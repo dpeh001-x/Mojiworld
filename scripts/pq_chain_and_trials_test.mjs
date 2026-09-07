@@ -7,9 +7,12 @@
 //  2. "highlight who is the npc that gives the [Lv-20 advancement] quest" -
 //     the journal pill must name the player's own instructor, and that
 //     instructor (alone) must carry the gold quest marker.
-//  3. Mirror Self: +35% hp via the stats table, evasion 190 / speed 3.5 via
-//     the literal, and the new recurring MIRROR JUDGEMENT (70% max HP + all
-//     MP, telegraphed, OHKO-clamped, evadable by distance).
+//  3. Mirror Self: 250,000 hp via the stats table and speed 2.9 via the
+//     literal (v0.30.262 settled the v0.30.260 buff of 288,000 / 3.5 per user
+//     on playtest), evasion 190, and the recurring MIRROR JUDGEMENT (70% max
+//     HP + all MP, telegraphed, OHKO-clamped, evadable by distance).
+//     Timed waits are wall-clock: since v0.30.385 the sim advances by real
+//     elapsed time, and headless rAF here runs far above 60 Hz.
 //  4. "completed part 1 of the PQ but milo dont let me proceed" - Milo must
 //     offer the next stage at every boundary, in PQ maps and in town, even
 //     when the unlocked flag has drifted; and stages 2-4 no longer out-level
@@ -55,12 +58,14 @@ const r1 = await page.evaluate(async () => {
   // dash live + shot ripe: nothing may fire
   m.shootTimer = -1; m._dashCharging = 280; m.vx = -6;
   const before = count();
-  await new Promise((res) => { let n = 0; const t = () => { game.paused = false; m._dashCharging = 280; m.shootTimer = Math.min(m.shootTimer, -1);
-    if (++n > 25) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  // v0.30.385 made the sim advance by real elapsed time, and headless rAF runs at ~300 Hz here, so waits are
+  // wall-clock now: 500 ms of dash (twice the 240 ms windup - a leak would show), then up to 1.2 s for the shot.
+  await new Promise((res) => { const t0 = performance.now(); const t = () => { game.paused = false; m._dashCharging = 280; m.shootTimer = Math.min(m.shootTimer, -1);
+    if (performance.now() - t0 > 500) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   out.firedWhileDashing = count() - before;
   // dash over: the ripe shot goes out
   m._dashCharging = 0; m.shootTimer = -1;
-  await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (++n > 30) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  await new Promise((res) => { const t0 = performance.now(); const t = () => { game.paused = false; if (count() > before || performance.now() - t0 > 1200) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   out.firedAfterDash = count() - before;
   game.monsters = []; game.projectiles = [];
   return out;
@@ -110,33 +115,38 @@ const r3 = await page.evaluate(async () => {
   let warned = false;
   const origToast = window.showToast;
   window.showToast = function (msg) { if (/JUDGEMENT charging/.test(String(msg))) warned = true; return origToast.apply(this, arguments); };
-  await new Promise((res) => { let n = 0; const t = () => { game.paused = false;
+  // wall-clock (v0.30.385): the charge is 950 ms of sim time; wait until the Judgement resolves (the cooldown
+  // re-arms to 18 s+) or 3 s pass
+  await new Promise((res) => { const t0 = performance.now(); const t = () => { game.paused = false;
     player.x = m.x - 60; player.vx = 0; player.invulnerable = 0;
-    if (++n > 90) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+    if (m._judgeCd > 5000 || performance.now() - t0 > 3000) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   window.showToast = origToast;
   out.warned = warned;
   out.hpAfter = player.hp; out.mpAfter = player.mp;
   out.tookPct = Math.round((200000 - player.hp) / 200000 * 100);
   // OHKO clamp: at 2 HP the judgement may not kill
   player.hp = 2; player.mp = 300; player.invulnerable = 0; m._judgeCd = 60; m._judgeWarned = true;
-  await new Promise((res) => { let n = 0; const t = () => { game.paused = false;
+  await new Promise((res) => { const t0 = performance.now(); const t = () => { game.paused = false;
     player.x = m.x - 60; player.invulnerable = 0;
-    if (++n > 40) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+    if (m._judgeCd > 5000 || performance.now() - t0 > 1500) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  out.clampResolved = m._judgeCd > 5000;
   out.aliveAfterClamp = player.hp >= 1;
   game.monsters = [];
   player.hp = player.maxHp;
   return out;
 });
-ok('Mirror Self hp comes from the stats table at ~288000 (+35%, spawn variance on top)',
-  r3.hp >= 275000 && r3.hp <= 305000, { hp: r3.hp, was: 213116 });
-ok('...evasion 190 and speed 3.5 from the literal',
-  r3.evasion === 190 && Math.abs(r3.speed - 3.5) < 0.01, { evasion: r3.evasion, speed: r3.speed });
+// v0.30.262, per user on playtest: the Mirror settles at 250,000 HP (was 288,000 here at v0.30.260; pre-buff
+// 213,116) and speed 2.9 (was 3.5) - "a trial rather than a wall". Evasion stays 190. Spawn variance on top.
+ok('Mirror Self hp comes from the stats table at ~250000 (v0.30.262; spawn variance on top)',
+  r3.hp >= 235000 && r3.hp <= 265000, { hp: r3.hp, was: 213116 });
+ok('...evasion 190 and speed 2.9 from the literal (v0.30.262)',
+  r3.evasion === 190 && Math.abs(r3.speed - 2.9) < 0.01, { evasion: r3.evasion, speed: r3.speed });
 ok('MIRROR JUDGEMENT telegraphs, then takes ~70% max HP and ALL the MP',
   r3.warned && r3.mpAfter <= 6 && r3.tookPct >= 40 && r3.tookPct <= 88,   // mp is zeroed AT impact; passive regen trickles 1-3 back before this read
   { warned: r3.warned, tookPct: r3.tookPct + '%', mpAfter: r3.mpAfter,
     note: 'DEF lessens the 70%, then _diffDmg difficulty scaling raises it - the same two dials as the class burst, hence the wide band' });
-ok('...and the OHKO clamp keeps a 2-HP player alive',
-  r3.aliveAfterClamp === true, { alive: r3.aliveAfterClamp });
+ok('...and the OHKO clamp keeps a 2-HP player alive (the second Judgement really resolved)',
+  r3.aliveAfterClamp === true && r3.clampResolved === true, { alive: r3.aliveAfterClamp, resolved: r3.clampResolved });
 
 // ---------- 4. the Ticket Rush chain has no dead-ends -----------------------
 // openNPC is the real dialog entry (the first cut called a nonexistent
