@@ -1,4 +1,4 @@
-// Sprite fit (v0.30.413): the padded attack sets draw their body at the idle's size in REAL play.
+// Sprite fit (v0.30.415): the padded attack sets draw their body at the idle's size in REAL play.
 // The game undoes an attack set's transparent padding with _ATK_FRAME_SCALE (per type, since
 // v0.26.351); v0.30.408 stacked calib state scales on top of that table for four of those types,
 // and the five drew 2-5x too big whenever they attacked. This test lets each monster attack the
