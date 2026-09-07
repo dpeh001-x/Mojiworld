@@ -96,6 +96,17 @@ const g = await page.evaluate(async () => {
   CanvasRenderingContext2D.prototype.drawImage = orig;
   out.plainDaggerDraw = c2.some((c) => c.w && Math.abs(c.w / c.h - 696 / 319) < 0.05);   // same geometry as p_dagger (696x319)
   out.plainDaggerSrc = (LX_PLAYER_PROJ.dagger && LX_PLAYER_PROJ.dagger.naturalWidth) || 0;
+  // the BASIC Shuriken fan (rogue A, SKILL_FNS.throwDagger, named 'Shuriken') throws stars too
+  game.projectiles = []; player.mp = 9999; if (player.cooldowns) player.cooldowns = {};
+  try { SKILL_FNS.throwDagger(); } catch (e) { out.basicErr = String(e).slice(0, 120); }
+  await frames(3);
+  const fan = game.projectiles.filter((p) => p.owner === 'player' && p.skill === 'dagger');
+  out.basicKinds = {}; for (const p of fan) out.basicKinds[p.kind || '(none)'] = (out.basicKinds[p.kind || '(none)'] || 0) + 1;
+  const c3 = []; CanvasRenderingContext2D.prototype.drawImage = function (img, ...rest) { const dw = rest.length >= 8 ? rest[6] : rest[2], dh = rest.length >= 8 ? rest[7] : rest[3];
+    c3.push({ w: img.naturalWidth || img.width, h: img.naturalHeight || img.height, dw, dh }); return orig.call(this, img, ...rest); };
+  try { drawProjectiles(); } catch (e) {}
+  CanvasRenderingContext2D.prototype.drawImage = orig;
+  out.basicStarDraws = c3.filter((c) => c.w && Math.abs(c.w / c.h - 1) < 0.02 && Math.abs(c.dw - c.dh) < 0.5 && c.dw >= 36 && c.dw <= 48).length;
   game.projectiles = [];
   return out;
 });
@@ -107,6 +118,9 @@ ok('drawProjectiles paints the kunai at its own aspect (height < width, not squa
 ok('...and the shuriken square, at least 36px, and spinning frame to frame', g.starDraws > 0 && g.spinAdvanced === true, { starDraws: g.starDraws, spin: g.spinAdvanced });
 ok('a plain skill:dagger projectile (basic Z throw) still draws the dagger sprite - the swap is scoped to Shin-Shuriken',
   g.plainDaggerDraw === true && g.plainDaggerSrc === 696, { plainDaggerDraw: g.plainDaggerDraw, src: g.plainDaggerSrc });
+ok('the BASIC Shuriken fan (rogue A, named "Shuriken") now spawns shuriken-kind lanes',
+  !g.basicErr && (g.basicKinds.shuriken || 0) >= 3 && !g.basicKinds['(none)'] && !g.basicKinds.dagger, { basicKinds: g.basicKinds, basicErr: g.basicErr });
+ok('...drawn as the star sprite at ~42px (sprScale trims the 18px hitbox to match Shin-Shuriken)', g.basicStarDraws >= 3, { basicStarDraws: g.basicStarDraws });
 ok('no page errors', errs.length === 0, { errs: errs.slice(0, 3) });
 
 await b.close(); srv.kill();
