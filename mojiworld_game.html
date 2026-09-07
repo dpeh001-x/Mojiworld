@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.387';
+const GAME_VERSION = 'v0.30.388';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -62088,6 +62088,16 @@ function _lxIsWildHostile(m) {
   if (m.isBoss || m.ally || m.isSummon || m._playerOwned) return false;
   return true;
 }
+// v0.30.388 — ZODIAC DAMAGE −25% (per user: "Lets reduce all zodiac bosses damage by
+// 25% from current"). A boss's ATK is not the type's number: spawnMonster derives it
+// from the boss's level (_bossAtkForLevel), then difficulty and variance scale it —
+// a Leo spawns at ~19,000 ATK against a type figure of 2,066. So the cut is applied
+// to the SPAWNED figure, after every multiplier, for any monster that is a zodiac
+// (contact, big melees, shots and hazards all size from m.atk). The zodiac skills
+// that size damage from the PLAYER's max HP instead — Leo's Sun Pounce, the sting,
+// the tide, the ice, the flood, the five-sins bar — carry the same multiplier on
+// their fractions. HEAVENSPLIT's set-to-1-HP is a mechanic, not damage, and stays.
+const LX_ZODIAC_DMG_MUL = 0.75;
 function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // v0.30.343 — warm this type's art NOW. The map-entry warm only covers the
   // map's own spawn list; boss adds / summons / event spawns arrived cold and
@@ -62850,6 +62860,12 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   if (_spawned && !_spawned._coinCurved) {
     _spawned.mojicoins = _lxCoinCurve(_spawned.mojicoins || 0, _spawned.maxHp || 0, !!(_spawned.isBoss || _spawned.boss || _spawned.zodiacBoss || isBoss));
     _spawned._coinCurved = true;
+  }
+  // v0.30.388 — zodiac damage −25%, on the spawned ATK after every multiplier (see LX_ZODIAC_DMG_MUL)
+  if (_spawned && (_spawned.zodiacBoss || (_spawned.type && String(_spawned.type).indexOf('zodiac_') === 0)) && !_spawned._zodiacAtkCut) {
+    _spawned._atkPreZodiacCut = _spawned.atk;
+    _spawned.atk = Math.max(1, Math.floor((_spawned.atk || 1) * LX_ZODIAC_DMG_MUL));
+    _spawned._zodiacAtkCut = true;
   }
   return _spawned;
 }
@@ -129446,7 +129462,7 @@ function zodiacBossAI(m, dt, distToPlayer) {
 // it should punish rooting to the spot, not imperfect footwork.
 const LEO_POUNCE_LAG = 120;      // frames of lag. game.time is a 60fps FRAME counter, so 120 == 2.0s
 const LEO_POUNCE_R = 150;        // slam radius, px, measured from the drawn circle
-const LEO_POUNCE_FRAC = 0.6;     // 60% of max HP - high, but deliberately NOT Taur's near-execute
+const LEO_POUNCE_FRAC = 0.45;   // v0.30.388 — was 0.6 (zodiac damage −25%)     // 60% of max HP - high, but deliberately NOT Taur's near-execute
 const _ZODIAC_GAIT = {
   // Ariel — WEAVE. The user's brief: in and out, fast. Rushes to knife range,
   // recoils, rushes again. Never sits still, never commits.
@@ -131240,7 +131256,7 @@ const ZODIAC_AI = {
           player.vx = rdir * 5;
           // v0.26.402 — Royal Roar now bites: 20% maxHP if caught in the cone.
           const _rm = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-          const _rd = Math.floor(_rm * 0.20);
+          const _rd = Math.floor(_rm * 0.20 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25%
           player.hp -= (player._god ? 0 : _rd);
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 260, 0, 0.20, "Leo's Royal Roar", '#ffdd44');
           player.lastHitTime = game.time;
@@ -131359,7 +131375,7 @@ const ZODIAC_AI = {
         m._virgoExecuteFiring = false;
         if ((player._virgoSin | 0) >= 5 && player.hp > 0 && player.invulnerable <= 0) {
           const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-          const dmg = Math.floor(_max * 0.75);   // v0.30.332 tune per user — was 0.95: five sins still costs 3/4 of the bar, but no longer strands the player at ~zero under falling pillars
+          const dmg = Math.floor(_max * 0.75 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25% (0.5625 of the bar)   // v0.30.332 tune per user — was 0.95: five sins still costs 3/4 of the bar, but no longer strands the player at ~zero under falling pillars
           player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));
           player.invulnerable = 1500;
           player.hitStun = 700;
@@ -132154,7 +132170,7 @@ const ZODIAC_AI = {
       if (player.invulnerable <= 0) {
         player.vx = dir * 14; player.vy = -6; player.hitStun = 260;
         const _km = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-        const _kd = Math.floor(_km * 0.12);
+        const _kd = Math.floor(_km * 0.12 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25%
         player.hp -= (player._god ? 0 : _kd);
         if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 140, 0, 0.12, "Sagittarius's Point-Blank Volley", '#ffcc44');
         player.lastHitTime = game.time; player._lastDamageSource = "Sagittarius's Point-Blank Volley";
@@ -132265,7 +132281,7 @@ const ZODIAC_AI = {
         const _pmx = player.x + player.w/2, _pmy = player.y + player.h/2;
         if (player.invulnerable <= 0 && Math.abs(_pmx - m._sagMarkX) < 70 && Math.abs(_pmy - m._sagMarkY) < 70) {
           const _sm = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-          const _sd = Math.floor(_sm * 0.24);
+          const _sd = Math.floor(_sm * 0.24 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25%
           player.hp -= (player._god ? 0 : _sd);
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.24, "Sagittarius's Marked Shot", '#ffaa44');
           player.lastHitTime = game.time; player._lastDamageSource = "Sagittarius's Marked Shot";
@@ -132319,7 +132335,7 @@ const ZODIAC_AI = {
         if ((m._capPressureTickAt | 0) <= (game.time | 0)) {
           m._capPressureTickAt = (game.time | 0) + 60;
           const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-          const _tick = Math.max(1, Math.floor(_max * 0.015));
+          const _tick = Math.max(1, Math.floor(_max * 0.015 * LX_ZODIAC_DMG_MUL));   // v0.30.388 — zodiac damage −25%
           player.hp -= (player._god ? 0 : _tick);
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.015, "Capricorn's Altitude Pressure", '#bba078');
           player.lastHitTime = game.time;
