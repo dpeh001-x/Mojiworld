@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.392';
+const GAME_VERSION = 'v0.30.393';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -86488,6 +86488,33 @@ function _lxSkillImpact(skill) {
 }
 const _LX_IMPACT_STOP = [[35, 80], [60, 95], [95, 120], [120, 140]];   // [weight][isCrit]
 const _LX_IMPACT_FLASH = [0, 0, 0.14, 0.22];
+// v0.30.393 — HIT FEEL (per the AAA combat analysis, item 1). Three changes to
+// what a landed hit does to the frame:
+//   1. the impact tier above is keyed on the skill's cooldown alone, so a Slash
+//      that takes a third of a monster's bar froze the frame like a poke. A hit
+//      that removes a quarter or more of the target's max HP now climbs one tier;
+//   2. a KILLING blow freezes for the full cap (150 ms) whatever cast it — the
+//      kill is the beat the eye waits for, and it was landing at 35 ms;
+//   3. a CAMERA KICK: a directional nudge of the view toward the hit on top of
+//      the random shake — 0 / 1.5 / 3 / 4.5 px by tier, +1.5 on a crit, 6 on a
+//      kill — decaying 22% a frame (gone in ~12). Same gates as the shake
+//      (reduce-motion, the shake slider); the strongest kick in a frame wins, so
+//      a multi-hit lane cannot stack it; summons, thorns and co-op relays do not
+//      kick (they are not the player's swing).
+const LX_KILL_STOP = 150;
+const LX_CAM_KICK = [0, 1.5, 3, 4.5];
+const _LX_KICK_SKIP = { __coop: 1, pet: 1, minion: 1, mojimon: 1, thorns: 1 };
+function _lxCamKick(m, w, isCrit, killed, skill) {
+  if (!game || game._reduceMotion || !m || !player || _LX_KICK_SKIP[skill]) return;
+  let amt = killed ? 6 : (LX_CAM_KICK[w] || 0) + (isCrit ? 1.5 : 0);
+  if (game._shakeMul != null) amt *= game._shakeMul;
+  if (amt <= 0.01) return;
+  const dx = (m.x + m.w / 2) - (player.x + player.w / 2), dy = (m.y + m.h / 2) - (player.y + player.h / 2);
+  const d = Math.hypot(dx, dy) || 1;
+  const kx = -dx / d * amt, ky = -dy / d * amt * 0.5;   // the view moves TOWARD the hit: the world shifts the other way
+  if (Math.abs(kx) > Math.abs(game._kickX || 0)) game._kickX = kx;
+  if (Math.abs(ky) > Math.abs(game._kickY || 0)) game._kickY = ky;
+}
 // v0.29.982 — THE MASTER'S MARK (per user "further improve on AI of
 // summons"; measured: the pack assisted the player's own target 0% of the
 // time). Every player-originated hit marks its victim; each summon family
@@ -87854,8 +87881,12 @@ function hitMonster(m, dmg, isCrit, skill) {
     // or tint rather than adding redraw work.
     // v0.29.127 — per-skill impact profile: heavier skills stop time longer
     // (see _lxSkillImpact above); heavy/ultra tiers add a thin impact flash.
-    const _iw = _lxSkillImpact(skill);
-    addHitStop(_LX_IMPACT_STOP[_iw][isCrit ? 1 : 0]);
+    let _iw = _lxSkillImpact(skill);
+    // v0.30.393 — weight by what the hit DID as well as what cast it (see LX_KILL_STOP)
+    if (finalDmg / Math.max(1, m.maxHp || finalDmg) >= 0.25 && _iw < 3) _iw++;
+    const _killed = m.currentHp <= 0 && _hpBeforeWrite > 0;
+    addHitStop(_killed ? LX_KILL_STOP : _LX_IMPACT_STOP[_iw][isCrit ? 1 : 0]);
+    _lxCamKick(m, _iw, isCrit, _killed, skill);
     if (_LX_IMPACT_FLASH[_iw]) flash(_LX_IMPACT_FLASH[_iw]);
     // v0.29.125 — WEIGHTED knockback (AAA-feel pass). The old flat 1.2 nudge
     // read identically for a poke and a nuke. Now the shove scales with the
@@ -138257,6 +138288,10 @@ function loop(time) {
     game.shake *= 0.85;
     if (game.shake < 0.2) { game.shake = 0; game.shakeX = 0; game.shakeY = 0; }
   }
+  if (game._kickX || game._kickY) {   // v0.30.393 — camera kick: 22% off a frame, gone in ~12
+    game._kickX = (game._kickX || 0) * 0.78; game._kickY = (game._kickY || 0) * 0.78;
+    if (Math.abs(game._kickX) < 0.15 && Math.abs(game._kickY) < 0.15) { game._kickX = 0; game._kickY = 0; }
+  }
 
   // v0.25.315 — Skip the entire render block when game.paused. Modals
   // (Wardrobe, U-panel, Quest Journal, NPC dialog, shops, etc.) all
@@ -138369,7 +138404,7 @@ function loop(time) {
   // v0.29.x — snap the shake to whole px: a fractional full-scene translate
   // resamples EVERY sprite through bilinear filtering for the entire shake
   // (soft/blurry frames). Integer shake keeps the impact feel, stays crisp.
-  ctx.translate(Math.round(game.shakeX), Math.round(game.shakeY));
+  ctx.translate(Math.round(game.shakeX + (game._kickX || 0)), Math.round(game.shakeY + (game._kickY || 0)));   // v0.30.393 — shake + kick
   // v0.29.422 — IMPACT ZOOM. A crit or a boss finisher punches the camera in
   // by a couple of percent and eases back out. Scaling about the SCREEN CENTRE
   // (not the player) is deliberate: the camera already keeps the player near
