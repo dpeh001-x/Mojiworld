@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.394';
+const GAME_VERSION = 'v0.30.395';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46897,7 +46897,9 @@ function _coopTickMonsters() {
     // host's actual monster deals. One number closes it.
     _e.a = Math.round(m.atk || 0);
     if (m.atkAnimUntil && m.atkAnimUntil > now) _e.aa = Math.min(2000, Math.round(m.atkAnimUntil - now));
-    if (m.isBoss && (m._wardUntil | 0) > (game.time | 0)) _e.wd = Math.min(600, (m._wardUntil | 0) - (game.time | 0));   // v0.30.390 — ward steps left, so guests draw the shield (and gate their own hits) like the host
+    if (m.isBoss && (m._wardUntil | 0) > (game.time | 0)) _e.wd = Math.min(600, (m._wardUntil | 0) - (game.time | 0));
+    if (m.isBoss && (m._wardGauge || 0) > 0) _e.wg = Math.round(Math.min(1, m._wardGauge) * 100);   // v0.30.395 — break gauge, percent
+    if (m.isBoss && (m._wardBreakUntil | 0) > (game.time | 0)) _e.wb = Math.min(600, (m._wardBreakUntil | 0) - (game.time | 0));   // v0.30.395 — open window, steps   // v0.30.390 — ward steps left, so guests draw the shield (and gate their own hits) like the host
     if (m.patternState && m.patternState !== 'idle') _e.ps = String(m.patternState).slice(0, 20);
     if (m._phaseSprite) _e.sp = String(m._phaseSprite).slice(0, 20);
     if (m._dreamPhase) _e.dp = 1;
@@ -47792,7 +47794,9 @@ function _coopApplyMonsters(msg) {
       const _nowV = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       m.atkAnimUntil = Math.max(m.atkAnimUntil || 0, _nowV + Math.min(2000, +e.aa || 0));
     }
-    if (e.wd > 0) m._wardUntil = Math.max(m._wardUntil | 0, (game.time | 0) + Math.min(600, +e.wd | 0));   // v0.30.390 — mirror the host's ward
+    if (e.wd > 0) m._wardUntil = Math.max(m._wardUntil | 0, (game.time | 0) + Math.min(600, +e.wd | 0));
+    m._wardGauge = (e.wg > 0) ? Math.min(1, (+e.wg | 0) / 100) : 0;   // v0.30.395 — mirror the host's gauge
+    if (e.wb > 0) { if (!((m._wardBreakUntil | 0) > (game.time | 0))) m._wardBreakAt = game.time | 0; m._wardBreakUntil = (game.time | 0) + Math.min(600, +e.wb | 0); }   // and its open window   // v0.30.390 — mirror the host's ward
     else if ((m._wardUntil | 0) > (game.time | 0)) m._wardUntil = game.time | 0;                              // the host is not warded: drop a stale local ward
     m.patternState = e.ps ? String(e.ps).slice(0, 20) : 'idle';
     if (e.sp) m._phaseSprite = String(e.sp).slice(0, 20);
@@ -80881,6 +80885,36 @@ function mirrorSelfAI(m, dt, distToPlayer) {
 // game.time counts FRAMES at 60fps, matching every other boss timer in this
 // function (the Sovereign's "16 s" cadence is 960).
 const LX_BOSS_WARD_LEN     = 180;   // v0.30.x — 3 s of 1-damage hits (was 3.5)
+// v0.30.395 — BREAK GAUGE (per the AAA combat analysis, item 3). The ward
+// punished aggression: three seconds of 1-damage hits with nothing to do but
+// wait. Every modern boss rewards it instead (Sekiro posture, FF7 Rebirth's
+// stagger bar, Monster Hunter part breaks), so the ward now carries a gauge.
+// Every warded hit still lands for 1, but it FEEDS the gauge by what it would
+// have done: a hit worth X of the boss's max HP fills X / 0.06 of it, clamped to
+// 6%..34% a hit — three heavy blows at best, seventeen pokes at worst. The hit
+// that fills it SHATTERS the shield: the ward ends on the spot and a 3 s window
+// opens at 1.5x damage taken, then the ward's own schedule re-arms it later.
+// The gauge is drawn under the shield, the shatter flies the shield apart, the
+// HUD pill carries the fill, and co-op guests receive gauge and window.
+const LX_WARD_BREAK_LEN = 180, LX_WARD_BREAK_MUL = 1.5;
+const LX_WARD_FILL_MIN = 0.06, LX_WARD_FILL_MAX = 0.34, LX_WARD_FILL_DIV = 0.06;
+function _lxWardBreakActive(m) { return !!m && (m._wardBreakUntil | 0) > (game.time | 0); }
+function _lxWardFeed(m, raw) {   // every warded hit; true when this one shattered the ward
+  const frac = raw / Math.max(1, m.maxHp || raw);
+  m._wardGauge = Math.min(1, (m._wardGauge || 0) + Math.max(LX_WARD_FILL_MIN, Math.min(LX_WARD_FILL_MAX, frac / LX_WARD_FILL_DIV)));
+  if (m._wardGauge < 1) return false;
+  const now = game.time | 0;
+  m._wardGauge = 0; m._wardUntil = now; m._wardBreakUntil = now + LX_WARD_BREAK_LEN; m._wardBreakAt = now;
+  try {
+    if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 34, y: m.y - 56, vy: -1.6, text: 'BREAK!', life: 50, color: '#ff6ad5', size: 19, crit: true });
+    if (typeof showToast === 'function') showToast('💥 Ward shattered — 3 s at 1.5× damage!', 'legendary');
+    if (typeof addHitStop === 'function') addHitStop(120);
+    if (typeof flash === 'function') flash(0.3);
+    if (typeof addShake === 'function') addShake(6);
+    if (typeof audio !== 'undefined' && audio && audio.play) audio.play('crit');
+  } catch (e) {}
+  return true;
+}
 const LX_BOSS_WARD_GAP_MIN = 900;   // v0.30.x — 15 s
 const LX_BOSS_WARD_GAP_MAX = 1200;  // v0.30.x — 20 s
 const LX_BOSS_WARD_FIRST   = 480;   // 8 s of clean opening before the first one
@@ -80901,6 +80935,7 @@ function _lxBossWardTick(m) {
   if ((m._wardUntil | 0) > now) return;                 // already warded
   if (now < m._wardNextAt) return;
   m._wardUntil  = now + LX_BOSS_WARD_LEN;
+  m._wardGauge  = 0;   // v0.30.395 — a fresh ward starts with an empty break gauge
   m._wardNextAt = now + _lxBossWardGap();
   // Telegraph it. An unannounced damage floor reads as a bug — the player
   // needs to know their hits are being refused, not that the game broke.
@@ -87748,7 +87783,10 @@ function hitMonster(m, dmg, isCrit, skill) {
   if (_lxAff === 'weak') finalDmg = Math.max(1, Math.floor(finalDmg * LX_WEAK_MUL));
   else if (_lxAff === 'resist') finalDmg = Math.max(1, Math.floor(finalDmg * LX_RESIST_MUL));
   if (m.isBoss && (m._wardUntil | 0) > (game.time | 0) && skill !== 'thorns') {
+    _lxWardFeed(m, finalDmg);   // v0.30.395 — the warded hit lands for 1 but feeds the break gauge by what it would have done
     finalDmg = 1;
+  } else if (m.isBoss && _lxWardBreakActive(m) && skill !== 'thorns') {
+    finalDmg = Math.max(1, Math.floor(finalDmg * LX_WARD_BREAK_MUL));   // v0.30.395 — the open window after a shatter
   }
   // v0.27.0 co-op forward — a NON-HOST is not authoritative over shared monsters.
   // finalDmg is now FULLY resolved (every attacker multiplier + DEF above), so
@@ -125957,6 +125995,40 @@ function _drawBossWardShield(m, sx, sy) {
   ctx.save();
   ctx.globalAlpha = 0.55 * fade;
   ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
+  // v0.30.395 — the break gauge under the shield: violet while filling, pink and labelled from 85%
+  const _g = Math.max(0, Math.min(1, m._wardGauge || 0));
+  const _gw = Math.max(48, size * 0.5), _gh = 6, _gx = cx - _gw / 2, _gy = cy + size / 2 - 10;
+  ctx.globalAlpha = 0.9 * fade;
+  ctx.fillStyle = 'rgba(10,20,34,0.8)'; ctx.fillRect(_gx - 1, _gy - 1, _gw + 2, _gh + 2);
+  ctx.fillStyle = _g >= 0.85 ? '#ff6ad5' : '#c48cff'; ctx.fillRect(_gx, _gy, _gw * _g, _gh);
+  if (_g >= 0.85) { ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.fillStyle = '#ffd6f4'; ctx.fillText('BREAK', cx, _gy - 3); }
+  ctx.restore();
+}
+// v0.30.395 — after the shatter: four quarters of the shield fly apart over 26 steps, and a pink ring pulses at the boss's feet for the whole open window
+function _drawBossWardBreak(m, sx, sy) {
+  const t = game.time | 0, age = t - (m._wardBreakAt | 0);
+  const _r = (m._lxDrawRect && m._lxDrawRect.t === t) ? m._lxDrawRect : null;
+  const _w = _r ? _r.w : (m.w || 0), _h = _r ? _r.h : (m.h || 0);
+  const cx = _r ? (_r.x + _r.w / 2) : (sx + (m.w || 0) / 2), cy = _r ? (_r.y + _r.h / 2) : (sy + (m.h || 0) / 2);
+  const size = Math.min(560, Math.max(72, Math.max(_w, _h) * 1.15));
+  const img = (typeof LX_FX !== 'undefined' && LX_FX) ? LX_FX.boss_shield : null;
+  ctx.save();
+  if (img && img.complete && img.naturalWidth && age >= 0 && age < 26) {
+    const k = age / 26, half = size / 2, sw = img.naturalWidth / 2, sh = img.naturalHeight / 2;
+    ctx.globalAlpha = 0.6 * (1 - k);
+    for (let q = 0; q < 4; q++) {
+      const dx = (q % 2 ? 1 : -1), dy = (q < 2 ? -1 : 1);
+      ctx.save();
+      ctx.translate(cx + dx * (half / 2 + k * 70), cy + dy * (half / 2 + k * 50) + k * k * 40);
+      ctx.rotate(dx * dy * k * 0.9);
+      ctx.drawImage(img, (q % 2) * sw, (q < 2 ? 0 : sh), sw, sh, -half / 2, -half / 2, half, half);
+      ctx.restore();
+    }
+  }
+  const left = (m._wardBreakUntil | 0) - t, pulse = 0.5 + 0.5 * Math.sin(t * 0.3);
+  ctx.globalAlpha = Math.min(1, left / 20) * (0.35 + 0.35 * pulse);
+  ctx.strokeStyle = '#ff6ad5'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.ellipse(sx + (m.w || 0) / 2, sy + (m.h || 0) - 4, Math.max(30, (m.w || 0) * 0.6), 10, 0, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
 }
 function drawMonster(m) {
@@ -126733,6 +126805,7 @@ function drawMonster(m) {
   // whole ward, fades in and out, and breathes; the icon is ludo.ai art baked by
   // scripts/gen_boss_shield_ludo.mjs into Sprites/fx/boss_shield.webp.
   if (m.isBoss && ((m._wardUntil | 0) > (game.time | 0)) && typeof _drawBossWardShield === 'function') _drawBossWardShield(m, sx, sy);
+  else if (m.isBoss && typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)) _drawBossWardBreak(m, sx, sy);   // v0.30.395
   if (_phaserHandlingMonsterUI()) return;
 
   // v0.26.106 — Hide HP bar / status icons / nameplate from the moment
@@ -139086,6 +139159,8 @@ function drawSuperBossBar() {
     ctx.fillText(_wTxt, _wx + 26, _wy + _wh / 2 + 1);
     ctx.fillStyle = '#7fd8ff';
     ctx.fillRect(_wx + 2, _wy + _wh - 3, (_ww - 4) * _wFrac, 2);
+    ctx.fillStyle = ((sb._wardGauge || 0) >= 0.85) ? '#ff6ad5' : '#c48cff';   // v0.30.395 — the break gauge along the pill's top edge
+    ctx.fillRect(_wx + 2, _wy + 1, (_ww - 4) * Math.max(0, Math.min(1, sb._wardGauge || 0)), 2);
     ctx.restore();
   }
   ctx.textAlign = 'left';
