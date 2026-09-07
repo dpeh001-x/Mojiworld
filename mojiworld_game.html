@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.405';
+const GAME_VERSION = 'v0.30.406';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -144737,6 +144737,7 @@ function _bgmFade(el, target, durationMs) {
   const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
   const start = el.volume;
   const _myFade = (el._fadeId = (el._fadeId || 0) + 1);   // v0.26.1020 — fade cancellation token
+  el._fadeTarget = target;   // v0.30.406 - what the latest fade wants; the readiness gate reads it
   const dur = Math.max(1, durationMs | 0);
   // If we're fading IN, make sure the element is actually playing first.
   if (target > 0.0001 && el.paused) {
@@ -144758,6 +144759,12 @@ function _bgmFade(el, target, durationMs) {
       // next fade-in starts the track from the top. Safe to do here
       // because k === 1 and target = 0 means the audio is inaudible.
       try { el.pause(); el.currentTime = 0; } catch (e) {}
+    } else if (el.paused && !(typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix)) {
+      // v0.30.406 - a fade-in ran to its target on a PAUSED element: something reset it under
+      // the fade (the readiness gate's load() did, before this build). This fade is the
+      // latest on the element (a newer one would have aborted this loop), so it is the
+      // bed the mix wants audible - play it. Autoplay-blocked play() rejects harmlessly.
+      try { el.play().catch(() => {}); } catch (e) {}
     }
   };
   requestAnimationFrame(step);
@@ -144982,9 +144989,19 @@ function _lxReadyGate(mapId, opts) {
             el.addEventListener('canplaythrough', done, { once: true });
             el.addEventListener('canplay', done, { once: true });
             el.addEventListener('error', done, { once: true });
+            // v0.30.406 - never load() an element that is already fetching or playing. loadMap's
+            // _setBossBgm ran a few awaits ago and its fade-in called play() on this very
+            // element; load() resets a media element and PAUSES it. A track still buffering
+            // when the gate reached this step (a first visit to a 5 MB track) came up loaded,
+            // at full volume, and paused - silence for the whole stay (the Verdant Hollow
+            // report). An element that is playing or loading reaches canplay on its own.
+            if (!el.paused || el.networkState === 2) return;
             try { el.load(); } catch (e) { res(); }
           }), CAP * 0.3);
         }
+        // v0.30.406 - belt and braces: the latest fade on this element wants it audible, yet it is
+        // paused (something reset it under the fade). Play it, unless a cinematic owns the mix.
+        try { if (el.paused && (el._fadeTarget || 0) > 0.0001 && !(typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix)) el.play().catch(() => {}); } catch (e) {}
         rec.bgm = el.readyState;
       }
     } catch (e) {}
