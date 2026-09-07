@@ -804,7 +804,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0
     },
     "attack": {
-      "s": 1.26,
+      "s": 2.9,
       "dx": 0,
       "dy": 0,
       "ft": [
@@ -815,8 +815,7 @@ window.LX_ANIM_CALIB = {
         151,
         108,
         115
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "king": {
@@ -1280,7 +1279,15 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_cancer": {
+    "walk": {
+      "s": 1.37,
+      "dx": 0,
+      "dy": 0
+    },
     "attack": {
+      "s": 1.43,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         72,
         60,
@@ -1291,8 +1298,7 @@ window.LX_ANIM_CALIB = {
         132,
         90,
         96
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "zodiac_gemini": {
@@ -1681,6 +1687,9 @@ window.LX_ANIM_CALIB = {
   },
   "conductorMech": {
     "attack": {
+      "s": 1.69,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         86,
         72,
@@ -1691,8 +1700,7 @@ window.LX_ANIM_CALIB = {
         172,
         108,
         115
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "cookie": {
@@ -1777,6 +1785,9 @@ window.LX_ANIM_CALIB = {
   },
   "echoKnight": {
     "attack": {
+      "s": 2.11,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         86,
         72,
@@ -1787,8 +1798,7 @@ window.LX_ANIM_CALIB = {
         155,
         108,
         115
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "elderbark": {
@@ -2161,6 +2171,9 @@ window.LX_ANIM_CALIB = {
   },
   "ossuaryTyrant": {
     "attack": {
+      "s": 1.4,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         86,
         108,
@@ -2171,12 +2184,14 @@ window.LX_ANIM_CALIB = {
         72,
         72,
         115
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "pathsBane": {
     "attack": {
+      "s": 3.42,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         86,
         72,
@@ -2187,8 +2202,7 @@ window.LX_ANIM_CALIB = {
         147,
         108,
         115
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "pearlSprite": {
@@ -2702,6 +2716,9 @@ window.LX_ANIM_CALIB = {
   },
   "tombKeeper": {
     "attack": {
+      "s": 2.29,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         86,
         72,
@@ -2712,8 +2729,7 @@ window.LX_ANIM_CALIB = {
         72,
         72,
         115
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "tombWraith": {

@@ -1,0 +1,57 @@
+# Sprite fit audit — 2026-09-07 (v0.30.408)
+
+Per user: "do an audit regarding the sprites, flag up potentially misfitting sprites".
+
+Tool: `node scripts/sprite_fit_audit.mjs` measures the real content box (alpha > 24) of every
+animation frame under `Sprites/{monsters,bosses,npc}` — 480 sets, 4,325 frames — and compares
+them the way the game draws them (every frame is scaled to the same box, so what matters is the
+pixels' own size and placement). Contact sheets for the flagged sets are in
+`docs/reports/sprite_fit/` (`index.html`), every frame at the same frame scale, so a body that
+shrinks between states shows exactly as it does in play. Raw numbers: `sprite_fit_audit.json`.
+The existing `animator_parity_check.mjs` passed 9/9 before this pass (manifest, hitboxes,
+content boxes all current).
+
+## Fixed in v0.30.408 — a state drawn small in its frame (the smith-golem defect)
+
+The body in these attack / walk frames was drawn at a fraction of the idle's size, so the
+monster shrank the moment it attacked. Each now carries a calib state scale (`data/anim_calib.js`)
+that restores the body to the idle's height; `scripts/sprite_fit_calib_test.mjs` blits a forced
+attack frame in the served build and checks the body and the feet line against the idle (15/15).
+
+| set | body vs idle | calib `s` |
+|---|---|---|
+| pathsBane attack | 29% | 3.42 |
+| forgewight attack | 43% (34% before its old 1.26) | 2.90 |
+| tombKeeper attack | 44% | 2.29 |
+| echoKnight attack | 47% | 2.11 |
+| conductorMech attack | 59% | 1.69 |
+| ossuaryTyrant attack | 72% | 1.40 |
+| zodiac_cancer walk / attack | 73% / 70% | 1.37 / 1.43 |
+
+## Flagged, not changed — please judge
+
+- **aetherion attack** — the body is 148% of the idle's in play (state median 167%): the attack set
+  is drawn larger AND the hand calib scales it 1.6× on top of the idle's 1.58×. If the boss is not
+  meant to grow half again when it attacks, `attack.s` ≈ 1.08 matches the idle.
+- **Walk / idle body drift** (frames of one loop whose body height differs > 20% from the loop's
+  median — a pulse every loop): aetherion2 walk (4 frames 126–146%), coach_stride idle (3 frames
+  61–68%), towerArbiter walk (3 frames 73%), bellowsbat idle/walk, cancer idle, leo pounce,
+  ossuaryTyrant idle, razorgale walk, sparkling walk, thornmaw walk, tideling walk, virgo fly.
+- **Foot line jumps** (the content bottom moves > 12% of the frame across a looping state — a hop
+  every loop): pinechad walk 15%, sparkling walk 18%, thornmaw walk 13%, young_confused_barnaby
+  duck 16%.
+- **Box aspect**: octoLegFreeze idle art is 0.60 wide-to-tall inside a 1.33 box (80×60) — much
+  taller than its hitbox.
+- **Clipped** (71 sets): opaque pixels along the top, left or right edge over more than 6% of that
+  edge. Almost all are attack frames where a slash or flare runs off the canvas (blockGary 4–6,
+  cherub 3–7, spectreCannoneer 4–7, frostkin 2–5…); the idle/walk ones worth a look are bonebosn
+  (idle 6 frames, walk 4), orange walk (4), fatLizard walk, goblinMauler walk, razorgale walk,
+  cancer idle (3), pisces idle (2), taurus walk (2), scorpio walk.
+- **Attack silhouette drift** (43 attack sets with 3+ frames > 20% off the state median) is listed
+  in the JSON but is mostly the pose — a raised hammer, a lunge, spread wings — not the body. The
+  body-vs-idle check above is the one that catches the real defect.
+
+## Not found
+
+No frame failed to decode, none is blank, and every monster with any frames has all three states
+(idle / walk / attack) at the counts the frame index records.
