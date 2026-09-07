@@ -10262,7 +10262,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.413';
+const GAME_VERSION = 'v0.30.414';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41907,6 +41907,16 @@ const PLAYER_SAVE_FIELDS = [
 const LX_ELDER_DROP_RATE = 0.01;
 const LX_REFIGHT_SHARD_MUL  = 0.40;   // shards on a repeat kill — reduced, never zero
 const LX_REFIGHT_SHARD_FLOOR = 0.02;  // v0.30.412 — the repeat ladder never pays less than 2% of the full drop (min 1)
+// v0.30.414 — the v0.30.412 ladder as one function, so the host's kill and a
+// co-op guest's credit for that kill pay by the SAME rule off each player's
+// OWN lifetime counter. Stamps the counter for the next kill.
+function _lxBossShardPayout(fullShards, key, isZodiac) {
+  game._bossKills = game._bossKills || {};
+  const k = game._bossKills[key] | 0;
+  const ladder = k === 0 ? 1 : (isZodiac ? Math.pow(0.5, k) : LX_REFIGHT_SHARD_MUL * Math.pow(0.5, k - 1));
+  game._bossKills[key] = k + 1;
+  return Math.max(1, Math.round(fullShards * Math.max(LX_REFIGHT_SHARD_FLOOR, ladder)));
+}
 const LX_REFIGHT_REWARD_MUL = 0.40;   // scroll + gear-drop chance on a repeat kill
 // =========================================================================
 // v0.29.9xx - THE VERMILLION HUNT (per user: "make him a mini-boss instead,
@@ -43769,8 +43779,10 @@ function _flushSaveStateNow() {
       player: pick(player, PLAYER_SAVE_FIELDS),
       game:   pick(game,   GAME_SAVE_FIELDS),
     };
+    try { if (typeof _lxLocalSaveSig === 'function') s.sig = _lxLocalSaveSig(s); } catch (e) {}   // v0.30.414 — see _lxLocalSaveVerdict
     const _json = JSON.stringify(s);
     localStorage.setItem(SAVE_KEY, _json);
+    try { if (s.sig && typeof _lxSaveMarkWrite === 'function') _lxSaveMarkWrite(s); } catch (e) {}
     // Server-sided MMO-lite: also push the save to the cloud account (throttled,
     // best-effort, cloud sessions only — no-op for Guest / local / offline).
     try { if (typeof _lxCloudPushSave === 'function') _lxCloudPushSave(_json); } catch (e) {}
@@ -44859,7 +44871,67 @@ function _lxSha256Bytes(bytes) {
   for(let i=0;i<8;i++){out[i*4]=(hs[i]>>>24)&0xff;out[i*4+1]=(hs[i]>>>16)&0xff;out[i*4+2]=(hs[i]>>>8)&0xff;out[i*4+3]=hs[i]&0xff;}
   return out;
 }
-function _lxUtf8(str){ return new Uint8Array([...unescape(encodeURIComponent(String(str)))].map(c=>c.charCodeAt(0))); }
+function _lxUtf8(str){
+  // v0.30.414 — TextEncoder when available (native, ~50x faster on a 300 KB
+  // save); the unescape path stays as the fallback. Same bytes either way.
+  try { if (typeof TextEncoder === 'function') return new TextEncoder().encode(String(str)); } catch (e) {}
+  return new Uint8Array([...unescape(encodeURIComponent(String(str)))].map(c=>c.charCodeAt(0)));
+}
+// v0.30.414 — LIVE SAVE INTEGRITY (per user: "please ensure this is properly
+// guarded"). The .mojisave export path has carried an HMAC since v0.29; the
+// localStorage save it wraps never did, so editing the stored JSON was the
+// one-line cheat the numeric clamps could not see. The flush now signs the
+// save (HMAC-SHA256 over version + timestamp + the guarded subset below, the
+// same key and primitive as the secure export) INSIDE the save object, so
+// every existing reader and writer — cloud sync, Steam Cloud, backup slots,
+// import — round-trips it untouched. loadState verifies before any migration
+// runs:
+//   signed and valid            -> trusted
+//   signed and wrong            -> loaded, but setshards / mojicoins / bank
+//                                  reset to 0 (progress kept, money not)
+//   unsigned, marker present    -> the money fields fall back to the last
+//                                  VERIFIED values this browser wrote (so
+//                                  stripping the signature gains nothing;
+//                                  an older client's cloud save loses only
+//                                  the growth since that flush)
+//   unsigned, no marker         -> legacy save, accepted once and signed on
+//                                  the next flush
+// Honest limit: the key ships in the client, so someone who reads the
+// source can re-sign. This closes casual editing and the "import anyway"
+// hole, not a determined attacker with the code open.
+const _LX_SAVE_MARK_KEY = SAVE_KEY + '_verified';
+// What the signature covers. Deliberately a SUBSET: the fields cheating
+// targets (money, stats, points, gear, quests, boss counters, dailies) and
+// not the cosmetic blobs — a painted wardrobe can be megabytes, and hashing
+// it every flush would be a 100 ms+ hitch for nothing anyone would edit.
+// Measured: the full save cost 8-18 ms per 170 KB; this subset is a few KB.
+const _LX_SIGNED_PLAYER_KEYS = ['cls','job','master','level','exp','expToNext','mojicoins','bankBalance','bankAccrueMs','setshards',
+  'skillPoints','skillRankPoints','skillRanks','baseAtk','baseDef','baseAcc','baseCrit','baseSpeed','baseJump','maxHp','maxMp',
+  'equipped','inventory','consumables','talents','boons','boonsEquipped','prestige','quests','_pqChainRuns'];
+const _LX_SIGNED_GAME_KEYS = ['_bossKills','bossDefeated','_bossDefeatedAt','_playMs','kills','dexMilestones','dexPerm','prestige',
+  'bossRushBest','_bossRushRewardDay','_chestCooldown'];
+function _lxLocalSaveSigBody(s) {
+  const pick = (o, keys) => { const out = {}; if (!o) return out; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
+  return 'ls2\n' + String(s.v) + '\n' + String(s.t) + '\n' + JSON.stringify(pick(s.player, _LX_SIGNED_PLAYER_KEYS)) + '\n' + JSON.stringify(pick(s.game, _LX_SIGNED_GAME_KEYS));
+}
+function _lxLocalSaveSig(s) { return _lxHmacSaveHex(_lxLocalSaveSigBody(s)); }
+// 'ok' | 'bad' | 'unsigned'
+function _lxLocalSaveVerdict(s) {
+  try {
+    if (!s || typeof s !== 'object') return 'bad';
+    if (typeof s.sig !== 'string' || !s.sig) return 'unsigned';
+    return _lxSigEqual(_lxLocalSaveSig(s), s.sig) ? 'ok' : 'bad';
+  } catch (e) { return 'bad'; }
+}
+function _lxSaveMarkWrite(s) {
+  try {
+    const p = s && s.player || {};
+    localStorage.setItem(_LX_SAVE_MARK_KEY, JSON.stringify({ t: s.t, setshards: p.setshards | 0, mojicoins: Math.floor(p.mojicoins || 0), bankBalance: Math.floor(p.bankBalance || 0) }));
+  } catch (e) {}
+}
+function _lxSaveMarkRead() {
+  try { const r = localStorage.getItem(_LX_SAVE_MARK_KEY); return r ? _lxSafeJsonParse(r) : null; } catch (e) { return null; }
+}
 function _lxHex(bytes){ let s=''; for(let i=0;i<bytes.length;i++) s+=bytes[i].toString(16).padStart(2,'0'); return s; }
 function _lxHmacSaveHex(msgStr){
   let key=_lxUtf8(_LX_SAVE_SECRET);
@@ -44943,9 +45015,18 @@ function importSave(input) {
         }
         // Tamper-evidence: a secure save whose signature doesn't verify was
         // edited or corrupted after export — warn hard before letting it in.
+        // v0.30.414 — the inner save carries its own live signature now; loadState
+        // enforces it on the reload that follows. Say so up front.
+        var _innerNote = '';
+        try {
+          var _iv = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(inner) : 'unsigned';
+          if (_iv === 'bad') _innerNote = '\n\n\u26a0 The save data inside has been EDITED: setshards, mojicoins and bank will reset to 0 when it loads.';
+          else if (_iv === 'unsigned' && typeof _lxSaveMarkRead === 'function' && _lxSaveMarkRead()) _innerNote = '\n\nUnsigned (older) save: currencies will be capped at your last verified values when it loads.';
+        } catch (_) {}
         var _importBody = (_secVerdict === 'bad')
           ? '⚠ This secure save FAILED its integrity check — it was edited or corrupted after it was exported. Importing it may be a modified/cheated save or could break your game. Continue only if you trust this file.'
           : ((_secVerdict === 'ok' ? '🔒 Signature verified. ' : '') + 'This will OVERWRITE your current progress and reload the game. Export a backup first if unsure.');
+        _importBody += _innerNote;   // v0.30.414
         var ask = (typeof uiConfirm === 'function')
           ? uiConfirm({ title: (_secVerdict === 'bad' ? 'Tampered save — import anyway?' : 'Import this save?'), body: _importBody, yesLabel: (_secVerdict === 'bad' ? 'Import anyway' : 'Import & reload'), noLabel: 'Cancel', danger: true })
           : Promise.resolve(window.confirm(_importBody + '\n\nOverwrite current progress with this save?'));
@@ -45102,6 +45183,9 @@ function loadState() {
     // and `s.game` go straight into Object.assign below, which is what turns
     // an own `__proto__` key into a real prototype swap. See _lxSafeJsonParse.
     const s = _lxSafeJsonParse(raw);
+    // v0.30.414 — verify BEFORE any migration or clamp touches the objects
+    // (the signature covers them as stored). Applied after the assigns below.
+    const _sigVerdict = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(s) : 'unsigned';
     // v0.25.773 — Surface save-version mismatch instead of silently wiping.
     // Previously any future SAVE_VERSION bump would just `return false`,
     // discarding the save with no feedback. Now: log a console warning AND
@@ -45221,6 +45305,21 @@ function loadState() {
       }
     } catch (e) {}
     Object.assign(game,   s.game || {});
+    // v0.30.414 — LIVE SAVE INTEGRITY verdict (see _lxLocalSaveVerdict).
+    try {
+      game._saveVerdict = _sigVerdict;
+      if (_sigVerdict === 'bad') {
+        player.setshards = 0; player.mojicoins = 0; player.bankBalance = 0;
+        setTimeout(() => { if (typeof showToast === 'function') showToast('⚠ Save integrity check FAILED — the save was edited or corrupted. Progress kept; setshards, mojicoins and bank reset.', 'danger'); }, 1800);
+      } else if (_sigVerdict === 'unsigned') {
+        const _mk = (typeof _lxSaveMarkRead === 'function') ? _lxSaveMarkRead() : null;
+        if (_mk && typeof _mk === 'object') {
+          const _cl = (k) => { const v = Math.max(0, Math.floor(+_mk[k] || 0)); if ((player[k] || 0) > v) player[k] = v; };
+          _cl('setshards'); _cl('mojicoins'); _cl('bankBalance');
+          setTimeout(() => { if (typeof showToast === 'function') showToast('⚠ Unsigned save — currencies capped at the last verified values.', 'rare'); }, 1800);
+        }
+      }
+    } catch (e) {}
     // v0.29.843 — PQ HUNT-CURVE UNWIND. The two Ticket Rush kill stages are
     // exempt from the hunt curve as of this version, but noScale is only read
     // at accept time — a save taken mid-chain still carries the retargeted
@@ -48085,7 +48184,19 @@ function _coopBroadcastKill(m, exp, coins) {
   // guest side also awards quest/bestiary credit and (new) Slaughter-Ladder
   // streak credit off this frame — both must be able to tell a real kill from
   // a mirage pop, exactly like the host's own _isIllusionKill gate.
-  try { net.ws.send(JSON.stringify({ t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0, il: m._isMirage ? 1 : 0 })); } catch (e) {}
+  // v0.30.414 — boss kills also carry what a guest needs to pay itself
+  // setshards by its OWN ladder: the boss's level (level-squared is the full
+  // drop; the Conductor's is stamped at runtime, so it must travel), its
+  // zodiac sign (ladder key), and bx=1 when THIS kill pays nothing even on the
+  // host (echo / expedition / split twin). Never the amount: each player's
+  // refight history is its own.
+  const _kf = { t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0, il: m._isMirage ? 1 : 0 };
+  if (m.isBoss) {
+    _kf.bl = (m.level && m.level > 0) ? (m.level | 0) : ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 0);
+    if (m.zodiacSign) _kf.zs = String(m.zodiacSign).slice(0, 24);
+    if (m._echoBoss || m._expeditionBoss || m._isTwin || m._isPiscesTwin) _kf.bx = 1;
+  }
+  try { net.ws.send(JSON.stringify(_kf)); } catch (e) {}
 }
 // v0.29.5xx — SHARED TRAIN-PQ TICK (per user "ensure coop works well for
 // train PQ"). The three Clockwork quests are all kind:'kill'
@@ -48302,6 +48413,29 @@ function _coopApplyKill(msg) {
     try { _ksOnKill(); } catch (e) {}
   }
   if (msg.b) { try { if (game.bossDefeated) game.bossDefeated[game.currentMap] = true; } catch (e) {} }
+  // v0.30.414 — BOSS SETSHARDS FOR GUESTS (per user: "should have shards").
+  // The kill frame carried EXP and coins but never shards, so only the host
+  // earned them in co-op. Same formula as the host's own kill — level-squared
+  // capped at 10,000, then THIS guest's refight ladder off THIS guest's
+  // lifetime counter — so a guest cannot out-earn playing solo, and the
+  // _coopKillDup gate above already drops a redelivered frame. bx=1 marks
+  // kills that pay nothing on the host either (echo / expedition / twins).
+  if (msg.b && !msg.il && +msg.bx !== 1 && !(game.expedition && game.expedition.active)) {
+    try {
+      const _tp = String(msg.tp || '').slice(0, 48);
+      const _def = (typeof monsterTypes !== 'undefined' && _tp) ? monsterTypes[_tp] : null;
+      const _lv = Math.max(0, Math.min(200, Math.floor(+msg.bl || 0) || ((_def && _def.level) | 0)));
+      if (_lv > 0 && typeof _lxBossShardPayout === 'function') {
+        const _full = Math.min(10000, Math.max(1, Math.floor(_lv * _lv)));
+        const _zs = (typeof msg.zs === 'string' && msg.zs) ? msg.zs.slice(0, 24) : '';
+        const _key = _zs ? ('zodiac_' + _zs) : (_tp + '@' + game.currentMap);
+        const _sh = _lxBossShardPayout(_full, _key, !!_zs);
+        player.setshards = (player.setshards || 0) + _sh;
+        const _nm = (_def && _def.name) ? String(_def.name).split(/[\s,—]/)[0] : 'The boss';
+        if (typeof showToast === 'function') setTimeout(() => showToast('◈ ' + _nm + ' dropped ' + _sh + ' Setshard' + (_sh === 1 ? '' : 's') + '! (co-op)', 'legendary'), 800);
+      }
+    } catch (e) {}
+  }
   // Small death pop so the kill reads on the peer (host's inline VFX isn't networked).
   if (Number.isFinite(+msg.x) && game.particles) {
     for (let i = 0; i < 8; i++) {
@@ -90433,15 +90567,9 @@ function killMonster(m) {
         // both floored at LX_REFIGHT_SHARD_FLOOR of the full drop (min 1), so a
         // refight is still never worth nothing. Lifetime income per boss now
         // converges to ~1.8x its first drop plus the floor trickle.
-        const _kills = (game._bossKills && game._bossKills[_lxBossKey(m)]) | 0;
-        const _ladder = _kills === 0 ? 1
-          : (m.zodiacSign ? Math.pow(0.5, _kills) : LX_REFIGHT_SHARD_MUL * Math.pow(0.5, _kills - 1));
-        const SHARDS = Math.max(1, Math.round(_fullShards * Math.max(LX_REFIGHT_SHARD_FLOOR, _ladder)));
-        // Stamp the lifetime counter that makes the NEXT kill a refight.
-        try {
-          const _bk = _lxBossKey(m);
-          if (_bk) { game._bossKills = game._bossKills || {}; game._bossKills[_bk] = (game._bossKills[_bk] | 0) + 1; }
-        } catch (e) {}
+        // v0.30.414 — ladder + counter stamp live in _lxBossShardPayout (shared
+        // with the co-op guest credit path).
+        const SHARDS = _lxBossShardPayout(_fullShards, _lxBossKey(m) || ((m.type || 'boss') + '@?'), !!m.zodiacSign);
         player.setshards = (player.setshards || 0) + SHARDS;
         game.bossDefeated[_shardMapKey] = true;
         const _firstWord = (m.name || 'The boss').split(/[\s,—]/)[0];

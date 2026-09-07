@@ -121,6 +121,28 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code></div>
 </header>
 
+<h2>v0.30.414 <span class="tag"><span class="pill feat">feat</span> Co-op guests earn boss setshards &mdash; and the live save is signed, so an edited save loses its money</span></h2>
+<p>Per user, on the two items the v0.30.412 audit noted but left alone: <em>co-op guests should have shards</em>, and <em>please ensure [save editing] is properly guarded</em>.</p>
+
+<h3>Co-op guests earn boss setshards</h3>
+<p>The host&rsquo;s kill frame carried EXP and coins but never shards, so in co-op only the host was ever paid for a boss. The frame now also carries what a guest needs to pay <em>itself</em>: the boss&rsquo;s level (level&sup2; is the full drop, and the Conductor&rsquo;s level is stamped at runtime so it has to travel), its zodiac sign, and a flag for kills that pay nothing on the host either (echo, expedition, split twins). It never carries an amount: each guest runs the <b>same v0.30.412 ladder off its own lifetime counter</b>, so a guest cannot out-earn playing solo, a redelivered frame is dropped by the existing dedupe, and only the host&rsquo;s frames are honoured. The ladder itself moved into one function shared by both paths. No relay change was needed &mdash; all three relays forward kill frames verbatim.</p>
+
+<h3>The live save is signed</h3>
+<p>The <code>.mojisave</code> export has carried an HMAC since v0.29; the localStorage save it wraps never did, so editing the stored JSON was the one-line cheat the numeric clamps could not see &mdash; and &ldquo;import anyway&rdquo; on a tampered file waved it straight through. The flush now signs the save (HMAC-SHA256, same key and primitive as the secure export) <b>inside the save object</b>, so every existing reader and writer &mdash; cloud sync, Steam Cloud, backup slots, import &mdash; round-trips it untouched. The signature covers a deliberate <b>subset</b>: currencies, bank, level and EXP, stats, skill and rank points, gear (equipped + inventory), consumables, talents, boons, quests and the boss counters and dailies &mdash; everything cheating targets &mdash; and not the cosmetic blobs, because a painted wardrobe can be megabytes and hashing it every flush measured 8&ndash;18&nbsp;ms per 170&nbsp;KB, a visible hitch for nothing anyone would edit. <code>loadState</code> verifies before any migration runs:</p>
+<table>
+<tr><th>save</th><th>result</th></tr>
+<tr><td>signed, valid</td><td>trusted</td></tr>
+<tr><td>signed, wrong</td><td>loads &mdash; progress kept &mdash; but <b>setshards, mojicoins and bank reset to 0</b>, with a toast saying why</td></tr>
+<tr><td>unsigned, and this browser has written a signed save before</td><td>the three money fields are <b>capped at the last verified values</b> this browser wrote, so stripping the signature gains nothing (an older client&rsquo;s cloud save loses only the growth since that flush)</td></tr>
+<tr><td>unsigned, first run of this build</td><td>legacy save, accepted once and signed on the next flush</td></tr>
+</table>
+<p>The import dialog now says up front which of those a file will hit. The UTF-8 encoder under the HMAC switched to <code>TextEncoder</code> (native; the old spread-and-map path was the slow part), so signing the subset costs a millisecond or two on a flush that is already debounced to one per 1.5&nbsp;s.</p>
+<p><b>Honest limit, stated plainly:</b> the key ships in the client. Someone who reads the source can re-sign, and nothing client-side can stop a devtools console from setting a value at runtime. This closes casual editing of the stored save and the import-anyway hole; it is not protection against a determined attacker with the code open, and no client-side game has that.</p>
+
+<h3>Verified</h3>
+<p><code>scripts/save_guard_test.mjs</code>: a flushed save carries a 64-hex signature that verifies; an edited copy fails, still loads with level intact and its money zeroed; a signature-stripped copy is capped at the marker (1,234 / 55,555) while legitimately lower values pass; a legacy save with no marker is accepted as-is; the secure export wraps the signed save intact and the good save reloads with its money. Guest side: first boss kill 2,500, second 1,000, redelivered 0, bx=1 0, illusion 0, non-host sender 0, other-map 0, zodiac 4,900 then 2,450. A 1.5&nbsp;MB cosmetic blob in the save neither slows the flush past 11&nbsp;ms nor breaks verification. <b>24/24</b>, and the v0.30.412 economy test still passes 12/12 on the refactored host path.</p>
+
+
 <h2>v0.30.413 <span class="tag"><span class="pill bug">bug</span> Class Advancement cards no longer clipped &mdash; the choice prompt is back on screen</span></h2>
 <p>Per user, with a screenshot of the Berserker / Knight cards cut at the modal frame: <em>&ldquo;cut off for this job advancement UI please fix&rdquo;.</em></p>
 <p><b>Measured on the live modal</b> at the game&rsquo;s 960&times;560 canvas (screen px at the 1.333 wrapper scale):</p>
