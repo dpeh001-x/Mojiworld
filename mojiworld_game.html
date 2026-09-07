@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.385';
+const GAME_VERSION = 'v0.30.386';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -105029,21 +105029,47 @@ function updateCamera() {
 //   main      → legacy slot (v0.24.1 single-image path, kept for back-compat)
 // v0.25.805 — `homestead` slot removed (was a redundant alias for the
 // Megamall art that drawBackground already returned via everdawnMegamall).
+// v0.30.386 — BACKDROPS RETRY (per user, of a tester's screenshot of the Clockwork
+// Underpass with a flat purple sky: "why is the background not loading for my
+// gametester"). The file shipped and the map pointed at it; what the screenshot
+// showed was the sky-gradient fallback drawBackground paints when NO backdrop has
+// loaded — and a backdrop that failed once (a throttled CDN, a dropped request, an
+// interrupted unzip) stayed failed for the whole session, silently: onerror set
+// _loaded = false and nothing ever asked again. Now a failed load is retried with
+// a backoff (cache-busted), a map whose backdrop has failed retries it on entry
+// and every 30s while you stand in it, and the failure is named once on screen
+// so a tester can report the file.
+const _LX_BG_RETRY_MS = [1500, 4000, 10000, 25000];   // the test overrides window._LX_BG_RETRY_MS
+const _LX_BG_FAILED = [];
+function _lxBgRetry(img, why) {
+  if (!img || img._loaded || img._lxRetryPending) return false;
+  img._lxRetryPending = true;
+  img._lxTries = (img._lxTries || 0) + 1;
+  try { img.src = img._lxPath + (img._lxPath.indexOf('?') >= 0 ? '&' : '?') + 'r=' + img._lxTries; } catch (e) { img._lxRetryPending = false; return false; }
+  try { console.log('[bg] retry ' + img._lxTries + ' (' + (why || 'error') + '): ' + img._lxPath); } catch (e) {}
+  return true;
+}
 function _loadBG(path) {
   const img = (typeof Image !== 'undefined') ? new Image() : null;
   if (!img) return null;
   img._loaded = false;
-  // v0.27.11 — all ~90 map backgrounds start downloading at script-parse time,
-  // BEFORE the boot loader's gated set — at default priority they were starving
-  // the loading screen / start map / character sprites on slow pipes ("assets
-  // still not fully loaded when the game begins"). Mark them LOW: the boot
-  // loader re-requests the start map's bg at HIGH priority and Chromium dedupes
-  // a URL to its highest requested priority, so the one bg that matters at
-  // reveal still loads first while the other ~89 yield the bandwidth.
+  img._lxPath = path;
+  img._lxErrN = 0;
+  img._lxFailed = false;
   if ('fetchPriority' in img) img.fetchPriority = 'low';
   img.decoding = 'async';
-  img.onload  = () => { img._loaded = true; };
-  img.onerror = () => { img._loaded = false; };
+  img.onload  = () => { img._loaded = true; img._lxFailed = false; img._lxRetryPending = false; };
+  img.onerror = () => {
+    img._loaded = false; img._lxRetryPending = false; img._lxErrN++;
+    const sched = (typeof window !== 'undefined' && Array.isArray(window._LX_BG_RETRY_MS)) ? window._LX_BG_RETRY_MS : _LX_BG_RETRY_MS;
+    if (img._lxErrN <= sched.length) {
+      setTimeout(() => { if (!img._loaded) _lxBgRetry(img, 'backoff'); }, sched[img._lxErrN - 1]);
+    } else {
+      img._lxFailed = true; img._lxFailedAt = Date.now();
+      if (_LX_BG_FAILED.indexOf(path) < 0) _LX_BG_FAILED.push(path);
+      try { console.warn('[bg] gave up after ' + img._lxErrN + ' attempts: ' + path); } catch (e) {}
+    }
+  };
   img.src     = path;
   return img;
 }
@@ -105644,6 +105670,14 @@ function drawBackground() {
   // Everdawn Bazaar / Zodiac Sanctum / Carriage of Ascension art take over.
   const _md = game.mapData;
   const _hasAuthoredBg = !!(_md.bg && BG_IMAGES[_md.bg] && BG_IMAGES[_md.bg]._loaded);
+  if (!_hasAuthoredBg && _md.bg && BG_IMAGES[_md.bg] && BG_IMAGES[_md.bg]._lxFailed) {   // v0.30.386 — a failed backdrop, and we are standing in its map
+    const _bgi = BG_IMAGES[_md.bg], _nowB = Date.now();
+    if (!_md._bgFailToast) {
+      _md._bgFailToast = true;
+      try { if (typeof showToast === 'function') showToast('⚠ Backdrop failed to load: ' + _bgi._lxPath + ' — retrying. If it stays flat, please report this with your build version.', 'rare'); } catch (e) {}
+    }
+    if (_nowB - (_bgi._lxFailedAt || 0) > 30000) { _bgi._lxFailedAt = _nowB; _lxBgRetry(_bgi, 'map in view'); }
+  }
 
   // Sanctum cosmic background — skip normal mountains/clouds/trees
   if (_md.sanctum && !_hasAuthoredBg) {
