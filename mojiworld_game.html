@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.396';
+const GAME_VERSION = 'v0.30.397';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -40503,6 +40503,28 @@ function toggleLoreMap() {
 // _mobLevel(m)) -> the map's levelReq (bosses sit in arenas whose levelReq
 // matches their tier) -> no level info at all falls back to the old
 // player-level curve so unleveled maps keep their prior behaviour.
+// v0.30.397 — BOSS HIT FLOOR (per user, from two clips at Lv 57 with 32k HP and
+// 831 DEF: King Krook's fireballs and Octobaby's tentacles landing 48 a hit —
+// "please increase the damage such that it at least deals 15% of the player's
+// max HP per hit"). Their hits are m.atk x a multiplier, then the armour curve,
+// the level relief and the warrior/aegis reductions, and at that DEF the whole
+// chain bottoms out near nothing; the existing _heavyFloorPct on the ink is a
+// fraction of a Lv-100 reference HP halved, not of the player's bar. So: every
+// hit these six land — contact and projectile — is floored at 15% of the
+// player's CURRENT max HP. It is applied to the LANDED number — after armour
+// and after the difficulty / level-gap scale — so it is a true floor (the
+// game's own 30% floor on the Conductor works the same way); the scale still
+// raises a hit above it. A raised block takes its 70% off the floor, a parry
+// still negates, a dodge still avoids, and a paused player (scaled to 0)
+// stays at 0. God mode is untouched.
+const LX_BOSS_HIT_FLOOR = { kingKrook: 0.15, octobaby: 0.15, octoLegPoison: 0.15, octoLegFreeze: 0.15, octoLegSkillLock: 0.15, octoLegStun: 0.15 };
+function _lxBossHpFloor(type, dmg) {
+  const f = type && LX_BOSS_HIT_FLOOR[type];
+  if (!f || typeof player === 'undefined' || !player || player._god) return dmg;
+  const mh = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
+  const floor = Math.max(1, Math.floor(mh * f * ((player.blockTimer > 0) ? 0.3 : 1)));
+  return dmg < floor ? floor : dmg;
+}
 function _diffDmg(d, srcLv, capPct) { /* v0.29.672 — a PAUSED player cannot be
   harmed. In co-op the world deliberately keeps running while a player sits in
   a menu (_lxCoopWorldStep: monsters move, the host keeps broadcasting, the
@@ -79060,7 +79082,7 @@ function updateMonsters(dt) {
         const _proj = {
           x: _sx, y: _sy, vx: (_dx/_d)*_spd, vy: (_dy/_d)*_spd,
           w: 30, h: 30, life: 240, damage: (m.atk || 120) * 0.7,
-          owner: 'enemy', skill: 'octoLeg', homing: true, noGravity: true,
+          owner: 'enemy', skill: 'octoLeg', _srcType: m.type, homing: true, noGravity: true,
           stun: 1200, poison: 3000, _poisonDmg: 16,
         };
         if (m.type === 'octoLegPoison')         { _proj.color = '#aa44dd'; _proj.poison = 4500; _proj._poisonDmg = 22; }
@@ -80196,6 +80218,7 @@ function updateMonsters(dt) {
         const _pcFloor = Math.max(1, Math.floor(_pcMax * 0.30));
         if (_shownDmg < _pcFloor) _shownDmg = _pcFloor;
       }
+      if (_shownDmg > 0) _shownDmg = _lxBossHpFloor(m.type, _shownDmg);   // v0.30.397 — Krook / Octobaby / tentacles: at least 15% of max HP a hit
       player.hp -= (player._god ? 0 : _shownDmg);
       player.lastHitTime = game.time;
       // v0.26.085 — Virgo Sin Counter increment. If this melee hit
@@ -81525,7 +81548,7 @@ function _bossSpecialAttacks(m, dt) {
       game.projectiles.push({
         x: _cx, y: _cy, vx: (_dx/_d) * 3.8, vy: (_dy/_d) * 3.8,
         w: 44, h: 44, life: 175, damage: (m.atk || 360),   // v0.26.487 — slightly larger (was 34×34)
-        owner: 'enemy', skill: 'mink', color: '#cc66ff',
+        owner: 'enemy', skill: 'mink', _srcType: m.type, color: '#cc66ff',
         homing: true, noGravity: true, _heavyFloorPct: 0.35,
         _sourceLabel: "Octobaby's Abyssal Ink",
       });
@@ -84405,7 +84428,7 @@ function bossAI(m, dt, distToPlayer) {
           game.projectiles.push({
             x: m.x + m.w/2, y: 460,
             vx: dir * 11, vy: 0, w: 34, h: 28, life: 150,
-            damage: m.atk * 1.7, owner: 'enemy', skill: 'shock',  // v0.25.716 — was 1.0 (+70 %)
+            damage: m.atk * 1.7, owner: 'enemy', skill: 'shock', _srcType: m.type,  // v0.25.716 — was 1.0 (+70 %)
             color: '#aa44ff', pierce: true, noGravity: true,
             stunHit: 1200,
             _gravBand: _gravHeavyBand(phase, 'skill'),   // v0.29.x — final-loss band clamp
@@ -85360,7 +85383,7 @@ function bossAI(m, dt, distToPlayer) {
           x: sx, y: m.y + m.h * 0.3,
           vx: m.facing * 2, vy: 0,
           w: 70, h: 80, life: 8,
-          damage: m.atk * 0.9, owner: 'enemy', skill: 'claw',
+          damage: m.atk * 0.9, owner: 'enemy', skill: 'claw', _srcType: m.type,
           color: '#ffaa55',
         });
         addShake(4);
@@ -85466,7 +85489,7 @@ function bossAI(m, dt, distToPlayer) {
             vy: Math.sin(ang) * SPEED,
             // v0.26.170 — Hitbox 22 → 57 to match rendered firebomb sprite.
             w: 57, h: 57, life: 110,
-            damage: m.atk * 0.8, owner: 'enemy', skill: 'firebomb',
+            damage: m.atk * 0.8, owner: 'enemy', skill: 'firebomb', _srcType: m.type,
             color: '#ff5522', gravity: 0.10,
           });
         }
@@ -85522,7 +85545,7 @@ function bossAI(m, dt, distToPlayer) {
             // v0.26.158 — Krook fireBreath cone uses skill:'firebomb' for
             // the v0.26.156 firebomb render branch (LX_MOB_PROJ.mfirebomb
             // sprite + tumble spin).
-            damage: m.atk * 0.45, owner: 'enemy', skill: 'firebomb',
+            damage: m.atk * 0.45, owner: 'enemy', skill: 'firebomb', _srcType: m.type,
             color: '#ff7733',
           });
         }
@@ -85543,7 +85566,7 @@ function bossAI(m, dt, distToPlayer) {
             x: m.x + m.w/2, y: m.y + m.h - 10,
             vx: i * 4, vy: -2,
             w: 22, h: 18, life: 60,
-            damage: m.atk * 0.7, owner: 'enemy', skill: 'shock',
+            damage: m.atk * 0.7, owner: 'enemy', skill: 'shock', _srcType: m.type,
             color: '#ddaa55',
           });
         }
@@ -85702,7 +85725,7 @@ function bossAI(m, dt, distToPlayer) {
               w: 104, h: 104, life: 220,
               // v0.26.158 — Krook fireballRain re-tagged to 'firebomb' for
               // the m_firebomb sprite render path.
-              damage: m.atk * 1.6, owner: 'enemy', skill: 'firebomb',
+              damage: m.atk * 1.6, owner: 'enemy', skill: 'firebomb', _srcType: m.type,
               color: '#ff5522',
             });
           }
@@ -85784,7 +85807,7 @@ function bossAI(m, dt, distToPlayer) {
           // huge OHKO projectile also renders as a tumbling m_firebomb
           // sprite at canvas-W/3 scale (~440 px after sprite × 1.3
           // multiplier — properly intimidating mouth-launched bomb).
-          owner: 'enemy', skill: 'firebomb',
+          owner: 'enemy', skill: 'firebomb', _srcType: m.type,
           color: '#ff7722',
           stunHit: 600,
           noGravity: true,
@@ -85884,7 +85907,7 @@ function bossAI(m, dt, distToPlayer) {
             vx: b * 1.6 + (player.x - ox) * 0.0015,
             vy: -3 - Math.random() * 1.2,
             w: 16, h: 16, life: 110,
-            damage: m.atk * 0.45, owner: 'enemy', skill: 'bubble',
+            damage: m.atk * 0.45, owner: 'enemy', skill: 'bubble', _srcType: m.type,
             color: '#aaddff',
           });
         }
@@ -85920,7 +85943,7 @@ function bossAI(m, dt, distToPlayer) {
         vy: (_hdy / _hd) * _hspeed,
         w: 36, h: 36, life: 280,   // v0.26.487 — slightly larger (was 28×28)
         damage: (m.atk || 360) * 0.55,
-        owner: 'enemy', skill: 'octoHead',
+        owner: 'enemy', skill: 'octoHead', _srcType: m.type,
         homing: true,
         noGravity: true,
         stun: 1500,
@@ -86027,7 +86050,7 @@ function bossAI(m, dt, distToPlayer) {
             vx: _dir * 4.2, vy: 0,
             w: 120, h: 78, life: 320,
             damage: (m.atk || 360) * 0.7,
-            owner: 'enemy', skill: 'tidalSweep',
+            owner: 'enemy', skill: 'tidalSweep', _srcType: m.type,
             noGravity: true,
             color: '#5fd6ff',
             _sourceLabel: 'the Tidal Sweep',
@@ -86044,7 +86067,7 @@ function bossAI(m, dt, distToPlayer) {
           x: ox, y: m.y + m.h * 0.6,
           vx: b * 1.8, vy: -2.6 - Math.random(),
           w: 16, h: 16, life: 110,
-          damage: m.atk * 0.45, owner: 'enemy', skill: 'bubble',
+          damage: m.atk * 0.45, owner: 'enemy', skill: 'bubble', _srcType: m.type,
           color: '#ffccdd',
         });
       }
@@ -86272,7 +86295,7 @@ function bossAI(m, dt, distToPlayer) {
         x: sx, y: sy,
         vx: (dx / dist) * speed, vy: (dy / dist) * speed,
         w: 30, h: 30, life: 240,                       // slow but long-lived — homing has time to track; v0.26.487 slightly larger (was 22×22)
-        damage: m.atk * 0.7, owner: 'enemy', skill: 'octoLeg',
+        damage: m.atk * 0.7, owner: 'enemy', skill: 'octoLeg', _srcType: m.type,
         homing: true,                                   // enable enemy-homing steering
         noGravity: true,
         // Universal stun + poison on every leg per the user spec.
@@ -91663,6 +91686,7 @@ function updateProjectiles(dt) {
         // v0.26.354 cap exists to prevent. Boss/zodiac/heavy-floor shots aren't
         // _normalMob, so they keep full punch.
         let _projLost = (player._god ? 0 : _diffDmg(dmg));
+        if (p._srcType && _projLost > 0) _projLost = _lxBossHpFloor(p._srcType, _projLost);   // v0.30.397 — Krook / Octobaby / tentacles: at least 15% of max HP a hit
         // v0.29.x — GRAVITOS heavy-hit band: clamp the FINAL loss using the
         // fully-mitigated (pre-punish) damage so DEF/block genuinely scale
         // the hit inside the phase band. Replaces the old pre-punish
