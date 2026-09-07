@@ -34,7 +34,7 @@ await page.waitForFunction(() => typeof _expeditionFloorCleared === 'function' &
 
 const r = await page.evaluate(() => {
   const LEVELS = [30, 40, 50, 60, 70, 80, 95];
-  const TARGET = { 30: 0.50, 40: 0.50, 50: 0.40, 60: 0.30, 70: 0.20, 80: 0.20, 95: 0.20 };
+  const TARGET = Object.fromEntries(LEVELS.map((lv) => [lv, +_lxExpeditionRunTarget(lv).toFixed(4)]));   // the shipped curve (LX_EXP_RUN_AT_40 -> LX_EXP_RUN_AT_70, flat above); v0.30.384 and v0.30.404 each halved it
   const N = EXPEDITION_FLOOR_COUNT;
 
   // Walk a full run through the REAL floor-clear handler. _maybeLevelUp is held
@@ -112,8 +112,8 @@ for (const lv of L) {
 }
 
 console.log('\nPARTIAL RUNS BANK WHAT THEY CLEARED');
-check(Math.abs(r.partial7 - r.target[60] * 0.7) <= 0.02,
-      'dying on floor 7 of 10 banks ~70% of the budget', { want: +(r.target[60] * 0.7).toFixed(4), got: r.partial7 });
+check(Math.abs(r.partial7 - r.target[60] * 28 / 55) <= 0.02,
+      'dying on floor 7 of 10 banks ~51% of the budget (floors pay by depth, f/55)', { want: +(r.target[60] * 28 / 55).toFixed(4), got: r.partial7 });
 check(r.partial7 > 0 && r.partial7 < r.share[60], 'a partial run pays less than a full clear',
       { partial: r.partial7, full: r.share[60] });
 

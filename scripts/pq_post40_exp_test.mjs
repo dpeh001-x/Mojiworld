@@ -47,8 +47,9 @@ const r = await page.evaluate(() => {
   // ONLY decay law above 70 — the payout no longer also caps at Lv 85, because
   // two curves decaying at once turned the tail into a cliff (0.082 at Lv 85 to
   // 0.010 at Lv 95). Targets below are that single curve.
-  const TARGET = { 40: 0.50, 45: 0.4417, 50: 0.3833, 60: 0.2667,
-                   70: 0.15, 75: 0.1227, 80: 0.1004, 85: 0.0822, 95: 0.0551 };
+  // v0.30.384 / v0.30.404: the stage caps bind at every level - stages 1-3 pay half a cap each, the finale a
+  // full one, so a full run is 2.5 caps of a level (5% to Lv 40, 1.25% from Lv 70).
+  const TARGET = Object.fromEntries(LEVELS.map((lv) => [lv, +(2.5 * _lxPqStageCapFrac(lv)).toFixed(4)]));
 
   // Share of ONE level paid by completing `id` at level `lv`.
   //
@@ -107,9 +108,10 @@ for (const lv of L) {
 }
 check(L.every((lv, i) => i === 0 || r.chain[lv] <= r.chain[L[i - 1]] + 0.001),
       'the run budget never rises with level', L.map(lv => r.chain[lv]));
-// The point of this change: past 70 it must keep FALLING, not sit flat.
+// v0.30.387: the stage cap tapers 40 -> 70 and holds flat after ("straight line, flat after"), and the caps
+// bind, so past 70 the run holds at its late value rather than falling further. It must never rise.
 for (const [a, b] of [[70, 75], [75, 80], [80, 85], [85, 95]]) {
-  check(r.chain[b] < r.chain[a] - 0.001, `the run is still scaling down from Lv ${a} to Lv ${b}`,
+  check(r.chain[b] <= r.chain[a] + 0.001 && r.chain[b] > 0, `the run holds or falls from Lv ${a} to Lv ${b} (never rises, never zero)`,
         { [a]: r.chain[a], [b]: r.chain[b] });
 }
 // ...but never to nothing. A linear continuation of the 40-70 slope would have
@@ -140,9 +142,9 @@ check(ceilingBreaches.length === 0, 'no stage exceeds the 80%-of-a-level hard ce
 console.log('\nAUTHORED TIER SPREAD SURVIVES (the v0.29.320 failure mode)');
 for (const lv of L) {
   const f = r.per.q_pq_finale[lv], c = r.per.q_pq_carriage[lv], u = r.per.q_clockwork_underpass[lv];
-  check(f > c && c > u, `finale > carriage > stage 1 at Lv ${lv}`, { finale: f, carriage: c, stage1: u });
+  check(f > c && c >= u, `finale > carriage >= stage 1 at Lv ${lv}`, { finale: f, carriage: c, stage1: u });   // stages 1-3 share one half-cap since v0.30.384
 }
-const pinned = L.filter(lv => new Set(Object.keys(r.per).map(id => r.per[id][lv])).size <= 2);
+const pinned = L.filter(lv => new Set(Object.keys(r.per).map(id => r.per[id][lv])).size <= 1);
 check(pinned.length === 0, 'stages are not all pinned to one clamp value', pinned);
 
 console.log('\nFLAGS');

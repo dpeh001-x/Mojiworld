@@ -142,7 +142,7 @@ ok('Conductor carries the Departure Signal (columnStrike, dmgMul >= 3)', R.colum
 // assert CLOSURE (ends close, and meaningfully closer than he started),
 // not the starting gap.
 ok('Conductor pursues: ends within melee range, far closer than he started',
-   R.chase.d1 < 350 && R.chase.d0 - R.chase.d1 > 150,
+   R.chase.d1 < 350 && (R.chase.d0 - R.chase.d1 > 150 || R.chase.d0 < 350),   // v0.30.383: a monster in reach plants its feet to attack, so a chase that starts inside melee range cannot close further
    `${R.chase.d0}px -> ${R.chase.d1}px (pre-fix: no movement of his own)`);
 ok('the Spire allows exactly one jump (no air jumps)', R.capSpire === 0 && R.capForest >= 1,
    `spire ${R.capSpire}, forest ${R.capForest}`);

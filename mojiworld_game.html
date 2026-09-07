@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.406';
+const GAME_VERSION = 'v0.30.407';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -47958,8 +47958,12 @@ function _lxPqStageCount(qid) {
 // Resume stays the default everywhere (that linear flow was itself a user
 // request, v0.26.298); this just stops it being the ONLY door.
 function _lxPqRestartChain() {
-  player._pqChainRuns = (player._pqChainRuns | 0) + 1;   // v0.30.381 — from here on this is a repeat run: 40% coins, 40% gear chance
-  const _ids = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
+  // v0.30.407 - a restart is a repeat only if the Rush was actually finished. Milo offers "reset my papers"
+  // mid-chain too, and that used to count as a run: a player who restarted after Stage 1 paid repeat
+  // rates (25% coins, 50% EXP) on the first run they ever completed, permanently.
+  const _wasCompleted = !!(player.quests && player.quests.completed && player.quests.completed.q_pq_finale);
+  if (_wasCompleted) player._pqChainRuns = (player._pqChainRuns | 0) + 1;   // v0.30.381 — from here on this is a repeat run: 25% coins, 25% gear chance, 50% EXP
+  const _ids = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale', 'q_clockwork_express'];   // v0.30.407 - the Express run rides the same reset (it is in LX_PQ_CHAIN_IDS but was left active/completed)
   if (player.quests) {
     for (const _id of _ids) {
       if (player.quests.completed) delete player.quests.completed[_id];
@@ -47991,11 +47995,12 @@ function _lxPqDirectTick() {
   };
   const _curMap = game.currentMap;
   const _qids = ['q_clockwork_underpass', 'q_pq_carriage', 'q_clockwork_express'];
+  let _ticked = false;   // v0.30.407 - reported to the caller: a ticket-family kill that advanced no PQ stage must still reach tickQuestKill (the class Lv-37 Conductor Sweep could never progress)
   for (const _qid of _qids) {
     const _a = player.quests.active[_qid];
     if (!_a) continue;
     if (_QID_MAP[_qid] && _QID_MAP[_qid] !== _curMap) continue;
-    _a.progress = (_a.progress || 0) + 1;
+    _a.progress = (_a.progress || 0) + 1; _ticked = true;
     const _q = QUESTS && QUESTS[_qid];
     const _target = (_a.targetCount != null) ? _a.targetCount : ((_q && _q.count) || 1);
     if (_qid === 'q_clockwork_underpass' && _a.progress === _target && typeof showToast === 'function') {
@@ -48012,6 +48017,7 @@ function _lxPqDirectTick() {
       _completeQuest(_qid);
     }
   }
+  if (!_ticked) return false;   // v0.30.407 - nothing advanced: no save, and the caller runs the standard tick
   if (typeof renderQuestTracker === 'function') renderQuestTracker();
   if (typeof _renderPqObjectivePin === 'function') _renderPqObjectivePin();
   if (typeof saveState === 'function') saveState();
@@ -49785,7 +49791,7 @@ const MODE_INTROS = [
     body: 'A multi-stage party quest through the Clockwork Underpass — punch tickets, ride the Endless Express, and face the Master Conductor. Find Milo in town to begin.',
   },
   {
-    id: 'towerExpedition', level: 20,
+    id: 'towerExpedition', level: 30,   // v0.30.407 - was 20 while Bravo gates at EXPEDITION_LEVEL_GATE (30): the banner sent players to a closed door for ten levels
     title: '🗼 TOWER EXPEDITIONS unlocked!',
     body: 'A roguelike climb: randomised floors, escalating rewards, and a run that ends when you fall. Enter from Everdawn Central — bank what you earn before you push deeper.',
   },
@@ -50256,8 +50262,8 @@ function tickQuestKill(monsterType, isBoss) {
       }
       continue;
     }
-    const matches = (q.kind === 'kill'  && q.target === _questMonsterType) ||
-                    (q.kind === 'boss'  && q.target === _questMonsterType);
+    const matches = (q.kind === 'kill'  && (q.target === _questMonsterType || q.target === monsterType)) ||
+                    (q.kind === 'boss'  && (q.target === _questMonsterType || q.target === monsterType));   // v0.30.407 - the alias folds conductorMech into ticketMech for the PQ stages; a quest that names conductorMech itself must still match
     if (!matches) continue;
     // v0.25.698 — Re-check class gate. The accept-quest path
     // `acceptQuest` at L15587 honors `q.cls` (only the matching class
@@ -50956,6 +50962,7 @@ function _completeQuest(id) {
   // quest before this shipped.
   const _huntScale = Math.max(1, (_activeSnap && _activeSnap.rewardScale) || 1);
   const _payMul = _qRewMul * _huntScale * _lxPqRepeatMul(id);   // v0.30.381 — a repeat Ticket Rush pays 40%
+  const _payMulExp = _qRewMul * _huntScale;   // v0.30.407 - EXP takes its repeat discount once, below (LX_PQ_REPEAT_EXP_MUL); with the coin factor here too a repeat paid 12.5% whenever the authored path won
   const _coinsGained = r.mojicoins ? _grantMojicoins(Math.min(_lxQuestCoinCeil(q.levelReq), Math.round(r.mojicoins * _payMul)), { full: true }) : 0;   // v0.30.381 — ceiling holds at turn-in
   if (r.exp)   {
     // Authored payout: flat r.exp × early-level ×3 × opening event. This stays
@@ -51075,7 +51082,7 @@ function _completeQuest(id) {
     // deliberately generous and still clamps), and the floor stands on its own
     // as the curve-relative guarantee it was written to be — which restores the
     // tier spread exactly where it had been lost, in the mid and late game.
-    const _authoredPaid = Math.floor(_authored * _questMul * _payMul);
+    const _authoredPaid = Math.floor(_authored * _questMul * _payMulExp);
     const _expBase = (q && q.noExpFloor) ? _authoredPaid : Math.max(_authoredPaid, _floor);
     let _questExp = _expBase;   // v0.26.x — +200% XP at Lv 1-5 · v0.29.7 curve-relative floor · v0.29.x ×10 quest EXP knob · v0.29.299 mid/late weighting · v0.29.302 hunt-scale payout
     // v0.29.309 — HARD CEILING: 80% of the CURRENT level's cost (per user
@@ -58188,7 +58195,7 @@ function _expeditionMobKilled(m) {
   // legacy zodiac) ends the expedition. Tagged in _expeditionSpawnTowerBoss.
   if (m && m.isBoss && m._expeditionMidBoss) {
     if (typeof showToast === 'function') showToast('⚔ The Arbiter falls. The descent continues...', 'legendary');
-    setTimeout(() => _expeditionFloorCleared(), 900);
+    const _fMid = game.expedition.floor; setTimeout(() => _expeditionFloorCleared(_fMid), 900);   // v0.30.407 - carries its floor
     return;
   }
   // F10 boss kill = expedition complete.
@@ -58230,7 +58237,7 @@ function _expeditionMobKilled(m) {
   const alive = (game.monsters || []).filter(x => x && x.currentHp > 0 && !x._dying);
   if (alive.length === 0) {
     // Brief delay so the kill anim + death VFX settle before the modal pops.
-    setTimeout(() => _expeditionFloorCleared(), 700);
+    const _fReg = game.expedition.floor; setTimeout(() => _expeditionFloorCleared(_fReg, true), 700);   // v0.30.407 - carries its floor, re-checks the room
   }
 }
 // v0.30.16 — EXPEDITION RUN EXP (per user: "as for expedition also similar
@@ -58271,13 +58278,17 @@ function _lxGrantExpeditionFloorExp(floor) {
   // re-prices the floors still to come rather than paying out against a level
   // the player has already left.
   const lv = Math.max(1, Math.floor(player.level || 1));
-  const gain = Math.floor(_lxLevelCost(lv) * _lxExpeditionRunTarget(lv) / EXPEDITION_FLOOR_COUNT);
+  // v0.30.407 - weighted by depth: floor f pays f/55 of the run budget (1+2+...+10 = 55), so the total is
+  // unchanged but B1 pays 1.8% of it instead of 10%. Clearing B1, leaving and re-entering paid a tenth of
+  // the budget per lap for the easiest room and no risk - better EXP a minute than a full descent.
+  const _wsum = EXPEDITION_FLOOR_COUNT * (EXPEDITION_FLOOR_COUNT + 1) / 2;
+  const gain = Math.floor(_lxLevelCost(lv) * _lxExpeditionRunTarget(lv) * f / _wsum);
   if (!(gain > 0)) return 0;
   player.exp += gain;
   if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
   return gain;
 }
-function _expeditionFloorCleared() {
+function _expeditionFloorCleared(expectFloor, verifyAlive) {
   if (!game.expedition || !game.expedition.active) return;
   // v0.26.343 — AUDIT FIX (Expedition #3, idempotency). When the last
   // 2-3 mobs die in the same burst (AoE / cleave), each kill that sees
@@ -58287,7 +58298,13 @@ function _expeditionFloorCleared() {
   // repeat calls for the same floor. The stamp is re-armed to null on
   // the next floor's loadMap entry (see the tower-floor entry hook).
   const _flr = game.expedition.floor;
+  // v0.30.407 - the 700 ms / 900 ms timers carry the floor they were armed on. Bravo opens as soon as the
+  // last mob drops, so a player who took her door inside that window loaded the next floor before the
+  // timer fired - and the timer then cleared the fresh floor (its EXP, "Quest Complete", Bravo ready)
+  // with every mob alive. A regular-floor timer also re-checks that nothing is alive.
+  if (expectFloor != null && expectFloor !== _flr) return;
   if (game.expedition._floorClearedFor === _flr) return;
+  if (verifyAlive && (game.monsters || []).some((x) => x && x.currentHp > 0 && !x._dying)) return;
   game.expedition._floorClearedFor = _flr;
   // v0.30.16 — bank this floor's share of the run's EXP budget.
   {
@@ -58644,6 +58661,7 @@ function _expeditionShowPuzzle() {
       card.querySelector('#ec-puzzle-ok').onclick = () => {
         modal.remove();
         game.paused = false;
+        if (!game.expedition || !game.expedition.active) return;   // v0.30.407 - the run ended (death) while the modal was up: do not bump a dead floor counter and warp out of town
         if (_passed) {
           // Bump floor counter again (skip).
           game.expedition.floor = (game.expedition.floor || 0) + 1;
@@ -95131,7 +95149,7 @@ So.. do you need a lift?`;
       text = `*A young woman in violet-and-gold pilgrim's wrap meets your eye. Her smile is gentle but her hands are scarred.*\n\nI'm Bravo. I guide descents through the Tower of Expedition — ten floors of memories the world keeps forgetting. You'll need a little more weight on your shoulders before I'll take you down, though.\n\nReturn at <b>Level ${EXPEDITION_LEVEL_GATE}</b>. You are currently ${_lv}.`;
       opts.push({ t:'Understood', cb: closeDialog });
     } else {
-      text = `*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready. Here's the truth no one tells you about the Everdawn: you don't climb toward a sunrise. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and you carry the dream back UP out of it. That's what the tower is. A grief you walk down on purpose, so you remember how to climb.\n\nI'll meet you at each threshold with three blessings to choose from. Hades does the same, apparently. I learned from the best.\n\n<b>The Rules</b>\n• 10 floors (B1 → B10). Each is its own crucible.\n• Mobs scale to <b>your</b> level — no coasting.\n• Clear the floor's quest → I appear → pick <b>one of three boons</b>.\n• B5 is a mid-tower trial. B10 is the Apex. They are not gentle.\n• Boons, items, coins, and EXP gained inside <b>vanish on exit</b>. Roguelite rules.\n• Death = run ends. The world above stays untouched.`;
+      text = `*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready. Here's the truth no one tells you about the Everdawn: you don't climb toward a sunrise. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and you carry the dream back UP out of it. That's what the tower is. A grief you walk down on purpose, so you remember how to climb.\n\nI'll meet you at each threshold with three blessings to choose from. Hades does the same, apparently. I learned from the best.\n\n<b>The Rules</b>\n• 10 floors (B1 → B10). Each is its own crucible.\n• Mobs scale to <b>your</b> level — no coasting.\n• Clear the floor's quest → I appear → pick <b>one of three boons</b>.\n• B5 is a mid-tower trial. B10 is the Apex. They are not gentle.\n• Boons, items and coins gained inside <b>vanish on exit</b>; EXP and levels are yours to keep. Roguelite rules.\n• Death = run ends. The world above stays untouched.`;
       opts.push({ t:`⚜ Begin Expedition (Lv ${_lv})`, cb:() => {
         closeDialog();
         if (typeof _startExpedition === 'function') _startExpedition();
@@ -95631,6 +95649,7 @@ So.. do you need a lift?`;
         // v0.29.941 — body moved to _lxPqRestartChain so the mid-chain
         // branches below can offer the identical reset.
         opts.push({ t:'🎫 Run the Ticket Rush again ✦', cb:() => { if (typeof _lxPqRestartChain === 'function') _lxPqRestartChain(); } });
+        if (typeof _lxIsPqMap === 'function' && _lxIsPqMap(game.currentMap)) opts.push({ t:'🏛 Ride back to Everdawn Central', cb:() => { closeDialog(); if (typeof loadMap === 'function') loadMap('town', 400); } });   // v0.30.407 - the branch every other in-map state has
         opts.push({ t:'Close', cb: closeDialog });
       }
     } else if (_isActive) {
@@ -95647,7 +95666,7 @@ So.. do you need a lift?`;
         // kill; this guard only shows if the handler hasn't fired yet).
         // v0.26.831+ — removed the dead pre-v0.26.309 _prog<300 branch that
         // mislabelled the Carriage as "Stage 2" inside this quest.
-        text = '*Milo flips through his clipboard, finds a fully-punched card, and grins.*\n\nThat\'s a hundred and fifty! Stage 1 completes the moment your last kill registers — give it a beat and the rewards drop. If they don\'t, talk to me again.';
+        text = '*Milo flips through his clipboard, finds a fully-punched card, and grins.*\n\nThat\'s ' + _lxPqStageCount('q_clockwork_underpass') + ' punched! Stage 1 completes the moment your last kill registers — give it a beat and the rewards drop. If they don\'t, talk to me again.';
       }
     } else if (_isUnlocked && _lvOk) {
       // v0.26.112 — Per user "Milo should have a conversation on clicking,

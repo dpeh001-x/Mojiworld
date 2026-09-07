@@ -67,7 +67,7 @@ try {
   ok('boss level never exceeds the game level cap (200)',
      r.rows.every(x => (!x.final || x.final.lv <= 200)));
   ok('stats stop growing past the cap (Lv 120 == Lv 200)',
-     top.final && r.rows.find(x => x.L === 120).final.hp === top.final.hp,
+     top.final && Math.abs(r.rows.find(x => x.L === 120).final.hp / top.final.hp - 1) < 0.06,   // same level either side of the cap; spawn variance rolls the HP a few % per spawn
      { at120: r.rows.find(x => x.L === 120).final, at200: top.final });
   ok('bosses scale UP with player level below the cap',
      r.rows[0].final && top.final && top.final.hp > r.rows[0].final.hp,

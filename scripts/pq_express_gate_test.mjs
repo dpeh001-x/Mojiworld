@@ -48,7 +48,7 @@ await page.waitForTimeout(2500);
 await page.evaluate(() => { player.level = 37; loadMap('town', 400); });
 await page.waitForTimeout(2500);
 
-const R = await page.evaluate(() => {
+const R = await page.evaluate(async () => {
   const out = {};
   const Q = () => player.quests;
   const CHAIN = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
@@ -103,11 +103,13 @@ const R = await page.evaluate(() => {
   clearAll();
   Q().active.q_clockwork_underpass = { progress: 0 };
   openNPC({ name: 'Milo', role: 'usher' });
-  out.chainWarp = game.currentMap;             // must be the Stage-1 lobby
+  out.chainWarp = game.currentMap; out.chainOpts = dialogOpts();   // the Stage-1 lobby, or (v0.30.305) the dialog that asks first
   try { closeDialog(); } catch (e) {}
 
   // ---- D. in-PQ-map Milo: forward options instead of only the ride home ---
-  // (we are now standing in the lobby, a PQ map)
+  // (since v0.30.305 town Milo asks instead of warping, so walk to the lobby, a PQ map, explicitly)
+  if (typeof loadMap === 'function') loadMap('clockworkUnderpassLobby', 300);
+  await new Promise((r) => setTimeout(r, 1800));
   clearAll(); doneChain();
   Q().active.q_clockwork_express = { progress: 5, targetCount: 60 };
   openNPC({ name: 'Milo', role: 'usher' });
@@ -139,8 +141,8 @@ ok('...and that dialog offers the Express as an explicit option, with the remain
   has(R.town.opts, 'Endless Express run (55 left)'), JSON.stringify(R.town.opts));
 ok('...alongside the "Run again" option the hijack used to bury',
   has(R.town.opts, 'Run the Ticket Rush again'), JSON.stringify(R.town.opts));
-ok('the four chain stages keep their auto-warp (Stage 1 active -> lobby)',
-  R.chainWarp === 'clockworkUnderpassLobby', `map after openNPC: ${R.chainWarp}`);
+ok('the four chain stages keep their way back (Stage 1 active -> lobby, or the v0.30.305 "Hop back on" offer)',
+  R.chainWarp === 'clockworkUnderpassLobby' || has(R.chainOpts, 'Hop back on'), `map after openNPC: ${R.chainWarp}; opts ${JSON.stringify(R.chainOpts)}`);
 ok('in-PQ-map Milo offers the Express run from a non-Express PQ map',
   has(R.inMap.opts, 'Continue the Endless Express run'), JSON.stringify(R.inMap.opts));
 ok('in-PQ-map Milo offers "Run again" when all four stages are done (was: only the ride home)',

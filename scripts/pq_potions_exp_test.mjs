@@ -143,9 +143,9 @@ ok('the per-map lock still WORKS for any map that opts in (mechanism kept, not r
 ok('the cap curve exists', exp.haveCap);
 if (exp.haveCap) {
   const c = exp.curve;
-  ok('4% through Lv 80', c[30] === 0.04 && c[40] === 0.04 && c[60] === 0.04 && c[80] === 0.04, JSON.stringify(c));
-  ok('tails to 1% after 80, and holds there',
-    c[90] > 0.01 && c[90] < 0.04 && c[100] === 0.01 && c[120] === 0.01,
+  ok('2% to Lv 40, 1% at Lv 60, 0.5% at Lv 80 (v0.30.404 halved the 4% / 1% curve)', c[30] === 0.02 && c[40] === 0.02 && c[60] === 0.01 && c[80] === 0.005, JSON.stringify(c));
+  ok('holds at 0.5% from Lv 70 up',
+    c[90] === 0.005 && c[100] === 0.005 && c[120] === 0.005,
     `Lv90 ${c[90]}, Lv100 ${c[100]}, Lv120 ${c[120]}`);
   const over = [];
   for (const lv of Object.keys(exp.paid)) {
@@ -156,13 +156,13 @@ if (exp.haveCap) {
     }
   }
   ok('NO PQ stage pays more than its cap, at any level tested', over.length === 0, over.slice(0, 4).join(' · '));
-  ok('the post-40 complaint case: a full 4-stage run at Lv 60 is now ~16% of a level, not ~50%',
+  ok('the post-40 complaint case: a full 4-stage run at Lv 60 is now ~2.5% of a level (2.5 caps), not ~50%',
     Math.abs(['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']
-      .reduce((a, id) => a + exp.paid[60][id], 0) - 0.16) < 0.005,
+      .reduce((a, id) => a + exp.paid[60][id], 0) - 2.5 * c[60]) < 0.005,
     'run at Lv 60 = ' + ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']
       .reduce((a, id) => a + exp.paid[60][id], 0).toFixed(3) + ' of a level');
   ok('the repeatable Express is capped too — the farm cannot just move',
-    exp.paid[60]['q_clockwork_express'] <= 0.0405, 'Express at Lv 60 = ' + exp.paid[60]['q_clockwork_express']);
+    exp.paid[60]['q_clockwork_express'] <= c[60] + 0.0005, 'Express at Lv 60 = ' + exp.paid[60]['q_clockwork_express']);
   ok('a NON-PQ quest can still pay far above the PQ cap — the ceiling is PQ-only',
     exp.control !== null && exp.control > 0.10,
     `${exp.controlId} at Lv 60 = ${exp.control} of a level (PQ cap there is ${exp.curve[60]})`);

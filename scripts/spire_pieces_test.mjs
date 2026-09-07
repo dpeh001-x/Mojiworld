@@ -47,7 +47,7 @@ try {
   ok('the drifting bars hold a standing player at 60 fps and at 30 fps', r.stand60.fell === 0 && r.stand30.fell === 0, JSON.stringify([r.stand60, r.stand30]));
   ok('a player jumping and landing on a drifting bar at 30 fps never falls through', r.jump30.fell === 0 && r.jump30.landings >= 8, JSON.stringify(r.jump30));
   ok('holding Down does not drop the player through a bar', r.down60.fell === 0, JSON.stringify(r.down60));
-  ok('party-quest EXP cap: 4% of a level per stage to Lv 40, ~2.3% at Lv 57, 1% from Lv 70', r.cap[29] === 0.04 && r.cap[40] === 0.04 && Math.abs(r.cap[57] - 0.023) < 0.001 && r.cap[70] === 0.01 && r.cap[85] === 0.01, JSON.stringify(r.cap));
+  ok('party-quest EXP cap: 2% of a level per stage to Lv 40, ~1.15% at Lv 57, 0.5% from Lv 70 (v0.30.404 halved 4/1)', r.cap[29] === 0.02 && r.cap[40] === 0.02 && Math.abs(r.cap[57] - 0.0115) < 0.001 && r.cap[70] === 0.005 && r.cap[85] === 0.005, JSON.stringify(r.cap));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();

@@ -211,7 +211,7 @@ await go('town');
 const dResume = await milo();
 const resumedMap = (await state()).map;
 ok('mid-stage in town: Milo resumes the run instead of stranding the player',
-  resumedMap === 'tower' || dResume.opts.some((t) => /Continue Stage 3|Stage 3/.test(t)),
+  resumedMap === 'tower' || dResume.opts.some((t) => /Continue Stage 3|Stage 3/i.test(t)),   // v0.30.305: town Milo asks ("Hop back on — STAGE 3") instead of warping
   { map: resumedMap, opts: dResume.opts });
 
 // every PQ map, every stage boundary, must offer a way onward

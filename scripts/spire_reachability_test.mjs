@@ -50,7 +50,7 @@ await page.waitForTimeout(2500);
 const R = await page.evaluate(async () => {
   player.level = 60; player._god = true;
   const sig = () => (game.mapData.platforms || [])
-    .map(p => `${p.x},${p.y},${p.w},${p.h},${p.type}`).join('|');
+    .map(p => `${p._driftBaseX != null ? p._driftBaseX : p.x},${p._driftBaseY != null ? p._driftBaseY : p.y},${p.w},${p.h},${p.type}`).join('|');   // drifting bars (v0.30.387) sweep around a fixed base; compare the base
 
   // ---- LAYOUT STABILITY: same geometry on every entry ---------------------
   const sigs = [];
@@ -69,9 +69,9 @@ const R = await page.evaluate(async () => {
   // The authored source array must not be mutated by loading, and the
   // per-load jitter pass must not touch this map (isVerticalTower skips it).
   const authored = MAPS.clockworkSpire.platforms
-    .map(p => `${p.x},${p.y},${p.w},${p.h},${p.type}`).join('|');
+    .map(p => `${p._driftBaseX != null ? p._driftBaseX : p.x},${p._driftBaseY != null ? p._driftBaseY : p.y},${p.w},${p.h},${p.type}`).join('|');   // drifting bars (v0.30.387) sweep around a fixed base; compare the base
   const varied = _variedMapData('clockworkSpire').platforms
-    .map(p => `${p.x},${p.y},${p.w},${p.h},${p.type}`).join('|');
+    .map(p => `${p._driftBaseX != null ? p._driftBaseX : p.x},${p._driftBaseY != null ? p._driftBaseY : p.y},${p.w},${p.h},${p.type}`).join('|');   // drifting bars (v0.30.387) sweep around a fixed base; compare the base
   const unjittered = varied === authored;
 
   const live = (game.mapData.platforms || []).slice();
