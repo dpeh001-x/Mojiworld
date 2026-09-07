@@ -1,4 +1,4 @@
-// UI panel plates (v0.30.408): the fourteen windows that sat on the bare dark gradient each carry
+// UI panel plates (v0.30.408, twelve since v0.30.409): the windows that sat on the bare dark gradient each carry
 // a Persona-5 plate - the file ships at the panel recipe (1200x670, flat 20% alpha), is served,
 // and is the computed background image of the window's panel element; a window with its own
 // themed gradient keeps it under the plate.
@@ -10,7 +10,7 @@ const { chromium } = require('playwright-core'); const { existsSync } = require(
 const PORT = Number(process.env.PORT || 10211); const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
 let pass = 0, fail = 0; const ok = (name, cond, note) => { if (cond) pass++; else fail++; console.log((cond ? 'PASS ' : 'FAIL ') + name + (note ? '  [' + note + ']' : '')); };
 const PANELS = {
-  inventory: '#inventory-modal > .modal', skills: '#skills-modal > .modal', skilltree: '#skilltree-modal > .modal', codex: '#codex-modal > .modal', taxi: '#taxi-modal > .modal', craft: '#craft-modal > .modal', help: '#help-modal > .modal', advancement: '#advancement-modal > .modal',
+  inventory: '#inventory-modal > .modal', codex: '#codex-modal > .modal',   // v0.30.409: the Skill Trainer and Skill Tree windows were removed (nothing in play opened them) taxi: '#taxi-modal > .modal', craft: '#craft-modal > .modal', help: '#help-modal > .modal', advancement: '#advancement-modal > .modal',
   mojidex: '#mojidex-modal .mjx-modal', tutorial: '#tutorial-modal > .modal', jukebox: '#jukebox-modal', backup: '#backup-modal', powerup: '#powerup-modal > .modal', sage: '#sage-blessing-modal > .modal',
 };
 const THEMED = new Set(['mojidex', 'tutorial', 'jukebox', 'backup', 'powerup', 'sage']);

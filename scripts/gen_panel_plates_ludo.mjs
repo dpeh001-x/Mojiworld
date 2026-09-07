@@ -27,8 +27,6 @@ const END = '. The CENTER of the canvas stays clean, dark and calm - a smooth da
   'Stylish, high-contrast corners, quiet center. Rich saturated purples, antique gold and crimson accents.';
 export const PANELS = {
   inventory:   { what: 'an INVENTORY bag window', motifs: 'a leather adventurer satchel spilling gold coins, cut gemstones, a coiled rope, a brass key, a rolled map and a small glowing potion vial' },
-  skills:      { what: 'a SKILL TRAINER window where fighting techniques are learned', motifs: 'crossed blades, an open training scroll with rune diagrams, a bandaged fist, a sparring dummy silhouette and small bursts of impact sparks' },
-  skilltree:   { what: 'a SKILL TREE window of branching talents', motifs: 'a glowing constellation of connected star-nodes branching like tree limbs, golden roots and leaves, small orbiting runes' },
   codex:       { what: 'a CODEX of world knowledge', motifs: 'an open leather-bound tome with a quill, a brass compass rose, wax seals, ink splashes and old map fragments' },
   mojidex:     { what: 'a MONSTER COMPENDIUM (bestiary) window', motifs: 'a magnifying glass over a creature silhouette, cute monster paw prints, a pinned specimen card, feathers and a small horn' },
   taxi:        { what: 'a TAXI travel service window', motifs: 'a vintage carriage wheel, a road milestone signpost with arrows, a glowing lantern, a ticket stub and swirling travel dust' },

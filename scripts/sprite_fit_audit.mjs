@@ -25,8 +25,10 @@ const idxSrc = readFileSync(path.join(ROOT, 'data', 'sprite_frame_index.js'), 'u
 const IDX = JSON.parse(idxSrc.slice(idxSrc.indexOf('{', idxSrc.indexOf('window.LX_SPRITE_FRAME_INDEX')), idxSrc.lastIndexOf('}') + 1));
 const calibSrc = readFileSync(path.join(ROOT, 'data', 'anim_calib.js'), 'utf8');
 const CALIB = (() => { const a = calibSrc.indexOf('window.LX_ANIM_CALIB = ') + 'window.LX_ANIM_CALIB = '.length; const b = calibSrc.indexOf('window.LX_ATK_HITBOX', a); return JSON.parse(calibSrc.slice(a, b).replace(/;\s*$/, '')); })();
-const game = readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8');
+const game = readFileSync(process.env.MOJI_GAME_SRC || path.join(ROOT, 'mojiworld_game.html'), 'utf8');   // MOJI_GAME_SRC: audit a candidate build's tables
 const BOX = {}; for (const m of game.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*):\s*\{\s*name:'[^']*',\s*w:\s*(\d+),\s*h:\s*(\d+)/mg)) if (!BOX[m[1]]) BOX[m[1]] = { w: +m[2], h: +m[3] };
+// the game's own padding multiplier for attack sets (_ATK_FRAME_SCALE): a padded set's small body is undone here at draw time
+const ATK = {}; { const i = game.indexOf('const _ATK_FRAME_SCALE = Object.assign('); const j = game.indexOf('});', i); for (const m of game.slice(i, j).matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*):\s*([\d.]+)/mg)) ATK[m[1]] = +m[2]; }
 // ---- measurement ------------------------------------------------------------------------------------------
 async function box(file) {
   const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -69,19 +71,22 @@ for (const s of sets) {
 for (const id of Object.keys(byType)) {
   const t = byType[id]; const idle = t.idle && t.idle.frames.filter((f) => f && !f.err && !f.empty);
   if (!idle || idle.length < 3) continue;
+  // in play every frame is scaled so its CANVAS height fills the draw box, so the body on screen is the content's
+  // share of its canvas, times the state's calib scale, times (for attack) the game's padding multiplier
   const idleS = (CALIB[t.idle.key] && CALIB[t.idle.key].idle && CALIB[t.idle.key].idle.s) || 1;
-  const im = median(idle.map((f) => f.h)) * idleS, iw = median(idle.map((f) => f.w)) * idleS;
+  const im = median(idle.map((f) => f.h / f.H)) * idleS, iw = median(idle.map((f) => f.w / f.W)) * idleS;
   for (const st of ['walk', 'attack']) {
     const s = t[st]; if (!s) continue; const g = s.frames.filter((f) => f && !f.err && !f.empty); if (g.length < 3) continue;
     const fs = (CALIB[s.key] && CALIB[s.key][st] && Array.isArray(CALIB[s.key][st].fs)) ? CALIB[s.key][st].fs : null; const sc = (CALIB[s.key] && CALIB[s.key][st] && CALIB[s.key][st].s) || 1;
-    const hs = g.map((f) => f.h * (fs ? (fs[s.frames.indexOf(f)] || 1) : 1)).sort((a, b) => a - b);
+    const atk = (st === 'attack' && ATK[s.key]) || 1;
+    const hs = g.map((f) => (f.h / f.H) * (fs ? (fs[s.frames.indexOf(f)] || 1) : 1)).sort((a, b) => a - b);
     // the body, not the pose: attack frames carry slashes and flares that make the content taller, so the
     // three smallest frames stand for the body (a state whose smallest frames are the idle's size is fine)
-    const body = median(hs.slice(0, 3)) * sc, all = median(hs) * sc; const r = body / im, rAll = all / im;
-    if (r < 0.75 || r > 1.25) flag(2, 'state-size', s, `${st} body height is ${(r * 100).toFixed(0)}% of the idle's (state median ${(rAll * 100).toFixed(0)}%; calib s ${sc}${idleS !== 1 ? ', idle s ' + idleS : ''}${fs ? ', per-frame fs' : ''}) -> calib s ${(sc / r).toFixed(2)} would match`, { ratio: +r.toFixed(2), suggestS: +(sc / r).toFixed(2) });
+    const body = median(hs.slice(0, 3)) * sc * atk, all = median(hs) * sc * atk; const r = body / im, rAll = all / im;
+    if (r < 0.75 || r > 1.25) flag(2, 'state-size', s, `${st} body height is ${(r * 100).toFixed(0)}% of the idle's in play (state median ${(rAll * 100).toFixed(0)}%; calib s ${sc}${atk !== 1 ? ', padding multiplier ' + atk : ''}${idleS !== 1 ? ', idle s ' + idleS : ''}${fs ? ', per-frame fs' : ''})${atk !== 1 || sc !== 1 ? '' : ' -> calib s ' + (1 / r).toFixed(2) + ' would match'}`, { ratio: +r.toFixed(2) });
   }
   const key = id.split(':')[1]; const b = BOX[key];
-  if (b && b.w > 0 && b.h > 0 && t.idle) { const ar = (iw / im) / (b.w / b.h); if (ar > 2.2 || ar < 1 / 2.2) flag(1, 'box-aspect', t.idle, `idle art aspect ${(iw / im).toFixed(2)} vs box aspect ${(b.w / b.h).toFixed(2)} (w ${b.w} h ${b.h}): ${ar > 1 ? 'much wider' : 'much taller'} than its box`, { ar: +ar.toFixed(2) }); }
+  if (b && b.w > 0 && b.h > 0 && t.idle) { const ipw = median(idle.map((f) => f.w)), iph = median(idle.map((f) => f.h)); const ar = (ipw / iph) / (b.w / b.h); if (ar > 2.2 || ar < 1 / 2.2) flag(1, 'box-aspect', t.idle, `idle art aspect ${(ipw / iph).toFixed(2)} vs box aspect ${(b.w / b.h).toFixed(2)} (w ${b.w} h ${b.h}): ${ar > 1 ? 'much wider' : 'much taller'} than its box`, { ar: +ar.toFixed(2) }); }
   const counts = ['idle', 'walk', 'attack'].map((st) => t[st] ? t[st].files.length : 0);
   if (id.startsWith('monsters:') && counts.some((c) => c > 0) && (counts[0] === 0 || counts[1] === 0 || counts[2] === 0)) flag(1, 'incomplete', t.idle || t.walk || t.attack, `idle/walk/attack frames ${counts.join('/')}`);
 }

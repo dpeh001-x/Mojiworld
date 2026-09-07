@@ -804,7 +804,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0
     },
     "attack": {
-      "s": 2.9,
+      "s": 1.26,
       "dx": 0,
       "dy": 0,
       "ft": [
@@ -1279,13 +1279,8 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_cancer": {
-    "walk": {
-      "s": 1.37,
-      "dx": 0,
-      "dy": 0
-    },
     "attack": {
-      "s": 1.43,
+      "s": 1,
       "dx": 0,
       "dy": 0,
       "ft": [
@@ -1687,7 +1682,7 @@ window.LX_ANIM_CALIB = {
   },
   "conductorMech": {
     "attack": {
-      "s": 1.69,
+      "s": 1,
       "dx": 0,
       "dy": 0,
       "ft": [
@@ -1785,7 +1780,7 @@ window.LX_ANIM_CALIB = {
   },
   "echoKnight": {
     "attack": {
-      "s": 2.11,
+      "s": 1,
       "dx": 0,
       "dy": 0,
       "ft": [
@@ -2171,7 +2166,7 @@ window.LX_ANIM_CALIB = {
   },
   "ossuaryTyrant": {
     "attack": {
-      "s": 1.4,
+      "s": 1,
       "dx": 0,
       "dy": 0,
       "ft": [
@@ -2189,7 +2184,7 @@ window.LX_ANIM_CALIB = {
   },
   "pathsBane": {
     "attack": {
-      "s": 3.42,
+      "s": 1,
       "dx": 0,
       "dy": 0,
       "ft": [
@@ -2716,7 +2711,7 @@ window.LX_ANIM_CALIB = {
   },
   "tombKeeper": {
     "attack": {
-      "s": 2.29,
+      "s": 1,
       "dx": 0,
       "dy": 0,
       "ft": [
