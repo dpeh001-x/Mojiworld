@@ -24,7 +24,7 @@ try {
     spawnMonster(player.x + 220, player.y, 'kingKrook', true); const m = game.monsters.filter((x) => x && x.type === 'kingKrook').pop(); if (!m) return Object.assign(o, { spawnErr: 'no boss' });
     m.currentHp = m.maxHp; m.evasion = 0; game.camera.x = Math.max(0, m.x + m.w / 2 - W / 2); m._dying = false;   // evasion pinned: King Krook rolls 130 evasion, which ate a hit and made this flaky
     const img = o.hasImg ? LX_FX.boss_shield : null;
-    const capture = () => { const calls = []; const proto = CanvasRenderingContext2D.prototype; const orig = proto.drawImage; proto.drawImage = function (im, ...a) { if (im === img) calls.push({ alpha: +this.globalAlpha.toFixed(3), x: a[0], y: a[1], w: a[2], h: a[3] }); return orig.apply(this, [im, ...a]); }; try { drawMonster(m); } catch (e) { calls.push({ err: String(e && e.message) }); } finally { proto.drawImage = orig; } return calls; };
+    const capture = () => { const calls = []; const proto = CanvasRenderingContext2D.prototype; const orig = proto.drawImage; proto.drawImage = function (im, ...a) { if ((im === img || (im && im._lxSrc === img)) && this === ctx) calls.push({ alpha: +this.globalAlpha.toFixed(3), x: a[0], y: a[1], w: a[2], h: a[3] }); return orig.apply(this, [im, ...a]); }; /* v0.30.405: the shield may be drawn from its pinned bitmap */ try { drawMonster(m); } catch (e) { calls.push({ err: String(e && e.message) }); } finally { proto.drawImage = orig; } return calls; };
     // warded, mid-ward: one shield draw, centred on the boss, boss-sized, translucent
     m._wardUntil = (game.time | 0) + 90; const mid = capture();
     // v0.30.390 centres the shield on the sprite the boss actually blitted (recorded by the sprite path) when that record is from this frame, else on the box

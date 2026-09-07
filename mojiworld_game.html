@@ -10128,7 +10128,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.404';
+const GAME_VERSION = 'v0.30.405';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13905,7 +13905,7 @@ function _lxShrinkFrames(frames, baseLogical) {
   const t = (typeof game !== 'undefined' && game) ? game.time : 0;
   if (t !== _lxShrinkStamp) { _lxShrinkStamp = t; _lxShrinkUsed = 0; }
   const canAsync = (typeof createImageBitmap === 'function');
-  let pending = false;
+  let pending = false, _lxPinsThisCall = 0;   // v0.30.405
   for (let i = 0; i < frames.length; i++) {
     const im = frames[i];
     if (!im) { pending = true; continue; }
@@ -13943,7 +13943,13 @@ function _lxShrinkFrames(frames, baseLogical) {
       if (im.complete) im._lxNoShrink = true; else pending = true;
       continue;
     }
-    if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) { im._lxNoShrink = true; im._lxNoShrinkCap = maxLong; continue; }
+    if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) {
+      // v0.30.405 — pinned, not raw; a few a call, and a frame that missed this call's budget is NOT marked, so the next call reaches it
+      if (_lxPinsThisCall >= 4) { pending = true; continue; }
+      im._lxNoShrink = true; im._lxNoShrinkCap = maxLong;
+      const _pv = _lxPinned(im); if (_pv !== im) { frames[i] = _pv; frames._readyN = 0; _lxPinsThisCall++; }
+      continue;
+    }
     // v0.29.742 — another array already paid for this source's bake; reuse it
     // when it fits this caller's cap instead of decoding the giant original
     // again. (A smaller cap still re-bakes — right-sizing is preserved.)
@@ -59603,6 +59609,9 @@ function _lxSpritePillTick() {
   }
   const t = window._lxSpriteTotal || 0;
   const d = window._lxSpriteDone || 0;
+  const _pnow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (t > 0 && d < t && _pnow - (window._lxPillAt || 0) < 250) return;   // v0.30.405 — at most four writes a second while sprites stream (the streamer ticked this per image: ~80 DOM writes a second mid-fight, each a style + layout + paint)
+  window._lxPillAt = _pnow;
   if (t > 0 && d < t) {
     const pct = Math.max(1, Math.round((d / t) * 100));
     p.textContent = '⏳ Loading sprites ' + d + '/' + t + ' · ' + pct + '%';
@@ -124213,7 +124222,7 @@ function _lxRecordBossRect(m, tr0, x0, y0, w, h) {
   } catch (e) {}
 }
 function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
-  const _lxTr0 = (typeof ctx.getTransform === 'function') ? ctx.getTransform() : null;   // v0.30.390 — the caller's space
+  const _lxTr0 = (typeof ctx.getTransform === 'function' && ((m._wardUntil | 0) > (game.time | 0) || (typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)))) ? ctx.getTransform() : null;   // v0.30.390 — the caller's space · v0.30.405 — only while the ward or its break window needs the rect (five Web API objects a boss draw otherwise)
   // v0.29.136 — King Krook "ROYAL CHARGE" (was the turtle SHELL CYCLONE).
   // King Krook is a crocodile king, not a turtle, so his phase-2 dash no longer
   // tucks into a shell. The attack now falls through to his own sprite, which
@@ -125196,6 +125205,51 @@ function _lxPlainOf(img, pw, ph) {
   }
   return _pc;
 }
+// v0.30.405 — DECODE PINNING (per user: "reducing lag of the game"; a Chrome trace
+// of the combat scene). drawImage from an HTMLImageElement goes through Chrome's
+// decoded-image cache, and that cache keeps no promise: on a dense fight — dozens
+// of 768-1024 px frames a second from boss idle sets, VFX loops, the boss bar
+// art, the ward shield, swing effects — it thrashes and RE-DECODES the same webp
+// every frame. The trace put 7.3 s of ImageDecodeTask inside an 8 s fight, and
+// every frame over 20 ms was one of those decodes. The monster sets were already
+// baked to bitmaps by _lxShrinkFrames, but only frames LARGER than the cap; the
+// rest stayed raw <img>. A canvas copy is a bitmap forever: _lxPinned makes one
+// per image, lazily, at native size, and carries the image's identity fields
+// (complete / naturalWidth / naturalHeight / src and the draw hints) so every
+// _lxFxReady-style check and every sizing path sees the same thing it saw before.
+const _lxPinCache = new WeakMap();
+const _LX_PIN_MAX_PX = 2200000;   // leave the rare huge sheets to the cache
+let _lxPinCount = 0, _lxPinPx = 0;   // diagnostics: how many pins exist and how many pixels they hold
+function _lxPinned(img) {
+  if (!img || img.tagName !== 'IMG' || !img.complete || !(img.naturalWidth > 0)) return img;
+  let cv = _lxPinCache.get(img); if (cv) return cv;
+  const w = img.naturalWidth, h = img.naturalHeight;
+  if (w * h > _LX_PIN_MAX_PX) return img;
+  try {
+    cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(img, 0, 0);
+    _lxPinCount++; _lxPinPx += w * h;
+  } catch (e) { return img; }
+  cv.complete = true; cv.naturalWidth = w; cv.naturalHeight = h; cv.src = img.src; cv._lxSrc = img;
+  for (const k of ['_lxIsFlash', '_lxDrawW', '_lxDrawH', '_lxNW', '_lxNH', '_lxFi', '_lxNoShrink', '_lxNoShrinkCap']) if (img[k] !== undefined) cv[k] = img[k];
+  _lxPinCache.set(img, cv);
+  return cv;
+}
+// The single choke point every draw site shares: a drawImage of a decoded <img>
+// onto the GAME canvas draws its pin instead. Offscreen contexts (the bakes, the
+// tints, the pin itself) are left alone, so a 1024 px boss frame that is about
+// to be baked down to its cap is not first pinned at full size for nothing.
+(function () {
+  try {
+    const P = CanvasRenderingContext2D.prototype, o = P.drawImage; if (!o || o._lxPinWrap) return;
+    window._lxPinStats = { pinned: 0, raw: 0 };   // diagnostics: game-canvas draws served from a pin vs. still raw (too big to pin)
+    const w = function (im, ...a) {
+      if (im && im.tagName === 'IMG' && typeof ctx !== 'undefined' && this === ctx && im.complete && im.naturalWidth > 0) { const p = _lxPinned(im); if (p !== im) { im = p; window._lxPinStats.pinned++; } else window._lxPinStats.raw++; }
+      return o.apply(this, [im, ...a]);
+    };
+    w._lxPinWrap = true; P.drawImage = w;
+  } catch (e) {}
+})();
 function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // v0.30.65 perf — COMBAT LAG. The tint bake mints a NEW canvas per
   // (sprite frame x filter) and the probe below ran on that copy, so every one
@@ -125214,6 +125268,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     const _tb = _lxTintBake(img, _lxMobTintFilter);
     if (_tb) img = _tb;
   }
+  img = _lxPinned(img);   // v0.30.405 — a bitmap, never a re-decode
   if (dw == null) { dw = img._lxDrawW || img.width; dh = img._lxDrawH || img.height; }   // v0.30.255 — device-res bakes carry their logical size
   // v0.30.261 perf — FLASH FRAMES DRAW DIRECT. The feather cache is keyed on
   // the source canvas, and a hit-flash tint bake is a fresh canvas per (frame,
@@ -126102,7 +126157,7 @@ function _drawBossWardShield(m, sx, sy) {
   const cx = _r ? (_r.x + _r.w / 2) : (sx + (m.w || 0) / 2), cy = _r ? (_r.y + _r.h / 2) : (sy + (m.h || 0) / 2);
   ctx.save();
   ctx.globalAlpha = 0.55 * fade;
-  ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
+  ctx.drawImage(_lxPinned(img), cx - size / 2, cy - size / 2, size, size);   // v0.30.405 — pinned
   // v0.30.395 — the break gauge under the shield: violet while filling, pink and labelled from 85%
   const _g = Math.max(0, Math.min(1, m._wardGauge || 0));
   const _gw = Math.max(48, size * 0.5), _gh = 6, _gx = cx - _gw / 2, _gy = cy + size / 2 - 10;
@@ -126129,7 +126184,7 @@ function _drawBossWardBreak(m, sx, sy) {
       ctx.save();
       ctx.translate(cx + dx * (half / 2 + k * 70), cy + dy * (half / 2 + k * 50) + k * k * 40);
       ctx.rotate(dx * dy * k * 0.9);
-      ctx.drawImage(img, (q % 2) * sw, (q < 2 ? 0 : sh), sw, sh, -half / 2, -half / 2, half, half);
+      ctx.drawImage(_lxPinned(img), (q % 2) * sw, (q < 2 ? 0 : sh), sw, sh, -half / 2, -half / 2, half, half);   // v0.30.405 — pinned
       ctx.restore();
     }
   }
@@ -134299,7 +134354,7 @@ function drawProjectiles() {
         // hue-rotate could only approximate from one teal crescent. Anything
         // without authored art falls back to the shared crescent, still tinted.
         const _swingOwn = p._swingType && LX_FX['swing_' + p._swingType];
-        const _swingImg = _lxFxReady(_swingOwn) ? _swingOwn : _lxTintedFx(LX_FX.fx_heavyswing, p.color);
+        const _swingImg = _lxFxReady(_swingOwn) ? _lxPinned(_swingOwn) : _lxTintedFx(LX_FX.fx_heavyswing, p.color);   // v0.30.405 — pinned
         if (p.vx < 0) {
           ctx.translate(sx + p.w + _ox, p.y - _oy);
           ctx.scale(-1, 1);
@@ -137575,9 +137630,10 @@ function _updateBuffRow() {
       if (_ico) _applySkillIcon(_ico, a.meta.skill || a.meta.key, a.meta.icon);
     }
     const bar = _pill.lastElementChild;
-    if (bar && bar._lastPct !== pct) {
-      bar._lastPct = pct;
-      bar.style.width = pct.toFixed(1) + '%';
+    const _pq = Math.round(pct / 2) * 2;   // v0.30.405 — 2% steps: the CSS transition smooths it, and the DOM stops seeing a write every frame
+    if (bar && bar._lastPct !== _pq) {
+      bar._lastPct = _pq;
+      bar.style.width = _pq + '%';
     }
     // v0.29.5xx — SECONDS REMAINING + EXPIRY FADE (per user "show a fade out
     // timer of the timespan left"). Both writes are change-gated like the bar
@@ -137906,7 +137962,7 @@ function updateUI() {
   // delta. Cap at 0 so it doesn't overshoot negative. See §2.3.
   if (d['combo-timer-fill']) {
     const _fillPct = game.combo > 0 ? Math.max(0, Math.min(100, (game.comboTimer / 2600) * 100)) : 0;
-    _uiSetStyle(d['combo-timer-fill'], 'width', _fillPct.toFixed(1) + '%');
+    _uiSetStyle(d['combo-timer-fill'], 'width', (Math.round(_fillPct / 4) * 4) + '%');   // v0.30.405 — 4% steps under the CSS transition (was a fresh width every frame)
   }
 
   // v0.25.874 — Render the buff icon row from player.buffs. Each
@@ -139048,8 +139104,8 @@ function drawSuperBossBar() {
   // the plate's hard border rectangles are gone — the frame IS the border.
   // Until decode, the original procedural plate draws unchanged.
   const hyper = !!sb.hyperBoss;
-  const _bbFrame = (typeof LX_FX !== 'undefined') && LX_FX.ui_bossbar_frame;
-  const _bbFill  = (typeof LX_FX !== 'undefined') && LX_FX.ui_bossbar_fill;
+  const _bbFrame = _lxPinned((typeof LX_FX !== 'undefined') && LX_FX.ui_bossbar_frame);   // v0.30.405 — pinned: this drew a raw 1024-wide webp twice a frame
+  const _bbFill  = _lxPinned((typeof LX_FX !== 'undefined') && LX_FX.ui_bossbar_fill);
   const _bbArt = _lxFxReady(_bbFrame) && _lxFxReady(_bbFill);
   if (_bbArt) {
     // soft smoked backing keeps the name + numbers readable over any arena;
@@ -142394,6 +142450,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         const _st = document.getElementById('loading-status');
         const _paint = (n) => {
           if (!_st) return;
+          const _pn = performance.now(); if (n > 0 && _pn - (_st._lxPaintAt || 0) < 250) return; _st._lxPaintAt = _pn;   // v0.30.405 — four writes a second, not thirty
           const _pct = Math.round(((_total - n) / Math.max(1, _total)) * 100);
           _st.innerHTML = '<span class="pct">' + _pct + '%</span> · <span class="pulse">Finishing sprites… ' + (_total - n) + '/' + _total + '</span>';
         };
@@ -144863,7 +144920,7 @@ function _lxReadyGate(mapId, opts) {
   const id = mapId || (typeof game !== 'undefined' && game && game.currentMap) || 'town';
   const CAP = opts.cap || 20000;
   const st = document.getElementById('loading-status');
-  const paint = (pct, msg) => { try { if (st) st.innerHTML = '<span class="pct">' + Math.round(pct) + '%</span> · <span class="pulse">' + msg + '</span>'; } catch (e) {} };
+  const paint = (pct, msg) => { try { const _pn = performance.now(); if (pct < 100 && st && _pn - (st._lxPaintAt || 0) < 250) return; if (st) st._lxPaintAt = _pn; /* v0.30.405 — four writes a second */ if (st) st.innerHTML = '<span class="pct">' + Math.round(pct) + '%</span> · <span class="pulse">' + msg + '</span>'; } catch (e) {} };
   const raf = () => new Promise((r) => requestAnimationFrame(r));
   const capped = (p, ms) => Promise.race([Promise.resolve(p), new Promise((r) => setTimeout(r, ms))]);
   const t0 = Date.now();
