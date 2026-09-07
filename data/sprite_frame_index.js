@@ -588,7 +588,8 @@ window.LX_SPRITE_FRAME_INDEX = {
    "quake_plume": 9,
    "quake_ring": 9,
    "scorpio_venompool": 9,
-   "shock_ring": 9
+   "shock_ring": 9,
+   "void_tear": 9
   },
   "projectiles/anim": {
    "bolt": 9,
