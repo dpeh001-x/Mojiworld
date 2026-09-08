@@ -2650,7 +2650,9 @@
 
   #minimap {
     position: absolute; bottom: 10px; right: 10px;
-    width: 220px; height: 74px;
+    /* v0.30.452 — auto height so a two-line map name grows the panel instead of pushing the canvas
+       out of it; min-height keeps the familiar size for every one-line title. */
+    width: 220px; height: auto; min-height: 74px;
     background: rgba(10,10,30,0.72);
     border: 1px solid #6688bb; border-radius: 6px;
     padding: 6px;
@@ -2663,7 +2665,9 @@
      screen; CSS pins the on-screen size so the layout is unchanged. */
   #minimap-canvas { display: block; background: rgba(0,0,0,0.4); border-radius: 3px; width: 208px; height: 50px; }
   #taxi-btn {
-    position: absolute; bottom: 92px; right: 10px;
+    /* v0.30.452 — was bottom:92px, i.e. 11px above the minimap. The panel now grows upward on
+       two-line map names, so this moves up by that line's height to keep the gap. */
+    position: absolute; bottom: 112px; right: 10px;
     padding: 5px 10px; background: linear-gradient(135deg, #447799, #335577);
     border: 1px solid #88bbdd; border-radius: 5px;
     color: #fff; font-size: 11px; font-weight: bold; cursor: pointer;
@@ -10217,7 +10221,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.451';
+const GAME_VERSION = 'v0.30.452';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -102331,7 +102335,35 @@ function drawMinimap() {
   // historical default) for normal flat maps.
   const worldH = game.mapData.worldHeight || 540;
   const scaleX = mw / worldW;
-  const scaleY = mh / worldH;
+  // v0.30.452 — TALL MAPS SCROLL INSTEAD OF SQUASHING (per user: the minimap "needs to be readjusted
+  // to look less stretched at the width", and "you dont have to try fit everything in a tall map,
+  // it can be move as the players moves upwards").
+  //
+  // scaleY was mh/worldH unconditionally — an INDEPENDENT vertical scale. The canvas is 416x100
+  // (4.16:1), so a map much taller than that was compressed vertically and therefore read as
+  // stretched horizontally against its own geometry: Clockwork Spire (720x4700) drew its world
+  // 27x wider than tall, Frozen Peak (800x14400) 75x. Forty-one platforms collapsed into 100px of
+  // canvas and merged into one horizontal smear.
+  //
+  // Fitting the whole tower was never going to work — at a true 1:1 scale a 4700px tower is a
+  // 15px-wide hairline. So: cap how far the vertical scale may fall behind the horizontal one, and
+  // let what no longer fits SCROLL with the player. Wide and ordinary maps are untouched, because
+  // for them mh/worldH is already the larger term and Math.max keeps it.
+  //
+  // The panel does NOT grow to make room: measured on this HUD there are only ~11px between the
+  // minimap's top edge and the taxi button sitting above it, so a taller box would collide with it.
+  // Everything stays inside the canvas, which clips.
+  const MM_MAX_STRETCH = 3;                        // most the world may look wider than it is tall
+  const scaleY = Math.max(mh / worldH, scaleX / MM_MAX_STRETCH);
+  const _mmWinH = mh / scaleY;                     // world px the window shows
+  const _mmScroll = _mmWinH < worldH - 0.5;        // false on every map that already fits
+  // Centre the window on the player, clamped so it never runs past either end of the world.
+  const _mmTopW = _mmScroll
+    ? Math.max(0, Math.min(worldH - _mmWinH, ((typeof player !== 'undefined' && player) ? player.y + player.h / 2 : 0) - _mmWinH / 2))
+    : 0;
+  const _mmOffY = _mmTopW * scaleY;
+  const mmY = (wy) => wy * scaleY - _mmOffY;       // world Y -> canvas Y, the ONE mapping
+  const _mmOn = (cy, pad) => cy > -(pad || 4 * S) && cy < mh + (pad || 4 * S);
   const isVerticalTower = !!game.mapData.isVerticalTower;
   // Ground band — v0.26.436: anchor to the ACTUAL (scaled) ground y instead
   // of a fixed bottom rail. On tall maps (block-land's 940 px) the old fixed
@@ -102345,17 +102377,24 @@ function drawMinimap() {
   const _mmMd = game.mapData;
   if (_mmMd._mmGroundP === undefined) _mmMd._mmGroundP = (_mmMd.platforms || []).find(p => p.type === 'ground') || null;
   const _gp = _mmMd._mmGroundP;
-  const _gMy = _gp ? Math.min(mh - 2 * S, _gp.y * scaleY) : (mh - 10 * S);
-  mctx.fillStyle = 'rgba(80,120,80,0.5)';
-  mctx.fillRect(0, _gMy, mw, mh - _gMy);
+  // v0.30.452 — when the window is scrolled up a tower the ground is far below it; drawing the
+  // clamped band anyway would paint a permanent green rail at the foot of the map that is not
+  // there. Only draw it when the ground is actually inside (or just under) the window.
+  const _gCy = _gp ? mmY(_gp.y) : (mh - 10 * S);
+  if (_gCy < mh) {
+    const _gMy = Math.max(0, Math.min(mh - 2 * S, _gCy));
+    mctx.fillStyle = 'rgba(80,120,80,0.5)';
+    mctx.fillRect(0, _gMy, mw, mh - _gMy);
+  }
   // Platforms — v0.26.436: brighter (0.95) so dense climb rows are legible
   // even when many tiers squash into the 50 px minimap height.
   mctx.fillStyle = 'rgba(185,210,240,0.95)';
   for (const p of game.mapData.platforms || []) {
     if (p.type === 'ground') continue;
+    const py = mmY(p.y);
+    if (!_mmOn(py)) continue;   // v0.30.452 — off-window rows cost nothing on a 201-platform tower
     const px = p.x * scaleX;
     const pw = Math.max(2 * S, p.w * scaleX);
-    const py = p.y * scaleY;
     mctx.fillRect(px, py, pw, 1.5 * S);
   }
   // v0.29.x — SYMBOL LANGUAGE (per user: "add further polish and finishing on
@@ -102370,7 +102409,7 @@ function drawMinimap() {
   // Portals — glow under, arch over.
   for (const po of game.mapData.portals || []) {
     const px = po.x * scaleX;
-    const py = (typeof po.y === 'number') ? po.y * scaleY : (mh - 7 * S);
+    const py = (typeof po.y === 'number') ? mmY(po.y) : (mh - 7 * S);
     mctx.fillStyle = 'rgba(255,204,68,' + (0.10 + _mmPulseA * 0.14).toFixed(3) + ')';
     mctx.beginPath(); mctx.arc(px, py, 7 * S, 0, Math.PI * 2); mctx.fill();
     mctx.beginPath();
@@ -102397,7 +102436,7 @@ function drawMinimap() {
   // NPCs — hollow teal rings, dark under-ring for contrast.
   for (const n of game.npcs || []) {
     const nx = (n.x + (n.w || 40) / 2) * scaleX;
-    const ny = (n.y || 436) * scaleY;
+    const ny = mmY(n.y || 436);
     mctx.lineWidth = 2 * S;
     mctx.strokeStyle = 'rgba(0,20,26,0.85)';
     mctx.beginPath(); mctx.arc(nx, ny, 2.2 * S, 0, Math.PI * 2); mctx.stroke();
@@ -102409,7 +102448,7 @@ function drawMinimap() {
   for (const m of game.monsters) {
     if (m.currentHp <= 0) continue;
     const mx = (m.x + m.w / 2) * scaleX;
-    const my = m.y * scaleY;
+    const my = mmY(m.y);
     if (m.isBoss) {
       const r = (3 + _mmPulseA * 0.7) * S;
       mctx.beginPath();
@@ -102438,7 +102477,7 @@ function drawMinimap() {
   // + portals + platforms). Pulse phase from game.time keeps the
   // halo gentle (~30 % alpha swing) so it's reassuring, not noisy.
   const px = (player.x + player.w/2) * scaleX;
-  const py = player.y * scaleY;
+  const py = mmY(player.y);
   const _mmPulse = _mmPulseA;
   // Outer halo — soft pulsing aura
   mctx.fillStyle = 'rgba(120, 255, 150, ' + (0.18 + _mmPulse * 0.20).toFixed(3) + ')';
@@ -102467,7 +102506,7 @@ function drawMinimap() {
   mctx.lineWidth = 1 * S;
   if (isVerticalTower) {
     const camY = (game.camera && game.camera.y) || 0;
-    mctx.strokeRect(game.camera.x * scaleX, camY * scaleY, W * scaleX, H * scaleY);
+    mctx.strokeRect(game.camera.x * scaleX, mmY(camY), W * scaleX, H * scaleY);
   } else {
     mctx.strokeRect(game.camera.x * scaleX, 0, W * scaleX, mh);
   }
