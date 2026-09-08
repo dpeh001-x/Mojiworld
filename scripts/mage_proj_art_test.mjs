@@ -29,6 +29,8 @@
 //
 //   node scripts/mage_proj_art_test.mjs [build.html]
 // ============================================================================
+// CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
+// multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +38,7 @@ import sharp from 'sharp';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const file = process.argv[2] || join(root, 'mojiworld_game.html');
-const s = readFileSync(file, 'utf8');
+const s = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 const DIR = join(root, 'Sprites', 'projectiles');
 const ALPHA = 12;
 
@@ -103,13 +105,17 @@ async function loopMotion(key) {
 }
 
 // ---- wiring ----------------------------------------------------------------
-ok('fire is registered as an animated projectile', /fire:\s*'p_fireball',/.test(s));
-ok('ice is registered as an animated projectile', /ice:\s*'p_icespike',/.test(s));
-ok('both keys are in _PROJ_ANIM_KEYS', /'p_fireball', 'p_icespike',/.test(s));
-ok('copies of a loop are staggered, not in unison',
-  /if \(_pAnimKey && p\._animOff === undefined\) p\._animOff = Math\.random\(\) \* 600;/.test(s)
-  && /_projAnimFrame\(_pAnimKey, p\._animOff\)/.test(s),
-  'one shared clock makes a screen of fireballs flare as a single object');
+// The mage projectiles are registered in LX_PLAYER_PROJ as sprite files (spun at draw time,
+// see the v0.26.173 rotation note) rather than as _PROJ_ANIM_KEYS loops. The art is still
+// wired; the keys are the projectile names.
+ok('fire is registered with its projectile sprite', /fireball:\s*'p_fireball\.webp',/.test(s));
+ok('ice is registered with its projectile sprite', /icespike:\s*'p_icespike\.webp',/.test(s));
+ok('both sprites ship on disk', existsSync(join(root, 'Sprites/projectiles/p_fireball.webp')) && existsSync(join(root, 'Sprites/projectiles/p_icespike.webp')));
+// RETIRED (2026-09-08): the per-copy animation offset it guarded is gone with the loops -
+// `_animOff` has zero occurrences in the game. Fire and ice are single sprites spun at draw
+// time, so there is no shared clock left to fall into unison. Kept as a note rather than a
+// deleted line so the reason survives: the defect it protected against cannot recur while
+// these projectiles are static.
 const idx = existsSync(join(root, 'data', 'sprite_frame_index.js'))
   ? readFileSync(join(root, 'data', 'sprite_frame_index.js'), 'utf8') : '';
 ok('the frame index knows both loops', /"p_fireball":\s*9/.test(idx) && /"p_icespike":\s*9/.test(idx));
@@ -129,8 +135,9 @@ if (existsSync(join(DIR, 'p_icespike.webp'))) {
   ok('ice spike is a shard, not a blob', m.aspect >= 1.8, `aspect ${m.aspect.toFixed(2)} (was 0.96)`);
   ok('ice spike points RIGHT', m.taper >= 1.3, `taper ${m.taper.toFixed(2)} (was 0.96)`);
   ok('the orient render is still what draws it', /angle = Math\.atan2\(p\.vy, p\.vx\);/.test(s));
-  ok('ice scale re-tuned for the new shape', /\(p\.skill === 'ice'\)  \? 3\.2/.test(s),
-    'the 2.4 multiplier was fitted to a square blob; a shard at the same number draws a third as tall');
+  // RETIRED (2026-09-08): the `(p.skill === 'ice') ? 3.2` draw multiplier it pinned no longer
+  // exists - the ice projectile is sized from its own sprite now. The shape checks above still
+  // guard what mattered: that the shard is a shard.
 } else { ok('p_icespike.webp on disk', false); }
 
 // ---- the loops -------------------------------------------------------------

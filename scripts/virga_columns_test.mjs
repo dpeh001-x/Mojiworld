@@ -18,13 +18,15 @@
 //
 //   node scripts/virga_columns_test.mjs [build.html]
 // ============================================================================
+// CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
+// multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const file = process.argv[2] || join(root, 'mojiworld_game.html');
-const s = readFileSync(file, 'utf8');
+const s = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -57,8 +59,14 @@ ok('adjacent pillars leave a standable gap', gap >= 120,
 
 // ---- significant damage, and the 1-HP option -------------------------------
 const dmgMul = Number((T.match(/dmgMul:\s*([\d.]+)/) || [])[1] || 0);
-ok('hits far harder than the generic column (1.25x)', dmgMul >= 2, `dmgMul=${dmgMul}`);
-ok('radiance can leave the player on 1 HP', /radiance:\s*\{[^}]*frac:\s*0\.99/.test(T));
+// v0.30.332 tune per user ('virga feels very difficult'): dmgMul 2.4 -> 1.8. The rule is the
+// INTENT - a column strike that outclasses the generic 1.25x column - not the old constant.
+ok('hits far harder than the generic column (1.25x)', dmgMul > 1.25, `dmgMul=${dmgMul}`);
+// v0.30.332 tune per user ("virga feels very difficult"): frac 0.99 -> 0.72 WITH flat:true.
+// Still a huge fractional hit, no longer a near-certain kill; flat is what lets the softer
+// fraction survive _diffDmg instead of being multiplied back into the ceiling.
+ok('radiance is a huge fractional hit, softened from the old 0.99 near-kill',
+  /radiance:\s*\{[^}]*frac:\s*0\.[5-9]/.test(T) && /radiance:\s*\{[^}]*flat:\s*true/.test(T));
 const chance = Number((T.match(/radiance:\s*\{[^}]*chance:\s*([\d.]+)/) || [])[1] || 0);
 ok('radiance is OCCASIONAL, not every hit', chance > 0 && chance <= 0.35, `chance=${chance}`);
 
@@ -68,7 +76,9 @@ ok('the trait handler builds lanes at telegraph time', /m\._columnLanes = _colum
 ok('the strike spawns one pillar per lane', /for \(const _lane of _csLanes\) game\.projectiles\.push\(\{/.test(s));
 ok('every lane is drawn as a danger zone', /for \(const _zl of _zLanes\) out\.push\(\{ kind: 'column'/.test(s));
 ok('the pillar carries its radiance option', /_radiance: cs\.radiance \|\| null/.test(s));
-ok('radiance resolves through the isFrac 99.9% ceiling', /_projLost = \(typeof _diffDmg === 'function'\) \? _diffDmg\(_rg, 0, true\)/.test(s));
+// v0.30.332 inverted this one: flat:true exists precisely to BYPASS the no-level punish that
+// would otherwise multiply any fraction back up into the 99.9% ceiling.
+ok('radiance carries flat:true so the softened fraction is not punished back to the ceiling', /radiance:\s*\{[^}]*flat:\s*true/.test(T));
 ok('radiance respects block / warrior DR / aegis', /_rg = Math\.max\(1, Math\.floor\(_rg \* 0\.3\)\)/.test(s)
   && /_warriorDr\(\)\)\);?\s*\n\s*if \(player\._aegis\) _rg/.test(s.replace(/\r/g, '')));
 ok('the death log names the pillar, not "a stray bolt"', /player\._lastDamageSource = player\._radianceHit \|\|/.test(s));

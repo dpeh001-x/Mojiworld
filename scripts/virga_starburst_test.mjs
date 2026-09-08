@@ -19,6 +19,8 @@
 //
 //   node scripts/virga_starburst_test.mjs [build.html]
 // ============================================================================
+// CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
+// multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +28,7 @@ import sharp from 'sharp';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const file = process.argv[2] || join(root, 'mojiworld_game.html');
-const s = readFileSync(file, 'utf8');
+const s = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {

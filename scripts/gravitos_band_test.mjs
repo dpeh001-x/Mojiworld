@@ -13,12 +13,14 @@
 // _gravHeavyBand / _gravBandClamp are extracted VERBATIM from the game file
 // (a hand-copied duplicate would certify nothing), then driven directly.
 
+// CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
+// multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const src = fs.readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8');
+const src = fs.readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8').replace(/\r\n/g, '\n');
 
 function extract(name) {
   const at = src.indexOf(`\nfunction ${name}(`);

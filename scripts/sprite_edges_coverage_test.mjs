@@ -13,6 +13,8 @@
 //   node scripts/sprite_edges_coverage_test.mjs          # summary + offenders
 //   node scripts/sprite_edges_coverage_test.mjs --list   # every missing key
 // ============================================================================
+// CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
+// multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LIST = process.argv.includes('--list');
 
-const src = readFileSync(join(root, 'data', 'sprite_edges.js'), 'utf8');
+const src = readFileSync(join(root, 'data', 'sprite_edges.js'), 'utf8').replace(/\r\n/g, '\n');
 const T = JSON.parse(src.match(/=\s*(\{[\s\S]*\})\s*;?\s*$/m)[1]);
 
 // The SAME scope the generator uses. A first version of this walked all of

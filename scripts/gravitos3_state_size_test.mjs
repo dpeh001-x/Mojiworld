@@ -21,6 +21,8 @@
 //
 //   node scripts/gravitos3_state_size_test.mjs
 // ============================================================================
+// CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
+// multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import sharp from 'sharp';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -33,7 +35,7 @@ const ALPHA = 12;
 const STRICT = 0.02;
 
 // per-state s from anim_calib.js, read rather than hard-coded
-const calibSrc = readFileSync(join(root, 'data', 'anim_calib.js'), 'utf8');
+const calibSrc = readFileSync(join(root, 'data', 'anim_calib.js'), 'utf8').replace(/\r\n/g, '\n');
 function calibFor(entity, state) {
   const i = calibSrc.indexOf('"' + entity + '": {');
   if (i < 0) return null;

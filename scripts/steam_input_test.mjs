@@ -21,6 +21,8 @@
 // not Valve's SDK. That limit is real and worth stating.
 //
 //   node scripts/steam_input_test.mjs
+// CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
+// multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import { createRequire } from 'node:module';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -47,7 +49,7 @@ const MOCK_CTRL_FNS = ['activateActionSet', 'isDigitalActionPressed', 'getAnalog
   if (!dtsFiles.length) {
     ok('steamworks.js typings are present to check the mock against', false, 'no .d.ts under ' + pkg);
   } else {
-    const txt = dtsFiles.map((f) => readFileSync(f, 'utf8')).join('\n');
+    const txt = dtsFiles.map((f) => readFileSync(f, 'utf8').replace(/\r\n/g, '\n')).join('\n');
     const missing = [...MOCK_INPUT_FNS, ...MOCK_CTRL_FNS].filter((f) => !new RegExp('\\b' + f + '\\s*\\(').test(txt));
     ok('every function this mock fakes really exists in steamworks.js', missing.length === 0,
        missing.length ? ('not in the shipped typings: ' + missing.join(', ')) : 'all ' + (MOCK_INPUT_FNS.length + MOCK_CTRL_FNS.length) + ' present');

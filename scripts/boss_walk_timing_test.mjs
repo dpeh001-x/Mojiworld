@@ -13,6 +13,8 @@
 // poses for ~160ms each and hard-cut between them, and it read as a shuffle
 // backwards. A set with no measurable stride must stay on uniform timing.
 //   node scripts/boss_walk_timing_test.mjs [build.html]
+// CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
+// multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import sharp from 'sharp';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,7 +23,7 @@ const ROOT = 'C:/Users/dpeh0/Mojiworld';
 const DIR = join(ROOT, 'Sprites', 'bosses', 'walk');
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
-const game = readFileSync(join(ROOT, process.argv[2] || 'mojiworld_game.html'), 'utf8');
+const game = readFileSync(join(ROOT, process.argv[2] || 'mojiworld_game.html'), 'utf8').replace(/\r\n/g, '\n');
 const m = game.match(/const _BOSS_WALK_WEIGHTS = (\{.*?\});/s);
 ok('the walk-timing table ships', !!m, '');
 const table = m ? JSON.parse(m[1]) : {};
