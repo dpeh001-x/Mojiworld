@@ -10217,7 +10217,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.450';
+const GAME_VERSION = 'v0.30.451';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12820,6 +12820,7 @@ const _FX_ANIM_KEYS = new Set([
   'arcane_burst',   // v0.29.946 — mage W detonation star (anim/arcane_burst_0..8, ludo.ai via gen_arcane_burst_fx.mjs)
   'arcane_shockwave',   // v0.29.951 — the AoE ring animates too: runes pulse around the band, arcs snap across it
   'quakeRing',          // v0.29.967 — boss quake ground ring: dust rolls outward, plates settle (frameGap 5 at the spawn site)
+  'tg_dash_zodiac_taurus',   // v0.30.451 — Taur's charge lane is the first ANIMATED zone telegraph (see _lxAttackZones' draw)
   'warlord_banner', 'doombringer_apoc', 'crusader_aegis', 'dragoon_skylance',
   'shadowlord_clones', 'shinobi_seal', 'nightreaper_eclipse', 'phantom_voidrift',
   'sage_meteorshower', 'elementalist_cascade', 'soul_vortex', 'hexmaster_grandhex',
@@ -135526,7 +135527,30 @@ function _drawAttackZones() {
     // sprites finish, so in practice the art is ready before the first fight;
     // the descriptors (and the punish rule keyed on them) are computed
     // identically either way.
-    const _img = (z.tg && typeof LX_FX !== 'undefined' && LX_FX[z.tg] && _lxFxReady(LX_FX[z.tg])) ? LX_FX[z.tg] : null;
+    let _img = (z.tg && typeof LX_FX !== 'undefined' && LX_FX[z.tg] && _lxFxReady(LX_FX[z.tg])) ? LX_FX[z.tg] : null;
+    // v0.30.451 — ANIMATED TELEGRAPHS. A key with frames in Sprites/fx/anim/<key>_0..8 plays them here;
+    // every other telegraph keeps its single still image, so this cannot change what a boss without
+    // a frame set draws.
+    //
+    // Cadence is wall-clock (game.time), NOT the windup's z.prog. prog is already spent on the alpha
+    // ramp above, and a lane whose shimmer advanced only with prog would sit frozen whenever the
+    // windup stalls — the shimmer's whole job is to read as LIVE danger while the boss braces.
+    //
+    // The all-ready latch is the v0.29.945 lesson repeated (soul_vortex, "it just keeps shuttering
+    // between 2 sprites"): a per-index fallback flips static/frame/static while the set is part
+    // decoded. Hold the still image until EVERY frame is in, then switch once, monotonically.
+    if (_img && typeof _fxAnimFrames === 'function') {
+      const _tf = _fxAnimFrames(z.tg);
+      if (_tf && _tf.length && !_tf._lxAllReady) {
+        let _allOk = true;
+        for (let _i = 0; _i < _tf.length; _i++) { if (!_lxFxReady(_tf[_i])) { _allOk = false; break; } }
+        if (_allOk) _tf._lxAllReady = true;
+      }
+      if (_tf && _tf.length && _tf._lxAllReady) {
+        const _f = _tf[Math.floor((game.time | 0) / 3) % _tf.length];
+        if (_lxFxReady(_f)) _img = _f;
+      }
+    }
     if (!_img) continue;
     ctx.globalAlpha = z.prog > 0.82 ? 0.97 : (0.30 + z.prog * 0.55);
     if ((z.kind === 'dash' || z.kind === 'swing') && z.dir === 'left') {

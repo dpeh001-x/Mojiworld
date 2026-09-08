@@ -576,6 +576,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "skyhunter_gale": 9,
    "skyhunter_ult": 9,
    "soul_vortex": 16,
+   "tg_dash_zodiac_taurus": 9,
    "warlord_banner": 9,
    "warlord_ult": 9
   },
