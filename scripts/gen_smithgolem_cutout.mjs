@@ -11,8 +11,9 @@
 // identical everywhere by construction.
 //   idle   9f  2% breath about the foot line (game ping-pongs it)
 //   walk   9f  heavy in-place stomp: legs alternate 26px lifts behind the skirt, 8px bob, 2.5deg sway
-//   attack 9f  wind-up over the shoulder (f1-3), SLAM to the floor (f4, held 130ms) with sparks,
-//              settle (f5), recover (f6-8). Body leans about the feet; the hammer pivots at the fist.
+//   attack 9f  wind-up over the shoulder while the body crouches back (f1-3), LUNGE + SLAM to the
+//              floor (f4, held 130ms) with sparks, settle (f5), recoil to rest (f6-8). The whole
+//              golem (legs too) translates and leans about its feet; the hammer pivots at the fist.
 //   node scripts/gen_smithgolem_cutout.mjs            # renders + gates + contact sheet to scripts/_style_pack/smithgolem_cutout/
 //   node scripts/gen_smithgolem_cutout.mjs --install  # writes Sprites/monsters/{idle,walk,attack}/smithgolem_0..8.webp
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
@@ -49,20 +50,36 @@ async function sparks(cx, cy, k) { const lines = []; for (let i = 0; i < 9; i++)
 // ---- deepest on-canvas slam angle: hammer bottom <= FLOOR-6, right edge <= 1000 --------
 // solved under the SLAM frames' own body transforms (lean +6/+5 about the feet drops the fist ~32px)
 const hammerM = (bodyM, swing) => { const f = apply(bodyM, FIST[0], FIST[1]); return mul(about(f[0], f[1], swing), bodyM); };
-const SLAM_BODIES = [about(FEET[0], FEET[1], 6, 1.03, 0.965), about(FEET[0], FEET[1], 5, 1.02, 0.98)];
+const attackBody = (lean, sx, sy, dx) => mul(translate(dx, 0), about(FEET[0], FEET[1], lean, sx, sy));
+// lunge +40 / lean +9: at +55 / +10 the fist sits ~97px further right and the 355px hammer
+// reach leaves the 1280 canvas at every angle that also clears the floor.
+const SLAM_BODIES = [attackBody(9, 1.05, 0.95, 40), attackBody(7, 1.03, 0.965, 36)];   // = the two slam rows below
 const slamOk = (a) => SLAM_BODIES.every((bm) => { const bx = measure(warp(hammer, W, H, hammerM(bm, a + 2)), W, H); return bx.b <= FLOOR - 6 && bx.r <= W - 24; });
-let SLAM = null; for (let a = 40; a <= 150; a += 2) { if (slamOk(a)) SLAM = a; else if (SLAM != null) break; }
+// the passing set is NOT contiguous (shallow angles clip the right edge, deep ones the
+// floor): take the DEEPEST passing angle, never the first run
+let SLAM = null; for (let a = 40; a <= 150; a += 2) if (slamOk(a)) SLAM = a;
+if (process.env.SLAM_DEBUG) for (let a = 40; a <= 150; a += 6) { const bx = measure(warp(hammer, W, H, hammerM(SLAM_BODIES[0], a + 2)), W, H); console.log('a', a, 'bottom', bx.b, 'right', bx.r, (bx.b <= FLOOR - 6 && bx.r <= W - 24) ? 'ok' : (bx.b > FLOOR - 6 ? 'FLOOR' : 'RIGHT')); }
 if (SLAM == null) { console.error('no on-canvas slam angle'); process.exit(2); }
 // ---- frame recipes ---------------------------------------------------------------
 const rec = { idle: [], walk: [], attack: [] };
 for (let i = 0; i < 9; i++) { const t = i / 8; rec.idle.push({ body: about(FEET[0], FEET[1], 0, 1, 1 + 0.02 * Math.sin(Math.PI * t)), swing: 0, legL: LB, legR: RB }); }
 for (let i = 0; i < 9; i++) { const p = 2 * Math.PI * i / 9, s = Math.sin(p);
+  // a foot travels FORWARD (+x, the golem faces right) while lifted and pushes back while
+  // planted: the left leg is airborne for sin>0, where -cos runs -1 -> +1; the right leg
+  // is airborne for sin<0, where +cos runs -1 -> +1. (The first cut had the signs
+  // swapped and moonwalked.)
   rec.walk.push({ body: mul(translate(0, -10 * Math.abs(s)), about(FEET[0], FEET[1], 2.5 * s)), swing: 0,
-    legL: mul(translate(12 * Math.cos(p), -30 * Math.max(0, s)), LB), legR: mul(translate(-12 * Math.cos(p), -30 * Math.max(0, -s)), RB) }); }
+    legL: mul(translate(-16 * Math.cos(p), -30 * Math.max(0, s)), LB), legR: mul(translate(16 * Math.cos(p), -30 * Math.max(0, -s)), RB) }); }
 // apex -72: the raised head sits above the golem's own head and stays VISIBLE in front;
 // at -88 it slid behind the torso and the hammer read as vanished.
-const A = [[0, 0, 1, 1, 0], [-20, -2, 1, 1, 0], [-46, -4, 1, 1, 0], [-72, -6, 1, 1.01, 0], [SLAM, 6, 1.03, 0.965, 1], [SLAM + 2, 5, 1.02, 0.98, 0.55], [35, 2, 1, 1, 0], [8, 0, 1, 1, 0], [0, 0, 1, 1, 0]];
-for (const [swing, lean, sx, sy, sp] of A) rec.attack.push({ body: about(FEET[0], FEET[1], lean, sx, sy), swing, legL: LB, legR: RB, sparks: sp });
+// THE BODY MOVES (per user): wind-up crouches BACK (dx -30, lean -8, 5% squat), the slam
+// LUNGES forward (dx +55, lean +10, squash) with the legs carried along, then recoils.
+// rows: [swing, lean, sx, sy, sparks, dx]
+const A = [[0, 0, 1, 1, 0, 0], [-20, -3, 1, 0.985, 0, -10], [-46, -6, 1.01, 0.965, 0, -22], [-72, -8, 1.03, 0.95, 0, -30],
+  [SLAM, 9, 1.05, 0.95, 1, 40], [SLAM + 2, 7, 1.03, 0.965, 0.55, 36], [35, 4, 1, 0.99, 0, 24], [8, 1, 1, 1, 0, 8], [0, 0, 1, 1, 0, 0]];
+// legs travel and squash with the body but never lean: a lean about the foot-line centre
+// would dip the outer foot below the floor row (measured: bottoms 1015-1023).
+for (const [swing, lean, sx, sy, sp, dx] of A) { const bm = attackBody(lean, sx, sy, dx), lm = attackBody(0, sx, sy, dx); rec.attack.push({ body: bm, swing, legL: mul(lm, LB), legR: mul(lm, RB), sparks: sp }); }
 // ---- render ----------------------------------------------------------------------
 async function render(r) { const out = Buffer.alloc(W * H * 4);
   over(out, warp(legL, W, H, r.legL), W, H); over(out, warp(legR, W, H, r.legR), W, H);
@@ -71,10 +88,13 @@ async function render(r) { const out = Buffer.alloc(W * H * 4);
   return out; }
 const frames = {}; const bad = []; const refH = measure(await render(rec.idle[0]), W, H).stoneH;   // the rest pose, legs included
 for (const st of ['idle', 'walk', 'attack']) { frames[st] = []; for (let i = 0; i < 9; i++) { const buf = await render(rec[st][i]); const m = measure(buf, W, H);
-    const eyes = eyeBlobs(buf, W, m.stoneTop + 40, m.stoneTop + 170, 220 + OX, 620 + OX);   // head columns only: the hammer's lava sits right of 634
+    // head columns only (the hammer's lava sits right of 634 at rest); the window follows the body transform in the attack (lunge + lean carry the head)
+    const hx = [220 + OX, 620 + OX].map((x) => Math.round(apply(rec[st][i].body, x, 507)[0]));
+    const eyes = eyeBlobs(buf, W, m.stoneTop + 40, m.stoneTop + 170, hx[0], hx[1]);
     frames[st].push({ buf, m, eyes }); const tol = st === 'attack' ? 0.08 : 0.04;
     if (m.edge) bad.push(`${st}_${i} edge px ${m.edge}`); if (m.margin < 24) bad.push(`${st}_${i} margin ${m.margin}`); if (m.b !== FLOOR) bad.push(`${st}_${i} ink bottom ${m.b}`);
-    if (Math.abs(m.stoneH / refH - 1) > tol) bad.push(`${st}_${i} body ${m.stoneH} vs ${refH}`); if (st === 'attack' ? eyes < 2 : eyes !== 2) bad.push(`${st}_${i} eyes ${eyes}`); } }
+    // idle/walk: exactly two eyes (a turned pose cannot pass); attack: at least one - the raised hammer crosses the face at the apex
+    if (Math.abs(m.stoneH / refH - 1) > tol) bad.push(`${st}_${i} body ${m.stoneH} vs ${refH}`); if (st === 'attack' ? eyes < 1 : eyes !== 2) bad.push(`${st}_${i} eyes ${eyes}`); } }
 // ---- sheet + report --------------------------------------------------------------
 const TW = 250, TH = 200; const comps = []; for (const [r, st] of ['idle', 'walk', 'attack'].entries()) for (let i = 0; i < 9; i++) comps.push({ input: await sharp(frames[st][i].buf, { raw: { width: W, height: H, channels: 4 } }).resize(TW, TH).png().toBuffer(), left: 4 + i * (TW + 4), top: 4 + r * (TH + 4) });
 await sharp({ create: { width: 9 * (TW + 4) + 4, height: 3 * (TH + 4) + 4, channels: 4, background: { r: 30, g: 34, b: 44, alpha: 1 } } }).composite(comps).png().toFile(path.join(STAGE, 'sheet.png'));

@@ -63,7 +63,10 @@
 // v0.30.435 - v12 -> v13. smithgolem idle/walk/attack_0..8 REPLACED under their own names
 // (cut-out rig of the static sprite, 1280x1024); returning browsers would otherwise mix
 // the old 1024px frames from the v12 generation with the new tables.
-const CACHE = 'mojiworld-assets-v13';
+// v0.30.436 - v13 -> v14. smithgolem idle/walk/attack_0..8 REPLACED under their own names
+// (cut-out rig of the static sprite, 1280x1024); returning browsers would otherwise mix
+// the old 1024px frames from the v13 generation with the new tables.
+const CACHE = 'mojiworld-assets-v14';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
