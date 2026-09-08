@@ -60,7 +60,10 @@
 // v0.30.429 - v11 -> v12. Boss attack art drop REPLACED under existing names
 // (gravitos2soul_2..8, gravitos2punch_4, towerSovereign_6); returning browsers would
 // otherwise serve the old frames from the v11 generation.
-const CACHE = 'mojiworld-assets-v12';
+// v0.30.435 - v12 -> v13. smithgolem idle/walk/attack_0..8 REPLACED under their own names
+// (cut-out rig of the static sprite, 1280x1024); returning browsers would otherwise mix
+// the old 1024px frames from the v12 generation with the new tables.
+const CACHE = 'mojiworld-assets-v13';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());

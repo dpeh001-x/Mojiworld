@@ -8,8 +8,14 @@
 // percent - so fs[] WAS the pulse, and frame 6 at 1.58x overshot as a cutoff.
 // The re-canvas (scripts/recanvas_smithgolem.mjs) keeps one scale, centres the
 // body and puts every ink bottom on one row; the calib carries no fs.
+// v0.30.435+: the frames are a CUT-OUT RIG of the static sprite
+// (scripts/gen_smithgolem_cutout.mjs) - one body, one face, one hammer under small
+// affine transforms - on a 1280x1024 canvas (the slam needs 128px each side).
+// Every frame therefore keeps both eyes: a turned-away pose (the old attack
+// frames 3-4) cannot come back without this test seeing it.
 //   ART   - stone-body height within 6% of the idle mean for all 27 frames;
-//           zero edge pixels; >= 30px margin on every side; one ink-bottom row
+//           zero edge pixels; >= 30px margin on every side; one ink-bottom row;
+//           all 27 frames 1280x1024; two red eyes in the head band of every frame
 //   CALIB - no fs on smithgolem attack (timing ft may stay)
 //   BUILD - forced idle 0 / attack 0 / attack 3 / attack 6 blit within 4% of
 //           one height, bottoms within 3px; prints the heights (--probe use)
@@ -26,13 +32,19 @@ async function stone(p) {
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const o = (y * W + x) * 4, a = data[o + 3];
     if (a > 16) { if (t < 0) t = y; b = y; if (l < 0 || x < l) l = x; if (x > r) r = x; if (y === 0 || y === H - 1 || x === 0 || x === W - 1) edge++; }
     if (a >= 200) { const R = data[o], G = data[o + 1], B = data[o + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B); if ((mx ? (mx - mn) / mx : 0) < 0.22 && (R + G + B) / 3 > 120) { if (st < 0) st = y; sb = y; } } }
-  return { W, H, edge, l, r, t, b, stoneH: sb - st + 1, margin: Math.min(l, W - 1 - r, t) };
+  // eyes: saturated-red column runs (>= 8px) in the head band, head columns only (the hammer's lava sits further right)
+  const ox = Math.round((W - 1024) / 2), cols = new Uint8Array(W);
+  for (let y = st + 40; y < st + 170; y++) for (let x = 220 + ox; x < 620 + ox; x++) { const o = (y * W + x) * 4; if (data[o + 3] > 128 && data[o] > 170 && data[o + 1] < 110 && data[o + 2] < 100) cols[x] = 1; }
+  let eyes = 0, run = 0; for (let x = 0; x <= W; x++) { if (x < W && cols[x]) run++; else { if (run >= 8) eyes++; run = 0; } }
+  return { W, H, edge, l, r, t, b, stoneH: sb - st + 1, margin: Math.min(l, W - 1 - r, t), eyes };
 }
 const rows = []; for (const s of ['idle', 'walk', 'attack']) for (let i = 0; i < 9; i++) rows.push({ s, i, m: await stone(path.join(ROOT, 'Sprites/monsters', s, `smithgolem_${i}.webp`)) });
 const ref = rows.filter(r => r.s === 'idle').reduce((a, r) => a + r.m.stoneH, 0) / 9;
 ok('all 27 frames: grey-stone body height within 6% of the idle mean (no per-frame rescale needed)', rows.every(r => Math.abs(r.m.stoneH / ref - 1) <= 0.06), rows.map(r => (100 * r.m.stoneH / ref).toFixed(0) + '%').join(' '));
 ok('no frame touches its canvas edge and every side keeps >= 30px', rows.every(r => r.m.edge === 0 && r.m.margin >= 30), 'min margin ' + Math.min(...rows.map(r => r.m.margin)));
 const bottoms = [...new Set(rows.map(r => r.m.b))]; ok('every ink bottom sits on one row', bottoms.length === 1, 'rows ' + bottoms.join(','));
+ok('all 27 frames are 1280x1024 (128px added each side for the slam; the body stays centred)', rows.every(r => r.m.W === 1280 && r.m.H === 1024), [...new Set(rows.map(r => r.m.W + 'x' + r.m.H))].join(','));
+ok('the golem faces the camera in every frame: two red eyes in the head band (the old attack 3-4 turned away)', rows.every(r => r.m.eyes >= 2) && rows.filter(r => r.s !== 'attack').every(r => r.m.eyes === 2), rows.map(r => r.m.eyes).join(''));
 const cs = readFileSync(path.join(ROOT, 'data', 'anim_calib.js'), 'utf8'); const calib = JSON.parse(cs.slice(cs.indexOf('window.LX_ANIM_CALIB = ') + 23, cs.indexOf('window.LX_ATK_HITBOX')).trim().replace(/;\s*$/, ''));
 ok('the calib carries NO per-frame scale for the smith golem (the pulse is gone at its source)', !(calib.smithgolem && calib.smithgolem.attack && calib.smithgolem.attack.fs), JSON.stringify(calib.smithgolem || null).slice(0, 120));
 
