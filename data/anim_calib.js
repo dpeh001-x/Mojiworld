@@ -805,7 +805,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.26,
       "dx": 0,
-      "dy": 0,
+      "dy": 0.035,
       "ft": [
         86,
         72,
@@ -814,8 +814,7 @@ window.LX_ANIM_CALIB = {
         151,
         108,
         115
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "king": {
