@@ -72,7 +72,10 @@
 // v0.30.441 - v15 -> v16. smithgolem idle/walk/attack_0..8 REPLACED under their own names
 // (cut-out rig of the static sprite, 1280x1024); returning browsers would otherwise mix
 // the old 1024px frames from the v15 generation with the new tables.
-const CACHE = 'mojiworld-assets-v16';
+// v0.30.442 - v16 -> v17. 28 monster attack frames REPLACED under their own names
+// (user art drop: 11 sets, edge clean-ups + the smith golem impact frames re-anchored);
+// returning browsers would otherwise serve the old frames from the v16 generation.
+const CACHE = 'mojiworld-assets-v17';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
