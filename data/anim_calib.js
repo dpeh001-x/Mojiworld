@@ -972,7 +972,7 @@ window.LX_ANIM_CALIB = {
   },
   "gravitos2punch": {
     "attack": {
-      "s": 1,
+      "s": 1.181,
       "dx": 0,
       "dy": 0.035,
       "ft": [

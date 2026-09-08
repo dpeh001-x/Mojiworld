@@ -55,7 +55,9 @@
 // v0.30.426 - v9 -> v10. The smith golem's 28 assets were REPLACED under their
 // own names (re-canvased to one scale / one foot line); returning browsers would
 // serve the old frames from the v9 generation.
-const CACHE = 'mojiworld-assets-v10';
+// v0.30.428 - v10 -> v11. gravitos2punch_0..8 REPLACED (regenerated punch set); returning
+// browsers would otherwise serve the old frames from the v10 generation.
+const CACHE = 'mojiworld-assets-v11';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
