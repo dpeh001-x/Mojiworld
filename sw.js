@@ -57,7 +57,10 @@
 // serve the old frames from the v9 generation.
 // v0.30.428 - v10 -> v11. gravitos2punch_0..8 REPLACED (regenerated punch set); returning
 // browsers would otherwise serve the old frames from the v10 generation.
-const CACHE = 'mojiworld-assets-v11';
+// v0.30.429 - v11 -> v12. Boss attack art drop REPLACED under existing names
+// (gravitos2soul_2..8, gravitos2punch_4, towerSovereign_6); returning browsers would
+// otherwise serve the old frames from the v11 generation.
+const CACHE = 'mojiworld-assets-v12';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
