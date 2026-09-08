@@ -78,7 +78,10 @@
 // v0.30.443 - v17 -> v18. 9 monster attack frames REPLACED under their own names
 // (user art drop: 11 sets, edge clean-ups + the smith golem impact frames re-anchored);
 // returning browsers would otherwise serve the old frames from the v17 generation.
-const CACHE = 'mojiworld-assets-v18';
+// v0.30.446 - v18 -> v19. 7 monster attack frames REPLACED under their own names
+// (user art drop: 11 sets, edge clean-ups + the smith golem impact frames re-anchored);
+// returning browsers would otherwise serve the old frames from the v18 generation.
+const CACHE = 'mojiworld-assets-v19';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
