@@ -20,29 +20,30 @@ all five corrupt-save cases boot with no error; boss attack-scale tables agree b
 
 ---
 
-## 1. The animator draws four monsters' attack state too big (confirmed)
+## 1. ~~The animator draws four monsters' attack state too big~~ — WITHDRAWN, my measurement error
 
-`monster_animator.html` keeps a hand-mirrored copy of the game's `_ATK_FRAME_SCALE`. The two have
-drifted, so the tool that promises "renders EXACTLY what the game renders" overstates the **attack**
-state for four types:
+**This finding was wrong and is retracted.** The shipped animator is correct.
 
-| Type | Game | Animator | Animator draws attack |
-| --- | --- | --- | --- |
-| `smithgolem` | *(no entry → ×1)* | 1.881 | **+88%** |
-| `conductorMech` | *(no entry → ×1)* | 1.69 | **+69%** |
-| `fatDragon` | 1.199 | 1.951 | **+63%** |
-| `tombKeeper` | 1.7 | 2.13 | **+25%** |
+What I originally measured: `monster_animator.html` keeps a hand-mirrored copy of the game's
+`_ATK_FRAME_SCALE`, and the copy I read carried `smithgolem 1.881` and `conductorMech 1.69` (both
+deliberately removed from the game) plus a superseded `fatDragon 1.951` and `tombKeeper 2.13` — so
+the tool drew those four monsters' attack up to 88% larger than the game.
 
-Cross-checked two ways: the animator reports the smith golem's attack at 205 px drawn against
-105 px for idle, while the in-engine probe in `scripts/smithgolem_scale_test.mjs` measures rendered
-ink of 113 px idle against 117–129 px attack on the same build. The game is right; the tool is wrong.
+What was actually true: I diffed the game's **origin blob** against the animator **file on disk**.
+This checkout's working tree is 47 commits behind origin, so that file is a stale local copy, not
+what anyone plays or opens. Diffing origin against origin, every mirrored table agrees — 9/9,
+including `_ATK_FRAME_SCALE` at the game's five entries and `_BOSS_SIZE_STRICT` at all 14 members.
 
-**This is why the smith golem "still looked wrong in the animator"** after the art itself was rebuilt.
-The residual was the tool, not the sprites.
+Two lessons kept from it, both worth having:
 
-**Fix:** delete the four drifted entries so the animator's table equals the game's
-(`{ ...5 game entries }`). One line, no art or game change. Worth a guard test that diffs the two
-tables, so the mirror cannot drift again — the same failure mode the hitbox tables already have fenced.
+- **`scripts/animator_table_parity_test.mjs` (new, shipped).** It diffs every table the animator
+  claims is "verbatim" — the attack padding, the boss attack scale, the five frame clocks and the
+  zodiac borrows, the anti-sinking clamp, and the body-lock / frame-trust / no-shrink / size-strict
+  sets — and fails on any drift. It passes on origin today. Run against a working copy it also
+  catches exactly the trap above: a stale local animator reports as drift immediately.
+- **Audit hygiene:** in this repo, with parallel sessions and a perpetually-behind local index,
+  *every* measurement must name its source blob. A finding built on a working-copy file is not a
+  finding about the game.
 
 ## 2. Every map transition drops 9–18 frames
 
@@ -134,10 +135,12 @@ has since shipped as the Conductor Mech — the comment above it already says so
 
 ## Suggested order
 
-1. **Sync the animator's attack table + add a drift guard** — one line, removes a defect you have
-   already hit once, and restores trust in the tool every art decision is made in.
-2. **Re-aim or retire the 14 stale harnesses** — restores the regression net.
-3. **Hide the map-transition hitch** — the most repeated rough edge a player actually feels.
-4. **Settle the Aetherion attack size** (and confirm thornmaw is intended).
-5. **Add a UI scale slider** — the one real accessibility gap.
-6. **Drop the ~54 MB of unreferenced art** — housekeeping, zero player impact, smaller clones and CDN.
+1. **Re-aim or retire the 14 stale harnesses** — restores the regression net; protects everything else.
+2. **Hide the map-transition hitch** — the most repeated rough edge a player actually feels.
+3. **Plant thornmaw's four floating walk frames** — a ground creature that leaves the ground.
+4. **Add a UI scale slider** — the one real accessibility gap.
+5. **Drop the ~54 MB of unreferenced art** — housekeeping, zero player impact, smaller clones and CDN.
+
+Aetherion's +66% attack is confirmed intended by the user and needs no change. The animator table
+fence ships alongside this report even though finding 1 was withdrawn: it is cheap and it closes a
+real failure mode.
