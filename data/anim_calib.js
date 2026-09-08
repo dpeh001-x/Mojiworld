@@ -2445,7 +2445,20 @@ window.LX_ANIM_CALIB = {
     }
   },
   "shardlich": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": -0.01
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": -0.02
+    },
     "attack": {
+      "s": 1.21,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         86,
         72,
@@ -2666,7 +2679,15 @@ window.LX_ANIM_CALIB = {
     }
   },
   "thornmaw": {
+    "idle": {
+      "s": 1.2,
+      "dx": 0,
+      "dy": 0
+    },
     "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         86,
         72,
@@ -2941,7 +2962,20 @@ window.LX_ANIM_CALIB = {
     }
   },
   "voltipup": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.03
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.03
+    },
     "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.03,
       "ft": [
         86,
         72,

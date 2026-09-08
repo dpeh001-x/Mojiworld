@@ -101,7 +101,8 @@ punch (`162e7c5e`), the void tear (`5536174a`), the A-press stances (`a68b4d62`)
 ### 1f. Animator patch bakes, 2026-09-08 (`330da2fc`, `47507139`, `88f57026`)
 
 Sixteen `LX_ANIM_PATCH:1` blobs pasted by the user, hardbaked with `apply_anim_patch.mjs` on
-v0.30.426. The values are the user's, verbatim. Every `ft` in the first nine and the four
+v0.30.426, then three more (shardlich, voltipup, thornmaw — their timings re-emitted unchanged, flags kept)
+on v0.30.434. The values are the user's, verbatim. Every `ft` in the first nine and the four
 re-emitted hitbox blocks in the last seven were byte-identical to the bake, so `LX_ATK_HITBOX` is
 unchanged; the other 140 entities are untouched (semantic diff of both tables per commit).
 
@@ -120,6 +121,9 @@ unchanged; the other 140 entities are untouched (semantic diff of both tables pe
 | gravitos3soul | attack `fs` [1,1,1,1.12,1,1,1,1,1] added; `ft` → [86,81,76,61,91,106,126,81,96] |
 | gravitos | attack dy 0.015 → 0.02; `ft` → [72,60,101,126,171,136,90,66,91] (hand-timed) |
 | aetherion | idle dy 0.165 → 0.16, walk dy 0.02 → 0.01, attack dy 0.01 → −0.01 |
+| shardlich (v0.30.434 batch) | idle dy −0.01, walk dy −0.02, attack s 1.21 (new) |
+| voltipup (v0.30.434 batch) | idle / walk / attack dy 0.03 (new) |
+| thornmaw (v0.30.434 batch) | idle s 1.2 (new) |
 
 Two things the bake surfaced:
 
