@@ -7,8 +7,9 @@
 //   - EYES: both red eyes found as a pair in EVERY frame (a turned head fails), and their
 //     spacing - a rigid facial measure - sets each frame's scale, so the body lands at the
 //     static sprite's size regardless of what the model drew;
-//   - FIT: each frame is rescaled by that spacing, feet-centroid centred on the rig's foot
-//     mark, ink bottom on row 1012, on the rig's 1280x1024 canvas (idle/walk unchanged);
+//   - FIT: each frame is rescaled by that spacing, the eye midpoint pinned to the static's
+//     spot and the stone feet row pinned with a <= 6% vertical stretch, on the rig's
+//     1280x1024 canvas (idle/walk unchanged) - see ALIGNMENT below;
 //   - BODY: the fitted eye spacing within 5% of the static's in every frame and the per-frame
 //     scale k within 8% across the roll (the grey-stone span is NOT used: dust and hammer
 //     highlights inflate it);
@@ -35,35 +36,64 @@ async function raw(buf) { const { data, info } = await sharp(buf).ensureAlpha().
 function feetCx(d, w, h, t, b) { const y0 = Math.round(b - (b - t) * 0.12); let m = 0, mx = 0; for (let y = y0; y <= b; y++) for (let x = 0; x < w; x++) { const a = d[(y * w + x) * 4 + 3]; m += a; mx += a * x; } return m ? mx / m : w / 2; }
 function lava(d, w, h) { let minY = h, maxY = -1, maxYx = 0; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = (y * w + x) * 4; if (d[o + 3] > 128 && d[o] > 190 && d[o + 1] > 60 && d[o + 1] < 180 && d[o + 2] < 90) { if (y < minY) minY = y; if (y > maxY) { maxY = y; maxYx = x; } } } return { minY, maxY, maxYx }; }
 // ---- reference: the static sprite on the rig canvas --------------------------
+// ALIGNMENT (v2, per user "not smooth ... body misalignments per frame"): the first fit
+// planted each frame by the alpha centroid of its bottom band and scaled by eye spacing.
+// At impact the hammer and dust on the floor pulled that centroid right, so the body was
+// pushed LEFT 90-180px on frames 4-7, and dust under the feet on frame 6 was taken for
+// the feet, lifting the head 88px. Now the HEAD is the anchor: scale x by eye spacing,
+// pin the eye midpoint to the static's spot, find the feet by STONE colour under the
+// head columns (dust is grey, stone is warm), and pin that row with a tiny vertical
+// stretch (<= 6%) so head and feet both land exactly, every frame.
+// stone = FULLY opaque, warm, textured body pixels. The model's dust is soft (alpha well
+// under 250 through most of a cloud) and neutral, so alpha >= 250 + warmth keeps it out.
+const stonePx = (d, o) => d[o + 3] >= 250 && (d[o] + d[o + 1] + d[o + 2]) / 3 > 125 && d[o] - d[o + 2] >= 22 && (Math.max(d[o], d[o + 1], d[o + 2]) - Math.min(d[o], d[o + 1], d[o + 2])) / Math.max(d[o], d[o + 1], d[o + 2]) < 0.3;
+function stoneFeet(d, w, h, ex, sp) { for (let y = h - 1; y >= 0; y--) { let n = 0; for (let x = Math.max(0, Math.round(ex - 1.2 * sp)); x < Math.min(w, Math.round(ex + 1.2 * sp)); x++) if (stonePx(d, (y * w + x) * 4)) n++; if (n >= 8) return y; } return -1; }
 const S = await raw(readFileSync(SRC)); const sEyes = findEyes(S.d, S.w, S.h); if (!sEyes) { console.error('no eye pair on the static'); process.exit(1); }
-const sM = measure(S.d, S.w, S.h); const REF = { spacing: sEyes.spacing, stoneH: sM.stoneH, feetX: feetCx(S.d, S.w, S.h, sM.t, sM.b) + OX, headTop: sM.stoneTop };
-console.log(`reference: eye spacing ${REF.spacing}px, body ${REF.stoneH}px, feet x ${REF.feetX.toFixed(0)}`);
+const sM = measure(S.d, S.w, S.h); const sEx = (sEyes.x1 + sEyes.x2) / 2, sFeet = stoneFeet(S.d, S.w, S.h, sEx, sEyes.spacing);
+const REF = { spacing: sEyes.spacing, stoneH: sM.stoneH, eyeX: sEx + OX, eyeY: sEyes.y, bodyLen: sFeet - sEyes.y, feetRow: sFeet, feetX: feetCx(S.d, S.w, S.h, sM.t, sM.b) + OX, headTop: sM.stoneTop };
+console.log(`reference: eye spacing ${REF.spacing}px, eyes at (${REF.eyeX.toFixed(0)}, ${REF.eyeY.toFixed(0)}), stone feet row ${REF.feetRow} (body ${REF.bodyLen}px), ink floor ${FLOOR}`);
 // ---- fit one returned frame onto the rig canvas -----------------------------
 async function fit(png) { const f = await raw(png); const e = findEyes(f.d, f.w, f.h); if (!e) return { bad: 'no eye pair' };
-  const k = REF.spacing / e.spacing; const rw = Math.max(1, Math.round(f.w * k)), rh = Math.max(1, Math.round(f.h * k));
-  const r = await raw(await sharp(png).resize(rw, rh, { kernel: 'lanczos3' }).png().toBuffer()); const m = measure(r.d, r.w, r.h); if (m.b < 0) return { bad: 'empty' };
-  // plant the FEET, not the global ink bottom: dust at the edge can hang a row or two lower
-  // (and is feathered away below), so the bottom is read under the feet columns only
-  const fx = feetCx(r.d, r.w, r.h, m.t, m.b); let fb = -1; for (let y = r.h - 1; y >= 0 && fb < 0; y--) for (let x = Math.max(0, Math.round(fx - 1.3 * REF.spacing)); x < Math.min(r.w, Math.round(fx + 1.3 * REF.spacing)); x++) if (r.d[(y * r.w + x) * 4 + 3] > 16) { fb = y; break; }
-  const dx = Math.round(REF.feetX - fx), dy = FLOOR - fb;
+  // uniform scale from the eye spacing (head size constant, no distortion); horizontal
+  // anchor = eye midpoint; vertical anchor = the lowest fully-opaque stone row under the
+  // head (the feet, crouched or not) -> the static's stone feet row. A crouch keeps its
+  // lower head; dust hanging under the feet is ignored. Fallback: ink bottom -> floor.
+  const sx = REF.spacing / e.spacing; const rw = Math.max(1, Math.round(f.w * sx)), rh = Math.max(1, Math.round(f.h * sx));
+  const r = await raw(await sharp(png).resize(rw, rh, { kernel: 'lanczos3' }).png().toBuffer()); const e1 = findEyes(r.d, r.w, r.h); if (!e1) return { bad: 'eyes lost in resize' };
+  const ex1 = (e1.x1 + e1.x2) / 2, fb1 = stoneFeet(r.d, r.w, r.h, ex1, e1.spacing); const m1 = measure(r.d, r.w, r.h);
+  const ratio = fb1 > 0 ? +((fb1 - e1.y) / REF.bodyLen).toFixed(3) : 0, plausible = ratio > 0.72 && ratio < 1.12;   // > 1.12 = the model stretched the golem (roll 3 frame 6: 1.2x taller)
+  const dx = Math.round(REF.eyeX - ex1), dy = plausible ? Math.round(REF.feetRow - fb1) : FLOOR - m1.b;
   const out = Buffer.alloc(W * H * 4); for (let y = 0; y < r.h; y++) { const Y = y + dy; if (Y < 0 || Y > FLOOR) continue; for (let x = 0; x < r.w; x++) { const X = x + dx; if (X < 0 || X >= W) continue; out.set(r.d.subarray((y * r.w + x) * 4, (y * r.w + x) * 4 + 4), (Y * W + X) * 4); } }   // rows below the floor are dropped
+  const k = +sx.toFixed(3), sy = plausible ? 'feet' : 'ink', eyeDy = Math.round(e1.y + dy - REF.eyeY);
   // EDGE FEATHER: the model's dust clouds drift to the canvas edge; a hard cut there is the
   // "clipped rubble" defect. Fade alpha to zero over the last 104px of every side (full at
   // 104, zero at 24) - the body never reaches that band, only dust and hammer trails do.
   // (left / right / top only: the feet are planted on row 1012 by construction and nothing sits below them)
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const o = (y * W + x) * 4; if (!out[o + 3]) continue; const dEdge = Math.min(x, W - 1 - x, y); if (dEdge < 104) out[o + 3] = Math.round(out[o + 3] * Math.max(0, Math.min(1, (dEdge - 24) / 80))); }
   const M = measure(out, W, H), E = findEyes(out, W, H), L = lava(out, W, H); const bad = [];
-  if (M.edge) bad.push('edge ' + M.edge); if (M.margin < 24) bad.push('margin ' + M.margin); if (M.b !== FLOOR) bad.push('bottom ' + M.b); if (!E) bad.push('eyes lost');
-  // body size: the eye spacing is the rigid measure (the grey-stone span is inflated by dust and hammer highlights)
-  if (E && Math.abs(E.spacing / REF.spacing - 1) > 0.05) bad.push('eye spacing ' + E.spacing); return { buf: out, k: +k.toFixed(3), m: M, eyes: E, lava: L, bad: bad.join(',') || null }; }
+  if (M.edge) bad.push('edge ' + M.edge); if (M.margin < 24) bad.push('margin ' + M.margin); if (!E) bad.push('eyes lost');
+  // the ink bottom under the feet: the outline below the stone row is ~12px in the static; allow 8-12 (rows past the floor were dropped)
+  const inkFeet = (() => { for (let y = FLOOR; y >= 0; y--) for (let x = Math.round(REF.eyeX - 1.2 * REF.spacing); x < Math.round(REF.eyeX + 1.2 * REF.spacing); x++) if (out[(y * W + x) * 4 + 3] > 16) return y; return -1; })();
+  if (inkFeet < FLOOR - 4) bad.push('feet ink bottom ' + inkFeet);
+  // alignment: eye midpoint x within 2px of the static's spot; y within the body's own
+  // length tolerance (a crouch sits lower - up to 28% of the body); spacing within 4%
+  if (E) { const mx = (E.x1 + E.x2) / 2; if (Math.abs(mx - REF.eyeX) > 2) bad.push(`eyes x ${mx.toFixed(0)}`); if (Math.abs(E.spacing / REF.spacing - 1) > 0.04) bad.push('eye spacing ' + E.spacing); }
+  return { buf: out, k, sy, eyeDy, ratio, plausible, m: M, eyes: E, lava: L, inkFeet, bad: bad.join(',') || null }; }
+// a stretched frame (body length > 1.12x the static's at the same head size) cannot be
+// anchored without a visible squash: substitute its neighbour (next, else previous)
+function substituteStretched(frames) { const notes = []; for (let i = 0; i < frames.length; i++) { if (frames[i].plausible || frames[i].bad) continue; const j = [i + 1, i - 1].find((n) => frames[n] && frames[n].plausible && !frames[n].bad); if (j === undefined) continue; frames[i] = { ...frames[j], substituted: j }; notes.push(`slot ${i} <- frame ${j}`); } return notes; }
 async function gateRoll(frames) { const bad = frames.map((f, i) => f.bad ? i + ':' + f.bad : null).filter(Boolean);
+  // head height: judged against THIS roll's rest frame (frame 0), not the static - the model draws the body a touch longer.
+  // A crouch may sit up to 28% of the body lower; nothing may sit more than 20px higher.
+  const y0 = frames[0].eyes && frames[0].eyes.y; if (y0) frames.forEach((f, i) => { if (f.eyes && (f.eyes.y < y0 - 20 || f.eyes.y > y0 + 0.28 * REF.bodyLen)) bad.push(`${i}: head at y ${f.eyes.y.toFixed(0)} vs rest ${y0.toFixed(0)}`); });
+  frames.forEach((f, i) => { if (!f.plausible && !f.substituted) bad.push(`${i}: body length ratio ${f.ratio} (stretched draw, no neighbour to substitute)`); });
   const ks = frames.map((f) => f.k).filter(Boolean); if (ks.length && Math.max(...ks) / Math.min(...ks) > 1.08) bad.push('head size drifts ' + Math.min(...ks) + '..' + Math.max(...ks));
   const apex = frames.some((f) => f.buf && f.lava.minY < f.m.stoneTop - 0.2 * REF.spacing), impact = frames.some((f) => f.buf && f.lava.maxY > FLOOR - 1.6 * REF.spacing && f.lava.maxYx > REF.feetX + 0.8 * REF.spacing);
   if (!apex) bad.push('no frame raises the hammer above the head'); if (!impact) bad.push('no frame puts the hammer at the floor in front of the feet'); return bad; }
 async function sheet(frames, p) { const TW = 250, TH = 200, comps = []; for (let i = 0; i < frames.length; i++) if (frames[i].buf) comps.push({ input: await sharp(frames[i].buf, { raw: { width: W, height: H, channels: 4 } }).resize(TW, TH).png().toBuffer(), left: 4 + i * (TW + 4), top: 4 });
   await sharp({ create: { width: N * (TW + 4) + 4, height: TH + 8, channels: 4, background: { r: 30, g: 34, b: 44, alpha: 1 } } }).composite(comps).png().toFile(p); }
-async function evaluate(label, pngs) { const frames = []; for (const p of pngs) frames.push(await fit(p)); const bad = await gateRoll(frames);
-  console.log(`${label}: k ${frames.map((f) => f.k ?? '-').join('/')}  body ${frames.map((f) => f.m ? f.m.stoneH : '-').join('/')}  ${bad.length ? 'REJECT - ' + bad.join('; ') : 'OK'}`);
+async function evaluate(label, pngs) { const frames = []; for (const p of pngs) frames.push(await fit(p)); const subs = substituteStretched(frames); const bad = await gateRoll(frames);
+  console.log(`${label}: k ${frames.map((f) => f.k ?? '-').join('/')}  bodyLen ${frames.map((f) => f.ratio ?? '-').join('/')}  eyes(x,y) ${frames.map((f) => f.eyes ? Math.round((f.eyes.x1 + f.eyes.x2) / 2) + ',' + Math.round(f.eyes.y) : '-').join(' ')}  feet ${frames.map((f) => f.inkFeet ?? '-').join('/')}${subs.length ? '  substituted: ' + subs.join(', ') : ''}  ${bad.length ? 'REJECT - ' + bad.join('; ') : 'OK'}`);
   await sheet(frames, path.join(KEEP, label + '_sheet.png')); return { frames, bad }; }
 const fetchBuf = async (u) => { const r = await fetch(u, { signal: AbortSignal.timeout(180000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); };
 let chosen = null;
