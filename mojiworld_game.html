@@ -10183,7 +10183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.422';
+const GAME_VERSION = 'v0.30.423';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41902,6 +41902,25 @@ const LX_REFIGHT_SHARD_FLOOR = 0.02;  // v0.30.412 — the repeat ladder never p
 // v0.30.414 — the v0.30.412 ladder as one function, so the host's kill and a
 // co-op guest's credit for that kill pay by the SAME rule off each player's
 // OWN lifetime counter. Stamps the counter for the next kill.
+// v0.30.423 - DUO TRIAL clear: the FULL drop (level squared, capped 10,000), no
+// refight ladder, the co-op-only title 'Twin Star', and a counter for the
+// achievement. Called on the host at kill time and on each guest from the
+// dt=1 kill frame, so every player is paid the same way.
+const LX_TITLE_TWIN_STAR = 'Twin Star';
+function _duoTrialReward(bossLv, typeName) {
+  const lv = Math.max(1, Math.min(200, bossLv | 0));
+  const full = Math.min(10000, Math.max(1, Math.floor(lv * lv)));
+  player.setshards = (player.setshards || 0) + full;
+  game.duoTrials = (game.duoTrials | 0) + 1;
+  if (!player.titles || typeof player.titles !== 'object') player.titles = {};
+  const first = !player.titles[LX_TITLE_TWIN_STAR];
+  player.titles[LX_TITLE_TWIN_STAR] = true;
+  if (first && !player.equippedTitle) player.equippedTitle = LX_TITLE_TWIN_STAR;
+  const nm = String(typeName || 'The boss').split(/[\s,\u2014]/)[0];
+  if (typeof showToast === 'function') setTimeout(() => showToast('\u{1F91D} DUO TRIAL CLEARED \u2014 ' + nm + ' pays ' + full + ' Setshards to everyone!' + (first ? ' Title: ' + LX_TITLE_TWIN_STAR : ''), 'legendary'), 700);
+  if (typeof checkAchievements === 'function') checkAchievements();
+  return full;
+}
 function _lxBossShardPayout(fullShards, key, isZodiac) {
   game._bossKills = game._bossKills || {};
   const k = game._bossKills[key] | 0;
@@ -42003,7 +42022,7 @@ const GAME_SAVE_FIELDS = [
   // Mojidex milestone rewards silently re-granted on every reload and their
   // PERMANENT +ATK/+DEF was thrown away each session. Found while wiring the
   // Trainee Path, whose final rung grants through the same dexPerm store.
-  'dexMilestones','dexPerm',
+  'dexMilestones','dexPerm','duoTrials',
   'boonDex'   // v0.30.421 - boon codex (lifetime; not wiped by ascension)
 ];
 // v0.25.264 — saveState() is called from ~30 sites: every kill, quest tick,
@@ -47574,6 +47593,7 @@ function _coopTryDowned() {
   player._downAlreadyRevived = _reviveSpent;
   player._downRevivable = !_onboarding && _coopPeerAliveOnMyMap() && !_reviveSpent;
   player._downed = true;
+  if (typeof _duoTrialFail === 'function') _duoTrialFail();   // v0.30.423 - shared fate (my own down)
   player._downedSilent = _onboarding;   // banner is suppressed while this is set
   player._downedUntil = performance.now() + (_onboarding ? COOP_DOWN_ONBOARD_MS : COOP_DOWN_MS);
   player.hp = 1;                     // keeps every death gate quiet while down
@@ -47736,8 +47756,14 @@ try {
   }, 600);
 } catch (e) {}
 // Peer notifications (down/up are self-reports keyed by relay-stamped sender id).
+// v0.30.423 - Duo Trial shared fate: any down (mine or a partner's) fails the
+// live trial. Host-judged: guests learn the verdict through the kill frame.
+function _duoTrialFail() {
+  try { if (game && Array.isArray(game.monsters)) for (const mm of game.monsters) if (mm && mm._duoTrial && !mm._duoTrialFailed) { mm._duoTrialFailed = true; if (typeof showToast === 'function') showToast('\u{1F91D} Duo Trial failed \u2014 someone went down. It pays as a plain echo now.', 'epic'); } } catch (e) {}
+}
 function _coopApplyDown(msg) {
   if (!msg || msg.id == null) return;
+  _duoTrialFail();   // v0.30.423
   const p = net.peers[msg.id]; if (!p) return;
   p._downed = true; p._reviveMs = 0;
   // v0.29.15 — a partner who has already spent their one revive on this map
@@ -48186,8 +48212,10 @@ function _coopBroadcastKill(m, exp, coins) {
   const _kf = { t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0, il: m._isMirage ? 1 : 0 };
   if (m.isBoss) {
     _kf.bl = (m.level && m.level > 0) ? (m.level | 0) : ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 0);
+    if (m._duoTrial && !m._duoTrialFailed && !m._duoPaidHost) { m._duoPaidHost = true; try { _duoTrialReward(_kf.bl || ((typeof monsterTypes !== 'undefined' && monsterTypes[m.type] && monsterTypes[m.type].level) | 0), m.type); } catch (e) {} }   // v0.30.423
     if (m.zodiacSign) _kf.zs = String(m.zodiacSign).slice(0, 24);
-    if (m._echoBoss || m._expeditionBoss || m._isTwin || m._isPiscesTwin) _kf.bx = 1;
+    if (m._duoTrial && !m._duoTrialFailed) _kf.dt = 1;   // v0.30.423 - Duo Trial cleared standing: everyone pays FULL
+    else if (m._echoBoss || m._expeditionBoss || m._isTwin || m._isPiscesTwin) _kf.bx = 1;
   }
   try { net.ws.send(JSON.stringify(_kf)); } catch (e) {}
 }
@@ -48413,7 +48441,8 @@ function _coopApplyKill(msg) {
   // lifetime counter — so a guest cannot out-earn playing solo, and the
   // _coopKillDup gate above already drops a redelivered frame. bx=1 marks
   // kills that pay nothing on the host either (echo / expedition / twins).
-  if (msg.b && !msg.il && +msg.bx !== 1 && !(game.expedition && game.expedition.active)) {
+  if (msg.b && !msg.il && +msg.dt === 1 && typeof _duoTrialReward === 'function') { try { _duoTrialReward(Math.floor(+msg.bl || 0), String(msg.tp || '')); } catch (e) {} }   // v0.30.423
+  if (msg.b && !msg.il && +msg.bx !== 1 && +msg.dt !== 1 && !(game.expedition && game.expedition.active)) {
     try {
       const _tp = String(msg.tp || '').slice(0, 48);
       const _def = (typeof monsterTypes !== 'undefined' && _tp) ? monsterTypes[_tp] : null;
@@ -49846,6 +49875,7 @@ const ACHIEVEMENTS = [
   { id:'combo200',     name:'Unstoppable',       desc:'Reach a 200-hit combo',            test:()=>(game.comboRecord||0)>=200 },
   { id:'prestige5',    name:'Reborn',            desc:'Ascend 5 times',                   test:()=>(game.prestige && game.prestige.count>=5) },
   { id:'prestige20',   name:'Apex Ascendant',    desc:'Reach the prestige cap (20)',      test:()=>(game.prestige && game.prestige.count>=20) },
+  { id:'duoTrial',     name:'Twin Star',         desc:'Clear a Duo Trial with a partner (nobody goes down)', test:()=>(game.duoTrials|0)>=1 },   // v0.30.423
   { id:'boonCodex',    name:'Boon Collector',    desc:'Hold every boon at least once',    test:()=>!!(game.boonDex && game.boonDex.ms && game.boonDex.ms.held100) },   // v0.30.421
   // v0.29.647 — onUnlock fires once, guarded by the persisted achievements map.
   { id:'questMaster',  name:'Quest Master',      desc:'Complete 175 quests',              test:()=>_lxQuestsDone()>=LX_GOD_QUEST_TARGET, onUnlock:()=>_lxGrantGodWeapon() },
@@ -95610,6 +95640,34 @@ So.. do you need a lift?`;
     // unlike the free echo it PAYS: 1.5× the boss's authored EXP and Mojicoins
     // (level-scaled), no zodiac diminishing. Still _echoBoss-tagged so it can't
     // re-stamp map-cleared state or farm per-map setshards.
+    // v0.30.423 - DUO TRIAL (per user: co-op-only rewards). Offered only when a
+    // partner shares the session. Shared fate: any player going down fails
+    // the trial (host-judged, see _duoTrialFail); a standing clear pays every
+    // player the FULL boss drop with no refight ladder, plus a co-op-only title.
+    const _duoPeers = (typeof net !== 'undefined' && net && net.peers) ? Object.keys(net.peers).length : 0;
+    if (typeof _coopActive === 'function' && _coopActive() && _duoPeers >= 1) {
+      const DUO_STRENGTH = 1.5;
+      const _dmul = _scale * DUO_STRENGTH;
+      opts.push({ t:`\u{1F91D} DUO TRIAL (\u00d7${_dmul.toFixed(2)} \u00b7 shared fate \u00b7 full shards for all)`, cb:() => {
+        if (!net.isHost) { document.getElementById('dialog-text').textContent = '*The Echo Keeper looks past you.*\n\nThe one who holds this room must call the trial. Ask your partner to summon it.'; return; }
+        const _x = (game.mapData.worldWidth || 1400) * 0.55;
+        let m = null;
+        if (typeof spawnMonster === 'function') m = spawnMonster(_x, 380, _bt, true, false);
+        if (m) {
+          m.maxHp = Math.floor((m.maxHp || 1) * _dmul); m.currentHp = m.maxHp;
+          m.atk = Math.floor((m.atk || 1) * _dmul); m.def = Math.floor((m.def || 0) * _dmul);
+          m.exp = 0; m.mojicoins = 0;
+          m._echoBoss = true; m._duoTrial = true; m._duoTrialFailed = false;
+          m.name = (m.name || _bt) + ' (Duo Trial)';
+          if (typeof showToast === 'function') showToast(`\u{1F91D} DUO TRIAL \u2014 ${_bt} \u00d7${_dmul.toFixed(2)}. Nobody goes down.`, 'legendary');
+          if (typeof flash === 'function') flash(0.45);
+          if (typeof addShake === 'function') addShake(10);
+          closeDialog();
+        } else {
+          document.getElementById('dialog-text').textContent = '*The Echo Keeper shrugs \u2014 the threads of this fight have thinned. Try again later.*';
+        }
+      } });
+    }
     const NIGHTMARE_STRENGTH = 2.0;
     const _nmul = _scale * NIGHTMARE_STRENGTH;
     opts.push({ t:`🌙 NIGHTMARE echo (×${_nmul.toFixed(2)} · real rewards)`, cb:() => {
