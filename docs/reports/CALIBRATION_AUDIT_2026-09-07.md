@@ -6,9 +6,12 @@ and supersedes, the three calibration write-ups produced this week:
 - `docs/reports/sprite_fit_audit_2026-09-07.md` (v0.30.408 audit + v0.30.415 correction) → §3;
   its raw numbers stay in `sprite_fit_audit.json` and the contact sheets in `sprite_fit/`
   (data, not prose). The old `.md` is now a pointer here.
-- the hitbox-coverage pass (v0.30.418 draft, **not landed** — it exists only as an uncommitted
-  working-copy report + scripts) → §4, folded in so it lives here when it ships.
-- the calibration layer audit that followed the Echo Knight fix (v0.30.419) → §5–§6.
+- the hitbox-coverage pass (drafted as v0.30.418, **landed as v0.30.420**) → §4, with what the
+  growth broke and the v0.30.424 fix in §4b and the Cancer analysis in §4c. Its separate `.md` is
+  now a pointer here.
+- the calibration layer audit that followed the Echo Knight fix (v0.30.419) → §5–§6, with the
+  animator mirror fixed and fenced in v0.30.424.
+- the final in-game sizes as the animator reports them after all of the above → §7.
 
 Every number below was taken from the repository itself: semantic diffs of the calibration
 tables between this conversation's first base (`5e942d73`, 2026-08-31) and `origin/main`
@@ -25,9 +28,9 @@ Tables diffed: `data/anim_calib.js` (`LX_ANIM_CALIB`, `LX_ATK_HITBOX`), `data/mo
 |---|---|---|
 | `LX_ANIM_CALIB` | **156** | 135 auto-timed (`ft` + `ftAuto:true`, v0.30.417) · 21 hand-authored (below) |
 | `LX_ATK_HITBOX` | **1** | legosaurus idle/walk/attack `w`/`ox` (v0.30.325) |
-| `LX_MOB_OFFSET_DATA` / `LX_MOB_SCALE_DATA` | 0 | — |
+| `LX_MOB_OFFSET_DATA` / `LX_MOB_SCALE_DATA` | 0 / **91** | draw multipliers lowered by old h / new h for every grown mob box (v0.30.420, §4) |
 | `LX_NPC_OFFSET_DATA` / `LX_NPC_SCALE_DATA` | 0 | — |
-| `LX_MOB_HITBOX` (`monster_hitboxes.js`) | 0 | — (the coverage pass in §4 would change 112; not landed) |
+| `LX_MOB_HITBOX` (`monster_hitboxes.js`) + `monsterTypes` w/h + `_Z_BOX_ABS` | **118** | every monster and boss box grown (or shrunk) to the art it draws (v0.30.420, §4) |
 
 ### 1a. Hand-authored `LX_ANIM_CALIB` changes (21 entities)
 
@@ -80,7 +83,11 @@ pathsBane, smithgolem, tombKeeper, gravitos3*, kingKrook*, zodiac_cancer are now
 |---|---|---|
 | `_lxMobPlantDy` post-clamp `echoKnight +7` | present → **removed** (v0.30.419 `2da338dc`) | see §2 |
 | animator `POST_CLAMP_PX.echoKnight` | 7 → **removed** (same commit, badge v0.30.419) | parity |
-| `_ATK_FRAME_SCALE` (game) | unchanged: fatDragon 1.199, tombKeeper 2.13, forgewight 2.327, pathsBane 1.604, echoKnight 2.10 | conductorMech has no entry (set redrawn v0.30.415) |
+| `_ATK_FRAME_SCALE` (game) | tombKeeper **2.13 → 1.70** (v0.30.424 `130e4fac`); fatDragon 1.199, forgewight 2.327, pathsBane 1.604, echoKnight 2.10 unchanged | the sprite-fit arbiter read tombKeeper's attack body at 1.25× idle with 2.13; 1.00 with 1.70 |
+| animator `ATK_FRAME_SCALE` | fatDragon 1.951 → 1.199, smithgolem 1.881 / conductorMech 1.69 **dropped**, tombKeeper → 1.70 (v0.30.424) | F1b fixed; now asserted by the parity check |
+| animator `SIZE_STRICT` | 5 entries → the game's 14 (v0.30.424) | dead under universal frame-trust on both sides; kept equal so the parity check has one answer |
+| `bigMelee.range` (20 def swingers + the 3 swing zodiac signs) | += half the v0.30.420 box delta (v0.30.424) | see §4b |
+| `bigMelee` vertical gate | centre-to-centre → **feet-to-feet** (v0.30.424) | see §4b |
 | `_MOB_SPRITE_FOOT_NUDGE`, `BOSS_DRAW_SCALE`, `_BOSS_ATK_SCALE` | unchanged (`slime 0.14` / `gravitos 0.95` / `kingKrook 1.10`) | |
 
 ### 1e. Generated tables regenerated in range (not authored)
@@ -89,7 +96,7 @@ pathsBane, smithgolem, tombKeeper, gravitos3*, kingKrook*, zodiac_cancer are now
 every art drop: gravitos2 laser/punch (`efcc94b0`), aetherionastral frames (`c0a516ac`), Gravitos
 Ascendant/Awakened + the eight-boss repaint (`53b9abcd`, `5490ff82`, `c132fc86`), the 16-frame
 punch (`162e7c5e`), the void tear (`5536174a`), the A-press stances (`a68b4d62`). All pass
-`animator_parity_check.mjs` 9/9 at the tip.
+`animator_parity_check.mjs` 10/10 at the tip (the tenth check, added in v0.30.424, asserts the animator's mirrored draw constants equal the game's).
 
 ---
 
@@ -152,18 +159,66 @@ counts the frame index records.
 
 ---
 
-## 4. Hitbox-coverage pass (draft v0.30.418) — **NOT LANDED**
-
-Lives only in the working copy (`hitbox_coverage_2026-09-07.md`, `scripts/hitbox_coverage_*.mjs`);
-`monster_hitboxes.js`, `monsterTypes` w/h and `LX_MOB_SCALE_DATA` on `origin/main` are unchanged
-(echoKnight is still 110×130 at scale 1.12). Recorded here so it lands in this document, not a fourth.
+## 4. Hitbox-coverage pass — **landed as v0.30.420** (`ed23f9f4`), consequences fixed in v0.30.424
 
 Method: `scripts/hitbox_coverage_probe.mjs` maps each type's drawn visible pixels (alpha box; padding
 and effect art excluded) to the screen against its box. New height = visible height above the floor;
 new width = 85 % of visible width; the draw multiplier (`LX_MOB_SCALE_DATA` for mobs, `BOSS_DRAW_SCALE`
-for bosses, `_Z_BOX_ABS` + `BOSS_DRAW_SCALE` for zodiac signs) is lowered by old h / new h so the sprite
-on screen does not move. 112 boxes would change (91 mobs, 21 bosses); left alone: gravitos (box
-deliberately larger than its art), frog and axolotl (probe caught their shadows). Full proposed table:
+for bosses, a new `_Z_BOX_ABS` table for the twelve zodiac signs) is lowered by old h / new h so the
+sprite on screen does not move. **118 boxes changed** (the v0.30.418 draft said 112; the landed pass
+corrected several bosses whose earlier probe had measured the stagger rim stamp as the body — e.g.
+kingKrook 385×351 → 347×344, capricorn 377×360 → 231×244). Left alone: gravitos (box deliberately
+larger than its art), frog and axolotl (probe caught their shadows). `scripts/hitbox_coverage_test.mjs`
+holds the contract (box as planned; covers the standing art 85–115 %; 74–106 % of visible width; the
+game's own visual target size within 6 % of the pre-change build) — 31/31 on the tip, 119/119 with
+`--all`. The separate `hitbox_coverage_2026-09-07.md` is now a pointer here.
+
+### 4a. Landed table (draft rows shown where the landed value differs are corrected in place)
+
+The draft table below is kept as the record of the pass; the landed values for the rows that changed
+between draft and landing: kingKrook 347×344 mul 0.7558 · zodiac_capricorn 231×244 · zodiac_aries
+186×272 · zodiac_scorpio 217×218 · zodiac_libra 181×250 · zodiac_pisces 311×339 · zodiac_leo 296×315 ·
+zodiac_taurus 283×290 · zodiac_aquarius 199×277 · zodiac_gemini 160×165 · zodiac_virgo 290×242 ·
+echoKnight 170×230 mul 0.633 · legosaurus 388×293 mul 1.6246 · young_confused_barnaby 141×195 ·
+sundered_smith 208×246 · ossuaryTyrant 259×323 · blightElder 308×327 · archon 89×136 · mirageStalker
+80×108 · towerStormcaller 80×98 · coralImp 54×75. Everything else landed as drafted.
+
+### 4b. What the growth broke — and the v0.30.424 fix (`130e4fac`)
+
+`bigMelee` had two axes coupled to the box, and the pass changed the box without moving the sprite:
+
+- **x — reach beyond the edge shrank by half the growth.** The trigger is centre-to-centre
+  (`|playerCx − (m.x + m.w/2)| < range`). Legosaurus 224→388: reach 68 px → **−14**; Blight Elder
+  130→308: 85 → **−4** — both could only swing at a player already inside the box. Twelve more shrank
+  7–75 px (Ossuary Tyrant 105 → 31, Sundered Smith 100 → 66, Echo Knight 95 → 65, Goblin Mauler 85 → 64 …);
+  three that shrank in width gained (nougatBear, blockGary, blockTigreal). Fix: `range` carries half the
+  box delta on the 20 def-level swingers whose width changed (Legosaurus 180 → 262, Blight Elder 150 → 239,
+  Ossuary Tyrant 160 → 235, Echo Knight 150 → 180, nougatBear 120 → 107 …), and the three swing zodiac
+  signs (aries, capricorn, pisces) carry their reach beyond the old `110 + 4·order` box onto `_Z_BOX_ABS`
+  in the builder (the box table is hoisted above the sig-move block so it is declared before use).
+  `melee_reach_test.mjs` pins every swinger's reach-beyond-edge to its pre-v0.30.420 value (±1 px).
+- **y — grounded players fell outside the gate.** It was `|playerCy − (m.y + m.h/2)| < swingH`, so a
+  taller box moved the centre away from a standing player: Blight Elder (gap 142 vs swingH 100), Ossuary
+  Tyrant (140 vs 100), Echo Knight (93 vs 90) and Legosaurus (125 vs 110) could not swing at a grounded
+  player at all; none were out before. Fix: the gate is feet-to-feet, `|(player.y + player.h) − (m.y + m.h)|
+  < swingH` — "within swingH of my floor line", independent of any box.
+- **The swing projectile itself** still spawns at the box edge, so it now starts at 85 % of the visible
+  width rather than deep inside the body — the more accurate of the two; left as landed.
+
+### 4c. Cancer's "STATE SHIFT idle 347 / walk 248 (1.40×)" is a metric artefact — not scaled, by design
+
+The manifest's per-frame content boxes for `zodiac_cancer` (1417×1417 canvases; rows are content top →
+bottom): idle frames 0 and 8 **387 → 1416**, walk **378–404 → 1383–1414**, attack **387–447 → 1415**. The
+crab's *body* spans the same ~72 % of its canvas in every state. Idle frames 1–7 carry baked water
+effects that reach the canvas top (rows **0–77 → 1414**), which an alpha-box metric counts as body — that
+is the "347". A state scale of 1.40 / 1.37 was authored on the keys the zodiac path actually reads
+(`zodiac/walk`, `zodiac/attack` — v0.30.408's plain `walk`/`attack` keys were never looked up), measured
+live through the scene transform captured at `drawMonster` entry, and **withdrawn**: it enlarged the
+walking crab 40 % past its real size (walk frames drew 467 px tall). Before any zodiac state is
+re-scaled, the sprite-fit and coverage metrics need an effect-excluding body box (the pipeline's
+`coreMetrics(dark: true)` idea). The calib ships byte-identical to origin.
+
+The draft table as recorded before landing:
 
 | type | boss | old w×h | new w×h | covers before → after | draw mul before → after |
 |---|---|---|---|---|---|
@@ -324,11 +379,13 @@ A third copy of the ladder shape with its own two tables.
 
 **F1 — the ladder exists three times.** `_lxMobPlantDy` (game), the Monster Plant preview
 (`_lxMpDrawPreview`, re-implements steps 2/4/5/10 and skips 6–9), and `monster_animator.html`'s
-"verbatim" constants. **F1b — and the mirror has already drifted:** the animator's `ATK_FRAME_SCALE`
-still carries `fatDragon 1.951`, `smithgolem 1.881`, `conductorMech 1.69` while the game has
-`fatDragon 1.199` and no entry for the other two (v0.30.239 / v0.30.403 / v0.30.415 changed the
-game; the mirror was not updated). The animator previews those attacks at the wrong size today —
-the exact failure class the Echo Knight +7 was.
+"verbatim" constants. **F1b — the mirror had drifted, and is now fenced (v0.30.424):** the animator's
+`ATK_FRAME_SCALE` carried `fatDragon 1.951`, `smithgolem 1.881`, `conductorMech 1.69` while the game had
+`fatDragon 1.199` and no entry for the other two (v0.30.239 / v0.30.403 / v0.30.415 changed the game;
+the mirror was not updated), and its `SIZE_STRICT` had 5 of the game's 14. Both re-synced; tombKeeper
+centred at 1.70 in both. `animator_parity_check.mjs` now parses `ATK_FRAME_SCALE`, `SIZE_STRICT`,
+`ATK_NOSHRINK`, `BOSS_ATK_SCALE`, `FOOT_NUDGE`, the pre/post-clamp px lines and the five frame-ms
+constants from BOTH files and asserts equality — the drift class is caught by a command now.
 
 **F2 — four independent vertical knobs** (6, 7, 9, 10; calib `dy` a fifth for animated states),
 differing only in where they sit relative to the clamp.
@@ -362,3 +419,34 @@ scan). The mob path anchors frames on the *static*'s bbox; the boss path per fra
 
 Steps 1–2 are mechanical and provable with the golden test; 3–5 change real numbers and want the
 same per-type before/after measurement the Echo Knight and Legosaurus passes used.
+
+## 7. Final in-game sizes as the animator reports them (v0.30.424, game scale on)
+
+Read straight from `monster_animator.html`'s in-game metrics (`__app.gameMetrics`) with the v0.30.424 files;
+all 156 entities report a real in-game size (no 220 px preview fallbacks). Render size is the blit box the
+game draws each state into (hitbox h × 1.5 × canvas factor × draw multiplier, × the state's calib scale and
+attack padding multiplier). A contact sheet of these sixteen at game scale was delivered with the 2026-09-07
+reply; regenerate by driving the animator with game scale on.
+
+| entity | hitbox w×h | draw mul | idle | walk | attack |
+|---|---|---|---|---|---|
+| echoKnight | 170×230 | 0.95 | 224×242 | 224×242 | 470×508 |
+| legosaurus | 388×293 | 1.6246 | 752×437 | 752×437 | 752×437 |
+| zodiac_cancer | 282×341 | 0.739 | 349×349 | 349×349 | 349×349 |
+| blightElder | 308×327 | 1.176 | 576×461 | 576×461 | 576×461 |
+| ossuaryTyrant | 259×323 | 1.321 | 614×512 | 614×512 | 614×512 |
+| kingKrook | 347×344 | 0.7558 | 535×416 | 539×419 | 541×421 |
+| pathsBane | 155×261 | 0.879 | 247×275 | 247×275 | 396×441 |
+| forgewight | 128×187 | 1.042 | 210×194 | 212×196 | 616×569 |
+| tombKeeper | 86×124 | 0.882 | 131×131 | 131×131 | 223×223 |
+| smithgolem | 96×74 | 1.383 | 123×123 | 123×123 | 123×123 |
+| fatDragon | 112×124 | 0.944 | 140×140 | 140×140 | 168×168 |
+| conductorMech | 76×64 | 1.83 | 117×117 | 117×117 | 117×117 |
+| gravitos | 340×380 | 0.95 | 636×578 | 654×594 | 636×578 |
+| aetherion | 309×275 | 1.1636 | 1011×809 | 669×535 | 1024×819 |
+| sundered_smith | 208×246 | 1.1382 | 531×354 | 585×390 | 732×488 |
+| slime | 42×47 | 1.323 | 62×56 | 62×56 | 62×56 |
+
+The full 156-row table is regenerable in one command from the animator; the sixteen above are the ones
+this week's passes touched or discussed. Attack columns include each type's `_ATK_FRAME_SCALE` padding
+multiplier where one exists (echoKnight 2.10, forgewight 2.327, pathsBane 1.604, tombKeeper 1.70, fatDragon 1.199).
