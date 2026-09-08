@@ -98,6 +98,48 @@ Ascendant/Awakened + the eight-boss repaint (`53b9abcd`, `5490ff82`, `c132fc86`)
 punch (`162e7c5e`), the void tear (`5536174a`), the A-press stances (`a68b4d62`). All pass
 `animator_parity_check.mjs` 10/10 at the tip (the tenth check, added in v0.30.424, asserts the animator's mirrored draw constants equal the game's).
 
+### 1f. Animator patch bakes, 2026-09-08 (`330da2fc`, `47507139`, `88f57026`)
+
+Sixteen `LX_ANIM_PATCH:1` blobs pasted by the user, hardbaked with `apply_anim_patch.mjs` on
+v0.30.426. The values are the user's, verbatim. Every `ft` in the first nine and the four
+re-emitted hitbox blocks in the last seven were byte-identical to the bake, so `LX_ATK_HITBOX` is
+unchanged; the other 140 entities are untouched (semantic diff of both tables per commit).
+
+| entity | change |
+|---|---|
+| deranged_kuro | attack dy 0 → 0.1 |
+| echoKnight | idle dy 0.005, walk dy −0.005 (new) — 1.21 px on top of the v0.30.419 ladder (4.84 px) |
+| elderbark | idle / walk / attack dy −0.015 (new) |
+| octoLegFreeze / Stun / Poison / SkillLock | dy 0.03 → 0.01 in every state |
+| ossuaryTyrant | idle dy 0.015, walk dy 0.01, attack dy 0.015 (new) |
+| pathsBane | walk dy −0.005, attack dy 0.075 (new) |
+| gravitos2laser | attack dy 0.035 → 0.04; `ft` → [72,60,60,81,151,96,60,51,56] (hand-timed) |
+| gravitos2 | idle / walk dy 0.045 → 0.025, attack dy 0.03 → 0.025 |
+| gravitos3 | attack s 1.08 → 1.12 |
+| gravitos3punch | attack dy 0.0294 → 0.035; `ft` → [76,66,66,61,116,101,146,121,91] |
+| gravitos3soul | attack `fs` [1,1,1,1.12,1,1,1,1,1] added; `ft` → [86,81,76,61,91,106,126,81,96] |
+| gravitos | attack dy 0.015 → 0.02; `ft` → [72,60,101,126,171,136,90,66,91] (hand-timed) |
+| aetherion | idle dy 0.165 → 0.16, walk dy 0.02 → 0.01, attack dy 0.01 → −0.01 |
+
+Two things the bake surfaced:
+
+- **`ftAuto` was being dropped by every patch.** The flag marks a timing as the generator's
+  (`gen_attack_timing` refreshes those and never touches the rest); the animator export does not
+  carry it, so a patch that re-emitted an *identical* timing silently froze it. The script now keeps
+  the flag when the timing is unchanged, and six older entries that had lost it the same way
+  (echoKnight, forgewight, ossuaryTyrant, pathsBane, smithgolem, tombKeeper — all equal to the
+  generator's) got it back, metadata only. `mob_attack_timing_test`'s rule check now names only
+  conductorMech (strike dwell 172 vs the generator's 143 — genuinely hand-timed, left as is).
+- **`echoknight_plant_test`** nets the authored idle offset (dy × targetH, as the draw path applies
+  it) out of its real-draw check; the engine ladder itself is unchanged at 4.84 px. 6/6.
+
+Green on the baked files: animator parity 10/10, hitbox coverage 31/31, Echo Knight 6/6, mob plant
+10/10, mob and boss frame timing 5/5 and 11/11, boss attack timing 11/11, animator timing UI 7/7.
+Pre-existing on v0.30.426 and reproduced on origin's own calib, so not from the bakes: sprite-fit
+ossuaryTyrant (its idle body reads 305 px on one base and 405–509 px on the next with identical
+ossuaryTyrant data — the arbiter appears to sample different idle frames), `gravitos_plant_test`
+(five AI movement checks), `boss_walk_timing_test` (aetherion stride), `boss_frame_timing_test`
+("a type without ft"), `mob_cast_plant_test` ("casting beats walk").
 ---
 
 ## 2. Echo Knight plant (v0.30.419)
