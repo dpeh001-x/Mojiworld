@@ -12,6 +12,11 @@ Play the latest `main` build straight from GitHub (correct MIME, always the bran
 
 **▶ https://raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html**
 
+### ♥ Support the project
+
+Mojiworld is built in the open by one person. If you want to see it finished:
+**▶ https://www.patreon.com/c/Mojiworld**
+
 Reviewers can bookmark the stable preview build (whatever is currently under review):
 
 **▶ https://raw.githack.com/dpeh001-x/Mojiworld/preview/mojiworld_game.html**
