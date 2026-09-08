@@ -815,7 +815,8 @@ window.LX_ANIM_CALIB = {
         151,
         108,
         115
-      ]
+      ],
+      "ftAuto": true
     }
   },
   "king": {
@@ -1804,7 +1805,8 @@ window.LX_ANIM_CALIB = {
         155,
         108,
         115
-      ]
+      ],
+      "ftAuto": true
     }
   },
   "elderbark": {
@@ -2213,7 +2215,8 @@ window.LX_ANIM_CALIB = {
         72,
         72,
         115
-      ]
+      ],
+      "ftAuto": true
     }
   },
   "pathsBane": {
@@ -2236,7 +2239,8 @@ window.LX_ANIM_CALIB = {
         147,
         108,
         115
-      ]
+      ],
+      "ftAuto": true
     }
   },
   "pearlSprite": {
@@ -2520,7 +2524,8 @@ window.LX_ANIM_CALIB = {
         72,
         72,
         115
-      ]
+      ],
+      "ftAuto": true
     }
   },
   "snail": {
@@ -2762,7 +2767,8 @@ window.LX_ANIM_CALIB = {
         72,
         72,
         115
-      ]
+      ],
+      "ftAuto": true
     }
   },
   "tombWraith": {
