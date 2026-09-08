@@ -75,9 +75,11 @@ const r = await page.evaluate(async () => {
     };
     try { drawMonster(m); } finally { CanvasRenderingContext2D.prototype.drawImage = P; }
     const fr = recs.find(q => q.img && q.d.length >= 4 && (q.img.naturalWidth || q.img.width) > 200);
-    const sh = recs.find(q => q !== fr);
     if (!fr) return null;
-    const Vs = sh ? sh.tr[0] : fr.tr[0], Vf = sh ? sh.tr[3] : 0;
+    // v0.30.420+ the mob draw emits no shadow blit to borrow the scene transform
+    // from, and the x-axis flips with facing - so the vertical mapping comes
+    // from the blit's OWN y-scale (never flipped) and the camera (0 here)
+    const Vs = Math.abs(fr.tr[1]), Vf = (game.camera.y || 0) * Vs;
     const ly = fr.tr[1] / Vs, wy = (fr.tr[3] - Vf) / Vs;
     const dn = fr.d.length, dy = fr.d[dn - 3], dh = fr.d[dn - 1];
     const y1 = Math.min(wy + ly * dy, wy + ly * (dy + dh)), y2 = Math.max(wy + ly * dy, wy + ly * (dy + dh));

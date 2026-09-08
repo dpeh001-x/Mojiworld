@@ -125,9 +125,10 @@ const r = await page.evaluate(async () => {
       mb.facing = 1;
       try { drawMonster(mb); } finally { CanvasRenderingContext2D.prototype.drawImage = P; }
       const fr = recs.find(q => q.img && q.img.src && /legosaurus/.test(q.img.src) && q.d.length >= 4);
-      const sh = recs.find(q => q !== fr);
-      if (!fr || !sh) continue;
-      const Vs = sh.tr[0], Ve = sh.tr[2], Vf = sh.tr[3];
+      if (!fr) continue;
+      // the y-scale is never flipped by facing, so it is the scene zoom; the
+      // camera is pinned at 0,0 here, so translate = world * zoom
+      const Vs = Math.abs(fr.tr[1]), Ve = (game.camera.x || 0) * Vs, Vf = (game.camera.y || 0) * Vs;
       const lx = fr.tr[0] / Vs, ly = fr.tr[1] / Vs;
       const wx = (fr.tr[2] - Ve) / Vs, wy = (fr.tr[3] - Vf) / Vs;
       const dn = fr.d.length, dx = fr.d[dn - 4], dy = fr.d[dn - 3], dw = fr.d[dn - 2], dh = fr.d[dn - 1];
@@ -166,12 +167,23 @@ const r = await page.evaluate(async () => {
     ? { impactMs: m.traits.bigMelee.impactMs, impactShake: m.traits.bigMelee.impactShake } : null;
   let swingP = null;
   if (m) {
-    player.x = m.x + m.w + 40; player.y = m.y; player.hp = Math.max(500, player.hp);
+    // on his floor line, 40 px outside his box - the swing gate is feet-to-feet
+    // and centre-to-centre in x with the v0.30.42x reach compensation
+    // the drive can take a few hundred frames beside a boss whose box now reaches
+    // the player - keep the player alive through it (contact damage killed the
+    // save once the box grew, and a dead player swallows the hit probe below)
+    player.invulnerable = 9e9; player.hp = player.maxHp = Math.max(player.maxHp || 0, 999999);
+    // re-pin the player EVERY frame: the boss shifts on its first update and the
+    // boot map has no floor under this y, so a one-time placement drifts out of
+    // both gates (measured: dx 336 vs range 262, feet 113 px apart). 30 px outside
+    // the box, feet on his floor line - inside the centre-to-centre reach.
     for (let f = 0; f < 900 && !swingP; f++) {
+      player.x = m.x + m.w + 30; player.y = m.y + m.h - player.h; player.vx = 0; player.vy = 0;
       game.time++;
       try { updateMonsters(16); } catch (e) {}
       swingP = (game.projectiles || []).find((p) => p && p.skill === 'swing' && p._swingType === 'legosaurus');
     }
+    player.invulnerable = 0;
   }
   out.swingCarries = swingP ? { impactMs: swingP._impactMs, impactShake: swingP._impactShake } : null;
 

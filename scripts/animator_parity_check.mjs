@@ -100,6 +100,43 @@ for (let p = 8840; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
 const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore', cwd: root });
 await new Promise((r) => setTimeout(r, 2200));
 
+// ---- v0.30.424 - MIRRORED CONSTANTS. The animator carries hand-copied 'verbatim' copies of
+// the game's draw tables; the Echo Knight +7 and the ATK_FRAME_SCALE drift (fatDragon
+// 1.951 vs 1.199, two entries the game no longer had) were both found by reading. This
+// reads them for you: every table below must be EQUAL in both files.
+{
+  const gameSrc = readFileSync(join(root, 'mojiworld_game.html'), 'utf8');
+  const animSrc = readFileSync(join(root, 'monster_animator.html'), 'utf8');
+  const mapOf = (src, re) => { const m = src.match(re); if (!m) return null; const o = {};
+    for (const [, k, v] of m[1].matchAll(/([a-zA-Z_][a-zA-Z0-9_]*): *([0-9.]+)/g)) o[k] = +v; return o; };
+  const setOf = (src, re) => { const m = src.match(re); if (!m) return null; return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort(); };
+  const canon = (o) => o && Object.keys(o).sort().reduce((r, k) => (r[k] = o[k], r), {});
+  const same = (a, b) => JSON.stringify(Array.isArray(a) ? a : canon(a)) === JSON.stringify(Array.isArray(b) ? b : canon(b));
+  const pairs = [
+    ['ATK_FRAME_SCALE', mapOf(gameSrc, /const _ATK_FRAME_SCALE = Object\.assign\(Object\.create\(null\), \{([\s\S]*?)\}\);/), mapOf(animSrc, /const ATK_FRAME_SCALE = \{([\s\S]*?)\};/)],
+    ['SIZE_STRICT', setOf(gameSrc, /const _BOSS_SIZE_STRICT = new Set\(\[([\s\S]*?)\]\);/), setOf(animSrc, /const SIZE_STRICT = new Set\(\[([\s\S]*?)\]\);/)],
+    ['ATK_NOSHRINK', setOf(gameSrc, /const _BOSS_ATK_NOSHRINK = new Set\(\[([^\]]*)\]\);/), setOf(animSrc, /const ATK_NOSHRINK = new Set\(\[([^\]]*)\]\);/)],
+    ['BOSS_ATK_SCALE', mapOf(gameSrc, /const _BOSS_ATK_SCALE = \{([^}]*)\}/), mapOf(animSrc, /const BOSS_ATK_SCALE = \{([^}]*)\}/)],
+    ['FOOT_NUDGE', mapOf(gameSrc, /const _MOB_SPRITE_FOOT_NUDGE = \{([^}]*)\}/), mapOf(animSrc, /const FOOT_NUDGE_FRAC = \{([^}]*)\}/)],
+  ];
+  // per-type px pushes: the game writes them as lines, the animator as two maps
+  const gamePost = {}, gamePre = {};
+  { const fn = gameSrc.match(/function _lxMobPlantDy\([\s\S]*?\n\}/); const body = fn ? fn[0] : '';
+    const clampAt = body.indexOf('_BURY_MAX_PX = 6');
+    // one line may name several types: `(type === 'a' || type === 'b')) dy += 5;`
+    for (const m of body.matchAll(/if \(!isFloating && (.+?)\) dy \+= (\d+);/g)) { const t = (m.index < clampAt) ? gamePre : gamePost;
+      for (const n of m[1].matchAll(/type === '([a-zA-Z_]+)'/g)) t[n[1]] = (t[n[1]] || 0) + +m[2]; } }
+  pairs.push(['PRE_CLAMP_PX', gamePre, mapOf(animSrc, /const PRE_CLAMP_PX = \{([^}]*)\}/)]);
+  pairs.push(['POST_CLAMP_PX', gamePost, mapOf(animSrc, /const POST_CLAMP_PX = \{([^}]*)\}/)]);
+  const ms = (name) => { const m = gameSrc.match(new RegExp('const _BOSS_' + name + '_FRAME_MS = (\\d+)')); return m ? +m[1] : null; };
+  const gameMs = { idle: ms('IDLE'), walk: ms('WALK'), attack: ms('ATK'), duck: ms('DUCK'), weave: ms('WEAVE') };
+  const animMsAll = mapOf(animSrc, /const GAME_FRAME_MS = \{([^}]*)\}/) || {};
+  const animMs = { idle: animMsAll.idle, walk: animMsAll.walk, attack: animMsAll.attack, duck: animMsAll.duck, weave: animMsAll.weave };
+  pairs.push(['FRAME_MS', gameMs, animMs]);
+  const bad = pairs.filter(([, a, b]) => a == null || b == null || !same(a, b)).map(([n, a, b]) => n + ' game=' + JSON.stringify(a) + ' animator=' + JSON.stringify(b));
+  ok('the animator\'s mirrored draw constants equal the game\'s', bad.length === 0, bad.join(' | ') || null);
+}
+
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 try {
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
