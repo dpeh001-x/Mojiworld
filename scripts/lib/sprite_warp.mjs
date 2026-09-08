@@ -41,6 +41,25 @@ export function measure(buf, W, H) {     // ink box (a>16), edge px, stone-body 
     if (a >= 200) { const R = buf[o], G = buf[o + 1], B = buf[o + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B); if ((mx ? (mx - mn) / mx : 0) < 0.25 && (R + G + B) / 3 > 120) { if (st < 0) st = y; sb = y; } } }
   return { t, b, l, r, edge, stoneH: sb - st + 1, stoneTop: st, margin: Math.min(l, W - 1 - r, t) };
 }
+// The two red eyes as a PAIR: saturated-red components (4px grid), roughly square,
+// side by side at one height, spacing 1.4-3.0x their height, in the upper half of
+// the ink box. Returns {x1,x2,y,h,spacing} or null. The spacing is a rigid facial
+// measure: invariant to arms, hammer and lean, it changes only with scale or a turn.
+export function findEyes(buf, W, H) {
+  const g = 4, GW = Math.ceil(W / g), GH = Math.ceil(H / g); const red = new Uint8Array(GW * GH); let inkT = H, inkB = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const o = (y * W + x) * 4; if (buf[o + 3] > 128) { if (y < inkT) inkT = y; if (y > inkB) inkB = y; if (buf[o] > 170 && buf[o + 1] < 110 && buf[o + 2] < 100) red[(y / g | 0) * GW + (x / g | 0)] = 1; } }
+  const seen = new Uint8Array(GW * GH), comps = [];
+  for (let i = 0; i < GW * GH; i++) { if (!red[i] || seen[i]) continue; const st = [i]; seen[i] = 1; let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1, n = 0;
+    while (st.length) { const c = st.pop(); const cx = c % GW, cy = (c / GW) | 0; n++; if (cx < x0) x0 = cx; if (cx > x1) x1 = cx; if (cy < y0) y0 = cy; if (cy > y1) y1 = cy;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = cx + dx, ny = cy + dy; if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue; const j = ny * GW + nx; if (red[j] && !seen[j]) { seen[j] = 1; st.push(j); } } }
+    const w = (x1 - x0 + 1) * g, h = (y1 - y0 + 1) * g; if (w < 12 || h < 12 || w / h < 0.55 || w / h > 1.8 || n * g * g < 0.5 * w * h) continue; comps.push({ cx: (x0 + x1 + 1) / 2 * g, cy: (y0 + y1 + 1) / 2 * g, w, h }); }
+  let best = null; const half = inkT + (inkB - inkT) * 0.5;
+  for (const a of comps) for (const b of comps) { if (a === b || a.cx >= b.cx) continue; const h = Math.max(a.h, b.h); if (Math.abs(a.cy - b.cy) > 0.5 * h || a.cy > half || b.cy > half) continue;
+    // the static's eyes: 48px squares 146px apart -> ratio 3.04; window 1.6-4.4, scored around 3.0
+    const dx = b.cx - a.cx, r = dx / h; if (r < 1.6 || r > 4.4) continue; const sim = Math.max(a.w * a.h, b.w * b.h) / Math.min(a.w * a.h, b.w * b.h); if (sim > 2) continue;
+    const score = Math.abs(r - 3.0) + (sim - 1) * 0.5; if (!best || score < best.score) best = { x1: a.cx, x2: b.cx, y: (a.cy + b.cy) / 2, h, spacing: dx, score }; }
+  return best;
+}
 // red "eye" blobs in a row band: clusters of saturated red columns >= 8px wide
 export function eyeBlobs(buf, W, y0, y1, x0 = 0, x1 = W) {
   const cols = new Uint8Array(W);

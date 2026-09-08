@@ -22,6 +22,7 @@
 //   node scripts/smithgolem_scale_test.mjs   (MOJI_GAME_FILE overrides the build)
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { findEyes } from './lib/sprite_warp.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const sharp = require('sharp'); sharp.cache(false); const { chromium } = require('playwright-core');
 const PORT = Number(process.env.PORT || 10136);
@@ -37,15 +38,21 @@ async function stone(p, atk) {
   const ox = Math.round((W - 1024) / 2), cols = new Uint8Array(W), x0 = 220 + ox - (atk ? 60 : 0), x1 = 620 + ox + (atk ? 160 : 0);
   for (let y = st + 40; y < st + 170; y++) for (let x = x0; x < x1; x++) { const o = (y * W + x) * 4; if (data[o + 3] > 128 && data[o] > 170 && data[o + 1] < 110 && data[o + 2] < 100) cols[x] = 1; }
   let eyes = 0, run = 0; for (let x = 0; x <= W; x++) { if (x < W && cols[x]) run++; else { if (run >= 8) eyes++; run = 0; } }
-  return { W, H, edge, l, r, t, b, stoneH: sb - st + 1, margin: Math.min(l, W - 1 - r, t), eyes };
+  const pair = findEyes(data, W, H);   // the two eyes as a pair: their spacing is a rigid facial measure, immune to dust and hammer
+  return { W, H, edge, l, r, t, b, stoneH: sb - st + 1, margin: Math.min(l, W - 1 - r, t), eyes, spacing: pair ? pair.spacing : 0 };
 }
 const rows = []; for (const s of ['idle', 'walk', 'attack']) for (let i = 0; i < 9; i++) rows.push({ s, i, m: await stone(path.join(ROOT, 'Sprites/monsters', s, `smithgolem_${i}.webp`), s === 'attack') });
 const ref = rows.filter(r => r.s === 'idle').reduce((a, r) => a + r.m.stoneH, 0) / 9;
-ok('all 27 frames: grey-stone body height within 6% of the idle mean (no per-frame rescale needed)', rows.every(r => Math.abs(r.m.stoneH / ref - 1) <= 0.06), rows.map(r => (100 * r.m.stoneH / ref).toFixed(0) + '%').join(' '));
+// idle/walk are the cut-out rig: the grey-stone span is the body. The attack is a ludo.ai
+// set (2026-09-08 pass) whose dust and hammer highlights inflate that span, so its body size is
+// pinned by the EYE SPACING instead - the static's 146px, within 5% in every frame.
+const REF_SPACING = (await stone(path.join(ROOT, 'Sprites/monsters/smithgolem.webp'), false)).spacing;
+ok('idle + walk: grey-stone body height within 6% of the idle mean (no per-frame rescale needed)', rows.filter(r => r.s !== 'attack').every(r => Math.abs(r.m.stoneH / ref - 1) <= 0.06), rows.filter(r => r.s !== 'attack').map(r => (100 * r.m.stoneH / ref).toFixed(0) + '%').join(' '));
+ok('attack: both eyes found as a pair in every frame and their spacing within 5% of the static sprite (one head size, never turned away)', REF_SPACING > 0 && rows.filter(r => r.s === 'attack').every(r => r.m.spacing > 0 && Math.abs(r.m.spacing / REF_SPACING - 1) <= 0.05), 'ref ' + REF_SPACING + ' / ' + rows.filter(r => r.s === 'attack').map(r => r.m.spacing).join(','));
 ok('no frame touches its canvas edge and every side keeps >= 30px', rows.every(r => r.m.edge === 0 && r.m.margin >= 30), 'min margin ' + Math.min(...rows.map(r => r.m.margin)));
 const bottoms = [...new Set(rows.map(r => r.m.b))]; ok('every ink bottom sits on one row', bottoms.length === 1, 'rows ' + bottoms.join(','));
 ok('all 27 frames are 1280x1024 (128px added each side for the slam; the body stays centred)', rows.every(r => r.m.W === 1280 && r.m.H === 1024), [...new Set(rows.map(r => r.m.W + 'x' + r.m.H))].join(','));
-ok('the golem faces the camera in every frame: two red eyes in idle/walk, at least one in the attack where the raised hammer crosses the face (the old attack 3-4 turned away)', rows.every(r => r.m.eyes >= 1) && rows.filter(r => r.s !== 'attack').every(r => r.m.eyes === 2), rows.map(r => r.m.eyes).join(''));
+ok('idle + walk face the camera in every frame: exactly two red eyes in the head band (the attack is covered by the eye-pair rule above)', rows.filter(r => r.s !== 'attack').every(r => r.m.eyes === 2), rows.filter(r => r.s !== 'attack').map(r => r.m.eyes).join(''));
 const cs = readFileSync(path.join(ROOT, 'data', 'anim_calib.js'), 'utf8'); const calib = JSON.parse(cs.slice(cs.indexOf('window.LX_ANIM_CALIB = ') + 23, cs.indexOf('window.LX_ATK_HITBOX')).trim().replace(/;\s*$/, ''));
 ok('the calib carries NO per-frame scale for the smith golem (the pulse is gone at its source)', !(calib.smithgolem && calib.smithgolem.attack && calib.smithgolem.attack.fs), JSON.stringify(calib.smithgolem || null).slice(0, 120));
 
@@ -92,8 +99,12 @@ try {
   ok('the feet stay on one line (bottoms within 3px)', good && Math.max(...hs.map((x) => x.bottom)) - Math.min(...hs.map((x) => x.bottom)) <= 3, good ? hs.map((x) => x.bottom.toFixed(1)).join(' / ') : '');
   const px = r.px || {}; const pv = ['i0', 'w4', 'a0', 'a3', 'a6'].map((k) => px[k]); const pgood = pv.every((x) => x && !x.err && x.h > 20);
   console.log('rendered ink heights (what the player sees) idle0/walk4/atk0/atk3/atk6: ' + (pgood ? pv.map((x) => x.h).join(' / ') : JSON.stringify(px)));
-  const pmax = pgood ? Math.max(...pv.map((x) => x.h)) : 0, pmin = pgood ? Math.min(...pv.map((x) => x.h)) : 0;
-  ok('rendered on screen, idle / walk / attack frames are one height within 6% (the pulse is gone for the player)', pgood && (pmax - pmin) / pmax <= 0.06, pgood ? pv.map((x) => x.h).join(' / ') : '');
+  // idle/walk (the rig) render at one height. The painted attack frames raise the hammer over
+  // the head and throw chips, so their INK is taller - the body under it is pinned by the
+  // eye-pair rule above. On screen they may only be taller than idle (never smaller), by <= 30%.
+  const ih = pgood ? px.i0.h : 0;
+  ok('rendered on screen, idle and walk are one height within 6% (the pulse is gone for the player)', pgood && Math.abs(px.w4.h / ih - 1) <= 0.06, pgood ? px.i0.h + ' / ' + px.w4.h : '');
+  ok('rendered on screen, attack frames are never smaller than idle and at most 30% taller (raised hammer, chips)', pgood && ['a0', 'a3', 'a6'].every((k) => px[k].h >= ih * 0.97 && px[k].h <= ih * 1.3), pgood ? ['a0', 'a3', 'a6'].map((k) => px[k].h).join(' / ') + ' vs idle ' + ih : '');
   ok('rendered ink bottoms sit on one line (within 3px)', pgood && Math.max(...pv.map((x) => x.bottom)) - Math.min(...pv.map((x) => x.bottom)) <= 3, pgood ? pv.map((x) => x.bottom).join(' / ') : '');
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } finally { await browser.close(); server.kill(); }
