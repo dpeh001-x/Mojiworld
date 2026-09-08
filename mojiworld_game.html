@@ -7503,6 +7503,17 @@
     #enhance-anvil { display: none; }
     #enhance-modal .modal { padding-left: 14px !important; }
   }
+
+  /* v0.30.449 — HUD SIZE. zoom (not transform) so each element keeps its own anchoring as it
+     scales: a corner-pinned readout stays in its corner and a percentage-centred bar stays
+     centred, which transform: scale() would need a per-element origin to match. Deliberately
+     excludes #game, the full-screen effect layers (map fade, boss intro, vignette, story
+     beats, area title) and the modals — this sizes the READOUTS, so the play area, camera
+     maths and pointer mapping are untouched at any setting. */
+  #top-ui, #right-ui, #tower-hud, #map-label, #minimap, #quest-tracker,
+  #skill-bar, #hotkey-hint, #controls, #save-indicator, #version-tag {
+    zoom: var(--lx-ui-scale, 1);
+  }
 </style>
 <style>.hud-drag{cursor:grab;}.hud-drag.hud-dragging{cursor:grabbing!important;user-select:none;-webkit-user-select:none;}.hud-drag.hud-dragging *{pointer-events:none;}</style><style>.hud-drag{cursor:grab;}.hud-drag.hud-dragging{cursor:grabbing!important;user-select:none;-webkit-user-select:none;}.hud-drag.hud-dragging *{pointer-events:none;}</style></head>
 <body>
@@ -9830,6 +9841,14 @@ The sleeping world is listening.</div>
     <!-- v0.29.125 — accessibility intensity sliders (finer-grained than the
          Reduce Motion master switch): scale screen shake + fullscreen flashes
          from 0% (off) to 100% (current default). -->
+    <!-- v0.30.449 — HUD scale. Chrome only: the canvas, the camera and input mapping are untouched. -->
+    <div class="settings-row">
+      <label title="Size of the HUD: stats, skill bar, minimap, quest tracker and hints. 100% = normal. Raise it on a TV or a handheld; the play area is not affected.">HUD Size</label>
+      <div class="ctrl">
+        <input type="range" id="set-uiscale" min="80" max="150" step="5" value="100" style="--moji-slider-pct: 28.57;">
+        <span class="val" id="set-uiscale-val">100%</span>
+      </div>
+    </div>
     <div class="settings-row">
       <label title="Screen-shake intensity. 100% = normal, 0% = no shake at all. Reduce Motion overrides this to off.">Screen Shake</label>
       <div class="ctrl">
@@ -10198,7 +10217,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.448';
+const GAME_VERSION = 'v0.30.449';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -37204,6 +37223,11 @@ const LX_SETTINGS_DEFAULTS = {
   // photosensitivity + comfort controls. 100 = current behaviour; 0 = off.
   // reduceMotion remains the hard master switch (kills shake entirely, caps
   // flashes at 0.2) — these sliders give finer-grained control without it.
+  // v0.30.449 — HUD SCALE %. The only accessibility control the audit found missing: every
+  // other comfort option (rebinding, colourblind rarity, shake, flash, reduced motion,
+  // separate volumes, difficulty) already shipped. 100 = unchanged. Scales the HUD chrome
+  // only — never the canvas, so the play area, camera maths and input mapping are untouched.
+  uiScale: 100,      // HUD chrome scale % (80 - 150)
   shakePct: 100,     // screen-shake intensity % (0 - 100)
   flashPct: 100,     // full-screen flash intensity % (0 - 100, incl. black flashes)
   cbRarity: false,   // v0.29.127 — colorblind-safe loot-rarity palette
@@ -37247,7 +37271,7 @@ function _lxGetSettings() {
     // a non-number; openSettingsModal then called s.scale.toFixed(2) -> throw ->
     // the whole Settings panel wouldn't open. Coerce the numeric fields back to a
     // finite value (falling back to the default) so the UI can never throw on them.
-    for (const _k of ['scale', 'bgm', 'sfx', 'shakePct', 'flashPct']) {
+    for (const _k of ['scale', 'bgm', 'sfx', 'shakePct', 'flashPct', 'uiScale']) {
       const _v = Number(out[_k]);
       out[_k] = Number.isFinite(_v) ? _v : LX_SETTINGS_DEFAULTS[_k];
     }
@@ -37351,6 +37375,8 @@ function openSettingsModal() {
   // cached page serves pre-slider HTML).
   const _shEl = document.getElementById('set-shake'), _flEl = document.getElementById('set-flash');
   if (_shEl) { _shEl.value = s.shakePct; const _v = document.getElementById('set-shake-val'); if (_v) _v.textContent = s.shakePct + '%'; }
+  { const _ue = document.getElementById('set-uiscale');
+    if (_ue) { _ue.value = (s.uiScale != null ? s.uiScale : 100); const _uv = document.getElementById('set-uiscale-val'); if (_uv) _uv.textContent = _ue.value + '%'; } }
   if (_flEl) { _flEl.value = s.flashPct; const _v = document.getElementById('set-flash-val'); if (_v) _v.textContent = s.flashPct + '%'; }
   const _cbEl = document.getElementById('set-cbrarity');
   if (_cbEl) _cbEl.classList.toggle('on', !!s.cbRarity);   // v0.29.127 — colorblind rarity palette
@@ -37650,6 +37676,7 @@ function applySettingsLive() {
     reduceMotion: document.getElementById('set-reducemotion') ? document.getElementById('set-reducemotion').classList.contains('on') : false,
     difficulty: document.getElementById('set-difficulty') ? document.getElementById('set-difficulty').value : 'normal',
     // v0.29.125 — accessibility intensity sliders (fall back to 100 = full).
+    uiScale: document.getElementById('set-uiscale') ? parseInt(document.getElementById('set-uiscale').value, 10) : 100,
     shakePct: document.getElementById('set-shake') ? parseInt(document.getElementById('set-shake').value, 10) : 100,
     flashPct: document.getElementById('set-flash') ? parseInt(document.getElementById('set-flash').value, 10) : 100,
     cbRarity: document.getElementById('set-cbrarity') ? document.getElementById('set-cbrarity').classList.contains('on') : false,
@@ -37669,6 +37696,8 @@ function applySettingsLive() {
     if (el) el.classList.toggle('on', !!s.lowfx);
   }
   if (isNaN(s.sfx)) s.sfx = 70;     // safety: missing slider value → default
+  if (isNaN(s.uiScale)) s.uiScale = 100;
+  s.uiScale = Math.max(80, Math.min(150, s.uiScale));
   if (isNaN(s.shakePct)) s.shakePct = 100;
   if (isNaN(s.flashPct)) s.flashPct = 100;
   _lxSaveSettings(s);
@@ -37782,6 +37811,11 @@ function _applySettings(s) {
     // flash / blackFlash. Clamped 0-1; null-safe defaults handled at the
     // read sites so a pre-slider save behaves as 100%.
     game._shakeMul = Math.max(0, Math.min(1, (Number(s.shakePct != null ? s.shakePct : 100)) / 100));
+    // v0.30.449 — HUD scale. One custom property; the .lx-ui-scaled rule does the rest.
+    try {
+      const _uk = Math.max(80, Math.min(150, Number(s.uiScale != null ? s.uiScale : 100))) / 100;
+      document.documentElement.style.setProperty('--lx-ui-scale', String(_uk));
+    } catch (e) {}
     game._flashMul = Math.max(0, Math.min(1, (Number(s.flashPct != null ? s.flashPct : 100)) / 100));
     // v0.29.127 — colorblind rarity palette: JS reads game._cbRarity through
     // _lxRarityColor; the DOM side (tooltips, inventory borders) follows the
