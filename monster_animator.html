@@ -88,9 +88,9 @@
     <header>
       <h1>Monster Animator <span class="mut">v2</span></h1>
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
-      <!-- build badge: bump alongside GAME_VERSION on every animator change,
-           so a stale cached copy is identifiable at a glance -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600">build v0.30.424</span>
+      <!-- build badge: the NUMBER is resolved live - the GAME_VERSION of the commit this
+           page is served from (v0.30.434 badge rework). data-anim = this file's own version, the offline fallback -->
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600" data-anim="v0.30.434">build …</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -103,39 +103,62 @@
       // costs no GitHub rate-limit budget, so refocus probes are free.
       (function () {
         var b = document.getElementById('lx-build-badge'); if (!b) return;
-        var base = b.textContent;
+        // v0.30.434 - the NUMBER is the build. The old v0.30.424 label was this file's own last
+        // change, hand-bumped, so a page pinned at main's tip advertised an old number
+        // after every game-only push and read as stale. The badge now resolves the
+        // GAME_VERSION of the served commit: the first "vX.Y.Z" commit subject at or
+        // below the pinned sha (main's last 15 commits, ETag-cached; one extra fetch,
+        // cached per sha, when the page is further behind). A pinned page that is
+        // BEHIND main's tip jumps to the latest pinned build on open - nothing can be
+        // unsaved yet; add ?nojump to inspect an old build. Mid-session the 45s banner
+        // below still offers the jump instead of forcing it.
+        var anim = b.getAttribute('data-anim') || '';
         var m = location.href.match(/rawcdn\.githack\.com\/dpeh001-x\/Mojiworld\/([0-9a-f]{40})\//i);
         var ref = m ? m[1] : (/raw\.githack\.com\/dpeh001-x\/Mojiworld\/[^/]+\//i.test(location.href) ? 'main' : 'local');
-        if (ref === 'local') { b.textContent = base + ' · local'; return; }
-        var LS = 'lx_launcher_sha', last = 0;
+        b.title = 'build = GAME_VERSION of the commit this page is served from, resolved live from GitHub. Animator file ' + anim + '.';
+        if (ref === 'local') { b.textContent = 'build · local (animator ' + anim + ')'; return; }
+        var LS = 'lx_tip_list', LSV = 'lx_build_ver', last = 0, first = true;
+        var VERRE = /^v\d+\.\d+\.\d+/;
+        var nojump = /[?&]nojump\b/.test(location.search);
         function paint(bg, fg, bd) { b.style.background = bg; b.style.color = fg; b.style.borderColor = bd; }
-        async function probe() {
-          if (Date.now() - last < 30000) return; last = Date.now();
+        function slim(list) { return list.map(function (x) { return { sha: x.sha, s: ((x.commit && x.commit.message) || '').split('\n')[0].slice(0, 80) }; }); }
+        function verOf(list, from) { for (var i = from || 0; i < list.length; i++) { var v = list[i].s.match(VERRE); if (v) return v[0]; } return null; }
+        async function tipList() {
           var cache = null; try { cache = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (e) {}
-          var sha = null;
           try {
             var headers = { Accept: 'application/vnd.github+json' };
-            if (cache && cache.etag) headers['If-None-Match'] = cache.etag;
-            var r = await fetch('https://api.github.com/repos/dpeh001-x/Mojiworld/commits/main', { headers: headers, cache: 'no-store' });
-            if (r.status === 304 && cache && cache.sha) sha = cache.sha;
-            else if (r.ok) { sha = (await r.json()).sha; try { localStorage.setItem(LS, JSON.stringify({ sha: sha, etag: r.headers.get('ETag'), at: Date.now() })); } catch (e) {} }
+            if (cache && cache.etag && cache.list) headers['If-None-Match'] = cache.etag;
+            var r = await fetch('https://api.github.com/repos/dpeh001-x/Mojiworld/commits?sha=main&per_page=15', { headers: headers, cache: 'no-store' });
+            if (r.status === 304 && cache && cache.list) { cache.at = Date.now(); try { localStorage.setItem(LS, JSON.stringify(cache)); } catch (e) {} return cache.list; }
+            if (r.ok) { var list = slim(await r.json()); try { localStorage.setItem(LS, JSON.stringify({ list: list, etag: r.headers.get('ETag'), at: Date.now() })); } catch (e) {} return list; }
           } catch (e) {}
-          // v0.29.249 — 10-min age cap on the cached-sha fallback (mirrors the
-          // launcher's v3 fix): after a rate-limit burst an hour-old sha could
-          // paint a stale pinned build green "✓ latest".
-          if (!sha && cache && cache.sha && cache.at && (Date.now() - cache.at) < 10 * 60 * 1000) sha = cache.sha;
-          if (!sha) { b.textContent = base + ' · offline'; paint('#123524', '#7ddba0', '#2a5c40'); return; }
-          if (ref === 'main') {
-            b.textContent = base + ' · branch URL — may lag, use latest↗';
-            paint('#3a2e12', '#e8c86a', '#5c4a2a');
-          } else if (ref.toLowerCase() === sha.toLowerCase()) {
-            b.textContent = base + ' · ' + sha.slice(0, 7) + ' ✓ latest';
-            paint('#123524', '#7ddba0', '#2a5c40');
-          } else {
-            b.textContent = base + ' · STALE — latest is ' + sha.slice(0, 7);
-            paint('#3a1515', '#ff9a9a', '#6b2a2a');
-            var a = document.getElementById('lx-latest-link'); if (a) a.textContent = 'open latest↗';
-          }
+          // 10-min age cap on the cached fallback (the launcher's v3 rule): an hour-old
+          // list after a rate-limit burst must not paint a stale build green.
+          if (cache && cache.list && cache.at && (Date.now() - cache.at) < 10 * 60 * 1000) return cache.list;
+          return null;
+        }
+        async function buildVer(sha, list) {
+          for (var k = 0; k < list.length; k++) if (list[k].sha.toLowerCase() === sha.toLowerCase()) { var v = verOf(list, k); if (v) return v; break; }
+          var mem = null; try { mem = JSON.parse(localStorage.getItem(LSV) || 'null'); } catch (e) {}
+          if (mem && mem[sha]) return mem[sha];   // a pinned sha's history never changes: cache forever
+          try {
+            var r = await fetch('https://api.github.com/repos/dpeh001-x/Mojiworld/commits?sha=' + sha + '&per_page=15', { headers: { Accept: 'application/vnd.github+json' } });
+            if (r.ok) { var v2 = verOf(slim(await r.json()), 0); if (v2) { mem = mem || {}; mem[sha] = v2; try { localStorage.setItem(LSV, JSON.stringify(mem)); } catch (e) {} return v2; } }
+          } catch (e) {}
+          return null;
+        }
+        async function probe() {
+          if (Date.now() - last < 30000) return; last = Date.now();
+          var onLoad = first; first = false;
+          var list = await tipList();
+          if (!list || !list.length) { b.textContent = 'build ? · offline (animator ' + anim + ')'; paint('#123524', '#7ddba0', '#2a5c40'); return; }
+          var tip = list[0].sha, tipVer = verOf(list, 0) || tip.slice(0, 7);
+          if (ref === 'main') { b.textContent = 'build ' + tipVer + ' · branch URL — may lag, use latest↗'; paint('#3a2e12', '#e8c86a', '#5c4a2a'); return; }
+          if (ref.toLowerCase() === tip.toLowerCase()) { b.textContent = 'build ' + tipVer + ' · ' + tip.slice(0, 7) + ' ✓ latest'; paint('#123524', '#7ddba0', '#2a5c40'); return; }
+          var mine = await buildVer(ref, list);
+          b.textContent = 'build ' + (mine || ref.slice(0, 7)) + ' · STALE — latest is ' + tipVer; paint('#3a1515', '#ff9a9a', '#6b2a2a');
+          var a = document.getElementById('lx-latest-link'); if (a) a.textContent = 'open latest↗';
+          if (onLoad && !nojump) location.replace('https://rawcdn.githack.com/dpeh001-x/Mojiworld/' + tip + '/monster_animator.html');
         }
         probe();
         window.addEventListener('focus', probe);
@@ -2355,7 +2378,7 @@
   const m = location.pathname.match(/\/dpeh001-x\/Mojiworld\/([0-9a-f]{40})\//i);
   const own = m && m[1];
   if (!own) return;   // branch URL / local file — nothing to compare against
-  const API = 'https://api.github.com/repos/dpeh001-x/Mojiworld/commits/main';
+  const API = 'https://api.github.com/repos/dpeh001-x/Mojiworld/commits?sha=main&per_page=15';   // v0.30.434 - list, so a docs/calib tip still names the build
   let etag = null;
   const timer = setInterval(check, 45000);
   setTimeout(check, 4000);
@@ -2366,11 +2389,13 @@
       const r = await fetch(API, { headers });
       if (r.status === 304 || !r.ok) return;
       etag = r.headers.get('ETag');
-      const sha = (await r.json()).sha;
-      if (sha && sha.toLowerCase() !== own.toLowerCase()) showBanner(sha);
+      // v0.30.434 - name the build, not just the sha: main's recent list, first versioned subject (same rule as the badge)
+      const j = await r.json(); const list = Array.isArray(j) ? j : [j]; const sha = list[0] && list[0].sha; let ver = null;
+      for (const c of list) { const v = ((c.commit && c.commit.message) || '').split('\n')[0].match(/^v\d+\.\d+\.\d+/); if (v) { ver = v[0]; break; } }
+      if (sha && sha.toLowerCase() !== own.toLowerCase()) showBanner(sha, ver);
     } catch (e) { /* offline — try again next tick */ }
   }
-  function showBanner(sha) {
+  function showBanner(sha, ver) {
     clearInterval(timer);
     if (document.getElementById('updbar')) return;
     const d = document.createElement('div');
@@ -2378,7 +2403,7 @@
     d.style.cssText = 'position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:999;' +
       'background:#123524;border:1px solid #2a5c40;border-top:none;border-radius:0 0 10px 10px;' +
       'color:#7ddba0;padding:6px 16px;font:600 12px system-ui;cursor:pointer;box-shadow:0 3px 14px rgba(0,0,0,.5)';
-    d.textContent = '⬆ new build ' + sha.slice(0, 7) + ' is live — click to update';
+    d.textContent = '⬆ new build ' + (ver || sha.slice(0, 7)) + ' is live — click to update';
     d.title = 'Opens the new pinned build. Unsaved slider edits are lost — Copy patch / Export first if needed.';
     d.onclick = () => { location.href = 'https://rawcdn.githack.com/dpeh001-x/Mojiworld/' + sha + '/monster_animator.html'; };
     document.body.appendChild(d);

@@ -267,13 +267,28 @@ which key it is asked for.
 
 The 1,200-word response cap still applies; if the summary table would blow past it, keep the table compact (≤ 8 words per summary cell) and link to the rendered URL for the full prose. Never skip the table — "see the file" is not enough.
 
-## Animator build badge (durable, 2026-07-23)
+## Animator build badge (durable, reworked v0.30.434 on 2026-09-08)
 
-`monster_animator.html` shows a green **build vX.Y.Z** badge in its sidebar
-header so the user can tell at a glance whether raw.githack is serving a stale
-cached copy. **Every commit that touches `monster_animator.html` must update
-the badge to the same version as the `GAME_VERSION` bump for that change.**
-It is a plain static string in the header markup (search for `build v0.`).
+`monster_animator.html` shows a green **build vX.Y.Z · sha ✓ latest** badge in
+its sidebar header. **The number is resolved at runtime**: the `GAME_VERSION`
+of the commit the page is served from, read as the first `vX.Y.Z` commit
+subject at or below the pinned sha via the GitHub API (ETag-cached, one extra
+per-sha fetch when the page is far behind). It therefore tracks game-only
+pushes too — a page pinned at main's tip always names the current build.
+Before this rework the number was a hand-bumped string that only moved when
+the animator file changed, so a fully current page advertised "v0.30.424"
+while the game was at v0.30.432 and was reported as stale.
+
+A pinned page that is behind main's tip **redirects to the latest pinned
+build on open** (nothing can be unsaved yet); `?nojump` inspects an old build
+on purpose. Mid-session the 45 s banner offers the jump instead of forcing it.
+
+The header markup keeps the file's own version in `data-anim="vX.Y.Z"` — the
+offline / local fallback label. **Bump it alongside `GAME_VERSION` on every
+commit that touches `monster_animator.html`** so the fallback stays honest;
+it is never shown when the API answers. `scripts/animator_badge_test.mjs`
+pins the four states (current, stale + jump, stale + `?nojump`, offline).
+
 
 ## Shipping rhythm
 
