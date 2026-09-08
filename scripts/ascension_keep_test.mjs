@@ -74,9 +74,11 @@ function run(player, game) {
     CLASSES: { warrior: { stats: { speed: 3.5, jump: 10 } } },
   };
   const p = game.prestige;
+  // v0.30.422 defined the heirloom (`_heir`) at offerPrestige's function scope, above
+  // this block; the extracted slice sees it as a free variable. No heirloom here.
   const fn = new Function(
     'player', 'game', 'p', ...Object.keys(stub),
-    `${RESET}\n return { player, game, p };`
+    `const _heir = null, _heirIdx = -1;\n${RESET}\n return { player, game, p };`
   );
   return fn(player, game, p, ...Object.values(stub));
 }

@@ -51,7 +51,9 @@ for (const f of files) all.push(await measure(f));
 const ref = all[0];
 console.log('  ' + all.map((m) => `${m.f.replace(KEY, '#').replace('.webp', '')}: ${m.W}x${m.H} edge${m.edge} body${m.bodyH} foot${m.foot}`).join('\n  '));
 
-check(all.every((m) => m.W === 1656 && m.H === 1505), 'CANVAS: all 10 files on the 1656x1505 canvas', all.map((m) => m.W + 'x' + m.H));
+// the star set was re-baked onto 1656x1516 (2026-09); what matters is ONE canvas across all ten
+const _canv = all.length ? all[0].W + 'x' + all[0].H : '?';
+check(all.every((m) => m.W === 1656 && m.H === all[0].H && m.H >= 1505), 'CANVAS: all 10 files on one 1656-wide canvas (' + _canv + ')', all.map((m) => m.W + 'x' + m.H));
 check(all.every((m) => m.edge <= 8),
       'FEATHER: no border pixel above alpha 8 on any of the four edges (was 255 on five frames + static)',
       all.filter((m) => m.edge > 8).map((m) => ({ f: m.f, edge: m.edge })));

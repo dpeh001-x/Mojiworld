@@ -36,9 +36,12 @@ ok('no skill is left on the generic cooldown shave',
 // All 13 job ultimates carry a real ability, not just a cd tweak.
 const ults = ids.filter(i => /_ult$/.test(i));
 ok('all job ultimates exist', ults.length >= 13, ults.length);
+// "real ability" = anything authored beyond the GENERIC shave shape ({ cdReducePct }):
+// a window, a buff/orb key (crusader_ult's shield), or an authored cooldown cut in ms
+// (ballista_ult: "turret - cd IS the prize", -18 s of 60). Dull = no row, or only cdReducePct.
 const dullUlts = ults.filter(i => {
   const b = L10[i];
-  return !b || (!b.window && b.cdReduceMs == null && b.cdMs == null);
+  return !b || Object.keys(b).length === 0 || Object.keys(b).every((k) => k === 'cdReducePct');
 });
 ok('no ultimate is left with nothing but a cooldown shave', dullUlts.length === 0, dullUlts);
 const windowedUlts = ults.filter(i => L10[i] && L10[i].window);
@@ -92,8 +95,10 @@ ok('no rank-5 window announces (that is a rank-10 beat)',
 
 // Wiring
 ok('window opens from the cast hook', /_applyLv10Cd[\s\S]{0,400}_msOpenWindow\(id\)/.test(src));
+// the amplifier now returns the adjusted damage (`finalDmg = _msApplyOnHit(...)`) and the
+// shade queue + overflow-valve bookkeeping sit between it and the write - still before it
 ok('on-hit verbs applied before the authoritative HP write',
-   /_msApplyOnHit\(m, finalDmg, isCrit, skill\);\s*\n\s*m\.currentHp -= finalDmg;/.test(src));
+   /finalDmg = _msApplyOnHit\(m, finalDmg, isCrit, skill\);[\s\S]{0,400}?m\.currentHp -= finalDmg;/.test(src));
 ok('mark amplifier sits with the global multipliers', /_msMarkMul\(m\)/.test(src));
 ok('kill refund is wired', /_msRefundOnKill\(skill\)/.test(src));
 ok('chain has a re-entrancy guard', /_msChaining/.test(src));

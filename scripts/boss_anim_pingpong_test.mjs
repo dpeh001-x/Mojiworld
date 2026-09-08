@@ -21,7 +21,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 // standard of ZERO), so the generator refused them and left the old art in
 // place: a rewinding animation beats a blast that hides the boss. Remove a key
 // from here the moment its art is regenerated — the test then holds the line.
-const KNOWN_UNFIXED = new Set(['gravitos3punch', 'gravitos3soul', 'gravitos2soul']);
+const KNOWN_UNFIXED = new Set([]);   // 2026-09-08: the three Gravitos sets listed here landed (v0.30.428/429 + the animator patch bakes)
 
 const sets = {};
 for (const sub of ['attack', 'idle', 'walk']) {

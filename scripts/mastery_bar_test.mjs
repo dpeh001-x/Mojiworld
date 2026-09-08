@@ -38,11 +38,14 @@ const m = src.match(/const LX_DUST_TRICKLE_CHANCE = ([\d.]+);/);
 ok('dust rate is a named constant', !!m, m && m[1]);
 const rate = m ? parseFloat(m[1]) : -1;
 ok('dust rate is genuinely low (0 < r <= 0.05)', rate > 0 && rate <= 0.05, rate);
-ok('dust excluded during expeditions', /LX_DUST_TRICKLE_CHANCE[\s\S]{0,140}game\.expedition && game\.expedition\.active/.test(src));
-ok('dust grants exactly 1 shard', /player\.setshards = \(player\.setshards \| 0\) \+ 1;/.test(src));
-// Expected yield sanity: at 3%, 1000 kills ~ 30 shards ~ 15% of a 200-shard craft.
-ok('~30 shards per 1000 kills (texture, not an economy rewrite)',
-   Math.abs(rate * 1000 - 30) < 1, +(rate * 1000).toFixed(1));
+// v0.29.7xx tier-aware rewrite: the expedition guard now WRAPS the whole shard block
+// (it precedes the constant's use), and the trickle writes through `_shardsWon = 1`.
+ok('dust excluded during expeditions', /if \(!\(game\.expedition && game\.expedition\.active\)\) \{[\s\S]{0,600}LX_DUST_TRICKLE_CHANCE/.test(src));
+ok('dust grants exactly 1 shard', /Math\.random\(\) < LX_DUST_TRICKLE_CHANCE\) \{\s*_shardsWon = 1;/.test(src));
+// v0.29.776 ("setshards come from bosses + elite/elder, not slime attrition") cut the
+// trickle from 3% to 0.5%: 1000 kills ~ 5 shards. Texture, not income.
+ok('~5 shards per 1000 kills (texture, not an economy rewrite - v0.29.776)',
+   Math.abs(rate * 1000 - 5) < 0.5, +(rate * 1000).toFixed(1));
 
 let pass = 0, fail = 0;
 for (const x of results) { (x.pass ? pass++ : fail++); console.log((x.pass ? 'PASS  ' : 'FAIL  ') + x.n + (x.x !== undefined ? '  ' + JSON.stringify(x.x) : '')); }

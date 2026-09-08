@@ -71,8 +71,11 @@ ok('the flag uses the SAME condition as the branch', !!sameShape,
   'they must be one expression apart, or this bug comes straight back');
 
 // ---- the consumer that made it visible --------------------------------------
-ok('the padding multiplier still keys off the flag',
-  /const _atkScale = \(m\._frameIsAttack && _ATK_FRAME_SCALE\[m\.type\]\) \|\| 1;/.test(s),
+// v0.30.415 moved the multiplier into the padding block, keyed on the frame the block
+// itself just picked (`_isAtkFrame = !!frame`), and gated on the table existing.
+ok('the padding multiplier still keys off the attack-frame flag',
+  /const _atkScale = \(m\._frameIsAttack && _ATK_FRAME_SCALE\[m\.type\]\) \|\| 1;/.test(s)
+  || /if \(_isAtkFrame && typeof _ATK_FRAME_SCALE === 'object' && _ATK_FRAME_SCALE\[mn\.type\]\) dh \*= _ATK_FRAME_SCALE\[mn\.type\];/.test(s),
   'this is the line that turned the mismatch into a doubled monster');
 
 console.log(`\n${pass}/${pass + fail} checks passed`);
