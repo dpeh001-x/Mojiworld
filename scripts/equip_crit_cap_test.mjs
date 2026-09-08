@@ -67,7 +67,7 @@ const R = await page.evaluate(() => {
   // rather than modelling it here: at tier 1 it is already x2, which means the
   // item that first reaches the 20 cap only PRINTS about 10.
   out.mult = starMult({}) * _tierMul(undefined);
-  out.underCapPassesThrough = equip(mk(9));                       // 9 x mult, still under
+  out.underCapPassesThrough = equip(mk(5));                       // 5 x mult (tier 1 = x2 -> 10), still under the 12 cap
   // Literal, not out.cap: on a build without the constant, mk(null) rolls a
   // null crit and the failure message reads "clamped to 0", which describes the
   // fixture rather than the build under test.
@@ -96,12 +96,12 @@ await browser.close(); server.kill();
 
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 170) });
-const CAP = 20;   // LX_EQUIP_CRIT_CAP_PER_ITEM; raised to 25 briefly, returned to 20
+const CAP = 12;   // LX_EQUIP_CRIT_CAP_PER_ITEM; 20 -> 25 -> 20, then 12 in v0.30.430 (per user: "each equipment gives way too much crit %")
 
-ok('the cap is a named constant set to 20', R.cap === CAP, 'LX_EQUIP_CRIT_CAP_PER_ITEM = ' + R.cap);
+ok('the cap is a named constant set to 12', R.cap === CAP, 'LX_EQUIP_CRIT_CAP_PER_ITEM = ' + R.cap);
 ok('a roll under the cap is scaled but not clamped',
-   Math.abs(R.underCapPassesThrough - 9 * R.mult) < 0.001 && R.underCapPassesThrough < CAP,
-   `an item printing 9 gives ${R.underCapPassesThrough} (x${R.mult} star/tier), still under the ${CAP} cap`);
+   Math.abs(R.underCapPassesThrough - 5 * R.mult) < 0.001 && R.underCapPassesThrough < CAP,
+   `an item printing 5 gives ${R.underCapPassesThrough} (x${R.mult} star/tier), still under the ${CAP} cap`);
 ok('the cap is on the EFFECTIVE contribution, not the printed roll',
    Math.abs(R.atCap - CAP) < 0.001,
    `an item printing ${CAP} is clamped to ${R.atCap}; the roll that first reaches the cap only prints ~${(CAP / R.mult).toFixed(1)}`);

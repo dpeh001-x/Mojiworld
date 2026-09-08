@@ -120,10 +120,12 @@ ok('the forge shows the player the steeper curve, not the flat one',
   r.preview && r.preview.atkDelta > 0 && r.preview.defDelta > 0
   && r.preview.atkDelta > r.preview.defDelta * 1.2,
   { atkDelta: r.preview && r.preview.atkDelta, defDelta: r.preview && r.preview.defDelta, err: r.previewErr });
-ok('every rung of the cost ladder came down 15%',
-  (r.costs || []).length === 10 && r.costs.every((c, i) => Math.abs(c - OLD_COSTS[i] * 0.85) <= OLD_COSTS[i] * 0.02),
+// v0.30.430 — per user "increase the cost of enhancement": the -15% ladder (0.85 x OLD_COSTS) went x1.5, so every
+// rung is now 1.275 x the v0.26.447 price and a full run costs 190,930 (was 127,035 after the -15%, 149,400 before it).
+ok('every rung of the cost ladder is 1.5x the -15% ladder (1.275x the v0.26.447 price, rounded)',
+  (r.costs || []).length === 10 && r.costs.every((c, i) => Math.abs(c - OLD_COSTS[i] * 0.85 * 1.5) <= OLD_COSTS[i] * 0.03),
   { costs: r.costs });
-ok('...so a full 0 to 10 run is meaningfully cheaper', newSum < oldSum * 0.87 && newSum > oldSum * 0.83,
+ok('...so a full 0 to 10 run costs about 28% more than the v0.26.447 ladder', newSum > oldSum * 1.25 && newSum < oldSum * 1.30,
   { was: oldSum, now: newSum, change: (100 * (newSum / oldSum - 1)).toFixed(1) + '%' });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 

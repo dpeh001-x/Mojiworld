@@ -10183,7 +10183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.429';
+const GAME_VERSION = 'v0.30.430';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20542,7 +20542,9 @@ const SUFFIX_IDS = Object.keys(SUFFIXES);
 // v0.30.x - per user: "reduce the mojicoins requirement slightly". Every rung
 // comes down 15%, so the shape of the curve is untouched and only its height
 // moves: a full 0 -> 10 run costs 127,035 where it cost 149,400.
-const STAR_COSTS    = [85, 340, 850, 2050, 4700, 10200, 15300, 21250, 29750, 42500];  // v0.30.x -15% · v0.26.447 was 100/400/1000/2400/5500/12000/18000/25000/35000/50000
+// v0.30.430 — per user "increase the cost of enhancement": every rung x1.5 (rounded), so the shape holds and a full
+// 0 -> 10 run costs 190,930 where it cost 127,035.
+const STAR_COSTS    = [130, 500, 1300, 3100, 7000, 15300, 23000, 32000, 44600, 64000];  // v0.30.430 x1.5 · was 85/340/850/2050/4700/10200/15300/21250/29750/42500 (v0.30.x -15% of v0.26.447)
 // v0.25.826 — Exponential enhancement scaling. Old linear curve added
 // a flat +10 % per star; the new curve compounds so each star is
 // meaningfully bigger than the last.
@@ -34636,7 +34638,26 @@ function refreshGearCache() { if (typeof player !== 'undefined' && player) playe
 // v0.30.x — the most any ONE equipped item may contribute to crit chance, in
 // percentage points, after star/tier/class-affinity scaling. Three slots, so
 // the most gear alone can pay is 3x this.
-const LX_EQUIP_CRIT_CAP_PER_ITEM = 20;
+// v0.30.430 — GEAR_ROLE_CAPS (per user: "reducing and capping the buffs by equipments — each equipment gives way too
+// much crit %; the flat attack increase by weapons should be slightly lowered; armor should add lesser ATK, focus
+// more on DEF and HP"). Measured on the tip with the three pieces from the report (Cosmic Wand T7, Stardust
+// Vestments T6, Nebula Codex T8, all ★10 on a Lv 99 mage): every slot paid the full 20 crit, the three together
+// +132% ATK, and the wand alone 7,151 flat ATK. The cap comes down 20 → 12 (36 from gear, 43 on a Rogue), and the
+// tooltip now prints the capped number instead of the raw roll × tier (that is where "+168% Crit" came from).
+const LX_EQUIP_CRIT_CAP_PER_ITEM = 12;
+// A weapon's flat ATK pays 85% (the ask was "slightly lowered"); every other slot's ATK is untouched.
+const LX_WEAPON_ATK_MUL = 0.85;
+// Armour's role: 40% of its flat ATK and half its % ATK, 115% of its DEF and HP. Applied to base and affix alike,
+// before the caps, in the same place every other multiplier lands (getEquipBonus) and mirrored by every tooltip.
+const LX_ARMOR_ROLE = { atk: 0.40, atkPct: 0.50, def: 1.15, hp: 1.15 };
+// The most % ATK any one piece may pay after star, tier, class and role: three slots, so 45% from gear at most.
+const LX_EQUIP_ATKPCT_CAP_PER_ITEM = 0.15;
+function _lxSlotStatMul(slot, k) {
+  const sl = (slot === 'accessorie') ? 'accessory' : slot;   // pre-v0.25.945 saves
+  if (sl === 'weapon') return k === 'atk' ? LX_WEAPON_ATK_MUL : 1;
+  if (sl === 'armor') return LX_ARMOR_ROLE[k] || 1;
+  return 1;
+}
 // v0.30.273 — PER-EQUIPMENT LIFESTEAL BAND (per user: "Equipments lifesteal is way
 // too high, for each equipment max will be at 3.5% hard cap, starting lifesteal
 // will be at 0.5%, ensure this applies throughout if an equipment gives
@@ -34731,7 +34752,7 @@ function getEquipBonus(key) {
           const mul = _starStatMult(it, k);
           const _pctSoft = _isPct ? (1 + (mul - 1) * 0.35) * tPctMul : mul;
           const _effMul = _noScale ? 1 : (_TIER_FLAT_STATS.has(k) ? mul * tMul : _pctSoft);
-          let _contrib = it[k] * _effMul * (_noScale ? 1 : _clsAff);
+          let _contrib = it[k] * _effMul * (_noScale ? 1 : _clsAff * _lxSlotStatMul(slot, k));   // v0.30.430 — GEAR_ROLE_CAPS slot weight
           // v0.26.287 — Cap any single item's effective crit contribution
           // (base × star × tier) so no one slot dominates the crit budget.
           // v0.26.461 — Per user "make crit/critDmg scaling less overpowered".
@@ -34750,6 +34771,7 @@ function getEquipBonus(key) {
           // With 3 slots that is +60 from gear: a crit-built character tops out
           // near 70% and a Rogue near 84% (×1.2) before boons.
           if (k === 'crit' && _contrib > LX_EQUIP_CRIT_CAP_PER_ITEM) _contrib = LX_EQUIP_CRIT_CAP_PER_ITEM;
+          if (k === 'atkPct' && _contrib > LX_EQUIP_ATKPCT_CAP_PER_ITEM) _contrib = LX_EQUIP_ATKPCT_CAP_PER_ITEM;   // v0.30.430 — GEAR_ROLE_CAPS
           // v0.30.273 — the per-equipment lifesteal band. Placed here, below every
           // multiplier, because the band is on what the piece PAYS: base +
           // affix, x star, x tier, x class affinity, and whatever Transcendence
@@ -97353,14 +97375,18 @@ function itemStatString(it, multiline) {
   const _tMul = (typeof _tierMul === 'function') ? _tierMul(it.tier) : 1;
   const _tPctMul = (typeof _tierPctMul === 'function') ? _tierPctMul(it.tier) : 1;
   const _fmt = (v) => v < 10 ? v.toFixed(1).replace(/\.0$/, '') : Math.round(v);
+  // v0.30.430 — GEAR_ROLE_CAPS: the slot's role weight and the per-item caps are printed, so the card never advertises
+  // a number the payout will not make (crit used to print raw × tier, e.g. "+168% Crit" for a piece that paid 20).
+  const _sf = (k) => (typeof _lxSlotStatMul === 'function') ? _lxSlotStatMul(it.slot, k) : 1;
+  const _capNote = ' <span style="opacity:0.6; font-size:10px;">(cap)</span>';
   const parts = [];
-  if (it.atk)          parts.push(`+${_fmt(it.atk * _tMul)} ATK${_tMul !== 1 ? ' <span style="opacity:0.6; font-size:10px;">(T'+(it.tier||1)+' ×'+_tMul.toFixed(2)+')</span>' : ''}`);
-  if (it.atkPct)       parts.push(`+${Math.round(it.atkPct*_tPctMul*100)}% ATK`);
-  if (it.def)          parts.push(`+${_fmt(it.def * _tMul)} DEF${_tMul !== 1 ? ' <span style="opacity:0.6; font-size:10px;">(T'+(it.tier||1)+')</span>' : ''}`);
-  if (it.hp)           parts.push(`+${_fmt(it.hp * _tMul)} HP`);
+  if (it.atk)          parts.push(`+${_fmt(it.atk * _tMul * _sf('atk'))} ATK${_tMul !== 1 ? ' <span style="opacity:0.6; font-size:10px;">(T'+(it.tier||1)+' ×'+_tMul.toFixed(2)+(_sf('atk') !== 1 ? ' · ' + (it.slot === 'weapon' ? 'weapon' : it.slot) + ' ×' + _sf('atk').toFixed(2) : '')+')</span>' : ''}`);
+  if (it.atkPct)       parts.push(`+${Math.round(Math.min(LX_EQUIP_ATKPCT_CAP_PER_ITEM, it.atkPct*_tPctMul*_sf('atkPct'))*100)}% ATK${it.atkPct*_tPctMul*_sf('atkPct') > LX_EQUIP_ATKPCT_CAP_PER_ITEM ? _capNote : ''}`);
+  if (it.def)          parts.push(`+${_fmt(it.def * _tMul * _sf('def'))} DEF${_tMul !== 1 ? ' <span style="opacity:0.6; font-size:10px;">(T'+(it.tier||1)+')</span>' : ''}`);
+  if (it.hp)           parts.push(`+${_fmt(it.hp * _tMul * _sf('hp'))} HP`);
   if (it.hpPct)        parts.push(`+${Math.round(it.hpPct*_tPctMul*100)}% HP`);   // v0.26.398 — was live (getMaxHp) but never shown
   if (it.mp)           parts.push(`+${_fmt(it.mp * _tMul)} MP`);
-  if (it.crit)         parts.push(`+${_fmt(it.crit * _tMul)}% Crit`);
+  if (it.crit)         parts.push(`+${_fmt(Math.min(LX_EQUIP_CRIT_CAP_PER_ITEM, it.crit * _tMul))}% Crit${it.crit * _tMul > LX_EQUIP_CRIT_CAP_PER_ITEM ? _capNote : ''}`);
   // v0.30.352 — accuracy was a SILENT stat: _TIER_FLAT_STATS scales it and
   // getAccuracy consumes it, but nothing ever printed it, because until now no
   // item carried any. Shipping Shardsight without this line would have put the
@@ -98023,8 +98049,11 @@ function renderEnhancementModal(selectedItem) {
         // v0.26.273 — Flat stats get tier mul × star mul; percent stats
         // get star mul only (their caps prevent unbounded scaling).
         const _statMul = _isTierStat(k) ? _tMul : 1;
-        let curVal  = base * _mulFor(k, s)     * _statMul;
-        let nextVal = base * _mulFor(k, s + 1) * _statMul;
+        const _roleMul = (typeof _lxSlotStatMul === 'function') ? _lxSlotStatMul(selectedItem.slot, k) : 1;   // v0.30.430 — GEAR_ROLE_CAPS
+        let curVal  = base * _mulFor(k, s)     * _statMul * _roleMul;
+        let nextVal = base * _mulFor(k, s + 1) * _statMul * _roleMul;
+        if (k === 'crit')   { curVal = Math.min(LX_EQUIP_CRIT_CAP_PER_ITEM, curVal);   nextVal = Math.min(LX_EQUIP_CRIT_CAP_PER_ITEM, nextVal); }
+        if (k === 'atkPct') { curVal = Math.min(LX_EQUIP_ATKPCT_CAP_PER_ITEM, curVal); nextVal = Math.min(LX_EQUIP_ATKPCT_CAP_PER_ITEM, nextVal); }
         // v0.30.273 — the forge preview is where a player decides to spend on a
         // star. Showing lifesteal climbing past the per-item cap sells an
         // upgrade the game will not pay out; banded here, an already-capped
