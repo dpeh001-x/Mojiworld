@@ -24,14 +24,26 @@ import { createRequire } from 'node:module'; import path from 'node:path'; impor
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync } from 'node:fs';
 import { measure, findEyes } from './lib/sprite_warp.mjs';
 const require = createRequire(import.meta.url); const sharp = require('sharp'); sharp.cache(false);
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const KEEP = path.join(ROOT, 'scripts/_tmp_golem_attack_rolls'); mkdirSync(KEEP, { recursive: true });
-const SRC = path.join(ROOT, 'Sprites/monsters/smithgolem.webp'); const W = 1280, H = 1024, OX = 128, FLOOR = 1012, N = 9;
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2); const has = (f) => argv.includes(f); const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
-const MOTION = 'A nine-frame HAMMER SMASH by this stone golem, seen from the SAME camera in every frame: it FACES THE CAMERA the whole time with BOTH glowing red square eyes visible in every single frame, it never turns sideways or away, it never rotates, its body stays EXACTLY the same size and its feet stay planted on the same ground line. Beats: '
+// --state idle|attack (default attack). The idle brief asks for a seamless breathing loop and
+// its gates ask for the opposite of the attack's: no crouch, subtle motion, a closed loop,
+// no glow eruptions (the earlier idle rolls set the golem on fire when asked for "pulsing").
+const STATE = arg('--state') || 'attack'; if (!['idle', 'attack'].includes(STATE)) { console.error('--state idle|attack'); process.exit(2); }
+const KEEP = path.join(ROOT, `scripts/_tmp_golem_${STATE}_rolls`); mkdirSync(KEEP, { recursive: true });
+const SRC = path.join(ROOT, 'Sprites/monsters/smithgolem.webp'); const W = 1280, H = 1024, OX = 128, FLOOR = 1012, N = 9;
+const MOTION_IDLE = 'A nine-frame seamless IDLE LOOP of this stone golem, seen from the SAME camera in every frame: it stands STILL, FACING THE CAMERA with BOTH glowing red square eyes visible in every single frame, feet planted on the same ground line, body EXACTLY the same size in the same spot, and merely BREATHES: a slow, gentle rise and settle of the shoulders and chest, the head nodding a hair, the hammer resting in its hand rocking very slightly with the breath. '
+  + 'The red glow of the eyes, the chest gem and the hammer lava stays constant in every frame. The last frame matches the first so the loop is seamless. '
+  + 'NO walking, NO stepping, NO turning, NO arm swing, NO hammer lift, NO flames, NO fire bursts, NO sparks, NO smoke, NO dust, NO light flashes anywhere. The change between one frame and the next is small and smooth. Transparent background, no ground plane, no shadow, one single character.';
+const MOTION_ATTACK = 'A nine-frame HAMMER SMASH by this stone golem, seen from the SAME camera in every frame: it FACES THE CAMERA the whole time with BOTH glowing red square eyes visible in every single frame, it never turns sideways or away, it never rotates, its body stays EXACTLY the same size and its feet stay planted on the same ground line. Beats: '
   + '(1) standing, hammer held at its side. (2) it lifts the hammer up. (3) hammer raised HIGH OVERHEAD in both hands, arms straight up, body leaning slightly back. (4) the hammer at its highest point above its head, wind-up peak. '
   + '(5) the hammer sweeping DOWN in a big arc in front of the body. (6) IMPACT: the hammer head SMASHES THE GROUND in front of its feet, a small burst of sparks and a few stone chips at the point of contact only. '
   + '(7) hammer resting on the ground, body leaning forward over it, sparks fading. (8) it lifts the hammer back up to its side. (9) standing again, exactly like frame 1. '
   + 'The hammer is a separate object clearly visible in every frame, never merging into the body. NO flames on the body, NO explosions, NO dust clouds, NO big shockwave, NO ground crack reaching the edge of the picture. Transparent background, no ground plane, no shadow, one single character.';
+const MOTION = STATE === 'idle' ? MOTION_IDLE : MOTION_ATTACK;
+// alpha-mask IoU on a 4px grid: the idle gates want small, smooth, closed motion
+function maskIoU(a, b) { let i = 0, u = 0; for (let y = 0; y < H; y += 4) for (let x = 0; x < W; x += 4) { const o = (y * W + x) * 4, pa = a[o + 3] > 16, pb = b[o + 3] > 16; if (pa && pb) i++; if (pa || pb) u++; } return u ? i / u : 1; }
+function redCount(a) { let n = 0; for (let o = 0; o < a.length; o += 16) if (a[o + 3] > 128 && a[o] > 190 && a[o + 1] < 150 && a[o + 2] < 100) n++; return n; }
 async function raw(buf) { const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); return { d: data, w: info.width, h: info.height }; }
 function feetCx(d, w, h, t, b) { const y0 = Math.round(b - (b - t) * 0.12); let m = 0, mx = 0; for (let y = y0; y <= b; y++) for (let x = 0; x < w; x++) { const a = d[(y * w + x) * 4 + 3]; m += a; mx += a * x; } return m ? mx / m : w / 2; }
 function lava(d, w, h) { let minY = h, maxY = -1, maxYx = 0; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const o = (y * w + x) * 4; if (d[o + 3] > 128 && d[o] > 190 && d[o + 1] > 60 && d[o + 1] < 180 && d[o + 2] < 90) { if (y < minY) minY = y; if (y > maxY) { maxY = y; maxYx = x; } } } return { minY, maxY, maxYx }; }
@@ -53,18 +65,25 @@ const sM = measure(S.d, S.w, S.h); const sEx = (sEyes.x1 + sEyes.x2) / 2, sFeet 
 const REF = { spacing: sEyes.spacing, stoneH: sM.stoneH, eyeX: sEx + OX, eyeY: sEyes.y, bodyLen: sFeet - sEyes.y, feetRow: sFeet, feetX: feetCx(S.d, S.w, S.h, sM.t, sM.b) + OX, headTop: sM.stoneTop };
 console.log(`reference: eye spacing ${REF.spacing}px, eyes at (${REF.eyeX.toFixed(0)}, ${REF.eyeY.toFixed(0)}), stone feet row ${REF.feetRow} (body ${REF.bodyLen}px), ink floor ${FLOOR}`);
 // ---- fit one returned frame onto the rig canvas -----------------------------
-async function fit(png) { const f = await raw(png); const e = findEyes(f.d, f.w, f.h); if (!e) return { bad: 'no eye pair' };
+async function fit(png, idx = 0) { const f = await raw(png); const e = findEyes(f.d, f.w, f.h); if (!e) return { bad: 'no eye pair' };
   // uniform scale from the eye spacing (head size constant, no distortion); horizontal
   // anchor = eye midpoint; vertical anchor = the lowest fully-opaque stone row under the
   // head (the feet, crouched or not) -> the static's stone feet row. A crouch keeps its
   // lower head; dust hanging under the feet is ignored. Fallback: ink bottom -> floor.
-  const sx = REF.spacing / e.spacing; const rw = Math.max(1, Math.round(f.w * sx)), rh = Math.max(1, Math.round(f.h * sx));
-  const r = await raw(await sharp(png).resize(rw, rh, { kernel: 'lanczos3' }).png().toBuffer()); const e1 = findEyes(r.d, r.w, r.h); if (!e1) return { bad: 'eyes lost in resize' };
+  const sx = REF.spacing / e.spacing; let sy = sx;
+  // IDLE: the model "breathes" by stretching the whole golem 7-9% taller on the inhale
+  // frames (rolls 1-3, 2026-09-08) - a pulse, not a breath. Its painted variation is kept
+  // but the body length is set per frame to a smooth 2.5% hump (0 at both ends, so the
+  // game's ping-pong stays continuous), feet pinned, head anchored: a real breath of ~11px.
+  if (STATE === 'idle') { const ex0 = (e.x1 + e.x2) / 2, fb0 = stoneFeet(f.d, f.w, f.h, ex0, e.spacing); const target = REF.bodyLen * (1 + 0.025 * Math.sin(Math.PI * idx / (N - 1)));
+    if (fb0 > 0) sy = target / (fb0 - e.y); if (Math.abs(sy / sx - 1) > 0.12) return { bad: 'body length off ' + (sy / sx).toFixed(3) }; }
+  const rw = Math.max(1, Math.round(f.w * sx)), rh = Math.max(1, Math.round(f.h * sy));
+  const r = await raw(await sharp(png).resize(rw, rh, { kernel: 'lanczos3', fit: 'fill' }).png().toBuffer()); const e1 = findEyes(r.d, r.w, r.h); if (!e1) return { bad: 'eyes lost in resize' };
   const ex1 = (e1.x1 + e1.x2) / 2, fb1 = stoneFeet(r.d, r.w, r.h, ex1, e1.spacing); const m1 = measure(r.d, r.w, r.h);
   const ratio = fb1 > 0 ? +((fb1 - e1.y) / REF.bodyLen).toFixed(3) : 0, plausible = ratio > 0.72 && ratio < 1.12;   // > 1.12 = the model stretched the golem (roll 3 frame 6: 1.2x taller)
   const dx = Math.round(REF.eyeX - ex1), dy = plausible ? Math.round(REF.feetRow - fb1) : FLOOR - m1.b;
   const out = Buffer.alloc(W * H * 4); for (let y = 0; y < r.h; y++) { const Y = y + dy; if (Y < 0 || Y > FLOOR) continue; for (let x = 0; x < r.w; x++) { const X = x + dx; if (X < 0 || X >= W) continue; out.set(r.d.subarray((y * r.w + x) * 4, (y * r.w + x) * 4 + 4), (Y * W + X) * 4); } }   // rows below the floor are dropped
-  const k = +sx.toFixed(3), sy = plausible ? 'feet' : 'ink', eyeDy = Math.round(e1.y + dy - REF.eyeY);
+  const k = +sx.toFixed(3), eyeDy = Math.round(e1.y + dy - REF.eyeY); sy = plausible ? 'feet' : 'ink';
   // EDGE FEATHER: the model's dust clouds drift to the canvas edge; a hard cut there is the
   // "clipped rubble" defect. Fade alpha to zero over the last 104px of every side (full at
   // 104, zero at 24) - the body never reaches that band, only dust and hammer trails do.
@@ -88,11 +107,17 @@ async function gateRoll(frames) { const bad = frames.map((f, i) => f.bad ? i + '
   const y0 = frames[0].eyes && frames[0].eyes.y; if (y0) frames.forEach((f, i) => { if (f.eyes && (f.eyes.y < y0 - 20 || f.eyes.y > y0 + 0.28 * REF.bodyLen)) bad.push(`${i}: head at y ${f.eyes.y.toFixed(0)} vs rest ${y0.toFixed(0)}`); });
   frames.forEach((f, i) => { if (!f.plausible && !f.substituted) bad.push(`${i}: body length ratio ${f.ratio} (stretched draw, no neighbour to substitute)`); });
   const ks = frames.map((f) => f.k).filter(Boolean); if (ks.length && Math.max(...ks) / Math.min(...ks) > 1.08) bad.push('head size drifts ' + Math.min(...ks) + '..' + Math.max(...ks));
-  const apex = frames.some((f) => f.buf && f.lava.minY < f.m.stoneTop - 0.2 * REF.spacing), impact = frames.some((f) => f.buf && f.lava.maxY > FLOOR - 1.6 * REF.spacing && f.lava.maxYx > REF.feetX + 0.8 * REF.spacing);
-  if (!apex) bad.push('no frame raises the hammer above the head'); if (!impact) bad.push('no frame puts the hammer at the floor in front of the feet'); return bad; }
+  if (STATE === 'attack') { const apex = frames.some((f) => f.buf && f.lava.minY < f.m.stoneTop - 0.2 * REF.spacing), impact = frames.some((f) => f.buf && f.lava.maxY > FLOOR - 1.6 * REF.spacing && f.lava.maxYx > REF.feetX + 0.8 * REF.spacing);
+    if (!apex) bad.push('no frame raises the hammer above the head'); if (!impact) bad.push('no frame puts the hammer at the floor in front of the feet'); }
+  else if (frames[0].buf) { const ious = frames.map((f) => f.buf ? maskIoU(frames[0].buf, f.buf) : 0), r0 = redCount(frames[0].buf);
+    frames.forEach((f, i) => { if (!f.buf) return; if (ious[i] < 0.9) bad.push(`${i}: silhouette drifts (IoU ${ious[i].toFixed(3)})`); if (f.eyes && Math.abs(f.eyes.y - frames[0].eyes.y) > 14) bad.push(`${i}: head bobs ${Math.round(f.eyes.y - frames[0].eyes.y)}px`);
+      const rc = redCount(f.buf); if (Math.abs(rc / r0 - 1) > 0.3) bad.push(`${i}: red glow ${(100 * rc / r0).toFixed(0)}% of frame 0 (flare / eruption)`); });
+    if (!ious.some((v, i) => i > 0 && v <= 0.985)) bad.push('no visible motion at all (every frame within 1.5% of frame 0)'); if (ious[N - 1] < 0.96) bad.push(`loop does not close (IoU last/first ${ious[N - 1].toFixed(3)})`);
+    console.log('  idle IoU vs frame 0: ' + ious.map((v) => v.toFixed(3)).join(' ')); }
+  return bad; }
 async function sheet(frames, p) { const TW = 250, TH = 200, comps = []; for (let i = 0; i < frames.length; i++) if (frames[i].buf) comps.push({ input: await sharp(frames[i].buf, { raw: { width: W, height: H, channels: 4 } }).resize(TW, TH).png().toBuffer(), left: 4 + i * (TW + 4), top: 4 });
   await sharp({ create: { width: N * (TW + 4) + 4, height: TH + 8, channels: 4, background: { r: 30, g: 34, b: 44, alpha: 1 } } }).composite(comps).png().toFile(p); }
-async function evaluate(label, pngs) { const frames = []; for (const p of pngs) frames.push(await fit(p)); const subs = substituteStretched(frames); const bad = await gateRoll(frames);
+async function evaluate(label, pngs) { const frames = []; for (const p of pngs) frames.push(await fit(p, frames.length)); const subs = substituteStretched(frames); const bad = await gateRoll(frames);
   console.log(`${label}: k ${frames.map((f) => f.k ?? '-').join('/')}  bodyLen ${frames.map((f) => f.ratio ?? '-').join('/')}  eyes(x,y) ${frames.map((f) => f.eyes ? Math.round((f.eyes.x1 + f.eyes.x2) / 2) + ',' + Math.round(f.eyes.y) : '-').join(' ')}  feet ${frames.map((f) => f.inkFeet ?? '-').join('/')}${subs.length ? '  substituted: ' + subs.join(', ') : ''}  ${bad.length ? 'REJECT - ' + bad.join('; ') : 'OK'}`);
   await sheet(frames, path.join(KEEP, label + '_sheet.png')); return { frames, bad }; }
 const fetchBuf = async (u) => { const r = await fetch(u, { signal: AbortSignal.timeout(180000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); };
@@ -106,7 +131,7 @@ else if (has('--generate')) {
   const ROLLS = Number(arg('--rolls') || 3); let start = 1; while (existsSync(path.join(KEEP, `roll${start}_0.png`))) start++;
   for (let roll = start; roll < start + ROLLS; roll++) { process.stdout.write(`roll ${roll} ... `); let anim;
     try { const res = await fetch(`${API}/assets/sprite/animate`, { method: 'POST', signal: AbortSignal.timeout(600000), headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initial_image: 'data:image/webp;base64,' + seed.toString('base64'), motion_prompt: MOTION, frames: N, frame_size: -9, model: 'eagle', individual_frames: true, loop: false, image_type: 'sprite' }) });
+        body: JSON.stringify({ initial_image: 'data:image/webp;base64,' + seed.toString('base64'), motion_prompt: MOTION, frames: N, frame_size: -9, model: 'eagle', individual_frames: true, loop: STATE === 'idle', image_type: 'sprite' }) });
       if (!res.ok) { const t = await res.text(); if (res.status === 402) { console.error('OUT OF CREDITS'); process.exit(3); } throw new Error(res.status + ' ' + t.slice(0, 140)); } anim = await res.json(); } catch (e) { console.log(e.message); continue; }
     let pngs = []; if (anim.spritesheet_url && anim.num_cols && anim.num_rows) { const sh = await fetchBuf(anim.spritesheet_url); const md = await sharp(sh).metadata(); const cw = Math.floor(md.width / anim.num_cols), ch = Math.floor(md.height / anim.num_rows);
       for (let r = 0; r < anim.num_rows && pngs.length < N; r++) for (let c = 0; c < anim.num_cols && pngs.length < N; c++) pngs.push(await sharp(sh).extract({ left: c * cw, top: r * ch, width: cw, height: ch }).png().toBuffer()); }
@@ -116,4 +141,4 @@ else if (has('--generate')) {
     const r = await evaluate('roll' + roll, pngs); if (!r.bad.length) { chosen = r.frames; console.log('roll ' + roll + ' passes every gate'); break; } }
 } else { console.log(MOTION + '\n\n--generate (LUDO_API_KEY) | --from N [--install]'); process.exit(0); }
 if (!chosen) { console.error('no roll passed the gates (see scripts/_tmp_golem_attack_rolls/*_sheet.png)'); process.exit(2); }
-if (has('--install')) { for (let i = 0; i < N; i++) { const p = path.join(ROOT, 'Sprites/monsters/attack', `smithgolem_${i}.webp`); const b = await sharp(chosen[i].buf, { raw: { width: W, height: H, channels: 4 } }).webp({ quality: 92, alphaQuality: 100 }).toBuffer(); writeFileSync(p + '.tmp', b); renameSync(p + '.tmp', p); } console.log('installed 9 attack frames'); }
+if (has('--install')) { for (let i = 0; i < N; i++) { const p = path.join(ROOT, 'Sprites/monsters', STATE, `smithgolem_${i}.webp`); const b = await sharp(chosen[i].buf, { raw: { width: W, height: H, channels: 4 } }).webp({ quality: 92, alphaQuality: 100 }).toBuffer(); writeFileSync(p + '.tmp', b); renameSync(p + '.tmp', p); } console.log('installed 9 ' + STATE + ' frames'); }
