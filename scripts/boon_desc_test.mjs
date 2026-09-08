@@ -57,7 +57,7 @@ const r = await ev(() => {
   const ls = POWERUPS.find((p) => p.id === 'ls'), skin = POWERUPS.find((p) => p.id === 'skin'), mirror = POWERUPS.find((p) => p.id === 'mirror'), atk = POWERUPS.find((p) => p.id === 'atk'), burn = POWERUPS.find((p) => p.id === 'burn'), mp = POWERUPS.find((p) => p.id === 'mpreg');
   const lsVal = _boonValText(ls, 15), lsRange = _boonRangeText(ls);
   const skinRange = _boonRangeText(skin), mirrorRange = _boonRangeText(mirror);
-  // the level band: at Lv 45 Keen Edge rolls inside [27, 55], never the table's 10..110
+  // the level band: at Lv 45 Keen Edge rolls inside [75, 150], never the table's 10..300 (v0.30.427: max 110 → 300)
   const lv0 = player.level; player.level = 45;
   const band = _boonBand(atk); const rolls = []; for (let i = 0; i < 300; i++) rolls.push(_rollBoonValue(atk));
   const atkRange = _boonRangeText(atk); player.level = lv0;
@@ -79,7 +79,7 @@ ok('the shared boon value/range formatters exist', !r.err && r.has, r.err || '')
 ok('every boon: its formatted value is literally the number the sentence shows (both ends of the range)', !r.err && r.bad && r.bad.length === 0, r.err || (r.bad && r.bad.join(' | ')));
 ok('Lifesteal: roll 15 reads 1.5%, and the range reads 0.5%–1.5% (was "5-15")', !r.err && r.lsVal === '1.5%' && /^0\.5%.{1,3}1\.5%$/.test(r.lsRange || ''), r.err || `${r.lsVal} / ${r.lsRange}`);
 ok('Second Skin: its inverted count reads as seconds, low to high (8s–14s); Mirror Step in seconds (1.5s–3.0s)', !r.err && /^8s.{1,3}14s$/.test(r.skinRange || '') && /^1\.5s.{1,3}3\.0s$/.test(r.mirrorRange || ''), r.err || `${r.skinRange} / ${r.mirrorRange}`);
-ok('Keen Edge at Lv 45: the range shown is the level band the roll is drawn from (27–55), not the table\'s 10–110', !r.err && r.band && r.band.lo === 27 && r.band.hi === 55 && r.rmin >= 27 && r.rmax <= 55 && /27.{1,3}55/.test(r.atkRange || ''), r.err || `band ${JSON.stringify(r.band)} rolls ${r.rmin}-${r.rmax} range "${r.atkRange}"`);
+ok('Keen Edge at Lv 45: the range shown is the level band the roll is drawn from (75–150), not the table\'s 10–300', !r.err && r.band && r.band.lo === 75 && r.band.hi === 150 && r.rmin >= 75 && r.rmax <= 150 && /75.{1,3}150/.test(r.atkRange || ''), r.err || `band ${JSON.stringify(r.band)} rolls ${r.rmin}-${r.rmax} range "${r.atkRange}"`);
 ok('Burning Touch says what it does: ×2 → 40% chance, 16% of the hit per tick for 3s; ×3 → 60% / 24%', !r.err && /40%/.test(r.burn2) && /16%/.test(r.burn2) && /3s/.test(r.burn2) && /60%/.test(r.burn3) && /24%/.test(r.burn3), r.err || `${r.burn2} | ${r.burn3}`);
 ok('Mana Surge says what a tier is (regen interval), not just "+5 tier"', !r.err && /every|interval|faster|s\b/.test(r.mp5 || '') && !/tier\s*$/.test(r.mp5 || ''), r.err || r.mp5);
 ok('the boon panel prints an equipped Lifesteal as "Roll 1.5% · range 0.5%–1.5%", never "range 5-15"', !r.err && r.panelLen > 0 && r.panelHas && !r.panelRaw, r.err || `len ${r.panelLen} has ${r.panelHas} raw ${r.panelRaw}`);

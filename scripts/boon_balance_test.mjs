@@ -188,12 +188,17 @@ try {
   });
 
   // ---- assertions ---------------------------------------------------------
+  // v0.30.427 — the stance flipped, per user: the flat boons are the significant ones and % ATK is 1-10%. The old
+  // assertion (flat within 2.2x of %) is now the failure mode; a max Keen Edge must be worth at least 3x a max Iron
+  // Muscles in real DPS, and Iron Muscles itself must sit at or under +11%.
   const ratioDps = out.dps.keen / Math.max(1, out.dps.iron);
-  ok(`Keen Edge no longer dwarfs Iron Muscles (was ~4x)  keen=+${out.dps.keen}% iron=+${out.dps.iron}%`,
-    ratioDps <= 2.2, { ...out.dps, ratio: +ratioDps.toFixed(2) });
+  ok(`Keen Edge is the significant one: at least 3x Iron Muscles in DPS  keen=+${out.dps.keen}% iron=+${out.dps.iron}%`,
+    ratioDps >= 3 && out.dps.keen >= 60, { ...out.dps, ratio: +ratioDps.toFixed(2) });
+  ok(`Iron Muscles is a 1-10% roll: a max roll buys no more than +11% DPS  iron=+${out.dps.iron}%`,
+    out.dps.iron > 0 && out.dps.iron <= 11, out.dps);
   const ratioEhp = out.ehp.thick / Math.max(0.1, out.ehp.vit);
-  ok(`Thick Skin no longer dwarfs Vitality (was ~4x)  thick=+${out.ehp.thick}% vit=+${out.ehp.vit}%`,
-    ratioEhp <= 2.6, { ...out.ehp, ratio: +ratioEhp.toFixed(2) });
+  ok(`Thick Skin is the significant one: at least 1.5x Vitality in EHP  thick=+${out.ehp.thick}% vit=+${out.ehp.vit}%`,
+    ratioEhp >= 1.5, { ...out.ehp, ratio: +ratioEhp.toFixed(2) });
   ok('Burning Touch: a x3 roll out-damages a x2 (roll is no longer inert)',
     out.burn.x3 > out.burn.x2 * 1.2, out.burn);
   ok('Storm Chain feeds mods.chainChance', out.chainMod > 0, { chainMod: out.chainMod });
