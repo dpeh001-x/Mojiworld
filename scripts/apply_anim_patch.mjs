@@ -57,6 +57,12 @@ for (const [st, v] of Object.entries(patch.calib)) {
   const ft = hasFt(v.ft) ? v.ft.map(x => Math.round(+x))
     : (calib[t] && calib[t][st] && hasFt(calib[t][st].ft) ? calib[t][st].ft : null);
   if (ft) e.ft = ft;
+  // The animator export does not carry ftAuto, so a patch that re-emits an
+  // IDENTICAL timing must not silently turn a generator-owned entry into a
+  // hand-authored one (gen_attack_timing never touches those). Keep the flag
+  // when the timing is unchanged; a changed timing drops it, as before.
+  const prevSt = calib[t] && calib[t][st];
+  if (ft && prevSt && prevSt.ftAuto === true && Array.isArray(prevSt.ft) && prevSt.ft.length === ft.length && prevSt.ft.every((x, i) => x === ft[i])) e.ftAuto = true;
   if (!isDefault(e) || e.fs || e.ft) entity[st] = e;
 }
 const before = JSON.stringify({ c: calib[t] || null, h: hitbox[t] || null });

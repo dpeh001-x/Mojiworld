@@ -136,17 +136,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.01
     },
     "walk": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.01
     },
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03,
+      "dy": 0.01,
       "ft": [
         86,
         72,
@@ -165,17 +165,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.01
     },
     "walk": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.01
     },
     "attack": {
       "s": 1,
       "dx": 0.03,
-      "dy": 0.03,
+      "dy": 0.01,
       "ft": [
         86,
         72,
@@ -194,17 +194,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.01
     },
     "walk": {
       "s": 1,
       "dx": 0.03,
-      "dy": 0.03
+      "dy": 0.01
     },
     "attack": {
       "s": 1,
       "dx": 0.03,
-      "dy": 0.03,
+      "dy": 0.01,
       "ft": [
         86,
         72,
@@ -223,17 +223,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.01
     },
     "walk": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03
+      "dy": 0.01
     },
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.03,
+      "dy": 0.01,
       "ft": [
         86,
         72,
@@ -1746,6 +1746,9 @@ window.LX_ANIM_CALIB = {
   },
   "deranged_kuro": {
     "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.1,
       "ft": [
         86,
         72,
@@ -1777,6 +1780,16 @@ window.LX_ANIM_CALIB = {
     }
   },
   "echoKnight": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.005
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": -0.005
+    },
     "attack": {
       "s": 1,
       "dx": 0,
@@ -1795,7 +1808,20 @@ window.LX_ANIM_CALIB = {
     }
   },
   "elderbark": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": -0.015
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": -0.015
+    },
     "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": -0.015,
       "ft": [
         86,
         72,
@@ -2163,10 +2189,20 @@ window.LX_ANIM_CALIB = {
     }
   },
   "ossuaryTyrant": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.015
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.01
+    },
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0,
+      "dy": 0.015,
       "ft": [
         86,
         108,
@@ -2181,10 +2217,15 @@ window.LX_ANIM_CALIB = {
     }
   },
   "pathsBane": {
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": -0.005
+    },
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0,
+      "dy": 0.075,
       "ft": [
         86,
         72,

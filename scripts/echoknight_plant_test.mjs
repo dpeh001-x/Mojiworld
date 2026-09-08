@@ -45,6 +45,7 @@ const r = await page.evaluate(async () => {
     const targetH = Math.round((mt.h || 30) * 1.5 * sizeFactor * _lxMobScale(t));
     const meta = MONSTER_SPRITE_META[t] || {};
     const dy = _lxMobPlantDy(t, mt.flies === true, srcH, targetH);
+    (out.targetH = out.targetH || {})[t] = targetH;   // the calib dy is applied as dy * targetH
     return Math.round((dy + ((meta.bboxBottomY + 1) / srcH) * targetH) * 100) / 100;   // opaque bottom vs foot line, +down
   };
   out.ladder = {};
@@ -98,6 +99,8 @@ const r = await page.evaluate(async () => {
   let st = null;
   for (let i = 0; i < 30 && !st; i++) { st = sample(); if (!st) await new Promise(r => setTimeout(r, 150)); }
   out.staticDraw = st && { src: st.src, sinkPx: st.sinkPx };
+  // an AUTHORED calib offset (animator patch) rides on top of the engine ladder
+  out.calibIdle = (typeof _lxAnimCalib === 'function') ? _lxAnimCalib('echoKnight', 'idle') : null;
   // attack frames decode lazily on first draw - poll until the blit comes from
   // a different baked object than the static (or resolves to an attack path)
   m.atkAnimUntil = performance.now() + 120000; m._frameIsAttack = true;
@@ -119,8 +122,12 @@ await b.close(); srv.kill();
 ok('the plant ladder puts echoKnight within the house norm (0..6 px under the foot line)',
   r.ladder && r.ladder.echoKnight >= 0 && r.ladder.echoKnight <= 6,
   { echoKnight: r.ladder && r.ladder.echoKnight, was: 11.84 });
-ok('the REAL draw agrees: opaque bottom of the static sprite within 6 px of the floor',
-  r.staticDraw && r.staticDraw.sinkPx >= -1 && r.staticDraw.sinkPx <= 6, r.staticDraw);
+// the house norm is for the ENGINE ladder; an authored idle offset from the animator
+// (calib dy, applied as dy * targetH) is the user's call and sits on top of it
+const _authoredPx = Math.round((((r.calibIdle && r.calibIdle.dy) || 0) * ((r.targetH && r.targetH.echoKnight) || 0)) * 100) / 100;
+ok('the REAL draw agrees: opaque bottom of the static sprite within 6 px of the floor, net of the authored idle calib offset',
+  r.staticDraw && (r.staticDraw.sinkPx - _authoredPx) >= -1 && (r.staticDraw.sinkPx - _authoredPx) <= 6,
+  Object.assign({}, r.staticDraw || {}, { authoredPx: _authoredPx, calibIdle: r.calibIdle }));
 ok('an ATTACK frame plants the same way (frames anchor through the same ladder)',
   r.attackDraw && (/monsters\/attack/.test(r.attackDraw.src) || r.attackDraw.differentObject)
   && r.attackDraw.sinkPx >= -3 && r.attackDraw.sinkPx <= 8, r.attackDraw);
