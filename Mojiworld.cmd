@@ -9,6 +9,25 @@ setlocal
 cd /d "%~dp0"
 set PORT=8765
 
+rem v0.30.432 - LIVE MODE. A checkout that must ALWAYS run the latest main carries
+rem an empty marker file named .mojiworld-live next to this launcher (make one
+rem with: git worktree add --detach C:\path\Mojiworld-live origin/main, then
+rem type nul ^> C:\path\Mojiworld-live\.mojiworld-live). On every launch it
+rem fetches and moves the checkout to origin/main, then replaces whatever
+rem server is already on :%PORT% - a server started from an older tree keeps
+rem serving that tree, which is exactly how a fresh launch used to look stale.
+rem The dev working copy has no marker, so nothing below runs there.
+if exist ".mojiworld-live" (
+  where git >nul 2>nul
+  if not errorlevel 1 (
+    echo Updating to the latest build...
+    git fetch origin -q
+    git checkout -q --detach origin/main
+    for /f "tokens=5" %%p in ('netstat -ano ^| findstr /c:":%PORT% " ^| findstr LISTENING') do taskkill /PID %%p /F >nul 2>nul
+    for /f "tokens=1-3" %%a in ('findstr /c:"const GAME_VERSION" mojiworld_game.html') do echo Serving %%c
+  )
+)
+
 if not exist mojiworld_game.html (
   echo mojiworld_game.html was not found next to the launcher.
   echo Put Mojiworld.cmd in the game folder ^(the repo root^).
