@@ -1,6 +1,6 @@
 // v0.30.411 setshard economy test: repeat-kill ladder for a normal boss and a
 // zodiac boss, twin exclusion (shards + sigil), Express respawn gate,
-// level-scaled respec cost, prestige reset (static).
+// flat 1500 respec cost (v0.30.431), prestige reset (static).
 //   node scripts/setshard_economy_test.mjs [file.html] [port]
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -14,7 +14,7 @@ const PAGE = process.argv[2] || 'mojiworld_game.html';
 const PORT = Number(process.argv[3] || 11061);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 1200));
-const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--no-sandbox', '--mute-audio'] });
+const browser = await chromium.launch({ channel: process.env.MOJI_PW_EXE ? undefined : 'msedge', executablePath: process.env.MOJI_PW_EXE || undefined, headless: true, args: ['--no-sandbox', '--mute-audio'] });   // v0.30.431 — MOJI_PW_EXE overrides the browser, like the other gear guards
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
 await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'load', timeout: 60000 });
@@ -87,7 +87,7 @@ const res = await page.evaluate(async () => {
 
   // ---- respec cost scaling ----
   const rc = [30, 50, 60, 80, 95, 100].map((l) => _lxRespecCost(l));
-  ok('respec cost 300/417/600/1067/1500/1500', JSON.stringify(rc) === JSON.stringify([300, 417, 600, 1067, 1500, 1500]), JSON.stringify(rc));
+  ok('respec cost is a flat 1500 at every level (v0.30.431, per user; the v0.30.412 level curve is retired)', JSON.stringify(rc) === JSON.stringify([1500, 1500, 1500, 1500, 1500, 1500]), JSON.stringify(rc));
 
   // ---- Express respawn gate ----
   player._pqFinaleBossPending = true;

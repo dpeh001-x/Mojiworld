@@ -53,8 +53,9 @@ try {
   ok('clicking a master card opens the permanence confirm for that talent', r.confirmShown && /Gravecall|Learn/.test(r.confirmTitle) && /Learn it/.test(r.yesLabel), r.confirmTitle + ' / ' + r.yesLabel);
   ok('"Learn it (permanent)" learns the MASTER talent (player.talents[master] set) and keeps the job talent', r.masterAfter === r.masterId && r.jobKept, 'master ' + r.masterAfter + ' jobKept ' + r.jobKept);
   ok('the panel re-renders the chosen master card', /✓/.test(r.hostAfter) && new RegExp('Gravecall ✓|' + r.masterId).test(r.hostAfter), r.hostAfter.slice(0, 200));
-  ok('the confirm quotes the level-scaled respec cost, not 1500', r.cost != null && r.confirmBody.includes(r.cost + '◈') && !r.confirmBody.includes('1500◈'), r.confirmBody.slice(-80));
-  ok('the respec buttons quote the level-scaled cost', r.respecLabelAfter.includes(r.cost + '◈') && !r.respecLabelAfter.includes('1500◈'), r.respecLabelBefore + ' -> ' + r.respecLabelAfter);
+  // v0.30.431 — the respec is a flat 1500 again (per user), so the check is "quotes _lxRespecCost()", whatever it returns
+  ok('the confirm quotes the live respec cost (_lxRespecCost)', r.cost != null && r.confirmBody.includes(r.cost + '◈'), r.confirmBody.slice(-80));
+  ok('the respec buttons quote the live respec cost', r.respecLabelAfter.includes(r.cost + '◈'), r.respecLabelBefore + ' -> ' + r.respecLabelAfter);
   ok('the job-tier card still learns through the same path', r.jobCard && r.jobAfter && r.jobAfter === JSON.parse(JSON.stringify(r.jobAfter)), 'job ' + r.jobAfter);
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
