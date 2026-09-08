@@ -10183,7 +10183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.420';
+const GAME_VERSION = 'v0.30.421';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21361,6 +21361,9 @@ function _lxBoonPotency() {
   return Math.min(1, Math.max(0, lv * 0.02));
 }
 function _applyEquippedBoons() {
+  // v0.30.421 - codex: every boon in the bag counts as held (covers every
+  // acquisition path and legacy bags on load); runs before the stat re-derive.
+  try { if (player && Array.isArray(player.boons)) for (const b of player.boons) if (b && b.id) _boonDexMark('held', b.id); } catch (e) {}
   if (!player.mods) return;
   const M = player.mods;
   // v0.29.344 — BACKFILL NEW BOON STATS ONTO OLD SAVES. player.mods is restored
@@ -21742,6 +21745,7 @@ function _detectActiveSynergies() {
     for (const s of BOON_SYNERGIES) {
       if (equippedIds.has(s.pair[0]) && equippedIds.has(s.pair[1])) {
         active[s.key] = true;
+        try { _boonDexMark('syn', s.key); } catch (e) {}   // v0.30.421 - codex: synergy awakened
       }
     }
   }
@@ -21958,6 +21962,54 @@ function _renderPqObjectivePin() {
 // id as `candidateIdx` is already equipped. Used by equipBoon AND every
 // auto-equip path (legacy migration, expedition Bravo's blessing, boon
 // pickup, powerup-choice modal) so same-type stacking can't sneak in.
+// v0.30.421 - BOON CODEX (per user: endgame replayability). Lifetime collection
+// of boons seen on the pick modal, held in the bag, and synergies activated.
+// Milestones pay once (game.boonDex.ms) and the 100% held bonus is a
+// permanent 4th equip slot read by _boonCap(). Not wiped by ascension.
+function _boonDex() {
+  if (!game.boonDex || typeof game.boonDex !== 'object') game.boonDex = { seen: {}, held: {}, syn: {}, ms: {}, slotBonus: 0 };
+  const d = game.boonDex; d.seen = d.seen || {}; d.held = d.held || {}; d.syn = d.syn || {}; d.ms = d.ms || {};
+  return d;
+}
+function _boonDexMark(kind, id) {
+  if (!id) return; const d = _boonDex(); if (d[kind][id]) return;
+  d[kind][id] = Date.now(); if (kind === 'held' && !d.seen[id]) d.seen[id] = d.held[id];
+  _boonDexCheck();
+}
+function _boonDexTotals() {
+  const d = _boonDex(); const ids = (typeof POWERUPS !== 'undefined' ? POWERUPS : []).map(p => p.id);
+  const n = ids.length || 1, held = ids.filter(i => d.held[i]).length, seen = ids.filter(i => d.seen[i]).length;
+  const synN = (typeof BOON_SYNERGIES !== 'undefined' ? BOON_SYNERGIES.length : 0) || 1;
+  const syn = (typeof BOON_SYNERGIES !== 'undefined' ? BOON_SYNERGIES : []).filter(s => d.syn[s.key]).length;
+  return { n, held, seen, synN, syn };
+}
+const BOON_DEX_MILESTONES = [
+  { key: 'held50',  test: t => t.held / t.n >= 0.5 - 1e-9, coins: 3000, shards: 50, label: 'half the boons held' },
+  { key: 'held100', test: t => t.held >= t.n,              slot: 1,                 label: 'every boon held', title: 'Boon Collector' },
+  { key: 'syn100',  test: t => t.syn >= t.synN,            title: 'Synergist',      label: 'every synergy awakened' },
+];
+function _boonDexCheck() {
+  try {
+    const d = _boonDex(), t = _boonDexTotals();
+    for (const m of BOON_DEX_MILESTONES) {
+      if (d.ms[m.key] || !m.test(t)) continue;
+      d.ms[m.key] = Date.now();
+      if (m.coins && typeof _grantMojicoins === 'function') _grantMojicoins(m.coins, { full: true });
+      if (m.shards) player.setshards = (player.setshards | 0) + m.shards;
+      if (m.slot) d.slotBonus = (d.slotBonus | 0) + m.slot;
+      if (m.title) { if (!player.titles || typeof player.titles !== 'object') player.titles = {}; player.titles[m.title] = true; }
+      if (typeof showToast === 'function') showToast('\u{1F4D6} Boon Codex \u2014 ' + m.label + '!' + (m.slot ? ' A 4th boon slot opens.' : m.title ? ' Title: ' + m.title : m.coins ? ' +' + m.coins + ' coins, +' + m.shards + '\u25C8' : ''), 'legendary');
+      if (typeof checkAchievements === 'function') checkAchievements();
+    }
+  } catch (e) {}
+}
+// The equip cap, live: base + the Collector's Slot + any Ascendant Edict slot.
+function _boonCap() {
+  const base = (typeof BOON_EQUIP_CAP === 'number') ? BOON_EQUIP_CAP : 3;
+  const dex = (game.boonDex && (game.boonDex.slotBonus | 0)) || 0;
+  const ed = (typeof _edictOn === 'function' && _edictOn('ascDryRun')) ? 1 : 0;
+  return base + dex + ed;
+}
 function _boonTypeEquipped(candidateIdx) {
   const id = player.boons && player.boons[candidateIdx] && player.boons[candidateIdx].id;
   if (!id || !player.boonsEquipped) return false;
@@ -21967,7 +22019,7 @@ function equipBoon(index) {
   if (!player.boons[index]) return false;
   if (!player.boonsEquipped) player.boonsEquipped = [];
   if (player.boonsEquipped.includes(index)) return false;
-  if (player.boonsEquipped.length >= BOON_EQUIP_CAP) return false;
+  if (player.boonsEquipped.length >= _boonCap()) return false;   // v0.30.421 - live cap
   // v0.26.400/401 — one-per-type cap. Equipping multiple copies of the same
   // boon (e.g. 3× Quick Learner = +150% EXP) is not allowed.
   if (_boonTypeEquipped(index)) {
@@ -22057,7 +22109,7 @@ function _migrateLegacyPowerups() {
     const newIdx = player.boons.length;
     player.boons.push(inst);
     // v0.26.401 — don't auto-equip a duplicate type (legacy migration).
-    if (player.boonsEquipped.length < BOON_EQUIP_CAP && !_boonTypeEquipped(newIdx)) player.boonsEquipped.push(newIdx);
+    if (player.boonsEquipped.length < _boonCap() && !_boonTypeEquipped(newIdx)) player.boonsEquipped.push(newIdx);
   }
   delete player._powerups;
   _applyEquippedBoons();
@@ -41943,7 +41995,8 @@ const GAME_SAVE_FIELDS = [
   // Mojidex milestone rewards silently re-granted on every reload and their
   // PERMANENT +ATK/+DEF was thrown away each session. Found while wiring the
   // Trainee Path, whose final rung grants through the same dexPerm store.
-  'dexMilestones','dexPerm'
+  'dexMilestones','dexPerm',
+  'boonDex'   // v0.30.421 - boon codex (lifetime; not wiped by ascension)
 ];
 // v0.25.264 — saveState() is called from ~30 sites: every kill, quest tick,
 // boon equip, skill unlock, level-up, etc. Each call serializes the whole
@@ -44840,7 +44893,7 @@ const _LX_SAVE_MARK_KEY = SAVE_KEY + '_verified';
 const _LX_SIGNED_PLAYER_KEYS = ['cls','job','master','level','exp','expToNext','mojicoins','bankBalance','bankAccrueMs','setshards',
   'skillPoints','skillRankPoints','skillRanks','baseAtk','baseDef','baseAcc','baseCrit','baseSpeed','baseJump','maxHp','maxMp',
   'equipped','inventory','consumables','talents','boons','boonsEquipped','prestige','quests','_pqChainRuns'];
-const _LX_SIGNED_GAME_KEYS = ['_bossKills','bossDefeated','_bossDefeatedAt','_playMs','kills','dexMilestones','dexPerm','prestige',
+const _LX_SIGNED_GAME_KEYS = ['boonDex','_bossKills','bossDefeated','_bossDefeatedAt','_playMs','kills','dexMilestones','dexPerm','prestige',
   'bossRushBest','_bossRushRewardDay','_chestCooldown'];
 function _lxLocalSaveSigBody(s) {
   const pick = (o, keys) => { const out = {}; if (!o) return out; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
@@ -45323,7 +45376,7 @@ function loadState() {
           clean.push(n);
         }
       }
-      const cap = (typeof BOON_EQUIP_CAP === 'number') ? BOON_EQUIP_CAP : 6;
+      const cap = (typeof _boonCap === 'function') ? _boonCap() : ((typeof BOON_EQUIP_CAP === 'number') ? BOON_EQUIP_CAP : 6);   // v0.30.421
       // v0.25.254 — surface a toast if the load truncated equipped boons
       // so the user knows their loadout shrunk (was silent before).
       const truncated = clean.length > cap;
@@ -49784,6 +49837,7 @@ const ACHIEVEMENTS = [
   { id:'combo200',     name:'Unstoppable',       desc:'Reach a 200-hit combo',            test:()=>(game.comboRecord||0)>=200 },
   { id:'prestige5',    name:'Reborn',            desc:'Ascend 5 times',                   test:()=>(game.prestige && game.prestige.count>=5) },
   { id:'prestige20',   name:'Apex Ascendant',    desc:'Reach the prestige cap (20)',      test:()=>(game.prestige && game.prestige.count>=20) },
+  { id:'boonCodex',    name:'Boon Collector',    desc:'Hold every boon at least once',    test:()=>!!(game.boonDex && game.boonDex.ms && game.boonDex.ms.held100) },   // v0.30.421
   // v0.29.647 — onUnlock fires once, guarded by the persisted achievements map.
   { id:'questMaster',  name:'Quest Master',      desc:'Complete 175 quests',              test:()=>_lxQuestsDone()>=LX_GOD_QUEST_TARGET, onUnlock:()=>_lxGrantGodWeapon() },
 ];
@@ -100668,7 +100722,7 @@ function renderBoonPanel() {
     if (idx >= player.boons.length || equipped.includes(idx)) game._boonSel.delete(idx);
   }
   const slotsHtml = [];
-  for (let s = 0; s < BOON_EQUIP_CAP; s++) {
+  for (let s = 0; s < _boonCap(); s++) {   // v0.30.421 - live cap
     const invIdx = equipped[s];
     const boon = (invIdx != null) ? player.boons[invIdx] : null;
     const def = boon ? getBoonDef(boon) : null;
@@ -100678,6 +100732,24 @@ function renderBoonPanel() {
       slotsHtml.push(`<div style="padding:8px 10px; background:rgba(0,0,0,0.25); border:1px dashed #554466; border-radius:6px; color:#776688; font-size:11px; font-style:italic; display:flex; align-items:center; justify-content:center;">— empty slot —</div>`);
     }
   }
+  // v0.30.421 - BOON CODEX strip: counts + every boon as an icon (dim = unseen,
+  // outlined = seen, lit = held), synergies, and the milestone ladder.
+  let codexHtml = '';
+  try {
+    const dx = _boonDex(), tt = _boonDexTotals();
+    const icons = (typeof POWERUPS !== 'undefined' ? POWERUPS : []).map(def => {
+      const held = !!dx.held[def.id], seen = held || !!dx.seen[def.id];
+      const st = held ? 'opacity:1;filter:none;border-color:#c8a8ff' : seen ? 'opacity:.75;filter:saturate(.4);border-color:#665a88' : 'opacity:.28;filter:grayscale(1);border-color:transparent';
+      return '<span title="' + (def.name || def.id) + (held ? ' \u2014 held' : seen ? ' \u2014 seen' : ' \u2014 undiscovered') + '" style="display:inline-flex;width:26px;height:26px;border:1px solid;border-radius:6px;align-items:center;justify-content:center;' + st + '">' + (typeof boonIconHtml === 'function' ? boonIconHtml(def, 20) : (def.icon || '?')) + '</span>';
+    }).join('');
+    const synRow = (typeof BOON_SYNERGIES !== 'undefined' ? BOON_SYNERGIES : []).map(s => '<span title="' + s.name + '" style="font-size:15px;opacity:' + (dx.syn[s.key] ? 1 : .3) + '">' + s.icon + '</span>').join(' ');
+    const ms = BOON_DEX_MILESTONES.map(m => '<span style="color:' + (dx.ms[m.key] ? '#9fe0a0' : '#776688') + '">' + (dx.ms[m.key] ? '\u2713 ' : '\u25CB ') + m.label + '</span>').join(' \u00b7 ');
+    codexHtml = '<div style="margin:8px 0 10px;padding:8px 10px;border:1px solid #443a66;border-radius:8px;background:rgba(0,0,0,0.22)">'
+      + '<div style="font-size:12px;color:#e8d8ff;margin-bottom:6px">\u{1F4D6} <b>Boon Codex</b> \u00b7 held <b>' + tt.held + '/' + tt.n + '</b> \u00b7 seen ' + tt.seen + '/' + tt.n + ' \u00b7 synergies <b>' + tt.syn + '/' + tt.synN + '</b>' + (dx.slotBonus ? ' \u00b7 <span style="color:#ffd84a">Collector\u2019s Slot open</span>' : '') + '</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px">' + icons + '</div>'
+      + '<div style="font-size:11px;color:#b8a8d0">' + synRow + '</div>'
+      + '<div style="font-size:11px;margin-top:6px">' + ms + '</div></div>';
+  } catch (e) { codexHtml = ''; }
   const invHtml = [];
   for (let i = 0; i < player.boons.length; i++) {
     const boon = player.boons[i];
@@ -100728,7 +100800,7 @@ function renderBoonPanel() {
   const _potLine = _potPct < 100
     ? `<div style="margin:0 0 8px 0; padding:8px 10px; background:linear-gradient(90deg, rgba(255,209,102,0.22), rgba(255,152,0,0.10)); border:2px solid #ffd166; border-radius:8px; font-size:13px; font-weight:bold; color:#ffe9b0; box-shadow:0 0 12px rgba(255,209,102,0.35), inset 0 0 8px rgba(255,209,102,0.08); text-shadow:0 1px 2px rgba(0,0,0,0.6);">⚖ Boon potency: <b style="color:#ffd166; font-size:16px;">${_potPct}%</b> — grows +2% per level, full strength at Lv 50.<br><span style="font-weight:normal; font-size:10px; color:#c9b990;">Double Shot still fires its extra shot — only the echo damage scales. Extra jumps always count in full.</span></div>`
     : '';
-  host.innerHTML = `${_talentLine}${_potLine}<h3 style="margin:0 0 6px 0; color:#c8a8ff; font-size:14px;">◈ Boon Loadout <span style="color:#888; font-size:11px; font-weight:normal;">(${equipped.length} / ${BOON_EQUIP_CAP} equipped · <span style="color:${bagColor};">${player.boons.length} / ${BOON_INVENTORY_CAP}</span> in bag)</span></h3><div style="display:grid; grid-template-columns:repeat(${BOON_EQUIP_CAP}, 1fr); gap:6px; margin-bottom:10px;">${slotsHtml.join('')}</div>${(typeof _synergyPanelHtml === 'function') ? _synergyPanelHtml() : ''}${toolbar}<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:6px; max-height:260px; overflow-y:auto;">${invHtml.join('')}</div><div style="margin-top:6px; font-size:10px; color:#888; text-align:center;"><span class="coin-ico"></span> ${player.mojicoins} Mojicoins · Bag ${bagPct}% full · ${bulk ? 'tick boons, then Discard selected' : 'use 🗑 Bulk discard to clear several at once'}</div>`;
+  host.innerHTML = codexHtml + `${_talentLine}${_potLine}<h3 style="margin:0 0 6px 0; color:#c8a8ff; font-size:14px;">◈ Boon Loadout <span style="color:#888; font-size:11px; font-weight:normal;">(${equipped.length} / ${BOON_EQUIP_CAP} equipped · <span style="color:${bagColor};">${player.boons.length} / ${BOON_INVENTORY_CAP}</span> in bag)</span></h3><div style="display:grid; grid-template-columns:repeat(${BOON_EQUIP_CAP}, 1fr); gap:6px; margin-bottom:10px;">${slotsHtml.join('')}</div>${(typeof _synergyPanelHtml === 'function') ? _synergyPanelHtml() : ''}${toolbar}<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:6px; max-height:260px; overflow-y:auto;">${invHtml.join('')}</div><div style="margin-top:6px; font-size:10px; color:#888; text-align:center;"><span class="coin-ico"></span> ${player.mojicoins} Mojicoins · Bag ${bagPct}% full · ${bulk ? 'tick boons, then Discard selected' : 'use 🗑 Bulk discard to clear several at once'}</div>`;
   const refresh = () => { renderBoonPanel(); renderLevelUp(); updateUI(); saveState(); };
   host.querySelectorAll('[data-equip]').forEach(btn => btn.onclick = () => { if (equipBoon(+btn.dataset.equip)) refresh(); });
   host.querySelectorAll('[data-unequip]').forEach(btn => btn.onclick = () => { if (unequipBoon(+btn.dataset.unequip)) refresh(); });
@@ -103666,6 +103738,7 @@ function showPowerupChoice(bossInfo) {
     ? rollMaxBoonInstance
     : rollBoonInstance;
   const pick = shuffled.slice(0, 3).map(def => ({ def, preview: _rollFn(def.id) }));
+  try { for (const p of pick) _boonDexMark('seen', p.def.id); } catch (e) {}   // v0.30.421 - codex: seen
   // Hero header copy. bossInfo.name might be a long boss title (e.g.
   // "King Gloopaloo, the Brimming Tyrant"); strip trailing comma-clauses
   // so the title reads as a clean proper-noun.
@@ -103760,7 +103833,7 @@ function showPowerupChoice(bossInfo) {
       const newIdx = player.boons.length;
       player.boons.push(inst);
       // v0.26.401 — don't auto-equip a duplicate boon type (choice modal).
-      if (player.boonsEquipped.length < BOON_EQUIP_CAP && !_boonTypeEquipped(newIdx)) {
+      if (player.boonsEquipped.length < _boonCap() && !_boonTypeEquipped(newIdx)) {
         player.boonsEquipped.push(newIdx);
         _applyEquippedBoons();
       }
