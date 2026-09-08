@@ -52,7 +52,10 @@
 // AND all nine 952px animated frames (Sprites/fx/anim/qte_chains_0..8), which
 // are what actually render during a shackle QTE. Without the bump a returning
 // browser mixes the new static with the old frames.
-const CACHE = 'mojiworld-assets-v9';
+// v0.30.426 - v9 -> v10. The smith golem's 28 assets were REPLACED under their
+// own names (re-canvased to one scale / one foot line); returning browsers would
+// serve the old frames from the v9 generation.
+const CACHE = 'mojiworld-assets-v10';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
