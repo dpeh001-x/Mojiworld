@@ -10183,7 +10183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.421';
+const GAME_VERSION = 'v0.30.422';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20008,7 +20008,7 @@ const MASTER_ADVANCE_LEVEL = 40;
 // real post-master endgame stretch before ascending. Named constant
 // replaces the previous hardcoded `50` in offerPrestige + dev cheat +
 // prestige modal copy.
-const PRESTIGE_LEVEL       = 85;
+const PRESTIGE_LEVEL       = 100;   // v0.30.422 - max level 100 (per user); Guguma offers the ascension here
 
 const CUTE_PAL = {
   outline:    '#2a1a28',
@@ -35075,6 +35075,7 @@ function _lxApplyStatTable(mon, type, isBoss, isElite, isMiniBoss) {
   try {
     if (typeof _edictOn === 'function') {
       if (_edictOn('unwakingVigil')) { mon.maxHp = Math.floor(mon.maxHp * 1.5); mon.currentHp = mon.maxHp; }
+      if (_edictOn('ascIronFoe') && !_edictLocked(EDICTS.find(x => x.id === 'ascIronFoe'))) { mon.maxHp = Math.floor(mon.maxHp * 1.5); mon.currentHp = mon.maxHp; }   // v0.30.422
       if (_edictOn('ironVerdict'))   mon.def = Math.floor(mon.def * 1.5);
     }
   } catch (e) {}
@@ -35166,7 +35167,12 @@ const EDICTS = [
   { id:'waningHand',   name:'Waning Hand',    icon:'🌙', desc:'Your ATK −50%',        line:'Your strength thins to a rumor.' },
   { id:'frayedThread', name:'Frayed Thread',  icon:'🧵', desc:'Your Max HP −25%',     line:'The thread of your life pulls taut.' },
   { id:'glassSkin',    name:'Glass Skin',     icon:'💎', desc:'You take +25% damage', line:'Every wound cuts a little deeper.' },
+  // v0.30.422 - ASCENDANT EDICTS (per user, #3): unlocked by ascension count, so
+  // each ascension changes HOW the next run plays. Burdens with a paired boon.
+  { id:'ascIronFoe',   name:'Iron Foe',       icon:'🜂', desc:'Enemy HP +50% · bosses drop +25% setshards', line:'You asked the Weight-Bearer for worthier foes.', asc: 1 },
+  { id:'ascDryRun',    name:'Dry Run',        icon:'🚱', desc:'Potions sealed · +1 boon slot',               line:'No draughts. Only what you carry within.',      asc: 2 },
 ];
+function _edictLocked(e) { return !!(e && e.asc && (((typeof game !== 'undefined' && game && game.prestige && game.prestige.count) | 0) < e.asc)); }
 function _edictOn(id) { return !!(typeof game !== 'undefined' && game && game.edicts && game.edicts[id]); }
 function _edictWeight() { let w = 0; if (typeof game !== 'undefined' && game && game.edicts) { for (const e of EDICTS) if (game.edicts[e.id]) w++; } return w; }
 // Modest reward bribe: +8% EXP and +6% gear-drop rate per Weight.
@@ -35186,8 +35192,9 @@ function openEdictsPanel() {
   const render = () => {
     const w = _edictWeight();
     const rows = EDICTS.map(e => {
-      const on = _edictOn(e.id);
-      return '<button class="edict-row" data-id="' + e.id + '" style="'
+      const on = _edictOn(e.id) && !_edictLocked(e);
+      const locked = _edictLocked(e);   // v0.30.422 - Ascendant Edicts read the ascension count
+      return '<button class="edict-row" data-id="' + e.id + '" data-locked="' + (locked ? 1 : 0) + '" title="' + (locked ? 'unlocks at ascension ' + e.asc : '') + '" style="' + (locked ? 'opacity:.45;cursor:not-allowed;' : '')
         + 'display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:11px 14px;'
         + 'margin:0;border-radius:11px;cursor:pointer;transition:all .12s;'
         + 'border:1px solid ' + (on ? '#c8a8ff' : 'rgba(150,120,200,0.28)') + ';'
@@ -35219,6 +35226,7 @@ function openEdictsPanel() {
     ov.querySelectorAll('.edict-row').forEach(btn => {
       btn.onclick = () => {
         const id = btn.getAttribute('data-id');
+        if (btn.getAttribute('data-locked') === '1') { const e = EDICTS.find(x => x.id === id); if (typeof showToast === 'function') showToast('\u{1F512} ' + (e ? e.name : 'This Edict') + ' unlocks at ascension ' + (e ? e.asc : '?') + '.', 'rare'); return; }   // v0.30.422
         game.edicts[id] = !game.edicts[id];
         if (typeof _applyEquippedBoons === 'function') { try { _applyEquippedBoons(); } catch (e) {} }
         if (typeof _refreshHud === 'function') { try { _refreshHud(); } catch (e) {} }
@@ -48414,7 +48422,8 @@ function _coopApplyKill(msg) {
         const _full = Math.min(10000, Math.max(1, Math.floor(_lv * _lv)));
         const _zs = (typeof msg.zs === 'string' && msg.zs) ? msg.zs.slice(0, 24) : '';
         const _key = _zs ? ('zodiac_' + _zs) : (_tp + '@' + game.currentMap);
-        const _sh = _lxBossShardPayout(_full, _key, !!_zs);
+        let _sh = _lxBossShardPayout(_full, _key, !!_zs);
+        if (typeof _edictOn === 'function' && _edictOn('ascIronFoe')) _sh = Math.ceil(_sh * 1.25);   // v0.30.422 - Iron Foe (guest's own edict)
         player.setshards = (player.setshards || 0) + _sh;
         const _nm = (_def && _def.name) ? String(_def.name).split(/[\s,—]/)[0] : 'The boss';
         if (typeof showToast === 'function') setTimeout(() => showToast('◈ ' + _nm + ' dropped ' + _sh + ' Setshard' + (_sh === 1 ? '' : 's') + '! (co-op)', 'legendary'), 800);
@@ -56369,8 +56378,46 @@ function resetStats() {
 
 // PRESTIGE — "Ascension" at level 50: reset to L1 with permanent bonuses
 // =========================================================================
-function offerPrestige() {
+// v0.30.422 - GUGUMA CARRIES THE ASCENSION (per user: "when character reaches
+// level 100 can ascend with Guguma"). A canary chip (the tutorial's own look)
+// with an HEIRLOOM picker: one equipped boon to carry through. "Later"
+// collapses it to a pill, because at the cap there is no next level-up to
+// re-offer on; a slow guard also raises the pill after a load at cap.
+function _gugumaAscendChip(show, expanded) {
+  let el = document.getElementById('guguma-ascend');
+  if (!show) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'guguma-ascend'; el.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:100040;max-width:min(520px,92vw);'; document.body.appendChild(el); }
+  const eq = (player.boonsEquipped || []).map(i => ({ i, b: player.boons && player.boons[i] })).filter(x => x.b);
+  const heirOpts = '<option value="-1">none</option>' + eq.map(x => { const d = (typeof getBoonDef === 'function') ? getBoonDef(x.b) : null; return '<option value="' + x.i + '"' + (game._heirloomIdx === x.i ? ' selected' : '') + '>' + (d ? d.name : x.b.id) + '</option>'; }).join('');
+  if (!expanded) {
+    el.innerHTML = '<button id="guguma-ascend-pill" class="guguma-chip" style="cursor:pointer;padding:6px 14px 6px 8px;gap:8px"><span class="guguma-sprite" style="width:28px;height:28px"><img src="Sprites/npc/Guguma.webp" alt="" style="width:28px;height:28px;object-fit:contain"></span><span class="guguma-line" style="font-size:12px">Ascend with Guguma \u2728</span></button>';
+    el.querySelector('#guguma-ascend-pill').onclick = () => _gugumaAscendChip(true, true);
+    return;
+  }
+  el.innerHTML = '<div class="guguma-chip guguma-tutorial" style="align-items:flex-start"><div class="guguma-sprite"><img src="Sprites/npc/Guguma.webp" alt="" onerror="this.style.display=\'none\'"></div>'
+    + '<div class="guguma-speech"><div class="guguma-name">Guguma \u00b7 the canary</div>'
+    + '<div class="guguma-line">Cheep! Level ' + PRESTIGE_LEVEL + ' \u2014 the top of the ropes. When you are ready I will carry you back to the first rung, stronger than you left it. Pick one boon to keep warm in my feathers.</div>'
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:12px">'
+    +   '<label>Heirloom boon <select id="guguma-heirloom" style="font-size:12px">' + heirOpts + '</select></label>'
+    +   '<button id="guguma-ascend-go" class="enhance-btn" style="padding:4px 12px">Ascend with Guguma \u2728</button>'
+    +   '<button id="guguma-ascend-later" class="enhance-btn" style="padding:4px 10px;background:linear-gradient(180deg,#888,#555);border-color:#aaa">Later</button>'
+    + '</div></div></div>';
+  el.querySelector('#guguma-heirloom').onchange = (e) => { game._heirloomIdx = +e.target.value; };
+  el.querySelector('#guguma-ascend-later').onclick = () => _gugumaAscendChip(true, false);
+  el.querySelector('#guguma-ascend-go').onclick = () => { game._heirloomIdx = +(el.querySelector('#guguma-heirloom').value); game._prestigeOffered = false; offerPrestige(true); };
+}
+function _gugumaAscendPrompt(quiet) {
+  if (!player || (player.level || 0) < PRESTIGE_LEVEL) { _gugumaAscendChip(false); return; }
+  if (game.prestige && (game.prestige.count || 0) >= 20) { _gugumaAscendChip(false); return; }
+  game._prestigeOffered = true;   // the legacy per-level-up offer stays quiet; Guguma owns it now
+  _gugumaAscendChip(true, !quiet);
+}
+try { setInterval(() => { try { if (typeof player !== 'undefined' && player && player.cls && (player.level || 0) >= PRESTIGE_LEVEL && !document.getElementById('guguma-ascend') && !(game.prestige && (game.prestige.count || 0) >= 20)) _gugumaAscendPrompt(true); } catch (e) {} }, 4000); } catch (e) {}
+function offerPrestige(fromGuguma) {
   if (player.level < PRESTIGE_LEVEL || game._prestigeOffered) return;
+  // v0.30.422 - HEIRLOOM: the boon Guguma keeps warm (an EQUIPPED boon chosen in her chip)
+  const _heirIdx = (game._heirloomIdx | 0), _heir = (_heirIdx >= 0 && player.boons && player.boonsEquipped && player.boonsEquipped.includes(_heirIdx) && player.boons[_heirIdx]) ? JSON.parse(JSON.stringify(player.boons[_heirIdx])) : null;
+  const _heirName = _heir ? (((typeof getBoonDef === 'function') && getBoonDef(_heir)) || {}).name || _heir.id : null;
   // v0.25.775 — Prestige cap at 20 ascensions. Pre-cap each ascension
   // granted +0.30 xpMult / +0.30 dmgMult / +1 bonusAP with no ceiling —
   // a player who ascended 100 times would have ×31 damage and ×31 XP.
@@ -56403,12 +56450,12 @@ function offerPrestige() {
                // v0.29.406 keep-everything (which was also per user). As
                // before, the copy must match the reset below exactly — an
                // irreversible confirm must not lie in either direction.
-               `You KEEP your equipment only — equipped gear and the gear in your inventory.\n` +
+               `You KEEP your equipment only — equipped gear and the gear in your inventory` + (_heirName ? ` — and your HEIRLOOM boon: ${_heirName} (Guguma keeps it warm).` : '.') + `\n` +
                `EVERYTHING else resets: level, stats, job/master, talents, skill tree, boons, skill ranks, quests, boss clears, setshards, mojicoins (wallet + bank), consumables, non-gear items (including <b>Zodiac Sigils</b>), and your MojiMon roster + species kill counts.\n\n` +
                `Ascension #${nextCount}.\n\n<i>Far above, faintly, something begins winding.</i>`;
   // v0.25.244 (X4) — in-game styled prestige confirm.
   uiConfirm({
-    title: '✨ ASCEND?',
+    title: fromGuguma ? '\u{1F424} ASCEND WITH GUGUMA?' : '✨ ASCEND?',   // v0.30.422
     body,
     yesLabel: 'Ascend',
     noLabel: 'Not yet',
@@ -56493,8 +56540,10 @@ function offerPrestige() {
     // retained, letting a Lv 1 player re-pump max-rank skills immediately on
     // re-unlock. Clear all four. Then re-derive `player.mods` from the now-
     // empty boon loadout so the stat block is back to baseline.
-    player.boons = [];
-    player.boonsEquipped = [];
+    player.boons = _heir ? [_heir] : [];             // v0.30.422 - the heirloom rides through
+    player.boonsEquipped = _heir ? [0] : [];
+    game._heirloomIdx = -1;
+    if (typeof _gugumaAscendChip === 'function') _gugumaAscendChip(false);
     player.skillRanks = {};
     player.skillRankPoints = 0;
     if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
@@ -62685,7 +62734,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // v0.29.66 — Edict enemy multipliers (Unwaking Vigil / Cruel Hour). Apply
   // to every monster incl. bosses — a heat system makes the WHOLE game harder,
   // and it's opt-in. Baked at spawn, so a toggle takes effect on the next map.
-  const _edHp  = _edictOn('unwakingVigil') ? 1.5 : 1;
+  const _edHp  = (_edictOn('unwakingVigil') ? 1.5 : 1) * (_edictOn('ascIronFoe') ? 1.5 : 1);   // v0.30.422
   const _edAtk = _edictOn('cruelHour')     ? 1.5 : 1;
   // v0.29.265 — PER-SPAWN STAT VARIABILITY (per user "moderate variability
   // of stats for each monsters but not deviate greatly"). Every non-boss
@@ -88893,7 +88942,7 @@ function _maybeLevelUp() {
   // the recursion tail. Every XP-grant site calls _maybeLevelUp() directly, so
   // a single big grant (very reachable now with the ×20 EXP stack) could push a
   // Lv 200 player to 201+ with unbounded stat growth. Freeze EXP at the cap.
-  if ((player.level || 0) >= 200) { player.exp = 0; return; }
+  if ((player.level || 0) >= PRESTIGE_LEVEL) { player.exp = 0; return; }   // v0.30.422 - the cap is the ascension level (was a 200 freeze)
   if (player.exp < player.expToNext) return;
   player.exp -= player.expToNext;
   player.level++;
@@ -89145,7 +89194,7 @@ function _maybeLevelUp() {
   // milestone trigger fired ten levels late (player who hit Lv 50 got no
   // prestige offer until they ground out to Lv 60). Now reads the constant.
   if (player.level >= PRESTIGE_LEVEL && !game._prestigeOffered) {
-    setTimeout(() => offerPrestige(), 900);
+    setTimeout(() => { if (typeof _gugumaAscendPrompt === 'function') _gugumaAscendPrompt(); else offerPrestige(); }, 900);   // v0.30.422 - Guguma carries the offer
   }
   // v0.25.773 — Chain to the next level-up if overflow EXP carried us past
   // another threshold. Each iteration runs the full UI treatment (toast,
@@ -90555,7 +90604,8 @@ function killMonster(m) {
         // converges to ~1.8x its first drop plus the floor trickle.
         // v0.30.414 — ladder + counter stamp live in _lxBossShardPayout (shared
         // with the co-op guest credit path).
-        const SHARDS = _lxBossShardPayout(_fullShards, _lxBossKey(m) || ((m.type || 'boss') + '@?'), !!m.zodiacSign);
+        let SHARDS = _lxBossShardPayout(_fullShards, _lxBossKey(m) || ((m.type || 'boss') + '@?'), !!m.zodiacSign);
+        if (typeof _edictOn === 'function' && _edictOn('ascIronFoe')) SHARDS = Math.ceil(SHARDS * 1.25);   // v0.30.422 - Iron Foe
         player.setshards = (player.setshards || 0) + SHARDS;
         game.bossDefeated[_shardMapKey] = true;
         const _firstWord = (m.name || 'The boss').split(/[\s,—]/)[0];
@@ -103395,6 +103445,7 @@ function _useCurePotion() {
   useConsumable('cure');
 }
 function useConsumable(id) {
+  if (typeof _edictOn === 'function' && _edictOn('ascDryRun')) { if (typeof showToast === 'function') showToast('\u{1F6B1} Dry Run \u2014 potions are sealed while that Edict is borne.', 'rare'); return false; }   // v0.30.422
   if (!player.consumables[id] || player.consumables[id] <= 0) return;
   // Centralized dead guard (the inventory-click path didn't gate it). NOT gated on
   // game.paused — legitimate inventory "Use" happens while the inventory modal (paused) is open.
@@ -103534,6 +103585,7 @@ function _setPotionCd(which) {
 }
 
 function useQuickPotion(which, preferElixir) {
+  if (typeof _edictOn === 'function' && _edictOn('ascDryRun')) { if (typeof showToast === 'function') showToast('\u{1F6B1} Dry Run \u2014 potions are sealed while that Edict is borne.', 'rare'); return false; }   // v0.30.422
   // v0.26.1023 — noPotion map lockout at the entry (the auto-buy fallback path
   // bypassed useConsumable's gate and healed with gold + empty stock).
   // v0.30.297 — AQUARIUS POTION SEAL. Placed beside the map noPotion gate,
