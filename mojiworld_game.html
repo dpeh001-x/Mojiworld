@@ -10183,7 +10183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.436';
+const GAME_VERSION = 'v0.30.437';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -125952,11 +125952,61 @@ function _monsterFramesFor(type) {
 // 480), so a 42px slime bakes at ~290px instead of staying 768px raw. The
 // largest monsters (Astrofox-class, whose 425-logical draw set the old 480)
 // still resolve to 480 — for them nothing changes.
-const _MOB_FRAME_BASE = Object.create(null);
+const _MOB_FRAME_BASE = Object.create(null);   // type -> { k: logical long-side px per px of m.h, final: every frame aspect was readable }
+// v0.30.437 - THE BASE IS WHAT THE DRAW NEEDS, NOT A GUESS (per user: "ossuarytyrant
+// sprites look blur could you please assist to make it more HQ similar to other
+// sprites"). The rule above sized the base as box x 4 with a 480 ceiling, set when
+// the largest monster drew 425 logical px. The v0.30.420 boxes outgrew it: Ossuary
+// Tyrant draws 614 logical (789 device px at render scale 1.29) from a raster baked
+// to 480 x 1.29 x 1.15 = 710 - an 11% UP-scale of an already-shrunk image, which
+// the v0.29.284 note calls "the only thing that would soften a sprite". Blight
+// Elder was 4% over; Echo Knight and Paths Bane drew 1:1 and looked fine. Measured
+// with a drawImage spy on the live loop (raster 710x592 vs blit 789x658); the
+// native art scores sharper than every peer, so the pipeline was the blur.
+// The base is now the largest logical long side the type can draw at, from the
+// draw path's own formula (targetH = m.h x 1.5 x sizeFactor x mobScale, width by
+// the widest aspect among its static and frames) times the largest state scale it
+// wears (calib s, _ATK_FRAME_SCALE, per-frame fs) - never below the old rule, so
+// nothing that was right-sized bakes bigger. Memoised per type as a factor of m.h
+// once every frame's aspect is readable; until then it is computed per call from
+// what has decoded (cheap, and stable unless a wider frame lands). A base that
+// grows re-bakes through the v0.30.256 versioned marks. mob_bake_base_test.mjs.
+function _mobDrawK(type) {
+  try {
+    const spr = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[type] : null;
+    if (!(spr && spr.naturalWidth > 0 && spr.naturalHeight > 0)) return null;
+    const srcLong = spr._lxOrigLong || Math.max(spr.naturalWidth, spr.naturalHeight);
+    const sizeFactor = Math.max(0.85, Math.min(1.20, srcLong / 768));   // MONSTER_SIZE_REF, as _drawMonsterSprite
+    let aspect = spr.naturalWidth / spr.naturalHeight, final = true;
+    const set = (typeof MONSTER_FRAMES !== 'undefined') ? MONSTER_FRAMES[type] : null;
+    if (set) for (const st of ['idle', 'walk', 'attack']) {
+      const arr = set[st]; if (!arr) continue;
+      for (const im of arr) {
+        if (!im) continue;
+        const w = im._lxNW || im.naturalWidth || im.width || 0, h = im._lxNH || im.naturalHeight || im.height || 0;
+        if (w > 1 && h > 1) { if (w / h > aspect) aspect = w / h; }
+        else if (!im.complete) final = false;   // still decoding (a 404 is complete with no size: readable, ignored)
+      }
+    }
+    let sMax = 1;
+    for (const st of ['idle', 'walk', 'attack']) {
+      const c = (typeof _lxAnimCalib === 'function') ? _lxAnimCalib(type, st) : null;
+      let sc = (c && +c.s > 0) ? +c.s : 1;
+      if (st === 'attack') {
+        sc *= (typeof _ATK_FRAME_SCALE === 'object' && _ATK_FRAME_SCALE[type]) || 1;
+        if (c && Array.isArray(c.fs)) { let fm = 1; for (const f of c.fs) if (+f > fm) fm = +f; sc *= fm; }
+      }
+      if (sc > sMax) sMax = sc;
+    }
+    return { k: 1.5 * sizeFactor * _lxMobScale(type) * Math.max(1, aspect) * sMax, final };
+  } catch (e) { return null; }
+}
 function _mobFrameBase(m) {
-  let b = _MOB_FRAME_BASE[m.type];
-  if (!b) b = _MOB_FRAME_BASE[m.type] = Math.max(160, Math.min(480, Math.ceil(Math.max(m.w || 0, m.h || 0) * 4)));
-  return b;
+  const guess = Math.max(160, Math.min(480, Math.ceil(Math.max(m.w || 0, m.h || 0) * 4)));   // the v0.29.707 rule, kept as the floor
+  let e = _MOB_FRAME_BASE[m.type];
+  if (!e || !e.final) { const r = _mobDrawK(m.type); if (r) e = _MOB_FRAME_BASE[m.type] = r; }
+  if (!e) return guess;
+  return Math.max(guess, Math.ceil((m.h || 30) * e.k));
 }
 // Current animation frame for a monster, or null to fall back to the static
 // sprite. Attack while m.atkAnimUntil is live OR the mob is in the player's
