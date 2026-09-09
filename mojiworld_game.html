@@ -10562,7 +10562,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.493';
+const GAME_VERSION = 'v0.30.494';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42682,7 +42682,29 @@ async function _lxSteamCloudSync() {
   const localT = (localSave && localSave.t) || 0;
   const cloudT = (cloudSave && cloudSave.t) || 0;
   if (localSave && cloudT === localT) return;                                    // identical -> nothing to do
-  if (localLevel <= 1 || cloudLevel > localLevel || cloudT > localT) {           // cloud is fresher / more advanced -> adopt it
+  // v0.30.494 — DATA-LOSS FIX, the Steam half of the v0.27.24 web fix. This path
+  // adopted the cloud blob on a newer TIMESTAMP alone. `t` is raw Date.now() at
+  // flush time, so a second Steam machine with a fast RTC stamps a low-level save
+  // "in the future" and clobbers a high-level character on the next launch here.
+  // A newer timestamp now only wins when it is not a level regression; a fresh
+  // machine (localLevel<=1) or a strictly-higher cloud level still applies
+  // unconditionally, so normal cross-device play is unchanged.
+  const _applyCloud = (localLevel <= 1) || (cloudLevel > localLevel) || (cloudT > localT && cloudLevel >= localLevel);
+  if (_applyCloud) {
+    // ...and snapshot what we are about to replace, exactly as the web path does,
+    // so a sync that still slips past the guard stays recoverable from the Save
+    // Backups menu. Skip trivial Lv<=1 saves (fresh-machine pull).
+    try {
+      if (localRaw && localLevel > 1 && typeof _lxGetBackups === 'function' && typeof _lxStoreBackups === 'function') {
+        const meta = (typeof _lxSaveMetaFrom === 'function') ? _lxSaveMetaFrom(localRaw) : {};
+        const arr = _lxGetBackups();
+        arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          ts: Date.now(), label: 'auto · before cloud sync',
+          name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: localRaw });
+        while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
+        _lxStoreBackups(arr);
+      }
+    } catch (e) {}
     // v0.29.475 — block the beforeunload flush, exactly as the import,
     // backup-restore and reset paths already do. Without it the handler saw a
     // live character and no guard, so it serialised the STILL-LOADED local
@@ -46425,6 +46447,13 @@ function loadState() {
 }
 function clearSave() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+  // v0.30.494 — the anti-tamper marker (SAVE_KEY + '_verified') used to survive
+  // "Erase everything", so the NEXT character created in this browser was graded
+  // against the deleted one's {setshards, mojicoins, bankBalance}. On an unsigned
+  // load the clamp then either did nothing (the dead character was richer, so the
+  // guard silently failed open) or filed the new character's currency down to a
+  // stranger's balance. Clearing the save clears its marker.
+  try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
   // v0.25.774 — Also wipe the first-time-tip flags + tutorial-seen marker
   // so a save-wiped player re-experiences the Lv-5 world-map tip, the
   // canvas-tap hotkey hint, and the tutorial modal. Previously only the
@@ -101634,18 +101663,25 @@ function renderSkillsReference(host) {
       _rpReset.title = 'No ranks spent yet — nothing to refund';
     } else {
       // v0.29.x (per user) — RP reset now COSTS 20% of your current Mojicoins.
-      const _cost = Math.floor((player.mojicoins | 0) * 0.20);
-      _rpReset.title = 'Refund every spent rank — costs ' + _cost + ' Mojicoins (20% of your ' + (player.mojicoins | 0) + ')';
+      // v0.30.494 — every coin read in this block was `| 0` (ToInt32). Past
+      // 2,147,483,647 coins that wraps NEGATIVE: the 20% fee came out negative,
+      // subtracting it GREW the debt, and Math.max(0, ...) filed the whole wallet
+      // to zero — made permanent by the saveState() a few lines down, and shown
+      // in the confirm dialog as "Cost: -258993460 Mojicoins". Same class as the
+      // v0.26.1028 / v0.26.1033 / v0.27.24 fixes; this was the site they missed.
+      const _coinsNow = () => Math.max(0, Math.floor(player.mojicoins || 0));
+      const _cost = Math.floor(_coinsNow() * 0.20);
+      _rpReset.title = 'Refund every spent rank — costs ' + _cost + ' Mojicoins (20% of your ' + _coinsNow() + ')';
       _rpReset.onclick = async () => {
-        const _fee = Math.floor((player.mojicoins | 0) * 0.20);   // re-read at click time
+        const _fee = Math.floor(_coinsNow() * 0.20);   // re-read at click time
         const ok = (typeof uiConfirm === 'function')
           ? await uiConfirm({
               title: '↺ Reset Rank Points?',
-              body: 'Refund all ' + _spent + ' spent RP back into your pool?\n\n• Cost: ' + _fee + ' Mojicoins — 20% of your ' + (player.mojicoins | 0) + '◈\n• Every skill returns to rank 0 — re-invest however you like.',
+              body: 'Refund all ' + _spent + ' spent RP back into your pool?\n\n• Cost: ' + _fee + ' Mojicoins — 20% of your ' + _coinsNow() + '◈\n• Every skill returns to rank 0 — re-invest however you like.',
               yesLabel: 'Reset (−' + _fee + '◈)', noLabel: 'Keep my ranks' })
           : confirm('Reset all ranks for ' + _fee + ' Mojicoins (20%)? Every skill returns to rank 0.');
         if (!ok) return;
-        player.mojicoins = Math.max(0, (player.mojicoins | 0) - _fee);
+        player.mojicoins = Math.max(0, _coinsNow() - _fee);
         player.skillRankPoints = (player.skillRankPoints | 0) + _spent;
         player.skillRanks = {};
         if (typeof showToast === 'function') showToast('↺ Ranks reset — +' + _spent + ' RP (−' + _fee + '◈)', 'rare');
