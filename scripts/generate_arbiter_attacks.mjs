@@ -66,12 +66,23 @@ const ATTACKS = {
   // own hazard; what is missing is the knight's form.
   verdict: {
     key: 'towerArbiterverdict',
-    motion: 'The armoured knight holds the broadsword OUT IN FRONT OF HIM at chest height with BOTH hands on the grip, blade level and pointing forward, in a steady braced two-handed guard. '
-      + 'THE SWORD ITSELF BARELY MOVES. It stays out in front of him in almost the same place in the whole animation, fully extended into empty space, and only dips through a SMALL controlled downward angle of a few degrees and lifts back. It never swings, never sweeps, never travels across the frame. '
-      + 'The animation is in his BODY, not in the sword: he settles his weight onto the back foot, turns his shoulders, drives forward into a braced lunge and leans into the strike with the cape flaring behind him, then settles back to the guard. '
-      + 'The sword is ALWAYS IN FRONT OF THE KNIGHT and always held clear of his body, so its whole length is silhouetted against empty background in every frame. '
-      + 'The blade NEVER goes above his head, NEVER goes behind his shoulder or behind his helmet, NEVER passes behind the cape, and is NEVER overlapped or hidden by any part of him. '
-      + 'A clean disciplined swordsman movement, weight shifting from the back foot to the front, both feet staying on the ground the whole time.' + COMMON,
+    // Per user, after ~60 rolls of trying to get a clean SWINGING sword out of the model:
+    // "seems like generating animation with the sword swinging is a bad idea, could you just
+    // make an animation of the arbiter holding the sword upright and it burning in fire".
+    // This is the right shape for the tool. Everything measured here says the model draws a
+    // whole blade when the pose stays near the seed and shears it once the pose travels. A
+    // held guard keeps the sword exactly where it draws it best, and the FIRE supplies the
+    // animation instead of the arm - so the set moves without the blade ever having to.
+    flaming: true,
+    // His own column-strike frame, where the sword is already vertical with the point to the
+    // sky and both hands on the grip - the pose the prompt could not talk the model into.
+    seed: join(repoRoot, 'scripts', 'seeds', 'towerArbiterupright.webp'),
+    motion: 'The armoured knight stands square and STILL, holding the broadsword UPRIGHT in both hands in front of his chest, the blade vertical and the point to the sky. His stance, arms, shoulders and head stay exactly where they are and do not move. '
+      + 'THE BLADE IS ON FIRE. Flame CLINGS CLOSELY to the steel, sheathing the blade and licking only a SHORT distance off its edges and just past the point. The fire does NOT tower above the sword and does not form a tall column - it hugs the blade. '
+      + 'THE STEEL OF THE SWORD STAYS CLEARLY VISIBLE through and between the flames, its shape and its sharp point readable at all times - the blade is sheathed in fire, NOT hidden by it and NOT replaced by it. '
+      + 'The fire is the ONLY thing that moves: it flickers, curls and guts continuously, with small embers rising. '
+      + 'The whole sword stays fully visible from crossguard to point at all times, held upright and clear of his body against empty background, and the burning blade is never cropped, never shortened and never ends in a flat cut. '
+      + 'A still, solemn, ceremonial stance - both feet planted, cape hanging.' + COMMON,
   },
   // The COLUMN — his columnStrike. A formal high guard into a point-first plunge
   // that calls the pillar. The pillar itself is drawn by the game (fx_col_arbiter),
@@ -158,6 +169,22 @@ const TIP_TAPER_MAX = 0.18;
 // single pixel by construction, so it cannot be blunt; this bound only has to stay well
 // under the 0.297 floor of the cut frames the threshold above was calibrated on.
 const TIP_MENDED_MAX = 0.28;
+// How different two frames look, as a mean absolute difference over a 64x64 thumbnail with
+// alpha folded in. Only ever compared against the other gaps in the same roll, so the units
+// do not matter - what matters is spotting the ONE gap that is nothing like the others.
+async function thumb(buf) {
+  return await sharp(buf).ensureAlpha().resize(64, 64, { fit: 'fill' }).raw().toBuffer();
+}
+function thumbDist(a, b) {
+  let d = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    const aa = a[i + 3] / 255, ba = b[i + 3] / 255;
+    d += Math.abs(a[i] * aa - b[i] * ba) + Math.abs(a[i + 1] * aa - b[i + 1] * ba)
+       + Math.abs(a[i + 2] * aa - b[i + 2] * ba) + Math.abs(a[i + 3] - b[i + 3]);
+  }
+  return d / (a.length / 4);
+}
+
 async function bladeTipRatio(buf) {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: W, height: H, channels: C } = info;
@@ -380,6 +407,33 @@ async function repairBladeTip(buf) {
   return await sharp(out, { raw: { width: W, height: H, channels: 4 } }).webp({ quality: 94 }).toBuffer();
 }
 
+// FIRE IS SATURATED TOO. armourBox() calls every saturated pixel armour, which is right for
+// gold and violet on black and wrong the moment the blade is burning: the flame stretches
+// the box up the sword, the bake reads a taller knight and scales him DOWN. Measured on the
+// first burning roll - he came out at 89% of the size his calibration was authored against.
+// The violet cape and trim cannot be confused with fire (blue-dominant against orange), so
+// a flaming set is measured on that instead, against its own target.
+async function violetBox(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels: C } = info;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1, n = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * C; if (data[i + 3] < 110) continue;
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    if (b <= r || b <= 90 || (b - Math.min(r, g)) / b <= 0.20) continue;
+    if (x < x0) x0 = x; if (x > x1) x1 = x;
+    if (y < y0) y0 = y; if (y > y1) y1 = y; n++;
+  }
+  return n > 100 ? { x0, y0, x1, y1 } : null;
+}
+// Where the violet cape lands in the art the shipped calibration was authored against:
+// its height in source-canvas pixels, and the x it is centred on. Fire cannot forge violet,
+// so this survives a burning blade where the saturated-pixel measure does not. (The first
+// numbers here were 178/165, read through a mask so strict it saw a third of the cape - it
+// normalised the knight to a third of the canvas. Measured properly: 337.)
+const VIOLET_TARGET = { towerArbiterverdict: 337, towerArbitercolumn: 328 };
+const VIOLET_CX = 631;
+
 async function armourBox(buf) {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: W, height: H, channels: C } = info;
@@ -434,34 +488,80 @@ async function edgeTouching(buf, margin = 2) {
 // need far more headroom than a standing pose does, and the model treats the
 // supplied frame as the whole world.
 const cropW = srcBox.x1 - srcBox.x0 + 1, cropH = srcBox.y1 - srcBox.y0 + 1;
-const PAD = 0.62;   // v0.30.x — 0.42 framed a staff; a broadsword at full extension needs more
+// v0.30.x — SPEND THE PIXELS ON THE KNIGHT. The animate endpoint returns frames at exactly
+// the resolution of the image it is given (measured: an 863x990 seed came back as 863x990
+// frames), and at 0.62 the knight was 385x442 inside that 863x990 - well over half the
+// budget was empty margin. A sword tip is the thinnest thing in the picture and it is the
+// first thing to go when there are no pixels to draw it with. Crop closer and then spend
+// the whole 1MP allowance on the character.
+const PAD = Number(arg('--pad') || 0.35);
 // The endpoint refuses a source over 1 megapixel ("True Size only works with
 // source images under 1 megapixel"), and 0.42 padding on a 523x615 crop lands
 // right on that line. Downscaling the initial costs nothing -- the returned
 // frames are rescaled back onto the source canvas regardless -- so cap it well
 // under the limit rather than trading away the headroom that stops the crops.
 const MAX_PX = 900000;
-let initial = await sharp(SRC)
-  .extract({ left: srcBox.x0, top: srcBox.y0, width: cropW, height: cropH })
-  .extend({
-    top: Math.round(cropH * PAD), bottom: Math.round(cropH * PAD),
-    left: Math.round(cropW * PAD), right: Math.round(cropW * PAD),
-    background: { r: 0, g: 0, b: 0, alpha: 0 },
-  })
-  .webp({ quality: 94 }).toBuffer();
-{
-  const im = await sharp(initial).metadata();
-  const px = im.width * im.height;
-  if (px > MAX_PX) {
-    const k = Math.sqrt(MAX_PX / px);
-    initial = await sharp(initial)
-      .resize(Math.floor(im.width * k), Math.floor(im.height * k))
-      .webp({ quality: 94 }).toBuffer();
-    const im2 = await sharp(initial).metadata();
-    console.log(`initial downscaled ${im.width}x${im.height} -> ${im2.width}x${im2.height} (1MP API cap)`);
-  }
+// THE POSE COMES FROM THE SEED, NOT FROM THE PROMPT. Asked for an upright sword, the model
+// returned the seed's own low diagonal guard with fire on it - and that is not it ignoring
+// the instruction so much as the same effect measured all the way through this file: what
+// the model draws well is what is near the seed. So to change the pose, change the seed.
+// An attack may name its own (`seed`); everything downstream still normalises against the
+// source canvas, so a different seed cannot move the boss out from under his calibration.
+async function makeInitial(path) {
+  const bb = await bbox(await sharp(path).toBuffer());
+  if (!bb) throw new Error('seed image is empty: ' + path);
+  const cw = bb.x1 - bb.x0 + 1, ch = bb.y1 - bb.y0 + 1;
+  let img = await sharp(path)
+    .extract({ left: bb.x0, top: bb.y0, width: cw, height: ch })
+    .extend({
+      top: Math.round(ch * PAD), bottom: Math.round(ch * PAD),
+      left: Math.round(cw * PAD), right: Math.round(cw * PAD),
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .webp({ quality: 94 }).toBuffer();
+  const im = await sharp(img).metadata();
+  // scale TO the budget, up or down - the returned frames match this size, so any pixel
+  // left unspent here is a pixel the model does not get to draw the blade with
+  const k = Math.sqrt(MAX_PX / (im.width * im.height));
+  img = await sharp(img)
+    .resize(Math.round(im.width * k), Math.round(im.height * k), { kernel: 'lanczos3' })
+    .webp({ quality: 96 }).toBuffer();
+  const im2 = await sharp(img).metadata();
+  console.log(`seed ${path.split(/[\\/]/).pop()}: ${im.width}x${im.height} -> ${im2.width}x${im2.height}`
+    + ` (figure ~${Math.round(cw * k)}x${Math.round(ch * k)})`);
+  return { buf: img, bb, cw, ch, k };
+}
+const initial = await makeInitial(SRC);
+const seedCache = new Map();
+async function seedFor(a) {
+  if (!a.seed) return initial;
+  if (!seedCache.has(a.seed)) seedCache.set(a.seed, await makeInitial(a.seed));
+  return seedCache.get(a.seed);
 }
 
+// How many frames to ASK for. The game wants nine; asking for a longer sequence and
+// keeping the best nine in a row costs one call and buys many more candidate runs.
+// 16 is the endpoint ceiling (20 is rejected outright with a schema error), and it gives
+// sixteen candidate runs of nine instead of one.
+const REQ = Math.max(FRAMES, Math.min(16, Number(arg('--req') || 16)));
+// How much the chosen nine frames must move, in the same units as the frame-gap measure.
+// His base attack travels 240 across its nine; below about 60 the set reads as a held pose
+// rather than a strike. MOTION_GOOD is where it stops paying for more rolls.
+const MOTION_MIN = Number(arg('--motion') || 60);
+const MOTION_GOOD = Number(arg('--motion-good') || 140);
+// Blunt blades tolerated in the shipped nine. 0 is the goal; 1 matches his base attack.
+const MAX_BAD = Number(arg('--max-bad') || 1);
+// THESE ARE ONE-SHOT ATTACKS, NOT IDLES. loop:true was inherited from the effect runners
+// and asks the model for a seamless CYCLE - so it has to travel out and come all the way
+// back, which is what puts the extreme of the motion in the middle (the part it draws
+// worst) and creates the frame-15-to-frame-0 seam (the pop, because frame 0 is the seed
+// itself). A swing plays once. Asking for one gives a one-way motion whose EARLY frames
+// are both nearest the seed and genuinely moving.
+// Measured both ways: asking for a one-shot instead of a cycle made it WORSE, not better
+// (best window went from 1-2 blunt frames to 4-8). The seamless cycle evidently keeps the
+// model anchored to the seed pose it was given; without it, it wanders off sooner.
+const LOOP = !has('--no-loop');
+const MEND = has('--mend');
 const only = arg('--only');
 const TRIES = Math.max(1, Number(arg('--tries') || 3));
 let failed = 0;
@@ -469,58 +569,130 @@ for (const [name, a] of Object.entries(ATTACKS)) {
   if (only && only !== name && only !== a.key) continue;
   process.stdout.write(`  ${name} (${a.key}) ... `);
   try {
-    let bufs = [], clipped = 0;
-    // Re-roll a clipped set rather than shipping it. The model is stochastic:
-    // the same prompt that crops on one draw is usually clean on the next, and
-    // "cut off at the edge" is cheap to detect and impossible to fix later.
+    // v0.30.x — ASK FOR MORE FRAMES AND KEEP THE BEST NINE IN A ROW.
+    // Thirty-two rolls over six motion prompts and two seed resolutions never produced nine
+    // intact blades in a nine-frame set. The failures are not random and they do not follow
+    // the motion: whatever it is asked for, frames 0 and 8 come back with a proper point
+    // EVERY time and the middle of the sequence comes back sheared EVERY time. What frames 0
+    // and 8 have in common is that they sit next to the seed image. The further into the
+    // invented middle the model gets, the less of the sword survives — a thrust that never
+    // rotates the blade failed frames 3, 4 and 5 in all eight rolls, exactly like the cleave.
+    //
+    // So stop fighting for a specific nine. Ask the endpoint for a longer sequence, score
+    // every frame, and take the best CONTIGUOUS run of nine out of it. Contiguous keeps the
+    // animation coherent — it is one unbroken passage of one roll, not a stitched composite —
+    // and a longer sequence simply contains far more chances that some nine in a row are all
+    // drawn whole. Every frame that ships is the model's own work, untouched.
+    const seed = await seedFor(a);
+    let bufs = [], clipped = 1, best = null;   // best = { frames, scores, roll, at }
     for (let attempt = 1; attempt <= TRIES; attempt++) {
-      const anim = await post('/assets/sprite/animate', {
-        initial_image: `data:image/webp;base64,${initial.toString('base64')}`,
-        motion_prompt: a.motion, frames: FRAMES, frame_size: -9,
-        model: 'eagle', individual_frames: true, loop: true, image_type: 'sprite',
-      });
-      bufs = [];
+      // A 502 from the endpoint is a bad minute, not a bad set.
+      let anim;
+      try {
+        anim = await post('/assets/sprite/animate', {
+          initial_image: `data:image/webp;base64,${seed.buf.toString('base64')}`,
+          motion_prompt: a.motion, frames: REQ, frame_size: -9,
+          model: 'eagle', individual_frames: true, loop: LOOP, image_type: 'sprite',
+        });
+      } catch (e) {
+        process.stdout.write(`[roll ${attempt} failed: ${String(e.message).split(String.fromCharCode(10))[0].slice(0, 60)}] `);
+        continue;
+      }
+      let all = [];
       if (anim.spritesheet_url && anim.num_cols && anim.num_rows) {
         const sheet = await fetchBuf(anim.spritesheet_url), sm = await sharp(sheet).metadata();
         const cw = Math.floor(sm.width / anim.num_cols), ch = Math.floor(sm.height / anim.num_rows);
-        for (let r = 0; r < anim.num_rows && bufs.length < FRAMES; r++)
-          for (let c = 0; c < anim.num_cols && bufs.length < FRAMES; c++)
-            bufs.push(await sharp(sheet).extract({ left: c * cw, top: r * ch, width: cw, height: ch }).webp({ quality: 94 }).toBuffer());
+        for (let r = 0; r < anim.num_rows && all.length < REQ; r++)
+          for (let c = 0; c < anim.num_cols && all.length < REQ; c++)
+            all.push(await sharp(sheet).extract({ left: c * cw, top: r * ch, width: cw, height: ch }).webp({ quality: 94 }).toBuffer());
       }
-      if (bufs.length < FRAMES && Array.isArray(anim.individual_frame_urls)) {
-        bufs = []; for (const u of anim.individual_frame_urls.slice(0, FRAMES)) bufs.push(await fetchBuf(u));
+      if (all.length < FRAMES && Array.isArray(anim.individual_frame_urls)) {
+        all = []; for (const u of anim.individual_frame_urls.slice(0, REQ)) all.push(await fetchBuf(u));
       }
-      if (bufs.length < FRAMES) throw new Error(`got ${bufs.length}/${FRAMES} frames`);
-      clipped = 0;
-      // A sword is THIN. The 24-pixel threshold inherited from the Sovereign (whose
-      // staff is short and whose cloak is the thing that brushes the border) let three
-      // frames through with the blade sheared flat and tipless: a blade crossing the
-      // frame edge contributes only its own width in border pixels, ~10-20, which is
-      // under 24. Nothing legitimate touches the border here — the bake re-places the
-      // art on the game canvas afterwards, so the model has no reason to reach the edge
-      // at all — and 4 leaves room for stray antialiasing without excusing a cut.
-      let blunt = 0, mended = 0; const taper = [];
-      for (let fi = 0; fi < bufs.length; fi++) {
-        if (await edgeTouching(bufs[fi]) > 4) { clipped++; taper.push('EDGE'); continue; }
-        let t = await bladeTipRatio(bufs[fi]), fixedIt = false;
-        if (t != null && t > TIP_TAPER_MAX) {
-          // the model left this blade blunt; extrude the point it should have drawn
-          const fixed = await repairBladeTip(bufs[fi]);
-          if (fixed) {
-            const t2 = await bladeTipRatio(fixed);
-            if (t2 != null && t2 <= TIP_MENDED_MAX) { bufs[fi] = fixed; t = t2; fixedIt = true; mended++; }
-          }
+      if (all.length < FRAMES) { process.stdout.write(`[roll ${attempt} short: ${all.length}] `); continue; }
+      // A blade wrapped in flame is not desaturated steel, so bladeTipRatio() cannot see it -
+      // it would find no 'steel' at all and score every frame unusable. For a flaming set the
+      // border check and the eye are the tests; the point is protected by the pose instead,
+      // since a held guard never leaves the part of the sequence the model draws properly.
+      const score = [];
+      for (const b of all) {
+        if (await edgeTouching(b) > 4) { score.push(9); continue; }   // 9 = unusable sentinel
+        if (a.flaming) { score.push(0); continue; }
+        const t = await bladeTipRatio(b);
+        score.push(t == null ? 9 : t);
+      }
+      // THE LOOP DOES NOT ACTUALLY CLOSE. loop:true implies frame 15 runs into frame 0, but
+      // frame 0 is the seed image itself and the rest are invented from it, so the 15->0 gap
+      // is often a visible pop in pose, framing and scale - one shipped column set ended on a
+      // frame where the knight abruptly faced the camera. The frames on either side of that
+      // seam are also the cleanest ones, so the intact-run search walks straight into it.
+      // Measure every gap and refuse to cross one that is nothing like the others.
+      const th = []; for (const b of all) th.push(await thumb(b));
+      const gap = th.map((t, i) => thumbDist(t, th[(i + 1) % th.length]));
+      const med = gap.slice().sort((p, q) => p - q)[gap.length >> 1] || 1;
+      const JUMP = med * 2.5;   // a real pop measures many times the median step
+      // the run of nine whose WORST frame is the best; ties go to the lower total
+      // The run may WRAP. loop:true means frame 15 runs straight into frame 0, and the
+      // frames that survive are the ones nearest the seed pose — which sit at BOTH ends of
+      // the array. A non-wrapping search would step over the one stretch most likely to be
+      // clean end to end. (Measured: two rolls in a row put their clean stretch at 13,14,15,0,1.)
+      const N = all.length;
+      // A RUN OF NINE THAT ACTUALLY MOVES.
+      // The first cut of this maximised blade quality alone, and got exactly what it asked
+      // for: nine flawless blades and no animation. Measured against his base attack, which
+      // travels 240 units across its nine frames, the winning runs travelled 16 and 3 - the
+      // column set was nine copies of one pose (identical tip width and reach in every frame).
+      // The still part of the loop is the part the model draws best, so quality alone always
+      // lands there.
+      //
+      // His base attack is the proof that both are available at once: it moves properly AND
+      // eight of its nine blades pass this same test. So movement is a REQUIREMENT, not a
+      // tiebreak - take the run that moves the most among those that are intact and smooth.
+      const okAt = (i) => score[((i % N) + N) % N] <= TIP_TAPER_MAX;
+      const at$ = (i) => ((i % N) + N) % N;
+      let at = -1, atTravel = -1, atBad = 99;
+      let loose = null;   // best effort, for the error message when nothing qualifies
+      for (let i = 0; i < N; i++) {
+        if (!LOOP && i + FRAMES > N) continue;   // no wrap: the sequence does not come back
+        const idx = Array.from({ length: FRAMES }, (_, k) => at$(i + k));
+        let bad = 0, worst = 0, travel = 0, jumped = false;
+        for (const j of idx) { if (score[j] > TIP_TAPER_MAX) bad++; if (score[j] > worst) worst = score[j]; }
+        for (let k = 0; k < FRAMES - 1; k++) {
+          const g = gap[idx[k]];
+          travel += g; if (g > JUMP) jumped = true;
         }
-        taper.push((t == null ? 'n/a' : t.toFixed(2)) + (fixedIt ? '*' : ''));   // * = point rebuilt
-        if (t != null && t > (fixedIt ? TIP_MENDED_MAX : TIP_TAPER_MAX)) blunt++;   // could not be mended
+        if (!loose || bad < loose.bad || (bad === loose.bad && travel > loose.travel)) loose = { i, bad, worst, travel, jumped };
+        if (jumped || travel < MOTION_MIN) continue;
+        // Grade rather than pass/fail: fewest blunt blades first, then the most movement.
+        // Zero is the target, but ONE is the bar the game already ships - his base attack
+        // has a blunt frame (f5, 0.37) and travels 240, and nobody has ever remarked on it.
+        // Refusing a 1-bad run that moves properly, in favour of a flawless run that does
+        // not move at all, is how the last pass produced nine copies of one pose.
+        if (bad < atBad || (bad === atBad && travel > atTravel)) { at = i; atTravel = travel; atBad = bad; }
       }
-      clipped += blunt;
-      if (mended) process.stdout.write('[' + mended + ' tip' + (mended > 1 ? 's' : '') + ' rebuilt] ');
-      if (!clipped) break;
-      process.stdout.write(`[${clipped}/${FRAMES} bad (taper ${taper.join(" ")}); re-roll ${attempt}/${TRIES}] `);
+      process.stdout.write(`[roll ${attempt}/${TRIES}: `
+        + (at >= 0 ? `best run at ${at}: ${atBad} bad, travel ${atTravel.toFixed(0)}`
+                   : `nothing smooth+moving (best: ${loose.bad} bad, travel ${loose.travel.toFixed(0)}`
+                     + `${loose.jumped ? ', has a pose jump' : ''})`) + '] ');
+      if (at >= 0 && (!best || atBad < best.bad || (atBad === best.bad && atTravel > best.travel))) {
+        best = { all, score, idx: Array.from({ length: FRAMES }, (_, k) => at$(at + k)), travel: atTravel, bad: atBad, roll: attempt, at };
+      }
+      if (best && best.bad === 0 && best.travel >= MOTION_GOOD) break;   // ideal; stop paying for rolls
     }
-    if (clipped) throw new Error(`still ${clipped}/${FRAMES} frames clipped or tipless after ${TRIES} tries`);
-
+    if (!best) {
+      throw new Error(`no run of ${FRAMES} in ${TRIES} rolls was smooth and moving`
+        + ` (needed travel >= ${MOTION_MIN})`);
+    }
+    if (best.bad > MAX_BAD) {
+      throw new Error(`best run still has ${best.bad} blunt blade(s) after ${TRIES} rolls`
+        + ` (travel ${best.travel.toFixed(0)})`);
+    }
+    {
+      bufs = best.idx.map((j) => best.all[j]);
+      process.stdout.write(`[took roll ${best.roll} frames ${best.idx.join(',')}; travel ${best.travel.toFixed(0)};`
+        + ` taper ${best.idx.map((j) => best.score[j].toFixed(2)).join(' ')}] `);
+      if (best.bad) process.stdout.write(`[NOTE ${best.bad} frame(s) under the taper bar - same as his base attack] `);
+    }
     const boxes = [];
     for (const b of bufs) { const bb = await bbox(b); if (bb) boxes.push(bb); }
     if (!boxes.length) throw new Error('every frame empty');
@@ -529,13 +701,51 @@ for (const [name, a] of Object.entries(ATTACKS)) {
       x1: Math.max(p.x1, q.x1), y1: Math.max(p.y1, q.y1),
     }));
     const uw = U.x1 - U.x0 + 1, uh = U.y1 - U.y0 + 1;
-    // Scale so the KNIGHT lands at this set's target height (see ARMOUR_TARGET above),
+    // A SEEDED SET IS PLACED BY INVERTING ITS SEED, NOT BY MEASURING ITSELF.
+    // Every measure-the-figure normaliser here is pose-dependent, and a custom seed exists
+    // precisely to change the pose. Measuring the violet cape works fine for a same-pose
+    // re-roll and breaks the moment the sword goes vertical: the cape reads taller in an
+    // upright stance, so matching its height to the old number shrank the knight to a third
+    // of the canvas. A seed is already real game art at a known-good size, and the frames
+    // come back at exactly the seed's own resolution, so the transform that built the seed
+    // (crop to content box, pad by PAD, scale by k) inverts exactly. No measurement, no pose
+    // assumption - the knight lands where the seed put him.
+    if (a.seed) {
+      // A SEEDED SET IS PLACED AGAINST THE CALIBRATED ART, NOT AGAINST ITSELF.
+      // A custom seed exists to change the pose, so any normaliser that measures the figure's
+      // own proportions drifts. Two things are stable across these poses and immune to fire:
+      // the height of the violet cape and the x it hangs on. Scale to that height, drop the
+      // feet on the source foot line, and hang the cape where the calibrated art hangs it -
+      // so a re-pose cannot move the boss out from under the calibration someone tuned.
+      const vs = [];
+      for (const b of bufs) { const vb = await violetBox(b); if (vb) vs.push(vb); }
+      if (!vs.length) throw new Error('no violet cape in any frame - cannot place the set');
+      const vMed = vs.map((v) => v.y1 - v.y0 + 1).sort((p, q) => p - q)[vs.length >> 1];
+      const scale = (VIOLET_TARGET[a.key] || vMed) / vMed;
+      const dw2 = Math.max(1, Math.round(uw * scale)), dh2 = Math.max(1, Math.round(uh * scale));
+      const v0 = vs[0];
+      const offY2 = (srcBox.y1 + 1) - dh2;                       // feet on the source foot line
+      const offX2 = Math.round(VIOLET_CX - ((v0.x0 + v0.x1) / 2 - U.x0) * scale);
+      const out = [];
+      for (const b of bufs) {
+        const layer = await sharp(b).extract({ left: U.x0, top: U.y0, width: uw, height: uh })
+          .resize(dw2, dh2, { fit: 'fill' }).png().toBuffer();
+        out.push(await sharp({ create: { width: CANVAS_W, height: CANVAS_H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+          .composite([{ input: layer, left: offX2, top: offY2 }]).webp({ quality: 94 }).toBuffer());
+      }
+      for (let i = 0; i < out.length; i++) await writeFile(join(ATK_DIR, `${a.key}_${i}.webp`), out[i]);
+      console.log(`OK ${out.length} frames (cape ${vMed} -> ${VIOLET_TARGET[a.key]}, x${scale.toFixed(3)};`
+        + ` ${dw2}x${dh2} at ${offX2},${offY2})`);
+      continue;
+    }
+    // Otherwise: scale so the KNIGHT lands at this set's target height (see ARMOUR_TARGET),
     // measured on the median armour box so one wild frame cannot set the size for all nine.
     const aHs = [];
-    for (const b of bufs) { const ab = await armourBox(b); if (ab) aHs.push(ab.y1 - ab.y0 + 1); }
-    if (!aHs.length) throw new Error('no armour found in any frame');
+    const measure = a.flaming ? violetBox : armourBox;
+    for (const b of bufs) { const ab = await measure(b); if (ab) aHs.push(ab.y1 - ab.y0 + 1); }
+    if (!aHs.length) throw new Error(a.flaming ? 'no violet cape found in any frame' : 'no armour found in any frame');
     const aMed = aHs.slice().sort((p, q) => p - q)[aHs.length >> 1];
-    const target = ARMOUR_TARGET[a.key] || Math.round(cropH * 0.86);
+    const target = (a.flaming ? VIOLET_TARGET[a.key] : ARMOUR_TARGET[a.key]) || Math.round(cropH * 0.86);
     let sc = target / aMed;
     // ...but never let the sweep overflow the game canvas: if the scaled union does not fit,
     // fall back to fitting it, and say so rather than silently clipping the blade.
@@ -547,7 +757,7 @@ for (const [name, a] of Object.entries(ATTACKS)) {
     const dw = Math.max(1, Math.round(uw * sc)), dh = Math.max(1, Math.round(uh * sc));
     // centre on the ARMOUR, not on the union: otherwise a blade held out to one side shoves
     // the knight off his own foot mark by half the blade.
-    const a0 = await armourBox(bufs[0]);
+    const a0 = await measure(bufs[0]);
     const aCx = a0 ? ((a0.x0 + a0.x1) / 2 - U.x0) * sc : dw / 2;
     const offX = Math.max(0, Math.min(CANVAS_W - dw, Math.round(srcBox.x0 + (a0 ? (srcBox.x1 - srcBox.x0 + 1) / 2 : cropW / 2) - aCx)));
     const offY = Math.max(0, (srcBox.y1 + 1) - dh);   // feet-aligned to the source foot line
