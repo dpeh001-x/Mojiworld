@@ -10221,7 +10221,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.457';
+const GAME_VERSION = 'v0.30.458';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21467,8 +21467,9 @@ function _applyEquippedBoons() {
   // boonsEquipped via an auto-equip path or a stale save, only the FIRST
   // instance of each boon id contributes its stat — the rest are inert.
   const _seenBoonIds = new Set();
-  for (const idx of player.boonsEquipped) {
-    const boon = player.boons[idx];
+  // v0.30.458 — the permanent loadout PLUS the expedition tray, permanent first (see
+  // _lxActiveBoonInstances). Outside a run this is exactly the old list.
+  for (const boon of ((typeof _lxActiveBoonInstances === 'function') ? _lxActiveBoonInstances() : [])) {
     if (!boon) continue;
     const def = getBoonDef(boon);
     if (!def) {
@@ -21803,11 +21804,11 @@ function _detectActiveSynergies() {
   // consumers can do `player._activeSynergies && player._activeSynergies.sanguineFlame`.
   if (!player) return;
   const active = {};
-  if (player.boons && player.boonsEquipped && player.boonsEquipped.length) {
-    // Build set of equipped boon ids.
+  {
+    // v0.30.458 — synergies see the expedition tray too, so a tower boon can complete a pair. Same
+    // source of truth as the stat pass, so the two can never disagree about what is live.
     const equippedIds = new Set();
-    for (const idx of player.boonsEquipped) {
-      const b = player.boons[idx];
+    for (const b of ((typeof _lxActiveBoonInstances === 'function') ? _lxActiveBoonInstances() : [])) {
       if (b && b.id) equippedIds.add(b.id);
     }
     // For each synergy, both pair ids must be present.
@@ -22084,16 +22085,133 @@ function _boonDexCheck() {
 // Loaned, not granted: the cap falls back the instant the run is over, and the restore below puts
 // the loadout back to exactly the three the player walked in with.
 const LX_EXPEDITION_BOON_SLOTS = 3;
-function _lxExpeditionBoonSlots() {
-  return (typeof game !== 'undefined' && game && game.expedition && game.expedition.active)
-    ? LX_EXPEDITION_BOON_SLOTS : 0;
+// How many boons the tower lends. Separate storage, so this is a TRAY SIZE and no longer anything to
+// do with the permanent equip cap.
+function _lxExpeditionBoonSlots() { return LX_EXPEDITION_BOON_SLOTS; }
+// The live tray: boon INSTANCES, held on game.expedition. Empty outside a run, which is what makes
+// "removed after finishing / leaving / logging off" free — every exit path already replaces
+// game.expedition wholesale, so there is nothing to clean up and nothing that can be missed.
+function _lxExpBoons() {
+  if (typeof game === 'undefined' || !game || !game.expedition || !game.expedition.active) return [];
+  if (!Array.isArray(game.expedition.expBoons)) game.expedition.expBoons = [];
+  if (game.expedition.expBoons.length > _lxExpeditionBoonSlots()) game.expedition.expBoons.length = _lxExpeditionBoonSlots();
+  return game.expedition.expBoons;
 }
-// The equip cap, live: base + the Collector's Slot + any Ascendant Edict slot + the expedition loan.
+function _lxExpTrayFull() { return _lxExpBoons().length >= _lxExpeditionBoonSlots(); }
+// v0.30.458 — THE TRAY PICKER (per user: "There should be a simple separate on screen UI when bravo to
+// select the 3 usable expedition boons"). Opens on top of Bravo's reveal with the three tower slots
+// laid out plainly. A free slot takes the blessing immediately and says so; a full tray waits for
+// you to choose which of the three it replaces, or to decline it. Nothing here touches
+// player.boons or player.boonsEquipped — that is the whole point of the tray.
+function _lxExpTrayClose() {
+  const el = document.getElementById('exp-tray-modal');
+  if (el) el.remove();
+  document.removeEventListener('keydown', _lxExpTrayKey);
+  if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;
+}
+function _lxExpTrayKey(e) {
+  if (!document.getElementById('exp-tray-modal')) return;
+  if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _lxExpTrayClose(); return; }
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= _lxExpeditionBoonSlots()) {
+    const btn = document.querySelector('#exp-tray-modal [data-tray-slot="' + (n - 1) + '"]');
+    if (btn) btn.click();
+  }
+}
+function _lxExpTrayOpen(inst, def) {
+  if (!game || !game.expedition || !game.expedition.active) return;
+  const tray = _lxExpBoons(), N = _lxExpeditionBoonSlots();
+  // A blessing whose type is already live would sit in the tray doing nothing — the one-per-type
+  // rule keeps the first instance. Say so rather than handing over an inert slot-filler.
+  const _dupe = !!(inst && inst.id && typeof _lxBoonIdActive === 'function' && _lxBoonIdActive(inst.id));
+  let pending = (inst && !_dupe) ? inst : null;
+  if (pending && tray.length < N) {           // free slot: it just goes in
+    tray.push(pending); pending = null;
+    if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
+    if (typeof _detectActiveSynergies === 'function') _detectActiveSynergies();
+  }
+  _lxExpTrayClose();
+  const modal = document.createElement('div');
+  modal.id = 'exp-tray-modal';
+  modal.style.cssText = 'position:fixed; inset:0; z-index:100050; display:flex; align-items:center; justify-content:center; background:rgba(6,3,14,0.72);';
+  const draw = () => {
+    const t = _lxExpBoons();
+    const cells = [];
+    for (let i = 0; i < N; i++) {
+      const b = t[i], d = b ? getBoonDef(b) : null;
+      const filled = !!(b && d);
+      const clickable = !!pending;
+      cells.push('<button data-tray-slot="' + i + '"' + (clickable ? '' : ' disabled') + ' style="text-align:left; padding:10px 12px; min-height:74px; border-radius:8px; cursor:' + (clickable ? 'pointer' : 'default')
+        + '; background:' + (filled ? 'rgba(255,190,90,0.12)' : 'rgba(0,0,0,0.3)') + '; border:1px ' + (filled ? 'solid #d9a441' : 'dashed #8a6a2a') + '; color:#ffe6b0; font-family:inherit;">'
+        + '<div style="font-size:10px; opacity:0.7; margin-bottom:3px;">TOWER SLOT ' + (i + 1) + '</div>'
+        + (filled
+            ? ('<div style="display:flex; gap:6px; align-items:center;"><span style="font-size:17px;">' + (d.icon || '') + '</span><b style="font-size:12.5px;">' + d.name + '</b></div>'
+               + '<div style="font-size:10.5px; color:#d8c49a; margin-top:2px;">' + (d.fmt ? d.fmt(b.roll) : '') + '</div>')
+            : '<div style="font-size:12px; font-style:italic; color:#b79355;">empty</div>')
+        + (clickable ? '<div style="font-size:10px; color:#ffcc66; margin-top:4px;">' + (filled ? 'click to REPLACE' : 'click to place') + '</div>' : '')
+        + '</button>');
+    }
+    const head = pending
+      ? '<div style="padding:9px 12px; border:1px solid #ffcc66; border-radius:8px; background:rgba(255,204,102,0.10); margin-bottom:10px;">'
+        + '<div style="font-size:11px; color:#ffcc66; margin-bottom:2px;">BRAVO OFFERS &mdash; the tray is full, choose what it replaces</div>'
+        + '<div style="display:flex; gap:7px; align-items:center;"><span style="font-size:19px;">' + ((def && def.icon) || '') + '</span>'
+        + '<b style="color:#fff3d6; font-size:13.5px;">' + ((def && def.name) || '') + '</b>'
+        + '<span style="color:#d8c49a; font-size:11.5px;">' + ((def && def.fmt) ? def.fmt(pending.roll) : '') + '</span></div></div>'
+      : (_dupe
+          ? '<div style="font-size:11.5px; color:#ffb0b0; margin-bottom:10px;">You already have ' + ((def && def.name) || 'that boon') + ' active &mdash; a second copy would do nothing, so it was declined.</div>'
+          : '<div style="font-size:11.5px; color:#cbb8a0; margin-bottom:10px;">Placed. These three are yours for this run only &mdash; they never touch your permanent loadout, and they leave when the run does.</div>');
+    modal.innerHTML = '<div style="width:min(560px,94vw); padding:16px 18px; background:linear-gradient(160deg,#1a1026,#120a1c); border:1px solid #d9a441; border-radius:12px; box-shadow:0 0 40px rgba(217,164,65,0.22);">'
+      + '<div style="font-size:15px; font-weight:800; color:#ffcc66; margin-bottom:3px;">⚜ Expedition Boons</div>'
+      + '<div style="font-size:11px; color:#9a8fb0; margin-bottom:10px;">' + t.length + ' / ' + N + ' &middot; separate from your ' + ((typeof _boonCap === 'function') ? _boonCap() : 3) + ' permanent boons</div>'
+      + head
+      + '<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px;">' + cells.join('') + '</div>'
+      + '<div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">'
+      + (pending ? '<button data-tray-decline style="padding:6px 14px; background:#3a2036; color:#e8c8ff; border:1px solid #7a5a88; border-radius:6px; font-size:12px; cursor:pointer; font-family:inherit;">Decline it</button>' : '')
+      + '<button data-tray-done style="padding:6px 16px; background:#6a4412; color:#fff; border:1px solid #d9a441; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; font-family:inherit;">Done</button>'
+      + '</div></div>';
+    modal.querySelectorAll('[data-tray-slot]').forEach((btn) => { btn.onclick = () => {
+      if (!pending) return;
+      const t2 = _lxExpBoons(), i = +btn.dataset.traySlot;
+      if (i < t2.length) t2[i] = pending; else t2.push(pending);
+      pending = null;
+      if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
+      if (typeof _detectActiveSynergies === 'function') _detectActiveSynergies();
+      if (typeof _playUiSfx === 'function') _playUiSfx('boon_gain');
+      draw();
+    }; });
+    const dec = modal.querySelector('[data-tray-decline]'); if (dec) dec.onclick = () => { pending = null; draw(); };
+    const dn = modal.querySelector('[data-tray-done]'); if (dn) dn.onclick = () => _lxExpTrayClose();
+  };
+  draw();
+  document.body.appendChild(modal);
+  game.paused = true;
+  document.addEventListener('keydown', _lxExpTrayKey);
+  modal.onclick = (e) => { if (e.target === modal && !pending) _lxExpTrayClose(); };
+}
+// Every boon instance whose stats are LIVE right now. Permanent ones come FIRST on purpose: the
+// one-per-type rule downstream keeps the first instance of an id and makes later ones inert, so a
+// tower boon can never override or displace a permanent boon of the same type.
+function _lxActiveBoonInstances() {
+  const out = [];
+  const bag = (typeof player !== 'undefined' && player && player.boons) || [];
+  const eq = (typeof player !== 'undefined' && player && player.boonsEquipped) || [];
+  for (const idx of eq) { const b = bag[idx]; if (b) out.push(b); }
+  for (const b of _lxExpBoons()) if (b) out.push(b);
+  return out;
+}
+// Is a boon id already live? Used by the tray picker so it cannot hand you an inert duplicate.
+function _lxBoonIdActive(id) {
+  if (!id) return false;
+  for (const b of _lxActiveBoonInstances()) if (b && b.id === id) return true;
+  return false;
+}
+// The equip cap, live: base + the Collector's Slot + any Ascendant Edict slot. v0.30.458 — the
+// expedition no longer touches this; its boons live in their own tray (see _lxExpBoons).
 function _boonCap() {
   const base = (typeof BOON_EQUIP_CAP === 'number') ? BOON_EQUIP_CAP : 3;
   const dex = (game.boonDex && (game.boonDex.slotBonus | 0)) || 0;
   const ed = (typeof _edictOn === 'function' && _edictOn('ascDryRun')) ? 1 : 0;
-  return base + dex + ed + _lxExpeditionBoonSlots();
+  return base + dex + ed;
 }
 // v0.30.455 — pull the loadout back inside whatever the cap is NOW. Called after the run's snapshot is
 // restored, which normally makes it a no-op; it earns its place on the path where the snapshot is
@@ -58997,40 +59115,17 @@ function _bravoShowBoonPick() {
       const _i = b.dataset.pick | 0;
       const _chosen = _picks[_i];
       if (_chosen && _chosen.inst) {
-        if (!player.boons) player.boons = [];
-        player.boons.push(_chosen.inst);
-        // Auto-equip in first free slot, if any.
-        if (!player.boonsEquipped) player.boonsEquipped = [];
-        // v0.26.307 (audit HIGH #1) — Fallback was 5 but the live const
-        // is 3 (tightened in v0.25.261). When 3 slots were already
-        // full the boon was pushed to player.boons but never auto-
-        // equipped + the player saw a "Bravo's Blessing: X" toast
-        // implying active. Fixed fallback to 3 to match the const.
-        let _autoEquipped = false;
-        const _expBoonIdx = player.boons.length - 1;
-        // v0.26.401 — skip auto-equip if a boon of this type is already equipped.
-        // v0.30.455 — the LIVE cap (was the raw BOON_EQUIP_CAP): this is the expedition's own boon
-        // grant, so it has to see the loaned slots, and it now honours the Collector's Slot too.
-        if (player.boonsEquipped.length < ((typeof _boonCap === 'function') ? _boonCap() : 3) && !_boonTypeEquipped(_expBoonIdx)) {
-          const _newIdx = _expBoonIdx;
-          player.boonsEquipped.push(_newIdx);
-          if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
-          if (typeof _detectActiveSynergies === 'function') _detectActiveSynergies();
-          _autoEquipped = true;
+        // v0.30.458 — the blessing goes to the EXPEDITION TRAY. It used to be pushed into player.boons
+        // and auto-equipped into player.boonsEquipped, which is precisely how a run reached into the
+        // permanent loadout: it took a real slot, could push a permanent boon out, and counted
+        // against the 50-boon bag cap until the end-of-run restore undid it. Nothing below writes
+        // player.boons or player.boonsEquipped any more.
+        if (typeof _lxExpTrayOpen === 'function') {
+          _lxExpTrayOpen(_chosen.inst, _chosen.def);
         }
-        if (typeof showToast === 'function') {
-          // v0.26.307 — Differentiate auto-equipped vs inventory-only.
-          // Tells the player to open the U panel to swap if all 3
-          // active slots were already full.
-          if (_autoEquipped) {
-            showToast(`✦ Bravo's Blessing: ${_chosen.def.icon || ''} ${_chosen.def.name}`, 'legendary');
-          } else {
-            showToast(`✦ ${_chosen.def.icon || ''} ${_chosen.def.name} (boon inventory) — slots full, swap in U panel`, 'epic');
-          }
-        }
-        if (typeof flash === 'function') flash(0.35);
-        if (typeof addShake === 'function') addShake(6);
       }
+      if (typeof flash === 'function') flash(0.35);
+      if (typeof addShake === 'function') addShake(6);
       // v0.26.290 — Tear down listener registered in the close helper.
       document.removeEventListener('keydown', _onBravoKey);
       modal.remove();
@@ -101154,18 +101249,39 @@ function renderBoonPanel() {
   const slotsHtml = [];
   // v0.30.455 — the last _lxExpeditionBoonSlots() slots are the tower's loan; colour them apart from
   // the permanent ones so nobody mistakes a loaned slot for a slot they earned.
-  const _capNow = _boonCap();
-  const _loaned = (typeof _lxExpeditionBoonSlots === 'function') ? _lxExpeditionBoonSlots() : 0;
+  const _capNow = _boonCap();   // v0.30.458 — permanent slots only; the tower's are in their own tray
   for (let s = 0; s < _capNow; s++) {   // v0.30.421 - live cap
-    const _isExpSlot = (s >= _capNow - _loaned) && _loaned > 0;
     const invIdx = equipped[s];
     const boon = (invIdx != null) ? player.boons[invIdx] : null;
     const def = boon ? getBoonDef(boon) : null;
     if (boon && def) {
-      slotsHtml.push(`<div style="padding:8px 10px; background:${_isExpSlot ? 'rgba(255,190,90,0.13)' : 'rgba(180,130,255,0.12)'}; border:1px solid ${_isExpSlot ? '#d9a441' : '#8866cc'}; border-radius:6px; display:flex; flex-direction:column; gap:2px;"><div style="display:flex; justify-content:space-between; align-items:center; gap:6px;"><div style="display:flex; gap:6px; align-items:center; min-width:0;">${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 22) : ('<span style="font-size:18px;">' + def.icon + '</span>')}<b style="color:#eddaff; font-size:12px;">${def.name}</b></div><button data-unequip="${invIdx}" style="padding:2px 6px; background:#552277; color:#fff; border:1px solid #aa77cc; border-radius:3px; font-size:10px; cursor:pointer;">Unequip</button></div><div style="font-size:11px; color:#e0d0f0;">${def.fmt(boon.roll)}</div><div style="font-size:10px; color:#aa88cc;">Roll ${_boonValText(def, boon.roll)} · range ${_boonRangeText(def)}</div></div>`);
+      slotsHtml.push(`<div style="padding:8px 10px; background:rgba(180,130,255,0.12); border:1px solid #8866cc; border-radius:6px; display:flex; flex-direction:column; gap:2px;"><div style="display:flex; justify-content:space-between; align-items:center; gap:6px;"><div style="display:flex; gap:6px; align-items:center; min-width:0;">${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 22) : ('<span style="font-size:18px;">' + def.icon + '</span>')}<b style="color:#eddaff; font-size:12px;">${def.name}</b></div><button data-unequip="${invIdx}" style="padding:2px 6px; background:#552277; color:#fff; border:1px solid #aa77cc; border-radius:3px; font-size:10px; cursor:pointer;">Unequip</button></div><div style="font-size:11px; color:#e0d0f0;">${def.fmt(boon.roll)}</div><div style="font-size:10px; color:#aa88cc;">Roll ${_boonValText(def, boon.roll)} · range ${_boonRangeText(def)}</div></div>`);
     } else {
-      slotsHtml.push(`<div style="padding:8px 10px; background:rgba(0,0,0,0.25); border:1px dashed ${_isExpSlot ? '#8a6a2a' : '#554466'}; border-radius:6px; color:${_isExpSlot ? '#b79355' : '#776688'}; font-size:11px; font-style:italic; display:flex; align-items:center; justify-content:center;">${_isExpSlot ? '⚜ expedition slot — on loan' : '— empty slot —'}</div>`);
+      slotsHtml.push(`<div style="padding:8px 10px; background:rgba(0,0,0,0.25); border:1px dashed #554466; border-radius:6px; color:#776688; font-size:11px; font-style:italic; display:flex; align-items:center; justify-content:center;">— empty slot —</div>`);
     }
+  }
+  // v0.30.458 — THE EXPEDITION TRAY, drawn as its own row so it can never be mistaken for the
+  // permanent loadout above it. Only present during a run.
+  let _trayHtml = '';
+  if (typeof _lxExpBoons === 'function' && game.expedition && game.expedition.active) {
+    const _tray = _lxExpBoons(), _tn = _lxExpeditionBoonSlots();
+    const _cells = [];
+    for (let i = 0; i < _tn; i++) {
+      const tb = _tray[i], td = tb ? getBoonDef(tb) : null;
+      if (tb && td) {
+        _cells.push('<div style="padding:8px 10px; background:rgba(255,190,90,0.12); border:1px solid #d9a441; border-radius:6px; display:flex; flex-direction:column; gap:2px;">'
+          + '<div style="display:flex; justify-content:space-between; align-items:center; gap:6px;"><div style="display:flex; gap:6px; align-items:center; min-width:0;">'
+          + ((typeof boonIconHtml === 'function') ? boonIconHtml(td, 22) : ('<span style="font-size:18px;">' + (td.icon || '') + '</span>'))
+          + '<b style="color:#ffe6b0; font-size:12px;">' + td.name + '</b></div>'
+          + '<button data-exp-drop="' + i + '" style="padding:2px 6px; background:#6a4412; color:#fff; border:1px solid #d9a441; border-radius:3px; font-size:10px; cursor:pointer;">Drop</button></div>'
+          + '<div style="font-size:10.5px; color:#d8c49a;">' + (td.fmt ? td.fmt(tb.roll) : '') + '</div></div>');
+      } else {
+        _cells.push('<div style="padding:8px 10px; background:rgba(0,0,0,0.25); border:1px dashed #8a6a2a; border-radius:6px; color:#b79355; font-size:11px; font-style:italic; display:flex; align-items:center; justify-content:center;">⚜ empty tower slot</div>');
+      }
+    }
+    _trayHtml = '<h3 style="margin:10px 0 6px 0; color:#ffcc66; font-size:14px;">⚜ Expedition Boons '
+      + '<span style="color:#888; font-size:11px; font-weight:normal;">(' + _tray.length + ' / ' + _tn + ' · this run only — they leave when it ends)</span></h3>'
+      + '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-bottom:10px;">' + _cells.join('') + '</div>';
   }
   // v0.30.421 - BOON CODEX strip: counts + every boon as an icon (dim = unseen,
   // outlined = seen, lit = held), synergies, and the milestone ladder.
@@ -101235,9 +101351,20 @@ function renderBoonPanel() {
   const _potLine = _potPct < 100
     ? `<div style="margin:0 0 8px 0; padding:8px 10px; background:linear-gradient(90deg, rgba(255,209,102,0.22), rgba(255,152,0,0.10)); border:2px solid #ffd166; border-radius:8px; font-size:13px; font-weight:bold; color:#ffe9b0; box-shadow:0 0 12px rgba(255,209,102,0.35), inset 0 0 8px rgba(255,209,102,0.08); text-shadow:0 1px 2px rgba(0,0,0,0.6);">⚖ Boon potency: <b style="color:#ffd166; font-size:16px;">${_potPct}%</b> — grows +2% per level, full strength at Lv 50.<br><span style="font-weight:normal; font-size:10px; color:#c9b990;">Double Shot still fires its extra shot — only the echo damage scales. Extra jumps always count in full.</span></div>`
     : '';
-  host.innerHTML = codexHtml + `${_talentLine}${_potLine}<h3 style="margin:0 0 6px 0; color:#c8a8ff; font-size:14px;">◈ Boon Loadout <span style="color:#888; font-size:11px; font-weight:normal;">(${equipped.length} / ${_capNow} equipped${_loaned ? ' · +' + _loaned + ' on loan' : ''} · <span style="color:${bagColor};">${player.boons.length} / ${BOON_INVENTORY_CAP}</span> in bag)</span></h3><div style="display:grid; grid-template-columns:repeat(${BOON_EQUIP_CAP}, 1fr); gap:6px; margin-bottom:10px;">${slotsHtml.join('')}</div>${(typeof _synergyPanelHtml === 'function') ? _synergyPanelHtml() : ''}${toolbar}<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:6px; max-height:260px; overflow-y:auto;">${invHtml.join('')}</div><div style="margin-top:6px; font-size:10px; color:#888; text-align:center;"><span class="coin-ico"></span> ${player.mojicoins} Mojicoins · Bag ${bagPct}% full · ${bulk ? 'tick boons, then Discard selected' : 'use 🗑 Bulk discard to clear several at once'}</div>`;
+  host.innerHTML = codexHtml + `${_talentLine}${_potLine}${_trayHtml}<h3 style="margin:0 0 6px 0; color:#c8a8ff; font-size:14px;">◈ Boon Loadout <span style="color:#888; font-size:11px; font-weight:normal;">(${equipped.length} / ${_capNow} equipped · <span style="color:${bagColor};">${player.boons.length} / ${BOON_INVENTORY_CAP}</span> in bag)</span></h3><div style="display:grid; grid-template-columns:repeat(${BOON_EQUIP_CAP}, 1fr); gap:6px; margin-bottom:10px;">${slotsHtml.join('')}</div>${(typeof _synergyPanelHtml === 'function') ? _synergyPanelHtml() : ''}${toolbar}<div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:6px; max-height:260px; overflow-y:auto;">${invHtml.join('')}</div><div style="margin-top:6px; font-size:10px; color:#888; text-align:center;"><span class="coin-ico"></span> ${player.mojicoins} Mojicoins · Bag ${bagPct}% full · ${bulk ? 'tick boons, then Discard selected' : 'use 🗑 Bulk discard to clear several at once'}</div>`;
   const refresh = () => { renderBoonPanel(); renderLevelUp(); updateUI(); saveState(); };
   host.querySelectorAll('[data-equip]').forEach(btn => btn.onclick = () => { if (equipBoon(+btn.dataset.equip)) refresh(); });
+  // v0.30.458 — dropping a tower boon frees its tray slot for the next blessing.
+  host.querySelectorAll('[data-exp-drop]').forEach(btn => btn.onclick = () => {
+    const _t = (typeof _lxExpBoons === 'function') ? _lxExpBoons() : [];
+    const _i = +btn.dataset.expDrop;
+    if (_t[_i]) {
+      _t.splice(_i, 1);
+      if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
+      if (typeof _detectActiveSynergies === 'function') _detectActiveSynergies();
+      refresh();
+    }
+  });
   host.querySelectorAll('[data-unequip]').forEach(btn => btn.onclick = () => { if (unequipBoon(+btn.dataset.unequip)) refresh(); });
   host.querySelectorAll('[data-reroll]').forEach(btn => btn.onclick = () => { if (rerollBoon(+btn.dataset.reroll)) refresh(); });
   host.querySelectorAll('[data-discard]').forEach(btn => btn.onclick = () => {
