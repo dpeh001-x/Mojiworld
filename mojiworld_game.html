@@ -10299,7 +10299,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.477';
+const GAME_VERSION = 'v0.30.478';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14710,8 +14710,8 @@ let _LX_ANIM_CALIB_CACHE = Object.create(null);
 // silently change the Sovereign's melee reach mid-swing. Art keys move; the
 // combat box stays on the type that authored it.
 function _lxSovArtKey(m) {
-  if (!m || !m._sovAtkKey) return null;
-  return ((game.time | 0) < (m._sovAtkUntil | 0)) ? m._sovAtkKey : null;
+  if (!m || !m._bossAtkKey) return null;
+  return ((game.time | 0) < (m._bossAtkUntil | 0)) ? m._bossAtkKey : null;
 }
 function _lxAnimCalib(type, state) {
   if (!type || !state) return _LX_ANIM_CALIB_DEFAULT;
@@ -123741,10 +123741,16 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // v0.30.89 — SOVEREIGN PER-ATTACK SETS (Sprites/bosses/attack/towerSovereign<x>_0..8).
   // Animated from the Sovereign's own sprite so the character is identical and
   // only the motion differs (scripts/generate_sovereign_attacks.mjs). Driven by
-  // the _sovAtkKey override below; no idle/walk sets exist for these keys
+  // the _bossAtkKey override below; no idle/walk sets exist for these keys
   // because they are only ever live mid-attack.
   'towerSovereignswing', 'towerSovereigncolumn', 'towerSovereigncollapse',
   'towerSovereignvolley', 'towerSovereigndrain',
+  // v0.30.478 — ARBITER PER-ATTACK SETS (Sprites/bosses/attack/towerArbiter<x>_0..8).
+  // Same shape as the Sovereign's above and animated the same way, from the
+  // Arbiter's own attack frame so the knight is identical and only the sword
+  // form differs (scripts/generate_arbiter_attacks.mjs). Frames-only: no
+  // Sprites/bosses/towerArbiter<x>.webp exists, so they join BOSS_FRAMES_ONLY.
+  'towerArbiterverdict', 'towerArbitercolumn',
   // v0.26.334 — Block-land chain-end boss. Authored sprite at
   // Sprites/bosses/legosaurus.webp — warped Tyrannosaurus-shaped lego
   // beast. Boss is post-load-spawned in the blockland_apex arena's
@@ -123776,6 +123782,7 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
 const BOSS_FRAMES_ONLY = new Set(['legosaurusdash',
   'towerSovereignswing', 'towerSovereigncolumn', 'towerSovereigncollapse',
   'towerSovereignvolley', 'towerSovereigndrain',
+  'towerArbiterverdict', 'towerArbitercolumn',   // v0.30.478
   'aetherionastral']);
 (function _loadBossSprites() {
   // v0.25.498 — `.webp`/`.png` fallback via the shared _loadEntitySprite helper above.
@@ -123871,14 +123878,31 @@ function _lxSovBeat(m, opts) {
     }
   } catch (e) {}
 }
-function _lxSovAtkPose(m, key, frames) {
-  if (!m || m.type !== 'towerSovereign') return;
-  const _k = 'towerSovereign' + key;
+// v0.30.478 — PER-ATTACK ART, FOR ANY BOSS THAT SHIPS IT. This was the Sovereign's
+// alone and hardcoded `'towerSovereign' + key`; the Arbiter now has two sets of his own,
+// and the two call sites that matter are already shared code (the bigMelee telegraph and
+// the columnStrike telegraph both call this), so a boss opts in by having the art and an
+// entry here rather than by growing a new call site. A type with no entry, or a key with
+// no frames on disk, still no-ops exactly as before.
+const _LX_BOSS_ATK_SETS = {
+  towerSovereign: (k) => 'towerSovereign' + k,
+  // the Arbiter's two are named for the move, not the gesture: `swing` IS the verdict
+  // (v0.30.467 made that swing land for 35% of max HP one time in four) and `column` is
+  // the pillar of judgment. Any other key he might fire falls through to his one set.
+  towerArbiter: (k) => (k === 'swing' ? 'towerArbiterverdict' : k === 'column' ? 'towerArbitercolumn' : null),
+};
+function _lxBossAtkPose(m, key, frames) {
+  if (!m) return;
+  const _fn = _LX_BOSS_ATK_SETS[m.type];
+  const _k = _fn && _fn(key);
+  if (!_k) return;
   const _set = (typeof BOSS_ATTACK_FRAMES !== 'undefined') ? BOSS_ATTACK_FRAMES[_k] : null;
   if (!_set || !_set.length) return;
-  m._sovAtkKey = _k;
-  m._sovAtkUntil = (game.time | 0) + (frames | 0);
+  m._bossAtkKey = _k;
+  m._bossAtkUntil = (game.time | 0) + (frames | 0);
 }
+// the five v0.30.89 call sites keep their name and their suffix argument
+function _lxSovAtkPose(m, key, frames) { return _lxBossAtkPose(m, key, frames); }
 function _loadBossFrames(map, subdir, types) {
   // v0.29.518 — this used to request _0.._8 unconditionally for every type in
   // every set (boss attack/idle/walk + the three zodiac sets), so a boss with
@@ -127814,7 +127838,7 @@ function drawMonster(m) {
   // is stamped ... so _bossAttacking is true", which the planted gate made
   // false for the whole moving half of the dash. Restored here.
   // v0.30.89 — a live Sovereign attack window is attacking outright (see note).
-  const _sovAtkLive = !!(m._sovAtkKey && (game.time | 0) < (m._sovAtkUntil | 0));
+  const _sovAtkLive = !!(m._bossAtkKey && (game.time | 0) < (m._bossAtkUntil | 0));   // v0.30.478 — any boss with per-attack art
   const _bossAttacking = _sovAtkLive || (((m.patternState && m.patternState !== 'idle'
                           && !_BOSS_MOVE_DRAW_STATES.has(m.patternState))
                        || (m.atkAnimUntil && _nowAtk < m.atkAnimUntil))
@@ -127896,7 +127920,7 @@ function drawMonster(m) {
   const _spriteKey = (m._braceDashing && m.type === 'legosaurus'
       && BOSS_ATTACK_FRAMES.legosaurusdash && BOSS_ATTACK_FRAMES.legosaurusdash.length)
     ? 'legosaurusdash'
-    : (_sovAtkLive ? m._sovAtkKey : (m._aeAstralKey || m._gravStarKey || m._phaseSprite || m.type));   // v0.30.x - Astral · v0.30.89 — per-attack Sovereign set
+    : (_sovAtkLive ? m._bossAtkKey : (m._aeAstralKey || m._gravStarKey || m._phaseSprite || m.type));   // v0.30.x - Astral · v0.30.89 — per-attack Sovereign set
   // v0.26.310 — prefer the 4-frame attack animation when its frames have
   // decoded; otherwise the single static attack pose, then idle.
   // v0.29.418 — pass m so the boss's cycle is phased per entity: an attack

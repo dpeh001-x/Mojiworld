@@ -3058,6 +3058,42 @@ window.LX_ANIM_CALIB = {
       "dx": 0,
       "dy": 0
     }
+  },
+  "towerArbiterverdict": {
+    "attack": {
+      "s": 1.77,
+      "dx": 0.115,
+      "dy": 0.005,
+      "ft": [
+        80,
+        90,
+        100,
+        110,
+        150,
+        130,
+        120,
+        110,
+        110
+      ]
+    }
+  },
+  "towerArbitercolumn": {
+    "attack": {
+      "s": 1.77,
+      "dx": 0.115,
+      "dy": 0.005,
+      "ft": [
+        100,
+        110,
+        120,
+        130,
+        160,
+        140,
+        120,
+        110,
+        110
+      ]
+    }
   }
 };
 window.LX_ATK_HITBOX = {
