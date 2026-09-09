@@ -94,7 +94,10 @@
 // REDRAWN under their own names (winged sunburst -> binding seal) and re-canvassed 768/952 -> 1024;
 // dash_mage, dash_rogue and dash_warrior loops replaced the same way. A returning browser would
 // otherwise mix old and new frames of the same sigil.
-const CACHE = 'mojiworld-assets-v23';
+// v0.30.491 - v23 -> v24. Sprites/ui/edicts_bg.webp is NEW art
+// referenced from CSS; a returning browser with the old manifest would render the Edicts panel
+// on its fallback gradient and never fetch the plate.
+const CACHE = 'mojiworld-assets-v24';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
