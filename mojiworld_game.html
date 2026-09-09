@@ -10229,7 +10229,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.469';
+const GAME_VERSION = 'v0.30.470';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -59895,7 +59895,7 @@ function _expeditionSpawnTowerBoss(slot) {
         // v0.26.321 — Per user "strong ohko mechanics similar to gravitos".
         // First cast 12 s → 8 s; cd 30 s → 14 s. Beats Gravitos's 18 s
         // cadence so the apex fight reads as DENSER pressure, not laxer.
-        m._sovereignOhkoTick = (game.time || 0) + 480;   // first cast ~8 s in
+        m._sovereignOhkoTick = (game.time || 0) + 720;   // v0.30.470 — first cast 8 s -> 12 s (per user: longer interval)
         m._sovereignOhkoCd = 840;
         // v0.26.321 — Schedule the new homing-volley + drain-pillar
         // patterns. _bossSpecialAttacks ticks both every frame.
@@ -82207,9 +82207,60 @@ function _bossSpecialAttacks(m, dt) {
         if (!q || q._sovShardOf !== m || q.currentHp <= 0) continue;
         _alive++;
         q._sovShardAng += 0.021;
-        q.x = _cx + Math.cos(q._sovShardAng) * _orbR - q.w / 2;
-        q.y = _cy + Math.sin(q._sovShardAng) * (_orbR * 0.55) - q.h / 2;
+        const _slotX = _cx + Math.cos(q._sovShardAng) * _orbR - q.w / 2;
+        const _slotY = _cy + Math.sin(q._sovShardAng) * (_orbR * 0.55) - q.h / 2;
+        // v0.30.470 — per user: "CrownShard can also home in near players and attack by
+        // firing its projectiles". The shard was a pure objective that orbited on rails and
+        // could not touch you; now it BREAKS the orbit when you come close and shoots.
+        //
+        // Two deliberate limits keep the Regalia a puzzle rather than a swarm:
+        //   LEASH — it never strays further than _shLeash from the crown, so the answer is
+        //     still "go and shatter them" and they cannot be kited across the arena; and
+        //   CONTACT STAYS HARMLESS (atk 0, as spawned) — the threat is the shots, so you can
+        //     still walk in and break one. Making the body hurt too would punish the exact
+        //     action the mechanic asks for.
+        // Off the hunt it EASES back to its slot rather than snapping, because the slot keeps
+        // rotating and a snap after a chase reads as a teleport.
+        // _shStand: it closes to arm's length and hovers there instead of sliding INSIDE the
+        // player. Measured without it, a shard settled 1 px off the player's centre - harmless
+        // (contact is still atk 0) but it read as a sprite stuck to you rather than circling.
+        const _shNotice = 300, _shLeash = 340, _shRange = 520, _shStand = 52;
+        const _pAlive = (typeof player !== 'undefined') && player && player.hp > 0;
+        const _pcx = _pAlive ? player.x + player.w / 2 : 0, _pcy = _pAlive ? player.y + player.h / 2 : 0;
+        const _qcx = q.x + q.w / 2, _qcy = q.y + q.h / 2;
+        const _pdist = _pAlive ? Math.hypot(_pcx - _qcx, _pcy - _qcy) : Infinity;
+        if (_pAlive && _pdist < _shNotice && _pdist > _shStand) {
+          let _nx = q.x + (_pcx - _qcx) * 0.055, _ny = q.y + (_pcy - _qcy) * 0.055;
+          const _lx = (_nx + q.w / 2) - _cx, _ly = (_ny + q.h / 2) - _cy, _ld = Math.hypot(_lx, _ly);
+          if (_ld > _shLeash) { const _k = _shLeash / _ld; _nx = _cx + _lx * _k - q.w / 2; _ny = _cy + _ly * _k - q.h / 2; }
+          q.x = _nx; q.y = _ny;
+        } else if (_pAlive && _pdist <= _shStand) {
+          /* at arm's length: hold station and keep shooting */
+        } else {
+          // 0.26, not a snap and not a drift: the slot itself rotates 0.021 rad/frame, so a
+          // slack follow trails it and the ring visibly sags inward (measured: shards settled
+          // at 0.88x of the orbit ellipse at gain 0.12). This tracks tight enough to keep the
+          // regalia reading as a rigid crown while still easing in after a chase.
+          q.x += (_slotX - q.x) * 0.26;
+          q.y += (_slotY - q.y) * 0.26;
+        }
         q.vx = 0; q.vy = 0;
+        // Staggered off its own orbit angle so four-to-six shards never volley in lockstep.
+        if (q._sovShardShotAt == null) q._sovShardShotAt = _now + 120 + Math.floor((q._sovShardAng / (Math.PI * 2)) * 150);
+        if (_pAlive && _pdist < _shRange && _now >= q._sovShardShotAt && game.projectiles) {
+          const _sAng = Math.atan2(_pcy - _qcy, _pcx - _qcx), _sSpd = 3.0;
+          game.projectiles.push({
+            x: _qcx, y: _qcy,
+            vx: Math.cos(_sAng) * _sSpd, vy: Math.sin(_sAng) * _sSpd,
+            w: 18, h: 18, life: 170,
+            damage: (m.atk || 200) * 0.18,   // a fraction of the Sovereign's own homer (0.55)
+            owner: 'enemy', skill: 'msovereign',
+            color: '#ffe9a8',
+            noGravity: true,
+            _sourceLabel: 'a Crown Shard',
+          });
+          q._sovShardShotAt = _now + (_ph === 1 ? 165 : _ph === 2 ? 140 : 115);   // 2.75 / 2.3 / 1.9 s
+        }
       }
       if (_alive === 0) {
         // BREAK — the payoff. Specials are pushed back so the reward is a
@@ -82289,7 +82340,12 @@ function _bossSpecialAttacks(m, dt) {
     // punish rather than only survive.
     {
       const _sp = m._sovPhase || 1;
-      m._sovereignOhkoTick = (game.time | 0) + (_sp === 1 ? 960 : _sp === 2 ? 720 : 540);
+      // v0.30.470 — per user "make the interval longer for when sovereign does OHKO moves":
+      // every phase +50%, 16/12/9 s -> 24/18/13.5 s. Phase 1 now sits above Gravitos's 18 s
+      // instead of under it, and phase 3's nine-second drumbeat - the densest unanswerable
+      // beat in the game - is the one that needed it most. The collapse still costs the
+      // Sovereign its 2.5 s SPENT window, so the punish beat is unchanged.
+      m._sovereignOhkoTick = (game.time | 0) + (_sp === 1 ? 1440 : _sp === 2 ? 1080 : 810);
       m._sovSpentUntil = (game.time | 0) + 210 + 150;
       if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'collapse', 200);   // v0.30.89 — held across the 3.5s telegraph
       if (typeof _lxSovBeat === 'function') {   // v0.30.122 — the one attack that can kill outright
