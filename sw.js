@@ -97,7 +97,10 @@
 // v0.30.491 - v23 -> v24. Sprites/ui/edicts_bg.webp is NEW art
 // referenced from CSS; a returning browser with the old manifest would render the Edicts panel
 // on its fallback gradient and never fetch the plate.
-const CACHE = 'mojiworld-assets-v24';
+// v0.30.495 - v24 -> v25. backgrounds/title_keyart_c.webp is NEW
+// art referenced from CSS; a returning browser with the old manifest would show the character
+// creation page on its old flat scrim and never fetch it.
+const CACHE = 'mojiworld-assets-v25';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
