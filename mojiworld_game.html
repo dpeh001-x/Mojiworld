@@ -10299,7 +10299,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.476';
+const GAME_VERSION = 'v0.30.477';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41110,15 +41110,25 @@ function addShake(amount) {
 // v0.30.475 — the flat band every zodiac projectile lands in, before defensive ABILITIES and before
 // Capricorn's own floor. Rolled per hit so a volley is not twelve identical numbers.
 const LX_ZODIAC_PROJ_MIN = 3000, LX_ZODIAC_PROJ_MAX = 5000;
-// v0.30.476 — how much of the normal armour curve a zodiac projectile still feels (per user: "the
-// zodiac projectiles should pierce DEF to a certain extent, meaning DEF still plays a part but
-// should not half the damage significantly"). This is the engine's OWN pierce term, the same one
-// _defPierceMul uses: _defAbsorbMul multiplies the ABSORBED FRACTION by it, so 0.22 means armour
-// keeps about a fifth of its usual bite and loses the rest. Riding the real curve rather than a
-// parallel one means DEF investment, level scaling and the 90-94% absorb cap all still read through
-// it — a tank is rewarded, just not made immune to twelve bosses.
-//   Measured at Lv 85: DEF 0 takes the full roll, DEF 625 about 14% off, DEF 6,250+ about 21% off.
-const LX_ZODIAC_DEF_PIERCE = 0.22;
+// v0.30.477 — ZODIAC DEF RESPONSE, anchored on two points the user gave: "at 2000 DEF can go down to
+// 3000 dmg / at 4000 DEF can go down to 2000 dmg".
+//
+// This replaces the v0.30.476 pierce multiplier, and it had to: _defAbsorbMul SATURATES, so it
+// cannot produce those two numbers at all. Measured at Lv 85 its absorbed fraction is 0.857 at
+// DEF 2000 and 0.923 at DEF 4000 — nearly the same — so landing 3,000 at the first needs a pierce of
+// 0.292 while landing 2,000 at the second needs 0.542. No single multiplier of that curve satisfies
+// both, whatever value is chosen.
+//
+// A straight ramp on raw DEF does, and matches how the request was phrased (plain DEF numbers, no
+// mention of level): the roll is scaled by 1 - DEF/LX_ZODIAC_DEF_ZERO. At DEF 2000 that is x0.75 and
+// at DEF 4000 x0.50, which against the 3,000-5,000 roll centres exactly on the 3,000 and 2,000 asked
+// for. Raw DEF is deliberate — the absorb curve's level scaling would otherwise move the anchors
+// under a player who only levelled up.
+//
+// The floor stops the ramp reaching zero: past DEF 5,200 a zodiac projectile still lands for at
+// least 35% of its roll, so no amount of armour makes twelve bosses harmless.
+const LX_ZODIAC_DEF_ZERO = 8000;     // DEF at which the bare ramp would reach zero
+const LX_ZODIAC_DEF_MIN_MUL = 0.35;  // ...but never below this share of the roll
 function _defAbsorbMul(pierceMul) {
   const d = (typeof getDef === 'function') ? getDef() : 0;
   if (d <= 0) return 1;
@@ -92845,21 +92855,24 @@ function updateProjectiles(dt) {
         // authoritative. It also lands after the _diffDmg pass that produced _projLost, which
         // multiplies by up to 6x at high level and would otherwise carry 5000 well past 5000.
         //
-        // v0.30.476 — DEF is no longer bypassed here; it is PIERCED (see LX_ZODIAC_DEF_PIERCE). The
-        // v0.30.475 note that used to sit here said the absorb curve "never touches this number",
-        // which stopped being true the moment the pierce went in, so it is corrected rather than
+        // v0.30.477 — DEF is neither bypassed (v0.30.475) nor filtered through the engine's saturating
+        // absorb curve (v0.30.476): it scales the roll directly, on the ramp above. Each of those two
+        // notes was rewritten when the model beneath it changed, and this one is no exception —
+        // a comment describing a model the code no longer runs is worse than none, so it is fixed
         // left to mislead the next reader. Defensive ABILITIES are kept for the same reason as then:
         // a block, a warrior's damage reduction and an Aegis are things the player spends and times,
         // and making them worthless against twelve bosses would be a different change than the one
         // asked for. They are applied explicitly below so the order is visible rather than inherited.
         if (p._zodiacSign && !player._god && _projLost > 0) {
           let _zf = LX_ZODIAC_PROJ_MIN + Math.random() * (LX_ZODIAC_PROJ_MAX - LX_ZODIAC_PROJ_MIN);
-          // v0.30.476 — DEF is PIERCED, not ignored. v0.30.475 removed it from this path entirely, which
-          // made armour worth exactly nothing against a zodiac boss; a heavily invested tank and a
-          // character in rags took the identical number. The absorb curve is back, with its bite
-          // shrunk to LX_ZODIAC_DEF_PIERCE, so DEF is visible on the number without approaching the
-          // halving the old model produced (measured before v0.30.475: 2,400 down to 125).
-          if (typeof _defAbsorbMul === 'function') _zf *= _defAbsorbMul(LX_ZODIAC_DEF_PIERCE);
+          // v0.30.477 — DEF scales the roll on a straight ramp (see LX_ZODIAC_DEF_ZERO). v0.30.475 removed
+          // DEF from this path entirely and v0.30.476 put it back through the engine's saturating
+          // absorb curve, which cannot separate DEF 2,000 from DEF 4,000 by anything like the amount
+          // asked for. Reading raw DEF keeps the two anchors where they were specified.
+          {
+            const _zDef = (typeof getDef === 'function') ? Math.max(0, getDef()) : 0;
+            _zf *= Math.max(LX_ZODIAC_DEF_MIN_MUL, 1 - _zDef / LX_ZODIAC_DEF_ZERO);
+          }
           if (player.blockTimer > 0) _zf *= 0.3;
           if (player.cls === 'warrior' && typeof _warriorDr === 'function') _zf *= _warriorDr();
           if (player._aegis) _zf *= 0.5;

@@ -1,4 +1,4 @@
-// Zodiac projectile damage (v0.30.476). Per user, in two steps: "all zodiac bosses projectiles
+// Zodiac projectile damage (v0.30.477). Per user, in two steps: "all zodiac bosses projectiles
 // should deal more damage, approximately 3000 - 5000 damage flat regardless of player's defence",
 // then "the zodiac projectiles should pierce DEF to a certain extent, meaning DEF still plays a part
 // but should not half the damage significantly".
@@ -13,7 +13,8 @@
 // armour must visibly crush the plain shot (2,400 -> 150) while only trimming the zodiac one.
 //   node scripts/zodiac_projectile_damage_test.mjs      MOJI_GAME_FILE / MOJI_SERVE_ROOT / PORT
 // Negative controls: v0.30.474 tracks the full DEF curve (2,400 -> 125) and never reaches the band;
-// v0.30.475 sits in the band but armour moves it by nothing at all.
+// v0.30.475 sits in the band but armour moves it by nothing; v0.30.476 moves it by ~4% between the
+// two anchor points, because the absorb curve it borrowed is already saturated by DEF 2,000.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
@@ -72,8 +73,8 @@ try {
     };
     // --- the DEF sweep, zodiac vs a plain enemy shot as the control
     o.sweep = [];
-    for (const d of [0, 500, 5000, 100000]) {
-      const z = await sample('aries', d, 5);
+    for (const d of [0, 2000, 4000, 8000]) {
+      const z = await sample('aries', d, 14);
       const p = await fire(null, d);
       o.sweep.push({ set: d, def: p.def, plain: p.lost, zodMean: Math.round(z.reduce((s, x) => s + x, 0) / z.length),
         zodMin: Math.min(...z), zodMax: Math.max(...z) });
@@ -95,24 +96,30 @@ try {
   ok('the flat band is declared as 3000-5000', !!r.band && r.band[0] === 3000 && r.band[1] === 5000, JSON.stringify(r.band));
   ok('an UNARMOURED hit lands inside the declared 3000-5000 band', S[0].zodMin >= 3000 && S[0].zodMax <= 5000,
     `${S[0].zodMin}-${S[0].zodMax} at def 0`);
-  ok('...and armour never pushes it below three quarters of the band floor', Math.min(...zAll) >= 2250,
-    `lowest hit seen across the whole sweep: ${Math.min(...zAll)}`);
   {
-    const soft = zMeans[0], hard = zMeans[zMeans.length - 1];
-    const cut = 1 - hard / soft;
-    ok('DEF still plays a part — heavy armour measurably reduces the hit', cut > 0.08,
-      `${Math.round(cut * 100)}% off at def ${S[S.length - 1].def} (${soft} -> ${hard})`);
-    ok('...but nowhere near halving it — the cut stays under a third', cut < 0.33,
-      `${Math.round(cut * 100)}% off; the pre-v0.30.475 curve took 95%`);
-    ok('...and the reduction is monotone in DEF, not noise', zMeans[0] >= zMeans[zMeans.length - 1],
+    const at = (d) => S.find((x) => x.set === d);
+    const a2 = at(2000), a4 = at(4000);
+    // The user named two points: "at 2000 DEF can go down to 3000 dmg / at 4000 DEF can go down to
+    // 2000 dmg". Read as where the roll now CENTRES at that armour, which is what the ramp targets.
+    ok('DEF 2,000 brings a zodiac hit to about 3,000', Math.abs(a2.zodMean - 3000) <= 350,
+      `mean ${a2.zodMean} at getDef ${a2.def} (target 3000)`);
+    ok('DEF 4,000 brings it to about 2,000', Math.abs(a4.zodMean - 2000) <= 350,
+      `mean ${a4.zodMean} at getDef ${a4.def} (target 2000)`);
+    ok('...and DEF 4,000 genuinely beats DEF 2,000 — the curve separates them', a2.zodMean - a4.zodMean > 600,
+      `${a2.zodMean} -> ${a4.zodMean}; the v0.30.476 absorb curve separated them by under 60`);
+    ok('the response is monotone in DEF, not noise', zMeans.every((m, i) => i === 0 || m <= zMeans[i - 1] + 120),
       zMeans.map((m, i) => `def ${S[i].def}: ${m}`).join(', '));
+    ok('armour never makes them harmless — the floor holds', Math.min(...zMeans) > 1000,
+      `lowest mean ${Math.min(...zMeans)} at def ${S[S.length - 1].def}`);
   }
   ok('the control proves the sweep is real — a PLAIN shot is crushed by the same armour', S[0].plain > S[S.length - 1].plain * 3,
     `plain ${S.map((x) => x.plain).join(' -> ')} across def ${S.map((x) => x.def).join(' -> ')}`);
   ok('every sign hits in the band at zero DEF, not just the one swept', Object.values(r.bySign).every((v) => Math.min(...v) >= 3000 && Math.max(...v) <= 5000),
     Object.entries(r.bySign).map(([k, v]) => `${k} ${Math.min(...v)}-${Math.max(...v)}`).join(', '));
-  ok('blocking still reduces it — the defensive ABILITY is not bypassed', Math.max(...r.blocked) < Math.min(...zAll),
-    `blocked ${Math.min(...r.blocked)}-${Math.max(...r.blocked)} vs unblocked ${Math.min(...zAll)}-${Math.max(...zAll)}`);
+  // Blocking is sampled at DEF 0, so it must be compared against the DEF-0 range - comparing it
+  // against the whole sweep let an armoured 1,050 sit below a blocked 1,486 and read as a failure.
+  ok('blocking still reduces it — the defensive ABILITY is not bypassed', Math.max(...r.blocked) < S[0].zodMin,
+    `blocked ${Math.min(...r.blocked)}-${Math.max(...r.blocked)} vs unblocked ${S[0].zodMin}-${S[0].zodMax} at the same 0 DEF`);
   ok('Capricorn keeps his 32%-of-maxHp floor, which only ever raises', Math.min(...r.capricorn) > 5000,
     `${Math.min(...r.capricorn)}-${Math.max(...r.capricorn)} against a 400,000 bar`);
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
