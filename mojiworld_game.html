@@ -10229,7 +10229,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.465';
+const GAME_VERSION = 'v0.30.466';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -137865,7 +137865,11 @@ function _dnBake(d, txt, col, baseSize) {
       c.beginPath(); c.rect(-baseSize * 2.2, -baseSize * 0.95, baseSize * 4.4, baseSize * 0.38); c.clip();
       c.fillStyle = '#ffffff'; c.fillText(txt, 0, 0); c.restore();
     }
-    return { cv, ax, ay, w: wCss, h: hCss };   // v0.30.416 — css box for the DPR-correct blit
+    // v0.30.466 — carry the scale it was baked at. The blit below draws this raster 1:1
+    // on the device grid, which is only the right SIZE while that scale still stands; the
+    // resolution governor (LX_DRS) moves it mid-session, and a raster baked at the old one
+    // would render at the wrong on-screen size rather than merely soft.
+    return { cv, ax, ay, w: wCss, h: hCss, dpr };
   } catch (e) { return null; }
 }
 function drawDamageNumbers() {
@@ -137921,6 +137925,7 @@ function drawDamageNumbers() {
   // v0.30.343 — see the bake gate below: cap bakes per frame so an AOE's
   // simultaneous settlers spread their bake cost over a few frames.
   let _dnBakeBudget = 3;
+  const _dnDprNow = Math.max(1, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1)));   // v0.30.466
   const _dnLowFx_top = (typeof _perfLowFx === 'function' && _perfLowFx());
   for (const d of game.damageNumbers) {
     const sx = d.x - camX;
@@ -137997,6 +138002,9 @@ function drawDamageNumbers() {
     // don't retry every frame, just stay live.
     if (age >= 10 && !rot && scale > 0.88 && scale < 1.12) {
       let _bk = d._bk;
+      // v0.30.466 — the governor can change the render scale between the bake and the blit;
+      // a raster from the old scale is retired so the next frame rebakes at the live one.
+      if (_bk && _bk.dpr !== _dnDprNow) _bk = d._bk = undefined;
       if (_bk === undefined && _dnBakeBudget > 0) { _dnBakeBudget--; _bk = d._bk = _dnBake(d, txt, col, baseSize); }
       if (_bk) {
         // v0.30.460 — CANCEL THE BOB FOR THE BLIT. This is the v0.29.408 bug again, in the path that
@@ -138015,8 +138023,29 @@ function drawDamageNumbers() {
         // bake covers. The pop-in overshoot, the rise and the shrink-and-fade all still animate on
         // the live path, and a readability anchor that visibly disagrees between neighbours is a
         // worse trade than a bob the original comment already called imperceptible.
-        const _inv = 1 / (scale || 1);
-        ctx.drawImage(_bk.cv, -_bk.ax * _inv, -_bk.ay * _inv, _bk.w * _inv, _bk.h * _inv);   // v0.30.416 — device-res bake, css-size blit
+        // v0.30.466 — BLIT ON THE DEVICE PIXEL GRID (per user: the outline "sometimes"
+        // renders soft instead of crisp). v0.30.416 and v0.30.460 both fixed the SIZE of this
+        // blit and neither fixed its SAMPLING, which is what the report is looking at.
+        // Measured on the real build, a settled number blits a 171x90 raster into a device
+        // rect of 170.667 x 89.333 at device y 344.933: fractional on both axes AND a 0.998
+        // scale, so the rasteriser resamples the whole bitmap bilinearly. That softens the
+        // 5 px outline into a smear, while a number still popping in (live path, real glyph
+        // rasterisation) stays crisp beside it - the two states in the report.
+        // Neither is fixable in CSS units: wCss * dpr is fractional, cv.width is its ceil, and
+        // the number's own x/y are floats. So draw the raster 1:1 in DEVICE space at an integer
+        // offset instead - no resample is possible by construction. The sub-pixel glyph position
+        // baked into the bitmap is preserved; only the whole-bitmap placement snaps, by under
+        // half a device pixel. Cancelling the bob comes free (v0.30.460 wanted exactly that).
+        const _tf = (typeof ctx.getTransform === 'function') ? ctx.getTransform() : null;
+        if (_tf) {
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.drawImage(_bk.cv, Math.round(_tf.e - _bk.ax * _bk.dpr), Math.round(_tf.f - _bk.ay * _bk.dpr));
+          ctx.restore();
+        } else {
+          const _inv = 1 / (scale || 1);   // no getTransform: the v0.30.460 css-size blit
+          ctx.drawImage(_bk.cv, -_bk.ax * _inv, -_bk.ay * _inv, _bk.w * _inv, _bk.h * _inv);
+        }
         ctx.restore();
         continue;
       }
