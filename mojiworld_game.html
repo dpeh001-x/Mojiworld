@@ -10562,7 +10562,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.500';
+const GAME_VERSION = 'v0.30.501';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -59516,8 +59516,17 @@ function _bravoShowBoonPick() {
   if (!game.expedition || !game.expedition.active) return;
   if (!game.expedition.bravoReady) return;
   // Build pool: prefer un-owned boons, fall back to full pool.
+  // v0.30.501 — THE OFFER AND THE ACCEPT NOW ASK THE SAME QUESTION. This pool filtered on
+  // player.boons alone, but the accept path below rejects a duplicate with _lxBoonIdActive,
+  // which ALSO sees the expedition tray (v0.30.458 moved blessings there). So a boon already
+  // in the tray was still offered, and taking it landed on the inert branch - which showed a
+  // warning and then cleared bravoReady and advanced the floor anyway. The blessing for that
+  // floor was spent on nothing, with a toast explaining why but no way to undo it. Filtering
+  // on the same predicate the accept path uses makes the two agree by construction rather
+  // than by two lists being kept in step.
+  const _boonActive = (id) => { try { return (typeof _lxBoonIdActive === 'function') && _lxBoonIdActive(id); } catch (e) { return false; } };
   const _ownedIds = new Set((player.boons || []).map(b => b.id));
-  let _pool = (typeof POWERUPS !== 'undefined') ? POWERUPS.filter(p => !_ownedIds.has(p.id)) : [];
+  let _pool = (typeof POWERUPS !== 'undefined') ? POWERUPS.filter(p => !_ownedIds.has(p.id) && !_boonActive(p.id)) : [];
   if (_pool.length < 3 && typeof POWERUPS !== 'undefined') _pool = POWERUPS.slice();
   // Random sample of 3 without replacement.
   const _picks = [];
@@ -59652,6 +59661,7 @@ function _bravoShowBoonPick() {
       }
       const _i = b.dataset.pick | 0;
       const _chosen = _picks[_i];
+      let _bravoInert = false;   // v0.30.501 — an inert pick must not cost the floor its blessing
       if (_chosen && _chosen.inst) {
         // v0.30.458 — the blessing goes to the EXPEDITION TRAY. It used to be pushed into player.boons
         // and auto-equipped into player.boonsEquipped, which is precisely how a run reached into the
@@ -59665,7 +59675,13 @@ function _bravoShowBoonPick() {
           if (_dupe) {
             // A second copy of a live boon is inert under the one-per-type rule, so say so rather
             // than quietly burning a tower slot on nothing.
-            if (typeof showToast === 'function') showToast('\u26A0 ' + (_chosen.def.name || 'That boon') + ' is already active — a second copy would do nothing.', 'rare');
+            // v0.30.501 — ...and do not burn the FLOOR on it either. The pool no longer offers a
+            // live boon, so this is now only reachable through the `_pool.length < 3` fallback
+            // to the full POWERUPS list. When it is reached, leave bravoReady set: the modal
+            // closes, the player speaks to Bravo again and draws a fresh three. Nothing advances,
+            // so there is no soft-lock - the floor is still cleared and she is still standing there.
+            _bravoInert = true;
+            if (typeof showToast === 'function') showToast('\u26A0 ' + (_chosen.def.name || 'That boon') + ' is already active — a second copy would do nothing. Speak to me again.', 'rare');
           } else {
             const _i = Math.max(0, Math.min(_bTrayN - 1, _bravoTarget | 0));
             const _replaced = _t[_i] ? getBoonDef(_t[_i]) : null;
@@ -59686,6 +59702,8 @@ function _bravoShowBoonPick() {
       modal.remove();
       if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;   // v0.27.8 — guarded unpause (see _closeBravoModal)
       // Clear the bravoReady flag + advance to the next floor.
+      // v0.30.501 — unless the pick was inert (see above): Bravo stays ready and the floor holds.
+      if (_bravoInert) return;
       game.expedition.bravoReady = false;
       if (typeof _expeditionAdvanceFloor === 'function') _expeditionAdvanceFloor('bravo');
     };
@@ -96946,7 +96964,18 @@ So.. do you need a lift?`;
     const _ready = _flagReady || _recoveryReady;
     // If recovery kicked in, re-arm the flag so all downstream paths
     // (advance, completion toast, etc.) see consistent state.
-    if (_recoveryReady && !_flagReady && _exp) _exp.bravoReady = true;
+    // v0.30.501 — through _expeditionFloorCleared, not by setting the flag by hand. Setting it
+    // directly skipped everything ELSE that clearing a floor means: the floor's share of the
+    // run's EXP budget (_lxGrantExpeditionFloorExp), the "Quest Complete" toast and the quest
+    // pin reset. A floor cleared via this recovery path therefore paid nothing at all, and the
+    // player had no way to tell - Bravo opened normally and the run carried on one floor's EXP
+    // short. That function is idempotent (it stamps _floorClearedFor), re-checks the floor it
+    // was armed for, and re-verifies that nothing is alive, so routing through it is strictly
+    // safer than the assignment it replaces. The raw flag stays as the fallback.
+    if (_recoveryReady && !_flagReady && _exp) {
+      if (typeof _expeditionFloorCleared === 'function') _expeditionFloorCleared(_floor, true);
+      if (!_exp.bravoReady) _exp.bravoReady = true;
+    }
     if (_isFinal) {
       text = `*Bravo bows. There is no floor beyond this one — the Apex was the answer all along.*\n\nYou did it. I'll meet you at the top.`;
       opts.push({ t:'Close', cb: closeDialog });
