@@ -81,7 +81,10 @@
 // v0.30.446 - v18 -> v19. 7 monster attack frames REPLACED under their own names
 // (user art drop: 11 sets, edge clean-ups + the smith golem impact frames re-anchored);
 // returning browsers would otherwise serve the old frames from the v18 generation.
-const CACHE = 'mojiworld-assets-v19';
+// v0.30.465 - v19 -> v20. dash_mage.webp and mstormorb.webp REPLACED under
+// their own names (regenerated art); returning browsers would otherwise serve the old
+// sprites from the v19 generation alongside the new animation frames.
+const CACHE = 'mojiworld-assets-v20';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
