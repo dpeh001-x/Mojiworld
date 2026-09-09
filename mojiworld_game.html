@@ -10562,7 +10562,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.495';
+const GAME_VERSION = 'v0.30.496';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35955,6 +35955,11 @@ function getAtk()  {
 // DEF, +30 HP / +2 DEF per level) rather than a fourth multiplier that grew
 // without bound. Returns the multiplier applied to incoming damage, so a
 // HIGHER number means LESS reduction.
+// v0.30.496 — the seven call-site comments that still advertised the ORIGINAL
+// v0.25.856 curve ("0.90 at L≤50 → 0.60 at L100") now point here instead. They
+// had described the opposite of the shipped behaviour since v0.29.275, which is
+// how an audit came to read this function as inverted. It is not: the weakening
+// curve below is the deliberate v0.29.275 balance change. Left as-is on purpose.
 function _warriorDr() {
   const lv = (player && player.level) || 1;
   if (lv <= 50) return 0.92;
@@ -57158,13 +57163,33 @@ function offerPrestige(fromGuguma) {
     game.prestige = p;
     // Reset progression
     player.level = 1; player.exp = 0; player.expToNext = 30;     // v0.26.329 — matches 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
-    player.maxHp = 100; player.maxMp = 50;
-    player.baseAtk = 12; player.baseDef = 5;
+    // v0.30.496 — reset to the CLASS baseline, the same values applyClass() hands a
+    // fresh character, instead of the hardcoded 100 / 50 / 12 / 5 this used to write.
+    // Two bugs, one cause:
+    //   * baseCrit was not in the list AT ALL, while _lxApplyJobInner and
+    //     _lxApplyMasterInner both do `baseCrit = (baseCrit||5) + stats.crit`. Crit
+    //     therefore COMPOUNDED across ascensions - a rogue went 25 -> 49 -> 73 -> 97
+    //     and hit the getCrit() ceiling of 100 after three of the twenty allowed
+    //     ascensions, permanently critting every hit. Worse, baseCrit is in both
+    //     PLAYER_SAVE_FIELDS and _LX_SIGNED_PLAYER_KEYS, so the inflated number was
+    //     persisted AND signed as legitimate. The confirm dialog promises
+    //     "EVERYTHING else resets: level, stats, job/master, ..." - it does now.
+    //   * every class's atk is above the hardcoded 12 (warrior 15, rogue 15, mage 10
+    //     with hp 70 vs the hardcoded 100, archer 13), so the v0.29.856 repair lifted
+    //     the stats straight back up on the forced reload and fired
+    //     "Repaired corrupted stats" after EVERY ascension, for every class. A
+    //     corruption alarm that always fires is not an alarm.
+    const _ascCs = (CLASSES[player.cls] && CLASSES[player.cls].stats) || null;
+    player.maxHp   = (_ascCs && _ascCs.hp)   || 100;
+    player.maxMp   = (_ascCs && _ascCs.mp)   || 50;
+    player.baseAtk = (_ascCs && _ascCs.atk)  || 12;
+    player.baseDef = (_ascCs && typeof _ascCs.def === 'number') ? _ascCs.def : 5;
+    player.baseCrit = (_ascCs && _ascCs.crit) || 5;
     // v0.26.1032 — also reset the Acc/Speed/Jump lanes (grown by the level-up panel),
     // else the invested base stat survives while _levelUpSpent is wiped -> re-investable.
     player.baseAcc = 0;
-    player.baseSpeed = (CLASSES[player.cls] && CLASSES[player.cls].stats && CLASSES[player.cls].stats.speed) || 3.5;
-    player.baseJump  = (CLASSES[player.cls] && CLASSES[player.cls].stats && CLASSES[player.cls].stats.jump)  || 10;
+    player.baseSpeed = (_ascCs && _ascCs.speed) || 3.5;
+    player.baseJump  = (_ascCs && _ascCs.jump)  || 10;
     // Clear the invested-stat ledger too. Without this, a post-ascension Reset
     // Stats reverses deltas that were already wiped above (maxHp -> 1, baseAtk
     // negative) and refunds free skill points for ranks that no longer exist.
@@ -81628,7 +81653,7 @@ function updateMonsters(dt) {
       let dmg = Math.max(1, _atkBase + Math.floor(Math.random() * 4));   /* v0.29.566 — flat DEF term dropped; _defAbsorbMul(_pierce) below is the armour model */
       // Block reduces damage by 70% (outside parry window)
       if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); triggerBlock(); }
-      if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
+      if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
       // Divine Aegis — halves damage taken while active
       if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
       // v0.25.530 — holyShield Lv10 bonus multiplies again for layered DR.
@@ -93295,7 +93320,7 @@ function updateProjectiles(dt) {
         let dmg = Math.max(1, Math.floor(p.damage));   /* v0.29.566 — flat DEF term retired; _defAbsorbMul(_pjPierce) below is the armour model */
         // Block reduces projectile damage by 70%
         if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); triggerBlock(); }
-        if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
+        if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
         // Divine Aegis — halves projectile damage taken while active
         if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
       // v0.25.530 — holyShield Lv10 bonus multiplies again for layered DR.
@@ -93637,7 +93662,7 @@ function updateProjectiles(dt) {
       dmg = dmg * 0.3;
       if (typeof triggerBlock === 'function') triggerBlock();
     }
-    if (player.cls === 'warrior') dmg = dmg * _warriorDr();  /* v0.25.856 Lv-scaled DR */
+    if (player.cls === 'warrior') dmg = dmg * _warriorDr();  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
     if (player._aegis) dmg = dmg * 0.5;
     return Math.max(1, Math.floor(dmg));
   };
@@ -93802,7 +93827,7 @@ function updateProjectiles(dt) {
               dmg = Math.max(1, Math.floor(dmg * 0.3));
               if (typeof triggerBlock === 'function') triggerBlock();
             }
-            if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
+            if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
             if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
             player.hp -= (player._god ? 0 : _diffDmg(dmg));
             player.lastHitTime = game.time;
@@ -94290,7 +94315,7 @@ function updateProjectiles(dt) {
               dmg = Math.max(1, Math.floor(dmg * 0.3));
               if (typeof triggerBlock === 'function') triggerBlock();
             }
-            if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
+            if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
             if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
             player.hp -= (player._god ? 0 : _diffDmg(dmg));
             player.lastHitTime = game.time;
@@ -94369,7 +94394,7 @@ function updateProjectiles(dt) {
               dmg = Math.max(1, Math.floor(dmg * 0.3));
               if (typeof triggerBlock === 'function') triggerBlock();
             }
-            if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
+            if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
             if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
             let _bhLost = (player._god ? 0 : _diffDmg(dmg));
             // v0.29.x — Gravitos black-hole core: clamp each tick's FINAL
@@ -94545,7 +94570,7 @@ function updateProjectiles(dt) {
           // Block window
           if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
           // Warrior class DR
-          if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR (0.90 at L≤50 → 0.60 at L100) */
+          if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
           // Divine Aegis halves damage
           if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
           // v0.29.x — %-derived hazards (fire/forge pillars: max(% maxHP, atk×N))
