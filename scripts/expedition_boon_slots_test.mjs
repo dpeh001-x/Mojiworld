@@ -68,6 +68,24 @@ try {
     player.boonsEquipped.length = 2;
     try { renderBoonPanel(); await sleep(250); html = (document.getElementById('lp-boons') || {}).innerHTML || ''; } catch (e) {}
     o.panelEmpty = { loanMarks: (html.match(/expedition slot/g) || []).length, plainEmpty: (html.match(/— empty slot —/g) || []).length };
+    // v0.30.456 — THE GLITCH: with 3 equipped and 3 loaned slots standing open, can the player
+    // actually PUT anything in them from the bag list? The Equip buttons were gated on the raw cap,
+    // so they all greyed out at 3 and the loaned slots could not be filled by hand. Drive the real
+    // button, not the function behind it — the function was never the broken part.
+    player.boonsEquipped.length = 3;
+    try { renderBoonPanel(); await sleep(250); } catch (e) {}
+    const host = document.getElementById('lp-boons');
+    const equipBtns = host ? Array.from(host.querySelectorAll('[data-equip]')) : [];
+    const usable = equipBtns.filter((btn) => !btn.disabled);
+    const eqBefore = player.boonsEquipped.length;
+    if (usable[0]) usable[0].click();
+    await sleep(300);
+    o.bagEquip = { buttons: equipBtns.length, enabled: usable.length, before: eqBefore, after: player.boonsEquipped.length };
+    // and once the six are full the buttons SHOULD grey out again
+    try { for (let i = 0; i < player.boons.length; i++) equipBoon(i); renderBoonPanel(); await sleep(250); } catch (e) {}
+    const host2 = document.getElementById('lp-boons');
+    const btns2 = host2 ? Array.from(host2.querySelectorAll('[data-equip]')) : [];
+    o.bagFull = { equipped: player.boonsEquipped.length, enabled: btns2.filter((b) => !b.disabled).length };
     // --- 4. the expedition's OWN grant path must see the loaned slots (it read the raw constant)
     game.expedition = { active: true, floor: 4, snapshot: null };
     fill(8); equipAsManyAsPossible();               // fill to the base 3 first
@@ -125,6 +143,10 @@ try {
   ok('the panel counts against the LIVE cap, not "6 / 3 equipped"', /6 \/ 6 equipped/.test(r.panelTower.heading) && /on loan/.test(r.panelTower.heading), r.panelTower.heading);
   ok('the loaned slots are visibly marked and amber, not passed off as permanent', r.panelEmpty.loanMarks === 3 && r.panelEmpty.plainEmpty === 1 && r.panelTower.amber,
     `loan-marked ${r.panelEmpty.loanMarks}, plain empty ${r.panelEmpty.plainEmpty}, amber ${r.panelTower.amber}`);
+  ok('the bag\'s Equip buttons stay usable while a loaned slot is open — the v0.30.455 glitch', r.bagEquip.enabled > 0 && r.bagEquip.after === r.bagEquip.before + 1,
+    `${r.bagEquip.enabled} of ${r.bagEquip.buttons} enabled at ${r.bagEquip.before} equipped, click took it to ${r.bagEquip.after}`);
+  ok('...and they DO grey out once all six are full', r.bagFull.equipped === 6 && r.bagFull.enabled === 0,
+    `${r.bagFull.equipped} equipped, ${r.bagFull.enabled} still enabled`);
   ok('the expedition\'s own boon grant fills a loaned slot (it read the raw cap before)', r.grant.after === r.grant.before + 1,
     `${r.grant.before} -> ${r.grant.after} equipped`);
   ok('FINISHING the run hands the loan back — the pre-run 2 return, the run\'s boons are gone', r.finish.inRun === 6 && r.finish.after === 2 && r.finish.cap === 3,
