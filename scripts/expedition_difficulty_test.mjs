@@ -195,55 +195,80 @@ ok('the coin CAP is per-difficulty: Hard clears the Normal ceiling instead of ty
   R.n200.coins === 6000 && R.h200.coins === 10500,
   `normal ${R.n200.coins} (cap 6000) vs hard ${R.h200.coins}`);
 
-// ---- Bravo -------------------------------------------------------------------
-// The picker is three radio rows on the FIRST screen now, not a submenu: one click to change,
-// and all three visible while the player is deciding. What this pins is that the rows are
-// exclusive (exactly one marked), that a pick re-renders both the marker AND the Begin button,
-// and that the numbers are readable without arithmetic.
+// ---- Bravo's card -------------------------------------------------------------
+// Three separate claims: the difficulty is a TAB STRIP above the speech (not an answer button),
+// the rulebook lives behind "Find out more" and answers in place, and the whole card FITS ON
+// SCREEN. The last one is the regression guard that matters: the panel is bottom-anchored and
+// content-sized, so before this it grew upward until the NPC's name and the difficulty strip
+// were both off the top of the window - the control the player was there to set, invisible.
 const M = await page.evaluate(async () => {
   const out = {};
-  const labels = () => [...document.querySelectorAll('#dialog-options button')].map((b) => b.textContent);
+  const optLabels = () => [...document.querySelectorAll('#dialog-options button')].map((b) => b.textContent);
+  const tabs = () => [...document.querySelectorAll('#dialog-tabs button')];
   const click = (frag) => { const b = [...document.querySelectorAll('#dialog-options button')].find((x) => x.textContent.indexOf(frag) >= 0); if (b) { b.click(); return true; } return false; };
+  const clickTab = (frag) => { const b = tabs().find((x) => x.textContent.indexOf(frag) >= 0); if (b) { b.click(); return true; } return false; };
+  const box = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
   player.level = Math.max(player.level | 0, (typeof EXPEDITION_LEVEL_GATE === 'number' ? EXPEDITION_LEVEL_GATE : 20) + 5);
   game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
-  game._expeditionDifficulty = 'normal';
+  game._expeditionDifficulty = 'normal'; game._expInfo = null;
   const npc = { x: 0, y: 0, name: 'Bravo', role: 'expedition', color: '#ffb0d8' };
   openNPC(npc);
-  out.first = labels();
-  out.pickedHard = click('Hard');
-  out.afterHard = labels();
-  out.prefHard = game._expeditionDifficulty;
-  out.pickedEasy = click('Easy');
-  out.afterEasy = labels();
-  out.prefEasy = game._expeditionDifficulty;
-  await new Promise((r) => setTimeout(r, 200));
-  out.dialogText = (document.getElementById('dialog-text').innerText || '');
+  await new Promise((r) => setTimeout(r, 400));
+  out.firstOpts = optLabels();
+  out.firstTabs = tabs().map((b) => ({ t: b.textContent, on: b.getAttribute('aria-checked'), role: b.getAttribute('role') }));
+  // the card has to be entirely on screen, with the strip and the header visible
+  out.fit = { vh: window.innerHeight, dialog: box('#dialog'), header: box('#dialog .dialog-header'),
+              tabs: box('#dialog-tabs'), opts: box('#dialog-options') };
+  const t = document.getElementById('dialog-text');
+  out.proseCapped = !!t.style.maxHeight && t.style.maxHeight !== 'none';
+  // one click on the strip switches it
+  out.tabSwitched = clickTab('Hard');
+  await new Promise((r) => setTimeout(r, 300));
+  out.prefAfter = game._expeditionDifficulty;
+  out.tabsAfter = tabs().map((b) => b.getAttribute('aria-checked'));
+  out.optsAfter = optLabels();
+  // find out more
+  out.openedInfo = click('Find out more');
+  await new Promise((r) => setTimeout(r, 250));
+  out.infoOpts = optLabels();
+  out.tabsOnInfo = tabs().length;
+  out.pickedTopic = click('What you keep');
+  await new Promise((r) => setTimeout(r, 250));
+  out.topicText = document.getElementById('dialog-text').innerText || '';
+  out.optsCountAfterTopic = optLabels().length;
+  out.backed = click('Back to the portal');
+  await new Promise((r) => setTimeout(r, 250));
+  out.afterBack = optLabels();
   click('Maybe later');
   return out;
 });
-const marked = (rows) => rows.filter((t) => t.indexOf('●') === 0);
-ok('all three difficulties are on the FIRST screen, no submenu to open',
-  ['Easy', 'Normal', 'Hard'].every((k) => M.first.some((t) => new RegExp('^[●○] ' + k + ' ').test(t))),
-  M.first.join(' | ').slice(0, 190));
-ok('they read as one exclusive choice - exactly one row is filled in',
-  marked(M.first).length === 1 && marked(M.afterHard).length === 1 && marked(M.afterEasy).length === 1,
-  `${marked(M.first).length} marked, then ${marked(M.afterHard).length}, then ${marked(M.afterEasy).length}`);
-ok('the numbers are percentages, so no multiplier has to be worked out to compare two rows',
-  M.first.some((t) => /Hard — enemies 150%, rewards 175%/.test(t)) && M.first.some((t) => /Easy — enemies 60%, rewards 50%/.test(t)),
-  M.first.filter((t) => /enemies/.test(t)).join(' | '));
-ok('ONE click switches it - no submenu, no confirm', M.pickedHard && M.prefHard === 'hard', `pref ${M.prefHard}`);
-ok('the marker follows the pick', M.afterHard.some((t) => /^● Hard /.test(t)) && !M.afterHard.some((t) => /^● Normal /.test(t)),
-  marked(M.afterHard)[0]);
-ok('the Begin button re-renders to name what it will actually start',
-  M.afterHard.some((t) => /Begin Expedition — .*Hard/.test(t)), M.afterHard[0]);
-ok('switching again works the same way, in both directions', M.pickedEasy && M.prefEasy === 'easy' && M.afterEasy.some((t) => /^● Easy /.test(t)), `pref ${M.prefEasy}`);
-ok('Easy no longer wears the unselected-radio glyph in the Begin button',
-  M.afterEasy.some((t) => /Begin Expedition — ◇ Easy/.test(t)), M.afterEasy[0]);
-ok('Bravo explains the trade before the buttons rather than behind them',
-  /How hard should it push back/.test(M.dialogText) && /locks when you step through/i.test(M.dialogText));
-ok('the friend option is still there and the seeded wording is not',
-  M.afterEasy.some((t) => /Join a friend/.test(t)) && !M.afterEasy.some((t) => /seeded run/.test(t)),
-  M.afterEasy.join(' | ').slice(0, 170));
+ok('the difficulty is a tab strip, not an answer button',
+  M.firstTabs.length === 3 && M.firstTabs.every((t) => t.role === 'radio') && !M.firstOpts.some((t) => /enemies d+%/.test(t)),
+  M.firstTabs.map((t) => t.t).join(' | '));
+ok('the tabs are checkbox-style, with exactly one ticked',
+  M.firstTabs.filter((t) => t.on === 'true').length === 1 && M.firstTabs.some((t) => t.t.indexOf('☑') === 0) && M.firstTabs.some((t) => t.t.indexOf('☐') === 0),
+  M.firstTabs.map((t) => t.t.slice(0, 1) + t.t.slice(1, 7)).join(' | '));
+ok('THE WHOLE CARD IS ON SCREEN - header and strip included',
+  M.fit.header && M.fit.header.top >= 0 && M.fit.tabs.top >= 0 && M.fit.dialog.top >= 0
+    && M.fit.opts.bottom <= M.fit.vh && M.fit.dialog.bottom <= M.fit.vh,
+  `dialog ${M.fit.dialog.top}..${M.fit.dialog.bottom} · header top ${M.fit.header && M.fit.header.top} · strip top ${M.fit.tabs && M.fit.tabs.top} · viewport ${M.fit.vh}`);
+ok('the prose is what got capped, so it scrolls instead of pushing the card off screen', M.proseCapped);
+ok('ONE click on the strip switches the difficulty',
+  M.tabSwitched && M.prefAfter === 'hard' && M.tabsAfter.join(',') === 'false,false,true', `pref ${M.prefAfter}`);
+ok('the Begin button follows the strip', M.optsAfter.some((t) => /Begin Expedition — .*Hard/.test(t)), M.optsAfter[0]);
+ok('her speech is the metaphor only - the rulebook is not in it',
+  !M.firstOpts.some((t) => /Rules/.test(t)) && M.openedInfo, 'find-out-more opened: ' + M.openedInfo);
+ok('"Find out more" lists the expedition section by section',
+  ['The descent', 'The blessings', 'The trials', 'What you keep', 'The weight'].every((k) => M.infoOpts.some((t) => t.indexOf(k) >= 0)),
+  M.infoOpts.join(' | ').slice(0, 190));
+ok('a topic answers IN PLACE, so several can be read without walking back out',
+  M.pickedTopic && /Roguelite rules/.test(M.topicText) && M.optsCountAfterTopic === M.infoOpts.length,
+  `${M.optsCountAfterTopic} options still listed`);
+ok('the strip stays reachable while reading the sections', M.tabsOnInfo === 3, `${M.tabsOnInfo} tabs`);
+ok('Back returns to the portal card', M.backed && M.afterBack.some((t) => /Begin Expedition/.test(t)), M.afterBack[0]);
+ok('the friend option survives the restructure',
+  M.firstOpts.some((t) => /Join a friend/.test(t)) && !M.firstOpts.some((t) => /seeded run/.test(t)),
+  M.firstOpts.join(' | ').slice(0, 160));
 
 // ---- the rumour ---------------------------------------------------------------
 const RUM = await page.evaluate(async () => {
