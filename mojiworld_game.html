@@ -10562,7 +10562,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.499';
+const GAME_VERSION = 'v0.30.500';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -62041,6 +62041,12 @@ function loadMap(id, entryX, entryY) {
     if (typeof saveState === 'function') { try { saveState(); } catch (e) {} }
     game._gravitosCinePlaying = true;
     game.paused = true;
+    // v0.30.500 — _gravitosCinePlaying already recorded the intent; nothing consulted it.
+    // _lxCineHoldActive() now does, so closeAllModals() and the watchdog stop lifting
+    // this pause out from under the dagger + entrance chain (a 12 s clip followed by
+    // an 11 s one, at the final boss, once per save). The deadline is a backstop for
+    // the case where _afterEntry never runs at all.
+    if (typeof _lxCineHold === 'function') _lxCineHold(30000);
     // v0.29.200 — the memory made real. The first true walk into The
     // Singularity now opens on the prologue's first-person twin-dagger POV
     // (clip_prologue_pov.mp4) and THEN the entrance cinematic — the same
@@ -62052,6 +62058,7 @@ function loadMap(id, entryX, entryY) {
     if (_bgmWasOn) { try { _bgmEl.pause(); } catch (e) {} }
     const _afterEntry = () => {
       game._gravitosCinePlaying = false;
+      if (typeof _lxCineHold === 'function') _lxCineHold(0);   // v0.30.500
       if (_bgmWasOn) { try { const _rp = _bgmEl.play(); if (_rp && _rp.catch) _rp.catch(() => {}); } catch (e) {} }
       // v0.29.98 — Gravitos speaks his creed the first time you stand in the
       // Singularity (right after the entry video): the extremist manifesto
@@ -140902,6 +140909,10 @@ function loop(time) {
         _anyVisible = (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen()) ||
                       !!(_csEl && _csEl.classList && (_csEl.classList.contains('open') || _csEl.classList.contains('on')));
       }
+      // v0.30.500 — a cinematic hold is a legitimate owner with no element to point at
+      // (see _lxCineHoldActive). It is deadline-bounded, so this can delay recovery by
+      // at most that deadline and never prevent it.
+      if (!_anyVisible && typeof _lxCineHoldActive === 'function' && _lxCineHoldActive()) _anyVisible = true;
       if (!_anyVisible) {
         try { console.warn('[StuckPauseWatchdog] paused >3s with no visible modal — force-unpausing'); } catch(_) {}
         game.paused = false;
@@ -142159,6 +142170,15 @@ function _prologueApexSegment() {
     // Hold the game paused UNDER the entrance clip so the boss can't chip the
     // player during it (unpaused when the fight arms, in _armPrologueFight).
     game.paused = true;
+    // v0.30.500 — and say so, or this pause does not survive its own cleanup. The
+    // closeAllModals() 300 ms below ends in an unconditional reassignment of
+    // game.paused, and the StuckPauseWatchdog force-unpauses anything it cannot
+    // attribute to a visible modal after 3 s. Neither could see a reason for this
+    // pause, so the boss got the whole entrance to itself - and player._god is not
+    // set until _armPrologueFight, which is a 500 ms beat plus a 6 s warm cap plus
+    // an 11 s clip away. The deadline is sized to that worst case and released
+    // early in _armPrologueFight.
+    if (typeof _lxCineHold === 'function') _lxCineHold(25000);
     // Defensive: if any advancement/ceremony/boss-intro modal opened during the
     // apex class chain or arena load, clear it — the prologue plays clean.
     setTimeout(() => {
@@ -142173,6 +142193,7 @@ function _prologueApexSegment() {
     // even if the clip is missing / autoplay is blocked, so it can't soft-lock.
     const _armPrologueFight = () => {
       if (!window._prologueActive) return;
+      if (typeof _lxCineHold === 'function') _lxCineHold(0);   // v0.30.500 — release before the unpause
       if (typeof closeAllModals === 'function') { try { closeAllModals(); } catch (e) {} }
       game.paused = false;
       // v0.29.108 (per user) — 15s of TRUE GODMODE from the moment you enter the
@@ -155249,6 +155270,52 @@ function closeCharStudio() {
 // stuck-pause watchdog can distinguish a real open modal (visible rects) from
 // a ZOMBIE (claims open via style/class but renders nothing). Keep the two
 // functions in lockstep when adding a modal.
+// v0.30.500 — ONE TABLE FOR BOTH READERS. _lxPauseOwners() and _anyOtherModalOpen()
+// are twins that must agree, and the file already says so ("Keep the two functions
+// in lockstep when adding a modal"). They had drifted anyway: four surfaces that
+// set game.paused = true appeared in neither, so _anyVisible came back false and
+// the StuckPauseWatchdog force-unpaused the world three seconds later, underneath
+// a full-screen veil that still read "PAUSED". The controller-unplug case is the
+// bad one - reason 'controller' has no auto-resume, so the sim ran indefinitely
+// while the player believed the game was stopped. Anything added here is seen by
+// both functions, which is the only way this stops happening.
+const _LX_EXTRA_PAUSE_SURFACES = [
+  { id: 'lx-autopause',             mode: 'display' },   // _lxAutoPause veil (controller lost, Steam overlay, blur)
+  { id: 'backup-modal-bg',          mode: 'class'   },   // openBackupModal
+  { id: 'exp-seed-modal',           mode: 'display' },   // _expeditionSeedPrompt - the player is TYPING a seed
+  { id: 'everdawn-welcome-overlay', mode: 'display' },   // first arrival in Everdawn
+];
+function _lxExtraPauseSurfaceEls() {
+  const out = [];
+  for (const s of _LX_EXTRA_PAUSE_SURFACES) {
+    const el = document.getElementById(s.id);
+    if (!el) continue;
+    if (s.mode === 'class') { if (el.classList && el.classList.contains('on')) out.push(el); }
+    else if (el.style.display === 'flex' || el.style.display === 'block') out.push(el);
+  }
+  return out;
+}
+// v0.30.500 — A CINEMATIC HOLD IS NOT A MODAL. Two entrances set game.paused = true so
+// the boss cannot act behind an opaque clip, and both were undone by the very
+// cleanup meant to clear stray modals: closeAllModals() ends in an unconditional
+// `game.paused = !!_forcedUp || _anyOtherModalOpen()`, and no cinematic overlay was
+// ever a pause owner. The prologue's arena entrance lost its pause 300 ms in and did
+// not set player._god until _armPrologueFight up to ~17 s later; the first true walk
+// into The Singularity had the same gap at the final boss. An element check cannot
+// close it - for part of that window no overlay exists yet, only the intent to play
+// one - so the intent is stated directly. ALWAYS deadline-bounded: a sequence that
+// dies mid-way releases the hold on its own rather than freezing the world, which is
+// the failure the watchdog exists to catch and must keep being able to catch.
+function _lxCineHoldActive() {
+  try {
+    if (typeof game === 'undefined' || !game) return false;
+    if (game._gravitosCinePlaying) return true;
+    return (typeof game._cineHoldUntil === 'number') && Date.now() < game._cineHoldUntil;
+  } catch (e) { return false; }
+}
+function _lxCineHold(ms) {
+  try { if (typeof game !== 'undefined' && game) game._cineHoldUntil = ms ? Date.now() + ms : 0; } catch (e) {}
+}
 function _lxPauseOwners() {
   const out = [];
   const ids = ['shop-modal','inventory-modal','powerup-modal',
@@ -155277,6 +155344,7 @@ function _lxPauseOwners() {
   document.querySelectorAll('#exp-door-modal, #exp-puzzle-modal, .tp-backdrop').forEach(el => out.push(el));
   const cs = document.getElementById('char-studio-overlay');
   if (cs && cs.classList && (cs.classList.contains('open') || cs.classList.contains('on'))) out.push(cs);
+  for (const el of _lxExtraPauseSurfaceEls()) out.push(el);   // v0.30.500
   return out;
 }
 function _anyOtherModalOpen() {
@@ -155327,6 +155395,8 @@ function _anyOtherModalOpen() {
   const gc2 = document.getElementById('game-complete-overlay');
   if (gc2 && gc2.classList && gc2.classList.contains('on')) return true;
   if (document.querySelector('#exp-door-modal, #exp-puzzle-modal, .tp-backdrop')) return true;
+  if (_lxExtraPauseSurfaceEls().length) return true;   // v0.30.500 — same table _lxPauseOwners reads
+  if (_lxCineHoldActive()) return true;                // v0.30.500 — an entrance clip owns the pause
   return false;
 }
 const _csCloseBtn = document.getElementById('char-studio-close');
