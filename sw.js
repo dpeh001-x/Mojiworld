@@ -84,7 +84,10 @@
 // v0.30.465 - v19 -> v20. dash_mage.webp and mstormorb.webp REPLACED under
 // their own names (regenerated art); returning browsers would otherwise serve the old
 // sprites from the v19 generation alongside the new animation frames.
-const CACHE = 'mojiworld-assets-v20';
+// v0.30.469 - v20 -> v21. p_lightning.webp REPLACED under its own name
+// (redrawn horizontal, tip right); returning browsers would otherwise keep serving the old
+// vertical bolt from the v20 generation next to the new frames.
+const CACHE = 'mojiworld-assets-v21';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
