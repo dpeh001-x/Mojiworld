@@ -10221,7 +10221,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.453';
+const GAME_VERSION = 'v0.30.454';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -56443,6 +56443,12 @@ function _amnesiacReset() {
 // invested LEVELUP_OPTIONS point (HP/MP/ATK/DEF/ACC/Speed/Jump) back to SP and
 // reverses the applied base-stat bonuses, for 20% of the player's CURRENT
 // Mojicoins. Distinct from respec() (which only clears milestone perks).
+// v0.30.454 — per user: "reset stat should also use 1000 set shards along with the existing 20% moji
+// coins". Coins alone were a soft brake: the charge is a PERCENTAGE of the wallet, so a player who
+// had just spent down to nothing reset for nearly nothing, and one sitting on a fortune paid a lot
+// for the same service. A flat shard price is the part that does not bend to how rich you are, and
+// it puts the reset beside Craft / Transcend / Reforge / Respec in the same currency.
+const LX_RESET_STATS_SHARDS = 1000;
 function resetStats() {
   const spent = player._levelUpSpent || {};
   // v0.29.471 — trainer purchases count toward "is there anything to reset",
@@ -56455,8 +56461,18 @@ function resetStats() {
   // the stash before hitting Reset Stats used to make the refund free.
   const cost = Math.floor(totalCoins() * 0.20);
   const _go = () => {
+    // v0.30.454 — check BOTH before charging EITHER, so a player who can pay the coins but not the
+    // shards is never billed for a reset that then does not happen.
     if (totalCoins() < cost) { if (typeof showToast === 'function') showToast('Not enough Mojicoins.', 'rare'); return; }
+    if ((player.setshards || 0) < LX_RESET_STATS_SHARDS) {
+      if (typeof showToast === 'function') showToast('Need ' + LX_RESET_STATS_SHARDS + '◈ setshards (you have ' + (player.setshards || 0) + '◈).', 'rare');
+      if (typeof _playUiSfx === 'function') _playUiSfx('error');
+      return;
+    }
     chargeCoins(cost);
+    // `|| 0` not `| 0`: ToInt32 wraps a balance above 2.147B negative, which the load-time guard
+    // then clamps to zero — the v0.27.24 shard-wipe bug, and the reason every shard site reads this way.
+    player.setshards = (player.setshards || 0) - LX_RESET_STATS_SHARDS;
     let refund = 0;
     for (const o of LEVELUP_OPTIONS) {
       const sN = spent[o.id] || 0; if (!sN) continue;
@@ -56507,7 +56523,7 @@ function resetStats() {
     player.hp = Math.min(player.hp || 0, getMaxHp());
     player.mp = Math.min(player.mp || 0, getMaxMp());
     if (typeof invalidateEquipBonusCache === 'function') invalidateEquipBonusCache();
-    if (typeof showToast === 'function') showToast('⟳ Stats reset — ' + refund + ' SP refunded (paid ' + cost + '🪙).', 'epic');
+    if (typeof showToast === 'function') showToast('⟳ Stats reset — ' + refund + ' SP refunded (paid ' + cost + '🪙 + ' + LX_RESET_STATS_SHARDS + '◈).', 'epic');
     if (typeof flash === 'function') flash(0.2);
     if (typeof saveState === 'function') saveState();
     if (typeof openLevelUpPanel === 'function') openLevelUpPanel();
@@ -56515,7 +56531,7 @@ function resetStats() {
   if (typeof uiConfirm === 'function') {
     uiConfirm({
       title: '⟳ Reset invested stats?',
-      body: 'Refund every Attribute/Skill point you have invested (HP, MP, ATK, DEF, ACC, Speed, Jump) back to SP for ' + cost + ' Mojicoins — 20% of your total ' + ((typeof _fmtBig === 'function') ? _fmtBig(Math.floor(totalCoins())) : Math.floor(totalCoins())) + ' (wallet + Mojibank). Paid from your wallet first, then your bank balance.',
+      body: 'Refund every Attribute/Skill point you have invested (HP, MP, ATK, DEF, ACC, Speed, Jump) back to SP for ' + cost + ' Mojicoins — 20% of your total ' + ((typeof _fmtBig === 'function') ? _fmtBig(Math.floor(totalCoins())) : Math.floor(totalCoins())) + ' (wallet + Mojibank) — plus ' + LX_RESET_STATS_SHARDS + '◈ setshards (you have ' + (player.setshards || 0) + '◈). Coins come from your wallet first, then your bank balance.',
       yesLabel: 'Pay & refund', noLabel: 'Cancel',
     }).then((ok) => { if (ok) _go(); });
   } else { _go(); }
@@ -100898,7 +100914,7 @@ function openLevelUpPanel() {
                 text-shadow:0 0 8px rgba(255,220,120,0.6);
                 font-variant-numeric:tabular-nums;">${player.skillPoints}</span>
         </div>
-        <button type="button" id="lp-reset-btn" onclick="resetStats()" title="Refund every invested stat point back to SP for 20% of your current Mojicoins." style="flex:0 0 auto; padding:5px 12px; background:linear-gradient(160deg,#5a2a2a,#3a1818); border:1px solid rgba(204,102,102,0.42); border-radius:8px; color:#ffcccc; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;">⟳ Reset Stats <span style="opacity:0.78; font-weight:500;">(20% 🪙)</span></button>
+        <button type="button" id="lp-reset-btn" onclick="resetStats()" title="Refund every invested stat point back to SP for 20% of your current Mojicoins plus 1,000 setshards." style="flex:0 0 auto; padding:5px 12px; background:linear-gradient(160deg,#5a2a2a,#3a1818); border:1px solid rgba(204,102,102,0.42); border-radius:8px; color:#ffcccc; font-size:11px; font-weight:700; cursor:pointer; white-space:nowrap;">⟳ Reset Stats <span style="opacity:0.78; font-weight:500;">(20% 🪙 + 1000◈)</span></button>
         <div id="lp-powerup" style="flex:1; display:flex; align-items:center;
              padding:5px 12px; background:rgba(0,0,0,0.35); border-radius:8px;
              border:1px solid rgba(255,255,255,0.06);

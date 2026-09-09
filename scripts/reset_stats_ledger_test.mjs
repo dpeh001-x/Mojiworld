@@ -88,7 +88,7 @@ const R = await page.evaluate(async () => {
   const ledgerAfterSwap = ledgerTotal();
   const spAfterSwap = player.skillPoints;
 
-  player.mojicoins = 10_000_000;
+  player.mojicoins = 10_000_000; player.setshards = 50_000;   // v0.30.454 - resetStats also costs 1000 setshards; this file tests the LEDGER, so fund it
   if (typeof game !== 'undefined') game.bankCoins = 0;
   resetStats();
   await new Promise(r => setTimeout(r, 350));
@@ -102,7 +102,7 @@ const R = await page.evaluate(async () => {
   const preB = stats();
   invest('atk', 300); invest('def', 100); invest('acc', 50);
   const spB1 = player.skillPoints;
-  player.mojicoins = 10_000_000;
+  player.mojicoins = 10_000_000; player.setshards = 50_000;   // v0.30.454 - resetStats also costs 1000 setshards; this file tests the LEDGER, so fund it
   resetStats();
   await new Promise(r => setTimeout(r, 350));
   const postB = stats();
