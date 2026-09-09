@@ -3571,7 +3571,7 @@
   /* dark — but the caps are what stop a bright map or a lit VFX from washing a label out. */
   /* backdrop-filter is progressively enhanced: without it the gradients alone still render, just */
   /* flat, which is what the pre-v0.30.483 build looked like. */
-  #dialog .options { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 9px; }
+  #dialog .options { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 7px; }
   #dialog .options button {
     /* v0.29.x — per user "create better UI buttons for NPCs": chunky
        MapleStory-style pills. One shared build — a hard gloss band baked
@@ -3593,12 +3593,17 @@
     backdrop-filter: blur(9px) saturate(1.25);
     -webkit-backdrop-filter: blur(9px) saturate(1.25);
     color: #fff8e6;
-    border: 2px solid rgba(255, 214, 118, 0.92);
-    padding: 11px 19px;
-    border-radius: 11px;
+    border: 1.5px solid rgba(255, 214, 118, 0.92);
+    /* v0.30.488 — per user "the bottom buttons for the dialogue can be smaller and take less
+       space". Down from 11x19 / 13.5px / r11 / 2px. Six options at the old size cost 227px of a
+       ~600px card — more than a third of it — and every pixel they gave back went straight to
+       the prose window, which was down to two visible lines. Still a comfortable tap target at
+       ~34px tall, and the type is 12.5px, which is where the rest of the HUD's controls sit. */
+    padding: 8px 14px;
+    border-radius: 9px;
     cursor: pointer;
-    font: 700 13.5px system-ui, -apple-system, "Segoe UI", sans-serif;
-    letter-spacing: 0.35px;
+    font: 700 12.5px system-ui, -apple-system, "Segoe UI", sans-serif;
+    letter-spacing: 0.25px;
     text-shadow: 0 1px 2px rgba(0,0,0,0.85);
     box-shadow:
       0 0 0 1.5px rgba(22, 9, 40, 0.72),
@@ -3757,7 +3762,7 @@
   /* the answers are their own compartment too — a hairline, not a box, so the card still reads
      as one object rather than three stacked panels */
   #dialog .options {
-    margin-top: 13px; padding-top: 13px;
+    margin-top: 10px; padding-top: 10px; gap: 7px;
     border-top: 1px solid rgba(255, 209, 102, 0.16);
   }
   #dialog .options button:active {
@@ -10428,7 +10433,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.487';
+const GAME_VERSION = 'v0.30.488';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -95548,7 +95553,8 @@ function _lxFitDialog() {
   if (!dlg.style.display || dlg.style.display === 'none') return;
   try {
     // start from a clean slate — a previous card's overrides must not leak into this one
-    txt.style.maxHeight = ''; dlg.style.paddingTop = ''; dlg.style.paddingBottom = '';
+    txt.style.height = ''; txt.style.maxHeight = '';
+    dlg.style.paddingTop = ''; dlg.style.paddingBottom = '';
     const PAD0 = parseFloat(getComputedStyle(dlg).paddingTop) || 28;
     txt.style.maxHeight = '0px';
     const rect = dlg.getBoundingClientRect();
@@ -95559,15 +95565,32 @@ function _lxFitDialog() {
     const freeDevice = budget - rect.height;       // what is left once the furniture is placed
     // 96px floor: on a very short window the prose becomes a small scrolling window rather than
     // vanishing, which is still readable. Better a tight box than no box.
-    txt.style.maxHeight = Math.round(Math.max(96, freeDevice / (scale || 1))) + 'px';
+    let cap = Math.round(Math.max(96, freeDevice / (scale || 1)));
+    // v0.30.488 — LOCK A HEIGHT, not just a ceiling. A max-height alone still lets the box grow from
+    // one line to its full size as the typewriter reveals, and the card is bottom-anchored, so
+    // that growth drags the portrait, the name, the difficulty strip and the buttons upward line
+    // by line (per user: "it pushes upwards when cut"). _runDialogTypewriter now measures the
+    // finished speech before typing any of it and leaves the answer on the element, so the box
+    // can be pinned to its FINAL size from the first frame. A short line still gets a short box:
+    // this is min(what the speech needs, what there is room for), not a fixed slab.
+    const full = (txt._twFullH > 0) ? txt._twFullH : txt.scrollHeight;
+    const lock = () => {
+      txt.style.maxHeight = cap + 'px';
+      txt.style.height = Math.round(Math.max(24, Math.min(full || cap, cap))) + 'px';
+    };
+    lock();
+    // MEASURE, THEN CHECK. The estimate above is not exact — the prose is collapsed with
+    // max-height, which `min-height: 1.74em` on the same element partly wins against, and the
+    // panel's padding and borders ride outside the measured furniture. At 1280x720 the estimate
+    // alone still left the card's top edge 32px above the window. Rather than enumerate every
+    // contributor, measure what actually happened and take the difference off.
     for (let pass = 0; pass < 3; pass++) {
       const now = dlg.getBoundingClientRect();
       const over = 6 - now.top;                    // positive when the card hangs off the top
       if (over <= 0) return;
-      const cur = parseFloat(txt.style.maxHeight) || txt.offsetHeight;
-      const next = Math.max(96, cur - over / (scale || 1));
-      if (next >= cur) break;                      // at the floor; the prose has nothing left
-      txt.style.maxHeight = Math.round(next) + 'px';
+      const next = Math.max(96, cap - over / (scale || 1));
+      if (next >= cap) break;                      // at the floor; the prose has nothing left
+      cap = Math.round(next); lock();
     }
     // LAST RESORT: on a short window at a large HUD scale the FURNITURE ALONE can exceed the
     // budget — at 1280x720 the header, strip, buttons and padding came to more than the whole
@@ -97420,6 +97443,7 @@ So.. do you need a lift?`;
   const subtitle = document.getElementById('dialog-subtitle');
   if (subtitle) subtitle.textContent = _dialogSubtitleFor(npc);
   // v0.25.830 — Typewriter reveal replaces the plain textContent set.
+  dlg.style.display = 'block';   // v0.30.488 — before the typewriter: a hidden box measures zero
   _runDialogTypewriter(text);
   const optDiv = document.getElementById('dialog-options');
   optDiv.innerHTML = '';
@@ -97523,7 +97547,18 @@ function _runDialogTypewriter(text) {
   if (!el) return;
   // Cancel any in-flight reveal from a previous call
   if (dlg && dlg._twTimer) { clearInterval(dlg._twTimer); dlg._twTimer = null; }
+  // v0.30.488 — MEASURE THE FINISHED SPEECH BEFORE TYPING A CHARACTER OF IT. Per user: "it pushes
+  // upwards when cut". The card is bottom-anchored and content-sized, so a prose box that grows
+  // as the typewriter reveals drags the whole panel — portrait, name, difficulty strip, buttons
+  // — upward line by line, and the player is reading a target that keeps moving. Rendering the
+  // full string once, taking its height, and clearing it costs one layout and lets _lxFitDialog
+  // lock the box to its final size before the first character appears. The card is then
+  // motionless for the whole speech.
+  el.style.height = ''; el.style.maxHeight = '';
+  el.innerHTML = text;
+  el._twFullH = el.scrollHeight;
   el.innerHTML = '';
+
   // v0.25.852 — Honour the OS-level `prefers-reduced-motion` setting.
   // Players who've opted out of continuous animation (vestibular needs,
   // motion-sickness) get the dialog text instantly without the typewriter
@@ -97534,6 +97569,7 @@ function _runDialogTypewriter(text) {
       window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     el.innerHTML = text;
     if (dlg) dlg.classList.remove('typing');
+    try { _lxFitDialog(); } catch (e) {}
     return;
   }
   // Cleanly handle <em> / <b> by parsing into a tiny token stream so the
