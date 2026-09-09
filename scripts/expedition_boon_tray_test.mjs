@@ -74,6 +74,16 @@ try {
     };
     // 1st blessing
     let card = await openBravo();
+    // v0.30.461 — the painted backdrop and the slot label. "TO BE REPLACED" is only honest on an
+    // OCCUPIED marked slot; an empty one replaces nothing, so it reads GOES HERE there.
+    {
+      const cardEl = document.querySelector('#bravo-boon-modal > div');
+      const cs = cardEl ? getComputedStyle(cardEl) : null;
+      const html = card ? card.innerHTML : '';
+      o.art = { backdrop: !!(cs && /bravo_backdrop/.test(cs.backgroundImage)),
+                emptyLabel: /GOES HERE/.test(html),
+                replacedLabel: /TO BE REPLACED/.test(html) };
+    }
     o.card1 = { open: !!card, slots: card ? card.querySelectorAll('[data-tray-target]').length : 0,
       picks: card ? card.querySelectorAll('[data-pick]').length : 0,
       sameCard: !!(card && card.querySelector('[data-tray-target]') && card.querySelector('[data-pick]')) };
@@ -89,6 +99,10 @@ try {
     card = await openBravo();
     const slot2 = document.querySelector('#bravo-boon-modal [data-tray-target="1"]');
     o.slotTapVisible = !!slot2;
+    {
+      const h = (document.getElementById('bravo-boon-modal') || {}).innerHTML || '';
+      o.fullLabel = { replaced: /TO BE REPLACED/.test(h), goes: /GOES HERE/.test(h) };
+    }
     if (slot2) slot2.click(); await sleep(160);
     o.pickedLabel = await pick();
     const after = _lxExpBoons().map((b) => b.id);
@@ -150,6 +164,11 @@ try {
     ok(`${how.toUpperCase()}: the tray empties, its stats go, the permanent 3 survive`,
       e.inRunTray === 3 && e.trayAfter === 0 && e.modsRose && e.modsBack && e.permBack && e.cap === 3, JSON.stringify(e));
   }
+  ok('the card carries its painted backdrop', r.art.backdrop, String(r.art.backdrop));
+  ok('an EMPTY marked slot says GOES HERE, since it replaces nothing', r.art.emptyLabel && !r.art.replacedLabel,
+    `goes-here ${r.art.emptyLabel}, to-be-replaced ${r.art.replacedLabel}`);
+  ok('a FULL tray marks the targeted slot TO BE REPLACED', r.fullLabel.replaced && !r.fullLabel.goes,
+    `to-be-replaced ${r.fullLabel.replaced}, goes-here ${r.fullLabel.goes}`);
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();
