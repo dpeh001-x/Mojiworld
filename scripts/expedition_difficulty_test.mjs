@@ -270,6 +270,50 @@ ok('the friend option survives the restructure',
   M.firstOpts.some((t) => /Join a friend/.test(t)) && !M.firstOpts.some((t) => /seeded run/.test(t)),
   M.firstOpts.join(' | ').slice(0, 160));
 
+// ---- the card survives an ANSWER-IN-PLACE swap ---------------------------------
+// The guard for the v0.30.489 regression. openNPC rebuilds the whole card, so measuring only
+// after it proves very little: the failure mode is a follow-up that swaps the TEXT and nothing
+// else. Every lore topic, the Sovereign rumour and the 51 legacy `textContent = ...` call sites
+// in openNPC's role branches take that path, and for one build they all left the prose box
+// uncapped - the card grew to a top of -540 with the NPC's name at -502.
+const SWAP = await page.evaluate(async () => {
+  const box = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+  // ON the player: the walk-away auto-dismiss closes a dialog whose NPC is far away.
+  game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
+  game._expInfo = null;
+  try { closeDialog(); } catch (e) {}
+  await new Promise((r) => setTimeout(r, 1500));   // let the post-expedition warp finish landing
+  const dlgEl = document.getElementById('dialog');
+  let npc = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    npc = { x: player.x, y: player.y, name: 'Bravo', role: 'expedition', color: '#ffb0d8' };
+    openNPC(npc);
+    await new Promise((r) => setTimeout(r, 600));
+    if (dlgEl.style.display === 'block') break;
+  }
+  if (dlgEl.style.display !== 'block') return { err: 'could not keep a dialog open to measure' };
+  const before = { dialog: box('#dialog'), header: box('#dialog .dialog-header'), tabs: box('#dialog-tabs') };
+  const b = [...document.querySelectorAll('#dialog-options button')].find((x) => x.textContent.indexOf('thing at the top') >= 0);
+  if (!b) return { err: 'no rumour option' };
+  b.click();
+  await new Promise((r) => setTimeout(r, 900));
+  const t = document.getElementById('dialog-text');
+  return { before, after: { dialog: box('#dialog'), header: box('#dialog .dialog-header'), tabs: box('#dialog-tabs') },
+           capped: !!t.style.maxHeight && t.style.maxHeight !== 'none', locked: !!t.style.height,
+           openAfter: document.getElementById('dialog').style.display === 'block',
+           vh: window.innerHeight };
+});
+ok('an answer-in-place swap keeps the card on screen', !SWAP.err && SWAP.openAfter
+  && SWAP.after.dialog.bottom > 0
+  && SWAP.after.dialog.top >= 0 && SWAP.after.header.top >= 0 && SWAP.after.tabs.top >= 0
+  && SWAP.after.dialog.bottom <= SWAP.vh,
+  SWAP.err || `after the swap: dialog ${SWAP.after.dialog.top}..${SWAP.after.dialog.bottom} · header ${SWAP.after.header.top} · strip ${SWAP.after.tabs.top} · viewport ${SWAP.vh}`);
+ok('...and the prose is still both capped and locked, so the box cannot creep',
+  SWAP.capped && SWAP.locked, `max-height set: ${SWAP.capped}, height set: ${SWAP.locked}`);
+ok('...and the card does not jump when the text changes',
+  SWAP.before && Math.abs(SWAP.after.dialog.top - SWAP.before.dialog.top) <= 2,
+  SWAP.before ? `top ${SWAP.before.dialog.top} -> ${SWAP.after.dialog.top}` : '');
+
 // ---- the rumour ---------------------------------------------------------------
 const RUM = await page.evaluate(async () => {
   const npc = { x: 0, y: 0, name: 'Bravo', role: 'expedition', color: '#ffb0d8' };

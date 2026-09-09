@@ -3752,6 +3752,14 @@
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 209, 102, 0.34) transparent;
   }
+  /* v0.30.489 — the "keep reading" fade. Applied only while there is something below the fold, so
+     the bottom line of a speech that fits is never dimmed for no reason. The mask is on the
+     element's own box rather than its content, so it stays pinned to the bottom edge while the
+     text scrolls underneath it. */
+  #dialog #dialog-text.lx-more {
+    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 26px), rgba(0, 0, 0, 0.15) 100%);
+    mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 26px), rgba(0, 0, 0, 0.15) 100%);
+  }
   #dialog #dialog-text::-webkit-scrollbar { width: 7px; }
   #dialog #dialog-text::-webkit-scrollbar-track { background: transparent; }
   #dialog #dialog-text::-webkit-scrollbar-thumb {
@@ -10433,7 +10441,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.488';
+const GAME_VERSION = 'v0.30.489';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -95546,6 +95554,25 @@ function _lxVoice(npc, role) {
 // and borders ride outside the measured furniture. At 1280x720 the estimate alone still left the
 // card's top edge 32px above the window. Rather than enumerate every contributor, the passes
 // below measure what actually happened and take the difference off.
+// v0.30.489 — "there is more below", visibly. The prose box scrolls as of v0.30.484, but the only
+// sign of it was a 7px scrollbar on a busy painted panel, which is easy to miss and gone
+// entirely on a touch device until you drag. A soft fade across the last 26px of the box says
+// the paragraph continues; it clears the moment you reach the end, so it never lies.
+// The class is toggled from three places, all of which already have the numbers warm: the
+// typewriter as it reveals, the fitter after it locks the box, and a scroll listener bound once.
+function _lxProseMore() {
+  const el = document.getElementById('dialog-text');
+  if (!el) return;
+  try {
+    el.classList.toggle('lx-more', (el.scrollHeight - el.clientHeight - el.scrollTop) > 6);
+    if (!el._lxMoreBound) {
+      el.addEventListener('scroll', () => {
+        el.classList.toggle('lx-more', (el.scrollHeight - el.clientHeight - el.scrollTop) > 6);
+      }, { passive: true });
+      el._lxMoreBound = true;
+    }
+  } catch (e) {}
+}
 function _lxFitDialog() {
   const dlg = document.getElementById('dialog');
   const txt = document.getElementById('dialog-text');
@@ -95587,7 +95614,7 @@ function _lxFitDialog() {
     for (let pass = 0; pass < 3; pass++) {
       const now = dlg.getBoundingClientRect();
       const over = 6 - now.top;                    // positive when the card hangs off the top
-      if (over <= 0) return;
+      if (over <= 0) break;
       const next = Math.max(96, cap - over / (scale || 1));
       if (next >= cap) break;                      // at the floor; the prose has nothing left
       cap = Math.round(next); lock();
@@ -95606,6 +95633,7 @@ function _lxFitDialog() {
       dlg.style.paddingTop = pad + 'px';
       dlg.style.paddingBottom = Math.max(14, pad + 8) + 'px';
     }
+    _lxProseMore();
   } catch (e) { /* never let a layout measurement break a conversation */ }
 }
 try {
@@ -97587,14 +97615,21 @@ function _runDialogTypewriter(text) {
   // caret itself stays a direct child of el, so it keeps trailing the text.
   let _twCur = el;
   const _twPut = (node) => {
+    // v0.30.489 — FOLLOW THE REVEAL ONLY IF THE READER IS ALREADY AT THE BOTTOM. v0.30.484 pinned
+    // unconditionally, which meant scrolling up to re-read a line yanked you back down on the
+    // very next character — the scrollbar was there and unusable for the length of the speech.
+    // The check has to happen BEFORE the node goes in: afterwards the box is already one line
+    // taller, so "am I at the bottom" would answer no for a reader who was.
+    const _twAtBottom = (el.scrollHeight - el.clientHeight - el.scrollTop) <= 4;
     if (_twCur === el) el.insertBefore(node, caret);
     else _twCur.appendChild(node);
-    // v0.30.484 — the prose box has a max-height and scrolls now, so a long speech would type
-    // itself out of sight. Pin to the bottom as it reveals; the instant reduced-motion path
-    // leaves scrollTop at 0, which is right, because there the whole line is already there
-    // to be read from the top.
-    if (el.scrollHeight > el.clientHeight) el.scrollTop = el.scrollHeight;
+    if (_twAtBottom) el.scrollTop = el.scrollHeight;
+    // cheap: both reads are already warm from the check above
+    if (el.scrollHeight > el.clientHeight) {
+      el.classList.toggle('lx-more', (el.scrollHeight - el.clientHeight - el.scrollTop) > 6);
+    }
   };
+
   const _TW_VOID = { BR: 1, HR: 1, IMG: 1, WBR: 1 };
   if (dlg) dlg.classList.add('typing');
   const SPEED_MS = 14;  // per-character cadence — ~70 chars/sec
@@ -97686,6 +97721,15 @@ function _runDialogTypewriter(text) {
       if (!dlg._twMute && (t.text === '!' || t.text === '?')) _twReact(t.text);
     }
   };
+  // v0.30.489 — REFIT HERE, on every line, not only when openNPC builds a fresh card.
+  // v0.30.488 moved the prose measurement into this function and cleared the box's height and
+  // max-height to take it — but the only callers that put them BACK were openNPC, the confirm
+  // card and the reduced-motion path. Every answer-in-place swap (the lore topics, the Sovereign
+  // rumour, and the 51 legacy `textContent = ...` call sites across openNPC's role branches)
+  // therefore left the box uncapped. Measured on Bravo's rumour at 1340x980: the prose grew to
+  // 505px, the card's top went to -540, and the NPC's name and the difficulty strip sat at -502
+  // and -383 — further off screen than the bug v0.30.484 set out to fix.
+  _lxFitDialog();
   dlg._twTimer = setInterval(step, SPEED_MS);
   // v0.25.851 — Expose a callable skip so the v0.25.851 global keyboard
   // listener (and any future option-click-to-skip-first path) can flush
@@ -97695,6 +97739,10 @@ function _runDialogTypewriter(text) {
     dlg._twMute = true;                       // v0.29.418 — flush silently, not 200 blips at once
     while (idx < tokens.length) step();
     dlg._twMute = false;
+    // v0.30.489 — a skip asks for the whole speech at once, so put the reader at the TOP of it.
+    // Following the reveal leaves the box scrolled to the last line, which is the right place
+    // to be while it types and the wrong place to be handed a finished paragraph.
+    try { el.scrollTop = 0; _lxProseMore(); } catch (e) {}
   };
   // Click on the dialog box skips the typewriter to the end. Note: clicks
   // on option buttons stop-propagation via the buttons themselves, so this
