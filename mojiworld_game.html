@@ -10299,7 +10299,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.480';
+const GAME_VERSION = 'v0.30.481';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42330,6 +42330,7 @@ const GAME_SAVE_FIELDS = [
   // on next launch. `active: false` is the no-expedition-in-progress
   // state; the rest of the fields are dormant in that case.
   'expedition',
+  '_expeditionDifficulty',   // v0.30.481 — the Easy/Normal/Hard pick queued at Bravo. Unsaved it silently reverted to Normal on every reload, so a player who chose Hard once would quietly get a Normal run the next session.
   // v0.26.x — Boss Rush: best-run record + once-per-day reward stamp.
   'bossRushBest','_bossRushRewardDay',
   // v0.29.296 — Trainee Path ladder ({kills, quests, done:{id:ts}}). Without
@@ -58570,10 +58571,15 @@ function _startExpedition() {
     ? ((game._nextExpeditionSeed >>> 0) % _LX_SEED_SPACE)
     : Math.floor(Math.random() * _LX_SEED_SPACE);
   game._nextExpeditionSeed = null;
+  // v0.30.481 — the difficulty is FIXED at the start and stamped on the run, not read live from
+  // the menu. Reading the preference mid-run would let a player start on Easy, clear nine
+  // floors, switch to Hard at Bravo and collect the premium for a descent they never made.
+  const _diff = _lxExpDiffPick();
   // Initialise state.
   game.expedition = {
     active: true,
     floor: 1,
+    difficulty: _diff.key,
     seed: _seed,
     seedCode: _lxSeedToCode(_seed),
     _draws: 0,
@@ -58599,7 +58605,8 @@ function _startExpedition() {
     enteredAt: Date.now(),
   };
   if (typeof showToast === 'function') {
-    showToast(`⚜ EXPEDITION BEGUN — Floor 1 of ${EXPEDITION_FLOOR_COUNT}  ·  seed ${game.expedition.seedCode}. Boons collected in here vanish on exit.`, 'legendary');
+    showToast(`⚜ EXPEDITION BEGUN — ${_diff.icon} ${_diff.label}  ·  Floor 1 of ${EXPEDITION_FLOOR_COUNT}  ·  share code ${game.expedition.seedCode} to send a friend down the same tower. Boons collected in here vanish on exit.`, 'legendary');
+
   }
   if (typeof flash === 'function') flash(0.5);
   if (typeof addShake === 'function') addShake(8);
@@ -58892,6 +58899,45 @@ const LX_EXPEDITION_MOB_DEF_MUL  = 1.85;  // was 2.05 (shared with ATK) — down
 // outright. Net effect, deliberately: a tower mob pays the same EXP for half the work.
 const LX_EXPEDITION_MOB_EXP_MUL  = 1.75;
 const LX_EXPEDITION_MOB_MUL = LX_EXPEDITION_MOB_STAT_MUL;   // the ATK/"stat" dial, read by sovereign_step_test
+// v0.30.481 — EXPEDITION DIFFICULTY. Per user: "For expedition mode can select difficulty level
+// easy (Stats at 0.6x), normal (current), hard (Stats at 1.5x) and tailor the EXP gain and
+// rewards accordingly", chosen "while talking to bravo NPC".
+//
+//   stat   multiplies every expedition foe's HP, ATK and DEF — the tower mobs through
+//          _expeditionScaleMob and BOTH tower bosses through _expeditionSpawnTowerBoss.
+//   reward multiplies every payout the run makes: the per-floor EXP budget, the full-clear
+//          bonus, the EXP each foe drops, the completion mojicoins and the setshard bundle.
+//
+// Normal is 1.00 in both columns by construction, so it is not a re-tuning of the mode — a
+// Normal run is the same fight and the same payout it was before this shipped.
+//
+// THE REWARD NUMBERS ARE DELIBERATELY NOT THE STAT NUMBERS, and the asymmetry is the design:
+// difficulty does not move linearly with enemy stats in either direction, because a run can be
+// LOST and a lost run forfeits every floor it did not reach plus the clear bonus. Easy removes
+// most of that risk on top of the 0.6x, so paying it 0.60 would make it the best EXP-per-hour
+// in the game and Normal a mistake; 0.50 keeps Normal the better rate for anyone who can clear
+// it. Hard adds the risk back with interest, so 1.50 would underpay the deaths it causes —
+// 1.75 is the premium for actually finishing one.
+const LX_EXPEDITION_DIFFICULTY = {
+  easy:   { key: 'easy',   label: 'Easy',   icon: '○', stat: 0.60, reward: 0.50, blurb: 'foes at 60% — a descent to learn the floors on' },
+  normal: { key: 'normal', label: 'Normal', icon: '◈', stat: 1.00, reward: 1.00, blurb: 'the tower exactly as it was built' },
+  hard:   { key: 'hard',   label: 'Hard',   icon: '⚔', stat: 1.50, reward: 1.75, blurb: 'foes at 150% — the only descent that pays a premium' },
+};
+const LX_EXPEDITION_DIFFICULTY_ORDER = ['easy', 'normal', 'hard'];
+// What the RUN is being played at. Every gameplay and payout site reads through here, never
+// off game.expedition.difficulty directly: a run started on a build without this feature has
+// no difficulty stamped and has to keep playing exactly as it did, so the fallback is Normal —
+// which is 1.00 in both columns and therefore a true no-op.
+function _lxExpDiff() {
+  const k = (typeof game !== 'undefined' && game.expedition && game.expedition.difficulty) || 'normal';
+  return LX_EXPEDITION_DIFFICULTY[k] || LX_EXPEDITION_DIFFICULTY.normal;
+}
+// What Bravo has QUEUED for the next run. Separate from the above on purpose — see the note at
+// _startExpedition, where the pick is frozen onto the run.
+function _lxExpDiffPick() {
+  const k = (typeof game !== 'undefined' && game._expeditionDifficulty) || 'normal';
+  return LX_EXPEDITION_DIFFICULTY[k] || LX_EXPEDITION_DIFFICULTY.normal;
+}
 function _expeditionScaleMob(m, playerLevel) {
   if (!game.expedition || !game.expedition.active) return m;
   // v0.26.418 — MAP-GATE. The active flag alone was leaking: if any expedition
@@ -58943,7 +58989,10 @@ function _expeditionScaleMob(m, playerLevel) {
   // Lv 80. A stable, predictable baseline beats an unstable inference.
   // v0.30.457 — per user: "Increase the expedition monsters stats and HP more, but give EXP that is
   // commensurate to those stats". One constant drives both, so the ratio can never drift apart.
-  _lxStatToLevel(m, _toLv, { hp: LX_EXPEDITION_MOB_HP_MUL, stat: LX_EXPEDITION_MOB_STAT_MUL, def: LX_EXPEDITION_MOB_DEF_MUL, exp: LX_EXPEDITION_MOB_EXP_MUL });   // v0.30.471
+  // v0.30.481 — the chosen difficulty rides on top of the tower's own dials. Normal is 1.00 in
+  // both columns, so an expedition run on Normal is byte-for-byte the fight it was before.
+  const _d = _lxExpDiff();
+  _lxStatToLevel(m, _toLv, { hp: LX_EXPEDITION_MOB_HP_MUL * _d.stat, stat: LX_EXPEDITION_MOB_STAT_MUL * _d.stat, def: LX_EXPEDITION_MOB_DEF_MUL * _d.stat, exp: LX_EXPEDITION_MOB_EXP_MUL * _d.reward });   // v0.30.471; v0.30.481 difficulty
   return m;
 }
 // v0.26.264 — Floor-clear detector. Called after every monster kill
@@ -59049,7 +59098,7 @@ function _lxGrantExpeditionFloorExp(floor) {
   // unchanged but B1 pays 1.8% of it instead of 10%. Clearing B1, leaving and re-entering paid a tenth of
   // the budget per lap for the easiest room and no risk - better EXP a minute than a full descent.
   const _wsum = EXPEDITION_FLOOR_COUNT * (EXPEDITION_FLOOR_COUNT + 1) / 2;
-  const gain = Math.floor(_lxLevelCost(lv) * _lxExpeditionRunTarget(lv) * f / _wsum);
+  const gain = Math.floor(_lxLevelCost(lv) * _lxExpeditionRunTarget(lv) * f / _wsum * _lxExpDiff().reward);   // v0.30.481 — difficulty
   if (!(gain > 0)) return 0;
   player.exp += gain;
   if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
@@ -59314,14 +59363,15 @@ function _expeditionSeedPrompt() {
     card.style.cssText = 'background:linear-gradient(180deg,#1d1430,#1a0e2a); border:2px solid #aa66ff; border-radius:14px; padding:24px 26px; min-width:440px; max-width:520px; color:#e8d8ff; box-shadow:0 22px 60px rgba(0,0,0,0.65), 0 0 40px rgba(170,100,255,0.25);';
     const _last = game._lastExpeditionSeedCode || '';
     card.innerHTML = `
-      <h2 style="margin:0 0 8px; text-align:center; font-size:22px; color:#e0c8ff;">🎲 Seeded Expedition</h2>
-      <div style="text-align:center; color:#bbb; font-size:12px; line-height:1.5; margin-bottom:16px;">
-        A seed fixes the descent&rsquo;s riddles and the Echo waiting on Floor&nbsp;10.<br>
-        Share the code and someone else can run the same tower.
+      <h2 style="margin:0 0 8px; text-align:center; font-size:22px; color:#e0c8ff;">🤝 Join a Friend&rsquo;s Descent</h2>
+      <div style="text-align:center; color:#bbb; font-size:12px; line-height:1.55; margin-bottom:16px;">
+        Paste a friend&rsquo;s code and the tower builds you <b>their</b> descent &mdash;<br>
+        the same floors, the same riddles, the same Echo waiting on Floor&nbsp;10.<br>
+        <span style="color:#8f83ad; font-size:11px;">You each run it on your own, at your own difficulty. Compare, or race.</span>
       </div>
       <input id="exp-seed-input" maxlength="24" placeholder="K7M2QF  ·  or any word" value="${_last.replace(/"/g, '')}"
         style="display:block; width:100%; box-sizing:border-box; padding:11px 13px; font-size:16px; font-family:'Inter',sans-serif; letter-spacing:3px; text-align:center; text-transform:uppercase; background:#120a20; border:1px solid #6a4a9a; border-radius:8px; color:#ffe89a; outline:none;">
-      <div style="text-align:center; color:#7a6f95; font-size:10.5px; margin-top:7px;">Leave blank for a random seed.</div>
+      <div style="text-align:center; color:#7a6f95; font-size:10.5px; margin-top:7px;">Leave blank for a fresh descent of your own &mdash; you will get a code to share.</div>
       <div style="display:flex; gap:10px; margin-top:18px;">
         <button id="exp-seed-go" style="flex:2; padding:10px 0; background:linear-gradient(180deg,#5a3a8a,#3a1a5e); color:#fff; border:1px solid #aa66cc; border-radius:6px; font-weight:700; cursor:pointer;">Descend</button>
         <button id="exp-seed-cancel" style="flex:1; padding:10px 0; background:#241a38; color:#b0a0c8; border:1px solid #4a3a6a; border-radius:6px; font-weight:600; cursor:pointer;">Cancel</button>
@@ -59609,7 +59659,7 @@ function _completeExpedition() {
     // finishing paid barely more than quitting one floor short. This is the difference.
     if (typeof _lxLevelCost === 'function' && typeof _lxExpeditionRunTarget === 'function') {
       const _clv = Math.max(1, Math.floor(player.level || 1));
-      const _bonus = Math.floor(_lxLevelCost(_clv) * _lxExpeditionRunTarget(_clv) * LX_EXP_CLEAR_BONUS);
+      const _bonus = Math.floor(_lxLevelCost(_clv) * _lxExpeditionRunTarget(_clv) * LX_EXP_CLEAR_BONUS * _lxExpDiff().reward);   // v0.30.481 — difficulty
       if (_bonus > 0) {
         player.exp += _bonus;
         if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
@@ -59630,11 +59680,19 @@ function _completeExpedition() {
   // chance 10-20) removed entirely — Bravo's max-roll boons + the 50%
   // 5-15 setshard line are enough to make completion feel earned
   // without making the tower a print-money loop.
-  const _coinReward = _lxExpeditionCoinReward(player.level || 1);   // v0.30.381 — capped
+  // v0.30.481 — read the difficulty HERE, while the run is still active. Everything below runs
+  // before _endExpedition, but the coin grant at the bottom deliberately does not, and by then
+  // game.expedition has been reset to a normal-difficulty blank.
+  const _dR = _lxExpDiff();
+  // The multiplier is applied AFTER the cap on purpose: LX_EXPEDITION_COIN_CAP is the ceiling
+  // for a NORMAL run, so Hard's ceiling is 1.75x of it (10,500) and Easy's is 3,000. A cap
+  // applied last would have paid Hard and Normal identically at high level, which is the one
+  // place the premium is supposed to show.
+  const _coinReward = Math.max(0, Math.floor(_lxExpeditionCoinReward(player.level || 1) * _dR.reward));   // v0.30.381 — capped; v0.30.481 — difficulty
   const _extras = [];
-  // 50 % chance: 5-15 setshards (unchanged).
+  // 50 % chance: 5-15 setshards (unchanged), scaled by difficulty like every other payout.
   if (Math.random() < 0.50) {
-    const _shards = 5 + Math.floor(Math.random() * 11);
+    const _shards = Math.max(1, Math.round((5 + Math.floor(Math.random() * 11)) * _dR.reward));
     // v0.27.24 — was `| 0` (ToInt32): a balance above 2.147B wraps negative
     // and the load-time guard then clamps it to 0 (permanent shard wipe).
     // Matches the `|| 0` fix already applied to every mojicoin grant site.
@@ -60001,11 +60059,15 @@ function _expeditionSpawnTowerBoss(slot) {
       const _bb = _lxFieldBaseline(_bossLv), _nb = _lxFieldBaseline(_bossNat);
       const _r = (_nb && _nb.hp > 0) ? (_bb.hp / _nb.hp) : 1;
       const _bossMul = (slot === 'mid') ? EXPEDITION_BOSS_MUL.mid : EXPEDITION_BOSS_MUL.final;
-      m.maxHp = Math.max(1, Math.floor((m.maxHp || 1) * _r * _bossMul));
+      // v0.30.481 — the Arbiter and the Sovereign answer to the run's difficulty like everything
+      // else in the tower. Leaving the bosses out would have made Hard a harder walk to the
+      // same two fights, which is the opposite of what a difficulty is for.
+      const _dB = _lxExpDiff();
+      m.maxHp = Math.max(1, Math.floor((m.maxHp || 1) * _r * _bossMul * _dB.stat));
       m.currentHp = m.maxHp;
-      m.atk = Math.max(1, Math.floor((m.atk || 1) * _r * _bossMul));
-      m.def = Math.max(0, Math.floor((m.def || 0) * _r));
-      m.exp = Math.max(1, Math.floor((m.exp || 0) * _r));
+      m.atk = Math.max(1, Math.floor((m.atk || 1) * _r * _bossMul * _dB.stat));
+      m.def = Math.max(0, Math.floor((m.def || 0) * _r * _dB.stat));
+      m.exp = Math.max(1, Math.floor((m.exp || 0) * _r * _dB.reward));
       m.level = _bossLv;
 
       // v0.26.310 — Per user "hard to defeat with mechanics similar to
@@ -96244,7 +96306,12 @@ So.. do you need a lift?`;
     // the conclusion, which is the most credible way to spread a rumour.
     const _sovRumour = () => { const d = document.getElementById('dialog-text'); if (d) d.textContent = 'You have been talking to Innie.\n\n*She does not laugh.* I have stood in that room. I am not going to tell you it looks like him, because I have thought about it too much and I no longer trust what I remember.\n\nI will tell you the thing I did not imagine. It does not attack while you are still deciding. Every other thing in that tower comes the moment you are in reach. That one waits — and it looks at your hands, not your blade.\n\nThe old man in the plaza does that. I have never seen anything else do it.\n\nAsk me again when you have been to the top.'; };
     if (_inExp) {
-      text = `*Bravo tilts her head, half-amused.*\n\nLost on your own descent already? You're on Floor ${game.expedition.floor} of ${EXPEDITION_FLOOR_COUNT}. Finish what you started, or step off the path — but quit here and the run's gifts come undone with the boundary.`;
+      // v0.30.481 — the run's difficulty is named here because it is fixed at the start and cannot
+      // be changed mid-descent; a player who forgets which one they picked has no other way to
+      // check it, and it is the number that explains why the floor is going the way it is.
+      const _dNow = _lxExpDiff();
+      text = `*Bravo tilts her head, half-amused.*\n\nLost on your own descent already? You're on Floor ${game.expedition.floor} of ${EXPEDITION_FLOOR_COUNT}, running ${_dNow.icon} <b>${_dNow.label}</b> — foes at ${Math.round(_dNow.stat * 100)}%, rewards at ${Math.round(_dNow.reward * 100)}%. Finish what you started, or step off the path — but quit here and the run's gifts come undone with the boundary.\n\nShare code <b>${game.expedition.seedCode}</b> if you want a friend walking the same floors.`;
+
       opts.push({ t:'Abandon this expedition', cb:() => { closeDialog(); if (typeof _endExpedition === 'function') _endExpedition('abandon'); } });
       opts.push({ t:'About the thing at the top\u2026', cb: _sovRumour });   // v0.30.471
       // v0.26.316 — Per user "For the expedition when clicking on
@@ -96266,14 +96333,41 @@ So.. do you need a lift?`;
       text = `*A young woman in violet-and-gold pilgrim's wrap meets your eye. Her smile is gentle but her hands are scarred.*\n\nI'm Bravo. I guide descents through the Tower of Expedition — ten floors of memories the world keeps forgetting. You'll need a little more weight on your shoulders before I'll take you down, though.\n\nReturn at <b>Level ${EXPEDITION_LEVEL_GATE}</b>. You are currently ${_lv}.`;
       opts.push({ t:'Understood', cb: closeDialog });
     } else {
-      text = `*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready. Here's the truth no one tells you about the Everdawn: you don't climb toward a sunrise. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and you carry the dream back UP out of it. That's what the tower is. A grief you walk down on purpose, so you remember how to climb.\n\nI'll meet you at each threshold with three blessings to choose from. Hades does the same, apparently. I learned from the best.\n\n<b>The Rules</b>\n• 10 floors (B1 → B10). Each is its own crucible.\n• Mobs scale to <b>your</b> level — no coasting.\n• Clear the floor's quest → I appear → pick <b>one of three boons</b>.\n• B5 is a mid-tower trial. B10 is the Apex. They are not gentle.\n• Boons, items and coins gained inside <b>vanish on exit</b>; EXP and levels are yours to keep. Roguelite rules.\n• Death = run ends. The world above stays untouched.`;
-      opts.push({ t:`⚜ Begin Expedition (Lv ${_lv})`, cb:() => {
+      // v0.30.481 — DIFFICULTY, chosen here (per user: "this can be done while taking to bravo NPC").
+      // It lives in a submenu rather than as three Begin buttons so the main menu keeps its
+      // length and each option can show its own numbers when it is actually being compared.
+      // Re-render pattern is the Brokkr shop's (game._brokMenu + openNPC(npc)); game._expMenu is
+      // cleared on every exit so a stale submenu can never be what greets the next conversation.
+      const _dSel = _lxExpDiffPick();
+      if (game._expMenu === 'diff') {
+        text = `*Bravo studies you for a moment longer than is comfortable.*\n\nHow hard do you want the tower to push back?\n\nI can hold some of it off you, or I can stand aside entirely — but understand the trade. The tower pays for what it takes. Ask me to soften it and it will pay you less; face it at full weight and it pays you more than the difference.\n\n<b>Fixed at the threshold.</b> Once you step through I cannot change it, and you will not be able to talk me into it on Floor 9.`;
+        for (const _k of LX_EXPEDITION_DIFFICULTY_ORDER) {
+          const _d = LX_EXPEDITION_DIFFICULTY[_k];
+          const _mark = (_d.key === _dSel.key) ? '✓ ' : '  ';
+          opts.push({ t:`${_mark}${_d.icon} ${_d.label} — foes ×${_d.stat.toFixed(2)} · rewards ×${_d.reward.toFixed(2)}`, cb:() => {
+            game._expeditionDifficulty = _d.key;
+            game._expMenu = null;
+            if (typeof saveState === 'function') saveState();
+            openNPC(npc);
+          } });
+        }
+        opts.push({ t:'◀ Back', cb:() => { game._expMenu = null; openNPC(npc); } });
+      } else {
+      text = `*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready. Here's the truth no one tells you about the Everdawn: you don't climb toward a sunrise. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and you carry the dream back UP out of it. That's what the tower is. A grief you walk down on purpose, so you remember how to climb.\n\nI'll meet you at each threshold with three blessings to choose from. Hades does the same, apparently. I learned from the best.\n\n<b>The Rules</b>\n• 10 floors (B1 → B10). Each is its own crucible.\n• Mobs scale to <b>your</b> level — no coasting.\n• Clear the floor's quest → I appear → pick <b>one of three boons</b>.\n• B5 is a mid-tower trial. B10 is the Apex. They are not gentle.\n• Boons, items and coins gained inside <b>vanish on exit</b>; EXP and levels are yours to keep. Roguelite rules.\n• Death = run ends. The world above stays untouched.\n• Difficulty: ${_dSel.icon} <b>${_dSel.label}</b> — foes ×${_dSel.stat.toFixed(2)}, EXP and rewards ×${_dSel.reward.toFixed(2)}. ${_dSel.blurb}.`;
+      opts.push({ t:`⚜ Begin Expedition — ${_dSel.icon} ${_dSel.label} (Lv ${_lv})`, cb:() => {
+        game._expMenu = null;
         closeDialog();
         if (typeof _startExpedition === 'function') _startExpedition();
       } });
-      // v0.29.286 — seeded run. Entering a code replays that descent's
-      // riddles and final Echo, so a run can be shared or re-attempted.
-      opts.push({ t:'🎲 Begin a seeded run…', cb: async () => {
+      opts.push({ t:`${_dSel.icon} Difficulty: ${_dSel.label} — change…`, cb:() => { game._expMenu = 'diff'; openNPC(npc); } });
+      // v0.29.286 — seeded run. Entering a code replays that descent's riddles and final Echo,
+      // so a run can be shared or re-attempted.
+      // v0.30.481 — reworded to what players actually use it for (per user: "change the wording to
+      // join seeded to join with a friend"). The mechanism is unchanged and so is the honest
+      // description of it: the same code gives you the same tower, played separately. It is a
+      // shared descent, not a shared session, and the modal says so rather than implying co-op.
+      opts.push({ t:'🤝 Join a friend\'s descent…', cb: async () => {
+        game._expMenu = null;
         closeDialog();
         const _code = await _expeditionSeedPrompt();
         if (_code === null) return;   // cancelled — don't start a run
@@ -96281,7 +96375,8 @@ So.. do you need a lift?`;
         if (typeof _startExpedition === 'function') _startExpedition();
       } });
       opts.push({ t:'About the thing at the top…', cb: _sovRumour });   // v0.30.471
-      opts.push({ t:'Maybe later', cb: closeDialog });
+      opts.push({ t:'Maybe later', cb:() => { game._expMenu = null; closeDialog(); } });
+      }
     }
   } else if (npc.role === 'echoKeeper') {
     // v0.26.262 — Echo Keeper. Re-summons the arena's boss scaled to
