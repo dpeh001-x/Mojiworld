@@ -105,6 +105,24 @@ try {
                      modsBack: modsOf() === modsTown, permBack: permSnap() === permBefore, cap: _boonCap() };
     }
     o.exits = exits;
+    // --- the bag's Equip buttons follow the LIVE permanent cap. This is the surviving half of the
+    //     retired expedition_boon_slots_test: the v0.30.456 fix was never really about the
+    //     expedition, it was that this gate read the raw BOON_EQUIP_CAP and so a Collector's-Slot
+    //     player could never fill their 4th slot from the bag. Proven here with a real slot bonus.
+    game.expedition = { active: false, floor: 0 };
+    player.boons = []; player.boonsEquipped = [];
+    for (let i = 0; i < 6; i++) { const b = rollBoonInstance(ids[i]); if (b) player.boons.push(b); }
+    equipBoon(0); equipBoon(1); equipBoon(2);
+    game.boonDex = game.boonDex || {}; game.boonDex.slotBonus = 1;      // the Collector's Slot
+    try { openLevelUpPanel(); await sleep(350); renderBoonPanel(); await sleep(250); } catch (e) {}
+    const bagHost = document.getElementById('lp-boons');
+    const bagBtns = bagHost ? Array.from(bagHost.querySelectorAll('[data-equip]')) : [];
+    const usable4 = bagBtns.filter((b) => !b.disabled);
+    const eqB4 = player.boonsEquipped.length;
+    if (usable4[0]) usable4[0].click();
+    await sleep(250);
+    o.collector = { cap: _boonCap(), enabled: usable4.length, before: eqB4, after: player.boonsEquipped.length };
+    game.boonDex.slotBonus = 0;
     // --- synergies see the tray
     game.expedition = { active: false, floor: 0 };
     player.boons = JSON.parse(permBefore).bag; player.boonsEquipped = JSON.parse(permBefore).eq; _applyEquippedBoons();
@@ -133,6 +151,8 @@ try {
     ok(`${how.toUpperCase()}: the tray empties, its stats go, and the permanent 3 are intact`,
       e.inRunTray === 3 && e.trayAfter === 0 && e.modsRose && e.modsBack && e.permBack && e.cap === 3, JSON.stringify(e));
   }
+  ok('the bag\'s Equip buttons follow the live permanent cap — a Collector\'s Slot 4th is fillable', r.collector.cap === 4 && r.collector.enabled > 0 && r.collector.after === r.collector.before + 1,
+    `cap ${r.collector.cap}, ${r.collector.enabled} enabled, ${r.collector.before} -> ${r.collector.after}`);
   ok('synergies count a tray boon (it completes a pair with a permanent one)', r.syn.before === false && r.syn.after === true, JSON.stringify(r.syn));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
