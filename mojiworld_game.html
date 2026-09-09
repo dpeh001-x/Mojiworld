@@ -10562,7 +10562,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.501';
+const GAME_VERSION = 'v0.30.502';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57104,12 +57104,38 @@ function _gugumaAscendChip(show, expanded) {
   el.querySelector('#guguma-ascend-go').onclick = () => { game._heirloomIdx = +(el.querySelector('#guguma-heirloom').value); game._prestigeOffered = false; offerPrestige(true); };
 }
 function _gugumaAscendPrompt(quiet) {
-  if (!player || (player.level || 0) < PRESTIGE_LEVEL) { _gugumaAscendChip(false); return; }
+  if (!player || window._prologueActive || (player.level || 0) < PRESTIGE_LEVEL) { _gugumaAscendChip(false); return; }
   if (game.prestige && (game.prestige.count || 0) >= 20) { _gugumaAscendChip(false); return; }
   game._prestigeOffered = true;   // the legacy per-level-up offer stays quiet; Guguma owns it now
   _gugumaAscendChip(true, !quiet);
 }
-try { setInterval(() => { try { if (typeof player !== 'undefined' && player && player.cls && (player.level || 0) >= PRESTIGE_LEVEL && !document.getElementById('guguma-ascend') && !(game.prestige && (game.prestige.count || 0) >= 20)) _gugumaAscendPrompt(true); } catch (e) {} }, 4000); } catch (e) {}
+// v0.30.x — THE PROLOGUE IS PLAYED AT LEVEL 100 AND THIS CHIP OUTLIVED IT.
+// Per user, on a brand-new character: "This is showing when i just created my
+// character: not supposed to have it". The intro is a flash-forward in the apex
+// form (player.level = 100), so the slow guard below saw the cap and raised the
+// ascension chip DURING the prologue. On exit the player is hard-clamped back to
+// Lv.1 — but nothing took the chip down, because the guard could only ever ADD
+// one: the removal path lives in _gugumaAscendPrompt, which is not called at all
+// once the level is under the cap. So a fresh character was met by Guguma
+// offering to carry them back from "the top of the ropes".
+// The guard is a RECONCILER now — it removes the chip when the offer no longer
+// applies — and the prologue's borrowed level never counts as the real cap.
+function _gugumaAscendEligible() {
+  if (typeof player === 'undefined' || !player || !player.cls) return false;
+  if (window._prologueActive) return false;   // the intro's Lv.100 form is a memory, not a cap
+  if ((player.level || 0) < PRESTIGE_LEVEL) return false;
+  if (game.prestige && (game.prestige.count || 0) >= 20) return false;
+  return true;
+}
+try {
+  setInterval(() => {
+    try {
+      const ok = _gugumaAscendEligible(), shown = !!document.getElementById('guguma-ascend');
+      if (ok && !shown) _gugumaAscendPrompt(true);
+      else if (!ok && shown) _gugumaAscendChip(false);
+    } catch (e) {}
+  }, 4000);
+} catch (e) {}
 function offerPrestige(fromGuguma) {
   if (player.level < PRESTIGE_LEVEL || game._prestigeOffered) return;
   // v0.30.422 - HEIRLOOM: the boon Guguma keeps warm (an EQUIPPED boon chosen in her chip)
@@ -143196,6 +143222,9 @@ function _prologueFinish(skipped) {
       if (typeof getMaxMp === 'function') player.mp = getMaxMp();
     } catch (e) {}
   }
+  // The apex chip must not outlive the apex. The reconciler above would clear it
+  // within four seconds anyway; this closes the window where it is still on screen.
+  if (typeof _gugumaAscendChip === 'function') { try { _gugumaAscendChip(false); } catch (e) {} }
   window._prologueSnapP = window._prologueSnapG = null;
   try { sessionStorage.removeItem('lx_prologue_snap_p'); sessionStorage.removeItem('lx_prologue_snap_g'); } catch (e) {}
   window._prologuePhase = null;   // never leak scripted phases into the real game
