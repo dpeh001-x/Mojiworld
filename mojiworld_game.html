@@ -10299,7 +10299,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.474';
+const GAME_VERSION = 'v0.30.475';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41107,6 +41107,9 @@ function addShake(amount) {
 // block / aegis / warrior / holyShield so it works alongside the existing
 // DR pipeline rather than replacing it. Applied at the main damage entry
 // points (contact, projectile, hazard) so all incoming damage benefits.
+// v0.30.475 — the flat band every zodiac projectile lands in, before defensive ABILITIES and before
+// Capricorn's own floor. Rolled per hit so a volley is not twelve identical numbers.
+const LX_ZODIAC_PROJ_MIN = 3000, LX_ZODIAC_PROJ_MAX = 5000;
 function _defAbsorbMul(pierceMul) {
   const d = (typeof getDef === 'function') ? getDef() : 0;
   if (d <= 0) return 1;
@@ -92822,10 +92825,37 @@ function updateProjectiles(dt) {
         // (gap is already priced into p.damage at spawn) without capping
         // against the player's own bar — HP investment keeps full value.
         if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor((p.damage || dmg) * 1.35));
+        // v0.30.475 — ZODIAC PROJECTILES HIT FLAT (per user: "all zodiac bosses projectiles should
+        // deal more damage, approximately 3000 - 5000 damage flat regardless of player's defence").
+        //
+        // Placed AFTER every band clamp above and not before them, on purpose. Those clamps —
+        // _gravBandClamp for the empowered zodiac shot, the generic boss band, and the normal-mob
+        // guard at 1.35x the spawn-time damage — were all written around the OLD, much smaller
+        // numbers and are expressed as fractions of a reference or of p.damage. Setting the flat
+        // value earlier would have let them crush it straight back down; setting it here makes it
+        // authoritative. It also lands after the _diffDmg pass that produced _projLost, which
+        // multiplies by up to 6x at high level and would otherwise carry 5000 well past 5000.
+        //
+        // "Regardless of defence" is read as the DEF STAT, which is bypassed completely here — the
+        // _defAbsorbMul curve never touches this number. Defensive ABILITIES are deliberately kept:
+        // a block, a warrior's damage reduction and an Aegis are things the player spends and times,
+        // and making them worthless against twelve bosses would be a different change than the one
+        // asked for. They are applied explicitly below so the order is visible rather than inherited.
+        if (p._zodiacSign && !player._god && _projLost > 0) {
+          let _zf = LX_ZODIAC_PROJ_MIN + Math.random() * (LX_ZODIAC_PROJ_MAX - LX_ZODIAC_PROJ_MIN);
+          if (player.blockTimer > 0) _zf *= 0.3;
+          if (player.cls === 'warrior' && typeof _warriorDr === 'function') _zf *= _warriorDr();
+          if (player._aegis) _zf *= 0.5;
+          _projLost = Math.max(1, Math.floor(_zf));
+        }
         // v0.30.297 — PER-SIGN PROJECTILE RULES (per user). Applied AFTER the
         // band clamps above, so block / warrior DR / aegis still mitigate
         // first; this raises the floor rather than bypassing defence. Keyed
         // on the sign stamped at every zodiac projectile spawn.
+        // v0.30.475 — Capricorn's floor still runs, and still only ever RAISES the number. It was an
+        // explicit per-sign request, and above ~15,600 max HP 32% is more than the 5,000 ceiling, so
+        // he keeps hitting harder than his eleven siblings rather than being quietly nerfed by a
+        // change whose stated direction was "deal more damage".
         if (p._zodiacSign === 'capricorn' && !player._god && _projLost > 0) {
           // "capricor projectiles deal at least 32% of players max HP"
           const _capMax = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
