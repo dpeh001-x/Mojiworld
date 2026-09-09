@@ -35,6 +35,16 @@ try {
     const S = monsterTypes.towerSovereign;
     o.sov = { exp: S.exp, jump: S.jump, hp: S.hp, atk: S.atk, def: S.def };
     o.mobMul = (typeof LX_EXPEDITION_MOB_MUL !== 'undefined') ? LX_EXPEDITION_MOB_MUL : null;
+    // v0.30.471 — read the dials themselves. The old form asserted the literal 1.75 for both HP
+    // and ATK and went red the moment v0.30.467 moved ATK to 2.05; a ratio checked against its
+    // own constant states the invariant (the scaler applies what it is given) without pinning a
+    // tuning value that is meant to move.
+    o.muls = {
+      hp:  (typeof LX_EXPEDITION_MOB_HP_MUL  !== 'undefined') ? LX_EXPEDITION_MOB_HP_MUL  : null,
+      atk: (typeof LX_EXPEDITION_MOB_STAT_MUL !== 'undefined') ? LX_EXPEDITION_MOB_STAT_MUL : null,
+      def: (typeof LX_EXPEDITION_MOB_DEF_MUL !== 'undefined') ? LX_EXPEDITION_MOB_DEF_MUL : null,
+      exp: (typeof LX_EXPEDITION_MOB_EXP_MUL !== 'undefined') ? LX_EXPEDITION_MOB_EXP_MUL : null,
+    };
     // ---- the expedition mob curve, measured through the real scaler against the real field baseline
     loadMap('tower_b3', 300); await sleep(800);
     game.expedition = { active: true, floor: 3, snapshot: null };
@@ -43,8 +53,9 @@ try {
     const base = _lxFieldBaseline(lv);
     const probe = { level: 20, isBoss: false };
     _expeditionScaleMob(probe, player.level);
-    o.mob = { lv, fieldHp: base.hp, fieldExp: base.exp, towerHp: probe.maxHp, towerExp: probe.exp, towerAtk: probe.atk,
-      hpRatio: +(probe.maxHp / base.hp).toFixed(3), expRatio: +(probe.exp / base.exp).toFixed(3), atkRatio: +(probe.atk / base.atk).toFixed(3) };
+    o.mob = { lv, fieldHp: base.hp, fieldExp: base.exp, towerHp: probe.maxHp, towerExp: probe.exp, towerAtk: probe.atk, towerDef: probe.def,
+      hpRatio: +(probe.maxHp / base.hp).toFixed(3), expRatio: +(probe.exp / base.exp).toFixed(3), atkRatio: +(probe.atk / base.atk).toFixed(3),
+      defRatio: +(probe.def / (base.atk * 0.35)).toFixed(3) };
     // ---- WATCH a live Sovereign move
     loadMap('tower_b10', 300); await sleep(1000);
     game.expedition = { active: true, floor: 10, snapshot: null };
@@ -105,10 +116,13 @@ try {
   ok('it DOES teleport horizontally, repeatedly, and never further than one 420px stride', r.watch.stepCount >= 3 && r.watch.biggestStep > 200 && r.watch.biggestStep <= 425,
     `${r.watch.stepCount} steps over ${r.watch.gameFrames} game frames, biggest observed ${r.watch.biggestStep}px vs walk ${r.watch.walkMaxPerFrame}px/frame`);
   ok('the teleport is HORIZONTAL — y does not move across the step', r.watch.dyAcrossStep === 0, `dy ${r.watch.dyAcrossStep}px`);
-  ok('expedition mobs are 1.75x a field monster of the same level in HP and ATK', Math.abs(r.mob.hpRatio - 1.75) < 0.02 && Math.abs(r.mob.atkRatio - 1.75) < 0.02,
-    `HP x${r.mob.hpRatio}, ATK x${r.mob.atkRatio} (Lv ${r.mob.lv}: ${r.mob.fieldHp} -> ${r.mob.towerHp})`);
-  ok('...and their EXP is commensurate — the SAME multiplier, not a token bump', Math.abs(r.mob.expRatio - r.mob.hpRatio) < 0.02,
-    `EXP x${r.mob.expRatio} vs stats x${r.mob.hpRatio} (${r.mob.fieldExp} -> ${r.mob.towerExp})`);
+  ok('the scaler applies each expedition dial it is handed — HP, ATK and DEF against a field monster of the same level',
+    Math.abs(r.mob.hpRatio - r.muls.hp) < 0.02 && Math.abs(r.mob.atkRatio - r.muls.atk) < 0.02 && Math.abs(r.mob.defRatio - r.muls.def) < 0.02,
+    `HP x${r.mob.hpRatio}/${r.muls.hp}, ATK x${r.mob.atkRatio}/${r.muls.atk}, DEF x${r.mob.defRatio}/${r.muls.def} (Lv ${r.mob.lv}: ${r.mob.fieldHp} -> ${r.mob.towerHp})`);
+  ok('a tower mob hits harder than it is tough — the trade v0.30.471 made', r.mob.atkRatio > r.mob.hpRatio,
+    `ATK x${r.mob.atkRatio} vs HP x${r.mob.hpRatio}`);
+  ok('EXP is paid on its own dial, not swept along by the HP one', Math.abs(r.mob.expRatio - r.muls.exp) < 0.02,
+    `EXP x${r.mob.expRatio}/${r.muls.exp} (${r.mob.fieldExp} -> ${r.mob.towerExp})`);
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();
