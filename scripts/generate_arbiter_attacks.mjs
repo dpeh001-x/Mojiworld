@@ -44,6 +44,8 @@ const COMMON = ' The character stays the same armoured knight in ornate polished
   // measures it so a clipped set is never silently accepted.
   + 'The ENTIRE figure stays inside the frame at all times: the top of the head, both feet, the full cloak and every effect are fully visible with a wide empty margin on all four sides. '
   + 'Nothing is ever cropped or cut by the frame edge. Do not zoom in, do not scale the character up, keep the framing wide. '
+  + 'The SWORD and its POINTED TIP are fully inside the frame in every single frame, with clear empty space beyond the tip. '
+  + 'The blade is always drawn complete, from crossguard to sharp point. NEVER let the blade run past the frame edge and NEVER end the blade in a flat straight cut. '
   + 'Seamless loop, no camera movement, no zooming, no drifting, no text, transparent background.';
 
 // One motion per attack. Each is written as a BODY ACTION rather than as an
@@ -113,6 +115,37 @@ async function bbox(buf) {
   return (x1 < 0) ? null : { x0, y0, x1, y1, W, H };
 }
 
+// v0.30.x — THE KNIGHT, NOT THE UNION. The bake below used to fit the union box of all
+// nine frames into the source content box. That is right for a staff, and wrong for a
+// broadsword: the union is dominated by wherever the blade reaches, so a set whose cleave
+// swings wide renders a SMALLER knight than a set that holds the sword close — measured
+// across two rolls of the same prompt, 87% and 104% of each other. Since the calibration
+// that scales these sets is authored per set in the animator, that turns a re-roll into a
+// silent resize of a boss somebody has already calibrated.
+//
+// The armour is saturated gold and violet; the blade is desaturated steel. Measuring the
+// box of SATURATED pixels tracks the character and ignores the sword, so every roll can be
+// normalised to the same knight height and the calibration stays meaningful across re-rolls.
+async function armourBox(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels: C } = info;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * C;
+    if (data[i + 3] < 80) continue;
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    if (mx < 40 || (mx - mn) / mx < 0.32) continue;   // desaturated => steel, not armour
+    if (x < x0) x0 = x; if (x > x1) x1 = x;
+    if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  return (x1 < 0) ? null : { x0, y0, x1, y1 };
+}
+// The knight height each set is normalised to, in source-canvas pixels. These are the sizes
+// the shipped v0.30.478 calibration was authored against (verdict s 2.18, column s 2.1), so
+// pinning them here means a re-roll cannot move a boss out from under its own calibration.
+const ARMOUR_TARGET = { towerArbiterverdict: 383, towerArbitercolumn: 356 };
+
 const srcMeta = await sharp(SRC).metadata();
 const CANVAS_W = srcMeta.width, CANVAS_H = srcMeta.height;
 const srcBox = await bbox(await sharp(SRC).toBuffer());
@@ -147,7 +180,7 @@ async function edgeTouching(buf, margin = 2) {
 // need far more headroom than a standing pose does, and the model treats the
 // supplied frame as the whole world.
 const cropW = srcBox.x1 - srcBox.x0 + 1, cropH = srcBox.y1 - srcBox.y0 + 1;
-const PAD = 0.42;
+const PAD = 0.62;   // v0.30.x — 0.42 framed a staff; a broadsword at full extension needs more
 // The endpoint refuses a source over 1 megapixel ("True Size only works with
 // source images under 1 megapixel"), and 0.42 padding on a 523x615 crop lands
 // right on that line. Downscaling the initial costs nothing -- the returned
@@ -205,7 +238,14 @@ for (const [name, a] of Object.entries(ATTACKS)) {
       }
       if (bufs.length < FRAMES) throw new Error(`got ${bufs.length}/${FRAMES} frames`);
       clipped = 0;
-      for (const b of bufs) { if (await edgeTouching(b) > 24) clipped++; }
+      // A sword is THIN. The 24-pixel threshold inherited from the Sovereign (whose
+      // staff is short and whose cloak is the thing that brushes the border) let three
+      // frames through with the blade sheared flat and tipless: a blade crossing the
+      // frame edge contributes only its own width in border pixels, ~10-20, which is
+      // under 24. Nothing legitimate touches the border here — the bake re-places the
+      // art on the game canvas afterwards, so the model has no reason to reach the edge
+      // at all — and 4 leaves room for stray antialiasing without excusing a cut.
+      for (const b of bufs) { if (await edgeTouching(b) > 4) clipped++; }
       if (!clipped) break;
       process.stdout.write(`[clipped ${clipped}/${FRAMES}; re-roll ${attempt}/${TRIES}] `);
     }
@@ -219,11 +259,28 @@ for (const [name, a] of Object.entries(ATTACKS)) {
       x1: Math.max(p.x1, q.x1), y1: Math.max(p.y1, q.y1),
     }));
     const uw = U.x1 - U.x0 + 1, uh = U.y1 - U.y0 + 1;
-    // scale the union box to the SOURCE content box, preserving aspect
-    const sc = Math.min(cropW / uw, cropH / uh);
+    // Scale so the KNIGHT lands at this set's target height (see ARMOUR_TARGET above),
+    // measured on the median armour box so one wild frame cannot set the size for all nine.
+    const aHs = [];
+    for (const b of bufs) { const ab = await armourBox(b); if (ab) aHs.push(ab.y1 - ab.y0 + 1); }
+    if (!aHs.length) throw new Error('no armour found in any frame');
+    const aMed = aHs.slice().sort((p, q) => p - q)[aHs.length >> 1];
+    const target = ARMOUR_TARGET[a.key] || Math.round(cropH * 0.86);
+    let sc = target / aMed;
+    // ...but never let the sweep overflow the game canvas: if the scaled union does not fit,
+    // fall back to fitting it, and say so rather than silently clipping the blade.
+    const fit = Math.min(CANVAS_W / uw, srcBox.y1 + 1 - Math.max(0, srcBox.y1 + 1 - CANVAS_H) > 0 ? (srcBox.y1 + 1) / uh : 1);
+    if (uw * sc > CANVAS_W || uh * sc > srcBox.y1 + 1) {
+      process.stdout.write(`[union ${Math.round(uw * sc)}x${Math.round(uh * sc)} exceeds canvas; fitting instead] `);
+      sc = Math.min(sc, fit);
+    }
     const dw = Math.max(1, Math.round(uw * sc)), dh = Math.max(1, Math.round(uh * sc));
-    const offX = srcBox.x0 + Math.round((cropW - dw) / 2);
-    const offY = srcBox.y0 + (cropH - dh);          // feet-aligned: bottom, not centre
+    // centre on the ARMOUR, not on the union: otherwise a blade held out to one side shoves
+    // the knight off his own foot mark by half the blade.
+    const a0 = await armourBox(bufs[0]);
+    const aCx = a0 ? ((a0.x0 + a0.x1) / 2 - U.x0) * sc : dw / 2;
+    const offX = Math.max(0, Math.min(CANVAS_W - dw, Math.round(srcBox.x0 + (a0 ? (srcBox.x1 - srcBox.x0 + 1) / 2 : cropW / 2) - aCx)));
+    const offY = Math.max(0, (srcBox.y1 + 1) - dh);   // feet-aligned to the source foot line
     await mkdir(ATK_DIR, { recursive: true });
     for (let i = 0; i < bufs.length; i++) {
       let cut = null;

@@ -7,7 +7,7 @@
 // The art is animated FROM towerArbiter_0.webp and baked back onto his exact
 // 1500x1300 canvas at his own content box, so "same in game scale" holds only if
 // the sets ALSO carry his attack calibration — the boss draw looks calib up by the
-// ART key, and a missing entry silently means s:1 against his authored s:1.77,
+// ART key, and a missing entry silently means s:1 against an authored 1.77-2.18,
 // i.e. a knight who shrinks by a third the instant he swings. That is the check
 // that matters here, so it is measured on the game's own _visW/_visH rather than
 // inferred from the files.
@@ -81,12 +81,23 @@ const near = (x, y) => x && y && y.h > 0 && Math.abs(x.h - y.h) / y.h < 0.08 && 
 ok('both sword sets load their nine frames', r.frames.towerArbiterverdict === 9 && r.frames.towerArbitercolumn === 9, r.frames);
 ok('the big swing draws the VERDICT set', v.key === 'towerArbiterverdict', v);
 ok('the column strike draws the COLUMN set', c.key === 'towerArbitercolumn', c);
-ok('both carry the Arbiter\'s own attack calibration — without it the knight shrinks by a third mid-swing',
+// v0.30.x — these two used to require the sets to carry the base attack's own s, which is
+// what the first pass baked. They are authored per set in the animator now (verdict 2.18,
+// column 2.1, deliberately larger than his 1.77 base), so pinning equality would pin a
+// tuning value that is meant to move. What must hold is that an entry EXISTS — the boss
+// draw resolves calibration by the ART key, and a missing one silently means s:1, i.e. a
+// knight who shrinks by a third the instant he swings — and that the drawn size tracks
+// whatever that entry says.
+ok('both sets carry an explicit calibration entry, not the s:1 default a missing one would give',
   r.calib.towerArbiterverdict && r.calib.towerArbitercolumn
-  && r.calib.towerArbiterverdict.s === r.calib.towerArbiter.s
-  && r.calib.towerArbitercolumn.s === r.calib.towerArbiter.s,
+  && r.calib.towerArbiterverdict.s > 1.2 && r.calib.towerArbitercolumn.s > 1.2,
   { base: r.calib.towerArbiter && r.calib.towerArbiter.s, verdict: r.calib.towerArbiterverdict && r.calib.towerArbiterverdict.s, column: r.calib.towerArbitercolumn && r.calib.towerArbitercolumn.s });
-ok('...so both render at the same in-game size as his base attack', near(v, b) && near(c, b), { base: b, verdict: v, column: c });
+ok('...and each renders at the size its own calibration asks for, relative to his base attack',
+  b.h > 0 && Math.abs((v.h / b.h) / (r.calib.towerArbiterverdict.s / r.calib.towerArbiter.s) - 1) < 0.06
+  && Math.abs((c.h / b.h) / (r.calib.towerArbitercolumn.s / r.calib.towerArbiter.s) - 1) < 0.06,
+  { base: b, verdict: v, column: c,
+    wantVerdictX: +(r.calib.towerArbiterverdict.s / r.calib.towerArbiter.s).toFixed(3), gotVerdictX: +(v.h / b.h).toFixed(3),
+    wantColumnX: +(r.calib.towerArbitercolumn.s / r.calib.towerArbiter.s).toFixed(3), gotColumnX: +(c.h / b.h).toFixed(3) });
 ok('each form has its own frame timing (they are different gestures, not one set twice)',
   r.calib.towerArbiterverdict && r.calib.towerArbitercolumn
   && JSON.stringify(r.calib.towerArbiterverdict.ft) !== JSON.stringify(r.calib.towerArbitercolumn.ft),

@@ -3061,7 +3061,7 @@ window.LX_ANIM_CALIB = {
   },
   "towerArbiterverdict": {
     "attack": {
-      "s": 1.77,
+      "s": 2.18,
       "dx": 0.115,
       "dy": 0.005,
       "ft": [
@@ -3079,8 +3079,8 @@ window.LX_ANIM_CALIB = {
   },
   "towerArbitercolumn": {
     "attack": {
-      "s": 1.77,
-      "dx": 0.115,
+      "s": 2.1,
+      "dx": 0.19,
       "dy": 0.005,
       "ft": [
         100,
