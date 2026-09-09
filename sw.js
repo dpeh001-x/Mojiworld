@@ -100,7 +100,10 @@
 // v0.30.495 - v24 -> v25. backgrounds/title_keyart_c.webp is NEW
 // art referenced from CSS; a returning browser with the old manifest would show the character
 // creation page on its old flat scrim and never fetch it.
-const CACHE = 'mojiworld-assets-v25';
+// v0.30.498 - v25 -> v26. backgrounds/title_keyart.webp is REPLACED
+// under its own name (new art, 1376x768 -> 2944x1632). Without a new generation a returning
+// browser keeps serving the old painting from cache and never sees this one.
+const CACHE = 'mojiworld-assets-v26';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
