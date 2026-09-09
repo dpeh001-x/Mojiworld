@@ -40,6 +40,13 @@
 // A per-spawn +/-5% jitter rolls on HP/ATK/DEF so a pack is not identical
 // clones, and a separate +/-10% roll varies the EXP and COIN payout (rolled
 // independently for each, once per kill). Set either to 0 for exact values.
+//
+// THE HP/ATK/DEF JITTER IS MOBS ONLY (v0.30.490). A boss spawns alone, so "a pack is not
+// clones" cannot be a reason to vary it, and a boss fight whose length moved a few
+// percent at random was nobody's decision — the code that applies it had been handed an
+// isBoss flag since v0.29.762 and never read it. Every row under "---- Bosses ----", and
+// every tower boss, now spawns at exactly the number written here. The EXP/COIN roll still
+// applies to them: what a kill pays can vary without changing how the fight goes.
 // =========================================================================
 window.LX_MONSTER_STATS = {
   // ---- Regular monsters ----

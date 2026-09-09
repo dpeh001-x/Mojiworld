@@ -10441,7 +10441,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.489';
+const GAME_VERSION = 'v0.30.490';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35447,6 +35447,8 @@ function _monsterCoinMult(m) { void m; return MONSTER_COIN_MULT; }
 // Still applied, both editable in that same file and both deliberate:
 //   • VARIANTS — Elite / Elder multipliers (set to 1 to flatten).
 //   • LX_MONSTER_JITTER — the per-spawn +/-5% roll so a pack is not clones.
+//     MOBS ONLY (v0.30.490): a boss spawns alone, so the reason does not apply to one,
+//     and a boss now spawns at exactly the number written in the table.
 //   • LX_REWARD_JITTER — a separate +/-10% roll on the exp and coin PAYOUT,
 //     rolled independently for each so one kill can be rich but stingy on xp.
 // Edicts (opt-in difficulty toggles) keep working: they are a player choice,
@@ -35484,7 +35486,24 @@ function _lxApplyStatTable(mon, type, isBoss, isElite, isMiniBoss) {
   if (!T || !mon) return mon;
   const V = (typeof LX_MONSTER_VARIANTS !== 'undefined' && LX_MONSTER_VARIANTS) || null;
   const vr = isMiniBoss ? (V && V.elder) : isElite ? (V && V.elite) : null;
-  const J = (typeof LX_MONSTER_JITTER === 'number') ? LX_MONSTER_JITTER : 0;
+  // v0.30.490 — BOSSES ARE EXEMPT FROM THE STAT JITTER. Its documented purpose, in this file and
+  // in data/monster_stats.js, is "so a pack is not clones" / "so a pack is not identical
+  // clones" — a reason that cannot apply to something that spawns alone. Three things say this
+  // was an oversight rather than a decision:
+  //   • spawnMonster, in the same pipeline, deliberately exempts bosses from its OWN per-spawn
+  //     variance three times over (_varHp / _varAtk / _varDef are all `isBoss ? 1 : ...`).
+  //     This table then overwrote those values and put the variance straight back.
+  //   • this function has taken `isBoss` since v0.29.762 and never once read it — a parameter
+  //     threaded in and left unused.
+  //   • the table's own header promises "the file's number IS the spawned number".
+  // Measured before the fix: four towerArbiter spawns at one level came back 17,305 / 18,037 /
+  // 17,385 / 17,478 HP with the table fixed at 17,199 the whole time, and through
+  // _expeditionSpawnTowerBoss — which multiplies by the level rebase and the boss dial — the
+  // spread widened to 156,723 / 155,825 / 144,705.
+  // THE REWARD JITTER BELOW IS DELIBERATELY LEFT ALONE for bosses: a payout that varies does
+  // not change how the fight goes, and "one kill can be rich but stingy on xp" reads the same
+  // on a boss as on a snail.
+  const J = (!isBoss && typeof LX_MONSTER_JITTER === 'number') ? LX_MONSTER_JITTER : 0;
   const jit = () => J > 0 ? (1 + (Math.random() * 2 - 1) * J) : 1;
   const mul = (k) => (vr && typeof vr[k] === 'number') ? vr[k] : 1;
   const hp = Math.max(1, Math.floor(T.hp * mul('hp') * jit()));
@@ -63531,6 +63550,10 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // instance rolls once at spawn: HP/ATK ±10%, DEF ±8%. The damage bands
   // clamp AFTER atk, so a hot roll nudges a mob up inside its band rather
   // than past it; bosses keep authored stats (encounters stay curated).
+  // v0.30.490 — these three exemptions are real but they are NOT the last word: any type listed
+  // in LX_MONSTER_STATS has its hp/atk/def overwritten further down by _lxApplyStatTable, which
+  // carries its own jitter. That path exempts bosses too now; before it did not, and a boss
+  // rolled +/-5% per spawn despite everything on these lines.
   const _varHp  = isBoss ? 1 : (0.90 + Math.random() * 0.20);
   const _varAtk = isBoss ? 1 : (0.90 + Math.random() * 0.20);
   const _varDef = isBoss ? 1 : (0.92 + Math.random() * 0.16);
