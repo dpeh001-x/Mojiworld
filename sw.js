@@ -90,7 +90,11 @@
 // v0.30.473 - v21 -> v22. dash_mage.webp and its nine anim frames REPLACED
 // under their own names (violet -> light blue); a returning browser would otherwise mix the
 // old violet still with the new blue frames from the v21 generation.
-const CACHE = 'mojiworld-assets-v22';
+// v0.30.479 - v22 -> v23. qte_holy.webp and its nine anim frames
+// REDRAWN under their own names (winged sunburst -> binding seal) and re-canvassed 768/952 -> 1024;
+// dash_mage, dash_rogue and dash_warrior loops replaced the same way. A returning browser would
+// otherwise mix old and new frames of the same sigil.
+const CACHE = 'mojiworld-assets-v23';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());

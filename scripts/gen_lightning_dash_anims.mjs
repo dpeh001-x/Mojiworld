@@ -54,6 +54,22 @@ const has = (f) => process.argv.includes(f);
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : d; };
 const only = (process.argv.find((a) => a.startsWith('--only=')) || '').split('=')[1] || '';
 const ROLLS = Number(argOf('--rolls', '4'));
+// --seed-pad: shrink the seed inside its frame before handing it to the animator. The dash
+// sprites are seated to fill their canvas, which is right for a static sprite and wrong for a
+// violent loop - asked for a detonation, the model blasted the streak into the right border and
+// the union crop threw ("clipped at the source edge (right)"). Handing it a smaller seed gives
+// the flare somewhere to go; the union crop scales the result back up, so the gutter costs no
+// final resolution. Default 1 = no padding, which is what the shipped dash_rogue and dash_archer
+// loops were made with. dash_warrior needs --seed-pad 0.62 to reproduce.
+const SEED_PAD = Number(argOf('--seed-pad', '1'));
+// --min-motion: a floor on the MEAN per-frame change, in percent. The existing gate only refuses
+// a loop that stalls outright (any single step under 0.35%); a loop can clear that and still be
+// barely more animated than the one it replaces. The first ring-free warrior roll came back at
+// 2.69% mean against the shipped loop's 2.35% - clean, but a 15% improvement is not the "more
+// intense and powerful" that was asked for. Passing a floor makes "more intense" a bar the art
+// has to clear rather than an adjective in the changelog. Default 0 = off, which is how the
+// shipped rogue (4.99%), archer and lightning loops were made.
+const MIN_MOTION = Number(argOf('--min-motion', '0'));
 
 // ---- briefs -----------------------------------------------------------------
 const LIGHTNING_PROMPT =
@@ -82,22 +98,55 @@ const LIGHTNING_MOTION =
   + 'the first so the loop is seamless. Nothing touches the border.';
 // The dash loops seed from the sprites already in game, so each brief describes THAT art moving.
 const DASH_MOTION = {
+  // Per user: "more intense and powerful". The first brief asked for a drift - lines flowing, core
+  // pulsing - and got exactly that. This one asks for a shockwave beat instead: gather, detonate,
+  // blast, settle. That arc is what makes a warrior charge read as heavy rather than as a gust.
   dash_warrior:
-    'This amber speed-burst charge streak SURGES forward. Across the nine frames, spread the motion '
-    + 'EVENLY so every frame differs clearly from the one before, including the last three: the '
-    + 'converging speed lines stretch and flow to the right, the hot core at the point flares '
-    + 'brighter and dimmer, and the small embers drift back and fade. '
+    'This amber speed-burst charge streak DETONATES forward with brutal force. Across the nine '
+    + 'frames build a violent surge, spread EVENLY so every frame differs clearly from the one '
+    + 'before, including the last three: first the speed lines COMPRESS and gather as the charge '
+    + 'winds up, then the hot core at the point ERUPTS into a searing white-hot flash, then the '
+    + 'whole streak blasts forward as a torrent of raking '
+    + 'motion lines with heavy sparks and embers thrown off it, then it roars back down to the '
+    + 'gathered pose. Make it feel FAR more powerful and violent than a gentle drift - big '
+    + 'brightness swings, thick raking streaks, heavy debris. '
+    + 'THE STREAK ITSELF IS IN EVERY SINGLE FRAME. It surges and flares, but it is never removed, '
+    + 'never hidden and never replaced: do not draw a frame that is only a burst, only a ring or '
+    + 'only sparks, and do not add a shockwave ring, halo, circle or arc at all - four rolls in a '
+    + 'row drew one wider than the picture and it came back sliced every time. The power comes from '
+    + 'the streaks themselves: they must visibly LENGTHEN and SHORTEN between frames, the whole '
+    + 'spray widening and narrowing as it surges, individual raking lines shooting out further and '
+    + 'snapping back, the core swinging hard between dim amber and searing white, and debris and '
+    + 'embers thrown in every frame. Change a LOT between frames - a viewer should never mistake '
+    + 'one frame for the next. Every frame still '
+    + 'reads as the same wide horizontal charge streak pointing right. '
+    + 'Every streak must TAPER to a point at both ends like a flame or a spark trail. Do not draw '
+    + 'a straight bar, beam, rectangle or ruled line across the picture, and do not end any shape '
+    + 'in a blunt flat cut. '
     + 'The streak keeps the SAME position, SAME length and SAME horizontal direction every frame - '
-    + 'do not rotate, tilt, travel, grow or shrink it, and do not add letters or new objects. '
-    + 'The last frame flows into the first. Nothing touches the border.',
+    + 'do not rotate, tilt, travel, grow or shrink the picture, and do not add letters or new '
+    + 'objects. The last frame flows into the first. '
+    + 'Every shape stays COMPLETE and entirely inside the picture with a clear margin all '
+    + 'round: let it brighten and churn rather than grow past the edge, and never draw a plume, '
+    + 'ring or streak with a flat or straight-sliced edge.',
+  // Per user: "more animation of the smoke". The first brief moved the puff as one soft mass; the
+  // smoke itself barely churned. This one makes the SMOKE the subject - many separate curling
+  // tendrils on their own timings, so there is visible movement everywhere in the plume at once.
   dash_rogue:
-    'This violet shadow-smoke puff BILLOWS and dissipates. Across the nine frames, spread the motion '
-    + 'EVENLY so every frame differs clearly from the one before, including the last three: the '
-    + 'smoke curls and churns outward, its edges softening and thinning as it disperses, and the '
-    + 'thin trailing wisp on the left frays away. '
+    'This violet shadow-smoke puff CHURNS and BOILS with heavy smoke motion. Across the nine frames '
+    + 'give the smoke a lot of movement, spread EVENLY so every frame differs clearly from the one '
+    + 'before, including the last three: MANY separate tendrils of smoke curl, twist and roll over '
+    + 'each other in different directions and at different speeds, new wisps peel off the mass and '
+    + 'spiral away, the dense core swirls and thins as it disperses, dark shadow motes scatter out '
+    + 'of it, and the trailing wisp on the left whips and frays. Every part of the plume should be '
+    + 'visibly moving in every frame - this is a boiling cloud of smoke, not one soft shape sliding '
+    + 'about. '
     + 'The puff keeps the SAME position and roughly the SAME overall size every frame - do not '
-    + 'rotate, travel or zoom it, and do not add letters or new objects. The last frame flows into '
-    + 'the first. Nothing touches the border.',
+    + 'rotate, travel or zoom the picture, and do not add letters or new objects. The last frame '
+    + 'flows into the first. '
+    + 'Every shape stays COMPLETE and entirely inside the picture with a clear margin all '
+    + 'round: let it brighten and churn rather than grow past the edge, and never draw a plume, '
+    + 'ring or streak with a flat or straight-sliced edge.',
   dash_archer:
     'These emerald wind streaks STREAM to the right. Across the nine frames, spread the motion '
     + 'EVENLY so every frame differs clearly from the one before, including the last three: the '
@@ -105,7 +154,10 @@ const DASH_MOTION = {
     + 'tumble and spin along with them. '
     + 'The gust keeps the SAME position, SAME length and SAME horizontal direction every frame - do '
     + 'not rotate, tilt, travel, grow or shrink it, and do not add letters or new objects. The last '
-    + 'frame flows into the first. Nothing touches the border.',
+    + 'frame flows into the first. '
+    + 'Every shape stays COMPLETE and entirely inside the picture with a clear margin all '
+    + 'round: let it brighten and churn rather than grow past the edge, and never draw a plume, '
+    + 'ring or streak with a flat or straight-sliced edge.',
 };
 
 const key = process.env.LUDO_API_KEY;
@@ -126,6 +178,49 @@ function sliceHeight(p, bx, from, to) {
   const a = Math.round(bx.x0 + bx.w * from), b = Math.round(bx.x0 + bx.w * to);
   for (let y = 0; y < p.h; y++) for (let x = a; x <= b && x < p.w; x++) if (p.d[(y * p.w + x) * 4 + 3] > ALPHA_ON) { if (y < top) top = y; if (y > bot) bot = y; break; }
   return bot < 0 ? 0 : bot - top + 1;
+}
+
+// A frame can clear the border check and still read as cut off: the model draws a ring or a
+// plume with a FLAT sliced edge somewhere inside the composition. Measure how much of each side
+// of the ink box is solid ink - a real drawn shape touches its own bounding box at a few points,
+// a sliced one runs along it. (dash_warrior's shipped frames measure <= 1.2%; the rejected
+// dash_mage rolls measured 19-25%.)
+// EDGE_OPAQUE, not "any ink". First cut measured coverage at alpha > 40 and started rejecting
+// loops that were not sliced at all - a soft full-frame glow lights up the whole perimeter at low
+// alpha, and the ink box (alpha > 8) is then the whole picture. A SLICE is a hard cut through
+// solid art, so it leaves NEAR-OPAQUE pixels sitting on the box edge; a glow tapers away long
+// before it. Calibrated on three known sets at alpha > 180: the dash_mage frames the user called
+// cut off measure 13 / 16 / 22%, the clean dash_rogue loop 5%, the clean dash_warrior loop 0%.
+// The limit sits at 10%, between them.
+const EDGE_OPAQUE = 180, FLUSH_LIMIT = 10;
+function flushSides(p) {
+  const bx = inkBox(p); const A = (x, y) => p.d[(y * p.w + x) * 4 + 3];
+  let L = 0, R = 0, T = 0, B = 0;
+  for (let y = bx.y0; y <= bx.y1; y++) { if (A(bx.x0, y) > EDGE_OPAQUE) L++; if (A(bx.x1, y) > EDGE_OPAQUE) R++; }
+  for (let x = bx.x0; x <= bx.x1; x++) { if (A(x, bx.y0) > EDGE_OPAQUE) T++; if (A(x, bx.y1) > EDGE_OPAQUE) B++; }
+  const h = bx.y1 - bx.y0 + 1, w = bx.x1 - bx.x0 + 1;
+  return { L: 100 * L / h, R: 100 * R / h, T: 100 * T / w, B: 100 * B / w };
+}
+// SUBJECT CONSISTENCY. The flush, motion and border gates all passed a warrior loop in which
+// frames 3-6 dropped the streak entirely and drew a fire RING in its place - on screen the dash
+// burst would morph from an arrow into a donut and back, which reads as a glitch rather than a
+// charge. No pixel-level gate could see it, because nothing was clipped and everything moved.
+// The ink box shape is what changed: the seed is 2.11 wide-to-tall and those frames measured
+// 0.90. Calibrated as a RATIO to the seed, since each dash has its own proportions - the ring
+// loop scores 0.43, while the clean rogue / archer / mage loops score 0.67 / 0.85 / 0.78. The
+// bar sits at 0.60.
+const SHAPE_MIN = 0.60;
+function gateShape(seedBox, frameBoxes) {
+  const seed = seedBox.w / seedBox.h;
+  const worst = frameBoxes.map((b) => (b.w / b.h) / seed).reduce((a, x) => Math.min(a, x), Infinity);
+  return worst < SHAPE_MIN
+    ? [`the subject CHANGES mid-loop: a frame is ${worst.toFixed(2)}x the seed's wide-to-tall shape (limit ${SHAPE_MIN}) - the streak was replaced by something else instead of surging`]
+    : [];
+}
+function gateFlush(p, label) {
+  const f = flushSides(p); const LIM = FLUSH_LIMIT;
+  const bad = Object.entries(f).filter(([, v]) => v > LIM).map(([k, v]) => `${k} ${v.toFixed(0)}%`);
+  return bad.length ? [`${label} is CUT OFF inside the art - a straight sliced edge (${bad.join(', ')}; limit ${LIM}%)`] : [];
 }
 
 // ---- gates ------------------------------------------------------------------
@@ -202,8 +297,15 @@ async function seat(raw, size, margin) {
   return sharp({ create: { width: size, height: size, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
     .composite([{ input: fitted, gravity: 'centre' }]).webp({ quality: 95 }).toBuffer();
 }
+async function seedFor(buf) {
+  if (!(SEED_PAD > 0) || SEED_PAD >= 1) return buf;
+  const meta = await sharp(buf).metadata(), S = Math.max(meta.width, meta.height);
+  const small = await sharp(buf).resize(Math.round(S * SEED_PAD), Math.round(S * SEED_PAD), { fit: 'inside' }).png().toBuffer();
+  return sharp({ create: { width: S, height: S, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: small, gravity: 'centre' }]).png().toBuffer();
+}
 async function animate(baseBuf, motion, size, prefix, dir, label) {
-  const uri = 'data:image/png;base64,' + (await sharp(baseBuf).resize(990, 990, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
+  const uri = 'data:image/png;base64,' + (await sharp(await seedFor(baseBuf)).resize(990, 990, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
   let last;
   for (let a = 1; a <= 4; a++) {
     try {
@@ -215,10 +317,23 @@ async function animate(baseBuf, motion, size, prefix, dir, label) {
       const bufs = await framesFrom(await res.json(), FRAMES);
       console.log('frames in');
       const packed = await packFrames(bufs, size, label);
+      for (let i = 0; i < packed.length; i++) {
+        const cut = gateFlush(await px(packed[i]), `frame ${i}`);
+        if (cut.length) {
+          const dbg = process.env.MOJI_ART_DEBUG;
+          if (dbg) { await mkdir(dbg, { recursive: true }); for (let j = 0; j < packed.length; j++) await writeFile(join(dbg, `${prefix}_rej${a}_${j}.webp`), packed[j]); console.log(`  (rejected frames dumped to ${dbg})`); }
+          throw new Error(cut.join('; '));
+        }
+      }
+      const shape = gateShape(inkBox(await px(baseBuf)), await Promise.all(packed.map(async (b) => inkBox(await px(b)))));
+      if (shape.length) throw new Error(shape.join('; '));
       const steps = (await motionProfile(packed)).map((s) => +(s * 100).toFixed(2));
       console.log(`  ${label}: per-frame change ${steps.join(' / ')} %`);
       const dead = steps.filter((s) => s < 0.35);
       if (dead.length) throw new Error(`the loop stalls: ${dead.length} step(s) under 0.35% change`);
+      const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
+      console.log(`  ${label}: mean per-frame change ${mean.toFixed(2)}%`);
+      if (MIN_MOTION > 0 && mean < MIN_MOTION) throw new Error(`the loop is too tame: ${mean.toFixed(2)}% mean per-frame change, floor ${MIN_MOTION}%`);
       await mkdir(dir, { recursive: true });
       const written = [];
       for (let i = 0; i < FRAMES; i++) { const p = join(dir, `${prefix}_${i}.webp`); await writeFile(p + '.tmp', packed[i]); await rename(p + '.tmp', p); written.push(p); }

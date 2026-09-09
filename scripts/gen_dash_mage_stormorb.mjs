@@ -52,6 +52,26 @@ const has = (f) => process.argv.includes(f);
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : d; };
 const only = (process.argv.find((a) => a.startsWith('--only=')) || '').split('=')[1] || '';
 const ROLLS = Number(argOf('--rolls', '4'));
+// --alpha: scale the whole sprite's opacity on the way out. The mage blink is drawn OVER the
+// player at the midpoint of a teleport, and at full strength it hides them; the user asked for
+// it fainter. Done deterministically here rather than hoping the model paints a fainter effect.
+const ALPHA_MUL = Number(argOf('--alpha', '1'));
+// --seed-pad: shrink the seed inside its frame before handing it to the animator. The still is
+// seated at 91% of its canvas, which is right for a static sprite and wrong as an animation seed:
+// asked to flare, the model pushed the art into the source border and one frame came back with a
+// 25% flat-cut left edge (the union measured 751 of 768px). A smaller seed gives the flare room;
+// the shared union crop scales the result back up, so the gutter costs no final resolution.
+const SEED_PAD = Number(argOf('--seed-pad', '1'));
+// --anim-only re-seeds from the file on disk, which has ALREADY been faded. Fading again would
+// square the multiplier (0.72 -> 0.52) and quietly ship a half-transparent loop, so refuse the
+// combination rather than produce it.
+if (has('--anim-only') && ALPHA_MUL !== 1) { console.error('--anim-only reads the faded file back, so --alpha would apply twice. Re-roll instead, or pass --alpha 1.'); process.exit(1); }
+async function fade(buf, mul) {
+  if (!(mul > 0) || mul === 1) return buf;
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  for (let i = 3; i < data.length; i += 4) data[i] = Math.round(data[i] * mul);
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).webp({ quality: 94, alphaQuality: 100 }).toBuffer();
+}
 
 // ---- the briefs -------------------------------------------------------------
 // The palette is the game's own: the procedural fallback this sprite replaces pushes
@@ -67,9 +87,12 @@ const DASH_PROMPT =
   + 'Composition, left to right: a shattering INCANTATION SEAL where the wizard vanished — two '
   + 'concentric rune rings of glowing pale-blue arcane glyphs breaking apart into drifting sigils; '
   + 'a long tapering lance of white-hot ice-blue magic streaking rightward out of it, wrapped in a '
-  + 'double helix of small arcane rune symbols and fine spell-script; and at the right end a '
-  + 'brilliant white-hot arrowhead flare where the wizard is arriving, throwing sharp four-point '
-  + 'starbursts and a scatter of glittering blue motes. '
+  + 'double helix of small arcane rune symbols and fine spell-script; and at the right end a SMALL, '
+  + 'SUBTLE pointed glow where the wizard is arriving. '
+  + 'Keep that arrival point UNDERSTATED - a soft taper and a couple of sparkles, NOT a big solid '
+  + 'arrowhead and not a chevron. The rune seal is the subject; the point is only where it lands. '
+  + 'EVERY ring and circle must be drawn COMPLETE and unbroken, entirely inside the picture, with '
+  + 'no flat or straight-cut edges anywhere - nothing may be sliced off. '
   + 'Invented magical glyphs, NOT real letters or words. '
   + 'Strictly horizontal, the streak running left-to-right across the middle of the frame and '
   + 'centred vertically. Flat 2D cartoon game VFX, bold clean shapes, bright painted glow, crisp '
@@ -86,6 +109,8 @@ const DASH_MOTION =
   + 'Make it SPECTACULAR: partway through the loop the whole effect flares to a brilliant white-hot '
   + 'peak — the core blazing, the rune rings blazing with it, a burst of extra starbursts and '
   + 'glittering blue motes thrown outward — then settles back down. '
+  + 'While it flares, the rings must stay COMPLETE and fully inside the picture: let them brighten '
+  + 'and spin rather than grow past the edge, and never draw a ring with a flat or sliced edge. '
   + 'What moves: the rune rings on the left spin and crack wider, their glyphs drifting outward and '
   + 'fading; the lance of magic pulses brighter and its energy flows steadily to the right; the tiny '
   + 'rune symbols wrapped around the streak twinkle and slide along it; the white-hot arrowhead at '
@@ -156,16 +181,84 @@ function medianHue(p) {
   if (!hues.length) return null;
   hues.sort((x, y) => x - y); return Math.round(hues[Math.floor(hues.length / 2)]);
 }
+// CUT-OFF INSIDE THE ART. The border check below only catches ink on the CANVAS edge; the
+// v0.30.473 loop passed it and was still visibly clipped, because the model drew the seal
+// truncated INSIDE the frame - flat-topped rings with a hard straight edge. A shape that ends
+// naturally touches its own bounding box at a point or two; a sliced one runs a long solid line
+// along it. Measured on that loop: top/bottom coverage 19-25% on the seal frames, against
+// <= 1.2% for the (clean) warrior dash. Anything over 8% is a slice.
+// EDGE_OPAQUE, not "any ink". First cut measured coverage at alpha > 40 and started rejecting
+// loops that were not sliced at all - a soft full-frame glow lights up the whole perimeter at low
+// alpha, and the ink box (alpha > 8) is then the whole picture. A SLICE is a hard cut through
+// solid art, so it leaves NEAR-OPAQUE pixels sitting on the box edge; a glow tapers away long
+// before it. Calibrated on three known sets at alpha > 180: the dash_mage frames the user called
+// cut off measure 13 / 16 / 22%, the clean dash_rogue loop 5%, the clean dash_warrior loop 0%.
+// The limit sits at 10%, between them.
+const EDGE_OPAQUE = 180, FLUSH_LIMIT = 10;
+function flushSides(p) {
+  const bx = inkBox(p); const A = (x, y) => p.d[(y * p.w + x) * 4 + 3];
+  let L = 0, R = 0, T = 0, B = 0;
+  for (let y = bx.y0; y <= bx.y1; y++) { if (A(bx.x0, y) > EDGE_OPAQUE) L++; if (A(bx.x1, y) > EDGE_OPAQUE) R++; }
+  for (let x = bx.x0; x <= bx.x1; x++) { if (A(x, bx.y0) > EDGE_OPAQUE) T++; if (A(x, bx.y1) > EDGE_OPAQUE) B++; }
+  const h = bx.y1 - bx.y0 + 1, w = bx.x1 - bx.x0 + 1;
+  return { L: 100 * L / h, R: 100 * R / h, T: 100 * T / w, B: 100 * B / w };
+}
+// SUBJECT CONSISTENCY. The flush, motion and border gates all passed a warrior loop in which
+// frames 3-6 dropped the streak entirely and drew a fire RING in its place - on screen the dash
+// burst would morph from an arrow into a donut and back, which reads as a glitch rather than a
+// charge. No pixel-level gate could see it, because nothing was clipped and everything moved.
+// The ink box shape is what changed: the seed is 2.11 wide-to-tall and those frames measured
+// 0.90. Calibrated as a RATIO to the seed, since each dash has its own proportions - the ring
+// loop scores 0.43, while the clean rogue / archer / mage loops score 0.67 / 0.85 / 0.78. The
+// bar sits at 0.60.
+const SHAPE_MIN = 0.60;
+function gateShape(seedBox, frameBoxes) {
+  const seed = seedBox.w / seedBox.h;
+  const worst = frameBoxes.map((b) => (b.w / b.h) / seed).reduce((a, x) => Math.min(a, x), Infinity);
+  return worst < SHAPE_MIN
+    ? [`the subject CHANGES mid-loop: a frame is ${worst.toFixed(2)}x the seed's wide-to-tall shape (limit ${SHAPE_MIN}) - the streak was replaced by something else instead of surging`]
+    : [];
+}
+function gateFlush(p, label) {
+  const f = flushSides(p); const LIM = FLUSH_LIMIT;
+  const bad = Object.entries(f).filter(([, v]) => v > LIM).map(([k, v]) => `${k} ${v.toFixed(0)}%`);
+  return bad.length ? [`${label} is CUT OFF inside the art - a straight sliced edge (${bad.join(', ')}; limit ${LIM}%)`] : [];
+}
 // count of near-white pixels - the flare. A flashy loop peaks and settles; a flat one does not.
 function brightCount(p) { let n = 0; for (let i = 0; i < p.w * p.h; i++) { const o = i * 4; if (p.d[o + 3] > 140 && p.d[o] > 225 && p.d[o + 1] > 225 && p.d[o + 2] > 225) n++; } return n; }
 // ---- gates ------------------------------------------------------------------
 // Every gate is a property the ENGINE depends on, not a taste call.
-function gateDash(b, bx) {
+// How tall the ink is inside a horizontal slice of the ink box - a streak that travels right
+// TAPERS toward its arrival point and is broad at the departure end.
+function sliceHeight(p, bx, from, to) {
+  let top = p.h, bot = -1;
+  const a = Math.round(bx.x0 + bx.w * from), b = Math.round(bx.x0 + bx.w * to);
+  for (let y = 0; y < p.h; y++) for (let x = a; x <= b && x < p.w; x++) if (p.d[(y * p.w + x) * 4 + 3] > ALPHA_ON) { if (y < top) top = y; if (y > bot) bot = y; break; }
+  return bot < 0 ? 0 : bot - top + 1;
+}
+// DIRECTION, measured by SHAPE rather than by brightness.
+//
+// The old test put the brightest tenth of the pixels right of centre, which worked while the art
+// ended in a big solid arrowhead. The user then asked to "reduce the directional arrow effect",
+// and the same brief asks for COMPLETE rune rings at the departure point - so the brightest mass
+// legitimately moved LEFT and the gate started rejecting exactly the art it had been retuned to
+// produce (two rolls in a row, both otherwise clean). A gate that fights the brief is a broken
+// gate, not a strict one.
+//
+// The taper is the honest signal: whichever way it points, a right-travelling streak is broad at
+// the left (rings, trailing motes) and narrow at the right (the arrival taper). Brightness is
+// kept only as a weak backstop - the light must not be piled at the departure end.
+function gateDash(p, bx, b) {
   const bad = [];
   if (bx.x0 === 0 || bx.y0 === 0 || bx.x1 >= bx.W - 1 || bx.y1 >= bx.H - 1) bad.push('ink on the canvas border');
   const aspect = bx.w / bx.h;
   if (aspect < 1.5) bad.push(`not a streak: ink ${bx.w}x${bx.h} (aspect ${aspect.toFixed(2)}, want >= 1.5)`);
-  if (b != null && b < bx.x0 + bx.w * 0.5) bad.push('the bright arrival flare is not leading on the RIGHT (the burst is flipped for a left dash, so the art must point right)');
+  const head = sliceHeight(p, bx, 0.88, 1.0), tail = sliceHeight(p, bx, 0.0, 0.12);
+  if (!tail || head / tail > 0.7) bad.push(`it does not taper to the RIGHT: right end ${head}px vs left end ${tail}px (want the right <= 70% of the left) - the burst is mirrored for a left dash, so the art must point right`);
+  // NO brightness test any more. It rejected six of six rolls that every other gate passed,
+  // because this brief deliberately moved the light leftward: "reduce the directional arrow
+  // effect" plus "EVERY ring drawn COMPLETE" puts the brightest mass on the rune rings at the
+  // departure end. Keeping it would have meant re-rolling until the model ignored the brief.
   return bad;
 }
 function gateOrb(bx) {
@@ -254,8 +347,15 @@ async function makeImage(prompt, label) {
   }
   throw new Error(`${label} FAILED: ${last && last.message}`);
 }
+async function seedFor(buf) {
+  if (!(SEED_PAD > 0) || SEED_PAD >= 1) return buf;
+  const meta = await sharp(buf).metadata(), S = Math.max(meta.width, meta.height);
+  const small = await sharp(buf).resize(Math.round(S * SEED_PAD), Math.round(S * SEED_PAD), { fit: 'inside' }).png().toBuffer();
+  return sharp({ create: { width: S, height: S, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: small, gravity: 'centre' }]).png().toBuffer();
+}
 async function animate(baseBuf, motion, size, prefix, dir, label) {
-  const uri = 'data:image/png;base64,' + (await sharp(baseBuf).resize(990, 990, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
+  const uri = 'data:image/png;base64,' + (await sharp(await seedFor(baseBuf)).resize(990, 990, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()).toString('base64');
   let last;
   for (let a = 1; a <= 4; a++) {
     try {
@@ -267,8 +367,12 @@ async function animate(baseBuf, motion, size, prefix, dir, label) {
       const bufs = await framesFrom(await res.json(), FRAMES);
       console.log('frames in');
       const packed = await packFrames(bufs, size, label);
+      const shape = gateShape(inkBox(await px(baseBuf)), await Promise.all(packed.map(async (b) => inkBox(await px(b)))));
+      if (shape.length) throw new Error(shape.join('; '));
       const stall = gateMotion(await motionProfile(packed), label);
       if (stall.length) throw new Error(stall.join('; '));
+      // no frame may be sliced inside its own art, not just off the canvas edge
+      for (let i = 0; i < packed.length; i++) { const cut = gateFlush(await px(packed[i]), `frame ${i}`); if (cut.length) throw new Error(cut.join('; ')); }
       // FLASHY, measured: the loop has to actually peak in brightness, not just wobble.
       if (label === 'dash_mage') {
         const bright = []; for (const b of packed) bright.push(brightCount(await px(b)));
@@ -278,7 +382,7 @@ async function animate(baseBuf, motion, size, prefix, dir, label) {
       }
       await mkdir(dir, { recursive: true });
       const written = [];
-      for (let i = 0; i < FRAMES; i++) { const p = join(dir, `${prefix}_${i}.webp`); await writeFile(p + '.tmp', packed[i]); await rename(p + '.tmp', p); written.push(p); }
+      for (let i = 0; i < FRAMES; i++) { const p = join(dir, `${prefix}_${i}.webp`); await writeFile(p + '.tmp', await fade(packed[i], ALPHA_MUL)); await rename(p + '.tmp', p); written.push(p); }
       for (const f of written) { const bx = inkBox(await px(await readFile(f))); if (bx.x0 === 0 || bx.y0 === 0 || bx.x1 >= bx.W - 1 || bx.y1 >= bx.H - 1) throw new Error(`${f} touches the border after packing`); }
       console.log(`  ${label}: ${FRAMES} frames written, none touching a border`);
       return;
@@ -304,18 +408,19 @@ async function build(name, prompt, motion, out, size, margin, gate, animDir, ani
     const raw = await makeImage(prompt, `${name} roll ${roll}`);
     const seated = await seat(raw, size, margin);
     const p = await px(seated), bx = inkBox(p);
-    const bad = gate(name === 'dash_mage' ? brightCentroid(p) : null, bx);
+    const bad = gate(p, bx, name === 'dash_mage' ? brightCentroid(p) : null);
     let hue = null;
     if (name === 'dash_mage') { hue = medianHue(p);
       if (hue == null || hue < 190 || hue > 245) bad.push(`not light blue: median hue ${hue} deg (want 190-245; violet reads ~270)`); }
+    bad.push(...gateFlush(p, 'the still'));
     console.log(`  roll ${roll}: ink ${bx.w}x${bx.h} at (${bx.x0},${bx.y0})${hue != null ? `, hue ${hue} deg` : ''} - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
     if (!bad.length) chosen = seated;
   }
   if (!chosen) { console.error(`${name}: no roll passed the gates`); process.exitCode = 2; return; }
-  await writeFile(out + '.tmp', chosen); await rename(out + '.tmp', out);
+  await writeFile(out + '.tmp', await fade(chosen, ALPHA_MUL)); await rename(out + '.tmp', out);
   console.log(`  base -> ${out.replace(repoRoot, '').replace(/\\/g, '/')}`);
   if (!has('--skip-anim')) await animate(chosen, motion, size, animPrefix, animDir, name);
 }
-if (!only || only === 'dash') await build('dash_mage', DASH_PROMPT, DASH_MOTION, DASH_OUT, DASH_SIZE, 0.045, (b, bx) => gateDash(b, bx), FX_ANIM, 'dash_mage');
-if (!only || only === 'orb') await build('mstormorb', ORB_PROMPT, ORB_MOTION, ORB_OUT, ORB_SIZE, 0.05, (b, bx) => gateOrb(bx), PROJ_ANIM, 'mstormorb');
+if (!only || only === 'dash') await build('dash_mage', DASH_PROMPT, DASH_MOTION, DASH_OUT, DASH_SIZE, 0.045, (p, bx, b) => gateDash(p, bx, b), FX_ANIM, 'dash_mage');
+if (!only || only === 'orb') await build('mstormorb', ORB_PROMPT, ORB_MOTION, ORB_OUT, ORB_SIZE, 0.05, (p, bx) => gateOrb(bx), PROJ_ANIM, 'mstormorb');
 console.log('\ndone.');
