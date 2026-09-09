@@ -10229,7 +10229,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.466';
+const GAME_VERSION = 'v0.30.467';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -58723,7 +58723,11 @@ function _lxStatToLevel(m, L, opts) {
   const b = _lxFieldBaseline(L);
   const k = (opts && opts.stat) || 1;
   const xp = (opts && opts.exp) || 1;
-  m.maxHp     = Math.max(1, Math.floor(b.hp * k));
+  // v0.30.467 — HP can be asked for separately from ATK/DEF. It defaults to `stat`, so every
+  // caller that does not ask is byte-identical; the expedition wants a much bulkier monster
+  // without the matching jump in its swing.
+  const kh = (opts && opts.hp) || k;
+  m.maxHp     = Math.max(1, Math.floor(b.hp * kh));
   m.currentHp = m.maxHp;
   m.atk       = Math.max(1, Math.floor(b.atk * k));
   m.def       = Math.max(0, Math.floor((b.atk * 0.35) * k));
@@ -58733,7 +58737,23 @@ function _lxStatToLevel(m, L, opts) {
 }
 // v0.30.457 — how much harder a tower mob is than the field monster of its level, and how much more it
 // pays. ONE number for both: "commensurate" means the exchange rate stays put.
-const LX_EXPEDITION_MOB_MUL = 1.75;
+// v0.30.467 — per user: "The monster HP especially should be much much higher in expedition
+// with modest raised defence and attack with slightly raised exp rewards". One constant drove
+// all four numbers (v0.30.457, so the exchange rate could not drift); the ask is explicitly for
+// them to move by different amounts, so it splits into the three the sentence names.
+//
+// HP KEEPS ITS AUTHORED 1.75 (user's call, once measured). The "much much higher" is
+// delivered by the scaler fix below rather than by this number: with the scaler actually
+// applied, a Lv-60 tower mob goes 7,733 -> 241,858 HP, which is 31x what the floor really
+// had and 1.75x the field monster of its level. Piling a further multiplier on top of a
+// 31x correction is how an expedition stops being clearable.
+const LX_EXPEDITION_MOB_HP_MUL  = 1.75;   // as authored — the fix, not this, is the increase
+const LX_EXPEDITION_MOB_STAT_MUL = 2.05;  // was 1.75 — the modest step, ATK and DEF through one factor
+// EXP TRACKS HP by construction (user's call): tie the two and a tower mob always pays the
+// same EXP per point of HP as the field monster of its level, so the reward per minute
+// cannot silently rot the next time either number is tuned.
+const LX_EXPEDITION_MOB_EXP_MUL  = LX_EXPEDITION_MOB_HP_MUL;
+const LX_EXPEDITION_MOB_MUL = LX_EXPEDITION_MOB_STAT_MUL;   // kept: read by the tower-mob tooltip copy
 function _expeditionScaleMob(m, playerLevel) {
   if (!game.expedition || !game.expedition.active) return m;
   // v0.26.418 — MAP-GATE. The active flag alone was leaking: if any expedition
@@ -58785,7 +58805,7 @@ function _expeditionScaleMob(m, playerLevel) {
   // Lv 80. A stable, predictable baseline beats an unstable inference.
   // v0.30.457 — per user: "Increase the expedition monsters stats and HP more, but give EXP that is
   // commensurate to those stats". One constant drives both, so the ratio can never drift apart.
-  _lxStatToLevel(m, _toLv, { stat: LX_EXPEDITION_MOB_MUL, exp: LX_EXPEDITION_MOB_MUL });
+  _lxStatToLevel(m, _toLv, { hp: LX_EXPEDITION_MOB_HP_MUL, stat: LX_EXPEDITION_MOB_STAT_MUL, exp: LX_EXPEDITION_MOB_EXP_MUL });   // v0.30.467
   return m;
 }
 // v0.26.264 — Floor-clear detector. Called after every monster kill
@@ -59575,7 +59595,7 @@ Object.assign(monsterTypes, {
   // chip-trade fight. Swing range stays at 200 so the player can still
   // disengage cleanly; cdMs > telegraphMs means he can never instantly
   // chain into a second swing.
-  towerArbiter:  { name:'The Arbiter',   w:140, h:160, color:'#ffd870', shell:'#aa6622', hp:58000,atk:395, def:165, evasion:110, exp:9200, mojicoins:0, speed:1.7, jump:0, boss:true,                       signature:'Mid-tower judge. Never leaves the ground — but his reach is immense.',         traits:{ activeBoss:true, miniElite:true, revivesOnce:{ hpPct:0.25 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:360, swingW:440, swingH:190, cdMs:2400, telegraphMs:450 }, columnStrike:{ dmgMul:2.0, width:120, range:600, cdMs:5500, telegraphMs:650, color:'#ffd870', sprite:'fx_col_arbiter' }, hourglassCharge:2400 } },
+  towerArbiter:  { name:'The Arbiter',   w:140, h:160, color:'#ffd870', shell:'#aa6622', hp:58000,atk:395, def:330, evasion:110, exp:9200, mojicoins:0, speed:1.7, jump:0, boss:true,                       signature:'Mid-tower judge. Never leaves the ground — but his reach is immense.',         traits:{ activeBoss:true, miniElite:true, revivesOnce:{ hpPct:0.25 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:360, swingW:440, swingH:190, cdMs:2400, telegraphMs:450, radiance:{ frac:0.35, chance:0.25, flat:true, tag:'VERDICT', label:'the Arbiter\u2019s verdict', color:'#ffd870', toast:'\u2696 VERDICT \u2014 the Arbiter\u2019s full swing takes a third of your health' } }, wardLen:225, columnStrike:{ dmgMul:2.0, width:120, range:600, cdMs:5500, telegraphMs:650, color:'#ffd870', sprite:'fx_col_arbiter' }, hourglassCharge:2400 } },
   // B6 — vertical climb harasser. Soul-flame projectiles + hover.
   towerSeer:     { name:'Aether Seer',   w:54,  h:58,  color:'#88c8ff', shell:'#2a4488', hp:2025, atk:200, def:54, evasion:160, exp:1700, mojicoins:0, speed:0.9, jump:0, flies:true, level:20, shoot:'mlantern',  shootCd:1700, signature:'Levitates. Drains MP on hit.',                  traits:{ sorrowDrain:true } },
   // B7 — crystalline volley. Ice shards in cone burst.
@@ -63675,10 +63695,18 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // via _expeditionScaleMob (no-op outside expedition mode). Non-boss
   // mobs only; F10 zodiac boss applies its own per-spawn scaling below.
   const _spawned = game.monsters[game.monsters.length - 1];
+  _lxApplyStatTable(_spawned, type, isBoss, isElite, isMiniBoss);   // v0.29.762 — the table is the final word
+  // v0.30.467 — ...and the table WAS the final word over the expedition scaler too, which ran
+  // just above it and had every value it wrote overwritten a line later. Measured on the
+  // build before this one: an active expedition at player Lv 60 spawned a towerWisp with
+  // 4,439 HP where the scaler had just set 241,858 — 1.8% of intended, for every tower mob,
+  // since LX_MONSTER_STATS covers all ten. That is why an expedition floor read as trivial,
+  // and it is why raising the multipliers alone would have changed nothing at all. Moved
+  // below the table, which is exactly where the PQ Stage 3 scaler already sits and says so
+  // ("This MUST run after the table"). Outside an expedition it still returns immediately.
   if (_spawned && typeof _expeditionScaleMob === 'function') {
     _expeditionScaleMob(_spawned, (player && player.level) || 1);
   }
-  _lxApplyStatTable(_spawned, type, isBoss, isElite, isMiniBoss);   // v0.29.762 — the table is the final word
   // v0.29.889 — ...except on PQ Stage 3, which scales to the character. Per user:
   // "3rd stage of PQ is extremely easy, scale the DEF and HP to the character's
   // to make it harder". This MUST run after the table: the table is where the
@@ -78871,6 +78899,11 @@ function updateMonsters(dt) {
               // pay the stop, so the other 28 swingers are untouched)
               _impactMs: bm.impactMs || 0,
               _impactShake: bm.impactShake || 0,
+              // v0.30.467 — an occasional swing that lands for a share of MAX HP instead of its
+              // rolled damage. Declared on the trait, so only a type that asks for one pays it; the
+              // projectile side of this (chance roll, block / warrior DR / Aegis, the toast) is the
+              // radiance payload Virga's pillars already use.
+              _radiance: bm.radiance || null,
               _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'heavy') : null,   // v0.29.131 — boss heavy-hit band (null for elites)
             });
             // v0.29.976 — ECHO STRIKE (traits.echoStrike = delay in ms). The
@@ -81829,7 +81862,12 @@ function _lxBossWardTick(m) {
   if (m._wardNextAt == null) { m._wardNextAt = now + LX_BOSS_WARD_FIRST; return; }
   if ((m._wardUntil | 0) > now) return;                 // already warded
   if (now < m._wardNextAt) return;
-  m._wardUntil  = now + LX_BOSS_WARD_LEN;
+  // v0.30.467 — a boss may declare its own ward length (traits.wardLen, in 60Hz steps);
+  // stamped on the instance so the shield fade and the badge drain read the same denominator
+  // as the timer instead of assuming the global.
+  const _wlen = ((m.traits && m.traits.wardLen) | 0) || LX_BOSS_WARD_LEN;
+  m._wardLen    = _wlen;
+  m._wardUntil  = now + _wlen;
   m._wardGauge  = 0;   // v0.30.395 — a fresh ward starts with an empty break gauge
   m._wardNextAt = now + _lxBossWardGap();
   // Telegraph it. An unannounced damage floor reads as a bug — the player
@@ -92646,11 +92684,11 @@ function updateProjectiles(dt) {
           _projLost = (!p._radiance.flat && typeof _diffDmg === 'function') ? _diffDmg(_rg, 0, true) : _rg;
           player._radianceHit = p._radiance.label || 'a pillar of judgment';
           if (game.damageNumbers) game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2,
-            text: '-' + _projLost + ' RADIANCE', life: 60, color: p._radiance.color || '#fff3c4', size: 20, big: true });
+            text: '-' + _projLost + ' ' + (p._radiance.tag || 'RADIANCE'), life: 60, color: p._radiance.color || '#fff3c4', size: 20, big: true });   // v0.30.467 — per-payload wording
           if (typeof addShake === 'function') addShake(20);
           if (typeof addHitStop === 'function') addHitStop(120);
           if (typeof flash === 'function') flash(0.6);
-          if (typeof showToast === 'function') showToast('RADIANCE — do not stand under the pillars!', 'danger');
+          if (typeof showToast === 'function') showToast(p._radiance.toast || 'RADIANCE — do not stand under the pillars!', 'danger');   // v0.30.467 — per-payload wording
         }
         player.hp -= _projLost;
         player.lastHitTime = game.time;
@@ -127106,7 +127144,7 @@ function _drawBossWardShield(m, sx, sy) {
   if (!img || !img.complete || !img.naturalWidth) return;
   const t = game.time | 0;
   const left = (m._wardUntil | 0) - t;                       // steps of ward remaining
-  const len = (typeof LX_BOSS_WARD_LEN === 'number' && LX_BOSS_WARD_LEN > 0) ? LX_BOSS_WARD_LEN : 180;
+  const len = (m._wardLen | 0) || ((typeof LX_BOSS_WARD_LEN === 'number' && LX_BOSS_WARD_LEN > 0) ? LX_BOSS_WARD_LEN : 180);   // v0.30.467 — per-boss length
   const elapsed = Math.max(0, len - left);
   const fade = Math.min(1, (elapsed + 1) / 5, left / 6);    // v0.30.390 — on from frame one (20%), full by frame five, off only over the last six; every warded frame shows it
   if (fade <= 0) return;
@@ -140434,7 +140472,7 @@ function drawSuperBossBar() {
   // bottom drains with the remaining time, so it also answers "for how long".
   if (sb && (sb._wardUntil | 0) > (game.time | 0)) {
     const _wLeft = (sb._wardUntil | 0) - (game.time | 0);
-    const _wFrac = Math.max(0, Math.min(1, _wLeft / LX_BOSS_WARD_LEN));
+    const _wFrac = Math.max(0, Math.min(1, _wLeft / ((sb._wardLen | 0) || LX_BOSS_WARD_LEN)));   // v0.30.467 — per-boss length
     const _wh = 20, _wy = y + barH + 18;   // v0.30.462 — below the frame, not under it
     const _wTxt = 'WARDED';
     ctx.save();
