@@ -10221,7 +10221,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.452';
+const GAME_VERSION = 'v0.30.453';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -58466,8 +58466,23 @@ function _endExpedition(reason) {
       if (_line) setTimeout(() => showToast(_line, 'epic'), 600);
     }
   }
-  // Return to Everdawn Central.
-  if (typeof loadMap === 'function') loadMap('town', 600);
+  // Return to Everdawn Central — but not this instant. See the v0.30.453 note above.
+  const _expExitTok = (game._expExitTok = (game._expExitTok | 0) + 1);
+  const _expExitMap = game.currentMap;
+  // Victory holds longer than death: death already has the 2.2 s overlay doing this job, while a
+  // clear has a corpse, its loot and the reward toasts to land first.
+  const _expExitMs = reason === 'complete' ? 2800 : 2300;
+  // Nothing may kill the player during a window they cannot act in — on a clear the arena can still
+  // hold live adds, and dying here would re-enter the death path with the run already closed.
+  if (typeof player !== 'undefined' && player && reason === 'complete') {
+    player.invulnerable = Math.max(player.invulnerable || 0, _expExitMs + 400);
+  }
+  setTimeout(() => {
+    if (game._expExitTok !== _expExitTok) return;                 // a newer run (or exit) superseded this
+    if (game.currentMap !== _expExitMap) return;                  // they already left some other way
+    if (game.expedition && game.expedition.active) return;        // a fresh expedition started meanwhile
+    if (typeof loadMap === 'function') loadMap('town', 600);
+  }, _expExitMs);
   if (typeof saveState === 'function') saveState();
   // v0.29.60 — the Amnesiac reflects on the run (Hades-style
   // death-as-story). Deferred so it lands after the town load + the
@@ -58732,8 +58747,9 @@ function _expeditionMobKilled(m) {
 // tail, and that is the user's call: the PQ keeps tapering past 70, the
 // Expedition HOLDS at 0.20. It is the longer, harder mode (10 floors, a boss
 // per five, a run you can lose), so it is the one that stays worth doing.
-const LX_EXP_RUN_AT_40 = 0.12;   // v0.30.404 — was 0.25 (1.2% of a level a floor) ·   // share of one level for a full 10-floor clear — v0.30.384: halved (was 0.50; per user, a floor is a stage, not a quest: 2.5% of a level a floor)
-const LX_EXP_RUN_AT_70 = 0.05;   // v0.30.404 — was 0.10 (0.5% a floor) ·   // per user: "after 70 cap at about 0.2 per run" — v0.30.384: halved with the above (1% of a level a floor)
+const LX_EXP_RUN_AT_40 = 0.30;   // v0.30.404 — was 0.25 (1.2% of a level a floor) ·   // share of one level for a full 10-floor clear — v0.30.384: halved (was 0.50; per user, a floor is a stage, not a quest: 2.5% of a level a floor)
+const LX_EXP_RUN_AT_70 = 0.20;   // v0.30.404 — was 0.10 (0.5% a floor) ·   // per user: "after 70 cap at about 0.2 per run" — v0.30.384: halved with the above (1% of a level a floor)
+const LX_EXP_CLEAR_BONUS = 0.5;   // v0.30.453 — a full clear pays half the run budget again, on top
 function _lxExpeditionRunTarget(L) {
   const lv = Math.max(1, Math.floor(L || 1));
   if (lv <= 40) return LX_EXP_RUN_AT_40;
@@ -59274,6 +59290,18 @@ function _completeExpedition() {
     if (_xg > 0 && typeof showToast === 'function') {
       showToast('⚜ Final floor — +' + _xg.toLocaleString() + ' EXP', 'epic');
     }
+    // v0.30.453 — CLEAR BONUS (per user: "The exp should be better on completion of the expedition").
+    // The per-floor split means a run abandoned on B9 already banked 45/55 of the budget, so
+    // finishing paid barely more than quitting one floor short. This is the difference.
+    if (typeof _lxLevelCost === 'function' && typeof _lxExpeditionRunTarget === 'function') {
+      const _clv = Math.max(1, Math.floor(player.level || 1));
+      const _bonus = Math.floor(_lxLevelCost(_clv) * _lxExpeditionRunTarget(_clv) * LX_EXP_CLEAR_BONUS);
+      if (_bonus > 0) {
+        player.exp += _bonus;
+        if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
+        if (typeof showToast === 'function') setTimeout(() => showToast('⚜ FULL CLEAR BONUS — +' + _bonus.toLocaleString() + ' EXP', 'legendary'), 450);
+      }
+    }
   }
   // Base reward: 5000c × player.level for finishing the full 10-floor run.
   // Scales with player level so higher-level expeditions pay more.
@@ -59391,7 +59419,7 @@ Object.assign(monsterTypes, {
   // chip-trade fight. Swing range stays at 200 so the player can still
   // disengage cleanly; cdMs > telegraphMs means he can never instantly
   // chain into a second swing.
-  towerArbiter:  { name:'The Arbiter',   w:140, h:160, color:'#ffd870', shell:'#aa6622', hp:42000,atk:340, def:90, evasion:110, exp:6800, mojicoins:0, speed:1.7, jump:0, boss:true,                       signature:'Mid-tower judge. Never leaves the ground — but his reach is immense.',         traits:{ activeBoss:true, miniElite:true, revivesOnce:{ hpPct:0.25 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:360, swingW:440, swingH:190, cdMs:2400, telegraphMs:450 }, columnStrike:{ dmgMul:2.0, width:120, range:600, cdMs:5500, telegraphMs:650, color:'#ffd870', sprite:'fx_col_arbiter' }, hourglassCharge:2400 } },
+  towerArbiter:  { name:'The Arbiter',   w:140, h:160, color:'#ffd870', shell:'#aa6622', hp:58000,atk:395, def:165, evasion:110, exp:9200, mojicoins:0, speed:1.7, jump:0, boss:true,                       signature:'Mid-tower judge. Never leaves the ground — but his reach is immense.',         traits:{ activeBoss:true, miniElite:true, revivesOnce:{ hpPct:0.25 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:360, swingW:440, swingH:190, cdMs:2400, telegraphMs:450 }, columnStrike:{ dmgMul:2.0, width:120, range:600, cdMs:5500, telegraphMs:650, color:'#ffd870', sprite:'fx_col_arbiter' }, hourglassCharge:2400 } },
   // B6 — vertical climb harasser. Soul-flame projectiles + hover.
   towerSeer:     { name:'Aether Seer',   w:54,  h:58,  color:'#88c8ff', shell:'#2a4488', hp:2025, atk:200, def:54, evasion:160, exp:1700, mojicoins:0, speed:0.9, jump:0, flies:true, level:20, shoot:'mlantern',  shootCd:1700, signature:'Levitates. Drains MP on hit.',                  traits:{ sorrowDrain:true } },
   // B7 — crystalline volley. Ice shards in cone burst.
