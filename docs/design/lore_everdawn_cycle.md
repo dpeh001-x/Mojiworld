@@ -41,7 +41,9 @@ maps to the cosmology:
 
 - **The Amnesiac** — gatekeeper of the reset / unmake. Implies he was
   someone once; the World drank him empty. Multi-stage script with a
-  hard-confirm "I wish to forget" branch.
+  hard-confirm "I wish to forget" branch. **He is the Sovereign of the
+  Spire, later** (v0.30.472) — see §7. Never stated in game; carried by
+  one repeated gesture and three disagreeing rumours.
 - **Sage Mira** (the silver-haired `???`) — last surviving member of the
   *Hourglass Expedition*, the one BEFORE the Doomed Expedition. She
   turned back at the Sanctum gate. The boons she sells are glimmers from
@@ -301,3 +303,48 @@ even for players who skip the clip or run a build without the cinematics.
 Name the two halves consistently: *the Kindest Hand* is what Guguma was
 during the pause; *the First Creature of the Morning* is what he is after
 it breaks (the rebirth cutscene's title card).
+
+## 7. The Crown and the Door (v0.30.472)
+
+The thing at the apex of the Expedition Spire is the Amnesiac, later,
+reached from the other side of a tear. This is **canon and is never
+stated anywhere in the game.**
+
+> Superseded: a v0.29.645 draft pointed chapter IV of the Lyra arc at the
+> crown and implied the Sovereign was her father, High Sage Vesper. That
+> pointer was removed in v0.30.472. Vesper is still lost in the tear — he
+> is a *witness* to the Spire, not its occupant. His last written line
+> still describes the stair, the light, and the people already sitting
+> under it who had simply stopped.
+
+### Why it holds together
+
+- The Amnesiac: *"Once I had a name… the interference drank me empty… I
+  became a door."* A man who cannot remember what he was walking toward.
+- The Sovereign: *"crowned by everyone who climbed this far and then
+  stopped. The last excuse, wearing a crown."* That is what the door
+  becomes when it stops.
+- On the player’s wrong-edged shadow the Amnesiac says: *"I have never
+  known one… No. That is not true, is it. I knew one."* He did. It was him.
+- `q_lyra_cut` already establishes you cannot reach forward to yourself
+  through **unbroken** time. The tear is what makes the loop payable.
+- B10 is reachable only by expedition — a realm you cannot walk to. All
+  ten Tower floors have zero incoming portals.
+
+### How it is delivered
+
+One tell, given to both men, explained by neither: **a hand that keeps
+turning a ring that is not on it.** It is in the Sovereign’s bestiary line
+and in the Amnesiac’s opening speech, and nothing draws attention to either.
+
+Three townsfolk carry the rumour and **none of them agree**, which is what
+keeps it a rumour:
+
+| Voice | What they contribute |
+|---|---|
+| **Auntie Innie** (inn) | Hearsay. A climber told her the thing at the top *sits* like him. "Not the hands," he said, and left without staying the night. |
+| **Old Arlen** (info) | The date. His pre-pause ledger has the same nameless man at the gate going **up** on a morning the Amnesiac was demonstrably in the plaza. One man, two places, one morning. He calls it bad record-keeping; he says that is not what he thinks. |
+| **Bravo** (expedition) | The observation, never the conclusion. She has stood in that room. The Sovereign *waits* instead of attacking, and it looks at your hands rather than your blade. The old man in the plaza does that too. |
+
+Rule for future work: **nobody confirms it.** The player may leave the game
+never having assembled it, and that is the intended failure mode.
