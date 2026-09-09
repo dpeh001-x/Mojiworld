@@ -3,7 +3,7 @@
 // one-shot VFX sets, one per class, drawn over the player when A lands.
 //   warrior SHIELD - a golden kite shield of light raised and braced
 //   rogue   EVADE  - a violet smoke burst with shadow streaks
-//   mage    VANISH - a blue-white arcane veil shimmering into nothing
+//   mage    VEIL   - a light-blue incantation veil: rings of runic script closing over the caster
 //   archer  ROLL   - a green wind-and-leaf swirl arcing low
 // Two ludo.ai stages each: text->image for the key frame, /assets/sprite/animate
 // to drive it (frame_size -9 keeps the framing; the motion prompt is verbs only).
@@ -39,8 +39,21 @@ const SETS = {
     motion: 'The smoke bursts outward from the centre, the shadow streaks whip sideways and stretch, wisps curl and tumble, magenta sparks flicker, then the whole cloud thins and dissipates into transparency.' + HOLD,
   },
   mage: {
-    base: COMMON + 'A shimmering arcane veil: a tall oval of pale blue-white light with glowing rune glyphs orbiting it, soft cyan sparkles, thin rings of light, ethereal and translucent, the centre fading toward invisibility.',
-    motion: 'The veil shimmers and ripples like water, the rune glyphs orbit and glow brighter, sparkles drift upward, the rings of light expand, then the veil folds inward and vanishes leaving a few fading sparkles.' + HOLD,
+    // Asking the prompt for an edge margin was tried and made it WORSE: the animate stage sets its own
+    // framing from the key frame, and the run that begged for margin came back with the glyph RING
+    // itself clipped on five frames instead of a few flare tendrils on three. The framing that works
+    // is the one below; the residual overflow is thin radial tendrils at the flare peak, which read
+    // as energy leaving the effect rather than as a hard cut.
+    // v0.30.484 — per user: "regenerate the mage block sprites: to look more like a magic incantation
+    // veil in light blue". The previous prompt asked for "a shimmering arcane veil: a TALL OVAL ...
+    // ethereal and translucent, the centre fading toward invisibility", and the model read that as
+    // exactly what it says — a hanging sheet. In game it looked like a ghost in a bedsheet rather
+    // than a spell. So: no oval, no fading-to-nothing, and the words that invited cloth are gone.
+    // What replaces them is structure — concentric bands of written incantation, a geometric seal,
+    // and a stated NOT-cloth constraint, because the failure mode is known and worth naming to the
+    // model rather than hoping.
+    base: COMMON + 'A circular arcane WARD of light blue incantation magic seen face-on: two concentric rotating rings of glowing cyan rune script and invented glyph characters, a fine geometric seal of thin straight lines spanning the inner ring, a pale ice-blue luminous core, crisp light-blue filaments arcing between the rings, small bright sparks of pale blue drifting outward. Luminous energy and written script only. NOT cloth, NOT fabric, NOT a sheet, NOT a hood or robe, NOT a ghost, no drapery or folds, no figure inside.',
+    motion: 'The two rings of rune script counter-rotate against each other and brighten, the glyphs flare one after another around the circle, the geometric seal snaps into place with a pulse of pale blue light, filaments of light arc between the rings, then the whole ward flares once and collapses inward to a point, leaving a few drifting blue sparks.' + HOLD,
   },
   archer: {
     base: COMMON + 'A swirling arc of green wind and scattered leaves sweeping low in a rolling curve, pale dust puffs at the base, bright emerald streaks of speed, a few small leaves and grass blades caught in the gust.',
