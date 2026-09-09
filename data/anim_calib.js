@@ -3051,6 +3051,13 @@ window.LX_ANIM_CALIB = {
       ],
       "ftAuto": true
     }
+  },
+  "sovCrownShard": {
+    "idle": {
+      "s": 2,
+      "dx": 0,
+      "dy": 0
+    }
   }
 };
 window.LX_ATK_HITBOX = {
