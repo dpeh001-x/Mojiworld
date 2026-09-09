@@ -48,7 +48,8 @@ const r = await page.evaluate(async () => {
   const casters = [];
   for (const t in monsterTypes) {
     const cs = monsterTypes[t] && monsterTypes[t].traits && monsterTypes[t].traits.columnStrike;
-    if (cs) casters.push({ type: t, sprite: cs.sprite || null, tg: 'tg_col_' + t });
+    if (cs) casters.push({ type: t, sprite: cs.sprite || null, tg: 'tg_col_' + t,
+      boss: !!monsterTypes[t].boss });
   }
   // ask the loader for every key this census needs, then let them decode
   for (const c of casters) {
@@ -66,6 +67,7 @@ const r = await page.evaluate(async () => {
     rows: casters.map((c) => ({
       type: c.type,
       sprite: c.sprite,
+      boss: c.boss,
       beam: c.sprite ? ready(c.sprite) : { has: false, decoded: false },
       tg: ready(c.tg),
     })),
@@ -86,6 +88,7 @@ for (const x of r.rows) {
 }
 console.log(`per-caster telegraphs resolving: ${tgHave.length}/${r.total}`);
 
+let borrowers = [];
 const checks = [
   ['every columnStrike caster declares a sprite', noSprite.length === 0, noSprite.map((x) => x.type).join(', ')],
   ['every declared beam sprite decodes', beamDead.length === 0, beamDead.map((x) => x.type + '->' + x.sprite).join(', ')],
@@ -93,6 +96,19 @@ const checks = [
     !!r.rows.find((x) => x.type === 'young_confused_barnaby' && x.sprite === 'fx_col_barnaby' && x.beam.decoded)],
   ['the Arbiter + Sovereign telegraphs load (were on disk, unregistered)',
     ['towerArbiter', 'towerSovereign'].every((t) => { const x = r.rows.find((y) => y.type === t); return x && x.tg.decoded; })],
+  // v0.30.486 — a boss may not draw another entity's beam. Ownership is a
+  // name test: fx_col_<something-that-is-this-caster>. Mobs may still share a
+  // family beam (towerHexer/future_lyra both use fx_col_tombhexer by design).
+  ['every BOSS draws its own beam, not a borrowed one', (() => {
+    const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+    borrowers = r.rows.filter((x) => {
+      if (!x.boss || !x.sprite) return false;
+      const f = norm(x.sprite.replace(/^fx_col_/, ''));
+      const ty = norm(x.type);
+      return !(ty.includes(f) || f.includes(ty));
+    });
+    return borrowers.length === 0;
+  })(), borrowers.map((x) => x.type + ' -> ' + x.sprite).join(', ')],
   ['no 404 for any column art', bad404.length === 0, bad404.join(' | ')],
 ];
 let fails = 0;

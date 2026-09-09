@@ -66,6 +66,30 @@ const JOBS = [
       + 'brick flecks rising through it and a faint worn stone sigil glow. Broad and imposing like '
       + 'a falling pillar of light, not a thin beam and not a wire',
   },
+  {
+    key: 'conductor',
+    file: 'fx_col_conductor.webp',
+    W: 512, H: 1120, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // The Master Conductor was the last BOSS drawing another boss's beam:
+    // v0.30.281 gave his DEPARTURE SIGNAL the Arbiter's golden judgement
+    // column, deliberately ("the judgment of a missed departure"). The idea is
+    // good and is kept - this is still a signal falling on you - but rendered
+    // in HIS palette (color #88aaee over shell #2a3a8a) instead of the Tower's
+    // gold, so a clockwork train guard stops firing the Spire's law.
+    // v1 of this prompt led with the clockwork and the model built a solid
+    // mechanical grille - a dark machine wall, not a strike. Every other beam
+    // in the game reads as LIGHT first. The gears are now ghostly shapes
+    // suspended inside a luminous shaft rather than the structure itself.
+    beam: 'clockwork railway DEPARTURE SIGNAL theme: a WIDE THICK column of BRIGHT GLOWING LIGHT '
+      + 'that fills the full width of the frame edge to edge, blazing white-hot core down the '
+      + 'centre, cold signal-lamp blue (#88aaee) mid-body, deep navy (#2a3a8a) only at the soft '
+      + 'translucent outer falloff, with a warm brass-amber glint threaded through the core. '
+      + 'It is a pillar of luminous energy, glowing and semi-transparent like a searchlight beam. '
+      + 'FAINT and GHOSTLY inside the glow, barely visible as darker silhouettes suspended in the '
+      + 'light: slowly turning clock hands, a few brass gear outlines, small punched ticket stubs '
+      + 'and drifting steam wisps rising. The clockwork is a subtle hint inside the light, NOT a '
+      + 'solid machine, NOT a metal grille, NOT a wall of gears. Bright, radiant and imposing',
+  },
 ];
 
 async function fetchBuf(url) {
