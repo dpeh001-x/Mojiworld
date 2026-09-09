@@ -3,7 +3,8 @@
 // HP just was: held 350ms, then drained exponentially). Driven through the
 // real drawSuperBossBar on a virtual clock; observed via a fillRect spy —
 // the fill tint, the bg and the ember chip are all fillRects with known
-// geometry (x=40, y=20, barW=880, barH=18 at logical W=960).
+// geometry is read off the draw itself (the trough rect), never hardcoded — v0.30.462
+// moved the plate to a centred 660x22 and stale literals took six checks down with it.
 //   node scripts/boss_bar_chip_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -57,19 +58,39 @@ const r = await page.evaluate(() => {
     const rects = []; let card = null;
     const _fr = ctx.fillRect;
     const _ft = ctx.fillText;
+    // v0.30.462 — the plate paints several of its layers with gradients now (the chip
+    // among them), and a CanvasGradient stringifies to "[object CanvasGradient]", which
+    // told this spy nothing. Resolve each one back to its colour stops so the colour
+    // probes below keep describing what was actually painted.
+    const stops = new Map();
+    const _clg = ctx.createLinearGradient;
+    ctx.createLinearGradient = function (...a) {
+      const g = _clg.apply(this, a); const list = []; const _add = g.addColorStop.bind(g);
+      g.addColorStop = (o, c) => { list.push(c); return _add(o, c); };
+      stops.set(g, list); return g;
+    };
+    const styleOf = (fs) => (fs && stops.has(fs)) ? stops.get(fs).join(' ') : String(fs);
     ctx.fillText = function (t, tx, ty) {
       if (String(this.font).indexOf('46px') >= 0) card = { a: +this.globalAlpha.toFixed(3), y: ty };
       return _ft.apply(this, arguments);
     };
-    ctx.fillRect = function (x, y, w, h) { rects.push({ s: String(this.fillStyle), x, y, w, h }); return _fr.apply(this, arguments); };
+    ctx.fillRect = function (x, y, w, h) { rects.push({ s: styleOf(this.fillStyle), grad: stops.has(this.fillStyle), x, y, w, h }); return _fr.apply(this, arguments); };
+    // the plate's gradients are cached on (geometry, phase) and so are built on the first
+    // draw only; drop the key so this draw rebuilds them where the spy above can read them
+    try { _SBB_G.key = ''; } catch (e) {}
     try { drawSuperBossBar(); } catch (e) { rects.push({ s: 'THREW:' + e }); }
-    ctx.fillRect = _fr; ctx.fillText = _ft;
+    ctx.fillRect = _fr; ctx.fillText = _ft; ctx.createLinearGradient = _clg;
     if (blockArt && typeof LX_FX !== 'undefined') { LX_FX.ui_bossbar_frame = sF; LX_FX.ui_bossbar_fill = sR; }
-    const strip = rects.filter(q => q.y === 20 && q.h === 18);
-    const ember = strip.find(q => /255,\s*225,\s*170/.test(q.s));
-    const tint = strip.find(q => /140,\s*90,\s*255|255,\s*110,\s*200|255,\s*60,\s*90/.test(q.s));
-    const pulse = strip.find(q => /255,\s*255,\s*255/.test(q.s) && q.w > 10);
-    return { emberX: ember ? Math.round(ember.x) : -1, emberW: ember ? Math.round(ember.w) : 0,
+    // v0.30.462 — locate the strip from the trough the plate paints (its gradient runs
+    // #04010a -> #170b28 -> #08030f) instead of hardcoding a y/h. The geometry moved
+    // once already and took six checks with it; now it cannot go stale.
+    const bar = rects.find(q => /#04010a/.test(q.s));
+    const strip = bar ? rects.filter(q => q.y === bar.y && q.h === bar.h) : [];
+    const ember = strip.find(q => /255,\s*206,\s*140|255,\s*225,\s*170/.test(q.s));
+    const tint = strip.find(q => /150,\s*100,\s*255|255,\s*110,\s*205|255,\s*80,\s*88|140,\s*90,\s*255/.test(q.s));
+    const pulse = strip.find(q => !q.grad && /255,\s*255,\s*255/.test(q.s) && q.w > 10);
+    return { barX: bar ? Math.round(bar.x) : -1, barW: bar ? Math.round(bar.w) : 0,
+             emberX: ember ? Math.round(ember.x) : -1, emberW: ember ? Math.round(ember.w) : 0,
              tintW: tint ? Math.round(tint.w) : 0, card,
              pulseW: pulse ? Math.round(pulse.w) : 0,
              pulseA: pulse ? +((pulse.s.match(/([\d.]+)\)\s*$/) || [0, 0])[1]) : 0,
@@ -124,14 +145,16 @@ const sw = r.sweep || [];
 ok('intro sweep: the fill starts near zero on acquisition', sw[0] <= 8, sw);
 ok('intro sweep: grows monotonically through the 700ms window',
   sw.every((w, i) => i === 0 || w >= sw[i - 1]) && sw[2] > sw[1], sw);
-ok('intro sweep: lands on the full bar (~880px) by 800ms', sw[4] >= 870, sw);
-ok('damage chip: a hit paints the ember strip over the lost HP (from the 50% edge, ~440 wide)',
-  r.hit1 && r.hit1.emberW >= 420 && Math.abs(r.hit1.emberX - (40 + 440)) <= 8, r.hit1);
+// v0.30.462 — stated as fractions of the strip the spy located, not as the pixel
+// literals of one particular layout
+ok('intro sweep: lands on the full bar by 800ms', r.hit1 && sw[4] >= r.hit1.barW - 10, { sw, barW: r.hit1 && r.hit1.barW });
+ok('damage chip: a hit paints the ember strip over the lost HP (from the 50% edge, half the bar wide)',
+  r.hit1 && r.hit1.emberW >= r.hit1.barW * 0.47 && Math.abs(r.hit1.emberX - (r.hit1.barX + r.hit1.barW * 0.5)) <= 8, r.hit1);
 ok('damage chip: holds through the first 350ms — no drain yet',
   r.held && r.held.emberW >= r.hit1.emberW - 10, r.held);
 ok('damage chip: fully drained ~3s after the hit', r.drained && r.drained.emberW <= 2, r.drained);
 ok('second hit re-arms the chip at the new HP edge (from 30%, spans the fresh loss)',
-  r.hit2 && r.hit2.emberW >= 150 && Math.abs(r.hit2.emberX - (40 + 264)) <= 8, r.hit2);
+  r.hit2 && r.hit2.emberW >= r.hit2.barW * 0.17 && Math.abs(r.hit2.emberX - (r.hit2.barX + r.hit2.barW * 0.3)) <= 8, r.hit2);
 ok('...and holds again', r.held2 && r.held2.emberW >= r.hit2.emberW - 10, r.held2);
 ok('a heal snaps the ghost up — no ember painted', r.healed && r.healed.emberW === 0, r.healed);
 ok('procedural fallback branch paints the chip too', r.procHit && r.procHit.emberW >= 100, r.procHit);

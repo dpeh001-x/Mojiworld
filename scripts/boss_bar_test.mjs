@@ -164,8 +164,12 @@ ok('...for the 63-million-HP one too', /[KM]|%/.test(hpText(r.superBoss)), { hp:
 ok('the bar frame + ribbon fill are decoded by the live loader', r.barArtReady === true, {});
 ok('with the art, the bar is drawImage-framed — no border rectangles',
    r.paintArt && r.paintArt.drawImage >= 2 && r.paintArt.strokeRect === 0, r.paintArt);
+// v0.30.462 — the fallback's plate border is gone: the plate's silhouette is the veil
+// vignette and the trough, so the one rectangle left to stroke is the bar's own rim
+// (it was two — an outer plate box and the bar box). Still the same assertion in spirit:
+// with no art decoded, the bar is framed by strokes and blits nothing.
 ok('with the art blocked, the procedural plate still draws (fallback intact)',
-   r.paintFallback && r.paintFallback.drawImage === 0 && r.paintFallback.strokeRect >= 2, r.paintFallback);
+   r.paintFallback && r.paintFallback.drawImage === 0 && r.paintFallback.strokeRect >= 1, r.paintFallback);
 ok('the embedded Cinzel title face loads (offline, no machine fonts)', r.fontLoaded === true, {});
 ok('the name draws IN the title face', typeof r.nameFont === 'string' && r.nameFont.includes('LXBossTitle'), { font: r.nameFont });
 ok('the name is stroke-outlined (dark ring + accent ring)', r.nameOutlined >= 2, { strokes: r.nameOutlined });
