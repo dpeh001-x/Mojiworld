@@ -39,15 +39,32 @@ const r = await page.evaluate(async () => {
     out.frames[k] = set ? set.length : 0;
     out.calib[k] = _lxAnimCalib(k, 'attack');
   }
-  const measure = async (poseKey) => {
-    if (poseKey) _lxBossAtkPose(m, poseKey, 240); else { m._bossAtkKey = null; m._bossAtkUntil = 0; }
-    m._frameIsAttack = true; m.patternState = 'attack';
-    await new Promise((res) => setTimeout(res, 520));
+  // Two things make a fixed sleep wrong here, and both cost a red run before they
+  // were pinned. (1) _visW/_visH are written by the boss DRAW, so a throttled frame
+  // leaves the previous pose's numbers in place. (2) the Arbiter's own AI is live:
+  // parked next to the player he fires his real bigMelee mid-measure and overwrites
+  // the forced pose, so the column read back as the verdict. So: keep him on camera with his
+  // own range, re-assert the pose every poll, and wait for a frame that actually drew
+  // the key under test.
+  const measure = async (poseKey, want) => {
+    m._visW = 0; m._visH = 0;
+    const t0 = performance.now();
+    while (performance.now() - t0 < 4000) {
+      // keep him ON CAMERA (off-screen he is culled and never writes _visW) and stop his
+      // own attacks instead: a boss out of view cannot be measured, a boss on cooldown cannot
+      // overwrite the pose under test.
+      m.x = player.x + 300;
+      m._bigMeleeCd = 99999; m._columnCd = 99999; m._bigMeleeFiring = false; m._columnFiring = false;
+      if (poseKey) _lxBossAtkPose(m, poseKey, 240); else { m._bossAtkKey = null; m._bossAtkUntil = 0; }
+      m._frameIsAttack = true; m.patternState = 'attack';
+      await new Promise((res) => setTimeout(res, 60));
+      if (m._visW > 0 && m._visH > 0 && (m._bossAtkKey || m.type) === want) break;
+    }
     return { key: m._bossAtkKey || m.type, w: Math.round(m._visW || 0), h: Math.round(m._visH || 0) };
   };
-  out.sizes.base = await measure(null);
-  out.sizes.verdict = await measure('swing');
-  out.sizes.column = await measure('column');
+  out.sizes.base = await measure(null, 'towerArbiter');
+  out.sizes.verdict = await measure('swing', 'towerArbiterverdict');
+  out.sizes.column = await measure('column', 'towerArbitercolumn');
   // a boss with no per-attack art must be untouched by the generalised resolver
   game.monsters.length = 0;
   spawnMonster(player.x + 300, player.y, 'echoKnight', true);
