@@ -10221,7 +10221,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.456';
+const GAME_VERSION = 'v0.30.457';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -58680,6 +58680,9 @@ function _lxStatToLevel(m, L, opts) {
   m.level     = Math.max(1, Math.floor(L));
   return b;
 }
+// v0.30.457 — how much harder a tower mob is than the field monster of its level, and how much more it
+// pays. ONE number for both: "commensurate" means the exchange rate stays put.
+const LX_EXPEDITION_MOB_MUL = 1.75;
 function _expeditionScaleMob(m, playerLevel) {
   if (!game.expedition || !game.expedition.active) return m;
   // v0.26.418 — MAP-GATE. The active flag alone was leaking: if any expedition
@@ -58729,7 +58732,9 @@ function _expeditionScaleMob(m, playerLevel) {
   // dividing the mob's EXP by its authored value — which compounded with the
   // tower tier multipliers and drifted to 5× a same-level field monster by
   // Lv 80. A stable, predictable baseline beats an unstable inference.
-  _lxStatToLevel(m, _toLv, { stat: 1, exp: 1 });
+  // v0.30.457 — per user: "Increase the expedition monsters stats and HP more, but give EXP that is
+  // commensurate to those stats". One constant drives both, so the ratio can never drift apart.
+  _lxStatToLevel(m, _toLv, { stat: LX_EXPEDITION_MOB_MUL, exp: LX_EXPEDITION_MOB_MUL });
   return m;
 }
 // v0.26.264 — Floor-clear detector. Called after every monster kill
@@ -59511,7 +59516,7 @@ Object.assign(monsterTypes, {
   // overshoots Gravitos's own 18 s — Sovereign is meant to be the
   // capstone fight. New homing-projectile and drain-pillar patterns
   // layer in via _bossSpecialAttacks (this file ~L43135 area).
-  towerSovereign:{ name:'The Sovereign of the Spire', w:255, h:300, color:'#fff5d0', shell:'#3a1a0a', hp:220000,atk:760,def:190,evasion:140, exp:28000, mojicoins:0, speed:2.3, jump:13, boss:true,            signature:'Final apex. Singularity collapses, homing volleys, and drain pillars.',traits:{ activeBoss:true, miniElite:true, revivesOnce:{ hpPct:0.30 }, bigMelee:{ kind:'swing', dmgMul:2.8, range:200, swingW:320, swingH:130, cdMs:3000, telegraphMs:500 }, columnStrike:{ dmgMul:3.0, width:140, range:680, cdMs:2800, telegraphMs:550, color:'#fff5d0', sprite:'fx_col_sovereign' }, hourglassCharge:1500, echoStrike:480 } },
+  towerSovereign:{ name:'The Sovereign of the Spire', w:255, h:300, color:'#fff5d0', shell:'#3a1a0a', hp:220000,atk:760,def:190,evasion:140, exp:70000, mojicoins:0, speed:2.3, jump:0, boss:true,            signature:'Final apex. Singularity collapses, homing volleys, and drain pillars.',traits:{ activeBoss:true, miniElite:true, revivesOnce:{ hpPct:0.30 }, bigMelee:{ kind:'swing', dmgMul:2.8, range:200, swingW:320, swingH:130, cdMs:3000, telegraphMs:500 }, columnStrike:{ dmgMul:3.0, width:140, range:680, cdMs:2800, telegraphMs:550, color:'#fff5d0', sprite:'fx_col_sovereign' }, hourglassCharge:1500, echoStrike:480 } },
 });
 
 // 10-floor descent config. Each entry drives _buildTowerMaps.
@@ -82054,6 +82059,45 @@ function _bossSpecialAttacks(m, dt) {
     }
     if (m._sovExposedUntil && _now >= m._sovExposedUntil) m._sovExposedUntil = 0;
     if (m._sovSpentUntil && _now >= m._sovSpentUntil) m._sovSpentUntil = 0;
+    // ---- SPIRE-STEP (v0.30.457) ------------------------------------------
+    // Per user: "make the towersovereign able to teleport horizontally but not jump at all".
+    // This is mobility, not an attack — it deals nothing and grants no i-frames, so it closes the
+    // distance without adding an unanswerable beat. Held back while the Regalia is up so it cannot
+    // drag the shard ring away from a player who is working through it.
+    if (m._sovStepAt == null) m._sovStepAt = _now + 300;
+    if (_now >= m._sovStepAt) {
+      // Measured: the Regalia shield is up ~49% of the fight and the gate below skips those, so a
+      // raw 200-frame cadence delivered only ~3 steps per 1,400 frames. Tightened so the EFFECTIVE
+      // rate lands near the intent once the shield takes its half.
+      const _cadence = _ph === 1 ? 150 : _ph === 2 ? 120 : 95;   // ~2.5 / 2.0 / 1.6 s at 60 fps
+      m._sovStepAt = _now + _cadence;
+      const _pcx = player.x + player.w / 2, _mcx = m.x + m.w / 2;
+      const _gap = _pcx - _mcx;
+      // Only worth a step when there is real ground to cover; blinking on top of someone already in
+      // reach is just a teleport into a melee trade nobody asked for.
+      if (!m._sovShielded && Math.abs(_gap) > 260 && m.currentHp > 0) {
+        const _ww = (game.mapData && game.mapData.worldWidth) || 2000;
+        const _side = _gap > 0 ? 1 : -1;
+        // land a stride SHORT of the player and on their side, never past or inside them
+        const _want = _pcx - _side * 170 - m.w / 2;
+        // A STEP, not a snap across the arena. Uncapped this closed 889px of a 1,350px gap in one
+        // frame, which means space can never be made against it — with the homing volleys and the
+        // drain pillars already in the kit, that is not a fight, it is a corner. Capped, it takes
+        // ground decisively and repeatedly, and kiting still buys something.
+        const _MAX_STEP = 420;
+        const _to = Math.max(20, Math.min(_ww - m.w - 20,
+          Math.abs(_want - m.x) > _MAX_STEP ? m.x + _side * _MAX_STEP : _want));
+        if (Math.abs(_to - m.x) > 40) {
+          if (typeof _lxSovBeat === 'function') _lxSovBeat(m, { ring: 190, motes: 14 });   // departure, at the old spot
+          m._sovStepCount = (m._sovStepCount | 0) + 1;   // instrumentation: cadence is in FRAMES, so
+          m._sovStepLast = Math.round(_to - m.x);        // wall-clock sampling cannot count these
+          m.x = _to;
+          m.vx = 0;                                   // arrive standing, not sliding
+          m.facing = _side > 0 ? 1 : -1;
+          if (typeof _lxSovBeat === 'function') _lxSovBeat(m, { ring: 230, motes: 18, shake: 5 });   // arrival
+        }
+      }
+    }
     // ONE writer for the vulnerability channel, in priority order — competing
     // per-mechanic writes would fight each other frame to frame.
     m._dmgTakenMul = m._sovShielded ? (_ph === 1 ? 0.12 : _ph === 2 ? 0.10 : 0.08)
