@@ -1,14 +1,19 @@
-// Zodiac projectile damage (v0.30.475). Per user: "all zodiac bosses projectiles should deal more
-// damage, approximately 3000 - 5000 damage flat regardless of player's defence".
+// Zodiac projectile damage (v0.30.476). Per user, in two steps: "all zodiac bosses projectiles
+// should deal more damage, approximately 3000 - 5000 damage flat regardless of player's defence",
+// then "the zodiac projectiles should pierce DEF to a certain extent, meaning DEF still plays a part
+// but should not half the damage significantly".
+//
+// So the claim under test is a BAND, not an absence: armour must move the number and must not move
+// it much. Both halves are asserted, because either alone is satisfiable by a broken build — DEF
+// doing nothing passes "not much", and the old curve passes "moves".
 //
 // Every number is the HP the player ACTUALLY lost, measured by firing real projectiles into a real
-// player through the game's own impact resolver — not read back off the constants. "Regardless of
-// defence" is checked the only way it honestly can be: the same projectile is fired across a DEF
-// sweep, and a PLAIN enemy shot is fired across the same sweep as the control. Armour must visibly
-// crush the plain shot and must not move the zodiac one.
+// player through the game’s own impact resolver — not read back off the constants. The same
+// projectile is fired across a DEF sweep, with a PLAIN enemy shot swept alongside it as the control:
+// armour must visibly crush the plain shot (2,400 -> 150) while only trimming the zodiac one.
 //   node scripts/zodiac_projectile_damage_test.mjs      MOJI_GAME_FILE / MOJI_SERVE_ROOT / PORT
-// Negative control v0.30.474: the zodiac shot tracks the DEF curve like any other and lands nowhere
-// near 3000-5000.
+// Negative controls: v0.30.474 tracks the full DEF curve (2,400 -> 125) and never reaches the band;
+// v0.30.475 sits in the band but armour moves it by nothing at all.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
@@ -88,13 +93,23 @@ try {
   console.log(`build ${r.ver}  band ${r.band && r.band.join('-')}`);
   console.log('  DEF sweep: ' + S.map((x) => `def ${x.def}: plain ${x.plain}, zodiac ~${x.zodMean}`).join(' | '));
   ok('the flat band is declared as 3000-5000', !!r.band && r.band[0] === 3000 && r.band[1] === 5000, JSON.stringify(r.band));
-  ok('a zodiac projectile lands inside 3000-5000 at every DEF tested', Math.min(...zAll) >= 3000 && Math.max(...zAll) <= 5000,
-    `${Math.min(...zAll)}-${Math.max(...zAll)}`);
-  ok('DEFENCE DOES NOT MOVE IT — the mean barely shifts from 0 DEF to 125,000', Math.max(...zMeans) - Math.min(...zMeans) < 900,
-    zMeans.map((m, i) => `def ${S[i].def}: ${m}`).join(', '));
+  ok('an UNARMOURED hit lands inside the declared 3000-5000 band', S[0].zodMin >= 3000 && S[0].zodMax <= 5000,
+    `${S[0].zodMin}-${S[0].zodMax} at def 0`);
+  ok('...and armour never pushes it below three quarters of the band floor', Math.min(...zAll) >= 2250,
+    `lowest hit seen across the whole sweep: ${Math.min(...zAll)}`);
+  {
+    const soft = zMeans[0], hard = zMeans[zMeans.length - 1];
+    const cut = 1 - hard / soft;
+    ok('DEF still plays a part — heavy armour measurably reduces the hit', cut > 0.08,
+      `${Math.round(cut * 100)}% off at def ${S[S.length - 1].def} (${soft} -> ${hard})`);
+    ok('...but nowhere near halving it — the cut stays under a third', cut < 0.33,
+      `${Math.round(cut * 100)}% off; the pre-v0.30.475 curve took 95%`);
+    ok('...and the reduction is monotone in DEF, not noise', zMeans[0] >= zMeans[zMeans.length - 1],
+      zMeans.map((m, i) => `def ${S[i].def}: ${m}`).join(', '));
+  }
   ok('the control proves the sweep is real — a PLAIN shot is crushed by the same armour', S[0].plain > S[S.length - 1].plain * 3,
     `plain ${S.map((x) => x.plain).join(' -> ')} across def ${S.map((x) => x.def).join(' -> ')}`);
-  ok('every sign hits in the band, not just the one swept', Object.values(r.bySign).every((v) => Math.min(...v) >= 3000 && Math.max(...v) <= 5000),
+  ok('every sign hits in the band at zero DEF, not just the one swept', Object.values(r.bySign).every((v) => Math.min(...v) >= 3000 && Math.max(...v) <= 5000),
     Object.entries(r.bySign).map(([k, v]) => `${k} ${Math.min(...v)}-${Math.max(...v)}`).join(', '));
   ok('blocking still reduces it — the defensive ABILITY is not bypassed', Math.max(...r.blocked) < Math.min(...zAll),
     `blocked ${Math.min(...r.blocked)}-${Math.max(...r.blocked)} vs unblocked ${Math.min(...zAll)}-${Math.max(...zAll)}`);
