@@ -113,7 +113,15 @@ try {
     `type ${r.sov.jump}, spawned ${r.spawned.jump}`);
   ok('...and watched live for 20s it never leaves the ground', r.watch.yRange <= 2 && !r.watch.everNegVy,
     `y range ${r.watch.yRange}px, ever launched ${r.watch.everNegVy}`);
-  ok('it DOES teleport horizontally, repeatedly, and never further than one 420px stride', r.watch.stepCount >= 3 && r.watch.biggestStep > 200 && r.watch.biggestStep <= 425,
+  // v0.30.472 — was `stepCount >= 3`, which is the boundary of a random process rather than an
+  // invariant. The step is skipped entirely while the Regalia shield is up, and the game's own
+  // note at that gate says the shield takes ~49% of the fight and the cadence therefore delivers
+  // "~3 steps per 1,400 frames" — so over this 1,401-frame watch, 2 and 3 are both ordinary. Runs
+  // on an unchanged build measured 3, 2, 3. What the check is actually for is that the Sovereign
+  // CLOSES DISTANCE BY STEPPING rather than walking, and never crosses the arena in one go, so it
+  // asserts repetition (more than once), the stride bounds, and that a step outruns the walk.
+  ok('it DOES teleport horizontally, repeatedly, and never further than one 420px stride',
+    r.watch.stepCount >= 2 && r.watch.biggestStep > 200 && r.watch.biggestStep <= 425 && r.watch.biggestStep > r.watch.walkMaxPerFrame * 4,
     `${r.watch.stepCount} steps over ${r.watch.gameFrames} game frames, biggest observed ${r.watch.biggestStep}px vs walk ${r.watch.walkMaxPerFrame}px/frame`);
   ok('the teleport is HORIZONTAL — y does not move across the step', r.watch.dyAcrossStep === 0, `dy ${r.watch.dyAcrossStep}px`);
   ok('the scaler applies each expedition dial it is handed — HP, ATK and DEF against a field monster of the same level',
