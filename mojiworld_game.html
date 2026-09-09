@@ -10562,7 +10562,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.492';
+const GAME_VERSION = 'v0.30.493';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -68953,11 +68953,16 @@ function drawClassIdentityHUD() {
     const _rgb = isArcher ? '136,255,204' : '255,238,68';
     ctx.save();
     ctx.translate(cx, cy);
+    // v0.30.493 — ONE OPACITY SCALE FOR THE WHOLE RING (per user: "make it less opaque as well").
+    // Every alpha below is a multiple of this, so the ring can be dimmed or lifted as ONE object
+    // instead of eight numbers drifting apart. It also rides the charge: an early hold is a
+    // whisper and a full one is loud, which is information the old flat ring did not carry.
+    const _RING_A = 0.62 + p * 0.30;
     // --- the groove: a soft dark channel, not a solid black rule -----------------
-    ctx.strokeStyle = 'rgba(12,6,24,0.42)';
+    ctx.strokeStyle = `rgba(12,6,24,${0.26 * _RING_A + 0.06})`;
     ctx.lineWidth = 6;
     ctx.beginPath(); ctx.arc(0, 0, _hr, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.strokeStyle = `rgba(255,255,255,${0.06 * _RING_A})`;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(0, 0, _hr + 3.2, 0, Math.PI * 2); ctx.stroke();
     // --- notches: the gauge reads as steps, so partial progress is legible -------
@@ -68965,30 +68970,40 @@ function drawClassIdentityHUD() {
     ctx.lineCap = 'round';
     for (let i = 0; i < _tick.length; i++) {
       const t = _tick[i], on = i < _lit;
-      ctx.strokeStyle = on ? `rgba(${_rgb},0.85)` : 'rgba(255,255,255,0.10)';
-      ctx.lineWidth = on ? 2.2 : 1.4;
-      const a = _hr + 4.5, b = _hr + (on ? 9 : 7);
+      // the lit run FADES BACK from the head, so the gauge has a direction rather than being a
+      // block of identical marks: the notch you just passed is the brightest.
+      const age = on ? (_lit - i) / Math.max(1, _lit) : 0;
+      ctx.strokeStyle = on
+        ? `rgba(${_rgb},${(0.30 + 0.45 * (1 - age)) * _RING_A})`
+        : `rgba(255,255,255,${0.08 * _RING_A})`;
+      ctx.lineWidth = on ? 2 : 1.3;
+      const a = _hr + 4.5, b = _hr + (on ? 8.5 : 6.5);
       ctx.beginPath(); ctx.moveTo(t.c * a, t.s * a); ctx.lineTo(t.c * b, t.s * b); ctx.stroke();
     }
-    // --- the sweep, with a lit head ---------------------------------------------
+    // --- the sweep: a faint body with a bright TAIL, so the charge flows ---------
     if (p > 0.004) {
       const a0 = -Math.PI / 2, a1 = a0 + p * Math.PI * 2;
-      ctx.strokeStyle = _hot;
-      ctx.lineWidth = 4.5;
-      ctx.shadowColor = `rgba(${_rgb},0.85)`;
-      ctx.shadowBlur = 10;
+      // Two passes rather than a gradient: createLinearGradient here would allocate every frame,
+      // and the block beside it was deliberately de-allocated in v0.30.285.
+      ctx.globalAlpha = 0.42 * _RING_A;
+      ctx.strokeStyle = _hot; ctx.lineWidth = 3.6;
       ctx.beginPath(); ctx.arc(0, 0, _hr, a0, a1); ctx.stroke();
+      const _tail = Math.min(0.28 * Math.PI * 2, p * Math.PI * 2);
+      ctx.globalAlpha = 0.92 * _RING_A;
+      ctx.lineWidth = 4.2;
+      ctx.shadowColor = `rgba(${_rgb},0.55)`; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(0, 0, _hr, a1 - _tail, a1); ctx.stroke();
       ctx.shadowBlur = 0;
       // the head: a bright bead where the charge currently is
       const hx = Math.cos(a1) * _hr, hy = Math.sin(a1) * _hr;
       ctx.fillStyle = '#fff';
-      ctx.globalAlpha = 0.9;
-      ctx.beginPath(); ctx.arc(hx, hy, 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.72 * _RING_A;
+      ctx.beginPath(); ctx.arc(hx, hy, 2.4, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
       // WARRIOR ONLY — embers thrown off the leading edge. Three motes on staggered
       // phases so it reads as heat coming off the wind-up, not as a spinner.
       if (!isArcher && p > 0.12) {
-        ctx.fillStyle = `rgba(255,190,90,${0.30 + p * 0.45})`;
+        ctx.fillStyle = `rgba(255,190,90,${(0.22 + p * 0.34) * _RING_A})`;
         for (let k = 0; k < 3; k++) {
           const ph = ((game.time * 0.06) + k * 0.37) % 1;
           const er = _hr + 4 + ph * 13, ea = a1 - 0.22 - k * 0.16;
@@ -69040,8 +69055,8 @@ function drawClassIdentityHUD() {
         // acquired something reads as square, not round — it is the one shape the aiming
         // state has that the charging state does not.
         const b = _hr + 13 - beat * 2, len = 9;
-        ctx.strokeStyle = `rgba(${_rgb},${0.75 + beat * 0.25})`;
-        ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+        ctx.strokeStyle = `rgba(${_rgb},${0.52 + beat * 0.20})`;   // v0.30.493 — was 0.75 + 0.25
+        ctx.lineWidth = 2.2; ctx.lineCap = 'round';
         for (let qx = -1; qx <= 1; qx += 2) for (let qy = -1; qy <= 1; qy += 2) {
           ctx.beginPath();
           ctx.moveTo(qx * b, qy * (b - len)); ctx.lineTo(qx * b, qy * b); ctx.lineTo(qx * (b - len), qy * b);
@@ -69052,8 +69067,8 @@ function drawClassIdentityHUD() {
         // wind-up is compression, so the ready state closes on the player rather than
         // radiating away from them.
         const d = _hr + 15 - beat * 3;
-        ctx.strokeStyle = `rgba(${_rgb},${0.7 + beat * 0.3})`;
-        ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.strokeStyle = `rgba(${_rgb},${0.50 + beat * 0.22})`;   // v0.30.493 — was 0.7 + 0.3
+        ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         for (let i = 0; i < 4; i++) {
           const a = Math.PI / 4 + i * Math.PI / 2, c = Math.cos(a), s = Math.sin(a);
           const px2 = -s, py2 = c;   // perpendicular
@@ -69064,26 +69079,29 @@ function drawClassIdentityHUD() {
           ctx.stroke();
         }
         // and the rim goes hot
-        ctx.strokeStyle = `rgba(255,255,255,${0.35 + beat * 0.3})`;
-        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = `rgba(255,255,255,${0.22 + beat * 0.20})`;   // v0.30.493
+        ctx.lineWidth = 1.4;
         ctx.beginPath(); ctx.arc(0, 0, _hr, 0, Math.PI * 2); ctx.stroke();
       }
       ctx.restore();
       // the label, on a plate so it survives a bright background
-      const _lbl = isArcher ? '🏹 LOOSE' : '⚔ RELEASE';
+      // v0.30.493 — per user: "change the loose to release". One word for one input, so the
+      // prompt does not change meaning when you change class. The bow keeps its own glyph.
+      const _lbl = isArcher ? '🏹 RELEASE' : '⚔ RELEASE';
       ctx.save();
       ctx.font = 'bold 12px ' + LX_FONT_ROUNDED;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       try { ctx.letterSpacing = '0.6px'; } catch (e) {}   // Chrome 99+; harmless where it is not supported
       const _lw = ctx.measureText(_lbl).width + 20, _ly = cy - _hr - 21;
-      ctx.fillStyle = 'rgba(10,5,22,0.72)';
+      ctx.fillStyle = 'rgba(10,5,22,0.46)';   // v0.30.493 — the plate is a scrim, not a sign
       ctx.beginPath();
       if (ctx.roundRect) ctx.roundRect(cx - _lw / 2, _ly - 10, _lw, 20, 10);   // radius = half the height: a true pill
       else ctx.rect(cx - _lw / 2, _ly - 10, _lw, 20);
       ctx.fill();
-      ctx.strokeStyle = `rgba(${_rgb},0.55)`; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = `rgba(${_rgb},0.38)`; ctx.lineWidth = 1; ctx.stroke();   // v0.30.493
       ctx.fillStyle = _hot;
-      ctx.shadowColor = `rgba(${_rgb},0.9)`; ctx.shadowBlur = 8;
+      ctx.globalAlpha = 0.92;
+      ctx.shadowColor = `rgba(${_rgb},0.7)`; ctx.shadowBlur = 7;
       ctx.fillText(_lbl, cx, _ly);
       ctx.restore();
     }
