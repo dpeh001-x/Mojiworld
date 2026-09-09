@@ -87,7 +87,10 @@
 // v0.30.469 - v20 -> v21. p_lightning.webp REPLACED under its own name
 // (redrawn horizontal, tip right); returning browsers would otherwise keep serving the old
 // vertical bolt from the v20 generation next to the new frames.
-const CACHE = 'mojiworld-assets-v21';
+// v0.30.473 - v21 -> v22. dash_mage.webp and its nine anim frames REPLACED
+// under their own names (violet -> light blue); a returning browser would otherwise mix the
+// old violet still with the new blue frames from the v21 generation.
+const CACHE = 'mojiworld-assets-v22';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());

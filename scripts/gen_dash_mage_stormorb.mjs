@@ -56,31 +56,40 @@ const ROLLS = Number(argOf('--rolls', '4'));
 // ---- the briefs -------------------------------------------------------------
 // The palette is the game's own: the procedural fallback this sprite replaces pushes
 // #aaccff / #cc99ff / #88aaff particles, and arcane_burst is violet-on-white-hot.
+// v0.30.47x — per user: "regenerate mage dash sprite to be light blue and more wizardry, also
+// animation should be more flashy without cut off". The v0.30.465 art was violet-dominant; the
+// palette is now ICE/SKY BLUE end to end, and the wizardry is pushed harder - a full seal, a
+// double rune ring, spell-script, arcane sigils - rather than a lance with a few glyphs on it.
 const DASH_PROMPT =
   "A WIZARD'S BLINK — an arcane teleport streak for a 2D fantasy game, drawn flat side-on and "
-  + 'pointing to the RIGHT. Composition, left to right: a broken INCANTATION CIRCLE of glowing violet '
-  + 'runes where the wizard vanished, its ring cracking apart into drifting glyphs; a long tapering '
-  + 'lance of white-hot violet-and-cornflower-blue magic streaking rightward out of it, wrapped in a '
-  + 'helix of small arcane rune symbols and fine spell-script; and at the right end a brilliant '
-  + 'white-hot arrowhead flare where the wizard is arriving, throwing a few sharp four-point '
-  + 'sparkles. Deep violet #cc99ff and cornflower blue #88aaff energy over a white-hot core. '
+  + 'pointing to the RIGHT, in a LIGHT BLUE palette: pale ice blue, cornflower blue #88aaff and '
+  + 'sky blue #aaccff over a brilliant white-hot core. NO purple and NO violet anywhere. '
+  + 'Composition, left to right: a shattering INCANTATION SEAL where the wizard vanished — two '
+  + 'concentric rune rings of glowing pale-blue arcane glyphs breaking apart into drifting sigils; '
+  + 'a long tapering lance of white-hot ice-blue magic streaking rightward out of it, wrapped in a '
+  + 'double helix of small arcane rune symbols and fine spell-script; and at the right end a '
+  + 'brilliant white-hot arrowhead flare where the wizard is arriving, throwing sharp four-point '
+  + 'starbursts and a scatter of glittering blue motes. '
   + 'Invented magical glyphs, NOT real letters or words. '
   + 'Strictly horizontal, the streak running left-to-right across the middle of the frame and '
-  + 'centred vertically. Flat 2D cartoon game VFX, bold clean shapes, painted glow, crisp edges, '
-  + 'no photorealism, no character, no hands, no background, no ground, no text, no logo. '
-  + 'Fully transparent background, the effect floating free with a clear even margin on all four '
-  + 'sides and nothing touching or running off the edge of the frame.';
+  + 'centred vertically. Flat 2D cartoon game VFX, bold clean shapes, bright painted glow, crisp '
+  + 'edges, high contrast, no photorealism, no character, no hands, no background, no ground, no '
+  + 'text, no logo. Fully transparent background, the effect floating free with a clear even '
+  + 'margin on all four sides and nothing touching or running off the edge of the frame.';
 // The first loop drifted twice, both visible at in-game size: a row of LARGE inscription glyphs
 // faded in along the beam from frame 6 and read as a text banner laid over the effect, and frames
 // 6-8 were then nearly identical, so the tail of the blink sat still. Both are called out here.
 const DASH_MOTION =
-  'The arcane blink streak surges. Across the nine frames, spread the motion EVENLY: EVERY frame '
-  + 'must differ clearly from the one before it, including the last three, and there must be no pair '
-  + 'of near-identical frames anywhere in the loop. '
-  + 'What moves: the rune circle on the left cracks wider and its glyphs drift outward and fade; the '
-  + 'lance of magic pulses brighter and its energy flows steadily to the right; the tiny rune symbols '
-  + 'already wrapped around the streak twinkle and slide along it; the white-hot arrowhead at the '
-  + 'right flares and its sparkles snap outward. '
+  'The arcane blink streak surges and FLASHES. Across the nine frames, spread the motion EVENLY: '
+  + 'EVERY frame must differ clearly from the one before it, including the last three, and there '
+  + 'must be no pair of near-identical frames anywhere in the loop. '
+  + 'Make it SPECTACULAR: partway through the loop the whole effect flares to a brilliant white-hot '
+  + 'peak — the core blazing, the rune rings blazing with it, a burst of extra starbursts and '
+  + 'glittering blue motes thrown outward — then settles back down. '
+  + 'What moves: the rune rings on the left spin and crack wider, their glyphs drifting outward and '
+  + 'fading; the lance of magic pulses brighter and its energy flows steadily to the right; the tiny '
+  + 'rune symbols wrapped around the streak twinkle and slide along it; the white-hot arrowhead at '
+  + 'the right flares and its starbursts snap outward. '
   + 'CRITICAL: do NOT add any new symbols, letters, words, inscriptions, captions or a row of large '
   + 'glyphs along the beam. Do not write anything. The only glyphs are the small ones already present '
   + 'in the first frame, and they must stay small and stay wrapped around the streak. '
@@ -131,6 +140,24 @@ function brightCentroid(p) {
   return n ? sx / n : null;
 }
 
+// Median hue of the SATURATED colour (near-white core excluded - it carries no hue, and it is
+// most of a glow sprite). Light blue lands ~195-235 deg; violet ~265-290. This is how "light
+// blue, not purple" is checked rather than eyeballed.
+function medianHue(p) {
+  const hues = [];
+  for (let i = 0; i < p.w * p.h; i++) {
+    const o = i * 4; if (p.d[o + 3] < 140) continue;
+    const R = p.d[o] / 255, Gc = p.d[o + 1] / 255, B = p.d[o + 2] / 255;
+    const mx = Math.max(R, Gc, B), mn = Math.min(R, Gc, B), c = mx - mn;
+    if (c < 0.18 || mx < 0.15) continue;                   // unsaturated: the white core, skip
+    let h; if (mx === R) h = ((Gc - B) / c + 6) % 6; else if (mx === Gc) h = (B - R) / c + 2; else h = (R - Gc) / c + 4;
+    hues.push(h * 60);
+  }
+  if (!hues.length) return null;
+  hues.sort((x, y) => x - y); return Math.round(hues[Math.floor(hues.length / 2)]);
+}
+// count of near-white pixels - the flare. A flashy loop peaks and settles; a flat one does not.
+function brightCount(p) { let n = 0; for (let i = 0; i < p.w * p.h; i++) { const o = i * 4; if (p.d[o + 3] > 140 && p.d[o] > 225 && p.d[o + 1] > 225 && p.d[o + 2] > 225) n++; } return n; }
 // ---- gates ------------------------------------------------------------------
 // Every gate is a property the ENGINE depends on, not a taste call.
 function gateDash(b, bx) {
@@ -242,6 +269,13 @@ async function animate(baseBuf, motion, size, prefix, dir, label) {
       const packed = await packFrames(bufs, size, label);
       const stall = gateMotion(await motionProfile(packed), label);
       if (stall.length) throw new Error(stall.join('; '));
+      // FLASHY, measured: the loop has to actually peak in brightness, not just wobble.
+      if (label === 'dash_mage') {
+        const bright = []; for (const b of packed) bright.push(brightCount(await px(b)));
+        const hi = Math.max(...bright), lo = Math.min(...bright), ratio = lo ? hi / lo : Infinity;
+        console.log(`  ${label}: white-core pixels per frame ${bright.join(' / ')} (peak/floor ${ratio.toFixed(2)}x)`);
+        if (ratio < 1.35) throw new Error(`the loop does not flare: peak/floor only ${ratio.toFixed(2)}x (want >= 1.35)`);
+      }
       await mkdir(dir, { recursive: true });
       const written = [];
       for (let i = 0; i < FRAMES; i++) { const p = join(dir, `${prefix}_${i}.webp`); await writeFile(p + '.tmp', packed[i]); await rename(p + '.tmp', p); written.push(p); }
@@ -271,7 +305,10 @@ async function build(name, prompt, motion, out, size, margin, gate, animDir, ani
     const seated = await seat(raw, size, margin);
     const p = await px(seated), bx = inkBox(p);
     const bad = gate(name === 'dash_mage' ? brightCentroid(p) : null, bx);
-    console.log(`  roll ${roll}: ink ${bx.w}x${bx.h} at (${bx.x0},${bx.y0}) - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
+    let hue = null;
+    if (name === 'dash_mage') { hue = medianHue(p);
+      if (hue == null || hue < 190 || hue > 245) bad.push(`not light blue: median hue ${hue} deg (want 190-245; violet reads ~270)`); }
+    console.log(`  roll ${roll}: ink ${bx.w}x${bx.h} at (${bx.x0},${bx.y0})${hue != null ? `, hue ${hue} deg` : ''} - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
     if (!bad.length) chosen = seated;
   }
   if (!chosen) { console.error(`${name}: no roll passed the gates`); process.exitCode = 2; return; }
