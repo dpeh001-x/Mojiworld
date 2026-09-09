@@ -102,67 +102,60 @@ ok('the run keeps the difficulty it started with, whatever the menu now says',
   T.frozenKey === 'easy' && T.pickKey === 'hard', `run ${T.frozenKey}, menu ${T.pickKey}`);
 
 // ---- both tower bosses --------------------------------------------------------
-// MEASURED AS MEDIANS OVER FIVE SPAWNS, with a same-difficulty control.
-// A single sample cannot answer this: the tower-boss spawn is NOT deterministic, despite
-// spawnMonster's own variance roll being disabled for bosses (_varHp = isBoss ? 1). Probed
-// directly, three raw Arbiter spawns at one level came back 17,047 / 17,113 / 17,573 HP, and
-// three spawns through _expeditionSpawnTowerBoss at Normal came back 156,723 / 155,825 /
-// 144,705 - an 8% spread with no difficulty change at all. The first cut of this test compared
-// one sample per difficulty and read 1.575 where the multiplier is 1.50, which looked like a
-// product bug and was noise. The control below is the part that keeps the loosened tolerance
-// honest: if it ever passes while Normal-vs-Normal drifts, the tolerance is hiding a real
-// change rather than absorbing jitter.
+// MEASURED WITH Math.random PINNED, which makes the spawn exactly reproducible.
+//
+// It is not reproducible otherwise, and that cost two rounds of this test to work out. Boss
+// stats vary per spawn despite spawnMonster explicitly exempting bosses from its own variance
+// roll (_varHp = isBoss ? 1): four raw Arbiter spawns came back 17,305 / 18,037 / 17,385 /
+// 17,478 HP with monsterTypes.towerArbiter.hp fixed at 58,000 the whole time. The culprit is
+// _lxApplyStatTable, which overwrites the statline from LX_MONSTER_STATS through an
+// LX_MONSTER_JITTER roll and never consults the isBoss flag it is handed. A first cut of this
+// test compared one sample per difficulty and read 1.575 where the multiplier is 1.50 - noise
+// wearing the shape of a bug. A second cut took medians over five spawns, which was slow and
+// still flaked once. Pinning Math.random to 0.5 makes jit() return exactly 1, so the ratios can
+// be asserted outright; the control below proves the pin actually took.
 const B = await page.evaluate(async () => {
   const frames = (n) => new Promise((res) => { let i = 0; const t = () => { game.paused = false; if (++i >= n) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   try { loadMap('forest'); } catch (e) {}          // any map with real mapData; the tower entry
   await frames(20);                                 // hook would spawn a second boss of its own
   player.level = 60;
-  const med = (xs) => { const v = xs.slice().sort((a, b) => a - b); return v[v.length >> 1]; };
-  const sample = async (slot, diff, n) => {
-    const rows = [];
-    for (let i = 0; i < n; i++) {
-      game.expedition = { active: true, floor: slot === 'mid' ? 5 : 10, difficulty: diff };
-      game.monsters = [];
-      _expeditionSpawnTowerBoss(slot);
-      await new Promise((r) => setTimeout(r, 1400));
-      const m = (game.monsters || []).find((x) => x && x._expeditionBoss);
-      if (m) rows.push({ hp: m.maxHp, atk: m.atk, def: m.def, exp: m.exp, lv: m.level });
-    }
-    if (!rows.length) return null;
-    return { n: rows.length, hp: med(rows.map((r) => r.hp)), atk: med(rows.map((r) => r.atk)),
-             def: med(rows.map((r) => r.def)), exp: med(rows.map((r) => r.exp)), lv: rows[0].lv };
+  const _rand = Math.random;
+  Math.random = () => 0.5;                          // jit() = 1 + (0.5*2-1)*J = 1, exactly neutral
+  const boss = async (slot, diff) => {
+    game.expedition = { active: true, floor: slot === 'mid' ? 5 : 10, difficulty: diff };
+    game.monsters = [];
+    _expeditionSpawnTowerBoss(slot);
+    await new Promise((r) => setTimeout(r, 1400));
+    const m = (game.monsters || []).find((x) => x && x._expeditionBoss);
+    return m ? { hp: m.maxHp, atk: m.atk, def: m.def, exp: m.exp, lv: m.level } : null;
   };
   const out = {};
-  out.midNormal = await sample('mid', 'normal', 5);
-  out.midControl = await sample('mid', 'normal', 5);   // the noise floor, same difficulty
-  out.midEasy = await sample('mid', 'easy', 5);
-  out.midHard = await sample('mid', 'hard', 5);
-  out.finNormal = await sample('final', 'normal', 5);
-  out.finHard = await sample('final', 'hard', 5);
+  out.midNormal = await boss('mid', 'normal');
+  out.midControl = await boss('mid', 'normal');     // same difficulty, must come back identical
+  out.midEasy = await boss('mid', 'easy');
+  out.midHard = await boss('mid', 'hard');
+  out.finNormal = await boss('final', 'normal');
+  out.finHard = await boss('final', 'hard');
+  Math.random = _rand;
   game.monsters = [];
   return out;
 });
-const TOL = 0.08;
 const ratio = (x, y) => (y ? x / y : 0);
-ok('the B5 Arbiter spawns for the measurement', !!(B.midNormal && B.midNormal.n === 5),
-  B.midNormal ? `median hp ${B.midNormal.hp} over ${B.midNormal.n} spawns` : 'no boss');
-ok('CONTROL: two Normal samples agree, so the tolerance is measuring difficulty and not jitter',
-  B.midControl && Math.abs(ratio(B.midControl.hp, B.midNormal.hp) - 1) <= TOL,
-  B.midControl ? `normal/normal ${ratio(B.midControl.hp, B.midNormal.hp).toFixed(3)} (limit ±${TOL})` : '');
+ok('the B5 Arbiter spawns for the measurement', !!B.midNormal, B.midNormal ? `hp ${B.midNormal.hp}` : 'no boss');
+ok('CONTROL: with the roll pinned, two Normal spawns are byte-identical',
+  B.midControl && JSON.stringify(B.midControl) === JSON.stringify(B.midNormal),
+  B.midControl ? `${B.midControl.hp} vs ${B.midNormal.hp}` : '');
 ok('the Arbiter takes the difficulty on HP, ATK and DEF',
-  B.midEasy && B.midHard
-    && Math.abs(ratio(B.midEasy.hp, B.midNormal.hp) - 0.6) <= TOL && Math.abs(ratio(B.midHard.hp, B.midNormal.hp) - 1.5) <= TOL * 1.5
-    && Math.abs(ratio(B.midEasy.atk, B.midNormal.atk) - 0.6) <= TOL && Math.abs(ratio(B.midHard.atk, B.midNormal.atk) - 1.5) <= TOL * 1.5
-    && Math.abs(ratio(B.midEasy.def, B.midNormal.def) - 0.6) <= TOL && Math.abs(ratio(B.midHard.def, B.midNormal.def) - 1.5) <= TOL * 1.5,
-  B.midEasy ? `hp x${ratio(B.midEasy.hp, B.midNormal.hp).toFixed(2)} / x${ratio(B.midHard.hp, B.midNormal.hp).toFixed(2)}  atk x${ratio(B.midEasy.atk, B.midNormal.atk).toFixed(2)} / x${ratio(B.midHard.atk, B.midNormal.atk).toFixed(2)}` : '');
+  B.midEasy && B.midHard && near(ratio(B.midEasy.hp, B.midNormal.hp), 0.6) && near(ratio(B.midHard.hp, B.midNormal.hp), 1.5)
+    && near(ratio(B.midEasy.atk, B.midNormal.atk), 0.6) && near(ratio(B.midHard.atk, B.midNormal.atk), 1.5)
+    && near(ratio(B.midEasy.def, B.midNormal.def), 0.6) && near(ratio(B.midHard.def, B.midNormal.def), 1.5),
+  B.midEasy ? `hp x${ratio(B.midEasy.hp, B.midNormal.hp).toFixed(3)} / x${ratio(B.midHard.hp, B.midNormal.hp).toFixed(3)}  atk x${ratio(B.midEasy.atk, B.midNormal.atk).toFixed(3)} / x${ratio(B.midHard.atk, B.midNormal.atk).toFixed(3)}` : '');
 ok('the B10 Sovereign takes it too - Hard is not a longer walk to the same apex',
-  B.finNormal && B.finHard && Math.abs(ratio(B.finHard.hp, B.finNormal.hp) - 1.5) <= TOL * 1.5
-    && Math.abs(ratio(B.finHard.atk, B.finNormal.atk) - 1.5) <= TOL * 1.5,
-  B.finNormal ? `hp x${ratio(B.finHard.hp, B.finNormal.hp).toFixed(2)}  atk x${ratio(B.finHard.atk, B.finNormal.atk).toFixed(2)}` : 'no boss');
+  B.finNormal && B.finHard && near(ratio(B.finHard.hp, B.finNormal.hp), 1.5) && near(ratio(B.finHard.atk, B.finNormal.atk), 1.5),
+  B.finNormal ? `hp x${ratio(B.finHard.hp, B.finNormal.hp).toFixed(3)}  atk x${ratio(B.finHard.atk, B.finNormal.atk).toFixed(3)}` : 'no boss');
 ok('boss EXP follows the reward column, not the stat one',
-  B.midHard && Math.abs(ratio(B.midHard.exp, B.midNormal.exp) - 1.75) <= TOL * 1.75
-    && Math.abs(ratio(B.midEasy.exp, B.midNormal.exp) - 0.5) <= TOL,
-  B.midHard ? `easy x${ratio(B.midEasy.exp, B.midNormal.exp).toFixed(2)} / hard x${ratio(B.midHard.exp, B.midNormal.exp).toFixed(2)}` : '');
+  B.midHard && near(ratio(B.midHard.exp, B.midNormal.exp), 1.75) && near(ratio(B.midEasy.exp, B.midNormal.exp), 0.5),
+  B.midHard ? `easy x${ratio(B.midEasy.exp, B.midNormal.exp).toFixed(3)} / hard x${ratio(B.midHard.exp, B.midNormal.exp).toFixed(3)}` : '');
 ok('difficulty does not move the boss level (still player + 10)',
   B.midEasy && B.midHard && B.midEasy.lv === B.midNormal.lv && B.midHard.lv === B.midNormal.lv,
   B.midNormal ? `lv ${B.midNormal.lv}` : '');
@@ -203,40 +196,73 @@ ok('the coin CAP is per-difficulty: Hard clears the Normal ceiling instead of ty
   `normal ${R.n200.coins} (cap 6000) vs hard ${R.h200.coins}`);
 
 // ---- Bravo -------------------------------------------------------------------
+// The picker is three radio rows on the FIRST screen now, not a submenu: one click to change,
+// and all three visible while the player is deciding. What this pins is that the rows are
+// exclusive (exactly one marked), that a pick re-renders both the marker AND the Begin button,
+// and that the numbers are readable without arithmetic.
 const M = await page.evaluate(async () => {
   const out = {};
   const labels = () => [...document.querySelectorAll('#dialog-options button')].map((b) => b.textContent);
   const click = (frag) => { const b = [...document.querySelectorAll('#dialog-options button')].find((x) => x.textContent.indexOf(frag) >= 0); if (b) { b.click(); return true; } return false; };
   player.level = Math.max(player.level | 0, (typeof EXPEDITION_LEVEL_GATE === 'number' ? EXPEDITION_LEVEL_GATE : 20) + 5);
   game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
-  game._expMenu = null; game._expeditionDifficulty = 'normal';
+  game._expeditionDifficulty = 'normal';
   const npc = { x: 0, y: 0, name: 'Bravo', role: 'expedition', color: '#ffb0d8' };
   openNPC(npc);
-  out.main = labels();
-  out.openedSub = click('Difficulty:');
-  out.sub = labels();
+  out.first = labels();
   out.pickedHard = click('Hard');
-  out.afterPick = labels();
-  out.pref = game._expeditionDifficulty;
+  out.afterHard = labels();
+  out.prefHard = game._expeditionDifficulty;
+  out.pickedEasy = click('Easy');
+  out.afterEasy = labels();
+  out.prefEasy = game._expeditionDifficulty;
   await new Promise((r) => setTimeout(r, 200));
-  out.textHasHard = (document.getElementById('dialog-text').innerText || '').indexOf('Hard') >= 0;
-  out.dialogText = (document.getElementById('dialog-text').innerText || '').slice(-140);
+  out.dialogText = (document.getElementById('dialog-text').innerText || '');
   click('Maybe later');
-  out.menuCleared = (game._expMenu == null);
   return out;
 });
-ok('Bravo offers a difficulty row in her main menu', M.main.some((t) => /Difficulty:/.test(t)), M.main.join(' | ').slice(0, 150));
-ok('it opens a submenu listing all three with their numbers',
-  M.openedSub && ['Easy', 'Normal', 'Hard'].every((k) => M.sub.some((t) => t.indexOf(k) >= 0)) && M.sub.some((t) => /foes ×/.test(t)),
-  M.sub.join(' | ').slice(0, 170));
-ok('the current choice is marked in the submenu', M.sub.some((t) => t.indexOf('✓') === 0), M.sub.find((t) => t.indexOf('✓') === 0));
-ok('picking Hard sticks and returns to the main menu', M.pickedHard && M.pref === 'hard' && M.afterPick.some((t) => /Difficulty: Hard/.test(t)), `pref ${M.pref}`);
-ok('the Begin button names the difficulty it will use', M.afterPick.some((t) => /Begin Expedition — .*Hard/.test(t)), M.afterPick[0]);
-ok('the run summary in her dialog names the difficulty the run will use', M.textHasHard, M.dialogText);
-ok('the friend option replaces the seeded one in the menu',
-  M.afterPick.some((t) => /Join a friend/.test(t)) && !M.afterPick.some((t) => /seeded run/.test(t)),
-  M.afterPick.join(' | ').slice(0, 170));
-ok('leaving clears the submenu state, so the next conversation opens at the top', M.menuCleared);
+const marked = (rows) => rows.filter((t) => t.indexOf('●') === 0);
+ok('all three difficulties are on the FIRST screen, no submenu to open',
+  ['Easy', 'Normal', 'Hard'].every((k) => M.first.some((t) => new RegExp('^[●○] ' + k + ' ').test(t))),
+  M.first.join(' | ').slice(0, 190));
+ok('they read as one exclusive choice - exactly one row is filled in',
+  marked(M.first).length === 1 && marked(M.afterHard).length === 1 && marked(M.afterEasy).length === 1,
+  `${marked(M.first).length} marked, then ${marked(M.afterHard).length}, then ${marked(M.afterEasy).length}`);
+ok('the numbers are percentages, so no multiplier has to be worked out to compare two rows',
+  M.first.some((t) => /Hard — enemies 150%, rewards 175%/.test(t)) && M.first.some((t) => /Easy — enemies 60%, rewards 50%/.test(t)),
+  M.first.filter((t) => /enemies/.test(t)).join(' | '));
+ok('ONE click switches it - no submenu, no confirm', M.pickedHard && M.prefHard === 'hard', `pref ${M.prefHard}`);
+ok('the marker follows the pick', M.afterHard.some((t) => /^● Hard /.test(t)) && !M.afterHard.some((t) => /^● Normal /.test(t)),
+  marked(M.afterHard)[0]);
+ok('the Begin button re-renders to name what it will actually start',
+  M.afterHard.some((t) => /Begin Expedition — .*Hard/.test(t)), M.afterHard[0]);
+ok('switching again works the same way, in both directions', M.pickedEasy && M.prefEasy === 'easy' && M.afterEasy.some((t) => /^● Easy /.test(t)), `pref ${M.prefEasy}`);
+ok('Easy no longer wears the unselected-radio glyph in the Begin button',
+  M.afterEasy.some((t) => /Begin Expedition — ◇ Easy/.test(t)), M.afterEasy[0]);
+ok('Bravo explains the trade before the buttons rather than behind them',
+  /How hard should it push back/.test(M.dialogText) && /locks when you step through/i.test(M.dialogText));
+ok('the friend option is still there and the seeded wording is not',
+  M.afterEasy.some((t) => /Join a friend/.test(t)) && !M.afterEasy.some((t) => /seeded run/.test(t)),
+  M.afterEasy.join(' | ').slice(0, 170));
+
+// ---- the rumour ---------------------------------------------------------------
+const RUM = await page.evaluate(async () => {
+  const npc = { x: 0, y: 0, name: 'Bravo', role: 'expedition', color: '#ffb0d8' };
+  game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
+  openNPC(npc);
+  const b = [...document.querySelectorAll('#dialog-options button')].find((x) => x.textContent.indexOf('the thing at the top') >= 0);
+  if (!b) return { err: 'no rumour option' };
+  b.click();
+  await new Promise((r) => setTimeout(r, 250));
+  return { text: document.getElementById('dialog-text').innerText || '' };
+});
+ok('the rumour option still opens', !RUM.err && RUM.text.length > 200, RUM.err || `${RUM.text.length} chars`);
+ok('it no longer tells the player who they had been talking to', !/talking to Innie/i.test(RUM.text || ''));
+ok('it no longer names the old man in the plaza, which was the answer', !/old man in the plaza/i.test(RUM.text || ''));
+ok('the detail that carries the whole thing survives',
+  /It watches your hands/.test(RUM.text || '') && /does not attack while you are still deciding/.test(RUM.text || ''));
+ok('and the resemblance is left for the player to make',
+  /one other thing that does that/.test(RUM.text || '') && /not in the tower/.test(RUM.text || ''));
 ok('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 
 await b.close(); srv.kill();
