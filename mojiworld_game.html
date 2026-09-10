@@ -10638,7 +10638,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.527';
+const GAME_VERSION = 'v0.30.528';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46900,6 +46900,7 @@ const audio = {
     };
   },
   play(kind) {
+    if (typeof document !== 'undefined' && document.hidden) return;   // v0.30.x — the co-op pump keeps hits landing in a hidden tab; they are not cues for anyone
     // v0.29.254 — controller haptics ride the sfx switchboard: every combat /
     // death / level-up path already calls audio.play, so this one line gives
     // rumble full coverage. BEFORE the mute gate on purpose — muting the game
@@ -46969,6 +46970,12 @@ const audio = {
     else if (kind === 'enhance')     { this.env(700, 0.05, 'square', 0.10, 200); setTimeout(() => { try { this.env(1400, 0.14, 'triangle', 0.11, 260); } catch (e) {} }, 65); }
     // UI tab switch: a light tick.
     else if (kind === 'uitab')       { this.env(900, 0.03, 'triangle', 0.05, 70); }
+    // v0.30.x — called from combat (heavy hits, Gravitos' quake, charge-ups, the Void entry) but
+    // never given a branch, so every one of those calls was silent.
+    else if (kind === 'hit_heavy')   { this.env(150, 0.12, 'square', 0.16, -60); this.env(90, 0.18, 'sine', 0.20, -30); }
+    else if (kind === 'quake_hit')   { this.env(70, 0.22, 'sawtooth', 0.22, -30); setTimeout(() => { try { this.env(55, 0.25, 'sine', 0.18, -15); } catch (e) {} }, 60); }
+    else if (kind === 'charge')      { this.env(300, 0.30, 'sawtooth', 0.09, 420); }
+    else if (kind === 'void')        { this.env(110, 0.40, 'sine', 0.14, -60); this.env(1800, 0.25, 'triangle', 0.04, -900); }
   },
   toggleMute() {
     // audio.muted is the sole source of truth; saveState() mirrors it into game.muted
@@ -146460,6 +146467,11 @@ const _AMBIENT_TARGET_VOL = 0.25;     // sits well below BGM ~0.55
 function _ambientEl(mapId) {
   if (!mapId || !_AMBIENT_FILES[mapId]) return null;
   if (_ambientEls[mapId]) return _ambientEls[mapId];
+  // v0.30.x — six maps use water.mp3, six use cave.mp3: each built its own element (own fetch,
+  // own decode, own mute target) and crossing between two water maps faded the bed out and
+  // back in from the top. Sharing the element makes that crossing seamless (_setMapAmbient
+  // sees target === active and leaves it playing).
+  for (const k in _ambientEls) { if (_ambientEls[k] && _AMBIENT_FILES[k] === _AMBIENT_FILES[mapId]) { _ambientEls[mapId] = _ambientEls[k]; return _ambientEls[k]; } }
   const a = new Audio(_AMBIENT_FILES[mapId]);
   // v0.26.445 — Instead of a seamless native loop (which drones and gets
   // repetitive), replay the clip after a RANDOMISED 7–15 s silent gap so the
@@ -146833,6 +146845,16 @@ function _lxSyncSfxMuted(m) {
   try {
     for (const k of Object.keys(_uiSfxEls)) { const e = _uiSfxEls[k]; if (e) e.muted = !!m; }
   } catch (_) {}
+  // v0.30.x — and the rest of the caches. Boss stingers, monster family clips, the per-monster
+  // custom probes, the ambient beds and the cinematic bed all built their element with the mute
+  // state of the moment and never heard about a toggle: muting left an ambient droning, and
+  // unmuting left a stinger built-while-muted silent for the session.
+  const _each = (cache) => { try { if (!cache) return; for (const k in cache) { const e = cache[k]; if (e && typeof e === 'object' && 'muted' in e) e.muted = !!m; } } catch (_) {} };
+  if (typeof _bossSfxEls !== 'undefined') _each(_bossSfxEls);
+  if (typeof _monsterSfxEls !== 'undefined') _each(_monsterSfxEls);
+  if (typeof _monsterCustomSfx !== 'undefined') _each(_monsterCustomSfx);
+  if (typeof _ambientEls !== 'undefined') _each(_ambientEls);
+  try { if (typeof _cineBgm !== 'undefined' && _cineBgm) _cineBgm.muted = !!m; } catch (_) {}
 }
 const _skillSfxLastTime = Object.create(null);
 const _SKILL_SFX_COOLDOWN = 80;       // ms — prevents same-skill spam
@@ -146919,6 +146941,7 @@ const _UI_SFX_FILES = {
   jump:             'audio/ui/jump.mp3',           // player jump — short whoosh / hop
   close:            'audio/ui/close.mp3',          // modal / dialog close — soft "tuck"
   option_click:     'audio/ui/option_click.mp3',   // dialog option select (vs hover)
+  tick:             'audio/ui/option_click.mp3',   // v0.30.x — Bravo's tray slots (_playUiSfx('tick')) were unmapped: silent
   error:            'audio/ui/error.mp3',          // gated action denied (insufficient funds / low level)
   portal:           'audio/ui/portal.mp3',         // loadMap transition — short whoosh
   // v0.26.362 — `equip` slot removed: equip.mp3 was never produced AND
@@ -147209,6 +147232,7 @@ const _BOSS_SFX_FILES = {
   king:                     'audio/boss/boss_gloopaloo.mp3',  // slimeCave (Gelwater Grotto)
   mooma:                  'audio/boss/boss_shroomaloo.mp3', // mushroom (Fungal Hollow)
   kingKrook:                'audio/boss/boss_krook.mp3',   // krookThrone
+  legosaurus:               'audio/boss/boss_krook.mp3',   // v0.30.x — declared as a bossType, never mapped: the intro was silent. Heavy / grounded fits the block-dino.
   // v0.26.362 — These 16 bosses were PRE-STAGED in v0.26.214 to point at
   // bespoke `boss_zodiac_*` / `boss_<name>` stingers that were never
   // produced (Ludo render never happened). Result: every one of these
@@ -147263,6 +147287,7 @@ function _bossSfxEl(id) {
 function _playBossSfx(id) {
   try {
     if (typeof audio !== 'undefined' && audio && audio.muted) return;
+    if (typeof document !== 'undefined' && document.hidden) return;   // v0.30.x — hidden-tab gate
     if (!_BOSS_SFX_FILES[id]) return;
     const el = _bossSfxEl(id);
     if (!el) return;
@@ -147415,6 +147440,11 @@ const _monsterCustomSfx = Object.create(null);   // 'type_kind' → Audio | null
 // _playMonsterSfx so the boss die-clip prewarm (first hit) shares the exact
 // same null-caching contract: undefined = never probed, 'probing' = loading,
 // null = 404 (use family), Audio = ready.
+// v0.30.x — a long session probes one (type, kind) per mob it meets; each READY clip holds a
+// decoded buffer. Cap the ready set: the oldest is dropped back to unprobed and re-fetches
+// (from cache) if it is ever needed again. 404 markers (null) cost nothing and are kept.
+const _MONSTER_CUSTOM_SFX_CAP = 24;
+const _monsterCustomSfxReady = [];
 function _probeMonsterCustomSfx(type, kind) {
   const ck = type + '_' + kind;
   if (_monsterCustomSfx[ck] !== undefined) return;
@@ -147425,12 +147455,22 @@ function _probeMonsterCustomSfx(type, kind) {
   a.preload = 'auto';
   if (typeof audio !== 'undefined' && audio) a.muted = !!audio.muted;
   a.addEventListener('error', () => { _monsterCustomSfx[ck] = null; });
-  a.addEventListener('canplaythrough', () => { if (_monsterCustomSfx[ck] === 'probing') _monsterCustomSfx[ck] = a; });
+  a.addEventListener('canplaythrough', () => {
+    if (_monsterCustomSfx[ck] !== 'probing') return;
+    _monsterCustomSfx[ck] = a;
+    _monsterCustomSfxReady.push(ck);
+    while (_monsterCustomSfxReady.length > _MONSTER_CUSTOM_SFX_CAP) {   // v0.30.x — see the cap above
+      const old = _monsterCustomSfxReady.shift();
+      const e = _monsterCustomSfx[old];
+      if (e && e !== 'probing') { try { e.pause(); e.src = ''; } catch (_) {} delete _monsterCustomSfx[old]; }
+    }
+  });
   _monsterCustomSfx[ck] = 'probing';
 }
 function _playMonsterSfx(m, kind) {
   try {
     if (typeof audio !== 'undefined' && audio && audio.muted) return;
+    if (typeof document !== 'undefined' && document.hidden) return;   // v0.30.x — hidden-tab gate (the co-op pump runs the sim while hidden)
     // Hit-rate cooldown applies whether the resolved clip is custom or family.
     if (kind === 'hit') {
       const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -148063,7 +148103,7 @@ function startBgm() {
   const onceUp = () => {
     const _active = _audibleBgm();
     // Audible track (active per-map track, or the default): play + leave running.
-    try { _active.play().catch(() => {}); } catch (e) {}
+    let _okP = null; try { _okP = _active.play(); } catch (e) {}   // v0.30.x — resolved below; a blocked play keeps the listeners
     // Unlock the default world theme for future map transitions, but keep it
     // SILENT if a per-map track is currently the audible one (void login etc.).
     if (_bgmEl !== _active) {
@@ -148084,7 +148124,6 @@ function startBgm() {
     // BGM map). The active track now just gets play()'d (to honor the
     // user gesture's autoplay permission); the rest still get the
     // play()+pause() dance so they're unlocked for future silent fades.
-    _bgmAutoplayUnlocked = true;
     for (const mapId of Object.keys(_bgmMapEls)) {
       const el = _bgmMapEls[mapId];
       if (!el) continue;
@@ -148099,9 +148138,17 @@ function startBgm() {
                  .catch(() => {/* blocked: try again next gesture */});
       } catch (e) {}
     }
-    window.removeEventListener('pointerdown', onceUp, true);
-    window.removeEventListener('keydown', onceUp, true);
-    window.removeEventListener('touchstart', onceUp, true);
+    // v0.30.x — the listeners used to come off on the FIRST gesture whether or not play() had
+    // succeeded; touchstart is not an activating gesture in Chrome, so a phone whose first touch
+    // was blocked never got a second chance and the BGM stayed off for the session.
+    const _done = () => {
+      _bgmAutoplayUnlocked = true;
+      window.removeEventListener('pointerdown', onceUp, true);
+      window.removeEventListener('keydown', onceUp, true);
+      window.removeEventListener('touchstart', onceUp, true);
+    };
+    if (_okP && typeof _okP.then === 'function') _okP.then(_done).catch(() => {/* blocked: try again on the next gesture */});
+    else _done();
   };
   window.addEventListener('pointerdown', onceUp, true);
   window.addEventListener('keydown', onceUp, true);
