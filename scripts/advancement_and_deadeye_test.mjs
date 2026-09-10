@@ -50,7 +50,8 @@ const r = await page.evaluate(async () => {
     player.skillCooldowns.marksman_oneshot = 450;
     player._deadeyeUntil = performance.now() + 5000;
     _lxRestoreUltCd();
-    out.deadeyeRestored = player.skillCooldowns.marksman_oneshot === def.cd;
+    let _mul = 1; try { if (typeof getCdrMult === 'function') _mul *= getCdrMult(); if (typeof JOB_CD_MUL === 'number') _mul *= JOB_CD_MUL; } catch (e) {}   // v0.30.523: the repair mirrors castSkill
+    out.deadeyeRestored = Math.abs(player.skillCooldowns.marksman_oneshot - def.cd * _mul) < 1e-6 && player.skillCooldowns.marksman_oneshot > 1000;
     player._deadeyeUntil = 0; player.skillCooldowns.marksman_oneshot = 0;
   }
 

@@ -77,7 +77,8 @@ const r = await page.evaluate(async () => {
     out.synthAccept = !!(sp && _lxPadBtn(sp, 0));
     out.synthDpadLeft = !!(sp && _lxPadBtn(sp, 14));
     // the stick is folded into the D-pad (raw axes are drift-guarded and would read 0)
-    const stick = _lxSteamNavPad({ _moveX: -0.9, _moveY: 0.8 });
+    const _yUp = (typeof _LX_STEAM_MOVE_Y_UP === 'undefined' || _LX_STEAM_MOVE_Y_UP);   // v0.30.523: Steam reports +Y as UP
+    const stick = _lxSteamNavPad({ _moveX: -0.9, _moveY: _yUp ? -0.8 : 0.8 });
     out.stickLeftIsDpadLeft = !!(stick && _lxPadBtn(stick, 14));
     out.stickDownIsDpadDown = !!(stick && _lxPadBtn(stick, 13));
     const contra = _lxSteamNavPad({ moveLeft: true, moveRight: true });
