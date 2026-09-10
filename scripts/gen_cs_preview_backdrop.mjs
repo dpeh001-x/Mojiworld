@@ -1,31 +1,29 @@
 #!/usr/bin/env node
-// Sprites/ui/cs_preview_bg.webp — the backdrop inside the character-creation preview box.
+// Sprites/ui/cs_preview_bg.webp + cs_preview_bg_floor.webp - the backdrop inside the
+// character-creation preview box.
 // ============================================================================
-// Per user, on seeing the first attempt in game: "Background looks weird, remake it to fit the UI
-// Background theme, change the concept to something more appropriate".
+// Per user, on the violet shrine niche: "for the background regenerate it again, make the colour
+// tone more neutral white grey and one with a floor for the character."
 //
-// WHAT WAS WRONG WITH THE MUSHROOM GROVE (scripts/gen_cs_throne_backdrop.mjs, never shipped).
-// It was a good picture of the wrong thing. The panel it sits in is deep violet glass with a
-// single gold hairline and gold lettering; the grove answered that with warm reds and leaf greens,
-// so the box read as a window cut into a different game. It was also busy in exactly the band
-// where a chibi stands, and red is the one hue a dark-haired character cannot separate from at
-// 240px. The concept is replaced rather than recoloured - a red-capped toadstool with the red
-// taken out is not a toadstool.
-//
-// THE CONCEPT NOW. A shrine niche: an arched alcove of dark violet stone with gold filigree worked
-// into the walls, a low stone dais across the bottom for the figure to stand on, and a night sky
-// with an aurora showing through the arch behind. It borrows the panel's own two colours, it is
-// symmetric so it does not fight a centred figure, its middle is empty sky by construction, and
-// an alcove is what a rounded square wants to be. It is also the right IDEA for the screen: this
-// is where a hero is chosen, so the hero should be standing somewhere that means something.
+// THE CONCEPT NOW. A pale studio alcove: an archway of light grey stone with soft fluting and
+// faint silver carving, opening onto a bright white-grey haze. Two files from ONE painting:
+//   cs_preview_bg.webp        the open haze, nothing to stand on
+//   cs_preview_bg_floor.webp  the same alcove with a flat stone floor across the bottom third and
+//                             a low round dais where the figure stands
+// The floor is COMPOSITED, not prompted. The first run asked the model for a floor in five rolls
+// and got five floorless archways (sharpest lower-half step 3 of 255, the same as the open
+// variant) - this endpoint paints the alcove it knows. Painting the floor here means the two
+// variants are the same picture above the horizon, so switching between them is a real choice
+// about the floor and nothing else, and the floor line cannot fail to exist.
+// The CSS ships the floor variant; the open one stays on disk as the alternative.
 //
 // WHAT IT SITS BEHIND. .cs-look-preview-wrap is a 240x240 rounded square (158 on mobile) with the
 // hero canvas centred on top, so the figure stands dead centre with its feet near the bottom. The
 // art has to be interesting at the edges and get out of the way through the middle.
 //
-//   node scripts/gen_cs_preview_backdrop.mjs                # print the brief
-//   node scripts/gen_cs_preview_backdrop.mjs --generate     # needs LUDO_API_KEY
-//   flags: --rolls N   --rescrim=<kept roll>
+//   node scripts/gen_cs_preview_backdrop.mjs                     # print the brief
+//   node scripts/gen_cs_preview_backdrop.mjs --generate          # needs LUDO_API_KEY; ships both
+//   flags: --rolls N   --keep <seated open roll>   (re-judge a saved roll and ship both from it)
 import sharp from 'sharp';
 import { writeFile, rename } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
@@ -34,42 +32,60 @@ import { fileURLToPath } from 'node:url';
 sharp.cache(false);
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = join(ROOT, 'Sprites', 'ui', 'cs_preview_bg.webp');
 const S = 512;
 const has = (f) => process.argv.includes(f);
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : d; };
 const ROLLS = Number(argOf('--rolls', '5'));
+export const FILES = { plain: 'cs_preview_bg.webp', floor: 'cs_preview_bg_floor.webp' };
 
 const PROMPT =
-  'A moonlit SHRINE NICHE painted as a full square scene that fills the whole picture edge to edge. '
-  + 'A tall stone archway of deep violet-grey stone frames the view, its pillars running down both '
-  + 'side edges and its arch curving across the top, carved all over with fine GOLD filigree - thin '
-  + 'gold scrollwork, small gold stars, a gold band around the arch. Along the bottom a low, wide '
-  + 'stone dais of three shallow steps, with worn gold inlay in the stone. Through the archway '
-  + 'behind, a deep indigo night sky with a soft violet aurora, distant stars, and tiny gold motes '
-  + 'of light drifting upward. '
-  + 'The colours are ONLY deep violet, indigo, dark blue-grey stone and pale gold. No red, no '
-  + 'orange, no green, no foliage, no plants, no mushrooms. '
-  + 'The middle of the picture is OPEN and quiet - just sky and soft light between the pillars, '
-  + 'nothing painted in the centre, nothing standing on the dais. '
-  + 'Every corner of the picture has stone, carving or sky painted in it, nothing left as plain '
-  + 'empty background. '
-  + 'Storybook game art, bold clean shapes, soft painted light, calm and reverent. '
+  'A quiet pale STUDIO ALCOVE painted as a full square scene that fills the whole picture edge to '
+  + 'edge, in NEUTRAL WHITE and LIGHT GREY tones only. A tall archway of smooth light grey stone '
+  + 'frames the view, its pillars running down both side edges and its arch curving across the '
+  + 'top, with soft carved fluting and faint silver-grey filigree in the stone. Through the '
+  + 'archway behind, a bright soft white-grey haze lit gently from above, with a few faint pale '
+  + 'motes of light drifting. '
+  + 'The colours are ONLY white, off-white, light grey, mid grey and soft silver. Completely '
+  + 'desaturated: no purple, no violet, no blue, no gold, no yellow, no red, no green, no warm '
+  + 'tint, no cool tint, no saturated colour anywhere. '
+  + 'The middle of the picture is OPEN and quiet - just soft haze between the pillars, nothing '
+  + 'painted in the centre. Every corner of the picture has stone, carving or haze painted in it, '
+  + 'nothing left as plain empty background. '
+  + 'Storybook game art, bold clean shapes, soft painted light, calm and airy. '
   + 'No character, no person, no creature, no statue. No text, no letters, no watermark, no user '
-  + 'interface, no picture frame or border around the edge.';
+  + 'interface, no picture frame or border around the edge. '
+  + 'There is NO floor and NO ground: the haze continues all the way down to the bottom edge, '
+  + 'no steps, no platform, no dais, nothing to stand on.';
 
 const key = process.env.LUDO_API_KEY;
 const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fetchBuf = async (u) => { const r = await fetch(u, { signal: AbortSignal.timeout(120000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); };
 
-// The ground, keyed to .cs-look-preview-wrap's own gradient so a cut-out with transparent margins
-// - which is what this endpoint reliably returns - can never land off-palette.
+// The ground, a neutral grey radial keyed to the CSS scrim, so a cut-out with transparent
+// margins - which is what this endpoint reliably returns - can never land off-palette.
 const GROUND = Buffer.from(
   `<svg width="${S}" height="${S}">`
   + `<defs><radialGradient id="g" cx="50%" cy="30%" r="82%">`
-  + `<stop offset="0%" stop-color="#6a53a8"/><stop offset="78%" stop-color="#2b1c52"/><stop offset="100%" stop-color="#1d1240"/></radialGradient></defs>`
+  + `<stop offset="0%" stop-color="#f3f4f6"/><stop offset="78%" stop-color="#c5c9d0"/><stop offset="100%" stop-color="#a9adb6"/></radialGradient></defs>`
   + `<rect width="${S}" height="${S}" fill="url(#g)"/></svg>`);
+// THE FLOOR. Horizon at 68%: a pale stone floor falling slightly darker toward the bottom edge, a
+// crisp shadow line where it meets the wall, and a low round dais of two shallow ellipses under
+// the spot the figure's feet land (the canvas is 220 of the 240 box; feet sit near 86%).
+const HZ = Math.round(S * 0.68);
+const FLOOR = Buffer.from(
+  `<svg width="${S}" height="${S}">`
+  + `<defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1">`
+  + `<stop offset="0%" stop-color="#dfe1e6"/><stop offset="35%" stop-color="#cfd2d9"/><stop offset="100%" stop-color="#b3b7c0"/></linearGradient>`
+  + `<radialGradient id="d" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#eceef1"/><stop offset="80%" stop-color="#d7dae0"/><stop offset="100%" stop-color="#c3c7cf"/></radialGradient>`
+  + `<radialGradient id="s" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#5a5e68" stop-opacity="0.34"/><stop offset="100%" stop-color="#5a5e68" stop-opacity="0"/></radialGradient></defs>`
+  + `<rect x="0" y="${HZ}" width="${S}" height="${S - HZ}" fill="url(#f)"/>`
+  + `<rect x="0" y="${HZ}" width="${S}" height="3" fill="#8e929c" fill-opacity="0.75"/>`
+  + `<rect x="0" y="${HZ + 3}" width="${S}" height="10" fill="#9da1aa" fill-opacity="0.35"/>`
+  + `<ellipse cx="${S / 2}" cy="${Math.round(S * 0.875)}" rx="${Math.round(S * 0.36)}" ry="${Math.round(S * 0.085)}" fill="url(#s)"/>`
+  + `<ellipse cx="${S / 2}" cy="${Math.round(S * 0.862)}" rx="${Math.round(S * 0.30)}" ry="${Math.round(S * 0.058)}" fill="#aeb2bb"/>`
+  + `<ellipse cx="${S / 2}" cy="${Math.round(S * 0.850)}" rx="${Math.round(S * 0.30)}" ry="${Math.round(S * 0.058)}" fill="url(#d)"/>`
+  + `</svg>`);
 
 async function px(buf) {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -79,85 +95,69 @@ async function seat(raw) {
   const trimmed = await sharp(raw).trim({ threshold: 8 }).png().toBuffer().catch(() => sharp(raw).png().toBuffer());
   // COVER, not inside: the square is filled by construction, so no roll can leave bare corners.
   const art = await sharp(trimmed).resize(S, S, { fit: 'cover', position: 'centre' }).png().toBuffer();
-  // THE HERO SCRIM. A busy picture behind a sprite is a legibility problem before it is a nice
-  // picture; this darkens the band the figure stands in so a black-haired chibi separates from it.
+  // DESATURATE BY CONSTRUCTION. "Neutral white grey" is a hard requirement, and the model leaks
+  // tint (a warm haze, a blue shadow) even when told not to. Pulling saturation to a fifth keeps
+  // a whisper of the painted colour temperature and removes any hue the eye could name.
+  const grey = await sharp(art).modulate({ saturation: 0.2 }).png().toBuffer();
+  // THE HERO SCRIM. A mild neutral dimming of the band the figure stands in, so a pale-skinned,
+  // white-haired chibi still separates from a white-grey wall.
   const HERO = Buffer.from(
     `<svg width="${S}" height="${S}"><defs><radialGradient id="h" cx="50%" cy="56%" r="42%">`
-    + `<stop offset="0%" stop-color="#160c2c" stop-opacity="0.52"/>`
-    + `<stop offset="62%" stop-color="#160c2c" stop-opacity="0.34"/>`
-    + `<stop offset="100%" stop-color="#160c2c" stop-opacity="0"/></radialGradient></defs>`
+    + `<stop offset="0%" stop-color="#3a3d46" stop-opacity="0.26"/>`
+    + `<stop offset="62%" stop-color="#3a3d46" stop-opacity="0.16"/>`
+    + `<stop offset="100%" stop-color="#3a3d46" stop-opacity="0"/></radialGradient></defs>`
     + `<rect width="${S}" height="${S}" fill="url(#h)"/></svg>`);
-  return sharp(GROUND).composite([{ input: art, left: 0, top: 0 }, { input: HERO }]).webp({ quality: 90 }).toBuffer();
+  return sharp(GROUND).composite([{ input: grey, left: 0, top: 0 }, { input: HERO }]).webp({ quality: 90 }).toBuffer();
 }
-function hsv(r, g, b) {
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
-  let h = 0;
-  if (d) {
-    if (mx === r) h = 60 * (((g - b) / d) % 6);
-    else if (mx === g) h = 60 * ((b - r) / d + 2);
-    else h = 60 * ((r - g) / d + 4);
-  }
-  return { h: (h + 360) % 360, s: mx ? d / mx : 0, v: mx / 255 };
-}
-async function stats(buf) {
-  // PALETTE IS MEASURED AT FULL RESOLUTION, and that is not a detail. The first cut of this gate
-  // read the colours off the same 96x96 thumbnail as the brightness, and rejected six rolls out of
-  // six for having "no gold" - while every one of them was covered in gold filigree. Filigree is
-  // one- and two-pixel scrollwork on dark stone; downsampled 5x it averages into its violet
-  // background and stops being gold at all. The thresholds are loose for the same reason: an
-  // anti-aliased gold line spends most of its pixels part-way to the stone behind it.
+export const withFloor = (seated) => sharp(seated).composite([{ input: FLOOR }]).webp({ quality: 90 }).toBuffer();
+
+export async function stats(buf) {
   const f = await px(buf);
-  let gold = 0, off = 0;
+  let sat = 0;
   for (let i = 0; i < f.d.length; i += 4) {
-    const c = hsv(f.d[i], f.d[i + 1], f.d[i + 2]);
-    if (c.s > 0.18 && c.v > 0.18) {
-      if (c.h >= 30 && c.h <= 68) gold++;                       // gold
-      else if (c.h >= 225 && c.h <= 305) { /* violet/indigo */ }
-      else off++;                                                // neither: off the panel's palette
-    }
+    const r = f.d[i], g = f.d[i + 1], b = f.d[i + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    if (mx > 46 && (mx - mn) / mx > 0.18) sat++;                // a pixel with a nameable hue
   }
-  const fullN = f.w * f.h;
-  gold = 100 * gold / fullN; off = 100 * off / fullN;
+  const satPct = 100 * sat / (f.w * f.h);
   const p = await px(await sharp(buf).resize(96, 96, { fit: 'fill' }).toBuffer());
   const lum = (i) => 0.299 * p.d[i] + 0.587 * p.d[i + 1] + 0.114 * p.d[i + 2];
-  let mid = 0, midN = 0, all = 0, allN = 0;
+  let all = 0, allN = 0; const rows = new Array(96).fill(0); const mid = [];
   for (let y = 0; y < 96; y++) for (let x = 0; x < 96; x++) {
-    const i = (y * 96 + x) * 4, v = lum(i);
-    all += v; allN++;
-    if (x > 30 && x < 66 && y > 12 && y < 72) { mid += v; midN++; }
+    const v = lum((y * 96 + x) * 4); all += v; allN++; rows[y] += v / 96;
+    if (x > 30 && x < 66 && y > 12 && y < 56) mid.push(v);      // above any floor line
   }
+  const mad = (vals) => { const mu = vals.reduce((a, b) => a + b, 0) / vals.length; return vals.reduce((a, b) => a + Math.abs(b - mu), 0) / vals.length; };
   let cd = 0;
   for (const [ox, oy] of [[3, 3], [75, 3], [3, 75], [75, 75]]) {
     const vals = [];
     for (let y = oy; y < oy + 18; y++) for (let x = ox; x < ox + 18; x++) vals.push(lum((y * 96 + x) * 4));
-    const mu = vals.reduce((a, b) => a + b, 0) / vals.length;
-    cd += vals.reduce((a, b) => a + Math.abs(b - mu), 0) / vals.length;
+    cd += mad(vals);
   }
-  return { mean: all / allN, centre: mid / midN, goldPct: gold, offPct: off, cornerDetail: cd / 4 };
+  // horizon: the sharpest brightness step between 4-row bands in the lower half
+  let horizon = 0;
+  for (let y = 48; y < 88; y++) horizon = Math.max(horizon, Math.abs((rows[y + 2] + rows[y + 3]) / 2 - (rows[y - 2] + rows[y - 1]) / 2));
+  return { mean: all / allN, satPct, centreDetail: mad(mid), cornerDetail: cd / 4, horizon };
 }
-function gate(s) {
+export function gate(s, variant) {
   const bad = [];
-  // "fit the UI Background theme" (per user), made checkable rather than hoped for.
-  if (s.offPct > 5) bad.push(`off the panel's palette: ${s.offPct.toFixed(1)}% of the picture is saturated colour that is neither violet nor gold (want <= 5%) — this is what made the mushroom grove read as a different game`);
-  if (s.goldPct < 0.35) bad.push(`no gold in it (${s.goldPct.toFixed(1)}%) — the panel's only accent is a gold hairline and gold lettering, so the art has to answer it`);
-  // FILLS THE ENTIRE SQUARE (per user, earlier): each corner patch must carry real variation. A
-  // plain gradient corner measures near zero; painted stone, carving or sky measures well above it.
-  if (s.cornerDetail < 3.2) bad.push(`the corners are empty ground, not art: detail ${s.cornerDetail.toFixed(1)} of 255 (want >= 3.2) — the square is not filled`);
-  if (s.mean > 96) bad.push(`too bright behind a character: mean ${s.mean.toFixed(0)} (want <= 96)`);
-  // ABSOLUTE, NOT A RATIO. The ratio form was wrong twice on the previous concept: a centred
-  // subject inside a vignette is ALWAYS brighter than its own corners, so the ratio can never be
-  // satisfied without ruining the picture. What matters is whether a dark chibi separates from
-  // what is behind it, and that is an absolute number.
-  if (s.centre > 100) bad.push(`the middle is too bright to stand a dark character against: ${s.centre.toFixed(0)} of 255 (want <= 100)`);
+  if (s.satPct > 2.5) bad.push(`not neutral: ${s.satPct.toFixed(1)}% of pixels carry a nameable hue (want <= 2.5%)`);
+  if (s.mean < 118) bad.push(`too dark for a white-grey backdrop: mean ${s.mean.toFixed(0)} (want >= 118)`);
+  if (s.mean > 218) bad.push(`blown out: mean ${s.mean.toFixed(0)} (want <= 218)`);
+  if (s.cornerDetail < 3.2) bad.push(`the corners are empty ground, not art: detail ${s.cornerDetail.toFixed(1)} (want >= 3.2)`);
+  // A visibly empty haze measures 13-16 here: the band's own top-to-bottom light gradient is
+  // most of that number. The first cut asked for <= 12 and rejected five clean rolls for it.
+  if (s.centreDetail > 20) bad.push(`the middle is busy behind the character: detail ${s.centreDetail.toFixed(1)} (want <= 20)`);
+  if (variant === 'floor' && s.horizon < 9) bad.push(`no floor line: sharpest lower-half step ${s.horizon.toFixed(1)} of 255 (want >= 9)`);
+  if (variant === 'plain' && s.horizon >= 9) bad.push(`the open variant has a floor line: step ${s.horizon.toFixed(1)} (want < 9)`);
   return bad;
 }
-async function makeImage(prompt, label) {
+async function makeImage(label) {
   let last;
   for (let a = 1; a <= 4; a++) {
     try {
       process.stdout.write(`  ${label} attempt ${a} ... `);
       const res = await fetch(`${API}/assets/image`, { method: 'POST', headers: { Authorization: `ApiKey ${key}`, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(150000), body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false, prompt }) });
+        signal: AbortSignal.timeout(150000), body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false, prompt: PROMPT }) });
       if (res.status === 402) { console.log('OUT OF CREDITS'); process.exit(3); }
       if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 120)}`);
       const data = await res.json();
@@ -168,43 +168,39 @@ async function makeImage(prompt, label) {
   }
   throw new Error(`${label} FAILED: ${last && last.message}`);
 }
-const line = (t, s) => `${t}: mean ${s.mean.toFixed(0)}, centre ${s.centre.toFixed(0)}, gold ${s.goldPct.toFixed(1)}%, off-palette ${s.offPct.toFixed(1)}%, corners ${s.cornerDetail.toFixed(1)}`;
+const line = (t, s) => `${t}: mean ${s.mean.toFixed(0)}, hue ${s.satPct.toFixed(1)}%, centre ${s.centreDetail.toFixed(1)}, corners ${s.cornerDetail.toFixed(1)}, horizon ${s.horizon.toFixed(1)}`;
+async function ship(variant, buf) {
+  const st = await stats(buf), bad = gate(st, variant);
+  console.log(`  ${line(variant, st)} - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
+  if (bad.length) return false;
+  const out = join(ROOT, 'Sprites', 'ui', FILES[variant]);
+  await writeFile(out + '.tmp', buf); await rename(out + '.tmp', out);
+  console.log(`  -> Sprites/ui/${FILES[variant]} (${Math.round(buf.length / 1024)}KB)`);
+  return true;
+}
+async function shipBoth(seated) {
+  const a = await ship('plain', seated);
+  const b = a && await ship('floor', await withFloor(seated));
+  return a && b;
+}
 
-// --rescrim=<kept roll>: re-run a saved composite through the CURRENT seat(), so the shipped file
-// stays a product of the committed script rather than of a lucky interactive session.
-const _reFrom = (process.argv.find((x) => x.startsWith('--rescrim=')) || '').split('=')[1];
-if (_reFrom) {
-  const buf = await seat(await sharp(_reFrom).png().toBuffer());
-  const st = await stats(buf), bad = gate(st);
-  console.log(`${line('rescrim ' + _reFrom, st)} - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
-  if (bad.length) process.exit(2);
-  await writeFile(OUT + '.tmp', buf); await rename(OUT + '.tmp', OUT);
-  console.log(`  -> ${OUT} (${Math.round(buf.length / 1024)}KB)`); process.exit(0);
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  // --keep <file>: ship both variants from a roll this script already seated (post-seat bytes;
+  // re-seating would paint the ground and the hero scrim a second time).
+  if (has('--keep')) {
+    const ok = await shipBoth(await sharp(argOf('--keep')).webp({ quality: 90 }).toBuffer());
+    process.exit(ok ? 0 : 2);
+  }
+  if (!has('--generate')) { console.log('DRY RUN.\n\n' + PROMPT + '\n'); process.exit(0); }
+  if (!key) { console.error('LUDO_API_KEY required'); process.exit(1); }
+  mkdirSync(join(ROOT, 'scripts', '_tmp_csbg'), { recursive: true });
+  let done = false;
+  for (let roll = 1; roll <= ROLLS && !done; roll++) {
+    const seated = await seat(await makeImage(`roll ${roll}`));
+    await writeFile(join(ROOT, 'scripts', '_tmp_csbg', `plain_roll${roll}.webp`), seated);
+    done = await shipBoth(seated);
+  }
+  if (!done) { console.error('no roll passed the gates'); process.exit(2); }
+  console.log('\ndone.');
 }
-// --keep=<kept roll>: ship a roll this script already seated, re-judged by the CURRENT gates.
-// Not the same as --rescrim: a kept roll is post-seat, so re-seating would paint the ground and
-// the hero scrim on a second time and darken the middle twice. This ships the bytes the run
-// produced, which is what reproducibility actually means here.
-const _keep = (process.argv.find((x) => x.startsWith('--keep=')) || '').split('=')[1];
-if (_keep) {
-  const buf = await sharp(_keep).webp({ quality: 90 }).toBuffer();
-  const st = await stats(buf), bad = gate(st);
-  console.log(`${line('keep ' + _keep, st)} - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
-  if (bad.length) process.exit(2);
-  await writeFile(OUT + '.tmp', buf); await rename(OUT + '.tmp', OUT);
-  console.log(`  -> ${OUT} (${Math.round(buf.length / 1024)}KB)`); process.exit(0);
-}
-if (!has('--generate')) { console.log('DRY RUN.\n\n' + PROMPT + '\n'); process.exit(0); }
-if (!key) { console.error('LUDO_API_KEY required'); process.exit(1); }
-mkdirSync(join(ROOT, 'scripts', '_tmp_csbg'), { recursive: true });
-console.log('=== cs_preview_bg ===');
-let best = null;
-for (let roll = 1; roll <= ROLLS && !best; roll++) {
-  const buf = await seat(await makeImage(PROMPT, `roll ${roll}`));
-  await writeFile(join(ROOT, 'scripts', '_tmp_csbg', `roll${roll}.webp`), buf);
-  const st = await stats(buf), bad = gate(st);
-  console.log(`  ${line('roll ' + roll, st)} - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
-  if (!bad.length) { best = buf; await writeFile(OUT + '.tmp', buf); await rename(OUT + '.tmp', OUT); console.log(`  -> Sprites/ui/cs_preview_bg.webp (${Math.round(buf.length / 1024)}KB)`); }
-}
-if (!best) { console.error('no roll passed the gates'); process.exit(2); }
-console.log('\ndone.');
