@@ -66,6 +66,13 @@ const r = await page.evaluate(async () => {
   try { if (typeof closeDialog === 'function') closeDialog(); } catch (e) {}
 
   // ---- 2. a chill must wear off on its own
+  // The world must actually be RUNNING for a timer to tick. Since v0.30.520 closeDialog keeps
+  // the pause when another surface owns it, and this harness boots with a story-beat overlay
+  // live - so put that away and release the pause, as the other harnesses do. (Before that
+  // change this passed only because closeDialog unpaused unconditionally, which was the bug.)
+  { const sb = document.getElementById('story-beat-overlay'); if (sb) { sb.classList.remove('on'); sb.style.display = 'none'; } }
+  game.paused = false;
+  out.runningForChill = !game.paused;
   player.freezeTimer = 1400;
   const before = player.freezeTimer;
   await wait(2500);                      // comfortably longer than 1400 ms
@@ -81,7 +88,7 @@ const checks = [
   ['the banker dialog opens without throwing', r.bankThrew === false, r.bankErr || ''],
   ['...and offers Withdraw, so banked coins can come back out', r.hasWithdraw === true],
   ['...and still offers Deposit', r.hasDeposit === true],
-  ['a chill wears off by itself', r.chillBefore === 1400 && r.chillAfter === 0, 'after=' + r.chillAfter],
+  ['a chill wears off by itself', r.runningForChill === true && r.chillBefore === 1400 && r.chillAfter === 0, 'after=' + r.chillAfter],
   ['...and the ailment flag clears with it', r.ailmentStillActive === false],
   ['no page errors', errs.length === 0, errs.join(' | ')],
 ];
