@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.521';
+const GAME_VERSION = 'v0.30.522';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43716,6 +43716,44 @@ function _lxPadModalRootScan() {
 let _lxPadNavPrev = {};
 let _lxPadNavFocusing = false;   // v0.29.727 — true only inside menu-nav's own scroll-focus; the focusin auto-keyboard ignores those
 let _lxPadNavCssDone = false;
+// v0.30.x — STEAM-INPUT-ONLY PLAYERS GOT NO MENU NAVIGATION. _lxPadPoll deliberately
+// carries on when only the Steam snapshot exists (`if (!pad && !steamBtns) return`), but
+// the whole modal branch was gated `pad ? _lxPadModalRoot() : null`, so with a Steam
+// config that keeps the device out of navigator.getGamepads() the pad registry, the
+// topmost-wins resolver and the nav ring were all skipped and every press went to
+// gameplay dispatch. Start still closed panels; nothing inside them could be pressed -
+// "Respawn" and dialog choices were unreachable. The same class as the Edicts panel,
+// one level up: it defeated the registry rather than being absent from it.
+//
+// The snapshot is { <action>: bool } keyed by the SAME action names _LX_PAD_MAP carries,
+// so a standard-mapped pad can be synthesised from it and handed to the nav exactly as
+// a browser Gamepad would be: _lxPadBtn reads buttons[i].pressed on a standard mapping,
+// _lxPadAxis reads raw axes, and _lxPadHatIndex finds no scan for index -1 and yields.
+function _lxSteamNavPad(sb) {
+  if (!sb || typeof sb !== "object") return null;
+  const buttons = [];
+  for (let i = 0; i < 17; i++) buttons[i] = { pressed: false, touched: false, value: 0 };
+  // the gameplay sanity gate: contradictory digital directions mean "no direction"
+  const dirBad = (!!sb.moveLeft && !!sb.moveRight) || (!!sb.moveUp && !!sb.moveDown);
+  for (const idx in _LX_PAD_MAP) {
+    const spec = (typeof _lxPadMapEff === "function") ? _lxPadMapEff(idx) : _LX_PAD_MAP[idx];
+    const nm = spec && (spec.a || spec.k);
+    if (!nm) continue;
+    if (dirBad && (nm === "moveLeft" || nm === "moveRight" || nm === "moveUp" || nm === "moveDown")) continue;
+    if (sb[nm]) buttons[idx | 0] = { pressed: true, touched: true, value: 1 };
+  }
+  // The analog stick is folded into the D-pad rather than exposed as axes: _lxPadAxis is
+  // drift-guarded and trusts only axes it has watched vary, which a synthetic pad never has,
+  // so raw axes would read 0 and the stick would be dead in menus. The nav reads 12-15.
+  const mx = +sb._moveX || 0, my = +sb._moveY || 0;
+  if (!dirBad) {
+    if (my < -0.6) buttons[12] = { pressed: true, touched: true, value: 1 };
+    if (my >  0.6) buttons[13] = { pressed: true, touched: true, value: 1 };
+    if (mx < -0.6) buttons[14] = { pressed: true, touched: true, value: 1 };
+    if (mx >  0.6) buttons[15] = { pressed: true, touched: true, value: 1 };
+  }
+  return { id: "steam-input", index: -1, mapping: "standard", connected: true, axes: [0, 0, 0, 0], buttons, _steamSynth: true };
+}
 function _lxPadMenuNav(root, pad) {
   if (!_lxPadNavCssDone) {
     _lxPadNavCssDone = true;
@@ -44292,7 +44330,8 @@ function _lxPadPoll() {
     // v0.29.125 — modal-aware routing: while a panel is open the pad drives
     // MENU navigation, not the character. Release any held game keys first so
     // movement doesn't stick under the open panel, then hand off and return.
-    const _mroot = pad ? _lxPadModalRoot() : null;
+    const _navPad = pad || ((steamBtns && typeof _lxSteamNavPad === "function") ? _lxSteamNavPad(steamBtns) : null);   // v0.30.x — Steam-only input still gets the menu
+    const _mroot = _navPad ? _lxPadModalRoot() : null;
     if (_mroot) {
       for (const k in _lxPadPrev) if (_lxPadPrev[k]) { _lxPadDispatch(k, false); _lxPadPrev[k] = false; }
       // v0.29.7xx — START-FLICKER FIX (per user: "pressing start causes the
@@ -44302,14 +44341,14 @@ function _lxPadPoll() {
       // still-held button as a new press and CLOSED it. Entering menu mode
       // now pre-marks held action buttons as already-down, so the press that
       // opened a surface can never also act on it; release and press again.
-      if (_lxPadMode !== 'menu' && pad) {
+      if (_lxPadMode !== 'menu' && _navPad) {
         _lxPadMode = 'menu';
         for (const _bi of [0, 1, 9]) {
-          const _b = pad.buttons[_bi];
+          const _b = _navPad.buttons[_bi];
           _lxPadNavPrev[_bi] = !!(_b && (_b.pressed || _b.value > 0.5));
         }
       }
-      _lxPadMenuNav(_mroot, pad);
+      _lxPadMenuNav(_mroot, _navPad);
       return;
     }
     _lxPadNavPrev = {};   // leaving menu mode — reset nav edge state
