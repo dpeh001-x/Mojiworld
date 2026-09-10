@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.563';
+const GAME_VERSION = 'v0.30.564';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -61550,6 +61550,83 @@ function _voidVideoRest() {
   if (_voidVideoEl && !_voidVideoEl.paused) { try { _voidVideoEl.pause(); } catch (e) {} }
 }
 
+// v0.30.564 — MAP BACKDROP VIDEOS. Per user: "backgrounds/everdawn should replace as the background for
+// everdawn central (can use video or GIF whichever loads faster), fallback to bg_v3_everdawn_central
+// if unable to load fast enough. same concept for backgrounds/gravitos to replace the background
+// bg_v3_gravitosArena which is the fallback".
+//
+// The same shape as the Void's sky above (v0.30.553), made table-driven so a map opts in with one
+// line. Video, not GIF, for the reason recorded there: the same five seconds as a GIF is several
+// times the bytes, has to download whole before the first frame, and decodes on the CPU; the mp4
+// streams, decodes in hardware, and painting it is one drawImage per frame.
+//
+// HOW THE FALLBACK WORKS. The map's plate (BG_IMAGES[md.bg]) is untouched and keeps loading exactly
+// as before. drawBackground paints the plate until the clip reports a decodable frame
+// (readyState >= HAVE_CURRENT_DATA), then paints the clip IN THE SAME SLOT - same 0.12 parallax,
+// same mirrored seam copy - so the Gravitos darkening tint, the accretion-disc overlay and the town
+// liveliness layer all stack on it unchanged. A short alpha ramp hides the swap. A clip that errors,
+// stalls, or never arrives simply never takes over: the plate is what shows, as today.
+//
+// It stays out of the way when it should: not created under prefers-reduced-motion or data-saver
+// (the plate is the reduced-motion presentation), paused by loadMap the moment any other map loads,
+// and paused while the tab is hidden. The service worker never touches it - media streams by byte
+// range, which the worker already refuses to cache - and it lives under backgrounds/ like every
+// other backdrop, so it ships to Steam through the existing backgrounds/** filter.
+const _LX_MAP_VIDEO = {
+  town:          'backgrounds/everdawn.mp4',   // Everdawn Central (h264 832x464, 24 fps, 5 s, 2.7 MB)
+  gravitosArena: 'backgrounds/gravitos.mp4',   // The Singularity  (h264 832x464, 24 fps, 5 s, 4.3 MB)
+};
+const _lxMapVideoEls = Object.create(null), _lxMapVideoDead = Object.create(null);
+let _lxMapVideoAlpha = 0, _lxMapVideoAlphaFor = null;
+function _lxMapVideoAllowed() {
+  try {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+    const c = navigator.connection;
+    if (c && (c.saveData || /(^|[^3-9])2g/.test(String(c.effectiveType || '')))) return false;
+  } catch (e) {}
+  return true;
+}
+function _lxMapVideoEnsure(id) {
+  const src = _LX_MAP_VIDEO[id];
+  if (!src || _lxMapVideoDead[id] || !_lxMapVideoAllowed()) return null;
+  if (_lxMapVideoEls[id]) return _lxMapVideoEls[id];
+  try {
+    const v = document.createElement('video');
+    v.id = 'map-bg-video-' + id;
+    v.muted = true; v.loop = true; v.playsInline = true; v.autoplay = true;
+    v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.preload = 'auto';
+    // kept in the layout at a pixel so every engine keeps decoding it; the canvas is the picture
+    v.style.cssText = 'position:absolute;left:-10px;top:-10px;width:1px;height:1px;opacity:0.01;pointer-events:none;';
+    v.addEventListener('error', () => { _lxMapVideoDead[id] = true; _lxMapVideoEls[id] = null; try { v.remove(); } catch (e) {} }, { once: true });
+    v.src = src;
+    document.body.appendChild(v);
+    _lxMapVideoEls[id] = v;
+    return v;
+  } catch (e) { _lxMapVideoDead[id] = true; return null; }
+}
+// The clip to paint for this map right now, or null to paint the plate. Also drives the ramp: the
+// first paintable frame starts a ~0.4 s fade from the plate, so the swap is never a pop.
+function _lxMapVideoFrame(id) {
+  if (!_LX_MAP_VIDEO[id]) return null;
+  const v = _lxMapVideoEnsure(id);
+  if (!v) return null;
+  if (v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+  if (v.readyState < 2 || !v.videoWidth) return null;
+  if (_lxMapVideoAlphaFor !== id) { _lxMapVideoAlphaFor = id; _lxMapVideoAlpha = 0; }
+  if (_lxMapVideoAlpha < 1) _lxMapVideoAlpha = Math.min(1, _lxMapVideoAlpha + 0.045);
+  return v;
+}
+function _lxMapVideoRest(exceptId) {
+  for (const id in _lxMapVideoEls) {
+    const v = _lxMapVideoEls[id];
+    if (v && id !== exceptId && !v.paused) { try { v.pause(); } catch (e) {} }
+  }
+  if (exceptId !== _lxMapVideoAlphaFor) { _lxMapVideoAlphaFor = null; _lxMapVideoAlpha = 0; }
+}
+try {
+  document.addEventListener('visibilitychange', () => { if (document.hidden) _lxMapVideoRest(null); });
+} catch (e) {}
+
 function _playVoidIntro() {
   const ov = document.getElementById('void-intro-overlay');
   if (!ov) return;
@@ -63035,6 +63112,7 @@ function loadMap(id, entryX, entryY) {
   // loads — big Guguma held ~1.5s, then it fades out to the black Void.
   if (id === 'void' && typeof _playVoidIntro === 'function') _playVoidIntro();
   if (id !== 'void' && typeof _voidVideoRest === 'function') _voidVideoRest();   // v0.30.553 — the sky video sleeps off the Void
+  if (typeof _lxMapVideoRest === 'function') { _lxMapVideoRest(id); _lxMapVideoEnsure(id); }   // v0.30.564 — map backdrop videos: sleep the others, start buffering this one
   // v0.29.x — ...and its counterpart on the way back out: the first time the
   // player walks from the Void into Everdawn Central, Guguma welcomes them.
   if (id === 'town' && _lxFromMap === 'void' && typeof _playEverdawnWelcome === 'function') {
@@ -109045,7 +109123,11 @@ function drawBackground() {
   // (right edge meets right edge, perfectly continuous). Also round shift to
   // integer pixels to avoid sub-pixel blur during slow camera movement.
   const bgPick = _pickBGImage();
-  if (bgPick) {
+  // v0.30.564 — a map with a backdrop video (see _LX_MAP_VIDEO) paints the clip in this slot once it
+  // has a decodable frame. The plate (bgPick) is the fallback until then - and forever, if the clip
+  // never arrives - so nothing below this line changes for a map without one.
+  const _bgVid = (typeof _lxMapVideoFrame === 'function') ? _lxMapVideoFrame(game.currentMap) : null;
+  if (bgPick || _bgVid) {
     const parallax = 0.12;
     /* v0.29.5xx — vertical parallax on tall tower maps, reworked (per user
        "improve on the vertical parallax"). Three fixes over the v0.25.470-era
@@ -109076,7 +109158,16 @@ function drawBackground() {
     // First copy — drawn normally. Coverage for any shift in [0, _bgW): this
     // copy spans [-shift, _bgW - shift] and the mirror spans on from there to
     // 2*_bgW - shift, so together they always cover the whole [0, W] screen.
-    const _bgSrc = _lxBgScaled(bgPick, _bgW, _bgH);
+    // v0.30.564 — a plate is baked once at drawn size; a clip is a new frame every draw, so it is
+    // painted straight (832x464 to the screen is a near-1:1 blit, one texture copy). While the ramp
+    // runs, the plate is painted first and the clip fades over it so the swap is never a pop.
+    const _bgSrc = _bgVid ? _bgVid : _lxBgScaled(bgPick, _bgW, _bgH);
+    if (_bgVid && bgPick && _lxMapVideoAlpha < 1) {
+      const _pl = _lxBgScaled(bgPick, _bgW, _bgH);
+      ctx.drawImage(_pl, -shift, _bgY, _bgW, _bgH);
+      ctx.save(); ctx.translate(2 * _bgW - shift, 0); ctx.scale(-1, 1); ctx.drawImage(_pl, 0, _bgY, _bgW, _bgH); ctx.restore();
+      ctx.globalAlpha = _lxMapVideoAlpha;
+    }
     ctx.drawImage(_bgSrc, -shift, _bgY, _bgW, _bgH);
     // Second copy — mirrored. Translating to (2*_bgW - shift) puts its right
     // edge at x=(2*_bgW-shift) and after scale(-1,1) its left edge ends up at
@@ -109087,6 +109178,7 @@ function drawBackground() {
     ctx.scale(-1, 1);
     ctx.drawImage(_bgSrc, 0, _bgY, _bgW, _bgH);
     ctx.restore();
+    if (_bgVid) ctx.globalAlpha = 1;   // v0.30.564 — end of the ramp blend, before the tint
     // v0.29.86 — optional per-map darkening tint over the authored bg.
     // Drawn on top of the backdrop only (boss decor, sky-life, and every
     // entity render later in the frame, so they stay full-brightness).
