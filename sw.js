@@ -121,7 +121,10 @@
 // v0.30.546 - v32 -> v33. Sprites/projectiles/mspore.webp is
 // REPLACED under its own name again (the pod redrawn as a smooth white spore puff). The last
 // bump was demonstrably load-bearing: the browser was still serving v28's copy.
-const CACHE = 'mojiworld-assets-v33';
+// v0.30.551 - v33 -> v34. Nine NEW frames at
+// Sprites/projectiles/anim/mspore_0..8.webp. A returning browser with the old manifest would
+// never fetch them and would keep drawing the static puff.
+const CACHE = 'mojiworld-assets-v34';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
