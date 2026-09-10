@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.525';
+const GAME_VERSION = 'v0.30.526';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -46049,6 +46049,9 @@ function loadState() {
           }
         }, 6000);
       } catch (_e) {}
+      // v0.30.x — the next autosave would overwrite this blob with the fresh character. Keep a
+      // copy under _recover (same idiom as the corrupt-save path) so nothing is lost for good.
+      try { if (!localStorage.getItem(SAVE_KEY + '_recover')) localStorage.setItem(SAVE_KEY + '_recover', raw); } catch (_e) {}
       return false;
     }
     if (!s || !s.player || !s.player.cls) return false;
@@ -49365,6 +49368,35 @@ function _coopApplyKill(msg) {
 // normal-mob 0.28x / boss 1.0x + a 1s i-frame), matching the essence of the real
 // contact-damage site. Projectile / telegraphed-special damage from mirrors is
 // not synced in v1 (see COOP_NOTES). Called from the follower branch each frame.
+// v0.30.x — MANA SHIELD PAID BEFORE THE FLOORS. The 2 MP : 1 HP trade ran on the pre-floor
+// damage; the Scorpio 40% / Conductor 30% / _lxBossHpFloor / boss-band floors then raised the
+// FINAL loss back up, so the player paid the MP and took the floored hit anyway. The trade now
+// runs on the final number, from one helper both contact paths share.
+function _lxManaShieldAbsorb(dmg) {
+  if (!player || !player.tree || !player.tree.manaShield || !(player.mp > 0) || !(dmg > 0)) return dmg;
+  const mpAbsorb = Math.min(player.mp, dmg * 2);
+  const hpSaved = Math.floor(mpAbsorb / 2);
+  player.mp -= mpAbsorb;
+  return Math.max(0, dmg - hpSaved);
+}
+// v0.30.x — the host's contact DR stack (block, warrior DR, Aegis, Holy Shield, DEF absorb).
+// The co-op follower path below skipped ALL of it: a guest fighting a mirrored boss took the
+// raw ATK x 0.28 / 1.0 with only _diffDmg on top - DEF, blocking and every shield were inert.
+function _lxContactDrStack(m, dmg) {
+  if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+  if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
+  if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
+  const _hsMul = (typeof _holyShieldDrMul === 'function') ? _holyShieldDrMul() : 1;
+  if (_hsMul < 1) dmg = Math.max(1, Math.floor(dmg * _hsMul));
+  const _pierce = (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1;
+  if (typeof _defAbsorbMul === 'function') dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul(_pierce)));
+  if (player._activeSynergies && player._activeSynergies.ironWill) {
+    const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
+    const _dr = Math.min(0.25, Math.floor(_maxHp / 100) * 0.01);
+    if (_dr > 0 && dmg > 0) dmg = Math.max(1, Math.floor(dmg * (1 - _dr)));
+  }
+  return dmg;
+}
 function _coopFollowerContactTick() {
   if (typeof player === 'undefined' || !player || player.hp <= 0 || player._god) return;
   if ((player.invulnerable | 0) > 0) return;
@@ -49380,7 +49412,9 @@ function _coopFollowerContactTick() {
     }
     const _normalMul = (!m.isBoss && !m.isMiniBoss) ? 0.28 : 1.0;
     let dmg = Math.max(1, Math.floor((m.atk || 20) * _normalMul));
+    dmg = _lxContactDrStack(m, dmg);   // v0.30.x — the host's DR stack; this path had none
     if (typeof _diffDmg === 'function') { try { dmg = _diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0); } catch (e) {} }
+    dmg = _lxManaShieldAbsorb(dmg);
     player.hp -= dmg;
     player.lastHitTime = game.time;
     player._lastDamageSource = m.label || m.type || 'an enemy';
@@ -82219,13 +82253,7 @@ function updateMonsters(dt) {
           });
         }
       }
-      // Skill tree: Mana Shield — consume MP first (2 MP : 1 HP)
-      if (player.tree.manaShield && player.mp > 0) {
-        const mpAbsorb = Math.min(player.mp, dmg * 2);
-        const hpSaved = Math.floor(mpAbsorb / 2);
-        player.mp -= mpAbsorb;
-        dmg = Math.max(0, dmg - hpSaved);
-      }
+      // v0.30.x — Mana Shield moved BELOW the floors (see _lxManaShieldAbsorb).
       // v0.26.265 — Synergy: Iron Will (def + maxhp). +1 % damage
       // reduction per 100 Max HP (cap 25 %). Applied at the contact-
       // damage site (the dominant player-damage source). Read by the
@@ -82283,6 +82311,7 @@ function updateMonsters(dt) {
         if (_shownDmg < _pcFloor) _shownDmg = _pcFloor;
       }
       if (_shownDmg > 0) _shownDmg = _lxBossHpFloor(m.type, _shownDmg);   // v0.30.397 — Krook / Octobaby / tentacles: at least 15% of max HP a hit
+      if (!player._god) _shownDmg = _lxManaShieldAbsorb(_shownDmg);   // v0.30.x — 2 MP : 1 HP on the FINAL loss, after every floor
       player.hp -= (player._god ? 0 : _shownDmg);
       player.lastHitTime = game.time;
       // v0.26.085 — Virgo Sin Counter increment. If this melee hit
