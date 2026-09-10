@@ -34,7 +34,7 @@ sharp.cache(false);
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'Sprites', 'projectiles', 'mspore.webp');
-const S = 640;
+const S = 1024;   // master resolution; the game blits this at ~31px via _lxProjScaled
 const has = (f) => process.argv.includes(f);
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i >= 0 ? process.argv[i + 1] : d; };
 const ROLLS = Number(argOf('--rolls', '6'));
@@ -51,12 +51,13 @@ const PROMPT =
   + 'The TOP is fully ROUNDED - no point, no peak, no tip, no curl. Not a teardrop, not a raindrop, '
   + 'not a kiss shape, not an egg. The UNDERSIDE is as full and round as the top, a mirror of it, '
   + 'and nothing hangs off it: no frill, no skirt, no legs, no feet, no nubs, no stem, no tail. '
-  + 'The body is WHITE - a clean soft white puff with a gentle glossy sheen and one bright highlight '
-  + 'near the top, shading to the faintest warm grey-pink underneath so it still reads as round. '
-  + 'Scattered over the white body are SIX OR SEVEN SOFT RED DOTS: simple round spots in a gentle '
-  + 'muted red, soft-edged, different sizes, spread across the whole body like spore freckles. '
-  + 'The red dots are important and must be clearly visible on the white. '
-  + 'It has NO FACE: no eyes, no mouth, no nose - just the plain white puff and its red dots. '
+  + 'The body is plain WHITE with real depth: a bright white top catching the light, shading down '
+  + 'through warm pink-grey to a distinctly darker rosy underside, so the ball reads as round and '
+  + 'solid rather than flat. One crisp bright highlight near the top. '
+  + 'The surface is COMPLETELY PLAIN - no spots, no dots, no freckles, no markings, no pattern of '
+  + 'any kind on it. Just the smooth shaded white surface. '
+  + 'Crisp, clean, high-detail rendering with clear soft shading. '
+  + 'It has NO FACE: no eyes, no mouth, no nose - just the plain shaded white ball. '
   + 'Soft cute cartoon style, bold clean shapes, smooth gentle shading. '
   + 'Colours are ONLY white and soft red - no green, no blue, no purple, no orange, no yellow. '
   + 'Flat 2D game sprite on a fully transparent background, drawn COMPLETE with a clear even margin '
@@ -67,12 +68,66 @@ const PROMPT =
 // they land correctly whatever size the puff comes back. Two dark oval eyes right of centre with a
 // glossy shine, the far one smaller, and a soft blush under them - the reference's face exactly.
 // Both eyes are inset from the right edge by construction, so they can never read as clipped.
+async function punch(buf) {
+  const alpha = await sharp(buf).ensureAlpha().extractChannel(3).png().toBuffer();
+  const rgb = await sharp(buf).removeAlpha()
+    .modulate({ saturation: 1.34 })          // the red dots were only a few levels off the white
+    .linear(1.18, -26)                       // pull the body off paper-white so it has a range
+    .sharpen({ sigma: 1.1, m1: 0.6, m2: 1.4 })
+    .toBuffer();
+  return sharp(rgb).joinChannel(alpha).webp({ quality: 96, alphaQuality: 100 }).toBuffer();
+}
+// Seeded, so a given body always gets the same freckles and the file is reproducible.
+function _rng(seed) { let t = seed >>> 0; return () => { t = (t * 1664525 + 1013904223) >>> 0; return t / 4294967296; }; }
+async function addDots(buf) {
+  const p0 = await px(buf), b = inkBox(p0);
+  // ROUND THE COORDINATES. These are floats from the placement loop, and indexing the pixel array
+  // with a float yields undefined, so every test failed and addDots quietly placed nothing at all -
+  // it returned a bald puff through a guard meant for genuinely bad bodies.
+  const on = (fx, fy) => { const x = Math.round(fx), y = Math.round(fy);
+    return x >= 0 && y >= 0 && x < p0.w && y < p0.h && p0.d[(y * p0.w + x) * 4 + 3] > 200; };
+  const rnd = _rng(0x5B03E5);   // fixed seed: the same body always gets the same freckles
+  const inset = Math.round(b.w * 0.10);                 // keep every dot clear of the rim
+  const eyeX = b.x0 + b.w * 0.675, eyeY = b.y0 + b.h * 0.50, eyeR = b.w * 0.20;
+  const placed = [];
+  for (let tries = 0; tries < 4000 && placed.length < 7; tries++) {
+    const r = b.w * (0.036 + rnd() * 0.038);
+    const x = b.x0 + r + rnd() * (b.w - 2 * r), y = b.y0 + r + rnd() * (b.h - 2 * r);
+    // fully inside the body, clear of the rim, clear of the face, not touching another dot
+    if (!on(x, y) || !on(x - r - inset, y) || !on(x + r + inset, y) || !on(x, y - r - inset) || !on(x, y + r + inset)) continue;
+    if (Math.hypot(x - eyeX, y - eyeY) < eyeR + r) continue;
+    if (placed.some((q) => Math.hypot(q.x - x, q.y - y) < q.r + r + b.w * 0.045)) continue;
+    placed.push({ x, y, r });
+  }
+  if (placed.length < 4) { console.log(`    addDots: only ${placed.length} dots would fit - leaving this roll bald`); return buf; }
+  const circles = placed.map((q) =>
+    `<circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="${q.r.toFixed(1)}" fill="url(#d)"/>`).join('');
+  const svg = Buffer.from(
+    `<svg width="${p0.w}" height="${p0.h}" xmlns="http://www.w3.org/2000/svg"><defs>`
+    + `<radialGradient id="d" cx="50%" cy="50%" r="50%">`
+    + `<stop offset="0%" stop-color="#c2394a" stop-opacity="0.92"/>`
+    + `<stop offset="72%" stop-color="#c2394a" stop-opacity="0.86"/>`
+    + `<stop offset="100%" stop-color="#d9647a" stop-opacity="0"/></radialGradient></defs>`
+    + circles + `</svg>`);
+  const painted = await sharp(buf).composite([{ input: svg }]).png().toBuffer();
+  const alpha = await sharp(buf).ensureAlpha().extractChannel(3).png().toBuffer();
+  // MATERIALISE BETWEEN THE TWO. Chained, sharp applies joinChannel to the ORIGINAL four-channel
+  // image rather than to the removeAlpha result, producing a five-channel buffer that renders as a
+  // fully opaque square - the "symmetry 100%, ink on the canvas border" signature. Every other
+  // joinChannel in this file already writes to a buffer first; this one did not.
+  const flat = await sharp(painted).removeAlpha().png().toBuffer();
+  return sharp(flat).joinChannel(alpha).webp({ quality: 96, alphaQuality: 100 }).toBuffer();
+}
 async function addOutline(buf) {
   const m = await sharp(buf).metadata();
   const w = Math.max(3, Math.round(m.width * 0.011));   // ring thickness
-  const alpha = await sharp(buf).ensureAlpha().extractChannel(3).toBuffer();
+  const alpha = await sharp(buf).ensureAlpha().extractChannel(3).png().toBuffer();
   // blur then threshold = a dilated silhouette; the ring is what sticks out past the original
-  const grown = await sharp(alpha).blur(w * 0.9).linear(6, -128).toBuffer();
+    // .png() on every one of these is load-bearing: extractChannel().toBuffer() inherits the input
+  // format and hands back a THREE-channel grey image, so joinChannel was building five- and
+  // six-channel buffers that render as a fully opaque rectangle - which is what the "symmetry 100%,
+  // ink on the canvas border" rolls actually were.
+  const grown = await sharp(alpha).blur(w * 0.9).linear(6, -128).png().toBuffer();
   // THREE channels, not four: joinChannel APPENDS, so giving it an image that already has an
   // alpha produced a five-channel buffer and a fully opaque rectangle - every roll then failed the
   // border check with a suspicious 100% symmetry, which is what a filled canvas measures.
@@ -101,7 +156,7 @@ async function addFace(buf) {
     + `</svg>`);
   // masked to the body, so a stray eye can never hang outside the silhouette
   const painted = await sharp(buf).composite([{ input: svg }]).png().toBuffer();
-  const alpha = await sharp(buf).ensureAlpha().extractChannel(3).toBuffer();
+  const alpha = await sharp(buf).ensureAlpha().extractChannel(3).png().toBuffer();
   return sharp(painted).ensureAlpha().joinChannel(alpha).webp({ quality: 94, alphaQuality: 100 }).toBuffer();
 }
 
@@ -320,7 +375,7 @@ if (has('--cast')) {
 }
 const _dress = (process.argv.find((x) => x.startsWith('--dress=')) || '').split('=')[1];
 if (_dress) {
-  const buf = await addFace(await addOutline(await seat(await sharp(_dress).png().toBuffer())));
+  const buf = await addFace(await addOutline(await addDots(await punch(await seat(await sharp(_dress).png().toBuffer())))));
   const pp = await px(buf), p2 = await px(buf, 256), bad = gate(pp, 'dressed', p2);
   console.log(`${line('dress ' + _dress, pp, p2)} - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
   if (bad.length) process.exit(2);
@@ -349,7 +404,7 @@ await mkdir(join(ROOT, 'scripts', '_tmp_mspore'), { recursive: true });
 console.log('=== mspore ===');
 let best = null;
 for (let roll = 1; roll <= ROLLS && !best; roll++) {
-  const buf = await addFace(await addOutline(await seat(await makeImage(PROMPT, `roll ${roll}`))));
+  const buf = await addFace(await addOutline(await addDots(await punch(await seat(await makeImage(PROMPT, `roll ${roll}`))))));
   await writeFile(join(ROOT, 'scripts', '_tmp_mspore', `roll${roll}.webp`), buf);
   const p = await px(buf), p256 = await px(buf, 256), bad = gate(p, 'roll ' + roll, p256);
   console.log(`  ${line('roll ' + roll, p, p256)} - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES every gate'}`);
