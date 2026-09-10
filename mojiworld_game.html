@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.511';
+const GAME_VERSION = 'v0.30.512';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -47759,6 +47759,22 @@ function mpConnect(url, name, room) {
     const wasConnected = net.connected;
     net.connected = false;
     net.peers = {};
+    // v0.30.512 — drop the host's mirror monsters HERE. The orphan-mirror purge in updateMonsters
+    // is gated on _coopActive(), and clearing net.peers is exactly what makes that false - so on
+    // a socket drop the purge was skipped, _coopFollowingHost() went false, and the mirrors fell
+    // through to the full LOCAL simulation. A guest who had whittled the host's boss to 5% could
+    // land one hit during a blink and collect a complete solo payout - setshards, gear, the
+    // map-cleared stamp, quest tick, EXP and coins - for a boss the host tanked. The purge's own
+    // comment names this failure ("must DROP the host's stale mirrors rather than let them
+    // resurrect under local AI"); its guard just never covered the disconnect case.
+    try {
+      if (game && Array.isArray(game.monsters)) {
+        for (let _mi = game.monsters.length - 1; _mi >= 0; _mi--) {
+          const _mm = game.monsters[_mi];
+          if (_mm && _mm._coopMirror) { _mm.currentHp = 0; game.monsters.splice(_mi, 1); }
+        }
+      }
+    } catch (e) {}
     _mpRenderPlayerList();
     // v0.29.4 — auto-reconnect on an UNEXPECTED drop (idle timeout, relay
     // restart, transient network blip). mpDisconnect() sets _userClosed so a
@@ -48183,7 +48199,13 @@ function _coopApplyBossHit(msg) {
     }
   }
   const isFrac = (+msg.fr > 0);
-  let dmg = isFrac ? Math.floor(player.maxHp * Math.min(1, +msg.fr)) : Math.max(1, +msg.d || 0);
+  // v0.30.512 — the fraction is of the RECEIVER's REAL pool, which is what this function's own
+  // contract says. player.maxHp is the raw class base; getMaxHp() adds mods, equipment, the
+  // prestige bonus, the class multiplier and the global x1.5. Every solo and host site computes
+  // the hit with getMaxHp() and broadcasts the fraction, so a guest was taking roughly half the
+  // share the host modelled - a Lv 50 warrior lost 26% to an attack that cost the host 50%. The
+  // sibling _coopApplyPartyHeal already uses getMaxHp(), so this was an oversight, not a rule.
+  let dmg = isFrac ? Math.floor((typeof getMaxHp === 'function' ? getMaxHp() : player.maxHp) * Math.min(1, +msg.fr)) : Math.max(1, +msg.d || 0);
   if (dmg <= 0) return;
   if (!isFrac) {   // raw atk-based hits are DEF-reducible (like contact/hazhit); %-nukes are not
     const _def = (typeof getDef === 'function') ? getDef() : 0;
@@ -48220,7 +48242,7 @@ function _coopSelfBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color) {
     }
   }
   const isFrac = (+dmgFrac > 0);
-  let dmg = isFrac ? Math.floor(player.maxHp * Math.min(1, +dmgFrac)) : Math.max(1, +dmgRaw || 0);
+  let dmg = isFrac ? Math.floor((typeof getMaxHp === 'function' ? getMaxHp() : player.maxHp) * Math.min(1, +dmgFrac)) : Math.max(1, +dmgRaw || 0);   // v0.30.512 — real pool, see _coopApplyBossHit
   if (dmg <= 0) return;
   if (!isFrac) {
     const _def = (typeof getDef === 'function') ? getDef() : 0;
@@ -69669,7 +69691,14 @@ function castSkill(id) {
   // v0.26.399 — holyShield (Knight ultimate) excluded: it grants a 5 s
   // invuln on a 22 s CD, so letting Quickening zero its cooldown allowed a
   // near-continuous invulnerability chain. Same class of exploit Sleight had.
-  if (computedCd > 0 && id !== 'sleight' && id !== 'holyShield' && id !== 'shinobi_seal') {
+  // v0.30.512 — elementalist_ult joins the exclusion list. Its charge block only re-stamps the
+  // inter-cast gate WHILE charges remain, so on the last charge nothing re-arms the cooldown; a
+  // Quickening roll on that press left it at 0, and the next press saw charges <= 0, refilled to
+  // three and dealt a fresh hand - six catastrophes back to back. This is the exact failure the
+  // list already exists for: sleight is excluded because "the charges <= 0 -> refill 3 reset on
+  // the very next press turned that into infinite Sleight teleports", and shinobi_seal was added
+  // for the same reason. The Apotheosis was written later on the same cadence and never added.
+  if (computedCd > 0 && id !== 'sleight' && id !== 'holyShield' && id !== 'shinobi_seal' && id !== 'elementalist_ult') {
     const cdrChance = (player.mods && player.mods.cdrChance) || 0;
     if (cdrChance > 0 && Math.random() < cdrChance) {
       player.skillCooldowns[id] = 0;
@@ -101768,9 +101797,16 @@ function renderSkillsReference(host) {
       const curRank = getSkillRank(skillId);
       // v0.25.529 — Damage-bonus % derived from the new linear curve:
       // +5% per rank, +10% at rank 10.
-      const dmgPct = curRank >= SKILL_RANK_CAP
-        ? SKILL_RANK_MAX_PCT                             // v0.30.116 - derived from the curve
-        : curRank * 5;                                   // r×5 % otherwise
+      // v0.30.512 — ask the CURVE, do not restate it. This row hardcoded 5%-per-rank and the
+      // generic cap, but _skillRankMulAt gives arrowShot / slash / stab 2% a rank capped at
+      // +20%, and marksman_oneshot a dmgOverride that reaches 1.885 at rank 10. So the tile
+      // told an archer "+25%" at rank 5 where the real multiplier was 1.10, and "+70% MAX" at
+      // rank 10 against a real 1.20. The curve-aware formatter already existed and was already
+      // used by the expandable detail panel two blocks below - so the same card showed two
+      // different numbers for the same rank. One source now.
+      const dmgPct = (typeof _formatRankPct === 'function')
+        ? _formatRankPct(curRank, skillId).replace(/^\+/, '')
+        : (curRank >= SKILL_RANK_CAP ? SKILL_RANK_MAX_PCT : curRank * 5)
       const atCap = curRank >= SKILL_RANK_CAP;
       const canAfford = pool > 0 && !atCap && !blocked;
       let pips = '';
@@ -101791,7 +101827,8 @@ function renderSkillsReference(host) {
       const _addTitle = atCap
         ? `Maxed — rank ${SKILL_RANK_CAP}/${SKILL_RANK_CAP}`
         : (pool > 0
-            ? 'Spend 1 RP — +5% damage this rank'
+            ? 'Spend 1 RP — next rank: ' + ((typeof _formatRankPct === 'function')
+                ? _formatRankPct(Math.min(SKILL_RANK_CAP, curRank + 1), skillId) : '+5%') + ' damage'
             : 'No Rank Points left — you earn 1 RP per level-up. RP is a '
               + 'separate pool from the Level-Up tab\'s SP.');
       const buttonHtml = blocked
