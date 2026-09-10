@@ -10660,7 +10660,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.552';
+const GAME_VERSION = 'v0.30.553';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -61417,6 +61417,46 @@ function _voidGugumaUseHi(img) {
   return true;
 }
 
+// v0.30.553 — THE VOID BACKDROP VIDEO. backgrounds/thevoid.mp4 (h264 832x464, 24 fps, 5 s, 1.2 MB),
+// painted cover-fit under the micro-stars every frame the Void is on screen. Per user: "use
+// backgrounds/thevoid as a background gif or video for the void map (whichever loads faster)".
+// A video, not a GIF: the same five seconds as a GIF would be several times the bytes, would
+// have to download whole before the first frame, and decodes on the CPU frame by frame; the mp4
+// streams, decodes in hardware, and drawImage(video) is one texture copy per frame. Muted +
+// inline so autoplay is allowed without a gesture (the same shape as the story-beat clips);
+// created on first use, paused by loadMap whenever the Void is not the current map so it costs
+// nothing elsewhere; if the file fails to load the Void stays black exactly as before.
+let _voidVideoEl = null, _voidVideoDead = false;
+function _voidVideoEnsure() {
+  if (_voidVideoEl || _voidVideoDead) return _voidVideoEl;
+  try {
+    const v = document.createElement('video');
+    v.id = 'void-bg-video';
+    v.muted = true; v.loop = true; v.playsInline = true; v.autoplay = true;
+    v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.preload = 'auto';
+    // kept in the layout at a pixel so every engine keeps decoding it; the canvas is the picture
+    v.style.cssText = 'position:absolute;left:-10px;top:-10px;width:1px;height:1px;opacity:0.01;pointer-events:none;';
+    v.addEventListener('error', () => { _voidVideoDead = true; _voidVideoEl = null; try { v.remove(); } catch (e) {} }, { once: true });
+    v.src = 'backgrounds/thevoid.mp4';
+    document.body.appendChild(v);
+    _voidVideoEl = v;
+  } catch (e) { _voidVideoDead = true; }
+  return _voidVideoEl;
+}
+function _voidVideoDraw() {
+  const v = _voidVideoEnsure();
+  if (!v) return false;
+  if (v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+  if (v.readyState < 2 || !v.videoWidth) return false;
+  const sc = Math.max(W / v.videoWidth, H / v.videoHeight);
+  const dw = v.videoWidth * sc, dh = v.videoHeight * sc;
+  ctx.drawImage(v, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  return true;
+}
+function _voidVideoRest() {
+  if (_voidVideoEl && !_voidVideoEl.paused) { try { _voidVideoEl.pause(); } catch (e) {} }
+}
+
 function _playVoidIntro() {
   const ov = document.getElementById('void-intro-overlay');
   if (!ov) return;
@@ -62901,6 +62941,7 @@ function loadMap(id, entryX, entryY) {
   // v0.26.x — Per user: a short "entering the Void" scene every time the Void
   // loads — big Guguma held ~1.5s, then it fades out to the black Void.
   if (id === 'void' && typeof _playVoidIntro === 'function') _playVoidIntro();
+  if (id !== 'void' && typeof _voidVideoRest === 'function') _voidVideoRest();   // v0.30.553 — the sky video sleeps off the Void
   // v0.29.x — ...and its counterpart on the way back out: the first time the
   // player walks from the Void into Everdawn Central, Guguma welcomes them.
   if (id === 'town' && _lxFromMap === 'void' && typeof _playEverdawnWelcome === 'function') {
@@ -108882,6 +108923,9 @@ function drawBackground() {
     // experiment was reverted). The black sky fill above already covers the
     // screen; we only sprinkle the drifting micro-stars on top. (The dark
     // purple-black radial wash lives only in the void-intro scene overlay.)
+    // v0.30.553 — the video sky (backgrounds/thevoid.mp4) goes under the stars; until its first
+    // frame decodes, or if it never loads, the black fill above is what shows — as before.
+    if (typeof _voidVideoDraw === 'function') _voidVideoDraw();
     ctx.save();
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
     const ww = _md.worldWidth || 800;
@@ -113787,17 +113831,11 @@ function drawPlatforms() {
     if (sx + p.w < 0 || sx > W) continue;
     if (p.y + p.h < _camY - 30 || p.y > _camY + H + 30) continue;
     if (p.type === 'ground') {
-      // v0.25.503 — The Void: paint the ground as a flat near-black band
-      // with a thin violet rim, matching the iconic-star portal palette
-      // and the all-black sky. Skip every other ground-tile path so
-      // grass / stone / sand textures don't bleed into the void.
-      if (game.mapData && game.mapData.isVoid) {
-        ctx.fillStyle = '#0a0612';
-        ctx.fillRect(sx, p.y, p.w, p.h);
-        ctx.fillStyle = 'rgba(170,119,255,0.4)';
-        ctx.fillRect(sx, p.y, p.w, 1);
-        continue;
-      }
+      // v0.25.503 painted the Void's ground as a near-black band with a thin violet rim.
+      // v0.30.553 — gone, per user ("remove the purple line floor"): the platform still carries
+      // the hero and the star portal, it just draws nothing, so the video sky runs to the
+      // bottom edge. Every other ground-tile path is still skipped here.
+      if (game.mapData && game.mapData.isVoid) continue;
       // v0.29.x — CUTE procedural floor. Per user: less plain + a 2px black
       // outline + biome-suitable. Still sprite-free (no stretched tiles): a
       // cel-shaded slab with a lit "surface" cap (grass/snow/sand/…), a dark
