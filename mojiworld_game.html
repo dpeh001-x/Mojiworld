@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.565';
+const GAME_VERSION = 'v0.30.566';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -61575,6 +61575,8 @@ function _voidVideoRest() {
 const _LX_MAP_VIDEO = {
   town:          'backgrounds/everdawn.mp4',   // Everdawn Central (h264 832x464, 24 fps, 5 s, 2.7 MB)
   gravitosArena: 'backgrounds/gravitos.mp4',   // The Singularity  (h264 832x464, 24 fps, 5 s, 4.3 MB)
+  // v0.30.566 — the Singularity once form 2 has fallen (see _lxMapVideoKeyFor). Not a map: a state of one.
+  gravitosFinale: 'backgrounds/gravitosfinale.mp4',   // (h264 832x464, 24 fps, 5 s, 4.8 MB)
 };
 const _lxMapVideoEls = Object.create(null), _lxMapVideoDead = Object.create(null);
 let _lxMapVideoAlpha = 0, _lxMapVideoAlphaFor = null;
@@ -61606,14 +61608,38 @@ function _lxMapVideoEnsure(id) {
 }
 // The clip to paint for this map right now, or null to paint the plate. Also drives the ramp: the
 // first paintable frame starts a ~0.4 s fade from the plate, so the swap is never a pop.
-function _lxMapVideoFrame(id) {
+// v0.30.566 — A MAP CAN HAVE MORE THAN ONE CLIP. Per user: "when the 2nd form of gravitos dies, the
+// background becomes gravitosfinale". The Singularity plays gravitos.mp4 until form 2 falls and
+// gravitosfinale.mp4 from then on. The MAP decides which key is current; everything below stays
+// keyed on the clip, which is why neither the draw site nor the loadMap hook had to change.
+let _lxGravFinaleBg = false;   // set by _lxGravCollapse(3), cleared by _lxGravArenaReset on every entry
+function _lxMapVideoKeyFor(mapId) {
+  if (mapId === 'gravitosArena' && _lxGravFinaleBg) return 'gravitosFinale';
+  return mapId;
+}
+// The outgoing clip, kept live only for the length of the ramp so a mid-fight switch crosses from
+// clip to clip. Without this the ramp would fade the finale in over the PLATE - a flash of the
+// still painting between two moving ones, at the most dramatic moment in the fight.
+let _lxMapVideoPrev = null;
+function _lxMapVideoUnder() {
+  const v = _lxMapVideoPrev;
+  return (v && v.isConnected && v.readyState >= 2 && v.videoWidth) ? v : null;
+}
+function _lxMapVideoFrame(mapId) {
+  const id = _lxMapVideoKeyFor(mapId);
   if (!_LX_MAP_VIDEO[id]) return null;
   const v = _lxMapVideoEnsure(id);
   if (!v) return null;
   if (v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
   if (v.readyState < 2 || !v.videoWidth) return null;
-  if (_lxMapVideoAlphaFor !== id) { _lxMapVideoAlphaFor = id; _lxMapVideoAlpha = 0; }
-  if (_lxMapVideoAlpha < 1) _lxMapVideoAlpha = Math.min(1, _lxMapVideoAlpha + 0.045);
+  if (_lxMapVideoAlphaFor !== id) {
+    _lxMapVideoPrev = (_lxMapVideoAlphaFor && _lxMapVideoEls[_lxMapVideoAlphaFor]) || null;
+    _lxMapVideoAlphaFor = id; _lxMapVideoAlpha = 0;
+  }
+  if (_lxMapVideoAlpha < 1) {
+    _lxMapVideoAlpha = Math.min(1, _lxMapVideoAlpha + 0.045);
+    if (_lxMapVideoAlpha >= 1 && _lxMapVideoPrev) { try { _lxMapVideoPrev.pause(); } catch (e) {} _lxMapVideoPrev = null; }
+  }
   return v;
 }
 function _lxMapVideoRest(exceptId) {
@@ -61621,7 +61647,7 @@ function _lxMapVideoRest(exceptId) {
     const v = _lxMapVideoEls[id];
     if (v && id !== exceptId && !v.paused) { try { v.pause(); } catch (e) {} }
   }
-  if (exceptId !== _lxMapVideoAlphaFor) { _lxMapVideoAlphaFor = null; _lxMapVideoAlpha = 0; }
+  if (exceptId !== _lxMapVideoAlphaFor) { _lxMapVideoAlphaFor = null; _lxMapVideoAlpha = 0; _lxMapVideoPrev = null; }
 }
 try {
   document.addEventListener('visibilitychange', () => { if (document.hidden) _lxMapVideoRest(null); });
@@ -109162,8 +109188,13 @@ function drawBackground() {
     // painted straight (832x464 to the screen is a near-1:1 blit, one texture copy). While the ramp
     // runs, the plate is painted first and the clip fades over it so the swap is never a pop.
     const _bgSrc = _bgVid ? _bgVid : _lxBgScaled(bgPick, _bgW, _bgH);
-    if (_bgVid && bgPick && _lxMapVideoAlpha < 1) {
-      const _pl = _lxBgScaled(bgPick, _bgW, _bgH);
+    // v0.30.566 — a mid-map clip switch (the Singularity's finale) crosses from the outgoing clip;
+    // the plate is only the underlay when there was no clip before this one.
+    const _bgUnder = (_bgVid && _lxMapVideoAlpha < 1)
+      ? ((typeof _lxMapVideoUnder === 'function' && _lxMapVideoUnder()) || (bgPick ? _lxBgScaled(bgPick, _bgW, _bgH) : null))
+      : null;
+    if (_bgUnder) {
+      const _pl = _bgUnder;
       ctx.drawImage(_pl, -shift, _bgY, _bgW, _bgH);
       ctx.save(); ctx.translate(2 * _bgW - shift, 0); ctx.scale(-1, 1); ctx.drawImage(_pl, 0, _bgY, _bgW, _bgH); ctx.restore();
       ctx.globalAlpha = _lxMapVideoAlpha;
@@ -113889,6 +113920,7 @@ function _lxGravArenaReset() {
   _lxGravDebris = [];
   _lxGravTintCur = null;
   _lxGravTintTo = _LX_GRAV_TINT[1];
+  _lxGravFinaleBg = false;   // v0.30.566 — the finale clip is a state of the fight, not of the map: every entry starts on gravitos.mp4
 }
 
 // Mark this form's platforms as doomed. They stay SOLID through the telegraph:
@@ -113897,6 +113929,14 @@ function _lxGravArenaReset() {
 function _lxGravCollapse(phase) {
   try {
     _lxGravTintTo = _LX_GRAV_TINT[phase | 0] || _LX_GRAV_TINT[3];
+    // v0.30.566 — the backdrop follows the same seams as the tint. Form 1 falls: start buffering the
+    // finale clip now (4.8 MB) so it is ready by the time it is wanted, but paused - it must not spend
+    // a decoder on a fight it is not yet part of. Form 2 falls: the arena becomes gravitosfinale.mp4
+    // from here on, and stays so until the next entry resets it (per user).
+    if (typeof game !== 'undefined' && game && game.currentMap === 'gravitosArena' && typeof _lxMapVideoEnsure === 'function') {
+      if ((phase | 0) === 2) { const _fv = _lxMapVideoEnsure('gravitosFinale'); if (_fv) { try { _fv.autoplay = false; _fv.pause(); } catch (e) {} } }
+      if ((phase | 0) === 3) _lxGravFinaleBg = true;
+    }
     if (typeof game === 'undefined' || !game.mapData || game.currentMap !== 'gravitosArena') return;
     const want = _LX_GRAV_COLLAPSE[phase | 0];
     if (!want) return;
