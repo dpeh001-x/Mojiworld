@@ -52,6 +52,7 @@ try {
     let opens = 0;
     for (let k = 0; k < 40; k++) {
       game.expedition.active = true; game.expedition.floor = 4; game.expedition.bravoReady = true;
+      game.expedition._bravoOffer = null;   // v0.30.524 binds the trio to its floor; every open here must be a fresh sample
       const old = document.getElementById('bravo-boon-modal'); if (old) old.remove();
       _bravoShowBoonPick(); await sleep(40);
       const modal = document.getElementById('bravo-boon-modal');
@@ -77,6 +78,7 @@ try {
       POWERUPS.length = 0;
       for (const id of seeded) { const d = _realPowerups.find((p) => p.id === id); if (d) POWERUPS.push(d); }
       game.expedition.active = true; game.expedition.floor = 4; game.expedition.bravoReady = true;
+      game.expedition._bravoOffer = null;   // v0.30.524 binds the trio to its floor; every open here must be a fresh sample
       const old = document.getElementById('bravo-boon-modal'); if (old) old.remove();
       _bravoShowBoonPick(); await sleep(60);
       const modal = document.getElementById('bravo-boon-modal');
