@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.523';
+const GAME_VERSION = 'v0.30.524';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -34945,7 +34945,7 @@ const player = {
   hp:100, maxHp:100, mp:50, maxMp:50,
   // v0.25.47 — initial expToNext bumped 100 → 120 to nudge the early
   // grind up alongside the steeper late-game curve.
-  exp:0, expToNext:30, level:1, mojicoins:300,                     // v0.26.329 — Lv 1→2 cost = 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
+  exp:0, expToNext:_lxFirstRungExp(), level:1, mojicoins:300,                     // v0.26.329 — Lv 1→2 cost = 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
   // v0.25.457 — Kaching: premium currency purchased with real cash.
   // $1 USD = 1000 Kaching (symbol: !). Spent in the P2W shop on
   // convenience items (item bags, cosmetic tickets). Saved alongside
@@ -35536,8 +35536,8 @@ const MOJICOIN_GAIN_MULT = 0.5;
 // v0.29.754 — per user "Reduce the T2-T10 costs and value by half". Every
 // tier target halved. Sell-back is 10% OF THIS TABLE, so resale value halves
 // with it in the same edit — one number per tier still governs both counters.
-const _GEAR_TIER_PRICE  = { 2: 15000, 3: 100000, 4: 250000, 6: 800000, 7: 1600000, 8: 3000000, 9: 5500000, 10: 9500000 };
-const _GEAR_TIER_MEDIAN = { 2: 1000,  3: 2700,   4: 4000,   6: 10500,   7: 16000,   8: 23500,   9: 36000,    10: 54000 };
+const _GEAR_TIER_PRICE  = { 2: 15000, 3: 100000, 4: 250000, 5: 500000, 6: 800000, 7: 1600000, 8: 3000000, 9: 5500000, 10: 9500000 };
+const _GEAR_TIER_MEDIAN = { 2: 1000,  3: 2700,   4: 4000,   5: 7500,   6: 10500,   7: 16000,   8: 23500,   9: 36000,    10: 54000 };
 function _lxGearMarketPrice(it) {
   if (!it || typeof it.price !== 'number' || !isFinite(it.price)) return 0;
   const t = it.tier | 0;
@@ -42636,7 +42636,10 @@ const LX_REFIGHT_SHARD_FLOOR = 0.02;  // v0.30.412 — the repeat ladder never p
 const LX_TITLE_TWIN_STAR = 'Twin Star';
 function _duoTrialReward(bossLv, typeName) {
   const lv = Math.max(1, Math.min(200, bossLv | 0));
-  const full = Math.min(10000, Math.max(1, Math.floor(lv * lv)));
+  const _fullRaw = Math.min(10000, Math.max(1, Math.floor(lv * lv)));
+  // v0.30.x — was flat every time: a respawned boss paid the full drop again, forever. Every
+  // other boss diminishes on repeat; this one now walks the same ladder, keyed per boss.
+  const full = (typeof _lxBossShardPayout === 'function') ? _lxBossShardPayout(_fullRaw, 'duo_' + String(typeName || 'boss').slice(0, 24), false) : _fullRaw;
   player.setshards = (player.setshards || 0) + full;
   game.duoTrials = (game.duoTrials | 0) + 1;
   if (!player.titles || typeof player.titles !== 'object') player.titles = {};
@@ -57545,7 +57548,7 @@ function offerPrestige(fromGuguma) {
     p.critBonus = (p.critBonus || 0) + 1; p.hpBonus = (p.hpBonus || 0) + 12;   // v0.29.x — uncapped per-ascension crit + HP so ascensions 8-20 (where dmgMult caps at x3) still grow the character
     game.prestige = p;
     // Reset progression
-    player.level = 1; player.exp = 0; player.expToNext = 30;     // v0.26.329 — matches 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
+    player.level = 1; player.exp = 0; player.expToNext = _lxFirstRungExp();     // v0.26.329 — matches 200 × 1^2.5 × 0.15 = 30 (was 37 under 250-base poly)
     // v0.30.496 — reset to the CLASS baseline, the same values applyClass() hands a
     // fresh character, instead of the hardcoded 100 / 50 / 12 / 5 this used to write.
     // Two bugs, one cause:
@@ -59853,6 +59856,7 @@ function _expeditionFloorCleared(expectFloor, verifyAlive) {
   if (game.expedition._floorClearedFor === _flr) return;
   if (verifyAlive && (game.monsters || []).some((x) => x && x.currentHp > 0 && !x._dying)) return;
   game.expedition._floorClearedFor = _flr;
+  (game.expedition._clearedFloors = game.expedition._clearedFloors || {})[_flr] = 1;   // v0.30.x — persisted with the run; see the entry hook
   // v0.30.16 — bank this floor's share of the run's EXP budget.
   {
     const _xg = _lxGrantExpeditionFloorExp(_flr);
@@ -59913,8 +59917,13 @@ function _bravoShowBoonPick() {
   if (_pool.length < 3 && typeof POWERUPS !== 'undefined') _pool = POWERUPS.slice();
   // Random sample of 3 without replacement.
   const _picks = [];
+  // v0.30.x — the mandatory pick was an unlimited reroll: every open drew a fresh max-roll trio
+  // and Escape consumed nothing. The offer is now bound to the floor it was earned on.
+  const _offer = game.expedition._bravoOffer;
+  const _reuse = !!(_offer && _offer.floor === game.expedition._floorClearedFor && Array.isArray(_offer.picks) && _offer.picks.length === 3);
+  if (_reuse) for (const p of _offer.picks) _picks.push(p);
   const _bag = _pool.slice();
-  for (let i = 0; i < 3 && _bag.length; i++) {
+  for (let i = 0; i < 3 && _bag.length && !_reuse; i++) {
     // v0.29.372 — weighted draw without replacement: Bravo's picks respect
     // boon rarity like every other source. Her god-roll VALUES stay — the
     // expedition's edge is roll quality, not tier odds.
@@ -59925,6 +59934,7 @@ function _bravoShowBoonPick() {
       ? rollMaxBoonInstance(_def.id)
       : { id: _def.id, roll: _def.max, rerolls: 0 };
     _picks.push({ def: _def, inst: _inst });
+    if (_picks.length === 3) game.expedition._bravoOffer = { floor: game.expedition._floorClearedFor, picks: _picks.slice() };
   }
   // Build modal.
   // v0.30.459 — TOWER SLOTS, rendered into Bravo's own card. _bravoTarget is the slot the blessing
@@ -62006,6 +62016,14 @@ function loadMap(id, entryX, entryY) {
     // bravoReady true after the deferred spawn — unaffected.
     game.expedition.bravoReady = false;
     game.expedition._floorClearedFor = null;   // re-arm idempotency guard (see _expeditionFloorCleared)
+    // v0.30.x — RELOADING A CLEARED FLOOR RESPAWNED IT. Only the floor's EXP share was stamped;
+    // every mob paid again, and the re-armed guard fired a second blessing. A cleared floor
+    // comes back empty with its door already open.
+    if (game.expedition._clearedFloors && game.expedition._clearedFloors[game.expedition.floor]) {
+      if (Array.isArray(game.monsters)) for (let i = game.monsters.length - 1; i >= 0; i--) { const _mm = game.monsters[i]; if (_mm && !_mm.ally && !_mm.isSummon && !_mm._playerOwned) game.monsters.splice(i, 1); }
+      game.expedition._floorClearedFor = game.expedition.floor;
+      game.expedition.bravoReady = true;
+    }
     const _cfg = MAPS[id] && MAPS[id]._towerFloor;
     if (_cfg && _cfg.quest) {
       game.expedition.currentQuest = { id: id, title: _cfg.quest.title, goal: _cfg.quest.goal };
@@ -68507,7 +68525,10 @@ function triggerDeath() {
   // so the vault is not a death shelter.
   const _netWorth = totalCoins();
   const _deathCap = Math.min(50000, 400 * Math.max(1, player.level | 0));
-  const lostMojicoins = _netWorth < 2000
+  // v0.30.x — the comment below says the expedition snapshot restore 'implicitly wipes' this
+  // penalty. It could not: the restore ran first and the charge landed on the restored real
+  // wallet, so a tower death cost every in-run gain AND 10% of net worth. Waived in a run.
+  const lostMojicoins = (_diedInExpedition || _netWorth < 2000)
     ? 0
     : Math.min(_deathCap, Math.floor(_netWorth * 0.10));
   // v0.25.585 — bug fix. Was deferring the mojicoin deduction to respawnAtTown
@@ -90644,6 +90665,11 @@ const _LX_LEVEL_COST_TABLE = [
   74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
   74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000
 ];
+// v0.30.x — the two Lv.1 literals below carried `expToNext:30`, a comment-era formula the
+// level-cost table replaced in v0.28.11. _maybeLevelUp only re-derives AFTER a level-up, so
+// the first rung - and the first rung after every one of 20 ascensions - was 324x too cheap.
+// Read the table lazily: the fresh-player literal may be evaluated before the const exists.
+function _lxFirstRungExp() { try { return _lxLevelCost(1) || 9720; } catch (e) { return 9720; } }
 function _lxLevelCost(L) {
   const T = _LX_LEVEL_COST_TABLE;
   if (L < 1) return T[0];
