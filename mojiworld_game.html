@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.524';
+const GAME_VERSION = 'v0.30.525';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57628,6 +57628,7 @@ function offerPrestige(fromGuguma) {
     // achievements latch into game.achievements once earned and are never
     // re-tested against this, and Mojidex discovery has its own
     // game.mojidexSeen, so neither is revoked by the wipe.
+    if (typeof checkAchievements === 'function') { try { checkAchievements(); } catch (e) {} }   // v0.30.x — bestiary-tier achievements read this live; latch before it goes
     game.bestiary = {};
     // v0.29.528 — and the roster the kill counts bought.
     player.mojimon = { roster: {}, assigned: null, cdUntil: 0, out: null };
@@ -65335,6 +65336,20 @@ function _lxAirJumpCap() {
   return (md && md.isUnderwater) ? Math.max(own, LX_UNDERWATER_AIR_JUMPS) : own;
 }
 
+// v0.30.x — TIME PASSES WHILE YOU ARE STUNNED. updatePlayer returns early for hit-stun,
+// freeze and the shackle QTE, and both the buff tick and the cooldown tick sat ~1,800 lines
+// later in the free tail - so every CC'd frame froze Holy Shield's +9999 DEF window and
+// every skill cooldown. The more you were hit, the longer your shield lasted.
+function _lxTickPlayerTimers(dt) {
+  if (!player) return;
+  if (player._lxTimersTickedAt === game.time) return;   // once per frame, whichever path reaches it first
+  player._lxTimersTickedAt = game.time;
+  if (player.buffs) for (const k in player.buffs) { if (player.buffs[k] > 0) player.buffs[k] = Math.max(0, player.buffs[k] - dt); }
+  if (player.skillCooldowns) for (const id in player.skillCooldowns) {
+    if (player.skillCooldowns[id] > 0) { player.skillCooldowns[id] -= dt; if (player.skillCooldowns[id] <= 0) delete player.skillCooldowns[id]; }
+    else delete player.skillCooldowns[id];
+  }
+}
 function updatePlayer(dt) {
   // v0.29.x — JUDGEMENT + DAWN SHIELD tick (Bastion of Dawn remake, per
   // user: "stacking buff per hit taken up to 5 then draws enemies near into
@@ -65645,6 +65660,7 @@ function updatePlayer(dt) {
   // Hit-stun: no voluntary action during stun
   const stunned = player.hitStun > 0;
   if (stunned) {
+    _lxTickPlayerTimers(dt);   // v0.30.x — CC does not stop the clock
     player.hitStun -= dt;
     player.state = 'hit';
     // Let physics carry knockback; apply light friction only when grounded
@@ -65720,6 +65736,7 @@ function updatePlayer(dt) {
   // hit-stun, honouring god-mode. Mage status-immunity / resists still cut the
   // apply chance + duration upstream.
   if (((player.frozenTimer | 0) > 0 || ((player.stunTimer | 0) > 0 && !(typeof _QTE !== 'undefined' && _QTE && _QTE.active))) && !player._god) {   // v0.30.368 — stun locks too
+    _lxTickPlayerTimers(dt);   // v0.30.x — CC does not stop the clock
     player.state = 'idle';
     if (player.onGround) player.vx *= 0.8;
     _playerGravityStep();
@@ -65743,6 +65760,7 @@ function updatePlayer(dt) {
   // voluntary action halts while gravity/collision keep running, and the
   // QTE frame (timer + arrow-key edge detection + DOM card) ticks here.
   if (typeof _QTE !== 'undefined' && _QTE.active) {
+    _lxTickPlayerTimers(dt);   // v0.30.x — CC does not stop the clock
     if (player._god) { _qteEnd(false); }
     else {
       _qteFrame(dt);
@@ -66812,14 +66830,7 @@ function updatePlayer(dt) {
   // is negligible (deleting during for-in is safe in V8). Net wins:
   // (a) save payload stays compact; (b) isReady(id) reads cleaner —
   // missing key now reliably means "never cast", not "cast long ago".
-  for (const id in player.skillCooldowns) {
-    if (player.skillCooldowns[id] > 0) {
-      player.skillCooldowns[id] -= dt;
-      if (player.skillCooldowns[id] <= 0) delete player.skillCooldowns[id];
-    } else {
-      delete player.skillCooldowns[id];
-    }
-  }
+  // v0.30.x — cooldowns tick in _lxTickPlayerTimers now (see above); this pass is the lifted call's twin
 
   // Tick the per-class identity mechanics (warrior charge, rogue momentum,
   // archer steady aim + root, mage chain ping). See _tickClassIdentity docs.
@@ -67539,10 +67550,7 @@ function updatePlayer(dt) {
   player.breath = Math.sin(game.time * 0.05) * 1.3;
   player.capeSway = Math.sin(game.time * 0.14) * 2 + player.vx * 0.3;
 
-  // Tick buffs
-  for (const k in player.buffs) {
-    if (player.buffs[k] > 0) player.buffs[k] = Math.max(0, player.buffs[k] - dt);
-  }
+  _lxTickPlayerTimers(dt);   // v0.30.x — lifted; also runs inside the CC early-returns above
   // Recent kills decay (for Warlord)
   if (player._recentKillsDecay > 0) {
     player._recentKillsDecay -= dt;
@@ -79645,7 +79653,7 @@ function updateMonsters(dt) {
     // while stunned. Reachable by a player today via the zodiac Tempo Break,
     // which costs three perfect dodges and announces "is staggered. PUNISH!".
     const _ccHalted = (m.stunTimer > 0) || (m.freezeTimer > 0 && !(m.isBoss || m.boss))
-      || (m._stagger > 0);
+      || (m._stagger > 0) || (m._dirOpenT > 0);   // v0.30.x — the opening was only a START gate; a latched swing resolved into it
     // Monster ranged attack
     if (m.shoot && !m.isBoss && m.currentHp > 0 && !_ccHalted) {
       // v0.29.639 - per-type fire variance; default preserves old behaviour.
@@ -82226,7 +82234,7 @@ function updateMonsters(dt) {
       if (player._activeSynergies && player._activeSynergies.ironWill) {
         const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
         const _dr = Math.min(0.25, Math.floor(_maxHp / 100) * 0.01);
-        if (_dr > 0) dmg = Math.max(1, Math.floor(dmg * (1 - _dr)));
+        if (_dr > 0 && dmg > 0) dmg = Math.max(1, Math.floor(dmg * (1 - _dr)));   // v0.30.x — a hit absorbed to 0 stays 0; max(1,0) re-armed the 40% boss floors
       }
       let _shownDmg = _diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0);   // v0.29.x — level-gap punish reads the attacker's real level; amplified value actually lost — reused for the floating number so it matches HP lost
       // v0.29.x — Gravitos contact: clamp the FINAL loss into the phase band.
@@ -84166,9 +84174,14 @@ const _LX_BOSS_CYCLE_LATCHES = [
   // Zodiacs — per-cycle latches only
   '_chargeBurst', '_plantAnnounced', '_taurusFired', '_leoFired', '_cancerFired',
   '_stung', '_erupted', '_sagFired', '_caprFired', '_aquaFired',
+  // v0.30.x — the trait kit's in-flight flags. Without these a stagger FROZE the telegraph
+  // (the timer stopped under _ccHalted) and the swing fired the moment the window closed,
+  // while the toast said the attack was broken off.
+  '_bigMeleeFiring', '_columnFiring', '_hgCharging',
 ];
 function _lxBossCycleLatchClear(m) {
   for (const f of _LX_BOSS_CYCLE_LATCHES) if (m[f]) m[f] = false;
+  m._bigMeleeT = 0; m._columnT = 0; m._hgT = 0;   // v0.30.x — and their timers, so nothing resumes
 }
 function _bossCanPunish(m) {
   if (!m || !m.isBoss) return false;
@@ -84343,6 +84356,7 @@ function bossAI(m, dt, distToPlayer) {
   // The 25%-HP enrage path at L34589 still layers ×0.75 on top of this
   // for the final-stretch panic phase, so an enraged boss ticks at
   // ~1.73× the natural rate (1.3 × 1/0.75) — meaningfully harder.
+  const _rawDt = dt;   // v0.30.x — _stagger is set in real ms
   dt = dt * 1.30;
   if (_LX_BOSS_PACE[m.type]) dt *= _LX_BOSS_PACE[m.type];   // v0.30.340 — see table above
   m.patternTimer += dt;
@@ -84356,7 +84370,7 @@ function bossAI(m, dt, distToPlayer) {
   if (m._bossPhase2) m.patternTimer += dt * 0.18;
   // v0.26.x — PUNISH WINDOW: tick cooldown, open a window on attack->idle, and
   // while staggered freeze the boss (stunned + vulnerable) and skip its attacks.
-  if (m._staggerCd > 0) m._staggerCd -= dt;
+  if (m._staggerCd > 0) m._staggerCd -= _rawDt;
   // v0.29.834 — BREAK DECAY. Bleeds while the boss is not being hit, so the
   // meter measures sustained PRESSURE rather than the length of the fight.
   // Ticked here, ahead of the window freeze, so it runs for every boss
@@ -84377,7 +84391,7 @@ function bossAI(m, dt, distToPlayer) {
   // a full pattern anyway. Only _stagger decrements here; _dirOpenT is owned by
   // the updateMonsters block that rolls it.
   if (m._stagger > 0 || m._dirOpenT > 0) {
-    if (m._stagger > 0) m._stagger -= dt;
+    if (m._stagger > 0) m._stagger -= _rawDt;
     // v0.30.324 — say so when the freeze cancels a pattern mid-flight. The
     // cancel is the break system's reward, but it was silent: Mooma's quake
     // banner ("JUMP!") kept hanging over a boss that would never quake, which
@@ -92220,6 +92234,9 @@ function killMonster(m) {
     if (typeof showToast === 'function') showToast('🐙 A tentacle falls — Octobaby REELS! Hit the head!', 'epic');
     if (typeof addShake === 'function') addShake(5);
   }
+  // v0.30.x — the comment below claims a Sovereign shard sweep that only existed on the
+  // regalia-lapse branch, which stops running the moment he leaves the roster.
+  for (let _si = game.monsters.length - 1; _si >= 0; _si--) { const _q = game.monsters[_si]; if (_q && _q._sovShardOf === m) { _q.currentHp = 0; game.monsters.splice(_si, 1); } }
   if (m.type === 'octobaby') {
     for (let _i = game.monsters.length - 1; _i >= 0; _i--) {
       const _leg = game.monsters[_i];
@@ -134699,7 +134716,7 @@ const ZODIAC_AI = {
         // v0.25.634 — owner:'enemy' so the resolver targets player not Virgo
         const _vCx = player.x + 14;
         const _vCs = m.traits && m.traits.columnStrike;
-        if (_vCs) {
+        if (_vCs && !m._columnFiring && !m._bigMeleeFiring) {   // v0.30.x — never teleport a telegraph mid-read
           m._columnFiring = true;
           m._columnT = _vCs.telegraphMs || 820;
           m._columnTargetX = _vCx;
