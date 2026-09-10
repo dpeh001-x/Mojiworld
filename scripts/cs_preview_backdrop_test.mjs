@@ -41,7 +41,12 @@ const cssBlock = (html.match(/#class-select-modal \.cs-look-preview-wrap \{[^}]*
 checks.push(['the preview box rule references the floored plate', cssBlock.length === 1 && /cs_preview_bg_floor\.webp/.test(cssBlock[0]), `${cssBlock.length} rule(s)`]);
 checks.push(['no rule still draws the open plate', count("url('Sprites/ui/cs_preview_bg.webp')") === 0, `${count("url('Sprites/ui/cs_preview_bg.webp')")} ref(s)`]);
 // and the scrims over it are neutral: no violet or gold wash left in that rule
-checks.push(['the scrims over the plate are neutral (no violet, no gold wash)', cssBlock.length === 1 && !/rgba\(255, 220, 140|rgba\(22, 14, 44|rgba\(120, 128, 148/.test(cssBlock[0].replace(/border-color[^;]*;/, ''))]);
+checks.push(['the plate\'s centre scrims are neutral (no gold wash, no old violet wash)', cssBlock.length === 1 && !/rgba\(255, 220, 140|rgba\(22, 14, 44|rgba\(120, 128, 148/.test(cssBlock[0].replace(/border[^;]*;/g, ''))]);
+// per user, after the neutral plate shipped: "the background has to blend better to the purple
+// backdrop" - the OUTER third is a violet vignette; the frame wears the picker cards' dark ring
+const RING = '0 0 0 1px rgba(4, 2, 12, 0.55)';
+checks.push(['the rim fades into the modal\'s violet and the frame wears the dark ring', cssBlock.length === 1 && /rgba\(24, 14, 50, 0\.80\) 100%/.test(cssBlock[0]) && cssBlock[0].includes(RING)]);
+checks.push(['the name field and gender buttons wear the same ring as the cards', count(RING) >= 7, `${count(RING)} ring(s) in the file`]);
 
 let fails = 0;
 for (const [n, ok, extra] of checks) { console.log((ok ? 'PASS ' : 'FAIL ') + n + (extra ? '  [' + extra + ']' : '')); if (!ok) fails++; }
