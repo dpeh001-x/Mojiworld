@@ -13,7 +13,11 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const PAGE = process.argv[2] || 'mojiworld_game.html';
 const PORT = Number(process.argv[3] || 11191);
-const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
+// MOJI_SERVE_ROOT: grade a tree other than the shared working copy, which parallel sessions
+// leave tens of commits behind origin/main. Both the server AND the static read use it, or the
+// two halves of this test would be reading two different builds.
+const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
+const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT });
 await new Promise((r) => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -99,18 +103,26 @@ const r = await page.evaluate(async () => {
 await browser.close(); server.kill();
 
 // ---- static: the retired Vesper pointer is gone, the new tell is in ----
-const html = fs.readFileSync(path.join(ROOT, PAGE), 'utf8');
+const html = fs.readFileSync(path.join(SERVE_ROOT, PAGE), 'utf8');
 const stat = [
   ['Sovereign lore drops the sapphire signet', !/A sapphire signet sits on one still hand/.test(html)],
   ['Sovereign lore carries the ring-that-is-not-there', /keeps turning a ring that is not on it/.test(html)],
   ['chapter IV no longer points at the crown', !/If you ever climb somewhere with a crown at the top/.test(html)],
   ['chapter IV keeps Lyra\'s grief and her father', /High Sage Vesper/.test(html) && /read what is written at the bottom of it/.test(html)],
 ];
-stat.push(['Amnesiac turns a ring that is not there', /turns a ring around the base of a finger that has no ring on it/.test(html)]);
+// v0.30.541 — the plant is a nine-word beat now ("His thumb turns a ring that is not on it"),
+// deliberately echoing the Sovereign's own line above. The old 20-word stage direction went
+// with the plain-speech pass; the LINK is what this guards, not the sentence.
+stat.push(['Amnesiac turns a ring that is not there', /turns a ring that is not on it/.test(html)]);
 stat.push(['Innie contributes the hearsay ("not the hands")', /climbers started it/.test(html) && /not the hands/.test(html)]);
 stat.push(['Arlen contributes the date (one man, two places)', /One man, two places, one morning/.test(html)]);
-stat.push(['Bravo gives the observation, not the conclusion', /looks at your hands, not your blade/.test(html) && /no longer trust what I remember/.test(html)]);
-stat.push(['Bravo refuses to assert it', /I am not going to tell you it looks like him/.test(html)]);
+// The two Bravo regexes below had not matched since before v0.30.500: her throne line was
+// rewritten and this test was not, and nobody saw it because it graded the stale checkout.
+// Re-pointed at the shipped phrasing; the claims ("observation, not conclusion" / "refuses to
+// assert") are unchanged. The apostrophe is optional-escaped because the line lives in a
+// single-quoted literal and the raw source reads won\'t.
+stat.push(['Bravo gives the observation, not the conclusion', /It watches your hands/.test(html) && /trust my own account of it/.test(html)]);
+stat.push(['Bravo refuses to assert it', /won\\?'t tell you what is on the throne/.test(html)]);
 // Scan PLAYER-FACING text only. The v0.30.469 design note states the canon in
 // plain words on purpose - that is what a canon note is for - so a whole-file
 // scan would flag the documentation rather than the writing.
