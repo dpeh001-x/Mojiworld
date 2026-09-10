@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.508';
+const GAME_VERSION = 'v0.30.509';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42786,6 +42786,11 @@ async function _lxSteamCloudSync() {
       }
     } catch (e) {}
     try { localStorage.setItem(SAVE_KEY, cloudRaw); } catch (e) {}
+    // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
+    // only, so adopting a Steam Cloud save installed a DIFFERENT character over the previous one's
+    // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
+    // incoming character's currency down to a balance that was never theirs.
+    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
     return 'reloading';
   }
   if (localRaw) _lxSteamCloudPush(localRaw, true);                               // local is ahead -> push it up
@@ -45746,6 +45751,12 @@ function importSave(input) {
         Promise.resolve(ask).then(function (go) {
           if (!go) { input.value = ''; return; }
           localStorage.setItem(SAVE_KEY, save);
+    // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
+    // only, so importing a save installed a DIFFERENT character over the previous one's
+    // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
+    // incoming character's currency down to a balance that was never theirs.
+    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
+
           game._resetting = true;   /* block the beforeunload save-flush from clobbering the import */
           if (game._saveTimer) { try { clearTimeout(game._saveTimer); } catch (_) {} game._saveTimer = null; }
           if (typeof showToast === 'function') showToast('⬆ Save imported — reloading…', 'legendary');
@@ -46597,6 +46608,12 @@ function _lxRestoreBackup(id) {
   if (!b || !b.data) return;
   try {
     localStorage.setItem(SAVE_KEY, b.data);
+    // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
+    // only, so restoring a backup slot installed a DIFFERENT character over the previous one's
+    // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
+    // incoming character's currency down to a balance that was never theirs.
+    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
+
     // Block the beforeunload save-flush from clobbering the restored blob
     // with the still-live session state (same guard as importSave).
     try { if (typeof game !== 'undefined') { game._resetting = true; if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; } } } catch (e) {}
@@ -78927,6 +78944,18 @@ function fireMonsterProjectile(m, angleOffset) {
   }
 }
 
+// v0.30.509 — the silent-sweep drain, lifted out of updateMonsters' tail so every exit can call
+// it (see the co-op-follower early return). Idempotent: a monster already gone resolves to -1.
+function _lxDrainPendingSweeps() {
+  if (typeof game === 'undefined' || !game) return;
+  if (!game._pendingSweeps || !game._pendingSweeps.length) return;
+  const _sweep = game._pendingSweeps;
+  game._pendingSweeps = null;
+  for (const _sm of _sweep) {
+    const _si2 = game.monsters.indexOf(_sm);
+    if (_si2 >= 0) game.monsters.splice(_si2, 1);
+  }
+}
 function updateMonsters(dt) {
   // v0.29.619 — SANCTUARY SWEEP. Layer 2 of the town guarantee: spawnMonster
   // already refuses wild spawns here, so this only ever fires for something
@@ -78973,6 +79002,10 @@ function updateMonsters(dt) {
       }
     }
     _coopFollowerContactTick();   // mirrored monsters still deal contact damage (else follower is invincible)
+    // v0.30.509 — drain on THIS exit too. v0.30.505 put the _pendingSweeps drain after the main
+    // loop only, so a guest who becomes a follower on the frame after an orphan was queued
+    // returned here every frame and the zero-HP entry stayed in game.monsters.
+    if (typeof _lxDrainPendingSweeps === 'function') _lxDrainPendingSweeps();
     return;
   }
   // v0.27.0 — orphaned-mirror cleanup: a connected NON-HOST that is no longer
@@ -82070,14 +82103,7 @@ function updateMonsters(dt) {
   // v0.30.505 — SILENT SWEEPS. Same deferral as _pendingKills and for the same reason, but these
   // are removed rather than killed: an orphaned Octobaby leg was never defeated by the player,
   // so paying its EXP and loot would be wrong (the head's own sweep is silent for that reason).
-  if (game._pendingSweeps && game._pendingSweeps.length) {
-    const _sweep = game._pendingSweeps;
-    game._pendingSweeps = null;
-    for (const _sm of _sweep) {
-      const _si2 = game.monsters.indexOf(_sm);
-      if (_si2 >= 0) game.monsters.splice(_si2, 1);
-    }
-  }
+  _lxDrainPendingSweeps();
   if (game._pendingKills && game._pendingKills.length) {
     const pending = game._pendingKills;
     game._pendingKills = null;
@@ -91904,7 +91930,14 @@ function killMonster(m) {
       try {
         for (let _ai = game.monsters.length - 1; _ai >= 0; _ai--) {
           const _add = game.monsters[_ai];
-          if (_add && _add !== m && _add._pqSummoned) {
+          // v0.30.509 — do not eat an add the PLAYER killed. v0.30.503 removed the
+          // `currentHp > 0` filter so stuck corpses would also be cleared, but that also
+          // swept a Ticket Mech that died in the same frame as the Conductor: both land in
+          // _pendingKills, the Conductor drains first, and its sweep spliced the Mech before
+          // killMonster could pay it out. An add already queued for a real death is left
+          // alone; anything else _pqSummoned goes, alive or a corpse.
+          const _queued = (game._pendingKills || []).indexOf(_add) >= 0;
+          if (_add && _add !== m && _add._pqSummoned && !_queued) {
             _add.currentHp = 0;
             game.monsters.splice(_ai, 1);
           }
@@ -142369,8 +142402,12 @@ function _prologueApexSegment() {
     // the fight. Fail-open: _gravitosEntryCutscene fires onDone exactly once
     // even if the clip is missing / autoplay is blocked, so it can't soft-lock.
     const _armPrologueFight = () => {
+      // v0.30.509 — release FIRST. v0.30.500 put this after the _prologueActive guard, so any
+      // path that ends the prologue early (the 120 s bail, or a throw caught by
+      // _prologueApexSegment) returned here without releasing and left the world frozen with
+      // nothing on screen until the 25 s deadline expired.
+      if (typeof _lxCineHold === 'function') _lxCineHold(0);
       if (!window._prologueActive) return;
-      if (typeof _lxCineHold === 'function') _lxCineHold(0);   // v0.30.500 — release before the unpause
       if (typeof closeAllModals === 'function') { try { closeAllModals(); } catch (e) {} }
       game.paused = false;
       // v0.29.108 (per user) — 15s of TRUE GODMODE from the moment you enter the
@@ -144075,6 +144112,12 @@ async function _lxCloudSyncOnLogin(session) {
       }
     } catch (e) {}
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(cloud)); } catch (e) {}
+    // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
+    // only, so adopting a web cloud save installed a DIFFERENT character over the previous one's
+    // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
+    // incoming character's currency down to a balance that was never theirs.
+    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
+
     try { sessionStorage.setItem('lx_resume', JSON.stringify(session)); } catch (e) {}
     location.reload();
     return 'reloading';
@@ -155511,7 +155554,14 @@ function _lxExtraPauseSurfaceEls() {
 function _lxCineHoldActive() {
   try {
     if (typeof game === 'undefined' || !game) return false;
-    if (game._gravitosCinePlaying) return true;
+    // v0.30.509 — the deadline is the WHOLE mechanism, so nothing may bypass it. v0.30.500
+    // returned true on _gravitosCinePlaying alone, and that flag is cleared in exactly one
+    // place (_afterEntry). If the entrance chain throws before its own 11 s safety timer is
+    // armed — and the dagger clip's catch swallows precisely that — the flag stayed true for
+    // the session and the StuckPauseWatchdog was suppressed FOREVER. Before v0.30.500 the
+    // watchdog recovered that in 3 s, so the "fix" turned a glitch into an unrecoverable
+    // freeze at the final boss. Both entrances call _lxCineHold() alongside setting the flag,
+    // so the deadline alone is sufficient and the flag branch was redundant as well as unsafe.
     return (typeof game._cineHoldUntil === 'number') && Date.now() < game._cineHoldUntil;
   } catch (e) { return false; }
 }
