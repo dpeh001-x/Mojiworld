@@ -194,8 +194,8 @@ window.LX_MONSTER_STATS = {
   zodiac_capricorn:               { lv: 88, hp: 19392000, atk:29466, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors (hp was 8.19x — a hair under)
   zodiac_aquarius:                { lv: 90, hp: 19392000, atk:32178, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors
   zodiac_pisces:                  { lv: 92, hp: 19392000, atk:70278, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors
-  towerArbiter:                   { lv:  1, hp:   17199, atk:   69, def: 34, exp:    946, coin:     0 },
-  towerSovereign:                 { lv:  1, hp:   90090, atk:   69, def: 80, exp:   4955, coin:     0 },
+  towerArbiter:                   { lv:  1, hp:   17199, atk:   69, def: 300, exp:    946, coin:     0 },
+  towerSovereign:                 { lv:  1, hp:   90090, atk:   69, def: 250, exp:   4955, coin:     0 },
 };
 
 // Elite / Elder spawn multipliers. Set to 1 to flatten that variant.

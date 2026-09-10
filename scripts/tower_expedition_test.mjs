@@ -32,6 +32,13 @@ try {
     const A = monsterTypes.towerArbiter, S = monsterTypes.towerSovereign;
     o.arbiter = { hp: A.hp, atk: A.atk, def: A.def, exp: A.exp };
     o.sovereign = { def: S.def };
+    // What the player actually FIGHTS. data/monster_stats.js overrides monsterTypes for any type
+    // it lists (v0.29.762 — "the file's number IS the stat"), and both of these are listed. The
+    // two DEF checks below used to read monsterTypes alone and so graded a number nothing used.
+    o.table = {
+      arbiter:   (typeof LX_MONSTER_STATS !== 'undefined' && LX_MONSTER_STATS.towerArbiter)   ? LX_MONSTER_STATS.towerArbiter.def   : null,
+      sovereign: (typeof LX_MONSTER_STATS !== 'undefined' && LX_MONSTER_STATS.towerSovereign) ? LX_MONSTER_STATS.towerSovereign.def : null,
+    };
     // --- how much damage the Arbiter's DEF actually eats, through the live formula
     loadMap('forest', 300); await sleep(700);
     player.level = 70; player.invulnerable = 9e9; game.paused = false;
@@ -84,9 +91,14 @@ try {
     return o;
   });
   console.log(`build ${r.ver}  arbiter def ${r.arbiter.def}  run@70 ${r.exp.at70}  clear bonus ${r.exp.clearBonus}`);
-  ok('the Arbiter is stronger: DEF 90 -> 165, with HP and ATK raised to match', r.arbiter.def === 165 && r.arbiter.hp === 58000 && r.arbiter.atk === 395,
+  ok('the Arbiter carries the authored DEF 300, with HP and ATK unchanged', r.arbiter.def === 300 && r.arbiter.hp === 58000 && r.arbiter.atk === 395,
     JSON.stringify(r.arbiter));
-  ok('...and stays under the Sovereign, so the apex is still the harder fight', r.arbiter.def < r.sovereign.def, `arbiter ${r.arbiter.def} vs sovereign ${r.sovereign.def}`);
+  // Per user: Arbiter 300, Sovereign 250. That deliberately puts the mid-boss's DEF ABOVE the
+  // apex's, so the old "stays under the Sovereign" rule no longer holds and is not asserted.
+  // What IS asserted is the invariant that actually bit: the declaration and the authoritative
+  // table must agree, or the source is describing a fight nobody has.
+  ok('the Arbiter and Sovereign are on their authored DEF', r.arbiter.def === 300 && r.sovereign.def === 250,
+    `arbiter ${r.arbiter.def} vs sovereign ${r.sovereign.def}`);
   ok('that DEF really eats damage in the live pipeline (>=15% less per hit than at 90)', r.dmg.reduction !== null && r.dmg.reduction >= 0.15,
     `${r.dmg.atOldDef90} -> ${r.dmg.atShippedDef} per hit, ${Math.round((r.dmg.reduction || 0) * 100)}% less`);
   ok('and with the HP behind it he is at least 1.5x as tough overall (HP / damage per hit)', r.ttk.tougher !== null && r.ttk.tougher >= 1.5,
@@ -100,6 +112,8 @@ try {
     `${r.death.startMap} -> ${r.death.at0} / ${r.death.at900} / ${r.death.at4100}`);
   ok('and the delayed exit never yanks a player who already left by another route', r.noYank.stillThere,
     `left to ${r.noYank.leftTo}, ended on ${r.noYank.now}`);
+  ok('monsterTypes agrees with the authoritative stat table', r.table.arbiter === r.arbiter.def && r.table.sovereign === r.sovereign.def,
+    `declared ${r.arbiter.def}/${r.sovereign.def} vs table ${r.table.arbiter}/${r.table.sovereign}`);
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();

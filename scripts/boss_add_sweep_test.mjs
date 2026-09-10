@@ -7,8 +7,7 @@
 //
 //   * the PQ Conductor's death sweep (v0.29.885)                  — fixed v0.30.503
 //   * the Tower Sovereign's lapsed Regalia window                  — this test's main subject
-//   * the Octobaby leg safety nets, whose comment says a "monster-update pass" will collect
-//     them (there is no such pass) — but whose PRIMARY path does splice, so they are covered
+//   * the Octobaby leg orphan path                                — fixed v0.30.505
 //
 // The Sovereign case is the worst of the three because it repeats: 4-6 shards are raised every
 // 16-22 s for the whole fight, and every window the player declines leaves its whole set behind.
@@ -35,7 +34,11 @@ try {
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     const o = {};
-    const step = (n) => { for (let i = 0; i < n; i++) { try { if (typeof updateMonsters === 'function') updateMonsters(16.667); } catch (e) {} } };
+    // Record what updateMonsters throws instead of swallowing it. An earlier draft used a bare
+    // catch{} here and a ReferenceError thrown EVERY FRAME by a bad fix surfaced only as
+    // "4 legs not swept" — a crash wearing an assertion's clothes.
+    const pumpErrs = [];
+    const step = (n) => { for (let i = 0; i < n; i++) { try { if (typeof updateMonsters === 'function') updateMonsters(16.667); } catch (e) { if (pumpErrs.length < 3) pumpErrs.push(String(e && e.message || e).slice(0, 120)); } } };
     // The Crown Regalia lives in _bossSpecialAttacks(m, dt); a bare updateMonsters pump never
     // reaches it, and the first draft of this test measured "0 shards raised" for that reason.
     const tick = (m, n) => { for (let i = 0; i < n; i++) { game.time = (game.time | 0) + 1; try { _bossSpecialAttacks(m, 16.667); } catch (e) {} } };
@@ -98,6 +101,38 @@ try {
       o.conAddsLeft = (game.monsters || []).filter((m) => m && m._pqSummoned).length;
       o.conCorpses = corpses();
     }
+    // ---- Octobaby: a leg whose head left by any route other than killMonster ----
+    // The head's killMonster handler splices the legs it knows about. This is the OTHER path:
+    // updateMonsters finds a leg whose parent is gone and used to zero its HP and move on,
+    // trusting a reaper that does not exist.
+    // Killing the Conductor above set game.paused for the victory banner, and updateMonsters
+    // does nothing while paused — so the first draft of this section pumped 50 frames into a
+    // frozen world and reported four un-swept legs against a fix that was working. Same leaked
+    // state boss_death_cleanup_test warns about in its own __setup.
+    game.paused = false;
+    game.monsters.length = 0;
+    const head = spawnMonster(player.x + 300, player.y - 60, 'octobaby', true, false);
+    o.octoSpawned = !!head;
+    if (head) {
+      step(30);                                  // let the head put its legs out
+      const legs = (game.monsters || []).filter((x) => x && x._octoParent === head);
+      o.octoLegs = legs.length;
+      // orphan them WITHOUT killMonster — a splice of the head alone
+      const hi = game.monsters.indexOf(head);
+      if (hi >= 0) game.monsters.splice(hi, 1);
+      head.currentHp = 0;
+      step(20);
+      o.octoLegsLeft = (game.monsters || []).filter((x) => x && x._octoParent === head).length;
+      o.octoCorpses = corpses();
+      let stubborn = 0;
+      for (const mo of [...(game.monsters || [])]) {
+        if (!mo || mo.currentHp > 0) continue;
+        for (let i = 0; i < 120 && game.monsters.indexOf(mo) >= 0; i++) { try { hitMonster(mo, 1e9, false); } catch (e) { break; } step(1); }
+        if (game.monsters.indexOf(mo) >= 0) stubborn++;
+      }
+      o.octoStubborn = stubborn;
+    }
+    o.pumpErrs = pumpErrs;
     return o;
   });
 
@@ -112,6 +147,11 @@ try {
   ok('the Conductor spawned with adds', r.conSpawned && r.conAdds === 2);
   ok('the Conductor still sweeps his adds (v0.30.503 holds)', r.conAddsLeft === 0, `${r.conAddsLeft} left`);
   ok('...and leaves no corpses either', r.conCorpses === 0, `${r.conCorpses} zero-HP monsters`);
+  ok('the Octobaby head put its legs out', r.octoSpawned && (r.octoLegs || 0) >= 1, 'legs=' + r.octoLegs);
+  ok('an orphaned leg is removed, not left at zero HP', (r.octoLegsLeft || 0) === 0, `${r.octoLegsLeft} legs still attached to a gone head`);
+  ok('...and leaves no corpse behind', (r.octoCorpses || 0) === 0, `${r.octoCorpses} zero-HP monsters`);
+  ok('...and nothing left is unkillable', (r.octoStubborn || 0) === 0, `${r.octoStubborn} could not be removed`);
+  ok('updateMonsters threw nothing while pumping', (r.pumpErrs || []).length === 0, (r.pumpErrs || []).join(' | '));
   ok('no page errors', errs.length === 0, errs.join(' | '));
 } finally {
   await browser.close(); server.kill();
