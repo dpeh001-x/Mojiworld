@@ -10660,7 +10660,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.551';
+const GAME_VERSION = 'v0.30.552';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13296,6 +13296,7 @@ function _lxTintedFx(img, color) {
 // lifetime; falls back to the static LX_FX sprite until frames decode.
 const FX_ANIM_FRAMES = Object.create(null);
 const _FX_ANIM_KEYS = new Set([
+  'singularity',   // v0.30.x — the Singularity's accretion disc loop (fx/anim/singularity_0..8, ludo.ai via scripts/gen_singularity_disc.mjs); drawn by _lxGravBackdropDraw
   'block_warrior', 'block_rogue', 'block_mage', 'block_archer',   // v0.30.398 — the A-press stance per class
   'bolt_impact',    // v0.30.x - Magic Bolt contact burst (anim/bolt_impact_0..7, ludo.ai via gen_bolt_impact_fx.mjs). Warmed eagerly below: it is a BASIC attack, so it fires long before the staggered boot warmer would reach it.
   'arcane_burst',   // v0.29.946 — mage W detonation star (anim/arcane_burst_0..8, ludo.ai via gen_arcane_burst_fx.mjs)
@@ -113430,7 +113431,7 @@ let _lxGravTintTo = 0.42;
 // run); the budget is cut by _perfVeryLowFx (tier 2) and by game._reduceMotion instead.
 const _LX_GF = { bakes: Object.create(null), pulses: [], cardEl: null, cardT: 0 };
 const _LX_GF_DISC = { fx: 0.515, fy: 0.225, fr: 0.080 };   // the oculus sphere in bg_v3_gravitosArena, as fractions of W / H / W
-const _LX_GF_COL = { 1: ['#8a5cff', '#ffd27a', 'rgba(150,100,255,'], 2: ['#d14dff', '#ffb35c', 'rgba(210,80,255,'], 3: ['#ff3d7a', '#ffe08a', 'rgba(255,60,110,'] };
+const _LX_GF_COL = { 1: ['#8a5cff', '#ffd27a', 'rgba(150,100,255,'], 2: ['#d14dff', '#ffb35c', 'rgba(210,80,255,'], 3: ['#e8609a', '#ffd9a0', 'rgba(230,90,150,'] };
 function _lxGfBake(key, size, paint) {
   let cv = _LX_GF.bakes[key];
   if (cv) return cv;
@@ -113479,9 +113480,26 @@ function _lxGfPaintDisc(phase) {
   };
 }
 function _lxGfPaintVignette(c) {
-  const g = c.createRadialGradient(0, 0, 60, 0, 0, 150);
-  g.addColorStop(0, 'rgba(140,0,40,0)'); g.addColorStop(0.58, 'rgba(140,0,40,0.16)'); g.addColorStop(1, 'rgba(190,0,50,1)');
+  // v0.30.x (per user: less red, blend and mix) - a wine-violet falloff that starts a third of the
+  // way out and never reaches full opacity, so it grades the scene rather than framing it
+  const g = c.createRadialGradient(0, 0, 40, 0, 0, 150);
+  g.addColorStop(0, 'rgba(110,20,80,0)'); g.addColorStop(0.36, 'rgba(110,20,80,0.06)'); g.addColorStop(0.7, 'rgba(120,20,80,0.26)'); g.addColorStop(1, 'rgba(130,24,86,0.62)');
   c.fillStyle = g; c.fillRect(-150, -150, 300, 300);
+}
+// The disc ART (per user: 'generate art sprites if you have to, it needs to look very good'):
+// Sprites/fx/anim/singularity_0..8 (ludo.ai, scripts/gen_singularity_disc.mjs) - a tilted accretion
+// disc with its black core at the canvas centre, drawn UNROTATED (the tilt is in the art; a
+// rotating tilted ellipse would precess like a wobbling plate). The plasma flow is the loop. The
+// static base covers the frames' decode, and the procedural bake below covers both.
+function _lxGfDiscArt() {
+  try {
+    const arr = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames('singularity') : null;
+    const f = (arr && typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, 85, 640) : null;
+    if (f) return f;
+    if (!_LX_GF.discImg) { const im = new Image(); im.decoding = 'async'; im.onerror = () => {}; im.src = 'Sprites/fx/singularity_disc.webp'; _LX_GF.discImg = im; }
+    const im = _LX_GF.discImg;
+    return (im.complete && im.naturalWidth > 0) ? im : null;
+  } catch (e) { return null; }
 }
 // Backdrop layer: drawn from drawBackground, in SCREEN space, right after the darkening tint, so
 // the platforms, the boss and every entity still sit in front of it. Tracks the 0.12 parallax the
@@ -113500,7 +113518,7 @@ function _lxGravBackdropDraw() {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     // 1. lens halo behind the sphere
-    ctx.globalAlpha = (phase === 3 ? 0.66 : phase === 2 ? 0.54 : 0.44) + beat * 0.16;
+    ctx.globalAlpha = (phase === 3 ? 0.56 : phase === 2 ? 0.46 : 0.36) + beat * 0.14;
     const hs = r * 7.0;
     ctx.drawImage(_lxGfBake('gf_halo' + phase, 256, _lxGfPaintHalo(phase)), bx - hs / 2, by - hs / 2, hs, hs);
     // 2. infalling stars: deterministic per index, no state, one path
@@ -113520,11 +113538,20 @@ function _lxGravBackdropDraw() {
     }
     ctx.globalAlpha = 0.75 + beat * 0.25;
     ctx.stroke();
-    // 3. the accretion disc, turning
-    ctx.globalAlpha = 1;
-    ctx.translate(bx, by); ctx.rotate(t * spin);
-    const ds = r * 6.2;
-    ctx.drawImage(_lxGfBake('gf_disc' + phase, 320, _lxGfPaintDisc(phase)), -ds / 2, -ds / 2, ds, ds);
+    // 3. the accretion disc: the painted loop when it has decoded, else the procedural bake turning
+    // the art's black core is ~19% of its canvas and its dense lens glow ~55%: at 7.4r the glow covers the painted sphere (r) and the core reads as the hole
+    const ds = r * 7.4;
+    const art = _lxGfDiscArt();
+    ctx.translate(bx, by);
+    if (art) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.97;
+      ctx.drawImage(art, -ds / 2, -ds / 2, ds, ds);
+    } else {
+      ctx.globalAlpha = 1;
+      ctx.rotate(t * spin);
+      ctx.drawImage(_lxGfBake('gf_disc' + phase, 320, _lxGfPaintDisc(phase)), -ds / 2, -ds / 2, ds, ds);
+    }
     ctx.restore();
   } catch (e) {}
 }
@@ -113551,8 +113578,11 @@ function _lxGravVignetteDraw() {
     if (typeof game === 'undefined' || !game || game.currentMap !== 'gravitosArena') return;
     const m = _lxGfBoss();
     if (!_lxGfDesperate(m)) return;
-    const a = 0.42 + 0.30 * (0.5 + 0.5 * Math.sin(game.time * 0.16));
-    ctx.save(); ctx.globalAlpha = a;
+    const breath = 0.5 + 0.5 * Math.sin(game.time * 0.16);
+    ctx.save();
+    // a slight tint over everything, so the whole scene sits in the same light as its edges
+    ctx.globalAlpha = 0.07 + 0.04 * breath; ctx.fillStyle = '#5a1040'; ctx.fillRect(0, Math.round(game.camera.y || 0), W, H);
+    ctx.globalAlpha = 0.55 + 0.25 * breath;
     ctx.drawImage(_lxGfBake('gf_vig', 300, _lxGfPaintVignette), 0, Math.round(game.camera.y || 0), W, H);
     ctx.restore();
   } catch (e) {}

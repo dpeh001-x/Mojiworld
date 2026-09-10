@@ -39,10 +39,11 @@ const canvasShot = async (file) => { const url = await page.evaluate(() => docum
 const sample = async (bx, by, bw, bh) => page.evaluate(([bx, by, bw, bh]) => {
   const cv = document.getElementById('game'); const c = cv.getContext('2d'); const dpr = cv.width / W;
   const d = c.getImageData(Math.round(bx * dpr), Math.round(by * dpr), Math.round(bw * dpr), Math.round(bh * dpr)).data;
-  let gold = 0, violet = 0, crimson = 0;
+  let gold = 0, violet = 0, crimson = 0, wine = 0;
   for (let i = 0; i < d.length; i += 4) { const r = d[i], g = d[i + 1], b = d[i + 2];
-    if (r > 150 && r - g > 25 && r - b > 40) gold++; else if (b > 150 && r > 100 && b - g > 50) violet++; else if (r > 90 && r - g > 50 && r - b > 20) crimson++; }
-  return { gold, violet, crimson, px: d.length / 4 };
+    if (r > 150 && r - g > 25 && r - b > 40) gold++; else if (b > 150 && r > 100 && b - g > 50) violet++; else if (r > 90 && r - g > 50 && r - b > 20) crimson++;
+    if (r > 40 && r - g > 12 && b - g > 2) wine++; }   // a soft grade: low-contrast, but warmer and bluer than green
+  return { gold, violet, crimson, wine, px: d.length / 4 };
 }, [bx, by, bw, bh]);
 
 const r = await page.evaluate(async () => {
@@ -59,6 +60,10 @@ const r = await page.evaluate(async () => {
   if (!boss) { try { boss = spawnMonster(1100, 380, 'gravitos', true); } catch (e) { out.spawnErr = String(e.message); } }
   out.boss = !!boss;
   out.helpers = ['_lxGravBackdropDraw', '_lxGravPulseDraw', '_lxGravVignetteDraw', '_lxGravFinaleBeat', '_lxGravFinaleKill'].filter((k) => typeof window[k] === 'function');
+  out.keyed = (typeof _FX_ANIM_KEYS !== 'undefined') && _FX_ANIM_KEYS.has('singularity');
+  out.indexed = (typeof _lxFrameCount === 'function') ? _lxFrameCount('fx/anim', 'singularity', 9) : null;   // 24 after the longer loop
+  let art = null; for (let i = 0; i < 40 && !art; i++) { await wait(100); try { art = (typeof _lxGfDiscArt === 'function') ? _lxGfDiscArt() : null; } catch (e) {} }
+  out.artReady = !!art; out.artLoop = !!(art && typeof FX_ANIM_FRAMES !== 'undefined' && FX_ANIM_FRAMES.singularity && FX_ANIM_FRAMES.singularity.includes(art));
   // the disc's screen position (same maths as the backdrop layer)
   const shift = Math.floor(((game.camera.x || 0) * 0.12) % W);
   out.disc = { x: 0.515 * W - shift, y: 0.259 * H, r: 0.08 * W };
@@ -106,11 +111,12 @@ const checks = [
   ['Gravitos is in the arena', r.boss === true],
   ['the finale helpers exist', r.helpers.length === 5, r.helpers.join(',')],
   ['the sky carries the accretion disc (warm gold rims over the sphere)', p1.gold > 400, `warm ${p1.gold} violet ${p1.violet}`],
+  ['the disc is the painted ludo.ai loop (keyed, indexed, decoded)', r.keyed === true && r.indexed >= 9 && r.artReady === true && r.artLoop === true, `keyed ${r.keyed} indexed ${r.indexed} ready ${r.artReady} loop ${r.artLoop}`],
   ['the form change raises the letterbox card', beat.card === true && beat.bars === 2 && /SECOND FORM/.test(beat.title || ''), `${beat.card} / ${beat.bars} / ${beat.title}`],
   ['...and rings the arena (shockwave pulses)', beat.pulses >= 1, `pulses ${beat.pulses}`],
   ['...and holds the frame', beat.hitStop > 0, `hitStop ${beat.hitStop}`],
   ['final form under 20% is desperation', desp.desperate === true],
-  ['...and the screen edge bleeds crimson', corner.crimson > 400, `crimson ${corner.crimson}/${corner.px}`],
+  ['...and the screen edge grades wine-violet (a blend, not a red frame)', corner.wine > 800 && corner.crimson < corner.px * 0.5, `wine ${corner.wine} crimson ${corner.crimson} / ${corner.px}`],
   ['the heaviest state stays inside the budget (avg frame <= 10 ms headless)', perf.avgFrame <= 10, `${perf.avgFrame} ms, ${perf.fps} fps`],
   ['no page errors', errs.length === 0, errs.join(' | ')],
 ];
