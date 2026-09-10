@@ -22,7 +22,11 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8910;
-const server = spawn(process.execPath, [join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
+// MOJI_SERVE_ROOT lets this run against a tree other than the repo working copy. That copy is
+// shared with parallel sessions here and is routinely many commits behind origin/main, so without
+// it the suite grades a build nobody is shipping.
+const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
+const server = spawn(process.execPath, [join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch(process.env.PW_EXE
   ? { executablePath: process.env.PW_EXE, headless: true }
@@ -68,7 +72,16 @@ await page.evaluate(() => {
   };
 });
 
-const BOSSES = await page.evaluate(() => Object.entries(monsterTypes).filter(([k, t]) => t && t.boss).map(([k]) => k));
+let BOSSES = await page.evaluate(() => Object.entries(monsterTypes).filter(([k, t]) => t && t.boss).map(([k]) => k));
+// MOJI_BOSS_FILTER=pqConductor re-runs one fight on a fresh page. ~50 fights share a page here,
+// and this file's own __setup comment records that leaked per-run state has faked failures before
+// (a 20 s stun that a clean single run measures at 2.5 s), so isolating one boss is the way to
+// separate a real defect from the harness tripping over its own previous fight.
+if (process.env.MOJI_BOSS_FILTER) {
+  const want = process.env.MOJI_BOSS_FILTER.split(',').map((x) => x.trim()).filter(Boolean);
+  BOSSES = BOSSES.filter((k) => want.includes(k));
+  console.log('filtered to: ' + BOSSES.join(', '));
+}
 console.log('BOSS'.padEnd(24) + 'mode        hazLeft  release  ccStuck  clearable  monsLeft');
 console.log('-'.repeat(78));
 
@@ -119,12 +132,19 @@ for (const type of BOSSES) {
         out.reshackles = reshackles;
         // whatever remains must be killable, or the arena never clears
         let clearable = true;
+        out.stubborn = [];
         for (const mo of [...(game.monsters || [])]) {
+          const _hp0 = mo.currentHp;
           for (let i = 0; i < 250 && game.monsters.indexOf(mo) >= 0; i++) {
             try { hitMonster(mo, 1e9, false); } catch (e) { break; }
             window.__step(16.667);
           }
-          if (game.monsters.indexOf(mo) >= 0) clearable = false;
+          if (game.monsters.indexOf(mo) >= 0) {
+            clearable = false;
+            // Name it. "leftovers are killable: NO" gave nothing to act on.
+            out.stubborn.push({ type: mo.type, hp0: _hp0, hp: mo.currentHp, max: mo.maxHp,
+              ev: mo.evasion, dying: !!mo._dying, inv: !!mo.invulnerable });
+          }
         }
         Object.assign(out, {
           hazAfter: (game.hazards || []).length,
@@ -152,7 +172,7 @@ for (const type of BOSSES) {
     // means it never let go at all within the 20 s window.
     ok(`${tag}: the boss's own shackle releases`, r.releaseSec != null && r.releaseSec <= 6, `${r.releaseSec}s`);
     ok(`${tag}: no hazards outlive the boss`, (r.hazAfter || 0) === 0, `${r.hazAfter} left`);
-    ok(`${tag}: leftovers are killable`, r.clearable !== false);
+    ok(`${tag}: leftovers are killable`, r.clearable !== false, JSON.stringify(r.stubborn || []));
     if (r.pageErrs) ok(`${tag}: no page errors`, false, `${r.pageErrs}`);
   }
 }

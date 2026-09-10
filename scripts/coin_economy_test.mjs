@@ -58,15 +58,32 @@ const c = await ev(() => {
   const has = typeof _lxCoinCurve === 'function' && typeof _lxMobCoin === 'function';
   if (!has) return { has };
   const T = LX_MONSTER_STATS;
-  const sp = (t, boss) => { game.monsters = []; spawnMonster(player.x + 200, player.y, t, !!boss); const m = game.monsters[game.monsters.length - 1]; return { coin: m.mojicoins, hp: m.maxHp, flag: !!m._coinCurved, table: T[t] ? T[t].coin : null }; };
+  const _rnd = Math.random;
+  const noElite = (fn) => { Math.random = () => 0.999999; try { return fn(); } finally { Math.random = _rnd; } };
+  const sp = (t, boss) => noElite(() => { game.monsters = []; spawnMonster(player.x + 200, player.y, t, !!boss); const m = game.monsters[game.monsters.length - 1]; return { coin: m.mojicoins, hp: m.maxHp, flag: !!m._coinCurved, table: T[t] ? T[t].coin : null }; });
   loadMap('forest', 300);
   const out = { has, curve: { elderbark: _lxCoinCurve(5785, 77128, false), sandhusk: _lxCoinCurve(284, 3784, false), scorpion: _lxCoinCurve(174, 2307, false), boss: _lxCoinCurve(329664, 19392000, true) } };
   out.elderbark = sp('elderbark'); out.sandhusk = sp('sandhusk'); out.scorpion = sp('scorpion'); out.virgo = sp('zodiac_virgo', true);
-  game.monsters = []; spawnMonster(player.x + 200, player.y, 'elderbark', false, true); const eld = game.monsters[game.monsters.length - 1]; out.elder = { coin: eld.mojicoins, hp: eld.maxHp, flag: !!eld._coinCurved, mini: !!eld.isMiniBoss };
+  noElite(() => { game.monsters = []; spawnMonster(player.x + 200, player.y, 'elderbark', false, true); });
+  const eld = game.monsters[game.monsters.length - 1]; out.elder = { coin: eld.mojicoins, hp: eld.maxHp, flag: !!eld._coinCurved, mini: !!eld.isMiniBoss };
   // the drop-time guard: a monster built without the flag is curved when its coins drop
   game.monsters = []; spawnMonster(player.x + 20, player.y, 'elderbark', false); const g = game.monsters[game.monsters.length - 1];
   g._coinCurved = false; g.mojicoins = 5785; g.maxHp = 77128; game.drops.length = 0; g.currentHp = 0; try { killMonster(g); } catch (e) {}
-  out.guardDrop = game.drops.filter((d) => d && d.type === 'mojicoin').reduce((a, d) => a + (d.value || 0), 0); game.drops.length = 0;
+  // The per-bag value is divided by mojicoinCount, so the BAG TOTAL is invariant and the 1-3
+  // split does not matter. What does matter, and what a hardcoded 1,940 could not survive, is
+  // the WORLD AFFIX: every map load rolls one (v0.29.288) and one of them pays +60% coin. Build
+  // the expectation from the live multipliers so this checks the drop-time GUARD rather than
+  // restating the multiplier chain.
+  const _bags = game.drops.filter((d) => d && d.type === 'mojicoin');
+  out.guardDrop = _bags.reduce((a, d) => a + (d.value || 0), 0);
+  out.guardBags = _bags.length;
+  out.guardAffix = (typeof _activeAffix === 'function' ? (_activeAffix() || {}).id : 'n/a');
+  out.guardExpect = Math.round(
+    _lxCoinCurve(5785, 77128, false)
+    * (typeof MONSTER_COIN_MULT === 'number' ? MONSTER_COIN_MULT : 1)
+    * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1)
+    * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1));
+  game.drops.length = 0;
   return out;
 });
 ok('the coin curve and the drop-time reader exist', !c.err && c.has, c.err || '');
@@ -74,7 +91,7 @@ ok('curve: 3,000-HP knee, HP^0.45 above it — elderbark 5,785 -> ~970, sandhusk
 ok('a spawned elderbark carries the curved coins and the flag (table 5,785 -> ~970 ±jitter)', !c.err && c.elderbark && c.elderbark.flag && near(c.elderbark.coin, 970, 0.12), c.err || JSON.stringify(c.elderbark));
 ok('a spawned sub-knee scorpion is unchanged (~174), a spawned Virgo keeps her boss payout (~318k-330k)', !c.err && c.scorpion && near(c.scorpion.coin, 174, 0.12) && c.virgo && near(c.virgo.coin, 329664, 0.12) && c.virgo.flag, c.err || JSON.stringify({ s: c.scorpion, v: c.virgo }));
 ok('an ELDER (mini-boss, 5x HP) is curved too — every spawn is', !c.err && c.elder && c.elder.mini && c.elder.flag && c.elder.coin < 5785 * 3, c.err || JSON.stringify(c.elder));
-ok('the drop-time guard curves a monster that skipped spawnMonster (5,785 raw on 77,128 HP -> ~1,940 in the bag, 2x scalar)', !c.err && near(c.guardDrop, 1940, 0.06), c.err || `bag ${c.guardDrop}`);
+ok('the drop-time guard curves a monster that skipped spawnMonster (5,785 raw on 77,128 HP -> the curve x coin/difficulty/affix multipliers)', !c.err && c.guardBags >= 1 && c.guardBags <= 3 && near(c.guardDrop, c.guardExpect, 0.03), c.err || `bag ${c.guardDrop} over ${c.guardBags} bag(s), expected ${c.guardExpect} (affix ${c.guardAffix})`);
 
 // ---- the grind, measured on a real map ----------------------------------------------
 const g = await ev(async () => {

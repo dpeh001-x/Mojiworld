@@ -51,13 +51,26 @@ for (const key of SETS) {
 
   // --- 2. character size constant -------------------------------------------
   let worst = 0;
-  for (const p of files) { const a = await armour(p); worst = Math.max(worst, Math.abs(a.h - base.h) / base.h); }
+  const drifts = [];
+  for (const p of files) {
+    const a = await armour(p);
+    const d = Math.abs(a.h - base.h) / base.h;
+    drifts.push({ f: p.split('/').pop(), d: +(d * 100).toFixed(1) });
+    worst = Math.max(worst, d);
+  }
+  drifts.sort((x, y) => y.d - x.d);
   // 18%, calibrated on the shipped gravitospunch set (15.5%): a full-body
   // punch that extends genuinely changes the silhouette, and failing accepted
   // art would only train people to ignore this suite. A camera zoom — the
   // defect being guarded against — runs 25-70%, well clear of the line.
-  ok(`${key}: character size matches the base sprite`, worst <= 0.18,
-     { worstDrift: (worst * 100).toFixed(1) + '%' });
+  // 22%, re-calibrated after v0.30.341 turned the nine-frame punch into sixteen with seven
+  // cross-dissolve in-betweens. A dissolve is a BLEND of two poses, so its silhouette is the
+  // union of both and necessarily measures taller than either source - the frames over the old
+  // 18% line (5 at 21.4%, 7 at 21.0%) are exactly the in-betweens flanking the old 15.5% peak,
+  // and the authored frames have not moved. The number this guard exists to catch is a camera
+  // zoom, which runs 25-70%, so the line still sits clear of the defect on both sides.
+  ok(`${key}: character size matches the base sprite`, worst <= 0.22,
+     { worstDrift: (worst * 100).toFixed(1) + '%', worstFrames: drifts.slice(0, 4) });
 
   // --- 3. it actually animates ---------------------------------------------
   const small = [];

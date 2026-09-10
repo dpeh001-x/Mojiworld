@@ -21,7 +21,13 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const URL = 'file:///' + path.join(ROOT, args[0] || 'mojiworld_game.html').split(path.sep).join('/');
+// MOJI_SERVE_ROOT lets this run against a tree other than the repo working copy. That copy is
+// shared with parallel sessions here and is routinely many commits behind origin/main, so without
+// it the suite grades a build nobody is shipping.
+// This one loads over file:// rather than a server, so it takes the path directly.
+const GAME_FILE = process.env.MOJI_GAME_FILE
+  || (args[0] && path.isAbsolute(args[0]) ? args[0] : path.join(ROOT, args[0] || 'mojiworld_game.html'));
+const URL = 'file:///' + GAME_FILE.split(path.sep).join('/');
 const browser = await chromium.launch({ channel: 'msedge', args: ['--allow-file-access-from-files'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = [];
@@ -80,7 +86,12 @@ const r = await page.evaluate(() => {
     } finally { window._maybeLevelUp = _o; window.showToast = _t; }
   };
 
-  const out = { levels: LEVELS, target: TARGET, share: {}, dbl: {}, partial7: null, floors: N };
+  // v0.30.453 — a full clear pays LX_EXP_CLEAR_BONUS of the budget again on top. Read the
+  // constant rather than restating it, so tuning it does not turn this suite red.
+  const CLEAR_BONUS = (typeof LX_EXP_CLEAR_BONUS === 'number') ? LX_EXP_CLEAR_BONUS : 0;
+  const TARGET_CLEAR = Object.fromEntries(LEVELS.map((lv) => [lv, +(TARGET[lv] * (1 + CLEAR_BONUS)).toFixed(4)]));
+  const out = { levels: LEVELS, target: TARGET, targetClear: TARGET_CLEAR, clearBonus: CLEAR_BONUS,
+                share: {}, dbl: {}, partial7: null, floors: N };
   for (const lv of LEVELS) {
     out.share[lv] = +(run(lv) / _lxLevelCost(lv)).toFixed(4);
     out.dbl[lv]   = +(run(lv, { doubleFireLast: true }) / _lxLevelCost(lv)).toFixed(4);
@@ -97,8 +108,9 @@ console.log('  ' + 'target'.padEnd(12) + L.map(l => r.target[l].toFixed(3).padSt
 
 console.log('\nRUN BUDGET — 0.50 at Lv 40 → 0.20 at Lv 70, capped at 0.20 above');
 for (const lv of L) {
-  check(Math.abs(r.share[lv] - r.target[lv]) <= 0.02, `a full run pays ~${r.target[lv]} of a level at Lv ${lv}`,
-        { want: r.target[lv], got: r.share[lv] });
+  check(Math.abs(r.share[lv] - r.targetClear[lv]) <= 0.02,
+        `a full run pays ~${r.targetClear[lv]} of a level at Lv ${lv} (budget ${r.target[lv]} + ${(r.clearBonus * 100)}% clear bonus)`,
+        { want: r.targetClear[lv], got: r.share[lv] });
 }
 check(r.share[80] === r.share[70] && r.share[95] === r.share[70],
       'the cap holds flat above Lv 70 (does not keep falling)', { 70: r.share[70], 80: r.share[80], 95: r.share[95] });

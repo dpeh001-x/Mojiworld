@@ -16,7 +16,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const PORT = 9118;
-const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
+// MOJI_SERVE_ROOT lets this run against a tree other than the repo working copy. That copy is
+// shared with parallel sessions here and is routinely many commits behind origin/main, so without
+// it the suite grades a build nobody is shipping.
+const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
+const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
   channel: process.env.MOJI_PW_EXE ? undefined : 'msedge',
@@ -36,6 +40,12 @@ const R = await page.evaluate(() => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   }
   loadMap('forest');
+  // v0.29.672 made a paused-player guard the FIRST line of _diffDmg: it returns 0 outright when
+  // game.paused is set. That is deliberate and co-op-facing, and loadMap leaves the game paused in
+  // a headless harness — so every measurement below came back 0 and thirteen numeric checks failed
+  // against perfectly healthy code. Two of the three "passes" were vacuous for the same reason
+  // (0 is monotonic, and 0 scales like 0). Unpause before measuring.
+  game.paused = false;
   // Sterile conditions: no difficulty scaling, no curse hex, no Glass Skin
   // edict, and no Second Skin charge (it returns 0 and would mask everything).
   game._diffDmgMul = 1;
@@ -104,8 +114,21 @@ const R = await page.evaluate(() => {
 
   // The absorb curve caps at 90% around 4500 DEF; 20000 is comfortably there.
   const TANK = 20000;
-  ok('DEF reaches the absorb cap at the tank test value',
-     (setDef(TANK), Math.abs(_defAbsorbMul() - 0.10) < 0.02), `absorbMul ${(setDef(TANK), _defAbsorbMul().toFixed(3))}`);
+  // v0.29.709 made the ceiling level-aware (per user: "higher DEF should reduce damage even
+  // more on higher levels"): 0.90 easing to 0.94 across Lv 50..90, so a dedicated Lv-90 tank
+  // tops out at 94% absorbed and never at immunity. Both ends are checked, because a single
+  // hardcoded number here is what made this read as a failure at 0.060 - the correct value.
+  setDef(TANK);
+  const _lvWas = player.level;
+  player.level = 10;  const capLow  = _defAbsorbMul();
+  player.level = 100; const capHigh = _defAbsorbMul();
+  player.level = _lvWas;
+  ok('below Lv 50 the absorb ceiling is still 90%',
+     Math.abs(capLow - 0.10) < 0.02, `absorbMul ${capLow.toFixed(3)} (expect ~0.10)`);
+  ok('at Lv 90+ it eases to 94%, and never to immunity',
+     Math.abs(capHigh - 0.06) < 0.02 && capHigh > 0, `absorbMul ${capHigh.toFixed(3)} (expect ~0.06)`);
+  ok('the ceiling really does rise with level',
+     capHigh < capLow, `Lv10 ${capLow.toFixed(3)} -> Lv100 ${capHigh.toFixed(3)}`);
 
   // An even fight must be untouched by DEF here, or DEF would be double-dipping
   // on content that is supposed to stay dangerous.

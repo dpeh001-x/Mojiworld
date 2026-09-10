@@ -25,7 +25,12 @@ const free = (p) => new Promise((r) => { const s = net_.createServer();
 let PORT = process.argv[2];
 for (let p = 8767; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
 const { spawn } = await import('node:child_process');
-const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });
+// MOJI_SERVE_ROOT lets this run against a tree other than the repo working copy. That copy is
+// shared with parallel sessions here and is routinely many commits behind origin/main, so without
+// it the suite grades a build nobody is shipping.
+const SERVE_ROOT = process.env.MOJI_SERVE_ROOT
+  || (await import('node:path')).default.resolve((await import('node:url')).fileURLToPath(import.meta.url), '../..');
+const srv = spawn(process.execPath, [(await import('node:path')).default.join(SERVE_ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: SERVE_ROOT });
 await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
@@ -90,7 +95,11 @@ const curve = (g, gl, n) => { const e = Math.min(n, r.lateFrom); return Math.pow
 const expSig  = (n) => +curve(r.sig, r.sigLate, n).toFixed(4);
 const expBase = (n) => +curve(r.base, r.baseLate, n).toFixed(4);
 const OLD_RATES = [95, 87, 79, 71, 63, 55, 47, 39, 31, 23];
-const EXPECT_RATES = [95, 87, 79, 71, 63, 55, 45, 35, 25, 15];
+// v0.30.x (per user: "reduce chance of success of enhancement from 8 to 10 stars") added a
+// THIRD band from the star-7 attempt, dropping 15 a star instead of 10, and lowered the floor
+// 12 -> 8 so the star-9 rung sits on an authored number. These were [.., 45, 35, 25, 15].
+const EXPECT_RATES = [95, 87, 79, 71, 63, 55, 45, 30, 15, 8];
+const EXPECT_FLOOR = 8;
 const near = (a, b, t) => a != null && Math.abs(a - b) <= (t || 0.02);
 const S = r.sigAt || {}, O = r.otherAt || {};
 const step = (arr, n) => +(arr[n] - arr[n - 1]).toFixed(4);
@@ -104,10 +113,16 @@ ok('from the \u26056 attempt on, the odds fall away faster',
   r.rates.slice(6).every((v, i) => v === EXPECT_RATES[6 + i] && v < OLD_RATES[6 + i]),
   { rates6to9: r.rates.slice(6), previously: OLD_RATES.slice(6),
     failRateNow: r.rates.slice(6).map(v => (100 - v) + '%'), failRateBefore: OLD_RATES.slice(6).map(v => (100 - v) + '%') });
-ok('every rung still clears the 12% floor, so pity stays the thing that carries a grind',
-  r.rates.every(v => v > 12), { lowest: Math.min(...r.rates) });
+// The star-9 rung now SITS on the floor by design, so "every rung clears it" is no longer the
+// claim - the claim is that the floor is where the authored table says it is, and that pity is
+// what carries the grind from there (+6% a failure, capped +30%: a star-9 attempt climbs 8 -> 38).
+ok('nothing falls below the authored floor, and the last rung sits exactly on it',
+  r.rates.every(v => v >= EXPECT_FLOOR) && Math.min(...r.rates) === EXPECT_FLOOR,
+  { lowest: Math.min(...r.rates), floor: EXPECT_FLOOR });
+// Compare against what the table DECLARES, not against two more hardcoded numbers - that is
+// what the check is for, and hardcoding made it fail the moment the table moved.
 ok('...and the odds the code DECLARES are the odds it actually rolls',
-  near(r.observed.s5, 0.55, 0.05) && near(r.observed.s8, 0.25, 0.05),
+  near(r.observed.s5, r.rates[5] / 100, 0.05) && near(r.observed.s8, r.rates[8] / 100, 0.05),
   { observedAt5: (r.observed.s5 * 100).toFixed(1) + '%', declared5: r.rates[5] + '%',
     observedAt8: (r.observed.s8 * 100).toFixed(1) + '%', declared8: r.rates[8] + '%', trialsEach: 800 });
 
