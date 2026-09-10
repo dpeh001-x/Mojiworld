@@ -110,7 +110,10 @@
 // files are REPLACED under their own names (the ward redrawn as an incantation shard). This is
 // the exact case the generation exists for: v0.30.487 replaced this same set without bumping,
 // so a returning browser kept serving the old opaque ward out of cache.
-const CACHE = 'mojiworld-assets-v28';
+// v0.30.533 - v28 -> v29. Both mspore files are REPLACED
+// under their own names (the pod recoloured white/pink/red and turned to face right). Without a
+// new generation a returning browser keeps firing the old mint pod out of cache.
+const CACHE = 'mojiworld-assets-v29';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
