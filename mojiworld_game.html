@@ -10642,7 +10642,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.546';
+const GAME_VERSION = 'v0.30.547';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -12946,10 +12946,9 @@ const LX_FX = (() => {
     // art is generated (prompts: DASH_FX_LUDO_PROMPTS.md) the files 404
     // harmlessly and the procedural particle dash FX stays as fallback.
     // Base art reads LEFT-TO-RIGHT; call sites mirror with flipX.
-    dash_warrior:       'dash_warrior.webp',  // amber body-charge shockwave streak
-    dash_mage:          'dash_mage.webp',     // violet/blue arcane blink rune burst
-    dash_archer:        'dash_archer.webp',   // emerald wind-roll gust spiral
-    dash_rogue:         'dash_rogue.webp',    // violet shadow-smoke ninja streak
+    // v0.30.547 — the four class dash sprites (dash_warrior / dash_mage / dash_archer / dash_rogue,
+    // plus their nine-frame loops under fx/anim) were REMOVED per user. The dash draws
+    // procedural FX only now: see drawDashFx.
 
     // v0.26.041 — Per user "for elementalist G skill also simultaneous
     // summon 3 progressively bigger ice blocks forward from the
@@ -13272,19 +13271,9 @@ const _FX_ANIM_KEYS = new Set([
   'block_warrior', 'block_rogue', 'block_mage', 'block_archer',   // v0.30.398 — the A-press stance per class
   'bolt_impact',    // v0.30.x - Magic Bolt contact burst (anim/bolt_impact_0..7, ludo.ai via gen_bolt_impact_fx.mjs). Warmed eagerly below: it is a BASIC attack, so it fires long before the staggered boot warmer would reach it.
   'arcane_burst',   // v0.29.946 — mage W detonation star (anim/arcane_burst_0..8, ludo.ai via gen_arcane_burst_fx.mjs)
-  // v0.30.465 — the mage BLINK streak (anim/dash_mage_0..8, ludo.ai via gen_dash_mage_stormorb.mjs).
-  // The spawn site passes no frameGap, so the nine frames stretch once across the burst's
-  // 22-frame life: the rune circle cracks, the lance surges, the arrival flare snaps — one shot,
-  // which is what a blink is. Without the key here _fxAnimFrames returns null before it ever
-  // looks at the folder and the static sprite would keep drawing alone.
-  'dash_mage',
-  // v0.30.469 — the other three class dashes, animated from the sprites already in game
-  // (anim/dash_{warrior,rogue,archer}_0..8, ludo.ai via gen_lightning_dash_anims.mjs). Same
-  // one-shot pacing as the mage: the spawn site passes no frameGap, so the nine frames stretch
-  // once across the burst's 22-frame life. The art itself is untouched — these are the looks
-  // already established, now moving: the warrior's speed lines surge, the rogue's smoke
-  // dissipates, the archer's wind ribbons stream.
-  'dash_warrior', 'dash_rogue', 'dash_archer',
+  // v0.30.547 — 'dash_mage' / 'dash_warrior' / 'dash_rogue' / 'dash_archer' were listed here
+  // (v0.30.465 / v0.30.469); the loops are removed per user, so the keys are gone too — an
+  // unlisted key never asks the folder for frames that do not exist.
   'arcane_shockwave',   // v0.29.951 — the AoE ring animates too: runes pulse around the band, arcs snap across it
   'quakeRing',          // v0.29.967 — boss quake ground ring: dust rolls outward, plates settle (frameGap 5 at the spawn site)
   'tg_dash_zodiac_taurus',   // v0.30.451 — Taur's charge lane is the first ANIMATED zone telegraph (see _lxAttackZones' draw)
@@ -18751,6 +18740,7 @@ const game = {
   chests: [],
   powerupOrbs: [],
   afterImages: [],
+  dashFx: [],        // v0.30.547 — procedural dash ring + speed streaks (spawnDashFx / drawDashFx)
   ambient: [],
   keys: {},
   currentMap: 'town',
@@ -57971,14 +57961,99 @@ function resetCombo() {
     }
   }
 }
-// v0.29.240 — Per-class quick-dash sprite gate (ludo.ai art). Returns the
-// LX_FX key for the player's class dash VFX once that sprite has decoded,
-// else null so every call site keeps its procedural particle fallback.
-// Generation prompts: DASH_FX_LUDO_PROMPTS.md → Sprites/fx/dash_<cls>.png.
-function _classDashSpriteReady() {
-  const key = 'dash_' + player.cls;
-  const img = (typeof LX_FX !== 'undefined') && LX_FX[key];
-  return (img && img.complete && img.naturalWidth > 0) ? key : null;
+// v0.30.547 — DASH FX, procedural. Per user: "remove all the class dash sprites" and "add more
+// effects to dashing without increasing lag". The four ludo dash sprites, their 36 animation
+// frames and the v0.29.240 decode gate that swapped them in are gone.
+// What replaced them costs less than they did: a launch ring (one ellipse stroke per frame),
+// six speed streaks that ride the hero for the length of the dash (six fillRects per frame),
+// and a class-tinted handful of particles through the existing pool. No images, no gradients,
+// no shadowBlur, no per-frame allocation; the list is capped at 8 and ticked inside its own
+// draw pass — the single-pass pattern drawAfterImages uses. A 130px sprite burst was a 768px
+// decode plus a scaled drawImage per frame for 22 frames; this is a few dozen path ops.
+function spawnDashFx(o) {
+  if (!game.dashFx) game.dashFx = [];
+  if (game.dashFx.length >= 8) game.dashFx.shift();
+  o.maxLife = o.life;
+  game.dashFx.push(o);
+}
+function drawDashFx() {
+  const arr = game.dashFx;
+  if (!arr || arr.length === 0) return;
+  const camX = game.camera.x;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  let w = 0;
+  for (let r = 0; r < arr.length; r++) {
+    const f = arr[r];
+    f.life -= 1;
+    if (f.life <= 0) continue;
+    if (w !== r) arr[w] = f;
+    w++;
+    const t = 1 - f.life / f.maxLife;   // 0 -> 1 over the life
+    if (f.type === 'ring') {
+      const sx = f.x - camX;
+      if (sx < -60 || sx > W + 60) continue;
+      const rx = f.r0 + (f.r1 - f.r0) * t;
+      ctx.globalAlpha = (1 - t) * 0.85;
+      ctx.strokeStyle = f.color;
+      ctx.lineWidth = 2.5 - 1.5 * t;
+      ctx.beginPath();
+      ctx.ellipse(sx, f.y, rx, rx * (f.squash || 0.45), 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (f.type === 'streaks') {
+      // ride the hero while the dash lasts; a blink's streaks freeze on its path instead
+      const cx = (f.follow ? player.x + player.w / 2 : f.x) - camX;
+      const cy = f.follow ? player.y + player.h / 2 : f.y;
+      if (cx < -80 || cx > W + 80) continue;
+      ctx.fillStyle = f.color;
+      const n = f.lines || 6;
+      for (let i = 0; i < n; i++) {
+        const yo = (i - (n - 1) / 2) * 7 + ((i & 1) ? 2 : -2);
+        const len = (18 + ((i * 7) % 5) * 5) * (1 - t * 0.6);   // shorten as they fade
+        const gap = 10 + ((i * 3) % 4) * 4 + t * 26;             // and fall back
+        ctx.globalAlpha = (1 - t) * (0.55 - (i % 3) * 0.1);
+        const x1 = cx - f.dir * gap;
+        ctx.fillRect(f.dir > 0 ? x1 - len : x1, cy + yo, len, 1.5);
+      }
+    }
+  }
+  if (w !== arr.length) arr.length = w;
+  ctx.restore();
+}
+// The launch of a warrior / archer / rogue quick dash: a ground ring at the feet, streaks that
+// ride the hero for the dash, and a class-flavoured handful of particles (eleven at most).
+function _spawnDashLaunchFx(dir, hex, cls) {
+  const cx = player.x + player.w / 2, feetY = player.y + player.h - 4, midY = player.y + player.h / 2;
+  spawnDashFx({ type: 'ring', x: cx, y: feetY, r0: 6, r1: 30, life: 12, color: hex, squash: 0.4 });
+  spawnDashFx({ type: 'streaks', follow: true, dir, lines: 6, life: 16, color: hex });
+  const P = game.particles, R = Math.random;
+  if (cls === 'warrior') {          // amber sparks kicked back and down
+    for (let i = 0; i < 6; i++) P.push({ x: cx - dir * 6, y: feetY - 6 - R() * 10, vx: -dir * (1 + R() * 3), vy: -1 - R() * 2,
+      gravity: 0.22, life: 18, color: (i & 1) ? '#ffcc66' : '#ff9933', size: 1.5 + R() });
+  } else if (cls === 'archer') {    // weightless green wisps in the roll's wake
+    for (let i = 0; i < 5; i++) P.push({ x: cx - dir * 4, y: midY + (R() - 0.5) * 20, vx: -dir * (0.6 + R() * 2), vy: (R() - 0.5) * 1.2,
+      gravity: 0, life: 20, color: (i & 1) ? '#88ffcc' : '#ccffee', size: 2 + R() });
+  } else if (cls === 'rogue') {     // violet smoke that lifts as it thins
+    for (let i = 0; i < 6; i++) P.push({ x: cx - dir * 8, y: midY + (R() - 0.5) * 24, vx: -dir * (0.4 + R() * 1.4), vy: -0.2 - R() * 0.6,
+      gravity: -0.02, life: 22, color: (i & 1) ? '#9977cc' : '#6a4fa0', size: 3 + R() * 1.5 });
+  }
+  for (let i = 0; i < 3; i++) P.push({ x: cx - dir * (2 + i * 4), y: feetY, vx: -dir * (0.5 + R() * 1.5), vy: -0.3 - R() * 0.6,
+    gravity: -0.01, life: 16, color: '#d8c19a', size: 2 + R() });
+}
+// The mage blink: a ring opening where she left, a ring snapping shut where she arrived,
+// streaks along the path between, and four motes rising at the arrival.
+function _spawnBlinkFx(startX, endX, dir) {
+  const cy = player.y + player.h / 2, hw = player.w / 2;
+  spawnDashFx({ type: 'ring', x: startX + hw, y: cy, r0: 4, r1: 26, life: 12, color: '#aaccff', squash: 1 });
+  spawnDashFx({ type: 'ring', x: endX + hw, y: cy, r0: 22, r1: 6, life: 12, color: '#cc99ff', squash: 1 });
+  spawnDashFx({ type: 'streaks', follow: false, x: (startX + endX) / 2 + hw, y: cy, dir, lines: 6, life: 16, color: '#bbddff' });
+  for (let i = 0; i < 4; i++) game.particles.push({ x: endX + hw + (Math.random() - 0.5) * 16, y: cy + (Math.random() - 0.5) * 20,
+    vx: (Math.random() - 0.5) * 0.6, vy: -0.4 - Math.random() * 0.8, gravity: -0.05, life: 22, color: (i & 1) ? '#ffffff' : '#cc99ff', size: 1.5 + Math.random() });
+}
+// The universal Shift dodge: one ring and the streaks, in the dodge's own ice-blue.
+function _spawnDodgeFx(dir) {
+  spawnDashFx({ type: 'ring', x: player.x + player.w / 2, y: player.y + player.h - 4, r0: 5, r1: 24, life: 10, color: '#88ddff', squash: 0.4 });
+  spawnDashFx({ type: 'streaks', follow: true, dir, lines: 5, life: 14, color: '#88ddff' });
 }
 // =========================================================================
 // v0.29.344 — ACTION-BOON DASH ENGINE (Flame Dash · Hyper Teleport · Nova Step)
@@ -58282,28 +58357,9 @@ function quickDash(dir) {
     player.quickDashTimer = 240;        // cooldown only — no motion (≥ invuln window, v0.26.399)
     player.quickDashDir = dir;
     player.vx = 0;
-    // v0.29.240 — ludo.ai blink sprite (dash_mage). When decoded, the two
-    // 14-particle arcane rings are replaced by a departure + arrival sprite
-    // burst; the procedural rings stay as fallback until the art lands.
-    // The silhouette afterimages along the path are kept in BOTH branches —
-    // same precedent as the rogue Shadow Dash sprite swap (v0.26.018).
-    const _mageDashSpr = _classDashSpriteReady();
-    // v0.29.x — ONE sprite, not two (per user: "for mage class the dash seems
-    // to show 2 dash sprites instead of 1").
-    //
-    // The departure+arrival pair was written for the PROCEDURAL rings still in
-    // the else-branches: a ring is symmetrical, so one at the origin and one at
-    // the destination reads as "vanished here, appeared there". The art that
-    // actually shipped (dash_mage.png) is a DIRECTIONAL lance, and two lances
-    // pointing the same way at two x positions read as one effect drawn twice —
-    // which is exactly what it looked like. Every other class already spawns a
-    // single burst (see the warrior/archer/rogue path below).
-    //
-    // The lance is now drawn once at the midpoint of the blink, so it streaks
-    // along the same trajectory the afterimages below already trace. The rings
-    // are untouched: they still fire as a depart/arrive pair, which is correct
-    // for that shape and is what the fallback looked like before any art landed.
-    if (!_mageDashSpr) {
+    // v0.30.547 — the blink sprite is gone (per user); the departure + arrival rings that were its
+    // fallback are the effect now, joined by _spawnBlinkFx below (ring, ring, streaks, motes).
+    {
       // Departure burst at the original tile
       for (let i = 0; i < 14; i++) {
         const a = (i / 14) * Math.PI * 2;
@@ -58326,16 +58382,7 @@ function quickDash(dir) {
         color: `rgba(170,200,255,${(0.55 - k * 0.10).toFixed(2)})`,
       });
     }
-    if (_mageDashSpr) {
-      // The single lance, at the midpoint of the blink. Sized off the distance
-      // actually travelled (Hyper Teleport scales the blink, so a boosted blink
-      // gets a longer streak) and clamped so a short hop near a wall does not
-      // produce a stubby blob or a boosted one a screen-wide banner.
-      const _mid = (startX + endX) / 2 + player.w / 2;
-      const _span = Math.abs(endX - startX);
-      spawnSpriteBurst(_mid, player.y + player.h / 2, _mageDashSpr,
-        { size: Math.max(120, Math.min(260, _span * 1.15)), life: 22, flipX: dir < 0 });
-    } else {
+    {
       // Arrival burst — slightly tighter ring, inward velocity so it
       // reads as the rune "snapping shut" around the destination.
       for (let i = 0; i < 14; i++) {
@@ -58348,6 +58395,7 @@ function quickDash(dir) {
         });
       }
     }
+    _spawnBlinkFx(startX, endX, dir);   // v0.30.547
     return;
   }
 
@@ -58419,15 +58467,11 @@ function quickDash(dir) {
   }
 
   // Puff + initial afterimage (themed colour by class)
-  // v0.29.240 — ludo.ai dash sprite (dash_warrior / dash_archer /
-  // dash_rogue). When decoded, one mirrored sprite burst trails the launch
-  // point instead of the two loose puff particles; procedural fallback
-  // until the art lands. Afterimage silhouette kept in both branches.
-  const _dashSpr = _classDashSpriteReady();
-  if (_dashSpr) {
-    spawnSpriteBurst(player.x + player.w / 2 - dir * 20, player.y + player.h / 2, _dashSpr,
-      { size: 130, life: 22, flipX: dir < 0 });
-  } else {
+  // v0.30.547 — the class dash sprite (v0.29.240) is gone per user. The launch is procedural:
+  // ground ring + speed streaks + class sparks (_spawnDashLaunchFx), and the two loose puffs
+  // that were the old fallback stay as part of it.
+  _spawnDashLaunchFx(dir, trailHex, player.cls);
+  {
     for (let i = 0; i < 2; i++) {
       game.particles.push({
         x: player.x + player.w/2, y: player.y + player.h - 4,
@@ -58871,6 +58915,7 @@ function startDodge() {
   // trail behind the player. The old 2-particle burst was almost invisible
   // — the new 10-particle streak reads as a deliberate slip-out arc.
   if (typeof audio !== 'undefined' && audio.play) audio.play('dodge');
+  _spawnDodgeFx(player.dodgeDir);   // v0.30.547
   for (let i = 0; i < 10; i++) {
     game.particles.push({
       x: player.x + player.w/2 - player.dodgeDir * (i * 2.5),
@@ -66017,14 +66062,10 @@ function updatePlayer(dt) {
       player._rogueDashBrakeDust = 1;
       const footX = player.x + player.w / 2 + player.quickDashDir * 13;
       const footY = player.y + player.h - 2;
-      // v0.29.240 — ludo.ai dash sprite: with dash_rogue decoded, the brake
-      // moment lands a small foot-level smoke puff of the same sprite
-      // instead of the 9 sand particles; procedural dust stays as fallback.
-      const _brakeSpr = (typeof _classDashSpriteReady === 'function') ? _classDashSpriteReady() : null;
-      if (_brakeSpr) {
-        spawnSpriteBurst(footX, footY - 8, _brakeSpr,
-          { size: 64, life: 16, flipX: player.quickDashDir < 0 });
-      } else {
+      // v0.30.547 — the brake sprite (v0.29.240) is gone per user: a small violet ring at the
+      // planted foot over the nine sand particles that were its fallback.
+      spawnDashFx({ type: 'ring', x: footX, y: footY, r0: 4, r1: 18, life: 10, color: '#9977cc', squash: 0.35 });
+      {
         for (let i = 0; i < 9; i++) {
           game.particles.push({
             x: footX + (Math.random() - 0.5) * 8,
@@ -141874,6 +141915,7 @@ function loop(time) {
   drawProjectiles();
   drawHazards();
   drawAfterImages();
+  drawDashFx();   // v0.30.547 — dash ring + speed streaks (procedural, behind the hero)
   drawMinions();
   drawShadowClones();
   drawSovereignShade();   // v0.30.x — the shade sits behind the hero like the clones do

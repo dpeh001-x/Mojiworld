@@ -1,11 +1,13 @@
-// The lightning bolt's orientation, and the four class-dash loops.
+// The lightning bolt's orientation and its animation loop.
+// (This file also pinned the four class-dash loops until they were removed per user — see
+// scripts/dash_fx_test.mjs for what guards the dash now.)
 // Two failure modes this pins, both silent:
 //   1. p_lightning drawn anything but horizontal-tip-right. Every LX_PLAYER_PROJ sprite is
 //      authored facing right and drawProjectiles rotates it to velocity, so a vertical bolt
 //      flies sideways. That is what shipped before 2026-09-09.
-//   2. frames on disk that nothing ever requests. _fxAnimFrames and _projAnimFrame both return
-//      null for a key not in their Set, and the bolt additionally needs a _GEN_PROJ_ANIM row to
-//      map its SKILL to the frame key. Any one of those missing = nine unread files.
+//   2. frames on disk that nothing ever requests. _projAnimFrame returns null for a key not in
+//      its Set, and the bolt additionally needs a _GEN_PROJ_ANIM row to map its SKILL to the
+//      frame key. Any one of those missing = nine unread files.
 //   node scripts/dash_class_lightning_test.mjs   (MOJI_GAME_FILE serves a staged build)
 import { chromium } from 'playwright-core'; import { existsSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process'; import net from 'node:net';
@@ -28,17 +30,15 @@ const lp = await raw(path.join(ROOT, 'Sprites/projectiles/p_lightning.webp')); c
 ok('p_lightning lies horizontally (the renderer rotates it from a right-facing pose)', lb.w / lb.h >= 1.6, `ink ${lb.w}x${lb.h}, aspect ${(lb.w / lb.h).toFixed(2)}`);
 const tip = sliceH(lp, lb, 0.90, 1.0), body = sliceH(lp, lb, 0.25, 0.75);
 ok('its front tip is a real point at the RIGHT end, not a blunt edge', body > 0 && tip / body <= 0.45, `tip ${tip}px vs body ${body}px (${(100 * tip / body).toFixed(0)}%)`);
-// ---- every set: frames, no cut-off, and the index knows them ------------------
-const SETS = [['lightning', 'Sprites/projectiles/anim', 'lightning'], ['dash_warrior', 'Sprites/fx/anim', 'dash_warrior'],
-  ['dash_rogue', 'Sprites/fx/anim', 'dash_rogue'], ['dash_archer', 'Sprites/fx/anim', 'dash_archer'], ['dash_mage', 'Sprites/fx/anim', 'dash_mage']];
+// ---- the set: frames, no cut-off, and the index knows them ---------------------
 const idx = readFileSync(path.join(ROOT, 'data', 'sprite_frame_index.js'), 'utf8');
-for (const [label, dir, prefix] of SETS) {
-  const files = []; for (let i = 0; i < 9; i++) files.push(path.join(ROOT, dir, `${prefix}_${i}.webp`));
-  ok(`${label}: nine frames ship`, files.every(existsSync));
+{
+  const files = []; for (let i = 0; i < 9; i++) files.push(path.join(ROOT, 'Sprites/projectiles/anim', `lightning_${i}.webp`));
+  ok('lightning: nine frames ship', files.every(existsSync));
   let worst = 1e9, clipped = [];
   for (const f of files) { if (!existsSync(f)) continue; const b = boxOf(await raw(f)); worst = Math.min(worst, b.margin); if (b.margin <= 0) clipped.push(path.basename(f)); }
-  ok(`${label}: NO CUT-OFF - every frame keeps a clear margin`, clipped.length === 0, `tightest ${worst}px${clipped.length ? ', clipped: ' + clipped.join(',') : ''}`);
-  ok(`${label}: the frame index knows all nine`, new RegExp(`"${prefix}":\\s*9`).test(idx));
+  ok('lightning: NO CUT-OFF - every frame keeps a clear margin', clipped.length === 0, `tightest ${worst}px${clipped.length ? ', clipped: ' + clipped.join(',') : ''}`);
+  ok('lightning: the frame index knows all nine', /"lightning":\s*9/.test(idx));
 }
 // ---- the wiring, in a running game -------------------------------------------
 const free = (p) => new Promise((r) => { const s = net.createServer(); s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
@@ -49,18 +49,12 @@ const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['-
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
 const errs = [], missed = [];
 page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
-page.on('response', (r) => { const u = r.url(); if (/dash_(warrior|rogue|archer|mage)|anim\/lightning|p_lightning/.test(u) && r.status() >= 400) missed.push(u.split('/').pop() + ' -> ' + r.status()); });
+page.on('response', (r) => { const u = r.url(); if (/anim\/lightning|p_lightning/.test(u) && r.status() >= 400) missed.push(u.split('/').pop() + ' -> ' + r.status()); });
 await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
-await page.waitForFunction(() => typeof _fxAnimFrames === 'function' && typeof _projAnimFrame === 'function', null, { timeout: 180000 });
-await page.evaluate(() => new Promise((res) => { let n = 0; const t = () => { window._lxBootGateDone = true; try { _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const o = document.getElementById(id); if (o) o.style.display = 'none'; } const c = document.querySelector('.cls-card'); if (c) c.click(); if (++n > 150) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); }));
+await page.waitForFunction(() => typeof _projAnimFrame === 'function', null, { timeout: 180000 });
+await page.evaluate(() => new Promise((res) => { let n = 0; const t = () => { window._lxBootGateDone = true; try { _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay']) { const el = document.getElementById(id); if (el) el.classList.add('fade'); } if (++n >= 3) res(); else setTimeout(t, 400); }; t(); }));
 const r = await page.evaluate(async () => {
-  const wait = (ms) => new Promise((x) => setTimeout(x, ms)); const out = { fx: {}, keys: {} };
-  for (const k of ['dash_warrior', 'dash_rogue', 'dash_archer', 'dash_mage']) {
-    out.keys[k] = _FX_ANIM_KEYS.has(k);
-    const arr = _fxAnimFrames(k) || [];
-    for (let i = 0; i < 200; i++) { if (arr.length && arr.every((f) => f && f.complete && f.naturalWidth > 0)) break; await wait(50); }
-    out.fx[k] = { n: arr.length, decoded: arr.filter((f) => f && f.complete && f.naturalWidth > 0).length };
-  }
+  const wait = (ms) => new Promise((x) => setTimeout(x, ms)); const out = { keys: {} };
   out.keys.lightning = _PROJ_ANIM_KEYS.has('lightning');
   out.genMap = (typeof _GEN_PROJ_ANIM !== 'undefined') && _GEN_PROJ_ANIM.lightning === 'lightning';
   for (let i = 0; i < 200; i++) { if (_projAnimFrame('lightning')) break; await wait(50); }
@@ -70,10 +64,6 @@ const r = await page.evaluate(async () => {
   out.staticBolt = !!(LX_PLAYER_PROJ && LX_PLAYER_PROJ.lightning && LX_PLAYER_PROJ.lightning.complete && LX_PLAYER_PROJ.lightning.naturalWidth > 0);
   return out;
 });
-for (const k of ['dash_warrior', 'dash_rogue', 'dash_archer', 'dash_mage']) {
-  ok(`${k} is listed in _FX_ANIM_KEYS`, r.keys[k]);
-  ok(`${k} resolves nine decoded frames in-engine`, r.fx[k].n === 9 && r.fx[k].decoded === 9, `${r.fx[k].decoded}/${r.fx[k].n}`);
-}
 ok('lightning is listed in _PROJ_ANIM_KEYS', r.keys.lightning);
 ok('_GEN_PROJ_ANIM maps the lightning SKILL to the lightning frame key', r.genMap === true);
 ok('the bolt resolves an animated frame in-engine', r.boltFrame === true);
