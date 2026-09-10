@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.517';
+const GAME_VERSION = 'v0.30.518';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -47920,7 +47920,15 @@ function _coopRecomputeHost() {
     lowest = n; hostId = n;
   }
   net.hostId = hostId;
+  const _wasHost = !!net.isHost;
   net.isHost = (hostId === +net.myId);
+  // v0.30.x — ADOPTION MUST SHED THE FLAG. Mirrors were "adopted as our own" by simply
+  // not being purged, so _coopMirror stayed set - and that flag is a permanent exclusion
+  // in local play (the Shadow Dance target picker skips it, planting skips it). A promoted
+  // guest's ultimate whiffed at a boss standing in front of them for the rest of the map.
+  if (net.isHost && !_wasHost && typeof game !== 'undefined' && game && Array.isArray(game.monsters)) {
+    for (const _m of game.monsters) if (_m && _m._coopMirror) delete _m._coopMirror;
+  }
 }
 // The host's current map (from presence), or our own map when we ARE the host.
 function _coopHostMap() {
@@ -47980,6 +47988,8 @@ function _coopTickMonsters() {
     // host's actual monster deals. One number closes it.
     _e.a = Math.round(m.atk || 0);
     if (m.atkAnimUntil && m.atkAnimUntil > now) _e.aa = Math.min(2000, Math.round(m.atkAnimUntil - now));
+    if ((m.freezeTimer | 0) > 0) _e.fz = Math.min(3000, m.freezeTimer | 0);   // v0.30.x — status was never mirrored
+    if ((m.stunTimer   | 0) > 0) _e.st = Math.min(1500, m.stunTimer   | 0);
     if (m.isBoss && (m._wardUntil | 0) > (game.time | 0)) _e.wd = Math.min(600, (m._wardUntil | 0) - (game.time | 0));
     if (m.isBoss && (m._wardGauge || 0) > 0) _e.wg = Math.round(Math.min(1, m._wardGauge) * 100);   // v0.30.395 — break gauge, percent
     if (m.isBoss && (m._wardBreakUntil | 0) > (game.time | 0)) _e.wb = Math.min(600, (m._wardBreakUntil | 0) - (game.time | 0));   // v0.30.395 — open window, steps   // v0.30.390 — ward steps left, so guests draw the shield (and gate their own hits) like the host
@@ -48538,7 +48548,7 @@ function _duoTrialFail() {
 }
 function _coopApplyDown(msg) {
   if (!msg || msg.id == null) return;
-  _duoTrialFail();   // v0.30.423
+  if (msg.map === game.currentMap) _duoTrialFail();   // v0.30.423 · v0.30.x — a partner dying on ANOTHER map is not part of this trial (the toast was map-gated; the fail was not)
   const p = net.peers[msg.id]; if (!p) return;
   p._downed = true; p._reviveMs = 0;
   // v0.29.15 — a partner who has already spent their one revive on this map
@@ -48890,6 +48900,8 @@ function _coopApplyMonsters(msg) {
       const _nowV = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       m.atkAnimUntil = Math.max(m.atkAnimUntil || 0, _nowV + Math.min(2000, +e.aa || 0));
     }
+    m.freezeTimer = (e.fz > 0) ? Math.min(3000, +e.fz | 0) : 0;   // v0.30.x — mirrored like the gauge: the host owns it
+    m.stunTimer   = (e.st > 0) ? Math.min(1500, +e.st | 0) : 0;
     if (e.wd > 0) m._wardUntil = Math.max(m._wardUntil | 0, (game.time | 0) + Math.min(600, +e.wd | 0));
     m._wardGauge = (e.wg > 0) ? Math.min(1, (+e.wg | 0) / 100) : 0;   // v0.30.395 — mirror the host's gauge
     if (e.wb > 0) { if (!((m._wardBreakUntil | 0) > (game.time | 0))) m._wardBreakAt = game.time | 0; m._wardBreakUntil = (game.time | 0) + Math.min(600, +e.wb | 0); }   // and its open window   // v0.30.390 — mirror the host's ward
@@ -48919,15 +48931,15 @@ function _coopApplyMonsters(msg) {
 // NON-HOST: forward the FULLY-resolved damage (all hitMonster multipliers + DEF)
 // to the host. The forward site is at hitMonster's finalDmg point, so guests deal
 // exactly the same damage as solo/host.
-function _coopSendDamage(m, dmg, isCrit, skill) {
+function _coopSendDamage(m, dmg, isCrit, skill, procs) {
   if (!m || m.uid == null) return;
-  try { net.ws.send(JSON.stringify({ t: 'dmg', u: m.uid, d: Math.max(0, Math.round(dmg) || 0), c: isCrit ? 1 : 0, k: String(skill || '').slice(0, 16) })); } catch (e) {}
+  try { net.ws.send(JSON.stringify({ t: 'dmg', u: m.uid, d: Math.max(0, Math.round(dmg) || 0), c: isCrit ? 1 : 0, k: String(skill || '').slice(0, 16), fz: (procs && procs.fz > 0) ? Math.min(3000, procs.fz | 0) : 0, st: (procs && procs.st > 0) ? Math.min(1500, procs.st | 0) : 0 })); } catch (e) {}
 }
 // HOST: apply an inbound remote-damage event as FINAL damage (the attacker
 // already rolled crit/mults on their client), keeping the monster-side gates
 // hitMonster would apply. Routes death through killMonster so loot/XP/removal
 // (and the kill broadcast below) all fire exactly as for a local kill.
-function _coopHostApplyDamage(uid, dmg, isCrit, skill) {
+function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk) {
   if (!net.isHost) return;
   const m = _coopFindByUid(uid);
   if (!m || m.currentHp <= 0) return;
@@ -48944,6 +48956,11 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill) {
   if (m._virgoChanneling)   d = Math.max(1, Math.floor(d * 0.4));         // channel DR
   if (m._libraShield)       d = Math.max(1, Math.floor(d * (m._libraShieldFactor || 0.5)));
   else if (m.zodiacSign === 'libra' && (m._libraOrbsAlive | 0) > 0) d = Math.floor(d * 0.5);
+  // v0.30.x — THE WARD IS A HOST GATE. This path had none: the only "ward" in it was the
+  // word forward in a comment. Mirror the solo order - a warded hit lands for 1 and feeds
+  // the break gauge by what it would have done; the open window after a shatter pays x1.5.
+  if (m.isBoss && skill !== 'thorns' && (m._wardUntil | 0) > (game.time | 0)) { if (typeof _lxWardFeed === 'function') _lxWardFeed(m, d); d = 1; }
+  else if (m.isBoss && skill !== 'thorns' && typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)) d = Math.max(1, Math.floor(d * LX_WARD_BREAK_MUL));
   // v0.29.867 — remote hits get the SAME window economy as local ones. This
   // path never applied the punish bonus, so a co-op guest hitting a staggered
   // boss was paid x1.0 where solo pays x1.6 -- the guest got nothing for the
@@ -48967,6 +48984,10 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill) {
   // v0.29.x — was 6 (ms): with dt≈16.7/step the white hit-flash lasted ONE
   // frame on co-op hits vs 3-6 frames (50-90ms) on solo hits. Match solo.
   m.hitFlash = Math.max(m.hitFlash | 0, 50);
+  if (pk) {   // v0.30.x — the guest's affix procs, rolled on its own stats, capped here
+    if (pk.fz > 0) m.freezeTimer = Math.max(m.freezeTimer | 0, Math.min(3000, +pk.fz | 0));
+    if (pk.st > 0) m.stunTimer   = Math.max(m.stunTimer   | 0, Math.min(1500, +pk.st | 0));
+  }
   if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 - 8, y: m.y - 6, vy: -2, text: '' + d, life: 30, color: isCrit ? '#ffd24a' : '#fff', size: isCrit ? 18 : 14, crit: isCrit });   // v0.30.411 - crit flag (star + crit treatment) for guest hits too
   if (m.currentHp <= 0) { m.currentHp = 0; try { killMonster(m); } catch (e) {} }
 }
@@ -48987,9 +49008,9 @@ function _coopBroadcastKill(m, exp, coins) {
   const _kf = { t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0, il: m._isMirage ? 1 : 0 };
   if (m.isBoss) {
     _kf.bl = (m.level && m.level > 0) ? (m.level | 0) : ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 0);
-    if (m._duoTrial && !m._duoTrialFailed && !m._duoPaidHost) { m._duoPaidHost = true; try { _duoTrialReward(_kf.bl || ((typeof monsterTypes !== 'undefined' && monsterTypes[m.type] && monsterTypes[m.type].level) | 0), m.type); } catch (e) {} }   // v0.30.423
+    /* v0.30.x — a standing partner, HERE, at kill time */ if (m._duoTrial && !m._duoTrialFailed && !m._duoPaidHost && (typeof _coopPeerAliveOnMyMap !== 'function' || _coopPeerAliveOnMyMap())) { m._duoPaidHost = true; try { _duoTrialReward(_kf.bl || ((typeof monsterTypes !== 'undefined' && monsterTypes[m.type] && monsterTypes[m.type].level) | 0), m.type); } catch (e) {} }   // v0.30.423
     if (m.zodiacSign) _kf.zs = String(m.zodiacSign).slice(0, 24);
-    if (m._duoTrial && !m._duoTrialFailed) _kf.dt = 1;   // v0.30.423 - Duo Trial cleared standing: everyone pays FULL
+    if (m._duoTrial && !m._duoTrialFailed && (typeof _coopPeerAliveOnMyMap !== 'function' || _coopPeerAliveOnMyMap())) _kf.dt = 1;   // v0.30.423 - Duo Trial cleared standing: everyone pays FULL
     else if (m._echoBoss || m._expeditionBoss || m._isTwin || m._isPiscesTwin) _kf.bx = 1;
   }
   try { net.ws.send(JSON.stringify(_kf)); } catch (e) {}
@@ -49381,7 +49402,7 @@ function _mpHandle(msg) {
       const _dp = net.peers && net.peers[msg && msg.id];
       if (!_dp || _dp.map !== game.currentMap) return;
       if (!_mpRateOk(msg.id, 'dmg', 80)) return;   // v0.29.472 — 20 was below real AoE play
-      _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k); return;
+      _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k, msg); return;
     }   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
@@ -88987,6 +89008,102 @@ function _lxWeakAffinity(m, skill) {   // 'weak' | 'resist' | null
   const cls = _lxDmgClass(skill); if (!cls) return null;
   return cls === weak ? 'weak' : 'resist';
 }
+// v0.30.x — GUESTS GET THEIR AFFIXES. hitMonster's co-op branch returned ~430 lines
+// before the on-hit procs, so a guest's freeze / chain / stun gear did literally nothing
+// while the tooltip still advertised it. The procs live here now, called from BOTH paths;
+// the guest rolls them on its own stats and ships the resulting status to the host in the
+// damage packet (chain hops go through hitMonster and forward themselves). Returns the
+// status timers so the packet can carry them.
+function _lxOnHitProcs(m, dmg, skill) {
+  // Equipment freeze chance
+  // v0.29.298 — + boon contribution (Frostbite). Was gear-only, so this
+  // fully-built behaviour was unreachable from the boon system.
+  // v0.29.401 — clamp: Math.random() < fc with fc >= 1 is a guaranteed freeze
+  // on every hit, which is a permanent stun-lock. 60% is the ceiling.
+  const fc = Math.min(0.60, getEquipBonus('freezeChance') + (player.mods.freezeChance || 0));
+  if (fc > 0 && skill !== 'thorns' && Math.random() < fc) {
+    m.freezeTimer = Math.max(m.freezeTimer || 0, 900);
+  }
+  // Chain lightning: hop to nearby enemy
+  // v0.29.298 — + boon contribution (Storm Chain). Same as freeze above: the
+  // chain-lightning path was fully implemented but gear-only.
+  // v0.29.401 — clamp, same reasoning as freeze above.
+  const chainCh = Math.min(0.60, getEquipBonus('chainChance') + (player.mods.chainChance || 0));
+  if (chainCh > 0 && skill !== 'thorns' && skill !== 'chain' && Math.random() < chainCh) {
+    let closest = null, bestD = 220 * 220;
+    for (const m2 of game.monsters) {
+      if (m2 === m || m2.currentHp <= 0) continue;
+      const dx = (m2.x - m.x), dy = (m2.y - m.y);
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestD) { bestD = d2; closest = m2; }
+    }
+    if (closest) {
+      // Lightning line particles
+      // v0.25.691 — 10 steps → 5 per proc. Chain procs from equipment can
+      // fire MANY times per frame (one per qualifying hit, recursing
+      // through hitMonster's chain branch). 11 particles × 5 procs = 55
+      // particles for one mob clear. Halve the step count + use the
+      // budgeted push so the global MAX_PARTICLES cap actually gates it.
+      const steps = 5;
+      const _budget2 = (typeof _budgetedParticlePush === 'function') ? _budgetedParticlePush : null;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const _lp = {
+          x: m.x + m.w/2 + (closest.x + closest.w/2 - m.x - m.w/2) * t + (Math.random()-0.5) * 10,
+          y: m.y + m.h/2 + (closest.y + closest.h/2 - m.y - m.h/2) * t + (Math.random()-0.5) * 10,
+          vx: 0, vy: 0, life: 12, color: '#ffff99', size: 3
+        };
+        if (_budget2) { if (!_budget2(_lp)) break; } else { game.particles.push(_lp); }
+      }
+      // v0.25.775 — was raw setTimeout, which survived map transitions /
+      // death / respawn and could fire hitMonster on a despawned `closest`
+      // ref. scheduleSkillTimer is the cancellable equivalent — registered
+      // in _pendingTimeouts and cleared by cancelPendingSkillTimers on
+      // death/loadMap.
+      (typeof scheduleSkillTimer === 'function' ? scheduleSkillTimer : setTimeout)(() => {
+        // v0.26.x audit FIX — pass PRE-combo/pre-DEF `dmg` (not the already-
+        // finalized `finalDmg`). The recursive hitMonster re-applies combo +
+        // the DEF curve itself; feeding finalDmg double-applied both (combo
+        // squared, DEF twice). Mirrors the elemChain hop above which passes
+        // `dmg * 0.5`. The hop now scales once, consistently.
+        if (closest && closest.currentHp > 0) {
+          hitMonster(closest, Math.floor(dmg * 0.6), false, 'chain');
+          // v0.29.298 — SYNERGY consumers for the new behavioural boons.
+          const _syn = player._activeSynergies || {};
+          // Stormfront (chain + freeze): the arc carries the freeze roll too.
+          if (_syn.stormfront && closest.currentHp > 0) {
+            const _fz = getEquipBonus('freezeChance') + (player.mods.freezeChance || 0);
+            if (_fz > 0 && Math.random() < _fz) closest.freezeTimer = Math.max(closest.freezeTimer || 0, 900);
+          }
+          // Chain Reaction (chain + multi): one extra hop off the arc target.
+          if (_syn.chainReaction) {
+            let second = null, bestD2 = 220 * 220;
+            for (const m3 of game.monsters) {
+              if (m3 === m || m3 === closest || m3.currentHp <= 0) continue;
+              const ddx = m3.x - closest.x, ddy = m3.y - closest.y;
+              const dd = ddx * ddx + ddy * ddy;
+              if (dd < bestD2) { bestD2 = dd; second = m3; }
+            }
+            if (second) hitMonster(second, Math.floor(dmg * 0.36), false, 'chain');
+          }
+        }
+      }, 40);
+    }
+  }
+  // Power Strike and Whirlwind stun briefly
+  if (skill === 'power' || skill === 'whirl') {
+    m.stunTimer = Math.max(m.stunTimer || 0, 400);
+  }
+  // Bolt has chance to freeze
+  if (skill === 'bolt' && Math.random() < 0.25) {
+    // v0.25.775 — Math.max so a 25% bolt proc doesn't SHORTEN a longer
+    // freeze applied by an affix or earlier skill (was straight assignment,
+    // breaking the refresh-to-greatest pattern every other status uses).
+    m.freezeTimer = Math.max(m.freezeTimer || 0, 800);
+  }
+
+  return { fz: m.freezeTimer | 0, st: m.stunTimer | 0 };
+}
 function hitMonster(m, dmg, isCrit, skill) {
   _lxLsReset();   // v0.30.x — new hit, new lifesteal budget. See _lxLsTake.
   // v0.25.605 — Dead-monster gate. Without this, a delayed projectile or
@@ -89830,6 +89947,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   const _lxAff = _lxWeakAffinity(m, skill);
   if (_lxAff === 'weak') finalDmg = Math.max(1, Math.floor(finalDmg * LX_WEAK_MUL));
   else if (_lxAff === 'resist') finalDmg = Math.max(1, Math.floor(finalDmg * LX_RESIST_MUL));
+  const _preWardDmg = finalDmg;   // v0.30.x — what a guest forwards; the host applies the ward itself
   if (m.isBoss && (m._wardUntil | 0) > (game.time | 0) && skill !== 'thorns') {
     _lxWardFeed(m, finalDmg);   // v0.30.395 — the warded hit lands for 1 but feeds the break gauge by what it would have done
     finalDmg = 1;
@@ -89854,7 +89972,12 @@ function hitMonster(m, dmg, isCrit, skill) {
     // multipliers, so guests get that too.
     _msApplyOnHit(m, finalDmg, isCrit, skill, true);
     _lxShadeQueue(m, _shadeRawDmg, isCrit, skill);   // v0.30.x — guests get their shade too; the host validates the echo like any hit
-    _coopSendDamage(m, finalDmg, isCrit, skill);
+    // v0.30.x — forward the PRE-ward value and let the host judge the ward: a mirror lags
+    // the host by ~100 ms, so the guest saw "unwarded" and sent full damage the host applied
+    // at 100% - and once the mirror caught up, the guest's gauge feed was overwritten by the
+    // host frame every tick, so a guest could never help shatter. Procs ride the same packet.
+    const _gp = _lxOnHitProcs(m, dmg, skill);
+    _coopSendDamage(m, _preWardDmg, isCrit, skill, _gp);
     m.currentHp = Math.max(0, m.currentHp - finalDmg);
     if (m.zodiacSign === 'virgo') _virgoTook(m, finalDmg);   // v0.30.366 — the no-overkill write books too
     // v0.29.x — was 6ms (one frame); match the solo 50ms flash duration.
@@ -90292,93 +90415,7 @@ function hitMonster(m, dmg, isCrit, skill) {
       (m.burnTimer || 0) < 1500) {
     _applyMobStatus(m, 'burn', 1500, { chance: 25, dmg: Math.max(1, Math.floor(finalDmg * 0.06)) });
   }
-  // Equipment freeze chance
-  // v0.29.298 — + boon contribution (Frostbite). Was gear-only, so this
-  // fully-built behaviour was unreachable from the boon system.
-  // v0.29.401 — clamp: Math.random() < fc with fc >= 1 is a guaranteed freeze
-  // on every hit, which is a permanent stun-lock. 60% is the ceiling.
-  const fc = Math.min(0.60, getEquipBonus('freezeChance') + (player.mods.freezeChance || 0));
-  if (fc > 0 && skill !== 'thorns' && Math.random() < fc) {
-    m.freezeTimer = Math.max(m.freezeTimer || 0, 900);
-  }
-  // Chain lightning: hop to nearby enemy
-  // v0.29.298 — + boon contribution (Storm Chain). Same as freeze above: the
-  // chain-lightning path was fully implemented but gear-only.
-  // v0.29.401 — clamp, same reasoning as freeze above.
-  const chainCh = Math.min(0.60, getEquipBonus('chainChance') + (player.mods.chainChance || 0));
-  if (chainCh > 0 && skill !== 'thorns' && skill !== 'chain' && Math.random() < chainCh) {
-    let closest = null, bestD = 220 * 220;
-    for (const m2 of game.monsters) {
-      if (m2 === m || m2.currentHp <= 0) continue;
-      const dx = (m2.x - m.x), dy = (m2.y - m.y);
-      const d2 = dx*dx + dy*dy;
-      if (d2 < bestD) { bestD = d2; closest = m2; }
-    }
-    if (closest) {
-      // Lightning line particles
-      // v0.25.691 — 10 steps → 5 per proc. Chain procs from equipment can
-      // fire MANY times per frame (one per qualifying hit, recursing
-      // through hitMonster's chain branch). 11 particles × 5 procs = 55
-      // particles for one mob clear. Halve the step count + use the
-      // budgeted push so the global MAX_PARTICLES cap actually gates it.
-      const steps = 5;
-      const _budget2 = (typeof _budgetedParticlePush === 'function') ? _budgetedParticlePush : null;
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const _lp = {
-          x: m.x + m.w/2 + (closest.x + closest.w/2 - m.x - m.w/2) * t + (Math.random()-0.5) * 10,
-          y: m.y + m.h/2 + (closest.y + closest.h/2 - m.y - m.h/2) * t + (Math.random()-0.5) * 10,
-          vx: 0, vy: 0, life: 12, color: '#ffff99', size: 3
-        };
-        if (_budget2) { if (!_budget2(_lp)) break; } else { game.particles.push(_lp); }
-      }
-      // v0.25.775 — was raw setTimeout, which survived map transitions /
-      // death / respawn and could fire hitMonster on a despawned `closest`
-      // ref. scheduleSkillTimer is the cancellable equivalent — registered
-      // in _pendingTimeouts and cleared by cancelPendingSkillTimers on
-      // death/loadMap.
-      (typeof scheduleSkillTimer === 'function' ? scheduleSkillTimer : setTimeout)(() => {
-        // v0.26.x audit FIX — pass PRE-combo/pre-DEF `dmg` (not the already-
-        // finalized `finalDmg`). The recursive hitMonster re-applies combo +
-        // the DEF curve itself; feeding finalDmg double-applied both (combo
-        // squared, DEF twice). Mirrors the elemChain hop above which passes
-        // `dmg * 0.5`. The hop now scales once, consistently.
-        if (closest && closest.currentHp > 0) {
-          hitMonster(closest, Math.floor(dmg * 0.6), false, 'chain');
-          // v0.29.298 — SYNERGY consumers for the new behavioural boons.
-          const _syn = player._activeSynergies || {};
-          // Stormfront (chain + freeze): the arc carries the freeze roll too.
-          if (_syn.stormfront && closest.currentHp > 0) {
-            const _fz = getEquipBonus('freezeChance') + (player.mods.freezeChance || 0);
-            if (_fz > 0 && Math.random() < _fz) closest.freezeTimer = Math.max(closest.freezeTimer || 0, 900);
-          }
-          // Chain Reaction (chain + multi): one extra hop off the arc target.
-          if (_syn.chainReaction) {
-            let second = null, bestD2 = 220 * 220;
-            for (const m3 of game.monsters) {
-              if (m3 === m || m3 === closest || m3.currentHp <= 0) continue;
-              const ddx = m3.x - closest.x, ddy = m3.y - closest.y;
-              const dd = ddx * ddx + ddy * ddy;
-              if (dd < bestD2) { bestD2 = dd; second = m3; }
-            }
-            if (second) hitMonster(second, Math.floor(dmg * 0.36), false, 'chain');
-          }
-        }
-      }, 40);
-    }
-  }
-  // Power Strike and Whirlwind stun briefly
-  if (skill === 'power' || skill === 'whirl') {
-    m.stunTimer = Math.max(m.stunTimer || 0, 400);
-  }
-  // Bolt has chance to freeze
-  if (skill === 'bolt' && Math.random() < 0.25) {
-    // v0.25.775 — Math.max so a 25% bolt proc doesn't SHORTEN a longer
-    // freeze applied by an affix or earlier skill (was straight assignment,
-    // breaking the refresh-to-greatest pattern every other status uses).
-    m.freezeTimer = Math.max(m.freezeTimer || 0, 800);
-  }
-
+  _lxOnHitProcs(m, dmg, skill);   // v0.30.x — lifted, see the function above hitMonster
   if (m.currentHp <= 0) killMonster(m);
 }
 
@@ -97530,8 +97567,10 @@ So.. do you need a lift?`;
     // partner shares the session. Shared fate: any player going down fails
     // the trial (host-judged, see _duoTrialFail); a standing clear pays every
     // player the FULL boss drop with no refight ladder, plus a co-op-only title.
-    const _duoPeers = (typeof net !== 'undefined' && net && net.peers) ? Object.keys(net.peers).length : 0;
-    if (typeof _coopActive === 'function' && _coopActive() && _duoPeers >= 1) {
+    // v0.30.x — a peer in the ROOM is not a partner in the FIGHT: the old count took every
+    // id in net.peers, on any map, stale ones included, so a second client parked in town
+    // unlocked a solo x1.5 trial that pays the full drop with no refight ladder.
+    if (typeof _coopActive === 'function' && _coopActive() && typeof _coopPeerAliveOnMyMap === 'function' && _coopPeerAliveOnMyMap()) {
       const DUO_STRENGTH = 1.5;
       const _dmul = _scale * DUO_STRENGTH;
       opts.push({ t:`\u{1F91D} DUO TRIAL (\u00d7${_dmul.toFixed(2)} \u00b7 shared fate \u00b7 full shards for all)`, cb:() => {
