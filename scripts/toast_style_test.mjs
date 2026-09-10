@@ -50,7 +50,9 @@ const r = await page.evaluate(() => {
   out.shadowStops = (cs(base).textShadow.match(/rgb/g) || []).length;   // the old ring had 9
   out.weight = cs(base).fontWeight;
   out.tracking = parseFloat(cs(base).letterSpacing);
-  out.hairline = cs(base, '::before').borderTopWidth;
+  out.gem = cs(base, '::before').borderTopLeftRadius;   // v0.30.x — the stripe became a gem
+  out.padTop = parseFloat(cs(base).paddingTop); out.fontPx = parseFloat(cs(base).fontSize);
+  out.bodyA = cs(base).getPropertyValue('--tc-body-a').trim();
   out.glint = cs(base, '::after').height;
   out.accentBase = cs(base).getPropertyValue('--tc-accent').trim();
   out.accentLeg = cs(leg).getPropertyValue('--tc-accent').trim();
@@ -68,10 +70,12 @@ if (SHOT) {
 }
 const checks = [
   ['four toasts rendered', r.count === 4],
-  ['the plate is a 10px-radius glass with a 3px accent stripe', r.radius === '10px' && r.leftStripe === '3px', `${r.radius} / ${r.leftStripe}`],
+  ['the plate is a 9px-radius glass with a rarity gem, not a stripe', r.radius === '9px' && r.leftStripe === '1px' && r.gem === '50%', `${r.radius} / ${r.leftStripe} / gem ${r.gem}`],
+  ['the plate is compact (<= 4px pad, <= 11px type)', r.padTop <= 4 && r.fontPx <= 11, `${r.padTop}px / ${r.fontPx}px`],
+  ['the body is translucent (alpha <= 0.7)', parseFloat(r.bodyA.slice(r.bodyA.lastIndexOf(',') + 1)) <= 0.7, r.bodyA],
   ['the 8-way black outline ring is gone (one edge + halo)', r.shadowStops === 2, `stops ${r.shadowStops}`],
   ['tracking is tight, weight 700', r.tracking <= 0.5 && String(r.weight) === '700', `${r.tracking}px / ${r.weight}`],
-  ['the gold hairline and the top glint are drawn', r.hairline === '1px' && r.glint === '1px', `${r.hairline} / ${r.glint}`],
+  ['the top glint is drawn', r.glint === '1px', `${r.glint}`],
   ['rarities recolour the same plate', r.accentLeg && r.accentRare && r.accentBase && r.accentLeg !== r.accentRare && r.accentRare !== r.accentBase && r.legStripe !== r.rareStripe, `${r.accentBase} / ${r.accentLeg} / ${r.accentRare}`],
   ['text is left-aligned beside the stripe', r.align === 'left'],
   ['no page errors', errs.length === 0, errs.join(' | ')],
