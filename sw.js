@@ -113,7 +113,8 @@
 // v0.30.533 - v28 -> v29. Both mspore files are REPLACED
 // under their own names (the pod recoloured white/pink/red and turned to face right). Without a
 // new generation a returning browser keeps firing the old mint pod out of cache.
-const CACHE = 'mojiworld-assets-v29';
+// v0.30.538 - v29 -> v30. Sprites/ui/cs/ico_*.webp (five files) are NEW art referenced from the creator's markup; a returning browser with the old manifest would show the picker labels without their icons and never fetch them.
+const CACHE = 'mojiworld-assets-v30';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
