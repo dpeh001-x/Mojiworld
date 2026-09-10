@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.522';
+const GAME_VERSION = 'v0.30.523';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43747,10 +43747,15 @@ function _lxSteamNavPad(sb) {
   // so raw axes would read 0 and the stick would be dead in menus. The nav reads 12-15.
   const mx = +sb._moveX || 0, my = +sb._moveY || 0;
   if (!dirBad) {
-    if (my < -0.6) buttons[12] = { pressed: true, touched: true, value: 1 };
-    if (my >  0.6) buttons[13] = { pressed: true, touched: true, value: 1 };
-    if (mx < -0.6) buttons[14] = { pressed: true, touched: true, value: 1 };
-    if (mx >  0.6) buttons[15] = { pressed: true, touched: true, value: 1 };
+    // v0.30.x — Steam Input reports +Y as UP (_LX_STEAM_MOVE_Y_UP); v0.30.522 folded the
+    // stick with the browser convention and every menu was vertically inverted, only in menus.
+    const _dz = (typeof _LX_PAD_DEADZONE === 'number') ? _LX_PAD_DEADZONE : 0.55;
+    const _yUp = (typeof _LX_STEAM_MOVE_Y_UP === 'undefined' || _LX_STEAM_MOVE_Y_UP) ? (my > _dz) : (my < -_dz);
+    const _yDn = (typeof _LX_STEAM_MOVE_Y_UP === 'undefined' || _LX_STEAM_MOVE_Y_UP) ? (my < -_dz) : (my > _dz);
+    if (_yUp) buttons[12] = { pressed: true, touched: true, value: 1 };
+    if (_yDn) buttons[13] = { pressed: true, touched: true, value: 1 };
+    if (mx < -_dz) buttons[14] = { pressed: true, touched: true, value: 1 };
+    if (mx >  _dz) buttons[15] = { pressed: true, touched: true, value: 1 };
   }
   return { id: "steam-input", index: -1, mapping: "standard", connected: true, axes: [0, 0, 0, 0], buttons, _steamSynth: true };
 }
@@ -49030,6 +49035,7 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk) {
   if (!net.isHost) return;
   const m = _coopFindByUid(uid);
   if (!m || m.currentHp <= 0) return;
+  if (m._duoTrial) m._duoPartnerSeen = true;   // v0.30.x — a guest hit IS presence; do not void the payout on a heartbeat blip
   // The incoming value is now FULLY resolved on the attacker's client (every
   // multiplier + the DEF armor curve — the forward moved to the finalDmg point in
   // hitMonster). The host applies ONLY the dynamic host-authoritative gates the
@@ -49095,9 +49101,9 @@ function _coopBroadcastKill(m, exp, coins) {
   const _kf = { t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0, il: m._isMirage ? 1 : 0 };
   if (m.isBoss) {
     _kf.bl = (m.level && m.level > 0) ? (m.level | 0) : ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 0);
-    /* v0.30.x — a standing partner, HERE, at kill time */ if (m._duoTrial && !m._duoTrialFailed && !m._duoPaidHost && (typeof _coopPeerAliveOnMyMap !== 'function' || _coopPeerAliveOnMyMap())) { m._duoPaidHost = true; try { _duoTrialReward(_kf.bl || ((typeof monsterTypes !== 'undefined' && monsterTypes[m.type] && monsterTypes[m.type].level) | 0), m.type); } catch (e) {} }   // v0.30.423
+    /* v0.30.x — a standing partner, HERE, at kill time */ if (m._duoTrial && !m._duoTrialFailed && !m._duoPaidHost && (m._duoPartnerSeen || typeof _coopPeerAliveOnMyMap !== 'function' || _coopPeerAliveOnMyMap())) { m._duoPaidHost = true; try { _duoTrialReward(_kf.bl || ((typeof monsterTypes !== 'undefined' && monsterTypes[m.type] && monsterTypes[m.type].level) | 0), m.type); } catch (e) {} }   // v0.30.423
     if (m.zodiacSign) _kf.zs = String(m.zodiacSign).slice(0, 24);
-    if (m._duoTrial && !m._duoTrialFailed && (typeof _coopPeerAliveOnMyMap !== 'function' || _coopPeerAliveOnMyMap())) _kf.dt = 1;   // v0.30.423 - Duo Trial cleared standing: everyone pays FULL
+    if (m._duoTrial && !m._duoTrialFailed && (m._duoPartnerSeen || typeof _coopPeerAliveOnMyMap !== 'function' || _coopPeerAliveOnMyMap())) _kf.dt = 1;   // v0.30.423 - Duo Trial cleared standing: everyone pays FULL
     else if (m._echoBoss || m._expeditionBoss || m._isTwin || m._isPiscesTwin) _kf.bx = 1;
   }
   try { net.ws.send(JSON.stringify(_kf)); } catch (e) {}
@@ -50530,7 +50536,11 @@ function _lxRestoreUltCd() {
     if ((player._deadeyeUntil || 0) > 0) open.push('marksman_oneshot');
     for (const id of open) {
       const def = SKILLS[id];
-      if (def && def.cd) player.skillCooldowns[id] = def.cd;
+      if (def && def.cd) {
+        let _mul = 1;   // v0.30.x — mirror castSkill: raw cd ignored cooldown reduction
+        try { if (typeof getCdrMult === 'function') _mul *= getCdrMult(); if (typeof JOB_CD_MUL === 'number') _mul *= JOB_CD_MUL; } catch (e) {}
+        player.skillCooldowns[id] = def.cd * _mul;
+      }
     }
   } catch (e) {}
 }
@@ -89149,6 +89159,7 @@ function _lxWeakAffinity(m, skill) {   // 'weak' | 'resist' | null
 // damage packet (chain hops go through hitMonster and forward themselves). Returns the
 // status timers so the packet can carry them.
 function _lxOnHitProcs(m, dmg, skill) {
+  const _fz0 = m.freezeTimer | 0, _st0 = m.stunTimer | 0;   // v0.30.x — so the packet carries only what THIS hit added
   // Equipment freeze chance
   // v0.29.298 — + boon contribution (Frostbite). Was gear-only, so this
   // fully-built behaviour was unreachable from the boon system.
@@ -89236,7 +89247,7 @@ function _lxOnHitProcs(m, dmg, skill) {
     m.freezeTimer = Math.max(m.freezeTimer || 0, 800);
   }
 
-  return { fz: m.freezeTimer | 0, st: m.stunTimer | 0 };
+  return { fz: Math.max(0, (m.freezeTimer | 0) - _fz0), st: Math.max(0, (m.stunTimer | 0) - _st0) };
 }
 function hitMonster(m, dmg, isCrit, skill) {
   _lxLsReset();   // v0.30.x — new hit, new lifesteal budget. See _lxLsTake.
