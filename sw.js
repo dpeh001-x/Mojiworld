@@ -125,7 +125,7 @@
 // Sprites/projectiles/anim/mspore_0..8.webp. A returning browser with the old manifest would
 // never fetch them and would keep drawing the static puff.
 const CACHE = 'mojiworld-assets-v34';
-const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
+const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {

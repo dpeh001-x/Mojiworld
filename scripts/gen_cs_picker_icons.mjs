@@ -43,6 +43,9 @@ const ICON = {
   mouth: 'A pair of glossy smiling pink lips',
   skin:  'A glossy wooden artist palette with four round dabs of skin-tone paint from pale to deep brown',
   dice:  'A glossy white six-sided die showing five black pips',
+  // v0.30.5xx - the gender buttons' text glyphs become icons too (per user: custom images, not glyphs)
+  male:   'A glossy sapphire-blue Mars male gender symbol, a circle with an arrow pointing up-right',
+  female: 'A glossy rose-pink Venus female gender symbol, a circle with a cross below it',
 };
 let keys = Object.keys(ICON);
 const only = arg('--only');

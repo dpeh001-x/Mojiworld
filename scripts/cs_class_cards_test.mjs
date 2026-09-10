@@ -35,7 +35,7 @@ const r = await page.evaluate(() => {
   const nav = document.querySelector('#class-select-modal .cs-page-nav');
   return {
     pageShown: getComputedStyle(document.getElementById('cs-page-class')).display !== 'none',
-    cardsBottom: optsBox.bottom, navTop: nav ? nav.getBoundingClientRect().top : Infinity,
+    cardsBottom: optsBox.bottom, navTop: nav ? nav.getBoundingClientRect().top : Infinity, navBottom: nav ? nav.getBoundingClientRect().bottom : Infinity, modalBottom: document.querySelector('#class-select-modal .modal.cs-epic').getBoundingClientRect().bottom,
     cards: cards.map((c) => {
       const crest = c.querySelector('.cls-icon img.cls-crest');
       const mark = c.querySelector('img.cls-watermark');
@@ -71,6 +71,7 @@ const checks = [
   ['the frame is the gold hairline with the dark ring', C.every((c) => /^1px rgba\(255, 220, 140/.test(c.border) && c.ring), C[0] && C[0].border],
   ['the four cards are the same height', Math.max(...C.map((c) => c.h)) - Math.min(...C.map((c) => c.h)) < 2, C.map((c) => Math.round(c.h)).join('/')],
   ['the cards clear the page nav (no clipping inside the modal\'s height cap)', r.cardsBottom <= r.navTop, `cards end ${Math.round(r.cardsBottom)}, nav starts ${Math.round(r.navTop)}`],
+  ['the page nav sits inside the modal (overflow is hidden there)', r.navBottom <= r.modalBottom + 1, `nav ends ${Math.round(r.navBottom)}, modal ends ${Math.round(r.modalBottom)}`],
   ['no 404 for any crest', bad404.length === 0, bad404.join(' | ')],
 ];
 let fails = 0;
