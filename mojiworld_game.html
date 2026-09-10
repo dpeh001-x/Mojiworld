@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.519';
+const GAME_VERSION = 'v0.30.520';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43578,6 +43578,9 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   // click-the-surface branch in _lxPadMenuNav); a choice stanza renders real
   // buttons and gets the standard nav ring.
   'story-beat-overlay',
+  // v0.30.x — seven ids the PAUSE registry treats as blocking were absent here, so a
+  // controller could reach none of them; bravo-boon-modal is a MANDATORY expedition choice.
+  'reforge-modal', 'bravo-boon-modal', 'exp-door-modal', 'exp-puzzle-modal', 'exp-seed-modal', 'everdawn-welcome-overlay', 'game-complete-overlay',
   'edicts-modal',   // v0.30.x — was unlisted, so the stick drove the player around behind it
   // v0.29.7xx — the wardrobe's Character Studio editor (opened from the U
   // panel): a real modal full of buttons that was never listed.
@@ -44503,7 +44506,15 @@ function _lxPadRumble(kind) {
 let _lxPadStarted = false;
 function _lxStartGamepad() {
   if (_lxPadStarted) return; _lxPadStarted = true;
-  const loop = () => { _lxPadPoll(); try { requestAnimationFrame(loop); } catch (e) { setTimeout(loop, 16); } };
+  // v0.30.x — this is a SECOND rAF chain beside _lxFrame, and unlike the sim (fixed 60 Hz
+  // step) it ran at full display refresh: on a 144 Hz panel the poller touched the DOM 2.4x
+  // more often than the game loop. Cap it at the sim's own cadence.
+  let _lastPoll = 0;
+  const loop = (ts) => {
+    const now = (typeof ts === 'number') ? ts : performance.now();
+    if (now - _lastPoll >= 15.5) { _lastPoll = now; _lxPadPoll(); }
+    try { requestAnimationFrame(loop); } catch (e) { setTimeout(loop, 16); }
+  };
   try { requestAnimationFrame(loop); } catch (e) { setInterval(_lxPadPoll, 16); }
 }
 try { window._lxSteamCloudPush = _lxSteamCloudPush; window._lxSteamCloudSync = _lxSteamCloudSync; window._lxStartGamepad = _lxStartGamepad; window._lxPadPoll = _lxPadPoll; } catch (e) {}
@@ -44814,6 +44825,14 @@ function _dismissBossIntro() {
   if (!els || !els.overlay || !els.overlay.classList.contains('on')) return;
   if (game._bossIntroTimer) { clearTimeout(game._bossIntroTimer); game._bossIntroTimer = null; }
   els.overlay.classList.remove('on');
+  // v0.30.x — the two capture-phase window listeners that skip the intro were attached once
+  // and never removed (0 removeEventListener calls), so after the first boss they ran on
+  // every keystroke and pointerdown for the rest of the session. Off with the overlay;
+  // the guard above re-attaches them for the next intro.
+  if (game._bossIntroDismiss) {
+    try { window.removeEventListener('keydown', game._bossIntroDismiss, true); window.removeEventListener('pointerdown', game._bossIntroDismiss, true); } catch (e) {}
+    game._bossIntroDismiss = null;
+  }
   const _strip = document.getElementById('bis-anime-strip');
   if (_strip) _strip.classList.remove('show');
   // Only unpause if no other modal owns the pause — without this, a story beat /
@@ -53686,14 +53705,28 @@ function renderKbmReference() {
 
 // v0.26.x — Capture-phase listener for the dedicated cure-key pickup. Mirrors
 // the action-pickup flow but writes player.cureKey (kept out of the resolver).
+// v0.30.x — WHO OWNS THIS KEY? The action pickup validates against a reserved list and the
+// other bind tables; the Cure pickup only refused skill keys and the Pickup one refused
+// nothing at all, so either could be stacked onto Move Left and persisted - every fresh
+// left-tap while afflicted then burned a Remedy. Shared check for both. Pickup keeps its
+// documented right to share a SKILL key (chest-open and the F skill are meant to overlap).
+function _lxKeyClaimedBy(k, allowSkill) {
+  if (!k) return null;
+  if (['enter', 'escape', 'p', 't', 'i', 'm', '9', '0'].indexOf(k) >= 0) return 'the interface';
+  if (!allowSkill && ((typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[k]) || (typeof KEY_TO_SLOT_DEFAULT !== 'undefined' && KEY_TO_SLOT_DEFAULT[k]))) return 'a skill slot';
+  const ab = (typeof player !== 'undefined' && player && player.actionBinds) || ((typeof ACTION_KEY_DEFAULT !== 'undefined') ? ACTION_KEY_DEFAULT : {});
+  for (const a in ab) if (String(ab[a] || '').toLowerCase() === k) return a;
+  return null;
+}
 (function _wireCureKeyPickup() {
   document.addEventListener('keydown', (ev) => {
     if (!_cureKeyPickup) return;
     const k = (ev.key || '').toLowerCase();
     if (k === 'escape') { _cureKeyPickup = false; renderKbmReference(); if (typeof _kbRenderPotionBinds === 'function') _kbRenderPotionBinds(); ev.preventDefault(); ev.stopPropagation(); return; }
     // Don't let a skill-slot key double as the cure key (it would also cast).
-    if (KEY_TO_SLOT[k] || KEY_TO_SLOT_DEFAULT[k]) {   // v0.26.x — catch CURRENT skill bindings (remapped), not only defaults
-      showToast('That key is a skill slot — pick another for Cure', 'common');
+    const _cOwn = _lxKeyClaimedBy(k, false);   // v0.30.x — skill slots AND every other bound action
+    if (_cOwn) {
+      showToast('\u26A0 ' + _kbDisplay(k) + ' belongs to ' + _cOwn + ' — pick another for Cure', 'common');
       _cureKeyPickup = false; renderKbmReference(); if (typeof _kbRenderPotionBinds === 'function') _kbRenderPotionBinds();
       ev.preventDefault(); ev.stopPropagation(); return;
     }
@@ -53776,6 +53809,8 @@ function renderKbmReference() {
     if (!_interactKeyPickup) return;
     const k = (ev.key || '').toLowerCase();
     if (k === 'escape') { _interactKeyPickup = false; renderKbmReference(); ev.preventDefault(); ev.stopPropagation(); return; }
+    const _iOwn = _lxKeyClaimedBy(k, true);   // v0.30.x — validated nothing before; a skill key is still allowed on purpose
+    if (_iOwn) { showToast('\u26A0 ' + _kbDisplay(k) + ' belongs to ' + _iOwn + ' — pick another for Pickup', 'common'); _interactKeyPickup = false; renderKbmReference(); ev.preventDefault(); ev.stopPropagation(); return; }
     if (typeof player !== 'undefined' && player) player.interactKey = k;
     if (typeof saveState === 'function') saveState();
     if (typeof showToast === 'function') showToast('Bound Open Chest / Pickup → ' + _kbDisplay(k), 'rare');
@@ -98741,7 +98776,10 @@ function closeDialog() {
     dlg.classList.remove('typing');
   }
   if (dlg) dlg.style.display = 'none';
-  game.paused = false;
+  // v0.30.x — every sibling close path asks _anyOtherModalOpen() before releasing the pause;
+  // this one did not. Abandon a quest from the Journal: the confirm is a dialog, both answers
+  // end here, and the world started running behind a full-screen journal.
+  game.paused = (typeof _anyOtherModalOpen === 'function') ? !!_anyOtherModalOpen() : false;
   game._activeNpc = null;
   game._activeNpcSticky = false;   // v0.25.479 — clear click/tap-open flag
 }
