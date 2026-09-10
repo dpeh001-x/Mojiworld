@@ -10642,7 +10642,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.538';
+const GAME_VERSION = 'v0.30.539';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57408,6 +57408,100 @@ function _openPreAdvanceClassSwap() {
   _try(0);
 }
 
+// v0.30.539 — PROOF OF INTENT BEFORE THE WIPE. Per user: a solemn confirmation that this erases
+// all character data, tight, that verifies the player truly means it. Until now "I wish to
+// forget" called _amnesiacReset() straight away: one click, a 1.2 s fade, and the save was gone.
+//
+// The design, and why each part is there:
+//   * It names the character being ended - name, class, level, playtime. An abstract warning is
+//     easy to click past; your own Lv 47 Rogue is not.
+//   * It lists what goes, in four words each. No prose.
+//   * It requires TYPING the word FORGET. A second button is just a second click, and the whole
+//     point is a deliberate act that cannot happen by reflex or by a mis-tap on a controller.
+//   * Cancel is the wide, bright, focused button. The destructive one stays disabled and dim
+//     until the word matches exactly, and it is the narrow one.
+//   * Escape and the backdrop both cancel.
+// It is registered in _LX_EXTRA_PAUSE_SURFACES below, because a modal that pauses the world and
+// is in neither pause registry is precisely the bug v0.30.500 existed to fix.
+function _amnesiacWipeGate(onConfirm) {
+  try {
+    const _old = document.getElementById('amnesiac-wipe-modal');
+    if (_old) _old.remove();
+    const p = (typeof player !== 'undefined' && player) ? player : {};
+    const cls = (typeof CLASSES !== 'undefined' && CLASSES[p.cls] && CLASSES[p.cls].name) || (p.cls || 'traveller');
+    const nm = (p.name || 'This character').toString().slice(0, 24);
+    const lv = (p.level | 0) || 1;
+    const mins = Math.max(0, Math.round(((game && game._playMs) || 0) / 60000));
+    const played = mins >= 60 ? (Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm') : (mins + 'm');
+    const coins = Math.max(0, Math.floor((p.mojicoins || 0) + (p.bankBalance || 0)));
+
+    const ov = document.createElement('div');
+    ov.id = 'amnesiac-wipe-modal';
+    ov.style.cssText = 'position:fixed; inset:0; z-index:12000; display:flex; align-items:center;'
+      + ' justify-content:center; background:rgba(6,3,12,0.86); backdrop-filter:blur(3px);';
+    ov.innerHTML =
+      '<div style="width:min(92vw,420px); background:linear-gradient(180deg,#1a1020,#140b18);'
+      + ' border:1px solid #7a3b52; border-radius:14px; padding:20px 22px 18px;'
+      + ' box-shadow:0 18px 60px rgba(0,0,0,0.7); font-family:inherit; color:#efe6ff;">'
+      + '<div style="font:800 17px/1.2 inherit; letter-spacing:0.4px; color:#ff9aa6;">\u26A0 ERASE THIS CHARACTER</div>'
+      + '<div style="margin:12px 0 10px; padding:9px 11px; background:rgba(255,255,255,0.05);'
+      + ' border-radius:9px; font:700 13px/1.5 inherit;">' + nm
+      + ' <span style="opacity:0.75; font-weight:400;">\u2014 Lv ' + lv + ' ' + cls + ' \u00b7 ' + played + ' played</span></div>'
+      + '<div style="font:400 12.5px/1.7 inherit; color:#cdbfe0;">'
+      + 'Deleted forever: level and stats \u00b7 all gear and items \u00b7 ' + coins.toLocaleString() + ' mojicoins \u00b7 '
+      + 'boons \u00b7 skill ranks \u00b7 quests \u00b7 boss clears \u00b7 setshards.'
+      + '<br><b style="color:#ff9aa6;">There is no undo, and no backup is taken.</b></div>'
+      + '<div style="margin:14px 0 6px; font:400 12px/1.4 inherit; color:#cdbfe0;">Type <b style="color:#fff;">FORGET</b> to confirm.</div>'
+      + '<input id="amnesiac-wipe-input" type="text" autocomplete="off" spellcheck="false" maxlength="10"'
+      + ' style="width:100%; box-sizing:border-box; padding:9px 11px; border-radius:9px;'
+      + ' border:1px solid #5a4668; background:#0d0712; color:#fff; font:700 14px/1.2 inherit;'
+      + ' letter-spacing:2px; text-transform:uppercase;">'
+      + '<div style="display:flex; gap:9px; margin-top:14px;">'
+      + '<button id="amnesiac-wipe-cancel" style="flex:2; padding:11px; border-radius:9px; cursor:pointer;'
+      + ' border:1px solid #8fa5c8; background:linear-gradient(180deg,#48597a,#31405c); color:#fff;'
+      + ' font:700 13px inherit;">Keep my character</button>'
+      + '<button id="amnesiac-wipe-go" disabled style="flex:1; padding:11px; border-radius:9px;'
+      + ' border:1px solid #6a3040; background:#2a1620; color:#7a6070; font:700 13px inherit;'
+      + ' cursor:not-allowed;">Erase</button>'
+      + '</div></div>';
+    document.body.appendChild(ov);
+    try { if (typeof game !== 'undefined' && game) game.paused = true; } catch (e) {}
+
+    const input = ov.querySelector('#amnesiac-wipe-input');
+    const go = ov.querySelector('#amnesiac-wipe-go');
+    const cancel = ov.querySelector('#amnesiac-wipe-cancel');
+    const close = () => {
+      try { document.removeEventListener('keydown', onKey, true); } catch (e) {}
+      ov.remove();
+      try {
+        if (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen()) game.paused = false;
+      } catch (e) {}
+    };
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    }
+    document.addEventListener('keydown', onKey, true);
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+    input.addEventListener('input', () => {
+      const ready = input.value.trim().toUpperCase() === 'FORGET';
+      go.disabled = !ready;
+      go.style.cursor = ready ? 'pointer' : 'not-allowed';
+      go.style.background = ready ? 'linear-gradient(180deg,#c0394f,#8d2337)' : '#2a1620';
+      go.style.color = ready ? '#fff' : '#7a6070';
+      go.style.borderColor = ready ? '#e06a80' : '#6a3040';
+    });
+    cancel.onclick = () => { close(); };
+    go.onclick = () => {
+      if (input.value.trim().toUpperCase() !== 'FORGET') return;
+      close();
+      try { onConfirm(); } catch (e) {}
+    };
+    setTimeout(() => { try { input.focus(); } catch (e) {} }, 40);
+  } catch (e) {
+    // Fail CLOSED. If the gate cannot be built, the save is NOT wiped - the whole point of it.
+    try { if (typeof showToast === 'function') showToast('Could not open the confirmation. Nothing was erased.', 'rare'); } catch (_) {}
+  }
+}
 function _amnesiacReset() {
   try {
     game._resetting = true;
@@ -96998,7 +97092,7 @@ function openNPC(npc) {
         'Look at me, and say it aloud: <em>I wish to forget what I wanted, so that I can want something better.</em>\n\n' +
         'Then the door opens. You\'ll fall a long way, and wake a stranger with a new lantern.',
         opts: [
-          { t:'⚠ I wish to forget',      cb: () => { game._amnesiacStage = 0; closeDialog(); _amnesiacReset(); } },
+          { t:'⚠ I wish to forget',      cb: () => { game._amnesiacStage = 0; closeDialog(); _amnesiacWipeGate(_amnesiacReset); } },   // v0.30.539 — type FORGET first
           { t:'…No. Never mind.',        cb: () => { game._amnesiacStage = 0; closeDialog(); } },
         ]
       },
@@ -97153,7 +97247,7 @@ function openNPC(npc) {
     opts.push({ t:'Opinions about the mushrooms?', cb:() => { document.getElementById('dialog-text').textContent = 'They gossip. I tell you, they gossip. Last week one of them spelled out my entire bedtime routine in spore patterns. The shame is unbearable.'; } });
     // v0.30.471 — Arlen is the one who gets the DATE wrong, which is the only
     // part of the rumour that matters and the part he cannot make sense of.
-    opts.push({ t:'What do people say about the Amnesiac?', cb:() => { document.getElementById('dialog-text').textContent = 'Ha! The tower story. Yes. Everyone has it now.\n\nHere is the part nobody bothers with, and it is the only part I like. I have a ledger from before the pause. There is a man in it with no name, at the gate, on his way UP. Same description. Same everything.\n\nAnd the Amnesiac was standing in this plaza that morning. I know, because he is in the ledger twice. Once at the gate, once here.\n\n*He taps the page, delighted.* One man, two places, one morning. Bad record-keeping, probably. That is what I tell people. It is not what I think.'; } });
+    opts.push({ t:'What do people say about the Amnesiac?', cb:() => { document.getElementById('dialog-text').textContent = 'Ha! The tower story. Everyone has it now.\n\nHere is the part nobody bothers with. I have a ledger from before the pause. There is a man in it with no name, at the gate, on his way UP — same description, same everything.\n\nAnd the Amnesiac was in this plaza that morning. He is in the ledger twice. Once at the gate, once here.\n\n*He taps the page, delighted.* One man, two places, one morning. Bad record-keeping, probably. That is what I tell people. It is not what I think.'; } });
     opts.push({ t:'Thanks', cb: closeDialog });
   } else if (npc.role === 'caravan') {
     // v0.26.x — Taxi Uncle (real name Mr Tan Hua Chieh) per user: drives a SMALL TAXI (no
@@ -97275,7 +97369,7 @@ So.. do you need a lift?`;
     }
     opts.push({ t:'Who do you fight?',     cb:() => { document.getElementById('dialog-text').textContent = 'The same hand that toppled the capital. We do not name it here. But press your ear to a paper lantern at midnight and you will hear what I hear.'; } });
     opts.push({ t:'How can I help?',       cb:() => { document.getElementById('dialog-text').textContent = 'Listen first. Watch second. The shadow magic in these alleys answers patience, not fury — Kuro will tell you the same, when he stops sharpening that ghost of a blade.'; } });
-    opts.push({ t:'You smell of another world?', cb:() => { document.getElementById('dialog-text').textContent = 'More than sugar and sunlight, traveller. Your shadow falls a half-step behind your feet. You were not born under this stalled sky — some hand above it cut a seam and pushed you through. Good. Strangers see what natives have stopped seeing.\n\nAnd the dark will test you for it. Walk the long alleys and you will glimpse shapes you knew as a child — a door, a face, a voice from a life a whole plane away. They are bait, not kin. This Pause wears your dead to slow your blade. Cut through them. You were sent to end the stillness, not to kneel in it.'; } });
+    opts.push({ t:'You smell of another world?', cb:() => { document.getElementById('dialog-text').textContent = 'More than sugar and sunlight. Your shadow falls a half-step behind your feet — you weren\'t born under this stalled sky. Something above it cut a seam and pushed you through. Good: strangers see what natives have stopped seeing.\n\nThe dark will test you for it. In the long alleys you\'ll glimpse a door, a face, a voice from a life a plane away. They\'re bait, not kin. Cut through them.'; } });
   } else if (npc.role === 'kuro') {
     // v0.25.411 — Kuro, the shadow samurai. Stoic, hooded, abandoned
     // honour for speed. His katana is condensed shadow — drawn from
@@ -97340,7 +97434,7 @@ So.. do you need a lift?`;
     }
     opts.push({ t:'Who fights beside you?', cb:() => { document.getElementById('dialog-text').textContent = 'Elena keeps our records — every victory in the lands of Moji passes through her quill. Barnaby keeps our steel — and his temper, when he can. Speak with both before you ride out. They are why this fortress still stands.'; } });
     opts.push({ t:'Why the white blade?',   cb:() => { document.getElementById('dialog-text').textContent = 'Justice\'s Breath is older than my house. The light is not mine — I only carry it. A sword that knows its purpose does not need its bearer to shout. Remember that, when your own steel sings.'; } });
-    opts.push({ t:'Your men look at me twice.', cb:() => { document.getElementById('dialog-text').textContent = 'Because you stand a half-beat wrong, and a soldier learns to read a stride. You did not climb to us by the road — you were sent across the planes, chosen by the watcher above this frozen sky to do what twelve ages of native champions could not.\n\nThe march will be cruel about it. You will see faces at the treeline you buried, or never had to — people you loved in the world you left behind. Do not break ranks for them. This vast dimension has no voice of its own, so it borrows the ones you carry to call you closer. Honour them by finishing the work: wake this place. That is the only mercy it is asking for.'; } });
+    opts.push({ t:'Your men look at me twice.', cb:() => { document.getElementById('dialog-text').textContent = 'You stand a half-beat wrong, and a soldier reads a stride. You did not climb here by the road. You were sent across the planes to do what twelve ages of native champions could not.\n\nThe march will be cruel about it. You will see faces at the treeline — people you buried, or never had to. Don\'t break ranks for them. This place has no voice of its own, so it borrows the ones you carry. Honour them by finishing the work.'; } });
   } else if (npc.role === 'scribe') {
     // v0.25.412 — Elena, knight-priestess + lore guide + skill
     // trainer. Phoenix-feather quill, leather-bound tome. Routes the
@@ -97349,7 +97443,7 @@ So.. do you need a lift?`;
     text = 'A new name for the ledger! Hold a moment — quill, ink, page. There. Tell me what you have done since the last sunrise, and I will set it where it cannot be unmade.\n\nChivalry is not only the sword, friend. It is the memory of the sword. Every victory you earn in the lands of Moji passes through this tome before it earns the right to be called a deed.';
     opts.push({ t:'Level up ✦',            cb:() => { closeDialog(); if (typeof openLevelUpPanel === 'function') openLevelUpPanel(); } });
     opts.push({ t:'Tell me of the lands.', cb:() => { document.getElementById('dialog-text').textContent = 'Moji is older than its current name. The Bastion was raised in the second age, when the lions still roamed the western plains; the gates remember them in gold. Sweet Candy Canyon to the east is younger, but no less strange. I am still cataloguing the Shadow-Woven Hood — they slip the quill.'; } });
-    opts.push({ t:'Record what I see on the road?', cb:() => { document.getElementById('dialog-text').textContent = '*Elena\'s quill pauses over the page.* I record deeds, not dreams — and what you see out there is neither. I have written the same marginal note for three expeditions now: that the Wayfarer reports figures from a life before this one. They always do, the ones who came from elsewhere. The tome cannot hold the faces, only the fact of them, so I write it plainly and let the page carry the weight. The world reaches into you because you are the first soul in an age it judged worth reaching for. Bring me the deed that ends the pause — that one I can make permanent.'; } });
+    opts.push({ t:'Record what I see on the road?', cb:() => { document.getElementById('dialog-text').textContent = '*Elena\'s quill pauses over the page.* I record deeds, not dreams.\n\nThree expeditions running I have written the same note: the Wayfarer reports figures from a life before this one. They always do, the ones from elsewhere.\n\nThe world reaches into you because you are the first soul in an age worth reaching for. Bring me the deed that ends the pause. That one I can make permanent.'; } });
   } else if (npc.role === 'archmage') {
     // v0.25.413 — Hera, the Azure Archmage. Charismatic leader of the
     // Academia restoration; sapphire-haired sorceress, silver eyes,
@@ -97403,7 +97497,7 @@ So.. do you need a lift?`;
     text = '…hm? Oh — yes, yes, come in, come in. Mind the third stack, the binding is rotten. I had to re-glue half of it last winter and the other half disagrees with me about its place in the index.\n\nThis tome here is a record of every spell-form that has crossed the Academia threshold since the rebuilding began. Yours, if you cast one near me, will join it. The quill insists.';
     opts.push({ t:'Level up ✦',          cb:() => { closeDialog(); if (typeof openLevelUpPanel === 'function') openLevelUpPanel(); } });
     opts.push({ t:'What ruins lie below?', cb:() => { document.getElementById('dialog-text').textContent = 'The first Academia, a civilization older than its name. We built our libraries on top of theirs. When the lanterns flicker the wrong colour, that is them, remembering. Best left to remember alone, between you and me.'; } });
-    opts.push({ t:'Why do I see my own past out there?', cb:() => { document.getElementById('dialog-text').textContent = '*Auron sets down his quill.* Ahh. So it shows you faces. Sit. The Everdawn is a single held instant, and a held instant has no time to make new thoughts — it can only re-use old ones. Yours are the only NEW thoughts to enter this world in twelve ages, so the world, starving, reads them. It pulls up the people you loved because love is the loudest thing a mind keeps. It is not your memory failing. It is a mute world learning to speak, one borrowed face at a time. Do not be unmade by it. Be flattered — then finish the work it cannot.'; } });
+    opts.push({ t:'Why do I see my own past out there?', cb:() => { document.getElementById('dialog-text').textContent = '*Auron sets down his quill.* So it shows you faces. Sit.\n\nThe Everdawn is one held instant. A held instant makes no new thoughts — it can only re-use old ones. Yours are the only new thoughts here in twelve ages, so the world reads them, and pulls up the people you loved because love is the loudest thing a mind keeps.\n\nThat is not your memory failing. It is a mute world learning to speak. Don\'t be unmade by it.'; } });
   } else if (npc.role === 'apprentice') {
     // v0.25.413 — Lyra, the Aspiring Sorceress. Young, eager, light-
     // blue spiky hair, conjuring a small ball of blue mana. Acts as
@@ -97572,7 +97666,7 @@ So.. do you need a lift?`;
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina counts ${_amt.toLocaleString()} mojicoins into a velvet pouch and slides it across the counter.*\n\nDo come back. Your money was very fond of us.`;
     } });
-    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands.*\n\nSimple as soup. Every hour you spend out there playing, your whole balance earns 0.1 % — paid on the hour, compounding, no cap. The clock only runs while the game runs: close it or pause it and the beads stop. Withdraw anytime, no fee.\n\n*She lowers her voice.*\n\nAnd before you ask, dear — no, the vault is not a hiding place. Death collects its 35 % from your purse first and my ledgers second, and the same is true of the fee for unlearning what you have learned. I keep your money working, not safe from consequence.'; } });
+    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands.*\n\nEvery hour you play, your whole balance earns 0.1 % — on the hour, compounding, no cap. The clock only runs while the game does. Withdraw anytime, no fee.\n\n*She lowers her voice.*\n\nAnd no, the vault is not a hiding place. Death takes its 35 % from your purse first and my ledgers second, and so does the fee for unlearning. I keep your money working, not safe.'; } });
   } else if (npc.role === 'bravoGuide') {
     // v0.26.289 — Per-floor Bravo. Three states:
     //   1. Player just arrived, quest not yet cleared → flavor flavor,
@@ -97668,7 +97762,7 @@ So.. do you need a lift?`;
     // answered the question instead of sharpening it. Bravo now refuses the identification
     // outright, gives only the one detail she trusts, and leaves the resemblance for the player
     // to make. The tell is still there for anyone who has met him; nothing points at it.
-    const _sovRumour = () => { const d = document.getElementById('dialog-text'); if (d) d.textContent = '*Bravo\'s smile goes out.*\n\nI have stood in that room.\n\nI am not going to tell you what is on the throne. I have turned it over so many times that I no longer trust my own account of it, and if you asked me on a different day you would get a different answer. One of them would be a lie. I could not tell you which.\n\nHere is the part I did not invent.\n\nIt does not attack while you are still deciding. Everything else down there comes the moment you are in reach — that one waits. And it does not watch your blade.\n\nIt watches your hands.\n\n*She turns back to the portal, and her voice goes quiet enough that you step closer to hear it.*\n\nI have met one other thing that does that. It is not in the tower, and I walk past it most days.\n\nAsk me again when you have been to the top. I want to know whether you noticed too.'; };
+    const _sovRumour = () => { const d = document.getElementById('dialog-text'); if (d) d.textContent = '*Bravo\'s smile goes out.*\n\nI have stood in that room.\n\nI won\'t tell you what is on the throne. I have turned it over too many times to trust my own account of it.\n\nHere is what I did not invent. It does not attack while you are still deciding — everything else down there comes the moment you are in reach. That one waits.\n\nAnd it does not watch your blade. It watches your hands.\n\n*She turns back to the portal, and her voice goes quiet enough that you step closer to hear it.*\n\nI have met one other thing that does that. It is not in the tower, and I walk past it most days.\n\nAsk me again when you have been to the top. I want to know whether you noticed too.'; };
     if (_inExp) {
       // v0.30.481 — the run's difficulty is named here because it is fixed at the start and cannot
       // be changed mid-descent; a player who forgets which one they picked has no other way to
@@ -97739,7 +97833,7 @@ So.. do you need a lift?`;
         opts.push({ t:'◈ The weight', cb: _say(`<b>The strip above this conversation.</b>\n\n${LX_EXPEDITION_DIFFICULTY_ORDER.map((k) => { const d = LX_EXPEDITION_DIFFICULTY[k]; return `${d.icon} <b>${d.label}</b> — everything down there hits and holds at ${_pc(d.stat)}, and pays ${_pc(d.reward)}.`; }).join('\n')}\n\nThe numbers do not match on purpose. A run can be <b>lost</b>, and a lost run pays for the floors you reached and nothing for the ones you did not — so making it safer is worth more than the difference, and making it harder is worth less. I price that in, in both directions.\n\nIt locks when you step through. Choose it up here, not on Floor 9.`) });
         opts.push({ t:'◀ Back to the portal', cb:() => { game._expInfo = null; openNPC(npc); } });
       } else {
-      text = `*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready.\n\nHere's the truth no one tells you about the Everdawn: you don't climb toward a sunrise. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and you carry the dream back UP out of it.\n\nThat's what the tower is. A grief you walk down on purpose, so you remember how to climb.\n\nTen floors. I'll be waiting at every one of them.`;
+      text = `*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready.\n\nYou don't climb toward a sunrise here. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and carry the dream back up out of it.\n\nA grief you walk down on purpose. Ten floors. I'll be at every one.`;
       opts.push({ t:`⚜ Begin Expedition — ${_dSel.icon} ${_dSel.label} (Lv ${_lv})`, cb:() => {
         game._expInfo = null;
         closeDialog();
@@ -98422,7 +98516,7 @@ So.. do you need a lift?`;
   } else if (npc.role === 'courier') {
     // v0.25.809 — Postal Wisp, the town courier. Pure flavour for
     // now; hooks reserved for a future mailbox / pen-pal system.
-    text = '*The Postal Wisp hovers a polite distance off the ground, satchel bigger than its body.*\n\nDelivery! Delivery — oh, no, sorry, you\'re not on my route. I\'m the town courier, Wisp\'s the name, mail\'s the game. These days I run two routes for you: mail-order potions delivered wherever you stand (small delivery fee), and a daily care-parcel the watcher above tucks into my satchel. They are there each morning by the last note of the dawn song — never early, never late. I have stopped wondering how. Press P anywhere to call me.';
+    text = '*The Postal Wisp hovers a polite distance off the ground, satchel bigger than its body.*\n\nDelivery! — oh. Sorry, you\'re not on my route.\n\nWisp, town courier. I run two for you: mail-order potions delivered wherever you stand, for a small fee, and a daily care-parcel the watcher above tucks into my satchel. It\'s there every morning by the last note of the dawn song.\n\nPress P anywhere to call me.';
     opts.push({ t:'✉ Mail-order potions (+15% delivery)', cb:() => { closeDialog(); if (typeof openShop === 'function') openShop('potion', { surcharge: 1.15 }); } });
     opts.push({ t:'🎁 Collect today\'s parcel', cb:() => { if (typeof _claimDailyParcel === 'function') _claimDailyParcel(); } });
     opts.push({ t:'Who do you deliver for?', cb:() => { document.getElementById('dialog-text').textContent = 'Everyone with coin and most without — postage is on a sliding scale. The Academia sends scrolls weekly, the foundry sends invoices daily, and Auntie Innie sends a love letter to no-one in particular every Wednesday. We do not ask. We simply deliver.'; } });
@@ -156112,6 +156206,7 @@ function closeCharStudio() {
 // both functions, which is the only way this stops happening.
 const _LX_EXTRA_PAUSE_SURFACES = [
   { id: 'lx-autopause',             mode: 'display' },   // _lxAutoPause veil (controller lost, Steam overlay, blur)
+  { id: 'amnesiac-wipe-modal',      mode: 'display' },   // v0.30.539 — the erase-character gate; the player is TYPING
   { id: 'backup-modal-bg',          mode: 'class'   },   // openBackupModal
   { id: 'exp-seed-modal',           mode: 'display' },   // _expeditionSeedPrompt - the player is TYPING a seed
   { id: 'everdawn-welcome-overlay', mode: 'display' },   // first arrival in Everdawn
