@@ -20,7 +20,12 @@ const PLATES = { town: 'backgrounds/bg_v3_everdawn_central.webp', gravitosArena:
 for (const [id, clip] of Object.entries(CLIPS)) {
   const mb = existsSync(clip) ? statSync(clip).size / 1048576 : 0;
   ok(`${id}: the clip ships (${clip})`, mb > 0.5 && mb < 12, { mb: +mb.toFixed(1) });
-  ok(`${id}: ...and is committed`, execFileSync('git', ['ls-files', '--', clip], { encoding: 'utf8' }).trim() === clip, {});
+  // Checked against the PUSHED tree, not the local index. This repo is edited by several sessions
+  // that commit through plumbing against origin/main, so the working copy's HEAD and index are
+  // routinely many commits stale; `git ls-files` answered "not committed" for clips that were
+  // already on origin, which is the wrong signal in exactly the situation this test exists for.
+  const inTree = (ref) => { try { return execFileSync('git', ['ls-tree', '--name-only', ref, '--', clip], { encoding: 'utf8' }).trim() === clip; } catch (e) { return false; } };
+  ok(`${id}: ...and is committed (in origin/main, or HEAD if there is no remote)`, inTree('origin/main') || inTree('HEAD'), {});
   ok(`${id}: the fallback plate still exists`, existsSync(PLATES[id]), {});
   ok(`${id}: the map is in the _LX_MAP_VIDEO table pointing at that clip`, new RegExp(`${id}:\\s+'${clip}'`).test(src), {});
   // the clip itself, when a probe is available: h264 keeps hardware decode on every target; a
