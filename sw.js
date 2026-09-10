@@ -115,7 +115,10 @@
 // new generation a returning browser keeps firing the old mint pod out of cache.
 // v0.30.538 - v29 -> v30. Sprites/ui/cs/ico_*.webp (five files) are NEW art referenced from the creator's markup; a returning browser with the old manifest would show the picker labels without their icons and never fetch them.
 // v0.30.540 - v30 -> v31. Sprites/ui/cs_preview_bg.webp is REPLACED under its own name (violet niche -> pale grey alcove) and Sprites/ui/cs_preview_bg_floor.webp is NEW and is the one the CSS now draws; a returning browser would keep the violet plate out of cache and never fetch the grey one.
-const CACHE = 'mojiworld-assets-v31';
+// v0.30.544 - v31 -> v32. Sprites/projectiles/mspore.webp is
+// REPLACED under its own name again (the pod redrawn as a smooth white spore puff). The last
+// bump was demonstrably load-bearing: the browser was still serving v28's copy.
+const CACHE = 'mojiworld-assets-v32';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
