@@ -106,7 +106,11 @@
 // v0.30.506 - v26 -> v27. Sprites/ui/cs_preview_bg.webp is NEW
 // art referenced from CSS; a returning browser with the old manifest would keep the character
 // preview box on its flat grey radial and never fetch the alcove.
-const CACHE = 'mojiworld-assets-v27';
+// v0.30.507 - v27 -> v28. All ten Sprites/fx/block_mage*
+// files are REPLACED under their own names (the ward redrawn as an incantation shard). This is
+// the exact case the generation exists for: v0.30.487 replaced this same set without bumping,
+// so a returning browser kept serving the old opaque ward out of cache.
+const CACHE = 'mojiworld-assets-v28';
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a)$/i;
 
 self.addEventListener('install', () => self.skipWaiting());
