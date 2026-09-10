@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.564';
+const GAME_VERSION = 'v0.30.565';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -142632,6 +142632,19 @@ function _sbbPal(phase, hyper) {
   if (phase === 2) return { tint: 'rgba(255,110,205,0.32)', rim: 'rgba(255,172,226,0.55)', glow: '255,110,210', hi: '#ffe4f6', foot: '#ff9fd8' };
   return { tint: 'rgba(255,80,88,0.36)', rim: 'rgba(255,158,126,0.55)', glow: '255,92,96', hi: '#ffdbd2', foot: '#ff9c86' };
 }
+// v0.30.565 — ui_bossbar_frame.webp's slice geometry, in source pixels, MEASURED by
+// scripts/gen_bossbar_ui.mjs (--measure re-prints it). hy0..hy1 is the hollow the fill shows
+// through; hx0..hx1 its horizontal extent; capL/capR the end caps that are never stretched;
+// floX0..floX1 the centre crest (equal when there is none). Regenerate the art, re-run the
+// measure, and replace this block - do not eyeball it.
+const _BB_GEOM = { W: 1024, H: 232, hy0: 75, hy1: 188, hx0: 52, hx1: 973, capL: 67, capR: 66, floX0: 477, floX1: 548 };
+// v0.30.565 — where the frame's top and bottom land on screen for a bar of height h at y, from
+// _BB_GEOM; the name and the state chip are seated off these so a taller frame cannot collide
+// with either. (Pure functions of h — cheap enough to call per draw.)
+function _bbFrameTop(y, h) { const g = _BB_GEOM, s = h / (g.hy1 - g.hy0); return y - g.hy0 * s; }
+function _bbFrameBottom(y, h) { const g = _BB_GEOM, s = h / (g.hy1 - g.hy0); return y + h + (g.H - g.hy1) * s; }
+function _bbNameY(y, h) { return Math.min(y - 21, Math.round(_bbFrameTop(y, h) - 12)); }   // 12: the title's comma and serifs hang below its baseline, and the badge stands proud of the rail
+function _bbChipY(y, h) { return Math.max(y + h + 26, Math.round(_bbFrameBottom(y, h) + 13)); }
 const _SBB_G = { key: '' };
 function _sbbGrads(x, y, w, h, phase, hyper) {
   const k = x + '|' + y + '|' + w + '|' + h + '|' + phase + '|' + (hyper ? 1 : 0);
@@ -142663,7 +142676,7 @@ function _sbbGrads(x, y, w, h, phase, hyper) {
   cv.addColorStop(0, 'rgba(255,240,210,0.22)'); cv.addColorStop(0.5, 'rgba(255,255,255,0)');
   cv.addColorStop(1, 'rgba(40,10,0,0.28)');
   _SBB_G.chipV = cv;
-  const ny = y - 21;
+  const ny = _bbNameY(y, h);   // v0.30.565 — seated off the frame, not a fixed 21px
   const ng = ctx.createLinearGradient(0, ny - 17, 0, ny + 4);
   ng.addColorStop(0, '#fffaf0'); ng.addColorStop(0.55, P.hi); ng.addColorStop(1, P.foot);
   _SBB_G.name = ng;
@@ -142864,17 +142877,23 @@ function drawSuperBossBar() {
     ctx.fillRect(x, y, fillW, barH);
   }
 
-  // 7. FRAME, 3-sliced at natural aspect. Source geometry, measured off the art:
-  //    the hollow runs y 33..81 of 112, the finials occupy the outer 200px, and the
-  //    centre flourish sits in x 440..584. Only the two plain rail spans stretch.
+  // 7. FRAME, 3-sliced at natural aspect. v0.30.565 — the source geometry is no longer
+  //    hardcoded from one look at the art: _BB_GEOM (below) is what
+  //    scripts/gen_bossbar_ui.mjs MEASURED off the written frame — where the hollow is
+  //    (hx0..hx1, hy0..hy1), how wide each end cap is (capL/capR, drawn at natural
+  //    aspect with the hollow's edge on the bar's edge), and the centre crest span
+  //    (floX0..floX1, never stretched). Only the two plain rail spans stretch.
   if (_bbArt) {
-    const _s = barH / 48, _fh = 112 * _s, _ft = y - 33 * _s, _cap = 200 * _s, _flo = 144 * _s;
-    ctx.drawImage(_bbFrame, 0, 0, 200, 112, x - _cap * 0.42, _ft, _cap, _fh);
-    ctx.drawImage(_bbFrame, 824, 0, 200, 112, x + barW - _cap * 0.58, _ft, _cap, _fh);
-    const _mL = x + _cap * 0.58, _mR = x + barW - _cap * 0.58;
-    ctx.drawImage(_bbFrame, 200, 0, 240, 112, _mL, _ft, _cx - _flo / 2 - _mL, _fh);
-    ctx.drawImage(_bbFrame, 584, 0, 240, 112, _cx + _flo / 2, _ft, _mR - (_cx + _flo / 2), _fh);
-    ctx.drawImage(_bbFrame, 440, 0, 144, 112, _cx - _flo / 2, _ft, _flo, _fh);
+    const _g = _BB_GEOM, _s = barH / (_g.hy1 - _g.hy0), _fh = _g.H * _s, _ft = y - _g.hy0 * _s;
+    const _capL = _g.capL * _s, _capR = _g.capR * _s, _floW = (_g.floX1 - _g.floX0) * _s;
+    const _dL = x - _g.hx0 * _s;                                   // source x 0 lands here
+    const _dR = x + barW + (_g.W - _g.hx1) * _s;                   // source x W lands here
+    ctx.drawImage(_bbFrame, 0, 0, _g.capL, _g.H, _dL, _ft, _capL, _fh);
+    ctx.drawImage(_bbFrame, _g.W - _g.capR, 0, _g.capR, _g.H, _dR - _capR, _ft, _capR, _fh);
+    const _mL = _dL + _capL, _mR = _dR - _capR;
+    ctx.drawImage(_bbFrame, _g.capL, 0, _g.floX0 - _g.capL, _g.H, _mL, _ft, Math.max(0, _cx - _floW / 2 - _mL), _fh);
+    ctx.drawImage(_bbFrame, _g.floX1, 0, _g.W - _g.capR - _g.floX1, _g.H, _cx + _floW / 2, _ft, Math.max(0, _mR - (_cx + _floW / 2)), _fh);
+    if (_floW > 0) ctx.drawImage(_bbFrame, _g.floX0, 0, _g.floX1 - _g.floX0, _g.H, _cx - _floW / 2, _ft, _floW, _fh);
   } else {
     ctx.strokeStyle = _P.rim; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, barW, barH);
   }
@@ -142898,7 +142917,7 @@ function drawSuperBossBar() {
   ctx.textAlign = 'center';
   ctx.globalAlpha = 0.2 + 0.8 * _introEase;   // fades in with the intro sweep
   const _nmTxt = ((hyper ? '⚠ HYPER BOSS — ' : '') + sb.name).toUpperCase();
-  const _ny = y - 21;
+  const _ny = _bbNameY(y, barH);   // v0.30.565 — clears the measured frame top
   ctx.font = '700 21px LXBossTitle, Cinzel, "Palatino Linotype", Georgia, serif';
   try { ctx.letterSpacing = '4.5px'; } catch (e) {}
   ctx.lineJoin = 'round'; ctx.miterLimit = 2;
@@ -142954,9 +142973,10 @@ function drawSuperBossBar() {
     ctx.lineJoin = 'round';
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-    ctx.strokeText(_bst.t, x + barW, y + barH + 26);   // v0.30.462 — clears the frame's lower rail
+    const _chipY = _bbChipY(y, barH);   // v0.30.565 — clears the measured frame bottom (was a fixed +26)
+    ctx.strokeText(_bst.t, x + barW, _chipY);
     ctx.fillStyle = _bst.c;
-    ctx.fillText(_bst.t, x + barW, y + barH + 26);
+    ctx.fillText(_bst.t, x + barW, _chipY);
   }
   // v0.29.x — TITLE CARD. For the first 1.9s after acquisition (the same
   // _bbSeen stamp the intro sweep rides), the boss's name is drawn large at
