@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.518';
+const GAME_VERSION = 'v0.30.519';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -40684,6 +40684,7 @@ function applyMaster(masterId) { return _lxGuardPoints('applyMaster:' + masterId
 function _lxApplyMasterInner(masterId) {
   const m = MASTERS[masterId];
   if (!m) return;
+  if (player.master) { console.warn('[master] already ' + player.master + '; refusing to stack ' + masterId); return; }   // v0.30.x — += stats twice is permanent
   player.master = masterId;
   if (m.stats.hp)    { player.maxHp += m.stats.hp; }
   if (m.stats.mp)    { player.maxMp += m.stats.mp; }
@@ -40761,6 +40762,11 @@ function _masterAdvancePending() {
 function openMasterAdvancement() {
   const job = JOBS[player.job];
   if (!job) return;
+  // v0.30.x — TWO CALLERS SCHEDULE THIS ON A DELAY WITHOUT RE-CHECKING (level-up at 600 ms,
+  // quest completion at 1400 ms; the boot-recovery caller does re-check, so the guard was
+  // known to be needed). A quest reward that levels you fires both: pick twice, and the
+  // first master's stat block stays baked into base stats under the second one's name.
+  if (player.master) return;
   // v0.30.x — this is the 2nd advancement: cold backdrop + the grand treatment,
   // matching its talent pick so the whole step reads as one room.
   const _am2 = document.getElementById('advancement-modal');
@@ -40831,11 +40837,33 @@ function openMasterAdvancement() {
       <div class="cls-stats"><b>Signature:</b><br>${m.signature}</div>
       <div class="cls-jobs" style="color:${m.color}">${statsLine}</div>
     `;
-    card.onclick = () => {
+    // v0.30.x — ARM, THEN COMMIT. The job card was rewritten this way (v0.29.598) because
+    // "one stray tap permanently decided the character"; the MORE permanent choice kept
+    // the single click, on a modal that auto-opens 600 ms after a level-up.
+    const _commitMaster = () => {
       applyMaster(masterId);
       document.getElementById('advancement-modal').style.display = 'none';
       setTimeout(() => { if (typeof _playStoryBeat === 'function') _playStoryBeat('advancement_2_done'); }, 500);
       game.paused = false;
+    };
+    card.onclick = () => {
+      if (card._armed) { _commitMaster(); return; }
+      opts.querySelectorAll('.class-card').forEach((el) => {
+        if (el === card) return;
+        el._armed = false; el.classList.remove('cls-armed');
+        if (el._confirmEl) { el._confirmEl.remove(); el._confirmEl = null; }
+      });
+      card._armed = true; card.classList.add('cls-armed');
+      const cf = document.createElement('div');
+      cf.className = 'cls-confirm';
+      cf.style.cssText = 'margin-top:8px;padding:7px 9px;border-radius:8px;font-size:12px;line-height:1.45;'
+        + 'background:rgba(0,0,0,0.34);border:1px solid ' + m.color + ';color:#ffe9b8;text-align:center;';
+      cf.innerHTML = 'This choice is <b>permanent</b>.<br><b style="color:' + m.color + '">Click again to take the ' + m.name + ' mastery</b>';
+      card.appendChild(cf); card._confirmEl = cf;
+      if (typeof _advOverflowHint === 'function') requestAnimationFrame(_advOverflowHint);
+      const gl = document.getElementById('adv-guide-line');
+      if (gl) gl.textContent = 'Take your time — click a card twice to lock it in. Nothing is chosen until you do.';
+      if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('chirp'); } catch (e) {} }
     };
     opts.appendChild(card);
   }
@@ -50435,6 +50463,12 @@ function _lxRestoreUltCd() {
     const open = [];
     if (player._warlordEnrageUntil) open.push('warlord_ult');
     if (player._sageUntil || (player._sageShots | 0) > 0) open.push('sage_ult');
+    // v0.30.x — Deadeye parks its cooldown at the short in-window gate on EVERY press and
+    // relies on a scheduled timer to put the real ~22s back. That timer dies with
+    // cancelPendingSkillTimers() on a map change or a death, and this repair - written
+    // for exactly that - did not list it. Walk through a portal inside the window and the
+    // ultimate kept a 450 ms cooldown for the rest of the run (~45x uptime).
+    if ((player._deadeyeUntil || 0) > 0) open.push('marksman_oneshot');
     for (const id of open) {
       const def = SKILLS[id];
       if (def && def.cd) player.skillCooldowns[id] = def.cd;
@@ -62672,7 +62706,7 @@ function loadMap(id, entryX, entryY) {
     // re-cast, forever. Only touched when a window was actually open, so a
     // normally-ticking cooldown is never penalised by walking through a door.
     _lxRestoreUltCd();
-    player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0;
+    player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0; player._deadeyeUntil = 0;   // v0.30.x — Deadeye's window resets with the others
     player._bastionArmedUntil = 0; player._bastionArmHeld = false;   // v0.29.697 — an armed bastion does not survive the reset
     player.doubleJumpUsed = false;
     if (typeof cancelPendingSkillTimers === 'function') cancelPendingSkillTimers();
@@ -68328,6 +68362,11 @@ function triggerDeath() {
   player._levitateUntil = 0;
   player._bigStabUntil = 0;
   player._mageBigSwingUntil = 0;
+  // v0.30.x — the map-change reset repairs a parked ultimate cooldown before it kills the
+  // timer that would have; both death paths killed the timer and repaired nothing, so
+  // dying inside a Warlord / Sage / Deadeye window left the ultimate parked at its gate.
+  if (typeof _lxRestoreUltCd === 'function') _lxRestoreUltCd();
+  player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0; player._deadeyeUntil = 0;
   // Cancel any queued skill setTimeout callbacks
   cancelPendingSkillTimers();
   // v0.25.605 — Force-close any open modal so the death overlay isn't
@@ -68706,6 +68745,8 @@ function respawnAtTown() {
   player._levitateUntil      = 0;
   player._bigStabUntil       = 0;
   player._mageBigSwingUntil  = 0;
+  if (typeof _lxRestoreUltCd === 'function') _lxRestoreUltCd();   // v0.30.x — see the other death path
+  player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0; player._deadeyeUntil = 0;
   cancelPendingSkillTimers();
   for (const k in player.buffs) player.buffs[k] = 0;
   resetCombo();
