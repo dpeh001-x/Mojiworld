@@ -59,9 +59,22 @@ try {
     player.inventory = [];
 
     // ---- 2. difficulty scaling ------------------------------------------
+    // game._diffDmgMul is re-stamped from the settings by the game's own tick, and the tick can
+    // land WHILE a shot is in flight - the harness sets 2.0, awaits up to 500 ms for the projectile
+    // to resolve, and the settings pass restores 1.0 underneath it. Assigning per batch and even
+    // per shot both produced blended means (a Nightmare row at 6200 against 8000, a Hard row at
+    // 1639). Pinned as a non-writable getter for the duration instead, so what the damage path
+    // reads is what the batch asked for. Restored to a plain value afterwards.
+    let _expFor = null;
+    const pinDiff = (mul) => { try { Object.defineProperty(game, '_diffDmgMul', { get: () => mul, set: () => {}, configurable: true }); } catch (e) { game._diffDmgMul = mul; } game._diffTier = null; };
+    const unpinDiff = (mul) => { try { delete game._diffDmgMul; } catch (e) {} game._diffDmgMul = mul; game._diffTier = null; };
     const fire = async (sign, defVal) => {
       for (let attempt = 0; attempt < 4; attempt++) {
         game.paused = false;
+        // Same reason for the expedition: game.expedition is live state the sim writes to, and a
+        // batch that stamps it once can be blanked partway through (a run 'ending' on a non-tower
+        // map). Re-stamped per shot so every sample in a batch is really at the tier it claims.
+        if (_expFor != null) { game.expedition = game.expedition || {}; game.expedition.active = true; game.expedition.difficulty = _expFor; }
         player.baseDef = defVal; player.mods.def = 0;
         if (typeof invalidateEquipBonusCache === 'function') invalidateEquipBonusCache();
         if (typeof refreshGearCache === 'function') refreshGearCache();
@@ -81,7 +94,7 @@ try {
       return 0;
     };
     const meanAt = async (mul, n) => {
-      game._diffDmgMul = mul; game._diffTier = null;
+      pinDiff(mul);
       const out = [];
       for (let i = 0; i < n; i++) out.push(await fire('aries', 0));
       return Math.round(out.reduce((s, x) => s + x, 0) / out.length);
@@ -90,15 +103,14 @@ try {
     o.normal    = await meanAt(1.0, 30);
     o.hard      = await meanAt(1.5, 30);
     o.nightmare = await meanAt(2.0, 30);
-    game._diffDmgMul = 1; game._diffTier = null;
+    unpinDiff(1);
 
     // expedition stat column on top of the global setting
     const expedAt = async (key, n) => {
-      game.expedition = game.expedition || {};
-      game.expedition.active = true; game.expedition.difficulty = key;
+      _expFor = key;
       const out = [];
       for (let i = 0; i < n; i++) out.push(await fire('aries', 0));
-      game.expedition.active = false;
+      _expFor = null; game.expedition.active = false;
       return Math.round(out.reduce((s, x) => s + x, 0) / out.length);
     };
     o.expEasy = await expedAt('easy', 24);
