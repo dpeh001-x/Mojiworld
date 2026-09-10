@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.520';
+const GAME_VERSION = 'v0.30.521';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42570,6 +42570,7 @@ const PLAYER_SAVE_FIELDS = [
   //     accept the finale quest, save, reload — boss won't spawn on
   //     next entry, quest can't be completed.
   '_pqSpirePieces',
+  '_pqStagePaid',   // v0.30.x — per-stage "has paid" record for the Ticket Rush; survives a restart
   '_pqChainRuns',   // v0.30.381 — repeat-run marker for the Ticket Rush
   '_pqFinaleBossPending',
   // v0.26.221 — CRITICAL save-loss fix #3 (same pattern as v0.26.200 / .215).
@@ -45696,7 +45697,7 @@ const _LX_SAVE_MARK_KEY = SAVE_KEY + '_verified';
 // Measured: the full save cost 8-18 ms per 170 KB; this subset is a few KB.
 const _LX_SIGNED_PLAYER_KEYS = ['cls','job','master','level','exp','expToNext','mojicoins','bankBalance','bankAccrueMs','setshards',
   'skillPoints','skillRankPoints','skillRanks','baseAtk','baseDef','baseAcc','baseCrit','baseSpeed','baseJump','maxHp','maxMp',
-  'equipped','inventory','consumables','talents','boons','boonsEquipped','prestige','quests','_pqChainRuns'];
+  'equipped','inventory','consumables','talents','boons','boonsEquipped','prestige','quests','_pqChainRuns','_pqStagePaid'];
 const _LX_SIGNED_GAME_KEYS = ['boonDex','_bossKills','bossDefeated','_bossDefeatedAt','_playMs','kills','dexMilestones','dexPerm','prestige',
   'bossRushBest','_bossRushRewardDay','_chestCooldown'];
 function _lxLocalSaveSigBody(s) {
@@ -51366,6 +51367,12 @@ function _lxRepairMirrorQuests() {
     if (typeof QUESTS !== 'object' || !player || !player.quests) return;
     const Q = player.quests, act = Q.active || {}, comp = Q.completed || {};
     if (!comp.q_inner_dim_trial) return;             // no proof of a kill; nothing to repair
+    // v0.30.x — this pass was written for a SEALED Inner Dimension, crediting any active
+    // mirror quest with the kill the player could no longer go and get. _lxNeedsMirrorSelf
+    // now reopens that door whenever such a quest is live, so the two contradicted: the
+    // door was open and the quest completed itself first - Auron paid 3200 coins for zero
+    // kills the moment the Journal was opened. If the door is open, there is nothing to repair.
+    if (typeof _lxNeedsMirrorSelf === 'function' && _lxNeedsMirrorSelf()) return;
     for (const id in act) {
       const q = QUESTS[id];
       if (!q || q.target !== 'mirrorSelf' || comp[id]) continue;
@@ -52080,8 +52087,18 @@ function _lxQuestCoinCeil(lv) { return LX_QUEST_COIN_PER_LEVEL * Math.max(1, (lv
 const LX_PQ_CHAIN_IDS = { q_clockwork_underpass: 1, q_pq_spire: 1, q_pq_carriage: 1, q_pq_finale: 1, q_clockwork_express: 1 };   // v0.30.384 — the Endless Express run rides the same restart
 const LX_PQ_REPEAT_MUL = 0.25;   // v0.30.404 — was 0.40
 const LX_PQ_REPEAT_EXP_MUL = 0.50;   // v0.30.404 — a repeat run's EXP too (repeats paid full EXP before; that was the grind-skip)
+// v0.30.x — A STAGE PAYS FULL ONCE. v0.30.407 stopped a mid-chain restart from counting as a
+// repeat RUN (which had put a player on 25%/50% rates for a run they never finished) - but
+// it still deletes the completion records, so every stage already paid could be re-earned
+// at full rate, indefinitely, through Milo's "reset my papers". Both are right at once if
+// the discount is keyed per STAGE: the first payout of each stage is full, every later
+// payout of that same stage is a repeat, and a restart never touches that record.
+function _lxPqStagePaid(id) {
+  return !!(typeof player !== 'undefined' && player && player._pqStagePaid && player._pqStagePaid[id]);
+}
 function _lxPqRepeatMul(id) {
-  return (LX_PQ_CHAIN_IDS[id] && typeof player !== 'undefined' && player && (player._pqChainRuns | 0) > 0) ? LX_PQ_REPEAT_MUL : 1;
+  if (!LX_PQ_CHAIN_IDS[id] || typeof player === 'undefined' || !player) return 1;
+  return ((player._pqChainRuns | 0) > 0 || _lxPqStagePaid(id)) ? LX_PQ_REPEAT_MUL : 1;
 }
 function _completeQuest(id) {
   const q = QUESTS[id]; if (!q) return;
@@ -52100,6 +52117,8 @@ function _completeQuest(id) {
   const _activeSnap = player.quests.active[id] || {};
   delete player.quests.active[id];
   player.quests.completed[id] = Date.now();
+  // v0.30.x — remember that this Ticket Rush stage has paid, across restarts (see _lxPqStagePaid)
+  if (typeof LX_PQ_CHAIN_IDS !== 'undefined' && LX_PQ_CHAIN_IDS[id]) { player._pqStagePaid = player._pqStagePaid || {}; player._pqStagePaid[id] = 1; }
   // v0.29.296 — Trainee Path: count the turn-in. Placed after the idempotency
   // guard above so a re-entrant call can never inflate the counter.
   try {
@@ -52281,7 +52300,7 @@ function _completeQuest(id) {
             && typeof _lxPqStageCapFrac === 'function') {
           const _pqCap = Math.floor(_lxLevelCost(player.level || 1) * _lxPqStageCapFrac(player.level || 1) * ((q && q.stageCapMul > 0) ? q.stageCapMul : 1));   // v0.30.384 — stages 1–3 carry stageCapMul 0.5
           if (_pqCap > 0 && _questExp > _pqCap) _questExp = _pqCap;
-          if (LX_PQ_CHAIN_IDS[id] && (player._pqChainRuns | 0) > 0) _questExp = Math.floor(_questExp * LX_PQ_REPEAT_EXP_MUL);   // v0.30.404 — a repeat run: half the EXP
+          if (_lxPqRepeatMul(id) !== 1) _questExp = Math.floor(_questExp * LX_PQ_REPEAT_EXP_MUL);   // v0.30.x — one source of truth with the coin/gear discount   // v0.30.404 — a repeat run: half the EXP
         }
       }
     } catch (e) {}
