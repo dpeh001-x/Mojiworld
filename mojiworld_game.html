@@ -5558,6 +5558,24 @@
   #party-frames .pf-revive.ready { background: rgba(30, 55, 30, 0.6); border-color: rgba(120, 220, 130, 0.5); color: #d6ffcf; }
   #party-frames .pf-revive.spent { background: rgba(45, 30, 32, 0.6); border-color: rgba(255, 120, 120, 0.4); color: rgba(255, 200, 200, 0.85); }
   #party-frames .pf-down .pf-name { color: #ffb8b8; }
+  /* v0.30.x — THE SINGULARITY form-change card: two letterbox bars slide in from the edges and
+     a title settles between them, then everything lets go. Transform + opacity only, so it
+     composites on the GPU and costs the game loop nothing. .gf-still (reduced motion) skips the
+     bars and the slide. */
+  .gf-card { position: absolute; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
+  .gf-card .gf-bar { position: absolute; left: 0; right: 0; height: 13%; background: #030108; transform: translateY(var(--gf-off)); animation: gfBar 2.6s cubic-bezier(.2,.8,.2,1) forwards; }
+  .gf-card .gf-top { top: 0; --gf-off: -100%; }
+  .gf-card .gf-bot { bottom: 0; --gf-off: 100%; }
+  .gf-card .gf-title { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); text-align: center; opacity: 0; animation: gfTitle 2.6s ease forwards; }
+  .gf-card .gf-t1 { font: 900 44px/1 'Inter', 'Segoe UI', system-ui, sans-serif; letter-spacing: 8px; color: #fff4ff; text-shadow: 0 0 22px rgba(190,120,255,0.9), 0 0 60px rgba(120,60,255,0.6), 0 2px 3px #000; }
+  .gf-card .gf-t2 { margin-top: 10px; font: 700 13px/1.4 'Inter', 'Segoe UI', system-ui, sans-serif; letter-spacing: 5px; color: #d9c2ff; text-shadow: 0 0 14px rgba(160,90,255,0.9), 0 1px 2px #000; }
+  .gf-card.gf-p3 .gf-t1 { color: #fff0f4; text-shadow: 0 0 22px rgba(255,80,130,0.95), 0 0 64px rgba(255,40,90,0.6), 0 2px 3px #000; }
+  .gf-card.gf-p3 .gf-t2 { color: #ffc6d6; text-shadow: 0 0 14px rgba(255,60,110,0.9), 0 1px 2px #000; }
+  .gf-card.gf-still .gf-bar { display: none; }
+  .gf-card.gf-still .gf-title { animation: gfTitleStill 2.6s ease forwards; }
+  @keyframes gfBar { 0% { transform: translateY(var(--gf-off)); } 14% { transform: translateY(0); } 80% { transform: translateY(0); } 100% { transform: translateY(var(--gf-off)); } }
+  @keyframes gfTitle { 0% { opacity: 0; transform: translateY(-50%) scale(1.18); letter-spacing: 14px; } 18% { opacity: 1; transform: translateY(-50%) scale(1); } 76% { opacity: 1; } 100% { opacity: 0; transform: translateY(-54%) scale(0.98); } }
+  @keyframes gfTitleStill { 0% { opacity: 0; } 15% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
   #toast-container {
     position: absolute;
     /* v0.29.761 — was centred at top:70px, the exact band where the map-name
@@ -10642,7 +10660,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.548';
+const GAME_VERSION = 'v0.30.549';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -91686,6 +91704,7 @@ function killMonster(m) {
     }
     // v0.30.x — the arena loses a tier and the lights go down one more step.
     if (typeof _lxGravCollapse === 'function') _lxGravCollapse(m._gravitosPhase);
+    if (typeof _lxGravFinaleBeat === 'function') _lxGravFinaleBeat(m._gravitosPhase, m);   // v0.30.x — letterbox + title, shockwave, held frame
     const _label = (m._gravitosPhase === 2)
       ? '💥 GRAVITOS AWAKENS — Phase 2 (stronger + faster)'
       : '💥💥 GRAVITOS ASCENDS — Phase 3 (DOUBLED + relentless)';
@@ -93194,6 +93213,7 @@ function _triggerSuperBossDeathRaw(m) {
       if (typeof _lxEndingCard === 'function') _lxEndingCard('Nothing that vast ever stood on its own.', null, 3800, _toShadow);
       else _toShadow();
     };
+    if (typeof _lxGravFinaleKill === 'function') _lxGravFinaleKill(m);   // v0.30.x — white-out, held frame, the arena rings out
     setTimeout(() => {
       if (typeof _gravitosDefeatCutscene === 'function') _gravitosDefeatCutscene(_afterDefeatCine);
       else _afterDefeatCine();
@@ -108935,6 +108955,8 @@ function drawBackground() {
       }
       ctx.fillStyle = _tint; ctx.fillRect(0, 0, W, H);
     }
+    // v0.30.x — the Singularity's living sky: lens halo, infalling stars, the accretion disc (see _lxGravBackdropDraw)
+    if (game.currentMap === 'gravitosArena' && typeof _lxGravBackdropDraw === 'function') _lxGravBackdropDraw();
     // v0.29.x — mid-ground parallax ridges: the derived depth layers between
     // the 0.12 backdrop and the 1.0 play field (see _lxMidgroundFor above).
     // Drawn after the tint so they sit IN the scene, before sky-life/props so
@@ -113385,7 +113407,180 @@ let _lxGravDebris = [];          // slabs mid-fall: drawn, no longer solid
 let _lxGravTintCur = null;       // eased alpha, null until the arena is entered
 let _lxGravTintTo = 0.42;
 
+// v0.30.x — THE SINGULARITY, FINAL-BOSS PASS (per user: "make the Gravitos fight and the backdrop
+// seem more like a final boss fight ... ensure the additional effects do not cause significant lag").
+//
+// What AAA final arenas do that this one did not: the ARENA is alive and reacts to the fight
+// (Hades' Styx, Hollow Knight's Radiance, Elden Ring's Elden Beast all animate the sky behind
+// the boss), the form change is a BEAT (letterbox, title, shockwave, a held frame), and the last
+// stretch is a DESPERATION state the player can feel at the screen edge. Every layer here is
+// baked once at 2x and blitted; the per-frame cost is 3-4 drawImage calls, ONE stroke path for
+// the infalling stars, and a fillRect - well under the cost of a single mob nameplate.
+// _perfLowFx() is TRUE whenever any boss is alive, so nothing here gates on it (it would never
+// run); the budget is cut by _perfVeryLowFx (tier 2) and by game._reduceMotion instead.
+const _LX_GF = { bakes: Object.create(null), pulses: [], cardEl: null, cardT: 0 };
+const _LX_GF_DISC = { fx: 0.515, fy: 0.225, fr: 0.080 };   // the oculus sphere in bg_v3_gravitosArena, as fractions of W / H / W
+const _LX_GF_COL = { 1: ['#8a5cff', '#ffd27a', 'rgba(150,100,255,'], 2: ['#d14dff', '#ffb35c', 'rgba(210,80,255,'], 3: ['#ff3d7a', '#ffe08a', 'rgba(255,60,110,'] };
+function _lxGfBake(key, size, paint) {
+  let cv = _LX_GF.bakes[key];
+  if (cv) return cv;
+  cv = document.createElement('canvas'); cv.width = cv.height = size * 2;
+  const c = cv.getContext('2d'); c.scale(2, 2); c.translate(size / 2, size / 2);
+  paint(c); _LX_GF.bakes[key] = cv; return cv;
+}
+function _lxGfBoss() {
+  const arr = (typeof game !== 'undefined' && game && game.monsters) || null;
+  if (!arr) return null;
+  for (let i = 0; i < arr.length; i++) { const m = arr[i]; if (m && m.type === 'gravitos' && m.currentHp > 0) return m; }
+  return null;
+}
+function _lxGfPhase(m) { return m ? ((m._gravitosPhase | 0) || 1) : 1; }
+// Desperation: final form, under a fifth of its bar.
+function _lxGfDesperate(m) { return !!(m && (m._gravitosPhase | 0) === 3 && m.maxHp > 0 && m.currentHp / m.maxHp < 0.20); }
+function _lxGfPaintHalo(phase) {
+  return (c) => {
+    const rg = _LX_GF_COL[phase][2];
+    const g = c.createRadialGradient(0, 0, 8, 0, 0, 118);
+    g.addColorStop(0, rg + '0.55)'); g.addColorStop(0.35, rg + '0.22)'); g.addColorStop(1, rg + '0)');
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, 118, 0, Math.PI * 2); c.fill();
+  };
+}
+// The accretion disc: a tilted stack of thin ellipses, brightest just outside the sphere,
+// gold on the inner rims and violet on the outer, with a few dashed lanes for texture.
+function _lxGfPaintDisc(phase) {
+  return (c) => {
+    const [vio, gold] = _LX_GF_COL[phase];
+    c.rotate(-0.32);
+    c.lineCap = 'round';
+    for (let i = 0; i < 11; i++) {
+      const r = 46 + i * 7.5, sq = 0.30 + i * 0.012;
+      const inner = i < 4;
+      c.strokeStyle = inner ? gold : vio;
+      c.globalAlpha = inner ? 0.95 - i * 0.12 : 0.55 - (i - 4) * 0.055;
+      c.lineWidth = inner ? 3.2 - i * 0.4 : 1.6;
+      c.beginPath(); c.ellipse(0, 0, r, r * sq, 0, 0, Math.PI * 2); c.stroke();
+    }
+    c.globalAlpha = 0.7; c.strokeStyle = '#ffffff'; c.lineWidth = 1.3;
+    for (let k = 0; k < 6; k++) {
+      const r = 60 + k * 14, a0 = k * 1.9, a1 = a0 + 1.1;
+      c.beginPath(); c.ellipse(0, 0, r, r * (0.32 + k * 0.015), 0, a0, a1); c.stroke();
+    }
+    c.globalAlpha = 1;
+  };
+}
+function _lxGfPaintVignette(c) {
+  const g = c.createRadialGradient(0, 0, 60, 0, 0, 150);
+  g.addColorStop(0, 'rgba(140,0,40,0)'); g.addColorStop(0.58, 'rgba(140,0,40,0.16)'); g.addColorStop(1, 'rgba(190,0,50,1)');
+  c.fillStyle = g; c.fillRect(-150, -150, 300, 300);
+}
+// Backdrop layer: drawn from drawBackground, in SCREEN space, right after the darkening tint, so
+// the platforms, the boss and every entity still sit in front of it. Tracks the 0.12 parallax the
+// backdrop itself uses, so the disc stays seated on the painted sphere as the camera pans.
+function _lxGravBackdropDraw() {
+  try {
+    if (typeof game === 'undefined' || !game || game.currentMap !== 'gravitosArena') return;
+    const m = _lxGfBoss();
+    const phase = _lxGfPhase(m), desperate = _lxGfDesperate(m);
+    const veryLow = (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx());
+    const t = game.time;
+    const shift = Math.floor(((game.camera.x || 0) * 0.12) % W);
+    const bx = _LX_GF_DISC.fx * W - shift, by = _LX_GF_DISC.fy * H, r = _LX_GF_DISC.fr * W;
+    const spin = (phase === 3 ? 0.011 : phase === 2 ? 0.007 : 0.004) * (desperate ? 2.2 : 1);
+    const beat = 0.5 + 0.5 * Math.sin(t * (desperate ? 0.16 : 0.05));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // 1. lens halo behind the sphere
+    ctx.globalAlpha = (phase === 3 ? 0.66 : phase === 2 ? 0.54 : 0.44) + beat * 0.16;
+    const hs = r * 7.0;
+    ctx.drawImage(_lxGfBake('gf_halo' + phase, 256, _lxGfPaintHalo(phase)), bx - hs / 2, by - hs / 2, hs, hs);
+    // 2. infalling stars: deterministic per index, no state, one path
+    const n = veryLow ? 10 : (phase === 3 ? 30 : phase === 2 ? 22 : 16);
+    ctx.strokeStyle = phase === 3 ? 'rgba(255,200,220,0.75)' : 'rgba(220,205,255,0.7)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    const R0 = W * 0.95, sp = spin * 3.2;
+    for (let i = 0; i < n; i++) {
+      const a = ((i * 0.618034) % 1) * Math.PI * 2 + i * 0.05;
+      const p = ((t * sp * (0.6 + ((i * 0.37) % 1) * 0.8)) + i * 0.173) % 1;   // 0 = far rim, 1 = swallowed
+      const rr = r * 0.95 + (R0 - r) * Math.pow(1 - p, 1.7);
+      const len = 8 + 52 * p * p;
+      const ca = Math.cos(a), sa = Math.sin(a) * 0.72;
+      ctx.moveTo(bx + ca * rr, by + sa * rr);
+      ctx.lineTo(bx + ca * (rr + len), by + sa * (rr + len));
+    }
+    ctx.globalAlpha = 0.75 + beat * 0.25;
+    ctx.stroke();
+    // 3. the accretion disc, turning
+    ctx.globalAlpha = 1;
+    ctx.translate(bx, by); ctx.rotate(t * spin);
+    const ds = r * 6.2;
+    ctx.drawImage(_lxGfBake('gf_disc' + phase, 320, _lxGfPaintDisc(phase)), -ds / 2, -ds / 2, ds, ds);
+    ctx.restore();
+  } catch (e) {}
+}
+// World-space shockwave rings (form change, the final blow): drawn by _lxGravArenaDraw, under the boss.
+function _lxGfPulse(x, y, col, ms) { _LX_GF.pulses.push({ x, y, col: col || '#ffffff', t0: performance.now(), ms: ms || 720 }); if (_LX_GF.pulses.length > 4) _LX_GF.pulses.shift(); }
+function _lxGravPulseDraw() {
+  if (!_LX_GF.pulses.length) return;
+  const now = performance.now(), camX = (game.camera && game.camera.x) || 0;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+  for (let i = _LX_GF.pulses.length - 1; i >= 0; i--) {
+    const p = _LX_GF.pulses[i], k = (now - p.t0) / p.ms;
+    if (k >= 1) { _LX_GF.pulses.splice(i, 1); continue; }
+    const e = 1 - Math.pow(1 - k, 2.2);
+    ctx.globalAlpha = (1 - k) * 0.9; ctx.strokeStyle = p.col; ctx.lineWidth = 16 * (1 - k) + 2;
+    ctx.beginPath(); ctx.arc(p.x - camX, p.y, 20 + e * 900, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = (1 - k) * 0.45; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(p.x - camX, p.y, 20 + e * 620, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
+}
+// Desperation vignette: the screen edge bleeds crimson and breathes with the boss. Screen space, late.
+function _lxGravVignetteDraw() {
+  try {
+    if (typeof game === 'undefined' || !game || game.currentMap !== 'gravitosArena') return;
+    const m = _lxGfBoss();
+    if (!_lxGfDesperate(m)) return;
+    const a = 0.42 + 0.30 * (0.5 + 0.5 * Math.sin(game.time * 0.16));
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.drawImage(_lxGfBake('gf_vig', 300, _lxGfPaintVignette), 0, Math.round(game.camera.y || 0), W, H);
+    ctx.restore();
+  } catch (e) {}
+}
+// The form-change BEAT: letterbox bars + a title card (DOM, GPU-composited), the shockwave, the held frame.
+function _lxGravFinaleBeat(phase, m) {
+  try {
+    const cx = m ? m.x + m.w / 2 : 1100, cy = m ? m.y + m.h / 2 : 380;
+    const col = (_LX_GF_COL[phase] || _LX_GF_COL[3])[0];
+    _lxGfPulse(cx, cy, col, 780); setTimeout(() => _lxGfPulse(cx, cy, '#ffffff', 620), 140);
+    if (typeof addHitStop === 'function') addHitStop(150);
+    const title = phase === 3 ? 'FINAL FORM' : 'SECOND FORM';
+    const sub = phase === 3 ? 'GRAVITOS, THE SINGULAR — ASCENDANT' : 'GRAVITOS, THE SINGULAR — AWAKENED';
+    _lxGravTitleCard(title, sub, phase);
+  } catch (e) {}
+}
+function _lxGravTitleCard(title, sub, phase) {
+  const host = document.querySelector('.game-wrapper'); if (!host) return;
+  if (_LX_GF.cardEl && _LX_GF.cardEl.parentNode) _LX_GF.cardEl.parentNode.removeChild(_LX_GF.cardEl);
+  const el = document.createElement('div');
+  el.className = 'gf-card gf-p' + (phase | 0) + ((typeof game !== 'undefined' && game && game._reduceMotion) ? ' gf-still' : '');
+  el.innerHTML = '<div class="gf-bar gf-top"></div><div class="gf-bar gf-bot"></div><div class="gf-title"><div class="gf-t1">' + title + '</div><div class="gf-t2">' + sub + '</div></div>';
+  host.appendChild(el); _LX_GF.cardEl = el;
+  clearTimeout(_LX_GF.cardT);
+  _LX_GF.cardT = setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); if (_LX_GF.cardEl === el) _LX_GF.cardEl = null; }, 2600);
+}
+// The final blow: a white-out, the held frame, the arena rings out from where he stood.
+function _lxGravFinaleKill(m) {
+  try {
+    const cx = m ? m.x + m.w / 2 : 1100, cy = m ? m.y + m.h / 2 : 380;
+    _lxGfPulse(cx, cy, '#ffffff', 900); setTimeout(() => _lxGfPulse(cx, cy, '#ffd27a', 1100), 160);
+    if (typeof addHitStop === 'function') addHitStop(150);
+    if (typeof flash === 'function') flash(1);
+    if (typeof addShake === 'function') addShake(24);
+  } catch (e) {}
+}
 function _lxGravArenaReset() {
+  _LX_GF.pulses.length = 0;   // v0.30.x — finale pulses die with the arena
   _lxGravDebris = [];
   _lxGravTintCur = null;
   _lxGravTintTo = _LX_GRAV_TINT[1];
@@ -113493,6 +113688,7 @@ function _lxGravArenaDraw() {
       ctx.restore();
     }
     if (game.currentMap !== 'gravitosArena') return;
+    if (typeof _lxGravPulseDraw === 'function') _lxGravPulseDraw();   // v0.30.x — form-change / final-blow shockwaves
     for (const p of (game.mapData.platforms || [])) {
       if (!p || !p._lxDoomed) continue;
       const sx = p.x - camX;
@@ -141943,6 +142139,7 @@ function loop(time) {
   if (typeof _qnavDrawCompass === 'function') _qnavDrawCompass();
   if (typeof _qnavDrawKey === 'function') _qnavDrawKey();   // compact directional key
   if (typeof _lxMobStrayCheck === 'function') _lxMobStrayCheck();   // v0.29.619 — BUG11 stray-mob report (self-throttled to 2s)   // v0.29.583 — quest compass (game.qnav)
+  if (typeof _lxGravVignetteDraw === 'function') _lxGravVignetteDraw();   // v0.30.x — the Singularity's desperation edge
   drawDamageNumbers();
   drawIceCheer();   // v0.25.458 — Icy Tower combo overlay
   if (typeof _drawControlVignette === 'function') _drawControlVignette();   // v0.30.368 — stunned / frozen / bubbled edge pulse
