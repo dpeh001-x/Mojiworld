@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.513';
+const GAME_VERSION = 'v0.30.514';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -50641,6 +50641,13 @@ const ACHIEVEMENTS = [
   { id:'questMaster',  name:'Quest Master',      desc:'Complete 175 quests',              test:()=>_lxQuestsDone()>=LX_GOD_QUEST_TARGET, onUnlock:()=>_lxGrantGodWeapon() },
 ];
 function checkAchievements() {
+  // v0.30.x — THE INTRO IS PLAYED AT LEVEL 100 AND MUST NOT EARN ANYTHING.
+  // The flash-forward hands the player a Lv.100 master build, and this runs on
+  // every kill with no prologue guard, so a single prologue kill latched the
+  // whole lv10..lv100 chain (plus firstCalling / truePath) onto a character who
+  // is reset to Lv.1 seconds later - and fired the matching STEAM unlocks, which
+  // no restore can take back. Nothing in a memory is earned.
+  if (window._prologueActive) return;
   if (!game.achievements) game.achievements = {};
   let unlocked = 0;
   for (const a of ACHIEVEMENTS) {
@@ -50763,7 +50770,7 @@ function _earlyState() {
     // Characters still inside the on-ramp (Lv < 10) are left alone — they get
     // the real ladder, which is the point.
     try {
-      if (typeof player !== 'undefined' && player && (player.level || 1) >= 10) {
+      if (typeof player !== 'undefined' && player && !window._prologueActive && (player.level || 1) >= 10) {   // v0.30.x — the intro's Lv.100 is borrowed; it must not grandfather the ladder away
         for (const h of EARLY_HOOKS) game.early.done[h.id] = 1;   // 1 = grandfathered (a real claim stores Date.now()); MUST be truthy or every truthiness check below re-fires the rung
         // Story rungs gated on LEVEL are already met too, so credit those
         // silently as well — otherwise a Lv-40 character logs in and is handed
@@ -142456,6 +142463,10 @@ function _prologueApexSegment() {
     window._prologueSnapG = JSON.stringify({
       mojidexSeen: game.mojidexSeen || {}, bestiary: game.bestiary || {},
       bossDefeated: game.bossDefeated || {}, kills: game.kills,
+      // v0.30.x — both of these are PERSISTED and were not snapshotted, so anything
+      // the apex segment wrote into them outlived the reset. Captured as null when
+      // absent so the restore can delete them again rather than inventing an empty one.
+      early: game.early || null, achievements: game.achievements || null,
     });
     // v0.27.24 — tab-durable redundancy for the restore. The window globals can
     // be cleared by another script between here and _prologueFinish; a
@@ -143492,6 +143503,10 @@ function _prologueFinish(skipped) {
     if (fg) {
       game.mojidexSeen = fg.mojidexSeen; game.bestiary = fg.bestiary;
       game.bossDefeated = fg.bossDefeated; game.kills = fg.kills;
+      // v0.30.x — restore-or-remove, so a ladder that did not exist before the intro
+      // does not come back as a fully grandfathered one.
+      if (fg.early) game.early = fg.early; else delete game.early;
+      if (fg.achievements) game.achievements = fg.achievements; else delete game.achievements;
     }
   } catch (e) {}
   // v0.27.24 — FAIL-SAFE: if the snapshot was truly unrecoverable, the player is
