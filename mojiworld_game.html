@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.514';
+const GAME_VERSION = 'v0.30.515';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -35824,7 +35824,18 @@ function openEdictsPanel() {
     // v0.30.491 — everything about how this looks now lives in the stylesheet under #edicts-modal.
     document.body.appendChild(ov);
   }
-  const close = () => { try { ov.remove(); } catch (e) {} if (typeof saveState === 'function') saveState(); };
+  // v0.30.x — this panel covers the whole viewport; the world must not keep
+  // playing behind it. Releasing the pause asks the same reconciliation every
+  // other surface uses, so closing this one on top of another modal does not
+  // unfreeze the game underneath it.
+  if (typeof game !== 'undefined' && game) game.paused = true;
+  const close = () => {
+    try { ov.remove(); } catch (e) {}
+    if (typeof game !== 'undefined' && game) {
+      game.paused = (typeof _anyOtherModalOpen === 'function') ? !!_anyOtherModalOpen() : false;
+    }
+    if (typeof saveState === 'function') saveState();
+  };
   const render = () => {
     const w = _edictWeight();
     // v0.30.491 — the row's state is a CLASS now, not eight interpolated colour strings. Same markup,
@@ -43536,6 +43547,7 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   // click-the-surface branch in _lxPadMenuNav); a choice stanza renders real
   // buttons and gets the standard nav ring.
   'story-beat-overlay',
+  'edicts-modal',   // v0.30.x — was unlisted, so the stick drove the player around behind it
   // v0.29.7xx — the wardrobe's Character Studio editor (opened from the U
   // panel): a real modal full of buttons that was never listed.
   'char-studio-overlay'];
@@ -106147,6 +106159,9 @@ function closeAllModals() {
   if (game && typeof game._uiConfirmCleanup === 'function') {
     try { game._uiConfirmCleanup(); } catch (e) { /* ignore */ }
   }
+  // v0.30.x — the edicts panel is REMOVED rather than hidden, so it cannot ride the
+  // display:none loop below; take it down explicitly or Esc leaves it on screen.
+  { const _ed = document.getElementById('edicts-modal'); if (_ed) { try { _ed.remove(); } catch (e) {} } }
   for (const id of ['shop-modal','inventory-modal','powerup-modal','sage-blessing-modal','help-modal','enhance-modal','reforge-modal','attributes-modal','dev-modal','taxi-modal','codex-modal','mojidex-modal','multiplayer-modal','quest-modal','worldmap-modal','confirm-modal','craft-modal','lore-modal']) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -155671,13 +155686,20 @@ const _LX_EXTRA_PAUSE_SURFACES = [
   { id: 'backup-modal-bg',          mode: 'class'   },   // openBackupModal
   { id: 'exp-seed-modal',           mode: 'display' },   // _expeditionSeedPrompt - the player is TYPING a seed
   { id: 'everdawn-welcome-overlay', mode: 'display' },   // first arrival in Everdawn
+  // v0.30.x — openEdictsPanel builds a full-viewport overlay at z-index 520 on the
+  // BODY and was in none of the five registries: the sim ticked underneath it, Esc
+  // did nothing, no controller could reach its close button, and the death overlay
+  // (z-index 90, inside the game wrapper) painted UNDER it - so dying behind the
+  // panel left the player guessing where the backdrop was.
+  { id: 'edicts-modal',             mode: 'exists'  },   // openEdictsPanel
 ];
 function _lxExtraPauseSurfaceEls() {
   const out = [];
   for (const s of _LX_EXTRA_PAUSE_SURFACES) {
     const el = document.getElementById(s.id);
     if (!el) continue;
-    if (s.mode === 'class') { if (el.classList && el.classList.contains('on')) out.push(el); }
+    if (s.mode === 'exists') { out.push(el); }   // v0.30.x — built on open, removed on close: being here IS being open
+    else if (s.mode === 'class') { if (el.classList && el.classList.contains('on')) out.push(el); }
     else if (el.style.display === 'flex' || el.style.display === 'block') out.push(el);
   }
   return out;
