@@ -63,12 +63,15 @@ const prompt = (theme, palette) => HEAD + theme + ' Mainly coloured in ' + palet
 // Per user ("because there should be some variety"): the first nineteen share the spore's orb-and-
 // crescents composition; the four below were given their OWN burst shapes instead, and the prompt
 // tail now says any energetic shape will do. Re-roll any of the nineteen the same way if the set
-// reads too uniform - change the theme sentence, not the style tail.
+// reads too uniform - change the theme sentence, not the style tail. Second pass per user
+// (v0.30.556): msplinter, mbloodbolt, micicle, mstone, mticket, mtoxic, mvoltzap and mwrap got
+// their own shapes too - a splinter burst, a blood splat, a snowflake of shards, a dust cloud, a
+// ray fan, a goo ring, a lightning crack, unrolling bandage.
 // hue: [lo, hi] in degrees (wrapping allowed) that the coloured pixels must mostly fall in;
 // mono: true for glyphs that are meant to be mostly white / cream / grey.
 const KEYS = {
   mbloodbolt:  { hue: [335, 20], palette: 'white, bright crimson RED and deep blood red', not: 'no blue, no green, no yellow, no purple',
-    theme: 'a bright round burst of crimson blood light with two curved crescent splash arcs sweeping out to either side of it and a few round droplets flicking off, like a spray of energy released.' },
+    theme: 'a blood splash - a glossy crimson splat with irregular splash lobes and round droplets flying outward from a bright glowing core, wet and shiny.' },
   mbonechip:   { mono: true, palette: 'white, ivory and pale warm cream', not: 'no strong colour at all, no blue, no green, no red',
     theme: 'a bright round burst of pale bone light with two curved crescent bone-shard arcs sweeping out to either side of it and small bone chips flicking off.' },
   mbubble:     { hue: [170, 210], palette: 'white, bright aqua CYAN and deep teal-blue', not: 'no red, no pink, no yellow, no green',
@@ -88,7 +91,7 @@ const KEYS = {
   mhornshot:   { mono: true, palette: 'white, warm cream and pale bone-tan', not: 'no strong colour at all, no blue, no green, no red',
     theme: 'a bone-tan flare shaped like two thick curved horns crossing in a V, with a bright glowing core between the horn tips and small bone chips flying off.' },
   micicle:     { hue: [175, 225], palette: 'white, pale ice CYAN and clear sky blue', not: 'no red, no pink, no yellow, no green',
-    theme: 'a bright round burst of pale frost light with two curved crescent ice-crystal arcs sweeping out to either side of it and small ice shards flicking off.' },
+    theme: 'a frost burst - sharp ice-crystal shards radiating outward like a six-pointed snowflake from a bright icy core, with tiny sparkles between them.' },
   mink:        { hue: [265, 320], palette: 'white, bright MAGENTA-violet and deep ink purple', not: 'no red, no green, no yellow, no orange',
     theme: 'an ink splat - a glowing magenta-white core inside a splash of deep violet ink with irregular splash lobes and round droplets flying outward, glossy and wet.' },
   mlantern:    { hue: [75, 150], palette: 'white, bright acid GREEN and pale yellow-green', not: 'no red, no blue, no orange, no purple',
@@ -96,23 +99,23 @@ const KEYS = {
   morange:     { hue: [18, 48], palette: 'white, bright citrus ORANGE and warm yellow', not: 'no blue, no green, no pink, no purple',
     theme: 'a bright round burst of citrus orange light with two curved crescent peel-slice arcs sweeping out to either side of it and small juice droplets flicking off.' },
   msplinter:   { hue: [18, 48], palette: 'white, warm AMBER wood-brown and pale tan', not: 'no blue, no green, no pink, no purple',
-    theme: 'a bright round burst of amber wood light with two curved crescent splinter arcs sweeping out to either side of it and small wood chips flicking off.' },
+    theme: 'a burst of wood splinters - jagged amber wood shards radiating outward from a small glowing core, with small chips and sawdust flying off.' },
   mstarshot:   { hue: [40, 65], palette: 'white, pale starlight YELLOW and soft cream', not: 'no red, no green, no orange, no purple',
     theme: 'a starlight twinkle - one big glossy four-point star with a bright white core and soft yellow glow, smaller stars and sparkle dots scattered around it.' },
   mstinger:    { hue: [30, 58], palette: 'white, bright honey AMBER and gold', not: 'no blue, no green, no pink, no purple',
     theme: 'a bright round burst of honey-amber light with two curved crescent arcs sweeping out to either side of it and small sting sparks flicking off.' },
   mstone:      { mono: true, palette: 'white, pale grey and warm beige', not: 'no strong colour at all, no blue, no green, no red',
-    theme: 'a bright round burst of dust-cloud light with two curved crescent arcs sweeping out to either side of it and small stone chips flicking off.' },
+    theme: 'a dust puff - a rounded cloud of pale dust lobes with a bright glowing core and small grey stone chips tumbling out of it.' },
   mticket:     { hue: [38, 62], palette: 'white, bright GOLD and warm yellow', not: 'no blue, no green, no red, no purple',
-    theme: 'a bright round burst of golden light with two curved crescent arcs sweeping out to either side of it and small confetti scraps flicking off.' },
+    theme: 'a golden flash - a bright core with straight golden light rays fanning outward in all directions and small confetti scraps between them.' },
   mtidemark:   { hue: [70, 140], palette: 'white, sickly pale GREEN and dark olive', not: 'no red, no blue, no orange, no purple',
     theme: 'a bright round burst of withered green glyph light with two curved crescent vine-tendril arcs sweeping out to either side of it and small leaves flicking off.' },
   mtoxic:      { hue: [75, 150], palette: 'white, bright toxic LIME GREEN and deep green', not: 'no red, no blue, no orange, no purple',
-    theme: 'a bright round burst of toxic green light with two curved crescent arcs sweeping out to either side of it and small bubbling drops flicking off.' },
+    theme: 'a toxic burst - a bright lime-green core inside a ring of bubbling green goo drops, with bubbles rising off it and a couple of drips.' },
   mvoltzap:    { hue: [42, 66], palette: 'white, bright electric YELLOW and pale gold', not: 'no red, no green, no blue, no purple',
-    theme: 'a bright round burst of yellow lightning light with two curved crescent arcs sweeping out to either side of it and small jagged sparks flicking off.' },
+    theme: 'a lightning crack - a bright yellow core with jagged lightning bolts zigzagging outward in several directions and small sparks at their tips.' },
   mwrap:       { mono: true, palette: 'white, pale cream and faded linen beige', not: 'no strong colour at all, no blue, no green, no red',
-    theme: 'a bright round burst of pale linen-white light with two curved crescent bandage-strip arcs sweeping out to either side of it and small loose threads flicking off.' },
+    theme: 'a bandage burst - pale linen strips curling and unrolling outward from a bright glowing core, with a few loose threads trailing off.' },
 };
 
 // ---- measurement ------------------------------------------------------------------------------
