@@ -10635,7 +10635,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.533';
+const GAME_VERSION = 'v0.30.534';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -115086,6 +115086,127 @@ const _LX_SHADOW_A_STR = [];   // v0.29.735 perf — blob-shadow alpha string me
 const _LX_RE_GRAVITOS = /^gravitos/i;   // v0.29.735 perf — was a fresh RegExp per visible mob per frame
 const _LX_ST_SCRATCH = [{ t: '', timer: 0 }, { t: '', timer: 0 }, { t: '', timer: 0 }];   // v0.29.735 perf — status-icon row scratch
 const _lxSkillIconSrcMemo = Object.create(null);   // v0.29.735 perf — resolved skill-icon URL strings
+// v0.30.x — CELESTIAL SIGIL (per user: "improve the aesthetic" of the star portal, "make it
+// even better" for the Sanctum mark). One renderer for both. Every static layer is baked ONCE
+// at 2x into an offscreen canvas and blitted with the live rotation / pulse, so the richer look
+// - a dashed astral ring, a gradient ray burst, a gold-ticked ring on a glass disc, a glyph with
+// a violet rim, gold inlay and a specular, soft orbiting motes - costs fewer canvas ops per
+// frame than the old per-frame path-drawn star did. `scale` sizes it at the call site.
+const _LX_SIGIL_BAKES = Object.create(null);
+function _lxSigilBake(key, size, paint) {
+  let cv = _LX_SIGIL_BAKES[key];
+  if (cv) return cv;
+  cv = document.createElement('canvas'); cv.width = cv.height = size * 2;
+  const c = cv.getContext('2d'); c.scale(2, 2); c.translate(size / 2, size / 2);
+  paint(c); _LX_SIGIL_BAKES[key] = cv; return cv;
+}
+function _lxSigilPaintRays(c) {   // 16 rays fading to their tips; every 4th long and warm
+  c.lineCap = 'round';
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2, long = (i % 4 === 0), mid = (i % 2 === 0);
+    const r0 = 28, r1 = long ? 54 : mid ? 44 : 38;
+    const g = c.createLinearGradient(Math.cos(a) * r0, Math.sin(a) * r0, Math.cos(a) * r1, Math.sin(a) * r1);
+    g.addColorStop(0, long ? 'rgba(255,236,190,0.85)' : 'rgba(215,185,255,0.70)');
+    g.addColorStop(1, 'rgba(200,160,255,0)');
+    c.strokeStyle = g; c.lineWidth = long ? 2.4 : mid ? 1.4 : 1;
+    c.beginPath(); c.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); c.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); c.stroke();
+  }
+}
+function _lxSigilPaintAstral(c) {   // the astrolabe: a dashed outer ring, gold and violet by turns, three gold pips
+  c.lineCap = 'round';
+  for (let i = 0; i < 6; i++) {
+    const a0 = (i / 6) * Math.PI * 2 + 0.12, a1 = a0 + Math.PI / 3 - 0.36;
+    c.strokeStyle = (i % 2) ? 'rgba(255,216,106,0.55)' : 'rgba(200,165,255,0.55)'; c.lineWidth = 1.1;
+    c.beginPath(); c.arc(0, 0, 33, a0, a1); c.stroke();
+  }
+  c.fillStyle = '#ffd86a';
+  for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2 - Math.PI / 2; c.beginPath(); c.arc(Math.cos(a) * 33, Math.sin(a) * 33, 1.8, 0, Math.PI * 2); c.fill(); }
+}
+function _lxSigilPaintRing(c) {   // glass disc, violet inner ring, gold outer ring with 12 ticks (cardinals longer)
+  c.fillStyle = 'rgba(38, 18, 70, 0.34)';
+  c.beginPath(); c.arc(0, 0, 27, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(190,150,255,0.50)'; c.lineWidth = 1;
+  c.beginPath(); c.arc(0, 0, 23.5, 0, Math.PI * 2); c.stroke();
+  c.strokeStyle = 'rgba(255,216,106,0.88)'; c.lineWidth = 1.4;
+  c.beginPath(); c.arc(0, 0, 27, 0, Math.PI * 2); c.stroke();
+  c.lineCap = 'round';
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2, card = (i % 3 === 0);
+    c.lineWidth = card ? 1.6 : 1; c.strokeStyle = card ? '#ffd86a' : 'rgba(255,216,106,0.7)';
+    const r0 = card ? 24.5 : 25.5, r1 = card ? 29.5 : 28.5;
+    c.beginPath(); c.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); c.lineTo(Math.cos(a) * r1, Math.sin(a) * r1); c.stroke();
+  }
+}
+function _lxSigilTrace(c, pts) { c.beginPath(); for (let i = 0; i < pts.length; i++) { if (i) c.lineTo(pts[i][0], pts[i][1]); else c.moveTo(pts[i][0], pts[i][1]); } c.closePath(); }
+function _lxSigilGlyphFinish(c, pts) {   // shared glyph body: gradient glass, violet rim, gold inlay, specular, hot core
+  const g = c.createLinearGradient(0, -22, 0, 22);
+  g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#eadcff'); g.addColorStop(1, '#b28bff');
+  _lxSigilTrace(c, pts); c.fillStyle = g; c.fill();
+  c.lineJoin = 'round';
+  c.strokeStyle = '#6f3fc4'; c.lineWidth = 3;   c.stroke();
+  c.strokeStyle = '#ffd86a'; c.lineWidth = 1.1; c.stroke();
+  c.save(); _lxSigilTrace(c, pts); c.clip();   // specular: a soft light on the upper-left, the glass read
+  const sp = c.createRadialGradient(-7, -9, 1, -7, -9, 16);
+  sp.addColorStop(0, 'rgba(255,255,255,0.75)'); sp.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = sp; c.fillRect(-30, -30, 60, 60); c.restore();
+  const cg = c.createRadialGradient(0, 0, 0, 0, 0, 7);
+  cg.addColorStop(0, 'rgba(255,255,255,1)'); cg.addColorStop(0.5, 'rgba(255,245,220,0.8)'); cg.addColorStop(1, 'rgba(255,220,150,0)');
+  c.fillStyle = cg; c.beginPath(); c.arc(0, 0, 7, 0, Math.PI * 2); c.fill();
+}
+function _lxSigilPaintStar(c) {   // the portal star: a thin 4-point sparkle behind an 8-point glass body
+  _lxSigilPaintRing(c);
+  const sp = []; for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + Math.PI / 4, r = (i % 2 === 0) ? 25 : 2.6; sp.push([Math.cos(a) * r, Math.sin(a) * r]); }
+  _lxSigilTrace(c, sp); c.fillStyle = 'rgba(255,255,255,0.85)'; c.fill();
+  const pts = []; for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2 - Math.PI / 2, r = (i % 2 === 0) ? 20 : 8.5; pts.push([Math.cos(a) * r, Math.sin(a) * r]); }
+  _lxSigilGlyphFinish(c, pts);
+  c.fillStyle = '#ffd86a';
+  for (let i = 0; i < 16; i += 4) { const p = pts[i]; c.beginPath(); c.arc(p[0] * 1.35, p[1] * 1.35, 1.7, 0, Math.PI * 2); c.fill(); }   // pips seated on the ring at the cardinals
+}
+function _lxSigilPaintTri(c) {   // the Sanctum mark: the triangle players know, apex down, with an inlaid inverted seal
+  _lxSigilPaintRing(c);
+  const pts = []; for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2 + Math.PI / 2; pts.push([Math.cos(a) * 20, Math.sin(a) * 20]); }
+  _lxSigilGlyphFinish(c, pts);
+  c.save(); c.rotate(Math.PI); c.strokeStyle = 'rgba(255,216,106,0.60)'; c.lineWidth = 1; c.lineJoin = 'round';
+  _lxSigilTrace(c, pts.map((p) => [p[0] * 0.46, p[1] * 0.46])); c.stroke(); c.restore();
+  c.fillStyle = '#ffd86a';
+  for (const p of pts) { c.beginPath(); c.arc(p[0] * 1.35, p[1] * 1.35, 2, 0, Math.PI * 2); c.fill(); }   // pips on the vertices, out on the ring
+}
+function _lxSigilPaintMote(c) {
+  const g = c.createRadialGradient(0, 0, 0, 0, 0, 5);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.45, 'rgba(230,210,255,0.8)'); g.addColorStop(1, 'rgba(200,160,255,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(0, 0, 5, 0, Math.PI * 2); c.fill();
+}
+function _drawCelestialSigil(x, y, t, glyph, scale) {
+  const S = scale || 1;
+  const lowFx = (typeof _perfLowFx === 'function' && _perfLowFx());
+  const pulse = 1 + Math.sin(t * 3) * 0.10;
+  const blit = (cv, size) => ctx.drawImage(cv, -size / 2, -size / 2, size, size);
+  ctx.save();
+  ctx.translate(x, y);
+  if (!lowFx) {
+    // ray burst turning one way, the astral ring the other: two nested mechanisms
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.rotate(-t * 0.18); ctx.scale(S, S);
+    blit(_lxSigilBake('sigil_rays', 112, _lxSigilPaintRays), 112); ctx.restore();
+    ctx.save(); ctx.rotate(t * 0.12); ctx.scale(S, S);
+    blit(_lxSigilBake('sigil_astral', 80, _lxSigilPaintAstral), 80); ctx.restore();
+  }
+  ctx.save(); ctx.rotate(t * 0.35); ctx.scale(S * pulse, S * pulse);
+  blit(glyph === 'tri' ? _lxSigilBake('sigil_tri', 64, _lxSigilPaintTri) : _lxSigilBake('sigil_star', 64, _lxSigilPaintStar), 64);
+  ctx.restore();
+  if (!lowFx) {   // orbiting motes: soft glows, not squares
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const mote = _lxSigilBake('sigil_mote', 12, _lxSigilPaintMote);
+    for (let i = 0; i < 4; i++) {
+      const a = t * 0.8 + (i / 4) * Math.PI * 2;
+      const ox = Math.cos(a) * 30 * S, oy = Math.sin(a * 1.2 + i) * 15 * S;
+      ctx.globalAlpha = 0.55 + Math.sin(t * 1.6 + i * 1.7) * 0.35;
+      const ms = (i % 2 ? 9 : 12) * S;
+      ctx.drawImage(mote, ox - ms / 2, oy - ms / 2, ms, ms);
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
 function drawPortals() {
   // v0.25.172 — Painterly portal sprite (Sprites/world/portal.webp)
   // replaces the old procedural ellipse + radial-gradient + sparkle
@@ -115127,34 +115248,10 @@ function drawPortals() {
       ctx.restore();
     }
     if (po.iconStar) {
-      // v0.25.503 — Iconic 8-point bobbing star (the Zodiac sigil
-      // pattern lifted from drawNPCs). Draws INSTEAD of the runestone
-      // portal sprite so void-style portals read as a single pulsing
-      // star rather than a generic vortex. Pulse + slow rotation.
-      const pulse = 1 + Math.sin(t * 3) * 0.18;
-      const rOuter = 22 * pulse;
-      const rInner = 7 * pulse;
-      ctx.save();
-      ctx.rotate(t * 0.35);
-      ctx.fillStyle = '#f6e6ff';
-      ctx.strokeStyle = '#aa77ff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      // v0.25.563 — sigil-star points 16 → 14 per "<15 particles" spec.
-      for (let i = 0; i < 14; i++) {
-        const a = (i / 14) * Math.PI * 2;
-        const r = (i % 2 === 0) ? rOuter : rInner;
-        const x = Math.cos(a) * r, y = Math.sin(a) * r;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(0, 0, 3 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      // v0.25.503 — a star INSTEAD of the runestone sprite, so void-style portals read as
+      // a single pulsing mark. v0.30.x (per user "improve the aesthetic") — the flat
+      // 14-point star is now the celestial sigil shared with the Sanctum mark.
+      _drawCelestialSigil(0, 0, t, 'star', 1);
     } else if (ready) {
       // Sprite is ~320x420 native; draw at 110x150 in-world. Centred so
       // the bottom of the portal sits roughly on the original ground line.
@@ -115173,7 +115270,7 @@ function drawPortals() {
       ctx.fill();
     }
     // Gentle drifting sparkles — additive + tiny, doesn't pop on lowFx.
-    if (typeof _perfLowFx !== 'function' || !_perfLowFx()) {
+    if (!po.iconStar && (typeof _perfLowFx !== 'function' || !_perfLowFx())) {   // v0.30.x — the sigil carries its own motes
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       for (let i = 0; i < 4; i++) {
@@ -115906,82 +116003,11 @@ function drawNPCs() {
       //   · a counter-rotating ray burst behind, long rays every third spoke
       //   · a gold ring, with pips seated on the triangle's three vertices
       //   · the triangle itself: violet-to-white fill, violet rim, gold inlay
-      const pulse = 1 + Math.sin(t * 3) * 0.18;
-      const R = 19 * pulse;                       // triangle circumradius
-      ctx.save();
-      ctx.translate(cx, cy);
-      // Ray burst — behind everything and turning the other way, so the sigil
-      // reads as two nested mechanisms rather than one spinning shape.
-      if (!(_perfLowFx && _perfLowFx())) {
-        ctx.save();
-        ctx.rotate(-t * 0.18);
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.strokeStyle = 'rgba(200,160,255,0.55)';
-        ctx.lineCap = 'round';
-        for (let i = 0; i < 12; i++) {
-          const a = (i / 12) * Math.PI * 2;
-          const long = (i % 3 === 0);
-          ctx.lineWidth = long ? 2 : 1;
-          const r0 = R * 1.15, r1 = R * (long ? 1.85 : 1.5);
-          ctx.beginPath();
-          ctx.moveTo(Math.cos(a) * r0, Math.sin(a) * r0);
-          ctx.lineTo(Math.cos(a) * r1, Math.sin(a) * r1);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-      ctx.rotate(t * 0.35);
-      // Ring
-      ctx.strokeStyle = 'rgba(255,216,106,0.75)';
-      ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.arc(0, 0, R * 1.12, 0, Math.PI * 2); ctx.stroke();
-      // The triangle — apex DOWN, the orientation the old wedge happened to
-      // land on and the one players have been reading as the Sanctum's mark.
-      const _tri = [];
-      for (let i = 0; i < 3; i++) {
-        const a = (i / 3) * Math.PI * 2 + Math.PI / 2;
-        _tri.push([Math.cos(a) * R, Math.sin(a) * R]);
-      }
-      const _tgd = ctx.createLinearGradient(0, -R, 0, R);
-      _tgd.addColorStop(0, '#ffffff');
-      _tgd.addColorStop(0.55, '#e8d4ff');
-      _tgd.addColorStop(1, '#b98cff');
-      ctx.beginPath();
-      ctx.moveTo(_tri[0][0], _tri[0][1]);
-      for (let i = 1; i < 3; i++) ctx.lineTo(_tri[i][0], _tri[i][1]);
-      ctx.closePath();
-      ctx.fillStyle = _tgd;
-      ctx.fill();
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#7a44cc'; ctx.lineWidth = 3;   ctx.stroke();   // heavy violet rim
-      ctx.strokeStyle = '#ffd86a'; ctx.lineWidth = 1.2; ctx.stroke();   // gold inlay over it
-      // Pips on the vertices, seated out on the ring.
-      ctx.fillStyle = '#ffd86a';
-      for (const _p of _tri) { ctx.beginPath(); ctx.arc(_p[0] * 1.12, _p[1] * 1.12, 1.9, 0, Math.PI * 2); ctx.fill(); }
-      // Inner core dot
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(0, 0, 3.2 * pulse, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      // Orbit dust — 3 tiny sparkles tracing an arc around the star.
-      // v0.25.440 — skipped under adaptive lowFx (mobile / slow hardware)
-      // since the halo + star are the load-bearing visual cue; the dust
-      // is pure flair and removing it on lag-stressed frames is an easy
-      // win.
-      const _amnDustOn = !(_perfLowFx && _perfLowFx());
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      for (let i = 0; _amnDustOn && i < 3; i++) {
-        const a = t * 0.8 + (i / 3) * Math.PI * 2;
-        const ox = cx + Math.cos(a) * 24;
-        const oy = cy + Math.sin(a) * 10;
-        ctx.fillStyle = 'rgba(230,210,255,0.8)';
-        ctx.beginPath();
-        ctx.arc(ox, oy, 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
+      // v0.30.x (per user "make it even better") — the mark is the celestial sigil now,
+      // shared with the star portals: baked layers, a dashed astral ring, gradient rays, a
+      // gold-ticked ring on a glass disc, soft orbiting motes. The triangle stays at its
+      // centre, with an inverted seal inlaid. See _drawCelestialSigil.
+      _drawCelestialSigil(cx, cy, t, 'tri', 0.9);
       // Label banner — only when camera is close enough that the player
       // would plausibly notice it (near the NPC)
       if (Math.abs((player.x + player.w/2) - npc.x) < 200) {
@@ -115992,7 +116018,7 @@ function drawNPCs() {
         // v0.30.x (per user "place it above the triangle") — was cy + 18,
         // i.e. hanging under the sigil. Now its BOTTOM edge sits 34 px above
         // the sigil's centre, clear of the reworked mark's 1.85x ray reach.
-        const _zx = Math.round(cx - _zs.width / 2), _zy = Math.round(cy - 34 - _zs.height);
+        const _zx = Math.round(cx - _zs.width / 2), _zy = Math.round(cy - 50 - _zs.height);   // v0.30.x — 34 -> 50: clear of the sigil's ray reach (54 x 0.9)
         ctx.drawImage(_zs, _zx, _zy);
         if (!(_perfLowFx && _perfLowFx())) {
           const _ph = (t * 0.35) % 2.4;                       // one sweep every ~2.4 beats, then rest
