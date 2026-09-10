@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.509';
+const GAME_VERSION = 'v0.30.510';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -20354,7 +20354,11 @@ const KEY_TO_SLOT_DEFAULT = Object.freeze({
 // The K modal exposes them as remappable chips in the Movement section.
 // Each entry maps an action id to its DEFAULT physical key. The K modal
 // surfaces these as remappable rows; player.actionBinds stores any user
-// overrides. Hotkey handlers consult `_isAction(k, 'X')` instead of a
+// overrides. Hotkey handlers consult `_isAction(rawKey, 'X')` instead of a
+// a literal key. Pass the PHYSICAL key, never _resolveActionKey's output: that
+// function returns the action's canonical DEFAULT and this one compares against
+// the user's BIND, so composing them cancels and the test can only pass while
+// nothing is remapped. Three hotkeys shipped that way and died on any rebind.
 // raw `if (k === 'X')` so the player's chosen binding wins.
 const ACTION_KEY_DEFAULT = Object.freeze({
   // v0.25.606 — Movement
@@ -36627,7 +36631,12 @@ window.addEventListener('keydown', e => {
   if (k === 'e') {
     if (typeof _qnavCycle === 'function') _qnavCycle();
   }
-  if (_isAction(k, 'questJournal') || k === 'j') {
+  // v0.30.510 — _isAction takes the PHYSICAL key, not the resolved one. _resolveActionKey maps a
+  // pressed key to its action's canonical DEFAULT, and _isAction compares a key against the
+  // user's BIND; feeding one into the other makes them cancel, so the test could only ever pass
+  // when nothing had been remapped. This site survived by accident on the `|| k === 'j'`
+  // fallback; the two below had no such luck and simply stopped working after a rebind.
+  if (_isAction(rawKey, 'questJournal') || k === 'j') {
     if (typeof toggleQuestJournal === 'function') toggleQuestJournal();
   }
   // v0.25.95 — W opens the World Map (overview of every reachable map,
@@ -36649,7 +36658,7 @@ window.addEventListener('keydown', e => {
   }
   // v0.26.516 — Bestiary unified into the Codex (Y). L now opens that same
   // unified Codex on its Bestiary tab, so there's one creature UI, not two.
-  if (_isAction(k, 'mojidex')) {
+  if (_isAction(rawKey, 'mojidex')) {   // v0.30.510 — physical key (see questJournal above)
     if (typeof toggleLoreMap === 'function') toggleLoreMap();
   }
   // v0.24.2 — I key retired. Skills reference now lives as a tab inside
@@ -36862,14 +36871,14 @@ window.addEventListener('keydown', e => {
   // unbound so future mappings have it free.
   if (k === 'escape') closeAllModals();
   if (k === 'm') audio.toggleMute();
-  if (_isAction(k, 'talkNpc')) {
+  if (_isAction(rawKey, 'talkNpc')) {   // v0.30.510 — physical key (see questJournal above)
     // v0.25.180 — N is the interact key:
     //   nearby chest → open it
     //   nearby NPC   → talk
     //   otherwise    → no-op (Codex moved exclusively to Y)
     // Pressing N while an NPC dialog is open closes it.
     // v0.25.986 — Gate switched from literal `k === 'n'` to
-    // `_isAction(k, 'talkNpc')` so remapped keybinds work too.
+    // `_isAction(rawKey, 'talkNpc')` so remapped keybinds work too.
     if (player.cls && player.hp > 0) {
       const dlg = document.getElementById('dialog');
       const dlgOpen = dlg && dlg.style.display && dlg.style.display !== 'none';
@@ -53493,6 +53502,23 @@ function renderKbmReference() {
       if (typeof _kbRenderPotionBinds === 'function') _kbRenderPotionBinds();   // v0.29.2
       return;
     }
+    // v0.30.510 — RESERVED KEYS. The sibling skill-pickup flow below rejects a HUD list; this
+    // one rejected only skill slots, so Enter could be bound to Move Left and take chat with
+    // it (the resolver then translates 'enter' to 'arrowleft', and nothing reaches the chat
+    // handler), with no toast and no way to guess what happened. Same for P (Postal Wisp) and
+    // T (co-op ping). Escape is listed because it is the universal modal-close.
+    {
+      const _RESERVED = ['enter', 'escape', 'p', 't', 'i', 'm', '9', '0'];
+      if (_RESERVED.indexOf(k) >= 0) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        showToast('That key is reserved by the interface — pick another', 'common');
+        _actionPickup = null;
+        renderKbmReference();
+        if (typeof _kbRenderPotionBinds === 'function') _kbRenderPotionBinds();
+        return;
+      }
+    }
     // Apply the new binding.
     if (!player.actionBinds) player.actionBinds = { ...ACTION_KEY_DEFAULT };
     // v0.25.606 — Proper SWAP semantics. Find any other action whose
@@ -53513,6 +53539,22 @@ function renderKbmReference() {
         ? player.actionBinds[a]
         : ACTION_KEY_DEFAULT[a];
       if (aCurrent === k) {
+        // v0.30.510 — refuse the swap rather than strand the displaced action with NO key. The
+        // Wardrobe ships unbound (ACTION_KEY_DEFAULT.wardrobe === ''), so binding it handed
+        // its empty string to whatever it displaced: pick the Fashionista chip, press W, and
+        // the World Map lost its key entirely, persisted. That is the exact outcome the swap
+        // was written to prevent - it just never accounted for the one action whose default
+        // is no key at all.
+        if (!oldKey) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          showToast('\u26A0 ' + _kbDisplay(k) + ' belongs to ' + a + ', and ' + _actionPickup
+            + ' has no key to trade — give ' + a + ' another key first.', 'rare');
+          _actionPickup = null;
+          renderKbmReference();
+          if (typeof _kbRenderPotionBinds === 'function') _kbRenderPotionBinds();
+          return;
+        }
         // Displaced — give it our old key.
         player.actionBinds[a] = oldKey;
       }
