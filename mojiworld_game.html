@@ -10624,7 +10624,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.510';
+const GAME_VERSION = 'v0.30.511';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -52559,8 +52559,14 @@ function acceptQuest(id) {
       if (_bank.objProgress) _a.objProgress = JSON.parse(JSON.stringify(_bank.objProgress));
       if (_bank.targetCount != null) _a.targetCount = _bank.targetCount;
       if (_bank.rewardScale != null) _a.rewardScale = _bank.rewardScale;
+      // v0.30.511 — restore the HAND-IN state banked above, or a quest abandoned while ready to
+      // turn in comes back as "in progress" and needs one more kill to become turnable again.
+      if (_bank.readyToHandIn) _a.readyToHandIn = true;
+      if (_bank.talkProgress) _a.talkProgress = JSON.parse(JSON.stringify(_bank.talkProgress));
       delete player._qBank[id];
-      if (typeof showToast === 'function') showToast('Progress restored — ' + (_a.progress | 0) + ' already counted', 'rare');
+      if (typeof showToast === 'function') showToast(_a.readyToHandIn
+        ? 'Progress restored — objectives already complete'
+        : 'Progress restored — ' + (_a.progress | 0) + ' already counted', 'rare');
     }
   } catch (e) {}
   if (typeof _playUiSfx === 'function') _playUiSfx('quest_accept');   // v0.26.x — SFX-review gap fill
@@ -52674,6 +52680,15 @@ function _lxBankQuestProgress(id, a) {
       objProgress: hasObj ? JSON.parse(JSON.stringify(a.objProgress)) : null,
       targetCount: (a.targetCount != null) ? a.targetCount : null,
       rewardScale: (a.rewardScale != null) ? a.rewardScale : null,
+      // v0.30.511 — bank the HAND-IN state too. readyToHandIn is written in exactly one place
+      // (_questGoalMet) and is never re-derived on accept or load, so abandoning a quest that
+      // was ready to turn in lost that forever: re-accepting restored the count but routed the
+      // quest to "in progress", and the giver would only offer the turn-in again after ANOTHER
+      // kill. On a count-1 boss quest that means killing the boss a second time. talkProgress
+      // has the same shape - unbanked, re-talking recomputed progress and discarded the count.
+      readyToHandIn: !!a.readyToHandIn,
+      talkProgress: (a.talkProgress && typeof a.talkProgress === 'object')
+        ? JSON.parse(JSON.stringify(a.talkProgress)) : null,
     };
   } catch (e) {}
 }
@@ -57055,6 +57070,25 @@ function _openPreAdvanceClassSwap() {
       noLabel: 'See another path',
     }).then((ok) => {
       if (ok) {
+        // v0.30.511 — clear the OLD class's skill tree, and refund what it cost. applyClass resets
+        // base stats, milestones, cooldowns and keybinds and refunds the level-up ledger, but it
+        // never touched treeUnlocked/tree - so a mage who bought +15% ATK, Mana Shield and
+        // Spellweaver kept all three as a warrior. The nodes are read class-agnostically by
+        // _applyEquippedBoons on every load and boon change, and the tree panel is scoped to the
+        // CURRENT class, so they were invisible and unrefundable while still applying. Every dev
+        // path and ascension already clear both maps; this, the one player-facing caller, did not.
+        try {
+          const _oldNodes = (typeof SKILL_TREE !== 'undefined' && SKILL_TREE[player.cls]) || [];
+          let _apBack = 0;
+          for (const _n of _oldNodes) {
+            if (_n && _n.id && player.treeUnlocked && player.treeUnlocked[_n.id]) _apBack += (_n.cost | 0);
+          }
+          player.treeUnlocked = {}; player.tree = {};
+          if (_apBack > 0) {
+            player.skillPoints = (player.skillPoints | 0) + _apBack;
+            if (typeof showToast === 'function') setTimeout(() => showToast('\u21BA ' + _apBack + ' AP refunded from the old skill tree', 'rare'), 900);
+          }
+        } catch (e) {}
         applyClass(next);
         if (typeof showToast === 'function') showToast(`⟳ You are now a ${c.name}. The road continues.`, 'legendary');
         if (typeof flash === 'function') flash(0.4);
@@ -91337,7 +91371,11 @@ function killMonster(m) {
   game.kills++;
   tickDaily('kills');
   _ksOnKill();   // v0.29.352 — Slaughter Ladder: same real-kill gate as kill credit, so mirages can't feed the streak
-  if (m.isBoss || m.isMiniBoss) tickDaily('boss', m.type);   // v0.26.x audit FIX — boss-track daily challenges (e.g. gravitos1) had NO tick caller, so they could never complete; credit boss/miniboss kills here
+  // v0.30.511 — an echo is not a kill for progression. The Echo Keeper's own spawner tags the
+  // shade "no quest tick, no first-kill cinematic" and its dialog promises "the persistent map
+  // record doesn't change", but neither this daily tick nor the quest tick below tested the tag.
+  // A free re-summon therefore replaced the boss respawn cooldown for every boss quest.
+  if ((m.isBoss || m.isMiniBoss) && !m._echoBoss) tickDaily('boss', m.type);   // v0.26.x audit FIX — boss-track daily challenges (e.g. gravitos1) had NO tick caller, so they could never complete; credit boss/miniboss kills here
   }
   checkAchievements();
   // v0.26.261 — Synergy: Blood Ritual (ls + atk). Each kill stamps a
@@ -91377,7 +91415,7 @@ function killMonster(m) {
   // STANDARD TICK PATH — skipped for ticket-family kills (already direct-
   // ticked above) to prevent double-counting. All other mob types
   // (non-ticket world mobs) still go through the regular pipeline.
-  if (m.type && !_inExp && !m._pqDirectTicked && !_isIllusionKill) tickQuestKill(m.type, !!m.isBoss);   // v0.29.321 — mirages don't advance hunt quests
+  if (m.type && !_inExp && !m._echoBoss && !m._pqDirectTicked && !_isIllusionKill) tickQuestKill(m.type, !!m.isBoss);   // v0.30.511 — echoes do not advance quests (see tickDaily above)   // v0.29.321 — mirages don't advance hunt quests
   // Mastery (v0.24.1) — per-mob-type kill counter. Hitting thresholds of
   // 100 / 500 / 1000 kills grants +1% / +2% / +3% damage vs that type.
   // Classic MMO "paragon-lite" grind that rewards long-term farming.
@@ -91426,9 +91464,18 @@ function killMonster(m) {
   // Bestiary tracking drives cosmetic unlocks
   trackPickup('kill', { type: m.type });
   if (m.isBoss) {
+    // v0.30.511 — THE PERMANENT RECORD IS FOR REAL KILLS ONLY. This was the last payout in this
+    // block without an echo/expedition guard; the map-cleared stamp, the setshard drop, the
+    // epitaph, the boon wheel and (since v0.30.497) the zodiac sigil all have one. The
+    // expedition's final boss spawns under the REAL 'zodiac_<sign>' type, so twelve runs
+    // stamped all twelve signs and fired the "all twelve defeated" branch below - handing over
+    // The Twelve Houses, its achievements and the Gravitos prerequisite to a player who had
+    // never entered a zodiac arena. The expedition even keeps a separate session counter
+    // (_expeditionZodiacKills) precisely to avoid touching this record, and this wrote it anyway.
+    const _realKill = !m._echoBoss && !m._expeditionBoss;
     // First-time zodiac kill → epic badge-earned flourish
-    const wasNew = m.zodiacBoss && !zodiacDefeated(m.zodiacSign);
-    trackPickup('boss', { id: m.type });
+    const wasNew = _realKill && m.zodiacBoss && !zodiacDefeated(m.zodiacSign);
+    if (_realKill) trackPickup('boss', { id: m.type });
     // v0.29.418 — kill-confirm micro-slow-mo (bosses ONLY, per user). ~0.9s
     // at 1/3 speed plus a soft flash: the takedown gets a beat to land
     // before the loot shower. The loop's _smHold gate does the slowing;
