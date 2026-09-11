@@ -131,7 +131,9 @@
 // under their own names (the Deadeye revamp's icons), as are audio/skill/marksman_oneshot.mp3 and marksman_ult.mp3
 // and - missed by v0.30.610 - Sprites/projectiles/p_ult_marksman.webp. Without a new generation a returning browser
 // keeps the old icon, the old cast sounds and the old round out of cache.
-const CACHE = 'mojiworld-assets-v38';   // v0.30.x - Deadeye revamp icons, cues and round replaced under their own names
+// v0.30.x - v38 -> v39. The 42 MP3s shipfix had staged as text (v0.30.572's nineteen monster clips and
+// their backups, v0.30.617's four Deadeye cues) are REPAIRED under their own names; browsers cached the broken bytes.
+const CACHE = 'mojiworld-assets-v39';   // v0.30.x - 42 corrupted MP3s repaired under their own names
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
