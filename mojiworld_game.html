@@ -10919,7 +10919,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.623';
+const GAME_VERSION = 'v0.30.624';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14753,7 +14753,7 @@ function _lxShrinkSlot(holder, key, baseLogical) {
     else if (!cv) im._lxNoShrink = true;
   }
 }
-function _lxShrinkFrames(frames, baseLogical) {
+function _lxShrinkFrames(frames, baseLogical, pinCap) {   // v0.30.624 - pinCap: sync pins per call (default 4); the prewarm asks for 2
   if (!frames) return frames;
   frames._lxBase = baseLogical;   // v0.30.256 — audit hook: which cap family governs this set
   const maxLong = _lxShrinkCap(baseLogical);
@@ -14816,7 +14816,7 @@ function _lxShrinkFrames(frames, baseLogical) {
     }
     if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) {
       // v0.30.405 — pinned, not raw; a few a call, and a frame that missed this call's budget is NOT marked, so the next call reaches it
-      if (_lxPinsThisCall >= 4) { pending = true; continue; }
+      if (_lxPinsThisCall >= (pinCap > 0 ? pinCap : 4)) { pending = true; continue; }
       im._lxNoShrink = true; im._lxNoShrinkCap = maxLong;
       const _pv = _lxPinned(im); if (_pv !== im) { frames[i] = _pv; frames._readyN = 0; _lxPinsThisCall++; }
       continue;
@@ -130238,10 +130238,13 @@ function _lxPrewarmMobBakes(type) {
     if (!t || !(t.h > 0)) return;
     const set = (typeof _monsterFramesFor === 'function') ? _monsterFramesFor(type) : null;
     if (!set) return;
-    for (const mode of ['idle', 'walk']) {
+    // v0.30.624 - the base _monsterStateFrame shrinks this type's sets with (_mobFrameBase(m)), from the
+    // type's own box: spawns carry sizeMul 1, so it is the base every spawned one draws with.
+    const base = (typeof _mobFrameBase === 'function') ? _mobFrameBase({ type, w: t.w, h: t.h }) : 0;
+    for (const mode of ['idle', 'walk', 'attack']) {   // v0.30.624 - attack too: a pack's first swings baked their frames mid-fight
       const arr = set[mode];
       if (!Array.isArray(arr)) continue;
-      for (let i = 0; i < arr.length; i++) _LX_PREWARM_Q.push({ type, arr, i, h: t.h, tries: 0 });
+      for (let i = 0; i < arr.length; i++) _LX_PREWARM_Q.push({ type, arr, i, h: t.h, tries: 0, base, atk: mode === 'attack' });
     }
   } catch (e) {}
 }
@@ -130251,7 +130254,7 @@ function _lxPrewarmDrain(force) {
     try { const cv = document.createElement('canvas'); cv.width = 4; cv.height = 4; _lxPrewarmScratch = cv.getContext('2d'); } catch (e) {}
     if (!_lxPrewarmScratch) { _LX_PREWARM_Q.length = 0; return; }
   }
-  let looked = 0, drained = 0;
+  let looked = 0, drained = 0, _kicked = 0;   // v0.30.624 - _kicked: shrink kicks this pass
   const _cap = force ? 40 : _lxMintBudget();          // v0.30.361 — a readiness gate drains in 40-job slices between paints
   const _look = force ? 400 : 24;
   while (_LX_PREWARM_Q.length && looked++ < _look && drained < _cap) {
@@ -130260,7 +130263,21 @@ function _lxPrewarmDrain(force) {
     if (!im) continue;
     const decoded = !(im.complete === false) && ((im.naturalWidth || im.width) > 0);
     // a size-explicit job (NPC idle frames) is never shrink-swapped, so it is final at once
-    const final = im.tagName === 'CANVAS' || im._lxNoShrink || j.tw > 0 || j.tries > 240 || (force && j.tries > 20);
+    let final = im.tagName === 'CANVAS' || im._lxNoShrink || j.tw > 0 || j.tries > 240 || (force && j.tries > 20);
+    // v0.30.624 - START THE SHRINK INSTEAD OF WAITING FOR IT (per user: "improving the lag when fighting
+    // multiple monsters"). A frame only counts as final once _lxShrinkFrames has swapped it for its bake
+    // or its pin, and only the DRAW path called that - so a pack the player had not reached was never
+    // shrunk, its jobs sat here for up to 240 tries, and the whole bill (98 sync pins, 80-120 plain
+    // downscales and 35-56 bitmap bakes a second) landed on the frame the pack came into view: 10
+    // frames in that second, the worst 224 ms. The drain now kicks the shrink itself with the base the
+    // draw path will use - one set a pass and two sync pins at most, eight sets and four pins behind
+    // the map veil, where a hitch is invisible.
+    if (decoded && !final && j.base > 0 && !j.arr._lxShrunk && _kicked < (force ? 8 : 1) && typeof _lxShrinkFrames === 'function') {
+      _kicked++; drained++;
+      try { _lxShrinkFrames(j.arr, j.base, force ? 4 : 2); } catch (e) {}
+      im = j.arr[j.i] || im;
+      final = im.tagName === 'CANVAS' || !!im._lxNoShrink;
+    }
     if (!decoded || !final) { if (j.tries++ < 600) _LX_PREWARM_Q.push(j); continue; }
     if (j.tw > 0 && j.th > 0) {   // v0.30.361 — a size-explicit job (NPC frames, see _lxPrewarmNpcBakes)
       try { _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, j.tw, j.th); } catch (e) {}
@@ -130280,7 +130297,15 @@ function _lxPrewarmDrain(force) {
       const targetH = _lxWholeSize(j.h * 1.5 * sizeFactor * _lxMobScale(j.type));
       const fw = im.naturalWidth || im.width || srcW, fh = im.naturalHeight || im.height || srcH;
       const frameW = _lxWholeSize(targetH * (fw / fh));
-      _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, frameW, targetH);
+      // v0.30.624 - an attack frame is drawn at the type's attack scale times the calib's per-frame fs[]
+      // (_drawMonsterSprite, v0.30.403), so its plain bake has to live in that size's bucket.
+      let _as = 1;
+      if (j.atk) {
+        _as = (typeof _ATK_FRAME_SCALE !== 'undefined' && _ATK_FRAME_SCALE[j.type]) || 1;
+        if (im._lxFi != null && typeof _lxAnimCalib === 'function') { const _ac = _lxAnimCalib(j.type, 'attack'); if (_ac && _ac.fs && _ac.fs[im._lxFi] > 0) _as *= _ac.fs[im._lxFi]; }
+      }
+      if (_as !== 1) _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, Math.round(frameW * _as), Math.round(targetH * _as));
+      else _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, frameW, targetH);
       drained++;
     } catch (e) {}
   }
