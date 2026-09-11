@@ -10911,6 +10911,10 @@ The sleeping world is listening.</div>
      attack). Authored with monster_animator.html and shipped ONLY via this
      baked file (hard bake v0.29.155 — localStorage overrides removed). -->
 <script src="data/anim_calib.js"></script>
+<!-- v0.30.629 - Per-skill sound tuning (volume, pitch, trims, fade, delay, clip swap,
+     mute) authored in tools/skill_sfx_tester.html and baked by
+     scripts/apply_sfx_patch.mjs. Missing file = every skill plays as authored. -->
+<script src="data/skill_sfx_tune.js"></script>
 <!-- v0.29.519 — Which optional sprite frames actually exist on disk. Every
      animation loader below walks a fixed <key>_0.._8 grid and cannot tell
      "absent" from "not yet decoded" without asking, so each unauthored set
@@ -10937,7 +10941,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.628';
+const GAME_VERSION = 'v0.30.629';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -150029,8 +150033,8 @@ function _lxSyncSfxMuted(m) {
 const _skillSfxLastTime = Object.create(null);
 const _SKILL_SFX_COOLDOWN = 80;       // ms — prevents same-skill spam
 const _SKILL_SFX_TARGET_VOL = 0.5;
-function _skillSfxEl(id) {
-  const path = _SKILL_SFX_FILES[id];
+function _skillSfxEl(id, _path) {
+  const path = _path || _SKILL_SFX_FILES[id];   // v0.30.629 - _path: a tuned skill's own element
   if (!path) return null;
   if (_skillSfxEls[id]) return _skillSfxEls[id];
   const a = new Audio(path);
@@ -150047,6 +150051,96 @@ function _skillSfxEl(id) {
   _skillSfxEls[id] = a;
   return a;
 }
+// v0.30.629 - Skill SFX tuning. tools/skill_sfx_tester.html lets a playtester hear
+// every skill cue and adjust it (louder/quieter, pitch, skip the head, cut the
+// tail, fade, delay, swap the clip, mute). The result is baked into
+// data/skill_sfx_tune.js (window.LX_SKILL_SFX_TUNE) by scripts/apply_sfx_patch.mjs.
+// The tester page mirrors _lxSkillSfxTune + _lxSkillSfxPlan and the stop/fade
+// watcher line for line, and scripts/skill_sfx_tune_test.mjs holds the page and
+// the game to the same numbers - change one, change the other.
+const _LX_SFX_FILE_RE = /^audio\/(?:[\w-]+\/)*[\w-]+\.(?:mp3|ogg|wav|m4a)$/;
+// A sanitised copy of a skill's tuning, or null when it has none. Out-of-range
+// numbers clamp, junk falls back to "as authored", and `file` must be a plain
+// audio/ path, so a hand-mangled table can never throw or reach outside audio/.
+function _lxSkillSfxTune(id) {
+  try {
+    const T = (typeof window !== 'undefined') ? window.LX_SKILL_SFX_TUNE : null;
+    const t = (T && typeof T === 'object' && Object.prototype.hasOwnProperty.call(T, id)) ? T[id] : null;
+    if (!t || typeof t !== 'object') return null;
+    const n = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v)) ? Math.max(lo, Math.min(hi, v)) : d;
+    const o = {
+      vol: n(t.vol, 0, 2, 1), pitch: n(t.pitch, -12, 12, 0),
+      start: n(t.start, 0, 10, 0), end: n(t.end, 0, 10, 0),
+      fade: n(t.fade, 0, 3, 0), delay: n(t.delay, 0, 1.5, 0),
+      file: (typeof t.file === 'string' && _LX_SFX_FILE_RE.test(t.file)) ? t.file : '',
+      mute: t.mute === true,
+    };
+    if (o.end && o.end <= o.start) o.end = 0;
+    return o;
+  } catch (_) { return null; }
+}
+// How a tuned cue plays at master volume `master`, for a clip `dur` seconds long
+// (0 while its length is still unknown). stopAt 0 = play to the natural end.
+function _lxSkillSfxPlan(o, master, dur) {
+  const base = Math.min(1, _SKILL_SFX_TARGET_VOL * o.vol);
+  const end = o.end || ((o.fade > 0 && dur > 0) ? dur : 0);
+  const stopAt = end > o.start ? end : 0;
+  return {
+    silent: o.mute || o.vol <= 0,
+    base: base, volume: Math.max(0, Math.min(1, base * master)),
+    rate: Math.pow(2, o.pitch / 12), preservesPitch: o.pitch === 0,
+    start: o.start, stopAt: stopAt, fade: stopAt ? Math.min(o.fade, stopAt - o.start) : 0,
+    delayMs: Math.round(o.delay * 1000),
+  };
+}
+function _lxPlayTunedSkillSfx(id, key, o, muted) {
+  if (o.mute || o.vol <= 0) return;
+  const path = o.file || _SKILL_SFX_FILES[key];
+  if (!path) return;
+  const ck = '~' + id;   // private element: never the bucket element other skills share
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (_skillSfxLastTime[ck] && now - _skillSfxLastTime[ck] < _SKILL_SFX_COOLDOWN) return;
+  _skillSfxLastTime[ck] = now;
+  let el = _skillSfxEls[ck];
+  if (el && el._lxPath !== path) { try { el.pause(); } catch (_) {} el = null; delete _skillSfxEls[ck]; }
+  if (!el) { el = _skillSfxEl(ck, path); if (!el) return; el._lxPath = path; }
+  // _setSfxMasterVolume re-derives every cached element from _sfxBase, so the
+  // tuned loudness has to live there or the settings slider would undo it.
+  el._sfxBase = Math.min(1, _SKILL_SFX_TARGET_VOL * o.vol);
+  if (muted) return;   // warmed, exactly like the untuned path
+  const fire = () => {
+    try {
+      if (typeof audio !== 'undefined' && audio && audio.muted) return;
+      const pl = _lxSkillSfxPlan(o, _SFX_MASTER_VOL, isFinite(el.duration) ? el.duration : 0);
+      const tok = el._lxTok = (el._lxTok || 0) + 1;
+      el.volume = pl.volume;
+      el.playbackRate = pl.rate;
+      try { el.preservesPitch = el.mozPreservesPitch = el.webkitPreservesPitch = pl.preservesPitch; } catch (_) {}
+      try { el.currentTime = pl.start; } catch (_) {}
+      const p = el.play();
+      if (p && p.catch) p.catch(() => {});
+      if (!o.end && !(o.fade > 0)) return;   // plays out to its natural end
+      // Stop and fade on the AUDIO clock, not a wall-clock timer, so load latency
+      // and the pitch rate can never shift the cut. The plan is re-derived each
+      // tick because a fade to the natural end needs a duration the very first
+      // cast of a session may not have yet.
+      const tick = () => {
+        if (el._lxTok !== tok || el.paused) return;
+        const q = _lxSkillSfxPlan(o, _SFX_MASTER_VOL, isFinite(el.duration) ? el.duration : 0);
+        if (q.stopAt) {
+          const t = el.currentTime;
+          if (t >= q.stopAt - 0.004) { try { el.pause(); } catch (_) {} return; }
+          if (q.fade > 0 && t > q.stopAt - q.fade) {
+            try { el.volume = Math.max(0, Math.min(1, q.volume * (q.stopAt - t) / q.fade)); } catch (_) {}
+          }
+        }
+        setTimeout(tick, 15);
+      };
+      setTimeout(tick, 15);
+    } catch (_) {}
+  };
+  if (o.delay > 0) setTimeout(fire, Math.round(o.delay * 1000)); else fire();
+}
 function _playSkillSfx(id) {
   try {
     // v0.29.878 — the mute check used to sit HERE, above _skillSfxEl(), so a
@@ -150062,6 +150156,12 @@ function _playSkillSfx(id) {
     // dropping audio/skill/<id>.mp3 + a _SKILL_SFX_FILES[id] entry gives that
     // skill its own cue (used by the 19 master signature skills below).
     const key = _SKILL_SFX_FILES[id] ? id : (_SKILL_SFX_ALIAS[id] || id);
+    // v0.30.629 - a skill with an entry in data/skill_sfx_tune.js (baked from the
+    // tester's tools/skill_sfx_tester.html) plays on its OWN element, so a
+    // pitched or boosted cue never leaks onto the skills sharing its bucket,
+    // and the untuned path below stays exactly as it was.
+    const _tune = _lxSkillSfxTune(id);
+    if (_tune) { _lxPlayTunedSkillSfx(id, key, _tune, _muted); return; }
     if (!_SKILL_SFX_FILES[key]) return;
     const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     if (_skillSfxLastTime[key] && now - _skillSfxLastTime[key] < _SKILL_SFX_COOLDOWN) return;
