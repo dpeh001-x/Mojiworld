@@ -6294,6 +6294,7 @@
   .moji-buff-pill[data-buff="warCry"]      { border-color: rgba(255, 80,  80, 0.55); }
   .moji-buff-pill[data-buff="bloodlust"]   { border-color: rgba(220, 40,  40, 0.55); }
   .moji-buff-pill[data-buff="comboAtk"]    { border-color: rgba(255, 200, 80,  0.55); }
+  .moji-buff-pill[data-buff="healLock"]    { border-color: rgba(255, 60, 90, 0.85); background: rgba(80, 10, 24, 0.55); }   /* v0.30.588 ohko-pass — a debuff reads red */
   .moji-buff-pill[data-buff="comboXp"]     { border-color: rgba(120, 200, 255, 0.55); }
   .moji-buff-pill[data-buff="eagleEye"]    { border-color: rgba(120, 220, 255, 0.55); }
   .moji-buff-pill[data-buff="guardian"]    { border-color: rgba(140, 220, 140, 0.55); }
@@ -10734,7 +10735,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.587';
+const GAME_VERSION = 'v0.30.588';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -84103,9 +84104,9 @@ function _bossSpecialAttacks(m, dt) {
       // handlers' shared _ccHalted. The two timers are also pushed past the
       // resolve so the first second after a collapse is a clean beat, the
       // same idiom the Regalia break uses.
-      m._sovCollapseUntil = (game.time | 0) + 300;
-      m._sovereignHomingAt = Math.max(m._sovereignHomingAt | 0, (game.time | 0) + 300 + 60);
-      m._sovereignDrainAt  = Math.max(m._sovereignDrainAt | 0,  (game.time | 0) + 300 + 60);
+      m._sovCollapseUntil = (game.time | 0) + 300 + 120;   // v0.30.588 ohko-pass — telegraph + 2 s: nothing right after the collapse either
+      m._sovereignHomingAt = Math.max(m._sovereignHomingAt | 0, (game.time | 0) + 300 + 150);   // v0.30.588 ohko-pass — 2.5 s past the resolve
+      m._sovereignDrainAt  = Math.max(m._sovereignDrainAt | 0,  (game.time | 0) + 300 + 150);
       if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'collapse', 290);   // v0.30.89 — held across the 3.5s telegraph
       if (typeof _lxSovBeat === 'function') {   // v0.30.122 — the one attack that can kill outright
         _lxSovBeat(m, { flash: 0.5, shake: 12, stop: 90, ring: 300, motes: 18,
@@ -86435,7 +86436,11 @@ function bossAI(m, dt, distToPlayer) {
       const _GAP = 8 * 60;   // 8 seconds, in 60-fps frames
       if (m._lastSkillAt == null) m._lastSkillAt = -999999;
       const _skillSpaced    = (_nowOhko - m._lastSkillAt) >= _GAP;
-      const _ohkoTrailClear = (_nowOhko - (m._lastOhkoAt || -999999)) >= _GAP;
+      // v0.30.588 ohko-pass — the 8 s trail is measured from the CAST, which left
+      // ~2.5 s after a singularity and nothing after a 13 s rain. Also require
+      // 2 s since the OHKO pattern ENDED (stamped at each pattern exit).
+      const _ohkoTrailClear = (_nowOhko - (m._lastOhkoAt || -999999)) >= _GAP
+                           && (_nowOhko - (m._lastOhkoEndAt || -999999)) >= 120;
       // v0.29.258 — hard OHKO-to-OHKO floor per form; the floor gates the
       // OHKO casts AND folds into _ohkoReady, so while an OHKO waits out its
       // window the regular rotation keeps rolling — the boss never stands
@@ -86728,7 +86733,7 @@ function bossAI(m, dt, distToPlayer) {
       }
       if (m.patternTimer > 1900) {
         m.patternState = 'idle'; m.patternTimer = 0;
-        m._drainFired = false; m._drainAnnounced = false;
+        m._drainFired = false; m._drainAnnounced = false; m._lastOhkoEndAt = game.time | 0;   // v0.30.588 ohko-pass
       }
     } else if (m.patternState === 'singularity') {
       // v0.25.528 — SINGULARITY COLLAPSE. Avoidable instant-death.
@@ -86826,7 +86831,7 @@ function bossAI(m, dt, distToPlayer) {
             game.hazards.splice(_hi, 1);
           }
         }
-        m.patternState = 'idle'; m.patternTimer = 0; m._sgSpawned = false;
+        m.patternState = 'idle'; m.patternTimer = 0; m._sgSpawned = false; m._lastOhkoEndAt = game.time | 0;   // v0.30.588 ohko-pass
       }
     } else if (m.patternState === 'collapseRain') {
       // v0.26.075 — Per user "make gravitos have many ohko attacks with
@@ -86910,6 +86915,7 @@ function bossAI(m, dt, distToPlayer) {
         m._rainIdx = 0;
         m.patternState = 'idle';
         m.patternTimer = 0;
+        m._lastOhkoEndAt = game.time | 0;   // v0.30.588 ohko-pass
       }
     } else if (m.patternState === 'laser') {
       // LASER SWEEP — charge, paint a warning beam, then fire tracking lasers
@@ -87278,6 +87284,7 @@ function bossAI(m, dt, distToPlayer) {
             damage: m.atk * 1.5, owner: 'enemy', skill: 'comet',  // v0.26.330 — was 1.25 (+20 %)
             color: '#cc66ff', noGravity: true, homing: true,
             stunHit: 600,
+            _healLockMs: 10000, _sourceLabel: 'a Gravitos comet',   // v0.30.588 ohko-pass — landing seals healing for 10 s (per user)
             // v0.29.x — heavy-hit rebalance: the old `_heavyFloorPct: 0.50`
             // pre-punish floor became a guaranteed ~300%-maxHp one-shot once
             // the Lv-80+ ×6 ramp multiplied past it. Comets now clamp the
@@ -94566,6 +94573,8 @@ function updateProjectiles(dt) {
         // 35% (difficulty headroom). Kills the _diffDmg double-dip runaway
         // (gap is already priced into p.damage at spawn) without capping
         // against the player's own bar — HP investment keeps full value.
+        // v0.30.588 ohko-pass — a tagged projectile (Gravitos's comets) seals healing on landing.
+        if (p._healLockMs > 0 && _projLost > 0 && !player._god && typeof _lxHealLockApply === 'function') _lxHealLockApply(p._healLockMs, p._sourceLabel);
         if (p._normalMob && _projLost > 0) _projLost = Math.min(_projLost, Math.floor((p.damage || dmg) * 1.35));
         // v0.30.475 — ZODIAC PROJECTILES HIT FLAT (per user: "all zodiac bosses projectiles should
         // deal more damage, approximately 3000 - 5000 damage flat regardless of player's defence").
@@ -95339,7 +95348,7 @@ function updateProjectiles(dt) {
       safe = _lxSzInside(h, _strict);
       if (!safe && h._lastSafeTick != null && ((game.time | 0) - h._lastSafeTick) <= LX_SZ_GRACE_TICKS) safe = true;
       if (!safe && player.hp > 0 && !player._god) {
-        if (player._ohkoParry > 0) {
+        if (LX_OHKO_PARRYABLE && player._ohkoParry > 0) {   // v0.30.588 ohko-pass — the collapse cannot be parried
           /* PERFECT PARRY: pressed A within the tight 120ms window as the collapse resolved -> fully negate the OHKO (high-skill reward; gated by the 1.8-2.5s block cooldown). */
           player._ohkoParry = 0;
           player.lastHitTime = game.time;
@@ -96418,6 +96427,48 @@ function _smoothFxCap() {
 // jump's height above the zone floor or 8 px below it. Bounded so a platform
 // zone and a ground zone (160-220 px apart) stay distinct. Used every frame
 // of the telegraph to stamp h._lastSafeTick, and at the resolve.
+// v0.30.588 ohko-pass — the collapse cannot be parried (per user). The block
+// key still arms _ohkoParry for its other uses; the resolver simply no longer
+// honours it. The safe zone is the counter.
+const LX_OHKO_PARRYABLE = false;
+// v0.30.588 ohko-pass — HEAL LOCK. No central heal function exists (25 sites
+// raise player.hp), so the lock is an accessor on player.hp: a write that
+// would raise hp is refused while locked; lowering it always goes through.
+// Scoped by session clock (t >= at: a reload cannot carry it), map and
+// death. Installed lazily on the first seal; the check reads the live
+// property descriptor, never a saved flag.
+function _lxHealLocked() {
+  if (typeof player === 'undefined' || !player) return false;
+  const t = game.time | 0;
+  return (player._healLockUntil | 0) > t && t >= (player._healLockAt | 0)
+      && player._healLockMap === game.currentMap && !game.dying;
+}
+function _lxHealLockInstall() {
+  const d = Object.getOwnPropertyDescriptor(player, 'hp');
+  if (d && d.get) return;
+  let _v = player.hp;
+  Object.defineProperty(player, 'hp', { enumerable: true, configurable: true,
+    get() { return _v; },
+    set(nv) {
+      if (typeof nv === 'number' && nv > _v && _lxHealLocked()) { player._healBlockedAt = game.time | 0; return; }
+      _v = nv;
+    } });
+}
+function _lxHealLockApply(ms, label) {
+  if (!player || player._god) return;
+  _lxHealLockInstall();
+  const t = game.time | 0, until = t + Math.round((ms || 10000) * 60 / 1000);
+  const fresh = !_lxHealLocked();
+  player._healLockAt = t;
+  player._healLockUntil = Math.max(player._healLockUntil | 0, until);
+  player._healLockTotalF = (player._healLockUntil | 0) - t;   // the overhead countdown drains against this
+  player._healLockMap = game.currentMap;
+  player._healLockLabel = label || 'a void projectile';
+  if (fresh) {
+    if (typeof showToast === 'function') showToast('\u{1F6AB} HEAL LOCKED \u2014 ' + Math.round((ms || 10000) / 1000) + 's: no healing of any kind', 'danger');
+    // (no floating HEAL LOCK damage number: the countdown over the head is the cue, and the number sat on top of it)
+  }
+}
 const LX_SZ_JUMP_SLACK = 150;
 const LX_SZ_GRACE_TICKS = 10;
 function _lxSzInside(h, strict) {
@@ -106409,6 +106460,12 @@ function useConsumable(id) {
   // which is the same shape and already covers every potion path: this
   // function and useQuickPotion are the two chokepoints _useBoundPotion and
   // the inventory both route through.
+  if (typeof _lxHealLocked === 'function' && _lxHealLocked()) {   // v0.30.588 ohko-pass — a sealed drink would be wasted: refuse it
+    const _hl = Math.ceil(((player._healLockUntil | 0) - (game.time | 0)) / 60);
+    if (typeof showToast === 'function') showToast('\u{1F6AB} HEAL LOCKED \u2014 ' + _hl + 's', 'common');
+    if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
+    return;
+  }
   if ((player._potionLockUntil | 0) > (game.time | 0)) {
     const _left = Math.ceil(((player._potionLockUntil | 0) - (game.time | 0)) / 60);
     if (typeof showToast === 'function') showToast('🧪 Potions sealed by the Tidesworn — ' + _left + 's', 'common');
@@ -106539,6 +106596,12 @@ function useQuickPotion(which, preferElixir) {
   // which is the same shape and already covers every potion path: this
   // function and useQuickPotion are the two chokepoints _useBoundPotion and
   // the inventory both route through.
+  if (typeof _lxHealLocked === 'function' && _lxHealLocked()) {   // v0.30.588 ohko-pass — a sealed drink would be wasted: refuse it
+    const _hl = Math.ceil(((player._healLockUntil | 0) - (game.time | 0)) / 60);
+    if (typeof showToast === 'function') showToast('\u{1F6AB} HEAL LOCKED \u2014 ' + _hl + 's', 'common');
+    if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
+    return;
+  }
   if ((player._potionLockUntil | 0) > (game.time | 0)) {
     const _left = Math.ceil(((player._potionLockUntil | 0) - (game.time | 0)) / 60);
     if (typeof showToast === 'function') showToast('🧪 Potions sealed by the Tidesworn — ' + _left + 's', 'common');
@@ -121685,10 +121748,63 @@ function _drawControlVignette() {
   ctx.fillRect(0, 0, W, H);
   ctx.restore();
 }
+// v0.30.588 ohko-pass — HEAL LOCK countdown above the character (per user). The
+// buff-bar pill sits off to the side; the seal is the one status a player has
+// to read mid-dodge, so it also counts down over the head: a struck-through
+// heal cross whose ring drains, the label, tenths of a second, a drain bar,
+// and a pulse that quickens in the last two seconds. Takes the control
+// banner's slot, or the one above it when both show. Plain strokes and two
+// short fillTexts, no emoji and no shadowBlur (see the v0.30.346 perf notes).
+function _drawHealLockTimer(sx, sy, lifted) {
+  if (!player || typeof _lxHealLocked !== 'function' || !_lxHealLocked()) return;
+  const now = game.time | 0;
+  const remainF = Math.max(0, (player._healLockUntil | 0) - now);
+  const totalF = Math.max(1, player._healLockTotalF | 0);
+  const frac = Math.max(0, Math.min(1, remainF / totalF));
+  const secs = (remainF / 60).toFixed(1) + 's';
+  const cx = sx + (player.w || 28) / 2;
+  const h = 20, r = 7, ico = 16;
+  const y = sy - 30 - (lifted ? 26 : 0);
+  const label = 'HEAL LOCK', tint = '#ff4d6d';
+  ctx.save();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 12px sans-serif';
+  const sw = Math.ceil(ctx.measureText(secs).width);
+  ctx.font = 'bold 11px sans-serif';
+  if (window._lxHealLockLabelW == null) window._lxHealLockLabelW = Math.ceil(ctx.measureText(label).width);
+  const lw = window._lxHealLockLabelW;
+  const w = ico + 12 + lw + 8 + sw + 10;
+  const x0 = cx - w / 2;
+  const urgent = remainF <= 120;
+  ctx.globalAlpha = urgent ? 0.8 + Math.sin(now * 0.45) * 0.2 : 0.92 + Math.sin(now * 0.15) * 0.06;
+  const pill = () => { ctx.beginPath(); ctx.moveTo(x0 + r, y); ctx.arcTo(x0 + w, y, x0 + w, y + h, r); ctx.arcTo(x0 + w, y + h, x0, y + h, r); ctx.arcTo(x0, y + h, x0, y, r); ctx.arcTo(x0, y, x0 + w, y, r); ctx.closePath(); };
+  pill(); ctx.strokeStyle = 'rgba(255,77,109,' + (urgent ? 0.35 : 0.18) + ')'; ctx.lineWidth = 5; ctx.stroke();   // soft halo: a wide faint stroke
+  pill(); ctx.fillStyle = 'rgba(46,4,16,0.82)'; ctx.fill();
+  ctx.strokeStyle = tint; ctx.lineWidth = 1.5; ctx.stroke();
+  // glyph: a heal cross, struck through, inside a ring that drains with the seal
+  const gx = x0 + 6 + ico / 2, gy = y + h / 2;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(120,255,170,0.9)'; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.moveTo(gx - 4, gy); ctx.lineTo(gx + 4, gy); ctx.moveTo(gx, gy - 4); ctx.lineTo(gx, gy + 4); ctx.stroke();
+  ctx.strokeStyle = tint; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.arc(gx, gy, 7, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(gx - 5, gy - 5); ctx.lineTo(gx + 5, gy + 5); ctx.stroke();
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(gx, gy, 7, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); ctx.stroke();
+  // label, then the seconds
+  ctx.fillStyle = tint; ctx.fillText(label, x0 + ico + 12, y + h / 2 + 0.5);
+  ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = urgent ? '#ffffff' : '#ffe3e8';
+  ctx.fillText(secs, x0 + ico + 12 + lw + 8, y + h / 2 + 0.5);
+  // drain bar: what is left of the seal
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x0, y + h + 2, w, 3);
+  ctx.fillStyle = tint; ctx.fillRect(x0, y + h + 2, w * frac, 3);
+  ctx.restore();
+}
 function _drawPlayerStatusIcons(sx, sy) {
   if (!player || player.hp <= 0) return;
   const _ctl = (typeof _playerControlState === 'function') ? _playerControlState() : null;   // v0.30.368
   if (_ctl) _drawPlayerControlBanner(sx, sy, _ctl);
+  if (typeof _lxHealLocked === 'function' && _lxHealLocked()) _drawHealLockTimer(sx, sy, !!_ctl);   // v0.30.588 ohko-pass — the seal counts down over the head
   // v0.29.486 (perf-pass) — flag pre-check before allocating (mirrors the
   // v0.26.244 monster-side fix): a healthy player paid an array per frame.
   if (!_ctl && !((player.burnTimer | 0) > 0 || (player.frozenTimer | 0) > 0 || (player.freezeTimer | 0) > 0 ||
@@ -141442,6 +141558,7 @@ const BUFF_META = [
   // nothing at all for it. Registry-vs-reality diff found it as the only real
   // gap: 11 registered against 12 buffs the code actually sets.
   { key: 'sleight',       icon: '🗡',  label: 'Sleight',     dur: 2500  },
+  { key: 'healLock',      icon: '\u{1F6AB}', label: 'HEAL LOCKED', dur: 10000 },   // v0.30.588 ohko-pass — driven by the lock clock, see _updateBuffRow
   { key: 'warCry',        icon: '⚔',  label: 'War Cry',     dur: 12000 },
   { key: 'bloodlust',     icon: '🩸', label: 'Bloodlust',    dur: 12000 },
   { key: 'rampage',       icon: '💢', label: 'Rampage',      dur: 3500  },
@@ -141476,6 +141593,12 @@ function _updateBuffRow() {
   const row = (typeof _LX_CACHED_BUFF_ROW !== 'undefined' && _LX_CACHED_BUFF_ROW)
     || (_LX_CACHED_BUFF_ROW = document.getElementById('buff-row'));
   if (!row || !player || !player.buffs) return;
+  // v0.30.588 ohko-pass — the heal lock keeps its own clock; mirror it into the
+  // buff timers so the bar shows a HEAL LOCKED pill that counts down with it.
+  if (typeof _lxHealLocked === 'function') {
+    const _hlMs = _lxHealLocked() ? Math.max(1, Math.round(((player._healLockUntil | 0) - (game.time | 0)) * 1000 / 60)) : 0;
+    if ((player.buffs.healLock | 0) !== _hlMs) player.buffs.healLock = _hlMs;
+  }
   // Collect currently-active buffs (timer > 0) into the pooled scratch.
   _buffActiveN = 0;
   for (let i = 0; i < BUFF_META.length; i++) {
