@@ -42,7 +42,7 @@ const r = await page.evaluate(() => {
   // B6: the first rung reads the table
   out.firstRung = (typeof _lxFirstRungExp === 'function') ? _lxFirstRungExp() : null;
   out.tableRung = _lxLevelCost(1);
-  // B10: Virgo's DEF matches its band
+  // B10 (corrected): Virgo keeps her deliberately halved DEF
   const z = (typeof LX_MONSTER_STATS !== 'undefined') ? LX_MONSTER_STATS : null;
   out.virgoDef = z && z.zodiac_virgo ? z.zodiac_virgo.def : null; out.leoDef = z && z.zodiac_leo ? z.zodiac_leo.def : null;
   // B11: the Duo Trial diminishes on repeat
@@ -63,7 +63,9 @@ const checks = [
   ["Bravo's offer is bound to the floor it was earned on", bravoBound === true],
   ['a cleared floor does not respawn on reload', floorsKept === true],
   ['a tower death waives the coin haircut the snapshot restore was meant to wipe', haircut === true],
-  ["Virgo's DEF matches its band", r.virgoDef != null && r.virgoDef === r.leoDef, `virgo ${r.virgoDef} leo ${r.leoDef}`],
+  // v0.30.x — corrected: v0.30.369 halved Virgo's DEF ON PURPOSE (1441 -> 720, 'Virgo heal rate lower still, DEF halved';
+  // scripts/virgo_ritual_test.mjs pins it). v0.30.524 read that as a data slip and undid it. It stays halved.
+  ["Virgo keeps the halved DEF v0.30.369 gave her", r.virgoDef === 720 && r.leoDef === 1441, `virgo ${r.virgoDef} leo ${r.leoDef}`],
   ['the Duo Trial diminishes on a repeat kill', r.duoFirst > 0 && r.duoSecond < r.duoFirst, `${r.duoFirst} -> ${r.duoSecond}`],
   ['no page errors', errs.length === 0, errs.join(' | ')],
 ];
