@@ -1,0 +1,995 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Skill Sound Tuner: the page a PLAYTESTER uses to hear every skill's sound
+     effect exactly as the game plays it, and adjust it. Hand-written, not
+     generated. Lives in tools/ but plays clips from the repo root (<base>).
+       reads    tools/skill_sfx_catalog.js   node scripts/gen_skill_sfx_catalog.mjs
+                data/skill_sfx_tune.js       the tuning the game plays today
+       returns  an LX_SFX_PATCH:1 blob       node scripts/apply_sfx_patch.mjs
+     Its sanitize / plan / stop-and-fade logic mirrors _lxSkillSfxTune,
+     _lxSkillSfxPlan and _lxPlayTunedSkillSfx in mojiworld_game.html line for
+     line; scripts/skill_sfx_tune_test.mjs holds the two to the same numbers.
+     Audience: a tester, not a developer - no shell and no jargon on the page. -->
+<base href="../">
+<title>Mojiworld — Skill Sound Tuner</title>
+<script src="tools/skill_sfx_catalog.js"></script>
+<script src="data/skill_sfx_tune.js"></script>
+<style>
+  :root{ --bg:#0c0a16; --panel:#151022; --panel2:#1b1530; --fg:#e8e4f4; --muted:#9790b4;
+         --ok:#88dd66; --warn:#ffcc55; --bad:#ff6677; --accent:#88ccff; --gold:#ffdd88;
+         --tuned:#c9a0ff; --border:rgba(255,255,255,.09); }
+  *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--fg)}
+  body{font:14px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif;padding-bottom:60px}
+  .wrap{max-width:1180px;margin:0 auto;padding:26px 18px 40px}
+  h1{font-size:27px;margin:0 0 6px} h1 .accent{color:var(--gold)}
+  .lede{color:var(--muted);margin:0 0 4px;max-width:82ch}
+
+  .how{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--gold);
+       border-radius:10px;padding:14px 18px;margin:16px 0 18px}
+  .how h3{margin:0 0 8px;font-size:14px;color:var(--gold);text-transform:uppercase;letter-spacing:.9px}
+  .how ol{margin:0;padding-left:20px} .how li{margin:5px 0} .how b{color:var(--fg)}
+  .k{font:12px ui-monospace,monospace;background:var(--panel2);border:1px solid var(--border);border-radius:4px;padding:1px 6px}
+
+  .prog{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin:0 0 14px}
+  .prog .top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .prog .big{font-size:19px;font-weight:800} .prog .sub{color:var(--muted);font-size:12px}
+  .track{height:9px;background:var(--panel2);border-radius:5px;margin-top:9px;overflow:hidden;display:flex}
+  .track i{display:block;height:100%}
+  .track .t{background:var(--tuned)} .track .g{background:var(--ok)} .track .r{background:var(--bad)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px;color:var(--muted)}
+  .legend b{font-weight:700} .legend .d{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px}
+
+  .bar{position:sticky;top:0;background:var(--bg);padding:10px 0 9px;border-bottom:1px solid var(--border);
+       display:flex;gap:8px;flex-wrap:wrap;align-items:center;z-index:9}
+  button{background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:7px;
+         padding:7px 13px;cursor:pointer;font-size:13px;font-family:inherit} button:hover{border-color:var(--accent)}
+  button.primary{background:#2a2145;border-color:var(--accent);font-weight:600}
+  button.big{padding:10px 18px;font-size:14px} button:disabled{opacity:.4;cursor:default}
+  select,input[type=text]{background:var(--panel);color:var(--fg);border:1px solid var(--border);
+         border-radius:7px;padding:7px 10px;font-size:13px;font-family:inherit}
+  .grow{flex:1;min-width:120px} .spacer{flex:1}
+  .mini{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer}
+  .mini input[type=range]{width:86px;accent-color:var(--accent)}
+  .saved{font-size:12px;color:var(--ok);opacity:0;transition:opacity .25s} .saved.on{opacity:1}
+
+  h2{font-size:17px;margin:30px 0 3px;color:var(--accent);border-top:1px solid var(--border);padding-top:20px}
+  h2 .n{color:var(--muted);font-size:12px;font-weight:400}
+  .row{display:grid;grid-template-columns:270px 132px 1fr 206px;gap:8px 14px;align-items:center;
+       padding:9px 11px;border-radius:9px;border:1px solid transparent}
+  .row:nth-child(even){background:rgba(255,255,255,.022)}
+  .row.hd{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px;background:none}
+  .row.cur{border-color:var(--accent);background:rgba(136,204,255,.06)}
+  .row.v-good{border-left:3px solid var(--ok)}
+  .row.v-bad{border-left:3px solid var(--bad);background:rgba(255,102,119,.05)}
+  .row.chg{box-shadow:inset 3px 0 0 var(--tuned)}
+  .nm{font-weight:700} .ic{margin-right:7px} .sub{color:var(--muted);font-size:11px}
+  .play{padding:6px 12px;min-width:74px}
+  .play.playing{border-color:var(--gold);color:var(--gold)} .play.waiting{border-color:var(--accent);color:var(--accent)}
+  .dur{font:11px ui-monospace,monospace;color:var(--muted);margin-left:7px}
+  .snd{font-size:12.5px;min-width:0}
+  .chip{display:inline-block;font-size:10px;font-weight:700;margin:3px 5px 0 0;padding:1px 6px;border-radius:4px;border:1px solid}
+  .chip.tuned{color:var(--tuned);border-color:rgba(201,160,255,.45)}
+  .chip.mine{color:var(--gold);border-color:rgba(255,221,136,.5)}
+  .chip.none{color:var(--warn);border-color:rgba(255,204,85,.45)}
+  .chip.cmt{color:var(--accent);border-color:rgba(136,204,255,.4)}
+  .acts{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+  .v{padding:5px 10px;font-size:13px;border-radius:6px;white-space:nowrap}
+  .v.on.good{background:rgba(136,221,102,.18);border-color:var(--ok);color:var(--ok)}
+  .v.on.bad{background:rgba(255,102,119,.18);border-color:var(--bad);color:var(--bad)}
+  .edb.on{border-color:var(--gold);color:var(--gold)}
+
+  .ed{grid-column:1/-1;background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--gold);
+      border-radius:10px;padding:12px 14px 14px;margin:4px 0 6px}
+  .ed .top{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .ed .desc{color:var(--muted);font-size:12px;margin:0 0 10px;max-width:95ch}
+  .wave{width:100%;height:96px;display:block;background:#0a0814;border:1px solid var(--border);
+        border-radius:8px;cursor:ew-resize;touch-action:none}
+  .wnote{color:var(--muted);font-size:11px;margin:4px 0 0}
+  .pick{display:flex;gap:10px 16px;align-items:center;flex-wrap:wrap;margin:12px 0 4px}
+  .pick select{max-width:100%;min-width:280px}
+  .ctl{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px 22px;margin:12px 0 10px}
+  .ctl .c{display:flex;flex-direction:column;gap:1px}
+  .ctl .lbl{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:12.5px}
+  .ctl .val{font:12px ui-monospace,monospace;color:var(--gold)}
+  .ctl .hint2{color:var(--muted);font-size:11px}
+  .ctl input[type=range]{width:100%;accent-color:var(--gold);margin:4px 0 0}
+  .rs{background:none;border:none;color:var(--muted);padding:0 3px;font-size:13px}
+  .rs:hover{color:var(--fg)}
+  .cmt{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:7px;
+       padding:6px 10px;font-size:12.5px;min-height:34px;resize:vertical;font-family:inherit}
+  .cmt:focus{border-color:var(--warn);outline:none} .cmt.has{border-color:rgba(255,204,85,.45)}
+
+  .exp{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin:30px 0 0}
+  .exp h3{margin:0 0 4px;font-size:16px;color:var(--gold)}
+  .exp p{color:var(--muted);margin:0 0 12px;font-size:13px;max-width:82ch}
+  .exp .btns{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .status{font-size:13px;min-height:20px;margin:2px 0 10px;color:var(--ok);font-weight:600} .status.err{color:var(--bad)}
+  .out{width:100%;min-height:190px;background:#0a0814;color:var(--fg);border:1px solid var(--border);
+       border-radius:8px;padding:12px 14px;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;resize:vertical;white-space:pre}
+  .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
+  .sep{border-top:1px dashed var(--border);margin:16px 0 14px}
+  .who{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:12px} .who label{color:var(--muted);font-size:12px}
+  .warnbox{background:rgba(255,102,119,.1);border:1px solid rgba(255,102,119,.4);border-radius:8px;
+       padding:10px 14px;margin:0 0 14px;font-size:13px;display:none}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--panel2);
+       border:1px solid var(--accent);border-radius:9px;padding:10px 18px;font-size:13px;
+       opacity:0;pointer-events:none;transition:opacity .2s;z-index:50} .toast.on{opacity:1}
+  @media(max-width:900px){ .row{grid-template-columns:1fr;gap:6px} .row.hd{display:none} .acts{justify-content:flex-start} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Mojiworld — <span class="accent">Skill Sound Tuner</span></h1>
+  <p class="lede">Every skill's sound effect, played exactly the way the game plays it. Listen, fix what sounds off with the sliders, and send your changes back &mdash; they go straight into the game.</p>
+
+  <div class="how">
+    <h3>How to use this page</h3>
+    <ol>
+      <li><b>Press &#9654; Play to hear a skill's sound</b> the way the game plays it right now.</li>
+      <li><b>Something off? Press &#9998; Edit.</b> Make it louder or quieter, higher or lower, skip a slow start, cut a long tail, fade it out, or make it wait a moment after the skill is used. Press &#9654; again to hear the change &mdash; and <span class="k">&#9654; Original</span> to compare it with how it was.</li>
+      <li><b>Wrong sound altogether?</b> Pick a different one from the list inside the editor, or press &#128078; (<i>needs a new sound</i>) and write what it should sound like instead.</li>
+      <li><b>Sounds right as it is?</b> Press &#128077; so we know it was checked.</li>
+      <li><b>When you're done (or want a break), scroll to the bottom and press <span class="k">Copy everything</span></b>, then paste it into a message and send it. Your work is saved in this browser as you go.</li>
+    </ol>
+    <p class="hint">Keyboard: <span class="k">Space</span> play &middot; <span class="k">O</span> original &middot; <span class="k">E</span> open / close the editor &middot; <span class="k">1</span> sounds right &middot; <span class="k">3</span> needs a new sound &middot; <span class="k">&darr;</span> / <span class="k">&uarr;</span> move &middot; <span class="k">/</span> search</p>
+  </div>
+
+  <div class="warnbox" id="nodata">&#9888; The skill list could not be loaded. This page has to stay inside the game's <b>tools</b> folder &mdash; please open it from there, or use the link you were sent.</div>
+  <div class="warnbox" id="nosave">&#9888; This browser won't let the page save your work automatically (private/incognito mode does this). Everything still works, but <b>press "Copy everything" or "Download" before closing the tab</b> or your changes will be lost.</div>
+
+  <div class="prog">
+    <div class="top">
+      <div><span class="big" id="pDone">0</span> <span class="sub">of <span id="pTotal">0</span> skill sounds checked</span></div>
+      <div class="sub" id="pRight"></div>
+    </div>
+    <div class="track"><i class="t" id="tT"></i><i class="g" id="tG"></i><i class="r" id="tR"></i></div>
+    <div class="legend">
+      <span><span class="d" style="background:var(--tuned)"></span><b id="lT">0</b> changed by you</span>
+      <span><span class="d" style="background:var(--ok)"></span><b id="lG">0</b> sound right</span>
+      <span><span class="d" style="background:var(--bad)"></span><b id="lR">0</b> need a new sound</span>
+      <span><span class="d" style="background:var(--panel2);border:1px solid var(--border)"></span><b id="lU">0</b> not checked yet</span>
+      <span>&#128172; <b id="lC">0</b> notes written</span>
+    </div>
+  </div>
+
+  <div class="bar">
+    <select id="sec"><option value="">All classes</option></select>
+    <select id="only">
+      <option value="">Show everything</option>
+      <option value="todo">Only ones I haven't checked</option>
+      <option value="mine">Only ones I changed</option>
+      <option value="bad">Only "needs a new sound"</option>
+      <option value="cmt">Only ones with a note</option>
+      <option value="tuned">Only ones already tuned in the game</option>
+    </select>
+    <input type="text" id="q" class="grow" placeholder="Search skills&hellip;">
+    <label class="mini" title="The same as the sound-effects slider in the game's settings. Only for listening here &mdash; it is not sent back.">&#128266; <input type="range" id="master" min="0" max="100" step="5"> <span id="masterV"></span></label>
+    <label class="mini" title="Play the sound again every time you let go of a slider"><input type="checkbox" id="auto"> replay after each change</label>
+    <button id="playList" title="Play every sound in the list below, one after another">&#9654; Play this list</button>
+    <span class="saved" id="savedTag">saved &#10003;</span>
+    <button class="primary" id="jump">&darr; Send changes</button>
+  </div>
+
+  <div id="list"></div>
+
+  <div class="exp" id="exportPanel">
+    <h3>Send your changes back</h3>
+    <p>Everything you changed and every note you wrote is already in the box below. Use whichever of these is easiest &mdash; they all contain exactly the same thing. Please send <b>all</b> of it, including the long last line: that line is what the game reads.</p>
+    <div class="who">
+      <label for="who">Your name (so we know whose changes these are):</label>
+      <input type="text" id="who" placeholder="e.g. Alwyn" style="min-width:180px">
+    </div>
+    <div class="btns">
+      <button class="primary big" id="copy">&#128203; Copy everything</button>
+      <button class="big" id="dl">&#128190; Download as a file</button>
+    </div>
+    <div class="status" id="status"></div>
+    <textarea class="out" id="out" readonly onclick="this.select()"></textarea>
+    <p class="hint">If the Copy button doesn't work, click inside the box above (it selects everything), then press <span class="k">Ctrl</span>+<span class="k">C</span>.</p>
+    <div class="sep"></div>
+    <div class="btns">
+      <button id="save">Save my work to a file</button>
+      <button id="loadBtn">Load work from a file</button>
+      <input type="file" id="load" accept=".json,application/json" style="display:none">
+      <button id="reset" style="margin-left:auto">Start over</button>
+    </div>
+    <p class="hint">Only needed to carry on from a different computer, or if you're worried about losing your work. Normal use doesn't need these.</p>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+const CAT = window.LX_SKILL_SFX_CATALOG || null;
+if (!CAT || !Array.isArray(CAT.rows)) { $('#nodata').style.display = 'block'; throw new Error('tools/skill_sfx_catalog.js did not load'); }
+let BAKED = (window.LX_SKILL_SFX_TUNE && typeof window.LX_SKILL_SFX_TUNE === 'object') ? window.LX_SKILL_SFX_TUNE : {};
+const ROWS = CAT.rows, SECTIONS = CAT.sections, LIB = CAT.library;
+const ROW = Object.fromEntries(ROWS.map((r) => [r.id, r]));
+const LIBF = Object.fromEntries(LIB.map((l) => [l.file, l]));
+const TARGET = CAT.targetVol, MASTER_DEFAULT = CAT.masterDefault;
+const USERS = {};   // clip -> the skills that play it by default
+ROWS.forEach((r) => { if (r.file) (USERS[r.file] = USERS[r.file] || []).push(r.id); });
+
+// ------------------------------------------------- the game's own rules ----
+// Mirrors _lxSkillSfxTune / _lxSkillSfxPlan in mojiworld_game.html line for
+// line: same ranges, same defaults, same maths. scripts/skill_sfx_tune_test.mjs
+// compares the two over a grid of settings, so any drift fails loudly.
+const FILE_RE = /^audio\/(?:[\w-]+\/)*[\w-]+\.(?:mp3|ogg|wav|m4a)$/;
+function sanitize(t) {
+  if (!t || typeof t !== 'object') return null;
+  const n = (v, lo, hi, d) => (typeof v === 'number' && isFinite(v)) ? Math.max(lo, Math.min(hi, v)) : d;
+  const o = {
+    vol: n(t.vol, 0, 2, 1), pitch: n(t.pitch, -12, 12, 0),
+    start: n(t.start, 0, 10, 0), end: n(t.end, 0, 10, 0),
+    fade: n(t.fade, 0, 3, 0), delay: n(t.delay, 0, 1.5, 0),
+    file: (typeof t.file === 'string' && FILE_RE.test(t.file)) ? t.file : '',
+    mute: t.mute === true,
+  };
+  if (o.end && o.end <= o.start) o.end = 0;
+  return o;
+}
+function plan(o, master, dur) {
+  const base = Math.min(1, TARGET * o.vol);
+  const end = o.end || ((o.fade > 0 && dur > 0) ? dur : 0);
+  const stopAt = end > o.start ? end : 0;
+  return {
+    silent: o.mute || o.vol <= 0,
+    base: base, volume: Math.max(0, Math.min(1, base * master)),
+    rate: Math.pow(2, o.pitch / 12), preservesPitch: o.pitch === 0,
+    start: o.start, stopAt: stopAt, fade: stopAt ? Math.min(o.fade, stopAt - o.start) : 0,
+    delayMs: Math.round(o.delay * 1000),
+  };
+}
+// The canonical stored form: defaults dropped, rounded. Identical to canon() in
+// scripts/apply_sfx_patch.mjs, so what gets sent is exactly what gets baked.
+const r2 = (x, d) => Math.round(x * Math.pow(10, d)) / Math.pow(10, d);
+function compact(t, id) {
+  const o = sanitize(t) || sanitize({});
+  if (o.mute) return { mute: true };
+  const out = {};
+  const put = (k, v, d, dflt) => { const x = r2(v, d); if (x !== dflt) out[k] = x; };
+  put('vol', o.vol, 2, 1); put('pitch', o.pitch, 1, 0); put('start', o.start, 3, 0);
+  put('end', o.end, 3, 0); put('fade', o.fade, 3, 0); put('delay', o.delay, 3, 0);
+  if (o.file && o.file !== (ROW[id] && ROW[id].file)) out.file = o.file;
+  return out;
+}
+
+// ---------------------------------------------------------------- state ----
+// st.t[id] is the tuning the tester wants for that skill (absent = leave it as
+// the game has it). st.v / st.c are verdicts and notes, as on the sound review.
+const KEY = 'lx_skill_sfx_tuner_v1';
+let st = { t: {}, v: {}, c: {}, who: '', master: null, auto: true };
+let CAN_SAVE = true;
+try {
+  localStorage.setItem('__t', '1'); localStorage.removeItem('__t');
+  const raw = localStorage.getItem(KEY);
+  if (raw) st = Object.assign(st, JSON.parse(raw));
+} catch (e) { CAN_SAVE = false; }
+if (!CAN_SAVE) $('#nosave').style.display = 'block';
+for (const id of Object.keys(st.t)) if (!ROW[id]) delete st.t[id];   // a skill since renamed or removed
+let saveTimer = null;
+function save() {
+  if (CAN_SAVE) {
+    try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) { CAN_SAVE = false; $('#nosave').style.display = 'block'; }
+    const tag = $('#savedTag'); tag.classList.add('on');
+    clearTimeout(saveTimer); saveTimer = setTimeout(() => tag.classList.remove('on'), 1400);
+  }
+  buildReport();
+}
+const DEFAULT = sanitize({});
+const baked = (id) => sanitize(BAKED[id]) || sanitize({});
+const eff = (id) => (st.t[id] && sanitize(st.t[id])) || baked(id);
+const same = (a, b, id) => JSON.stringify(compact(a, id)) === JSON.stringify(compact(b, id));
+const changed = (id) => !!st.t[id] && !same(st.t[id], baked(id), id);
+const tunedInGame = (id) => Object.keys(compact(baked(id), id)).length > 0;
+const fileOf = (id) => eff(id).file || ROW[id].file || '';
+const masterVol = () => (typeof st.master === 'number' ? st.master : MASTER_DEFAULT);
+function setTune(id, t) {   // stored sanitised; identical to the game's copy = no change
+  const s = sanitize(t) || sanitize({});
+  if (same(s, baked(id), id)) delete st.t[id]; else st.t[id] = s;
+}
+
+// ------------------------------------------------------------ clip info ----
+// Durations come from each clip's metadata, which works even when the page is
+// opened straight off disk. The waveform needs the clip's bytes (fetch), which
+// browsers only hand over on the web link - off disk the editor still works,
+// it just draws no picture.
+const durs = {}, probing = {}, waves = {};
+function probeDur(file, cb) {
+  if (!file) { if (cb) cb(); return; }
+  if (durs[file]) { if (cb) cb(); return; }
+  (probing[file] = probing[file] || []).push(cb || null);
+  if (probing[file].length > 1) return;
+  const a = new Audio();
+  a.preload = 'metadata';
+  const done = () => { const l = probing[file] || []; delete probing[file]; l.forEach((f) => f && f()); onClipInfo(file); };
+  a.addEventListener('loadedmetadata', () => { if (isFinite(a.duration) && a.duration > 0) durs[file] = a.duration; done(); }, { once: true });
+  a.addEventListener('error', done, { once: true });
+  a.src = file;
+}
+function probeAll() {   // quietly fill in every row's length, three at a time
+  const files = [...new Set(ROWS.map((r) => fileOf(r.id)).filter(Boolean))];
+  let i = 0, live = 0;
+  const pump = () => { while (live < 3 && i < files.length) { live++; probeDur(files[i++], () => { live--; pump(); }); } };
+  pump();
+}
+let actx = null;
+function loadWave(file) {
+  if (!file || waves[file]) return;
+  waves[file] = 'loading';
+  (async () => {
+    try {
+      const res = await fetch(file);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const buf = await res.arrayBuffer();
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const dec = await actx.decodeAudioData(buf);
+      const ch = dec.getChannelData(0), N = 600, pk = new Float32Array(N), step = ch.length / N;
+      for (let i = 0; i < N; i++) {
+        let m = 0;
+        for (let j = Math.floor(i * step), e = Math.min(ch.length, Math.floor((i + 1) * step)); j < e; j++) { const v = ch[j] < 0 ? -ch[j] : ch[j]; if (v > m) m = v; }
+        pk[i] = m;
+      }
+      waves[file] = { pk: pk, dur: dec.duration };
+      if (!durs[file]) durs[file] = dec.duration;
+    } catch (e) { waves[file] = 'fail'; }
+    onClipInfo(file);
+  })();
+}
+function onClipInfo(file) {
+  document.querySelectorAll('[data-dur]').forEach((el) => {
+    const f = fileOf(el.dataset.dur);
+    if (f === file && durs[f]) el.textContent = durs[f].toFixed(2) + 's';
+  });
+  if (openId && fileOf(openId) === file) { if (edNeedsDur && durs[file]) renderEditor(); else drawWave(openId); }
+}
+
+// --------------------------------------------------------------- player ----
+// One element for everything: a tester clicking down 74 rows must never hear
+// two cues pile up. It is driven exactly like the game's tuned element: volume,
+// rate, pitch lock and start from plan(), then stop-and-fade on the AUDIO clock
+// with the same watcher as _lxPlayTunedSkillSfx.
+const player = new Audio();
+player.preload = 'auto';
+let ptok = 0, headId = null, headT = null, listRun = null;
+function markPlaying(id, how) {
+  document.querySelectorAll('.play.playing,.play.waiting').forEach((b) => b.classList.remove('playing', 'waiting'));
+  if (id) document.querySelectorAll('[data-play="' + id + '"]').forEach((b) => b.classList.add(how || 'playing'));
+}
+function clearHead() { const id = headId; headId = null; headT = null; if (id) drawWave(id); }
+function finish(tok) {
+  if (tok !== ptok) return;
+  ptok++;
+  markPlaying(null); clearHead();
+  if (listRun) setTimeout(listNext, 420);
+}
+function stopPlayback() { ptok++; try { player.pause(); } catch (e) {} markPlaying(null); clearHead(); }
+function playRow(id, original) {
+  const r = ROW[id]; if (!r) return;
+  stopPlayback();
+  const o = original ? DEFAULT : eff(id);
+  const file = original ? r.file : (o.file || r.file);
+  if (!file) { toast('This skill has no sound yet — open ✎ Edit and pick one.'); return; }
+  const tok = ++ptok;
+  const i = visible().findIndex((x) => x.id === id);
+  if (i >= 0) setCursor(i, false);
+  if (plan(o, 1, 0).silent) { toast('Silent — in the game this skill makes no sound.'); finish(tok); return; }
+  markPlaying(id, o.delay > 0 ? 'waiting' : 'playing');
+  const fire = () => {
+    if (tok !== ptok) return;
+    if (player.src !== new URL(file, document.baseURI).href) player.src = file;
+    const pl = plan(o, masterVol(), durs[file] || 0);
+    player.volume = pl.volume;
+    player.playbackRate = pl.rate;
+    try { player.preservesPitch = player.mozPreservesPitch = player.webkitPreservesPitch = pl.preservesPitch; } catch (e) {}
+    try { player.currentTime = pl.start; } catch (e) {}
+    headId = id; headT = pl.start;
+    markPlaying(id, 'playing');
+    const p = player.play();
+    if (p && p.catch) p.catch(() => finish(tok));
+    const tick = () => {
+      if (tok !== ptok) return;
+      const t = player.currentTime;
+      headT = t; drawWave(id);
+      if (player.paused || player.ended) { finish(tok); return; }
+      const q = plan(o, masterVol(), isFinite(player.duration) ? player.duration : 0);
+      if (q.stopAt) {
+        if (t >= q.stopAt - 0.004) { try { player.pause(); } catch (e) {} finish(tok); return; }
+        if (q.fade > 0 && t > q.stopAt - q.fade) {
+          try { player.volume = Math.max(0, Math.min(1, q.volume * (q.stopAt - t) / q.fade)); } catch (e) {}
+        }
+      }
+      setTimeout(tick, 15);
+    };
+    setTimeout(tick, 15);
+  };
+  if (o.delay > 0) setTimeout(fire, Math.round(o.delay * 1000)); else fire();
+  probeDur(file);
+}
+player.addEventListener('error', () => {
+  if (headId) toast('That sound file is missing — please mention it in a note.');
+  finish(ptok);
+});
+
+// ------------------------------------------------------------- waveform ----
+// Gold = what plays (scaled by the loudness and shaped by the fade), grey =
+// trimmed away; green / red flags mark where it starts and stops.
+function drawWave(id) {
+  const cv = document.querySelector('canvas[data-wave="' + id + '"]');
+  if (!cv) return;
+  const o = eff(id), file = fileOf(id), w = waves[file], d = durs[file] || (w && w.dur) || 0;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth || 600, H = cv.clientHeight || 96;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  g.font = '11px ui-monospace,Consolas,monospace';
+  if (!file) { g.fillStyle = '#9790b4'; g.fillText('no sound yet - pick one below', 10, H / 2 + 4); return; }
+  if (!d) { g.fillStyle = '#9790b4'; g.fillText('loading...', 10, H / 2 + 4); return; }
+  const pl = plan(o, 1, d), s = pl.start, e = pl.stopAt || d, mid = H / 2;
+  const X = (t) => Math.max(0, Math.min(W, (t / d) * W));
+  g.fillStyle = 'rgba(255,255,255,.08)'; g.fillRect(0, mid, W, 1);
+  if (w && w.pk) {
+    const pk = w.pk, n = pk.length, bw = W / n, gain = pl.silent ? 0 : o.vol;
+    for (let i = 0; i < n; i++) {
+      const t = ((i + 0.5) / n) * w.dur, inside = t >= s && t <= e;
+      let a = pk[i] * (inside ? gain : 1);
+      if (inside && pl.fade && t > e - pl.fade) a *= Math.max(0, (e - t) / pl.fade);
+      const h = Math.max(0.5, Math.min(mid - 3, a * (mid - 5)));
+      g.fillStyle = inside ? '#ffdd88' : 'rgba(151,144,180,.28)';
+      g.fillRect((t / d) * W - bw / 2, mid - h, Math.max(1, bw - 0.4), h * 2);
+    }
+  } else {
+    g.fillStyle = 'rgba(151,144,180,.6)';
+    g.fillText(w === 'fail' ? 'the sound picture only shows on the web link - the sliders still work' : 'drawing...', 10, 15);
+  }
+  g.fillStyle = 'rgba(12,10,22,.55)'; g.fillRect(0, 0, X(s), H); g.fillRect(X(e), 0, W - X(e), H);
+  const flag = (x, col, label, left) => {
+    g.fillStyle = col; g.fillRect(x - 1, 0, 2, H); g.fillRect(left ? x - 9 : x, 0, 9, 9);
+    g.fillText(label, left ? x - 12 - g.measureText(label).width : x + 12, H - 6);
+  };
+  flag(X(s), '#88dd66', s.toFixed(2) + 's', false);
+  flag(X(e), '#ff6677', e.toFixed(2) + 's', true);
+  if (pl.fade) { g.strokeStyle = '#88ccff'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(X(e - pl.fade), 7); g.lineTo(X(e), H - 7); g.stroke(); }
+  if (headId === id && headT != null) { g.fillStyle = '#ffffff'; g.fillRect(X(headT) - 0.75, 0, 1.5, H); }
+}
+// Click or drag on the picture: moves whichever edge (start / stop) is nearer.
+let drag = null;
+function dragTo(id, which, t, d) {
+  const o = Object.assign({}, eff(id)), e = o.end || d;
+  if (which === 'start') o.start = r2(Math.max(0, Math.min(t, e - 0.05)), 3);
+  else { const v = Math.max(t, o.start + 0.05); o.end = v >= d - 0.01 ? 0 : r2(v, 3); }
+  o.fade = Math.min(o.fade, Math.max(0, (o.end || d) - o.start));
+  setTune(id, o);
+  syncEditor(id);
+}
+
+// --------------------------------------------------------------- render ----
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const secLabel = (id) => (SECTIONS.find((s) => s.id === id) || { label: id }).label;
+function subLine(r) {
+  const b = [secLabel(r.cls)];
+  if (r.job && CAT.jobs[r.job]) b.push(CAT.jobs[r.job].name);
+  if (r.master && CAT.masters[r.master]) b.push(CAT.masters[r.master].name);
+  if (r.cue) b.push('extra sound');
+  return b.join(' › ');
+}
+function clipName(file) {
+  if (!file) return '';
+  const l = LIBF[file], base = file.split('/').pop().replace(/\.\w+$/, '').replace(/_/g, ' ');
+  return (l && l.cat === 'ui' ? 'Menu: ' : l && l.cat === 'mob-fire' ? 'Monster shot: ' : '') + base.charAt(0).toUpperCase() + base.slice(1);
+}
+const others = (id) => { const f = ROW[id].file; return f ? USERS[f].filter((x) => x !== id) : []; };
+let openId = null, cursor = 0, edNeedsDur = false;
+
+function visible() {
+  const sec = $('#sec').value, only = $('#only').value, q = ($('#q').value || '').trim().toLowerCase();
+  return ROWS.filter((r) => {
+    if (sec && r.cls !== sec) return false;
+    if (q && !(r.name + ' ' + r.id + ' ' + subLine(r) + ' ' + clipName(fileOf(r.id))).toLowerCase().includes(q)) return false;
+    const v = st.v[r.id], ch = changed(r.id);
+    if (only === 'todo') return !v && !ch;
+    if (only === 'mine') return ch;
+    if (only === 'bad') return v === 'bad';
+    if (only === 'cmt') return !!(st.c[r.id] || '').trim();
+    if (only === 'tuned') return tunedInGame(r.id);
+    return true;
+  });
+}
+function chipsHtml(id) {
+  const o = eff(id), f = fileOf(id), bk = BAKED[id], ch = [];
+  if (!f) ch.push('<span class="chip none">NO SOUND YET</span>');
+  if (o.mute) ch.push('<span class="chip none">SILENT</span>');
+  if (changed(id)) ch.push('<span class="chip mine">YOUR CHANGE</span>');
+  else if (tunedInGame(id)) ch.push('<span class="chip tuned">TUNED IN GAME</span>');
+  if (bk && typeof bk.dur === 'number' && durs[f] && Math.abs(bk.dur - durs[f]) > 0.03) ch.push('<span class="chip none" title="This sound was replaced after it was tuned - check where it starts and stops">SOUND REPLACED &mdash; RE-CHECK</span>');
+  if ((st.c[id] || '').trim()) ch.push('<span class="chip cmt">&#128172; NOTE</span>');
+  return ch.join('');
+}
+function sndHtml(id) {
+  const r = ROW[id], o = eff(id), f = fileOf(id), sh = others(id), swapped = !!o.file && o.file !== r.file;
+  let h = f ? esc(clipName(f)) + (swapped ? ' <span class="sub">(swapped in)</span>' : '') : '<span class="sub">&mdash;</span>';
+  if (sh.length && !swapped) h += '<div class="sub">shared with ' + esc(sh.slice(0, 3).map((x) => ROW[x].name).join(', ')) + (sh.length > 3 ? ' +' + (sh.length - 3) : '') + '</div>';
+  return h + '<div>' + chipsHtml(id) + '</div>';
+}
+function rowHtml(r) {
+  const v = st.v[r.id], f = fileOf(r.id), d = f && durs[f];
+  return '<div class="row' + (v ? ' v-' + v : '') + (changed(r.id) ? ' chg' : '') + '" id="r_' + r.id + '">'
+    + '<div><span class="ic">' + esc(r.icon) + '</span><span class="nm">' + esc(r.name) + '</span><div class="sub">' + esc(subLine(r)) + '</div></div>'
+    + '<div><button class="play" data-play="' + r.id + '">&#9654; Play</button><span class="dur" data-dur="' + r.id + '">' + (d ? d.toFixed(2) + 's' : '') + '</span></div>'
+    + '<div class="snd" data-snd="' + r.id + '">' + sndHtml(r.id) + '</div>'
+    + '<div class="acts"><button class="edb' + (openId === r.id ? ' on' : '') + '" data-ed="' + r.id + '">&#9998; Edit</button>'
+    + '<button class="v good' + (v === 'good' ? ' on' : '') + '" data-v="' + r.id + '|good" title="Sounds right">&#128077;</button>'
+    + '<button class="v bad' + (v === 'bad' ? ' on' : '') + '" data-v="' + r.id + '|bad" title="Needs a new sound">&#128078;</button></div>'
+    + (openId === r.id ? '<div class="ed" id="ed_' + r.id + '"></div>' : '')
+    + '</div>';
+}
+function refreshRow(id) {   // in-place update that never rebuilds a slider mid-drag
+  const row = document.getElementById('r_' + id);
+  if (row) {
+    row.classList.toggle('chg', changed(id));
+    const s = row.querySelector('[data-snd]'); if (s) s.innerHTML = sndHtml(id);
+  }
+  paintProgress();
+}
+function render() {
+  const vis = visible(), by = {};
+  vis.forEach((r) => (by[r.cls] = by[r.cls] || []).push(r));
+  let h = '';
+  for (const s of SECTIONS) {
+    const l = by[s.id]; if (!l || !l.length) continue;
+    h += '<h2>' + esc((s.icon ? s.icon + ' ' : '') + s.label) + ' <span class="n">(' + l.length + ')</span></h2>'
+      + '<div class="row hd"><div>skill</div><div>listen</div><div>the sound it plays</div><div style="text-align:right">edit &middot; verdict</div></div>'
+      + l.map(rowHtml).join('');
+  }
+  $('#list').innerHTML = h || '<p class="sub" style="margin-top:24px">Nothing matches those filters &mdash; try "Show everything".</p>';
+  if (openId) renderEditor();
+  if (cursor >= vis.length) cursor = Math.max(0, vis.length - 1);
+  paintCursor(); paintProgress();
+}
+function replaceRow(id) {   // re-render one row, e.g. to open or close its editor
+  const row = document.getElementById('r_' + id);
+  if (!row) return;
+  row.outerHTML = rowHtml(ROW[id]);
+  if (id === openId) renderEditor();
+}
+
+// --------------------------------------------------------------- editor ----
+const CTL = [
+  ['vol', 'Loudness', 'quieter &larr; &rarr; louder'],
+  ['pitch', 'Pitch', 'lower &amp; slower &larr; &rarr; higher &amp; faster'],
+  ['start', 'Start later', 'skip a slow or silent beginning'],
+  ['end', 'Stop sooner', 'cut off a long tail'],
+  ['fade', 'Fade out', 'soften the ending instead of a hard stop'],
+  ['delay', 'Wait before playing', 'line the sound up with the moment it hits'],
+];
+const NEEDS_DUR = { start: 1, end: 1, fade: 1 };
+function ctlSpec(k, o, d) {
+  const e = o.end || d;
+  switch (k) {
+    case 'vol': return { min: 0, max: 200, step: 5, val: Math.round(o.vol * 100),
+      show: o.vol === 1 ? '100% (as recorded)' : Math.round(o.vol * 100) + '%' + (o.vol === 0 ? ' - silent' : '') };
+    case 'pitch': return { min: -12, max: 12, step: 0.5, val: o.pitch,
+      show: o.pitch === 0 ? '0 (as recorded)' : o.pitch > 0 ? '+' + o.pitch + ' higher' : '−' + (-o.pitch) + ' lower' };
+    case 'start': return { min: 0, max: r2(d, 2), step: 0.01, val: o.start, show: o.start ? 'skips ' + o.start.toFixed(2) + ' s' : 'from the very start' };
+    case 'end': return { min: 0, max: r2(d, 2), step: 0.01, val: o.end || r2(d, 2), show: o.end ? 'stops at ' + o.end.toFixed(2) + ' s' : 'plays to the end' };
+    case 'fade': return { min: 0, max: r2(Math.min(3, Math.max(0.01, e - o.start)), 2), step: 0.01, val: o.fade, show: o.fade ? o.fade.toFixed(2) + ' s' : 'none' };
+    default: return { min: 0, max: 1.5, step: 0.01, val: o.delay, show: o.delay ? o.delay.toFixed(2) + ' s later' : 'right away' };
+  }
+}
+function pickHtml(id) {
+  const r = ROW[id], cur = eff(id).file;
+  let h = '<select data-pick="' + id + '"><option value="">' + (r.file ? 'its own sound &mdash; ' + esc(clipName(r.file)) : '(no sound of its own)') + '</option>';
+  for (const [c, label] of [['skill', 'Other skill sounds'], ['ui', 'Menu sounds'], ['mob-fire', 'Monster shot sounds']]) {
+    const items = LIB.filter((l) => l.cat === c && l.file !== r.file);
+    if (!items.length) continue;
+    h += '<optgroup label="' + label + '">' + items.map((l) => {
+      const u = (USERS[l.file] || []).map((x) => ROW[x].name);
+      return '<option value="' + esc(l.file) + '"' + (l.file === cur ? ' selected' : '') + '>' + esc(clipName(l.file))
+        + (u.length ? ' (' + esc(u.slice(0, 2).join(', ') + (u.length > 2 ? '…' : '')) + ')' : '') + '</option>';
+    }).join('') + '</optgroup>';
+  }
+  return h + '</select>';
+}
+function renderEditor() {
+  const id = openId, host = id && document.getElementById('ed_' + id);
+  if (!host) return;
+  const r = ROW[id], o = eff(id), f = fileOf(id), d = f ? (durs[f] || 0) : 0, sh = others(id);
+  const tuned = Object.keys(compact(o, id)).length > 0;
+  edNeedsDur = !!f && !d;
+  if (f) { probeDur(f); loadWave(f); }
+  host.innerHTML = '<div class="top">'
+    + '<button class="play" data-play="' + id + '">&#9654; Play' + (tuned ? ' (as tuned)' : '') + '</button>'
+    + '<button data-orig="' + id + '" title="The sound exactly as recorded, with no changes">&#9654; Original</button>'
+    + (changed(id) ? '<button data-undo="' + id + '" title="Back to how the game has it now">&#8630; Undo my changes</button>' : '')
+    + (tuned ? '<button data-plain="' + id + '" title="Remove every change: the sound exactly as recorded">&#10227; Back to the original</button>' : '')
+    + (sh.length && tuned ? '<button data-share="' + id + '" title="' + esc(sh.map((x) => ROW[x].name).join(', ')) + '">Use these settings for the ' + sh.length + ' other skill' + (sh.length > 1 ? 's' : '') + ' with this sound</button>' : '')
+    + '<span class="spacer"></span><button data-ed="' + id + '">Close</button></div>'
+    + (r.desc ? '<p class="desc">' + esc(r.desc) + '</p>' : '')
+    + '<canvas class="wave" data-wave="' + id + '"></canvas>'
+    + '<p class="wnote">Click or drag on the picture to move the nearest edge: <span style="color:var(--ok)">green</span> is where the sound starts, <span style="color:var(--bad)">red</span> is where it stops.</p>'
+    + '<div class="pick"><span class="sub">Sound:</span>' + pickHtml(id)
+    + '<label class="mini"><input type="checkbox" data-mute="' + id + '"' + (o.mute ? ' checked' : '') + '> silent &mdash; this skill should make no sound</label></div>'
+    + '<div class="ctl">' + CTL.map(([k, label, hint]) => {
+      const off = NEEDS_DUR[k] && !d, sp = off ? null : ctlSpec(k, o, d || 1);
+      return '<div class="c"><div class="lbl"><span>' + label + '</span><span><span class="val" data-val="' + k + '">' + (sp ? sp.show : 'loading&hellip;') + '</span>'
+        + '<button class="rs" data-rs="' + k + '" title="Put this one back">&#8634;</button></span></div>'
+        + '<input type="range" data-k="' + k + '" min="' + (sp ? sp.min : 0) + '" max="' + (sp ? sp.max : 1) + '" step="' + (sp ? sp.step : 0.01) + '" value="' + (sp ? sp.val : 0) + '"' + (off ? ' disabled' : '') + '>'
+        + '<span class="hint2">' + hint + '</span></div>';
+    }).join('') + '</div>'
+    + '<textarea class="cmt' + ((st.c[id] || '').trim() ? ' has' : '') + '" data-c="' + id + '" rows="2" placeholder="Anything the sliders can\'t fix? Say what it should sound like instead &mdash; e.g. &quot;too thin, should be a deep whoomph&quot;">' + esc(st.c[id] || '') + '</textarea>';
+  drawWave(id);
+}
+function syncEditor(id, skip) {   // labels + slider ranges after a change, without rebuilding
+  const host = document.getElementById('ed_' + id);
+  if (host) {
+    const o = eff(id), f = fileOf(id), d = f ? (durs[f] || 0) : 0;
+    for (const [k] of CTL) {
+      if (NEEDS_DUR[k] && !d) continue;
+      const sp = ctlSpec(k, o, d), inp = host.querySelector('input[data-k="' + k + '"]'), val = host.querySelector('[data-val="' + k + '"]');
+      if (val) val.textContent = sp.show;
+      if (inp && k !== skip) { inp.max = sp.max; inp.value = sp.val; }
+    }
+    const mc = host.querySelector('input[data-mute]'); if (mc) mc.checked = o.mute;
+    drawWave(id);
+  }
+  refreshRow(id);
+}
+function onSlide(id, k, raw) {
+  const o = Object.assign({}, eff(id)), d = durs[fileOf(id)] || 0, v = parseFloat(raw);
+  if (!isFinite(v)) return;
+  if (k === 'vol') o.vol = v / 100;
+  else if (k === 'pitch') o.pitch = v;
+  else if (k === 'delay') o.delay = v;
+  else if (k === 'start') o.start = Math.max(0, Math.min(v, (o.end || d) - 0.05));
+  else if (k === 'end') { const e = Math.max(v, o.start + 0.05); o.end = e >= d - 0.005 ? 0 : e; }
+  else if (k === 'fade') o.fade = v;
+  o.fade = Math.min(o.fade, Math.max(0, (o.end || d) - o.start));
+  setTune(id, o);
+  syncEditor(id, k);
+}
+function resetCtl(id, k) {   // back to how the game has it; if already there, back to as recorded
+  const o = Object.assign({}, eff(id)), b = baked(id);
+  o[k] = o[k] !== b[k] ? b[k] : DEFAULT[k];
+  setTune(id, o); syncEditor(id); save();
+  if (st.auto) playRow(id);
+}
+function onPick(id, file) {
+  const o = Object.assign({}, eff(id), { file: file });
+  if (o.start || o.end || o.fade) { o.start = 0; o.end = 0; o.fade = 0; toast('New sound picked — where it starts and stops was reset.'); }
+  setTune(id, o); save(); renderEditor(); refreshRow(id);
+  if (st.auto) playRow(id);
+}
+
+// ------------------------------------------------------------- progress ----
+function counts() {
+  let t = 0, g = 0, b = 0, c = 0, done = 0;
+  for (const r of ROWS) {
+    const ch = changed(r.id), v = st.v[r.id];
+    if (ch) t++;
+    if (v === 'good') g++; else if (v === 'bad') b++;
+    if ((st.c[r.id] || '').trim()) c++;
+    if (ch || v) done++;
+  }
+  return { t: t, g: g, b: b, c: c, done: done, total: ROWS.length, todo: ROWS.length - done };
+}
+function paintProgress() {
+  const n = counts();
+  $('#pDone').textContent = n.done; $('#pTotal').textContent = n.total;
+  $('#lT').textContent = n.t; $('#lG').textContent = n.g; $('#lR').textContent = n.b;
+  $('#lU').textContent = n.todo; $('#lC').textContent = n.c;
+  let tt = 0, gg = 0, bb = 0;   // each row counted once on the bar: changed > good > needs work
+  for (const r of ROWS) { if (changed(r.id)) tt++; else if (st.v[r.id] === 'good') gg++; else if (st.v[r.id] === 'bad') bb++; }
+  const pct = (x) => (n.total ? (x / n.total) * 100 : 0) + '%';
+  $('#tT').style.width = pct(tt); $('#tG').style.width = pct(gg); $('#tR').style.width = pct(bb);
+  $('#pRight').textContent = n.done === n.total && n.total ? 'All checked — press "Copy everything" at the bottom and send it over.'
+    : Math.round(n.total ? (n.done / n.total) * 100 : 0) + '% checked';
+}
+
+// --------------------------------------------------------------- report ----
+// The one thing the tester hands back: readable in a chat window, with the
+// machine part as a single last line. Items under NEEDS WORK use the sound
+// review's layout on purpose - scripts/regen_sfx_from_comments.mjs reads them
+// (and their file: lines) straight out of this text - while slider changes are
+// listed first, in a section it ignores, so tuning never triggers a regen.
+function stamp() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function describe(id) {
+  const o = eff(id), r = ROW[id], b = [];
+  if (o.mute) return 'made silent';
+  if (o.file && o.file !== r.file) b.push('sound swapped to ' + clipName(o.file) + (r.file ? ' (was ' + clipName(r.file) + ')' : ''));
+  if (o.vol !== 1) b.push((o.vol > 1 ? 'louder' : 'quieter') + ' (' + Math.round(o.vol * 100) + '%)');
+  if (o.pitch) b.push('pitch ' + (o.pitch > 0 ? '+' : '-') + Math.abs(o.pitch) + (o.pitch > 0 ? ' (higher)' : ' (lower)'));
+  if (o.start) b.push('skips the first ' + o.start.toFixed(2) + ' s');
+  if (o.end) b.push('stops at ' + o.end.toFixed(2) + ' s');
+  if (o.fade) b.push(o.fade.toFixed(2) + ' s fade-out');
+  if (o.delay) b.push('plays ' + o.delay.toFixed(2) + ' s after the skill');
+  return b.join(' | ') || 'back to the sound exactly as recorded';
+}
+function patchObj() {
+  const tune = {}, was = {}, notes = {};
+  for (const r of ROWS) {
+    if (changed(r.id)) {
+      const c = compact(st.t[r.id], r.id), f = fileOf(r.id);
+      if ((c.start || c.end || c.fade) && durs[f]) c.dur = r2(durs[f], 3);
+      tune[r.id] = c;
+      was[r.id] = compact(baked(r.id), r.id);
+    }
+    const v = st.v[r.id], cm = (st.c[r.id] || '').trim();
+    if (v || cm) { notes[r.id] = {}; if (v) notes[r.id].verdict = v; if (cm) notes[r.id].comment = cm; }
+  }
+  return { LX_SFX_PATCH: 1, who: (st.who || '').trim(), date: stamp(), build: CAT.ver || '', tune: tune, was: was, notes: notes };
+}
+function buildReport() {
+  const n = counts(), who = (st.who || '').trim(), L = [];
+  const cm = (id) => (st.c[id] || '').trim();
+  const bar = () => L.push('=================================================');
+  L.push('MOJIWORLD — SKILL SOUND REVIEW + TUNING');
+  L.push('Tester: ' + (who || '(name not filled in)'));
+  L.push('Date:   ' + stamp());
+  L.push('Build:  ' + (CAT.ver || '?'));
+  L.push('');
+  L.push('Checked ' + n.done + ' of ' + n.total + ' skill sounds: ' + n.t + ' changed, ' + n.b + ' need a new sound, ' + n.g + ' sound right.');
+  L.push('');
+  const chg = ROWS.filter((r) => changed(r.id));
+  if (chg.length) {
+    bar(); L.push('CHANGED WITH THE SLIDERS (' + chg.length + ')'); bar();
+    chg.forEach((r, i) => {
+      L.push((i + 1) + '. ' + r.name + '  (' + subLine(r) + ')');
+      L.push('   ' + describe(r.id));
+      if (cm(r.id) && st.v[r.id] !== 'bad') cm(r.id).split(/\r?\n/).forEach((line, k) => L.push('   ' + (k ? '      ' : 'note: ') + line));
+      L.push('');
+    });
+  }
+  const item = (r, i) => {
+    const f = fileOf(r.id), sh = others(r.id);
+    L.push((i + 1) + '. ' + r.name + '  [skill sound]');
+    L.push('   file: ' + (f || '(none)') + (sh.length && f === r.file ? '   (also plays for ' + sh.map((x) => ROW[x].name).join(', ') + ')' : ''));
+    if (cm(r.id)) cm(r.id).split(/\r?\n/).forEach((line, k) => L.push('   ' + (k === 0 ? '> ' : '  ') + line));
+    else L.push('   > (no comment written)');
+    L.push('');
+  };
+  const group = (title, pick) => { const items = ROWS.filter(pick); if (!items.length) return; bar(); L.push(title + ' (' + items.length + ')'); bar(); items.forEach(item); };
+  group('NEEDS WORK', (r) => st.v[r.id] === 'bad');
+  group('MARKED GOOD, BUT WITH A COMMENT', (r) => st.v[r.id] === 'good' && cm(r.id) && !changed(r.id));
+  group('COMMENTED, NO VERDICT GIVEN', (r) => !st.v[r.id] && cm(r.id) && !changed(r.id));
+  const good = ROWS.filter((r) => st.v[r.id] === 'good' && !cm(r.id));
+  if (good.length) { bar(); L.push('MARKED GOOD, NOTHING TO CHANGE (' + good.length + ')'); bar(); L.push(good.map((r) => r.name).join(', ')); L.push(''); }
+  if (!n.done) { L.push('(Nothing checked yet - play a sound, change it or give it a verdict, and this fills itself in.)'); L.push(''); }
+  L.push('-------------------------------------------------');
+  L.push('FOR THE GAME - please send this last line too, exactly as it is:');
+  L.push(JSON.stringify(patchObj()));
+  const text = L.join('\n');
+  $('#out').value = text;
+  paintProgress();
+  return text;
+}
+
+// --------------------------------------------------------------- export ----
+// Three ways out, because this is the step that must not fail: the async
+// Clipboard API is absent on file:// pages, execCommand is the fallback, and
+// the always-visible, always-filled box is the manual route.
+function setStatus(msg, isBad) { const el = $('#status'); el.textContent = msg; el.classList.toggle('err', !!isBad); }
+async function copyAll() {
+  const text = buildReport(), box = $('#out');
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); setStatus('Copied. Now paste it into a message and send it. ✓'); return; }
+  } catch (e) { /* fall through */ }
+  try {
+    box.focus(); box.select(); box.setSelectionRange(0, text.length);
+    if (document.execCommand('copy')) { setStatus('Copied. Now paste it into a message and send it. ✓'); return; }
+  } catch (e) { /* fall through */ }
+  box.focus(); box.select();
+  setStatus('Your browser blocked the copy button. The text below is selected — press Ctrl+C (or Cmd+C) to copy it.', true);
+}
+function download(name, text, mime) {
+  const blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+let toastT = null;
+function toast(m) {
+  const el = $('#toast'); el.textContent = m; el.classList.add('on');
+  clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('on'), 2600);
+}
+
+// ----------------------------------------------------- cursor + verdicts ----
+function setCursor(i, scroll) {
+  const vis = visible(); if (!vis.length) return;
+  cursor = Math.max(0, Math.min(vis.length - 1, i));
+  paintCursor();
+  if (scroll !== false) { const el = document.getElementById('r_' + vis[cursor].id); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+}
+function paintCursor() {
+  document.querySelectorAll('.row.cur').forEach((e) => e.classList.remove('cur'));
+  const vis = visible(); if (!vis.length || !vis[cursor]) return;
+  const el = document.getElementById('r_' + vis[cursor].id); if (el) el.classList.add('cur');
+}
+function openEditor(id, keepOpen) {
+  const prev = openId;
+  openId = (prev === id && !keepOpen) ? null : id;
+  if (prev && prev !== openId) replaceRow(prev);
+  if (openId && openId !== prev) replaceRow(openId);
+  paintCursor();
+  if (openId) { const el = document.getElementById('r_' + openId); if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+}
+function setVerdict(id, k) {
+  if (st.v[id] === k) delete st.v[id]; else st.v[id] = k;
+  const row = document.getElementById('r_' + id);
+  if (row) {
+    row.classList.remove('v-good', 'v-bad');
+    if (st.v[id]) row.classList.add('v-' + st.v[id]);
+    row.querySelectorAll('.v').forEach((b) => b.classList.toggle('on', b.dataset.v === id + '|' + st.v[id]));
+  }
+  save();
+  if (st.v[id] === 'bad' && !(st.c[id] || '').trim()) {
+    openEditor(id, true);
+    const t = document.querySelector('textarea[data-c="' + id + '"]'); if (t) t.focus();
+    toast('Say what it should sound like instead — that sentence is the most useful part.');
+  }
+}
+
+// ------------------------------------------------------------ play list ----
+function startList() {
+  const ids = visible().map((r) => r.id).filter((id) => fileOf(id) && !plan(eff(id), 1, 0).silent);
+  if (!ids.length) { toast('Nothing to play in this list.'); return; }
+  listRun = { ids: ids, i: 0 };
+  $('#playList').innerHTML = '&#9632; Stop';
+  listNext();
+}
+function cancelList() {
+  if (!listRun) return;
+  listRun = null;
+  $('#playList').innerHTML = '&#9654; Play this list';
+  stopPlayback();
+}
+function listNext() {
+  if (!listRun) return;
+  if (listRun.i >= listRun.ids.length) { cancelList(); toast('That was the whole list.'); return; }
+  const id = listRun.ids[listRun.i++], vi = visible().findIndex((x) => x.id === id);
+  if (vi >= 0) setCursor(vi, true);
+  playRow(id);
+}
+
+// --------------------------------------------------------------- events ----
+const list = $('#list');
+list.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset;
+  if (d.play) { cancelList(); playRow(d.play); }
+  else if (d.orig) { cancelList(); playRow(d.orig, true); }
+  else if (d.ed) openEditor(d.ed);
+  else if (d.v) { const p = d.v.split('|'); setVerdict(p[0], p[1]); }
+  else if (d.rs) resetCtl(openId, d.rs);
+  else if (d.undo) { delete st.t[d.undo]; save(); renderEditor(); refreshRow(d.undo); if (st.auto) playRow(d.undo); }
+  else if (d.plain) { setTune(d.plain, {}); save(); renderEditor(); refreshRow(d.plain); if (st.auto) playRow(d.plain); }
+  else if (d.share) {
+    const src = eff(d.share), xs = others(d.share);
+    xs.forEach((x) => setTune(x, src)); save(); render();
+    toast('Copied to ' + xs.length + ' other skill' + (xs.length > 1 ? 's' : '') + ': ' + xs.map((x) => ROW[x].name).join(', '));
+  }
+});
+list.addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.matches('input[type=range][data-k]')) { onSlide(openId, t.dataset.k, t.value); return; }
+  if (t.matches('textarea[data-c]')) {
+    const id = t.dataset.c;
+    if (t.value.trim()) st.c[id] = t.value; else delete st.c[id];
+    t.classList.toggle('has', !!t.value.trim());
+    refreshRow(id); save();
+  }
+});
+list.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.matches('input[type=range][data-k]')) { syncEditor(openId); save(); if (st.auto) playRow(openId); }
+  else if (t.matches('select[data-pick]')) onPick(t.dataset.pick, t.value);
+  else if (t.matches('input[data-mute]')) { setTune(t.dataset.mute, Object.assign({}, eff(t.dataset.mute), { mute: t.checked })); save(); syncEditor(t.dataset.mute); }
+});
+list.addEventListener('pointerdown', (e) => {
+  const cv = e.target.closest('canvas[data-wave]'); if (!cv) return;
+  const id = cv.dataset.wave, d = durs[fileOf(id)] || 0; if (!d) return;
+  const rc = cv.getBoundingClientRect(), t = Math.max(0, Math.min(d, ((e.clientX - rc.left) / rc.width) * d)), o = eff(id);
+  drag = { id: id, cv: cv, d: d, which: Math.abs(t - o.start) <= Math.abs(t - (o.end || d)) ? 'start' : 'end' };
+  try { cv.setPointerCapture(e.pointerId); } catch (err) { /* old browsers */ }
+  dragTo(id, drag.which, t, d);
+  e.preventDefault();
+});
+list.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const rc = drag.cv.getBoundingClientRect();
+  dragTo(drag.id, drag.which, Math.max(0, Math.min(drag.d, ((e.clientX - rc.left) / rc.width) * drag.d)), drag.d);
+});
+const endDrag = () => { if (!drag) return; const id = drag.id; drag = null; save(); if (st.auto) playRow(id); };
+list.addEventListener('pointerup', endDrag);
+list.addEventListener('pointercancel', endDrag);
+['#sec', '#only'].forEach((s) => $(s).addEventListener('change', () => { cursor = 0; render(); }));
+$('#q').addEventListener('input', () => { cursor = 0; render(); });
+$('#master').addEventListener('input', (e) => { st.master = +e.target.value / 100; $('#masterV').textContent = e.target.value + '%'; save(); });
+$('#auto').addEventListener('change', (e) => { st.auto = e.target.checked; save(); });
+$('#playList').addEventListener('click', () => (listRun ? cancelList() : startList()));
+$('#jump').addEventListener('click', () => $('#exportPanel').scrollIntoView({ behavior: 'smooth' }));
+$('#who').addEventListener('input', (e) => { st.who = e.target.value; save(); });
+$('#copy').addEventListener('click', copyAll);
+$('#dl').addEventListener('click', () => {
+  const who = (st.who || '').trim().replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
+  download('mojiworld_skill_sounds' + (who ? '_' + who : '') + '.txt', buildReport());
+  setStatus('Downloaded. Find it in your Downloads folder and send us the file. ✓');
+});
+$('#save').addEventListener('click', () => {
+  download('mojiworld_skill_sound_work.json', JSON.stringify(st), 'application/json');
+  setStatus('Work file saved. Keep it somewhere safe — "Load work from a file" brings it all back. ✓');
+});
+$('#loadBtn').addEventListener('click', () => $('#load').click());
+$('#load').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const d = JSON.parse(fr.result);
+      if (!d || typeof d !== 'object' || (!d.t && !d.v && !d.c)) throw new Error('not a work file');
+      st = { t: d.t || {}, v: d.v || {}, c: d.c || {}, who: d.who || '', master: typeof d.master === 'number' ? d.master : null, auto: d.auto !== false };
+      for (const id of Object.keys(st.t)) if (!ROW[id]) delete st.t[id];
+      $('#who').value = st.who; openId = null; save(); render();
+      setStatus('Work loaded — ' + counts().done + ' skills restored. ✓');
+    } catch (err) { setStatus('That file could not be read. Pick the mojiworld_skill_sound_work.json file you saved earlier.', true); }
+  };
+  fr.readAsText(f);
+  e.target.value = '';
+});
+$('#reset').addEventListener('click', () => {
+  if (!confirm('Clear every change, verdict and note on this page and start over?\n\nThis cannot be undone — press Cancel and use "Save my work to a file" first if you are unsure.')) return;
+  st = { t: {}, v: {}, c: {}, who: st.who, master: st.master, auto: st.auto };
+  openId = null; save(); render();
+  setStatus('Cleared. Starting fresh.');
+});
+// Keyboard: 74 rows, and three clicks per row is the difference between a pass
+// that gets finished and one that does not. Sliders keep their own arrow keys.
+document.addEventListener('keydown', (e) => {
+  const t = e.target, tag = t && t.tagName, k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && t.type !== 'range' && t.type !== 'checkbox')) {
+    if (k === 'Escape') { t.blur(); e.preventDefault(); }
+    return;
+  }
+  if (tag === 'INPUT' && ((t.type === 'range' && /^(Arrow|Page|Home|End)/.test(k)) || (t.type === 'checkbox' && k === ' '))) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const vis = visible(), r = vis[cursor];
+  if (k === '/') { e.preventDefault(); $('#q').focus(); return; }
+  if (!r) return;
+  if (k === ' ') { e.preventDefault(); cancelList(); playRow(r.id); }
+  else if (k === 'o') { e.preventDefault(); cancelList(); playRow(r.id, true); }
+  else if (k === 'e' || k === 'Enter') { e.preventDefault(); openEditor(r.id); }
+  else if (k === '1') { e.preventDefault(); setVerdict(r.id, 'good'); }
+  else if (k === '3') { e.preventDefault(); setVerdict(r.id, 'bad'); }
+  else if (k === 'ArrowDown' || k === 'j') { e.preventDefault(); setCursor(cursor + 1); }
+  else if (k === 'ArrowUp' || k === 'k') { e.preventDefault(); setCursor(cursor - 1); }
+});
+window.addEventListener('resize', () => { if (openId) drawWave(openId); });
+
+// ----------------------------------------------------------------- boot ----
+SECTIONS.forEach((s) => {
+  const o = document.createElement('option');
+  o.value = s.id; o.textContent = s.label + ' (' + ROWS.filter((r) => r.cls === s.id).length + ')';
+  $('#sec').appendChild(o);
+});
+$('#who').value = st.who || '';
+$('#master').value = Math.round(masterVol() * 100);
+$('#masterV').textContent = Math.round(masterVol() * 100) + '%';
+$('#auto').checked = st.auto !== false;
+render();
+buildReport();
+probeAll();
+// For scripts/skill_sfx_tune_test.mjs - harmless to a tester.
+window.__lxTuner = {
+  sanitize: sanitize, plan: plan, compact: compact, state: () => st, durs: durs,
+  setTune: (id, t) => { setTune(id, t); save(); render(); },
+  play: (id, original) => playRow(id, original), report: () => buildReport(), patch: () => patchObj(),
+  bake: (t) => { BAKED = t || {}; render(); buildReport(); },
+};
+</script>
+</body>
+</html>
