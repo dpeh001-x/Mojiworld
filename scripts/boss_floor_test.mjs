@@ -59,6 +59,10 @@ for (const bt of BOSSES) {
   const B = band(b.lv);
   const rh = b.hp / B.hp, ra = b.atk / B.atk, rd = b.def / B.def;
   for (const [r, need, tag] of [[rh, 8, 'HP'], [ra, 2, 'ATK'], [rd, 2, 'DEF']]) {
+    // v0.30.x — Virgo's DEF is exempt from the 2x floor: v0.30.369 halved it ON PURPOSE (1441 -> 720,
+    // 'Virgo heal rate lower still, DEF halved', pinned by virgo_ritual_test). The two decisions
+    // collide; the later, explicit one wins. Her HP and ATK floors still apply.
+    if (bt === 'zodiac_virgo' && tag === 'DEF') continue;
     if (r < worst.r) worst = { r, what: `${bt} ${tag} ${r.toFixed(2)}x` };
     if (r < need) violations.push(`${bt} ${tag} ${r.toFixed(2)}x (need ${need}x)`);
   }
