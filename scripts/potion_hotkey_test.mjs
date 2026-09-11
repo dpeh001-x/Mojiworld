@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Potion hotkey and potion seals. Per user: "Another bug, I am unable to use my potions (when i press the hotkey)"
 // (v0.30.614), then "potions seal should not last longer than 15s. Ensure that players can use potions when not
-// sealed" (v0.30.619).
+// sealed" (v0.30.621).
 //
 //  1. Aquarius's seal: 15 s, never extended while up, 15 s grace after, lifted by a map change, and never read as
 //     longer than 15 s whatever wrote it. The lapse is waited out on the game's own clock, not faked.
