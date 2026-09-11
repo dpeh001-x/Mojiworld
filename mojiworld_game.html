@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.580';
+const GAME_VERSION = 'v0.30.581';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -84232,7 +84232,8 @@ function _bossSpecialAttacks(m, dt) {
         Math.max(60, Math.min(_ww - 60, _ww * 0.18)),
         Math.max(60, Math.min(_ww - 60, _ww * 0.82)),
       ];
-      const _pillarW = 90;
+      // v0.30.581 — sized from the art it will draw (see _lxDrainPillarWidth); 90 was a hand-set band
+      const _pillarW = (typeof _lxDrainPillarWidth === 'function') ? _lxDrainPillarWidth(_wh) : 90;
       for (let _pi = 0; _pi < _xs.length; _pi++) {
         // Stagger the spawn so the three pillars resolve in sequence
         // (≈ 350 ms apart) — gives the player a moment to read each
@@ -138780,6 +138781,35 @@ function _drawVoidTearArcs(cx, cy, w, fade, onArt) {
   }
   ctx.restore();
 }
+// v0.30.581 — the drain pillar's hitbox is the width of the art it draws (per user: "ensure ... the
+// hitbox is accurate to the image dimensions of the sprite art"). The sprite is drawn at its own
+// aspect at full height, so its drawn width follows the screen; the ink inside it - not the
+// transparent margin - is what the player sees as the pillar, and that is what should hurt.
+// Read once from the decoded image (alpha > 16, rows below the crown) and cached on it; the
+// measured fallbacks match the shipped file for a canvas that cannot be read or is not decoded yet.
+function _lxDrainPillarInk() {
+  const img = (typeof LX_VFX !== 'undefined') ? LX_VFX.drainPillar : null;
+  const FALLBACK = { frac: 0.82, cx: 0.534, aw: 512, ah: 1152 };
+  if (!img || !img.complete || !img.naturalWidth) return FALLBACK;
+  if (img._lxInk) return img._lxInk;
+  try {
+    const W = 128, H = Math.max(1, Math.round(128 * img.naturalHeight / img.naturalWidth));
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const g = cv.getContext('2d'); g.drawImage(img, 0, 0, W, H);
+    const d = g.getImageData(0, 0, W, H).data;
+    let x0 = W, x1 = -1;
+    for (let y = Math.round(H * 0.25); y < H; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 16) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
+    if (x1 < 0) return FALLBACK;
+    img._lxInk = { frac: (x1 - x0 + 1) / W, cx: ((x0 + x1) / 2 + 0.5) / W, aw: img.naturalWidth, ah: img.naturalHeight };
+    return img._lxInk;
+  } catch (e) { return FALLBACK; }   // tainted canvas: the measured fallback
+}
+// The pillar's world width for a pillar of height hh: the drawn canvas width at that height, times
+// the ink fraction. 90 was the hand-set band before the art had a say.
+function _lxDrainPillarWidth(hh) {
+  const k = _lxDrainPillarInk();
+  return Math.max(40, Math.round(hh * (k.aw / k.ah) * k.frac));
+}
 function drawHazards(_behindPass) {
   if (!game.hazards || game.hazards.length === 0) return;   // v0.25.451: empty-list early-out
   let _vfHz = null;   // v0.30.292 perf — each guard+draw pair below called _lxVfxFrame twice (and could land on different animation frames)
@@ -139693,9 +139723,8 @@ function drawHazards(_behindPass) {
       const _camX2 = game.camera.x, _camY2 = (game.camera && game.camera.y) || 0;
       const _px = h.x - _camX2;
       const _ph = h.h;
-      // Soft outer halo
-      ctx.fillStyle = 'rgba(255, 204, 68, ' + (0.10 + prog * 0.22) + ')';
-      ctx.fillRect(_px - 8, 0, h.w + 16, _ph);
+      // v0.30.581 — the soft halo rectangle is gone (per user: "there is this weird yellow box"); the
+      // art is the telegraph now, and its ink is the hazard's exact width.
       // v0.29.316 — authored drain art (Sprites/vfx/sovereign_drain_pillar.webp)
       // replaces ONLY the flat inner fill. Deliberately conservative given the
       // v0.26.340 revert above: the halo, the bright pulsing edges and the
@@ -139712,17 +139741,17 @@ function drawHazards(_behindPass) {
         // aspect, centre on the band. The telegraph (halo, edges, rain, label) stays at h.w.
         const _dpAw = _dpImg.naturalWidth || _dpImg.width || 1, _dpAh = _dpImg.naturalHeight || _dpImg.height || 1;
         const _dpDw = _ph * _dpAw / _dpAh;
-        ctx.drawImage(_dpImg, _px + (h.w - _dpDw) / 2, 0, _dpDw, _ph);
+        // v0.30.581 — the INK is centred on the hazard (its centre sits at 53.4% of the canvas, not 50%),
+        // so the drawn column and the band that hurts coincide to the pixel
+        const _dpK = (typeof _lxDrainPillarInk === 'function') ? _lxDrainPillarInk() : { cx: 0.5 };
+        ctx.drawImage(_dpImg, _px + h.w / 2 - _dpDw * _dpK.cx, 0, _dpDw, _ph);
         ctx.restore();
       } else {
         // Solid inner column with vertical scanlines for depth
         ctx.fillStyle = 'rgba(255, 224, 120, ' + _coreA + ')';
         ctx.fillRect(_px, 0, h.w, _ph);
       }
-      // Bright pulsing edges
-      ctx.strokeStyle = 'rgba(255, 244, 180, ' + (0.7 + prog * 0.3) + ')';
-      ctx.lineWidth = 2 + prog * 3;
-      ctx.strokeRect(_px, 0, h.w, _ph);
+      // v0.30.581 — the stroked box is gone with the halo (see above)
       // Falling particle streamers inside the column
       if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
         _budgetedParticlePush({

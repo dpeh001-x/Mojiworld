@@ -32,10 +32,20 @@ ok('...and the engine loads it as the drainPillar VFX', /drainPillar:\s*'soverei
 // v0.30.578 (per user: "this part should not be squished") - the art keeps its own aspect: scaled by
 // height, centred on the band, overhanging it where the crown is wider. The telegraph itself - halo,
 // pulsing edges, rain, label - is still drawn from h.w, so the boundary the player reads is unchanged.
-ok('...drawn at its own aspect, scaled by height and centred on the band (not squashed into it)',
-   /const _dpDw = _ph \* _dpAw \/ _dpAh;\s*\n\s*ctx\.drawImage\(_dpImg, _px \+ \(h\.w - _dpDw\) \/ 2, 0, _dpDw, _ph\);/.test(src), {});
-ok('...with the edges, rain and label still painted by the engine from the band width', /ctx\.strokeRect\(_px, 0, h\.w, _ph\);/.test(src), {});
+// v0.30.580 (per user: "there is this weird yellow box please ensure that is removed and the hitbox
+// is accurate to the image dimensions of the sprite art") - the halo rectangle and the stroked box
+// are gone, the hazard is sized from the art's measured ink width, and the ink is centred on it.
+ok('...drawn at its own aspect, scaled by height, with the INK centred on the hazard',
+   /const _dpDw = _ph \* _dpAw \/ _dpAh;[\s\S]{0,400}ctx\.drawImage\(_dpImg, _px \+ h\.w \/ 2 - _dpDw \* _dpK\.cx, 0, _dpDw, _ph\);/.test(src), {});
 ok('...and the old squashed draw is gone', !/ctx\.drawImage\(_dpImg, _px, 0, h\.w, _ph\);/.test(src), {});
+ok('the yellow halo rectangle is gone', !/ctx\.fillRect\(_px - 8, 0, h\.w \+ 16, _ph\);/.test(src), {});
+ok('the stroked box is gone', !/ctx\.strokeRect\(_px, 0, h\.w, _ph\);/.test(src), {});
+ok('the ink is measured off the decoded image, with the measured fallbacks (82% wide, centre 53.4%)',
+   /function _lxDrainPillarInk\(\)[\s\S]{0,300}frac: 0\.82, cx: 0\.534/.test(src), {});
+ok('the hazard width comes from the art: canvas width at that height times the ink fraction',
+   /function _lxDrainPillarWidth\(hh\)[\s\S]{0,200}hh \* \(k\.aw \/ k\.ah\) \* k\.frac/.test(src), {});
+ok('...and the spawn uses it (90 only as the fallback)', /const _pillarW = \(typeof _lxDrainPillarWidth === 'function'\) \? _lxDrainPillarWidth\(_wh\) : 90;/.test(src), {});
+ok('the rain and the label still come from the band', /x: h\.x \+ Math\.random\(\) \* h\.w,/.test(src) && /ctx\.fillText\('HP\/MP→1', _px \+ h\.w \/ 2, _camY2 \+ 14\);/.test(src), {});
 
 const fails = results.filter((r) => !r.pass);
 for (const r of results) console.log((r.pass ? 'PASS  ' : 'FAIL  ') + r.n + (r.x && Object.keys(r.x).length ? '  ' + JSON.stringify(r.x) : ''));
