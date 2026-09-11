@@ -2,7 +2,7 @@
 // re-run it after adding or renaming a skill, re-pointing an alias, or adding clips.
 // Read by tools/skill_sfx_tester.html (a <script>, so the page also works off disk).
 window.LX_SKILL_SFX_CATALOG = {
-  "ver": "v0.30.629",
+  "ver": "v0.30.630",
   "targetVol": 0.5,
   "masterDefault": 0.7,
   "sections": [
