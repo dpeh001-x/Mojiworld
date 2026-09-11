@@ -10937,7 +10937,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.629';
+const GAME_VERSION = 'v0.30.630';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -21420,6 +21420,10 @@ const MS_KEY_LABEL = {
   rush: {
     mobCap: (v) => '+' + ((v - 3) * 20) + ' px dash reach',
   },
+  // v0.30.630 - the rank-10 extraHit is not a finisher: the body spends it on a third dive, a normal slam
+  dragoon_skylance: {
+    extraHit: () => '+1 extra dive (a third slam)',
+  },
 };
 function _formatSkillLv10Bonus(id) {
   const b = (typeof SKILL_LV10_BONUS !== 'undefined') ? SKILL_LV10_BONUS[id] : null;
@@ -21439,7 +21443,7 @@ function _formatMilestoneObj(b, id) {
   if (b.hits)        parts.push(_lab('hits', b.hits) || ('+' + b.hits + ' bonus hit' + (b.hits > 1 ? 's' : '')));
   if (b.finalHits)   parts.push('+' + b.finalHits + ' final hit');
   if (b.chainHits)   parts.push((b.chainChance * 100 | 0) + '% chance: +' + b.chainHits + ' bonus stab');
-  if (b.extraHit)    parts.push('+1 finisher attack at ATK × ' + b.extraHit.toFixed(1));
+  if (b.extraHit)    parts.push(_lab('extraHit', b.extraHit) || ('+1 finisher attack at ATK × ' + b.extraHit.toFixed(1)));
   if (b.wolfHits)    parts.push('+' + b.wolfHits + ' bonus bite per wolf');
   if (b.mobCap)      parts.push(_lab('mobCap', b.mobCap) || ('mob cap → ' + b.mobCap));
   // v0.30.144 - both were silently dropped: guardian's rank-10 DEF bonus (the body
@@ -21455,7 +21459,7 @@ function _formatMilestoneObj(b, id) {
   if (b.buffMs)      parts.push('+' + (b.buffMs / 1000).toFixed(0) + ' s buff duration');
   if (b.drBonus)     parts.push('+' + (b.drBonus * 100 | 0) + '% damage reduction for ' + (b.drMs / 1000).toFixed(0) + ' s');
   if (b.critBonus)   parts.push('+' + (b.critBonus * 100 | 0) + '% crit (during buff)');
-  if (b.cdMs)        parts.push('cooldown → ' + (b.cdMs / 1000).toFixed(1) + ' s');
+  if (b.cdMs)        parts.push('cooldown → ' + (b.cdMs * (id && typeof _skillCdMul === 'function' ? _skillCdMul(id) : 1) / 1000).toFixed(1) + ' s');   // v0.30.630 - the cast multiplies the override too (see _skillRealCd)
   if (b.cdReduceMs)  parts.push('cooldown −' + (b.cdReduceMs / 1000).toFixed(1) + ' s');
   if (b.cdReducePct) parts.push('cooldown −' + Math.round(b.cdReducePct * 100) + '%');
   if (b.orbDurMul)   parts.push('orb duration × ' + b.orbDurMul.toFixed(2));
@@ -21507,6 +21511,46 @@ function _applyLv10Cd(id, cdMul) {
   }
 }
 
+// v0.30.630 - WHAT A CAST REALLY COSTS AND WAITS. The Skills tab printed the raw table numbers, but
+// castSkill charges a mage ceil(mp x 0.80) (x1.5 more for a spell under the Overload milestone)
+// and sets every cooldown to cd x JOB_CD_MUL (0.75) - x0.90 more for a mage, x Quick Draw for
+// Arrow Shot - and then applies the rank-5 / rank-10 cooldown perk. So every cooldown pill read a
+// third too long (a mage's nearly half) and a mage's MP a quarter too high. Measured by casting
+// all 72 skills: the cooldown castSkill set was the pill x0.75 (x0.675 for a mage) every time.
+// These mirror the PERMANENT terms of that arithmetic. The terms that change between casts
+// (Hallowed Field, rogue Momentum, a Quickening proc) are left out, so the number is what the
+// next cast waits at rest.
+function _skillPaidMp(id) {
+  const s = SKILLS[id];
+  if (!s || !(s.mp > 0)) return 0;
+  let cost = s.mp;
+  if (player.cls === 'mage') cost = Math.ceil(cost * 0.80);
+  if (typeof hasMilestone === 'function' && hasMilestone('overload')
+      && (s.cls === 'mage' || s.job === 'archmage' || s.job === 'warlock')) cost = Math.ceil(cost * 1.5);
+  return cost;
+}
+function _skillCdMul(id) {
+  let m = player.cls === 'mage' ? 0.90 : 1;
+  if (player.tree && player.tree.arrowCdMul && id === 'arrowShot') m *= player.tree.arrowCdMul;
+  return m * JOB_CD_MUL;
+}
+// War of Banners and Bastion of Dawn stamp SKILLS[id].cd themselves when their window ends,
+// bypassing the multiplier above, so those two wait the table's full value.
+const _SKILL_RAW_CD = new Set(['warlord_ult', 'crusader_ult']);
+function _skillRealCd(id) {
+  const s = SKILLS[id];
+  if (!s || !(s.cd > 0)) return 0;
+  if (_SKILL_RAW_CD.has(id)) return s.cd;
+  const mul = _skillCdMul(id);
+  let cd = s.cd * mul;
+  const b = (typeof getSkillLv10 === 'function') ? getSkillLv10(id) : null;   // the perk _applyLv10Cd applies
+  if (b) {
+    if (b.cdMs != null) cd = b.cdMs * mul;
+    else if (b.cdReduceMs != null) cd = Math.max(0, cd - b.cdReduceMs);
+    else if (b.cdReducePct != null) cd = cd * (1 - b.cdReducePct);
+  }
+  return cd;
+}
 function skillBySlot(slot) {
   const kit = skillsForClass(player.cls, player.job, player.master);
   // Pick the most-specific skill for the slot: master > job > class
@@ -72083,6 +72127,7 @@ function castSkill(id) {
   // the value, so the L10 bonus shows up on the very next press
   // even if Quickening also fires this cast.
   if (typeof _applyLv10Cd === 'function') _applyLv10Cd(id, cdMul);
+  const _rankedCd = player.skillCooldowns[id];   // v0.30.630 - after the rank perk; a Deadeye window stamps THIS when it closes
   // v0.25.269 — Quickening boon (player.mods.cdrChance, capped at 0.20).
   // Roll once per cast: on a hit, the cooldown is bypassed entirely so
   // the skill is castable again on the very next press. v0.25.559 —
@@ -72198,7 +72243,7 @@ function castSkill(id) {
     if (!player[_dew.until] || _dnow >= player[_dew.until]) {
       player[_dew.until] = _dnow + _dew.ms; _deOpened = true;
       if (_dew.onOpen) _dew.onOpen();
-      const _realCd = computedCd;
+      const _realCd = _rankedCd > 0 ? _rankedCd : computedCd;   // v0.30.630 - was computedCd, which threw away the rank-5 cooldown perk
       if (typeof showToast === 'function') showToast(_dew.toast, 'legendary');
       scheduleSkillTimer(() => {
         player[_dew.until] = 0;
@@ -104233,7 +104278,7 @@ function renderSkillsReference(host) {
                  font:700 10px Inter, system-ui, sans-serif; letter-spacing:0.6px;">↺ Reset RP</button>
       </div>
       <div class="skl-hint">
-        <b class="blue">+</b> spends 1 RP <span style="color:#888;">(Rank Points — separate from the Level-Up tab\u2019s SP)</span> — <b>+5%</b> damage per rank · <b>+${SKILL_RANK_LV10_PCT}%</b> bonus at rank 10 (cap ${SKILL_RANK_CAP}) · click <b style="color:#9ac;">+</b> next to a skill name to expand level-up perks
+        <b class="blue">+</b> spends 1 RP <span style="color:#888;">(Rank Points — separate from the Level-Up tab\u2019s SP)</span> — most skills <b>+5%</b> damage per rank · <b>+${SKILL_RANK_LV10_PCT}%</b> bonus at rank 10 (cap ${SKILL_RANK_CAP}) · click <b style="color:#9ac;">+</b> next to a skill name to expand level-up perks
       </div>
     </div>
     <div id="skills-tier-tabs"></div>
@@ -104370,8 +104415,10 @@ function renderSkillsReference(host) {
           ? `<img src="Sprites/skills/${skillId}.webp" alt="" style="width:22px; height:22px; object-fit:contain; vertical-align:middle; margin-right:4px;" onerror="this.outerHTML='${s.def.icon || '•'} '"> ${s.def.name}`
           : `${s.def.icon || '•'} ${s.def.name}`;
         desc  = s.def.desc || '';
-        if (s.def.mp) mpStr = `${s.def.mp}MP`;
-        if (s.def.cd) cdStr = `${(s.def.cd/1000).toFixed(1)}s`;
+        // v0.30.630 - what the cast charges and waits (_skillPaidMp / _skillRealCd), not the raw table value
+        { const _mp = _skillPaidMp(skillId), _cd = _skillRealCd(skillId);
+          if (_mp) mpStr = `${_mp}MP`;
+          if (_cd) cdStr = `${(_cd/1000).toFixed(1)}s`; }
       } else {
         label = `Slot ${r.slot.toUpperCase()}`;
         desc = r.slot === 'x'
@@ -104500,8 +104547,8 @@ function renderSkillsReference(host) {
                     : s.cls ? 'basic · ' + s.cls
                     : '—';
         detailRows.push(`<div><span style="color:#888;">Tier:</span> <b style="color:#cce;">${_tier}</b></div>`);
-        if (s.mp != null) detailRows.push(`<div><span style="color:#888;">MP cost:</span> <b style="color:#88bbff;">${s.mp}</b></div>`);
-        if (s.cd != null) detailRows.push(`<div><span style="color:#888;">Cooldown:</span> <b style="color:#ffcc66;">${(s.cd/1000).toFixed(2)}s</b></div>`);
+        if (s.mp != null) detailRows.push(`<div><span style="color:#888;">MP cost:</span> <b style="color:#88bbff;">${_skillPaidMp(skillId)}</b></div>`);
+        if (s.cd != null) detailRows.push(`<div><span style="color:#888;">Cooldown:</span> <b style="color:#ffcc66;">${(_skillRealCd(skillId)/1000).toFixed(2)}s</b></div>`);
         const _curRank = (typeof getSkillRank === 'function') ? getSkillRank(skillId) : 0;
         if (!isBasicMeleeSlot(skillId)) {
           // v0.25.532 — Level-up Perks panel. Replaces the single-line
@@ -104551,7 +104598,7 @@ function renderSkillsReference(host) {
               ${_atMax ? '' : `
                 <div style="margin-top:3px; font-size:10px; color:#888;">
                   Cost: <b style="color:#88ccff;">1 RP per rank</b> ·
-                  ranks 1-9 add +5% damage each
+                  ranks 1-9 add +${Math.round((_skillRankMulAt(skillId, 1) - 1) * 100)}% damage each
                 </div>
               `}
               ${_milestone5Str ? `
@@ -104569,7 +104616,7 @@ function renderSkillsReference(host) {
                    display:flex; gap:5px; align-items:flex-start; font-size:10px;">
                 <span style="color:#ffe5a0; flex:0 0 auto;">★ Rank 10${_curRank >= SKILL_RANK_CAP ? ' · ACTIVE' : ''}:</span>
                 <span style="color:#ddd; flex:1; line-height:1.35;">
-                  <b style="color:#ffe5a0;">+${SKILL_RANK_LV10_PCT}% damage</b> (full curve = +${SKILL_RANK_MAX_PCT}% over base)
+                  <b style="color:#ffe5a0;">+${Math.round((_skillRankMulAt(skillId, SKILL_RANK_CAP) - _skillRankMulAt(skillId, SKILL_RANK_CAP - 1)) * 100)}% damage</b> (full curve = +${Math.round((_skillRankMulAt(skillId, SKILL_RANK_CAP) - 1) * 100)}% over base)
                   ${_milestoneStr ? `<br><span style="color:#cce;">⤷ ${_milestoneStr}</span>` : ''}
                 </span>
               </div>
@@ -109069,7 +109116,7 @@ function openHelp() {
         <span style="flex:1;">
           <b>${s.name}</b>
           <span style="color:${tierCol}; font-size:9px; margin-left:6px; padding:1px 4px; border:1px solid ${tierCol}; border-radius:3px;">${tier}</span>
-          <div style="color:#888; font-size:10px;">${s.mp ? `${s.mp} MP · ` : ''}${(s.cd/1000).toFixed(1)}s cd</div>
+          <div style="color:#888; font-size:10px;">${_skillPaidMp(id) ? `${_skillPaidMp(id)} MP · ` : ''}${(_skillRealCd(id)/1000).toFixed(1)}s cd</div>
         </span>
       </div>
       <div style="font-size:11px; color:#d8d8e4; margin:2px 0 0 36px; line-height:1.35;">${s.desc || ''}</div>
