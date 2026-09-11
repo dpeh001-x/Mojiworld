@@ -200,6 +200,25 @@ states dropped; hitbox block replaced, or removed when absent); all other
 entities are untouched. After baking: `node --check anim_calib.js`, commit,
 push per the sync-first rule. Never hand-edit the values in transit.
 
+## Skill sound tuning patches (durable)
+
+Testers tune skill SFX in `tools/skill_sfx_tester.html` (the Skill Sound Tuner:
+loudness, pitch, start/stop trim, fade, delay, clip swap, mute). Its "Copy
+everything" report ends with a JSON line tagged `LX_SFX_PATCH:1`. When the user
+pastes such a report in chat, hardbake it with:
+
+```bash
+node scripts/apply_sfx_patch.mjs '<pasted text>'
+```
+
+It rewrites `data/skill_sfx_tune.js` only (declarative per skill; an unknown id
+refuses the whole patch; a stale base prints CONFLICT). "Needs a new sound"
+items in the same text go to `node scripts/regen_sfx_from_comments.mjs --paste`.
+After adding or renaming a skill or re-pointing `_SKILL_SFX_ALIAS`, run
+`node scripts/gen_skill_sfx_catalog.mjs`; `node scripts/skill_sfx_tune_test.mjs`
+holds the page and the game to the same numbers. Tester link (always current):
+`https://raw.githack.com/dpeh001-x/Mojiworld/main/tools/skill_sfx_tester.html`.
+
 ## Animator parity (durable, HARD — do not wait to be asked)
 
 `monster_animator.html` promises "renders EXACTLY what the game renders". Three
