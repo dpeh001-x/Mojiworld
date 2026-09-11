@@ -44,25 +44,30 @@ const fetchBuf = async (u) => { const r = await fetch(u, { signal: AbortSignal.t
 // ice-cyan crystalline shard with a deep-blue vortex inside and a cyan glow; this is the same
 // material laid flat as a round gate: a rim of jagged ice-crystal facets, the deep-blue vortex
 // inside, cyan light. No violet, and no tone pass.
+// v6 (per user: "regenerate this as a rift portal instead similar to the dimensional rift style,
+// but put it in yellow"). The game's rift style is the phantom void rift: a jagged tear in space
+// with crackling spiked edges and a bright core. This is that tear laid flat as a round gate, in
+// gold: ragged golden-yellow edges spiking outward like cracked light, a dark void inside with
+// amber-gold light swirling into a white-gold centre, gold sparks. The bold dark cel outline the
+// crystal shard wears is kept (the brief asks, the generator guarantees).
 const PROMPT =
-  'game vfx sprite, a CIRCULAR DIMENSIONAL PORTAL seen from directly above, a perfect round disc that '
-  + 'fills almost the whole picture. The rim is a ring of jagged pale ICE-CRYSTAL facets, frosty white '
-  + 'and pale cyan, like a crystal geode edge, with a bright cyan glow bleeding off it. Inside the rim '
-  + 'a swirling vortex of DEEP BLUE and navy light spiralling into a bright white-cyan centre, with '
-  + 'thin cyan energy arcs and small ice shards and motes drifting over it. Round, not oval, centred, '
-  + 'with only a thin margin of empty space around the disc. Colours ONLY: white, frost white, pale '
-  + 'cyan, bright cyan, sky blue, deep blue, navy. No purple, no violet, no pink, no gold. Crisp '
-  + 'cel-shaded painterly game VFX with soft glow. Pure transparent background, alpha only: no '
-  + 'ground, no floor, no scene, no box, no frame, no square, no border, no character, no text, no '
-  + 'letters, no watermark. Cel-shaded like a game sprite: a BOLD DARK NAVY OUTLINE traces the outer '
-  + 'edge of the crystal rim and the inner edge where the rim meets the vortex, crisp contour lines, '
-  + 'flat cel shading with hard-edged highlights, not a soft airbrushed glow.';
+  'game vfx sprite, a CIRCULAR DIMENSIONAL RIFT seen from directly above, a round torn opening in '
+  + 'space that fills almost the whole picture. Its edge is RAGGED and JAGGED: cracked spikes and '
+  + 'crackling lightning-like shards of bright GOLDEN-YELLOW energy radiating outward all around the '
+  + 'rim, glowing amber at the base and white-hot at the tips. Inside the rift a dark void with '
+  + 'swirling amber and gold light spiralling into a blazing white-gold centre, small gold sparks '
+  + 'and embers drifting over it. Round overall, centred, with only a thin margin of empty space '
+  + 'around it. Colours ONLY: golden yellow, amber, orange-gold, white-gold, dark void black and '
+  + 'deep brown-black inside. No blue, no cyan, no purple, no violet, no pink, no green. Cel-shaded '
+  + 'like a game sprite: a BOLD DARK OUTLINE traces the jagged outer edge and the inner edge where '
+  + 'the rim meets the void, crisp contour lines, flat cel shading with hard-edged highlights. Pure '
+  + 'transparent background, alpha only: no ground, no floor, no scene, no box, no frame, no square, '
+  + 'no border, no character, no text, no letters, no watermark.';
 const MOTION =
-  'the deep-blue vortex inside the crystal rim turns slowly clockwise, the bright white-cyan centre '
-  + 'pulses, the cyan glow on the ice-crystal rim brightens and dims in a slow loop, thin cyan energy '
-  + 'arcs flicker across the vortex, small ice shards and motes drift and fade while new ones appear; '
-  + 'the disc stays perfectly in place and keeps its size and shape; seamless loop, nothing leaves '
-  + 'the frame';
+  'the golden void inside the rift swirls slowly clockwise and its white-gold centre pulses, the '
+  + 'jagged crackling edges flicker and shift like living lightning, gold sparks and embers drift '
+  + 'off the rim and fade while new ones appear; the rift stays perfectly in place and keeps its '
+  + 'overall size and shape; seamless loop, nothing leaves the frame';
 
 async function px(buf) { const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); return { d: data, w: info.width, h: info.height }; }
 // alpha feather on all four sides + a guaranteed-clear border ring
@@ -109,7 +114,7 @@ export async function tone(buf) {
 // sprite is cel-shaded: a bold dark-navy contour around its silhouette. The brief asks for it,
 // and this guarantees it: the silhouette (alpha > 60) is dilated by OUTLINE.px and the ring that
 // adds is painted dark navy under the art, so base and every frame wear one identical contour.
-export const OUTLINE = { px: 4, r: 0x0c, g: 0x16, b: 0x3a, inset: 0.93 };
+export const OUTLINE = { px: 4, r: 0x24, g: 0x14, b: 0x06, inset: 0.93 };   // v6: dark brown-black under the gold rift (was navy under the ice)
 export async function outline(buf) {
   const p = await px(buf); const W = p.w, H = p.h, R = OUTLINE.px;
   const solid = new Uint8Array(W * H);
