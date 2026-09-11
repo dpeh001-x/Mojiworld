@@ -10919,7 +10919,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.625';
+const GAME_VERSION = 'v0.30.626';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18703,7 +18703,7 @@ function _mapPlatformTint(md) {
 const _CUTE_PLAT_CACHE = new Map();
 const _CUTE_PLAT_MAX_PX = 1500000;   // ~6 MB at 4 bytes/px — a 2400x60 ground fits fine
 function _cutePlatformSprite(w, h, tint, ground, theme, variant) {
-  const key = w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '') + '|' + (variant | 0);   // v0.30.609 — the variant too
+  const key = (tint.exact ? 'x|' : '') + w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '') + '|' + (variant | 0);   // v0.30.609 — the variant too
   let cv = _CUTE_PLAT_CACHE.get(key);
   if (cv) return cv;
   if (!(w > 0 && h > 0) || w * h > _CUTE_PLAT_MAX_PX) return null;   // caller falls back
@@ -18740,6 +18740,7 @@ function _cutePlatformSprite(w, h, tint, ground, theme, variant) {
 // wears. Everything is deterministic from the slab's size, so a bake is stable and cacheable.
 const _CUTE_PAD_TOP = 12;
 const _CUTE_EDGE = { grass: 'scallop', swamp: 'scallop', stone: 'flat', ice: 'lump', lava: 'crust', sand: 'wave', coral: 'wave', candy: 'drip', honey: 'drip', cosmic: 'wave' };
+Object.assign(_CUTE_EDGE, { rock: 'crust', basalt: 'flat', moss: 'lump', mosswood: 'lump', snowpave: 'lump' });   // v0.30.626
 function _cuteRng(seed) { let t = seed >>> 0; return () => { t += 0x6D2B79F5; let r = Math.imul(t ^ (t >>> 15), 1 | t); r ^= r + Math.imul(r ^ (r >>> 7), 61 | r); return ((r ^ (r >>> 14)) >>> 0) / 4294967296; }; }
 // v0.30.606 — COLOUR FROM THE MAP (per user: "The floor and platform are nice but it needs to fit the
 // overall colour of the map"). 96 of the 109 maps fall to the 'grass' theme, so the painter put a
@@ -18876,8 +18877,359 @@ function _cuteTopPts(xa, xb, dip, rng) {
   while (xx < xb - 0.5) { const mw = Math.min(xb - xx, 14 + rng() * 14), xe = xx + mw; s.push([xx + mw / 2, xe]); xx = xe; }
   return s;
 }
+// v0.30.626 - FLOORS THAT FIT THE PLACE (per user: "towns should have either wood plank style, concrete etc.
+// that matches the theme"; "there should be more different floors for the different biomes"; "even
+// different towns have different styles"; "do not need props"). A material is a face texture, a top
+// texture and whether it is BUILT: built floors are flat slabs - no rolling top, no keel, nothing
+// hanging, nothing growing - and every material takes its colour from the backdrop's own painted floor
+// (_MAP_FLOOR_PAL, sampled offline). split: the top and the face are different stuff (snow on paving,
+// moss on planks), so the face must not borrow the top's hue.
+var _CUTE_MAT = {
+  cobble: { face: 'cobble', cap: 'paving', built: 1 }, paving: { face: 'paving', cap: 'paving', built: 1 },
+  snowpave: { face: 'paving', cap: 'snow', built: 1, split: 1, lit: 'snow' }, brick: { face: 'brick', cap: 'paving', built: 1 },
+  temple: { face: 'temple', cap: 'temple', built: 1 }, tile: { face: 'tile', cap: 'tile', built: 1 },
+  marble: { face: 'marble', cap: 'marble', built: 1 }, mosaic: { face: 'mosaic', cap: 'tile', built: 1 },
+  wood: { face: 'wood', cap: 'wood', built: 1 }, boardwalk: { face: 'boardwalk', cap: 'wood', built: 1 },
+  lacquer: { face: 'lacquer', cap: 'lacquer', built: 1 }, parquet: { face: 'parquet', cap: 'wood', built: 1 },
+  mosswood: { face: 'wood', cap: 'moss', built: 1, split: 1, lit: 'moss' }, metal: { face: 'metal', cap: 'metal', built: 1 },
+  concrete: { face: 'concrete', cap: 'concrete', built: 1 }, toybrick: { face: 'toybrick', cap: 'toybrick', built: 1 },
+  basalt: { face: 'basalt', cap: 'rock' }, rock: { face: 'rock', cap: 'rock' }, moss: { cap: 'moss', lit: 'moss' },
+};
+function _cuteBuiltFace(ctx, sx, fy, w, fh, style, rng, C, ground) {
+  const mix = C.mix, R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha, HI = C.faceHi || C.top;
+  ctx.save();
+  if (style === 'wood') {                   // planks: staggered joints, grain, nail heads, a seam under each
+    const ph = ground ? 12 : Math.max(5, Math.min(8, fh / 2));
+    for (let yy = fy, row = 0; yy < fy + fh; yy += ph, row++) {
+      ctx.fillStyle = mix(C.body, HI, 0.22 + R(-0.06, 0.06) + ((row & 1) ? 0.05 : 0)); ctx.fillRect(sx, yy, w, ph);
+      ctx.strokeStyle = C.bodyDk; ctx.globalAlpha = A0 * 0.32; ctx.lineWidth = 1;
+      for (let g = 0; g < 2; g++) { const gy = yy + ph * (0.3 + g * 0.4) + R(-0.8, 0.8); ctx.beginPath(); ctx.moveTo(sx, gy); for (let xx = 0; xx <= w; xx += 10) ctx.lineTo(sx + xx, gy + Math.sin((xx + row * 37 + g * 13) * 0.05) * 0.8); ctx.stroke(); }
+      ctx.globalAlpha = A0;
+      for (let xx = sx + ((row & 1) ? R(18, 46) : R(46, 84)); xx < sx + w - 8; xx += R(64, 112)) {
+        const jx = Math.round(xx); ctx.fillStyle = C.bodyDk; ctx.fillRect(jx, yy, 1.5, ph); ctx.fillStyle = C.bodyLt; ctx.fillRect(jx + 1.5, yy, 1, ph);
+        ctx.fillStyle = C.bodyDk; ctx.fillRect(jx - 4, yy + ph / 2 - 0.8, 1.6, 1.6); ctx.fillRect(jx + 4, yy + ph / 2 - 0.8, 1.6, 1.6);
+      }
+      ctx.fillStyle = C.bodyDk; ctx.fillRect(sx, yy + ph - 1, w, 1); ctx.globalAlpha = A0 * 0.5; ctx.fillStyle = C.bodyLt; ctx.fillRect(sx, yy, w, 1); ctx.globalAlpha = A0;
+    }
+  } else if (style === 'tile') {            // polished tiles: a gloss streak on each, light grout
+    const ts = ground ? 24 : Math.max(10, Math.min(16, fh));
+    for (let yy = fy, row = 0; yy < fy + fh; yy += ts, row++) {
+      for (let xx = sx - ((row & 1) ? ts / 2 : 0); xx < sx + w; xx += ts) {
+        const x0 = Math.max(sx, xx), x1 = Math.min(sx + w, xx + ts);
+        ctx.fillStyle = mix(C.body, HI, 0.4 + R(-0.05, 0.05)); ctx.fillRect(x0, yy, x1 - x0, ts);
+        ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.moveTo(x0, yy + ts * 0.18); ctx.lineTo(x0 + ts * 0.45, yy); ctx.lineTo(x0 + ts * 0.78, yy); ctx.lineTo(x0, yy + ts * 0.6); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = C.topLt; ctx.globalAlpha = A0 * 0.55; ctx.fillRect(x0, yy, 1, ts); ctx.globalAlpha = A0;
+      }
+      ctx.fillStyle = C.topLt; ctx.globalAlpha = A0 * 0.55; ctx.fillRect(sx, yy, w, 1); ctx.globalAlpha = A0;
+    }
+  } else if (style === 'paving') {          // flagstones in courses: rounded, varied widths, mortar gaps
+    const bh = ground ? 16 : Math.max(7, Math.min(10, fh / 1.6));
+    for (let yy = fy + 1, row = 0; yy < fy + fh; yy += bh, row++) {
+      for (let xx = sx - R(0, 22) - ((row & 1) ? 14 : 0); xx < sx + w;) {
+        const bw = R(ground ? 26 : 16, ground ? 48 : 30), x0 = Math.max(sx, xx + 1), x1 = Math.min(sx + w, xx + bw - 1);
+        if (x1 - x0 > 3) {
+          ctx.fillStyle = mix(C.body, HI, R(0.2, 0.42)); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x0, yy + 0.5, x1 - x0, bh - 2, 2.5); else ctx.rect(x0, yy + 0.5, x1 - x0, bh - 2); ctx.fill();
+          ctx.fillStyle = C.bodyLt; ctx.globalAlpha = A0 * 0.7; ctx.fillRect(x0 + 2, yy + 1, x1 - x0 - 4, 1); ctx.globalAlpha = A0;
+          ctx.fillStyle = 'rgba(0,0,0,0.16)'; ctx.fillRect(x0 + 2, yy + bh - 3, x1 - x0 - 4, 1.5);
+        }
+        xx += bw;
+      }
+    }
+  } else if (!_cuteBuiltFace2(ctx, sx, fy, w, fh, style, rng, C, ground, HI) && !_cuteBuiltFace3(ctx, sx, fy, w, fh, style, rng, C, ground, HI)) _cuteBuiltFace4(ctx, sx, fy, w, fh, style, rng, C, ground, HI);
+  ctx.restore();
+}
+function _cuteBuiltFace2(ctx, sx, fy, w, fh, style, rng, C, ground, HI) {
+  const mix = C.mix, R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
+  if (style === 'metal') {                  // riveted plates: bevelled seams, rivets, a groove
+    const pw = ground ? 56 : 40;
+    for (let xx = sx - R(0, pw * 0.5); xx < sx + w; xx += pw) {
+      const x0 = Math.max(sx, xx), x1 = Math.min(sx + w, xx + pw);
+      ctx.fillStyle = mix(C.body, HI, 0.3 + R(-0.05, 0.05)); ctx.fillRect(x0, fy, x1 - x0, fh);
+      ctx.fillStyle = C.bodyLt; ctx.fillRect(x0, fy, 1, fh); ctx.fillStyle = C.bodyDk; ctx.fillRect(x1 - 1, fy, 1, fh);
+      for (const ry of (fh > 14 ? [fy + 3.5, fy + fh - 3.5] : [fy + fh / 2])) for (const rx of [x0 + 4, x1 - 4]) {
+        if (rx < sx + 2 || rx > sx + w - 2) continue;
+        ctx.fillStyle = C.bodyDk; ctx.beginPath(); ctx.arc(rx + 0.4, ry + 0.4, 1.6, 0, 6.2832); ctx.fill(); ctx.fillStyle = C.topLt; ctx.beginPath(); ctx.arc(rx - 0.3, ry - 0.3, 1.1, 0, 6.2832); ctx.fill();
+      }
+    }
+    if (fh > 16) { const gy = fy + Math.round(fh * 0.55); ctx.fillStyle = C.bodyDk; ctx.fillRect(sx, gy, w, 1.5); ctx.globalAlpha = A0 * 0.6; ctx.fillStyle = C.bodyLt; ctx.fillRect(sx, gy + 1.5, w, 1); ctx.globalAlpha = A0; }
+  } else if (style === 'concrete') {        // cast slabs: expansion joints, aggregate speckle, a stained foot
+    ctx.fillStyle = mix(C.body, HI, 0.35); ctx.fillRect(sx, fy, w, fh);
+    for (let xx = sx + R(24, 56); xx < sx + w - 6; xx += R(52, 70)) { const jx = Math.round(xx); ctx.fillStyle = C.bodyDk; ctx.fillRect(jx, fy, 1.5, fh); ctx.globalAlpha = A0 * 0.6; ctx.fillStyle = C.bodyLt; ctx.fillRect(jx + 1.5, fy, 1, fh); ctx.globalAlpha = A0; }
+    for (let n = 0, N = Math.round(w * fh / 40); n < N; n++) { ctx.fillStyle = rng() < 0.5 ? C.bodyDk : C.bodyLt; ctx.globalAlpha = A0 * R(0.25, 0.55); ctx.fillRect(R(sx, sx + w), R(fy, fy + fh), 1, 1); }
+    ctx.globalAlpha = A0; const g = ctx.createLinearGradient(0, fy + fh * 0.55, 0, fy + fh); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.18)'); ctx.fillStyle = g; ctx.fillRect(sx, fy + fh * 0.55, w, fh * 0.45);
+  } else if (style === 'rock') {            // natural rock: jittered facets, lit upper-left edges, shaded lower-right
+    const cs = ground ? 20 : 12;
+    for (let yy = fy - 2, row = 0; yy < fy + fh; yy += cs * 0.8, row++) {
+      for (let xx = sx - R(0, cs) - ((row & 1) ? cs / 2 : 0); xx < sx + w; xx += cs * R(0.85, 1.3)) {
+        const j = () => R(-cs * 0.18, cs * 0.18), a = [xx + j(), yy + j()], b = [xx + cs + j(), yy + j()], c = [xx + cs + j(), yy + cs * 0.8 + j()], d = [xx + j(), yy + cs * 0.8 + j()];
+        ctx.fillStyle = mix(C.body, HI, R(0.1, 0.34)); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.fill();
+        ctx.lineWidth = 1; ctx.strokeStyle = C.bodyLt; ctx.globalAlpha = A0 * 0.7; ctx.beginPath(); ctx.moveTo(d[0], d[1]); ctx.lineTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        ctx.strokeStyle = C.bodyDk; ctx.globalAlpha = A0 * 0.8; ctx.beginPath(); ctx.moveTo(b[0], b[1]); ctx.lineTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); ctx.stroke(); ctx.globalAlpha = A0;
+      }
+    }
+  } else if (style === 'cobble') {          // rounded cobblestones, each with a shadow and a lit crown
+    const cs = ground ? 12 : 8;
+    for (let yy = fy + 1, row = 0; yy < fy + fh; yy += cs * 0.9, row++) {
+      for (let xx = sx - R(0, cs) - ((row & 1) ? cs * 0.5 : 0); xx < sx + w; xx += cs * R(0.95, 1.25)) {
+        const rw = cs * R(0.42, 0.55), rh = cs * R(0.36, 0.46), cx = xx + cs * 0.5, cy = yy + cs * 0.45;
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(cx + 0.6, cy + 0.9, rw, rh, 0, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = mix(C.body, HI, R(0.18, 0.42)); ctx.beginPath(); ctx.ellipse(cx, cy, rw, rh, 0, 0, 6.2832); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.ellipse(cx - rw * 0.25, cy - rh * 0.35, rw * 0.45, rh * 0.3, 0, 0, 6.2832); ctx.fill();
+      }
+    }
+  } else if (style === 'brick') {           // small bricks in running bond
+    const bh = ground ? 8 : 5, bw = ground ? 22 : 14;
+    for (let yy = fy + 1, row = 0; yy < fy + fh; yy += bh, row++) for (let xx = sx - ((row & 1) ? bw / 2 : 0); xx < sx + w; xx += bw) {
+      const x0 = Math.max(sx, xx + 1), x1 = Math.min(sx + w, xx + bw - 1); if (x1 - x0 < 2) continue;
+      ctx.fillStyle = mix(C.body, HI, R(0.2, 0.42)); ctx.fillRect(x0, yy + 1, x1 - x0, bh - 2); ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(x0, yy + 1, x1 - x0, 1);
+    }
+  } else return false;
+  ctx.globalAlpha = A0; return true;
+}
+function _cuteBuiltFace3(ctx, sx, fy, w, fh, style, rng, C, ground, HI) {
+  const mix = C.mix, R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
+  if (style === 'temple') {                 // a carved fret band over a red lacquer line, then long slabs
+    const band = Math.min(5, fh * 0.3);
+    ctx.fillStyle = mix(C.body, HI, 0.4); ctx.fillRect(sx, fy, w, band);
+    ctx.fillStyle = C.bodyDk; for (let xx = sx + 6; xx < sx + w - 4; xx += 12) { ctx.fillRect(xx, fy + 1.5, 4, 1); ctx.fillRect(xx + 1.5, fy + 1.5, 1, band - 2.5); }
+    ctx.fillStyle = '#b8402e'; ctx.globalAlpha = A0 * 0.85; ctx.fillRect(sx, fy + band, w, 1.5); ctx.globalAlpha = A0;
+    const sy = fy + band + 1.5, sh = fh - band - 1.5, bw = ground ? 40 : 26;
+    for (let xx = sx - R(0, bw * 0.5); xx < sx + w; xx += bw) { const x0 = Math.max(sx, xx + 1), x1 = Math.min(sx + w, xx + bw - 1); if (x1 - x0 < 3) continue; ctx.fillStyle = mix(C.body, HI, R(0.2, 0.34)); ctx.fillRect(x0, sy + 1, x1 - x0, sh - 1); ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(x0, sy + 1, x1 - x0, 1); }
+  } else if (style === 'marble') {          // veined slabs and a gold inlay line
+    const bw = ground ? 48 : 30;
+    for (let xx = sx - R(0, bw * 0.5); xx < sx + w; xx += bw) {
+      const x0 = Math.max(sx, xx), x1 = Math.min(sx + w, xx + bw);
+      ctx.fillStyle = mix(C.body, HI, R(0.45, 0.6)); ctx.fillRect(x0, fy, x1 - x0, fh);
+      ctx.strokeStyle = C.bodyDk; ctx.globalAlpha = A0 * 0.28; ctx.lineWidth = 0.8;
+      for (let v = 0; v < 2; v++) { let vx = R(x0, x1), vy = fy; ctx.beginPath(); ctx.moveTo(vx, vy); while (vy < fy + fh) { vx += R(-4, 4); vy += R(3, 6); ctx.lineTo(Math.max(x0, Math.min(x1, vx)), Math.min(fy + fh, vy)); } ctx.stroke(); }
+      ctx.globalAlpha = A0; ctx.fillStyle = C.topLt; ctx.fillRect(x0, fy, 1, fh);
+    }
+    ctx.fillStyle = '#d9b45a'; ctx.globalAlpha = A0 * 0.8; ctx.fillRect(sx, fy + Math.min(4, fh * 0.25), w, 1.2);
+  } else if (style === 'mosaic') {          // small tesserae in two tones, a diagonal pattern
+    const t = ground ? 8 : 5;
+    for (let yy = fy + 1, r = 0; yy < fy + fh; yy += t, r++) for (let xx = sx, c = 0; xx < sx + w; xx += t, c++) {
+      ctx.fillStyle = ((r + c) % 3 === 0) ? mix(HI, '#ffffff', 0.25) : mix(C.body, HI, R(0.3, 0.5)); ctx.fillRect(xx + 0.5, yy + 0.5, Math.min(t - 1, sx + w - xx - 0.5), t - 1);
+    }
+  } else if (style === 'boardwalk') {       // a pier edge: deck boards end-on, a stringer, post heads with bolts
+    const dh = Math.max(4, fh * 0.45);
+    ctx.fillStyle = mix(C.body, HI, 0.3); ctx.fillRect(sx, fy, w, dh);
+    ctx.fillStyle = C.bodyDk; for (let xx = sx + R(4, 10); xx < sx + w; xx += R(9, 13)) ctx.fillRect(Math.round(xx), fy, 1, dh);
+    ctx.fillRect(sx, fy + dh, w, 1.5); ctx.fillStyle = mix(C.body, C.bodyDk, 0.3); ctx.fillRect(sx, fy + dh + 1.5, w, fh - dh - 1.5);
+    for (let xx = sx + R(12, 24); xx < sx + w - 6; xx += R(36, 48)) { const px = Math.round(xx); ctx.fillStyle = mix(C.body, HI, 0.18); ctx.fillRect(px, fy + dh + 1.5, 5, fh - dh - 1.5); ctx.fillStyle = C.bodyLt; ctx.fillRect(px, fy + dh + 1.5, 1, fh - dh - 1.5); ctx.fillStyle = C.bodyDk; ctx.fillRect(px + 2, fy + dh + 4, 1.4, 1.4); }
+  } else return false;
+  ctx.globalAlpha = A0; return true;
+}
+function _cuteBuiltFace4(ctx, sx, fy, w, fh, style, rng, C, ground, HI) {
+  const mix = C.mix, R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
+  if (style === 'lacquer') {                // red lacquer, two gold trims, gilt studs, a sheen
+    ctx.fillStyle = mix(C.body, HI, 0.35); ctx.fillRect(sx, fy, w, fh);
+    ctx.fillStyle = '#e2b24a'; ctx.globalAlpha = A0 * 0.9; ctx.fillRect(sx, fy + 1, w, 1.5); ctx.fillRect(sx, fy + fh - 3, w, 1.2);
+    for (let xx = sx + R(10, 20); xx < sx + w - 6; xx += 26) { ctx.globalAlpha = A0 * 0.75; ctx.beginPath(); ctx.arc(xx, fy + fh * 0.55, 1.6, 0, 6.2832); ctx.fill(); }
+    ctx.globalAlpha = A0; ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(sx, fy + 3, w, 1);
+  } else if (style === 'parquet') {         // herringbone slats, alternating direction
+    const u = ground ? 8 : 5;
+    for (let yy = fy, r = 0; yy < fy + fh; yy += u, r++) for (let xx = sx - u * 2, c = 0; xx < sx + w; xx += u * 2, c++) {
+      const odd = (r + c) & 1; ctx.fillStyle = mix(C.body, HI, odd ? 0.3 : 0.45); ctx.beginPath();
+      if (odd) { ctx.moveTo(xx, yy); ctx.lineTo(xx + u, yy); ctx.lineTo(xx + u * 2, yy + u); ctx.lineTo(xx + u, yy + u); } else { ctx.moveTo(xx + u, yy); ctx.lineTo(xx + u * 2, yy); ctx.lineTo(xx + u, yy + u); ctx.lineTo(xx, yy + u); }
+      ctx.closePath(); ctx.fill(); ctx.strokeStyle = C.bodyDk; ctx.globalAlpha = A0 * 0.4; ctx.lineWidth = 0.8; ctx.stroke(); ctx.globalAlpha = A0;
+    }
+  } else if (style === 'toybrick') {        // toy bricks: offset courses, a plastic gloss, a crisp shadow line
+    const bh = ground ? 10 : Math.max(6, fh / 2), unit = ground ? 32 : 24;
+    for (let yy = fy, row = 0; yy < fy + fh; yy += bh, row++) for (let xx = sx - ((row & 1) ? unit / 2 : 0); xx < sx + w; xx += unit) {
+      const x0 = Math.max(sx, xx + 0.5), x1 = Math.min(sx + w, xx + unit - 0.5); if (x1 - x0 < 2) continue;
+      ctx.fillStyle = mix(C.body, HI, 0.55); ctx.fillRect(x0, yy + 0.5, x1 - x0, bh - 1);
+      ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fillRect(x0 + 1, yy + 1.5, x1 - x0 - 2, 1.2); ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(x0, yy + bh - 2, x1 - x0, 1.5);
+    }
+  } else if (style === 'basalt') {          // basalt columns: varied widths, a lit facet, cross fractures
+    for (let xx = sx - R(0, 8); xx < sx + w;) {
+      const cw = R(ground ? 12 : 8, ground ? 20 : 13), x0 = Math.max(sx, xx), x1 = Math.min(sx + w, xx + cw);
+      ctx.fillStyle = mix(C.body, HI, R(0.12, 0.3)); ctx.fillRect(x0, fy, x1 - x0, fh);
+      ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(x0, fy, Math.min(2, x1 - x0), fh); ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(x1 - 1, fy, 1, fh);
+      ctx.fillStyle = 'rgba(0,0,0,0.2)'; for (let k = 0, n = Math.floor(fh / R(6, 11)); k < n; k++) ctx.fillRect(x0, fy + R(3, fh - 2), x1 - x0, 1);
+      xx += cw;
+    }
+  } else return false;
+  ctx.globalAlpha = A0; return true;
+}
+// toy-brick studs stand on the surface, the way grass tufts do (drawn with the decor, above the line)
+function _cuteStuds(ctx, sx, y, w, C, ground) {
+  const step = ground ? 16 : 12, sw = ground ? 9 : 7, sh = ground ? 4 : 3;
+  for (let xx = sx + step / 2 - sw / 2; xx < sx + w - sw; xx += step) {
+    ctx.fillStyle = C.OUT; ctx.fillRect(xx - 1, y - sh - 1, sw + 2, sh + 2);
+    ctx.fillStyle = C.top; ctx.fillRect(xx, y - sh, sw, sh + 1);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fillRect(xx + 1, y - sh + 0.5, sw * 0.4, 1);
+  }
+}
+function _cuteBuiltCap(ctx, sx, y, w, cap, style, rng, C) {
+  const R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
+  if (style === 'snow') { _cuteCapTexture(ctx, sx, y, w, cap, 'ice', rng, C); return true; }    // snow lying on paving
+  if (style === 'moss') { _cuteCapTexture(ctx, sx, y, w, cap, 'grass', rng, C); return true; }  // moss on planks or earth
+  if (style === 'wood') {                   // board tops: lengthwise grain and the board joints
+    ctx.strokeStyle = C.topDk; ctx.lineWidth = 1; ctx.globalAlpha = A0 * 0.45;
+    for (let k = 1; k < 3; k++) { const gy = y + cap * (k / 3); ctx.beginPath(); ctx.moveTo(sx, gy); for (let xx = 0; xx <= w; xx += 12) ctx.lineTo(sx + xx, gy + Math.sin((xx + k * 29) * 0.06) * 0.6); ctx.stroke(); }
+    ctx.globalAlpha = A0 * 0.7; ctx.fillStyle = C.topDk; for (let xx = sx + R(30, 70); xx < sx + w - 6; xx += R(70, 120)) ctx.fillRect(Math.round(xx), y + 1, 1, cap - 1);
+  } else if (style === 'tile') {            // polish: a hard specular line and a faint reflection under it
+    ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.55; ctx.fillRect(sx + 3, y + cap * 0.28, w - 6, 1.2); ctx.globalAlpha = A0 * 0.18; ctx.fillRect(sx + 3, y + cap * 0.28 + 2, w - 6, Math.max(1, cap * 0.3));
+    ctx.globalAlpha = A0 * 0.5; ctx.fillStyle = C.topDk; for (let xx = sx + R(10, 24); xx < sx + w - 4; xx += 24) ctx.fillRect(Math.round(xx), y + cap * 0.6, 1, cap * 0.4);
+  } else if (style === 'paving') {          // stone tops and their joints
+    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.55; for (let xx = sx + R(12, 30); xx < sx + w - 5; xx += R(22, 40)) ctx.fillRect(Math.round(xx), y + cap * 0.35, 1.2, cap * 0.65);
+    ctx.globalAlpha = A0 * 0.35; for (let n = 0, N = Math.round(w / 9); n < N; n++) ctx.fillRect(R(sx, sx + w), R(y + 2, y + cap - 1), 1, 1);
+  } else if (style === 'metal') {           // tread plate: small raised diagonal ticks
+    ctx.lineWidth = 1.2; ctx.strokeStyle = C.topLt; ctx.globalAlpha = A0 * 0.6;
+    for (let xx = sx + 4, k = 0; xx < sx + w - 3; xx += 6, k++) { const cy = y + cap * 0.5; ctx.beginPath(); if (k & 1) { ctx.moveTo(xx - 1.5, cy - 1.2); ctx.lineTo(xx + 1.5, cy + 1.2); } else { ctx.moveTo(xx - 1.5, cy + 1.2); ctx.lineTo(xx + 1.5, cy - 1.2); } ctx.stroke(); }
+  } else if (style === 'concrete') {        // the groove of a kerb and fine speckle
+    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.45; ctx.fillRect(sx, y + cap - 2, w, 1);
+    for (let n = 0, N = Math.round(w / 7); n < N; n++) { ctx.globalAlpha = A0 * R(0.15, 0.35); ctx.fillRect(R(sx, sx + w), R(y + 2, y + cap - 2), 1, 1); }
+  } else if (style === 'rock') {            // a rough top: chips and small dark pits
+    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.5; for (let n = 0, N = Math.round(w / 6); n < N; n++) ctx.fillRect(R(sx, sx + w), R(y + 2, y + cap - 1), R(1, 2.5), 1);
+  } else if (style === 'temple') {          // slab joints and the red trim under the lip
+    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.5; for (let xx = sx + R(14, 30); xx < sx + w - 5; xx += R(26, 40)) ctx.fillRect(Math.round(xx), y + cap * 0.3, 1, cap * 0.7);
+    ctx.globalAlpha = A0 * 0.9; ctx.fillStyle = '#b8402e'; ctx.fillRect(sx, y + cap - 1.6, w, 1.4);
+  } else if (style === 'marble') {          // polish and a gold edge
+    ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.5; ctx.fillRect(sx + 3, y + cap * 0.3, w - 6, 1.2); ctx.globalAlpha = A0 * 0.85; ctx.fillStyle = '#d9b45a'; ctx.fillRect(sx, y + cap - 1.5, w, 1.2);
+  } else if (style === 'lacquer') {         // a gold edge and a lacquer sheen
+    ctx.fillStyle = '#e2b24a'; ctx.globalAlpha = A0 * 0.9; ctx.fillRect(sx, y + cap - 1.8, w, 1.4); ctx.globalAlpha = A0 * 0.35; ctx.fillStyle = '#ffffff'; ctx.fillRect(sx + 3, y + cap * 0.3, w - 6, 1);
+  } else if (style === 'toybrick') {        // plastic gloss
+    ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.35; ctx.fillRect(sx + 2, y + cap * 0.3, w - 4, 1.2);
+  } else return false;
+  ctx.globalAlpha = A0; return true;
+}
+// v0.30.626 - a built floating platform is a flat slab: no keel, nothing hanging, no end wrap.
+function _cuteBuiltGeom(G, w, h, ground) {
+  if (ground || G.block) return G;
+  const faceH = Math.max(h, Math.min(18, 12 + w * 0.02));
+  return Object.assign({}, G, { island: false, keel: 0, hang: 0, wrap: 0, faceH, cap: Math.max(5, Math.min(7, faceH * 0.4)) });
+}
+// v0.30.626 - WHAT EACH MAP IS FLOORED IN, read off its own backdrop. Every town has a floor of its own; the
+// open country splits into meadow grass (unlisted), dark moss, rock, basalt and Block-land's toy bricks.
+// An authored md.floorTheme still wins over this table; unlisted maps keep _pickFloorTheme's rules.
+var _MAP_FLOOR_MATERIAL = {
+  // towns - one floor each
+  town: 'cobble', everdawn_megamall: 'tile', glasswindHamlet: 'snowpave', shadowWovenHood: 'brick', hiddenPagoda: 'lacquer',
+  bastion: 'paving', bastionThrone: 'marble', bastionRampart: 'stone', azureAcademia: 'mosaic', azureAbode: 'parquet',
+  jadeGrove: 'boardwalk', emeraldVillage: 'wood', reachOfVermillion: 'temple', fieryHideout: 'basalt', verdantHaven: 'mosswood',
+  void: 'cosmic', boss_rush: 'cosmic',
+  // trains, stations, machines, halls
+  tower: 'wood', clockworkUnderpassLobby: 'wood', clockworkExpress: 'concrete', clockworkSpire: 'metal', magmaFoundry: 'metal', magmaFoundry2: 'metal',
+  pearlBathhouse: 'mosaic', stardustAtrium: 'marble', celestialSpire: 'marble', sundered_forge: 'temple',
+  // masonry: crypts, catacombs, temples, castles
+  cryptHollow: 'stone', sanctum: 'stone', gravitosArena: 'stone', krookThrone: 'stone', innerDimension: 'stone', boss: 'stone', zodiacHall: 'stone',
+  hollowSepulchre: 'stone', ossuarySprawl: 'stone', hollowSepulchre2: 'stone', wayfarersLantern: 'stone', wayfarersLantern1: 'stone', wayfarersLantern2: 'stone',
+  // the wild: moss, rock, basalt, toy bricks
+  boneGraveyard: 'moss', boneGraveyard2: 'moss', boneGraveyard3: 'moss', thornspireThicket: 'moss', gloomsporeVerge: 'moss', verdantHollow: 'moss', bloomhaven: 'moss', mushroom: 'moss',
+  slimeCave: 'rock', graniteBluffs: 'rock', distortedThreshold: 'rock', fracturedReflection: 'rock', confusedVigil: 'rock', sauroSlope: 'basalt',
+  blockland_meadow: 'toybrick', blockland_grove: 'toybrick', blockland_dunes: 'toybrick', blockland_quarry: 'toybrick', blockland_outpost: 'toybrick', blockland_citadel: 'toybrick', blockland_apex: 'toybrick',
+  // snow, water and sand
+  frostbiteHollow: 'ice', glasswindSteppe: 'ice', glasswindSteppe2: 'ice',
+  coralReef: 'coral', abyssalTrench: 'coral', octopusGrotto: 'coral', kelpForest: 'coral', bubbleGrotto: 'coral', tidepoolShoals: 'coral',
+  sunsetBeach: 'sand', tidalLagoon: 'sand', witheringTide: 'swamp', witheringTide2: 'swamp', interdimensionalAscension: 'cosmic',
+  // the Expedition tower, floor by floor
+  tower_b1: 'paving', tower_b2: 'stone', tower_b3: 'stone', tower_b4: 'boardwalk', tower_b5: 'cobble', tower_b6: 'marble', tower_b7: 'paving', tower_b8: 'rock', tower_b9: 'stone', tower_b10: 'rock',
+  // the zodiac domains: starry rock under their night skies
+  zod_aries: 'cosmic', zod_taurus: 'cosmic', zod_gemini: 'cosmic', zod_cancer: 'cosmic', zod_leo: 'cosmic', zod_virgo: 'cosmic',
+  zod_libra: 'cosmic', zod_scorpio: 'cosmic', zod_sagittarius: 'cosmic', zod_capricorn: 'cosmic', zod_aquarius: 'cosmic', zod_pisces: 'cosmic',
+};
+// v0.30.626 - GENERATED from each backdrop's painted floor (k-means over its bottom band), shaped by the map's material.
+var _MAP_FLOOR_PAL = {
+  abyssalTrench: { top: '#5e779e', body: '#364966' },
+  azureAbode: { top: '#996e52', body: '#61422e' },
+  azureAcademia: { top: '#7fbecf', body: '#43737f' },
+  bastion: { top: '#bcc4af', body: '#6f7566' },
+  bastionRampart: { top: '#768082', body: '#474e50' },
+  bastionThrone: { top: '#afb7bb', body: '#7c8285' },
+  blockland_apex: { top: '#4a9f3d', body: '#11640d' },
+  blockland_citadel: { top: '#429837', body: '#076008' },
+  blockland_dunes: { top: '#429837', body: '#076008' },
+  blockland_grove: { top: '#138949', body: '#005723' },
+  blockland_meadow: { top: '#138949', body: '#005723' },
+  blockland_outpost: { top: '#429837', body: '#076008' },
+  blockland_quarry: { top: '#429837', body: '#076008' },
+  bloomhaven: { top: '#698961', body: '#1d3247' },
+  boneGraveyard: { top: '#516d4b', body: '#263047' },
+  boneGraveyard2: { top: '#516d4b', body: '#263047' },
+  boneGraveyard3: { top: '#4a6b3f', body: '#1b333f' },
+  boss: { top: '#546b76', body: '#32434b' },
+  bubbleGrotto: { top: '#7596af', body: '#435b6e' },
+  celestialSpire: { top: '#c9cfcb', body: '#949895' },
+  clockworkExpress: { top: '#7b757c', body: '#4c484d' },
+  clockworkSpire: { top: '#707b7f', body: '#434b4f' },
+  clockworkUnderpassLobby: { top: '#845a36', body: '#55371c' },
+  confusedVigil: { top: '#8b555b', body: '#5b3338' },
+  coralReef: { top: '#5e74a1', body: '#364768' },
+  cryptHollow: { top: '#6d8789', body: '#3f5354' },
+  distortedThreshold: { top: '#af7678', body: '#6f4648' },
+  emeraldVillage: { top: '#aa8f65', body: '#695637' },
+  everdawn_megamall: { top: '#dac0ca', body: '#847179' },
+  fieryHideout: { top: '#6d6573', body: '#443e48' },
+  fracturedReflection: { top: '#596b7d', body: '#35434f' },
+  frostbiteHollow: { top: '#549cd1', body: '#245f86' },
+  glasswindHamlet: { top: '#d7e8f3', body: '#6d8a9c' },
+  glasswindSteppe: { top: '#7ab0dc', body: '#406a8b' },
+  glasswindSteppe2: { top: '#639fc4', body: '#32617c' },
+  gloomsporeVerge: { top: '#59804e', body: '#0d3635' },
+  graniteBluffs: { top: '#404945', body: '#282f2c' },
+  gravitosArena: { top: '#686977', body: '#40414b' },
+  hiddenPagoda: { top: '#b14049', body: '#731f28' },
+  hollowSepulchre: { top: '#554c71', body: '#362f4b' },
+  hollowSepulchre2: { top: '#6b544b', body: '#45342d' },
+  innerDimension: { top: '#556474', body: '#333e4b' },
+  interdimensionalAscension: { top: '#7e7eae', body: '#4c4d6f' },
+  jadeGrove: { top: '#9ea38e', body: '#5f6253' },
+  kelpForest: { top: '#697680', body: '#3f4950' },
+  krookThrone: { top: '#5d6c73', body: '#384348' },
+  magmaFoundry: { top: '#65737f', body: '#3d4750' },
+  magmaFoundry2: { top: '#6a707b', body: '#40454d' },
+  mushroom: { top: '#688d5c', body: '#153539' },
+  octopusGrotto: { top: '#6c79a3', body: '#404a69' },
+  ossuarySprawl: { top: '#554c71', body: '#362f4b' },
+  pearlBathhouse: { top: '#877bbb', body: '#524a79' },
+  reachOfVermillion: { top: '#988f81', body: '#5d574c' },
+  sanctum: { top: '#454a63', body: '#2b2f41' },
+  sauroSlope: { top: '#6d6573', body: '#443e48' },
+  shadowWovenHood: { top: '#8a5457', body: '#5a3335' },
+  slimeCave: { top: '#527b76', body: '#2e4c49' },
+  stardustAtrium: { top: '#d3beb6', body: '#998983' },
+  sundered_forge: { top: '#7a9394', body: '#475a5b' },
+  sunsetBeach: { top: '#918f9a', body: '#58575f' },
+  thornspireThicket: { top: '#59804e', body: '#0d3635' },
+  tidalLagoon: { top: '#92918b', body: '#585854' },
+  tidepoolShoals: { top: '#585b86', body: '#363859' },
+  tower: { top: '#ad926c', body: '#6b583c' },
+  tower_b1: { top: '#768988', body: '#465453' },
+  tower_b10: { top: '#5c4d69', body: '#3b3044' },
+  tower_b2: { top: '#5b617e', body: '#373c51' },
+  tower_b3: { top: '#535e54', body: '#333b34' },
+  tower_b4: { top: '#68705e', body: '#3f4538' },
+  tower_b5: { top: '#626d6b', body: '#3b4442' },
+  tower_b6: { top: '#b7b5b7', body: '#828182' },
+  tower_b7: { top: '#676689', body: '#3f3f59' },
+  tower_b8: { top: '#534e63', body: '#353141' },
+  tower_b9: { top: '#867c68', body: '#534c3d' },
+  town: { top: '#caaa9d', body: '#7c655b' },
+  verdantHaven: { top: '#688d5c', body: '#614c34' },
+  verdantHollow: { top: '#698961', body: '#1d3247' },
+  wayfarersLantern: { top: '#6d6465', body: '#443e3e' },
+  wayfarersLantern1: { top: '#6f505d', body: '#48313b' },
+  wayfarersLantern2: { top: '#494d5c', body: '#2e313c' },
+  witheringTide: { top: '#6f8885', body: '#415352' },
+  witheringTide2: { top: '#537679', body: '#2f494b' },
+  zod_aquarius: { top: '#3b4858', body: '#242e3b' },
+  zod_aries: { top: '#7489cf', body: '#425386' },
+  zod_cancer: { top: '#617293', body: '#39475e' },
+  zod_capricorn: { top: '#284871', body: '#152e4d' },
+  zod_gemini: { top: '#3b4858', body: '#242e3b' },
+  zod_leo: { top: '#7489cf', body: '#425386' },
+  zod_libra: { top: '#3b4858', body: '#242e3b' },
+  zod_pisces: { top: '#617293', body: '#39475e' },
+  zod_sagittarius: { top: '#7489cf', body: '#425386' },
+  zod_scorpio: { top: '#617293', body: '#39475e' },
+  zod_taurus: { top: '#284871', body: '#152e4d' },
+  zod_virgo: { top: '#284871', body: '#152e4d' },
+  zodiacHall: { top: '#71788e', body: '#44495a' },
+};
 function _cuteMaterial(ctx, sx, fy, w, fh, theme, rng, C, ground) {
   if (fh < 3) return;
+  { const _cm = _CUTE_MAT[theme]; if (_cm && _cm.face) { _cuteBuiltFace(ctx, sx, fy, w, fh, _cm.face, rng, C, ground); return; } }   // v0.30.626
   const mix = C.mix, R = (a, b) => a + rng() * (b - a);
   ctx.save();
   const A0 = ctx.globalAlpha;
@@ -18981,7 +19333,7 @@ function _cuteHangers(ctx, x0, x1, yb, theme, rng, C, keelPts) {
     } else if (theme === 'cosmic') {
       ctx.beginPath(); ctx.moveTo(hx - 1.7, hy); ctx.lineTo(hx + 1.7, hy); ctx.lineTo(hx + 0.4, hy + len + 4); ctx.closePath();
       ctx.fillStyle = C.topLt; ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1; ctx.stroke();
-    } else if (theme === 'stone' || theme === 'sand' || theme === 'coral') {
+    } else if (theme === 'stone' || theme === 'sand' || theme === 'coral' || theme === 'rock' || theme === 'basalt') {
       const py = hy + len, s = R(1.8, 3);
       ctx.beginPath(); ctx.moveTo(hx - s, py); ctx.lineTo(hx - s * 0.3, py - s); ctx.lineTo(hx + s, py - s * 0.4); ctx.lineTo(hx + s * 0.6, py + s * 0.8); ctx.closePath();
       ctx.fillStyle = C.body; ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1; ctx.stroke();
@@ -18993,6 +19345,7 @@ function _cuteHangers(ctx, x0, x1, yb, theme, rng, C, keelPts) {
   ctx.globalAlpha = A0;
 }
 function _cuteCapTexture(ctx, sx, y, w, cap, theme, rng, C) {
+  { const _cm = _CUTE_MAT[theme]; if (_cm && _cm.cap && _cuteBuiltCap(ctx, sx, y, w, cap, _cm.cap, rng, C)) return; }   // v0.30.626
   const R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
   if (theme === 'grass' || theme === 'swamp' || !theme) {
     ctx.strokeStyle = C.topDk; ctx.lineWidth = 1; ctx.globalAlpha = A0 * 0.55;
@@ -19034,6 +19387,12 @@ function _cuteDroops(ctx, sx, ye, w, theme, rng, C, ground) {
 // boundary lumps (grass, snow, gloss) or runs flat (weathered stone).
 function _cuteLit(theme, C) {
   const mix = C.mix, top = C.top;
+  { const _cm = _CUTE_MAT[theme]; if (_cm) {   // v0.30.626 - snow and moss lie lumpy; a built top is lit flat
+    if (_cm.lit === 'snow') return { color: '#ffffff', alpha: 0.75, frac: 0.55, bump: true };
+    if (_cm.lit === 'moss') return { color: mix(top, '#e8ffb0', 0.3), alpha: 0.45, frac: 0.5, bump: true };
+    if (_cm.built) return { color: '#ffffff', alpha: (_cm.face === 'tile' || _cm.face === 'marble') ? 0.3 : 0.18, frac: 0.42, bump: false };
+    return { color: mix(top, '#ffffff', 0.25), alpha: 0.35, frac: 0.4, bump: false };
+  } }
   if (theme === 'grass' || !theme) return { color: mix(top, '#fff3b0', 0.45), alpha: 0.6, frac: 0.5, bump: true };
   if (theme === 'swamp') return { color: mix(top, '#e8ffb0', 0.35), alpha: 0.5, frac: 0.5, bump: true };
   if (theme === 'ice') return { color: '#ffffff', alpha: 0.75, frac: 0.55, bump: true };
@@ -19045,8 +19404,9 @@ function _cuteLit(theme, C) {
   return null;   // cosmic has its own gradient
 }
 function _cuteDecor(ctx, sx, y, w, theme, rng, C, ground) {
+  if (theme === 'toybrick') { _cuteStuds(ctx, sx, y, w, C, ground); return; }   // v0.30.626 - the studs are the material, not a prop
   const grassy = theme === 'grass' || theme === 'swamp' || !theme;
-  const decor = grassy ? 'tuft' : theme === 'ice' ? 'snow' : theme === 'cosmic' ? 'crystal' : theme === 'candy' ? 'sprinkle' : theme === 'lava' ? 'ember' : theme === 'sand' ? 'pebble' : theme === 'coral' ? 'shell' : theme === 'honey' ? 'drop' : theme === 'stone' ? 'chip' : null;
+  const decor = grassy ? 'tuft' : theme === 'ice' ? 'snow' : theme === 'cosmic' ? 'crystal' : theme === 'candy' ? 'sprinkle' : theme === 'lava' ? 'ember' : theme === 'sand' ? 'pebble' : theme === 'coral' ? 'shell' : theme === 'honey' ? 'drop' : (theme === 'stone' || theme === 'rock' || theme === 'basalt') ? 'chip' : null;
   if (!decor || w < 24) return;
   const OUT = C.OUT, A0 = ctx.globalAlpha, mix = C.mix;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -19097,9 +19457,11 @@ function _cuteDecor(ctx, sx, y, w, theme, rng, C, ground) {
 function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const _pa = ctx.globalAlpha;
   const mix = (typeof _mixHex === 'function') ? _mixHex : ((x) => x);
-  const P = _cuteMapPalette(tint) || tint;   // v0.30.606 - the map's colour; the theme only picks the shape
+  const P = (tint && tint.exact) ? tint : (_cuteMapPalette(tint) || tint);   // v0.30.626 - a sampled floor palette is used as is   // v0.30.606 - the map's colour; the theme only picks the shape
   const top = P.top, body = P.body;
   const C = { mix, top, body, topLt: mix(top, '#ffffff', 0.38), topDk: mix(top, body, 0.42), bodyLt: mix(body, top, 0.30), bodyDk: mix(body, '#000000', 0.40), OUT: mix(body, '#05030a', 0.62) };
+  const _cmat = _CUTE_MAT[theme];   // v0.30.626 - snow on paving, moss on planks: the face keeps its own hue
+  if (_cmat && _cmat.split) { C.faceHi = mix(body, '#ffffff', 0.35); C.bodyLt = mix(body, '#ffffff', 0.22); }
   ctx.globalAlpha = _pa * a;
   if (w < 8 || h < 6) {   // too small for anything - flat fill + outline
     ctx.fillStyle = body; ctx.fillRect(sx, y, w, h);
@@ -19109,7 +19471,8 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   }
   const rng = _cuteRng((Math.round(w) * 73856093) ^ (Math.round(h) * 19349663) ^ ((theme || 'g').charCodeAt(0) * 83492791) ^ (((variant | 0) + 1) * 40503));
   const edge = _CUTE_EDGE[theme] || 'flat';
-  const G = _cuteGeom(w, h, ground), cap = G.cap, wrap = G.wrap;
+  const built = !!(_CUTE_MAT[theme] && _CUTE_MAT[theme].built);   // v0.30.626
+  const G = built ? _cuteBuiltGeom(_cuteGeom(w, h, ground), w, h, ground) : _cuteGeom(w, h, ground), cap = G.cap, wrap = G.wrap;
   // v4: a ground side that abuts another ground piece (variant bit 1 = left, 2 = right) is filled
   // flush, 1px into the pad so the seam column is opaque, and draws no keyline; where it stands
   // proud of a lower neighbour (bits 2-6 / 7-11) only that riser is outlined.
@@ -19118,7 +19481,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const xs = sx, xe = sx + w, ww = w, fx0 = jl ? xs - 1 : xs, fx1 = jr ? xe + 1 : xe;
   const inset = G.island ? 3 : 0, x0 = xs + inset, x1 = xe - inset, yb = y + G.faceH;
   const r = ground ? 4 : Math.min(6, G.faceH / 2);
-  const flatTop = theme === 'stone' || theme === 'lava' || theme === 'cosmic';
+  const flatTop = built || theme === 'stone' || theme === 'lava' || theme === 'cosmic' || theme === 'basalt';
   const dip = flatTop ? 0 : (ground ? 1.5 : 1.1);   // the rolling top: crests ON the collision line, dips this far below it
   const keelPts = [];   // the underside, drawn from the seeded stream ONCE: filled, clipped and stroked alike
   if (G.keel) { const N = Math.max(3, Math.round(w / 26)); for (let i = N - 1; i >= 1; i--) { const t = i / N; keelPts.push([x0 + 6 + (x1 - x0 - 12) * t + (rng() - 0.5) * 6, yb + G.keel * Math.sin(Math.PI * t) * (0.55 + rng() * 0.45)]); } }
@@ -19322,6 +19685,7 @@ function _pickFloorTheme(md) {
   const id = (typeof game !== 'undefined' && game.currentMap)
     ? game.currentMap
     : (md.id || md.name || '');
+  if (_MAP_FLOOR_MATERIAL && _MAP_FLOOR_MATERIAL[id]) return _MAP_FLOOR_MATERIAL[id];   // v0.30.626 - what the map is built of
   if (id === 'frozenPeak')                                    return 'ice';
   if (id === 'lavaCavern')                                    return 'lava';
   if (id === 'duneSands')                                     return 'sand';
@@ -115579,6 +115943,9 @@ function drawPlatforms() {
     ? _mapPlatformTint(game.mapData)
     : _PLATFORM_TINT_DEFAULT;
   const _th = (game.mapData && typeof _pickFloorTheme === 'function') ? _pickFloorTheme(game.mapData) : 'grass';   // v0.30.597 — the biome's palette and surface
+  // v0.30.626 - the map's own floor colours, sampled from its backdrop's painted floor (_MAP_FLOOR_PAL)
+  const _fpal = (_MAP_FLOOR_PAL && game.currentMap) ? _MAP_FLOOR_PAL[game.currentMap] : null;
+  const _ptf = _fpal ? (_fpal._t || (_fpal._t = { top: _fpal.top, body: _fpal.body, exact: true })) : _pt;
   for (const p of game.mapData.platforms) {
     const sx = p.x - game.camera.x;
     if (sx + p.w < 0 || sx > W) continue;
@@ -115594,11 +115961,11 @@ function drawPlatforms() {
       // cel-shaded slab with a lit "surface" cap (grass/snow/sand/…), a dark
       // earthy body, a gloss line, and a crisp 2px black outline. The old
       // MAP_FLOOR_OVERRIDES data + _pickMapFloorOverride() stay as dead code.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, true, _th, _lxGroundJoin(p));   // v0.30.613 - joined sides draw no keyline
+      _drawCutePlatform(sx, p.y, p.w, p.h, _ptf, true, _th, _lxGroundJoin(p));   // v0.30.613 - joined sides draw no keyline
     } else {
       // v0.29.x — CUTE procedural floating platform. Same cel-shaded, black-
       // outlined slab as the floor but rounded on top for a friendlier read.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, false, _th, _lxPlatVariant(p));   // v0.30.609 — one of three seeded variants
+      _drawCutePlatform(sx, p.y, p.w, p.h, _ptf, false, _th, _lxPlatVariant(p));   // v0.30.609 — one of three seeded variants
     }
   }
   // v0.25.482 — outlinePlatforms post-pass. Strokes a 2 px near-black
