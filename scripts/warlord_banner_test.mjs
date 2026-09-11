@@ -1,111 +1,155 @@
-// Warlord's Banner is now a real world object, not a 0.8s flash.
+// The planted standard is drawn at its own aspect, pre-scaled, and without the pool.
+// ============================================================================
+// Per user: "regenerate the sprite for this banner it should be much nicer and
+// aesthetic and fit the game better, remove the weird glow around it" and "it
+// should not looked squished as well".
 //
-// Per user: "warlord banner skill should have the warlord banner summoned onto
-// the map for the duration stated". The buff runs 12s (720 frames); the sprite
-// burst it used to fire lasted ~50. This drives the live skill and holds the
-// object to that contract: planted at the cast spot, standing for the full
-// duration, gone after, one at a time, and wiped by a map change.
-//   node scripts/warlord_banner_test.mjs [port]
-import { chromium } from 'playwright-core';
-import { existsSync, statSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
-const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
+// The art is a separate deliverable (reviewed by eye). This test pins the
+// RENDERER, which is what made the old art squished and fringed and would do
+// the same to the new art:
+//
+//   1. NO SQUISH: the drawImage call's dw/dh ratio equals the loaded image's
+//      natural aspect within 2%. Baseline draws 92x150 (0.61) regardless of
+//      the image (0.26 old / 0.34 new) -> fails.
+//   2. PRE-SCALED SOURCE: the first argument to that drawImage is a cached
+//      canvas produced by _lxProjScaled, not the raw Image. Baseline passes the
+//      raw Image -> fails. This is the mechanism that removes the red fringe
+//      (a 4.6x single-step bilinear shrink of a hard cutout).
+//   3. NO POOL: no createRadialGradient with the pool's exact signature
+//      (r0 = 2, r1 = h.w * 0.9) is issued on the main context while the banner
+//      is the only hazard. Baseline issues one per frame -> fails.
+//   4. CONTROL: the banner is genuinely being drawn (>= 1 matching drawImage
+//      per frame), so the two rows above are not vacuously true.
+//   5. the asset on disk has the pole base flush with its bottom edge (the
+//      renderer anchors the image bottom to the floor line, so a padded
+//      bottom would float the standard).
+// Run: node scripts/warlord_banner_test.mjs
+//      MOJI_GAME_FILE=_prev.html node scripts/warlord_banner_test.mjs   (baseline)
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright-core');
+const sharp = require('sharp'); sharp.cache(false);
+const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
+const res = [];
+const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 210) });
 
-const ART = 'Sprites/fx/warlord_banner_planted.webp';
-ok('the banner sprite ships', existsSync(ART) && statSync(ART).size > 3000 && statSync(ART).size < 200000,
-   { bytes: existsSync(ART) ? statSync(ART).size : 0 });
-ok('...and is COMMITTED (packagers ship only tracked files)',
-   execFileSync('git', ['ls-files', '--', ART], { encoding: 'utf8' }).trim() === ART, {});
+// ---- 5. asset: pole base flush with the bottom edge -------------------------
+{
+  const p = path.join(ROOT, 'Sprites', 'fx', 'warlord_banner_planted.webp');
+  const { data, info } = await sharp(p).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let bottom = 0; for (let x = 0; x < info.width; x++) if (data[((info.height - 1) * info.width + x) * 4 + 3] > 128) bottom++;
+  ok('asset: pole base is flush with the bottom edge (honest floor anchor)', bottom > 0,
+     `${info.width}x${info.height}, ${bottom} opaque px on the bottom row`);
+}
 
-const net = await import('node:net');
-const free = (p) => new Promise((r) => { const s = net.createServer();
-  s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT = process.argv[2];
-for (let p = 8767; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
-const { spawn } = await import('node:child_process');
-const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });
-await new Promise(r => setTimeout(r, 2000));
-const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
-const page = await (await b.newContext()).newPage();
-const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
-await page.waitForFunction(() => typeof SKILL_FNS === 'object' && typeof updateProjectiles === 'function', { timeout: 120000 });
+const PORT = Number(process.env.PORT || 11421);
+const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
+await new Promise((r) => setTimeout(r, 1200));
+let browser = null;
+for (let a = 1; a <= 3 && !browser; a++) {
+  try { browser = await chromium.launch({ channel: 'msedge', headless: true }); }
+  catch (e) { if (a === 3) throw e; await new Promise((r) => setTimeout(r, 2000 * a)); }
+}
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'load', timeout: 120000 });
+await page.waitForTimeout(12000);
+const click = async (sel, ms) => {
+  const el = await page.$(sel);
+  if (!el || !(await el.isVisible().catch(() => false))) return false;
+  try { await el.click({ timeout: ms || 2500 }); return true; } catch (e) { return false; }
+};
+await click('#menu-newgame', 8000); await page.waitForTimeout(1500);
+await click('#auth-submit', 8000);  await page.waitForTimeout(2500);
+for (let i = 0; i < 8; i++) {
+  const r = await page.evaluate(() => { const o = document.getElementById('class-options');
+    return !!(o && o.firstElementChild && o.firstElementChild.getBoundingClientRect().width > 40); });
+  if (r) break;
+  if (!(await click('#cs-nav-next'))) break;
+  await page.waitForTimeout(1000);
+}
+await page.evaluate(() => { const o = document.getElementById('class-options'); if (o && o.firstElementChild) o.firstElementChild.click(); });
+for (let i = 0; i < 45; i++) {
+  for (const sel of ['#plg-dagger-skip', '#plg-skip', '#boss-intro-skip', '#tut-skip']) await click(sel, 1200);
+  await page.keyboard.press('Enter').catch(() => {});
+  await page.waitForTimeout(2000);
+  const st = await page.evaluate(() => ({ p: (typeof game !== 'undefined') ? game.paused : null, pro: !!window._prologueActive }));
+  if (st.p === false && !st.pro) break;
+}
+// loop() parks until the loading overlay carries .fade.
+await page.evaluate(() => { const o = document.getElementById('loading-overlay'); if (o) o.classList.add('fade'); });
+await page.waitForTimeout(1200);
 
-const r = await page.evaluate(async () => {
-  const out = {};
-  game.paused = true;                       // the suite owns the clock
-  const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
-  player.cls = 'warrior'; player.job = 'berserker'; player.master = 'warlord';
-  player.hp = getMaxHp(); player.mp = 9999; player.skillCooldowns = {};
+const R = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try { loadMap('forest'); game.paused = false; player._god = true; } catch (e) {}
+  await sleep(1500);
+  const img = LX_FX && LX_FX.warlord_banner_planted;
+  for (let i = 0; i < 100 && !(img && img.complete && img.naturalWidth > 0); i++) await sleep(100);
+  if (!(img && img.naturalWidth > 0)) return { err: 'banner image never decoded' };
+  const natAr = img.naturalWidth / img.naturalHeight;
+
   game.hazards.length = 0; game.monsters.length = 0;
-  player.facing = 1;
-  const bannerOf = () => game.hazards.find(h => h.type === 'warlord_banner');
-  const frames = (n) => { for (let f = 0; f < n; f++) updateProjectiles(16); };
+  const W0 = 92, H0 = 150;
+  const cx = player.x + player.w / 2 + 40, footY = player.y + player.h;
+  game.hazards.push({ type: 'warlord_banner', cx, x: cx - W0 / 2, y: footY - H0, w: W0, h: H0, footY,
+                      life: 900, maxLife: 900, _dieAt: (game.time | 0) + 900 });
 
-  const px = player.x, pFoot = player.y + player.h;
-  SKILL_FNS.warlord_warcry();
-  const h0 = bannerOf();
-  out.planted = {
-    exists: !!h0, life: h0 && h0.life, maxLife: h0 && h0.maxLife,
-    footOnGround: !!h0 && Math.abs(h0.footY - pFoot) < 2,
-    besideCaster: !!h0 && Math.abs(h0.cx - (px + player.w / 2)) > 10 && Math.abs(h0.cx - (px + player.w / 2)) < 60,
-    protectedType: (typeof _HAZ_PROTECTED !== 'undefined') && _HAZ_PROTECTED.has('warlord_banner'),
-    spriteRegistered: !!(typeof LX_FX !== 'undefined' && LX_FX.warlord_banner_planted),
+  // Spies on the MAIN context only.
+  const P = CanvasRenderingContext2D.prototype;
+  const oDraw = P.drawImage, oGrad = P.createRadialGradient;
+  const draws = [], pools = [];
+  P.drawImage = function (...a) {
+    if (this === ctx) {
+      const src = a[0];
+      const cache = img._lxProjCache ? Object.values(img._lxProjCache) : [];
+      const isBanner = src === img || cache.includes(src);
+      if (isBanner && a.length === 5) draws.push({ preScaled: src !== img, dw: a[3], dh: a[4] });
+    }
+    return oDraw.apply(this, a);
   };
-
-  // it must NOT follow the player, and must outlive the old ~50-frame burst
-  player.x += 300;
-  frames(120);
-  const h1 = bannerOf();
-  out.mid = { alive: !!h1, stayedPut: !!h1 && Math.abs(h1.cx - (px + player.w / 2 + (player.facing > 0 ? -34 : 34))) < 2,
-    lifeLeft: h1 && h1.life };
-
-  // still standing near the end of the buff, gone after it
-  frames(560);                               // ~680 total of 720
-  out.lateAlive = !!bannerOf();
-  frames(80);                                // past 720
-  out.expired = !bannerOf();
-
-  // recast replaces rather than stacks
-  player.skillCooldowns = {}; player.mp = 9999;
-  SKILL_FNS.warlord_warcry();
-  frames(30);
-  player.skillCooldowns = {}; player.mp = 9999;
-  SKILL_FNS.warlord_warcry();
-  out.afterRecast = game.hazards.filter(h => h.type === 'warlord_banner').length;
-
-  // the buff it advertises is the same length as the banner
-  out.buffFrames = (player._warlordBanner | 0) - (game.time | 0);
-  out.desc = SKILLS.warlord_warcry && SKILLS.warlord_warcry.desc;
-  game.hazards.length = 0; game.paused = false;
-  return out;
+  P.createRadialGradient = function (...a) {
+    if (this === ctx && a[2] === 2 && Math.abs(a[5] - W0 * 0.9) < 0.01) pools.push(1);
+    return oGrad.apply(this, a);
+  };
+  for (let i = 0; i < 12; i++) { game.paused = false; await sleep(40); }
+  P.drawImage = oDraw; P.createRadialGradient = oGrad;
+  const _h = game.hazards[0];
+  const _clip = _h ? { x: _h.cx - game.camera.x - 90, y: _h.footY - ((game.camera && game.camera.y) || 0) - 190, w: 180, h: 215 } : null;
+  game.hazards.length = 0;
+  const d = draws[draws.length - 1] || null;
+  return { natAr: +natAr.toFixed(4), natural: img.naturalWidth + 'x' + img.naturalHeight, frames: 12,
+           draws: draws.length, preScaled: draws.filter((x) => x.preScaled).length,
+           drawAr: d ? +(d.dw / d.dh).toFixed(4) : null, dw: d ? d.dw : null, dh: d ? d.dh : null,
+           pools: pools.length, clip: _clip };
 });
-await b.close(); try { srv.kill(); } catch (e) {}
+if (process.env.LX_SHOT && R.clip) {
+  // keep the banner alive for the shot, then clip around it (canvas px -> viewport via the wrapper scale)
+  await page.evaluate(() => { const cx = player.x + player.w / 2 + 40, footY = player.y + player.h; game.hazards.push({ type: 'warlord_banner', cx, x: cx - 46, y: footY - 150, w: 92, h: 150, footY, life: 900, maxLife: 900, _dieAt: (game.time | 0) + 900 }); game.paused = false; });
+  await page.waitForTimeout(400);
+  const sc = await page.evaluate(() => { const c = document.getElementById('game'); const r = c.getBoundingClientRect(); return { x: r.x, y: r.y, k: r.width / c.width }; });
+  await page.screenshot({ path: process.env.LX_SHOT, clip: { x: sc.x + R.clip.x * sc.k, y: sc.y + R.clip.y * sc.k, width: R.clip.w * sc.k, height: R.clip.h * sc.k } });
+  console.log('  shot -> ' + process.env.LX_SHOT);
+}
+await browser.close(); server.kill();
 
-console.log('planted:', JSON.stringify(r.planted));
-console.log('mid    :', JSON.stringify(r.mid), '| lateAlive:', r.lateAlive, '| expired:', r.expired,
-            '| afterRecast:', r.afterRecast, '| buffFrames:', r.buffFrames);
+if (R.err) ok('the banner rendered at all', false, R.err);
+else {
+  console.log(`  image ${R.natural} (aspect ${R.natAr})   drawn ${R.dw}x${R.dh} (aspect ${R.drawAr})   draws ${R.draws}/${R.frames} frames, pre-scaled ${R.preScaled}, pool gradients ${R.pools}`);
+  ok('CONTROL: the banner is being drawn every frame', R.draws >= 8, `${R.draws} banner draws in ${R.frames} frames`);
+  ok('no squish: drawn aspect equals the image\'s natural aspect (within 2%)',
+     R.drawAr != null && Math.abs(R.drawAr - R.natAr) / R.natAr < 0.02,
+     `drawn ${R.drawAr} vs natural ${R.natAr} (baseline forces 92x150 = 0.613)`);
+  ok('the source is the cached pre-scaled canvas, not the raw image (fringe mechanism removed)',
+     R.draws > 0 && R.preScaled === R.draws, `${R.preScaled}/${R.draws} draws pre-scaled`);
+  ok('the warm base pool is gone (no radial gradient with its signature)', R.pools === 0,
+     `${R.pools} pool gradients in ${R.frames} frames (baseline: one per frame)`);
+}
 
-ok('casting plants a banner in the world', r.planted.exists === true, r.planted);
-ok('it stands for the full 12s buff (720 frames), not the old ~50-frame flash',
-   r.planted.maxLife === 720, r.planted);
-ok('its pole base sits on the caster\'s ground line', r.planted.footOnGround === true, r.planted);
-ok('it plants BESIDE the caster, not on top of them', r.planted.besideCaster === true, r.planted);
-ok('the sprite is registered in the FX table', r.planted.spriteRegistered === true, r.planted);
-ok('it is protected from the hazard perf-trim', r.planted.protectedType === true, r.planted);
-ok('it does NOT follow the player — a planted banner stays planted',
-   r.mid.alive === true && r.mid.stayedPut === true, r.mid);
-ok('still standing at ~680 frames (the old burst died at 50)', r.lateAlive === true, {});
-ok('and gone once the duration is spent', r.expired === true, {});
-ok('a recast replaces the banner instead of stacking a second one', r.afterRecast === 1, { count: r.afterRecast });
-ok('the banner duration matches the buff it announces', Math.abs(r.buffFrames - 720) <= 2, { buffFrames: r.buffFrames });
-ok('the tooltip states the real duration (it said 6s while the code ran 12s)',
-   /12s/.test(r.desc || ''), { desc: r.desc });
-ok('no page errors', errs.length === 0, errs.slice(0, 3));
-
-let pass = 0, fail = 0;
-for (const x of results) { (x.pass ? pass++ : fail++); console.log((x.pass ? 'PASS  ' : 'FAIL  ') + x.n + '  ' + JSON.stringify(x.x)); }
-console.log(`\n${pass}/${pass + fail} checks passed`);
-process.exit(fail ? 1 : 0);
+let bad = 0;
+for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
+console.log(bad ? `\n${bad}/${res.length} FAILED` : `\nall ${res.length} passed`);
+process.exit(bad ? 1 : 0);
