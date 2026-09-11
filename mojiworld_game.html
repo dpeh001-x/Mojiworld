@@ -10737,7 +10737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.613';
+const GAME_VERSION = 'v0.30.614';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -37161,6 +37161,10 @@ window.addEventListener('keydown', e => {
     // rebound off Shift, Shift becomes a stale default and this null-bail used to
     // swallow the Cure press. Fire Cure here too (same guard as the normal site).
     if (rawKey === (player.cureKey || 'shift') && !(KEY_TO_SLOT && KEY_TO_SLOT[rawKey]) && !e.repeat && !game.paused && player.hp > 0) _useCurePotion();
+    if ((rawKey === 'pageup' || rawKey === 'pagedown') && !e.repeat && !game.paused && player.hp > 0 && typeof showToast === 'function') {   // v0.30.614 - a stale potion key explains itself
+      const _pa = rawKey === 'pageup' ? 'hpPotion' : 'mpPotion', _pk = (player.actionBinds && player.actionBinds[_pa]) || '';
+      showToast('\u{1F9EA} ' + (rawKey === 'pageup' ? 'HP' : 'MP') + ' potion is on ' + (_pk ? ((typeof _kbDisplay === 'function') ? _kbDisplay(_pk) : _pk) : 'no key') + ' now \u2014 rebind it in K \u25B8 Potions', 'common');
+    }
     e.preventDefault(); return;
   }
   const k = resolved;
@@ -42247,6 +42251,12 @@ function addShake(amount) {
 // v0.30.475 — the flat band every zodiac projectile lands in, before defensive ABILITIES and before
 // Capricorn's own floor. Rolled per hit so a volley is not twelve identical numbers.
 const LX_ZODIAC_PROJ_MIN = 3000, LX_ZODIAC_PROJ_MAX = 5000;
+// v0.30.614 - AQUARIUS'S SEAL IS BOUNDED. 45 s sealed (v0.30.297, per user), then at least 15 s in which no hit can
+// seal again. Before this a live seal was refreshed to a full 45 s by EVERY sealing hit; while only her aura bolts
+// carried her sign that was rare, but v0.30.601 tagged every zodiac projectile, and her homing droplets and waves
+// land every few seconds - so from the first hit to the end of the fight potions never came back
+// ("I am unable to use my potions", per user).
+const LX_AQUARIUS_SEAL_F = 2700, LX_AQUARIUS_SEAL_GRACE_F = 900;
 // v0.30.601 - BOSS PROJECTILE BANDS, the zodiac idea for every other boss. A boss's shot lands in a band of the
 // REFERENCE BAR at the boss's own level (_refBarAtLv: class-neutral at-level HP times the geared allowance),
 // rolled per hit and then run through the same straight DEF ramp, difficulty and abilities as a zodiac shot
@@ -95593,10 +95603,12 @@ function updateProjectiles(dt) {
           // potions for 45 seconds". game.time is the 60Hz sim counter, the
           // same clock the potion cooldown already uses, so the seal pauses
           // with the game instead of draining behind a menu.
-          const _seal = (game.time | 0) + 2700;
-          if ((player._potionLockUntil | 0) < _seal) {
-            const _wasSealed = (player._potionLockUntil | 0) > (game.time | 0);
+          const _seal = (game.time | 0) + LX_AQUARIUS_SEAL_F;
+          const _wasSealed = (player._potionLockUntil | 0) > (game.time | 0);
+          // v0.30.614 - a live seal is never extended, and a lapsed one cannot be re-applied inside its grace (see the constants)
+          if (!_wasSealed && (game.time | 0) >= (player._potionSealNextAt | 0)) {
             player._potionLockUntil = _seal;
+            player._potionSealNextAt = _seal + LX_AQUARIUS_SEAL_GRACE_F;
             if (!_wasSealed && typeof showToast === 'function') showToast('🧪 POTIONS SEALED — 45s', 'epic');
           }
         }
@@ -107022,7 +107034,16 @@ function _useBoundPotion(physKey) {
   if (typeof _tutPing === 'function') _tutPing('potion');
   if (!player.potionBinds) player.potionBinds = { pageup: 'hp_auto', pagedown: 'mp_auto' };
   const bindId = player.potionBinds[physKey];
-  if (!bindId || bindId === 'none') return;
+  if (!bindId) {   // v0.30.614 - a bind table without this slot (an older or damaged save) is repaired, not obeyed silently
+    const _def = ({ pageup: 'hp_auto', pagedown: 'mp_auto' })[physKey];
+    if (!_def) return;
+    player.potionBinds[physKey] = _def; if (typeof saveState === 'function') saveState();
+    return _useBoundPotion(physKey);
+  }
+  if (bindId === 'none') {   // v0.30.614 - "Disabled" was chosen in K > Potions; say so instead of swallowing the press
+    if (typeof showToast === 'function') showToast('\u{1F9EA} ' + ((typeof _kbDisplay === 'function') ? _kbDisplay(physKey) : physKey) + ' is set to Disabled \u2014 choose a potion for it in K \u25B8 Potions', 'common');
+    return;
+  }
   // Cascade mode — fall through to useQuickPotion (smallest first, then
   // direct-buy fallback) so the existing pricing-by-mojicoin path still
   // works when the player hasn't pinned a size.
