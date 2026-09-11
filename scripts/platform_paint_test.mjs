@@ -45,6 +45,12 @@ try {
     }
     out.wideGround = !!_cutePlatformSprite(2400, 60, tint, true, 'grass');
     out.padTop = _CUTE_PAD_TOP;
+    // v0.30.605 - the colour is the MAP's, not the theme's: a grass-themed slab on a red map must
+    // come out red, and a lava-themed slab on a blue map blue. Mean cap colour, rows 3-4.
+    const capRGB = (cv) => { const c = cv.getContext('2d'), d = c.getImageData(10, _CUTE_PAD_TOP + 3, cv.width - 20, 2).data; let r = 0, g = 0, b = 0, n = 0; for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } return n ? [r / n | 0, g / n | 0, b / n | 0] : null; };
+    out.redGrass = capRGB(_cutePlatformSprite(200, 40, { top: '#874244', body: '#301221' }, true, 'grass'));
+    out.blueLava = capRGB(_cutePlatformSprite(200, 40, { top: '#4477b2', body: '#1a2345' }, true, 'lava'));
+    out.darkMap = capRGB(_cutePlatformSprite(200, 40, { top: '#161c24', body: '#0a0c10' }, true, 'stone'));
     return out;
   });
   for (const th of ['grass', 'ice', 'lava', 'candy', 'stone', 'cosmic']) {
@@ -57,6 +63,9 @@ try {
     ok(`${th}: a second call returns the cached bake`, t.cached === true);
   }
   ok('a full-width 2400px ground still bakes', r.wideGround === true);
+  ok("a grass-themed slab on a red map takes the map's red, not grass green", r.redGrass && r.redGrass[0] > r.redGrass[1] + 30, r.redGrass);
+  ok("a lava-themed slab on a blue map takes the map's blue, not lava orange", r.blueLava && r.blueLava[2] > r.blueLava[0] + 30, r.blueLava);
+  ok('a near-black map still gets a readable cap (luminance >= 110)', r.darkMap && (0.299 * r.darkMap[0] + 0.587 * r.darkMap[1] + 0.114 * r.darkMap[2]) >= 110, r.darkMap);
   ok('no page errors', errs.length === 0, errs.join(' | '));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'}(${fail}) — ${pass} passed, ${fail} failed`);

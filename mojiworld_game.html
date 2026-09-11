@@ -10735,7 +10735,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.605';
+const GAME_VERSION = 'v0.30.606';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18540,8 +18540,8 @@ function _cutePlatformSprite(w, h, tint, ground, theme) {
 // v0.30.597 — TERRAIN, NOT A COLLISION BOX (per user: "Improve on the floor and platform designs,
 // make it more aesthetic"). Every map drew the same translucent dark slab tinted from its
 // backdrop; the biome tile art the registry names never existed on disk. This is still the
-// sprite-free, any-width, baked-once slab, but painted: the biome palette (_PLATFORM_THEME_TINT,
-// nudged a quarter toward the map's sampled tint so it sits in ITS light), a lit surface cap with
+// sprite-free, any-width, baked-once slab, but painted: the MAP's own colour (re-lit by
+// _cuteMapPalette, v0.30.606), a lit surface cap with
 // the biome's own edge - grass scallops, snow lumps, candy and honey drips, lava crust cracks, sand
 // and coral waves, stone courses - body texture under it, a gloss line, an underside shade, decor
 // standing on the surface (tufts, snow, crystals, sprinkles, embers), and the 2px keyline the cast
@@ -18549,13 +18549,45 @@ function _cutePlatformSprite(w, h, tint, ground, theme) {
 const _CUTE_PAD_TOP = 12;
 const _CUTE_EDGE = { grass: 'scallop', swamp: 'scallop', stone: 'flat', ice: 'lump', lava: 'crust', sand: 'wave', coral: 'wave', candy: 'drip', honey: 'drip', cosmic: 'wave' };
 function _cuteRng(seed) { let t = seed >>> 0; return () => { t += 0x6D2B79F5; let r = Math.imul(t ^ (t >>> 15), 1 | t); r ^= r + Math.imul(r ^ (r >>> 7), 61 | r); return ((r ^ (r >>> 14)) >>> 0) / 4294967296; }; }
+// v0.30.606 — COLOUR FROM THE MAP (per user: "The floor and platform are nice but it needs to fit the
+// overall colour of the map"). 96 of the 109 maps fall to the 'grass' theme, so the painter put a
+// green cap on the red Magma Foundry, the blue Bone Graveyard and the brown town. The theme still
+// chooses the SHAPE - edge, texture, decor - but the colour now comes from the map's own tint
+// (_mapPlatformTint: an authored platTint, the baked LX_MAP_PLATFORM_TINT table, or the backdrop
+// sampler), re-lit so it reads as terrain: the tint's hue kept, its saturation lifted a little, the
+// cap's lightness pulled into a readable 0.52-0.80 band (a dark backdrop sample would otherwise give
+// the old near-black slab), the body a deep shade of the same hue. Cached per tint.
+const _CUTE_MAP_PAL = new Map();
+function _cuteHexHsl(hex) {
+  const n = parseInt(String(hex).slice(1, 7), 16); const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; let h = 0, sat = 0;
+  if (mx !== mn) { const d = mx - mn; sat = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn); h = (mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) / 6; }
+  return [h, sat, l];
+}
+function _cuteHslHex(h, sat, l) {
+  const f = (p, q, t) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; };
+  let r = l, g = l, b = l;
+  if (sat) { const q = l < 0.5 ? l * (1 + sat) : l + sat - l * sat, p = 2 * l - q; r = f(p, q, h + 1 / 3); g = f(p, q, h); b = f(p, q, h - 1 / 3); }
+  const x = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
+  return '#' + x(r) + x(g) + x(b);
+}
+function _cuteMapPalette(tint) {
+  if (!tint || !/^#[0-9a-fA-F]{6}/.test(String(tint.top))) return tint;
+  const key = tint.top + '|' + tint.body; let p = _CUTE_MAP_PAL.get(key); if (p) return p;
+  const [h, sat, l] = _cuteHexHsl(tint.top);
+  const capS = Math.min(0.72, sat * 1.15), capL = Math.max(0.52, Math.min(0.8, 0.45 + l * 0.38));
+  const bodyS = capS * 0.85, bodyL = Math.max(0.15, Math.min(0.34, capL * 0.42));
+  p = { top: _cuteHslHex(h, capS, capL), body: _cuteHslHex(h, bodyS, bodyL) };
+  if (_CUTE_MAP_PAL.size > 64) _CUTE_MAP_PAL.clear();
+  _CUTE_MAP_PAL.set(key, p); return p;
+}
 function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme) {
   const OUT = '#0a0510';
   const _pa = ctx.globalAlpha;
   ctx.globalAlpha = _pa * a;
-  const P = (theme && _PLATFORM_THEME_TINT[theme]) || tint;
   const mix = (typeof _mixHex === 'function') ? _mixHex : ((x) => x);
-  const top = mix(P.top, tint.top, 0.25), body = mix(P.body, tint.body, 0.25);
+  const P = _cuteMapPalette(tint) || tint;   // v0.30.606 — the map's colour; the theme only picks the shape
+  const top = P.top, body = P.body;
   const topLt = mix(top, '#ffffff', 0.38), bodyDk = mix(body, '#000000', 0.38), bodyLt = mix(body, top, 0.35);
   if (w < 6 || h < 6) {   // too small for anything - flat fill + outline
     ctx.fillStyle = body; ctx.fillRect(sx, y, w, h);
