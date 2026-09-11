@@ -53,6 +53,7 @@ const R = await page.evaluate(async () => {
   clear();
   player.maxMp = 999999; player.mp = 999999; player.baseAtk = 500; player.hp = player.maxHp = 99999;
   const out = { name: SKILLS.marksman_oneshot.name, ultName: SKILLS.marksman_ult.name, cdDef: SKILLS.marksman_oneshot.cd, ultCdDef: SKILLS.marksman_ult.cd };
+  const played = []; { const _p = window._playSkillSfx; window._playSkillSfx = function (k) { played.push(k); return _p.apply(this, arguments); }; }   // which cues fire
   const dummy = (dx) => { const m = spawnMonster(player.x + dx, player.y - 10, 'snail', false); m.maxHp = m.currentHp = 5e8; m.evasion = 0; m.dodge = 0; m.level = 1; m.def = 0; return m; };
   const reset = () => {
     player.skillCooldowns = {}; player.mp = 999999; player._castLockUntil = 0; player.hitStun = 0;
@@ -111,6 +112,13 @@ const R = await page.evaluate(async () => {
   out.fx = { tracer: !!(LX_FX.deadeye_tracer && LX_FX.deadeye_tracer.naturalWidth), reticle: !!(LX_FX.deadeye_reticle && LX_FX.deadeye_reticle.naturalWidth),
     keyed: _FX_ANIM_KEYS.has('deadeye_hit') && _FX_ANIM_KEYS.has('deadeye_execute'), hitFrames: _lxFrameCount('fx/anim', 'deadeye_hit', 9), execFrames: _lxFrameCount('fx/anim', 'deadeye_execute', 9),
     round: !!(LX_BULT_PROJ.bult_marksman && LX_BULT_PROJ.bult_marksman.naturalWidth), exec: !!(LX_BULT_PROJ.bult_deadeye_exec && LX_BULT_PROJ.bult_deadeye_exec.naturalWidth) };
+  // the revamp's cues, icons and descriptions
+  out.played = [...new Set(played)];
+  const cueKeys = ['marksman_oneshot', 'marksman_ult', 'deadeye_execute', 'deadeye_lock'];
+  out.cues = {}; for (const k of cueKeys) { const f = _SKILL_SFX_FILES[k]; out.cues[k] = f ? (await fetch(f)).status : 'unmapped'; }
+  out.icons = {}; for (const k of ['marksman_oneshot', 'marksman_ult']) { const im = new Image(); im.src = 'Sprites/skills/' + k + '.webp'; try { await im.decode(); } catch (e) {} _skillIconUrl(k); out.icons[k] = im.naturalWidth; }
+  await sleep(300); out.iconStatus = { a: _skillIconStatus.marksman_oneshot, b: _skillIconStatus.marksman_ult };
+  out.desc = { de: SKILLS.marksman_oneshot.desc, pr: SKILLS.marksman_ult.desc, emoji: SKILLS.marksman_ult.icon, sig: (typeof MASTERS !== 'undefined' && MASTERS.marksman) ? MASTERS.marksman.signature : null };
   // ---- 6. the frame budget under a full mash with three foes ----------------------------------
   const prof = {}; const wrap = (n) => { const f = window[n]; if (typeof f !== 'function') return; prof[n] = 0; window[n] = function () { const a = performance.now(); try { return f.apply(this, arguments); } finally { prof[n] += performance.now() - a; } }; };
   for (const n of ['_lxDeadeyeDraw', 'drawDamageNumbers', 'drawProjectiles', 'updateProjectiles', 'updateMonsters', 'hitMonster', 'drawSmoothFx', 'drawMonsters', 'drawPlayer']) wrap(n);
@@ -141,6 +149,10 @@ const checks = [
   ['Protocol closes onto its real cooldown', R.ultCdAfter > 40000, `${R.ultCdAfter} ms`],
   ['a Deadeye-marked foe takes 7-round volleys', R.markedVolley === 7, `${R.markedVolley}`],
   ['a parked Protocol cooldown is repaired with the other windows', R.ultRepaired === true],
+  ['the four cues are mapped and served', Object.values(R.cues).every((v) => v === 200), JSON.stringify(R.cues)],
+  ['a window opening plays the lock-on cue, and the Execute Round its boom', R.played.includes('deadeye_lock') && R.played.includes('deadeye_execute'), R.played.join(',')],
+  ['the skill-bar icons are the new 256 px art and resolve', R.icons.marksman_oneshot === 256 && R.icons.marksman_ult === 256 && R.iconStatus.a === 'ok' && R.iconStatus.b === 'ok', JSON.stringify(R.icons) + ' ' + JSON.stringify(R.iconStatus)],
+  ['the descriptions carry the real numbers', /50% ATK/.test(R.desc.de) && /30s cooldown starts when the window closes/.test(R.desc.de) && /60% ATK/.test(R.desc.pr) && /EXECUTE ROUND/.test(R.desc.pr) && R.desc.emoji === '⚡' && /Deadeye Protocol overclocks/.test(R.desc.sig || ''), R.desc.emoji + ' / ' + R.desc.sig],
   ['the art is registered and decoded', R.fx.tracer && R.fx.reticle && R.fx.keyed && R.fx.hitFrames === 9 && R.fx.execFrames === 9 && R.fx.round && R.fx.exec, JSON.stringify(R.fx)],
   // (headless software GL; the module's own draw and the hit path each measure well under 0.1 ms a frame - see perfBoth.per)
   ['a full mash of both windows stays inside the frame budget', R.avgFrame < 14 && R.dnCount <= 30 && R.perfBoth.per._lxDeadeyeDraw < 0.5 && R.perfBoth.per.hitMonster < 0.5, `${R.avgFrame} ms avg, ${R.dnCount} numbers alive, module draw ${R.perfBoth.per._lxDeadeyeDraw} ms, hitMonster ${R.perfBoth.per.hitMonster} ms`],

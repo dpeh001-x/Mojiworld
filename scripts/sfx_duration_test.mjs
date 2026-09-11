@@ -31,6 +31,11 @@ const CLIPS = [
   'audio/monster/mob_drownedCur_die.mp3',
   'audio/monster/mob_spectreCannoneer_die.mp3',
   'audio/monster/mob_brinekraken_die.mp3',
+  // Deadeye revamp (scripts/gen_deadeye_sfx_icons.mjs): the two press cues fire every 250-420 ms inside a window.
+  'audio/skill/marksman_oneshot.mp3',
+  'audio/skill/marksman_ult.mp3',
+  'audio/skill/deadeye_execute.mp3',
+  'audio/skill/deadeye_lock.mp3',
 ];
 
 const RATES = [0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0];

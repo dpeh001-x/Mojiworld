@@ -127,7 +127,11 @@
 // v0.30.577 - v35 -> v36. Sprites/vfx/sovereign_drain_pillar.webp is REPLACED
 // under its own name (the drain column redrawn cel-shaded). Without a new generation a returning
 // browser keeps the painterly one out of cache.
-const CACHE = 'mojiworld-assets-v37';   // v0.30.587 - five sliced sprites feathered and four projectile loops regenerated under their own names
+// v0.30.x - v37 -> v38. Sprites/skills/marksman_oneshot.webp and marksman_ult.webp are REPLACED
+// under their own names (the Deadeye revamp's icons), as are audio/skill/marksman_oneshot.mp3 and marksman_ult.mp3
+// and - missed by v0.30.610 - Sprites/projectiles/p_ult_marksman.webp. Without a new generation a returning browser
+// keeps the old icon, the old cast sounds and the old round out of cache.
+const CACHE = 'mojiworld-assets-v38';   // v0.30.x - Deadeye revamp icons, cues and round replaced under their own names
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
