@@ -124,7 +124,10 @@
 // v0.30.551 - v33 -> v34. Nine NEW frames at
 // Sprites/projectiles/anim/mspore_0..8.webp. A returning browser with the old manifest would
 // never fetch them and would keep drawing the static puff.
-const CACHE = 'mojiworld-assets-v35';   // v0.30.x - 19 monster clips regenerated under their own names (tester pass 3)
+// v0.30.577 - v35 -> v36. Sprites/vfx/sovereign_drain_pillar.webp is REPLACED
+// under its own name (the drain column redrawn cel-shaded). Without a new generation a returning
+// browser keeps the painterly one out of cache.
+const CACHE = 'mojiworld-assets-v36';   // v0.30.x - 19 monster clips regenerated under their own names (tester pass 3)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
