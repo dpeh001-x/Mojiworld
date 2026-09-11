@@ -10735,7 +10735,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.596';
+const GAME_VERSION = 'v0.30.597';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18510,8 +18510,8 @@ function _mapPlatformTint(md) {
 // the 0.55 per shape and the blit carries the caller's own alpha.
 const _CUTE_PLAT_CACHE = new Map();
 const _CUTE_PLAT_MAX_PX = 1500000;   // ~6 MB at 4 bytes/px — a 2400x60 ground fits fine
-function _cutePlatformSprite(w, h, tint, ground) {
-  const key = w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0);
+function _cutePlatformSprite(w, h, tint, ground, theme) {
+  const key = w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '');   // v0.30.597 — theme in the key
   let cv = _CUTE_PLAT_CACHE.get(key);
   if (cv) return cv;
   if (!(w > 0 && h > 0) || w * h > _CUTE_PLAT_MAX_PX) return null;   // caller falls back
@@ -18525,50 +18525,124 @@ function _cutePlatformSprite(w, h, tint, ground) {
   // lies OUTSIDE the w x h box; an exact-size canvas crops that outer pixel and
   // the blit no longer matches the direct paint. Measured before this padding:
   // maxDelta 67 over half the bytes. The blit offsets by the same pad.
-  const PAD = 2;
+  // v0.30.597 — the bake is padded 12px ABOVE the slab for the decor that stands on its surface
+  // (grass tufts, snow, crystals); _drawCutePlatform undoes the same pad.
+  const PAD = 2, PAD_TOP = _CUTE_PAD_TOP;
   cv = document.createElement('canvas');
-  cv.width = Math.ceil(w) + PAD * 2; cv.height = Math.ceil(h) + PAD * 2;
+  cv.width = Math.ceil(w) + PAD * 2; cv.height = Math.ceil(h) + PAD + PAD_TOP;
   const c = cv.getContext('2d');
-  _paintCutePlatform(c, PAD, PAD, w, h, tint, ground, 0.55);
+  _paintCutePlatform(c, PAD, PAD_TOP, w, h, tint, ground, ground ? 1 : 0.94, theme);
   _CUTE_PLAT_CACHE.set(key, cv);
   return cv;
 }
 // The original body, lifted verbatim onto an arbitrary context so the bake and
 // the uncached fallback cannot drift apart. `a` is the per-shape alpha.
-function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a) {
+// v0.30.597 — TERRAIN, NOT A COLLISION BOX (per user: "Improve on the floor and platform designs,
+// make it more aesthetic"). Every map drew the same translucent dark slab tinted from its
+// backdrop; the biome tile art the registry names never existed on disk. This is still the
+// sprite-free, any-width, baked-once slab, but painted: the biome palette (_PLATFORM_THEME_TINT,
+// nudged a quarter toward the map's sampled tint so it sits in ITS light), a lit surface cap with
+// the biome's own edge - grass scallops, snow lumps, candy and honey drips, lava crust cracks, sand
+// and coral waves, stone courses - body texture under it, a gloss line, an underside shade, decor
+// standing on the surface (tufts, snow, crystals, sprinkles, embers), and the 2px keyline the cast
+// wears. Everything is deterministic from the slab's size, so a bake is stable and cacheable.
+const _CUTE_PAD_TOP = 12;
+const _CUTE_EDGE = { grass: 'scallop', swamp: 'scallop', stone: 'flat', ice: 'lump', lava: 'crust', sand: 'wave', coral: 'wave', candy: 'drip', honey: 'drip', cosmic: 'wave' };
+function _cuteRng(seed) { let t = seed >>> 0; return () => { t += 0x6D2B79F5; let r = Math.imul(t ^ (t >>> 15), 1 | t); r ^= r + Math.imul(r ^ (r >>> 7), 61 | r); return ((r ^ (r >>> 14)) >>> 0) / 4294967296; }; }
+function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme) {
   const OUT = '#0a0510';
   const _pa = ctx.globalAlpha;
   ctx.globalAlpha = _pa * a;
-  if (w < 6 || h < 6) {   // too small for banding — flat fill + outline
-    ctx.fillStyle = tint.body; ctx.fillRect(sx, y, w, h);
+  const P = (theme && _PLATFORM_THEME_TINT[theme]) || tint;
+  const mix = (typeof _mixHex === 'function') ? _mixHex : ((x) => x);
+  const top = mix(P.top, tint.top, 0.25), body = mix(P.body, tint.body, 0.25);
+  const topLt = mix(top, '#ffffff', 0.38), bodyDk = mix(body, '#000000', 0.38), bodyLt = mix(body, top, 0.35);
+  if (w < 6 || h < 6) {   // too small for anything - flat fill + outline
+    ctx.fillStyle = body; ctx.fillRect(sx, y, w, h);
     ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.strokeRect(sx + 1, y + 1, w - 2, h - 2);
     ctx.globalAlpha = _pa;
     return;
   }
-  const r = Math.min(ground ? 5 : 8, w / 2, h / 2);
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(sx, y, w, h, ground ? [r, r, 0, 0] : [r, r, 3, 3]);
-  else ctx.rect(sx, y, w, h);
-  ctx.fillStyle = tint.body; ctx.fill();
+  const rng = _cuteRng((Math.round(w) * 73856093) ^ (Math.round(h) * 19349663) ^ ((theme || 'g').charCodeAt(0) * 83492791));
+  const edge = _CUTE_EDGE[theme] || 'flat';
+  const r = Math.min(ground ? 5 : 7, w / 2, h / 2);
+  const cap = Math.max(4, Math.min(ground ? 14 : 7, h * (ground ? 0.28 : 0.5)));
+  // silhouette (rebuilt again for the keyline at the end: the texture and cap passes below start
+  // their own paths, and a stroke outlines the CURRENT path, not the one that was filled)
+  const silhouette = () => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(sx, y, w, h, ground ? [r, r, 0, 0] : [r, r, 4, 4]); else ctx.rect(sx, y, w, h); };
+  silhouette();
+  ctx.fillStyle = body; ctx.fill();
   ctx.save(); ctx.clip();
-  // lit surface cap
-  const band = Math.max(5, Math.min(ground ? 13 : 11, h * (ground ? 0.32 : 0.46)));
-  ctx.fillStyle = tint.top; ctx.fillRect(sx, y, w, band);
-  // gloss highlight just under the top edge
-  ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(sx, y + 1.5, w, 1.5);
-  // soft inner bottom shadow for depth
-  const sh = Math.min(7, h * 0.34);
-  ctx.fillStyle = 'rgba(0,0,0,0.20)'; ctx.fillRect(sx, y + h - sh, w, sh);
+  // body texture
+  ctx.lineWidth = 1;
+  if (theme === 'stone') {           // courses of blocks, offset every other row
+    ctx.strokeStyle = bodyDk; ctx.globalAlpha = _pa * a * 0.55;
+    for (let yy = y + cap + 7, row = 0; yy < y + h - 2; yy += 9, row++) { ctx.beginPath(); ctx.moveTo(sx, yy + 0.5); ctx.lineTo(sx + w, yy + 0.5); ctx.stroke();
+      for (let xx = sx + ((row & 1) ? 11 : 0); xx < sx + w; xx += 22) { ctx.beginPath(); ctx.moveTo(xx + 0.5, yy - 9); ctx.lineTo(xx + 0.5, yy); ctx.stroke(); } }
+    ctx.globalAlpha = _pa * a;
+  } else if (theme === 'sand' || theme === 'coral' || theme === 'honey') {   // strata
+    ctx.strokeStyle = bodyDk; ctx.globalAlpha = _pa * a * 0.35;
+    for (let yy = y + cap + 6; yy < y + h - 3; yy += 7) { ctx.beginPath(); for (let xx = 0; xx <= w; xx += 6) { const yv = yy + Math.sin((xx + yy) * 0.11) * 1.2; if (xx) ctx.lineTo(sx + xx, yv); else ctx.moveTo(sx, yv); } ctx.stroke(); }
+    ctx.globalAlpha = _pa * a;
+  } else if (theme === 'lava') {     // glowing cracks
+    ctx.strokeStyle = top; ctx.lineWidth = 1.5; ctx.globalAlpha = _pa * a * 0.75;
+    for (let n = 0, N = Math.max(1, Math.round(w / 34)); n < N; n++) { let xx = sx + 6 + rng() * (w - 12), yy = y + cap + 2; ctx.beginPath(); ctx.moveTo(xx, yy);
+      for (let k = 0; k < 4 && yy < y + h - 3; k++) { xx += (rng() - 0.5) * 10; yy += 3 + rng() * 6; ctx.lineTo(xx, Math.min(yy, y + h - 2)); } ctx.stroke(); }
+    ctx.globalAlpha = _pa * a; ctx.lineWidth = 1;
+  } else if (theme === 'ice') {      // pale diagonal fractures
+    ctx.strokeStyle = topLt; ctx.globalAlpha = _pa * a * 0.4;
+    for (let n = 0, N = Math.max(1, Math.round(w / 40)); n < N; n++) { const xx = sx + rng() * w, yy = y + cap + rng() * Math.max(1, h - cap - 6); ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx + 5 + rng() * 8, yy + 3 + rng() * 5); ctx.stroke(); }
+    ctx.globalAlpha = _pa * a;
+  } else if (theme === 'honey') {    // (handled as strata above)
+  } else {                            // pebbles / motes (grass, swamp, candy, cosmic, default)
+    const N = Math.max(2, Math.round(w / 18));
+    for (let n = 0; n < N; n++) { const xx = sx + 4 + rng() * (w - 8), yy = y + cap + 3 + rng() * Math.max(1, h - cap - 6), rr = 1 + rng() * (ground ? 2.2 : 1.2);
+      ctx.fillStyle = (theme === 'cosmic') ? '#ffffff' : (rng() < 0.7 ? bodyDk : bodyLt); ctx.globalAlpha = _pa * a * (theme === 'cosmic' ? 0.55 + rng() * 0.4 : 0.6);
+      ctx.beginPath(); ctx.ellipse(xx, yy, rr * 1.4, rr, 0, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = _pa * a;
+  }
+  // the lit cap, with the biome's edge hanging into the body
+  ctx.fillStyle = top;
+  ctx.beginPath(); ctx.moveTo(sx, y); ctx.lineTo(sx + w, y); ctx.lineTo(sx + w, y + cap);
+  if (edge === 'scallop') { const sw = 9; for (let xx = w; xx > 0; xx -= sw) ctx.arc(sx + xx - sw / 2, y + cap, sw / 2, 0, Math.PI, false); }
+  else if (edge === 'wave') { for (let xx = w; xx >= 0; xx -= 4) ctx.lineTo(sx + xx, y + cap + Math.sin(xx * 0.35) * 1.6); }
+  else if (edge === 'drip') { const dw = 14; for (let xx = w; xx > 0; xx -= dw) { const d = 2 + (Math.sin(xx * 0.7) + 1) * 2.2; ctx.lineTo(sx + xx - dw * 0.25, y + cap); ctx.quadraticCurveTo(sx + xx - dw * 0.5, y + cap + d * 2.2, sx + xx - dw * 0.75, y + cap); } }
+  else if (edge === 'lump') { const lw = 12; for (let xx = w; xx > 0; xx -= lw) ctx.arc(sx + xx - lw / 2, y + cap - 1, lw / 2, 0, Math.PI, false); }
+  else if (edge === 'crust') { for (let xx = w; xx >= 0; xx -= 5) ctx.lineTo(sx + xx, y + cap + ((Math.round(xx / 5) & 1) ? 1.5 : -1)); }
+  else { ctx.lineTo(sx, y + cap); }
+  ctx.lineTo(sx, y + cap); ctx.closePath(); ctx.fill();
+  // a thin dark line along the cap's edge gives the surface its cel definition
+  ctx.strokeStyle = OUT; ctx.lineWidth = 1.2; ctx.globalAlpha = _pa * a * 0.5; ctx.stroke(); ctx.globalAlpha = _pa * a;
+  if (theme === 'cosmic') { const g = ctx.createLinearGradient(0, y, 0, y + cap); g.addColorStop(0, topLt); g.addColorStop(1, top); ctx.fillStyle = g; ctx.fillRect(sx, y, w, Math.max(1, cap * 0.5)); }
+  // gloss along the top, shade along the bottom
+  ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fillRect(sx + r, y + 1.5, Math.max(0, w - 2 * r), 1.5);
+  const shd = Math.min(ground ? 9 : 5, h * 0.3);
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(sx, y + h - shd, w, shd);
   ctx.restore();
-  // crisp 2px black outline
+  silhouette();
   ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
+  // decor standing on the surface (drawn above y, into the bake's top pad)
+  const decor = theme === 'grass' || theme === 'swamp' ? 'tuft' : theme === 'ice' ? 'snow' : theme === 'cosmic' ? 'crystal' : theme === 'candy' ? 'sprinkle' : theme === 'lava' ? 'ember' : theme === 'sand' ? 'pebble' : theme === 'coral' ? 'shell' : theme === 'honey' ? 'drop' : theme === 'stone' ? 'chip' : null;
+  if (decor && w >= 24) {
+    const N = Math.max(1, Math.round(w / (ground ? 70 : 46)));
+    for (let n = 0; n < N; n++) {
+      const xx = sx + 8 + rng() * Math.max(1, w - 16), sc = 0.8 + rng() * 0.5;
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      if (decor === 'tuft') { ctx.strokeStyle = OUT; ctx.lineWidth = 3.2; ctx.beginPath(); ctx.moveTo(xx - 3 * sc, y + 1); ctx.lineTo(xx - 4 * sc, y - 5 * sc); ctx.moveTo(xx, y + 1); ctx.lineTo(xx + 0.5, y - 7 * sc); ctx.moveTo(xx + 3 * sc, y + 1); ctx.lineTo(xx + 4.5 * sc, y - 4.5 * sc); ctx.stroke(); ctx.strokeStyle = topLt; ctx.lineWidth = 1.4; ctx.stroke(); }
+      else if (decor === 'snow') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 6 * sc, 3.2 * sc, 0, Math.PI, 0); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 4.6 * sc, 2.2 * sc, 0, Math.PI, 0); ctx.fill(); }
+      else if (decor === 'crystal') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.moveTo(xx - 3.5 * sc, y + 1); ctx.lineTo(xx, y - 8 * sc); ctx.lineTo(xx + 3.5 * sc, y + 1); ctx.closePath(); ctx.fill(); ctx.fillStyle = topLt; ctx.beginPath(); ctx.moveTo(xx - 2 * sc, y + 0.5); ctx.lineTo(xx, y - 6 * sc); ctx.lineTo(xx + 2 * sc, y + 0.5); ctx.closePath(); ctx.fill(); }
+      else if (decor === 'sprinkle') { ctx.strokeStyle = ['#ffffff', '#ffd23f', '#6fd6ff', '#ff6f9c'][Math.floor(rng() * 4)]; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(xx - 2.5, y - 1.5); ctx.lineTo(xx + 2.5, y - 3.5); ctx.stroke(); }
+      else if (decor === 'ember') { ctx.fillStyle = '#ffb347'; ctx.globalAlpha = _pa * a * 0.9; ctx.beginPath(); ctx.arc(xx, y - 2.5 * sc, 1.4 * sc, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = _pa * a; }
+      else if (decor === 'pebble' || decor === 'chip' || decor === 'shell') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 3.4 * sc, 2.4 * sc, 0, Math.PI, 0); ctx.fill(); ctx.fillStyle = decor === 'shell' ? '#ffd9c4' : bodyLt; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 2.2 * sc, 1.5 * sc, 0, Math.PI, 0); ctx.fill(); }
+      else if (decor === 'drop') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y - 1, 3 * sc, 3.6 * sc, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = topLt; ctx.beginPath(); ctx.ellipse(xx, y - 1, 1.8 * sc, 2.4 * sc, 0, 0, Math.PI * 2); ctx.fill(); }
+    }
+  }
   ctx.globalAlpha = _pa;
 }
-function _drawCutePlatform(sx, y, w, h, tint, ground) {
-  const spr = _cutePlatformSprite(w, h, tint, ground);
-  if (spr) { ctx.drawImage(spr, sx - 2, y - 2); return; }   // undo the bake pad
-  // Oversized slab (or a zero-size one): paint it directly, exactly as before.
-  _paintCutePlatform(ctx, sx, y, w, h, tint, ground, 0.55);
+function _drawCutePlatform(sx, y, w, h, tint, ground, theme) {
+  const spr = _cutePlatformSprite(w, h, tint, ground, theme);
+  if (spr) { ctx.drawImage(spr, sx - 2, y - _CUTE_PAD_TOP); return; }   // undo the bake pad (2px sides, 12px above)
+  _paintCutePlatform(ctx, sx, y, w, h, tint, ground, ground ? 1 : 0.94, theme);
 }
 // v0.25.461 — Map id → floor-tile key. Wins over the theme lookup
 // when the player is on one of these maps and the matching authored
@@ -114430,6 +114504,7 @@ function drawPlatforms() {
   const _pt = (game.mapData && !game.mapData.isVoid && typeof _mapPlatformTint === 'function')
     ? _mapPlatformTint(game.mapData)
     : _PLATFORM_TINT_DEFAULT;
+  const _th = (game.mapData && typeof _pickFloorTheme === 'function') ? _pickFloorTheme(game.mapData) : 'grass';   // v0.30.597 — the biome's palette and surface
   for (const p of game.mapData.platforms) {
     const sx = p.x - game.camera.x;
     if (sx + p.w < 0 || sx > W) continue;
@@ -114445,11 +114520,11 @@ function drawPlatforms() {
       // cel-shaded slab with a lit "surface" cap (grass/snow/sand/…), a dark
       // earthy body, a gloss line, and a crisp 2px black outline. The old
       // MAP_FLOOR_OVERRIDES data + _pickMapFloorOverride() stay as dead code.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, true);
+      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, true, _th);
     } else {
       // v0.29.x — CUTE procedural floating platform. Same cel-shaded, black-
       // outlined slab as the floor but rounded on top for a friendlier read.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, false);
+      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, false, _th);
     }
   }
   // v0.25.482 — outlinePlatforms post-pass. Strokes a 2 px near-black
