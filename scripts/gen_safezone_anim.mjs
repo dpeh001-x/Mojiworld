@@ -65,10 +65,52 @@ async function feather(buf) {
   }
   return sharp(p.d, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer();
 }
+// v3 (per user: "the borders are too light coloured, make them darker so they can match the
+// background better"). The model paints the rim near-white; the arena behind it is deep violet,
+// so the rim read as a cut-out. This pulls every bright, low-saturation pixel toward a violet-blue
+// (#6a4fc4) in proportion to how bright it is - the whites become a deep glowing rim, the vortex
+// and the pale centre keep their colour - and lowers the brightest pixels' alpha a touch so the
+// rim sits in the scene instead of on it. Deterministic, so the loop keeps its motion exactly.
+// The eye of the vortex is spared (inner 24% of the sheet's radius, feathered out to 34%): the
+// rim is what clashed with the arena; the bright centre is what the eye goes to.
+export const TONE = { r: 0x6a, g: 0x4f, b: 0xc4, from: 150, strength: 0.72, alphaMul: 0.88, eyeR: 0.24, eyeFeather: 0.10 };
+export async function tone(buf) {
+  const p = await px(buf);
+  const cx = p.w / 2, cy = p.h / 2, R = p.w / 2;
+  for (let i = 0; i < p.d.length; i += 4) {
+    const a = p.d[i + 3]; if (a < 8) continue;
+    const r = p.d[i], g = p.d[i + 1], b = p.d[i + 2];
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), sat = mx ? (mx - mn) / mx : 0;
+    if (lum <= TONE.from) continue;
+    const px_ = (i / 4) % p.w, py_ = Math.floor(i / 4 / p.w);
+    const d = Math.hypot(px_ - cx, py_ - cy) / R;
+    const eye = d < TONE.eyeR ? 0 : d > TONE.eyeR + TONE.eyeFeather ? 1 : (d - TONE.eyeR) / TONE.eyeFeather;
+    if (eye <= 0) continue;
+    const k = Math.min(1, (lum - TONE.from) / (255 - TONE.from)) * TONE.strength * (1 - sat * 0.5) * eye;
+    p.d[i] = Math.round(r + (TONE.r - r) * k);
+    p.d[i + 1] = Math.round(g + (TONE.g - g) * k);
+    p.d[i + 2] = Math.round(b + (TONE.b - b) * k);
+    p.d[i + 3] = Math.round(a * (1 - (1 - TONE.alphaMul) * k));
+  }
+  return sharp(p.d, { raw: { width: p.w, height: p.h, channels: 4 } }).png().toBuffer();
+}
 async function seat(raw) {
   const inner = await sharp(raw).ensureAlpha().resize(S, S, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
   const canvas = await sharp({ create: { width: S, height: S, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: inner, gravity: 'centre' }]).png().toBuffer();
-  return feather(canvas);
+  return tone(await feather(canvas));
+}
+// --retone <dir-with-base-and-frames>: re-tone frames that were seated before the tone pass
+// existed (no ludo call). Reads <dir>/base.webp and <dir>/frame_0..8.webp, writes the repo files.
+export async function retone(dir) {
+  const base = await tone(await sharp(await readFile(join(dir, 'base.webp'))).png().toBuffer());
+  await writeFile(BASE + '.tmp', await sharp(base).webp({ quality: 92 }).toBuffer()); await rename(BASE + '.tmp', BASE);
+  for (let i = 0; i < FRAMES; i++) {
+    const f = await tone(await sharp(await readFile(join(dir, `frame_${i}.webp`))).png().toBuffer());
+    const p = join(ANIM_DIR, `${KEY}_${i}.webp`);
+    await writeFile(p + '.tmp', await sharp(f).webp({ quality: 90 }).toBuffer()); await rename(p + '.tmp', p);
+  }
+  console.log('  re-toned base + ' + FRAMES + ' frames from ' + dir);
 }
 export async function borderInk(buf) {
   const p = await px(buf); let n = 0;
@@ -198,6 +240,7 @@ async function animate(base) {
 // only when run directly: the gates above are imported by scripts/safezone_anim_test.mjs
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
+  if (has('--retone')) { await retone(process.argv[process.argv.indexOf('--retone') + 1]); process.exit(0); }
   if (!has('--generate')) { console.log('DRY RUN.\n\nbase:\n' + PROMPT + '\n\nmotion:\n' + MOTION + '\n'); process.exit(0); }
   if (!key) { console.error('LUDO_API_KEY required'); process.exit(1); }
   let base;

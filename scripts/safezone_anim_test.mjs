@@ -53,7 +53,8 @@ const r = await page.evaluate(async () => {
   const wait = (ms) => new Promise((x) => setTimeout(x, ms));
   const out = { keyed: _FX_ANIM_KEYS.has('gravitos_singularity_zone') };
   const arr = _fxAnimFrames('gravitos_singularity_zone') || [];
-  for (let i = 0; i < 200; i++) { if (arr.length && arr.every((f) => f && f.complete && f.naturalWidth > 0)) break; await wait(50); }
+  void LX_FX.safezone_shield;
+  for (let i = 0; i < 200; i++) { if (arr.length && arr.every((f) => f && f.complete && f.naturalWidth > 0) && LX_FX.safezone_shield && LX_FX.safezone_shield.complete) break; await wait(50); }
   out.frames = arr.length; out.decoded = arr.filter((f) => f && f.complete && f.naturalWidth > 0).length;
   // draw one zone and record what lands on it
   loadMap('gravitosArena'); game.camera.x = 0; if (game.camera) game.camera.y = 0;
@@ -66,16 +67,20 @@ const r = await page.evaluate(async () => {
   try { for (let t = 0; t < 40; t++) { game.time = t; drawHazards(); } } finally { ctx.fillRect = oFR; ctx.drawImage = oDI; }
   const near = (o) => o.w < 900 && Math.abs(o.x - Z.x) < 200 && Math.abs(o.y - Z.y) < 200;
   const exact = (o) => Math.abs(o.x - Z.x) < 0.5 && Math.abs(o.y - Z.y) < 0.5 && Math.abs(o.w - Z.w) < 0.5 && Math.abs(o.h - Z.h) < 0.5;
-  out.zoneBlits = blits.filter(near).length; out.exactBlits = blits.filter(near).filter(exact).length;
+  const inside = (o) => o.x >= Z.x - 0.5 && o.y >= Z.y - 0.5 && o.x + o.w <= Z.x + Z.w + 0.5 && o.y + o.h <= Z.y + Z.h + 0.5;
+  out.zoneBlits = blits.filter(near).length; out.exactBlits = blits.filter(near).filter(exact).length; out.insideBlits = blits.filter(near).filter(inside).length;
+  out.shieldBlits = [...srcs].filter((n) => /safezone_shield/.test(n)).length;
+  out.shieldDecoded = !!(LX_FX.safezone_shield && LX_FX.safezone_shield.complete && LX_FX.safezone_shield.naturalWidth > 0);
   out.zoneFills = fills.filter(near).length;
   out.distinctFrames = [...srcs].filter((n) => /gravitos_singularity_zone_\d/.test(n)).length;
   return out;
 });
 await browser.close(); server.kill();
 
-console.log(`  keyed ${r.keyed}, frames ${r.decoded}/${r.frames}, zone blits ${r.zoneBlits} (exact ${r.exactBlits}), zone fills ${r.zoneFills}, distinct frames drawn ${r.distinctFrames}`);
+console.log(`  keyed ${r.keyed}, frames ${r.decoded}/${r.frames}, zone blits ${r.zoneBlits} (exact ${r.exactBlits}, inside ${r.insideBlits}), shield ${r.shieldDecoded}/${r.shieldBlits}, zone fills ${r.zoneFills}, distinct frames drawn ${r.distinctFrames}`);
 checks.push(['the loop key is opt-in listed and all nine frames decode in-engine', r.keyed && r.frames === 9 && r.decoded === 9]);
-checks.push(['every frame drawn on the zone sits at the exact lethal rect', r.zoneBlits > 0 && r.exactBlits === r.zoneBlits]);
+checks.push(['the portal is drawn at the exact lethal rect every tick, and nothing paints past it', r.exactBlits >= 40 && r.insideBlits === r.zoneBlits, `${r.exactBlits} exact of ${r.zoneBlits}, ${r.insideBlits} inside`]);
+checks.push(['the shelter mark (shield) decodes and is drawn inside the zone in place of the word', r.shieldDecoded && r.shieldBlits === 1]);
 checks.push(['the loop actually cycles on screen (several distinct frames over 40 ticks)', r.distinctFrames >= 5, String(r.distinctFrames)]);
 checks.push(['no wash rect is filled over the zone once the art is up', r.zoneFills === 0, String(r.zoneFills)]);
 checks.push(['no failed request for the art', missed.length === 0, missed.join(', ')]);
