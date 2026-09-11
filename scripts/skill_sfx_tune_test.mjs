@@ -11,7 +11,11 @@
 //  C. hand-back - its "Copy everything" text bakes (apply_sfx_patch.mjs) into
 //             exactly what the page heard; a stale base is a CONFLICT; an unknown
 //             skill refuses the patch; regen reads the "needs a new sound" items.
-//  D. data  - every baked entry names a real skill, and no baked trim refers to
+//  D. comments - every sound has a comment box; typing saves; the toolbar's
+//             "Export comments" copies general, per-sound, tuned-sound and
+//             needs-a-new-sound comments and nothing else; regen reads it without
+//             picking up general or tuned-sound lines; apply bakes nothing from it.
+//  E. data  - every baked entry names a real skill, and no baked trim refers to
 //             a clip since regenerated to a different length.
 // Run: node scripts/skill_sfx_tune_test.mjs [game.html]
 import { chromium } from 'playwright-core';
@@ -181,7 +185,46 @@ const parsed = sniff(C.text, 'tuner'), hit = parsed.rows.find((r) => r.file === 
 check(!!hit && hit.verdict === 'bad' && /deep boom/.test(hit.comment), 'regen_sfx_from_comments reads the "needs a new sound" item', parsed.rows);
 check(!parsed.rows.some((r) => r.file === ROW[TUNED].file || r.file === 'audio/skill/mage_ice.mp3'), '... and never a skill that was only tuned', parsed.rows.map((r) => r.file));
 
-console.log('D. the baked table');
+console.log('D. the comment section');
+const FREE = CAT.rows.map((r) => r.id).filter((id) => ![TUNED, SIB, JUNK, ...FIXED].includes(id) && !ROW[id].cue);
+const [GOOD, PLAIN] = FREE;
+await tp.fill(`#r_${PLAIN} textarea[data-c]`, 'a bit long, cut the echo');
+await tp.fill('#gen', 'mage sounds are all too quiet');
+await tp.evaluate(({ TUNED, GOOD }) => { const s = window.__lxTuner.state(); s.v[GOOD] = 'good'; s.c[GOOD] = 'love this one'; s.c[TUNED] = 'snappier now'; }, { TUNED, GOOD });
+await tp.click('#jumpC');
+await tp.waitForTimeout(300);
+const E = await tp.evaluate((PLAIN) => ({
+  boxes: document.querySelectorAll('#list .row[id^="r_"] textarea[data-c]').length,
+  typed: window.__lxTuner.state().c[PLAIN], g: window.__lxTuner.state().g,
+  status: document.getElementById('cstatus').textContent, cout: document.getElementById('cout').value,
+  report: window.__lxTuner.report(), patch: window.__lxTuner.patch(),
+}), PLAIN);
+check(E.boxes === CAT.rows.length, `every sound has its own comment box (${CAT.rows.length})`, E.boxes);
+check(E.typed === 'a bit long, cut the echo' && E.g === 'mage sounds are all too quiet', 'typing in a row box or the general box saves the comment', { typed: E.typed, g: E.g });
+check(/Copied|blocked/.test(E.status) && E.cout.includes('a bit long, cut the echo'), 'the toolbar "Export comments" button fills the comments box and copies it', E.status);
+check(['mage sounds are all too quiet', 'love this one', 'snappier now', 'too thin, should be a deep boom', 'a bit long, cut the echo'].every((x) => E.cout.includes(x)), 'the export carries general, per-sound, tuned-sound and needs-a-new-sound comments', E.cout.slice(0, 700));
+check(!E.cout.includes('LX_SFX_PATCH') && !/^CHANGED WITH THE SLIDERS/m.test(E.cout), '... and only comments: no slider changes, no machine line', E.cout.slice(0, 300));
+const pc = sniff(E.cout, 'comments'), rowsFor = (f) => pc.rows.filter((r) => r.file === f);
+check(rowsFor(ROW.arcaneBurst.file).some((r) => r.verdict === 'bad' && /deep boom/.test(r.comment))
+  && rowsFor(ROW[PLAIN].file).some((r) => r.verdict === 'none' && /cut the echo/.test(r.comment))
+  && rowsFor(ROW[GOOD].file).some((r) => r.verdict === 'good' && /love this/.test(r.comment)), 'regen reads the comments export: needs-work, no-verdict and good-with-comment items', pc.rows);
+check(!pc.rows.some((r) => /snappier now|too quiet/.test(r.comment || '')), "... and never the general comments or a tuned sound's comment", pc.rows.map((r) => r.comment));
+check(/^GENERAL COMMENTS$/m.test(E.report) && E.patch.general === 'mage sounds are all too quiet', '"Copy everything" carries the general comments too', E.patch.general);
+const tmpE = mkdtempSync(path.join(os.tmpdir(), 'sfxcmt-')), repE = path.join(tmpE, 'paste.txt'), tblE = path.join(tmpE, 'tune.js');
+const runE = (...extra) => {
+  try { return { code: 0, out: execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'apply_sfx_patch.mjs'), repE, '--table=' + tblE, ...extra], { encoding: 'utf8', stdio: 'pipe' }) }; }
+  catch (e) { return { code: e.status, out: String(e.stdout || '') + String(e.stderr || '') }; }
+};
+const emptyTable = header + 'window.LX_SKILL_SFX_TUNE = {\n};\n';
+writeFileSync(tblE, emptyTable); writeFileSync(repE, E.cout);
+const e1 = runE();
+check(e1.code === 0 && /comments-only/.test(e1.out) && readFileSync(tblE, 'utf8') === emptyTable, 'apply_sfx_patch.mjs recognises a comments-only paste and bakes nothing', e1.out.slice(0, 200));
+writeFileSync(repE, E.report);
+const e2 = runE('--dry-run');
+check(e2.code === 0 && /General comments from the tester/.test(e2.out) && /too quiet/.test(e2.out) && /love this one/.test(e2.out), "... and prints the tester's comments alongside a bake", e2.out.slice(-400));
+rmSync(tmpE, { recursive: true, force: true });
+
+console.log('E. the baked table');
 const shipped = A.shipped || {};
 const unknown = Object.keys(shipped).filter((id) => !ROW[id]);
 check(!unknown.length, `every baked entry names a real skill (${Object.keys(shipped).length} baked)`, unknown);

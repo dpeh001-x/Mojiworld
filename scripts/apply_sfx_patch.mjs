@@ -8,6 +8,10 @@
 //   node scripts/apply_sfx_patch.mjs --paste < report.txt
 //   --dry-run        print what would change, write nothing
 //   --table=<path>   bake into another copy of the table (tests)
+// A comments-only paste (the tuner's "Export comments") has no blob: it is
+// recognised, nothing is baked, and its "needs a new sound" items are pointed at
+// regen_sfx_from_comments.mjs. Every bake also prints the tester's comments -
+// general and per sound - so nothing they wrote is lost on the way in.
 // Semantics: DECLARATIVE per skill. Every skill in the patch ends up with
 // exactly the tuning the tester heard (an empty entry = back to as-authored,
 // which removes it); skills not in the patch are untouched, so two testers'
@@ -48,7 +52,15 @@ function objectAt(s, i) {
   return null;
 }
 const at = raw.indexOf('{"LX_SFX_PATCH"');
-if (at < 0) fail('no LX_SFX_PATCH blob found - paste the whole "Copy everything" text, including its last line');
+if (at < 0) {
+  if (/SKILL SOUND REVIEW: COMMENTS/.test(raw)) {
+    console.log('This is a comments-only export (the tuner\'s "Export comments") - there is nothing to bake.');
+    console.log('Its "needs a new sound" items can be regenerated straight from the same text:');
+    console.log('  node scripts/regen_sfx_from_comments.mjs --paste < <the pasted text>');
+    process.exit(0);
+  }
+  fail('no LX_SFX_PATCH blob found - paste the whole "Copy everything" text, including its last line');
+}
 const blob = objectAt(raw, at);
 if (!blob) fail('the LX_SFX_PATCH line is cut off - paste all of it');
 let patch;
@@ -116,7 +128,15 @@ console.log(`LX_SFX_PATCH from ${patch.who || '(no name)'} ${patch.date || ''}, 
 for (const c of changes) console.log(`  ${c.id.padEnd(22)} ${JSON.stringify(c.before)}  ->  ${JSON.stringify(c.after)}`);
 if (!changes.length) console.log('  (no tuning changes in this patch)');
 for (const id of conflicts) console.log(`  CONFLICT ${id}: its baked tuning changed after the tester's page loaded it - the tester's version won`);
-const bad = Object.entries(patch.notes || {}).filter(([, n]) => n && n.verdict === 'bad');
+const general = typeof patch.general === 'string' ? patch.general.trim() : '';
+if (general) { console.log('\nGeneral comments from the tester:'); for (const l of general.split(/\r?\n/)) console.log('  ' + l); }
+const notes = Object.entries(patch.notes || {}).filter(([, n]) => n && typeof n === 'object');
+const said = notes.filter(([, n]) => n.verdict !== 'bad' && n.comment);
+if (said.length) {
+  console.log(`\nComments on ${said.length} other sound(s):`);
+  for (const [id, n] of said) console.log(`  ${id}${n.verdict === 'good' ? ' (sounds right)' : ''}: ${n.comment}`);
+}
+const bad = notes.filter(([, n]) => n.verdict === 'bad');
 if (bad.length) {
   console.log(`\n${bad.length} sound(s) marked "needs a new sound" - tuning cannot fix those. Regenerate from the same text:`);
   console.log('  node scripts/regen_sfx_from_comments.mjs --paste < <the pasted report>');

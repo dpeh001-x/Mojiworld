@@ -218,6 +218,9 @@ After adding or renaming a skill or re-pointing `_SKILL_SFX_ALIAS`, run
 `node scripts/gen_skill_sfx_catalog.mjs`; `node scripts/skill_sfx_tune_test.mjs`
 holds the page and the game to the same numbers. Tester link (always current):
 `https://raw.githack.com/dpeh001-x/Mojiworld/main/tools/skill_sfx_tester.html`.
+A comments-only paste (the tuner's "Export comments" button) has no
+`LX_SFX_PATCH` line: there is nothing to bake (the script says so), and its
+"needs a new sound" items go to `node scripts/regen_sfx_from_comments.mjs --paste`.
 
 ## Animator parity (durable, HARD — do not wait to be asked)
 
