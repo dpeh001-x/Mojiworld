@@ -10937,7 +10937,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.627';
+const GAME_VERSION = 'v0.30.628';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18830,6 +18830,37 @@ function _lxPlatVariant(p) {
 // Which sides of a ground piece abut another ground piece (a step of up to 24px still counts).
 // Bit 1 = left, bit 2 = right; bits 2-6 / 7-11 = how far that end stands proud of a LOWER
 // neighbour (its riser). Passed to the bake as its variant: a joined side draws no keyline.
+// v0.30.628 - STACKED PLATFORMS DO NOT PAINT OVER EACH OTHER (per user: "ensure that platforms dont overlap such
+// as in this image which results in an unsightly overlap"). A floating platform hangs a face, a keel and roots or
+// icicles below its one-way box; where a map stacks two closer than that art is deep, the upper one covered the
+// lower one's top. Each floating platform now measures the room down to the nearest surface it overlaps (live,
+// load-jittered positions; drift platforms by their base) and its underside is cut to fit: a shorter face, a
+// shallower keel, nothing hanging without room. The room rides in the bake variant's upper bits. Collision is untouched.
+let _lxDcapMd = null, _lxDcapN = -1;
+function _lxPlatDepthCap(p) {
+  const md = game.mapData, ps = md && md.platforms;
+  if (!ps) return 0;
+  if (md !== _lxDcapMd || ps.length !== _lxDcapN) {
+    _lxDcapMd = md; _lxDcapN = ps.length;
+    const bx = (q) => (q._driftBaseX != null ? q._driftBaseX : q.x), by = (q) => (q._driftBaseY != null ? q._driftBaseY : q.y);
+    for (const a of ps) {
+      if (!a || a.type === 'ground') continue;
+      let room = 99;
+      for (const b of ps) {
+        if (b === a || !b || Math.min(bx(a) + a.w, bx(b) + b.w) - Math.max(bx(a), bx(b)) <= 4) continue;
+        const dy = by(b) - by(a); if (dy > 0 && dy - 3 < room) room = dy - 3;
+      }
+      a._lxDcap = room < 60 ? Math.max(1, Math.round(room)) : 0;
+    }
+  }
+  return p._lxDcap | 0;
+}
+function _cuteDepthCap(G, variant, ground, h) {
+  const d = ground ? 0 : ((variant | 0) >> 4), full = G.depth != null ? G.depth : Math.ceil(G.faceH + (G.keel || 0) + (G.hang || 0));
+  if (!(d > 0) || d >= full) return G;
+  const faceH = Math.max(h, Math.min(G.faceH, d)), keel = Math.max(0, Math.min(G.keel || 0, d - faceH)), hang = (d - faceH - keel) >= 11 ? (G.hang || 0) : 0;
+  return Object.assign({}, G, { faceH, keel, hang, wrap: Math.min(G.wrap || 0, Math.max(0, faceH - G.cap - 5)), depth: Math.ceil(faceH + keel + hang) });
+}
 let _lxJoinMd = null, _lxJoinN = -1;
 function _lxGroundJoin(p) {
   const md = game.mapData, ps = md && md.platforms;
@@ -18908,7 +18939,7 @@ var _CUTE_MAT = {
   temple: { face: 'temple', cap: 'temple', built: 1 }, tile: { face: 'tile', cap: 'tile', built: 1 },
   marble: { face: 'marble', cap: 'marble', built: 1 }, mosaic: { face: 'mosaic', cap: 'tile', built: 1 },
   wood: { face: 'wood', cap: 'wood', built: 1 }, boardwalk: { face: 'boardwalk', cap: 'wood', built: 1 },
-  lacquer: { face: 'lacquer', cap: 'lacquer', built: 1 }, parquet: { face: 'parquet', cap: 'wood', built: 1 },
+  kawara: { face: 'kawara', cap: 'kawara', built: 1 }, parquet: { face: 'parquet', cap: 'wood', built: 1 },
   mosswood: { face: 'wood', cap: 'moss', built: 1, split: 1, lit: 'moss' }, metal: { face: 'metal', cap: 'metal', built: 1 },
   concrete: { face: 'concrete', cap: 'concrete', built: 1 }, toybrick: { face: 'toybrick', cap: 'toybrick', built: 1 },
   basalt: { face: 'basalt', cap: 'rock' }, rock: { face: 'rock', cap: 'rock' }, moss: { cap: 'moss', lit: 'moss' },
@@ -19039,11 +19070,16 @@ function _cuteBuiltFace3(ctx, sx, fy, w, fh, style, rng, C, ground, HI) {
 }
 function _cuteBuiltFace4(ctx, sx, fy, w, fh, style, rng, C, ground, HI) {
   const mix = C.mix, R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
-  if (style === 'lacquer') {                // red lacquer, two gold trims, gilt studs, a sheen
-    ctx.fillStyle = mix(C.body, HI, 0.35); ctx.fillRect(sx, fy, w, fh);
-    ctx.fillStyle = '#e2b24a'; ctx.globalAlpha = A0 * 0.9; ctx.fillRect(sx, fy + 1, w, 1.5); ctx.fillRect(sx, fy + fh - 3, w, 1.2);
-    for (let xx = sx + R(10, 20); xx < sx + w - 6; xx += 26) { ctx.globalAlpha = A0 * 0.75; ctx.beginPath(); ctx.arc(xx, fy + fh * 0.55, 1.6, 0, 6.2832); ctx.fill(); }
-    ctx.globalAlpha = A0; ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(sx, fy + 3, w, 1);
+  if (style === 'kawara') {                 // v0.30.628 - kawara along a wall top, as the backdrop paints it: staggered arched tiles, outlined, lit top-left
+    const t = ground ? 10 : 6, tw = ground ? 9 : 6, r = tw / 2;
+    ctx.fillStyle = C.bodyDk; ctx.fillRect(sx, fy, w, fh);
+    for (let yy = fy - t * 0.35, row = 0; yy < fy + fh; yy += t * 0.72, row++) {
+      for (let xx = sx - ((row & 1) ? r : 0) - tw; xx < sx + w + tw; xx += tw) {
+        ctx.beginPath(); ctx.moveTo(xx, yy + t); ctx.lineTo(xx, yy + r); ctx.arc(xx + r, yy + r, r, Math.PI, 0); ctx.lineTo(xx + tw, yy + t); ctx.closePath();
+        ctx.fillStyle = mix(C.body, HI, R(0.36, 0.52)); ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1; ctx.stroke();
+        ctx.strokeStyle = mix(HI, '#ffffff', 0.35); ctx.globalAlpha = A0 * 0.55; ctx.beginPath(); ctx.arc(xx + r, yy + r, Math.max(0.5, r - 1.2), Math.PI * 1.05, Math.PI * 1.55); ctx.stroke(); ctx.globalAlpha = A0;
+      }
+    }
   } else if (style === 'parquet') {         // herringbone slats, alternating direction
     const u = ground ? 8 : 5;
     for (let yy = fy, r = 0; yy < fy + fh; yy += u, r++) for (let xx = sx - u * 2, c = 0; xx < sx + w; xx += u * 2, c++) {
@@ -19105,8 +19141,9 @@ function _cuteBuiltCap(ctx, sx, y, w, cap, style, rng, C) {
     ctx.globalAlpha = A0 * 0.9; ctx.fillStyle = '#b8402e'; ctx.fillRect(sx, y + cap - 1.6, w, 1.4);
   } else if (style === 'marble') {          // polish and a gold edge
     ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.5; ctx.fillRect(sx + 3, y + cap * 0.3, w - 6, 1.2); ctx.globalAlpha = A0 * 0.85; ctx.fillStyle = '#d9b45a'; ctx.fillRect(sx, y + cap - 1.5, w, 1.2);
-  } else if (style === 'lacquer') {         // a gold edge and a lacquer sheen
-    ctx.fillStyle = '#e2b24a'; ctx.globalAlpha = A0 * 0.9; ctx.fillRect(sx, y + cap - 1.8, w, 1.4); ctx.globalAlpha = A0 * 0.35; ctx.fillStyle = '#ffffff'; ctx.fillRect(sx + 3, y + cap * 0.3, w - 6, 1);
+  } else if (style === 'kawara') {          // v0.30.628 - the ridge: cap-tile joints, its shadow line, a moonlit rim
+    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.6; for (let xx = sx + R(10, 22); xx < sx + w - 4; xx += R(26, 34)) ctx.fillRect(Math.round(xx), y + 1, 1, cap - 1);
+    ctx.globalAlpha = A0 * 0.8; ctx.fillStyle = C.bodyDk; ctx.fillRect(sx, y + cap - 1.6, w, 1.6); ctx.globalAlpha = A0 * 0.45; ctx.fillStyle = '#ffffff'; ctx.fillRect(sx + 2, y + cap * 0.3, w - 4, 1);
   } else if (style === 'toybrick') {        // plastic gloss
     ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.35; ctx.fillRect(sx + 2, y + cap * 0.3, w - 4, 1.2);
   } else return false;
@@ -19116,14 +19153,14 @@ function _cuteBuiltCap(ctx, sx, y, w, cap, style, rng, C) {
 function _cuteBuiltGeom(G, w, h, ground) {
   if (ground || G.block) return G;
   const faceH = Math.max(h, Math.min(18, 12 + w * 0.02));
-  return Object.assign({}, G, { island: false, keel: 0, hang: 0, wrap: 0, faceH, cap: Math.max(5, Math.min(7, faceH * 0.4)) });
+  return Object.assign({}, G, { island: false, keel: 0, hang: 0, wrap: 0, faceH, cap: Math.max(5, Math.min(7, faceH * 0.4)), depth: Math.ceil(faceH) });
 }
 // v0.30.626 - WHAT EACH MAP IS FLOORED IN, read off its own backdrop. Every town has a floor of its own; the
 // open country splits into meadow grass (unlisted), dark moss, rock, basalt and Block-land's toy bricks.
 // An authored md.floorTheme still wins over this table; unlisted maps keep _pickFloorTheme's rules.
 var _MAP_FLOOR_MATERIAL = {
   // towns - one floor each
-  town: 'cobble', everdawn_megamall: 'tile', glasswindHamlet: 'snowpave', shadowWovenHood: 'brick', hiddenPagoda: 'lacquer',
+  town: 'cobble', everdawn_megamall: 'tile', glasswindHamlet: 'snowpave', shadowWovenHood: 'brick', hiddenPagoda: 'kawara',
   bastion: 'paving', bastionThrone: 'marble', bastionRampart: 'stone', azureAcademia: 'mosaic', azureAbode: 'parquet',
   jadeGrove: 'boardwalk', emeraldVillage: 'wood', reachOfVermillion: 'temple', fieryHideout: 'basalt', verdantHaven: 'mosswood',
   void: 'cosmic', boss_rush: 'cosmic',
@@ -19187,7 +19224,7 @@ var _MAP_FLOOR_PAL = {
   gloomsporeVerge: { top: '#59804e', body: '#0d3635' },
   graniteBluffs: { top: '#404945', body: '#282f2c' },
   gravitosArena: { top: '#686977', body: '#40414b' },
-  hiddenPagoda: { top: '#b14049', body: '#731f28' },
+  hiddenPagoda: { top: '#636687', body: '#3d3f57' },
   hollowSepulchre: { top: '#554c71', body: '#362f4b' },
   hollowSepulchre2: { top: '#6b544b', body: '#45342d' },
   innerDimension: { top: '#556474', body: '#333e4b' },
@@ -19490,7 +19527,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const rng = _cuteRng((Math.round(w) * 73856093) ^ (Math.round(h) * 19349663) ^ ((theme || 'g').charCodeAt(0) * 83492791) ^ (((variant | 0) + 1) * 40503));
   const edge = _CUTE_EDGE[theme] || 'flat';
   const built = !!(_CUTE_MAT[theme] && _CUTE_MAT[theme].built);   // v0.30.626
-  const G = built ? _cuteBuiltGeom(_cuteGeom(w, h, ground), w, h, ground) : _cuteGeom(w, h, ground), cap = G.cap, wrap = G.wrap;
+  const G = _cuteDepthCap(built ? _cuteBuiltGeom(_cuteGeom(w, h, ground), w, h, ground) : _cuteGeom(w, h, ground), variant, ground, h), cap = G.cap, wrap = G.wrap;   // v0.30.628 - cut to the room below
   // v4: a ground side that abuts another ground piece (variant bit 1 = left, 2 = right) is filled
   // flush, 1px into the pad so the seam column is opaque, and draws no keyline; where it stands
   // proud of a lower neighbour (bits 2-6 / 7-11) only that riser is outlined.
@@ -19543,7 +19580,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const grainOver = (x, yy, wd, ht, al) => { ctx.save(); ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = _pa * a * al; ctx.translate(gox, goy); ctx.fillStyle = grain; ctx.fillRect(x - gox, yy - goy, wd, ht); ctx.restore(); };
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   // 1. what hangs below goes first, so the face covers where it roots
-  if (G.island && G.keel) _cuteHangers(ctx, x0, x1, yb, theme, rng, C, keelPts);
+  if (G.island && G.keel && G.hang) _cuteHangers(ctx, x0, x1, yb, theme, rng, C, keelPts);   // v0.30.628 - nothing hangs without room
   // 2. the face: bounce-lit under the lip, darkening with depth, material, grain, bevelled ends,
   //    occlusion under the lip, and on a ground a fade into the keyline colour at the foot
   face();
@@ -115983,7 +116020,7 @@ function drawPlatforms() {
     } else {
       // v0.29.x — CUTE procedural floating platform. Same cel-shaded, black-
       // outlined slab as the floor but rounded on top for a friendlier read.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _ptf, false, _th, _lxPlatVariant(p));   // v0.30.609 — one of three seeded variants
+      _drawCutePlatform(sx, p.y, p.w, p.h, _ptf, false, _th, _lxPlatVariant(p) | (_lxPlatDepthCap(p) << 4));   // v0.30.628 - the room below rides in the variant   // v0.30.609 — one of three seeded variants
     }
   }
   // v0.25.482 — outlinePlatforms post-pass. Strokes a 2 px near-black
