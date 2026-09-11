@@ -95,6 +95,10 @@ const r = await page.evaluate(() => {
     }
     return counts;
   };
+  // v0.30.579 — per user: "There should be only 2 hyper boss, sovereign and gravitos". The flag
+  // is read off the authored types, and the Sovereign's bar is painted to prove the prefix.
+  out.hyperTypes = Object.keys(monsterTypes).filter((k) => monsterTypes[k] && monsterTypes[k].hyperBoss).sort();
+  out.sovereign = draw(mk('towerSovereign'));
   out.barArtReady = !!(typeof LX_FX !== 'undefined' && LX_FX.ui_bossbar_frame && LX_FX.ui_bossbar_frame.complete && LX_FX.ui_bossbar_frame.naturalWidth > 0
     && LX_FX.ui_bossbar_fill && LX_FX.ui_bossbar_fill.complete && LX_FX.ui_bossbar_fill.naturalWidth > 0);
   // v0.29.x — TITLE FACE + OUTLINES: the embedded Cinzel loads, the name draws
@@ -172,6 +176,8 @@ ok('with the art, the bar is drawImage-framed — no border rectangles',
 // with no art decoded, the bar is framed by strokes and blits nothing.
 ok('with the art blocked, the procedural plate still draws (fallback intact)',
    r.paintFallback && r.paintFallback.drawImage === 0 && r.paintFallback.strokeRect >= 1, r.paintFallback);
+ok('exactly two authored types are hyper bosses: gravitos and the Sovereign', JSON.stringify(r.hyperTypes) === JSON.stringify(['gravitos', 'towerSovereign']), { hyper: r.hyperTypes });
+ok("the Sovereign's bar carries the HYPER BOSS prefix", (r.sovereign || []).some((t) => /HYPER BOSS/.test(t) && /SOVEREIGN/.test(t)), { painted: r.sovereign });
 ok('both embedded faces load (Cinzel for titles, Exo 2 for the boss name; offline, no machine fonts)', r.fontLoaded === true, {});
 ok('the name draws IN the boss-name face', typeof r.nameFont === 'string' && r.nameFont.includes('LXBossName'), { font: r.nameFont });
 ok('the name is stroke-outlined (dark ring + accent ring)', r.nameOutlined >= 2, { strokes: r.nameOutlined });
