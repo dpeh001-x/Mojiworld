@@ -79,12 +79,16 @@ private-repo plan.
 
 ---
 
-## Signing the ROOT launcher stub too (optional, recommended)
+## The ROOT launcher stub — retired until it can be signed (v0.30.589)
 
 The repo-root `Mojiworld.exe` (the little launcher compiled from
-`tools/launcher/`) is blocked by SAC for the same reason — that is why
-`Mojiworld.cmd` exists as the batch workaround. Once you hold a cert, sign the
-stub locally and re-commit it, after which the .exe works everywhere:
+`tools/launcher/`) was blocked by SAC for the same reason — the owner's own
+machine refused it on 2026-09-11 — so it is **no longer in the repo root or the
+playtest zip**. `Mojiworld.cmd` is the launcher: cmd.exe → the OpenJS-signed
+node.exe, nothing SAC can object to. `tools/launcher/build_launcher.ps1` now
+builds to `tools/launcher/out/` and refuses to put an unsigned exe back in the
+root. Once you hold a cert, build, sign the stub locally, verify it, copy it to
+the root and commit it — after which the .exe works everywhere:
 
 ```
 signtool sign /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 ^

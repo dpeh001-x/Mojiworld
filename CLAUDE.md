@@ -315,13 +315,13 @@ there. Everything else lives in a bucket. **Adding a file to root needs a
 reason from the list below** — otherwise it belongs in `data/`, `tools/`,
 `scripts/`, or `docs/`.
 
-Root files (17), and why each one has to be there:
+Root files (16), and why each one has to be there:
 
 - `mojiworld_game.html` — the entire game in one file (canvas, HUD, systems, logic).
 - `CHANGELOG.html` / `MOBILE_CHANGELOG.html` — shareable changelogs (raw.githack-linked, never move).
 - `animator.html` / `monster_animator.html` — animator launcher + tool (raw.githack-linked, never move).
 - `sw.js` — service worker; its cache scope is the directory it is served from, so it CANNOT move.
-- `Mojiworld.cmd` / `Mojiworld.exe` / `serve.js` / `serve.bat` — desktop launchers + the static server they spawn. The launchers `cd` to their own folder and run `node serve.js`, so these four travel together at root.
+- `Mojiworld.cmd` / `serve.js` / `serve.bat` — the desktop launcher + the static server it spawns. The launcher `cd`s to its own folder and runs `node serve.js`, so these travel together at root. **There is deliberately no `Mojiworld.exe` here (retired v0.30.589)**: it was an unsigned stub, and Windows 11 Smart App Control blocks unsigned executables with no override — the owner's own machine refused it. The launch path is cmd.exe → the OpenJS-signed node.exe, which SAC never objects to. The stub's source stays in `tools/launcher/`; its build script writes to `tools/launcher/out/` and refuses to put an unsigned exe back in the root — rebuild, **sign** (docs/guides/CODE_SIGNING.md), then commit it to reinstate.
 - `render.yaml` — Render reads the blueprint from the repo root only.
 - `package.json`, `package-lock.json`, `.gitignore`, `README.md`, `LICENSE`, `CLAUDE.md` — conventional root files.
 

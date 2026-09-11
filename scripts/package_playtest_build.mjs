@@ -18,7 +18,12 @@ const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : nu
 const OUT = arg('--out') || join(ROOT, '_playtest');
 
 // Files the game itself needs at the root.
-const ROOT_FILES = ['mojiworld_game.html', 'sw.js', 'serve.js', 'Mojiworld.cmd', 'Mojiworld.exe'];
+// v0.30.589 — Mojiworld.exe is gone from the list (and from the repo root): it was an UNSIGNED launcher
+// stub, and Windows 11 Smart App Control blocks unsigned executables with no user override - the
+// owner's own machine refused it. Mojiworld.cmd is the launcher (cmd.exe -> the OpenJS-signed
+// node.exe, nothing SAC can object to); the README has always said to double-click it. The exe
+// comes back only signed - docs/guides/CODE_SIGNING.md.
+const ROOT_FILES = ['mojiworld_game.html', 'sw.js', 'serve.js', 'Mojiworld.cmd'];
 // Asset trees it loads from. The cinematics subtree rides along because the
 // game <video>-plays 21 films from it at runtime (prologue through the ending
 // chain) and every cutscene FAILS OPEN on a missing clip — a package without
