@@ -22,7 +22,8 @@ checks.push(['he is the shape a wish took (called, not choosing)', /I am the sha
 checks.push(['whether the sky or something above it chose him, he has never needed to know', /or something above the sky, I have never needed to know\./.test(gate)]);
 checks.push(['he is what every heart fears most and turns from', /What every heart in this world fears most\.\.\. what it turns from, and calls morning\. I am that\./.test(gate)]);
 checks.push(['the weight was placed on him; he carries it', /The weight was placed\. I carry it\./.test(gate)]);
-checks.push(['he goes still as if a word were spoken above him', /as if a word had been spoken somewhere above the Singularity/.test(gate)]);
+checks.push(['he hears the word spoken above him, and says so himself', /Be still\.\.\. Did you hear that\? No\. You would not\. Something has spoken, far above the Singularity\.\.\. and I am always the last to hear it\./.test(gate)]);
+checks.push(['the gate beat is all his own voice: no narrator line, nothing in the third person (per user)', !gate.includes('*') && !/\bHe (goes|pauses|laughs|tilts|nods|looks)\b/.test(gate)]);
 checks.push(['the Nyx cadence: it matters not who you are', /It matters not who you are\./.test(gate)]);
 checks.push(['he closes on the user\'s own line', /The void awaits all\.\.\. The void awaits you\.\.\./.test(gate)]);
 checks.push(['the old tourniquet and "mine to hold" lines are gone', !/tourniquet|mine to hold/.test(gate)]);
