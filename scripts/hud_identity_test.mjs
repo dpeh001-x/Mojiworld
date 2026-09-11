@@ -69,9 +69,9 @@ const r = await page.evaluate(async () => {
   out.rowH = document.querySelector('.stats-id-row.lx-idp').offsetHeight;
   return out;
 });
-checks.push(['the crest sits in the gilded medallion and loads', r.crest.loaded && r.crest.inFrame && r.crest.w >= 40 && r.crest.h >= 40, JSON.stringify(r.crest)]);
+checks.push(['the crest sits in the gilded medallion and loads', r.crest.loaded && r.crest.inFrame && r.crest.w >= 34 && r.crest.h >= 34, JSON.stringify(r.crest)]);
 checks.push(['the level medal shows the level on the medallion\'s lower edge', r.badge.text === r.badge.lv && r.badge.cx > r.badge.pl && r.badge.cx < r.badge.pr && r.badge.bb > r.badge.pb && r.badge.bt < r.badge.pb, `Lv ${r.badge.text}`]);
-checks.push(['the name is engraved gold, set in Cinzel', /^"?Cinzel/.test(r.name.font) && r.name.size >= 14 && r.name.clip === 'text' && r.name.cinzel, `${r.name.font.split(',')[0]} ${r.name.size}px clip:${r.name.clip}`]);
+checks.push(['the name is engraved gold, set in Cinzel', /^"?Cinzel/.test(r.name.font) && r.name.size >= 13 && r.name.clip === 'text' && r.name.cinzel, `${r.name.font.split(',')[0]} ${r.name.size}px clip:${r.name.clip}`]);
 checks.push(['a long name ends in an ellipsis instead of widening the panel', r.long.overflow && r.long.dw <= 1, `panel width moved ${r.long.dw.toFixed(1)} px`]);
 // color-mix() reports the rim as color(srgb r g b / a) with 0-1 channels; bring it to 0-255 to compare
 const rgb = (s) => { const k = /^color\(srgb/.test(s) ? 255 : 1; return (s.match(/[\d.]+/g) || []).slice(0, 3).map((v) => Math.round(Number(v) * k)).join(','); };
@@ -79,7 +79,7 @@ checks.push(['the class chip wears the class colour, rim and all', !!r.chip.inli
 checks.push(['with no unspent points the gem is quiet', r.quiet]);
 checks.push(['unspent points light the gem, and spending them puts it out', r.lit && r.out]);
 checks.push(['a level-up pulses the medal; a save loading in does not', r.pulse && r.jumpQuiet]);
-checks.push(['the plate stays compact', r.rowH <= 50, r.rowH + ' layout px']);
+checks.push(['the plate stays compact', r.rowH <= 44, r.rowH + ' layout px']);
 await page.click('.lx-idp-sp', { timeout: 5000 }); await page.waitForTimeout(700);
 const opened = await page.evaluate(() => { const m = document.getElementById('attributes-modal'); if (!m) return false; const cs = getComputedStyle(m); return cs.display !== 'none' && cs.visibility !== 'hidden' && m.getBoundingClientRect().width > 0; });
 checks.push(['clicking the gem opens the Level Up panel', opened]);

@@ -48,8 +48,8 @@ const measure = () => page.evaluate(() => {
 const a = await measure();
 const eq = (arr) => Math.max(...arr) - Math.min(...arr) <= 1;
 checks.push(['two ribbons of equal cells: four combat stats, three resources', a.rows.length === 2 && a.rows[0].cells.length === 4 && a.rows[1].cells.length === 3 && eq(a.rows[0].cells.map((c) => c.w)) && eq(a.rows[1].cells.map((c) => c.w)), a.rows.map((r) => r.cells.map((c) => c.w).join('/')).join(' | ')]);
-checks.push(['one icon size for every stat', a.icons.length === 7 && a.icons.every((x) => x === '12x12'), a.icons.join(' ')]);
-checks.push(['both rows are the same slim height and the footer is compact', a.rows.every((r) => r.h === 16) && a.footerH <= 40, `rows ${a.rows.map((r) => r.h).join('/')} · footer ${a.footerH} layout px (was 49)`]);
+checks.push(['one icon size for every stat', a.icons.length === 7 && a.icons.every((x) => x === '11x11'), a.icons.join(' ')]);
+checks.push(['both rows are the same slim height and the footer is compact', a.rows.every((r) => r.h === 15) && a.footerH <= 34, `rows ${a.rows.map((r) => r.h).join('/')} · footer ${a.footerH} layout px (was 49)`]);
 checks.push(['no dashed rule between the rows', a.rows.every((r) => !r.dashed)]);
 checks.push(['coins read gold, setshards violet', /255, 223, 142/.test(a.coin) && /232, 216, 255/.test(a.shard), `${a.coin} / ${a.shard}`]);
 await page.evaluate(() => { player.mojicoins = 1234567; game.kills = 12345; player.setshards = 45678; player.baseAcc = 245; updateUI(); });
