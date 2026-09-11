@@ -126,12 +126,15 @@ const F = await page.evaluate((authored) => {
     //   base    _lvlReq = isBossQ ? lvl - 10 : lvl - 2
     //   greater _gLv    = max(_lvlReq + 5, lvl + 3)
     //   apex    aLv     = lvl + 6
+    // except a codex COHORT (v0.30.607 codex-cohort, e.g. the Magma Foundry): its
+    // residents share one Greater and one Apex level, read from the game itself.
     const isGen = /^b_/.test(qid);
     const isBossQ = q.kind === 'boss' || !!(monsterTypes[q.target] || {}).boss;
     if (isGen) {
       const base = Math.max(1, hi - (isBossQ ? 10 : 2));
-      const want = /_apex$/.test(qid) ? hi + 6
-                 : /_greater$/.test(qid) ? Math.max(base + 5, hi + 3)
+      const coh = (!isBossQ && typeof _lxCodexCohortLevels === 'function') ? _lxCodexCohortLevels(q.target) : null;
+      const want = /_apex$/.test(qid) ? (coh ? coh.apex : hi + 6)
+                 : /_greater$/.test(qid) ? (coh ? coh.greater : Math.max(base + 5, hi + 3))
                  : base;
       if (q.levelReq !== want) add('C QUEST', qid, `"${q.name}" levelReq ${q.levelReq}, formula says ${want} (target Lv${hi}${isBossQ ? ', boss' : ''})`);
     } else if (isBossQ) {

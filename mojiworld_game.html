@@ -10735,7 +10735,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.606';
+const GAME_VERSION = 'v0.30.607';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -25101,6 +25101,37 @@ const MONSTER_BESTIARY = {
 // the generator as a named function declaration (hoisted) and schedule
 // it via setTimeout(0) so it runs AFTER the rest of the script body has
 // initialised every const it depends on.
+// v0.30.607 codex-cohort - per user: "for smith golem apex quest pls try to align it together
+// with the other monsters in the magma foundry at the same time". Codex tiers were placed per
+// creature (Greater at natural + 3, Apex at + 6), so a map whose residents span several levels
+// opened its studies one at a time: the Foundry's four Apex Studies at 66, 68, 71 and 72. A map
+// listed here is a COHORT: its residents' Greater Studies OPEN at one level - the roster's
+// average natural level + 3, raised if needed so it still follows every resident's first study
+// (natural - 2) - and their Apex Studies together three levels later. A single shared Apex level
+// alone could not keep the order (under 70 it opens the Bellowsbat's Apex before its Greater).
+// Only the unlock level moves: hunt size and pay stay on the creature's own level, because the
+// codex coin clamp (level x 800) binds for these studies and _lxTrimQuestPay's median calibration
+// would carry any re-pricing into every other quest. Residents come from the map's spawn table.
+const LX_CODEX_COHORT_MAPS = ['magmaFoundry'];
+function _lxCodexCohortLevels(monId) {
+  const memo = _lxCodexCohortLevels._m || (_lxCodexCohortLevels._m = Object.create(null));
+  if (monId in memo) return memo[monId];
+  let res = null;
+  try {
+    for (const mapId of LX_CODEX_COHORT_MAPS) {
+      const sp = (typeof MAPS !== 'undefined' && MAPS[mapId] && MAPS[mapId].spawns) || [];
+      const ids = [...new Set(sp.map((e) => e && e.type).filter(Boolean))];
+      if (!ids.includes(monId)) continue;
+      const lv = ids.map((t) => (typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[t]) || 0).filter((n) => n > 0);
+      if (!lv.length) break;
+      const mean = Math.round(lv.reduce((a, b) => a + b, 0) / lv.length);
+      const greater = Math.max(mean + 3, Math.max(...lv) - 2 + 1);
+      res = { greater, apex: greater + 3, map: mapId };
+      break;
+    }
+  } catch (e) { res = null; }
+  return (memo[monId] = res);
+}
 function _generateBestiaryQuests() {
   if (typeof QUESTS !== 'object' || typeof monsterTypes !== 'object') return;
   for (const monId in MONSTER_BESTIARY) {
@@ -25238,13 +25269,14 @@ function _generateBestiaryQuests() {
     // back half of the game while the opening hours stay story-led.
     if (!isBossQ && lvl >= 30) {
       const _gLv = Math.max(_lvlReq + 5, lvl + 3);
+      const _coh = _lxCodexCohortLevels(monId);   // v0.30.607 codex-cohort - a cohort's Greater Studies open together (count + pay stay on _gLv)
       // v0.30.254 — supply cap applies after the tier floor; tiers may TIE at
       // the cap (the v0.29.315 ordering rule already allows ties, never drops).
       const gCount = _lxHuntSupplyCap(monId, _tierFloor(_bestiaryHuntCount(monId + "_greater", _gLv), count + 100, _gLv));
       QUESTS[qid + '_greater'] = {
         name: '📖 ' + (mt.name || monId) + ' — Greater Study',
         icon: '📕',
-        levelReq: Math.max(_lvlReq + 5, lvl + 3),
+        levelReq: _coh ? _coh.greater : _gLv,   // v0.30.607 codex-cohort - was the _gLv formula written a second time
         kind: 'kill', target: monId, count: gCount,
         npc: cfg.npc || 'a passing scholar',
         desc: `The first study only sketched the ${mt.name || monId}. A full entry needs a population, not a specimen — behaviour under pressure, how they die when they are tired of dying. The Pause taught everything here to persist; nothing taught it to stop. Bring me ${gCount} ${_lxPluralMob(mt.name || monId)}. ${LX_CODEX_FRAME.greater}`,
@@ -25262,12 +25294,13 @@ function _generateBestiaryQuests() {
     // sent at something wildly off your own tier.
     if (!isBossQ && lvl >= LX_CODEX_HIGH_LV) {
       const aLv = lvl + 6;
+      const _cohA = _lxCodexCohortLevels(monId);   // v0.30.607 codex-cohort - and their Apex Studies three levels later (count + pay stay on aLv)
       const aCount = _lxHuntSupplyCap(monId, _tierFloor(_bestiaryHuntCount(monId + "_apex", aLv),
                                  (QUESTS[qid + '_greater'] ? QUESTS[qid + '_greater'].count : count) + 100, aLv));   // v0.30.254 — supply-capped
       QUESTS[qid + '_apex'] = {
         name: '📖 ' + (mt.name || monId) + ' — Apex Study',
         icon: '📗',
-        levelReq: aLv,
+        levelReq: _cohA ? _cohA.apex : aLv,   // v0.30.607 codex-cohort
         kind: 'kill', target: monId, count: aCount,
         npc: cfg.npc || 'a passing scholar',
         desc: `Two studies in and the ${mt.name || monId} still keeps the last word. The Codex no longer wants a specimen; it wants the shape of an ending — how a kind carries itself when the sky is being argued over and every road left on the map leads to the Singularity. Count them the way the bells count hours: ${aCount} ${_lxPluralMob(mt.name || monId)} — none skipped, none early. Then the entry closes like a door, and everything written inside it is safe from forgetting — whichever way the argument above goes. ${LX_CODEX_FRAME.apex}`,
