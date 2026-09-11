@@ -10737,7 +10737,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.612';
+const GAME_VERSION = 'v0.30.613';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18585,43 +18585,87 @@ function _cuteMapPalette(tint) {
   if (!tint || !/^#[0-9a-fA-F]{6}/.test(String(tint.top))) return tint;
   const key = tint.top + '|' + tint.body; let p = _CUTE_MAP_PAL.get(key); if (p) return p;
   const [h, sat, l] = _cuteHexHsl(tint.top);
-  const capS = Math.min(0.72, sat * 1.15), capL = Math.max(0.52, Math.min(0.8, 0.45 + l * 0.38));
-  const bodyS = capS * 0.85, bodyL = Math.max(0.18, Math.min(0.38, capL * 0.48));   // v0.30.609 — was 0.15-0.34 / x0.42: a mid-tone face for v3's material
+  const capS = Math.min(0.78, sat * 1.3), capL = Math.max(0.55, Math.min(0.82, 0.48 + l * 0.38));   // v0.30.613 - v4: brighter, more saturated cap (was x1.15 / 0.52-0.80)
+  const bodyS = Math.min(0.6, capS * 0.75), bodyL = Math.max(0.2, Math.min(0.4, capL * 0.5));   // v0.30.613 - v4: a duller face under the brighter cap (was x0.85 / 0.18-0.38 / x0.48)
   p = { top: _cuteHslHex(h, capS, capL), body: _cuteHslHex(h, bodyS, bodyL) };
   if (_CUTE_MAP_PAL.size > 64) _CUTE_MAP_PAL.clear();
   _CUTE_MAP_PAL.set(key, p); return p;
 }
-// v0.30.609 — TERRAIN v3, after MapleStory and the AAA side-scrollers (per user: "Honestly the floor
-// can see better improvements, look at maplestory style floors and other sidescrolling AAA games to
-// compare analyse and improve"). What those floors do that v0.30.597's did not, and what this does:
-//  1. MASS. A MapleStory foothold platform is a chunky piece - a grass or stone lip, a textured
-//     face, ends that round off - and Hollow Knight / Ori / Rayman float theirs as islands with a
-//     tapered, hanging underside. Platforms here are one-way (drop through with down), so the art
-//     hangs BELOW the authored collision box without lying about anything: the surface you stand on
-//     is still exactly y. _cuteGeom sets the depth: ~14-18 px of face, a keel of up to 12 px, and
-//     what hangs from it.
-//  2. A LIP THAT OVERHANGS. The standing layer runs the full width, proud of an inset face at the
-//     ends; its edge (scallops, snow lumps, drips, crust) droops over the face, with a strip of
-//     occlusion under it.
-//  3. MATERIAL. Stones and bricks with a lit top edge and a shaded underside, strata, glowing
-//     cracks, ice facets, candy layers - the way hand-painted tiles are drawn.
-//  4. LIGHT. Bounce-lit under the lip, darkening with depth, a rim light on top, and a keyline in
-//     the darkest shade of the map's own hue instead of black, so the terrain sits IN the scene.
-//  5. UNDERSIDES that belong to the biome: roots, icicles, glowing drips, syrup, crystals, rubble.
-//  6. VARIATION. Each platform takes one of three seeded variants from its authored position
-//     (_lxPlatVariant), so a run of same-width ledges is not one stamp repeated.
-// Colour is still the map's (_cuteMapPalette, v0.30.606); every shade below is derived from it.
+// v0.30.613 - TERRAIN v4, the second MapleStory pass (per user, after v3: "This is very good, can we
+// improve on the designs more"). Set against the close-ups, v3 still fell short of a painted
+// foothold in six ways, and this closes each:
+//  1. A ROLLING TOP. The standing surface was a ruled line. It now rolls in gentle mounds whose
+//     crests sit exactly on the collision line (dips of at most 1.5 px, never above it), so feet
+//     stay on the surface while the silhouette stops looking drawn with a ruler.
+//  2. A SUNLIT LAYER. A grass top in MapleStory is two tones: a lit upper layer with a lumpy lower
+//     boundary over a shadowed one. Snow, candy gloss, weathered stone and hot lava get the same.
+//  3. ENDS THAT WRAP. On a floating platform the cap now curls DOWN over both ends of the face, the
+//     way grass drapes over the end of a MapleStory foothold, instead of stopping flush.
+//  4. ROCKS WITH INTENT. A few large stones (5-9 px) with a shadow, a highlight and an outline in
+//     the soil face of a ground, where v3 had only pebbles.
+//  5. PAINTERLY GRAIN. A seeded value-noise pattern composited in 'overlay' over the face and the
+//     cap, so the gradients read as paint rather than as a fill tool.
+//  6. NO SEAMS. Adjacent ground pieces used to each carry their own keyline, so a long floor showed
+//     a dark vertical line every slab (the lava cavern's floor had three). drawPlatforms now tells
+//     the bake which sides abut another ground piece (_lxGroundJoin); that side is filled flush
+//     and its keyline skipped. A small step between pieces joins too, only its riser outlined.
+// Plus: bevelled face ends (lit left, shaded right), a bottom fade into the keyline colour on
+// grounds, a brighter and more saturated cap over a duller face (_cuteMapPalette), a back row of
+// darker tufts behind the lit ones, and the odd bush or rock cluster on a grass ground.
+// Colour is still the map's; collision is untouched.
 function _cuteGeom(w, h, ground) {
   const block = !ground && h > 30, island = !ground && !block;
-  const cap = ground ? Math.max(8, Math.min(16, h * 0.26)) : block ? Math.max(6, Math.min(12, h * 0.2)) : Math.max(5, Math.min(8, h * 0.6));
+  const cap = ground ? Math.max(10, Math.min(18, h * 0.3)) : block ? Math.max(6, Math.min(12, h * 0.2)) : Math.max(5, Math.min(8, h * 0.6));
   const faceH = (ground || block) ? h : Math.max(h, Math.min(18, 11 + w * 0.03));
   const keel = island && w >= 60 ? Math.min(12, 4 + w * 0.04) : 0;
   const hang = island ? 11 : 0;
-  return { block, island, cap, faceH, keel, hang, depth: Math.ceil(faceH + keel + hang) };
+  const wrap = island && w >= 40 ? Math.max(0, Math.min(5, faceH - cap - 5)) : 0;   // how far the cap curls down the ends
+  return { block, island, cap, faceH, keel, hang, wrap, depth: Math.ceil(faceH + keel + hang) };
 }
 function _lxPlatVariant(p) {
   const vx = Math.round(p._driftBaseX != null ? p._driftBaseX : p.x), vy = Math.round(p._driftBaseY != null ? p._driftBaseY : p.y);
   return Math.abs((vx * 73 + vy * 31) | 0) % 3;
+}
+// Which sides of a ground piece abut another ground piece (a step of up to 24px still counts).
+// Bit 1 = left, bit 2 = right; bits 2-6 / 7-11 = how far that end stands proud of a LOWER
+// neighbour (its riser). Passed to the bake as its variant: a joined side draws no keyline.
+let _lxJoinMd = null, _lxJoinN = -1;
+function _lxGroundJoin(p) {
+  const md = game.mapData, ps = md && md.platforms;
+  if (!ps) return 0;
+  if (md !== _lxJoinMd || ps.length !== _lxJoinN) {
+    _lxJoinMd = md; _lxJoinN = ps.length;
+    const g = ps.filter((q) => q.type === 'ground');
+    for (const a of g) {
+      let f = 0;
+      for (const b of g) {
+        if (b === a || Math.abs(b.y - a.y) > 24) continue;
+        const gL = a.x - (b.x + b.w), gR = b.x - (a.x + a.w), e = Math.max(0, Math.min(31, Math.round(b.y - a.y)));
+        if (gL >= -8 && gL <= 2) f |= 1 | (e << 2);
+        if (gR >= -8 && gR <= 2) f |= 2 | (e << 7);
+      }
+      a._lxJoin = f;
+    }
+  }
+  return p._lxJoin | 0;
+}
+// Painterly grain: one seeded 96x96 value-noise tile, wrapped at the edges so it repeats without a
+// seam, composited in 'overlay' (mid-grey does nothing; lighter and darker blotches modulate).
+let _CUTE_GRAIN = null;
+function _cuteGrain(ctx) {
+  if (!_CUTE_GRAIN) {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 96;
+    const c = cv.getContext('2d'), rng = _cuteRng(0x9e3779b9), S = 96;
+    c.fillStyle = '#808080'; c.fillRect(0, 0, S, S);
+    for (let n = 0; n < 150; n++) {
+      const x = rng() * S, y = rng() * S, r = 3 + rng() * 7, dark = rng() < 0.5, a = 0.08 + rng() * 0.14;
+      c.fillStyle = dark ? 'rgba(0,0,0,' + a.toFixed(3) + ')' : 'rgba(255,255,255,' + a.toFixed(3) + ')';
+      for (let ox = -S; ox <= S; ox += S) for (let oy = -S; oy <= S; oy += S) { c.beginPath(); c.arc(x + ox, y + oy, r, 0, Math.PI * 2); c.fill(); }
+    }
+    for (let n = 0; n < 500; n++) { const a = 0.1 + rng() * 0.2; c.fillStyle = rng() < 0.5 ? 'rgba(0,0,0,' + a.toFixed(2) + ')' : 'rgba(255,255,255,' + a.toFixed(2) + ')'; c.fillRect(Math.floor(rng() * S), Math.floor(rng() * S), 1, 1); }
+    _CUTE_GRAIN = cv;
+  }
+  return ctx.createPattern(_CUTE_GRAIN, 'repeat');
 }
 // The cap's lower edge, computed ONCE per paint (it is seeded, and the same path is filled, clipped
 // and stroked). Segments run right-to-left, x relative to the slab, y relative to the edge line.
@@ -18635,7 +18679,21 @@ function _cuteEdgePts(w, edge, rng) {
   else s.push(['l', 0, 0]);
   return s;
 }
-function _cuteEdgeDraw(ctx, sx, ye, segs) { for (const g of segs) { if (g[0] === 'q') ctx.quadraticCurveTo(sx + g[1], ye + g[2], sx + g[3], ye + g[4]); else ctx.lineTo(sx + g[1], ye + g[2]); } }
+// droop(x): extra y at x, so the edge can curl down over the ends of a floating platform.
+function _cuteEdgeDraw(ctx, sx, ye, segs, droop) {
+  const d = droop || (() => 0);
+  for (const g of segs) { if (g[0] === 'q') ctx.quadraticCurveTo(sx + g[1], ye + g[2] + d(g[1]), sx + g[3], ye + g[4] + d(g[3])); else ctx.lineTo(sx + g[1], ye + g[2] + d(g[1])); }
+}
+// The rolling top: mounds from xa to xb whose crests sit exactly on y and whose dips are `dip`
+// below it. Returns [[cx, xEnd], ...]; the caller draws quadraticCurveTo(cx, y - dip, xEnd, y + dip),
+// whose midpoint is exactly y. Flat themes get one straight segment.
+function _cuteTopPts(xa, xb, dip, rng) {
+  const s = [];
+  if (!(dip > 0)) { s.push([(xa + xb) / 2, xb]); return s; }
+  let xx = xa;
+  while (xx < xb - 0.5) { const mw = Math.min(xb - xx, 14 + rng() * 14), xe = xx + mw; s.push([xx + mw / 2, xe]); xx = xe; }
+  return s;
+}
 function _cuteMaterial(ctx, sx, fy, w, fh, theme, rng, C, ground) {
   if (fh < 3) return;
   const mix = C.mix, R = (a, b) => a + rng() * (b - a);
@@ -18647,6 +18705,18 @@ function _cuteMaterial(ctx, sx, fy, w, fh, theme, rng, C, ground) {
     ctx.fillStyle = mix(C.body, C.top, tone); ctx.beginPath(); ctx.ellipse(0, 0, rw, rh, 0, 0, Math.PI * 2); ctx.fill();
     if (rw > 1.8) { ctx.strokeStyle = C.bodyLt; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(0, 0, rw * 0.75, rh * 0.68, 0, Math.PI * 1.1, Math.PI * 1.75); ctx.stroke(); }
     ctx.restore();
+  };
+  // v4: a few LARGE stones with a cast shadow, a lit top and an outline - the deliberate rocks of a
+  // painted soil face, where v3 had only pebbles. Ground faces only; they need the room.
+  const outline = (rw, rh) => { ctx.beginPath(); ctx.moveTo(-rw, rh * 0.3); ctx.quadraticCurveTo(-rw * 0.9, -rh, -rw * 0.2, -rh); ctx.quadraticCurveTo(rw * 0.7, -rh * 1.05, rw, -rh * 0.1); ctx.quadraticCurveTo(rw * 0.95, rh, 0, rh); ctx.quadraticCurveTo(-rw * 0.9, rh, -rw, rh * 0.3); ctx.closePath(); };
+  const boulder = (cx, cy, rw, rh) => {
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(R(-0.25, 0.25));
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(1.5, 2.2, rw, rh, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = mix(C.body, '#ffffff', 0.2); outline(rw, rh); ctx.fill();
+    ctx.fillStyle = mix(C.body, '#ffffff', 0.42); ctx.beginPath(); ctx.moveTo(-rw * 0.7, -rh * 0.2); ctx.quadraticCurveTo(-rw * 0.5, -rh * 0.85, rw * 0.2, -rh * 0.8); ctx.quadraticCurveTo(-rw * 0.2, -rh * 0.4, -rw * 0.7, -rh * 0.2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.moveTo(-rw * 0.4, rh * 0.55); ctx.quadraticCurveTo(rw * 0.3, rh, rw * 0.95, rh * 0.1); ctx.quadraticCurveTo(rw * 0.5, rh * 0.5, -rw * 0.4, rh * 0.55); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = C.OUT; ctx.lineWidth = 1.2; ctx.globalAlpha = A0 * 0.75; outline(rw, rh); ctx.stroke();
+    ctx.restore(); ctx.globalAlpha = A0;
   };
   if (theme === 'stone') {                  // brick courses: lit top edge, shaded underside, a few cracks
     const bh = ground ? 12 : 7, bw = ground ? 28 : 16;
@@ -18668,6 +18738,7 @@ function _cuteMaterial(ctx, sx, fy, w, fh, theme, rng, C, ground) {
       ctx.lineTo(sx + w, yy + 12); ctx.lineTo(sx, yy + 12); ctx.closePath(); ctx.fill();
     }
     for (let n = 0, N = Math.max(1, Math.round(w * fh / 700)); n < N; n++) pebble(R(sx + 4, sx + w - 4), R(fy + 3, fy + fh - 3), R(1.6, 3), R(1.2, 2.2), R(-0.4, 0.4), theme === 'coral' ? 0.5 : 0.3);
+    if (ground && fh >= 30 && theme === 'sand') for (let n = 0, N = Math.max(1, Math.round(w / 140)); n < N; n++) boulder(R(sx + 14, sx + w - 14), R(fy + fh * 0.4, fy + fh * 0.78), R(5, 8), R(3.5, 5.5));
   } else if (theme === 'lava') {            // dark rock, glowing cracks, a molten glow at the foot of the ground
     for (let n = 0, N = Math.max(2, Math.round(w * fh / 360)); n < N; n++) pebble(R(sx + 4, sx + w - 4), R(fy + 3, fy + fh - 3), R(2, ground ? 5 : 3), R(1.5, ground ? 3.2 : 2.2), R(-0.5, 0.5), R(0.02, 0.12));
     ctx.strokeStyle = C.top; ctx.lineWidth = 1.5; ctx.globalAlpha = A0 * 0.85; ctx.shadowColor = C.top; ctx.shadowBlur = 4;
@@ -18701,10 +18772,12 @@ function _cuteMaterial(ctx, sx, fy, w, fh, theme, rng, C, ground) {
     for (let n = 0, N = Math.max(4, Math.round(w * fh / 90)); n < N; n++) { ctx.globalAlpha = A0 * R(0.25, 0.8); ctx.beginPath(); ctx.arc(R(sx, sx + w), R(fy, fy + fh), R(0.5, 1.3), 0, Math.PI * 2); ctx.fill(); }
     ctx.globalAlpha = A0;
     for (let n = 0, N = Math.max(1, Math.round(w / 40)); n < N; n++) { const cx = R(sx, sx + w), cy = R(fy + 2, fy + fh - 2), s = R(2.5, ground ? 7 : 4); ctx.fillStyle = mix(C.body, C.top, R(0.2, 0.45)); ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s * 0.6, cy); ctx.lineTo(cx, cy + s * 0.9); ctx.lineTo(cx - s * 0.6, cy); ctx.closePath(); ctx.fill(); }
-  } else {                                  // grass, swamp, default: soil with embedded stones and roots
-    for (let n = 0, N = Math.max(2, Math.round(w * fh / (ground ? 380 : 220))); n < N; n++) pebble(R(sx + 4, sx + w - 4), R(fy + 3, fy + fh - 3), R(1.6, ground ? 4.5 : 2.6), R(1.2, ground ? 3 : 1.8), R(-0.5, 0.5), R(0.12, 0.34));
+  } else {                                  // grass, swamp, default: soil with embedded stones, roots, and a few boulders
+    for (let n = 0, N = Math.max(2, Math.round(w * fh / (ground ? 460 : 220))); n < N; n++) pebble(R(sx + 4, sx + w - 4), R(fy + 3, fy + fh - 3), R(1.6, ground ? 3.6 : 2.6), R(1.2, ground ? 2.6 : 1.8), R(-0.5, 0.5), R(0.12, 0.34));
     ctx.strokeStyle = C.bodyDk; ctx.lineWidth = 1; ctx.globalAlpha = A0 * 0.6;
     for (let n = 0, M = Math.max(1, Math.round(w / 60)); n < M; n++) { let xx = R(sx + 6, sx + w - 6), yy = fy + 2; ctx.beginPath(); ctx.moveTo(xx, yy); for (let k = 0; k < 3; k++) { xx += R(-6, 6); yy += R(2, ground ? 8 : 4); ctx.lineTo(xx, Math.min(yy, fy + fh - 2)); } ctx.stroke(); }
+    ctx.globalAlpha = A0;
+    if (ground && fh >= 30) for (let n = 0, N = Math.max(1, Math.round(w / 120)); n < N; n++) boulder(R(sx + 14, sx + w - 14), R(fy + fh * 0.4, fy + fh * 0.78), R(5, 9), R(3.5, 6));
   }
   ctx.restore();
 }
@@ -18762,7 +18835,7 @@ function _cuteCapTexture(ctx, sx, y, w, cap, theme, rng, C) {
 function _cuteDroops(ctx, sx, ye, w, theme, rng, C, ground) {
   const R = (a, b) => a + rng() * (b - a);
   if (theme === 'grass' || theme === 'swamp' || !theme) {           // blades hanging over the lip
-    for (let n = 0, N = Math.max(1, Math.round(w / (ground ? 40 : 30))); n < N; n++) {
+    for (let n = 0, N = Math.max(1, Math.round(w / (ground ? 36 : 30))); n < N; n++) {
       const xx = R(sx + 5, sx + w - 5), len = R(3, 6), dx = R(-2, 2);
       ctx.beginPath(); ctx.moveTo(xx, ye - 1.5); ctx.quadraticCurveTo(xx + dx * 0.3, ye + len * 0.6, xx + dx, ye + len);
       ctx.strokeStyle = C.OUT; ctx.lineWidth = 2.6; ctx.stroke(); ctx.strokeStyle = C.top; ctx.lineWidth = 1.2; ctx.stroke();
@@ -18775,16 +18848,51 @@ function _cuteDroops(ctx, sx, ye, w, theme, rng, C, ground) {
     }
   }
 }
+// The sunlit layer of the cap: colour, alpha, how far down it reaches, and whether its lower
+// boundary lumps (grass, snow, gloss) or runs flat (weathered stone).
+function _cuteLit(theme, C) {
+  const mix = C.mix, top = C.top;
+  if (theme === 'grass' || !theme) return { color: mix(top, '#fff3b0', 0.45), alpha: 0.6, frac: 0.5, bump: true };
+  if (theme === 'swamp') return { color: mix(top, '#e8ffb0', 0.35), alpha: 0.5, frac: 0.5, bump: true };
+  if (theme === 'ice') return { color: '#ffffff', alpha: 0.75, frac: 0.55, bump: true };
+  if (theme === 'candy') return { color: '#ffffff', alpha: 0.35, frac: 0.42, bump: true };
+  if (theme === 'honey') return { color: '#fff4c0', alpha: 0.4, frac: 0.45, bump: true };
+  if (theme === 'stone') return { color: mix(top, '#ffffff', 0.3), alpha: 0.4, frac: 0.4, bump: false };
+  if (theme === 'sand' || theme === 'coral') return { color: mix(top, '#ffffff', 0.3), alpha: 0.4, frac: 0.5, bump: true };
+  if (theme === 'lava') return { color: mix(top, '#ffe08a', 0.5), alpha: 0.5, frac: 0.38, bump: true };
+  return null;   // cosmic has its own gradient
+}
 function _cuteDecor(ctx, sx, y, w, theme, rng, C, ground) {
   const grassy = theme === 'grass' || theme === 'swamp' || !theme;
   const decor = grassy ? 'tuft' : theme === 'ice' ? 'snow' : theme === 'cosmic' ? 'crystal' : theme === 'candy' ? 'sprinkle' : theme === 'lava' ? 'ember' : theme === 'sand' ? 'pebble' : theme === 'coral' ? 'shell' : theme === 'honey' ? 'drop' : theme === 'stone' ? 'chip' : null;
   if (!decor || w < 24) return;
-  const OUT = C.OUT, A0 = ctx.globalAlpha;
+  const OUT = C.OUT, A0 = ctx.globalAlpha, mix = C.mix;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  for (let n = 0, N = Math.max(1, Math.round(w / (ground ? 64 : 44))); n < N; n++) {
-    const xx = sx + 8 + rng() * Math.max(1, w - 16), sc = 0.8 + rng() * 0.5;
+  const tuft = (xx, sc, lit) => {
+    ctx.strokeStyle = OUT; ctx.lineWidth = 3.2; ctx.beginPath(); ctx.moveTo(xx - 3 * sc, y + 1); ctx.lineTo(xx - 4 * sc, y - 5 * sc); ctx.moveTo(xx, y + 1); ctx.lineTo(xx + 0.5, y - 7 * sc); ctx.moveTo(xx + 3 * sc, y + 1); ctx.lineTo(xx + 4.5 * sc, y - 4.5 * sc); ctx.stroke();
+    ctx.strokeStyle = lit ? C.topLt : C.topDk; ctx.lineWidth = 1.4; ctx.stroke();
+  };
+  for (let n = 0, N = Math.max(1, Math.round(w / (ground ? 56 : 44))); n < N; n++) {
+    const xx = sx + 8 + rng() * Math.max(1, w - 16), sc = 0.8 + rng() * 0.5, roll = rng();
     if (decor === 'tuft') {
-      if (theme === 'grass' && rng() < 0.28) {   // a small flower among the grass, the MapleStory way
+      if (ground && w >= 80 && roll < 0.16) {   // a low bush, the odd prop MapleStory sets at the foot of a scene
+        const bx = xx, s = 0.9 + rng() * 0.5;
+        ctx.fillStyle = OUT; for (const [dx, r] of [[-5.5, 4.6], [0, 6], [5.5, 4.6]]) { ctx.beginPath(); ctx.arc(bx + dx * s, y + 1 - r * s * 0.85, r * s, 0, Math.PI * 2); ctx.fill(); }
+        ctx.fillStyle = C.topDk; for (const [dx, r] of [[-5.5, 3.4], [0, 4.7], [5.5, 3.4]]) { ctx.beginPath(); ctx.arc(bx + dx * s, y + 1 - (r + 1.2) * s * 0.85, r * s, 0, Math.PI * 2); ctx.fill(); }
+        ctx.fillStyle = C.topLt; ctx.globalAlpha = A0 * 0.8; for (const [dx, r] of [[-5, 1.6], [1, 2.2], [6, 1.5]]) { ctx.beginPath(); ctx.arc(bx + dx * s, y - 6 * s, r * s, 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = A0;
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(bx, y + 1.5, 9 * s, 1.6, 0, 0, Math.PI * 2); ctx.fill();
+        continue;
+      }
+      if (ground && roll < 0.28) {              // a cluster of two or three rocks on the surface
+        for (let k = 0, K = 2 + (rng() < 0.5 ? 1 : 0); k < K; k++) {
+          const rx = xx + (k - 1) * 5 * sc, rw = (2.2 + rng() * 1.8) * sc, rh = rw * 0.7;
+          ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(rx, y + 0.8, rw + 1, rh + 1, 0, Math.PI, 0); ctx.fill();
+          ctx.fillStyle = mix(C.body, '#ffffff', 0.25); ctx.beginPath(); ctx.ellipse(rx, y + 0.8, rw, rh, 0, Math.PI, 0); ctx.fill();
+          ctx.fillStyle = mix(C.body, '#ffffff', 0.5); ctx.beginPath(); ctx.ellipse(rx - rw * 0.25, y + 0.8 - rh * 0.35, rw * 0.4, rh * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+        }
+        continue;
+      }
+      if (theme === 'grass' && roll < 0.5) {   // a small flower among the grass, the MapleStory way
         ctx.strokeStyle = OUT; ctx.lineWidth = 2.6; ctx.beginPath(); ctx.moveTo(xx, y + 1); ctx.lineTo(xx, y - 6 * sc); ctx.stroke();
         ctx.strokeStyle = C.topDk; ctx.lineWidth = 1.1; ctx.stroke();
         ctx.fillStyle = OUT; ctx.beginPath(); ctx.arc(xx, y - 7 * sc, 3.1 * sc, 0, Math.PI * 2); ctx.fill();
@@ -18793,8 +18901,8 @@ function _cuteDecor(ctx, sx, y, w, theme, rng, C, ground) {
         ctx.fillStyle = '#ffc93c'; ctx.beginPath(); ctx.arc(xx, y - 7 * sc, 0.9 * sc, 0, Math.PI * 2); ctx.fill();
         continue;
       }
-      ctx.strokeStyle = OUT; ctx.lineWidth = 3.2; ctx.beginPath(); ctx.moveTo(xx - 3 * sc, y + 1); ctx.lineTo(xx - 4 * sc, y - 5 * sc); ctx.moveTo(xx, y + 1); ctx.lineTo(xx + 0.5, y - 7 * sc); ctx.moveTo(xx + 3 * sc, y + 1); ctx.lineTo(xx + 4.5 * sc, y - 4.5 * sc); ctx.stroke();
-      ctx.strokeStyle = C.topLt; ctx.lineWidth = 1.4; ctx.stroke();
+      tuft(xx + 6 * sc, sc * 0.8, false);       // a darker tuft behind, for depth
+      tuft(xx, sc, true);
     } else if (decor === 'snow') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 6 * sc, 3.2 * sc, 0, Math.PI, 0); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 4.6 * sc, 2.2 * sc, 0, Math.PI, 0); ctx.fill(); }
     else if (decor === 'crystal') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.moveTo(xx - 3.5 * sc, y + 1); ctx.lineTo(xx, y - 8 * sc); ctx.lineTo(xx + 3.5 * sc, y + 1); ctx.closePath(); ctx.fill(); ctx.fillStyle = C.topLt; ctx.beginPath(); ctx.moveTo(xx - 2 * sc, y + 0.5); ctx.lineTo(xx, y - 6 * sc); ctx.lineTo(xx + 2 * sc, y + 0.5); ctx.closePath(); ctx.fill(); }
     else if (decor === 'sprinkle') { ctx.strokeStyle = ['#ffffff', '#ffd23f', '#6fd6ff', '#ff6f9c'][Math.floor(rng() * 4)]; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(xx - 2.5, y - 1.5); ctx.lineTo(xx + 2.5, y - 3.5); ctx.stroke(); }
@@ -18807,7 +18915,7 @@ function _cuteDecor(ctx, sx, y, w, theme, rng, C, ground) {
 function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const _pa = ctx.globalAlpha;
   const mix = (typeof _mixHex === 'function') ? _mixHex : ((x) => x);
-  const P = _cuteMapPalette(tint) || tint;   // v0.30.606 — the map's colour; the theme only picks the shape
+  const P = _cuteMapPalette(tint) || tint;   // v0.30.606 - the map's colour; the theme only picks the shape
   const top = P.top, body = P.body;
   const C = { mix, top, body, topLt: mix(top, '#ffffff', 0.38), topDk: mix(top, body, 0.42), bodyLt: mix(body, top, 0.30), bodyDk: mix(body, '#000000', 0.40), OUT: mix(body, '#05030a', 0.62) };
   ctx.globalAlpha = _pa * a;
@@ -18819,9 +18927,17 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   }
   const rng = _cuteRng((Math.round(w) * 73856093) ^ (Math.round(h) * 19349663) ^ ((theme || 'g').charCodeAt(0) * 83492791) ^ (((variant | 0) + 1) * 40503));
   const edge = _CUTE_EDGE[theme] || 'flat';
-  const G = _cuteGeom(w, h, ground), cap = G.cap;
-  const inset = G.island ? 3 : 0, x0 = sx + inset, x1 = sx + w - inset, yb = y + G.faceH;
+  const G = _cuteGeom(w, h, ground), cap = G.cap, wrap = G.wrap;
+  // v4: a ground side that abuts another ground piece (variant bit 1 = left, 2 = right) is filled
+  // flush, 1px into the pad so the seam column is opaque, and draws no keyline; where it stands
+  // proud of a lower neighbour (bits 2-6 / 7-11) only that riser is outlined.
+  const jl = ground && (variant & 1) ? 1 : 0, jr = ground && (variant & 2) ? 1 : 0;
+  const eL = jl ? (variant >> 2) & 31 : 0, eR = jr ? (variant >> 7) & 31 : 0;
+  const xs = sx, xe = sx + w, ww = w, fx0 = jl ? xs - 1 : xs, fx1 = jr ? xe + 1 : xe;
+  const inset = G.island ? 3 : 0, x0 = xs + inset, x1 = xe - inset, yb = y + G.faceH;
   const r = ground ? 4 : Math.min(6, G.faceH / 2);
+  const flatTop = theme === 'stone' || theme === 'lava' || theme === 'cosmic';
+  const dip = flatTop ? 0 : (ground ? 1.5 : 1.1);   // the rolling top: crests ON the collision line, dips this far below it
   const keelPts = [];   // the underside, drawn from the seeded stream ONCE: filled, clipped and stroked alike
   if (G.keel) { const N = Math.max(3, Math.round(w / 26)); for (let i = N - 1; i >= 1; i--) { const t = i / N; keelPts.push([x0 + 6 + (x1 - x0 - 12) * t + (rng() - 0.5) * 6, yb + G.keel * Math.sin(Math.PI * t) * (0.55 + rng() * 0.45)]); } }
   const face = () => {
@@ -18833,46 +18949,78 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
       ctx.lineTo(x0 + 6, yb);
       ctx.quadraticCurveTo(x0 - 1, yb - 2, x0, y + cap * 0.5);
       ctx.closePath();
-    } else if (ctx.roundRect) ctx.roundRect(sx, y, w, G.faceH, ground ? [r, r, 0, 0] : [r, r, 3, 3]);
-    else ctx.rect(sx, y, w, G.faceH);
+    } else if (ctx.roundRect) ctx.roundRect(fx0, y, fx1 - fx0, G.faceH, ground ? [jl ? 0 : r, jr ? 0 : r, 0, 0] : [r, r, 3, 3]);
+    else ctx.rect(fx0, y, fx1 - fx0, G.faceH);
   };
+  const rr = ground ? 4 : Math.min(cap, 5);
+  const topA = xs + (jl ? 0 : rr), topB = xe - (jr ? 0 : rr);
+  const tops = _cuteTopPts(topA, topB, dip, rng);
+  const segs = _cuteEdgePts(ww, edge, rng);
+  const droop = wrap ? ((x) => { const t = Math.max(0, Math.min(1, Math.min(x, ww - x) / 10)); return wrap * (1 - t) * (1 - t); }) : null;
+  const capPath = () => {
+    ctx.beginPath();
+    if (jl) { ctx.moveTo(fx0, y + dip); ctx.lineTo(topA, y + dip); } else { ctx.moveTo(xs, y + rr); ctx.quadraticCurveTo(xs, y, topA, y + dip); }
+    for (const t of tops) ctx.quadraticCurveTo(t[0], y - dip, t[1], y + dip);
+    if (jr) { ctx.lineTo(fx1, y + dip); ctx.lineTo(fx1, y + cap); ctx.lineTo(xe, y + cap); } else { ctx.quadraticCurveTo(xe, y, xe, y + rr); ctx.lineTo(xe, y + cap + wrap); }
+    _cuteEdgeDraw(ctx, xs, y + cap, segs, droop);
+    if (jl) ctx.lineTo(fx0, y + cap);
+    ctx.closePath();
+  };
+  const capStroke = () => {   // the cap's outline, open where a side is joined, plus the riser of a step
+    ctx.beginPath();
+    if (jl) ctx.moveTo(topA, y + dip); else { ctx.moveTo(xs, y + cap + wrap); ctx.lineTo(xs, y + rr); ctx.quadraticCurveTo(xs, y, topA, y + dip); }
+    for (const t of tops) ctx.quadraticCurveTo(t[0], y - dip, t[1], y + dip);
+    if (jr) ctx.moveTo(xe, y + cap); else { ctx.quadraticCurveTo(xe, y, xe, y + rr); ctx.lineTo(xe, y + cap + wrap); }
+    _cuteEdgeDraw(ctx, xs, y + cap, segs, droop);
+    if (eL > 0) { ctx.moveTo(xs + 1, y + dip); ctx.lineTo(xs + 1, y + Math.min(eL, cap) + 1); }
+    if (eR > 0) { ctx.moveTo(xe - 1, y + dip); ctx.lineTo(xe - 1, y + Math.min(eR, cap) + 1); }
+    ctx.stroke();
+  };
+  const grain = _cuteGrain(ctx), gox = Math.floor(rng() * 96), goy = Math.floor(rng() * 96);
+  const grainOver = (x, yy, wd, ht, al) => { ctx.save(); ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = _pa * a * al; ctx.translate(gox, goy); ctx.fillStyle = grain; ctx.fillRect(x - gox, yy - goy, wd, ht); ctx.restore(); };
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   // 1. what hangs below goes first, so the face covers where it roots
   if (G.island && G.keel) _cuteHangers(ctx, x0, x1, yb, theme, rng, C, keelPts);
-  // 2. the face: bounce-lit under the lip, darkening with depth, material, occlusion under the lip
+  // 2. the face: bounce-lit under the lip, darkening with depth, material, grain, bevelled ends,
+  //    occlusion under the lip, and on a ground a fade into the keyline colour at the foot
   face();
   const gF = ctx.createLinearGradient(0, y + cap, 0, yb + G.keel);
   gF.addColorStop(0, C.bodyLt); gF.addColorStop(0.3, body); gF.addColorStop(1, C.bodyDk);
   ctx.fillStyle = gF; ctx.fill();
   ctx.save(); face(); ctx.clip();
-  _cuteMaterial(ctx, sx, y + cap, w, (yb + G.keel) - (y + cap), theme, rng, C, ground);
-  const gAO = ctx.createLinearGradient(0, y + cap - 1, 0, y + cap + 7);
-  gAO.addColorStop(0, 'rgba(0,0,0,0.34)'); gAO.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = gAO; ctx.fillRect(sx, y + cap - 1, w, 8);
-  if (ground) { const gB = ctx.createLinearGradient(0, y + h * 0.6, 0, y + h); gB.addColorStop(0, 'rgba(0,0,0,0)'); gB.addColorStop(1, 'rgba(0,0,0,0.28)'); ctx.fillStyle = gB; ctx.fillRect(sx, y + h * 0.6, w, h * 0.4); }
+  _cuteMaterial(ctx, xs, y + cap, ww, (yb + G.keel) - (y + cap), theme, rng, C, ground);
+  grainOver(xs, y, ww, G.faceH + G.keel + 2, 0.32);
+  if (!ground) {
+    const bL = ctx.createLinearGradient(x0, 0, x0 + 4, 0); bL.addColorStop(0, 'rgba(255,255,255,0.22)'); bL.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = bL; ctx.fillRect(x0, y, 4, G.faceH + G.keel);
+    const bR = ctx.createLinearGradient(x1 - 4, 0, x1, 0); bR.addColorStop(0, 'rgba(0,0,0,0)'); bR.addColorStop(1, 'rgba(0,0,0,0.26)'); ctx.fillStyle = bR; ctx.fillRect(x1 - 4, y, 4, G.faceH + G.keel);
+  }
+  const gAO = ctx.createLinearGradient(0, y + cap - 1, 0, y + cap + 8);
+  gAO.addColorStop(0, 'rgba(0,0,0,0.36)'); gAO.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = gAO; ctx.fillRect(xs, y + cap - 1, ww, 9 + wrap);
+  if (ground) { const gB = ctx.createLinearGradient(0, y + h * 0.55, 0, y + h); gB.addColorStop(0, 'rgba(0,0,0,0)'); gB.addColorStop(1, C.OUT); ctx.globalAlpha = _pa * a * 0.55; ctx.fillStyle = gB; ctx.fillRect(xs, y + h * 0.55, ww, h * 0.45); ctx.globalAlpha = _pa * a; }
   ctx.restore();
-  face(); ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; ctx.stroke();
-  // 3. the cap: the layer you stand on, full width and proud of the face, its edge hanging over it
-  const rr = ground ? 4 : Math.min(cap, 5);
-  const segs = _cuteEdgePts(w, edge, rng);
-  const capPath = () => {
-    ctx.beginPath();
-    ctx.moveTo(sx + rr, y); ctx.lineTo(sx + w - rr, y);
-    ctx.quadraticCurveTo(sx + w, y, sx + w, y + rr);
-    ctx.lineTo(sx + w, y + cap);
-    _cuteEdgeDraw(ctx, sx, y + cap, segs);
-    ctx.lineTo(sx, y + rr); ctx.quadraticCurveTo(sx, y, sx + rr, y);
-    ctx.closePath();
-  };
+  ctx.lineWidth = 2; ctx.strokeStyle = C.OUT;
+  if (ground) { ctx.beginPath(); if (jl) ctx.moveTo(xs, y + h); else { ctx.moveTo(xs, y + cap * 0.5); ctx.lineTo(xs, y + h); } ctx.lineTo(xe, y + h); if (!jr) ctx.lineTo(xe, y + cap * 0.5); ctx.stroke(); }
+  else { face(); ctx.stroke(); }
+  // 3. the cap: the layer you stand on - a rolling top, a sunlit layer over a shadowed one, its edge
+  //    hanging over the face and curling down the ends of a floating platform
   capPath();
   const gC = ctx.createLinearGradient(0, y, 0, y + cap + 3);
   gC.addColorStop(0, C.topLt); gC.addColorStop(0.45, top); gC.addColorStop(1, C.topDk);
   ctx.fillStyle = gC; ctx.fill();
   ctx.save(); capPath(); ctx.clip();
-  _cuteCapTexture(ctx, sx, y, w, cap, theme, rng, C);
-  ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.fillRect(sx + rr, y + 1.5, Math.max(0, w - 2 * rr), 1.5);   // rim light
+  const lit = _cuteLit(theme, C);
+  if (lit) {
+    const ly = y + cap * lit.frac;
+    ctx.beginPath(); ctx.moveTo(xs, y - 3); ctx.lineTo(xe, y - 3); ctx.lineTo(xe, ly);
+    let xx = ww; while (xx > 0.5) { const bw = Math.min(xx, 9 + rng() * 12), xa = xx - bw; ctx.quadraticCurveTo(xs + xa + bw / 2, ly + (lit.bump ? (rng() * 2 - 0.4) * cap * 0.3 : 0), xs + xa, ly + (lit.bump ? (rng() - 0.5) * cap * 0.12 : 0)); xx = xa; }
+    ctx.closePath(); ctx.fillStyle = lit.color; ctx.globalAlpha = _pa * a * lit.alpha; ctx.fill(); ctx.globalAlpha = _pa * a;
+  }
+  _cuteCapTexture(ctx, xs, y, ww, cap, theme, rng, C);
+  grainOver(xs, y - 2, ww, cap + wrap + 4, 0.22);
+  ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.fillRect(topA, y + 2, Math.max(0, topB - topA), 1.4);   // rim light, below the dips
   ctx.restore();
-  capPath(); ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; ctx.stroke();
+  ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; capStroke();
   // 4. over the edge, then 5. what stands on the surface (into the bake's top pad)
   _cuteDroops(ctx, sx, y + cap, w, theme, rng, C, ground);
   _cuteDecor(ctx, sx, y, w, theme, rng, C, ground);
@@ -115133,7 +115281,7 @@ function drawPlatforms() {
       // cel-shaded slab with a lit "surface" cap (grass/snow/sand/…), a dark
       // earthy body, a gloss line, and a crisp 2px black outline. The old
       // MAP_FLOOR_OVERRIDES data + _pickMapFloorOverride() stay as dead code.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, true, _th, 0);
+      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, true, _th, _lxGroundJoin(p));   // v0.30.613 - joined sides draw no keyline
     } else {
       // v0.29.x — CUTE procedural floating platform. Same cel-shaded, black-
       // outlined slab as the floor but rounded on top for a friendlier read.
