@@ -29,8 +29,13 @@ const PIL = 'Sprites/vfx/sovereign_drain_pillar.webp';
 ok('the drain pillar art ships', existsSync(PIL) && statSync(PIL).size > 20000, { kb: existsSync(PIL) ? Math.round(statSync(PIL).size / 1024) : 0 });
 ok('...and is committed (origin/main)', inTree(PIL), {});
 ok('...and the engine loads it as the drainPillar VFX', /drainPillar:\s*'sovereign_drain_pillar\.webp'/.test(src), {});
-ok('...drawn stretched into the pillar band, with the edges, rain and label still painted by the engine',
-   /ctx\.drawImage\(_dpImg, _px, 0, h\.w, _ph\);/.test(src) && /ctx\.strokeRect\(_px, 0, h\.w, _ph\);/.test(src), {});
+// v0.30.578 (per user: "this part should not be squished") - the art keeps its own aspect: scaled by
+// height, centred on the band, overhanging it where the crown is wider. The telegraph itself - halo,
+// pulsing edges, rain, label - is still drawn from h.w, so the boundary the player reads is unchanged.
+ok('...drawn at its own aspect, scaled by height and centred on the band (not squashed into it)',
+   /const _dpDw = _ph \* _dpAw \/ _dpAh;\s*\n\s*ctx\.drawImage\(_dpImg, _px \+ \(h\.w - _dpDw\) \/ 2, 0, _dpDw, _ph\);/.test(src), {});
+ok('...with the edges, rain and label still painted by the engine from the band width', /ctx\.strokeRect\(_px, 0, h\.w, _ph\);/.test(src), {});
+ok('...and the old squashed draw is gone', !/ctx\.drawImage\(_dpImg, _px, 0, h\.w, _ph\);/.test(src), {});
 
 const fails = results.filter((r) => !r.pass);
 for (const r of results) console.log((r.pass ? 'PASS  ' : 'FAIL  ') + r.n + (r.x && Object.keys(r.x).length ? '  ' + JSON.stringify(r.x) : ''));
