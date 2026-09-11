@@ -552,6 +552,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "fx_leo_slam": 9,
    "fx_shard": 9,
    "fx_voidbeam": 9,
+   "gravitos_singularity_zone": 9,
    "grav_impact": 9,
    "hexmaster_grandhex": 1,
    "hexmaster_ult": 9,

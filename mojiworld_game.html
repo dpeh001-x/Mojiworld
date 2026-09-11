@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.572';
+const GAME_VERSION = 'v0.30.573';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13379,6 +13379,7 @@ const _FX_ANIM_KEYS = new Set([
   // v0.30.547 — 'dash_mage' / 'dash_warrior' / 'dash_rogue' / 'dash_archer' were listed here
   // (v0.30.465 / v0.30.469); the loops are removed per user, so the keys are gone too — an
   // unlisted key never asks the folder for frames that do not exist.
+  'gravitos_singularity_zone',   // v0.30.573 — the Singularity safe zone breathes (anim/gravitos_singularity_zone_0..8, gen_safezone_anim.mjs)
   'arcane_shockwave',   // v0.29.951 — the AoE ring animates too: runes pulse around the band, arcs snap across it
   'quakeRing',          // v0.29.967 — boss quake ground ring: dust rolls outward, plates settle (frameGap 5 at the spawn site)
   'tg_dash_zodiac_taurus',   // v0.30.451 — Taur's charge lane is the first ANIMATED zone telegraph (see _lxAttackZones' draw)
@@ -139523,22 +139524,27 @@ function drawHazards(_behindPass) {
       // footprint at 1.2× scale so the painted "safe haven" reads
       // beyond the strict rect edge, with the procedural rect + label
       // drawing on top for legibility.
-      const _szReady = _lxFxReady(LX_FX.gravitos_singularity_zone);
+      // v0.30.573 — THE RING BREATHES, AND THERE IS NO BOX (per user: "regenerated to look less box
+      // like, remove the whitish outline, animated"). The marker is a ring of light lying on
+      // the ground (gen_safezone_anim.mjs), round on the sheet and feathered to a clear border,
+      // so the stretch into the zone rect makes an oval pool of light with nothing square
+      // about it. Nine frames loop at 4 ticks each; the static sprite is the fallback until
+      // they decode. Still drawn at the EXACT rect and not one pixel past it - the rect is the
+      // lethal boundary (see scripts/gravitos_safezone_draw_test.mjs).
+      const _szFrames = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames('gravitos_singularity_zone') : null;
+      let _szImg = null;
+      if (_szFrames && _szFrames.length) {
+        const _f = _szFrames[Math.floor(game.time / 4) % _szFrames.length];
+        if (_f && _f.complete && _f.naturalWidth > 0) _szImg = _f;
+      }
+      if (!_szImg && _lxFxReady(LX_FX.gravitos_singularity_zone)) _szImg = LX_FX.gravitos_singularity_zone;
+      const _szReady = !!_szImg;
       for (const z of zones) {
         const _zx = z.x - _camX;
         if (_szReady) {
-          // v0.30.x — was 12, i.e. the painted haven bled 12 px past the rect
-          // on every side. That was authored deliberately ("so the painted
-          // safe haven reads beyond the strict rect edge") back when a violet
-          // outline still marked the real boundary. With the outline gone the
-          // sprite IS the boundary the player reads, and it has to tell the
-          // truth: 0 pad, exact footprint.
-          const _szPad = 0;
           ctx.save();
-          ctx.globalAlpha = 0.85 + Math.sin(tt * 1.3) * 0.10;
-          ctx.drawImage(LX_FX.gravitos_singularity_zone,
-            _zx - _szPad, z.y - _szPad,
-            z.w + _szPad * 2, z.h + _szPad * 2);
+          ctx.globalAlpha = 0.92 + Math.sin(tt * 1.3) * 0.06;
+          ctx.drawImage(_szImg, _zx, z.y, z.w, z.h);
           ctx.restore();
         }
         // v0.30.x (per user: "remove the rectangle border and outline") —
@@ -139555,19 +139561,24 @@ function drawHazards(_behindPass) {
         // footprint and not one pixel beyond it: no stroke, no edge band, so
         // the zone reads as lit ground rather than a boxed-in rectangle, and
         // every lit pixel is a pixel that is actually safe.
-        const _zg = ctx.createLinearGradient(0, z.y, 0, z.y + z.h);
-        const _za = _szReady ? 0.14 : (0.34 + Math.sin(tt * 1.3) * 0.07);
-        _zg.addColorStop(0,    'rgba(255,246,196,' + (_za * 1.15).toFixed(3) + ')');
-        _zg.addColorStop(0.55, 'rgba(255,240,180,' + _za.toFixed(3) + ')');
-        _zg.addColorStop(1,    'rgba(255,232,160,' + (_za * 0.55).toFixed(3) + ')');
-        ctx.fillStyle = _zg;
-        ctx.fillRect(_zx, z.y, z.w, z.h);
-        // 'SAFE' label centred in the rect
+        // v0.30.573 — the cream wash over the rect is gone (it was the "whitish box"). Only when
+        // no art has decoded at all does a faint pale wash still mark the footprint, so a
+        // cold first load never leaves the player with nothing to run to.
+        if (!_szReady) {
+          const _za = 0.30 + Math.sin(tt * 1.3) * 0.07;
+          ctx.fillStyle = 'rgba(200,232,255,' + _za.toFixed(3) + ')';
+          ctx.fillRect(_zx, z.y, z.w, z.h);
+        }
+        // 'SAFE' label centred in the rect: pale over the blue ring, with an ink edge so it
+        // reads on the bright rim and the dark veil alike
         ctx.save();
-        ctx.fillStyle = 'rgba(40, 16, 50, 0.92)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = 'bold 14px Inter, system-ui, sans-serif';
+        ctx.lineWidth = 3; ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(18, 8, 34, 0.85)';
+        ctx.strokeText('SAFE', _zx + z.w / 2, z.y + z.h / 2);
+        ctx.fillStyle = 'rgba(236, 246, 255, 0.96)';
         ctx.fillText('SAFE', _zx + z.w / 2, z.y + z.h / 2);
         ctx.restore();
       }

@@ -60,7 +60,7 @@ const r = await page.evaluate(() => {
     zoneStrokes, zoneFills, zoneBlits,
     fillsOutside: zoneFills.filter(outside),
     blitsOutside: zoneBlits.filter(outside),
-    coversZone: zoneFills.some(o => Math.abs(o.x - Z.x) < 0.5 && Math.abs(o.y - Z.y) < 0.5 &&
+    coversZone: zoneBlits.some(o => Math.abs(o.x - Z.x) < 0.5 && Math.abs(o.y - Z.y) < 0.5 &&
                                     Math.abs(o.w - Z.w) < 0.5 && Math.abs(o.h - Z.h) < 0.5),
   };
 });
@@ -73,8 +73,8 @@ console.log('\nNO RECTANGLE BORDER OR OUTLINE');
 check(r.zoneStrokes.length === 0, 'no strokeRect is drawn on the safe zone', r.zoneStrokes);
 
 console.log('\nTHE ZONE IS STILL READABLE');
-check(r.zoneFills.length > 0, 'something still fills the zone (guards a vacuous pass)', r.zoneFills.length);
-check(r.coversZone, 'a fill covers the zone rect exactly', r.zoneFills);
+check(r.zoneBlits.length > 0, 'the ring sprite is drawn on the zone (guards a vacuous pass)', r.zoneBlits.length);   // v0.30.5xx - the cream wash is gone; the sprite is the cue
+check(r.coversZone, 'the sprite blit covers the zone rect exactly', r.zoneBlits);
 
 console.log('\nNOTHING PAINTS OUTSIDE THE LETHAL BOUNDARY');
 check(r.fillsOutside.length === 0, 'no fill extends past the safe rect', r.fillsOutside);
