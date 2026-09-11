@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.585';
+const GAME_VERSION = 'v0.30.586';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -93851,7 +93851,7 @@ function _lxSpireSeatChest(ch, floor) {
 function _tickSpireDrift() {
   // v0.30.463 — B6 uses the same drifting-floor machinery as the Spire (it is authored by the same
   // generator), so the gate covers both rather than the tick being copied.
-  if (game.currentMap !== 'clockworkSpire' && game.currentMap !== 'tower_b6') return;
+  if (game.currentMap !== 'clockworkSpire' && game.currentMap !== 'tower_b6' && game.currentMap !== 'gravitosArena') return;   // v0.30.586 — the Singularity drifts too (tagged in _lxGravArenaReset)
   const md = game.mapData;
   if (!md || !Array.isArray(md.platforms)) return;
   const T = (game.time || 0) * (Math.PI * 2 / 360);   // ~6 s per full sweep at 60 fps
@@ -93888,6 +93888,12 @@ function _tickSpireDrift() {
   if (Array.isArray(game.chests)) for (const c of game.chests) {
     const d = c && c._spireFloor != null ? moved[c._spireFloor] : null;
     if (d) { c.x += d.dx; c.y += d.dy; }
+  }
+  // v0.30.586 — launch pads ride their platform (the Singularity's y:320 pair carry one each); a pad
+  // left at its authored x while the shelf swings 64px away would launch from mid-air.
+  if (game.mapData && Array.isArray(game.mapData.launchPads)) for (const lp of game.mapData.launchPads) {
+    const d = lp && lp._spireFloor != null ? moved[lp._spireFloor] : null;
+    if (d) { lp.x += d.dx; lp.y += d.dy; }
   }
   if (Array.isArray(game.hazards)) for (const h of game.hazards) {
     const d = h && h._spireFloor != null ? moved[h._spireFloor] : null;
@@ -114020,6 +114026,37 @@ function _lxGravArenaReset() {
   _lxGravTintCur = null;
   _lxGravTintTo = _LX_GRAV_TINT[1];
   _lxGravFinaleBg = false;   // v0.30.566 — the finale clip is a state of the fight, not of the map: every entry starts on gravitos.mp4
+  // v0.30.586 — THE FLOOR DRIFTS (per user: "make the platforms in the map drift similarly to pq
+  // stage 2 but to a larger extent"). Same engine as the Spire (_tickSpireDrift: position
+  // recomputed from an authored base each frame, the standing player carried), horizontal only -
+  // at 3x gravity a shelf that also rises and sinks under a jump is a trap, not a hazard - and
+  // larger: the Spire sways 14-26px, these 56-72px. Two platforms deliberately stay put:
+  //   y:480 ground   every portal resolves its floor onto the ground slab (_defaultPortalY), and a
+  //                  portal is a FIXED world x - a drifting floor would slide out from under it;
+  //   y:260 centre   both collapse patterns hard-code it (midPlatY = 260) for their safe boxes,
+  //                  so it is the arena's anchor; the six around it swing.
+  // Neighbouring pairs are put in anti-phase so the pair never travels together, and each row
+  // gets its own phase so the arena reads as scattered, not as one sheet sliding.
+  try {
+    if (typeof game !== 'undefined' && game && game.currentMap === 'gravitosArena' && game.mapData && Array.isArray(game.mapData.platforms)) {
+      const _AMP = { 380: 56, 320: 64, 180: 72 };
+      const plats = game.mapData.platforms; let fi = 0;
+      for (const p of plats) {
+        if (!p || p.type !== 'platform') continue;
+        p._spireFloor = ++fi;
+        p._driftBaseX = p.x; p._driftBaseY = p.y;
+        const amp = _AMP[p.y] || 0;
+        if (!amp) { p._driftAx = 0; p._driftAy = 0; p._driftPhase = 0; continue; }
+        const left = p.x < 1100;
+        p._driftAx = amp; p._driftAy = 0;
+        p._driftPhase = (p.y === 380 ? 0 : p.y === 320 ? 2.1 : 4.2) + (left ? 0 : Math.PI);
+      }
+      if (Array.isArray(game.mapData.launchPads)) for (const lp of game.mapData.launchPads) {
+        const host = plats.find((p) => p && p.type === 'platform' && lp.y === p.y && lp.x >= p.x - 4 && (lp.x + lp.w) <= (p.x + p.w + 4));
+        if (host) lp._spireFloor = host._spireFloor;
+      }
+    }
+  } catch (e) {}
 }
 
 // Mark this form's platforms as doomed. They stay SOLID through the telegraph:
@@ -114044,8 +114081,11 @@ function _lxGravCollapse(phase) {
       // Matched on authored coordinates rather than an index, so a future edit
       // to the platform list cannot silently collapse the wrong slab: a
       // platform that is not found is simply skipped.
+      // v0.30.586 — matched on the drift BASE when the platform swings (its live x is anywhere within
+      // +-72px of authored), and never the ground: every portal resolves its floor onto the
+      // ground slab, and the arena's exits must survive both form changes (per user).
       const p = (game.mapData.platforms || []).find(
-        (q) => q && q.x === t.x && q.y === t.y && !q._lxDoomed);
+        (q) => q && q.type !== 'ground' && (q._driftBaseX != null ? q._driftBaseX : q.x) === t.x && (q._driftBaseY != null ? q._driftBaseY : q.y) === t.y && !q._lxDoomed);
       if (!p) continue;
       p._lxDoomed = _LX_GRAV_TELL_MS;
       n++;
