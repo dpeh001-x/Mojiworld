@@ -53,16 +53,26 @@ const STYLE = ' Chunky chibi cartoon game UI in the style of a cute mobile RPG: 
 // Per user, on seeing the gold-rails-and-gem crest candidates: "the style can be a little less
 // gothic classical". So: no crest, no gems, no filigree or engraving - a soft rounded tube of a
 // frame with big round end caps and one small plain star badge, toy-like rather than regal.
-const FRAME_PROMPT = 'A BOSS HEALTH BAR FRAME for a cute cartoon 2D game, very wide and thin, seen straight on: '
-  + 'ONE single closed frame shaped like a long thin rounded capsule - a continuous chunky rounded border, like '
-  + 'a soft smooth tube, running all the way round: along the top, round the right end, along the bottom and '
-  + 'back round the left end - so the top rail and the bottom rail are CONNECTED at both ends by big smooth '
-  + 'rounded end caps. Simple, friendly and playful: smooth rounded shapes only, NO filigree, NO scrollwork, '
-  + 'NO baroque or gothic ornament, NO gems, NO engraving, NO spikes. Warm golden-yellow with a deeper '
-  + 'orange-brown underside, cel shaded, one small plain round star badge sitting on the middle of the top rail. '
-  + 'The rails are slim, about a third as thick as the slot between them. The long slot INSIDE the frame MUST '
-  + 'be completely empty and transparent - a hollow open window where a health fill will show through from '
-  + 'behind - nothing painted inside it, no fill, no red bar, no gradient, no glass.' + STYLE;
+// Third steer, on the toy capsule with the star badge: "this is too cartoonish". Between the
+// gothic filigree (v1) and the toy (v2b) sits the register the rest of the game's UI panels use -
+// a sleek anime-RPG plate: dark graphite metal with slim gold trim, angular gold end caps, one
+// small diamond emblem. Refined, not cute; simple, not baroque. The style tail below is this
+// prompt's own; the chibi STYLE line is for sprites, and it is what made the capsule a toy.
+const FRAME_STYLE = ' Sleek modern fantasy-RPG game UI, the kind a polished anime action RPG uses for its boss '
+  + 'bar: crisp clean vector-like edges, a fine dark outline, subtle bevel and soft highlight on the gold, flat '
+  + 'shading, refined and elegant but SIMPLE. Not chibi, not cute, not a toy, not cartoonish, not photoreal. '
+  + 'Flat 2D UI sprite on a fully transparent background, no drop shadow, no scenery, no text, no numbers, no '
+  + 'letters, no watermark.';
+const FRAME_PROMPT = 'A BOSS HEALTH BAR FRAME for a 2D action RPG, very wide and thin, seen straight on: ONE single '
+  + 'closed frame around a long thin slot - a continuous border running all the way round: a slim rail of dark '
+  + 'graphite metal edged with a thin bright gold trim line along the top and along the bottom, and at each end '
+  + 'a solid angular gold end cap shaped like a short pointed chevron that CONNECTS the top rail to the bottom '
+  + 'rail and closes the frame. One small gold diamond-shaped emblem sits centred on the top rail. Clean and '
+  + 'restrained: NO filigree, NO scrollwork, NO baroque or gothic ornament, NO gems other than the one diamond '
+  + 'emblem, NO stars, NO spikes, NO engraving. The rails are slim, about a quarter as thick as the slot between '
+  + 'them. The long slot INSIDE the frame MUST be completely empty and transparent - a hollow open window where '
+  + 'a health fill will show through from behind - nothing painted inside it, no fill, no red bar, no gradient, '
+  + 'no glass.' + FRAME_STYLE;
 const FILL_PROMPT = 'A HEALTH BAR FILL texture for a 2D game: a very wide thin horizontal ribbon of glossy '
   + 'bright crimson-red to hot-pink liquid energy, flat cel shaded - a lighter pink band across the top third '
   + 'with a crisp white glossy highlight streak, a deeper red band along the bottom, a few small round '
@@ -127,7 +137,26 @@ function measureFrame(p) {
     floX0 = Math.max(capL, floX0 - 4); floX1 = Math.min(W - capR, floX1 + 4);   // a little air so the badge's outline is never on a stretched slice
   }
   capL = Math.max(capL, hx0); capR = Math.max(capR, W - hx1);
-  return { W, H, hy0, hy1, hx0, hx1, capL, capR, floX0, floX1, rail, hollowClear: +hollowClear.toFixed(3) };
+  // CORNER INSET: how much further in the hollow's edge sits at its top and bottom rows than at
+  // its middle row. A capsule's hollow is rounded, a chevron's is angled, and the game draws the
+  // trough and fill as a RECTANGLE - so at each end the fill stopped flat inside a curved cap with
+  // dark wedges in the corners (per user: "there is a cutoff at the edge"). The draw code clips
+  // the trough and fill to a rounded rect of this radius so the fill follows the frame.
+  const inset = (row) => { let l = W >> 1, r = W >> 1; while (l > 0 && A(l - 1, row) < 128) l--; while (r < W && A(r, row) < 128) r++; return Math.max(l - hx0, hx1 - r, 0); };
+  const cin0 = Math.max(inset(hy0 + 1), inset(hy1 - 2), Math.round((inset(hy0 + Math.round((hy1 - hy0) * 0.25)) + inset(hy1 - Math.round((hy1 - hy0) * 0.25))) * 1.3));
+  // ...but never further than the cap's opaque body covers on its thinnest hollow row, or the
+  // trough would show past the frame's outer edge. (The sleek chevron covers ~47px at every row
+  // against a 33px inset; a capsule's outer curve could be thinner than its inner one.)
+  let cover = W; for (let y = hy0; y < hy1; y++) { let fo = 0; while (fo < W && A(fo, y) < 128) fo++; let lo = W - 1; while (lo > 0 && A(lo, y) < 128) lo--;
+    let hl = W >> 1; while (hl > 0 && A(hl - 1, y) < 128) hl--; let hr = W >> 1; while (hr < W && A(hr, y) < 128) hr++; cover = Math.min(cover, hl - fo, lo - hr); }
+  const cin = Math.max(0, Math.min(cin0, cover - 4));
+  // HOLLOW OUTLINE, sampled: [row, leftEdge, rightEdge] at nine rows from the hollow's top to its
+  // bottom. The draw code clips the trough and fill to this polygon, so the fill reaches exactly
+  // the hollow's corners - rounded, chamfered or square - and never past the cap's outer edge.
+  // (A rectangle cannot do both on a chevron: its inner and outer edges are parallel, so what
+  // reaches the top corner pokes out above the tip.)
+  const hpoly = []; for (let i = 0; i < 9; i++) { const r = Math.round(hy0 + (hy1 - 1 - hy0) * i / 8); let l = W >> 1, rr = W >> 1; while (l > 0 && A(l - 1, r) < 128) l--; while (rr < W && A(rr, r) < 128) rr++; hpoly.push([r, l, rr]); }
+  return { W, H, hy0, hy1, hx0, hx1, capL, capR, floX0, floX1, cin, capCover: cover, hpoly, rail, hollowClear: +hollowClear.toFixed(3) };
 }
 function gateFrame(g, c) {
   const bad = []; if (!g) return ['no hollow strip: no row band across the middle 60% of the width is transparent'];
@@ -137,7 +166,9 @@ function gateFrame(g, c) {
   if (g.hollowClear < 0.97) bad.push(`hollow not really hollow (${(100 * g.hollowClear).toFixed(1)}% clear, want >= 97%)`);
   if (g.capL > g.W * 0.3 || g.capR > g.W * 0.3) bad.push(`end caps eat the bar (${g.capL} / ${g.capR}px)`);
   if (g.floX1 - g.floX0 > g.W * 0.4) bad.push(`centre crest too wide (${g.floX1 - g.floX0}px)`);
-  if (c.dark < 0.04) bad.push(`no keyline (${(100 * c.dark).toFixed(1)}% near-black)`); if (c.bright < 0.25) bad.push(`too dark to read (${(100 * c.bright).toFixed(0)}% bright)`);
+  // bright >= 12%, not 25%: a graphite frame with gold trim is MEANT to be mostly dark, and the
+  // trim is what has to read over the fill. The old filigree measured 4%; the gold capsule 50%.
+  if (c.dark < 0.04) bad.push(`no keyline (${(100 * c.dark).toFixed(1)}% dark)`); if (c.bright < 0.12) bad.push(`too dark to read (${(100 * c.bright).toFixed(0)}% bright)`);
   return bad;
 }
 function gateFill(c) {

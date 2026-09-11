@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.570';
+const GAME_VERSION = 'v0.30.571';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -142750,7 +142750,14 @@ function _sbbPal(phase, hyper) {
 // through; hx0..hx1 its horizontal extent; capL/capR the end caps that are never stretched;
 // floX0..floX1 the centre crest (equal when there is none). Regenerate the art, re-run the
 // measure, and replace this block - do not eyeball it.
-const _BB_GEOM = { W: 1024, H: 232, hy0: 75, hy1: 188, hx0: 52, hx1: 973, capL: 67, capR: 66, floX0: 477, floX1: 548 };
+// v0.30.571 — regenerated again (per user: "too cartoonish"); cin is the hollow's CORNER INSET - how
+// much further in its edge sits at the top and bottom rows than at the middle - which the trough
+// and fill run under the caps by, so they follow the frame's ends instead of stopping flat.
+// hpoly is the hollow's outline, [row, leftEdge, rightEdge] at nine rows top to bottom: what the
+// trough and fill are clipped to, so they reach the hollow's corners exactly and never past the
+// cap's outer edge (a rectangle cannot do both on a chevron).
+const _BB_GEOM = { W: 1024, H: 120, hy0: 43, hy1: 95, hx0: 49, hx1: 976, capL: 69, capR: 67, floX0: 495, floX1: 529, cin: 33,
+  hpoly: [[43,74,951],[49,68,957],[56,61,964],[62,55,970],[69,49,976],[75,55,970],[81,61,964],[88,68,957],[94,74,951]] };
 // v0.30.565 — where the frame's top and bottom land on screen for a bar of height h at y, from
 // _BB_GEOM; the name and the state chip are seated off these so a taller frame cannot collide
 // with either. (Pure functions of h — cheap enough to call per draw.)
@@ -142934,24 +142941,45 @@ function drawSuperBossBar() {
   // 2. Phase-tinted bloom, then the recessed trough it sits in.
   ctx.fillStyle = _G.glow;
   ctx.fillRect(x - 22, y - 9, barW + 44, barH + 18);
+  // v0.30.571 — THE CUTOFF. The hollow is not a rectangle (a capsule's ends are rounded, a
+  //    chevron's angled) and the trough and fill were, so at each end the fill stopped flat
+  //    inside the cap with dark wedges in the corners. Both now run _bbExt past the bar on
+  //    each side - the hollow's measured corner inset, in screen px - and the cap's opaque body
+  //    hides the ends. The main trough rect keeps its exact geometry (the dynamics test reads
+  //    the bar off it); the extensions are two extra rects under the caps.
+  const _bbExt = _bbArt ? _BB_GEOM.cin * barH / (_BB_GEOM.hy1 - _BB_GEOM.hy0) : 0;
+  ctx.save();
+  if (_bbArt && _BB_GEOM.hpoly) {
+    // ...and clipped to the hollow's measured outline, so what runs under the caps stops at the
+    //    cap's inner edge on every row - rounded, chamfered or square - and never shows past its
+    //    outer edge. hpoly rows map onto the bar's height; its columns onto the bar's ends.
+    const _g = _BB_GEOM, _sx = barH / (_g.hy1 - _g.hy0), _sy = barH / Math.max(1, _g.hy1 - 1 - _g.hy0), _P = _g.hpoly;
+    ctx.beginPath();
+    for (let _i = 0; _i < _P.length; _i++) { const _yy = y + (_P[_i][0] - _g.hy0) * _sy, _xx = x + (_P[_i][1] - _g.hx0) * _sx; if (_i) ctx.lineTo(_xx, _yy); else ctx.moveTo(_xx, _yy); }
+    for (let _i = _P.length - 1; _i >= 0; _i--) ctx.lineTo(x + barW + (_P[_i][2] - _g.hx1) * _sx, y + (_P[_i][0] - _g.hy0) * _sy);
+    ctx.closePath(); ctx.clip();
+  }
   ctx.fillStyle = _G.trough;
   ctx.fillRect(x, y, barW, barH);
+  if (_bbExt > 0) { ctx.fillRect(x - _bbExt, y, _bbExt, barH); ctx.fillRect(x + barW, y, _bbExt, barH); }
 
   // 3. FILL. The ribbon is source-cropped by HP% (it drains instead of squashing),
   //    then lit: a bright crown, a shaded belly, and a specular along the top third.
   if (fillW > 0.5) {
+    // v0.30.571 — the fill starts under the left cap, and at full HP ends under the right one
+    const _fx = x - _bbExt, _fw = fillW + _bbExt + (_drawPct >= 0.999 ? _bbExt : 0);
     if (_bbArt) {
       const _srcW = Math.max(1, Math.floor(_bbFill.naturalWidth * _drawPct));
-      ctx.drawImage(_bbFill, 0, 0, _srcW, _bbFill.naturalHeight, x, y, fillW, barH);
+      ctx.drawImage(_bbFill, 0, 0, _srcW, _bbFill.naturalHeight, _fx, y, _fw, barH);
       ctx.fillStyle = _P.tint;
     } else {
       ctx.fillStyle = _getSBossBarGrad(phase, x, barW);
     }
-    ctx.fillRect(x, y, fillW, barH);
+    ctx.fillRect(_fx, y, _fw, barH);
     ctx.fillStyle = _G.shade;
-    ctx.fillRect(x, y, fillW, barH);
+    ctx.fillRect(_fx, y, _fw, barH);
     ctx.fillStyle = _G.gloss;
-    ctx.fillRect(x + 1, y + 1, Math.max(0, fillW - 2), barH * 0.46);
+    ctx.fillRect(_fx + 1, y + 1, Math.max(0, _fw - 2), barH * 0.46);
   }
 
   // 4. GHOST CHIP — the HP just lost, receding: brightest where the fill stood,
@@ -142974,8 +143002,8 @@ function drawSuperBossBar() {
     ctx.restore();
   }
   // Bevel: a dark lip along the top of the recess, a lit one along the bottom.
-  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x, y, barW, 1);
-  ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y + barH - 1, barW, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x - _bbExt, y, barW + 2 * _bbExt, 1);
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x - _bbExt, y + barH - 1, barW + 2 * _bbExt, 1);
 
   // 6. Hot leading edge — where the HP is being spent.
   if (fillW > 3 && _drawPct < 0.999) {
@@ -142989,6 +143017,7 @@ function drawSuperBossBar() {
     ctx.fillStyle = 'rgba(255,255,255,' + (0.45 * _pp * _pp).toFixed(3) + ')';
     ctx.fillRect(x, y, fillW, barH);
   }
+  ctx.restore();   // v0.30.571 — end of the hollow clip
 
   // 7. FRAME, 3-sliced at natural aspect. v0.30.565 — the source geometry is no longer
   //    hardcoded from one look at the art: _BB_GEOM (below) is what
