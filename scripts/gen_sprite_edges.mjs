@@ -33,10 +33,15 @@
 // when that edge is clean. A sprite with no cut edges stores "". A sprite
 // ABSENT from the table is unknown, not clean, and still probes live.
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+// The checkout this file lives in, NOT a fixed path: a hardcoded root made a
+// run from a git worktree probe the main checkout's Sprites/ and overwrite its
+// data/sprite_edges.js, clobbering a parallel session's uncommitted table.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT_URL = pathToFileURL(ROOT).href + '/';   // file:///C:/.../ for the page
 const OUT = join(ROOT, 'data', 'sprite_edges.js');
 const CHECK = process.argv.includes('--check');
 // Every tree whose sprites can reach the feather probe.
@@ -59,14 +64,14 @@ console.log('sprites to probe: ' + keys.length);
 
 const browser = await chromium.launch({ channel: 'msedge', args: ['--allow-file-access-from-files'] });
 const page = await browser.newPage();
-await page.goto('file:///C:/Users/dpeh0/Mojiworld/data/', { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.goto(ROOT_URL + 'data/', { waitUntil: 'domcontentloaded' }).catch(() => {});
 await page.setContent('<body></body>');
 
 const CHUNK = 150;
 const table = {};
 for (let i = 0; i < keys.length; i += CHUNK) {
   const batch = keys.slice(i, i + CHUNK);
-  const got = await page.evaluate(async (batch) => {
+  const got = await page.evaluate(async ({ batch, base }) => {
     const S = 48;
     const cv = document.createElement('canvas');
     cv.width = S; cv.height = S;
@@ -91,7 +96,7 @@ for (let i = 0; i < keys.length; i += CHUNK) {
       const img = await new Promise((r) => {
         const im = new Image();
         im.onload = () => r(im); im.onerror = () => r(null);
-        im.src = 'file:///C:/Users/dpeh0/Mojiworld/Sprites/' + rel;
+        im.src = base + rel;
       });
       if (!img || !img.naturalWidth) continue;      // 404 / broken: leave absent
       try { if (img.decode) await img.decode(); } catch (e) {}
@@ -99,7 +104,7 @@ for (let i = 0; i < keys.length; i += CHUNK) {
       out[rel] = (v === '|||') ? '' : v;            // no cut edges -> clean
     }
     return out;
-  }, batch);
+  }, { batch, base: ROOT_URL + 'Sprites/' });
   Object.assign(table, got);
   process.stdout.write('  probed ' + Math.min(i + CHUNK, keys.length) + '/' + keys.length + '\r');
 }
