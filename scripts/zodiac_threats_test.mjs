@@ -6,7 +6,7 @@
 //
 //   scorpio    contact >= 40% of the player's max HP
 //   capricorn  projectile >= 32% of max HP
-//   aquarius   projectile seals potions for 45s (2700 sim frames)
+//   aquarius   projectile seals potions for 15s (900 sim frames) - was 45 s, capped at 15 s per user in v0.30.621
 //   pisces     atk doubled in the live stat table
 //
 // CONTROLS matter more than usual here: a floor that fires for EVERY sign
@@ -156,7 +156,7 @@ ok('CONTROL: an untouched sign\'s contact is NOT floored', R.libraTouch.pct >= 0
    `libra contact ${R.libraTouch.pct}%`);
 ok('CONTROL: no potion seal before an aquarius hit (nor from capricorn)',
    R.sealBefore === false && R.sealAfterCap === false);
-ok('aquarius projectiles seal potions for 45s', R.sealFrames > 2600 && R.sealFrames <= 2700,
+ok('aquarius projectiles seal potions for 15s', R.sealFrames > 800 && R.sealFrames <= 900,
    `${R.sealFrames} sim frames (~${(R.sealFrames / 60).toFixed(0)}s at 60Hz)`);
 ok('...and the seal actually refuses a drink', R.healed === 0,
    `potion healed ${R.healed} hp while sealed`);

@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// Potion hotkey - v0.30.611. Per user: "Another bug, I am unable to use my potions (when i press the hotkey)".
+// Potion hotkey and potion seals. Per user: "Another bug, I am unable to use my potions (when i press the hotkey)"
+// (v0.30.614), then "potions seal should not last longer than 15s. Ensure that players can use potions when not
+// sealed" (v0.30.619).
 //
-// Two halves. (1) Aquarius's seal: v0.30.297 seals potions for 45 s on her projectiles; a live seal was refreshed to
-// a full 45 s by every sealing hit, and once v0.30.601 tagged every zodiac projectile her homing droplets landed every
-// few seconds - potions never came back for the whole fight. A seal is now 45 s, never extended while live, and cannot
-// be re-applied for 15 s after it lapses. (2) The hotkey never fails silently: a Disabled slot says so, a slot missing
-// from the bind table is repaired, and the old key of a rebound potion says where the potion went.
-// Driven through the real keydown listener and the real impact resolver, HP read back, toasts captured.
+//  1. Aquarius's seal: 15 s, never extended while up, 15 s grace after, lifted by a map change, and never read as
+//     longer than 15 s whatever wrote it. The lapse is waited out on the game's own clock, not faked.
+//  2. Gravitos's heal lock: 10 s a landing, but a continuous lock ends within 15 s of its start and is followed by
+//     the same grace. MP potions pass it (it refuses HP raises only).
+//  3. The hotkey never fails silently: Disabled says so, a missing slot is repaired, a rebound key names the live key.
+//  4. The seal shows as a POTIONS SEALED pill while it is up, and not after.
+// Drinks are counted by STOCK consumed (HP regen moves HP inside a wait). Toasts are captured.
 //   node scripts/potion_hotkey_test.mjs      MOJI_GAME_FILE / MOJI_SERVE_ROOT / PORT
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -28,15 +31,17 @@ try {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
-    loadMap('forest', 300); await sleep(900);
+    loadMap('forest', 300); await sleep(900); game.monsters.length = 0;
     const toasts = []; const _st = window.showToast; window.showToast = (t, k) => { toasts.push(String(t)); return _st ? _st(t, k) : undefined; };
-    const o = { ver: GAME_VERSION, sealF: typeof LX_AQUARIUS_SEAL_F !== 'undefined' ? LX_AQUARIUS_SEAL_F : null, graceF: typeof LX_AQUARIUS_SEAL_GRACE_F !== 'undefined' ? LX_AQUARIUS_SEAL_GRACE_F : null };
-    const reset = () => { game.paused = false; player._god = false; player.hp = Math.floor(getMaxHp() * 0.4); player.mp = Math.floor(getMaxMp() * 0.4); player._potionCdHp = 0; player._potionCdMp = 0; player._potionLockUntil = 0; player._potionSealNextAt = 0; player._healLockUntil = 0; player.consumables = player.consumables || {}; player.consumables.hp_s = 9; player.consumables.mp_s = 9; player.blockTimer = 0; player.invulnerable = 0; player.lastHitTime = -9999; toasts.length = 0; };
+    const has = (n) => { try { return eval(n); } catch (e) { return null; } };
+    const o = { ver: GAME_VERSION, maxF: has('LX_SEAL_MAX_F'), graceF: has('LX_SEAL_GRACE_F'), sealF: has('LX_AQUARIUS_SEAL_F'), aGraceF: has('LX_AQUARIUS_SEAL_GRACE_F') };
+    const reset = () => { game.paused = false; player._god = false; player.hp = Math.floor(getMaxHp() * 0.4); player.mp = Math.floor(getMaxMp() * 0.4); player._potionCdHp = 0; player._potionCdMp = 0;
+      player._potionLockUntil = 0; player._potionSealNextAt = 0; player._potionLockMap = null; player._healLockUntil = 0; player._healLockNextAt = 0; player._healLockStart = 0;
+      player.consumables = player.consumables || {}; player.consumables.hp_s = 9; player.consumables.mp_s = 9; player.blockTimer = 0; player.invulnerable = 0; player.lastHitTime = -9999; toasts.length = 0; };
     const press = async (key) => { window.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true })); window.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, bubbles: true })); await sleep(250); };
-    // a drink is counted by STOCK consumed, not by HP - natural regen moves HP by a few points inside the wait
-    const drinkHp = async (key) => { const s0 = player.consumables.hp_s | 0; await press(key); return s0 - (player.consumables.hp_s | 0); };
+    const drink = async (key, id) => { player._potionCdHp = 0; player._potionCdMp = 0; const s0 = player.consumables[id] | 0; await press(key); return s0 - (player.consumables[id] | 0); };
     const aquaHit = async () => {   // a real Aquarius projectile through the impact resolver; retried, because evasion can dodge one
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let a = 0; a < 5; a++) {
         player.invulnerable = 0; player.lastHitTime = -9999; player.parryWindow = 0; player.maxHp = Math.max(player.maxHp, 400000); if (player.hp < 1000) player.hp = 100000; const before = player.hp;
         game.projectiles.push({ x: player.x + player.w / 2 - 6, y: player.y + player.h / 2 - 6, vx: 0, vy: 0, w: 12, h: 12, life: 120, damage: 400, owner: 'enemy', skill: 'mbolt', color: '#fff', _zodiacAttacker: true, _zodiacSign: 'aquarius' });
         for (let i = 0; i < 30 && player.hp >= before; i++) await sleep(20); game.projectiles.length = 0; player.invulnerable = 0; player.lastHitTime = -9999;
@@ -44,33 +49,64 @@ try {
       }
       return false;
     };
+    const pill = () => !!document.querySelector('.moji-buff-pill[data-buff="potionSeal"]');
     // 1. defaults drink
-    reset(); o.def = { hp: await drinkHp('PageUp'), toasts: toasts.slice() };
-    reset(); { const s0 = player.consumables.mp_s | 0; await press('PageDown'); o.defMp = { mp: s0 - (player.consumables.mp_s | 0) }; }
-    // 2. a seal refuses the drink and is not extended by a second hit
-    reset(); o.seal = {}; o.seal.hit = await aquaHit(); o.seal.until = (player._potionLockUntil | 0) - (game.time | 0); o.seal.next = (player._potionSealNextAt | 0) - (player._potionLockUntil | 0);
-    toasts.length = 0; o.seal.drink = await drinkHp('PageUp'); o.seal.drinkToasts = toasts.slice();
-    const u1 = player._potionLockUntil | 0; player._potionLockUntil = (game.time | 0) + 600; const u2 = player._potionLockUntil; await aquaHit(); o.seal.extended = (player._potionLockUntil | 0) !== u2; o.seal.u1 = u1;
-    // 3. grace: a lapsed seal cannot be re-applied inside its grace, and can after it
-    player._potionLockUntil = (game.time | 0) - 1; player._potionSealNextAt = (game.time | 0) + 600; await aquaHit(); o.grace = { resealedInGrace: (player._potionLockUntil | 0) > (game.time | 0) };
-    player._potionSealNextAt = 0; await aquaHit(); o.grace.resealedAfter = (player._potionLockUntil | 0) > (game.time | 0);
-    // 4. a bind table missing its slot is repaired; a Disabled slot says so
-    reset(); player.potionBinds = {}; o.repair = { hp: await drinkHp('PageUp'), binds: JSON.stringify(player.potionBinds) };
-    reset(); player.potionBinds = { pageup: 'none', pagedown: 'mp_auto' }; o.disabled = { hp: await drinkHp('PageUp'), toasts: toasts.slice() }; player.potionBinds = { pageup: 'hp_auto', pagedown: 'mp_auto' };
-    // 5. a rebound potion: the old key explains, the new key drinks
-    reset(); player.actionBinds = Object.assign({}, ACTION_KEY_DEFAULT, { hpPotion: '1' }); o.rebound = { oldKey: await drinkHp('PageUp'), oldToasts: toasts.slice() }; toasts.length = 0; o.rebound.newKey = await drinkHp('1'); o.rebound.newToasts = toasts.slice();
+    reset(); o.def = { hp: await drink('PageUp', 'hp_s'), toasts: toasts.slice() }; reset(); o.defMp = await drink('PageDown', 'mp_s');
+    // 2. a real seal: 15 s, refused with a toast, not extended, shown as a pill
+    reset(); o.seal = { hit: await aquaHit() }; o.seal.until = (player._potionLockUntil | 0) - (game.time | 0); o.seal.next = (player._potionSealNextAt | 0) - (player._potionLockUntil | 0);
+    o.seal.toast = toasts.find((t) => /SEALED/.test(t)) || ''; await sleep(400); o.seal.pill = pill();
+    toasts.length = 0; o.seal.drink = await drink('PageUp', 'hp_s'); o.seal.drinkToasts = toasts.slice();
+    const u2 = player._potionLockUntil | 0; await aquaHit(); o.seal.extended = (player._potionLockUntil | 0) !== u2;
+    // 3. wait the seal out on the game's own clock, then drink the moment it lapses
+    player._god = true; const lapseAt = player._potionLockUntil | 0, g0 = game.time | 0, w0 = performance.now();
+    while ((game.time | 0) < lapseAt + 2 && performance.now() - w0 < 30000) { game.paused = false; game.monsters.length = 0; await sleep(200); }
+    o.lapse = { waitedF: (game.time | 0) - g0, waitedS: +((performance.now() - w0) / 1000).toFixed(1) }; player._god = false;
+    await sleep(300); o.lapse.pill = pill(); toasts.length = 0; o.lapse.drink = await drink('PageUp', 'hp_s'); o.lapse.toasts = toasts.slice();
+    // 4. grace: no re-seal inside it, a re-seal after it
+    await aquaHit(); o.grace = { inGrace: (typeof _lxPotionSealLeftF === 'function') ? _lxPotionSealLeftF() > 0 : (player._potionLockUntil | 0) > (game.time | 0) };
+    player._potionSealNextAt = 0; await aquaHit(); o.grace.after = (player._potionLockUntil | 0) > (game.time | 0);
+    // 5. leaving the map lifts the seal
+    loadMap('town', 300); await sleep(1200); game.paused = false; game.monsters.length = 0; o.map = { map: game.currentMap, drink: await drink('PageUp', 'hp_s'), toasts: toasts.slice(-2) };
+    loadMap('forest', 300); await sleep(1200); game.paused = false; game.monsters.length = 0;
+    // 6. a stored seal can never read longer than 15 s
+    reset(); player._potionLockUntil = (game.time | 0) + 99999; player._potionLockMap = game.currentMap;
+    o.clamp = { left: (typeof _lxPotionSealLeftF === 'function') ? _lxPotionSealLeftF() : (player._potionLockUntil | 0) - (game.time | 0) }; o.clamp.drink = await drink('PageUp', 'hp_s'); o.clamp.toast = toasts.find((t) => /sealed/i.test(t)) || '';
+    // 7. heal lock: a comet every 5 s. The lock holds at most 15 s from its start, then lapses and stays open (the
+    //    grace) although the comets keep landing - before, each landing pushed it another 10 s, with no end.
+    reset(); o.hl = { spans: [], at: [], locked: [] }; const hl0 = game.time | 0;
+    for (let i = 0; i < 6; i++) { _lxHealLockApply(10000, 'a Gravitos comet'); o.hl.at.push((game.time | 0) - hl0); o.hl.locked.push(_lxHealLocked()); o.hl.spans.push((player._healLockUntil | 0) - hl0); if (i < 5) game.time = (game.time | 0) + 300; }
+    // 8. under a FRESH heal lock: MP drinks, HP refused with a toast naming MP
+    player._healLockUntil = 0; player._healLockNextAt = 0; player._healLockStart = 0; _lxHealLockApply(10000, 'a Gravitos comet'); o.hl.lockedForDrinks = _lxHealLocked();
+    toasts.length = 0; o.hl.mp = await drink('PageDown', 'mp_s'); o.hl.hp = await drink('PageUp', 'hp_s'); o.hl.hpToasts = toasts.slice();
+    game.time = (player._healLockUntil | 0) + 5; o.hl.lapsed = !_lxHealLocked(); _lxHealLockApply(10000, 'a Gravitos comet'); o.hl.inGrace = _lxHealLocked();
+    game.time = Math.max(game.time | 0, (player._healLockNextAt | 0) + 1); _lxHealLockApply(10000, 'a Gravitos comet'); o.hl.after = _lxHealLocked();
+    player._healLockUntil = 0; player._healLockNextAt = 0;
+    // 9. the key never fails silently
+    reset(); player.potionBinds = {}; o.repair = { hp: await drink('PageUp', 'hp_s'), binds: JSON.stringify(player.potionBinds) };
+    reset(); player.potionBinds = { pageup: 'none', pagedown: 'mp_auto' }; o.disabled = { hp: await drink('PageUp', 'hp_s'), toasts: toasts.slice() }; player.potionBinds = { pageup: 'hp_auto', pagedown: 'mp_auto' };
+    reset(); player.actionBinds = Object.assign({}, ACTION_KEY_DEFAULT, { hpPotion: '1' }); o.rebound = { oldKey: await drink('PageUp', 'hp_s'), oldToasts: toasts.slice() }; toasts.length = 0; o.rebound.newKey = await drink('1', 'hp_s');
     player.actionBinds = Object.assign({}, ACTION_KEY_DEFAULT); reset();
     return o;
   });
-  console.log(`build ${r.ver}  seal ${r.sealF} f  grace ${r.graceF} f`);
+  console.log(`build ${r.ver}  ceiling ${r.maxF} f  grace ${r.graceF} f  aquarius ${r.sealF}/${r.aGraceF} f`);
   ok('PgUp drinks one HP potion with the default binds', r.def.hp === 1 && r.def.toasts.some((t) => /Used/.test(t)), `${r.def.hp} used; ${r.def.toasts[0] || ''}`);
-  ok('PgDn drinks one MP potion with the default binds', r.defMp.mp === 1, `${r.defMp.mp} used`);
-  ok('the seal constants are declared: 2700 f sealed, 900 f grace', r.sealF === 2700 && r.graceF === 900);
-  ok('an Aquarius hit seals potions for 45 s and books the grace', r.seal.hit && r.seal.until > 2600 && r.seal.until <= 2700 && r.seal.next === 900, `until +${r.seal.until} f, grace +${r.seal.next} f`);
+  ok('PgDn drinks one MP potion with the default binds', r.defMp === 1, `${r.defMp} used`);
+  ok('one ceiling and one grace for every seal: 900 f (15 s) each, Aquarius uses both', r.maxF === 900 && r.graceF === 900 && r.sealF === 900 && r.aGraceF === 900);
+  ok('an Aquarius hit seals potions for 15 s and books the 15 s grace', r.seal.hit && r.seal.until > 800 && r.seal.until <= 900 && r.seal.next === 900, `until +${r.seal.until} f, grace +${r.seal.next} f`);
+  ok('the seal toast says 15s', /15s/.test(r.seal.toast), r.seal.toast);
   ok('a sealed drink is refused, and says so', r.seal.drink === 0 && r.seal.drinkToasts.some((t) => /sealed/i.test(t)), r.seal.drinkToasts.join(' | '));
-  ok('a second hit during a live seal does NOT extend it (was: refreshed to 45 s every hit)', r.seal.extended === false);
-  ok('a lapsed seal cannot be re-applied inside its 15 s grace', r.grace.resealedInGrace === false);
-  ok('after the grace, the next hit seals again', r.grace.resealedAfter === true);
+  ok('a second hit while sealed does NOT extend the seal', r.seal.extended === false);
+  ok('while sealed, the buff bar shows a POTIONS SEALED pill', r.seal.pill === true);
+  ok('the seal lapses on the game clock within 15 s', r.lapse.waitedF <= 900, `${r.lapse.waitedF} f, ${r.lapse.waitedS} s wall`);
+  ok('the moment it lapses, PgUp drinks and the pill is gone', r.lapse.drink === 1 && r.lapse.pill === false, `${r.lapse.drink} used, pill ${r.lapse.pill}; ${r.lapse.toasts.join(' | ')}`);
+  ok('inside the 15 s grace, a hit does not seal again', r.grace.inGrace === false);
+  ok('after the grace, the next hit seals again', r.grace.after === true);
+  ok('leaving the map lifts the seal: PgUp drinks on the next map', r.map.drink === 1, `${r.map.map}: ${r.map.drink} used; ${r.map.toasts.join(' | ')}`);
+  ok('a stored seal of 99,999 frames reads as 15 s and says 15s', r.clamp.left === 900 && r.clamp.drink === 0 && /15s/.test(r.clamp.toast), `${r.clamp.left} f; ${r.clamp.toast}`);
+  ok('a comet every 5 s holds the heal lock at most 15 s from its start, then it lapses and stays open', r.hl.spans.every((s) => s <= 900) && r.hl.at.every((a, i) => r.hl.locked[i] === (a < 900)), `unlock at +${r.hl.spans.join(',')} f; locked ${r.hl.locked.map((b, i) => '+' + r.hl.at[i] + ':' + (b ? 'Y' : 'n')).join(' ')}`);
+  ok('under a heal lock, PgDn still drinks an MP potion', r.hl.lockedForDrinks && r.hl.mp === 1, `${r.hl.mp} used`);
+  ok('under a heal lock, an HP potion is refused with a toast that says MP still works', r.hl.hp === 0 && r.hl.hpToasts.some((t) => /HEAL LOCKED/.test(t) && /MP/.test(t)), r.hl.hpToasts.join(' | '));
+  ok('the heal lock lapses, cannot re-lock inside its grace, and can after', r.hl.lapsed && r.hl.inGrace === false && r.hl.after === true, `lapsed ${r.hl.lapsed} inGrace ${r.hl.inGrace} after ${r.hl.after}`);
   ok('a bind table missing its slot is repaired and the drink lands', r.repair.hp === 1 && /hp_auto/.test(r.repair.binds), r.repair.binds);
   ok('a slot set to Disabled says so instead of swallowing the press', r.disabled.hp === 0 && r.disabled.toasts.some((t) => /Disabled/.test(t)), r.disabled.toasts.join(' | '));
   ok('with HP potion rebound to 1, PgUp says where it went and drinks nothing', r.rebound.oldKey === 0 && r.rebound.oldToasts.some((t) => /potion is on/.test(t)), r.rebound.oldToasts.join(' | '));

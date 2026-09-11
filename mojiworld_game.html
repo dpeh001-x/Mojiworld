@@ -6469,6 +6469,7 @@
   .moji-buff-pill[data-buff="bloodlust"]   { border-color: rgba(220, 40,  40, 0.55); }
   .moji-buff-pill[data-buff="comboAtk"]    { border-color: rgba(255, 200, 80,  0.55); }
   .moji-buff-pill[data-buff="healLock"]    { border-color: rgba(255, 60, 90, 0.85); background: rgba(80, 10, 24, 0.55); }   /* v0.30.588 ohko-pass — a debuff reads red */
+  .moji-buff-pill[data-buff="potionSeal"]  { border-color: rgba(255, 60, 90, 0.85); background: rgba(80, 10, 24, 0.55); }   /* v0.30.621 - a debuff reads red */
   .moji-buff-pill[data-buff="comboXp"]     { border-color: rgba(120, 200, 255, 0.55); }
   .moji-buff-pill[data-buff="eagleEye"]    { border-color: rgba(120, 220, 255, 0.55); }
   .moji-buff-pill[data-buff="guardian"]    { border-color: rgba(140, 220, 140, 0.55); }
@@ -10918,7 +10919,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.620';
+const GAME_VERSION = 'v0.30.621';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -42437,7 +42438,12 @@ const LX_ZODIAC_PROJ_MIN = 3000, LX_ZODIAC_PROJ_MAX = 5000;
 // carried her sign that was rare, but v0.30.601 tagged every zodiac projectile, and her homing droplets and waves
 // land every few seconds - so from the first hit to the end of the fight potions never came back
 // ("I am unable to use my potions", per user).
-const LX_AQUARIUS_SEAL_F = 2700, LX_AQUARIUS_SEAL_GRACE_F = 900;
+// v0.30.621 - NO SEAL LASTS LONGER THAN 15 S (per user: "potions seal should not last longer than 15s. Ensure that players
+// can use potions when not sealed"). LX_SEAL_MAX_F caps any continuous stretch in which a seal can refuse a potion -
+// Aquarius's potion seal and Gravitos's heal lock alike - and LX_SEAL_GRACE_F is the open window after one lapses, in
+// which the same seal cannot land again.
+const LX_SEAL_MAX_F = 900, LX_SEAL_GRACE_F = 900;
+const LX_AQUARIUS_SEAL_F = LX_SEAL_MAX_F, LX_AQUARIUS_SEAL_GRACE_F = LX_SEAL_GRACE_F;   // were 2700 (45 s) / 900
 // v0.30.601 - BOSS PROJECTILE BANDS, the zodiac idea for every other boss. A boss's shot lands in a band of the
 // REFERENCE BAR at the boss's own level (_refBarAtLv: class-neutral at-level HP times the geared allowance),
 // rolled per hit and then run through the same straight DEF ramp, difficulty and abilities as a zodiac shot
@@ -95791,12 +95797,13 @@ function updateProjectiles(dt) {
           // same clock the potion cooldown already uses, so the seal pauses
           // with the game instead of draining behind a menu.
           const _seal = (game.time | 0) + LX_AQUARIUS_SEAL_F;
-          const _wasSealed = (player._potionLockUntil | 0) > (game.time | 0);
+          const _wasSealed = _lxPotionSealLeftF() > 0;
           // v0.30.614 - a live seal is never extended, and a lapsed one cannot be re-applied inside its grace (see the constants)
           if (!_wasSealed && (game.time | 0) >= (player._potionSealNextAt | 0)) {
             player._potionLockUntil = _seal;
+            player._potionLockMap = game.currentMap;   // v0.30.621 - the seal belongs to this fight
             player._potionSealNextAt = _seal + LX_AQUARIUS_SEAL_GRACE_F;
-            if (!_wasSealed && typeof showToast === 'function') showToast('🧪 POTIONS SEALED — 45s', 'epic');
+            if (typeof showToast === 'function') showToast('🧪 POTIONS SEALED — ' + Math.round(LX_AQUARIUS_SEAL_F / 60) + 's', 'epic');
           }
         }
         if (p._radiance && _projLost > 0 && !player._god && Math.random() < (p._radiance.chance || 0.2)) {
@@ -97578,6 +97585,17 @@ const LX_OHKO_PARRYABLE = false;
 // Scoped by session clock (t >= at: a reload cannot carry it), map and
 // death. Installed lazily on the first seal; the check reads the live
 // property descriptor, never a saved flag.
+// v0.30.621 - the one reader of Aquarius's potion seal: frames left, 0 when open. The seal belongs to the fight, so it lifts
+// the moment the map changes (as the heal lock already does), and it never reads longer than LX_SEAL_MAX_F, whatever
+// wrote the unlock time.
+function _lxPotionSealLeftF() {
+  if (typeof player === 'undefined' || !player || typeof game === 'undefined' || !game) return 0;
+  const t = game.time | 0, left = (player._potionLockUntil | 0) - t;
+  if (left <= 0) return 0;
+  if (player._potionLockMap && player._potionLockMap !== game.currentMap) { player._potionLockUntil = 0; return 0; }
+  if (left > LX_SEAL_MAX_F) { player._potionLockUntil = t + LX_SEAL_MAX_F; return LX_SEAL_MAX_F; }
+  return left;
+}
 function _lxHealLocked() {
   if (typeof player === 'undefined' || !player) return false;
   const t = game.time | 0;
@@ -97598,10 +97616,17 @@ function _lxHealLockInstall() {
 function _lxHealLockApply(ms, label) {
   if (!player || player._god) return;
   _lxHealLockInstall();
-  const t = game.time | 0, until = t + Math.round((ms || 10000) * 60 / 1000);
+  const t = game.time | 0;
   const fresh = !_lxHealLocked();
+  // v0.30.621 - BOUNDED LIKE THE POTION SEAL. Each landing pushed the unlock to now + 10 s, so a comet barrage chained the
+  // lock with no end. A continuous lock now ends at most LX_SEAL_MAX_F after it began, and once it lapses no landing
+  // re-locks for LX_SEAL_GRACE_F.
+  if (fresh && t < (player._healLockNextAt | 0)) return;
+  if (fresh) player._healLockStart = t;
+  const until = Math.min(t + Math.round((ms || 10000) * 60 / 1000), (player._healLockStart | 0) + LX_SEAL_MAX_F);
   player._healLockAt = t;
-  player._healLockUntil = Math.max(player._healLockUntil | 0, until);
+  player._healLockUntil = Math.max(fresh ? 0 : (player._healLockUntil | 0), until);
+  player._healLockNextAt = (player._healLockUntil | 0) + LX_SEAL_GRACE_F;
   player._healLockTotalF = (player._healLockUntil | 0) - t;   // the overhead countdown drains against this
   player._healLockMap = game.currentMap;
   player._healLockLabel = label || 'a void projectile';
@@ -107659,14 +107684,14 @@ function useConsumable(id) {
   // which is the same shape and already covers every potion path: this
   // function and useQuickPotion are the two chokepoints _useBoundPotion and
   // the inventory both route through.
-  if (typeof _lxHealLocked === 'function' && _lxHealLocked()) {   // v0.30.588 ohko-pass — a sealed drink would be wasted: refuse it
+  if (typeof _lxHealLocked === 'function' && _lxHealLocked() && p.type !== 'mp') {   // v0.30.588 ohko-pass — a sealed drink would be wasted: refuse it (v0.30.621: MP passes - the lock refuses HP raises only)
     const _hl = Math.ceil(((player._healLockUntil | 0) - (game.time | 0)) / 60);
-    if (typeof showToast === 'function') showToast('\u{1F6AB} HEAL LOCKED \u2014 ' + _hl + 's', 'common');
+    if (typeof showToast === 'function') showToast('\u{1F6AB} HEAL LOCKED \u2014 ' + _hl + 's \u00B7 MP potions still work', 'common');
     if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
     return;
   }
-  if ((player._potionLockUntil | 0) > (game.time | 0)) {
-    const _left = Math.ceil(((player._potionLockUntil | 0) - (game.time | 0)) / 60);
+  if (_lxPotionSealLeftF() > 0) {   // v0.30.621 - one reader: map-scoped, never longer than LX_SEAL_MAX_F
+    const _left = Math.ceil(_lxPotionSealLeftF() / 60);
     if (typeof showToast === 'function') showToast('🧪 Potions sealed by the Tidesworn — ' + _left + 's', 'common');
     if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
     return;
@@ -107795,14 +107820,14 @@ function useQuickPotion(which, preferElixir) {
   // which is the same shape and already covers every potion path: this
   // function and useQuickPotion are the two chokepoints _useBoundPotion and
   // the inventory both route through.
-  if (typeof _lxHealLocked === 'function' && _lxHealLocked()) {   // v0.30.588 ohko-pass — a sealed drink would be wasted: refuse it
+  if (typeof _lxHealLocked === 'function' && _lxHealLocked() && which !== 'mp') {   // v0.30.588 ohko-pass — a sealed drink would be wasted: refuse it (v0.30.621: MP passes - the lock refuses HP raises only)
     const _hl = Math.ceil(((player._healLockUntil | 0) - (game.time | 0)) / 60);
-    if (typeof showToast === 'function') showToast('\u{1F6AB} HEAL LOCKED \u2014 ' + _hl + 's', 'common');
+    if (typeof showToast === 'function') showToast('\u{1F6AB} HEAL LOCKED \u2014 ' + _hl + 's \u00B7 MP potions still work', 'common');
     if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
     return;
   }
-  if ((player._potionLockUntil | 0) > (game.time | 0)) {
-    const _left = Math.ceil(((player._potionLockUntil | 0) - (game.time | 0)) / 60);
+  if (_lxPotionSealLeftF() > 0) {   // v0.30.621 - one reader: map-scoped, never longer than LX_SEAL_MAX_F
+    const _left = Math.ceil(_lxPotionSealLeftF() / 60);
     if (typeof showToast === 'function') showToast('🧪 Potions sealed by the Tidesworn — ' + _left + 's', 'common');
     if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
     return;
@@ -107821,6 +107846,7 @@ function useQuickPotion(which, preferElixir) {
   // at full HP+MP). The R / T quick keys pass preferElixir=false, so they keep
   // their single-stat behaviour. Otherwise falls through to the cascade below.
   if (preferElixir && player.consumables && (player.consumables.full | 0) > 0
+      && !(typeof _lxHealLocked === 'function' && _lxHealLocked())   // v0.30.621 - under a heal lock an MP press drinks MP, not a refused elixir
       && _potionReady('hp') && _potionReady('mp')
       && (player.hp < getMaxHp() || player.mp < getMaxMp())) {
     useConsumable('full');   // gates both tracks + sets both cooldowns internally
@@ -142861,6 +142887,7 @@ const BUFF_META = [
   // gap: 11 registered against 12 buffs the code actually sets.
   { key: 'sleight',       icon: '🗡',  label: 'Sleight',     dur: 2500  },
   { key: 'healLock',      icon: '\u{1F6AB}', label: 'HEAL LOCKED', dur: 10000 },   // v0.30.588 ohko-pass — driven by the lock clock, see _updateBuffRow
+  { key: 'potionSeal',    icon: '\u{1F9EA}', label: 'POTIONS SEALED', dur: 15000 },   // v0.30.621 - driven by the seal clock, see _updateBuffRow
   { key: 'warCry',        icon: '⚔',  label: 'War Cry',     dur: 12000 },
   { key: 'bloodlust',     icon: '🩸', label: 'Bloodlust',    dur: 12000 },
   { key: 'rampage',       icon: '💢', label: 'Rampage',      dur: 3500  },
@@ -142900,6 +142927,10 @@ function _updateBuffRow() {
   if (typeof _lxHealLocked === 'function') {
     const _hlMs = _lxHealLocked() ? Math.max(1, Math.round(((player._healLockUntil | 0) - (game.time | 0)) * 1000 / 60)) : 0;
     if ((player.buffs.healLock | 0) !== _hlMs) player.buffs.healLock = _hlMs;
+  }
+  if (typeof _lxPotionSealLeftF === 'function') {   // v0.30.621 - the potion seal counts down as a pill, so 'not sealed' is visible
+    const _psMs = Math.round(_lxPotionSealLeftF() * 1000 / 60);
+    if ((player.buffs.potionSeal | 0) !== _psMs) player.buffs.potionSeal = _psMs;
   }
   // Collect currently-active buffs (timer > 0) into the pooled scratch.
   _buffActiveN = 0;
