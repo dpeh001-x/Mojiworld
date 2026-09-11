@@ -1,5 +1,5 @@
-// Gravitos's manifesto: a higher force, subtly held by a higher one; his beats play over the
-// Singularity arena. Per user: "change the contents of the gravitos speech, make him be a higher
+// Gravitos's manifesto: a higher force, subtly held by a higher one, in the register of Nyx
+// (Persona 3); his beats play over the Singularity arena. Per user: "change the contents of the gravitos speech, make him be a higher
 // force that subtly is controlled by an even higher force. Change the storybeat background to
 // gravitosarena".
 //   node scripts/gravitos_beat_test.mjs [file.html] [port]
@@ -17,13 +17,15 @@ const checks = [];
 const html = readFileSync(path.join(ROOT, PAGE), 'utf8');
 const gate = (html.match(/gravitos_gate: \{[\s\S]*?\n  \},/) || [''])[0];
 checks.push(['the gate beat is found', gate.length > 200]);
-// the tells, all oblique: nothing names the hand
-checks.push(['he was sent, and did not ask what else the sky kept', /The sky sent me\. I did not ask what else it kept\./.test(gate)]);
-checks.push(['the weight was set on him by a hand he was never shown', /set on my shoulders, and I have never once been told by whom/.test(gate)]);
-checks.push(['he will not say whose hand tied the tourniquet', /Do not ask me whose hand tied it\./.test(gate)]);
-checks.push(['he listens upward before he threatens', /listening to something above the Singularity that you cannot hear/.test(gate)]);
-checks.push(['he was made to break heroes', /I have broken kinder heroes than you\. I was made to\./.test(gate)]);
-checks.push(['the old flat claim of ownership is gone', !/shattering — is mine\.\\n/.test(gate)]);
+// the register (per user: Nyx, Persona 3) and the tells, all oblique: nothing names the hand
+checks.push(['he is the shape a wish took (called, not choosing)', /I am the shape that asking took\./.test(gate)]);
+checks.push(['whether the sky or something above it chose him, he has never needed to know', /or something above the sky, I have never needed to know\./.test(gate)]);
+checks.push(['he is what every heart fears most and turns from', /What every heart in this world fears most\.\.\. what it turns from, and calls morning\. I am that\./.test(gate)]);
+checks.push(['the weight was placed on him; he carries it', /The weight was placed\. I carry it\./.test(gate)]);
+checks.push(['he goes still as if a word were spoken above him', /as if a word had been spoken somewhere above the Singularity/.test(gate)]);
+checks.push(['the Nyx cadence: it matters not who you are', /It matters not who you are\./.test(gate)]);
+checks.push(['he closes on the user\'s own line', /The void awaits all\.\.\. The void awaits you\.\.\./.test(gate)]);
+checks.push(['the old tourniquet and "mine to hold" lines are gone', !/tourniquet|mine to hold/.test(gate)]);
 checks.push(['nothing names who holds him (subtle, per user)', !/Sovereign|Watcher|Amnesiac|Interference/i.test(gate)]);
 checks.push(['the opener the look test pins is kept', /Singularity does not echo/.test(gate)]);
 const GROUND = 'backgrounds/bg_v3_gravitosArena.webp';
