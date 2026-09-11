@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.568';
+const GAME_VERSION = 'v0.30.569';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -82224,6 +82224,22 @@ function updateMonsters(dt) {
             m._flyMode = 'i';
           }
         }
+        // v0.30.569 — AIM ABOVE THE FLOOR (per user: "the flying monsters behave strangely, after they
+        // seem rooted to the ground" - the Spirelings in B1, filmed sitting in a row on the floor).
+        // Every destination above is picked around the player's CENTRE, and a player standing on the
+        // floor has half of that circle - and the whole dive-bomb band - below the ground. Since
+        // v0.29.397 the physics stops a flier AT the floor, so a flier given such a destination
+        // pressed into the clamp and sat there for the length of the destination window, then drew
+        // another. Fliers had no floor rule before that clamp because they could sink through the
+        // floor instead, which was the bug that clamp fixed - the pinning is what it left behind.
+        // The destination is now held at least a hover height above the slab under it, so the same
+        // orbits and dives happen in the air the flier can actually occupy.
+        if (m._flyDestY != null && typeof _lxFlierFloorY === 'function') {
+          const _hoverMin = Math.max(28, m.h * 0.75);
+          const _ceilY = _lxFlierFloorY(m._flyDestX) - m.h / 2 - _hoverMin;
+          if (m._flyDestY > _ceilY) m._flyDestY = _ceilY;
+          if (m._flyDestY < 10 + m.h / 2) m._flyDestY = 10 + m.h / 2;
+        }
         // Steer toward destination. Smooth lerp of vx/vy toward the
         // normalised direction × max-speed.
         const _sdx = m._flyDestX - _seekCx;
@@ -82272,7 +82288,12 @@ function updateMonsters(dt) {
     // impact enters at vx >= 1.2 and up to 9 on a heavy skill, far above any
     // mob's walk threshold, so a shoved mob still slides from the hit.
     // Zeroing vx outright would have flattened every knockback in the game.
-    else if (typeof _mobWalking === 'function' && !_mobWalking(m)
+    // v0.30.569 — grounded mobs only. The kill exists to stop a mob sliding under idle art, and a
+    // ground mob's chase sets vx to facing x speed outright, far above the threshold. A FLIER's vx
+    // comes from the seek lerp above - 16% of the way to its target speed per tick, from zero - so
+    // on every destination that was not nearly horizontal its first tick landed under the 35%
+    // threshold and was zeroed, every tick, forever. Fliers play no walk cycle on vx anyway.
+    else if (!m.flies && typeof _mobWalking === 'function' && !_mobWalking(m)
              && Math.abs(m.vx || 0) < _lxMobWalkOn(m)) m.vx = 0;
     // v0.29.x — braceDash outranks the cast-plant AND the boss chase AI:
     // dead still through the brace, the full committed vx through the dash.
@@ -127035,6 +127056,19 @@ function _mobCasting(m) {
 // tick (a knockback still shoves it, then dies out), it does not jump, and the
 // walk latch is dropped so the attack frames start on a still body. Bosses keep
 // their lunges and dashes; a monster mid-jump finishes the jump first.
+// v0.30.569 — THE FLOOR UNDER A FLIER, at a given x. The same per-x, deepest-slab rule as the v0.29.397
+// clamp in the flier physics (and the same cache, keyed to the platforms array identity), so what a
+// flier AIMS for and where it is STOPPED agree. Returns the world-bottom margin when no slab spans x.
+function _lxFlierFloorY(x) {
+  const md = (typeof game !== 'undefined' && game) ? game.mapData : null;
+  if (!md) return 536;
+  const plats = md.platforms || [];
+  let slabs = md._lxGroundSlabs;
+  if (!slabs || md._lxGroundSlabsSrc !== plats) { slabs = plats.filter(p => p.type === 'ground'); md._lxGroundSlabs = slabs; md._lxGroundSlabsSrc = plats; }
+  let f = null;
+  for (let i = 0; i < slabs.length; i++) { const g = slabs[i]; if (x >= g.x && x <= g.x + g.w && (f == null || g.y > f)) f = g.y; }
+  return (f != null) ? f : ((md.worldHeight || 560) - 24);
+}
 function _lxMobPlanted(m) {
   if (!m || m.isBoss || m.boss || m.zodiacBoss || m.superBoss || m._rushBoss) return false;
   if (m._coopMirror || m.ally || m.isSummon || m._playerOwned) return false;
