@@ -10735,7 +10735,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.600';
+const GAME_VERSION = 'v0.30.601';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -41678,6 +41678,19 @@ function toggleLoreMap() {
 // still negates, a dodge still avoids, and a paused player (scaled to 0)
 // stays at 0. God mode is untouched.
 const LX_BOSS_HIT_FLOOR = { kingKrook: 0.15, octobaby: 0.15, octoLegPoison: 0.15, octoLegFreeze: 0.15, octoLegSkillLock: 0.15, octoLegStun: 0.15 };
+// v0.30.601 - one landed-number law for boss AND zodiac projectiles: a roll in [lo, hi], the straight DEF ramp
+// (v0.30.477: x(1 - DEF/8000), floored at 35%), the difficulty tier and expedition column, then the abilities
+// the player spends - block, warrior DR, Aegis. Lifted verbatim out of the zodiac impact block so both share it.
+function _lxRolledProjLoss(lo, hi) {
+  let v = lo + Math.random() * (hi - lo);
+  { const _d = (typeof getDef === 'function') ? Math.max(0, getDef()) : 0; v *= Math.max(LX_ZODIAC_DEF_MIN_MUL, 1 - _d / LX_ZODIAC_DEF_ZERO); }
+  { const _gd = (typeof game !== 'undefined' && game && typeof game._diffDmgMul === 'number' && game._diffDmgMul > 0) ? game._diffDmgMul : 1; v *= _gd;
+    if (typeof game !== 'undefined' && game && game.expedition && game.expedition.active && typeof _lxExpDiff === 'function') { const _ed = _lxExpDiff(); if (_ed && typeof _ed.stat === 'number' && _ed.stat > 0) v *= _ed.stat; } }
+  if (player.blockTimer > 0) v *= 0.3;
+  if (player.cls === 'warrior' && typeof _warriorDr === 'function') v *= _warriorDr();
+  if (player._aegis) v *= 0.5;
+  return Math.max(1, Math.floor(v));
+}
 function _lxBossHpFloor(type, dmg) {
   const f = type && LX_BOSS_HIT_FLOOR[type];
   if (!f || typeof player === 'undefined' || !player || player._god) return dmg;
@@ -41803,6 +41816,12 @@ function addShake(amount) {
 // v0.30.475 — the flat band every zodiac projectile lands in, before defensive ABILITIES and before
 // Capricorn's own floor. Rolled per hit so a volley is not twelve identical numbers.
 const LX_ZODIAC_PROJ_MIN = 3000, LX_ZODIAC_PROJ_MAX = 5000;
+// v0.30.601 - BOSS PROJECTILE BANDS, the zodiac idea for every other boss. A boss's shot lands in a band of the
+// REFERENCE BAR at the boss's own level (_refBarAtLv: class-neutral at-level HP times the geared allowance),
+// rolled per hit and then run through the same straight DEF ramp, difficulty and abilities as a zodiac shot
+// (_lxRolledProjLoss). Level-scaled where the zodiac band is flat, because story bosses live at Lv 30-60.
+const LX_BOSS_PROJ_SUPER = [0.18, 0.30];   // super / hyper bosses: share of the at-level bar per shot
+const LX_BOSS_PROJ_STORY = [0.12, 0.20];   // story bosses
 // v0.30.477 — ZODIAC DEF RESPONSE, anchored on two points the user gave: "at 2000 DEF can go down to
 // 3000 dmg / at 4000 DEF can go down to 2000 dmg".
 //
@@ -41983,6 +42002,12 @@ function _refHpAtLv(lv) {
 function _refLoAtLv(lv) {
   const L = Math.max(1, lv | 0);
   return Math.round((63 + 15.7 * L) * _REF_GEAR_ALLOWANCE);
+}
+// v0.30.601 - the class-NEUTRAL reference bar: _refHpAtLv without its class factor. Boss projectile bands anchor
+// here so the same shot means the same number for every class, exactly as the flat zodiac band does.
+function _refBarAtLv(lv) {
+  const L = Math.max(1, lv | 0);
+  return Math.round((104 + 23.6 * L) * _refGearAllowance(L));
 }
 // v0.29.269 — LEVEL-RAMPED DAMAGE BANDS (per user "at lower levels the
 // monsters should be dealing less damage as per ratio and higher level the
@@ -42276,6 +42301,15 @@ function _bossHitBand(m, kind) {
   const T = s
     ? { touch: { floor: 0.15, cap: 0.60 }, heavy: { floor: 0, cap: 0.92 }, ranged: { floor: 0, cap: 0.75 } }
     : { touch: { floor: 0.10, cap: 0.50 }, heavy: { floor: 0, cap: 0.80 }, ranged: { floor: 0, cap: 0.65 } };
+  // v0.30.601 - RANGED IS ROLLED, NOT CLAMPED. The ranged row above capped a boss's shot at 0.75 of _refLoAtLv,
+  // a bar that stops at ~1,750 by Lv 70 while a geared player's is ~12,000: boss projectiles could not hurt at
+  // endgame whatever the boss's ATK. Ranged now returns a roll band on the neutral at-level bar; the impact
+  // resolver rolls it through _lxRolledProjLoss. touch/heavy keep the clamp below, untouched.
+  if (kind === 'ranged') {
+    const _rlv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+    const _rb = s ? LX_BOSS_PROJ_SUPER : LX_BOSS_PROJ_STORY;
+    return { kind: 'ranged', roll: true, floor: _rb[0], cap: _rb[1], ref: _refBarAtLv(_rlv) };
+  }
   const b = T[kind] || T.heavy;
   const lv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
   return { floor: b.floor, cap: b.cap, ref: _refLoAtLv(lv) };
@@ -81883,7 +81917,7 @@ function updateMonsters(dt) {
         const _proj = {
           x: _sx, y: _sy, vx: (_dx/_d)*_spd, vy: (_dy/_d)*_spd,
           w: 30, h: 30, life: 240, damage: (m.atk || 120) * 0.7,
-          owner: 'enemy', skill: 'octoLeg', _srcType: m.type, homing: true, noGravity: true,
+          owner: 'enemy', skill: 'octoLeg', _srcType: m.type, _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, homing: true, noGravity: true,
           stun: 1200, poison: 3000, _poisonDmg: 16,
         };
         if (m.type === 'octoLegPoison')         { _proj.color = '#aa44dd'; _proj.poison = 4500; _proj._poisonDmg = 22; }
@@ -83878,7 +83912,7 @@ function _aeLance(m, ang, speed, dmgMul, floorPct) {
   game.projectiles.push({
     x: cx, y: cy, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed,
     w: 46, h: 46, life: 175, damage: Math.floor((m.atk || 460) * dmgMul),
-    owner: 'enemy', skill: 'mdark', color: '#aa66ff', homing: true, noGravity: true,
+    owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'mdark', color: '#aa66ff', homing: true, noGravity: true,
     _heavyFloorPct: floorPct, _sourceLabel: "Aetherion's Shard Lance",
   });
 }
@@ -84179,7 +84213,7 @@ function _bossSpecialAttacks(m, dt) {
             vx: Math.cos(_sAng) * _sSpd, vy: Math.sin(_sAng) * _sSpd,
             w: 18, h: 18, life: 170,
             damage: (m.atk || 200) * 0.18,   // a fraction of the Sovereign's own homer (0.55)
-            owner: 'enemy', skill: 'msovereign',
+            owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'msovereign',
             color: '#ffe9a8',
             noGravity: true,
             _sourceLabel: 'a Crown Shard',
@@ -84379,7 +84413,7 @@ function _bossSpecialAttacks(m, dt) {
           vx: Math.cos(_ang) * _spd, vy: Math.sin(_ang) * _spd,
           w: 30, h: 30, life: 220,   // v0.26.487 — slightly larger boss homer (was 22×22)
           damage: (m.atk || 200) * 0.55,
-          owner: 'enemy', skill: 'msovereign',   // v0.30.468 — its own art, not the shared dark orb
+          owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'msovereign',   // v0.30.468 — its own art, not the shared dark orb
           color: '#ffcc44',
           homing: true,
           noGravity: true,
@@ -84493,7 +84527,7 @@ function _bossSpecialAttacks(m, dt) {
       game.projectiles.push({
         x: _cx, y: _cy, vx: (_dx/_d) * 3.8, vy: (_dy/_d) * 3.8,
         w: 44, h: 44, life: 175, damage: (m.atk || 360),   // v0.26.487 — slightly larger (was 34×34)
-        owner: 'enemy', skill: 'mink', _srcType: m.type, color: '#cc66ff',
+        owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'mink', _srcType: m.type, color: '#cc66ff',
         homing: true, noGravity: true, _heavyFloorPct: 0.35,
         _sourceLabel: "Octobaby's Abyssal Ink",
       });
@@ -84523,7 +84557,7 @@ function _bossSpecialAttacks(m, dt) {
           // screen-filling discs.
           w: 18, h: 18, life: 120,
           damage: (m.atk || 200) * 0.7,
-          owner: 'enemy', skill: 'mticket', color: '#ffd866',
+          owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'mticket', color: '#ffd866',
           _sourceLabel: 'a Ticket Storm shard',
         });
       }
@@ -84573,7 +84607,7 @@ function _bossSpecialAttacks(m, dt) {
           // matching her base shot. w:34 keeps perfect hitbox/visual parity:
           // mbloodbolt's _PROJ_SPRITE_BLIT size 0.5 renders at 2·0.5·p.w = p.w.
           w: 34, h: 34, life: 110,
-          damage: m.atk * 0.8, owner: 'enemy', skill: 'mbloodbolt',
+          damage: m.atk * 0.8, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'mbloodbolt',
           color: '#cc2233',
         });
       }
@@ -84712,6 +84746,7 @@ function _bossSpecialAttacks(m, dt) {
             damage: (m.atk || 305) * 1.4,
             owner: 'enemy',
             skill: 'forgeHammer',
+            _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null,
             color: '#ffaa44',
             noGravity: true,
             pierce: true,                              // can clip player multiple times on the return leg
@@ -84788,7 +84823,7 @@ function _bossSpecialAttacks(m, dt) {
             vx: dir * 5.5, vy: 0,
             w: 48, h: 26, life: 110,
             damage: (m.atk || 275) * 2.4,
-            owner: 'enemy', skill: 'quake', color: '#ffaa44',
+            owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'quake', color: '#ffaa44',
             _sourceLabel: 'the Broken Anvil\'s toll',
           });
         }
@@ -85416,7 +85451,7 @@ function bossAI(m, dt, distToPlayer) {
             x: _gloopMuzzleX(m), y: _gloopMuzzleY(m),   // v0.29.581 — was m.y+10 (above his crown at large size tiers)
             vx: i * 3 + m.facing * 2, vy: -5,
             w: 14, h: 14, life: 80,
-            damage: m.atk * 0.7, owner: 'enemy', skill: 'splash'
+            damage: m.atk * 0.7, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'splash'
           });
         }
         addShake(10);
@@ -85482,7 +85517,7 @@ function bossAI(m, dt, distToPlayer) {
           vx: vxRaw * cj - vyRaw * sj,
           vy: vxRaw * sj + vyRaw * cj,
           w: 16, h: 16, life: 90,
-          damage: m.atk * 0.5, owner: 'enemy', skill: 'goo',
+          damage: m.atk * 0.5, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'goo',
           stunHit: 1500,                              // sticks player on hit
           color: '#66ccff',
         });
@@ -85651,7 +85686,7 @@ function bossAI(m, dt, distToPlayer) {
           vx: (dxg / distG) * speed,
           vy: (dyg / distG) * speed,
           w: 48, h: 48, life: 140,
-          damage: m.atk * 0.8, owner: 'enemy', skill: 'goo',
+          damage: m.atk * 0.8, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'goo',
           stunHit: 2000,
           color: '#66ccff',
         });
@@ -85855,7 +85890,7 @@ function bossAI(m, dt, distToPlayer) {
             vx: _toP * 2.2, vy: 0,
             w: 104, h: 76, life: 13,
             damage: (m.atk || 225) * 2.2,
-            owner: 'enemy', skill: 'barnFist', color: '#ff9a3c',
+            owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'barnFist', color: '#ff9a3c',
             noGravity: true,
           });
           // fire off the knuckles: embers thrown along the punch line
@@ -86018,7 +86053,7 @@ function bossAI(m, dt, distToPlayer) {
             vx: Math.cos(ang) * 5 + m.facing * 0.5,
             vy: Math.sin(ang) * 5,
             w: 14, h: 14, life: 120,
-            damage: m.atk * 0.95, owner:'enemy', skill:'shard',  // v0.30.x — was 0.78
+            damage: m.atk * 0.95, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill:'shard',  // v0.30.x — was 0.78
             color:'#c8a8ff',
           });
         }
@@ -86087,7 +86122,7 @@ function bossAI(m, dt, distToPlayer) {
             x: tx, y: -10,
             vx: (Math.random() - 0.5) * 1, vy: 6 + Math.random() * 2,
             w: 16, h: 16, life: 90,
-            damage: m.atk * 0.78, owner:'enemy', skill:'shard',  // v0.30.x — was 0.60
+            damage: m.atk * 0.78, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill:'shard',  // v0.30.x — was 0.60
             color:'#8866ee',
           });
         }
@@ -86118,7 +86153,7 @@ function bossAI(m, dt, distToPlayer) {
             x: m.x + m.w/2, y: m.y + m.h/2,
             vx: dir * 16, vy: 0,
             w: 26, h: 20, life: 180,
-            damage: m.atk * 1.75, owner:'enemy', skill:'voidbeam',  // v0.30.x — was 1.40
+            damage: m.atk * 1.75, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill:'voidbeam',  // v0.30.x — was 1.40
             color:'#ff44ff', pierce: true,
           });
         }
@@ -87856,7 +87891,7 @@ function bossAI(m, dt, distToPlayer) {
             x: m.x + m.w/2, y: m.y + m.h - 10,
             vx: i * 3, vy: -3,
             w: 18, h: 14, life: 70,
-            damage: m.atk * 0.9, owner: 'enemy', skill: 'shock'
+            damage: m.atk * 0.9, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'shock'
           });
         }
         addShake(14);
@@ -87894,7 +87929,7 @@ function bossAI(m, dt, distToPlayer) {
             x: m.x + m.w/2, y: m.y + 10,
             vx: Math.cos(ang) * 4, vy: Math.sin(ang) * 4,
             w: 24, h: 24, life: 90,                       // v0.26.x — bigger pod (was 16) so it reads as a prominent threat
-            damage: m.atk * 0.45, owner: 'enemy', skill: 'spore',
+            damage: m.atk * 0.45, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'spore',
             color: '#aa66cc'
           });
         }
@@ -88124,7 +88159,7 @@ function bossAI(m, dt, distToPlayer) {
               vx: Math.cos(ang) * 4.2,
               vy: Math.sin(ang) * 4.2 - 1.2,
               w: 18, h: 18, life: 110,
-              damage: m.atk * 0.6, owner: 'enemy', skill: 'spore',
+              damage: m.atk * 0.6, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'spore',
               color: '#cc88ee', gravity: 0.05,
             });
           }
@@ -88341,7 +88376,7 @@ function bossAI(m, dt, distToPlayer) {
           x: sx, y: m.y + m.h * 0.3,
           vx: m.facing * 2, vy: 0,
           w: 70, h: 80, life: 8,
-          damage: m.atk * 0.9, owner: 'enemy', skill: 'claw', _srcType: m.type,
+          damage: m.atk * 0.9, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'claw', _srcType: m.type,
           color: '#ffaa55',
         });
         addShake(4);
@@ -88447,7 +88482,7 @@ function bossAI(m, dt, distToPlayer) {
             vy: Math.sin(ang) * SPEED,
             // v0.26.170 — Hitbox 22 → 57 to match rendered firebomb sprite.
             w: 57, h: 57, life: 110,
-            damage: m.atk * 0.8, owner: 'enemy', skill: 'firebomb', _srcType: m.type,
+            damage: m.atk * 0.8, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'firebomb', _srcType: m.type,
             color: '#ff5522', gravity: 0.10,
           });
         }
@@ -88503,7 +88538,7 @@ function bossAI(m, dt, distToPlayer) {
             // v0.26.158 — Krook fireBreath cone uses skill:'firebomb' for
             // the v0.26.156 firebomb render branch (LX_MOB_PROJ.mfirebomb
             // sprite + tumble spin).
-            damage: m.atk * 0.45, owner: 'enemy', skill: 'firebomb', _srcType: m.type,
+            damage: m.atk * 0.45, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'firebomb', _srcType: m.type,
             color: '#ff7733',
           });
         }
@@ -88524,7 +88559,7 @@ function bossAI(m, dt, distToPlayer) {
             x: m.x + m.w/2, y: m.y + m.h - 10,
             vx: i * 4, vy: -2,
             w: 22, h: 18, life: 60,
-            damage: m.atk * 0.7, owner: 'enemy', skill: 'shock', _srcType: m.type,
+            damage: m.atk * 0.7, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'shock', _srcType: m.type,
             color: '#ddaa55',
           });
         }
@@ -88683,7 +88718,7 @@ function bossAI(m, dt, distToPlayer) {
               w: 104, h: 104, life: 220,
               // v0.26.158 — Krook fireballRain re-tagged to 'firebomb' for
               // the m_firebomb sprite render path.
-              damage: m.atk * 1.6, owner: 'enemy', skill: 'firebomb', _srcType: m.type,
+              damage: m.atk * 1.6, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'firebomb', _srcType: m.type,
               color: '#ff5522',
             });
           }
@@ -88765,7 +88800,7 @@ function bossAI(m, dt, distToPlayer) {
           // huge OHKO projectile also renders as a tumbling m_firebomb
           // sprite at canvas-W/3 scale (~440 px after sprite × 1.3
           // multiplier — properly intimidating mouth-launched bomb).
-          owner: 'enemy', skill: 'firebomb', _srcType: m.type,
+          owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'firebomb', _srcType: m.type,
           color: '#ff7722',
           stunHit: 600,
           noGravity: true,
@@ -88865,7 +88900,7 @@ function bossAI(m, dt, distToPlayer) {
             vx: b * 1.6 + (player.x - ox) * 0.0015,
             vy: -3 - Math.random() * 1.2,
             w: 16, h: 16, life: 110,
-            damage: m.atk * 0.45, owner: 'enemy', skill: 'bubble', _srcType: m.type,
+            damage: m.atk * 0.45, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'bubble', _srcType: m.type,
             color: '#aaddff',
           });
         }
@@ -88901,7 +88936,7 @@ function bossAI(m, dt, distToPlayer) {
         vy: (_hdy / _hd) * _hspeed,
         w: 36, h: 36, life: 280,   // v0.26.487 — slightly larger (was 28×28)
         damage: (m.atk || 360) * 0.55,
-        owner: 'enemy', skill: 'octoHead', _srcType: m.type,
+        owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'octoHead', _srcType: m.type,
         homing: true,
         noGravity: true,
         stun: 1500,
@@ -89008,7 +89043,7 @@ function bossAI(m, dt, distToPlayer) {
             vx: _dir * 4.2, vy: 0,
             w: 120, h: 78, life: 320,
             damage: (m.atk || 360) * 0.7,
-            owner: 'enemy', skill: 'tidalSweep', _srcType: m.type,
+            owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'tidalSweep', _srcType: m.type,
             noGravity: true,
             color: '#5fd6ff',
             _sourceLabel: 'the Tidal Sweep',
@@ -89025,7 +89060,7 @@ function bossAI(m, dt, distToPlayer) {
           x: ox, y: m.y + m.h * 0.6,
           vx: b * 1.8, vy: -2.6 - Math.random(),
           w: 16, h: 16, life: 110,
-          damage: m.atk * 0.45, owner: 'enemy', skill: 'bubble', _srcType: m.type,
+          damage: m.atk * 0.45, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'bubble', _srcType: m.type,
           color: '#ffccdd',
         });
       }
@@ -89259,7 +89294,7 @@ function bossAI(m, dt, distToPlayer) {
         x: sx, y: sy,
         vx: (dx / dist) * speed, vy: (dy / dist) * speed,
         w: 30, h: 30, life: 240,                       // slow but long-lived — homing has time to track; v0.26.487 slightly larger (was 22×22)
-        damage: m.atk * 0.7, owner: 'enemy', skill: 'octoLeg', _srcType: m.type,
+        damage: m.atk * 0.7, owner: 'enemy', skill: 'octoLeg', _srcType: m.type, _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null,
         homing: true,                                   // enable enemy-homing steering
         noGravity: true,
         // Universal stun + poison on every leg per the user spec.
@@ -94744,7 +94779,17 @@ function updateProjectiles(dt) {
         // the hit inside the phase band. Replaces the old pre-punish
         // _heavyFloorPct floors that the Lv-80+ ×6 ramp turned into
         // guaranteed one-shots (see _gravHeavyBand).
-        if (p._gravBand && _projLost > 0) _projLost = _gravBandClamp(dmg, p._gravBand);
+        if (p._gravBand && _projLost > 0) {
+          _projLost = _gravBandClamp(dmg, p._gravBand);
+          // v0.30.601 - GRAVITOS'S PROJECTILES ARE FLOORED BY THE HYPER BAND (per user: "ensure gravitos projectile does
+          // more than this damage as well"). His per-phase band is a CEILING on the mitigated shot - form 1 tops out
+          // at 1,717 whatever his ATK, and armour still crushes the base of a gravbolt or ring in every form - so his
+          // shots lagged the 3,000-5,000 the zodiac bosses land. Every Gravitos projectile now lands for at least
+          // the super/hyper roll on the Lv-100 bar (same DEF ramp, difficulty and abilities as the rest); his form-2
+          // and form-3 ceilings still carry a comet far above it. Only projectiles reach this line - the black-hole
+          // core tick and his touch are hazards / contact and keep their own bands.
+          if (_projLost > 0) _projLost = Math.max(_projLost, _lxRolledProjLoss(LX_BOSS_PROJ_SUPER[0] * _refBarAtLv(100), LX_BOSS_PROJ_SUPER[1] * _refBarAtLv(100)));
+        }
         // v0.29.262 — zodiac empowered projectile: cap re-anchored to the
         // zodiac's own level ref (carried on p._bossBand.ref) instead of
         // player maxHp; floor dropped so DEF always moves the number.
@@ -94754,7 +94799,12 @@ function updateProjectiles(dt) {
         // columnStrike trait strike (they resolve through this path) lands
         // inside its tier band. Skipped when a more specific clamp already
         // ran (Gravitos band / zodiac empowered).
-        if (!p._gravBand && !_zEmpowered && p._bossBand && _projLost > 0) _projLost = _gravBandClamp(dmg, p._bossBand);
+        if (!p._gravBand && !_zEmpowered && p._bossBand && _projLost > 0) {
+          _projLost = p._bossBand.roll   // v0.30.601 - a ranged boss band is rolled on the at-level bar, not clamped to it
+            ? _lxRolledProjLoss(p._bossBand.floor * p._bossBand.ref, p._bossBand.cap * p._bossBand.ref)
+            : _gravBandClamp(dmg, p._bossBand);
+          if (p._bossBand.roll && p._srcType) _projLost = _lxBossHpFloor(p._srcType, _projLost);   // v0.30.397's floor still wins where it is higher
+        }
         // v0.29.262 — final normal-mob guard is RAW, not %-of-maxHp: the
         // landed loss may exceed the spawn-time banded damage by at most
         // 35% (difficulty headroom). Kills the _diffDmg double-dip runaway
@@ -94783,41 +94833,7 @@ function updateProjectiles(dt) {
         // and making them worthless against twelve bosses would be a different change than the one
         // asked for. They are applied explicitly below so the order is visible rather than inherited.
         if (p._zodiacSign && !player._god && _projLost > 0) {
-          let _zf = LX_ZODIAC_PROJ_MIN + Math.random() * (LX_ZODIAC_PROJ_MAX - LX_ZODIAC_PROJ_MIN);
-          // v0.30.477 — DEF scales the roll on a straight ramp (see LX_ZODIAC_DEF_ZERO). v0.30.475 removed
-          // DEF from this path entirely and v0.30.476 put it back through the engine's saturating
-          // absorb curve, which cannot separate DEF 2,000 from DEF 4,000 by anything like the amount
-          // asked for. Reading raw DEF keeps the two anchors where they were specified.
-          {
-            const _zDef = (typeof getDef === 'function') ? Math.max(0, getDef()) : 0;
-            _zf *= Math.max(LX_ZODIAC_DEF_MIN_MUL, 1 - _zDef / LX_ZODIAC_DEF_ZERO);
-          }
-          // v0.30.497 — DIFFICULTY APPLIES AGAIN. Replacing _projLost wholesale (v0.30.475)
-          // threw away the _diffDmg pass that produced it, and the difficulty multiplier
-          // went with it: Story and Nightmare dealt byte-identical zodiac projectile
-          // damage, and an expedition boss scaled to 150% by a Hard run hit for exactly
-          // what the same boss hits for on Easy. Every other damage source in the game
-          // moves with both. Applied explicitly here, in the same visible order as the
-          // defensive abilities below, rather than by re-inheriting the whole clamp
-          // chain the flat roll was deliberately placed after.
-          //
-          // The 3000-5000 band the flat roll was asked for is the NORMAL-difficulty band
-          // and stays exactly that. Story (x0.5) reads 1500-2500, Nightmare (x2.0) reads
-          // 6000-10000, and an expedition run multiplies by its own stat column on top
-          // (Easy x0.60, Hard x1.50) - the same column that scales those bosses' HP, ATK
-          // and DEF, so the projectile now tracks the boss the player actually chose.
-          {
-            const _gd = (typeof game !== 'undefined' && game && typeof game._diffDmgMul === 'number' && game._diffDmgMul > 0) ? game._diffDmgMul : 1;
-            _zf *= _gd;
-            if (typeof game !== 'undefined' && game && game.expedition && game.expedition.active && typeof _lxExpDiff === 'function') {
-              const _ed = _lxExpDiff();
-              if (_ed && typeof _ed.stat === 'number' && _ed.stat > 0) _zf *= _ed.stat;
-            }
-          }
-          if (player.blockTimer > 0) _zf *= 0.3;
-          if (player.cls === 'warrior' && typeof _warriorDr === 'function') _zf *= _warriorDr();
-          if (player._aegis) _zf *= 0.5;
-          _projLost = Math.max(1, Math.floor(_zf));
+          _projLost = _lxRolledProjLoss(LX_ZODIAC_PROJ_MIN, LX_ZODIAC_PROJ_MAX);   // v0.30.601 - shared with the boss bands; the maths is unchanged
         }
         // v0.30.297 — PER-SIGN PROJECTILE RULES (per user). Applied AFTER the
         // band clamps above, so block / warrior DR / aegis still mitigate
@@ -134500,7 +134516,7 @@ function _zodiacAiGeneric(m, dt, distToPlayer, phase, z) {
         vx: offset * 1.8, vy: -4 - Math.abs(offset) * 0.3,
         w: 14, h: 14, life: 120,
         damage: m.atk * (phase === 3 ? 1.40 : phase === 2 ? 1.25 : 1.10),  // v0.25.720 — was 1.05 / 0.9 / 0.9
-        owner: 'enemy', skill: 'zodiac', color: z.colors.aura,
+        owner: 'enemy', _zodiacSign: m.zodiacSign || null, skill: 'zodiac', color: z.colors.aura,
         _zodiacAttacker: true,  // v0.25.822 — flag for empowered-hit roll at impact
       });
     }
@@ -134649,7 +134665,7 @@ const ZODIAC_AI = {
             x: m.x + m.w/2, y: m.y + m.h/2,
             vx: Math.cos(ang) * 5, vy: Math.sin(ang) * 5,
             w: 14, h: 14, life: 80,
-            damage: m.atk * 0.85, owner: 'enemy', skill: 'fire', color: '#ff6622'
+            damage: m.atk * 0.85, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'fire', color: '#ff6622'
           });
         }
         // v0.26.085 — Per user "Cracked Arena: Each wall impact damages
@@ -134716,7 +134732,7 @@ const ZODIAC_AI = {
                 x: m.x + m.w/2, y: m.y + m.h/2,
                 vx: Math.cos(ang) * 5, vy: Math.sin(ang) * 5,
                 w: 14, h: 14, life: 90,
-                damage: m.atk * 0.8, owner: 'enemy', skill: 'fire', color: '#ff6622'
+                damage: m.atk * 0.8, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'fire', color: '#ff6622'
               });
             }
             addShake(5); flash(0.18);
@@ -134841,7 +134857,7 @@ const ZODIAC_AI = {
             x: m.x + m.w/2, y: m.y + m.h - 10,
             vx: i * 3, vy: 0,
             w: 26, h: 20, life: 90,
-            damage: m.atk * 1.1, owner: 'enemy', skill: 'quake', color: '#cc9966'
+            damage: m.atk * 1.1, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'quake', color: '#cc9966'
           });
         }
         // v0.26.086 — Per user "Taurus Trample Lines — Taurus stomps,
@@ -134859,7 +134875,7 @@ const ZODIAC_AI = {
             x: _vx - 14, y: m.y - 80,
             vx: 0, vy: 7,
             w: 28, h: 60, life: 90,
-            damage: m.atk * 0.9, owner: 'enemy', skill: 'quake',
+            damage: m.atk * 0.9, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'quake',
             color: '#cc9966',
             _sourceLabel: 'a Trample Line',
           });
@@ -134905,7 +134921,7 @@ const ZODIAC_AI = {
           game.projectiles.push({
             x: px, y: -20, vx: 0, vy: 11,
             w: 22, h: 32, life: 80,
-            damage: m.atk * 1.2, owner: 'enemy', skill: 'taurus_boulder', color: '#aa8855'
+            damage: m.atk * 1.2, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'taurus_boulder', color: '#aa8855'
           });
         }
         addShake(8); flash(0.2);
@@ -135013,7 +135029,7 @@ const ZODIAC_AI = {
             x: m.x + m.w/2, y: m.y + m.h/2,
             vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
             w: 14, h: 14, life: 110,
-            damage: m.atk * 1.0, owner: 'enemy', skill: 'gemini_shard', color: z.colors.aura
+            damage: m.atk * 1.0, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'gemini_shard', color: z.colors.aura
           });
         }
         flash(0.4); addShake(12); audio.play('crit');
@@ -135148,7 +135164,7 @@ const ZODIAC_AI = {
             game.projectiles.push({
               x: _ax + (_bx - _ax) * u - 11, y: _ay + (_by - _ay) * u - 11,
               vx: 0, vy: 0, w: 22, h: 22, life: 16,
-              damage: m.atk * 0.85, owner: 'enemy', skill: 'gemini_shard',
+              damage: m.atk * 0.85, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'gemini_shard',
               color: z.colors.aura, noGravity: true,
             });
           }
@@ -135238,7 +135254,7 @@ const ZODIAC_AI = {
           x: sx, y: sy,
           vx: (dx/len) * 7, vy: (dyy/len) * 7,
           w: 18, h: 10, life: 140,
-          damage: m.atk * 0.9, owner: 'enemy', skill: 'gemini_shard', color: z.colors.aura
+          damage: m.atk * 0.9, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'gemini_shard', color: z.colors.aura
         });
       }
       addShake(4);
@@ -135431,7 +135447,7 @@ const ZODIAC_AI = {
             x: lx + side * 80, y: m.y - 30,
             vx: side * -3, vy: 8,
             w: 32, h: 38, life: 90,
-            damage: m.atk * 1.2, owner: 'enemy', skill: 'pincer', color: '#ff66aa'
+            damage: m.atk * 1.2, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'pincer', color: '#ff66aa'
           });
         }
         addShake(8); flash(0.18); audio.play('crit');
@@ -135453,7 +135469,7 @@ const ZODIAC_AI = {
             vx: (Math.random() - 0.5) * 2,
             vy: -2 - Math.random(),
             w: 26, h: 26, life: 200,   // v0.26.487 — slightly larger (was 20×20)
-            damage: m.atk * 0.55, owner: 'enemy', skill: 'cancerBubble',
+            damage: m.atk * 0.55, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'cancerBubble',
             color: '#aaccff', homing: true, gravity: -0.04,
           });
         }
@@ -135476,7 +135492,7 @@ const ZODIAC_AI = {
           x: m.x + m.w/2, y: m.y + m.h - 14,
           vx: dir * 7, vy: 0,
           w: 40, h: 22, life: 100,
-          damage: m.atk * 1.0, owner: 'enemy', skill: 'pincerSweep', color: '#ff44aa'
+          damage: m.atk * 1.0, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'pincerSweep', color: '#ff44aa'
         });
       }
       if (m.patternTimer > 700) { m.patternState = 'idle'; m.patternTimer = 0; m.vx = 0; m._cancerFired = false; }
@@ -135757,7 +135773,7 @@ const ZODIAC_AI = {
             x: m.x + m.w/2, y: m.y + m.h/2,
             vx: rdir * 9, vy: i * 1.2,
             w: 24, h: 16, life: 80,
-            damage: m.atk * 1.0, owner: 'enemy', skill: 'roar', color: '#ffdd44'
+            damage: m.atk * 1.0, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'roar', color: '#ffdd44'
           });
         }
         m.patternState = 'idle'; m.patternTimer = 0;
@@ -135957,7 +135973,7 @@ const ZODIAC_AI = {
               x: _sbCx - 13, y: _sbCy - 13,
               vx: Math.cos(_sa) * 6.2, vy: Math.sin(_sa) * 6.2,
               w: 26, h: 26, life: 160,
-              damage: _sbDmg, owner: 'enemy', skill: 'radiantLance',
+              damage: _sbDmg, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'radiantLance',
               noGravity: true, color: '#ffeecc',
               _defPierce: (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1,
               _sourceLabel: 'Virga — Starburst',
@@ -136312,7 +136328,7 @@ const ZODIAC_AI = {
         // reading it and moving, and a coin-flip on top of that would only make
         // the same dodge feel arbitrary. Half speed for 3 s stacks real pressure
         // against the arena's centre-line rule: slowed, crossing costs more.
-        damage: m.atk * 1.1, owner: 'enemy', skill: 'scale', color: '#ffcc66',
+        damage: m.atk * 1.1, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'scale', color: '#ffcc66',
         slow: 3000, sourceLabel: "Libra's scale beam"
       });
       addShake(4);
@@ -136473,7 +136489,7 @@ const ZODIAC_AI = {
             vx: offset * 2.4 + dir * 4, vy: -7 - Math.abs(offset) * 0.3,
             w: 14, h: 14, life: 130,
             damage: m.atk * (phase === 3 ? 1.15 : 1.0),
-            owner: 'enemy', skill: 'venom', color: '#ff44aa',
+            owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'venom', color: '#ff44aa',
             poison: phase === 3 ? 4500 : 3000,
           });
         }
@@ -136532,7 +136548,7 @@ const ZODIAC_AI = {
               vx: offset * 1.8, vy: -9 - Math.abs(offset) * 0.5,
               w: 14, h: 14, life: 140,
               damage: m.atk * (phase === 3 ? 1.2 : 1.0),
-              owner: 'enemy', skill: 'venom', color: '#ff44aa',
+              owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'venom', color: '#ff44aa',
               poison: phase === 3 ? 5000 : 3500,
             });
           }
@@ -136582,7 +136598,7 @@ const ZODIAC_AI = {
         vx: Math.cos(_ang) * _arrowSpeed,
         vy: Math.sin(_ang) * _arrowSpeed,
         w: 18, h: 8, life: 220,
-        damage: (m.atk || 200) * 0.85, owner: 'enemy', skill: 'arrow',
+        damage: (m.atk || 200) * 0.85, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'arrow',
         color: '#ffcc44',
         gravity: 0.40,                                  // visible parabolic curve
         _sourceLabel: 'a Trajectory Shot',
@@ -136641,7 +136657,7 @@ const ZODIAC_AI = {
           x: _sx, y: _sy,
           vx: (_dx / _d) * _spd, vy: (_dy / _d) * _spd,
           w: 20, h: 8, life: 80,
-          damage: (m.atk || 200) * 1.1, owner: 'enemy', skill: 'arrow',
+          damage: (m.atk || 200) * 1.1, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'arrow',
           color: '#ffe88a',
           noGravity: true,
           _sourceLabel: 'a Hunt Mark arrow',
@@ -136696,7 +136712,7 @@ const ZODIAC_AI = {
         game.projectiles.push({
           x: tx, y: -20, vx: 0, vy: 10,
           w: 8, h: 20, life: 100,
-          damage: m.atk * 0.7, owner: 'enemy', skill: 'arrowRain', color: '#ffcc88'
+          damage: m.atk * 0.7, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'arrowRain', color: '#ffcc88'
         });
       }
       if (m.patternTimer > total * 70 + 400) {
@@ -136727,7 +136743,7 @@ const ZODIAC_AI = {
           x: m.x + m.w/2, y: m.y + m.h/2,
           vx: dir * 14, vy: (_by / _bd) * 14,
           w: 30, h: 8, life: 100,
-          damage: m.atk * 1.3, owner: 'enemy', skill: 'starbeam',
+          damage: m.atk * 1.3, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'starbeam',
           color: '#ffffcc', pierce: true
         });
         flash(0.25); audio.play('crit');
@@ -136762,7 +136778,7 @@ const ZODIAC_AI = {
           x: sx, y: sy,
           vx: (dx / len) * 16, vy: (dyy / len) * 16,
           w: 20, h: 14, life: 80,
-          damage: m.atk * 1.5, owner: 'enemy', skill: 'markedShot',
+          damage: m.atk * 1.5, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'markedShot',
           color: '#ffaa44', pierce: true
         });
         // v0.26.402 — if the player ignored the 900ms crosshair and is still
@@ -136932,7 +136948,7 @@ const ZODIAC_AI = {
             x: m.x + m.w/2, y: m.y + m.h/2,
             vx: dir * 6 + i * 1.4, vy: i * 1.2,
             w: 16, h: 14, life: 100,
-            damage: m.atk * 0.9, owner: 'enemy', skill: 'ice', color: '#aaeeff',
+            damage: m.atk * 0.9, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'ice', color: '#aaeeff',
             freeze: phase === 3 ? 1400 : 900,
           });
         }
@@ -136967,7 +136983,7 @@ const ZODIAC_AI = {
           game.projectiles.push({
             x: px, y: 470, vx: 0, vy: -10,
             w: 22, h: 110, life: 60,
-            damage: m.atk * 1.1, owner: 'enemy', skill: 'icePillar',
+            damage: m.atk * 1.1, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'icePillar',
             color: '#cceeff', freeze: phase === 3 ? 1600 : 1100,
           });
         }
@@ -137117,7 +137133,7 @@ const ZODIAC_AI = {
             x: m.x + m.w/2, y: 460,
             vx: w * 5, vy: 0,
             w: 40, h: 26, life: 180,
-            damage: m.atk * 0.9, owner: 'enemy', skill: 'wave', color: '#66ccff'
+            damage: m.atk * 0.9, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'wave', color: '#66ccff'
           });
         }
         const drops = phase === 3 ? 6 : phase === 2 ? 4 : 3;
@@ -137129,7 +137145,7 @@ const ZODIAC_AI = {
               x: m.x + m.w/2, y: m.y + m.h/4,
               vx: (Math.random() - 0.5) * 4, vy: -3,
               w: 12, h: 12, life: 160,
-              damage: m.atk * 0.7, owner: 'enemy', skill: 'droplet', color: '#aaeeff', homing: true,
+              damage: m.atk * 0.7, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'droplet', color: '#aaeeff', homing: true,
             });
           }, i * 130);
         }
@@ -137162,7 +137178,7 @@ const ZODIAC_AI = {
           game.projectiles.push({
             x: px, y: 470, vx: 0, vy: -9,
             w: 28, h: 100, life: 60,
-            damage: m.atk * 0.95, owner: 'enemy', skill: 'waterPillar', color: '#88ccff'
+            damage: m.atk * 0.95, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'waterPillar', color: '#88ccff'
           });
         }
         addShake(6); flash(0.15);
@@ -137194,7 +137210,7 @@ const ZODIAC_AI = {
         game.projectiles.push({
           x: sx, y: 420, vx, vy: 0,
           w: 80, h: 60, life: 240,
-          damage: m.atk * 1.4, owner: 'enemy', skill: 'tsunami', color: '#aaeeff'
+          damage: m.atk * 1.4, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'tsunami', color: '#aaeeff'
         });
         addShake(14); flash(0.3); audio.play('crit');
         showToast('Aqua summons a tsunami!', 'epic');
@@ -137310,7 +137326,7 @@ const ZODIAC_AI = {
           vx: (_dx / _d) * _spd, vy: (_dy / _d) * _spd,
           // v0.26.170 — Hitbox 18 → 40 to match rendered mdark sprite.
           w: 40, h: 40, life: 130,
-          damage: (m.atk || 200) * 0.5, owner: 'enemy', skill: 'mdark',
+          damage: (m.atk || 200) * 0.5, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'mdark',
           color: '#ccaaff',
           noGravity: true,
           _dreamInvisible: true,
@@ -137398,7 +137414,7 @@ const ZODIAC_AI = {
               y: m.y + m.h/2 + Math.sin(a) * r,
               vx: -Math.cos(a) * 3.5, vy: -Math.sin(a) * 3.5,
               w: 14, h: 14, life: 110,
-              damage: m.atk * 0.85, owner: 'enemy', skill: 'whirl', color: '#aa66ff'
+              damage: m.atk * 0.85, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'whirl', color: '#aa66ff'
             });
           } else {
             // v0.26.402 — every 3rd shot is AIMED at the player rather than
@@ -137415,7 +137431,7 @@ const ZODIAC_AI = {
               x: m.x + m.w/2, y: m.y + m.h/2,
               vx: _vx, vy: _vy,
               w: 14, h: 14, life: 130,
-              damage: m.atk * 0.85, owner: 'enemy', skill: 'whirl', color: '#cc99ff'
+              damage: m.atk * 0.85, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'whirl', color: '#cc99ff'
             });
           }
         }, i * 40);
