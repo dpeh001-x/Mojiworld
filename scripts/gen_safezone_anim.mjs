@@ -27,7 +27,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const KEY = 'gravitos_singularity_zone';
 const BASE = join(ROOT, 'Sprites', 'fx', KEY + '.webp');
 const ANIM_DIR = join(ROOT, 'Sprites', 'fx', 'anim');
-const S = 512, FRAMES = 9, FEATHER = 0.07;
+const S = 512, FRAMES = 9, FEATHER = 0.05;
 const has = (f) => process.argv.includes(f);
 const exists = async (p) => { try { await access(p); return true; } catch { return false; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -35,19 +35,24 @@ const key = process.env.LUDO_API_KEY;
 const API = process.env.LUDO_API_BASE || 'https://api.ludo.ai/api';
 const fetchBuf = async (u) => { const r = await fetch(u, { signal: AbortSignal.timeout(120000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); };
 
+// v2 (per user, on the ring: "the safe zone art can still be better, like a circle dimensional
+// portal"): a round portal seen from directly above, so the renderer's stretch into the wide zone
+// rect lays it on the floor in perspective. It fills the sheet (a ring left the rect half empty and
+// hovered at mid-height).
 const PROMPT =
-  'game vfx sprite, a glowing RING of soft blue-white light lying flat on the ground, seen from '
-  + 'slightly above so the ring reads as a wide oval, a sanctuary halo: a bright thin luminous rim, '
-  + 'a faint pale glow pooled inside the ring, and a few small wisps and motes of light rising gently '
-  + 'from it. The ring floats alone in the middle of the picture with generous empty space around it '
-  + 'on every side. Colours: white, pale cyan, sky blue, a hint of violet at the rim. Soft edges, '
-  + 'translucent light, painterly 16-bit VFX. Pure transparent background, alpha only: no ground, no '
-  + 'floor, no scene, no box, no frame, no rectangle, no square, no border, no character, no text, '
-  + 'no letters, no watermark.';
+  'game vfx sprite, a CIRCULAR DIMENSIONAL PORTAL seen from directly above, a perfect round disc that '
+  + 'fills almost the whole picture: a swirling vortex of deep blue and violet light spiralling into a '
+  + 'bright white-cyan centre, a thick luminous rim of pale blue light around the outside with faint '
+  + 'glowing arcane runes along it, small motes and wisps of light drifting off the rim. Round, not '
+  + 'oval, centred, with only a thin margin of empty space around the disc. Colours: white, pale cyan, '
+  + 'sky blue, violet, deep indigo in the vortex. Soft glowing edges, painterly 16-bit VFX. Pure '
+  + 'transparent background, alpha only: no ground, no floor, no scene, no box, no frame, no square, '
+  + 'no border, no character, no text, no letters, no watermark.';
 const MOTION =
-  'the ring of light pulses and breathes: its rim brightens and dims in a slow loop, the pooled glow '
-  + 'inside swells and settles, small motes drift upward and fade while new ones rise, the whole '
-  + 'shape stays in place and keeps its size; seamless loop, nothing leaves the frame';
+  'the vortex inside the portal turns slowly clockwise, the bright centre pulses, the rim glow '
+  + 'brightens and dims in a slow loop, the runes shimmer, small motes drift off the rim and fade '
+  + 'while new ones appear; the disc stays perfectly in place and keeps its size and shape; '
+  + 'seamless loop, nothing leaves the frame';
 
 async function px(buf) { const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); return { d: data, w: info.width, h: info.height }; }
 // alpha feather on all four sides + a guaranteed-clear border ring
@@ -88,11 +93,29 @@ export async function shape(buf) {
 export function gate(sh, bi) {
   const bad = [];
   if (bi > 0) bad.push(`ink on the border (${bi} px)`);
-  if (sh.boxFill > 0.80) bad.push(`reads as a slab: ${(100 * sh.boxFill).toFixed(0)}% of its own box is opaque (want <= 80%)`);
-  if (sh.cornerFill > 0.30) bad.push(`square corners: ${(100 * sh.cornerFill).toFixed(0)}% of the box corners are opaque (want <= 30%)`);
+  if (sh.boxFill > 0.86) bad.push(`reads as a slab: ${(100 * sh.boxFill).toFixed(0)}% of its own box is opaque (want <= 86%; a full disc is ~79%)`);
+  if (sh.cornerFill > 0.40) bad.push(`square corners: ${(100 * sh.cornerFill).toFixed(0)}% of the box corners are opaque (want <= 40%; a disc leaves them mostly empty, a rectangle fills them)`);
   if (sh.fill < 0.04) bad.push(`too faint / empty: ${(100 * sh.fill).toFixed(1)}% of the sheet`);
   return bad;
 }
+// 2026-09-11: ludo's asset endpoints answer 202 with a JOB ({id, status: 'running',
+// poll_after_ms}) instead of the asset; the finished job at GET /assets/jobs/<id> carries the
+// result (image: result: [{url}]; animate: the frame urls / spritesheet on the job or its result).
+async function pollJob(job, label) {
+  const t0 = Date.now();
+  for (;;) {
+    await sleep(Math.min(15000, Math.max(2000, Number(job.poll_after_ms) || 5000)));
+    const r = await fetch(`${API}/assets/jobs/${job.id}`, { headers: { Authorization: `ApiKey ${key}` }, signal: AbortSignal.timeout(30000) });
+    if (!r.ok) throw new Error(`job ${job.id}: ${r.status}`);
+    job = await r.json();
+    if (job.status === 'succeeded') return job;
+    if (job.status === 'failed' || job.status === 'cancelled') throw new Error(`job ${job.id} ${job.status}: ${JSON.stringify(job).slice(0, 160)}`);
+    if (Date.now() - t0 > 600000) throw new Error(`job ${job.id} still ${job.status} after 600s`);
+    process.stdout.write(`[${label} ${job.status}] `);
+  }
+}
+const isJob = (res, data) => res.status === 202 || (data && data.id && data.status && !data.url && !data.result && !data.individual_frame_urls && !data.spritesheet_url);
+const unwrap = (data) => (data && data.result && !Array.isArray(data.result) && typeof data.result === 'object') ? Object.assign({}, data, data.result) : data;
 async function makeImage() {
   let last;
   for (let a = 1; a <= 4; a++) {
@@ -102,9 +125,11 @@ async function makeImage() {
         signal: AbortSignal.timeout(150000), body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: 'ar_1_1', n: 1, augment_prompt: false, prompt: PROMPT }) });
       if (res.status === 402) { console.log('OUT OF CREDITS'); process.exit(3); }
       if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 120)}`);
-      const data = await res.json();
-      const url = Array.isArray(data) ? data[0] && data[0].url : (data && (data.url || (data.images && data.images[0] && data.images[0].url)));
-      if (!url) throw new Error('no url in the response');
+      let data = await res.json();
+      if (isJob(res, data)) data = await pollJob(data, 'image');
+      const url = Array.isArray(data) ? data[0] && data[0].url
+        : (data && (data.url || (data.images && data.images[0] && data.images[0].url) || (Array.isArray(data.result) && data.result[0] && data.result[0].url)));
+      if (!url) throw new Error('no url in the response: ' + JSON.stringify(data).slice(0, 160));
       const seated = await seat(await fetchBuf(url));
       const sh = await shape(seated), bad = gate(sh, await borderInk(seated));
       console.log(`box ${sh.bw}x${sh.bh}, box fill ${(100 * sh.boxFill).toFixed(0)}%, corners ${(100 * sh.cornerFill).toFixed(0)}% - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'ok'}`);
@@ -146,7 +171,11 @@ async function animate(base) {
         signal: AbortSignal.timeout(600000), body: JSON.stringify({ initial_image: uri, motion_prompt: MOTION, frames: FRAMES, frame_size: -9, model: 'eagle', individual_frames: true, loop: true }) });
       if (res.status === 402) { console.log('OUT OF CREDITS'); process.exit(3); }
       if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 120)}`);
-      const raw = await framesFrom(await res.json(), FRAMES);
+      let data = await res.json();
+      if (isJob(res, data)) data = await pollJob(data, 'animate');
+      data = unwrap(data);
+      if (Array.isArray(data.result) && data.result[0] && typeof data.result[0] === 'object') data = Object.assign({}, data, data.result[0]);
+      const raw = await framesFrom(data, FRAMES);
       console.log('frames in');
       const out = [];
       for (let i = 0; i < FRAMES; i++) {
