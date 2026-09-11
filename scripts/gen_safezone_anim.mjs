@@ -50,24 +50,29 @@ const fetchBuf = async (u) => { const r = await fetch(u, { signal: AbortSignal.t
 // gold: ragged golden-yellow edges spiking outward like cracked light, a dark void inside with
 // amber-gold light swirling into a white-gold centre, gold sparks. The bold dark cel outline the
 // crystal shard wears is kept (the brief asks, the generator guarantees).
+// v7 (per user, on the gold rift: "make this more spherical"). The flat spiked disc becomes a
+// volumetric ORB: the same gold rift energy, but shaded as a solid sphere - lit from the upper
+// left, darker underside, a specular highlight, the void swirl seen inside as if through amber
+// glass - with the crackling gold arcs and spikes kept around its silhouette.
 const PROMPT =
-  'game vfx sprite, a CIRCULAR DIMENSIONAL RIFT seen from directly above, a round torn opening in '
-  + 'space that fills almost the whole picture. Its edge is RAGGED and JAGGED: cracked spikes and '
-  + 'crackling lightning-like shards of bright GOLDEN-YELLOW energy radiating outward all around the '
-  + 'rim, glowing amber at the base and white-hot at the tips. Inside the rift a dark void with '
-  + 'swirling amber and gold light spiralling into a blazing white-gold centre, small gold sparks '
-  + 'and embers drifting over it. Round overall, centred, with only a thin margin of empty space '
-  + 'around it. Colours ONLY: golden yellow, amber, orange-gold, white-gold, dark void black and '
-  + 'deep brown-black inside. No blue, no cyan, no purple, no violet, no pink, no green. Cel-shaded '
-  + 'like a game sprite: a BOLD DARK OUTLINE traces the jagged outer edge and the inner edge where '
-  + 'the rim meets the void, crisp contour lines, flat cel shading with hard-edged highlights. Pure '
+  'game vfx sprite, a SPHERICAL golden DIMENSIONAL RIFT: a glowing three-dimensional ORB of swirling '
+  + 'gold energy that fills almost the whole picture, shaded like a solid round ball, lit from the '
+  + 'upper left with a darker amber underside and a small bright specular highlight, clearly a '
+  + 'sphere with volume and not a flat disc. A dark void swirl is visible inside the orb as if seen '
+  + 'through molten amber glass, spiralling into a blazing white-gold core. Around the silhouette, '
+  + 'crackling golden lightning arcs and a few jagged gold spikes of energy, glowing amber at the '
+  + 'base and white-hot at the tips, with gold sparks drifting off. Round overall, centred, with '
+  + 'only a thin margin of empty space around it. Colours ONLY: golden yellow, amber, orange-gold, '
+  + 'white-gold, dark void black and deep brown-black inside. No blue, no cyan, no purple, no '
+  + 'violet, no pink, no green. Cel-shaded like a game sprite: a BOLD DARK OUTLINE traces the '
+  + 'sphere and its spikes, crisp contour lines, flat cel shading with hard-edged highlights. Pure '
   + 'transparent background, alpha only: no ground, no floor, no scene, no box, no frame, no square, '
   + 'no border, no character, no text, no letters, no watermark.';
 const MOTION =
-  'the golden void inside the rift swirls slowly clockwise and its white-gold centre pulses, the '
-  + 'jagged crackling edges flicker and shift like living lightning, gold sparks and embers drift '
-  + 'off the rim and fade while new ones appear; the rift stays perfectly in place and keeps its '
-  + 'overall size and shape; seamless loop, nothing leaves the frame';
+  'the golden energy swirls slowly around the surface of the sphere and the void inside it turns, '
+  + 'the white-gold core pulses, the crackling arcs and spikes around the silhouette flicker like '
+  + 'living lightning, gold sparks drift off and fade while new ones appear; the sphere stays '
+  + 'perfectly in place and keeps its size and round shape; seamless loop, nothing leaves the frame';
 
 async function px(buf) { const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); return { d: data, w: info.width, h: info.height }; }
 // alpha feather on all four sides + a guaranteed-clear border ring
