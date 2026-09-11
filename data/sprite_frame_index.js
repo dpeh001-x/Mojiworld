@@ -541,6 +541,8 @@ window.LX_SPRITE_FRAME_INDEX = {
    "cascade_void": 9,
    "crusader_aegis": 9,
    "crusader_ult": 9,
+   "deadeye_execute": 9,
+   "deadeye_hit": 9,
    "doombringer_apoc": 9,
    "doombringer_ult": 9,
    "dragoon_skylance": 9,
