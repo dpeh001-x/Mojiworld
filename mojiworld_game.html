@@ -10735,7 +10735,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.608';
+const GAME_VERSION = 'v0.30.609';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -18510,8 +18510,8 @@ function _mapPlatformTint(md) {
 // the 0.55 per shape and the blit carries the caller's own alpha.
 const _CUTE_PLAT_CACHE = new Map();
 const _CUTE_PLAT_MAX_PX = 1500000;   // ~6 MB at 4 bytes/px — a 2400x60 ground fits fine
-function _cutePlatformSprite(w, h, tint, ground, theme) {
-  const key = w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '');   // v0.30.597 — theme in the key
+function _cutePlatformSprite(w, h, tint, ground, theme, variant) {
+  const key = w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '') + '|' + (variant | 0);   // v0.30.609 — the variant too
   let cv = _CUTE_PLAT_CACHE.get(key);
   if (cv) return cv;
   if (!(w > 0 && h > 0) || w * h > _CUTE_PLAT_MAX_PX) return null;   // caller falls back
@@ -18523,15 +18523,15 @@ function _cutePlatformSprite(w, h, tint, ground, theme) {
   }
   // PAD BY 2. The 2px outline is stroked CENTRED on the path, so half of it
   // lies OUTSIDE the w x h box; an exact-size canvas crops that outer pixel and
-  // the blit no longer matches the direct paint. Measured before this padding:
-  // maxDelta 67 over half the bytes. The blit offsets by the same pad.
-  // v0.30.597 — the bake is padded 12px ABOVE the slab for the decor that stands on its surface
-  // (grass tufts, snow, crystals); _drawCutePlatform undoes the same pad.
-  const PAD = 2, PAD_TOP = _CUTE_PAD_TOP;
+  // the blit no longer matches the direct paint. The blit offsets by the same pad.
+  // v0.30.597 — padded 12px ABOVE the slab for the decor that stands on its surface.
+  // v0.30.609 — and as deep BELOW as the art (_cuteGeom.depth): a floating platform's face, keel and
+  // what hangs from it sit under the one-way collision box, so the bake follows the art, not the box.
+  const PAD = 2, PAD_TOP = _CUTE_PAD_TOP, G = _cuteGeom(w, h, ground);
   cv = document.createElement('canvas');
-  cv.width = Math.ceil(w) + PAD * 2; cv.height = Math.ceil(h) + PAD + PAD_TOP;
+  cv.width = Math.ceil(w) + PAD * 2; cv.height = PAD_TOP + Math.max(Math.ceil(h), G.depth) + PAD + 1;
   const c = cv.getContext('2d');
-  _paintCutePlatform(c, PAD, PAD_TOP, w, h, tint, ground, ground ? 1 : 0.94, theme);
+  _paintCutePlatform(c, PAD, PAD_TOP, w, h, tint, ground, ground ? 1 : 0.94, theme, variant);
   _CUTE_PLAT_CACHE.set(key, cv);
   return cv;
 }
@@ -18576,105 +18576,302 @@ function _cuteMapPalette(tint) {
   const key = tint.top + '|' + tint.body; let p = _CUTE_MAP_PAL.get(key); if (p) return p;
   const [h, sat, l] = _cuteHexHsl(tint.top);
   const capS = Math.min(0.72, sat * 1.15), capL = Math.max(0.52, Math.min(0.8, 0.45 + l * 0.38));
-  const bodyS = capS * 0.85, bodyL = Math.max(0.15, Math.min(0.34, capL * 0.42));
+  const bodyS = capS * 0.85, bodyL = Math.max(0.18, Math.min(0.38, capL * 0.48));   // v0.30.609 — was 0.15-0.34 / x0.42: a mid-tone face for v3's material
   p = { top: _cuteHslHex(h, capS, capL), body: _cuteHslHex(h, bodyS, bodyL) };
   if (_CUTE_MAP_PAL.size > 64) _CUTE_MAP_PAL.clear();
   _CUTE_MAP_PAL.set(key, p); return p;
 }
-function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme) {
-  const OUT = '#0a0510';
+// v0.30.609 — TERRAIN v3, after MapleStory and the AAA side-scrollers (per user: "Honestly the floor
+// can see better improvements, look at maplestory style floors and other sidescrolling AAA games to
+// compare analyse and improve"). What those floors do that v0.30.597's did not, and what this does:
+//  1. MASS. A MapleStory foothold platform is a chunky piece - a grass or stone lip, a textured
+//     face, ends that round off - and Hollow Knight / Ori / Rayman float theirs as islands with a
+//     tapered, hanging underside. Platforms here are one-way (drop through with down), so the art
+//     hangs BELOW the authored collision box without lying about anything: the surface you stand on
+//     is still exactly y. _cuteGeom sets the depth: ~14-18 px of face, a keel of up to 12 px, and
+//     what hangs from it.
+//  2. A LIP THAT OVERHANGS. The standing layer runs the full width, proud of an inset face at the
+//     ends; its edge (scallops, snow lumps, drips, crust) droops over the face, with a strip of
+//     occlusion under it.
+//  3. MATERIAL. Stones and bricks with a lit top edge and a shaded underside, strata, glowing
+//     cracks, ice facets, candy layers - the way hand-painted tiles are drawn.
+//  4. LIGHT. Bounce-lit under the lip, darkening with depth, a rim light on top, and a keyline in
+//     the darkest shade of the map's own hue instead of black, so the terrain sits IN the scene.
+//  5. UNDERSIDES that belong to the biome: roots, icicles, glowing drips, syrup, crystals, rubble.
+//  6. VARIATION. Each platform takes one of three seeded variants from its authored position
+//     (_lxPlatVariant), so a run of same-width ledges is not one stamp repeated.
+// Colour is still the map's (_cuteMapPalette, v0.30.606); every shade below is derived from it.
+function _cuteGeom(w, h, ground) {
+  const block = !ground && h > 30, island = !ground && !block;
+  const cap = ground ? Math.max(8, Math.min(16, h * 0.26)) : block ? Math.max(6, Math.min(12, h * 0.2)) : Math.max(5, Math.min(8, h * 0.6));
+  const faceH = (ground || block) ? h : Math.max(h, Math.min(18, 11 + w * 0.03));
+  const keel = island && w >= 60 ? Math.min(12, 4 + w * 0.04) : 0;
+  const hang = island ? 11 : 0;
+  return { block, island, cap, faceH, keel, hang, depth: Math.ceil(faceH + keel + hang) };
+}
+function _lxPlatVariant(p) {
+  const vx = Math.round(p._driftBaseX != null ? p._driftBaseX : p.x), vy = Math.round(p._driftBaseY != null ? p._driftBaseY : p.y);
+  return Math.abs((vx * 73 + vy * 31) | 0) % 3;
+}
+// The cap's lower edge, computed ONCE per paint (it is seeded, and the same path is filled, clipped
+// and stroked). Segments run right-to-left, x relative to the slab, y relative to the edge line.
+function _cuteEdgePts(w, edge, rng) {
+  const s = [];
+  if (edge === 'scallop') { let xx = w; while (xx > 0.5) { const sw = Math.min(xx, 7 + rng() * 4), xa = xx - sw; s.push(['q', xa + sw / 2, sw * 0.62, xa, 0]); xx = xa; } }
+  else if (edge === 'lump') { let xx = w; while (xx > 0.5) { const sw = Math.min(xx, 10 + rng() * 5), xa = xx - sw; s.push(['q', xa + sw / 2, sw * 0.5, xa, 0]); xx = xa; } }
+  else if (edge === 'wave') { for (let xx = w; xx >= 0; xx -= 4) s.push(['l', xx, Math.sin(xx * 0.35) * 1.6 + 0.8]); s.push(['l', 0, 0.8]); }
+  else if (edge === 'drip') { let xx = w; while (xx > 0.5) { const dw = Math.min(xx, 12 + rng() * 6), xa = xx - dw, d = 2 + rng() * 5; s.push(['l', xx - dw * 0.3, 0]); s.push(['q', xx - dw * 0.5, d * 2.1, xx - dw * 0.7, 0]); s.push(['l', xa, 0]); xx = xa; } }
+  else if (edge === 'crust') { let k = 0; for (let xx = w; xx > 0; xx -= 4 + rng() * 3, k++) s.push(['l', xx, (k & 1) ? 2 : -1]); s.push(['l', 0, 0]); }
+  else s.push(['l', 0, 0]);
+  return s;
+}
+function _cuteEdgeDraw(ctx, sx, ye, segs) { for (const g of segs) { if (g[0] === 'q') ctx.quadraticCurveTo(sx + g[1], ye + g[2], sx + g[3], ye + g[4]); else ctx.lineTo(sx + g[1], ye + g[2]); } }
+function _cuteMaterial(ctx, sx, fy, w, fh, theme, rng, C, ground) {
+  if (fh < 3) return;
+  const mix = C.mix, R = (a, b) => a + rng() * (b - a);
+  ctx.save();
+  const A0 = ctx.globalAlpha;
+  const pebble = (cx, cy, rw, rh, rot, tone) => {
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot);
+    ctx.fillStyle = C.bodyDk; ctx.beginPath(); ctx.ellipse(0.8, 1.1, rw, rh, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = mix(C.body, C.top, tone); ctx.beginPath(); ctx.ellipse(0, 0, rw, rh, 0, 0, Math.PI * 2); ctx.fill();
+    if (rw > 1.8) { ctx.strokeStyle = C.bodyLt; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(0, 0, rw * 0.75, rh * 0.68, 0, Math.PI * 1.1, Math.PI * 1.75); ctx.stroke(); }
+    ctx.restore();
+  };
+  if (theme === 'stone') {                  // brick courses: lit top edge, shaded underside, a few cracks
+    const bh = ground ? 12 : 7, bw = ground ? 28 : 16;
+    for (let yy = fy + 2, row = 0; yy < fy + fh - 2; yy += bh, row++) {
+      for (let xx = sx - ((row & 1) ? bw / 2 : 0) - R(0, 4); xx < sx + w; xx += bw + R(-2, 2)) {
+        const a0 = Math.max(sx, xx + 1), a1 = Math.min(sx + w, xx + bw - 1);
+        if (a1 - a0 < 3) continue;
+        ctx.fillStyle = mix(C.body, C.top, R(0.06, 0.22)); ctx.fillRect(a0, yy + 1, a1 - a0, bh - 2);
+        ctx.fillStyle = C.bodyLt; ctx.fillRect(a0, yy + 1, a1 - a0, 1);
+        ctx.fillStyle = C.bodyDk; ctx.fillRect(a0, yy + bh - 2, a1 - a0, 1);
+        if (rng() < 0.18) { ctx.strokeStyle = C.bodyDk; ctx.lineWidth = 1; ctx.beginPath(); const cx = R(a0, a1); ctx.moveTo(cx, yy + 2); ctx.lineTo(cx + R(-3, 3), yy + bh - 3); ctx.stroke(); }
+      }
+    }
+  } else if (theme === 'sand' || theme === 'coral' || theme === 'honey') {   // strata, a few embedded pieces
+    for (let yy = fy + 3, k = 0; yy < fy + fh; yy += ground ? 9 : 6, k++) {
+      ctx.fillStyle = (k & 1) ? mix(C.body, C.top, 0.14) : mix(C.body, C.bodyDk, 0.2);
+      ctx.beginPath(); ctx.moveTo(sx, yy);
+      for (let xx = 0; xx <= w; xx += 6) ctx.lineTo(sx + xx, yy + Math.sin((xx + k * 17) * 0.09) * 1.6);
+      ctx.lineTo(sx + w, yy + 12); ctx.lineTo(sx, yy + 12); ctx.closePath(); ctx.fill();
+    }
+    for (let n = 0, N = Math.max(1, Math.round(w * fh / 700)); n < N; n++) pebble(R(sx + 4, sx + w - 4), R(fy + 3, fy + fh - 3), R(1.6, 3), R(1.2, 2.2), R(-0.4, 0.4), theme === 'coral' ? 0.5 : 0.3);
+  } else if (theme === 'lava') {            // dark rock, glowing cracks, a molten glow at the foot of the ground
+    for (let n = 0, N = Math.max(2, Math.round(w * fh / 360)); n < N; n++) pebble(R(sx + 4, sx + w - 4), R(fy + 3, fy + fh - 3), R(2, ground ? 5 : 3), R(1.5, ground ? 3.2 : 2.2), R(-0.5, 0.5), R(0.02, 0.12));
+    ctx.strokeStyle = C.top; ctx.lineWidth = 1.5; ctx.globalAlpha = A0 * 0.85; ctx.shadowColor = C.top; ctx.shadowBlur = 4;
+    for (let n = 0, M = Math.max(1, Math.round(w / 30)); n < M; n++) { let xx = R(sx + 6, sx + w - 6), yy = fy + 1; ctx.beginPath(); ctx.moveTo(xx, yy); for (let k = 0; k < 5 && yy < fy + fh - 2; k++) { xx += R(-5, 5); yy += R(3, 7); ctx.lineTo(xx, Math.min(yy, fy + fh - 1)); } ctx.stroke(); }
+    ctx.shadowBlur = 0;
+    if (ground) { const g = ctx.createLinearGradient(0, fy + fh * 0.55, 0, fy + fh); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, C.top); ctx.globalAlpha = A0 * 0.5; ctx.fillStyle = g; ctx.fillRect(sx, fy + fh * 0.55, w, fh * 0.45); }
+  } else if (theme === 'ice') {             // blocks of ice: frosted top edges, glints, fracture lines, dark seams
+    const bh = ground ? 14 : 8;
+    for (let yy = fy + 1; yy < fy + fh - 1; yy += bh) {
+      for (let xx = sx - R(0, 12); xx < sx + w;) {
+        const bw = R(ground ? 22 : 14, ground ? 44 : 26), a0 = Math.max(sx, xx + 1), a1 = Math.min(sx + w, xx + bw - 1);
+        if (a1 - a0 >= 3) {
+          ctx.fillStyle = mix(C.body, C.top, R(0.18, 0.42)); ctx.fillRect(a0, yy + 1, a1 - a0, bh - 2);
+          ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(a0, yy + 1, a1 - a0, 1);
+          if (rng() < 0.4) { ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.beginPath(); const gx = R(a0 + 2, Math.max(a0 + 2, a1 - 4)); ctx.moveTo(gx, yy + bh - 3); ctx.lineTo(gx + 3, yy + 2); ctx.stroke(); }
+          if (rng() < 0.25) { ctx.strokeStyle = C.bodyDk; ctx.lineWidth = 1; ctx.beginPath(); const cx = R(a0, a1); ctx.moveTo(cx, yy + 1); ctx.lineTo(cx + R(-4, 4), yy + bh * 0.5); ctx.lineTo(cx + R(-4, 4), yy + bh - 1); ctx.stroke(); }
+        }
+        xx += bw;
+      }
+    }
+  } else if (theme === 'candy') {           // layered bands with sprinkles baked in
+    for (let yy = fy + 4, k = 0; yy < fy + fh; yy += ground ? 10 : 6, k++) {
+      ctx.fillStyle = (k & 1) ? mix(C.body, C.top, 0.28) : mix(C.body, '#ffffff', 0.08);
+      ctx.beginPath(); ctx.moveTo(sx, yy); for (let xx = 0; xx <= w; xx += 5) ctx.lineTo(sx + xx, yy + Math.sin(xx * 0.3 + k) * 1.2);
+      ctx.lineTo(sx + w, yy + 3.5); for (let xx = w; xx >= 0; xx -= 5) ctx.lineTo(sx + xx, yy + 3.5 + Math.sin(xx * 0.3 + k + 1) * 1.2); ctx.closePath(); ctx.fill();
+    }
+    ctx.lineWidth = 1.6;
+    for (let n = 0, N = Math.max(2, Math.round(w * fh / 260)); n < N; n++) { ctx.strokeStyle = ['#ffffff', '#ffd23f', '#6fd6ff', '#ff6f9c'][Math.floor(rng() * 4)]; const xx = R(sx + 3, sx + w - 3), yy = R(fy + 3, fy + fh - 3); ctx.beginPath(); ctx.moveTo(xx - 1.8, yy + 0.8); ctx.lineTo(xx + 1.8, yy - 0.8); ctx.stroke(); }
+  } else if (theme === 'cosmic') {          // stars and crystal facets
+    ctx.fillStyle = '#ffffff';
+    for (let n = 0, N = Math.max(4, Math.round(w * fh / 90)); n < N; n++) { ctx.globalAlpha = A0 * R(0.25, 0.8); ctx.beginPath(); ctx.arc(R(sx, sx + w), R(fy, fy + fh), R(0.5, 1.3), 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = A0;
+    for (let n = 0, N = Math.max(1, Math.round(w / 40)); n < N; n++) { const cx = R(sx, sx + w), cy = R(fy + 2, fy + fh - 2), s = R(2.5, ground ? 7 : 4); ctx.fillStyle = mix(C.body, C.top, R(0.2, 0.45)); ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s * 0.6, cy); ctx.lineTo(cx, cy + s * 0.9); ctx.lineTo(cx - s * 0.6, cy); ctx.closePath(); ctx.fill(); }
+  } else {                                  // grass, swamp, default: soil with embedded stones and roots
+    for (let n = 0, N = Math.max(2, Math.round(w * fh / (ground ? 380 : 220))); n < N; n++) pebble(R(sx + 4, sx + w - 4), R(fy + 3, fy + fh - 3), R(1.6, ground ? 4.5 : 2.6), R(1.2, ground ? 3 : 1.8), R(-0.5, 0.5), R(0.12, 0.34));
+    ctx.strokeStyle = C.bodyDk; ctx.lineWidth = 1; ctx.globalAlpha = A0 * 0.6;
+    for (let n = 0, M = Math.max(1, Math.round(w / 60)); n < M; n++) { let xx = R(sx + 6, sx + w - 6), yy = fy + 2; ctx.beginPath(); ctx.moveTo(xx, yy); for (let k = 0; k < 3; k++) { xx += R(-6, 6); yy += R(2, ground ? 8 : 4); ctx.lineTo(xx, Math.min(yy, fy + fh - 2)); } ctx.stroke(); }
+  }
+  ctx.restore();
+}
+function _cuteHangers(ctx, x0, x1, yb, theme, rng, C, keelPts) {
+  const R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
+  for (let n = 0, N = Math.max(1, Math.round((x1 - x0) / 38)); n < N; n++) {
+    const kp = keelPts.length ? keelPts[Math.floor(rng() * keelPts.length)] : [(x0 + x1) / 2, yb];
+    const hx = kp[0] + R(-3, 3), hy = kp[1] - 3, len = R(4, 8);
+    if (theme === 'ice') {
+      ctx.beginPath(); ctx.moveTo(hx - 2.4, hy); ctx.lineTo(hx + 2.4, hy); ctx.lineTo(hx + R(-0.5, 0.5), hy + len + 3); ctx.closePath();
+      ctx.fillStyle = C.topLt; ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1.2; ctx.stroke();
+    } else if (theme === 'lava') {
+      ctx.globalAlpha = A0 * 0.9; ctx.fillStyle = '#ffb347'; ctx.shadowColor = '#ff7a2a'; ctx.shadowBlur = 5;
+      ctx.beginPath(); ctx.moveTo(hx - 1.6, hy); ctx.quadraticCurveTo(hx - 2.2, hy + len, hx, hy + len + 1.5); ctx.quadraticCurveTo(hx + 2.2, hy + len, hx + 1.6, hy); ctx.closePath(); ctx.fill();
+      ctx.shadowBlur = 0; ctx.globalAlpha = A0;
+    } else if (theme === 'candy' || theme === 'honey') {
+      ctx.beginPath(); ctx.moveTo(hx - 2.6, hy); ctx.quadraticCurveTo(hx - 2.8, hy + len, hx, hy + len + 2); ctx.quadraticCurveTo(hx + 2.8, hy + len, hx + 2.6, hy); ctx.closePath();
+      ctx.fillStyle = C.top; ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1.2; ctx.stroke();
+    } else if (theme === 'cosmic') {
+      ctx.beginPath(); ctx.moveTo(hx - 1.7, hy); ctx.lineTo(hx + 1.7, hy); ctx.lineTo(hx + 0.4, hy + len + 4); ctx.closePath();
+      ctx.fillStyle = C.topLt; ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1; ctx.stroke();
+    } else if (theme === 'stone' || theme === 'sand' || theme === 'coral') {
+      const py = hy + len, s = R(1.8, 3);
+      ctx.beginPath(); ctx.moveTo(hx - s, py); ctx.lineTo(hx - s * 0.3, py - s); ctx.lineTo(hx + s, py - s * 0.4); ctx.lineTo(hx + s * 0.6, py + s * 0.8); ctx.closePath();
+      ctx.fillStyle = C.body; ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1; ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.quadraticCurveTo(hx + R(-4, 4), hy + len * 0.6, hx + R(-3, 3), hy + len + 2);
+      ctx.strokeStyle = C.OUT; ctx.lineWidth = 2.4; ctx.stroke(); ctx.strokeStyle = C.mix(C.body, C.top, 0.25); ctx.lineWidth = 1.1; ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = A0;
+}
+function _cuteCapTexture(ctx, sx, y, w, cap, theme, rng, C) {
+  const R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
+  if (theme === 'grass' || theme === 'swamp' || !theme) {
+    ctx.strokeStyle = C.topDk; ctx.lineWidth = 1; ctx.globalAlpha = A0 * 0.55;
+    for (let n = 0, N = Math.round(w / 8); n < N; n++) { const xx = R(sx + 3, sx + w - 3); ctx.beginPath(); ctx.moveTo(xx, y + cap - 0.5); ctx.lineTo(xx + R(-1.5, 1.5), y + cap * R(0.35, 0.6)); ctx.stroke(); }
+  } else if (theme === 'stone') {
+    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.5; ctx.fillRect(sx, y + cap * 0.62, w, 1);
+    for (let xx = sx + R(10, 24); xx < sx + w - 4; xx += R(22, 34)) ctx.fillRect(xx, y + cap * 0.62, 1, cap * 0.38);
+  } else if (theme === 'ice') {
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.globalAlpha = A0 * 0.55; ctx.beginPath(); ctx.moveTo(sx + w * 0.12, y + cap * 0.38); ctx.lineTo(sx + w * 0.52, y + cap * 0.38); ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.7; for (let n = 0, N = Math.max(1, Math.round(w / 50)); n < N; n++) { ctx.beginPath(); ctx.arc(R(sx + w * 0.55, sx + w - 6), y + cap * 0.4, 0.9, 0, Math.PI * 2); ctx.fill(); }
+  } else if (theme === 'lava') {
+    ctx.fillStyle = C.OUT; ctx.globalAlpha = A0 * 0.35; for (let n = 0, N = Math.round(w / 10); n < N; n++) ctx.fillRect(R(sx, sx + w), R(y + 2, y + cap - 1), R(1, 3), 1);
+  } else if (theme === 'candy' || theme === 'honey') {
+    ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.32; for (let n = 0, N = Math.max(1, Math.round(w / 60)); n < N; n++) { ctx.beginPath(); ctx.ellipse(R(sx + 8, sx + w - 8), y + cap * 0.4, R(4, 9), 1.3, 0, 0, Math.PI * 2); ctx.fill(); }
+  } else if (theme === 'cosmic') {
+    const g = ctx.createLinearGradient(0, y, 0, y + cap); g.addColorStop(0, C.topLt); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.globalAlpha = A0 * 0.6; ctx.fillRect(sx, y, w, cap * 0.6);
+  } else {                                  // sand, coral
+    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.5; for (let n = 0, N = Math.round(w / 6); n < N; n++) ctx.fillRect(R(sx, sx + w), R(y + 2, y + cap - 1), 1, 1);
+  }
+  ctx.globalAlpha = A0;
+}
+function _cuteDroops(ctx, sx, ye, w, theme, rng, C, ground) {
+  const R = (a, b) => a + rng() * (b - a);
+  if (theme === 'grass' || theme === 'swamp' || !theme) {           // blades hanging over the lip
+    for (let n = 0, N = Math.max(1, Math.round(w / (ground ? 40 : 30))); n < N; n++) {
+      const xx = R(sx + 5, sx + w - 5), len = R(3, 6), dx = R(-2, 2);
+      ctx.beginPath(); ctx.moveTo(xx, ye - 1.5); ctx.quadraticCurveTo(xx + dx * 0.3, ye + len * 0.6, xx + dx, ye + len);
+      ctx.strokeStyle = C.OUT; ctx.lineWidth = 2.6; ctx.stroke(); ctx.strokeStyle = C.top; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+  } else if (theme === 'ice') {                                        // little icicles under the snow
+    for (let n = 0, N = Math.max(1, Math.round(w / 34)); n < N; n++) {
+      const xx = R(sx + 6, sx + w - 6), len = R(3, 6);
+      ctx.beginPath(); ctx.moveTo(xx - 1.8, ye - 1); ctx.lineTo(xx + 1.8, ye - 1); ctx.lineTo(xx, ye + len); ctx.closePath();
+      ctx.fillStyle = C.topLt; ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1; ctx.stroke();
+    }
+  }
+}
+function _cuteDecor(ctx, sx, y, w, theme, rng, C, ground) {
+  const grassy = theme === 'grass' || theme === 'swamp' || !theme;
+  const decor = grassy ? 'tuft' : theme === 'ice' ? 'snow' : theme === 'cosmic' ? 'crystal' : theme === 'candy' ? 'sprinkle' : theme === 'lava' ? 'ember' : theme === 'sand' ? 'pebble' : theme === 'coral' ? 'shell' : theme === 'honey' ? 'drop' : theme === 'stone' ? 'chip' : null;
+  if (!decor || w < 24) return;
+  const OUT = C.OUT, A0 = ctx.globalAlpha;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  for (let n = 0, N = Math.max(1, Math.round(w / (ground ? 64 : 44))); n < N; n++) {
+    const xx = sx + 8 + rng() * Math.max(1, w - 16), sc = 0.8 + rng() * 0.5;
+    if (decor === 'tuft') {
+      if (theme === 'grass' && rng() < 0.28) {   // a small flower among the grass, the MapleStory way
+        ctx.strokeStyle = OUT; ctx.lineWidth = 2.6; ctx.beginPath(); ctx.moveTo(xx, y + 1); ctx.lineTo(xx, y - 6 * sc); ctx.stroke();
+        ctx.strokeStyle = C.topDk; ctx.lineWidth = 1.1; ctx.stroke();
+        ctx.fillStyle = OUT; ctx.beginPath(); ctx.arc(xx, y - 7 * sc, 3.1 * sc, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = ['#ffffff', '#ffd6e8', '#fff1a8', '#d9ecff'][Math.floor(rng() * 4)];
+        for (let k = 0; k < 5; k++) { const an = k * 1.2566; ctx.beginPath(); ctx.arc(xx + Math.cos(an) * 1.5 * sc, y - 7 * sc + Math.sin(an) * 1.5 * sc, 1.3 * sc, 0, Math.PI * 2); ctx.fill(); }
+        ctx.fillStyle = '#ffc93c'; ctx.beginPath(); ctx.arc(xx, y - 7 * sc, 0.9 * sc, 0, Math.PI * 2); ctx.fill();
+        continue;
+      }
+      ctx.strokeStyle = OUT; ctx.lineWidth = 3.2; ctx.beginPath(); ctx.moveTo(xx - 3 * sc, y + 1); ctx.lineTo(xx - 4 * sc, y - 5 * sc); ctx.moveTo(xx, y + 1); ctx.lineTo(xx + 0.5, y - 7 * sc); ctx.moveTo(xx + 3 * sc, y + 1); ctx.lineTo(xx + 4.5 * sc, y - 4.5 * sc); ctx.stroke();
+      ctx.strokeStyle = C.topLt; ctx.lineWidth = 1.4; ctx.stroke();
+    } else if (decor === 'snow') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 6 * sc, 3.2 * sc, 0, Math.PI, 0); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 4.6 * sc, 2.2 * sc, 0, Math.PI, 0); ctx.fill(); }
+    else if (decor === 'crystal') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.moveTo(xx - 3.5 * sc, y + 1); ctx.lineTo(xx, y - 8 * sc); ctx.lineTo(xx + 3.5 * sc, y + 1); ctx.closePath(); ctx.fill(); ctx.fillStyle = C.topLt; ctx.beginPath(); ctx.moveTo(xx - 2 * sc, y + 0.5); ctx.lineTo(xx, y - 6 * sc); ctx.lineTo(xx + 2 * sc, y + 0.5); ctx.closePath(); ctx.fill(); }
+    else if (decor === 'sprinkle') { ctx.strokeStyle = ['#ffffff', '#ffd23f', '#6fd6ff', '#ff6f9c'][Math.floor(rng() * 4)]; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(xx - 2.5, y - 1.5); ctx.lineTo(xx + 2.5, y - 3.5); ctx.stroke(); }
+    else if (decor === 'ember') { ctx.fillStyle = '#ffb347'; ctx.globalAlpha = A0 * 0.9; ctx.beginPath(); ctx.arc(xx, y - 2.5 * sc, 1.4 * sc, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = A0; }
+    else if (decor === 'pebble' || decor === 'chip' || decor === 'shell') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 3.4 * sc, 2.4 * sc, 0, Math.PI, 0); ctx.fill(); ctx.fillStyle = decor === 'shell' ? '#ffd9c4' : C.bodyLt; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 2.2 * sc, 1.5 * sc, 0, Math.PI, 0); ctx.fill(); }
+    else if (decor === 'drop') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y - 1, 3 * sc, 3.6 * sc, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = C.topLt; ctx.beginPath(); ctx.ellipse(xx, y - 1, 1.8 * sc, 2.4 * sc, 0, 0, Math.PI * 2); ctx.fill(); }
+  }
+  ctx.globalAlpha = A0;
+}
+function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const _pa = ctx.globalAlpha;
-  ctx.globalAlpha = _pa * a;
   const mix = (typeof _mixHex === 'function') ? _mixHex : ((x) => x);
   const P = _cuteMapPalette(tint) || tint;   // v0.30.606 — the map's colour; the theme only picks the shape
   const top = P.top, body = P.body;
-  const topLt = mix(top, '#ffffff', 0.38), bodyDk = mix(body, '#000000', 0.38), bodyLt = mix(body, top, 0.35);
-  if (w < 6 || h < 6) {   // too small for anything - flat fill + outline
+  const C = { mix, top, body, topLt: mix(top, '#ffffff', 0.38), topDk: mix(top, body, 0.42), bodyLt: mix(body, top, 0.30), bodyDk: mix(body, '#000000', 0.40), OUT: mix(body, '#05030a', 0.62) };
+  ctx.globalAlpha = _pa * a;
+  if (w < 8 || h < 6) {   // too small for anything - flat fill + outline
     ctx.fillStyle = body; ctx.fillRect(sx, y, w, h);
-    ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.strokeRect(sx + 1, y + 1, w - 2, h - 2);
+    ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; ctx.strokeRect(sx + 1, y + 1, w - 2, h - 2);
     ctx.globalAlpha = _pa;
     return;
   }
-  const rng = _cuteRng((Math.round(w) * 73856093) ^ (Math.round(h) * 19349663) ^ ((theme || 'g').charCodeAt(0) * 83492791));
+  const rng = _cuteRng((Math.round(w) * 73856093) ^ (Math.round(h) * 19349663) ^ ((theme || 'g').charCodeAt(0) * 83492791) ^ (((variant | 0) + 1) * 40503));
   const edge = _CUTE_EDGE[theme] || 'flat';
-  const r = Math.min(ground ? 5 : 7, w / 2, h / 2);
-  const cap = Math.max(4, Math.min(ground ? 14 : 7, h * (ground ? 0.28 : 0.5)));
-  // silhouette (rebuilt again for the keyline at the end: the texture and cap passes below start
-  // their own paths, and a stroke outlines the CURRENT path, not the one that was filled)
-  const silhouette = () => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(sx, y, w, h, ground ? [r, r, 0, 0] : [r, r, 4, 4]); else ctx.rect(sx, y, w, h); };
-  silhouette();
-  ctx.fillStyle = body; ctx.fill();
-  ctx.save(); ctx.clip();
-  // body texture
-  ctx.lineWidth = 1;
-  if (theme === 'stone') {           // courses of blocks, offset every other row
-    ctx.strokeStyle = bodyDk; ctx.globalAlpha = _pa * a * 0.55;
-    for (let yy = y + cap + 7, row = 0; yy < y + h - 2; yy += 9, row++) { ctx.beginPath(); ctx.moveTo(sx, yy + 0.5); ctx.lineTo(sx + w, yy + 0.5); ctx.stroke();
-      for (let xx = sx + ((row & 1) ? 11 : 0); xx < sx + w; xx += 22) { ctx.beginPath(); ctx.moveTo(xx + 0.5, yy - 9); ctx.lineTo(xx + 0.5, yy); ctx.stroke(); } }
-    ctx.globalAlpha = _pa * a;
-  } else if (theme === 'sand' || theme === 'coral' || theme === 'honey') {   // strata
-    ctx.strokeStyle = bodyDk; ctx.globalAlpha = _pa * a * 0.35;
-    for (let yy = y + cap + 6; yy < y + h - 3; yy += 7) { ctx.beginPath(); for (let xx = 0; xx <= w; xx += 6) { const yv = yy + Math.sin((xx + yy) * 0.11) * 1.2; if (xx) ctx.lineTo(sx + xx, yv); else ctx.moveTo(sx, yv); } ctx.stroke(); }
-    ctx.globalAlpha = _pa * a;
-  } else if (theme === 'lava') {     // glowing cracks
-    ctx.strokeStyle = top; ctx.lineWidth = 1.5; ctx.globalAlpha = _pa * a * 0.75;
-    for (let n = 0, N = Math.max(1, Math.round(w / 34)); n < N; n++) { let xx = sx + 6 + rng() * (w - 12), yy = y + cap + 2; ctx.beginPath(); ctx.moveTo(xx, yy);
-      for (let k = 0; k < 4 && yy < y + h - 3; k++) { xx += (rng() - 0.5) * 10; yy += 3 + rng() * 6; ctx.lineTo(xx, Math.min(yy, y + h - 2)); } ctx.stroke(); }
-    ctx.globalAlpha = _pa * a; ctx.lineWidth = 1;
-  } else if (theme === 'ice') {      // pale diagonal fractures
-    ctx.strokeStyle = topLt; ctx.globalAlpha = _pa * a * 0.4;
-    for (let n = 0, N = Math.max(1, Math.round(w / 40)); n < N; n++) { const xx = sx + rng() * w, yy = y + cap + rng() * Math.max(1, h - cap - 6); ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx + 5 + rng() * 8, yy + 3 + rng() * 5); ctx.stroke(); }
-    ctx.globalAlpha = _pa * a;
-  } else if (theme === 'honey') {    // (handled as strata above)
-  } else {                            // pebbles / motes (grass, swamp, candy, cosmic, default)
-    const N = Math.max(2, Math.round(w / 18));
-    for (let n = 0; n < N; n++) { const xx = sx + 4 + rng() * (w - 8), yy = y + cap + 3 + rng() * Math.max(1, h - cap - 6), rr = 1 + rng() * (ground ? 2.2 : 1.2);
-      ctx.fillStyle = (theme === 'cosmic') ? '#ffffff' : (rng() < 0.7 ? bodyDk : bodyLt); ctx.globalAlpha = _pa * a * (theme === 'cosmic' ? 0.55 + rng() * 0.4 : 0.6);
-      ctx.beginPath(); ctx.ellipse(xx, yy, rr * 1.4, rr, 0, 0, Math.PI * 2); ctx.fill(); }
-    ctx.globalAlpha = _pa * a;
-  }
-  // the lit cap, with the biome's edge hanging into the body
-  ctx.fillStyle = top;
-  ctx.beginPath(); ctx.moveTo(sx, y); ctx.lineTo(sx + w, y); ctx.lineTo(sx + w, y + cap);
-  if (edge === 'scallop') { const sw = 9; for (let xx = w; xx > 0; xx -= sw) ctx.arc(sx + xx - sw / 2, y + cap, sw / 2, 0, Math.PI, false); }
-  else if (edge === 'wave') { for (let xx = w; xx >= 0; xx -= 4) ctx.lineTo(sx + xx, y + cap + Math.sin(xx * 0.35) * 1.6); }
-  else if (edge === 'drip') { const dw = 14; for (let xx = w; xx > 0; xx -= dw) { const d = 2 + (Math.sin(xx * 0.7) + 1) * 2.2; ctx.lineTo(sx + xx - dw * 0.25, y + cap); ctx.quadraticCurveTo(sx + xx - dw * 0.5, y + cap + d * 2.2, sx + xx - dw * 0.75, y + cap); } }
-  else if (edge === 'lump') { const lw = 12; for (let xx = w; xx > 0; xx -= lw) ctx.arc(sx + xx - lw / 2, y + cap - 1, lw / 2, 0, Math.PI, false); }
-  else if (edge === 'crust') { for (let xx = w; xx >= 0; xx -= 5) ctx.lineTo(sx + xx, y + cap + ((Math.round(xx / 5) & 1) ? 1.5 : -1)); }
-  else { ctx.lineTo(sx, y + cap); }
-  ctx.lineTo(sx, y + cap); ctx.closePath(); ctx.fill();
-  // a thin dark line along the cap's edge gives the surface its cel definition
-  ctx.strokeStyle = OUT; ctx.lineWidth = 1.2; ctx.globalAlpha = _pa * a * 0.5; ctx.stroke(); ctx.globalAlpha = _pa * a;
-  if (theme === 'cosmic') { const g = ctx.createLinearGradient(0, y, 0, y + cap); g.addColorStop(0, topLt); g.addColorStop(1, top); ctx.fillStyle = g; ctx.fillRect(sx, y, w, Math.max(1, cap * 0.5)); }
-  // gloss along the top, shade along the bottom
-  ctx.fillStyle = 'rgba(255,255,255,0.28)'; ctx.fillRect(sx + r, y + 1.5, Math.max(0, w - 2 * r), 1.5);
-  const shd = Math.min(ground ? 9 : 5, h * 0.3);
-  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(sx, y + h - shd, w, shd);
+  const G = _cuteGeom(w, h, ground), cap = G.cap;
+  const inset = G.island ? 3 : 0, x0 = sx + inset, x1 = sx + w - inset, yb = y + G.faceH;
+  const r = ground ? 4 : Math.min(6, G.faceH / 2);
+  const keelPts = [];   // the underside, drawn from the seeded stream ONCE: filled, clipped and stroked alike
+  if (G.keel) { const N = Math.max(3, Math.round(w / 26)); for (let i = N - 1; i >= 1; i--) { const t = i / N; keelPts.push([x0 + 6 + (x1 - x0 - 12) * t + (rng() - 0.5) * 6, yb + G.keel * Math.sin(Math.PI * t) * (0.55 + rng() * 0.45)]); } }
+  const face = () => {
+    ctx.beginPath();
+    if (G.island) {
+      ctx.moveTo(x0, y + cap * 0.5); ctx.lineTo(x1, y + cap * 0.5);
+      ctx.quadraticCurveTo(x1 + 1, yb - 2, x1 - 6, yb);
+      for (const kp of keelPts) ctx.lineTo(kp[0], kp[1]);
+      ctx.lineTo(x0 + 6, yb);
+      ctx.quadraticCurveTo(x0 - 1, yb - 2, x0, y + cap * 0.5);
+      ctx.closePath();
+    } else if (ctx.roundRect) ctx.roundRect(sx, y, w, G.faceH, ground ? [r, r, 0, 0] : [r, r, 3, 3]);
+    else ctx.rect(sx, y, w, G.faceH);
+  };
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  // 1. what hangs below goes first, so the face covers where it roots
+  if (G.island && G.keel) _cuteHangers(ctx, x0, x1, yb, theme, rng, C, keelPts);
+  // 2. the face: bounce-lit under the lip, darkening with depth, material, occlusion under the lip
+  face();
+  const gF = ctx.createLinearGradient(0, y + cap, 0, yb + G.keel);
+  gF.addColorStop(0, C.bodyLt); gF.addColorStop(0.3, body); gF.addColorStop(1, C.bodyDk);
+  ctx.fillStyle = gF; ctx.fill();
+  ctx.save(); face(); ctx.clip();
+  _cuteMaterial(ctx, sx, y + cap, w, (yb + G.keel) - (y + cap), theme, rng, C, ground);
+  const gAO = ctx.createLinearGradient(0, y + cap - 1, 0, y + cap + 7);
+  gAO.addColorStop(0, 'rgba(0,0,0,0.34)'); gAO.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = gAO; ctx.fillRect(sx, y + cap - 1, w, 8);
+  if (ground) { const gB = ctx.createLinearGradient(0, y + h * 0.6, 0, y + h); gB.addColorStop(0, 'rgba(0,0,0,0)'); gB.addColorStop(1, 'rgba(0,0,0,0.28)'); ctx.fillStyle = gB; ctx.fillRect(sx, y + h * 0.6, w, h * 0.4); }
   ctx.restore();
-  silhouette();
-  ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();
-  // decor standing on the surface (drawn above y, into the bake's top pad)
-  const decor = theme === 'grass' || theme === 'swamp' ? 'tuft' : theme === 'ice' ? 'snow' : theme === 'cosmic' ? 'crystal' : theme === 'candy' ? 'sprinkle' : theme === 'lava' ? 'ember' : theme === 'sand' ? 'pebble' : theme === 'coral' ? 'shell' : theme === 'honey' ? 'drop' : theme === 'stone' ? 'chip' : null;
-  if (decor && w >= 24) {
-    const N = Math.max(1, Math.round(w / (ground ? 70 : 46)));
-    for (let n = 0; n < N; n++) {
-      const xx = sx + 8 + rng() * Math.max(1, w - 16), sc = 0.8 + rng() * 0.5;
-      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      if (decor === 'tuft') { ctx.strokeStyle = OUT; ctx.lineWidth = 3.2; ctx.beginPath(); ctx.moveTo(xx - 3 * sc, y + 1); ctx.lineTo(xx - 4 * sc, y - 5 * sc); ctx.moveTo(xx, y + 1); ctx.lineTo(xx + 0.5, y - 7 * sc); ctx.moveTo(xx + 3 * sc, y + 1); ctx.lineTo(xx + 4.5 * sc, y - 4.5 * sc); ctx.stroke(); ctx.strokeStyle = topLt; ctx.lineWidth = 1.4; ctx.stroke(); }
-      else if (decor === 'snow') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 6 * sc, 3.2 * sc, 0, Math.PI, 0); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 4.6 * sc, 2.2 * sc, 0, Math.PI, 0); ctx.fill(); }
-      else if (decor === 'crystal') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.moveTo(xx - 3.5 * sc, y + 1); ctx.lineTo(xx, y - 8 * sc); ctx.lineTo(xx + 3.5 * sc, y + 1); ctx.closePath(); ctx.fill(); ctx.fillStyle = topLt; ctx.beginPath(); ctx.moveTo(xx - 2 * sc, y + 0.5); ctx.lineTo(xx, y - 6 * sc); ctx.lineTo(xx + 2 * sc, y + 0.5); ctx.closePath(); ctx.fill(); }
-      else if (decor === 'sprinkle') { ctx.strokeStyle = ['#ffffff', '#ffd23f', '#6fd6ff', '#ff6f9c'][Math.floor(rng() * 4)]; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(xx - 2.5, y - 1.5); ctx.lineTo(xx + 2.5, y - 3.5); ctx.stroke(); }
-      else if (decor === 'ember') { ctx.fillStyle = '#ffb347'; ctx.globalAlpha = _pa * a * 0.9; ctx.beginPath(); ctx.arc(xx, y - 2.5 * sc, 1.4 * sc, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = _pa * a; }
-      else if (decor === 'pebble' || decor === 'chip' || decor === 'shell') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 3.4 * sc, 2.4 * sc, 0, Math.PI, 0); ctx.fill(); ctx.fillStyle = decor === 'shell' ? '#ffd9c4' : bodyLt; ctx.beginPath(); ctx.ellipse(xx, y + 0.5, 2.2 * sc, 1.5 * sc, 0, Math.PI, 0); ctx.fill(); }
-      else if (decor === 'drop') { ctx.fillStyle = OUT; ctx.beginPath(); ctx.ellipse(xx, y - 1, 3 * sc, 3.6 * sc, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = topLt; ctx.beginPath(); ctx.ellipse(xx, y - 1, 1.8 * sc, 2.4 * sc, 0, 0, Math.PI * 2); ctx.fill(); }
-    }
-  }
+  face(); ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; ctx.stroke();
+  // 3. the cap: the layer you stand on, full width and proud of the face, its edge hanging over it
+  const rr = ground ? 4 : Math.min(cap, 5);
+  const segs = _cuteEdgePts(w, edge, rng);
+  const capPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(sx + rr, y); ctx.lineTo(sx + w - rr, y);
+    ctx.quadraticCurveTo(sx + w, y, sx + w, y + rr);
+    ctx.lineTo(sx + w, y + cap);
+    _cuteEdgeDraw(ctx, sx, y + cap, segs);
+    ctx.lineTo(sx, y + rr); ctx.quadraticCurveTo(sx, y, sx + rr, y);
+    ctx.closePath();
+  };
+  capPath();
+  const gC = ctx.createLinearGradient(0, y, 0, y + cap + 3);
+  gC.addColorStop(0, C.topLt); gC.addColorStop(0.45, top); gC.addColorStop(1, C.topDk);
+  ctx.fillStyle = gC; ctx.fill();
+  ctx.save(); capPath(); ctx.clip();
+  _cuteCapTexture(ctx, sx, y, w, cap, theme, rng, C);
+  ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.fillRect(sx + rr, y + 1.5, Math.max(0, w - 2 * rr), 1.5);   // rim light
+  ctx.restore();
+  capPath(); ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; ctx.stroke();
+  // 4. over the edge, then 5. what stands on the surface (into the bake's top pad)
+  _cuteDroops(ctx, sx, y + cap, w, theme, rng, C, ground);
+  _cuteDecor(ctx, sx, y, w, theme, rng, C, ground);
   ctx.globalAlpha = _pa;
 }
-function _drawCutePlatform(sx, y, w, h, tint, ground, theme) {
-  const spr = _cutePlatformSprite(w, h, tint, ground, theme);
+function _drawCutePlatform(sx, y, w, h, tint, ground, theme, variant) {
+  const spr = _cutePlatformSprite(w, h, tint, ground, theme, variant);
   if (spr) { ctx.drawImage(spr, sx - 2, y - _CUTE_PAD_TOP); return; }   // undo the bake pad (2px sides, 12px above)
-  _paintCutePlatform(ctx, sx, y, w, h, tint, ground, ground ? 1 : 0.94, theme);
+  _paintCutePlatform(ctx, sx, y, w, h, tint, ground, ground ? 1 : 0.94, theme, variant);
 }
 // v0.25.461 — Map id → floor-tile key. Wins over the theme lookup
 // when the player is on one of these maps and the matching authored
@@ -114655,7 +114852,7 @@ function drawPlatforms() {
   for (const p of game.mapData.platforms) {
     const sx = p.x - game.camera.x;
     if (sx + p.w < 0 || sx > W) continue;
-    if (p.y + p.h < _camY - 30 || p.y > _camY + H + 30) continue;
+    if (p.y + p.h + 44 < _camY - 30 || p.y > _camY + H + 30) continue;   // v0.30.609 — the island's underside hangs up to ~44px below the box
     if (p.type === 'ground') {
       // v0.25.503 painted the Void's ground as a near-black band with a thin violet rim.
       // v0.30.553 — gone, per user ("remove the purple line floor"): the platform still carries
@@ -114667,11 +114864,11 @@ function drawPlatforms() {
       // cel-shaded slab with a lit "surface" cap (grass/snow/sand/…), a dark
       // earthy body, a gloss line, and a crisp 2px black outline. The old
       // MAP_FLOOR_OVERRIDES data + _pickMapFloorOverride() stay as dead code.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, true, _th);
+      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, true, _th, 0);
     } else {
       // v0.29.x — CUTE procedural floating platform. Same cel-shaded, black-
       // outlined slab as the floor but rounded on top for a friendlier read.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, false, _th);
+      _drawCutePlatform(sx, p.y, p.w, p.h, _pt, false, _th, _lxPlatVariant(p));   // v0.30.609 — one of three seeded variants
     }
   }
   // v0.25.482 — outlinePlatforms post-pass. Strokes a 2 px near-black
