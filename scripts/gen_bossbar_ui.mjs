@@ -73,14 +73,33 @@ const FRAME_PROMPT = 'A BOSS HEALTH BAR FRAME for a 2D action RPG, very wide and
   + 'them. The long slot INSIDE the frame MUST be completely empty and transparent - a hollow open window where '
   + 'a health fill will show through from behind - nothing painted inside it, no fill, no red bar, no gradient, '
   + 'no glass.' + FRAME_STYLE;
-const FILL_PROMPT = 'A HEALTH BAR FILL texture for a 2D game: a very wide thin horizontal ribbon of glossy '
-  + 'bright crimson-red to hot-pink liquid energy, flat cel shaded - a lighter pink band across the top third '
-  + 'with a crisp white glossy highlight streak, a deeper red band along the bottom, a few small round '
-  + 'bubbles and sparkles inside it. It fills the whole image edge to edge, corner to corner, with NO border, '
-  + 'no outline, no frame, no end caps, no background and no text.';
+// Per user, on the pink cel ribbon under the sleek frame: "this can be a better red and the
+// details / art for just this bar alone can be improved". Same register as the frame now - a
+// rich ruby red with real detail, not bubblegum with bubbles.
+const FILL_PROMPT = 'A BOSS HEALTH BAR FILL texture for a 2D action RPG: a very wide thin horizontal ribbon of '
+  + 'rich RUBY RED liquid energy - deep crimson at the bottom rising to a bright saturated scarlet core band, '
+  + 'a thin crisp white-hot specular streak running along the top edge, fine diagonal flowing energy '
+  + 'striations across the band, a few tiny bright embers and sparks drifting inside it, a faint darker '
+  + 'vignette at the very bottom. Vivid, glossy, refined, like molten ruby glass. Sleek modern fantasy-RPG '
+  + 'game UI: crisp clean edges, flat shading with soft glow, not cartoonish, no cel outline, no round '
+  + 'bubbles, no pink, not photoreal. It fills the whole image edge to edge, corner to corner, with NO '
+  + 'border, no outline, no frame, no end caps, no background and no text.';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function fetchBuf(url) { const r = await fetch(url, { signal: AbortSignal.timeout(90000) }); if (!r.ok) throw new Error('fetch ' + r.status); return Buffer.from(await r.arrayBuffer()); }
+async function pollJob(job, label) {
+  const t0 = Date.now();
+  for (;;) {
+    await sleep(Math.min(15000, Math.max(2000, Number(job.poll_after_ms) || 5000)));
+    const r = await fetch(`${API}/assets/jobs/${job.id}`, { headers: { Authorization: `ApiKey ${apiKey}` }, signal: AbortSignal.timeout(30000) });
+    if (!r.ok) throw new Error(`job ${job.id}: ${r.status}`);
+    job = await r.json();
+    if (job.status === 'succeeded') return job;
+    if (job.status === 'failed' || job.status === 'cancelled') throw new Error(`job ${job.id} ${job.status}: ${JSON.stringify(job).slice(0, 160)}`);
+    if (Date.now() - t0 > 240000) throw new Error(`job ${job.id} still ${job.status} after 240s`);
+    process.stdout.write(`  ${label}: job ${job.status}...\n`);
+  }
+}
 async function makeImage(prompt, label, ratio) {
   let last;
   for (let a = 1; a <= 4; a++) {
@@ -89,9 +108,14 @@ async function makeImage(prompt, label, ratio) {
         body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: ratio, n: 1, augment_prompt: false, prompt }), signal: AbortSignal.timeout(150000) });
       if (res.status === 402) { console.log('OUT OF CREDITS'); process.exit(3); }
       if (!res.ok) throw new Error(`${res.status}: ${(await res.text()).slice(0, 140)}`);
-      const data = await res.json();
-      const url = Array.isArray(data) ? data[0] && data[0].url : (data && (data.url || (data.images && data.images[0] && data.images[0].url)));
-      if (!url) throw new Error('no url in the response');
+      let data = await res.json();
+      // 2026-09-11: the endpoint began answering 202 with a JOB ({id, status: 'running',
+      // poll_after_ms}) instead of the image; the finished job at GET /assets/jobs/<id> carries
+      // result: [{url}]. Four "no url in the response" retries in a row is what that looked like.
+      if (res.status === 202 || (data && data.id && data.status && !data.url && !data.result)) data = await pollJob(data, label);
+      const url = Array.isArray(data) ? data[0] && data[0].url
+        : (data && (data.url || (data.images && data.images[0] && data.images[0].url) || (Array.isArray(data.result) && data.result[0] && data.result[0].url)));
+      if (!url) throw new Error('no url in the response: ' + JSON.stringify(data).slice(0, 160));
       return await fetchBuf(url);
     } catch (e) { last = e; console.log(`  ${label} attempt ${a} failed: ${e.message}`); if (a < 4) await sleep(4000 * a); }
   }
@@ -174,8 +198,12 @@ function gateFrame(g, c) {
 function gateFill(c) {
   const bad = [];
   if (c.solid < 0.98) bad.push(`not opaque edge to edge (${(100 * c.solid).toFixed(1)}% solid)`);
-  if (c.sat < 0.25) bad.push(`too grey (${(100 * c.sat).toFixed(0)}% saturated)`); if (c.band < 0.5) bad.push(`not red-to-pink (${(100 * c.band).toFixed(0)}% in band)`);
-  if (c.bright < 0.25) bad.push(`too dim (${(100 * c.bright).toFixed(0)}% bright)`);
+  // v3 fill: RED, not pink - the hue band is 340..15 and most of the ribbon must be in it; and a
+  // ruby ribbon is vivid without being light, so "bright" (luminance > 150) only has to cover the
+  // specular streak. The pink cel ribbon measured 88% saturated / 100% in the old wide band / 74%
+  // bright; a proper red sits nearer 90 / 90 / 15.
+  if (c.sat < 0.5) bad.push(`not vivid enough (${(100 * c.sat).toFixed(0)}% saturated, want >= 50%)`); if (c.band < 0.6) bad.push(`not red (${(100 * c.band).toFixed(0)}% in the 340-15 band, want >= 60%)`);
+  if (c.bright < 0.06) bad.push(`no highlight at all (${(100 * c.bright).toFixed(0)}% bright, want >= 6%)`);
   return bad;
 }
 const fmtG = (g) => g ? `H ${g.H} hollow y ${g.hy0}..${g.hy1} x ${g.hx0}..${g.hx1} (${(100 * g.hollowClear).toFixed(1)}% clear) caps ${g.capL}/${g.capR} crest ${g.floX0}..${g.floX1} rail ${g.rail}` : 'no hollow';
@@ -241,7 +269,7 @@ async function seatFill(src) {
 }
 async function judgeFill(png, label) {
   const out = await sharp(png).webp({ quality: 92 }).toBuffer();
-  const c = colourStats(await raw(await sharp(out).png().toBuffer()), [320, 20]), bad = gateFill(c);
+  const c = colourStats(await raw(await sharp(out).png().toBuffer()), [340, 15]), bad = gateFill(c);
   console.log(`${label}: solid ${(100 * c.solid).toFixed(1)}% sat ${(100 * c.sat).toFixed(0)}% band ${(100 * c.band).toFixed(0)}% bright ${(100 * c.bright).toFixed(0)}% - ${bad.length ? 'REJECT: ' + bad.join('; ') : 'PASSES'}`);
   return { out, bad };
 }

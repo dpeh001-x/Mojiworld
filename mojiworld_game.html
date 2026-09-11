@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.574';
+const GAME_VERSION = 'v0.30.575';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -142818,8 +142818,8 @@ function _bbFrameBottom(y, h) { const g = _BB_GEOM, s = h / (g.hy1 - g.hy0); ret
 function _bbNameY(y, h) { return Math.min(y - 21, Math.round(_bbFrameTop(y, h) - 12)); }   // 12: the title's comma and serifs hang below its baseline, and the badge stands proud of the rail
 function _bbChipY(y, h) { return Math.max(y + h + 26, Math.round(_bbFrameBottom(y, h) + 13)); }
 const _SBB_G = { key: '' };
-function _sbbGrads(x, y, w, h, phase, hyper) {
-  const k = x + '|' + y + '|' + w + '|' + h + '|' + phase + '|' + (hyper ? 1 : 0);
+function _sbbGrads(x, y, w, h, phase, hyper, art) {   // v0.30.575 — art: the ribbon texture is drawn, so go easy on the crown and gloss
+  const k = x + '|' + y + '|' + w + '|' + h + '|' + phase + '|' + (hyper ? 1 : 0) + '|' + (art ? 1 : 0);
   if (_SBB_G.key === k) return _SBB_G;
   const P = _sbbPal(phase, hyper);
   _SBB_G.key = k;
@@ -142830,19 +142830,25 @@ function _sbbGrads(x, y, w, h, phase, hyper) {
   veil.addColorStop(0, 'rgba(4,1,9,0.6)'); veil.addColorStop(0.5, 'rgba(4,1,9,0.4)');
   veil.addColorStop(0.78, 'rgba(4,1,9,0.13)'); veil.addColorStop(1, 'rgba(4,1,9,0)');
   _SBB_G.veil = veil;
-  const glow = ctx.createLinearGradient(0, y - 9, 0, y + h + 9);
-  glow.addColorStop(0, 'rgba(' + P.glow + ',0)'); glow.addColorStop(0.5, 'rgba(' + P.glow + ',0.22)');
+  // v0.30.575 — the bloom is a radial gradient in the same squashed space the caller draws it in
+  // (translate to the bar's centre, scale y by glowSy): it reaches 40px past each end and fades
+  // to nothing there, so there is no edge to see; vertically it is still the 9px halo. The stops
+  // keep the old strength at the bar's own edge (about 0.12) and its old nothing at the rim.
+  _SBB_G.glowR = w / 2 + 40;
+  _SBB_G.glowSy = (h / 2 + 9) / _SBB_G.glowR;
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, _SBB_G.glowR);
+  glow.addColorStop(0, 'rgba(' + P.glow + ',0.22)'); glow.addColorStop(0.55, 'rgba(' + P.glow + ',0.12)');
   glow.addColorStop(1, 'rgba(' + P.glow + ',0)');
   _SBB_G.glow = glow;
   const tr = ctx.createLinearGradient(0, y, 0, y + h);
   tr.addColorStop(0, '#04010a'); tr.addColorStop(0.4, '#170b28'); tr.addColorStop(1, '#08030f');
   _SBB_G.trough = tr;
   const sh = ctx.createLinearGradient(0, y, 0, y + h);
-  sh.addColorStop(0, 'rgba(255,255,255,0.34)'); sh.addColorStop(0.34, 'rgba(255,255,255,0.05)');
+  sh.addColorStop(0, art ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.34)'); sh.addColorStop(0.34, art ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)');
   sh.addColorStop(0.6, 'rgba(0,0,0,0.12)'); sh.addColorStop(1, 'rgba(0,0,0,0.46)');
   _SBB_G.shade = sh;
   const gl = ctx.createLinearGradient(0, y + 1, 0, y + h * 0.46);
-  gl.addColorStop(0, 'rgba(255,255,255,0.36)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
+  gl.addColorStop(0, art ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.36)'); gl.addColorStop(1, 'rgba(255,255,255,0)');
   _SBB_G.gloss = gl;
   const cv = ctx.createLinearGradient(0, y, 0, y + h);
   cv.addColorStop(0, 'rgba(255,240,210,0.22)'); cv.addColorStop(0.5, 'rgba(255,255,255,0)');
@@ -142978,7 +142984,7 @@ function drawSuperBossBar() {
   const _bbFrame = _lxPinned((typeof LX_FX !== 'undefined') && LX_FX.ui_bossbar_frame);   // v0.30.405 — pinned: this drew a raw 1024-wide webp twice a frame
   const _bbFill  = _lxPinned((typeof LX_FX !== 'undefined') && LX_FX.ui_bossbar_fill);
   const _bbArt = _lxFxReady(_bbFrame) && _lxFxReady(_bbFill);
-  const _G = _sbbGrads(x, y, barW, barH, phase, hyper);
+  const _G = _sbbGrads(x, y, barW, barH, phase, hyper, _bbArt);
   const fillW = barW * _drawPct;   // intro sweep x real HP
 
   // 1. VEIL. An elliptical vignette rather than the old hard-edged rectangle: the
@@ -142990,9 +142996,15 @@ function drawSuperBossBar() {
   ctx.fillRect(-_G.vr, -_G.vr, _G.vr * 2, _G.vr * 2);
   ctx.restore();
 
-  // 2. Phase-tinted bloom, then the recessed trough it sits in.
+  // 2. Phase-tinted bloom — v0.30.575: an ELLIPSE, built the way the veil is, not a rectangle 22px
+  //    wider than the bar whose vertical-only gradient left a hard edge standing past each cap
+  //    (per user, with a crop of it: "a little cutoff gradient here"). Then the recessed trough.
+  ctx.save();
+  ctx.translate(_cx, y + barH / 2);
+  ctx.scale(1, _G.glowSy);
   ctx.fillStyle = _G.glow;
-  ctx.fillRect(x - 22, y - 9, barW + 44, barH + 18);
+  ctx.fillRect(-_G.glowR, -_G.glowR, _G.glowR * 2, _G.glowR * 2);
+  ctx.restore();
   // v0.30.571 — THE CUTOFF. The hollow is not a rectangle (a capsule's ends are rounded, a
   //    chevron's angled) and the trough and fill were, so at each end the fill stopped flat
   //    inside the cap with dark wedges in the corners. Both now run _bbExt past the bar on
