@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.577';
+const GAME_VERSION = 'v0.30.578';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -95305,6 +95305,12 @@ function updateProjectiles(dt) {
       if (h.life <= 0) { game.hazards.splice(i, 1); continue; }
       continue;
     }
+    if (h.type === 'gravitos_singularity' && h.life > 0) {
+      // v0.30.578 sz-fix — remember the last frame the player counted as inside,
+      // so a hit-stop / knockback nudge on the resolve frame is forgiven.
+      const _gvG = game.monsters && game.monsters.find(mm => mm && mm.type === 'gravitos');
+      if (_lxSzInside(h, !!(_gvG && (_gvG.phase | 0) >= 3))) h._lastSafeTick = game.time | 0;
+    }
     if (h.type === 'gravitos_singularity' && h.life === 0) {
       // v0.25.528 — Singularity Collapse resolves. Player AABB checked
       // against every safe-zone rect; if no overlap, the player is
@@ -95319,15 +95325,11 @@ function updateProjectiles(dt) {
       // 10/10 push — barely clipping a box no longer survives at full pressure.
       const _gv = game.monsters && game.monsters.find(mm => mm && mm.type === 'gravitos');
       const _strict = !!(_gv && (_gv.phase | 0) >= 3);
-      const _pcx = player.x + player.w / 2, _pcy = player.y + player.h / 2;
-      for (const z of zones) {
-        if (_strict) {
-          if (_pcx >= z.x && _pcx <= z.x + z.w && _pcy >= z.y && _pcy <= z.y + z.h) { safe = true; break; }
-        } else if (player.x < z.x + z.w && player.x + player.w > z.x &&
-                   player.y < z.y + z.h && player.y + player.h > z.y) {
-          safe = true; break;
-        }
-      }
+      // v0.30.578 sz-fix — the zone protects the column above it (a jump inside
+      // the light is still inside), and a stamp from the last few frames
+      // forgives a nudge on the resolve frame. See _lxSzInside.
+      safe = _lxSzInside(h, _strict);
+      if (!safe && h._lastSafeTick != null && ((game.time | 0) - h._lastSafeTick) <= LX_SZ_GRACE_TICKS) safe = true;
       if (!safe && player.hp > 0 && !player._god) {
         if (player._ohkoParry > 0) {
           /* PERFECT PARRY: pressed A within the tight 120ms window as the collapse resolved -> fully negate the OHKO (high-skill reward; gated by the 1.8-2.5s block cooldown). */
@@ -96402,6 +96404,27 @@ function _smoothFxCap() {
 // exist in small authored numbers (a singularity, the Spire's 8 static void
 // tears, a heal field...). Everything else is short-lived telegraph clutter —
 // in a pathological pileup the oldest of those are the right things to shed.
+// v0.30.578 sz-fix — is the player inside one of a Singularity's safe zones?
+// A zone protects the COLUMN above its floor line: horizontal overlap (the
+// player's centre when `strict`, i.e. Gravitos phase 3), and feet within a
+// jump's height above the zone floor or 8 px below it. Bounded so a platform
+// zone and a ground zone (160-220 px apart) stay distinct. Used every frame
+// of the telegraph to stamp h._lastSafeTick, and at the resolve.
+const LX_SZ_JUMP_SLACK = 150;
+const LX_SZ_GRACE_TICKS = 10;
+function _lxSzInside(h, strict) {
+  if (!h || typeof player === 'undefined' || !player) return false;
+  const zones = h.safeZones || [];
+  const pcx = player.x + player.w / 2, feet = player.y + player.h;
+  for (const z of zones) {
+    const fl = z.y + z.h;
+    const yOk = feet <= fl + 8 && feet >= fl - LX_SZ_JUMP_SLACK;
+    const xOk = strict ? (pcx >= z.x && pcx <= z.x + z.w)
+                       : (player.x < z.x + z.w && player.x + player.w > z.x);
+    if (xOk && yOk) return true;
+  }
+  return false;
+}
 const _HAZ_PROTECTED = new Set(['gravitos_singularity', 'void_tear', 'aurora_field', 'soul_vortex', 'necro_maelstrom', 'warlord_banner', 'sovereign_drain_pillar', 'blackhole']);
 function _trimVisualQueues() {
   const pc = _particleCap();
@@ -139569,12 +139592,27 @@ function drawHazards(_behindPass) {
       // position (sx auto-derived above, h.cy is world-Y so we keep it).
       const rings = 3;
       for (let r = 0; r < rings; r++) {
-        const rr = (1 - prog) * (340 - r * 60) + 40;
+        const rr = (1 - prog) * (340 - r * 60) + 4;   // v0.30.578 sz-fix — close AT the resolve (was +40: never closed)
         ctx.strokeStyle = 'rgba(204, 102, 255, ' + (0.30 - r * 0.07) + ')';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(sx, h.cy, rr, tt + r * 0.6, tt + r * 0.6 + Math.PI * 1.6);
         ctx.stroke();
+      }
+      // v0.30.578 sz-fix — the last three seconds count down at the core and the
+      // final half-second whites out, so the instant it lands is unmistakable.
+      // Derived from h.life, the same number the resolve fires on.
+      if (h.life <= 180) {
+        const _n = Math.max(1, Math.ceil(h.life / 60));
+        const _sub = ((h.life - 1) % 60) / 60;          // 1 -> 0 inside each second
+        ctx.save();
+        ctx.globalAlpha = 0.45 + 0.55 * _sub;
+        ctx.font = 'bold ' + Math.round(48 + (1 - _sub) * 26) + 'px Arial, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.strokeText(String(_n), sx, h.cy - 72);
+        ctx.fillStyle = h.life <= 30 ? '#ffffff' : '#ff9cff'; ctx.fillText(String(_n), sx, h.cy - 72);
+        ctx.restore();
+        if (h.life <= 30) { ctx.fillStyle = 'rgba(255,255,255,' + (0.35 * (1 - h.life / 30)).toFixed(3) + ')'; ctx.fillRect(0, _camY, W, H); }
       }
       // Safe zones — bright cream rect with violet outline + label.
       const zones = h.safeZones || [];
