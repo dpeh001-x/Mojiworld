@@ -54,7 +54,9 @@ const PROMPT =
   + 'cyan, bright cyan, sky blue, deep blue, navy. No purple, no violet, no pink, no gold. Crisp '
   + 'cel-shaded painterly game VFX with soft glow. Pure transparent background, alpha only: no '
   + 'ground, no floor, no scene, no box, no frame, no square, no border, no character, no text, no '
-  + 'letters, no watermark.';
+  + 'letters, no watermark. Cel-shaded like a game sprite: a BOLD DARK NAVY OUTLINE traces the outer '
+  + 'edge of the crystal rim and the inner edge where the rim meets the vortex, crisp contour lines, '
+  + 'flat cel shading with hard-edged highlights, not a soft airbrushed glow.';
 const MOTION =
   'the deep-blue vortex inside the crystal rim turns slowly clockwise, the bright white-cyan centre '
   + 'pulses, the cyan glow on the ice-crystal rim brightens and dims in a slow loop, thin cyan energy '
@@ -103,10 +105,32 @@ export async function tone(buf) {
   }
   return sharp(p.d, { raw: { width: p.w, height: p.h, channels: 4 } }).png().toBuffer();
 }
+// v5 (per user: "it should also have the same kind of outline" as the crystal portal). That
+// sprite is cel-shaded: a bold dark-navy contour around its silhouette. The brief asks for it,
+// and this guarantees it: the silhouette (alpha > 60) is dilated by OUTLINE.px and the ring that
+// adds is painted dark navy under the art, so base and every frame wear one identical contour.
+export const OUTLINE = { px: 4, r: 0x0c, g: 0x16, b: 0x3a, inset: 0.93 };
+export async function outline(buf) {
+  const p = await px(buf); const W = p.w, H = p.h, R = OUTLINE.px;
+  const solid = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) solid[i] = p.d[i * 4 + 3] > 60 ? 1 : 0;
+  const offs = []; for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) if (dx * dx + dy * dy <= R * R) offs.push([dx, dy]);
+  const out = Buffer.alloc(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    let near = 0;
+    if (!solid[i]) for (const [dx, dy] of offs) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H && solid[yy * W + xx]) { near = 1; break; } }
+    const o = i * 4;
+    if (near) { out[o] = OUTLINE.r; out[o + 1] = OUTLINE.g; out[o + 2] = OUTLINE.b; out[o + 3] = 245; }
+  }
+  const ring = await sharp(out, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer();
+  return sharp(ring).composite([{ input: await sharp(buf).png().toBuffer() }]).png().toBuffer();
+}
 async function seat(raw) {
-  const inner = await sharp(raw).ensureAlpha().resize(S, S, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+  const inS = Math.round(S * OUTLINE.inset);   // room for the contour inside the feather margin
+  const inner = await sharp(raw).ensureAlpha().resize(inS, inS, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
   const canvas = await sharp({ create: { width: S, height: S, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: inner, gravity: 'centre' }]).png().toBuffer();
-  const f = await feather(canvas);
+  const f = await feather(await outline(canvas));
   return has('--tone') ? tone(f) : f;   // v4: opt-in; the crystal brief wants its own colour
 }
 // --retone <dir-with-base-and-frames>: re-tone frames that were seated before the tone pass
