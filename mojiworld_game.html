@@ -10937,7 +10937,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.628';
+const GAME_VERSION = 'v0.30.629';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60458,6 +60458,77 @@ function _applyEarlyMapLayoutVariant(id, plats) {
   return v.id;
 }
 
+// v0.30.629 - SPACE THE PLATFORMS OUT (per user: "try to space out even more, vertically and horizontally").
+// Floating platforms now look solid, and a map that stacks one a few dozen px above another it overlaps, or
+// sets two side by side almost touching, read cramped even with the undersides cut to fit (v0.30.628).
+// Right after a map's layout is built on load (after the height jitter), crowded pairs are pushed apart: a
+// platform less than LX_SPACE_V above one it overlaps moves up (or the lower one down, or one slides clear
+// sideways); two side by side closer than LX_SPACE_H move apart. A move is kept only if it leaves the moved
+// platform crowded with fewer platforms and none new, stays inside the map and no higher than the highest
+// authored platform, and a conservative jump model (a plain jump plus the air jump: 90 px up, 120 px across)
+// still reaches every platform it reached before. Portals, NPCs and launch pads on a moved platform ride with
+// it; a platform carrying a world prop never moves. Boss arenas, the Void and Clockwork Spire's one-jump course
+// keep their authored layout, and the authored MAPS data is never touched (arrays are copied before any move).
+const LX_SPACE_V = 64, LX_SPACE_H = 40, LX_REACH_UP = 90, LX_REACH_X = 120;
+function _lxSpaceOutPlatforms(md, id) {
+  if (!md || !Array.isArray(md.platforms) || md.isBossArena || md.isVoid || id === 'clockworkSpire') return 0;
+  const all = md.platforms, fl = all.filter((p) => p && p.type !== 'ground' && p.w > 0 && typeof p.y === 'number' && typeof p.x === 'number');
+  if (fl.length < 2) return 0;
+  const ov = (a, b) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const crowd = (a, b) => { const o = ov(a, b), dy = Math.abs(b.y - a.y); return (o > 8 && dy > 0 && dy < LX_SPACE_V) || (dy < 24 && -o < LX_SPACE_H); };
+  const partners = (p) => { const s = new Set(); for (const o of fl) if (o !== p && crowd(p, o)) s.add(o); return s; };
+  const count = () => { let n = 0; for (let i = 0; i < fl.length; i++) for (let j = i + 1; j < fl.length; j++) if (crowd(fl[i], fl[j])) n++; return n; };
+  const n0 = count(); if (!n0) return 0;
+  const grounds = all.filter((p) => p && p.type === 'ground'), ww = md.worldWidth || 2000, yTop = Math.min(...fl.map((p) => p.y));
+  const gGap = (p) => { let g = 999; for (const q of grounds) if (ov(p, q) > 0) g = Math.min(g, q.y - p.y); return g; };
+  const reach = () => {
+    const q = grounds.length ? grounds.slice() : [fl.reduce((m, p) => (p.y > m.y ? p : m), fl[0])], R = new Set(q);
+    while (q.length) { const s = q.pop(); for (const t of fl) { if (R.has(t)) continue; const rise = s.y - t.y, gap = -ov(s, t); if (rise <= LX_REACH_UP && gap <= LX_REACH_X + Math.max(0, -rise) * 0.8) { R.add(t); q.push(t); } } }
+    return R;
+  };
+  const R0 = reach(), orig = new Map(fl.map((p) => [p, [p.x, p.y]]));
+  const hostOf = (x, y, w) => { let best = null; for (const p of fl) { if (x + (w || 0) < p.x - 4 || x > p.x + p.w + 4) continue; const d = p.y - y; if (d >= -4 && d <= 60 && (!best || d < best.d)) best = { p, d }; } return best && best.p; };
+  const pinned = new Set();
+  for (const pr of ((typeof MAP_PROPS !== 'undefined' && MAP_PROPS[id]) || [])) { if (!pr || typeof pr.x !== 'number' || typeof pr.y !== 'number') continue; const h = fl.find((p) => pr.x >= p.x - 4 && pr.x <= p.x + p.w + 4 && Math.abs(pr.y - p.y) <= 10); if (h) pinned.add(h); }
+  const riders = [];
+  for (const k of ['portals', 'npcs', 'launchPads']) (md[k] || []).forEach((e, i) => { if (e && typeof e.x === 'number' && typeof e.y === 'number') { const h = hostOf(e.x, e.y, k === 'launchPads' ? e.w : 0); if (h) riders.push([k, i, h]); } });
+  const cands = (a, b) => {   // candidate moves for one crowded pair, gentlest first
+    const out = [], dy = Math.abs(b.y - a.y);
+    if (ov(a, b) > 8 && dy > 0 && dy < LX_SPACE_V) {   // stacked: lift the upper, drop the lower, or slide one clear
+      const up = a.y < b.y ? a : b, lo = up === a ? b : a, need = LX_SPACE_V - dy;
+      if (need <= 40) out.push([up, 0, -need], [lo, 0, need]);
+      for (const [m, o] of [[up, lo], [lo, up]]) { const l = (o.x - 16) - (m.x + m.w), r = (o.x + o.w + 16) - m.x; if (-l <= 120) out.push([m, l, 0]); if (r <= 120) out.push([m, r, 0]); }
+    } else {   // side by side: open the gap
+      const L = a.x <= b.x ? a : b, Rt = L === a ? b : a, need = LX_SPACE_H - (Rt.x - (L.x + L.w));
+      if (need > 0 && need <= 80) out.push([Rt, need, 0], [L, -need, 0]);
+    }
+    return out;
+  };
+  const stillReaches = () => { const R = reach(); for (const t of R0) if (!R.has(t)) return false; return true; };
+  for (let pass = 0; pass < 4; pass++) {
+    let any = false; const pairs = [];
+    for (let i = 0; i < fl.length; i++) for (let j = i + 1; j < fl.length; j++) if (crowd(fl[i], fl[j])) pairs.push([fl[i], fl[j]]);
+    pairs.sort((p, q) => Math.abs(p[0].y - p[1].y) - Math.abs(q[0].y - q[1].y));
+    for (const [a, b] of pairs) {
+      if (!crowd(a, b)) continue;
+      for (const [p, dx, dy] of cands(a, b)) {
+        if (pinned.has(p) || (!dx && !dy)) continue;
+        const bef = partners(p), g0 = gGap(p), ox = p.x, oy = p.y; p.x += dx; p.y += dy;
+        const aft = partners(p);
+        if (p.x >= 8 && p.x + p.w <= ww - 8 && p.y >= yTop && aft.size < bef.size && [...aft].every((o) => bef.has(o)) && gGap(p) >= Math.min(g0, 48) && stillReaches()) { any = true; break; }
+        p.x = ox; p.y = oy;
+      }
+    }
+    if (!any) break;
+  }
+  let moved = 0; for (const p of fl) { const o = orig.get(p); if (o[0] !== p.x || o[1] !== p.y) moved++; }
+  if (moved) {
+    for (const k of ['portals', 'npcs', 'launchPads']) if (Array.isArray(md[k])) md[k] = md[k].map((e) => (e && typeof e === 'object' ? { ...e } : e));
+    for (const [k, i, h] of riders) { const o = orig.get(h), dx = h.x - o[0], dy = h.y - o[1]; if (dx || dy) { md[k][i].x += dx; md[k][i].y += dy; } }
+  }
+  md._lxSpaced = { before: n0, after: count(), moved };
+  return moved;
+}
 function _variedMapData(id) {
   const base = MAPS[id];
   if (!base) return null;
@@ -64451,6 +64522,7 @@ function loadMap(id, entryX, entryY) {
   const _lxFromMap = game.currentMap;
   game.currentMap = id;
   game.mapData = _variedMapData(id);
+  try { _lxSpaceOutPlatforms(game.mapData, id); } catch (e) {}   // v0.30.629 - crowded platforms pushed apart before anything reads the layout
   if (typeof _lxGravArenaReset === 'function') _lxGravArenaReset();   // v0.30.x — intact Singularity on every entry
   // v0.30.x — pre-decode Gravitos's sprite sets while the entry beat plays,
   // so his first cast doesn't pay a synchronous first-use decode (perf).
