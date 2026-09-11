@@ -33,7 +33,7 @@ await page.waitForFunction(() => typeof drawSuperBossBar === 'function' && typeo
 // the bar furniture streams with the rest of LX_FX at boot — wait for the two
 // pieces to decode before asserting on them (same pattern as the telegraph
 // art suite).
-await page.waitForFunction(() => window._lxBossFontReady === true, null, { timeout: 20000 }).catch(() => {});
+await page.waitForFunction(() => window._lxBossFontReady === true && window._lxBossNameReady === true, null, { timeout: 20000 }).catch(() => {});
 await page.waitForFunction(() => typeof LX_FX !== 'undefined'
   && LX_FX.ui_bossbar_frame && LX_FX.ui_bossbar_frame.complete && LX_FX.ui_bossbar_frame.naturalWidth > 0
   && LX_FX.ui_bossbar_fill && LX_FX.ui_bossbar_fill.complete && LX_FX.ui_bossbar_fill.naturalWidth > 0,
@@ -99,8 +99,10 @@ const r = await page.evaluate(() => {
     && LX_FX.ui_bossbar_fill && LX_FX.ui_bossbar_fill.complete && LX_FX.ui_bossbar_fill.naturalWidth > 0);
   // v0.29.x — TITLE FACE + OUTLINES: the embedded Cinzel loads, the name draws
   // in it, and every text on the bar is stroke-outlined before it is filled.
-  out.fontLoaded = window._lxBossFontReady === true
-    && (typeof document !== 'undefined' && document.fonts && document.fonts.check('700 19px LXBossTitle'));
+  // two embedded faces since v0.30.576: LXBossTitle (Cinzel) for the pause heading and zone
+  // titles, LXBossName (Exo 2) for the boss name and its title card
+  out.fontLoaded = window._lxBossFontReady === true && window._lxBossNameReady === true
+    && (typeof document !== 'undefined' && document.fonts && document.fonts.check('700 19px LXBossTitle') && document.fonts.check('700 19px LXBossName'));
   {
     game.monsters.length = 0; game._superBossRef = null;
     game.monsters.push(mk('legosaurus'));
@@ -170,8 +172,8 @@ ok('with the art, the bar is drawImage-framed — no border rectangles',
 // with no art decoded, the bar is framed by strokes and blits nothing.
 ok('with the art blocked, the procedural plate still draws (fallback intact)',
    r.paintFallback && r.paintFallback.drawImage === 0 && r.paintFallback.strokeRect >= 1, r.paintFallback);
-ok('the embedded Cinzel title face loads (offline, no machine fonts)', r.fontLoaded === true, {});
-ok('the name draws IN the title face', typeof r.nameFont === 'string' && r.nameFont.includes('LXBossTitle'), { font: r.nameFont });
+ok('both embedded faces load (Cinzel for titles, Exo 2 for the boss name; offline, no machine fonts)', r.fontLoaded === true, {});
+ok('the name draws IN the boss-name face', typeof r.nameFont === 'string' && r.nameFont.includes('LXBossName'), { font: r.nameFont });
 ok('the name is stroke-outlined (dark ring + accent ring)', r.nameOutlined >= 2, { strokes: r.nameOutlined });
 ok('the HP readout is outlined over the ribbon', r.hpOutlined === true, {});
 ok('no page errors', errs.length === 0, errs.slice(0, 3));

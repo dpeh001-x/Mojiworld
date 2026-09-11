@@ -21,15 +21,20 @@ try {
   await page.waitForFunction(() => typeof LX_FX !== 'undefined' && LX_FX.ui_bossbar_frame && LX_FX.ui_bossbar_frame.complete && LX_FX.ui_bossbar_frame.naturalWidth > 0
     && LX_FX.ui_bossbar_fill && LX_FX.ui_bossbar_fill.complete && LX_FX.ui_bossbar_fill.naturalWidth > 0, null, { timeout: 60000 }).catch(() => {});
   await page.waitForFunction(() => window._lxBossFontReady === true, null, { timeout: 20000 }).catch(() => {});
-  await page.evaluate(([hp, ph]) => { window.__bbHp = hp; window.__bbPhase = ph; }, [Number(process.env.BOSSBAR_HP || 0.62), Number(process.env.BOSSBAR_PHASE || 2)]);
+  await page.waitForFunction(() => window._lxBossNameReady === true, null, { timeout: 20000 }).catch(() => {});
+  await page.evaluate(([hp, ph, card, hyper]) => { window.__bbHp = hp; window.__bbPhase = ph; window.__bbCard = card; window.__bbHyper = hyper; },
+    [Number(process.env.BOSSBAR_HP || 0.62), Number(process.env.BOSSBAR_PHASE || 2), process.env.BOSSBAR_CARD === '1', process.env.BOSSBAR_HYPER === '1']);
   const r = await page.evaluate(() => {
     game.paused = true;
     for (const id of ['class-select-modal', 'loading-overlay']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     player.cls = 'warrior'; player.x = 800; player.y = 400;
     const t = monsterTypes.gravitos || monsterTypes.aetherion || {};
     const HP = Number(window.__bbHp) || 0.62, PH = Number(window.__bbPhase) || 2;   // BOSSBAR_HP / BOSSBAR_PHASE env
+    // BOSSBAR_CARD=1: the boss was acquired 700ms ago, so the centre-screen title card is at
+    // full presence and the intro sweep has landed - the name face and its treatment, at both sizes.
+    const seen = window.__bbCard ? performance.now() - 700 : 0;
     const mon = { type: 'gravitos', name: t.name || 'Gravitos', w: t.w || 90, h: t.h || 90, x: 900, y: 400, currentHp: Math.floor((t.hp || 21000000) * HP), maxHp: t.hp || 21000000,
-      isBoss: true, boss: true, superBoss: true, hyperBoss: false, level: t.level || 60, traits: t.traits, _bbSeen: 0, phase: PH };
+      isBoss: true, boss: true, superBoss: true, hyperBoss: !!window.__bbHyper, level: t.level || 60, traits: t.traits, _bbSeen: seen, phase: PH };
     game.monsters.length = 0; game._superBossRef = null; game.monsters.push(mon);
     const cv = [...document.querySelectorAll('canvas')].sort((a, b) => b.width * b.height - a.width * a.height)[0];
     const c = cv.getContext('2d');
@@ -40,7 +45,9 @@ try {
     // Read the bar's placement back the way drawSuperBossBar computes it, and walk the middle row
     // for where the fill's pink actually starts and ends - so "there is a cutoff at the edge" can be
     // answered with columns instead of guesses.
-    const uiK = (game._uiScale > 0) ? game._uiScale : 1, W = cv.width, barW = Math.min(660 * uiK, W - 120), barH = Math.round(22 * uiK), bx = Math.round((W - barW) / 2), by = 34;
+    const uiK = (game._uiScale > 0) ? game._uiScale : 1, W = cv.width, barW = Math.min(660 * uiK, W - 120), barH = Math.round(22 * uiK), bx = Math.round((W - barW) / 2);
+    // v0.30.576: the bar drops to keep the name on screen - mirror the game's formula
+    const tall = (typeof _BB_GEOM === 'object') ? _BB_GEOM.hy0 * barH / (_BB_GEOM.hy1 - _BB_GEOM.hy0) : 0, by = Math.max(34, Math.round(24 + 12 + tall));
     const mid = c.getImageData(0, by + (barH >> 1), W, 1).data; const isPink = (x) => { const i = x * 4; return mid[i] > 180 && mid[i + 1] < 170 && mid[i + 2] > 90; };
     let p0 = -1, p1 = -1; for (let x = 0; x < W; x++) if (isPink(x)) { if (p0 < 0) p0 = x; p1 = x; }
     return { url: cv.toDataURL('image/png'), w: cv.width, h: cv.height, threw, frameNat: frame.naturalWidth + 'x' + frame.naturalHeight, geom: (typeof _BB_GEOM === 'object') ? _BB_GEOM : null,
@@ -48,7 +55,7 @@ try {
   });
   console.log('placement', JSON.stringify(r.place));
   const sharp = require('sharp'); const buf = Buffer.from(r.url.split(',')[1], 'base64');
-  const band = await sharp(buf).extract({ left: 0, top: 0, width: r.w, height: Math.min(r.h, 130) }).png().toBuffer();
+  const band = await sharp(buf).extract({ left: 0, top: 0, width: r.w, height: Math.min(r.h, process.env.BOSSBAR_CARD === '1' ? 330 : 130) }).png().toBuffer();   // the card sits at 36% of the height
   writeFileSync(OUT, band);
   console.log(`canvas ${r.w}x${r.h}  frame ${r.frameNat}  geom ${JSON.stringify(r.geom)}  threw ${r.threw || 'no'}  errors ${errs.length}\nwrote ${OUT}`);
   if (r.threw || errs.length) { console.log(errs.join('\n')); process.exitCode = 1; }
