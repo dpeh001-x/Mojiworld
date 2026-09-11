@@ -314,9 +314,24 @@ async function main() {
           method: 'POST', headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(r.ep === 'music' ? 300000 : TIMEOUT), body: JSON.stringify(body) });
         if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 120)}`);
-        const j = await res.json();
-        const url = j.url || (j.result && j.result.url);
-        if (!url) throw new Error('no url in response');
+        let j = await res.json();
+        // v0.30.x — the endpoint went ASYNC (202 + a job): poll GET /assets/jobs/{id} with wait=30 until
+        // it succeeds; its result is exactly the old synchronous body. A 200 still carries the url directly.
+        if (res.status === 202 || (j && (j.status === 'queued' || j.status === 'running'))) {
+          const jobId = j.id || j.jobId; if (!jobId) throw new Error('202 without a job id');
+          const t0 = Date.now();
+          while (true) {
+            if (Date.now() - t0 > 420000) throw new Error('job ' + jobId + ' still not done after 7 min');
+            const pr = await fetch(`${API}/assets/jobs/${jobId}?wait=30`, { headers: { Authorization: `ApiKey ${apiKey}` }, signal: AbortSignal.timeout(45000) });
+            if (!pr.ok) throw new Error(`poll HTTP ${pr.status}`);
+            const pj = await pr.json();
+            if (pj.status === 'succeeded') { j = pj.result || {}; break; }
+            if (pj.status === 'failed' || pj.status === 'canceled') throw new Error('job ' + pj.status + ': ' + ((pj.error && pj.error.message) || ''));
+            await sleep(Math.max(1000, pj.poll_after_ms || 2000));
+          }
+        }
+        const url = j.url || (j.result && j.result.url) || (j.audio && j.audio.url);
+        if (!url) throw new Error('no url in response: ' + JSON.stringify(j).slice(0, 160));
         const dl = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT) });
         if (!dl.ok) throw new Error(`download HTTP ${dl.status}`);
         buf = Buffer.from(await dl.arrayBuffer());
