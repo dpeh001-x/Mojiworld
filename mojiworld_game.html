@@ -10735,7 +10735,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.607';
+const GAME_VERSION = 'v0.30.608';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -45364,13 +45364,14 @@ const STORY_BEATS = {
   // v0.30.605 — per user: "do not put a 3rd person view, always from gravitos voice itself". The gate
   // beat has no narrator lines now: the opener is spoken, and the listening upward is his own
   // ("Be still... Did you hear that? ... I am always the last to hear it").
+  // v0.30.608 — and every stanza is read aloud (`voice`): an original voice in Nyx's calm register, per user.
   gravitos_gate: {
     mode: 'dialog',
     ground: 'backgrounds/bg_v3_gravitosArena.webp',
     stanzas: [
-      { speaker: "Gravitos, the Weight-Bearer", text: "The Singularity does not echo. It swallows.\n\nTwelve ages ago this world dreamed with its eyes open... and tore itself apart with wanting. Every voice in it asked the sky for stillness.\n\nI am the shape that asking took. Whether the sky chose me, or something above the sky, I have never needed to know." },
-      { speaker: "Gravitos, the Weight-Bearer", text: "You already know what I am, foreigner. What every heart in this world fears most... what it turns from, and calls morning. I am that.\n\nI did not steal the dreaming. I closed its eyes. Every quiet dawn since is a stillness I keep... not one I chose. The weight was placed. I carry it.\n\nThere is trembling in you. There should be." },
-      { speaker: "Gravitos, the Weight-Bearer", text: "Be still... Did you hear that? No. You would not. Something has spoken, far above the Singularity... and I am always the last to hear it.\n\nYou understand what waits, and still you raise your hand against it. If more of them had been like you... perhaps. But it is late now. It matters not who you are.\n\nThe void awaits all... The void awaits you..." }
+      { speaker: "Gravitos, the Weight-Bearer", text: "The Singularity does not echo. It swallows.\n\nTwelve ages ago this world dreamed with its eyes open... and tore itself apart with wanting. Every voice in it asked the sky for stillness.\n\nI am the shape that asking took. Whether the sky chose me, or something above the sky, I have never needed to know.", voice: 'audio/story/gravitos_gate_1.mp3' },
+      { speaker: "Gravitos, the Weight-Bearer", text: "You already know what I am, foreigner. What every heart in this world fears most... what it turns from, and calls morning. I am that.\n\nI did not steal the dreaming. I closed its eyes. Every quiet dawn since is a stillness I keep... not one I chose. The weight was placed. I carry it.\n\nThere is trembling in you. There should be.", voice: 'audio/story/gravitos_gate_2.mp3' },
+      { speaker: "Gravitos, the Weight-Bearer", text: "Be still... Did you hear that? No. You would not. Something has spoken, far above the Singularity... and I am always the last to hear it.\n\nYou understand what waits, and still you raise your hand against it. If more of them had been like you... perhaps. But it is late now. It matters not who you are.\n\nThe void awaits all... The void awaits you...", voice: 'audio/story/gravitos_gate_3.mp3' }
     ],
   },
   gravitos_awakened: {
@@ -45784,6 +45785,59 @@ function _sbPreloadForMap(id) { const b = _sbBeatForMap(id); if (b) _sbPreloadCl
 //     text, an optional countdown (seconds > 0) that picks `default`
 //     on expiry, and the pick stored at player._storyChoices[flag].
 //     While a choice is live, click/Enter CANNOT skip the stanza.
+// v0.30.608 — STORY VOICE-OVER. Per user: "Yes lets incorporate the audio". A stanza may carry
+// `voice: 'audio/story/<beat>_<n>.mp3'`; the clip plays as that stanza opens, stops the moment the
+// player advances or the beat closes, and the music ducks under it for the length of the beat (the
+// same ref-counted duck the cutscene clips use). Every read of a beat is buffered when the beat
+// opens, so stanza two is ready before stanza one ends. The clips keep their own cache, listed in
+// _setSfxMasterVolume and _lxSyncSfxMuted, so the SFX slider and the mute toggle reach a read that
+// is already playing, exactly as they reach every other clip.
+const _storyVoiceEls = Object.create(null);
+const _STORY_VOICE_BASE = 0.9;
+let _sbVoiceCur = null;
+let _sbVoiceDucked = false;
+function _sbStoryVoiceEl(path) {
+  if (!path) return null;
+  if (_storyVoiceEls[path]) return _storyVoiceEls[path];
+  const a = new Audio();
+  a.preload = 'auto';
+  a.loop = false;
+  a._sfxBase = _STORY_VOICE_BASE;
+  a.volume = _STORY_VOICE_BASE * ((typeof _SFX_MASTER_VOL === 'number') ? _SFX_MASTER_VOL : 1);
+  try { if (typeof audio !== 'undefined' && audio) a.muted = !!audio.muted; } catch (e) {}
+  a.src = path;
+  _storyVoiceEls[path] = a;
+  return a;
+}
+function _sbStoryVoicePrewarm(beat) {
+  try { for (const st of (beat && beat.stanzas) || []) { if (st && typeof st.voice === 'string') _sbStoryVoiceEl(st.voice); } } catch (e) {}
+}
+function _sbStoryVoiceStop(release) {
+  try { if (_sbVoiceCur) { _sbVoiceCur.pause(); try { _sbVoiceCur.currentTime = 0; } catch (e) {} } } catch (e) {}
+  _sbVoiceCur = null;
+  if (release && _sbVoiceDucked) {
+    _sbVoiceDucked = false;
+    try { if (typeof _vidUnduckBgm === 'function') _vidUnduckBgm(900); } catch (e) {}
+  }
+}
+function _sbStoryVoicePlay(stanza) {
+  _sbStoryVoiceStop(false);
+  try {
+    const src = (stanza && typeof stanza.voice === 'string') ? stanza.voice : null;
+    if (!src) return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    const el = _sbStoryVoiceEl(src);
+    if (!el) return false;
+    el.volume = _STORY_VOICE_BASE * ((typeof _SFX_MASTER_VOL === 'number') ? _SFX_MASTER_VOL : 1);
+    try { if (typeof audio !== 'undefined' && audio) el.muted = !!audio.muted; } catch (e) {}
+    if (!_sbVoiceDucked && typeof _vidDuckBgm === 'function') { _sbVoiceDucked = true; try { _vidDuckBgm(); } catch (e) {} }
+    try { el.currentTime = 0; } catch (e) {}
+    _sbVoiceCur = el;
+    const p = el.play();
+    if (p && p.catch) p.catch(() => {});
+    return true;
+  } catch (e) { return false; }
+}
 function _playStoryBeat(beatId, onClose) {
   let beat;
   if (beatId && typeof beatId === 'object') {
@@ -45823,6 +45877,7 @@ function _playStoryBeat(beatId, onClose) {
   } catch (e) {}
   // v0.29.27 — cinematic clip backdrop (no-op for beats without one).
   _sbAttachClip(beatId);
+  _sbStoryVoicePrewarm(beat);   // v0.30.608 — buffer every stanza's read up front
   // v0.29.x — Per user "the tutorial tab should be behind the storytelling tab":
   // the interactive tutorial dock (z-600, position:fixed) otherwise floats OVER
   // the story-beat overlay (z-105, inside the game-wrapper stacking context), so
@@ -45937,6 +45992,7 @@ function _playStoryBeat(beatId, onClose) {
     // v0.29.60 — stanza text may be a function of the player's choices.
     const _t = (typeof s.text === 'function') ? s.text(player._storyChoices || {}) : s.text;
     _sbSetText(els.text, _t || '');
+    _sbStoryVoicePlay(s);   // v0.30.608 — the stanza's own read, if it has one
     // v0.27.4 — only the FIRST stanza runs the overlay entry fade. Advances
     // used to re-toggle .on (hiding everything + re-running the full 700ms
     // fade → each click felt laggy); now the text swaps in-place with the
@@ -45959,6 +46015,7 @@ function _playStoryBeat(beatId, onClose) {
   };
   const closeBeat = () => {
     _clearChoiceUi();   // v0.29.60 — kill any live countdown + buttons
+    _sbStoryVoiceStop(true);   // v0.30.608 — stop the read, hand the music back
     els.overlay.classList.remove('on');
     try { document.body.classList.remove('sb-active'); } catch (e) {}   // v0.29.x — restore the tutorial dock
     _sbDetachClip();   // v0.29.27 — unload the clip with the overlay
@@ -147937,6 +147994,7 @@ function _setSfxMasterVolume(v) {
       // 'probing' | null; the `el && el._sfxBase != null` guard below skips
       // the non-element sentinels safely.
       (typeof _NPC_TALK_SFX !== 'undefined') ? _NPC_TALK_SFX : null,
+      (typeof _storyVoiceEls !== 'undefined') ? _storyVoiceEls : null,   // v0.30.608 — story voice-over
     ];
     for (const cache of caches) {
       if (!cache) continue;
@@ -148447,6 +148505,7 @@ function _lxSyncSfxMuted(m) {
   if (typeof _monsterSfxEls !== 'undefined') _each(_monsterSfxEls);
   if (typeof _monsterCustomSfx !== 'undefined') _each(_monsterCustomSfx);
   if (typeof _ambientEls !== 'undefined') _each(_ambientEls);
+  if (typeof _storyVoiceEls !== 'undefined') _each(_storyVoiceEls);   // v0.30.608 — story voice-over
   try { if (typeof _cineBgm !== 'undefined' && _cineBgm) _cineBgm.muted = !!m; } catch (_) {}
 }
 const _skillSfxLastTime = Object.create(null);

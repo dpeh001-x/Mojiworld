@@ -75,6 +75,12 @@ function describe(rel) {
   if (dir === 'skill') return { cat: 'skill', when: 'Cast SFX — plays when the player uses the "' + base.replace(/_/g, ' ') + '" skill' };
   if (dir === 'boss')  return { cat: 'boss-voice', when: 'Boss intro VOICE — plays once when first entering the ' + base.replace(/^boss_/, '').replace(/_/g, ' ') + ' arena (gated by _bossIntrosSeen)' };
   if (dir === 'ambient') return { cat: 'ambient', when: 'Ambient loop layered under the BGM on ' + base + '-biome maps' };
+  // Story voice-over: audio/story/<beat>_<n>.mp3 is stanza <n> of STORY_BEATS.<beat>, read aloud as
+  // that stanza opens (the stanza's `voice` field; _sbStoryVoicePlay in mojiworld_game.html).
+  if (dir === 'story') {
+    const m = base.match(/^(.+)_(\d+)$/);
+    return { cat: 'story-voice', when: 'Story voice-over \u2014 ' + (m ? 'stanza ' + m[2] + ' of the ' + m[1].replace(/_/g, ' ') + ' beat' : base) + ', read aloud as that stanza opens (stops when the player advances)' };
+  }
   if (dir === 'voice') {
     const v = base.match(/^(\w+?)_(m|f)_(hit\d|death|.*)$/) || base.match(/^(cheer)_(m|f)_(\d)$/);
     if (v) {
