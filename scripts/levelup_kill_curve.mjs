@@ -33,6 +33,10 @@ const data = await page.evaluate(() => {
         (typeof MOB_NATURAL_LEVEL !== 'undefined') ? MOB_NATURAL_LEVEL : {})) {
     const t = monsterTypes[id];
     if (!t || t.isBoss || t.boss) continue;
+    // v0.30.x — mini-elites revive on their first death and pay NOTHING for it (pathsBane,
+    // ossuaryTyrant ... measured 0 EXP), and echoKnight is a big-monster-tier giant with ~7x the HP
+    // of its level. Neither is what a player grinds, and the zeros dropped whole levels from the dump.
+    if (t.miniElite || id === 'echoKnight') continue;
     if (EXCLUDE.test(id)) continue;
     if (!(lv > 0)) continue;
     (byLevel[lv] ||= []).push({ id, exp: t.exp | 0 });

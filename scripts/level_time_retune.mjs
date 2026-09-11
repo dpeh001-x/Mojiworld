@@ -39,7 +39,13 @@ function extractObject(v) {
 }
 const num = (name, dflt) => {
   const m = html.match(new RegExp('const\\s+' + name + '\\s*=\\s*([\\d.]+)\\s*;'));
-  return m ? parseFloat(m[1]) : dflt;
+  if (m) return parseFloat(m[1]);
+  // v0.30.x — both names are ALIASES now (`const LX_MONSTER_EXP_MULT = LX_EXP.monster;`), which the
+  // literal-only pattern above never matched, so the printed stack read x1 against a live x2. Follow
+  // the alias into LX_EXP. (Display only: EXP/kill is measured, so the bake never used this value.)
+  const a = html.match(new RegExp('const\\s+' + name + '\\s*=\\s*LX_EXP\\.(\\w+)\\s*;'));
+  if (a) { const v = html.match(new RegExp('^\\s+' + a[1] + ':\\s*([\\d.]+)\\s*,', 'm')); if (v) return parseFloat(v[1]); }
+  return dflt;
 };
 const EVENT   = num('LX_EVENT_EXP_MULT', 1);
 const MONSTER = num('LX_MONSTER_EXP_MULT', 1);
@@ -52,6 +58,12 @@ const EARLY = L => (L <= 5 ? 3 : 1);         // v0.26.x early-level kicker
 // level-gap penalty on top. The inflated numbers also pushed Lv 90 past the
 // 1e12 save clamp. scripts/levelup_kill_curve.mjs --dump= writes the real
 // figures by spawning and killing through the live pipeline.
+// v0.30.x — STALE-DESIGN WARNING (2026-09-11). The ANCHORS below are the July 2026 design. The EXP
+// knobs were cut after that bake (v0.29.858-869: event x2 -> x1, monster x10 -> x2, newbie x35 -> x6),
+// so the live table no longer matches them, and Lv 36-84 was since eased on purpose by
+// scripts/rebake_level_band.mjs ("make level 40-80 slightly easier than the current"). Running
+// --write here REWRITES ALL 200 LEVELS back to these anchors - e.g. Lv 50 from ~40,000 kills to
+// 5,000. For a band change use scripts/rebake_level_band.mjs, which leaves other levels untouched.
 const PERKILL_FILE = new URL('./level_perkill_measured.json', import.meta.url);
 if (!fs.existsSync(PERKILL_FILE)) {
   console.error('missing scripts/level_perkill_measured.json — regenerate it first:\n'
@@ -75,6 +87,7 @@ const mobs = [];
 for (const k in monsterTypes) {
   const m = monsterTypes[k];
   if (!m || typeof m !== 'object' || m.exp == null || m.boss || /^octoLeg/.test(k)) continue;
+  if (m.miniElite || k === 'echoKnight') continue;   // v0.30.x — not what anyone grinds; see levelup_kill_curve.mjs
   if (/^(tower|express|ticket|conductor|mirror)/i.test(k)) continue;
   const lvl = (m.level != null) ? m.level : NAT[k]; if (lvl == null) continue;
   mobs.push({ k, lvl, exp: m.exp });
