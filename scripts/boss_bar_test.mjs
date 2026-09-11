@@ -60,6 +60,9 @@ const r = await page.evaluate(() => {
     }, over || {});
   };
 
+  // The boss title is a baked image since the typeset title: a blit of a bake counts as painting its text.
+  const _lxBakeOf = (img) => { try { return (typeof _LX_BT_CACHE !== 'undefined') ? ([..._LX_BT_CACHE.values()].find((b) => b.cv === img) || null) : null; } catch (e) { return null; } };
+  const _lxBakeText = (bt) => (bt.parts.tag ? bt.parts.tag + ' - ' : '') + bt.parts.name + (bt.parts.epithet ? ', ' + bt.parts.epithet.toUpperCase() : '');
   // Spy the renderer: what text does the bar actually paint?
   const draw = (mon) => {
     game.monsters.length = 0;
@@ -68,8 +71,10 @@ const r = await page.evaluate(() => {
     const real = ctx.fillText.bind(ctx);
     const painted = [];
     ctx.fillText = function (t) { painted.push(String(t)); return real.apply(this, arguments); };
+    const _diT = ctx.drawImage;
+    ctx.drawImage = function (img) { const bt = _lxBakeOf(img); if (bt) painted.push(_lxBakeText(bt)); return _diT.apply(this, arguments); };
     try { drawSuperBossBar(); } catch (e) { painted.push('THREW:' + e); }
-    ctx.fillText = real;
+    ctx.fillText = real; ctx.drawImage = _diT;
     return painted;
   };
 
@@ -86,7 +91,7 @@ const r = await page.evaluate(() => {
     }
     const counts = { drawImage: 0, strokeRect: 0 };
     const _di = ctx.drawImage, _sr = ctx.strokeRect;
-    ctx.drawImage = function () { counts.drawImage++; return _di.apply(this, arguments); };
+    ctx.drawImage = function (img) { if (!_lxBakeOf(img)) counts.drawImage++; return _di.apply(this, arguments); };   // the title bake is text, not frame art
     ctx.strokeRect = function () { counts.strokeRect++; return _sr.apply(this, arguments); };
     try { drawSuperBossBar(); } catch (e) { counts.threw = String(e).slice(0, 80); }
     ctx.drawImage = _di; ctx.strokeRect = _sr;
@@ -117,8 +122,10 @@ const r = await page.evaluate(() => {
       if (String(t).includes('LEGOSAURUS')) nameFont = String(ctx.font);
       return _ft.apply(this, arguments);
     };
+    const _diN = ctx.drawImage;
+    ctx.drawImage = function (img) { const bt = _lxBakeOf(img); if (bt && bt.parts.name.includes('LEGOSAURUS')) { nameFont = bt.font; if (bt.outlined) strokes.push(bt.parts.name, bt.parts.name); } return _diN.apply(this, arguments); };
     try { drawSuperBossBar(); } catch (e) { strokes.push('THREW:' + e); }
-    ctx.strokeText = _st; ctx.fillText = _ft;
+    ctx.strokeText = _st; ctx.fillText = _ft; ctx.drawImage = _diN;
     out.nameFont = nameFont;
     out.nameOutlined = strokes.filter(t => t.includes('LEGOSAURUS')).length;
     out.hpOutlined = strokes.some(t => /[KM]\s*\/|·/.test(t) || /%/.test(t));
@@ -179,7 +186,7 @@ ok('with the art blocked, the procedural plate still draws (fallback intact)',
 ok('exactly two authored types are hyper bosses: gravitos and the Sovereign', JSON.stringify(r.hyperTypes) === JSON.stringify(['gravitos', 'towerSovereign']), { hyper: r.hyperTypes });
 ok("the Sovereign's bar carries the HYPER BOSS prefix", (r.sovereign || []).some((t) => /HYPER BOSS/.test(t) && /SOVEREIGN/.test(t)), { painted: r.sovereign });
 ok('both embedded faces load (Cinzel for titles, Exo 2 for the boss name; offline, no machine fonts)', r.fontLoaded === true, {});
-ok('the name draws IN the boss-name face', typeof r.nameFont === 'string' && r.nameFont.includes('LXBossName'), { font: r.nameFont });
+ok('the name draws IN the boss-name face (engraved Cinzel since the typeset title)', typeof r.nameFont === 'string' && /Cinzel/.test(r.nameFont), { font: r.nameFont });
 ok('the name is stroke-outlined (dark ring + accent ring)', r.nameOutlined >= 2, { strokes: r.nameOutlined });
 ok('the HP readout is outlined over the ribbon', r.hpOutlined === true, {});
 ok('no page errors', errs.length === 0, errs.slice(0, 3));

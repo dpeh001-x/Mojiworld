@@ -74,12 +74,19 @@ const r = await page.evaluate(() => {
       if (String(this.font).indexOf('46px') >= 0) card = { a: +this.globalAlpha.toFixed(3), y: ty };
       return _ft.apply(this, arguments);
     };
+    // the title card is a baked image since the typeset title: find it by its canvas in the bake cache
+    const _di = ctx.drawImage;
+    ctx.drawImage = function (img, ...rest) {
+      try { const bt = (typeof _LX_BT_CACHE !== 'undefined') ? [..._LX_BT_CACHE.values()].find((b) => b.cv === img) : null;
+        if (bt && bt.kind === 'card') card = { a: +this.globalAlpha.toFixed(3), y: (rest[1] || 0) + bt.ay }; } catch (e) {}
+      return _di.apply(this, arguments);
+    };
     ctx.fillRect = function (x, y, w, h) { rects.push({ s: styleOf(this.fillStyle), grad: stops.has(this.fillStyle), x, y, w, h }); return _fr.apply(this, arguments); };
     // the plate's gradients are cached on (geometry, phase) and so are built on the first
     // draw only; drop the key so this draw rebuilds them where the spy above can read them
     try { _SBB_G.key = ''; } catch (e) {}
     try { drawSuperBossBar(); } catch (e) { rects.push({ s: 'THREW:' + e }); }
-    ctx.fillRect = _fr; ctx.fillText = _ft; ctx.createLinearGradient = _clg;
+    ctx.fillRect = _fr; ctx.fillText = _ft; ctx.createLinearGradient = _clg; ctx.drawImage = _di;
     if (blockArt && typeof LX_FX !== 'undefined') { LX_FX.ui_bossbar_frame = sF; LX_FX.ui_bossbar_fill = sR; }
     // v0.30.462 — locate the strip from the trough the plate paints (its gradient runs
     // #04010a -> #170b28 -> #08030f) instead of hardcoding a y/h. The geometry moved
