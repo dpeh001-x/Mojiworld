@@ -4,7 +4,7 @@
 // should be more different floors for the different biomes", "even different towns have different
 // styles and should have different floors", "do not need props". This bakes every material in the
 // _CUTE_MAT registry through the real _cutePlatformSprite (a floating platform and a ground) and reads
-// the pixels back: the surface is at the collision line, the box is opaque, the keyline is dark, a
+// the pixels back (studs are counted from two rows above the surface; the keyline straddles it): the surface is at the collision line, the box is opaque, the keyline is dark, a
 // built slab hangs nothing below itself, toy bricks carry studs, and a split material (moss on planks)
 // keeps its face's own hue. Then the tables: every map resolves to a known floor, every town's floor
 // is its own, every listed map has a sampled palette, and drawPlatforms paints with that palette.
@@ -32,7 +32,7 @@ try {
       const G = _CUTE_MAT[theme].built ? _cuteBuiltGeom(_cuteGeom(w, h, ground), w, h, ground) : _cuteGeom(w, h, ground);
       let solid = 0, air = 0, inside = 0, opaque = 0, below = 0, studs = 0;
       for (const f of [0.25, 0.4, 0.5, 0.6, 0.75]) { const x = Math.round(2 + w * f); if (d[at(x, P + 2) + 3] > 200) solid++; if (d[at(x, P - 5) + 3] < 40) air++; }
-      for (let y = 0; y < cv.height; y++) for (let x = 6; x < W - 6; x++) { const a = d[at(x, y) + 3], ry = y - P; if (ry >= 0 && ry < h) { inside++; if (a > 230) opaque++; } if (ry > G.faceH + 3 && a > 60) below++; if (ry < 0 && ry >= -5 && a > 200) studs++; }
+      for (let y = 0; y < cv.height; y++) for (let x = 6; x < W - 6; x++) { const a = d[at(x, y) + 3], ry = y - P; if (ry >= 0 && ry < h) { inside++; if (a > 230) opaque++; } if (ry > G.faceH + 3 && a > 60) below++; if (ry <= -2 && ry >= -5 && a > 200) studs++; }
       const ky = P + Math.round(G.cap + 5); let key = 255; for (let x = 1; x <= 6; x++) { const i = at(x, ky); if (d[i + 3] > 150) key = Math.min(key, lum(d, i)); }
       return { solid, air, opaque: +(opaque / Math.max(1, inside)).toFixed(2), below, studs, key: key | 0 };
     };
@@ -56,7 +56,7 @@ try {
     ok(`${th}: the keyline is dark down the edge`, p.key < 90 && g.key < 90, [p.key, g.key]);
     if (m.built) ok(`${th}: a built slab hangs nothing below itself`, p.below === 0 && g.below === 0, [p.below, g.below]);
     if (th === 'toybrick') ok('toybrick: studs stand on the surface', p.studs > 20 && g.studs > 40, [p.studs, g.studs]);
-    else ok(`${th}: nothing stands above the surface of a built slab`, !m.built || (p.air >= 4 && g.air >= 4), [p.air, g.air]);
+    else ok(`${th}: nothing stands above the surface of a built slab`, !m.built || (p.studs === 0 && g.studs === 0), [p.studs, g.studs]);
   }
   ok('moss on planks: the top is green and the face stays brown (split palette)', r.split.top[1] > r.split.top[0] && r.split.face[0] > r.split.face[1], r.split);
   ok('every map resolves to a floor the painter knows', r.unknown.length === 0, r.unknown);
