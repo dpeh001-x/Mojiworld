@@ -39,20 +39,28 @@ const fetchBuf = async (u) => { const r = await fetch(u, { signal: AbortSignal.t
 // portal"): a round portal seen from directly above, so the renderer's stretch into the wide zone
 // rect lays it on the floor in perspective. It fills the sheet (a ring left the rect half empty and
 // hovered at mid-height).
+// v4 (per user: "the violet rim does not look good, regenerate the whole thing, make it nicer, the
+// aesthetic should look similar and better to the crystal portal"). The crystal portal is a pale
+// ice-cyan crystalline shard with a deep-blue vortex inside and a cyan glow; this is the same
+// material laid flat as a round gate: a rim of jagged ice-crystal facets, the deep-blue vortex
+// inside, cyan light. No violet, and no tone pass.
 const PROMPT =
   'game vfx sprite, a CIRCULAR DIMENSIONAL PORTAL seen from directly above, a perfect round disc that '
-  + 'fills almost the whole picture: a swirling vortex of deep blue and violet light spiralling into a '
-  + 'bright white-cyan centre, a thick luminous rim of pale blue light around the outside with faint '
-  + 'glowing arcane runes along it, small motes and wisps of light drifting off the rim. Round, not '
-  + 'oval, centred, with only a thin margin of empty space around the disc. Colours: white, pale cyan, '
-  + 'sky blue, violet, deep indigo in the vortex. Soft glowing edges, painterly 16-bit VFX. Pure '
-  + 'transparent background, alpha only: no ground, no floor, no scene, no box, no frame, no square, '
-  + 'no border, no character, no text, no letters, no watermark.';
+  + 'fills almost the whole picture. The rim is a ring of jagged pale ICE-CRYSTAL facets, frosty white '
+  + 'and pale cyan, like a crystal geode edge, with a bright cyan glow bleeding off it. Inside the rim '
+  + 'a swirling vortex of DEEP BLUE and navy light spiralling into a bright white-cyan centre, with '
+  + 'thin cyan energy arcs and small ice shards and motes drifting over it. Round, not oval, centred, '
+  + 'with only a thin margin of empty space around the disc. Colours ONLY: white, frost white, pale '
+  + 'cyan, bright cyan, sky blue, deep blue, navy. No purple, no violet, no pink, no gold. Crisp '
+  + 'cel-shaded painterly game VFX with soft glow. Pure transparent background, alpha only: no '
+  + 'ground, no floor, no scene, no box, no frame, no square, no border, no character, no text, no '
+  + 'letters, no watermark.';
 const MOTION =
-  'the vortex inside the portal turns slowly clockwise, the bright centre pulses, the rim glow '
-  + 'brightens and dims in a slow loop, the runes shimmer, small motes drift off the rim and fade '
-  + 'while new ones appear; the disc stays perfectly in place and keeps its size and shape; '
-  + 'seamless loop, nothing leaves the frame';
+  'the deep-blue vortex inside the crystal rim turns slowly clockwise, the bright white-cyan centre '
+  + 'pulses, the cyan glow on the ice-crystal rim brightens and dims in a slow loop, thin cyan energy '
+  + 'arcs flicker across the vortex, small ice shards and motes drift and fade while new ones appear; '
+  + 'the disc stays perfectly in place and keeps its size and shape; seamless loop, nothing leaves '
+  + 'the frame';
 
 async function px(buf) { const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); return { d: data, w: info.width, h: info.height }; }
 // alpha feather on all four sides + a guaranteed-clear border ring
@@ -98,7 +106,8 @@ export async function tone(buf) {
 async function seat(raw) {
   const inner = await sharp(raw).ensureAlpha().resize(S, S, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
   const canvas = await sharp({ create: { width: S, height: S, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: inner, gravity: 'centre' }]).png().toBuffer();
-  return tone(await feather(canvas));
+  const f = await feather(canvas);
+  return has('--tone') ? tone(f) : f;   // v4: opt-in; the crystal brief wants its own colour
 }
 // --retone <dir-with-base-and-frames>: re-tone frames that were seated before the tone pass
 // existed (no ludo call). Reads <dir>/base.webp and <dir>/frame_0..8.webp, writes the repo files.

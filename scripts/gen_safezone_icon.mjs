@@ -31,7 +31,8 @@ const fetchBuf = async (u) => { const r = await fetch(u, { signal: AbortSignal.t
 const hud = readFileSync(join(ROOT, 'scripts', 'gen_hud_stat_icons.mjs'), 'utf8');
 const SUFFIX = (/const SUFFIX = '([^']+)'/.exec(hud) || [])[1];
 if (!SUFFIX) { console.error('could not read the HUD style tail'); process.exit(1); }
-const PROMPT = 'A glossy pale-blue and white heater shield with a soft cyan glow and a small white four-point star in its centre' + SUFFIX;
+// v4 (per user): the shield is GOLD, so it reads against the cyan-and-navy portal it sits on
+const PROMPT = 'A glossy golden yellow heater shield with warm amber shading, a soft gold glow and a small white four-point star in its centre' + SUFFIX;
 
 async function pollJob(job, label) {
   const t0 = Date.now();
