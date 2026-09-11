@@ -10734,7 +10734,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.573';
+const GAME_VERSION = 'v0.30.574';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -60910,7 +60910,7 @@ Object.assign(monsterTypes, {
   // B3 — projectile mage. Withered-glyph cadence (uses fast mtidemark).
   towerHexer:    { name:'Tomb Hexer',    w:72, h:106,  color:'#c8a8ff', shell:'#4a2a8a', hp:1650, atk:160, def:63, evasion:130, exp:1380, mojicoins:0, speed:0.9, jump:0, level:20, shoot:'mhexbolt', shootCd:1500,signature:'Channels withered glyphs.',                            traits:{ columnStrike:{ dmgMul:1.5, width:90, range:520, cdMs:8000, telegraphMs:750, color:'#c88aff', sprite:'fx_col_tombhexer' } } },
   // B4 — invisible-until-close stalker. Burst-dash punisher.
-  towerStalker:  { name:'Mirror Stalker',w:62, h:91,  color:'#3a4a6a', shell:'#88aacc', hp:2175, atk:200, def:72, evasion:180, exp:1620, mojicoins:0, speed:1.3, jump:7, level:20,                       signature:'Cloaks. Strikes from blind side.',                    traits:{ hourglassCharge:2200 } },
+  towerStalker:  { name:'Mirror Stalker',w:62, h:91,  color:'#3a4a6a', shell:'#88aacc', hp:2175, atk:200, def:72, evasion:180, exp:1620, mojicoins:0, speed:1.3, jump:7, level:20,                       signature:'Cloaks. Strikes from blind side.',                    traits:{ hourglassCharge:2200, hourglassDashMs:380, hourglassDistance:380 } },   // v0.30.574 stalker-lunge — was the handler default 320 ms / 460 px
   // B5 mid-boss — Tower Arbiter. Wide swing + telegraphed column strike
   // + revivesOnce at 25 %. Halfway gate-keeper for the descent.
   // v0.26.318 — Per user "The arbiter from the expedition is still
@@ -80663,6 +80663,10 @@ function updateMonsters(dt) {
     if (m.traits && m.traits.hourglassCharge > 0 && (!m.isBoss || m.traits.activeBoss)
         && m.currentHp > 0 && !_ccHalted) {
       const _hgBrace = m.traits.hourglassCharge;
+      // v0.30.574 stalker-lunge — per-trait dash overrides (default = the numbers
+      // this handler always used, so every other lunger is unchanged).
+      const _hgDashMs = m.traits.hourglassDashMs || 320;
+      const _hgDist = m.traits.hourglassDistance || 460;
       if (m._hgCd === undefined) m._hgCd = 3000 + Math.random() * 3000;   // staggered first cast
       m._hgCd -= dt;
       const _hgDx = _playerCx - (m.x + m.w / 2);
@@ -80702,10 +80706,10 @@ function updateMonsters(dt) {
           }
           if (m._hgT <= 0) {
             m._hgPhase = 'dash';
-            m._hgT = 320;
+            m._hgT = _hgDashMs;   // v0.30.574 stalker-lunge — was 320
             m._hgTravel = 0;
-            const _hgFrames = Math.max(1, 320 / (1000 / 60));
-            m._hgVx = m._hgDir * (460 / _hgFrames);
+            const _hgFrames = Math.max(1, _hgDashMs / (1000 / 60));
+            m._hgVx = m._hgDir * (_hgDist / _hgFrames);   // was 460
             if (typeof addShake === 'function') addShake(5);
           }
         } else if (m._hgPhase === 'dash') {
@@ -80715,7 +80719,7 @@ function updateMonsters(dt) {
           // 60fps frames but integrated per tick, so a slower tick would carry
           // past the authored distance the telegraph promised.
           m._hgTravel = (m._hgTravel || 0) + Math.abs(m._hgVx);
-          if (m._hgTravel >= 460) m._hgT = 0;
+          if (m._hgTravel >= _hgDist) m._hgT = 0;   // v0.30.574 stalker-lunge
           if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
             _budgetedParticlePush({
               x: m.x + m.w / 2 - m._hgDir * m.w * 0.5,
@@ -125010,6 +125014,42 @@ function _drawBubble(cx, topY, text, opts) {
   ctx.drawImage(cv, cx - cv._lxBw / 2 - cv._lxM, topY - cv._lxBh - cv._lxM, cv._lxLw, cv._lxLh);
   ctx.globalAlpha = _pa;
 }
+// v0.30.574 stalker-lunge — the hourglass lunge's only visible tell for a
+// NON-boss was a trickle of sand particles: the floor lane is gated on
+// _lxZoneWorthy, whose first line returns false for every non-boss. So the
+// brace now carries an unmissable overhead sign - a pulsing "!" and a chevron
+// pointing where the lunge will go (the direction is locked at brace start,
+// so the sign is honest). Grows as the brace runs down. Bosses keep their
+// lane grammar and are not marked twice.
+function _drawHgWarn(m) {
+  if (!m || !m._hgCharging || m._hgPhase !== 'brace' || m.isBoss || m.boss) return;
+  const sx = m.x + m.w / 2 - game.camera.x;
+  if (sx < -60 || sx > W + 60) return;
+  const sy = m.y - ((game.camera && game.camera.y) || 0);
+  const brace = (m.traits && m.traits.hourglassCharge) || 1;
+  const prog = Math.max(0, Math.min(1, 1 - (m._hgT || 0) / brace));
+  const pulse = 0.55 + 0.45 * Math.abs(Math.sin(game.time * 0.25));
+  const k = 0.85 + 0.35 * prog;
+  const dir = m._hgDir > 0 ? 1 : -1;
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.translate(sx, sy - 16);
+  ctx.scale(k, k);
+  ctx.font = 'bold 22px Arial, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.strokeText('!', 0, 0);
+  ctx.fillStyle = '#ffd88a'; ctx.fillText('!', 0, 0);
+  // chevron: two strokes pointing along the locked lunge direction
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const cx = dir * 16, cy = -8;
+  for (let pass = 0; pass < 2; pass++) {
+    ctx.beginPath();
+    ctx.moveTo(cx - dir * 6, cy - 6); ctx.lineTo(cx, cy); ctx.lineTo(cx - dir * 6, cy + 6);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffd88a'; ctx.lineWidth = 2.5;
+  }
+  ctx.restore();
+}
 function _drawMobChat(m) {
   if (!m._chat) return;
   const sx = m.x + m.w/2 - game.camera.x;
@@ -138432,9 +138472,9 @@ function _lxAttackZones() {
     if (m._hgCharging && m._hgPhase === 'brace' && m.traits && m.traits.hourglassCharge > 0
         && _lxZoneWorthy(m, 1)) {   // contact damage — raw atk
       const _hd = m._hgDir > 0 ? 1 : -1;
-      const _hgFr = Math.max(1, 320 / (1000 / 60));
-      const _hpad = Math.ceil((460 / _hgFr) * 1.2);
-      const _hdist = 460 + _hpad;
+      const _hgFr = Math.max(1, (m.traits.hourglassDashMs || 320) / (1000 / 60));   // v0.30.574 stalker-lunge — honours the per-trait override
+      const _hpad = Math.ceil(((m.traits.hourglassDistance || 460) / _hgFr) * 1.2);
+      const _hdist = (m.traits.hourglassDistance || 460) + _hpad;
       out.push({ kind: 'dash',
         x: _hd > 0 ? m.x : m.x - _hdist,
         y: m.y, w: m.w + _hdist, h: m.h,
@@ -142533,6 +142573,7 @@ function loop(time) {
     // Chat bubble — drawn outside of the squash/stretch transform so the
     // bubble stays upright / unstretched even when the mob is wobbling.
     _drawMobChat(m);
+    _drawHgWarn(m);   // v0.30.574 stalker-lunge — overhead "!" + chevron during a non-boss hourglass brace
   }
   // v0.26.107 — Draw the fade-out list (alpha-wrapped drawMonster
   // calls + expired-entry cleanup). Helper lives next to killMonster
