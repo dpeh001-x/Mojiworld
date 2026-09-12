@@ -11236,7 +11236,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.648';
+const GAME_VERSION = 'v0.30.649';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57166,13 +57166,20 @@ function _renderWorldMapDiagram(host, opts) {
     // once. Ours has three bands: far shows only landmarks, mid adds the places you have walked,
     // near adds everything. The band is one attribute on the <svg>; CSS does the rest, so panning
     // and zooming never re-render the diagram.
+    // v0.30.649 — see --wm-k above: the name divides the zoom back out so it holds its size on screen
+    'text.wm-node-label { font-size: calc(var(--wm-k, 1) * var(--wm-fs, 18px)); stroke-width: calc(var(--wm-k, 1) * var(--wm-hw, 3px)); } ' +
     '.wm-lbl { transition: opacity 120ms ease; } ' +
+    '.wm-lbl-drop { opacity: 0 !important; } ' +   // v0.30.649 — no seat, no name; the card still has it
     'svg[data-wm-zoom="far"] .wm-lbl-near, svg[data-wm-zoom="far"] .wm-lbl-mid { opacity:0; } ' +
     'svg[data-wm-zoom="mid"] .wm-lbl-near { opacity:0; } ' +
     // the globe stops turning while you are reading a node - motion under a pointer target is the
     // one thing every critique of these screens agrees on
     '.wm-spin { animation-play-state: running; } ' +
     'svg.wm-focus .wm-spin { animation-play-state: paused; } ' +
+    // v0.30.649 — the traced route: a warm line with light running along it toward the destination
+    '@keyframes wmRouteFlow { to { stroke-dashoffset: -36; } } ' +
+    '.wm-route { stroke-dasharray: 10 8; animation: wmRouteFlow 900ms linear infinite; filter: drop-shadow(0 0 4px rgba(255,214,130,0.65)); } ' +
+    '@media (prefers-reduced-motion: reduce) { .wm-route { animation: none; } } ' +
     '.wm-card { opacity:0; transition: opacity 110ms ease; } ' +
     '.wm-card.on { opacity:1; } ' +
     '.wm-node:hover .wm-disc { stroke-width:4; }';
@@ -57565,6 +57572,51 @@ function _renderWorldMapDiagram(host, opts) {
     _card.classList.add('on');
   };
   const _hideCard = () => { _card.classList.remove('on'); };
+  // v0.30.649 — THE ROUTE. A travel map should answer "how do I get there from here", not just "what is
+  // that". Pointing at a place now traces the actual shortest chain of portals from where you stand
+  // to it, as one bright line laid over the lanes, and the card says how many jumps it is. The graph
+  // is the same portal pairs the lanes were drawn from, so the route can never disagree with them.
+  const _adj = Object.create(null);
+  for (const k of Object.keys(_wmDir)) {
+    const d = _wmDir[k];
+    (_adj[d.lo] || (_adj[d.lo] = [])).push(d.hi);
+    (_adj[d.hi] || (_adj[d.hi] = [])).push(d.lo);
+  }
+  const _routeTo = (dest) => {                 // breadth-first from the current map; [] when unreachable
+    if (!dest || dest === cur || !_adj[cur]) return [];
+    const prev = Object.create(null); const seen = new Set([cur]); const q = [cur];
+    while (q.length) {
+      const at = q.shift();
+      for (const nx of (_adj[at] || [])) {
+        if (seen.has(nx)) continue;
+        seen.add(nx); prev[nx] = at;
+        if (nx === dest) { const path = [dest]; let p = dest; while (prev[p]) { p = prev[p]; path.unshift(p); } return path; }
+        q.push(nx);
+      }
+    }
+    return [];
+  };
+  const _routeLine = document.createElementNS(SVG_NS, 'path');
+  _routeLine.setAttribute('class', 'wm-route');
+  _routeLine.setAttribute('fill', 'none');
+  _routeLine.setAttribute('stroke', 'rgba(255,231,168,0.92)');
+  _routeLine.setAttribute('stroke-width', '2.6');
+  _routeLine.setAttribute('stroke-linecap', 'round');
+  _routeLine.setAttribute('pointer-events', 'none');
+  const _showRoute = (dest) => {
+    const path = _routeTo(dest);
+    if (path.length < 2) { _routeLine.removeAttribute('d'); return 0; }
+    let d = '';
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1], b = path[i];
+      const seg = svg.querySelector('.wm-lane[data-a="' + a + '"][data-b="' + b + '"], .wm-lane[data-a="' + b + '"][data-b="' + a + '"]');
+      if (seg) d += (d ? ' ' : '') + seg.getAttribute('d');
+    }
+    if (!d) { _routeLine.removeAttribute('d'); return 0; }
+    _routeLine.setAttribute('d', d);
+    return path.length - 1;
+  };
+  const _hideRoute = () => { _routeLine.removeAttribute('d'); };
   // Nodes
   for (const [id, p] of Object.entries(positions)) {
     const m = MAPS[id]; if (!m) continue;
@@ -57914,9 +57966,14 @@ function _renderWorldMapDiagram(host, opts) {
         : (opts.mode === 'taxi' ? 'Click to ride here' : 'Click to travel here');
       const _cardHintCol = here ? '#ffdd88' : !acc.ok ? '#e08a9a' : '#8fd9ff';
       g.addEventListener('mouseenter', () => {
-        try { _showCard(p.x, p.y, _cardTitleTxt, _cardMetaTxt, _cardRowTxt, _cardHintTxt, _cardHintCol); _focusLanes(id); } catch (e) {}
+        try {
+          const _jumps = _showRoute(id);   // v0.30.649 — trace the way there before the card is written
+          const _meta = _cardMetaTxt + (_jumps > 0 ? '  ·  ' + _jumps + (_jumps === 1 ? ' jump' : ' jumps') + ' away' : '');
+          _showCard(p.x, p.y, _cardTitleTxt, _meta, _cardRowTxt, _cardHintTxt, _cardHintCol);
+          _focusLanes(id);
+        } catch (e) {}
       });
-      g.addEventListener('mouseleave', () => { try { _hideCard(); _focusLanes(null); } catch (e) {} });
+      g.addEventListener('mouseleave', () => { try { _hideCard(); _focusLanes(null); _hideRoute(); } catch (e) {} });
     }
     // Biome icon (emoji as SVG text)
     const _icoCh = _WM_BIOME_ICON[id] || '📍';
@@ -57975,6 +58032,13 @@ function _renderWorldMapDiagram(host, opts) {
     // user units and displayed at about 0.68 of that, so 11.5u was never 11.5 px to a player. Names
     // go to 18u (about 12.3 px on screen) and the place you are standing in to 21u, which is the
     // only size difference on the map. Everything else that was competing with them is gone.
+    // v0.30.649 — a name is drawn in map units, so zooming in magnified the type along with the world:
+    // by the third notch the names were twice the size of the discs and fighting each other for room.
+    // Every map that zooms keeps its labels at a fixed size on SCREEN. --wm-k carries the current
+    // zoom (1 all the way out, 0.29 all the way in) and the type and its halo divide by it, so a
+    // name is the same 12 px whatever the magnification - and zooming in genuinely makes room.
+    label.style.setProperty('--wm-fs', (here ? 21 : 18) + 'px');
+    label.style.setProperty('--wm-hw', (here ? 3.6 : 3) + 'px');
     label.setAttribute('font-size', here ? '21' : '18');
     label.setAttribute('font-family', "'Cinzel', 'Trebuchet MS', Georgia, serif");
     label.setAttribute('letter-spacing', here ? '1.4' : '1');
@@ -58012,6 +58076,26 @@ function _renderWorldMapDiagram(host, opts) {
           ts.textContent = part;
           label.appendChild(ts);
         });
+      } else if (_nm.length > 16 && _nm.indexOf(' ') > 0) {
+        // v0.30.649 — "The Interdimensional Ascension" on one line is wider than the gap between two
+        // nodes, so no seat around its own node can hold it and it lands on someone. Break it at the
+        // space nearest the middle: two balanced lines are both narrower and better looking than a
+        // truncation, and the compound names above already read this way.
+        let _cut = -1, _mid = _nm.length / 2;
+        for (let _i = 0; _i < _nm.length; _i++) {
+          if (_nm[_i] !== ' ') continue;
+          if (_cut < 0 || Math.abs(_i - _mid) < Math.abs(_cut - _mid)) _cut = _i;
+        }
+        if (_cut < 0) label.textContent = _nm;
+        else {
+          [_nm.slice(0, _cut), _nm.slice(_cut + 1)].forEach((part, pi) => {
+            const ts = document.createElementNS(SVG_NS, 'tspan');
+            ts.setAttribute('x', 0);
+            ts.setAttribute('dy', pi === 0 ? 0 : 13);
+            ts.textContent = part;
+            label.appendChild(ts);
+          });
+        }
       } else {
         label.textContent = _nm;
       }
@@ -58111,10 +58195,19 @@ function _renderWorldMapDiagram(host, opts) {
     const _band = () => (vb.w > W * 0.82 ? 'far' : vb.w > W * 0.55 ? 'mid' : 'near');
     const _queueVB = () => {
       svg.setAttribute('viewBox', vb.x.toFixed(1) + ' ' + vb.y.toFixed(1) + ' ' + vb.w.toFixed(1) + ' ' + vb.h.toFixed(1));
+      // v0.30.649 — publish the zoom so the labels can hold their screen size (see --wm-k)
+      const _k = Math.max(0.2, Math.min(1, vb.w / W));
+      svg.style.setProperty('--wm-k', _k.toFixed(3));
+      svg.dataset.wmK = _k.toFixed(3);
       const b = _band();
       if (svg.getAttribute('data-wm-zoom') !== b) {
         svg.setAttribute('data-wm-zoom', b);
-        if (typeof _wmDeoverlapLabels === 'function') _wmDeoverlapLabels(svg);   // re-space what is now visible
+        // v0.30.649 — wait out the 120 ms fade before re-placing. A name that is still at opacity 0 when
+        // the pass runs counts as hidden and never gets a seat, which is how a whole band could
+        // arrive unplaced: crossing into the near zoom revealed 53 more names, all of them stacked
+        // on the nodes they belong to.
+        clearTimeout(svg._lxBandT);
+        svg._lxBandT = setTimeout(() => { try { _wmDeoverlapLabels(svg); } catch (e) {} }, 190);
       }
     };
     svg.setAttribute('data-wm-zoom', _band());
@@ -58212,8 +58305,16 @@ function _renderWorldMapDiagram(host, opts) {
   // spread: once the SVG is attached (so it has real geometry), greedily push
   // any name label that still collides with one above it straight down until
   // it clears. Pin-independent, so it survives the live wmX/wmY churn.
+  svg.appendChild(_routeLine);   // v0.30.649 — over the lanes, under the nodes' own card
   svg.appendChild(_card);   // v0.30.646 — above every node, so it is never painted over
-  if (typeof _wmDeoverlapLabels === 'function') _wmDeoverlapLabels(svg);
+  // v0.30.649 — the map is built and appended in one tick, so at this point the modal often has no
+  // layout yet and every measurement reads zero: the pass bailed on its own guard and no name was
+  // ever placed (it was only ever the authored seat you saw). Run it again on the next frame, when
+  // the box is real. It is idempotent, so the pair costs nothing but the second pass.
+  if (typeof _wmDeoverlapLabels === 'function') {
+    _wmDeoverlapLabels(svg);
+    requestAnimationFrame(() => { try { _wmDeoverlapLabels(svg); } catch (e) {} });
+  }
   if (typeof _wmPlaceSubTiles === 'function') _wmPlaceSubTiles(svg);   // v0.30.643
 }
 // v0.30.643 - the sub-label's lock icon sits to the left of centred text, so it can only be placed
@@ -58237,44 +58338,117 @@ function _wmPlaceSubTiles(svg) {
 // SVG user units via the viewBox-to-client height ratio before nudging each
 // label's `y`. Top-to-bottom greedy + a couple of settle passes; O(n²) over ~73
 // labels is trivial and only runs on map open.
+// v0.30.649 — LABEL PLACEMENT. The old pass knew about other labels and nothing else, so it solved a
+// collision with a name by pushing it straight down into a DISC - which is what the map looked like
+// once every place was discovered: "Everdawn Megamall" through a node, "Hera's Floating Abode"
+// through another, half a dozen more. Cartographers solved this a long time ago: give every label a
+// ring of candidate seats around its feature, try them in order of preference, and take the first
+// one that is clear of everything already placed. This does that with six seats - under, over, right,
+// left, and further under and over - counting the node discs and the level pills as obstacles, and
+// placing the names that matter most (where you stand, then the landmarks) first so they keep the
+// best seat. One measurement per label; the candidate rectangles are arithmetic from there.
+function _wmPlaceNodeLabel(t, dx, dy, anchor) {
+  t.setAttribute('x', dx); t.setAttribute('y', dy); t.setAttribute('text-anchor', anchor);
+  for (const ts of t.querySelectorAll('tspan')) ts.setAttribute('x', dx);
+}
 function _wmDeoverlapLabels(svg) {
   if (!svg) return;
   const rect = svg.getBoundingClientRect();
   const vb = svg.viewBox && svg.viewBox.baseVal;
   if (!vb || !rect.height || !vb.height) return;     // hidden / not laid out yet
-  const uPerPx = vb.height / rect.height;            // user units per screen px
-  // v0.30.647 — the pass only ever pushed labels DOWN and never recorded where they started, so calling
-  // it twice walked them off the map. Each label now remembers its authored y and is put back
-  // before every pass, which is what lets the zoom bands re-space the visible set.
-  const labels = Array.from(svg.querySelectorAll('text.wm-node-label')).filter((t) => {
+  const pxPerU = rect.height / vb.height;            // screen px per user unit
+  const PAD = 3;
+  // every name back to its authored seat, so the pass is idempotent and the zoom bands can re-run it
+  // Which names are showing is read from the zoom band, not from computed opacity: both the band
+  // fade and the drop below are CSS transitions, so an opacity read mid-fade would call a visible
+  // name hidden - and a name dropped by the previous pass could never come back.
+  const band = svg.getAttribute('data-wm-zoom') || 'far';
+  const kz = parseFloat(svg.dataset.wmK || '1') || 1;      // the zoom scalar the type divides by
+  const live = [];
+  for (const t of svg.querySelectorAll('text.wm-node-label')) {
     if (!t.hasAttribute('data-y0')) t.setAttribute('data-y0', t.getAttribute('y') || '0');
-    t.setAttribute('y', t.getAttribute('data-y0'));
-    return (t.textContent || '').trim() && getComputedStyle(t).opacity !== '0';   // hidden names take no space
-  });
-  if (labels.length < 2) return;
-  const GAP = 2;                                      // screen-px breathing room
-  for (let pass = 0; pass < 3; pass++) {
-    const items = labels.map(t => ({ t, r: t.getBoundingClientRect() }))
-                        .sort((a, b) => a.r.top - b.r.top);
-    let moved = false;
-    for (let i = 1; i < items.length; i++) {
-      const B = items[i];
-      let push = 0;
-      for (let j = 0; j < i; j++) {
-        const A = items[j];
-        if (A.r.left < B.r.right && A.r.right > B.r.left) {     // horizontal overlap
-          const need = (A.r.bottom + GAP) - (B.r.top + push);
-          if (need > push) push = need;
-        }
-      }
-      if (push > 0.5) {
-        const y = parseFloat(B.t.getAttribute('y') || '0');
-        B.t.setAttribute('y', y + push * uPerPx);
-        B.r = { left: B.r.left, right: B.r.right, top: B.r.top + push, bottom: B.r.bottom + push };
-        moved = true;
-      }
+    _wmPlaceNodeLabel(t, 0, (parseFloat(t.getAttribute('data-y0')) || 0) * kz, 'middle');
+    t.classList.remove('wm-lbl-drop');                             // every name gets another chance
+    if (!(t.textContent || '').trim()) continue;
+    const cls = t.getAttribute('class') || '';
+    if (band === 'far' && (cls.indexOf('wm-lbl-mid') >= 0 || cls.indexOf('wm-lbl-near') >= 0)) continue;
+    if (band === 'mid' && cls.indexOf('wm-lbl-near') >= 0) continue;
+    const g = t.parentNode;
+    const disc = g && g.querySelector && g.querySelector('.wm-disc');
+    if (!disc) continue;
+    live.push({ t, g, disc, here: parseFloat(t.getAttribute('font-size')) >= 20,
+      key: (t.getAttribute('class') || '').indexOf('wm-lbl-far') >= 0 });
+  }
+  if (!live.length) return;
+  // obstacles that are not labels: every disc on the board, and every pill that is showing
+  const blocks = [];
+  for (const c of svg.querySelectorAll('g.wm-node .wm-disc')) blocks.push(c.getBoundingClientRect());
+  for (const p of svg.querySelectorAll('g.wm-node rect')) {
+    if (getComputedStyle(p).opacity === '0') continue;
+    const r = p.getBoundingClientRect(); if (r.width) blocks.push(r);
+  }
+  const hit = (a, b) => a.left - PAD < b.right && a.right + PAD > b.left && a.top - PAD < b.bottom && a.bottom + PAD > b.top;
+  const area = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+                         Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  // preferred seats, in order: under the node, over it, out to each side, then further out
+  const SEATS = [
+    [0, 55, 'middle'], [0, -52, 'middle'],                     // under, over
+    [30, 6, 'start'], [-30, 6, 'end'],                          // out to each side
+    [27, -28, 'start'], [-27, -28, 'end'],                      // the four diagonals
+    [27, 40, 'start'], [-27, 40, 'end'],
+    [0, 78, 'middle'], [0, -76, 'middle'],                      // further under and over
+    [46, 6, 'start'], [-46, 6, 'end'],                          // further out
+  ];
+  live.sort((a, b) => (b.here - a.here) || (b.key - a.key));
+  const placed = [];
+  const seat = (L, skipRect) => {
+    const base = L.t.getBoundingClientRect();                       // the one measurement
+    const dc = L.disc.getBoundingClientRect();
+    const cx = dc.left + dc.width / 2, cy = dc.top + dc.height / 2;
+    const y0 = parseFloat(L.t.getAttribute('data-y0')) || 0;
+    const w = base.width, h = base.height;
+    let best = null, bestCost = Infinity;
+    for (const [sx, sy, anchor] of SEATS) {
+      // where the box lands for this seat, without touching the DOM
+      const left = cx + sx * kz * pxPerU - (anchor === 'middle' ? w / 2 : anchor === 'end' ? w : 0);
+      const top = base.top + (sy - y0) * kz * pxPerU;
+      const r = { left, right: left + w, top, bottom: top + h };
+      if (r.left < rect.left + 4 || r.right > rect.right - 4 || r.top < rect.top + 4 || r.bottom > rect.bottom - 4) continue;
+      let cost = 0;
+      for (const b of blocks) if (hit(r, b)) cost += area(r, b) + 40;
+      for (const p of placed) { if (p === skipRect) continue; if (hit(r, p)) cost += area(r, p) + 80; }   // a name over a name is worse
+      if (cost < bestCost) { bestCost = cost; best = { sx, sy, anchor, r }; }
+      if (cost === 0) break;                                            // first clear seat wins
     }
-    if (!moved) break;
+    if (!best) return null;
+    _wmPlaceNodeLabel(L.t, best.sx * kz, best.sy * kz, best.anchor);
+    best.cost = bestCost; best.label = L;
+    return best;
+  };
+  for (const L of live) { const got = seat(L, null); if (got) placed.push(got.r), (L._seat = got); }
+  // A second round for whatever still sits on something. The first round placed them against a
+  // half-built board; now every other name has settled, so a seat that was taken may be free - and a
+  // name that had to accept a collision often has somewhere clean to go.
+  for (const L of live) {
+    if (!L._seat || !L._seat.cost) continue;
+    const i = placed.indexOf(L._seat.r);
+    const got = seat(L, L._seat.r);
+    if (got && got.cost < L._seat.cost) { if (i >= 0) placed[i] = got.r; L._seat = got; }
+    else _wmPlaceNodeLabel(L.t, L._seat.sx * kz, L._seat.sy * kz, L._seat.anchor);   // keep the better of the two
+  }
+  // And a name with nowhere clean to go is not drawn at all. This is the old cartographer's last
+  // resort and the honest one: a name printed through a disc is worse than no name, and this map has
+  // a better place to say it - point at the place and the card gives you its name, level and roster.
+  // Two are exempt: where you stand, and the landmarks. Those are the names you navigate by, so they
+  // keep their seat even if they have to wear it over something.
+  // Where you stand always keeps its name. Zoomed in, the player came to read, so a name only goes
+  // if it would be buried; zoomed out, where the map is showing landmarks over the whole world, a
+  // name has to be nearly clean to stay. A landmark keeps its name if it only grazes something -
+  // a few pixels of overlap is not worth losing a name you navigate by - and loses it if it would
+  // sit squarely on a disc. Everything else needs a clean seat or it is not drawn.
+  for (const L of live) {
+    const tol = L.here ? Infinity : band === 'near' ? 620 : L.key ? 110 : 90;
+    L.t.classList.toggle('wm-lbl-drop', !!(L._seat && L._seat.cost > tol));
   }
 }
 // v0.26.x exploit FIX — destination level-gate lookup for W-map fast-travel.
