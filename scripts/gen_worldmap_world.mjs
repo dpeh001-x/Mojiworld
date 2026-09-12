@@ -1,6 +1,12 @@
-// The World Map's ground, take five (v0.30.655). Per user, after seeing towns composited onto the
-// v0.30.653 continent: "the new towns look weird, perhaps you could regenerate a whole new image,
-// the town need to be accurate to how they look in game as well".
+// The World Map's ground (v0.30.656). The painting, as painted - no towns on it and no glaze over
+// it. Per user, supplying the image itself: "just use this".
+//
+// Every ground from v0.30.651 to v0.30.655 was darkened before it shipped, because 80 light-on-dark
+// markers stand on it and a bright painting swallows them. That treatment is gone: the user picked
+// this image and it ships as this image. The legibility it used to buy is now bought in the renderer
+// instead, by the reading scrim under the node field in mojiworld_game.html - the layer that can pay
+// for it without touching the art. The brightness gate is therefore gone too; it would refuse this
+// file, and refusing the user's own choice is not what a gate is for.
 //
 //   LUDO_API_KEY=... node scripts/gen_worldmap_world.mjs --variants 3     # request N, write a sheet
 //   LUDO_API_KEY=... node scripts/gen_worldmap_world.mjs --use 2          # glaze candidate N, ship it
@@ -36,11 +42,10 @@ const require = createRequire(import.meta.url);
 const sharp = require('sharp');
 const fs = require('node:fs');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = path.join(ROOT, 'backgrounds', 'worldmap_bg_v5.webp');
+const OUT = path.join(ROOT, 'backgrounds', 'worldmap_bg_v6.webp');
 const RAW = path.join(ROOT, 'scripts', '_tmp_wm_world5_raw.webp');
 const W = 1536, H = 896;
-const CENTRE_MAX_LUM = 66;      // a painted world may be seen; it still may not shout
-const CENTRE_MAX_P98 = 150;
+// Measured and reported, never enforced - see the header.
 
 const PROMPT = [
   'A hand-painted top-down fantasy world map illustration for a cute 2D MMO, in the style of a',
@@ -148,36 +153,8 @@ async function centreStats(buf) {
   return { mean: sum / raw.length, p98 };
 }
 
-// Glaze: one warm dusk wash plus a soft edge vignette, so a bright painting becomes a ground that
-// 109 markers can sit on. This is Ghost of Tsushima's move - treat the art, not the type.
-const GLAZE = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-  <defs>
-    <radialGradient id="v" cx="50%" cy="48%" r="76%">
-      <stop offset="0%" stop-color="#0a0a1e" stop-opacity="0.30"/>
-      <stop offset="58%" stop-color="#0a0a1e" stop-opacity="0.42"/>
-      <stop offset="100%" stop-color="#05040f" stop-opacity="0.80"/>
-    </radialGradient>
-  </defs>
-  <rect width="100%" height="100%" fill="#131026" opacity="0.30"/>
-  <rect width="100%" height="100%" fill="url(#v)"/>
-</svg>`);
-
-async function glaze(art) {
-  let buf = await sharp(art).resize(W, H, { fit: 'cover', position: 'centre' })
-    .composite([{ input: GLAZE, blend: 'over' }]).png().toBuffer();
-  let st = await centreStats(buf);
-  if (st.mean > CENTRE_MAX_LUM || st.p98 > CENTRE_MAX_P98) {
-    const k = Math.max(0.25, Math.min(CENTRE_MAX_LUM / st.mean, CENTRE_MAX_P98 / st.p98));
-    buf = await sharp(buf).linear(k, 0).toBuffer();
-    st = await centreStats(buf);
-    console.log(`  pulled by x${k.toFixed(2)}`);
-  }
-  return { buf, st };
-}
-
 const argN = (flag) => { const i = process.argv.indexOf(flag); return i < 0 ? 0 : Number(process.argv[i + 1] || 0); };
-const cand = (i) => path.join(ROOT, 'scripts', `_tmp_wm_v5_raw${i}.webp`);
-
+const cand = (i) => path.join(ROOT, 'scripts', `_tmp_wm_v6_raw${i}.webp`);
 const variants = argN('--variants'), use = argN('--use');
 if (variants) {                                       // request N takes and lay them out to choose from
   const tiles = [];
@@ -185,11 +162,9 @@ if (variants) {                                       // request N takes and lay
     console.log(`candidate ${i}/${variants} - requesting art...`);
     const art = await makeImage(PROMPT);
     fs.writeFileSync(cand(i), art);
-    const { st } = await glaze(art);
-    console.log(`  candidate ${i}: centre mean ${st.mean.toFixed(1)}, brightest 2% ${st.p98}`);
     tiles.push(await sharp(art).resize(768, 448, { fit: 'cover' }).toBuffer());
   }
-  const sheet = path.join(ROOT, 'scripts', '_tmp_wm_v5_sheet.png');
+  const sheet = path.join(ROOT, 'scripts', '_tmp_wm_v6_sheet.png');
   await sharp({ create: { width: 768, height: 448 * tiles.length, channels: 3, background: '#0b0b14' } })
     .composite(tiles.map((b, i) => ({ input: b, left: 0, top: i * 448 }))).png().toFile(sheet);
   console.log(`wrote ${path.relative(ROOT, sheet)} - pick one, then re-run with --use N`);
@@ -199,26 +174,24 @@ if (variants) {                                       // request N takes and lay
 let art;
 if (use) {
   if (!fs.existsSync(cand(use))) throw new Error('no candidate ' + use);
-  console.log(`World Map world-ground - using candidate ${use}`);
+  console.log(`World Map ground - using candidate ${use}`);
   art = fs.readFileSync(cand(use));
   fs.writeFileSync(RAW, art);
 } else if (fs.existsSync(RAW) && !process.argv.includes('--fresh')) {
-  console.log('World Map world-ground - reusing the saved art (pass --fresh to re-request)');
+  console.log('World Map ground - reusing the saved art (pass --fresh to re-request)');
   art = fs.readFileSync(RAW);
 } else {
-  console.log('World Map world-ground - requesting art...');
+  console.log('World Map ground - requesting art...');
   art = await makeImage(PROMPT);
   fs.writeFileSync(RAW, art);
 }
 const meta0 = await sharp(art).metadata();
 console.log(`  art ${meta0.width}x${meta0.height}`);
-const { buf, st } = await glaze(art);
-console.log(`  glazed: centre mean ${st.mean.toFixed(1)} (max ${CENTRE_MAX_LUM}), brightest 2% ${st.p98} (max ${CENTRE_MAX_P98})`);
-if (st.mean > CENTRE_MAX_LUM + 6) { console.error('REFUSING: too loud in the middle for a node field.'); process.exit(1); }
 
 const tmp = OUT + '.tmp';
-await sharp(buf).webp({ quality: 86 }).toFile(tmp);
+await sharp(art).resize(W, H, { fit: 'cover', position: 'centre' }).webp({ quality: 92 }).toFile(tmp);
 fs.renameSync(tmp, OUT);
 const fin = await centreStats(fs.readFileSync(OUT));
-console.log(`wrote ${path.relative(ROOT, OUT)}  ${W}x${H}  ${Math.round(fs.statSync(OUT).size / 1024)} KB  centre mean ${fin.mean.toFixed(1)}, p98 ${fin.p98}`);
+console.log(`wrote ${path.relative(ROOT, OUT)}  ${W}x${H}  ${Math.round(fs.statSync(OUT).size / 1024)} KB`);
+console.log(`  centre mean ${fin.mean.toFixed(1)}, brightest 2% ${fin.p98} - reported, not enforced; the renderer's scrim carries legibility now`);
 console.log('OK');

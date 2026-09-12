@@ -68,6 +68,7 @@ const a = await page.evaluate(() => {
   return { lanes: lanes.length, quad, straight, bowedOut, bowedIn, minGap: Math.round(minGap),
     weights: Object.keys(strokes).length, strokes: Object.entries(strokes).sort((x, y) => y[1] - x[1]).slice(0, 5),
     nodes: nodes.length,
+    dome: !!svg.querySelector('circle[fill="url(#wm-dome)"]'),
     spin: spin ? { ellipses: spin.querySelectorAll('ellipse').length, stars: spin.querySelectorAll('circle').length,
       anim: getComputedStyle(spin).animationName, dur: getComputedStyle(spin).animationDuration, origin: spin.style.transformOrigin } : null };
 });
@@ -75,9 +76,13 @@ checks.push(['every lane is a curve, none left straight', a.quad > 50 && a.strai
 checks.push(['the whole web bows away from the centre', a.bowedOut === a.quad, `${a.bowedOut} out / ${a.bowedIn} in`]);
 checks.push(['lanes stop clear of the 21 px node discs', a.minGap >= 18, `closest endpoint ${a.minGap} px from a node`]);
 checks.push(['lanes carry more than one weight', a.weights >= 3, a.strokes.map(([s, n]) => n + 'x ' + s).join(', ').slice(0, 120)]);
-checks.push(['the globe layer turns behind the pins', !!a.spin && a.spin.ellipses === 3 && a.spin.stars >= 20 && a.spin.anim === 'wmSpin' && parseFloat(a.spin.dur) >= 120,
-  a.spin ? `${a.spin.ellipses} rings, ${a.spin.stars} stars, ${a.spin.anim} ${a.spin.dur}` : 'no spin layer']);
-checks.push(['the spin turns about the map centre, so nothing drifts off', !!a.spin && /px/.test(a.spin.origin), a.spin ? a.spin.origin : '']);
+// v0.30.653 took the star-chart globe off the board: the ground is a painted continent now, and an
+// armillary sphere over a landmass reads as two maps at once. These two checks went on asking for it
+// and have failed on main ever since, which is worse than useless - a suite nobody can read as green
+// stops being read at all. They now assert the removal was deliberate and complete, the way
+// worldmap_type_test.mjs does, and check that the atmosphere it left behind is still there.
+checks.push(['the star-chart globe is off the board', !a.spin, a.spin ? 'a spin layer is still drawn' : 'none on the board']);
+checks.push(['and its soft atmosphere stayed', a.dome, a.dome ? 'dome present' : 'no dome']);
 checks.push(['the pins themselves did not move', a.nodes >= 80, `${a.nodes} nodes`]);
 checks.push(['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')]);
 } catch (e) {
