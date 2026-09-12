@@ -11172,7 +11172,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.643';
+const GAME_VERSION = 'v0.30.644';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57033,6 +57033,9 @@ function _renderWorldMapDiagram(host, opts) {
     '.wm-shoot2 { animation: wmShoot2 13s linear infinite; } ' +
     '.wm-node .wm-hoverhalo { opacity:0; transition:opacity 120ms ease; } ' +
     '.wm-node:hover .wm-hoverhalo { opacity:1; } ' +
+    '@keyframes wmSpin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} } ' +
+    '.wm-spin { animation: wmSpin 240s linear infinite; will-change: transform; } ' +
+    '@media (prefers-reduced-motion: reduce) { .wm-spin { animation: none; } } ' +
     '.wm-node:hover .wm-disc { stroke-width:4; }';
   svg.appendChild(_gstyle);
   // v0.26.x — static galaxy backdrop: ONE pre-rendered image (cached) in
@@ -57101,15 +57104,77 @@ function _renderWorldMapDiagram(host, opts) {
   // edit-mode authoring helpers + the v0.25.977 filter strip still
   // work as documentation; just no shapes paint.
   const cx = W / 2, cy = H / 2;
+  // v0.30.644 — THE GLOBE. Per user: "perhaps can make the world map more intuitive, abit globe spin
+  // like, make it more artistic". Nothing here moves a node - every pin stays exactly where it is
+  // authored, and the de-overlap pass still owns the labels. What changes is the space they hang
+  // in: a limb ring at the edge of the field, two tilted meridians, and a sparse star layer that
+  // belongs to the sphere rather than to the screen, all turning once every four minutes. Read
+  // together with the lanes bowing away from the same centre, the flat pin-board becomes the face
+  // of something round and slowly spinning. Cost is one composited transform on one <g> - no
+  // filters, nothing per-frame in JS - and it is skipped entirely on the lowest FX tier.
+  if (!(typeof LX_PERF !== 'undefined' && LX_PERF.veryLowFx)) {
+    const _R = Math.min(W, H) * 0.46;
+    const _spin = document.createElementNS(SVG_NS, 'g');
+    _spin.setAttribute('class', 'wm-spin');
+    _spin.setAttribute('pointer-events', 'none');
+    _spin.style.transformOrigin = cx.toFixed(1) + 'px ' + cy.toFixed(1) + 'px';
+    const _ring = (rx, ry, rot, a, w) => {
+      const e = document.createElementNS(SVG_NS, 'ellipse');
+      e.setAttribute('cx', cx.toFixed(1)); e.setAttribute('cy', cy.toFixed(1));
+      e.setAttribute('rx', rx.toFixed(1)); e.setAttribute('ry', ry.toFixed(1));
+      e.setAttribute('fill', 'none');
+      e.setAttribute('stroke', 'rgba(168,206,255,' + a + ')');
+      e.setAttribute('stroke-width', w);
+      if (rot) e.setAttribute('transform', 'rotate(' + rot + ' ' + cx.toFixed(1) + ' ' + cy.toFixed(1) + ')');
+      _spin.appendChild(e);
+    };
+    _ring(_R, _R * 0.98, 0, '0.085', '1.1');        // the limb
+    _ring(_R * 0.98, _R * 0.30, -14, '0.045', '1'); // two meridians, tilted like an armillary sphere
+    _ring(_R * 0.40, _R * 0.97, 9, '0.04', '1');
+    for (let i = 0; i < 26; i++) {
+      const _a = Math.random() * Math.PI * 2, _rr = Math.sqrt(Math.random()) * _R * 0.97;
+      const _s = document.createElementNS(SVG_NS, 'circle');
+      _s.setAttribute('cx', (cx + Math.cos(_a) * _rr).toFixed(1));
+      _s.setAttribute('cy', (cy + Math.sin(_a) * _rr * 0.92).toFixed(1));
+      _s.setAttribute('r', (Math.random() * 0.9 + 0.35).toFixed(2));
+      _s.setAttribute('fill', 'rgba(226,234,255,' + (0.18 + Math.random() * 0.28).toFixed(2) + ')');
+      _spin.appendChild(_s);
+    }
+    svg.appendChild(_spin);
+  }
   // v0.25.416 — Connection edges reflect ACTUAL portal links between maps.
   // v0.25.960 → v0.25.983 — Edges WERE drawn as gentle quadratic Bezier
   // curves that bowed away from canvas centre. Per user "Make the link
-  // lines straight rather than curved" the bowed-curve helper is replaced
-  // with a plain M…L straight-line path. Same SVG <path> element shape
-  // so the dashed-style overrides for edit-mode 'remove' / 'add' deltas
-  // still apply unchanged.
+  // lines straight rather than curved" the bowed-curve helper was replaced
+  // with a plain M…L straight-line path.
+  // v0.30.644 — and back to a bow, per user: the straight web read "too rigid and
+  // opaque ... very stiff", asking for something "more intuitive, a bit globe
+  // spin like, more artistic". This is not the old bow restored blind. Three
+  // things make it read as a sphere rather than as bent lines:
+  //   * every lane bows AWAY FROM THE CENTRE, so the whole web curves one way,
+  //     the way meridians do on a globe seen face-on;
+  //   * the bow scales with the lane's length AND with how far out it sits, so
+  //     the middle of the map stays crisp and legible while the rim sweeps;
+  //   * both ends stop short of the discs, so a lane now meets a node instead
+  //     of stabbing through it - that gap is most of what killed the stiffness.
+  // Same SVG <path> element shape, so the dashed-style overrides for edit-mode
+  // 'remove' / 'add' deltas, the arrow markers and the animateMotion pulses all
+  // still apply unchanged - they simply follow the curve now.
   const _wmCurvePath = (p, q) => {
-    return `M ${p.x.toFixed(1)},${p.y.toFixed(1)} L ${q.x.toFixed(1)},${q.y.toFixed(1)}`;
+    const dx = q.x - p.x, dy = q.y - p.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+    let nx = mx - cx, ny = my - cy;
+    const rl = Math.hypot(nx, ny);
+    if (rl < 1) { nx = -dy / len; ny = dx / len; }   // a lane straight over the pole: bow sideways
+    else { nx /= rl; ny /= rl; }
+    const bow = Math.min(len * 0.15, 44) * (0.3 + 0.7 * Math.min(1, rl / (Math.min(W, H) * 0.48)));
+    const bx = mx + nx * bow, by = my + ny * bow;
+    const t = Math.min(23, len * 0.3);              // clear of a 21 px disc, never past the midpoint
+    const s1 = Math.hypot(bx - p.x, by - p.y) || 1, s2 = Math.hypot(bx - q.x, by - q.y) || 1;
+    const ax = p.x + ((bx - p.x) / s1) * t, ay = p.y + ((by - p.y) / s1) * t;
+    const zx = q.x + ((bx - q.x) / s2) * t, zy = q.y + ((by - q.y) / s2) * t;
+    return `M ${ax.toFixed(1)},${ay.toFixed(1)} Q ${bx.toFixed(1)},${by.toFixed(1)} ${zx.toFixed(1)},${zy.toFixed(1)}`;
   };
   // v0.26.210 — Directional arrows on W-map edges. Per user "show with
   // the directional arrows if the existing maps on world map (W) is
@@ -57183,13 +57248,20 @@ function _renderWorldMapDiagram(host, opts) {
       pathTo = pLo;
     }
     const isRemoved = _wmEditMode && _wmEditDeltas[key] === 'remove';
+    // v0.30.644 — a lane's weight now says what it is. Both ends walked: a solid thread. One end: dimmer.
+    // Neither: a faint dotted guess. The flat violet at 0.72 on every single lane was the "opaque"
+    // half of the complaint - 150-odd identical strokes with no hierarchy read as a net thrown over
+    // the art. Fogged pairs also lose the cyan halo, so brightness tracks knowledge everywhere.
+    const _vLo = !!(game.visitedMaps && game.visitedMaps[d.lo]) || _wmDev;
+    const _vHi = !!(game.visitedMaps && game.visitedMaps[d.hi]) || _wmDev;
+    const _known = (_vLo ? 1 : 0) + (_vHi ? 1 : 0);
     // v0.26.868 — star-lane glow underlay (soft cyan halo under the core line)
-    if (!isRemoved) {
+    if (!isRemoved && _known > 0) {
       const glow = document.createElementNS(SVG_NS, 'path');
       glow.setAttribute('d', _wmCurvePath(pathFrom, pathTo));
       glow.setAttribute('fill', 'none');
-      glow.setAttribute('stroke', 'rgba(120,200,255,0.14)');
-      glow.setAttribute('stroke-width', '6.5');
+      glow.setAttribute('stroke', _known === 2 ? 'rgba(120,200,255,0.11)' : 'rgba(120,200,255,0.06)');
+      glow.setAttribute('stroke-width', '7.5');
       glow.setAttribute('stroke-linecap', 'round');
       glow.setAttribute('pointer-events', 'none');
       svg.appendChild(glow);
@@ -57197,10 +57269,12 @@ function _renderWorldMapDiagram(host, opts) {
     const path = document.createElementNS(SVG_NS, 'path');
     path.setAttribute('d', _wmCurvePath(pathFrom, pathTo));
     path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', isRemoved ? 'rgba(255,80,80,0.65)' : 'rgba(205,180,255,0.72)');
-    path.setAttribute('stroke-width', '2.2');
+    path.setAttribute('stroke', isRemoved ? 'rgba(255,80,80,0.65)'
+      : _known === 2 ? 'rgba(216,200,255,0.58)' : _known === 1 ? 'rgba(204,182,250,0.40)' : 'rgba(180,166,232,0.28)');
+    path.setAttribute('stroke-width', isRemoved ? '2.2' : (_known === 2 ? '1.8' : '1.45'));
     path.setAttribute('stroke-linecap', 'round');
     if (isRemoved) path.setAttribute('stroke-dasharray', '8,6');
+    else if (_known === 0) path.setAttribute('stroke-dasharray', '2,5.5');   // v0.30.644 — a route you have only heard of
     if (!twoWay) {
       path.setAttribute('marker-end', isRemoved ? 'url(#wm-arrow-removed)' : 'url(#wm-arrow)');
     }
@@ -57208,8 +57282,9 @@ function _renderWorldMapDiagram(host, opts) {
     // v0.26.869 — ACTIVE STARLANES: links touching the current map brighten
     // and carry a travelling light pulse (SMIL animateMotion along the lane).
     if (!isRemoved && !_wmEditMode && (d.lo === cur || d.hi === cur)) {
-      path.setAttribute('stroke', 'rgba(170,225,255,0.92)');
-      path.setAttribute('stroke-width', '2.6');
+      path.setAttribute('stroke', 'rgba(170,225,255,0.85)');
+      path.setAttribute('stroke-width', '2.2');
+      path.setAttribute('stroke-dasharray', 'none');   // v0.30.644 — where you stand is the brightest thing on the map
       const _pulse = document.createElementNS(SVG_NS, 'circle');
       _pulse.setAttribute('r', '2.8');
       _pulse.setAttribute('fill', '#dff1ff');
