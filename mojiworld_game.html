@@ -11145,7 +11145,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.638';
+const GAME_VERSION = 'v0.30.639';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -37163,6 +37163,11 @@ const LX_COIN_CAP_POINTS = [[10, 50], [20, 150], [40, 250], [50, 350], [60, 400]
 const LX_COIN_CAP_TOP = 500;           // what a Lv70-and-above monster pays at most, before the roll
 const LX_COIN_CAP_FLOOR = 10;          // the weakest monsters still leave something
 const LX_COIN_CAP_JITTER = 0.12;       // the "some variations" - one roll per kill
+// v0.30.639 - per user: "coin gear should affect ordinary kills, but cap it at 500% gain". Greed
+// (gear + the Treasure Hunter boon), Hunter's Bounty, Golden Blood and the kill-streak bonus all
+// multiply an ordinary kill again, together capped at +500% - so a kill pays at most six times its
+// level number. The 0.5 grind scalar is not a gain and is not counted against this.
+const LX_COIN_GEAR_MAX = 6.0;
 const LX_BOSS_COIN_CAP_BASE = 30000;   // ...and a boss, plus per level of the boss
 const LX_BOSS_COIN_CAP_PER_LV = 2000;
 // v0.30.638 - a normal monster's boon roll scales with ITS level (per user: "boon drop rate 0.05%
@@ -37207,9 +37212,9 @@ function _lxCoinCapForLevel(lv) {
 // stats table cannot deliver that by itself: its coin column runs from 8 at Lv1 to 357,406 at Lv100, so
 // a ceiling clipped the rich rows while the poorer high-level rows still paid a fifth of the number
 // (Lv100 measured 216 against a 500 ceiling). This IS the wallet-bound figure, so it is divided back
-// through greed, the grind scalar and the kill streak here - which is why coin gear no longer changes
-// an ordinary kill. Difficulty and the world affix still scale it, being opt-in risk. A boss keeps its
-// table bag, held under its own far larger ceiling.
+// through greed, the grind scalar and the kill streak here, then multiplied by whatever coin gear the
+// player earned, capped at LX_COIN_GEAR_MAX. Difficulty and the world affix scale it too, being opt-in
+// risk. A boss keeps its table bag, held under its own far larger ceiling.
 function _lxKillCoinValue(m, coinMul, piles) {
   const wf = (1 + ((player.mods && player.mods.greed) || 0) + ((typeof getEquipBonus === 'function') ? getEquipBonus('greed') : 0))
     * ((typeof MOJICOIN_GAIN_MULT === 'number') ? MOJICOIN_GAIN_MULT : 1)
@@ -37218,7 +37223,10 @@ function _lxKillCoinValue(m, coinMul, piles) {
     * ((typeof _affixCoinMul === 'function') ? _affixCoinMul() : 1);
   const want = _lxKillCoinCap(m) * risk;   // this kill's number for this monster's level, jitter included
   if (!(m && (m.isBoss || m.boss || m.zodiacBoss))) {
-    const flat = (wf > 0) ? want / wf : want;
+    // v0.30.639 - what the player earned: greed x the crit-coin boons x the kill streak, capped.
+    // wf already carries greed and the streak, so divide the grind scalar back out of it.
+    const gain = Math.min(LX_COIN_GEAR_MAX, (wf / (((typeof MOJICOIN_GAIN_MULT === 'number') ? MOJICOIN_GAIN_MULT : 1) || 1)) * coinMul);
+    const flat = (wf > 0) ? (want * gain) / wf : want * gain;
     return Math.max(1, Math.ceil(flat / Math.max(1, piles)));
   }
   let total = _lxMobCoin(m) * coinMul * ((typeof _monsterCoinMult === 'function') ? _monsterCoinMult(m) : 1) * risk;

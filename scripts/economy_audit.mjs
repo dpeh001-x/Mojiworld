@@ -28,20 +28,33 @@ try {
     const BANDS = [20, 30, 40, 50, 60, 70, 80, 90, 100];
     const lvOf = (t) => (typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[t]) || (monsterTypes[t] && monsterTypes[t].lv) || 0;
     const types = Object.keys(monsterTypes).filter((t) => lvOf(t) > 0 && !/tower|dummy/i.test(t));
+    const MOJI = String.fromCharCode(109, 111, 106, 105, 99, 111, 105, 110);
     let boons = 0; const orb = window.spawnPowerupOrb;
     window.spawnPowerupOrb = function () { boons++; return orb.apply(this, arguments); };
     // boss-flagged types also spawn as ordinary mobs (young_confused_barnaby at Lv40 pays ~37k a kill).
     // They are bosses for reward purposes, so keep them out of the grind sample and report bosses separately.
-    const bossy = new Set();
-    for (const t of types) { game.monsters.length = 0; const m = spawnMonster(700, 400, t); if (m && !m._suppressed && (m.isBoss || m.boss || m.zodiacBoss)) bossy.add(t); }
-    game.monsters.length = 0;
+    const bossy = new Set(), silent = new Set();
+    for (const t of types) {
+      game.monsters.length = 0; game.drops.length = 0;
+      const m = spawnMonster(700, 400, t); if (!m || m._suppressed) { silent.add(t); continue; }
+      if (m.isBoss || m.boss || m.zodiacBoss) { bossy.add(t); continue; }
+      // some entities (pathsBane and friends) are not monsters killMonster processes: they drop nothing
+      // and would sit in the sample as zeros, dragging a band mean far below what a real kill pays.
+      m.currentHp = 0; player.exp = 0; try { killMonster(m); } catch (e) {}
+      if (!game.drops.some((d) => d && d.type === MOJI && d.value > 0)) silent.add(t);
+    }
+    game.monsters.length = 0; game.drops.length = 0;
     const PROFILES = { plain: { greed: 0, gold: 0, crit: false }, geared: { greed: 0.80, gold: 0.40, crit: true } };
-    const out = { bands: {}, boss: {}, meta: { map: game.mapData && game.mapData.name, kills: KILLS } };
+    const out = { bands: {}, boss: {}, meta: { map: game.mapData && game.mapData.name, kills: KILLS,
+      diffCoinMul: (typeof _diffCoinMul === 'function') ? _diffCoinMul() : 1,
+      affixCoinMul: (typeof _affixCoinMul === 'function') ? _affixCoinMul() : 1 } };
     const px = 700, gy = 400;
     for (const L of BANDS) {
       const pool = types.filter((t) => lvOf(t) > L - 10 && lvOf(t) <= L);
-      const use = (pool.length ? pool : types.filter((t) => lvOf(t) <= L).slice(-6)).filter((t) => !bossy.has(t));
-      out.bands[L] = { types: use.length, hourCap: null, bossySkipped: (pool.length ? pool : []).filter((t) => bossy.has(t)).length };
+      // no fallback: if no ordinary monster lives in this band, say so rather than sampling something else
+      const use = pool.filter((t) => !bossy.has(t) && !silent.has(t));
+      out.bands[L] = { types: use.length, hourCap: null, bossySkipped: pool.filter((t) => bossy.has(t)).length };
+      if (!use.length) { out.bands[L].empty = true; continue; }
       for (const [pname, P] of Object.entries(PROFILES)) {
         player.level = L; player.mods = player.mods || {}; player.mods.greed = P.greed; player.mods.goldBlood = P.gold;
         player._activeSynergies = P.crit ? { treasureCrits: true } : {};
@@ -85,11 +98,12 @@ try {
         }
       }
     }
-    out.meta.boonTotal = boons;
+    out.meta.boonTotal = boons; out.meta.silent = [...silent].slice(0, 20); out.meta.silentN = silent.size;
     return out;
   }, KILLS);
   const F = (n) => Number(n).toLocaleString('en-US');
   console.log(`map ${r.meta.map} - ${r.meta.kills} kills per band per profile\n`);
+  console.log('difficulty x' + r.meta.diffCoinMul + ', world affix x' + r.meta.affixCoinMul + ' (both scale the level number)');
   console.log('band  types    PLAIN mean      med      max       GEARED mean      med       max     boons/1k');
   for (const [L, b] of Object.entries(r.bands)) {
     const p = b.plain, g = b.geared; if (!p) continue;
