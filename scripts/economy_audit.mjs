@@ -52,6 +52,9 @@ try {
           game.drops.length = 0; game.monsters.length = 0;
           const m = spawnMonster(px, gy, t);
           if (!m || m._suppressed) continue;
+          // re-assert the profile EVERY kill: a level-up mid-pass rebuilds player.mods from equipped boons
+          // and silently wiped greed / Golden Blood for the rest of the band (measured: Lv50 geared read 864 vs 2,701).
+          player.mods.greed = P.greed; player.mods.goldBlood = P.gold; player._activeSynergies = P.crit ? { treasureCrits: true } : {};
           m._killedByCrit = P.crit; m.currentHp = 0; player._boonWin = [];   // raw rate; the hourly ceiling is reported separately
           player.level = L; player.exp = 0;                  // pin the level: a kill grants EXP
           try { killMonster(m); } catch (e) { out.bands[L].err = String(e.message).slice(0, 80); }
