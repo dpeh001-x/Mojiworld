@@ -8,17 +8,23 @@
 // BOTH steps the render scale down a quarter at a time, floor 1.0. A long
 // clean stretch earns quarters back up to the fit ceiling.
 //
+// v0.30.636 — HD FIRST (per user: "keep images as HD as possible"). The
+// governor is now the player's choice: it runs on the Medium and Low presets
+// only. High, the default, keeps full resolution under any load, and the FX
+// tiers still trim eye-candy there. So the ladder below runs on Medium.
+//
 // The test drives it with a deterministic in-page busy-burner (N ms of spin
 // per rAF), which is load the FX tiers cannot fix — exactly the case the
 // governor exists for. Asserts:
 //   1. at rest on a scale-2 machine, nothing changes;
-//   2. under 30ms/frame of synthetic load the ladder engages IN ORDER
-//      (lowFx, veryLowFx, then resolution) and the scale steps down;
-//   3. the scale never goes below the 1.0 floor;
-//   4. with the load removed, the scale steps back up to the ceiling;
-//   5. localStorage.lx_drs='off' disables the governor.
+//   2. on High, 30ms/frame of synthetic load engages the FX tiers but never
+//      the resolution;
+//   3. on Medium the same load steps the scale down, the FX tiers first;
+//   4. the scale never goes below the 1.0 floor;
+//   5. with the load removed, the scale steps back up to the ceiling;
+//   6. localStorage.lx_drs='off' (read at load) keeps the governor off.
 //
-//   node scripts/drs_test.mjs [page] [port]
+//   node scripts/drs_test.mjs [page] [port]      (serve the tree on [port] first)
 // ============================================================================
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -41,10 +47,7 @@ const ok = (name, cond, info) => {
 
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1498, height: 886 }, deviceScaleFactor: 2 })).newPage();
-await page.goto(`http://localhost:${PORT}/${PAGE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
-await page.waitForFunction(() => typeof game === 'object' && typeof player === 'object', null, { timeout: 180000 });
-await page.waitForTimeout(8000);
-await page.evaluate(() => {
+const boot = () => {
   window._lxBootGateDone = true; window._prologueActive = false;
   for (const id of ['loading-overlay', 'class-select-modal', 'advancement-modal', 'boot-gate', 'intro-overlay'])
     { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
@@ -52,15 +55,22 @@ await page.evaluate(() => {
   if (typeof refreshGearCache === 'function') refreshGearCache();
   player.hp = getMaxHp(); player._god = true;
   try { loadMap('innerDimension'); } catch (e) {}
-});
-await page.waitForTimeout(2600);
-for (let i = 0; i < 6; i++) { await page.keyboard.press('Enter'); await page.waitForTimeout(150); }
-await page.waitForTimeout(6000);   // past the map-change grace window
+};
+const enterScene = async () => {
+  await page.waitForFunction(() => typeof game === 'object' && typeof player === 'object', null, { timeout: 180000 });
+  await page.waitForTimeout(8000);
+  await page.evaluate(boot);
+  await page.waitForTimeout(2600);
+  for (let i = 0; i < 6; i++) { await page.keyboard.press('Enter'); await page.waitForTimeout(150); }
+  await page.waitForTimeout(6000);   // past the map-change grace window
+};
+await page.goto(`http://localhost:${PORT}/${PAGE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await enterScene();
 
 const snap = () => page.evaluate(() => ({
   dpr: _LX_DPR, ceil: _lxTargetDpr(), lowFx: LX_PERF.lowFx, very: LX_PERF.veryLowFx,
   active: (typeof LX_DRS !== 'undefined') ? LX_DRS.active : null,
-  hasGov: typeof _lxDrsTick === 'function',
+  hasGov: typeof _lxDrsTick === 'function', q: LX_GFX.quality,
 }));
 
 const rest = await snap();
@@ -79,11 +89,18 @@ const burn = (ms) => page.evaluate((mm) => {
     window.__burner = requestAnimationFrame(spin);
   }
 }, ms);
+// v0.30.636 — on High (the default) the same overload costs effects, never pixels.
+await page.evaluate(() => { LX_GFX.quality = 'high'; });
 await burn(30);
+await page.waitForTimeout(20000);
+const high = await snap();
+ok('on High the overload engages the FX tiers but never the resolution',
+  high.lowFx === true && high.very === true && high.dpr === 2 && high.active === false, high);
+await page.evaluate(() => { LX_GFX.quality = 'medium'; });   // the rest of the ladder runs on Medium
 await page.waitForTimeout(20000);
 const loaded = await snap();
 ok('the FX tiers engaged first', loaded.lowFx === true && loaded.very === true, loaded);
-ok('and the resolution stepped down', loaded.dpr <= 1.75 && loaded.active === true, loaded);
+ok('and on Medium the resolution stepped down', loaded.dpr <= 1.75 && loaded.active === true, loaded);
 
 // ---- floor ------------------------------------------------------------------
 await page.waitForTimeout(30000);
@@ -107,20 +124,20 @@ ok('with the load removed the scale steps all the way back up',
   { dpr: rec.dpr, ceil: rec.ceil, secs: Math.round((Date.now() - t0) / 1000) });
 
 // ---- kill switch ------------------------------------------------------------
-// With the governor off, the scale must simply STOP MOVING — it neither
-// steps down under load nor climbs. (The first draft asserted it equals the
-// ceiling, which conflates the kill switch with recovery.)
-await page.evaluate(() => {
-  try { localStorage.setItem('lx_drs', 'off'); } catch (e) {}
-  _lxApplyRenderScale(2);
-  if (typeof LX_DRS !== 'undefined') { LX_DRS.active = false; LX_DRS.healthySince = 0; }
-});
-await burn(30);
+// _LX_DRS_OFF is read once, at load, so the switch is tested the way a player
+// uses it: set it and reload. (Until v0.30.636 this set it mid-session, which
+// does nothing; the check only passed while the last recovery step's cooldown
+// still held the scale.) On Medium, under load, the scale must not move.
+await page.evaluate(() => { try { localStorage.setItem('lx_drs', 'off'); } catch (e) {} });
+await page.reload({ waitUntil: 'domcontentloaded', timeout: 180000 });
+await enterScene();
+await page.evaluate(() => { LX_GFX.quality = 'medium'; });
+await burn(30);   // the burner died with the old document; this re-installs it
 await page.waitForTimeout(20000);
 const off = await snap();
 await page.evaluate(() => { try { localStorage.removeItem('lx_drs'); } catch (e) {} });
 await burn(0);
-ok("localStorage.lx_drs='off' freezes the governor (no step-down under load)",
+ok("localStorage.lx_drs='off' (read at load) keeps the governor off, even on Medium under load",
   off.dpr === 2 && off.active === false, off);
 await b.close();
 console.log(`\n${pass}/${pass + fail} checks passed`);

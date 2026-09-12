@@ -10,6 +10,9 @@
 //   3. FLOOR    _lxDrsFloorNow() is 0.75 on desktop, and the declared mobile
 //               floor stays 1.0 — the governor may now trade resolution at
 //               dpr 1, but only on machines already in veryLowFx.
+//               v0.30.636 — HD first: the floor is per preset. Low keeps the
+//               0.75 rung, Medium stops at native (1.0), and High — the
+//               default — never runs the governor at all.
 // Baseline (MOJI_GAME_FILE=<v0.30.277 copy>): 1 and 2 fail outright, 3 fails
 // on the missing helper.
 // Run: node scripts/dropcap_drs_test.mjs
@@ -52,8 +55,17 @@ const R = await page.evaluate(() => {
   out.itemsKept = game.drops.filter((d) => d.type === 'item').length
     + game.drops.filter((d) => d.type === 'potion_hp').length;
   game.drops.length = 0;
-  // --- 3. floor -------------------------------------------------------------
+  // --- 3. floor, per preset (v0.30.636) ------------------------------------
+  const q0 = LX_GFX.quality;
+  LX_GFX.quality = 'low';
   out.floorNow = (typeof _lxDrsFloorNow === 'function') ? _lxDrsFloorNow() : 'absent';
+  out.enLow = (typeof _lxDrsEnabled === 'function') ? _lxDrsEnabled() : 'absent';
+  LX_GFX.quality = 'medium';
+  out.floorMed = (typeof _lxDrsFloorNow === 'function') ? _lxDrsFloorNow() : 'absent';
+  out.enMed = (typeof _lxDrsEnabled === 'function') ? _lxDrsEnabled() : 'absent';
+  LX_GFX.quality = 'high';
+  out.enHigh = (typeof _lxDrsEnabled === 'function') ? _lxDrsEnabled() : 'absent';
+  LX_GFX.quality = q0;
   out.floorMobileDecl = (typeof LX_DRS !== 'undefined') ? LX_DRS.floor : 'absent';
   out.isMobile = (typeof _IS_MOBILE_AT_LOAD !== 'undefined') ? _IS_MOBILE_AT_LOAD : 'absent';
   return out;
@@ -65,7 +77,7 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
 
 console.log(`  drawDrops 300 coins: on-camera ${R.onMs}ms/call, off-camera ${R.offMs}ms/call`);
 console.log(`  merge: 400 coins + 2 protected -> ${R.dropsAfter} drops, coin value ${R.coinValue}, protected kept ${R.itemsKept}${R.trimErr ? ', TRIM ERR ' + R.trimErr : ''}`);
-console.log(`  floor: _lxDrsFloorNow()=${R.floorNow}  LX_DRS.floor=${R.floorMobileDecl}  mobile=${R.isMobile}`);
+console.log(`  floor: low ${R.floorNow}, medium ${R.floorMed}; governor on low ${R.enLow} / medium ${R.enMed} / high ${R.enHigh}; LX_DRS.floor=${R.floorMobileDecl}  mobile=${R.isMobile}`);
 
 ok('CONTROL: an on-camera pile still costs real time (the bench is live)', R.onMs > 0.15,
    `${R.onMs}ms/call — a near-zero here would mean drawDrops is not running at all`);
@@ -79,9 +91,12 @@ ok('coin piles converge under the cap', !R.trimErr && R.dropsAfter <= 242,
 ok('...with every earned coin preserved', R.coinValue === 400 * 5,
    `total value ${R.coinValue} of 2000 — merging must never destroy currency`);
 ok('...and item/potion drops untouched', R.itemsKept === 2);
-ok('desktop floor is one rung below native; the declared mobile floor stays 1.0',
-   R.floorNow === 0.75 && R.floorMobileDecl === 1.0 && R.isMobile === false,
-   `floorNow ${R.floorNow}, mobile decl ${R.floorMobileDecl} (pre-fix: helper absent)`);
+ok('desktop floor is one rung below native on Low and native on Medium; the declared mobile floor stays 1.0',
+   R.floorNow === 0.75 && R.floorMed === 1.0 && R.floorMobileDecl === 1.0 && R.isMobile === false,
+   `low ${R.floorNow}, medium ${R.floorMed}, mobile decl ${R.floorMobileDecl} (pre-fix: helper absent)`);
+ok('the governor runs on Medium and Low only; High keeps full resolution (v0.30.636)',
+   R.enLow === true && R.enMed === true && R.enHigh === false,
+   `low ${R.enLow}, medium ${R.enMed}, high ${R.enHigh}`);
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
