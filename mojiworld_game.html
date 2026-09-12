@@ -11342,7 +11342,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.651';
+const GAME_VERSION = 'v0.30.652';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57283,9 +57283,24 @@ function _renderWorldMapDiagram(host, opts) {
     // and zooming never re-render the diagram.
     // v0.30.649 — see --wm-k above: the name divides the zoom back out so it holds its size on screen
     'text.wm-node-label { font-size: calc(var(--wm-k, 1) * var(--wm-fs, 18px)); stroke-width: calc(var(--wm-k, 1) * var(--wm-hw, 3px)); } ' +
+    // v0.30.652 — the regions are what is named when you are looking at the whole world; as you close in
+    // they hand over to the places inside them. Endless Space 2 does exactly this with its
+    // constellations, and it is the reason a crowded map can still have a legible far view.
+    '.wm-terr-name { transition: opacity 160ms ease; } ' +
+    'svg[data-wm-zoom="near"] .wm-terr-name { opacity: 0; } ' +
+    'svg[data-wm-zoom="mid"] .wm-terr-name { opacity: 0.55; } ' +
+    '.wm-terr { transition: opacity 160ms ease; } ' +
+    'svg[data-wm-zoom="near"] .wm-terr { opacity: 0.55; } ' +
     '.wm-lbl { transition: opacity 120ms ease; } ' +
     '.wm-lbl-drop { opacity: 0 !important; } ' +   // v0.30.649 — no seat, no name; the card still has it
     'svg[data-wm-zoom="far"] .wm-lbl-near, svg[data-wm-zoom="far"] .wm-lbl-mid { opacity:0; } ' +
+    // v0.30.652 — MapleStory's rule, and the reason its world plate stays legible: the world view names
+    // REGIONS and the continent view names PLACES, never both on one screen. So on a map with enough
+    // discovered to be crowded, the far zoom drops the place names entirely and the territories carry
+    // it; zoom in and they hand back. A sparse map (.wm-sparse, 24 places or fewer) keeps its place
+    // names at every zoom - there is nothing to crowd yet - and quietens the region names instead.
+    'svg[data-wm-zoom="far"]:not(.wm-sparse) .wm-lbl-far:not(.wm-lbl-here) { opacity:0; } ' +
+    'svg.wm-sparse .wm-terr-name { opacity:0.22; } ' +
     'svg[data-wm-zoom="mid"] .wm-lbl-near { opacity:0; } ' +
     // the globe stops turning while you are reading a node - motion under a pointer target is the
     // one thing every critique of these screens agrees on
@@ -57413,6 +57428,119 @@ function _renderWorldMapDiagram(host, opts) {
       _spin.appendChild(_s);
     }
     svg.appendChild(_spin);
+  }
+  // v0.30.652 — TERRITORIES. The map was a constellation: 109 equal pins on an empty ground, with no
+  // sense that any of them belonged together. But the world already knew its own regions - they are
+  // written into the map names. "Bone Graveyard - Mossy Reaches", "- Sundered Catacomb", "- Lich's
+  // Vigil" are three rooms of one place, and there are ten such places, from Block-land's seven to
+  // the Bastion's three. So the names are read back into geography: every family of maps that share
+  // a name AND sit together becomes one soft painted territory in its own biome colour, with the
+  // family name set across it.
+  //
+  // Nothing is invented. A family needs two or more placed maps and a radius under 300 units, so a
+  // name that happens to repeat across the world (and there are some) never paints a region that is
+  // not really there. Singles stay as they are - wilderness between the named places, which is what
+  // they are. And no rectangles: the v0.25.980 removal of the grouped squares stands, this is a wash
+  // with no edge, which is the opposite thing.
+  const _TERR_HUE = {
+    'Bone Graveyard':    ['#2f3a2b', '#9fbd7e'],   // mossy bone
+    'Bloom Reaches':     ['#26402f', '#77c48c'],   // verdant
+    'Magma Foundry':     ['#46281d', '#e0895a'],   // ember
+    'Withering Tide':    ['#1f3b3e', '#63bfc4'],   // drowned teal
+    'Glasswind Steppe':  ['#26374a', '#86b6de'],   // pale ice
+    'Hollow Sepulchre':  ['#2c2540', '#9b8ad4'],   // cold crypt violet
+    "Wayfarer's Lantern": ['#43341f', '#dfb765'],  // lantern amber
+    'Block-land':        ['#3f3320', '#e0c063'],   // toybox yellow
+    'The Bastion':       ['#3a3526', '#cdbd7e'],   // stone gold
+    'Distorted Portal':  ['#3a2440', '#c47ad0'],   // unstable
+  };
+  const _terrFamily = (nm) => {
+    // the separator must carry whitespace on both sides, or "Block-land" splits at its own hyphen
+    const m = /^(.+?)\s+[·—–-]\s+/.exec(String(nm || ''));
+    if (m && m[1].length > 3) return m[1].trim();
+    return null;
+  };
+  {
+    const fams = Object.create(null);
+    for (const [id, p] of Object.entries(positions)) {
+      const m = MAPS[id]; if (!m) continue;
+      const f = _terrFamily(m.name) || ((m.name && MAPS[id].name === m.name && _terrFamily(m.name + ' · x')) ? null : null);
+      const key = f || (function () {          // a map whose own name IS the family (the region's seat)
+        const nm = String(m.name || '');
+        for (const k of Object.keys(_TERR_HUE)) if (nm === k) return k;
+        return null;
+      })();
+      if (!key) continue;
+      (fams[key] || (fams[key] = [])).push({ id, x: p.x, y: p.y });
+    }
+    const _terrLayer = document.createElementNS(SVG_NS, 'g');
+    _terrLayer.setAttribute('class', 'wm-terr');
+    _terrLayer.setAttribute('pointer-events', 'none');
+    const _terrNames = [];
+    for (const key of Object.keys(fams)) {
+      const list = fams[key];
+      if (list.length < 2) continue;
+      const tx = list.reduce((a, b) => a + b.x, 0) / list.length;
+      const ty = list.reduce((a, b) => a + b.y, 0) / list.length;
+      let far = 0; for (const p of list) far = Math.max(far, Math.hypot(p.x - tx, p.y - ty));
+      if (far > 300) continue;                 // scattered: a coincidence of naming, not a place
+      const [deep, rim] = _TERR_HUE[key] || ['#2e2a44', '#9a8fc4'];
+      const gid = 'wm-terr-' + key.replace(/[^A-Za-z0-9]/g, '');
+      const rg = document.createElementNS(SVG_NS, 'radialGradient');
+      rg.setAttribute('id', gid);
+      for (const [off, op] of [['0%', '0.90'], ['58%', '0.48'], ['100%', '0']]) {
+        const st = document.createElementNS(SVG_NS, 'stop');
+        st.setAttribute('offset', off); st.setAttribute('stop-color', deep); st.setAttribute('stop-opacity', op);
+        rg.appendChild(st);
+      }
+      _gdefs.appendChild(rg);
+      const rr = Math.max(104, far + 86);
+      for (const p of list) {                  // one wash per member: they union into a soft shape
+        const c = document.createElementNS(SVG_NS, 'circle');
+        c.setAttribute('cx', p.x); c.setAttribute('cy', p.y);
+        c.setAttribute('r', Math.round(rr * 0.60));
+        c.setAttribute('fill', 'url(#' + gid + ')');
+        _terrLayer.appendChild(c);
+      }
+      _terrNames.push({ key, tx, ty: ty - rr * 0.56, rim });
+    }
+    svg.appendChild(_terrLayer);
+    // Ten names, so the crudest possible de-collision is the right one: sort them down the page and
+    // push any that still sit on the one above. The alternative - running the node placer over them -
+    // would be a lot of machinery for ten labels that barely move.
+    // Their widths are known well enough without measuring: Marcellus at this size and tracking runs
+    // about 0.62 em a character. Four of these sit on top of each other in the north-west, so the
+    // pass repeats until nothing moves.
+    for (const t of _terrNames) t.hw = t.key.length * 23 * 0.62 / 2 + 12;
+    _terrNames.sort((a, b) => a.ty - b.ty);
+    for (let pass = 0; pass < 4; pass++) {
+      let moved = false;
+      for (let i = 1; i < _terrNames.length; i++) {
+        const B = _terrNames[i];
+        for (let j = 0; j < i; j++) {
+          const A = _terrNames[j];
+          if (Math.abs(A.tx - B.tx) < A.hw + B.hw && Math.abs(A.ty - B.ty) < 34) { B.ty = A.ty + 34; moved = true; }
+        }
+      }
+      if (!moved) break;
+    }
+    // The region name reads at the zooms where the PLACE names do not: out here you are looking at
+    // the world, so the world's regions are what is labelled.
+    for (const t of _terrNames) {
+      const el = document.createElementNS(SVG_NS, 'text');
+      el.setAttribute('class', 'wm-terr-name');
+      el.setAttribute('x', t.tx.toFixed(0));
+      el.setAttribute('y', t.ty.toFixed(0));
+      el.setAttribute('text-anchor', 'middle');
+      el.setAttribute('font-family', "'Marcellus SC', 'Cinzel', Georgia, serif");
+      el.setAttribute('font-size', '23');
+      el.setAttribute('letter-spacing', '5');
+      el.setAttribute('fill', t.rim);
+      el.setAttribute('fill-opacity', '0.42');
+      el.setAttribute('pointer-events', 'none');
+      el.textContent = t.key.toUpperCase();
+      svg.appendChild(el);
+    }
   }
   // v0.25.416 — Connection edges reflect ACTUAL portal links between maps.
   // v0.25.960 → v0.25.983 — Edges WERE drawn as gentle quadratic Bezier
@@ -57609,6 +57737,9 @@ function _renderWorldMapDiagram(host, opts) {
   // working against the player. So while you know 24 places or fewer, everything you know is named
   // at every zoom; past that the middle band takes over and the far view keeps only the landmarks.
   const _lblPromote = (() => { try { return Object.keys(game.visitedMaps || {}).length <= 24; } catch (e) { return true; } })();
+  // v0.30.652 — the flag the stylesheet reads to decide whether the far view belongs to the regions or
+  // still to the places themselves.
+  const _lblSparse = _lblPromote;
   const _nextHops = (() => {
     const s = new Set();
     const cm = MAPS[cur];
@@ -57866,7 +57997,8 @@ function _renderWorldMapDiagram(host, opts) {
     // here, above the pill, because the pill and the name have to agree.
     // (the visited test is inlined rather than reusing _visitedMap, which is declared further down
     //  with the label itself - reading it here would be a temporal-dead-zone error)
-    const _lblBand = (here || _isSafeHub || _isBoss || _nextHops.has(id)) ? 'wm-lbl-far'
+    const _lblBand = here ? 'wm-lbl-far wm-lbl-here'   // v0.30.652 — never hidden by the region handover
+                   : (_isSafeHub || _isBoss || _nextHops.has(id)) ? 'wm-lbl-far'
                    : (here || !!(game.visitedMaps && game.visitedMaps[id]) || _wmDev) ? (_lblPromote ? 'wm-lbl-far' : 'wm-lbl-mid')
                    : 'wm-lbl-near';
     // v0.26.x — visual hierarchy: ① next-hop ring (one portal away — pairs
@@ -58335,6 +58467,7 @@ function _renderWorldMapDiagram(host, opts) {
       }
     };
     svg.setAttribute('data-wm-zoom', _band());
+    if (_lblSparse) svg.classList.add('wm-sparse');   // v0.30.652 — the far view still belongs to the places
     const _clampVB = () => {
       vb.w = Math.min(W, Math.max(W / 3.5, vb.w)); vb.h = vb.w * (H / W);
       vb.x = Math.min(W - vb.w, Math.max(0, vb.x));

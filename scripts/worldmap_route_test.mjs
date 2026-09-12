@@ -59,8 +59,10 @@ await page.evaluate(() => { game.visitedMaps = game.visitedMaps || {}; for (cons
 await page.evaluate(() => toggleWorldMap());
 await page.waitForTimeout(2600);
 const far = await clash();
-checks.push(['on a fully discovered map, almost no name sits on a node', far.onNode <= 6 && far.labels >= 20, `${far.onNode} of ${far.labels} names touch a disc`]);
-checks.push(['and almost none sits on another name', far.pairs <= 3, `${far.pairs} overlapping pairs`]);
+// v0.30.652 handed the far view to the region names, so on a crowded map there are no place names
+// out here to place — that handover is pinned in worldmap_territory_test. What this suite owns is
+// the placement itself, which is now measured where the place names actually live: zoomed in.
+checks.push(['on a fully discovered map the far view carries almost no place names', far.labels <= 3, `${far.labels} place names at the world view`]);
 checks.push(['names use the seats around their node, not just the one under it', (far.seats.start || 0) + (far.seats.end || 0) >= 4, JSON.stringify(far.seats)]);
 
 // Measure what the player sees: the rendered box in screen pixels. The computed font-size is in SVG
