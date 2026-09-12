@@ -11145,7 +11145,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.635';
+const GAME_VERSION = 'v0.30.636';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -11645,13 +11645,26 @@ const LX_DRS = {
 // once at boot; the reload the switch already requires picks up changes.
 const _LX_DRS_OFF = (() => { try { return localStorage.getItem('lx_drs') === 'off'; } catch (e) { return false; } })();
 function _lxDrsEnabled() {
-  return _LX_RSCALE == null && !_LX_DRS_OFF;        // manual scale override wins outright
+  if (_LX_RSCALE != null || _LX_DRS_OFF) return false;   // manual scale override wins outright
+  // v0.30.636 - HD FIRST (per user: "keep images as HD as possible"). Easing the render scale is the one
+  // lever that softens EVERY image on screen at once, and it fired by itself in dense fights: the HD
+  // probe (scripts/perf_hd_probe.mjs) caught it taking a 1.33 target down to 1.0 and 0.75 mid-fight.
+  // It is now the player's choice: High (the default) keeps full resolution always, Medium may ease
+  // down to native scale, Low keeps the old 0.75 floor. The FX tiers (lowFx / veryLowFx) still trim
+  // eye-candy automatically on every preset - they cost effects, never sharpness.
+  const q = (typeof LX_GFX !== 'undefined' && LX_GFX && LX_GFX.quality) || 'high';
+  return q === 'medium' || q === 'low';
 }
 function _lxDrsFloorNow() {
-  return (typeof _IS_MOBILE_AT_LOAD !== 'undefined' && _IS_MOBILE_AT_LOAD) ? LX_DRS.floor : LX_DRS.floorDesktop;
+  if (typeof _IS_MOBILE_AT_LOAD !== 'undefined' && _IS_MOBILE_AT_LOAD) return LX_DRS.floor;
+  return (typeof LX_GFX !== 'undefined' && LX_GFX && LX_GFX.quality === 'low') ? LX_DRS.floorDesktop : 1.0;   // v0.30.636 - Medium stops at native
 }
 function _lxDrsTick(frame, time) {
-  if (!_lxDrsEnabled()) return;
+  if (!_lxDrsEnabled()) {
+    // v0.30.636 - switching to High (or turning the governor off) mid-reduction restores full scale at once.
+    if (LX_DRS.active) { LX_DRS.active = false; LX_DRS.healthySince = 0; try { _lxApplyRenderScale(_lxTargetDpr()); } catch (e) {} }
+    return;
+  }
   const ceil = _lxTargetDpr();
   // v0.30.278 — the effective floor. Desktop may go BELOW native scale as a
   // true last resort (the down-step still requires veryLowFx + sustained
@@ -18928,8 +18941,17 @@ function _mapPlatformTint(md) {
 // the 0.55 per shape and the blit carries the caller's own alpha.
 const _CUTE_PLAT_CACHE = new Map();
 const _CUTE_PLAT_MAX_PX = 1500000;   // ~6 MB at 4 bytes/px — a 2400x60 ground fits fine
+// v0.30.636 - the platform bake scale follows the TARGET resolution as well as the live one. When the
+// governor (Medium / Low presets) eases the live scale mid-fight, re-baking every platform and floor
+// would cost a hitch at exactly the wrong moment, and a higher-resolution bake draws down cleanly. A
+// manual render scale above the target still wins (max), so an override never draws them soft.
+function _lxPlatBakeDpr() {
+  const live = (typeof _lxBakeDpr === 'function') ? _lxBakeDpr() : 1;
+  const t = (typeof _lxTargetDpr === 'function') ? Math.min(3, _lxTargetDpr()) : 1;
+  return Math.max(live, Math.max(1, Math.ceil(t * 8 - 1e-6) / 8));
+}
 function _cutePlatformSprite(w, h, tint, ground, theme, variant) {
-  const key = (tint.exact ? 'x|' : '') + w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '') + '|' + (variant | 0);   // v0.30.609 — the variant too
+  const key = (tint.exact ? 'x|' : '') + w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '') + '|' + (variant | 0) + '|' + _lxPlatBakeDpr();   // v0.30.609 - the variant too; v0.30.636 - and the bake scale
   let cv = _CUTE_PLAT_CACHE.get(key);
   if (cv) return cv;
   if (!(w > 0 && h > 0) || w * h > _CUTE_PLAT_MAX_PX) return null;   // caller falls back
@@ -18946,10 +18968,19 @@ function _cutePlatformSprite(w, h, tint, ground, theme, variant) {
   // v0.30.609 — and as deep BELOW as the art (_cuteGeom.depth): a floating platform's face, keel and
   // what hangs from it sit under the one-way collision box, so the bake follows the art, not the box.
   const PAD = 2, PAD_TOP = _CUTE_PAD_TOP, G = _cuteGeom(w, h, ground);
+  // v0.30.636 - BAKE AT DEVICE RESOLUTION. Minted at logical size and blitted in logical units, every
+  // platform and floor was upscaled by the render scale: the HD probe measured 1.36x on a 1.33 screen
+  // (~1.9x at 1080p fullscreen). The paint runs under a scale transform, so its geometry is untouched,
+  // and _drawCutePlatform draws it back at its logical box. Memory stays bounded: a floor that would
+  // pass twice the logical pixel budget at device scale eases its scale toward 1x instead.
+  const _lw = Math.ceil(w) + PAD * 2, _lh = PAD_TOP + Math.max(Math.ceil(h), G.depth) + PAD + 1;
+  const _s = Math.max(1, Math.min(_lxPlatBakeDpr(), Math.sqrt((_CUTE_PLAT_MAX_PX * 2) / (_lw * _lh))));
   cv = document.createElement('canvas');
-  cv.width = Math.ceil(w) + PAD * 2; cv.height = PAD_TOP + Math.max(Math.ceil(h), G.depth) + PAD + 1;
+  cv.width = Math.ceil(_lw * _s); cv.height = Math.ceil(_lh * _s);
   const c = cv.getContext('2d');
+  if (_s !== 1) c.scale(_s, _s);
   _paintCutePlatform(c, PAD, PAD_TOP, w, h, tint, ground, ground ? 1 : 0.94, theme, variant);
+  cv._lxLW = _lw; cv._lxLH = _lh;
   _CUTE_PLAT_CACHE.set(key, cv);
   return cv;
 }
@@ -19836,7 +19867,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
 }
 function _drawCutePlatform(sx, y, w, h, tint, ground, theme, variant) {
   const spr = _cutePlatformSprite(w, h, tint, ground, theme, variant);
-  if (spr) { ctx.drawImage(spr, sx - 2, y - _CUTE_PAD_TOP); return; }   // undo the bake pad (2px sides, 12px above)
+  if (spr) { ctx.drawImage(spr, sx - 2, y - _CUTE_PAD_TOP, spr._lxLW || spr.width, spr._lxLH || spr.height); return; }   // v0.30.636 - logical box of a device-res bake   // undo the bake pad (2px sides, 12px above)
   _paintCutePlatform(ctx, sx, y, w, h, tint, ground, ground ? 1 : 0.94, theme, variant);
 }
 // v0.25.461 — Map id → floor-tile key. Wins over the theme lookup
@@ -60654,6 +60685,7 @@ function startDodge() {
 function _lxPrewarmBossSets(type, zodiacSign) {
   try {
     if (!type) return;
+    if (typeof _lxPrewarmMobFx === 'function') _lxPrewarmMobFx(type, true);   // v0.30.636 - a boss's swing, column, telegraph and ward art too
     const stores = [];
     const add = (S) => { if (typeof S !== 'undefined' && S) stores.push(S); };
     try { add(BOSS_IDLE_FRAMES); } catch (e) {}
@@ -75187,7 +75219,7 @@ function drawSmoothFx(_behindPass) {
         ctx.rotate(fx.angle);
         // Sprite faces "open-right" — translate so the swing emanates
         // from the cast point and arcs outward.
-        ctx.drawImage(_lxProjScaled(_slashSprite, Math.round(sz)), Math.round(-sz * 0.15), Math.round(-sz / 2), Math.round(sz), Math.round(sz));   // v0.26.x perf — integer blit   // v0.30.294 perf — 768px art, drawn twice per frame per slash
+        ctx.drawImage(_lxProjScaled(_slashSprite, Math.round(sz), true), Math.round(-sz * 0.15), Math.round(-sz / 2), Math.round(sz), Math.round(sz));   // v0.26.x perf — integer blit   // v0.30.294 perf — 768px art, drawn twice per frame per slash
         ctx.restore();
         continue;
       }
@@ -75423,10 +75455,10 @@ function drawSmoothFx(_behindPass) {
           ctx.save();
           ctx.translate(sx, fx.y);
           ctx.rotate(_age * fx.spin);
-          ctx.drawImage(_lxProjScaled(_explosionSprite, Math.round(sz)), -sz / 2, -sz / 2, sz, sz);   // v0.30.294 perf
+          ctx.drawImage(_lxProjScaled(_explosionSprite, Math.round(sz), true), -sz / 2, -sz / 2, sz, sz);   // v0.30.294 perf
           ctx.restore();
         } else {
-          ctx.drawImage(_lxProjScaled(_explosionSprite, Math.round(sz)), sx - sz / 2, fx.y - sz / 2, sz, sz);   // v0.30.294 perf
+          ctx.drawImage(_lxProjScaled(_explosionSprite, Math.round(sz), true), sx - sz / 2, fx.y - sz / 2, sz, sz);   // v0.30.294 perf
         }
         ctx.globalAlpha = 1;
         continue;
@@ -118015,17 +118047,24 @@ function _getPlainPortalImg(img) {
 // resample visually lossless. Bucketed to 10px so near sizes share one bake;
 // a source already within 2.2x of the box is returned untouched (no win).
 // Per-image slot map, tiny FIFO, exactly the _lxPlainCache recipe (v0.29.735).
-function _lxProjScaled(img, boxPx) {
+function _lxProjScaled(img, boxPx, grow) {
   if (!img) return img;
   const nw = img.naturalWidth || img.width || 0, nh = img.naturalHeight || img.height || 0;
   const box = boxPx | 0;
   if (!nw || !nh || box < 14 || Math.max(nw, nh) <= box * 2.2) return img;
-  const key = Math.ceil((box * 2) / 10) * 10;
+  // v0.30.636 - grow (the slash and the explosion, whose size eases every frame): round UP to a x1.1 rung
+  // instead of the 10 px bucket, so a swing's whole growth maps to about a dozen bakes that stay cached
+  // rather than a fresh bake from 768 px art on most frames. A rung keeps the bake at 2.0-2.2x the box,
+  // the same oversample band as the bucket, so nothing draws softer.
+  const key = grow ? Math.min(Math.max(nw, nh), Math.ceil(10 * Math.pow(1.1, Math.ceil(Math.log(box * 0.2) / Math.log(1.1))))) : Math.ceil((box * 2) / 10) * 10;
+  // v0.30.636 - a Map with oldest-first eviction. The object cache was thrown away WHOLE on its 6th size
+  // bucket, so the buckets after it re-minted what had just been evicted: the engage probe counted up
+  // to 21 of these canvases a second mid-fight.
   let m = img._lxProjCache;
-  if (!m) m = img._lxProjCache = {};
-  let c = m[key];
+  if (!m || !m.get) m = img._lxProjCache = new Map();
+  let c = m.get(key);
   if (c === undefined) {
-    if ((m._n || 0) > 4) m = img._lxProjCache = {};
+    if (m.size >= 16) m.delete(m.keys().next().value);
     try {
       const cv = document.createElement('canvas');
       const k = key / Math.max(nw, nh);
@@ -118037,8 +118076,7 @@ function _lxProjScaled(img, boxPx) {
       g.drawImage(img, 0, 0, cv.width, cv.height);
       c = cv;
     } catch (e) { c = null; }
-    m[key] = c;
-    m._n = (m._n || 0) + 1;
+    m.set(key, c);
   }
   return c || img;
 }
@@ -118349,7 +118387,7 @@ function drawPortals() {
       // v0.26.x perf — label baked per (name, hint) and blitted (was a fillRect,
       // 2 font sets and 2 fillText per frame while standing at a portal).
       const _hint = (po.dest === 'town' || game.currentMap === 'void') ? 'Press [↑]' : '[↑] Enter';
-      if (!po._lblSprite || po._lblHint !== _hint || po._lblName !== po.name) {
+      if (!po._lblSprite || po._lblHint !== _hint || po._lblName !== po.name || po._lblS !== _lxBakeDpr()) {   // v0.30.636 - and the bake scale
         // v0.26.x — auto-append the destination's danger level when the authored
         // name doesn't already carry one (covers all ~197 portals from one spot).
         let _dispName = po.name;
@@ -118357,15 +118395,15 @@ function drawPortals() {
           const _dlv = po.levelGate || _mapDangerLv(po.dest);
           if (_dlv >= 10) _dispName += ' (Lv ' + _dlv + ')';
         }
-        const _lc = document.createElement('canvas'); _lc.width = 160; _lc.height = 26;
-        const _lg = _lc.getContext('2d');
+        const _lS = _lxBakeDpr(); const _lc = document.createElement('canvas'); _lc.width = Math.ceil(160 * _lS); _lc.height = Math.ceil(26 * _lS);   // v0.30.636 - device-res bake
+        const _lg = _lc.getContext('2d'); _lg.scale(_lS, _lS);
         _lg.fillStyle = 'rgba(0,0,0,0.7)'; _lg.fillRect(0, 0, 160, 26);
         _lg.textAlign = 'center';
         _lg.fillStyle = '#fff'; _lg.font = 'bold 12px sans-serif'; _lg.fillText(_dispName, 80, 12);
         _lg.fillStyle = '#ffdd44'; _lg.font = '10px sans-serif'; _lg.fillText(_hint, 80, 23);
-        po._lblSprite = _lc; po._lblHint = _hint; po._lblName = po.name;
+        po._lblSprite = _lc; po._lblHint = _hint; po._lblName = po.name; po._lblS = _lS;
       }
-      ctx.drawImage(po._lblSprite, Math.round(sx - 80), Math.round(Math.max(6, _lblFeetY - 143)));   // v0.28.4 — was hardcoded 350 (see above); clamp keeps top-pad portals' labels on-screen; v0.30.619: 13px higher, riding with the portal
+      ctx.drawImage(po._lblSprite, Math.round(sx - 80), Math.round(Math.max(6, _lblFeetY - 143)), 160, 26);   // v0.28.4 — was hardcoded 350 (see above); clamp keeps top-pad portals' labels on-screen; v0.30.619: 13px higher, riding with the portal
     }
   }
 }
@@ -120937,15 +120975,26 @@ function _heroVecAttackWrist(t) {
 function _heroVecAttackBodyX(t) {
   return _heroVecAttackStrike(t) * 2.8 - _heroVecAttackRecover(t) * 1.4;
 }
-function _heroVecAttackLegPose(t) {
-  const bodyX = _heroVecAttackBodyX(t);
-  const keys = [
+const _HV_ATK_LEG_KEYS = Object.freeze([
     { p: 0.00, legR: -0.20, legL: 0.22, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
     { p: 0.18, legR: -0.28, legL: 0.32, legRY: 0.1, legLY: 0.0, legRSy: 0.98, legLSy: 1.04 },
     { p: 0.50, legR: -0.40, legL: 0.26, legRY: 0.4, legLY: -0.1, legRSy: 0.94, legLSy: 1.02 },
     { p: 0.72, legR: -0.30, legL: 0.22, legRY: 0.2, legLY: 0.0, legRSy: 0.97, legLSy: 1.01 },
     { p: 1.00, legR: -0.20, legL: 0.20, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
-  ];
+  ].map(Object.freeze));   // v0.30.636 - hoisted: rebuilt on every call, six calls a frame mid-swing
+// v0.30.636 - applyChain (inside the hero draw) rebuilt each bone's root-to-leaf chain with unshift and an
+// opts {} on every call, ~18 calls per hero per frame. HERO_VEC_RIG never changes, so each chain is
+// built once and shared (it is only indexed).
+const _HV_NO_OPTS = Object.freeze({});
+const _HV_CHAINS = Object.create(null);
+function _hvChain(b) {
+  let c = _HV_CHAINS[b];
+  if (!c) { c = []; for (let cur = b; cur; cur = HERO_VEC_RIG[cur].parent) c.unshift(cur); _HV_CHAINS[b] = c; }
+  return c;
+}
+function _heroVecAttackLegPose(t) {
+  const bodyX = _heroVecAttackBodyX(t);
+  const keys = _HV_ATK_LEG_KEYS;
   for (let i = 0; i < keys.length - 1; i++) {
     const a = keys[i];
     const b = keys[i + 1];
@@ -121011,15 +121060,16 @@ function _heroVecWarriorBodyBob(t) {
     y: -Math.sin(t * Math.PI) * 3.0,
   };
 }
-function _heroVecWarriorSwingLegPose(t) {
-  const keys = [
+const _HV_WAR_LEG_KEYS = Object.freeze([
     { p: 0.00, legR: -0.22, legL: 0.26, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
     { p: 0.18, legR: -0.44, legL: 0.58, legRY: 0.2, legLY: 0.0, legRSy: 0.96, legLSy: 1.08 },
     { p: 0.27, legR: -0.52, legL: 0.66, legRY: 0.4, legLY: 0.0, legRSy: 0.94, legLSy: 1.10 },
     { p: 0.55, legR: -0.66, legL: 0.44, legRY: 0.8, legLY: -0.2, legRSy: 0.90, legLSy: 1.04 },
     { p: 0.72, legR: -0.50, legL: 0.36, legRY: 0.4, legLY: 0.0, legRSy: 0.95, legLSy: 1.02 },
     { p: 1.00, legR: -0.22, legL: 0.24, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
-  ];
+  ].map(Object.freeze));   // v0.30.636 - hoisted: rebuilt on every call, six calls a frame mid-swing
+function _heroVecWarriorSwingLegPose(t) {
+  const keys = _HV_WAR_LEG_KEYS;
   for (let i = 0; i < keys.length - 1; i++) {
     const a = keys[i];
     const b = keys[i + 1];
@@ -121226,16 +121276,17 @@ function _heroVecRogueWrist(t) {
   const arm = _heroVecRogueFrontArm(t);
   return _heroVecRogueDaggerWorldRotation(t) - (_heroVecRogueSpine(t) + arm);
 }
-function _heroVecRogueLegPose(t) {
-  const big = _heroVecRogueBigStabActive() ? 1.18 : 1;
-  const bodyX = _heroVecRogueBodyX(t);
-  const keys = [
+const _HV_ROGUE_LEG_KEYS = Object.freeze([
     { p: 0.00, legR: -0.26, legL: 0.30, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
     { p: 0.16, legR: -0.50, legL: 0.56, legRY: 0.2, legLY: 0.0, legRSy: 0.95, legLSy: 1.07 },
     { p: 0.42, legR: -0.68, legL: 0.42, legRY: 0.9, legLY: -0.3, legRSy: 0.88, legLSy: 1.03 },
     { p: 0.62, legR: -0.56, legL: 0.34, legRY: 0.4, legLY: 0.0, legRSy: 0.93, legLSy: 1.02 },
     { p: 1.00, legR: -0.24, legL: 0.24, legRY: 0.0, legLY: 0.0, legRSy: 1.00, legLSy: 1.00 },
-  ];
+  ].map(Object.freeze));   // v0.30.636 - hoisted: rebuilt on every call, six calls a frame mid-swing
+function _heroVecRogueLegPose(t) {
+  const big = _heroVecRogueBigStabActive() ? 1.18 : 1;
+  const bodyX = _heroVecRogueBodyX(t);
+  const keys = _HV_ROGUE_LEG_KEYS;
   for (let i = 0; i < keys.length - 1; i++) {
     const a = keys[i];
     const b = keys[i + 1];
@@ -122734,7 +122785,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   const BODY_STROKE_W = 1.5;
   let _bodyStrokeOverride = null;
   function applyChain(bone, opts) {
-    opts = opts || {};
+    opts = opts || _HV_NO_OPTS;
     // v0.25.573 — `deform: false` semantics changed.
     //
     // OLD (v0.25.401 / v0.25.448 / v0.25.567): skip every scale in the
@@ -122758,9 +122809,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // re-orthonormalize the frame so no squash/shear from any source (pose
     // deforms through rotations, chibi-weight canvas scale) reaches the art.
     const weaponLock = !!opts.weaponLock;
-    const chain = [];
-    let cur = bone;
-    while (cur) { chain.unshift(cur); cur = HERO_VEC_RIG[cur].parent; }
+    const chain = _hvChain(bone);   // v0.30.636 - memoised per bone
     let cumParentSx = 1, cumParentSy = 1;
     const lastIdx = chain.length - 1;
     for (let i = 0; i <= lastIdx; i++) {
@@ -131061,6 +131110,7 @@ let _lxPrewarmScratch = null;
 function _lxPrewarmMobBakes(type) {
   if (!type || _LX_PREWARM_SEEN.has(type)) return;
   _LX_PREWARM_SEEN.add(type);
+  if (typeof _lxPrewarmMobFx === 'function') _lxPrewarmMobFx(type);   // v0.30.636 - and its attack art
   try {
     const t = (typeof monsterTypes !== 'undefined') ? monsterTypes[type] : null;
     if (!t || !(t.h > 0)) return;
@@ -131077,7 +131127,7 @@ function _lxPrewarmMobBakes(type) {
   } catch (e) {}
 }
 function _lxPrewarmDrain(force) {
-  if (!_LX_PREWARM_Q.length) return;
+  if (!_LX_PREWARM_Q.length && !_LX_PREWARM_FXQ.length) return;   // v0.30.636 - or the FX pre-warm's own queue
   if (!_lxPrewarmScratch) {
     try { const cv = document.createElement('canvas'); cv.width = 4; cv.height = 4; _lxPrewarmScratch = cv.getContext('2d'); } catch (e) {}
     if (!_lxPrewarmScratch) { _LX_PREWARM_Q.length = 0; return; }
@@ -131137,6 +131187,9 @@ function _lxPrewarmDrain(force) {
       drained++;
     } catch (e) {}
   }
+  // v0.30.636 - the FX pre-warm gets the passes this queue leaves idle, and every pass behind the map veil,
+  // so the mob bakes above run exactly as before and a frame never pays for both.
+  if (_LX_PREWARM_FXQ.length && (force || drained === 0)) _lxPrewarmFxDrain(force);
 }
 // v0.30.358 perf — the plain downscale, as a helper, because TWO paths need it.
 // It was inline in _lxDrawSoft's edge-clean branch; the feathered branch, on a
@@ -131147,6 +131200,120 @@ function _lxPrewarmDrain(force) {
 // draws its plain downscale instead - a tiny blit - and feathers later.
 // pw/ph are the plain path's own DEVICE-pixel buckets (ceil to 10), so the
 // entry it mints is the very one the edge-clean path will hit.
+// v0.30.636 - FX PRE-WARM (the v0.30.624 changelog's open item: "the first time a fight plays an effect
+// animation ... its nine frames are still pinned at once, which accounts for most of the remaining
+// 70-140 ms frames"). _fxAnimFrames creates a set's images on its first REQUEST - the first cast - so
+// that cast paid the download, the decode and nine pins inside one frame. Now the sets this character
+// can actually cast are requested as soon as its class, job and master are known, and their frames
+// ride the same prewarm drain as the mob bakes: pinned two a frame, before the fight. Which sets each
+// skill plays was MEASURED (every skill of every class cast in turn, recording _fxAnimFrames calls);
+// only sets in _FX_ANIM_KEYS are listed, and only for skills this character can cast, so memory holds
+// just what the fight would have pinned anyway. Runs again when the job or master changes.
+const _LX_SKILL_FX = {
+  warlord_warcry: ['warlord_banner'], doombringer_apoc: ['doombringer_apoc'], crusader_aegis: ['crusader_aegis'],
+  dragoon_skylance: ['dragoon_skylance'], warlord_ult: ['warlord_ult'], doombringer_ult: ['doombringer_ult'],
+  crusader_ult: ['crusader_ult'], dragoon_ult: ['dragoon_ult', 'fx_shard'],
+  arcaneBurst: ['arcane_burst', 'arcane_shockwave'], archbishop_grail: ['archbishop_grail'], sage_meteorshower: ['sage_meteorshower'],
+  elementalist_cascade: ['elementalist_cascade', 'cascade_fire', 'cascade_ice', 'cascade_lightning', 'cascade_void'],
+  necromancer_harvest: ['soul_vortex'], hexmaster_grandhex: ['hexmaster_grandhex'], sage_ult: ['sage_ult'],
+  elementalist_ult: ['elementalist_ult'], necromancer_ult: ['necro_maelstrom', 'necromancer_ult'], hexmaster_ult: ['hexmaster_ult'],
+  archbishop_ult: ['archbishop_ult'],
+  sleight: ['phantom_voidrift'], shadowlord_clones: ['shadowlord_clones'], shinobi_seal: ['shinobi_seal'],
+  nightreaper_mark: ['nightreaper_eclipse'], shadowlord_ult: ['shadowlord_ult'], shinobi_ult: ['shinobi_ult'],
+  nightreaper_ult: ['nightreaper_ult', 'fx_shard'], phantom_ult: ['phantom_ult', 'fx_shard'],
+  marksman_oneshot: ['marksman_oneshot', 'deadeye_hit'], ballista_volley: ['ballista_volley'], beastmaster_pack: ['beastmaster_pack'],
+  skyhunter_gale: ['skyhunter_gale'], marksman_ult: ['marksman_ult'], ballista_ult: ['ballista_ult', 'deadeye_hit'],
+  beastmaster_ult: ['beastmaster_ult'], skyhunter_ult: ['skyhunter_ult'],
+};
+// A set queues once, whoever asks for it. `base` is the shrink base its own draw path uses - 640 for the
+// _fxAnimFrames sets, 720 for the _lxVfxFrame loops (_bossLoopFrame's default) - so the frames the drain
+// settles are the very ones the draw will look up. The FX jobs have a queue of their own: the prewarm
+// drain serves it only on passes the mob bakes leave idle (every pass behind the map veil), so the mob
+// bakes run exactly as they did and no frame pays for both.
+const _LX_PREWARM_FXQ = [];
+function _lxQueueFxSet(arr, base) {
+  if (!arr || arr._lxFxWarmQ) return;
+  arr._lxFxWarmQ = true;
+  for (let i = 0; i < arr.length; i++) _LX_PREWARM_FXQ.push({ arr, i, base, tries: 0 });
+}
+// One sync-pin kick a pass (eight behind the veil): a set's shrink pins two frames per kick, a single
+// image is one pin. A settled or 404 slot costs nothing; a downloading one waits its turn.
+function _lxPrewarmFxDrain(force) {
+  const kicks = force ? 8 : 1, look = force ? 200 : 24;
+  let kicked = 0, looked = 0;
+  while (_LX_PREWARM_FXQ.length && kicked < kicks && looked++ < look) {
+    const j = _LX_PREWARM_FXQ.shift();
+    const im = j.pin || j.arr[j.i];
+    if (!im || im.tagName === 'CANVAS' || im._lxNoShrink || (!j.pin && j.arr._lxShrunk)) continue;
+    if (!(im.complete && (im.naturalWidth || im.width) > 0)) { if (!im.complete && j.tries++ < 600) _LX_PREWARM_FXQ.push(j); continue; }
+    kicked++;
+    if (j.pin) { try { _lxPinned(im); } catch (e) {} continue; }
+    try { _lxShrinkFrames(j.arr, j.base, force ? 4 : 2); } catch (e) {}
+    const now = j.arr[j.i];
+    if (now && now.tagName !== 'CANVAS' && !now._lxNoShrink && !j.arr._lxShrunk && j.tries++ < 600) _LX_PREWARM_FXQ.push(j);
+  }
+}
+let _lxFxWarmCls = null, _lxFxWarmJob = null, _lxFxWarmMaster = null;
+function _lxPrewarmClassFx() {
+  if (typeof player === 'undefined' || !player || !player.cls) return;
+  if (player.cls === _lxFxWarmCls && player.job === _lxFxWarmJob && player.master === _lxFxWarmMaster) return;   // one compare a frame
+  _lxFxWarmCls = player.cls; _lxFxWarmJob = player.job; _lxFxWarmMaster = player.master;
+  try {
+    const keys = ['block_' + player.cls];   // the A-press stance: the most frequent effect of all
+    for (const id in SKILLS) {
+      const sk = SKILLS[id], fx = _LX_SKILL_FX[id];
+      if (!fx || sk.cls !== player.cls) continue;
+      if (sk.job && sk.job !== player.job) continue;
+      if (sk.master && sk.master !== player.master) continue;
+      for (const k of fx) if (keys.indexOf(k) < 0) keys.push(k);
+    }
+    for (const k of keys) _lxQueueFxSet((typeof _fxAnimFrames === 'function') ? _fxAnimFrames(k) : null, 640);   // starts the downloads and decodes
+  } catch (e) {}
+}
+// v0.30.636 - MOB ATTACK ART, the same idea for the other side of the fight. The engage probe, taught to name
+// every image pinned on its first draw once a pack is met, found that what remained was the pack's own
+// attack art: the dash streak, the poison cloud and the quake ring (nine frames each, all pinned the
+// moment the first one played) plus the per-type swing, column and telegraph sprites. They now queue
+// the first time a type spawns - behind the map veil, for a map's roster - from what the type itself
+// declares: its MONSTER_SKILLS kind, the swing and column-telegraph art keyed on its name, and any
+// trait field that names an FX sprite (columnStrike's `sprite`). A single image queues a pin job, which
+// the drain serves two a pass once it has decoded. Static fallbacks are left alone: they are only
+// drawn while a set's frames are not ready, and after this the frames are.
+// vfx: _lxVfxFrame loops; fx: _fxAnimFrames sets; img: single LX_FX sprites drawn as they are.
+const _LX_MOB_SKILL_ART = {
+  groundStun: { vfx: ['quakePlume'], fx: ['quakeRing'] }, poisonCloud: { vfx: ['poisonCloud'] },
+  dashCharge: { vfx: ['dashStreak'] }, shockwave: { vfx: ['shockRing'] }, lightningStrike: { vfx: ['lightningPillar'] },
+  freezeBeam: { vfx: ['frostBeam'] }, cloudburst: { vfx: ['cloudburst'] },
+  mortarLob: { img: ['meteor_marker'] },   // the landing-zone marker (a marker-only meteor_warn)
+};
+const _LX_MOB_TYPE_ART = {
+  legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },   // his 6 s arena stomp is a mob_quake of his own
+};
+const _LX_MOB_FX_SEEN = new Set();
+function _lxPrewarmMobFx(type, boss) {
+  const seen = type + (boss ? '|boss' : '');
+  if (!type || _LX_MOB_FX_SEEN.has(seen)) return;
+  _LX_MOB_FX_SEEN.add(seen);
+  try {
+    const t = (typeof monsterTypes !== 'undefined') ? monsterTypes[type] : null;
+    if (!t) return;
+    const FX = (typeof LX_FX !== 'undefined' && LX_FX) || {}, pins = [];
+    const one = (im) => { if (im && im.tagName === 'IMG' && pins.indexOf(im) < 0) pins.push(im); };
+    one(FX['swing_' + type]); one(FX['tg_col_' + type]);
+    const tr = t.traits;
+    if (tr && typeof tr === 'object') for (const k in tr) { const v = tr[k]; if (v && typeof v === 'object') for (const f in v) if (typeof v[f] === 'string' && FX[v[f]]) one(FX[v[f]]); }
+    if (tr && tr.braceDash && tr.braceDash.gore) one(FX.fx_taurus_gore);   // the goring charge's impact burst
+    if (boss || t.boss) one(FX.boss_shield);   // drawn while a boss's ward holds
+    const sk = (typeof MONSTER_SKILLS !== 'undefined') ? MONSTER_SKILLS[type] : null;
+    for (const art of [sk && _LX_MOB_SKILL_ART[sk.kind], _LX_MOB_TYPE_ART[type]]) {
+      if (!art) continue;
+      for (const k of (art.img || [])) one(FX[k]);
+      for (const k of (art.vfx || [])) { try { _lxVfxFrame(k); } catch (e) {} _lxQueueFxSet((typeof VFX_ANIM_FRAMES !== 'undefined') ? VFX_ANIM_FRAMES[k] : null, 720); }
+      for (const k of (art.fx || [])) _lxQueueFxSet((typeof _fxAnimFrames === 'function') ? _fxAnimFrames(k) : null, 640);
+    }
+    for (const im of pins) _LX_PREWARM_FXQ.push({ pin: im, tries: 0 });
+  } catch (e) {}
+}
 function _lxPlainOf(img, pw, ph) {
   const _pk = (pw << 16) | ph;
   let _pcM = img._lxPlainCache;
@@ -131204,9 +131371,12 @@ function _lxPinned(img) {
   try {
     const P = CanvasRenderingContext2D.prototype, o = P.drawImage; if (!o || o._lxPinWrap) return;
     window._lxPinStats = { pinned: 0, raw: 0 };   // diagnostics: game-canvas draws served from a pin vs. still raw (too big to pin)
-    const w = function (im, ...a) {
-      if (im && im.tagName === 'IMG' && typeof ctx !== 'undefined' && this === ctx && im.complete && im.naturalWidth > 0) { const p = _lxPinned(im); if (p !== im) { im = p; window._lxPinStats.pinned++; } else window._lxPinStats.raw++; }
-      return o.apply(this, [im, ...a]);
+    // v0.30.636 - no rest array and no spread copy per call: this wrapper sees EVERY drawImage on every
+    // context (hundreds a frame, plus every offscreen bake). The cheap identity test runs first, so the
+    // offscreen blits skip the DOM getters; arguments passes the 3-, 5- and 9-argument forms unchanged.
+    const w = function (im) {
+      if (typeof ctx !== 'undefined' && this === ctx && im && im.tagName === 'IMG' && im.complete && im.naturalWidth > 0) { const p = _lxPinned(im); if (p !== im) { arguments[0] = p; window._lxPinStats.pinned++; } else window._lxPinStats.raw++; }
+      return o.apply(this, arguments);
     };
     w._lxPinWrap = true; P.drawImage = w;
   } catch (e) {}
@@ -131308,7 +131478,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // A render-scale change shifts the buckets, so stale-dpr entries age out of
   // the 8-slot FIFO on their own.
   const _fDpr = _lxBakeDpr();
-  const _bw = Math.max(14, Math.round((dw * _fDpr) / 10) * 10), _bh = Math.max(14, Math.round((dh * _fDpr) / 10) * 10);
+  const _bw = Math.max(14, Math.ceil((dw * _fDpr) / 10) * 10), _bh = Math.max(14, Math.ceil((dh * _fDpr) / 10) * 10);   // v0.30.636 - ceil: a rounded-down bucket drew up to 5 device px short
   // v0.29.735 perf — integer key, not a 5-way string concat per blit per frame.
   // _bw/_bh are 10px buckets far below 65535 so the packing cannot collide;
   // the old string keys simply age out of the FIFO once, self-healing.
@@ -131393,7 +131563,11 @@ const _MOB_SPRITE_CACHE = new Map();
 // new cache generation per pixel of window resize.
 function _lxBakeDpr() {
   const d = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.min(3, _LX_DPR) : 1;
-  return Math.max(1, Math.round(d * 4) / 4);
+  // v0.30.636 - ROUND UP, to eighths. Nearest-quarter rounding could land BELOW the live scale (1.33 ->
+  // 1.25, 1.6 -> 1.5), so every bake keyed on it was blitted as a 6-7% upscale. Rounding up keeps each
+  // blit a downscale; eighths keep the overshoot small (1.33 -> 1.375) and still bucket coarsely
+  // enough that dragging a window cannot mint a cache generation per pixel.
+  return Math.max(1, Math.ceil(d * 8 - 1e-6) / 8);
 }
 function _getCachedScaledSprite(keyPrefix, sprite, srcW, srcH, targetW, targetH) {
   // Bail if dimensions invalid (defensive — callers shouldn't pass these
@@ -142434,7 +142608,8 @@ function _fxRgb(hex) {
          parseInt(h.slice(5, 7), 16);
 }
 function _fxStamp(kind, color, d) {
-  const key = kind + '|' + color + '|' + d;
+  const px = Math.max(8, Math.ceil(d) * 2);   // v0.30.636 - the stamp depends on this alone, so key on it: fractional sizes minted identical canvases
+  const key = kind + '|' + color + '|' + px;
   let c = _FX_STAMPS.get(key);
   if (c) return c;
   // v0.29.477 (perf-pass) — was a wholesale .clear() at 512: the key space
@@ -142448,7 +142623,6 @@ function _fxStamp(kind, color, d) {
     for (const k of _FX_STAMPS.keys()) { _FX_STAMPS.delete(k); if (--_evict <= 0) break; }
   }
   c = document.createElement('canvas');
-  const px = Math.max(8, Math.ceil(d) * 2);
   c.width = px; c.height = px;
   const g = c.getContext('2d');
   const h = px / 2;
@@ -144607,7 +144781,7 @@ function loop(time) {
     const _sfMs = game.monsters;
     if (_sfMs) for (let _sfI = 0; _sfI < _sfMs.length; _sfI++) { const _sfM = _sfMs[_sfI]; if (_sfM && _sfM._ohkoWarnUntil != null && _sfM._ohkoWarnUntil > _sfT) _sfM._ohkoWarnUntil++; }
   }
-  if (_LX_PREWARM_Q.length) _lxPrewarmDrain();   // v0.30.358 — bakes ahead of the draw, through the same budget
+  _lxPrewarmClassFx(); if (_LX_PREWARM_Q.length || _LX_PREWARM_FXQ.length) _lxPrewarmDrain();   // v0.30.358 — bakes ahead of the draw, through the same budget
   game._playMs = (game._playMs || 0) + dt;
   if (!game.paused && typeof _lxBankAccrue === 'function') _lxBankAccrue(dt);   // v0.30.380 — bank interest on play time   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
   if (player._eclipseRain && !game.paused) _lxEclipseTick(dt);   // v0.30.34 - Eclipse clock: same cadence as game.time, so hit-stop cannot stretch the hold past the moon
