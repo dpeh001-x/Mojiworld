@@ -4,7 +4,7 @@
 // lv 70+ 500", "Lv 10 at 50 mojicoins", "for Moji coin increase it to such: Lv 80 1,116 -> 500,
 // Lv 100 216 -> 500", and "boon drop rate 0.05% for low level monsters to 0.2% for high level
 // monsters". So an ordinary monster pays its LEVEL's number (not its row in the stats table), each
-// kill rolling its own +/-12%; coin gear multiplies it again but stops at +500%; a boss keeps its bag under its own
+// kill rolling its own +/-12%; coin gear multiplies it again but stops at +250%; a boss keeps its bag under its own
 // far larger ceiling; and the boon roll runs 0.05% at Lv10 to 0.2% at Lv70+, still limited per hour.
 //   node scripts/drop_cap_test.mjs        MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -52,7 +52,7 @@ try {
       const t = pick(lo, hi); out[key + 'Type'] = t;
       if (!t) continue;
       const lvl = lvOf(t);
-      out[key] = { lv: lvl, base: _lxCoinCapForLevel(lvl), want: Math.round(_lxCoinCapForLevel(lvl) * out.risk), plain: sample(t, at, 0, false, 60), geared: sample(t, at, 0.80, true, 60), rich: sample(t, at, 5.0, true, 40) };
+      out[key] = { lv: lvl, base: _lxCoinCapForLevel(lvl), want: Math.round(_lxCoinCapForLevel(lvl) * out.risk), plain: sample(t, at, 0, false, 60), light: sample(t, at, 0.80, false, 40), geared: sample(t, at, 0.80, true, 60), rich: sample(t, at, 5.0, true, 40) };
       out.gearMax = LX_COIN_GEAR_MAX;
     }
     // a boss keeps its table bag under its own ceiling
@@ -74,8 +74,8 @@ try {
     ok(`a Lv${b ? b.lv : '?'} monster pays its level number (${b ? b.want : '?'})`, b && near(b.plain.mean, b.want, 0.08) && b.plain.max <= Math.round(b.want * 1.12) + 1, b && { want: b.want, mean: b.plain.mean, med: b.plain.med, max: b.plain.max });
   }
   ok('the payout varies kill to kill rather than being a flat number', r.hi && r.hi.plain.distinct >= 10 && r.hi.plain.min < r.hi.want, r.hi && r.hi.plain);
-  ok('coin gear lifts an ordinary kill again (greed + crit boons = x4.5)', ['hi', 'mid', 'lo'].every((k) => r[k] && near(r[k].geared.mean, r[k].plain.mean * 4.5, 0.08)), { hi: r.hi && [r.hi.plain.mean, r.hi.geared.mean], mid: r.mid && [r.mid.plain.mean, r.mid.geared.mean], lo: r.lo && [r.lo.plain.mean, r.lo.geared.mean] });
-  ok('and it stops at +500%: no stack pays past six times the level number', r.gearMax === 6 && ['hi', 'mid', 'lo'].every((k) => r[k] && near(r[k].rich.mean, r[k].plain.mean * 6, 0.08) && r[k].rich.max <= Math.round(r[k].want * 6 * 1.12) + 2), { cap: r.gearMax, hi: r.hi && { plain: r.hi.plain.mean, rich: r.hi.rich.mean, max: r.hi.rich.max, ceiling: Math.round(r.hi.want * 6 * 1.12) } });
+  ok('coin gear lifts an ordinary kill under the cap (greed alone = x1.8)', ['hi', 'mid', 'lo'].every((k) => r[k] && near(r[k].light.mean, r[k].plain.mean * 1.8, 0.08)), { hi: r.hi && [r.hi.plain.mean, r.hi.light.mean], mid: r.mid && [r.mid.plain.mean, r.mid.light.mean], lo: r.lo && [r.lo.plain.mean, r.lo.light.mean] });
+  ok('and it stops at +250%: no stack pays past three and a half times the level number', r.gearMax === 3.5 && ['hi', 'mid', 'lo'].every((k) => r[k] && near(r[k].rich.mean, r[k].plain.mean * 3.5, 0.08) && near(r[k].geared.mean, r[k].plain.mean * 3.5, 0.08) && r[k].rich.max <= Math.round(r[k].want * 3.5 * 1.12) + 2), { cap: r.gearMax, hi: r.hi && { plain: r.hi.plain.mean, geared: r.hi.geared.mean, rich: r.hi.rich.mean, max: r.hi.rich.max, ceiling: Math.round(r.hi.want * 3.5 * 1.12) } });
   ok('the boon roll runs 0.05% on a low-level monster to 0.2% on a Lv70+ one', r.boonRates[0] === 0.05 && r.boonRates[1] === 0.05 && r.boonRates[5] === 0.2 && r.boonRates[6] === 0.2 && r.boonRates[3] === 0.125 && r.boonRates.every((v, i) => i === 0 || v >= r.boonRates[i - 1]), r.boonRates);
   ok('mob boons are still limited per hour: four to Lv60, two above', r.hourCap80 === 2 && r.hourCap50 === 4 && r.spent80 === 2, { at80: r.hourCap80, at50: r.hourCap50, spent: r.spent80 });
   ok('a boss still pays its own bag, far above a monster kill', r.bossCap > 50000 && r.bossPay > 10000, { cap: r.bossCap, pay: r.bossPay });
