@@ -24,6 +24,7 @@ const browser = await chromium.launch({ channel: 'chrome', args: [
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
   '--disable-backgrounding-occluded-windows'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+if (process.env.DRS === 'off') await page.addInitScript(() => { try { localStorage.setItem('lx_drs', 'off'); } catch (e) {} });
 await page.goto(URL + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof loadMap === 'function' && typeof spawnMonster !== 'undefined', { timeout: 60000 }).catch(() => {});
 await page.waitForFunction(() => typeof loadMap === 'function', { timeout: 60000 });
@@ -42,9 +43,10 @@ await page.waitForTimeout(6000);
 // then the player teleports in and a per-second series records frames and canvas creation. ---
 const series = await page.evaluate(async ({ WAIT, SECS }) => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let __projImg = null; const __projSrc = {};   // the image _lxProjScaled is baking, while it runs
   const oce = document.createElement, made = {}, WATCH = ['_lxPlainOf', '_lxPinned', '_lxBitmapToCanvas', '_dnBake', '_lxTintBake', '_lxDrawSoft', '_fxStamp'];
   document.createElement = function (t, ...r) {
-    if (String(t).toLowerCase() === 'canvas') { const s = (new Error().stack || '').split('\n')[2] || '', f = (s.match(/at ([^ (]+)/) || [])[1] || '?', k = WATCH.find((w) => f.endsWith(w)) || 'other'; made[k] = (made[k] || 0) + 1; }
+    if (String(t).toLowerCase() === 'canvas') { const s = (new Error().stack || '').split('\n')[2] || '', f = (s.match(/at ([^ (]+)/) || [])[1] || '?', k = WATCH.find((w) => f.endsWith(w)) || ('?' + f.split('.').pop().slice(-22)); made[k] = (made[k] || 0) + 1; if (__projImg && __projImg.src) { const q = String(__projImg.src).replace(/^.*?Sprites\//, '').replace(/\.webp$/, ''); __projSrc[q] = (__projSrc[q] || 0) + 1; } }
     return oce.call(document, t, ...r);
   };
   const ww = (game.mapData && game.mapData.worldWidth) || 2400, types = Object.keys(monsterTypes).slice(0, 8);
@@ -54,6 +56,10 @@ const series = await page.evaluate(async ({ WAIT, SECS }) => {
   for (let i = 0; i < 28; i++) try { spawnMonster(gx + (i % 7 - 3) * 60, player.y - 40, types[i % types.length]); } catch (e) {}
   await sleep(WAIT);
   window.drawMonster = odm;
+  const __pinSrc = {}, __opin = window._lxPinned;
+  window._lxPinned = function (img) { const c0 = _lxPinCount; const r = __opin.apply(this, arguments); if (_lxPinCount > c0 && img && img.src) { const k = String(img.src).replace(/^.*?Sprites\//, '').replace(/_\d+\.webp$/, '_N').replace(/\.webp$/, ''); __pinSrc[k] = (__pinSrc[k] || 0) + 1; } return r; };
+  const __oproj = window._lxProjScaled;
+  if (typeof __oproj === 'function') window._lxProjScaled = function (img) { __projImg = img; try { return __oproj.apply(this, arguments); } finally { __projImg = null; } };
   const pins0 = _lxPinCount, queue0 = typeof _LX_PREWARM_Q !== 'undefined' ? _LX_PREWARM_Q.length : -1;
   player.x = gx - 30; player.vx = 0;
   const key = (t, k) => window.dispatchEvent(new KeyboardEvent(t, { key: k, bubbles: true })), out = { ww, px, gx, pins0, queue0, rows: [] };
@@ -64,7 +70,7 @@ const series = await page.evaluate(async ({ WAIT, SECS }) => {
     dts.sort((a, b) => a - b); const d = {}; for (const k of Object.keys(made)) { const v = made[k] - (snap[k] || 0); if (v) d[k] = v; }
     out.rows.push({ sec, f: dts.length, p50: +dts[dts.length >> 1].toFixed(1), p95: +dts[Math.floor(dts.length * 0.95)].toFixed(1), max: +dts[dts.length - 1].toFixed(1), slow: dts.filter((x) => x > 33).length, alive: game.monsters.filter((m) => m && m.currentHp > 0).length, pins: _lxPinCount - p0, made: d });
   }
-  document.createElement = oce; return out;
+  document.createElement = oce; out.pinSrc = Object.entries(__pinSrc).sort((x, y) => y[1] - x[1]).slice(0, 16); out.projSrc = Object.entries(__projSrc).sort((x, y) => y[1] - x[1]).slice(0, 12); return out;
 }, { WAIT: Number(process.env.WAIT || 5000), SECS: Number(process.env.SECS || 10) });
 const R = series.rows, first = R.slice(0, 5), rest = R.slice(5);
 const sum = (a, k) => a.reduce((s, r) => s + r[k], 0), mx = (a) => Math.max(...a.map((r) => r.max));
@@ -72,4 +78,6 @@ console.log(`map ww ${series.ww}, player ${Math.round(series.px)} -> pack ${Math
 console.log('sec frames p50 p95 max >33ms alive newPins | canvases that second');
 for (const r of R) console.log(String(r.sec).padStart(3), String(r.f).padStart(5), String(r.p50).padStart(5), String(r.p95).padStart(6), String(r.max).padStart(6), String(r.slow).padStart(4), String(r.alive).padStart(4), String(r.pins).padStart(4), ' |', Object.entries(r.made).sort((a, b) => b[1] - a[1]).map(([k, v]) => k.replace('_lx', '') + ':' + v).join(' '));
 console.log(`ENGAGE first 5 s: frames ${sum(first, 'f')}, >33ms ${sum(first, 'slow')}, worst ${mx(first)} ms, new pins ${sum(first, 'pins')}; after: frames ${sum(rest, 'f')}, >33ms ${sum(rest, 'slow')}, worst ${rest.length ? mx(rest) : '-'} ms`);
+console.log('pinned on first draw during the engage: ' + (series.pinSrc || []).map(([k, v]) => k + ' x' + v).join(', '));
+console.log('projectile bakes minted during the engage: ' + (series.projSrc || []).map(([k, v]) => k + ' x' + v).join(', '));
 await browser.close(); try { _srv.kill(); } catch (e) {}
