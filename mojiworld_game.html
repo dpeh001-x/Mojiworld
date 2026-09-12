@@ -11145,7 +11145,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.637';
+const GAME_VERSION = 'v0.30.638';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -37152,9 +37152,7 @@ function _lxMobCoin(m) {
 //      applied AFTER greed and the grind scalar, so coin gear still helps up to the ceiling,
 //   3. the same taper on the boon roll, plus an hourly ceiling on mob-dropped boons.
 // Boss-kill boons, Sage Mira's offering and expedition blessings are untouched.
-const LX_LATE_LEVEL = 60;              // below this nothing changes
-const LX_LATE_COIN_DECAY = 0.98;       // base coins per level above it
-const LX_LATE_COIN_FLOOR = 0.40;
+const LX_LATE_LEVEL = 60;              // v0.30.638 - now only gates the hourly boon ceiling below
 // v0.30.637 - the per-kill ceiling is the MONSTER'S, not the player's (per user: "scale and cap that
 // a per-kill coin ceiling to be 500 for level 70 mobs and above, with some variations" and "ensure
 // that the lower level monsters mojicoin drop scale is fair"). These are the levels the user named:
@@ -37167,17 +37165,20 @@ const LX_COIN_CAP_FLOOR = 10;          // the weakest monsters still leave somet
 const LX_COIN_CAP_JITTER = 0.12;       // the "some variations" - one roll per kill
 const LX_BOSS_COIN_CAP_BASE = 30000;   // ...and a boss, plus per level of the boss
 const LX_BOSS_COIN_CAP_PER_LV = 2000;
-const LX_BOON_RATE_NORMAL = 0.002;     // v0.30.637 - per user: 0.2% on a normal monster (was 0.5%)
-const LX_LATE_BOON_DECAY = 0.985;
-const LX_LATE_BOON_FLOOR = 0.30;
-function _lxLateCoinMul(lv) {
-  const over = Math.max(0, (lv | 0) - LX_LATE_LEVEL);
-  return over ? Math.max(LX_LATE_COIN_FLOOR, Math.pow(LX_LATE_COIN_DECAY, over)) : 1;
+// v0.30.638 - a normal monster's boon roll scales with ITS level (per user: "boon drop rate 0.05%
+// for low level monsters to 0.2% for high level monsters"): 0.05% at Lv10 and below, climbing
+// straight to 0.2% at Lv70 and above, so hunting bigger monsters is what improves the odds.
+const LX_BOON_RATE_LO = 0.0005, LX_BOON_RATE_LO_LV = 10;
+const LX_BOON_RATE_HI = 0.002,  LX_BOON_RATE_HI_LV = 70;
+function _lxBoonRateForLevel(lv) {
+  const L = Math.max(1, lv | 0);
+  if (L <= LX_BOON_RATE_LO_LV) return LX_BOON_RATE_LO;
+  if (L >= LX_BOON_RATE_HI_LV) return LX_BOON_RATE_HI;
+  return LX_BOON_RATE_LO + (LX_BOON_RATE_HI - LX_BOON_RATE_LO) * (L - LX_BOON_RATE_LO_LV) / (LX_BOON_RATE_HI_LV - LX_BOON_RATE_LO_LV);
 }
-function _lxLateBoonMul(lv) {
-  const over = Math.max(0, (lv | 0) - LX_LATE_LEVEL);
-  return over ? Math.max(LX_LATE_BOON_FLOOR, Math.pow(LX_LATE_BOON_DECAY, over)) : 1;
-}
+// v0.30.638 - _lxLateCoinMul / _lxLateBoonMul retired. They decayed both payouts with the PLAYER's
+// level, which held a Lv80-100 player at a third of the number the monster carries; the per-monster
+// payout (coins) and per-monster rate (boons) say what a kill is worth on their own now.
 function _lxKillCoinCap(m) {
   if (m && (m.isBoss || m.boss || m.zodiacBoss)) {
     const bl = (typeof _mobLevel === 'function') ? _mobLevel(m) : ((player && player.level) | 0);
@@ -37200,19 +37201,28 @@ function _lxCoinCapForLevel(lv) {
   return last[1];
 }
 // The value of ONE coin pile. A kill drops 1-3 of them and they split the kill's payout, so this is
-// the whole payout divided by the pile count - tapered for level, then held under the ceiling.
+// that payout divided by the pile count.
+// v0.30.638 - an ordinary monster pays ITS LEVEL'S number (per user: "Lv 20 at 150 mojicoin, lv 40
+// at 250 ... lv 70+ 500", then "for Moji coin increase it to such: Lv 80 -> 500, Lv 100 -> 500"). The
+// stats table cannot deliver that by itself: its coin column runs from 8 at Lv1 to 357,406 at Lv100, so
+// a ceiling clipped the rich rows while the poorer high-level rows still paid a fifth of the number
+// (Lv100 measured 216 against a 500 ceiling). This IS the wallet-bound figure, so it is divided back
+// through greed, the grind scalar and the kill streak here - which is why coin gear no longer changes
+// an ordinary kill. Difficulty and the world affix still scale it, being opt-in risk. A boss keeps its
+// table bag, held under its own far larger ceiling.
 function _lxKillCoinValue(m, coinMul, piles) {
-  const base = _lxMobCoin(m) * coinMul
-    * (typeof _monsterCoinMult === 'function' ? _monsterCoinMult(m) : 1)
-    * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1)
-    * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1);
-  let total = base * _lxLateCoinMul((player && player.level) | 0);
-  // what the pickup will make of it: greed gear / boons, the grind scalar, the kill-streak bonus
   const wf = (1 + ((player.mods && player.mods.greed) || 0) + ((typeof getEquipBonus === 'function') ? getEquipBonus('greed') : 0))
     * ((typeof MOJICOIN_GAIN_MULT === 'number') ? MOJICOIN_GAIN_MULT : 1)
     * ((typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1);
-  const cap = _lxKillCoinCap(m);
-  if (wf > 0 && total * wf > cap) total = cap / wf;
+  const risk = ((typeof _diffCoinMul === 'function') ? _diffCoinMul() : 1)
+    * ((typeof _affixCoinMul === 'function') ? _affixCoinMul() : 1);
+  const want = _lxKillCoinCap(m) * risk;   // this kill's number for this monster's level, jitter included
+  if (!(m && (m.isBoss || m.boss || m.zodiacBoss))) {
+    const flat = (wf > 0) ? want / wf : want;
+    return Math.max(1, Math.ceil(flat / Math.max(1, piles)));
+  }
+  let total = _lxMobCoin(m) * coinMul * ((typeof _monsterCoinMult === 'function') ? _monsterCoinMult(m) : 1) * risk;
+  if (wf > 0 && total * wf > want) total = want / wf;
   return Math.max(1, Math.ceil(total / Math.max(1, piles)));
 }
 // Mob-dropped boons get an hourly ceiling as well as the rate taper: the rate alone is a coin flip
@@ -94815,7 +94825,7 @@ function killMonster(m) {
   // worth 2x an ordinary mob while still ending up lower than it was.
   // v0.30.444 - normals back to 0.50%: v0.29.864 cut elites to 0.10% and, against its own stated
   // intent ("the tiers the ask did not name must not have moved"), normals 10x to 0.05% too.
-  const _boonRate = ((m.isElite || m.isMiniBoss) ? 0.0010 : LX_BOON_RATE_NORMAL) * _lxLateBoonMul(player.level);   // v0.30.635 - tapered above Lv60
+  const _boonRate = (m.isElite || m.isMiniBoss) ? 0.0010 : _lxBoonRateForLevel((typeof _mobLevel === 'function') ? _mobLevel(m) : (player.level | 0));   // v0.30.638 - 0.05% -> 0.2% by monster level; the hourly ceiling below still applies
   if (tier !== 2 && player.level >= 20 && Math.random() < _boonRate && _lxBoonBudgetOk() && typeof spawnPowerupOrb === 'function') {
     _lxBoonBudgetSpend();   // v0.30.635 - at most _lxBoonHourCap() mob-dropped boons an hour (boss boons and Mira's offering are untouched)
     spawnPowerupOrb(m.x + m.w / 2, m.y + m.h / 2, 'common');

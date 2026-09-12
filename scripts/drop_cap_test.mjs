@@ -1,12 +1,11 @@
-// What one kill can pay, and how often a boon falls.
+// What one kill pays, and how often a boon falls.
 //
-// v0.30.635 tapered late-game coins and put a ceiling on a kill. v0.30.637 moved that ceiling onto
-// the MONSTER (per user: "a per-kill coin ceiling to be 500 for level 70 mobs and above, with some
-// variations", "the lower level monsters mojicoin drop scale is fair", "boon drops capped at 0.2%
-// for normal monsters"): a Lv70+ monster pays at most ~500 into the wallet, each kill rolling its
-// own +/-12%; below Lv70 it follows the levels the user named - Lv10 50, Lv20 150, Lv40 250, Lv50
-// 350, Lv60 400 - interpolating between them;
-// and a normal monster's boon roll is 0.2%, tapering further above Lv60 and limited per hour.
+// v0.30.638, per user: "Lv 20 at 150 mojicoin, lv 40 at 250 moji coin, lvl 50 at 350. lv 60 400,
+// lv 70+ 500", "Lv 10 at 50 mojicoins", "for Moji coin increase it to such: Lv 80 1,116 -> 500,
+// Lv 100 216 -> 500", and "boon drop rate 0.05% for low level monsters to 0.2% for high level
+// monsters". So an ordinary monster pays its LEVEL's number (not its row in the stats table), each
+// kill rolling its own +/-12%; coin gear no longer moves it; a boss keeps its table bag under its own
+// far larger ceiling; and the boon roll runs 0.05% at Lv10 to 0.2% at Lv70+, still limited per hour.
 //   node scripts/drop_cap_test.mjs        MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -21,7 +20,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 160)));
 try {
   await page.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
-  await page.waitForFunction(() => typeof _lxCoinCapForLevel === 'function' && typeof killMonster === 'function', null, { timeout: 180000 });
+  await page.waitForFunction(() => typeof _lxCoinCapForLevel === 'function' && typeof _lxBoonRateForLevel === 'function', null, { timeout: 180000 });
   await page.waitForTimeout(2500);
   await page.evaluate(() => { try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; } player.cls = 'warrior'; player.level = 60; player.invulnerable = 9e9; player.hp = player.maxHp = 99999; loadMap('forest', 300); game.paused = false; });
   await page.waitForTimeout(6000);
@@ -30,59 +29,54 @@ try {
     const MOJI = String.fromCharCode(109, 111, 106, 105, 99, 111, 105, 110);
     const lvOf = (t) => (typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[t]) || 0;
     const types = Object.keys(monsterTypes).filter((t) => lvOf(t) > 0 && !/tower|dummy/i.test(t));
-    // the ceiling curve itself
     out.curve = [5, 10, 20, 30, 40, 50, 60, 70, 80, 100].map((lv) => _lxCoinCapForLevel(lv));
-    out.top = LX_COIN_CAP_TOP; out.boonNormal = LX_BOON_RATE_NORMAL; out.mid15 = _lxCoinCapForLevel(15);
-    // a kill's payout: spawn, kill, sum the piles the way the pickup does
+    // difficulty and the world affix scale the level number on purpose; fold them in before comparing
+    out.risk = ((typeof _diffCoinMul === 'function') ? _diffCoinMul() : 1) * ((typeof _affixCoinMul === 'function') ? _affixCoinMul() : 1);
+    out.mid15 = _lxCoinCapForLevel(15);
+    out.boonRates = [5, 10, 20, 40, 60, 70, 100].map((lv) => +(_lxBoonRateForLevel(lv) * 100).toFixed(4));
+    // one kill, summed the way the pickup does
     const killPay = (t, lv, greed, crit) => {
       player.level = lv; player.mods = player.mods || {}; player.mods.greed = greed; player.mods.goldBlood = crit ? 0.4 : 0;
       player._activeSynergies = crit ? { treasureCrits: true } : {};
       game.drops.length = 0; game.monsters.length = 0;
-      const m = spawnMonster(700, 400, t); if (!m || m._suppressed) return null;
-      m._killedByCrit = crit; m.currentHp = 0; player.exp = 0;
-      killMonster(m); player.level = lv;
+      const mm = spawnMonster(700, 400, t); if (!mm || mm._suppressed) return null;
+      mm._killedByCrit = crit; mm.currentHp = 0; player.exp = 0;
+      killMonster(mm); player.level = lv;
       let g = 0; for (const d of game.drops) if (d && d.type === MOJI && d.value > 0) g += Math.floor(Math.floor(d.value * (1 + greed)) * MOJICOIN_GAIN_MULT);
-      return { pay: g, mobLv: (typeof _mobLevel === 'function') ? _mobLevel(m) : lv, piles: game.drops.filter((d) => d && d.type === MOJI).length };
+      return { pay: g, mobLv: (typeof _mobLevel === 'function') ? _mobLevel(mm) : lv, boss: !!(mm.isBoss || mm.boss || mm.zodiacBoss) };
     };
-    const firstKillable = (pool) => { for (const t of pool) { const k = killPay(t, 60, 0, false); if (k && k.pay > 0) return t; } return null; };
-    // a Lv70+ monster, geared, over many kills: the ceiling holds and it is not a flat number
-    const hi = types.filter((t) => lvOf(t) >= 70);
-    const hiType = firstKillable(hi);
-    out.hiType = hiType; out.hiPool = hi.length;
-    if (hiType) {
-      const pays = []; for (let i = 0; i < 120; i++) { const k = killPay(hiType, 80, 0.80, true); if (k) pays.push(k.pay); }
-      pays.sort((a, b) => a - b);
-      out.hi = { n: pays.length, min: pays[0], med: pays[pays.length >> 1], max: pays[pays.length - 1], mean: Math.round(pays.reduce((a, b) => a + b, 0) / pays.length), distinct: new Set(pays).size };
+    // a monster in this level window that really dies through killMonster and drops coins
+    const pick = (lo, hi) => { for (const t of types) { const L = lvOf(t); if (L <= lo || L > hi) continue; const k = killPay(t, 60, 0, false); if (k && !k.boss && k.pay > 0) return t; } return null; };
+    const sample = (t, lv, greed, crit, n) => { const a = []; for (let i = 0; i < n; i++) { const k = killPay(t, lv, greed, crit); if (k && k.pay > 0) a.push(k.pay); } a.sort((x, y) => x - y); return { n: a.length, mean: Math.round(a.reduce((x, y) => x + y, 0) / Math.max(1, a.length)), med: a[a.length >> 1], min: a[0], max: a[a.length - 1], distinct: new Set(a).size }; };
+    for (const [key, lo, hi, at] of [['hi', 70, 200, 80], ['mid', 40, 50, 50], ['lo', 10, 20, 20]]) {
+      const t = pick(lo, hi); out[key + 'Type'] = t;
+      if (!t) continue;
+      const lvl = lvOf(t);
+      out[key] = { lv: lvl, base: _lxCoinCapForLevel(lvl), want: Math.round(_lxCoinCapForLevel(lvl) * out.risk), plain: sample(t, at, 0, false, 60), geared: sample(t, at, 0.80, true, 60) };
     }
-    // a low-level monster: the ceiling sits above what it actually pays, so nothing is clipped there
-    const lo = types.filter((t) => lvOf(t) > 10 && lvOf(t) <= 20);
-    const loType = firstKillable(lo);
-    out.loType = loType;
-    if (loType) {
-      const k = killPay(loType, 20, 0, false);
-      out.lo = { pay: k && k.pay, lv: k && k.mobLv, ceiling: _lxCoinCapForLevel(k ? k.mobLv : 20) };
-    }
-    // boon budget, unchanged by this pass
+    // a boss keeps its table bag under its own ceiling
+    const arena = Object.values(typeof MAPS !== 'undefined' ? MAPS : {}).filter((mp) => mp && mp.isBossArena && mp.bossType).sort((a, b) => (b.levelReq || 0) - (a.levelReq || 0))[0];
+    if (arena) { game.monsters.length = 0; const bm = spawnMonster(700, 400, arena.bossType, true); out.bossCap = bm ? _lxKillCoinCap(bm) : 0; out.bossPay = bm ? Math.floor(_lxKillCoinValue(bm, 1, 1) * MOJICOIN_GAIN_MULT) : 0; game.monsters.length = 0; }
+    // the hourly boon ceiling
     player.level = 80; player._boonWin = []; out.hourCap80 = _lxBoonHourCap();
     let spent = 0; while (_lxBoonBudgetOk() && spent < 20) { _lxBoonBudgetSpend(); spent++; }
     out.spent80 = spent;
     player.level = 50; player._boonWin = []; out.hourCap50 = _lxBoonHourCap();
-    out.boonTaper = { at60: _lxLateBoonMul(60), at100: +_lxLateBoonMul(100).toFixed(3) };
-    // a boss keeps its own, far larger ceiling
-    const arena = Object.values(typeof MAPS !== 'undefined' ? MAPS : {}).filter((mp) => mp && mp.isBossArena && mp.bossType).sort((a, b) => (b.levelReq || 0) - (a.levelReq || 0))[0];
-    if (arena) { game.monsters.length = 0; const bm = spawnMonster(700, 400, arena.bossType, true); out.bossCap = bm ? _lxKillCoinCap(bm) : 0; game.monsters.length = 0; }
     return out;
   });
   console.log(JSON.stringify(r));
-  const c = r.curve;
-  ok('the ceiling hits the levels asked for: 50 / 150 / 250 / 350 / 400 / 500', c[1] === 50 && c[2] === 150 && c[4] === 250 && c[5] === 350 && c[6] === 400 && c[7] === 500 && c[8] === 500 && c[9] === 500, c);
-  ok('it climbs with the monster and interpolates between those levels', c.every((v, i) => i === 0 || v >= c[i - 1]) && c[3] > 150 && c[3] < 250 && r.mid15 === 100, { curve: c, lv15: r.mid15 });
-  ok('a geared kill on a Lv70+ monster lands on that ceiling', r.hi && r.hi.max <= Math.round(500 * 1.12) + 1 && r.hi.mean >= 430 && r.hi.mean <= 510, r.hi);
-  ok('and it varies kill to kill rather than paying a flat 500', r.hi && r.hi.distinct >= 15 && r.hi.min <= Math.round(500 * 0.95), r.hi);
-  ok('a low-level kill is held to its own level ceiling', r.lo && r.lo.pay > 0 && r.lo.pay <= Math.round(r.lo.ceiling * 1.12) + 1, r.lo);
-  ok('a normal monster rolls a boon at 0.2%', r.boonNormal === 0.002, r.boonNormal);
-  ok('boons still taper above Lv60 and are limited per hour', r.boonTaper.at60 === 1 && r.boonTaper.at100 < 0.6 && r.hourCap80 === 2 && r.hourCap50 === 4 && r.spent80 === 2, { taper: r.boonTaper, at80: r.hourCap80, at50: r.hourCap50 });
-  ok('a boss keeps its own far larger ceiling', r.bossCap > 50000, r.bossCap);
+  const c = r.curve, near = (got, want, tol) => got >= want * (1 - tol) && got <= want * (1 + tol);
+  ok('the curve hits the levels asked for: 50 / 150 / 250 / 350 / 400 / 500', c[1] === 50 && c[2] === 150 && c[4] === 250 && c[5] === 350 && c[6] === 400 && c[7] === 500 && c[8] === 500 && c[9] === 500, c);
+  ok('it climbs with the monster and interpolates between those levels', c.every((v, i) => i === 0 || v >= c[i - 1]) && c[3] === 200 && r.mid15 === 100, { curve: c, lv15: r.mid15 });
+  for (const k of ['hi', 'mid', 'lo']) {
+    const b = r[k];
+    ok(`a Lv${b ? b.lv : '?'} monster pays its level number (${b ? b.want : '?'})`, b && near(b.plain.mean, b.want, 0.08) && b.plain.max <= Math.round(b.want * 1.12) + 1, b && { want: b.want, mean: b.plain.mean, med: b.plain.med, max: b.plain.max });
+  }
+  ok('the payout varies kill to kill rather than being a flat number', r.hi && r.hi.plain.distinct >= 10 && r.hi.plain.min < r.hi.want, r.hi && r.hi.plain);
+  ok('coin gear no longer changes an ordinary kill', ['hi', 'mid', 'lo'].every((k) => r[k] && near(r[k].geared.mean, r[k].plain.mean, 0.08)), { hi: r.hi && [r.hi.plain.mean, r.hi.geared.mean], mid: r.mid && [r.mid.plain.mean, r.mid.geared.mean], lo: r.lo && [r.lo.plain.mean, r.lo.geared.mean] });
+  ok('the boon roll runs 0.05% on a low-level monster to 0.2% on a Lv70+ one', r.boonRates[0] === 0.05 && r.boonRates[1] === 0.05 && r.boonRates[5] === 0.2 && r.boonRates[6] === 0.2 && r.boonRates[3] === 0.125 && r.boonRates.every((v, i) => i === 0 || v >= r.boonRates[i - 1]), r.boonRates);
+  ok('mob boons are still limited per hour: four to Lv60, two above', r.hourCap80 === 2 && r.hourCap50 === 4 && r.spent80 === 2, { at80: r.hourCap80, at50: r.hourCap50, spent: r.spent80 });
+  ok('a boss still pays its own bag, far above a monster kill', r.bossCap > 50000 && r.bossPay > 10000, { cap: r.bossCap, pay: r.bossPay });
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'}(${fail}) - ${pass} passed, ${fail} failed`);
