@@ -145,7 +145,7 @@ export function parseReport(text, source) {
     const hdr = line.match(/^(NEEDS WORK|NOT SURE|MARKED GOOD, BUT WITH A COMMENT|COMMENTED, NO VERDICT GIVEN|MARKED GOOD, NOTHING TO CHANGE)\b/);
     if (hdr) { verdict = { 'NEEDS WORK': 'bad', 'NOT SURE': 'meh', 'MARKED GOOD, BUT WITH A COMMENT': 'good', 'COMMENTED, NO VERDICT GIVEN': 'none', 'MARKED GOOD, NOTHING TO CHANGE': 'ok' }[hdr[1]]; cur = null; continue; }
     if (verdict === 'ok') continue;
-    const item = line.match(/^\s*\d+\.\s+(.+?)\s+\[(hit sound|death sound|NPC voice|fallback sound)\]\s*$/);
+    const item = line.match(/^\s*\d+\.\s+(.+?)\s+\[(hit sound|death sound|skill sound|NPC voice|fallback sound)\]\s*$/);
     if (item) { cur = { name: item[1], verdict, comment: '', source }; out.push(cur); continue; }
     if (!cur) continue;
     const f = line.match(/^\s*file:\s*(\S+)/); if (f) { cur.file = f[1].replace(/\\/g, '/'); continue; }
