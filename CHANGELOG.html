@@ -121,6 +121,34 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code> &middot; <a href="https://www.patreon.com/c/Mojiworld" style="color:#c9a6ff;">&hearts; Support on Patreon</a></div>
 </header>
 
+<h2>v0.30.636 <span class="tag"><span class="pill perf">perf</span> HD first: fights keep full resolution, platforms are drawn sharp, and a fight's effects are ready before it starts</span></h2>
+<p>Per user: <i>help improve on the lag even more, also try to keep images as HD as possible</i>. Two measurements drove this. A new HD probe (<code>scripts/perf_hd_probe.mjs</code>) records every draw that stretches an image past its own pixels while each class casts through a 24-monster fight. The engage probe now names each image prepared for the first time mid-fight.</p>
+<ul>
+<li><b>The resolution no longer drops by itself.</b> In a dense fight the resolution governor lowered the render scale on the default High preset. The HD probe caught a 1.33 screen dropping to 1.0 and then to 0.75, which softens every image at once. The governor now runs only on Medium (down to native resolution) and Low (down to 0.75, as before). High keeps full resolution. The effect tiers still trim extra effects on every preset, which costs effects, not sharpness.</li>
+<li><b>Platforms, floors and the portal name are drawn at screen resolution.</b> They were cached as bitmaps at 1&times; and stretched to the screen: 1.36&times; on a 1.33 screen, about 1.9&times; at 1080p fullscreen. They are now cached at the screen's scale and drawn back at their own size. A very large floor lowers its scale so its memory stays within the old budget.</li>
+<li><b>Cached sprites round up.</b> Every cache keyed on the screen scale rounded it to the nearest quarter, so a 1.33 screen got 1.25 bakes, a 6&ndash;7% stretch on each one. The scale now rounds up in eighths (1.33 &rarr; 1.375), so every cached draw is a downscale. Soft-edged sprites round their size up the same way.</li>
+<li>Measured with the HD probe on an 8-second fight. With the governor as shipped, the build before this pass (v0.30.632) dropped to 0.75 scale and this one held 1.33 throughout. With the governor off, so that both builds draw at the same scale, stretched draws went from 2,283 to 286 for the Warrior and from 1,917 to 309 for the Mage. What is left is mostly art that is smaller than the size it is drawn at.</li>
+<li><b>Your skill effects are ready before you cast them.</b> An effect animation was created on its first cast, so that cast paid for the download, the decode and nine frame copies in one frame. The sets your class, job and master can cast are now loaded as soon as they are known, and their frames are prepared a few at a time. Which effects each skill plays was measured by casting every skill of every class.</li>
+<li><b>So are the monsters' attacks.</b> After that, the engage probe's list of first-draw images was the pack's own attack art: the dash streak, the poison cloud and the quake ring (nine frames each, all prepared the moment the first one played), plus each type's swing, column and telegraph sprites, the boss ward and the mortar marker. They are now queued when a monster type first spawns, which for a map's own monsters is behind the loading screen.</li>
+<li><b>The monster warm-up still comes first.</b> Effect preparation has its own queue and only uses frames where the monster warm-up has nothing to do (and every frame behind the loading screen). The monster warm-up runs exactly as before, and no frame pays for both.</li>
+<li><b>Less work every frame.</b> These came from a static review of the render path:
+<ul>
+<li>The <code>drawImage</code> wrapper, which every draw goes through, no longer builds two arrays per call.</li>
+<li>The hero rig builds each bone chain, and the attack-leg keyframe tables, once instead of on every call.</li>
+<li>Growing slashes and explosions reuse a small set of cached sizes instead of making a new one on most frames.</li>
+<li>The projectile cache drops its oldest entry instead of clearing itself.</li>
+<li>Effect stamps are cached by pixel size, so fractional sizes no longer make duplicates.</li>
+</ul></li>
+</ul>
+<p>Measured with the engage probe: a 28-monster pack spawns out of sight and is then reached, with the governor off on both builds and two interleaved runs each, against v0.30.632 (the build this pass started from). In the first 5 seconds:</p>
+<ul>
+<li>Frames over 33&nbsp;ms went from 18 and 9 to 8 and 2.</li>
+<li>The worst frame went from 68 and 57&nbsp;ms to 50 and 47&nbsp;ms.</li>
+<li>Images prepared mid-fight went from 55 and 17 to 1 and 1 (a launch pad).</li>
+</ul>
+<p>By the time the pack was reached, 93 images were ready, against 24 and 51.</p>
+<p>Verified: <code>hd_prewarm_test</code> 12/12. It is new and checks the governor policy, the rounding up, device-resolution platforms that do not re-bake when the scale eases, class and monster effects queued and ready before the fight, the draw wrapper's call forms, the bounded growth bakes, and the rig chains and leg tables. Other tests: <code>drs_test</code> 7/8 (High holds full resolution under load, Medium steps down, and the off switch is now tested with a reload); <code>dropcap_drs_test</code> 7/7; <code>platform_paint_test</code> 55/55 (it now reads device-resolution bakes at their own size); <code>prewarm_engage_test</code> 5/5; <code>decode_pin_test</code> 4/4; <code>perf_draw_smoke_test</code> 10/10; <code>render_scale_test</code> 7/7; <code>fitscale_cache_test</code> 5/5; <code>mobile_render_test</code> 11/11. Three checks fail the same way on v0.30.632 on the test machine, so this change did not cause them. The first is the governor's climb back to full scale: headless frames there are too slow to count as clean, and both builds stayed at 1.0 for 260&nbsp;s. The others are <code>perf_loop_smoke_test</code>'s afterimage check and <code>perf_blit_route_test</code>'s meteor check.</p>
+
 <h2>v0.30.635 <span class="tag"><span class="pill balance">balance</span> Late-game gold and boons: tapered above Lv 60, and a ceiling on any one kill</span></h2>
 <p>Per user: <i>cap and decrease the boon and gold drops at later levels especially above level 60 &mdash; my tester is getting too much gold and boons</i>. Measured first, on the build before this one (<code>scripts/economy_audit.mjs</code>, 300 kills a band in two profiles): coins reaching the wallet per ordinary kill climbed to 1,706 at Lv 80 plain and 7,549 for a greed build, single kills spiked past 23,760, and boons fell at 1.7 per 1,000 kills with no ceiling at all &mdash; roughly five an hour into a fifty-slot bag.</p>
 <p>Three levers, none of which touch a character at or below Lv 60 in ordinary play:</p>
