@@ -11172,7 +11172,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.644';
+const GAME_VERSION = 'v0.30.645';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57018,6 +57018,49 @@ function _renderWorldMapDiagram(host, opts) {
   _gdefs.appendChild(_mkPlanet('wm-planet',        'rgba(120,95,185,0.95)', 'rgba(58,40,95,0.92)',  'rgba(22,14,42,0.95)'));
   _gdefs.appendChild(_mkPlanet('wm-planet-hub',    'rgba(255,215,120,0.95)','rgba(150,105,35,0.95)','rgba(70,45,12,0.95)'));
   _gdefs.appendChild(_mkPlanet('wm-planet-locked', 'rgba(60,50,85,0.85)',  'rgba(30,22,48,0.8)',   'rgba(12,8,24,0.85)'));
+  // v0.30.645 — the paint box for the art pass.
+  // LANES: a lane used to be one flat colour from disc to disc, so it ended on a hard stub. Each
+  // tier now gets a gradient that is transparent at both ends and full in the middle, so a lane
+  // rises out of the dark, carries, and dissolves again. Two directions cover both diagonals of a
+  // bounding box ('d' = the lane runs down-right, 'u' = up-right); the bow guarantees every lane's
+  // box has real height, which is what objectBoundingBox needs.
+  const _mkLane = (id, col, up) => {
+    const lg = document.createElementNS(SVG_NS, 'linearGradient');
+    lg.setAttribute('id', id);
+    lg.setAttribute('x1', '0'); lg.setAttribute('y1', up ? '1' : '0');
+    lg.setAttribute('x2', '1'); lg.setAttribute('y2', up ? '0' : '1');
+    for (const [o, a] of [['0%', 0], ['16%', 1], ['84%', 1], ['100%', 0]]) {
+      const st = document.createElementNS(SVG_NS, 'stop');
+      st.setAttribute('offset', o);
+      st.setAttribute('stop-color', col);
+      st.setAttribute('stop-opacity', a);
+      lg.appendChild(st);
+    }
+    _gdefs.appendChild(lg);
+  };
+  for (const [tier, col] of [['hi', 'rgb(216,200,255)'], ['mid', 'rgb(204,182,250)'], ['lo', 'rgb(180,166,232)'], ['act', 'rgb(170,225,255)']]) {
+    _mkLane('wm-lane-' + tier + '-d', col, false);
+    _mkLane('wm-lane-' + tier + '-u', col, true);
+  }
+  // NODES: a soft contact shadow under each disc and a glass highlight over it. Together they lift
+  // the pin off the plate - the discs used to read as flat stickers on the nebula.
+  const _mkSoft = (id, stops) => {
+    const rg = document.createElementNS(SVG_NS, 'radialGradient');
+    rg.setAttribute('id', id);
+    for (const [o, c] of stops) {
+      const st = document.createElementNS(SVG_NS, 'stop');
+      st.setAttribute('offset', o); st.setAttribute('stop-color', c);
+      rg.appendChild(st);
+    }
+    _gdefs.appendChild(rg);
+    return rg;
+  };
+  _mkSoft('wm-shadow', [['0%', 'rgba(4,2,12,0.62)'], ['58%', 'rgba(4,2,12,0.34)'], ['100%', 'rgba(4,2,12,0)']]);
+  const _gloss = _mkSoft('wm-gloss', [['0%', 'rgba(255,255,255,0.30)'], ['46%', 'rgba(255,255,255,0.07)'], ['72%', 'rgba(255,255,255,0)']]);
+  _gloss.setAttribute('cx', '34%'); _gloss.setAttribute('cy', '26%'); _gloss.setAttribute('r', '62%');
+  // AIR: the lit rim of an atmosphere, brightest just inside the limb. This is what makes the field
+  // read as the face of a sphere rather than as a circle drawn on black.
+  _mkSoft('wm-dome', [['0%', 'rgba(120,170,255,0)'], ['58%', 'rgba(120,170,255,0.025)'], ['86%', 'rgba(140,195,255,0.075)'], ['97%', 'rgba(180,215,255,0.055)'], ['100%', 'rgba(180,215,255,0)']]);
   svg.appendChild(_gdefs);
   const _gstyle = document.createElementNS(SVG_NS, 'style');
   _gstyle.textContent =
@@ -57114,6 +57157,14 @@ function _renderWorldMapDiagram(host, opts) {
   // filters, nothing per-frame in JS - and it is skipped entirely on the lowest FX tier.
   if (!(typeof LX_PERF !== 'undefined' && LX_PERF.veryLowFx)) {
     const _R = Math.min(W, H) * 0.46;
+    // v0.30.645 — the air on the globe. Painted once, still, under the turning rings: a lit rim just
+    // inside the limb, so the field has depth even when nothing is moving.
+    const _air = document.createElementNS(SVG_NS, 'circle');
+    _air.setAttribute('cx', cx.toFixed(1)); _air.setAttribute('cy', cy.toFixed(1));
+    _air.setAttribute('r', (_R * 1.04).toFixed(1));
+    _air.setAttribute('fill', 'url(#wm-dome)');
+    _air.setAttribute('pointer-events', 'none');
+    svg.appendChild(_air);
     const _spin = document.createElementNS(SVG_NS, 'g');
     _spin.setAttribute('class', 'wm-spin');
     _spin.setAttribute('pointer-events', 'none');
@@ -57269,8 +57320,12 @@ function _renderWorldMapDiagram(host, opts) {
     const path = document.createElementNS(SVG_NS, 'path');
     path.setAttribute('d', _wmCurvePath(pathFrom, pathTo));
     path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', isRemoved ? 'rgba(255,80,80,0.65)'
-      : _known === 2 ? 'rgba(216,200,255,0.58)' : _known === 1 ? 'rgba(204,182,250,0.40)' : 'rgba(180,166,232,0.28)');
+    // v0.30.645 — the lane fades out at both ends instead of stopping dead. Direction picks the diagonal
+    // the gradient runs along; opacity per tier stays exactly where v0.30.644 tuned it.
+    const _laneUp = ((pathTo.x - pathFrom.x) * (pathTo.y - pathFrom.y)) < 0;
+    const _laneKey = 'url(#wm-lane-' + (_known === 2 ? 'hi' : _known === 1 ? 'mid' : 'lo') + (_laneUp ? '-u)' : '-d)');
+    path.setAttribute('stroke', isRemoved ? 'rgba(255,80,80,0.65)' : _laneKey);
+    path.setAttribute('opacity', isRemoved ? '1' : (_known === 2 ? '0.58' : _known === 1 ? '0.40' : '0.28'));
     path.setAttribute('stroke-width', isRemoved ? '2.2' : (_known === 2 ? '1.8' : '1.45'));
     path.setAttribute('stroke-linecap', 'round');
     if (isRemoved) path.setAttribute('stroke-dasharray', '8,6');
@@ -57282,7 +57337,8 @@ function _renderWorldMapDiagram(host, opts) {
     // v0.26.869 — ACTIVE STARLANES: links touching the current map brighten
     // and carry a travelling light pulse (SMIL animateMotion along the lane).
     if (!isRemoved && !_wmEditMode && (d.lo === cur || d.hi === cur)) {
-      path.setAttribute('stroke', 'rgba(170,225,255,0.85)');
+      path.setAttribute('stroke', 'url(#wm-lane-act' + (_laneUp ? '-u)' : '-d)'));
+      path.setAttribute('opacity', '0.85');   // v0.30.645 — the lane you are standing on dissolves too
       path.setAttribute('stroke-width', '2.2');
       path.setAttribute('stroke-dasharray', 'none');   // v0.30.644 — where you stand is the brightest thing on the map
       const _pulse = document.createElementNS(SVG_NS, 'circle');
@@ -57478,6 +57534,15 @@ function _renderWorldMapDiagram(host, opts) {
     _hoverHalo.setAttribute('stroke-width', '1.5');
     _hoverHalo.setAttribute('pointer-events', 'none');
     g.appendChild(_hoverHalo);
+    // v0.30.645 — a soft contact shadow, offset down, so the pin sits IN the plate rather than on it.
+    if (!_nodeHidden) {
+      const _shadow = document.createElementNS(SVG_NS, 'ellipse');
+      _shadow.setAttribute('cx', '0'); _shadow.setAttribute('cy', '4');
+      _shadow.setAttribute('rx', here ? '27' : '24'); _shadow.setAttribute('ry', here ? '25' : '22');
+      _shadow.setAttribute('fill', 'url(#wm-shadow)');
+      _shadow.setAttribute('pointer-events', 'none');
+      g.appendChild(_shadow);
+    }
     // Node disc
     const disc = document.createElementNS(SVG_NS, 'circle');
     disc.setAttribute('class', 'wm-disc');              // v0.26.869 — hover-glow CSS hook
@@ -57489,6 +57554,15 @@ function _renderWorldMapDiagram(host, opts) {
     disc.setAttribute('stroke-width', here ? 3.5 : ((_isSafeHub || _isBoss) ? 3 : 2.5));
     if (!acc.ok && !_isSafeHub && !_taxiDim) disc.setAttribute('opacity', '0.55');  // v0.26.498 — _taxiDim handles its own 20% group opacity
     g.appendChild(disc);
+    // v0.30.645 — one glass highlight over the sphere, upper left, under the region sprite so the art
+    // stays crisp. Skipped on locked nodes: a thing you cannot reach should not catch the light.
+    if (acc.ok || here) {
+      const _gl = document.createElementNS(SVG_NS, 'circle');
+      _gl.setAttribute('r', here ? 24 : 21);
+      _gl.setAttribute('fill', 'url(#wm-gloss)');
+      _gl.setAttribute('pointer-events', 'none');
+      g.appendChild(_gl);
+    }
     // v0.25.985 — Outer halo for safe hubs (skipped if current map's
     // own gold "here" halo is already painted). Adds a thin gold ring
     // ~4 px outside the disc so the safe-hub read is unmistakable
@@ -57581,9 +57655,10 @@ function _renderWorldMapDiagram(host, opts) {
       lvLbl.setAttribute('x', 0);
       lvLbl.setAttribute('y', lvY + lvH - 4);  // baseline ~4 px above the pill bottom
       lvLbl.setAttribute('text-anchor', 'middle');
-      lvLbl.setAttribute('font-size', '12');
-      lvLbl.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+      lvLbl.setAttribute('font-size', '11');
+      lvLbl.setAttribute('font-family', "'Cinzel', 'Trebuchet MS', Georgia, serif");   // v0.30.645
       lvLbl.setAttribute('font-weight', '700');
+      lvLbl.setAttribute('letter-spacing', '0.5');
       lvLbl.setAttribute('fill', here ? '#ffe6a8' : (_isSafeHub ? '#ffe6a8' : (acc.ok ? tierCol : '#aa6677')));
       lvLbl.setAttribute('pointer-events', 'none');
       lvLbl.textContent = lvText;
@@ -57679,8 +57754,11 @@ function _renderWorldMapDiagram(host, opts) {
     label.setAttribute('class', 'wm-node-label');      // v0.26.x — tagged for the de-overlap post-pass
     label.setAttribute('y', 52);                       // was 38
     label.setAttribute('text-anchor', 'middle');
-    label.setAttribute('font-size', '12');             // v0.26.x was 14
-    label.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+    label.setAttribute('font-size', '11.5');           // v0.26.x was 14 · v0.30.645 12 -> 11.5 for Cinzel's wider cut
+    // v0.30.645 — the map wore the browser's UI font while the rest of the game is set in Cinzel and
+    // Cormorant. Place names are the one thing on this screen that should read as engraved.
+    label.setAttribute('font-family', "'Cinzel', 'Trebuchet MS', Georgia, serif");
+    label.setAttribute('letter-spacing', '0.7');
     label.setAttribute('font-weight', here ? '700' : '500');
     label.setAttribute('pointer-events', 'none');
     // v0.26.x — Per user: don't reveal a location's NAME until the player has
@@ -57713,8 +57791,10 @@ function _renderWorldMapDiagram(host, opts) {
     const sub = document.createElementNS(SVG_NS, 'text');
     sub.setAttribute('y', 70);                         // was 50
     sub.setAttribute('text-anchor', 'middle');
-    sub.setAttribute('font-size', '12');               // was 9
-    sub.setAttribute('font-family', 'Trebuchet MS, sans-serif');
+    sub.setAttribute('font-size', '12.5');             // was 9 · v0.30.645 — Cormorant runs small
+    sub.setAttribute('font-family', "'Cormorant Garamond', Georgia, serif");   // v0.30.645
+    sub.setAttribute('font-style', 'italic');
+    sub.setAttribute('letter-spacing', '0.3');
     sub.setAttribute('fill', here ? '#ffdd88' : (acc.ok ? '#999' : '#aa6677'));
     sub.setAttribute('pointer-events', 'none');
     // v0.25.638 — Suppress "Lv 1+" sub-label entirely. Pre-fix, every
