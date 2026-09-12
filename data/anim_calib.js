@@ -2765,7 +2765,20 @@ window.LX_ANIM_CALIB = {
     }
   },
   "tidepoolTurtle": {
+    "idle": {
+      "s": 1.46,
+      "dx": 0,
+      "dy": 0
+    },
+    "walk": {
+      "s": 1.46,
+      "dx": 0,
+      "dy": 0
+    },
     "attack": {
+      "s": 1.46,
+      "dx": 0,
+      "dy": 0,
       "ft": [
         86,
         72,
@@ -2781,8 +2794,18 @@ window.LX_ANIM_CALIB = {
     }
   },
   "tombKeeper": {
+    "idle": {
+      "s": 1.56,
+      "dx": 0,
+      "dy": 0
+    },
+    "walk": {
+      "s": 1.56,
+      "dx": 0,
+      "dy": 0
+    },
     "attack": {
-      "s": 1,
+      "s": 2.05,
       "dx": 0,
       "dy": 0,
       "ft": [
