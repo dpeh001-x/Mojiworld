@@ -11172,7 +11172,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.645';
+const GAME_VERSION = 'v0.30.646';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57079,6 +57079,12 @@ function _renderWorldMapDiagram(host, opts) {
     '@keyframes wmSpin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} } ' +
     '.wm-spin { animation: wmSpin 240s linear infinite; will-change: transform; } ' +
     '@media (prefers-reduced-motion: reduce) { .wm-spin { animation: none; } } ' +
+    '.wm-lane, .wm-laneglow { transition: opacity 150ms ease; } ' +
+    '.wm-focus .wm-lane, .wm-focus .wm-laneglow { opacity:0.09; } ' +
+    '.wm-focus .wm-lane.wm-lit { opacity:1; } ' +
+    '.wm-focus .wm-laneglow.wm-lit { opacity:0.85; } ' +
+    '.wm-card { opacity:0; transition: opacity 110ms ease; } ' +
+    '.wm-card.on { opacity:1; } ' +
     '.wm-node:hover .wm-disc { stroke-width:4; }';
   svg.appendChild(_gstyle);
   // v0.26.x — static galaxy backdrop: ONE pre-rendered image (cached) in
@@ -57315,6 +57321,8 @@ function _renderWorldMapDiagram(host, opts) {
       glow.setAttribute('stroke-width', '7.5');
       glow.setAttribute('stroke-linecap', 'round');
       glow.setAttribute('pointer-events', 'none');
+      glow.setAttribute('class', 'wm-laneglow');   // v0.30.646 — follows its lane into and out of focus
+      glow.setAttribute('data-a', d.lo); glow.setAttribute('data-b', d.hi);
       svg.appendChild(glow);
     }
     const path = document.createElementNS(SVG_NS, 'path');
@@ -57328,6 +57336,9 @@ function _renderWorldMapDiagram(host, opts) {
     path.setAttribute('opacity', isRemoved ? '1' : (_known === 2 ? '0.58' : _known === 1 ? '0.40' : '0.28'));
     path.setAttribute('stroke-width', isRemoved ? '2.2' : (_known === 2 ? '1.8' : '1.45'));
     path.setAttribute('stroke-linecap', 'round');
+    // v0.30.646 — the two maps this lane joins, so hovering either end can light it
+    path.setAttribute('class', 'wm-lane');
+    path.setAttribute('data-a', d.lo); path.setAttribute('data-b', d.hi);
     if (isRemoved) path.setAttribute('stroke-dasharray', '8,6');
     else if (_known === 0) path.setAttribute('stroke-dasharray', '2,5.5');   // v0.30.644 — a route you have only heard of
     if (!twoWay) {
@@ -57386,6 +57397,79 @@ function _renderWorldMapDiagram(host, opts) {
     }
     return s;
   })();
+  // v0.30.646 — THE HOVER CARD. The map used to answer through an SVG <title>, which is the operating
+  // system's tooltip: a second of delay, the OS font, a grey box outside the art, and no way to
+  // style a word of it. This is the same information as a piece of the game - the place name set in
+  // Cinzel, its level, its roster, and a line telling you what a click will do - drawn inside the
+  // map, appearing the instant you point at a node. The <title> is replaced by an aria-label on the
+  // node group, so screen readers keep the text and the native tooltip stops competing.
+  const _WM_CIN = "'Cinzel', Georgia, serif", _WM_COR = "'Cormorant Garamond', Georgia, serif";
+  const _card = document.createElementNS(SVG_NS, 'g');
+  _card.setAttribute('class', 'wm-card');
+  _card.setAttribute('pointer-events', 'none');
+  const _cardBg = document.createElementNS(SVG_NS, 'rect');
+  _cardBg.setAttribute('rx', '11'); _cardBg.setAttribute('ry', '11');
+  _cardBg.setAttribute('fill', 'rgba(9,5,24,0.94)');
+  _cardBg.setAttribute('stroke', 'rgba(178,150,255,0.5)');
+  _cardBg.setAttribute('stroke-width', '1.2');
+  _card.appendChild(_cardBg);
+  const _cardRule = document.createElementNS(SVG_NS, 'line');   // a hairline under the title
+  _cardRule.setAttribute('stroke', 'rgba(178,150,255,0.28)');
+  _cardRule.setAttribute('stroke-width', '1');
+  _card.appendChild(_cardRule);
+  const _mkCardTxt = (y, face, size, fill, weight, ls) => {
+    const t = document.createElementNS(SVG_NS, 'text');
+    t.setAttribute('x', '15'); t.setAttribute('y', String(y));
+    t.setAttribute('font-family', face); t.setAttribute('font-size', String(size));
+    t.setAttribute('fill', fill);
+    if (weight) t.setAttribute('font-weight', weight);
+    if (ls) t.setAttribute('letter-spacing', String(ls));
+    _card.appendChild(t); return t;
+  };
+  const _cTitle = _mkCardTxt(27, _WM_CIN, 14, '#ffe6a8', '700', 0.8);
+  const _cMeta = _mkCardTxt(46, _WM_COR, 12.5, '#b6a4dd', null, 0.2);
+  const _cRows = [];
+  for (let i = 0; i < 6; i++) _cRows.push(_mkCardTxt(70 + i * 16, _WM_COR, 12.5, '#d7cdf0'));
+  const _cHint = _mkCardTxt(0, _WM_COR, 12.5, '#8fd9ff', null, 0.3);
+  const _wid = (t) => { try { return t.getComputedTextLength ? t.getComputedTextLength() : 0; } catch (e) { return 0; } };
+  // light every lane that touches this map, and drop the rest back
+  const _focusLanes = (mapId) => {
+    for (const el of svg.querySelectorAll('.wm-lit')) el.classList.remove('wm-lit');
+    if (!mapId) { svg.classList.remove('wm-focus'); return; }
+    let n = 0;
+    for (const el of svg.querySelectorAll('.wm-lane, .wm-laneglow')) {
+      if (el.getAttribute('data-a') === mapId || el.getAttribute('data-b') === mapId) { el.classList.add('wm-lit'); n++; }
+    }
+    if (n) svg.classList.add('wm-focus'); else svg.classList.remove('wm-focus');
+  };
+  const _showCard = (px, py, title, meta, rows, hint, hintCol) => {
+    _cTitle.textContent = title;
+    _cMeta.textContent = meta || '';
+    for (let i = 0; i < _cRows.length; i++) {
+      _cRows[i].textContent = rows[i] || '';
+      _cRows[i].setAttribute('y', String(70 + i * 16));
+    }
+    const _rowN = rows.length;
+    const _hintY = (meta ? 70 : 54) + _rowN * 16 + 4;
+    _cHint.textContent = hint || '';
+    _cHint.setAttribute('y', String(_hintY));
+    _cHint.setAttribute('fill', hintCol || '#8fd9ff');
+    let w = Math.max(_wid(_cTitle), _wid(_cMeta), _wid(_cHint));
+    for (const r of _cRows) w = Math.max(w, _wid(r));
+    w = Math.max(150, Math.min(300, w + 30));
+    const h = _hintY + (hint ? 12 : -4);
+    _cardBg.setAttribute('width', w.toFixed(1)); _cardBg.setAttribute('height', h.toFixed(1));
+    _cardRule.setAttribute('x1', '13'); _cardRule.setAttribute('x2', (w - 13).toFixed(1));
+    _cardRule.setAttribute('y1', '36'); _cardRule.setAttribute('y2', '36');
+    // beside the node, flipped and clamped so the card never leaves the frame
+    let x = px + 34, y = py - h / 2;
+    if (x + w > W - 10) x = px - 34 - w;
+    if (x < 10) x = Math.min(W - w - 10, Math.max(10, px + 34));
+    y = Math.max(10, Math.min(H - h - 10, y));
+    _card.setAttribute('transform', 'translate(' + x.toFixed(1) + ',' + y.toFixed(1) + ')');
+    _card.classList.add('on');
+  };
+  const _hideCard = () => { _card.classList.remove('on'); };
   // Nodes
   for (const [id, p] of Object.entries(positions)) {
     const m = MAPS[id]; if (!m) continue;
@@ -57700,7 +57784,35 @@ function _renderWorldMapDiagram(host, opts) {
       }
       _tooltip.textContent = _tLines.join('\n');
     }
-    g.appendChild(_tooltip);
+    // v0.30.646 — the same text the old <title> carried, handed to the card instead, plus a line
+    // saying what a click will do. aria-label keeps it for screen readers with no native tooltip.
+    g.setAttribute('aria-label', _tooltip.textContent.split('\n').join(' · '));
+    {
+      const _cardKnown = here || _visitedMap;
+      const _cardTitleTxt = _cardKnown ? (m.name || id) : '???';
+      const _cardMetaTxt = !_cardKnown ? 'undiscovered'
+        : (_isSafeHub ? 'safe hub' : _isBoss ? 'boss arena' : 'wilds')
+          + ((typeof m.levelReq === 'number' && m.levelReq > 1) ? '  ·  Lv ' + m.levelReq + '+' : '');
+      let _cardRowTxt = [];
+      if (!_cardKnown) _cardRowTxt = ['Travel here to reveal this place.'];
+      else {
+        const _r = _wmMobRoster(m) || [];
+        if (!_r.length) _cardRowTxt = ['No monsters here.'];
+        else {
+          _cardRowTxt = _r.slice(0, 5).map((x) => '·  ' + x.name + '  x' + x.count
+            + ((typeof x.level === 'number' && x.level > 0) ? '   Lv ' + x.level : '') + (x.isBoss ? '   BOSS' : ''));
+          if (_r.length > 5) _cardRowTxt.push('   and ' + (_r.length - 5) + ' more');
+        }
+      }
+      const _cardHintTxt = here ? 'You are here'
+        : !acc.ok ? String(acc.reason || 'Locked').replace(/^\S+\s+/u, (x) => /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u.test(x) ? '' : x)
+        : (opts.mode === 'taxi' ? 'Click to ride here' : 'Click to travel here');
+      const _cardHintCol = here ? '#ffdd88' : !acc.ok ? '#e08a9a' : '#8fd9ff';
+      g.addEventListener('mouseenter', () => {
+        try { _showCard(p.x, p.y, _cardTitleTxt, _cardMetaTxt, _cardRowTxt, _cardHintTxt, _cardHintCol); _focusLanes(id); } catch (e) {}
+      });
+      g.addEventListener('mouseleave', () => { try { _hideCard(); _focusLanes(null); } catch (e) {} });
+    }
     // Biome icon (emoji as SVG text)
     const _icoCh = _WM_BIOME_ICON[id] || '📍';
     // v0.30.643 - the atlas tile when we have one (every biome icon does), the old SVG text only as a
@@ -57851,14 +57963,9 @@ function _renderWorldMapDiagram(host, opts) {
       // would stop on all 80 nodes, ~all of them undiscovered "???" dead ends.
       g.setAttribute('data-wm-pick', '1');
     }
-    // Hover tooltip via title
-    const titleEl = document.createElementNS(SVG_NS, 'title');
-    // v0.25.638 — Tooltip: same Lv-1+ suppression as the visible sub-label.
-    // v0.26.x — Per user: name stays hidden until travelled here too.
-    titleEl.textContent = (here || _visitedMap)
-      ? `${m.name || id}${m.levelReq && m.levelReq > 1 ? ` · Lv ${m.levelReq}+` : ''}${acc.reason ? ` · ${acc.reason}` : ''}`
-      : `??? — undiscovered${acc.reason ? ` · ${acc.reason}` : ''}`;
-    g.appendChild(titleEl);
+    // v0.30.646 — the second <title> went with the first. Both were the operating system's tooltip,
+    // and between them they fired a delayed grey box over the card. The node's aria-label above
+    // carries the full text for screen readers.
     svg.appendChild(g);
   }
   // v0.26.x — Bottom legend (tier swatches + one-way/two-way edge key) REMOVED
@@ -57971,6 +58078,7 @@ function _renderWorldMapDiagram(host, opts) {
   // spread: once the SVG is attached (so it has real geometry), greedily push
   // any name label that still collides with one above it straight down until
   // it clears. Pin-independent, so it survives the live wmX/wmY churn.
+  svg.appendChild(_card);   // v0.30.646 — above every node, so it is never painted over
   if (typeof _wmDeoverlapLabels === 'function') _wmDeoverlapLabels(svg);
   if (typeof _wmPlaceSubTiles === 'function') _wmPlaceSubTiles(svg);   // v0.30.643
 }
