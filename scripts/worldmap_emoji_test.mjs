@@ -56,7 +56,9 @@ await page.waitForTimeout(2500);
 const a = await read();
 checks.push(['the world map draws no operating-system emoji', a.osEmoji.length === 0, a.osEmoji.slice(0, 6).join(' ')]);
 checks.push(['every node icon is an atlas tile', a.tiles >= 80 && a.atlasImages === a.tiles, `${a.tiles} tiles, ${a.atlasImages} atlas images`]);
-checks.push(['the lock tiles are placed left of their centred text', a.subTiles.length > 0 && a.subTiles.every((x) => x < -6 && x > -200), `${a.subTiles.length} locks, x ${a.subTiles.slice(0, 3).join('/')}`]);
+// v0.30.647 silenced the fog, so the "(lock) unexplored" sub-labels - and with them the lock tiles -
+// are gone from a normal map. The placement rule still has to hold for any that do appear.
+checks.push(['any lock tile is placed left of its centred text', a.subTiles.every((x) => x < -6 && x > -200), `${a.subTiles.length} locks${a.subTiles.length ? ', x ' + a.subTiles.slice(0, 3).join('/') : ' (the fog is silent now)'}`]);
 checks.push(['each tile crops one 64 px cell of the sheet', !!a.sample && /^\d+ \d+ 64 64$/.test(a.sample.viewBox) && a.sample.overflow === 'hidden', a.sample ? a.sample.viewBox : 'no tile']);
 checks.push(['the painted region sprites still layer over them', a.regionSprites >= 60, String(a.regionSprites)]);
 // the taxi map renders through the same function

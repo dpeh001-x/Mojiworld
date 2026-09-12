@@ -11172,7 +11172,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.646';
+const GAME_VERSION = 'v0.30.647';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57083,6 +57083,18 @@ function _renderWorldMapDiagram(host, opts) {
     '.wm-focus .wm-lane, .wm-focus .wm-laneglow { opacity:0.09; } ' +
     '.wm-focus .wm-lane.wm-lit { opacity:1; } ' +
     '.wm-focus .wm-laneglow.wm-lit { opacity:0.85; } ' +
+    // v0.30.647 — SEMANTIC ZOOM. Every map that works at this scale (Endless Space 2, Stellaris, Mass
+    // Effect) draws less the further out you are, rather than trying to make 109 labels legible at
+    // once. Ours has three bands: far shows only landmarks, mid adds the places you have walked,
+    // near adds everything. The band is one attribute on the <svg>; CSS does the rest, so panning
+    // and zooming never re-render the diagram.
+    '.wm-lbl { transition: opacity 120ms ease; } ' +
+    'svg[data-wm-zoom="far"] .wm-lbl-near, svg[data-wm-zoom="far"] .wm-lbl-mid { opacity:0; } ' +
+    'svg[data-wm-zoom="mid"] .wm-lbl-near { opacity:0; } ' +
+    // the globe stops turning while you are reading a node - motion under a pointer target is the
+    // one thing every critique of these screens agrees on
+    '.wm-spin { animation-play-state: running; } ' +
+    'svg.wm-focus .wm-spin { animation-play-state: paused; } ' +
     '.wm-card { opacity:0; transition: opacity 110ms ease; } ' +
     '.wm-card.on { opacity:1; } ' +
     '.wm-node:hover .wm-disc { stroke-width:4; }';
@@ -57389,6 +57401,11 @@ function _renderWorldMapDiagram(host, opts) {
   // hover states) make "where can I go from here" the brightest tier of
   // the hierarchy after "you are here" — these nodes get a soft cyan ring
   // that pairs with the existing bright active starlanes.
+  // v0.30.647 — semantic zoom is for a CROWDED map. Early on, the handful of places you have walked are
+  // the most precious thing on the screen, and hiding them at the default zoom would be the fix
+  // working against the player. So while you know 24 places or fewer, everything you know is named
+  // at every zoom; past that the middle band takes over and the far view keeps only the landmarks.
+  const _lblPromote = (() => { try { return Object.keys(game.visitedMaps || {}).length <= 24; } catch (e) { return true; } })();
   const _nextHops = (() => {
     const s = new Set();
     const cm = MAPS[cur];
@@ -57593,12 +57610,25 @@ function _renderWorldMapDiagram(host, opts) {
     const _safeGold   = '#ffd166';
     const _bossRed    = '#ff6b6b';
     const _safeStroke = _isSafeHub ? _safeGold : (_isBoss ? _bossRed : tierCol);
+    // v0.30.647 — the zoom band this node's name and level pill belong to. Landmarks (where you stand,
+    // safe hubs, boss arenas, and anywhere one portal from here) are named at every zoom; other
+    // places you have walked appear at the middle zoom; the rest only when you are close in. Decided
+    // here, above the pill, because the pill and the name have to agree.
+    // (the visited test is inlined rather than reusing _visitedMap, which is declared further down
+    //  with the label itself - reading it here would be a temporal-dead-zone error)
+    const _lblBand = (here || _isSafeHub || _isBoss || _nextHops.has(id)) ? 'wm-lbl-far'
+                   : (here || !!(game.visitedMaps && game.visitedMaps[id]) || _wmDev) ? (_lblPromote ? 'wm-lbl-far' : 'wm-lbl-mid')
+                   : 'wm-lbl-near';
     // v0.26.x — visual hierarchy: ① next-hop ring (one portal away — pairs
     // with the bright starlane), ② undiscovered maps recede (whole node
     // dimmed so explored space pops), ③ filter-free hover halo.
     const _undiscovered = !here && !(game.visitedMaps && game.visitedMaps[id]) && !_wmDev;
     if (_undiscovered && !_taxiDim && !_nodeHidden && !_wmEditMode) {
-      g.setAttribute('opacity', '0.58');
+      // v0.30.647 — deeper than the old 0.58, and the disc and its emblem shrink with it. Elden Ring and
+      // Valhalla both draw the places you have not been to as present but plainly not yours: visible
+      // enough to pull you toward them, quiet enough that the map reads as a record of where you HAVE
+      // been. With the "???" text gone, this dim is the whole fog.
+      g.setAttribute('opacity', '0.46');
     }
     if (!here && _nextHops.has(id) && !_wmEditMode && !_taxiDim) {
       const hopRing = document.createElementNS(SVG_NS, 'circle');
@@ -57630,7 +57660,7 @@ function _renderWorldMapDiagram(host, opts) {
     // Node disc
     const disc = document.createElementNS(SVG_NS, 'circle');
     disc.setAttribute('class', 'wm-disc');              // v0.26.869 — hover-glow CSS hook
-    disc.setAttribute('r', here ? 24 : 21);             // v0.26.336 was 32 / 28 (was 22 / 19)
+    disc.setAttribute('r', here ? 24 : (_undiscovered ? 18.5 : 21));   // v0.26.336 was 32 / 28 · v0.30.647 — the fog sits smaller
     disc.setAttribute('fill',
       _isSafeHub ? 'url(#wm-planet-hub)'                // v0.26.868 — gold planet-sphere for hubs
                  : (acc.ok ? 'url(#wm-planet)' : 'url(#wm-planet-locked)'));   // planet-shaded globes
@@ -57658,13 +57688,8 @@ function _renderWorldMapDiagram(host, opts) {
       _haloRing.setAttribute('stroke', 'rgba(255,221,102,0.40)');
       _haloRing.setAttribute('stroke-width', '1.5');
       _haloRing.setAttribute('pointer-events', 'none');
-      // v0.26.869 — gentle gold shimmer so the safe-hub ring twinkles
-      const _hrA = document.createElementNS(SVG_NS, 'animate');
-      _hrA.setAttribute('attributeName', 'stroke-opacity');
-      _hrA.setAttribute('values', '0.55;1;0.55');
-      _hrA.setAttribute('dur', '3.4s');
-      _hrA.setAttribute('repeatCount', 'indefinite');
-      _haloRing.appendChild(_hrA);
+      // v0.30.647 — the shimmer is gone. A dozen safe hubs twinkling at once is idle motion spread over
+      // the whole map; the motion budget belongs to the one node that matters, which still breathes.
       g.insertBefore(_haloRing, disc);
     }
     // v0.26.x — Boss node ring (crimson), mirroring the safe-hub gold ring,
@@ -57734,6 +57759,7 @@ function _renderWorldMapDiagram(host, opts) {
       pill.setAttribute('stroke-width', '1.5');
       if (!acc.ok && !_isSafeHub && !_taxiDim) pill.setAttribute('opacity', '0.65');
       pill.setAttribute('pointer-events', 'none');
+      pill.setAttribute('class', 'wm-lbl ' + _lblBand);   // v0.30.647 — a pill without its name is noise
       g.appendChild(pill);
       const lvLbl = document.createElementNS(SVG_NS, 'text');
       lvLbl.setAttribute('x', 0);
@@ -57746,6 +57772,7 @@ function _renderWorldMapDiagram(host, opts) {
       lvLbl.setAttribute('fill', here ? '#ffe6a8' : (_isSafeHub ? '#ffe6a8' : (acc.ok ? tierCol : '#aa6677')));
       lvLbl.setAttribute('pointer-events', 'none');
       lvLbl.textContent = lvText;
+      lvLbl.setAttribute('class', 'wm-lbl ' + _lblBand);   // v0.30.647
       g.appendChild(lvLbl);
     }
     // v0.25.715 — Mob roster tooltip. Native SVG <title> renders as a
@@ -57841,7 +57868,7 @@ function _renderWorldMapDiagram(host, opts) {
     // The NAME / level / roster stay fogged as "???" until you travel there;
     // only the icon is revealed, so the map reads as art instead of emoji.
     if (typeof WM_REGION_ICON_IDS !== 'undefined' && WM_REGION_ICON_IDS.has(id)) {
-      const _rsz = here ? 44 : 40;
+      const _rsz = here ? 44 : (_undiscovered ? 35 : 40);   // v0.30.647 — an unwalked emblem sits smaller too
       const rimg = document.createElementNS(SVG_NS, 'image');
       rimg.setAttribute('x', -_rsz / 2);
       rimg.setAttribute('y', -_rsz / 2);
@@ -57863,14 +57890,23 @@ function _renderWorldMapDiagram(host, opts) {
     // The separator must be space-padded, so single hyphenated tokens like
     // "Block-land" stay intact while "Block-land — Toy Meadow" splits at " — ".
     const label = document.createElementNS(SVG_NS, 'text');
-    label.setAttribute('class', 'wm-node-label');      // v0.26.x — tagged for the de-overlap post-pass
+    label.setAttribute('class', 'wm-node-label wm-lbl ' + _lblBand);   // v0.26.x — tagged for the de-overlap post-pass · v0.30.647 — banded
     label.setAttribute('y', 52);                       // was 38
     label.setAttribute('text-anchor', 'middle');
-    label.setAttribute('font-size', '11.5');           // v0.26.x was 14 · v0.30.645 12 -> 11.5 for Cinzel's wider cut
-    // v0.30.645 — the map wore the browser's UI font while the rest of the game is set in Cinzel and
-    // Cormorant. Place names are the one thing on this screen that should read as engraved.
+    // v0.30.647 — the map's type was rendering at 7.8 px on screen: the diagram is drawn in 1529x889
+    // user units and displayed at about 0.68 of that, so 11.5u was never 11.5 px to a player. Names
+    // go to 18u (about 12.3 px on screen) and the place you are standing in to 21u, which is the
+    // only size difference on the map. Everything else that was competing with them is gone.
+    label.setAttribute('font-size', here ? '21' : '18');
     label.setAttribute('font-family', "'Cinzel', 'Trebuchet MS', Georgia, serif");
-    label.setAttribute('letter-spacing', '0.7');
+    label.setAttribute('letter-spacing', here ? '1.4' : '1');
+    // A halo, not an outline: the stroke is painted UNDER the glyph (paint-order), so the letter
+    // shape stays clean and only its surroundings darken. This is how a label survives a painted
+    // background without a plate behind it.
+    label.setAttribute('stroke', 'rgba(16,9,32,0.8)');
+    label.setAttribute('stroke-width', here ? '3.6' : '3');
+    label.setAttribute('stroke-linejoin', 'round');
+    label.style.paintOrder = 'stroke fill';
     label.setAttribute('font-weight', here ? '700' : '500');
     label.setAttribute('pointer-events', 'none');
     // v0.26.x — Per user: don't reveal a location's NAME until the player has
@@ -57880,8 +57916,12 @@ function _renderWorldMapDiagram(host, opts) {
     // it, and it's flagged visited on load).
     const _showName = here || _visitedMap;
     if (!_showName) {
-      label.setAttribute('fill', '#777');
-      label.textContent = '???';
+      // v0.30.647 — an unvisited place used to print "???" under its disc, and a gated one printed
+      // "unexplored" under that. On a fresh save those two strings were 152 of the 161 labels on
+      // screen - 94% of the map's text saying nothing, over the art, 80 times over. The emblem
+      // already says "somewhere you have not been"; the card says the rest the moment you point at
+      // it. So the fog draws no text at all now.
+      label.textContent = '';
     } else {
       label.setAttribute('fill', here ? '#ffe6a8' : (acc.ok ? '#ddd' : '#666'));
       const _nm = m.name || id;
@@ -57918,9 +57958,10 @@ function _renderWorldMapDiagram(host, opts) {
     // v0.26.x — Per user: the always-on "Lv N+" recommended-level sub-label is
     // gone; level info now lives ONLY in the visited-gated pill above. Keep the
     // "you are here" marker and any hard-gate lock reason (e.g. 🔒 Lv 70).
-    let _subTxt = here ? '▸ YOU ARE HERE'
-                    : _taxiDim ? ''   // v0.26.498 — the 20% dim says "not yet"
-                    : (acc.reason || '');
+    // v0.30.647 — the sub-label is now only ever the "you are here" marker. The lock reason it used to
+    // print on every gated node ("unexplored", 72 times on a fresh save) moved into the hover card,
+    // where it is one line, in context, and only when asked for.
+    let _subTxt = here ? '▸ YOU ARE HERE' : '';
     // v0.30.643 - the lock on a gated node was the other SVG emoji. Lift the leading glyph out of the
     // string into an atlas tile and leave the words behind; the tile is placed once the diagram is
     // attached and the text can be measured (_wmPlaceSubTiles, below the de-overlap pass).
@@ -57931,9 +57972,13 @@ function _renderWorldMapDiagram(host, opts) {
       if (_subTile) { _subTxt = _subLead[2]; _subTile.setAttribute('data-lx-subtile', '1'); }
     }
     sub.textContent = _subTxt;
-    if (_subTile) sub.setAttribute('data-lx-sub', '1');
-    g.appendChild(sub);
-    if (_subTile) g.appendChild(_subTile);
+    // v0.30.647 — and if there is nothing to say, nothing is appended. This used to put an empty <text>
+    // under all 80 silent places on every render.
+    if (_subTxt) {
+      if (_subTile) sub.setAttribute('data-lx-sub', '1');
+      g.appendChild(sub);
+      if (_subTile) g.appendChild(_subTile);
+    }
     // v0.25.422 — Click handling. In edit mode every node is clickable
     // (selects → toggles a pair). In normal mode only accessible non-here
     // nodes teleport.
@@ -57983,7 +58028,18 @@ function _renderWorldMapDiagram(host, opts) {
     // ~frame rate, and rAF is suspended in occluded windows (it would eat
     // the update entirely). A setAttribute here is a cheap single-element
     // invalidation; no coalescing needed.
-    const _queueVB = () => { svg.setAttribute('viewBox', vb.x.toFixed(1) + ' ' + vb.y.toFixed(1) + ' ' + vb.w.toFixed(1) + ' ' + vb.h.toFixed(1)); };
+    // v0.30.647 — one attribute carries the zoom band; the CSS above decides what is named. vb.w runs
+    // from W (all the way out) to W/3.5 (all the way in).
+    const _band = () => (vb.w > W * 0.82 ? 'far' : vb.w > W * 0.55 ? 'mid' : 'near');
+    const _queueVB = () => {
+      svg.setAttribute('viewBox', vb.x.toFixed(1) + ' ' + vb.y.toFixed(1) + ' ' + vb.w.toFixed(1) + ' ' + vb.h.toFixed(1));
+      const b = _band();
+      if (svg.getAttribute('data-wm-zoom') !== b) {
+        svg.setAttribute('data-wm-zoom', b);
+        if (typeof _wmDeoverlapLabels === 'function') _wmDeoverlapLabels(svg);   // re-space what is now visible
+      }
+    };
+    svg.setAttribute('data-wm-zoom', _band());
     const _clampVB = () => {
       vb.w = Math.min(W, Math.max(W / 3.5, vb.w)); vb.h = vb.w * (H / W);
       vb.x = Math.min(W - vb.w, Math.max(0, vb.x));
@@ -58109,7 +58165,14 @@ function _wmDeoverlapLabels(svg) {
   const vb = svg.viewBox && svg.viewBox.baseVal;
   if (!vb || !rect.height || !vb.height) return;     // hidden / not laid out yet
   const uPerPx = vb.height / rect.height;            // user units per screen px
-  const labels = Array.from(svg.querySelectorAll('text.wm-node-label'));
+  // v0.30.647 — the pass only ever pushed labels DOWN and never recorded where they started, so calling
+  // it twice walked them off the map. Each label now remembers its authored y and is put back
+  // before every pass, which is what lets the zoom bands re-space the visible set.
+  const labels = Array.from(svg.querySelectorAll('text.wm-node-label')).filter((t) => {
+    if (!t.hasAttribute('data-y0')) t.setAttribute('data-y0', t.getAttribute('y') || '0');
+    t.setAttribute('y', t.getAttribute('data-y0'));
+    return (t.textContent || '').trim() && getComputedStyle(t).opacity !== '0';   // hidden names take no space
+  });
   if (labels.length < 2) return;
   const GAP = 2;                                      // screen-px breathing room
   for (let pass = 0; pass < 3; pass++) {

@@ -65,7 +65,11 @@ checks.push(['every pin casts a shadow', a.withShadow === a.nodes && a.nodes >= 
 checks.push(['reachable pins catch a highlight, locked ones do not', a.withGloss > 0 && a.withGloss < a.nodes, `${a.withGloss}/${a.nodes} glossed`]);
 checks.push(['the globe carries air, painted still under the turning rings', !!a.air && a.air.r > 200 && a.air.inSpin === false, a.air ? `r ${a.air.r}` : 'no dome']);
 checks.push(['place names are set in Cinzel', /Cinzel/.test(a.labelFace) && a.cinzel >= 80, `${a.cinzel} in Cinzel`]);
-checks.push(['sub-labels are set in Cormorant italic', a.cormorant >= 80, `${a.cormorant} in Cormorant`]);
+// v0.30.647 emptied the sub-labels: the only one left is the "you are here" marker, because the
+// lock reason every gated node used to print moved into the hover card.
+// (the count is the one remaining sub-label plus the hover card's own meta and roster rows, which
+//  are built up-front and filled on hover - it was 88 when every node printed "unexplored")
+checks.push(['the sub-label that remains is set in Cormorant italic', a.cormorant >= 1 && a.cormorant <= 12, `${a.cormorant} in Cormorant`]);
 checks.push(['both faces are actually loaded, not falling back', a.cinzelReady && a.cormorantReady, `Cinzel ${a.cinzelReady}, Cormorant ${a.cormorantReady}`]);
 checks.push(['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')]);
 } catch (e) {
