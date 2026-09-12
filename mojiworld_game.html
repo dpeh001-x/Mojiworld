@@ -10963,6 +10963,33 @@ The sleeping world is listening.</div>
     return r;
   }
   window._lxEmojiRuns = runs;
+  // v0.30.643 - the one path the two chokepoints cannot reach: SVG. The observer skips SVG subtrees
+  // (and the <span class="lx-emo"> tile it builds does not render inside one), so an emoji set as
+  // SVG <text> was still drawn by the operating system's font. This hands that path the same atlas
+  // cell as a nested <svg> + <image>: same art as the canvas and the DOM, same already-fetched
+  // sheet, cropped by the viewBox. Returns null when there is no atlas, so the caller keeps its
+  // text fallback.
+  window._lxEmojiSvgTile = function (e, size, cx, cy) {
+    if (!A || !A.map || !(size > 0)) return null;
+    const i = idxOf(String(e || ''));
+    if (!(i >= 0)) return null;
+    const NS = 'http://www.w3.org/2000/svg', c = A.cell;
+    const sv = document.createElementNS(NS, 'svg');
+    sv.setAttribute('x', (cx || 0) - size / 2);
+    sv.setAttribute('y', (cy || 0) - size / 2);
+    sv.setAttribute('width', size);
+    sv.setAttribute('height', size);
+    sv.setAttribute('viewBox', ((i % A.cols) * c) + ' ' + (Math.floor(i / A.cols) * c) + ' ' + c + ' ' + c);
+    sv.setAttribute('pointer-events', 'none');
+    sv.setAttribute('overflow', 'hidden');
+    const im = document.createElementNS(NS, 'image');
+    im.setAttribute('width', A.cols * c);
+    im.setAttribute('height', A.rows * c);
+    im.setAttributeNS('http://www.w3.org/1999/xlink', 'href', A.src);
+    im.setAttribute('href', A.src);
+    sv.appendChild(im);
+    return sv;
+  };
   const strip = (v) => String(v).replace(RE, (e) => (KEEP.has(e) || /^[#*0-9]$/.test(e)) ? e : '').replace(/ {2,}/g, ' ').replace(/^ +/, '');
   window._lxEmojiStrip = strip;
   // ---- the atlas image ----
@@ -11145,7 +11172,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.642';
+const GAME_VERSION = 'v0.30.643';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57417,14 +57444,18 @@ function _renderWorldMapDiagram(host, opts) {
       _bossRing.setAttribute('stroke-width', '1.5');
       _bossRing.setAttribute('pointer-events', 'none');
       g.insertBefore(_bossRing, disc);
-      const _bossGlyph = document.createElementNS(SVG_NS, 'text');
-      _bossGlyph.setAttribute('x', 15);
-      _bossGlyph.setAttribute('y', 17);
-      _bossGlyph.setAttribute('text-anchor', 'middle');
-      _bossGlyph.setAttribute('font-size', '14');
-      _bossGlyph.setAttribute('pointer-events', 'none');
-      _bossGlyph.textContent = '⚔';
-      g.appendChild(_bossGlyph);
+      const _bossTile = (typeof _lxEmojiSvgTile === 'function') ? _lxEmojiSvgTile('⚔', 14, 15, 12) : null;
+      if (_bossTile) g.appendChild(_bossTile);   // v0.30.643 - the custom icon, not the OS font
+      else {
+        const _bossGlyph = document.createElementNS(SVG_NS, 'text');
+        _bossGlyph.setAttribute('x', 15);
+        _bossGlyph.setAttribute('y', 17);
+        _bossGlyph.setAttribute('text-anchor', 'middle');
+        _bossGlyph.setAttribute('font-size', '14');
+        _bossGlyph.setAttribute('pointer-events', 'none');
+        _bossGlyph.textContent = '⚔';
+        g.appendChild(_bossGlyph);
+      }
     }
     // v0.25.711 + v0.25.715 — Level badge above the node. Always shown for
     // every map so a player scanning the W-map can read the difficulty at
@@ -57521,14 +57552,25 @@ function _renderWorldMapDiagram(host, opts) {
     }
     g.appendChild(_tooltip);
     // Biome icon (emoji as SVG text)
-    const ico = document.createElementNS(SVG_NS, 'text');
-    ico.setAttribute('y', 9);                            // was 6 (re-centred for 28-px disc)
-    ico.setAttribute('text-anchor', 'middle');
-    ico.setAttribute('font-size', '28');                 // was 20
-    ico.setAttribute('pointer-events', 'none');
-    ico.textContent = _WM_BIOME_ICON[id] || '📍';
-    if (!acc.ok && !_taxiDim) ico.setAttribute('opacity', '0.55');
-    g.appendChild(ico);
+    const _icoCh = _WM_BIOME_ICON[id] || '📍';
+    // v0.30.643 - the atlas tile when we have one (every biome icon does), the old SVG text only as a
+    // fallback. This is what was still rendering in the operating system's emoji font: the 26 nodes
+    // with no region sprite over them - the twelve zodiac halls, the ten tower floors and four
+    // biomes - plus every icon in the moment before its sprite decodes.
+    const ico = _lxEmojiSvgTile ? _lxEmojiSvgTile(_icoCh, 28, 0, 0) : null;
+    if (ico) {
+      if (!acc.ok && !_taxiDim) ico.setAttribute('opacity', '0.55');
+      g.appendChild(ico);
+    } else {
+      const _icoTxt = document.createElementNS(SVG_NS, 'text');
+      _icoTxt.setAttribute('y', 9);                      // was 6 (re-centred for 28-px disc)
+      _icoTxt.setAttribute('text-anchor', 'middle');
+      _icoTxt.setAttribute('font-size', '28');           // was 20
+      _icoTxt.setAttribute('pointer-events', 'none');
+      _icoTxt.textContent = _icoCh;
+      if (!acc.ok && !_taxiDim) _icoTxt.setAttribute('opacity', '0.55');
+      g.appendChild(_icoTxt);
+    }
     // Cute per-region emblem sprite, layered over the emoji. The SVG <image>
     // loads live in the DOM and paints itself when ready (the emoji stays as
     // the load-time / missing fallback), so no JS re-render is needed.
@@ -57609,10 +57651,22 @@ function _renderWorldMapDiagram(host, opts) {
     // v0.26.x — Per user: the always-on "Lv N+" recommended-level sub-label is
     // gone; level info now lives ONLY in the visited-gated pill above. Keep the
     // "you are here" marker and any hard-gate lock reason (e.g. 🔒 Lv 70).
-    sub.textContent = here ? '▸ YOU ARE HERE'
+    let _subTxt = here ? '▸ YOU ARE HERE'
                     : _taxiDim ? ''   // v0.26.498 — the 20% dim says "not yet"
                     : (acc.reason || '');
+    // v0.30.643 - the lock on a gated node was the other SVG emoji. Lift the leading glyph out of the
+    // string into an atlas tile and leave the words behind; the tile is placed once the diagram is
+    // attached and the text can be measured (_wmPlaceSubTiles, below the de-overlap pass).
+    let _subTile = null;
+    const _subLead = /^(\S+)\s+(\S.*)$/.exec(_subTxt);
+    if (_subLead && typeof _lxEmojiSvgTile === 'function' && /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u.test(_subLead[1])) {
+      _subTile = _lxEmojiSvgTile(_subLead[1], 12, 0, 0);
+      if (_subTile) { _subTxt = _subLead[2]; _subTile.setAttribute('data-lx-subtile', '1'); }
+    }
+    sub.textContent = _subTxt;
+    if (_subTile) sub.setAttribute('data-lx-sub', '1');
     g.appendChild(sub);
+    if (_subTile) g.appendChild(_subTile);
     // v0.25.422 — Click handling. In edit mode every node is clickable
     // (selects → toggles a pair). In normal mode only accessible non-here
     // nodes teleport.
@@ -57763,6 +57817,23 @@ function _renderWorldMapDiagram(host, opts) {
   // any name label that still collides with one above it straight down until
   // it clears. Pin-independent, so it survives the live wmX/wmY churn.
   if (typeof _wmDeoverlapLabels === 'function') _wmDeoverlapLabels(svg);
+  if (typeof _wmPlaceSubTiles === 'function') _wmPlaceSubTiles(svg);   // v0.30.643
+}
+// v0.30.643 - the sub-label's lock icon sits to the left of centred text, so it can only be placed
+// once the SVG is attached and getComputedTextLength() answers. Runs beside the de-overlap pass,
+// over the handful of gated nodes.
+function _wmPlaceSubTiles(svg) {
+  if (!svg) return;
+  for (const tile of svg.querySelectorAll('svg[data-lx-subtile]')) {
+    const txt = tile.parentNode && tile.parentNode.querySelector('text[data-lx-sub]');
+    let w = 0;
+    try { if (txt && txt.getComputedTextLength) w = txt.getComputedTextLength(); } catch (e) {}
+    if (!(w > 0) && txt) w = (txt.textContent || '').length * 5.8;   // off-document fallback
+    const sz = parseFloat(tile.getAttribute('width')) || 12;
+    const y = txt ? (parseFloat(txt.getAttribute('y')) || 70) : 70;
+    tile.setAttribute('x', (-w / 2 - sz - 2).toFixed(1));
+    tile.setAttribute('y', (y - sz + 1).toFixed(1));
+  }
 }
 // v0.26.x — Label de-overlap pass. Works in screen space (getBoundingClientRect
 // reflects the full <g> transform stack) and converts the needed push back into
