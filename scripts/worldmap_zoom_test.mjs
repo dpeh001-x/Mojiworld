@@ -14,9 +14,9 @@ const PORT = Number(process.argv[3] || 11633);
 const SHOT = process.argv[4] || '';
 const checks = [];
 const html = readFileSync(path.join(ROOT, PAGE), 'utf8');
-const fontFile = path.join(ROOT, 'assets/fonts/marcellus-sc-400-latin.woff2');
+const fontFile = path.join(ROOT, 'assets/fonts/alegreya-sc-latin.woff2');
 checks.push(['the display face ships beside the other two',
-  existsSync(fontFile) && statSync(fontFile).size > 8000 && /@font-face \{ font-family: 'Marcellus SC'/.test(html),
+  existsSync(fontFile) && statSync(fontFile).size > 8000 && /@font-face \{ font-family: 'Alegreya SC'/.test(html),
   existsSync(fontFile) ? statSync(fontFile).size + ' bytes' : 'missing']);
 checks.push(['the slider and the recent strip ship', /id="worldmap-zoom"/.test(html) && /function _wmRenderRecent/.test(html)]);
 
@@ -111,7 +111,7 @@ checks.push(['and it costs exactly the Taxi Uncle\'s fare', ride.paid === ride.f
 // the map's face
 const face = await page.evaluate(async () => {
   try { await document.fonts.ready; } catch (e) {}
-  return { loaded: document.fonts.check("400 16px 'Marcellus SC'") };
+  return { loaded: document.fonts.check("700 16px 'Alegreya SC'") };
 });
 checks.push(['the map is set in the new face, and it really loaded', face.loaded]);
 checks.push(['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')]);

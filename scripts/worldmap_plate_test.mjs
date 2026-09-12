@@ -74,7 +74,7 @@ const R = await page.evaluate(async () => {
   // VARIANCE and had it backwards: the old procedural sky, with hard-edged
   // random stars and a bright core flare, scores HIGHER variance than a soft
   // painting. Variance measures sharpness, not provenance.)
-  const plate = new Image(); plate.src = 'backgrounds/worldmap_bg_v2.webp';   // v0.30.651 - the chart plate replaced the nebula
+  const plate = new Image(); plate.src = 'backgrounds/worldmap_bg_v4.webp';   // v0.30.651 - the chart plate replaced the nebula
   await new Promise(r => { plate.onload = r; plate.onerror = r; });
   let corr = null;
   if (plate.naturalWidth) {
@@ -155,14 +155,14 @@ const stdAvg = (R.stdR + R.stdG + R.stdB) / 3;
 ok('the diagram backdrop raster is built and attached', R.rasterAttached && R.rasterW > 0, `${R.rasterW}x${R.rasterH}`);
 ok('the painted plate decoded and was used', R.plateReady === true, `plateReady=${R.plateReady}`);
 ok('the raster IS the painted plate (luminance correlates with the file)', R.corr != null && R.corr >= 0.7,
-   `correlation with backgrounds/worldmap_bg_v2.webp = ${R.corr} (procedural sky measures ~0)`);
+   `correlation with backgrounds/worldmap_bg_v4.webp = ${R.corr} (procedural sky measures ~0)`);
 ok('it stays dark enough for node labels to read', R.meanLum < 95, `mean luminance ${R.meanLum}/255`);
 // Not "the mean is above N" -- darkening the reading area legitimately pulls the
 // mean down. The property is that the plate still has lit nebula in it somewhere.
 // v0.30.651 — the plate is a dark chart now, not a lit nebula: its structure is engraved arcs at the
 // edges rather than bright cores, so the floor comes down. The property is unchanged — the backdrop
 // must still carry SOMETHING, or we are back to the black slab this test was written to catch.
-ok('it is not a black slab either', R.p95all >= 12 && R.meanLum > 3,
+ok('it is not a black slab either', R.p95all >= 40 && R.meanLum > 14,
    `brightest 5% of the plate reaches ${R.p95all}/255 (mean ${R.meanLum})`);
 ok('a live diagram re-renders when the plate lands late', R.hostTagged, `host tagged for re-render: ${R.hostTagged}`);
 

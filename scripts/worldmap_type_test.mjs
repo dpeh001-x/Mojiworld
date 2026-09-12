@@ -106,20 +106,18 @@ const drift = await page.evaluate(() => {
 });
 checks.push(['running the label spacer again does not walk labels down the map', drift.worst < 1.5, `worst drift ${drift.worst} units over ${drift.n} labels`]);
 
-// And the globe holds still while a node is being read. The perf watchdog may have dropped the run
-// into the lowest FX tier by now, which skips the globe layer entirely by design - force it back on
-// and re-render so there is a globe to test.
+// v0.30.653 took the globe off the board: the ground is a painted continent with a coastline now,
+// and an armillary sphere over a landmass reads as two maps at once. The layer is still BUILT - its
+// stylesheet, its reduced-motion rule and its pause-on-hover all still work if a future ground wants
+// it back - so what this checks is that the removal was deliberate and complete, not half-done.
 await page.evaluate(() => { try { LX_PERF.veryLowFx = false; } catch (e) {} toggleWorldMap(); toggleWorldMap(); });
 await page.waitForTimeout(2200);
-const spin = await page.evaluate(() => {
-  const s = document.querySelector('.wm-spin');
-  if (!s) return { present: false };
-  const idle = getComputedStyle(s).animationPlayState;
-  const g = document.querySelector('g.wm-node');
-  if (g) g.dispatchEvent(new MouseEvent('mouseenter'));
-  return { present: true, idle, hovered: getComputedStyle(document.querySelector('.wm-spin')).animationPlayState };
-});
-checks.push(['the globe stops turning while you read a node', spin.present && spin.idle === 'running' && spin.hovered === 'paused', JSON.stringify(spin)]);
+const spin = await page.evaluate(() => ({
+  onBoard: !!document.querySelector('#worldmap-modal svg .wm-spin'),
+  ruleKept: [...document.querySelectorAll('#worldmap-modal svg style')].some((s) => /wm-spin \{ animation-play-state: paused/.test(s.textContent || '')),
+  airKept: !!document.querySelector('#worldmap-modal svg circle[fill="url(#wm-dome)"]'),
+}));
+checks.push(['the star-chart globe is off the board, and its atmosphere stayed', spin.onBoard === false && spin.ruleKept && spin.airKept, JSON.stringify(spin)]);
 checks.push(['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')]);
 } catch (e) {
   checks.push(['the run completed without a crash', false, String((e && e.message) || e).split('\n')[0].slice(0, 160)]);

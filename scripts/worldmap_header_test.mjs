@@ -69,9 +69,9 @@ const a = await page.evaluate(() => {
 });
 checks.push(['exactly one close button is on screen, not two', a.closes.length === 1, JSON.stringify(a.closes)]);
 // v0.30.650 moved the map's display face from Cinzel to Marcellus SC; either is the map's face
-checks.push(['the title is set in the map display face, tracked and in caps', !!a.title && /Marcellus|Cinzel/.test(a.title.face) && parseFloat(a.title.track) >= 2, a.title ? `${a.title.face} ${a.title.size}px, tracking ${a.title.track}` : 'no title']);
+checks.push(['the title is set in the map display face, tracked and in caps', !!a.title && /Alegreya|Marcellus|Cinzel/.test(a.title.face) && parseFloat(a.title.track) >= 2, a.title ? `${a.title.face} ${a.title.size}px, tracking ${a.title.track}` : 'no title']);
 checks.push(['the chip pairs a Cormorant label with a display-face place name',
-  !!a.chipKey && /Cormorant/.test(a.chipKey.face) && a.chipKey.style === 'italic' && !!a.chipName && /Marcellus|Cinzel/.test(a.chipName.face),
+  !!a.chipKey && /Cormorant/.test(a.chipKey.face) && a.chipKey.style === 'italic' && !!a.chipName && /Alegreya|Marcellus|Cinzel/.test(a.chipName.face),
   a.chipKey && a.chipName ? `"${a.chipKey.text}" ${a.chipKey.face} + "${a.chipName.text}" ${a.chipName.face}` : 'missing']);
 checks.push(['the count and the key hint are set in Cormorant', !!a.counts && /Cormorant/.test(a.counts.face) && !!a.key && /Cormorant/.test(a.key.face), a.counts ? a.counts.face + ' ' + a.counts.size + 'px' : '']);
 checks.push(['the discovery bar matches the count it sits beside', a.total > 0 && Math.abs(a.barPct - (a.visited / a.total) * 100) < 0.6, `${a.visited}/${a.total} = ${((a.visited / a.total) * 100).toFixed(1)}%, bar ${a.barPct}%`]);
