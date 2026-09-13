@@ -20,7 +20,7 @@
 //   5. trim, fit at 86% into 128x128 (the pipeline every other icon uses), then a light sharpen
 //      because the downsample softens the outline.
 //
-//   node scripts/gen_guguma_pin.mjs --build [--out=<png>] [--ol=56] [--headf=0.64] [--nw=0.32] [--gold]
+//   node scripts/gen_guguma_pin.mjs --build [--out=<png>] [--ol=56] [--headf=0.76] [--nw=0.25] [--gold]
 //   node scripts/gen_guguma_pin.mjs --install [--from=<png>]    # -> Sprites/ui/emoji/1f4cd.webp
 // then repack the atlas:  node scripts/pack_emoji_atlas.mjs
 import sharp from 'sharp';
@@ -33,8 +33,8 @@ const REVIEW = path.join(ROOT, 'scripts', '_tmp_pin_review');
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith('--' + k + '=')); return a ? a.slice(k.length + 3) : d; };
 const has = (f) => process.argv.includes('--' + f);
 const S = 1024;
-const HEAD_BOX = { left: 222, top: 183, width: 516, height: 474 };   // his head, down to where the belly patch starts
-const OVAL = { rx: 0.52, ry: 0.54, cy: 0.45 };   // the ellipse his head is cut to: rounded, so it reads as a pin head
+const HEAD_BOX = { left: Number(arg('bx', 222)), top: Number(arg('by', 183)), width: Number(arg('bw', 516)), height: Number(arg('bh', 520)) };   // how much of him the pin shows: his head is widest at x 233-727, his belly patch starts around y 648
+const OVAL = { rx: Number(arg('ovrx', 0.52)), ry: Number(arg('ovry', 0.56)), cy: Number(arg('ovcy', 0.46)) };   // the ellipse he is cut to: rounded, so it reads as a pin head
 
 // His two eyes: the dark blobs that do NOT touch the silhouette's edge (the edge-touching dark run is
 // his outline). Returns their centres in head-layer pixels, left first.
@@ -65,7 +65,7 @@ function findEyes(data, info) {
   return out.slice(0, 2).sort((a, b) => a.x - b.x);
 }
 
-async function buildPin({ ol = 56, headf = 0.64, nw = 0.32, gold = false, cheeks = true, sharpen = true } = {}) {
+async function buildPin({ ol = 56, headf = 0.76, nw = 0.25, gold = false, cheeks = true, sharpen = true } = {}) {
   // 1. his head, rounded off
   const src = path.join(ROOT, 'Sprites/npc/Guguma.webp');
   const cut0 = await sharp(src).extract(HEAD_BOX).png().toBuffer();
@@ -136,7 +136,7 @@ async function buildPin({ ol = 56, headf = 0.64, nw = 0.32, gold = false, cheeks
 if (has('build') || (!has('install') && !has('build'))) {
   fs.mkdirSync(REVIEW, { recursive: true });
   const out = arg('out', path.join(REVIEW, 'pin.png'));
-  fs.writeFileSync(out, await buildPin({ ol: Number(arg('ol', 56)), headf: Number(arg('headf', 0.64)), nw: Number(arg('nw', 0.32)), gold: has('gold') }));
+  fs.writeFileSync(out, await buildPin({ ol: Number(arg('ol', 56)), headf: Number(arg('headf', 0.76)), nw: Number(arg('nw', 0.25)), gold: has('gold') }));
   console.log('built', path.relative(ROOT, out));
 }
 if (has('install')) {
