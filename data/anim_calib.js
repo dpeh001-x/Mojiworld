@@ -2444,17 +2444,17 @@ window.LX_ANIM_CALIB = {
   },
   "shardlich": {
     "idle": {
-      "s": 1,
+      "s": 0.7,
       "dx": 0,
       "dy": -0.01
     },
     "walk": {
-      "s": 1,
+      "s": 0.7,
       "dx": 0,
       "dy": -0.02
     },
     "attack": {
-      "s": 1.21,
+      "s": 0.74,
       "dx": 0,
       "dy": 0,
       "ft": [
