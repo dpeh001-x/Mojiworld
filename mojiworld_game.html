@@ -11723,7 +11723,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.672';
+const GAME_VERSION = 'v0.30.673';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13945,6 +13945,8 @@ const LX_FX = (() => {
     // v0.25.228 — sniper F (railshot laser bow) + V (arrow rain) +
     // skyhunter V (epic elemental arrows burst) + dragoon G AOE impact
     railshot:           'railshot.webp',
+    // v0.30.673 - the overcharge rings, scaled by draw at release (scripts/gen_railshot_charge_fx.mjs)
+    railshot_charge:    'railshot_charge.webp',
     arrow_rain:         'arrow_rain.webp',
     elemental_arrows:   'elemental_arrows.webp',
     dragoon_impact:     'dragoon_impact.webp',
@@ -20910,7 +20912,7 @@ const SKILLS = {
   // v0.23.1 — Sniper X (slot s) reverts to the archer default MultiShot (its
   // old `snipe_railgun` was too OP for an early slot). Railshot moves to F
   // (slot q) with a longer CD + higher MP cost to match job-signature tier.
-  snipe_railgun:{ name:'Railshot',       icon:'💠', cls:'archer', job:'sniper', slot:'q', mp:28, cd:12000, desc:'Instant piercing rail along the facing direction — hits every foe in a flat line. Each consecutive hit empowers the next.' },
+  snipe_railgun:{ name:'Railshot',       icon:'💠', cls:'archer', job:'sniper', slot:'q', mp:28, cd:12000, desc:'Instant piercing rail along the facing direction — hits every foe in a flat line. Each consecutive hit empowers the next. HOLD to overcharge: up to +150% damage and a rail that carries 700 px further.' },
   arrowRain:    { name:'Arrow Rain',     icon:'🌧️', cls:'archer', job:'sniper', slot:'c', mp:42, cd:18000,  desc:'Ultimate: Rain arrows over an area.' },
   // Ranger
   wildBond:     { name:'Wild Bond',      icon:'🐺', cls:'archer', job:'ranger', slot:'q', mp:30, cd:70000, desc:'Summon a hardy wolf companion. 60s timer OR 15× your max HP, whichever runs out first.' },
@@ -80051,14 +80053,33 @@ const SKILL_FNS = {
     const sx = player.x + player.w/2;
     const sy = player.y + 24;
     const dir = player.facing;
+    // v0.30.673 - OVERCHARGE. Per user: hold to draw for "up to +150% damage and a longer pierce".
+    // Railshot's own escalation (+30% per link) is a CROWD bonus - the link index is the target's
+    // place in the line - so in a duel it was always index 0 and paid exactly nothing. Measured at
+    // 1,100 ATK: 2,678 to a lone boss, against 9,088 from Charged Shot at half the MP and a third of
+    // the cooldown. The draw is what a duel can build instead.
+    //
+    // The charge is the class's own Hold-to-Draw (WAR_CHARGE_FRAMES = 45, so ~0.75 s to full), not a
+    // second mechanic: holding the key already freezes the archer's feet and draws the ring. A TAP is
+    // unchanged - _releasedCharge is 0 under WAR_CHARGE_TAP frames, so this is a pure addition.
+    const _rsChg = (player.cls === 'archer' && player._archerDrawConsumedAt === game.time)
+      ? Math.max(0, Math.min(1, player._archerDrawPower || 0)) : 0;
+    const _rsDmgMul = 1 + 1.5 * _rsChg;        // full draw = x2.5
+    const _rsReach = Math.round(700 * _rsChg); // and the rail carries 700 px further
     // v0.25.228 — laser-bow rail beam sprite at the firing point.
     // v0.26.148 — Per user "make archer F skill sprite much bigger".
     // Size 220 → 500 (+127 %), life 22 → 34 frames so the bigger beam
     // has dwell time to read. Forward offset 80 → 160 px so the larger
     // sprite anchors mid-beam instead of bunching at the bow.
     spawnSpriteBurst(sx + dir * 160, sy, 'railshot',
-      { size: 500, life: 34, angle: dir > 0 ? 0 : Math.PI });
-    const maxRange = 900;
+      { size: 500 + 180 * _rsChg, life: 34, angle: dir > 0 ? 0 : Math.PI });
+    // v0.30.673 - the overcharge rings at the bow, sized by how long it was held. Tap-fired shots skip
+    // it entirely so the cheap cast stays visually cheap.
+    if (_rsChg > 0.05) {
+      spawnSpriteBurst(sx + dir * 34, sy, 'railshot_charge',
+        { size: 120 + 300 * _rsChg, life: 20 + Math.round(14 * _rsChg) });
+    }
+    const maxRange = 900 + _rsReach;   // v0.30.673 - a full draw reaches 1600 px
     // Sweep every monster in a narrow horizontal lane from player
     // v0.29.x — per user: "Archer's Railshot does not hit enemies sometimes, i
     // believe that the vertical height is too little, add on to that."
@@ -80079,7 +80100,7 @@ const SKILL_FNS = {
     // what "a flat line through everything in its path" already meant. The band
     // widens 54 -> 70 as asked, but the overlap test is what fixes the misses;
     // widening alone would have left Gravitos and the Sovereign untouchable.
-    const lane = 70;
+    const lane = 70 + Math.round(18 * _rsChg);   // v0.30.673 - and cuts a slightly taller lane, so a full draw does not clip past a short target at range
     const railTop = sy - lane, railBot = sy + lane;
     const hits = [];
     for (const m of game.monsters) {
@@ -80104,7 +80125,7 @@ const SKILL_FNS = {
           if (!h.m || h.m.currentHp <= 0) return;
           const stackMul = 1 + i * 0.30;
           const crit = rollCrit() || Math.random() < 0.4;
-          const dmg = Math.floor((baseAtk * 1.8 + 2) * stackMul * (crit ? getCritDmg() : 1));
+          const dmg = Math.floor((baseAtk * 1.8 + 2) * stackMul * _rsDmgMul * (crit ? getCritDmg() : 1));
           hitMonster(h.m, dmg, crit, 'railshot');
           spawnSmoothExplosion(h.m.x + h.m.w/2, h.m.y + h.m.h/2, 24 + i * 3, '#aaddff', '#4488ff88', { life: 14 });
         });
@@ -80121,7 +80142,7 @@ const SKILL_FNS = {
       // skill scales with build investment instead of bypassing it.
       const crit = rollCrit() || Math.random() < 0.4;
       // v0.25.557 — railshot base 3.2×ATK+25 → 1.8×ATK+2 per rebalance.
-      const dmg = Math.floor((baseAtk * 1.8 + 2) * stackMul * (crit ? getCritDmg() : 1));
+      const dmg = Math.floor((baseAtk * 1.8 + 2) * stackMul * _rsDmgMul * (crit ? getCritDmg() : 1));
       hitMonster(h.m, dmg, crit, 'railshot');
       h.m.vx += dir * 14;
       // Electric spark particles at impact
@@ -80137,9 +80158,10 @@ const SKILL_FNS = {
         '#aaddff', '#4488ff88', { life: 18 });
     });
     // Main rail beam — thick bright core + soft halo
-    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 8, '#ffffff', { life: 14 });
-    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 16, '#66ccff', { life: 18 });
-    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 24, '#4488ff55', { life: 22 });
+    const _rsW = 1 + 0.7 * _rsChg;   // v0.30.673 - a held rail is a visibly fatter beam
+    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 8 * _rsW, '#ffffff', { life: 14 });
+    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 16 * _rsW, '#66ccff', { life: 18 });
+    spawnSmoothBeam(sx, sy, dir > 0 ? 0 : Math.PI, maxRange, 24 * _rsW, '#4488ff55', { life: 22 });
     // Muzzle burst at player
     spawnSmoothExplosion(sx + dir * 20, sy, 36, '#ffffff', '#88ddff88', { life: 22 });
     for (let k = 0; k < 15; k++) {
@@ -80152,6 +80174,7 @@ const SKILL_FNS = {
     }
     flash(0.35);
     if (hits.length >= 3) showToast(`${hits.length}x rail chain!`, 'epic');
+    if (_rsChg >= 0.999) { addShake(8); flash(0.22); }   // v0.30.673 - a full draw lands with weight
   },
   arrowRain: () => {
     // v0.25.261 — Reskinned to a translucent rain cloud with blue
@@ -150160,6 +150183,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     'Sprites/fx/ballista_volley.webp',
     'Sprites/fx/eagle_eye.webp',
     'Sprites/fx/railshot.webp',
+    'Sprites/fx/railshot_charge.webp',
     'Sprites/fx/arrow_rain.webp',
     'Sprites/fx/elemental_arrows.webp',
     'Sprites/fx/dragoon_impact.webp',
