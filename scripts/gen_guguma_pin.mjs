@@ -20,7 +20,7 @@
 //   5. trim, fit at 86% into 128x128 (the pipeline every other icon uses), then a light sharpen
 //      because the downsample softens the outline.
 //
-//   node scripts/gen_guguma_pin.mjs --build [--out=<png>] [--ol=56] [--headf=0.76] [--nw=0.25] [--gold]
+//   node scripts/gen_guguma_pin.mjs --build [--out=<png>] [--ol=80] [--headf=0.76] [--nw=0.25] [--gold]
 //   node scripts/gen_guguma_pin.mjs --install [--from=<png>]    # -> Sprites/ui/emoji/1f4cd.webp
 // then repack the atlas:  node scripts/pack_emoji_atlas.mjs
 import sharp from 'sharp';
@@ -33,7 +33,7 @@ const REVIEW = path.join(ROOT, 'scripts', '_tmp_pin_review');
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith('--' + k + '=')); return a ? a.slice(k.length + 3) : d; };
 const has = (f) => process.argv.includes('--' + f);
 const S = 1024;
-const HEAD_BOX = { left: Number(arg('bx', 222)), top: Number(arg('by', 183)), width: Number(arg('bw', 516)), height: Number(arg('bh', 520)) };   // how much of him the pin shows: his head is widest at x 233-727, his belly patch starts around y 648
+const HEAD_BOX = { left: Number(arg('bx', 222)), top: Number(arg('by', 183)), width: Number(arg('bw', 516)), height: Number(arg('bh', 496)) };   // how much of him the pin shows: his head is widest at x 233-727, his belly patch starts around y 648
 const OVAL = { rx: Number(arg('ovrx', 0.52)), ry: Number(arg('ovry', 0.56)), cy: Number(arg('ovcy', 0.46)) };   // the ellipse he is cut to: rounded, so it reads as a pin head
 
 // His two eyes: the dark blobs that do NOT touch the silhouette's edge (the edge-touching dark run is
@@ -65,14 +65,84 @@ function findEyes(data, info) {
   return out.slice(0, 2).sort((a, b) => a.x - b.x);
 }
 
-async function buildPin({ ol = 56, headf = 0.76, nw = 0.25, gold = false, cheeks = true, sharpen = true } = {}) {
+// His own outline is hand-drawn and uneven - thick on his back, thin under his beak, and gone
+// altogether wherever the ellipse cuts him. Adding a stroke on top of that gives an edge whose width
+// changes all the way round (per user: "the outline around all aspects of guguma shoukd be
+// consistent"). So his outline is REMOVED first and one even stroke is drawn around what is left.
+//
+// What counts as his outline: dark pixels CONNECTED TO THE SILHOUETTE EDGE. His eyes and the line on
+// his beak are dark too, but they are islands inside him, so they stay.
+function stripOwnOutline(data, W, H) {
+  const n = W * H, dark = new Uint8Array(n), opaque = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const p = i * 4;
+    opaque[i] = data[p + 3] > 150 ? 1 : 0;
+    dark[i] = (opaque[i] && data[p] + data[p + 1] + data[p + 2] < 260) ? 1 : 0;
+  }
+  const seen = new Uint8Array(n), stack = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!dark[i] || seen[i]) continue;
+    let top = 0, touches = false; const px = [];
+    stack[top++] = i; seen[i] = 1;
+    while (top) {
+      const p = stack[--top], x = p % W, y = (p - x) / W;
+      px.push(p);
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) touches = true;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const q = ny * W + nx;
+        if (!opaque[q]) { touches = true; continue; }
+        if (dark[q] && !seen[q]) { seen[q] = 1; stack[top++] = q; }
+      }
+    }
+    if (touches) for (const p of px) data[p * 4 + 3] = 0;
+  }
+  // the antialiased fringe his outline leaves behind
+  for (let pass = 0; pass < 3; pass++) {
+    const kill = [];
+    for (let i = 0; i < n; i++) {
+      const p = i * 4;
+      if (data[p + 3] < 60 || data[p] + data[p + 1] + data[p + 2] > 420) continue;
+      const x = i % W, y = (i - x) / W;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H || data[(ny * W + nx) * 4 + 3] < 60) { kill.push(p); break; }
+      }
+    }
+    for (const p of kill) data[p + 3] = 0;
+  }
+  return data;
+}
+// open (erode then dilate): drops the wing tip that pokes through the ellipse as a nub, and any
+// stray speck, without moving the silhouette itself.
+async function smoothAlpha(png, r) {
+  const eroded = await sharp(png).extractChannel('alpha').blur(r).raw().toBuffer({ resolveWithObject: true });
+  const W = eroded.info.width, H = eroded.info.height, ch = eroded.info.channels, n = W * H;
+  const m1 = Buffer.alloc(n);
+  for (let i = 0; i < n; i++) m1[i] = eroded.data[i * ch] > 205 ? 255 : 0;
+  const back = await sharp(m1, { raw: { width: W, height: H, channels: 1 } }).blur(r).raw().toBuffer({ resolveWithObject: true });
+  const rgba = Buffer.alloc(n * 4);
+  const src = await sharp(png).ensureAlpha().raw().toBuffer();
+  for (let i = 0; i < n; i++) {
+    const keep = back.data[i * back.info.channels] > 50 ? 1 : 0;
+    rgba[i * 4] = src[i * 4]; rgba[i * 4 + 1] = src[i * 4 + 1]; rgba[i * 4 + 2] = src[i * 4 + 2];
+    rgba[i * 4 + 3] = keep ? src[i * 4 + 3] : 0;
+  }
+  return sharp(rgba, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer();
+}
+
+async function buildPin({ ol = 80, headf = 0.76, nw = 0.25, gold = false, cheeks = true, sharpen = true } = {}) {
   // 1. his head, rounded off
   const src = path.join(ROOT, 'Sprites/npc/Guguma.webp');
   const cut0 = await sharp(src).extract(HEAD_BOX).png().toBuffer();
   const m0 = await sharp(cut0).metadata();
   const ell = Buffer.from(`<svg width="${m0.width}" height="${m0.height}" xmlns="http://www.w3.org/2000/svg"><ellipse cx="${m0.width / 2}" cy="${m0.height * OVAL.cy}" rx="${m0.width * OVAL.rx}" ry="${m0.height * OVAL.ry}" fill="#fff"/></svg>`);
   const cut = await sharp(cut0).composite([{ input: ell, blend: 'dest-in' }]).png().toBuffer();
-  const trimmed = await sharp(cut).trim({ threshold: 10 }).png().toBuffer();
+  const { data: cd, info: ci } = await sharp(cut).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const bareBuf = await sharp(stripOwnOutline(cd, ci.width, ci.height), { raw: { width: ci.width, height: ci.height, channels: 4 } }).png().toBuffer();
+  const bare = await smoothAlpha(bareBuf, Math.max(3, Math.round(ci.width * (Number(arg('open', 0.028))))));
+  const trimmed = await sharp(bare).trim({ threshold: 10 }).png().toBuffer();
   const tm = await sharp(trimmed).metadata();
   const headH = Math.round(S * headf), headW = Math.round(tm.width * (headH / tm.height));
   const head = await sharp(trimmed).resize(headW, headH).png().toBuffer();
@@ -136,7 +206,7 @@ async function buildPin({ ol = 56, headf = 0.76, nw = 0.25, gold = false, cheeks
 if (has('build') || (!has('install') && !has('build'))) {
   fs.mkdirSync(REVIEW, { recursive: true });
   const out = arg('out', path.join(REVIEW, 'pin.png'));
-  fs.writeFileSync(out, await buildPin({ ol: Number(arg('ol', 56)), headf: Number(arg('headf', 0.76)), nw: Number(arg('nw', 0.25)), gold: has('gold') }));
+  fs.writeFileSync(out, await buildPin({ ol: Number(arg('ol', 80)), headf: Number(arg('headf', 0.76)), nw: Number(arg('nw', 0.25)), gold: has('gold') }));
   console.log('built', path.relative(ROOT, out));
 }
 if (has('install')) {
