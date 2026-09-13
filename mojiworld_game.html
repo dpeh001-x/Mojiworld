@@ -11723,7 +11723,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.675';
+const GAME_VERSION = 'v0.30.676';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -108791,9 +108791,9 @@ function _mmInk(c, w, col) {
   c.lineJoin = 'round'; c.lineCap = 'round';
   c.lineWidth = w; c.strokeStyle = col || 'rgba(10,6,14,0.92)';
 }
-function _mmSpray(c, x, y, r, col, seed) {
+function _mmSpray(c, x, y, r, col, seed, n) {
   c.save();
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0, N = n || 5; i < N; i++) {   // v0.30.676 — a count, so a marker can ask for less
     const a = _mmRnd(x | 0, y | 0, seed + i) * Math.PI * 2;
     const d = r * (1.05 + _mmRnd(y | 0, x | 0, seed + i * 7) * 0.85);
     const rr = r * (0.10 + _mmRnd(x | 0, i, seed) * 0.16);
@@ -108908,32 +108908,75 @@ function drawMinimap() {
   for (const po of game.mapData.portals || []) {
     const px = po.x * scaleX;
     const py = (typeof po.y === 'number') ? mmY(po.y) : (mh - 7 * S);
-    // v0.30.675 — the arch is now a stencil: same silhouette, sprayed. The halo stays (it is what makes
-    // an exit findable on a busy map) but it is overspray now rather than a clean glow.
-    mctx.fillStyle = 'rgba(255,204,68,' + (0.08 + _mmPulseA * 0.12).toFixed(3) + ')';
-    mctx.beginPath(); mctx.arc(px, py, 7 * S, 0, Math.PI * 2); mctx.fill();
-    _mmSpray(mctx, px, py, 5.4 * S, '#ffd24a', 11);
-    const _wob = (_mmRnd(px | 0, py | 0, 3) - 0.5) * 0.9 * S;   // the same lean every frame
+    // v0.30.676 — the portal, redrawn. Per user: "the portals can look way better, please redesign them
+    // with little spray."
+    //
+    // What was wrong with v0.30.675's: a soft halo circle PLUS five overspray dots put a fuzzy cloud
+    // around a marker only twelve pixels wide, so the shape inside it went soft — the gate read as a
+    // gold blob with a fringe. And the silhouette itself was a horseshoe: tall, narrow, round on top,
+    // with a doorway cut so small it closed up at map scale.
+    //
+    // So: wider and squatter, which is what a GATE looks like from across a room; the opening cut big
+    // enough to survive being twelve pixels wide; light spilling out of it, because a portal that is
+    // working is the one thing on this map that is lit from inside; four hard shine ticks instead of a
+    // cloud, which is how graffiti draws a glow; and two dots of overspray instead of five.
+    const _wob = (_mmRnd(px | 0, py | 0, 3) - 0.5) * 0.8 * S;   // the same lean every frame
+    const _gw = 3.7 * S, _gh = 5.0 * S;                          // half-width, height of the gate
+    // the shine: four ticks on the diagonals, breathing with the pulse. Hard marks, not a blur.
+    mctx.save();
+    mctx.globalAlpha = 0.30 + _mmPulseA * 0.34;
+    mctx.strokeStyle = '#ffe08a'; mctx.lineCap = 'round'; mctx.lineWidth = 1.15 * S;
+    for (let k = 0; k < 4; k++) {
+      const a = Math.PI / 4 + k * Math.PI / 2;
+      const r0 = 5.3 * S, r1 = r0 + (1.5 + _mmPulseA * 1.1) * S;
+      mctx.beginPath();
+      mctx.moveTo(px + Math.cos(a) * r0, py - 0.6 * S + Math.sin(a) * r0 * 0.82);
+      mctx.lineTo(px + Math.cos(a) * r1, py - 0.6 * S + Math.sin(a) * r1 * 0.82);
+      mctx.stroke();
+    }
+    mctx.restore();
+    _mmSpray(mctx, px, py - 0.6 * S, 4.4 * S, '#ffd24a', 11, 2);
+    // the gate: two posts and a lintel arch, leaning its own way
     mctx.beginPath();
-    mctx.moveTo(px - 3 * S + _wob, py + 5 * S);
-    mctx.lineTo(px - 3.2 * S, py - 1.5 * S);
-    mctx.arc(px, py - 1.5 * S, 3 * S, Math.PI, 0);
-    mctx.lineTo(px + 3 * S - _wob, py + 5 * S);
+    mctx.moveTo(px - _gw + _wob, py + _gh);
+    mctx.lineTo(px - _gw - 0.2 * S, py - 1.1 * S);
+    mctx.arc(px, py - 1.1 * S, _gw, Math.PI, 0);
+    mctx.lineTo(px + _gw - _wob, py + _gh);
     mctx.closePath();
     mctx.fillStyle = '#ffcc44';
     mctx.fill();
-    _mmInk(mctx, 1.6 * S);
+    _mmInk(mctx, 1.5 * S);
     mctx.stroke();
-    _mmDrip(mctx, px + 2.4 * S, py + 4.4 * S, 3.4 * S, 1.1 * S, '#e3a92c', 5);
-    // the doorway cut — what makes it read as a gate, not a blob
+    // the threshold, lit from inside: dark at the lintel, embers at the floor
+    const _thr = mctx.createLinearGradient(0, py - 2.4 * S, 0, py + _gh);
+    _thr.addColorStop(0, 'rgba(38,22,2,0.97)');
+    _thr.addColorStop(0.62, 'rgba(120,64,8,0.92)');
+    _thr.addColorStop(1, 'rgba(255,214,120,' + (0.55 + _mmPulseA * 0.35).toFixed(3) + ')');
     mctx.beginPath();
-    mctx.moveTo(px - 1.2 * S, py + 5 * S);
-    mctx.lineTo(px - 1.2 * S, py + 0.2 * S);
-    mctx.arc(px, py + 0.2 * S, 1.2 * S, Math.PI, 0);
-    mctx.lineTo(px + 1.2 * S, py + 5 * S);
+    mctx.moveTo(px - 1.75 * S, py + _gh);
+    mctx.lineTo(px - 1.75 * S, py - 0.9 * S);
+    mctx.arc(px, py - 0.9 * S, 1.75 * S, Math.PI, 0);
+    mctx.lineTo(px + 1.75 * S, py + _gh);
     mctx.closePath();
-    mctx.fillStyle = 'rgba(48,30,4,0.95)';
+    mctx.fillStyle = _thr;
     mctx.fill();
+    // ...and a hairline around the opening. Without it the embers at the floor land within a shade of
+    // the gold posts either side and the bottom of the doorway closes up at map scale — the whole
+    // point of the lit threshold is that you can see it is open.
+    mctx.save();
+    mctx.strokeStyle = 'rgba(26,14,2,0.85)'; mctx.lineWidth = 0.75 * S; mctx.lineJoin = 'round';
+    mctx.stroke();
+    mctx.restore();
+    // a rim-light down the left post, so the gate is not a flat cut-out
+    mctx.save();
+    mctx.globalAlpha = 0.85;
+    mctx.strokeStyle = '#fff0c2'; mctx.lineWidth = 0.9 * S; mctx.lineCap = 'round';
+    mctx.beginPath();
+    mctx.moveTo(px - _gw + 0.75 * S, py + _gh - 1.1 * S);
+    mctx.lineTo(px - _gw + 0.75 * S, py - 1.4 * S);
+    mctx.stroke();
+    mctx.restore();
+    _mmDrip(mctx, px + _gw - 0.9 * S, py + _gh - 0.3 * S, 3.0 * S, 1.0 * S, '#e3a92c', 5);
   }
   // NPCs — hollow teal rings, dark under-ring for contrast.
   for (const n of game.npcs || []) {
