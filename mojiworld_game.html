@@ -11348,7 +11348,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.657';
+const GAME_VERSION = 'v0.30.658';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57215,6 +57215,24 @@ function _wmBgRasterURL(W, H) {
   const vg = c.createRadialGradient(W/2, H/2, Math.min(W,H)*0.35, W/2, H/2, Math.max(W,H)*0.62); // vignette
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(2,0,14,0.55)');
   c.fillStyle = vg; c.fillRect(0, 0, W, H);
+  // v0.30.658 — EAT THE EDGE. Per user: "the black rectangular border here is still there, omit it."
+  // The plate is pinned to the node space (v0.30.656), which is a rectangle, so wherever the window
+  // is a different shape from that rectangle the painting simply stopped — a hard vertical seam with
+  // a darker band beyond it. v0.30.656 filled that band with a second stretched copy of the art,
+  // which only moved the seam. This eats the plate's own alpha at the border instead: the world
+  // dissolves into the dark it sits on and there is no line to see. The fade is a fraction of the
+  // shorter side, so it looks the same on any canvas the raster is asked for.
+  const _fx = Math.round(Math.min(W, H) * 0.085), _fy = _fx;
+  c.globalCompositeOperation = 'destination-out';
+  const _eat = (x0, y0, x1, y1) => {
+    const g = c.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.55, 'rgba(0,0,0,0.35)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g;
+    c.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0) || W, Math.abs(y1 - y0) || H);
+  };
+  _eat(0, 0, _fx, 0); _eat(W, 0, W - _fx, 0);          // left and right
+  _eat(0, 0, 0, _fy); _eat(0, H, 0, H - _fy);          // top and bottom
+  c.globalCompositeOperation = 'source-over';
   // v0.30.x — TAINT GUARD (tester: "the world map doesnt open", both the W key
   // and the Taxi's Browse Routes). drawImage of the plate taints the canvas on
   // a file:// origin - which is exactly how a playtest zip is opened - and
@@ -57318,7 +57336,11 @@ function _renderWorldMapDiagram(host, opts) {
     }
     _gdefs.appendChild(lg);
   };
-  for (const [tier, col] of [['hi', 'rgb(216,200,255)'], ['mid', 'rgb(204,182,250)'], ['lo', 'rgb(180,166,232)'], ['act', 'rgb(170,225,255)']]) {
+  // v0.30.658 — warm, not cool. Lavender starlanes were drawn for a nebula; over a hand-painted
+  // continent they read as a net thrown on top of the art rather than as roads across it. These are
+  // the colours of the paths already painted into the ground, which is what a route between two
+  // places on this map should look like. The lane you are standing on stays gold and separate.
+  for (const [tier, col] of [['hi', 'rgb(242,230,201)'], ['mid', 'rgb(226,212,183)'], ['lo', 'rgb(203,192,170)'], ['act', 'rgb(255,219,143)']]) {
     _mkLane('wm-lane-' + tier + '-d', col, false);
     _mkLane('wm-lane-' + tier + '-u', col, true);
   }
@@ -57399,30 +57421,23 @@ function _renderWorldMapDiagram(host, opts) {
     '@media (prefers-reduced-motion: reduce) { .wm-route { animation: none; } } ' +
     '.wm-card { opacity:0; transition: opacity 110ms ease; } ' +
     '.wm-card.on { opacity:1; } ' +
-    '.wm-node:hover .wm-disc { stroke-width:4; }';
+    '.wm-node:hover .wm-disc { stroke-width:4; } ' +
+    // v0.30.658 — SEMANTIC ZOOM FOR LANES, the same idea the place names have used since v0.30.647. The
+    // world view is for reading the shape of the world, and at that size the cross-continent portals
+    // are what turns eighty lines into a weave: they are the ones that cannot help crossing everything
+    // between their ends. So they are not drawn out here. Zoom in and they come back, band by band,
+    // by the time the map is showing you a region in detail. Nothing is lost - only deferred - and the
+    // lane you are standing on is exempt at every zoom, because that one is never clutter.
+    '.wm-lane, .wm-laneglow { transition: opacity 200ms ease; } ' +
+    '[data-wm-zoom="far"] .wm-lane-l2, [data-wm-zoom="far"] .wm-lane-l3 { opacity: 0 !important; } ' +
+    '[data-wm-zoom="mid"] .wm-lane-l3 { opacity: 0 !important; }';
   svg.appendChild(_gstyle);
   // v0.26.x — static galaxy backdrop: ONE pre-rendered image (cached) in
   // place of 4 blur-filtered ellipses + 58 star elements + core + vignette.
-  // v0.30.656 — TWO copies of the ground, and the difference between them is the whole point. The bleed
-  // is stretched to whatever shape the window is so the letterbox bands are filled (which is what
-  // v0.30.63 added this for); the plate is pinned at 0,0,W,H, the exact space the nodes are authored
-  // in, so the volcano is under the Magma Foundry's markers at every window size. Before this the
-  // single copy did both jobs and did the second one wrong: on a wide window it was drawn 20% too
-  // wide and 160 units too far left, and every pin pointed at the wrong ground.
-  const _bgBleed = document.createElementNS(SVG_NS, 'image');
-  try { _bgBleed.setAttribute('href', _wmBgRasterURL(W, H)); } catch (e) {}
-  _bgBleed.setAttribute('x', 0); _bgBleed.setAttribute('y', 0);
-  _bgBleed.setAttribute('width', W); _bgBleed.setAttribute('height', H);
-  _bgBleed.setAttribute('data-wm-bg', '1');   // v0.30.63 — resized after attach
-  _bgBleed.setAttribute('pointer-events', 'none');
-  const _bgDefs = document.createElementNS(SVG_NS, 'defs');
-  const _bgClip = document.createElementNS(SVG_NS, 'clipPath');
-  _bgClip.setAttribute('id', 'wm-bleed-clip');
-  const _bgClipPath = document.createElementNS(SVG_NS, 'path');
-  _bgClipPath.setAttribute('clip-rule', 'evenodd');     // outer rect minus the plate = the bands
-  _bgClipPath.setAttribute('d', `M0 0H${W}V${H}H0Z`);
-  _bgClip.appendChild(_bgClipPath); _bgDefs.appendChild(_bgClip); svg.appendChild(_bgDefs);
-  _bgBleed.setAttribute('clip-path', 'url(#wm-bleed-clip)');
+  // v0.30.656 put a second, stretched copy of the ground behind this one to fill the letterbox bands.
+  // v0.30.658 removed it: a second copy cannot fill a band without drawing an edge where it meets the
+  // first, and the edge was the thing being complained about. The plate's own border is eaten in
+  // _wmBgRasterURL instead, so the one copy fades out into the backdrop and the bands need nothing.
   const _bgImg = document.createElementNS(SVG_NS, 'image');
   // the backdrop is decoration; the map is not. Never let it throw out of here.
   try { _bgImg.setAttribute('href', _wmBgRasterURL(W, H)); } catch (e) {}
@@ -57446,10 +57461,7 @@ function _renderWorldMapDiagram(host, opts) {
   // frame the way they do around it, and the field still measures darker than it did before.
   _bgImg.setAttribute('opacity', '0.85');
   _bgImg.setAttribute('pointer-events', 'none');
-  // v0.30.656 — the bands are a frame, not more map: the bleed sits well under the plate's value so
-  // the edge of the registered painting reads as the edge of the world rather than a seam.
-  _bgBleed.setAttribute('opacity', '0.42');
-  svg.appendChild(_bgBleed);
+  _bgImg.setAttribute('data-wm-bg', '1');     // the only backdrop there is now
   svg.appendChild(_bgImg);
   for (let i = 0; i < 12; i++) {
     const s = document.createElementNS(SVG_NS, 'circle');
@@ -57800,7 +57812,7 @@ function _renderWorldMapDiagram(host, opts) {
       glow.setAttribute('stroke-width', (4.5 + 3 * _near).toFixed(1));
       glow.setAttribute('stroke-linecap', 'round');
       glow.setAttribute('pointer-events', 'none');
-      glow.setAttribute('class', 'wm-laneglow');   // v0.30.646 — follows its lane into and out of focus
+      glow.setAttribute('class', 'wm-laneglow' + ((d.lo === cur || d.hi === cur) ? '' : _laneLen > 520 ? ' wm-lane-l3' : _laneLen > 300 ? ' wm-lane-l2' : ''));   // v0.30.646 — follows its lane into and out of focus
       glow.setAttribute('data-a', d.lo); glow.setAttribute('data-b', d.hi);
       svg.appendChild(glow);
     }
@@ -57817,7 +57829,9 @@ function _renderWorldMapDiagram(host, opts) {
     path.setAttribute('stroke-width', isRemoved ? '2.2' : ((_known === 2 ? 1.8 : 1.45) * (0.60 + 0.40 * _near)).toFixed(2));
     path.setAttribute('stroke-linecap', 'round');
     // v0.30.646 — the two maps this lane joins, so hovering either end can light it
-    path.setAttribute('class', 'wm-lane');
+    // v0.30.658 — how far out this lane survives. Exempt: the lane you are standing on.
+    const _laneBand = (d.lo === cur || d.hi === cur) ? '' : _laneLen > 520 ? ' wm-lane-l3' : _laneLen > 300 ? ' wm-lane-l2' : '';
+    path.setAttribute('class', 'wm-lane' + _laneBand);
     path.setAttribute('data-a', d.lo); path.setAttribute('data-b', d.hi);
     if (isRemoved) path.setAttribute('stroke-dasharray', '8,6');
     else if (_known === 0) path.setAttribute('stroke-dasharray', '2,5.5');   // v0.30.644 — a route you have only heard of
@@ -58677,36 +58691,11 @@ function _renderWorldMapDiagram(host, opts) {
     svg.appendChild(_zoomHint);
   }
   host.appendChild(svg);
-  {   // v0.30.63 — fill the letterbox bands with the plate (see note above)
-    const _wmFit = () => {
-      const _hr = host.getBoundingClientRect();
-      if (!(_hr.width > 8 && _hr.height > 8)) return false;
-      const _sc = Math.min(_hr.width / W, _hr.height / H);
-      const _cw = _hr.width / _sc, _ch = _hr.height / _sc;
-      const _key = Math.round(_cw) + 'x' + Math.round(_ch);
-      if (svg._lxFitKey === _key) return true;          // same box: nothing to redo
-      svg._lxFitKey = _key;
-      const _cx = (W - _cw) / 2, _cy = (H - _ch) / 2;
-      // v0.30.656 — the BLEED stretches; the plate above it never moves.
-      try { _bgBleed.setAttribute('href', _wmBgRasterURL(Math.round(_cw), Math.round(_ch))); } catch (e) {}
-      _bgBleed.setAttribute('x', _cx); _bgBleed.setAttribute('y', _cy);
-      _bgBleed.setAttribute('width', _cw); _bgBleed.setAttribute('height', _ch);
-      _bgClipPath.setAttribute('d', `M${_cx} ${_cy}H${_cx + _cw}V${_cy + _ch}H${_cx}Z M0 0H${W}V${H}H0Z`);
-      for (const _st of svg.querySelectorAll('circle[data-wm-star="1"]')) {
-        _st.setAttribute('cx', (_cx + Math.random() * _cw).toFixed(1));
-        _st.setAttribute('cy', (_cy + Math.random() * _ch).toFixed(1));
-      }
-      return true;
-    };
-    if (!_wmFit()) requestAnimationFrame(_wmFit);
-    try {
-      if (typeof ResizeObserver === 'function') {
-        if (host._lxWmRO) host._lxWmRO.disconnect();   // one per host, not one per render
-        host._lxWmRO = new ResizeObserver(() => { try { _wmFit(); } catch (e) {} });
-        host._lxWmRO.observe(host);
-      }
-    } catch (e) {}
-  }
+  // v0.30.63's letterbox fit is gone with the bleed it existed to size (v0.30.658). Nothing here depends
+  // on the host's shape any more: the plate is pinned to the node space and fades out at its own
+  // border, and the twelve twinkling stars were already scattered across that space when they were
+  // made. The ResizeObserver it installed is disconnected if an earlier render left one behind.
+  try { if (host._lxWmRO) { host._lxWmRO.disconnect(); host._lxWmRO = null; } } catch (e) {}
   // v0.26.x — Per user "make sure the words are not overlapping". Final
   // guarantee on top of the font shrink + compound-name wrapping + position
   // spread: once the SVG is attached (so it has real geometry), greedily push

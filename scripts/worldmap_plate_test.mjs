@@ -68,6 +68,13 @@ const R = await page.evaluate(async () => {
     const i = (y * cv.width + x) * 4; const r = d[i], g = d[i+1], b = d[i+2];
     n++; sr += r; sg += g; sb += b; srr += r*r; sgg += g*g; sbb += b*b; lum += 0.2126*r + 0.7152*g + 0.0722*b;
   }
+  // v0.30.658 — the plate's own border is eaten so it dissolves into the backdrop instead of ending
+  // at a rectangle. Sampled here: fully opaque in the middle, gone at the corners, part-way at the
+  // very edge of the mid-side. If a future change puts a hard edge back, these move together.
+  const A = (x, y) => d[((Math.round(y) * cv.width + Math.round(x)) * 4) + 3];
+  const alpha = { mid: A(cv.width / 2, cv.height / 2), corner: A(2, 2),
+    leftEdge: A(2, cv.height / 2), rightEdge: A(cv.width - 3, cv.height / 2),
+    inset: A(cv.width * 0.14, cv.height / 2) };
   const v = (s, ss) => Math.sqrt(Math.max(0, ss/n - (s/n)*(s/n)));
   // Does the raster actually carry the plate? Correlate its luminance field with
   // the plate file's on a coarse grid. (A first version compared colour
@@ -146,6 +153,8 @@ const R = await page.evaluate(async () => {
     stdR: +v(sr, srr).toFixed(1), stdG: +v(sg, sgg).toFixed(1), stdB: +v(sb, sbb).toFixed(1),
     meanLum: +(lum / n).toFixed(1), p95, centreMean, p95all, cover, corr: corr == null ? null : +corr.toFixed(3),
     plateReady: (typeof _wmPlate !== 'undefined') ? !!_wmPlate._lxReady : null,
+    alpha,
+    backdrops: svg ? svg.querySelectorAll(':scope > image').length : -1,
     rasterAttached: !!bgImgEl && (bgImgEl.getAttribute('href') || '').startsWith('data:image/png'),
     plateBox: plateEl ? [plateEl.getAttribute('x'), plateEl.getAttribute('y'), plateEl.getAttribute('width'), plateEl.getAttribute('height')].join(',') : null,
     vbox: svg ? [svg.viewBox.baseVal.width, svg.viewBox.baseVal.height].map(Math.round).join(',') : null,
@@ -175,9 +184,16 @@ ok('it is not a black slab either', R.p95all >= 40 && R.meanLum > 14,
      'plate at ' + R.plateBox + ', node space ' + R.vbox); }
 ok('a live diagram re-renders when the plate lands late', R.hostTagged, `host tagged for re-render: ${R.hostTagged}`);
 
-ok('the backdrop reaches every edge (no letterbox band inside the border)',
-   R.cover && Math.max(R.cover.gapL, R.cover.gapR, R.cover.gapT, R.cover.gapB) <= 2,
-   R.cover ? `uncovered px  L${R.cover.gapL} R${R.cover.gapR} T${R.cover.gapT} B${R.cover.gapB}  [${R.cover._dbg}]` : '(no backdrop)');
+// v0.30.658 — this used to demand the backdrop cover the whole ELEMENT, letterbox bands included,
+// which is why v0.30.63 stretched a copy of the art to the window's shape. Per user, twice: that
+// stretched copy is what drew "the black rectangular border". A second copy cannot fill a band
+// without drawing an edge where it meets the first. The property that actually matters is that the
+// player never sees an edge — so the plate is pinned to the node space (checked above) and its own
+// border is eaten, and THAT is what is asserted now. The bands are simply the backdrop behind it.
+ok('the painting has no hard edge: its border is eaten, its middle is not',
+   R.alpha && R.alpha.mid >= 250 && R.alpha.corner <= 12 && R.alpha.leftEdge <= 40 && R.alpha.rightEdge <= 40 && R.alpha.inset >= 200,
+   R.alpha ? `alpha mid ${R.alpha.mid}, corner ${R.alpha.corner}, edges ${R.alpha.leftEdge}/${R.alpha.rightEdge}, 14% in ${R.alpha.inset}` : '(no raster)');
+ok('and there is only ONE backdrop, so there is no seam where two met', R.backdrops === 1, R.backdrops + ' backdrop images on the board');
 // 70 sits between the measured builds, not next to either: the pre-fix plate
 // reads 87 in the reading area and this one 59.
 ok('the reading area has no blown-out cores behind the labels', R.p95 <= 70,
