@@ -154,10 +154,20 @@ const R = await page.evaluate(async () => {
     meanLum: +(lum / n).toFixed(1), p95, centreMean, p95all, cover, corr: corr == null ? null : +corr.toFixed(3),
     plateReady: (typeof _wmPlate !== 'undefined') ? !!_wmPlate._lxReady : null,
     alpha,
+    dpr: devicePixelRatio,
     backdrops: svg ? svg.querySelectorAll(':scope > image').length : -1,
-    rasterAttached: !!bgImgEl && (bgImgEl.getAttribute('href') || '').startsWith('data:image/png'),
+    // v0.30.661 — webp or png. The raster is built at the display's device ratio now, which quadrupled
+    // its pixels; as lossless PNG that was ~7.9 MB of base64 per open. WebP carries the same image,
+    // alpha and all, at ~363 KB. PNG remains the fallback, so both are a pass.
+    rasterAttached: !!bgImgEl && /^data:image\/(webp|png)/.test(bgImgEl.getAttribute('href') || ''),
+    rasterFmt: ((bgImgEl && bgImgEl.getAttribute('href')) || '').slice(5, 15),
+    rasterKB: Math.round((((bgImgEl && bgImgEl.getAttribute('href')) || '').length * 0.75) / 1024),
     plateBox: plateEl ? [plateEl.getAttribute('x'), plateEl.getAttribute('y'), plateEl.getAttribute('width'), plateEl.getAttribute('height')].join(',') : null,
-    vbox: svg ? [svg.viewBox.baseVal.width, svg.viewBox.baseVal.height].map(Math.round).join(',') : null,
+    // v0.30.661 — the NODE SPACE, not the viewBox. The world view zooms out past the canvas now so
+    // the outermost pins clear the floating chrome, which means the viewBox is deliberately bigger
+    // than the space the pins are authored in. The plate is registered to the pins, so the pins are
+    // what it has to match.
+    vbox: [W, H].map(Math.round).join(','),
     hostTagged: !!document.querySelector('[data-wm-diagram="1"]'),
   };
 });
@@ -166,7 +176,8 @@ await browser.close(); server.kill();
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 140) });
 const stdAvg = (R.stdR + R.stdG + R.stdB) / 3;
-ok('the diagram backdrop raster is built and attached', R.rasterAttached && R.rasterW > 0, `${R.rasterW}x${R.rasterH}`);
+ok('the diagram backdrop raster is built and attached', R.rasterAttached && R.rasterW > 0, `${R.rasterW}x${R.rasterH} ${R.rasterFmt} ~${R.rasterKB} KB`);
+ok('and it is built at the DISPLAY resolution, not the layout one', R.rasterW >= R.vbox.split(',')[0] * Math.min(2, R.dpr) * 0.95, `raster ${R.rasterW}px across a ${R.vbox.split(',')[0]}px node space at dpr ${R.dpr} (capped at 2)`);
 ok('the painted plate decoded and was used', R.plateReady === true, `plateReady=${R.plateReady}`);
 ok('the raster IS the painted plate (luminance correlates with the file)', R.corr != null && R.corr >= 0.7,
    `correlation with backgrounds/worldmap_bg_v6.webp = ${R.corr} (procedural sky measures ~0)`);
@@ -181,7 +192,7 @@ ok('it is not a black slab either', R.p95all >= 40 && R.meanLum > 14,
 { const b = (R.plateBox || '').split(',').map(Number), v = (R.vbox || '').split(',').map(Number);
   ok('the painting is registered to the pins: the plate sits exactly on the node space',
      b.length === 4 && Math.abs(b[0]) < 1 && Math.abs(b[1]) < 1 && Math.abs(b[2] - v[0]) < 1.5 && Math.abs(b[3] - v[1]) < 1.5,
-     'plate at ' + R.plateBox + ', node space ' + R.vbox); }
+     'plate at ' + R.plateBox + ', node space ' + R.vbox + ' (the view is wider on purpose)'); }
 ok('a live diagram re-renders when the plate lands late', R.hostTagged, `host tagged for re-render: ${R.hostTagged}`);
 
 // v0.30.658 — this used to demand the backdrop cover the whole ELEMENT, letterbox bands included,

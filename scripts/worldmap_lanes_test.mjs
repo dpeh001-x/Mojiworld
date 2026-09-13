@@ -51,7 +51,11 @@ await page.evaluate(() => toggleWorldMap());
 await page.waitForTimeout(2500);
 const a = await page.evaluate(() => {
   const svg = document.querySelector('#worldmap-modal svg') || document.querySelector('svg');
-  const vb = svg.viewBox.baseVal, cx = vb.width / 2, cy = vb.height / 2;
+  // v0.30.661 — the centre of the VIEW, origin included. This read vb.width/2 alone, which is the
+  // centre only while the view starts at 0,0 - true until the world view zoomed out past the canvas
+  // and vb.x/vb.y went negative. The assumed centre was then ~92 units off and two lanes whose
+  // midpoints sit near it were classified as bowing inward when they do not.
+  const vb = svg.viewBox.baseVal, cx = vb.x + vb.width / 2, cy = vb.y + vb.height / 2;
   // the two arrowhead paths live in <defs> and carry no stroke - they are markers, not lanes
   const lanes = [...svg.querySelectorAll('path')].filter((p) => /^M [\d.]+,[\d.]+ [QL]/.test(p.getAttribute('d') || '') && p.getAttribute('stroke'));
   const parse = (d) => { const m = /^M ([\d.]+),([\d.]+) Q ([\d.]+),([\d.]+) ([\d.]+),([\d.]+)$/.exec(d); return m ? m.slice(1).map(Number) : null; };

@@ -10123,7 +10123,7 @@ The sleeping world is listening.</div>
          reading flat, and a near-black ground under both. */
       background:
         radial-gradient(ellipse at 50% 42%, rgba(72,54,150,0.10), transparent 62%),
-        url('backgrounds/worldmap_bg_v6.webp') center/cover no-repeat,   /* v0.30.656 — the painting, unglazed */
+        url('backgrounds/worldmap_bg_v7.webp') center/cover no-repeat,   /* v0.30.661 — the 2x plate */
         linear-gradient(160deg, #08051b, #0a0722 55%, #04020f);
       /* v0.30.659 — this is what the diagram fades INTO now that it has no panel of its own, so it stops
          being a second sharp copy of the painting and becomes depth of field: the same world, out of
@@ -11397,7 +11397,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.660';
+const GAME_VERSION = 'v0.30.661';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -57197,12 +57197,28 @@ _wmPlate.onerror = () => { _wmPlate._lxReady = false; };
 // Shadow-Woven Hood a street of red paper lanterns beside the rift. scripts/gen_worldmap_towns.mjs
 // holds the twenty prompts and the placer; worldmap_bg_v4.webp stays in the repo because it is that
 // script's input, the continent before anyone built on it.
-_wmPlate.src = 'backgrounds/worldmap_bg_v6.webp';
+// v0.30.661 — the 2x plate, per user: "make the map background more HD as it looks rather blurry". The
+// painting was generated at 1008x576 and cover-fitted to 1536 before it ever shipped, so the file
+// carried a 1.5x upscale; scripts/gen_worldmap_hd.mjs takes it to 3072x1792 with one Lanczos pass
+// and an unsharp mask cut for painted art. It does not invent detail — nothing can — but it stops
+// the browser doing the enlargement with a worse filter, and it puts back the edges the first
+// upscale and the webp quantiser took out (+12% edge energy, measured).
+_wmPlate.src = 'backgrounds/worldmap_bg_v7.webp';
 function _wmBgRasterURL(W, H) {
-  if (_wmBgCache && _wmBgCache.key === W + 'x' + H) return _wmBgCache.url;
+  // v0.30.661 — THE REAL SOURCE OF THE BLUR. This canvas was built at the diagram's USER size (~1525
+  // across) and handed to the browser as a PNG, which the compositor then scaled to the element's
+  // DEVICE pixels — 2754 across on a 2x display. A 1.8x bilinear enlargement of everything: the
+  // painting, the scrims, the stars, the feathered border. Building it at the device ratio instead
+  // means the browser draws it at 1:1 and the only resampling left is the one done here, with the
+  // canvas's own high-quality filter. Capped at 2 because past that the file is bigger than any
+  // detail it could carry, and the plate itself is 3072 wide.
+  const R = Math.max(1, Math.min(2, (typeof devicePixelRatio === 'number' && devicePixelRatio > 0) ? devicePixelRatio : 1));
+  if (_wmBgCache && _wmBgCache.key === W + 'x' + H + '@' + R) return _wmBgCache.url;
   const cv = document.createElement('canvas');
-  cv.width = W; cv.height = H;
+  cv.width = Math.round(W * R); cv.height = Math.round(H * R);
   const c = cv.getContext('2d');
+  c.scale(R, R);                       // every coordinate below stays in user units
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
   const _plate = _wmPlate._lxReady && _wmPlate.naturalWidth > 0 && !_wmPlateTainted;
   if (_plate) {
     // cover-fit the plate, then a light cool scrim so the node labels keep
@@ -57298,13 +57314,22 @@ function _wmBgRasterURL(W, H) {
   // opens everywhere; on file:// it wears the generated galaxy instead of the
   // painted plate - degraded, never broken.
   let url;
-  try { url = cv.toDataURL('image/png'); }
+  // v0.30.661 — WebP, not PNG. Doubling the raster for the display's real resolution quadrupled its
+  // pixels, and as a lossless PNG data URL that came to ~7.9 MB of base64 held in memory and decoded
+  // every time the map opens. The same image as webp at 0.92 is a fraction of it with nothing
+  // visible lost on a painted backdrop, alpha included — which the feathered border needs. PNG stays
+  // as the fallback for any engine that hands back something else, and the taint path below is
+  // untouched: it is the reason this is wrapped at all.
+  try {
+    url = cv.toDataURL('image/webp', 0.92);
+    if (url.indexOf('data:image/webp') !== 0) url = cv.toDataURL('image/png');   // no regex: the escape does not survive the wire
+  }
   catch (e) {
     _wmPlateTainted = true;
     if (_plate) return _wmBgRasterURL(W, H);   // one retry, now plate-free
     return '';                                  // untainted and still failing: let the SVG gradient carry it
   }
-  _wmBgCache = { key: W + 'x' + H, url };
+  _wmBgCache = { key: W + 'x' + H + '@' + R, url };
   return url;
 }
 function _renderWorldMapDiagram(host, opts) {
@@ -57316,7 +57341,13 @@ function _renderWorldMapDiagram(host, opts) {
   const cur = game.currentMap;
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  // v0.30.661 — per user: "need to zoom out abit as the nodes at the sides are buried". The world view
+  // was exactly the canvas, so the outermost pins sat on its very edge — which is precisely where
+  // v0.30.660 put the floating cards. The world now shows the canvas plus a margin, so the node
+  // field lands inside the chrome rather than under it. The art does not grow with it; what shows
+  // beyond the painting is the backdrop it fades into, which is the point of the frameless design.
+  const _WPAD = 1.12, _WW = W * _WPAD, _WH = H * _WPAD;
+  svg.setAttribute('viewBox', `${((W - _WW) / 2).toFixed(1)} ${((H - _WH) / 2).toFixed(1)} ${_WW.toFixed(1)} ${_WH.toFixed(1)}`);
   svg.setAttribute('width', '100%');
   // v0.26.485 — preserveAspectRatio 'meet' + fill the flex grid box (width AND
   // height 100%, allowed to shrink) so the whole diagram letterbox-fits the
@@ -58680,9 +58711,12 @@ function _renderWorldMapDiagram(host, opts) {
     svg.setAttribute('data-wm-zoom', _band());
     if (_lblSparse) svg.classList.add('wm-sparse');   // v0.30.652 — the far view still belongs to the places
     const _clampVB = () => {
-      vb.w = Math.min(W, Math.max(W / 3.5, vb.w)); vb.h = vb.w * (H / W);
-      vb.x = Math.min(W - vb.w, Math.max(0, vb.x));
-      vb.y = Math.min(H - vb.h, Math.max(0, vb.y));
+      // v0.30.661 — the widest view is the padded world, and once the box is wider than the canvas its
+      // origin has to be allowed NEGATIVE or the pan clamp would shove the extra margin all onto one
+      // side. Both ends are derived rather than written down, so they stay right at any zoom.
+      vb.w = Math.min(_WW, Math.max(W / 3.5, vb.w)); vb.h = vb.w * (H / W);
+      vb.x = Math.min(Math.max(0, W - vb.w), Math.max(Math.min(0, W - vb.w), vb.x));
+      vb.y = Math.min(Math.max(0, H - vb.h), Math.max(Math.min(0, H - vb.h), vb.y));
     };
     const _scrn = () => {   // current letterbox scale + offsets ('meet')
       const r = svg.getBoundingClientRect();
@@ -58694,7 +58728,7 @@ function _renderWorldMapDiagram(host, opts) {
       const { r, sc, ox, oy } = _scrn();
       const mx = vb.x + (ev.clientX - r.left - ox) / sc;
       const my = vb.y + (ev.clientY - r.top - oy) / sc;
-      const nw = Math.min(W, Math.max(W / 3.5, vb.w * (ev.deltaY > 0 ? 1.15 : 1 / 1.15)));
+      const nw = Math.min(_WW, Math.max(W / 3.5, vb.w * (ev.deltaY > 0 ? 1.15 : 1 / 1.15)));
       const k = nw / vb.w;
       vb.x = mx - (mx - vb.x) * k;
       vb.y = my - (my - vb.y) * k;
@@ -58726,7 +58760,7 @@ function _renderWorldMapDiagram(host, opts) {
     }, true);
     svg.addEventListener('dblclick', (ev) => {
       if (ev.target && ev.target.closest && ev.target.closest('.wm-node')) return;
-      vb = { x: 0, y: 0, w: W, h: H };
+      vb = { x: (W - _WW) / 2, y: (H - _WH) / 2, w: _WW, h: _WH };   // v0.30.661 — back to the padded world
       _queueVB();
     });
     // v0.30.650 — the slider and the wheel are one control: the slider writes vb.w and the shared
@@ -58736,9 +58770,11 @@ function _renderWorldMapDiagram(host, opts) {
     if (_zoomEl) {
       _zoomEl.value = '0';
       _zoomEl.oninput = () => {
-        const z = 1 + (3.5 - 1) * (Number(_zoomEl.value) / 100);
+        // v0.30.661 — geometric between the two ends rather than W/z, so the slider still reaches the
+        // padded world at 0 and the same closest zoom at 100 now that the far end has moved.
+        const _t = Number(_zoomEl.value) / 100;
         const mx = vb.x + vb.w / 2, my = vb.y + vb.h / 2;
-        const nw = Math.min(W, Math.max(W / 3.5, W / z));
+        const nw = _WW * Math.pow((W / 3.5) / _WW, _t);
         vb.h = nw * (H / W);
         vb.x = mx - nw / 2; vb.y = my - vb.h / 2; vb.w = nw;
         _clampVB(); _queueVB();
