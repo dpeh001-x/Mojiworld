@@ -196,7 +196,14 @@ ok('the painting has no hard edge: its border is eaten, its middle is not',
 ok('and there is only ONE backdrop, so there is no seam where two met', R.backdrops === 1, R.backdrops + ' backdrop images on the board');
 // 70 sits between the measured builds, not next to either: the pre-fix plate
 // reads 87 in the reading area and this one 59.
-ok('the reading area has no blown-out cores behind the labels', R.p95 <= 70,
+// v0.30.660 — the ceiling moves from 70 to 150, and it is a real change of policy rather than a
+// number nudged to make a build pass. Per user: "the background image can look less dark". The
+// scrim was carrying the whole legibility budget and paying for it with the painting; the halo
+// under every name carries its share now (asserted in worldmap_type_test, which pins its width and
+// that it is painted UNDER the glyph). 150 is still nowhere near blown out - the check that this
+// was written to catch, a plate with bright cores sitting exactly where the small labels are, fires
+// at 200+. The measured build sits at 114.
+ok('the reading area has no blown-out cores behind the labels', R.p95 <= 150,
    `95th-percentile luminance in the central 60% = ${R.p95}/255 (mean ${R.centreMean})`);
 
 let bad = 0;

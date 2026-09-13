@@ -67,6 +67,8 @@ const a = await page.evaluate(() => {
     labels: lbl.length, total: strings.filter(Boolean).length,
     size: one ? parseFloat(one.getAttribute('font-size')) : -1,
     paintOrder: cs ? (cs.paintOrder || '') : '', stroke: one ? one.getAttribute('stroke') : '',
+    haloW: one ? parseFloat(one.getAttribute('stroke-width') || 0) : -1,
+    haloA: one ? (parseFloat((/rgba\([^)]*?,\s*([\d.]+)\s*\)/.exec(one.getAttribute('stroke') || '') || [])[1]) || 0) : -1,
     strokeIsBlack: one ? /rgba\(0, ?0, ?0/.test(one.getAttribute('stroke') || '') : true,
     fogNodes: fog.length, fogDisc,
     hubShimmer: svg.querySelectorAll('circle animate').length,
@@ -76,7 +78,12 @@ const a = await page.evaluate(() => {
 checks.push(['the fog draws no text at all', a.fogStrings === 0, `${a.fogStrings} "???"/"unexplored" strings`]);
 checks.push(['the map is quiet: far fewer labels than the 161 it drew', a.total <= 30, `${a.total} labels on screen`]);
 checks.push(['a place name is big enough to read', a.size >= 18, a.size + ' user units (~' + (a.size * 0.68).toFixed(1) + ' px on screen)']);
+// v0.30.660 — and it has to be HEAVY. The ground was brightened at the user's request, so the halo
+// is no longer a nicety on top of a dark scrim: it is the thing keeping a name off the painting.
+// Width and opacity are pinned here because the plate suite's reading-area ceiling was relaxed on
+// the strength of them.
 checks.push(['the name wears a halo, painted under the glyph, and it is not pure black', /stroke/.test(a.paintOrder) && !a.strokeIsBlack, `paint-order "${a.paintOrder}", stroke ${a.stroke}`]);
+checks.push(['and the halo is heavy enough to carry a bright ground', a.haloW >= 3.5 && a.haloA >= 0.85, `${a.haloW} units at ${a.haloA} alpha`]);
 checks.push(['unvisited places are dimmed and sit smaller', a.fogNodes > 40 && a.fogDisc > 0 && a.fogDisc < 21, `${a.fogNodes} fogged, disc r ${a.fogDisc}`]);
 checks.push(['no node idles on its own any more', a.hubShimmer === 0, a.hubShimmer + ' per-node animations']);
 

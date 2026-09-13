@@ -65,6 +65,19 @@ const a = await page.evaluate(() => {
   return { title: f('.wm-hd-title'), chipKey: f('.wm-hd-chip b'), chipName: f('#worldmap-here-name'),
     counts: f('#worldmap-counts'), key: f('.wm-hd-key'),
     barPct: bar ? parseFloat(bar.style.width) : -1, visited: counts ? +counts[1] : -1, total: counts ? +counts[2] : -1,
+    hdRows: (() => {
+      const l = document.querySelector('#worldmap-header .wm-hd-l'), r = document.querySelector('#worldmap-header .wm-hd-r');
+      if (!l || !r) return -1;
+      return Math.abs(l.getBoundingClientRect().top - r.getBoundingClientRect().top) < 10 ? 1 : 2;
+    })(),
+    hdFloats: (() => { const h = document.getElementById('worldmap-header'); return !!h && getComputedStyle(h).position === 'absolute'; })(),
+    mapPct: (() => {
+      const m = document.querySelector('#worldmap-modal .modal'), svg = document.querySelector('#worldmap-modal svg');
+      if (!m || !svg) return -1;
+      const mr = m.getBoundingClientRect(), host = svg.parentElement.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+      const sc = Math.min(host.width / vb.width, host.height / vb.height);
+      return Math.round(100 * (vb.width * sc) * (vb.height * sc) / (mr.width * mr.height));
+    })(),
     closes, overlap, headerH: Math.round(hr.height) };
 });
 checks.push(['exactly one close button is on screen, not two', a.closes.length === 1, JSON.stringify(a.closes)]);
@@ -76,7 +89,13 @@ checks.push(['the chip pairs a Cormorant label with a display-face place name',
 checks.push(['the count and the key hint are set in Cormorant', !!a.counts && /Cormorant/.test(a.counts.face) && !!a.key && /Cormorant/.test(a.key.face), a.counts ? a.counts.face + ' ' + a.counts.size + 'px' : '']);
 checks.push(['the discovery bar matches the count it sits beside', a.total > 0 && Math.abs(a.barPct - (a.visited / a.total) * 100) < 0.6, `${a.visited}/${a.total} = ${((a.visited / a.total) * 100).toFixed(1)}%, bar ${a.barPct}%`]);
 checks.push(['nothing in the header runs under the close button', a.overlap === null, a.overlap || 'clear']);
-checks.push(['the strip stays a single line', a.headerH <= 56, a.headerH + ' px tall']);
+// v0.30.660 — the header no longer takes a slice of the modal: it floats over the map, so its own
+// height costs the world nothing and a ceiling on it measures nothing. What it was really protecting
+// is that the two halves sit on ONE line rather than stacking, which is still worth pinning - and
+// the thing it was paying for, map area, is now asserted directly.
+checks.push(['the two halves of the header sit on one line', a.hdRows === 1, a.hdRows + ' row(s)']);
+checks.push(['the header floats: it takes no height from the map', a.hdFloats, a.hdFloats ? 'out of flow' : 'still in the column']);
+checks.push(['the map has the whole modal', a.mapPct >= 90, a.mapPct + '% of the modal is map (was 60% before v0.30.660)']);
 if (SHOT) await page.screenshot({ path: SHOT, clip: { x: 20, y: 40, width: 1240, height: 120 } });
 checks.push(['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')]);
 } catch (e) {
