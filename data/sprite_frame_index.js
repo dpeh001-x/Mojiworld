@@ -620,6 +620,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "markedShot": 9,
    "mbloodbolt": 9,
    "mbonechip": 9,
+   "mcryshard": 9,
    "mdark": 9,
    "meteor": 9,
    "mfirespit": 9,
