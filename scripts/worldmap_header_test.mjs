@@ -65,6 +65,26 @@ const a = await page.evaluate(() => {
   return { title: f('.wm-hd-title'), chipKey: f('.wm-hd-chip b'), chipName: f('#worldmap-here-name'),
     counts: f('#worldmap-counts'), key: f('.wm-hd-key'),
     barPct: bar ? parseFloat(bar.style.width) : -1, visited: counts ? +counts[1] : -1, total: counts ? +counts[2] : -1,
+    // v0.30.669 — the quietest text in the strip, against the card behind it. "Press W to close"
+    // used to be #7d7396 on a near-black card: 4.2:1, under the 4.5 that small text needs to be read
+    // rather than merely noticed. A ratio survives a palette change; a hex literal does not.
+    faintest: (() => {
+      const el = document.querySelector('#worldmap-header .wm-hd-key'), card = document.querySelector('#worldmap-header .wm-hd-r');
+      if (!el || !card) return -1;
+      // Split on anything that is not a digit or a dot. Written without a backslash class on
+      // purpose: one does not survive being generated through a template literal, and the failure is
+      // silent — the class matches the letters "d" and "." and every reading comes back NaN.
+      const nums = (v) => String(v).split(/[^0-9.]+/).filter(Boolean).map(Number);
+      const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+      const L = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      const fg = nums(getComputedStyle(el).color).slice(0, 3);
+      const cn = nums(getComputedStyle(card).backgroundColor);
+      const a = cn.length > 3 ? cn[3] : 1;
+      const under = [10, 8, 16];                       // the near-black the card is laid over
+      const bg = cn.slice(0, 3).map((c, i) => c * a + under[i] * (1 - a));
+      const x = L(fg), y = L(bg);
+      return Math.round(100 * (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)) / 100;
+    })(),
     hdRows: (() => {
       const l = document.querySelector('#worldmap-header .wm-hd-l'), r = document.querySelector('#worldmap-header .wm-hd-r');
       if (!l || !r) return -1;
@@ -96,6 +116,7 @@ checks.push(['nothing in the header runs under the close button', a.overlap === 
 checks.push(['the two halves of the header sit on one line', a.hdRows === 1, a.hdRows + ' row(s)']);
 checks.push(['the header floats: it takes no height from the map', a.hdFloats, a.hdFloats ? 'out of flow' : 'still in the column']);
 checks.push(['the map has the whole modal', a.mapPct >= 90, a.mapPct + '% of the modal is map (was 60% before v0.30.660)']);
+checks.push(['the faintest text in the strip is readable, not just present', a.faintest >= 4.5, a.faintest + ':1 against its card (4.5 is the floor for small text)']);
 if (SHOT) await page.screenshot({ path: SHOT, clip: { x: 20, y: 40, width: 1240, height: 120 } });
 checks.push(['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')]);
 } catch (e) {
