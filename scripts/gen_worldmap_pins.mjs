@@ -47,22 +47,21 @@ const ITERS = 1400;
 // Regions measured off the painting, in canvas pixels: [cx, cy, rx, ry, ground]
 const REGIONS = {
   ice:       [372, 152, 168,  76, 'land'],   // the glass-shard steppe, upper left
-  volcano:   [218, 398, 128,  92, 'land'],   // black rock and lava channels
+  volcano:   [225, 400, 152, 116, 'land'],   // black rock and lava channels
   bricks:    [345, 662, 182, 108, 'land'],   // the toy-brick town
   sand:      [300, 788, 150,  34, 'land'],   // the beach below it
-  sweet:     [455, 516,  86,  92, 'land'],   // the open band east of the lava
+  sweet:     [468, 520, 112, 118, 'land'],   // the open band east of the lava
+  downs:     [524, 296, 112,  90, 'land'],   // the open grass between the ice and the moor
   moor:      [752, 168, 162,  84, 'land'],   // tombs and the lantern way-station
   graveyard:[1212, 182, 188,  98, 'land'],   // mossy headstones under twisted trees
   heartland: [618, 424, 128, 120, 'land'],   // the central plain
-  bastion:  [1000, 434, 138,  88, 'land'],   // the walled fortress
+  bastion:  [1000, 436, 158, 104, 'land'],   // the walled fortress
   rift:      [806, 682, 142,  92, 'land'],   // the torn violet ground
   jungle:   [1108, 686, 200, 116, 'land'],   // the wooded east and its towns
   // The four Bloom Reaches maps need to sit together or the region-name pass drops the family: it
   // asks for two placed maps inside 300px before it will name a territory, and splitting Verdant
   // Haven and Hollow into the central plain cost the world one of its ten names.
   thicket:  [1247, 536, 120, 106, 'land'],   // the wooded shoulder east of the bastion
-  rocks:    [1306, 712, 132,  98, 'land'],   // the pale boulder field
-  isles:    [1416, 424,  96, 150, 'land'],   // the islets off the east coast
   sea:      [ 765, 445, 720, 400, 'water'],  // anywhere the painting is open water
 };
 
@@ -85,8 +84,10 @@ const ASSIGN = {
   emeraldVillage: 'jungle', jadeGrove: 'jungle',
   wildflowerPlains: 'jungle', skyGarden: 'jungle', azureAcademia: 'jungle', hiddenPagoda: 'jungle',
   shadowWovenHood: 'jungle', reachOfVermillion: 'jungle', boss: 'jungle',
-  graniteBluffs: 'rocks', sauroSlope: 'rocks', krookThrone: 'rocks',
-  celestialSpire: 'isles', stormCrest: 'isles', thunderPlateau: 'isles', sanctum: 'isles',
+  sauroSlope: 'volcano', krookThrone: 'volcano',     // both open onto the foundry's maps
+  graniteBluffs: 'sweet',                            // onto Honeycomb Hollow and a Block-land meadow
+  celestialSpire: 'bastion', sanctum: 'bastion',     // onto the Stardust Atrium, which is bastion
+  stormCrest: 'downs', thunderPlateau: 'downs',      // onto Dune Sands, in the band below them
   abyssalTrench: 'sea', coralReef: 'sea', tidalLagoon: 'sea', tidepoolShoals: 'sea', kelpForest: 'sea',
   bubbleGrotto: 'sea', octopusGrotto: 'sea', witheringTide: 'sea', witheringTide2: 'sea', pearlBathhouse: 'sea',
 };
@@ -216,7 +217,52 @@ const byRegion = {};
 // inside the authoring box is a band barely wider than a node, so containment kept projecting two
 // maps onto the same pixel and the repulsion had nowhere to push them.
 for (const id of ids) if (ASSIGN[id] !== 'sea') (byRegion[ASSIGN[id]] = byRegion[ASSIGN[id]] || []).push(id);
-const BERTHS = seaBerths(SEA_ORDER.length);
+// Which sea map gets which berth is decided by the portals, not by the order they are listed in.
+// Spreading them round the ring by bearing put the Abyssal Trench and the Withering Tide's Drowned
+// Hold on opposite coasts with a 927px lane between them - the longest line on the map. Cost is the
+// total length of every link a berth would create (sea neighbours at their berths, land neighbours at
+// their region's centre); greedy first, then pairwise swaps until no swap helps.
+const BERTHS = (() => {
+  const B = seaBerths(SEA_ORDER.length);
+  const home = (id) => {
+    const i = SEA_ORDER.indexOf(id);
+    if (i >= 0) return null;                       // another sea map: resolved from the current pick
+    const r = REGIONS[ASSIGN[id]];
+    return r ? { x: r[0], y: r[1] } : null;
+  };
+  const nbrs = {};
+  for (const id of SEA_ORDER) nbrs[id] = [];
+  for (const [a, b] of LINKS) {
+    if (nbrs[a]) nbrs[a].push(b);
+    if (nbrs[b]) nbrs[b].push(a);
+  }
+  const cost = (pick) => {                          // pick[i] = berth index for SEA_ORDER[i]
+    let t = 0;
+    SEA_ORDER.forEach((id, i) => {
+      const p = B[pick[i]];
+      for (const nb of nbrs[id]) {
+        const j = SEA_ORDER.indexOf(nb);
+        const q = j >= 0 ? B[pick[j]] : home(nb);
+        if (!q) continue;
+        t += Math.hypot(p.x - q.x, p.y - q.y) * (j >= 0 ? 0.5 : 1);   // sea pairs counted once
+      }
+    });
+    return t;
+  };
+  let pick = B.map((_, i) => i);
+  let best = cost(pick);
+  for (let pass = 0; pass < 60; pass++) {
+    let moved = false;
+    for (let i = 0; i < pick.length; i++) for (let j = i + 1; j < pick.length; j++) {
+      const t = pick.slice(); const x = t[i]; t[i] = t[j]; t[j] = x;
+      const c = cost(t);
+      if (c < best - 0.5) { pick = t; best = c; moved = true; }
+    }
+    if (!moved) break;
+  }
+  console.log(`  sea berths assigned by their portals: total link length ${Math.round(best)}px`);
+  return pick.map((b) => B[b]);
+})();
 SEA_ORDER.forEach((id, i) => {
   if (ASSIGN[id] !== 'sea') return;
   const seat = BERTHS[i];

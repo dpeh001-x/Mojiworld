@@ -57,11 +57,19 @@ const a = await page.evaluate(() => {
     air: air ? { r: +air.getAttribute('r'), inSpin: !!air.closest('g.wm-spin') } : null,
     cinzel: pill.length, cormorant: sub.length,
     cinzelReady: document.fonts.check("700 12px Cinzel"), cormorantReady: document.fonts.check("italic 400 12px 'Cormorant Garamond'"),
+    ringed: [...document.querySelectorAll('#worldmap-modal svg g.wm-node .wm-disc')]
+      .filter((d) => parseFloat(d.getAttribute('stroke-width') || 0) >= 2 && (d.getAttribute('stroke') || 'none') !== 'none').length,
     labelFace: lbl ? lbl.getAttribute('font-family') : '' };
 });
 checks.push(['every lane is painted with a fading gradient', a.faded === a.lanes && a.lanes > 50, `${a.faded}/${a.lanes}`]);
 checks.push(['that gradient is transparent at both ends', JSON.stringify(a.laneStops) === JSON.stringify(['0', '1', '1', '0']), JSON.stringify(a.laneStops)]);
-checks.push(['every pin casts a shadow', a.withShadow === a.nodes && a.nodes >= 80, `${a.withShadow}/${a.nodes}`]);
+// v0.30.657 — the contact shadows are OFF, per user: "remove the black semi opaque boxes surrounding
+// the nodes as it makes it look messier as well". One reads as a shadow; eighty at map scale read as
+// dark tiles laid over the painting. What this check owns is the property the shadow was there for -
+// that a pin is separable from the ground it stands on - so it now asserts the removal was complete
+// AND that every disc still carries the coloured ring that does that job.
+checks.push(['no pin wears a dark halo any more', a.withShadow === 0, `${a.withShadow} of ${a.nodes} still shadowed`]);
+checks.push(['and every pin is still ringed, which is what separates it from the ground', a.ringed === a.nodes && a.nodes >= 80, `${a.ringed}/${a.nodes}`]);
 checks.push(['reachable pins catch a highlight, locked ones do not', a.withGloss > 0 && a.withGloss < a.nodes, `${a.withGloss}/${a.nodes} glossed`]);
 checks.push(['the globe carries air, painted still under the turning rings', !!a.air && a.air.r > 200 && a.air.inSpin === false, a.air ? `r ${a.air.r}` : 'no dome']);
 checks.push(['place names are set in Cinzel', /Cinzel/.test(a.labelFace) && a.cinzel >= 80, `${a.cinzel} in Cinzel`]);

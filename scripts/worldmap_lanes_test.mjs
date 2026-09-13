@@ -14,7 +14,16 @@ const PAGE = process.argv[2] || 'mojiworld_game.html';
 const PORT = Number(process.argv[3] || 11541);
 const checks = [];
 const html = readFileSync(path.join(ROOT, PAGE), 'utf8');
-checks.push(['the bowed lane helper ships', /const bow = Math\.min\(len \* 0\.15, 44\)/.test(html) && /class', 'wm-spin'/.test(html)]);
+// v0.30.657 — the bow is a tuned number, not a contract: it went from 0.15/44 to 0.09/24 when the
+// lane web was flattened, and pinning the literals only made this check a tripwire on the next tune.
+// What matters is that the helper still bows (a straight-line web was the v0.30.644 complaint) and
+// that the bow is capped so a long lane cannot swing across the map. The visual property is asserted
+// for real further down, on the rendered paths.
+checks.push(['the bowed lane helper ships, with a capped bow', (() => {
+  const m = /const bow = Math\.min\(len \* ([\d.]+), (\d+)\)/.exec(html);
+  return !!m && +m[1] > 0 && +m[1] <= 0.2 && +m[2] > 0 && +m[2] <= 60;
+})(), (/const bow = Math\.min\(len \* ([\d.]+), (\d+)\)/.exec(html) || []).slice(1).join(' / ')]);
+checks.push(['lanes recede with distance instead of all weighing the same', /const _near = Math\.max\(0, Math\.min\(1, \(520 - _laneLen\)/.test(html)]);
 checks.push(['the spin respects reduced motion', /prefers-reduced-motion: reduce\) \{ \.wm-spin \{ animation: none/.test(html)]);
 
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
