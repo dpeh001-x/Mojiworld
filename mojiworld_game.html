@@ -11723,7 +11723,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.673';
+const GAME_VERSION = 'v0.30.674';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -119681,6 +119681,59 @@ function _getPlainPortalImg(img) {
 // resample visually lossless. Bucketed to 10px so near sizes share one bake;
 // a source already within 2.2x of the box is returned untouched (no win).
 // Per-image slot map, tiny FIFO, exactly the _lxPlainCache recipe (v0.29.735).
+// v0.30.674 deadeye-outline - a 2 px black ring for Deadeye Protocol's rounds (per user: "for the
+// projectiles from the skill deadeyes protocol it needs to have a 2px black outline around it").
+// "2 px" is 2 px AS DRAWN, not 2 px of source art - the lesson the gear editor's outline learned in
+// v0.29.396: the Overclock round is 512 px wide art in a ~70 px box, so a literal 2-source-px ring
+// would be a third of a screen pixel. The radius comes from the drawn box, so both rounds read the
+// same on screen. The mask is thresholded at 50% alpha (a quarter of this art's opaque pixels are
+// semi-transparent glow, and a raw-alpha silhouette traces the glow into a fat fuzzy ring), then the
+// body is punched out so what is left is a band of exactly the ring width - drawn ON TOP of the art,
+// so no black sits under the glow and dims it. Baked once per (sprite bake, radius).
+const _LX_PROJ_RING = new WeakMap();
+function _lxProjRing(img, drawnW) {
+  const nw = (img && (img.naturalWidth || img.width)) | 0, nh = (img && (img.naturalHeight || img.height)) | 0;
+  if (!nw || !nh || !(drawnW > 0)) return null;
+  const R = Math.max(1, Math.round(2 * (nw / drawnW)));   // 2 px as drawn, expressed in this bake's pixels
+  let byR = _LX_PROJ_RING.get(img);
+  if (!byR) { byR = new Map(); _LX_PROJ_RING.set(img, byR); }
+  let ring = byR.get(R);
+  if (ring !== undefined) return ring;
+  ring = null;
+  try {
+    const pad = R + 1;
+    const solid = document.createElement('canvas'); solid.width = nw; solid.height = nh;
+    const sx = solid.getContext('2d', { willReadFrequently: true });
+    sx.drawImage(img, 0, 0, nw, nh);
+    try {   // a file:// build taints the canvas; then the raw alpha stands in and the ring goes soft
+      const id = sx.getImageData(0, 0, nw, nh), d = id.data;
+      for (let i = 0; i < d.length; i += 4) { const a = d[i + 3] >= 128 ? 255 : 0; d[i] = 0; d[i + 1] = 0; d[i + 2] = 0; d[i + 3] = a; }
+      sx.putImageData(id, 0, 0);
+    } catch (_e) {}
+    const cv = document.createElement('canvas'); cv.width = nw + pad * 2; cv.height = nh + pad * 2;
+    const cx = cv.getContext('2d');
+    for (let i = 0; i < 16; i++) {   // 16 stamps read as a circle, not a star
+      const a = (i / 16) * Math.PI * 2;
+      cx.drawImage(solid, Math.round(pad + Math.cos(a) * R), Math.round(pad + Math.sin(a) * R), nw, nh);
+    }
+    cx.globalCompositeOperation = 'source-in';
+    cx.fillStyle = '#000'; cx.fillRect(0, 0, cv.width, cv.height);
+    cx.globalCompositeOperation = 'destination-out';
+    cx.drawImage(solid, pad, pad, nw, nh);   // punch the body: what is left is the band alone
+    cx.globalCompositeOperation = 'source-over';
+    cv._lxKx = cv.width / nw; cv._lxKy = cv.height / nh;
+    ring = cv;
+  } catch (_e) { ring = null; }
+  byR.set(R, ring);
+  return ring;
+}
+// Draws that band around a sprite already blitted at dw x dh, centred on the current transform.
+function _lxProjRingDraw(ctx, img, dw, dh) {
+  const ring = _lxProjRing(img, dw);
+  if (!ring) return;
+  const w = dw * ring._lxKx, h = dh * ring._lxKy;
+  ctx.drawImage(ring, -w / 2, -h / 2, w, h);
+}
 function _lxProjScaled(img, boxPx, grow) {
   if (!img) return img;
   const nw = img.naturalWidth || img.width || 0, nh = img.naturalHeight || img.height || 0;
@@ -141720,8 +141773,10 @@ function drawProjectiles() {
         let _dw2 = _box, _dh2 = _box;
         if (_nw >= _nh) _dh2 = _box * (_nh / _nw); else _dw2 = _box * (_nw / _nh);
         ctx.drawImage(_bdraw, -_dw2 / 2, -_dh2 / 2, _dw2, _dh2);
+        if (p.skill === 'marksman_ult') _lxProjRingDraw(ctx, _bdraw, _dw2, _dh2);   // v0.30.674 deadeye-outline
       } else {
         ctx.drawImage(_bdraw, -_bw / 2, -_bh / 2, _bw, _bh);
+        if (p.skill === 'marksman_ult') _lxProjRingDraw(ctx, _bdraw, _bw, _bh);   // v0.30.674 deadeye-outline
       }
       ctx.restore();
       continue;
