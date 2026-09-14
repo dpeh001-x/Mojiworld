@@ -12560,7 +12560,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.729';
+const GAME_VERSION = 'v0.30.730';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -74712,8 +74712,11 @@ function _lxDeColumn(m, n0, volc) {
   if (!d) return 0;
   const now = game.time | 0;
   let c = m._deCol;
-  if (!c || now - c.t > 15 || !c.sum || c.sum.life <= 0) {
-    c = m._deCol = { m, t: now, n: 0, total: 0, rows: new Array(7).fill(null), sum: null };
+  // v0.30.730 gb-gold — the sum is what used to prove a column was still alive. A B/G column
+  // no longer HAS one, and `!c.sum` would then be true on every hit: each would start a new
+  // column and the stack would never build. A totalless column is judged on its own freshness.
+  if (!c || now - c.t > 15 || (!c.noSum && (!c.sum || c.sum.life <= 0))) {
+    c = m._deCol = { m, t: now, n: 0, total: 0, rows: new Array(7).fill(null), sum: null, noSum: !!volc };
     _LX_DE.cols.push(c);
     while (_LX_DE.cols.length > LX_COL_MAX) { const _ev = _LX_DE.cols.shift(); if (_ev && _ev.m && _ev.m._deCol === _ev) _ev.m._deCol = null; }
   }
@@ -74722,8 +74725,8 @@ function _lxDeColumn(m, n0, volc) {
   c.rows[row] = d; d._deRow = row;
   d.life = 24; d.maxLife = 30; d.vy = 0;   // maxLife - life = 6: the row enters half-way through the pop, not from the crit's 2.6x overshoot
   if (volc) {
-    // v0.30.729 gb-volcano — a master skill must not read smaller than a basic attack. Rows
-    // clear a crit (18) instead of being shrunk to 11-14, and wear the magma ramp.
+    // v0.30.730 gb-gold — a master skill must not read smaller than a basic attack, and with
+    // no total above it the row carries the whole moment. Embers come off the row now.
     d.size = LX_GB_ROW_SIZE; d._gbVolc = true; d.big = true; d.color = LX_GB_ROW_COL;
     c.pitch = LX_GB_ROW_PITCH;
   } else {
@@ -74731,16 +74734,14 @@ function _lxDeColumn(m, n0, volc) {
   }
   d.crit = false;   // keeps the gold, drops the star and the 2.6x crit overshoot: seven starred pops a press was noise, and every line crits anyway
   d._txt = undefined; d._bk = undefined;
+  // v0.30.730 gb-gold — NO TOTAL on a B/G column, per user: "There should not be a B / G total
+  // displayed". Deadeye still builds and keeps its own, so this branches rather than deletes.
+  if (volc) {
+    _lxVolcEmbers(d.x + 8, d.y);
+    return val;
+  }
   if (!c.sum) { c.sum = { x: d.x, y: d.y, vy: 0, text: '', life: 30, maxLife: 31, color: '#ffd24a', size: 22, big: true, _deSum: true }; arr.push(c.sum); }
   else { const i = arr.indexOf(c.sum); if (i >= 0 && i !== arr.length - 1) { arr.splice(i, 1); arr.push(c.sum); } }   // the cap drops the head: keep the total at the tail
-  // v0.30.729 gb-volcano — the total leads the column, so it clears the rows under it and
-  // throws embers as it climbs. This sits AFTER the if/else above on purpose: v0.30.724
-  // wedged its own if/else between them and re-parented that `else`, which quietly stopped
-  // the total being moved back to the array tail - and MAX_DN evicts from the head.
-  if (volc) {
-    c.sum.size = LX_GB_SUM_SIZE; c.sum._gbVolc = true; c.sum.color = LX_GB_SUM_COL; c.sum._bk = undefined;
-    _lxVolcEmbers(c.sum.x + 8, c.sum.y);
-  }
   c.sum.text = _lxDeFmt(c.total); c.sum._txt = undefined; c.sum._bk = undefined; c.sum.life = 30; c.sum.maxLife = 44; c.sum.vy = 0;
   return val;
 }
@@ -74789,20 +74790,23 @@ const LX_GB_BASIC = new Set(['melee', 'arrow', 'bolt', 'charged', 'deadeye']);
 // was built for Deadeye, where the TOTAL carries the weight - so a master skill read smaller
 // than a basic attack. Inverted: rows clear a crit, the total clears the rows, and the pitch
 // grows so they have room to sit in.
-const LX_GB_ROW_SIZE  = 24;     // vs 14 for a normal hit, 18 for a crit
-const LX_GB_SUM_SIZE  = 30;     // the total still leads its own column
-const LX_GB_ROW_PITCH = 32;     // a 24px row does not fit the old 20px pitch
-const LX_GB_ROW_COL   = '#ff6a10';   // molten orange - the rows
-const LX_GB_SUM_COL   = '#ffb020';   // hotter amber - the total above them
+// v0.30.730 gb-gold — with no total above them the rows ARE the read, so they take the size
+// the total used to have and then some. Still well clear of a normal hit (14) and a crit (18).
+const LX_GB_ROW_SIZE  = 30;
+const LX_GB_ROW_PITCH = 38;     // a 30px row needs the room
+const LX_GB_ROW_COL   = '#ffbe1e';   // gold, per the screenshot - the halo and rim mix off this
 // The magma ramp, top to bottom: white-hot, yellow, orange, deep red. Cached per integer
 // size exactly like the crit gradient it sits beside.
 const _dnVolcGrad = new Map();
 function _lxVolcGrad(ctx2, bs) {
   let g = _dnVolcGrad.get(bs);
   if (!g) {
+    // v0.30.730 gb-gold — re-weighted GOLD. v0.30.729 ran this to #b81a05, a deep red base,
+    // and the user pointed at the gold glyph and said keep that. Bright yellow crown, amber
+    // body, and it only heats into orange at the very bottom edge.
     g = ctx2.createLinearGradient(0, -bs * 0.95, 0, bs * 0.3);
-    g.addColorStop(0, '#fff6d0'); g.addColorStop(0.3, '#ffd23a');
-    g.addColorStop(0.62, '#ff7a12'); g.addColorStop(1, '#b81a05');
+    g.addColorStop(0, '#fffdf0'); g.addColorStop(0.34, '#ffe86a');
+    g.addColorStop(0.72, '#ffae12'); g.addColorStop(1, '#e2560a');
     _dnVolcGrad.set(bs, g);
   }
   return g;
@@ -74810,16 +74814,24 @@ function _lxVolcGrad(ctx2, bs) {
 // The spray off the total as it climbs. Capped, and skipped entirely when the particle
 // budget is already under pressure - an ultimate lands on a room, not on one foe.
 function _lxVolcEmbers(x, y) {
-  if (!game.particles || game.particles.length > 150) return;
-  for (let i = 0; i < 7; i++) {
-    const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.5;
-    const sp = 1.6 + Math.random() * 3.2;
-    game.particles.push({ x: x + (Math.random() - 0.5) * 26, y,
-      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.2,
-      life: 22 + (Math.random() * 16 | 0), gravity: 0.16,
-      color: i % 3 === 0 ? '#fff0b0' : (i % 3 === 1 ? '#ff9a1e' : '#e03a08'),
-      size: 1.5 + Math.random() * 2.2 });
+  if (!game.particles) return;
+  // v0.30.730 gb-gold — the blast. Radial rather than a puff upward, and fast enough to
+  // clear the glyph: an explosion throws OUTWARD. Still budget-aware, because an ultimate
+  // lands on a room - under pressure it degrades to a thinner ring instead of vanishing.
+  const heavy = game.particles.length < 120;
+  if (game.particles.length > 190) return;
+  const n = heavy ? 16 : 8;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + Math.random() * 0.4;
+    const sp = 2.6 + Math.random() * 5.0;
+    game.particles.push({ x, y,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.8 - 1.4,
+      life: 20 + (Math.random() * 18 | 0), gravity: 0.17,
+      color: i % 3 === 0 ? '#fff6c8' : (i % 3 === 1 ? '#ffc21e' : '#ff6a10'),
+      size: 1.8 + Math.random() * 2.6 });
   }
+  // the flash on the same frame at the same point - this is what reads as a detonation
+  if (heavy && typeof spawnSmoothImpact === 'function') { try { spawnSmoothImpact(x, y, '#ffd24a'); } catch (e) {} }
 }
 function _lxGbStackOpen() { player._gbStackAt = game.time | 0; player._gbStackUntil = (game.time | 0) + LX_GB_STACK_OPEN; }
 function _lxGbStack(m, skill) {
@@ -147610,11 +147622,13 @@ function _dnBake(d, txt, col, baseSize) {
     c.globalAlpha = 1;
     const deco = !(typeof _perfLowFx === 'function' && _perfLowFx());
     if (d.crit || d.big || _dnTkB) {   // colored halo (the shadowBlur replacement)
-      c.lineWidth = d.crit ? 9 : 7; c.strokeStyle = col;
-      c.globalAlpha = 0.35; c.strokeText(txt, 0, 0); c.globalAlpha = 1;
+      c.lineWidth = d._gbVolc ? 11 : (d.crit ? 9 : 7); c.strokeStyle = col;   // v0.30.730 gb-gold — wider: heat coming off the glyph, not a flat sticker
+      c.globalAlpha = d._gbVolc ? 0.5 : 0.35; c.strokeText(txt, 0, 0); c.globalAlpha = 1;
     }
-    c.lineWidth = d._gbVolc ? 7 : 5; c.strokeStyle = '#000'; c.strokeText(txt, 0, 0);    // the 5 px readability anchor (v0.30.729 gb-volcano — 7 under a 24-30px molten glyph)
-    if ((d.crit || _dnTkB) && deco) { c.lineWidth = 2; c.strokeStyle = d.crit ? '#fff7b0' : _mixHex(col, '#ffffff', 0.72); c.strokeText(txt, 0, 0); }
+    c.lineWidth = d._gbVolc ? 9 : 5; c.strokeStyle = '#000'; c.strokeText(txt, 0, 0);    // the 5 px readability anchor (v0.30.730 gb-gold — 9 under a 30px glyph: 'bolder')
+    // v0.30.730 gb-gold — the bright inner rim over the black. Crits always had a 2px version;
+    // a B/G number gets a wider one, which is the double-outline an arcade damage number reads by.
+    if ((d.crit || _dnTkB || d._gbVolc) && deco) { c.lineWidth = d._gbVolc ? 3 : 2; c.strokeStyle = d._gbVolc ? '#fff3ac' : (d.crit ? '#fff7b0' : _mixHex(col, '#ffffff', 0.72)); c.strokeText(txt, 0, 0); }
     if (d.crit || d.big || _dnTkB) {
       const _bs = fs2;
       let grad;
@@ -147640,8 +147654,8 @@ function _dnBake(d, txt, col, baseSize) {
     } else c.fillStyle = col;
     c.fillText(txt, 0, 0);
     if ((d.crit || d.big || _dnTkB) && deco) {   // top specular highlight band
-      c.save(); c.globalAlpha = d.crit ? 0.7 : 0.4;
-      c.beginPath(); c.rect(-baseSize * 2.2, -baseSize * 0.95, baseSize * 4.4, baseSize * 0.38); c.clip();
+      c.save(); c.globalAlpha = d._gbVolc ? 0.75 : (d.crit ? 0.7 : 0.4);   // v0.30.730 gb-gold — a hotter crown
+      c.beginPath(); c.rect(-baseSize * 2.2, -baseSize * 0.95, baseSize * 4.4, baseSize * (d._gbVolc ? 0.46 : 0.38)); c.clip();
       c.fillStyle = '#ffffff'; c.fillText(txt, 0, 0); c.restore();
     }
     // v0.30.466 — carry the scale it was baked at. The blit below draws this raster 1:1
@@ -147724,7 +147738,8 @@ function drawDamageNumbers() {
     let scale = 1;
     if (age < 10) {
       const t = age / 10;
-      const s = d.crit ? 2.6 : 1.9;
+      // v0.30.730 gb-gold — a B/G number SLAMS in, past even a crit: "explosive AAA style".
+      const s = d._gbVolc ? 3.6 : (d.crit ? 2.6 : 1.9);
       const back = 1 + (t - 1) * (t - 1) * ((s + 1) * (t - 1) + s);
       scale = 0.3 + back * 0.7;
     }
@@ -147854,9 +147869,9 @@ function drawDamageNumbers() {
     // colored halo stroke at ~strokeText cost: same "glow" read, none of the
     // CPU pre-rasterize pass shadowBlur forces on iGPU/mobile.
     if ((d.crit || d.big || _dnTk) && !_dnStress) {
-      ctx.lineWidth = d.crit ? 9 : 7;
+      ctx.lineWidth = d._gbVolc ? 11 : (d.crit ? 9 : 7);   // v0.30.730 gb-gold
       ctx.strokeStyle = col;
-      ctx.globalAlpha = alpha * 0.35;
+      ctx.globalAlpha = alpha * (d._gbVolc ? 0.5 : 0.35);
       ctx.strokeText(txt, 0, 0);
       ctx.globalAlpha = alpha;
     }
@@ -147877,15 +147892,15 @@ function drawDamageNumbers() {
     // and makes it a true constant 5 device px at every point in the animation.
     // The decorative halo + gold-foil strokes below/above deliberately keep
     // scaling with the glyph — they are glow, not the readability anchor.
-    ctx.lineWidth = (d._gbVolc ? 7 : 5) / (scale || 1);   // v0.30.729 gb-volcano — a heavier anchor under a 24-30px molten glyph
+    ctx.lineWidth = (d._gbVolc ? 9 : 5) / (scale || 1);   // v0.30.730 gb-gold — a heavier anchor under a 30px glyph
     ctx.strokeStyle = '#000';
     ctx.strokeText(txt, 0, 0);
 
     // Crit inner gold-foil stroke over the black outline. Cosmetic
     // 2-px highlight; skipped on lowFx + in stress mode.
-    if ((d.crit || _dnTk) && !_dnLowFx_top && !_dnStress) {
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = d.crit ? '#fff7b0' : _mixHex(col, '#ffffff', 0.72);   // v0.30.695 taken-foil - mixed from its own colour
+    if ((d.crit || _dnTk || d._gbVolc) && !_dnLowFx_top && !_dnStress) {
+      ctx.lineWidth = d._gbVolc ? 3 : 2;   // v0.30.730 gb-gold — the double-outline rim
+      ctx.strokeStyle = d._gbVolc ? '#fff3ac' : (d.crit ? '#fff7b0' : _mixHex(col, '#ffffff', 0.72));   // v0.30.695 taken-foil - mixed from its own colour
       ctx.strokeText(txt, 0, 0);
     }
 
@@ -147938,9 +147953,9 @@ function drawDamageNumbers() {
     // Top specular highlight — clip to text, paint a bright horizontal band
     if ((d.crit || d.big || _dnTk) && !_dnLowFx) {
       ctx.save();
-      ctx.globalAlpha = alpha * (d.crit ? 0.7 : 0.4);
-      // Reserve upper 38% for the highlight band
-      const bandH = baseSize * 0.38;
+      ctx.globalAlpha = alpha * (d._gbVolc ? 0.75 : (d.crit ? 0.7 : 0.4));   // v0.30.730 gb-gold — a hotter crown
+      // Reserve upper 38% for the highlight band (46% on a B/G glyph)
+      const bandH = baseSize * (d._gbVolc ? 0.46 : 0.38);
       ctx.beginPath();
       ctx.rect(-baseSize * 2.2, -baseSize * 0.95, baseSize * 4.4, bandH);
       ctx.clip();
