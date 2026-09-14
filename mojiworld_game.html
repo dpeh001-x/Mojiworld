@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.746';
+const GAME_VERSION = 'v0.30.747';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -63247,6 +63247,25 @@ function _rogueChainDash(dir) {
 //   arc   peak lift in px at the top of the roll, zero at both ends.
 //   tuck  how far the body pulls in at the top (a scale, so 0.09 = 9% wider and shorter).
 const LX_ROLL = { ms: 340, ease: 0.8, pow: 2.3, arc: 17, tuck: 0.09 };
+// v0.30.747 - the evade burst's back-flip (per user: "make the evade burst skill character roll smooth
+// and natural more natural than the archer dash"). The difference between the two moves is not a
+// bigger number, it is the SHAPE of the turn: the dash roll eases OUT, which is right for a ground
+// tumble whose spin is all imparted at the push-off and then bleeds away. A back-flip is symmetric -
+// the body sets, spends the turn at the apex where it is tucked, and opens out to put its feet down -
+// so this one eases IN and OUT, and it lands on the ground rather than on a timer.
+//   ms    the whole flip. MEASURED against its own launch: the arc is 21 sim steps in the air, so
+//         350 ms puts the last degree of the turn on the touchdown frame. A shorter airtime (a
+//         platform under the arc, a heavy-gravity map) is handled by settle, below.
+//   vx    backward travel, tuned so the body covers the same ~120 px the teleport used to snap
+//         through - measured at the landing frame, not assumed - but FLIES it instead.
+//   drag  air drag for the length of the flip. Normal air friction is 0.92, which would eat the
+//         travel in a handful of frames (~46 px of the 120) - a body in flight does not brake.
+//   tuck  how far it pulls in at the apex (a scale). Deeper than the roll's 0.09, because a flip
+//         tucks harder than a tumble, and back to true for the landing.
+//   settle  when the ground arrives before the turn is done, the rest of it resolves in this long
+//         instead of being cut dead mid-rotation - the body whips the remainder through and plants,
+//         which is what a person does when they under-rotate.
+const LX_FLIP = { ms: 350, vx: 7.6, drag: 0.992, tuck: 0.14, settle: 90 };
 function quickDash(dir) {
   if (player._eclipseHold) return;   // v0.30.34 - held under the eclipse
   // v0.29.605 — a fresh dash always begins an unchained sequence.
@@ -68404,6 +68423,7 @@ function loadMap(id, entryX, entryY) {
     player.somersaultDir = 0;
     player.somersaultDuration = 0;
     player.somersaultTurns = 1;   // reset the double-flip flag (an interrupted Ground Slam left it at 2, doubling the next archer roll)
+    player._evadeFlip = 0;        // v0.30.747 - the evade flip's flag, for the same reason
     player._archerRoll = 0;       // v0.30.x — and the roll flag, so a later flip is not given the roll's arc
     player._virgoSin = 0; player._virgoMarker = null; player._virgoMark = 'balanced';   // Virgo sin/mark shouldn't carry to the next map (a returning 5-sin player ate an instant JUDGMENT)
     player._chantRaiseUntil = 0;
@@ -71782,7 +71802,11 @@ function updatePlayer(dt) {
       // drag so the directional launch actually carries the player FAR (normal
       // 0.92 air friction would kill the horizontal momentum in a few frames).
       const _padFlinging = (player._padFlingUntil || 0) > game.time && !player.onGround;
-      player.vx *= _padFlinging ? 0.992 : fric;
+      // v0.30.747 - the evade flip carries the same way. At the normal 0.92 air drag its backward leap
+      // decays to about 46 px of the 120 the skill promises, and the body would visibly brake in
+      // mid-air. Near-zero drag for the length of the flip only.
+      const _flipping = player._evadeFlip === 1 && !player.onGround;
+      player.vx *= (_padFlinging || _flipping) ? LX_FLIP.drag : fric;
       if (Math.abs(player.vx) < 0.1) player.vx = 0;
       if (player.onGround && !player.attacking) player.state = 'idle';
     }
@@ -72000,9 +72024,30 @@ function updatePlayer(dt) {
   }
   // Somersault spin animation timer
   if (player.somersault > 0) {
+    // v0.30.747 - THE FLIP LANDS ON THE GROUND, not on a clock. Its length is the airtime of a
+    // normal-gravity launch, but a platform under the arc, a low ceiling or a heavy-gravity map all
+    // cut that short, and a body still turning after its feet are down cannot look right.
+    // Note what this does NOT do: zero the spin. Cutting a half-finished rotation dead would snap
+    // the body upright, which is worse than the problem. Scaling the time left AND the duration by
+    // the same factor leaves t exactly where it is - no jump in the angle - and resolves the rest of
+    // the turn in LX_FLIP.settle ms, so the body whips the remainder through and plants its feet,
+    // which is what a person does when they under-rotate. Six frames of grace so the launch frame
+    // cannot cancel it, and once only, or each landing frame would re-compress what is left.
+    if (player._evadeFlip === 1 && player.onGround && !player._evadeFlipSettled
+        && ((game.time | 0) - (player._evadeFlipAt || 0)) > 6) {
+      player._evadeFlipSettled = 1;
+      if (player.somersault > LX_FLIP.settle) {
+        const _k = LX_FLIP.settle / player.somersault;
+        player.somersaultDuration = Math.max(1, player.somersaultDuration * _k);
+        player.somersault *= _k;
+      }
+    }
     player.somersault = Math.max(0, player.somersault - dt);
     if (player.somersault <= 0) {
       player.somersaultDuration = 0;
+      player._evadeFlip = 0;   // v0.30.747 - the flip is over; a later somersault is not given its shape
+      player._evadeFlipSettled = 0;
+      player.vx *= 0.35;       // v0.30.747 - and the backward carry stops with it, at the feet
       // v0.30.x — the roll ENDS on something. The rogue's dash brakes with dust at its planted foot;
       // the archer's roll just stopped mid-air-looking, which is half of why it read as unreal.
       if (player._archerRoll === 1) {
@@ -74207,6 +74252,7 @@ function triggerDeath() {
   player.somersaultDuration = 0;
   player.somersaultTurns = 1;
   player._archerRoll = 0;
+  player._evadeFlip = 0;   // v0.30.747
   player._virgoSin = 0; player._virgoMarker = null; player._virgoMark = 'balanced';   // dying shouldn't keep the Virgo sin count (instant JUDGMENT on respawn)
   player._chantRaiseUntil = 0;
   player._impalePoseUntil = 0;
@@ -82109,16 +82155,25 @@ const SKILL_FNS = {
     // v0.25.261 — Always a somersault flip backwards (was conditional
     // on holding the back-direction key). Reads as a clean signature
     // archer move every cast.
-    const tx = Math.min(game.mapData.worldWidth - player.w, Math.max(0, player.x - player.facing * 120));
+    // v0.30.747 - THE FLIP IS A JUMP NOW, not a jump-cut. The old cast teleported: player.x was moved
+    // 120 px backwards on the spot, and only then did the body start turning - at one constant
+    // angular speed, with no tuck, while a separate vy carried it up and down. Nothing about that
+    // could read as a person flipping. The 120 px is unchanged as a distance; it is now FLOWN, on a
+    // real ballistic arc, with the rotation eased in and out and timed to finish as the feet land.
+    // (The world clamp the teleport needed is gone with it: updatePlayer already clamps x to the map.)
     for (let i=0;i<14;i++) { game.particles.push({x:player.x+player.w/2,y:player.y+player.h,vx:player.facing*(1+Math.random()*3),vy:-1-Math.random()*2,life:20,color:'#ccffcc',size:2}); }
-    player.x = tx;
-    // Always somersault: compact upward snap + spin flag
+    // Always somersault: a real backward leap + the flip flag
     {
-      const compactFlipMs = 420;
       player.vy = -8;
-      player.somersault = compactFlipMs;    // ms of spin animation
+      player.vx = -player.facing * LX_FLIP.vx;   // carried, not snapped (see LX_FLIP.drag)
+      player.somersault = LX_FLIP.ms;
       player.somersaultDir = -player.facing;
-      player.somersaultDuration = compactFlipMs;
+      player.somersaultDuration = LX_FLIP.ms;
+      player.somersaultTurns = 1;        // one flip - never inherit Ground Slam's double
+      player._evadeFlip = 1;             // this somersault is the evade flip (see LX_FLIP)
+      player._evadeFlipAt = (game.time | 0);
+      player._evadeFlipSettled = 0;
+      player._jumpStT = game.time;       // the takeoff stretch the weight system already knows how to do
       // Extra ring of dust kicking up at launch
       for (let i = 0; i < 3; i++) {
         const a = (i / 3) * Math.PI;
@@ -124025,7 +124080,14 @@ function _chibiApply(sx, sy) {
     // the body leaves the ground with its angular momentum already spent and lands upright, so the
     // turn is fast at the launch and settles into the landing instead of running at one speed.
     const _roll = player._archerRoll === 1;
-    const _te = _roll ? (LX_ROLL.ease * (1 - Math.pow(1 - t, LX_ROLL.pow)) + (1 - LX_ROLL.ease) * t) : t;
+    // v0.30.747 - and the evade flip, which is the other shape: smootherstep, t^3(6t^2-15t+10). Zero
+    // angular speed at both ends, peak at the apex - the body sets, turns while it is tucked, and
+    // opens out into the landing. It also means an interrupted flip settles upright instead of
+    // snapping, which is what the old linear turn did every time it was cut short.
+    const _flip = player._evadeFlip === 1;
+    const _te = _roll ? (LX_ROLL.ease * (1 - Math.pow(1 - t, LX_ROLL.pow)) + (1 - LX_ROLL.ease) * t)
+      : _flip ? (t * t * t * (t * (t * 6 - 15) + 10))
+      : t;
     const ang = _te * Math.PI * 2 * (player.somersaultTurns || 1) * (player.somersaultDir || 1);
     // v0.25.448 — Archer dash somersault gets a 10 px vertical lift so
     // the forward roll arcs ABOVE the ground tile rather than scraping
@@ -124044,6 +124106,9 @@ function _chibiApply(sx, sy) {
     // v0.30.x — the tuck: a body rolls by pulling in, and comes out of it long. Widest and shortest
     // at the top of the arc, back to true as the feet come down.
     if (_roll) { const _k = LX_ROLL.tuck * Math.sin(Math.PI * t); ctx.scale(1 + _k, 1 - _k); }
+    // v0.30.747 - the flip tucks harder than the roll and opens back out to land. It gets no _lift: its
+    // arc is the real jump, where the roll's has to be faked because a tumble never leaves the floor.
+    else if (_flip) { const _k = LX_FLIP.tuck * Math.sin(Math.PI * t); ctx.scale(1 + _k, 1 - _k); }
     ctx.translate(0, player.h / 2);
   } else if (game.mapData && game.mapData.isIcy
              && !player.onGround
