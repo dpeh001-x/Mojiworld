@@ -12560,7 +12560,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.735';
+const GAME_VERSION = 'v0.30.736';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -70517,6 +70517,40 @@ function _atkMonBoxCached(m) {
   if (m) { m._abFrame = game.time; m._abBox = b; }
   return b;
 }
+// v0.30.x — WHAT CAN TOUCH YOU IS WHAT YOU CAN SEE (per user: "ensure that all flying monsters
+// does damage when the monster sprite touches me").
+//
+// Contact damage tested aabb(player, m) — the AUTHORED box — while the sprite is drawn foot-anchored
+// at m._visW x m._visH, which is a different and much larger rectangle. Measured across all 14
+// flying types (scripts/flying_contact_test.mjs prints the table): 13 of them draw a sprite more
+// than 25% bigger than the box that can hurt you, and the worst are far past that —
+//   towerWisp    box  33x37   drawn  81x81   (2.45x wide, 2.19x tall)
+//   lanternWisp  box  27x70   drawn  79x79   (2.93x wide)
+//   jellyfish    box  56x90   drawn 110x110  (1.96x wide)
+// so a wisp's body could sit squarely over the player and pass straight through them.
+//
+// The player's own attacks already solved exactly this: _atkMonBox returns a centred fraction of the
+// RENDERED box so swings connect with what is on screen. This makes the reverse direction use THE
+// SAME rectangle, so "what I can hit" and "what can hit me" are one fact instead of two, and there
+// is no new tuning constant to drift.
+//
+// Strictly ADDITIVE: the union with the authored box, so nothing that lands today can stop landing,
+// and a flier that has not been drawn yet (never on screen, no _visW) keeps its authored box exactly.
+// Everything else about contact is untouched — the facing gate still lets you dodge behind a mob,
+// and parry, evasion, i-frames and the on-screen gate all still run first.
+//
+// GROUND monsters are deliberately left alone. Their sprites overhang their boxes too, but extending
+// their contact box upward would start damaging players who jump over a tall mob's head, which is a
+// balance change nobody asked for. This is scoped to fliers, which is what was reported.
+function _mobTouchBox(m) {
+  if (!m || !m._visW || !m._visH) return m;                      // not drawn yet — authored box
+  if (typeof _lxMobIsFloating !== 'function' || !_lxMobIsFloating(m)) return m;
+  const v = (typeof _atkMonBoxCached === 'function') ? _atkMonBoxCached(m) : null;
+  if (!v || v === m) return m;
+  const x0 = Math.min(m.x, v.x), y0 = Math.min(m.y, v.y);
+  const x1 = Math.max(m.x + m.w, v.x + v.w), y1 = Math.max(m.y + m.h, v.y + v.h);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
 function checkPlatformCollision(entity) {
   // v0.29.x - WORLD CEILING (per tester: "Underwater maps such as Coral Reef
   // Depths, put a ceiling so that players do not jump pass the top of the
@@ -88406,7 +88440,7 @@ function updateMonsters(dt) {
     // omnidirectional contact damage (their own threat identity).
     const _faceOk = (m.isBoss || m.isMiniBoss) ? true
       : (((player.x + player.w / 2) >= (m.x + m.w / 2) ? 1 : -1) === (m.facing || 1));
-    if (_onScreen && aabb(player, m) && player.invulnerable <= 0 && _faceOk) {
+    if (_onScreen && aabb(player, _mobTouchBox(m)) && player.invulnerable <= 0 && _faceOk) {   // v0.30.x — fliers hit with the sprite you can see
       // Parry window — perfect timing on Z completely negates + stuns
       if (player.parryWindow > 0) {
         triggerParry(m);
