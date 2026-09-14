@@ -68,6 +68,13 @@ const r = await page.evaluate(() => {
   out.ceil = LX_QUEST_COIN_PER_LEVEL;
   out.scalar = MOJICOIN_GAIN_MULT;
   const b = player.mojicoins; out.grantOf10k = _grantMojicoins(10000); player.mojicoins = b;
+  // The per-level coin TARGET is the only lever on ordinary mob kills: _lxKillCoinValue treats this
+  // as the wallet-bound figure and divides it back through MOJICOIN_GAIN_MULT, so the scalar cancels
+  // for kills and cutting it alone moves them ~0%. Read through the game's own interpolator.
+  out.capLv20 = _lxCoinCapForLevel(20);
+  out.capLv80 = _lxCoinCapForLevel(80);
+  out.bossCapBase = LX_BOSS_COIN_CAP_BASE;
+  out.bossCapPerLv = LX_BOSS_COIN_CAP_PER_LV;
   return out;
 });
 console.log(`\n  quest coins: median ${r.median} · mean ${r.mean} · ceiling ${r.ceil}/level`);
@@ -81,6 +88,16 @@ ok(r.grantOf10k === 3750, 'so a 10,000 grant actually pays 3,750', r.grantOf10k)
 ok(near(r.meanChancePct, 10.22, 0.2), 'the mean quest gear chance is 13.62% -> ~10.22%', r.meanChancePct);
 ok(near(r.maxChancePct, 40.5, 0.2), 'and the highest is 54% -> 40.5%', r.maxChancePct);
 ok(r.guaranteed === 36, 'the 36 authored one-time guarantees are still guarantees', r.guaranteed);
+
+// --- the lever that actually moves mob kills ------------------------------------------------------
+// v0.30.756 cut MOJICOIN_GAIN_MULT and called mob kills done. They were not: the scalar cancels for
+// kills by construction, and 400 real kills a band measured Lv80 at 497 -> 493 coins (-0.8%). These
+// four numbers are what a kill is actually worth, so they are what the test guards.
+ok(r.capLv80 === 375, 'a Lv 70+ monster targets 375 coins, not 500', r.capLv80);
+ok(r.capLv20 === 113, 'and a Lv 20 one targets 113, not 150', r.capLv20);
+ok(r.bossCapBase === 22500 && r.bossCapPerLv === 1500,
+  'the boss coin ceiling came down too, so cap-bound bosses are cut as well',
+  r.bossCapBase + ' + ' + r.bossCapPerLv + '/lv');
 ok(errs.length === 0, 'no page errors', errs.join(' | '));
 
 await browser.close().catch(() => {}); server.kill();
