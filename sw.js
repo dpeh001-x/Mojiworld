@@ -98,6 +98,9 @@
 // lopsided spire stair -> a symmetrical vaulted sanctum) and Sprites/ui/bravo_arch.webp is NEW and
 // is the velvet the three blessing arches are now lined with. A returning browser would keep the
 // old backdrop out of cache and never fetch either.
+// v0.30.722 - v49 -> v50. Sprites/ui/boon_card_back.webp is NEW art - the faint damask
+// stock the boon pick cards are printed on. A returning browser would never fetch it and would
+// keep showing flat panels.
 // v0.30.491 - v23 -> v24. Sprites/ui/edicts_bg.webp is NEW art
 // referenced from CSS; a returning browser with the old manifest would render the Edicts panel
 // on its fallback gradient and never fetch the plate.
@@ -143,7 +146,7 @@
 // v0.30.x - v46 -> v47. The War of Banners burst frames were re-baked with a softer impact flash
 // (v0.30.691) under their own names, and that ship did not bump: anyone who loaded v0.30.689 has the
 // blown-out frames cached.
-const CACHE = 'mojiworld-assets-v49';   // v0.30.x - the re-baked War of Banners frames
+const CACHE = 'mojiworld-assets-v50';   // v0.30.x - the re-baked War of Banners frames
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
