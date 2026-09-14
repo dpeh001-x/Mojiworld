@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // Rebuild the Mojiworld app icon on a backdrop that works at 32 pixels, WITHOUT redrawing Guguma.
 //
-// Per user: "improve on the background art for the mojiworld icon".
+// Per user: "improve on the background art for the mojiworld icon", then - of the first attempt,
+// which shipped as v0.30.723 - "The after looks worse, this can be much better improved" and "it
+// needs to be something people are intrigued to click on".
+//
+// The backdrop now comes from scripts/gen_icon_gate.mjs, which paints it to constraints measured off
+// the subject rather than cropping a painted plate. Read that file's header for why the first attempt
+// was worse and what the measurements actually demanded.
 //
 // Why the foreground is lifted out of the shipped PNG rather than re-composited from a sprite:
 // scripts/_gen_guguma_icon.mjs (the old one-off) no longer runs - it reads Sprites/ui/mojiworld_logo
@@ -20,6 +26,7 @@
 //   node scripts/gen_app_icon_art.mjs             # measure + write previews, touch nothing tracked
 //   node scripts/gen_app_icon_art.mjs --write     # write assets/mojiworld_icon_512.png + _184.jpg
 import sharp from 'sharp';
+import { gatePng } from './gen_icon_gate.mjs';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -32,17 +39,13 @@ const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : nu
 const S = 512;
 const RADIUS = 116;                                   // the shipped icon's corner radius
 const SRC_ICON = join(ROOT, 'assets', 'mojiworld_icon_512.png');
-// The lifted subject, committed. The mask rules below were written against the OLD magenta backdrop
-// ('r - b > 40' is his yellow there, but it is also the NEW plate's dawn glow), so re-deriving the
-// mask from the icon this script just wrote would let the flood fill walk out of the bird and into
-// the sky. The lift happens ONCE, from the pre-change art, and its result is the input from then on.
+// The lifted subject, committed. The mask rules below were written against the ORIGINAL magenta
+// backdrop ('r - b > 40' is his yellow there, but it is also a sunrise, and it is the gate's gold
+// ring), so re-deriving the mask from the icon this script just wrote would let the flood fill walk
+// out of the bird. The lift happens ONCE, from the pre-change art, and is the input from then on;
+// pass --lift-from <png> to redo it against a build that predates every backdrop change.
 const SUBJECT = join(ROOT, 'assets', 'mojiworld_icon_guguma.png');
 const LIFT_FROM = arg('--lift-from');
-// The committed plate is the SOURCE art, untoned and unframed, so a re-run reproduces the icon
-// from a tracked input rather than from a scratch roll that is gitignored.
-const BACKDROP = arg('--bg') || (existsSync(join(ROOT, 'assets', 'icon_bg_v2.png'))
-  ? join(ROOT, 'assets', 'icon_bg_v2.png')
-  : join(ROOT, 'scripts', '_tmp_icon_bg', 'roll1.png'));
 const TMP = join(ROOT, 'scripts', '_tmp_icon_build');
 
 // ---------------------------------------------------------------- the bird, lifted off its backdrop
@@ -137,29 +140,14 @@ birdPng = await sharp(bird, { raw: { width: W, height: H, channels: 4 } }).png()
 await writeFile(join(TMP, 'bird.png'), birdPng);
 }
 
-// The backdrop came back with its own rounded corners on transparency. Fill them with the plate's
-// own darkest sky rather than leaving holes, then let the icon's mask do the rounding once.
-const bgMeta = await sharp(BACKDROP).metadata();
-const trimmed = await sharp(BACKDROP).trim().toBuffer();
-// Framed, not just centred. Guguma's feet are at y~470 of 512 and the plate's island silhouette sits
-// mid-frame; centred, the island runs straight through his legs and his own black keyline merges
-// with it into one dark mass. Scaling the plate up and pulling it DOWN puts the horizon under his
-// feet - where it grounds him - and lifts the warm glow to sit behind his body instead of his shins.
-const ZOOM = Number(arg('--zoom') || 1.34);
-const SHIFT = Number(arg('--shift') || 0.16);        // of the canvas, downward
-const bigW = Math.round(S * ZOOM);
-const big = await sharp(trimmed).resize(bigW, bigW, { fit: 'cover' }).png().toBuffer();
-const offX = Math.round((bigW - S) / 2), offY = Math.round((bigW - S) / 2 - S * SHIFT);
-// The plate's dawn glow comes back almost white, and Guguma's belly is white: measured on the
-// first composite, the belly stood only 10/255 clear of the backdrop right behind it, so at 16px it
-// dissolved into the sky. Pulling the highlights down and the saturation up keeps the sunrise warm
-// while giving the belly something to be bright against.
-const TONE = Number(arg('--tone') || 0.80), SAT = Number(arg('--sat') || 1.22);
-const flat = await sharp(big)
-  .extract({ left: offX, top: Math.max(0, offY), width: S, height: S })
-  .modulate({ brightness: TONE, saturation: SAT })
-  .flatten({ background: '#141024' }).png().toBuffer();
-console.log(`backdrop ${bgMeta.width}x${bgMeta.height} -> ${S}x${S}  zoom ${ZOOM}  shift ${SHIFT} (crop at ${offX},${Math.max(0, offY)} of ${bigW})`);
+// The backdrop is PAINTED, not cropped. A painted plate has to be framed by hand and every reframe
+// moves its content somewhere new relative to the bird - the v0.30.723 plate needed zoom 1.34 and a
+// 16% downward shift just to keep its horizon off his shins, and its glow still landed behind his
+// legs. scripts/gen_icon_gate.mjs instead draws the gate around the geometry measured FROM the
+// subject (disc r=236 at 256,275; decoration only in the four pockets his distance transform leaves
+// clear), so there is nothing left to frame and nothing to tone-correct after the fact.
+const flat = await sharp(await gatePng()).flatten({ background: '#141024' }).png().toBuffer();
+console.log(`backdrop: painted gate ${S}x${S} (scripts/gen_icon_gate.mjs)`);
 
 const roundMask = await sharp(Buffer.from(
   `<svg width="${S}" height="${S}" xmlns="http://www.w3.org/2000/svg"><rect width="${S}" height="${S}" rx="${RADIUS}" fill="#fff"/></svg>`),
@@ -180,11 +168,10 @@ const out184 = await sharp(full512).resize(184, 184, { kernel: 'lanczos3' })
 await writeFile(join(TMP, 'icon184.jpg'), out184);
 
 if (has('--write')) {
-  await writeFile(join(ROOT, 'assets', 'icon_bg_v2.png'), await sharp(trimmed).png().toBuffer());
   await writeFile(SUBJECT, birdPng);
   await writeFile(SRC_ICON, out512);
   await writeFile(join(ROOT, 'assets', 'mojiworld_icon_184.jpg'), out184);
-  console.log('wrote assets/mojiworld_icon_512.png, assets/mojiworld_icon_184.jpg, assets/icon_bg_v2.png (plate), assets/mojiworld_icon_guguma.png (subject)');
+  console.log('wrote assets/mojiworld_icon_512.png, assets/mojiworld_icon_184.jpg, assets/mojiworld_icon_guguma.png (subject)');
 } else {
   console.log('previews in ' + TMP + '  (--write to install)');
 }
