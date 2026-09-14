@@ -56,10 +56,13 @@ const R = await page.evaluate(async () => {
     .filter(t => /Summon cap/.test(t.textContent || '')).length;
   const clearToasts = () => document.querySelectorAll('.toast').forEach(t => t.remove());
 
-  // Fill the pack so every further cast is a capped no-op.
+  // Fill the pack so every further cast is a capped no-op. Cast the REAL skill once from empty:
+  // beastmaster_pack tops up to the shared cap in one go, so the pack ends at whatever that cap is
+  // and the test never has to know the number. (It used to push exactly four stubs and assert 4.)
   player.pack = [];
   player.pet = null;
-  for (let i = 0; i < 4; i++) player.pack.push({ x: player.x, y: player.y, vx: 0, vy: 0, hp: 1, maxHp: 1, life: 99999, maxLife: 99999, cdAtk: 0, facing: 1, scale: 2.4 });
+  SKILL_FNS.beastmaster_pack(); await frame();
+  out.cap = player.pack.length;
   out.packLen = player.pack.length;
 
   // --- the reported burst: mash the skill --------------------------------
@@ -93,17 +96,17 @@ await browser.close(); server.kill();
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 210) });
 
-console.log(`  throttle window: ${R.windowMs}ms   pack filled to ${R.packLen}`);
+console.log(`  throttle window: ${R.windowMs}ms   pack filled to ${R.packLen} (shared wolf cap ${R.cap})`);
 console.log(`  6 rapid casts -> ${R.burstToasts} toast(s)   ranger 5 casts -> ${R.rangerBurst}   after the window -> ${R.afterWindow}`);
 
 ok('the throttle exists', R.hasThrottle && R.windowMs > 0, `LX_SUMMON_CAP_TOAST_MS = ${R.windowMs}`);
-ok('CONTROL: the pack really is at the cap', R.packLen === 4, `${R.packLen} wolves`);
+ok('CONTROL: the pack really is at the cap', R.cap >= 2 && R.packLen === R.cap, `${R.packLen} wolves (cap ${R.cap})`);
 ok('six rapid casts raise ONE notice, not six', R.burstToasts === 1,
    `${R.burstToasts} toasts from 6 presses — the screenshot showed four stacked`);
 ok('...and the first press still speaks', R.burstToasts >= 1,
    'silence would leave the player wondering why the key did nothing');
-ok('CONTROL: the capped cast still summons nothing', R.packAfterBurst === 4,
-   `pack is ${R.packAfterBurst} after 6 attempts — the cap itself still holds`);
+ok('CONTROL: the capped cast still summons nothing', R.packAfterBurst === R.cap,
+   `pack is ${R.packAfterBurst} after 6 attempts, cap is ${R.cap} — the cap itself still holds`);
 ok('the notice returns after the window (not muted forever)', R.afterWindow === 1,
    `${R.afterWindow} toast once the throttle expired`);
 ok('the Ranger shares the fix', R.rangerBurst === 1,
