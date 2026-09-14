@@ -30,23 +30,33 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const STILL = 'scripts/seeds/warrior_shockwave_carved.webp';
 const ANIM = 'Sprites/projectiles/anim';
 const NAME = 'warrior_shockwave';
+const TRAIL = 'scripts/seeds/warrior_shockwave_trail.webp';   // the still + its painted flame trail
+// --raw-palette keeps ludo's own colour instead of mapping it onto the bare blade's statistics.
+// Default ON whenever the source already carries flame (see the note in _tmp history / below).
+const RAW_PAL = process.argv.includes('--raw-palette');
 const SIZE = 768, FEATHER = 40;
 // The still is a deep-red crescent blade-wave, convex edge leading to the RIGHT (the draw path
 // rotates it to its own heading from a right-facing source). The motion has to stay INSIDE that
 // silhouette: this is one swing's wave, not a new shape per frame.
-// Per user: "redo smooth crescent, it should be a smooth crescent transforming into a fireball".
-// So the shape is MEANT to change across the set - which is the opposite of every other projectile
-// here, and the reason the drift/scale gates below are widened for this one set only.
-const MOTION = 'A smooth crescent blade-wave TRANSFORMS into a blazing fireball across the nine frames, one '
-  + 'continuous motion with no jump: frames 1-3 it is still a clean crescent, its inner energy flowing and its '
-  + 'bright edge flaring hotter; frames 4-6 the crescent curls inward on itself, the two horns sweeping round '
-  + 'and closing as the whole shape rolls up and thickens into a burning sphere; frames 7-9 it is a round '
-  + 'blazing fireball of red and crimson flame with a hot bright core, licks of fire curling off its surface '
-  + 'and a short trail of fire streaming back to the left. Keep it SMOOTH and clean - flowing fire and soft '
-  + 'glow, NO speckles, NO grain, NO scattered dots, NO torn debris, NO sparks flying off. The shape stays '
-  + 'CENTRED in the frame and keeps the same overall size as it changes: it does not slide, pan, drift, '
-  + 'rotate or flip. Keep the exact same deep red and crimson palette, the same smooth painterly style and a '
-  + 'fully transparent background in every frame.';
+// v0.30.x — RE-SPEC, and it reverses the previous one. The set used to be authored to
+// "a smooth crescent transforming into a fireball" (the user's earlier wording), and the shape gates
+// below were deliberately widened to let that through. Measured on the shipped frames, that is
+// exactly what it does and it does not read in motion: the hollow inside the crescent fills in from
+// frame 4 and by frame 6 the bounding box is 61% solid and square (aspect 0.99) - a ball. Per user:
+// "it should stay a crescent throughout but have a trail of flame". So the silhouette is now held
+// and the FLAME is what animates.
+const MOTION = 'A deep red crescent blade-wave hangs in the frame and NEVER changes its shape. In every single '
+  + 'frame it is the SAME crescent: the same curved arc, the same thickness, the same orientation, its convex '
+  + 'edge leading to the RIGHT and its hollow concave side open to the LEFT. It does NOT curl up, does NOT '
+  + 'close, does NOT roll inward, does NOT thicken, and NEVER becomes a ball, sphere, fireball, ring or disc - '
+  + 'the empty space inside the curve stays empty in all nine frames. What MOVES is FIRE: a trail of flame '
+  + 'streams backwards off the crescent to the LEFT, long tongues of red and orange fire flowing and flickering '
+  + 'and trailing away from the concave side, and the bright hot inner edge of the blade flares and pulses. '
+  + 'Think of a burning blade held still in a wind - the blade is rigid, only the flame moves. Keep it SMOOTH '
+  + 'and clean: flowing fire and soft glow, NO speckles, NO grain, NO scattered dots, NO torn debris, NO sparks '
+  + 'flying off. The crescent stays CENTRED and the same size throughout: it does not slide, pan, drift, grow, '
+  + 'shrink, rotate or flip. Keep the exact same deep red and crimson palette, the same smooth painterly style '
+  + 'and a fully transparent background in every frame.';
 
 async function ludo(route, body, timeout = 240000) {
   const res = await fetch(`${API}/${route}`, { method: 'POST', headers: { Authorization: `ApiKey ${KEY}`, 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(timeout), body: JSON.stringify(body) });
@@ -152,6 +162,51 @@ async function deBackground(buf) {
   }
   return { buf: await sharp(data, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer(), cleared: killed / n };
 }
+// Two numbers per frame, both read inside the frame's own bounding box:
+//   fill  ink / bbox area          - a thin arc is sparse, a solid blob is not
+//   core  ink in the middle 34%    - THE crescent test: the hollow must stay hollow
+async function enclosedOf(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().resize(256, 256, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).raw().toBuffer({ resolveWithObject: true });
+  const W = info.width, H = info.height, C = info.channels, n = W * H;
+  const clear = new Uint8Array(n); let empty = 0;
+  for (let i = 0; i < n; i++) { clear[i] = data[i * C + 3] <= 40 ? 1 : 0; if (clear[i]) empty++; }
+  const seen = new Uint8Array(n), st = new Int32Array(n); let t = 0;
+  for (let x = 0; x < W; x++) for (const y of [0, H - 1]) { const i = y * W + x; if (clear[i] && !seen[i]) { seen[i] = 1; st[t++] = i; } }
+  for (let y = 0; y < H; y++) for (const x of [0, W - 1]) { const i = y * W + x; if (clear[i] && !seen[i]) { seen[i] = 1; st[t++] = i; } }
+  let out = 0;
+  while (t) {
+    const i = st[--t]; out++; const x = i % W, y = (i - x) / W;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const q = ny * W + nx; if (clear[q] && !seen[q]) { seen[q] = 1; st[t++] = q; }
+    }
+  }
+  return (empty - out) / n;
+}
+async function shapeOf(bufs) {
+  let fill = 0, core = 0, ring = 0;
+  for (const b of bufs) {
+    const { data, info } = await sharp(b).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width: W, height: H, channels: C } = info;
+    const A = (x, y) => data[(y * W + x) * C + 3];
+    let ink = 0, x0 = W, x1 = -1, y0 = H, y1 = -1;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (A(x, y) <= 40) continue;
+      ink++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (x1 < 0) continue;
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    fill = Math.max(fill, ink / (bw * bh));
+    const cx0 = Math.round(x0 + bw * 0.33), cx1 = Math.round(x0 + bw * 0.67);
+    const cy0 = Math.round(y0 + bh * 0.33), cy1 = Math.round(y0 + bh * 0.67);
+    let cInk = 0, cN = 0;
+    for (let y = cy0; y <= cy1; y++) for (let x = cx0; x <= cx1; x++) { cN++; if (A(x, y) > 40) cInk++; }
+    if (cN) core = Math.max(core, cInk / cN);
+    ring = Math.max(ring, await enclosedOf(b));
+  }
+  return { fill, core, ring };
+}
 async function driftOf(bufs) {
   const boxes = [];
   for (const b of bufs) { const bb = await box(b); boxes.push({ cx: (bb.x0 + bb.w / 2) / bb.W, cy: (bb.y0 + bb.h / 2) / bb.H, s: Math.max(bb.w, bb.h) / Math.max(bb.W, bb.H) }); }
@@ -219,20 +274,110 @@ async function matchPalette(buf, ref) {
   return sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer();
 }
 
-async function animate() {
+// Paint the flame trail onto the user's crescent. The blade is his art and must survive intact, so
+// the gate is the same crescent test the frames are held to (the hollow stays hollow) PLUS proof that
+// something new actually appeared on the trailing side - an edit that changes nothing would otherwise
+// sail through a shape gate.
+const TRAIL_PROMPT = 'Keep this deep red crescent blade EXACTLY as it is: the same curve, the same thickness, '
+  + 'the same position, the same size and the same deep red and crimson colour, and the hollow empty space '
+  + 'inside the curve must stay COMPLETELY EMPTY. Do not redraw it, do not thicken it, do not close it, do not '
+  + 'turn it into a ball, sphere, ring or disc. ADD a trail of fire streaming backwards off its hollow concave '
+  + 'side to the LEFT: long smooth tongues of red and orange flame flowing away to the left, brightest and '
+  + 'hottest where they leave the blade and fading softly to nothing at the far left. Smooth painterly fire and '
+  + 'soft glow only - NO speckles, NO grain, NO scattered dots, NO sparks, NO debris. Fully transparent '
+  + 'background.';
+
+async function inkBox(buf) {
+  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: W, height: H, channels: C } = info;
+  let x0 = W, x1 = -1, ink = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (data[(y * W + x) * C + 3] <= 40) continue;
+    ink++; if (x < x0) x0 = x; if (x > x1) x1 = x;
+  }
+  return { x0, x1, ink, W };
+}
+
+async function trailPick(n) {
+  const raw = path.join(ROOT, 'scripts', '_tmp_ws_review', `trail_raw_${n}.png`);
+  if (!fs.existsSync(raw)) { console.error('no such roll: ' + raw); process.exit(1); }
+  const still = fs.readFileSync(path.join(ROOT, STILL));
+  const stillRef = await stats(still), stillMean = await meanRGB(still);
+  const base = await inkBox(still);
+  const cleaned = (await deBackground(await sharp(fs.readFileSync(raw)).ensureAlpha()
+    .resize(SIZE, SIZE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer())).buf;
+  const buf = RAW_PAL ? cleaned : await matchPalette(cleaned, stillRef);
+  const { fill, core, ring } = await shapeOf([buf]);
+  const bb = await inkBox(buf);
+  const grew = (base.x0 / base.W) - (bb.x0 / bb.W);
+  const hue = paletteDrift(await meanRGB(buf), stillMean);
+  const good = core <= 0.55 && fill <= 0.42 && ring <= 0.02 && grew >= 0.03 && hue <= 40;
+  console.log(`roll ${n}: core ${(core * 100).toFixed(0)}% fill ${(fill * 100).toFixed(0)}% ring ${(ring * 100).toFixed(1)}% trail +${(grew * 100).toFixed(1)}% palette ${hue.toFixed(0)} ${good ? 'OK' : 'REJECTED'}`);
+  if (!good) process.exit(1);
+  const out = path.join(ROOT, TRAIL);
+  fs.writeFileSync(out + '.tmp', await sharp(buf).webp({ quality: 94, alphaQuality: 100 }).toBuffer());
+  fs.renameSync(out + '.tmp', out);
+  console.log('wrote ' + TRAIL);
+}
+
+async function trail() {
   const src = path.join(ROOT, STILL);
+  const still = fs.readFileSync(src);
+  const stillRef = await stats(still), stillMean = await meanRGB(still);
+  const base = await inkBox(still);
+  const uri = 'data:image/png;base64,' + (await sharp(still).resize(990, 990, { fit: 'inside' }).png().toBuffer()).toString('base64');
+  const REVIEW = path.join(ROOT, 'scripts', '_tmp_ws_review');
+  fs.mkdirSync(REVIEW, { recursive: true });
+  let best = null;
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    process.stdout.write(`trail attempt ${attempt} ... `);
+    try {
+      const d = await ludo('assets/image/edit', { image: uri, prompt: TRAIL_PROMPT, n: 1, augment_prompt: false }, 300000);
+      const url = Array.isArray(d) ? (d[0] && d[0].url) : (d.url || (d.images && d.images[0] && d.images[0].url));
+      if (!url) throw new Error('no url from image/edit');
+      fs.writeFileSync(path.join(REVIEW, `trail_raw_${attempt}.png`), await fetchBuf(url));
+      const cleaned = (await deBackground(await sharp(await fetchBuf(url)).ensureAlpha().resize(SIZE, SIZE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer())).buf;
+      const buf = RAW_PAL ? cleaned : await matchPalette(cleaned, stillRef);
+      const { fill, core, ring } = await shapeOf([buf]);
+      const bb = await inkBox(buf);
+      // the trail has to reach further LEFT than the bare blade did, in canvas fractions
+      const grew = (base.x0 / base.W) - (bb.x0 / bb.W);
+      const hue = paletteDrift(await meanRGB(buf), stillMean);
+      const good = core <= 0.55 && fill <= 0.42 && ring <= 0.02 && grew >= 0.03 && hue <= 40;
+      console.log(`core ${(core * 100).toFixed(0)}% fill ${(fill * 100).toFixed(0)}% ring ${(ring * 100).toFixed(1)}% trail +${(grew * 100).toFixed(1)}% palette ${hue.toFixed(0)} ${good ? 'OK' : 'rejected'}`);
+      if (!best || (good && !best.good) || (good === best.good && core < best.core)) best = { buf, core, fill, grew, hue, good };
+      if (good) break;
+    } catch (e) { console.log('failed: ' + e.message); if (/402/.test(e.message)) process.exit(3); await sleep(3000 * attempt); }
+  }
+  if (!best || !best.good) { console.error('FAILED: no usable trail seed'); process.exit(1); }
+  const out = path.join(ROOT, TRAIL);
+  fs.writeFileSync(out + '.tmp', await sharp(best.buf).webp({ quality: 94, alphaQuality: 100 }).toBuffer());
+  fs.renameSync(out + '.tmp', out);
+  console.log(`wrote ${TRAIL} (core ${(best.core * 100).toFixed(0)}%, trail +${(best.grew * 100).toFixed(1)}%)`);
+}
+
+async function animate() {
+  // animate the TRAIL seed once it has been painted; the bare still is the fallback
+  const src = fs.existsSync(path.join(ROOT, TRAIL)) ? path.join(ROOT, TRAIL) : path.join(ROOT, STILL);
   if (!fs.existsSync(src)) { console.error('missing ' + STILL); process.exit(1); }
+  console.log('animating ' + path.relative(ROOT, src).replace(/\\/g, '/'));
   const REVIEW = path.join(ROOT, 'scripts', '_tmp_ws_review');
   fs.mkdirSync(REVIEW, { recursive: true });
   const stillMean = await meanRGB(fs.readFileSync(src));
   const stillRef = await stats(fs.readFileSync(src));
   const uri = 'data:image/png;base64,' + (await sharp(fs.readFileSync(src)).resize(990, 990, { fit: 'inside' }).png().toBuffer()).toString('base64');
   let best = null;
-  // the crescent is SUPPOSED to become a fireball, so the shape gates that keep every other
-  // projectile rigid are widened here: a crescent rolling into a ball legitimately changes its bbox
-  // size a lot and its centre somewhat. Drift is still held tight enough that the wave cannot walk
-  // off its own hitbox.
-  const ok = (x) => x.score >= 12 && x.drift <= 0.14 && x.scale <= 0.45 && x.hue <= 34;
+  // The widened shape gates are GONE with the fireball spec that needed them. The silhouette must
+  // now hold, so scale is pulled back in (0.45 -> 0.22 — a flame trail may lengthen the box, the
+  // blade may not swell) and the crescent test is added outright. core <= 0.30 is the one that
+  // matters: the shipped fireball frames score 0.83-1.00 on it and would be rejected on sight.
+  // Thresholds set against measured examples of each failure, not picked round:
+  //   fill <= 0.40  a solid ball measures 0.42-0.61; the trailed crescent 0.32
+  //   core <= 0.55  a ball measures 0.83-1.00; the trailed crescent 0.41 (a trail widens the bbox,
+  //                 so the old 0.30 - right for a bare blade - rejected a good crescent outright)
+  //   ring <= 0.02  a closed donut traps 0.15 of the canvas; a crescent traps 0.000-0.001
+  const ok = (x) => x.score >= 12 && x.drift <= 0.14 && x.scale <= 0.22 && x.hue <= 34
+    && x.core <= 0.55 && x.fill <= 0.40 && x.ring <= 0.02;
   for (let attempt = 1; attempt <= 3; attempt++) {
     process.stdout.write(`animate ${NAME} attempt ${attempt} ... `);
     try {
@@ -245,29 +390,40 @@ async function animate() {
       for (let i = 0; i < raw.length; i++) {
         const b = (await deBackground(raw[i])).buf;
         hueRaw = Math.max(hueRaw, paletteDrift(await meanRGB(b), stillMean));
-        bufs.push(await matchPalette(b, stillRef));
+        bufs.push(RAW_PAL ? b : await matchPalette(b, stillRef));
       }
       const score = await motionScore(bufs);
       const { drift, scale } = await driftOf(bufs);
+      const { fill, core, ring } = await shapeOf(bufs);
       let hue = 0;
       for (const b of bufs) hue = Math.max(hue, paletteDrift(await meanRGB(b), stillMean));
-      const cand = { bufs, score, drift, scale, hue };
-      console.log(`motion ${score.toFixed(1)} drift ${(drift * 100).toFixed(1)}% scale ${(scale * 100).toFixed(1)}% palette ${hue.toFixed(0)} (ludo returned ${hueRaw.toFixed(0)} off, corrected)`);
-      if (!best || (ok(cand) && !ok(best))) best = cand;
+      const cand = { bufs, score, drift, scale, hue, fill, core, ring };
+      console.log(`motion ${score.toFixed(1)} drift ${(drift * 100).toFixed(1)}% scale ${(scale * 100).toFixed(1)}% palette ${hue.toFixed(0)} (ludo returned ${hueRaw.toFixed(0)} off, corrected) | crescent: fill ${(fill * 100).toFixed(0)}% core ${(core * 100).toFixed(0)}% ring ${(ring * 100).toFixed(1)}%`);
+      if (!best || (ok(cand) && !ok(best)) || (ok(cand) === ok(best) && cand.core < best.core)) best = cand;
       if (ok(cand)) break;                                // moves a lot, stays put, still his colours
       console.log(score < 12 ? '  rejected: too static'
-        : (drift > 0.14 || scale > 0.45) ? '  rejected: it wanders off its own hitbox (it may change SHAPE, not position)'
+        : ring > 0.02 ? `  rejected: the blade closed into a RING (traps ${(ring * 100).toFixed(1)}% of the canvas)`
+        : (core > 0.55 || fill > 0.40) ? `  rejected: it stops being a crescent — the hollow fills in (core ${(core * 100).toFixed(0)}%, fill ${(fill * 100).toFixed(0)}%)`
+        : (drift > 0.14 || scale > 0.22) ? '  rejected: it wanders or swells off its own hitbox'
         : `  rejected: the palette drifted from the still (mean rgb off by ${hue.toFixed(0)})`);
     } catch (e) { console.log('failed: ' + e.message); if (/402/.test(e.message)) process.exit(3); await sleep(4000 * attempt); }
   }
+  // It used to keep the FIRST candidate as 'best' and write it even when every roll was rejected —
+  // this run shipped a core-99% ball over the live frames after printing three rejections. A set that
+  // fails the gates is not written at all now.
   if (!best) { console.error('FAILED: no usable animation'); process.exit(1); }
+  if (!ok(best)) {
+    console.error(`FAILED: no roll passed the gates (best: core ${(best.core * 100).toFixed(0)}%, ` +
+      `fill ${(best.fill * 100).toFixed(0)}%, motion ${best.score.toFixed(1)}) — nothing written`);
+    process.exit(1);
+  }
   const dir = path.join(ROOT, ANIM);
   fs.mkdirSync(dir, { recursive: true });
   for (let i = 0; i < 9; i++) {
     const f = path.join(dir, `${NAME}_${i}.webp`);
     fs.writeFileSync(f + '.tmp', await normalise(best.bufs[i])); fs.renameSync(f + '.tmp', f);
   }
-  console.log(`wrote ${ANIM}/${NAME}_0..8.webp (motion ${best.score.toFixed(1)})`);
+  console.log(`wrote ${ANIM}/${NAME}_0..8.webp (motion ${best.score.toFixed(1)}, crescent core ${(best.core * 100).toFixed(0)}%)`);
 }
 if (has('recolour')) {
   const src = path.join(ROOT, STILL);
@@ -280,5 +436,8 @@ if (has('recolour')) {
     console.log('recoloured ' + NAME + '_' + i + '.webp');
   }
 }
+const _pick = process.argv.find((a) => a.startsWith('--trail-pick='));
+if (_pick) { await trailPick(_pick.split('=')[1]); }
+else if (has('trail')) { if (!KEY) { console.error('LUDO_API_KEY is not set'); process.exit(1); } await trail(); }
 if (has('animate')) { if (!KEY) { console.error('LUDO_API_KEY is not set'); process.exit(1); } await animate(); }
 else console.log(`${NAME}: animates ${STILL} (the user's own art — never regenerated here) into ${ANIM}/${NAME}_0..8.webp\n  --animate to run\n`);

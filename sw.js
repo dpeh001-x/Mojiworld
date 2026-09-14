@@ -160,7 +160,7 @@
 // crescent-into-fireball), so a returning browser would otherwise keep the old opaque set.
 // v0.30.x - v54 -> v55. The doom fireball tail is ramped so it stops ending in a straight
 // line; the still and all nine frames are REPLACED under their own names.
-const CACHE = 'mojiworld-assets-v55';   // v0.30.x - the doom fireball tail ramp
+const CACHE = 'mojiworld-assets-v56';   // v0.30.x - the doom fireball tail ramp
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
