@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.756';
+const GAME_VERSION = 'v0.30.757';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -126423,20 +126423,66 @@ function _heroVecRogueDashPose(t) {
         if (k === 'p') continue;
         out[k] = a[k] + (b[k] - a[k]) * u;
       }
-      return _heroVecRogueDashJoin(out);
+      return _heroVecRogueDashJoin(out, p);
     }
   }
-  return _heroVecRogueDashJoin(Object.assign({}, keys[keys.length - 1]));
+  return _heroVecRogueDashJoin(Object.assign({}, keys[keys.length - 1]), p);
 }
+// v0.30.x — THE LEGS SPRINT, AND STAY ON THE HIP WHILE THEY DO (per user, with a reference GIF of a
+// bear running flat out: "the legs should move rapidly like a crazy sprint", then "do the sprint but
+// make sure the leg is always attached to hip").
+//
+// The authored keys describe ONE stride and hold it for the whole dash, so the legs were posed
+// rather than running. CYCLES adds a fast antiphase swing on top of them - 4.5 cycles across the
+// 24-frame pose is about eleven strides a second at 60fps, and the CADENCE is what reads as a
+// sprint far more than the size of the swing does.
+//
+// The two asks fight each other and the fight is measurable. A leg rotates about a hip the torso
+// only just covers, so the bigger the swing the more of that joint is left bare: measured as trapped
+// background in the hip band across the 24 frames, a bare swing of 1.10 rad took it from 1,094 px to
+// 5,280. Two terms buy the swing back:
+//   HIP_PULL  drags each hip toward the leg that is swinging, so the joint travels with the limb
+//             instead of being left behind by it.
+//   HIP_TUCK  lifts both legs toward the body at the extremes of the swing, where the gap opens.
+// Swept together (amp x hip-pull x tuck), 0.55 / 4.8 / 3.0 lands at 1,072 px - BELOW the 1,094 of
+// the build with no sprint at all - while the peak swing between the legs goes from 1.32 rad to
+// 2.23. So the legs run harder than before AND sit tighter on the hip than before; the numbers are
+// in scripts/rogue_dash_pose_test.mjs, which measures the hip band rather than trusting these.
+//
+// An envelope ramps the cycle in over the first eighth and out over the last fifth, so the launch
+// and the settle land on the authored pose exactly and a dash cannot end with a leg mid-swing.
+const HERO_VEC_ROGUE_DASH_SPRINT_CYCLES = 4.5;
+const HERO_VEC_ROGUE_DASH_SPRINT_AMP = 0.55;   // radians of swing per leg, peak
+const HERO_VEC_ROGUE_DASH_SPRINT_LIFT = 2.0;   // px of knee lift on the forward half of each swing
+const HERO_VEC_ROGUE_DASH_SPRINT_HIP_PULL = 4.8;   // px the hip follows its own swinging leg
+const HERO_VEC_ROGUE_DASH_SPRINT_HIP_TUCK = 3.0;   // px both legs ride up at the swing extremes
 // Applied to the RESOLVED pose so it works on every frame including the clamped last one, and so the
 // authored table stays readable as the thing an artist edits.
-function _heroVecRogueDashJoin(o) {
+function _heroVecRogueDashJoin(o, t) {
   const lean = o.spine || 0;
   const shift = HERO_VEC_ROGUE_DASH_HIP_FOLLOW * lean;
   o.legLX += shift; o.legRX += shift;
   const mid = (o.legL + o.legR) / 2;
   o.legL = mid + (o.legL - mid) * HERO_VEC_ROGUE_DASH_LEG_SPLIT;
   o.legR = mid + (o.legR - mid) * HERO_VEC_ROGUE_DASH_LEG_SPLIT;
+  // the sprint
+  const p = (typeof t === 'number') ? Math.max(0, Math.min(1, t)) : 0;
+  const env = Math.min(1, p / 0.12) * Math.min(1, Math.max(0, (1 - p) / 0.20));
+  if (env > 0) {
+    const ph = p * HERO_VEC_ROGUE_DASH_SPRINT_CYCLES * Math.PI * 2;
+    const sn = Math.sin(ph);
+    const sw = sn * HERO_VEC_ROGUE_DASH_SPRINT_AMP * env;
+    o.legL += sw;
+    o.legR -= sw;
+    // the knee that is coming forward lifts; the trailing one does not
+    o.legLY -= Math.max(0, sn) * HERO_VEC_ROGUE_DASH_SPRINT_LIFT * env;
+    o.legRY -= Math.max(0, -sn) * HERO_VEC_ROGUE_DASH_SPRINT_LIFT * env;
+    // keep the joint covered: the hip goes with its leg, and both ride up at the extremes
+    o.legLX += sw * HERO_VEC_ROGUE_DASH_SPRINT_HIP_PULL;
+    o.legRX -= sw * HERO_VEC_ROGUE_DASH_SPRINT_HIP_PULL;
+    const tuck = Math.abs(sn) * HERO_VEC_ROGUE_DASH_SPRINT_HIP_TUCK * env;
+    o.legLY -= tuck; o.legRY -= tuck;
+  }
   return o;
 }
 // v0.25.448 — Warrior dash "bash" pose. Same data shape as the rogue

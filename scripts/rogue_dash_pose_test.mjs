@@ -70,8 +70,10 @@ const R = await page.evaluate(() => {
   const cv = document.createElement('canvas'); cv.width = 300; cv.height = 300;
   const c2 = cv.getContext('2d', { willReadFrequently: true });
   let gap = 0, worst = 0;
-  for (let i = 0; i < 9; i++) {
-    player._rogueDashPoseAt = (game.time | 0) - Math.round((i / 8) * 24);
+  // 24 frames, one per game frame: the sprint cycles 4.5 times across the pose, and a 9-frame
+  // sample aliases that into noise rather than measuring it.
+  for (let i = 0; i < 24; i++) {
+    player._rogueDashPoseAt = (game.time | 0) - i;
     player._rogueDashPoseUntil = (game.time | 0) + 9999;
     c2.clearRect(0, 0, cv.width, cv.height);
     c2.save(); c2.scale(3.4, 3.4);
@@ -80,17 +82,40 @@ const R = await page.evaluate(() => {
     const d = c2.getImageData(0, 0, cv.width, cv.height).data;
     const W = cv.width, H = cv.height;
     const on = (x, y) => d[(y * W + x) * 4 + 3] > 24;
+    // Count trapped background ONLY in the HIP BAND — the strip just below the torso, where a leg
+    // that has come away from the body shows up as a void. The first version of this counted whole
+    // columns, which also counts the daylight BETWEEN two splayed legs: the moment the legs were
+    // given a sprint cycle it climbed from 4,796 to 7,726 and called a correct animation broken.
+    // Detachment happens at the hip; splay happens at the feet. Measure where the fault actually is.
+    let bt = H, bb = -1;
+    for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) if (on(x, y)) { if (y < bt) bt = y; if (y > bb) bb = y; }
+    const y0 = Math.round(bt + (bb - bt) * 0.52), y1 = Math.round(bt + (bb - bt) * 0.78);
     let f = 0;
     for (let x = 0; x < W; x++) {
       let top = -1, bot = -1;
       for (let y = 0; y < H; y++) if (on(x, y)) { if (top < 0) top = y; bot = y; }
       if (top < 0) continue;
-      for (let y = top + 1; y < bot; y++) if (!on(x, y)) f++;
+      for (let y = Math.max(top + 1, y0); y < Math.min(bot, y1); y++) if (!on(x, y)) f++;
     }
     gap += f; if (f > worst) worst = f;
   }
   player._rogueDashPoseUntil = 0; game.paused = false;
   out.gap = gap; out.gapWorst = worst;
+  out.sprintCycles = (typeof HERO_VEC_ROGUE_DASH_SPRINT_CYCLES !== 'undefined') ? HERO_VEC_ROGUE_DASH_SPRINT_CYCLES : null;
+  out.sprintAmp = (typeof HERO_VEC_ROGUE_DASH_SPRINT_AMP !== 'undefined') ? HERO_VEC_ROGUE_DASH_SPRINT_AMP : null;
+  // The legs must actually RUN. Sample the angle BETWEEN the two legs and count how many times it
+  // reverses direction: a held stride turns around once or twice across the whole dash, a sprint
+  // reverses on every stride. This is the cadence the reference GIF is all about, and it is the one
+  // thing a pose table alone cannot express.
+  const sep = [];
+  for (let i = 0; i <= 96; i++) { const q = _heroVecRogueDashPose(i / 96); sep.push(q.legL - q.legR); }
+  let rev = 0;
+  for (let i = 2; i < sep.length; i++) {
+    const a = sep[i - 1] - sep[i - 2], b = sep[i] - sep[i - 1];
+    if (a * b < 0) rev++;
+  }
+  out.legReversals = rev;
+  out.legSwingPeak = +(Math.max(...sep) - Math.min(...sep)).toFixed(2);
   return out;
 });
 await browser.close(); server.kill();
@@ -114,8 +139,15 @@ const checks = [
   ['the hips follow the leaning torso', R.hipFollow === 13, String(R.hipFollow)],
   ['the leg scissor is compressed into a stride', R.legSplit === 0.75, String(R.legSplit)],
   ['the hips sit under the lean, not behind it', R.hipLag >= 8, R.hipLag + 'px ahead of the body translate'],
-  ['the legs stay joined to the torso', R.gap <= 6000, R.gap + ' gap px (was 12071)'],
-  ['...on every frame, not just on average', R.gapWorst <= 1200, R.gapWorst + ' px on the worst frame (was 2342)'],
+  // per user: "do the sprint but make sure the leg is always attached to hip". Measured in the HIP
+  // BAND over 24 frames. Reference points from the sweep: no sprint at all = 1094, a bare 1.10 rad
+  // swing with no hip compensation = 5280, and the build before the hip fix (detached) = far worse.
+  ['the legs stay attached at the hip', R.gap <= 1400, R.gap + ' hip-band gap px (no sprint at all is 1094)'],
+  ['...on every frame, not just on average', R.gapWorst <= 260, R.gapWorst + ' px on the worst frame'],
+  // per user: "the legs should move rapidly like a crazy sprint"
+  ['the legs actually cycle rather than holding a stride', R.legReversals >= 6, R.legReversals + ' reversals across the dash'],
+  ['the sprint is a real swing, not a twitch', R.legSwingPeak >= 1.6, R.legSwingPeak + ' rad between the legs'],
+  ['the sprint cadence is the authored 4.5 cycles', R.sprintCycles === 4.5, String(R.sprintCycles)],
   ['the pose resolves to finite values across its timeline', R.finite === true],
   ['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')],
 ];
