@@ -12181,7 +12181,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.689';
+const GAME_VERSION = 'v0.30.690';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -81368,8 +81368,33 @@ const SKILL_FNS = {
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
     // v0.25.238 — ultra epic colossal greatsword summon sprite at the
     // cast point. Lifetime spans the strike chain.
-    spawnSpriteBurst(player.x + player.w/2 + dir * 90, player.y + player.h/2 - 40, 'doombringer_apoc',
-      { size: 280, life: 60, angle: dir > 0 ? 0 : Math.PI });
+    // v0.30.690 - THE SUMMON (per user: "make it much more legendary and epic", "bigger in effect").
+    // The old cast dropped one 280px burst and let it hang there for the whole chain, rotated by PI
+    // when facing left - which stood the sword on its pommel, point at the sky, every left-hand cast.
+    // Now it is a staged beat: a rune-gold column opens the ground, the blade PLUNGES down into it
+    // hilt-first with an overshoot, and then burns through its ignition loop for the whole chain.
+    // Mirrored for a left cast (flipX), never rotated, so the point always goes down.
+    const _heat = Math.min(1, (player._calamityHeat | 0) / LX_DOOM_HEAT_MAX);   // the meter, made visible
+    const _apocBlade = Math.round(560 * (1 + 0.22 * _heat));                    // colossal, hotter when stoked
+    const _apocX = player.x + player.w / 2 + dir * 96;
+    const _apocY = player.y + player.h - _apocBlade * 0.40;                     // point near the feet, hilt high
+    spawnSpriteBurst(_apocX, player.y + player.h - 6, 'fx_groundshock',
+      { size: 300 + 90 * _heat, life: 20, behind: true, opacity: 0.9 });
+    spawnSpriteBurst(_apocX, _apocY, 'doombringer_apoc',
+      { size: _apocBlade, life: 13, flipX: dir < 0, pivotY: 0.08,
+        scaleStartY: 0.45, scaleEndY: 1.08, scaleStartX: 0.86, scaleEndX: 1.04 });
+    // sticky: the chain spawns a dozen more bursts, and the smoothFx cap evicts the oldest - without
+    // this the summoned blade disappears a third of the way through its own skill (seen in capture).
+    spawnSpriteBurst(_apocX, _apocY, 'doombringer_apoc',
+      { size: _apocBlade, life: 92, frameGap: 9, flipX: dir < 0, pivotY: 0.08, sticky: true });
+    for (let _e = 0; _e < 18; _e++) {
+      const _ea = Math.PI * (0.15 + Math.random() * 0.7);
+      game.particles.push({ x: _apocX + (Math.random() - 0.5) * 90, y: player.y + player.h - 6,
+        vx: Math.cos(_ea) * (1 + Math.random() * 3) * (Math.random() < 0.5 ? -1 : 1), vy: -2 - Math.random() * 4,
+        life: 34 + Math.random() * 20, color: _e % 3 === 0 ? '#fff2c8' : _e % 3 === 1 ? '#ffb24a' : '#ff6c28',
+        size: 2 + Math.random() * 2.5 });
+    }
+    flash(0.30); addShake(9); if (typeof addZoomPunch === 'function') addZoomPunch(0.032);
     for (let i = 0; i < strikes; i++) {
       scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
@@ -81395,11 +81420,22 @@ const SKILL_FNS = {
             m.vy -= 2;
           }
         }
-        // Smooth crescent + impact
-        spawnSmoothSlash(cx, cy, dir > 0 ? 0 : Math.PI, 130, '#ffcc66',
-          { thickness: 10 + i, spread: Math.PI * 0.9, life: 20 });
+        // v0.30.690 - each cleave is the colossal blade coming down, not a lone crescent: a big
+        // afterimage of the sword at the strike angle (mirrored, so a left cast reads the same),
+        // a wider crescent that grows through the chain, sparks off the edge and a rising shake.
+        const _swing = (0.62 - i * 0.075) * (dir > 0 ? 1 : -1);
+        spawnSpriteBurst(cx + dir * 12, cy - 18, 'doombringer_apoc',
+          { size: Math.round(_apocBlade * (0.58 + i * 0.012)), life: 13, frameGap: 2,
+            flipX: dir < 0, angle: _swing, opacity: 0.62, behind: true, pivotY: 0.12 });
+        spawnSmoothSlash(cx, cy, dir > 0 ? 0 : Math.PI, 210 + i * 6, '#ffcc66',
+          { thickness: 16 + i * 1.5, spread: Math.PI * 0.95, life: 22, edgeCol: '#fff2c8' });
         spawnSmoothImpact(cx, cy, '#ffee88');
-        flash(0.18 + i * 0.04);
+        for (let _k = 0; _k < 4; _k++) {
+          game.particles.push({ x: cx, y: cy + (Math.random() - 0.5) * 40,
+            vx: dir * (3 + Math.random() * 6), vy: (Math.random() - 0.6) * 4,
+            life: 20 + Math.random() * 14, color: _k % 2 ? '#fff2c8' : '#ffb24a', size: 2 + Math.random() * 2 });
+        }
+        flash(0.18 + i * 0.04); addShake(3 + i * 0.5);
       }, i * 150);
     }
     // v0.25.60 — FINAL ACTION: ground-slam coda at 900ms. The 5
@@ -81426,9 +81462,29 @@ const SKILL_FNS = {
           m.vy = -7;
         }
       }
-      // Big slam visual: full-height impact pillar + wide shockwave
-      spawnSmoothExplosion(slamX, slamY - 18, 220, '#ffe488', '#ff883344', { life: 32 });
+      // v0.30.690 - THE EXECUTIONER'S STROKE. The blade rises out of frame and comes down as a
+      // guillotine, the impact opens a scorched scar on the ground and a dust ring races out of it.
+      spawnSpriteBurst(slamX, slamY - _apocBlade * 0.52, 'doombringer_apoc',
+        { size: Math.round(_apocBlade * 1.35), life: 15, flipX: dir < 0, pivotY: 0.06,
+          scaleStartY: 0.72, scaleEndY: 1.3, scaleStartX: 1, scaleEndX: 1.06 });
+      // a 300px white core washed the whole screen pale in the capture; the impact reads hotter and
+      // heavier when the flash is tighter and the structure comes from the ring and the scar.
+      spawnSmoothExplosion(slamX, slamY - 16, 230, '#ffe9b0', '#ff5a1a66', { life: 30 });
+      spawnSmoothExplosion(slamX, slamY - 6, 300, '#ffd28a', '#ff88332a', { life: 30, sprite: 'dust_ring', spin: 0.03 });
+      spawnSpriteBurst(slamX, slamY - 4, 'fx_groundshock', { size: 460, life: 42, behind: true, opacity: 0.9 });
       spawnSmoothImpact(slamX, slamY - 4, '#ffaa44');
+      // and the blade STAYS, standing in the wound it made, before it burns out - the beat the old
+      // cast never had: the sword simply vanished the moment the slam damage was dealt.
+      spawnSpriteBurst(slamX, slamY - 2, 'doombringer_apoc',
+        { size: Math.round(_apocBlade * 1.12), life: 36, frameGap: 4, flipX: dir < 0,
+          anchorBottom: true, opacity: 0.96, sticky: true });
+      for (let _r = 0; _r < 26; _r++) {
+        const _rx = slamX + (Math.random() - 0.5) * 420;
+        game.particles.push({ x: _rx, y: slamY - 6,
+          vx: (_rx - slamX) / 42, vy: -3 - Math.random() * 7,
+          life: 40 + Math.random() * 26, color: _r % 3 === 0 ? '#fff2c8' : _r % 3 === 1 ? '#ffb24a' : '#ff6c28',
+          size: 2 + Math.random() * 3 });
+      }
       // Shockwave dust ring radiating outward
       for (let i = 0; i < 3; i++) {
         const ang = (i / 3) * Math.PI;            // half-circle along ground
@@ -81450,7 +81506,7 @@ const SKILL_FNS = {
           life: 28, color: j < 8 ? '#ffffff' : '#ffcc66', size: 3
         });
       }
-      flash(0.7); addHitStop(220);
+      flash(0.88); addHitStop(150); addShake(22); if (typeof addZoomPunch === 'function') addZoomPunch(0.055);   // v0.30.690 - the stroke lands
       audio.play('crit');
     }, 900);
     // v0.25.530 — Level-10 bonus: schedule one more colossal slam at
