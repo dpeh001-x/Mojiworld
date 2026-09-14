@@ -121,6 +121,34 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code> &middot; <a href="https://www.patreon.com/c/Mojiworld" style="color:#c9a6ff;">&hearts; Support on Patreon</a></div>
 </header>
 
+<h2>v0.30.706 <span class="tag"><span class="pill bug">bug</span> King Krook stops changing size &mdash; 36 frames regenerated, one canvas, nothing cut off</span></h2>
+<p>Per user, with a video of the fight: <em>Krook animation sprites are all very disjointed and buggy, regenerate the necessary sprites using ludo.ai ensuring no cut offs as well, then recalibrate them cleanly.</em></p>
+
+<h3>Measured before touching anything</h3>
+<table style="border-collapse:collapse;font-size:13px;margin:8px 0;">
+<tr><th style="text-align:left;padding:3px 14px 3px 0;">set</th><th style="text-align:left;padding:3px 14px 3px 0;">content width spread</th><th style="text-align:left;padding:3px 14px 3px 0;">height spread</th><th style="text-align:left;padding:3px 14px 3px 0;">feet drift</th><th style="text-align:left;padding:3px 0;">frames clipped</th></tr>
+<tr><td style="padding:2px 14px 2px 0;">idle</td><td>212px (17.6%)</td><td>87px (8.1%)</td><td>0px</td><td><b>9 of 9</b></td></tr>
+<tr><td style="padding:2px 14px 2px 0;">walk</td><td>159px (20.9%)</td><td>27px (4.4%)</td><td>18px</td><td><b>3 of 9</b></td></tr>
+<tr><td style="padding:2px 14px 2px 0;">attack</td><td><b>294px (34.3%)</b></td><td>162px (23.0%)</td><td>0px</td><td><b>9 of 9</b></td></tr>
+<tr><td style="padding:2px 14px 2px 0;">stomp</td><td>169px (29.6%)</td><td>143px (26.7%)</td><td><b>88px</b></td><td>1 of 9</td></tr>
+</table>
+<p>A third of a body-width of scale change inside one swing is the &ldquo;disjointed&rdquo;, and <b>22 of the 36 frames were cropped hard against the bottom edge</b> &mdash; the feet WERE the canvas edge, so any toe that reached lower was simply gone.</p>
+<p>On top of that the sets lived on <b>three different canvases</b> (1800&times;1400, 990&times;770, 940&times;731), and <code>_drawBossSprite</code> scales a boss by its source long edge, so he also changed size when he changed STATE. Drawn on screen: <b>296&times;294 idle, 328&times;325 walk, 328&times;325 attack, 353&times;347 stomp</b> &mdash; a 19% jump between states, which <code>anim_calib</code> was hand-compensating per state (s = 1 / 1.67 / 1.6 / 2.4).</p>
+
+<h3>Regenerated, not redrawn</h3>
+<p>The old frames read as nine separate drawings of a crocodile king because that is what they were. <code>/assets/sprite/animate</code> is seeded with <em>one</em> image and moves that, so every frame is the same character by construction &mdash; the seed is the shipped still the user has never complained about. Four sets &times; nine frames, and the prompts are written against the measured failure: no zoom, no camera move, no travel, feet on one line, whole body inside the frame with margin.</p>
+<p>Two prompt passes were needed and both are recorded in <code>scripts/gen_krook_anim_ludo.mjs</code>: the first idle roll <em>turned him to face the camera</em> from frame 3 (&ldquo;side view, facing RIGHT&rdquo; was read as a starting pose, so it is stated as a ban now), and the first stomp rolls read as a <em>squat</em> rather than a stomp, so the brief became a rear-up and a drive down &mdash; which also matches what the skill shouts at you.</p>
+
+<h3>Then the calibration, made arithmetic</h3>
+<p><code>scripts/gen_krook_normalise.mjs</code> measures all 36 frames and lays them out with <b>one canvas (960&times;960), one scale and one offset</b>, from the union box of the whole set, with a 4.5% margin no frame may cross. One scale rather than per-frame on purpose: the walk's body rock and the stomp's rear-up ARE size changes in the content box, and normalising those away would give back a stiff sliding sprite.</p>
+<p>With the art consistent, the calibration collapses from four hand-tuned per-state numbers to <b>one</b>: <code>s 1.6, dx 0, dy 0.04</code> for idle, walk, attack and the stomp set alike.</p>
+<p>And <code>_BOSS_ATK_SCALE = { kingKrook: 1.10 }</code> is gone. Its own comment said it &ldquo;compensates the content-norm's attack shrink&rdquo; &mdash; the shrink came from the attack art being on a smaller canvas. Measured now: attack content 745&times;736 against idle 752&times;729, so the same 1.10 would be a 10% jump on every swing. <code>animator_parity_check.mjs</code> caught that <code>monster_animator.html</code> mirrors that table and made me fix both.</p>
+
+<h3>Verified</h3>
+<p><b>Frames cut off: 22 &rarr; 0.</b> Within-state content spread: idle 17.6% &rarr; <b>0.4%</b>, walk 20.9% &rarr; 8.8%, attack 34.3% &rarr; <b>6.8%</b>, stomp 29.6% &rarr; 5.9% &mdash; what is left is the animation itself (a lifted foot, an extended arm), not drift. Drawn size across the four states: <b>19% spread &rarr; 1%</b> (305&times;296, 306&times;297, 303&times;299, 306&times;297), and sampled live through a real fight, <b>215 consecutive frames at 390&times;390 with zero variation</b> (it was two sizes before the <code>_BOSS_ATK_SCALE</code> removal, and four across states before that).</p>
+<p>Suites: <code>animator_parity_check</code> 10/10, <code>boss_anim_integrity</code> 16/16, <code>boss_anim_pingpong</code> 4/4, <code>anim_smoothness</code> 8/8, <code>animator_table_parity</code> 9/9. <code>anim_frame_scale</code> is 7/8 here and 7/8 on <code>origin/main</code> &mdash; its one failure names <code>gravitos3soul</code> and is untouched by this.</p>
+
+
 <h2>v0.30.705 <span class="tag"><span class="pill polish">polish</span> Every master G and B skill stacks its damage into one column, like Deadeye Protocol</span></h2>
 <p>Per user: <em>for all classes G and B skill damage numbers make them stacked just like the style in deadeye protocol (marksman).</em></p>
 

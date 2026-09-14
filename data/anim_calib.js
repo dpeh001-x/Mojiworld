@@ -716,19 +716,19 @@ window.LX_ANIM_CALIB = {
   },
   "kingKrook": {
     "idle": {
-      "s": 1,
+      "s": 1.6,
       "dx": 0,
       "dy": 0.04
     },
     "walk": {
-      "s": 1.67,
+      "s": 1.6,
       "dx": 0,
-      "dy": 0.065
+      "dy": 0.04
     },
     "attack": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0.0532,
+      "dy": 0.04,
       "ft": [
         72,
         60,
@@ -1135,9 +1135,9 @@ window.LX_ANIM_CALIB = {
   },
   "kingKrookstomp": {
     "attack": {
-      "s": 2.4,
+      "s": 1.6,
       "dx": 0,
-      "dy": 0.28,
+      "dy": 0.04,
       "ft": [
         72,
         60,
