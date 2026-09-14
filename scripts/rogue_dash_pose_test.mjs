@@ -82,25 +82,42 @@ const R = await page.evaluate(() => {
     const d = c2.getImageData(0, 0, cv.width, cv.height).data;
     const W = cv.width, H = cv.height;
     const on = (x, y) => d[(y * W + x) * 4 + 3] > 24;
-    // Count trapped background ONLY in the HIP BAND — the strip just below the torso, where a leg
-    // that has come away from the body shows up as a void. The first version of this counted whole
-    // columns, which also counts the daylight BETWEEN two splayed legs: the moment the legs were
-    // given a sprint cycle it climbed from 4,796 to 7,726 and called a correct animation broken.
-    // Detachment happens at the hip; splay happens at the feet. Measure where the fault actually is.
-    let bt = H, bb = -1;
-    for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) if (on(x, y)) { if (y < bt) bt = y; if (y > bb) bb = y; }
-    const y0 = Math.round(bt + (bb - bt) * 0.52), y1 = Math.round(bt + (bb - bt) * 0.78);
-    let f = 0;
-    for (let x = 0; x < W; x++) {
-      let top = -1, bot = -1;
-      for (let y = 0; y < H; y++) if (on(x, y)) { if (top < 0) top = y; bot = y; }
-      if (top < 0) continue;
-      for (let y = Math.max(top + 1, y0); y < Math.min(bot, y1); y++) if (!on(x, y)) f++;
+    // IS THE FIGURE STILL ONE BODY? Flood-fill the drawn pixels and count separate pieces.
+    //
+    // This replaces a hip-band gap measurement that misled twice. That one counted trapped
+    // background in a window sized off the body's bounding box, so it moved whenever the legs did:
+    // giving the legs a sprint made it jump 4,796 -> 7,726, and hanging them lower moved its window
+    // again - both times calling a correct animation broken. Connected pieces cannot be fooled that
+    // way, because it asks the actual question: has a limb come off?
+    //
+    // The baseline is TWO, not one: the rogue's dagger is legitimately its own shape. Specks under
+    // 120px are antialias noise and are ignored.
+    const n = W * H, solid = new Uint8Array(n);
+    for (let k = 0; k < n; k++) solid[k] = d[k * 4 + 3] > 40 ? 1 : 0;
+    const seen = new Uint8Array(n), st = new Int32Array(n);
+    let pieces = 0;
+    for (let k = 0; k < n; k++) {
+      if (!solid[k] || seen[k]) continue;
+      let top = 0, area = 0; st[top++] = k; seen[k] = 1;
+      while (top) {
+        const c = st[--top]; area++;
+        const x = c % W, y = (c - x) / W;
+        if (x > 0 && solid[c - 1] && !seen[c - 1]) { seen[c - 1] = 1; st[top++] = c - 1; }
+        if (x < W - 1 && solid[c + 1] && !seen[c + 1]) { seen[c + 1] = 1; st[top++] = c + 1; }
+        if (y > 0 && solid[c - W] && !seen[c - W]) { seen[c - W] = 1; st[top++] = c - W; }
+        if (y < H - 1 && solid[c + W] && !seen[c + W]) { seen[c + W] = 1; st[top++] = c + W; }
+      }
+      if (area > 120) pieces++;
     }
-    gap += f; if (f > worst) worst = f;
+    gap += pieces; if (pieces > worst) worst = pieces;
   }
   player._rogueDashPoseUntil = 0; game.paused = false;
-  out.gap = gap; out.gapWorst = worst;
+  out.pieceSum = gap; out.piecesWorst = worst;
+  out.hipDrop = (typeof HERO_VEC_ROGUE_DASH_HIP_DROP !== 'undefined') ? HERO_VEC_ROGUE_DASH_HIP_DROP : null;
+  // the drop and the sprint must both be gone by the settle, or the legs snap when the dash ends
+  const endKey = HERO_VEC_ROGUE_DASH_KEYS[HERO_VEC_ROGUE_DASH_KEYS.length - 1];
+  const endPose = _heroVecRogueDashPose(1);
+  out.settleClean = Math.abs(endPose.legLY - endKey.legLY) < 0.01 && Math.abs(endPose.legRY - endKey.legRY) < 0.01;
   out.sprintCycles = (typeof HERO_VEC_ROGUE_DASH_SPRINT_CYCLES !== 'undefined') ? HERO_VEC_ROGUE_DASH_SPRINT_CYCLES : null;
   out.sprintAmp = (typeof HERO_VEC_ROGUE_DASH_SPRINT_AMP !== 'undefined') ? HERO_VEC_ROGUE_DASH_SPRINT_AMP : null;
   // The legs must actually RUN. Sample the angle BETWEEN the two legs and count how many times it
@@ -123,7 +140,8 @@ if (R.err) { console.log(R.err); process.exit(1); }
 console.log(`keys at ${JSON.stringify(R.ps)}`);
 console.log(`smear key ${JSON.stringify(R.smear)}`);
 console.log(`hip follow ${R.hipFollow}, leg split ${R.legSplit}, hip lag behind the torso at the smear ${R.hipLag}px`);
-console.log(`gap pixels trapped in the silhouette: ${R.gap} total, ${R.gapWorst} worst frame (before the fix: 12071 / 2342)\n`);
+console.log(`separate pieces across 24 frames: worst ${R.piecesWorst}  (2 is the body plus his dagger; 3 means a limb came off)`);
+console.log(`leg anchor dropped ${R.hipDrop}px mid-dash, settle lands on the authored pose: ${R.settleClean}\n`);
 
 const S = R.smear || {};
 const checks = [
@@ -142,8 +160,9 @@ const checks = [
   // per user: "do the sprint but make sure the leg is always attached to hip". Measured in the HIP
   // BAND over 24 frames. Reference points from the sweep: no sprint at all = 1094, a bare 1.10 rad
   // swing with no hip compensation = 5280, and the build before the hip fix (detached) = far worse.
-  ['the legs stay attached at the hip', R.gap <= 1400, R.gap + ' hip-band gap px (no sprint at all is 1094)'],
-  ['...on every frame, not just on average', R.gapWorst <= 260, R.gapWorst + ' px on the worst frame'],
+  ['the figure never comes apart — the legs stay on the body', R.piecesWorst <= 2, R.piecesWorst + ' pieces at worst (2 = body + his dagger; 3 = a limb came off)'],
+  ['the leg anchor is the authored 6px drop', R.hipDrop === 6, String(R.hipDrop)],
+  ['the drop and the sprint are both gone by the settle', R.settleClean === true],
   // per user: "the legs should move rapidly like a crazy sprint"
   ['the legs actually cycle rather than holding a stride', R.legReversals >= 6, R.legReversals + ' reversals across the dash'],
   ['the sprint is a real swing, not a twitch', R.legSwingPeak >= 1.6, R.legSwingPeak + ' rad between the legs'],
