@@ -12183,7 +12183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.701';
+const GAME_VERSION = 'v0.30.702';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -64355,6 +64355,7 @@ function _expeditionMobKilled(m) {
     // sweep land first. The cutscene is fail-open and always calls back, so completion cannot be
     // lost to a missing clip: a dropped file just means the results screen opens as it does today.
     if (m.type === 'towerSovereign' && typeof _sovereignFallCutscene === 'function') {
+      m._sovFallPlayed = true;   // v0.30.702 - claimed, so killMonster's own hook cannot play it twice
       let _done = false;
       const _after = () => { if (_done) return; _done = true; _completeExpedition(); };
       setTimeout(() => { try { _sovereignFallCutscene(_after); } catch (e) { _after(); } }, 1500);
@@ -65391,12 +65392,6 @@ function _expeditionSpawnTowerBoss(slot) {
       m._expeditionBoss = true;
       if (slot === 'mid') m._expeditionMidBoss = true;
       else                m._expeditionFinalBoss = true;
-      // v0.30.698 - the Sovereign's defeat cinematic is ~4 MB and plays the instant he dies. Prime the
-      // HTTP cache while the fight runs (fetch + drain, the story-beat clip idiom), once a session.
-      if (slot !== 'mid' && !window._lxSovCineWarm) {
-        window._lxSovCineWarm = true;
-        try { fetch('steam/higgsfield/cinematics/clip_sovereign_fall.mp4').then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => {}); } catch (e) {}
-      }
       // Scale to player level. Mid-boss uses Lv 30 benchmark.
       // v0.26.310 — Per user "The sovereign of the spire does not scale
       // to level, it should scale to level +10". Sovereign now scales
@@ -69660,6 +69655,13 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     _spawned._atkPreZodiacCut = _spawned.atk;
     _spawned.atk = Math.max(1, Math.floor((_spawned.atk || 1) * LX_ZODIAC_DMG_MUL));
     _spawned._zodiacAtkCut = true;
+  }
+  // v0.30.702 - the Sovereign's defeat cinematic is ~4 MB and plays the instant he dies, so it is primed
+  // the moment he is on a floor - by ANY route, which is why this sits here and not in the
+  // expedition's own spawn. Fetch + drain (the story-beat clip idiom), once a session.
+  if (_spawned && _spawned.type === 'towerSovereign' && !window._lxSovCineWarm) {
+    window._lxSovCineWarm = true;
+    try { fetch('steam/higgsfield/cinematics/clip_sovereign_fall.mp4').then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => {}); } catch (e) {}
   }
   return _spawned;
 }
@@ -97113,6 +97115,18 @@ function killMonster(m) {
   // either advances the run (boss kill on F10) or triggers the floor-
   // clear check (last regular mob on F1-F9). No-op outside expedition.
   if (typeof _expeditionMobKilled === 'function') _expeditionMobKilled(m);
+  // v0.30.702 - per user: "wire it to play when the tower sovereign dies". The fall is his DEATH scene,
+  // not an expedition-completion screen, so it plays wherever he dies. The expedition branch above
+  // claims it first because it alone has to hold something behind it; this is every OTHER way he
+  // can be killed, and there are real ones: _bossRushRoster() is every boss in the MojiDex, so the
+  // rush carries him, and the Echo Keeper can re-summon him. A mirage of him is not him. His
+  // revivesOnce means the first fall reanimates and never reaches this line, so this is the real
+  // death, and the claim flag makes the scene fire exactly once per monster.
+  if (m && m.type === 'towerSovereign' && !m._isMirage && !m._sovFallPlayed
+      && typeof _sovereignFallCutscene === 'function') {
+    m._sovFallPlayed = true;
+    setTimeout(() => { try { _sovereignFallCutscene(null); } catch (e) {} }, 1500);
+  }
   // v0.25.61 — quest progression hook
   // v0.26.277 — Skip quest tick inside an active expedition. The
   // expedition is a sandboxed re-run; kills here shouldn't tick
