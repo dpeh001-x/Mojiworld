@@ -12560,7 +12560,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.725';
+const GAME_VERSION = 'v0.30.726';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -136332,6 +136332,24 @@ function _drawMonsterSprite(m, sx, sy) {
   ctx.translate(footX, footY);
   // v0.26.489 — facing mirror XOR per-type forced X-flip (mayo / towerSeer).
   if (((m.facing | 0) < 0) !== _MOB_SPRITE_XFLIP.has(m.type)) ctx.scale(-1, 1);
+  // v0.30.x — RESOLVE THE FRAME FIRST (per user: the Tombkeeper "seems to have a single frame
+  // where by the sprite grows big for that 1 frame").
+  //
+  // _monsterStateFrame is what sets m._frameIsAttack, and it used to be called ~96 lines BELOW
+  // the calib block just under this comment — which reads that flag to choose which state's
+  // calibration to scale by. So the scale applied to a draw was the one belonging to the
+  // PREVIOUS draw, and at every boundary of an attack the scale and the frame disagreed for
+  // exactly one frame. The Tombkeeper's calib is idle/walk s=1.56 against attack s=2.05, so the
+  // frame where his swing ENDS was drawn with the attack scale on an idle pose: 2.05/1.56 =
+  // 1.31x, a single visibly bigger frame. (Entering the swing has the same fault in reverse —
+  // one frame at 0.76x — but a brief shrink at the start of a wind-up is far harder to catch.)
+  //
+  // Same family as the v0.30.x forgewight / smith-golem fix a few screens up, and the same rule:
+  // the flag has to describe the frame being drawn. That one aligned the flag's CONDITION; this
+  // one fixes its TIMING. Hoisting the call is safe — nothing between the old and new call sites
+  // touches anything _monsterStateFrame reads (the only monster fields written in that span are
+  // m._visW/_visH), and it is still called exactly once per draw.
+  const _stateImg = sprite ? _monsterStateFrame(m) : null;
   // v0.26.x — Per-(type, state) animation calibration (monster_animator.html):
   // scale around the planted foot + nudge by a fraction of the rendered height.
   // Applied here so every draw branch below inherits it; no-op when {s:1,dx:0,dy:0}.
@@ -136432,7 +136450,7 @@ function _drawMonsterSprite(m, sx, sy) {
     else                      _st = 'sepia(0.50) saturate(2.0) hue-rotate(15deg) brightness(1.12)';
     _lxMobTintFilter = _st; _stBakedTint = true;
   }
-  const _stateImg = sprite ? _monsterStateFrame(m) : null;
+  // v0.30.x — _stateImg is resolved above, before the calib block that reads m._frameIsAttack.
   if (_stateImg) {
     // v0.26.351 — Weapon-swing attack frames. A few big melee mobs author their
     // swing/smash attack frames with the character composited inside a padded
