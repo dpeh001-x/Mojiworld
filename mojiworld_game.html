@@ -12560,7 +12560,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.728';
+const GAME_VERSION = 'v0.30.729';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -74702,9 +74702,9 @@ function _lxDeHit(x, y, key, size, life) { const Hh = _LX_DE.hits; if (Hh.length
 function _lxDeFmt(v) { v = Math.round(v); return v >= 1e6 ? (v / 1e6).toFixed(v < 1e7 ? 2 : 1) + 'M' : v >= 1e4 ? (v / 1e3).toFixed(v < 1e5 ? 1 : 0) + 'K' : String(v); }
 // THE COLUMN. `n0` is game.damageNumbers.length before the hit; the hit's own number is the newest
 // numeric entry after it. Returns the damage the number shows (what the tallies count).
-// v0.30.724 gb-split — `split` is passed only by _lxGbStack, and only for an actual B/G cast.
+// v0.30.729 gb-volcano — `volc` is passed only by _lxGbStack, and only for an actual B/G cast.
 // Deadeye passes nothing and keeps the single slim row it has always had.
-function _lxDeColumn(m, n0, split) {
+function _lxDeColumn(m, n0, volc) {
   const arr = game.damageNumbers; if (!arr || n0 < 0) return 0;
   let d = null, val = 0;
   // (the number may already carry thousands separators - "1,359" - so strip them before reading it)
@@ -74717,49 +74717,30 @@ function _lxDeColumn(m, n0, split) {
     _LX_DE.cols.push(c);
     while (_LX_DE.cols.length > LX_COL_MAX) { const _ev = _LX_DE.cols.shift(); if (_ev && _ev.m && _ev.m._deCol === _ev) _ev.m._deCol = null; }
   }
-  c.t = now; c.total += val;   // v0.30.724 gb-split — the hit counts ONCE however many lines show it
-  // v0.30.724 gb-split — one hit becomes several lines that sum to exactly what it dealt.
-  // Integer parts with the remainder on the first line: 1001 over 3 is 335 + 333 + 333, not
-  // three 333s that quietly lose 2. The monster already lost its HP before this ran - this
-  // is how the number is written, not what it cost.
-  const _parts = [];
-  if (split) {
-    const _n = _lxGbSplitCount(val);
-    const _base = Math.floor(val / _n);
-    for (let i = 0; i < _n; i++) _parts.push(_base);
-    _parts[0] += val - _base * _n;
-  } else _parts.push(val);
-  if (split) c.pitch = LX_GB_ROW_PITCH;
-  for (let k = 0; k < _parts.length; k++) {
-    let e = d;
-    if (k > 0) {   // extra lines are new floaters cloned off the real one
-      e = { x: d.x, y: d.y, vy: 0, text: "", color: d.color, size: d.size, life: 24, maxLife: 30 };
-      arr.push(e);
-    }
-    // _lxDeFmt abbreviates past 10k ("131K"), so the drawn text cannot be added back up to
-    // the hit. Keep the exact part on the entry: it is what this line stands for, and it is
-    // what makes "the lines sum to the hit" checkable rather than merely asserted.
-    e._gbPart = _parts[k];
-    e.text = _lxDeFmt(_parts[k]);
-    const row = c.n % 7; c.n++;
-    const old = c.rows[row]; if (old && old !== e && old.life > 4) old.life = 4;   // the row's previous occupant retires
-    c.rows[row] = e; e._deRow = row;
-    e.life = 24; e.maxLife = 30; e.vy = 0;   // maxLife - life = 6: the row enters half-way through the pop, not from the crit's 2.6x overshoot
-    if (split) {
-      // bigger and bolder than a plain column row, with the alternating tag lean
-      e.size = LX_GB_ROW_SIZE; e._gb = true;
-      e._gbLean = (row % 2 ? 1 : -1) * LX_GB_LEAN;
-    } else {
-      e.size = Math.max(11, Math.min(LX_COL_ROW_MAX, ((e.size | 0) || 14) - 5));   // rows are slimmer than a lone hit, and never taller than the 20px row pitch; the total carries the weight
-    }
-    e.crit = false;   // keeps the gold, drops the star and the 2.6x crit overshoot: seven starred pops a press was noise, and every line crits anyway
-    e._txt = undefined; e._bk = undefined;
+  c.t = now; const row = c.n % 7; c.n++; c.total += val;   // v0.30.729 gb-volcano — one hit, one number again
+  const old = c.rows[row]; if (old && old.life > 4) old.life = 4;   // the row's previous occupant retires
+  c.rows[row] = d; d._deRow = row;
+  d.life = 24; d.maxLife = 30; d.vy = 0;   // maxLife - life = 6: the row enters half-way through the pop, not from the crit's 2.6x overshoot
+  if (volc) {
+    // v0.30.729 gb-volcano — a master skill must not read smaller than a basic attack. Rows
+    // clear a crit (18) instead of being shrunk to 11-14, and wear the magma ramp.
+    d.size = LX_GB_ROW_SIZE; d._gbVolc = true; d.big = true; d.color = LX_GB_ROW_COL;
+    c.pitch = LX_GB_ROW_PITCH;
+  } else {
+    d.size = Math.max(11, Math.min(LX_COL_ROW_MAX, ((d.size | 0) || 14) - 5));   // rows are slimmer than a lone hit, and never taller than the 20px row pitch; the total carries the weight
   }
-  const d0 = d;
-  if (!c.sum) { c.sum = { x: d0.x, y: d0.y, vy: 0, text: '', life: 30, maxLife: 31, color: '#ffd24a', size: 22, big: true, _deSum: true }; arr.push(c.sum); }
-  // v0.30.724 gb-split — the total leads a split column, so it grows with the rows under it
-  if (split) { c.sum.size = LX_GB_SUM_SIZE; c.sum._gb = true; c.sum._bk = undefined; }
+  d.crit = false;   // keeps the gold, drops the star and the 2.6x crit overshoot: seven starred pops a press was noise, and every line crits anyway
+  d._txt = undefined; d._bk = undefined;
+  if (!c.sum) { c.sum = { x: d.x, y: d.y, vy: 0, text: '', life: 30, maxLife: 31, color: '#ffd24a', size: 22, big: true, _deSum: true }; arr.push(c.sum); }
   else { const i = arr.indexOf(c.sum); if (i >= 0 && i !== arr.length - 1) { arr.splice(i, 1); arr.push(c.sum); } }   // the cap drops the head: keep the total at the tail
+  // v0.30.729 gb-volcano — the total leads the column, so it clears the rows under it and
+  // throws embers as it climbs. This sits AFTER the if/else above on purpose: v0.30.724
+  // wedged its own if/else between them and re-parented that `else`, which quietly stopped
+  // the total being moved back to the array tail - and MAX_DN evicts from the head.
+  if (volc) {
+    c.sum.size = LX_GB_SUM_SIZE; c.sum._gbVolc = true; c.sum.color = LX_GB_SUM_COL; c.sum._bk = undefined;
+    _lxVolcEmbers(c.sum.x + 8, c.sum.y);
+  }
   c.sum.text = _lxDeFmt(c.total); c.sum._txt = undefined; c.sum._bk = undefined; c.sum.life = 30; c.sum.maxLife = 44; c.sum.vy = 0;
   return val;
 }
@@ -74770,7 +74751,7 @@ function _lxDeColumnsHold() {
     const c = C[i], m = c.m;
     if (!m || (game.time | 0) - c.t > 40) { C.splice(i, 1); if (m && m._deCol === c) m._deCol = null; continue; }
     const cx = m.x + m.w / 2 - 8;
-    const _p = c.pitch || 20;   // v0.30.724 gb-split — a split column runs on a taller pitch
+    const _p = c.pitch || 20;   // v0.30.729 gb-volcano — an erupting column runs on a taller pitch
     for (let r = 0; r < 7; r++) { const e = c.rows[r]; if (e && e.life > 0) { e.x = cx; e.y = m.y - 6 - r * _p; e.vy = 0; } }
     if (c.sum && c.sum.life > 0) { c.sum.x = cx; c.sum.y = m.y - 6 - 7 * _p - 8; c.sum.vy = 0; }
   }
@@ -74802,18 +74783,44 @@ const LX_GB_STACK_MAX  = 1200;  // hard ceiling from the cast (~20 s), so a stan
 // window though: Z-spam after a cast would otherwise hold it open to the ceiling and quietly turn
 // the column into how damage numbers look, which is not what was asked for.
 const LX_GB_BASIC = new Set(['melee', 'arrow', 'bolt', 'charged', 'deadeye']);
-// v0.30.724 gb-split — the split-line look, per user: "bigger, bolder looking with slight
-// graffiti look ... split the damage into multiple lines". The column shrinks its rows to 14
-// so the total can carry the weight; a split row is the thing being read here, so it gets its
-// own size and its own pitch to sit in. LEAN alternates per row: a stack of straight numbers
-// reads as a spreadsheet, a slight tilt reads as a sprayed tag.
-const LX_GB_ROW_SIZE  = 19;     // vs the column default cap of 14
-const LX_GB_ROW_PITCH = 27;     // vs 20 - a 19px row needs the room
-const LX_GB_SUM_SIZE  = 28;     // vs 22 - the total stays the biggest thing in the column
-const LX_GB_LEAN      = 0.08;   // radians, ~4.6 degrees, alternating by row
-// How many lines one hit becomes. The user gave the ladder: "2 hits at 50% or 3 hits at 33.3%
-// or 4 hits at 25% or 5 hits at 20%" - bigger hits earn more lines.
-function _lxGbSplitCount(v) { return v >= 1e5 ? 5 : v >= 1e4 ? 4 : v >= 1e3 ? 3 : 2; }
+// v0.30.729 gb-volcano — per user: "revert to original, change it to volcano style effect,
+// larger than the normal attack damage size". A normal hit pushes size 14 and a crit 18
+// (see the _dn literal in hitMonster); the column then shrank its rows to 11-14 because it
+// was built for Deadeye, where the TOTAL carries the weight - so a master skill read smaller
+// than a basic attack. Inverted: rows clear a crit, the total clears the rows, and the pitch
+// grows so they have room to sit in.
+const LX_GB_ROW_SIZE  = 24;     // vs 14 for a normal hit, 18 for a crit
+const LX_GB_SUM_SIZE  = 30;     // the total still leads its own column
+const LX_GB_ROW_PITCH = 32;     // a 24px row does not fit the old 20px pitch
+const LX_GB_ROW_COL   = '#ff6a10';   // molten orange - the rows
+const LX_GB_SUM_COL   = '#ffb020';   // hotter amber - the total above them
+// The magma ramp, top to bottom: white-hot, yellow, orange, deep red. Cached per integer
+// size exactly like the crit gradient it sits beside.
+const _dnVolcGrad = new Map();
+function _lxVolcGrad(ctx2, bs) {
+  let g = _dnVolcGrad.get(bs);
+  if (!g) {
+    g = ctx2.createLinearGradient(0, -bs * 0.95, 0, bs * 0.3);
+    g.addColorStop(0, '#fff6d0'); g.addColorStop(0.3, '#ffd23a');
+    g.addColorStop(0.62, '#ff7a12'); g.addColorStop(1, '#b81a05');
+    _dnVolcGrad.set(bs, g);
+  }
+  return g;
+}
+// The spray off the total as it climbs. Capped, and skipped entirely when the particle
+// budget is already under pressure - an ultimate lands on a room, not on one foe.
+function _lxVolcEmbers(x, y) {
+  if (!game.particles || game.particles.length > 150) return;
+  for (let i = 0; i < 7; i++) {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 1.5;
+    const sp = 1.6 + Math.random() * 3.2;
+    game.particles.push({ x: x + (Math.random() - 0.5) * 26, y,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 1.2,
+      life: 22 + (Math.random() * 16 | 0), gravity: 0.16,
+      color: i % 3 === 0 ? '#fff0b0' : (i % 3 === 1 ? '#ff9a1e' : '#e03a08'),
+      size: 1.5 + Math.random() * 2.2 });
+  }
+}
 function _lxGbStackOpen() { player._gbStackAt = game.time | 0; player._gbStackUntil = (game.time | 0) + LX_GB_STACK_OPEN; }
 function _lxGbStack(m, skill) {
   if (!player || !m || !game.damageNumbers || !game.damageNumbers.length) return;
@@ -74822,8 +74829,8 @@ function _lxGbStack(m, skill) {
   const t = game.time | 0;
   if (t < (player._gbStackAt | 0)) { player._gbStackUntil = 0; return; }   // game.time went backwards (map load): the window is stale
   if (t > (player._gbStackUntil | 0)) return;
-  // v0.30.724 gb-split — a basic that joins the column is not a B or G skill; it keeps the
-  // old slim single row. Only the cast the window was opened for splits into lines.
+  // v0.30.729 gb-volcano — a basic that joins the column is not a B or G skill; it keeps the
+  // old slim row. Only the cast the window was opened for erupts.
   _lxDeColumn(m, game.damageNumbers.length - 1, !LX_GB_BASIC.has(skill));
   if (!LX_GB_BASIC.has(skill)) {
     player._gbStackUntil = Math.min((player._gbStackAt | 0) + LX_GB_STACK_MAX,
@@ -147578,7 +147585,7 @@ function _dnBake(d, txt, col, baseSize) {
   try {
     const fs2 = baseSize | 0;
     const cv = document.createElement('canvas');
-    const pad = (d && d._gbLean) ? 26 : 14;   // covers the 9 px halo stroke + the (2,3) shadow offset; v0.30.724 gb-split — a leaned glyph sweeps outside the upright box, so its bake gets a wider margin
+    const pad = 14;   // covers the 9 px halo stroke + the (2,3) shadow offset
     const c = cv.getContext('2d');
     const font = '900 ' + fs2 + 'px Impact, "Arial Black", "Trebuchet MS", sans-serif';
     c.font = font;
@@ -147599,10 +147606,6 @@ function _dnBake(d, txt, col, baseSize) {
     c.textAlign = 'center'; c.textBaseline = 'alphabetic';
     c.lineJoin = 'round'; c.lineCap = 'round';
     c.translate(ax, ay);
-    // v0.30.724 gb-split — the tag lean is baked in. The settled blit below is NOT rotated by
-    // the draw site (its gate is `!rot`), so a lean applied only live would snap straight the
-    // instant a number settled. Baking it here keeps the two paths agreeing.
-    if (d._gbLean) c.rotate(d._gbLean);
     c.globalAlpha = 0.55; c.fillStyle = '#000'; c.fillText(txt, 2, 3);   // ground shadow
     c.globalAlpha = 1;
     const deco = !(typeof _perfLowFx === 'function' && _perfLowFx());
@@ -147610,12 +147613,13 @@ function _dnBake(d, txt, col, baseSize) {
       c.lineWidth = d.crit ? 9 : 7; c.strokeStyle = col;
       c.globalAlpha = 0.35; c.strokeText(txt, 0, 0); c.globalAlpha = 1;
     }
-    c.lineWidth = d._gb ? 8 : 5; c.strokeStyle = '#000'; c.strokeText(txt, 0, 0);    // the 5 px readability anchor (v0.30.724 gb-split — 8 on a split line: 'bolder looking')
+    c.lineWidth = d._gbVolc ? 7 : 5; c.strokeStyle = '#000'; c.strokeText(txt, 0, 0);    // the 5 px readability anchor (v0.30.729 gb-volcano — 7 under a 24-30px molten glyph)
     if ((d.crit || _dnTkB) && deco) { c.lineWidth = 2; c.strokeStyle = d.crit ? '#fff7b0' : _mixHex(col, '#ffffff', 0.72); c.strokeText(txt, 0, 0); }
     if (d.crit || d.big || _dnTkB) {
       const _bs = fs2;
       let grad;
-      if (d.crit) {
+      if (d._gbVolc) { grad = _lxVolcGrad(c, _bs); }   // v0.30.729 gb-volcano — the magma ramp
+      else if (d.crit) {
         grad = _dnCritGrad.get(_bs);
         if (!grad) {
           grad = c.createLinearGradient(0, -_bs * 0.9, 0, _bs * 0.25);
@@ -147748,11 +147752,7 @@ function drawDamageNumbers() {
     // ctx.rotate() costs a non-trivial matrix-mul per number. Removing it
     // on lowFx saves the matrix op + makes the canvas state predictable
     // (so a future "single setTransform" pass becomes possible).
-    // v0.30.724 gb-split — the constant tag lean rides on top of the decaying spawn wobble.
-    // It is deliberately NOT folded into `rot`: that variable gates the settled-bitmap path
-    // below, and a permanent non-zero there would keep every split line on the live path forever.
-    const _lean = d._gbLean || 0;
-    if ((rot || _lean) && !_dnLowFx_top) ctx.rotate(rot + _lean);
+    if (rot && !_dnLowFx_top) ctx.rotate(rot);
     if (scale !== 1) ctx.scale(scale, scale);
     ctx.globalAlpha = alpha;
     // v0.25.695 — Font cache. Only re-set when the integer pixel size
@@ -147877,7 +147877,7 @@ function drawDamageNumbers() {
     // and makes it a true constant 5 device px at every point in the animation.
     // The decorative halo + gold-foil strokes below/above deliberately keep
     // scaling with the glyph — they are glow, not the readability anchor.
-    ctx.lineWidth = (d._gb ? 8 : 5) / (scale || 1);   // v0.30.724 gb-split — a split line carries a heavier anchor
+    ctx.lineWidth = (d._gbVolc ? 7 : 5) / (scale || 1);   // v0.30.729 gb-volcano — a heavier anchor under a 24-30px molten glyph
     ctx.strokeStyle = '#000';
     ctx.strokeText(txt, 0, 0);
 
@@ -147899,7 +147899,8 @@ function drawDamageNumbers() {
       // per-number colour so they allocate. Saves a gradient + 3 stops per crit.
       const _bs = baseSize | 0;
       let grad;
-      if (d.crit) {
+      if (d._gbVolc) { grad = _lxVolcGrad(ctx, _bs); }   // v0.30.729 gb-volcano — the magma ramp
+      else if (d.crit) {
         grad = _dnCritGrad.get(_bs);
         if (!grad) {
           grad = ctx.createLinearGradient(0, -_bs * 0.9, 0, _bs * 0.25);
