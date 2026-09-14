@@ -136,7 +136,7 @@
 // v0.30.x - v44 -> v45. War of Banners' art is REPLACED under its own names: the cast burst
 // (fx/warlord_ult + its nine frames), the banner wave (projectiles/p_ult_warlord + its nine frames)
 // and the skill icon. Without a new generation a returning browser keeps the old set out of cache.
-const CACHE = 'mojiworld-assets-v45';   // v0.30.x - War of Banners redrawn under its own filenames
+const CACHE = 'mojiworld-assets-v46';   // v0.30.690 - the Blade of Calamity art is redrawn (nine frames + the still)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
