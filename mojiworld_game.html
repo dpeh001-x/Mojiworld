@@ -12183,7 +12183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.702';
+const GAME_VERSION = 'v0.30.703';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14719,6 +14719,9 @@ const LX_FX = (() => {
     gravitos_slamzone:  'gravitos_slamzone.webp',  // slam strike-column floor band
     gravitos_laserring: 'gravitos_laserring.webp', // v0.29.572 — Laser Sweep charge ring
     gravitos_tendril:   'gravitos_tendril.webp',   // crushTendrils descending tendril
+    // v0.30.x — the column of light Aetherion changes shape inside (ludo.ai, see
+    // scripts/gen_aetherion_evolve.mjs). Spawned once, at the break of his form change.
+    ae_evolve:          'ae_evolve.webp',
     // v0.26.521 — Lv-50 B-slot ULTIMATE cast VFX (one per master, id
     // `<master>_ult`). Static base art generated to Sprites/fx/<key>.png; the
     // 9-frame loop lives in Sprites/fx/anim/<key>_0..8.webp and is registered
@@ -14897,6 +14900,7 @@ const _FX_ANIM_KEYS = new Set([
   'sage_meteorshower', 'elementalist_cascade', 'soul_vortex', 'hexmaster_grandhex',
   'cascade_fire', 'cascade_ice', 'cascade_lightning', 'cascade_void',   // v0.30.47 — Cascade phase bursts
   'necro_maelstrom',   // v0.29.929 — the Lv-50 ultimate has its own storm now
+  'ae_evolve',         // v0.30.x — Aetherion's ascension column
 
   'archbishop_grail', 'marksman_oneshot', 'ballista_volley', 'beastmaster_pack',
   'skyhunter_gale',
@@ -44584,6 +44588,108 @@ function _lxRolledProjLoss(lo, hi) {
   if (player.cls === 'warrior' && typeof _warriorDr === 'function') v *= _warriorDr();
   if (player._aegis) v *= 0.5;
   return Math.max(1, Math.floor(v));
+}
+// ── AETHERION'S ASCENSION ─────────────────────────────────────────────────────────────────────
+// v0.30.x — per user: "when aetherion transforms to aetherion2 make an animation to show the
+// evolution". The form change was a CUT: one frame the Shardfather, the next the second form, with
+// a ring of particles thrown over the seam and an instant sprite swap underneath it. Now it is a
+// beat, and the swap happens at its brightest moment, where the eye cannot follow it - the same
+// trick the Gravitos form change uses, held longer because this is one creature changing shape
+// rather than an arena coming apart.
+//
+//   0-620ms    THE GATHER     he locks in place and draws tall; his own crystal falls inward out of
+//                             a ring, timed to arrive together; the light on him climbs
+//   300ms      THE COLUMN     the pillar of ascension light starts to rise, timed so that it is at
+//                             full height - and standing in front of him - exactly at the break
+//   620ms      THE BREAK      the sprite is swapped BEHIND the column, where it cannot be seen; the
+//                             ground ring, the shards blowing back out, the flash and the hold all
+//                             land on that frame
+//   620-1050   ASCENDANT      the light burns off the new form, which settles down out of an
+//                             overshoot on the squash decay that was already there; embers rise
+//
+// The column does the hiding, NOT the brightness on him. The first cut of this whited him out to
+// near-pure white at the same moment the white pillar arrived, and the two merged into one
+// unreadable blob for about 400ms - the same way the War of Banners impact flash swallowed its own
+// standard. He now only brightens enough to look lit from inside, and the column covers the swap.
+//
+// The iframe covers the whole beat, so he cannot be hit while he is a column of light - before this
+// it was 1.2s over an instant swap, which is why it read as a stutter rather than a transformation.
+const LX_AE_EVO = { pillar: 300, gather: 620, burn: 430, total: 1400, iframe: 1700 };
+function _lxAeEvolveStart(m) {
+  m._aeEvoT = 0; m._aeEvoStage = 0; m._aeEvoWhite = 0;
+  m.invulnerable = LX_AE_EVO.iframe;
+  m.vx = 0; m.hitFlash = 0;
+  try {
+    if (typeof audio !== 'undefined' && audio && audio.play) audio.play('charge');
+    if (typeof addHitStop === 'function') addHitStop(90);
+  } catch (e) {}
+}
+function _lxAeEvolveTick(m, dt) {
+  if (!(m._aeEvoT >= 0)) return;                       // -1 once it has played; undefined before it
+  const t = m._aeEvoT = m._aeEvoT + dt;
+  const G = LX_AE_EVO.gather;
+  const lowFx = (typeof _perfVeryLowFx === 'function') && _perfVeryLowFx();
+  const still = (typeof game !== 'undefined') && game && game._reduceMotion;
+  // the light on him: climbing through the gather, burning off the new form quickly after it
+  m._aeEvoWhite = (t < G) ? Math.min(1, t / G) : Math.max(0, 1 - (t - G) / LX_AE_EVO.burn);
+  if (t < G) {
+    if (!still) { const k = t / G; m.scaleX = 1 - 0.10 * k; m.scaleY = 1 + 0.16 * k; }
+    // THE GATHER — each mote starts on a ring and is given exactly the speed that lands it on him
+    // as the whiteout peaks, so the crystal arrives all at once instead of trickling in.
+    if (!lowFx && (game.time % 2 === 0) && typeof _budgetedParticlePush === 'function') {
+      const cx = m.x + m.w / 2, cy = m.y + m.h / 2;
+      const a = Math.random() * Math.PI * 2, R = 150 + Math.random() * 110, ttl = 22 + Math.random() * 8;
+      _budgetedParticlePush({
+        x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R,
+        vx: -Math.cos(a) * (R / ttl), vy: -Math.sin(a) * (R / ttl),
+        life: ttl, color: (Math.random() < 0.5) ? '#ffffff' : '#e8d089', size: 2 + Math.random() * 3,
+      });
+    }
+  }
+  // THE COLUMN — it rises during the gather, so that it stands at full height in front of him at the
+  // break. spawnSpriteBurst draws after the monsters, so the column is what the swap happens behind.
+  // 9 frames at frameGap 5 is 45 game-frames, and its 5th frame - the tallest - lands on the break.
+  if (m._aeEvoStage === 0 && t >= LX_AE_EVO.pillar) {
+    m._aeEvoStage = 1;
+    if (!still) {
+      const cx = m.x + m.w / 2, feet = m.y + m.h;
+      try {
+        if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(cx, feet + 6, 'ae_evolve', { life: 46, size: Math.max(360, m.h * 2.8), frameGap: 5, keepAspect: true, anchorBottom: true });
+        if (typeof spawnDashFx === 'function') spawnDashFx({ type: 'ring', x: cx, y: feet - 4, r0: 20, r1: 190, life: 30, color: '#ffe9a8', squash: 0.3 });
+      } catch (e) {}
+    }
+  }
+  // THE BREAK
+  if (m._aeEvoStage === 1 && t >= G) {
+    m._aeEvoStage = 2;
+    m._phaseSprite = 'aetherion2';                     // swapped behind the column, not in the open
+    m.scaleX = 1.20; m.scaleY = 0.84;                  // arrives oversized; the existing decay settles it
+    const cx = m.x + m.w / 2, cy = m.y + m.h / 2, feet = m.y + m.h;
+    try {
+      if (!still) {
+        if (typeof spawnDashFx === 'function') spawnDashFx({ type: 'ring', x: cx, y: feet - 6, r0: 30, r1: 280, life: 26, color: '#ffe9a8', squash: 0.3 });
+        if (typeof spawnSmoothExplosion === 'function') spawnSmoothExplosion(cx, cy, 240, '#ffffff', '#c9a6ff55', { life: 30 });
+      }
+      if (typeof showToast === 'function') showToast('✨ AETHERION EVOLVES — Shardfather Ascendant', 'legendary');
+      if (typeof flash === 'function') flash(0.55);
+      if (typeof addShake === 'function') addShake(14);
+      if (typeof addHitStop === 'function') addHitStop(150);
+      if (typeof audio !== 'undefined' && audio && audio.play) { audio.play('levelup'); audio.play('quake_hit'); }
+    } catch (e) {}
+    if (!lowFx && typeof _budgetedParticlePush === 'function') {
+      for (let i = 0; i < 30; i++) {                   // the gathered crystal blows straight back out
+        const a = (i / 30) * Math.PI * 2 + Math.random() * 0.2, sp = 7 + Math.random() * 4;
+        if (!_budgetedParticlePush({ x: cx, y: cy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 46, color: (i % 3 === 0) ? '#c8a8ff' : '#fff4cf', size: 4 + Math.random() * 2 })) break;
+      }
+    }
+  }
+  // ASCENDANT — embers off the new form while the white burns away
+  if (t > G && t < LX_AE_EVO.total && !lowFx && (game.time % 3 === 0) && typeof _budgetedParticlePush === 'function') {
+    _budgetedParticlePush({ x: m.x + Math.random() * m.w, y: m.y + m.h * 0.25 + Math.random() * m.h * 0.7,
+      vx: (Math.random() - 0.5) * 1.1, vy: -1.4 - Math.random() * 1.6, life: 42,
+      color: (Math.random() < 0.5) ? '#ffe9a8' : '#c8a8ff', size: 3 });
+  }
+  if (t >= LX_AE_EVO.total) { m._aeEvoT = -1; m._aeEvoWhite = 0; }
 }
 function _lxBossHpFloor(type, dmg) {
   const f = type && LX_BOSS_HIT_FLOOR[type];
@@ -84909,30 +85015,13 @@ function updateMonsters(dt) {
     // theatrical particle burst. Single-shot — once `_aetherionEvolved`
     // is set we skip this branch forever. Per-monster cost is one bool
     // check + one float compare; cheap to run for every boss every frame.
+    if (m._aeEvoT >= 0) _lxAeEvolveTick(m, dt);   // v0.30.x — his ascension, mid-flight
     if (m.type === 'aetherion' && !m._aetherionEvolved &&
         m.currentHp > 0 && m.currentHp <= m.maxHp * 0.5) {
       m._aetherionEvolved = true;
-      m._phaseSprite = 'aetherion2';
       m.atk = Math.floor((m.atk || 0) * 1.25);
-      m.invulnerable = 1200;  // 1.2 s evolution iframe
       m.stunTimer = 0; m.freezeTimer = 0;
-      m.hitFlash = 60;
-      // Theatrical evolution burst — radial violet + cyan shards
-      for (let i = 0; i < 28; i++) {
-        const a = (i / 28) * Math.PI * 2;
-        if (typeof _budgetedParticlePush === 'function') {
-          if (!_budgetedParticlePush({
-            x: m.x + m.w/2, y: m.y + m.h/2,
-            vx: Math.cos(a) * 7, vy: Math.sin(a) * 7,
-            life: 50, color: i % 2 ? '#c8a8ff' : '#88ddff', size: 5,
-          })) break;
-        }
-      }
-      if (typeof showToast === 'function') showToast('✨ AETHERION EVOLVES — Shardfather Ascendant', 'legendary');
-      if (typeof flash === 'function') flash(0.5);
-      if (typeof addShake === 'function') addShake(10);
-      if (typeof addHitStop === 'function') addHitStop(100);
-      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('levelup');
+      _lxAeEvolveStart(m);   // v0.30.x — the theatre (and the sprite swap) now lives in the beat
     }
     // Squash/stretch decay back toward 1.0 (snappy exp ease)
     if (m.scaleX !== undefined && m.scaleX !== 1) {
@@ -135754,7 +135843,12 @@ function drawMonster(m) {
   // colour": a dying mob renders GRAYSCALE (and the killing-blow hit-flash /
   // freeze tint is suppressed), so the corpse drains of colour as it fades out
   // instead of carrying the bright white flash into the fade.
-  const _didFilterSave = flashOn || freezeOn || m._dying;
+  // v0.30.x — AETHERION'S ASCENSION: his form change whites him out, the sprite is swapped at the
+  // peak of it, and the white burns off the new form. Quantised to twelfths because the sprite path
+  // BAKES one tinted copy per distinct filter string (_lxMobTintFilter) - a smoothly ramping value
+  // would allocate a fresh bake every frame of the beat.
+  const _aeWhite = (m._aeEvoWhite > 0) ? Math.round(m._aeEvoWhite * 12) / 12 : 0;
+  const _didFilterSave = flashOn || freezeOn || m._dying || _aeWhite > 0;
   if (_didFilterSave) {
     ctx.save();
     // v0.29.5xx — lag fix: the tint is resolved to a filter STRING and (for
@@ -135765,6 +135859,11 @@ function drawMonster(m) {
     let _mobTint;
     if (m._dying) {
       _mobTint = 'grayscale(1)';
+    } else if (_aeWhite > 0) {
+      // Lit from inside, not erased. The first cut of this ran to brightness(4.2) and he became a
+      // white blob that the white ascension column then merged into - the column is what hides the
+      // swap, so he only has to look like he is burning, not like he is gone.
+      _mobTint = 'brightness(' + (1 + 2.2 * _aeWhite).toFixed(2) + ') saturate(' + (1 - 0.5 * _aeWhite).toFixed(2) + ')';
     } else if (flashOn && freezeOn) {
       // v0.26.x — Per user "make the hue change more subtle": freeze hue-rotate
       // softened 170deg → 60deg (a gentle cool tint instead of a near-
