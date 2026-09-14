@@ -107,6 +107,9 @@
 // v0.30.726 - v51 -> v52. Sprites/fx/warcry.webp is REPLACED under its own name (a
 // lion head -> an expanding shout-wave), and its nine anim/ frames plus Sprites/fx/fx_warcry_mark.webp
 // are NEW. A returning browser would keep the lion cached and never fetch any of them.
+// v0.30.734 - v53 -> v54. Sprites/fx/warcry.webp and its nine anim/ frames are REPLACED
+// under their own names again - feathered at the circumference, where they previously ended on the
+// square edge of their own canvas. A returning browser would keep the hard-cut plates cached.
 // v0.30.491 - v23 -> v24. Sprites/ui/edicts_bg.webp is NEW art
 // referenced from CSS; a returning browser with the old manifest would render the Edicts panel
 // on its fallback gradient and never fetch the plate.
@@ -155,7 +158,7 @@
 // v0.30.x - v52 -> v53. warrior_shockwave.webp and its nine frames are REPLACED under their
 // own names (the crescent was recarved thinner and translucent, and the animation is now a
 // crescent-into-fireball), so a returning browser would otherwise keep the old opaque set.
-const CACHE = 'mojiworld-assets-v53';   // v0.30.x - the recarved warrior_shockwave set
+const CACHE = 'mojiworld-assets-v54';   // v0.30.x - the recarved warrior_shockwave set
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
