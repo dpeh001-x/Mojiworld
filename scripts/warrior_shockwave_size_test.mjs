@@ -16,6 +16,8 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 ok('p_shockwave.webp is on disk', existsSync('Sprites/projectiles/p_shockwave.webp'), {});
+ok('warrior_shockwave.webp is on disk', existsSync('Sprites/projectiles/warrior_shockwave.webp'), {});
+ok('its nine frames are on disk', [0,1,2,3,4,5,6,7,8].every((i) => existsSync(`Sprites/projectiles/anim/warrior_shockwave_${i}.webp`)), {});
 
 const net = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net.createServer();
@@ -60,11 +62,20 @@ const r = await page.evaluate(async () => {
   // The table is LX_PLAYER_PROJ (an IIFE result) and its values are Image
   // objects, not filenames. There is no LX_PLAYER_PROJ_BY_SKILL binding — the
   // first draft invented that name and silently resolved to null.
+  const _file = (v) => (typeof v === 'string') ? v : (v && v.src ? decodeURIComponent(v.src).split('/').pop() : null);
   try {
-    const v = LX_PLAYER_PROJ && LX_PLAYER_PROJ.shockwave;
-    out.sprite = (typeof v === 'string') ? v
-      : (v && v.src ? decodeURIComponent(v.src).split('/').pop() : null);
-  } catch (e) {}
+    out.sprite = _file(LX_PLAYER_PROJ && LX_PLAYER_PROJ.shockwave);
+    // v0.30.x — the two skills no longer share art. _LX_PROJ_FOR_SKILL is what the generic draw
+    // branch looks the sprite up in, so ask IT rather than re-deriving the mapping here.
+    out.waveSprite = _file(_LX_PROJ_FOR_SKILL && _LX_PROJ_FOR_SKILL.bloodwave);   // Somersault Smash
+    out.fanSprite  = _file(_LX_PROJ_FOR_SKILL && _LX_PROJ_FOR_SKILL.shockwave);   // Warcry's fan
+    out.waveAnimKey = (typeof _GEN_PROJ_ANIM !== 'undefined') ? _GEN_PROJ_ANIM.bloodwave : null;
+    out.fanAnimKey  = (typeof _GEN_PROJ_ANIM !== 'undefined') ? _GEN_PROJ_ANIM.shockwave : null;
+    out.waveDecoded = !!(LX_PLAYER_PROJ && LX_PLAYER_PROJ.warrior_shockwave && LX_PLAYER_PROJ.warrior_shockwave.naturalWidth);
+    out.waveFrames = (typeof _lxFrameCount === 'function') ? _lxFrameCount('projectiles/anim', 'warrior_shockwave', 9) : -1;
+    for (let i = 0; i < 40 && !(typeof _projAnimFrame === 'function' && _projAnimFrame('warrior_shockwave')); i++) await new Promise((r) => setTimeout(r, 100));
+    out.waveAnimReady = !!(typeof _projAnimFrame === 'function' && _projAnimFrame('warrior_shockwave'));
+  } catch (e) { out.probeErr = String(e.message).slice(0, 120); }
   return out;
 });
 await b.close(); try { srv.kill(); } catch (e) {}
@@ -72,12 +83,23 @@ await b.close(); try { srv.kill(); } catch (e) {}
 console.log('powerStrike ->', JSON.stringify(r.powerStrike));
 console.log('warcry fan  ->', JSON.stringify(r.warcry));
 console.log('sprite      ->', r.sprite);
+console.log('wave / fan  ->', r.waveSprite, '/', r.fanSprite, ' frames:', r.waveFrames);
 
 ok('powerStrike still fires its wave', !!r.powerStrike, { err: r.err_powerStrike });
-ok('powerStrike wave is enlarged (was 44x30)',
-   r.powerStrike && r.powerStrike.w === 78 && r.powerStrike.h === 52, r.powerStrike);
-ok('powerStrike still draws p_shockwave (no sprite was swapped)',
+ok('powerStrike wave is enlarged (was 44x30) and still at its v0.29.x 64x44',
+   r.powerStrike && r.powerStrike.w === 64 && r.powerStrike.h === 44, r.powerStrike);
+// v0.30.x — per user: "Change somersault smash projectile to the new sprite i added:
+// warrior_shockwave". This pair used to assert the opposite (that nothing had been swapped);
+// the swap is now deliberate, so what has to be pinned is that it hit ONLY Somersault Smash.
+ok('Somersault Smash throws the new crescent', r.waveSprite === 'warrior_shockwave.webp', { waveSprite: r.waveSprite });
+ok('and it is drawn through the shared branch, not a per-projectile bspr override',
    r.powerStrike && r.powerStrike.bspr === null, { bspr: r.powerStrike && r.powerStrike.bspr });
+ok('Warcry\'s fan was NOT swapped with it', r.fanSprite === 'p_shockwave.webp', { fanSprite: r.fanSprite });
+ok('the two skills play different frame sets now',
+   r.waveAnimKey === 'warrior_shockwave' && r.fanAnimKey === 'shockwave', { wave: r.waveAnimKey, fan: r.fanAnimKey });
+ok('the crescent decodes and its nine frames are indexed and play',
+   r.waveDecoded && r.waveFrames === 9 && r.waveAnimReady,
+   { decoded: r.waveDecoded, frames: r.waveFrames, ready: r.waveAnimReady, probeErr: r.probeErr });
 ok('warlord_warcry still fires its fan', !!r.warcry, { err: r.err_warlord_warcry });
 ok('the fan is still a FAN of three, not merged into one',
    r.warcry && r.warcry.n >= 3, { n: r.warcry && r.warcry.n });
@@ -88,7 +110,7 @@ ok('the fan is scaled LESS than powerStrike (three hitboxes can multi-hit one ta
    { fanArea: r.warcry && r.warcry.w * r.warcry.h, waveArea: r.powerStrike && r.powerStrike.w * r.powerStrike.h });
 ok('both are genuinely bigger than before',
    r.powerStrike && r.warcry && (r.powerStrike.w * r.powerStrike.h) > 44 * 30 && (r.warcry.w * r.warcry.h) > 28 * 14, {});
-ok('the shockwave sprite still resolves to p_shockwave.webp', r.sprite === 'p_shockwave.webp', { sprite: r.sprite });
+ok('the shared shockwave key still resolves to p_shockwave.webp', r.sprite === 'p_shockwave.webp', { sprite: r.sprite });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;

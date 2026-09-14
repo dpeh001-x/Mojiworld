@@ -667,6 +667,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "tsunami": 9,
    "venom": 9,
    "voidring": 9,
+   "warrior_shockwave": 9,
    "wave": 9,
    "whirl": 9,
    "zodiac": 9
