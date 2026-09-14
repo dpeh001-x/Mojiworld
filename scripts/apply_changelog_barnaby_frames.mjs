@@ -22,6 +22,7 @@ const ENTRY = J(
   '<tr><td>Attack art</td><td>5%</td><td>20.6%</td></tr>',
   '<tr><td>Weave (the dash lean)</td><td>never drawn</td><td>drawn</td></tr>',
   '</tbody></table>',
+  '<p><b>A correction to v0.30.696.</b> That entry describes this change, but the build it shipped carried Mooma’s landing fix instead: two of my ship chains ran at once and shared the same scratch filenames, so one pushed the other’s build under its own message. Mooma’s fix is genuinely in from v0.30.696 (its own entry follows); Barnaby’s is this one. The chain now gives every run its own scratch names.</p>',
   '<p><code>scripts/barnaby_frames_test.mjs</code> &mdash; 6 checks over a live fight: his attack art is at least a fifth of his draws, the weave set is drawn at all, the walk loop is at most half of them, the walk loop is still used for actual walking, the sim is asserted to have stepped before anything is counted, and a control that the two opt-in tables name him and nobody else.</p>',
   '');
 s = s.replace(ANCHOR, ENTRY);

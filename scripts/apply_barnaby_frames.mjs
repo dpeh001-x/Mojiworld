@@ -44,7 +44,7 @@ const sub = (label, anchor, after, expect) => {
 
 // ---- 1. the two opt-in tables, beside the move-state set they qualify --------
 sub('tables', "const _BOSS_MOVE_DRAW_STATES = new Set(['chase', 'reposition', 'dashIn',",
-  J("// v0.30.696 barnaby-frames - a boss draws its attack art only while PLANTED (see _lxPlanted),",
+  J("// v0.30.699 barnaby-frames - a boss draws its attack art only while PLANTED (see _lxPlanted),",
     "// which is right for bosses that stroll through a wind-up and wrong for one whose whole kit",
     "// moves: measured over 600 frames, Barnaby drew walk 272 times and attack 23, with his weave",
     "// and duck sets never drawn at all. These two tables are keyed by type, so only he takes them.",
@@ -54,11 +54,11 @@ sub('tables', "const _BOSS_MOVE_DRAW_STATES = new Set(['chase', 'reposition', 'd
 
 // ---- 2. his attacks read as attacks even while he moves ---------------------
 sub('attacking', "                       && (_lxPlanted || m._braceDashing));",
-  "                       && (_lxPlanted || m._braceDashing || _LX_ATK_WHILE_MOVING.has(m.type)));   // v0.30.696 barnaby-frames");
+  "                       && (_lxPlanted || m._braceDashing || _LX_ATK_WHILE_MOVING.has(m.type)));   // v0.30.699 barnaby-frames");
 
 // ---- 3. his dash wears the weave set ----------------------------------------
 sub('dash weave', "  const _bossWeaveImg = _bossAirborne ? _bossWeaveFrame(_bodyKey, m) : null;",
-  J("  // v0.30.696 barnaby-frames - a listed dash state draws the weave lean too, not just genuine hangtime",
+  J("  // v0.30.699 barnaby-frames - a listed dash state draws the weave lean too, not just genuine hangtime",
     "  const _lxDashWeave = !_bossAttacking && m.patternState && _LX_DASH_WEAVE[m.type] && _LX_DASH_WEAVE[m.type].has(m.patternState);",
     "  const _bossWeaveImg = (_bossAirborne || _lxDashWeave) ? _bossWeaveFrame(_bodyKey, m) : null;"));
 
