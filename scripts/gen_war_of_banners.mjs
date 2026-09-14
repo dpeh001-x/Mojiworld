@@ -329,9 +329,9 @@ async function bakeCast() {
   };
   //            sy    flash  ring  ringA  alpha
   const plan = [[1.06, 0.00, 0.00, 0.00, 0.90],   // coming down
-                [0.94, 0.62, 0.16, 0.95, 1.00],   // the hit
-                [0.99, 0.34, 0.42, 0.85, 1.00],
-                [1.01, 0.18, 0.66, 0.62, 1.00],
+                [0.94, 0.30, 0.16, 0.95, 1.00],   // the hit - the flash stays UNDER the banner (0.62 washed the art out to a white blob in game)
+                [0.99, 0.17, 0.42, 0.85, 1.00],
+                [1.01, 0.09, 0.66, 0.62, 1.00],
                 [1.00, 0.08, 0.85, 0.38, 0.99],
                 [1.00, 0.02, 1.00, 0.18, 0.92],   // planted; the ring has run past
                 [1.00, 0.00, 0.00, 0.00, 0.74],
