@@ -12183,7 +12183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.704';
+const GAME_VERSION = 'v0.30.705';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -74179,13 +74179,14 @@ function _lxDeColumn(m, n0) {
   let c = m._deCol;
   if (!c || now - c.t > 15 || !c.sum || c.sum.life <= 0) {
     c = m._deCol = { m, t: now, n: 0, total: 0, rows: new Array(7).fill(null), sum: null };
-    _LX_DE.cols.push(c); if (_LX_DE.cols.length > 6) _LX_DE.cols.shift();
+    _LX_DE.cols.push(c);
+    while (_LX_DE.cols.length > LX_COL_MAX) { const _ev = _LX_DE.cols.shift(); if (_ev && _ev.m && _ev.m._deCol === _ev) _ev.m._deCol = null; }
   }
   c.t = now; const row = c.n % 7; c.n++; c.total += val;
   const old = c.rows[row]; if (old && old.life > 4) old.life = 4;   // the row's previous occupant retires
   c.rows[row] = d; d._deRow = row;
   d.life = 24; d.maxLife = 30; d.vy = 0;   // maxLife - life = 6: the row enters half-way through the pop, not from the crit's 2.6x overshoot
-  d.size = Math.max(11, ((d.size | 0) || 14) - 5);   // rows are slimmer than a lone hit; the total carries the weight
+  d.size = Math.max(11, Math.min(LX_COL_ROW_MAX, ((d.size | 0) || 14) - 5));   // rows are slimmer than a lone hit, and never taller than the 20px row pitch; the total carries the weight
   d.crit = false;   // keeps the gold, drops the star and the 2.6x crit overshoot: seven starred pops a press was noise, and every line crits anyway
   d._txt = undefined; d._bk = undefined;
   if (!c.sum) { c.sum = { x: d.x, y: d.y, vy: 0, text: '', life: 30, maxLife: 31, color: '#ffd24a', size: 22, big: true, _deSum: true }; arr.push(c.sum); }
@@ -74204,6 +74205,48 @@ function _lxDeColumnsHold() {
     if (c.sum && c.sum.life > 0) { c.sum.x = cx; c.sum.y = m.y - 6 - 7 * 20 - 8; c.sum.vy = 0; }
   }
 }
+// =========================================================================
+// v0.30.705 — THE COLUMN, FOR EVERY MASTER SKILL. Per user: "for all classes G and B skill
+// damage numbers make them stacked just like the style in deadeye protocol (marksman)".
+//
+// G is the master signature and B the master ultimate (KEY_TO_SLOT_DEFAULT maps g -> slot 'x',
+// b -> slot 'b'): thirty-four skills across the four classes.
+//
+// They cannot be recognised by the tag they pass to hitMonster, which was the obvious approach and
+// the wrong one. Measured across all thirty-four: only nine call hitMonster directly at all — the
+// rest deal their damage through projectiles, ground hazards, summons and damage-over-time, none of
+// which knows which skill spawned it. Worse, two of the nine pass 'melee' and 'magic', the same tags
+// a basic attack uses, so a tag list would have missed most of the skills and captured basic hits.
+//
+// So the window opens at the CAST and every monster damage number pushed inside it joins that
+// monster's column. That is the same shape as _classSkillMul right beside it, which exists for the
+// same reason (a cast's damage arrives late), and it is what makes the summon ultimates work: for
+// Apex Bond or Necrotic Ascendance the minions ARE the skill, and a tag test would stack nothing.
+const LX_COL_MAX       = 10;    // columns held at once - an ultimate lands on a room, not on one foe
+const LX_COL_ROW_MAX   = 14;    // a row never grows past the 20px pitch it has to sit in
+const LX_GB_STACK_OPEN = 180;   // frames of stacking a cast buys outright (~3 s)
+const LX_GB_STACK_HOLD = 45;    // and it stays open this long after each hit it stacked (~0.75 s)
+const LX_GB_STACK_MAX  = 1200;  // hard ceiling from the cast (~20 s), so a standing aura is not forever
+// A basic attack lands in the column while the window is open — it is the same foe in the same
+// moment, and leaving it out would be the one number not in the stack. It does not EXTEND the
+// window though: Z-spam after a cast would otherwise hold it open to the ceiling and quietly turn
+// the column into how damage numbers look, which is not what was asked for.
+const LX_GB_BASIC = new Set(['melee', 'arrow', 'bolt', 'charged', 'deadeye']);
+function _lxGbStackOpen() { player._gbStackAt = game.time | 0; player._gbStackUntil = (game.time | 0) + LX_GB_STACK_OPEN; }
+function _lxGbStack(m, skill) {
+  if (!player || !m || !game.damageNumbers || !game.damageNumbers.length) return;
+  if (skill === 'thorns' || skill === '__coop') return;   // a retaliation is not your cast
+  if (_LX_DE_LINE_SKILLS.has(skill)) return;               // Deadeye's own paths column themselves, and keep their tallies
+  const t = game.time | 0;
+  if (t < (player._gbStackAt | 0)) { player._gbStackUntil = 0; return; }   // game.time went backwards (map load): the window is stale
+  if (t > (player._gbStackUntil | 0)) return;
+  _lxDeColumn(m, game.damageNumbers.length - 1);
+  if (!LX_GB_BASIC.has(skill)) {
+    player._gbStackUntil = Math.min((player._gbStackAt | 0) + LX_GB_STACK_MAX,
+                                    Math.max(player._gbStackUntil | 0, t + LX_GB_STACK_HOLD));
+  }
+}
+// =========================================================================
 function _lxDeFace(t) { player.facing = (t.x + t.w / 2 < player.x + player.w / 2) ? -1 : 1; }
 function _lxDeMuzzle() { return { x: player.x + (player.facing > 0 ? player.w : 0), y: player.y + 24 }; }
 function _lxDeDryFire() {   // nothing in reach: one tracer into the air, no ramp credit
@@ -75555,6 +75598,9 @@ function castSkill(id) {
   player._classSkillMul = _computeClassSkillMul(id);
   player._classSkillMulExpires = game.time + 120;
   player._classSkillMulSkillId = id;
+  // v0.30.705 — G (master signature) and B (master ultimate) stack their damage numbers into one
+  // column per foe instead of piling them on the same spot. See _lxGbStack.
+  if (s.slot === 'x' || s.slot === 'b') _lxGbStackOpen();
   const f = SKILL_FNS[id];
   // v0.26.1030 — if the SKILL_FN no-ops (returns '_lxNoCast', e.g. a summon at cap),
   // refund the cd + MP committed above so the cast isn't silently wasted.
@@ -95741,6 +95787,7 @@ function hitMonster(m, dmg, isCrit, skill) {
       if (_lxAff === 'weak') { _dn.color = isCrit ? '#ffb347' : '#ff9a3c'; _dn.size += 2; _dn.big = true; }   // v0.30.402 — no floating tag (per user)
       else if (_lxAff === 'resist') { _dn.color = isCrit ? '#c9d6e8' : '#9fb4c8'; _dn.size = Math.max(11, _dn.size - 2); }
       game.damageNumbers.push(_dn);
+      _lxGbStack(m, skill);   // v0.30.705 — G / B master skills stack into one column per foe
     }
     return;
   }
@@ -96117,6 +96164,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     tier,
     wobbleDir: Math.random() < 0.5 ? -1 : 1,
   });
+  _lxGbStack(m, skill);   // v0.30.705 — G / B master skills stack into one column per foe
 
   // Lifesteal (powerup + equipment)
   // v0.25.939 — Audit caught uncapped lifesteal. End-game gear stacking

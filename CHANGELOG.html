@@ -121,6 +121,28 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code> &middot; <a href="https://www.patreon.com/c/Mojiworld" style="color:#c9a6ff;">&hearts; Support on Patreon</a></div>
 </header>
 
+<h2>v0.30.705 <span class="tag"><span class="pill polish">polish</span> Every master G and B skill stacks its damage into one column, like Deadeye Protocol</span></h2>
+<p>Per user: <em>for all classes G and B skill damage numbers make them stacked just like the style in deadeye protocol (marksman).</em></p>
+
+<h3>G and B are the master pair &mdash; thirty-four skills</h3>
+<p><code>KEY_TO_SLOT_DEFAULT</code> maps <kbd>G</kbd> to slot <code>x</code> (the master signature) and <kbd>B</kbd> to slot <code>b</code> (the master ultimate): seventeen of each, across all four classes. Their hits now take the next row UP on the foe they land on &mdash; seven rows, then it wraps &mdash; with a gold running total riding above, which is exactly the display Deadeye Protocol has had to itself since it was written.</p>
+
+<h3>Why it is a cast window and not a list of hit tags</h3>
+<p>The obvious implementation is to tag the hits and column the tagged ones. It was measured across all thirty-four before being written, and it does not work: <b>only nine of the thirty-four call <code>hitMonster</code> directly at all.</b> The rest deal their damage through projectiles, ground hazards, summons and damage-over-time &mdash; none of which knows which skill spawned it. Worse, two of the nine pass <code>'melee'</code> and <code>'magic'</code>, the same tags a basic attack uses. A tag list would have missed most of the roster and captured basic attacks while it was at it.</p>
+<p>So the window opens at the <b>cast</b>, and every monster damage number pushed inside it joins that foe's column. That is the same shape as <code>_classSkillMul</code> sitting right beside it in the cast path, which exists for the same reason (a cast's damage arrives late) &mdash; and it is the only thing that makes the summon ultimates work at all: for <b>Apex Bond</b> or <b>Necrotic Ascendance</b> the minions <em>are</em> the skill.</p>
+<p>The window is 3&nbsp;s from the cast, held open another 0.75&nbsp;s by each hit it stacks, capped at 20&nbsp;s so a standing aura is not forever. A <b>basic attack joins an open column but never extends it</b> &mdash; it is the same foe in the same moment so leaving it out would look broken, but Z-spam after a cast must not quietly turn the column into how damage numbers look.</p>
+
+<h3>Two things the column needed before it could be shared</h3>
+<ul>
+  <li><b>A row has to fit its row.</b> Rows sit 20&nbsp;px apart and a row was simply &ldquo;five smaller than the hit would have been&rdquo;. That held while only Deadeye used it &mdash; its lines are 0.5&nbsp;ATK each &mdash; but a master ultimate's single hit wants size 39, and three of those 20&nbsp;px apart is one illegible smear. Rows are capped to the pitch now; the gold total carries the weight, which is what the comment under that line already said.</li>
+  <li><b>A column can be evicted safely.</b> The hold list kept six columns and the seventh shifted the oldest out &mdash; but left the foe still pointing at it, so later hits fed a column nothing was holding and the numbers sagged away under the damage-number tick's gravity. It never showed because Deadeye fires at ONE target. An ultimate lands on a room at a time, so it would have shown immediately. The list holds ten now and clears the foe's pointer when it drops one.</li>
+</ul>
+
+<h3>Verified</h3>
+<p>New suite <code>scripts/master_skill_column_test.mjs</code>, 16/16 &mdash; it fails 6 of those on the previous build. It casts <b>all thirty-four</b> skills and asserts that <b>every one of the 981 hits</b> they landed came out of the column with a row; that a hit with no window open does not stack; that the window closes once the cast stops landing; that Z-spam never extends it; that no row is taller than its pitch and none keeps the crit pop; that <b>no damage number is ever columned twice</b> (the Deadeye double-count that sharing the column could have caused); and that a sixteen-foe AoE leaves no foe pointing at a column nothing holds.</p>
+<p>Frame time is unchanged: median 4.2&nbsp;ms before and after through a Blade of Calamity cast, p95 18.8 &rarr; 14.1&nbsp;ms. Neighbours re-run green: <code>advancement_and_deadeye</code> 10/10, <code>combat_test</code> 10/10, <code>boss_hit_floor</code> 9/9.</p>
+
+
 <h2>v0.30.704 <span class="tag"><span class="pill feat">feat</span> The parry gets its own counter-flash</span></h2>
 <p>Per user: <em>&ldquo;when the parry does dish damage to monsters make it have its own special effect sprite and animation&rdquo;.</em></p>
 <p><b>A parry damages a monster in two unrelated places, and both were wrong.</b> The first is <b>Riposte Nova</b>, the Tier-1 boon: a defended hit detonates a 150&nbsp;px shockwave. It drew <code>nova_ring</code> &mdash; which is <em>Nova Step&rsquo;s end-of-dash ring</em> &mdash; so the payoff for a perfect parry looked like a movement skill going off. The registry admitted as much in a comment: &ldquo;Riposte Nova reuses nova_ring above&rdquo;. The second is the <b>rogue&rsquo;s parry counter-strike</b>, <code>getAtk() &times; 1.6</code> into the monster that was just parried &mdash; every rogue has it from level&nbsp;1, no boon needed &mdash; and it carried no effect of its own at all. The counter landed as a plain melee hit.</p>
