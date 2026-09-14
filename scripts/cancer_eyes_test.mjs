@@ -1,128 +1,131 @@
-// Cancer has black kawaii eyes, in every loop.
+// Cancer's eye art is the original art.
 // ============================================================================
-// Per user: "for zodiac cancer the eyes are also a little weird, please do the
-// same with black kawaii eyes".
+// Per user, after seeing the kawaii-eye pass in play: "then remove the kawaii
+// eyes it looks too artificial and weird".
 //
-// WHAT WAS WRONG. Her two eyes were blank, pupil-less cream discs inside amber
-// rings — a lifeless stare. Unlike Aquarius (whose base was fine and whose idle
-// prompt spoiled it), the discs were in cancer.webp ITSELF, so every frame of
-// all three loops inherited them. The base was edited first (ludo.ai image
-// edit, scripts/gen_cancer_eyes.mjs) and the three loops regenerated from it.
+// v0.30.711 edited her base sprite to swap the blank amber-ringed discs for big
+// black kawaii eyes and regenerated idle, walk and attack from it. In motion it
+// did not work: the eyes read as pasted on, and the attack loop drifted them up
+// the shell onto the feeler bases so she appeared to grow eyes on her antennae
+// (frames 1-7 of nine). This test now asserts the REVERT — all 28 sprites back
+// to exactly the bytes that shipped before that change.
 //
-// THE MEASURE. How much of the eye band is solid black. The first cut of this
-// used "mean luminance of the darkest 8%", which scored ~3 on the untouched art
-// AND ~0 on every candidate — useless, because the darkest pixels in that crop
-// are the character's outline, which is there either way. Coverage is the right
-// question: the blank discs are large, so turning them into black eyes moves it
-// a long way while the outline contributes equally to both.
-//
-//   previous build:  base 20.6%   idle 17-19%   walk 16-18%
-//
-// The per-frame bar is derived from the CURRENT BASE at run time, not hardcoded,
-// so this keeps its meaning if she is ever redrawn again. Attack frames whose
-// eye band is washed out by her charge-up glow are exempted BY MEASUREMENT (and
-// named in the output) rather than by index, so the exemption cannot silently
-// widen if the animation changes.
+// Byte equality against the pre-change commit is the real check; the pixel
+// measurements below are a second, independent opinion that does not depend on
+// git, so a future rewrite of history cannot make this pass vacuously.
 //
 // Run: node scripts/cancer_eyes_test.mjs
 import sharp from 'sharp';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 sharp.cache(false);
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const Z = path.join(ROOT, 'Sprites', 'bosses', 'zodiac');
-const BASE = path.join(Z, 'cancer.webp');
+// The commit whose Cancer art is the one to hold: the parent of the kawaii-eye
+// art commit (9dca9d0a), i.e. the art as it stood before v0.30.711.
+const PRE = '3ced88f1ff1d3860313e1f8411f8e3cd328781b5';
 const EYE = { left: 580, top: 940, width: 380, height: 180 };
-// What the shipped art measured before this change - a recorded fact, used only
-// to give the base check a floor and to print an honest before/after.
-const PREV_BASE_BLACK = 20.6;
+// Measured signatures. The original art sits near 20%; the rejected kawaii pass
+// sat at 38-40%. The 30% line is comfortably between the two populations.
+const KAWAII_LINE = 30;
 
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 240) });
+const git = (args) => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
 
-async function eyeStats(file) {
-  const { data, info } = await sharp(file).extract(EYE).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  let black = 0, tot = 0, sum = 0;
+const files = ['Sprites/bosses/zodiac/cancer.webp'];
+for (const st of ['idle', 'walk', 'attack']) for (let i = 0; i < 9; i++) files.push(`Sprites/bosses/zodiac/${st}/cancer_${i}.webp`);
+
+// ---- 1. byte equality with the pre-change art ------------------------------
+const mismatched = [];
+let gitOk = true;
+for (const p of files) {
+  try {
+    const want = git(['rev-parse', `${PRE}:${p}`]);
+    const got = git(['hash-object', p]);
+    if (want !== got) mismatched.push(p.split('/').slice(-2).join('/'));
+  } catch (e) { gitOk = false; break; }
+}
+
+// ---- 2. the same conclusion from the pixels, without git -------------------
+async function eyeBlack(file) {
+  const { data, info } = await sharp(await readFile(file)).extract(EYE).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let black = 0, tot = 0;
   for (let p = 0; p < data.length; p += info.channels) {
     if (data[p + 3] < 128) continue;
     tot++;
-    const l = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-    sum += l;
-    if (l < 40) black++;
+    if (0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2] < 40) black++;
   }
-  return tot ? { black: 100 * black / tot, mean: sum / tot } : { black: 0, mean: 255 };
+  return tot ? 100 * black / tot : 0;
 }
-async function silhouette(file, N = 256) {
-  const { data, info } = await sharp(file).resize(N, N, { fit: 'fill' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const m = new Uint8Array(N * N);
-  for (let i = 0, p = 0; p < data.length; p += info.channels, i++) m[i] = data[p + 3] > 64 ? 1 : 0;
-  return m;
+const baseBlack = await eyeBlack(path.join(Z, 'cancer.webp'));
+const loopBlack = {};
+for (const st of ['idle', 'walk']) {
+  const v = [];
+  for (let i = 0; i < 9; i++) v.push(+(await eyeBlack(path.join(Z, st, `cancer_${i}.webp`))).toFixed(1));
+  loopBlack[st] = v;
 }
-const iou = (a, b) => { let x = 0, u = 0; for (let i = 0; i < a.length; i++) { if (a[i] | b[i]) u++; if (a[i] & b[i]) x++; } return u ? x / u : 0; };
-async function delta(a, b) {
-  const A = await sharp(a).resize(160, 160, { fit: 'fill' }).ensureAlpha().raw().toBuffer();
-  const B = await sharp(b).resize(160, 160, { fit: 'fill' }).ensureAlpha().raw().toBuffer();
-  let s = 0; for (let i = 0; i < A.length; i++) s += Math.abs(A[i] - B[i]);
-  return s / A.length / 255;
-}
-const frame = (st, i) => path.join(Z, st, `cancer_${i}.webp`);
+const kawaiiFrames = ['idle', 'walk'].flatMap((st) => loopBlack[st].map((v, i) => (v >= KAWAII_LINE ? `${st}_${i}` : null)).filter(Boolean));
 
-const baseStat = await eyeStats(BASE);
-const baseMeta = await sharp(BASE).metadata();
-const baseSil = await silhouette(BASE);
-const BAR = baseStat.black * 0.6;
-// A frame is glow-washed when her charge-up floods the eye band with light.
-const GLOW = baseStat.mean + 25;
-
-const loops = {};
-for (const st of ['idle', 'walk', 'attack']) {
-  const stats = [], sizes = new Set(), deltas = [];
-  for (let i = 0; i < 9; i++) {
-    stats.push(await eyeStats(frame(st, i)));
-    const m = await sharp(frame(st, i)).metadata();
-    sizes.add(`${m.width}x${m.height}`);
+// ---- 3. the manifest describes the art that is actually on disk ------------
+const mf = {};
+// eslint-disable-next-line no-new-func
+new Function('window', await readFile(path.join(ROOT, 'data', 'anim_calib_manifest.js'), 'utf8'))(mf);
+const entry = mf.LX_ANIM_MANIFEST && mf.LX_ANIM_MANIFEST.zodiac_cancer;
+async function frameBox(p) {
+  const { data, info } = await sharp(await readFile(p)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const W = info.width, H = info.height, C = info.channels;
+  let cT = -1, cB = -1, bT = -1, bB = -1;
+  for (let y = 0; y < H; y++) {
+    let any = false, solid = false;
+    for (let x = 0; x < W; x++) {
+      const a = data[(y * W + x) * C + 3];
+      if (a > 16) { any = true; if (a > 235) { solid = true; break; } }
+    }
+    if (any) { if (cT < 0) cT = y; cB = y; }
+    if (solid) { if (bT < 0) bT = y; bB = y; }
   }
-  for (let i = 0; i < 9; i++) deltas.push(await delta(frame(st, i), frame(st, (i + 1) % 9)));
-  loops[st] = {
-    black: stats.map((s) => +s.black.toFixed(1)),
-    glow: stats.map((s, i) => (s.mean > GLOW ? i : -1)).filter((i) => i >= 0),
-    sizes: [...sizes],
-    minDelta: Math.min(...deltas),
-    sil: await silhouette(frame(st, 0)),
-  };
+  return [cT, cB, bT, bB];
+}
+const stale = [];
+if (entry) {
+  for (const st of ['idle', 'walk', 'attack']) {
+    const want = [];
+    for (let i = 0; i < 9; i++) want.push(await frameBox(path.join(Z, st, `cancer_${i}.webp`)));
+    if (JSON.stringify(entry.states[st].cb) !== JSON.stringify(want)) stale.push(st);
+  }
 }
 
-const dim = (st) => loops[st].black.map((v, i) => ((v < BAR && !loops[st].glow.includes(i)) ? i : -1)).filter((i) => i >= 0);
-const idleBad = dim('idle'), walkBad = dim('walk'), atkBad = dim('attack');
+// ---- 4. control: the Aquarius fix from the same day is untouched -----------
+let aqOk = 'not checked';
+try {
+  const out = git(['diff', '--name-only', 'origin/main', '--', 'Sprites/bosses/zodiac/idle/aquarius_0.webp',
+    'Sprites/bosses/zodiac/idle/aquarius_4.webp', 'Sprites/bosses/zodiac/idle/aquarius_8.webp']);
+  aqOk = out ? out.split('\n').join(', ') : 'none';
+} catch (e) { aqOk = 'git failed'; }
 
-console.log(`  base   eye band ${baseStat.black.toFixed(1)}% black (previous build: ${PREV_BASE_BLACK}%)  -> per-frame bar ${BAR.toFixed(1)}%`);
-for (const st of ['idle', 'walk', 'attack']) {
-  const L = loops[st];
-  console.log(`  ${st.padEnd(6)} ${JSON.stringify(L.black)}  glow-washed ${L.glow.length ? L.glow.join(',') : 'none'}  minDelta ${L.minDelta.toFixed(4)}  ${L.sizes.join('/')}  IoU-vs-base ${iou(baseSil, L.sil).toFixed(3)}`);
-}
+console.log(`  base eye band ${baseBlack.toFixed(1)}% black  (original ~20.6%, rejected kawaii pass ~38.5%)`);
+console.log(`  idle ${JSON.stringify(loopBlack.idle)}`);
+console.log(`  walk ${JSON.stringify(loopBlack.walk)}`);
+console.log(`  byte-identical to ${PRE.slice(0, 8)}: ${gitOk ? `${files.length - mismatched.length}/${files.length}` : 'git unavailable'} | manifest stale states: ${stale.join(', ') || 'none'} | aquarius idle changed: ${aqOk}`);
 
-ok('THE BASE HAS BLACK EYES: the blank cream discs are gone',
-  baseStat.black >= 30,
-  `${baseStat.black.toFixed(1)}% of the eye band is solid black (previous build: ${PREV_BASE_BLACK}%)`);
-ok('IDLE KEEPS THEM: every idle frame carries the black eyes',
-  idleBad.length === 0,
-  idleBad.length ? `frames ${idleBad.join(', ')} under the ${BAR.toFixed(1)}% bar` : `floor ${Math.min(...loops.idle.black)}% vs bar ${BAR.toFixed(1)}%`);
-ok('WALK KEEPS THEM: every walk frame carries the black eyes',
-  walkBad.length === 0,
-  walkBad.length ? `frames ${walkBad.join(', ')} under the bar` : `floor ${Math.min(...loops.walk.black)}% vs bar ${BAR.toFixed(1)}%`);
-ok('ATTACK KEEPS THEM: every attack frame not washed out by her own glow',
-  atkBad.length === 0,
-  atkBad.length ? `frames ${atkBad.join(', ')} under the bar` : `${loops.attack.glow.length} frame(s) exempt as glow-washed (measured, not assumed): ${loops.attack.glow.join(',') || 'none'}`);
-ok('STILL THE SAME CRAB: each loop matches the base silhouette',
-  ['idle', 'walk', 'attack'].every((st) => iou(baseSil, loops[st].sil) >= 0.80),
-  ['idle', 'walk', 'attack'].map((st) => `${st} ${iou(baseSil, loops[st].sil).toFixed(3)}`).join(', '));
-ok('THE LOOPS STILL MOVE: no loop is nine copies of one drawing',
-  ['idle', 'walk', 'attack'].every((st) => loops[st].minDelta > 0.002),
-  ['idle', 'walk', 'attack'].map((st) => `${st} ${loops[st].minDelta.toFixed(4)}`).join(', '));
-ok('SIZE UNCHANGED: every frame matches the base canvas',
-  ['idle', 'walk', 'attack'].every((st) => loops[st].sizes.length === 1 && loops[st].sizes[0] === `${baseMeta.width}x${baseMeta.height}`),
-  `base ${baseMeta.width}x${baseMeta.height}; loops ${['idle', 'walk', 'attack'].map((st) => loops[st].sizes.join('/')).join(', ')}`);
+ok('THE ART IS THE ORIGINAL ART: all 28 sprites byte-identical to the pre-change commit',
+  gitOk && mismatched.length === 0,
+  gitOk ? (mismatched.length ? `differs: ${mismatched.join(', ')}` : `${files.length}/${files.length} match ${PRE.slice(0, 8)}`) : 'git unavailable - byte check could not run');
+ok('NO KAWAII EYES ON THE BASE: the eye band reads as the original discs',
+  baseBlack < KAWAII_LINE,
+  `${baseBlack.toFixed(1)}% black, under the ${KAWAII_LINE}% line (the rejected pass measured 38.5%)`);
+ok('NO KAWAII EYES IN ANY LOOP: no idle or walk frame carries them',
+  kawaiiFrames.length === 0,
+  kawaiiFrames.length ? `still kawaii: ${kawaiiFrames.join(', ')}` : `18 frames all under ${KAWAII_LINE}%`);
+ok('THE MANIFEST MATCHES THE ART ON DISK: her frame boxes were re-measured',
+  !!entry && stale.length === 0,
+  entry ? (stale.length ? `stale: ${stale.join(', ')}` : 'idle, walk and attack all current') : 'zodiac_cancer missing from the manifest');
+ok('CONTROL — AQUARIUS IS UNTOUCHED: the other zodiac fix is not collateral',
+  aqOk === 'none', aqOk);
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

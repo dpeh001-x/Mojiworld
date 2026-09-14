@@ -1,8 +1,22 @@
 #!/usr/bin/env node
 // Cancer gets black kawaii eyes (ludo.ai image edit).
+//
+//   *** REJECTED — DO NOT RUN WITHOUT ASKING FIRST. ***
+//
+// This shipped as v0.30.711 and was reverted in full the same day. Per user,
+// after seeing it in play: "then remove the kawaii eyes it looks too artificial
+// and weird". Two things went wrong that are not visible in a still frame:
+//   - the eyes read as pasted on rather than drawn with the character;
+//   - regenerating the loops from the edited base moved them. In the attack
+//     loop the eyes drifted up the shell onto the feeler bases across frames
+//     1-7 of nine, so she appeared to sprout eyes on her antennae — the user's
+//     words: "sometimes the cancer boss eyes pops up at the tip of the feelers".
+// Her art is back to the pre-change bytes; scripts/cancer_eyes_test.mjs now
+// asserts exactly that. The file is kept as the record of what was tried and
+// why it was dropped — running it again would re-break her.
 // ============================================================================
-// Per user: "for zodiac cancer the eyes are also a little weird, please do the
-// same with black kawaii eyes".
+// Per user, originally: "for zodiac cancer the eyes are also a little weird,
+// please do the same with black kawaii eyes".
 //
 // HER EYES ARE IN THE BASE SPRITE, not in one loop. Aquarius only needed her
 // idle re-rolled because her base was already right and a prompt turned her
