@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.753';
+const GAME_VERSION = 'v0.30.754';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -148727,6 +148727,15 @@ function _sbBuild() {
 // yet). Async-probed once per id; the per-frame renders below call
 // _applySkillIcon, which is dataset-guarded so it only touches the DOM on change.
 const _skillIconStatus = Object.create(null);   // id -> 'pending' | 'ok' | 'fail'
+// v0.30.754 icon-retry — a failed probe used to be FINAL: `undefined` is the only state that
+// probes, so one dropped request pinned that skill to its emoji for the whole session with the
+// file perfectly loadable. These nine probes fire during the ~2700-sprite boot storm, which is
+// exactly when a request is most likely to be starved. Now a failure is retried a few times,
+// spaced, and only then final - so a genuinely missing icon still stops asking.
+const _skillIconTries = Object.create(null);    // id -> attempts so far
+const _skillIconFailAt = Object.create(null);   // id -> when the last attempt failed
+const _LX_ICON_TRIES = 3;
+const _LX_ICON_RETRY_MS = 1500;
 // v0.29.870 — ONE-WAY BATCH GATE for the icon swap (see _skillIconUrl).
 // Closed until every probe requested so far has settled, then latched open
 // forever. Latching matters: ids get requested later too (hotkey cards, a
@@ -148752,11 +148761,25 @@ function _lxSkillIconGateOpen() {
 }
 function _skillIconUrl(id) {
   if (!id) return null;
+  // v0.30.754 icon-retry — a failure is no longer the end of it. Retried on the HUD tick that was
+  // already going to call this, so no timer is scheduled and an id nobody asks for costs nothing.
+  if (_skillIconStatus[id] === 'fail') {
+    const _tn = _skillIconTries[id] | 0;
+    const _now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (_tn < _LX_ICON_TRIES && (_now - (_skillIconFailAt[id] || 0)) >= _LX_ICON_RETRY_MS) {
+      _skillIconTries[id] = _tn + 1;
+      delete _skillIconStatus[id];   // falls into the probe below on this same call
+    } else return null;
+  }
   if (_skillIconStatus[id] === undefined) {
     _skillIconStatus[id] = 'pending';
     const im = new Image();
     im.onload = () => { _skillIconStatus[id] = 'ok'; };
-    im.onerror = () => { _skillIconStatus[id] = 'fail'; };
+    im.onerror = () => {
+      // record WHEN, so the retry above can space itself without a timer
+      _skillIconFailAt[id] = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      _skillIconStatus[id] = 'fail';
+    };
     // v0.29.528 — .webp, not .png. Sprites/skills holds 72 .webp files and
     // zero .png, so this probe failed for every skill and the bar silently
     // served emoji forever. Silently is the operative word: onerror discards
@@ -148765,7 +148788,11 @@ function _skillIconUrl(id) {
     // v0.29.870 — jump the bulk loader's queue. These nine files gate a
     // visible HUD element; the ~2700 world sprites behind them do not.
     try { im.fetchPriority = 'high'; } catch (e) {}
-    im.src = 'Sprites/skills/' + id + '.webp';
+    // A retry carries a cache-buster: a browser that cached the failed response would hand
+    // back the same failure and the retry would prove nothing. The first attempt stays clean
+    // so the common path is still a plain, cacheable URL.
+    const _tq = _skillIconTries[id] | 0;
+    im.src = 'Sprites/skills/' + id + '.webp' + (_tq ? ('?r=' + _tq) : '');   // v0.30.754 icon-retry
   }
   // v0.29.735 perf — the status is a one-way latch, so the string is invariant
   // once resolved; this ran ~9-14x per 33ms HUD tick, all discarded.
