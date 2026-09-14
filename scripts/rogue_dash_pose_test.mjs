@@ -1,20 +1,20 @@
-// THE ROGUE DASH IS A NINJUTSU LUNGE, AND IT DOESN'T STUTTER
+// THE ROGUE DASH POSE IS THE AUTHORED ORIGINAL — PINNED ON PURPOSE
 // ============================================================================
-// Per user: make the rogue dash "look smoother, like a ninjutsu dash", with a reference of a ninja
-// mid-leap — torso pitched forward but still upright, lead hand out, blade arm swept BACK, a long
-// split stride.
+// v0.30.746 replaced this pose with a "ninjutsu lunge" (a shallower lean, the head riding the body
+// instead of cancelling it, the blade arm swept back, and Catmull-Rom interpolation instead of a
+// per-segment ease). The user looked at it and said: "the original one was better use it". It was
+// reverted, and these numbers are the original ones.
 //
-// Two separate faults, and only one of them was the pose:
-//   POSE      the spine pitched to 0.92 rad (53 degrees, most of the way to horizontal), the head
-//             was counter-rotated by EXACTLY -spine at every key so it read as bolted on, and BOTH
-//             arms swung forward together — no blade arm, no silhouette, a face-down curl.
-//   SMOOTHNESS every segment was eased in AND out, which drives the pose's velocity to ZERO at each
-//             of the five keyframes: accelerate, stop, accelerate, five times in 24 frames. That
-//             stutter is what "not smooth" actually was, and no individual key was wrong.
+// So this file is a GUARD, not a spec I am arguing for. The values below are pinned because they are
+// the ones that were chosen after seeing both, and the point is that the next pass at this pose has
+// to be a deliberate decision rather than an accident. Every check names the value it protects, so
+// changing the pose on purpose means editing this file in the same commit and seeing exactly what
+// moved.
 //
-// The smoothness check is the interesting one: it samples the pose densely and measures how fast the
-// spine is turning AT the interior keys. On the old build that is ~0 by construction; a Catmull-Rom
-// spline carries momentum through them.
+// If you do revisit it: scripts/_tmp_rogue_pose.mjs films the pose frame by frame off its own
+// 24-frame timeline (it draws _drawVectorHero with opts.animName to an offscreen canvas at nine
+// phases), which is how the comparison that settled this was made. Looking at the strip is worth
+// more than any number in here.
 // Run: node scripts/rogue_dash_pose_test.mjs [file.html] [port]
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -42,63 +42,41 @@ await page.evaluate(() => { player.level = 40; player.cls = 'rogue'; loadMap('fo
 await page.waitForTimeout(4000);
 
 const R = await page.evaluate(() => {
-  const out = {};
   const keys = (typeof HERO_VEC_ROGUE_DASH_KEYS !== 'undefined') ? HERO_VEC_ROGUE_DASH_KEYS : null;
-  if (!keys) return { err: 'no keys' };
-  out.keyPs = keys.map((k) => k.p);
-  out.apexSpine = Math.max(...keys.map((k) => Math.abs(k.spine)));
-  // head must not simply cancel the spine at every key
-  out.headIsNegSpine = keys.every((k) => Math.abs(k.head + k.spine) < 0.02);
-  // at the glide key (the widest lean), the two arms must be on opposite sides
-  const glide = keys.reduce((a, b) => (Math.abs(b.spine) > Math.abs(a.spine) ? b : a), keys[0]);
-  out.glide = { spine: glide.spine, armL: glide.armL, armR: glide.armR, legL: glide.legL, legR: glide.legR };
-  out.armsSplit = (glide.armL * glide.armR) < 0 || (glide.armR < -0.6);
-  out.strideSplit = (glide.legL * glide.legR) < 0;
-
-  // sample the pose densely and measure |d spine / dp| around each interior key
-  const N = 400, sp = [];
-  for (let i = 0; i <= N; i++) sp.push(_heroVecRogueDashPose(i / N).spine);
-  const speedAt = (p) => {
-    const i = Math.round(p * N);
-    const a = sp[Math.max(0, i - 2)], b = sp[Math.min(N, i + 2)];
-    return Math.abs(b - a) / (4 / N);
-  };
-  const interior = out.keyPs.slice(1, -1);
-  out.keySpeeds = interior.map((p) => +speedAt(p).toFixed(3));
-  // the fastest the spine ever turns, for scale
-  let peak = 0;
-  for (let i = 1; i < sp.length; i++) peak = Math.max(peak, Math.abs(sp[i] - sp[i - 1]) * N);
-  out.peakSpeed = +peak.toFixed(3);
-  // MEDIAN, not minimum. The glide key is the apex of the lean - a genuine turning point, where the
-  // spine's speed SHOULD pass through zero on any scheme. Taking the minimum therefore always finds
-  // that key and says nothing about stutter. The fault being measured is EVERY key stopping, so the
-  // median is the honest statistic: on the eased-per-segment build all three are ~2% of peak.
-  const _sorted = out.keySpeeds.slice().sort((a, b) => a - b);
-  out.medKeySpeedFrac = +(_sorted[_sorted.length >> 1] / Math.max(0.001, peak)).toFixed(3);
-  out.minKeySpeedFrac = +(Math.min(...out.keySpeeds) / Math.max(0.001, peak)).toFixed(3);
-  // and it must stay sane: no wild spline overshoot beyond the authored range
-  const lo = Math.min(...keys.map((k) => k.spine)), hi = Math.max(...keys.map((k) => k.spine));
-  out.overshoot = +(Math.max(0, Math.max(...sp) - hi, lo - Math.min(...sp))).toFixed(3);
+  if (!keys) return { err: 'HERO_VEC_ROGUE_DASH_KEYS is gone' };
+  const out = { ps: keys.map((k) => k.p), n: keys.length };
+  const smear = keys.find((k) => Math.abs(k.p - 0.58) < 1e-6) || null;
+  out.smear = smear ? { spine: smear.spine, head: smear.head, armL: smear.armL, armR: smear.armR, legL: smear.legL, legR: smear.legR, x: smear.x, limbSy: smear.limbSy } : null;
+  out.headCancelsSpine = keys.every((k) => Math.abs(k.head + k.spine) < 0.02);
+  out.bodySquashFree = keys.every((k) => k.sx === 1 && k.sy === 1);
+  // the hips must stay pinned to the lunging torso (the v0.29.x detached-leg fix)
+  out.hipsTrackSpine = keys.every((k) => Math.abs(k.legLX - k.x) <= 1.0 && Math.abs(k.legRX - k.x) <= 1.0);
+  // the pose resolves and is finite across its whole timeline
+  let finite = true;
+  for (let i = 0; i <= 60; i++) {
+    const p = _heroVecRogueDashPose(i / 60);
+    for (const v of Object.values(p)) if (!Number.isFinite(v)) finite = false;
+  }
+  out.finite = finite;
   return out;
 });
 await browser.close(); server.kill();
 if (R.err) { console.log(R.err); process.exit(1); }
+console.log(`keys at ${JSON.stringify(R.ps)}`);
+console.log(`smear key ${JSON.stringify(R.smear)}\n`);
 
-console.log(`apex spine lean       ${R.apexSpine.toFixed(2)} rad (${(R.apexSpine * 57.3).toFixed(0)} deg)`);
-console.log(`glide key             ${JSON.stringify(R.glide)}`);
-console.log(`spine turn speed at the interior keys ${JSON.stringify(R.keySpeeds)}  (peak ${R.peakSpeed})`);
-console.log(`as a fraction of peak — median ${R.medKeySpeedFrac}, slowest ${R.minKeySpeedFrac} (the slowest is the glide apex, where the lean genuinely reverses)`);
-console.log(`spline overshoot past the authored range: ${R.overshoot} rad\n`);
-
+const S = R.smear || {};
 const checks = [
-  ['the lunge leans, it does not dive', R.apexSpine <= 0.62, R.apexSpine.toFixed(2) + ' rad'],
-  ['the head rides the body instead of cancelling it', R.headIsNegSpine === false],
-  ['the blade arm trails while the lead arm reaches', R.armsSplit === true, `armL ${R.glide.armL} armR ${R.glide.armR}`],
-  ['the legs split into a stride', R.strideSplit === true, `legL ${R.glide.legL} legR ${R.glide.legR}`],
-  // the smoothness itself: the pose must not come to a stop at its own keyframes
-  ['the pose keeps moving through its keyframes', R.medKeySpeedFrac >= 0.15,
-    `median key moves at ${(R.medKeySpeedFrac * 100).toFixed(0)}% of peak speed`],
-  ['and the smoothing does not overshoot into a broken pose', R.overshoot <= 0.08, R.overshoot + ' rad'],
+  ['the five authored keys are intact', R.n === 5 && R.ps.join() === '0,0.24,0.58,0.78,1', R.ps.join()],
+  ['the smear key keeps its 0.92 lean', S.spine === 0.92, String(S.spine)],
+  ['the head still counter-rotates the spine exactly', R.headCancelsSpine === true],
+  ['both arms still sweep forward together at the smear', S.armL === 2.05 && S.armR === 1.58, `armL ${S.armL} armR ${S.armR}`],
+  ['the legs keep their split', S.legL === -0.45 && S.legR === 0.85, `legL ${S.legL} legR ${S.legR}`],
+  ['the limb stretch is the authored 1.18', S.limbSy === 1.18, String(S.limbSy)],
+  // these two are the fixes that predate the revert and must survive it
+  ['the body carries NO squash (the v0.25.661 head-distortion fix)', R.bodySquashFree === true],
+  ['the hips track the lunging torso (the v0.29.x detached-leg fix)', R.hipsTrackSpine === true],
+  ['the pose resolves to finite values across its timeline', R.finite === true],
   ['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')],
 ];
 let bad = 0; for (const [n, ok, x] of checks) { if (!ok) bad++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '   [' + x + ']' : ''}`); }
