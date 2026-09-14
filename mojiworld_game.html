@@ -12183,7 +12183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.697';
+const GAME_VERSION = 'v0.30.698';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -64346,6 +64346,16 @@ function _expeditionMobKilled(m) {
       if (!game._expeditionZodiacKills) game._expeditionZodiacKills = {};
       game._expeditionZodiacKills[m.zodiacSign] = true;
     }
+    // v0.30.698 - THE SOVEREIGN'S FALL. Only the Sovereign gets the cut (the legacy zodiac final boss
+    // keeps the plain completion), and only after a beat, so his death FX and the floor's loot
+    // sweep land first. The cutscene is fail-open and always calls back, so completion cannot be
+    // lost to a missing clip: a dropped file just means the results screen opens as it does today.
+    if (m.type === 'towerSovereign' && typeof _sovereignFallCutscene === 'function') {
+      let _done = false;
+      const _after = () => { if (_done) return; _done = true; _completeExpedition(); };
+      setTimeout(() => { try { _sovereignFallCutscene(_after); } catch (e) { _after(); } }, 1500);
+      return;
+    }
     _completeExpedition();
     return;
   }
@@ -65377,6 +65387,12 @@ function _expeditionSpawnTowerBoss(slot) {
       m._expeditionBoss = true;
       if (slot === 'mid') m._expeditionMidBoss = true;
       else                m._expeditionFinalBoss = true;
+      // v0.30.698 - the Sovereign's defeat cinematic is ~4 MB and plays the instant he dies. Prime the
+      // HTTP cache while the fight runs (fetch + drain, the story-beat clip idiom), once a session.
+      if (slot !== 'mid' && !window._lxSovCineWarm) {
+        window._lxSovCineWarm = true;
+        try { fetch('steam/higgsfield/cinematics/clip_sovereign_fall.mp4').then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => {}); } catch (e) {}
+      }
       // Scale to player level. Mid-boss uses Lv 30 benchmark.
       // v0.26.310 — Per user "The sovereign of the spire does not scale
       // to level, it should scale to level +10". Sovereign now scales
@@ -150175,6 +150191,81 @@ function _lxEndingCard(main, subLine, holdMs, onDone) {
       t2 = setTimeout(finish, 550);
     }, Math.max(1200, holdMs || 3800));
   } catch (e) { finish(); }
+}
+
+// v0.30.698 - THE SOVEREIGN FALLS (per user: "Generate a video using higgsfield when the
+// towersovereign is slain at the b10 map, the towersovereign dissolves and disintegrates only to
+// see the amnesiac laid kneeling down unconscious"). Seedance 2.0, 720p, 8s, native audio, cut
+// from the Sovereign's own boss art and the Amnesiac's NPC art so both read on model.
+// Same fail-open contract as the other standalone clips: a missing or blocked file goes straight
+// to onDone, so the expedition completes exactly as it does today.
+function _sovereignFallCutscene(onDone) {
+  let done = false, timer = 0, titleT = 0, guard = 0, guardArms = 2;
+  let playing = false;
+  let _ducked = false;
+  const _duck   = () => { if (!_ducked) { _ducked = true;  try { _vidDuckBgm();   } catch (e) {} } };
+  const _unduck = () => { if (_ducked)  { _ducked = false; try { _vidUnduckBgm(); } catch (e) {} } };
+  // Unlike the Gravitos arena, B10 can still hold live mobs when its boss dies, and this overlay
+  // covers the screen for eight seconds - so the floor is held, exactly as a story beat holds it.
+  // _lxCineHold keeps the StuckPauseWatchdog from fighting a pause that is on purpose.
+  const _wasPaused = !!(typeof game !== 'undefined' && game && game.paused);
+  try { if (typeof game !== 'undefined' && game) game.paused = true; } catch (e) {}
+  try { if (typeof _lxCineHold === 'function') _lxCineHold(15000); } catch (e) {}
+  const finish = () => {
+    if (done) return; done = true;
+    if (timer) clearTimeout(timer);
+    if (titleT) clearTimeout(titleT);
+    if (guard) clearTimeout(guard);
+    window.removeEventListener('keydown', onKey, true);
+    if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+    try { if (!_wasPaused && typeof game !== 'undefined' && game) game.paused = false; } catch (e) {}
+    try { if (typeof _lxCineHold === 'function') _lxCineHold(0); } catch (e) {}
+    _unduck();
+    try { onDone && onDone(); } catch (e) {}
+  };
+  const ov = document.createElement('div');
+  ov.id = 'sovereign-fall-cine';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#050208;display:flex;'
+    + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
+  ov.innerHTML =
+    '<video id="sov-fall-vid" playsinline preload="auto" '
+    + 'style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#050208;opacity:0;transition:opacity 500ms ease;"></video>'
+    + '<div id="sov-fall-title" style="position:absolute;left:0;right:0;bottom:12%;text-align:center;'
+    + 'font:800 clamp(22px,5vw,54px)/1.1 \'Segoe UI\',system-ui,sans-serif;letter-spacing:2px;color:#fff5d0;'
+    + 'text-shadow:0 0 26px rgba(210,150,60,0.85),0 2px 4px #000;opacity:0;transition:opacity 900ms ease;pointer-events:none;">'
+    + 'THE SOVEREIGN FALLS<div style="font:600 clamp(12px,2.2vw,20px)/1.4 \'Segoe UI\',system-ui,sans-serif;'
+    + 'letter-spacing:5px;color:#d9b7ff;margin-top:10px;text-shadow:0 0 16px rgba(120,50,190,0.9);">AND THE AMNESIAC IS LEFT KNEELING</div></div>'
+    + '<button id="sov-fall-skip" style="position:absolute;top:16px;right:18px;z-index:2;padding:5px 14px;'
+    + 'border-radius:8px;border:1px solid #8a6a32;background:rgba(30,16,6,0.85);color:#ffe6a8;font:700 12px monospace;cursor:pointer;">Skip &#9654;&#9654;</button>';
+  function onKey(e) { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(); } }
+  document.body.appendChild(ov);
+  ov.addEventListener('click', finish);
+  const sk = ov.querySelector('#sov-fall-skip'); if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
+  window.addEventListener('keydown', onKey, true);
+  const titleEl = ov.querySelector('#sov-fall-title');
+  const vid = ov.querySelector('#sov-fall-vid');
+  if (!vid) { finish(); return; }
+  vid.oncanplay = () => {
+    if (done || playing) return;
+    playing = true;
+    if (guard) { clearTimeout(guard); guard = 0; }
+    vid.style.opacity = '1'; vid.volume = 0.9;
+    _duck();
+    const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
+    // The card lands on the reveal, once the ash has cleared off the kneeling figure.
+    titleT = setTimeout(() => { if (titleEl) titleEl.style.opacity = '1'; }, 5400);
+    timer = setTimeout(finish, 11500);   // 8.06s clip + headroom; onended normally gets there first
+  };
+  vid.onended = finish;
+  vid.onerror = finish;              // missing/blocked clip -> straight to the completion screen
+  const _guardCheck = () => {
+    if (done || playing) return;
+    if (vid.networkState === 3 /* NO_SOURCE */ || guardArms <= 0) { finish(); return; }
+    guardArms--; guard = setTimeout(_guardCheck, 4000);
+  };
+  guard = setTimeout(_guardCheck, 4000);
+  vid.src = 'steam/higgsfield/cinematics/clip_sovereign_fall.mp4';
+  try { vid.load(); } catch (e) {}
 }
 
 function _amnesiacItsHimCutscene(onDone) {
