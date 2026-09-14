@@ -104,6 +104,9 @@
 // v0.30.723 - v50 -> v51. Sprites/fx/doombringer_ult.webp and its nine anim/ frames are
 // REPLACED under their own names (a medium sword inside a fireball -> a colossal point-down
 // doom-blade). A returning browser would keep the old plate cached and never fetch the new one.
+// v0.30.726 - v51 -> v52. Sprites/fx/warcry.webp is REPLACED under its own name (a
+// lion head -> an expanding shout-wave), and its nine anim/ frames plus Sprites/fx/fx_warcry_mark.webp
+// are NEW. A returning browser would keep the lion cached and never fetch any of them.
 // v0.30.491 - v23 -> v24. Sprites/ui/edicts_bg.webp is NEW art
 // referenced from CSS; a returning browser with the old manifest would render the Edicts panel
 // on its fallback gradient and never fetch the plate.
@@ -149,7 +152,7 @@
 // v0.30.x - v46 -> v47. The War of Banners burst frames were re-baked with a softer impact flash
 // (v0.30.691) under their own names, and that ship did not bump: anyone who loaded v0.30.689 has the
 // blown-out frames cached.
-const CACHE = 'mojiworld-assets-v51';   // v0.30.x - the re-baked War of Banners frames
+const CACHE = 'mojiworld-assets-v52';   // v0.30.x - the re-baked War of Banners frames
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

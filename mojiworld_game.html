@@ -12560,7 +12560,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.727';
+const GAME_VERSION = 'v0.30.728';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14788,6 +14788,7 @@ const LX_FX = (() => {
     // v0.25.218 — warrior C/D/F (no warrior gold so dust ring won't trigger)
     rush:               'rush.webp',
     warcry:             'warcry.webp',
+    fx_warcry_mark:     'fx_warcry_mark.webp',   // v0.30.728 — stamped on every foe the roar catches
     bloodlust:          'bloodlust.webp',
     // v0.25.218 — ballista G (siege volley)
     ballista_volley:    'ballista_volley.webp',
@@ -15272,6 +15273,7 @@ const _FX_ANIM_KEYS = new Set([
   'bolt_impact',    // v0.30.x - Magic Bolt contact burst (anim/bolt_impact_0..7, ludo.ai via gen_bolt_impact_fx.mjs). Warmed eagerly below: it is a BASIC attack, so it fires long before the staggered boot warmer would reach it.
   'arcane_burst',   // v0.29.946 — mage W detonation star (anim/arcane_burst_0..8, ludo.ai via gen_arcane_burst_fx.mjs)
   'parry_riposte',  // v0.30.704 parry-fx — the parry counter-flash (anim/parry_riposte_0..8, ludo.ai via gen_parry_riposte_fx.mjs)
+  'warcry',         // v0.30.728 — the battle-roar pressure wave (anim/warcry_0..8, ludo.ai via gen_warcry_fx.mjs)
   // v0.30.547 — 'dash_mage' / 'dash_warrior' / 'dash_rogue' / 'dash_archer' were listed here
   // (v0.30.465 / v0.30.469); the loops are removed per user, so the keys are gone too — an
   // unlisted key never asks the folder for frames that do not exist.
@@ -79927,10 +79929,24 @@ const SKILL_FNS = {
     if (typeof _coopPartyBuff === 'function') _coopPartyBuff('warCry', _wcDur, 'War Cry');
     showToast('WAR CRY! +55% ATK · +25% DEF' + (_wcBonus && _wcBonus.buffMs ? ' (+' + (_wcBonus.buffMs / 1000) + ' s)' : ''), 'epic');
     flash(0.35);     pixelBurst('ring', player.x + player.w/2, player.y + player.h/2, 1, { color:'#ffcc44', color2:'#ffee88', speed:6, life:30, size:3, n:24 });
-    // v0.25.218 — battle-roar sound-wave sprite over the player.
-    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'warcry',
-      { size: 220, life: 32 });
     const cx = player.x + player.w/2, cy = player.y + player.h/2;
+    // v0.30.728 — THE ROAR, AT THE SIZE OF THE GROUND IT COVERS (per user: "needs to be much
+    // bigger and intense"). v0.25.218 drew a 220 px lion's head here: a picture OF a roar, small
+    // enough to sit inside the player's own silhouette, while the pulse it stands for taunts to
+    // 340 px and staggers to 180. The new plate is the wave itself, so it is drawn at the reach
+    // it represents and its nine frames carry the expansion.
+    // sticky, and so is the mark below. smoothFx is capped at MAX_SMOOTH_FX (14) and evicts
+    // OLDEST-FIRST, and a roar into a crowd now pushes a wave, a shock and two entries per
+    // struck foe — measured, the ground shock was being thrown away before it drew a frame.
+    // Both are short-lived bursts, which is exactly what sticky is for.
+    spawnSpriteBurst(cx, player.y + player.h - 4, 'fx_groundshock',
+      { size: 420, life: 26, behind: true, opacity: 0.85, sticky: true });
+    spawnSpriteBurst(cx, cy, 'warcry',
+      { size: 620, life: 30, behind: true, opacity: 0.9,
+        scaleStartX: 0.30, scaleEndX: 1.12, scaleStartY: 0.30, scaleEndY: 1.12 });
+    spawnSpriteBurst(cx, cy, 'warcry', { size: 300, life: 18 });
+    addShake(10); if (typeof addZoomPunch === 'function') addZoomPunch(0.030);
+    if (typeof addHitStop === 'function') addHitStop(40);
     // Damaging pulse + aggro taunt
     for (const m of game.monsters) {
       if (m.currentHp <= 0) continue;
@@ -79941,6 +79957,14 @@ const SKILL_FNS = {
           { const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 0.9 * (_c ? getCritDmg() : 1)), _c, 'warCry'); }   // v0.26.1033 — was flag-only: crit showed but dealt no bonus dmg
           m.vx += Math.sign(m.x - player.x) * 4;
           m.vy -= 2;
+          // v0.30.728 — THE STRUCK ARE MARKED. `follow` rides the stamp on the foe so it stays
+          // on a monster the pulse just knocked backwards, rather than hanging in the air where
+          // that monster used to be.
+          if (typeof spawnSpriteBurst === 'function') {
+            spawnSpriteBurst(m.x + m.w / 2, m.y + m.h / 2, 'fx_warcry_mark',
+              { size: Math.round(Math.max(64, Math.min(180, m.w * 1.9))), life: 30, follow: m, sticky: true,
+                scaleStartX: 0.55, scaleEndX: 1.18, scaleStartY: 0.55, scaleEndY: 1.18 });
+          }
         }
       }
     }
@@ -79998,7 +80022,7 @@ const SKILL_FNS = {
           vx: Math.cos(a) * 1.4, vy: -3 - Math.random() * 4,
           life: 30, color: i % 2 ? '#ffcc44' : '#ff5544', size: 3 });
       }
-      if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(cx, cy, 'warcry', { size: 200, life: 30 });
+      if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(cx, cy, 'warcry', { size: 380, life: 30, behind: true, opacity: 0.85 });   // v0.30.728 — the plate is a pressure wave now, not a face
     }
     player.buffs.rampage = 3500;
     showToast('💪 RAMPAGE!', 'legendary');
