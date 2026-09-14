@@ -65,6 +65,7 @@ const data = await page.evaluate(() => {
   const cards = [...document.querySelectorAll('#quest-modal .qj-card')].slice(0, 40);
   return cards.map((c) => {
     const nm = c.querySelector('.qj-name');
+    const trk = c.querySelector('[data-qtrack]');
     return {
       name: nm ? nm.textContent : '',
       clipped: nm ? (nm.scrollWidth > nm.clientWidth + 1) : false,
@@ -72,6 +73,10 @@ const data = await page.evaluate(() => {
       nav: !!c.querySelector('.qj-line3'),
       desc: !!c.querySelector('.qj-desc'),
       strip: !!c.querySelector('.qj-rw'),
+      rwText: (c.querySelector('.qj-rw') || {}).textContent || '',
+      lvPill: c.querySelectorAll('.qj-pill.lv').length,
+      lvGate: c.querySelectorAll('.qj-pill.lvgate').length,
+      trackText: trk ? (trk.textContent || '').replace(/[\s🧭]/g, '') : null,
       oldPills: c.querySelectorAll('.qj-pill.mojicoins, .qj-pill.exp, .qj-pill.gear').length,
     };
   });
@@ -94,6 +99,33 @@ ok(data.some((d) => d.strip), 'the compact reward strip is drawn');
 ok(med(data.map((d) => d.h)) <= 95, 'the median card is under 95px tall', med(data.map((d) => d.h)) + 'px');
 ok(data.filter((d) => d.clipped).length === 0, 'no quest title is cut off by the badges beside it',
   data.filter((d) => d.clipped).map((d) => d.name).slice(0, 3).join(' | '));
+
+// --- the level pill only appears when it is a gate ------------------------------------------------
+// 299 of 312 quests sit at or below the player's level, so at Lv 80 "Lv 40+" is a true, useless
+// statement. It has to vanish there AND come back when the quest is genuinely above you, or this is
+// just hiding information rather than ranking it.
+ok(data.every((d) => d.lvPill === 0), 'no card shows a level pill the player already clears',
+  data.filter((d) => d.lvPill).length + ' cards still print one');
+ok(data.every((d) => !/100%/.test(d.rwText)), 'a guaranteed gear drop is a glyph, not "100%"',
+  (data.find((d) => /100%/.test(d.rwText)) || {}).rwText);
+ok(data.every((d) => d.trackText === null || d.trackText === ''),
+  'the Track button is an icon, not a word repeated down the list',
+  (data.find((d) => d.trackText) || {}).trackText);
+
+const gated = await page.evaluate(async () => {
+  // drop to level 1 and re-render: now almost everything IS above the player
+  player.level = 1;
+  document.getElementById('quest-modal').style.display = 'none';
+  if (typeof renderQuestJournal === 'function') renderQuestJournal();
+  else if (typeof openQuestJournal === 'function') openQuestJournal();
+  await new Promise((r) => setTimeout(r, 600));
+  const cards = [...document.querySelectorAll('#quest-modal .qj-card')].slice(0, 40);
+  return { cards: cards.length,
+    withGate: cards.filter((c) => c.querySelector('.qj-pill.lvgate')).length };
+});
+ok(gated.cards === 0 || gated.withGate > 0,
+  'and it comes back, as a gate, when the quest is above the player',
+  JSON.stringify(gated));
 ok(errs.length === 0, 'no page errors', errs.join(' | '));
 
 await browser.close().catch(() => {}); server.kill();
