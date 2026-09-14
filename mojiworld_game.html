@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.759';
+const GAME_VERSION = 'v0.30.760';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -74999,15 +74999,17 @@ function _lxDeColumn(m, n0, volc) {
   if (!d) return 0;
   const now = game.time | 0;
   let c = m._deCol;
-  // v0.30.730 gb-gold — the sum is what used to prove a column was still alive. A B/G column
-  // no longer HAS one, and `!c.sum` would then be true on every hit: each would start a new
-  // column and the stack would never build. A totalless column is judged on its own freshness.
-  if (!c || now - c.t > 15 || (!c.noSum && (!c.sum || c.sum.life <= 0))) {
-    c = m._deCol = { m, t: now, n: 0, total: 0, rows: new Array(7).fill(null), sum: null, noSum: !!volc };
+  // v0.30.730 gb-gold — the sum is what used to prove a column was still alive, and asking
+  // whether it is still alive on a column that HAS none is true on every hit: each would start
+  // a fresh column and the stack would never build.
+  // v0.30.760 de-gold — no column has a total any more (marksman was the last one that did), so
+  // that test is gone and freshness is all there is left to judge.
+  if (!c || now - c.t > 15) {
+    c = m._deCol = { m, t: now, n: 0, rows: new Array(7).fill(null) };
     _LX_DE.cols.push(c);
     while (_LX_DE.cols.length > LX_COL_MAX) { const _ev = _LX_DE.cols.shift(); if (_ev && _ev.m && _ev.m._deCol === _ev) _ev.m._deCol = null; }
   }
-  c.t = now; const row = c.n % 7; c.n++; c.total += val;   // v0.30.729 gb-volcano — one hit, one number again
+  c.t = now; const row = c.n % 7; c.n++;   // v0.30.729 gb-volcano — one hit, one number again
   const old = c.rows[row]; if (old && old.life > 4) old.life = 4;   // the row's previous occupant retires
   c.rows[row] = d; d._deRow = row;
   d.life = 24; d.maxLife = 30; d.vy = 0;   // maxLife - life = 6: the row enters half-way through the pop, not from the crit's 2.6x overshoot
@@ -75032,19 +75034,23 @@ function _lxDeColumn(m, n0, volc) {
     // foe so the ribbon does not drift off to one side.
     d._gbDx = (((c.n - 1) % LX_GB_XPHASE) - (LX_GB_XPHASE - 1) / 2) * LX_GB_XSTEP;
   } else {
-    d.size = Math.max(11, Math.min(LX_COL_ROW_MAX, ((d.size | 0) || 14) - 5));   // rows are slimmer than a lone hit, and never taller than the 20px row pitch; the total carries the weight
+    // v0.30.760 de-gold — marksman's G and B ARE these lines: marksman_oneshot and marksman_ult are
+    // both in _LX_DE_LINE_SKILLS, so _lxGbStack returns on them and they never reach the volcano
+    // branch above. Their rows were shrunk to 11-14 to leave headroom for a total that is now gone,
+    // and they took the damage TIER's colour - every Deadeye line is a guaranteed crit, and the crit
+    // palette is WHITE at tier 4, so a strong marksman's column read white with a gold total above it.
+    // The row carries the whole moment now: gold, a size up, on a pitch with room for it.
+    d.size = LX_DE_ROW_SIZE; d.color = LX_GB_ROW_COL; d.big = true;
+    c.pitch = LX_DE_ROW_PITCH;
   }
   d.crit = false;   // keeps the gold, drops the star and the 2.6x crit overshoot: seven starred pops a press was noise, and every line crits anyway
   d._txt = undefined; d._bk = undefined;
   // v0.30.730 gb-gold — NO TOTAL on a B/G column, per user: "There should not be a B / G total
-  // displayed". Deadeye still builds and keeps its own, so this branches rather than deletes.
-  if (volc) {
-    _lxVolcEmbers(d.x + 8, d.y);
-    return val;
-  }
-  if (!c.sum) { c.sum = { x: d.x, y: d.y, vy: 0, text: '', life: 30, maxLife: 31, color: '#ffd24a', size: 22, big: true, _deSum: true }; arr.push(c.sum); }
-  else { const i = arr.indexOf(c.sum); if (i >= 0 && i !== arr.length - 1) { arr.splice(i, 1); arr.push(c.sum); } }   // the cap drops the head: keep the total at the tail
-  c.sum.text = _lxDeFmt(c.total); c.sum._txt = undefined; c.sum._bk = undefined; c.sum.life = 30; c.sum.maxLife = 44; c.sum.vy = 0;
+  // displayed". v0.30.760 de-gold — and none on marksman's own columns either, per user: "remove the
+  // total damage line, keep the rows". Nothing builds one any more, so the branch goes with it.
+  // (The window-close banners — "FOCUS FIRE 12.4K", "OVERCLOCK 31K" — are a different thing and are
+  // left alone: they are named end-of-window readouts, not the total that sat on top of the column.)
+  if (volc) _lxVolcEmbers(d.x + 8, d.y);
   return val;
 }
 // Hold every live column above its foe (the number tick applies gravity; a column must not sag).
@@ -75056,7 +75062,6 @@ function _lxDeColumnsHold() {
     const cx = m.x + m.w / 2 - 8;
     const _p = c.pitch || 20;   // v0.30.729 gb-volcano — an erupting column runs on a taller pitch
     for (let r = 0; r < 7; r++) { const e = c.rows[r]; if (e && e.life > 0) { e.x = cx + (e._gbDx || 0); e.y = m.y - 6 - r * _p; e.vy = 0; } }   // v0.30.735 gb-pop — _gbDx keeps overlapping rows apart
-    if (c.sum && c.sum.life > 0) { c.sum.x = cx; c.sum.y = m.y - 6 - 7 * _p - 8; c.sum.vy = 0; }
   }
 }
 // =========================================================================
@@ -75077,7 +75082,11 @@ function _lxDeColumnsHold() {
 // same reason (a cast's damage arrives late), and it is what makes the summon ultimates work: for
 // Apex Bond or Necrotic Ascendance the minions ARE the skill, and a tag test would stack nothing.
 const LX_COL_MAX       = 10;    // columns held at once - an ultimate lands on a room, not on one foe
-const LX_COL_ROW_MAX   = 14;    // a row never grows past the 20px pitch it has to sit in
+// v0.30.760 de-gold — marksman's Deadeye rows (see the else branch in _lxDeColumn). Was
+// LX_COL_ROW_MAX = 14: the rows were held under the 20px pitch because a running total sat above
+// them and carried the read. The total is gone, so the rows carry it.
+const LX_DE_ROW_SIZE   = 19;    // a crit is 18 and a normal hit 14: a row now reads at least as loud as a crit
+const LX_DE_ROW_PITCH  = 26;    // 20 had the taller glyphs touching
 const LX_GB_STACK_OPEN = 180;   // frames of stacking a cast buys outright (~3 s)
 const LX_GB_STACK_HOLD = 45;    // and it stays open this long after each hit it stacked (~0.75 s)
 const LX_GB_STACK_MAX  = 1200;  // hard ceiling from the cast (~20 s), so a standing aura is not forever
