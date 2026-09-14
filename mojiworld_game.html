@@ -12181,7 +12181,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.688';
+const GAME_VERSION = 'v0.30.689';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -82903,6 +82903,8 @@ const SKILL_FNS = {
     player.mp = Math.min(getMaxMp(), player.mp + (SKILLS.warlord_ult.mp || 70)); // v0.26.x audit FIX — refund the cast COST (warlord is a warrior, no MP discount), not 1.3× of it. The old 1.3× net-GAINED ~21 MP per tap; the window is now cost-neutral (free spam), not free-plus-profit. Mirrors the sage_ult fix.
     player.skillCooldowns.warlord_ult = 250;                 // spammable re-cast gate
     const dir = player.facing || 1, cx = player.x + player.w / 2, cy = player.y + player.h / 2;
+    const _wobFoot = player.y + player.h - 6;   // v0.30.x — the standard is planted on the floor, not floating at the waist
+    const _wobLean = (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) || (typeof game !== 'undefined' && game && game._reduceMotion);
     if (!_active) {
       player._warlordEnrageUntil = _now + 10000;
       player.buffs = player.buffs || {}; player.buffs.bloodlust = 10000;
@@ -82913,15 +82915,43 @@ const SKILL_FNS = {
       // caster's own reward.
       if (typeof _coopPartyBuff === 'function') _coopPartyBuff('bloodlust', 10000, 'War of Banners');
       if (typeof _coopPartyHeal === 'function') _coopPartyHeal(0.25, 0, 'War of Banners');
-      spawnSpriteBurst(cx, player.y + player.h - 24, 'warlord_ult', { size: 250, life: 70 });
-      showToast('WAR OF BANNERS — ENRAGE! spam B', 'legendary'); flash(0.5); addHitStop(50);
+      // v0.30.x — THE RALLY (per user: "make it much more legendary and epic"). It was one 250 px
+      // burst dropped at the waist and nothing else: a poster, over in a blink. It is a beat now —
+      // the standard drives into the FLOOR at nearly twice the size, a flat gold ring runs out along
+      // the ground (squashed, the way a side-scroller reads a shockwave), rays go up off the pole,
+      // embers climb it, and then two flanking banners and a third behind rise a beat apart, so the
+      // line forms instead of appearing. The extras are skipped on a strained frame budget or when
+      // the player asked for reduced motion; the standard itself always plays.
+      spawnSpriteBurst(cx, _wobFoot, 'warlord_ult', { size: 440, life: 78, anchorBottom: true });
+      if (typeof spawnDashFx === 'function') spawnDashFx({ type: 'ring', x: cx, y: _wobFoot, r0: 12, r1: 165, life: 16, color: '#ffcc44', squash: 0.22 });
+      showToast('WAR OF BANNERS — ENRAGE! spam B', 'legendary'); flash(0.5); addHitStop(50); addShake(12);
+      if (typeof addZoomPunch === 'function') addZoomPunch(0.045);
+      if (!_wobLean) {
+        if (typeof spawnSmoothBeam === 'function') for (const _a of [-0.36, 0, 0.36]) spawnSmoothBeam(cx, _wobFoot - 24, -Math.PI / 2 + _a, 300, 18, '#ffd766', { life: 13 });
+        for (let _i = 0; _i < 16; _i++) {
+          const _p = { x: cx + (Math.random() * 140 - 70), y: _wobFoot - Math.random() * 20, vx: (Math.random() - 0.5) * 2.4, vy: -(2 + Math.random() * 3.6),
+            life: 34 + Math.random() * 20, color: _i % 3 ? '#ffd34d' : '#ff8a3c', size: 2 + Math.random() * 2.6 };
+          if (typeof _budgetedParticlePush === 'function') { if (!_budgetedParticlePush(_p)) break; } else game.particles.push(_p);
+        }
+        for (const [_dx, _ms, _sz] of [[-170, 130, 280], [170, 220, 280], [0, 320, 210]]) scheduleSkillTimer(() => {
+          if (player.hp <= 0) return;
+          spawnSpriteBurst(cx + _dx, _wobFoot, 'warlord_ult', { size: _sz, life: 56, anchorBottom: true, opacity: 0.92, flipX: _dx < 0, fadeOut: 0.45 });
+          if (typeof spawnDashFx === 'function') spawnDashFx({ type: 'ring', x: cx + _dx, y: _wobFoot, r0: 6, r1: 90, life: 12, color: '#ffcc44', squash: 0.2 });
+          addShake(5); flash(0.12);
+        }, _ms);
+      }
       scheduleSkillTimer(() => { player.skillCooldowns.warlord_ult = SKILLS.warlord_ult.cd; player._warlordEnrageUntil = 0; }, 10000);
     }
     // v0.30.618 warrior-tune - per user: "Increase the damage dealt by war of banners". Both halves
     // of every press +50% (sweep 2.4 -> 3.6, banner wave 1.6x ATK + 6 -> 2.4x ATK + 9). Measured
     // before: 9.3x ATK a press, 204x ATK an enrage - no more per second of cooldown than Ground Slam.
     performMelee(320, 3.6, { color: '#ffcc44', kb: 6 }); addHitStop(14);
-    game.projectiles.push({ x: cx + dir * 24, y: cy, vx: dir * 13, vy: 0, w: 84, h: 84, life: 36, damage: getAtk() * 2.4 + 9, owner: 'player', skill: 'bloodwave', bspr: 'bult_warlord', sprScale: 1.4, color: '#ffdd55', noGravity: true, pierce: true });   // v0.26.x — much bigger banner; flag animates via ludo.ai frames (Sprites/projectiles/anim/p_ult_warlord_0..8.webp)
+    // v0.30.x — a banner snaps up on the sweep itself. Before this only the OPENING press showed a
+    // banner at all, so the nine enraged re-presses that follow it - the body of the ultimate - were
+    // a plain melee swing with a wave leaving the screen.
+    spawnSpriteBurst(cx + dir * 56, _wobFoot, 'warlord_ult', { size: 210, life: 32, anchorBottom: true, opacity: 0.8, flipX: dir < 0, fadeOut: 0.6 });
+    if (!_wobLean && typeof spawnDashFx === 'function') spawnDashFx({ type: 'ring', x: cx + dir * 56, y: _wobFoot, r0: 5, r1: 70, life: 10, color: '#ffcc44', squash: 0.2 });
+    game.projectiles.push({ x: cx + dir * 24, y: cy, vx: dir * 13, vy: 0, w: 84, h: 84, life: 36, damage: getAtk() * 2.4 + 9, owner: 'player', skill: 'bloodwave', bspr: 'bult_warlord', sprScale: 1.9, color: '#ffdd55', noGravity: true, pierce: true });   // v0.30.x — sprScale 1.4 -> 1.9: the redrawn wave is drawn as big as it hits (the box, the damage and the pierce are unchanged)   // v0.26.x — much bigger banner; flag animates via ludo.ai frames (Sprites/projectiles/anim/p_ult_warlord_0..8.webp)
   },
   doombringer_ult: () => {
     // v0.29.684 — THE VERDICT COLLECTED. Consume every DOOM brand on screen and
