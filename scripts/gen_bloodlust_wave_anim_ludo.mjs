@@ -43,15 +43,32 @@ const N = 9, SIZE = 768;
 const argv = process.argv.slice(2), has = (f) => argv.includes(f);
 const arg = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 
-const MOTION = [
+// v1 (v0.30.687, REJECTED by the user: "the animation sprites look rather weird"). It asked for
+// embers and sparks shedding off the trailing edge, and that is exactly what it delivered - the
+// middle frames fizz into speckle, the silhouette breaks up, and the whole thing reads as sparkle
+// rather than as a pressure wave. Kept so the next person does not ask for particles again.
+const MOTION_EMBERS = [
   'A crimson crescent energy shockwave, seen side-on, flying to the RIGHT.',
-  'The crescent stays PERFECTLY CENTRED and the SAME SIZE and the SAME ANGLE in every frame:',
-  'do NOT rotate it, do NOT spin it, do NOT move it across the frame, no camera move, no zoom, no scaling.',
-  'Only the ENERGY moves, like a shockwave passing through it: a bright hot ripple travels along the arc',
-  'from the inner edge outward and releases off the sharp tips, the jagged spikes flare wider and whip back,',
-  'the dark red core pulses brighter and dimmer, and small embers and blood-red sparks shed backwards off',
-  'the trailing edge and fade. The leading edge of the crescent stays the brightest part throughout.',
-  'Seamless loop - the last frame must flow back into the first. Consistent art style, same colours,',
+  'Only the ENERGY moves: a bright ripple travels the arc, the spikes flare, embers and sparks shed off the trailing edge.',
+].join(' ');
+
+// v2 - per user: "make it look more shockwave like sonic boom". The brief is written AGAINST the
+// v1 failure: the crescent is a solid object moving through air, so what animates is the AIR -
+// pressure rings, speed lines, a rim flash - while the silhouette stays hard-edged and unbroken.
+// Particles are banned outright rather than left unmentioned, because unmentioned is how v1 got
+// them.
+const MOTION = [
+  'A crimson crescent blade SHOCKWAVE flying to the RIGHT - a sonic boom. Not fire, not sparkle, not magic dust.',
+  'The crescent itself stays PERFECTLY CENTRED, the SAME SIZE and the SAME ANGLE in every frame:',
+  'do NOT rotate it, do NOT move it across the frame, no camera move, no zoom, no scaling.',
+  'Its silhouette stays CRISP, SOLID and UNBROKEN in every frame - hard clean edges, sharp unbroken points,',
+  'the same deep red body and dark outline throughout.',
+  'What moves is the AIR around it: a thin translucent white pressure ring expands outward from the crescent',
+  'and fades, a second fainter ring follows behind it, straight horizontal speed lines streak backwards off',
+  'the tips, and a thin white-hot rim flashes along the leading edge and dims again.',
+  'ABSOLUTELY NO sparks, NO embers, NO glitter, NO speckles, NO dust, NO flying debris, NO grain, NO noise,',
+  'NO smoke: the frame stays clean and only the rings, the streaks and the rim light change.',
+  'Seamless loop - the last frame flows back into the first. Same colours, same art style,',
   'fully transparent background in every frame, no background, no scene, no text, no watermark.',
 ].join(' ');
 
