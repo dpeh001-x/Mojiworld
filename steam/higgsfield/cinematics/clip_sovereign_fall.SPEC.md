@@ -10,12 +10,23 @@ laid kneeling down unconscious" / "make it dramatic and cinematic 720p" /
 
 - **Path (exact):** `steam/higgsfield/cinematics/clip_sovereign_fall.mp4`
 - Wired in `mojiworld_game.html` → `_sovereignFallCutscene()`
-  (`#sov-fall-vid`), fired from `_expeditionMobKilled()` when the killed
-  final boss is `towerSovereign` — 1.5 s after the kill, so his death FX and
-  the floor's loot sweep land first. `_completeExpedition()` is the scene's
-  `onDone`, so the results screen opens when the scene ends.
-  The legacy zodiac final boss is untouched: it still completes plainly and
-  never sees a scene.
+  (`#sov-fall-vid`). **It is his death scene, not an expedition-completion
+  screen** (per user, v0.30.701: "wire it to play when the tower sovereign
+  dies"), so it plays wherever he dies — 1.5 s after the kill, so his death FX
+  and the floor's loot sweep land first.
+  - `killMonster()` owns the general case: any `towerSovereign` death that is
+    not a mirage plays it. That matters, because `_bossRushRoster()` is every
+    boss in the MojiDex and therefore carries him, and the Echo Keeper can
+    re-summon him — neither route goes anywhere near an expedition.
+  - `_expeditionMobKilled()` claims it first (`m._sovFallPlayed = true`) in
+    the B10 final-boss branch, because it alone has something to hold behind
+    the scene: `_completeExpedition()` is its `onDone`, so the results screen
+    opens when the scene ends.
+  - The claim flag makes it fire **exactly once per monster**, and his
+    `revivesOnce` means the first fall reanimates him and never reaches the
+    hook — the scene lands on the real death.
+  - The legacy zodiac final boss is untouched: it still completes plainly and
+    never sees a scene.
 - Fail-open on the house contract (NO_SOURCE fast-fail, two 4 s re-arms, a
   11.5 s ceiling): a missing or blocked file completes the run immediately, so
   a dropped clip can never cost a player their expedition.
@@ -23,9 +34,11 @@ laid kneeling down unconscious" / "make it dramatic and cinematic 720p" /
   and this overlay covers the screen for eight seconds — so the scene holds
   the floor (`game.paused`, restored on exit) and calls `_lxCineHold(15000)`
   so the StuckPauseWatchdog does not fight a pause that is on purpose.
-- Warmed on spawn: `_expeditionSpawnTowerBoss('final')` fetches the ~4 MB clip
-  into the HTTP cache while the fight runs (once per session,
-  `window._lxSovCineWarm`), so the cut plays frame-one.
+- Warmed on spawn from `spawnMonster()` - every route that can put him on a
+  floor goes through it - fetching the ~4 MB clip into the HTTP cache while
+  the fight runs (once per session, `window._lxSovCineWarm`), so the cut
+  plays frame-one. It lived in the expedition's own boss spawn until
+  v0.30.701, which left a Boss Rush Sovereign facing a cold fetch.
 - Title card at ~5.4 s, on the reveal: "THE SOVEREIGN FALLS / AND THE AMNESIAC
   IS LEFT KNEELING".
 - Also listed in `steam/package.json` `extraResources`.
@@ -110,10 +123,14 @@ playback stays the normal one.
 - ~6–8 s — the Amnesiac kneeling, head bowed, arms limp, the last cinders
   falling; camera holds. On model against `Sprites/npc/amnesiac.webp`.
 
-Guarded by `scripts/sovereign_fall_test.mjs` (20 checks): the clip beside the
+Guarded by `scripts/sovereign_fall_test.mjs` (27 checks): the clip beside the
 game at 1280×720 with an audio track, the kill-chain wiring (only the
 Sovereign; completion reached on every path including a throw), the warm
 fetch, real unmuted playback at volume 0.9, the held-and-released floor, skip,
-fail-open in ~0.2 s with no stuck pause, and an integration pass that kills a
+fail-open in ~0.2 s with no stuck pause, an integration pass that kills a
 Sovereign inside a live expedition and proves completion waits for the scene
-and then lands.
+and then lands, and a real-pipeline pass that spawns a Sovereign on a live map
+with no expedition anywhere, kills him through `killMonster` twice (the first
+fall reanimates and plays nothing), and proves the real death opens the scene,
+holds the floor, releases it, and fires exactly once. On v0.30.698 that same
+pass reads `sceneOnDeath: false`.
