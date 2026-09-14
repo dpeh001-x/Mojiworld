@@ -38,6 +38,26 @@ const WALK_MOTION = 'the zodiac creature performs a smooth looping WALK cycle IN
 // Per-sign idle overrides for creatures whose generic "breathing" reads oddly.
 const IDLE_OVERRIDES = {
   pisces: 'the two koi fish HOLD their positions in the yin-yang ring and do NOT swim around, circle, rotate, or drift — only their FINS and TAILS flap, wave, fan and ripple actively (pectoral fins fanning, tail fins swishing), with gentle gill/sparkle motion and a soft pulse on the central orb. The bodies stay put; just the fins move. Lively fins, NOT stiff.' + FACING,
+  // v0.30.x — per user, over a screenshot of the fight: "some of the sprites eyes
+  // look a little creepy ... regenerate to make it look more kawaii cuter looking".
+  // The generic IDLE_MOTION asks for "an occasional blink", and on this bell-headed
+  // jellyfish the model drew that blink as the eyes NARROWING into dark lidded slits
+  // — frames 2 to 7 of the shipped loop, six of nine — which reads as a slow glare
+  // rather than a blink. Her walk and attack loops never do it: both keep the big
+  // round glowing eyes the whole way through, so the loop was also inconsistent with
+  // the rest of her. The fix is to take the blink out entirely and pin the eyes wide
+  // and lit in every frame; the life stays in the bell, the tentacles and the stars.
+  aquarius: 'the celestial jellyfish floats gently in place — its dome-shaped bell breathes with a '
+    + 'slow soft squash-and-stretch, its long tentacles drift, sway and ripple underneath, and the '
+    + 'little stars printed on its bell twinkle and shimmer. '
+    + 'CRITICAL — THE EYES: both eyes stay BIG, PERFECTLY ROUND, WIDE OPEN and brightly GLOWING '
+    + 'CYAN in EVERY SINGLE FRAME, exactly the large round glowing eyes of the source image, each '
+    + 'with a bright white sparkle highlight. The expression is sweet, gentle, friendly and '
+    + 'adorable — a cute kawaii chibi mascot. NEVER narrow, squint, half-close, hood, lid or '
+    + 'shade the eyes; NEVER blink or close them, not even for one frame; NEVER draw them as '
+    + 'slits, crescents, thin lines, dark patches or empty sockets; NEVER make the face angry, '
+    + 'sinister, sleepy, smug or menacing. The two big round glowing eyes must be the brightest '
+    + 'and cutest thing in every one of the nine frames.' + FACING,
 };
 // Per-sign WALK overrides (winged signs hover/flap rather than leg-walk).
 const WALK_OVERRIDES = {
@@ -50,7 +70,38 @@ const smallBaseUri = async (buf) => {
   return 'data:image/png;base64,' + small.toString('base64');
 };
 async function fetchBuf(url) { const r = await fetch(url); if (!r.ok) throw new Error(`fetch ${r.status}`); return Buffer.from(await r.arrayBuffer()); }
-async function framesFrom(data, n) {
+
+// ludo.ai moved to a JOB API (2026-09-11): the POST answers with a receipt
+// ({id, status, poll_after_ms}) and the frames only arrive from
+// GET /assets/jobs/<id> once it succeeds. This runner predates that, so it read
+// the receipt as if it were the result and every call would die on "no usable
+// frames". Same fix as the FX generators.
+async function awaitJob(data) {
+  if (!data || !data.id || data.status === 'succeeded') return data;
+  const t0 = Date.now();
+  let wait = Number(data.poll_after_ms) || 5000;
+  for (;;) {
+    await sleep(Math.max(2500, Math.min(15000, wait)));
+    const r = await fetch(`${API}/assets/jobs/${data.id}`, { headers: { Authorization: `ApiKey ${key}` } });
+    if (r.status === 429) { wait = Math.min(30000, wait * 2 + Math.random() * 3000); continue; }   // the status endpoint rate-limits too
+    if (!r.ok) throw new Error(`job ${data.id}: ${r.status}`);
+    const j = await r.json();
+    if (j.status === 'succeeded') return j;
+    if (j.status === 'failed' || j.status === 'cancelled') throw new Error('job ' + j.status + (j.error ? ': ' + String(j.error).slice(0, 120) : ''));
+    if (Date.now() - t0 > 900000) throw new Error('job still running after 900 s');
+    wait = Number(j.poll_after_ms) || 6000;
+  }
+}
+async function framesFrom(raw, n) {
+  // A succeeded job wraps the payload in `result`.
+  let data = raw || {};
+  if (!data.spritesheet_url && !data.individual_frame_urls && data.result) {
+    const r = data.result;
+    if (Array.isArray(r) && r.length >= n && r[0] && r[0].url) {
+      const o = []; for (let i = 0; i < n; i++) o.push(await fetchBuf(r[i].url)); return o;
+    }
+    data = (Array.isArray(r) ? (r[0] || {}) : r) || {};
+  }
   // Prefer the spritesheet — cells match the input aspect. Ludo's
   // individual_frame_urls wrongly square non-square frames. Slice first.
   if (data.spritesheet_url && data.num_cols && data.num_rows) {
@@ -63,7 +114,7 @@ async function framesFrom(data, n) {
   }
   const urls = data.individual_frame_urls || [];
   if (urls.length >= n) { const o = []; for (let i = 0; i < n; i++) o.push(await fetchBuf(urls[i])); return o; }
-  throw new Error('no usable frames');
+  throw new Error('no usable frames; keys=' + Object.keys(raw || {}).join(','));
 }
 
 // discover signs
@@ -71,6 +122,10 @@ let signs = (await readdir(ZODIAC_DIR, { withFileTypes: true }))
   .filter((d) => d.isFile() && /\.(png|webp)$/i.test(d.name))
   .map((d) => ({ sign: basename(d.name, extname(d.name)), file: d.name }));
 const only = arg('--only');
+// --mode idle (or a comma list) regenerates just that state, so fixing one loop does
+// not re-roll the two beside it that were already right.
+const modeArg = arg('--mode');
+const MODES = modeArg ? modeArg.split(',') : ['attack', 'idle', 'walk'];
 if (only) { const set = new Set(only.split(',')); signs = signs.filter((s) => set.has(s.sign)); }
 if (!signs.length) { console.error('No zodiac sprites found.'); process.exit(1); }
 
@@ -99,7 +154,7 @@ async function genMode(s, mode) {
       frames: FRAMES, frame_size: -9, model: 'eagle', individual_frames: true, loop: mode !== 'attack', image_type: 'sprite' }),
   });
   if (!res.ok) throw new Error(`${mode} ${res.status}: ${(await res.text()).slice(0, 160)}`);
-  const bufs = await framesFrom(await res.json(), FRAMES);
+  const bufs = await framesFrom(await awaitJob(await res.json()), FRAMES);
   if (bufs.length < FRAMES) throw new Error(`${mode} got ${bufs.length} frames`);
   await mkdir(outDir, { recursive: true });
   // Resize each frame to the EXACT base dimensions (same aspect => uniform, no warp).
@@ -111,7 +166,7 @@ async function genMode(s, mode) {
 console.log(`Generating zodiac attack + idle for ${signs.length} sign(s)...`);
 let made = 0, failed = 0;
 for (const s of signs) {
-  for (const mode of ['attack', 'idle', 'walk']) {
+  for (const mode of MODES) {
     process.stdout.write(`  ${s.sign}/${mode} ... `);
     try { const r = await genMode(s, mode); if (r === 'skip') console.log('skip'); else { made++; console.log(`OK ${r}`); await sleep(800); } }
     catch (e) { failed++; console.log(`FAIL: ${e.message}`); }
