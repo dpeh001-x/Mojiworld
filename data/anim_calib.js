@@ -718,17 +718,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0.04
+      "dy": 0
     },
     "walk": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0.04
+      "dy": 0
     },
     "attack": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0.04,
+      "dy": 0,
       "ft": [
         72,
         60,
@@ -1137,7 +1137,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0.04,
+      "dy": 0,
       "ft": [
         72,
         60,
