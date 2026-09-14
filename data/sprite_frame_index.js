@@ -617,6 +617,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "icePillar": 9,
    "ice": 9,
    "lightning": 9,
+   "maeshard": 9,
    "markedShot": 9,
    "mbloodbolt": 9,
    "mbonechip": 9,
