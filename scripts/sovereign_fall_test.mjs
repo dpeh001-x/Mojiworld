@@ -64,15 +64,20 @@ const r = await page.evaluate(() => {
   out.completes = km.includes('_done = true; _completeExpedition();');
   out.catchCompletes = km.includes('catch (e) { _after(); }');
   out.plainStillThere = /_completeExpedition\(\);\s*\r?\n\s*return;/.test(km);
-  const sp = String(typeof _expeditionSpawnTowerBoss === 'function' ? _expeditionSpawnTowerBoss : '');
+  // The warm belongs to spawnMonster, not to the expedition's own boss spawn — he can be put on
+  // a floor by routes that never touch it (the Boss Rush, the Echo Keeper).
+  const sp = String(typeof spawnMonster === 'function' ? spawnMonster : '');
   out.warmWired = sp.includes('clip_sovereign_fall.mp4') && sp.includes('_lxSovCineWarm');
+  const kmAll = String(typeof killMonster === 'function' ? killMonster : '');
+  out.deathHook = kmAll.includes("m.type === 'towerSovereign' && !m._isMirage && !m._sovFallPlayed");
   return out;
 });
 ok('the cutscene helper exists', r.fnExists, '');
 ok('kill chain: only the Sovereign gets the cut', r.onlySovereign, r);
 ok('kill chain: the run still completes after it (and on a throw)', r.completes && r.catchCompletes, r);
 ok('kill chain: the plain completion path survives for the zodiac boss', r.plainStillThere, r);
-ok('the clip is warmed when the Sovereign spawns', r.warmWired, r);
+ok('the clip is warmed whenever the Sovereign is spawned, by any route', r.warmWired, r);
+ok('the death itself plays it — the hook is in killMonster', r.deathHook, r);
 
 await page.waitForLoadState('load', { timeout: 120000 }).catch(() => {});
 await page.waitForTimeout(3000);
@@ -145,6 +150,65 @@ ok('INTEGRATION: completion waits for the scene, then lands',
   integ.completedImmediately === 0 && integ.completedDuringScene === 0 && integ.completedAfterScene === 1, integ);
 ok('INTEGRATION: a zodiac final boss still completes plainly, with no scene',
   integ.zodiacCompleted === 2 && integ.zodiacScene === false, integ);
+
+// THE REAL DEATH PIPELINE. Everything above drives the hooks directly; this spawns an actual
+// Sovereign on an actual map and kills him through killMonster, with no expedition anywhere — the
+// Boss Rush's shape, since _bossRushRoster() is every boss in the MojiDex and so carries him.
+const ctx3 = await b.newContext({ viewport: { width: 1280, height: 720 } });
+const page3 = await ctx3.newPage();
+const errs3 = []; page3.on('pageerror', e => errs3.push(String(e).slice(0, 160)));
+await page3.goto(`http://localhost:${PORT}/${GAME}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page3.waitForFunction(() => typeof killMonster === 'function' && typeof spawnMonster === 'function',
+  null, { timeout: 120000 });
+await page3.waitForLoadState('load', { timeout: 120000 }).catch(() => {});
+const real = await page3.evaluate(async () => {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const out = {};
+  try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
+  for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+  try { player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; } catch (e) {}
+  try { loadMap('boss'); } catch (e) { out.err = 'loadMap ' + e.message; return out; }
+  await sleep(1800);
+  game.paused = false; player.invulnerable = 9e9;
+  if (game.monsters) game.monsters.length = 0;
+  const m = spawnMonster(400, 300, 'towerSovereign', true, false);
+  out.spawned = !!m && m.type === 'towerSovereign';
+  if (!m) return out;
+  m._echoBoss = true; m._rushBoss = true;              // the rush's tags: a sandboxed re-fight
+  out.noExpedition = !(game.expedition && game.expedition.active);
+  // His first fall is not a death — revivesOnce brings him back at 30%.
+  m.currentHp = 0;
+  try { killMonster(m); } catch (e) { out.err1 = String(e).slice(0, 140); }
+  await sleep(1900);
+  out.revived = m._revivedOnce === true;
+  out.sceneAfterRevive = !!document.getElementById('sovereign-fall-cine');
+  // The real one.
+  m.currentHp = 0;
+  try { killMonster(m); } catch (e) { out.err2 = String(e).slice(0, 140); }
+  out.claimedSync = m._sovFallPlayed === true;
+  await sleep(1900);
+  out.sceneOnDeath = !!document.getElementById('sovereign-fall-cine');
+  out.heldDuring = !!game.paused;
+  // Fire-once: put him back on the field and kill him again — no second scene.
+  if (game.monsters && game.monsters.indexOf(m) < 0) game.monsters.push(m);
+  m.currentHp = 0;
+  try { killMonster(m); } catch (e) {}
+  await sleep(1900);
+  out.overlays = document.querySelectorAll('#sovereign-fall-cine').length;
+  const ov = document.getElementById('sovereign-fall-cine'); if (ov) ov.click();
+  await sleep(400);
+  out.cleared = !document.getElementById('sovereign-fall-cine');
+  out.released = !game.paused;
+  return out;
+});
+ok('REAL KILL: a Sovereign spawns on a live map', real.spawned === true && real.noExpedition === true, real);
+ok('REAL KILL: his first fall reanimates him and plays nothing',
+  real.revived === true && real.sceneAfterRevive === false, real);
+ok('REAL KILL: the real death opens the scene, with no expedition in sight',
+  real.sceneOnDeath === true && real.claimedSync === true, real);
+ok('REAL KILL: it holds the floor, then releases it', real.heldDuring === true && real.released === true, real);
+ok('REAL KILL: it fires exactly once per monster', real.overlays === 1 && real.cleared === true, real);
+ok('REAL KILL: no page errors down the death pipeline', errs3.length === 0, errs3.slice(0, 3));
 
 const ctx2 = await b.newContext({ viewport: { width: 1280, height: 720 } });
 const page2 = await ctx2.newPage();
