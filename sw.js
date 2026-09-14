@@ -139,7 +139,7 @@
 // v0.30.x - v46 -> v47. The War of Banners burst frames were re-baked with a softer impact flash
 // (v0.30.691) under their own names, and that ship did not bump: anyone who loaded v0.30.689 has the
 // blown-out frames cached.
-const CACHE = 'mojiworld-assets-v47';   // v0.30.x - the re-baked War of Banners frames
+const CACHE = 'mojiworld-assets-v48';   // v0.30.x - the re-baked War of Banners frames
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

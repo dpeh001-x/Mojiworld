@@ -605,6 +605,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "void_tear": 9
   },
   "projectiles/anim": {
+   "bloodlust_wave": 9,
    "bolt": 9,
    "bubble": 9,
    "cancerBubble": 9,
@@ -617,7 +618,6 @@ window.LX_SPRITE_FRAME_INDEX = {
    "icePillar": 9,
    "ice": 9,
    "lightning": 9,
-   "maeshard": 9,
    "markedShot": 9,
    "mbloodbolt": 9,
    "mbonechip": 9,
