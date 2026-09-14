@@ -113,6 +113,9 @@
 // v0.30.737 - v54 -> v55. Sprites/fx/ground_slam.webp is REPLACED under its own name
 // (red-and-cyan clip-art -> an amber crater) and its nine anim/ frames are NEW. A returning browser
 // would keep the old sticker cached and never fetch any of them.
+// v0.30.744 - v56 -> v57. Sprites/fx/ground_slam.webp and its nine anim/ frames are
+// REPLACED under their own names again - the silhouette is feathered, where it previously ended in
+// a hard outline at its widest points. A returning browser would keep the crisp-cut plates cached.
 // v0.30.491 - v23 -> v24. Sprites/ui/edicts_bg.webp is NEW art
 // referenced from CSS; a returning browser with the old manifest would render the Edicts panel
 // on its fallback gradient and never fetch the plate.
@@ -161,7 +164,7 @@
 // v0.30.x - v52 -> v53. warrior_shockwave.webp and its nine frames are REPLACED under their
 // own names (the crescent was recarved thinner and translucent, and the animation is now a
 // crescent-into-fireball), so a returning browser would otherwise keep the old opaque set.
-const CACHE = 'mojiworld-assets-v56';   // v0.30.x - the recarved warrior_shockwave set
+const CACHE = 'mojiworld-assets-v57';   // v0.30.x - the recarved warrior_shockwave set
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
