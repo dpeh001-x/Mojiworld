@@ -23,20 +23,29 @@ const KEY = process.env.LUDO_API_KEY, API = process.env.LUDO_API_BASE || 'https:
 const has = (f) => process.argv.includes('--' + f);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const STILL = 'Sprites/projectiles/warrior_shockwave.webp';
+// ludo animates the user's ORIGINAL painting, not the carved/translucent still: animating the thin
+// see-through version gave it too little to hold and it came back repainted as a veined flame
+// (palette 169 off, first two frames nearly empty). The carve and the fade are applied to its output
+// afterwards by gen_warrior_shockwave_shape.mjs --frames.
+const STILL = 'scripts/seeds/warrior_shockwave_carved.webp';
 const ANIM = 'Sprites/projectiles/anim';
 const NAME = 'warrior_shockwave';
 const SIZE = 768, FEATHER = 40;
 // The still is a deep-red crescent blade-wave, convex edge leading to the RIGHT (the draw path
 // rotates it to its own heading from a right-facing source). The motion has to stay INSIDE that
 // silhouette: this is one swing's wave, not a new shape per frame.
-const MOTION = 'The crescent blade-wave SURGES forward with strong visible change in every frame, spread '
-  + 'evenly across all nine: the energy inside the crescent churns and streams along its length, its bright '
-  + 'leading edge flares and pulses hotter, the thin tips at the top and bottom whip and trail, and small '
-  + 'sparks and torn wisps of red energy peel off its trailing inner edge and stream backward to the left. '
-  + 'CRITICAL - THE CRESCENT STAYS PUT: it keeps the same position, the same size, the same curve and the '
-  + 'same rightward facing in every frame; nothing rotates, zooms, pans, mirrors or flips - only the energy '
-  + 'and the sparks move. Keep the exact same deep red and crimson palette, the same painterly style and a '
+// Per user: "redo smooth crescent, it should be a smooth crescent transforming into a fireball".
+// So the shape is MEANT to change across the set - which is the opposite of every other projectile
+// here, and the reason the drift/scale gates below are widened for this one set only.
+const MOTION = 'A smooth crescent blade-wave TRANSFORMS into a blazing fireball across the nine frames, one '
+  + 'continuous motion with no jump: frames 1-3 it is still a clean crescent, its inner energy flowing and its '
+  + 'bright edge flaring hotter; frames 4-6 the crescent curls inward on itself, the two horns sweeping round '
+  + 'and closing as the whole shape rolls up and thickens into a burning sphere; frames 7-9 it is a round '
+  + 'blazing fireball of red and crimson flame with a hot bright core, licks of fire curling off its surface '
+  + 'and a short trail of fire streaming back to the left. Keep it SMOOTH and clean - flowing fire and soft '
+  + 'glow, NO speckles, NO grain, NO scattered dots, NO torn debris, NO sparks flying off. The shape stays '
+  + 'CENTRED in the frame and keeps the same overall size as it changes: it does not slide, pan, drift, '
+  + 'rotate or flip. Keep the exact same deep red and crimson palette, the same smooth painterly style and a '
   + 'fully transparent background in every frame.';
 
 async function ludo(route, body, timeout = 240000) {
@@ -219,7 +228,11 @@ async function animate() {
   const stillRef = await stats(fs.readFileSync(src));
   const uri = 'data:image/png;base64,' + (await sharp(fs.readFileSync(src)).resize(990, 990, { fit: 'inside' }).png().toBuffer()).toString('base64');
   let best = null;
-  const ok = (x) => x.score >= 12 && x.drift <= 0.07 && x.scale <= 0.18 && x.hue <= 34;
+  // the crescent is SUPPOSED to become a fireball, so the shape gates that keep every other
+  // projectile rigid are widened here: a crescent rolling into a ball legitimately changes its bbox
+  // size a lot and its centre somewhat. Drift is still held tight enough that the wave cannot walk
+  // off its own hitbox.
+  const ok = (x) => x.score >= 12 && x.drift <= 0.14 && x.scale <= 0.45 && x.hue <= 34;
   for (let attempt = 1; attempt <= 3; attempt++) {
     process.stdout.write(`animate ${NAME} attempt ${attempt} ... `);
     try {
@@ -243,7 +256,7 @@ async function animate() {
       if (!best || (ok(cand) && !ok(best))) best = cand;
       if (ok(cand)) break;                                // moves a lot, stays put, still his colours
       console.log(score < 12 ? '  rejected: too static'
-        : (drift > 0.07 || scale > 0.18) ? '  rejected: the crescent wanders (it should animate in place)'
+        : (drift > 0.14 || scale > 0.45) ? '  rejected: it wanders off its own hitbox (it may change SHAPE, not position)'
         : `  rejected: the palette drifted from the still (mean rgb off by ${hue.toFixed(0)})`);
     } catch (e) { console.log('failed: ' + e.message); if (/402/.test(e.message)) process.exit(3); await sleep(4000 * attempt); }
   }

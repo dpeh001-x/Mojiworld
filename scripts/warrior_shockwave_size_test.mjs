@@ -52,7 +52,7 @@ const r = await page.evaluate(async () => {
 
   // powerStrike spawns its wave on a timer (SOMER_MS), so wait it out.
   const ps = await run('powerStrike', 1400);
-  out.powerStrike = ps.length ? { n: ps.length, w: ps[0].w, h: ps[0].h, bspr: ps[0].bspr || null, dmg: Math.round(ps[0].damage) } : null;
+  out.powerStrike = ps.length ? { n: ps.length, w: ps[0].w, h: ps[0].h, bspr: ps[0].bspr || null, spr: ps[0].sprScale || null, dmg: Math.round(ps[0].damage) } : null;
 
   const wc = await run('warlord_warcry', 200);
   out.warcry = wc.length ? { n: wc.length, w: wc[0].w, h: wc[0].h, bspr: wc[0].bspr || null, dmg: Math.round(wc[0].damage) } : null;
@@ -111,6 +111,10 @@ ok('the fan is scaled LESS than powerStrike (three hitboxes can multi-hit one ta
 ok('both are genuinely bigger than before',
    r.powerStrike && r.warcry && (r.powerStrike.w * r.powerStrike.h) > 44 * 30 && (r.warcry.w * r.warcry.h) > 28 * 14, {});
 ok('the shared shockwave key still resolves to p_shockwave.webp', r.sprite === 'p_shockwave.webp', { sprite: r.sprite });
+// v0.30.x — per user: "make the crescent bigger". sprScale is DRAWN size only; the hitbox above is
+// asserted unchanged in the same breath so a look change can never become a reach change.
+ok('the wave is drawn bigger', r.powerStrike && r.powerStrike.spr === 1.8, { sprScale: r.powerStrike && r.powerStrike.spr });
+ok('and its hitbox is untouched by that', r.powerStrike && r.powerStrike.w === 64 && r.powerStrike.h === 44, r.powerStrike);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;

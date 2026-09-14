@@ -152,7 +152,10 @@
 // v0.30.x - v46 -> v47. The War of Banners burst frames were re-baked with a softer impact flash
 // (v0.30.691) under their own names, and that ship did not bump: anyone who loaded v0.30.689 has the
 // blown-out frames cached.
-const CACHE = 'mojiworld-assets-v52';   // v0.30.x - the re-baked War of Banners frames
+// v0.30.x - v52 -> v53. warrior_shockwave.webp and its nine frames are REPLACED under their
+// own names (the crescent was recarved thinner and translucent, and the animation is now a
+// crescent-into-fireball), so a returning browser would otherwise keep the old opaque set.
+const CACHE = 'mojiworld-assets-v53';   // v0.30.x - the recarved warrior_shockwave set
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
