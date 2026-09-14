@@ -161,7 +161,7 @@
 // v0.30.x - v52 -> v53. warrior_shockwave.webp and its nine frames are REPLACED under their
 // own names (the crescent was recarved thinner and translucent, and the animation is now a
 // crescent-into-fireball), so a returning browser would otherwise keep the old opaque set.
-const CACHE = 'mojiworld-assets-v55';   // v0.30.x - the recarved warrior_shockwave set
+const CACHE = 'mojiworld-assets-v56';   // v0.30.x - the recarved warrior_shockwave set
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
