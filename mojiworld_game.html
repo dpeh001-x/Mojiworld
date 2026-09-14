@@ -12183,7 +12183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.703';
+const GAME_VERSION = 'v0.30.704';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14764,8 +14764,14 @@ const LX_FX = (() => {
     nova_ring:          'nova_ring.webp',      // Nova Step — end-of-dash shockwave
     bloom_burst:        'bloom_burst.webp',    // Death Bloom — corpse petal detonation
     echo_slash:         'echo_slash.webp',     // Phantom Echo — ghost slash on the echo hit
-    // v0.29.362 — Tier-1 boon FX (art shipped v0.29.355). Riposte Nova reuses
-    // nova_ring above; Mirror Step's decoy is a procedural afterimage.
+    // v0.29.362 — Tier-1 boon FX (art shipped v0.29.355). Mirror Step's decoy
+    // is a procedural afterimage.
+    // v0.30.704 parry-fx — the parry has its own art at last (per user: "when the parry
+    // does dish damage to monsters make it have its own special effect sprite and
+    // animation"). Riposte Nova used to borrow nova_ring, which is the Nova Step DASH
+    // shockwave, so the win moment read as a movement skill; and the rogue's parry
+    // counter-strike had no effect of its own at all. Both wear this now.
+    parry_riposte:      'parry_riposte.webp',   // Riposte Nova + the rogue counter (anim/parry_riposte_0..8, ludo.ai via scripts/gen_parry_riposte_fx.mjs)
     time_ripple:        'time_ripple.webp',    // Bullet Waltz — slow-field rings around the player
     ice_spike_ring:     'Ice_spike_1.webp',     // v0.29.4xx — Ice Spike cast: rune circle around the caster
     crescendo_hit:      'crescendo_hit.webp',  // Crescendo — 4th-basic crit starburst
@@ -14888,6 +14894,7 @@ const _FX_ANIM_KEYS = new Set([
   'block_warrior', 'block_rogue', 'block_mage', 'block_archer',   // v0.30.398 — the A-press stance per class
   'bolt_impact',    // v0.30.x - Magic Bolt contact burst (anim/bolt_impact_0..7, ludo.ai via gen_bolt_impact_fx.mjs). Warmed eagerly below: it is a BASIC attack, so it fires long before the staggered boot warmer would reach it.
   'arcane_burst',   // v0.29.946 — mage W detonation star (anim/arcane_burst_0..8, ludo.ai via gen_arcane_burst_fx.mjs)
+  'parry_riposte',  // v0.30.704 parry-fx — the parry counter-flash (anim/parry_riposte_0..8, ludo.ai via gen_parry_riposte_fx.mjs)
   // v0.30.547 — 'dash_mage' / 'dash_warrior' / 'dash_rogue' / 'dash_archer' were listed here
   // (v0.30.465 / v0.30.469); the loops are removed per user, so the keys are gone too — an
   // unlisted key never asks the folder for frames that do not exist.
@@ -14925,6 +14932,10 @@ const _FX_ANIM_KEYS = new Set([
 // requested on the first hit of a run. Kick the decode at load rather than
 // letting that first detonation fall back to the static sprite.
 setTimeout(() => { try { _fxAnimFrames('bolt_impact'); } catch (e) {} }, 0);
+// v0.30.704 parry-fx — the same argument, and a stronger one: a parry is a defensive
+// BASIC every class owns from level 1, needs no skill and no boon, and can land in
+// the first seconds of a run — long before the staggered skill warmer would reach it.
+setTimeout(() => { try { _fxAnimFrames('parry_riposte'); } catch (e) {} }, 0);
 // v0.30.x — CAST-FX RE-TIMING. These sets are played once across the burst's
 // life on uniform timing (Math.floor(t * n) below), which is fine for evenly
 // authored frames and cruel for uneven ones. Holding each frame in proportion
@@ -63047,7 +63058,15 @@ function triggerParry(source) {
   }
   // Class-specific parry reward
   if (player.cls === 'rogue' && source && source.currentHp !== undefined) {
+    // v0.30.704 parry-fx — the other place a parry damages a monster, and the one that
+    // had no effect of its own: the counter landed as a plain melee hit. Bigger and a
+    // little longer than the nova's per-monster flash, because this IS the whole move.
+    // Gated on damage: 'melee' is NOT in MISS_EXEMPT_SKILLS, so this counter can whiff,
+    // and a whiffed counter dishes nothing — the request is "when the parry does dish
+    // damage to monsters", so a miss keeps its MISS marker and gets no flash.
+    const _pfHpR = source.currentHp;
     hitMonster(source, Math.floor(getAtk() * 1.6), true, 'melee');
+    if (source.currentHp < _pfHpR) _lxParryFx(source.x + source.w / 2, source.y + source.h / 2, 92, 20);
   } else if (player.cls === 'archer') {
     player._nextShotBonus = 3000;       // next shot gets massive crit
     showToast('PARRY — next shot empowered!', 'legendary');
@@ -63057,6 +63076,17 @@ function triggerParry(source) {
     player.burnTimer = 0; player.freezeTimer = 0; player.stunTimer = 0;
   }
   showToast('PARRY!', 'legendary');
+}
+
+// v0.30.704 parry-fx — the counter-flash a parry leaves on what it damaged. One
+// helper, because the parry damages monsters from two unrelated places (the
+// Riposte Nova boon and the rogue counter-strike) and they should look like the
+// same move. Silent and total no-op until the art has decoded, so a missing file
+// costs nothing; the caller keeps whatever fallback it already had.
+function _lxParryFx(cx, cy, size, life) {
+  if (typeof spawnSpriteBurst !== 'function' || typeof _lxVfxReady !== 'function') return false;
+  if (typeof LX_FX === 'undefined' || !_lxVfxReady(LX_FX.parry_riposte)) return false;
+  try { spawnSpriteBurst(cx, cy, 'parry_riposte', { size: size, life: life, spin: 0.02 }); return true; } catch (e) { return false; }
 }
 
 // v0.29.362 — RIPOSTE NOVA (Tier-1). A defended hit detonates a shockwave.
@@ -63076,10 +63106,21 @@ function _riposteProc() {
     if (!_rm || _rm.currentHp <= 0) continue;
     const _rdx = (_rm.x + _rm.w / 2) - _rcx, _rdy = (_rm.y + _rm.h / 2) - _rcy;
     if (_rdx * _rdx + _rdy * _rdy > _rr * _rr) continue;
+    // v0.30.704 parry-fx — the flash lands ON each monster the nova actually DAMAGED,
+    // which is exactly what the request names; the ring alone only marks where the
+    // player stood. Gated on the health actually dropping rather than on the call
+    // being made: hitMonster returns early on a dead target, and while 'nova' is
+    // MISS_EXEMPT today, a flash that can appear over a monster that took nothing is
+    // the wrong promise to leave lying around.
+    const _pfHp = _rm.currentHp;
     hitMonster(_rm, _rdmg, false, 'nova');
     _rm.vx = (_rm.vx || 0) + Math.sign(_rdx || 1) * 5;
+    if (_rm.currentHp < _pfHp) _lxParryFx(_rm.x + _rm.w / 2, _rm.y + _rm.h / 2, 76, 16);
   }
-  if (typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.nova_ring)) {
+  // v0.30.704 parry-fx — its own ring now. nova_ring stays as the else: if the new art
+  // 404s the nova degrades to precisely the effect that shipped, never to nothing.
+  if (!_lxParryFx(_rcx, _rcy, _rr * 2.1, 20)
+      && typeof _lxVfxReady === 'function' && typeof LX_FX !== 'undefined' && _lxVfxReady(LX_FX.nova_ring)) {
     try { spawnSpriteBurst(_rcx, _rcy, 'nova_ring', { size: _rr * 2.1, life: 20, spin: 0.02 }); } catch (e) {}
   }
   if (typeof addShake === 'function') addShake(5);
@@ -151775,6 +151816,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     'Sprites/fx/deadeye_reticle.webp',
     'Sprites/fx/archmage_elemental.webp',
     'Sprites/fx/arcane_burst.webp',
+    'Sprites/fx/parry_riposte.webp',   // v0.30.704 parry-fx — a parry can land in the first seconds of a run
     'Sprites/fx/rush.webp',
     'Sprites/fx/warcry.webp',
     'Sprites/fx/bloodlust.webp',

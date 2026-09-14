@@ -565,6 +565,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "necro_maelstrom": 16,
    "nightreaper_eclipse": 9,
    "nightreaper_ult": 9,
+   "parry_riposte": 9,
    "phantom_ult": 9,
    "phantom_voidrift": 9,
    "qte_break": 9,
