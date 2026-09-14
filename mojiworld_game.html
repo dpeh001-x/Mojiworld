@@ -12183,7 +12183,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.695';
+const GAME_VERSION = 'v0.30.696';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -92457,6 +92457,38 @@ function bossAI(m, dt, distToPlayer) {
         m.vy = -12; m.vx = m.facing * 3;
       }
       if (m.onGround && m.patternTimer > 300) {
+        // v0.30.696 mooma-slam - THE LANDING LANDS. Per user: "when she jump and attack animation
+        // attack does not actually damage the player". It never did: the only output of this
+        // pattern was the shockwave below, which spawns at her centre and travels outward and
+        // upward, so it leaves from under the feet of whoever she landed on; and a clip from it
+        // is a `ranged` boss roll on a LEVEL 16 bar - about 10 damage against an endgame pool.
+        // Her quake and ground shake hurt because they are percentages of the player's own max
+        // HP, so the impact uses that same shape, at the small end because this is her most
+        // frequent pattern: 10% (quake is 50%, the ground shake 75%), DEF absorbs it, capped at
+        // 25% so the level-punish ramp cannot spike it into a one-shot. On the ground within
+        // 170 px only - jumping the landing is the dodge her other two ground attacks teach.
+        if (player && player.hp > 0 && player.invulnerable <= 0) {
+          const _msMax = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
+          const _msDx = (player.x + player.w / 2) - (m.x + m.w / 2);
+          if (player.onGround && Math.abs(_msDx) < 170) {
+            const _msDmg = Math.max(1, Math.floor(_msMax * 0.10 * ((typeof _defAbsorbMul === 'function') ? _defAbsorbMul() : 1)));
+            const _msLost = player._god ? 0 : Math.min((typeof _diffDmg === 'function') ? _diffDmg(_msDmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0) : _msDmg, Math.floor(_msMax * 0.25));
+            player.hp -= _msLost;
+            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w / 2, 0, 170, 0, 0.10, (m.name || 'Mooma') + "'s slam", '#ff5522');
+            player.lastHitTime = game.time;
+            player._lastDamageSource = (m.name || 'Mooma') + "'s slam";
+            player.hitStun = 400;
+            player.invulnerable = 800;   // the shockwave below cannot double-dip the same landing
+            player.vx = (Math.sign(_msDx) || 1) * 9;
+            player.vy = -7;
+            if (game.damageNumbers) {
+              game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2,
+                text: '-' + _msLost, life: 46, color: '#ff5522', size: 18, big: true });
+            }
+          } else if (Math.abs(_msDx) < 170 && typeof showToast === 'function') {
+            showToast('\uD83E\uDD98 Cleared her landing!', 'epic');
+          }
+        }
         // Shockwave
         for (let i = -2; i <= 2; i++) {
           game.projectiles.push({
