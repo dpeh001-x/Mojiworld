@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.752';
+const GAME_VERSION = 'v0.30.753';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -126325,6 +126325,32 @@ const HERO_VEC_ROGUE_DASH_KEYS = [
   { p:0.78, spine: 0.42, head:-0.42, armL: 1.45, armR: 0.98, handL:-0.10, legL:-1.02, legR: 0.22, x: 3.4, y: 0.8, headX: 0.0, headY: 0.0, legLX: 3.8, legLY: 0.6, legRX: 2.9, legRY: 0.8, sx:1.00, sy:1.00, limbSy:1.02 },
   { p:1.00, spine: 0.04, head:-0.04, armL: 0.38, armR: 0.28, handL: 0.00, legL:-0.26, legR: 0.22, x: 0.5, y: 0.4, headX: 0.0, headY: 0.0, legLX: 0.5, legLY: 0.3, legRX: 0.4, legRY: 0.4, sx:1.00, sy:1.00, limbSy:1.00 },
 ];
+// v0.30.x — THE HIPS FOLLOW THE LEANING TORSO, AND THE LEGS STOP SCISSORING.
+// Per user: "the legs can be improved such that they dont cross so much" and, on a zoom of the
+// lower body, "it looks disjointed from the main torso ... it should always be joined to the main
+// torso".
+//
+// Both are consequences of the RIG, not of the keyframes, which is why the authored table above is
+// left exactly as it is:
+//
+//   JOINED.  The legs are ROOT-parented while the torso is a SPINE child. The keys already translate
+//   the legs with the body's x/y - that is the v0.29.x fix that stopped them detaching - but nothing
+//   followed the body's ROTATION, and this pose leans to 0.92 rad. At 53 degrees the torso's base has
+//   swung well clear of the hips the legs still hang from, so a hole opens between them. Measured as
+//   background pixels trapped inside the figure's own silhouette, across the nine pose frames:
+//   12,071 px. Adding a lean-proportional shift to both hips was swept from 0 to 18 and bottoms out
+//   in a flat basin at 12-14 (5,120 px); HIP_FOLLOW sits at 13, which is a 58% reduction. It scales
+//   with the lean, so it is exactly zero when the rogue is upright and cannot disturb the settle.
+//
+//   CROSSING. The keys rotate the legs in OPPOSITE directions by up to 0.88 rad each - a symmetric
+//   scissor, not a stride - and with the hips barely a pixel apart in X the two legs sweep through
+//   the same space. LEG_SPLIT compresses that opposition about its own mean, so the pair reads as a
+//   stride rather than blades of a scissor. It is a compromise and worth knowing which way it runs:
+//   sweeping it showed gap and foot separation pull AGAINST each other (0.5 -> 4,442 px gap but the
+//   feet close to 47; 1.6 -> the feet open to 57 but the gap returns to 5,434). 0.75 keeps most of
+//   the gap win at 4,793 while taking the sharpest of the scissor off.
+const HERO_VEC_ROGUE_DASH_HIP_FOLLOW = 13;
+const HERO_VEC_ROGUE_DASH_LEG_SPLIT = 0.75;
 function _heroVecRogueDashPose(t) {
   const p = _heroClamp01(t);
   const keys = HERO_VEC_ROGUE_DASH_KEYS;
@@ -126338,10 +126364,21 @@ function _heroVecRogueDashPose(t) {
         if (k === 'p') continue;
         out[k] = a[k] + (b[k] - a[k]) * u;
       }
-      return out;
+      return _heroVecRogueDashJoin(out);
     }
   }
-  return keys[keys.length - 1];
+  return _heroVecRogueDashJoin(Object.assign({}, keys[keys.length - 1]));
+}
+// Applied to the RESOLVED pose so it works on every frame including the clamped last one, and so the
+// authored table stays readable as the thing an artist edits.
+function _heroVecRogueDashJoin(o) {
+  const lean = o.spine || 0;
+  const shift = HERO_VEC_ROGUE_DASH_HIP_FOLLOW * lean;
+  o.legLX += shift; o.legRX += shift;
+  const mid = (o.legL + o.legR) / 2;
+  o.legL = mid + (o.legL - mid) * HERO_VEC_ROGUE_DASH_LEG_SPLIT;
+  o.legR = mid + (o.legR - mid) * HERO_VEC_ROGUE_DASH_LEG_SPLIT;
+  return o;
 }
 // v0.25.448 — Warrior dash "bash" pose. Same data shape as the rogue
 // dash keys (spine/head/arm/leg rotations + bone offsets + body
