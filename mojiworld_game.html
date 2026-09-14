@@ -12560,7 +12560,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.732';
+const GAME_VERSION = 'v0.30.733';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -58890,6 +58890,43 @@ _wmPlate.onload = () => {
   }
 };
 _wmPlate.onerror = () => { _wmPlate._lxReady = false; };
+
+// v0.30.x — THE WORLD MAP'S ART JOINS THE BOOT GATE (per user, with a screenshot of the map:
+// "ensure that the map loads before the game starts").
+//
+// The commence gate holds the loading screen until every WATCHED image is complete, and it watches
+// exactly two things: document.images, and window._lxRegistryImages (what _warmDecodeRegistries
+// walked). The map's art was in neither, for two different reasons:
+//   - the 82 region emblems are SVG <image> elements that renderWorldMap CREATES on first open, so
+//     at boot they do not exist in any form the gate could look at;
+//   - _wmPlate, the painted backdrop, is a bare `new Image()` at script scope — never appended to
+//     the document, so not in document.images, and in no registry either.
+// Measured on v0.30.729: the world revealed at 23.6 s with 0 of 82 emblems even REQUESTED, and the
+// first paint of the map had 77 of 77 nodes still loading. That is the emoji-then-pop the screenshot
+// caught, and it is why pressing W is where the map starts loading rather than where it finishes.
+//
+// This is a plain {key: Image} map because that is the shape _warmDecodeRegistries.collect() walks;
+// adding it to that function's registry list is the whole fix. The plate rides along in the same
+// object so it is gated too.
+//
+// fetchPriority is LOW on purpose. These are worth waiting for but they are not worth waiting for
+// FIRST: the start map's own spawn/NPC/background art is already requested at 'high' by
+// _lxPreloadMapAssets, and 82 extra sockets at default priority would push the art the player is
+// about to actually look at behind art for a screen they may not open. The gate waits for both
+// either way, so the only thing priority changes here is the order they arrive in.
+const LX_WORLD_MAP_ART = (() => {
+  const out = { _plate: _wmPlate };
+  try {
+    for (const id of WM_REGION_ICON_IDS) {
+      const im = new Image();
+      try { im.fetchPriority = 'low'; } catch (e) {}
+      try { im.decoding = 'async'; } catch (e) {}
+      im.src = 'Sprites/world/regions/' + id + '.webp';
+      out[id] = im;
+    }
+  } catch (e) {}
+  return out;
+})();
 // v0.30.651 — the new ground: a deep indigo field with the engraved chart arcs at its edges and the
 // middle left dark and empty, authored for this screen by scripts/gen_worldmap_backdrop.mjs. The
 // plate it replaces was a bright magenta-and-violet nebula whose cores sat right where the node
@@ -153953,6 +153990,11 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     try { _regs.push(typeof BOSS_SPRITES     !== 'undefined' ? BOSS_SPRITES     : null); } catch (e) {}
     try { _regs.push(typeof MONSTER_SPRITES  !== 'undefined' ? MONSTER_SPRITES  : null); } catch (e) {}
     try { _regs.push(typeof _NPC_SPRITES     !== 'undefined' ? _NPC_SPRITES     : null); } catch (e) {}
+    // v0.30.x — the world map's 82 region emblems + its backdrop plate. Light (1.7 MB all told), and
+    // it is the difference between the map being ready when the player opens it and the map STARTING
+    // to load when the player opens it. Deliberately in the light pass, not includeHeavy: the heavy
+    // pass is fire-and-forget and is not gated, which is the thing being fixed.
+    try { _regs.push(typeof LX_WORLD_MAP_ART !== 'undefined' ? LX_WORLD_MAP_ART : null); } catch (e) {}
     // v0.26.954 — these were missing: map props, item icons, B-ult
     // projectiles, and the seven worn-equipment layer registries.
     try { _regs.push(typeof LX_OBJECTS       !== 'undefined' ? LX_OBJECTS       : null); } catch (e) {}

@@ -121,6 +121,29 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code> &middot; <a href="https://www.patreon.com/c/Mojiworld" style="color:#c9a6ff;">&hearts; Support on Patreon</a></div>
 </header>
 
+<h2>v0.30.733 <span class="tag"><span class="pill bug">bug</span> the world map&rsquo;s art loads before the game starts, instead of when you press W</span></h2>
+<p>Per user, with a screenshot of the World Map: <em>ensure that the map loads before the game starts.</em></p>
+
+<h3>Why the commence gate could not see it</h3>
+<p>The gate built across v0.29.735 &rarr; v0.30.x holds the loading screen until every <b>watched</b> image is complete, and it watches exactly two things: <code>document.images</code>, and <code>window._lxRegistryImages</code> &mdash; whatever <code>_warmDecodeRegistries</code> walked. The map&rsquo;s art was in neither, for two different reasons:</p>
+<ul>
+<li>the <b>82 region emblems</b> are SVG <code>&lt;image&gt;</code> elements that <code>renderWorldMap</code> <em>creates on first open</em>. At boot they do not exist in any form the gate could look at, so pressing W is where they start loading, not where they finish. The renderer even says so &mdash; its own comment admits the emoji shows &ldquo;in the moment before its sprite decodes&rdquo;.</li>
+<li><code>_wmPlate</code>, the painted backdrop, is a bare <code>new Image()</code> at script scope: never appended, so not in <code>document.images</code>, and in no registry. It does finish in time in practice, but only because its <code>src</code> is set at parse ~29&nbsp;s before the reveal &mdash; nothing <em>held the door</em> for it, so that was luck, not a guarantee.</li>
+</ul>
+<p>Measured on v0.30.732: the world revealed and <b>0 of 82</b> emblems had been requested.</p>
+
+<h3>The fix is one registry</h3>
+<p><code>LX_WORLD_MAP_ART</code> is a plain <code>{key: Image}</code> map built from <code>WM_REGION_ICON_IDS</code>, with the plate riding along in the same object &mdash; that is the shape <code>_warmDecodeRegistries.collect()</code> already walks, so adding it to that function&rsquo;s registry list is the entire change. It goes in the <b>light</b> pass, not <code>includeHeavy</code>: the heavy pass is fire-and-forget and deliberately ungated, which is the thing being fixed.</p>
+<p>The emblems are requested at <code>fetchPriority = 'low'</code> on purpose. They are worth waiting for but not worth waiting for <em>first</em> &mdash; the start map&rsquo;s own spawn, NPC and background art is already requested at <code>'high'</code> by <code>_lxPreloadMapAssets</code>, and 82 extra sockets at default priority would push the art the player is about to look at behind art for a screen they may never open. The gate waits for both either way; priority only changes the order they arrive in.</p>
+
+<h3>A measurement trap worth recording</h3>
+<p>The first version of the test reported &ldquo;0 of 82 requested&rdquo; for the <em>fixed</em> build too. Resource timing keeps <b>250 entries</b> by default and this boot makes ~2,000 requests, so the region entries are evicted long before anything reads them and every build looks identical. <code>setResourceTimingBufferSize</code> has to be raised in an init script, before page script runs, or the test measures the buffer rather than the game.</p>
+
+<h3>Verified</h3>
+<p><code>scripts/worldmap_preload_test.mjs</code> walks a real boot to the reveal and asserts both the timing and the structure. On <code>origin/main</code> it is <b>3 of 6</b>, failing on exactly the defect &mdash; 0/82 finished before the reveal, 0/82 watched, plate not watched. On this build it is <b>6 of 6</b>: 82/82 finished before the reveal, 82/82 watched, plate watched.</p>
+<p>No boot cost: <code>boot_commence_gate_test</code>&rsquo;s fast-boot check fails on <code>origin/main</code> at <b>9476&nbsp;ms</b> and on this build at <b>3185&nbsp;ms</b> &mdash; it is a pre-existing failure and this change is on the right side of it. <code>sprite_gate_retry_test</code> 11/11, <code>shackle_worldmap_test</code> 8/8. Total added to the gated set: <b>1.7&nbsp;MB across 82 files</b>.</p>
+
+
 <h2>v0.30.732 <span class="tag"><span class="pill art">art</span> The Somersault Smash wave is a crescent that becomes a fireball</span></h2>
 <p>Per user, on the crescent shipped in v0.30.731: "make the crescent bigger, more crescent shaped, less opaque", then "more transluscent", then "redo smooth crescent, it should be a smooth crescent transforming into a fireball".</p>
 <p>The wave now leaves as a clean crescent and arrives as a fireball. Across its nine frames the crescent's horns sweep inward, the whole shape rolls up and thickens, and the last three frames are a blazing sphere with fire curling off it. The crescent itself is thinner and sharper and you can see the map through it. Drawn size is up 1.8x; the hitbox, the damage, the pierce and the reach are all exactly what they were, and the test asserts both halves of that in the same breath so a look change can never quietly become a reach change.</p>
