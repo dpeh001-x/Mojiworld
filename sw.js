@@ -110,6 +110,9 @@
 // v0.30.734 - v53 -> v54. Sprites/fx/warcry.webp and its nine anim/ frames are REPLACED
 // under their own names again - feathered at the circumference, where they previously ended on the
 // square edge of their own canvas. A returning browser would keep the hard-cut plates cached.
+// v0.30.737 - v54 -> v55. Sprites/fx/ground_slam.webp is REPLACED under its own name
+// (red-and-cyan clip-art -> an amber crater) and its nine anim/ frames are NEW. A returning browser
+// would keep the old sticker cached and never fetch any of them.
 // v0.30.491 - v23 -> v24. Sprites/ui/edicts_bg.webp is NEW art
 // referenced from CSS; a returning browser with the old manifest would render the Edicts panel
 // on its fallback gradient and never fetch the plate.
@@ -158,9 +161,7 @@
 // v0.30.x - v52 -> v53. warrior_shockwave.webp and its nine frames are REPLACED under their
 // own names (the crescent was recarved thinner and translucent, and the animation is now a
 // crescent-into-fireball), so a returning browser would otherwise keep the old opaque set.
-// v0.30.x - v54 -> v55. The doom fireball tail is ramped so it stops ending in a straight
-// line; the still and all nine frames are REPLACED under their own names.
-const CACHE = 'mojiworld-assets-v56';   // v0.30.x - the doom fireball tail ramp
+const CACHE = 'mojiworld-assets-v55';   // v0.30.x - the recarved warrior_shockwave set
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

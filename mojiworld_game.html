@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.739';
+const GAME_VERSION = 'v0.30.740';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -15327,6 +15327,7 @@ const _FX_ANIM_KEYS = new Set([
   'arcane_burst',   // v0.29.946 — mage W detonation star (anim/arcane_burst_0..8, ludo.ai via gen_arcane_burst_fx.mjs)
   'parry_riposte',  // v0.30.704 parry-fx — the parry counter-flash (anim/parry_riposte_0..8, ludo.ai via gen_parry_riposte_fx.mjs)
   'warcry',         // v0.30.728 — the battle-roar pressure wave (anim/warcry_0..8, ludo.ai via gen_warcry_fx.mjs)
+  'ground_slam',    // v0.30.740 — the warrior A landing (anim/ground_slam_0..8, ludo.ai via gen_ground_slam_fx.mjs)
   // v0.30.547 — 'dash_mage' / 'dash_warrior' / 'dash_rogue' / 'dash_archer' were listed here
   // (v0.30.465 / v0.30.469); the loops are removed per user, so the keys are gone too — an
   // unlisted key never asks the folder for frames that do not exist.
@@ -80011,14 +80012,34 @@ const SKILL_FNS = {
       if (player.hp <= 0 || game.paused) return;
       player._warriorGroundSmashAt = (game.time | 0);
       player._warriorGroundSmashUntil = (game.time | 0) + 16;   // brief smash pose on impact
-      flash(0.42);
+      flash(0.26);   // v0.30.740 — 0.42 white-outs the new crater at the instant it lands
       if (typeof addShake === 'function') addShake(11);
       if (typeof addHitStop === 'function') addHitStop(70);
-      performAround(190, 2.7, { color:'#ffcc55', kb:8 });   // v0.30.618 warrior-tune - 3.4 -> 2.7 (per user: nerf; was 2.6 -> 3.4 in v0.26.x)
+      performAround(190, 2.7, { color:'#ffcc55', kb:8, noShock: true });   // v0.30.740 — the crater is the ring; see opts.noShock   // v0.30.618 warrior-tune - 3.4 -> 2.7 (per user: nerf; was 2.6 -> 3.4 in v0.26.x)
       const cx = player.x + player.w/2, cy = player.y + player.h/2;
-      if (typeof spawnSmoothExplosion === 'function') spawnSmoothExplosion(cx, cy + player.h/2, 180, '#ffcc55');
-      if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(cx, cy + player.h/2, 'ground_slam', { size: 230, life: 28 });
-      if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(cx, player.y + player.h, 'dust_ring', { size: 300, life: 34, scaleStartX: 0.4, scaleEndX: 1.7, scaleStartY: 0.4, scaleEndY: 0.85 });
+      // v0.30.740 — the generic smooth explosion is gone. Measured by suppressing each effect
+      // in turn: it, not the art, was the white-out over this landing, and its bloom ignores the
+      // radius it is handed. The crater carries the hot core now, which is the whole point of it.
+      // v0.30.740 — THE LANDING, REWORKED (per user: "make it AAA grade skill simple but smooth
+      // looking, generate a nice animation for it as well").
+      //   * NEW ART. The old plate was clip-art: a red-and-white cartoon star burst with cyan
+      //     crystal shards, fighting this skill's own palette — every particle it throws is
+      //     #ffcc55 amber and #aa7733 earth. The new one is a single clean idea in that palette:
+      //     a hot amber core in a cracked crater with one dust ring driven out of it.
+      //   * NINE FRAMES, where it was one still image on a skill whose whole read is a wave
+      //     travelling outward. They ignite, surge and disperse across the burst.
+      //   * DRAWN AT ITS REAL REACH. 230 px was a third of the ground this actually hits — the
+      //     landing sweeps performAround(190), a 380 px circle, and the rings carry past it. 460
+      //     matches that, and it rides BEHIND the warrior because it is a crater he is standing
+      //     in. 460 also carries the 1/0.86 the feathered plate needs (its ink is scaled into
+      //     the canvas so the radial falloff has margin), so the visible crater is ~395 px.
+      if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(cx, player.y + player.h, 'ground_slam',
+        // life 54, not 30: the nine frames stretch across the burst, and at 30 the crater was
+        // already fading by the time the impact flash cleared — the aftermath outlives the bang.
+        { size: 460, life: 54, behind: true, opacity: 0.95,
+          scaleStartX: 0.55, scaleEndX: 1.06, scaleStartY: 0.55, scaleEndY: 1.06 });
+      // v0.30.740 — the separate dust_ring is retired: the new plate draws its own, expanding
+      // across its nine frames, and two rings from the same impact read as two impacts.
       for (let i = 0; i < 24; i++) {
         const a = (i / 24) * Math.PI * 2;
         game.particles.push({ x: cx, y: cy + player.h/2,
@@ -80031,8 +80052,12 @@ const SKILL_FNS = {
       scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         const radius = 110 + r * 60;   // tighter rings (was 180 + r*110)
-        performAround(radius, 1.2, { color:'#ffdd88', kb:4 });   // v0.30.618 warrior-tune - 1.5 -> 1.2 (per user: nerf)
+        performAround(radius, 1.2, { color:'#ffdd88', kb:4, noShock: true });   // v0.30.618 warrior-tune - 1.5 -> 1.2 (per user: nerf) · v0.30.740 — see below
         const cx = player.x + player.w/2, cy = player.y + player.h;
+        // v0.30.740 — the pulse's own ring, flattened along the ground the way a shockwave runs.
+        if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(cx, cy, 'dust_ring',
+          { size: Math.round(radius * 2.1), life: 26, behind: true, opacity: 0.55,
+            scaleStartX: 0.45, scaleEndX: 1.15, scaleStartY: 0.22, scaleEndY: 0.5 });
         const n = 18 + r * 6;
         for (let i = 0; i < n; i++) {
           const a = (i / n) * Math.PI * 2;
