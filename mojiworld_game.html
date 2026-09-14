@@ -12181,7 +12181,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.687';
+const GAME_VERSION = 'v0.30.688';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -62485,6 +62485,13 @@ function _rogueChainDash(dir) {
     }
   }
 }
+// v0.30.x — the archer's dash roll, in one place (per user: "it looks too stiff and unreal").
+//   ms    the whole tumble. Travel is 240 ms; 340 lets the landing settle without spinning on the spot.
+//   ease  how much of the turn is eased vs linear (1 = all ease-out, 0 = the old constant speed).
+//   pow   the ease-out exponent: higher = more of the turn packed into the launch.
+//   arc   peak lift in px at the top of the roll, zero at both ends.
+//   tuck  how far the body pulls in at the top (a scale, so 0.09 = 9% wider and shorter).
+const LX_ROLL = { ms: 340, ease: 0.8, pow: 2.3, arc: 17, tuck: 0.09 };
 function quickDash(dir) {
   if (player._eclipseHold) return;   // v0.30.34 - held under the eclipse
   // v0.29.605 — a fresh dash always begins an unchained sequence.
@@ -62616,11 +62623,21 @@ function quickDash(dir) {
     // proper tumble-and-land instead of a too-fast cartwheel.
     // Initial vx also softened 14 → 11 so the body covers slightly
     // less ground while the long rotation plays out.
+    // v0.30.x — per user: the roll "looks too stiff and unreal". Three things made it so, and all
+    // three are fixed in _chibiApply's somersault branch (see LX_ROLL there):
+    //   * the spin ran at a CONSTANT angular speed from launch to finish - a machine turning, not a
+    //     body tumbling. It eases out now: the turn is nearly done by the time the travel stops.
+    //   * 420 ms of spin against 240 ms of travel left the archer spinning ON THE SPOT for the last
+    //     180 ms. The roll is 340 ms now, and the ease puts ~90% of the turn inside the travel.
+    //   * the 10 px lift was keyed off quickDashTimer, which expires at 240 ms - so mid-roll the body
+    //     SNAPPED back down while still spinning. It is an arc now, zero at both ends, and it is
+    //     keyed off the roll itself (_archerRoll) rather than a timer that ends first.
     player.vx = dir * 11;
-    player.somersault = 420;
+    player.somersault = LX_ROLL.ms;
     player.somersaultDir = dir;
-    player.somersaultDuration = 420;
+    player.somersaultDuration = LX_ROLL.ms;
     player.somersaultTurns = 1;   // single tumble — don't inherit a stale double-flip from Ground Slam
+    player._archerRoll = 1;       // this somersault is the dash roll; cleared where the flip is
     player.invulnerable = player.invulnerable /* iframe removed v0.26.x */;
     trailHex = '#88ffcc';
     trailRgba = 'rgba(140,255,200,0.55)';
@@ -67507,6 +67524,7 @@ function loadMap(id, entryX, entryY) {
     player.somersaultDir = 0;
     player.somersaultDuration = 0;
     player.somersaultTurns = 1;   // reset the double-flip flag (an interrupted Ground Slam left it at 2, doubling the next archer roll)
+    player._archerRoll = 0;       // v0.30.x — and the roll flag, so a later flip is not given the roll's arc
     player._virgoSin = 0; player._virgoMarker = null; player._virgoMark = 'balanced';   // Virgo sin/mark shouldn't carry to the next map (a returning 5-sin player ate an instant JUDGMENT)
     player._chantRaiseUntil = 0;
     player._impalePoseUntil = 0;
@@ -71055,6 +71073,21 @@ function updatePlayer(dt) {
     player.somersault = Math.max(0, player.somersault - dt);
     if (player.somersault <= 0) {
       player.somersaultDuration = 0;
+      // v0.30.x — the roll ENDS on something. The rogue's dash brakes with dust at its planted foot;
+      // the archer's roll just stopped mid-air-looking, which is half of why it read as unreal.
+      if (player._archerRoll === 1) {
+        player._archerRoll = 0;
+        const _rfX = player.x + player.w / 2 + (player.somersaultDir || player.facing || 1) * 8, _rfY = player.y + player.h - 2;
+        if (typeof spawnDashFx === 'function') spawnDashFx({ type: 'ring', x: _rfX, y: _rfY, r0: 3, r1: 20, life: 10, color: '#88ffcc', squash: 0.3 });
+        if (!(typeof _perfVeryLowFx === 'function' && _perfVeryLowFx())) {
+          for (let _i = 0; _i < 7; _i++) {
+            const _p = { x: _rfX + (Math.random() * 14 - 7), y: _rfY - Math.random() * 4, vx: (Math.random() - 0.5) * 2.2 - (player.somersaultDir || 1) * 0.8,
+              vy: -(0.6 + Math.random() * 1.5), life: 16 + Math.random() * 10, color: _i % 2 ? '#bff5e0' : '#8fe8c4', size: 1.6 + Math.random() * 1.6 };
+            if (typeof _budgetedParticlePush === 'function') { if (!_budgetedParticlePush(_p)) break; } else game.particles.push(_p);
+          }
+        }
+        if (typeof addShake === 'function') addShake(2);
+      }
       player.somersaultDir = 0;
       player.somersaultTurns = 1;   // v0.26.x — reset double-flip flag (Ground Slam) so later single flips aren't doubled
     }
@@ -73243,6 +73276,7 @@ function triggerDeath() {
   player.somersaultDir = 0;
   player.somersaultDuration = 0;
   player.somersaultTurns = 1;
+  player._archerRoll = 0;
   player._virgoSin = 0; player._virgoMarker = null; player._virgoMark = 'balanced';   // dying shouldn't keep the Virgo sin count (instant JUDGMENT on respawn)
   player._chantRaiseUntil = 0;
   player._impalePoseUntil = 0;
@@ -122077,17 +122111,29 @@ function _chibiApply(sx, sy) {
   if (player.somersault > 0) {
     const flipMs = Math.max(1, player.somersaultDuration || 520);
     const t = Math.max(0, Math.min(1, 1 - player.somersault / flipMs));
-    const ang = t * Math.PI * 2 * (player.somersaultTurns || 1) * (player.somersaultDir || 1);
+    // v0.30.x — the dash roll only (every other somersault in the game keeps its linear turn):
+    // the body leaves the ground with its angular momentum already spent and lands upright, so the
+    // turn is fast at the launch and settles into the landing instead of running at one speed.
+    const _roll = player._archerRoll === 1;
+    const _te = _roll ? (LX_ROLL.ease * (1 - Math.pow(1 - t, LX_ROLL.pow)) + (1 - LX_ROLL.ease) * t) : t;
+    const ang = _te * Math.PI * 2 * (player.somersaultTurns || 1) * (player.somersaultDir || 1);
     // v0.25.448 — Archer dash somersault gets a 10 px vertical lift so
     // the forward roll arcs ABOVE the ground tile rather than scraping
     // through it. Detected implicitly: a somersault that fires while
     // quickDashTimer is active is the dash-roll variant; evadeRoll
     // (which sets somersault but not quickDashTimer) keeps its
     // ground-hugging arc unchanged.
-    const isDashRoll = (player.quickDashTimer | 0) > 0;
-    if (isDashRoll) ctx.translate(0, -10);
+    // v0.30.x — an ARC, not a step. The lift used to be a flat -10 px switched on by quickDashTimer,
+    // which meant the body popped up at the launch and dropped back the instant the dash timer ran
+    // out - mid-spin. sin() puts it at zero on both ends, so the roll leaves the floor and returns to
+    // it, and it is the ROLL that decides, not a timer that expires first.
+    const _lift = _roll ? LX_ROLL.arc * Math.sin(Math.PI * t) : 0;
+    if (_lift) ctx.translate(0, -_lift);
     ctx.translate(0, -player.h / 2);   // pivot near torso center instead of feet
     ctx.rotate(ang);
+    // v0.30.x — the tuck: a body rolls by pulling in, and comes out of it long. Widest and shortest
+    // at the top of the arc, back to true as the feet come down.
+    if (_roll) { const _k = LX_ROLL.tuck * Math.sin(Math.PI * t); ctx.scale(1 + _k, 1 - _k); }
     ctx.translate(0, player.h / 2);
   } else if (game.mapData && game.mapData.isIcy
              && !player.onGround
