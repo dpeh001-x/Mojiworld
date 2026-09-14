@@ -8293,6 +8293,14 @@
      after enhancement. Star count is read from item.stars (0-10) and
      surfaces as a tiny golden chip on the upper-left of the slot. The
      glow scales gently with star count so a ★10 catches the eye. */
+  /* v0.30.707 — forge grid: worth against the worn piece. Top-right is the free corner. */
+  .forge-delta {
+    position: absolute; top: -4px; right: -4px; z-index: 3;
+    font: 800 9px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    padding: 0 3px; border-radius: 4px; letter-spacing: 0.2px;
+    border: 1px solid rgba(0,0,0,0.55); text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    pointer-events: none; white-space: nowrap;
+  }
   .item-star-badge {
     position: absolute;
     top: -4px; left: -4px;
@@ -12183,7 +12191,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.706';
+const GAME_VERSION = 'v0.30.707';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -105291,6 +105299,98 @@ function itemStatString(it, multiline) {
 // any other surface that wants the "★N" chip floating on the upper-left of
 // an item icon. Tier color shifts at 5 / 8 stars so high-star gear visibly
 // reads as endgame.
+// v0.30.707 — ONE definition of what a piece of gear is actually worth.
+//
+// Per user, with a screenshot of the forge: "When Enhancing, show how much (+/- %) the item
+// will be so that you know what u are ehancing, there's 3 items that look similar but the
+// stats are different". Three T7 bows share an icon and the grid said nothing that told them
+// apart - the only way to compare was to click each in turn and read the preview.
+//
+// The formula below is not new: it is exactly what the stat preview was computing inline
+// (star curve, signature curve for the slot's own stat, tier multiplier on flat stats, the
+// GEAR_ROLE_CAPS role multiplier, then the per-item caps). It is lifted into a function so
+// the tile badge and the preview cannot drift apart - the preview now calls it too, which is
+// the whole reason to extract it rather than copy it.
+function _forgeEffStat(it, k, starsOverride) {
+  if (!it) return 0;
+  const base = it[k];
+  if (typeof base !== 'number' || !base) return 0;
+  const st = (starsOverride === undefined) ? (it.stars || 0) : starsOverride;
+  const sig = (typeof _starSignatureStat === 'function') && _starSignatureStat(it, k);
+  const mul = sig ? _starCurve(STAR_SIG_GROWTH, STAR_SIG_LATE_GROWTH, st)
+                  : _starCurve(STAR_GROWTH, STAR_LATE_GROWTH, st);
+  const tierStat = (typeof _TIER_FLAT_STATS !== 'undefined') && _TIER_FLAT_STATS.has(k);
+  const tMul = (tierStat && typeof _tierMul === 'function') ? _tierMul(it.tier) : 1;
+  const roleMul = (typeof _lxSlotStatMul === 'function') ? _lxSlotStatMul(it.slot, k) : 1;
+  let v = base * mul * tMul * roleMul;
+  if (k === 'crit') v = Math.min(LX_EQUIP_CRIT_CAP_PER_ITEM, v);
+  if (k === 'atkPct') v = Math.min(LX_EQUIP_ATKPCT_CAP_PER_ITEM, v);
+  if (k === 'lifesteal' && typeof _lxEquipLifesteal === 'function') v = _lxEquipLifesteal(v);
+  return v;
+}
+
+// Every stat a piece actually contributes, at its current stars.
+function _forgeEffAll(it) {
+  const out = {};
+  if (!it) return out;
+  for (const k in it) {
+    if (typeof it[k] !== 'number') continue;
+    if (k === 'price' || k === 'tier' || k === 'stars') continue;
+    if (!(k in STAT_LABEL)) continue;
+    const v = _forgeEffStat(it, k);
+    if (v) out[k] = v;
+  }
+  return out;
+}
+
+// How this piece compares with the one already worn in its slot.
+//
+// The number is the MEAN of the per-stat ratios, taken over the stats the worn piece actually
+// provides. Per-stat ratios are unit-free, so ATK and MP and crit can be averaged without
+// inventing weights for them - which is the trap a single "gear score" falls into. Stats the
+// candidate adds that the worn piece does not have are deliberately NOT in the mean (there is
+// no ratio to take); they are listed in the tooltip instead, so the headline stays honest and
+// the detail is still one hover away. Each ratio is clamped to +/-200% so one stat that the
+// worn piece barely has cannot swamp the average.
+function _forgeCompare(cand, worn) {
+  if (!cand || !worn || cand === worn) return null;
+  const a = _forgeEffAll(cand), b = _forgeEffAll(worn);
+  const rows = []; let sum = 0, n = 0;
+  const keys = Object.keys(b).concat(Object.keys(a).filter((k) => !(k in b)));
+  for (const k of keys) {
+    const av = a[k] || 0, bv = b[k] || 0;
+    rows.push({ k, av, bv });
+    if (bv > 0) { sum += Math.max(-2, Math.min(2, (av - bv) / bv)); n++; }
+  }
+  return { pct: n ? Math.round((sum / n) * 100) : null, rows };
+}
+
+// The badge, and the tooltip line that backs it up. Top-right is the one free corner on a
+// 60px slot: stars sit top-left, tier and class bottom-right, the equipped E bottom-left.
+function _forgeDeltaBadge(cand, worn) {
+  const cmp = _forgeCompare(cand, worn);
+  if (!cmp || cmp.pct === null) return '';
+  const p = cmp.pct;
+  const col = p > 0 ? '#7ee07e' : p < 0 ? '#ff8a8a' : '#c8c8d4';
+  const bg = p > 0 ? 'rgba(40,110,40,0.82)' : p < 0 ? 'rgba(130,40,40,0.82)' : 'rgba(70,70,85,0.82)';
+  const txt = p > 0 ? '+' + p + '%' : p < 0 ? p + '%' : '=';
+  return `<span class="forge-delta" style="color:${col}; background:${bg};">${txt}</span>`;
+}
+
+function _forgeCompareTooltip(cand, worn) {
+  const cmp = _forgeCompare(cand, worn);
+  if (!cmp) return '';
+  const fmt = (k, v) => (typeof STATS_PCT !== 'undefined' && STATS_PCT.has(k))
+    ? (v * 100).toFixed(1) + '%' : (v < 5 ? v.toFixed(1) : String(Math.round(v)));
+  const lines = cmp.rows.map((r) => {
+    const label = (STAT_LABEL && STAT_LABEL[r.k]) || r.k;
+    const mark = r.bv > 0 ? (r.av > r.bv ? ' ▲' : r.av < r.bv ? ' ▼' : '') : ' (new)';
+    return '  ' + label + ': ' + fmt(r.k, r.av) + ' vs ' + fmt(r.k, r.bv) + mark;
+  });
+  const head = cmp.pct === null ? 'vs equipped:' : 'vs equipped: ' + (cmp.pct > 0 ? '+' : '') + cmp.pct + '% on average';
+  return '\n' + head + '\n' + lines.join('\n');
+}
+
 function _starBadgeHtml(it) {
   if (!it) return '';
   const s = it.stars || 0;
@@ -105776,12 +105876,17 @@ function renderEnhancementModal(selectedItem) {
     div.style.cssText = 'position:relative; cursor:pointer;'
       + (selectedItem === it ? ' outline:3px solid #ffd066; box-shadow:0 0 12px rgba(255,200,80,0.55);' : '')
       + (s >= MAX_STARS ? ' opacity:0.5;' : '');
+    // v0.30.707 — what is this piece worth, against the one already worn in its slot?
+    // The worn piece itself gets no badge: it is the baseline, and it already shows an E.
+    const _worn = player.equipped[it.slot === 'accessorie' ? 'accessory' : it.slot];
     div.innerHTML = itemIconHtml(it, 44) + _starBadgeHtml(it) + _tierBadgeHtml(it)
       + (typeof _classBadgeHtml === 'function' ? _classBadgeHtml(it) : '')
+      + _forgeDeltaBadge(it, _worn)
       + (entry.equipped ? '<div style="position:absolute; bottom:1px; left:3px; font-size:8px; font-weight:800; color:#88ff88; text-shadow:0 0 3px #000;">E</div>' : '')
       + (it.transcended ? '<div style="position:absolute; top:1px; left:3px; font-size:9px; font-weight:800; color:#ffb380; text-shadow:0 0 4px #000;" title="Transcended">🜂</div>' : '')
       + (s >= MAX_STARS ? '<div style="position:absolute; top:50%; left:0; right:0; transform:translateY(-50%); text-align:center; font-size:8px; font-weight:800; color:#ff99dd; text-shadow:0 0 3px #000;">MAX</div>' : '');
-    div.title = (it.name || 'Item') + (entry.equipped ? ' [Equipped]' : '') + ' · ★' + s + (s >= MAX_STARS ? ' (MAX)' : '') + (it.transcended ? ' · 🜂 Transcended' : '');
+    div.title = (it.name || 'Item') + (entry.equipped ? ' [Equipped]' : '') + ' · ★' + s + (s >= MAX_STARS ? ' (MAX)' : '') + (it.transcended ? ' · 🜂 Transcended' : '')
+      + _forgeCompareTooltip(it, _worn);
     // v0.26.x — Click toggles selection: tapping the already-selected item
     // deselects it, hiding the preview so the full grid is browsable again.
     div.onclick = () => renderEnhancementModal(selectedItem === it ? null : it);
@@ -105905,19 +106010,12 @@ function renderEnhancementModal(selectedItem) {
         if (!(k in STAT_LABEL)) continue;
         const base = selectedItem[k];
         if (!base) continue;
-        // v0.26.273 — Flat stats get tier mul × star mul; percent stats
-        // get star mul only (their caps prevent unbounded scaling).
-        const _statMul = _isTierStat(k) ? _tMul : 1;
-        const _roleMul = (typeof _lxSlotStatMul === 'function') ? _lxSlotStatMul(selectedItem.slot, k) : 1;   // v0.30.430 — GEAR_ROLE_CAPS
-        let curVal  = base * _mulFor(k, s)     * _statMul * _roleMul;
-        let nextVal = base * _mulFor(k, s + 1) * _statMul * _roleMul;
-        if (k === 'crit')   { curVal = Math.min(LX_EQUIP_CRIT_CAP_PER_ITEM, curVal);   nextVal = Math.min(LX_EQUIP_CRIT_CAP_PER_ITEM, nextVal); }
-        if (k === 'atkPct') { curVal = Math.min(LX_EQUIP_ATKPCT_CAP_PER_ITEM, curVal); nextVal = Math.min(LX_EQUIP_ATKPCT_CAP_PER_ITEM, nextVal); }
-        // v0.30.273 — the forge preview is where a player decides to spend on a
-        // star. Showing lifesteal climbing past the per-item cap sells an
-        // upgrade the game will not pay out; banded here, an already-capped
-        // piece honestly previews +0.0.
-        if (k === 'lifesteal') { curVal = _lxEquipLifesteal(curVal); nextVal = _lxEquipLifesteal(nextVal); }
+        // v0.30.707 — the star curve, the signature curve, the tier multiplier, the role
+        // multiplier and the per-item caps all live in _forgeEffStat now. This loop used to
+        // carry that formula inline, which is fine until a second reader needs it - the grid
+        // badge does - and then there are two copies to keep in step. There is one.
+        let curVal  = _forgeEffStat(selectedItem, k, s);
+        let nextVal = _forgeEffStat(selectedItem, k, s + 1);
         const fmt = (v) => STATS_PCT.has(k) ? `${(v*100).toFixed(1)} %` : (v < 5 ? v.toFixed(1) : Math.round(v));
         const delta = nextVal - curVal;
         const _deltaStr = STATS_PCT.has(k) ? `+${(delta*100).toFixed(1)} %` : (delta < 5 ? `+${delta.toFixed(1)}` : `+${Math.round(delta)}`);
