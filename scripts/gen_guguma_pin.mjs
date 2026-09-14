@@ -33,8 +33,8 @@ const REVIEW = path.join(ROOT, 'scripts', '_tmp_pin_review');
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith('--' + k + '=')); return a ? a.slice(k.length + 3) : d; };
 const has = (f) => process.argv.includes('--' + f);
 const S = 1024;
-const HEAD_BOX = { left: Number(arg('bx', 222)), top: Number(arg('by', 183)), width: Number(arg('bw', 516)), height: Number(arg('bh', 496)) };   // how much of him the pin shows: his head is widest at x 233-727, his belly patch starts around y 648
-const OVAL = { rx: Number(arg('ovrx', 0.52)), ry: Number(arg('ovry', 0.56)), cy: Number(arg('ovcy', 0.46)) };   // the ellipse he is cut to: rounded, so it reads as a pin head
+const HEAD_BOX = { left: Number(arg('bx', 199)), top: Number(arg('by', 183)), width: Number(arg('bw', 560)), height: Number(arg('bh', 540)) };   // how much of him the pin shows: his head is widest at x 233-727, his belly patch starts around y 648
+const OVAL = { rx: Number(arg('ovrx', 0.4143)), ry: Number(arg('ovry', 0.4296)), cy: Number(arg('ovcy', 0.530)) };   // ball-bottom: 232 px both ways, a CIRCLE centred on his belly   // the ellipse he is cut to: rounded, so it reads as a pin head
 
 // His two eyes: the dark blobs that do NOT touch the silhouette's edge (the edge-touching dark run is
 // his outline). Returns their centres in head-layer pixels, left first.
@@ -137,7 +137,16 @@ async function buildPin({ ol = 80, headf = 0.76, nw = 0.25, gold = false, cheeks
   const src = path.join(ROOT, 'Sprites/npc/Guguma.webp');
   const cut0 = await sharp(src).extract(HEAD_BOX).png().toBuffer();
   const m0 = await sharp(cut0).metadata();
-  const ell = Buffer.from(`<svg width="${m0.width}" height="${m0.height}" xmlns="http://www.w3.org/2000/svg"><ellipse cx="${m0.width / 2}" cy="${m0.height * OVAL.cy}" rx="${m0.width * OVAL.rx}" ry="${m0.height * OVAL.ry}" fill="#fff"/></svg>`);
+  // ball-bottom - per user: "more spherical from the mid and bottom section". The cut is a circle,
+  // but it only rules BELOW its own centre: the rect unions everything above it, so his head, his
+  // tuft and his crown stay his own shape while the mid and the underside become one round arc.
+  // (A plain ellipse cannot do both - closing the bottom arc inside the crop closes the top too and
+  // shears the tuft off. Measured: 8.1% rms deviation from a circle before, 1.2% after.)
+  const ellCy = m0.height * OVAL.cy;
+  const ell = Buffer.from(`<svg width="${m0.width}" height="${m0.height}" xmlns="http://www.w3.org/2000/svg">`
+    + `<ellipse cx="${m0.width / 2}" cy="${ellCy}" rx="${m0.width * OVAL.rx}" ry="${m0.height * OVAL.ry}" fill="#fff"/>`
+    + (has('legacytop') ? '' : `<rect x="0" y="0" width="${m0.width}" height="${ellCy}" fill="#fff"/>`)
+    + '</svg>');
   const cut = await sharp(cut0).composite([{ input: ell, blend: 'dest-in' }]).png().toBuffer();
   const { data: cd, info: ci } = await sharp(cut).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const bareBuf = await sharp(stripOwnOutline(cd, ci.width, ci.height), { raw: { width: ci.width, height: ci.height, channels: 4 } }).png().toBuffer();
