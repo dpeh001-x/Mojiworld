@@ -12181,7 +12181,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.684';
+const GAME_VERSION = 'v0.30.685';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -52199,6 +52199,10 @@ function _coopApplyDrop(msg) {
     const _it = _mpScrubStrings(msg.it);
     game.drops.push({ x: +msg.x || 0, y: +msg.y || 0, vy: -4, type: 'item', item: _it,
       life: Math.max(1000, +msg.l || DROP_LIFE_MS), noMagnet: !!msg.nm, _coopMirror: true });
+    // v0.30.685 — boss loot (the only drops the host tags nm) opens this follower's own
+    // vacuum window. Loot is instanced, so this sweeps OUR copy to US and takes nothing
+    // from the host or from another guest.
+    if (msg.nm && typeof _lxOpenLootVacuum === 'function') _lxOpenLootVacuum();
   } else if (msg.k === 'orb') {
     if (!game.powerupOrbs) game.powerupOrbs = [];
     const pw = (typeof POWERUPS !== 'undefined' && POWERUPS.length) ? _weightedBoonPick(POWERUPS) : null;   // v0.29.372 — rarity-weighted
@@ -68230,6 +68234,41 @@ function spawnPowerupOrb(x, y, rarity) {
   });
 }
 
+// =========================================================================
+// v0.30.685 — BOSS LOOT VACUUM.
+//
+// Per user: "after boss fights directly vacuum all the loots to the player
+// (ensure that in coop the coop players get loots as well)".
+//
+// This reverses v0.26.151, which was itself a user call ("Make boss item drops
+// not autoloot, but only loot when walked over it") and is why every boss and
+// super-boss gear site tags its drop `noMagnet: true`. Those tags stay, because
+// they still describe the drop correctly outside the window below - what changes
+// is that a boss death now opens a window in which the tag is ignored.
+//
+// A window rather than a per-drop flag, because "all the loots" includes what is
+// already lying on the floor when the boss falls: the coins and potions the
+// fight scattered, and the boon orbs. Those are separate arrays with their own
+// magnet radii, and a window sweeps all three without touching how any of them
+// is granted - every pickup still runs its existing path, so greed mods,
+// _grantMojicoins, quest ticks and telemetry are all unchanged.
+//
+// CO-OP: loot here is INSTANCED. The host rolls a drop, broadcasts it, and
+// _coopApplyDrop gives each follower its own independent copy which that
+// follower picks up locally. So a follower already gets its own loot - what it
+// did not have was the window, since it never runs the boss-death path. It opens
+// one when boss loot arrives (the broadcast's `nm` flag is set only by the boss
+// and super-boss drop sites), which needs no new message type and therefore no
+// protocol change between versions.
+// =========================================================================
+let _lxVacuumUntil = 0;
+const LX_VACUUM_MS = 2800;          // long enough to cross a boss arena, short enough to end
+const _lxNow = () => (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+function _lxOpenLootVacuum(ms) {
+  _lxVacuumUntil = Math.max(_lxVacuumUntil, _lxNow() + (ms || LX_VACUUM_MS));
+}
+function _lxVacuumOn() { return _lxVacuumUntil > _lxNow(); }
+
 function updatePowerupOrbs(dt) {
   for (let i = game.powerupOrbs.length - 1; i >= 0; i--) {
     const o = game.powerupOrbs[i];
@@ -68257,11 +68296,16 @@ function updatePowerupOrbs(dt) {
       game.powerupOrbs.splice(i, 1);
       continue;
     }
-    // Magnet (100 px) — sqrt only when pulling
-    if (d2 < 100*100) {
-      const dist = Math.sqrt(d2);
-      o.x += dx / dist * 2.5;
-      o.y += dy / dist * 1.5;
+    // Magnet (100 px) — sqrt only when pulling. v0.30.685 — during a boss loot sweep the
+    // radius is ignored and the pull is much faster, so orbs land with the rest of the loot.
+    // Claimed the same way a drop is, so a slow frame budget cannot strand one mid-flight.
+    if (_lxVacuumOn()) o._vac = 1;
+    const _orbVac = !!o._vac;
+    if (_orbVac || d2 < 100*100) {
+      const dist = Math.sqrt(d2) || 1;
+      const _os = _orbVac ? 14 : 2.5, _oy = _orbVac ? 14 : 1.5;
+      o.x += dx / dist * Math.min(_os, dist);
+      o.y += dy / dist * Math.min(_oy, dist);
     }
     if (o.life <= 0) game.powerupOrbs.splice(i, 1);
   }
@@ -72719,6 +72763,7 @@ function updatePlayer(dt) {
   // out of the per-drop loop (were recomputed for every drop every frame).
   const _dropPcx = player.x + player.w/2, _dropPcy = player.y + player.h/2;
   const _dropLvMul = 1 + Math.min(1.0, ((player.level || 1) - 1) / 99);
+  const _vacuum = _lxVacuumOn();   // v0.30.685 — boss loot sweep; one read a frame, not one a drop
   for (let i = game.drops.length - 1; i >= 0; i--) {
     const d = game.drops[i];
     {
@@ -72761,9 +72806,15 @@ function updatePlayer(dt) {
     // the drop starts drifting, then visibly accelerates into the player.
     // min(speed, dist) kills overshoot jitter at the center; leaving the
     // radius resets the ramp so re-entry starts soft again.
-    if (!d.noMagnet && d2 < _magnetR * _magnetR) {
+    // The sweep CLAIMS a drop, and a claimed drop keeps coming after the window shuts.
+    // Without the claim the sweep is a race against the frame rate: at 60fps a drop crosses
+    // a boss arena in well under a second, but on a slow frame budget the window expires with
+    // the loot still in mid-air - measured at ~10fps, exactly the bug a bare timer invites.
+    if (_vacuum) d._vac = 1;
+    if (d._vac || (!d.noMagnet && d2 < _magnetR * _magnetR)) {
       const dist = Math.sqrt(d2) || 1;
-      d._mv = Math.min(11, (d._mv || 1.6) * 1.12 + 0.2);
+      // A swept drop starts already moving and tops out roughly twice as fast.
+      d._mv = d._vac ? Math.min(24, (d._mv || 7) * 1.16 + 0.6) : Math.min(11, (d._mv || 1.6) * 1.12 + 0.2);
       const sp = Math.min(d._mv, dist);
       d.x += dx / dist * sp; d.y += dy / dist * sp;
     } else if (d._mv) d._mv = 0;
@@ -97152,6 +97203,9 @@ function killMonster(m) {
   // dropped at the NORMAL tier-0 rate despite its higher stats. Now both Elite
   // and Elder map to tier 1 (and the tier-1 chance below is doubled).
   const tier = m.isBoss ? 2 : ((m.isElite || m.isMiniBoss) ? 1 : 0);
+  // v0.30.685 — the boss is down, so everything on the floor comes to the player: this
+  // drop, the coins and potions the fight scattered, and the boon orbs. See _lxOpenLootVacuum.
+  if (m.isBoss || m.superBoss) _lxOpenLootVacuum();
   // v0.25.7  — bumped normal-mob base drop rate 0.14 → 0.18.
   // v0.25.787 — Cut back to reduce inventory-clog reports. Normal mobs
   // 0.18 → 0.08 (~2.25× less), elites 0.50 → 0.28 (~1.8× less), bosses
