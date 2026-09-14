@@ -12181,7 +12181,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.683';
+const GAME_VERSION = 'v0.30.684';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -74057,6 +74057,25 @@ function _tickClassIdentity(dt) {
     // v0.30.42 — null guard: the apotheosis hold ceiling above can release
     // (and therefore clear) the charge earlier in this same tick.
     if (player._warCharge && player._warCharge.cls === 'archer') player.vx = 0;
+    // v0.30.684 - per user: the overcharge should be visible while Railshot CHARGES, not only at release.
+    // A ring pulses at the bow every few frames and grows with the draw, so a held rail reads from
+    // across the screen and a full draw is unmistakable. Throttled by frame, skipped under adaptive
+    // low-FX, and scoped to this one skill - it is the only per-frame cost the charge adds.
+    if (player._warCharge && player._warCharge.cls === 'archer' &&
+        player._warCharge.skillId === 'snipe_railgun' &&
+        !(typeof _perfVeryLowFx === 'function' && _perfVeryLowFx())) {
+      const _rcP = player._warCharge.power || 0;
+      const _rcGap = _rcP >= 0.999 ? 5 : 9;
+      if (((game.time | 0) % _rcGap) === 0) {
+        const _rcF = player.facing || 1;
+        spawnSpriteBurst(player.x + player.w / 2 + _rcF * 26, player.y + 24, 'railshot_charge', {
+          size: 110 + 360 * _rcP,
+          life: 14,
+          spin: (((game.time | 0) % (2 * _rcGap)) ? 1 : -1) * (0.8 + 1.2 * _rcP),
+          opacity: 0.28 + 0.56 * _rcP,
+        });
+      }
+    }
     // Getting stunned / dying cancels the charge without firing
     if (player.hitStun > 0 || player.hp <= 0 || game.dying > 0 || game.paused) {
       player._warCharge = null;
@@ -80902,12 +80921,21 @@ const SKILL_FNS = {
     // has dwell time to read. Forward offset 80 → 160 px so the larger
     // sprite anchors mid-beam instead of bunching at the bow.
     spawnSpriteBurst(sx + dir * 160, sy, 'railshot',
-      { size: 500 + 180 * _rsChg, life: 34, angle: dir > 0 ? 0 : Math.PI });
+      { size: 500 + 320 * _rsChg, life: 34, angle: dir > 0 ? 0 : Math.PI });   // v0.30.684 - was +180
     // v0.30.673 - the overcharge rings at the bow, sized by how long it was held. Tap-fired shots skip
     // it entirely so the cheap cast stays visually cheap.
     if (_rsChg > 0.05) {
-      spawnSpriteBurst(sx + dir * 34, sy, 'railshot_charge',
-        { size: 120 + 300 * _rsChg, life: 20 + Math.round(14 * _rsChg) });
+      // v0.30.684 - per user, larger and more powerful: a wide ring spinning one way, a tighter
+      // counter-spinning one inside it, and a white flare at the muzzle. 420 px at a full draw
+      // became 700, and the two layers turning against each other is what sells the power - a
+      // single bigger circle just looks like a bigger circle.
+      const _rsSize = 230 + 470 * _rsChg;
+      spawnSpriteBurst(sx + dir * 40, sy, 'railshot_charge',
+        { size: _rsSize, life: 24 + Math.round(16 * _rsChg), spin: 0.9 + 1.4 * _rsChg });
+      spawnSpriteBurst(sx + dir * 40, sy, 'railshot_charge',
+        { size: _rsSize * 0.58, life: 20 + Math.round(12 * _rsChg), spin: -(1.6 + 2.0 * _rsChg), opacity: 0.78 });
+      spawnSmoothExplosion(sx + dir * 40, sy, 40 + 90 * _rsChg, '#ffffff', '#aaddff88',
+        { life: 16 + Math.round(8 * _rsChg) });
     }
     const maxRange = 900 + _rsReach;   // v0.30.673 - a full draw reaches 1600 px
     // Sweep every monster in a narrow horizontal lane from player

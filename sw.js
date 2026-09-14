@@ -133,7 +133,7 @@
 // keeps the old icon, the old cast sounds and the old round out of cache.
 // v0.30.x - v38 -> v39. The 42 MP3s shipfix had staged as text (v0.30.572's nineteen monster clips and
 // their backups, v0.30.617's four Deadeye cues) are REPAIRED under their own names; browsers cached the broken bytes.
-const CACHE = 'mojiworld-assets-v43';   // v0.30.673 - railshot overcharge fx
+const CACHE = 'mojiworld-assets-v44';   // v0.30.684 - the railshot overcharge art is redrawn denser at 1024
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

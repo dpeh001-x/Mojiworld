@@ -21,14 +21,18 @@ const sharp = require('sharp');
 const fs = require('node:fs');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'Sprites', 'fx', 'railshot_charge.webp');
-const SIZE = 512;
+// 1024, not 512: the overcharge is drawn up to ~760 px wide at a full draw, and a 512 source went
+// soft at that size. The gates below are resolution-independent.
+const SIZE = Number((process.argv.find((a) => a.startsWith('--size=')) || '--size=1024').slice(7));
 const KEEP = process.argv.includes('--keep');
 
 const PROMPT = [
   'Game VFX sprite, fully transparent background, alpha only - no scene, no floor, no character, no',
-  'text, no watermark, no border. ONE centred effect: a railgun overcharge - three concentric rings of',
-  'electric energy being pulled inward toward a small blinding white-hot core, with forked lightning',
-  'arcs snapping between the rings and a few bright motes spiralling in. Ice blue and cyan',
+  'text, no watermark, no border. ONE centred effect: a violent railgun overcharge at the instant before',
+  'firing - four dense concentric rings of electric energy crushing inward onto a blinding white-hot',
+  'core that flares outward in a star, with MANY thick forked lightning bolts arcing between every ring,',
+  'crackling filaments filling the space inside the rings, and bright sparks and motes spiralling in.',
+  'Packed with detail and energy, overwhelming and powerful, not a thin empty ring. Ice blue and cyan',
   '(#66ccff, #aaddff) with a pure white centre. Crisp cel-shaded anime game art, bold clean edges,',
   'high contrast, glowing. Perfectly centred, circular overall silhouette, generous empty margin on',
   'all four sides. No background wash, no rectangle, no card, no frame.',
@@ -79,7 +83,10 @@ async function makeImage() {
       const m = await measure(img);
       console.log(`  attempt ${attempt}: transparent ${m.clearPct.toFixed(0)}%  corners ${m.cornerInk.toFixed(1)}%  aspect ${m.aspect.toFixed(2)}  cool ${m.coolPct.toFixed(0)}%  centre off ${m.centreOff.toFixed(2)}`);
       const why = [];
-      if (m.clearPct < 45) why.push('only ' + m.clearPct.toFixed(0) + '% of the frame is clear - it came back as a filled card');
+      if (m.clearPct < 40) why.push('only ' + m.clearPct.toFixed(0) + '% of the frame is clear - it came back as a filled card');
+      // and the opposite failure: a thin open ring reads as weak at the size this is drawn. The first
+      // 1024 roll came back sparser than the 512 it replaced, which is how this gate got written.
+      if (m.inkPct < 20) why.push('only ' + m.inkPct.toFixed(0) + '% ink - a thin empty ring, not an overcharge');
       if (m.cornerInk > 2) why.push('ink in the corners (' + m.cornerInk.toFixed(1) + '%) - there is a background or a frame');
       if (m.aspect < 0.72 || m.aspect > 1.38) why.push('silhouette aspect ' + m.aspect.toFixed(2) + ' - not round enough to sit on an anchor');
       if (m.coolPct < 55) why.push('only ' + m.coolPct.toFixed(0) + '% of the ink is cool - it would clash with the cyan beam');
@@ -112,6 +119,7 @@ async function measure(png) {
   const bw = Math.max(1, x1 - x0 + 1), bh = Math.max(1, y1 - y0 + 1);
   return {
     clearPct: 100 * clear / (W * H),
+    inkPct: 100 * ink / (W * H),
     cornerInk: 100 * corner / Math.max(1, cornerTot),
     aspect: bw / bh,
     coolPct: ink ? 100 * cool / ink : 0,

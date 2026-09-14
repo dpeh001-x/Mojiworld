@@ -70,6 +70,34 @@ try {
     o.fullVeryFar = await fire(1, 1550);
     o.tooFar = await fire(1, 1750);                 // and it is still a finite rail
     o.fxRegistered = !!(LX_FX && LX_FX.railshot_charge);
+    // v0.30.684 - the rings must be visible WHILE the bow is drawn, not only at release, and the
+    // release must be the biggest of the three. Sizes are read off the queued sprite bursts.
+    const ringSizes = () => (game.smoothFx || []).filter((f) => f.spriteKey === 'railshot_charge').map((f) => Math.round(f.size));
+    const holdFor = async (p) => {
+      const slot = Object.keys(KEY_TO_SLOT).find((k) => KEY_TO_SLOT[k] === 'q') || 'f';
+      game.keys[slot] = true;
+      player._warCharge = { slotKey: slot, start: (game.time | 0) - Math.round(45 * p), skillId: 'snipe_railgun', power: p, cls: 'archer', frames: 45 };
+      game.smoothFx = [];
+      // the tick recomputes power from start each frame, so start is re-pinned through the sample or
+      // a half draw silently finishes charging and both cases read the same size
+      for (let i = 0; i < 12; i++) { player._warCharge.start = (game.time | 0) - Math.round(45 * p); await sleep(50); }
+      const s = ringSizes();
+      game.keys[slot] = false; player._warCharge = null;
+      return s;
+    };
+    o.holdHalf = await holdFor(0.5);
+    o.holdFull = await holdFor(1);
+    const ringsOnRelease = async (charge) => {
+      target(200);
+      for (const k of Object.keys(player._cd || {})) player._cd[k] = 0;
+      player.facing = 1; player._releasedCharge = charge; game.smoothFx = [];
+      const _rnd = Math.random; Math.random = () => 0.95;
+      try { castSkill('snipe_railgun'); } finally { Math.random = _rnd; }
+      await sleep(80);            // read them while they are still alive
+      return ringSizes();
+    };
+    o.releaseRings = await ringsOnRelease(1);
+    o.tapRings = await ringsOnRelease(0);
     return o;
   });
   const ratio = (a, b) => (b ? +(a / b).toFixed(2) : 0);
@@ -82,6 +110,11 @@ try {
   ok('...and it is still a rail, not an infinite line', r.tooFar === 0, String(r.tooFar));
   ok('the overcharge art is registered and served', r.fxRegistered && seen.art === 200, 'HTTP ' + seen.art);
   ok('the card tells the player it can be held', /HOLD to overcharge/i.test(r.desc) && /150%/.test(r.desc), r.desc.slice(-90));
+  const big = (a) => (a && a.length ? Math.max(...a) : 0);
+  ok('the rings show WHILE the bow is drawn', r.holdFull.length > 0, r.holdFull.join(', ') || 'nothing queued');
+  ok('...and they grow with the draw', big(r.holdFull) > big(r.holdHalf), `half ${big(r.holdHalf)} -> full ${big(r.holdFull)}`);
+  ok('the release is bigger than the draw, and layered', big(r.releaseRings) >= 650 && r.releaseRings.length >= 2, r.releaseRings.join(', '));
+  ok('a tap still summons no rings at all', r.tapRings.length === 0, r.tapRings.join(', ') || 'none');
   ok('no page errors', errs.length === 0, errs.join(' | '));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass}/${pass + fail} checks passed`);
