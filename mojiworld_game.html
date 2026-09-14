@@ -12261,7 +12261,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.712';
+const GAME_VERSION = 'v0.30.713';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -38866,7 +38866,8 @@ function getAtk()  {
   // for context; halves every attack (basics + skills) so mobs don't
   // melt instantly.
   const _edAtk = _edictOn('waningHand') ? 0.5 : 1;   // v0.29.66 — Edict: Waning Hand (your ATK −50%)
-  return Math.floor(base * pct * pDmg * PLAYER_ATK_MUL * _clsAtkMul * _edAtk);
+  // v0.30.713 — the MojiMon bond, last, so it is a percentage of the ATK you really have.
+  return Math.floor(base * pct * pDmg * PLAYER_ATK_MUL * _clsAtkMul * _edAtk * _mojimonAuraMul('atk'));
 }
 // v0.25.856 — Warrior Fortitude Lv-scaling. Returns the damage-taken
 // multiplier that warrior-class damage paths use. At Lv ≤50 it stays at
@@ -38935,6 +38936,8 @@ function getDef()  {
   { const _tfx = (typeof talentFx === 'function') ? talentFx() : null; if (_tfx && _tfx.defPct) d = Math.floor(d * (1 + _tfx.defPct)); }
   // v0.25.511 — Warrior innate: +20 % DEF over the baseline classes.
   if (player.cls === 'warrior') d = Math.floor(d * 1.25);
+  // v0.30.713 — the MojiMon bond. getMagicDef delegates here, so warding scales with it too.
+  d = Math.floor(d * _mojimonAuraMul('def'));
   return d;
 }
 // v0.25.738 — Magic DEF removed per user "DEF = Magic DEF". The two
@@ -38983,6 +38986,9 @@ function getMaxHp(){
   // v0.26.889 — job talent: max HP%
   { const _tfx = (typeof talentFx === 'function') ? talentFx() : null; if (_tfx && _tfx.maxHpPct) h = Math.floor(h * (1 + _tfx.maxHpPct)); }
   if (_edictOn('frayedThread')) h = Math.floor(h * 0.75);   // v0.29.66 — Edict: Frayed Thread (your Max HP −25%)
+  // v0.30.713 — the MojiMon bond, after the class and global multipliers so it reads as a
+  // percentage of the pool the player actually sees on the bar.
+  h = Math.floor(h * _mojimonAuraMul('hp'));
   return h;
 }
 function getMaxMp(){
@@ -38998,6 +39004,7 @@ function getMaxMp(){
   if (_mpPct) m = Math.floor(m * (1 + _mpPct));
   // v0.26.889 — job talent: max MP%
   { const _tfx = (typeof talentFx === 'function') ? talentFx() : null; if (_tfx && _tfx.maxMpPct) m = Math.floor(m * (1 + _tfx.maxMpPct)); }
+  m = Math.floor(m * _mojimonAuraMul('mp'));   // v0.30.713 — the MojiMon bond
   return m;
 }
 // v0.25.530 — Holy Shield level-10 damage-reduction multiplier. Returns
@@ -76087,6 +76094,95 @@ const MOJIMON_UPG_PT_CAP = 15;
 // at 20 points, which is the "overpowered" case this pair exists to prevent.
 const MOJIMON_ATK_MULT = 0.5;
 const MOJIMON_UPG_STATS = ['hp', 'atk', 'def'];   // v0.29.446 — the only allocatable keys
+// v0.30.713 — THE BOND. A captured MojiMon you keep on the H slot lends you a little of itself.
+//
+// Per user: "after capturing and equipping let them provide a small stat boost to the player
+// between 0.1-2.5% of a particular main STAT - HP MP DEF ATK, higher level monsters have more
+// STAT bonuses".
+//
+// WHICH stat is a property of the species, not a roll, so it is collectable knowledge: a creature
+// that casts lends MP, and everything else lends whichever of HP / ATK / DEF it is most extreme
+// in, measured against the roster's own medians rather than raw numbers (a mob with 60,000 HP and
+// 900 ATK is not "a HP mob" - it is a late-game mob, and both figures are large).
+//
+// HOW MUCH is the species' level on a straight line from the floor to the ceiling the user set:
+// Lv 1 gives 0.1%, Lv 100 gives 2.5%. 129 of the 131 capturable species carry a level through
+// monsterTypes.level or MOB_NATURAL_LEVEL; the two that do not (towerArbiter, towerSovereign) sit
+// at the floor, and the panel prints the level it used so that is visible rather than mysterious.
+//
+// Deliberately NOT summed across the roster: one bond at a time, the one you chose. And read from
+// `assigned` rather than `out`, because `out` is the transient summon - tying a passive stat to it
+// would make your HP bar jump every time the companion timed out or died.
+const MOJIMON_AURA_MIN = 0.001;    // 0.1% at Lv 1
+const MOJIMON_AURA_MAX = 0.025;    // 2.5% at Lv 100
+const MOJIMON_AURA_TOP_LEVEL = 100;
+const MOJIMON_AURA_STATS = ['hp', 'mp', 'atk', 'def'];
+
+function _mojimonLevelOf(type) {
+  const t = (typeof monsterTypes !== 'undefined') ? monsterTypes[type] : null;
+  if (t && typeof t.level === 'number' && t.level > 0) return t.level;
+  if (typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[type]) return MOB_NATURAL_LEVEL[type];
+  return 0;   // unknown: the panel says so, and the bond sits at the floor
+}
+
+// Roster medians, computed once. Medians rather than means because the stat spread is heavily
+// skewed by a handful of bosses, and a mean would call almost everything "below average".
+function _mojimonMedians() {
+  if (window._MM_MED) return window._MM_MED;
+  const out = { hp: 1, atk: 1, def: 1 };
+  try {
+    const all = (typeof _mjxAllTypes === 'function') ? _mjxAllTypes() : Object.keys(monsterTypes);
+    for (const k of ['hp', 'atk', 'def']) {
+      const v = all.map((t) => (monsterTypes[t] && monsterTypes[t][k]) || 0).filter((x) => x > 0).sort((a, b) => a - b);
+      if (v.length) out[k] = v[Math.floor(v.length / 2)] || 1;
+    }
+  } catch (e) {}
+  window._MM_MED = out; return out;
+}
+
+function _mojimonAuraStat(type) {
+  const t = (typeof monsterTypes !== 'undefined') ? monsterTypes[type] : null;
+  if (!t) return 'atk';
+  if (t.shoot) return 'mp';                     // it casts: it lends you the pool to cast with
+  const med = _mojimonMedians();
+  const score = { hp: (t.hp || 0) / (med.hp || 1), atk: (t.atk || 0) / (med.atk || 1), def: (t.def || 0) / (med.def || 1) };
+  return ['hp', 'atk', 'def'].reduce((a, b) => (score[b] > score[a] ? b : a));
+}
+
+function _mojimonAuraPct(type) {
+  const lv = _mojimonLevelOf(type);
+  const t = Math.max(0, Math.min(1, (lv - 1) / (MOJIMON_AURA_TOP_LEVEL - 1)));
+  return MOJIMON_AURA_MIN + (MOJIMON_AURA_MAX - MOJIMON_AURA_MIN) * t;
+}
+
+// The bond currently in force, or null. Captured AND assigned - a species sitting in the roster
+// unassigned lends nothing, which is what makes the H slot a choice.
+function _mojimonAura() {
+  const mm = (player && player.mojimon) || null;
+  if (!mm || !mm.roster) return null;
+  const type = mm.assigned;
+  if (!type || !mm.roster[type]) return null;
+  return { type, stat: _mojimonAuraStat(type), pct: _mojimonAuraPct(type), level: _mojimonLevelOf(type) };
+}
+
+// One multiplier for the four getters to share. Cheap enough to call per frame: the only work is
+// a roster lookup and the medians, which are memoised.
+function _mojimonAuraMul(stat) {
+  const a = _mojimonAura();
+  return (a && a.stat === stat) ? 1 + a.pct : 1;
+}
+
+// "+1.8% ATK" — the panel's line, and the one place the wording lives.
+const MOJIMON_AURA_NAME = { hp: 'Max HP', mp: 'Max MP', atk: 'ATK', def: 'DEF' };
+function _mojimonAuraLabel(type) {
+  const stat = _mojimonAuraStat(type);
+  const pct = _mojimonAuraPct(type);
+  return {
+    stat, pct, level: _mojimonLevelOf(type),
+    text: '+' + (pct * 100).toFixed(1) + '% ' + MOJIMON_AURA_NAME[stat],
+  };
+}
+
 function _mojimonEnsure() {
   if (!player.mojimon || typeof player.mojimon !== 'object') player.mojimon = {};
   const mm = player.mojimon;
@@ -76804,6 +76900,23 @@ function renderMojiMonPanel() {
         '<button type="button" title="Assign to the H quick-summon hotkey" onclick="_mojimonUi.assign(\'' + k + '\')" style="padding:5px 7px; border-radius:8px; border:1px solid #7a6a3a; background:rgba(160,130,40,0.18); color:' + (mm.assigned === k ? '#ffd166' : '#8a82a4') + '; cursor:pointer; font-size:12px;">' + (mm.assigned === k ? '★H' : '☆') + '</button>' +
         (isOut ? '' : '<button type="button" onclick="_mojimonUi.summon(\'' + k + '\')" ' + (cdLeft > 0 ? 'disabled style="opacity:0.45; cursor:default;' : 'style="cursor:pointer;') + ' padding:5px 10px; border-radius:8px; border:1px solid #4a7a5a; background:rgba(60,160,90,0.25); color:#a0ffc0; font-size:11px; font-weight:700;">Summon</button>') +
         '</div>' +
+        // v0.30.713 — what this species lends you while it holds the H slot. Shown on every row, so
+        // the roster reads as a menu of bonds rather than a list of pets; lit on the assigned one,
+        // because that is the only one paying out.
+        ((function () {
+          const _al = _mojimonAuraLabel(k);
+          const _on = (mm.assigned === k);
+          return '<div style="margin-top:5px; display:flex; align-items:center; gap:6px; font-size:10px;'
+            + ' padding:3px 6px; border-radius:7px;'
+            + (_on ? ' background:rgba(127,224,160,0.14); border:1px solid rgba(127,224,160,0.45); color:#bff2d4;'
+                   : ' background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); color:#8a82a4;')
+            + '" title="' + (_al.level ? 'Species level ' + _al.level : 'Species level unknown — this bond sits at the floor')
+            + '. A bond runs from +0.1% at Lv 1 to +2.5% at Lv 100, and only the assigned MojiMon pays it.">'
+            + '<span style="font-weight:800;">' + (_on ? 'BOND' : 'bond') + '</span>'
+            + '<span style="' + (_on ? 'color:#7fe0a0; font-weight:800;' : '') + '">' + _al.text + '</span>'
+            + '<span style="margin-left:auto; opacity:0.75;">' + (_al.level ? 'Lv ' + _al.level : 'Lv ?') + '</span>'
+            + '</div>';
+        })()) +
         '<div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.08); padding-top:4px;">' +
         '<div style="font-size:10px; color:#9b93b8;">Allocate points (' + free + ' free · max ' + MOJIMON_UPG_PT_CAP + ' per stat):</div>' +
         row('hp', 'HP', '+' + Math.round(_mmUpgPts(rec.upg.hp) * MOJIMON_UPG.hp * 100) + '%') +
