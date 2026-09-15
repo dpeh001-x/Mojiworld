@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.761';
+const GAME_VERSION = 'v0.30.762';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -92967,7 +92967,7 @@ function bossAI(m, dt, distToPlayer) {
       }
     } else if (m.patternState === 'singularity') {
       // v0.25.528 — SINGULARITY COLLAPSE. Avoidable instant-death.
-      // 3.5 s telegraph paints 3 small safe-zone rects across the
+      // 5.5 s telegraph paints 5 small safe-zone rects across the
       // arena; everything outside them resolves into a kill. Spawns
       // ONE hazard with type='gravitos_singularity' that owns the
       // safe-zone array, the render path and the resolve check.
@@ -92979,15 +92979,27 @@ function bossAI(m, dt, distToPlayer) {
         // width, –22% height). Player needs cleaner positioning to
         // survive — the OHKO is now a real test, not a casual dodge.
         const safeW = 112, safeH = 70;   // v0.30.580 — was 100 (per user: "slightly larger")
-        // Three safe zones aligned to platforms the player can actually
-        // stand on: left + right ground rests, plus the centre mid-air
-        // platform at y=260. Each zone's BOTTOM sits on the platform
-        // top so the player's centre (≈ feet − 22 px) lands inside the
-        // rect when they stand on it. Random jitter on X so positions
-        // aren't memorisable across runs.
+        // FIVE safe zones aligned to platforms the player can actually stand on, and
+        // they reach BOTH ENDS of the arena. Each zone's BOTTOM sits on the platform
+        // top so the player's centre (≈ feet − 22 px) lands inside the rect when they
+        // stand on it. Random jitter on X so positions aren't memorisable across runs.
+        //
+        // v0.30.x — BUG: the three authored zones spanned x 480..1552 of a 2200-wide
+        // arena. Both ends were dead ground. A player fighting at the left wall (x≈40)
+        // or on the right perch above x≈1900 — both places this fight legitimately
+        // pushes you to, since the hyper-jump vents at 240 and 1840 are how you reach
+        // the high platforms — had 440 to 500 px to cross under 3x gravity inside the
+        // telegraph, with the boss's own attacks still live. The nearest shelter being
+        // off-screen is not a dodge. The two new zones sit in the end thirds, clear of
+        // the vents, so wherever the collapse catches you there is a rest within reach.
         const groundY = 480;        // gravitosArena ground top
         const midPlatY = 260;       // wide centre platform top
         const zones = [
+          {                                          // v0.30.x — LEFT END (new)
+            x: 40 + Math.random() * 70,
+            y: groundY - safeH,
+            w: safeW, h: safeH,
+          },
           {
             x: 480 + Math.random() * 140,
             y: groundY - safeH,
@@ -93003,7 +93015,12 @@ function bossAI(m, dt, distToPlayer) {
             y: groundY - safeH,
             w: safeW, h: safeH,
           },
-        ];
+          {                                          // v0.30.x — RIGHT END (new)
+            x: ww - 40 - safeW - Math.random() * 60,
+            y: groundY - safeH,
+            w: safeW, h: safeH,
+          },
+        ].map((z) => _lxSafeZoneOffPad(z, ww));
         // v0.29.929 — THE COLLAPSE SWALLOWS THE LESSER WELLS (per user: black
         // holes "overlap with the safe areas"). The singularity is the greater
         // gravity: every live black hole is consumed the moment the collapse is
@@ -93023,7 +93040,7 @@ function bossAI(m, dt, distToPlayer) {
           cx: m.x + m.w / 2, cy: m.y + m.h / 2,
           // v0.29.555 (per user) — "give more time for players to seek
           // shelter". 210 -> 330 frames, i.e. 3.5 s -> 5.5 s. The safe zones
-          // are only 100x70 in a 2200-wide arena and one of the three sits on
+          // are only 100x70 in a 2200-wide arena and one of the five sits on
           // a mid-air platform, so the old window left almost no room for
           // reaction time on top of the travel and the climb.
           life: 330, maxLife: 330,         // 5.5 s @ 60 fps
@@ -93082,18 +93099,35 @@ function bossAI(m, dt, distToPlayer) {
       const SAFE_LIFE = 84;     // 1.4 s @ 60 fps — explicit timer the hazard counts down
       const RAIN_COUNT = 4;
       if (m._rainIdx == null) m._rainIdx = 0;
+      // v0.30.x — THE RAIN CYCLES ITS BANDS. Which band a box lands on used to be a
+      // fresh 60/40 coin per box, so a four-box rain could put all four on the ground:
+      // the pattern's stated point — "forces the player to vary between altitudes" —
+      // came down to a die roll, and about one rain in twelve asked for no climb at
+      // all. The bands now alternate strictly. Only the band the cycle STARTS on is
+      // random, drawn once per rain here, so the order is still not memorisable while
+      // the shape of the ask is guaranteed.
+      if (m._rainBand0 == null) m._rainBand0 = (Math.random() < 0.5) ? 0 : 1;
       // Spawn next box when the current cadence slot opens up.
       if (m._rainIdx < RAIN_COUNT && m.patternTimer >= m._rainIdx * TICK_MS) {
         const ww = game.mapData.worldWidth || 2200;
         const safeW = 102, safeH = 60;   // v0.30.580 — was 90 (per user: "slightly larger")
         const groundY = 480;
         const midPlatY = 260;
-        // 60% chance the box lands on the ground band, 40% on the
-        // mid platform — forces the player to vary between altitudes.
-        const onGround = Math.random() < 0.60;
+        // Alternating bands — see _rainBand0 above.
+        const onGround = ((m._rainIdx + m._rainBand0) % 2) === 0;
         const _y = (onGround ? groundY : midPlatY) - safeH;
-        const _x = Math.max(40, Math.min(ww - safeW - 40, Math.random() * (ww - safeW)));
-        const safeRect = { x: _x, y: _y, w: safeW, h: safeH };
+        // v0.30.x — and a mid-band box has to land ON the mid platform. x was a flat
+        // random across the whole 2200 px for BOTH bands, but the centre platform only
+        // spans 900..1300: a mid-band box outside it hung in the air over a lethal
+        // floor with nothing to stand on — a safe zone the player could not occupy.
+        // That was survivable-by-luck while the band was a coin flip and the box was
+        // usually on the ground; with the alternation above it would be guaranteed
+        // twice a rain, so the two changes belong together. The ground band keeps the
+        // full arena-wide roll.
+        const _x = onGround
+          ? Math.max(40, Math.min(ww - safeW - 40, Math.random() * (ww - safeW)))
+          : (908 + Math.random() * Math.max(1, 1292 - 908 - safeW));
+        const safeRect = _lxSafeZoneOffPad({ x: _x, y: _y, w: safeW, h: safeH }, ww);
         // Reuse the existing gravitos_singularity hazard type — the
         // render branch + resolve path already handle the safe-zone
         // exclusion math, so we just spawn one with a single-element
@@ -93143,6 +93177,7 @@ function bossAI(m, dt, distToPlayer) {
           }
         }
         m._rainIdx = 0;
+        m._rainBand0 = null;   // v0.30.x — next rain draws its own starting band
         m.patternState = 'idle';
         m.patternTimer = 0;
         m._lastOhkoEndAt = game.time | 0;   // v0.30.588 ohko-pass
@@ -102784,6 +102819,46 @@ function _lxSzInside(h, strict) {
     if (xOk && yOk) return true;
   }
   return false;
+}
+// v0.30.x — NO SAFE ZONE ON A LAUNCH PAD.
+// The Singularity's shelters were placed with no knowledge of the arena's five
+// hyper-jump vents, and the collapse rain placed its box at a flat random across the
+// full width. A rect overlapping a pad was a death sentence dressed as a shelter:
+// standing on a pad FIRES it (vy −95 at launchPadMul 1.6), so the player was flung
+// several hundred px out of the only survivable rect a beat before the collapse
+// resolved — and nothing they could have done differently would have helped, because
+// occupying the rect is what triggered the ejection. The resolve check is a plain AABB
+// against the rect, so "standing on a pad" and "inside a safe zone" are mutually
+// exclusive by construction: the zone has to move, not the pad.
+//
+// Slides the rect to whichever side of the offending pad is nearer, wrapping to the
+// other side when that one runs out of arena, and re-tests (a slide can land on the
+// next pad along). The gravitos arena always has room; a map that somehow did not
+// would get the rect back unmoved rather than shoved off-screen, which is the same
+// behaviour as before this function existed.
+function _lxSafeZoneOffPad(rect, ww) {
+  const pads = (game.mapData && game.mapData.launchPads) || null;
+  if (!pads || !pads.length) return rect;
+  const PAD_H = 26;    // the vent's trigger band, measured either side of its y line
+  const MARGIN = 14;   // and a little air past its ends, so a foot cannot clip one
+  for (let pass = 0; pass < 8; pass++) {
+    let hit = null;
+    for (const p of pads) {
+      if (!p) continue;
+      const x0 = p.x - MARGIN, x1 = p.x + (p.w || 0) + MARGIN;
+      const y0 = p.y - PAD_H, y1 = p.y + PAD_H;
+      if (rect.x < x1 && rect.x + rect.w > x0 && rect.y < y1 && rect.y + rect.h > y0) { hit = { x0, x1 }; break; }
+    }
+    if (!hit) return rect;
+    const cx = rect.x + rect.w / 2;
+    const left = hit.x0 - rect.w, right = hit.x1;
+    let nx = (Math.abs(cx - hit.x0) <= Math.abs(cx - hit.x1)) ? left : right;
+    if (nx < 20) nx = right;
+    if (nx + rect.w > ww - 20) nx = left;
+    if (nx < 20 || nx + rect.w > ww - 20) return rect;   // nowhere to go — leave it be
+    rect.x = nx;
+  }
+  return rect;
 }
 const _HAZ_PROTECTED = new Set(['gravitos_singularity', 'void_tear', 'aurora_field', 'soul_vortex', 'necro_maelstrom', 'warlord_banner', 'sovereign_drain_pillar', 'blackhole']);
 function _trimVisualQueues() {
@@ -147250,7 +147325,7 @@ function drawHazards(_behindPass) {
     }
     else if (h.type === 'gravitos_singularity') {
       // v0.25.528 — Singularity Collapse telegraph. Paints a darkening
-      // arena-wide void with 3 highlighted safe-zone rects so the
+      // arena-wide void with its highlighted safe-zone rects so the
       // player can read where to stand. h.safeZones is the canonical
       // array of {x, y, w, h} world rects — also drives the resolve
       // check at h.life === 0 (player AABB must overlap one).
