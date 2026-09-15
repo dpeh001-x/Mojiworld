@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.760';
+const GAME_VERSION = 'v0.30.761';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -141140,6 +141140,28 @@ function zodiacBossAI(m, dt, distToPlayer) {
 const LEO_POUNCE_LAG = 120;      // frames of lag. game.time is a 60fps FRAME counter, so 120 == 2.0s
 const LEO_POUNCE_R = 150;        // slam radius, px, measured from the drawn circle
 const LEO_POUNCE_FRAC = 0.45;   // v0.30.388 — was 0.6 (zodiac damage −25%)     // 60% of max HP - high, but deliberately NOT Taur's near-execute
+// v0.30.x — SCORPIO STALKS, SHE DOES NOT SLIDE. Her two locomotion numbers, named so
+// the thing the fight actually reads is a value and not a literal buried in two
+// different handlers.
+//   DRIFT is the clamp on the per-frame creep in her own AI handler: 1.4 -> 1.2
+//   px/frame, i.e. 84 -> 72 px/s at 60 fps. Worth being exact about WHERE that clamp
+//   decides anything, because the two obvious readings are both wrong. It is not her
+//   cruising speed — left alone the creep never reaches it, since the physics loop's
+//   drag balances the +0.05/frame acceleration at ~0.78 px/frame (47 px/s). And it does
+//   not cap a SKITTER dart at the moment the dart fires, because the gait runs AFTER
+//   this handler and gets the last word on m.vx for that frame. What it governs is the
+//   frame after every dart: the handler pulls the dart's velocity back down to this
+//   number, and that post-skitter ceiling is how she spends most of a fight closing on
+//   you. Measured on the live boss: 79 px/s before, 68 after (cap x drag).
+//   scripts/scorpio_stalk_test.mjs.
+//   BURROW TRACK is the per-frame lerp toward the player while she is underground.
+//   That window is 550 ms, ~33 frames, so 0.06 closed ~87% of the gap: wherever you
+//   stood when she went under, she came up beneath you. The eruption was not dodgeable
+//   by moving and the ground-crack marker — which exists to promise exactly that — was
+//   decoration. 0.035 closes ~69%, and against a running player the steady-state lag is
+//   ~114 px against her ~108 px half-width, so stepping off the marker steps off it.
+const SCORPIO_DRIFT_MAX = 1.2;
+const SCORPIO_BURROW_TRACK = 0.035;
 const _ZODIAC_GAIT = {
   // Ariel — WEAVE. The user's brief: in and out, fast. Rushes to knife range,
   // recoils, rushes again. Never sits still, never commits.
@@ -143635,7 +143657,7 @@ const ZODIAC_AI = {
     const dir = Math.sign((player.x + player.w/2) - (m.x + m.w/2));
     if (!m._noGravity) {
       m.vx += dir * 0.05;
-      if (Math.abs(m.vx) > 1.4) m.vx = Math.sign(m.vx) * 1.4;
+      if (Math.abs(m.vx) > SCORPIO_DRIFT_MAX) m.vx = Math.sign(m.vx) * SCORPIO_DRIFT_MAX;   // v0.30.x — was 1.4 (84 px/s); see SCORPIO_DRIFT_MAX
     }
     if (m.patternState === 'idle') {
       // v0.25.46 — tighter cycles + 50% burrow chance (was 40%).
@@ -143695,7 +143717,7 @@ const ZODIAC_AI = {
         // Underground travel — track player horizontally with light lag.
         // Telegraph the emerge spot with a rising dust column on phase 2/3.
         const targetX = player.x + player.w / 2 - m.w / 2;
-        m.x += (targetX - m.x) * 0.06;       // smooth chase
+        m.x += (targetX - m.x) * SCORPIO_BURROW_TRACK;   // v0.30.x — eased, was 0.06 (see SCORPIO_BURROW_TRACK)
         m.y = groundY + 70;                  // hold underground
         if (phase >= 2 && m.patternTimer % 5 < dt) {
           game.particles.push({

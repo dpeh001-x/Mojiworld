@@ -93,31 +93,41 @@ const R = await page.evaluate(async () => {
     place(m, tb);
     m.facing = ((player.x + player.w / 2) >= (m.x + m.w / 2)) ? 1 : -1;   // contact is facing-gated
     const hp0 = player.hp;
-    const _px = () => { player.vx = 0; player.vy = 0; player.x = _hx; player.y = _hy; };
-    const _hx = player.x, _hy = player.y;
-    const pin = setInterval(() => { try { m.vx = 0; m.vy = 0; m.currentHp = m.maxHp; _px(); } catch (e) {} }, 16);
-    await sleep(900);
-    clearInterval(pin);
+    const hx = player.x, hy = player.y;
+    // Hold both of them IN THE FRAME LOOP, not on a setInterval. The interval version of this was
+    // flaky — it reported 0 damage on some builds and 183 on others, which looked exactly like a
+    // regression and was not: a timer competing with the page's own rAF gets throttled under load,
+    // the player then falls out of the touch box, and no contact ever registers. Pinning on every
+    // sampled frame is what a diagnostic that reproduced 182 every time actually did.
+    let overlapped = false;
+    for (let i = 0; i < 55; i++) {
+      m.vx = 0; m.vy = 0; m.currentHp = m.maxHp;
+      player.vx = 0; player.vy = 0; player.x = hx; player.y = hy;
+      if (typeof aabb === 'function' && typeof _mobTouchBox === 'function' && aabb(player, _mobTouchBox(m))) overlapped = true;
+      await sleep(16);
+    }
     const lost = hp0 - player.hp;
     player._god = true; player.hp = getMaxHp();
-    return lost;
+    return { lost, overlapped };
   };
   // ON the sprite but STRICTLY OUTSIDE the authored box: the sprite is foot-anchored, so it runs
   // from m.y+m.h-visH up to m.y+m.h, and the band above m.y is drawn art that the old box never
   // covered. Sitting the player's whole body in that band is the exact case the user reported.
   // (The first cut placed them at 75% of visH, which still overlapped the old box and so 'passed'
   // on the unfixed build too - a false pass that proved nothing.)
-  out.onSprite = await hit((m) => {
+  out.onSpriteR = await hit((m) => {
     player.x = m.x + m.w / 2 - player.w / 2;
     player.y = m.y - player.h - 2;                  // fully above the authored box, inside the art
     player.vx = 0; player.vy = 0;
   });
   // CLEAR of the sprite: well outside everything
-  out.offSprite = await hit((m, tb) => {
+  out.offSpriteR = await hit((m, tb) => {
     player.x = tb.x + tb.w + 260;
     player.y = tb.y;
     player.vx = 0; player.vy = 0;
   });
+  out.onSprite = out.onSpriteR.lost; out.onOverlap = out.onSpriteR.overlapped;
+  out.offSprite = out.offSpriteR.lost; out.offOverlap = out.offSpriteR.overlapped;
   game.monsters.length = 0; player._god = true;
   return out;
 });
@@ -137,8 +147,8 @@ const checks = [
   ['every flying type was measured', R.rows.length >= 12, R.rows.length + ' types'],
   ['every flier\'s touch box covers the drawn sprite', notCovering.length === 0, notCovering.join(', ')],
   ['no flier\'s touch box is smaller than its authored box', shrunk.length === 0, shrunk.join(', ')],
-  ['standing on the sprite, outside the old box, now takes damage', R.onSprite > 0, String(R.onSprite)],
-  ['standing clear of the sprite still takes none', R.offSprite === 0, String(R.offSprite)],
+  ['standing on the sprite, outside the old box, now takes damage', R.onSprite > 0 && R.onOverlap === true, R.onSprite + ' hp, boxes overlapped: ' + R.onOverlap],
+  ['standing clear of the sprite still takes none', R.offSprite <= 0 && R.offOverlap === false, R.offSprite + ' hp (regen can tick it up a point, so this is <= 0), overlapped: ' + R.offOverlap],
   ['ground monsters are untouched', groundChanged.length === 0, groundChanged.join(', ')],
   ['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')],
 ];
