@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.768';
+const GAME_VERSION = 'v0.30.769';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14825,7 +14825,7 @@ const LX_FX = (() => {
     crusader_aegis:    'crusader_aegis.webp',
     dragoon_skylance:  'dragoon_skylance.webp',
     // v0.25.215 — knight F (guardian) + beastmaster F (wild bond) + marksman G
-    knight_guardian:   'knight_guardian.webp',
+    knight_guardian:   'knight_guardian.webp',   // v0.30.769 kg-grand — frame 0 of anim/knight_guardian_0..8 (gen_knight_guardian_fx.mjs)
     wild_bond:         'wild_bond.webp',
     marksman_oneshot:  'marksman_oneshot.webp',
     // v0.30.x — Deadeye revamp (ludo.ai, scripts/gen_deadeye_art.mjs): the hitscan line, the lock-on
@@ -15330,6 +15330,7 @@ const _FX_ANIM_KEYS = new Set([
   'parry_riposte',  // v0.30.704 parry-fx — the parry counter-flash (anim/parry_riposte_0..8, ludo.ai via gen_parry_riposte_fx.mjs)
   'warcry',         // v0.30.728 — the battle-roar pressure wave (anim/warcry_0..8, ludo.ai via gen_warcry_fx.mjs)
   'ground_slam',    // v0.30.740 — the warrior A landing (anim/ground_slam_0..8, ludo.ai via gen_ground_slam_fx.mjs)
+  'knight_guardian',   // v0.30.769 kg-grand — the Guardian aegis: wings beat, halo pulses (anim/knight_guardian_0..8, ludo.ai via gen_knight_guardian_fx.mjs)
   'bastion_aura', 'bastion_pillar',   // v0.30.767 — Bastion of Dawn: armed ward loop + release shaft (anim/*, ludo.ai via gen_bastion_fx.mjs)
   // v0.30.547 — 'dash_mage' / 'dash_warrior' / 'dash_rogue' / 'dash_archer' were listed here
   // (v0.30.465 / v0.30.469); the loops are removed per user, so the keys are gone too — an
@@ -79076,6 +79077,9 @@ function spawnSpriteBurst(x, y, spriteKey, opts) {
     // Eclipse moon; see the cap in the budget pass). Short-lived fx only.
     sticky: !!opts.sticky,
     follow: opts.follow || null,   // v0.30.398 — an entity to ride: the burst re-centres on it every step
+    // v0.30.769 kg-grand — keep the whole sprite on screen: the draw nudges it back inside the view
+    // instead of letting the screen edge cut it. Opt-in; every existing burst is unchanged.
+    clampView: !!opts.clampView,
     // v0.25.996 — Per-axis scale transitions. When all four start/end
     // values are provided, the draw branch overrides the uniform
     // 0.5×→1.1× `grow` curve with independent X/Y scales interpolated
@@ -79696,7 +79700,17 @@ function drawSmoothFx(_behindPass) {
       // masking it. null/absent -> 1, so every other burst is untouched.
       const _opa = (fx.opacity == null) ? 1 : fx.opacity;
       ctx.globalAlpha = (fx.fadeOut ? alpha * Math.max(0, 1 - t * fx.fadeOut) : alpha) * _opa;
-      ctx.translate(sx, fx.y);
+      // v0.30.769 kg-grand — clampView: shift the box back inside the view (screen x, world y under the
+      // camera-y translate) rather than let the screen edge slice a large emblem. The box is the
+      // same one drawImage fills below, measured about the same pivot.
+      let _cvx = sx, _cvy = fx.y;
+      if (fx.clampView) {
+        const _cpx = (fx.pivotX != null ? fx.pivotX : 0.5), _cpy = fx.anchorBottom ? 1 : (fx.pivotY != null ? fx.pivotY : 0.5);
+        const _vt = Math.round((game.camera && game.camera.y) || 0);
+        _cvx = Math.min(Math.max(_cvx, wpx * _cpx), W - wpx * (1 - _cpx));
+        _cvy = Math.min(Math.max(_cvy, _vt + hpx * _cpy), _vt + H - hpx * (1 - _cpy));
+      }
+      ctx.translate(_cvx, _cvy);
       const rot = (fx.angle || 0) + (fx.spin || 0) * t;
       if (rot) ctx.rotate(rot);
       if (fx.flipX || fx.flipY) ctx.scale(fx.flipX ? -1 : 1, fx.flipY ? -1 : 1);
@@ -80663,9 +80677,17 @@ const SKILL_FNS = {
     flash(0.3);
     spawnFx('warrior','shieldBash', player.x + player.w/2, player.y + player.h/2, player.facing, { scale: 0.75, frameMs: 70 });
     // v0.25.215 — divine shield-bubble sprite at the player's chest as
-    // the guardian buff ignites. Held visible ~50 frames.
+    // the guardian buff ignites.
+    // v0.30.769 kg-grand — per user: "need to be larger and grander, more grandiose looking". The
+    // winged aegis loop at 400 on a stately 0.78 -> 1.06 swell (312 -> 424 px; was a static 90 -> 198),
+    // held 84 frames and looping every 5. BEHIND the entity layer so it frames the knight instead of
+    // burying the knight and every foe beside it at this size, and FOLLOWING the knight so a cast on
+    // the move is not left behind as a decal. pivotY 0.86 seats the knight at the foot of the aegis so it
+    // RISES behind them - centred on the chest, a knight standing on low ground had the bottom third of
+    // the emblem cut off by the bottom of the screen - and clampView keeps all of it on screen anywhere.
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'knight_guardian',
-      { size: 180, life: 50 });
+      { size: 400, life: 84, frameGap: 5, behind: true, follow: player, pivotY: 0.86, clampView: true,
+        scaleStartX: 0.78, scaleEndX: 1.06, scaleStartY: 0.78, scaleEndY: 1.06 });
     // Shield aura rings (2 concentric)
     // v0.25.547 — Two concentric 15-mote rings removed; the existing
     // 'knight_guardian' shield-bubble sprite covers the cast moment.
@@ -136541,6 +136563,7 @@ function _lxPrewarmDrain(force) {
 // only sets in _FX_ANIM_KEYS are listed, and only for skills this character can cast, so memory holds
 // just what the fight would have pinned anyway. Runs again when the job or master changes.
 const _LX_SKILL_FX = {
+  guardian: ['knight_guardian'],   // v0.30.769 kg-grand — Guardian has a loop of its own now
   warlord_warcry: ['warlord_banner'], doombringer_apoc: ['doombringer_apoc'], crusader_aegis: ['crusader_aegis'],
   dragoon_skylance: ['dragoon_skylance'], warlord_ult: ['warlord_ult'], doombringer_ult: ['doombringer_ult'],
   crusader_ult: ['crusader_ult', 'bastion_aura', 'bastion_pillar'], dragoon_ult: ['dragoon_ult', 'fx_shard'],

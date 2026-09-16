@@ -562,6 +562,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "ground_slam": 9,
    "hexmaster_grandhex": 1,
    "hexmaster_ult": 9,
+   "knight_guardian": 9,
    "marksman_oneshot": 9,
    "marksman_ult": 9,
    "necromancer_ult": 9,
