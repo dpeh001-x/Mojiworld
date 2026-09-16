@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.770';
+const GAME_VERSION = 'v0.30.771';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -14815,6 +14815,7 @@ const LX_FX = (() => {
     shadow_strike: 'shadow_strike.webp',
     // v0.25.214 — warrior + thief master skill bursts.
     ground_slam:       'ground_slam.webp',
+    sage_meteor_impact: 'sage_meteor_impact.webp',   // v0.30.771 — Meteor Sigil comet explosion (ludo.ai, scripts/gen_sage_meteor_impact_fx.mjs)
     shadowlord_clones: 'shadowlord_clones.webp',
     shinobi_seal:      'shinobi_seal.webp',
     warlord_banner:    'warlord_banner.webp',
@@ -15330,6 +15331,7 @@ const _FX_ANIM_KEYS = new Set([
   'parry_riposte',  // v0.30.704 parry-fx — the parry counter-flash (anim/parry_riposte_0..8, ludo.ai via gen_parry_riposte_fx.mjs)
   'warcry',         // v0.30.728 — the battle-roar pressure wave (anim/warcry_0..8, ludo.ai via gen_warcry_fx.mjs)
   'ground_slam',    // v0.30.740 — the warrior A landing (anim/ground_slam_0..8, ludo.ai via gen_ground_slam_fx.mjs)
+  'sage_meteor_impact',   // v0.30.771 — Meteor Sigil's comet explosion (anim/sage_meteor_impact_0..7, ludo.ai via gen_sage_meteor_impact_fx.mjs)
   'knight_guardian',   // v0.30.769 kg-grand — the Guardian aegis: wings beat, halo pulses (anim/knight_guardian_0..8, ludo.ai via gen_knight_guardian_fx.mjs)
   'bastion_aura', 'bastion_pillar',   // v0.30.767 — Bastion of Dawn: armed ward loop + release shaft (anim/*, ludo.ai via gen_bastion_fx.mjs)
   // v0.30.547 — 'dash_mage' / 'dash_warrior' / 'dash_rogue' / 'dash_archer' were listed here
@@ -85060,7 +85062,15 @@ const SKILL_FNS = {
       .sort((a, b) => Math.abs((a.x + a.w / 2) - cx) - Math.abs((b.x + b.w / 2) - cx)).slice(0, 3);
     const t = ts.length ? ts[(player._sageShots - 1) % ts.length] : null;
     const vx = dir * 9;
-    game.projectiles.push({ x: cx, y: cy, vx, vy: -3, w: 40, h: 40, life: 150, damage: getAtk() * 5.25 + 33,   /* v0.30.391 — +25% burst (per user; was 4.2x+26) */ owner: 'player', skill: 'fire', bspr: 'bult_sage', sprScale: 4.5, spin: 0.55, homing: t, color: '#ff8822', noGravity: true, explode: 56 });
+    game.projectiles.push({ x: cx, y: cy, vx, vy: -3, w: 40, h: 40, life: 150, damage: getAtk() * 5.25 + 33,   /* v0.30.391 — +25% burst (per user; was 4.2x+26) */ owner: 'player', skill: 'fire', bspr: 'bult_sage', sprScale: 4.5, spin: 0.55, homing: t, color: '#ff8822', noGravity: true,
+      // v0.30.771 — METEOR SIGIL EXPLODES (per user: "when the meteor sigil contacts enemies make a
+      // explosion animation of the meteor ... it should cause splash damage to the near surrounding
+      // monsters"). The splash already existed but at explode:56 - a 112 px circle round a comet
+      // DRAWN at 40 x sprScale 4.5 = 180 px, so the blast was smaller than the rock and caught almost
+      // nothing beside the target. 110 is a 220 px circle, matched to the explosion drawn below. The
+      // splash itself is the shared p.explode path: neighbours take 70% (the target already took its
+      // full hit), once per comet.
+      explode: 110, impactFx: 'sage_meteor_impact' });
     flash(0.15); addShake(3);
     if (player._sageShots >= 10) _sageSigilClose();
     else player.skillCooldowns.sage_ult = 220;
@@ -100846,6 +100856,19 @@ function updateProjectiles(dt) {
                 const d2 = Math.floor(p.damage * 0.7 * (crit2 ? getCritDmg() : 1));
                 hitMonster(m2, d2, crit2, p.skill);
               }
+            }
+            // v0.30.771 — a projectile can name its own explosion (Meteor Sigil: 'sage_meteor_impact').
+            // Sized off p.explode so the drawn blast and the damaged circle cannot drift apart. Measured
+            // on the art: the solid fireball spans ~0.5 of its canvas in the full-strength frames and its
+            // sparks and outer puffs ~0.72, so a canvas of diameter / 0.6 puts the splash edge between
+            // the fireball and the sparks it throws. Scale is pinned at 1 because the art grows by
+            // itself - the default 0.5 -> 1.1 burst grow would shrink the opening flash to nothing.
+            // life 40 = five game frames per art frame; the burst's own tail fade ends the smoke.
+            // Opt-in per projectile, so every other explosive round keeps exactly the impact it had.
+            if (p.impactFx && typeof spawnSpriteBurst === 'function') {
+              spawnSpriteBurst(p.x + p.w / 2, p.y + p.h / 2, p.impactFx,
+                { size: Math.round((p.explode * 2) / 0.6), life: 40,
+                  scaleStartX: 1, scaleEndX: 1, scaleStartY: 1, scaleEndY: 1 });
             }
             for (let j = 0; j < 15; j++) {
               const a = (j / 15) * Math.PI * 2;

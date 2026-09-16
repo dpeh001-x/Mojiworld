@@ -581,6 +581,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "qte_tidal": 9,
    "quakeRing": 9,
    "sage_meteorshower": 9,
+   "sage_meteor_impact": 8,
    "sage_ult": 9,
    "shadowlord_clones": 9,
    "shadowlord_ult": 9,
