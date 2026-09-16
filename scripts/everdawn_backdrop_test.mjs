@@ -1,5 +1,5 @@
 // Everdawn Central backdrop: no mirrored seam copy, one copy that covers the
-// pan at both ends of the map; the clip slowed, mixed, and looped by handover.
+// pan at both ends of the map; the clip plays direct, at 1x, on a native seamless loop.
 // ============================================================================
 // Per user: "please do not reflect ... Also slow and smoothen the background
 // video animation".
@@ -8,10 +8,10 @@
 //      backdrop draw is made under a mirrored transform (baseline: one per frame)
 //   2. COVER (control): the copy or copies span the whole screen at both ends
 //   3. PAN: the copy slides between the ends (the parallax still works)
-//   4. RATE: the town clip plays at 0.55x (baseline: 1x)
-//   5. MIX: the backdrop paints the mix canvas, not the raw element (baseline: element)
-//   6. LOOP: seeking the clip near its end starts the twin and hands over to it
-//      without a restart cut (baseline: no twin)
+//   4. RATE: the town clip plays at 1x. v0.30.x everdawn-hq: the regenerated clip is slow and
+//      smooth at the source (48 fps, seamless), so the 0.55x slow-down it used to need is gone
+//   5. DIRECT: the backdrop paints the video element itself - no offscreen mix canvas per tick
+//   6. LOOP: a whole lap plays on the one element's native loop, and no twin decoder is created
 //   7. CONTROL: the forest, unflagged, still paints its mirrored copy
 // Run: node scripts/everdawn_backdrop_test.mjs
 //      MOJI_GAME_FILE=_prev.html node scripts/everdawn_backdrop_test.mjs   (baseline)
@@ -111,27 +111,22 @@ const R = await page.evaluate(async () => {
     oc.getContext('2d').drawImage(cv, 0, 0, oc.width, oc.height); out._shot = oc.toDataURL('image/png');
   } catch (e) { out._shot = null; }
 
-  // loop handover: watch a whole lap (5.04 s / 0.55 = 9.2 s wall) and see the twin start in the
-  // last 0.75 s of clip time and take over, with the clip element never restarting from 0 itself.
-  // (A seek to the end is not used: the test server has no Range support, so a seek snaps to 0.)
+  // native loop: watch one lap (7.6 s) on the element itself. It must wrap (currentTime jumps back
+  // near 0) and keep playing, the element must stay the current one, and no twin may be created.
   if (v && out.clip.ready) {
     const v0 = v;
-    const twState = (x) => x ? { rs: x.readyState, vw: x.videoWidth, paused: x.paused, t: +x.currentTime.toFixed(2) } : null;
-    let seekable = null; try { seekable = v0.seekable.length ? [+v0.seekable.start(0).toFixed(2), +v0.seekable.end(0).toFixed(2)] : []; } catch (e) { seekable = 'err'; }
-    const twinBefore = twState((typeof _lxMapVideoTwins !== 'undefined') ? _lxMapVideoTwins.town : null);
-    let twinStarted = false, twinStartAtRemain = null, cutSeen = false, lastT = v0.currentTime, handedAt = null;
-    for (let i = 0; i < 240 && handedAt == null; i++) {   // up to 12 s
+    let wrapped = false, lastT = v0.currentTime, maxT = 0;
+    for (let i = 0; i < 220 && !wrapped; i++) {   // up to 11 s
       game.paused = false; await sleep(50);
-      const tw = (typeof _lxMapVideoTwins !== 'undefined') ? _lxMapVideoTwins.town : null;
-      const cur = (typeof _lxMapVideoEls !== 'undefined') ? _lxMapVideoEls.town : null;
-      if (cur === v0) {
-        if (v0.currentTime + 0.5 < lastT) cutSeen = true;   // the clip itself jumped back: the old cut
-        lastT = v0.currentTime;
-        if (tw && !tw.paused && tw.currentTime > 0 && !twinStarted) { twinStarted = true; twinStartAtRemain = +(v0.duration - v0.currentTime).toFixed(2); }
-      } else if (cur) handedAt = i;
+      if (v0.currentTime + 1 < lastT) wrapped = true;
+      lastT = v0.currentTime; if (lastT > maxT) maxT = lastT;
     }
+    await sleep(600);
     const cur = (typeof _lxMapVideoEls !== 'undefined') ? _lxMapVideoEls.town : null;
-    out.loop = { seekable, twinStarted, twinStartAtRemain, handedOver: !!(cur && cur !== v0), cutSeen, curId: cur ? cur.id : null, curPlaying: !!(cur && !cur.paused), curT: cur ? +cur.currentTime.toFixed(2) : null, oldPaused: v0.paused, oldT: +v0.currentTime.toFixed(2), twinBefore };
+    const tw = (typeof _lxMapVideoTwins !== 'undefined') ? _lxMapVideoTwins.town : null;
+    out.loop = { wrapped, maxT: +maxT.toFixed(2), dur: +(v0.duration || 0).toFixed(2), stillPlaying: !v0.paused && v0.currentTime > 0.1,
+                 twinMade: !!tw || !!document.getElementById('map-bg-video-town-twin'), handedOver: !!(cur && cur !== v0),
+                 mixMade: !!((typeof _lxMapVideoMix !== 'undefined') && _lxMapVideoMix.town) };
   } else out.loop = { skipped: 'clip not ready' };
 
   // control: an unflagged map still mirrors
@@ -155,9 +150,10 @@ const w = R.west || {}, e = R.east || {};
 ok('NO MIRROR: no full-width backdrop draw under a mirrored transform, west or east', w.frames > 0 && e.frames > 0 && w.mirroredMax === 0 && e.mirroredMax === 0, `mirrored draws per frame: west ${w.mirroredMax}, east ${e.mirroredMax} (baseline: 1)`);
 ok('COVER (control): the backdrop spans the whole screen at both ends', w.leftMax <= 0.5 && w.rightMin >= R.map.W - 0.5 && e.leftMax <= 0.5 && e.rightMin >= R.map.W - 0.5, `west [${w.leftMax}, ${w.rightMin}], east [${e.leftMax}, ${e.rightMin}] vs [0, ${R.map.W}]`);
 ok('PAN: the copy slides between the ends', w.frames > 0 && e.frames > 0 && (w.dxTypical - e.dxTypical) >= 150, `dx west ${w.dxTypical}, east ${e.dxTypical} (travel ${((R.map.worldWidth - R.map.W) * 0.12).toFixed(0)} px expected)`);
-ok('RATE: the town clip plays at 0.55x', R.clip.ready && Math.abs(R.clip.rate - 0.55) < 0.01, `ready ${R.clip.ready}, rate ${R.clip.rate} (baseline: 1)`);
-ok('MIX: the backdrop paints the mix canvas, not the raw element', R.clip.ready && /CANVAS/.test(String(e.kinds)) && !/VIDEO/.test(String(e.kinds)), `draw sources at the east end: ${e.kinds} (baseline: VIDEO)`);
-ok('LOOP: in the last 0.75 s the twin starts and takes over, and the clip never restarts from 0 itself', R.loop && R.loop.twinStarted && R.loop.handedOver && R.loop.curPlaying && !R.loop.cutSeen, JSON.stringify(R.loop));
+ok('RATE: the town clip plays at 1x', R.clip.ready && Math.abs(R.clip.rate - 1) < 0.01, `ready ${R.clip.ready}, rate ${R.clip.rate} (previous build: 0.55)`);
+ok('CLIP: the HQ clip is what loaded (1280x720, native loop)', R.clip.ready && R.clip.w === 1280 && R.clip.h === 720 && R.clip.loop === true, JSON.stringify(R.clip));
+ok('DIRECT: the backdrop paints the video element and never builds the offscreen mix canvas', R.clip.ready && /VIDEO/.test(String(e.kinds)) && R.loop && R.loop.mixMade === false, `east-end draw sources ${e.kinds} (a CANVAS there is the plate underlay during the fade-in); mix canvas built: ${R.loop && R.loop.mixMade} (previous build: true)`);
+ok('LOOP: a full lap wraps on the one element and keeps playing, with no twin decoder', R.loop && R.loop.wrapped && R.loop.stillPlaying && !R.loop.twinMade && !R.loop.handedOver, JSON.stringify(R.loop));
 ok('CONTROL: the forest, unflagged, still paints its mirrored copy', R.forest && R.forest.frames > 0 && R.forest.mirroredMax >= 1, `forest mirrored draws per frame: ${R.forest && R.forest.mirroredMax}`);
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
