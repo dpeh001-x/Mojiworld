@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Steam LIBRARY HERO: Guguma, mid-battle-cry, in the crystal cavern (bg_v3_dungeon), logo space at centre.
+// Steam LIBRARY HERO: Guguma (his original art) in the blazing crystal cavern (bg_v3_dungeon), logo space at centre.
 //
 // Per user: "regenerate this ugly steam banner (i cant remember what are the dimensions) with something
 // high intensity with guguma in this background, have the mojiworld logo words in the centre".
@@ -10,8 +10,9 @@
 // the art around an open centre for the logo, and a preview with the logo placed there.
 //
 //   node scripts/gen_steam_hero_guguma.mjs --pose [--n 4]        # ludo.ai: Guguma action poses -> STAGE
-//   node scripts/gen_steam_hero_guguma.mjs --compose <pose.png>   # master, upload size, logo preview
-//   (shipped art: --compose steam/assets/refs/guguma_battlecry_pose.png, pose 3 of the first ludo batch;
+//   node scripts/gen_steam_hero_guguma.mjs --compose [art.png] [--trail]   # master, upload size, logo preview
+//   (shipped art: --compose with no path = his original Sprites/npc/Guguma_hi.webp. The earlier battle-cry
+//    version was --compose steam/assets/refs/guguma_battlecry_pose.png --trail;
 //    then copy STAGE/library_hero.png -> steam/assets/ and library_hero_upload.png -> steam/assets/upload/library_hero.png)
 //
 // Sizes (tools/gen_steam_upload_assets.mjs): master 3840x1240, upload 1920x620.
@@ -104,10 +105,17 @@ if (has('--pose')) {
 
 // ---------------------------------------------------------------- compose ----
 const W = 3840, H = 1240;
-// Guguma BEHIND the title, in the centre Steam never crops: face and flared wings above the logo, body behind
-// it, feet below. (ax, ay) is the point of the pose - his body, not his bounding box - placed at (cx, cy).
-// A first pass had him huge at the left: he crowded the logo and a narrow library window cut his wing.
-const G = { cx: 1920, cy: 540, h: 860, ax: 0.55, ay: 0.58 };
+// Guguma BEHIND the title, in the centre Steam never crops: head above the logo, body behind it, feet below.
+// (ax, ay) is the point of the art placed at (cx, cy). A first pass had him huge at the left: he crowded the
+// logo and a narrow library window cut his wing.
+// HIS ORIGINAL ART, not a redraw (per user: "for guguma, he needs to be the more original cuter version").
+// The ludo battle-cry pose (refs/guguma_battlecry_pose.png) grew big wings and angry brows; Guguma_hi.webp is
+// the in-game drawing itself. His beak sits at 0.44 of his height, so at h 900 with his tuft at y 45 the whole
+// face clears the logo's top edge (y 472), his belly is behind the title and his feet show below it.
+const G = { cx: 1920, cy: 540, h: 900, ax: 0.5, ay: 0.55 };
+const DEFAULT_ART = 'Sprites/npc/Guguma_hi.webp';
+// lava light on him: strong enough to set him in the cave, gentle enough that his yellow stays his yellow
+const UNDERLIGHT = has('--trail') ? 0.85 : 0.4;
 const LOGO = { w: 1500, cx: W / 2, cy: H / 2 };      // where the preview puts Steam's library_logo
 let seed = 20260916;
 const rnd = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -133,8 +141,9 @@ function heat() {    // screen-blended: bloom behind Guguma, light burst, fire t
     const a = (i / 26) * Math.PI * 2 + rnd() * 0.08, sp = 0.035 + rnd() * 0.03, R = 2600;
     rays += `<path d="M${G.cx} ${G.cy} L${(G.cx + Math.cos(a - sp) * R).toFixed(0)} ${(G.cy + Math.sin(a - sp) * R).toFixed(0)} L${(G.cx + Math.cos(a + sp) * R).toFixed(0)} ${(G.cy + Math.sin(a + sp) * R).toFixed(0)}Z" opacity="${(0.25 + rnd() * 0.5).toFixed(2)}"/>`;
   }
+  // the fire trail belongs to a CHARGING pose; his original art stands, so it is opt-in (--trail)
   let trail = '';
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < (has('--trail') ? 9 : 0); i++) {
     const y0 = G.cy + 60 + (i - 4) * 58 + rnd() * 30, len = 1100 + rnd() * 700, th = 18 + rnd() * 34, dy = 120 + rnd() * 90;
     // a POINTED head hidden behind his body, widest mid-way, a point again at the tail: blunt heads all
     // ending on one line stacked into a pale slab behind him
@@ -191,7 +200,7 @@ async function guguma(posePath) {
   const body = await sharp(trimmed).resize(w, h, { kernel: 'lanczos3' }).png().toBuffer();
   // lava light from below: an orange ramp kept only where Guguma is, soft-lit onto him
   const ramp = Buffer.from(`<svg width="${w}" height="${h}"><defs><linearGradient id="u" x1="0" y1="0" x2="0.3" y2="1">
-    <stop offset="0.35" stop-color="#ff7a2a" stop-opacity="0"/><stop offset="1" stop-color="#ff5010" stop-opacity="0.85"/></linearGradient></defs>
+    <stop offset="0.35" stop-color="#ff7a2a" stop-opacity="0"/><stop offset="1" stop-color="#ff5010" stop-opacity="${UNDERLIGHT}"/></linearGradient></defs>
     <rect width="${w}" height="${h}" fill="url(#u)"/></svg>`);
   const tint = await sharp(ramp).composite([{ input: body, blend: 'dest-in' }]).png().toBuffer();
   const lit = await sharp(body).composite([{ input: tint, blend: 'soft-light' }]).png().toBuffer();
@@ -213,8 +222,8 @@ async function guguma(posePath) {
 }
 
 if (has('--compose')) {
-  const posePath = arg('--compose');
-  if (!posePath) { console.error('--compose <pose.png>'); process.exit(1); }
+  const next = arg('--compose');
+  const posePath = next && !next.startsWith('--') ? next : join(ROOT, DEFAULT_ART);
   await mkdir(STAGE, { recursive: true });
   const g = await guguma(posePath);
   const gl = Math.round(G.cx - g.w * G.ax), gt = Math.round(G.cy - g.h * G.ay);
