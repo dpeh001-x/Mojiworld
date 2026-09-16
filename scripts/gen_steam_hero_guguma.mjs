@@ -10,9 +10,9 @@
 // the art around an open centre for the logo, and a preview with the logo placed there.
 //
 //   node scripts/gen_steam_hero_guguma.mjs --pose [--n 4]        # ludo.ai: Guguma action poses -> STAGE
-//   node scripts/gen_steam_hero_guguma.mjs --compose [art.png] [--trail]   # master, upload size, logo preview
+//   node scripts/gen_steam_hero_guguma.mjs --compose [art.png] [--battle]  # master, upload size, logo preview
 //   (shipped art: --compose with no path = his original Sprites/npc/Guguma_hi.webp. The earlier battle-cry
-//    version was --compose steam/assets/refs/guguma_battlecry_pose.png --trail;
+//    version was --compose steam/assets/refs/guguma_battlecry_pose.png --battle;
 //    then copy STAGE/library_hero.png -> steam/assets/ and library_hero_upload.png -> steam/assets/upload/library_hero.png)
 //
 // Sizes (tools/gen_steam_upload_assets.mjs): master 3840x1240, upload 1920x620.
@@ -106,17 +106,27 @@ if (has('--pose')) {
 // ---------------------------------------------------------------- compose ----
 const W = 3840, H = 1240;
 // Guguma BEHIND the title, in the centre Steam never crops: head above the logo, body behind it, feet below.
-// (ax, ay) is the point of the art placed at (cx, cy). A first pass had him huge at the left: he crowded the
-// logo and a narrow library window cut his wing.
+// A first pass had him huge at the left: he crowded the logo and a narrow library window cut his wing.
 // HIS ORIGINAL ART, not a redraw (per user: "for guguma, he needs to be the more original cuter version").
 // The ludo battle-cry pose (refs/guguma_battlecry_pose.png) grew big wings and angry brows; Guguma_hi.webp is
-// the in-game drawing itself. His beak sits at 0.44 of his height, so at h 900 with his tuft at y 45 the whole
-// face clears the logo's top edge (y 472), his belly is behind the title and his feet show below it.
-const G = { cx: 1920, cy: 540, h: 900, ax: 0.5, ay: 0.55 };
+// the in-game drawing itself.
+// BIGGER (per user: "make guguma bigger"): the ceiling is his face against the centred logo. Measured on his
+// art, the beak spans 0.371-0.437 of his trimmed height at 0.70-0.82 of his width; measured on the wordmark,
+// its LETTERS under that beak start ~30 px below the logo's box (the box is raised by the sparkle over the
+// I). Tuft at y 40, a 1400 px logo, 14 px of clear air under the beak: h 1045, up from 900. (cx, cy) is the
+// light's origin; he is placed by his top edge and his horizontal centre (ax).
+const G = { cx: 1920, cy: 540, top: 40, h: 1045, ax: 0.5 };
 const DEFAULT_ART = 'Sprites/npc/Guguma_hi.webp';
+// --battle rebuilds the earlier battle-cry look: fire trail, a hot rim glow hugging him, shockwave rings and a
+// strong underlight. Without it none of those are drawn - the rim glow and the rings read as a halo around him
+// (per user: "remove the weird halo effect around guguma").
+const BATTLE = has('--battle');
 // lava light on him: strong enough to set him in the cave, gentle enough that his yellow stays his yellow
-const UNDERLIGHT = has('--trail') ? 0.85 : 0.4;
-const LOGO = { w: 1500, cx: W / 2, cy: H / 2 };      // where the preview puts Steam's library_logo
+const UNDERLIGHT = BATTLE ? 0.85 : 0.4;
+// THICKER BLACK OUTLINE (per user): his silhouette grown by OUTLINE px with a true distance, so the line is
+// even all round - a blur-and-threshold swell goes thin in the notch under a wing and blobby at the tuft.
+const OUTLINE = 16, OUTLINE_RGB = [11, 8, 8];
+const LOGO = { w: 1400, cx: W / 2, cy: H / 2 };      // where the preview puts Steam's library_logo
 let seed = 20260916;
 const rnd = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -141,9 +151,9 @@ function heat() {    // screen-blended: bloom behind Guguma, light burst, fire t
     const a = (i / 26) * Math.PI * 2 + rnd() * 0.08, sp = 0.035 + rnd() * 0.03, R = 2600;
     rays += `<path d="M${G.cx} ${G.cy} L${(G.cx + Math.cos(a - sp) * R).toFixed(0)} ${(G.cy + Math.sin(a - sp) * R).toFixed(0)} L${(G.cx + Math.cos(a + sp) * R).toFixed(0)} ${(G.cy + Math.sin(a + sp) * R).toFixed(0)}Z" opacity="${(0.25 + rnd() * 0.5).toFixed(2)}"/>`;
   }
-  // the fire trail belongs to a CHARGING pose; his original art stands, so it is opt-in (--trail)
+  // the fire trail belongs to a CHARGING pose; his original art stands, so it is opt-in (--battle)
   let trail = '';
-  for (let i = 0; i < (has('--trail') ? 9 : 0); i++) {
+  for (let i = 0; i < (BATTLE ? 9 : 0); i++) {
     const y0 = G.cy + 60 + (i - 4) * 58 + rnd() * 30, len = 1100 + rnd() * 700, th = 18 + rnd() * 34, dy = 120 + rnd() * 90;
     // a POINTED head hidden behind his body, widest mid-way, a point again at the tail: blunt heads all
     // ending on one line stacked into a pale slab behind him
@@ -153,8 +163,8 @@ function heat() {    // screen-blended: bloom behind Guguma, light burst, fire t
   return svg(
     `<g fill="url(#ray)" filter="url(#b8)">${rays}</g>
      <ellipse cx="${G.cx}" cy="${G.cy}" rx="1250" ry="900" fill="url(#bloom)"/>
-     <ellipse cx="${G.cx}" cy="${G.cy + 40}" rx="760" ry="560" fill="none" stroke="#ffd690" stroke-width="26" opacity="0.42" filter="url(#b8)"/>
-     <ellipse cx="${G.cx}" cy="${G.cy + 40}" rx="1020" ry="720" fill="none" stroke="#ff8a3a" stroke-width="14" opacity="0.22" filter="url(#b8)"/>
+     ${BATTLE ? `<ellipse cx="${G.cx}" cy="${G.cy + 40}" rx="760" ry="560" fill="none" stroke="#ffd690" stroke-width="26" opacity="0.42" filter="url(#b8)"/>
+     <ellipse cx="${G.cx}" cy="${G.cy + 40}" rx="1020" ry="720" fill="none" stroke="#ff8a3a" stroke-width="14" opacity="0.22" filter="url(#b8)"/>` : ''}
      <g filter="url(#b6)">${trail}</g>
      <rect x="0" y="${H * 0.8}" width="${W}" height="${H * 0.2}" fill="url(#seam)"/>`,
     `<filter id="b8" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="8"/></filter>
@@ -166,9 +176,7 @@ function heat() {    // screen-blended: bloom behind Guguma, light burst, fire t
      <linearGradient id="trail" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#fff6c9" stop-opacity="0"/><stop offset="0.12" stop-color="#fff6c9"/><stop offset="0.3" stop-color="#ffc247"/>
        <stop offset="0.6" stop-color="#ff5a1c" stop-opacity="0.7"/><stop offset="1" stop-color="#ff3a10" stop-opacity="0"/></linearGradient>
      <linearGradient id="seam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff7a2a" stop-opacity="0"/>
-       <stop offset="0.45" stop-color="#ff9a3a" stop-opacity="0.38"/><stop offset="1" stop-color="#ff5a1a" stop-opacity="0"/></linearGradient>
-     <linearGradient id="flare" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffb35a" stop-opacity="0"/>
-       <stop offset="0.5" stop-color="#fff4d6" stop-opacity="0.55"/><stop offset="1" stop-color="#ffb35a" stop-opacity="0"/></linearGradient>`);
+       <stop offset="0.45" stop-color="#ff9a3a" stop-opacity="0.38"/><stop offset="1" stop-color="#ff5a1a" stop-opacity="0"/></linearGradient>`);
 }
 function embers(front) {   // back layer: many small rising sparks; front layer: a few big out-of-focus ones
   let body = '';
@@ -204,7 +212,9 @@ async function guguma(posePath) {
     <rect width="${w}" height="${h}" fill="url(#u)"/></svg>`);
   const tint = await sharp(ramp).composite([{ input: body, blend: 'dest-in' }]).png().toBuffer();
   const lit = await sharp(body).composite([{ input: tint, blend: 'soft-light' }]).png().toBuffer();
-  // hot rim: his silhouette, grown and blurred, tinted gold, laid under him
+  const ol = await outlined(lit, w, h);
+  if (!BATTLE) return { img: ol.img, P: ol.P, w, h, rim: null, pad: 0 };
+  // hot rim (--battle only): his silhouette, grown and blurred, tinted gold, laid under him
   const pad = 90;
   // two pipelines: in one, sharp extends BEFORE it extracts the channel, and the padding arrives opaque
   const a1 = await sharp(body).extractChannel('alpha').png().toBuffer();
@@ -218,7 +228,36 @@ async function guguma(posePath) {
     rimRGBA[q] = Math.round(255 * k); rimRGBA[q + 1] = Math.round(170 * k); rimRGBA[q + 2] = Math.round(60 * k); rimRGBA[q + 3] = Math.round(255 * k);
   }
   const rim = await sharp(rimRGBA, { raw: { width: alpha.info.width, height: alpha.info.height, channels: 4 } }).png().toBuffer();
-  return { lit, rim, w, h, pad };
+  return { img: ol.img, P: ol.P, w, h, rim, pad };
+}
+// His art padded by P, laid over a black silhouette grown OUTLINE px (chamfer 5-7-11 distance, 1 px anti-alias).
+async function outlined(img, w, h) {
+  const P = OUTLINE + 4, W2 = w + 2 * P, H2 = h + 2 * P;
+  const padded = await sharp(img).extend({ top: P, bottom: P, left: P, right: P, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+  const { data: a } = await sharp(padded).extractChannel('alpha').raw().toBuffer({ resolveWithObject: true });
+  const INF = 1e9, d = new Float64Array(W2 * H2);
+  for (let i = 0; i < d.length; i++) d[i] = a[i] > 127 ? 0 : INF;
+  const relax = (x, y, dx, dy, c) => {
+    const nx = x + dx, ny = y + dy;
+    if (nx < 0 || ny < 0 || nx >= W2 || ny >= H2) return;
+    const i = y * W2 + x, v = d[ny * W2 + nx] + c;
+    if (v < d[i]) d[i] = v;
+  };
+  for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) {
+    relax(x, y, -1, 0, 5); relax(x, y, -1, -1, 7); relax(x, y, 0, -1, 5); relax(x, y, 1, -1, 7);
+    relax(x, y, -2, -1, 11); relax(x, y, 2, -1, 11); relax(x, y, -1, -2, 11); relax(x, y, 1, -2, 11);
+  }
+  for (let y = H2 - 1; y >= 0; y--) for (let x = W2 - 1; x >= 0; x--) {
+    relax(x, y, 1, 0, 5); relax(x, y, 1, 1, 7); relax(x, y, 0, 1, 5); relax(x, y, -1, 1, 7);
+    relax(x, y, 2, 1, 11); relax(x, y, -2, 1, 11); relax(x, y, 1, 2, 11); relax(x, y, -1, 2, 11);
+  }
+  const line = Buffer.alloc(W2 * H2 * 4);
+  for (let i = 0, q = 0; i < d.length; i++, q += 4) {
+    const k = Math.max(0, Math.min(1, OUTLINE + 0.5 - d[i] / 5));
+    line[q] = OUTLINE_RGB[0]; line[q + 1] = OUTLINE_RGB[1]; line[q + 2] = OUTLINE_RGB[2]; line[q + 3] = Math.round(255 * k);
+  }
+  const base = await sharp(line, { raw: { width: W2, height: H2, channels: 4 } }).png().toBuffer();
+  return { img: await sharp(base).composite([{ input: padded }]).png().toBuffer(), P };
 }
 
 if (has('--compose')) {
@@ -226,13 +265,13 @@ if (has('--compose')) {
   const posePath = next && !next.startsWith('--') ? next : join(ROOT, DEFAULT_ART);
   await mkdir(STAGE, { recursive: true });
   const g = await guguma(posePath);
-  const gl = Math.round(G.cx - g.w * G.ax), gt = Math.round(G.cy - g.h * G.ay);
+  const gl = Math.round(G.cx - g.w * G.ax), gt = G.top;   // his art's own top-left, before the outline pad
   const hero = await sharp(await cavern()).composite([
     { input: shade(), blend: 'over' },
     { input: heat(), blend: 'screen' },
     { input: embers(false), blend: 'screen' },
-    { input: g.rim, left: gl - g.pad, top: gt - g.pad, blend: 'screen' },
-    { input: g.lit, left: gl, top: gt },
+    ...(g.rim ? [{ input: g.rim, left: gl - g.pad, top: gt - g.pad, blend: 'screen' }] : []),
+    { input: g.img, left: gl - g.P, top: gt - g.P },
     { input: embers(true), blend: 'screen' },
   ]).removeAlpha().png().toBuffer();
   const master = join(STAGE, 'library_hero.png'), upload = join(STAGE, 'library_hero_upload.png');
