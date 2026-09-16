@@ -121,6 +121,55 @@
   <div class="meta">Base: <code>v0.9.8</code> &middot; All changes on <code>main</code> &middot; <a href="https://www.patreon.com/c/Mojiworld" style="color:#c9a6ff;">&hearts; Support on Patreon</a></div>
 </header>
 
+<h2>v0.30.775 — boss fights stop decoding full-size art on the main thread <span class="pill bug">perf</span></h2>
+<p>Per user: reduce the lag when battling monsters, <strong>especially bosses</strong>, by working on
+<strong>image decoding</strong>.</p>
+<p><strong>What the lag was.</strong> Boss art is 1100–1656 px on its long side, against a 1104 px draw cap, so every
+boss frame gets shrunk off-thread before it is drawn — but only once it is <em>first drawn</em>, and drawing a
+full-size frame is a synchronous decode on the main thread, 40–65 ms for a 2.5 MP frame. The prewarm that was meant
+to prevent this ran while the arena's loading black-hold had the bake budget at zero, retried for half a second and
+gave up. Twenty-five seconds after the Gravitos arena loaded, 144 of the family's 187 frames were still full size,
+so the first use of every animation in the fight — the walk, each attack, each phase — decoded frame by frame
+on the main thread. In the first three seconds of that fight: 27 main-thread decodes (828 ms) and 34 frames
+over 33 ms, the worst 130 ms.</p>
+<p><strong>What changed.</strong></p>
+<ul>
+<li><strong>A bake queue that finishes.</strong> When a boss or mini-boss spawns, every over-cap frame of its current
+form — its idle, walk and attack sets and attack variants — is queued and baked off-thread on a timer, whether or
+not anything is drawn. It works hardest while the screen is black or paused (the arena load and the boss intro)
+and trickles one frame at a time in play, because each finished bake is a ~4 MB GPU upload and three at once during
+a fight dropped the arena from 240 to ~80 fps. A phase form (Gravitos II, III) is queued the moment the boss reaches
+it, rather than all 187 frames up front.</li>
+<li><strong>No full-size frame on the main thread while its set bakes.</strong> The set jumps the queue, and the boss is
+drawn with the nearest already-baked frame of the same animation; before any frame of that animation has landed,
+one frame is held, so a brand-new animation costs one decode instead of one per frame. An animation that bakes
+nothing within 4 s is drawn exactly as before.</li>
+<li><strong>A baked frame keeps its calibration.</strong> Baked frames had dropped the per-frame index and animation
+state the boss draw reads, so a baked frame ignored its per-frame scale and a baked duck or weave frame borrowed
+the idle calibration — a size pop the moment a bake landed.</li>
+<li><strong>The sprite tables were stale.</strong> <code>data/sprite_bbox.js</code> was missing 118 sprites and had
+199 stale entries, mostly boss frames regenerated since; each forced a live pixel scan of the full-size image on
+first draw. <code>data/sprite_edges.js</code> was missing 327 and had 191 stale. Both are regenerated from the
+shipped art.</li>
+</ul>
+<p><strong>How it was measured.</strong> <code>scripts/perf_boss_decode_bench.mjs</code> loads a boss arena, lets its
+own flow run for 11 s (load, intro, spawn), then draws every animation set of that boss once, through the game's own
+frame picker and boss draw, while a Chrome trace attributes each main-thread decode to the set that caused it — no
+AI, no luck about which attack comes first. Both builds were served from a clean extract of the shipped commit, the
+old build with the old tables and the new build with the new ones, one after the other. A note on the harness: an
+earlier probe loaded candidate builds by URL path, which resolved every sprite path into the wrong folder and
+measured the procedural fallbacks instead of the bosses; candidates are now served through
+<code>MOJI_GAME_FILE</code>. Test: <code>scripts/boss_decode_stall_test.mjs</code>.</p>
+
+<table style="font-size:12px;border-collapse:collapse"><thead><tr><th>boss (every animation set drawn once)</th><th>main-thread decodes, before</th><th>after</th><th>raw full-size blits, before</th><th>after</th><th>frames &gt; 33 ms, before</th><th>after</th></tr></thead><tbody>
+<tr><td>gravitos</td><td style="text-align:right">172 (6140 ms)</td><td style="text-align:right"><b>21 (355 ms)</b></td><td style="text-align:right">114</td><td style="text-align:right"><b>1</b></td><td style="text-align:right">215</td><td style="text-align:right"><b>39</b></td></tr>
+<tr><td>aetherion</td><td style="text-align:right">53 (1906 ms)</td><td style="text-align:right"><b>8 (149 ms)</b></td><td style="text-align:right">40</td><td style="text-align:right"><b>1</b></td><td style="text-align:right">53</td><td style="text-align:right"><b>9</b></td></tr>
+<tr><td>zodiac_leo (leo)</td><td style="text-align:right">10 (114 ms)</td><td style="text-align:right"><b>0 (0 ms)</b></td><td style="text-align:right">0</td><td style="text-align:right"><b>0</b></td><td style="text-align:right">2</td><td style="text-align:right"><b>0</b></td></tr>
+<tr><td>young_confused_barnaby</td><td style="text-align:right">1 (54 ms)</td><td style="text-align:right"><b>0 (0 ms)</b></td><td style="text-align:right">0</td><td style="text-align:right"><b>0</b></td><td style="text-align:right">1</td><td style="text-align:right"><b>0</b></td></tr>
+<tr><td>king</td><td style="text-align:right">1 (55 ms)</td><td style="text-align:right"><b>1 (53 ms)</b></td><td style="text-align:right">0</td><td style="text-align:right"><b>0</b></td><td style="text-align:right">1</td><td style="text-align:right"><b>1</b></td></tr>
+</tbody></table>
+
+
 <h2>v0.30.774 — Skill Tuner: every variable a skill is made of <span class="pill feat">tool</span></h2>
 <p>Per user, the tuner now exposes, per skill and editable in place: <strong>MP cost, cooldown, damage</strong> (every
 ATK multiplier and flat), <strong>hit and projectile counts</strong> (the loop bounds that fire lances, shards, waves and

@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.774';
+const GAME_VERSION = 'v0.30.775';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -16325,6 +16325,111 @@ let _lxBakeInFlight = 0;
 // fight's samples). The area card pauses the game for ~3s on every map entry:
 // widen the pipe to 6 while paused so the wave clears before the fighting
 // starts, and keep combat frames at the gentle 2.
+// v0.30.775 — BOSS FRAME BAKE QUEUE + DRAW STAND-IN (per user: "reduce the lag on battling monsters,
+// especially the bosses ... by working on image decoding"). Boss art is 1656 px on the long side against
+// a 1104 px shrink cap, so every frame is baked down off-thread by _lxAsyncBake - but only once it is
+// DRAWN, and drawing a raw 2.5 MP frame is a synchronous main-thread decode. Measured in the Gravitos
+// arena: 27 main-thread decodes (828 ms, up to 50 ms each) and 34 frames over 33 ms in the first three
+// seconds of the fight; 25 s after the arena loaded, 144 of the family's 187 frames were still raw,
+// because the spawn prewarm ran while _lxBakeBudget() was 0 (the load black-hold) and gave up. Two parts:
+//  1. _lxBossBakeQueue: when a boss spawns, every over-cap frame of its current form - its sets and attack
+//     variants; a phase form joins when the boss reaches it - goes into a queue a timer pumps whether or
+//     not anything is drawn, on a budget of its own (_lxBossBakeBudget: hard while the screen is black or
+//     paused, where the old budget was 0 or idle; one at a time in play).
+//  2. _lxBossStandIn: a raw over-cap frame is never handed to the canvas while its set is baking. The set
+//     jumps the queue, and the nearest baked frame of the same set is drawn instead; before any is baked,
+//     one held frame per set, so a new animation costs one decode rather than one per frame. A set that
+//     bakes nothing within 4 s is drawn as before.
+const _LX_BOSS_BAKE_Q = [];
+let _lxBossBakeTimer = 0;
+const _LX_BOSS_BAKE_SEEN = new WeakSet();
+// The budget follows what the screen is doing. Baking is off-thread, but every landed bake is a ~4 MB GPU
+// upload: with 3 in flight during play the Gravitos arena fell from 240 to ~80 fps for the ten seconds the
+// whole family took. So the queue works hardest when nothing is being fought - the load black-hold and the
+// paused boss intro - and trickles one at a time in play, beside the two the draw path already allows.
+function _lxBossBakeBudget() {
+  if (typeof game !== 'undefined' && game) {
+    if (game._gravitosCinePlaying) return 1;                                   // a video is playing: keep it smooth
+    if ((game.blackHoldFrames | 0) > 0 || (game.blackFlashOverlay || 0) > 0.4) return 3;   // the screen is black: nothing to stutter
+    if (game.paused) return 6;
+  }
+  return 1;
+}
+function _lxBossBakeKick(ms) { if (!_lxBossBakeTimer) _lxBossBakeTimer = setTimeout(_lxBossBakePump, ms || 0); }
+function _lxBossBakeQueue(type, sign) {
+  if (!type || typeof createImageBitmap !== 'function') return 0;
+  const exact = [], variant = [];
+  const take = (st, k) => { const a = st && st[k]; if (!Array.isArray(a) || !a.length || _LX_BOSS_BAKE_SEEN.has(a)) return; _LX_BOSS_BAKE_SEEN.add(a); (k === type || k === sign ? exact : variant).push(a); };
+  try {
+    for (const st of [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES, BOSS_WEAVE_FRAMES, BOSS_DUCK_FRAMES]) {
+      for (const k in st) {
+        if (k.indexOf(type) !== 0) continue;
+        // the FORM: the type itself and its attack / cast variants (gravitospunch, kingKrookstomp) - not a
+        // phase form (gravitos2: queued when the boss reaches it, see _lxBossStandIn; all 187 Gravitos
+        // frames up front was 820 MB of canvases for a fight that may end in phase one), and not a different
+        // boss that merely shares a prefix (king -> kingKrook)
+        if (k.length > type.length) { const c = k.charCodeAt(type.length); if (!(c >= 97 && c <= 122)) continue; }
+        take(st, k);
+      }
+    }
+    if (sign) for (const st of [ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES, ZODIAC_CHARGE_FRAMES, ZODIAC_POUNCE_FRAMES, ZODIAC_FLY_FRAMES]) take(st, sign);
+  } catch (e) {}
+  let n = 0;
+  for (const a of exact.concat(variant)) for (let i = 0; i < a.length; i++) { _LX_BOSS_BAKE_Q.push({ a, i, t: 0 }); n++; }
+  if (n) _lxBossBakeKick(0);
+  return n;
+}
+function _lxBossBakePump() {
+  _lxBossBakeTimer = 0;
+  const Q = _LX_BOSS_BAKE_Q;
+  if (!Q.length) return;
+  const budget = _lxBossBakeBudget(), cap = _lxShrinkCap(720);   // 720: the base every boss frame picker shrinks to
+  let scanned = 0;
+  while (Q.length && _lxBakeInFlight < budget && scanned++ < 80) {
+    const j = Q.shift(), im = j.a[j.i];
+    if (!im || im.tagName !== 'IMG' || im._lxBaking) continue;               // baked, baking, or an empty slot
+    if (!im.complete) { if (++j.t < 600) Q.push(j); continue; }             // still downloading: come back (bounded)
+    if (!(im.naturalWidth > 0) || Math.max(im.naturalWidth, im.naturalHeight) <= cap) continue;   // failed, or small enough to pin on first draw
+    _lxAsyncBake(j.a, j.i, im, cap);
+  }
+  if (Q.length) _lxBossBakeKick(_lxBakeInFlight >= budget ? 40 : 90);
+}
+function _lxBossBakeBump(set) {
+  const t = (typeof game !== 'undefined' && game) ? (game.time | 0) : 0;
+  if (set._lxBumpT === t) return;
+  set._lxBumpT = t;
+  const Q = _LX_BOSS_BAKE_Q, mine = [], rest = [];
+  for (const j of Q) (j.a === set ? mine : rest).push(j);
+  if (!mine.length) for (let i = 0; i < set.length; i++) if (set[i] && set[i].tagName === 'IMG' && !set[i]._lxBaking) mine.push({ a: set, i, t: 0 });
+  if (!mine.length) return;
+  Q.length = 0;
+  for (const j of mine) Q.push(j);
+  for (const j of rest) Q.push(j);
+  _lxBossBakeKick(0);
+}
+function _lxBossStandIn(sprite, m) {
+  if (!sprite || !m || sprite.tagName !== 'IMG') return sprite;
+  // a boss that has reached a new form (gravitos -> gravitos2) queues that form the first time it draws in it
+  const _form = m._phaseSprite;
+  if (_form && m._lxBakedForm !== _form) { m._lxBakedForm = _form; _lxBossBakeQueue(_form, null); }
+  const set = sprite._lxSet;
+  if (!set || set._lxStandInOff || !(sprite.naturalWidth > 0)) return sprite;
+  const cap = _lxShrinkCap(720), long = Math.max(sprite.naturalWidth, sprite.naturalHeight);
+  if (long <= cap) return sprite;                                            // under the cap: pinned on first draw, cheap
+  const bc = sprite._lxBakedCv;
+  if (bc) { const bl = Math.max(bc.width, bc.height); if (bl <= cap && bl >= Math.min(long, cap) * 0.95) return bc; }
+  _lxBossBakeBump(set);
+  const i = sprite._lxFi | 0;
+  for (let d = 1; d < set.length; d++) {
+    const a = set[i - d], b = set[i + d];
+    if (a && a.tagName === 'CANVAS') return a;
+    if (b && b.tagName === 'CANVAS') return b;
+  }
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (!set._lxStandInT0) set._lxStandInT0 = now;
+  if (now - set._lxStandInT0 > 4000) { set._lxStandInOff = true; return sprite; }   // a set that will not bake: draw it as before
+  return set._lxHoldRaw || (set._lxHoldRaw = sprite);
+}
 function _lxBakeBudget() {
   if (typeof game !== 'undefined' && game) {
     // v0.29.742 — while a dramatic blackout or the Gravitos entry cinematic owns
@@ -16375,6 +16480,12 @@ function _lxBitmapToCanvas(bmp, src) {
   // this pointer the (now scale-aware) resolver answers from the source's
   // table row instead, and the scan cannot fire.
   cv._lxBboxSrc = src;
+  // v0.30.775 — carry the frame index and state tag. _drawBossSprite reads sprite._lxFi for the per-frame
+  // calib scale (fs) and sprite._lxSt for the calib state; a baked frame dropped both, so it fell back to
+  // the derived state (a duck / weave frame borrowed the idle entry) and ignored fs - a size pop the moment
+  // a bake landed. _lxPinned already copied _lxFi; this is the bake path catching up.
+  if (src._lxFi !== undefined) cv._lxFi = src._lxFi;
+  if (src._lxSt !== undefined) cv._lxSt = src._lxSt;
   return cv;
 }
 // v0.29.749 — OFF-THREAD FOR REAL. createImageBitmap(<img>) re-decodes the
@@ -69813,6 +69924,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     // v0.30.x — and the BOSS frame sets, which _monsterFramesFor does not own and which
     // shipped with no decode() at all. See _lxWarmBossFrames.
     if ((isBoss || isMiniBoss) && typeof _lxWarmBossFrames === 'function') _lxWarmBossFrames(type);
+    if ((isBoss || isMiniBoss) && typeof _lxBossBakeQueue === 'function') _lxBossBakeQueue(type, (typeof monsterTypes !== 'undefined' && monsterTypes[type] && monsterTypes[type].zodiacSign) || null);   // v0.30.775 — see _lxBossBakeQueue
   } catch (e) {}
   // v0.29.619 — no wild spawn may land in a town, whatever called us. Returns the
   // same stub shape as the co-op guard below so callers that set fields on the
@@ -133999,7 +134111,7 @@ function _loadBossFrames(map, subdir, types) {
       img.decoding = 'async';
       img.onerror = () => { /* frame absent — handled by the contiguous-run check */ };
       img.src = 'Sprites/bosses/' + subdir + '/' + type + '_' + i + '.webp';
-      img._lxFi = i;   // frame index — keys the per-frame calib scale (fs)
+      img._lxFi = i; img._lxSet = arr;   // frame index — keys the per-frame calib scale (fs); v0.30.775 — _lxSet: the set, for _lxBossStandIn
       img._lxSt = subdir;   // v0.30.68 — state dir ('idle'|'walk'|'attack'|'duck'|'weave'),
                             // the calib key this frame should be looked up under
       arr[i] = img;
@@ -135593,6 +135705,7 @@ function _lxRecordBossRect(m, tr0, x0, y0, w, h) {
   } catch (e) {}
 }
 function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
+  sprite = _lxBossStandIn(sprite, m);   // v0.30.775 — never a raw over-cap frame on the main thread while its set bakes
   const _lxTr0 = (typeof ctx.getTransform === 'function' && ((m._wardUntil | 0) > (game.time | 0) || (typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)))) ? ctx.getTransform() : null;   // v0.30.390 — the caller's space · v0.30.405 — only while the ward or its break window needs the rect (five Web API objects a boss draw otherwise)
   // v0.29.136 — King Krook "ROYAL CHARGE" (was the turtle SHELL CYCLONE).
   // King Krook is a crocodile king, not a turtle, so his phase-2 dash no longer
