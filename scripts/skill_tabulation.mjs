@@ -1,0 +1,179 @@
+// SKILL TABULATION - every skill of every class, measured, in one table: damage as % of the class's
+// basic hit, lines of damage, distinct monsters hit out of a 6-mob cluster, statuses inflicted, MP,
+// cooldown - so an abnormally high or low output stands out against its own tier.
+//
+// Nothing is read off a multiplier. Each skill is cast at a pinned dummy (evasion 0, crits off, RNG
+// pinned) and the dummy's HP loss is totalled over WINDOW ms, so DOTs, channels, summons and delayed
+// detonations count as they land. A second cast against a 6-mob cluster counts how many distinct
+// monsters lose HP. The dummy is held in place by position, NOT by freeze/stun, so the statuses a
+// skill applies (burn, poison, freeze, stun, hex stacks, weaken, marks, knockback) are observable.
+//   MOJI_GAME_FILE=<build> node scripts/skill_tabulation.mjs [--window=10000] [--only=cls] [--out=x.json] [--md=x.md]
+import { createRequire } from 'node:module'; import path from 'node:path';
+import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright-core');
+const PORT = Number(process.env.PORT || 11091);
+const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith('--' + k + '=')); return a ? a.split('=')[1] : d; };
+const WINDOW = Number(arg('window', 10000)), CLUSTER_MS = Number(arg('cluster', 4000));
+const ONLY = arg('only', '').split(',').filter(Boolean);
+const TAGS = arg('tags', '').split(',').filter(Boolean);   // --tags=id1,id2  log every hit's tag / in / out for these skills (diagnostic)
+const OUT = arg('out', path.join(ROOT, 'docs', 'reports', 'skill_tabulation.json'));
+const MD = arg('md', path.join(ROOT, 'docs', 'reports', 'SKILL_TABULATION.md'));
+const renderMd = (r) => {
+  const md = [`# Skill tabulation — ${r.ver} (measured)`, '', `Every skill cast once at a pinned dummy (ATK 1000, level 90, evasion 0, crits off, RNG pinned); damage is the dummy's HP loss over ${r.window / 1000} s as a % of that class's basic hit. "Mobs" = distinct monsters hit out of a 6-mob cluster. Statuses are the dummy fields the cast set. Flags compare a row with the median of its own tier in its class: HIGH > 2×, LOW < 0.5×.`, ''];
+  for (const [cls, c] of Object.entries(r.classes)) {
+    const rows = Object.entries(c.rows).map(([id, x]) => Object.assign({ id, pct: c.basic.total ? x.total / c.basic.total * 100 : 0 }, x));
+    const med = {}; for (const t of ['basic', 'job', 'master']) { const v = rows.filter((x) => x.tier === t && x.total > 0).map((x) => x.pct).sort((a, b) => a - b); med[t] = v.length ? v[Math.floor(v.length / 2)] : 0; }
+    md.push(`## ${cls} — basic ${c.basicId} = ${c.basic.total} per hit`, '', '| tier | key | skill | id | dmg %basic | lines | per line | cd s | mp | %basic per 10 s cd | mobs | statuses | flag |', '|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|');
+    rows.sort((a, b) => ['basic', 'job', 'master'].indexOf(a.tier) - ['basic', 'job', 'master'].indexOf(b.tier) || String(a.key).localeCompare(String(b.key)));
+    for (const x of rows) {
+      const flag = x.err ? 'ERR' : x.total === 0 ? 'utility' : med[x.tier] && x.pct > 2 * med[x.tier] ? 'HIGH' : med[x.tier] && x.pct < 0.5 * med[x.tier] ? 'LOW' : '';
+      const perCd = x.cd ? (x.pct / (x.cd / 10000)).toFixed(0) : '-';
+      md.push(`| ${x.tier} | ${x.key} | ${x.name} | ${x.id} | ${x.err ? x.err : x.pct.toFixed(0) + '%'} | ${x.lines || 0} | ${x.lines ? (x.pct / x.lines).toFixed(0) + '%' : '-'} | ${(x.cd / 1000).toFixed(1)} | ${x.mp} | ${perCd} | ${x.mobsHit || 0}/${x.mobs || 6} | ${(x.statuses || []).join(' ')} | ${flag} |`);
+    }
+    md.push('');
+  }
+  return md.join('\n') + '\n';
+};
+// --merge=a.json,b.json,...  combines per-class runs (one class per browser session keeps each run
+// short) into one JSON + one markdown table, without opening a browser.
+if (arg('merge')) {
+  const parts = arg('merge').split(',').map((f) => JSON.parse(readFileSync(f, 'utf8')));
+  const merged = { ver: parts[0].ver, window: parts[0].window, clusterMs: parts[0].clusterMs, classes: Object.assign({}, ...parts.map((p) => p.classes)) };
+  writeFileSync(OUT, JSON.stringify(merged, null, 1)); writeFileSync(MD, renderMd(merged));
+  console.log(`merged ${parts.length} runs (${Object.keys(merged.classes).join(', ')}) -> ${OUT}\n${MD}`); process.exit(0);
+}
+const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT, env: { ...process.env } });
+await new Promise((r) => setTimeout(r, 1800));
+const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
+const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
+const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 160)));
+try {
+  await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.waitForFunction(() => typeof loadMap === 'function' && typeof castSkill === 'function', null, { timeout: 180000 });
+  await page.waitForTimeout(8000);
+  const r = await page.evaluate(async ({ WINDOW, CLUSTER_MS, ONLY, TAGS }) => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
+    for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+    loadMap('forest', 300); await sleep(2000);
+    for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
+    game.paused = false;
+    // Every cast starts from the spawn point. Dash skills (Kage Rush, Voidwalk, Mirror Shadow) carry the
+    // player across the map, and a dummy spawned 150 px ahead of wherever they stopped can drop into a
+    // gap - the frozen rogue run read those three at 0% for exactly that reason.
+    // ...captured once the player has LANDED: right after boot the spawn is 36 px above the ground and a
+    // dummy spawned beside an airborne player sits above the orbit of Divine Aegis's orbs (it read 0%).
+    for (let i = 0; i < 30 && !player.onGround; i++) await sleep(100);
+    const _x0 = player.x, _y0 = player.y;
+    // Pin the hit-streak multipliers. comboMult climbs 1 -> 5 with every hit of the SESSION (2.6 s
+    // decay, so a 10 s window of bites keeps it alive) and critStreak adds up to +15%: a 155-line skill
+    // measured after 300 earlier hits read up to 5x a fresh basic on the same literals. Both are
+    // gameplay, neither is the skill's number - hold them so every row is read at the same rung.
+    Object.defineProperty(game, 'comboMult', { get: () => 1, set() {}, configurable: true });
+    Object.defineProperty(game, 'critStreak', { get: () => 0, set() {}, configurable: true });
+    // ...and the combo COUNT: crossing 50 grants buffs.comboAtk (+50% ATK, 8 s) mid-cast, so an 81-line
+    // skill read 12% higher when the count had already crossed than when it crossed during the cast
+    Object.defineProperty(game, 'combo', { get: () => 0, set() {}, configurable: true });
+    window.getCritDmg = () => 1; window.rollCrit = () => false;
+    const _rnd = Math.random; Math.random = () => 0.95;
+    const slotKey = {}; try { for (const [k, v] of Object.entries(KEY_TO_SLOT_DEFAULT)) slotKey[v] = k.toUpperCase(); } catch (e) {}
+    const tierOf = (slot) => 'xb'.includes(slot) ? 'master' : 'qc'.includes(slot) ? 'job' : 'basic';
+    let dummies = [], hits = 0; const hitSet = new Set(); let tagLog = null;   // tagLog: [tag, in, out] per hit when --tags names the skill
+    const _hm = window.hitMonster;
+    window.hitMonster = function (m, dmg, isCrit, skill) { const i = dummies.indexOf(m); if (i >= 0) { hits++; hitSet.add(i); if (tagLog) { const hp0 = m.currentHp; const r = _hm.apply(this, arguments); tagLog.push([skill, Math.round(dmg), Math.round(hp0 - m.currentHp)]); return r; } } return _hm.apply(this, arguments); };
+    const STATUS_RE = /(timer|stack|mark|slow|weak|hex|doom|brand|bleed|burn|poison|freeze|frozen|stun|chill|vuln|amp|curse|dot|shock|soak|wet|oil)/i;
+    const mk = (offsets) => {
+      game.monsters.length = 0; dummies = [];
+      for (const [dx, dy] of offsets) {
+        const m = spawnMonster(player.x + dx, player.y + (dy || -10), 'slime', false); if (!m) continue;
+        m.w = 60; m.h = 60; m.maxHp = 9e12; m.currentHp = 9e12; m.evasion = 0; m.speed = 0; m.atk = 0;
+        m._pinX = player.x + dx; m._pinY = player.y + (dy || -10); m.x = m._pinX; m.y = m._pinY; m.vx = 0; m.vy = 0; dummies.push(m);
+      }
+      return dummies;
+    };
+    const setup = (id) => {
+      const sk = SKILLS[id];
+      player.x = _x0; player.y = _y0; player.vx = 0; player.vy = 0;
+      player.cls = sk.cls; player.job = sk.job || null; player.masteries = {}; player.master = sk.master || null; if (sk.master) player.masteries[sk.master] = true;
+      player._god = true; player.level = 90; player.baseAtk = 1000; player.baseCrit = 0; player.mods = player.mods || {}; player.mods.crit = 0;
+      player.maxMp = 99999; player.mp = 99999; player.maxHp = 999999; player.hp = 999999; player.facing = 1; player._releasedCharge = 1;
+      player.pet = null; player.pack = []; player.ultPet = null; player.buffs = player.buffs || {}; for (const k of Object.keys(player.buffs)) player.buffs[k] = 0;
+      if (game.minions) game.minions.length = 0;
+      player._ballistaTurrets = []; player._clones = null; player._hexOrbs = null; player._shade = null; player._judgeStacks = 0; player._mirrorBlink = false;
+      player._ballistaChannel = null; if (typeof _LX_DE !== 'undefined' && _LX_DE) { _LX_DE.execTally = 0; _LX_DE.meter = 0; _LX_DE.protocolTotal = 0; _LX_DE.tally = 0; }
+      player._msWin = null; player._aegis = null; player._eclipseRain = null; player._eclipseHold = null; player._doomWinBonus = null;
+      player._necromancerOrbs = null;   // Soul Siphon's Soul Ward lives 12 s and fires 6x-ATK orbs every 1.5 s: it bit through Dark Pulse's window (+2400%)
+      player.dragoonSlam = 0; player._dragoonExtraSlam = 0; player._slamPierceLeft = 0; player._ascended = false;
+      player._dawnStored = 0; player._bastionArmAt = 0; player._bastionArmedUntil = 0; player._calamityHeat = 0; game.critStreak = 0;
+      if (game.orbs) game.orbs.length = 0;
+      for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; if (player.cooldowns) for (const k of Object.keys(player.cooldowns)) player.cooldowns[k] = 0;
+      game.projectiles.length = 0; if (game.hazards) game.hazards.length = 0;
+    };
+    // "one use": one press, except the two press-driven Marksman windows (pressed at their gate for the
+    // whole window) and Bastion of Dawn (armed, pinned to full Dawn Charge, released) - as skill_budget_test.mjs
+    const USES = { marksman_oneshot: [Math.floor(6000 / 430), 430], marksman_ult: [Math.floor(8000 / 260), 260] };
+    const cast = async (id) => {
+      const u = USES[id];
+      if (id === 'crusader_ult') { castSkill(id); await sleep(150); player._bastionArmAt = game.time - 600; player._dawnStored = getMaxHp(); castSkill(id); return 2; }
+      if (!u) { castSkill(id); return 1; }
+      for (let i = 0; i < u[0]; i++) { for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; player.mp = 99999; try { castSkill(id); } catch (e) {} await sleep(u[1]); }
+      return u[0];
+    };
+    const snap = (m) => { const o = {}; for (const k of Object.keys(m)) { const v = m[k]; if (STATUS_RE.test(k) && (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string')) o[k] = v; } return o; };
+    // The DAMAGE dummy is held the way skill_budget_test.mjs holds it - frozen and stunned, never moved -
+    // so a piercing shard passes through it once, as in play. Resetting a knocked-back dummy into the
+    // shards every 200 ms made Voidwalk re-hit 34 times (11307%) where the frozen dummy takes 3 (998%).
+    // Statuses are read from the CLUSTER run, whose dummies are not frozen, so freeze / stun show.
+    const measure = async (id, offsets, ms, pin) => {
+      setup(id); mk(offsets); hits = 0; hitSet.clear();
+      tagLog = (pin && TAGS.includes(id)) ? [] : null;
+      if (pin) for (const m of dummies) { m.frozen = 99999; m.stunTimer = 99999; }
+      const hp0 = dummies.map((m) => m.currentHp); const before = snap(dummies[0]);
+      let presses = 1; try { presses = await cast(id); } catch (e) { return { err: 'threw: ' + String(e.message).slice(0, 80) }; }
+      const statuses = new Set(); let kb = false; const prof = []; const t0 = performance.now();
+      while (performance.now() - t0 < ms) {
+        await sleep(200);
+        if (pin) { for (const m of dummies) { m.frozen = 99999; m.stunTimer = 99999; m.vx = 0; } }
+        else {
+          for (const m of dummies) { if (Math.abs(m.vx) > 2 || Math.abs(m.vy) > 6) kb = true; m.x = m._pinX; m.y = m._pinY; m.vx = 0; m.vy = 0; m.speed = 0; }
+          const now = snap(dummies[0]); for (const [k, v] of Object.entries(now)) { const b = before[k]; if ((typeof v === 'number' && v > (typeof b === 'number' ? b : 0)) || (v === true && b !== true) || (typeof v === 'string' && v && v !== b)) statuses.add(k); }
+        }
+        prof.push(Math.round(hp0[0] - dummies[0].currentHp));
+      }
+      const lost = dummies.map((m, i) => Math.round(hp0[i] - m.currentHp));
+      if (kb) statuses.add('knockback');
+      let tags = null;
+      if (tagLog) { tags = {}; for (const [t, din, dout] of tagLog) { const b = tags[t] = tags[t] || { n: 0, in: 0, out: 0 }; b.n++; b.in += din; b.out += dout; } tagLog = null; }
+      return { total: lost[0], allTotal: lost.reduce((a, b) => a + b, 0), lines: hits, mobsHit: [...hitSet].length, mobs: dummies.length, at2s: prof[9] || 0, statuses: [...statuses].sort(), presses, tags };
+    };
+    const out = { ver: GAME_VERSION, window: WINDOW, clusterMs: CLUSTER_MS, classes: {} };
+    const ids = Object.keys(SKILLS); const clsOf = {}; for (const id of ids) (clsOf[SKILLS[id].cls] = clsOf[SKILLS[id].cls] || []).push(id);
+    const SINGLE = [[150, -10]], CLUSTER = [[150, -10], [230, -10], [320, -10], [420, -10], [-160, -10], [560, -10]];
+    for (const cls of Object.keys(clsOf)) {
+      if (ONLY.length && !ONLY.includes(cls)) continue;
+      const basicId = clsOf[cls].find((id) => SKILLS[id].slot === 'd');
+      const basic = await measure(basicId, SINGLE, 1500, true);
+      const rows = {};
+      for (const id of clsOf[cls]) {
+        const sk = SKILLS[id];
+        const one = await measure(id, SINGLE, WINDOW, true);
+        const many = one.err ? { mobsHit: 0, statuses: [] } : await measure(id, CLUSTER, CLUSTER_MS, false);
+        rows[id] = Object.assign({ name: sk.name, slot: sk.slot, key: slotKey[sk.slot] || sk.slot.toUpperCase(), tier: tierOf(sk.slot), job: sk.job || '', master: sk.master || '', mp: sk.mp, cd: sk.cd, desc: sk.desc }, one, { statuses: many.statuses || [], mobsHit: many.mobsHit, mobs: many.mobs || 6, clusterTotal: many.allTotal || 0 });
+      }
+      out.classes[cls] = { basicId, basic, rows };
+    }
+    Math.random = _rnd; window.hitMonster = _hm;
+    return out;
+  }, { WINDOW, CLUSTER_MS, ONLY, TAGS });
+  writeFileSync(OUT, JSON.stringify(r, null, 1));
+  writeFileSync(MD, renderMd(r));
+  console.log(`build ${r.ver} -> ${OUT}\n${MD}`);
+  for (const [cls, c] of Object.entries(r.classes)) for (const [id, x] of Object.entries(c.rows)) if (x.tags) {
+    console.log(`tags ${cls}/${id}: ` + Object.entries(x.tags).map(([t, b]) => `${t} x${b.n} in ${b.in} out ${b.out}`).join(' | '));
+  }
+  if (errs.length) console.log('page errors: ' + errs.slice(0, 5).join(' | '));
+} finally { await browser.close(); server.kill(); }

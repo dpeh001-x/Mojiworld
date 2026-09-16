@@ -57,6 +57,16 @@ try {
     loadMap('forest', 300); await sleep(2000);
     for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
     game.paused = false;
+    // Pin the hit-streak multipliers (found after v0.30.772 shipped): comboMult climbs 1 -> 5 with every
+    // hit of the SESSION (2.6 s decay) and critStreak adds up to +15%, so a row's reading depended on how
+    // many hits the rows before it had landed. Held at 1 / 0 so every row is read at the same rung.
+    Object.defineProperty(game, 'comboMult', { get: () => 1, set() {}, configurable: true });
+    Object.defineProperty(game, 'critStreak', { get: () => 0, set() {}, configurable: true });
+    Object.defineProperty(game, 'combo', { get: () => 0, set() {}, configurable: true });   // crossing 50 grants +50% ATK for 8 s mid-cast
+    // every cast starts at the spawn, captured once the player has LANDED (right after boot it is 36 px up,
+    // and a dummy spawned beside an airborne player sits above the orbit of Divine Aegis's orbs)
+    for (let i = 0; i < 30 && !player.onGround; i++) await sleep(100);
+    const _x0 = player.x, _y0 = player.y;
     window.getCritDmg = () => 1; window.rollCrit = () => false;
     const _rnd = Math.random; Math.random = () => 0.95;
     let dummy = null, lines = 0;
@@ -64,7 +74,7 @@ try {
     window.hitMonster = function (m) { if (m === dummy) lines++; return _hm.apply(this, arguments); };
     const mk = (dx) => { game.monsters.length = 0; const m = spawnMonster(player.x + (dx || 150), player.y - 10, 'slime', false);
       if (!m) return null; m.w = 60; m.h = 60; m.maxHp = 9e12; m.currentHp = 9e12; m.evasion = 0; m.speed = 0; m.frozen = 99999; m.stunTimer = 99999; return m; };
-    const setup = (id) => { const sk = SKILLS[id];
+    const setup = (id) => { const sk = SKILLS[id]; player.x = _x0; player.y = _y0; player.vx = 0; player.vy = 0;
       player.cls = sk.cls; player.job = sk.job || null; player.masteries = {}; player.master = sk.master || null; if (sk.master) player.masteries[sk.master] = true;
       player._god = true; player.level = 90; player.baseAtk = 1000; player.baseCrit = 0; player.mods = player.mods || {}; player.mods.crit = 0;
       player.maxMp = 99999; player.mp = 99999; player.maxHp = 999999; player.hp = 999999; player.facing = 1; player._releasedCharge = 1;
@@ -80,6 +90,10 @@ try {
       if (typeof _LX_DE !== 'undefined' && _LX_DE) { _LX_DE.execTally = 0; _LX_DE.meter = 0; _LX_DE.protocolTotal = 0; _LX_DE.tally = 0; }
       player._msWin = null;                                             // Deadeye / Protocol window
       player._aegis = null;                                             // Divine Aegis orbs, 9 s
+      player._necromancerOrbs = null;                                   // Soul Siphon's Soul Ward, 12 s, 6x-ATK orbs every 1.5 s
+      player._calamityHeat = 0;                                         // berserker heat builds on every hit of the job and multiplies the doombringer's numbers: every cast starts cold
+      player.buffs = player.buffs || {}; for (const k of Object.keys(player.buffs)) player.buffs[k] = 0;   // Warlord's Banner's 12 s ATK buff was still on Blade of Calamity (+68%)
+      player._judgeStacks = 0;
       player._eclipseRain = null; player._eclipseHold = null;           // Eclipse rain channel
       player._doomWinBonus = null;
       player.dragoonSlam = 0; player._dragoonExtraSlam = 0; player._slamPierceLeft = 0;

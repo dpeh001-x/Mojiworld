@@ -59,6 +59,75 @@ bosses), so a DOT's budget binds first on bosses.
 | warrior | B | Bastion of Dawn (`crusader_ult`) | 1784% | **2497%** | 3 | 2500% |
 | warrior | B | Skyfall Dominion (`dragoon_ult`) | 2483% | **1009%** | 10 | 1000% |
 
+## Damage tiers — v0.30.773 (measured, comboMult held)
+
+Targets as a % of the class basic hit: base kit 100 + 30·cd (100–400), job tier 350 + 25·cd (500–900), master 1000 (Bastion of Dawn 2500). Read with crits off, RNG pinned, comboMult 1, critStreak 0, a frozen dummy, from the landed spawn. Full table: docs/reports/SKILL_TABULATION.md.
+
+| class | tier | key | skill | cd s | lines | was | now |
+|---|---|---|---|---:|---:|---:|---:|
+| archer | basic | X | Multi Shot | 2.6 | 3 | 338% | **179%** |
+| archer | basic | S | Charged Shot | 4 | 1 | 266% | **220%** |
+| archer | basic | C | Evade Burst | 8 | 2 | 169% | **340%** |
+| archer | job | F | Railshot | 12 | 1 | 340% | **650%** |
+| archer | job | V | Elemental Arrows | 17 | 10 | 1084% | **778%** |
+| archer | job | F | Wild Bond | 70 | 7 | 359% | **900%** |
+| archer | master | G | Gale Storm | 19 | 13 | 199% | **977%** |
+| archer | master | G | Siege Volley | 23 | 106 | 199% | **999%** |
+| archer | master | G | Deadeye | 30 | 81 | 438% | **995%** |
+| archer | master | B | Deadeye Protocol | 60 | 155 | 170% | **980%** |
+| archer | master | B | War Machine | 60 | 11 | 160% | **1074%** |
+| archer | master | B | Apex Bond | 60 | 7 | 216% | **1001%** |
+| archer | master | B | Eye of the Tempest | 60 | 14 | 190% | **916%** |
+| archer | master | G | Call of the Wild | 100 | 35 | 192% | **1000%** |
+| mage | basic | X | Fireball | 2.4 | 1 | 115% | **172%** |
+| mage | basic | C | Dimensional Warp | 2.4 | 1 | 125% | **172%** |
+| mage | basic | S | Ice Spike | 4.5 | 3 | 205% | **236%** |
+| mage | basic | D | Arcane Burst | 7 | 1 | 136% | **310%** |
+| mage | job | F | Meteor | 10 | 1 | 263% | **600%** |
+| mage | job | V | Celestial Aurora | 10 | 9 | 383% | **383%** |
+| mage | job | F | Holy Light | 12 | 1 | 62% | **62%** |
+| mage | job | V | Elemental Convergence | 14 | 1 | 171% | **701%** |
+| mage | job | F | Soul Siphon | 20 | 32 | 3512% | **838%** |
+| mage | job | V | Dark Pulse | 26 | 73 | 3081% | **874%** |
+| mage | master | G | Prismatic Cascade | 15 | 4 | 941% | **941%** |
+| mage | master | G | Pyre Columns | 17 | 3 | 910% | **910%** |
+| mage | master | G | Grand Hex | 25 | 12 | 637% | **962%** |
+| mage | master | G | Judgment of the Holy Grail | 32 | 7 | 948% | **936%** |
+| mage | master | G | Soul Vortex | 40 | 17 | 832% | **944%** |
+| mage | master | B | Elemental Apotheosis | 40 | 2 | 995% | **995%** |
+| mage | master | B | Meteor Sigil | 50 | 1 | 998% | **998%** |
+| mage | master | B | Pandemic Hex | 50 | 13 | 911% | **964%** |
+| mage | master | B | Necrotic Ascendance | 60 | 12 | 878% | **944%** |
+| mage | master | B | Apotheosis | 65 | 6 | 1187% | **1000%** |
+| rogue | basic | D | Flurry | 1 | 1 | 176% | **130%** |
+| rogue | basic | S | Shuriken | 1.3 | 5 | 443% | **141%** |
+| rogue | basic | C | Smoke Dash | 1.5 | 4 | 339% | **144%** |
+| rogue | basic | X | Backstab | 2 | 2 | 304% | **160%** |
+| rogue | job | F | Shadow Strike | 7 | 5 | 877% | **524%** |
+| rogue | job | V | Death Blossom | 8 | 3 | 328% | **552%** |
+| rogue | job | F | Shin-Shuriken | 9 | 12 | 1413% | **581%** |
+| rogue | job | V | Voidrift Blink | 14 | 1 | 131% | **700%** |
+| rogue | master | G | Kage Rush | 15 | 1 | 1000% | **1000%** |
+| rogue | master | G | Voidrift Execution | 20 | 7 | 970% | **970%** |
+| rogue | master | G | Eclipse Massacre | 25 | 11 | 909% | **909%** |
+| rogue | master | B | Hundred-Hand Shadow Dance | 45 | 5 | 1002% | **1002%** |
+| rogue | master | B | Bloodmoon Domain | 45 | 16 | 865% | **998%** |
+| rogue | master | B | Voidwalk | 50 | 3 | 998% | **998%** |
+| warrior | basic | C | Rush | 1.8 | 2 | 377% | **154%** |
+| warrior | basic | S | Ground Slam | 4 | 3 | 171% | **220%** |
+| warrior | basic | X | Somersault Smash | 4.5 | 2 | 732% | **235%** |
+| warrior | basic | D | War Cry | 18 | 1 | 202% | **202%** |
+| warrior | job | V | Rampage | 8 | 8 | 804% | **551%** |
+| warrior | job | V | Holy Shield | 22 | 3 | 782% | **899%** |
+| warrior | master | G | Blade of Calamity | 18 | 11 | 600% | **999%** |
+| warrior | master | G | Warlord's Banner | 19 | 3 | 970% | **970%** |
+| warrior | master | G | Sky Lance | 25 | 2 | 999% | **999%** |
+| warrior | master | G | Divine Aegis | 26 | 3 | 857% | **857%** |
+| warrior | master | B | Calamity Incarnate | 50 | 8 | 710% | **1000%** |
+| warrior | master | B | Skyfall Dominion | 50 | 10 | 935% | **935%** |
+| warrior | master | B | War of Banners | 60 | 2 | 932% | **932%** |
+| warrior | master | B | Bastion of Dawn | 60 | 3 | 2497% | **2497%** |
+
 ## ⚔ WARRIOR (13 skills)
 
 class: warrior
