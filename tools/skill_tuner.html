@@ -63,10 +63,20 @@
   .field .was { color: var(--gold); display: block; }
   .small { font-size: 12px; color: var(--muted); }
   .warn { color: var(--warn); font-size: 12px; }
-  h4 { margin: 10px 0 2px; font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
-  .where { margin-top: 8px; font-size: 13px; }
-  .where pre { white-space: pre-wrap; word-break: break-word; background: #0f0b19; border-radius: 8px; padding: 8px; font-size: 12px; color: #c9c2dc; }
-  .where mark { background: #4a3a10; color: var(--gold); border-radius: 3px; padding: 0 2px; }
+  h4 { margin: 12px 0 2px; font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  .steps-help { margin: 0 0 6px; }
+  /* one part of a skill: "Area hit   within [120] pixels · [0.53] × attack" */
+  .steps { display: grid; gap: 4px; }
+  .step { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 5px 10px; border-radius: 8px; background: var(--panel2); }
+  .step .lbl { font-weight: 600; min-width: 200px; }
+  .step .part { display: inline-flex; align-items: center; gap: 6px; }
+  .step .words, .step .unit, .step .sep { color: var(--muted); font-size: 14px; }
+  .step input { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+  .step input.changed { border-color: var(--gold); background: #3a2e0c; }
+  .step .hint { color: var(--muted); font-size: 12px; }
+  .step .hint:empty, .step .was:empty { display: none; }
+  .step .was { color: var(--gold); font-size: 12px; }
+  .step .note { color: var(--warn); font-size: 12px; margin-left: auto; }
   .tested { font-size: 13px; color: var(--good); }
   #out { width: 100%; height: 120px; margin-top: 8px; background: #0f0b19; color: #b9ffd0; border: 1px solid var(--line); border-radius: 8px; font: 12px/1.4 Consolas, monospace; display: none; }
   #frame { position: fixed; left: -9999px; top: 0; width: 1280px; height: 760px; border: 0; }
@@ -281,14 +291,82 @@ function measuredText(id) {
   const bits = [m.hits + (m.hits === 1 ? ' hit' : ' hits'), 'reaches ' + m.mobsHit + ' of ' + m.mobs + ' enemies'].concat(m.effects);
   return m.pct > 0 ? `About <b>${Math.round(m.pct).toLocaleString()}%</b> of a basic attack<br>${esc(bits.join(' · '))}` : 'Deals no damage itself<br>(a buff or helper skill)';
 }
-function numberRow(s, l, f, i, sameLabel) {
-  const d = describe(l, f), cur = (edits.get(keyOf(s, l)) || [])[i];
-  const shown = cur != null ? cur : l.text.slice(f.start, f.end);
-  const label = d.label + (sameLabel > 1 ? ' #' + sameLabel : '');
-  return `<div class="field line"><span class="lbl">${esc(label)}</span>` +
-    `<input class="${f.kind} val${cur != null ? ' changed' : ''}" data-id="${esc(s.id)}" data-line="${esc(l.text)}" data-i="${i}" value="${esc(shown)}" inputmode="decimal">` +
-    `<span class="unit">${esc(d.unit)}</span><span class="extra"><span class="small hint">${d.hint ? esc(d.hint(+shown)) : ''}</span>` +
-    `<span class="was">${cur != null ? 'was ' + esc(l.text.slice(f.start, f.end)) : ''}</span></span></div>`;
+// ---------- one part of a skill, as a plain sentence ----------
+// Every line of the skill's code becomes one row: a short name for what that part does, then its numbers
+// as boxes inside a sentence. For example   performAround(120, 0.53, ...)   becomes
+//   Area hit   within [120] pixels · [0.53] × attack
+const STATUS_NAMES = { stun: 'Stun', burn: 'Burn', poison: 'Poison', freeze: 'Freeze', slow: 'Slow' };
+const title = (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+function partName(l) {                      // what this row of the skill does
+  const t = l.text, only = l.fields.length === 1 ? l.fields[0] : null;
+  if (/^for\s*\(/.test(t)) return 'Repeat';
+  if (/^const (LX_|GLOBAL_)/.test(t)) return only ? describe(l, only).label : '';   // a named setting already says what it is (several on one line: each box names itself)
+  if (/performAround\(/.test(t)) return 'Area hit';
+  if (/performMelee\(/.test(t)) return 'Close-range hit';
+  if (/raiseMinion\(/.test(t)) return 'Summoned minion';
+  const st = t.match(/_applyMobStatus\([^,]+,\s*'(\w+)'/); if (st) return STATUS_NAMES[st[1]] || 'Effect';
+  if (/freezeTimer\s*=/.test(t)) return 'Freeze';
+  if (/stunTimer\s*=/.test(t)) return 'Stun';
+  const nm = t.match(/name:\s*'([^']+)'/); if (nm && /mul:/.test(t)) return nm[1].split(' ').map(title).join(' ');
+  if (/_sageDmgMul/.test(t)) return 'Fire pillar';
+  if (/ultPet/.test(t)) return 'Pet bites';
+  const key = t.match(/^(\w+):/); if (key && OBJ_NAMES[key[1]]) return OBJ_NAMES[key[1]][0];   // a named field, e.g. "baseMul: 8.4,"
+  if (/\bwant\b/.test(t)) return 'Execute shot';
+  if (/\bdmg:\s*\d/.test(t)) return 'Each strike';
+  if (/hazards\.push/.test(t)) return 'Zone';
+  if (/projectiles\.push|damage:/.test(t)) return 'Each projectile';
+  if (/\batk:\s*/.test(t)) return 'Summon or zone';
+  if (/hitMonster|\bdmg\b|_dmg|\w[Dd]mg\w*\s*=|^:\s*getAtk/.test(t)) return 'Each hit';
+  return 'Setting';
+}
+// named fields inside a settings block: [what it is, unit]
+const OBJ_NAMES = {
+  baseMul: ['Damage when released at once', '× attack'],
+  timeMul: ['Extra damage when fully charged', '× attack'],
+  dmgAmp: ['Boost after taking a full health bar of damage', '× extra'],
+};
+function partWords(l, f, s) {               // the words around one number box: { before, unit, hint }
+  const before = l.text.slice(Math.max(0, f.start - 60), f.start), d = describe(l, f), named = /^const (LX_|GLOBAL_)/.test(l.text);
+  if (s.id === '_global') return { before: '', unit: '×' };
+  if (named) return { before: l.fields.length > 1 ? d.label : '', unit: d.unit, hint: d.hint };
+  const key = l.text.match(/^(\w+):/); if (key && OBJ_NAMES[key[1]]) return { before: '', unit: OBJ_NAMES[key[1]][1] };
+  switch (f.kind) {
+    case 'mul':
+      if (/ultPet/.test(l.text)) return { before: /\?\s*$/.test(before) ? 'werewolf (Apex Bond)' : 'pet (Wild Bond)', unit: '× attack' };
+      if (/\?\s*$/.test(before)) return { before: 'if lined up', unit: '× attack' };
+      if (/[^:]:\s*$/.test(before) && /\?/.test(before)) return { before: 'otherwise', unit: '× attack' };
+      if (/Math\.max\(getAtk\(\)\s*\*\s*$/.test(before)) return { before: 'at least', unit: '× attack' };
+      return { before: l.fields.find((x) => x.kind === 'mul') === f ? 'deals' : 'and', unit: '× attack' };
+    case 'flat': return { before: '+', unit: 'damage' };
+    case 'count': return /^for\s*\(/.test(l.text) ? { before: '', unit: 'times' } : { before: '', unit: 'of them' };
+    case 'radius':
+      if (/performMelee\(\s*$/.test(before)) return { before: 'reach', unit: 'pixels' };
+      if (/explode/.test(before)) return { before: 'explosion', unit: 'pixels' };
+      return { before: 'within', unit: 'pixels' };
+    case 'time': return { before: 'lasts', unit: d.unit, hint: d.hint };
+    case 'frac': return /chance:\s*$/.test(before) ? { before: '', unit: '% chance' } : { before: 'share', unit: '', hint: d.hint };
+    case 'speed': return { before: /vx:\s*(Math\.\w+\([^)]*\)\s*\*\s*)?$/.test(before) ? 'sideways speed' : /vy:\s*(Math\.\w+\([^)]*\)\s*\*\s*)?$/.test(before) ? 'up-down speed' : 'speed', unit: '' };
+  }
+  return { before: '', unit: d.unit };
+}
+function lineRow(s, l) {
+  const cur = edits.get(keyOf(s, l)) || [];
+  const parts = l.fields.map((f, i) => {
+    if (f.kind === 'speed' && f.value === 0 && cur[i] == null) return '';   // a zero speed only means "not moving that way"
+    const w = partWords(l, f, s), val = cur[i] != null ? cur[i] : l.text.slice(f.start, f.end);
+    return `<span class="part">${w.before ? `<span class="words">${esc(w.before)}</span>` : ''}` +
+      `<input class="${f.kind} val${cur[i] != null ? ' changed' : ''}" data-id="${esc(s.id)}" data-line="${esc(l.text)}" data-i="${i}" value="${esc(val)}" inputmode="decimal">` +
+      `${w.unit ? `<span class="unit">${esc(w.unit)}</span>` : ''}<span class="hint">${w.hint ? esc(w.hint(+val)) : ''}</span>` +
+      `<span class="was">${cur[i] != null ? 'was ' + esc(l.text.slice(f.start, f.end)) : ''}</span></span>`;
+  }).filter(Boolean).join('<span class="sep">·</span>');
+  if (!parts) return '';
+  const lead = partName(l);
+  const nearby = lead === 'Area hit' && !l.fields.some((f) => f.kind === 'radius') ? '<span class="words">nearby</span>' : '';
+  const notes = [];
+  if (l.count > 1) notes.push(`used in ${l.count} places`);
+  if (l.shared) notes.push('also changes ' + l.shared.map((id) => (skillById(id) || { name: id }).name).join(', '));
+  return `<div class="step line" title="Game file line ${l.lineNo || '?'}">${lead ? `<span class="lbl">${esc(lead)}</span>` : ''}${nearby}${parts}` +
+    `${notes.length ? `<span class="note">⚠ ${esc(notes.join('; '))}</span>` : ''}</div>`;
 }
 function card(s) {
   const re = rowEdits[s.id] || {}, isGlobal = s.id === '_global';
@@ -303,21 +381,11 @@ function card(s) {
     if (s.mp != null) html += `<div class="field"><span class="lbl">Mana cost</span><input class="mp${re.mp != null ? ' changed' : ''}" data-id="${esc(s.id)}" data-f="mp" value="${re.mp != null ? re.mp : s.mp}" inputmode="numeric"><span class="unit">mana</span><span class="extra"><span class="was">${re.mp != null ? 'was ' + s.mp : ''}</span></span></div>`;
     html += '</div>';
   }
-  if (s.lines.length) {
-    html += `<h4>${isGlobal ? 'Multipliers' : 'Damage and effects'}</h4><div class="fields">`;
-    const seen = {};
-    for (const l of s.lines) l.fields.forEach((f, i) => { const lb = describe(l, f).label; seen[lb] = (seen[lb] || 0) + 1; html += numberRow(s, l, f, i, seen[lb]); });
-    html += '</div>';
-    const notes = [];
-    for (const l of s.lines) {
-      if (l.count > 1) notes.push(`One of these lines appears ${l.count} times in the game; changing it changes all of them.`);
-      if (l.shared) notes.push(`One of these numbers is shared with ${l.shared.map((id) => (skillById(id) || { name: id }).name).join(', ')}; changing it changes that skill too.`);
-    }
-    if (notes.length) html += `<div class="warn">⚠ ${esc([...new Set(notes)].join(' '))}</div>`;
-    html += `<details class="where"><summary class="small">Show where these numbers are in the code</summary><pre>${s.lines.map((l) => {
-      let out = '', pos = 0; for (const f of l.fields) { out += esc(l.text.slice(pos, f.start)) + '<mark>' + esc(l.text.slice(f.start, f.end)) + '</mark>'; pos = f.end; }
-      return (l.lineNo ? 'line ' + l.lineNo + ':  ' : '') + out + esc(l.text.slice(pos));
-    }).join('\n')}</pre></details>`;
+  const rows = s.lines.map((l) => lineRow(s, l)).filter(Boolean);
+  if (rows.length) {
+    html += `<h4>${isGlobal ? 'Multipliers' : 'How the skill works'}</h4>` +
+      (isGlobal ? '' : '<p class="small steps-help">Each row is one part of the skill, in the order the game runs them. Type a new number into any box.</p>') +
+      `<div class="steps">${rows.join('')}</div>`;
   } else if (!isGlobal) {
     html += '<p class="small">This skill has no damage numbers of its own (it is a buff, or it copies your attacks).</p>';
   }
@@ -349,7 +417,7 @@ document.addEventListener('input', (ev) => {
   if (['q', 'tier', 'onlyChanged'].includes(el.id)) { render(); return; }
   if (el.tagName !== 'INPUT' || !el.dataset.id) return;
   const s = skillById(el.dataset.id); if (!s) return;
-  const row = el.closest('.field'), was = row && row.querySelector('.was');
+  const row = el.closest('.part, .field'), was = row && row.querySelector('.was');   // .part = one box in a sentence row
   if (el.dataset.f) {                                   // cooldown (seconds) or mana cost
     const f = el.dataset.f, v = f === 'cd' ? Math.round(parseFloat(el.value) * 1000) : Math.round(parseFloat(el.value));
     if (!isFinite(v) || v < 0) return;
@@ -364,7 +432,7 @@ document.addEventListener('input', (ev) => {
     cur[i] = (t === old || +t === f.value) ? null : t;
     if (cur.every((v) => v == null)) edits.delete(k); else edits.set(k, cur);
     el.classList.toggle('changed', cur[i] != null); if (was) was.textContent = cur[i] != null ? 'was ' + old : '';
-    const hint = row && row.querySelector('.hint'), d = describe(l, f); if (hint && d.hint) hint.textContent = d.hint(+t);
+    const hint = row && row.querySelector('.hint'), w = partWords(l, f, s); if (hint && w.hint) hint.textContent = w.hint(+t);
   }
   const c = el.closest('.card'); if (c) c.classList.toggle('edited', changedIds().includes(s.id));
   updateCount();

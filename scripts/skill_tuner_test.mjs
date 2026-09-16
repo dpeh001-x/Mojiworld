@@ -48,16 +48,22 @@ try {
   const gSrc = await page.evaluate(() => [/GLOBAL_SKILL_DMG_MUL\s*=\s*(\d+(?:\.\d+)?)/, /GLOBAL_ULT_DMG_MUL\s*=\s*(\d+(?:\.\d+)?)/].map((re) => (lxTuner.src.match(re) || [])[1]));
   check(g.length === 2 && g[0].endsWith('= ' + gSrc[0]) && g[1].endsWith('= ' + gSrc[1]), 'GLOBAL_SKILL_DMG_MUL and GLOBAL_ULT_DMG_MUL are shown, not hidden', g.join(' | '));
 
-  // 4b. plain language: the card names its numbers in words, and the code stays hidden until asked for
+  // 4b. plain language: every number sits in a plain sentence, and no card shows any code at all
   const words = await page.evaluate(() => {
     const c = document.querySelector('article.card.skill[data-id="shinobi_seal"]'); if (!c) return null;
-    const labels = [...c.querySelectorAll('.field .lbl')].map((e) => e.textContent), units = [...c.querySelectorAll('.field .unit')].map((e) => e.textContent);
-    const where = c.querySelector('details.where');
-    return { labels, units, codeHidden: !!where && !where.open, codeVisible: [...c.querySelectorAll('pre')].some((p) => p.checkVisibility ? p.checkVisibility() : p.getClientRects().length > 0) };
+    const labels = [...c.querySelectorAll('.field .lbl, .step .lbl')].map((e) => e.textContent), units = [...c.querySelectorAll('.field .unit, .step .unit')].map((e) => e.textContent);
+    // the text a reader sees on every card (boxes read as their numbers)
+    const CODE = /performAround\(|performMelee\(|getAtk|hitMonster|=>|\/\/|\bconst\b|for \(let|_lx|LX_|\{ *color/;
+    const codey = [...document.querySelectorAll('article.card')].filter((k) => CODE.test(k.innerText)).map((k) => k.dataset.id);
+    const slam = document.querySelector('article.card.skill[data-id="groundSlam"]');
+    const rows = slam ? [...slam.querySelectorAll('.step')].map((r) => [...r.childNodes].map((n) => n.tagName === 'INPUT' ? '[' + n.value + ']' : (n.querySelector && n.querySelector('input') ? [...n.childNodes].map((m) => m.tagName === 'INPUT' ? '[' + m.value + ']' : m.textContent).join(' ') : n.textContent)).join(' ').replace(/\s+/g, ' ').trim()) : [];
+    return { labels, units, pre: document.querySelectorAll('pre, details.where').length, codey, rows };
   });
   check(!!words && ['Cooldown', 'Mana cost', 'Slash damage'].every((l) => words.labels.includes(l)) && words.units.includes('× attack') && words.units.includes('seconds'),
     'Kage Rush reads in plain words: Cooldown (seconds), Mana cost, Slash damage (× attack)', words ? words.labels.join(' | ') : 'no card');
-  check(!!words && words.codeHidden && !words.codeVisible, 'the code is hidden until "Show where these numbers are in the code" is opened', JSON.stringify(words && { hidden: words.codeHidden, visible: words.codeVisible }));
+  check(!!words && words.pre === 0 && !words.codey.length, 'no card for any skill shows code', words ? `code blocks ${words.pre}; cards with code-like text: ${words.codey.join(', ') || 'none'}` : '');
+  check(!!words && words.rows.some((r) => /^Repeat \[\d+\] times/.test(r)) && words.rows.some((r) => /^Area hit within \[\d+\] pixels · deals \[[\d.]+\] × attack/.test(r)),
+    'Ground Slam reads as sentences: "Repeat [4] times", "Area hit within [120] pixels · deals [0.53] × attack"', words ? words.rows.join(' | ') : '');
 
   // 5. reset clears everything
   await page.click('#reset');

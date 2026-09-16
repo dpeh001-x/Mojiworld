@@ -153,10 +153,15 @@
       const text = raw.trim(); if (!text) return;
       let f = fields || fieldsOf(text, objFields ? OBJ_FIELDS : null); if (!f.length) return;
       if (!fields) {
-        const noise = /pixelBurst|_budgetedParticlePush|spawnSpriteBurst|spawnSmooth|damageNumbers|particles\.push|Opts:|bodyAlpha|alpha:/.test(text);
+        // visual effects, not skill numbers: particle / burst option lines ("{ size: .., life: 40, spin: .. }"),
+        // and a ward's starting state ("{ life: 0, maxLife: .. }")
+        const noise = /pixelBurst|_budgetedParticlePush|spawnSpriteBurst|spawnSmooth|damageNumbers|particles\.push|Opts:|bodyAlpha|alpha:|\bspin:|\bopacity:|\bbehind:\s*true|maxLife:|\bsize:\s*[^,]+,\s*life:/.test(text);
         const deals = DEALS.test(text) && !noise;
         const isLoop = /^\s*for\s*\(/.test(raw);
         f = f.filter((x) => x.kind === 'mul' || x.kind === 'flat' || x.kind === 'frac' || (isLoop ? (!noise && loopDeals(lineNo)) : deals));
+        // a bare loop header ("for (let i = 0; i < 3; i++) {") that appears elsewhere in the game is not this
+        // skill's number: the text is identical in every copy, so an edit would rewrite all of them (one was in 91 places)
+        if (isLoop && /^for\s*\([^)]*\)\s*\{?\s*$/.test(text) && count(text) > 1) f = f.filter((x) => x.kind !== 'count');
         if (!f.length) return;
       }
       if (s.lines.some((l) => l.text === text)) return;
