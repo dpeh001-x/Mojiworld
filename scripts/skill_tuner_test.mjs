@@ -48,6 +48,17 @@ try {
   const gSrc = await page.evaluate(() => [/GLOBAL_SKILL_DMG_MUL\s*=\s*(\d+(?:\.\d+)?)/, /GLOBAL_ULT_DMG_MUL\s*=\s*(\d+(?:\.\d+)?)/].map((re) => (lxTuner.src.match(re) || [])[1]));
   check(g.length === 2 && g[0].endsWith('= ' + gSrc[0]) && g[1].endsWith('= ' + gSrc[1]), 'GLOBAL_SKILL_DMG_MUL and GLOBAL_ULT_DMG_MUL are shown, not hidden', g.join(' | '));
 
+  // 4b. plain language: the card names its numbers in words, and the code stays hidden until asked for
+  const words = await page.evaluate(() => {
+    const c = document.querySelector('article.card.skill[data-id="shinobi_seal"]'); if (!c) return null;
+    const labels = [...c.querySelectorAll('.field .lbl')].map((e) => e.textContent), units = [...c.querySelectorAll('.field .unit')].map((e) => e.textContent);
+    const where = c.querySelector('details.where');
+    return { labels, units, codeHidden: !!where && !where.open, codeVisible: [...c.querySelectorAll('pre')].some((p) => p.checkVisibility ? p.checkVisibility() : p.getClientRects().length > 0) };
+  });
+  check(!!words && ['Cooldown', 'Mana cost', 'Slash damage'].every((l) => words.labels.includes(l)) && words.units.includes('× attack') && words.units.includes('seconds'),
+    'Kage Rush reads in plain words: Cooldown (seconds), Mana cost, Slash damage (× attack)', words ? words.labels.join(' | ') : 'no card');
+  check(!!words && words.codeHidden && !words.codeVisible, 'the code is hidden until "Show where these numbers are in the code" is opened', JSON.stringify(words && { hidden: words.codeHidden, visible: words.codeVisible }));
+
   // 5. reset clears everything
   await page.click('#reset');
   check(Object.keys(await page.evaluate(() => lxTuner.buildPatch())).length === 0, 'Reset empties the patch');
@@ -66,7 +77,7 @@ try {
 
   // 6. Measure: the edited build boots in the frame and Kage Rush reads its measured %basic
   await page.fill('#q', 'kage rush'); await page.dispatchEvent('#q', 'input');
-  const vis = await page.evaluate(() => document.querySelectorAll('tr.skill').length);
+  const vis = await page.evaluate(() => document.querySelectorAll('article.card.skill').length);
   check(vis === 1, 'the filter narrows the page to one skill', vis + ' rows');
   await page.click('#measure');
   await page.waitForFunction(() => typeof lxTuner.measured.edited.shinobi_seal === 'number' || /failed/.test(document.getElementById('status').textContent), null, { timeout: 150000 });
@@ -81,6 +92,16 @@ try {
   }
   const own = errs.filter((e) => /lxTuner|skill_tuner|lxScan|lxMeasure/.test(e));
   check(!own.length, 'no page errors from the tuner itself', own.join(' | ') || (errs.length ? errs.length + ' from the game frame (informational)' : 'none'));
+  // 7. opened straight from disk (double-clicking the file): no server, so it must say how to start, not show errors
+  const disk = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const diskErrs = []; disk.on('pageerror', (e) => diskErrs.push(String(e.message).slice(0, 120)));
+  await disk.goto('file:///' + path.join(ROOT, 'tools', 'skill_tuner.html').split(path.sep).join('/'), { waitUntil: 'load' });
+  const start = await disk.evaluate(() => ({ startShown: !document.getElementById('start').hidden, status: document.getElementById('status').textContent, results: !!window.LX_SKILL_TAB, testOff: document.getElementById('measure').disabled }));
+  check(start.startShown && /Open game file/.test(start.status) && !diskErrs.length, 'opened from disk, it shows the "Start here" steps and no errors', `${start.status} ${diskErrs.join(' | ')}`);
+  check(start.results, 'opened from disk, it still has the last damage test results (docs/reports/skill_tabulation.js)');
+  check(start.testOff, 'opened from disk, the damage test button is switched off with an explanation (it needs the game server)');
+  const loaded = await disk.evaluate((text) => { lxTuner.load(text, 'mojiworld_game.html'); return { cards: document.querySelectorAll('article.card.skill').length, measured: document.querySelector('article.card.skill[data-id="shinobi_seal"] .measured').textContent }; }, readFileSync(process.env.MOJI_GAME_FILE ? path.resolve(ROOT, process.env.MOJI_GAME_FILE) : path.join(ROOT, 'mojiworld_game.html'), 'utf8'));
+  check(loaded.cards >= 60 && /basic attack/.test(loaded.measured), 'after opening the game file it lists every skill with its measured damage in words', `${loaded.cards} cards; Kage Rush: ${loaded.measured}`);
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);
