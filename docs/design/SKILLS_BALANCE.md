@@ -1,10 +1,63 @@
-# Skill Balance Sheet — v0.25.518 (Mojiworld)
+# Skill Balance Sheet — v0.30.771 (Mojiworld)
 
 Edit this sheet to retune skills. The format below maps directly to the values in `SKILLS` (metadata: `mp`, `cd`) and the `SKILL_FNS` bodies (damage formulas). After tweaking, paste the changed block back to me with "apply this" and I'll wire it into `mojiworld_game.html`.
 
 **Damage notation:** `ATK × N` = `Math.floor(getAtk() × N)`. `+ flat` is a constant add. `crit` means the hit auto-crits. `area W×H` is the AoE rectangle. `radius R` is a circular AoE.
 
 ---
+
+## Damage budgets — v0.30.771 (measured)
+
+Per user (2026-09-16): **G and B** — the master signature and the master ultimate — of every class
+deal about **1000% of that class's basic attack**, cumulative across their lines. Damage-over-time,
+summon and channel skills deal that 1000% **over 10 seconds**. Skills that charge or carry a
+requirement may reach **2500%** — Bastion of Dawn at a full Dawn Charge is the reference.
+Q, C and the basic d/s/a/e/w kit are **out of scope** and were not changed.
+
+These are measured, not derived: one cast at a stationary dummy (evasion 0, crits off, RNG pinned),
+HP loss totalled over 10 s, lines counted at `hitMonster`. `scripts/skill_budget_test.mjs` is the
+measurement with ±20% assertions; this table is from the run that passed.
+
+Two definitions the table depends on: Deadeye (marksman G) and Protocol (marksman B) are budgeted on
+the **full press window** (6 s at the 420 ms gate; 8 s at the 250 ms gate), because one press is not
+the skill; Bastion of Dawn is released at t = 1 (held 10 s) and d = 1 (a full health bar banked).
+
+Known bound: burn and poison ticks are clamped to 0.5% of the target's max HP per tick (0.1% on
+bosses), so a DOT's budget binds first on bosses.
+
+| class | key | skill | before | after | lines | budget |
+|---|---|---|---:|---:|---:|---:|
+| archer | G | Deadeye (`marksman_oneshot`) | 6389% | **1000%** | 81 | 1000% |
+| archer | G | Siege Volley (`ballista_volley`) | 8462% | **1014%** | 106 | 1000% |
+| archer | G | Call of the Wild (`beastmaster_pack`) | 9878% | **958%** | 39 | 1000% |
+| archer | G | Gale Storm (`skyhunter_gale`) | 5498% | **996%** | 13 | 1000% |
+| archer | B | Deadeye Protocol (`marksman_ult`) | 91975% | **1088%** | 155 | 1000% |
+| archer | B | War Machine (`ballista_ult`) | 546% | **989%** | 11 | 1000% |
+| archer | B | Apex Bond (`beastmaster_ult`) | 577% | **1080%** | 7 | 1000% |
+| archer | B | Eye of the Tempest (`skyhunter_ult`) | 1586% | **983%** | 14 | 1000% |
+| mage | G | Judgment of the Holy Grail (`archbishop_grail`) | 1994% | **1010%** | 7 | 1000% |
+| mage | G | Pyre Columns (`sage_meteorshower`) | 767% | **1001%** | 3 | 1000% |
+| mage | G | Prismatic Cascade (`elementalist_cascade`) | 782% | **941%** | 4 | 1000% |
+| mage | G | Soul Vortex (`necromancer_harvest`) | 857% | **998%** | 18 | 1000% |
+| mage | G | Grand Hex (`hexmaster_grandhex`) | 2152% | **1001%** | 12 | 1000% |
+| mage | B | Meteor Sigil (`sage_ult`) | 300% | **998%** | 1 | 1000% |
+| mage | B | Elemental Apotheosis (`elementalist_ult`) | 532% | **995%** | 2 | 1000% |
+| mage | B | Necrotic Ascendance (`necromancer_ult`) | 1226% | **1047%** | 12 | 1000% |
+| mage | B | Pandemic Hex (`hexmaster_ult`) | 1534% | **1056%** | 13 | 1000% |
+| rogue | G | Kage Rush (`shinobi_seal`) | 248% | **1000%** | 1 | 1000% |
+| rogue | G | Eclipse Massacre (`nightreaper_mark`) | 1149% | **1008%** | 11 | 1000% |
+| rogue | G | Voidrift Execution (`phantom_cut`) | 3576% | **997%** | 7 | 1000% |
+| rogue | B | Hundred-Hand Shadow Dance (`shinobi_ult`) | 1124% | **1002%** | 5 | 1000% |
+| rogue | B | Bloodmoon Domain (`nightreaper_ult`) | 1767% | **1008%** | 16 | 1000% |
+| rogue | B | Voidwalk (`phantom_ult`) | 636% | **998%** | 3 | 1000% |
+| warrior | G | Warlord's Banner (`warlord_warcry`) | 595% | **970%** | 3 | 1000% |
+| warrior | G | Blade of Calamity (`doombringer_apoc`) | 1118% | **1118%** | 11 | 1000% |
+| warrior | G | Divine Aegis (`crusader_aegis`) | 832% | **857%** | 3 | 1000% |
+| warrior | G | Sky Lance (`dragoon_skylance`) | 727% | **999%** | 2 | 1000% |
+| warrior | B | War of Banners (`warlord_ult`) | 556% | **932%** | 2 | 1000% |
+| warrior | B | Calamity Incarnate (`doombringer_ult`) | 4332% | **999%** | 8 | 1000% |
+| warrior | B | Bastion of Dawn (`crusader_ult`) | 1784% | **2497%** | 3 | 2500% |
+| warrior | B | Skyfall Dominion (`dragoon_ult`) | 2483% | **1009%** | 10 | 1000% |
 
 ## ⚔ WARRIOR (13 skills)
 
