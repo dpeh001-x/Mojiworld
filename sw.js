@@ -164,7 +164,10 @@
 // v0.30.x - v52 -> v53. warrior_shockwave.webp and its nine frames are REPLACED under their
 // own names (the crescent was recarved thinner and translucent, and the animation is now a
 // crescent-into-fireball), so a returning browser would otherwise keep the old opaque set.
-const CACHE = 'mojiworld-assets-v57';   // v0.30.x - the recarved warrior_shockwave set
+// v0.30.767 - v57 -> v58. crusader_ult.webp and its nine frames are REPLACED under their own names
+// (the Bastion of Dawn medallion, which was cut off at its edges, is now the Dawnbreak nova), so a
+// returning browser would otherwise keep the old set.
+const CACHE = 'mojiworld-assets-v58';   // v0.30.767 - the Dawnbreak nova replaces the crusader_ult set
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

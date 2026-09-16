@@ -529,6 +529,8 @@ window.LX_SPRITE_FRAME_INDEX = {
    "archbishop_ult": 9,
    "ballista_ult": 9,
    "ballista_volley": 9,
+   "bastion_aura": 9,
+   "bastion_pillar": 9,
    "beastmaster_pack": 9,
    "beastmaster_ult": 9,
    "block_archer": 9,
