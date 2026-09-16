@@ -28,8 +28,11 @@ const SPEC = {
   store_capsule_vertical: { w: 374,  h: 448, label: 'Vertical capsule' },
   store_page_background:  { w: 1438, h: 810, label: 'Page background' },
   library_capsule:        { w: 600,  h: 900, label: 'Library capsule' },
-  library_header:         { w: 460,  h: 215, label: 'Library header' },
-  library_hero:           { w: 1920, h: 620, label: 'Library hero' },
+  // Library header + hero at the sizes Steamworks' Library Assets page states (read 2026-09-16): an upload
+  // of the old half-size hero (1920x620) is refused with 'Dimensions provided do not match any known assets'.
+  // Steam generates the half-size copies itself.
+  library_header:         { w: 920,  h: 430, label: 'Library header' },
+  library_hero:           { w: 3840, h: 1240, label: 'Library hero' },
   library_logo:           { w: 1280, h: 720, label: 'Library logo', fit: 'inside' },
 };
 
