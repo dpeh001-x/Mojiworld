@@ -11,6 +11,7 @@
 //
 //   node scripts/gen_steam_hero_guguma.mjs --pose [--n 4]        # ludo.ai: Guguma action poses -> STAGE
 //   node scripts/gen_steam_hero_guguma.mjs --compose [art.png] [--battle]  # master, upload size, logo preview
+//   node scripts/gen_steam_hero_guguma.mjs --logo                          # library_logo (thick outline) + upload
 //   (shipped art: --compose with no path = his original Sprites/npc/Guguma_hi.webp. The earlier battle-cry
 //    version was --compose steam/assets/refs/guguma_battlecry_pose.png --battle;
 //    then copy STAGE/library_hero.png -> steam/assets/ and library_hero_upload.png -> steam/assets/upload/library_hero.png)
@@ -115,7 +116,10 @@ const W = 3840, H = 1240;
 // its LETTERS under that beak start ~30 px below the logo's box (the box is raised by the sparkle over the
 // I). Tuft at y 40, a 1400 px logo, 14 px of clear air under the beak: h 1045, up from 900. (cx, cy) is the
 // light's origin; he is placed by his top edge and his horizontal centre (ax).
-const G = { cx: 1920, cy: 540, top: 40, h: 1045, ax: 0.5 };
+// CENTRED (per user: "push guguma slightly down vertically to centralise"): with the logo moved to the bottom
+// his face no longer sets the ceiling, so he sits at the vertical middle - his box centred on H/2, and the
+// light burst centred on him.
+const G = { cx: 1920, cy: 620, top: 98, h: 1045, ax: 0.5 };
 const DEFAULT_ART = 'Sprites/npc/Guguma_hi.webp';
 // --battle rebuilds the earlier battle-cry look: fire trail, a hot rim glow hugging him, shockwave rings and a
 // strong underlight. Without it none of those are drawn - the rim glow and the rings read as a halo around him
@@ -126,7 +130,15 @@ const UNDERLIGHT = BATTLE ? 0.85 : 0.4;
 // THICKER BLACK OUTLINE (per user): his silhouette grown by OUTLINE px with a true distance, so the line is
 // even all round - a blur-and-threshold swell goes thin in the notch under a wing and blobby at the tuft.
 const OUTLINE = 16, OUTLINE_RGB = [11, 8, 8];
-const LOGO = { w: 1400, cx: W / 2, cy: H / 2 };      // where the preview puts Steam's library_logo
+// LOGO LOWER (per user: "push it vertically down more"). Steamworks places the library logo at one of four
+// pins - left bottom, centred top, centred middle, centred bottom - with no free offset, so "lower" is
+// CENTRED BOTTOM. The preview puts it there, BOTTOM px above the edge.
+const LOGO = { w: 1400, cx: W / 2, bottom: 62 };
+// THICKER LOGO OUTLINE (per user: "make the blackoutline of the mojiworld thicker to match guguma"). Measured
+// in hero-master px: Guguma's art outline runs ~25 px plus the 16 px added = ~41; the wordmark's dark edge at
+// the preview's 1400 px is 21-24. LOGO_OUTLINE px at the wordmark's own 1254 px width is ~19 at 1400 -> ~42.
+const LOGO_OUTLINE = 17;
+const WORDMARK = 'Sprites/ui/mojiworld_logo.webp';
 let seed = 20260916;
 const rnd = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -134,14 +146,20 @@ const svg = (body, defs = '') => Buffer.from(`<svg width="${W}" height="${H}" vi
 
 async function cavern() {
   // 1456x816 -> 3840 wide is 2152 tall; the band keeps the crystals and puts the lava seam at ~0.87 of H
-  const band = await sharp(join(ROOT, 'backgrounds/bg_v3_dungeon.webp')).resize(W, 2152, { kernel: 'lanczos3' })
-    .extract({ left: 0, top: 771, width: W, height: H }).png().toBuffer();
-  return sharp(band).blur(2.6).modulate({ saturation: 1.18, brightness: 0.74 }).linear(1.15, -18).png().toBuffer();
+  // REFIT (per user: "the background adjust it to make it more fitting"): zoomed ZOOM so the crystals are sized
+  // for a 1045 px hero rather than read as wallpaper behind him; the glowing floor seam (0.86 of the art) lands
+  // at SEAM_Y, just behind his feet, so he stands IN the cavern; a deeper focus blur separates the crisp,
+  // outlined subject; saturation eased off the magenta so the yellow chick and gold logo own the colour.
+  const ZOOM = 1.1, SEAM_Y = 1110;
+  const sw = Math.round(W * ZOOM), sh = Math.round(2152 * ZOOM);
+  const band = await sharp(join(ROOT, 'backgrounds/bg_v3_dungeon.webp')).resize(sw, sh, { kernel: 'lanczos3' })
+    .extract({ left: Math.round((sw - W) / 2), top: Math.round(0.86 * sh - SEAM_Y), width: W, height: H }).png().toBuffer();
+  return sharp(band).blur(3.6).modulate({ saturation: 1.02, brightness: 0.72 }).linear(1.12, -16).png().toBuffer();
 }
 function shade() {   // darker ceiling and corners, hotter floor
   return svg(`<rect width="${W}" height="${H}" fill="url(#top)"/><rect width="${W}" height="${H}" fill="url(#vig)"/>`,
     `<linearGradient id="top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#12030a" stop-opacity="0.72"/>
-       <stop offset="0.45" stop-color="#12030a" stop-opacity="0.08"/><stop offset="1" stop-color="#12030a" stop-opacity="0.35"/></linearGradient>
+       <stop offset="0.45" stop-color="#12030a" stop-opacity="0.08"/><stop offset="1" stop-color="#12030a" stop-opacity="0.55"/></linearGradient>
      <radialGradient id="vig" cx="0.5" cy="0.55" r="0.75"><stop offset="0.55" stop-color="#000" stop-opacity="0"/>
        <stop offset="1" stop-color="#000" stop-opacity="0.78"/></radialGradient>`);
 }
@@ -176,7 +194,7 @@ function heat() {    // screen-blended: bloom behind Guguma, light burst, fire t
      <linearGradient id="trail" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#fff6c9" stop-opacity="0"/><stop offset="0.12" stop-color="#fff6c9"/><stop offset="0.3" stop-color="#ffc247"/>
        <stop offset="0.6" stop-color="#ff5a1c" stop-opacity="0.7"/><stop offset="1" stop-color="#ff3a10" stop-opacity="0"/></linearGradient>
      <linearGradient id="seam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff7a2a" stop-opacity="0"/>
-       <stop offset="0.45" stop-color="#ff9a3a" stop-opacity="0.38"/><stop offset="1" stop-color="#ff5a1a" stop-opacity="0"/></linearGradient>`);
+       <stop offset="0.45" stop-color="#ff9a3a" stop-opacity="0.2"/><stop offset="1" stop-color="#ff5a1a" stop-opacity="0"/></linearGradient>`);
 }
 function embers(front) {   // back layer: many small rising sparks; front layer: a few big out-of-focus ones
   let body = '';
@@ -231,8 +249,8 @@ async function guguma(posePath) {
   return { img: ol.img, P: ol.P, w, h, rim, pad };
 }
 // His art padded by P, laid over a black silhouette grown OUTLINE px (chamfer 5-7-11 distance, 1 px anti-alias).
-async function outlined(img, w, h) {
-  const P = OUTLINE + 4, W2 = w + 2 * P, H2 = h + 2 * P;
+async function outlined(img, w, h, T = OUTLINE) {
+  const P = T + 4, W2 = w + 2 * P, H2 = h + 2 * P;
   const padded = await sharp(img).extend({ top: P, bottom: P, left: P, right: P, background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
   const { data: a } = await sharp(padded).extractChannel('alpha').raw().toBuffer({ resolveWithObject: true });
   const INF = 1e9, d = new Float64Array(W2 * H2);
@@ -253,13 +271,29 @@ async function outlined(img, w, h) {
   }
   const line = Buffer.alloc(W2 * H2 * 4);
   for (let i = 0, q = 0; i < d.length; i++, q += 4) {
-    const k = Math.max(0, Math.min(1, OUTLINE + 0.5 - d[i] / 5));
+    const k = Math.max(0, Math.min(1, T + 0.5 - d[i] / 5));
     line[q] = OUTLINE_RGB[0]; line[q + 1] = OUTLINE_RGB[1]; line[q + 2] = OUTLINE_RGB[2]; line[q + 3] = Math.round(255 * k);
   }
   const base = await sharp(line, { raw: { width: W2, height: H2, channels: 4 } }).png().toBuffer();
   return { img: await sharp(base).composite([{ input: padded }]).png().toBuffer(), P };
 }
 
+// The wordmark with its outline thickened - the SAME image the preview shows and --logo installs.
+async function thickWordmark() {
+  const src = await sharp(join(ROOT, WORDMARK)).ensureAlpha().trim({ threshold: 10 }).png().toBuffer();
+  const m = await sharp(src).metadata();
+  // trimmed to its own ink again: Valve's review wants the library logo as the wordmark alone, no padding
+  return sharp((await outlined(src, m.width, m.height, LOGO_OUTLINE)).img).trim({ threshold: 10 }).png().toBuffer();
+}
+if (has('--logo')) {
+  // steam/assets/library_logo.png (art of record) + upload/library_logo.png inside Valve's 1280x720 box
+  const img = await thickWordmark(), m = await sharp(img).metadata();
+  await writeFile(join(ROOT, 'steam/assets/library_logo.png'), await sharp(img).png({ compressionLevel: 9 }).toBuffer());
+  const up = await sharp(img).resize(1280, 720, { fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' }).png({ compressionLevel: 9 }).toBuffer();
+  await writeFile(join(ROOT, 'steam/assets/upload/library_logo.png'), up);
+  const um = await sharp(up).metadata();
+  console.log(`library_logo ${m.width}x${m.height} · upload ${um.width}x${um.height}`);
+}
 if (has('--compose')) {
   const next = arg('--compose');
   const posePath = next && !next.startsWith('--') ? next : join(ROOT, DEFAULT_ART);
@@ -278,10 +312,10 @@ if (has('--compose')) {
   await writeFile(master, hero);
   await sharp(hero).resize(1920, 620, { kernel: 'lanczos3' }).png({ compressionLevel: 9 }).toFile(upload);
   // what Steam shows: the library_logo centred over the hero (a Steamworks setting, not baked in)
-  const logo = await sharp(join(ROOT, 'Sprites/ui/mojiworld_logo.webp')).resize(LOGO.w).png().toBuffer();
+  const logo = await sharp(await thickWordmark()).resize(LOGO.w, null, { kernel: 'lanczos3' }).png().toBuffer();
   const lm = await sharp(logo).metadata();
   // two pipelines again: sharp resizes BEFORE it composites, which would drop the logo on the shrunk image
-  const withLogo = await sharp(hero).composite([{ input: logo, left: Math.round(LOGO.cx - lm.width / 2), top: Math.round(LOGO.cy - lm.height / 2) }]).png().toBuffer();
+  const withLogo = await sharp(hero).composite([{ input: logo, left: Math.round(LOGO.cx - lm.width / 2), top: Math.round(H - LOGO.bottom - lm.height) }]).png().toBuffer();
   await sharp(withLogo).resize(1920, 620, { kernel: 'lanczos3' }).png().toFile(join(STAGE, 'preview_with_logo.png'));
   const mm = await sharp(master).metadata(), um = await sharp(upload).metadata();
   console.log(`master ${mm.width}x${mm.height} · upload ${um.width}x${um.height} · preview_with_logo.png -> ${STAGE}`);
