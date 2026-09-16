@@ -51,5 +51,18 @@ const shared = skills.flatMap((s) => s.lines.filter((l) => l.shared).map((l) => 
 console.log('  shared lines: ' + shared.length + (shared.length ? '  e.g. ' + shared.slice(0, 3).join(' | ') : ''));
 check(true, 'shared lines are flagged on both owners', shared.length + ' shared');
 
+// 5. the other variables a skill is made of - counts, reaches, durations, statuses, speeds - are found
+//    where the code has them, and never mistaken for damage (the tier generator scales mul/flat only)
+const kinds = {}; for (const s of skills) for (const l of s.lines) for (const f of l.fields) kinds[f.kind] = (kinds[f.kind] || 0) + 1;
+console.log('  fields by kind: ' + Object.entries(kinds).map(([k, n]) => k + ' ' + n).join(', '));
+const has = (id, kind, value) => { const s = skills.find((x) => x.id === id); return !!s && s.lines.some((l) => l.fields.some((f) => f.kind === kind && (value == null || f.value === value))); };
+check(has('dragoon_ult', 'count', 9) && has('phantom_ult', 'count', 3) && has('hexmaster_ult', 'count', 10), 'lance / ring / orb counts are found as counts', 'Skyfall 9 lances, Voidwalk 3 rings, Pandemic 10 orbs');
+check(has('hexmaster_ult', 'radius', 540) && has('doombringer_ult', 'radius', 440) && has('groundSlam', 'radius'), 'area reaches are found as radii', 'Pandemic 540, Calamity blade 440, Ground Slam');
+check(has('darkPulse', 'time', 30000) && has('soulSiphon', 'time', 16000) && has('elemental', 'time', 1200), 'summon lives and status durations are found as times', 'skeletons 30000 / 16000 ms, Convergence stun 1200 ms');
+check(has('elemental', 'frac', 100) || has('elemental', 'frac', 75), 'a status chance is a share, not a multiplier', 'Convergence burn / stun chance');
+const noise = skills.flatMap((s) => s.lines.filter((l) => /particles\.push|pixelBurst|_budgetedParticlePush/.test(l.text)).map((l) => s.id));
+check(!noise.length, 'particle pushes are never listed as skill variables', noise.slice(0, 4).join(', ') || 'none');
+check(kinds.mul > 60 && kinds.count >= 10 && kinds.radius >= 15 && kinds.time >= 20, 'every kind is populated', JSON.stringify(kinds));
+
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);

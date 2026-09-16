@@ -52,6 +52,18 @@ try {
   await page.click('#reset');
   check(Object.keys(await page.evaluate(() => lxTuner.buildPatch())).length === 0, 'Reset empties the patch');
 
+  // 5b. the other variables: a count edit (Skyfall Dominion's nine lances -> seven) rides the same patch and lands on its loop line
+  const cntSel = 'input[data-id="dragoon_ult"].count';
+  const cnt = await page.$eval(cntSel, (el) => ({ v: el.value, line: el.dataset.line })).catch(() => null);
+  if (cnt) {
+    await page.fill(cntSel, String(+cnt.v - 2)); await page.dispatchEvent(cntSel, 'input');
+    const r = await page.evaluate(() => { const p = lxTuner.buildPatch(); const e = p.dragoon_ult && p.dragoon_ult.lines[0]; const out = lxTuner.applyPatch(lxTuner.src, p); return { anchor: e && e.anchor, nw: e && e.new, n: e ? out.split(e.new).length - 1 : 0 }; });
+    check(r.anchor === cnt.line && r.n === 1 && /< 7;/.test(r.nw || ''), 'a count edit (lances 9 -> 7) rewrites exactly its loop line', `${(r.anchor || '').slice(0, 40)} -> ${(r.nw || '').slice(0, 40)}`);
+    await page.click('#reset');
+  } else check(false, 'Skyfall Dominion shows an editable lance count');
+  const kindsShown = await page.evaluate(() => [...new Set([...document.querySelectorAll('.line input')].map((el) => el.className.split(' ')[0]))].sort());
+  check(['count', 'flat', 'mul', 'radius', 'time'].every((k) => kindsShown.includes(k)), 'multipliers, flats, counts, reaches and durations are all on the page', kindsShown.join(' '));
+
   // 6. Measure: the edited build boots in the frame and Kage Rush reads its measured %basic
   await page.fill('#q', 'kage rush'); await page.dispatchEvent('#q', 'input');
   const vis = await page.evaluate(() => document.querySelectorAll('tr.skill').length);

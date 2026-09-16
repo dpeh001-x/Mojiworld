@@ -24,13 +24,28 @@
     [new RegExp('\\bdmg:\\s*' + N, 'g'), 'mul'],                                                   // { delay: 180, dmg: 1.6, crit: true } -> getAtk() * s.dmg
     [new RegExp('\\b(?:const|let)\\s+\\w*(?:[Dd]mg|[Mm]ul)\\w*\\s*=\\s*' + N + '\\s*;', 'g'), 'mul'],     // const laneMul = 1.4;
     [new RegExp('\\braiseMinion\\([^()]*,\\s*(\\d+\\.\\d+)(?=\\s*\\))', 'g'), 'mul'],               // raiseMinion(x, y, type, life, 0.55) - the caller's bite (a fraction; the life before it is an integer)
+    // ---- the other variables a skill is made of (shown and editable; never scaled by the tier generator) ----
+    [new RegExp('\\bfor\\s*\\(\\s*(?:let|var)\\s+\\w+\\s*=\\s*0\\s*;\\s*\\w+\\s*<\\s*' + N + '(?=\\s*;)', 'g'), 'count'],   // for (let i = 0; i < 9; i++) - lances, shards, waves, summons
+    [new RegExp('\\b(?:count|targets|waves|rings|shards|lances|orbs|bolts|hops|n)\\s*:\\s*' + N, 'g'), 'count'],
+    [new RegExp('\\bperform(?:Around|Melee)\\(\\s*' + N + '(?=\\s*,)', 'g'), 'radius'],           // performAround(540, ...) - the reach
+    [new RegExp('\\b(?:explode|aoeOnHit|radius|range|reach|aoe)\\s*:\\s*' + N, 'g'), 'radius'],
+    [new RegExp('\\braiseMinion\\([^()]*,\\s*(\\d{3,})(?=\\s*[,)])', 'g'), 'time'],                 // raiseMinion(x, y, type, 30000[, bite]) - the summon's life in ms
+    [new RegExp("\\b_applyMobStatus\\([^,()]+,\\s*'[a-z]+',\\s*" + N, 'g'), 'time'],              // _applyMobStatus(m, 'stun', 1200, ...) - the status duration in ms
+    [new RegExp("\\b_applyMobStatus\\([^()]*\\{[^}]*\\bchance:\\s*" + N, 'g'), 'frac'],           // ...its chance
+    [new RegExp('\\b(?:freezeTimer|stunTimer|burnTimer|slowTimer)\\s*=\\s*Math\\.max\\([^,()]+(?:\\([^()]*\\))?[^,()]*,\\s*' + N, 'g'), 'time'],   // m.freezeTimer = Math.max(m.freezeTimer || 0, 1500)
+    [new RegExp('\\blife:\\s*' + N, 'g'), 'time'],                                                  // life: 130 - projectile / hazard / ward life (frames or ms, as the line says)
+    [new RegExp('\\b(?:ms|dur|duration|until)\\s*:\\s*' + N, 'g'), 'time'],
+    [new RegExp('\\b(?:vx|vy|speed|sp)\\s*:\\s*(?:Math\\.(?:cos|sin)\\([^()]*\\)\\s*\\*\\s*)?' + N, 'g'), 'speed'],   // vx: Math.cos(a) * 9 / speed: 13
+    [new RegExp('\\bpierce\\w*:\\s*' + N, 'g'), 'count'],
   ];
   // const laneDmg = cond ? 1.4 : 1.0;  -> two numbers, both this skill's
   const NAMED_TERNARY = new RegExp('\\b(?:const|let)\\s+\\w*(?:[Dd]mg|[Mm]ul)\\w*\\s*=[^;?]*\\?\\s*' + N + '\\s*:\\s*' + N + '\\s*;', 'g');
   const OBJ_FIELDS = new RegExp('\\b(mul|flat|baseMul|timeMul|dmgAmp|dmg|atk|dps|perStack|cap)\\s*:\\s*' + N, 'g');
   // a constant is a damage number only when its NAME says so; caps, windows, ranges, heat budgets and
   // vulnerability stacks are not (LX_DOOM_CONSUME_CAP is how much heat the ult eats, not what it deals)
-  const CONST_KIND = (name) => /VULN|_MS$|RANGE|RADIUS|CONSUME|WINDOW|GATE|_AT$|RESIST|_ICD|_CD$/.test(name) ? null
+  const CONST_KIND = (name) => /VULN|CONSUME|_AT$|RESIST/.test(name) ? null
+    : /_MS$|WINDOW|GATE|_ICD|_CD$|TICK_MS|DURATION/.test(name) ? 'time'      // durations, windows, gates: shown and editable, never scaled
+    : /RANGE|RADIUS|REACH|_PX$/.test(name) ? 'radius'
     : /FRAC|SPLASH|SHARE|PCT$/.test(name) ? 'frac'          // a share of damage already dealt: shown, never scaled with the lines
     : /FLAT/.test(name) ? 'flat'
     : /_DMG|DMG_|_ATK|ATK_|_MUL|MUL_|DPS|_DOT|DOT_|BURST|RUPTURE|FINALE|HEAT_DMG|EXEC_FRAC/.test(name) ? 'mul'
@@ -128,10 +143,22 @@
       if (extra) for (const m of text.matchAll(extra)) { const start = m.index + m[0].length - m[2].length; if (seen.has(start)) continue; seen.add(start); out.push({ kind: /flat/i.test(m[1]) ? 'flat' : 'mul', name: m[1], value: +m[2], start, end: start + m[2].length }); }
       return out.sort((a, b) => a.start - b.start);
     };
+    // a line carries a skill VARIABLE (count / reach / duration / speed) only when it is part of what the
+    // skill deals or does - a projectile, a hazard, a hit, a status, a summon, a constant. Particle lives,
+    // particle velocities and VFX loops match the same shapes and are noise.
+    const DEALS = /damage:|\bdmg\b|\batk:|hitMonster|perform(?:Around|Melee)|raiseMinion|_applyMobStatus|hazards\.push|projectiles\.push|\bskill:|owner: 'player'|\bLX_|^const |Timer = Math\.max|homing/;
+    const loopDeals = (lineNo) => { for (let j = lineNo + 1; j <= Math.min(lines.length - 1, lineNo + 14); j++) { if (/^\s*\}/.test(lines[j]) && lines[j].search(/\S/) <= lines[lineNo].search(/\S/)) return false; if (DEALS.test(lines[j]) && !/pixelBurst|_budgetedParticlePush|spawnSpriteBurst|spawnSmooth/.test(lines[j])) return true; } return false; };
     const addLine = (s, lineNo, via, fields, objFields) => {
       const raw = lines[lineNo]; if (/^\s*\/\//.test(raw)) return;                       // a comment
       const text = raw.trim(); if (!text) return;
-      const f = fields || fieldsOf(text, objFields ? OBJ_FIELDS : null); if (!f.length) return;
+      let f = fields || fieldsOf(text, objFields ? OBJ_FIELDS : null); if (!f.length) return;
+      if (!fields) {
+        const noise = /pixelBurst|_budgetedParticlePush|spawnSpriteBurst|spawnSmooth|damageNumbers|particles\.push|Opts:|bodyAlpha|alpha:/.test(text);
+        const deals = DEALS.test(text) && !noise;
+        const isLoop = /^\s*for\s*\(/.test(raw);
+        f = f.filter((x) => x.kind === 'mul' || x.kind === 'flat' || x.kind === 'frac' || (isLoop ? (!noise && loopDeals(lineNo)) : deals));
+        if (!f.length) return;
+      }
       if (s.lines.some((l) => l.text === text)) return;
       s.lines.push({ text, lineNo: lineNo + 1, count: count(text), via: via || '', fields: f });
     };
