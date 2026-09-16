@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.769';
+const GAME_VERSION = 'v0.30.770';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -75264,14 +75264,24 @@ const LX_GB_POP_MIN   = 0.06;   // the scale it starts from
 // The mini wobble shake, per user. The draw already has a decaying ROTATION wobble on every
 // number; for a B/G one it is amplified and paired with a positional judder over the same
 // window, so the number arrives shaken rather than placed.
-const LX_GB_SHAKE_F   = 8;      // frames the judder lasts
-const LX_GB_SHAKE     = 6;      // px of judder at its opening amplitude
+// v0.30.x gb-cluster — per user: "more intense wobble". Judder 6 px over 8 frames -> 11 px over
+// 12: a bigger jolt that rings on for longer.
+const LX_GB_SHAKE_F   = 12;     // frames the judder lasts
+const LX_GB_SHAKE     = 11;     // px of judder at its opening amplitude
 // 0.258, not a round number, because the amplitude is NOT the angle you see: the shipped
 // curve is sin(age * 0.9) * W * (1 - age / 12), whose peak lands at about 0.81 of W. Per user
 // the wobble maxes at 12 degrees, so W = 0.2094 / 0.81. Solved rather than guessed, and the
 // result checked across the whole window: the peak is 12.0 degrees, at frame 2, and no frame
 // exceeds it. Every other number in the game stays at 0.18.
-const LX_GB_WOBBLE    = 0.258;  // rotation amplitude
+// v0.30.x gb-cluster — per user: "more intense wobble". The B/G wobble now has its own window
+// and speed instead of borrowing every number's (12 frames at 0.9 rad/frame): 16 frames at
+// 1.25 rad/frame, so it swings harder, faster and for longer, and the amplitude is re-solved the
+// same way 0.258 was so the peak the eye sees is exactly 22 degrees (was 12). Ordinary numbers
+// keep 0.18 over 12 frames. The settled bitmap gates on rot === 0, so a B/G row simply stays on
+// the live path for the few extra frames it is still swinging.
+const LX_GB_WOBBLE    = 0.4316;  // rotation amplitude (peak 22 deg across the window)
+const LX_GB_WOBBLE_F  = 16;      // frames the B/G wobble lasts
+const LX_GB_WOBBLE_HZ = 1.25;    // rad per frame
 // A 38px row bakes ~72px of ink, so a 26px pitch buries each row two-thirds under the next.
 // That only works because the rows also STEP SIDEWAYS: a first pass alternated +-13px and
 // four rows at a tight pitch piled into an unreadable mush. Stepping them diagonally instead
@@ -75281,7 +75291,11 @@ const LX_GB_WOBBLE    = 0.258;  // rotation amplitude
 // 26 only worked because rows also stepped sideways; stacked straight up it is the pile that
 // step was added to fix. 58 was chosen by rendering 50 / 58 / 66 side by side: at 50 each
 // row's drop shadow ate the digits below it, 66 stopped overlapping at all.
-const LX_GB_ROW_PITCH = 58;
+// v0.30.x gb-cluster — per user: "even more overlap to make it look a little more clustered".
+// 58 -> 48. The v0.30.751 note above found 50 let each row's drop shadow eat the digits under
+// it; that is exactly the read being asked for now - a pile, with the newest row on top - so the
+// pitch goes past it on purpose.
+const LX_GB_ROW_PITCH = 48;
 // 64 is not cosmetic - it is what MAKES the tight pitch legible. Rendered side by side at
 // steps of 30 / 48 / 56 / 64 against pitches of 40 / 34 / 26, only a step near half the
 // width of the number itself turns a buried stack into a fanned deck you can read every row of.
@@ -148789,8 +148803,10 @@ function drawDamageNumbers() {
     }
     // Early rotation wobble — settles to 0 within ~10 frames.
     let rot = 0;
-    if (age < 12) {
-      rot = Math.sin(age * 0.9) * (d._gbVolc ? LX_GB_WOBBLE : 0.18) * (1 - age / 12) * d.wobbleDir;   // v0.30.751 gb-core — a bigger wobble on a B/G arrival
+    if (d._gbVolc) {   // v0.30.x gb-cluster — B/G: its own, longer, faster window
+      if (age < LX_GB_WOBBLE_F) rot = Math.sin(age * LX_GB_WOBBLE_HZ) * LX_GB_WOBBLE * (1 - age / LX_GB_WOBBLE_F) * d.wobbleDir;
+    } else if (age < 12) {
+      rot = Math.sin(age * 0.9) * 0.18 * (1 - age / 12) * d.wobbleDir;
     }
 
     ctx.save();
@@ -148809,7 +148825,7 @@ function drawDamageNumbers() {
     // ctx.rotate() costs a non-trivial matrix-mul per number. Removing it
     // on lowFx saves the matrix op + makes the canvas state predictable
     // (so a future "single setTransform" pass becomes possible).
-    if (rot && !_dnLowFx_top) ctx.rotate(rot);
+    if (rot && (!_dnLowFx_top || d._gbVolc)) ctx.rotate(rot);   // v0.30.x gb-cluster — B/G rows wobble even under low-fx
     if (scale !== 1) ctx.scale(scale, scale);
     ctx.globalAlpha = alpha;
     // v0.25.695 — Font cache. Only re-set when the integer pixel size

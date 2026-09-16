@@ -3,7 +3,7 @@
 // Per user, over six rounds of samples: a core bigger than the outline; chunkier
 // and wider; the burst stacked vertically; the previous font kept; a strong drop
 // shadow; no horizontal stretch but a soft glow; thinner outlines; a dramatic
-// entrance; a mini wobble shake; wobble capped at 12 degrees, no shockwave ring;
+// entrance; a mini wobble shake; wobble capped at 22 degrees (v0.30.x gb-cluster, was 12), no shockwave ring;
 // and finally a softer, smaller, less opaque glow.
 //
 //   1. FRAMES RAN: the sim actually stepped (the boot gate is open)
@@ -11,10 +11,10 @@
 //      so the visible rings are 2px and 5.5px - the frame frames it
 //   3. THE FACE IS UNTOUCHED: Impact leads BOTH font sites and nothing scales
 //      the glyph horizontally. An Arial Black pass and a stretch were rejected
-//   4. THE BURST IS VERTICAL: step 0, every row on the same x, pitch 58
+//   4. THE BURST IS VERTICAL: step 0, every row on the same x, pitch 48 (gb-cluster, was 58)
 //   5. THE ENTRANCE: 0.06 -> ~2.08 -> 1 over 10 frames, and the pop is not
 //      allowed past frame 10 where the settled bitmap takes over
-//   6. THE WOBBLE IS CAPPED: peak exactly 12.0 degrees, checked across the
+//   6. THE WOBBLE IS CAPPED: peak exactly 22.0 degrees (gb-cluster, was 12), checked across the
 //      whole window rather than read off the amplitude constant
 //   7. THE GLOW GROWS WITH THE GLYPH: at frame 0 it is a fraction of its
 //      settled width, not a full-size disc around a speck
@@ -78,7 +78,7 @@ try {
       size: LX_GB_ROW_SIZE, white: LX_GB_WHITE, black: LX_GB_BLACK,
       pitch: LX_GB_ROW_PITCH, step: LX_GB_XSTEP,
       popS: LX_GB_POP_S, popMin: LX_GB_POP_MIN,
-      wobble: LX_GB_WOBBLE, shake: LX_GB_SHAKE, shakeF: LX_GB_SHAKE_F,
+      wobble: LX_GB_WOBBLE, wobbleF: LX_GB_WOBBLE_F, wobbleHz: LX_GB_WOBBLE_HZ, shake: LX_GB_SHAKE, shakeF: LX_GB_SHAKE_F,
       glow: LX_GB_GLOW, pulse: LX_GB_GLOW_PULSE, dilate: LX_GB_DILATE,
     };
 
@@ -93,7 +93,9 @@ try {
     out.pop = pop;
     // THE WOBBLE, across the whole window - not read off the amplitude
     let wmax = 0;
-    for (let age = 0; age < 12; age++) wmax = Math.max(wmax, Math.abs(Math.sin(age * 0.9) * LX_GB_WOBBLE * (1 - age / 12)));
+    for (let age = 0; age < LX_GB_WOBBLE_F; age++) wmax = Math.max(wmax, Math.abs(Math.sin(age * LX_GB_WOBBLE_HZ) * LX_GB_WOBBLE * (1 - age / LX_GB_WOBBLE_F)));
+    // and the live draw really uses that curve, including under low-fx (which boss fights switch on)
+    out.lowFxRot = /if \(rot && \(!_dnLowFx_top \|\| d\._gbVolc\)\) ctx\.rotate\(rot\);/.test(String(drawDamageNumbers));
     out.wobbleDeg = +(wmax * 180 / Math.PI).toFixed(2);
     // THE GLOW at frame 0 vs settled, using the shipped divisor
     const gw = (age, scale) => {
@@ -159,14 +161,14 @@ try {
     impactSites === 2 && !stretch,
     `Impact-led font sites ${impactSites}/2, stretch present ${stretch} (an Arial Black pass and a stretch were both rejected)`);
   ok('THE BURST IS VERTICAL: step 0, every row on the same x',
-    D.step === 0 && D.pitch === 58 && R.rows.n === 4 && R.rows.dx.every((v) => v === 0) && R.rows.volc,
+    D.step === 0 && D.pitch === 48 && R.rows.n === 4 && R.rows.dx.every((v) => v === 0) && R.rows.volc,
     `step ${D.step}, pitch ${D.pitch}, offsets ${JSON.stringify(R.rows.dx)}`);
   ok('THE ENTRANCE: 0.06 to a ~2.08 peak and back to 1 by frame 10',
     R.pop[0] === D.popMin && Math.max(...R.pop) > 2 && R.pop[10] === 1,
     `${R.pop[0]} -> peak ${Math.max(...R.pop)} -> ${R.pop[10]} (a crit peaks at 1.30)`);
-  ok('THE WOBBLE IS CAPPED AT 12 DEGREES, measured across the window',
-    Math.abs(R.wobbleDeg - 12) < 0.15 && !ring,
-    `peak ${R.wobbleDeg} deg; shockwave ring present ${ring} (removed per user)`);
+  ok('THE WOBBLE IS CAPPED AT 22 DEGREES, measured across its own window, and survives low-fx',
+    Math.abs(R.wobbleDeg - 22) < 0.15 && !ring && R.lowFxRot === true && D.wobbleF > 12 && D.shake > 6 && D.shakeF > 8,
+    `peak ${R.wobbleDeg} deg over ${D.wobbleF} frames; judder ${D.shake}px/${D.shakeF}f; B/G rotates under low-fx ${R.lowFxRot}; shockwave ring present ${ring} (removed per user)`);
   ok('THE GLOW GROWS WITH THE GLYPH: frame 0 is a speck, not a disc',
     R.glowF0Device < R.glowSettled * 0.25 && D.glow[0][1] <= 0.06,
     `frame 0 renders ${R.glowF0Device} device px vs ${R.glowSettled} settled; outer alpha ${D.glow[0][1]}`);
