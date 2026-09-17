@@ -7,6 +7,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const PORT = Number(process.env.PORT || 11201);
+const GAME = process.env.MOJI_GAME_FILE ? path.resolve(ROOT, process.env.MOJI_GAME_FILE) : path.join(ROOT, 'mojiworld_game.html');
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT, env: { ...process.env } });
 await new Promise((r) => setTimeout(r, 1800));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
@@ -16,7 +17,7 @@ const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0
 let pass = 0, fail = 0;
 const check = (ok, msg, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (detail ? '  [' + detail + ']' : '')); ok ? pass++ : fail++; };
 try {
-  await page.goto(`http://localhost:${PORT}/tools/skill_tuner.html`, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.goto(`http://localhost:${PORT}/tools/skill_tuner.html?source=local`, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForFunction(() => window.lxTuner && window.lxTuner.scan, null, { timeout: 120000 });
   const stats = await page.evaluate(() => lxTuner.scan.stats);
   check(stats.skills >= 70 && stats.lines >= 100, 'the page scanned the served game', `${stats.skills} skills, ${stats.lines} damage lines`);
@@ -89,25 +90,54 @@ try {
   await page.waitForFunction(() => typeof lxTuner.measured.edited.shinobi_seal === 'number' || /failed/.test(document.getElementById('status').textContent), null, { timeout: 150000 });
   const m = await page.evaluate(() => ({ pct: lxTuner.measured.edited.shinobi_seal, status: document.getElementById('status').textContent }));
   check(typeof m.pct === 'number' && m.pct > 0, 'Measure boots the edited build in the frame and reads the skill', m.status.slice(0, 100));
-  const budget = 1000;
-  check(typeof m.pct === 'number' && Math.abs(m.pct / budget - 1) <= 0.2, "Kage Rush measures inside its budget band (it is one line, so this is the frame's basic too)", `${Math.round(m.pct || 0)}% vs ${budget}%`);
-  if (process.env.TAB_JSON && existsSync(process.env.TAB_JSON)) {
-    const tab = JSON.parse(readFileSync(process.env.TAB_JSON, 'utf8')); const c = tab.classes.rogue;
-    const ref = c && c.rows.shinobi_seal ? c.rows.shinobi_seal.total / c.basic.total * 100 : null;
-    check(ref != null && Math.abs(m.pct / ref - 1) <= 0.05, 'the page measures what scripts/skill_tabulation.mjs measured', `page ${Math.round(m.pct)}% vs tabulation ${Math.round(ref || 0)}%`);
-  }
+  // Kage Rush's damage is whatever the user set (v0.30.778 moved it off the old 1000% budget), so the page is held to
+  // the damage table measured for the same build rather than to a fixed number
+  const TAB = process.env.TAB_JSON || path.join(ROOT, 'docs', 'reports', 'skill_tabulation.json');
+  const tab = existsSync(TAB) ? JSON.parse(readFileSync(TAB, 'utf8')) : null, rc = tab && tab.classes.rogue;
+  const ref = rc && rc.rows.shinobi_seal ? rc.rows.shinobi_seal.total / rc.basic.total * 100 : null;
+  check(ref != null && typeof m.pct === 'number' && Math.abs(m.pct / ref - 1) <= 0.05, 'the page measures what scripts/skill_tabulation.mjs measured', `page ${Math.round(m.pct || 0)}% vs tabulation ${Math.round(ref || 0)}%`);
   const own = errs.filter((e) => /lxTuner|skill_tuner|lxScan|lxMeasure/.test(e));
   check(!own.length, 'no page errors from the tuner itself', own.join(' | ') || (errs.length ? errs.length + ' from the game frame (informational)' : 'none'));
   // 7. opened straight from disk (double-clicking the file): no server, so it must say how to start, not show errors
   const disk = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const diskErrs = []; disk.on('pageerror', (e) => diskErrs.push(String(e.message).slice(0, 120)));
-  await disk.goto('file:///' + path.join(ROOT, 'tools', 'skill_tuner.html').split(path.sep).join('/'), { waitUntil: 'load' });
+  await disk.goto('file:///' + path.join(ROOT, 'tools', 'skill_tuner.html').split(path.sep).join('/') + '?source=local', { waitUntil: 'load' });
   const start = await disk.evaluate(() => ({ startShown: !document.getElementById('start').hidden, status: document.getElementById('status').textContent, results: !!window.LX_SKILL_TAB, testOff: document.getElementById('measure').disabled }));
   check(start.startShown && /Open game file/.test(start.status) && !diskErrs.length, 'opened from disk, it shows the "Start here" steps and no errors', `${start.status} ${diskErrs.join(' | ')}`);
   check(start.results, 'opened from disk, it still has the last damage test results (docs/reports/skill_tabulation.js)');
   check(start.testOff, 'opened from disk, the damage test button is switched off with an explanation (it needs the game server)');
-  const loaded = await disk.evaluate((text) => { lxTuner.load(text, 'mojiworld_game.html'); return { cards: document.querySelectorAll('article.card.skill').length, measured: document.querySelector('article.card.skill[data-id="shinobi_seal"] .measured').textContent }; }, readFileSync(process.env.MOJI_GAME_FILE ? path.resolve(ROOT, process.env.MOJI_GAME_FILE) : path.join(ROOT, 'mojiworld_game.html'), 'utf8'));
+  const loaded = await disk.evaluate((text) => { lxTuner.load(text, 'mojiworld_game.html'); return { cards: document.querySelectorAll('article.card.skill').length, measured: document.querySelector('article.card.skill[data-id="shinobi_seal"] .measured').textContent }; }, readFileSync(GAME, 'utf8'));
   check(loaded.cards >= 60 && /basic attack/.test(loaded.measured), 'after opening the game file it lists every skill with its measured damage in words', `${loaded.cards} cards; Kage Rush: ${loaded.measured}`);
+
+  // 8. with no setting it opens the NEWEST game: GitHub is asked for main's commit and the file is read at that commit.
+  //    GitHub is stood in for here, so the check is about what the page asks for and does with the answer.
+  const SHA = 'abcdef0123456789abcdef0123456789abcdef01', asked = [];
+  const ghGame = readFileSync(GAME, 'utf8').replace(/const GAME_VERSION = '[^']+'/, "const GAME_VERSION = 'v9.9.999'");
+  const tabPath = path.join(ROOT, 'docs', 'reports', 'skill_tabulation.json');
+  const ok = (body) => ({ status: 200, contentType: 'text/plain', headers: { 'access-control-allow-origin': '*' }, body });
+  const gh = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  await gh.route('https://api.github.com/**', (rt) => { asked.push(rt.request().url()); rt.fulfill(ok(SHA)); });
+  await gh.route('https://raw.githubusercontent.com/**', (rt) => {
+    const u = rt.request().url(); asked.push(u);
+    if (u.endsWith(`/${SHA}/mojiworld_game.html`)) return rt.fulfill(ok(ghGame));
+    if (u.endsWith(`/${SHA}/docs/reports/skill_tabulation.json`) && existsSync(tabPath)) return rt.fulfill(ok(readFileSync(tabPath, 'utf8')));
+    rt.fulfill({ status: 404, headers: { 'access-control-allow-origin': '*' }, body: '' });
+  });
+  await gh.goto(`http://localhost:${PORT}/tools/skill_tuner.html`, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await gh.waitForFunction(() => window.lxTuner && lxTuner.scan && /v9\.9\.999/.test(document.getElementById('fileName').textContent), null, { timeout: 120000 }).catch(() => {});
+  const ghs = await gh.evaluate(() => ({ ver: lxTuner.src ? lxTuner.verOf(lxTuner.src) : null, name: document.getElementById('fileName').textContent, status: document.getElementById('status').textContent }));
+  check(ghs.ver === 'v9.9.999' && /v9\.9\.999 \(GitHub abcdef0\)/.test(ghs.name) && asked.some((u) => u.includes(`/${SHA}/mojiworld_game.html`)),
+    "with no setting it opens the newest game from GitHub, read at main's exact commit, and shows its version", `${ghs.name} | ${ghs.status.slice(0, 80)}`);
+  const guard = await gh.evaluate(() => { try { lxTuner.sameGame("const GAME_VERSION = 'v0.30.632';"); return 'saved'; } catch (e) { return e.message; } });
+  const same = await gh.evaluate(() => { try { lxTuner.sameGame(lxTuner.src); return 'ok'; } catch (e) { return e.message; } });
+  check(/v0\.30\.632/.test(guard) && /v9\.9\.999/.test(guard) && same === 'ok', 'Save refuses a game file of another version and accepts the same version', guard.slice(0, 90));
+  // 9. offline: it opens the copy next to the page and says why
+  const off = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  await off.route('https://api.github.com/**', (rt) => rt.abort()); await off.route('https://raw.githubusercontent.com/**', (rt) => rt.abort());
+  await off.goto(`http://localhost:${PORT}/tools/skill_tuner.html`, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await off.waitForFunction(() => window.lxTuner && lxTuner.scan, null, { timeout: 120000 }).catch(() => {});
+  const offs = await off.evaluate(() => ({ name: document.getElementById('fileName').textContent, status: document.getElementById('status').textContent }));
+  check(/Could not reach GitHub/.test(offs.status) && /on this computer/.test(offs.name), 'offline, it opens the copy on this computer and says GitHub could not be reached', `${offs.name} | ${offs.status.slice(0, 90)}`);
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);

@@ -89,6 +89,7 @@
     <span id="fileName" class="muted"></span>
     <span class="grow"></span>
     <span id="count" class="pill">No changes yet</span>
+    <button id="latest" title="Open the newest version of the game (the one on GitHub that every change is saved to)">⟳ Newest game</button>
     <button id="open">📂 Open game file</button>
     <button id="save" class="good">💾 Save to game file</button>
     <button id="reset">↩ Undo all changes</button>
@@ -113,11 +114,11 @@
   <section id="start" class="panel">
     <h2>Start here</h2>
     <ol>
-      <li>Click <b>📂 Open game file</b> and choose <b>mojiworld_game.html</b> from your Mojiworld folder.</li>
+      <li>The newest version of the game opens by itself (it needs the internet). If it does not, click <b>⟳ Newest game</b>, or <b>📂 Open game file</b> to choose a <b>mojiworld_game.html</b> yourself.</li>
       <li>Pick a class, find a skill, and type a new number into any box. Changed boxes turn gold.</li>
-      <li>Click <b>💾 Save to game file</b>. Reload the game to try it.</li>
+      <li>Open <b>More options</b> at the bottom, click <b>📋 Copy my changes</b>, and paste them into a message to Claude.</li>
     </ol>
-    <p class="small">Not sure? Instead of saving, open <b>More options</b> at the bottom and copy your changes to send to Claude.</p>
+    <p class="small">The version you are editing is shown next to the title. <b>💾 Save to game file</b> only writes into a game file of that same version, so a newer game is never mixed with an older copy.</p>
   </section>
 
   <details class="panel help" open>
@@ -473,7 +474,11 @@ async function pickFile() {
 }
 $('open').onclick = async () => {
   if (changedIds().length && !confirm('Opening a file clears your unsaved changes. Continue?')) return;
-  try { const f = await pickFile(); fileHandle = f.handle; load(f.text, f.name); } catch (e) { if (e.name !== 'AbortError') status('Could not open the file: ' + e.message, true); }
+  try { const f = await pickFile(); fileHandle = f.handle; load(f.text, `${f.name} (${verOf(f.text)})`); } catch (e) { if (e.name !== 'AbortError') status('Could not open the file: ' + e.message, true); }
+};
+$('latest').onclick = () => {
+  if (changedIds().length && !confirm('Opening the newest game clears your unsaved changes. Continue?')) return;
+  loadLatest().catch((e) => status('Could not open the newest game from GitHub (' + e.message + '). Click 📂 Open game file instead.', true));
 };
 $('save').onclick = async () => {
   const n = changedIds().length; if (!n) return status('Nothing to save yet — change a number first.', true);
@@ -481,6 +486,7 @@ $('save').onclick = async () => {
     if (!fileHandle && window.showOpenFilePicker) { status('Choose the game file to save into (mojiworld_game.html).'); const f = await pickFile(); fileHandle = f.handle; fileName = f.name; }
     if (fileHandle) {
       const fresh = await (await fileHandle.getFile()).text();
+      sameGame(fresh);
       const out = applyPatch(fresh, buildPatch());
       const w = await fileHandle.createWritable(); await w.write(out); await w.close();
       load(out, fileHandle.name); status(`Saved ${n} skill${n === 1 ? '' : 's'} into ${fileHandle.name}. Reload the game to try them.`);
@@ -528,16 +534,45 @@ async function measureEdited() {
 $('measure').onclick = measureEdited;
 if (!SERVED) { $('measure').disabled = true; $('measure').title = 'The damage test needs the page opened through the game server, for example http://localhost:8765/tools/skill_tuner.html while the game is running.'; }
 
-// ---------- start ----------
-window.lxTuner = { get src() { return src; }, get scan() { return scan; }, edits, rowEdits, measured, buildPatch, applyPatch, load, measureEdited };   // used by scripts/skill_tuner_test.mjs
-loadResults(window.LX_SKILL_TAB);
-if (SERVED) {
-  fetch('mojiworld_game.html', { cache: 'no-store' }).then((r) => r.text()).then((t) => { load(t, 'mojiworld_game.html'); status('Loaded the game. To save, click Save — you will be asked to choose the game file once.'); })
-    .catch(() => status('Could not read the game automatically. Click Open game file.', true));
-  if (!window.LX_SKILL_TAB) fetch('docs/reports/skill_tabulation.json', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((tab) => { loadResults(tab); render(); }).catch(() => {});
-} else {
-  status('Click 📂 Open game file to begin.');
+// ---------- start: open the newest game by itself ----------
+// The newest game is the one on GitHub's main branch - every change is saved there, while the copy in
+// the Mojiworld folder on this computer can be many versions behind. GitHub is asked which commit main is
+// on, and the file is read at exactly that commit (the plain "main" address can lag a few minutes).
+const REPO = 'dpeh001-x/Mojiworld';
+const verOf = (text) => (String(text).match(/const GAME_VERSION = '([^']+)'/) || [])[1] || 'unknown version';
+// Saving writes into a file on this computer, so it must be the same version as the one being edited.
+function sameGame(fileText) {
+  const want = verOf(src), got = verOf(fileText);
+  if (want !== got) throw new Error(`that file is ${got}, but you are editing ${want}. Nothing was saved, so the two versions are not mixed. Open More options and use 📋 Copy my changes instead.`);
 }
+async function loadLatest() {
+  status('Opening the newest game from GitHub…');
+  let sha = '';
+  try { const r = await fetch(`https://api.github.com/repos/${REPO}/commits/main`, { headers: { Accept: 'application/vnd.github.sha' }, cache: 'no-store' }); if (r.ok) sha = (await r.text()).trim(); } catch (e) {}
+  if (!/^[0-9a-f]{40}$/.test(sha)) sha = '';
+  const base = `https://raw.githubusercontent.com/${REPO}/${sha || 'main'}/`;
+  const r = await fetch(base + 'mojiworld_game.html', { cache: 'no-store' });
+  if (!r.ok) throw new Error('GitHub answered ' + r.status);
+  const text = await r.text();
+  fileHandle = null;
+  load(text, `newest game ${verOf(text)}` + (sha ? ` (GitHub ${sha.slice(0, 7)})` : ' (GitHub)'));
+  status(`Opened the newest game, ${verOf(text)}. Change any number, then use 📋 Copy my changes under More options.`);
+  try {   // the damage results measured for that same commit
+    const t = await fetch(base + 'docs/reports/skill_tabulation.json', { cache: 'no-store' });
+    if (t.ok) { const tab = await t.json(); if (tab && tab.classes) { measured.file = {}; loadResults(tab); render(); } }
+  } catch (e) {}
+}
+window.lxTuner = { get src() { return src; }, get scan() { return scan; }, edits, rowEdits, measured, buildPatch, applyPatch, load, measureEdited, loadLatest, sameGame, verOf };   // used by scripts/skill_tuner_test.mjs
+loadResults(window.LX_SKILL_TAB);
+// ?source=local skips GitHub and reads the game next to this page (used by the tests)
+function loadLocal(why) {
+  if (!SERVED) return status((why ? why + ' ' : '') + 'Click 📂 Open game file to begin.', !!why);
+  fetch('mojiworld_game.html', { cache: 'no-store' }).then((r) => r.text()).then((t) => { load(t, `mojiworld_game.html on this computer (${verOf(t)})`); status((why ? why + ' ' : '') + `Opened the copy on this computer, ${verOf(t)}.`, !!why); })
+    .catch(() => status('Could not read the game automatically. Click 📂 Open game file.', true));
+  if (!window.LX_SKILL_TAB) fetch('docs/reports/skill_tabulation.json', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((tab) => { loadResults(tab); render(); }).catch(() => {});
+}
+if (new URLSearchParams(location.search).get('source') === 'local') loadLocal('');
+else loadLatest().catch((e) => loadLocal(`Could not reach GitHub (${e.message}), so the newest game did not open.`));
 </script>
 </body>
 </html>
