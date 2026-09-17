@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.837';
+const GAME_VERSION = 'v0.30.838';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -13107,7 +13107,7 @@ _lxApplyRenderScale(_LX_DPR);
       // this, any resize instantly undid the reduction and the fight lagged
       // again until the next 5s of overload re-triggered it.
       let want = _lxTargetDpr();
-      if (typeof LX_DRS !== 'undefined' && LX_DRS.active) want = Math.min(want, _LX_DPR);
+      if (typeof LX_DRS !== 'undefined' && (LX_DRS.active || LX_DRS.emerg)) want = Math.min(want, _LX_DPR);   // v0.30.x drs-handover — the emergency floor holds too
       if (Math.abs(want - _LX_DPR) / Math.max(_LX_DPR, 0.001) > 0.05) _lxApplyRenderScale(want);
     }, 220);
   };
@@ -13477,7 +13477,13 @@ function _lxDrsTick(frame, time) {
     _lxDrsEmergencyTick(time);   // v0.30.784 — High only: a floor for a fight the machine cannot hold at all
     return;
   }
-  if (LX_DRS.emerg) { LX_DRS.emerg = false; LX_DRS.emergMap = null; }   // a preset change hands control to the governor
+  if (LX_DRS.emerg) {   // a preset change hands control to the governor
+    LX_DRS.emerg = false; LX_DRS.emergMap = null;
+    // v0.30.x drs-handover — ...and the reduction with it. The emergency floor leaves the scale eased with `active` false,
+    // and only an ACTIVE reduction is stepped back up here or restored by switching to High, so a player who moved to
+    // Medium or Low mid-lag kept the eased scale (on Medium, possibly 0.75, under its own 1.0 floor) until a reload.
+    if (_LX_DPR < _lxTargetDpr() - 0.01) { LX_DRS.active = true; LX_DRS.healthySince = 0; }
+  }
   const ceil = _lxTargetDpr();
   // v0.30.278 — the effective floor. Desktop may go BELOW native scale as a
   // true last resort (the down-step still requires veryLowFx + sustained
@@ -64279,7 +64285,7 @@ function _updateDashTrail(dt) {
     f.life -= dt;
     if (f.life <= 0) { T.splice(i, 1); continue; }
     if (!(M.dashFlame > 0)) continue;
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (!m || m.currentHp <= 0) continue;
       // v0.29.735 perf — the 20-frame per-mob throttle is the cheapest predicate
       // and rejects almost every pair (a mob ticks at most once per 20 frames),
@@ -64340,7 +64346,7 @@ function _dashNovaBurst() {
   const R = 150;
   const atk = (typeof getAtk === 'function') ? getAtk() : 50;
   const dmg = Math.max(1, Math.floor(atk * M.dashNova));
-  for (const m of game.monsters) {
+  for (const m of game.monsters.slice()) {
     if (!m || m.currentHp <= 0) continue;
     const dx = (m.x + m.w / 2) - cx, dy = (m.y + m.h / 2) - cy;
     if (dx * dx + dy * dy > R * R) continue;
@@ -64863,7 +64869,7 @@ function _riposteProc() {
   player._riposteAt = game.time;
   const _rcx = player.x + player.w / 2, _rcy = player.y + player.h / 2, _rr = 150;
   const _rdmg = Math.max(1, Math.floor(((typeof getAtk === 'function') ? getAtk() : 50) * player.mods.riposteNova));
-  for (const _rm of game.monsters) {
+  for (const _rm of game.monsters.slice()) {
     if (!_rm || _rm.currentHp <= 0) continue;
     const _rdx = (_rm.x + _rm.w / 2) - _rcx, _rdy = (_rm.y + _rm.h / 2) - _rcy;
     if (_rdx * _rdx + _rdy * _rdy > _rr * _rr) continue;
@@ -72915,7 +72921,7 @@ function updatePlayer(dt) {
     // the player's AABB took ~18 hits in one cast. The set is freshly
     // allocated in SKILL_FNS.rush on every cast, so a follow-up rush can
     // re-hit the same enemy. Cleared when rushTimer reaches 0 below.
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
       if (player._rushHitSet && player._rushHitSet.has(m)) continue;
       if (aabb(player, m)) {
@@ -73671,7 +73677,7 @@ function updatePlayer(dt) {
       if (orb.hitCd > 0) orb.hitCd -= dt;
       // Hit enemies inside the orb's strike radius.
       if (orb.hitCd <= 0) {
-        for (const m of game.monsters) {
+        for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
           const dx = (m.x + m.w/2) - ox;
           const dy = (m.y + m.h/2) - oy;
@@ -73801,7 +73807,7 @@ function updatePlayer(dt) {
         c.attackTimer = 400;
         c.swingProg = 1;
         let hitCount = 0;
-        for (const m of game.monsters) {
+        for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
           const mcx = m.x + m.w/2;
           const mcy = m.y + m.h/2;
@@ -75305,7 +75311,7 @@ function updatePlayer(dt) {
   for (const ai of game.afterImages) {
     if (!ai.dmg) continue;
     const hb = _aiHb; hb.x = ai.x; hb.y = ai.y; hb.w = player.w; hb.h = player.h;
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (m.x >= hb.x + hb.w || m.x + m.w <= hb.x) continue;
       if (m.currentHp <= 0) continue;
       if (ai.hitIds.has(m)) continue;
@@ -81652,7 +81658,7 @@ const SKILL_FNS = {
       scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
         const cx = player.x + player.w/2, cy = player.y + player.h/2;
-        for (const m of game.monsters) {
+        for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
           if (Math.abs((m.x + m.w/2) - cx) < _rushReach && Math.abs(m.y - player.y) < 60) {
             const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 1.5 * (_c ? getCritDmg() : 1)), _c, 'rush');   // v0.26.385; v0.26.1027 — apply crit DAMAGE (the flag alone did nothing)
@@ -81714,7 +81720,7 @@ const SKILL_FNS = {
     addShake(10); if (typeof addZoomPunch === 'function') addZoomPunch(0.030);
     if (typeof addHitStop === 'function') addHitStop(40);
     // Damaging pulse + aggro taunt
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
       const d = Math.abs(m.x - player.x);
       if (d < 340) {
@@ -81920,7 +81926,7 @@ const SKILL_FNS = {
         // saved per cast).
         const _hsR = 200 + w * 60;
         const _hsR2 = _hsR * _hsR;
-        for (const m of game.monsters) {
+        for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
           const dx = (m.x + m.w/2) - cx, dy = (m.y + m.h/2) - cy;
           if (dx*dx + dy*dy < _hsR2) {
@@ -82255,7 +82261,7 @@ const SKILL_FNS = {
     // the violet cloud is gone. The skill's damage corridor + smoke-
     // tick hazard + afterimages all stay unchanged.
     // Damage enemies in a tall corridor (3 effective lines) along the dash
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
       // Expanded vertical corridor — 60 px above and below
       if (m.y + m.h < player.y - 60 || m.y > player.y + player.h + 60) continue;
@@ -82287,7 +82293,7 @@ const SKILL_FNS = {
     for (let tick = 0; tick < 3; tick++) {
       scheduleSkillTimer(() => {
         if (player.hp <= 0 || game.paused) return;
-        for (const m of game.monsters) {
+        for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
           if (Math.abs((m.x + m.w/2) - cloudX) < 90 && Math.abs(m.y - player.y) < 80) {
             // v0.25.658 — P1 REBALANCE. Cloud per-tick 0.8 → 0.5.
@@ -82333,7 +82339,7 @@ const SKILL_FNS = {
     // Helper: damage every mob inside the corridor between (ax,ay) and (bx,by).
     const slashCorridor = (ax, ay, bx, by) => {
       const lo = Math.min(ax, bx), hi = Math.max(ax, bx);
-      for (const m of game.monsters) {
+      for (const m of game.monsters.slice()) {
         if (m.currentHp <= 0) continue;
         const mid = m.x + m.w / 2;
         if (mid < lo - 16 || mid > hi + 16) continue;
@@ -82820,7 +82826,7 @@ const SKILL_FNS = {
     // Damage ramps mildly per consecutive charge (1.0× → 1.15× → 1.3×)
     const ramp = 1.0 + (2 - chargeIdx) * 0.15;
     let hitCount = 0;
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
       const cx = m.x + m.w/2, cy = m.y + m.h/2;
       if (m.y + m.h < corridorTop || m.y > corridorBot) continue;   // v0.30.805 — body overlap, not centre-in-band
@@ -83083,7 +83089,7 @@ const SKILL_FNS = {
     // Bumped to 2.2× — within C-tier budget for a mobility-with-damage skill.
     const _dmg = Math.max(1, Math.floor(getAtk() * 2.1));
     let _hits = 0;
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (!m || m.currentHp <= 0) continue;
       const mcx = m.x + m.w/2, mcy = m.y + m.h/2;
       if (mcx < lo || mcx > hi) continue;
@@ -83331,7 +83337,7 @@ const SKILL_FNS = {
     // Drain HP+MP, raise a single skeletal thrall
     let drained = 0;
     const victims = [];
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
       if (Math.abs(m.x - player.x) < 220 && Math.abs(m.y - player.y) < 140) {
         // v0.25.557 — soul siphon per-tick 0.9×ATK + 8 → 0.9×ATK.
@@ -83626,7 +83632,7 @@ const SKILL_FNS = {
     const blastCy = player.y + player.h/2;
     const BLAST_R = 130;
     let kbCount = 0;
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
       const dx = (m.x + m.w/2) - blastCx;
       const dy = (m.y + m.h/2) - blastCy;
@@ -83747,7 +83753,7 @@ const SKILL_FNS = {
       w: reach,
       h: player.h + 8,
     };
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
       if (aabb(hitbox, _atkMonBox(m))) {
         const crit = rollCrit();
@@ -84240,7 +84246,7 @@ const SKILL_FNS = {
         const hitbox = {
           x: cx - 160, y: cy - 50, w: 320, h: 100,
         };
-        for (const m of game.monsters) {
+        for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
           if (aabb(hitbox, _atkMonBox(m))) {
             const crit = rollCrit() || i === strikes - 1;
@@ -84283,7 +84289,7 @@ const SKILL_FNS = {
       const slamY = player.y + player.h;            // ground line at player feet
       // Wide ground-slam hitbox: 380x80 centered on player
       const slamHit = { x: slamX - 190, y: slamY - 40, w: 380, h: 80 };
-      for (const m of game.monsters) {
+      for (const m of game.monsters.slice()) {
         if (m.currentHp <= 0) continue;
         if (aabb(slamHit, m)) {
           const crit = rollCrit();
@@ -84354,7 +84360,7 @@ const SKILL_FNS = {
           if (player.hp <= 0 || game.paused) return;
           const _sx = player.x + player.w/2, _sy = player.y + player.h;
           const _hb = { x: _sx - 220, y: _sy - 50, w: 440, h: 100 };
-          for (const m of game.monsters) {
+          for (const m of game.monsters.slice()) {
             if (m.currentHp <= 0) continue;
             if (aabb(_hb, m)) {
               const crit = true;
@@ -84688,7 +84694,7 @@ const SKILL_FNS = {
           const a = (k / 12) * Math.PI * 2;
           game.particles.push({ x: ax, y: ay, vx: Math.cos(a) * 9, vy: Math.sin(a) * 9, life: 36, color: k % 2 ? '#c8a8ff' : '#5522aa', size: 4 });
         }
-        for (const m of game.monsters) {
+        for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
           const dx = (m.x + m.w / 2) - ax, dy = (m.y + m.h / 2) - ay;
           if (dx * dx + dy * dy <= _R2 && typeof hitMonster === 'function') {
@@ -84773,7 +84779,7 @@ const SKILL_FNS = {
         player.vx = 0; player.vy = 0;
         player.facing = dir;
         const hitbox = { x: player.x - 80, y: player.y - 10, w: player.w + 160, h: player.h + 20 };
-        for (const m of game.monsters) {
+        for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
           // Object-ref dedup (v0.25.939): knockback moves the mob between
           // steps, so any position-derived key re-hits the same target.
@@ -85086,7 +85092,7 @@ const SKILL_FNS = {
       // Big damage nova: ATK × 2 to everything within 220 px
       // v0.25.547 perf — squared-distance compare (was Math.hypot per mob).
       const _phNovaR2 = 220 * 220;
-      for (const m of game.monsters) {
+      for (const m of game.monsters.slice()) {
         if (m.currentHp <= 0) continue;
         const _mcx = m.x + m.w/2;
         const dx = _mcx - fx, dy = (m.y + m.h/2) - fy;
@@ -85518,7 +85524,7 @@ const SKILL_FNS = {
     const _aoeX0 = cx - 325, _aoeX1 = cx + 325;
     const _aoeY0 = cy - 220, _aoeY1 = cy + 220;
     let _aoeHits = 0;
-    for (const m of game.monsters) {
+    for (const m of game.monsters.slice()) {
       if (!m || m.currentHp <= 0) continue;
       const mcx = m.x + m.w/2, mcy = m.y + m.h/2;
       if (mcx < _aoeX0 || mcx > _aoeX1) continue;
@@ -86614,7 +86620,11 @@ function performMelee(range, dmgPct, opts = {}) {
     h: player.h + 10 + tall * 2,
   };
   let hits = 0;
-  for (const m of game.monsters) {
+  // v0.30.x kill-skip — every sweep that calls hitMonster walks a SNAPSHOT of game.monsters (this one and ~34 others). A
+  // kill splices the array, and a for...of over the live array then skipped the monster that slid into the freed slot:
+  // a swing through a pack that killed one foe missed the next one in line. The dead guard below passes over a monster
+  // that died earlier in the same sweep, as it always did.
+  for (const m of game.monsters.slice()) {
     if (m.currentHp <= 0) continue;
     if (aabb(hitbox, _atkMonBox(m))) {
       const critRoll = Math.random() * 100;
@@ -86685,7 +86695,7 @@ function performAround(radius, dmgPct, opts = {}) {
     x: pcx - radius, y: pcy - radius,
     w: radius * 2, h: radius * 2
   };
-  for (const m of game.monsters) {
+  for (const m of game.monsters.slice()) {
     if (m.currentHp <= 0) continue;
     const dx = (m.x + m.w/2) - pcx;
     if (dx >= radius || dx <= -radius) continue;
@@ -86845,7 +86855,7 @@ function applyEnhOnHit(m, dmg, enh) {
     const _rad = enh.splashOnHit;
     const _rSq = _rad * _rad;
     const _splashDmg = Math.floor(dmg * 0.5);
-    for (const m2 of game.monsters) {
+    for (const m2 of game.monsters.slice()) {
       if (m2 === m || m2.currentHp <= 0) continue;
       const dxc = (m2.x + m2.w/2) - _hcx;
       // X-axis bbox gate — Math.abs avoids the sqrt branch entirely for
@@ -98245,7 +98255,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     // post-respawn, applying damage in the wrong context.
     if (player.tree.elemChain && (skill === 'bolt' || skill === 'fire' || skill === 'ice')) {
       let chains = 0;
-      for (const m2 of game.monsters) {
+      for (const m2 of game.monsters.slice()) {
         if (m2 === m || m2.currentHp <= 0 || chains >= 2) continue;
         const dx = m2.x - m.x, dy = m2.y - m.y;
         if (dx*dx + dy*dy < 180*180) {
@@ -98842,7 +98852,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     y: m.y - 5,
     vx: (Math.random() - 0.5) * 1.8,
     vy: -2.4 - Math.random() * 0.9 - tier * 0.15,
-    text: finalDmg.toLocaleString() + _suffix,
+    text: finalDmg.toLocaleString('en-US') + _suffix,   // v0.30.x dn-locale — was the player's locale: "1.234" (de, es, it, pt-BR...) read back as 1.234 in _lxDeColumn (Deadeye's Execute Round fell to its ATK floor, 1M+ rows never joined a column) and missed both glyph atlases
     life, maxLife: life,
     color: _dnColor,
     size: _dnSize,
@@ -99539,7 +99549,7 @@ function killMonster(m) {
       game._bloomChain = (game._bloomChain | 0) + 1;
       const bx = m.x + m.w / 2, by = m.y + m.h / 2, R = 130;
       const bdmg = Math.max(1, Math.floor((m.maxHp || 1) * _bloom));
-      for (const o of game.monsters) {
+      for (const o of game.monsters.slice()) {
         if (!o || o === m || o.currentHp <= 0) continue;
         const dx = (o.x + o.w / 2) - bx, dy = (o.y + o.h / 2) - by;
         if (dx * dx + dy * dy > R * R) continue;
@@ -100608,7 +100618,12 @@ function killMonster(m) {
   // monster list. The helper handles _dying / _fadeStart / _fadeMs and
   // the push to game._fadingMonsters; see _beginMonsterFade above.
   _beginMonsterFade(m);
-  game.monsters.splice(idx, 1);
+  // v0.30.x kill-skip — LOOK THE INDEX UP AGAIN. `idx` was taken at the top, and everything between there and here can
+  // kill other monsters first: a Death Bloom blast, a Grand Hex spread that ruptures. Each of those kills splices
+  // game.monsters, so a neighbour stored earlier in the array shifted this one down a slot, and splice(idx) removed the
+  // NEXT monster instead - a live mob gone with no EXP or loot - while this one stayed in the list at 0 HP: drawn,
+  // still running its AI and contact damage, and unkillable, because hitMonster ignores a monster at 0 HP.
+  { const _kIdx = game.monsters.indexOf(m); if (_kIdx >= 0) game.monsters.splice(_kIdx, 1); }
 
   if (m.isBoss) {
     // v0.26.x — Boss Rush: advance the rush before any persistent-world
@@ -102553,7 +102568,7 @@ function updateProjectiles(dt) {
     // Self-exploding projectiles (fireball etc.) detonate at end of life
     if (!hit && p.life <= 0 && p.selfExplode && p.explode && p.owner === 'player') {
       const ecx = p.x + p.w/2, ecy = p.y + p.h/2;
-      for (const m2 of game.monsters) {
+      for (const m2 of game.monsters.slice()) {
         if (m2.currentHp <= 0) continue;
         const dx = (m2.x + m2.w/2) - ecx;
         const dy = (m2.y + m2.h/2) - ecy;
@@ -150096,7 +150111,7 @@ function drawParticles() {
       ctx.fillStyle = p.color;
       lastColor = null;
       _drawStar(sx, p.y, p.size * 1.6, p.size * 0.7, 5, p.rot || 0);
-      if (typeof p.spin === 'number') p.rot = (p.rot || 0) + p.spin;
+      if (typeof p.spin === 'number') p.rot = (p.rot || 0) + (_lxRenderOnly ? 0 : p.spin);   // v0.30.x hz-smooth — a display frame between steps does not advance it
     } else {
       const alpha = p.life < 20 ? p.life / 20 : 1;
       if (alpha !== lastAlpha) { ctx.globalAlpha = alpha; lastAlpha = alpha; }
@@ -150652,7 +150667,7 @@ function _dnBake(d, txt, col, baseSize) {
     // DPR (soft glyphs, smeared halo, thinner-looking outline than the live
     // pop-in frames). Backing store is DPR x the CSS box; the draw site blits
     // it back at the CSS size, so the geometry below is unchanged.
-    const dpr = Math.max(1, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1)));
+    const dpr = Math.max(0.25, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1)));   // v0.30.x dn-subscale — see _dnDprNow
     const wCss = tw + pad * 2 + 4;
     const hCss = Math.ceil(fs2 * 1.5) + pad * 2;
     cv.width = Math.ceil(wCss * dpr);
@@ -150791,7 +150806,10 @@ function drawDamageNumbers() {
   // simultaneous settlers spread their bake cost over a few frames.
   let _dnBakeBudget = 3;
   _lxDnAtlasBudget = 1;   // v0.30.815 dn-atlas — at most one glyph atlas is built per frame
-  const _dnDprNow = Math.max(1, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1)));   // v0.30.466
+  // v0.30.x dn-subscale — floor 0.25, not 1. Below render scale 1 (the governor's 0.75 floor on Low, the High emergency
+  // step, a manual render scale) the settled bitmap and both glyph atlases were still built at 1 and then blitted 1:1 in
+  // DEVICE pixels, so every number jumped a third bigger the frame it settled, and fading figures stayed oversized.
+  const _dnDprNow = Math.max(0.25, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1)));   // v0.30.466
   const _dnLowFx_top = (typeof _perfLowFx === 'function' && _perfLowFx());
   const _dnUiK = (game._uiScale > 0) ? game._uiScale : 1;   // v0.30.x — HUD size
   for (const d of game.damageNumbers) {
@@ -152827,7 +152845,9 @@ function loop(time) {
     if ((player._potionCdHp | 0) > _sfT) player._potionCdHp = (player._potionCdHp | 0) + 1;
     if ((player._potionCdMp | 0) > _sfT) player._potionCdMp = (player._potionCdMp | 0) + 1;
     const _sfMs = game.monsters;
-    if (_sfMs) for (let _sfI = 0; _sfI < _sfMs.length; _sfI++) { const _sfM = _sfMs[_sfI]; if (_sfM && _sfM._ohkoWarnUntil != null && _sfM._ohkoWarnUntil > _sfT) _sfM._ohkoWarnUntil++; if (_sfM && _sfM.type === 'gravitos') { if (_sfM._lastOhkoAt != null) _sfM._lastOhkoAt++; if (_sfM._lastOhkoEndAt != null) _sfM._lastOhkoEndAt++; if (_sfM._lastSkillAt != null) _sfM._lastSkillAt++; if (_sfM._lastSingAt != null) _sfM._lastSingAt++; } }   /* v0.30.836 ohko-gap — the OHKO gap does not run out behind a menu */
+    // v0.30.x ward-pause — a boss ward, its BREAK window and the gap to the next ward are game.time deadlines too: a menu
+    // opened mid-ward waited it out for free, and one opened during a break let the 1.5x window expire behind it.
+    if (_sfMs) for (let _sfI = 0; _sfI < _sfMs.length; _sfI++) { const _sfM = _sfMs[_sfI]; if (_sfM && _sfM._ohkoWarnUntil != null && _sfM._ohkoWarnUntil > _sfT) _sfM._ohkoWarnUntil++; if (_sfM && (_sfM._wardUntil | 0) > _sfT) _sfM._wardUntil++; if (_sfM && (_sfM._wardBreakUntil | 0) > _sfT) { _sfM._wardBreakUntil++; if (_sfM._wardBreakAt != null) _sfM._wardBreakAt++; } if (_sfM && _sfM._wardNextAt != null && _sfM._wardNextAt > _sfT) _sfM._wardNextAt++; if (_sfM && _sfM.type === 'gravitos') { if (_sfM._lastOhkoAt != null) _sfM._lastOhkoAt++; if (_sfM._lastOhkoEndAt != null) _sfM._lastOhkoEndAt++; if (_sfM._lastSkillAt != null) _sfM._lastSkillAt++; if (_sfM._lastSingAt != null) _sfM._lastSingAt++; } }   /* v0.30.836 ohko-gap — the OHKO gap does not run out behind a menu */
   }
   _lxPrewarmClassFx(); if (_LX_PREWARM_Q.length || _LX_PREWARM_FXQ.length) _lxPrewarmDrain();   // v0.30.358 — bakes ahead of the draw, through the same budget
   game._playMs = (game._playMs || 0) + dt;
