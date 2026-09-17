@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.850';
+const GAME_VERSION = 'v0.30.851';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53084,6 +53084,7 @@ function _coopTickMonsters() {
   if (_ak) _frame.ak = _ak;   // v0.30.829 - the last batch of hits I have applied from each partner (0 = none yet)
   if (_coopBundleOn()) {   // v0.30.823 - ONE message per tick: projectiles, hazards and my fx ride the monster frame
     _frame.pl = _coopProjList(); _frame.hl = _coopHazList();
+    { const _hx = _coopHazDoneList(); if (_hx) _frame.hx = _hx; }   // v0.30.x coop-ohko — hazards the host resolved
     const _fxw = _coopFxDrain(); if (_fxw) { if (_fxw.fx) _frame.fx = _fxw.fx; if (_fxw.pj) _frame.pj = _fxw.pj; }
     const _po = _coopPoseDelta(); if (_po) _frame.po = _po;
   }
@@ -53156,24 +53157,53 @@ function _coopTickHazards() {
   const now = performance.now();
   if (now - (net._coopHazAt || 0) < COOP_PROJ_TICK_MS) return;
   net._coopHazAt = now;
-  try { net.ws.send(JSON.stringify({ t: 'haz', map: game.currentMap, list: _coopHazList() })); } catch (e) {}
+  const _hzf = { t: 'haz', map: game.currentMap, list: _coopHazList() }; const _hx = _coopHazDoneList(); if (_hx) _hzf.hx = _hx;   // v0.30.x coop-ohko
+  try { net.ws.send(JSON.stringify(_hzf)); } catch (e) {}
+}
+// v0.30.x coop-ohko — EVERY ENEMY HAZARD REACHES A GUEST (per user: "the One shots need to hit guests"). Only hazards
+// stamped owner:'enemy' were sent, and the boss set pieces never were: Singularity Collapse (Gravitos, its Collapse Rain,
+// the Sovereign), the Sovereign's drain pillars, the black hole, Aetherion's tears and Echo Step ring, Legosaurus's quake,
+// Gloopaloo's puddles, and every elite trait hazard. A guest stood through all of them. Now they are mirrored with the
+// fields their resolvers read (safe zones, stun, radius, band...) and the guest resolves each against its OWN position
+// through the same code the host runs. Map-authored tears (_spireFloor) are built by each client's own loadMap.
+const _COOP_HZ_TYPES = { gravitos_singularity: 1, sovereign_drain_pillar: 1, blackhole: 1, gloop_puddle: 1, void_tear: 1,
+  mob_quake: 1, mob_shockwave: 1, mob_poisoncloud: 1, mob_lightning: 1, mob_frostbeam: 1, mob_cloudburst: 1 };
+const _COOP_HZ_XF = ['stun', 'colorTele', 'poison', 'maxRadius', 'bolt', 'tele', 'slow', 'dir', 'warn', 'reach', 'downdraft',
+  'atk', '_bhAwakened', '_bhCoreRadius', '_bhPullRadius', '_gravBand', 'footY'];
+// Detonations: a guest mirror lags the host, so the frame that drops a hazard the host just resolved can arrive before
+// the guest's copy counts down to its own resolve - and the guest walked out of a one-shot. The hazard loop stamps each
+// synced hazard that runs out; its uid rides the frames for 400 ms and the guest resolves its copy at once.
+function _coopHazDoneList() {
+  const d = game._coopHzDone; if (!d || !d.length) return null;
+  const now = performance.now(); let k = 0; while (k < d.length && now - d[k + 1] > 400) k += 2;
+  if (k) d.splice(0, k);
+  if (!d.length) return null;
+  const out = []; for (let i = 0; i < d.length; i += 2) out.push(d[i]);
+  return out;
 }
 function _coopHazList() {
   const list = [];
   const arr = game.hazards || [];
   for (let i = 0; i < arr.length && list.length < COOP_PROJ_CAP; i++) {
     const h = arr[i];
-    if (!h || h.owner !== 'enemy') continue;   // only player-facing hazards
+    if (!h || h._coopMirror) continue;
+    if (!(h.owner === 'enemy' || (_COOP_HZ_TYPES[h.type] && h._spireFloor == null))) continue;   // only player-facing hazards
     if (h._huid == null) h._huid = (game._hazUid = (game._hazUid || 0) + 1);
+    let _xf = null;
+    if (_COOP_HZ_TYPES[h.type]) {
+      for (const _k of _COOP_HZ_XF) if (h[_k] != null) (_xf = _xf || {})[_k] = (typeof h[_k] === 'number') ? Math.round(h[_k] * 100) / 100 : h[_k];
+      if (Array.isArray(h.safeZones)) (_xf = _xf || {}).sz = h.safeZones.slice(0, 8).map((z) => [Math.round(z.x), Math.round(z.y), Math.round(z.w), Math.round(z.h)]);
+    }
     list.push({
-      u: h._huid, t: String(h.type || '').slice(0, 16),
+      u: h._huid, t: String(h.type || '').slice(0, 24),   // v0.30.x coop-ohko — was 16: 'gravitos_singularity' arrived as 'gravitos_singula' and matched no resolver
       x: Math.round(h.x || 0), y: Math.round(h.y || 0),
       cx: (h.cx != null) ? Math.round(h.cx) : undefined, cy: (h.cy != null) ? Math.round(h.cy) : undefined,
       w: Math.round(h.w || 0), h: Math.round(h.h || 0), r: Math.round(h.radius || 0),
       l: Math.round((h.life != null) ? h.life : (h.timer || 0)), ml: Math.round(h.maxLife || h.timer || 0),
       d: Math.round(h.damage || 0), c: String(h.color || '').slice(0, 9),
-      mk: h._markerOnly ? 1 : 0, sl: String(h._sourceLabel || '').slice(0, 24),
+      mk: h._markerOnly ? 1 : 0, sl: String(h._sourceLabel || '').slice(0, 40),
     });
+    if (_xf) list[list.length - 1].xf = _xf;   // v0.30.x coop-ohko
   }
   return list;
 }
@@ -53223,22 +53253,36 @@ function _coopApplyHazards(msg) {
   const seen = new Set();
   const byUid = {};
   for (const h of game.hazards) if (h && h._coopMirror && h._huid != null) byUid[h._huid] = h;
+  // v0.30.x coop-ohko — a copy that ran out HERE (resolved, or expired) while the host still lists it must not come back
+  // and resolve a second time: remember it for a few seconds.
+  const _gone = net._coopHzGone || (net._coopHzGone = {}), _gnow = performance.now();
+  if (net._coopHzPrev) for (const _u in net._coopHzPrev) { const _ph = net._coopHzPrev[_u]; if (!byUid[_u] && _ph && (_ph.life | 0) <= 8) _gone[_u] = _gnow; }
+  for (const _u in _gone) if (_gnow - _gone[_u] > 5000) delete _gone[_u];
   for (const e of incoming) {
     if (!e || e.u == null) continue;
     seen.add(e.u);
     let h = byUid[e.u];
-    if (!h) { h = { _coopMirror: true, _huid: e.u, owner: 'enemy' }; h.maxLife = +e.ml || +e.l || 60; game.hazards.push(h); }
+    if (!h && _gone[e.u]) continue;
+    if (!h) { h = { _coopMirror: true, _huid: e.u, owner: 'enemy' }; h.maxLife = +e.ml || +e.l || 60; game.hazards.push(h); byUid[e.u] = h; }
     h.type = e.t; h.x = +e.x || 0; h.y = +e.y || 0;
     if (e.cx !== undefined) h.cx = +e.cx; if (e.cy !== undefined) h.cy = +e.cy;
     h.w = +e.w || 0; h.h = +e.h || 0; h.radius = +e.r || 0; h.life = +e.l;
     h.damage = +e.d || 0; h.color = e.c || '#ffaa33';
     if (e.mk) h._markerOnly = 1;
     if (e.sl) h._sourceLabel = e.sl;
+    if (e.xf && typeof e.xf === 'object') {   // v0.30.x coop-ohko — what the type's resolver reads
+      for (const _k of _COOP_HZ_XF) if (e.xf[_k] != null) h[_k] = e.xf[_k];
+      if (Array.isArray(e.xf.sz)) h.safeZones = e.xf.sz.slice(0, 8).map((a) => ({ x: +a[0] || 0, y: +a[1] || 0, w: +a[2] || 0, h: +a[3] || 0 }));
+    }
   }
+  // v0.30.x coop-ohko — a hazard the host resolved resolves here on the next step, however far behind this copy is.
+  if (Array.isArray(msg.hx)) for (const _u of msg.hx.slice(0, 64)) { const h = byUid[_u]; if (h && game.hazards.indexOf(h) >= 0) { if (h.life > 1) h.life = 1; h._coopDet = 1; } }
   for (let i = game.hazards.length - 1; i >= 0; i--) {
     const h = game.hazards[i];
-    if (h && h._coopMirror && h._huid != null && !seen.has(h._huid)) game.hazards.splice(i, 1);
+    if (h && h._coopMirror && h._huid != null && !seen.has(h._huid) && !h._coopDet) game.hazards.splice(i, 1);
   }
+  const _prev = net._coopHzPrev = {};
+  for (const h of game.hazards) if (h && h._coopMirror && h._huid != null) _prev[h._huid] = h;
 }
 // NON-HOST: apply an inbound hazard DETONATION (meteor strike zone) to the local
 // player, mirroring the enemy-hazard damage path in updateProjectiles. Reliable
@@ -54478,7 +54522,7 @@ function _mpHandle(msg) {
     case 'mon':   // v0.27.0 host monster state (non-host mirrors); v0.30.823 - its projectiles, hazards and fx ride along
       _coopApplyMonsters(msg);
       if (msg.pl) _coopApplyProjectiles({ id: msg.id, map: msg.map, list: msg.pl });
-      if (msg.hl) _coopApplyHazards({ id: msg.id, map: msg.map, list: msg.hl });
+      if (msg.hl) _coopApplyHazards({ id: msg.id, map: msg.map, list: msg.hl, hx: msg.hx });
       _coopApplyFx(msg);
       return;
     case 'proj': _coopApplyProjectiles(msg); return; // v0.27.0 host enemy projectiles (non-host takes ranged damage)
@@ -102826,6 +102870,7 @@ function updateProjectiles(dt) {
       h.life = h.timer;
     }
     h.life -= 1;
+    if (h.life <= 0 && h._huid != null && !h._coopMirror && !h._coopDoneSent) { h._coopDoneSent = 1; (game._coopHzDone || (game._coopHzDone = [])).push(h._huid, performance.now()); }   // v0.30.x coop-ohko (see _coopHazDoneList)
     if (h.type && h.type.indexOf('mob_') === 0) {
       const _hcx = (h.cx != null) ? h.cx : (h.x + (h.w || 0) / 2);
       const _hcy = (h.cy != null) ? h.cy : (h.y + (h.h || 0) / 2);
