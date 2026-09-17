@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.842';
+const GAME_VERSION = 'v0.30.843';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -71827,6 +71827,19 @@ function _atkMonBox(m) {
 // m.vx), so the box is identical across all projectiles the same frame. Cache it
 // on the mob keyed by game.time: the P×M allocations collapse to at most one per
 // distinct mob actually hit-tested, and mobs no projectile reaches cost nothing.
+// v0.30.x tall-boss — REACH A BOSS'S BODY, NOT ITS MIDDLE. Bosses stand 186-387 px tall (Gravitos 340x380), so their centre
+// sits 93-194 px above their feet, and several master skills tested a centre (or a top-left corner) against a small radius:
+// four Hundred-Hand slashes, Soul Siphon, Celestial Aurora's field, Mirror Shadow's clones, Divine Aegis's orbs, Holy
+// Grail's range and Voidrift's nova all measured out of reach of a boss the player was standing against. For a boss these
+// now measure to its attack box; every other monster keeps its original test, so no ordinary fight changes.
+function _lxBossy(m) { return !!(m && (m.isBoss || m.boss || m.isMiniBoss || m.zodiacBoss)); }
+function _lxMonHitD2(m, px, py) {   // squared distance from a point to what the attack can hit (0 inside)
+  if (!_lxBossy(m)) { const dx = (m.x + m.w / 2) - px, dy = (m.y + m.h / 2) - py; return dx * dx + dy * dy; }
+  const b = _atkMonBoxCached(m) || m;
+  const qx = Math.max(b.x, Math.min(px, b.x + b.w)), qy = Math.max(b.y, Math.min(py, b.y + b.h));
+  const dx = px - qx, dy = py - qy;
+  return dx * dx + dy * dy;
+}
 function _atkMonBoxCached(m) {
   if (m && m._abFrame === game.time) return m._abBox;
   const b = _atkMonBox(m);
@@ -73687,7 +73700,7 @@ function updatePlayer(dt) {
           const dx = (m.x + m.w/2) - ox;
           const dy = (m.y + m.h/2) - oy;
           // v0.25.557 — strike radius +30% (22 → 29 px).
-          if (dx * dx + dy * dy < 29 * 29) {
+          if ((_lxBossy(m) ? _lxMonHitD2(m, ox, oy) : dx * dx + dy * dy) < 29 * 29) {   // v0.30.x tall-boss — an orb orbiting at +-86 px only met the centre of a boss under ~274 px
             // v0.25.120 — orb damage doubled (1.1×ATK+6 → 2.2×ATK+12).
             // v0.26.150 — Per user "Make crusader G skill orbs deal much
             // more damage". 2.2×ATK+12 → 6.0×ATK+40 (~2.7× per-hit total).
@@ -73817,7 +73830,7 @@ function updatePlayer(dt) {
           const mcx = m.x + m.w/2;
           const mcy = m.y + m.h/2;
           const dx = mcx - cx, dy = mcy - cy;
-          if (dx * dx + dy * dy <= AOE_R_SQ) {
+          if (_lxMonHitD2(m, cx, cy) <= AOE_R_SQ) {   // v0.30.x tall-boss — the side clones hover 28 px under the floor and could never reach a boss's middle
             // Slightly toned down per-hit since we now hit a full circle.
             const dmg = Math.floor(getAtk() * 1.1 + 6);
             hitMonster(m, dmg, rollCrit(), 'shadow');
@@ -77930,7 +77943,9 @@ function castSkill(id) {
   //   • _doppelCasting reentry guard — the echo cast can never re-roll,
   //     Phantom-Echo's `_echoing` precedent;
   //   • no-op casts ('_lxNoCast') never double.
-  if (!_castNoOp && f && s.slot !== 'd' && id !== 'sleight' && id !== 'holyShield' &&
+  // v0.30.x tall-boss audit — nor Bastion of Dawn: its release tap returns nothing, so the echo 200 ms later took the ARM
+  // branch, re-armed the bastion for 15 s, and its auto-release paid a second full heal, shield and burst.
+  if (!_castNoOp && f && s.slot !== 'd' && id !== 'sleight' && id !== 'holyShield' && id !== 'crusader_ult' &&
       !player._doppelCasting && player.mods && player.mods.doppelChance > 0 &&
       Math.random() < player.mods.doppelChance) {
     setTimeout(() => {
@@ -83356,7 +83371,9 @@ const SKILL_FNS = {
     const victims = [];
     for (const m of game.monsters.slice()) {
       if (m.currentHp <= 0) continue;
-      if (Math.abs(m.x - player.x) < 220 && Math.abs(m.y - player.y) < 140) {
+      const _ssb = _lxBossy(m) ? (_atkMonBoxCached(m) || m) : null;   // v0.30.x tall-boss — a boss's body, not its top-left corner (184 px tall and up never passed |dy| < 140)
+      if (_ssb ? (Math.abs((_ssb.x + _ssb.w / 2) - (player.x + player.w / 2)) < 220 + _ssb.w / 2 && _ssb.y < player.y + player.h + 140 && _ssb.y + _ssb.h > player.y - 140)
+               : (Math.abs(m.x - player.x) < 220 && Math.abs(m.y - player.y) < 140)) {
         // v0.25.557 — soul siphon per-tick 0.9×ATK + 8 → 0.9×ATK.
         // v0.25.658 — P0 REBALANCE. Q-signature was 0.9× = 77% under
         // target 4.0× (the agent didn't measure as a one-shot because
@@ -85113,7 +85130,7 @@ const SKILL_FNS = {
         if (m.currentHp <= 0) continue;
         const _mcx = m.x + m.w/2;
         const dx = _mcx - fx, dy = (m.y + m.h/2) - fy;
-        if (dx*dx + dy*dy > _phNovaR2) continue;
+        if ((_lxBossy(m) ? _lxMonHitD2(m, fx, fy) : dx*dx + dy*dy) > _phNovaR2) continue;   // v0.30.x tall-boss — the last strike leaves you at a boss's top edge, 244-255 px from its middle
         const dmg = Math.floor(getAtk() * 2.6 + 6);
         hitMonster(m, dmg, true, 'phantom_nova');
         m.vx += (_mcx - fx > 0 ? 1 : -1) * 8;
@@ -85640,7 +85657,7 @@ const SKILL_FNS = {
         let target = null, bestHp = -1;
         for (const m of game.monsters) {
           if (!m || m.currentHp <= 0) continue;
-          if (Math.abs(m.x - player.x) > 520) continue;
+          if (_lxBossy(m) ? Math.abs((m.x + m.w / 2) - (player.x + player.w / 2)) > 520 + m.w / 2 : Math.abs(m.x - player.x) > 520) continue;   // v0.30.x tall-boss — left edges: from a wide boss's right side the pillars fell on empty ground
           if (m.currentHp > bestHp) { bestHp = m.currentHp; target = m; }
         }
         const px = target ? target.x + target.w/2
@@ -86197,7 +86214,7 @@ const SKILL_FNS = {
       }
       player.vy = 0;
       spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'shinobi_ult', { size: 250, life: 26, spin: Math.PI * 2, scaleStartX: 0.8, scaleEndX: 1.25, scaleStartY: 0.8, scaleEndY: 1.25, fadeOut: 0.8 });   // v0.26.x — 360° CW spin + enlarge + fade per user
-      performAround(175, 5, { color: '#d9a8f0', kb: 5 }); addHitStop(16);   // v0.30.x — light orchid, sampled from the sakura mandala that replaced the blue art
+      performAround(175, 5, { color: '#d9a8f0', kb: 5, at: (_snT && _lxBossy(_snT)) ? { x: _snT.x + _snT.w / 2, y: _snT.y + _snT.h / 2 } : undefined }); addHitStop(16);   // v0.30.x tall-boss — on a boss the slash centres on it: from its feet its middle was 178-206 px away   // v0.30.x — light orchid, sampled from the sakura mandala that replaced the blue art
     }, 100 + i * 115);
     scheduleSkillTimer(() => { if (player.hp <= 0) return; spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'shinobi_ult', { size: 440, life: 80, spin: Math.PI * 2, scaleStartX: 0.9, scaleEndX: 1.6, scaleStartY: 0.9, scaleEndY: 1.6, fadeOut: 0.85 }); performAround(330, 6, { color: '#9fb4ff', kb: 14 }); flash(0.7); addShake(12); addHitStop(110); player.x = bx; player.y = by; player.vy = 0; }, 100 + nodes.length * 115 + 140);   // v0.26.x — finale: 360° spin + enlarge 0.9→1.6 + fade per user. v0.30.47 — shockwave ghost-blue (was pink #ff88aa, tuned for the old red-gold art); the reworked sprite is indigo and steel
   },
@@ -103770,8 +103787,9 @@ function updateProjectiles(dt) {
         for (const m of [...game.monsters]) {
           if (m.currentHp <= 0) continue;
           const mcx = m.x + m.w/2, mcy = m.y + m.h/2;
-          if (mcx >= h.x && mcx <= (h.x + h.w) &&
-              mcy >= h.y && mcy <= (h.y + h.h)) {
+          if (_lxBossy(m) ? aabb(h, _atkMonBoxCached(m) || m)   // v0.30.x tall-boss — the 100 px field only held a centre of a monster under ~144 px
+              : (mcx >= h.x && mcx <= (h.x + h.w) &&
+              mcy >= h.y && mcy <= (h.y + h.h))) {
             hitMonster(m, Math.max(1, Math.floor(h.atk)), false, 'aurora');
           }
         }
