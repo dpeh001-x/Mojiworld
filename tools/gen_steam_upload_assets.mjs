@@ -22,10 +22,12 @@ const OUT = 'steam/assets/upload';
 
 // name -> { w, h, label }  — Valve's published store/library dimensions.
 const SPEC = {
-  store_capsule_main:     { w: 616,  h: 353, label: 'Main capsule' },
-  store_capsule_small:    { w: 231,  h: 87,  label: 'Small capsule' },
-  store_capsule_header:   { w: 460,  h: 215, label: 'Header capsule' },
-  store_capsule_vertical: { w: 374,  h: 448, label: 'Vertical capsule' },
+  // Store capsules at the sizes Valve's store-graphics docs require (read 2026-09-17). The half sizes this listed
+  // before (616x353 and so on) are what Steam derives itself; uploading them is refused like the old hero was.
+  store_capsule_main:     { w: 1232, h: 706, label: 'Main capsule' },
+  store_capsule_small:    { w: 462,  h: 174, label: 'Small capsule' },
+  store_capsule_header:   { w: 920,  h: 430, label: 'Header capsule' },
+  store_capsule_vertical: { w: 748,  h: 896, label: 'Vertical capsule' },
   store_page_background:  { w: 1438, h: 810, label: 'Page background' },
   library_capsule:        { w: 600,  h: 900, label: 'Library capsule' },
   // Library header + hero at the sizes Steamworks' Library Assets page states (read 2026-09-16): an upload
