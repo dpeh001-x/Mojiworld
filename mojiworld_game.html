@@ -12685,7 +12685,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.825';
+const GAME_VERSION = 'v0.30.826';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -137904,7 +137904,14 @@ function _lxPrewarmDrain(force) {
   let looked = 0, drained = 0, _kicked = 0;   // v0.30.624 - _kicked: shrink kicks this pass
   const _cap = force ? 40 : _lxMintBudget();          // v0.30.361 — a readiness gate drains in 40-job slices between paints
   const _look = force ? 400 : 24;
+  // v0.30.x ft-hitch — A FORCED SLICE IS TIME-BOXED (launch finishing touches, per user: map-transition hitches). The
+  // 40-job cap counted jobs, not time, and a job is a feathered bake of a large mob frame: measured on the first visit to
+  // gloomsporeVerge, 225 bakes cost 1,326 ms (up to 61 ms each) and one slice ran 767-913 ms without yielding, so the
+  // loading veil froze and, when the gate hit its cap, the freeze landed after the veil had lifted (2,070 ms). A slice
+  // now stops taking jobs after 12 ms once it has done one, and the gate loop paints and yields between slices as before.
+  const _t0 = (force && typeof performance !== 'undefined') ? performance.now() : 0;
   while (_LX_PREWARM_Q.length && looked++ < _look && drained < _cap) {
+    if (_t0 && drained > 0 && performance.now() - _t0 > 12) break;
     const j = _LX_PREWARM_Q.shift();
     let im = j.arr[j.i];
     if (!im) continue;
@@ -137958,7 +137965,7 @@ function _lxPrewarmDrain(force) {
   }
   // v0.30.636 - the FX pre-warm gets the passes this queue leaves idle, and every pass behind the map veil,
   // so the mob bakes above run exactly as before and a frame never pays for both.
-  if (_LX_PREWARM_FXQ.length && (force || drained === 0)) _lxPrewarmFxDrain(force);
+  if (_LX_PREWARM_FXQ.length && (force || drained === 0) && !(_t0 && performance.now() - _t0 > 12)) _lxPrewarmFxDrain(force);   // v0.30.x ft-hitch — not on a spent slice
 }
 // v0.30.358 perf — the plain downscale, as a helper, because TWO paths need it.
 // It was inline in _lxDrawSoft's edge-clean branch; the feathered branch, on a
@@ -159151,7 +159158,9 @@ function _lxReadyGate(mapId, opts) {
       const total = (typeof _LX_PREWARM_Q !== 'undefined') ? _LX_PREWARM_Q.length : 0;
       window._lxMintBypass = true;
       const t1 = Date.now();
-      while (typeof _LX_PREWARM_Q !== 'undefined' && _LX_PREWARM_Q.length && Date.now() - t1 < CAP * 0.3) {
+      // v0.30.x ft-hitch — rec.ms is written when the gate ends. A capped gate lifts the veil while this async run keeps
+      // going; forced slices after that were the post-veil freeze. The rest drains on the normal per-frame budget.
+      while (typeof _LX_PREWARM_Q !== 'undefined' && _LX_PREWARM_Q.length && Date.now() - t1 < CAP * 0.3 && !rec.ms) {
         _lxPrewarmDrain(true);
         rec.baked = total - _LX_PREWARM_Q.length;
         paint(40 + 30 * (rec.baked / Math.max(1, total)), 'Baking sprites… ' + rec.baked + '/' + total);
