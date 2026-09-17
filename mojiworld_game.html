@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.849';
+const GAME_VERSION = 'v0.30.850';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -72496,6 +72496,20 @@ function updatePlayer(dt) {
     // v0.30.x - Meteor Sigil closes on SIM time (see sage_ult): pause, death
     // and map changes can no longer strand the window or eat its shots.
     if ((player._sageUntilFr | 0) > 0 && game.time >= player._sageUntilFr) _sageSigilClose();
+    // v0.30.x — War of Banners and the Deadeye windows close on game time too (see warlord_ult / _lxDeNow).
+    if ((player._warlordEnrageUntil | 0) > 0 && game.time >= player._warlordEnrageUntil) {
+      player._warlordEnrageUntil = 0;
+      if (player.skillCooldowns && typeof SKILLS !== 'undefined' && SKILLS.warlord_ult) player.skillCooldowns.warlord_ult = SKILLS.warlord_ult.cd;
+    }
+    if (typeof _LX_DE_WINDOWS !== 'undefined') for (const _dwId in _LX_DE_WINDOWS) {
+      const _dw = _LX_DE_WINDOWS[_dwId];
+      if ((player[_dw.until] || 0) > 0 && _lxDeNow() >= player[_dw.until]) {
+        player[_dw.until] = 0;
+        const _rc = player._deRealCd && player._deRealCd[_dwId];
+        if (_rc > 0 && player.skillCooldowns) player.skillCooldowns[_dwId] = _rc;
+        if (_dw.onClose) { try { _dw.onClose(); } catch (e) {} }
+      }
+    }
     // v0.30.x — the Storm's Eye (Necrotic Ascendance channel guard) rides the
     // same half-damage bridge; the pill and duration come from its own buff key.
     const _dsMs = Math.max((player.buffs && player.buffs.aegisShield) | 0,
@@ -76224,7 +76238,10 @@ const LX_PROTOCOL_METER        = 6;      // volleys per Execute Round
 const LX_PROTOCOL_EXEC_FRAC    = 0.25;   // the Execute Round: this share of the volley damage since the last one
 const _LX_DE = { tracers: [], hits: [], cols: [], tally: 0, execTally: 0, protocolTotal: 0, meter: 0 };
 const _LX_DE_LINE_SKILLS = new Set(['oneshot', 'marksman_ult']);   // hits that are ONE LINE of many: no per-hit impact stop / kick / flash (see hitMonster)
-function _lxDeNow() { return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(); }
+// v0.30.x — Deadeye's clock is GAME time in ms (per user: fix windows that ran behind a menu). Its windows were
+// performance.now() deadlines closed by setTimeout, so a pause spent the 6 s / 8 s window and stamped the cooldown with the
+// shots unused. The watcher beside _sageSigilClose closes them; the pause block shifts them.
+function _lxDeNow() { return ((typeof game !== 'undefined' && game) ? (game.time || 0) : 0) * (1000 / 60); }
 function _lxDeSfx(k) { if (typeof _playSkillSfx === 'function') _playSkillSfx(k); }
 const _LX_DE_WINDOWS = {
   marksman_oneshot: { until: '_deadeyeUntil',  ms: LX_DEADEYE_MS,  gate: LX_DEADEYE_GATE_MS,  toast: 'DEADEYE — FOCUS FIRE 6s',
@@ -77769,11 +77786,7 @@ function castSkill(id) {
       if (_dew.onOpen) _dew.onOpen();
       const _realCd = _rankedCd > 0 ? _rankedCd : computedCd;   // v0.30.630 - was computedCd, which threw away the rank-5 cooldown perk
       if (typeof showToast === 'function') showToast(_dew.toast, 'legendary');
-      scheduleSkillTimer(() => {
-        player[_dew.until] = 0;
-        player.skillCooldowns[id] = _realCd;
-        if (_dew.onClose) { try { _dew.onClose(); } catch (e) {} }
-      }, _dew.ms);
+      player._deRealCd = player._deRealCd || {}; player._deRealCd[id] = _realCd;   // v0.30.x — stamped by the watcher when the window closes
     } else {
       player.mp = _preCastMp;   // shots inside the window are free
     }
@@ -85861,7 +85874,10 @@ const SKILL_FNS = {
     // v0.26.x — ENRAGE WINDOW: the first press opens a 10s rage; re-pressing B
     // during it is a FREE (MP-refunded), low-cd enraged strike. When the 10s
     // ends a scheduled lock applies the full cooldown.
-    const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    // v0.30.x — the enrage window runs on GAME steps (per user: fix windows that ran behind a menu). It was a
+    // performance.now() deadline closed by a setTimeout, so both kept running while paused, while its Bloodlust buff (ms,
+    // ticked in play) froze: a pause ate the free recasts. A per-step watcher (next to Meteor Sigil's) closes it now.
+    const _now = game.time | 0;
     const _active = (player._warlordEnrageUntil || 0) > _now;
     player.mp = Math.min(getMaxMp(), player.mp + (SKILLS.warlord_ult.mp || 70)); // v0.26.x audit FIX — refund the cast COST (warlord is a warrior, no MP discount), not 1.3× of it. The old 1.3× net-GAINED ~21 MP per tap; the window is now cost-neutral (free spam), not free-plus-profit. Mirrors the sage_ult fix.
     player.skillCooldowns.warlord_ult = 250;                 // spammable re-cast gate
@@ -85870,7 +85886,7 @@ const SKILL_FNS = {
     const _wobLean = (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) || (typeof game !== 'undefined' && game && game._reduceMotion);
     if (!_active) {
       const _wobDur = _lxRankDurMs('warlord_ult', 10000);   // v0.30.779 - the enrage and its Bloodlust: +1 s per skill rank
-      player._warlordEnrageUntil = _now + _wobDur;
+      player._warlordEnrageUntil = _now + Math.max(1, Math.round(_msFrames(_wobDur)));
       player.buffs = player.buffs || {}; player.buffs.bloodlust = _wobDur;
       player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.25));
       // v0.29.304 — only the OPENING of the enrage window shares (this handler
@@ -85904,7 +85920,7 @@ const SKILL_FNS = {
           addShake(5); flash(0.12);
         }, _ms);
       }
-      scheduleSkillTimer(() => { player.skillCooldowns.warlord_ult = SKILLS.warlord_ult.cd; player._warlordEnrageUntil = 0; }, _wobDur);
+      // (closed by the watcher beside _sageSigilClose, on game time)
     }
     // v0.30.618 warrior-tune - per user: "Increase the damage dealt by war of banners". Both halves
     // of every press +50% (sweep 2.4 -> 3.6, banner wave 1.6x ATK + 6 -> 2.4x ATK + 9). Measured
@@ -93674,7 +93690,12 @@ function bossAI(m, dt, distToPlayer) {
       // v0.29.830 — +150 to match the telegraph bump above, so the 300ms window
       // the player gets to punish after the blink is unchanged.
       if (m.patternTimer > 650) { m.patternState = 'idle'; m.patternTimer = 0; m._teleported = false; }
-    } else if (m.patternState === 'astral') {
+    } else if (m.patternState === 'astral' && !(m._ae && (game.time | 0) < (m._astralJudgeNextAt | 0) && !m._astralFired)) {
+      // v0.30.x — ONE JUDGEMENT EVERY TWO MINUTES (per user: "Single cast every 2 minutes"). Since the rework, Aetherion's
+      // own state machine (_aetherionTick, m._ae) mirrors its Astral Echo into patternState 'astral', and this legacy body
+      // resolved inside it - and, because it resets patternState to idle at 1900 ms while the echo still reads 'astral',
+      // re-entered and resolved again: 2-3 judgements (66% HP, 99% MP) an echo. Now it resolves once, then sits out for
+      // 7200 steps (a pause-shifted deadline); the reworked echo runs alone in between.
       // v0.25.714 — ASTRAL JUDGEMENT. The user-requested signature attack
       // for "much harder": 59 % of max HP damage AND a 99 % MP drain on
       // a 1500 ms telegraph. Modeled on Gravitos's SOUL DRAIN template
@@ -93705,6 +93726,7 @@ function bossAI(m, dt, distToPlayer) {
       }
       if (m.patternTimer >= 1500 && !m._astralFired) {
         m._astralFired = true;
+        m._astralJudgeNextAt = (game.time | 0) + 7200;   // v0.30.x — the next judgement is two minutes away
         // === RESOLVE ===
         // HP damage: 66 % of max HP (v0.30.x — was 59), run through the player's defenses
         // so it composes with DEF / blocks / Aegis / warrior 18 % mit.
@@ -102215,7 +102237,7 @@ function updateProjectiles(dt) {
           // DefBreak (Ballista): permanent stun vulnerability
           if (p.defBreak) {
             m.stunTimer = Math.max(m.stunTimer || 0, 400);
-            m.atk = Math.max(1, Math.floor(m.atk * 0.85));
+            if (!_lxBossy(m)) m.atk = Math.max(1, Math.floor(m.atk * 0.85));   // v0.30.x per user: "Siege volley should not cut boss attack" - uncapped, ~100 arrows took a boss's ATK to 1
           }
           // Status
           // v0.26.041 — Optional `freezeChance` (0..1) + `freezeBossImmune`
@@ -152911,7 +152933,7 @@ function _lxDrawFrame(time) {
 // v0.30.x pause-clock — per-monster game.time deadlines shifted while a solo game is paused (see the pause block in loop).
 const _LX_PAUSE_MON_FIELDS = ['_piscesDreamUntil', '_geminiLyingUntil', '_libraImbalanceUntil', '_hexUntil', '_doomUntil',
   '_sovereignOhkoTick', '_sovCollapseUntil', '_sovSpentUntil', '_sovExposedUntil', '_sovRegaliaEnds', '_sovRegaliaAt',
-  '_sovereignHomingAt', '_sovereignDrainAt', '_sovShardShotAt'];
+  '_sovereignHomingAt', '_sovereignDrainAt', '_sovShardShotAt', '_astralJudgeNextAt'];
 function loop(time) {
   // v0.26.946 — boot gate: while the opaque loading overlay is up, skip the
   // sim+render entirely (it was stealing main-thread time from the sprite
@@ -153036,7 +153058,11 @@ function loop(time) {
     //    menu mid-telegraph let a homing volley and a drain pillar fire into it, or spawned a second collapse), Pisces'
     //    Dream Realm, Gemini's Lie and Libra's imbalance (skippable phases), Grand Hex / Doom Brand stacks and Pandemic.
     if ((player._bastionArmedUntil | 0) > _sfT) { player._bastionArmedUntil++; if (player._bastionArmAt != null) player._bastionArmAt++; }
-    for (const _pf of ['_skinReadyAt', '_guardianReflect', '_holyShieldDrUntil', '_warlordBanner', '_sageUntilFr']) { if ((player[_pf] | 0) > _sfT) player[_pf]++; }
+    for (const _pf of ['_skinReadyAt', '_guardianReflect', '_holyShieldDrUntil', '_warlordBanner', '_sageUntilFr', '_warlordEnrageUntil']) { if ((player[_pf] | 0) > _sfT) player[_pf]++; }
+    { const _deStep = 1000 / 60, _deNowMs = _sfT * _deStep;   // v0.30.x — the Deadeye windows are game-time ms (see _lxDeNow)
+      if ((player._deadeyeUntil || 0) > _deNowMs) player._deadeyeUntil += _deStep;
+      if ((player._protocolUntil || 0) > _deNowMs) player._protocolUntil += _deStep;
+      if (player._deadeyeLastPress) player._deadeyeLastPress += _deStep; }
     if (player._hitIframeAt != null && _sfT - player._hitIframeAt < 400) player._hitIframeAt++;
     if ((game._hexPandemicUntil | 0) > _sfT) game._hexPandemicUntil++;
     if (game.hazards) for (const _ph of game.hazards) { if (_ph && _ph._dieAt != null && _ph._dieAt > _sfT) _ph._dieAt++; }
