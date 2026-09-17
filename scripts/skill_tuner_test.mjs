@@ -66,6 +66,16 @@ try {
   check(!!words && words.rows.some((r) => /^Repeat \[\d+\] times/.test(r)) && words.rows.some((r) => /^Area hit within \[\d+\] pixels · deals \[[\d.]+\] × attack/.test(r)),
     'Ground Slam reads as sentences: "Repeat [4] times", "Area hit within [120] pixels · deals [0.53] × attack"', words ? words.rows.join(' | ') : '');
 
+  // 4c. "you pay N in game" beside every Mana cost box is what the running game charges (boot loop: basics 0, +25%, mages 80%)
+  const shownPay = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('input[data-f="mp"]')].map((el) => [el.dataset.id, +((el.closest('.field').querySelector('.paid') || {}).textContent || '').replace(/\D+/g, '')])));
+  const game = await browser.newPage();
+  await game.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await game.waitForFunction(() => typeof SKILLS === 'object' && typeof _skillPaidMp === 'function', null, { timeout: 180000 });
+  const realPay = await game.evaluate((ids) => Object.fromEntries(ids.map((id) => { player.cls = SKILLS[id].cls; return [id, _skillPaidMp(id)]; })), Object.keys(shownPay).filter((id) => id !== '_global'));
+  await game.close();
+  const payWrong = Object.keys(realPay).filter((id) => shownPay[id] !== realPay[id]);
+  check(Object.keys(realPay).length >= 60 && !payWrong.length, 'every skill\'s "you pay N in game" matches what the running game charges', payWrong.map((id) => `${id} shows ${shownPay[id]}, game ${realPay[id]}`).join(', ') || `${Object.keys(realPay).length} skills; magicBolt ${shownPay.magicBolt}, fireball ${shownPay.fireball}`);
+
   // 5. reset clears everything
   await page.click('#reset');
   check(Object.keys(await page.evaluate(() => lxTuner.buildPatch())).length === 0, 'Reset empties the patch');
