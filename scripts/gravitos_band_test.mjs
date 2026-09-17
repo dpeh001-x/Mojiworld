@@ -41,7 +41,7 @@ function constant(name) {
 const REF = constant('_GRAV_BAND_REF');
 const api = new Function('_GRAV_BAND_REF', `
   const _refLoAtLv = (lv) => Math.round((63 + 15.7 * lv) * 1.5);
-  const game = { _diffDmgMul: 1 };
+  const game = { _diffDmgMul: 1, time: 0 };
   ${extract('_gravHeavyBand')}
   ${extract('_gravBandClamp')}
   return { _gravHeavyBand, _gravBandClamp, _refLoAtLv };

@@ -59,6 +59,18 @@ ok('copy: no longer claims gear resets', !src.includes('Your inventory, equipmen
 ok('copy: states EQUIPMENT ONLY is kept', src.includes('You KEEP your equipment only'));
 
 // ---------------------------------------------------------------- harness
+// v0.30.524 - the reset reads the first rung off the level-cost table through
+// _lxFirstRungExp() instead of the retired literal 30. Run the game's OWN helper
+// (sliced verbatim, like RESET) so a drifted copy certifies nothing.
+const _tbl = src.match(/const _LX_LEVEL_COST_TABLE = \[[\s\S]*?\];/);
+const _rung = src.match(/^function _lxFirstRungExp\(\) \{.*\}/m);
+const _cost = src.match(/^function _lxLevelCost\(L\) \{[\s\S]*?^\}/m);
+if (!_tbl || !_rung || !_cost) throw new Error('level-cost table / _lxFirstRungExp / _lxLevelCost not found');
+const _lxFirstRungExp = new Function(`${_tbl[0]}\n${_cost[0]}\n${_rung[0]}\nreturn _lxFirstRungExp;`)();
+const TABLE_RUNG = +_tbl[0].match(/\[\s*(\d+)/)[1];
+ok('source: ascension reads the first rung from the table (v0.30.524)', /player\.expToNext = _lxFirstRungExp\(\);/.test(RESET));
+ok('first rung is the table entry, not the retired literal 30', _lxFirstRungExp() === TABLE_RUNG && TABLE_RUNG > 1000, `${_lxFirstRungExp()} vs ${TABLE_RUNG}`);
+
 const SLOTS = ['weapon','armor','accessory','body_top','body_bottom','cape','gloves','boots','helmet'];
 
 function run(player, game) {
@@ -72,6 +84,7 @@ function run(player, game) {
     showToast: () => {}, flash: () => {}, addShake: () => {},
     audio: { play: () => {} },
     CLASSES: { warrior: { stats: { speed: 3.5, jump: 10 } } },
+    _lxFirstRungExp,   // v0.30.524 - the game's own helper, extracted above
   };
   const p = game.prestige;
   // v0.30.422 defined the heirloom (`_heir`) at offerPrestige's function scope, above
@@ -145,7 +158,7 @@ const freshGame = () => ({ prestige: { count: 3, xpMult: 1.9, dmgMult: 1.9, bonu
   const { player, game, p } = run(fullPlayer(), freshGame());
   eq('level reset', player.level, 1);
   eq('exp reset', player.exp, 0);
-  eq('expToNext reset', player.expToNext, 30);
+  eq('expToNext reset to the table first rung (v0.30.524, was the literal 30)', player.expToNext, TABLE_RUNG);
   eq('maxHp reset', player.maxHp, 100);
   eq('maxMp reset', player.maxMp, 50);
   eq('baseAtk reset', player.baseAtk, 12);

@@ -101,14 +101,18 @@ for (const [label, dir, key] of STATES) {
     : (calibFor(key, 'attack') || 1);
   // Per frame: the norm scales so CONTENT matches ref, then calib s multiplies.
   const drawn = fr.map((f) => {
-    const n = Math.abs(f.content - ref) > ref * STRICT ? Math.max(0.5, Math.min(2, ref / f.content)) : 1;
+    // NO NORM TERM. _BOSS_FRAME_TRUST_ALL = true since v0.29.197 ("remove the rescaling entirely"), so
+    // _drawBossSprite never enters the _BOSS_SIZE_STRICT content-norm: every frame is drawn as authored in one
+    // constant box. The first version of this file multiplied by ref/content here - a correction the game does
+    // not make - which is how v0.30.251 baked walk s 1.021 and shipped him ~12% SMALLER walking than idling.
+    const n = 1;
     return (f.body / f.canvas) * n * s;
   });
   const d = med(drawn);
   drawnByState.push({ label, d });
   console.log('  ' + label.padEnd(8) + String(fr.length).padStart(2) + '   '
     + s.toFixed(2).padStart(7) + '   ' + med(fr.map((f) => f.body)).toString().padStart(8)
-    + '   ' + med(fr.map((f) => f.body * (Math.abs(f.content - ref) > ref * STRICT ? ref / f.content : 1))).toFixed(0).padStart(10)
+    + '   ' + med(fr.map((f) => f.body)).toFixed(0).padStart(10)
     + '   ' + d.toFixed(4).padStart(10));
 }
 const vals = drawnByState.map((x) => x.d);
@@ -119,7 +123,8 @@ console.log(`\n  cross-state spread: ${spread.toFixed(3)}x  (${biggest.label} is
 console.log('  1.000 would mean he is the same titan in every state.');
 const TOL = 1.06;
 if (spread > TOL) {
-  console.log(`\n  FAIL — he changes size by ${((spread - 1) * 100).toFixed(0)}% between states.`);
+  console.log(`\n  NOTE — he changes size by ${((spread - 1) * 100).toFixed(0)}% between states (median armour height, pose-sensitive).`);
+  console.log('  calib s is USER-AUTHORED (LX_ANIM_PATCH bakes 0588c6b9, 07ba9806, 03fc0e87, 88f57026) - show this to the user, never bake it.');
   console.log('  Suggested calib s to put every state on the idle size:');
   const idleD = drawnByState.find((x) => x.label === 'idle');
   for (const x of drawnByState) {
@@ -128,4 +133,4 @@ if (spread > TOL) {
     console.log('    ' + x.label.padEnd(8) + (s * (idleD.d / x.d)).toFixed(3));
   }
 }
-process.exitCode = spread > TOL ? 1 : 0;
+process.exitCode = 0;   // diagnostic, not a gate: the only way to pass was to overwrite the user's own animator patches

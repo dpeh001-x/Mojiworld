@@ -71,7 +71,9 @@ const anim = readFileSync(new URL('./regen_anim_from_base.mjs', import.meta.url)
 ok('gen_projectile_restyle insets every candidate it writes',
   /fit_sprite_frames\.mjs/.test(gen) && /fitToMargin\(\[f\]/.test(gen) && /--no-fit/.test(gen), {});
 ok('regen_anim_from_base maps its frames onto the base',
-  /fit_sprite_frames\.mjs/.test(anim) && /fitFramesToBase\(basePath/.test(anim) && /--no-fit/.test(anim), {});
+  // 6e6fccb1 added fitBase: the fit target is _fitTo, which DEFAULTS to basePath.
+  /fit_sprite_frames\.mjs/.test(anim) && /_fitTo = t\.fitBase \? [^;]+ : basePath;/.test(anim)
+    && /fitFramesToBase\(_fitTo,/.test(anim) && /--no-fit/.test(anim), {});
 
 rmSync(DIR, { recursive: true, force: true });
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));

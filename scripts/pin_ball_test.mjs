@@ -50,7 +50,10 @@ async function shape(buf) {
 }
 
 const built = readFileSync(ROOT + '/Sprites/ui/emoji/1f4cd.webp');
-const shipped = execFileSync('git', ['show', 'origin/main:Sprites/ui/emoji/1f4cd.webp'], { cwd: ROOT, maxBuffer: 32 << 20 });
+// The control is the pin v0.30.686 REPLACED. It was read from origin/main, which was the
+// old egg only until this change was pushed - after that the control compared the new
+// pin with itself. ea44410c (v0.30.671) is the last commit that shipped the egg.
+const shipped = execFileSync('git', ['show', 'ea44410c:Sprites/ui/emoji/1f4cd.webp'], { cwd: ROOT, maxBuffer: 32 << 20 });
 const A = await shape(built), B = await shape(shipped);
 console.log('  new:     ' + JSON.stringify({ rms: +(A.lower.rms * 100).toFixed(1), worst: +(A.lower.worst * 100).toFixed(1), reach: +((A.bot - A.widestY) / A.R).toFixed(2), topRms: +(A.upper.rms * 100).toFixed(1) }));
 console.log('  shipped: ' + JSON.stringify({ rms: +(B.lower.rms * 100).toFixed(1), worst: +(B.lower.worst * 100).toFixed(1), reach: +((B.bot - B.widestY) / B.R).toFixed(2), topRms: +(B.upper.rms * 100).toFixed(1) }));

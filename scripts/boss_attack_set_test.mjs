@@ -59,6 +59,13 @@ const PROFILES = {
 };
 const KEYS = Object.keys(PROFILES);
 const ALPHA = 12, BODY_LUM = 120, FRAMES = 9;
+// GEOMETRY IS READ THROUGH A FADE. The user's 2026-08-29 redraw of gravitos3soul 4-8 (d3038e7d)
+// lays a soft alpha vignette over frames 5-8: the wings' hard rectangular crop is feathered and
+// the last frame dissolves. Not one pixel of the titan moved - the flame holes and the head/crotch
+// rows are identical to the v0.30.204 frames - but an `alpha >= 160` armour mask reads the fade as
+// a 20.6% shrink and `alpha > 12` reads the faded foot-flame as a 7 px hop. So size and floor are
+// measured on ink at ANY visible alpha, with a row-mass gate so stray smoke specks cannot vote.
+const INK = 8, ROW_MASS = 12;
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -69,9 +76,14 @@ const ok = (name, cond, detail = '') => {
 async function measure(buf) {
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: h, channels: c } = info;
-  let x1 = -1, y1 = -1, border = 0, by0 = h, by1 = -1, bx0 = w, bx1 = -1;
+  let x1 = -1, y1 = -1, border = 0, by0 = h, by1 = -1, bx0 = w, bx1 = -1, iy0 = -1, iy1 = -1, floor = -1;
+  const darkRow = new Int32Array(h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const i = (y * w + x) * c;
+    if (data[i + 3] > INK) {
+      floor = y;
+      if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 <= BODY_LUM) darkRow[y]++;
+    }
     if (data[i + 3] <= ALPHA) continue;
     if (x === 0 || y === 0 || x === w - 1 || y === h - 1) border++;
     if (x > x1) x1 = x; if (y > y1) y1 = y;
@@ -79,7 +91,8 @@ async function measure(buf) {
       if (y < by0) by0 = y; if (y > by1) by1 = y; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
     }
   }
-  return { w, h, border, feet: y1, body: by1 < 0 ? null : by1 - by0 + 1,
+  for (let y = 0; y < h; y++) if (darkRow[y] >= ROW_MASS) { if (iy0 < 0) iy0 = y; iy1 = y; }
+  return { w, h, border, feet: floor, bodyInk: iy1 < 0 ? null : iy1 - iy0 + 1, body: by1 < 0 ? null : by1 - by0 + 1,
     bodyW: bx1 < 0 ? null : bx1 - bx0 + 1 };
 }
 
@@ -107,10 +120,11 @@ for (const key of KEYS) {
   const bodies = ms.map((m) => m.body);
   const widths = ms.map((m) => m.bodyW);
   const spr = (a) => (Math.max(...a) - Math.min(...a)) / Math.max(...a);
-  const drift = spr(bodies);
+  const inkBodies = ms.map((m) => m.bodyInk);
+  const drift = spr(inkBodies);
   if (prof.kind === 'planted') {
     ok('the titan is one size all the way through', drift <= prof.maxBodyDrift,
-      `dark-armour body ${Math.min(...bodies)}..${Math.max(...bodies)} = ${(drift * 100).toFixed(1)}%`);
+      `dark-ink body ${Math.min(...inkBodies)}..${Math.max(...inkBodies)} = ${(drift * 100).toFixed(1)}%`);
   } else {
     const reach = spr(widths);
     const shape = spr(widths.map((w2, i) => w2 / bodies[i]));

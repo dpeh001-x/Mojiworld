@@ -18,8 +18,9 @@
 import sharp from 'sharp';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 sharp.cache(false);
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DIR = join(ROOT, 'Sprites', 'bosses', 'walk');
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 

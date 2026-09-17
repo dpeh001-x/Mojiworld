@@ -28,22 +28,31 @@ const rates = gear ? {
 } : null;
 
 // ---- boons -------------------------------------------------------------------
-const boon = src.match(/const _boonRate = \(m\.isElite \|\| m\.isMiniBoss\) \? ([\d.]+) : ([\d.]+);/);
-const boons = boon ? { elite: +(boon[1] * 100).toFixed(3), normal: +(boon[2] * 100).toFixed(3) } : null;
+// v0.30.638 - per user: "boon drop rate 0.05% for low level monsters to 0.2% for
+// high level monsters". The normal-mob arm is no longer a literal: it is
+// _lxBoonRateForLevel(monster level), a straight ramp between two constants.
+// The elite / elder arm is still the literal this test exists to hold down.
+const boon = src.match(/const _boonRate = \(m\.isElite \|\| m\.isMiniBoss\) \? ([\d.]+) : _lxBoonRateForLevel\(/);
+const ramp = src.match(/const LX_BOON_RATE_LO = ([\d.]+), LX_BOON_RATE_LO_LV = \d+;\s*const LX_BOON_RATE_HI = ([\d.]+),\s*LX_BOON_RATE_HI_LV = \d+;/);
+const boons = (boon && ramp) ? { elite: +(boon[1] * 100).toFixed(3), normalLo: +(ramp[1] * 100).toFixed(3), normalHi: +(ramp[2] * 100).toFixed(3) } : null;
 
 console.log(`  equipment (pre-luck): ${JSON.stringify(rates)}`);
 console.log(`  boons     (pre-luck): ${JSON.stringify(boons)}`);
 
 check(!!rates, 'the equipment drop formula is where the test expects it', !!gear);
-check(!!boons, 'the boon rate is keyed on elite / elder', !!boon);
+check(!!boons, 'the boon rate is keyed on elite / elder', { eliteArm: !!boon, normalRamp: !!ramp });
 if (rates && boons) {
   // Came down, significantly. Elite equipment was 1.00% before this pass.
   check(rates.elite <= 0.40, 'elite / elder equipment chance is significantly reduced (was 1.00%)', rates.elite);
   check(boons.elite <= 0.20, 'elite / elder boon chance is significantly reduced (was 0.50%)', boons.elite);
   // The tiers the ask did not name must not have moved.
-  check(rates.normal === 0.1, 'normal-mob equipment rate is untouched at 0.10%', rates.normal);
-  check(rates.boss === 1.8, 'boss equipment main roll is untouched at 1.80%', rates.boss);
-  check(boons.normal === 0.5, 'normal-mob boon trickle is untouched at 0.50%', boons.normal);
+  // v0.30.756 - per user: "reduce the chance of getting equipment from quests,
+  // monsters". The 0.02 global went to 0.015, taking EVERY tier down 25% together
+  // (normal 0.10 -> 0.075, elite 0.30 -> 0.225, boss 1.80 -> 1.35) and leaving the
+  // ordering alone. Pinned again so the next move is a decision, not an accident.
+  check(rates.normal === 0.075, 'normal-mob equipment rate is 0.075% (v0.30.756: 0.10% less 25%)', rates.normal);
+  check(rates.boss === 1.35, 'boss equipment main roll is 1.35% (v0.30.756: 1.80% less 25%)', rates.boss);
+  check(boons.normalLo === 0.05 && boons.normalHi === 0.2, 'normal-mob boon roll is the v0.30.638 ramp: 0.05% (Lv10-) to 0.20% (Lv70+)', boons);
   // An elite must still be worth more than a snail for GEAR — the tier has to
   // keep meaning something even after a cut this size.
   check(rates.elite > rates.normal, 'an elite is still a better equipment kill than a normal mob',

@@ -95,4 +95,8 @@ for (const s of sets) {
 }
 console.log(`\n  worst body pulse today ${worstNow.toFixed(3)}x  ->  with bodylock ${worstLock.toFixed(3)}x`);
 console.log('  "art itself" is the raw drawn body before any normalisation, for reference.');
-process.exitCode = worstLock < worstNow ? 0 : 1;
+// DIAGNOSTIC, NOT A GATE. The exit code only ever reported which of two normalisations won, and it has been 1
+// since the day this file was committed (v0.30.240: content-norm 1.152x vs bodylock 1.176x - that commit's own
+// finding was "bodylock comes out worse"). Neither normalisation runs in the game: _BOSS_FRAME_TRUST_ALL = true
+// since v0.29.197, so the "art itself" column is what actually reaches the screen.
+process.exitCode = 0;

@@ -36,9 +36,10 @@
 import sharp from 'sharp';
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 sharp.cache(false);
 
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DIR = join(ROOT, 'Sprites', 'bosses', 'walk');
 const CHECK = process.argv.includes('--check');
 const ALL = process.argv.includes('--all');

@@ -74,8 +74,11 @@ const sOf = (k) => (V[k] && typeof V[k].s === "number") ? V[k].s : null;
 ok("calib compensates the recompose on all three states (same on-screen size)",
    sOf("zodiac/idle") === want && sOf("zodiac/walk") === want && sOf("zodiac/attack") === want,
    );
-ok("...and fly is deliberately NOT compensated (it was never rescaled)",
-   !V["zodiac/fly"], "a fly entry here would resize the one clean state");
+// 0588c6b9 baked a user-pasted animator patch that gives fly its OWN calib (s 1.14,
+// dy -0.035). That is the user's sizing, not the recompose compensation, so the
+// invariant is "fly never carries 1/K", not "fly has no entry".
+ok("...and fly does NOT carry the recompose compensation (it was never rescaled)",
+   sOf("zodiac/fly") !== want, "fly s=" + sOf("zodiac/fly") + " (1/K=" + want + " here would resize the one clean state)");
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

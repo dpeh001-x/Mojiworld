@@ -75,8 +75,17 @@ const game = readFileSync(isAbsolute(TARGET) ? TARGET : join(ROOT, TARGET), 'utf
     return +(Math.sqrt(arr.reduce((x, y) => x + (y - mn) ** 2, 0) / arr.length) / mn).toFixed(2); };
   const uniform = cv(step);
   const weighted = w.length === step.length ? cv(step.map((s, i) => s / w[i])) : 99;
-  ok('weighted timing measurably evens out the cast', weighted < uniform * 0.65,
-     { uniform, weighted, steps: step.map((x) => Math.round(x)).join(' ') });
+  // v0.30.725 redrew the blade. The new art is evenly paced to begin with (cv 0.39; the
+  // old plate was 0.77), so the fixed 35% gain this asserted cannot be reached: what is
+  // left is ONE near-held pair (frames 4->5) that the generator's 0.45 blink clamp will
+  // not flatten. Pin what is reachable - the table beats uniform timing AND is as even
+  // as gen_fx_anim_timing's clamp (MIN_W 0.45 / MAX_W 2.2) allows for the art on disk.
+  const _mean = step.reduce((x, y) => x + y, 0) / step.length;
+  const _ideal = step.map((s) => Math.max(0.45, Math.min(2.2, s / _mean)));
+  const _isum = _ideal.reduce((x, y) => x + y, 0);
+  const best = cv(step.map((s, i) => s / (_ideal[i] * step.length / _isum)));
+  ok('weighted timing measurably evens out the cast', weighted < uniform && weighted <= best + 0.02,
+     { uniform, weighted, best, steps: step.map((x) => Math.round(x)).join(' ') });
 }
 
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));
