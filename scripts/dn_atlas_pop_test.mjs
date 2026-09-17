@@ -1,6 +1,7 @@
 // A popping damage number blits glyphs from an atlas (dn-atlas): same picture as the live text path, the same
 // constant 5 px outline, no text rasterised once warm, whole-device-pixel blits, and the live path still there for
-// everything the atlas does not cover.
+// everything the atlas does not cover. v0.30.830: a size bucket is 12% wide, so a blit may sit up to 12% under the atlas
+// cell it samples. gb-atlas: a B/G sticker in a boss scene draws from its own atlas too, and covers the live picture.
 //   PORT=9761 node scripts/dn_atlas_pop_test.mjs [candidate.html]      (MOJI_GAME_FILE also honoured)
 import { chromium } from 'playwright-core';
 import path from 'node:path';
@@ -39,7 +40,7 @@ try {
     const mk = (o, age) => Object.assign({ x: camX + 480, y: camY + 260, vy: 0, life: 50 - age, maxLife: 50, wobbleDir: 1 }, o);
     const P = CanvasRenderingContext2D.prototype;
     const render = (d, atlasOn, spy) => {
-      _LX_DN_ATLAS_ON = atlasOn; _lxDnAtlasBudget = 9;
+      _LX_DN_ATLAS_ON = atlasOn; _lxDnAtlasBudget = 9; if (typeof _LX_GB_ATLAS_ON !== 'undefined') _LX_GB_ATLAS_ON = atlasOn;
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
       ctx.fillStyle = 'rgb(' + BG.join(',') + ')'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -60,13 +61,21 @@ try {
     const kinds = [['plain', { text: '4821', color: '#ffffff', size: 15 }], ['crit', { text: '12,640', color: '#ffcc55', size: 44, crit: true }], ['big', { text: '9,307', color: '#ff2266', size: 34, big: true }]];
     for (const [name, o] of kinds) for (const age of [1, 3, 5, 8]) {
       const live = render(mk(o, age), false, false), atl = render(mk(o, age), true, true);
-      out.cases.push(Object.assign({ name, age, text: atl.log.text, blits: atl.log.blits.length, offGrid: atl.log.blits.filter((b) => !b.ident || b.dx !== Math.round(b.dx) || b.dy !== Math.round(b.dy) || b.dw !== b.sw).length }, stats(live.px, atl.px, live.w, live.h)));
+      out.cases.push(Object.assign({ name, age, text: atl.log.text, blits: atl.log.blits.length, offGrid: atl.log.blits.filter((b) => !b.ident || b.dx !== Math.round(b.dx) || b.dy !== Math.round(b.dy)).length, fitMin: Math.min(...atl.log.blits.map((b) => b.dw / b.sw)), fitMax: Math.max(...atl.log.blits.map((b) => b.dw / b.sw)) }, stats(live.px, atl.px, live.w, live.h)));
     }
-    // fallbacks: a B/G sticker, a word, and a scene that is not low-fx all keep the live text path
+    // gb-atlas — a B/G sticker's pop (it wobbles, so its blits are rotated and are not held to the pixel grid)
+    out.gbCases = [];
+    for (const age of [1, 3, 5, 8]) {
+      const o = { text: '5,120', color: LX_GB_ROW_COL, size: LX_GB_ROW_SIZE, big: true, _gbVolc: true };
+      const live = render(mk(o, age), false, false), atl = render(mk(o, age), true, true);
+      out.gbCases.push(Object.assign({ name: 'gb', age, text: atl.log.text, blits: atl.log.blits.length }, stats(live.px, atl.px, live.w, live.h)));
+    }
+    // fallbacks: a word, and a scene that is not low-fx (a B/G sticker's too), keep the live text path; a B/G sticker in a boss scene does not (gb-atlas)
     const liveText = (d, lowFxOff) => { const keepFn = window._perfLowFx; if (lowFxOff) { window._perfLowFx = () => false; game._lowFxCache = null; } try { return render(d, true, true).log.text; } finally { window._perfLowFx = keepFn; game._lowFxCache = null; } };
     out.word = liveText(mk({ text: 'WARDED', color: '#7fd8ff', size: 15 }, 3), false);
     out.gb = liveText(mk({ text: '5,120', color: '#ffd84a', size: 30, _gbVolc: true }, 3), false);
     out.calm = liveText(mk({ text: '4821', color: '#ffffff', size: 15 }, 3), true);
+    out.gbCalm = liveText(mk({ text: '5,120', color: '#ffd84a', size: 30, _gbVolc: true }, 3), true);
     // the font cache: three same-size numbers live in ONE frame (a calm scene, atlas not in play) must all draw in the damage font
     { const keepFn = window._perfLowFx; window._perfLowFx = () => false; game._lowFxCache = null; const fonts = []; const oF3 = P.fillText;
       P.fillText = function () { if (this === ctx) fonts.push(this.font); return oF3.apply(this, arguments); };
@@ -90,12 +99,16 @@ try {
   console.log('case        age  live-text  blits  offGrid   IoU   meanDiff  bbox live -> atlas (device px)      first black run');
   for (const c of r.cases) console.log(`${c.name.padEnd(10)} ${String(c.age).padStart(4)} ${String(c.text).padStart(9)} ${String(c.blits).padStart(6)} ${String(c.offGrid).padStart(8)} ${String(c.iou).padStart(6)} ${String(c.meanDiff).padStart(9)}  ${JSON.stringify(c.bbA)} -> ${JSON.stringify(c.bbB)}   ${c.firstBlackRunA} -> ${c.firstBlackRunB}`);
   check(r.cases.every((c) => c.text === 0 && c.blits > 0), 'a popping figure in a boss scene rasterises no text: it blits glyphs', r.cases.filter((c) => c.text !== 0 || !c.blits).slice(0, 3));
-  check(r.cases.every((c) => c.offGrid === 0), 'every glyph blit lands on whole device pixels at exactly its own size (no resample)', r.cases.filter((c) => c.offGrid).slice(0, 3));
+  const fitOk = (c) => c.offGrid === 0 && c.fitMax <= 1 + 1e-6 && c.fitMin >= 0.8 && c.fitMax - c.fitMin < 1e-6;
+  check(r.cases.every(fitOk), 'every glyph blit lands on whole device pixels, all of a number\'s glyphs at one fit of their atlas cells and never enlarged (v0.30.830: a cell is up to 12% over, plus the half pixel its bucket rounds up to)', r.cases.filter((c) => !fitOk(c)).slice(0, 3).map((c) => [c.name, c.age, c.offGrid, c.fitMin, c.fitMax]));
   check(r.cases.every((c) => c.iou >= 0.9), 'the atlas picture covers the same pixels as the live text (IoU >= 0.90 at every age, plain / crit / big)', r.cases.filter((c) => c.iou < 0.9));
   check(r.cases.every((c) => Math.abs(c.bbA[2] - c.bbB[2]) <= Math.max(4, c.bbA[2] * 0.04) && Math.abs(c.bbA[3] - c.bbB[3]) <= Math.max(4, c.bbA[3] * 0.04)), 'and is the same size to within the 4% size ladder', r.cases.map((c) => [c.name, c.age, c.bbA, c.bbB]).slice(0, 4));
   check(r.cases.every((c) => Math.abs(c.firstBlackRunA - c.firstBlackRunB) <= 2), 'the black outline measures the same on the canvas, live or atlas', r.cases.map((c) => [c.name, c.age, c.firstBlackRunA, c.firstBlackRunB]));
   check(r.outlineDev.length === 1 && Math.abs(r.outlineDev[0] - 5 * r.dpr) < 0.01, 'every atlas is stroked with a literal 5 px outline under the plain render scale, whatever the pop size', r.outlineDev);
-  check(r.word > 0 && r.gb > 0 && r.calm > 0, 'a word pop, a B/G sticker and a scene that is not low-fx all keep the live text path', { word: r.word, gb: r.gb, calm: r.calm });
+  check(r.word > 0 && r.calm > 0 && r.gbCalm > 0, 'a word pop, and a scene that is not low-fx (a B/G sticker\'s too), keep the live text path', { word: r.word, calm: r.calm, gbCalm: r.gbCalm });
+  for (const c of r.gbCases) console.log(`${c.name.padEnd(10)} ${String(c.age).padStart(4)} ${String(c.text).padStart(9)} ${String(c.blits).padStart(6)}        - ${String(c.iou).padStart(6)} ${String(c.meanDiff).padStart(9)}  ${JSON.stringify(c.bbA)} -> ${JSON.stringify(c.bbB)}`);
+  check(r.gb === 0 && r.gbCases.every((c) => c.text === 0 && c.blits > 0), 'a B/G sticker popping in a boss scene rasterises no text either: it blits from its own atlas (gb-atlas)', { gb: r.gb, cases: r.gbCases.map((c) => [c.age, c.text, c.blits]) });
+  check(r.gbCases.every((c) => c.iou >= 0.9), 'and its atlas picture covers the same pixels as its live text (IoU >= 0.90 at every pop age)', r.gbCases.map((c) => [c.age, c.iou, c.meanDiff]));
   check(r.fontDraws >= 6 && r.fonts.length === 1 && /Impact/.test(r.fonts[0]) && /19px/.test(r.fonts[0]), 'three same-size numbers popping live in one frame all draw in the damage font (the v0.30.807 fix holds)', { fonts: r.fonts, draws: r.fontDraws });
   check(r.builtFirst === 1 && r.builtSecond === 2, 'at most one atlas is built per frame; the second number draws live for that frame and gets its atlas on the next', { first: r.builtFirst, second: r.builtSecond });
   check(r.cachePx <= r.capPx * 1.15, 'the atlas cache stays inside its pixel budget (oldest out first)', { px: r.cachePx, cap: r.capPx, n: r.cacheN });

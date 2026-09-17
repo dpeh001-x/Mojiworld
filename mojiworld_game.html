@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.836';
+const GAME_VERSION = 'v0.30.837';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -150381,7 +150381,7 @@ let _LX_DN_ATLAS_ON = true;
 const _LX_DN_ATLAS_CHARS = '0123456789,★';
 const _LX_DN_ATLAS_OK = /^[0-9,]+★?$/;
 const _LX_DN_ATLAS = new Map();            // key -> atlas; insertion order is the LRU order
-const _LX_DN_ATLAS_MAX_PX = 12e6;          // ~48 MB of backing store, oldest out first
+const _LX_DN_ATLAS_MAX_PX = 32e6;          // ~128 MB of backing store, oldest out first (v0.30.x gb-atlas — was 12e6: a boss fight's figure atlases (~7 MP) and sticker atlases (~21 MP at render scale 1.93) have to fit together, or both churn)
 let _lxDnAtlasPx = 0;
 let _lxDnAtlasBudget = 0;                  // builds still allowed this frame (drawDamageNumbers resets it)
 // The pop's size, snapped to a 4% ladder hung on the base size (so scale 1 is exactly the base) and then to the
@@ -150509,6 +150509,129 @@ function _lxDnAtlasBlit(at, txt, scale, rotated, fit) {
       const c0 = at.cells.get(txt[i]);
       ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, pen - at.pad, -at.base, c0.sw / dpr, at.cellH / dpr);
       pen += c0.adv;
+    }
+  }
+  ctx.restore();
+  return true;
+}
+// v0.30.x gb-atlas — B/G STICKERS FROM THE ATLAS TOO (Gravitos lag, per user: "work on reducing lag even more"). v0.30.815
+// left the B/G sticker out: its pop and its growing fade still stroked the whole number live - a 15 px silhouette, the
+// halo, a 15 px white border, an 11 px black one and a dilated gradient fill, five strokes of 54 px text at a size that
+// changes every frame, so no glyph or stroke cache ever hit. Measured in a Gravitos fight (a warlord casting, 30 A/B
+// pairs): hiding only the B/G stickers took the frame rate from 63 to 87 fps; in isolation, seven stickers on screen held
+// a frame at 15 fps, and the same stickers drawn from atlases at 114. The work is the text stroking itself (a CPU canvas
+// was no faster), which is exactly what a slower processor pays for whatever graphics card it has.
+// Same scheme as the figure atlas: one row per live pass, so layers stack across the whole number as the live calls do,
+// built once per (base size, size bucket, render scale) and shared by every sticker - they are all the same gold, and a
+// crit differs only in its halo row. Strokes are the live path's constant CSS widths, baked at the bucket's size. Rows
+// are opaque and take their pass's alpha at the blit (shadow 0.8, halo 0.35), so each layer composites as its live call
+// does on a fading frame too. That is why the dilation keeps a row of its own: measured, its stroke covers the glyph's
+// interior as well, so a fading sticker takes the gold twice, and merged into the fill row it faded greyer. The
+// silhouette's (7, 9) drop is applied at the blit instead of padded into every cell.
+// A halo row is built only at sizes where the halo reaches past the white border (7 x size / 2 > 7.5, a crit's 9 x size / 2
+// > 7.5); below that the opaque border covers it on every pop frame, and on a fading frame it would show through the
+// half-transparent border as at most a 9% gold tint. Low-fx only, where the live path draws no glow, flash or highlight:
+// those are the heavy scenes, and elsewhere nothing changes.
+let _LX_GB_ATLAS_ON = true;
+function _lxGbAtlasGet(b0, px, crit, col, stress, dpr) {
+  const key = 'gb|' + b0 + '|' + px + '|' + (stress ? 's' + (crit ? 1 : 0) : 'n') + '|' + col + '|' + dpr;
+  let at = _LX_DN_ATLAS.get(key);
+  if (at !== undefined) {
+    if (at) { _LX_DN_ATLAS.delete(key); _LX_DN_ATLAS.set(key, at); }
+    return at;
+  }
+  if (_lxDnAtlasBudget <= 0) return null;
+  _lxDnAtlasBudget--;
+  at = _lxGbAtlasBuild(b0, px, crit, col, stress, dpr);
+  _LX_DN_ATLAS.set(key, at);
+  if (at) {
+    _lxDnAtlasPx += at.px;
+    for (const k of _LX_DN_ATLAS.keys()) {
+      if (_lxDnAtlasPx <= _LX_DN_ATLAS_MAX_PX || k === key) break;
+      const old = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k);
+      if (old) { _lxDnAtlasPx -= old.px; old.cv.width = old.cv.height = 0; }
+    }
+  }
+  return at;
+}
+function _lxGbAtlasBuild(b0, px, crit, col, stress, dpr) {
+  try {
+    const S = px / Math.max(1, b0), reach = LX_GB_WHITE / 2;
+    const cv = document.createElement('canvas'); const c = cv.getContext('2d');
+    const font = '900 ' + px + 'px Impact, "Arial Black", "Trebuchet MS", sans-serif';
+    c.font = font;
+    const mAll = c.measureText(_LX_DN_ATLAS_CHARS);
+    const asc = Math.ceil(mAll.actualBoundingBoxAscent || px), desc = Math.ceil(mAll.actualBoundingBoxDescent || px * 0.3);
+    const rows = [{ p: 'sstroke', a: LX_GB_SHADOW_A, sh: 1 }, { p: 'sfill', a: LX_GB_SHADOW_A, sh: 1 }];
+    if (!stress && 9 * S / 2 > reach) rows.push({ p: 'halo', w: 9, a: 0.35, sh: 0, crit: 1 });
+    if (!stress && 7 * S / 2 > reach) rows.push({ p: 'halo', w: 7, a: 0.35, sh: 0, crit: 0 });
+    rows.push({ p: 'white', a: 1, sh: 0 }, { p: 'black', a: 1, sh: 0 }, { p: 'fill', a: 1, sh: 0 }, { p: 'dil', a: 1, sh: 0 });
+    const pad = Math.ceil(Math.max(LX_GB_WHITE, LX_GB_BLACK, rows.some((r) => r.w === 9) ? 9 * S : 0) / 2 + 2);
+    const base = asc + pad, cellH = Math.ceil((base + desc + pad) * dpr), rowH = cellH + 2;
+    const cells = new Map(); let x = 0;
+    for (const ch of _LX_DN_ATLAS_CHARS) {
+      const adv = c.measureText(ch).width; const sw = Math.ceil((Math.ceil(adv) + pad * 2) * dpr);
+      cells.set(ch, { sx: x, sw, adv }); x += sw + 2;
+    }
+    cv.width = x; cv.height = rowH * rows.length;
+    let fillStyle;
+    if (!stress) {   // _lxVolcGrad's ramp, in the atlas's own units (the live one is cached per base size and scaled with the glyph)
+      fillStyle = c.createLinearGradient(0, -px * 0.95, 0, px * 0.3);
+      fillStyle.addColorStop(0, '#fffdf0'); fillStyle.addColorStop(0.34, '#ffe86a');
+      fillStyle.addColorStop(0.72, '#ffae12'); fillStyle.addColorStop(1, '#e2560a');
+    } else fillStyle = crit ? '#ffd84a' : col;
+    for (let r = 0; r < rows.length; r++) {
+      const R = rows[r];
+      for (const [ch, cell] of cells) {
+        c.save();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.beginPath(); c.rect(cell.sx, r * rowH, cell.sw, cellH); c.clip();
+        c.setTransform(dpr, 0, 0, dpr, cell.sx + pad * dpr, r * rowH + base * dpr);
+        c.font = font; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.lineJoin = 'round'; c.lineCap = 'round';
+        if (R.p === 'sstroke') { c.lineWidth = LX_GB_WHITE; c.strokeStyle = '#000'; c.strokeText(ch, 0, 0); }
+        else if (R.p === 'sfill') { c.fillStyle = '#000'; c.fillText(ch, 0, 0); }
+        else if (R.p === 'halo') { c.lineWidth = R.w * S; c.strokeStyle = col; c.strokeText(ch, 0, 0); }
+        else if (R.p === 'white') { c.lineWidth = LX_GB_WHITE; c.strokeStyle = '#ffffff'; c.strokeText(ch, 0, 0); }
+        else if (R.p === 'black') { c.lineWidth = LX_GB_BLACK; c.strokeStyle = '#000'; c.strokeText(ch, 0, 0); }
+        else if (R.p === 'fill') { c.fillStyle = fillStyle; c.fillText(ch, 0, 0); }
+        else { c.lineWidth = LX_GB_DILATE; c.strokeStyle = fillStyle; c.strokeText(ch, 0, 0); }
+        c.restore();
+      }
+    }
+    return { cv, cells, pad, base, cellH, rowH, rows, shx: LX_GB_SHADOW_X * S, shy: LX_GB_SHADOW_Y * S, dpr, px: cv.width * cv.height };
+  } catch (e) { return null; }
+}
+// As _lxDnAtlasBlit, with a per-row alpha, the silhouette's drop and the crit's halo row. The number's alpha is the
+// context's on entry.
+function _lxGbAtlasBlit(at, txt, scale, rotated, fit, crit) {
+  const r = (fit > 0 && fit <= 1) ? fit : 1, ck = crit ? 1 : 0;
+  const n = txt.length; let wTot = 0;
+  for (let i = 0; i < n; i++) { const c0 = at.cells.get(txt[i]); if (!c0) return false; wTot += c0.adv; }
+  const dpr = at.dpr, a0 = ctx.globalAlpha;
+  const tf = rotated ? null : ((typeof ctx.getTransform === 'function') ? ctx.getTransform() : null);
+  if (!rotated && !tf) return false;
+  ctx.save();
+  if (tf) ctx.setTransform(1, 0, 0, 1, 0, 0);
+  else if (r / scale !== 1) ctx.scale(r / scale, r / scale);
+  for (let row = 0; row < at.rows.length; row++) {
+    const R = at.rows[row];
+    if (R.crit !== undefined && R.crit !== ck) continue;
+    const ox = R.sh ? at.shx : 0, oy = R.sh ? at.shy : 0;
+    ctx.globalAlpha = a0 * R.a;
+    let pen = -wTot / 2;
+    if (tf) {   // no rotation: whole device pixels, as the figure atlas (v0.30.466)
+      const dy = Math.round(tf.f + (oy - at.base) * dpr * r);
+      for (let i = 0; i < n; i++) {
+        const c0 = at.cells.get(txt[i]);
+        ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, Math.round(tf.e + (pen - at.pad + ox) * dpr * r), dy, c0.sw * r, at.cellH * r);
+        pen += c0.adv;
+      }
+    } else {
+      for (let i = 0; i < n; i++) {
+        const c0 = at.cells.get(txt[i]);
+        ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, pen - at.pad + ox, -at.base + oy, c0.sw / dpr, at.cellH / dpr);
+        pen += c0.adv;
+      }
     }
   }
   ctx.restore();
@@ -150855,6 +150978,10 @@ function drawDamageNumbers() {
       const _b0 = baseSize | 0, _apx = _lxDnAtlasPx4(_b0, scale || 1);
       const _at = _lxDnAtlasGet(_b0, _apx, baseSize, d, col, _dnTk, _dnLowFx_top, _dnStress, _dnDprNow);
       if (_at && _lxDnAtlasBlit(_at, txt, scale || 1, !!(rot && !_dnLowFx_top), (_b0 * (scale || 1)) / _apx)) _dnAtlasDone = true;
+    } else if (d._gbVolc && _LX_GB_ATLAS_ON && _dnLowFx_top && _LX_DN_ATLAS_OK.test(txt)) {   // v0.30.x gb-atlas — a sticker's live frames
+      const _b0 = baseSize | 0, _apx = _lxDnAtlasPx4(_b0, scale || 1);
+      const _at = _lxGbAtlasGet(_b0, _apx, !!d.crit, col, _dnStress, _dnDprNow);
+      if (_at && _lxGbAtlasBlit(_at, txt, scale || 1, !!rot, (_b0 * (scale || 1)) / _apx, !!d.crit)) _dnAtlasDone = true;
     }
     const _dnLowFx = _dnLowFx_top || _dnStress;
     if (!_dnAtlasDone) {
