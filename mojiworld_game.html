@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.832';
+const GAME_VERSION = 'v0.30.833';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -39590,7 +39590,7 @@ function _grantMojicoins(n, opts) {
   // at the single choke-point every earn path routes through, so "coin gain"
   // means ALL coin gain while the boon holds — kills, chests, rebates alike.
   const _ksMul = (typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1;
-  const _dawnMul = (typeof _lxDawnCoinMul === 'function') ? _lxDawnCoinMul() : 1;   // v0.30.803 - Dawn's Favor: +10% once the story is finished
+  const _dawnMul = (opts && opts.sale) ? 1 : ((typeof _lxDawnCoinMul === 'function') ? _lxDawnCoinMul() : 1);   // v0.30.803 - Dawn's Favor: +10% once the story is finished
   const granted = Math.max(0, Math.floor(n * mult * _ksMul * _dawnMul));
   // v0.26.x audit FIX — clamp to the same 1e12 ceiling the save-load sanitizer
   // enforces, so the wallet doesn't briefly exceed the cap in-session and then
@@ -57241,6 +57241,7 @@ function _completeQuest(id) {
   delete player.quests.active[id];
   player.quests.completed[id] = Date.now();
   // v0.30.x — remember that this Ticket Rush stage has paid, across restarts (see _lxPqStagePaid)
+  const _pqRepeatMul = _lxPqRepeatMul(id);   // v0.30.833 - read BEFORE the stamp on the next line: read after it, every FIRST run was a "repeat" (25% coins, 50% EXP, 25% gear chance)
   if (typeof LX_PQ_CHAIN_IDS !== 'undefined' && LX_PQ_CHAIN_IDS[id]) { player._pqStagePaid = player._pqStagePaid || {}; player._pqStagePaid[id] = 1; }
   // v0.29.296 — Trainee Path: count the turn-in. Placed after the idempotency
   // guard above so a re-entrant call can never inflate the counter.
@@ -57281,7 +57282,7 @@ function _completeQuest(id) {
   // rescaled (bosses, visits, the zodiac set) and for saves that accepted a
   // quest before this shipped.
   const _huntScale = Math.max(1, (_activeSnap && _activeSnap.rewardScale) || 1);
-  const _payMul = _qRewMul * _huntScale * _lxPqRepeatMul(id);   // v0.30.381 — a repeat Ticket Rush pays 40%
+  const _payMul = _qRewMul * _huntScale * _pqRepeatMul;   // v0.30.381 — a repeat Ticket Rush pays 40%
   const _payMulExp = _qRewMul * _huntScale;   // v0.30.407 - EXP takes its repeat discount once, below (LX_PQ_REPEAT_EXP_MUL); with the coin factor here too a repeat paid 12.5% whenever the authored path won
   const _coinsGained = r.mojicoins ? _grantMojicoins(Math.min(_lxQuestCoinCeil(q.levelReq), Math.round(r.mojicoins * _payMul)), { full: true }) : 0;   // v0.30.381 — ceiling holds at turn-in
   if (r.exp)   {
@@ -57423,7 +57424,7 @@ function _completeQuest(id) {
             && typeof _lxPqStageCapFrac === 'function') {
           const _pqCap = Math.floor(_lxLevelCost(player.level || 1) * _lxPqStageCapFrac(player.level || 1) * ((q && q.stageCapMul > 0) ? q.stageCapMul : 1));   // v0.30.384 — stages 1–3 carry stageCapMul 0.5
           if (_pqCap > 0 && _questExp > _pqCap) _questExp = _pqCap;
-          if (_lxPqRepeatMul(id) !== 1) _questExp = Math.floor(_questExp * LX_PQ_REPEAT_EXP_MUL);   // v0.30.x — one source of truth with the coin/gear discount   // v0.30.404 — a repeat run: half the EXP
+          if (_pqRepeatMul !== 1) _questExp = Math.floor(_questExp * LX_PQ_REPEAT_EXP_MUL);   // v0.30.x — one source of truth with the coin/gear discount   // v0.30.404 — a repeat run: half the EXP
         }
       }
     } catch (e) {}
@@ -57457,7 +57458,7 @@ function _completeQuest(id) {
   // exceed cap, the world drop just remains until the player frees a
   // slot — same as any other drop.
   let gearMsg = '';
-  if (r.gearChance && Math.random() < r.gearChance * _lxPqRepeatMul(id) &&   // v0.30.381 — repeat Ticket Rush: 40% of the chance
+  if (r.gearChance && Math.random() < r.gearChance * _pqRepeatMul &&   // v0.30.381 — repeat Ticket Rush: 40% of the chance
       typeof rollItemDrop === 'function') {
     // v0.26.366 — rewards.gearSlot lets a quest grant a specific equipment
     // slot. 'accessory' is normalised to the 'accessories' item category.
@@ -101011,8 +101012,13 @@ const LX_BOSS_GEAR_CAP_REFIGHT = 1;
 function _lxIsGearItem(it) { const sl = it && it.slot; return sl === 'weapon' || sl === 'armor' || sl === 'accessory' || sl === 'accessorie'; }
 function _lxIsSuperBoss(m) { return !!(m && (m.type === 'aetherion' || m.type === 'aetherion2' || m.superBoss) && !m._rushBoss); }
 function _lxBossGearCap(m) { return (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) ? LX_BOSS_GEAR_CAP_REFIGHT : LX_BOSS_GEAR_CAP; }
+// v0.30.833 - the fights that pay nothing by design: the free (non-zodiac) Echo Keeper shade, a Boss Rush echo, the
+// prologue's memory of Gravitos. The Nightmare echo ("real rewards"), the Duo Trial ("full drop") and zodiac echoes
+// (EXP in full, coins diminished) are paying modes and are NOT in this set.
+function _lxRewardlessEcho(m) { return !!(m && m._echoBoss && (m._rushBoss || (!m._nightmareEcho && !m._duoTrial && !m.zodiacBoss && !m.zodiacSign))); }
 function _lxBossGearGate(m, it, ordinary) {
   if (!m || !_lxIsGearItem(it)) return true;
+  if (_lxRewardlessEcho(m)) return false;   // v0.30.833
   if (!(m.isBoss || m.boss || m.zodiacBoss)) return true;
   if (ordinary && _lxIsSuperBoss(m)) return false;
   if (m._gearBudget == null) m._gearBudget = _lxBossGearCap(m);
@@ -101025,6 +101031,7 @@ function triggerSuperBossDeath(m) {
   const drops = game.drops;
   drops.push = function (d) {
     if (d && d.type === 'item' && d.item && !_lxBossGearGate(m, d.item, false)) return drops.length;
+    if (d && d.type === 'mojicoin' && _lxRewardlessEcho(m)) return drops.length;   // v0.30.833 - the super-boss pile's coin bags too
     return Array.prototype.push.apply(drops, arguments);
   };
   try { return _triggerSuperBossDeathRaw(m); } finally { delete drops.push; }
@@ -107636,7 +107643,7 @@ function executeSellSelection() {
     if (typeof it.price !== 'number' || !isFinite(it.price)) continue;   // v0.26.1031 — never destroy price-less items (recipe scrolls, Zodiac Sigils) for 0 coins
     const val = _sellPriceOf(it);   // v0.29.748 — 10% of market price, already final
     for (const s in player.equipped) { if (player.equipped[s] === it) player.equipped[s] = null; }
-    gained += _grantMojicoins(val, { full: true });   // {full} — _sellPriceOf is the payout, not a pre-scalar figure
+    gained += _grantMojicoins(val, { full: true, sale: true });   // v0.30.833 - sale: the quoted price is the payout (no Dawn's Favor)   // {full} — _sellPriceOf is the payout, not a pre-scalar figure
     count++;
     player.inventory.splice(idx, 1);
   }
@@ -115434,7 +115441,7 @@ function showPowerupChoice(bossInfo) {
 const SAGE_PRICE = 5000;
 const SAGE_COOLDOWN_MS = 12 * 60 * 60 * 1000;   // 12 hours
 
-function _sageReadyAt() { return (player._sageNextAt | 0) || 0; }
+function _sageReadyAt() { const t = +player._sageNextAt; return Number.isFinite(t) && t > 0 ? t : 0; }   // v0.30.833 - was `| 0`: an epoch-ms stamp folded to a negative 32-bit int, so the 12 h wait never applied
 function _sageReady() { return _monoNow() >= _sageReadyAt(); }
 function _sageWaitText() {
   const wait = _sageReadyAt() - _monoNow();   // gate uses _monoNow; match it so the countdown label isn't skewed after a clock change

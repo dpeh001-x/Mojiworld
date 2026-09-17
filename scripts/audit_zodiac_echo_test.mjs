@@ -71,6 +71,11 @@ try {
     const fire = async (sign, defVal) => {
       for (let attempt = 0; attempt < 4; attempt++) {
         game.paused = false;
+        // v0.30.833 - every sampled shot knocks the hero back: after ~6 they were pinned on the world edge (x = 0), where the first
+        // attempt of each shot misses, and the forest's own mobs shove them as well. Four misses return 0 and blend a tier's mean (a
+        // different tier each run: hard 3398, expedition-hard 2487 ...). Re-centre and clear the field before every attempt.
+        player.x = Math.round(((game.mapData && game.mapData.worldWidth) || 1600) / 2); player.vx = 0; player.vy = 0; player.hitStun = 0;
+        if (game.monsters.length) game.monsters.length = 0;
         // Same reason for the expedition: game.expedition is live state the sim writes to, and a
         // batch that stamps it once can be blanked partway through (a run 'ending' on a non-tower
         // map). Re-stamped per shot so every sample in a batch is really at the tier it claims.
