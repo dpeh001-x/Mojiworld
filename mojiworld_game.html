@@ -3142,6 +3142,11 @@
     font-size: 10px; color: #ddaa66; letter-spacing: 1.2px; text-transform: uppercase;
     margin-bottom: 4px; font-weight: 600;
   }
+  /* v0.30.x ft-quest — unseen unlocked quests, until the journal is opened */
+  #quest-tracker .qt-new {
+    margin-left: 6px; padding: 0 6px; border-radius: 8px; letter-spacing: 0.4px; text-transform: none;
+    background: rgba(136, 204, 255, 0.18); border: 1px solid rgba(136, 204, 255, 0.55); color: #bfe3ff;
+  }
   #quest-tracker .qt-row {
     display: flex; align-items: center; gap: 6px;
     padding: 3px 0; border-top: 1px solid rgba(221,170,102,0.18);
@@ -12628,7 +12633,7 @@ function _lxDevSurface() {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
   } catch (e) { return false; }
 }
-const GAME_VERSION = 'v0.30.819';
+const GAME_VERSION = 'v0.30.820';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -55526,6 +55531,22 @@ function _ensureQuests() {
   if (!player.quests.completed) player.quests.completed = {};
   if (!player.quests.unlocked)  player.quests.unlocked  = {};
 }
+// v0.30.x ft-quest — UNSEEN UNLOCKS (launch finishing touches, per user). Eighteen quests have no giver: they are
+// taken from the journal's Available tab, and the only word a player got was a toast that is gone in a few seconds
+// (easy to miss mid-fight, and it never said where the quest lives). player.quests.fresh remembers every quest
+// unlocked since the journal was last opened - it rides the save with the rest of player.quests - and the quest
+// tracker shows how many until the journal is opened. Accepted or finished quests stop counting on their own.
+function _lxFreshQuestCount() {
+  try {
+    const f = player && player.quests && player.quests.fresh; if (!f) return 0;
+    let c = 0;
+    for (const id in f) {
+      if (!QUESTS[id] || !player.quests.unlocked[id] || player.quests.active[id] || player.quests.completed[id]) continue;
+      c++;
+    }
+    return c;
+  } catch (e) { return 0; }
+}
 // Mark any quest the player now meets the level gate for as "unlocked"
 // in the journal. Idempotent — call freely.
 function tickQuestUnlocks() {
@@ -55578,14 +55599,18 @@ function tickQuestUnlocks() {
       // grew. Skip on the very first level-up (pre-class-pick) to avoid
       // spam during boot.
       if (player.cls) {
+        const _qk = (typeof _questKeyLabel === 'function') ? _questKeyLabel() : 'Q';   // v0.30.x ft-quest — say where it lives
         showToast((q.story || q.advancement)
-          ? `🌅 STORY — ${q.icon} ${q.name}`
-          : `📜 New quest: ${q.icon} ${q.name}`,
+          ? `🌅 STORY — ${q.icon} ${q.name} · ${_qk}`
+          : `📜 New quest: ${q.icon} ${q.name} · ${_qk}`,
           (q.story || q.advancement) ? 'story' : 'epic');   // v0.26.888 — story beats stand apart
+        if (!player.quests.fresh) player.quests.fresh = {};
+        player.quests.fresh[id] = 1;
       }
       any = true;
     }
   }
+  if (any && typeof renderQuestTracker === 'function') { try { renderQuestTracker(); } catch (e) {} }   // v0.30.x ft-quest — the "new" count
   return any;
 }
 // Bump kill / boss quests when a monster dies. monsterType matches the
@@ -56214,7 +56239,8 @@ function renderQuestTracker() {
       <span class="qt-prog" style="color:#c9b8d8;">${locked ? 'Lv ' + (nq.levelReq || 1) : 'press ' + _questKeyLabel()}</span>
     </div>`;
   })() : '';
-  if (!ids.length && !_nbRow) {
+  const _freshN = _lxFreshQuestCount();   // v0.30.x ft-quest
+  if (!ids.length && !_nbRow && !_freshN) {
     el.classList.remove('show');
     el.innerHTML = '';
     return;
@@ -56258,7 +56284,8 @@ function renderQuestTracker() {
       ${guide}
     </div>`;
   }).join('');
-  el.innerHTML = `<div class="qt-head">📜 Quests</div>${_nbRow}${rows}`;
+  const _freshChip = _freshN ? `<span class="qt-new">${_freshN} new · ${_questKeyLabel()}</span>` : '';   // v0.30.x ft-quest
+  el.innerHTML = `<div class="qt-head">📜 Quests${_freshChip}</div>${_nbRow}${rows}`;
   el.classList.add('show');
 }
 // v0.29.129 — Live guidance refresh. The ◀/▶ pointer tracks the player and
@@ -57406,6 +57433,8 @@ function toggleQuestJournal() {
   renderQuestJournal();
   modal.style.display = 'flex';
   game.paused = true;
+  // v0.30.x ft-quest — the journal has been seen: the tracker's "new" count clears
+  if (player.quests && player.quests.fresh) { player.quests.fresh = {}; if (typeof renderQuestTracker === 'function') { try { renderQuestTracker(); } catch (e) {} } }
 }
 
 // =========================================================================
