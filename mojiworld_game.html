@@ -12628,7 +12628,7 @@ function _lxDevSurface() {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
   } catch (e) { return false; }
 }
-const GAME_VERSION = 'v0.30.816';
+const GAME_VERSION = 'v0.30.817';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -125363,6 +125363,15 @@ const LX_DAWN_SIGIL_D = 184;    // ground sigil, across (drawn at 30% height: it
 const LX_DAWN_HALO_D  = 250;    // halo behind the head and shoulders - larger than the wings, so its rays burst past them
 const LX_DAWN_PLUME_D = 204;    // the wings: the frame's lower centre is left empty for the hero to stand in
 const LX_DAWN_STEP    = 7;      // game frames per painted frame (the cross-fade fills the gaps)
+// v0.30.817 - TRANSLUCENT (per user: "make the aura transluscent"): the world and the hero read through it. Opacity per layer;
+// the halo and the sigil still breathe +0.10 on top of theirs. Where halo and wings overlap the aura is naturally denser.
+const LX_DAWN_HALO_ALPHA  = 0.40;   // was 0.78 - 0.96
+const LX_DAWN_WINGS_ALPHA = 0.50;   // was 0.96
+const LX_DAWN_SIGIL_ALPHA = 0.50;   // was 0.80 - 0.98
+const LX_DAWN_BLOOM_ALPHA = 0.08;   // the additive pass over the wings, was 0.14 - 0.24; it adds light, not cover
+const LX_DAWN_GLINT_ALPHA = 0.75;   // star glints at full kindle, was 0.90
+// Cross-fade exponent that keeps a see-through plume at constant cover between frames (see scripts/postgame_unlock_test.mjs).
+const LX_DAWN_XFADE_P = Math.log((1 - Math.sqrt(1 - LX_DAWN_WINGS_ALPHA)) / LX_DAWN_WINGS_ALPHA) / Math.log(0.5);
 function drawDawnAura() {
   if (typeof player === 'undefined' || !player || !player.cls) return;
   if (!_lxStoryComplete()) return;
@@ -125386,24 +125395,24 @@ function drawDawnAura() {
     const HD = LX_DAWN_HALO_D * (1 + 0.035 * Math.sin(gt * 0.05));
     ctx.save();
     ctx.translate(cx, sy - 24); ctx.rotate(-gt * 0.004);
-    ctx.globalAlpha = 0.78 + 0.18 * breathe;
+    ctx.globalAlpha = LX_DAWN_HALO_ALPHA + 0.10 * breathe;
     ctx.drawImage(sc(A.halo, LX_DAWN_HALO_D), -HD / 2, -HD / 2, HD, HD);
     ctx.restore();
-    // 2. the wings: 0..8..1 (16 steps), the outgoing frame eased out as the incoming one eases in
+    // 2. the wings: 0..8..1 (16 steps), cross-faded at constant cover (LX_DAWN_XFADE_P)
     const N = 9, span = 2 * (N - 1), ph = (gt / LX_DAWN_STEP) % span, i0 = Math.floor(ph), f = ph - i0;
     const at = (k) => { const m = k % span; return A.frames[m < N ? m : span - m]; };
     const fa = at(i0), fb = at(i0 + 1);
     const PD = LX_DAWN_PLUME_D, px = cx - PD / 2, py = feet + 12 - PD;
-    if (ok(fa)) { ctx.globalAlpha = 0.96 * (1 - f * f); ctx.drawImage(sc(fa, PD), px, py, PD, PD); }
-    if (ok(fb)) { ctx.globalAlpha = 0.96 * f * (2 - f); ctx.drawImage(sc(fb, PD), px, py, PD, PD); }
+    if (ok(fa)) { ctx.globalAlpha = LX_DAWN_WINGS_ALPHA * Math.pow(1 - f, LX_DAWN_XFADE_P); ctx.drawImage(sc(fa, PD), px, py, PD, PD); }
+    if (ok(fb)) { ctx.globalAlpha = LX_DAWN_WINGS_ALPHA * Math.pow(f, LX_DAWN_XFADE_P); ctx.drawImage(sc(fb, PD), px, py, PD, PD); }
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.14 + 0.10 * breathe;
+    ctx.globalAlpha = LX_DAWN_BLOOM_ALPHA + 0.05 * breathe;
     if (ok(fa)) ctx.drawImage(sc(fa, PD), px, py, PD, PD);
     // 3. the sigil on the ground, over the base of the wings (they rise from the hero's back, it lies under the feet)
     ctx.globalCompositeOperation = 'source-over';
     ctx.save();
     ctx.translate(cx, feet - 1); ctx.scale(1, 0.30); ctx.rotate(gt * 0.006);
-    ctx.globalAlpha = 0.80 + 0.18 * breathe;
+    ctx.globalAlpha = LX_DAWN_SIGIL_ALPHA + 0.10 * breathe;
     ctx.drawImage(sc(A.sigil, LX_DAWN_SIGIL_D), -LX_DAWN_SIGIL_D / 2, -LX_DAWN_SIGIL_D / 2, LX_DAWN_SIGIL_D, LX_DAWN_SIGIL_D);
     ctx.restore();
     ctx.globalCompositeOperation = 'lighter';
@@ -125414,7 +125423,7 @@ function drawDawnAura() {
       const h1 = Math.sin(cyc * 12.9898 + i * 78.233) * 43758.5453, h2 = Math.sin(cyc * 93.989 + i * 47.11) * 24634.6345;
       const rx = (h1 - Math.floor(h1)) * 2 - 1, ry = h2 - Math.floor(h2);
       const gx = cx + rx * 84, gy = feet - 30 - ry * 140, s = Math.sin(u * Math.PI), R = 2 + 7 * s, r = R * 0.22;
-      ctx.globalAlpha = 0.9 * s;
+      ctx.globalAlpha = LX_DAWN_GLINT_ALPHA * s;
       ctx.beginPath();
       ctx.moveTo(gx, gy - R); ctx.lineTo(gx + r, gy - r); ctx.lineTo(gx + R, gy); ctx.lineTo(gx + r, gy + r);
       ctx.lineTo(gx, gy + R); ctx.lineTo(gx - r, gy + r); ctx.lineTo(gx - R, gy); ctx.lineTo(gx - r, gy - r);

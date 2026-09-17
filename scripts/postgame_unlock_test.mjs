@@ -45,8 +45,8 @@ try {
       const ks = (typeof _ksXpMul === 'function') ? _ksXpMul() : 1, b = player.exp; killMonster(m); return (player.exp - b) / ks;
     };
     // one drawDawnAura() call, counted: painted layers are drawImage calls, the stand-in crown is nine strokes
-    const layers = () => { let st = 0, im = 0; const os = ctx.stroke, oi = ctx.drawImage; ctx.stroke = function () { st++; return os.apply(this, arguments); }; ctx.drawImage = function () { im++; return oi.apply(this, arguments); };
-      try { drawDawnAura(); } finally { ctx.stroke = os; ctx.drawImage = oi; } return { strokes: st, images: im }; };
+    const layers = () => { let st = 0, im = 0; const alphas = []; const os = ctx.stroke, oi = ctx.drawImage; ctx.stroke = function () { st++; return os.apply(this, arguments); }; ctx.drawImage = function () { im++; alphas.push(+ctx.globalAlpha.toFixed(3)); return oi.apply(this, arguments); };
+      try { drawDawnAura(); } finally { ctx.stroke = os; ctx.drawImage = oi; } return { strokes: st, images: im, alphas }; };
     const strokes = () => layers().strokes;
     // ---- an unfinished save ----
     out.before = { done: _lxStoryComplete(), coins: coins(), exp: killExp(), strokes: strokes(), seen: !!player._dawnFavorSeen };
@@ -66,6 +66,9 @@ try {
     for (let i = 0; i < 150 && !(LX_DAWN_ART.frames && LX_DAWN_ART.halo.naturalWidth && LX_DAWN_ART.sigil.naturalWidth && LX_DAWN_ART.frames.every((f) => f.naturalWidth)); i++) await sleep(100);
     out.artReady = !!(LX_DAWN_ART.frames && LX_DAWN_ART.frames.every((f) => f.naturalWidth > 0) && LX_DAWN_ART.halo.naturalWidth > 0 && LX_DAWN_ART.sigil.naturalWidth > 0);
     out.painted = layers();
+    // v0.30.817 - translucent: every painted layer is see-through, and the wings' cross-fade holds its cover between frames
+    { const A = LX_DAWN_WINGS_ALPHA, p = LX_DAWN_XFADE_P; const cover = [0, 0.25, 0.5, 0.75, 1].map((f) => 1 - (1 - A * Math.pow(1 - f, p)) * (1 - A * Math.pow(f, p)));
+      out.sheer = { wings: A, halo: LX_DAWN_HALO_ALPHA, sigil: LX_DAWN_SIGIL_ALPHA, maxDrawn: Math.max.apply(null, out.painted.alphas), cover: cover.map((c) => +c.toFixed(3)) }; }
     const keepHalo = LX_DAWN_ART.halo; LX_DAWN_ART.halo = new Image(); out.standIn = layers(); LX_DAWN_ART.halo = keepHalo;
     player.dawnAuraOff = true; out.off = layers(); out.offStrokes = out.off.strokes; player.dawnAuraOff = false;
     // motes are particles, and particles live in WORLD x: scroll the camera and see where they are born
@@ -108,6 +111,8 @@ try {
     check(r.after.done && Math.abs(cr - 1.10) < 0.0005, 'a finished save earns exactly +10% Mojicoins', `${r.before.coins} -> ${r.after.coins} (x${cr.toFixed(4)})`);
     check(Math.abs(er - 1.10) < 0.0005, 'and exactly +10% EXP from a kill', `${r.before.exp} -> ${r.after.exp} (x${er.toFixed(4)})`);
     check(r.artReady && r.painted.images >= 4 && r.painted.strokes === 0, 'the Everdawn Aura is painted: halo, wings (cross-faded, with bloom) and sigil are drawn as art', JSON.stringify(r.painted));
+    check(r.sheer.maxDrawn <= 0.62 && r.sheer.wings <= 0.6 && r.sheer.halo <= 0.6 && r.sheer.sigil <= 0.6 && r.sheer.cover.every((c) => Math.abs(c - r.sheer.wings) <= 0.02),
+      'the aura is translucent: no layer is drawn above 62% and the wings hold their cover through the cross-fade', JSON.stringify(r.sheer));
     check(r.standIn.strokes === 9 && r.standIn.images === 0, 'until the art has decoded the nine-ray stand-in is drawn instead', JSON.stringify(r.standIn));
     check(r.off.strokes === 0 && r.off.images === 0, 'switched off, nothing is drawn', JSON.stringify(r.off));
     check(r.motes.camX > 500 && r.motes.n >= 2 && r.motes.worstDx <= 45, 'with the camera scrolled, motes are born at the hero (world x), not at the screen x', JSON.stringify(r.motes));
