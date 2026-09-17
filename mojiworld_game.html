@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.841';
+const GAME_VERSION = 'v0.30.842';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -69659,6 +69659,7 @@ function loadMap(id, entryX, entryY) {
     player.somersaultTurns = 1;   // reset the double-flip flag (an interrupted Ground Slam left it at 2, doubling the next archer roll)
     player._evadeFlip = 0;        // v0.30.747 - the evade flip's flag, for the same reason
     player._archerRoll = 0;       // v0.30.x — and the roll flag, so a later flip is not given the roll's arc
+    player._cancerBubble = 0; player._cancerBubbleHits = 0;   // v0.30.x boss-audit — nor Cancer's bubble (its countdown lives in her handler)
     player._virgoSin = 0; player._virgoMarker = null; player._virgoMark = 'balanced';   // Virgo sin/mark shouldn't carry to the next map (a returning 5-sin player ate an instant JUDGMENT)
     player._chantRaiseUntil = 0;
     player._impalePoseUntil = 0;
@@ -75591,6 +75592,7 @@ function triggerDeath() {
   player.somersaultTurns = 1;
   player._archerRoll = 0;
   player._evadeFlip = 0;   // v0.30.747
+  player._cancerBubble = 0; player._cancerBubbleHits = 0;   // v0.30.x boss-audit — nor Cancer's bubble
   player._virgoSin = 0; player._virgoMarker = null; player._virgoMark = 'balanced';   // dying shouldn't keep the Virgo sin count (instant JUDGMENT on respawn)
   player._chantRaiseUntil = 0;
   player._impalePoseUntil = 0;
@@ -91345,7 +91347,10 @@ function _aetherionTick(m, dt) {
   const st = A.st || 'idle';
   if (st === 'idle') { if (m.speed === 0) m.speed = _aeBaseSpeed(m); }
   else { if (m.speed !== 0) m.speed = 0; m.vx = 0; }
-  if (m._dirOpenT > 0) {   // staggered: the player's window - nothing starts, and a windup in progress is broken off
+  // v0.30.x boss-audit — a BREAK or punish stagger (_stagger) is the player's window too. Only _dirOpenT was read here, so
+  // with "Aetherion buckles. PUNISH!" on screen his windups still finished (Shard Lance, Fracture, Shardfall, Sky-Break)
+  // and Echo Step kept re-arming his invulnerability, while every other reader tests both.
+  if (m._dirOpenT > 0 || m._stagger > 0) {   // staggered: the player's window - nothing starts, and a windup in progress is broken off
     if (st !== 'idle') {
       A.st = 'idle'; A.t = 0; A.astralFired = false;
       if (typeof showToast === 'function') showToast("⚡ Aetherion's attack is broken off!", 'rare');
@@ -99889,13 +99894,19 @@ function killMonster(m) {
   // seconds long, so without this the Venomlord can still kill you during her
   // own death animation. The per-pool _owner check covers the live case; this
   // is the same belt-and-suspenders splice king/gravitos get.
+  // v0.30.x boss-audit — Cancer's Bubble Prison only counts down inside her own handler, so bursting out with the blow that
+  // kills her (or dying bubbled) left BUBBLED, its sphere and its vignette on the player until the next Cancer fight.
+  if (m.zodiacSign === 'cancer' && typeof player !== 'undefined' && player) { player._cancerBubble = 0; player._cancerBubbleHits = 0; }
   if (m.type === 'scorpio' || m.zodiacId === 'scorpio') {
     for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
       const _h = game.hazards[_hi];
       if (_h && (_h.type === 'venom_pool' || _h.type === 'venom_burst')) game.hazards.splice(_hi, 1);
     }
   }
-  if (m.type === 'king' || m.type === 'gravitos') {
+  // v0.30.x boss-audit — the Tower Sovereign's Singularity Collapse IS a gravitos_singularity hazard (it reuses the renderer
+  // and resolver), and nothing scrubbed it: landing the final blow during its 5 s telegraph, outside the light, let the
+  // one-shot land in his death cinematic - and a player killed there lost the whole ten-floor expedition.
+  if (m.type === 'king' || m.type === 'gravitos' || m.type === 'towerSovereign') {
     const scrubType = (m.type === 'king') ? 'gloop_puddle' : 'gravitos_singularity';
     for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
       if (game.hazards[_hi] && game.hazards[_hi].type === scrubType) {
@@ -144429,6 +144440,10 @@ const ZODIAC_AI = {
     // one beam rather than two overlapping ones. While both twins live they
     // lock and fire along the line JOINING them: the space between the twins
     // is the kill zone, which turns their orbit into information.
+    // v0.30.x boss-audit — the twin died during the TWINSTARS telegraph: the block below (the only thing that clears
+    // _starLining) stopped running, so the flag stuck, Dive Cross (which needs it false) never fired again, and the state
+    // label held 'starLine' - blocking the blink gait and the shared lunge - for the rest of the fight.
+    if (m._starLining && !(m._twin && m._twin.currentHp > 0)) { m._starLining = false; if (m.patternState === 'starLine') m.patternState = 'idle'; }
     if (!m._isTwin && m._twin && m._twin.currentHp > 0 && !m._gemDive && !m._mergeArmed) {
       if (m._starLineAt == null) m._starLineAt = (game.time | 0) + 300;
       const _t = m._twin;
