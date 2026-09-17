@@ -27,7 +27,10 @@ try {
     spawnMonster(player.x + 260, player.y, 'kingKrook', true); const b = game.monsters.filter((x) => x && x.type === 'kingKrook').pop();
     if (b) { const k = _lxBossKey(b); game._bossKills = game._bossKills || {}; game._bossKills[k] = 0; const first = _lxMobCoin(b); game._bossKills[k] = 1; const again = _lxMobCoin(b); game._bossKills[k] = 0; o.refight = { key: k, first, again, ratio: first ? +(again / first).toFixed(3) : null }; game.monsters.splice(game.monsters.indexOf(b), 1); }
     const src = await (await fetch(location.pathname)).text();
-    o.src = { repeatExp: src.indexOf("if (LX_PQ_CHAIN_IDS[id] && (player._pqChainRuns | 0) > 0) _questExp = Math.floor(_questExp * LX_PQ_REPEAT_EXP_MUL);") >= 0, express: src.indexOf('mojicoins: 800 + N * 16,') >= 0,
+    // The EXP hook has been rewritten twice since v0.30.404 put it in: v0.30.x keyed it on _lxPqRepeatMul(id) ("one source of truth
+    // with the coin / gear discount"), and v0.30.833 reads that multiplier ONCE, before the stage-paid stamp (read after it, every
+    // FIRST run was paid as a repeat). The rule - a repeat's EXP is multiplied by LX_PQ_REPEAT_EXP_MUL - is what is pinned.
+    o.src = { repeatExp: src.indexOf("if (_pqRepeatMul !== 1) _questExp = Math.floor(_questExp * LX_PQ_REPEAT_EXP_MUL);") >= 0 && src.indexOf("const _pqRepeatMul = _lxPqRepeatMul(id);") >= 0, express: src.indexOf('mojicoins: 800 + N * 16,') >= 0,
       stage600: src.split('rewards: { mojicoins: 600, exp: 2800, gearChance: 0.15, gearTier: ').length - 1 === 2 && src.indexOf('rewards: { mojicoins: 600, exp: 2000, gearChance: 0.15, gearTier: 3') >= 0, finale4000: src.indexOf('rewards: { mojicoins: 4000, exp: 6500, gearChance: 0.90, gearTier: 5') >= 0, cache1500: src.indexOf('rewards: { mojicoins: 1500, exp: 5000, gearChance: 0.40, gearTier: 4') >= 0 };
     return o;
   });
@@ -35,11 +38,21 @@ try {
   const c = r.consts;
   ok('PQ EXP caps halved: 2% a stage to Lv 40, 0.5% past 70; the run shares 25% / 8%', c.stageCap === 0.02 && c.stageCapLate === 0.005 && c.runAt40 === 0.25 && c.runAt70 === 0.08 && r.capFrac.l29 === 0.02 && r.capFrac.l80 === 0.005 && r.capFrac.l55 > 0.005 && r.capFrac.l55 < 0.02, JSON.stringify([c, r.capFrac]));
   ok('PQ repeats pay 25% coins and 50% EXP (the EXP hook is in the shipped source)', c.repeat === 0.25 && c.repeatExp === 0.5 && r.repeatMulFirst === 1 && r.repeatMulAgain === 0.25 && r.src.repeatExp, JSON.stringify([r.repeatMulFirst, r.repeatMulAgain, r.src.repeatExp]));
-  // the game rescales quest coin rewards at boot (a stage's 600 lands as 296 in the table), so the runtime check is "half of v0.30.403's table" (591 / 3,942 / 1,826) and the authored numbers are checked in the source
-  const half = (now, was) => Math.abs(now - was / 2) <= 1;
-  ok('PQ coins halved: stages 600, finale 4,000, the express supply cache 1,500 and its run 800 + 16N (runtime table at half of v0.30.403)', half(r.quests.q_clockwork_underpass.coins, 591) && half(r.quests.q_pq_spire.coins, 591) && half(r.quests.q_pq_carriage.coins, 591) && half(r.quests.q_pq_finale.coins, 3942) && half(r.quests.q_clockwork_express.coins, 1826) && r.src.express && r.src.stage600 && r.src.finale4000 && r.src.cache1500, JSON.stringify([r.quests, r.src]));
+  // the game rescales quest coin rewards at boot (a stage's 600 landed as 296 in the v0.30.404 table), so the runtime check is "half of
+  // v0.30.403's table" (591 / 3,942 / 1,826) and the authored numbers are checked in the source.
+  // v0.30.756 then cut every quest's coins by 25% (TARGET_MEDIAN 35,000 -> 26,250, per user "gear gets rarer ... gold -25%"), so the
+  // table is half of v0.30.403 x 0.75. That step CALIBRATES to the median quest, so the whole table drifts a few percent whenever the
+  // quest list changes (214 / 1,424 / 659 on v0.30.854 against an exact 222 / 1,478 / 685): 6% of slack, and the chain's own ratios
+  // - which the calibration cannot move, it is one uniform factor - are held to 1%.
+  const half = (now, was) => Math.abs(now / (was / 2 * 0.75) - 1) <= 0.06;
+  const ratio = (a, b, want) => Math.abs(a / b - want) <= want * 0.01;
+  ok('the chain keeps its authored shape after every rescale: a stage is 15% of the finale (600 / 4,000)', ratio(r.quests.q_pq_spire.coins, r.quests.q_pq_finale.coins, 0.15) && ratio(r.quests.q_clockwork_underpass.coins, r.quests.q_pq_finale.coins, 0.15) && ratio(r.quests.q_pq_carriage.coins, r.quests.q_pq_finale.coins, 0.15), JSON.stringify(r.quests));
+  ok('PQ coins halved: stages 600, finale 4,000, the express supply cache 1,500 and its run 800 + 16N (runtime table at half of v0.30.403, less v0.30.756\'s 25%)', half(r.quests.q_clockwork_underpass.coins, 591) && half(r.quests.q_pq_spire.coins, 591) && half(r.quests.q_pq_carriage.coins, 591) && half(r.quests.q_pq_finale.coins, 3942) && half(r.quests.q_clockwork_express.coins, 1826) && r.src.express && r.src.stage600 && r.src.finale4000 && r.src.cache1500, JSON.stringify([r.quests, r.src]));
   ok('expedition bonus halved: 1,000 x Lv/15 capped at 6,000 (Lv 29 1,933; Lv 45 3,000; Lv 80 5,333; Lv 200 6,000)', c.expCap === 6000 && r.expBonus.l29 === 1933 && r.expBonus.l45 === 3000 && r.expBonus.l80 === 5333 && r.expBonus.l200 === 6000, JSON.stringify(r.expBonus));
-  ok('expedition EXP share halved: 12% of a level for a full clear to Lv 40, 5% past 70', c.expAt40 === 0.12 && c.expAt70 === 0.05, JSON.stringify([c.expAt40, c.expAt70]));
+  // v0.30.404 halved this to 0.12 / 0.05. v0.30.453 put it back, per user: the figure originally asked for was "after 70 cap at about
+  // 0.2 per run", and two halvings had left a quarter of it - "the tail goes back to 0.20 and the pre-40 band to 0.30" (plus a
+  // full-clear bonus of half the run budget, LX_EXP_CLEAR_BONUS). The expedition's COIN bonus stayed halved (the check above).
+  ok('expedition EXP share (v0.30.453, per user): 30% of a level for a full clear to Lv 40, 20% past 70', c.expAt40 === 0.30 && c.expAt70 === 0.20, JSON.stringify([c.expAt40, c.expAt70]));
   ok('a boss refight pays 30% of its bag', c.refight === 0.3 && r.refight && r.refight.first > 0 && r.refight.ratio != null && Math.abs(r.refight.ratio - 0.3) < 0.01, JSON.stringify(r.refight));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }

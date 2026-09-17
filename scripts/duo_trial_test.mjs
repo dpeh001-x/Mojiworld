@@ -32,8 +32,11 @@ const g = await page.evaluate(async () => {
   // solo: no trial offered
   try { openNPC(keeper); } catch (e) { out.openErr = String(e).slice(0, 120); } await wait(150);
   out.soloOffers = /DUO TRIAL/.test(optsText()); try { closeDialog(); } catch (e) {}
-  // fake a partner on the session, host side
-  const sent = []; net.connected = true; net.myId = 1; net.isHost = true; net.peers = { 2: { name: 'P2' } }; net.ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)) };
+  // fake a partner on the session, host side.
+  // v0.30.518 ("the Duo Trial reads the room"): a partner is a peer ALIVE ON MY MAP and heard from in the last 6 s
+  // (_coopPeerAliveOnMyMap). A bare id in net.peers - which is what this fixture used to be - is exactly what that release
+  // stopped counting (a second client parked in town unlocked a solo x1.5 trial that paid the full drop).
+  const sent = []; net.connected = true; net.myId = 1; net.isHost = true; net.peers = { 2: { name: 'P2', map: game.currentMap, hp: 100, _last: performance.now() } }; net.ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)) };
   try { openNPC(keeper); } catch (e) { out.openErr2 = String(e).slice(0, 120); } await wait(150);
   out.duoOffered = /DUO TRIAL/.test(optsText());
   const btn = Array.from(document.querySelectorAll('button')).find(x => /DUO TRIAL/.test(x.textContent));
@@ -47,6 +50,11 @@ const g = await page.evaluate(async () => {
   out.ach = !!ACHIEVEMENTS.find(a => a.id === 'duoTrial' && a.test());
   // guest side: a dt frame pays the guest the full drop too
   // the guest handler is host-only and fail-closed: not the host, and the frame must come from net.hostId
+  // v0.30.524 put the Duo Trial on the repeat ladder, keyed per boss on each player's OWN save (it "was flat every time: a respawned
+  // boss paid the full drop again, forever"). Host and guest share one page here, so the host's clear above has already stamped
+  // duo_kingKrook: first read what a SECOND clear pays on this save (40%, LX_REFIGHT_SHARD_MUL), then give the guest a save of its own.
+  player.setshards = 0; try { _duoTrialReward(50, 'kingKrook'); } catch (e) {} out.secondClear = player.setshards; out.refightMul = (typeof LX_REFIGHT_SHARD_MUL === 'number') ? LX_REFIGHT_SHARD_MUL : null;
+  if (game._bossKills) delete game._bossKills.duo_kingKrook; game.duoTrials = 1;
   player.setshards = 0; net.isHost = false; net.hostId = 7;
   try { _coopApplyKill({ t: 'kill', id: 7, u: 999, e: 0, c: 0, x: 0, y: 0, map: game.currentMap, tp: 'kingKrook', b: 1, bl: 50, dt: 1 }); } catch (e) { out.guestErr = String(e).slice(0, 120); }
   out.guestShards = player.setshards; net.isHost = true; net.hostId = 1;
@@ -61,7 +69,8 @@ const g = await page.evaluate(async () => {
 ok('solo: the Echo Keeper does not offer the Duo Trial', !g.openErr && g.soloOffers === false, { err: g.openErr, solo: g.soloOffers });
 ok('with a partner on the session the DUO TRIAL option appears and summons a tagged echo', g.duoOffered && g.spawned && g.named && g.echo, { offered: g.duoOffered, spawned: g.spawned, err: g.openErr2 });
 ok('a standing clear: kill frame carries dt=1 (no bx), host is paid the FULL level² drop, title + counter + achievement', g.dt === 1 && g.bx !== 1 && g.hostShards === 2500 && g.title && g.trials === 1 && g.ach, { dt: g.dt, bx: g.bx, shards: g.hostShards, title: g.title, err: g.kfErr });
-ok('a guest receiving dt=1 pays itself the same full drop', g.guestShards === 2500, { guest: g.guestShards, err: g.guestErr });
+ok('a guest receiving dt=1 pays itself the same full drop (on its own, fresh counter)', g.guestShards === 2500, { guest: g.guestShards, err: g.guestErr });
+ok('a second Duo clear of the same boss walks the repeat ladder: 40% of the full drop (v0.30.524)', g.refightMul === 0.4 && g.secondClear === 1000, { second: g.secondClear, mul: g.refightMul });
 ok('shared fate: a partner going down fails the live trial and the kill frame becomes a plain echo (bx=1, no dt)', g.failed === true && g.failFrame && g.failFrame.bx === 1 && !g.failFrame.dt, { failed: g.failed, frame: g.failFrame });
 ok('no page errors', errs.length === 0, { errs: errs.slice(0, 3) });
 await b.close(); srv.kill();

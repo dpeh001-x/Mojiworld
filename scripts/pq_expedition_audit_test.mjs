@@ -28,11 +28,13 @@ try {
     const clearQ = () => { for (const k of Object.keys(player.quests.active)) delete player.quests.active[k]; for (const k of Object.keys(player.quests.completed)) delete player.quests.completed[k]; };
     player.level = 40; player.hp = player.maxHp; player.invulnerable = 9e9;
     // 1. Conductor Sweep: three Conductor Mech kills on the Underpass with only the class quest active
-    const qid = Object.keys(QUESTS).find((k) => /_lv37$/.test(k) && QUESTS[k].target === 'conductorMech' && QUESTS[k].cls === player.cls) || Object.keys(QUESTS).find((k) => /_lv37$/.test(k) && QUESTS[k].target === 'conductorMech') || null;
-    if (qid && QUESTS[qid].cls) player.cls = QUESTS[qid].cls;   // the quest tick re-checks the class gate
+    // v0.30.715 retargeted the class questline ("clears a place before it leaves it"): the class Lv-37 quest is Sting Patrol (jellyfish)
+    // now, and NO shipped quest targets a ticket-family mob outside the PQ. The v0.30.407 rule is still live code - a ticket-family kill
+    // that advanced no PQ stage must still reach tickQuestKill - so it is held with a synthetic quest of the same shape as the old one.
+    const qid = 'q__audit_conductor_sweep'; QUESTS[qid] = { name: 'Conductor Sweep (audit)', icon: '', levelReq: 37, kind: 'kill', target: 'conductorMech', count: 20, desc: '', rewards: {} };
     loadMap('clockworkUnderpassLobby', 300); await gate(); game.paused = false; clearQ();
     o.sweep = { qid, noneActiveTick: _lxPqDirectTick() };
-    if (qid) { player.quests.active[qid] = { progress: 0, targetCount: QUESTS[qid].count }; for (let i = 0; i < 3; i++) { const m = spawnMonster(player.x + 120, player.y, 'conductorMech', false); if (!m) break; m.evasion = 0; m.invulnerable = 0; m.currentHp = 3; try { hitMonster(m, 1e9, false, 'melee'); } catch (e) {} game.time += 120; await sleep(120); } await sleep(400); o.sweep.progress = player.quests.active[qid] ? player.quests.active[qid].progress : 'gone'; delete player.quests.active[qid]; }
+    if (qid) { player.quests.active[qid] = { progress: 0, targetCount: QUESTS[qid].count }; for (let i = 0; i < 3; i++) { const m = spawnMonster(player.x + 120, player.y, 'conductorMech', false); if (!m) break; m.evasion = 0; m.invulnerable = 0; m.currentHp = 3; try { hitMonster(m, 1e9, false, 'melee'); } catch (e) {} game.time += 120; await sleep(120); } await sleep(400); o.sweep.progress = player.quests.active[qid] ? player.quests.active[qid].progress : 'gone'; delete player.quests.active[qid]; delete QUESTS[qid]; }
     // ...and a Stage-1 kill still ticks Stage 1 (the fix must not break the PQ path)
     player.quests.active.q_clockwork_underpass = { progress: 0, targetCount: 100 }; { const m = spawnMonster(player.x + 120, player.y, 'ticketMech', false); if (m) { m.evasion = 0; m.invulnerable = 0; m.currentHp = 3; try { hitMonster(m, 1e9, false, 'melee'); } catch (e) {} } } await sleep(400);
     o.sweep.stage1Progress = player.quests.active.q_clockwork_underpass ? player.quests.active.q_clockwork_underpass.progress : 'gone'; clearQ();
@@ -43,7 +45,10 @@ try {
     clearQ(); player._pqChainRuns = 0; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']) player.quests.completed[id] = true; player.quests.active.q_clockwork_express = { progress: 3, targetCount: 60 }; noLoad(() => _lxPqRestartChain());
     o.restart.afterFinaleRuns = player._pqChainRuns; o.restart.afterFinaleMul = _lxPqRepeatMul('q_clockwork_underpass'); o.restart.expressCleared = !player.quests.active.q_clockwork_express && !player.quests.completed.q_clockwork_express; clearQ();
     // 3. a repeat pays 25% coins and 50% EXP at two levels (the coin factor must not reach the EXP path)
-    const stage1 = (lv, runs) => { player.level = lv; player.exp = 0; player._pqChainRuns = runs; delete player.quests.completed.q_clockwork_underpass; player.quests.active.q_clockwork_underpass = { progress: 100, targetCount: 100 }; player.mojicoins = 0; const l0 = player.level, e0 = player.exp; _completeQuest('q_clockwork_underpass'); return { exp: player.level > l0 ? _lxLevelCost(l0) - e0 + player.exp : player.exp - e0, coins: player.mojicoins }; };
+    // v0.30.x keeps a per-stage 'has paid' record (_pqStagePaid) that survives restarts, so a FIRST run needs it empty - and the very
+    // first quest a save turns in also pays a one-off achievement (+3,000 coins and a level), absorbed by the throwaway run below.
+    const stage1 = (lv, runs) => { if (!runs) player._pqStagePaid = {}; player.level = lv; player.exp = 0; player._pqChainRuns = runs; delete player.quests.completed.q_clockwork_underpass; player.quests.active.q_clockwork_underpass = { progress: 100, targetCount: 100 }; player.mojicoins = 0; const l0 = player.level, e0 = player.exp; _completeQuest('q_clockwork_underpass'); return { exp: player.level > l0 ? _lxLevelCost(l0) - e0 + player.exp : player.exp - e0, coins: player.mojicoins }; };
+    stage1(29, 0);
     o.repeat = {}; for (const lv of [29, 60]) { const a = stage1(lv, 0), b = stage1(lv, 1); o.repeat[lv] = { expRatio: +(b.exp / Math.max(1, a.exp)).toFixed(3), coinRatio: +(b.coins / Math.max(1, a.coins)).toFixed(3) }; } clearQ(); player._pqChainRuns = 0;
     // 4. the floor-clear timer carries its floor (synthetic run on a field map, level-up held off)
     loadMap('forest', 300); await gate(); game.paused = true; game.monsters.length = 0; const LU = window._maybeLevelUp; window._maybeLevelUp = () => {}; const TS = window.showToast; window.showToast = () => {};
@@ -59,13 +64,13 @@ try {
     const intro = (typeof MODE_INTROS !== 'undefined') ? (MODE_INTROS.find ? MODE_INTROS.find((x) => x && x.id === 'towerExpedition') : null) : null;
     o.text = { bannerLevel: intro ? intro.level : null, gate: (typeof EXPEDITION_LEVEL_GATE !== 'undefined') ? EXPEDITION_LEVEL_GATE : null };
     const src = await (await fetch(location.pathname)).text();
-    o.text.briefingSaysExpVanishes = /coins, and EXP gained inside <b>vanish on exit<\/b>/.test(src); o.text.briefingKeepsExp = /EXP and levels are yours to keep/.test(src);
+    o.text.briefingSaysExpVanishes = /coins, and EXP gained inside <b>vanish on exit<\/b>/.test(src); o.text.briefingKeepsExp = src.indexOf('What survives is <b>EXP and levels</b>') >= 0;   // v0.30.484 compartmented Bravo's card: "What you keep" says it now
     o.text.miloHardcoded = /a hundred and fifty! Stage 1 completes/.test(src); o.text.miloReadsCount = /_lxPqStageCount\('q_clockwork_underpass'\) \+ ' punched!/.test(src);
     o.text.puzzleGuarded = /#ec-puzzle-ok'\)\.onclick = \(\) => \{\s*modal\.remove\(\);\s*game\.paused = false;\s*if \(!game\.expedition \|\| !game\.expedition\.active\) return;/.test(src);
     return o;
   });
   console.log('build ' + r.ver + '  sweep ' + JSON.stringify(r.sweep) + '  restart ' + JSON.stringify(r.restart) + '  repeat ' + JSON.stringify(r.repeat) + '  stale ' + JSON.stringify(r.stale) + '  floors ' + JSON.stringify(r.floors) + '  text ' + JSON.stringify(r.text));
-  ok('the class Lv-37 Conductor Sweep counts Conductor Mech kills (3 kills -> 3/20)', r.sweep.qid && r.sweep.progress === 3, JSON.stringify(r.sweep));
+  ok('a non-PQ quest on a ticket-family mob counts its kills while no PQ stage is active (the v0.30.407 rule; 3 kills -> 3/20)', r.sweep.qid && r.sweep.progress === 3, JSON.stringify(r.sweep));
   ok('the direct PQ tick reports false when no PQ stage is active (so the standard quest tick runs)', r.sweep.noneActiveTick === false, String(r.sweep.noneActiveTick));
   ok('a Stage-1 Ticket Mech kill still advances Stage 1', r.sweep.stage1Progress === 1, String(r.sweep.stage1Progress));
   ok('restarting before the finale was ever cleared is not a repeat run (runs stay 0, full rates)', r.restart.earlyRuns === 0 && r.restart.earlyMul === 1, JSON.stringify(r.restart));
