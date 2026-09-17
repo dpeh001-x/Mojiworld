@@ -542,6 +542,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "cascade_ice": 9,
    "cascade_lightning": 9,
    "cascade_void": 9,
+   "clone_strike": 9,
    "crusader_aegis": 9,
    "crusader_ult": 9,
    "deadeye_execute": 9,
