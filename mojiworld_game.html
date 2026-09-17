@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.843';
+const GAME_VERSION = 'v0.30.844';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -67970,6 +67970,10 @@ function _lxMapVideoRest(exceptId) {
   for (const id in _lxMapVideoEls) {
     const v = _lxMapVideoEls[id];
     if (v && id !== exceptId && !v.paused) { try { v.pause(); } catch (e) {} }
+    if (v && id !== exceptId && typeof _LX_VID_CACHE !== 'undefined') {   // v0.30.x video-cache — a rested clip gives its full-screen bitmap back
+      const _vc = _LX_VID_CACHE.get(v);
+      if (_vc && _vc.bmp) { try { _vc.bmp.close(); } catch (e) {} _vc.bmp = null; _vc.bw = _vc.bh = 0; _vc.dirty = true; }
+    }
   }
   if (typeof _lxMapVideoTwins !== 'undefined') for (const id in _lxMapVideoTwins) {   // v0.30.593 everdawn-bg
     const t = _lxMapVideoTwins[id];
@@ -117823,6 +117827,46 @@ function drawSkyLifeOverlay() {
 // same downscale with the same smoothing, done a single time instead of every
 // frame. Keyed on the drawn size, so the vertical-tower path (which draws at
 // 1.45x) and any canvas resize simply re-bake.
+// v0.30.x video-cache — ONE VIDEO FRAME, PULLED ONCE (boss-fight lag, per user). A map clip draws twice a frame (the
+// backdrop and its mirrored seam copy), and every drawImage(<video>) fetches and converts the element's current frame on
+// the main thread: measured in the Gravitos arena, 257 us a call, 0.5 ms of every frame - for a clip that only changes
+// 24 times a second. The frame is now drawn once, at the size it is drawn at, into an OffscreenCanvas when the video
+// presents it (requestVideoFrameCallback) and handed over as an ImageBitmap, which both draws blit (a first cut kept a plain
+// canvas copy instead, and re-snapshotting a canvas that changed cost 137 us a blit - most of the saving). Same pixels: the copy is the frame scaled to the size it is
+// drawn at, with the same smoothing. Without requestVideoFrameCallback, or before the first frame lands, the element is
+// drawn as before.
+let _LX_VID_CACHE_ON = true;
+const _LX_VID_CACHE = new WeakMap();
+function _lxVideoCached(v, wCss, hCss) {
+  if (!_LX_VID_CACHE_ON || !v || typeof HTMLVideoElement === 'undefined' || !(v instanceof HTMLVideoElement)
+      || typeof v.requestVideoFrameCallback !== 'function' || typeof OffscreenCanvas === 'undefined') return v;
+  const dpr = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : 1;
+  const cw = Math.max(1, Math.round(wCss * dpr)), ch = Math.max(1, Math.round(hCss * dpr));
+  let c = _LX_VID_CACHE.get(v);
+  if (!c) {
+    c = { oc: null, cx: null, bmp: null, bw: 0, bh: 0, dirty: true, armed: false };
+    try { c.oc = new OffscreenCanvas(cw, ch); c.cx = c.oc.getContext('2d'); } catch (e) { return v; }
+    _LX_VID_CACHE.set(v, c);
+  }
+  if (!c.armed) {
+    c.armed = true;
+    const onFrame = () => { c.dirty = true; try { v.requestVideoFrameCallback(onFrame); } catch (e) { c.armed = false; } };
+    try { v.requestVideoFrameCallback(onFrame); } catch (e) { c.armed = false; return v; }
+  }
+  if (c.bw !== cw || c.bh !== ch) c.dirty = true;
+  if (c.dirty && v.readyState >= 2 && v.videoWidth && c.cx) {
+    try {
+      if (c.oc.width !== cw || c.oc.height !== ch) { c.oc.width = cw; c.oc.height = ch; }
+      c.cx.imageSmoothingEnabled = true;
+      if ('imageSmoothingQuality' in c.cx) c.cx.imageSmoothingQuality = 'high';
+      c.cx.drawImage(v, 0, 0, cw, ch);
+      const next = c.oc.transferToImageBitmap();   // hands the pixels over without a copy; the canvas starts blank again
+      if (c.bmp && typeof c.bmp.close === 'function') c.bmp.close();
+      c.bmp = next; c.bw = cw; c.bh = ch; c.dirty = false;
+    } catch (e) { return v; }
+  }
+  return (c.bmp && c.bw === cw && c.bh === ch) ? c.bmp : v;
+}
 function _lxBgScaled(img, w, h) {
   if (!img || !(w > 0) || !(h > 0)) return img;
   // v0.30.255 — bake at DEVICE resolution (see _lxBakeDpr). The v0.30.246 bake
@@ -118003,7 +118047,7 @@ function drawBackground() {
     // v0.30.564 — a plate is baked once at drawn size; a clip is a new frame every draw, so it is
     // painted straight (832x464 to the screen is a near-1:1 blit, one texture copy). While the ramp
     // runs, the plate is painted first and the clip fades over it so the swap is never a pop.
-    const _bgSrc = _bgVid ? _bgVid : _lxBgScaled(bgPick, _bgW, _bgH);
+    const _bgSrc = _bgVid ? _lxVideoCached(_bgVid, _bgW, _bgH) : _lxBgScaled(bgPick, _bgW, _bgH);   // v0.30.x video-cache
     // v0.30.566 — a mid-map clip switch (the Singularity's finale) crosses from the outgoing clip;
     // the plate is only the underlay when there was no clip before this one.
     const _bgUnder = (_bgVid && _lxMapVideoAlpha < 1)
