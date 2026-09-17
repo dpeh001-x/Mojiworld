@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.844';
+const GAME_VERSION = 'v0.30.845';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53998,10 +53998,14 @@ function _coopApplyMonsters(msg) {
     }
     m.freezeTimer = (e.fz > 0) ? Math.min(3000, +e.fz | 0) : 0;   // v0.30.x — mirrored like the gauge: the host owns it
     m.stunTimer   = (e.st > 0) ? Math.min(1500, +e.st | 0) : 0;
+    // v0.30.x coop-audit — THE STALE-WARD DROP BELONGS TO wd. It sat in the else of the wb test below, and the host sends wb
+    // only AFTER a ward shatters - so on every ordinary warded frame the guest set the ward here and erased it two lines
+    // later: no shield drawn, no ward pill, its hits not reduced to 1 (lifesteal paid on full damage), and the bar dipping
+    // then snapping back when the host's HP arrived.
     if (e.wd > 0) m._wardUntil = Math.max(m._wardUntil | 0, (game.time | 0) + Math.min(600, +e.wd | 0));
+    else if ((m._wardUntil | 0) > (game.time | 0)) m._wardUntil = game.time | 0;                              // the host is not warded: drop a stale local ward
     m._wardGauge = (e.wg > 0) ? Math.min(1, (+e.wg | 0) / 100) : 0;   // v0.30.395 — mirror the host's gauge
     if (e.wb > 0) { if (!((m._wardBreakUntil | 0) > (game.time | 0))) m._wardBreakAt = game.time | 0; m._wardBreakUntil = (game.time | 0) + Math.min(600, +e.wb | 0); }   // and its open window   // v0.30.390 — mirror the host's ward
-    else if ((m._wardUntil | 0) > (game.time | 0)) m._wardUntil = game.time | 0;                              // the host is not warded: drop a stale local ward
     m.patternState = e.ps ? String(e.ps).slice(0, 20) : 'idle';
     if (e.sp) m._phaseSprite = String(e.sp).slice(0, 20);
     m._dreamPhase = !!e.dp;
@@ -54114,6 +54118,11 @@ function _coopBroadcastKill(m, exp, coins) {
     if (m.zodiacSign) _kf.zs = String(m.zodiacSign).slice(0, 24);
     if (m._duoTrial && !m._duoTrialFailed && (m._duoPartnerSeen || typeof _coopPeerAliveOnMyMap !== 'function' || _coopPeerAliveOnMyMap())) _kf.dt = 1;   // v0.30.423 - Duo Trial cleared standing: everyone pays FULL
     else if (m._echoBoss || m._expeditionBoss || m._isTwin || m._isPiscesTwin) _kf.bx = 1;
+    // v0.30.x coop-audit — what the kill IS, independent of what it pays: bx is shared by echoes, expeditions and split twins
+    // and a Duo Trial's dt suppresses it, so a guest could not tell an echo, a run boss or a twin from the real boss.
+    if (m._echoBoss) _kf.ec = 1;
+    if (m._expeditionBoss) _kf.ex = 1;
+    if (m._isTwin || m._isPiscesTwin) _kf.tw = 1;   // a split twin is a mechanic, not a second boss (see killMonster)
   }
   try { net.ws.send(JSON.stringify(_kf)); } catch (e) {}
 }
@@ -54295,7 +54304,7 @@ function _coopApplyKill(msg) {
   // hunt quests in v0.29.321, but this guest-side mirror kept advancing them
   // off broadcast frames. Same rule both sides now: illusions count nothing.
   if (msg.tp && !msg.il && typeof trackPickup === 'function') {
-    try { trackPickup('kill', { type: msg.tp }); if (msg.b) trackPickup('boss', { id: msg.tp }); } catch (e) {}
+    try { trackPickup('kill', { type: msg.tp }); if (msg.b && !+msg.ec && !+msg.ex && !+msg.tw) trackPickup('boss', { id: msg.tp }); } catch (e) {}   // v0.30.x coop-audit — as the host: an echo, expedition or split-twin kill is not a real boss kill (zodiac badge, boss-gated cosmetics)
   }
   // v0.29.5xx — GUEST KILL-QUEST PROGRESS (per user "ensure all these rewards
   // and shared server experiences are debugged"). tickQuestKill() is the only
@@ -54316,7 +54325,7 @@ function _coopApplyKill(msg) {
     // never rides the payload, which is what made the v0.29.563 guard a no-op.
     try {
       if (_lxPqTicketFamily(msg.tp, msg.nm)) _lxPqDirectTick();
-      else if (typeof tickQuestKill === 'function') tickQuestKill(msg.tp, !!msg.b);
+      else if (typeof tickQuestKill === 'function' && !+msg.ec) tickQuestKill(msg.tp, !!msg.b);   // v0.30.x coop-audit — echoes advance no quest, as on the host
     } catch (e) {}
   }
   // v0.29.356 — Slaughter Ladder co-op parity. A guest who is IN the fight
@@ -54331,7 +54340,9 @@ function _coopApplyKill(msg) {
       typeof _coopNearKill === 'function' && _coopNearKill(msg.x, msg.y)) {
     try { _ksOnKill(); } catch (e) {}
   }
-  if (msg.b) { try { if (game.bossDefeated) game.bossDefeated[game.currentMap] = true; } catch (e) {} }
+  if (msg.b && !+msg.ec && !+msg.ex && !+msg.tw) { try { if (game.bossDefeated) game.bossDefeated[game.currentMap] = true; } catch (e) {} }   // v0.30.x coop-audit — as the host
+  // v0.30.x coop-audit — boss daily challenges: the host ticks its own in killMonster; a guest's never moved in co-op.
+  if (msg.b && !msg.il && !+msg.ec && !+msg.tw && typeof tickDaily === 'function') { try { tickDaily('boss', msg.tp); } catch (e) {} }
   // v0.30.414 — BOSS SETSHARDS FOR GUESTS (per user: "should have shards").
   // The kill frame carried EXP and coins but never shards, so only the host
   // earned them in co-op. Same formula as the host's own kill — level-squared
