@@ -91,7 +91,7 @@ try {
   const paused = await ev(A, () => {
     game.paused = true;                 // as if a UI modal opened
     const m = game.monsters.find(mm => mm && mm.currentHp > 0);
-    const hp0 = player.hp;
+    const hp0 = player.hp, x0 = player.x, y0 = player.y; player.hitStun = 0; player._poisonTimer = 0;
     let movedAny = false; let px = m.x;
     // Reproduce loop()'s visible+paused path: it calls _lxCoopWorldStep(dt).
     // Track movement across steps, but PIN the monster back onto the host each
@@ -104,10 +104,14 @@ try {
       px = m.x;
       if (i % 5 === 4) { m.x = player.x + 4; m.y = player.y; m.facing = (player.x >= m.x) ? 1 : -1; px = m.x; }
     }
-    return { paused: game.paused, moved: movedAny, tookDmg: player.hp < hp0, hp0, hp1: player.hp };
+    return { paused: game.paused, moved: movedAny, tookDmg: player.hp < hp0, hp0, hp1: player.hp, shoved: Math.abs(player.x - x0) > 0.5 || Math.abs(player.y - y0) > 0.5, stunned: (player.hitStun | 0) > 0, poisoned: (player._poisonTimer | 0) > 0 };
   });
   ok('co-op: monsters KEEP MOVING while the host is paused in a menu', paused && paused.moved, paused);
-  ok('co-op: the paused (in-menu) host STILL TAKES monster damage', paused && paused.tookDmg, paused);
+  // v0.29.672 zeroed the damage and v0.29.674 finished the job, per user: "pause stops everything from the player side, while it
+  // continues for the others". _lxCoopWorldStep snapshots every combat-mutable field of a paused player, lets the world simulate for
+  // the room, and restores - a GHOST STATUE. (Merely HIDDEN is different: tabbing away has never been a shield.) This check used to
+  // assert the opposite - that a host sitting in a menu kept losing HP - with a monster pinned onto them for 60 steps.
+  ok('co-op: the paused (in-menu) host is a ghost statue - no damage, no shove, no stun, no poison (v0.29.674)', paused && !paused.tookDmg && !paused.shoved && !paused.stunned && !paused.poisoned, paused);
 
   // GUEST keeps receiving the host's monster movement while the host is paused.
   await sleep(1200);

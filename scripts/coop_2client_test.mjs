@@ -125,7 +125,12 @@ try {
 
   // HOST-side kill also reaches the peer: host kills a different monster directly.
   const tUid2 = aUids[aUids.length - 1];
-  await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) { m.currentHp = 1; hitMonster(m, 9999, false, 'hosttest'); } }, tUid2);
+  // The host's killing blow has to LAND: a fresh Lv 1 hero rolls the level-gap accuracy check (v0.25.510) and the monster's evasion, and
+  // a MISS leaves the 1-HP monster alive on both screens - this check passed or failed with that roll (17/17 and 16/17 on the same
+  // build, an hour apart). And this map's Glasswind Hare carries the phantomDodge trait (v0.29.320: it blinks sideways instead of eating
+  // the hit) - measured: with accuracy pinned, the host's 9,999 still left it at 1 HP one run in three. Out-level the target, zero its
+  // evasion and i-frames, drop its defensive traits, and the KILL - and its trip to the partner - is what is tested.
+  await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) { player.level = Math.max(player.level | 0, 120); m.evasion = 0; m.invulnerable = 0; m.traits = null; m.currentHp = 1; hitMonster(m, 9999, false, 'hosttest'); } }, tUid2);
   await sleep(700);
   ok('host kill removes monster on non-host too', await ev(B, (u) => !game.monsters.some(x => x.uid === u), tUid2), { tUid2 });
 

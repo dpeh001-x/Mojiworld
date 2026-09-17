@@ -50,7 +50,10 @@ try {
   // the host's). Set def on BOTH the host monster and the attacker's mirror to
   // reflect a real high-DEF boss (both spawn from the same type in real play).
   await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) { m.def = 600; m.isBoss = false; m.currentHp = 100000; m.maxHp = 100000; } }, tUid);
-  await ev(B, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) { m.def = 600; m.isBoss = false; } }, tUid);
+  // The hit must LAND before its size can be judged: a fresh Lv 1 hero swinging at this map's monsters rolls the level-gap accuracy
+  // check (v0.25.510: down to a 10% floor at +16 levels) and an evasion roll, and a MISS forwards nothing at all - which is what
+  // {rawHit:10000, applied:0} was. Out-level the target and zero its evasion on the attacker's side, where the roll happens.
+  await ev(B, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) { m.def = 600; m.isBoss = false; m.evasion = 0; } player.level = Math.max(player.level | 0, 120); }, tUid);
   await sleep(300);
   const rawHit = 10000;
   const hpBefore = await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); return m ? m.currentHp : null; }, tUid);

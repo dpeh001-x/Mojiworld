@@ -94,8 +94,12 @@ const o = await page.evaluate(() => {
 
   // ---- 'hazhit': in range, out of range, god, forged --------------------
   const hz = (over) => Object.assign({ t: 'hazhit', id: 7, map: MAP, x: Math.round(px()), r: 180, d: 500 }, over || {});
-  let hp0 = player.hp; H(hz());
-  r.hazhitHits = player.hp < hp0;
+  // v0.29.672 (per user: "pause the game for the player but not the others in the room"): a PAUSED player cannot be harmed - _diffDmg,
+  // the choke point this handler routes through, returns 0 while game.paused. This page never leaves its opening pause, so the
+  // in-range hit read as 'no damage'. Both halves of the rule are held now: paused takes nothing, unpaused takes the hit.
+  r.pausedAtStart = !!game.paused; game.paused = true; player.invulnerable = 0; let hp0 = player.hp; H(hz()); r.hazhitPausedImmune = player.hp === hp0;
+  game.paused = false; player.invulnerable = 0; hp0 = player.hp; H(hz());
+  r.hazhitHits = player.hp < hp0; r.hazhitDbg = { hp0, hp1: player.hp, inv: player.invulnerable, camY: Math.round((game.camera && game.camera.y) || 0), py: Math.round(player.y), following: _coopFollowingHost() };
   player.hp = player.maxHp; player.invulnerable = 0;
   hp0 = player.hp; H(hz({ x: Math.round(px() + 5000) }));
   r.hazhitFarMisses = player.hp === hp0;
@@ -169,7 +173,8 @@ ok('300-monster flood: no throw', o.monFloodThrew === null, `${o.mirrorsAfterFlo
 ok('forged mon sync rejected', o.forgedMonRejected);
 ok('proj sync adds projectiles', o.projThrew === null && o.projAdded);
 ok('NaN projectile never enters the world', o.projNaN === null && o.projNoNaNInWorld);
-ok('hazhit in range damages', o.hazhitHits);
+ok('hazhit in range damages (unpaused)', o.hazhitHits, JSON.stringify(o.hazhitDbg));
+ok('a PAUSED guest takes no hazard hit (v0.29.672)', o.hazhitPausedImmune);
 ok('hazhit out of range misses', o.hazhitFarMisses);
 ok('hazhit respects god mode', o.hazhitGodImmune);
 ok('forged hazhit rejected', o.hazhitForgedRejected);

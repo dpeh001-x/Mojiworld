@@ -64,7 +64,14 @@ const r = await page.evaluate(() => {
   o.recv.multiInOneFrame = player.buffs.warCry === 12000 && player.buffs.bloodlust === 12000;
   clear(); bf({ hm: MAP, bk: 'warCry', bms: 7000 });   // legacy single form
   o.recv.legacyForm = player.buffs.warCry === 7000;
-  o.recv.allMetaDeclared = BUFF_META.every(b => b.key in player.buffs);
+  // BUFF_META is the HUD's pill table. Two of its rows are not buffs at all: healLock (v0.30.588) and potionSeal (v0.30.621) are boss
+  // DEBUFFS driven by their own clocks (_healLockUntil / the Aquarius seal; see _updateBuffRow) and deliberately have no player.buffs
+  // slot - which is also what keeps them off the wire: the receiver only accepts keys it has a slot for. So the rule is 'every BUFF
+  // row is declared', and its other half: a partner cannot send me one of the debuffs.
+  const CLOCK_PILLS = ['healLock', 'potionSeal'];
+  o.recv.allMetaDeclared = BUFF_META.filter(b => !CLOCK_PILLS.includes(b.key)).every(b => b.key in player.buffs) && CLOCK_PILLS.every(k => BUFF_META.some(b => b.key === k) && !(k in player.buffs));
+  clear(); bf({ hm: MAP, bl: [['healLock', 9000], ['potionSeal', 9000]] });
+  o.recv.debuffsNotSendable = !player.buffs.healLock && !player.buffs.potionSeal && !((player._healLockUntil | 0) > (game.time | 0));
 
   // ---- EFFECT: buffs delivered over the wire must move real stats ----------
   const snap = () => ({ atk: getAtk(), def: getDef(), crit: getCrit(), spd: +getSpeed().toFixed(3) });

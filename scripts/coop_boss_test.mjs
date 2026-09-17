@@ -75,8 +75,12 @@ try {
     b.currentHp = b.maxHp = 999999;
     const hostBefore = { x: player.x, hp: player.hp, vx: player.vx };
     const d0 = Math.abs(b.x - 1600);
-    // run 240 real sim frames of the monster world
-    for (let i = 0; i < 240; i++) { try { updateMonsters(1000 / 60); } catch (e) { return { err: String(e) }; } }
+    // run 240 real sim frames of the monster world.
+    // Since v0.29.286's pattern census Mooma's cycle rolls slam 40% / spores 38% / other 22%, and she only TRAVELS during the slam: one
+    // 240-frame window holds a single roll, so 'boss MOVED toward the guest' failed six times in ten on a boss that was targeting the
+    // guest correctly (the check above). The roll is pinned into the slam band for the window, so what is judged is the DIRECTION.
+    const _rnd = Math.random; Math.random = () => 0.2;
+    try { for (let i = 0; i < 240; i++) { try { updateMonsters(1000 / 60); } catch (e) { return { err: String(e) }; } } } finally { Math.random = _rnd; }
     const d1 = Math.abs(b.x - 1600);
     return {
       aggroId: b._coopAggroId, d0: Math.round(d0), d1: Math.round(d1),

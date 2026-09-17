@@ -6,6 +6,10 @@
 //      A's actual lookCustom + equipped visuals
 //   2. visually: crops A's own hero from A's canvas and A's avatar as drawn
 //      on B's canvas, side by side (scratch_avatar_mirror.png)
+// NEEDS THE WORKER: without wrangler dev / miniflare on :8787 the two connects fail and five checks fail with them - that is the
+// environment, not the game (3/8 on a machine with no wrangler). To certify the GAME side alone, point it at the node relay, which
+// shares the worker's forwarding rules:   PORT=8080 node mp/server.mjs   then   MIRROR_WS=ws://localhost:8080 node scripts/coop_avatar_mirror_test.mjs
+// (8/8 on v0.30.854). The first two labels say REAL worker code; with MIRROR_WS set they mean whatever relay that is.
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
 

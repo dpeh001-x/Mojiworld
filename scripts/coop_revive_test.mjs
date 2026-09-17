@@ -44,6 +44,10 @@ try {
   // Position both at the same spot so the revive radius is satisfied.
   await ev(A, () => { player.x = 600; player.y = 300; player.hp = player.maxHp = 3000; });
   await ev(B, () => { player.x = 600; player.y = 300; player.hp = player.maxHp = 3000; player._god = false; });
+  // v0.29.48 (per user): a down during ONBOARDING - the prologue, a story beat, or before the first-run tutorial is marked seen - is
+  // silent (no DOWNED banner), cannot be revived and auto-respawns after 5 s (_isOnboardingActive / COOP_DOWN_ONBOARD_MS). This test's
+  // fresh characters had never seen the tutorial, so the banner and the revive it asserts could not happen. They have seen it now.
+  for (const P of [A, B]) await ev(P, () => { player._tutorialSeen = true; window._prologueActive = false; window._prologuePending = false; document.body.classList.remove('sb-active'); });
   await sleep(500);   // let presence propagate positions
 
   // 1) B "dies" -> enters DOWNED (not death) because A is alive on the map.

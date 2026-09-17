@@ -51,13 +51,19 @@ try {
   // fires, and polls — eliminating cross-case message-timing races.
   const drain = async () => { await ev(B, () => { player.x = 20000; player.invulnerable = 0; player.hp = player.maxHp = 5000; }); await sleep(700); };
 
-  // 1) %-maxHp proximity nuke (fr=0.5) IN range -> ~50% of B's maxHp.
+  // 1) %-maxHp proximity nuke (fr=0.5) IN range -> ~50% of B's pool.
+  // v0.30.512: the fraction is of the receiver's REAL pool - getMaxHp(), which adds mods, equipment, the class multiplier and the global
+  // x1.5 to the raw class base in player.maxHp. Every solo and host site already computed the hit with getMaxHp(); a guest measured
+  // against player.maxHp "was taking roughly half the share the host modelled". This test set maxHp = 5000 and expected ~2,500 lost;
+  // the mage's real pool here is ~11,500, so it lost ~5,760 - the rule working, read against the wrong number. Both %-cases below
+  // start the follower at its real pool and expect the share of THAT. The band is the original one, ten points either side: the hit then
+  // passes through _diffDmg like the host's own copy of the attack does (the global monster-damage baseline - x1.18 here: 59% / 47%).
   await drain();
-  await ev(B, () => { player.x = 600 - player.w / 2; player.invulnerable = 0; player.hp = player.maxHp = 5000; });
+  let pool = await ev(B, () => { player.x = 600 - player.w / 2; player.invulnerable = 0; player.maxHp = 5000; player.hp = getMaxHp(); return player.hp; });
   await ev(A, () => _coopBroadcastBossHit(600, 0, 220, 0, 0.5, 'Test Nuke', '#f55'));
-  await B.waitForFunction(() => player.hp < 5000, null, { timeout: 3000 }).catch(() => {});
+  await B.waitForFunction((p) => player.hp < p, pool, { timeout: 3000 }).catch(() => {});
   let hp1 = await ev(B, () => player.hp);
-  ok('follower TAKES a %-maxHp proximity nuke in range (~50%)', hp1 <= 3000 && hp1 >= 2000, { hp1, dropped: 5000 - hp1 });
+  ok('follower TAKES a %-maxHp proximity nuke in range: 50% of its REAL pool (getMaxHp, v0.30.512)', pool > 5000 && Math.abs((pool - hp1) / pool - 0.5) <= 0.10, { pool, hp1, share: +((pool - hp1) / pool).toFixed(3) });
 
   // 2) Same nuke but B stands OUTSIDE the radius -> no damage.
   await drain();
@@ -69,11 +75,11 @@ try {
 
   // 3) Arena-wide nuke (radius 0) hits regardless of position.
   await drain();
-  await ev(B, () => { player.x = 4000; player.invulnerable = 0; player.hp = player.maxHp = 5000; });
+  pool = await ev(B, () => { player.x = 4000; player.invulnerable = 0; player.maxHp = 5000; player.hp = getMaxHp(); return player.hp; });
   await ev(A, () => _coopBroadcastBossHit(0, 0, 0, 0, 0.4, 'Arena Nuke', '#f55'));
-  await B.waitForFunction(() => player.hp < 5000, null, { timeout: 3000 }).catch(() => {});
+  await B.waitForFunction((p) => player.hp < p, pool, { timeout: 3000 }).catch(() => {});
   hp1 = await ev(B, () => player.hp);
-  ok('arena-wide nuke (r=0) hits a follower anywhere', hp1 <= 3500 && hp1 >= 2500, { hp1, dropped: 5000 - hp1 });
+  ok('arena-wide nuke (r=0) hits a follower anywhere: 40% of its real pool', Math.abs((pool - hp1) / pool - 0.4) <= 0.10, { pool, hp1, share: +((pool - hp1) / pool).toFixed(3) });
 
   // 4) Raw atk-based hit (d) applies a flat number (DEF-reduced but positive).
   await drain();
