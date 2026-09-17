@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.853';
+const GAME_VERSION = 'v0.30.854';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -22904,6 +22904,12 @@ const SKILL_HIT_TAG_TO_DEF_ID = {
   // v0.25.530 — Master-skill aliases so the L10 bonus lookup resolves
   // to the canonical SKILL_DEFS id when the projectile uses a short tag.
   oneshot: 'marksman_oneshot',
+  // v0.30.854 - tags with exactly one producer. These hits arrive long after the cast (a held charge, a channel, a rain,
+  // orbiting orbs, clones), when no cast is running to attribute them, so the tag itself names the skill.
+  charged: 'chargedShot', evade_blast: 'evadeRoll', railshot: 'snipe_railgun', rainArrow: 'arrowRain', elemArrow: 'elementalArrows',
+  aurora: 'celestialAurora', siphon: 'soulSiphon', necromancerorb: 'soulSiphon',
+  shockwave: 'warlord_warcry', apoc: 'doombringer_apoc', apocSlam: 'doombringer_apoc', aegis: 'crusader_aegis',
+  shadow: 'shadowlord_clones', eclipse_snap: 'nightreaper_mark', phantom_nova: 'phantom_cut',
 };
 function getSkillRank(id) {
   if (!id || !player.skillRanks) return 0;
@@ -22913,6 +22919,8 @@ function getSkillRank(id) {
 // summons / buffs : per skill up with RP increase the duration by 1s"). Each rank point adds
 // 1 second, so rank 10 is +10 s. These skills pass their base duration through one of the two
 // functions below; the Skills panel uses the same list to show the bonus.
+// v0.30.854 - skills with NO damage of their own: a rank is +1 s of duration, and the panel says only that (it said "+70% dmg")
+const LX_RANK_NO_DMG_IDS = new Set(['bloodlust', 'guardian', 'shadowlord_ult', 'wildBond', 'beastmaster_pack', 'beastmaster_ult']);
 const LX_RANK_DUR_IDS = new Set([
   'warCry', 'bloodlust', 'guardian', 'holyShield', 'eagleEye', 'celestialAurora',
   'soulSiphon', 'darkPulse', 'wildBond',
@@ -22943,7 +22951,31 @@ function _skillRankMulAt(id, r) {
   }
   return 1 + r * SKILL_RANK_BONUS_PER;
 }
-function getSkillRankMul(tag) {
+// v0.30.854 - RANK ATTRIBUTION: a skill's RP rank boosts THAT SKILL'S hits.
+// The rank bonus was looked up from the hit TAG, and most skills tag their hits generically ('aoe', 'meleeSkill',
+// 'shard', 'siege' ...) or with another skill's tag ('arrow', 'dagger', 'fire', 'meteor'). Measured at rank 10
+// (scripts/skill_rank_attribution_probe.mjs): of 72 skills 22 used their own rank, 33 used none at all, 10 used
+// ANOTHER skill's (Multi Shot rode Arrow Shot's 2% a rank; three ultimates rode Fireball's). The panel sells
+// "+5% damage per rank" on every one of them. Tags are left exactly as they are - the x2 on G skills, the class
+// multiplier, the basic-attack exemptions and every status proc key off them - and the rank is attributed instead:
+//   1. castSkill names the skill while its own code runs (_lxRankSrc), so every hit it lands at once is its own;
+//   2. the projectiles and hazards it creates carry that name (rs) and restore it while they resolve;
+//   3. a hit made INSIDE another hit (chain lightning at 50% of the already-ranked damage, overkill carry, spell
+//      echo, on-kill bursts) never inherits it - that would pay the rank twice;
+//   4. tags that only one skill produces resolve to it (SKILL_HIT_TAG_TO_DEF_ID), which covers hits that arrive
+//      long after the cast - channels, rains, orbs, clones.
+// Reactive and summoned damage (LX_RANK_NEVER) is never ranked, whatever cast it rides - as before.
+let _lxRankSrc = null;
+const LX_RANK_NEVER = new Set(['thorns', 'burn', 'minion', 'pet', 'pack', 'afterimage']);
+// run fn as <id>'s own code - for the few hit sources that live in a per-frame state machine, outside any cast or timer
+function _lxRankAs(id, fn) { const p = _lxRankSrc; _lxRankSrc = id; try { return fn(); } finally { _lxRankSrc = p; } }
+function _lxRankStampNew(arr, from, id) {
+  if (!arr) return;
+  for (let i = Math.max(0, from | 0); i < arr.length; i++) { const o = arr[i]; if (o && o.owner !== 'enemy' && o.rs == null) o.rs = id; }
+}
+function getSkillRankMul(tag, src) {
+  // v0.30.854 - the hit was attributed to a skill (see the note above): that skill's rank, on its own curve (so a basic stays at 2% a rank)
+  if (src && typeof SKILLS !== 'undefined' && SKILLS[src] && !LX_RANK_NEVER.has(tag)) return _skillRankMulAt(src, getSkillRank(src));
   // v0.30.x — THE WARRIOR/ROGUE BASIC WAS AN RP BLACK HOLE. 'melee' is in
   // SKILL_RANK_BLACKLIST and there is no 'melee' entry in the tag bridge, so
   // getSkillRankMul('melee') returned 1 no matter what -- while the skills
@@ -55845,7 +55877,7 @@ function _lxEclipseTick(dt) {
       // 164.1 xATK per cast, which was 7.0x the median skill's sustained rate.
       const isCrit = rollCrit() || Math.random() < 0.40;
       const dmg = Math.max(1, Math.floor(getAtk() * 0.9 * (isCrit ? getCritDmg() : 1)));
-      hitMonster(m, dmg, isCrit, 'dagger');
+      _lxRankAs('nightreaper_mark', () => hitMonster(m, dmg, isCrit, 'dagger'));
       m.stunTimer = Math.max(m.stunTimer || 0, 200);   // shorter than the 240 ms gap, so it can lapse
       spawnSmoothSlash(tx, ty, Math.PI / 2, 90, '#ff66aa', { thickness: 5, spread: Math.PI * 0.25, life: 14 });
       spawnSmoothSlash(tx, ty - 170, Math.PI / 2, 240, '#ffd0e4', { thickness: 2.5, spread: Math.PI * 0.10, life: 10 });
@@ -55898,6 +55930,7 @@ function _lxEclipseTick(dt) {
   player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.14));
 }
 function scheduleSkillTimer(fn, ms) {
+  const _rs = _lxRankSrc;   // v0.30.854 - rank attribution: who scheduled this
   const id = setTimeout(() => {
     // Drop self from the tracked list before firing, so long chains of
     // scheduled ticks don't grow the array indefinitely.
@@ -55906,7 +55939,9 @@ function scheduleSkillTimer(fn, ms) {
       const idx = arr.indexOf(id);
       if (idx !== -1) arr.splice(idx, 1);
     }
+    const _rsPrev = _lxRankSrc, _rsP0 = game.projectiles.length, _rsH0 = game.hazards ? game.hazards.length : 0; _lxRankSrc = _rs;
     try { fn(); } catch (e) { /* swallow — a dead callback shouldn't crash the frame */ }
+    finally { _lxRankSrc = _rsPrev; if (_rs) { _lxRankStampNew(game.projectiles, _rsP0, _rs); _lxRankStampNew(game.hazards, _rsH0, _rs); } }
   }, ms);
   if (!player._pendingTimeouts) player._pendingTimeouts = [];
   player._pendingTimeouts.push(id);
@@ -73997,11 +74032,11 @@ function updatePlayer(dt) {
           if (d < LX_HEXORB_STRIKE) {
             const _c = (typeof rollCrit === 'function') && rollCrit();
             const _dmg = Math.floor(getAtk() * LX_HEXORB_DMG_MUL * (_c && typeof getCritDmg === 'function' ? getCritDmg() : 1));
-            if (typeof hitMonster === 'function') hitMonster(m, _dmg, _c, 'hexorb');
+            if (typeof hitMonster === 'function') _lxRankAs('hexmaster_grandhex', () => hitMonster(m, _dmg, _c, 'hexorb'));
             // The curse is the point. _hexAdd can rupture and killMonster
             // splices game.monsters — safe here because this loop walks
             // hw.orbs, and a dead orb.tgt is caught by the currentHp gate above.
-            if (m.currentHp > 0 && typeof _hexAdd === 'function') _hexAdd(m, 1);
+            if (m.currentHp > 0 && typeof _hexAdd === 'function') _lxRankAs('hexmaster_grandhex', () => _hexAdd(m, 1));
             if (typeof spawnSmoothImpact === 'function') spawnSmoothImpact(orb.x, orb.y, '#66ccff');
             for (let _pi = 0; _pi < 5; _pi++) {
               game.particles.push({ x: orb.x, y: orb.y,
@@ -74121,7 +74156,7 @@ function updatePlayer(dt) {
             x: player.x + (player.facing > 0 ? player.w : -40),
             y: player.y + 6 + i * 26,
             vx: player.facing * 17, vy: 0, w: 42, h: 8, life: 250,
-            damage: getAtk() * 0.535 + 5, owner: 'player', skill: 'siege',  // v0.26.x — -20% per-arrow (was 0.55+5); duration kept at 8 s
+            damage: getAtk() * 0.535 + 5, owner: 'player', skill: 'siege', rs: 'ballista_volley',  // v0.26.x — -20% per-arrow (was 0.55+5); duration kept at 8 s
             pierce: true, defBreak: true, color: '#cc5522',
           });
         }
@@ -74267,7 +74302,7 @@ function updatePlayer(dt) {
           vx: (_aimX / _len) * 11, vy: (_aimY / _len) * 11,
           w: 28, h: 8, life: 150,
           damage: Math.floor(getAtk() * 2.1) + 25,
-          owner: 'player', skill: 'siege', homing: tgt, bspr: 'bult_ballista', sprScale: 2.0, bsprKeepAspect: true,   // v0.26.x — 2× larger projectile sprite per user · v0.29.5xx — 512×512 art was crushed into an 84×24 box (3.50×); keepAspect draws it square
+          owner: 'player', skill: 'siege', rs: 'ballista_ult', homing: tgt, bspr: 'bult_ballista', sprScale: 2.0, bsprKeepAspect: true,   // v0.26.x — 2× larger projectile sprite per user · v0.29.5xx — 512×512 art was crushed into an 84×24 box (3.50×); keepAspect draws it square
           color: '#ffaa55', pierce: true, defBreak: true, noGravity: true,
         });
         // Muzzle spark + keep the ballista weapon sprite anchored to the turret.
@@ -75038,7 +75073,7 @@ function updatePlayer(dt) {
     // damage actually comes from: 5.05 xATK per second of cooldown, 4.7x the
     // median, on an 11s button. The dive now hits harder and lands less often.
     // The v0.30.334 bossMul stays untouched - the boss buff was the point.
-    performAround(340, 8, { color:'#88ccff', kb:14, bossMul: 1.6 });   // v0.30.334 buff per user ("dragoon way too little vs bosses"): 4.0 -> 5.2, and x1.6 more against bosses (8.3x effective)   // v0.26.x balance audit: 6.5x/460 -> 4.0x/340
+    _lxRankAs('dragoon_skylance', () => performAround(340, 8, { color:'#88ccff', kb:14, bossMul: 1.6 }));   // v0.30.334 buff per user ("dragoon way too little vs bosses"): 4.0 -> 5.2, and x1.6 more against bosses (8.3x effective)   // v0.26.x balance audit: 6.5x/460 -> 4.0x/340
     // v0.25.228 — epic dragon-lance impact crater sprite at the slam
     // point. Held visible for the AOE window; cyan-and-gold shockwave.
     // v0.25.259 — Bumped to read as a much bigger AOE plunge:
@@ -75082,7 +75117,7 @@ function updatePlayer(dt) {
   // Rampage: continuous AoE while active
   // v0.25.557 — tick rate 8 frames → 60 frames (1 s) per global spec.
   if (player.buffs.rampage > 0) {
-    if (game.time % 60 === 0) performAround(90, 0.8, { color:'#ff8844', kb:2 });
+    if (game.time % 60 === 0) _lxRankAs('rampage', () => performAround(90, 0.8, { color:'#ff8844', kb:2 }));
     for (let i = 0; i < 3; i++) {
       const a = Math.random() * Math.PI * 2;
       game.particles.push({
@@ -75349,7 +75384,7 @@ function updatePlayer(dt) {
             // mark; it just no longer opens by going the wrong way.
             const _adx = (_et.x + _et.w / 2) - _eCx, _ady = (_et.y + _et.h / 2) - _eCy;
             const _ad = Math.sqrt(_adx * _adx + _ady * _ady) || 1;
-            game.projectiles.push({ x: _eCx, y: _eCy, vx: (_adx / _ad) * 9, vy: (_ady / _ad) * 9, w: 48, h: 16, life: 130, damage: Math.floor(getAtk() * 1) + 10, owner: 'player', skill: 'gale', homing: _et, bspr: 'bult_skyhunter', bsprKeepAspect: true, color: '#ffd24a', pierce: true, pierceLeft: 2 });   // v0.29.5xx — 512×512 art was crushed into a 72×24 box (3.00×); keepAspect draws it square
+            game.projectiles.push({ x: _eCx, y: _eCy, vx: (_adx / _ad) * 9, vy: (_ady / _ad) * 9, w: 48, h: 16, life: 130, damage: Math.floor(getAtk() * 1) + 10, owner: 'player', skill: 'gale', rs: 'skyhunter_ult', homing: _et, bspr: 'bult_skyhunter', bsprKeepAspect: true, color: '#ffd24a', pierce: true, pierceLeft: 2 });   // v0.29.5xx — 512×512 art was crushed into a 72×24 box (3.00×); keepAspect draws it square
             pet.fireCd = 600;
           } else { pet.fireCd = 350; }
         }
@@ -78281,7 +78316,11 @@ function castSkill(id) {
   const f = SKILL_FNS[id];
   // v0.26.1030 — if the SKILL_FN no-ops (returns '_lxNoCast', e.g. a summon at cap),
   // refund the cd + MP committed above so the cast isn't silently wasted.
-  const _castNoOp = (f && f() === '_lxNoCast');
+  // v0.30.854 - rank attribution: hits landed by this code are this skill's, and so are the projectiles / hazards it creates
+  const _rsPrev = _lxRankSrc, _rsP0 = game.projectiles.length, _rsH0 = game.hazards ? game.hazards.length : 0;
+  let _castNoOp = false; _lxRankSrc = id;
+  try { _castNoOp = (f && f() === '_lxNoCast'); }
+  finally { _lxRankSrc = _rsPrev; _lxRankStampNew(game.projectiles, _rsP0, id); _lxRankStampNew(game.hazards, _rsH0, id); }
   if (_castNoOp) { player.skillCooldowns[id] = _preCastCd; player.mp = _preCastMp; }
   // v0.29.362 — DOPPEL CAST (Tier-1). A successful cast has a chance to fire
   // a second time 200 ms later, free of MP and cooldown. Guard rails:
@@ -97912,7 +97951,13 @@ function _lxOnHitProcs(m, dmg, skill) {
 
   return { fz: Math.max(0, (m.freezeTimer | 0) - _fz0), st: Math.max(0, (m.stunTimer | 0) - _st0) };
 }
+// v0.30.854 - the attribution belongs to this hit alone. Whatever the hit sets off from inside (chain lightning at 50% of the
+// ALREADY-ranked damage, overkill carry, the mage's spell echo, on-kill bursts) runs with none, or the rank would be paid twice.
 function hitMonster(m, dmg, isCrit, skill) {
+  const _rs = _lxRankSrc; _lxRankSrc = null;
+  try { return _hitMonsterCore(m, dmg, isCrit, skill, _rs); } finally { _lxRankSrc = _rs; }
+}
+function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   _lxLsReset();   // v0.30.x — new hit, new lifesteal budget. See _lxLsTake.
   // v0.25.605 — Dead-monster gate. Without this, a delayed projectile or
   // setTimeout-scheduled bonus hit (ninja extraHit, splashOnHit, chain
@@ -98377,7 +98422,7 @@ function hitMonster(m, dmg, isCrit, skill) {
   // (thorns / pet / minion / pack / afterimage) so those don't
   // double-dip on rank investment in another skill.
   if (skill && !player._oneShot) {
-    const rmul = getSkillRankMul(skill);
+    const rmul = getSkillRankMul(skill, _rankSrc);   // v0.30.854 - the attributed skill first, the tag second
     if (rmul !== 1) dmg = Math.floor(dmg * rmul);
   }
   // v0.29.296 — MARK amplifier. A marked foe takes more from EVERY source
@@ -102114,6 +102159,7 @@ function updateProjectiles(dt) {
   }
   for (let i = game.projectiles.length - 1; i >= 0; i--) {
     const p = game.projectiles[i];
+    _lxRankSrc = (p && p.rs) || null;   // v0.30.854 - rank attribution
     game._fxOrigin = (p && p.owner === 'player') ? 'me' : 'local';   // v0.30.823 - my shot's fx are mine; an enemy shot's are made on every screen
     // Enemy-owned projectile with `homing: true` — gently steer toward player.
     // v0.25.590 — Math.hypot → Math.sqrt(squared). hypot is ~2× slower than
@@ -103022,6 +103068,7 @@ function updateProjectiles(dt) {
   }
   for (let i = game.hazards.length - 1; i >= 0; i--) {
     const h = game.hazards[i];
+    _lxRankSrc = (h && h.rs) || null;   // v0.30.854 - rank attribution
     game._fxOrigin = (h && h.owner === 'enemy') ? 'local' : 'me';   // v0.30.823
     // v0.25.589 — migrate hazards authored with `timer:` instead of
     // `life:`/`maxLife:`. The v0.25.581 zodiac AI rewrite created
@@ -111416,7 +111463,7 @@ function renderSkillsReference(host) {
         pips += `<span class="${cls}"></span>`;
       }
       const rightLabel = curRank > 0
-        ? `<span class="skl-rank-pct">+${dmgPct}%${atCap ? ' MAX' : ''}</span>`
+        ? `<span class="skl-rank-pct">${LX_RANK_NO_DMG_IDS.has(skillId) ? '+' + curRank + ' s' : '+' + dmgPct + '%'}${atCap ? ' MAX' : ''}</span>`
         : `<span class="skl-rank-empty">0/${SKILL_RANK_CAP}</span>`;
       // v0.29.829 — a greyed "+" with no explanation reads as "the game
       // will not let me use this skill". Say which pool is empty, and name
@@ -111516,18 +111563,18 @@ function renderSkillsReference(host) {
               </div>
               <div style="display:flex; gap:6px; align-items:center; font-size:10.5px; flex-wrap:wrap;">
                 <span style="color:#aaa;">Now:</span>
-                <b style="color:#ffdd66;">${_curPct} dmg${LX_RANK_DUR_IDS.has(skillId) ? ' · +' + _curRank + ' s duration' : ''}${_atMax ? ' · MAX' : ''}</b>
+                <b style="color:#ffdd66;">${LX_RANK_NO_DMG_IDS.has(skillId) ? '+' + _curRank + ' s duration' : _curPct + ' dmg' + (LX_RANK_DUR_IDS.has(skillId) ? ' · +' + _curRank + ' s duration' : '')}${_atMax ? ' · MAX' : ''}</b>
                 ${_atMax ? '' : `
                   <span style="color:#666;">→</span>
                   <span style="color:#aaa;">Next:</span>
-                  <b style="color:#cce;">${_nextPct} dmg${LX_RANK_DUR_IDS.has(skillId) ? ' · +' + _nextRank + ' s duration' : ''}</b>
+                  <b style="color:#cce;">${LX_RANK_NO_DMG_IDS.has(skillId) ? '+' + _nextRank + ' s duration' : _nextPct + ' dmg' + (LX_RANK_DUR_IDS.has(skillId) ? ' · +' + _nextRank + ' s duration' : '')}</b>
                   <span style="color:#888; font-size:9.5px;">(+${_stepPct}% this rank)</span>
                 `}
               </div>
               ${_atMax ? '' : `
                 <div style="margin-top:3px; font-size:10px; color:#888;">
                   Cost: <b style="color:#88ccff;">1 RP per rank</b> ·
-                  ranks 1-9 add +${Math.round((_skillRankMulAt(skillId, 1) - 1) * 100)}% damage${LX_RANK_DUR_IDS.has(skillId) ? ' and +1 s duration' : ''} each
+                  ${LX_RANK_NO_DMG_IDS.has(skillId) ? 'each rank adds +1 s duration' : 'ranks 1-9 add +' + Math.round((_skillRankMulAt(skillId, 1) - 1) * 100) + '% damage' + (LX_RANK_DUR_IDS.has(skillId) ? ' and +1 s duration' : '') + ' each'}
                 </div>
               `}
               ${_milestone5Str ? `
@@ -152650,7 +152697,7 @@ function _lxCoopWorldStep(dt) {
     game._fxOrigin = 'world';
     updateMonsters(dt);        // enemy AI/physics + monster→player contact & hazard damage
     game._fxOrigin = 'me';
-    updateProjectiles(dt);     // enemy projectiles keep flying + hitting (i-frame-respecting)
+    updateProjectiles(dt); _lxRankSrc = null;     // enemy projectiles keep flying + hitting (i-frame-respecting)
     game._fxOrigin = 'me';
     if (_pSnap) { window._lxHpRestore = true; try { for (const _k in _pSnap) player[_k] = _pSnap[_k]; } finally { window._lxHpRestore = false; } }   // v0.30.633 seal-fix - the undo passes the heal lock
     // Death check — MUST run here too. The normal check lives in loop(), which
@@ -152769,6 +152816,7 @@ const LX_LOOP_THROW_RECOVER = 120;   // throws in one run before the scene is cl
 const LX_LOOP_THROW_GIVEUP = 900;    // throws in one run before the player is asked to reload
 let _lxLoopThrowRun = 0, _lxLoopThrowAt = 0, _lxLoopRecoveries = 0;
 function _lxLoopThrew(err) {
+  _lxRankSrc = null;   // v0.30.854 - a throw inside the projectile / hazard loops skips their reset
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   if (now - _lxLoopThrowAt > LX_LOOP_THROW_GAP_MS) _lxLoopThrowRun = 0;
   _lxLoopThrowAt = now;
@@ -153439,7 +153487,7 @@ function loop(time) {
     if (typeof _tickBossCourage === 'function') _tickBossCourage(dt);               // v0.26.x — low-level-boss Brave Dodge / Counter
     if (typeof _lxVermillionTick === 'function') _lxVermillionTick();               // v0.29.9xx — Vermillion 5-min hunt clock (Fractured Reflection)
     game._fxOrigin = 'world'; updateMonsters(dt); game._fxOrigin = 'me';   // v0.30.823 - fx born in monster AI are the world's
-    updateProjectiles(dt); game._fxOrigin = 'me';
+    updateProjectiles(dt); game._fxOrigin = 'me'; _lxRankSrc = null;   // v0.30.854 - no attribution outlives the loops
     emitProjectileTrails();   // v0.25.21 — runs every frame regardless of render path
     updateMinions(dt);
     updateParticles(dt);
