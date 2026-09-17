@@ -26,7 +26,9 @@ try {
   const page = await ctx.newPage();
   page._errors = []; page.on('pageerror', e => page._errors.push(String(e).slice(0, 160)));
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
+  // v0.30.785 — a RETURNING player saved in town. The start map is where the boot's gate points its HIGH stamp, and a
+  // brand-new player's start map is now The Void (no backdrop plate at all), so this test names its start map.
+  await page.evaluate(() => { try { localStorage.clear(); localStorage.setItem('levelx_save_v1', JSON.stringify({ v: (typeof SAVE_VERSION !== 'undefined' ? SAVE_VERSION : 1), t: Date.now(), player: { cls: 'warrior', level: 10, look: { name: 'Prio' } }, game: { currentMap: 'town' } })); } catch (e) {} });
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
 
   // Parse-time bulk loads are LOW priority the moment they exist.
@@ -51,10 +53,7 @@ try {
   ok('non-start backgrounds stay LOW', gate.forestStillLow === 'low', gate);
 
   // Enter; the streamer kicks at ~8s and streams maps LOW.
-  await page.click('#menu-newgame').catch(() => {});
-  await page.waitForSelector('#auth-user', { state: 'visible', timeout: 10000 }).catch(() => {});
-  await page.fill('#auth-user', 'Prio');
-  await page.click('#auth-submit');
+  await page.click('#menu-continue');   // v0.30.785 — the returning player seeded above resumes (New Game would wipe and reload)
   const t0 = Date.now();
   await page.waitForFunction(() => window._lxWorldStreamed === true, null, { timeout: 25000 });
   const kickMs = Date.now() - t0;

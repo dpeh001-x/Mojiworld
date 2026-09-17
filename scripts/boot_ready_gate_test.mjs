@@ -87,8 +87,11 @@ const obs = await ev(() => ({ ...window.__gateObs, gateExists: typeof _lxReadyGa
   overlayGone: !document.getElementById('loading-overlay') || document.getElementById('loading-overlay').classList.contains('fade') }));
 const bootRec = (obs.log || []).find((r) => r.boot) || null;
 ok('the readiness gate exists and ran on the real boot path', !obs.err && obs.gateExists && obs.gateDone && !!bootRec, obs.err || `gate ${obs.gateExists ? 'present' : 'missing'}, boot record ${!!bootRec}`);
-ok('it warmed the PREDICTED first map, not the void placeholder the game boots in',
-  !!bootRec && bootRec.id === obs.predicted && obs.predicted !== 'void' && obs.sitting === 'void',
+// v0.30.785 — a brand-new player's first map IS The Void: they create their hero there, and after the prologue and the
+// tutorial they are still there (traced on v0.30.784). The boot used to warm 'town' for them - a map they do not
+// see for minutes - and that preload was most of a 25 s wait before the menu. The gate must warm what is predicted.
+ok('it warmed the PREDICTED first map - for a brand-new player, The Void they create their hero in',
+  !!bootRec && bootRec.id === obs.predicted && obs.predicted === 'void' && obs.sitting === 'void',
   bootRec ? `predicted ${obs.predicted}, gated ${bootRec.id}, while sitting in ${obs.sitting}` : '');
 ok('the overlay faded only AFTER the gate released', obs.overlayGone && obs.gateDoneAt > 0 && obs.fadedAt >= obs.gateDoneAt - 60,
   `gate released at ${Math.round(obs.gateDoneAt)}ms, overlay faded at ${Math.round(obs.fadedAt)}ms`);
@@ -119,7 +122,7 @@ await page.click('#cs-nav-next').catch(() => {});
 // The class-select "Next" only pages the modal; the world is entered when the
 // game loads the predicted first map. Do exactly that, through loadMap, so the
 // veil gate runs for it the way it will for a player.
-await page.evaluate(() => { try { loadMap(_lxPredictStartMap(), 300); } catch (e) {} });
+await page.evaluate(() => { try { loadMap('town', 300); } catch (e) {} });   // v0.30.785 — the hub a new player walks into from The Void
 await page.waitForFunction(() => game.currentMap && game.currentMap !== 'void', null, { timeout: 20000 }).catch(() => {});
 await page.waitForFunction((id) => (window._lxReadyGateLog || []).some((r) => !r.boot && r.id === id), await page.evaluate(() => game.currentMap), { timeout: 12000 }).catch(() => {});
 await page.waitForTimeout(300);
@@ -149,12 +152,11 @@ const entry = async (label) => ev(async ({ label }) => {
 }, { label });
 
 const town = await entry('first map');
-// The boot gate already decoded and baked this map, so its veil gate should
-// find nothing to do and release quickly - and never sit on the preloader's
-// 1.5s per-image timeout for an unrelated broken sprite.
-ok(`the first map (${town.id}) entered through its veil gate, which found the boot gate's work already done`,
-  !town.err && !!town.rec && town.rec.baked === 0 && town.rec.ms < 900,
-  town.err || (town.rec ? `veil gate on ${town.rec.id}: baked ${town.rec.baked} (already done at boot), decode ${town.rec.decodeMs}ms, ${town.rec.ms}ms total` : `no gate record for ${town.id}`));
+// v0.30.785 — the boot gate warmed The Void, so town is prepared by its OWN veil gate when the player walks in: it
+// must run and finish uncapped (its frames, backdrop and music ready before the veil lifts - checked below).
+ok(`the first hub (${town.id}) entered through its veil gate, which finished uncapped`,
+  !town.err && !!town.rec && !town.rec.capped,
+  town.err || (town.rec ? `veil gate on ${town.rec.id}: baked ${town.rec.baked}, decode ${town.rec.decodeMs}ms, ${town.rec.ms}ms total` : `no gate record for ${town.id}`));
 ok(`${town.id}: every idle/walk frame of its ${town.types} mob types is decoded and carries a size-keyed bake${town.frames === 0 ? ' (a hub: no mob spawns to bake)' : ''}`,
   !town.err && (town.frames === 0 || (town.decoded === town.frames && town.baked === town.frames)),
   town.err || `${town.decoded}/${town.frames} decoded, ${town.baked}/${town.frames} baked`);

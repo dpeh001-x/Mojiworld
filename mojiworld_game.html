@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.788';
+const GAME_VERSION = 'v0.30.789';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -43791,6 +43791,7 @@ function openClassSelect() {
     card.onclick = () => {
       audio.init();
       applyClass(id);
+      window._lxAwaitingCreation = false;   // v0.30.789 — the player has created a hero: saving may begin
       document.getElementById('class-select-modal').style.display = 'none';
       game.paused = false;
       showToast(`You are a ${c.name}!`, 'epic');
@@ -48658,6 +48659,8 @@ function _flushSaveStateNow() {
   // v0.26.x — Prologue: the flash-forward plays at Lv.100 on a fresh save;
   // a flush here would persist the apex state. Hard-gated until restore.
   if (window._prologueActive || window._prologuePending) return;
+  // v0.30.789 — NO HERO IS SAVED BEFORE ONE IS CREATED (see _lxAwaitingCreation at the fresh-start branch).
+  if (window._lxAwaitingCreation) { const _csm = document.getElementById('class-select-modal'); if (_csm && _csm.style.display === 'flex') return; }
   // v0.26.x — never persist while character creation is open: a tab-close
   // at class select used to flush a default-warrior save, skipping creation
   // forever (the prologue-seen flag already prevents a prologue replay).
@@ -50052,6 +50055,8 @@ function importSave(input) {
 }
 function saveState() {
   if (window._prologueActive || window._prologuePending) return;   // v0.26.x — Prologue save gate (see _flushSaveStateNow)
+  // v0.30.789 — NO HERO IS SAVED BEFORE ONE IS CREATED (see _lxAwaitingCreation at the fresh-start branch).
+  if (window._lxAwaitingCreation) { const _csm = document.getElementById('class-select-modal'); if (_csm && _csm.style.display === 'flex') return; }
   // v0.26.x — never persist while character creation is open: a tab-close
   // at class select used to flush a default-warrior save, skipping creation
   // forever (the prologue-seen flag already prevents a prologue replay).
@@ -153764,6 +153769,16 @@ try { if (window.SteamAPI && window.SteamAPI.onOverlay) window.SteamAPI.onOverla
 try { setInterval(() => { try { if (typeof _lxSteamPresence === 'function') _lxSteamPresence(); } catch (e) {} }, 6000); } catch (e) {}
 
 if (!loadState()) {
+  // v0.30.789 — NO HERO IS SAVED BEFORE ONE IS CREATED (per user: "make sure the sprites BGM and map load before
+  // the game starts" - found while measuring the first boot). A fresh start opens character creation on a
+  // DEFAULT player, and that default is already cls 'warrior'. The save gates below were narrowed to
+  // "!player.cls" in v0.29.584, which the default always passes, so the autosave heartbeat wrote a Lv.1
+  // warrior 31 s into a brand-new player's loading screen. The menu then offered that stranger's save as
+  // "Continue · Hero · Lv.1 Warrior", New Game treated it as an adventure to back up, wipe and RELOAD (the
+  // whole ~40 s boot a second time), and closing the game during creation skipped creation on relaunch.
+  // This flag is true only on this path, and only the player's own class pick clears it; while it is set
+  // and creation is on screen, nothing is persisted.
+  window._lxAwaitingCreation = true;
   // v0.26.x — Fresh-start now opens on the flash-forward prologue: a
   // skippable cinematic + ~30s as the Lv.100 memory vs Gravitos, then the
   // strip beat lands the player in The Void for class select (the
@@ -155019,6 +155034,9 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         try {
           const raw = localStorage.getItem(SAVE_KEY);
           const sv = raw ? JSON.parse(raw) : null;
+          // v0.30.789 — no save: character creation happens in The Void, and the prologue returns there.
+          // Preparing 'town' decoded a map a new player does not see until well after they play.
+          if (!sv) return (typeof MAPS !== 'undefined' && MAPS.void) ? 'void' : 'town';
           // v0.26.961 — the save nests the map under game.currentMap (the
           // old top-level read always fell back to 'town'); 'void' resumes
           // redirect to town (see the loadState remap).
@@ -155036,7 +155054,13 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       // v0.27.3 — the gate now ALSO waits for the NPC sprite registry fill
       // (window._lxNpcSpritesReady) so every NPC_SPRITES entry is decoded
       // before the world reveals — no NPC pop-in. Same 30s cap above.
-      Promise.allSettled([_warmDecodeRegistries(), _mapPre, window._lxNpcSpritesReady || null]).then(_proceed, _proceed);
+      // v0.30.789 — THE MENU WAITS FOR WHAT THE PLAYER IS ABOUT TO SEE. It used to wait on _warmDecodeRegistries()
+      // as well: every registry sprite in the game (1,005 sets), measured at 33 s on a fast local disk, so the
+      // gate's own 30 s cap - not readiness - decided when the menu appeared (36 s), and the decode competed
+      // with the start map's own preload (22 s). The sweep still starts here and runs behind the menu; the
+      // start map, its NPCs and, after the click, the commence and ready gates are what hold the door.
+      _warmDecodeRegistries();
+      Promise.allSettled([_mapPre, window._lxNpcSpritesReady || null]).then(_proceed, _proceed);
     } catch (e) { _proceed(); }
   }
   function _finishHide(session) {
@@ -157658,6 +157682,7 @@ function _lxPredictStartMap() {
   try {
     const raw = (typeof SAVE_KEY !== 'undefined') ? localStorage.getItem(SAVE_KEY) : null;
     if (raw) { const sv = JSON.parse(raw); m = (sv && (sv.currentMap || (sv.game && sv.game.currentMap))) || null; }
+    else if (typeof MAPS === 'object' && MAPS.void) return 'void';   // v0.30.789 — a new player creates their hero in The Void
   } catch (e) { m = null; }
   if (m && _LX_MAP_MIGRATE[m]) m = _LX_MAP_MIGRATE[m];
   if (!m || typeof MAPS !== 'object' || !MAPS[m]) m = 'town';
