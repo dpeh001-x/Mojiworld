@@ -107,9 +107,11 @@ if (has('--pose')) {
 
 // ---------------------------------------------------------------- compose ----
 // STORE MAIN CAPSULE (per user, of the Google result's thumbnail: "yes i Want the guguma art here"). Google shows
-// the store page's og:image - the main capsule - cropped to a square from its LEFT edge, so the title and Guguma
-// both live inside the left H x H square. Unlike the library hero, a capsule carries the game's title itself
-// (Valve: the title and nothing else). Rendered at 2x, 2464x1412, and downscaled to Valve's 1232x706.
+// the store page's og:image - the main capsule - cropped to a square. Unlike the library hero, a capsule carries the
+// game's title itself (Valve: the title and nothing else). Rendered at 2x, 2464x1412, downscaled to Valve's 1232x706.
+// CENTRED (per user: "make guguma and the mojiworld logo more central"): the first cut kept both inside the LEFT
+// square, where the old capsule's Google crop fell; they now share the capsule's vertical centre line, so a centred
+// square crop (google_thumb_preview.png) holds both.
 const CAPSULE = has('--capsule');
 const W = CAPSULE ? 2464 : 3840, H = CAPSULE ? 1412 : 1240;
 // Guguma BEHIND the title, in the centre Steam never crops: head above the logo, body behind it, feet below.
@@ -125,7 +127,7 @@ const W = CAPSULE ? 2464 : 3840, H = CAPSULE ? 1412 : 1240;
 // CENTRED (per user: "push guguma slightly down vertically to centralise"): with the logo moved to the bottom
 // his face no longer sets the ceiling, so he sits at the vertical middle - his box centred on H/2, and the
 // light burst centred on him.
-const G = CAPSULE ? { cx: 700, cy: 610, top: 52, h: 1150, ax: 0.5 } : { cx: 1920, cy: 620, top: 98, h: 1045, ax: 0.5 };
+const G = CAPSULE ? { cx: 1232, cy: 610, top: 52, h: 1150, ax: 0.5 } : { cx: 1920, cy: 620, top: 98, h: 1045, ax: 0.5 };
 // the light, embers and outline were sized around a 1045 px Guguma; S keeps them in proportion to him (1 for the hero)
 const S = G.h / 1045;
 const DEFAULT_ART = 'Sprites/npc/Guguma_hi.webp';
@@ -146,8 +148,8 @@ const LOGO = { w: 1400, cx: W / 2, bottom: 62 };
 // in hero-master px: Guguma's art outline runs ~25 px plus the 16 px added = ~41; the wordmark's dark edge at
 // the preview's 1400 px is 21-24. LOGO_OUTLINE px at the wordmark's own 1254 px width is ~19 at 1400 -> ~42.
 const LOGO_OUTLINE = 17;
-// Capsule title: across his feet, as on the hero the user approved, inside Google's left square with a margin.
-const CAP_LOGO = { w: 1270, left: 70, bottom: 58 };
+// Capsule title: across his feet, as on the hero the user approved, centred under him.
+const CAP_LOGO = { w: 1270, cx: 1232, bottom: 58 };
 const WORDMARK = 'Sprites/ui/mojiworld_logo.webp';
 let seed = 20260916;
 const rnd = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -344,14 +346,14 @@ if (CAPSULE) {
     { input: g.img, left: gl - g.P, top: gt - g.P },
     { input: embers(true), blend: 'screen' },
     // the title goes over everything, bokeh included: Valve's rule is that it must stay legible
-    { input: logo, left: CAP_LOGO.left, top: H - CAP_LOGO.bottom - lm.height },
+    { input: logo, left: Math.round(CAP_LOGO.cx - lm.width / 2), top: H - CAP_LOGO.bottom - lm.height },
   ]).removeAlpha().png().toBuffer();
   // two pipelines (resize runs before composite in one)
   const cap = await sharp(art).resize(1232, 706, { kernel: 'lanczos3' }).png({ compressionLevel: 9 }).toBuffer();
   await writeFile(join(STAGE, 'store_capsule_main.png'), cap);
-  // what Google shows: the left square of the store's 616x353 copy, at thumbnail size
+  // what Google shows: a centred square of the store's 616x353 copy, at thumbnail size
   const half = await sharp(cap).resize(616, 353, { kernel: 'lanczos3' }).png().toBuffer();
-  await sharp(half).extract({ left: 0, top: 0, width: 353, height: 353 }).resize(120, 120, { kernel: 'lanczos3' }).png().toFile(join(STAGE, 'google_thumb_preview.png'));
+  await sharp(half).extract({ left: Math.round((616 - 353) / 2), top: 0, width: 353, height: 353 }).resize(120, 120, { kernel: 'lanczos3' }).png().toFile(join(STAGE, 'google_thumb_preview.png'));
   if (has('--install')) {
     // art of record + the upload copy: Valve takes the main capsule at exactly 1232x706
     for (const p of ['steam/assets/store_capsule_main.png', 'steam/assets/upload/store_capsule_main.png']) {
@@ -361,5 +363,5 @@ if (CAPSULE) {
     }
   }
   const cm = await sharp(cap).metadata();
-  console.log(`capsule ${cm.width}x${cm.height} · title ${lm.width}x${lm.height} at (${CAP_LOGO.left},${H - CAP_LOGO.bottom - lm.height}) · Guguma ${g.w}x${g.h} at (${gl},${gt})${has('--install') ? ' · installed' : ''} -> ${STAGE}`);
+  console.log(`capsule ${cm.width}x${cm.height} · title ${lm.width}x${lm.height} at (${Math.round(CAP_LOGO.cx - lm.width / 2)},${H - CAP_LOGO.bottom - lm.height}) · Guguma ${g.w}x${g.h} at (${gl},${gt})${has('--install') ? ' · installed' : ''} -> ${STAGE}`);
 }
