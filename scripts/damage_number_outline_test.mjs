@@ -51,6 +51,9 @@ try {
           const bakedCssW = img.width / dpr;               // the bake is at device resolution
           baked.push(5 * (arguments[3] / bakedCssW) * Math.abs(m.a));
         }
+        if (arguments.length === 9 && img && img.tagName === 'CANVAS') {   // dn-atlas: a glyph cell, baked at the render scale with a 5 px outline
+          baked.push(5 * dpr * (arguments[7] / arguments[3]) * Math.abs(m.a));
+        }
       } catch (e) {}
       return oDI.apply(c, arguments);
     };

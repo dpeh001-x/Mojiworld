@@ -12628,7 +12628,7 @@ function _lxDevSurface() {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
   } catch (e) { return false; }
 }
-const GAME_VERSION = 'v0.30.814';
+const GAME_VERSION = 'v0.30.815';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -149572,6 +149572,142 @@ const _dnBigGrad = new Map();
 // live path and the baked bitmap below cannot drift apart. Crits keep their own gold treatment.
 const _LX_DN_FIG = /^-?[\d,]+$/;
 function _lxDnTaken(d, txt) { return !!(d && d.taken) && !d.crit && _LX_DN_FIG.test(txt || ''); }
+// v0.30.815 dn-atlas — THE POP, FROM A GLYPH ATLAS (see the note at the live passes in drawDamageNumbers).
+// A popping number rasterised 3-6 passes of thick stroked text at a size that changes every frame, and numbers
+// of several base sizes pop at once, so the glyph cache never had the size warm: measured, the pop was ~80% of
+// the canvas flush of a fight with hits landing. The twelve glyphs a damage figure is made of are rendered
+// ONCE per (base size, pop size, style, colour), at that exact font size with a literal 5 px outline - so the
+// outline is the same constant it is in every other phase - and a popping number is a few blits.
+// One ROW PER PASS of the live path (shadow, halo, outline, rim, fill + highlight): drawn row by row across the
+// whole number, a digit's halo can never tint its neighbour's outline, exactly as when each pass was one call.
+let _LX_DN_ATLAS_ON = true;
+const _LX_DN_ATLAS_CHARS = '0123456789,★';
+const _LX_DN_ATLAS_OK = /^[0-9,]+★?$/;
+const _LX_DN_ATLAS = new Map();            // key -> atlas; insertion order is the LRU order
+const _LX_DN_ATLAS_MAX_PX = 12e6;          // ~48 MB of backing store, oldest out first
+let _lxDnAtlasPx = 0;
+let _lxDnAtlasBudget = 0;                  // builds still allowed this frame (drawDamageNumbers resets it)
+// The pop's size, snapped to a 4% ladder hung on the base size (so scale 1 is exactly the base) and then to the
+// half-pixel grid: the four frames around the apex share one atlas, and a pop needs six or seven, not ten.
+const _LX_DN_ATLAS_LN = Math.log(1.04);
+function _lxDnAtlasPx4(b0, scale) {
+  const k = Math.round(Math.log(Math.max(0.05, scale)) / _LX_DN_ATLAS_LN);
+  return Math.max(4, Math.round(b0 * Math.pow(1.04, k) * 2) / 2);
+}
+function _lxDnAtlasGet(b0, px, baseSize, d, col, tk, lowFx, stress, dpr) {
+  const key = b0 + '|' + px + '|' + (d.crit ? 1 : 0) + (d.big ? 1 : 0) + (tk ? 1 : 0) + '|' + col + '|' + (lowFx ? 1 : 0) + (stress ? 1 : 0) + '|' + dpr;
+  let at = _LX_DN_ATLAS.get(key);
+  if (at !== undefined) {
+    if (at) { _LX_DN_ATLAS.delete(key); _LX_DN_ATLAS.set(key, at); }   // most recently used goes last
+    return at;
+  }
+  if (_lxDnAtlasBudget <= 0) return null;   // not this frame: the caller draws live, as it always did
+  _lxDnAtlasBudget--;
+  at = _lxDnAtlasBuild(b0, px, baseSize, d, col, tk, lowFx, stress, dpr);
+  _LX_DN_ATLAS.set(key, at);                // a failed build is remembered as null, so it is not retried every frame
+  if (at) {
+    _lxDnAtlasPx += at.px;
+    for (const k of _LX_DN_ATLAS.keys()) {
+      if (_lxDnAtlasPx <= _LX_DN_ATLAS_MAX_PX || k === key) break;
+      const old = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k);
+      if (old) { _lxDnAtlasPx -= old.px; old.cv.width = old.cv.height = 0; }
+    }
+  }
+  return at;
+}
+function _lxDnAtlasBuild(b0, px, baseSize, d, col, tk, lowFx, stress, dpr) {
+  try {
+    const S = px / Math.max(1, b0);                                  // the pop scale this size stands for
+    const crit = !!d.crit, grad = (crit || d.big || tk) && !stress;   // the same gates the live passes use
+    const halo = grad, rim = (crit || tk) && !lowFx && !stress, hi = (crit || d.big || tk) && !lowFx && !stress;
+    const cv = document.createElement('canvas'); const c = cv.getContext('2d');
+    const font = '900 ' + px + 'px Impact, "Arial Black", "Trebuchet MS", sans-serif';
+    c.font = font;
+    const mAll = c.measureText(_LX_DN_ATLAS_CHARS);
+    const asc = Math.ceil(mAll.actualBoundingBoxAscent || px), desc = Math.ceil(mAll.actualBoundingBoxDescent || px * 0.3);
+    const pad = Math.ceil(Math.max(halo ? (crit ? 9 : 7) * S / 2 : 0, 2.5) + 3 * S + 2);   // the widest stroke's reach + the shadow offset
+    const base = asc + pad, cellHCss = base + desc + pad;
+    const cellH = Math.ceil(cellHCss * dpr), rowH = cellH + 2;
+    const cells = new Map(); let x = 0;
+    for (const ch of _LX_DN_ATLAS_CHARS) {
+      const adv = c.measureText(ch).width; const sw = Math.ceil((Math.ceil(adv) + pad * 2) * dpr);
+      cells.set(ch, { sx: x, sw, adv }); x += sw + 2;
+    }
+    const passes = ['shadow']; if (halo) passes.push('halo'); passes.push('outline'); if (rim) passes.push('rim'); passes.push('fill');
+    cv.width = x; cv.height = rowH * passes.length;
+    let fillStyle;
+    if (grad) {
+      fillStyle = c.createLinearGradient(0, -px * 0.9, 0, px * 0.25);
+      if (crit) { fillStyle.addColorStop(0, '#fff4b8'); fillStyle.addColorStop(0.45, '#ffd84a'); fillStyle.addColorStop(1, '#ff8a1f'); }
+      else { fillStyle.addColorStop(0, _mixHex(col, '#ffffff', 0.55)); fillStyle.addColorStop(1, col); }
+    } else if (crit) fillStyle = '#ffd84a';
+    else if (!stress && !lowFx) fillStyle = _lxPlainGrad(c, col, Math.max(1, Math.round(px)));
+    else fillStyle = col;
+    const bsS = baseSize * S;   // the highlight band is cut in the live path's (float) base size
+    for (let r = 0; r < passes.length; r++) {
+      const pass = passes[r];
+      for (const [ch, cell] of cells) {
+        c.save();
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        c.beginPath(); c.rect(cell.sx, r * rowH, cell.sw, cellH); c.clip();   // a glyph never paints into its neighbour's cell
+        c.setTransform(dpr, 0, 0, dpr, cell.sx + pad * dpr, r * rowH + base * dpr);
+        c.font = font; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.lineJoin = 'round'; c.lineCap = 'round';
+        if (pass === 'shadow') { c.globalAlpha = 0.55; c.fillStyle = '#000'; c.fillText(ch, 2 * S, 3 * S); }
+        else if (pass === 'halo') { c.lineWidth = (crit ? 9 : 7) * S; c.strokeStyle = col; c.globalAlpha = 0.35; c.strokeText(ch, 0, 0); }
+        else if (pass === 'outline') { c.lineWidth = 5; c.strokeStyle = '#000'; c.strokeText(ch, 0, 0); }   // THE readability anchor: a literal 5, at every pop size
+        else if (pass === 'rim') { c.lineWidth = 2 * S; c.strokeStyle = crit ? '#fff7b0' : _mixHex(col, '#ffffff', 0.72); c.strokeText(ch, 0, 0); }
+        else {
+          c.fillStyle = fillStyle; c.fillText(ch, 0, 0);
+          if (hi) {
+            c.globalAlpha = crit ? 0.7 : 0.4;
+            c.beginPath(); c.rect(-bsS * 2.2, -bsS * 0.95, bsS * 4.4, bsS * 0.38); c.clip();
+            c.fillStyle = '#ffffff'; c.fillText(ch, 0, 0);
+          }
+        }
+        c.restore();
+      }
+    }
+    return { cv, cells, pad, base, cellH, rowH, rows: passes.length, dpr, px: cv.width * cv.height };
+  } catch (e) { return null; }
+}
+// Blit one number from its atlas. The context arrives translated to the number's anchor, rotated if it is
+// wobbling, and scaled by the pop; the glyphs are already the popped size, so the scale is cancelled. With no
+// rotation the blits land on whole device pixels at exactly their own size - no resample, the same guarantee
+// the settled bitmap carries (v0.30.466). Returns false (draw live) if a glyph is missing or the matrix is unreadable.
+function _lxDnAtlasBlit(at, txt, scale, rotated) {
+  const n = txt.length; let wTot = 0;
+  for (let i = 0; i < n; i++) { const c0 = at.cells.get(txt[i]); if (!c0) return false; wTot += c0.adv; }
+  const dpr = at.dpr;
+  if (!rotated) {
+    const tf = (typeof ctx.getTransform === 'function') ? ctx.getTransform() : null;
+    if (!tf) return false;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const oy = Math.round(tf.f - at.base * dpr);
+    for (let r = 0; r < at.rows; r++) {
+      let pen = -wTot / 2;
+      for (let i = 0; i < n; i++) {
+        const c0 = at.cells.get(txt[i]);
+        ctx.drawImage(at.cv, c0.sx, r * at.rowH, c0.sw, at.cellH, Math.round(tf.e + (pen - at.pad) * dpr), oy, c0.sw, at.cellH);
+        pen += c0.adv;
+      }
+    }
+    ctx.restore();
+    return true;
+  }
+  ctx.save();
+  if (scale !== 1) ctx.scale(1 / scale, 1 / scale);
+  for (let r = 0; r < at.rows; r++) {
+    let pen = -wTot / 2;
+    for (let i = 0; i < n; i++) {
+      const c0 = at.cells.get(txt[i]);
+      ctx.drawImage(at.cv, c0.sx, r * at.rowH, c0.sw, at.cellH, pen - at.pad, -at.base, c0.sw / dpr, at.cellH / dpr);
+      pen += c0.adv;
+    }
+  }
+  ctx.restore();
+  return true;
+}
 function _dnBake(d, txt, col, baseSize) {
   const _dnTkB = _lxDnTaken(d, txt);   // v0.30.695 taken-foil
   try {
@@ -149725,6 +149861,7 @@ function drawDamageNumbers() {
   // v0.30.343 — see the bake gate below: cap bakes per frame so an AOE's
   // simultaneous settlers spread their bake cost over a few frames.
   let _dnBakeBudget = 3;
+  _lxDnAtlasBudget = 1;   // v0.30.815 dn-atlas — at most one glyph atlas is built per frame
   const _dnDprNow = Math.max(1, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1)));   // v0.30.466
   const _dnLowFx_top = (typeof _perfLowFx === 'function' && _perfLowFx());
   const _dnUiK = (game._uiScale > 0) ? game._uiScale : 1;   // v0.30.x — HUD size
@@ -149825,7 +149962,9 @@ function drawDamageNumbers() {
     // this is the one marker the user asked back, crit only, drawn live.)
     const txt = (d._txt !== undefined) ? d._txt : (d._txt = String(d.text) + (d.crit ? '\u2605' : ''));
     const col = d.color || '#ffffff';
-    const _dnTk = _lxDnTaken(d, txt);   // v0.30.695 taken-foil - draw it like a hit we dealt
+    const _dnTk = _lxDnTaken(d, txt);
+    const _dnAtlasable = _LX_DN_ATLAS_ON && !d._gbVolc && _LX_DN_ATLAS_OK.test(txt);   // v0.30.815 dn-atlas
+    const _dnFading = age >= 10 && d.life < fadeFrames;   // v0.30.695 taken-foil - draw it like a hit we dealt
 
     // v0.30.340 — settled numbers draw their baked bitmap (see _dnBake above).
     // Gate mirrors the phases whose raster is static: past the pop-in, no
@@ -149839,7 +149978,7 @@ function drawDamageNumbers() {
     // fading already holds its settled bitmap; drawn under the same shrink and alpha it is the same
     // picture. Growth is left live (a B/G sticker dissolves OUTWARD to 1.75x; a bitmap that far up
     // would soften), as is the pop: the crisp overshoot is the whole point of it.
-    if (age >= 10 && !rot && d.life < fadeFrames && scale <= 1.2) {
+    if (age >= 10 && !rot && d.life < fadeFrames && scale <= 1.2 && !_dnAtlasable) {   // v0.30.815 dn-atlas — a figure fades from the atlas instead: constant outline
       let _fb = d._bk;
       if (_fb && _fb.dpr !== _dnDprNow) _fb = d._bk = undefined;   // a render-scale change retired it (as below)
       if (_fb === undefined && _dnBakeBudget > 0) { _dnBakeBudget--; _fb = d._bk = _dnBake(d, txt, col, baseSize); }   // a short-lived number that never settled bakes here, so it never draws full-size for a frame
@@ -149849,7 +149988,7 @@ function drawDamageNumbers() {
         continue;
       }
     }
-    if (age >= 10 && !rot && scale > 0.88 && scale < 1.12) {
+    if (age >= 10 && !rot && scale > 0.88 && scale < 1.12 && !(_dnFading && _dnAtlasable)) {   // v0.30.815 dn-atlas — not while a figure fades: the 1:1 blit would hold it at full size, then jump
       let _bk = d._bk;
       // v0.30.466 — the governor can change the render scale between the bake and the blit;
       // a raster from the old scale is retired so the next frame rebakes at the live one.
@@ -149900,6 +150039,19 @@ function drawDamageNumbers() {
       }
     }
 
+    // v0.30.815 dn-atlas — THE POP BLITS GLYPHS. Everything that reaches this point used to rasterise text: the pop,
+    // the wobble, a fade with no bake. A damage figure now draws those frames from a glyph atlas baked once for
+    // its (base size, pop size, style, colour) - a true 5 px outline at that exact size, one row per pass so the
+    // layers stack as the live path stacks them - and only falls through to live text when its atlas is not
+    // built yet (one build per frame), or when it is a B/G sticker or a word.
+    let _dnAtlasDone = false;
+    if (_dnAtlasable && (_dnLowFx_top || _dnFading)) {   // the pop in a boss / heavy scene (the frames that need it); the fade tail everywhere (see the gate above)
+      const _b0 = baseSize | 0, _apx = _lxDnAtlasPx4(_b0, scale || 1);
+      const _at = _lxDnAtlasGet(_b0, _apx, baseSize, d, col, _dnTk, _dnLowFx_top, _dnStress, _dnDprNow);
+      if (_at && _lxDnAtlasBlit(_at, txt, scale || 1, !!(rot && !_dnLowFx_top))) _dnAtlasDone = true;
+    }
+    const _dnLowFx = _dnLowFx_top || _dnStress;
+    if (!_dnAtlasDone) {
     // v0.25.694 — Perf: ground-shadow layer no longer pays a save/restore.
     // It only mutates globalAlpha + fillStyle, both of which we restore
     // inline before the main fill. Saves ~30 µs/number × 30-50 numbers =
@@ -150051,7 +150203,7 @@ function drawDamageNumbers() {
     // v0.25.695 — _dnLowFx now hoisted to function top as _dnLowFx_top; we
     // alias here so the existing per-line conditionals read clean.
     // v0.25.718 — Also skip in stress mode for the same framerate reason.
-    const _dnLowFx = _dnLowFx_top || _dnStress;
+    // (v0.30.815 dn-atlas — _dnLowFx is declared above the live passes now; the sparkles below read it too)
 
     // Top specular highlight — clip to text, paint a bright horizontal band
     if ((d.crit || d.big || _dnTk) && !_dnLowFx) {
@@ -150068,6 +150220,7 @@ function drawDamageNumbers() {
     }
 
     // Crit sparkle — 4 tiny + marks around the number for the first few frames
+    }   // v0.30.815 dn-atlas — end of the live text passes
     if (d.crit && age < 8 && !_dnLowFx) {
       // v0.25.694 — Sparkle save/restore eliminated; we only change
       // globalAlpha / strokeStyle / lineWidth which are restored inline.

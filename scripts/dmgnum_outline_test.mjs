@@ -37,17 +37,21 @@ const r = await page.evaluate(async () => {
       const rec = { args: a.length, rasterW: im.width, rasterH: im.height, a: +t.a.toFixed(4) };
       if (a.length === 2) { rec.devX = +(t.a * a[0] + t.e).toFixed(4); rec.devY = +(t.d * a[1] + t.f).toFixed(4); rec.devW = im.width * t.a; rec.devH = im.height * t.d; }
       else if (a.length === 4) { rec.devX = +(t.a * a[0] + t.e).toFixed(4); rec.devY = +(t.d * a[1] + t.f).toFixed(4); rec.devW = +(t.a * a[2]).toFixed(4); rec.devH = +(t.d * a[3]).toFixed(4); }
+      else if (a.length === 8) { rec.atlas = true; rec.rasterW = a[2]; rec.rasterH = a[3]; rec.devX = +(t.a * a[4] + t.e).toFixed(4); rec.devY = +(t.d * a[5] + t.f).toFixed(4); rec.devW = +(t.a * a[6]).toFixed(4); rec.devH = +(t.d * a[7]).toFixed(4); }   // dn-atlas: a glyph cell, source rect = the raster
       blits.push(rec);
     }
     return _di.apply(this, arguments);
   };
-  ctx.strokeText = function (txt, x, y) {
+  // dn-atlas: the pop and the fade may blit glyphs instead of stroking live, so the black outline is read wherever it is
+  // actually stroked - the live path on the main context, the settled bake and the atlas build on their own canvases.
+  const _P = CanvasRenderingContext2D.prototype, _pst = _P.strokeText;
+  _P.strokeText = function (txt, x, y) {
     if (String(this.strokeStyle) === '#000000') strokes.push(+(this.lineWidth * this.getTransform().a).toFixed(3));
-    return _st.apply(this, arguments);
+    return _pst.apply(this, arguments);
   };
   game.damageNumbers = [mk(400, 40), mk(700, 56)];
   for (let i = 0; i < 14; i++) { drawDamageNumbers(); for (const d of game.damageNumbers) d.life--; }
-  ctx.drawImage = _di; ctx.strokeText = _st;
+  ctx.drawImage = _di; _P.strokeText = _pst;
   const whole = (v) => Math.abs(v - Math.round(v)) < 0.01;
   return {
     dpr: _LX_DPR, n: blits.length,

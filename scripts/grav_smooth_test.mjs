@@ -72,10 +72,15 @@ try {
     const uiK = (game._uiScale > 0) ? game._uiScale : 1;
     fading._bk = _dnBake(fading, '1234\u2605', '#ffd24a', (18 + 4) * uiK);   // it settled earlier and holds its bake
     game.damageNumbers = [fading];
+    drawDamageNumbers();   // (dn-atlas: the first fading figure of a size builds its glyph atlas - text, once. Count the warm draw.)
     out.fade = count(() => drawDamageNumbers());
     const popping = mk(37, 40);                                    // age 3: mid pop
     game.damageNumbers = [popping];
+    // (dn-atlas, later build: in a boss scene the pop blits glyphs. This check is about the LIVE path, so the atlas is held off for it;
+    //  scripts/dn_atlas_pop_test.mjs covers the atlas.)
+    const _atWas = (typeof _LX_DN_ATLAS_ON !== 'undefined') ? _LX_DN_ATLAS_ON : null; if (_atWas !== null) _LX_DN_ATLAS_ON = false;
     out.pop = count(() => drawDamageNumbers());
+    if (_atWas !== null) _LX_DN_ATLAS_ON = _atWas;
     game.damageNumbers = saved;
     // 3. the stand-in
     const boss = game.monsters.find((x) => x && x.type === 'gravitos' && x.currentHp > 0);
@@ -148,7 +153,7 @@ try {
 
   ok('FRAMES RAN: the sim actually stepped', (U.framesRan | 0) > 10, `${U.framesRan} frames`);
   ok('THE FADE TAIL BLITS THE BAKE: one bitmap, no text passes; the pop still draws live text',
-    U.fade.drawImage === 1 && U.fade.fillText === 0 && U.fade.strokeText === 0 && U.pop.strokeText >= 2 && U.pop.fillText >= 1,
+    U.fade.drawImage >= 1 && U.fade.fillText === 0 && U.fade.strokeText === 0 && U.pop.strokeText >= 2 && U.pop.fillText >= 1,   // (dn-atlas: a fading FIGURE blits glyph cells now - several blits, still no text)
     `fading number: ${JSON.stringify(U.fade)} (previous build: 4+ text passes); popping number: ${JSON.stringify(U.pop)}`);
   ok('THE STAND-IN IS THE LAST DRAWN CANVAS, never the raw first frame; without one the old hold is unchanged',
     U.standIn.withLast === 'last canvas' && U.standIn.withoutLast === 'raw (as before)', JSON.stringify(U.standIn));
