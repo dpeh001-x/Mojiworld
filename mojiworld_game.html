@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.838';
+const GAME_VERSION = 'v0.30.839';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -93835,6 +93835,11 @@ function bossAI(m, dt, distToPlayer) {
     m._rainTimer  -= dt;
     m._warpTimer  -= dt;
     if (m.phase !== phase) {
+      // v0.30.x grav-ohko-cut — an HP tier cut short a one-shot still running (a Collapse Rain between boxes, a Soul Drain
+      // wind-up, a Singularity): stamp its END, as each pattern's own exit does. Without it form 3 measured its one-shot
+      // window from the rain's CAST (v0.30.836 only covers a field still on screen), so the next one could be warned
+      // ~15 s after the last box instead of the full window.
+      if (m.patternState === 'collapseRain' || m.patternState === 'soulDrain' || m.patternState === 'singularity') m._lastOhkoEndAt = game.time | 0;
       m.phase = phase;
       m.patternTimer = 0;
       m.patternState = 'idle';
@@ -93877,7 +93882,11 @@ function bossAI(m, dt, distToPlayer) {
       const _warpCd = phase === 1 ? 45000 : phase === 2 ? 30000 : 20000;
       const _sgActive = game.hazards && game.hazards.some(h =>
         h.type === 'gravitos_singularity' || h.type === 'gravitos_singularity_zone');
-      if (player && player.hp > 0 && (player.invulnerable | 0) <= 0 && !_sgActive) {
+      // v0.30.x grav-ohko-cut — nor during a one-shot's warning or its run: a warp on the last warning frame dropped the player
+      // under 3x gravity into a Collapse Rain box or out of Soul Drain's line-of-sight answer, which the 8 s promise below
+      // (warp -> no OHKO) never covered, because it only spaces a one-shot that has not been queued yet.
+      const _ohkoLive = m._ohkoWarnUntil != null || m.patternState === 'collapseRain' || m.patternState === 'soulDrain' || m.patternState === 'singularity';
+      if (player && player.hp > 0 && (player.invulnerable | 0) <= 0 && !_sgActive && !_ohkoLive) {
         const _ww = (game.mapData && game.mapData.worldWidth) || 2200;
         const _ox = player.x + player.w / 2, _oy = player.y + player.h / 2;
         // Departure implosion at the old position.
@@ -99732,6 +99741,14 @@ function killMonster(m) {
       m._gravCadenceMul = 1.45;
     }
     // Reset timers / pattern / hazards so the new form starts fresh
+    // v0.30.x grav-ohko-cut — ...including a one-shot. A warning up when the form died still fired its move once the
+    // deadline passed (the firing branch checks no spacing), 0-3.5 s into the new form, on top of its black flash, title
+    // card and platform drop - and as the form's full-HP -99% variant. A warned or running one-shot is dropped here and
+    // stamped as ended, with the skill clock, so the new form opens on the same 8 s quiet a finished one-shot leaves.
+    if (m._ohkoWarnUntil != null || m.patternState === 'collapseRain' || m.patternState === 'soulDrain' || m.patternState === 'singularity') {
+      m._ohkoWarnUntil = null; m._ohkoQueued = null;
+      m._lastOhkoEndAt = m._lastSkillAt = game.time | 0;
+    }
     m.stunTimer = 0; m.freezeTimer = 0;
     m.attackTimer = 0; m.attackCooldown = 0;
     m.patternTimer = 0; m.patternState = 'idle';
