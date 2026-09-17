@@ -11998,6 +11998,11 @@ The sleeping world is listening.</div>
         </select>
       </div>
     </div>
+    <!-- v0.30.x grav-gpu — which chip draws the game (see _lxGpuInfo). A player reporting lag can read this out. -->
+    <div class="settings-row sub" id="set-gpu-row">
+      <label title="The graphics chip your browser is using to draw the game. On a PC with a graphics card this should name the card. 'Integrated' or 'software' here explains slow frames: plug the monitor into the graphics card, turn on hardware acceleration in the browser, or update the graphics driver.">&nbsp;&nbsp;&#8226; Drawing on</label>
+      <div class="ctrl" style="justify-content:flex-end;"><span class="val" id="set-gpu-val" style="max-width:300px;text-align:right;white-space:normal;line-height:1.25;">&hellip;</span></div>
+    </div>
     <div class="settings-row sub">
       <label title="Rain, snow and dust. Turning this off only hides the particles — weather still applies its elemental damage bonuses, so combat is unchanged.">&nbsp;&nbsp;&#8226; Weather Effects</label>
       <div class="ctrl" style="justify-content:flex-end;">
@@ -12685,7 +12690,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.829';
+const GAME_VERSION = 'v0.30.830';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -13166,6 +13171,38 @@ function _lxRendererIsSoftware() {
   } catch (e) { return false; }
 }
 try { if (_lxRendererIsSoftware()) _lxSetNoBackdrop('software renderer'); } catch (e) {}
+// v0.30.x grav-gpu — WHICH CHIP IS DRAWING (Gravitos lag, per user: "my tester is still experiencing a lot of lag", on an
+// RTX 4060). Measured, a Gravitos fight's frame is mostly canvas raster work handed to the GPU, which a discrete card
+// makes cheap - unless the browser is not using it: a monitor cabled to the motherboard (the i5-10400's UHD 630 draws
+// everything), a blocklisted driver, or hardware acceleration switched off. The detection above only removed the blurs
+// silently. Settings now names the renderer, and a software renderer is told to the player once a session.
+let _lxGpuCache = null;
+function _lxGpuInfo() {
+  if (_lxGpuCache) return _lxGpuCache;
+  let raw = '';
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (gl) { const dbg = gl.getExtension('WEBGL_debug_renderer_info'); raw = String((dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)) || ''); }
+    const lose = gl && gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+  } catch (e) {}
+  // "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)" -> "NVIDIA GeForce RTX 4060"
+  let name = raw;
+  const m = raw.match(/^ANGLE \(([^,]+),\s*(.+?)(?:\s+Direct3D.*|\s+OpenGL.*|\s+Vulkan.*|,\s*[^,]*)?\)\s*$/);
+  if (m) name = m[2];
+  name = name.replace(/\s*\(0x[0-9a-f]+\)/i, '').replace(/\s+/g, ' ').trim() || 'unknown';
+  const software = !raw || /swiftshader|llvmpipe|basic render|software|microsoft basic/i.test(raw);
+  const integrated = !software && /intel|uhd graphics|iris|radeon\(tm\) graphics|radeon graphics|vega \d|adreno|mali|apple m\d/i.test(raw) && !/arc a\d|nvidia|geforce|quadro|rtx|gtx|radeon rx/i.test(raw);
+  _lxGpuCache = { raw, name, software, integrated };
+  return _lxGpuCache;
+}
+try {
+  if (_lxGpuInfo().software) {
+    setTimeout(() => {
+      try { if (typeof showToast === 'function') showToast('\u26A0 The game is drawing without your graphics card (software rendering), so it will run slowly. Turn on hardware acceleration in your browser, or update the graphics driver. Settings \u2192 Drawing on shows what it uses.', 'epic'); } catch (e) {}
+    }, 12000);
+  }
+} catch (e) {}
 
 // v0.30.281 — CHOOSING LOW ENGAGES THE MEASURED LEVERS IMMEDIATELY.
 // The Low preset used to gate only canvas-side systems (weather / ambient /
@@ -41640,6 +41677,10 @@ function _lxGfxSwitchChanged() {
 }
 function openSettingsModal() {
   const s = _lxGetSettings();
+  try {   // v0.30.x grav-gpu
+    const g = _lxGpuInfo(), el = document.getElementById('set-gpu-val');
+    if (el) { el.textContent = g.name + (g.software ? ' \u00B7 software (slow)' : g.integrated ? ' \u00B7 integrated' : ''); el.style.color = g.software ? '#ff8a7a' : g.integrated ? '#ffd27a' : ''; el.title = g.raw; }
+  } catch (e) {}
   {
     _lxGfxBase = s.gfxBase || ((s.gfx && s.gfx !== 'custom') ? s.gfx : 'high');
     const sel = document.getElementById('set-gfx');
@@ -150166,10 +150207,18 @@ let _lxDnAtlasPx = 0;
 let _lxDnAtlasBudget = 0;                  // builds still allowed this frame (drawDamageNumbers resets it)
 // The pop's size, snapped to a 4% ladder hung on the base size (so scale 1 is exactly the base) and then to the
 // half-pixel grid: the four frames around the apex share one atlas, and a pop needs six or seven, not ten.
-const _LX_DN_ATLAS_LN = Math.log(1.04);
+// v0.30.x grav-atlas — SIZE BUCKETS x1.12, ROUNDED UP, BLITTED AT THE EXACT SIZE (Gravitos lag, per user: "my tester is still
+// experiencing a lot of lag"). v0.30.815 built one atlas per 4% of pop scale. A popping number walks ~38 of those, times its
+// colour (4 in a Gravitos fight) and base size (3-4), and at 1080p (render scale 1.93) an atlas is ~313k device px - so only
+// 38 fit under the 12 MP cap. Measured in a form-3 fight at 2x CPU throttle: the cache evicted and rebuilt continuously,
+// 46-144 builds in 8 s at ~9 ms each, plus a texture upload per build. Now a bucket is 12% wide and always the next size UP,
+// and _lxDnAtlasBlit scales the glyphs down to the exact size (at most 12%, inside a 10-frame pop or the fade tail), so a
+// pop needs ~13 atlases and the fight's working set fits.
+const _LX_DN_ATLAS_STEP = 1.12;
+const _LX_DN_ATLAS_LN = Math.log(_LX_DN_ATLAS_STEP);
 function _lxDnAtlasPx4(b0, scale) {
-  const k = Math.round(Math.log(Math.max(0.05, scale)) / _LX_DN_ATLAS_LN);
-  return Math.max(4, Math.round(b0 * Math.pow(1.04, k) * 2) / 2);
+  const k = Math.ceil(Math.log(Math.max(0.05, scale)) / _LX_DN_ATLAS_LN - 1e-6);
+  return Math.max(4, Math.ceil(b0 * Math.pow(_LX_DN_ATLAS_STEP, k) * 2) / 2);
 }
 function _lxDnAtlasGet(b0, px, baseSize, d, col, tk, lowFx, stress, dpr) {
   const key = b0 + '|' + px + '|' + (d.crit ? 1 : 0) + (d.big ? 1 : 0) + (tk ? 1 : 0) + '|' + col + '|' + (lowFx ? 1 : 0) + (stress ? 1 : 0) + '|' + dpr;
@@ -150251,7 +150300,8 @@ function _lxDnAtlasBuild(b0, px, baseSize, d, col, tk, lowFx, stress, dpr) {
 // wobbling, and scaled by the pop; the glyphs are already the popped size, so the scale is cancelled. With no
 // rotation the blits land on whole device pixels at exactly their own size - no resample, the same guarantee
 // the settled bitmap carries (v0.30.466). Returns false (draw live) if a glyph is missing or the matrix is unreadable.
-function _lxDnAtlasBlit(at, txt, scale, rotated) {
+function _lxDnAtlasBlit(at, txt, scale, rotated, fit) {
+  const r = (fit > 0 && fit <= 1) ? fit : 1;   // v0.30.x grav-atlas — the wanted size over the atlas's (bucketed up) size
   const n = txt.length; let wTot = 0;
   for (let i = 0; i < n; i++) { const c0 = at.cells.get(txt[i]); if (!c0) return false; wTot += c0.adv; }
   const dpr = at.dpr;
@@ -150260,12 +150310,12 @@ function _lxDnAtlasBlit(at, txt, scale, rotated) {
     if (!tf) return false;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const oy = Math.round(tf.f - at.base * dpr);
-    for (let r = 0; r < at.rows; r++) {
+    const oy = Math.round(tf.f - at.base * dpr * r);
+    for (let row = 0; row < at.rows; row++) {
       let pen = -wTot / 2;
       for (let i = 0; i < n; i++) {
         const c0 = at.cells.get(txt[i]);
-        ctx.drawImage(at.cv, c0.sx, r * at.rowH, c0.sw, at.cellH, Math.round(tf.e + (pen - at.pad) * dpr), oy, c0.sw, at.cellH);
+        ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, Math.round(tf.e + (pen - at.pad) * dpr * r), oy, c0.sw * r, at.cellH * r);
         pen += c0.adv;
       }
     }
@@ -150273,12 +150323,12 @@ function _lxDnAtlasBlit(at, txt, scale, rotated) {
     return true;
   }
   ctx.save();
-  if (scale !== 1) ctx.scale(1 / scale, 1 / scale);
-  for (let r = 0; r < at.rows; r++) {
+  if (r / scale !== 1) ctx.scale(r / scale, r / scale);   // v0.30.x grav-atlas — the atlas's size, fitted to the exact one
+  for (let row = 0; row < at.rows; row++) {
     let pen = -wTot / 2;
     for (let i = 0; i < n; i++) {
       const c0 = at.cells.get(txt[i]);
-      ctx.drawImage(at.cv, c0.sx, r * at.rowH, c0.sw, at.cellH, pen - at.pad, -at.base, c0.sw / dpr, at.cellH / dpr);
+      ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, pen - at.pad, -at.base, c0.sw / dpr, at.cellH / dpr);
       pen += c0.adv;
     }
   }
@@ -150625,7 +150675,7 @@ function drawDamageNumbers() {
     if (_dnAtlasable && (_dnLowFx_top || _dnFading)) {   // the pop in a boss / heavy scene (the frames that need it); the fade tail everywhere (see the gate above)
       const _b0 = baseSize | 0, _apx = _lxDnAtlasPx4(_b0, scale || 1);
       const _at = _lxDnAtlasGet(_b0, _apx, baseSize, d, col, _dnTk, _dnLowFx_top, _dnStress, _dnDprNow);
-      if (_at && _lxDnAtlasBlit(_at, txt, scale || 1, !!(rot && !_dnLowFx_top))) _dnAtlasDone = true;
+      if (_at && _lxDnAtlasBlit(_at, txt, scale || 1, !!(rot && !_dnLowFx_top), (_b0 * (scale || 1)) / _apx)) _dnAtlasDone = true;
     }
     const _dnLowFx = _dnLowFx_top || _dnStress;
     if (!_dnAtlasDone) {
