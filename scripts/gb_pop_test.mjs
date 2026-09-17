@@ -169,9 +169,10 @@ try {
   ok('A HELD ROW IS REALLY PAUSED: it burns no life while it waits',
     R.hold.lifeBefore === R.hold.lifeAfter && R.hold.stillHeld === true,
     `life ${R.hold.lifeBefore} -> ${R.hold.lifeAfter} across 3 frames while still held (wait ${R.hold.waited} frames)`);
-  ok('THEY OVERLAP HARD, AND STILL READ: pitch well under the ink, rows stepped diagonally',
-    R.pitch < I.bg.h * 0.55 && new Set(R.cascade.dx).size === 4 &&
-      Math.max(...R.cascade.dx) - Math.min(...R.cascade.dx) >= R.xstep * 2,
+  // v0.30.751 gb-core, per user: "the burst overlap can be vertically just above each other" - the diagonal step is 0;
+  // v0.30.807 gb-pile tightened the pitch to 32 and stacks the newest row in front
+  ok('THEY OVERLAP HARD, STACKED STRAIGHT UP: pitch well under the ink, no sideways step',
+    R.pitch < I.bg.h * 0.55 && R.xstep === 0 && R.cascade.dx.every((v) => v === 0),
     `pitch ${R.pitch} against ${I.bg.h}px of ink (${Math.round(100 - R.pitch / I.bg.h * 100)}% buried); diagonal offsets ${JSON.stringify(R.cascade.dx)}`);
   ok('THE ARRIVAL FLASH AND THE HARDER SLAM ARE WIRED',
     R.flash > 0 && R.slam >= 4,

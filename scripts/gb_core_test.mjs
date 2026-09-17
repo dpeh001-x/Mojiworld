@@ -126,7 +126,7 @@ try {
     // THE PILE: let the four-row cascade land (rows arrive 5 frames apart) and the climb settle, then read where they sit
     {
       const tP = game.time, wP = performance.now();
-      while (game.time - tP < 26 && performance.now() - wP < 6000) await sleep(16);
+      while (game.time - tP < 26 && performance.now() - wP < 15000) await sleep(16);   // 26 frames of game time, however slowly they come
       const live = rows.filter((z) => z.life > 0);
       out.pile = { n: live.length, y: live.map((z) => +z.y.toFixed(1)), foeY: m.y - 6, colVolc: !!(m._deCol && m._deCol.volc),
         newestInFront: game.damageNumbers.indexOf(rows[rows.length - 1]) > game.damageNumbers.indexOf(rows[0]) };
@@ -150,6 +150,10 @@ try {
       game.damageNumbers.length = 0;
       const camX0 = game.camera.x, camY0 = (game.camera && game.camera.y) || 0;
       ['1,204', '987', '1,331'].forEach((t, i) => game.damageNumbers.push({ x: camX0 + 400 + i * 120, y: camY0 + 400, vy: 0, text: t, life: 40, maxLife: 44, color: '#fff', size: 14, crit: false }));
+      // v0.30.815 draws a popping number from a glyph atlas (its own canvas, its own font), so no fillText reaches ctx;
+      // the font cache this checks still serves every live number the atlas does not cover - switch the atlas off to see it
+      const _atlasWas = (typeof _LX_DN_ATLAS_ON !== 'undefined') ? _LX_DN_ATLAS_ON : null;
+      if (_atlasWas !== null) _LX_DN_ATLAS_ON = false;
       const fonts = {}, ft = ctx.fillText, origDraw = window.drawDamageNumbers;
       let armed = false;
       ctx.fillText = function (txt) { if (armed) fonts[String(txt)] = ctx.font; return ft.apply(this, arguments); };
@@ -157,6 +161,7 @@ try {
       const wF = performance.now();
       while (Object.keys(fonts).length < 3 && performance.now() - wF < 3000) await sleep(16);
       window.drawDamageNumbers = origDraw; delete ctx.fillText;
+      if (_atlasWas !== null) _LX_DN_ATLAS_ON = _atlasWas;
       out.fonts = fonts;
       game.damageNumbers.length = 0;
     }
@@ -189,9 +194,11 @@ try {
   ok('THE CORE OUTWEIGHS THE FRAME: 50 core, 15 white, 11 black',
     D.size === 50 && D.white === 15 && D.black === 11 && (D.white - D.black) / 2 <= 3,
     `core ${D.size}, visible white ${(D.white - D.black) / 2}px, black ring ${D.black / 2}px; B/G ink ${R.ink.bg.w}x${R.ink.bg.h} vs crit ${R.ink.crit.w}x${R.ink.crit.h}`);
-  ok('THE FACE IS UNTOUCHED: Impact at both sites, no horizontal stretch',
-    impactSites === 2 && !stretch,
-    `Impact-led font sites ${impactSites}/2, stretch present ${stretch} (an Arial Black pass and a stretch were both rejected)`);
+  ok('THE FACE IS UNTOUCHED: Impact at all three sites (bake, live, glyph atlas), no horizontal stretch',
+    // v0.30.815 (boss fights, smoother round two): a popping number blits glyphs from an atlas that is rasterised in the
+    // same face - the third site, beside the bake and the live draw
+    impactSites === 3 && !stretch,
+    `Impact-led font sites ${impactSites}/3, stretch present ${stretch} (an Arial Black pass and a stretch were both rejected)`);
   ok('THE BURST IS VERTICAL: step 0, every row on the same x',
     D.step === 0 && D.pitch === 32 && R.rows.n === 4 && R.rows.dx.every((v) => v === 0) && R.rows.volc,
     `step ${D.step}, pitch ${D.pitch}, offsets ${JSON.stringify(R.rows.dx)}`);

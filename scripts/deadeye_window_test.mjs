@@ -118,7 +118,8 @@ const R = await page.evaluate(async () => {
   out.cues = {}; for (const k of cueKeys) { const f = _SKILL_SFX_FILES[k]; out.cues[k] = f ? (await fetch(f)).status : 'unmapped'; }
   out.icons = {}; for (const k of ['marksman_oneshot', 'marksman_ult']) { const im = new Image(); im.src = 'Sprites/skills/' + k + '.webp'; try { await im.decode(); } catch (e) {} _skillIconUrl(k); out.icons[k] = im.naturalWidth; }
   await sleep(300); out.iconStatus = { a: _skillIconStatus.marksman_oneshot, b: _skillIconStatus.marksman_ult };
-  out.desc = { de: SKILLS.marksman_oneshot.desc, pr: SKILLS.marksman_ult.desc, emoji: SKILLS.marksman_ult.icon, sig: (typeof MASTERS !== 'undefined' && MASTERS.marksman) ? MASTERS.marksman.signature : null };
+  out.desc = { de: SKILLS.marksman_oneshot.desc, pr: SKILLS.marksman_ult.desc, emoji: SKILLS.marksman_ult.icon, sig: (typeof MASTERS !== 'undefined' && MASTERS.marksman) ? MASTERS.marksman.signature : null,
+    deAtk: String(+(+LX_DEADEYE_LINE_ATK).toFixed(2)), prAtk: String(+(+LX_PROTOCOL_LINE_ATK).toFixed(2)) };   // the user's Skill Editor owns these numbers
   // ---- 6. the frame budget under a full mash with three foes ----------------------------------
   const prof = {}; const wrap = (n) => { const f = window[n]; if (typeof f !== 'function') return; prof[n] = 0; window[n] = function () { const a = performance.now(); try { return f.apply(this, arguments); } finally { prof[n] += performance.now() - a; } }; };
   for (const n of ['_lxDeadeyeDraw', 'drawDamageNumbers', 'drawProjectiles', 'updateProjectiles', 'updateMonsters', 'hitMonster', 'drawSmoothFx', 'drawMonsters', 'drawPlayer']) wrap(n);
@@ -136,9 +137,11 @@ await browser.close(); server.kill();
 console.log(JSON.stringify(R));
 const checks = [
   ['the names stay', R.name === 'Deadeye' && R.ultName === 'Deadeye Protocol'],
-  ['sizeable cooldowns: 30 s and 60 s', R.cdDef === 30000 && R.ultCdDef === 60000, `${R.cdDef} / ${R.ultCdDef}`],
+  // v0.30.778 (the user's own skill numbers) set Deadeye to 40 s; the Skill Editor owns exact cooldowns, so this holds the intent: sizeable
+  ['sizeable cooldowns: at least 30 s and 60 s', R.cdDef >= 30000 && R.ultCdDef >= 60000, `${R.cdDef} / ${R.ultCdDef}`],
   ['the opening press pays MP; presses inside are free', R.mpFirst > 0 && R.mpFollow === 0, `${R.mpFirst} then ${R.mpFollow}`],
-  ['the first press is 3 lines on the marked foe, in 3 rows, with a running total', R.linesFirst === 3 && R.rowsFirst === 3 && R.sumFirst && R.markIsA && R.aHurt, `${R.linesFirst} lines / ${R.rowsFirst} rows / sum ${R.sumFirst} / numbers: ${R.textsFirst}`],
+  // v0.30.760 de-gold, per user: "remove the total damage line, keep the rows"
+  ['the first press is 3 lines on the marked foe, in 3 rows, and no running total', R.linesFirst === 3 && R.rowsFirst === 3 && !R.sumFirst && R.markIsA && R.aHurt, `${R.linesFirst} lines / ${R.rowsFirst} rows / sum ${R.sumFirst} / numbers: ${R.textsFirst}`],
   ['every line lands on ONE target (the second foe is never touched)', R.bUntouched && R.bStillUntouched],
   ['it is spammy: presses land at the 420 ms gate through one 6 s window', R.presses >= 10 && R.msPerPress <= 560, `${R.presses} presses, ${R.msPerPress} ms apart (${R.framesPerPress} frames)`],
   ['the window closes onto the real cooldown and nothing fires after', R.cdAfter > 20000 && R.late === 0, `cd ${R.cdAfter} ms, late ${R.late}`],
@@ -152,7 +155,7 @@ const checks = [
   ['the four cues are mapped and served', Object.values(R.cues).every((v) => v === 200), JSON.stringify(R.cues)],
   ['a window opening plays the lock-on cue, and the Execute Round its boom', R.played.includes('deadeye_lock') && R.played.includes('deadeye_execute'), R.played.join(',')],
   ['the skill-bar icons are the new 256 px art and resolve', R.icons.marksman_oneshot === 256 && R.icons.marksman_ult === 256 && R.iconStatus.a === 'ok' && R.iconStatus.b === 'ok', JSON.stringify(R.icons) + ' ' + JSON.stringify(R.iconStatus)],
-  ['the descriptions carry the real numbers', /50% ATK/.test(R.desc.de) && /30s cooldown starts when the window closes/.test(R.desc.de) && /60% ATK/.test(R.desc.pr) && /EXECUTE ROUND/.test(R.desc.pr) && R.desc.emoji === '⚡' && /Deadeye Protocol overclocks/.test(R.desc.sig || ''), R.desc.emoji + ' / ' + R.desc.sig],
+  ['the descriptions carry the real numbers', R.desc.de.includes(R.desc.deAtk + '× ATK') && /cooldown starts when the window closes/i.test(R.desc.de) && R.desc.pr.includes(R.desc.prAtk + '× ATK') && /EXECUTE ROUND/.test(R.desc.pr) && R.desc.emoji === '⚡' && /Deadeye Protocol overclocks/.test(R.desc.sig || ''), R.desc.emoji + ' / ' + R.desc.sig],
   ['the art is registered and decoded', R.fx.tracer && R.fx.reticle && R.fx.keyed && R.fx.hitFrames === 9 && R.fx.execFrames === 9 && R.fx.round && R.fx.exec, JSON.stringify(R.fx)],
   // (headless software GL; the module's own draw and the hit path each measure well under 0.1 ms a frame - see perfBoth.per)
   ['a full mash of both windows stays inside the frame budget', R.avgFrame < 14 && R.dnCount <= 30 && R.perfBoth.per._lxDeadeyeDraw < 0.5 && R.perfBoth.per.hitMonster < 0.5, `${R.avgFrame} ms avg, ${R.dnCount} numbers alive, module draw ${R.perfBoth.per._lxDeadeyeDraw} ms, hitMonster ${R.perfBoth.per.hitMonster} ms`],

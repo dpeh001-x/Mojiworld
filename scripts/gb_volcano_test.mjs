@@ -146,22 +146,24 @@ try {
   ok('NO LEAN LEFT ANYWHERE: not on the entry, not in the source',
     ['small', 'mid', 'big', 'huge'].every((k) => R[k].leans.every((v) => v === undefined)) && !leanInSrc && !splitInSrc,
     `entry leans undefined, _gbLean in source ${leanInSrc}, split machinery in source ${splitInSrc}`);
-  ok('LARGER THAN A NORMAL ATTACK: rows clear a crit, the total clears the rows',
-    R.mid.sizes.every((v) => v > 18) && R.mid.sumSize > R.mid.sizes[0],
+  // v0.30.730 gb-gold, per user: "There should not be a B / G total displayed" - the rows carry it alone
+  ok('LARGER THAN A NORMAL ATTACK: rows clear a crit, and no total rides above them (v0.30.730)',
+    R.mid.sizes.every((v) => v > 18) && R.mid.sumSize === null,
     `row ${R.mid.sizes[0]} vs normal 14 / crit 18; total ${R.mid.sumSize}`);
   ok('IT ERUPTS: the volcano flag, molten colours and a four-stop magma ramp',
-    R.mid.volc && R.mid.sumVolc && /^#/.test(R.mid.colors[0] || '') &&
+    R.mid.volc && /^#/.test(R.mid.colors[0] || '') &&   // v0.30.730: no total to carry the flag
       Array.isArray(R.ramp.top) && R.ramp.top[0] > 200 && R.ramp.top[1] > 180 &&
       Array.isArray(R.ramp.bottom) && R.ramp.bottom[0] > 120 && R.ramp.bottom[1] < 90,
     `rows ${R.mid.colors[0]}, total ${R.mid.sumColor}, ramp top rgb(${R.ramp.top}) -> bottom rgb(${R.ramp.bottom})`);
-  ok('EMBERS FLY: the total throws hot particles as it climbs',
+  ok('EMBERS FLY: the row throws hot particles (off the row since v0.30.730 removed the total)',
     R.mid.embers > 0 && R.basic.embers === 0,
     `${R.mid.embers} particles on a B/G hit, ${R.basic.embers} on a basic`);
   ok('THE DAMAGE IS STILL UNTOUCHED: the column costs the monster nothing',
     R.hp.lostWithStack === R.hp.lostPlain && R.hp.lostWithStack > 0,
     `${R.hp.lostWithStack} with the column open vs ${R.hp.lostPlain} with it shut`);
-  ok('CONTROL — A BASIC IS UNAFFECTED: slim row, no eruption, and the total stays at the array tail',
-    R.basic.lines === 1 && R.basic.volc === false && R.basic.sizes.every((v) => v <= 14) && R.basic.sumAtTail === true,
+  // v0.30.760 de-gold: a basic that joins a column takes the slim column row (LX_DE_ROW_SIZE 19), and no total exists
+  ok('CONTROL — A BASIC IS UNAFFECTED: one slim row below the B/G size, no eruption, no total',
+    R.basic.lines === 1 && R.basic.volc === false && R.basic.sizes.every((v) => v < R.mid.sizes[0]) && R.basic.sumAtTail === null,
     `basic: ${R.basic.lines} row at size ${JSON.stringify(R.basic.sizes)}, volc ${R.basic.volc}, total at tail ${R.basic.sumAtTail}`);
 } finally { await browser.close().catch(() => {}); server.kill(); }
 let bad = 0;

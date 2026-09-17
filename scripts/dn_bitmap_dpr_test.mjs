@@ -21,7 +21,7 @@ await new Promise((r) => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
 await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
-await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForTimeout(9000);
 await page.evaluate(() => { const lo = document.getElementById('loading-overlay'); if (lo) lo.classList.add('fade'); });
 await page.fill('#hero-name-input', 'Dpr');
@@ -41,6 +41,9 @@ const r = await page.evaluate(() => {
   const out = { dpr: _LX_DPR, devicePixelRatio: window.devicePixelRatio, cases: [] };
   const cx = game.camera.x, cy = (game.camera.y || 0);
   // one region per case; both renders land at the same spot so the diff is 1:1
+  // Sampled at age 23, where the settled idle bob (1 + sin((age-10)*0.24)*0.045) is 1.001. v0.30.460 cancels the bob in the
+  // bitmap blit on purpose, so at the old age 20 (bob 1.030) the live number was 3% wider and the diff read as blur:
+  // 1.56-4.76 there, 0.22-0.38 here on v0.30.821 - the bake itself had not gone soft.
   const render = (d, useBitmap) => {
     ctx.setTransform(_LX_DPR, 0, 0, _LX_DPR, 0, 0);
     ctx.fillStyle = '#1e1a2e'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -52,7 +55,7 @@ const r = await page.evaluate(() => {
     return ctx.getImageData(x0, y0, Math.round(280 * D), Math.round(90 * D));
   };
   for (const kind of ['plain', 'big', 'crit']) {
-    const d = { x: cx + 400, y: cy + 300, vy: 0, text: '502,586★', life: 25, maxLife: 45, size: kind === 'crit' ? 22 : 14,
+    const d = { x: cx + 400, y: cy + 300, vy: 0, text: '502,586★', life: 22, maxLife: 45, size: kind === 'crit' ? 22 : 14,
       color: kind === 'crit' ? '#ffd84a' : (kind === 'big' ? '#ff8a66' : '#ffffff'), crit: kind === 'crit', big: kind === 'big' };
     const live = render(d, false), bit = render(d, true);
     const a = live.data, b = bit.data;

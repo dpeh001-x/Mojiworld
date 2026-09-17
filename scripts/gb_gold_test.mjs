@@ -131,6 +131,8 @@ try {
       out.deadeye = {
         sums: game.damageNumbers.filter((d) => d && d._deSum).length,
         sumSize: (game.damageNumbers.find((d) => d && d._deSum) || {}).size,
+        rowSize: (game.damageNumbers.find((d) => d && d._deRow !== undefined && !d._deSum) || {}).size,
+        deRowSize: (typeof LX_DE_ROW_SIZE !== 'undefined') ? LX_DE_ROW_SIZE : null,
       };
       drop(m);
     }
@@ -163,8 +165,9 @@ try {
     R.mid.sums === 0 && R.huge.sums === 0 && R.stack.sums === 0,
     `mid ${R.mid.sums}, huge ${R.huge.sums}, after 4 stacked hits ${R.stack.sums} (previous build: 1 each)`);
   ok('THE COLUMN STILL STACKS: four hits fill four rows of ONE column',
-    R.stack.cols === 1 && R.stack.n === 4 && R.stack.filledRows === 4 && R.stack.noSum === true,
-    `${R.stack.cols} column, n=${R.stack.n}, ${R.stack.filledRows} rows filled, noSum ${R.stack.noSum}`);
+    // v0.30.760 de-gold - no column carries a total any more, so the noSum flag that suppressed one is gone: count them
+    R.stack.cols === 1 && R.stack.n === 4 && R.stack.filledRows === 4 && R.stack.sums === 0,
+    `${R.stack.cols} column, n=${R.stack.n}, ${R.stack.filledRows} rows filled, ${R.stack.sums} totals`);
   ok('BIGGER: rows clear a normal hit (14) and a crit (18)',
     R.mid.sizes.every((v) => v >= 30),
     `row size ${JSON.stringify(R.mid.sizes)}`);
@@ -179,9 +182,10 @@ try {
   ok('EXPLOSIVE: a radial blast off the row (the total it used to ride is gone), never on a basic',
     R.mid.embers >= 16 && R.basic.embers === 0 && R.mid.flash > 0,
     `${R.mid.embers} particles + ${R.mid.flash} shockwave flash on a B/G hit; ${R.basic.embers}/${R.basic.flash} on a basic`);
-  ok('CONTROL — DEADEYE KEEPS ITS TOTAL: removing the B/G one did not remove that',
-    R.deadeye.sums === 1 && R.deadeye.sumSize === 22,
-    `deadeye column built ${R.deadeye.sums} total at size ${R.deadeye.sumSize}`);
+  // v0.30.760 de-gold, per user: "remove the total damage line, keep the rows" - Deadeye lost its total too
+  ok('CONTROL — DEADEYE KEEPS ITS ROWS AND HAS NO TOTAL (v0.30.760)',
+    R.deadeye.sums === 0 && R.deadeye.rowSize === R.deadeye.deRowSize,
+    `deadeye column built ${R.deadeye.sums} totals; its row is size ${R.deadeye.rowSize} (LX_DE_ROW_SIZE ${R.deadeye.deRowSize})`);
 } finally { await browser.close().catch(() => {}); server.kill(); }
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
