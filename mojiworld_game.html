@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.840';
+const GAME_VERSION = 'v0.30.841';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -152765,6 +152765,10 @@ function _lxDrawFrame(time) {
 
   _drawOffscreenThreats();   // v0.26.x -- edge arrows for off-screen boss-tier mobs
 }
+// v0.30.x pause-clock — per-monster game.time deadlines shifted while a solo game is paused (see the pause block in loop).
+const _LX_PAUSE_MON_FIELDS = ['_piscesDreamUntil', '_geminiLyingUntil', '_libraImbalanceUntil', '_hexUntil', '_doomUntil',
+  '_sovereignOhkoTick', '_sovCollapseUntil', '_sovSpentUntil', '_sovExposedUntil', '_sovRegaliaEnds', '_sovRegaliaAt',
+  '_sovereignHomingAt', '_sovereignDrainAt', '_sovShardShotAt'];
 function loop(time) {
   // v0.26.946 — boot gate: while the opaque loading overlay is up, skip the
   // sim+render entirely (it was stealing main-thread time from the sprite
@@ -152876,6 +152880,27 @@ function loop(time) {
     if ((player._potionSealNextAt | 0) > _sfT) player._potionSealNextAt = (player._potionSealNextAt | 0) + 1;
     if ((player._potionCdHp | 0) > _sfT) player._potionCdHp = (player._potionCdHp | 0) + 1;
     if ((player._potionCdMp | 0) > _sfT) player._potionCdMp = (player._potionCdMp | 0) + 1;
+    // v0.30.x pause-clock — MORE game.time DEADLINES THAT A MENU WAITED OUT (audit round 2). Each was set as game.time + N
+    // steps and read against game.time, and game.time keeps counting while a solo game is paused:
+    //  - _hitIframeAt: pause 3 s after a hit and its i-frames no longer read as hit-granted, so they carried the player
+    //    through a Singularity / Sovereign collapse that v0.29.283 made lethal;
+    //  - Bastion of Dawn (_bastionArmAt / _bastionArmedUntil) charged to its full 15x behind a menu; Second Skin
+    //    (_skinReadyAt) came off cooldown there;
+    //  - the game.time half of a buff whose ms half is frozen: Guardian / Holy Shield reflect, Holy Shield's damage
+    //    reduction, War of Banners' reach (_warlordBanner) and every hazard's _dieAt (the banner prop); Meteor Sigil's
+    //    window (_sageUntilFr) closed on unpause and charged its full cooldown with the shots unused;
+    //  - boss states: the Tower Sovereign's collapse hold / SPENT / EXPOSED / Regalia / volley / drain / shard clocks (a
+    //    menu mid-telegraph let a homing volley and a drain pillar fire into it, or spawned a second collapse), Pisces'
+    //    Dream Realm, Gemini's Lie and Libra's imbalance (skippable phases), Grand Hex / Doom Brand stacks and Pandemic.
+    if ((player._bastionArmedUntil | 0) > _sfT) { player._bastionArmedUntil++; if (player._bastionArmAt != null) player._bastionArmAt++; }
+    for (const _pf of ['_skinReadyAt', '_guardianReflect', '_holyShieldDrUntil', '_warlordBanner', '_sageUntilFr']) { if ((player[_pf] | 0) > _sfT) player[_pf]++; }
+    if (player._hitIframeAt != null && _sfT - player._hitIframeAt < 400) player._hitIframeAt++;
+    if ((game._hexPandemicUntil | 0) > _sfT) game._hexPandemicUntil++;
+    if (game.hazards) for (const _ph of game.hazards) { if (_ph && _ph._dieAt != null && _ph._dieAt > _sfT) _ph._dieAt++; }
+    if (game.monsters) for (const _pm of game.monsters) {
+      if (!_pm) continue;
+      for (const _pf of _LX_PAUSE_MON_FIELDS) { if (_pm[_pf] != null && _pm[_pf] > _sfT) _pm[_pf]++; }
+    }
     const _sfMs = game.monsters;
     // v0.30.x ward-pause — a boss ward, its BREAK window and the gap to the next ward are game.time deadlines too: a menu
     // opened mid-ward waited it out for free, and one opened during a break let the 1.5x window expire behind it.
