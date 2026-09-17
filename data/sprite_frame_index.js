@@ -545,6 +545,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "clone_strike": 9,
    "crusader_aegis": 9,
    "crusader_ult": 9,
+   "dawn_aura": 9,
    "deadeye_execute": 9,
    "deadeye_hit": 9,
    "doombringer_apoc": 9,

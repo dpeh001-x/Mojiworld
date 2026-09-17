@@ -1,4 +1,5 @@
-// Dawn's Favor - what finishing the story unlocks (v0.30.803) - and the Titles panel that carries it.
+// Dawn's Favor - what finishing the story unlocks (v0.30.803) - and the Titles panel that carries it. The aura is
+// painted art since v0.30.813 (scripts/gen_everdawn_aura.mjs).
 // One character is measured before and after it holds the Conqueror title (what a finished save looks like):
 // coins and kill EXP must pay exactly +10%, the aura must draw and switch off, titles must be choosable, the
 // credits must lead into the panel, and the U panel must offer it. Nothing may change for an unfinished save.
@@ -43,7 +44,10 @@ try {
       const m = spawnMonster(player.x + 120, player.y - 10, 'slime', false); m.exp = 1000000; m.level = player.level;
       const ks = (typeof _ksXpMul === 'function') ? _ksXpMul() : 1, b = player.exp; killMonster(m); return (player.exp - b) / ks;
     };
-    const strokes = () => { let n = 0; const o = ctx.stroke; ctx.stroke = function () { n++; return o.apply(this, arguments); }; try { drawDawnAura(); } finally { ctx.stroke = o; } return n; };
+    // one drawDawnAura() call, counted: painted layers are drawImage calls, the stand-in crown is nine strokes
+    const layers = () => { let st = 0, im = 0; const os = ctx.stroke, oi = ctx.drawImage; ctx.stroke = function () { st++; return os.apply(this, arguments); }; ctx.drawImage = function () { im++; return oi.apply(this, arguments); };
+      try { drawDawnAura(); } finally { ctx.stroke = os; ctx.drawImage = oi; } return { strokes: st, images: im }; };
+    const strokes = () => layers().strokes;
     // ---- an unfinished save ----
     out.before = { done: _lxStoryComplete(), coins: coins(), exp: killExp(), strokes: strokes(), seen: !!player._dawnFavorSeen };
     const hush = () => { for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); } };
@@ -58,7 +62,23 @@ try {
     await sleep(900);                                                     // a few frames: the one-time notice
     out.after = { done: _lxStoryComplete(), coins: coins(), exp: killExp(), strokes: strokes(), seen: !!player._dawnFavorSeen,
       toast: /Dawn's Favor/.test(document.body.innerText) };
-    player.dawnAuraOff = true; out.offStrokes = strokes(); player.dawnAuraOff = false;
+    // v0.30.813 - the painted aura: wait for its art, then count the layers; blank the art to see the stand-in
+    for (let i = 0; i < 150 && !(LX_DAWN_ART.frames && LX_DAWN_ART.halo.naturalWidth && LX_DAWN_ART.sigil.naturalWidth && LX_DAWN_ART.frames.every((f) => f.naturalWidth)); i++) await sleep(100);
+    out.artReady = !!(LX_DAWN_ART.frames && LX_DAWN_ART.frames.every((f) => f.naturalWidth > 0) && LX_DAWN_ART.halo.naturalWidth > 0 && LX_DAWN_ART.sigil.naturalWidth > 0);
+    out.painted = layers();
+    const keepHalo = LX_DAWN_ART.halo; LX_DAWN_ART.halo = new Image(); out.standIn = layers(); LX_DAWN_ART.halo = keepHalo;
+    player.dawnAuraOff = true; out.off = layers(); out.offStrokes = out.off.strokes; player.dawnAuraOff = false;
+    // motes are particles, and particles live in WORLD x: scroll the camera and see where they are born
+    loadMap('forest', 1500); await sleep(1500); hush(); game.paused = false;
+    const born = (emit) => { const n0 = game.particles.length; emit(); return game.particles.slice(n0).filter((p) => !p.text); };
+    const wx = () => player.x + player.w / 2;
+    const motes = born(() => { for (let k = 0; k < 18; k++) { game.time = (game.time | 0) + 1; drawDawnAura(); } });
+    out.motes = { camX: game.camera.x, n: motes.length, worstDx: motes.reduce((m, p) => Math.max(m, Math.abs(p.x - wx())), 0) };
+    const ember = Object.keys(SETS).find((k) => SETS[k].aura && SETS[k].aura.shape === 'ember');
+    const keepSets = player._activeFullSetsCache; player._activeFullSetsCache = [ember];
+    const embers = born(() => { game.time = 8 * Math.ceil(((game.time | 0) + 1) / 8); drawSetAura(); });
+    player._activeFullSetsCache = keepSets;
+    out.embers = { set: ember, n: embers.length, worstDx: embers.reduce((m, p) => Math.max(m, Math.abs(p.x - wx())), 0) };
     openTitlesPanel();
     const rowOf = (t) => [...document.querySelectorAll('#titles-modal .tt-row')].find((b) => b.getAttribute('data-title') === t);
     out.panelAfter = { conquerorWorn: rowOf(LX_TITLE_CONQUEROR).classList.contains('on'), echoLocked: rowOf('Echo Walker').classList.contains('locked'),
@@ -87,7 +107,11 @@ try {
     check(r.escCloses, 'Escape closes the panel and releases the pause');
     check(r.after.done && Math.abs(cr - 1.10) < 0.0005, 'a finished save earns exactly +10% Mojicoins', `${r.before.coins} -> ${r.after.coins} (x${cr.toFixed(4)})`);
     check(Math.abs(er - 1.10) < 0.0005, 'and exactly +10% EXP from a kill', `${r.before.exp} -> ${r.after.exp} (x${er.toFixed(4)})`);
-    check(r.after.strokes === 9 && r.offStrokes === 0, 'the Everdawn Aura draws its nine rays, and none when switched off', `${r.after.strokes} / ${r.offStrokes}`);
+    check(r.artReady && r.painted.images >= 4 && r.painted.strokes === 0, 'the Everdawn Aura is painted: halo, wings (cross-faded, with bloom) and sigil are drawn as art', JSON.stringify(r.painted));
+    check(r.standIn.strokes === 9 && r.standIn.images === 0, 'until the art has decoded the nine-ray stand-in is drawn instead', JSON.stringify(r.standIn));
+    check(r.off.strokes === 0 && r.off.images === 0, 'switched off, nothing is drawn', JSON.stringify(r.off));
+    check(r.motes.camX > 500 && r.motes.n >= 2 && r.motes.worstDx <= 45, 'with the camera scrolled, motes are born at the hero (world x), not at the screen x', JSON.stringify(r.motes));
+    check(r.embers.n >= 1 && r.embers.worstDx <= 30, 'and so are the embers of the set-bonus aura (they used the screen x)', JSON.stringify(r.embers));
     check(r.after.seen && r.after.toast, 'a save that finished before this build is told once', JSON.stringify({ seen: r.after.seen, toast: r.after.toast }));
     check(r.panelAfter.conquerorWorn && !r.panelAfter.echoLocked && r.panelAfter.twinLocked && r.panelAfter.toggle, 'Titles panel after: earned titles wearable, unearned locked, aura switch present', JSON.stringify(r.panelAfter));
     check(r.noTitle.eq === '' && r.noTitle.hud === 'none' && r.lockedClick === '' && r.echo.eq === 'Echo Walker' && /ECHO WALKER/.test(r.echo.hud), 'choosing: no title hides the HUD line, a locked row does nothing, an earned one is worn', JSON.stringify({ n: r.noTitle, l: r.lockedClick, e: r.echo }));
@@ -99,6 +123,9 @@ try {
   const u = await page.evaluate(() => { const row = document.getElementById('u-jump-row'); const t = row && row.querySelector('[data-ujump="titles"]');
     const lbl = row ? row.textContent.replace(/\s+/g, ' ') : ''; if (t) t.click(); return { lbl, opened: !!document.getElementById('titles-modal') }; });
   check(/Compendium L/.test(u.lbl) && !/MojiDex L/.test(u.lbl) && u.opened, 'U panel: the L button says Compendium, and Titles opens the panel', u.lbl);
+  const art = ['Sprites/fx/dawn_halo.webp', 'Sprites/fx/dawn_sigil.webp', 'Sprites/fx/dawn_aura.webp']; for (let i = 0; i < 9; i++) art.push('Sprites/fx/anim/dawn_aura_' + i + '.webp');
+  const served = await page.evaluate(async (list) => { const bad = []; for (const u of list) { try { const r = await fetch(u); if (!r.ok || !/webp/.test(r.headers.get('content-type') || '')) bad.push(u + ' ' + r.status); } catch (e) { bad.push(u + ' ' + e.message); } } return bad; }, art);
+  check(served.length === 0, 'all 12 aura files are served as WebP', served.slice(0, 3).join(' | '));
   check(!errs.length, 'no page errors', errs.slice(0, 2).join(' | '));
 } catch (e) { check(false, 'harness error', String(e.message).slice(0, 300)); }
 await browser.close(); server.kill();
