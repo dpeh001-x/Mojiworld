@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.852';
+const GAME_VERSION = 'v0.30.853';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53083,7 +53083,7 @@ function _coopTickMonsters() {
   let _ak = null; for (const _id in net.peers) { const _q = net.peers[_id]; if (_q && _q.map === game.currentMap) (_ak = _ak || {})[_id] = (net._ackBy && net._ackBy[_id]) || 0; }
   if (_ak) _frame.ak = _ak;   // v0.30.829 - the last batch of hits I have applied from each partner (0 = none yet)
   if (_coopBundleOn()) {   // v0.30.823 - ONE message per tick: projectiles, hazards and my fx ride the monster frame
-    _frame.pl = _coopProjList(); _frame.hl = _coopHazList();
+    _frame.pl = _coopProjList(_key); _frame.hl = _coopHazList();
     { const _hx = _coopHazDoneList(); if (_hx) _frame.hx = _hx; }   // v0.30.x coop-ohko — hazards the host resolved
     const _fxw = _coopFxDrain(); if (_fxw) { if (_fxw.fx) _frame.fx = _fxw.fx; if (_fxw.pj) _frame.pj = _fxw.pj; }
     const _po = _coopPoseDelta(); if (_po) _frame.po = _po;
@@ -53103,7 +53103,27 @@ function _coopTickProjectiles() {
   net._coopProjAt = now;
   try { net.ws.send(JSON.stringify({ t: 'proj', map: game.currentMap, list: _coopProjList() })); } catch (e) {}
 }
-function _coopProjList() {
+// v0.30.x coop-proj — THE RULES RIDE WITH THE SHOT. A mirror carried position, damage and colour, and the guest's hit code
+// reads far more: the Gravitos phase band (x17 in form 3), every boss's roll band and HP floor, the zodiac flat roll and
+// Capricorn's floor, Aquarius's potion seal, radiance, DEF pierce, and the freeze / poison / slow / skill lock / stun /
+// heal lock a shot applies. Without them a guest took every boss shot as a plain bolt: a form-3 Gravitos comet that
+// nearly one-shots the host took a small bite, and the Void Ring's lock and stun never landed. The fields go out on a
+// shot's first frames and on each keyframe (the guest keeps them on its copy), so a volley costs its bytes once.
+const _COOP_PJ_XF = ['_defPierce', '_ignoreDef', '_heavyFloorPct', '_srcType', '_gravBand', '_bossBand', '_healLockMs', '_sourceLabel',
+  'sourceLabel', '_zodiacSign', '_radiance', '_impactMs', '_impactShake', 'freeze', 'poison', '_poisonDmg', 'slow', 'skillLock',
+  'stunHit', '_zoneAttack', 'pierce'];
+function _coopPjVal(v) {   // numbers, short strings, booleans, and one level of those (bands, radiance)
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string') return v.slice(0, 80);
+  if (typeof v === 'boolean') return v;
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    const o = {}; let k = 0;
+    for (const key in v) { if (++k > 12) break; const x = v[key]; if (typeof x === 'number' ? Number.isFinite(x) : (typeof x === 'string' || typeof x === 'boolean')) o[key] = typeof x === 'string' ? x.slice(0, 80) : x; }
+    return o;
+  }
+  return undefined;
+}
+function _coopProjList(full) {
   const list = [];
   const arr = game.projectiles || [];
   for (let i = 0; i < arr.length && list.length < COOP_PROJ_CAP; i++) {
@@ -53114,9 +53134,15 @@ function _coopProjList() {
       u: p._puid, x: Math.round(p.x), y: Math.round(p.y),
       vx: +(+p.vx || 0).toFixed(1), vy: +(+p.vy || 0).toFixed(1),
       w: Math.round(p.w || 12), h: Math.round(p.h || 12), l: Math.round(p.life),
-      d: Math.round(p.damage || 0), s: String(p.skill || '').slice(0, 12),
+      d: Math.round(p.damage || 0), s: String(p.skill || '').slice(0, 24),   // v0.30.x coop-proj — was 12
       c: String(p.color || '').slice(0, 9), n: p._normalMob ? 1 : 0, z: p._zodiacAttacker ? 1 : 0,
     });
+    if (full !== false || (p._coopXfN | 0) < 3) {   // v0.30.x coop-proj
+      p._coopXfN = (p._coopXfN | 0) + 1;
+      let _xf = null;
+      for (const _k of _COOP_PJ_XF) if (p[_k] != null && p[_k] !== false && p[_k] !== 0) { const _v = _coopPjVal(p[_k]); if (_v !== undefined) (_xf = _xf || {})[_k] = _v; }
+      if (_xf) list[list.length - 1].xf = _xf;
+    }
   }
   return list;
 }
@@ -53141,6 +53167,7 @@ function _coopApplyProjectiles(msg) {
     p.w = +e.w || 12; p.h = +e.h || 12; p.life = +e.l || 60;
     p.damage = +e.d || 0; p.skill = e.s || 'mbolt'; p.color = e.c || '#ff6688';
     p._normalMob = !!e.n; p._zodiacAttacker = !!e.z;
+    if (e.xf && typeof e.xf === 'object') for (const _k of _COOP_PJ_XF) { if (e.xf[_k] != null) { const _v = _coopPjVal(e.xf[_k]); if (_v !== undefined) p[_k] = _v; } }   // v0.30.x coop-proj
   }
   for (let i = game.projectiles.length - 1; i >= 0; i--) {
     const p = game.projectiles[i];
