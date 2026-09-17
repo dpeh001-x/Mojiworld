@@ -8,7 +8,11 @@
 
 **Play in a browser from the link below, or unzip the portable build and double-click `Mojiworld.cmd`.** Solo play needs no install, server or account. (The game must be served over http for everything to work — the launcher and the links below do that; opening the .html straight from disk runs with reduced features.)
 
-Play the latest `main` build straight from GitHub (correct MIME, always the branch tip):
+**▶ https://play.moji-studios.com/**
+
+That is the live deploy of `main` (GitHub Pages, updated a few minutes after every push; art streams from a CDN, no interstitial). It is the link to give players and phones.
+
+The exact branch tip straight from GitHub, a few minutes fresher but slower and behind a one-click "Open the page" notice:
 
 **▶ https://raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html**
 

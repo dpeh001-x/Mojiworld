@@ -12628,7 +12628,7 @@ function _lxDevSurface() {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
   } catch (e) { return false; }
 }
-const GAME_VERSION = 'v0.30.805';
+const GAME_VERSION = 'v0.30.806';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -12645,6 +12645,72 @@ const GAME_VERSION = 'v0.30.805';
   window.addEventListener('error', (ev) => { note('error', ev && (ev.message || (ev.error && ev.error.message))); });
   window.addEventListener('unhandledrejection', (ev) => { const r = ev && ev.reason; note('promise', r && (r.message || r)); });
   try { window.__lxCrashNotes = true; } catch (e) {}   // scripts/launch_smoke_probe.mjs reads this
+})();
+// v0.30.806 - BOOT IMAGE HOLD (web deploys only; per user: "the web boot is still about 57 s").
+// Measured on the live deploy: the page and its scripts are ready in 1.9 s, and the title menu waits for 172
+// high-priority files (35 MB). But parse-time loaders had by then started 2,259 MORE image requests (379 MB: every
+// boss's frames, all fx, monsters, equipment, 97 backgrounds). On one HTTP/2 connection to the CDN they share the
+// line with the gate's files, whose last members did not even START until 16 s. The gate's own DEFERRED list learned
+// this in v0.29.323b; the loaders scattered through this file never did.
+// So until the menu is up, a sprite or background src assigned from script is HELD unless the image is one the
+// boot asked for: marked _lxNow (the gate's loadOne), fetchPriority 'high' (before or after - the start map's
+// preload stamps it on images that already exist), decode() called on it, or already in the document.
+// A held image reads as still loading (src answers, complete is false). At menu-up the queue streams in, x16:
+// on-screen first, boss frames last. Off on file://, localhost and the packaged app, where art is local and the
+// storm is harmless. ?lxhold=1 forces it on (tests), ?lxhold=0 forces it off.
+(function _lxBootImageHold() {
+  try {
+    const h = location.hostname, qs = location.search || '';
+    const local = location.protocol === 'file:' || h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || window.MOJI_PACKAGED === true;
+    if (/[?&]lxhold=0\b/.test(qs) || (local && !/[?&]lxhold=1\b/.test(qs))) return;
+    const P = HTMLImageElement.prototype;
+    const dSrc = Object.getOwnPropertyDescriptor(P, 'src'), dCmp = Object.getOwnPropertyDescriptor(P, 'complete');
+    const dPri = Object.getOwnPropertyDescriptor(P, 'fetchPriority'), oDecode = P.decode;
+    if (!dSrc || !dSrc.set || !dSrc.get || !dCmp || !dCmp.get) return;
+    let held = [], open = false, started = 0;
+    const RX = /(^|\/)(Sprites|backgrounds)\//;
+    const abs = (v) => { try { return new URL(v, document.baseURI).href; } catch (e) { return String(v); } };
+    const start = (img) => { const u = img._lxHeldSrc; if (u == null) return false; img._lxHeldSrc = null; started++; dSrc.set.call(img, u); return true; };
+    Object.defineProperty(P, 'src', { configurable: true, enumerable: dSrc.enumerable,
+      get() { return this._lxHeldSrc != null ? abs(this._lxHeldSrc) : dSrc.get.call(this); },
+      set(v) {
+        if (open || this._lxNow === true || typeof v !== 'string' || !RX.test(v) || this.isConnected || this.fetchPriority === 'high') {
+          this._lxHeldSrc = null; dSrc.set.call(this, v); return;
+        }
+        if (this._lxHeldSrc == null) held.push(this);
+        this._lxHeldSrc = v;
+      } });
+    Object.defineProperty(P, 'complete', { configurable: true, enumerable: dCmp.enumerable,
+      get() { return this._lxHeldSrc != null ? false : dCmp.get.call(this); } });
+    if (dPri && dPri.set && dPri.get) Object.defineProperty(P, 'fetchPriority', { configurable: true, enumerable: dPri.enumerable,
+      get() { return dPri.get.call(this); },
+      set(v) { dPri.set.call(this, v); if (v === 'high') start(this); } });
+    if (typeof oDecode === 'function') P.decode = function () { start(this); return oDecode.apply(this, arguments); };
+    const release = (why) => {
+      if (open) return; open = true;
+      const q = held.filter((im) => im._lxHeldSrc != null);
+      const rank = (im) => im.isConnected ? 0 : /\/bosses\//.test(im._lxHeldSrc || '') ? 2 : 1;
+      q.sort((a, b) => rank(a) - rank(b));   // stable: parse order within a rank
+      held = q;                              // stats() keeps counting what has not started yet
+      try { console.log('[boot] image hold released (' + why + '): ' + q.length + ' queued, ' + started + ' were asked for early'); } catch (e) {}
+      let i = 0;
+      const next = () => {
+        while (i < q.length) {
+          const im = q[i++];
+          if (im._lxHeldSrc == null) continue;   // something asked for it meanwhile
+          let done = false; const fin = () => { if (done) return; done = true; clearTimeout(t); next(); };
+          const t = setTimeout(fin, 10000);
+          im.addEventListener('load', fin, { once: true }); im.addEventListener('error', fin, { once: true });
+          start(im);
+          return;
+        }
+      };
+      for (let k = 0; k < 16; k++) next();
+    };
+    window._lxBootHold = { release, now: start, peek: () => held.find((im) => im._lxHeldSrc != null) || null,
+      stats: () => ({ open, held: held.filter((im) => im._lxHeldSrc != null).length, started }) };
+    setTimeout(() => release('failsafe'), 20000);
+  } catch (e) {}
 })();
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
@@ -67400,6 +67466,7 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
   const track = (img) => {
     if (!img || !img.src) return;
     if (prio && 'fetchPriority' in img) { try { img.fetchPriority = prio; } catch (e) {} }
+    if (prio === 'high' && window._lxBootHold) { try { window._lxBootHold.now(img); } catch (e) {} }   // v0.30.806 - a held image the map needs (browsers without fetchPriority)
     _imgs.push(img);
   };
   try {
@@ -155444,6 +155511,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     const img = new Image();
     img.decoding = 'async';
     if (isCritical && 'fetchPriority' in img) img.fetchPriority = 'high';
+    if (isCritical) img._lxNow = true;   // v0.30.806 - the boot image hold lets the gate's own files through, fetchPriority or not
     let resolved = false;
     const finish = () => {
       if (resolved) return;
@@ -155568,6 +155636,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   }
   function _finishHide(session) {
     try { window._lxBootMenuSeen = true; } catch (e) {}   // v0.29.721 — resume/deeplink paths skip the menu; still arm the rescue
+    try { if (window._lxBootHold) window._lxBootHold.release('resume'); } catch (e) {}   // v0.30.806 - the menu is up: the held art streams in behind it
     if (!overlay) return;
     // v0.29.735 — COMMENCE GATE (per user: "alot of the sprites dont load
     // well before the game starts, please ensure all sprites are working
@@ -155669,8 +155738,10 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         // dynamic fetchPriority changes on queued/in-flight requests (the
         // v0.27.11 preloader note relies on the same behaviour).
         try {
-          for (const _im of (window._lxSpriteWatch || []))
+          for (const _im of (window._lxSpriteWatch || [])) {
             if (_im && _im.src && !_im.complete && 'fetchPriority' in _im) _im.fetchPriority = 'high';
+            if (_im && window._lxBootHold) window._lxBootHold.now(_im);   // v0.30.806 - still held (no fetchPriority): ask for it
+          }
         } catch (e) {}
         const _total = (window._lxSpriteWatch || []).length;
         const _st = document.getElementById('loading-status');
@@ -156002,6 +156073,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   function _showAuthGate() {
     if (!overlay) return;
     try { window._lxBootMenuSeen = true; } catch (e) {}   // v0.29.721 — arms the loop's wedge rescue (see BootGate failsafe)
+    try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}   // v0.30.806 - the menu is up: the held art streams in behind it
     // Seamless resume right after a cloud-save pull reload — we already authenticated
     // this tab session, so skip the form and reveal the (now cloud-loaded) world.
     try { const _rs = sessionStorage.getItem('lx_resume'); if (_rs) { sessionStorage.removeItem('lx_resume'); _finishHide(JSON.parse(_rs)); return; } } catch (e) {}
