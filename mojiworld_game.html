@@ -12615,7 +12615,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.795';
+const GAME_VERSION = 'v0.30.796';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -93168,6 +93168,7 @@ function bossAI(m, dt, distToPlayer) {
             m._rainTimer = _rainCd;
             m._rainIdx = 0;
             m._rainSafe = null;
+            m._rainNextAt = null;   // v0.30.796 sz-all — the real-time clock starts with the pattern
           } else if (_pick === 'soulDrain') {
             m.patternState = 'soulDrain';
             m._soulTimer = _soulCd;
@@ -93535,7 +93536,14 @@ function bossAI(m, dt, distToPlayer) {
       // the shape of the ask is guaranteed.
       if (m._rainBand0 == null) m._rainBand0 = (Math.random() < 0.5) ? 0 : 1;
       // Spawn next box when the current cadence slot opens up.
-      if (m._rainIdx < RAIN_COUNT && m.patternTimer >= m._rainIdx * TICK_MS) {
+      // v0.30.796 sz-all — REAL TIME between boxes. patternTimer runs 1.30x / 1.56x / 2.12x by form (measured,
+      // see the singularity note above), so form 3 dropped its boxes 1.9 s apart while each lived 1.4 s of
+      // real time - the next box was already down before the last had resolved. The 4 s gap v0.26.308
+      // authored is now 4 s on the wall clock in every form.
+      const _rainNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      if (m._rainNextAt == null) m._rainNextAt = _rainNow;
+      if (m._rainIdx < RAIN_COUNT && _rainNow >= m._rainNextAt) {
+        m._rainNextAt = _rainNow + TICK_MS;
         const ww = game.mapData.worldWidth || 2200;
         const safeW = 102, safeH = 60;   // v0.30.580 — was 90 (per user: "slightly larger")
         const groundY = 480;
@@ -93556,7 +93564,16 @@ function bossAI(m, dt, distToPlayer) {
         const _camL = (game.camera && game.camera.x) || 0;
         let _lo = Math.max(40 + safeW / 2, _camL + 16 + safeW / 2, _pcx - _reach);
         let _hi = Math.min(ww - 40 - safeW / 2, _camL + W - 16 - safeW / 2, _pcx + _reach);
-        if (_hi < _lo) { _lo = _hi = Math.max(40 + safeW / 2, Math.min(ww - 40 - safeW / 2, _pcx)); }
+        // v0.30.796 sz-all — NOT UNDER THE HUD. Measured at 1630x944: the minimap panel sits over screen x 736-944 of
+        // the floor and the hotkey hint over 821-944 of the floor band's top, so a box rolled in the right fifth of
+        // the screen was drawn behind a panel - the invisible shelter in the report. The band's covered spans are
+        // read off the live DOM once per box and the roll is kept clear of them.
+        { const _cov = _lxSzHudCoveredSpans(groundY - safeH, groundY); for (const _sp of _cov) { const _a = _camL + _sp[0] - safeW / 2, _b = _camL + _sp[1] + safeW / 2; if (_b <= _lo || _a >= _hi) continue; if (_pcx < (_a + _b) / 2) _hi = Math.min(_hi, _a); else _lo = Math.max(_lo, _b); } }
+        if (_hi < _lo) {   // v0.30.796 sz-all — no visible floor within reach: the nearest visible spot if it is near enough, else the player's own feet (the panels over them fade while the box lives)
+          const _cands = [_hi, _lo].filter((v) => v >= 40 + safeW / 2 && v <= ww - 40 - safeW / 2 && v >= _camL + 16 + safeW / 2 && v <= _camL + W - 16 - safeW / 2).sort((p, q) => Math.abs(p - _pcx) - Math.abs(q - _pcx));
+          if (_cands.length && Math.abs(_cands[0] - _pcx) <= _reach * 1.15) _lo = _hi = _cands[0];
+          else _lo = _hi = Math.max(40 + safeW / 2, Math.min(ww - 40 - safeW / 2, _pcx));
+        }
         const _PLAT_L = 908 + safeW / 2, _PLAT_R = 1292 - safeW / 2;   // centre-platform span for a box centre
         // Alternating bands — see _rainBand0 above.
         let onGround = ((m._rainIdx + m._rainBand0) % 2) === 0;
@@ -93616,7 +93633,10 @@ function bossAI(m, dt, distToPlayer) {
       // Pattern ends after all 4 spawns + the final box's lifetime
       // resolves. RAIN_COUNT × TICK_MS + (SAFE_LIFE × ~16.7 ms) ≈
       // 4 × 1700 + 1400 = 8200 ms total window before exiting.
-      if (m.patternTimer > RAIN_COUNT * TICK_MS + 1400) {
+      // v0.30.796 sz-all — and the pattern ends when the last box has resolved, not on the scaled timer.
+      const _rainDone = m._rainIdx >= RAIN_COUNT && !game.hazards.some((h) => h && h.type === 'gravitos_singularity' && h.life > 0);
+      if (_rainDone || m.patternTimer > 60000) {
+        m._rainNextAt = null;
         // Defense-in-depth scrub: any leftover rain hazards drop here
         // so the next pattern entry starts clean.
         for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
@@ -103310,6 +103330,120 @@ function _lxSzInside(h, strict) {
 // next pad along). The gravitos arena always has room; a map that somehow did not
 // would get the rect back unmoved rather than shoved off-screen, which is the same
 // behaviour as before this function existed.
+// v0.30.796 sz-all — which screen-x spans of a floor band (world y0..y1) are covered by HUD panels. Read off the
+// DOM with elementsFromPoint (the whole stack, so a transparent full-screen layer - a veil, the touch deck -
+// hides nothing) at two heights of the band, in 16 px steps, and cached for 3 s: the HUD does not move
+// between the boxes of one rain. Returns [[x0, x1], ...] in screen px. A visible element that is not the
+// game canvas, not one of its ancestors and not full-screen sized counts as cover; the cache also keeps
+// the covering elements themselves, for _lxSzHudYield.
+let _lxSzHudCache = null;
+function _lxSzHudCoveredSpans(y0, y1) {
+  const now = Date.now();
+  if (_lxSzHudCache && now - _lxSzHudCache.at < 3000 && _lxSzHudCache.y0 === y0 && _lxSzHudCache.y1 === y1 && _lxSzHudCache.W === W && _lxSzHudCache.H === H) return _lxSzHudCache.spans;
+  const out = [], els = [];
+  try {
+    const cv = document.getElementById('game'); const efp = document.elementsFromPoint ? 'elementsFromPoint' : (document.elementFromPoint ? 'elementFromPoint' : null);
+    if (!cv || !efp) return out;
+    const R = cv.getBoundingClientRect(); if (!(R.width > 0 && R.height > 0)) return out;
+    const k = R.width / W, camY = (game.camera && game.camera.y) || 0;
+    const ys = [R.top + (y0 + 6 - camY) * k, R.top + ((y0 + y1) / 2 - camY) * k, R.top + (y1 - 4 - camY) * k];
+    const seen = new Map();   // element -> covers? (style reads once per element)
+    const covers = (el) => {
+      if (!el || el === cv || cv.contains(el) || el.contains(cv)) return false;
+      if (seen.has(el)) return seen.get(el);
+      let c = false;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && !(r.width > R.width * 0.9 && r.height > R.height * 0.9)) {
+        const cs = getComputedStyle(el); c = cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.05;
+      }
+      seen.set(el, c); if (c) els.push(el); return c;
+    };
+    let cur = null;
+    for (let x = 8; x < W; x += 16) {
+      let covered = false;
+      for (const y of ys) {
+        const st = document[efp](R.left + x * k, y); const arr = Array.isArray(st) ? st : [st];
+        for (const el of arr) if (covers(el)) covered = true;   // every covering element in the stack, so the whole panel yields, not just its label
+      }
+      if (covered) { if (cur && x - cur[1] <= 16) cur[1] = x; else { cur = [x, x]; out.push(cur); } }
+    }
+    for (const sp of out) { sp[0] = Math.max(0, sp[0] - 8); sp[1] = Math.min(W, sp[1] + 8); }
+  } catch (e) {}
+  _lxSzHudCache = { at: now, y0, y1, W, H, spans: out, els };
+  return out;
+}
+// v0.30.796 sz-all — THE HUD YIELDS. While a safe zone is alive, every panel over its band fades to 0.12 so a
+// box that had to land under one (the player standing there, no visible floor in reach) still shows; the
+// inline styles are restored the frame after the last zone resolves.
+let _lxSzYielded = null;
+function _lxSzHudYield(z) {
+  try {
+    if (z) {
+      if (_lxSzYielded) return;
+      _lxSzHudCoveredSpans(z.y, z.y + z.h);
+      const els = (_lxSzHudCache && _lxSzHudCache.els) || [];
+      _lxSzYielded = els.map((el) => { const o = el.style.opacity, t = el.style.transition; el.style.transition = 'opacity .15s'; el.style.opacity = '0.12'; return [el, o, t]; });
+    } else if (_lxSzYielded) {
+      for (const r of _lxSzYielded) { r[0].style.opacity = r[1]; r[0].style.transition = r[2]; }
+      _lxSzYielded = null;
+    }
+  } catch (e) {}
+}
+// v0.30.796 sz-all — THE BEACON. Drawn in screen space after the art post-FX, for every live safe zone: a
+// pillar of light over the rect (exactly the column LX_SZ_JUMP_SLACK protects, so every lit pixel is a
+// safe pixel), a ring expanding from the rect on spawn, a timer ring closing on the rect as the resolve
+// nears, and a chevron at the screen edge for a zone that is off screen. The ground marker is untouched.
+const _LX_SZ_BEACON_H = 150;   // = LX_SZ_JUMP_SLACK: the protected column
+function _lxSafeZoneBeacons() {
+  try {
+    if (typeof game === 'undefined' || !game || !game.hazards) return;
+    let _live = null; for (const h of game.hazards) if (h && h.type === 'gravitos_singularity' && h.life > 0 && h.safeZones && h.safeZones.length) { _live = h; break; }
+    _lxSzHudYield(_live ? _live.safeZones[0] : null);
+    if (!_live) return;
+    const camX = (game.camera && game.camera.x) || 0, camY = (game.camera && game.camera.y) || 0;
+    const t = game.time;
+    for (const h of game.hazards) {
+      if (!h || h.type !== 'gravitos_singularity' || !(h.life > 0) || !h.safeZones) continue;
+      const age = (h.maxLife | 0) - (h.life | 0), frac = h.life / Math.max(1, h.maxLife);
+      for (const z of h.safeZones) {
+        const sx = z.x - camX, sy = z.y - camY, cx = sx + z.w / 2;
+        const onScreen = sx + z.w > 0 && sx < W;
+        ctx.save();
+        if (onScreen) {
+          // the pillar: brightest at the rect, fading up the protected column; breathes with the zone
+          const ph = _LX_SZ_BEACON_H, breath = 0.82 + 0.18 * Math.sin(t * 0.18);
+          const g = ctx.createLinearGradient(0, sy, 0, sy - ph);
+          g.addColorStop(0, 'rgba(255,214,110,' + (0.55 * breath).toFixed(3) + ')'); g.addColorStop(0.45, 'rgba(255,196,80,' + (0.22 * breath).toFixed(3) + ')'); g.addColorStop(1, 'rgba(255,180,60,0)');
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = g; ctx.fillRect(Math.round(sx), Math.round(sy - ph), Math.round(z.w), ph);
+          // a hot core line down the pillar's middle so it reads at a glance even over the boss
+          ctx.globalAlpha = 0.35 * breath; ctx.fillStyle = '#fff3c4'; ctx.fillRect(Math.round(cx - 2), Math.round(sy - ph * 0.9), 4, Math.round(ph * 0.9));
+          ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+          // the spawn ring: expands from the rect over the first 24 frames
+          if (age < 24) {
+            const k = age / 24, rr = 30 + 190 * (1 - Math.pow(1 - k, 2));
+            ctx.globalAlpha = (1 - k) * 0.85; ctx.strokeStyle = '#ffe089'; ctx.lineWidth = 3 + 6 * (1 - k);
+            ctx.beginPath(); ctx.ellipse(cx, sy + z.h / 2, rr, rr * 0.42, 0, 0, Math.PI * 2); ctx.stroke();
+          }
+          // the timer ring: closes onto the rect as the resolve nears; the last second turns white
+          { const rr = z.w * 0.5 + 24 * frac + 6; const late = h.life <= 60;
+            ctx.globalAlpha = 0.55 + 0.35 * (1 - frac); ctx.strokeStyle = late ? '#ffffff' : '#ffd36b'; ctx.lineWidth = late ? 3 : 2;
+            ctx.beginPath(); ctx.ellipse(cx, sy + z.h / 2, rr, rr * 0.42, 0, 0, Math.PI * 2); ctx.stroke(); }
+        } else {
+          // off screen: a chevron at the edge, at the zone's height, pointing the way
+          const left = sx + z.w / 2 < 0, ex = left ? 14 : W - 14, ey = Math.max(24, Math.min(H - 24, sy + z.h / 2));
+          const pulse = 0.7 + 0.3 * Math.sin(t * 0.3);
+          ctx.globalAlpha = pulse; ctx.fillStyle = '#ffd36b'; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+          ctx.beginPath(); ctx.moveTo(ex + (left ? 26 : -26), ey - 18); ctx.lineTo(ex, ey); ctx.lineTo(ex + (left ? 26 : -26), ey + 18); ctx.lineTo(ex + (left ? 14 : -14), ey); ctx.closePath(); ctx.stroke(); ctx.fill();
+          const _d = Math.round(Math.abs((left ? -sx - z.w : sx - W)) );
+          ctx.font = 'bold 12px system-ui, sans-serif'; ctx.textAlign = left ? 'left' : 'right'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.fillStyle = '#fff3c4';
+          ctx.strokeText('SAFE ' + _d + 'px', ex + (left ? 32 : -32), ey); ctx.fillText('SAFE ' + _d + 'px', ex + (left ? 32 : -32), ey);
+        }
+        ctx.restore();
+      }
+    }
+  } catch (e) {}
+}
 function _lxSafeZoneOffPad(rect, ww) {
   const pads = (game.mapData && game.mapData.launchPads) || null;
   if (!pads || !pads.length) return rect;
@@ -136991,7 +137125,7 @@ const _LX_MOB_TYPE_ART = {
   legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },   // his 6 s arena stomp is a mob_quake of his own
   // v0.30.790 grav-smooth — the five rings his patterns cast: each was decoded and pinned on the frame of its
   // first cast (laser 22 ms, soul 36 ms, slam 22 ms, measured).
-  gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring'] },
+  gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield'], fx: ['gravitos_singularity_zone'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
 };
 const _LX_MOB_FX_SEEN = new Set();
 function _lxPrewarmMobFx(type, boss) {
@@ -148004,9 +148138,13 @@ function drawHazards(_behindPass) {
         // no art has decoded at all does a faint pale wash still mark the footprint, so a
         // cold first load never leaves the player with nothing to run to.
         if (!_szReady) {
-          const _za = 0.30 + Math.sin(tt * 1.3) * 0.07;
-          ctx.fillStyle = 'rgba(200,232,255,' + _za.toFixed(3) + ')';
+          // v0.30.796 sz-all — a zone with no art is still a zone the player can see: a gold rim and a warm
+          // fill, inside the rect as everything here must be (the old pale wash vanished under the veil).
+          const _za = 0.55 + Math.sin(tt * 1.3) * 0.12;
+          ctx.fillStyle = 'rgba(255,190,70,' + (_za * 0.55).toFixed(3) + ')';
           ctx.fillRect(_zx, z.y, z.w, z.h);
+          ctx.fillStyle = 'rgba(255,224,140,' + _za.toFixed(3) + ')';   // the rim: four bands inside the rect (no strokeRect - nothing may paint past the rect)
+          ctx.fillRect(_zx, z.y, z.w, 3); ctx.fillRect(_zx, z.y + z.h - 3, z.w, 3); ctx.fillRect(_zx, z.y, 3, z.h); ctx.fillRect(_zx + z.w - 3, z.y, 3, z.h);
         }
         // v0.30.582 — THE SHELTER MARK (per user: "the safe word does not look very nice, could we
         // think of a better word or symbol"). A shield is the one mark every player reads as
@@ -151251,6 +151389,7 @@ function loop(time) {
   drawIcyHud();
   // Whole-scene grading / bloom / grain art pass.
   drawArtPostFX();
+  if (typeof _lxSafeZoneBeacons === 'function') _lxSafeZoneBeacons();   // v0.30.796 sz-all — the OHKO's answer is the last thing painted in the world
   // Update minimap (DOM-side, every few frames to avoid overhead)
   if (game.time % 4 === 0) drawMinimap();
 
