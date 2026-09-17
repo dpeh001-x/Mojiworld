@@ -12628,7 +12628,7 @@ function _lxDevSurface() {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
   } catch (e) { return false; }
 }
-const GAME_VERSION = 'v0.30.815';
+const GAME_VERSION = 'v0.30.816';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -46060,6 +46060,12 @@ function _defPierceMul(m) {
 // Scoped to Gravitos ON PURPOSE: _bossHitBand's generic tiers still read
 // _refLoAtLv(lv), so no other boss in the game moves. Retune form 1 by
 // editing this one number; forms 2-3 both follow from _P3_REF / _P3_MUL.
+// v0.30.816 grav-meteor-cap — per user: "gravitos falling meteor ... dishes too much damage, cap it to 30k HP damage".
+// The most ONE of his blue meteors (Gravity Crush column, Crush Tendril, Decay Pillar) may take off the bar: the
+// FINAL loss, after DEF, block, class DR, Aegis, the difficulty multiplier and the phase band. It bounds the hit
+// that had no bound - the meteor body striking on the way DOWN, which has carried the full payload since v0.30.45
+// and never passed through the band the landing does - and the guest's copy of the detonation in co-op.
+const LX_GRAV_METEOR_CAP = 30000;
 const _GRAV_BAND_REF = 4041;
 function _gravHeavyBand(phase, kind) {
   const p = (phase >= 3) ? 3 : (phase === 2 ? 2 : 1);
@@ -52592,7 +52598,11 @@ function _coopApplyHazHit(msg) {
   if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
   if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
   if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
-  player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg;
+  let _hzLost = (typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg;
+  // v0.30.816 grav-meteor-cap — the guest takes the same ceiling. The flag is the host's; the label is the fallback for a
+  // relay that forwards only the fields it knows.
+  if ((msg.gb || /Gravity Crush column|Crush Tendril|Decay Pillar/.test(String(msg.sl || ''))) && _hzLost > LX_GRAV_METEOR_CAP) _hzLost = LX_GRAV_METEOR_CAP;
+  player.hp -= _hzLost;
   player.lastHitTime = game.time;
   player.invulnerable = 600;
   player._lastDamageSource = msg.sl || 'a meteor strike';
@@ -102717,7 +102727,8 @@ function updateProjectiles(dt) {
         if (player.blockTimer > 0) { _pd = Math.max(1, Math.floor(_pd * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
         if (player.cls === 'warrior' && typeof _warriorDr === 'function') _pd = Math.max(1, Math.floor(_pd * _warriorDr()));
         if (player._aegis) _pd = Math.max(1, Math.floor(_pd * 0.5));
-        const _pLost = (player._god ? 0 : ((typeof _diffDmg === 'function') ? _diffDmg(_pd, 0, !!h._pctCap) : _pd));
+        let _pLost = (player._god ? 0 : ((typeof _diffDmg === 'function') ? _diffDmg(_pd, 0, !!h._pctCap) : _pd));
+        if (h._gravBlue && _pLost > LX_GRAV_METEOR_CAP) _pLost = LX_GRAV_METEOR_CAP;   // v0.30.816 grav-meteor-cap — the fall is the payload, and it had no ceiling
         player.hp = Math.max(0, player.hp - _pLost);
         player.invulnerable = 400;
         player._lastDamageSource = h._sourceLabel || 'Meteor';
@@ -102761,7 +102772,7 @@ function updateProjectiles(dt) {
         // per-frame detonation). A _coopMirror hazard on a follower is a VISUAL-only
         // telegraph, so it skips local damage here (the hit arrives via 'hazhit').
         if (net.isHost && typeof _coopActive === 'function' && _coopActive() && net.ws) {
-          try { net.ws.send(JSON.stringify({ t: 'hazhit', map: game.currentMap, x: Math.round(_cx), r: Math.round(radius), d: Math.round(h.damage || 30), c: h.color || '#ffaa33', sl: h._sourceLabel || '' })); } catch (e) {}
+          try { net.ws.send(JSON.stringify({ t: 'hazhit', map: game.currentMap, x: Math.round(_cx), r: Math.round(radius), d: Math.round(h.damage || 30), c: h.color || '#ffaa33', sl: h._sourceLabel || '', gb: h._gravBlue ? 1 : 0 /* v0.30.816 grav-meteor-cap: gb = one of Gravitos's blue meteors */ })); } catch (e) {}
         }
         // Player-targeted: standard pattern from the projectile-hit
         // pipeline (respects player.invulnerable / blockTimer / DEF /
@@ -102793,6 +102804,7 @@ function updateProjectiles(dt) {
           if (_mLost > 0 && h._gravBand && typeof _gravBandClamp === 'function') {
             _mLost = _gravBandClamp(dmg, h._gravBand);
           }
+          if (h._gravBlue && _mLost > LX_GRAV_METEOR_CAP) _mLost = LX_GRAV_METEOR_CAP;   // v0.30.816 grav-meteor-cap — after the band, so the band can only tighten it
           player.hp -= _mLost;
           player.lastHitTime = game.time;
           player.invulnerable = 600;   // standard iframe window after a meteor
