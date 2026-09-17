@@ -12628,7 +12628,7 @@ function _lxDevSurface() {
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
   } catch (e) { return false; }
 }
-const GAME_VERSION = 'v0.30.802';
+const GAME_VERSION = 'v0.30.803';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -39353,7 +39353,8 @@ function _grantMojicoins(n, opts) {
   // at the single choke-point every earn path routes through, so "coin gain"
   // means ALL coin gain while the boon holds — kills, chests, rebates alike.
   const _ksMul = (typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1;
-  const granted = Math.max(0, Math.floor(n * mult * _ksMul));
+  const _dawnMul = (typeof _lxDawnCoinMul === 'function') ? _lxDawnCoinMul() : 1;   // v0.30.803 - Dawn's Favor: +10% once the story is finished
+  const granted = Math.max(0, Math.floor(n * mult * _ksMul * _dawnMul));
   // v0.26.x audit FIX — clamp to the same 1e12 ceiling the save-load sanitizer
   // enforces, so the wallet doesn't briefly exceed the cap in-session and then
   // snap back on reload. (Return the amount actually added so toasts match.)
@@ -46663,6 +46664,9 @@ const PLAYER_SAVE_FIELDS = [
   // v0.29.x — which earned title is worn under the name. Must persist beside
   // 'titles' or the Conqueror line vanishes on the next reload.
   'equippedTitle',
+  // v0.30.803 - Dawn's Favor: the aura's off switch, and "the player has been told" (see drawDawnAura).
+  'dawnAuraOff',
+  '_dawnFavorSeen',
   // v0.26.276 — Optional auto-equip toggle. When true, looted gear
   // scoring 5 %+ better than equipped auto-swaps in. Off by default
   // (preserves v0.25.623's "no surprise loadout changes" intent).
@@ -99314,7 +99318,7 @@ function killMonster(m) {
   // continuous ramp (see _lxEarlyExpMul): ×30 at Lv 1 → ×10 at Lv 10 → ×1 by
   // Lv 30. No cliff at Lv 6, and the boost genuinely returns to normal.
   const _earlyLvlXpMul = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
-  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * _ksXpMul() * _lxExpLevelGapMul(m));   // v0.29.858 level-gap falloff · v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
+  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * _ksXpMul() * _lxExpLevelGapMul(m) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1));   // v0.29.858 level-gap falloff · v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
   player.exp += _xpGain;
   // v0.29.296 — Trainee Path: count the kill, then test the ladder. Skipped
   // entirely once the path is finished so a long-running save pays nothing.
@@ -100264,7 +100268,7 @@ function _triggerSuperBossDeathRaw(m) {
 
   // Huge EXP bonus on top of normal (prestige-scaled)
   const _pXp = (game.prestige && game.prestige.xpMult) || 1;
-  player.exp += Math.floor(m.exp * 0.5 * _pXp * ((typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1) * _lxExpLevelGapMul(m) * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
+  player.exp += Math.floor(m.exp * 0.5 * _pXp * ((typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1) * _lxExpLevelGapMul(m) * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
   // v0.26.x audit FIX — convert the banked bonus into levels NOW. The kill
   // flow's only _maybeLevelUp runs BEFORE this grant, so without this call a
   // Shardfather kill (a big, level-crossing bonus, more so with the ×20 EXP
@@ -100308,6 +100312,7 @@ function _triggerSuperBossDeathRaw(m) {
     if (!player.titles[LX_TITLE_CONQUEROR]) {
       player.titles[LX_TITLE_CONQUEROR] = true;
       player.equippedTitle = LX_TITLE_CONQUEROR;
+      player._dawnFavorSeen = true;   // v0.30.803 - the credits open the Titles panel with the news; no early toast over the loot rain
       // rides the tail of the loot-rain cascade, before the 1900ms cutscene
       if (typeof showToast === 'function') {
         setTimeout(() => showToast('\u2756 TITLE EARNED \u2014 ' + LX_TITLE_CONQUEROR.toUpperCase() + ' \u2756', 'legendary'), 1100);
@@ -110905,7 +110910,8 @@ function openLevelUpPanel() {
       <button type="button" class="u-jump" data-ujump="map"><img class="uj-ico" src="Sprites/ui/nav/map.webp" alt="" draggable="false" onerror="this.replaceWith(document.createTextNode('\uD83D\uDDFA'))"> World Map <kbd>W</kbd></button>
       <button type="button" class="u-jump" data-ujump="quest"><img class="uj-ico" src="Sprites/ui/nav/quest.webp" alt="" draggable="false" onerror="this.replaceWith(document.createTextNode('\uD83D\uDCDC'))"> Quests <kbd>Q</kbd></button>
       <button type="button" class="u-jump" data-ujump="codex"><img class="uj-ico" src="Sprites/ui/nav/codex.webp" alt="" draggable="false" onerror="this.replaceWith(document.createTextNode('\uD83D\uDCD6'))"> MojiDex <kbd>Y</kbd></button>
-      <button type="button" class="u-jump" data-ujump="mojidex"><img class="uj-ico" src="Sprites/ui/nav/mojidex.webp" alt="" draggable="false" onerror="this.replaceWith(document.createTextNode('\uD83D\uDC3E'))"> MojiDex <kbd>L</kbd></button>
+      <button type="button" class="u-jump" data-ujump="mojidex"><img class="uj-ico" src="Sprites/ui/nav/mojidex.webp" alt="" draggable="false" onerror="this.replaceWith(document.createTextNode('\uD83D\uDC3E'))"> Compendium <kbd>L</kbd></button>
+      <button type="button" class="u-jump" data-ujump="titles">🎖 Titles</button>
     </div>
     <div id="u-pane-lp" style="display:${game._uTab==='lp'?'block':'none'}">
       <!-- v0.25.539 — Top strip: SP pool (left, prominent) + current stats (right).
@@ -111035,6 +111041,7 @@ function openLevelUpPanel() {
           else if (which === 'quest' && typeof toggleQuestJournal === 'function') toggleQuestJournal();
           else if (which === 'codex' && typeof openCodex === 'function') openCodex();
           else if (which === 'mojidex' && typeof openMojidex === 'function') openMojidex();
+          else if (which === 'titles' && typeof openTitlesPanel === 'function') openTitlesPanel();   // v0.30.803
         } catch (e) {}
       };
     });
@@ -115478,6 +115485,8 @@ function _showGameComplete() {
     if (typeof game !== 'undefined') game.paused = false;
     // v0.30.797 - the finale now points somewhere: what is still out there once the world is awake
     try { setTimeout(function () { if (typeof showToast === 'function') showToast('🌅 The world is awake. The Hall of Echoes, the Zodiac Hall and the Expedition are still out there.', 'legendary'); }, 900); } catch (e) {}
+    // v0.30.803 - and it pays: the Titles panel opens with Dawn's Favor, the post-game unlock
+    try { setTimeout(function () { if (typeof openTitlesPanel === 'function' && typeof _lxStoryComplete === 'function' && _lxStoryComplete()) openTitlesPanel({ fresh: true }); }, 1400); } catch (e) {}
     setTimeout(function () { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }, 400);
   };
   void ov.offsetWidth;
@@ -125118,6 +125127,167 @@ const _playerNameTagCache = { name: null, tw: 0 };
 // wire equippedTitle into the nameplate render". This is that patch, plus the
 // title the endgame never had.
 const LX_TITLE_CONQUEROR = 'Conqueror of Mojiworld';
+// v0.30.803 - DAWN'S FAVOR (per user: "a real post-game unlock"). Finishing the story used to leave one
+// auto-equipped title and a toast. It now unlocks three things for good, all read from what the save already
+// records (the Conqueror title, or the seen epilogue), so a character that finished before this build has them too:
+//   - the Waking World blessing: +10% EXP from kills and +10% Mojicoins from every earn path;
+//   - the Everdawn Aura, a sunrise crown drawn behind the character (it can be switched off);
+//   - both live in the new Titles panel (U -> Titles). The panel itself is open to everyone: titles were
+//     earned in four places (Gravitos, Duo Trial, Expedition, Boon Codex) and could never be chosen.
+const LX_DAWN_FAVOR_EXP = 0.10;
+const LX_DAWN_FAVOR_COINS = 0.10;
+function _lxStoryComplete() {
+  try {
+    if (typeof player === 'undefined' || !player) return false;
+    return !!((player.titles && player.titles[LX_TITLE_CONQUEROR]) || (player._storyBeatsSeen && player._storyBeatsSeen.epilogue_gravitos));
+  } catch (e) { return false; }
+}
+function _lxDawnExpMul()  { return _lxStoryComplete() ? 1 + LX_DAWN_FAVOR_EXP : 1; }
+function _lxDawnCoinMul() { return _lxStoryComplete() ? 1 + LX_DAWN_FAVOR_COINS : 1; }
+function _lxDawnAuraOn()  { return _lxStoryComplete() && player.dawnAuraOff !== true; }
+// Drawn right after the set aura, behind the body: ground light, nine rays fanned over the head and shoulders,
+// one rising mote every 12 frames. Two plain fills and nine plain strokes - no shadowBlur, no gradients.
+function drawDawnAura() {
+  if (typeof player === 'undefined' || !player || !player.cls) return;
+  if (!_lxStoryComplete()) return;
+  if (!player._dawnFavorSeen) {   // a character that finished the story before this build: say so once
+    player._dawnFavorSeen = true;
+    if (typeof showToast === 'function') showToast('🌅 Dawn\'s Favor: the world you woke pays you back. Open U, then Titles.', 'legendary');
+    try { if (typeof saveState === 'function') saveState(); } catch (e) {}
+  }
+  if (player.dawnAuraOff === true) return;
+  const sx = Math.round(player.x - game.camera.x), sy = Math.round(player.y);
+  // The chibi is drawn about 70 x 85 px around a 28 x 44 hitbox, so the crown is sized to the drawn figure
+  // (it would hide behind the hair otherwise) and centred on the shoulders.
+  const cx = sx + player.w / 2, top = sy + 4;
+  const t = (game.time || 0) * 0.05;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.16 + 0.05 * Math.sin(t * 1.1);
+  ctx.fillStyle = '#ffcf8a';
+  ctx.beginPath();
+  ctx.ellipse(cx, sy + player.h - 3, 34, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.10 + 0.04 * Math.sin(t * 0.9);
+  ctx.beginPath();
+  ctx.arc(cx, top, 50, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';   // additive gold vanishes on a bright sky; the rays are painted
+  ctx.lineCap = 'round';
+  const r0 = 44;
+  for (let i = 0; i < 9; i++) {
+    const ang = Math.PI + (i + 0.5) * (Math.PI / 9);   // left horizon, over the top, to the right horizon
+    const len = (i % 2 ? 12 : 22) + 4 * Math.sin(t * 1.7 + i * 1.3);
+    ctx.globalAlpha = 0.62 + 0.22 * Math.sin(t * 1.3 + i * 0.9);
+    ctx.strokeStyle = i % 2 ? '#ff9ac8' : '#ffd77a';
+    ctx.lineWidth = i % 2 ? 2 : 3.5;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(ang) * r0, top + Math.sin(ang) * r0);
+    ctx.lineTo(cx + Math.cos(ang) * (r0 + len), top + Math.sin(ang) * (r0 + len));
+    ctx.stroke();
+  }
+  ctx.restore();
+  if ((game.time | 0) % 12 === 0 && game.particles) {
+    game.particles.push({
+      x: cx + (Math.random() - 0.5) * player.w, y: sy + player.h - 2,
+      vx: (Math.random() - 0.5) * 0.3, vy: -0.5 - Math.random() * 0.4,
+      life: 34, color: Math.random() < 0.5 ? '#ffe9a8' : '#ff9ac8', size: 2,
+    });
+  }
+}
+// Every title the game can grant and where it comes from; unearned rows show the source as a goal.
+function _lxTitleSources() {
+  const out = [], seen = {};
+  const add = (t, how) => { if (t && !seen[t]) { seen[t] = 1; out.push({ t, how }); } };
+  add(LX_TITLE_CONQUEROR, 'Defeat Gravitos, the Weight-Bearer');
+  try { add(LX_TITLE_TWIN_STAR, 'Clear a Duo Trial with a co-op partner'); } catch (e) {}
+  try { for (const m of BOON_DEX_MILESTONES) if (m.title) add(m.title, 'Boon Codex: ' + m.label); } catch (e) {}
+  try { for (const t of EXPEDITION_TITLES) add(t, 'A rare reward for an Expedition victory'); } catch (e) {}
+  return out;
+}
+const LX_TITLES_CSS = `
+  #titles-modal { position:fixed; inset:0; z-index:1200; display:flex; align-items:center; justify-content:center; background:rgba(6,3,15,0.74); font-family:Inter,system-ui,sans-serif; }
+  #titles-modal .tt-card { width:min(560px,94vw); max-height:90vh; display:flex; flex-direction:column; background:linear-gradient(180deg,#241640,#120a24); border:1px solid #7a4dd8; border-radius:14px; box-shadow:0 18px 60px rgba(0,0,0,0.6); color:#f0e8ff; overflow:hidden; }
+  #titles-modal .tt-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:13px 16px 7px; }
+  #titles-modal .tt-head h2 { margin:0; font:800 19px Georgia,serif; letter-spacing:1px; color:#ffe9a8; }
+  #titles-modal .tt-x { padding:6px 12px; border-radius:8px; border:1px solid rgba(200,168,255,0.4); background:rgba(255,255,255,0.08); color:#f0e8ff; font:700 12px Inter,system-ui,sans-serif; cursor:pointer; }
+  #titles-modal .tt-x:hover { border-color:#e6d4ff; }
+  #titles-modal .tt-fresh { margin:0 16px 8px; padding:8px 10px; border-radius:9px; text-align:center; font:800 14px Georgia,serif; letter-spacing:2px; color:#2a1a05; background:linear-gradient(90deg,#ffe9a8,#ffcf8a,#ff9ac8); }
+  #titles-modal .tt-intro { margin:0; padding:0 16px 9px; font-size:12.5px; color:#b8a8e0; }
+  #titles-modal .tt-body { overflow-y:auto; padding:0 12px 12px; }
+  #titles-modal .tt-list { display:flex; flex-direction:column; gap:6px; }
+  #titles-modal .tt-row { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:8px 12px; border-radius:9px; border:1px solid rgba(160,130,230,0.25); background:rgba(255,255,255,0.04); color:inherit; cursor:pointer; font:inherit; }
+  #titles-modal .tt-row:hover { border-color:rgba(200,168,255,0.55); }
+  #titles-modal .tt-row.on { border-color:#ffd77a; background:rgba(255,215,122,0.10); }
+  #titles-modal .tt-row.locked { opacity:0.45; cursor:default; }
+  #titles-modal .tt-name { display:block; font:700 14px Georgia,serif; color:#ffe9a8; letter-spacing:0.6px; }
+  #titles-modal .tt-how { display:block; font-size:11.5px; color:#9a8fc0; }
+  #titles-modal .tt-pill { margin-left:auto; font:700 10.5px Inter,system-ui,sans-serif; letter-spacing:1px; padding:3px 9px; border-radius:10px; border:1px solid rgba(255,255,255,0.18); color:#b8a8d0; white-space:nowrap; }
+  #titles-modal .tt-row.on .tt-pill { color:#2a1a05; background:#ffd77a; border-color:#ffd77a; }
+  #titles-modal .tt-favor { margin-bottom:10px; padding:10px 13px; border-radius:10px; border:1px solid rgba(255,207,138,0.45); background:linear-gradient(180deg,rgba(255,207,138,0.12),rgba(255,154,200,0.06)); }
+  #titles-modal .tt-favor.locked { opacity:0.6; border-style:dashed; }
+  #titles-modal .tt-favor h3 { margin:0 0 4px; font:800 14px Georgia,serif; color:#ffcf8a; letter-spacing:1px; }
+  #titles-modal .tt-favor p { margin:3px 0; font-size:12.5px; color:#e6dcff; }
+  #titles-modal .tt-toggle { margin-top:6px; padding:6px 12px; border-radius:8px; border:1px solid rgba(255,207,138,0.6); background:rgba(255,207,138,0.14); color:#ffe9a8; font:700 12px Inter,system-ui,sans-serif; cursor:pointer; }
+`;
+// opts.fresh: opened by the credits, right after the story ends - carries the "unlocked" banner.
+function openTitlesPanel(opts) {
+  if (typeof document === 'undefined' || typeof player === 'undefined' || !player) return;
+  if (typeof closeAllModals === 'function') { try { closeAllModals(); } catch (e) {} }
+  if (!document.getElementById('lx-titles-css')) {
+    const st = document.createElement('style'); st.id = 'lx-titles-css'; st.textContent = LX_TITLES_CSS; document.head.appendChild(st);
+  }
+  let ov = document.getElementById('titles-modal');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'titles-modal'; document.body.appendChild(ov); }
+  if (typeof game !== 'undefined' && game) game.paused = true;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); close(); } };
+  const close = () => {
+    document.removeEventListener('keydown', onKey, true);
+    try { ov.remove(); } catch (e) {}
+    if (typeof game !== 'undefined' && game) game.paused = (typeof _anyOtherModalOpen === 'function') ? !!_anyOtherModalOpen() : false;
+    try { if (typeof saveState === 'function') saveState(); } catch (e) {}
+  };
+  const row = (val, name, how, on, locked) => '<button type="button" class="tt-row' + (on ? ' on' : '') + (locked ? ' locked' : '') + '" data-title="' + esc(val) + '" data-locked="' + (locked ? 1 : 0) + '">'
+    + '<span><span class="tt-name">' + esc(name) + '</span><span class="tt-how">' + esc(how) + '</span></span>'
+    + '<span class="tt-pill">' + (locked ? 'not earned' : on ? 'WORN ✦' : 'wear') + '</span></button>';
+  const render = () => {
+    const owned = (player.titles && typeof player.titles === 'object') ? Object.keys(player.titles).filter((k) => player.titles[k]) : [];
+    const worn = (typeof player.equippedTitle === 'string') ? player.equippedTitle : '';
+    const src = _lxTitleSources(), known = {};
+    let rows = row('', 'No title', 'Your name stands alone.', !worn, false), later = '';   // earned first, goals after
+    for (const x of src) { known[x.t] = 1; const lk = owned.indexOf(x.t) < 0; const h = row(x.t, x.t, x.how, worn === x.t, lk); if (lk) later += h; else rows += h; }
+    for (const t of owned) if (!known[t]) rows += row(t, t, 'Earned', worn === t, false);
+    rows += later;
+    const done = _lxStoryComplete();
+    const favor = done
+      ? '<div class="tt-favor"><h3>🌅 Dawn\'s Favor</h3>'
+        + '<p><b>The Waking World</b>: +' + Math.round(LX_DAWN_FAVOR_EXP * 100) + '% EXP from every kill and +' + Math.round(LX_DAWN_FAVOR_COINS * 100) + '% Mojicoins from everything that pays, for good.</p>'
+        + '<p><b>Everdawn Aura</b>: a sunrise crown behind your character.</p>'
+        + '<button type="button" class="tt-toggle" id="tt-aura">' + (player.dawnAuraOff === true ? 'Aura is off: turn it on' : 'Aura is on: turn it off') + '</button></div>'
+      : '<div class="tt-favor locked"><h3>🔒 Dawn\'s Favor</h3><p>Finish the story to unlock it for good: +' + Math.round(LX_DAWN_FAVOR_EXP * 100) + '% EXP, +' + Math.round(LX_DAWN_FAVOR_COINS * 100) + '% Mojicoins and the Everdawn Aura.</p></div>';
+    ov.innerHTML = '<div class="tt-card"><div class="tt-head"><h2>🎖 Titles</h2><button type="button" class="tt-x" id="tt-close">Close ✕</button></div>'
+      + ((opts && opts.fresh && done) ? '<div class="tt-fresh">✦ DAWN\'S FAVOR UNLOCKED ✦</div>' : '')
+      + '<p class="tt-intro">' + owned.length + ' earned. The title you wear shows under your name, and your co-op partners see it too.</p>'
+      + '<div class="tt-body">' + favor + '<div class="tt-list">' + rows + '</div></div></div>';
+    ov.querySelector('#tt-close').onclick = close;
+    const au = ov.querySelector('#tt-aura');
+    if (au) au.onclick = () => { player.dawnAuraOff = (player.dawnAuraOff === true) ? false : true; render(); };
+    ov.querySelectorAll('.tt-row').forEach((b) => {
+      b.onclick = () => {
+        if (b.getAttribute('data-locked') === '1') return;
+        player.equippedTitle = b.getAttribute('data-title') || '';
+        // The HUD's title line is written inside updateUI's stat-change gate, so a title change alone never
+        // repainted it: spoil the gate's signature, then repaint (the world is paused behind this panel).
+        try { if (_uiLast && _uiLast._stat) _uiLast._stat.lvl = -1; if (typeof updateUI === 'function') updateUI(); } catch (e) {}
+        render();
+      };
+    });
+  };
+  ov.onclick = (ev) => { if (ev.target === ov) close(); };
+  document.addEventListener('keydown', onKey, true);
+  render();
+}
 const _titleTagCache = { key: null, tw: 0 };
 function _lxEquippedTitle() {
   const t = (typeof player !== 'undefined') && player && player.equippedTitle;
@@ -129385,6 +129555,7 @@ function drawPlayer() {
   if (player.invulnerable > 0 && player.dodgeTimer <= 0 && !player._downed && Math.floor(player.invulnerable / 60) % 2 === 0) return;   // v0.29.764 — downed is a held pose, not a mercy blink; never flicker-vanish it
   // v0.25.249 — set-bonus 3pc aura sits behind the character.
   drawSetAura();
+  if (typeof drawDawnAura === 'function') drawDawnAura();   // v0.30.803 - Dawn's Favor
   // v0.25.513 — Hallowed Field on-screen indicator. While the
   // Arch Bishop's passive aura is active (an enemy is within 320 px),
   // paint a soft golden halo behind the chibi. Pulses gently with the
