@@ -1,4 +1,4 @@
-// CO-OP FIDELITY (v0.30.823, fx collection v0.30.824): the relay budget, seeing each other's skills, and a host that goes away.
+// CO-OP FIDELITY (v0.30.823, fx collection v0.30.824, lag v0.30.827): the relay budget, seeing each other's skills, and a host that goes away.
 // Two real browser clients through the real relay (mp/server.mjs - the same 40 msg/s bucket the deployed worker runs).
 //   [SERVE_ROOT=<dir with mp/, data/, art>] node scripts/coop_fidelity_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path';
@@ -27,10 +27,10 @@ const boot = async (name) => {
     window.__pump = setInterval(() => { try { _mpTick(); _coopTickMonsters(); _coopTickProjectiles(); _coopTickHazards(); } catch (e) {} }, 16); }, name);
   return page;
 };
-const wait = (P, fn, ms = 8000) => P.waitForFunction(fn, null, { timeout: ms }).then(() => true).catch(() => false);
+const wait = (P, fn, ms = 8000, arg = null) => P.waitForFunction(fn, arg, { timeout: ms }).then(() => true).catch(() => false);
 try {
   const A = await boot('Host'), B = await boot('Guest');
-  check(await A.evaluate(() => typeof _coopFxDrain === 'function' && typeof _coopSetAway === 'function' && LX_COOP_CAP === 2), 'the build has the fidelity layer (cap 2)');
+  check(await A.evaluate(() => typeof _coopFxDrain === 'function' && typeof _coopSetAway === 'function' && typeof _coopDeltaOn === 'function' && LX_COOP_CAP >= 3), 'the build has the fidelity layer and light frames (cap 3)');
   // ---- connect the two for real ----
   await A.evaluate(({ ws, room }) => mpConnect(ws, 'Host', room), { ws: WS, room: ROOM }); await wait(A, () => net.myId != null);
   await B.evaluate(({ ws, room }) => mpConnect(ws, 'Guest', room), { ws: WS, room: ROOM }); await wait(B, () => net.myId != null);
@@ -69,6 +69,23 @@ try {
     await B.evaluate((uid) => { const m = game.monsters.find((x) => x.uid === uid); for (let i = 0; i < 30; i++) _coopSendDamage(m, 100, false, 'test'); _coopActionFlush(true); }, await A.evaluate(() => window.__uid));
     await A.waitForTimeout(700); return A.evaluate(() => ({ frames: window.__dmgFrames, lost: window.__hp0 - game.monsters[0].currentHp })); })();
   check(bh.frames <= 2 && bh.lost === 3000, '30 hits in one frame travel as one message and all 30 land', J(bh));
+  // ---- 3b. LAG (v0.30.827): light monster frames, no rubber band, a hit leaves within its frame ----
+  await A.evaluate(() => { game.monsters.length = 0; const gy = player.y;
+    for (let i = 0; i < 8; i++) { const m = spawnMonster(player.x + 120 + i * 40, gy - 20, 'slime', false); m.maxHp = m.currentHp = 5e6; }            // near, alive, moving
+    for (let i = 0; i < 12; i++) { const m = spawnMonster(player.x + 3200 + i * 40, gy - 20, 'slime', false); m.maxHp = m.currentHp = 5e6; m.speed = 0; m._lxFar = 1; } });   // far from everyone
+  await B.evaluate(() => { window.__mf = { key: 0, light: 0, keyBytes: 0, lightBytes: 0, arr: 0 }; const oh = _mpHandle; _mpHandle = function (m) { try { if (m && m.t === 'mon') { const n = JSON.stringify(m.list || []).length; if (m.dl) { window.__mf.light++; window.__mf.lightBytes += n; window.__mf.arr += (m.list || []).filter(Array.isArray).length; } else { window.__mf.key++; window.__mf.keyBytes += n; } } } catch (e) {} return oh.apply(this, arguments); }; });
+  await wait(B, () => game.monsters.filter((m) => m._coopMirror).length === 20, 6000); await B.waitForTimeout(3000);
+  const lf = await B.evaluate(() => ({ ...window.__mf, mirrors: game.monsters.filter((m) => m._coopMirror).length }));
+  check(lf.key >= 3 && lf.light > lf.key * 2 && lf.arr > 0 && lf.mirrors === 20 && (lf.lightBytes / lf.light) < (lf.keyBytes / lf.key) * 0.5, 'light frames between keyframes: under half the size, and all 20 mirrors (12 of them out of sight of every player) stay', J({ key: lf.key, light: lf.light, keyAvg: Math.round(lf.keyBytes / lf.key), lightAvg: Math.round(lf.lightBytes / Math.max(1, lf.light)), mirrors: lf.mirrors }));
+  const killUid = await A.evaluate(() => { const m = game.monsters.find((x) => x._lxFar); const u = m.uid; m.currentHp = 0; killMonster(m); return u; });
+  check(await wait(B, (u) => !game.monsters.some((m) => m.uid === u), 3000, killUid), 'a kill between keyframes still removes the mirror');
+  const rb = await B.evaluate(async () => { const m = game.monsters.find((x) => x._coopMirror && x.currentHp > 1e6); const before = m.currentHp; let sent = 0; const ws = net.ws, os = ws.send; const t0 = performance.now(); ws.send = function (s) { if (!sent && s.startsWith('{"t":"dmg"')) sent = performance.now() - t0; return os.apply(this, arguments); };
+    hitMonster(m, 400000, false, 'lagtest'); const predicted = m.currentHp; let up = false; const t1 = performance.now();
+    while (performance.now() - t1 < 1000) { if (m.currentHp > predicted + 1) up = true; await new Promise((r) => setTimeout(r, 8)); } ws.send = os;
+    return { predictedDrop: before - predicted, wentBackUp: up, sentAfterMs: +sent.toFixed(1), settled: before - m.currentHp }; });
+  check(rb.predictedDrop > 0 && !rb.wentBackUp && rb.settled > 0 && rb.sentAfterMs > 0 && rb.sentAfterMs < 40, 'my hit shows at once, leaves within its frame, and the bar never jumps back up', J(rb));
+  const leg = await A.evaluate(() => { const p = Object.values(net.peers)[0]; const cap = p.cap; p.cap = 2; const d2 = _coopDeltaOn(), b2 = _coopBundleOn(); p.cap = cap; return { d2, b2, d3: _coopDeltaOn() }; });
+  check(leg.d2 === false && leg.b2 === true && leg.d3 === true, 'a v0.30.823 partner (cap 2) still gets full bundled frames; light frames need cap 3', J(leg));
   // ---- 4. a paused host: nobody's target, still hands out loot ----
   await B.evaluate(() => { player.x += 700; player.vx = 0; }); await A.waitForFunction(() => { const g = Object.values(net.peers)[0]; return g && Math.abs(g.x - player.x) > 500; }, null, { timeout: 5000 }).catch(() => {});
   const idle = await A.evaluate(async () => { game.monsters.length = 0; const b = spawnMonster(player.x + 80, player.y - 40, 'mooma', true); b.maxHp = b.currentHp = 9e6; const g = Object.values(net.peers)[0];

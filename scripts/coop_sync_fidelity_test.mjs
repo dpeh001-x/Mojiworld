@@ -151,7 +151,9 @@ console.log(`recorded ${o.framesRecorded} frames (${o.monFrames} mon) over ~20s 
 console.log(`replayed into a guest: ${o.samples} position samples, ${o.stateChecks} state checks, up to ${o.maxProjMirrors} mirrored projectiles\n`);
 const results = [];
 const ok = (n, c, e) => results.push({ n, pass: !!c, e });
-ok('shipped cadence constants are 50ms', o.tickMs === 50 && o.projTickMs === 50, `mon ${o.tickMs}ms proj ${o.projTickMs}ms`);
+// v0.30.827 - the monster tick is 48 ms on purpose: the host checks the timer once a frame, so "50" alternated between every
+// 3rd and every 4th frame at 60 fps (15-20 Hz, uneven); 48 is every 3rd frame, a steady 20 Hz - the frame count below still holds.
+ok('shipped cadence constants are 48 / 50 ms (20 Hz)', o.tickMs === 48 && o.projTickMs === 50, `mon ${o.tickMs}ms proj ${o.projTickMs}ms`);
 ok('host emits one frame per 50ms window', o.monFrames > 350 && o.monFrames < 460, `${o.monFrames} mon frames / 20s`);
 ok('mirror mean error is tight', o.meanErr >= 0 && o.meanErr < 12, `${o.meanErr}px`);
 ok('mirror p95 error is tight', o.p95Err >= 0 && o.p95Err < 40, `${o.p95Err}px`);

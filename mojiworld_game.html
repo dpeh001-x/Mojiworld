@@ -12685,7 +12685,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.826';
+const GAME_VERSION = 'v0.30.827';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52341,7 +52341,7 @@ function mpDisconnect() {
 // land visibly tighter. Payload per tick is unchanged (same fields, same
 // caps) — a busy 20-monster map costs ~30 KB/s host-upstream at 20 Hz, and
 // the CAP bounds the worst case exactly as before.
-const COOP_MON_TICK_MS = 50;    // host monster-state broadcast cadence (~20 Hz)
+const COOP_MON_TICK_MS = 48;    // host monster-state broadcast cadence (20 Hz: every 3rd frame at 60 fps - 50 alternated between 3 and 4 frames; v0.30.827)
 const COOP_MON_CAP     = 80;    // max monsters synced per frame (payload bound)
 const COOP_PROJ_TICK_MS = 50;   // host enemy-projectile broadcast cadence (~20 Hz; hazards ride this too)
 const COOP_PROJ_CAP     = 60;   // max enemy projectiles synced per frame
@@ -52463,7 +52463,7 @@ function _coopFindByUid(uid) {
 //
 // New frames are only used between builds that advertise them (cap, on the 2.5 s look-sync ping and at once on a
 // roster change): with an older build on the map everything falls back to the old separate frames.
-const LX_COOP_CAP = 2;            // 2 = bundled host frames, batched hits, fx frames, away handoff
+const LX_COOP_CAP = 3;            // what this build reads: 2 = bundled host frames, batched hits, fx frames, away handoff; 3 = light monster frames (v0.30.827)
 const LX_MP_RATE = 36;            // my own token bucket, kept inside the relay's 40 / s ...
 const LX_MP_BURST = 50;           // ... and its burst of 60
 const LX_MP_RESERVE = 10;         // tokens a droppable frame may never spend: they belong to kills, hits and drops
@@ -52473,18 +52473,72 @@ function _coopPeerCap(id) { const p = (id != null && net.peers) ? net.peers[id] 
 // Every partner on MY map reads the new frames. (A partner on another map ignores monster frames anyway.)
 function _coopBundleOn() {
   if (!_coopActive()) return false;
-  for (const id in net.peers) { const p = net.peers[id]; if (p && p.map === game.currentMap && (p.cap | 0) < LX_COOP_CAP) return false; }
+  for (const id in net.peers) { const p = net.peers[id]; if (p && p.map === game.currentMap && (p.cap | 0) < 2) return false; }
   return true;
 }
 function _coopAllCap() {
-  for (const id in net.peers) { const p = net.peers[id]; if (p && (p.cap | 0) < LX_COOP_CAP) return false; }
+  for (const id in net.peers) { const p = net.peers[id]; if (p && (p.cap | 0) < 2) return false; }
   return true;
+}
+// ---- v0.30.827 - CO-OP LAG (per user: "improve on the lag of coop battles and boss fights") ------------------
+// Measured first (scripts/coop_perf_probe.mjs: two real clients, a zodiac boss and a pack of 24, both casting). The
+// netcode's CPU is small on both sides (host ~6 ms of JS a second, guest ~10), so the lag is not there. It is here:
+//   1. A GUEST'S HITS RUBBER-BANDED. A guest predicts its hit on the mirror at once, but every host frame wrote the
+//      host's HP over it - and the frames still in flight had not seen the hit yet. The bar dropped, jumped back up,
+//      then dropped again: 4 of 8 probes. Hits I have sent now stay subtracted from what the host reports until the
+//      host has had time to apply them (the measured round trip + the two 50 ms ticks in between).
+//   2. v0.30.823 made every hit wait up to 50 ms for its batch. A hit now leaves at the end of the frame it landed in
+//      while my send budget is healthy, and only falls back to the 50 ms batch when it is not.
+//   3. THE HOST'S UPLOAD. Every 50 ms it sent every monster in full - 90 bytes each, type and max HP and attack
+//      included, standing still or not, in sight of anyone or not: ~65 KB/s for 25 monsters at 60 fps, ~200 KB/s on
+//      a packed map. On a weak uplink that queues, and a queue is latency for everything behind it (boss hits,
+//      kills). Now a full KEYFRAME goes twice a second, and in between only what CHANGED and what SOMEBODY CAN SEE,
+//      as a bare array [uid, x, y, vx, vy, facing, hp, {what is active}] - about 30 bytes.
+// Light frames need every partner on the map to read them (cap 3); otherwise the full frames of v0.30.823 stand.
+const COOP_KEY_MS = 500;          // a full monster keyframe this often; light frames in between
+const COOP_FAR_X = 1500;          // a monster farther than this from EVERY player on the map ...
+const COOP_FAR_Y = 1000;          // ... waits for the next keyframe
+const LX_MP_QUICK = 30;           // send-budget tokens above which a hit leaves at once instead of in the 50 ms batch
+const _COOP_MON_CORE = { u: 1, x: 1, y: 1, vx: 1, vy: 1, f: 1, h: 1, m: 1, t: 1, b: 1, a: 1 };
+const _COOP_MON_EX = { aa: 1, fz: 1, st: 1, wd: 1, wg: 1, wb: 1, ps: 1, sp: 1, dp: 1, p: 1, sg: 1, op: 1, bk: 1, cs: 1, sf: 1 };
+function _coopDeltaOn() {   // at least one partner on my map, and every one of them reads light frames
+  if (!_coopActive()) return false;
+  let n = 0;
+  for (const id in net.peers) { const p = net.peers[id]; if (!p || p.map !== game.currentMap) continue; if ((p.cap | 0) < 3) return false; n++; }
+  return n > 0;
+}
+// a light entry back into the shape _coopApplyMonsters reads; _d marks "no statics here"
+function _coopMonFromArr(a) {
+  const e = { u: a[0], x: a[1], y: a[2], vx: a[3], vy: a[4], f: a[5], h: a[6], _d: 1 };
+  const ex = a[7];
+  if (ex && typeof ex === 'object') for (const k in ex) if (_COOP_MON_EX[k]) e[k] = ex[k];
+  return e;
+}
+// How long a hit I sent may still be missing from the host's frames: my batch + the trip there + the host's next
+// monster tick + the trip back. _rttMs is the measured player-relay-player round trip to the host.
+function _coopPendWindow() {
+  const h = (net.hostId != null && net.peers) ? net.peers[net.hostId] : null;
+  const rtt = (h && Number.isFinite(+h._rttMs)) ? +h._rttMs : 120;
+  return Math.max(160, Math.min(800, rtt + 130));
+}
+function _coopNotePending(m, d) {
+  if (!m || !(d > 0)) return;
+  (m._pend || (m._pend = [])).push({ d, t: performance.now() });
+  if (m._pend.length > 40) m._pend.splice(0, m._pend.length - 40);
+}
+function _coopHpWithPending(m, hostHp) {
+  const q = m._pend;
+  if (!q || !q.length) return hostHp;
+  const now = performance.now(), W = _coopPendWindow(); let sum = 0, k = 0;
+  for (let i = 0; i < q.length; i++) { const p = q[i]; if (now - p.t < W) { q[k++] = p; sum += p.d; } }
+  q.length = k;
+  return Math.max(hostHp > 0 ? 1 : 0, hostHp - sum);   // my hits never "kill" the mirror: only the host's kill does
 }
 // The socket's send, behind my copy of the relay's bucket. Droppable = newest-wins frames; everything else always goes.
 function _lxMpBudgetWrap(ws) {
   try {
     const raw = ws.send.bind(ws); let tokens = LX_MP_BURST, last = performance.now();
-    net._budget = { sent: 0, skipped: 0 };
+    net._budget = { sent: 0, skipped: 0, tokens: () => Math.min(LX_MP_BURST, tokens + (performance.now() - last) / 1000 * LX_MP_RATE) };   // v0.30.827 - tokens(): how healthy my budget is
     ws.send = function (s) {
       const now = performance.now();
       tokens = Math.min(LX_MP_BURST, tokens + (now - last) / 1000 * LX_MP_RATE); last = now;
@@ -52503,7 +52557,10 @@ function _coopQueueHit(h) {
   if (q.length >= COOP_HIT_CAP) { _coopActionFlush(true); return; }
   // A hit must never wait on the frame loop (a minion or a burn can land one while I sit in a menu): the first hit
   // of a window books the flush itself, and everything that lands inside the window leaves with it.
-  if (!net._hitTimer) net._hitTimer = setTimeout(() => { net._hitTimer = 0; try { _coopActionFlush(true); } catch (e) {} }, COOP_ACT_TICK_MS);
+  // v0.30.827 - ... and while my send budget is healthy that window is THIS FRAME (0 ms: everything the frame lands still
+  // leaves together); the 50 ms batch is for when a channelled skill is hitting every frame and the budget is not.
+  const _quick = !!(net._budget && net._budget.tokens && net._budget.tokens() > LX_MP_QUICK);
+  if (!net._hitTimer) net._hitTimer = setTimeout(() => { net._hitTimer = 0; try { _coopActionFlush(true); } catch (e) {} }, _quick ? 0 : COOP_ACT_TICK_MS);
 }
 function _coopActionFlush(force) {
   if (!_coopActive() || !net.ws || net.ws.readyState !== 1) { if (net._hitQ) net._hitQ.length = 0; return; }
@@ -52516,7 +52573,7 @@ function _coopActionFlush(force) {
   if (!hits && !fxw && !po) return;
   net._actAt = now;
   try {
-    if (hits || _coopPeerCap(net.hostId) >= LX_COOP_CAP) {
+    if (hits || _coopPeerCap(net.hostId) >= 2) {
       const f = { t: 'dmg', fm: game.currentMap };
       if (hits) f.l = hits;
       if (fxw) { if (fxw.fx) f.fx = fxw.fx; if (fxw.pj) f.pj = fxw.pj; }
@@ -52740,6 +52797,12 @@ function _coopTickMonsters() {
   const now = performance.now();
   if (now - (net._coopMonAt || 0) < COOP_MON_TICK_MS) return;
   net._coopMonAt = now;
+  // v0.30.827 - a full KEYFRAME every COOP_KEY_MS; in between, only what changed and what somebody can see (see part above)
+  const _delta = _coopDeltaOn();
+  const _key = !_delta || (now - (net._coopKeyAt || 0) >= COOP_KEY_MS);
+  if (_key) net._coopKeyAt = now;
+  let _pls = null;
+  if (_delta && !_key) { _pls = [[player.x, player.y]]; for (const _id in net.peers) { const _q = net.peers[_id]; if (_q && _q.map === game.currentMap && Number.isFinite(+_q.x)) _pls.push([+_q.x, +_q.y || 0]); } }
   const list = [];
   const arr = game.monsters || [];
   for (let i = 0; i < arr.length && list.length < COOP_MON_CAP; i++) {
@@ -52788,9 +52851,18 @@ function _coopTickMonsters() {
     if (m._dirOpenT > 0) _e.op = Math.min(9000, Math.round(m._dirOpenT));
     if (m._break > 0 && m._breakMax > 0) _e.bk = Math.max(0, Math.min(100, Math.round((m._break / m._breakMax) * 100)));
     if (m._cancerShellClosed) { _e.cs = 1; if (m._shellFace) _e.sf = m._shellFace === -1 ? -1 : 1; }
-    list.push(_e);
+    if (!_delta) { list.push(_e); continue; }
+    let _ex = null; for (const _k in _e) { if (_COOP_MON_CORE[_k]) continue; (_ex = _ex || {})[_k] = _e[_k]; }
+    const _d = [_e.u, _e.x, _e.y, _e.vx, _e.vy, _e.f, _e.h]; if (_ex) _d.push(_ex);
+    const _sig = JSON.stringify(_d);
+    if (_key || !m._kfSent) { m._kfSent = true; m._lastSig = _sig; list.push(_e); continue; }   // keyframe, or first sight: in full
+    if (_sig === m._lastSig) continue;                                                           // nothing about it changed
+    let _near = false; for (let _j = 0; _j < _pls.length; _j++) { if (Math.abs(_pls[_j][0] - m.x) < COOP_FAR_X && Math.abs(_pls[_j][1] - m.y) < COOP_FAR_Y) { _near = true; break; } }
+    if (!_near) continue;                                                                        // nobody can see it: the next keyframe carries it
+    m._lastSig = _sig; list.push(_d);
   }
   const _frame = { t: 'mon', map: game.currentMap, list };
+  if (_delta && !_key) _frame.dl = 1;   // a light frame: what is absent is NOT gone
   if (_coopBundleOn()) {   // v0.30.823 - ONE message per tick: projectiles, hazards and my fx ride the monster frame
     _frame.pl = _coopProjList(); _frame.hl = _coopHazList();
     const _fxw = _coopFxDrain(); if (_fxw) { if (_fxw.fx) _frame.fx = _fxw.fx; if (_fxw.pj) _frame.pj = _fxw.pj; }
@@ -53637,7 +53709,7 @@ function _coopApplyMonsters(msg) {
   if (net.hostId == null || +msg.id !== +net.hostId) return;
   if (!_coopFollowingHost()) return;
   if (msg.map !== game.currentMap) return;   // only mirror the host's current map
-  const incoming = (msg.list || []).slice(0, COOP_MON_CAP);   // clamp to the promised bound (payload-flood guard)
+  const incoming = (msg.list || []).slice(0, COOP_MON_CAP).map((_e0) => Array.isArray(_e0) ? _coopMonFromArr(_e0) : _e0);   // clamp to the promised bound (payload-flood guard); v0.30.827 - light entries are arrays
   const seen = new Set();
   const byUid = {};
   // v0.27.0 fix (live 2-client test) — a follower holds ONLY the host's mirrors.
@@ -53654,6 +53726,7 @@ function _coopApplyMonsters(msg) {
     if (!e || e.u == null || !Number.isFinite(+e.x) || !Number.isFinite(+e.y)) continue;
     seen.add(e.u);
     let m = byUid[e.u];
+    if (!m && e._d) continue;   // v0.30.827 - a light entry for a monster I have not met: its keyframe is at most half a second away
     if (!m) {
       net._coopSpawning = true;   // bypass the non-host spawn-suppression for mirror creation
       net._coopForceElite = (e.b === 3);   // v0.27.2 — b===3 means the host's monster is an Elite; force the mirror to the elite variant (matching name/size/atk/hitbox) instead of re-rolling the 3% chance locally.
@@ -53680,7 +53753,7 @@ function _coopApplyMonsters(msg) {
     m.vx = +e.vx || 0; m.vy = +e.vy || 0;
     m.facing = e.f === -1 ? -1 : 1;
     if (Number.isFinite(+e.m)) m.maxHp = +e.m;
-    if (Number.isFinite(+e.h)) m.currentHp = +e.h;
+    if (Number.isFinite(+e.h)) m.currentHp = _coopHpWithPending(m, +e.h);   // v0.30.827 - no rubber band: see _coopPendWindow
     // v0.29.368 — adopt the host's rolled atk so guest contact damage matches
     // what the host's actual monster deals (mirror creation re-rolled the
     // per-spawn variance locally). Clamped: the host-only sender gate already
@@ -53730,7 +53803,7 @@ function _coopApplyMonsters(msg) {
   // Drop mirrors the host no longer reports (killed / despawned upstream).
   for (let i = game.monsters.length - 1; i >= 0; i--) {
     const m = game.monsters[i];
-    if (m && m.uid != null && m._coopMirror && !seen.has(m.uid)) game.monsters.splice(i, 1);
+    if (!msg.dl && m && m.uid != null && m._coopMirror && !seen.has(m.uid)) game.monsters.splice(i, 1);   // v0.30.827 - only a keyframe may conclude a monster is gone
   }
 }
 // NON-HOST: forward the FULLY-resolved damage (all hitMonster multipliers + DEF)
@@ -53738,7 +53811,7 @@ function _coopApplyMonsters(msg) {
 // exactly the same damage as solo/host.
 function _coopSendDamage(m, dmg, isCrit, skill, procs) {
   if (!m || m.uid == null) return;
-  if (_coopPeerCap(net.hostId) >= LX_COOP_CAP) {   // v0.30.823 - batched: one message per 50 ms, not one per hit
+  if (_coopPeerCap(net.hostId) >= 2) {   // v0.30.823 - batched: one message per 50 ms, not one per hit
     _coopQueueHit({ u: m.uid, d: Math.max(0, Math.round(dmg) || 0), c: isCrit ? 1 : 0, k: String(skill || '').slice(0, 16), fz: (procs && procs.fz > 0) ? Math.min(3000, procs.fz | 0) : 0, st: (procs && procs.st > 0) ? Math.min(1500, procs.st | 0) : 0 });
     return;
   }
@@ -98153,6 +98226,7 @@ function hitMonster(m, dmg, isCrit, skill) {
     const _gp = _lxOnHitProcs(m, dmg, skill);
     _coopSendDamage(m, _preWardDmg, isCrit, skill, _gp);
     m.currentHp = Math.max(0, m.currentHp - finalDmg);
+    _coopNotePending(m, finalDmg);   // v0.30.827 - stays subtracted from the host's HP until the host has had time to apply it
     if (m.zodiacSign === 'virgo') _virgoTook(m, finalDmg);   // v0.30.366 — the no-overkill write books too
     // v0.29.x — was 6ms (one frame); match the solo 50ms flash duration.
     m.hitFlash = Math.max(m.hitFlash | 0, 50);
