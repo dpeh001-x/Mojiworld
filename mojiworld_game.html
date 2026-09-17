@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.845';
+const GAME_VERSION = 'v0.30.846';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -47500,7 +47500,7 @@ function _lxSteamPushStats() {
       lifetime_kills: (game && game.kills) || 0,
       highest_level: (player && player.level) || 1,
       lifetime_coins: (player && player.mojicoins) || 0,
-      bosses_defeated: (game && game.bossDefeated) ? Object.keys(game.bossDefeated).length : 0,
+      bosses_defeated: (game && game.bestiary) ? Object.keys(game.bestiary).filter((k) => k.indexOf('_boss_') === 0).length : 0,   // v0.30.x — distinct bosses (was bossDefeated keys: doubled, and shrinking on respawn)
     });
   } catch (e) {}
 }
@@ -55822,7 +55822,7 @@ const ACHIEVEMENTS = [
   { id:'firstBlood',   name:'First Blood',      desc:'Defeat 1 enemy',                   test:()=>game.kills>=1 },
   { id:'slayer100',    name:'Slayer',           desc:'Defeat 100 enemies',               test:()=>game.kills>=100 },
   { id:'exterminator', name:'Exterminator',     desc:'Defeat 1000 enemies',              test:()=>game.kills>=1000 },
-  { id:'bossHunter',   name:'Boss Hunter',      desc:'Defeat 3 different bosses',        test:()=>Object.keys(game.bossDefeated||{}).length>=3 },
+  { id:'bossHunter',   name:'Boss Hunter',      desc:'Defeat 3 different bosses',        test:()=>Object.keys(game.bestiary||{}).filter(k=>k.indexOf('_boss_')===0).length>=3 },   // v0.30.x — was bossDefeated MAP keys: every boss writes two (the map and its _shardsAwarded twin), so it unlocked at 2, and respawns delete them (boss6's fix, v0.26.x)
   { id:'lv10',         name:'Adept',            desc:'Reach level 10',                   test:()=>player.level>=10 },
   { id:'lv20',         name:'Apprentice',       desc:'Reach level 20',                   test:()=>player.level>=20 },
   { id:'lv50',         name:'Master',           desc:'Reach level 50',                   test:()=>player.level>=50 },
@@ -66285,6 +66285,13 @@ function _expeditionMobKilled(m) {
     // lost to a missing clip: a dropped file just means the results screen opens as it does today.
     if (m.type === 'towerSovereign' && typeof _sovereignFallCutscene === 'function') {
       m._sovFallPlayed = true;   // v0.30.702 - claimed, so killMonster's own hook cannot play it twice
+      // v0.30.x sov-fall — THE RUN IS WON NOW, NOT WHEN THE CUT ENDS. The cutscene (and the completion behind it) waits
+      // 1.5 s, and the game kept running: his last homing volley in flight, a DoT, a leftover mob. A death in that beat
+      // took _endExpedition('death') - snapshot restored, run inactive - and the completion that followed found nothing to
+      // complete: the ten-floor clear, its coins, bonus and title roll, lost to a boss already dead.
+      game.expedition._finalBossDown = true;
+      player.invulnerable = Math.max(player.invulnerable | 0, 2600);
+      if (game.projectiles) for (let _pi = game.projectiles.length - 1; _pi >= 0; _pi--) { const _pp = game.projectiles[_pi]; if (_pp && _pp.owner === 'enemy') game.projectiles.splice(_pi, 1); }
       let _done = false;
       const _after = () => { if (_done) return; _done = true; _completeExpedition(); };
       setTimeout(() => { try { _sovereignFallCutscene(_after); } catch (e) { _after(); } }, 1500);
@@ -75445,6 +75452,8 @@ function _tryCheatDeathRevive() {
 }
 
 function triggerDeath() {
+  // v0.30.x sov-fall — the final boss is already down: nothing can fail the run in the beat before its cutscene.
+  if (game.expedition && game.expedition.active && game.expedition._finalBossDown) { player.hp = Math.max(1, player.hp | 0); return; }
   // Close a stale MP chat bar so a post-respawn Enter goes to NPC/interact, not the box.
   if (typeof _mpCloseChat === 'function' && typeof net !== 'undefined' && net && net.chatOpen) _mpCloseChat(false);
   // v0.26.x — if the non-blocking tutorial dock is open when the player dies,
@@ -100048,6 +100057,7 @@ function killMonster(m) {
   // achievements — a 3x quest accelerator from nearly-free kills. Pack-call
   // and Keeper-hound spawns still count: they're full-HP real fights.
   const _isIllusionKill = !!m._isMirage;
+  const _lxTwinKill = !!(m._isTwin || m._isPiscesTwin);   // v0.30.x twin-rewards — a split twin pays nothing boss-sized (see the boss daily tick below)
   if (!_isIllusionKill) {
   game.kills++;
   tickDaily('kills');
@@ -100056,7 +100066,13 @@ function killMonster(m) {
   // shade "no quest tick, no first-kill cinematic" and its dialog promises "the persistent map
   // record doesn't change", but neither this daily tick nor the quest tick below tested the tag.
   // A free re-summon therefore replaced the boss respawn cooldown for every boss quest.
-  if ((m.isBoss || m.isMiniBoss) && !m._echoBoss) tickDaily('boss', m.type);   // v0.26.x audit FIX — boss-track daily challenges (e.g. gravitos1) had NO tick caller, so they could never complete; credit boss/miniboss kills here
+  // v0.30.x twin-rewards — A SPLIT TWIN IS NOT A SECOND BOSS. Gemini and Pisces split at 66% into a twin spawned as a full
+  // zodiac boss, and only the sigil and setshard payouts knew it: the twin's own death paid full EXP and coins, a boon pick,
+  // its own gear budget (a first fight could drop 6 pieces against a cap of 3), boss quest / daily ticks, the zodiac badge
+  // and the map's defeated stamp - so killing the twin and dying marked a sign beaten that never was, and a free Echo
+  // Keeper echo of Gemini opened a boon wheel every run. Every one of those now skips a twin (_lxTwinKill, declared with
+  // _isIllusionKill); the parent pays as before.
+  if ((m.isBoss || m.isMiniBoss) && !m._echoBoss && !_lxTwinKill) tickDaily('boss', m.type);   // v0.26.x audit FIX — boss-track daily challenges (e.g. gravitos1) had NO tick caller, so they could never complete; credit boss/miniboss kills here
   }
   checkAchievements();
   // v0.26.261 — Synergy: Blood Ritual (ls + atk). Each kill stamps a
@@ -100108,7 +100124,7 @@ function killMonster(m) {
   // STANDARD TICK PATH — skipped for ticket-family kills (already direct-
   // ticked above) to prevent double-counting. All other mob types
   // (non-ticket world mobs) still go through the regular pipeline.
-  if (m.type && !_inExp && !m._echoBoss && !m._pqDirectTicked && !_isIllusionKill) tickQuestKill(m.type, !!m.isBoss);   // v0.30.511 — echoes do not advance quests (see tickDaily above)   // v0.29.321 — mirages don't advance hunt quests
+  if (m.type && !_inExp && !m._echoBoss && !m._pqDirectTicked && !_isIllusionKill && !_lxTwinKill) tickQuestKill(m.type, !!m.isBoss);   // v0.30.511 — echoes do not advance quests (see tickDaily above)   // v0.29.321 — mirages don't advance hunt quests
   // Mastery (v0.24.1) — per-mob-type kill counter. Hitting thresholds of
   // 100 / 500 / 1000 kills grants +1% / +2% / +3% damage vs that type.
   // Classic MMO "paragon-lite" grind that rewards long-term farming.
@@ -100165,7 +100181,7 @@ function killMonster(m) {
     // The Twelve Houses, its achievements and the Gravitos prerequisite to a player who had
     // never entered a zodiac arena. The expedition even keeps a separate session counter
     // (_expeditionZodiacKills) precisely to avoid touching this record, and this wrote it anyway.
-    const _realKill = !m._echoBoss && !m._expeditionBoss;
+    const _realKill = !m._echoBoss && !m._expeditionBoss && !_lxTwinKill;
     // First-time zodiac kill → epic badge-earned flourish
     const wasNew = _realKill && m.zodiacBoss && !zodiacDefeated(m.zodiacSign);
     if (_realKill) trackPickup('boss', { id: m.type });
@@ -100744,7 +100760,7 @@ function killMonster(m) {
         }
       } catch (e) {}
     }
-    if (!m._echoBoss && !m._expeditionBoss) {
+    if (!m._echoBoss && !m._expeditionBoss && !_lxTwinKill) {
       game.bossDefeated[game.currentMap] = true;
       game._bossDefeatedAt = game._bossDefeatedAt || {}; game._bossDefeatedAt[game.currentMap] = (game._playMs || 0);   // v0.26.453 - respawn-cooldown stamp
     }
@@ -100794,7 +100810,7 @@ function killMonster(m) {
       // v0.26.365 — Also skip for Echo Keeper re-fights (_echoBoss): per
       // user, returning to attempt a boss again grants NO boon (and no EXP/
       // coins — zeroed at echo spawn). Pure practice fight.
-      if (m._expeditionBoss || m._echoBoss) return;
+      if (m._expeditionBoss || m._echoBoss || m._isTwin || m._isPiscesTwin) return;   // v0.30.x twin-rewards
       // v0.30.x - per user: "Train conductor boss should not drop any boons".
       // The PQ finale pays through its own quest chain (EXP, coins, the Rush
       // completion); the boon wheel on top made him the most farmable boon
@@ -101141,6 +101157,7 @@ function _lxBossGearCap(m) { return (typeof _lxIsBossRefight === 'function' && _
 function _lxRewardlessEcho(m) { return !!(m && m._echoBoss && (m._rushBoss || (!m._nightmareEcho && !m._duoTrial && !m.zodiacBoss && !m.zodiacSign))); }
 function _lxBossGearGate(m, it, ordinary) {
   if (!m || !_lxIsGearItem(it)) return true;
+  if (m._isTwin || m._isPiscesTwin) return false;   // v0.30.x twin-rewards — the parent's budget is the fight's
   if (_lxRewardlessEcho(m)) return false;   // v0.30.833
   if (!(m.isBoss || m.boss || m.zodiacBoss)) return true;
   if (ordinary && _lxIsSuperBoss(m)) return false;
@@ -144372,6 +144389,7 @@ const ZODIAC_AI = {
         twin.currentHp = Math.floor(m.maxHp * 0.5);
         twin.maxHp = twin.currentHp;
         twin._isTwin = true;
+        twin.exp = 0; twin.mojicoins = 0;   // v0.30.x twin-rewards — a split is a mechanic, not a second boss (see killMonster)
         twin._twinParent = m;
         twin.flies = true; twin._noGravity = true; twin.onGround = false;   // v0.29.836
         twin.color = '#ff88cc';
@@ -146750,6 +146768,7 @@ const ZODIAC_AI = {
         twin.currentHp = Math.floor(m.maxHp * 0.5);
         twin.maxHp = twin.currentHp;
         twin._isPiscesTwin = true;
+        twin.exp = 0; twin.mojicoins = 0;   // v0.30.x twin-rewards — a split is a mechanic, not a second boss (see killMonster)
         twin._piscesOrbitSign = -1;
         twin.color = '#ff99cc';
         m._piscesTwin = twin;
