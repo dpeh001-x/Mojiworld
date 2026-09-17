@@ -1,5 +1,7 @@
-// The Skills panel says what the skills do (v0.30.782): descriptions audited against the code, rank-perk text
-// that matches the perk, and the Celestial Aurora field ticking for its whole (rank-extended) life.
+// The Skills panel says what the skills do. Descriptions are held to the numbers in the RUNNING game - constants and
+// the skill functions' own source - so a Skill Editor patch that changes a number without its text fails here.
+// Also: rank-perk text matches the perk, Magic Bolt is free, the first-paint skill bar carries the live texts, and the
+// Celestial Aurora field ticks for its whole (rank-extended) life.
 //
 //   [SERVE_ROOT=<dir with serve.js + the game's data/>] node scripts/skill_desc_accuracy_test.mjs [candidate.html]
 import { createRequire } from 'node:module'; import path from 'node:path';
@@ -27,15 +29,52 @@ try {
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     loadMap('forest', 300); await sleep(1500);
-    const out = { ver: GAME_VERSION };
+    const out = { ver: GAME_VERSION, claims: [] };
+    const fmt = (v) => String(+(+v).toFixed(2));
+    const lit = (id, re) => { const m = SKILL_FNS[id].toString().match(re); return m ? +m[1] : NaN; };
+    const lit2 = (id, re) => { const m = SKILL_FNS[id].toString().match(re); return m ? [+m[1], +m[2]] : [NaN, NaN]; };
+    const claim = (id, text) => out.claims.push({ id, text, ok: SKILLS[id].desc.includes(text), desc: SKILLS[id].desc });
+    // constants
+    claim('marksman_ult', `${fmt(LX_PROTOCOL_LINE_ATK)}× ATK + ${LX_PROTOCOL_LINE_FLAT} each`);
+    claim('shinobi_seal', `dealing ${fmt(LX_KAGE_DMG)}× ATK`);
+    claim('hexmaster_grandhex', `a ${fmt(LX_GRANDHEX_BURST_MUL)}× ATK burst`);
+    claim('hexmaster_grandhex', `PULSES AGAIN (${fmt(LX_GRANDHEX_BURST_MUL * 0.8)}× ATK)`);
+    claim('hexmaster_grandhex', `RUPTURES for ${fmt(LX_GRANDHEX_RUPTURE_MUL)}× ATK and splashes ${Math.round(LX_GRANDHEX_RUPTURE_SPLASH * 100)}%`);
+    claim('hexmaster_grandhex', `(${fmt(LX_HEXORB_DMG_MUL)}× ATK + a stack)`);
+    { const lo = LX_DAWN.baseMul, hi = (LX_DAWN.baseMul + LX_DAWN.timeMul) * (1 + LX_DAWN.dmgAmp);
+      claim('crusader_ult', `a holy detonation for ${fmt(lo * 0.7)}× ATK, up to ${fmt(hi * 0.7)}× fully charged`);
+      claim('crusader_ult', `after-waves of ${fmt(lo * 0.15)}× ATK each (up to ${fmt(hi * 0.15)}×)`); }
+    // literals in the skill functions; hits tagged with a slot-x skill's own id are doubled by hitMonster (_isGSkill)
+    out.gx2 = { phantom_cut: _isGSkill('phantom_cut'), archbishop_grail: _isGSkill('archbishop_grail') };
+    claim('phantom_cut', `(${fmt(2 * lit('phantom_cut', /getAtk\(\) \* ([\d.]+)\), crit, 'phantom_cut'/))}× ATK each)`);
+    claim('phantom_cut', `shadow nova (${fmt(lit('phantom_cut', /const dmg = Math\.floor\(getAtk\(\) \* ([\d.]+) \+ 6\)/))}× ATK`);
+    claim('archbishop_grail', `(${fmt(2 * lit('archbishop_grail', /const dmg = Math\.floor\(getAtk\(\) \* ([\d.]+)\);/))}× ATK each)`);
+    { const c = lit('doombringer_ult', /performMelee\(440, ([\d.]+) \* _heatMul/), f = lit('doombringer_ult', /getAtk\(\) \* ([\d.]+) \* _heatMul \+/);
+      claim('doombringer_ult', `a ${fmt(c)}× ATK melee cleave`); claim('doombringer_ult', `doom-fires (${fmt(f)}× ATK each)`);
+      claim('doombringer_ult', `(~${fmt(c + 7 * f)}x ATK total, ~${fmt(2 * (c + 7 * f))}x at full heat)`); }
+    claim('shinobi_ult', `(${fmt(lit('shinobi_ult', /performAround\(175, ([\d.]+),/))}× ATK in 175 px each)`);
+    claim('shinobi_ult', `then a ${fmt(lit('shinobi_ult', /performAround\(330, ([\d.]+),/))}× ATK shockwave finale`);
+    claim('sleight', `for ${fmt(lit('sleight', /getAtk\(\) \* ([\d.]+) \* ramp/))}× ATK`);
+    { const [a, b] = lit2('elemental', /getAtk\(\) \* ([\d.]+) \* jumpMul \+ (\d+)/); claim('elemental', `(${fmt(a)}× ATK + ${b}, −8% per hop)`); }
+    claim('archbishop_ult', `five holy pulses (${fmt(lit('archbishop_ult', /performAround\(440, ([\d.]+),/))}× ATK`);
+    claim('phantom_ult', `shards (${fmt(lit('phantom_ult', /damage: getAtk\(\) \* ([\d.]+) \+/))}× ATK each)`);
+    claim('nightreaper_ult', `shuriken (${fmt(lit('nightreaper_ult', /damage: getAtk\(\) \* ([\d.]+) \+ 5/))}× ATK each)`);
+    claim('arcaneBurst', `(${fmt(lit('arcaneBurst', /performAround\(_abAoe, ([\d.]+),/))}× ATK, heavy knockback)`);
+    claim('holyLight', `holy AoE (${fmt(lit('holyLight', /const _aoeDmg = Math\.max\(1, Math\.floor\(getAtk\(\) \* ([\d.]+)\)\)/))}× ATK`);
+    claim('darkPulse', `(220px, ${fmt(lit('darkPulse', /performAround\(220, ([\d.]+),/))}× ATK)`);
+    claim('blink', `Deals ${fmt(lit('blink', /const _dmg = Math\.max\(1, Math\.floor\(getAtk\(\) \* ([\d.]+)\)\)/))}× ATK`);
     // Magic Bolt's row says mp:3, but the boot loop zeroes every basic attack's MP - it really is free
     player.cls = 'mage'; player.job = null; player.master = null; player.maxMp = 500; player.mp = 200; player.skillCooldowns = {}; player.attackCooldown = 0;
     game.paused = false; const mp0 = player.mp; try { castSkill('magicBolt'); } catch (e) { out.boltErr = e.message; }
-    out.boltCost = mp0 - player.mp;
+    out.boltCost = mp0 - player.mp; out.boltDesc = SKILLS.magicBolt.desc;
     // rank-perk text
     out.warCry5 = _formatSkillLv5Bonus('warCry'); out.meteor10 = _formatSkillLv10Bonus('meteor'); out.rush10 = _formatSkillLv10Bonus('rush');
-    out.aegis10 = _formatSkillLv10Bonus('crusader_aegis'); out.deadeye10 = _formatSkillLv10Bonus('marksman_oneshot');
-    out.stab5 = _formatSkillLv5Bonus('stab');
+    out.aegis10 = _formatSkillLv10Bonus('crusader_aegis'); out.deadeye10 = _formatSkillLv10Bonus('marksman_oneshot'); out.stab5 = _formatSkillLv5Bonus('stab');
+    // the first-paint skill bar in the HTML carries copies of descs; they must be the live texts
+    const html = await (await fetch(location.pathname, { cache: 'no-store' })).text();
+    out.bar = [...html.matchAll(/<div class="skill-slot ready" title="([^"—]+) — ([^"]*) \(Lv \d+\+\)">/g)].map((m) => {
+      const s = Object.values(SKILLS).find((x) => x.name === m[1].trim() && x.cls === 'warrior'); return { name: m[1].trim(), ok: !!s && s.desc === m[2] };
+    });
     // Celestial Aurora: one heal / holy tick per second of the field's life, including the rank seconds
     const aurora = async (rank) => {
       game.paused = true; game.hazards.length = 0; player.cls = 'mage'; player.job = 'priest'; player.skillRanks = { celestialAurora: rank };
@@ -48,16 +87,17 @@ try {
       return { life: h.maxLife, ticksDealt: h.ticksDealt };
     };
     out.aurora0 = await aurora(0); out.aurora10 = await aurora(10); player.skillRanks = {};
-    out.desc = {}; for (const id of ['magicBolt', 'phantom_cut', 'marksman_ult', 'doombringer_ult', 'hexmaster_grandhex', 'archbishop_grail', 'arrowRain']) out.desc[id] = SKILLS[id].desc;
+    out.arrowRain = SKILLS.arrowRain.desc;
     return out;
   });
   console.log('build ' + r.ver);
-  check(r.boltCost === 0 && /Free to cast\.$/.test(r.desc.magicBolt) && /1\.2× ATK \+ 6/.test(r.desc.magicBolt), 'Magic Bolt is free (basic attacks are zeroed at boot) and its text says so, with its 1.2× damage', `cost ${r.boltCost}; ${r.desc.magicBolt}`);
-  check(/5\.8× ATK each/.test(r.desc.phantom_cut), "Voidrift Execution's strikes read 5.8× ATK (2.9 doubled by the G-skill x2, verified in play)", r.desc.phantom_cut.slice(0, 90));
-  check(/1× ATK \+ 12 each/.test(r.desc.marksman_ult) && !/0\.6% ATK/.test(r.desc.marksman_ult), 'Deadeye Protocol quotes its real round damage', r.desc.marksman_ult.slice(0, 120));
-  check(/~35x ATK total/.test(r.desc.doombringer_ult) && /\+1% damage per point/.test(r.desc.doombringer_ult), 'Calamity Incarnate quotes 35× and +1% per heat point', '');
-  check(/4× ATK burst/.test(r.desc.hexmaster_grandhex) && /splashes 50%/.test(r.desc.hexmaster_grandhex), "Grand Hex quotes the user's v0.30.778 numbers", '');
-  check(/5\.6× ATK each/.test(r.desc.archbishop_grail) && /22 arrows/.test(r.desc.arrowRain), 'Holy Grail pillars (doubled) and Arrow Rain count are stated', '');
+  const bad = r.claims.filter((c) => !c.ok);
+  check(r.claims.length >= 25 && !bad.length && !r.claims.some((c) => /NaN/.test(c.text)), `every checked description quotes the number in the running game's code (${r.claims.length} claims)`,
+    bad.map((c) => `${c.id} should say "${c.text}"`).join(' | ') || r.claims.map((c) => c.text).slice(0, 4).join(' · '));
+  check(r.gx2.phantom_cut && r.gx2.archbishop_grail, 'the doubled numbers are real: both skills are G skills whose hits carry their own id', JSON.stringify(r.gx2));
+  check(r.boltCost === 0 && /Free to cast\.$/.test(r.boltDesc), 'Magic Bolt is free (basic attacks are zeroed at boot) and its text says so', `cost ${r.boltCost}; ${r.boltDesc}`);
+  check(r.bar.length >= 5 && r.bar.every((b) => b.ok), "the HTML's first-paint skill bar tooltips are the live descriptions", r.bar.map((b) => `${b.name} ${b.ok ? 'ok' : 'STALE'}`).join(', '));
+  check(/22 arrows/.test(r.arrowRain), 'Arrow Rain states its arrow count', r.arrowRain);
   check(/\+2\.5 s buff duration/.test(r.warCry5 || ''), 'War Cry rank 5 reads +2.5 s, not +3 s', r.warCry5);
   check(/for 2\.5 s after casting/.test(r.stab5 || ''), 'a 2.5 s milestone window reads 2.5 s, not 3 s', r.stab5);
   check(/second full meteor/.test(r.meteor10 || '') && !/finisher attack/.test(r.meteor10 || ''), 'Meteor rank 10 says it drops a second meteor', r.meteor10);
