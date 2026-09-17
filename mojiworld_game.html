@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.833';
+const GAME_VERSION = 'v0.30.834';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -47292,7 +47292,12 @@ async function _lxSteamCloudSync() {
         game._saveDirty = false;
       }
     } catch (e) {}
-    try { localStorage.setItem(SAVE_KEY, cloudRaw); } catch (e) {}
+    // v0.30.834 - RELOAD LOOP. The write could fail (quota - the backup a few lines up has just spent what was left), and
+    // 'reloading' was returned regardless: the next boot saw the same local-vs-cloud difference and reloaded again, for
+    // ever, never reaching the menu. Reload only when the bytes are really there; otherwise play on with the local save.
+    let _wrote = false;
+    try { localStorage.setItem(SAVE_KEY, cloudRaw); _wrote = localStorage.getItem(SAVE_KEY) === cloudRaw; } catch (e) {}
+    if (!_wrote) { try { game._resetting = false; } catch (e) {} try { console.warn('[steam-cloud] could not store the cloud save locally; keeping the local one'); } catch (e) {} return; }
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
     // only, so adopting a Steam Cloud save installed a DIFFERENT character over the previous one's
     // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
@@ -52267,10 +52272,17 @@ function _mpStopKeepalive() {
 // Backoff 1s,2s,4s,8s… capped at 15s so a flapping relay isn't hammered, but a
 // real drop recovers within seconds and the re-sent hello restores presence +
 // host election automatically.
+const LX_MP_RECONNECT_MAX = 10;   // v0.30.834 - 1+2+4+8+15x6 = ~105 s of trying, then a Retry button
 function _mpScheduleReconnect() {
   if (net._userClosed) return;                 // user pressed Disconnect / left co-op
   if (!net._lastUrl) return;
   if (net._reconnectTimer) return;             // one pending attempt at a time
+  if ((net._reconnectTries | 0) >= LX_MP_RECONNECT_MAX) {   // v0.30.834 - stop asking: the relay is gone or refusing us. One button brings it back.
+    net._reconnectTries = 0;
+    _mpStatus('Could not reconnect to your party.', '#ff8888');
+    _mpBanner('Could not reconnect to your party. Solo play is unaffected.', 'bad', { retry: () => mpConnect(net._lastUrl, net._lastName, net._lastRoom) });
+    return;
+  }
   const tries = (net._reconnectTries = (net._reconnectTries || 0) + 1);
   const delay = Math.min(15000, 1000 * Math.pow(2, tries - 1));
   _mpStatus(`Reconnecting to your party… (try ${tries})`, '#ffcc66');
@@ -52365,7 +52377,6 @@ function mpConnect(url, name, room) {
     if (net.ws !== ws) return;   // v0.27.1 — a newer connect superseded this socket
     if (net._warmTimer) { clearInterval(net._warmTimer); net._warmTimer = null; }
     if (net._deadTimer) { clearTimeout(net._deadTimer); net._deadTimer = null; }
-    net._reconnectTries = 0;
     const hello = {
       t: 'hello',
       name: (name || 'Hero').slice(0, 20),
@@ -52383,7 +52394,7 @@ function mpConnect(url, name, room) {
     };
     ws.send(JSON.stringify(hello));
     net.connected = true;
-    net._reconnectTries = 0;   // v0.29.4 — clean open resets the backoff counter
+    // v0.30.834 - the backoff is reset on 'welcome' (really joined), not here: open-then-close retried at 1 Hz for ever
     _mpStartKeepalive();       // v0.29.4 — keep the socket alive through pauses / menus / AFK
     // v0.28.1 — refresh Steam Rich Presence now that we're in a party (enables
     // friends' "Join Game" via the connect key). No-op without Steam.
@@ -54538,6 +54549,7 @@ function _mpHandle(msg) {
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
     case 'welcome':
       net.myId = msg.id;
+      net._reconnectTries = 0;   // v0.30.834 - joined for real: the next drop starts its backoff from 1 s again
       net.roomId = String(msg.room || net.roomId || '').replace(/[<>]/g, '').slice(0, 64);   // v0.26.1029 — scrub at ingestion; roomId feeds an innerHTML log sink (XSS from a hostile/MITM relay)
       net.peers = {};
       for (const p of (msg.players || [])) net.peers[p.id] = { ..._mpScrubStrings(p), _last: performance.now() };
@@ -93537,9 +93549,10 @@ function bossAI(m, dt, distToPlayer) {
           })) break;
         }
         // New position somewhere above ground, avoiding player
-        let nx;
+        let nx, _tpTries = 0;
         do { nx = 200 + Math.random() * (game.mapData.worldWidth - 400); }
-        while (Math.abs(nx - player.x) < 300);
+        while (Math.abs(nx - player.x) < 300 && ++_tpTries < 24);   // v0.30.834 - bounded: on an arena under ~1000 px no spot qualifies and this never ended
+        if (!Number.isFinite(nx)) nx = m.x;
         m.x = nx;
         m.y = 200 + Math.random() * 100;
         m.vx = 0; m.vy = 0;
@@ -104664,6 +104677,7 @@ function _defaultPortalY(x) {
   return gs[0].y;
 }
 function tryPortal() {
+  if (window._prologueActive) return false;   // v0.30.834 - the memory has no doors: Up is a movement key there, and the hero stands ON the Void portal
   for (const po of game.portals) {
     // v0.25.470 — portals can carry an explicit `y` for tall maps (vertical
     // tower / multi-tier interiors). Otherwise default to the map's ground line.
@@ -152244,6 +152258,39 @@ function _lxNextFrame() {
   try { requestAnimationFrame(_lxFrame); }
   catch (e) { _LX_RAF_PENDING = false; setTimeout(() => _lxFrame(performance.now()), 16); }
 }
+// v0.30.834 - A FRAME THAT THROWS EVERY TIME. The catch in loop() keeps the frame chain alive, which is right for one
+// bad frame and wrong for a permanent one: a malformed entity throws 60 times a second for ever, the picture is frozen
+// or half-drawn (sim and draw share the try), the console fills, and nothing tells the player or tries anything.
+// Count the RUN of throws - a run ends after LX_LOOP_THROW_GAP_MS without one (NOT "a clean frame": since v0.30.828 a
+// display frame between two sim steps runs no sim at all, so clean frames interleave with a permanent throw). The
+// first three are logged; at LX_LOOP_THROW_RECOVER the scene's entities are dropped and the player is walked back to
+// town, at most twice a session; still throwing at LX_LOOP_THROW_GIVEUP, the player is told plainly to reload. None
+// of this touches the save.
+const LX_LOOP_THROW_GAP_MS = 1000;   // this long without a throw ends the run
+const LX_LOOP_THROW_RECOVER = 120;   // throws in one run before the scene is cleared (~2 s at 60 steps a second)
+const LX_LOOP_THROW_GIVEUP = 900;    // throws in one run before the player is asked to reload
+let _lxLoopThrowRun = 0, _lxLoopThrowAt = 0, _lxLoopRecoveries = 0;
+function _lxLoopThrew(err) {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (now - _lxLoopThrowAt > LX_LOOP_THROW_GAP_MS) _lxLoopThrowRun = 0;
+  _lxLoopThrowAt = now;
+  const n = ++_lxLoopThrowRun;
+  try { if (typeof game !== 'undefined' && game) game._iteratingMonsters = false; } catch (_e) {}   // set before the monster pass, cleared after it with no finally: left true, no kill ever drains again
+  if (n === LX_LOOP_THROW_RECOVER && _lxLoopRecoveries < 2) {
+    _lxLoopRecoveries++;
+    try { console.error('[loop] ' + n + ' throws in a row - clearing the scene and returning to town', err); } catch (_e) {}
+    try { for (const k of ['monsters', 'projectiles', 'hazards', 'smoothFx', 'fxInstances', 'particles', 'damageNumbers']) if (Array.isArray(game[k])) game[k].length = 0; } catch (_e) {}
+    // A throw inside the DEATH path is the worst case of all: triggerDeath runs its cleanup before it sets game.dying, so
+    // the death gate re-fires (and re-throws) every frame at 0 HP with no overlay, and every respawn handler asks for
+    // game.dying > 0. Stand the hero up here - a free revive is the right price for a game that could not show a death.
+    try { if (typeof player !== 'undefined' && player && !(player.hp > 0)) { player.hp = (typeof getMaxHp === 'function') ? getMaxHp() : 1; game.dying = 0; player.invulnerable = Math.max(player.invulnerable | 0, 2500); } } catch (_e) {}
+    try { game.paused = false; if (typeof loadMap === 'function') loadMap('town', 600); } catch (_e) {}
+    try { if (typeof showToast === 'function') showToast('Something went wrong in that scene - you were returned to town. Your save is safe.', 'danger'); } catch (_e) {}
+  } else if (n === LX_LOOP_THROW_GIVEUP) {
+    try { if (typeof showToast === 'function') showToast('The game hit an error it cannot recover from. Please reload - your save is safe.', 'danger'); } catch (_e) {}
+  }
+  return n;
+}
 function _lxFrame(time) {
   _LX_RAF_PENDING = false;
   try {
@@ -153061,7 +153108,7 @@ function loop(time) {
   _trimVisualQueues();
   _lxNextFrame();
   } catch (_loopErr) {   // v0.26.1024 — a transient sim/draw throw no longer freezes the tab
-    try { console.error('[loop]', _loopErr); } catch (_e) {}
+    if (_lxLoopThrew(_loopErr) <= 3) { try { console.error('[loop]', _loopErr); } catch (_e) {} }   // v0.30.834 - was logged 60 times a second for ever; see _lxLoopThrew
     // v0.26.1033 — clear any leaked transform/alpha/composite from the throwing
     // frame so the next frame paints clean (belt-and-braces with the top-of-frame
     // reset; a throw during teardown could otherwise still leave a dirty context).
@@ -154295,11 +154342,12 @@ function _prologueApexSegment() {
   }
 }
 function _prologueHardenBoss() {
+  if (!window._prologueActive) return;   // v0.30.834 - never touch a boss outside the memory
   // The memory's Gravitos cannot realistically die in 30s — and if he
   // somehow does, the _echoBoss tag keeps the kill sandboxed (no stamps,
   // no boon, no epilogue cinematic side-state on a save that's seconds old).
   const g = (game.monsters || []).find(m => m && m.type === 'gravitos');
-  if (!g) { setTimeout(_prologueHardenBoss, 800); return; }
+  if (!g) { if (window._prologueActive) setTimeout(_prologueHardenBoss, 800); return; }   // v0.30.834 - the poll ends with the prologue: it used to run for the whole session, and would have quadrupled the REAL Gravitos and tagged his kill a reward-less echo
   g.maxHp = Math.floor((g.maxHp || 1) * 4);
   g.currentHp = g.maxHp;
   g.exp = 0; g.mojicoins = 0;
@@ -155212,6 +155260,7 @@ function _gravitosDefeatCutscene(onDone) {
 // safety timer trips — so a bad asset can never soft-lock the intro.
 function _prologueVoidCutscene(onDone) {
   let done = false;
+  let timer = null;   // v0.30.834 - declared BEFORE finish(), which reads it (a synchronous play() throw hit the dead zone: black cover, no way out)
   const finish = () => {
     if (done) return; done = true;
     if (timer) { clearTimeout(timer); timer = null; }
@@ -155244,15 +155293,17 @@ function _prologueVoidCutscene(onDone) {
     vid.onerror = finish;
     try { const pp = vid.play(); if (pp && pp.catch) pp.catch(finish); } catch (e) { finish(); }
   }
+  if (done) return;   // v0.30.834 - already finished inside play(): do not leave a key-eating listener behind
   ov.addEventListener('click', finish);
   const sk = ov.querySelector('#plg-void-skip');
   if (sk) sk.onclick = (e) => { e.stopPropagation(); finish(); };
   window.addEventListener('keydown', onKey, true);
   // Safety net: never let a stalled/looping/missing clip hold the intro. The
   // real clip is ~5s; 9s covers buffering with margin.
-  let timer = setTimeout(finish, 9000);
+  timer = setTimeout(finish, 9000);
 }
 function _prologueFinish(skipped) {
+  if (!window._prologueActive) return;   // v0.30.834 - idempotent for real (the 120 s cap and the stanza chain could both get here)
   if (window._prologueTimer) { clearInterval(window._prologueTimer); window._prologueTimer = null; }
   window._prologueGodUntil = 0;   // v0.29.55 — end the godmode window with the memory
   try { if (!window._prologuePrevGod) player._god = false; } catch (e) {}   // drop the prologue-owned godmode (snapshot restore also resets it)
@@ -155521,7 +155572,7 @@ function _bossRushComplete() {
 // is async: if the cloud save is newer it writes localStorage + reloads so the
 // natural boot load picks it up — mirrors the account-cloud login-sync pattern.
 try { if (typeof _lxStartGamepad === 'function') _lxStartGamepad(); } catch (e) {}
-try { if (typeof _lxSteamCloudSync === 'function') _lxSteamCloudSync().then((r) => { if (r === 'reloading') { try { location.reload(); } catch (e) {} } }, () => {}); } catch (e) {}
+try { if (typeof _lxSteamCloudSync === 'function') _lxSteamCloudSync().then((r) => { if (r === 'reloading') { let _again = false; try { _again = sessionStorage.getItem('lx_steam_sync_reload') === '1'; sessionStorage.setItem('lx_steam_sync_reload', '1'); } catch (e) {} if (_again) { try { showToast('Cloud save downloaded - restart the game to load it.', 'rare'); } catch (e) {} return; } try { location.reload(); } catch (e) {} } }, () => {}); } catch (e) {}
 try { if (typeof _lxSteamSyncAchievements === 'function') setTimeout(_lxSteamSyncAchievements, 1500); } catch (e) {}
 // v0.28.1 — Steam: auto-join a friend's party if launched via "Join Game"
 // (window.MOJI_JOIN), and start the rich-presence + stats heartbeat (self-
@@ -167853,6 +167904,7 @@ const _LX_EXTRA_PAUSE_SURFACES = [
   // (z-index 90, inside the game wrapper) painted UNDER it - so dying behind the
   // panel left the player guessing where the backdrop was.
   { id: 'edicts-modal',             mode: 'exists'  },   // openEdictsPanel
+  { id: 'titles-modal',             mode: 'exists'  },   // v0.30.834 - openTitlesPanel (v0.30.803): the world ran again 3 s after it opened, and you could die behind it
 ];
 function _lxExtraPauseSurfaceEls() {
   const out = [];
