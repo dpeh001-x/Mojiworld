@@ -167,7 +167,7 @@
 // v0.30.767 - v57 -> v58. crusader_ult.webp and its nine frames are REPLACED under their own names
 // (the Bastion of Dawn medallion, which was cut off at its edges, is now the Dawnbreak nova), so a
 // returning browser would otherwise keep the old set.
-const CACHE = 'mojiworld-assets-v59';   // v0.30.791 - Sprites/fx/knight_guardian.webp was redrawn in place in v0.30.769 (launch polish)
+const CACHE = 'mojiworld-assets-v60';   // v0.30.x - Sprites/summons/clone_{left,center,right}.webp and their 27 attack frames redrawn in place (Mirror Shadow)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
