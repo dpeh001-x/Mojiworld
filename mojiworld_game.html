@@ -12685,7 +12685,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.828';
+const GAME_VERSION = 'v0.30.829';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52521,16 +52521,42 @@ function _coopPendWindow() {
   const rtt = (h && Number.isFinite(+h._rttMs)) ? +h._rttMs : 120;
   return Math.max(160, Math.min(800, rtt + 130));
 }
+// v0.30.829 - HIT ACKNOWLEDGEMENTS. v0.30.827 kept my hit subtracted for a guessed TIME (round trip + 130 ms). Two
+// things were wrong with a guess: a host having a slow moment answers later than the guess, and the bar jumped back
+// up exactly as before; and a host answering SOONER than the guess had my hit in its number while I was still
+// subtracting it - the bar dipped by twice the hit, then came back. Now it is exact: every batch of hits carries a
+// number (q), the host's monster frame says which batch it has applied from each partner (ak), and a hit stays
+// subtracted until the frame that acknowledges it - which is the same frame whose HP already contains it.
+// An older host (v0.30.823 up to the build before this one) sends no ak: for it the guessed time stands, and a drop
+// in ITS number the size of my hit is read as my hit landing (so the double dip ends there too, whenever the host
+// applied the hit as sent).
+const COOP_PEND_MAX_MS = 1500;    // an unacknowledged hit is given up after this long (the message was lost, or the host refused it)
+const COOP_PEND_MATCH = 0.9;      // older host: a drop of at least this share of my hit counts as my hit
+function _coopHitSeqNext() {      // starts from the clock so a reload under the same relay id never reuses a number the host still holds
+  if (!net._hitSeq) net._hitSeq = Date.now() % 1000000000;
+  return net._hitSeq + 1;
+}
 function _coopNotePending(m, d) {
   if (!m || !(d > 0)) return;
-  (m._pend || (m._pend = [])).push({ d, t: performance.now() });
+  (m._pend || (m._pend = [])).push({ d, t: performance.now(), q: net._hitSeqOf || 0 });
   if (m._pend.length > 40) m._pend.splice(0, m._pend.length - 40);
 }
 function _coopHpWithPending(m, hostHp) {
+  const last = m._hostHp; m._hostHp = hostHp;
   const q = m._pend;
   if (!q || !q.length) return hostHp;
-  const now = performance.now(), W = _coopPendWindow(); let sum = 0, k = 0;
-  for (let i = 0; i < q.length; i++) { const p = q[i]; if (now - p.t < W) { q[k++] = p; sum += p.d; } }
+  const now = performance.now();
+  const acked = net._ackHost != null && net._ackHost === net.hostId;
+  const W = acked ? COOP_PEND_MAX_MS : _coopPendWindow();
+  let drop = (!acked && last > hostHp) ? last - hostHp : 0;
+  let sum = 0, k = 0;
+  for (let i = 0; i < q.length; i++) {
+    const p = q[i];
+    if (now - p.t >= W) continue;
+    if (acked) { if (p.q <= (net._hitAck || 0)) continue; }
+    else if (drop >= p.d * COOP_PEND_MATCH) { drop -= p.d; continue; }
+    q[k++] = p; sum += p.d;
+  }
   q.length = k;
   return Math.max(hostHp > 0 ? 1 : 0, hostHp - sum);   // my hits never "kill" the mirror: only the host's kill does
 }
@@ -52554,6 +52580,7 @@ function _lxMpBudgetWrap(ws) {
 function _coopQueueHit(h) {
   const q = net._hitQ || (net._hitQ = []);
   q.push(h);
+  net._hitSeqOf = _coopHitSeqNext();   // v0.30.829 - the batch this hit rides (read by _coopNotePending)
   if (q.length >= COOP_HIT_CAP) { _coopActionFlush(true); return; }
   // A hit must never wait on the frame loop (a minion or a burn can land one while I sit in a menu): the first hit
   // of a window books the flush itself, and everything that lands inside the window leaves with it.
@@ -52575,7 +52602,7 @@ function _coopActionFlush(force) {
   try {
     if (hits || _coopPeerCap(net.hostId) >= 2) {
       const f = { t: 'dmg', fm: game.currentMap };
-      if (hits) f.l = hits;
+      if (hits) { f.l = hits; f.q = net._hitSeq = _coopHitSeqNext(); }   // v0.30.829 - q: the host acknowledges it on its monster frame
       if (fxw) { if (fxw.fx) f.fx = fxw.fx; if (fxw.pj) f.pj = fxw.pj; }
       if (po) f.po = po;
       net.ws.send(JSON.stringify(f));
@@ -52855,14 +52882,16 @@ function _coopTickMonsters() {
     let _ex = null; for (const _k in _e) { if (_COOP_MON_CORE[_k]) continue; (_ex = _ex || {})[_k] = _e[_k]; }
     const _d = [_e.u, _e.x, _e.y, _e.vx, _e.vy, _e.f, _e.h]; if (_ex) _d.push(_ex);
     const _sig = JSON.stringify(_d);
-    if (_key || !m._kfSent) { m._kfSent = true; m._lastSig = _sig; list.push(_e); continue; }   // keyframe, or first sight: in full
-    if (_sig === m._lastSig) continue;                                                           // nothing about it changed
+    if (_key || !m._kfSent) { m._kfSent = true; m._netHit = false; m._lastSig = _sig; list.push(_e); continue; }   // keyframe, or first sight: in full
+    if (_sig === m._lastSig && !m._netHit) continue;                                                       // nothing about it changed
     let _near = false; for (let _j = 0; _j < _pls.length; _j++) { if (Math.abs(_pls[_j][0] - m.x) < COOP_FAR_X && Math.abs(_pls[_j][1] - m.y) < COOP_FAR_Y) { _near = true; break; } }
-    if (!_near) continue;                                                                        // nobody can see it: the next keyframe carries it
-    m._lastSig = _sig; list.push(_d);
+    if (!_near && !m._netHit) continue;                                                                    // nobody can see it: the next keyframe carries it
+    m._netHit = false; m._lastSig = _sig; list.push(_d);
   }
   const _frame = { t: 'mon', map: game.currentMap, list };
   if (_delta && !_key) _frame.dl = 1;   // a light frame: what is absent is NOT gone
+  let _ak = null; for (const _id in net.peers) { const _q = net.peers[_id]; if (_q && _q.map === game.currentMap) (_ak = _ak || {})[_id] = (net._ackBy && net._ackBy[_id]) || 0; }
+  if (_ak) _frame.ak = _ak;   // v0.30.829 - the last batch of hits I have applied from each partner (0 = none yet)
   if (_coopBundleOn()) {   // v0.30.823 - ONE message per tick: projectiles, hazards and my fx ride the monster frame
     _frame.pl = _coopProjList(); _frame.hl = _coopHazList();
     const _fxw = _coopFxDrain(); if (_fxw) { if (_fxw.fx) _frame.fx = _fxw.fx; if (_fxw.pj) _frame.pj = _fxw.pj; }
@@ -53709,6 +53738,7 @@ function _coopApplyMonsters(msg) {
   if (net.hostId == null || +msg.id !== +net.hostId) return;
   if (!_coopFollowingHost()) return;
   if (msg.map !== game.currentMap) return;   // only mirror the host's current map
+  if (msg.ak && net.myId != null && msg.ak[net.myId] != null) { net._hitAck = +msg.ak[net.myId] || 0; net._ackHost = net.hostId; }   // v0.30.829
   const incoming = (msg.list || []).slice(0, COOP_MON_CAP).map((_e0) => Array.isArray(_e0) ? _coopMonFromArr(_e0) : _e0);   // clamp to the promised bound (payload-flood guard); v0.30.827 - light entries are arrays
   const seen = new Set();
   const byUid = {};
@@ -53825,6 +53855,7 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk) {
   if (!net.isHost) return;
   const m = _coopFindByUid(uid);
   if (!m || m.currentHp <= 0) return;
+  m._netHit = true;   // v0.30.829 - rides the next light frame whatever happens below: the partner is waiting on this number
   if (m._duoTrial) m._duoPartnerSeen = true;   // v0.30.x — a guest hit IS presence; do not void the payout on a heartbeat blip
   // The incoming value is now FULLY resolved on the attacker's client (every
   // multiplier + the DEF armor curve — the forward moved to the finalDmg point in
@@ -54329,6 +54360,7 @@ function _mpHandle(msg) {
       const _dp = net.peers && net.peers[msg && msg.id];
       if (!_dp || _dp.map !== game.currentMap) return;
       if (!_mpRateOk(msg.id, 'dmg', 80)) return;   // v0.29.472 — 20 was below real AoE play
+      if (msg.q != null) (net._ackBy || (net._ackBy = {}))[msg.id] = +msg.q || 0;   // v0.30.829 - acknowledged on my next monster frame
       if (Array.isArray(msg.l)) {   // v0.30.823 - batched hits
         for (const _h of msg.l.slice(0, COOP_HIT_CAP)) if (_h && _h.u != null) _coopHostApplyDamage(_h.u, +_h.d || 0, !!_h.c, _h.k, _h);
         return;

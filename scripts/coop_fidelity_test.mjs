@@ -80,10 +80,21 @@ try {
   const killUid = await A.evaluate(() => { const m = game.monsters.find((x) => x._lxFar); const u = m.uid; m.currentHp = 0; killMonster(m); return u; });
   check(await wait(B, (u) => !game.monsters.some((m) => m.uid === u), 3000, killUid), 'a kill between keyframes still removes the mirror');
   const rb = await B.evaluate(async () => { const m = game.monsters.find((x) => x._coopMirror && x.currentHp > 1e6); const before = m.currentHp; let sent = 0; const ws = net.ws, os = ws.send; const t0 = performance.now(); ws.send = function (s) { if (!sent && s.startsWith('{"t":"dmg"')) sent = performance.now() - t0; return os.apply(this, arguments); };
-    hitMonster(m, 400000, false, 'lagtest'); const predicted = m.currentHp; let up = false; const t1 = performance.now();
-    while (performance.now() - t1 < 1000) { if (m.currentHp > predicted + 1) up = true; await new Promise((r) => setTimeout(r, 8)); } ws.send = os;
-    return { predictedDrop: before - predicted, wentBackUp: up, sentAfterMs: +sent.toFixed(1), settled: before - m.currentHp }; });
-  check(rb.predictedDrop > 0 && !rb.wentBackUp && rb.settled > 0 && rb.sentAfterMs > 0 && rb.sentAfterMs < 40, 'my hit shows at once, leaves within its frame, and the bar never jumps back up', J(rb));
+    hitMonster(m, 400000, false, 'lagtest'); const predicted = m.currentHp, d = before - predicted; let up = false, dip = false; const t1 = performance.now();
+    while (performance.now() - t1 < 1000) { if (m.currentHp > predicted + 1) up = true; if (m.currentHp < predicted - d * 0.5) dip = true; await new Promise((r) => setTimeout(r, 8)); } ws.send = os;
+    return { predictedDrop: d, wentBackUp: up, doubleDip: dip, sentAfterMs: +sent.toFixed(1), settled: before - m.currentHp, acked: net._ackHost === net.hostId }; });
+  check(rb.predictedDrop > 0 && !rb.wentBackUp && !rb.doubleDip && rb.settled === rb.predictedDrop && rb.acked && rb.sentAfterMs > 0 && rb.sentAfterMs < 40, 'my hit shows at once, leaves within its frame, and the bar neither jumps back up nor dips twice', J(rb));
+  // v0.30.829 - a host having a slow moment: it takes 400 ms to get to my hit. The bar must hold exactly where I put it.
+  await A.evaluate(() => { const ws = net.ws, om = ws.onmessage; window.__omRestore = () => { ws.onmessage = om; }; ws.onmessage = (ev) => { if (String(ev.data).indexOf('"t":"dmg"') >= 0) setTimeout(() => om.call(ws, ev), 400); else om.call(ws, ev); }; });
+  const slow = await B.evaluate(async () => { const m = game.monsters.find((x) => x._coopMirror && x.currentHp > 1e6); const before = m.currentHp;
+    hitMonster(m, 400000, false, 'lagtest'); const predicted = m.currentHp, d = before - predicted; let up = false, dip = false, held = 0; const t1 = performance.now();
+    while (performance.now() - t1 < 1400) { if (m.currentHp > predicted + 1) up = true; if (m.currentHp < predicted - d * 0.5) dip = true; if (m._pend && m._pend.length) held = performance.now() - t1; await new Promise((r) => setTimeout(r, 8)); }
+    return { predictedDrop: d, wentBackUp: up, doubleDip: dip, heldMs: Math.round(held), settled: before - m.currentHp }; });
+  await A.evaluate(() => { try { window.__omRestore(); } catch (e) {} });
+  check(slow.predictedDrop > 0 && !slow.wentBackUp && !slow.doubleDip && slow.settled === slow.predictedDrop && slow.heldMs >= 350, 'a host that takes 400 ms to answer: my hit stays put until the frame that acknowledges it', J(slow));
+  const old = await B.evaluate(() => { const hold = net._ackHost; net._ackHost = null; const m = { _pend: [{ d: 100, t: performance.now(), q: 0 }], _hostHp: 1000 };
+    const r = [_coopHpWithPending(m, 1000), _coopHpWithPending(m, 900), _coopHpWithPending(m, 900)]; net._ackHost = hold; return r; });
+  check(old[0] === 900 && old[1] === 900 && old[2] === 900, 'a host without acknowledgements (an older build): its own drop ends my subtraction, no double dip', J(old));
   const leg = await A.evaluate(() => { const p = Object.values(net.peers)[0]; const cap = p.cap; p.cap = 2; const d2 = _coopDeltaOn(), b2 = _coopBundleOn(); p.cap = cap; return { d2, b2, d3: _coopDeltaOn() }; });
   check(leg.d2 === false && leg.b2 === true && leg.d3 === true, 'a v0.30.823 partner (cap 2) still gets full bundled frames; light frames need cap 3', J(leg));
   // ---- 4. a paused host: nobody's target, still hands out loot ----
