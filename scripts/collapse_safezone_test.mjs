@@ -85,6 +85,7 @@ const R = await page.evaluate(async () => {
     for (let f = 0; f < 60 && seen.length < 4; f++) {
       boss.patternState = 'collapseRain';
       boss.patternTimer = (boss._rainIdx || 0) * 4000 + 1;
+      boss._rainNextAt = null; boss._rainRestF = 0;   // (ohko-gap: the rain's clocks since v0.30.796 / ohko-gap - the wall-clock tick and the rest)
       for (const z of game.hazards) {
         if (!z || z.type !== 'gravitos_singularity' || !z.safeZones || z.safeZones.length !== 1) continue;
         if (ids.has(z)) continue;
@@ -92,6 +93,7 @@ const R = await page.evaluate(async () => {
         const s = z.safeZones[0];
         seen.push({ x: +s.x.toFixed(1), y: +s.y.toFixed(1), w: s.w, h: s.h });
       }
+      for (let i = game.hazards.length - 1; i >= 0; i--) { const z = game.hazards[i]; if (z && z.type === 'gravitos_singularity' && ids.has(z)) game.hazards.splice(i, 1); }   // (ohko-gap: a box never spawns while another lethal field is live)
       await sleep(20);
     }
     out.rains.push(seen);

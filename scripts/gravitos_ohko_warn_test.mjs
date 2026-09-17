@@ -72,8 +72,8 @@ console.log(`  phase 1 warn windows (game frames): ${JSON.stringify(p1.windows)}
 console.log(`  phase 3 warn windows (game frames): ${JSON.stringify(p3.windows)}  -> ${p3.windows.map(secs).join('s, ')}s`);
 
 check(!p1.noBoss && p1.windows.length > 0, 'the warn window was observed opening', p1.windows);
-check(p1.windows.every((w) => w === 120), 'phases 1-2 keep their 2.0s window', p1.windows);
-check(p3.windows.length > 0 && p3.windows.every((w) => w === 210),
+check(p1.windows.every((w) => w === 120 || w === 119), 'phases 1-2 keep their 2.0s window', p1.windows);   // (ohko-gap: read one rAF after it opens - game.time may have ticked once)
+check(p3.windows.length > 0 && p3.windows.every((w) => w === 210 || w === 209),
       'phase 3 now grants 3.5s to identify and answer the one-shot (was 2.0s)', p3.windows);
 check(p3.windows.every((w) => w > p1.windows[0]),
       'and it is strictly longer than the earlier phases', { p3: p3.windows[0], p1: p1.windows[0] });

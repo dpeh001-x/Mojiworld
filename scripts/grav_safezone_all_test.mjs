@@ -142,10 +142,10 @@ HUD YIELDS  minimap opacity before ${yd.before}  during ${yd.during}  after ${yd
     clear(); await sleep(2500); clear();
     const m = boss(); if (!m) return { err: 'no boss' };
     player.x = game.camera.x + 400; player.y = 436; player.vx = player.vy = 0; player._god = true;
-    m.currentHp = Math.floor(m.maxHp * 0.49); m.patternState = 'idle'; m.patternTimer = 99999; m._lastSkillAt = -99999; m._lastOhkoAt = -99999; m._ohkoWarnUntil = null; m._ohkoQueued = null;
+    m.currentHp = Math.floor(m.maxHp * 0.49); m.patternState = 'idle'; m.patternTimer = 99999; m._lastSkillAt = -99999; m._lastOhkoAt = -99999; m._lastOhkoEndAt = -99999; m._ohkoWarnUntil = null; m._ohkoQueued = null;   // (ohko-gap: form 3 measures the window from the last OHKO's END)
     m._instaTimer = 99999; m._rainTimer = -1; m._soulTimer = 99999;
     const seen = new Set(), stamps = []; let endedAt = null, lastDeath = null; const t0 = performance.now();
-    while (performance.now() - t0 < 40000) {
+    while (performance.now() - t0 < 75000) {   // (ohko-gap: a form-3 rain is 4 boxes and three 5 s rests)
       await sleep(30);
       for (const h of game.hazards) { if (h && h.type === 'gravitos_singularity' && !seen.has(h)) { seen.add(h); stamps.push(performance.now()); } if (h && h.type === 'gravitos_singularity' && h.life <= 0 && seen.has(h)) lastDeath = lastDeath || performance.now(); }
       if (stamps.length >= 4 && m.patternState !== 'collapseRain') { endedAt = performance.now(); break; }
@@ -155,7 +155,7 @@ HUD YIELDS  minimap opacity before ${yd.before}  during ${yd.during}  after ${yd
   });
   console.log(`\nCADENCE (form ${cad.form})  boxes ${cad.boxes}  gaps s ${JSON.stringify(cad.gaps)}  pattern ended ${cad.endedAfterLast} s after the last box  (${cad.state})`);
   check(cad.form === 3 && cad.boxes === 4, 'form 3 drops all four boxes', cad);
-  check(cad.gaps.length === 3 && cad.gaps.every((g) => g >= 3.6 && g <= 4.8), 'the boxes are 4 s apart on the wall clock (previous build: ~1.9 s in form 3)', cad.gaps);
+  check(cad.gaps.length === 3 && cad.gaps.every((g) => g >= 6.2 && g <= 14), 'form 3: each box comes a full 5 s rest after the last one resolved - at least 6.4 s apart (ohko-gap; v0.30.796: 4 s, before it ~1.9 s)', cad.gaps);
   check(cad.endedAfterLast != null && cad.endedAfterLast >= 1.2 && cad.endedAfterLast <= 4.0, 'the pattern ends once the last box has resolved', cad);
   check(errs.length === 0, 'no page errors', errs.slice(0, 3));
 } finally { await browser.close().catch(() => {}); srv.kill(); }

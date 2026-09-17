@@ -55,9 +55,9 @@ const r = await page.evaluate(async () => {
     for (let k = 0; k < 6; k++) {
       clearOverlays();
       game.hazards = game.hazards.filter((h) => h.type !== 'gravitos_singularity');
-      m.patternState = 'collapseRain'; m._rainIdx = 0; m._rainBand0 = k % 2; m.patternTimer = 0; m._ohkoWarnUntil = null;
+      m.patternState = 'collapseRain'; m._rainIdx = 0; m._rainBand0 = k % 2; m.patternTimer = 0; m._ohkoWarnUntil = null; m._rainNextAt = null; m._rainRestF = 0;   // (ohko-gap: and the rain's own clocks - the wall-clock tick of v0.30.796 left 23 of these 30 boxes unspawned)
       let hz = null;
-      for (let t = 0; t < 40 && !hz; t++) { await sleep(16); hz = game.hazards.find((h) => h.type === 'gravitos_singularity'); if (!hz && m.patternState !== 'collapseRain') { m.patternState = 'collapseRain'; m._rainIdx = 0; m.patternTimer = 0; } }
+      for (let t = 0; t < 40 && !hz; t++) { await sleep(16); hz = game.hazards.find((h) => h.type === 'gravitos_singularity'); if (!hz && m.patternState !== 'collapseRain') { m.patternState = 'collapseRain'; m._rainIdx = 0; m.patternTimer = 0; m._rainNextAt = null; m._rainRestF = 0; } }
       if (!hz) { out.boxes.push({ standX, err: 'no box' }); continue; }
       const z = hz.safeZones[0], camX = game.camera.x, pcx = player.x + player.w / 2;
       out.boxes.push({ standX, band: (z.y + z.h === GROUND) ? 'ground' : 'mid', x: Math.round(z.x), w: z.w,

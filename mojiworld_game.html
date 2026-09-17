@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.835';
+const GAME_VERSION = 'v0.30.836';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -92445,6 +92445,12 @@ const _GRAV_OHKO_WARN_P3 = 3.5 * 60;
 const _GRAV_OHKO_WARN = 2 * 60;
 const _GRAV_OHKO_WARN_P2 = 2.75 * 60;   // v0.30.444 - graded: P1 2.0 s, P2 2.75 s, P3 3.5 s (P2 inherited P1's)
 const _GRAV_SING_MIN_GAP = 22 * 60;
+// v0.30.836 ohko-gap — per user: "for the 3rd form ensure strict time gap of the OHKO, it is still casting back to back".
+// The clear air between one Collapse Rain box RESOLVING and the next one APPEARING, counted in frames the boss AI
+// actually ran - so hit-stop, a slow device and a pause cannot spend it (the 4 s wall-clock tick could be eaten by
+// all three: a box lives on the world clock, the tick ran on the wall clock).
+const LX_GRAV_RAIN_REST = 156;      // forms 1-2: 2.6 s - the old nominal rest (4 s tick less the 1.4 s box), now guaranteed
+const LX_GRAV_RAIN_REST_F3 = 300;   // form 3: 5 s
 // v0.29.832 — KING KROOK ATTACK STRINGS. Krook used to pick one basic, return to
 // idle, and re-roll — so his basics never formed a phrase and there was nothing
 // to anticipate. He now commits to a short string: the beats inside it come
@@ -94030,6 +94036,9 @@ function bossAI(m, dt, distToPlayer) {
       // `>= 10000` here, i.e. ~166 s, a latent units bug that all but
       // disabled the spacing; this corrects it while adding the request.)
       const _GAP = 8 * 60;   // 8 seconds, in 60-fps frames
+      // v0.30.836 ohko-gap — a lethal field still on screen IS the OHKO still running, whatever ended its pattern (an HP-tier
+      // change resets the pattern to idle and leaves the field live, with no end stamp).
+      if (game.hazards.some((h) => h && h.type === 'gravitos_singularity' && h.life > 0)) m._lastOhkoEndAt = _nowOhko;
       if (m._lastSkillAt == null) m._lastSkillAt = -999999;
       const _skillSpaced    = (_nowOhko - m._lastSkillAt) >= _GAP;
       // v0.30.588 ohko-pass — the 8 s trail is measured from the CAST, which left
@@ -94060,7 +94069,10 @@ function bossAI(m, dt, distToPlayer) {
       const _OHKO_GAP = phase >= 3 ? (28 + 30 * m._ohkoGapRoll) * 60
                       : phase === 2 ? (25 + 35 * m._ohkoGapRoll) * 60
                       : 30 * 60;
-      const _ohkoSpaced = (_nowOhko - (m._lastOhkoAt || -999999)) >= _OHKO_GAP;
+      // v0.30.836 ohko-gap — FORM 3: the window runs from the moment the last OHKO ENDED. From the cast, a long field ate it:
+      // a rain is 13-21 s of a 25-28 s window. Forms 1-2 keep the cast-based clock they were tuned on.
+      const _ohkoFrom = ((m._gravitosPhase | 0) >= 3) ? Math.max(m._lastOhkoAt || -999999, m._lastOhkoEndAt || -999999) : (m._lastOhkoAt || -999999);
+      const _ohkoSpaced = (_nowOhko - _ohkoFrom) >= _OHKO_GAP;
       // v0.29.830 — HARD FLOOR ON SINGULARITY RECASTS (per user: "gets very cheesy
       // at the end where he starts spamming"). The three one-shot mechanics
       // share a picker that takes whichever timer is MOST overdue, and in
@@ -94108,6 +94120,7 @@ function bossAI(m, dt, distToPlayer) {
             m._rainIdx = 0;
             m._rainSafe = null;
             m._rainNextAt = null;   // v0.30.796 sz-all — the real-time clock starts with the pattern
+            m._rainRestF = 0;   // v0.30.836 ohko-gap — and so does the rest
           } else if (_pick === 'soulDrain') {
             m.patternState = 'soulDrain';
             m._soulTimer = _soulCd;
@@ -94481,7 +94494,14 @@ function bossAI(m, dt, distToPlayer) {
       // authored is now 4 s on the wall clock in every form.
       const _rainNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       if (m._rainNextAt == null) m._rainNextAt = _rainNow;
-      if (m._rainIdx < RAIN_COUNT && _rainNow >= m._rainNextAt) {
+      // v0.30.836 ohko-gap — STRICT REST. Never a box while a lethal field is live (two fields with different shelters
+      // cannot be survived), and after it resolves a rest counted HERE, one per AI frame - this block does not run in
+      // hit-stop or a pause, and runs slower on a slow device, exactly as the box itself does.
+      const _rainFieldLive = game.hazards.some((h) => h && h.type === 'gravitos_singularity' && h.life > 0);
+      if (_rainFieldLive) m._rainRestF = ((m._gravitosPhase | 0) >= 3) ? LX_GRAV_RAIN_REST_F3 : LX_GRAV_RAIN_REST;
+      else if (m._rainRestF > 0) m._rainRestF--;
+      if (m._rainIdx === 0) m._rainRestF = 0;   // the first box of a rain owes no rest - the OHKO window has already cleared the air
+      if (m._rainIdx < RAIN_COUNT && _rainNow >= m._rainNextAt && !_rainFieldLive && !(m._rainRestF > 0)) {
         m._rainNextAt = _rainNow + TICK_MS;
         const ww = game.mapData.worldWidth || 2200;
         const safeW = 102, safeH = 60;   // v0.30.580 — was 90 (per user: "slightly larger")
@@ -152680,7 +152700,7 @@ function loop(time) {
     if ((player._potionCdHp | 0) > _sfT) player._potionCdHp = (player._potionCdHp | 0) + 1;
     if ((player._potionCdMp | 0) > _sfT) player._potionCdMp = (player._potionCdMp | 0) + 1;
     const _sfMs = game.monsters;
-    if (_sfMs) for (let _sfI = 0; _sfI < _sfMs.length; _sfI++) { const _sfM = _sfMs[_sfI]; if (_sfM && _sfM._ohkoWarnUntil != null && _sfM._ohkoWarnUntil > _sfT) _sfM._ohkoWarnUntil++; }
+    if (_sfMs) for (let _sfI = 0; _sfI < _sfMs.length; _sfI++) { const _sfM = _sfMs[_sfI]; if (_sfM && _sfM._ohkoWarnUntil != null && _sfM._ohkoWarnUntil > _sfT) _sfM._ohkoWarnUntil++; if (_sfM && _sfM.type === 'gravitos') { if (_sfM._lastOhkoAt != null) _sfM._lastOhkoAt++; if (_sfM._lastOhkoEndAt != null) _sfM._lastOhkoEndAt++; if (_sfM._lastSkillAt != null) _sfM._lastSkillAt++; if (_sfM._lastSingAt != null) _sfM._lastSingAt++; } }   /* v0.30.836 ohko-gap — the OHKO gap does not run out behind a menu */
   }
   _lxPrewarmClassFx(); if (_LX_PREWARM_Q.length || _LX_PREWARM_FXQ.length) _lxPrewarmDrain();   // v0.30.358 — bakes ahead of the draw, through the same budget
   game._playMs = (game._playMs || 0) + dt;
