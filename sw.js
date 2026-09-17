@@ -167,7 +167,7 @@
 // v0.30.767 - v57 -> v58. crusader_ult.webp and its nine frames are REPLACED under their own names
 // (the Bastion of Dawn medallion, which was cut off at its edges, is now the Dawnbreak nova), so a
 // returning browser would otherwise keep the old set.
-const CACHE = 'mojiworld-assets-v63';   // v0.30.x - Dragoon Sky Lance frames, dragoon_impact, p_ult_dragoon and both Dragoon skill icons recoloured blue in place
+const CACHE = 'mojiworld-assets-v64';   // v0.30.x - Dragoon Sky Lance frames, still, dragoon_impact and its icon darkened to navy in place
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
