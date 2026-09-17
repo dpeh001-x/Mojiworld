@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.778';
+const GAME_VERSION = 'v0.30.779';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -22539,6 +22539,22 @@ const SKILL_HIT_TAG_TO_DEF_ID = {
 function getSkillRank(id) {
   if (!id || !player.skillRanks) return 0;
   return Math.max(0, Math.min(SKILL_RANK_CAP, player.skillRanks[id] | 0));
+}
+// v0.30.779 - SUMMONS AND BUFFS LAST LONGER WITH RANK (per user: "for skills that has
+// summons / buffs : per skill up with RP increase the duration by 1s"). Each rank point adds
+// 1 second, so rank 10 is +10 s. These skills pass their base duration through one of the two
+// functions below; the Skills panel uses the same list to show the bonus.
+const LX_RANK_DUR_IDS = new Set([
+  'warCry', 'bloodlust', 'guardian', 'holyShield', 'eagleEye', 'celestialAurora',
+  'soulSiphon', 'darkPulse', 'wildBond',
+  'warlord_warcry', 'crusader_aegis', 'shadowlord_clones', 'hexmaster_grandhex', 'beastmaster_pack',
+  'warlord_ult', 'shadowlord_ult', 'archbishop_ult', 'ballista_ult', 'beastmaster_ult', 'skyhunter_ult',
+]);
+function _lxRankDurMs(id, ms) {           // a duration counted in milliseconds
+  return ms + 1000 * getSkillRank(id);
+}
+function _lxRankDurFrames(id, frames) {   // a duration counted in frames (60 a second)
+  return frames + 60 * getSkillRank(id);
 }
 // v0.30.140 - the rank curve as PURE MATH for any (skill, rank), so the panel can
 // ask what a rank is worth without mutating player.skillRanks, and can never
@@ -80636,7 +80652,7 @@ const SKILL_FNS = {
     // +55% ATK and +25% DEF for 7s, taunts enemies, shock pulse that damages close foes
     // v0.25.530 — Level-10 bonus extends buff duration by buffMs (5 s).
     const _wcBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('warCry') : null;
-    const _wcDur = 7000 + ((_wcBonus && _wcBonus.buffMs) || 0);
+    const _wcDur = _lxRankDurMs('warCry', 7000 + ((_wcBonus && _wcBonus.buffMs) || 0));   // v0.30.779 - +1 s per skill rank
     player.buffs.warCry = _wcDur;
     // v0.29.301 — a rally shout should rally the party: partners on this map
     // get the same +ATK/+DEF window (their own timer is never shortened).
@@ -80698,7 +80714,7 @@ const SKILL_FNS = {
     // amplifier, not a passive AOE. 20 s cooldown (set in SKILLS def).
     // v0.25.530 — Level-10 bonus: +20 s rage duration.
     const _blBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('bloodlust') : null;
-    const _blDur = 20000 + ((_blBonus && _blBonus.buffMs) || 0);   // v0.26.385 — base uptime 12s → 20s (matches desc)
+    const _blDur = _lxRankDurMs('bloodlust', 20000 + ((_blBonus && _blBonus.buffMs) || 0));   // v0.26.385 — base uptime 12s → 20s (matches desc)
     player.buffs.bloodlust = _blDur;
     player._bloodstorm = 0;                           // retired — no auto-ring
     player._bloodstormNextTick = 0;
@@ -80789,7 +80805,7 @@ const SKILL_FNS = {
     const _gr = (typeof getSkillRank === 'function') ? getSkillRank('guardian') : 0;
     const _g10 = (typeof getSkillLv10 === 'function') ? getSkillLv10('guardian') : null;
     // v0.30.444 - getSkillLv10 hands back the rank-5 row at ranks 5-9 (generic shave has no buffMs); the >= 10 gate silently dropped it
-    const _gDur = 30000 + ((_g10 && _g10.buffMs) ? _g10.buffMs : 0);
+    const _gDur = _lxRankDurMs('guardian', 30000 + ((_g10 && _g10.buffMs) ? _g10.buffMs : 0));   // v0.30.779 - +1 s per skill rank
     const _gDef = 20 + 2 * _gr + ((_g10 && _g10.defBonusPct) ? _g10.defBonusPct : 0);
     const _gRef = 20 + 2 * _gr;
     player.buffs.guardian = _gDur;
@@ -80821,11 +80837,12 @@ const SKILL_FNS = {
     // 'knight_guardian' shield-bubble sprite covers the cast moment.
   },
   holyShield: () => {
-    player.buffs.holyShield = 5000;
+    const _hsDur = _lxRankDurMs('holyShield', 5000);   // v0.30.779 - +1 s per skill rank
+    player.buffs.holyShield = _hsDur;
     // v0.29.301 — share the Holy Shield window with partners on this map. As
     // with Guardian, only the timed buff travels: the caster's i-frames and
     // reflect/DR stamps stay local to whoever cast it.
-    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('holyShield', 5000, 'Holy Shield');
+    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('holyShield', _hsDur, 'Holy Shield');
     // v0.26.x audit FIX — the desc promises "5s damage reflect" and the comment
     // below says "the 5s reflect buff stays", but the reflect flag was never
     // actually set — only invuln + a DEF spike were. The damage pipeline's
@@ -82293,14 +82310,15 @@ const SKILL_FNS = {
       const _src = victims.length > 0 ? victims[0] : null;
       const _rx = _src ? _src.x + _src.w/2 : player.x + player.w/2 + player.facing * 40;
       const _ry = _src ? _src.y : player.y + player.h - 18;
-      raiseMinion(_rx, _ry, _rt, 16000, 0.75);   // v0.29.888 — 8s -> 16s (duration x2)
+      raiseMinion(_rx, _ry, _rt, _lxRankDurMs('soulSiphon', 16000), 0.75);   // v0.29.888 — 8s -> 16s (duration x2)
     }
     // v0.29.916 — SOUL WARD (moved here from Soul Vortex in v0.29.924, per
     // user). Two orbs, phase-opposed; they orbit wide, home into monsters
     // within 380px, are consumed on impact, and the ward grows one back every
     // 1.5s to a cap of 5. Engine in updatePlayer beside the aegis block; drawn
     // by drawNecromancerOrbs. On Soul Siphon's 20s cd the 12s ward is ~60% uptime.
-    player._necromancerOrbs = { life: 12000, maxLife: 12000, orbs: [] };
+    const _ssOrbMs = _lxRankDurMs('soulSiphon', 12000);   // v0.30.779 - +1 s per skill rank (thrall and Soul Ward)
+    player._necromancerOrbs = { life: _ssOrbMs, maxLife: _ssOrbMs, orbs: [] };
     for (let i = 0; i < 2; i++) {
       player._necromancerOrbs.orbs.push({
         baseAng: i * Math.PI,          // opposite sides
@@ -82359,7 +82377,7 @@ const SKILL_FNS = {
     // own ground to rise from.
     const mx = cx + player.facing * (60 + i * 46) + Math.cos(a) * 30;
       const ty = cy + Math.sin(a) * 20;
-      raiseMinion(mx, ty, i % 2 === 0 ? 'skeleton' : 'zombie', 30000, 0.65);   // v0.26.x — 30 s (mn.life counts down in ms). The comment here read "15s" and the tooltip repeated it; the value is 30000.
+      raiseMinion(mx, ty, i % 2 === 0 ? 'skeleton' : 'zombie', _lxRankDurMs('darkPulse', 30000), 0.65);   // v0.26.x — 30 s (mn.life counts down in ms). The comment here read "15s" and the tooltip repeated it; the value is 30000.
     }
     showToast('DARK PULSE', 'legendary');
     flash(0.35);   },
@@ -82636,10 +82654,11 @@ const SKILL_FNS = {
   },
   eagleEye: () => {
     // v0.25.541 — duration 8 s → 30 s, crit bonus +40 → +20 (handled in getCrit).
-    player.buffs.eagleEye = 30000;
+    const _eeDur = _lxRankDurMs('eagleEye', 30000);   // v0.30.779 - +1 s per skill rank
+    player.buffs.eagleEye = _eeDur;
     // v0.29.304 — a hunter marking targets should sharpen the whole party:
     // partners on this map get the same +crit window.
-    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('eagleEye', 30000, 'Eagle Eye');
+    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('eagleEye', _eeDur, 'Eagle Eye');
     // v0.26.410 — playtest: archer's first ~3 shots of every engage were weak
     // because Steady Aim starts at 0 (decays to 0 between pulls). Eagle Eye now
     // seeds +18 Steady (~2 shots' worth, ≈+18% dmg) so re-positioning archers
@@ -82945,7 +82964,7 @@ const SKILL_FNS = {
     player.pet = {
       x: player.x, y: player.y, vx: 0, vy: 0,
       hp: _lxSummonHp(), maxHp: _lxSummonHp(),   // v0.29.904 — player max HP x15 (was a flat 80 000)
-      life: 60000, maxLife: 60000,   // v0.26.x — maxLife stamped for the summon duration timer
+      life: _lxRankDurMs('wildBond', 60000), maxLife: _lxRankDurMs('wildBond', 60000),   // v0.26.x — maxLife stamped for the summon duration timer
       cdAtk: 0,
       // v0.26.148 — Per user "make the summons for warlock and ranger
       // bigger, do not squish their sprite". Scale 1.6 → 2.4 (+50 %).
@@ -82999,18 +83018,19 @@ const SKILL_FNS = {
   warlord_warcry: () => {
     const recent = player._recentKills || 0;
     const stacks = Math.min(8, recent);
-    player.buffs.warCry = 12000;
-    player.buffs.bloodlust = 12000;
+    const _wbMs = _lxRankDurMs('warlord_warcry', 12000);   // v0.30.779 - +1 s per skill rank
+    player.buffs.warCry = _wbMs;
+    player.buffs.bloodlust = _wbMs;
     // v0.29.304 — a banner is a party rally by definition: partners on this map
     // get BOTH buffs in one frame (the set form exists precisely for this — as
     // two separate sends the flood guard would drop the second) plus the heal.
     // `_warlordBanner` (the +50% skill-range stamp) stays local: it is measured
     // against the caster's own frame clock.
-    if (typeof _coopPartyBuff === 'function') _coopPartyBuff({ warCry: 12000, bloodlust: 12000 }, "Warlord's Banner");
+    if (typeof _coopPartyBuff === 'function') _coopPartyBuff({ warCry: _wbMs, bloodlust: _wbMs }, "Warlord's Banner");
     if (typeof _coopPartyHeal === 'function') _coopPartyHeal(0.25, 0, "Warlord's Banner");
     // 6s Warlord's Banner buff — stored on player, read by performMelee +
     // performAround to scale skill range +50%
-    player._warlordBanner = game.time + 720;   // v0.26.397 — frames: 12000→720 (~12s; performMelee compares vs game.time. was ~200s)
+    player._warlordBanner = game.time + _lxRankDurFrames('warlord_warcry', 720);   // v0.26.397 — frames: 12000→720 (~12s; performMelee compares vs game.time. was ~200s)
     player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.25 + stacks * 20));
     // v0.26.x audit FIX — clamp to the summon's OWN maxHp, not a literal 300.
     // Wolves now spawn with 8000-10000 HP; the stale `Math.min(300, …)` (from an
@@ -83034,7 +83054,7 @@ const SKILL_FNS = {
     // wiped with game.hazards on map change). It carries no damage — the
     // banner is the buff's visible anchor, not a new attack.
     {
-      const _wbLifeF = 720;   // frames — the same 720 the +50%-range stamp uses
+      const _wbLifeF = _lxRankDurFrames('warlord_warcry', 720);   // frames — the same 720 the +50%-range stamp uses
       // Recast replaces rather than stacks: two banners would double-draw.
       for (let _i = game.hazards.length - 1; _i >= 0; _i--) {
         if (game.hazards[_i] && game.hazards[_i].type === 'warlord_banner') game.hazards.splice(_i, 1);
@@ -83338,7 +83358,7 @@ const SKILL_FNS = {
     // v0.26.x balance audit (2nd pass): LIFE base 16000->9000ms. The half-damage
     // window was 62% uptime (74% at Lv10) on the 26s cd and compounds with
     // Guardian's DR; 9000 (Lv10 ~10800) brings it to ~35-41% uptime.
-    const LIFE = Math.floor(9000 * _aeDurMul);   // 9 s base × Lv10 multiplier
+    const LIFE = _lxRankDurMs('crusader_aegis', Math.floor(9000 * _aeDurMul));   // 9 s base × Lv10 multiplier
     player._aegis = {
       life: LIFE, maxLife: LIFE,
       orbs: [],
@@ -83537,7 +83557,7 @@ const SKILL_FNS = {
     // v0.26.x audit 2nd pass: LIFE 15000->11000ms. Per-strike is a modest 1.1x
     // (below the 1.2x trim threshold), so the lever is uptime: 3 turrets at
     // 15s/22s = ~68% was the top sustained rogue output; ~50% now.
-    const LIFE = 11000;
+    const LIFE = _lxRankDurMs('shadowlord_clones', 11000);   // v0.30.779 - +1 s per skill rank
     player._clones = [];
     const px = player.x + player.w / 2;
     const py = player.y + player.h / 2;
@@ -84276,7 +84296,7 @@ const SKILL_FNS = {
     // the timer and tops the flight back up to three rather than stacking six.
     {
       const _hw = player._hexOrbs || { life: 0, maxLife: LX_HEXORB_LIFE_MS, orbs: [] };
-      _hw.life = LX_HEXORB_LIFE_MS; _hw.maxLife = LX_HEXORB_LIFE_MS;
+      _hw.life = _lxRankDurMs('hexmaster_grandhex', LX_HEXORB_LIFE_MS); _hw.maxLife = _hw.life;   // v0.30.779 - +1 s per skill rank
       while (_hw.orbs.length < LX_HEXORB_COUNT) {
         const _i = _hw.orbs.length;
         _hw.orbs.push({
@@ -84363,7 +84383,7 @@ const SKILL_FNS = {
       cx, cy,
       x: cx - _caW/2, y: cy - _caH/2, w: _caW, h: _caH,
       // v0.25.557 — field duration 5 s → 10 s (300 → 600 frames).
-      life: 600, maxLife: 600,
+      life: _lxRankDurFrames('celestialAurora', 600), maxLife: _lxRankDurFrames('celestialAurora', 600),   // v0.30.779 - +1 s per skill rank
       // v0.25.557 — holy DoT 0.45×ATK → 0.75×ATK; heal 20% → 15% per spec.
       atk: getAtk() * 1,
       healPct: (0.15 + charges * 0.05) * _caHealMul,
@@ -84648,7 +84668,7 @@ const SKILL_FNS = {
       player.pack.push({
         x: player.x + (i - 1) * 50, y: player.y, vx: 0, vy: 0,
         hp: _lxSummonHp(), maxHp: _lxSummonHp(),   // v0.29.904 — player max HP x15 (was a flat 100 000)
-        life: 100000, maxLife: 100000,    // 100 s (maxLife → summon duration timer)
+        life: _lxRankDurMs('beastmaster_pack', 100000), maxLife: _lxRankDurMs('beastmaster_pack', 100000),    // 100 s (maxLife → summon duration timer)
         cdAtk: 0,
         facing: player.facing,
         // v0.26.148 — Scale 1.6 → 2.4, same rationale as wildBond.
@@ -84721,14 +84741,15 @@ const SKILL_FNS = {
     const _wobFoot = player.y + player.h - 6;   // v0.30.x — the standard is planted on the floor, not floating at the waist
     const _wobLean = (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) || (typeof game !== 'undefined' && game && game._reduceMotion);
     if (!_active) {
-      player._warlordEnrageUntil = _now + 10000;
-      player.buffs = player.buffs || {}; player.buffs.bloodlust = 10000;
+      const _wobDur = _lxRankDurMs('warlord_ult', 10000);   // v0.30.779 - the enrage and its Bloodlust: +1 s per skill rank
+      player._warlordEnrageUntil = _now + _wobDur;
+      player.buffs = player.buffs || {}; player.buffs.bloodlust = _wobDur;
       player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.25));
       // v0.29.304 — only the OPENING of the enrage window shares (this handler
       // re-runs on every re-press inside the window; broadcasting each one
       // would spam partners with heals). The free-recast enrage itself is the
       // caster's own reward.
-      if (typeof _coopPartyBuff === 'function') _coopPartyBuff('bloodlust', 10000, 'War of Banners');
+      if (typeof _coopPartyBuff === 'function') _coopPartyBuff('bloodlust', _wobDur, 'War of Banners');
       if (typeof _coopPartyHeal === 'function') _coopPartyHeal(0.25, 0, 'War of Banners');
       // v0.30.x — THE RALLY (per user: "make it much more legendary and epic"). It was one 250 px
       // burst dropped at the waist and nothing else: a poster, over in a blink. It is a beat now —
@@ -84755,7 +84776,7 @@ const SKILL_FNS = {
           addShake(5); flash(0.12);
         }, _ms);
       }
-      scheduleSkillTimer(() => { player.skillCooldowns.warlord_ult = SKILLS.warlord_ult.cd; player._warlordEnrageUntil = 0; }, 10000);
+      scheduleSkillTimer(() => { player.skillCooldowns.warlord_ult = SKILLS.warlord_ult.cd; player._warlordEnrageUntil = 0; }, _wobDur);
     }
     // v0.30.618 warrior-tune - per user: "Increase the damage dealt by war of banners". Both halves
     // of every press +50% (sweep 2.4 -> 3.6, banner wave 1.6x ATK + 6 -> 2.4x ATK + 9). Measured
@@ -85013,7 +85034,7 @@ const SKILL_FNS = {
     player.invulnerable = Math.max(player.invulnerable, 300);
     const _scx = player.x + player.w / 2, _scy = player.y + player.h / 2;
     player._shade = {
-      life: LX_SHADE_LIFE, maxLife: LX_SHADE_LIFE,
+      life: _lxRankDurMs('shadowlord_ult', LX_SHADE_LIFE), maxLife: _lxRankDurMs('shadowlord_ult', LX_SHADE_LIFE),
       x: _scx - player.facing * LX_SHADE_OFFSET, y: _scy,
       facing: player.facing, queue: [], swing: 0, echoes: 0,
       // v0.30.57 — the mimicry buffer: filled by the tick, replayed
@@ -85398,7 +85419,7 @@ const SKILL_FNS = {
     // sustained holy judgment pulses capped by a screen-wide column.
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'archbishop_ult', { size: 300, life: 100, frameGap: 3 });   // v0.26.x — smaller frame gap per user
     player.hp = getMaxHp();
-    player.invulnerable = Math.max(player.invulnerable, 5000);
+    player.invulnerable = Math.max(player.invulnerable, _lxRankDurMs('archbishop_ult', 5000));   // v0.30.779 - +1 s per skill rank
     // v0.29.x — party heal: Apotheosis fully heals every co-op partner on
     // cast (100% HP / 50% MP of their own pools), its judgment pulses tick
     // +6% HP to the party, and the final pillar full-heals the party again.
@@ -85422,7 +85443,7 @@ const SKILL_FNS = {
     // shared summon timer renders the countdown above each turret.
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'ballista_ult', { size: 260, life: 80 });
     showToast('WAR MACHINE — turrets deployed!', 'legendary'); flash(0.5); addShake(8);
-    const LIFE = Math.round((SKILLS.ballista_ult.cd || 62000) * 0.75);   // ≈46.5 s
+    const LIFE = _lxRankDurMs('ballista_ult', Math.round((SKILLS.ballista_ult.cd || 62000) * 0.75));   // ≈46.5 s
     const px = player.x + player.w / 2, py = player.y + player.h / 2;
     const fanX = 320, fanY = 50;
     const positions = [
@@ -85469,16 +85490,17 @@ const SKILL_FNS = {
     // player.pet melee-ally system with the werewolf sprite) + self empower.
     spawnSpriteBurst(player.x + player.w / 2, player.y + player.h - 10, 'beastmaster_ult', { size: 300, life: 80 });
     showToast('APEX BOND — werewolf summoned!', 'legendary'); flash(0.6); addShake(8);
-    player.buffs = player.buffs || {}; player.buffs.bloodlust = 12000;
+    const _abMs = _lxRankDurMs('beastmaster_ult', 12000);   // v0.30.779 - +1 s per skill rank (Bloodlust)
+    player.buffs = player.buffs || {}; player.buffs.bloodlust = _abMs;
     player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.20));
     // v0.29.304 — Apex Bond shares its empower + surge with the party. The
     // werewolf itself stays the caster's (one summon per caster).
-    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('bloodlust', 12000, 'Apex Bond');
+    if (typeof _coopPartyBuff === 'function') _coopPartyBuff('bloodlust', _abMs, 'Apex Bond');
     if (typeof _coopPartyHeal === 'function') _coopPartyHeal(0.20, 0, 'Apex Bond');
     // v0.26.x — Apex Bond's werewolf had no player-indicated duration; per
     // "if not indicated make them last 75% their cooldown time" → 0.75 × 68s
     // cd = 51s (was a surprising 14s). maxLife stamped for the duration timer.
-    player.ultPet = { x: player.x + (player.facing || 1) * 44, y: player.y, vx: 0, vy: 0, hp: _lxSummonHp(), maxHp: _lxSummonHp(),   /* v0.29.904 — player max HP x15 */ life: 51000, maxLife: 51000, cdAtk: 0, scale: 2.8, sprite: 'werewolf' };   // v0.26.x — separate slot so it coexists with the F-skill wolf
+    player.ultPet = { x: player.x + (player.facing || 1) * 44, y: player.y, vx: 0, vy: 0, hp: _lxSummonHp(), maxHp: _lxSummonHp(),   /* v0.29.904 — player max HP x15 */ life: _lxRankDurMs('beastmaster_ult', 51000), maxLife: _lxRankDurMs('beastmaster_ult', 51000), cdAtk: 0, scale: 2.8, sprite: 'werewolf' };   // v0.26.x — separate slot so it coexists with the F-skill wolf
     for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; game.particles.push({ x: player.x + player.w / 2, y: player.y + player.h, vx: Math.cos(a) * 4, vy: Math.sin(a) * 3, life: 42, color: i % 2 ? '#ffaa44' : '#cc8833', size: 3 }); }
   },
   skyhunter_ult: () => {
@@ -85495,7 +85517,7 @@ const SKILL_FNS = {
     // the hover tick sets the hitbox to 44×30 × scale. Both fall to exactly 75%
     // — 22×2.97 = 65.3 stays clear of the max(32,…) floor, so nothing clamps
     // and the visual and its collision box stay in agreement.
-    player.ultPet = { x: player.x, y: player.y - 80, vx: 0, vy: 0, hp: _lxSummonHp(), maxHp: _lxSummonHp(),   /* v0.29.904 — player max HP x15. Live: the eagle takes no CONTACT damage (it flies above the melee line) but enemy projectiles hit it through the shared summon-hit path. */ life: 42000, maxLife: 42000, cdAtk: 0, fireCd: 0, scale: 2.97, sprite: 'eagle', flying: true, shooter: true };   // v0.26.x — separate slot so it coexists with the F-skill wolf
+    player.ultPet = { x: player.x, y: player.y - 80, vx: 0, vy: 0, hp: _lxSummonHp(), maxHp: _lxSummonHp(),   /* v0.29.904 — player max HP x15. Live: the eagle takes no CONTACT damage (it flies above the melee line) but enemy projectiles hit it through the shared summon-hit path. */ life: _lxRankDurMs('skyhunter_ult', 42000), maxLife: _lxRankDurMs('skyhunter_ult', 42000), cdAtk: 0, fireCd: 0, scale: 2.97, sprite: 'eagle', flying: true, shooter: true };   // v0.26.x — separate slot so it coexists with the F-skill wolf
     for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2; game.particles.push({ x: player.x + player.w / 2, y: player.y, vx: Math.cos(a) * 5, vy: Math.sin(a) * 4, life: 38, color: '#cfeaff', size: 3 }); }
   },
 };
@@ -109554,7 +109576,7 @@ function renderSkillsReference(host) {
                  font:700 10px Inter, system-ui, sans-serif; letter-spacing:0.6px;">↺ Reset RP</button>
       </div>
       <div class="skl-hint">
-        <b class="blue">+</b> spends 1 RP <span style="color:#888;">(Rank Points — separate from the Level-Up tab\u2019s SP)</span> — most skills <b>+5%</b> damage per rank · <b>+${SKILL_RANK_LV10_PCT}%</b> bonus at rank 10 (cap ${SKILL_RANK_CAP}) · click <b style="color:#9ac;">+</b> next to a skill name to expand level-up perks
+        <b class="blue">+</b> spends 1 RP <span style="color:#888;">(Rank Points — separate from the Level-Up tab\u2019s SP)</span> — most skills <b>+5%</b> damage per rank · <b>+${SKILL_RANK_LV10_PCT}%</b> bonus at rank 10 (cap ${SKILL_RANK_CAP}) · summons and buffs last <b>+1 s</b> per rank · click <b style="color:#9ac;">+</b> next to a skill name to expand level-up perks
       </div>
     </div>
     <div id="skills-tier-tabs"></div>
@@ -109858,18 +109880,18 @@ function renderSkillsReference(host) {
               </div>
               <div style="display:flex; gap:6px; align-items:center; font-size:10.5px; flex-wrap:wrap;">
                 <span style="color:#aaa;">Now:</span>
-                <b style="color:#ffdd66;">${_curPct} dmg${_atMax ? ' · MAX' : ''}</b>
+                <b style="color:#ffdd66;">${_curPct} dmg${LX_RANK_DUR_IDS.has(skillId) ? ' · +' + _curRank + ' s duration' : ''}${_atMax ? ' · MAX' : ''}</b>
                 ${_atMax ? '' : `
                   <span style="color:#666;">→</span>
                   <span style="color:#aaa;">Next:</span>
-                  <b style="color:#cce;">${_nextPct} dmg</b>
+                  <b style="color:#cce;">${_nextPct} dmg${LX_RANK_DUR_IDS.has(skillId) ? ' · +' + _nextRank + ' s duration' : ''}</b>
                   <span style="color:#888; font-size:9.5px;">(+${_stepPct}% this rank)</span>
                 `}
               </div>
               ${_atMax ? '' : `
                 <div style="margin-top:3px; font-size:10px; color:#888;">
                   Cost: <b style="color:#88ccff;">1 RP per rank</b> ·
-                  ranks 1-9 add +${Math.round((_skillRankMulAt(skillId, 1) - 1) * 100)}% damage each
+                  ranks 1-9 add +${Math.round((_skillRankMulAt(skillId, 1) - 1) * 100)}% damage${LX_RANK_DUR_IDS.has(skillId) ? ' and +1 s duration' : ''} each
                 </div>
               `}
               ${_milestone5Str ? `
