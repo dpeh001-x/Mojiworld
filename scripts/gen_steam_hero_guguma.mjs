@@ -12,6 +12,7 @@
 //   node scripts/gen_steam_hero_guguma.mjs --pose [--n 4]        # ludo.ai: Guguma action poses -> STAGE
 //   node scripts/gen_steam_hero_guguma.mjs --compose [art.png] [--battle]  # master, upload size, logo preview
 //   node scripts/gen_steam_hero_guguma.mjs --logo                          # library_logo (thick outline) + upload
+//   node scripts/gen_steam_hero_guguma.mjs --capsule [--install]           # STORE main capsule 1232x706 (see CAPSULE)
 //   (shipped art: --compose with no path = his original Sprites/npc/Guguma_hi.webp. The earlier battle-cry
 //    version was --compose steam/assets/refs/guguma_battlecry_pose.png --battle;
 //    then copy STAGE/library_hero.png -> steam/assets/ and library_hero_upload.png -> steam/assets/upload/library_hero.png)
@@ -105,7 +106,12 @@ if (has('--pose')) {
 }
 
 // ---------------------------------------------------------------- compose ----
-const W = 3840, H = 1240;
+// STORE MAIN CAPSULE (per user, of the Google result's thumbnail: "yes i Want the guguma art here"). Google shows
+// the store page's og:image - the main capsule - cropped to a square from its LEFT edge, so the title and Guguma
+// both live inside the left H x H square. Unlike the library hero, a capsule carries the game's title itself
+// (Valve: the title and nothing else). Rendered at 2x, 2464x1412, and downscaled to Valve's 1232x706.
+const CAPSULE = has('--capsule');
+const W = CAPSULE ? 2464 : 3840, H = CAPSULE ? 1412 : 1240;
 // Guguma BEHIND the title, in the centre Steam never crops: head above the logo, body behind it, feet below.
 // A first pass had him huge at the left: he crowded the logo and a narrow library window cut his wing.
 // HIS ORIGINAL ART, not a redraw (per user: "for guguma, he needs to be the more original cuter version").
@@ -119,7 +125,9 @@ const W = 3840, H = 1240;
 // CENTRED (per user: "push guguma slightly down vertically to centralise"): with the logo moved to the bottom
 // his face no longer sets the ceiling, so he sits at the vertical middle - his box centred on H/2, and the
 // light burst centred on him.
-const G = { cx: 1920, cy: 620, top: 98, h: 1045, ax: 0.5 };
+const G = CAPSULE ? { cx: 700, cy: 610, top: 52, h: 1150, ax: 0.5 } : { cx: 1920, cy: 620, top: 98, h: 1045, ax: 0.5 };
+// the light, embers and outline were sized around a 1045 px Guguma; S keeps them in proportion to him (1 for the hero)
+const S = G.h / 1045;
 const DEFAULT_ART = 'Sprites/npc/Guguma_hi.webp';
 // --battle rebuilds the earlier battle-cry look: fire trail, a hot rim glow hugging him, shockwave rings and a
 // strong underlight. Without it none of those are drawn - the rim glow and the rings read as a halo around him
@@ -138,6 +146,8 @@ const LOGO = { w: 1400, cx: W / 2, bottom: 62 };
 // in hero-master px: Guguma's art outline runs ~25 px plus the 16 px added = ~41; the wordmark's dark edge at
 // the preview's 1400 px is 21-24. LOGO_OUTLINE px at the wordmark's own 1254 px width is ~19 at 1400 -> ~42.
 const LOGO_OUTLINE = 17;
+// Capsule title: across his feet, as on the hero the user approved, inside Google's left square with a margin.
+const CAP_LOGO = { w: 1270, left: 70, bottom: 58 };
 const WORDMARK = 'Sprites/ui/mojiworld_logo.webp';
 let seed = 20260916;
 const rnd = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -150,10 +160,11 @@ async function cavern() {
   // for a 1045 px hero rather than read as wallpaper behind him; the glowing floor seam (0.86 of the art) lands
   // at SEAM_Y, just behind his feet, so he stands IN the cavern; a deeper focus blur separates the crisp,
   // outlined subject; saturation eased off the magenta so the yellow chick and gold logo own the colour.
-  const ZOOM = 1.1, SEAM_Y = 1110;
-  const sw = Math.round(W * ZOOM), sh = Math.round(2152 * ZOOM);
+  // (the art is 1456x816: cover-fit to the canvas, then zoomed; the capsule's floor seam is clamped to the art)
+  const ZOOM = 1.1, SEAM_Y = CAPSULE ? 1300 : 1110;
+  const k = Math.max(W / 1456, H / 816) * ZOOM, sw = Math.round(1456 * k), sh = Math.round(816 * k);
   const band = await sharp(join(ROOT, 'backgrounds/bg_v3_dungeon.webp')).resize(sw, sh, { kernel: 'lanczos3' })
-    .extract({ left: Math.round((sw - W) / 2), top: Math.round(0.86 * sh - SEAM_Y), width: W, height: H }).png().toBuffer();
+    .extract({ left: Math.round((sw - W) / 2), top: Math.max(0, Math.min(sh - H, Math.round(0.86 * sh - SEAM_Y))), width: W, height: H }).png().toBuffer();
   return sharp(band).blur(3.6).modulate({ saturation: 1.02, brightness: 0.72 }).linear(1.12, -16).png().toBuffer();
 }
 function shade() {   // darker ceiling and corners, hotter floor
@@ -166,7 +177,7 @@ function shade() {   // darker ceiling and corners, hotter floor
 function heat() {    // screen-blended: bloom behind Guguma, light burst, fire trail, the lava seam flaring
   let rays = '';
   for (let i = 0; i < 26; i++) {
-    const a = (i / 26) * Math.PI * 2 + rnd() * 0.08, sp = 0.035 + rnd() * 0.03, R = 2600;
+    const a = (i / 26) * Math.PI * 2 + rnd() * 0.08, sp = 0.035 + rnd() * 0.03, R = 2600 * S;
     rays += `<path d="M${G.cx} ${G.cy} L${(G.cx + Math.cos(a - sp) * R).toFixed(0)} ${(G.cy + Math.sin(a - sp) * R).toFixed(0)} L${(G.cx + Math.cos(a + sp) * R).toFixed(0)} ${(G.cy + Math.sin(a + sp) * R).toFixed(0)}Z" opacity="${(0.25 + rnd() * 0.5).toFixed(2)}"/>`;
   }
   // the fire trail belongs to a CHARGING pose; his original art stands, so it is opt-in (--battle)
@@ -180,14 +191,14 @@ function heat() {    // screen-blended: bloom behind Guguma, light burst, fire t
   }
   return svg(
     `<g fill="url(#ray)" filter="url(#b8)">${rays}</g>
-     <ellipse cx="${G.cx}" cy="${G.cy}" rx="1250" ry="900" fill="url(#bloom)"/>
+     <ellipse cx="${G.cx}" cy="${G.cy}" rx="${1250 * S}" ry="${900 * S}" fill="url(#bloom)"/>
      ${BATTLE ? `<ellipse cx="${G.cx}" cy="${G.cy + 40}" rx="760" ry="560" fill="none" stroke="#ffd690" stroke-width="26" opacity="0.42" filter="url(#b8)"/>
      <ellipse cx="${G.cx}" cy="${G.cy + 40}" rx="1020" ry="720" fill="none" stroke="#ff8a3a" stroke-width="14" opacity="0.22" filter="url(#b8)"/>` : ''}
      <g filter="url(#b6)">${trail}</g>
      <rect x="0" y="${H * 0.8}" width="${W}" height="${H * 0.2}" fill="url(#seam)"/>`,
     `<filter id="b8" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="8"/></filter>
      <filter id="b6" x="-10%" y="-50%" width="120%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>
-     <radialGradient id="ray" gradientUnits="userSpaceOnUse" cx="${G.cx}" cy="${G.cy}" r="2100">
+     <radialGradient id="ray" gradientUnits="userSpaceOnUse" cx="${G.cx}" cy="${G.cy}" r="${2100 * S}">
        <stop offset="0" stop-color="#ffd27a" stop-opacity="0.34"/><stop offset="1" stop-color="#ff6a2a" stop-opacity="0"/></radialGradient>
      <radialGradient id="bloom"><stop offset="0" stop-color="#fff0b8" stop-opacity="0.85"/><stop offset="0.28" stop-color="#ffab3d" stop-opacity="0.55"/>
        <stop offset="0.62" stop-color="#ff4d1f" stop-opacity="0.18"/><stop offset="1" stop-color="#ff4d1f" stop-opacity="0"/></radialGradient>
@@ -198,17 +209,17 @@ function heat() {    // screen-blended: bloom behind Guguma, light burst, fire t
 }
 function embers(front) {   // back layer: many small rising sparks; front layer: a few big out-of-focus ones
   let body = '';
-  const n = front ? 26 : 320;
+  const n = Math.round((front ? 26 : 320) * (W * H) / (3840 * 1240));   // the same density on any canvas
   for (let i = 0; i < n; i++) {
     // denser around Guguma and along the lava seam
     const nearG = rnd() < 0.45;
-    const x = nearG ? G.cx - 900 + rnd() * 2100 : rnd() * W;
-    const y = nearG ? G.cy - 520 + rnd() * 1080 : H * (0.25 + rnd() * 0.75);
+    const x = nearG ? G.cx - 900 * S + rnd() * 2100 * S : rnd() * W;
+    const y = nearG ? G.cy - 520 * S + rnd() * 1080 * S : H * (0.25 + rnd() * 0.75);
     if (front) {
-      const r = 14 + rnd() * 30;
+      const r = (14 + rnd() * 30) * S;
       body += `<circle cx="${x.toFixed(0)}" cy="${y.toFixed(0)}" r="${r.toFixed(0)}" fill="url(#bokeh)" opacity="${(0.35 + rnd() * 0.45).toFixed(2)}"/>`;
     } else {
-      const len = 6 + rnd() * 26, th = 1.6 + rnd() * 3.2, ang = -35 - rnd() * 40;
+      const len = (6 + rnd() * 26) * S, th = (1.6 + rnd() * 3.2) * S, ang = -35 - rnd() * 40;
       body += `<rect x="${x.toFixed(0)}" y="${y.toFixed(0)}" width="${len.toFixed(1)}" height="${th.toFixed(1)}" rx="${(th / 2).toFixed(1)}" fill="${rnd() < 0.3 ? '#fff4c8' : '#ffb347'}" opacity="${(0.45 + rnd() * 0.55).toFixed(2)}" transform="rotate(${ang.toFixed(0)} ${x.toFixed(0)} ${y.toFixed(0)})"/>`;
     }
   }
@@ -230,7 +241,7 @@ async function guguma(posePath) {
     <rect width="${w}" height="${h}" fill="url(#u)"/></svg>`);
   const tint = await sharp(ramp).composite([{ input: body, blend: 'dest-in' }]).png().toBuffer();
   const lit = await sharp(body).composite([{ input: tint, blend: 'soft-light' }]).png().toBuffer();
-  const ol = await outlined(lit, w, h);
+  const ol = await outlined(lit, w, h, Math.round(OUTLINE * S));
   if (!BATTLE) return { img: ol.img, P: ol.P, w, h, rim: null, pad: 0 };
   // hot rim (--battle only): his silhouette, grown and blurred, tinted gold, laid under him
   const pad = 90;
@@ -319,4 +330,36 @@ if (has('--compose')) {
   await sharp(withLogo).resize(1920, 620, { kernel: 'lanczos3' }).png().toFile(join(STAGE, 'preview_with_logo.png'));
   const mm = await sharp(master).metadata(), um = await sharp(upload).metadata();
   console.log(`master ${mm.width}x${mm.height} · upload ${um.width}x${um.height} · preview_with_logo.png -> ${STAGE}`);
+}
+if (CAPSULE) {
+  await mkdir(STAGE, { recursive: true });
+  const g = await guguma(join(ROOT, DEFAULT_ART));
+  const gl = Math.round(G.cx - g.w * G.ax), gt = G.top;
+  const logo = await sharp(await thickWordmark()).resize(CAP_LOGO.w, null, { kernel: 'lanczos3' }).png().toBuffer();
+  const lm = await sharp(logo).metadata();
+  const art = await sharp(await cavern()).composite([
+    { input: shade(), blend: 'over' },
+    { input: heat(), blend: 'screen' },
+    { input: embers(false), blend: 'screen' },
+    { input: g.img, left: gl - g.P, top: gt - g.P },
+    { input: embers(true), blend: 'screen' },
+    // the title goes over everything, bokeh included: Valve's rule is that it must stay legible
+    { input: logo, left: CAP_LOGO.left, top: H - CAP_LOGO.bottom - lm.height },
+  ]).removeAlpha().png().toBuffer();
+  // two pipelines (resize runs before composite in one)
+  const cap = await sharp(art).resize(1232, 706, { kernel: 'lanczos3' }).png({ compressionLevel: 9 }).toBuffer();
+  await writeFile(join(STAGE, 'store_capsule_main.png'), cap);
+  // what Google shows: the left square of the store's 616x353 copy, at thumbnail size
+  const half = await sharp(cap).resize(616, 353, { kernel: 'lanczos3' }).png().toBuffer();
+  await sharp(half).extract({ left: 0, top: 0, width: 353, height: 353 }).resize(120, 120, { kernel: 'lanczos3' }).png().toFile(join(STAGE, 'google_thumb_preview.png'));
+  if (has('--install')) {
+    // art of record + the upload copy: Valve takes the main capsule at exactly 1232x706
+    for (const p of ['steam/assets/store_capsule_main.png', 'steam/assets/upload/store_capsule_main.png']) {
+      await writeFile(join(ROOT, p) + '.tmp', cap);
+      const { rename } = await import('node:fs/promises');
+      await rename(join(ROOT, p) + '.tmp', join(ROOT, p));
+    }
+  }
+  const cm = await sharp(cap).metadata();
+  console.log(`capsule ${cm.width}x${cm.height} · title ${lm.width}x${lm.height} at (${CAP_LOGO.left},${H - CAP_LOGO.bottom - lm.height}) · Guguma ${g.w}x${g.h} at (${gl},${gt})${has('--install') ? ' · installed' : ''} -> ${STAGE}`);
 }
