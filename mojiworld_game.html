@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.780';
+const GAME_VERSION = 'v0.30.781';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -99337,7 +99337,7 @@ function killMonster(m) {
     // (and affix magnitudes downstream) grade with mob difficulty. _mobLevel
     // is the canonical helper — falls back to MOB_NATURAL_LEVEL or
     // map.levelReq if the mob doesn't carry an explicit .level field.
-    const item = rollItemDrop(tier, _mobLevel(m), undefined, null, _bossLootTierCap(m));
+    const item = rollItemDrop(tier, _mobLevel(m), undefined, null, _bossLootTierCap(m), m);
     if (item && _lxBossGearGate(m, item, true)) {   // v0.30.378 — boss gear budget
       game.drops.push({
         x: m.x + m.w/2, y: m.y + m.h/2, vy: -6,
@@ -99405,7 +99405,7 @@ function killMonster(m) {
     for (let i = 0; i < _bossBonusDrops; i++) {
       // v0.25.678 — Boss bonus drops also grade by mob level — the boss's
       // own level dictates how spicy its retinue of extra rolls is.
-      const extra = rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
+      const extra = rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m), m);
       if (extra && _lxBossGearGate(m, extra, true)) {   // v0.30.378 — boss gear budget
         game.drops.push({
           x: m.x + m.w/2 + (Math.random()-0.5)*60,
@@ -99977,7 +99977,7 @@ function _triggerSuperBossDeathRaw(m) {
     // v0.26.327 — Gravitos kill rolls from the T8+ pool exclusively.
     const leg = _isGravitosKill ? _rollGravitosHighTierItem()
       : _isAetherionKill ? _rollAetherionShardgear()
-      : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
+      : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m), m);
     if (leg) {
       leg.rarity = 'legendary';
       game.drops.push({
@@ -99994,7 +99994,7 @@ function _triggerSuperBossDeathRaw(m) {
     // v0.26.327 — Gravitos T8+ pool override (same pattern as legendary loop above).
     const extra = _isGravitosKill ? _rollGravitosHighTierItem()
       : _isAetherionKill ? _rollAetherionShardgear()
-      : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
+      : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m), m);
     if (extra) {
       game.drops.push({
         x: m.x + m.w/2 + (Math.random()-0.5)*160,
@@ -100028,7 +100028,7 @@ function _triggerSuperBossDeathRaw(m) {
   // converted into more equipment.
   for (let i = 0; i < 3; i++) {
     // v0.26.327 — Gravitos T8+ pool override (same pattern as above).
-    const _gear = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m));
+    const _gear = _isGravitosKill ? _rollGravitosHighTierItem() : rollItemDrop(2, _mobLevel(m), undefined, null, _bossLootTierCap(m), m);
     if (_gear) {
       _gear.rarity = 'legendary';
       game.drops.push({
@@ -100176,7 +100176,8 @@ function _triggerSuperBossDeathRaw(m) {
   }
 }
 
-function rollItemDrop(tier, mobLevel, forceCat, forceTier, capTier) {
+// v0.30.781 t10-grav — srcMob: the monster this roll is for, when there is one. Only its TYPE opens T10.
+function rollItemDrop(tier, mobLevel, forceCat, forceTier, capTier, srcMob) {
   // tier: 0 normal, 1 elite, 2 boss
   // mobLevel: optional, 1+ — scales rolled affix magnitudes (v0.25.484).
   // forceCat: optional 'weapons'|'armors'|'accessories' — when set, the
@@ -100226,7 +100227,14 @@ function rollItemDrop(tier, mobLevel, forceCat, forceTier, capTier) {
   // fall back to the map levelReq, which is swept to 1 on open maps — Octobaby
   // and the two tower bosses all resolved to Lv 1 and would otherwise have been
   // graded as low-tier. Only boss death paths pass this.
-  const _cap = (typeof capTier === 'number') ? capTier : _lvTierCap;
+  // v0.30.781 t10-grav — per user: "ensure that T10 items drop only from gravitos" and "ensure the zodiac
+  // bosses do not drop T10 equipments". The boss caps already held (zodiac 8 at most), but the level
+  // fallback above reaches T10 at Lv 85+ for any boss-grade roll that arrives WITHOUT a cap - every quest
+  // reward does - and forceTier and the empty-bag fallback below skip the cap entirely. So the ceiling
+  // is set here, once, for every path: T9, lifted to T10 only for a roll made for a Gravitos. The TYPE is
+  // checked rather than capTier === 10, so a boss handed a 10 by mistake still cannot open it.
+  const _lxTierCeil = (srcMob && srcMob.type === 'gravitos') ? 10 : 9;
+  const _cap = Math.min((typeof capTier === 'number') ? capTier : _lvTierCap, _lxTierCeil);
   let pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _cap);
   if (tier < 2) pool = pool.filter(it => (it.tier | 0) <= 7);
   // v0.29.336 — forceTier pins the pool to ONE item tier and deliberately
@@ -100236,10 +100244,12 @@ function rollItemDrop(tier, mobLevel, forceCat, forceTier, capTier) {
   // a one-off story payout is not a drop rate. Falls through to the capped
   // pool if the requested tier has no item in this category.
   if (forceTier != null) {
-    const _exact = ITEM_POOL[cat].filter(it => (it.tier | 0) === (forceTier | 0));
+    const _exact = ITEM_POOL[cat].filter(it => (it.tier | 0) === Math.min(forceTier | 0, _lxTierCeil));   // v0.30.781 t10-grav — a quest cannot pin T10
     if (_exact.length) pool = _exact;
   }
-  if (!pool.length) pool = ITEM_POOL[cat];   // defensive: never leave the bag empty
+  // defensive: never leave the bag empty
+  // v0.30.781 t10-grav — but never by handing back the whole catalogue: that was a T10 for anyone.
+  if (!pool.length) pool = ITEM_POOL[cat].filter(it => (it.tier | 0) <= _lxTierCeil);
   // v0.25.678 — Level-graded rarity weights. Per user request "items that
   // drop from monsters graded by level of the monster, bosses drop high
   // tier". Replaces the old fixed-per-tier weights (v0.25.7) with a
