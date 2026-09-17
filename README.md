@@ -18,8 +18,15 @@ The exact branch tip straight from GitHub, a few minutes fresher but slower and 
 
 ### ♥ Support the project
 
-Mojiworld is built in the open by one person. If you want to see it finished:
-**▶ https://ko-fi.com/mojistudios**
+Mojiworld is built in the open by one person. If you want to see it finished, or just come say hi:
+
+<a href="https://ko-fi.com/mojistudios"><img src="assets/social/kofi.svg" width="48" alt="Ko-fi"></a>&nbsp;
+<a href="https://discord.gg/9CqQwXKcv"><img src="assets/social/discord.svg" width="48" alt="Discord"></a>&nbsp;
+<a href="https://www.instagram.com/mojistudios.official/"><img src="assets/social/instagram.svg" width="48" alt="Instagram"></a>&nbsp;
+<a href="https://moji-studios.com"><img src="assets/social/website.svg" width="48" alt="Moji Studios website"></a>
+
+**▶ Ko-fi:** https://ko-fi.com/mojistudios &nbsp;·&nbsp; **Discord:** https://discord.gg/9CqQwXKcv
+**▶ Instagram:** https://www.instagram.com/mojistudios.official/ &nbsp;·&nbsp; **Website:** https://moji-studios.com
 
 Reviewers can bookmark the stable preview build (whatever is currently under review):
 
