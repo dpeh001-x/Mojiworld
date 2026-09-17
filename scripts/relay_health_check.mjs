@@ -3,7 +3,7 @@
 // Also times the connect, since a cold Render free-tier dyno takes ~90s.
 //
 //   node scripts/relay_health_check.mjs [wss://host]
-const URL = process.argv[2] || 'wss://mojiworld-mp.onrender.com';
+const URL = process.argv[2] || 'wss://mojiworld-mp.dpeh001.workers.dev';   // v0.30.789 - the shipped relay (MP_FALLBACK_URL); the Render one is retired
 const room = 'healthcheck__ch1';
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);

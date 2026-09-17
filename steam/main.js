@@ -12,7 +12,7 @@
 // player's entire character save. We bind a FIXED port + hold a single-instance
 // lock so two copies never fight over it.
 'use strict';
-const { app, BrowserWindow, shell, powerSaveBlocker, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, powerSaveBlocker, ipcMain, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const staticServer = require('./static_server');
@@ -162,6 +162,7 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
+      devTools: !app.isPackaged,   // v0.30.791 - F12 / Ctrl+Shift+I opened devtools in the shipped build
     },
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -169,6 +170,23 @@ async function createWindow() {
     return { action: 'allow' };
   });
   win.loadURL('http://127.0.0.1:' + port + ENTRY);
+  // v0.30.791 - LAUNCH POLISH: a renderer crash or hang used to leave a blank or frozen window with no way back
+  // but the task manager. Crash: reload (the game autosaves every 30 s and on hide). Hang: ask, never guess.
+  win.webContents.on('render-process-gone', (_e, d) => {
+    console.error('[mojiworld] renderer gone: ' + (d && d.reason));
+    setTimeout(() => { try { if (!win.isDestroyed()) win.webContents.reload(); } catch (e) {} }, 500);
+  });
+  win.webContents.on('did-fail-load', (_e, code, desc, _url, isMainFrame) => {
+    if (!isMainFrame || code === -3) return;   // -3 = aborted by a newer navigation
+    console.error('[mojiworld] load failed: ' + code + ' ' + desc);
+    setTimeout(() => { try { if (!win.isDestroyed()) win.loadURL('http://127.0.0.1:' + port + ENTRY); } catch (e) {} }, 1000);
+  });
+  win.on('unresponsive', async () => {
+    try {
+      const r = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Wait', 'Reload'], defaultId: 0, cancelId: 0, title: 'Mojiworld', message: 'The game is not responding.', detail: 'Wait a little longer, or reload. Progress is saved every 30 seconds.' });
+      if (r.response === 1 && !win.isDestroyed()) { win.webContents.forcefullyCrashRenderer(); }
+    } catch (e) {}
+  });
   return win;
 }
 

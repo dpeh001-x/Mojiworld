@@ -61,7 +61,7 @@ const C = cast ? cast[0] : '';
 ok('the cast summons the ward', /player\._hexOrbs = _hw;/.test(C));
 ok('"up to 3" is a cap, not an addition', /while \(_hw\.orbs\.length < LX_HEXORB_COUNT\)/.test(C),
   'a recast must top up to three, not stack six');
-ok('a recast refreshes the timer', /_hw\.life = LX_HEXORB_LIFE_MS;/.test(C));
+ok('a recast refreshes the timer', /_hw\.life = (?:_lxRankDurMs\('hexmaster_grandhex', )?LX_HEXORB_LIFE_MS\)?;/.test(C));   // v0.30.779 wraps the base in _lxRankDurMs (+1 s per rank)
 const count = Number((s.match(/LX_HEXORB_COUNT = (\d+)/) || [])[1] || 0);
 const hits = Number((s.match(/LX_HEXORB_HITS = (\d+)/) || [])[1] || 0);
 ok('three orbs', count === 3, `LX_HEXORB_COUNT=${count}`);

@@ -23,13 +23,14 @@
     [new RegExp('(?:getAtk\\(\\)|baseAtk)\\s*\\*\\s*\\d+(?:\\.\\d+)?(?:\\s*\\*\\s*[A-Za-z_$][\\w$.]*)*\\)?\\s*\\+\\s*' + N, 'g'), 'flat'],
     [new RegExp('\\bdmg:\\s*' + N, 'g'), 'mul'],                                                   // { delay: 180, dmg: 1.6, crit: true } -> getAtk() * s.dmg
     [new RegExp('\\b(?:const|let)\\s+\\w*(?:[Dd]mg|[Mm]ul)\\w*\\s*=\\s*' + N + '\\s*;', 'g'), 'mul'],     // const laneMul = 1.4;
-    [new RegExp('\\braiseMinion\\([^()]*,\\s*(\\d+\\.\\d+)(?=\\s*\\))', 'g'), 'mul'],               // raiseMinion(x, y, type, life, 0.55) - the caller's bite (a fraction; the life before it is an integer)
+    [new RegExp('\\braiseMinion\\((?:[^()]|\\([^()]*\\))*,\\s*(\\d+\\.\\d+)(?=\\s*\\))', 'g'), 'mul'],   // raiseMinion(x, y, type, life, 0.55) - the caller's bite (a fraction; the life before it is an integer, or _lxRankDurMs(id, N) since v0.30.779)
     // ---- the other variables a skill is made of (shown and editable; never scaled by the tier generator) ----
     [new RegExp('\\bfor\\s*\\(\\s*(?:let|var)\\s+\\w+\\s*=\\s*0\\s*;\\s*\\w+\\s*<\\s*' + N + '(?=\\s*;)', 'g'), 'count'],   // for (let i = 0; i < 9; i++) - lances, shards, waves, summons
     [new RegExp('\\b(?:count|targets|waves|rings|shards|lances|orbs|bolts|hops|n)\\s*:\\s*' + N, 'g'), 'count'],
     [new RegExp('\\bperform(?:Around|Melee)\\(\\s*' + N + '(?=\\s*,)', 'g'), 'radius'],           // performAround(540, ...) - the reach
     [new RegExp('\\b(?:explode|aoeOnHit|radius|range|reach|aoe)\\s*:\\s*' + N, 'g'), 'radius'],
     [new RegExp('\\braiseMinion\\([^()]*,\\s*(\\d{3,})(?=\\s*[,)])', 'g'), 'time'],                 // raiseMinion(x, y, type, 30000[, bite]) - the summon's life in ms
+    [new RegExp("\\b_lxRankDur(?:Ms|Frames)\\('[A-Za-z_0-9]+',\\s*" + N, 'g'), 'time'],            // _lxRankDurMs('darkPulse', 30000) - a summon's or buff's base life; the game adds +1 s per skill rank (v0.30.779)
     [new RegExp("\\b_applyMobStatus\\([^,()]+,\\s*'[a-z]+',\\s*" + N, 'g'), 'time'],              // _applyMobStatus(m, 'stun', 1200, ...) - the status duration in ms
     [new RegExp("\\b_applyMobStatus\\([^()]*\\{[^}]*\\bchance:\\s*" + N, 'g'), 'frac'],           // ...its chance
     [new RegExp('\\b(?:freezeTimer|stunTimer|burnTimer|slowTimer)\\s*=\\s*Math\\.max\\([^,()]+(?:\\([^()]*\\))?[^,()]*,\\s*' + N, 'g'), 'time'],   // m.freezeTimer = Math.max(m.freezeTimer || 0, 1500)

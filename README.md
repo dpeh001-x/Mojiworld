@@ -2,11 +2,11 @@
 
 > _Once upon a time…_ a 2D action-platformer RPG with roguelite loot and **drop-in co-op**. Four classes, eight job advancements, sixteen master classes, branching skill trees, affix-roll gear, star enhancement, procedural dungeons, and mini-bosses — all in a single HTML file, no build step.
 
-**Current build: v0.29.25.** The whole game lives in `mojiworld_game.html` (open it in a browser and play). Since the last README, the project has grown a full **shared-world co-op layer** (fight the *same* monsters with a friend via a Party Code) and a **Steam desktop wrapper** — see below.
+**Current build: the version on the title screen (see `CHANGELOG.html`).** The whole game lives in `mojiworld_game.html`. Since the last README, the project has grown a full **shared-world co-op layer** (fight the *same* monsters with a friend via a Party Code) and a **Steam desktop wrapper** — see below.
 
 ## 🎮 Play
 
-**Open `mojiworld_game.html` in any modern browser.** Solo play needs zero setup — no install, no server, no accounts.
+**Play in a browser from the link below, or unzip the portable build and double-click `Mojiworld.cmd`.** Solo play needs no install, server or account. (The game must be served over http for everything to work — the launcher and the links below do that; opening the .html straight from disk runs with reduced features.)
 
 Play the latest `main` build straight from GitHub (correct MIME, always the branch tip):
 

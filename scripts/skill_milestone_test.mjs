@@ -103,7 +103,7 @@ ok('mark amplifier sits with the global multipliers', /_msMarkMul\(m\)/.test(src
 ok('kill refund is wired', /_msRefundOnKill\(skill\)/.test(src));
 ok('chain has a re-entrancy guard', /_msChaining/.test(src));
 ok('shorter windows cannot stomp longer ones', /cur\.until > until && cur\.until > now/.test(src));
-ok('formatter renders the window clause', /for ' \+ \(w\.ms \/ 1000\)/.test(src));
+ok('formatter renders the window clause', /for ' \+ (?:_sec\(w\.ms\)|\(w\.ms \/ 1000\))/.test(src));   // v0.30.782 prints half seconds via _sec()
 
 let pass = 0, fail = 0;
 for (const x of results) { (x.pass ? pass++ : fail++); console.log((x.pass ? 'PASS  ' : 'FAIL  ') + x.n + (x.x !== undefined ? '  ' + JSON.stringify(x.x) : '')); }
