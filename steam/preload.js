@@ -13,6 +13,7 @@ const relay = getArg('--moji-relay=');
 const steamAvailable = getArg('--moji-steam=') === '1';
 const onDeck = getArg('--moji-deck=') === '1';
 const launchJoin = getArg('--moji-launch-join=');
+const packaged = getArg('--moji-packaged=') === '1';   // v0.30.797 - the packaged app serves from 127.0.0.1; the game must not mistake it for a developer's localhost
 
 // Second-instance "Join Game" callbacks (registered by the game via onJoin).
 // A lobby resolve can land BEFORE the game's inline script registers its
@@ -89,6 +90,7 @@ const SteamAPI = {
 
 try {
   contextBridge.exposeInMainWorld('MOJI_RELAY_URL', relay);
+  contextBridge.exposeInMainWorld('MOJI_PACKAGED', packaged);
   if (launchJoin) contextBridge.exposeInMainWorld('MOJI_JOIN', launchJoin);
   // Only expose the Steam bridge when Steam actually initialized — impossible to
   // false-positive on the web / non-Steam build (which never gets --moji-steam=1).

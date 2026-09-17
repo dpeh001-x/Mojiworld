@@ -158,7 +158,7 @@ async function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0'), '--moji-deck=' + (ON_DECK ? '1' : '0'), '--moji-launch-join=' + LAUNCH_JOIN],
+      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0'), '--moji-deck=' + (ON_DECK ? '1' : '0'), '--moji-launch-join=' + LAUNCH_JOIN, '--moji-packaged=' + (app.isPackaged ? '1' : '0')],   // v0.30.797 - the page hides dev tools in the packaged app
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
