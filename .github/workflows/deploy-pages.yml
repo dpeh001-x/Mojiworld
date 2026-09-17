@@ -6,7 +6,8 @@ name: Deploy game to GitHub Pages
 # subdomain ROOT serves the game directly -> https://play.moji-studios.com/.
 #
 # Heavy art (Sprites/ audio/ backgrounds/, ~1.3GB) is NOT bundled — it streams
-# from jsDelivr over this repo, pinned to the commit SHA. Keeps the artifact tiny.
+# from jsDelivr over this repo, each art folder pinned to the last commit that touched
+# it (see "Assemble site"). Keeps the artifact tiny.
 #
 # One-time setup outside this file (see DEPLOY.md):
 #   - Cloudflare DNS: CNAME  play -> dpeh001-x.github.io   (DNS-only / grey cloud)
@@ -38,6 +39,7 @@ jobs:
 
       - name: Assemble site
         env:
+          GH_TOKEN: ${{ github.token }}
           GAME_DOMAIN: ${{ vars.GAME_DOMAIN }}
           MP_WSS_URL: ${{ vars.MP_WSS_URL }}
         run: |
@@ -101,11 +103,23 @@ jobs:
           # relative asset reference (JS strings, CSS url(), static HTML — all
           # share the form <quote-or-paren>Dir/ ) to the CDN. The committed game
           # keeps relative paths for local dev.
-          CDN_BASE="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${GITHUB_SHA}"
-          for f in _site/index.html _site/mojiworld_game.html; do
-            sed -i -E "s#([\"'(])(Sprites|audio|backgrounds)/#\1${CDN_BASE}/\2/#g" "$f"
+          # v0.30.808 - PINNED PER ART FOLDER, to the last commit that touched it. Pinning all three to THIS
+          # commit (the old rule) changed every art URL on every push: the CDN edge started cold and every
+          # returning player's browser cache missed on every sprite, several times a day. An immutable URL
+          # only has to change when its bytes can have. The commits API answers "newest commit at or under
+          # <sha> that touched <path>"; any failure falls back to this commit - always correct, only colder.
+          CDN_ROOT="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}"
+          for d in Sprites audio backgrounds; do
+            pin="$(curl -fsSL --retry 2 --max-time 20 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits?path=${d}&sha=${GITHUB_SHA}&per_page=1" | jq -r '.[0].sha // empty' || true)"
+            if ! printf '%s' "${pin}" | grep -qE '^[0-9a-f]{40}$'; then
+              pin="${GITHUB_SHA}"; echo "::warning::no pin found for ${d}/ - using this commit"
+            fi
+            for f in _site/index.html _site/mojiworld_game.html; do
+              sed -i -E "s#([\"'(])${d}/#\1${CDN_ROOT}@${pin}/${d}/#g" "$f"
+            done
+            echo "Heavy assets: ${d}/ -> ${CDN_ROOT}@${pin}/${d}/"
           done
-          echo "Heavy assets -> ${CDN_BASE}/{Sprites,audio,backgrounds}/"
 
           # Inject the live multiplayer endpoint so the in-game Multi panel
           # defaults to the production wss:// server instead of localhost.
