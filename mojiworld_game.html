@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.851';
+const GAME_VERSION = 'v0.30.852';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53349,6 +53349,7 @@ function _coopApplyBossHit(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
   if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed
   if (!_coopFollowingHost()) return;
+  if (msg.k) { if (msg.p && typeof msg.p === 'object' && typeof _lxBossExecLocal === 'function') { try { _lxBossExecLocal(String(msg.k).slice(0, 16), msg.p); } catch (e) {} } return; }   // v0.30.x coop-exec
   if (!player || player.hp <= 0 || player._god || (player.invulnerable | 0) > 0) return;
   const r = Math.max(0, +msg.r || 0);
   if (r > 0 && r < 9000) {   // positional attack — the guest can dodge out of the radius
@@ -53385,6 +53386,243 @@ function _coopApplyBossHit(msg) {
   player._lastDamageSource = msg.sl || 'a boss attack';
   if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
   if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ff5555', big: true });
+}
+// v0.30.x coop-exec — BOSS EXECUTES REACH EVERY PLAYER (per user: "the One shots need to hit guests"). These moves wrote
+// `player` inside the boss AI and nothing else: a guest never took HEAVENSPLIT, King Krook's Earthquake / Stomp, Soul
+// Drain or the Stinger, and on a tick aimed at the guest the aggro swap restored the host's fields afterwards, so NOBODY
+// did. The effect lives here now; each player runs it against its own player (ground, i-frames, block, line of sight,
+// its own HP), exactly as a solo player always has.
+//   _lxBossExec(kind, p)     host, at the move: the local player (or, mid-swap, the host after the restore) + guests
+//   _lxBossExecLocal(kind, p) the effect itself; true when it landed
+// true when a live partner on my map (as host) reports HP under frac of its max
+function _lxCoopPeerBelow(frac) {
+  try {
+    if (typeof net === 'undefined' || !net || !net.isHost || !net.peers || typeof _coopActive !== 'function' || !_coopActive()) return false;
+    for (const id in net.peers) { const q = net.peers[id]; if (q && q.map === game.currentMap && +q.hp > 0 && +q.maxHp > 0 && (+q.hp / +q.maxHp) < frac) return true; }
+  } catch (e) {}
+  return false;
+}
+function _lxBossExec(kind, p) {
+  let landed = true;
+  if (typeof game !== 'undefined' && game && game._bossHitTap) { try { game._bossHitTap(p.x, p.y, 0, 0, 0, '', '', kind, p); } catch (e) {} }
+  else landed = _lxBossExecLocal(kind, p);
+  try {
+    if (typeof net !== 'undefined' && net && net.isHost && net.ws && typeof _coopActive === 'function' && _coopActive()) {
+      // fr is for a build that predates k: it takes a %-of-max-HP hit instead of nothing
+      const fr = kind === 'kkQuake' ? 0.55 : kind === 'kkStomp' ? (p.col ? 0.5 : 0.22) : kind === 'zdHp1' ? 0.9 : kind === 'scSting' ? 0.5 : kind === 'gvDrain' ? 0.9 : 0;
+      net.ws.send(JSON.stringify({ t: 'bosshit', map: game.currentMap, x: p.x | 0, y: p.y | 0, r: 0, d: 0, fr, sl: kind, c: '#ff5555', k: kind, p }));
+    }
+  } catch (e) {}
+  return landed;
+}
+function _lxBossExecLocal(kind, p) {
+  if (!player || player.hp <= 0 || player._downed || !p) return false;
+  switch (kind) {
+  case 'zdHp1': case 'zdMp0': {
+    const zn = String(p.n || 'The zodiac').slice(0, 40);
+    // Check player defenses (these gate the EFFECT, not the visuals)
+    if (player._god) {
+      showToast('✦ Aegis holds — desperation no-sold', 'epic');
+      return false;
+    }
+    if ((player.invulnerable | 0) > 0) {
+      // iframe save — player rolled / dashed through the telegraph
+      showToast('✦ Dodged the desperation!', 'rare');
+      return false;
+    }
+    const blocked = (player.blockTimer > 0);
+    if (blocked && typeof triggerBlock === 'function') triggerBlock();
+
+    if (kind === 'zdHp1') {
+    if (blocked) {
+      // Lose 50% of current HP, floor at 1
+      const lost = Math.max(1, Math.floor(player.hp * 0.5));
+      player.hp = Math.max(1, player.hp - lost);
+      showToast('🛡 Blocked! Half damage from HEAVENSPLIT', 'epic');
+      game.damageNumbers.push({
+        taken: true, x: player.x + 14, y: player.y, vy: -2,
+        text: '-' + lost, life: 50, color: '#ff4466', big: true,
+      });
+    } else {
+      // Floor to 1 HP
+      const lost = Math.max(0, player.hp - 1);
+      player.hp = 1;
+      showToast(`☠ HEAVENSPLIT — left at 1 HP!`, 'legendary');
+      if (lost > 0) {
+        game.damageNumbers.push({
+          taken: true, x: player.x + 14, y: player.y, vy: -2,
+          text: '-' + lost, life: 60, color: '#ff2244', big: true,
+        });
+      }
+    }
+    player.lastHitTime = game.time;
+    player.invulnerable = 720;   // generous iframe so player can heal/retreat
+    player._lastDamageSource = `${zn}'s HEAVENSPLIT`;
+      return true;
+    }
+    // MP0 — drain player MP. Block halves the drain (so caster classes
+    // aren't completely shut out).
+    const beforeMp = player.mp;
+    if (blocked) {
+      const lost = Math.max(1, Math.floor(player.mp * 0.5));
+      player.mp = Math.max(0, player.mp - lost);
+      showToast('🛡 Blocked! Half drain from MANA REND', 'epic');
+      game.damageNumbers.push({
+        taken: true, x: player.x + 14, y: player.y - 8, vy: -2,
+        text: '-' + lost + ' MP', life: 50, color: '#5a9bff', big: true,
+      });
+    } else {
+      const lost = beforeMp;
+      player.mp = 0;
+      showToast(`✸ MANA REND — MP drained!`, 'legendary');
+      if (lost > 0) {
+        game.damageNumbers.push({
+          taken: true, x: player.x + 14, y: player.y - 8, vy: -2,
+          text: '-' + lost + ' MP', life: 60, color: '#3377ff', big: true,
+        });
+      }
+    }
+    // Brief iframe so the burst hit-stop reads cleanly, but shorter than
+    // HP1 since the move is non-lethal.
+    player.invulnerable = Math.max(player.invulnerable, 360);
+    return true;
+  }
+  case 'kkQuake': {
+    // Apply only when player is on ground (jumping clears it).
+    if (player.onGround && player.hp > 0 && (player.invulnerable | 0) <= 0) {   // v0.26.1029 — honor i-frames like other executes
+      const dmg = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp) * 0.55);  // v0.26.468 — 90% → 55% (per user "avoid OHKO"): still a heavy, telegraphed, jump-avoidable hit but no longer near-lethal. true maxHP basis.
+      player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));   // v0.26.1029 — honor god mode
+      player.mp = player._god ? player.mp : 0;
+      game.damageNumbers.push({
+        taken: true, x: player.x + 14, y: player.y - 10, vy: -2,
+        text: '-' + dmg + ' EARTHQUAKE', life: 60, color: '#ff4444', size: 18,
+      });
+      showToast('💥 -' + dmg + ' HP + ALL MP drained!', 'legendary');   // v0.26.1031 — was a stale "90%"; the hit is 55% maxHP
+      player._lastDamageSource = 'King Krook\'s earthquake';
+    } else {
+      showToast('🦘 Earthquake evaded!', 'epic');
+    }
+    return true;
+  }
+  case 'kkStomp': {
+    const m = { _kColossal: !!p.col };
+    if (player.onGround && player.hp > 0 && (player.invulnerable | 0) <= 0) {   // i-frames honoured, like his other executes
+      // v0.30.345 — a colossal stomp takes HALF the bar; the ordinary one is
+      // unchanged. Same contract either way: announced, ground-only,
+      // i-frames honoured, and both floor at 1 HP — a stomp never kills
+      // outright, it sets up the kill.
+      const dmg = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp) * (m._kColossal ? 0.50 : 0.22));
+      player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));
+      // The point of the move. Routed through stun resistance the way
+      // Octobaby's shock tentacle is, so gear that claims to resist stun
+      // resists this one too instead of the stat being decorative.
+      const _mul = (typeof getStunResist === 'function') ? (1 - getStunResist()) : 1;
+      const _ms = Math.floor(3000 * Math.max(0, _mul));
+      if (_ms > 0 && !player._god) player.stunTimer = Math.max(player.stunTimer || 0, _ms);
+      game.damageNumbers.push({
+        taken: true, x: player.x + 14, y: player.y - 10, vy: -2,
+        text: '-' + dmg + ' STOMP', life: 60, color: '#e0b070', size: 18,
+      });
+      if (_ms > 0 && !player._god) showToast('💫 STUNNED for ' + (_ms / 1000).toFixed(1) + 's!', 'legendary');
+      player._lastDamageSource = 'King Krook\'s Tyrant\'s Stomp';
+    } else {
+      showToast('🦘 Stomp evaded!', 'epic');
+    }
+    return true;
+  }
+  case 'gvDrain': {
+    const m = { x: +p.x || 0, y: +p.y || 0, w: 0, h: 0 }, phase = p.ph | 0;
+    const _drainBlocked = (typeof _lxLosBlocked === 'function')
+      && _lxLosBlocked(m.x + m.w / 2, m.y + m.h / 2,
+                       player.x + player.w / 2, player.y + player.h / 2);
+    if (_drainBlocked) {
+      showToast('⛨ LINE OF SIGHT BROKEN — the drain finds nothing', 'legendary');
+      if (typeof flash === 'function') flash(0.25);
+      game.damageNumbers.push({
+        taken: true, x: player.x + 8, y: player.y - 14, vy: -2,
+        text: 'BLOCKED', life: 56, color: '#9fe8ff', size: 16,
+      });
+    }
+    if (!_drainBlocked) {
+    // Apply unavoidable drain. Clamp to 1 (don't reduce below 1).
+    // v0.29.550 — honour godmode. The drain is a CLAMP, not damage, so it
+    // sailed past every `hp -= player._god ? 0 : dmg` guard — during the
+    // prologue memory it set HP→1 and MP→1 straight through godmode, and
+    // since the prologue tick re-pins HP but (before this fix) not MP,
+    // the player spent the rest of the tutorial fight at MP 1, unable to
+    // cast — the "low MP and HP moments" reported. The telegraph and
+    // toast still play; only the clamp respects _god.
+    if (!player._god && player.hp > 1) {
+      player.hp = 1;
+      player.lastHitTime = game.time;
+      player._lastDamageSource = 'Gravitos\' Soul Drain';
+      game.damageNumbers.push({
+        taken: true, x: player.x + 14, y: player.y, vy: -2,
+        text: 'HP→1', life: 56, color: '#cc66ff', size: 18,
+      });
+    }
+    if (!player._god && player.mp > 1) {   // v0.29.550 — same godmode guard as the HP clamp above
+      player.mp = 1;
+      game.damageNumbers.push({
+        taken: true, x: player.x + 14, y: player.y - 26, vy: -2,
+        text: 'MP→1', life: 56, color: '#88aaff', size: 16,
+      });
+    }
+    }   // v0.29.830 — end of the line-of-sight gate
+    // v0.25.716 — Post-drain godmode upped 600 ms → 8000 ms.
+    // v0.25.725 — Trimmed back 8000 ms → 2500 ms per user request.
+    // 8 seconds was overkill — the player could fully recover, queue
+    // 3-4 spells, AND no-sell several follow-up patterns all in one
+    // window. 2.5 s is enough for one heal + a reposition step (the
+    // intended "collect yourself" beat) without trivialising the
+    // post-drain pressure. Other patterns landing inside the window
+    // still bounce; once the iframe drops, the boss's pattern cycle
+    // resumes its usual relentless cadence on a still-clearing
+    // player.
+    // v0.26.403 — recovery window scales DOWN by form so P3 no longer
+    // grants a free full reset (P1 2.2s → P2 1.7s → P3 1.2s). Part of the
+    // push to a true 10/10 endgame check: the drain is still survivable but
+    // you can't queue a full heal + reposition + no-sell inside the window.
+    const _gmWin = phase >= 3 ? 1200 : phase === 2 ? 1700 : 2200;
+    player.invulnerable = Math.max(player.invulnerable, _gmWin);
+    showToast('✨ INVULNERABLE — ' + (_gmWin / 1000).toFixed(1) + 's recovery', 'legendary');
+    flash(0.45);
+    addShake(10);
+    // Burst of dark sparkles around the player.
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      if (!_budgetedParticlePush({
+        x: player.x + player.w/2, y: player.y + player.h/2,
+        vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
+        life: 30, color: i % 2 ? '#cc66ff' : '#ffffff', size: 4,
+      })) break;
+    }
+    return true;
+  }
+  case 'scSting': {
+    const m = { x: +p.x || 0, w: 0 };
+    const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
+    const _dx = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
+    const _hpStillLow = (player.hp / Math.max(1, _maxHp)) < 0.25;
+    if (_dx < 350 && _hpStillLow && player.invulnerable <= 0) {
+      const dmg = Math.floor(_maxHp * 0.95);
+      player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));
+      player.invulnerable = 1500;
+      player.hitStun = 700;
+      player._lastDamageSource = 'Scorpio Stinger Execute';
+      if (game.damageNumbers) {
+        game.damageNumbers.push({
+          taken: true, x: player.x + 14, y: player.y, vy: -2,
+          text: '-' + dmg + ' STINGER', life: 70, color: '#aa44dd', size: 24, big: true,
+        });
+      }
+    } else if (typeof showToast === 'function') {
+      showToast('🦂 Stinger evaded!', 'epic');
+    }
+    return true;
+  }
+  }
+  return false;
 }
 // v0.29.x — SELF (host) positional boss hit. During a PARTNER-targeted bossAI
 // tick, direct player.hp writes are discarded on restore (they measured range
@@ -89633,7 +89871,7 @@ function updateMonsters(dt) {
             // Tap boss direct-hit broadcasts fired during this tick so the
             // HOST can be hit positionally at their REAL location.
             _bTapHits = [];
-            game._bossHitTap = (cx, cy, r, d, fr, sl, c) => { _bTapHits.push({ cx, cy, r, d, fr, sl, c }); };
+            game._bossHitTap = (cx, cy, r, d, fr, sl, c, k, p) => { _bTapHits.push({ cx, cy, r, d, fr, sl, c, k, p }); };   // v0.30.x coop-exec — k: a boss execute (see _lxBossExec)
           }
         }
       }
@@ -89696,7 +89934,7 @@ function updateMonsters(dt) {
             // finally block below, so hugging the boss while the mon tanks
             // is not free invulnerability.
             _bTapHits = [];   // v0.29.459 — taunt swap uses the same positional re-apply as co-op
-            game._bossHitTap = (cx, cy, r, d, fr, sl, c) => { _bTapHits.push({ cx, cy, r, d, fr, sl, c }); };
+            game._bossHitTap = (cx, cy, r, d, fr, sl, c, k) => { if (!k) _bTapHits.push({ cx, cy, r, d, fr, sl, c }); };   // v0.30.x coop-exec — an execute aimed at the companion was never re-applied
           }
         }
       }
@@ -89709,7 +89947,7 @@ function updateMonsters(dt) {
           game._bossHitTap = null;
           // Re-apply tapped direct hits at the host's REAL position.
           if (_bTapHits && _bTapHits.length && typeof _coopSelfBossHit === 'function') {
-            for (const _hh of _bTapHits) _coopSelfBossHit(_hh.cx, _hh.cy, _hh.r, _hh.d, _hh.fr, _hh.sl, _hh.c);
+            for (const _hh of _bTapHits) { if (_hh.k) { if (typeof _lxBossExecLocal === 'function') _lxBossExecLocal(_hh.k, _hh.p); } else _coopSelfBossHit(_hh.cx, _hh.cy, _hh.r, _hh.d, _hh.fr, _hh.sl, _hh.c); }
           }
         }
       }
@@ -94430,71 +94668,7 @@ function bossAI(m, dt, distToPlayer) {
         // yourself and Gravitos and the drain cannot reach you. The 1.5s
         // telegraph, the ring and the terror are unchanged; what changes is
         // that there is now a correct thing to do with those 1.5 seconds.
-        const _drainBlocked = (typeof _lxLosBlocked === 'function')
-          && _lxLosBlocked(m.x + m.w / 2, m.y + m.h / 2,
-                           player.x + player.w / 2, player.y + player.h / 2);
-        if (_drainBlocked) {
-          showToast('⛨ LINE OF SIGHT BROKEN — the drain finds nothing', 'legendary');
-          if (typeof flash === 'function') flash(0.25);
-          game.damageNumbers.push({
-            taken: true, x: player.x + 8, y: player.y - 14, vy: -2,
-            text: 'BLOCKED', life: 56, color: '#9fe8ff', size: 16,
-          });
-        }
-        if (!_drainBlocked) {
-        // Apply unavoidable drain. Clamp to 1 (don't reduce below 1).
-        // v0.29.550 — honour godmode. The drain is a CLAMP, not damage, so it
-        // sailed past every `hp -= player._god ? 0 : dmg` guard — during the
-        // prologue memory it set HP→1 and MP→1 straight through godmode, and
-        // since the prologue tick re-pins HP but (before this fix) not MP,
-        // the player spent the rest of the tutorial fight at MP 1, unable to
-        // cast — the "low MP and HP moments" reported. The telegraph and
-        // toast still play; only the clamp respects _god.
-        if (!player._god && player.hp > 1) {
-          player.hp = 1;
-          player.lastHitTime = game.time;
-          player._lastDamageSource = 'Gravitos\' Soul Drain';
-          game.damageNumbers.push({
-            taken: true, x: player.x + 14, y: player.y, vy: -2,
-            text: 'HP→1', life: 56, color: '#cc66ff', size: 18,
-          });
-        }
-        if (!player._god && player.mp > 1) {   // v0.29.550 — same godmode guard as the HP clamp above
-          player.mp = 1;
-          game.damageNumbers.push({
-            taken: true, x: player.x + 14, y: player.y - 26, vy: -2,
-            text: 'MP→1', life: 56, color: '#88aaff', size: 16,
-          });
-        }
-        }   // v0.29.830 — end of the line-of-sight gate
-        // v0.25.716 — Post-drain godmode upped 600 ms → 8000 ms.
-        // v0.25.725 — Trimmed back 8000 ms → 2500 ms per user request.
-        // 8 seconds was overkill — the player could fully recover, queue
-        // 3-4 spells, AND no-sell several follow-up patterns all in one
-        // window. 2.5 s is enough for one heal + a reposition step (the
-        // intended "collect yourself" beat) without trivialising the
-        // post-drain pressure. Other patterns landing inside the window
-        // still bounce; once the iframe drops, the boss's pattern cycle
-        // resumes its usual relentless cadence on a still-clearing
-        // player.
-        // v0.26.403 — recovery window scales DOWN by form so P3 no longer
-        // grants a free full reset (P1 2.2s → P2 1.7s → P3 1.2s). Part of the
-        // push to a true 10/10 endgame check: the drain is still survivable but
-        // you can't queue a full heal + reposition + no-sell inside the window.
-        const _gmWin = phase >= 3 ? 1200 : phase === 2 ? 1700 : 2200;
-        player.invulnerable = Math.max(player.invulnerable, _gmWin);
-        showToast('✨ INVULNERABLE — ' + (_gmWin / 1000).toFixed(1) + 's recovery', 'legendary');
-        flash(0.45);
-        addShake(10);
-        // Burst of dark sparkles around the player.
-        for (let i = 0; i < 3; i++) {
-          const a = (i / 3) * Math.PI * 2;
-          if (!_budgetedParticlePush({
-            x: player.x + player.w/2, y: player.y + player.h/2,
-            vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
-            life: 30, color: i % 2 ? '#cc66ff' : '#ffffff', size: 4,
-          })) break;
-        }
+        _lxBossExec('gvDrain', { x: Math.round(m.x + m.w / 2), y: Math.round(m.y + m.h / 2), ph: phase | 0 });   // v0.30.x coop-exec — line of sight from each player
       }
       if (m.patternTimer > 1900) {
         m.patternState = 'idle'; m.patternTimer = 0;
@@ -96243,20 +96417,7 @@ function bossAI(m, dt, distToPlayer) {
       if (t >= 1200 && !m._kFired) {
         m._kFired = true;
         addShake(22); flash(0.35);
-        // Apply only when player is on ground (jumping clears it).
-        if (player.onGround && player.hp > 0 && (player.invulnerable | 0) <= 0) {   // v0.26.1029 — honor i-frames like other executes
-          const dmg = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp) * 0.55);  // v0.26.468 — 90% → 55% (per user "avoid OHKO"): still a heavy, telegraphed, jump-avoidable hit but no longer near-lethal. true maxHP basis.
-          player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));   // v0.26.1029 — honor god mode
-          player.mp = player._god ? player.mp : 0;
-          game.damageNumbers.push({
-            taken: true, x: player.x + 14, y: player.y - 10, vy: -2,
-            text: '-' + dmg + ' EARTHQUAKE', life: 60, color: '#ff4444', size: 18,
-          });
-          showToast('💥 -' + dmg + ' HP + ALL MP drained!', 'legendary');   // v0.26.1031 — was a stale "90%"; the hit is 55% maxHP
-          player._lastDamageSource = 'King Krook\'s earthquake';
-        } else {
-          showToast('🦘 Earthquake evaded!', 'epic');
-        }
+        _lxBossExec('kkQuake', { x: Math.round(m.x + m.w / 2), y: Math.round(m.y + m.h / 2) });   // v0.30.x coop-exec — every grounded player
       }
       if (t > 1600) { m.patternState = 'idle'; m.patternTimer = 0; }
     } else if (m.patternState === 'stomp') {
@@ -96304,28 +96465,7 @@ function bossAI(m, dt, distToPlayer) {
             life: 32, color: '#e0b070', size: 4,
           });
         }
-        if (player.onGround && player.hp > 0 && (player.invulnerable | 0) <= 0) {   // i-frames honoured, like his other executes
-          // v0.30.345 — a colossal stomp takes HALF the bar; the ordinary one is
-          // unchanged. Same contract either way: announced, ground-only,
-          // i-frames honoured, and both floor at 1 HP — a stomp never kills
-          // outright, it sets up the kill.
-          const dmg = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp) * (m._kColossal ? 0.50 : 0.22));
-          player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));
-          // The point of the move. Routed through stun resistance the way
-          // Octobaby's shock tentacle is, so gear that claims to resist stun
-          // resists this one too instead of the stat being decorative.
-          const _mul = (typeof getStunResist === 'function') ? (1 - getStunResist()) : 1;
-          const _ms = Math.floor(3000 * Math.max(0, _mul));
-          if (_ms > 0 && !player._god) player.stunTimer = Math.max(player.stunTimer || 0, _ms);
-          game.damageNumbers.push({
-            taken: true, x: player.x + 14, y: player.y - 10, vy: -2,
-            text: '-' + dmg + ' STOMP', life: 60, color: '#e0b070', size: 18,
-          });
-          if (_ms > 0 && !player._god) showToast('💫 STUNNED for ' + (_ms / 1000).toFixed(1) + 's!', 'legendary');
-          player._lastDamageSource = 'King Krook\'s Tyrant\'s Stomp';
-        } else {
-          showToast('🦘 Stomp evaded!', 'epic');
-        }
+        _lxBossExec('kkStomp', { x: Math.round(m.x + m.w / 2), y: Math.round(m.y + m.h / 2), col: m._kColossal ? 1 : 0 });   // v0.30.x coop-exec
       }
       if (t > 1700) { m.patternState = 'idle'; m.patternTimer = 0; }
     } else if (m.patternState === 'fireballRain') {
@@ -143882,22 +144022,10 @@ function _zodiacDesperationFire(m, z) {
   }
   flash(0.7); addShake(14); addHitStop(60);
 
-  // Check player defenses (these gate the EFFECT, not the visuals)
-  if (player._god) {
-    showToast('✦ Aegis holds — desperation no-sold', 'epic');
-    return;
-  }
-  if ((player.invulnerable | 0) > 0) {
-    // iframe save — player rolled / dashed through the telegraph
-    showToast('✦ Dodged the desperation!', 'rare');
-    return;
-  }
-  const blocked = (player.blockTimer > 0);
-  if (blocked && typeof triggerBlock === 'function') triggerBlock();
-
-  if (move === 'hp1') {
-    // HP1 — drop player HP to 1 (cannot kill). Block reduces to 50% loss.
-    let beforeHp = player.hp;
+  // v0.30.x coop-exec — the effect lands on EVERY player it reaches: _lxBossExec runs it here (or, on a partner-targeted
+  // tick, on the host after the swap restores) and sends it to guests, who run the same lines on their own player.
+  const _zdLanded = _lxBossExec(move === 'hp1' ? 'zdHp1' : 'zdMp0', { x: Math.round(cx), y: Math.round(cy), n: z.name, g: z.glyph });
+  if (move === 'hp1' && _zdLanded) {
     // v0.30.371 — the boss is SPENT: 8s of no aggression so the player can recover
     m._zSpentMs = ZODIAC_SPENT_MS; m.patternState = 'idle'; m.patternTimer = 0; m._zLungeMs = 0;
     // v0.30.x status-audit — SPENT skips the sign's own handler for 8 s, and Cancer's Bubble Prison counts down and bursts
@@ -143907,56 +144035,6 @@ function _zodiacDesperationFire(m, z) {
     if (m._bigMeleeFiring) { m._bigMeleeFiring = false; m._bigMeleeT = 0; }   // a smash already winding up is dropped too
     m._bigMeleeCd = Math.max(m._bigMeleeCd | 0, ZODIAC_SPENT_MS);
     if (typeof showToast === 'function') showToast(z.glyph + ' ' + z.name.split(' ')[0] + ' is SPENT — ' + Math.round(ZODIAC_SPENT_MS / 1000) + 's to recover', 'epic');
-    if (blocked) {
-      // Lose 50% of current HP, floor at 1
-      const lost = Math.max(1, Math.floor(player.hp * 0.5));
-      player.hp = Math.max(1, player.hp - lost);
-      showToast('🛡 Blocked! Half damage from HEAVENSPLIT', 'epic');
-      game.damageNumbers.push({
-        taken: true, x: player.x + 14, y: player.y, vy: -2,
-        text: '-' + lost, life: 50, color: '#ff4466', big: true,
-      });
-    } else {
-      // Floor to 1 HP
-      const lost = Math.max(0, player.hp - 1);
-      player.hp = 1;
-      showToast(`☠ HEAVENSPLIT — left at 1 HP!`, 'legendary');
-      if (lost > 0) {
-        game.damageNumbers.push({
-          taken: true, x: player.x + 14, y: player.y, vy: -2,
-          text: '-' + lost, life: 60, color: '#ff2244', big: true,
-        });
-      }
-    }
-    player.lastHitTime = game.time;
-    player.invulnerable = 720;   // generous iframe so player can heal/retreat
-    player._lastDamageSource = `${z.name}'s HEAVENSPLIT`;
-  } else {
-    // MP0 — drain player MP. Block halves the drain (so caster classes
-    // aren't completely shut out).
-    const beforeMp = player.mp;
-    if (blocked) {
-      const lost = Math.max(1, Math.floor(player.mp * 0.5));
-      player.mp = Math.max(0, player.mp - lost);
-      showToast('🛡 Blocked! Half drain from MANA REND', 'epic');
-      game.damageNumbers.push({
-        taken: true, x: player.x + 14, y: player.y - 8, vy: -2,
-        text: '-' + lost + ' MP', life: 50, color: '#5a9bff', big: true,
-      });
-    } else {
-      const lost = beforeMp;
-      player.mp = 0;
-      showToast(`✸ MANA REND — MP drained!`, 'legendary');
-      if (lost > 0) {
-        game.damageNumbers.push({
-          taken: true, x: player.x + 14, y: player.y - 8, vy: -2,
-          text: '-' + lost + ' MP', life: 60, color: '#3377ff', big: true,
-        });
-      }
-    }
-    // Brief iframe so the burst hit-stop reads cleanly, but shorter than
-    // HP1 since the move is non-lethal.
-    player.invulnerable = Math.max(player.invulnerable, 360);
   }
 }
 
@@ -145870,7 +145948,7 @@ const ZODIAC_AI = {
     // above 25% via potion / Status Cure Remedy / regen tick.
     if (player && player.hp > 0) {
       const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
-      const _lowHp = (player.hp / Math.max(1, _maxHp)) < 0.25;
+      const _lowHp = (player.hp / Math.max(1, _maxHp)) < 0.25 || _lxCoopPeerBelow(0.25);   // v0.30.x coop-exec — a partner at low HP draws the Stinger too
       if (_lowHp && !m._scorpStingerArmed && m._scorpStingerReady !== false) {   // _scorpStingerReady gates re-arm (default-true via !==false; consumed on arm; restored only when HP climbs >35%) — fixes the inescapable execute loop
         m._scorpStingerArmed = true;
         m._scorpStingerReady = false;   // consume readiness so it can't instantly re-arm while the player is floored at <25% HP
@@ -145889,27 +145967,13 @@ const ZODIAC_AI = {
           // player who healed back to ≥25% OR ran out of range escapes.
           const _dx = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
           const _hpStillLow = (player.hp / Math.max(1, _maxHp)) < 0.25;
-          if (_dx < 350 && _hpStillLow && player.invulnerable <= 0) {
-            const dmg = Math.floor(_maxHp * 0.95);
-            player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));
-            player.invulnerable = 1500;
-            player.hitStun = 700;
-            player._lastDamageSource = 'Scorpio Stinger Execute';
-            if (game.damageNumbers) {
-              game.damageNumbers.push({
-                taken: true, x: player.x + 14, y: player.y, vy: -2,
-                text: '-' + dmg + ' STINGER', life: 70, color: '#aa44dd', size: 24, big: true,
-              });
-            }
-          } else if (typeof showToast === 'function') {
-            showToast('🦂 Stinger evaded!', 'epic');
-          }
+          _lxBossExec('scSting', { x: Math.round(m.x + m.w / 2), y: Math.round(m.y + m.h / 2) });   // v0.30.x coop-exec — each player's own HP and range
         }
       }
       // Re-arm gate: only allow another execute after player rises
       // above 35% HP again (hysteresis prevents instant re-arm when
       // the player recovers slightly then drops back below 25%).
-      if (m._scorpStingerArmed === false && (player.hp / Math.max(1, _maxHp)) > 0.35) {
+      if (m._scorpStingerArmed === false && (player.hp / Math.max(1, _maxHp)) > 0.35 && !_lxCoopPeerBelow(0.35)) {
         m._scorpStingerReady = true;
       }
       // (re-arm is now gated by `m._scorpStingerReady !== false` at the arm condition above;
