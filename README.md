@@ -19,7 +19,7 @@ The exact branch tip straight from GitHub, a few minutes fresher but slower and 
 ### ♥ Support the project
 
 Mojiworld is built in the open by one person. If you want to see it finished:
-**▶ https://www.patreon.com/c/Mojiworld**
+**▶ https://ko-fi.com/mojistudios**
 
 Reviewers can bookmark the stable preview build (whatever is currently under review):
 

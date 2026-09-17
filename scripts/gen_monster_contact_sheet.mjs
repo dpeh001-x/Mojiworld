@@ -2,7 +2,7 @@
 // monsterTypes table so it can never drift from what actually ships.
 //
 // Why it exists: the single most shareable thing this project owns is the sheer number of creatures in it, and there
-// was no one image that showed them. The sheet carries the play link and the Patreon link in its footer, so the image
+// was no one image that showed them. The sheet carries the play link and the Ko-fi link in its footer, so the image
 // advertises the game wherever it is reposted without the caption having to.
 //
 //   node scripts/gen_monster_contact_sheet.mjs            -> writes the HTML to scripts/_tmp_contact_sheet.html
@@ -111,7 +111,7 @@ writeFileSync(OUT, `<!doctype html><html><head><meta charset="utf-8">
   <footer>
     <div class="l">MOJIWORLD &mdash; The Everdawn Cycle</div>
     <div class="r">Free in your browser, no install &middot; <b>raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html</b><br>
-      Support the project &middot; <b>patreon.com/c/Mojiworld</b></div>
+      Support the project &middot; <b>ko-fi.com/mojistudios</b></div>
   </footer>
 </div></body></html>`);
 
