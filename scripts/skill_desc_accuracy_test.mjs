@@ -36,6 +36,8 @@ try {
     const claim = (id, text) => out.claims.push({ id, text, ok: SKILLS[id].desc.includes(text), desc: SKILLS[id].desc });
     // constants
     claim('marksman_ult', `${fmt(LX_PROTOCOL_LINE_ATK)}× ATK + ${LX_PROTOCOL_LINE_FLAT} each`);
+    claim('marksman_oneshot', `${fmt(LX_DEADEYE_LINE_ATK)}× ATK + ${LX_DEADEYE_LINE_FLAT} each`);
+    claim('dragoon_ult', `460px shockwave (${fmt(lit('dragoon_ult', /performAround\(460, ([\d.]+),/))}× ATK`);
     claim('shinobi_seal', `dealing ${fmt(LX_KAGE_DMG)}× ATK`);
     claim('hexmaster_grandhex', `a ${fmt(LX_GRANDHEX_BURST_MUL)}× ATK burst`);
     claim('hexmaster_grandhex', `PULSES AGAIN (${fmt(LX_GRANDHEX_BURST_MUL * 0.8)}× ATK)`);
@@ -92,7 +94,7 @@ try {
   });
   console.log('build ' + r.ver);
   const bad = r.claims.filter((c) => !c.ok);
-  check(r.claims.length >= 25 && !bad.length && !r.claims.some((c) => /NaN/.test(c.text)), `every checked description quotes the number in the running game's code (${r.claims.length} claims)`,
+  check(r.claims.length >= 27 && !bad.length && !r.claims.some((c) => /NaN/.test(c.text)), `every checked description quotes the number in the running game's code (${r.claims.length} claims)`,
     bad.map((c) => `${c.id} should say "${c.text}"`).join(' | ') || r.claims.map((c) => c.text).slice(0, 4).join(' · '));
   check(r.gx2.phantom_cut && r.gx2.archbishop_grail, 'the doubled numbers are real: both skills are G skills whose hits carry their own id', JSON.stringify(r.gx2));
   check(r.boltCost === 0 && /Free to cast\.$/.test(r.boltDesc), 'Magic Bolt is free (basic attacks are zeroed at boot) and its text says so', `cost ${r.boltCost}; ${r.boltDesc}`);
