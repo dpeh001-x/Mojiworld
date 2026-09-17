@@ -12607,7 +12607,7 @@ function _lxFrameCount(dir, key, fallback) {
 // CANVAS / CORE
 // =========================================================================
 // Bump this on every release — displays at top-right of the game
-const GAME_VERSION = 'v0.30.783';
+const GAME_VERSION = 'v0.30.784';
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -13100,6 +13100,11 @@ const LX_DRS = {
   upAvg: 13, upHoldMs: 20000, upCooldownMs: 20000,
   lastChange: 0, healthySince: 0, graceUntil: 0, active: false, _map: null,
   _announced: false,
+  // v0.30.784 — HIGH'S EMERGENCY FLOOR (see _lxDrsEmergencyTick): sustained average frame past emergAvg for
+  // emergHoldMs, with the FX tiers already spent, drops High to native scale for the rest of the map.
+  emergAvg: 45, emergHoldMs: 2500, emergStepMs: 5000, emergSettleMs: 1000, emergProbeMs: 3500, emergGain: 0.85,
+  emerg: false, emergMap: null, emergSince: 0, emergGraceUntil: 0, emergSeenMap: null, _emergAnnounced: false,
+  emergEma: 16.7, emergProbe: null, emergUseless: false,
 };
 // v0.30.285 perf — 'lx_drs' is a console-set-then-reload debug switch (nothing
 // in the file ever writes the key), yet the old read hit synchronous,
@@ -13117,6 +13122,64 @@ function _lxDrsEnabled() {
   const q = (typeof LX_GFX !== 'undefined' && LX_GFX && LX_GFX.quality) || 'high';
   return q === 'medium' || q === 'low';
 }
+// v0.30.784 — HIGH'S EMERGENCY FLOOR (per user: "reduce the lag on gravitos fight, players are experiencing
+// extreme lag"). v0.30.636 made High keep full resolution under ANY load (per user: "keep images as HD as
+// possible"), and that stands for every framerate a player can play at. It does not stand for a slideshow:
+// measured in the Singularity at 1080p fullscreen on a software rasteriser (scripts/perf_gravitos_ablate.mjs),
+// High draws a 1851x1080 backing store at 8-12 fps; native scale (1.0) is 28 fps and 0.75 is 58 fps, while
+// every effect the FX tiers can cull (particles, hazards, the boss sprite, HUD writes) moves it by under 15%.
+// So on High, and only on High (Medium/Low keep their governor), once the FX tiers are already spent AND the
+// smoothed frame has stayed past emergAvg (45 ms, ~22 fps - above drs_test's 30 ms synthetic load, which
+// keeps HD) for emergHoldMs, the scale drops straight to native, then a quarter at a time to 0.75 if even
+// that cannot hold. It is not given back mid-map (a machine that just ran at 20 fps would flap); the next
+// map starts at full HD again. Mobile, the manual lx_render_scale override and lx_drs='off' are untouched.
+// EVERY STEP PROVES ITSELF. On a machine that is CPU-bound rather than pixel-bound (measured: GPU on, CPU
+// throttled 4x) the same drop to 0.75 bought nothing, so it would only have cost sharpness. After each step
+// the real frame time is sampled for emergProbeMs (past a settle window for the re-bake); a step that did
+// not make frames at least 15% faster is taken back, and this map tries no further steps.
+function _lxDrsEmergencyTick(time) {
+  try {
+    if (_LX_RSCALE != null || _LX_DRS_OFF) return;
+    if (typeof _IS_MOBILE_AT_LOAD !== 'undefined' && _IS_MOBILE_AT_LOAD) return;
+    const rdt = Math.min(1000, (typeof _lxRealDtMs === 'number' && _lxRealDtMs > 0) ? _lxRealDtMs : 16.7);
+    LX_DRS.emergEma += (rdt - LX_DRS.emergEma) * 0.05;   // UNclamped - LX_PERF.avgFrame saturates at 80 ms
+    const map = (typeof game !== 'undefined' && game) ? game.currentMap : null;
+    if (map !== LX_DRS.emergSeenMap) {   // every map: a load hitch is not overload, and HD comes back
+      LX_DRS.emergSeenMap = map; LX_DRS.emergGraceUntil = time + 5000; LX_DRS.emergSince = 0;
+      LX_DRS.emergProbe = null; LX_DRS.emergUseless = false;
+      if (LX_DRS.emerg) { LX_DRS.emerg = false; LX_DRS.emergMap = null; _lxApplyRenderScale(_lxTargetDpr()); LX_DRS.lastChange = time; }
+      return;
+    }
+    const pr = LX_DRS.emergProbe;
+    if (pr) {
+      if (time >= pr.at + LX_DRS.emergSettleMs) { pr.sum += rdt; pr.n++; }
+      if (time < pr.at + LX_DRS.emergProbeMs) return;
+      LX_DRS.emergProbe = null;
+      if (!(pr.n > 0) || (pr.sum / pr.n) > pr.before * LX_DRS.emergGain) {   // not pixel-bound: give the pixels back
+        _lxApplyRenderScale(pr.from); LX_DRS.lastChange = time; LX_DRS.emergUseless = true;
+        if (pr.from >= _lxTargetDpr() - 0.01) { LX_DRS.emerg = false; LX_DRS.emergMap = null; }
+      }
+      return;
+    }
+    if (LX_DRS.emergUseless || time < LX_DRS.emergGraceUntil) return;
+    const severe = LX_PERF.veryLowFx && LX_PERF.avgFrame > LX_DRS.emergAvg;
+    if (!severe) { LX_DRS.emergSince = 0; return; }
+    if (!LX_DRS.emergSince) { LX_DRS.emergSince = time; return; }
+    if (time - LX_DRS.emergSince < LX_DRS.emergHoldMs) return;
+    const cur = _LX_DPR;
+    let next = null;
+    if (!LX_DRS.emerg && cur > 1.01) next = 1.0;
+    else if (LX_DRS.emerg && cur > LX_DRS.floorDesktop + 0.01 && time - LX_DRS.lastChange > LX_DRS.emergStepMs) next = Math.max(LX_DRS.floorDesktop, Math.round((cur - 0.25) * 4) / 4);
+    if (next == null) return;
+    LX_DRS.emergProbe = { from: cur, before: LX_DRS.emergEma, at: time, sum: 0, n: 0 };
+    _lxApplyRenderScale(next);
+    LX_DRS.emerg = true; LX_DRS.emergMap = map; LX_DRS.lastChange = time; LX_DRS.emergSince = 0;
+    if (!LX_DRS._emergAnnounced && typeof showToast === 'function') {
+      LX_DRS._emergAnnounced = true;
+      showToast('⚡ Resolution eased for this area to keep the fight playable — full HD returns on the next map', 'common');
+    }
+  } catch (e) {}
+}
 function _lxDrsFloorNow() {
   if (typeof _IS_MOBILE_AT_LOAD !== 'undefined' && _IS_MOBILE_AT_LOAD) return LX_DRS.floor;
   return (typeof LX_GFX !== 'undefined' && LX_GFX && LX_GFX.quality === 'low') ? LX_DRS.floorDesktop : 1.0;   // v0.30.636 - Medium stops at native
@@ -13125,8 +13188,10 @@ function _lxDrsTick(frame, time) {
   if (!_lxDrsEnabled()) {
     // v0.30.636 - switching to High (or turning the governor off) mid-reduction restores full scale at once.
     if (LX_DRS.active) { LX_DRS.active = false; LX_DRS.healthySince = 0; try { _lxApplyRenderScale(_lxTargetDpr()); } catch (e) {} }
+    _lxDrsEmergencyTick(time);   // v0.30.784 — High only: a floor for a fight the machine cannot hold at all
     return;
   }
+  if (LX_DRS.emerg) { LX_DRS.emerg = false; LX_DRS.emergMap = null; }   // a preset change hands control to the governor
   const ceil = _lxTargetDpr();
   // v0.30.278 — the effective floor. Desktop may go BELOW native scale as a
   // true last resort (the down-step still requires veryLowFx + sustained
@@ -93426,8 +93491,27 @@ function bossAI(m, dt, distToPlayer) {
         const safeW = 102, safeH = 60;   // v0.30.580 — was 90 (per user: "slightly larger")
         const groundY = 480;
         const midPlatY = 260;
+        // v0.30.784 — EVERY RAIN BOX IS A SHELTER THE PLAYER CAN SEE AND REACH (per user: "ensure that
+        // there are safe portals when gravitos does his OHKO my tester played it and there seemed to have
+        // no safe portals"). A box lives SAFE_LIFE (1.4 s) and its x was rolled across the whole 2200 px
+        // arena while the screen shows 960 of it. Measured (scripts/gravitos_rain_reach_test.mjs): 21 of 30
+        // boxes appeared OFF-SCREEN with nothing pointing at them, and 25 of 30 sat past what a warrior runs
+        // in 1.4 s (worst 1989 px away) - the player saw the veil and the countdown and no shelter at all.
+        // The box centre is now rolled inside a window around the player that is (a) on screen and (b) no
+        // wider than the player's OWN speed covers in the box's life, less a reaction beat - with a step's
+        // distance from where they stand, so the rain still makes them move. A mid-band box needs the
+        // centre platform inside that window; when the platform is out of reach this box takes the ground.
+        const _pcx = player.x + player.w / 2;
+        const _spd = (typeof getSpeed === 'function') ? Math.max(1, getSpeed()) : 3.5;
+        const _reach = Math.max(110, Math.min(360, _spd * (SAFE_LIFE - 18) * 0.85));
+        const _camL = (game.camera && game.camera.x) || 0;
+        let _lo = Math.max(40 + safeW / 2, _camL + 16 + safeW / 2, _pcx - _reach);
+        let _hi = Math.min(ww - 40 - safeW / 2, _camL + W - 16 - safeW / 2, _pcx + _reach);
+        if (_hi < _lo) { _lo = _hi = Math.max(40 + safeW / 2, Math.min(ww - 40 - safeW / 2, _pcx)); }
+        const _PLAT_L = 908 + safeW / 2, _PLAT_R = 1292 - safeW / 2;   // centre-platform span for a box centre
         // Alternating bands — see _rainBand0 above.
-        const onGround = ((m._rainIdx + m._rainBand0) % 2) === 0;
+        let onGround = ((m._rainIdx + m._rainBand0) % 2) === 0;
+        if (!onGround && (_hi < _PLAT_L || _lo > _PLAT_R)) onGround = true;   // the climb is out of reach: this box takes the ground
         const _y = (onGround ? groundY : midPlatY) - safeH;
         // v0.30.x — and a mid-band box has to land ON the mid platform. x was a flat
         // random across the whole 2200 px for BOTH bands, but the centre platform only
@@ -93437,9 +93521,11 @@ function bossAI(m, dt, distToPlayer) {
         // usually on the ground; with the alternation above it would be guaranteed
         // twice a rain, so the two changes belong together. The ground band keeps the
         // full arena-wide roll.
-        const _x = onGround
-          ? Math.max(40, Math.min(ww - safeW - 40, Math.random() * (ww - safeW)))
-          : (908 + Math.random() * Math.max(1, 1292 - 908 - safeW));
+        const _step = Math.min(90, (_hi - _lo) / 3);
+        let _bcx = _lo;
+        for (let _t = 0; _t < 6; _t++) { _bcx = _lo + Math.random() * Math.max(1, _hi - _lo); if (Math.abs(_bcx - _pcx) >= _step) break; }
+        if (!onGround) _bcx = Math.max(_PLAT_L, Math.min(_PLAT_R, _bcx));
+        const _x = _bcx - safeW / 2;
         const safeRect = _lxSafeZoneOffPad({ x: _x, y: _y, w: safeW, h: safeH }, ww);
         // Reuse the existing gravitos_singularity hazard type — the
         // render branch + resolve path already handle the safe-zone
@@ -121300,8 +121386,14 @@ function _lxGravBackdropDraw() {
     const hs = r * 9.0;
     ctx.drawImage(_lxGfBake('gf_halo' + phase, 256, _lxGfPaintHalo(phase)), bx - hs / 2, by - hs / 2, hs, hs);
     // 1c. the light pooling on the floor beneath the hole
-    ctx.globalAlpha = 0.22 + beat * 0.08;
-    ctx.drawImage(_lxGfBake('gf_halo' + phase, 256, _lxGfPaintHalo(phase)), bx - r * 4.5, 470 - r * 1.1, r * 9, r * 2.2);
+    // v0.30.784 perf — skipped under veryLowFx. At fit scale this backdrop is four additive/alpha blits of
+    // 690-1270 device px each, every frame; removing the whole backdrop bought +41% fps on a weak CPU and
+    // +74% on a software rasteriser (scripts/perf_gravitos_ablate.mjs). The floor pool and the disc's bloom copy
+    // are the two that only add glow; the halo, the disc itself and the motes stay.
+    if (!veryLow) {
+      ctx.globalAlpha = 0.22 + beat * 0.08;
+      ctx.drawImage(_lxGfBake('gf_halo' + phase, 256, _lxGfPaintHalo(phase)), bx - r * 4.5, 470 - r * 1.1, r * 9, r * 2.2);
+    }
     // 3. the accretion disc: the painted loop when it has decoded, else the procedural bake turning
     // the art's black core is ~19% of its canvas and its dense lens glow ~55%: at 7.4r the glow covers the painted sphere (r) and the core reads as the hole
     const ds = r * 7.4;
@@ -121314,10 +121406,12 @@ function _lxGravBackdropDraw() {
       ctx.drawImage(tinted, -ds / 2, -ds / 2, ds, ds);
       // bloom: the same art once more, additive, a little larger and faint, so its light bleeds into
       // the stone and the sky instead of stopping at the sprite's edge
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = (phase === 3 ? 0.30 : 0.22) + beat * 0.08;
-      const bs = ds * 1.16;
-      ctx.drawImage(tinted, -bs / 2, -bs / 2, bs, bs);
+      if (!veryLow) {   // v0.30.784 perf — the bloom copy is glow only; see the floor pool above
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = (phase === 3 ? 0.30 : 0.22) + beat * 0.08;
+        const bs = ds * 1.16;
+        ctx.drawImage(tinted, -bs / 2, -bs / 2, bs, bs);
+      }
     } else {
       ctx.globalAlpha = 1;
       ctx.rotate(t * spin);
