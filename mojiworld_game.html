@@ -12658,7 +12658,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.822';
+const GAME_VERSION = 'v0.30.823';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52129,6 +52129,8 @@ function mpConnect(url, name, room) {
   try {
     ws = new WebSocket(url);
     net.ws = ws;
+    _lxMpBudgetWrap(ws);   // v0.30.823 - my copy of the relay's 40 / s bucket
+    net._away = false; net._hitQ = [];
   } catch (e) {
     _mpStatus('Bad URL: ' + e.message, '#ff8888');
     return;
@@ -52218,7 +52220,8 @@ function mpConnect(url, name, room) {
   ws.onmessage = (ev) => {
     if (net.ws !== ws) return;   // v0.27.1 — ignore frames from a superseded socket
     let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
-    _mpHandle(msg);
+    const _po = game._fxOrigin; game._fxOrigin = 'net';   // v0.30.823 - fx made while handling a frame are never re-sent
+    try { _mpHandle(msg); } finally { game._fxOrigin = _po || 'me'; }
   };
   ws.onclose = () => {
     if (net.ws !== ws) return;   // v0.27.1 — a stale onclose must not clobber the live connection
@@ -52355,7 +52358,8 @@ function _coopReelectTick() {
 }
 function _coopRecomputeHost() {
   if (!_coopActive() || net.myId == null) { net.isHost = true; net.hostId = net.myId; return; }
-  let lowest = +net.myId, hostId = +net.myId;
+  const _useAway = _coopAllCap(), _selfAway = _useAway && !!net._away;   // v0.30.823 - see part C above
+  let lowest = _selfAway ? Infinity : +net.myId, hostId = _selfAway ? null : +net.myId;
   // v0.29.471 — a peer silent longer than this cannot be host. Matches the
   // cutoff _coopHostMap already applies before it stops following a host, so
   // "we stopped following you" and "you are no longer host" now agree instead
@@ -52371,7 +52375,17 @@ function _coopRecomputeHost() {
     const _p = net.peers[id];
     const _last = _p && +_p._last;
     if (Number.isFinite(_last) && (_now - _last) > _LX_HOST_STALE_MS) continue;   // ghost — skip
+    if (_useAway && _p && _p._away) continue;                                      // v0.30.823 - said it was away
     lowest = n; hostId = n;
+  }
+  if (hostId == null) {   // v0.30.823 - everyone is away: the old rule (lowest live id) keeps the world owned
+    lowest = +net.myId; hostId = +net.myId;
+    for (const id in net.peers) {
+      const n = +id, _p = net.peers[id], _last = _p && +_p._last;
+      if (!Number.isFinite(n) || n >= lowest) continue;
+      if (Number.isFinite(_last) && (_now - _last) > _LX_HOST_STALE_MS) continue;
+      lowest = n; hostId = n;
+    }
   }
   net.hostId = hostId;
   const _wasHost = !!net.isHost;
@@ -52405,6 +52419,275 @@ function _coopFindByUid(uid) {
   for (let i = 0; i < arr.length; i++) if (arr[i] && arr[i].uid === uid) return arr[i];
   return null;
 }
+// =========================================================================
+// v0.30.823 - CO-OP FIDELITY (per user: "each player sees each other in real time doing the exact skills /
+// movement ... for boss fights sync as much as possible"). Measured first (scripts/relay_budget_probe.mjs,
+// scripts/coop_fidelity_probe.mjs), and two things were wrong that no amount of interpolation could hide:
+//
+//  1. THE RELAY WAS THROWING THE BOSS FIGHT AWAY. It allows each socket 40 messages a second (burst 60) and drops
+//     the rest silently. A 60 fps host sent state 14/s + mon 20/s + proj 20/s + haz 20/s = 74/s, so in a boss fight
+//     31% of its frames never arrived - measured on the real relay: 41% of kills, 26% of boss hits, 63% of hazard
+//     frames, 29% of state. Now the host's projectile and hazard lists RIDE THE MONSTER FRAME (one message per 50 ms),
+//     a guest's hits are BATCHED per 50 ms instead of one message per hit, and every socket carries its own copy of
+//     the relay's bucket so that when the budget is tight WE choose what to skip (a position frame, newest wins)
+//     and never the relay (a kill, a boss hit, a drop).
+//  2. NOBODY SAW ANYBODY'S SKILLS. Presence carried position and a three-value anim; no cast, projectile or effect
+//     was ever sent. See part B (_coopFx*).
+//
+// New frames are only used between builds that advertise them (cap, on the 2.5 s look-sync ping and at once on a
+// roster change): with an older build on the map everything falls back to the old separate frames.
+const LX_COOP_CAP = 2;            // 2 = bundled host frames, batched hits, fx frames, away handoff
+const LX_MP_RATE = 36;            // my own token bucket, kept inside the relay's 40 / s ...
+const LX_MP_BURST = 50;           // ... and its burst of 60
+const LX_MP_RESERVE = 10;         // tokens a droppable frame may never spend: they belong to kills, hits and drops
+const COOP_ACT_TICK_MS = 50;      // a guest's action frame (hits + fx), at most this often
+const COOP_HIT_CAP = 48;          // hits per action frame
+function _coopPeerCap(id) { const p = (id != null && net.peers) ? net.peers[id] : null; return p ? (p.cap | 0) : 0; }
+// Every partner on MY map reads the new frames. (A partner on another map ignores monster frames anyway.)
+function _coopBundleOn() {
+  if (!_coopActive()) return false;
+  for (const id in net.peers) { const p = net.peers[id]; if (p && p.map === game.currentMap && (p.cap | 0) < LX_COOP_CAP) return false; }
+  return true;
+}
+function _coopAllCap() {
+  for (const id in net.peers) { const p = net.peers[id]; if (p && (p.cap | 0) < LX_COOP_CAP) return false; }
+  return true;
+}
+// The socket's send, behind my copy of the relay's bucket. Droppable = newest-wins frames; everything else always goes.
+function _lxMpBudgetWrap(ws) {
+  try {
+    const raw = ws.send.bind(ws); let tokens = LX_MP_BURST, last = performance.now();
+    net._budget = { sent: 0, skipped: 0 };
+    ws.send = function (s) {
+      const now = performance.now();
+      tokens = Math.min(LX_MP_BURST, tokens + (now - last) / 1000 * LX_MP_RATE); last = now;
+      const droppable = typeof s === 'string' && (s.startsWith('{"t":"state"') || s.startsWith('{"t":"mon"')
+        || s.startsWith('{"t":"proj"') || s.startsWith('{"t":"haz"') || s.startsWith('{"t":"ping","fm"'));
+      if (droppable && tokens < LX_MP_RESERVE) { net._budget.skipped++; return; }
+      tokens = Math.max(0, tokens - 1); net._budget.sent++;
+      return raw(s);
+    };
+  } catch (e) {}
+}
+// GUEST: hits queue here and leave once per action frame (with my fx, see part B).
+function _coopQueueHit(h) {
+  const q = net._hitQ || (net._hitQ = []);
+  q.push(h);
+  if (q.length >= COOP_HIT_CAP) { _coopActionFlush(true); return; }
+  // A hit must never wait on the frame loop (a minion or a burn can land one while I sit in a menu): the first hit
+  // of a window books the flush itself, and everything that lands inside the window leaves with it.
+  if (!net._hitTimer) net._hitTimer = setTimeout(() => { net._hitTimer = 0; try { _coopActionFlush(true); } catch (e) {} }, COOP_ACT_TICK_MS);
+}
+function _coopActionFlush(force) {
+  if (!_coopActive() || !net.ws || net.ws.readyState !== 1) { if (net._hitQ) net._hitQ.length = 0; return; }
+  const now = performance.now();
+  if (!force && now - (net._actAt || 0) < COOP_ACT_TICK_MS) return;
+  const hits = net._hitQ && net._hitQ.length ? net._hitQ.splice(0, COOP_HIT_CAP) : null;
+  // the HOST's fx ride its monster frame; everyone else's ride this one
+  const fxw = (net.isHost && _coopBundleOn()) ? null : _coopFxDrain();
+  const po = (net.isHost && _coopBundleOn()) ? null : _coopPoseDelta();
+  if (!hits && !fxw && !po) return;
+  net._actAt = now;
+  try {
+    if (hits || _coopPeerCap(net.hostId) >= LX_COOP_CAP) {
+      const f = { t: 'dmg', fm: game.currentMap };
+      if (hits) f.l = hits;
+      if (fxw) { if (fxw.fx) f.fx = fxw.fx; if (fxw.pj) f.pj = fxw.pj; }
+      if (po) f.po = po;
+      net.ws.send(JSON.stringify(f));
+    } else if (fxw || po) {
+      // an older host would read a list-only 'dmg' frame as a hit on nothing: fx go on the verbatim 'ping' carrier
+      net.ws.send(JSON.stringify({ t: 'ping', fm: game.currentMap, fx: fxw ? fxw.fx : undefined, pj: fxw ? fxw.pj : undefined, po: po || undefined }));
+    }
+  } catch (e) {}
+}
+// ---- part B: SEEING EACH OTHER'S SKILLS -------------------------------------------------------------------
+// Every skill's look is made of two things this file already keeps in arrays: smooth fx (slash, stab, beam, bolt,
+// explosion, impact, sprite burst, kanji ...) and the player's projectiles. Both are replicated as what they are -
+// pictures. Nothing here can deal damage, heal, buff or spawn: a copy is a smooth fx (cosmetic by construction) or
+// a projectile owned by 'peer', which the projectile loop moves and draws but only ever "collides" to vanish.
+//   - each smooth fx is stamped with WHO made it at birth (game._fxOrigin): 'me' (my input, my skills, my minions,
+//     my projectiles and hazards), 'world' (monster and boss AI), 'local' (enemy shots hitting me - every client
+//     makes its own from the mirrored projectile), 'net' (made while handling a network frame - never re-sent);
+//   - I send 'me'; the HOST also sends 'world', because a guest's mirrors run no AI and would show a silent boss;
+//   - an fx that rides the caster (follow === player) rides the caster's avatar on the other screens.
+const COOP_FX_CAP = 24;           // smooth fx per frame
+const COOP_PJ_CAP = 32;           // projectiles per frame
+const COOP_FX_TYPES = { slash: 1, stab: 1, explosion: 1, beam: 1, bolt: 1, impact: 1, spriteBurst: 1, kanji: 1, rainbowStair: 1 };
+const _COOP_STR_OK = /^[\w #.,()%:+\-\/]{0,40}$/;
+function _coopWireObj(o) {
+  const w = {}; let n = 0;
+  for (const k in o) {
+    if (k.charCodeAt(0) === 95) continue;                      // _private: bookkeeping, caches, entity refs
+    const v = o[k], t = typeof v;
+    if (t === 'number') { if (Number.isFinite(v)) w[k] = Math.round(v * 100) / 100; }
+    else if (t === 'string') { if (v.length <= 40) w[k] = v; }
+    else if (t === 'boolean') { if (v) w[k] = 1; }
+    if (++n >= 48) break;
+  }
+  return w;
+}
+function _coopCleanObj(e) {
+  if (!e || typeof e !== 'object') return null;
+  const c = {}; let n = 0;
+  for (const k in e) {
+    if (!/^[A-Za-z][A-Za-z0-9]{0,23}$/.test(k)) continue;
+    const v = e[k], t = typeof v;
+    if (t === 'number') { if (Number.isFinite(v) && Math.abs(v) < 1e7) c[k] = v; }
+    else if (t === 'string') { if (_COOP_STR_OK.test(v)) c[k] = v; }
+    if (++n >= 48) break;
+  }
+  return (Number.isFinite(c.x) && Number.isFinite(c.y)) ? c : null;
+}
+// Collect what is new since the last frame. Called by whoever is about to send (the host's monster frame, or an
+// action frame). Returns null when there is nothing to say.
+function _coopFxDrain() {
+  let fx = null, pj = null;
+  const sf = game.smoothFx || [];
+  for (let i = 0; i < sf.length; i++) {
+    const f = sf[i];
+    if (!f || f._fxSeen) continue;
+    f._fxSeen = 1;
+    if (f._o !== 'me' && !(f._o === 'world' && net.isHost)) continue;
+    if (!COOP_FX_TYPES[f.type]) continue;
+    const w = _coopWireObj(f);
+    if (f.follow && typeof player !== 'undefined' && f.follow === player) w.fw = 1;
+    (fx = fx || []).push(w);
+    if (fx.length >= COOP_FX_CAP) break;
+  }
+  const pr = game.projectiles || [];
+  for (let i = 0; i < pr.length; i++) {
+    const p = pr[i];
+    if (!p || p._fxSeen) continue;
+    p._fxSeen = 1;
+    if (p.owner !== 'player' || (p.life | 0) <= 0) continue;
+    const w = _coopWireObj(p);
+    delete w.owner; delete w.damage;
+    (pj = pj || []).push(w);
+    if (pj.length >= COOP_PJ_CAP) break;
+  }
+  return (fx || pj) ? { fx, pj } : null;
+}
+// RECEIVE: pictures only, from a partner I can see, on my map, at a bounded rate.
+function _coopApplyFx(msg) {
+  if (!msg || (!msg.fx && !msg.pj && !msg.po) || msg.id === net.myId) return;
+  const peer = net.peers && net.peers[msg.id];
+  if (!peer) return;
+  if ((msg.fm || msg.map) !== game.currentMap) return;
+  if (!_mpRateOk(msg.id, 'fx', 30)) return;
+  if (msg.po) _coopApplyPose(peer, msg.po);
+  if (Array.isArray(msg.fx)) {
+    if (!game.smoothFx) game.smoothFx = [];
+    let follow = null;
+    for (const e of msg.fx.slice(0, COOP_FX_CAP)) {
+      const c = _coopCleanObj(e);
+      if (!c || !COOP_FX_TYPES[c.type]) continue;
+      c.life = Math.max(1, Math.min(600, +c.life || 1)); c.maxLife = Math.max(c.life, Math.min(600, +c.maxLife || c.life));
+      if (c.fw) {   // rides the caster: follow their avatar where I draw it
+        follow = follow || { w: 28, h: 44, get x() { return (peer._rx != null) ? peer._rx : (peer.x || 0); }, get y() { return (peer._ry != null) ? peer._ry : (peer.y || 0); } };
+        c.follow = follow;
+      }
+      delete c.fw; c._o = 'net'; c._fxSeen = 1; c._peerFx = 1;
+      game.smoothFx.push(c);
+    }
+  }
+  if (Array.isArray(msg.pj)) {
+    for (const e of msg.pj.slice(0, COOP_PJ_CAP)) {
+      const c = _coopCleanObj(e);
+      if (!c) continue;
+      c.life = Math.max(1, Math.min(900, +c.life || 1));
+      c.vx = +c.vx || 0; c.vy = +c.vy || 0; c.w = Math.max(2, Math.min(400, +c.w || 12)); c.h = Math.max(2, Math.min(400, +c.h || 12));
+      c.owner = 'peer'; c.damage = 0; c._peerFx = 1; c._fxSeen = 1;
+      game.projectiles.push(c);
+    }
+  }
+}
+// SKILL POSES. The hero renderer strikes a pose for a skill while a game-time window is open on the player
+// (_warriorBashUntil, _levitateUntil, _ninjaPoseUntil ...). game.time is each client's own frame counter, so a pose
+// travels as [frames left, frames since it began] and is rebuilt on the receiver's clock; _mpDrawPeerAvatar swaps the
+// windows in while it draws that partner.
+const COOP_POSES = ['bigStab', 'chantRaise', 'impalePose', 'levitate', 'mageBigSwing', 'ninjaCrouch', 'ninjaPose', 'rogueDashPose', 'rogueThrowSomersault', 'warriorBash', 'warriorGroundSmash'];
+function _coopPoseDelta() {
+  const now = game.time | 0; let sig = '';
+  for (let i = 0; i < COOP_POSES.length; i++) { const u = player['_' + COOP_POSES[i] + 'Until'] | 0; if (u > now) sig += i + ':' + u + ','; }
+  if (sig === (net._poseSig || '')) return null;
+  net._poseSig = sig;
+  const out = {};
+  for (const k of COOP_POSES) { const u = player['_' + k + 'Until'] | 0; if (u > now) { const a = player['_' + k + 'At'] | 0; out[k] = [Math.min(600, u - now), a ? Math.max(0, Math.min(600, now - a)) : 0]; } }
+  return out;   // {} = every pose has ended
+}
+function _coopApplyPose(peer, po) {
+  if (!peer || !po || typeof po !== 'object') return;
+  const now = game.time | 0, pose = {};
+  for (const k of COOP_POSES) { const e = po[k]; if (Array.isArray(e) && Number.isFinite(+e[0]) && +e[0] > 0) pose[k] = { u: now + Math.min(600, +e[0] | 0), a: now - Math.max(0, Math.min(600, +e[1] | 0)) }; }
+  peer._pose = pose;
+}
+const _coopPoseKeep = [];
+function _coopPoseSwapIn(peer) {
+  const now = game.time | 0, pose = (peer && peer._pose) || null;
+  _coopPoseKeep.length = 0;
+  for (const k of COOP_POSES) {
+    const ku = '_' + k + 'Until', ka = '_' + k + 'At'; _coopPoseKeep.push(player[ku], player[ka]);
+    const e = pose && pose[k]; const live = !!(e && e.u > now);
+    player[ku] = live ? e.u : 0; player[ka] = live ? e.a : 0;
+  }
+}
+function _coopPoseSwapOut() {
+  if (_coopPoseKeep.length !== COOP_POSES.length * 2) return;
+  for (let i = 0; i < COOP_POSES.length; i++) { player['_' + COOP_POSES[i] + 'Until'] = _coopPoseKeep[i * 2]; player['_' + COOP_POSES[i] + 'At'] = _coopPoseKeep[i * 2 + 1]; }
+  _coopPoseKeep.length = 0;
+}
+// ---- part C: A HOST THAT IS AWAY HANDS THE WORLD OVER ------------------------------------------------------
+// (per user: "If the host pauses, ensure that the other players in the host party can continue playing (another
+// player assumes the role of the host or other alternative solutions)".) What already held: a paused host keeps
+// simulating the shared world (_lxCoopWorldStep), a hidden desktop tab keeps it alive on a worker pump, and a host
+// silent for 5 s loses the election. What did not:
+//   - a phone that backgrounds the tab FREEZES, so the party stared at frozen monsters for the full 5 s. The host now
+//     says "away" as it goes (visibilitychange / pagehide / freeze) and the next player takes the world AT ONCE;
+//   - a desktop host hidden for 10 s, or paused in a menu for 20 s with no boss alive, is AFK: it hands the world to
+//     a player who is actually playing (full-rate simulation, aggro on people who are there) and takes it back on
+//     return. Mid-boss a PAUSED host keeps the world - a handoff restarts the boss's current pattern, and the
+//     live-world step already keeps that fight running;
+//   - while paused the host is a statue nothing can hurt, yet monsters and bosses still picked it as a target:
+//     with a partner alive on the map they now ignore a paused host (see _hostIdle in updateMonsters);
+//   - a paused host never relayed loot (drops waited for the unpause): the live-world step now sends them.
+// Only between builds that all understand 'aw' (cap 2); with an older build in the room the old election stands.
+const LX_AWAY_HIDDEN_MS = 10000;
+const LX_AWAY_PAUSED_MS = 20000;
+function _coopBossAlive() {
+  const arr = game.monsters || [];
+  for (let i = 0; i < arr.length; i++) { const m = arr[i]; if (m && m.isBoss && m.currentHp > 0) return true; }
+  return false;
+}
+function _coopSetAway(away) {
+  away = !!away;
+  if (away === !!net._away) return;
+  net._away = away;
+  try { if (net.ws && net.ws.readyState === 1) net.ws.send(JSON.stringify({ t: 'ping', aw: away ? 1 : 0, cap: LX_COOP_CAP })); } catch (e) {}
+  const was = net.isHost;
+  _coopRecomputeHost();
+  if (was !== net.isHost && typeof _mpRenderPlayerList === 'function') _mpRenderPlayerList();
+}
+function _coopAwayTick() {
+  if (!_coopActive()) return;
+  const now = performance.now();
+  const hidden = (typeof document !== 'undefined' && !!document.hidden);
+  if (hidden) { if (!net._hiddenAt) net._hiddenAt = now; } else net._hiddenAt = 0;
+  if (game.paused && !hidden) { if (!net._pausedAt) net._pausedAt = now; } else net._pausedAt = 0;
+  const mobile = (typeof _IS_MOBILE_AT_LOAD !== 'undefined' && !!_IS_MOBILE_AT_LOAD);
+  _coopSetAway((hidden && (mobile || now - net._hiddenAt > LX_AWAY_HIDDEN_MS))
+    || (!!net._pausedAt && now - net._pausedAt > LX_AWAY_PAUSED_MS && !_coopBossAlive()));
+}
+try {
+  const _lxGoing = () => { try { if (_coopActive()) { net._hiddenAt = net._hiddenAt || performance.now(); _coopSetAway(true); } } catch (e) {} };
+  document.addEventListener('visibilitychange', () => { try {
+    if (!_coopActive()) return;
+    if (document.hidden && typeof _IS_MOBILE_AT_LOAD !== 'undefined' && _IS_MOBILE_AT_LOAD) _lxGoing(); else _coopAwayTick();
+  } catch (e) {} });
+  window.addEventListener('pagehide', _lxGoing);
+  document.addEventListener('freeze', _lxGoing);
+  document.addEventListener('resume', () => { try { _coopAwayTick(); } catch (e) {} });
+} catch (e) {}
 // HOST: broadcast the authoritative monster list (throttled). Called each frame.
 function _coopTickMonsters() {
   if (!_coopActive() || !net.isHost) return;
@@ -52461,7 +52744,13 @@ function _coopTickMonsters() {
     if (m._cancerShellClosed) { _e.cs = 1; if (m._shellFace) _e.sf = m._shellFace === -1 ? -1 : 1; }
     list.push(_e);
   }
-  try { net.ws.send(JSON.stringify({ t: 'mon', map: game.currentMap, list })); } catch (e) {}
+  const _frame = { t: 'mon', map: game.currentMap, list };
+  if (_coopBundleOn()) {   // v0.30.823 - ONE message per tick: projectiles, hazards and my fx ride the monster frame
+    _frame.pl = _coopProjList(); _frame.hl = _coopHazList();
+    const _fxw = _coopFxDrain(); if (_fxw) { if (_fxw.fx) _frame.fx = _fxw.fx; if (_fxw.pj) _frame.pj = _fxw.pj; }
+    const _po = _coopPoseDelta(); if (_po) _frame.po = _po;
+  }
+  try { net.ws.send(JSON.stringify(_frame)); } catch (e) {}
 }
 // HOST: broadcast enemy (monster-fired) projectiles so followers take RANGED /
 // telegraph damage from shared monsters (contact damage alone let guests facetank
@@ -52470,9 +52759,13 @@ function _coopTickMonsters() {
 // i-frame-respecting player-damage path. Throttled; snapshot + follower dead-reckon.
 function _coopTickProjectiles() {
   if (!_coopActive() || !net.isHost) return;
+  if (_coopBundleOn()) return;   // v0.30.823 - rides the monster frame
   const now = performance.now();
   if (now - (net._coopProjAt || 0) < COOP_PROJ_TICK_MS) return;
   net._coopProjAt = now;
+  try { net.ws.send(JSON.stringify({ t: 'proj', map: game.currentMap, list: _coopProjList() })); } catch (e) {}
+}
+function _coopProjList() {
   const list = [];
   const arr = game.projectiles || [];
   for (let i = 0; i < arr.length && list.length < COOP_PROJ_CAP; i++) {
@@ -52487,7 +52780,7 @@ function _coopTickProjectiles() {
       c: String(p.color || '').slice(0, 9), n: p._normalMob ? 1 : 0, z: p._zodiacAttacker ? 1 : 0,
     });
   }
-  try { net.ws.send(JSON.stringify({ t: 'proj', map: game.currentMap, list })); } catch (e) {}
+  return list;
 }
 // NON-HOST: reconcile the host's enemy projectiles into game.projectiles by uid
 // (add new, correct positions of existing, drop absent). The follower's own
@@ -52522,9 +52815,13 @@ function _coopApplyProjectiles(msg) {
 // projectile sync alone misses.
 function _coopTickHazards() {
   if (!_coopActive() || !net.isHost) return;
+  if (_coopBundleOn()) return;   // v0.30.823 - rides the monster frame
   const now = performance.now();
   if (now - (net._coopHazAt || 0) < COOP_PROJ_TICK_MS) return;
   net._coopHazAt = now;
+  try { net.ws.send(JSON.stringify({ t: 'haz', map: game.currentMap, list: _coopHazList() })); } catch (e) {}
+}
+function _coopHazList() {
   const list = [];
   const arr = game.hazards || [];
   for (let i = 0; i < arr.length && list.length < COOP_PROJ_CAP; i++) {
@@ -52541,7 +52838,7 @@ function _coopTickHazards() {
       mk: h._markerOnly ? 1 : 0, sl: String(h._sourceLabel || '').slice(0, 24),
     });
   }
-  try { net.ws.send(JSON.stringify({ t: 'haz', map: game.currentMap, list })); } catch (e) {}
+  return list;
 }
 // HOST→ALL: broadcast physical loot — gear/item drops + boon (power-up) orbs — so co-op
 // guests get loot from shared monster kills. ALL drop creation lives in the host-only
@@ -53395,6 +53692,10 @@ function _coopApplyMonsters(msg) {
 // exactly the same damage as solo/host.
 function _coopSendDamage(m, dmg, isCrit, skill, procs) {
   if (!m || m.uid == null) return;
+  if (_coopPeerCap(net.hostId) >= LX_COOP_CAP) {   // v0.30.823 - batched: one message per 50 ms, not one per hit
+    _coopQueueHit({ u: m.uid, d: Math.max(0, Math.round(dmg) || 0), c: isCrit ? 1 : 0, k: String(skill || '').slice(0, 16), fz: (procs && procs.fz > 0) ? Math.min(3000, procs.fz | 0) : 0, st: (procs && procs.st > 0) ? Math.min(1500, procs.st | 0) : 0 });
+    return;
+  }
   try { net.ws.send(JSON.stringify({ t: 'dmg', u: m.uid, d: Math.max(0, Math.round(dmg) || 0), c: isCrit ? 1 : 0, k: String(skill || '').slice(0, 16), fz: (procs && procs.fz > 0) ? Math.min(3000, procs.fz | 0) : 0, st: (procs && procs.st > 0) ? Math.min(1500, procs.st | 0) : 0 })); } catch (e) {}
 }
 // HOST: apply an inbound remote-damage event as FINAL damage (the attacker
@@ -53822,7 +54123,12 @@ function _mpRateOk(id, kind, perSec) {
 function _mpHandle(msg) {
   if (!msg || typeof msg !== 'object') return;   // v0.27.0 — a malformed/JSON-null relay frame must not throw on switch(msg.t)
   switch (msg.t) {
-    case 'mon':  _coopApplyMonsters(msg); return;   // v0.27.0 host monster state (non-host mirrors)
+    case 'mon':   // v0.27.0 host monster state (non-host mirrors); v0.30.823 - its projectiles, hazards and fx ride along
+      _coopApplyMonsters(msg);
+      if (msg.pl) _coopApplyProjectiles({ id: msg.id, map: msg.map, list: msg.pl });
+      if (msg.hl) _coopApplyHazards({ id: msg.id, map: msg.map, list: msg.hl });
+      _coopApplyFx(msg);
+      return;
     case 'proj': _coopApplyProjectiles(msg); return; // v0.27.0 host enemy projectiles (non-host takes ranged damage)
     case 'haz':  _coopApplyHazards(msg); return;     // v0.27.0 host enemy hazard telegraphs (visual)
     case 'hazhit': _coopApplyHazHit(msg); return;    // v0.27.0 host hazard detonation -> follower takes the strike
@@ -53856,6 +54162,13 @@ function _mpHandle(msg) {
           if (typeof msg.v === 'string') { _pp.v = msg.v.slice(0, 16); _mpNoteVersion(_pp, _pp.v); }
           _pp._last = performance.now();
         }
+      }
+      // v0.30.823 - what the sender's build can read (cap), whether it is away (aw), and its fx on the old carrier
+      if (msg && msg.id !== net.myId && net.peers[msg.id]) {
+        const _cq = net.peers[msg.id];
+        if (msg.cap != null) _cq.cap = msg.cap | 0;
+        if (msg.aw != null && !!msg.aw !== !!_cq._away) { _cq._away = !!msg.aw; _coopRecomputeHost(); _mpRenderPlayerList(); }
+        if (msg.fx || msg.pj || msg.po) _coopApplyFx(msg);
       }
       // v0.29.x — RTT probe (latency visibility). A carrier ping carrying `rt`
       // is echoed straight back addressed to its sender; receiving our own
@@ -53892,10 +54205,16 @@ function _mpHandle(msg) {
     // Require the sender to be a peer we can see, on our map, and cap the rate
     // on OUR clock (the existing throttles were all sender-side).
     case 'dmg': {
+      _coopApplyFx(msg);   // v0.30.823 - a guest's action frame: its fx are for everyone, its hits for the host
       if (!net.isHost) return;
       const _dp = net.peers && net.peers[msg && msg.id];
       if (!_dp || _dp.map !== game.currentMap) return;
       if (!_mpRateOk(msg.id, 'dmg', 80)) return;   // v0.29.472 — 20 was below real AoE play
+      if (Array.isArray(msg.l)) {   // v0.30.823 - batched hits
+        for (const _h of msg.l.slice(0, COOP_HIT_CAP)) if (_h && _h.u != null) _coopHostApplyDamage(_h.u, +_h.d || 0, !!_h.c, _h.k, _h);
+        return;
+      }
+      if (msg.u == null) return;   // an fx-only action frame: nothing to hit
       _coopHostApplyDamage(msg.u, +msg.d || 0, !!msg.c, msg.k, msg); return;
     }   // remote damage -> host applies
     case 'kill': _coopApplyKill(msg); return;       // host kill -> peers award XP/coins
@@ -53933,6 +54252,7 @@ function _mpHandle(msg) {
       if (msg.id === net.myId) break;   // v0.26.1020 — ignore self-echo on broadcast relays (match 'chat')
       if (!net.peers[msg.id] && Object.keys(net.peers).length >= MP_MAX_PEERS) break;   // v0.26.1033 — peer-flood cap
       net.peers[msg.id] = { ..._mpScrubStrings(msg), _last: performance.now() };
+      net._lastLookSyncAt = 0;   // v0.30.823 - tell the newcomer what I can read (cap) on the very next tick
       _coopRecomputeHost();   // v0.27.0 — a lower-id peer joining can hand off host
       _mpPushLog(`${escapeHtml(msg.name || 'Someone')} joined.`, 'sys');
       _mpRenderPlayerList();
@@ -54104,6 +54424,7 @@ function _mpNoteVersion(peer, v) {
 function _mpTick() {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
   const now = performance.now();
+  _coopAwayTick(); _coopActionFlush(false);   // v0.30.823 - every frame; each paces itself
   // v0.29.x (peer-coordinate accuracy) — AIRBORNE-FLIP FLUSH. Send an immediate
   // state frame the moment we leave the ground or land (the two instants where
   // a partner's linear extrapolation of our old velocity is most wrong), instead
@@ -54145,7 +54466,7 @@ function _mpTick() {
   if (now - (net._lastLookSyncAt || 0) > 2500) {
     net._lastLookSyncAt = now;
     try {
-      net.ws.send(JSON.stringify({ t: 'ping', lk: _av.look, eq: _av.eq, ti: _ttlWire,
+      net.ws.send(JSON.stringify({ t: 'ping', lk: _av.look, eq: _av.eq, ti: _ttlWire, cap: LX_COOP_CAP, aw: net._away ? 1 : 0,
         rt: Math.round(performance.now()),
         v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined }));
     } catch (e) { /* ignore */ }
@@ -54396,6 +54717,7 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     player._castLockUntil = 0;
     player.somersault   = 0;
     player.frozenTimer  = 0;
+    _coopPoseSwapIn(p);   // v0.30.823 - their skill pose (ground smash, bash, ninja seals, levitate, impale, chant ...)
     player.lookCustom = {
       hairId:  _ok(lk.h) || 'flow',
       eyeId:   _ok(lk.e) || 'default',
@@ -54478,6 +54800,7 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     p._heroAtkAt = player._heroAtkAt;
     // Pop any ctx saves a mid-draw throw left open (see ledger note above).
     while (_ctxSaves > 0) { try { ctx.restore(); } catch (_e) {} _ctxSaves--; }
+    _coopPoseSwapOut();   // v0.30.823
     player.cls = _saved.cls; player.job = _saved.job; player.master = _saved.master;
     player.facing = _saved.facing; player.w = _saved.w; player.h = _saved.h;
     player.x = _saved.x; player.y = _saved.y;
@@ -79383,7 +79706,7 @@ function pixelBurst(pattern, x, y, facing, opts) {
 function spawnSmoothSlash(x, y, angle, length, color, opts) {
   opts = opts || {};
   if (!game.smoothFx) game.smoothFx = [];
-  game.smoothFx.push({
+  game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
     type: 'slash', x, y, angle, length, color,
     life: opts.life || 18, maxLife: opts.life || 18,
     thickness: opts.thickness || 6,
@@ -79427,7 +79750,7 @@ function spawnSmoothSlash(x, y, angle, length, color, opts) {
 function spawnStabImpact(x, y, dir, length, color, opts) {
   opts = opts || {};
   if (!game.smoothFx) game.smoothFx = [];
-  game.smoothFx.push({
+  game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
     type: 'stab', x, y, dir: (dir < 0 ? -1 : 1), length, color,
     life: opts.life || 14, maxLife: opts.life || 14,
     thickness: opts.thickness || 9,
@@ -79444,7 +79767,7 @@ function spawnSmoothExplosion(x, y, radius, coreCol, edgeCol, opts) {
   // path killed the requestAnimationFrame loop = the whole game froze.
   const _core = coreCol || '#ffffff';
   const _edge = edgeCol || (_core.length === 7 ? _core + '80' : 'rgba(255,255,255,0.4)');
-  game.smoothFx.push({
+  game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
     type: 'explosion', x, y,
     radius: 0, maxRadius: radius,
     coreCol: _core, edgeCol: _edge,
@@ -79457,7 +79780,7 @@ function spawnSmoothExplosion(x, y, radius, coreCol, edgeCol, opts) {
 function spawnSmoothBeam(x, y, angle, length, width, color, opts) {
   opts = opts || {};
   if (!game.smoothFx) game.smoothFx = [];
-  game.smoothFx.push({
+  game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
     type: 'beam', x, y, angle, length, width, color,
     life: opts.life || 14, maxLife: opts.life || 14,
   });
@@ -79508,7 +79831,7 @@ function spawnKanjiFlash(x, y, glyph, color, opts) {
     d: 0.42 + Math.random() * 0.38,              // fraction of size, from centre
     r: 1.2 + Math.random() * 2.6,
   });
-  game.smoothFx.push({
+  game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
     type: 'kanji', x, y, glyph: glyph || '凶', color: color || '#ff2b46',
     size: _sz, rot: (opts.rot !== undefined) ? opts.rot : (Math.random() * 2 - 1) * 0.09,
     life: opts.life || 26, maxLife: opts.life || 26,
@@ -79551,7 +79874,7 @@ function spawnKageBolt(x, y, angle, length, color, opts) {
     }
     branches.push(bp);
   }
-  game.smoothFx.push({
+  game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
     type: 'bolt', x, y, angle, length, color: color || '#fff0f4', pts, branches,
     thickness: opts.thickness || 3,
     rim: opts.rim !== false,
@@ -79566,7 +79889,7 @@ function spawnKageBolt(x, y, angle, length, color, opts) {
 function spawnSpriteBurst(x, y, spriteKey, opts) {
   opts = opts || {};
   if (!game.smoothFx) game.smoothFx = [];
-  game.smoothFx.push({
+  game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
     type: 'spriteBurst', x, y, spriteKey,
     life: opts.life || 22, maxLife: opts.life || 22,
     size: opts.size || 80,
@@ -79635,7 +79958,7 @@ function spawnSpriteBurst(x, y, spriteKey, opts) {
 }
 function spawnSmoothImpact(x, y, color) {
   if (!game.smoothFx) game.smoothFx = [];
-  game.smoothFx.push({
+  game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
     type: 'impact', x, y, color,
     life: 16, maxLife: 16,
     rot: Math.random() * Math.PI,
@@ -79652,7 +79975,7 @@ function _spawnRainbowStairs() {
   const baseX = player.x + player.w / 2;
   const baseY = player.y + player.h;
   for (let i = 0; i < 6; i++) {
-    game.smoothFx.push({
+    game.smoothFx.push({ _o: game._fxOrigin || 'me',   // v0.30.823 - who made this (see _coopFxDrain)
       type: 'rainbowStair',
       x: baseX + dir * (16 + i * 26),
       y: baseY + 8 + i * 15,
@@ -86885,6 +87208,7 @@ function updateMonsters(dt) {
       }
     }
   }
+  const _hostIdle = !!(game.paused && _aggroPeers && _aggroPeers.length);   // v0.30.823 - paused in a menu, partners still fighting
   // v0.25.653 — manual mob-index counter for the mob-mob soft-spread
   // pass below. The `for...of` loop doesn't expose an index, and using
   // `indexOf` inside the loop would be O(n²). Increment manually each
@@ -88708,6 +89032,7 @@ function updateMonsters(dt) {
       let _playerEff = Math.sqrt(_bestSq) - 60;
       if (_playerEff < 0) _playerEff = 0;
       _bestSq = _playerEff * _playerEff;
+      if (_hostIdle) _bestSq = Infinity;   // v0.30.823 - any partner beats a paused host
       // v0.30.283 perf — _consider closure inlined at its six call sites: the
       // closure captured per-mob state, so it re-allocated for every non-boss
       // mob every frame the roster gate passed. Arithmetic is verbatim.
@@ -88788,7 +89113,7 @@ function updateMonsters(dt) {
       let _mmPrevAggro = null;   // v0.29.463 — taunt swap restores aggro too
       if (_aggroPeers && _aggroPeers.length) {
         const _bmx = m.x + m.w / 2, _bmy = m.y + m.h / 2;
-        const _dHost = Math.hypot(player.x + player.w / 2 - _bmx, player.y + player.h / 2 - _bmy);
+        const _dHost = _hostIdle ? Infinity : Math.hypot(player.x + player.w / 2 - _bmx, player.y + player.h / 2 - _bmy);   // v0.30.823
         let _best = null, _bestD = _dHost;
         for (const _q of _aggroPeers) {
           const _d = Math.hypot(_q.x + 14 - _bmx, _q.y + 22 - _bmy);
@@ -101069,6 +101394,7 @@ function updateProjectiles(dt) {
   }
   for (let i = game.projectiles.length - 1; i >= 0; i--) {
     const p = game.projectiles[i];
+    game._fxOrigin = (p && p.owner === 'player') ? 'me' : 'local';   // v0.30.823 - my shot's fx are mine; an enemy shot's are made on every screen
     // Enemy-owned projectile with `homing: true` — gently steer toward player.
     // v0.25.590 — Math.hypot → Math.sqrt(squared). hypot is ~2× slower than
     // sqrt because of overflow protection we don't need here. Speed clamp
@@ -101165,7 +101491,7 @@ function updateProjectiles(dt) {
     // there is no per-frame compounding and the shot resumes full speed the
     // instant it leaves the field or the window lapses. Life is NOT extended
     // — a slowed shot dies sooner into its travel, which is the point.
-    if (p.owner !== 'player' && typeof _waltzMulAt === 'function') {
+    if (p.owner !== 'player' && p.owner !== 'peer' && typeof _waltzMulAt === 'function') {
       const _wm = _waltzMulAt(p.x, p.y);
       if (_wm < 1) { p.x -= p.vx * (1 - _wm); p.y -= p.vy * (1 - _wm); }
     }
@@ -101195,7 +101521,7 @@ function updateProjectiles(dt) {
       else if (p.skill === 'mdark') p.vy += 0.06;
     }
     // Ballistic arc for player projectiles (not homing ones — those steer themselves)
-    if (p.owner === 'player' && !p.homing && !p.noGravity && p.skill !== 'rainArrow') {
+    if ((p.owner === 'player' || p.owner === 'peer') && !p.homing && !p.noGravity && p.skill !== 'rainArrow') {
       let g = (p.gravity !== undefined) ? p.gravity
               : (p.skill === 'arrow' || p.skill === 'dagger' || p.skill === 'charged' ||
                  p.skill === 'deadeye' || p.skill === 'elemArrow' ||
@@ -101221,7 +101547,7 @@ function updateProjectiles(dt) {
     // actually gates the trail spam during intense combat. Net visual
     // delta: ~imperceptible (the trail is already overlapping), but
     // the GC pressure during ranger sustained-fire drops measurably.
-    if (p.owner === 'player' && ((p._trailFrame = (p._trailFrame|0) + 1) & 1)) {
+    if ((p.owner === 'player' || p.owner === 'peer') && ((p._trailFrame = (p._trailFrame|0) + 1) & 1)) {
       const _tp = {
         x: p.x + p.w/2 + (Math.random() - 0.5) * 6,
         y: p.y + p.h/2 + (Math.random() - 0.5) * 6,
@@ -101519,6 +101845,14 @@ function updateProjectiles(dt) {
             p.pierceLeft -= 1;
           }
         }
+      }
+    } else if (p.owner === 'peer') {
+      // v0.30.823 - A PARTNER'S PROJECTILE IS A PICTURE. It deals nothing and procs nothing; the hit it stands for
+      // was resolved on its owner's screen and reaches the monster through the host. It stops on the first monster
+      // it touches (unless it pierces) so an arrow does not sail through what it just hit.
+      if (!p.pierce && !p.piercing) {
+        const _pms = game.monsters;
+        for (let _pi = 0; _pi < _pms.length; _pi++) { const _pm = _pms[_pi]; if (_pm && _pm.currentHp > 0 && !_pm.ally && !_pm.isSummon && aabb(p, _pm)) { hit = true; break; } }
       }
     } else {
       // Enemy projectile
@@ -101968,6 +102302,7 @@ function updateProjectiles(dt) {
   }
   for (let i = game.hazards.length - 1; i >= 0; i--) {
     const h = game.hazards[i];
+    game._fxOrigin = (h && h.owner === 'enemy') ? 'local' : 'me';   // v0.30.823
     // v0.25.589 — migrate hazards authored with `timer:` instead of
     // `life:`/`maxLife:`. The v0.25.581 zodiac AI rewrite created
     // multiple meteor_warn hazards with `timer:` (Aries charge trail,
@@ -146547,7 +146882,7 @@ function drawProjectiles() {
       ctx.restore();
       continue;
     }
-    if (p.owner === 'player') {
+    if (p.owner === 'player' || p.owner === 'peer') {   // v0.30.823 - a partner's shot wears the same art
       // v0.25.208 — sprite-first dispatch. Each player projectile has a
       // ludo-generated webp; drawImage rotated to the velocity vector.
       // Procedural drawing remains as a cold-start fallback if the
@@ -151342,8 +151677,11 @@ function _lxCoopWorldStep(dt) {
       stunTimer: player.stunTimer, _skillLockTimer: player._skillLockTimer,
       _electrocuteTimer: player._electrocuteTimer,
     } : null;
+    game._fxOrigin = 'world';
     updateMonsters(dt);        // enemy AI/physics + monster→player contact & hazard damage
+    game._fxOrigin = 'me';
     updateProjectiles(dt);     // enemy projectiles keep flying + hitting (i-frame-respecting)
+    game._fxOrigin = 'me';
     if (_pSnap) { window._lxHpRestore = true; try { for (const _k in _pSnap) player[_k] = _pSnap[_k]; } finally { window._lxHpRestore = false; } }   // v0.30.633 seal-fix - the undo passes the heal lock
     // Death check — MUST run here too. The normal check lives in loop(), which
     // is frozen while hidden/paused; without this, contact damage kept applying
@@ -151361,6 +151699,7 @@ function _lxCoopWorldStep(dt) {
     if (typeof _coopTickMonsters    === 'function') _coopTickMonsters();     // host rebroadcasts so guests stay live
     if (typeof _coopTickProjectiles === 'function') _coopTickProjectiles();
     if (typeof _coopTickHazards     === 'function') _coopTickHazards();
+    if (typeof _coopTickDrops       === 'function') _coopTickDrops();        // v0.30.823 - a paused host still hands out the loot
     if (typeof _mpTick === 'function') _mpTick();   // presence + keepalive
   } catch (e) { /* never let the background sim throw out of the pump/loop */ }
 }
@@ -151804,8 +152143,8 @@ function loop(time) {
     if (typeof _tickZodiacDodgeReward === 'function') _tickZodiacDodgeReward(dt);   // v0.26.x — zodiac perfect-dodge reward
     if (typeof _tickBossCourage === 'function') _tickBossCourage(dt);               // v0.26.x — low-level-boss Brave Dodge / Counter
     if (typeof _lxVermillionTick === 'function') _lxVermillionTick();               // v0.29.9xx — Vermillion 5-min hunt clock (Fractured Reflection)
-    updateMonsters(dt);
-    updateProjectiles(dt);
+    game._fxOrigin = 'world'; updateMonsters(dt); game._fxOrigin = 'me';   // v0.30.823 - fx born in monster AI are the world's
+    updateProjectiles(dt); game._fxOrigin = 'me';
     emitProjectileTrails();   // v0.25.21 — runs every frame regardless of render path
     updateMinions(dt);
     updateParticles(dt);
