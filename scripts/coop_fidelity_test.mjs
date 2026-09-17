@@ -1,4 +1,4 @@
-// CO-OP FIDELITY (v0.30.823): the relay budget, seeing each other's skills, and a host that goes away.
+// CO-OP FIDELITY (v0.30.823, fx collection v0.30.824): the relay budget, seeing each other's skills, and a host that goes away.
 // Two real browser clients through the real relay (mp/server.mjs - the same 40 msg/s bucket the deployed worker runs).
 //   [SERVE_ROOT=<dir with mp/, data/, art>] node scripts/coop_fidelity_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path';
@@ -88,6 +88,7 @@ try {
   await A.evaluate(() => { _coopSetAway(false); _coopAwayTick = window.__awayTick; }); const back = await wait(A, () => net.isHost === true, 3000) && await wait(B, () => net.isHost === false, 3000);
   check(back, 'and takes it back on return');
   const det = await A.evaluate(() => { const realNow = performance.now.bind(performance); let t = realNow(); performance.now = () => t; const hid = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+    game.monsters.length = 0;   // while the guest hosted, its spawner may have rolled a natural boss - and a boss rightly blocks the paused handoff
     const out = {}; try { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); net._hiddenAt = 0; _coopAwayTick(); t += 9000; _coopAwayTick(); out.at9s = !!net._away; t += 1500; _coopAwayTick(); out.at10s = !!net._away;
       delete document.hidden; _coopAwayTick(); out.back = !!net._away;
       game.paused = true; _coopAwayTick(); t += 21000; _coopAwayTick(); out.paused21s = !!net._away; game.paused = false; _coopAwayTick(); out.unpaused = !!net._away;

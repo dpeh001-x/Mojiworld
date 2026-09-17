@@ -12658,7 +12658,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.823';
+const GAME_VERSION = 'v0.30.824';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52130,7 +52130,7 @@ function mpConnect(url, name, room) {
     ws = new WebSocket(url);
     net.ws = ws;
     _lxMpBudgetWrap(ws);   // v0.30.823 - my copy of the relay's 40 / s bucket
-    net._away = false; net._hitQ = [];
+    net._away = false; net._hitQ = []; net._fxQ = []; net._pjQ = [];
   } catch (e) {
     _mpStatus('Bad URL: ' + e.message, '#ff8888');
     return;
@@ -52539,10 +52539,14 @@ function _coopCleanObj(e) {
   }
   return (Number.isFinite(c.x) && Number.isFinite(c.y)) ? c : null;
 }
-// Collect what is new since the last frame. Called by whoever is about to send (the host's monster frame, or an
-// action frame). Returns null when there is nothing to say.
-function _coopFxDrain() {
-  let fx = null, pj = null;
+// v0.30.824 - COLLECT EVERY FRAME, SEND EVERY 50 ms. Collecting only when a frame was about to leave missed whatever was
+// born and gone in between - a point-blank arrow hits within two or three frames. _coopFxCollect runs from _mpTick
+// (every frame, paused or not) and queues the wire form; _coopFxDrain hands the queues to whoever is sending. A queued
+// projectile is moved on by its own velocity for the frames it waited, so it enters the partner's screen where it is.
+const COOP_FXQ_CAP = 64;
+function _coopFxCollect() {
+  if (!_coopActive()) return;
+  const fq = net._fxQ || (net._fxQ = []), pq = net._pjQ || (net._pjQ = []);
   const sf = game.smoothFx || [];
   for (let i = 0; i < sf.length; i++) {
     const f = sf[i];
@@ -52552,10 +52556,9 @@ function _coopFxDrain() {
     if (!COOP_FX_TYPES[f.type]) continue;
     const w = _coopWireObj(f);
     if (f.follow && typeof player !== 'undefined' && f.follow === player) w.fw = 1;
-    (fx = fx || []).push(w);
-    if (fx.length >= COOP_FX_CAP) break;
+    fq.push(w);
   }
-  const pr = game.projectiles || [];
+  const pr = game.projectiles || [], now = performance.now();
   for (let i = 0; i < pr.length; i++) {
     const p = pr[i];
     if (!p || p._fxSeen) continue;
@@ -52563,8 +52566,24 @@ function _coopFxDrain() {
     if (p.owner !== 'player' || (p.life | 0) <= 0) continue;
     const w = _coopWireObj(p);
     delete w.owner; delete w.damage;
-    (pj = pj || []).push(w);
-    if (pj.length >= COOP_PJ_CAP) break;
+    pq.push({ w, t: now });
+  }
+  if (fq.length > COOP_FXQ_CAP) fq.splice(0, fq.length - COOP_FXQ_CAP);   // newest wins
+  if (pq.length > COOP_FXQ_CAP) pq.splice(0, pq.length - COOP_FXQ_CAP);
+}
+// Called by whoever is about to send (the host's monster frame, or an action frame). Null = nothing to say.
+function _coopFxDrain() {
+  _coopFxCollect();
+  const fq = net._fxQ, pq = net._pjQ;
+  let fx = null, pj = null;
+  if (fq && fq.length) fx = fq.splice(0, COOP_FX_CAP);
+  if (pq && pq.length) {
+    const now = performance.now(); pj = [];
+    for (const e of pq.splice(0, COOP_PJ_CAP)) {
+      const k = Math.max(0, Math.min(12, (now - e.t) / 16.67)), w = e.w;
+      if (k > 0.5) { w.x = Math.round((w.x + (w.vx || 0) * k) * 100) / 100; w.y = Math.round((w.y + (w.vy || 0) * k) * 100) / 100; if (w.life) w.life = Math.max(1, Math.round(w.life - k)); }
+      pj.push(w);
+    }
   }
   return (fx || pj) ? { fx, pj } : null;
 }
@@ -54424,7 +54443,7 @@ function _mpNoteVersion(peer, v) {
 function _mpTick() {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
   const now = performance.now();
-  _coopAwayTick(); _coopActionFlush(false);   // v0.30.823 - every frame; each paces itself
+  _coopAwayTick(); _coopFxCollect(); _coopActionFlush(false);   // v0.30.823 - every frame; each paces itself (v0.30.824: fx are collected every frame)
   // v0.29.x (peer-coordinate accuracy) — AIRBORNE-FLIP FLUSH. Send an immediate
   // state frame the moment we leave the ground or land (the two instants where
   // a partner's linear extrapolation of our old velocity is most wrong), instead
