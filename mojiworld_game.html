@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.839';
+const GAME_VERSION = 'v0.30.840';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -41324,7 +41324,11 @@ function _wireMobileCooldownSweep() {
     btn._cachedIconEl = btn.querySelector('.mc-icon');
     btn._cachedOverlay = btn.querySelector('.mc-cd');
   }
+  // v0.30.x dom-churn — the deck is only shown under this media query or the manual mobile-controls toggle; on a desktop
+  // screen the sweep rewrote nine hidden buttons' --cd-pct and cooldown text ten times a second (~90 mutations a second).
+  const _mcDeckMq = (typeof window !== 'undefined' && window.matchMedia) ? window.matchMedia('(pointer: coarse), (max-width: 900px)') : null;
   _cdSweepId = setInterval(() => {
+    if (_mcDeckMq && !_mcDeckMq.matches && !document.body.classList.contains('force-mobile-ctrl')) return;
     if (typeof player === 'undefined' || !player) return;
     if (typeof KEY_TO_SLOT === 'undefined') return;
     // v0.26.223 — Skip the DOM sweep when paused. Pre-fix this interval
@@ -77513,16 +77517,27 @@ function castSkill(id) {
     game._lastFailSfx = now;
     audio.play('fail');
   };
+  // v0.30.x dom-churn — ONE REFUSAL TOAST A MOMENT. A held skill key re-calls castSkill every frame, and each refusal
+  // below built a fresh toast element: measured in a Gravitos fight, a warrior holding keys through his own Ground Slam
+  // lock raised "Skills locked!" 72 times a second - 190 toast-container mutations a second, each a style + layout pass,
+  // and a toast that flickered as it was replaced. The same message now shows at most once per 900 ms (the buzzer keeps
+  // its own 120 ms debounce).
+  const _failToast = (msg) => {
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (game._lastFailToast === msg && now - (game._lastFailToastAt || 0) < 900) return;
+    game._lastFailToast = msg; game._lastFailToastAt = now;
+    showToast(msg, 'common');
+  };
   // v0.25.485 — Skill-lock debuff (octopus boss "Skill Lock" tentacle).
   // Silences active skill use for the duration; basic attacks (slot 'd')
   // are still allowed so the player isn't completely defenseless.
   if (player._skillLockTimer > 0 && s.slot !== 'd') {
-    showToast('🔒 Skills locked!', 'common'); _failCue();
+    _failToast('🔒 Skills locked!'); _failCue();
     return;
   }
   // Tower: Basic Attacks Only modifier — block all non-'d' skills
   if (towerBasicOnly() && s.slot !== 'd') {
-    showToast('🚇 Basic attacks only!', 'common'); _failCue();
+    _failToast('🚇 Basic attacks only!'); _failCue();
     return;
   }
   // v0.25.582 — Map-level skill lock. Frozen Peak (and any future
@@ -77530,7 +77545,7 @@ function castSkill(id) {
   // (Z basic attack), so combat is reduced to simple Z-tap timing while
   // the player navigates the climb.
   if (game.mapData && game.mapData.skillLockExceptZ && s.slot !== 'd') {
-    showToast('❄ Only Z attacks here!', 'common'); _failCue();
+    _failToast('❄ Only Z attacks here!'); _failCue();
     return;
   }
   // Stamp current basic-skill enhancement for any effect this cast triggers
