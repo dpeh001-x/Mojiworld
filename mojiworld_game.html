@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.875';
+const GAME_VERSION = 'v0.30.876';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -72129,7 +72129,9 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     };
     // Zodiac bosses read their intro from the config
     if (typeof _lxPrewarmBossSets === 'function') _lxPrewarmBossSets(type, t.zodiacSign || null);   // v0.30.261 — see the function
-    if (t.zodiacBoss) {
+    if (game._lxSplitSpawn) {
+      // v0.30.x boss polish (audit B4) — a split twin joins a fight already on: no entrance banner, shake or flash
+    } else if (t.zodiacBoss) {
       const z = ZODIAC_SIGNS.find(s => s.id === t.zodiacSign);
       if (z) spawnBossIntro(z.glyph + ' ' + z.name, z.desc);
       else   spawnBossIntro(t.name, 'the stars align against you');
@@ -100701,8 +100703,10 @@ function _killMonsterRaw(m) {
     // this just arms the counter. Multi-phase bosses (Gravitos) route their
     // NON-final phase-downs through the phase machine and return before
     // reaching this line, so only the true final kill earns the slow-mo.
-    game._slowmoFrames = 54;
-    if (typeof flash === 'function') flash(0.25);
+    if (!_lxTwinKill) {   // v0.30.x boss polish (audit B4) — a split twin going down is not the takedown
+      game._slowmoFrames = 54;
+      if (typeof flash === 'function') flash(0.25);
+    }
     if (wasNew) {
       const z = ZODIAC_SIGNS.find(s => s.id === m.zodiacSign);
       showToast(`🏅 ${z.glyph} BADGE EARNED — ${_lxZodiacSign(z)}`, 'legendary');
@@ -101277,7 +101281,10 @@ function _killMonsterRaw(m) {
       game.bossDefeated[game.currentMap] = true;
       game._bossDefeatedAt = game._bossDefeatedAt || {}; game._bossDefeatedAt[game.currentMap] = (game._playMs || 0);   // v0.26.453 - respawn-cooldown stamp
     }
-    showToast(`${m.name} defeated! Choose a powerup!`, 'legendary');
+    // v0.30.x boss polish (audit B4 / B6) — only a kill that opens the boon wheel says so: twins, echoes, expedition
+    // bosses and the Conductor pay no boon (see the 1.5 s timer below)
+    if (_lxTwinKill) showToast('One twin falls!', 'epic');
+    else showToast((m._expeditionBoss || m._echoBoss || m.type === 'pqConductor') ? `${m.name} defeated!` : `${m.name} defeated! Choose a powerup!`, 'legendary');
     // v0.25.679 — pass the boss's name + icon so the reveal modal can
     // theme its hero header with "From <boss name>". Falls back to the
     // generic header if the boss has no readable name.
@@ -101821,8 +101828,12 @@ function _triggerSuperBossDeathRaw(m) {
   if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
 
   // Dramatic toast — staggered messages
-  showToast('THE SHARDFATHER FALLS!', 'legendary');
-  setTimeout(() => showToast('The Sanctum trembles...', 'epic'), 900);
+  // v0.30.x boss polish (audit B1) — Gravitos and Octobaby are super bosses too, and fell to Aetherion's lines
+  const _sbLines = ({ gravitos: ['THE WEIGHT-BEARER FALLS!', 'Twelve ages of weight, set down at last...'],
+    octobaby: ['OCTOBABY IS DETHRONED!', 'The grotto\'s eight moods fall quiet...'] })[m.type]
+    || ['THE SHARDFATHER FALLS!', 'The Sanctum trembles...'];
+  showToast(_sbLines[0], 'legendary');
+  setTimeout(() => showToast(_sbLines[1], 'epic'), 900);
   // v0.25.775 — Previously this toast promised a +50% mojicoins rain bonus
   // that was purely cosmetic — no `player.mojicoins += ...` followed it.
   // Now: actually grant the bonus mojicoins so the toast text is honest.
@@ -139509,7 +139520,8 @@ const _LX_MOB_SKILL_ART = {
   mortarLob: { img: ['meteor_marker'] },   // the landing-zone marker (a marker-only meteor_warn)
 };
 const _LX_MOB_TYPE_ART = {
-  legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },   // his 6 s arena stomp is a mob_quake of his own
+  legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },
+  zodiac_pisces: { img: ['gravitos_riftring'], fx: ['gravitos_riftring'] },   // v0.30.x boss polish (audit B2) — her Tidal Crush zone   // his 6 s arena stomp is a mob_quake of his own
   // v0.30.790 grav-smooth — the five rings his patterns cast: each was decoded and pinned on the frame of its
   // first cast (laser 22 ms, soul 36 ms, slam 22 ms, measured).
   gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield', 'gravitos_voidrift', 'gravitos_riftring'], fx: ['gravitos_singularity_zone', 'gravitos_voidrift', 'gravitos_riftring'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
@@ -145290,7 +145302,7 @@ const ZODIAC_AI = {
     if (phase >= 2 && !m._split && !m._isTwin) {
       m._split = true;
       showToast('Gemini splits!', 'legendary');
-      spawnMonster(m.x + 40, m.y, 'zodiac_gemini', true, false);
+      game._lxSplitSpawn = true; try { spawnMonster(m.x + 40, m.y, 'zodiac_gemini', true, false); } finally { game._lxSplitSpawn = false; }   // v0.30.x boss polish (audit B4)
       const twin = game.monsters[game.monsters.length - 1];
       if (twin) {
         twin.currentHp = Math.floor(m.maxHp * 0.5);
@@ -147551,14 +147563,14 @@ const ZODIAC_AI = {
     if (phase >= 2 && player) {
       if (m._tidalAt == null) m._tidalAt = (game.time | 0) + 300;
       if (!m._tidalArmed && (game.time | 0) >= m._tidalAt) {
-        m._tidalArmed = true; m._tidalT = 60;
+        m._tidalArmed = true; m._tidalT = 1000;   // v0.30.x boss polish (audit B2) — dt is ms here: 60 was a ~60 ms "1s" warning
         m._tidalX = player.x + player.w/2; m._tidalY = player.y + player.h/2;
         m._tidalAt = (game.time | 0) + 360;
         if (typeof showToast === 'function') showToast('🐟 Pisces — Tidal Crush! Move!', 'epic');
       }
       if (m._tidalArmed) {
         m._tidalT -= dt;
-        if (game.time % 2 === 0) { const _ta = Math.random() * Math.PI * 2, _tr = 80 * (m._tidalT / 60); game.particles.push({ x: m._tidalX + Math.cos(_ta) * _tr, y: m._tidalY + Math.sin(_ta) * _tr, vx: 0, vy: 0, life: 10, color: '#aa66ff', size: 3 }); }
+        if (game.time % 2 === 0) { const _ta = Math.random() * Math.PI * 2, _tr = 80 * (m._tidalT / 1000); game.particles.push({ x: m._tidalX + Math.cos(_ta) * _tr, y: m._tidalY + Math.sin(_ta) * _tr, vx: 0, vy: 0, life: 10, color: '#aa66ff', size: 3 }); }
         if (m._tidalT <= 0) {
           m._tidalArmed = false;
           const _px = player.x + player.w/2, _py = player.y + player.h/2;
@@ -147655,7 +147667,7 @@ const ZODIAC_AI = {
     if (phase >= 2 && !m._piscesSplit && !m._isPiscesTwin) {
       m._piscesSplit = true;
       showToast('Pisces splits!', 'legendary');
-      spawnMonster(m.x + 60, m.y, 'zodiac_pisces', true, false);
+      game._lxSplitSpawn = true; try { spawnMonster(m.x + 60, m.y, 'zodiac_pisces', true, false); } finally { game._lxSplitSpawn = false; }   // v0.30.x boss polish (audit B4)
       const twin = game.monsters[game.monsters.length - 1];
       if (twin) {
         twin.currentHp = Math.floor(m.maxHp * 0.5);
@@ -149271,7 +149283,7 @@ function _lxAttackZones() {
         color: '#ffd88a', dir: _hd > 0 ? 'right' : 'left', tg: 'tg_dash' });
     }
     if (m._braceDashing && m._bdPhase === 'brace' && m.traits && m.traits.braceDash
-        && _lxZoneWorthy(m, 1)) {   // dash damage is contact — raw atk
+        && (m.traits.braceDash.gore || _lxZoneWorthy(m, 1))) {   // dash damage is contact — raw atk; a gore takes a flat share of max HP, so it always draws (v0.30.x audit B3)
       const bd = m.traits.braceDash;
       const _d = m._bdDir > 0 ? 1 : -1;
       const _bdFr = Math.max(1, (bd.dashMs || 380) / (1000 / 60));
@@ -149313,8 +149325,17 @@ function _lxAttackZones() {
         w: LEO_POUNCE_R * 2, h: 32,
         prog: _lp, color: '#ffdd66', dir: 'center', tg: 'tg_smash' });
     }
+    // v0.30.x boss polish (audit B2) — Pisces' Tidal Crush: the spot it crushes, for the whole second it promises.
+    // It tests a +-80 px box round the marked point (corner 113 px), so the ring is drawn 120 px out and never
+    // under-promises.
+    if (m._tidalArmed && m._tidalT > 0 && m._tidalX != null) {
+      out.push({ kind: 'smash', x: m._tidalX - 120, y: m._tidalY - 120, w: 240, h: 240,
+        prog: Math.max(0, Math.min(1, 1 - m._tidalT / 1000)), color: '#aa66ff', dir: 'center', tg: 'gravitos_riftring' });
+    }
+    // v0.30.x boss polish (audit B3) — a swing that can land a flat share of max HP (the Arbiter's VERDICT) always
+    // draws: it was hidden whenever the player's HP outgrew the boss's ATK. The heavier punish still follows worthiness.
     if (m._bigMeleeFiring && m._bigMeleeT > 0 && m.traits && m.traits.bigMelee
-        && _lxZoneWorthy(m, (m.traits.bigMelee.dmgMul || 1.5))) {
+        && (m.traits.bigMelee.radiance || _lxZoneWorthy(m, (m.traits.bigMelee.dmgMul || 1.5)))) {
       const bm = m.traits.bigMelee;
       const prog = Math.max(0, Math.min(1, 1 - m._bigMeleeT / (bm.telegraphMs || 1)));
       if (bm.kind === 'smash') {
