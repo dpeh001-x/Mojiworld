@@ -12070,9 +12070,9 @@ The sleeping world is listening.</div>
       </div>
     </div>
     <div class="settings-row">
-      <label title="Canvas zoom level — affects how big the game renders on screen. 2.0× is the default. Higher = bigger sprites, may overflow viewport. Lower = smaller, more letterbox.">Resolution</label>
+      <label title="The largest the game may draw. It grows with your window up to this size, never past it, and never overflows. 2.0× is the default; at the top, Fit, it always fills the window (4K included). Lower = smaller, with a wider border.">Resolution</label>
       <div class="ctrl">
-        <input type="range" id="set-scale" min="0.5" max="3.0" step="0.05" value="2.0" style="--moji-slider-pct: 60.00;">
+        <input type="range" id="set-scale" min="0.5" max="4.0" step="0.05" value="2.0" style="--moji-slider-pct: 42.86;">
         <span class="val" id="set-scale-val">2.00×</span>
       </div>
     </div>
@@ -12250,7 +12250,7 @@ The sleeping world is listening.</div>
       </div>
     </div>
     <div class="actions">
-      <button class="reset" onclick="resetSettings()">↺ Reset Defaults</button>
+      <button class="reset" onclick="resetSettings()" title="Put every option here back to its default. Your difficulty is kept.">↺ Reset Defaults</button>
       <button class="close" onclick="closeSettingsModal()">✓ Done</button>
     </div>
   </div>
@@ -12816,7 +12816,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.902';
+const GAME_VERSION = 'v0.30.903';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -41895,8 +41895,13 @@ function _lxGfxSwitchChanged() {
   for (const n of [sel.value, (typeof _lxGfxBase !== 'undefined' ? _lxGfxBase : null), 'high', 'medium', 'low']) {
     if (n && LX_GFX_PRESETS[n] && _order.indexOf(n) < 0) _order.push(n);
   }
+  // v0.30.x (settings audit) - only a preset on the SAME engine tier as the player's own may claim the switches: on High,
+  // turning Weather, Ambient and Shadows off matched Low's switch set, and Low's tier (culled flashes, no backdrops)
+  // came with it, unasked. Now that is High with three effects off - Custom.
+  const _tierOf = LX_GFX_PRESETS[(typeof _lxGfxBase !== 'undefined' && LX_GFX_PRESETS[_lxGfxBase]) ? _lxGfxBase : 'high'];
   for (const name of _order) {
     const q = LX_GFX_PRESETS[name];
+    if (q.tierLow !== _tierOf.tierLow || q.tierVeryLow !== _tierOf.tierVeryLow) continue;
     if (q.weather === cur.weather && q.ambient === cur.ambient &&
         q.shadows === cur.shadows && q.dmgnum === cur.dmgnum) {
       if (sel.value !== name) sel.value = name;
@@ -41906,6 +41911,9 @@ function _lxGfxSwitchChanged() {
   }
   sel.value = 'custom';
 }
+// v0.30.x (settings audit) - the Resolution slider's top stop means "no cap": fill the window whatever its size.
+const _LX_SCALE_FIT = 4.0;
+function _lxScaleLabel(v) { v = parseFloat(v); return v >= _LX_SCALE_FIT - 0.001 ? 'Fit' : v.toFixed(2) + '×'; }
 function openSettingsModal() {
   const s = _lxGetSettings();
   try {   // v0.30.x grav-gpu
@@ -41923,7 +41931,7 @@ function openSettingsModal() {
     set('set-fx-dmgnum',  s.fxDmgNum  !== false);
   }
   document.getElementById('set-scale').value     = s.scale;
-  document.getElementById('set-scale-val').textContent = s.scale.toFixed(2) + '×';
+  document.getElementById('set-scale-val').textContent = _lxScaleLabel(s.scale);
   document.getElementById('set-bgm').value       = s.bgm;
   document.getElementById('set-bgm-val').textContent = s.bgm + '%';
   document.getElementById('set-sfx').value       = s.sfx;
@@ -41972,7 +41980,7 @@ function openSettingsModal() {
   const _bgmEl2  = document.getElementById('set-bgm');
   const _sfxEl   = document.getElementById('set-sfx');
   _scaleEl.oninput = function() {
-    document.getElementById('set-scale-val').textContent = parseFloat(this.value).toFixed(2) + '×';
+    document.getElementById('set-scale-val').textContent = _lxScaleLabel(this.value);
     applySettingsLive();
   };
   _bgmEl2.oninput = function() {
@@ -42429,9 +42437,12 @@ function _applySettings(s) {
   if (typeof _fitGameToViewport === 'function') _fitGameToViewport();
 }
 function resetSettings() {
-  _lxSaveSettings({ ...LX_SETTINGS_DEFAULTS });
+  // v0.30.x (settings audit) - the difficulty is a choice about the game, not a display or sound preference: a player
+  // resetting their volume on Nightmare used to drop to Normal without a word. It is kept; the rest goes back.
+  const _keep = { ...LX_SETTINGS_DEFAULTS, difficulty: (_lxGetSettings().difficulty || 'normal') };
+  _lxSaveSettings(_keep);
   openSettingsModal();
-  _applySettings(LX_SETTINGS_DEFAULTS);
+  _applySettings(_keep);
 }
 // Apply persisted settings on init (after a tick to let DOM + audio be ready)
 setTimeout(() => { _applySettings(_lxGetSettings()); }, 100);
@@ -42505,8 +42516,9 @@ function _fitGameToViewport() {
   // "minimized" or "too big" they now have direct control. Same scale
   // applies to every map in the session — guaranteed consistent.
   const _userSettings = _lxGetSettings();
-  const _userScale = (typeof _userSettings.scale === 'number' && _userSettings.scale > 0.2)
+  let _userScale = (typeof _userSettings.scale === 'number' && _userSettings.scale > 0.2)
     ? _userSettings.scale : 2.0;
+  if (_userScale >= 3.999) _userScale = 99;   // v0.30.x (settings audit) - "Fit": no cap, fill the window
   // v0.26.x — Desktop scale clamp (overspill fix). The fixed 2.0 user scale
   // rendered the 960×560 wrapper at 1920×1120 regardless of viewport; on any
   // window smaller than that, body overflow:hidden CLIPPED the HUD + every
@@ -116973,6 +116985,10 @@ function closeAllModals() {
   }
   const _setBg = document.getElementById('settings-modal-bg');
   if (_setBg && _setBg.classList) _setBg.classList.remove('on');
+  // v0.30.x (settings audit) - and Save Backups (Settings > Slots, or the title menu) and the Jukebox: neither was on this
+  // list, so Esc closed Settings and left Slots standing on its own, the game paused behind it.
+  { const _bk = document.getElementById('backup-modal-bg'); if (_bk && _bk.classList.contains('on') && typeof closeBackupModal === 'function') { try { closeBackupModal(); } catch (e) {} } }
+  { const _jb = document.getElementById('jukebox-modal-bg'); if (_jb && _jb.classList.contains('on') && typeof closeJukebox === 'function') { try { closeJukebox(); } catch (e) {} } }
   /* Forced-choice overlays (expedition door/puzzle, ticket puzzle, credits) have
      no Esc path by design - do NOT unpause underneath them. */
   const _forcedUp = document.querySelector('#exp-door-modal, #exp-puzzle-modal, .tp-backdrop, #game-complete-overlay.on');
