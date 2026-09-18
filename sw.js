@@ -167,7 +167,9 @@
 // v0.30.767 - v57 -> v58. crusader_ult.webp and its nine frames are REPLACED under their own names
 // (the Bastion of Dawn medallion, which was cut off at its edges, is now the Dawnbreak nova), so a
 // returning browser would otherwise keep the old set.
-const CACHE = 'mojiworld-assets-v64';   // v0.30.x - Dragoon Sky Lance frames, still, dragoon_impact and its icon darkened to navy in place
+// v0.30.868 - v64 -> v65. Sprites/monsters/idle/scorpion_5.webp and scorpion_6.webp are REPLACED under their own
+// names (the Pincer's stray antennas cut out - pincer-antennas), so a returning browser would otherwise keep them.
+const CACHE = 'mojiworld-assets-v65';   // v0.30.868 - the Pincer's idle 5-6 without antennas
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
