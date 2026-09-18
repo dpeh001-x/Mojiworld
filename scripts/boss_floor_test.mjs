@@ -101,7 +101,12 @@ const S = await page.evaluate(() => {
   const read = (ty) => {
     const m = spawnMonster((player.x || 400) + 240, (player.y || 300), ty, true);
     if (!m || !m.type) return null;
-    const r = { maxHp: Math.round(m.maxHp || 0), atk: Math.round(m.atk || 0), def: Math.round(m.def || 0) };
+    // v0.30.388 cuts every zodiac's ATK by LX_ZODIAC_DMG_MUL AFTER the table is applied and keeps the pre-cut value -
+    // the table drives the spawn through that number; the cut itself is checked on its own below
+    const pre = (m._atkPreZodiacCut != null) ? m._atkPreZodiacCut : m.atk;
+    const r = { maxHp: Math.round(m.maxHp || 0), atk: Math.round(pre || 0), def: Math.round(m.def || 0),
+      cut: (m._atkPreZodiacCut != null) ? { pre: Math.round(m._atkPreZodiacCut), atk: Math.round(m.atk || 0),
+        mul: (typeof LX_ZODIAC_DMG_MUL === 'number') ? LX_ZODIAC_DMG_MUL : null } : null };
     game.monsters.length = 0;
     return r;
   };
@@ -118,6 +123,10 @@ for (const [ty, want] of [['octobaby', rows.find((r) => r.t === 'octobaby')], ['
      got && near(got.maxHp, want.hp) && near(got.atk, want.atk) && near(got.def, want.def),
      got ? `spawned ${got.maxHp}/${got.atk}/${got.def} vs table ${want.hp}/${want.atk}/${want.def}` : 'spawn failed');
 }
+{ const c = S.virgo && S.virgo.cut;
+  ok('a zodiac\'s spawned ATK is its table ATK after the zodiac damage cut (v0.30.388)',
+     c && c.mul > 0 && c.mul < 1 && c.atk === Math.max(1, Math.floor(c.pre * c.mul)),
+     c ? `${c.pre} x ${c.mul} -> ${c.atk}` : 'no cut recorded'); }
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

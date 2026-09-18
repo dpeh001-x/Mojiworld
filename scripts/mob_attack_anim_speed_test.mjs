@@ -36,7 +36,7 @@ const r = await page.evaluate(async () => {
   // its attack rate per-monster, and does a boss still get the boss rate?
   const _src = String(_monsterStateFrame);
   out.usesMobRate = _src.includes('set.attack, _atkMs');
-  out.bossKeepsRate = _src.includes('m.isBoss ? _BOSS_ATK_FRAME_MS : _MOB_ATK_FRAME_MS');
+  out.bossKeepsRate = _src.includes('m.isBoss ? _BOSS_ATK_FRAME_MS :');   // the mob side became a per-type table (Plumpdrake swings slower)
   out.holdUsesMobRate = _src.includes('now + _atkMs * 9');
   out.mobMs = (typeof _MOB_ATK_FRAME_MS !== 'undefined') ? _MOB_ATK_FRAME_MS : null;
 

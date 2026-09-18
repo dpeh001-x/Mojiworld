@@ -40,11 +40,13 @@ const r = await page.evaluate(() => {
   // every string the nameplate paints, in order
   const tagTexts = () => {
     const painted = [];
-    const _ft = ctx.fillText, _st = ctx.strokeText;
-    ctx.fillText = function (t) { painted.push(String(t)); return _ft.apply(this, arguments); };
-    ctx.strokeText = function () { return _st.apply(this, arguments); };
+    // v0.30.346 bakes the name plate into an offscreen canvas once per name and blits it, so a hook on the game
+    // ctx saw only the title line. Hook every 2D context and drop the bake so the name is painted inside the capture.
+    const P = CanvasRenderingContext2D.prototype, _ft = P.fillText;
+    P.fillText = function (t) { painted.push(String(t)); return _ft.apply(this, arguments); };
+    try { if (typeof _playerNameTagCache === 'object' && _playerNameTagCache) _playerNameTagCache.key = null; } catch (e) {}
     try { _drawPlayerNameTag(200, 300); } catch (e) { painted.push('THREW:' + e); }
-    ctx.fillText = _ft; ctx.strokeText = _st;
+    P.fillText = _ft;
     return painted;
   };
   const hud = () => {
