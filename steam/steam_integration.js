@@ -152,8 +152,11 @@ function init() {
     presence: {
       set(p) {
         try {
-          if (!client.friends || typeof client.friends.setRichPresence !== 'function' || !p) return false;
-          const sr = (k, v) => { try { client.friends.setRichPresence(k, v == null ? '' : String(v)); } catch (_) {} };
+          // v0.30.898 launch audit: steamworks.js 0.4.0 puts this on localplayer (client.friends does not exist, so presence and
+          // the 'connect' key behind Steam's Join Game never reached Steam)
+          const lp = client.localplayer;
+          if (!lp || typeof lp.setRichPresence !== 'function' || !p) return false;
+          const sr = (k, v) => { try { lp.setRichPresence(k, v == null ? '' : String(v)); } catch (_) {} };
           if ('status' in p)    { sr('status', p.status); sr('steam_display', '#Status_Playing'); sr('game_status', p.status); }
           if ('group' in p)     sr('steam_player_group', p.group);
           if ('groupSize' in p) sr('steam_player_group_size', p.groupSize ? String(p.groupSize) : '');
@@ -161,14 +164,19 @@ function init() {
           return true;
         } catch (e) { return false; }
       },
-      clear() { try { if (client.friends && client.friends.clearRichPresence) client.friends.clearRichPresence(); } catch (e) {} },
+      clear() {   // no clearRichPresence in 0.4.0: blank every key set() writes
+        try { const lp = client.localplayer; if (lp && typeof lp.setRichPresence === 'function') for (const k of ['status', 'steam_display', 'game_status', 'steam_player_group', 'steam_player_group_size', 'connect']) lp.setRichPresence(k, ''); } catch (e) {}
+      },
     },
     // Steam overlay — open a dialog ('friends' | 'community' | ...) or a web page.
     overlay: {
       open(dialog) {
         try {
-          const ov = client.overlay || (client.friends && client.friends);
-          if (ov && typeof ov.activateDialog === 'function') { ov.activateDialog(String(dialog || 'friends')); return true; }
+          // v0.30.898 launch audit: activateDialog takes steamworks.js's numeric Dialog enum; the string 'friends' threw
+          const DIALOG = { friends: 0, community: 1, players: 2, settings: 3, officialgamegroup: 4, stats: 5, achievements: 6 };
+          const n = (typeof dialog === 'number') ? dialog : DIALOG[String(dialog || 'friends').toLowerCase()];
+          const ov = client.overlay;
+          if (n != null && ov && typeof ov.activateDialog === 'function') { ov.activateDialog(n); return true; }
           if (client.overlay && typeof client.overlay.activateToUser === 'function') { /* needs a steamid — skip */ }
           return false;
         } catch (e) { return false; }

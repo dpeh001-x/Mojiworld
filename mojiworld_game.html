@@ -12810,7 +12810,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.897';
+const GAME_VERSION = 'v0.30.898';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -47611,13 +47611,17 @@ function _lxSteamInviteFriends() {
 }
 // --- Steam Stats + achievement progress --------------------------------------
 // Lifetime stat counters (configure matching stat API names in Steamworks).
+let _lxSteamStatsAt = 0;
 function _lxSteamPushStats() {
   if (!_steamAvailable() || !window.SteamAPI.stats) return;
+  // v0.30.898 launch audit: stored on every save (~1.5 s) - Steam rate-limits StoreStats; once a minute is plenty
+  const _now = Date.now(); if (_now - _lxSteamStatsAt < 60000) return; _lxSteamStatsAt = _now;
+  const _i32 = (v) => Math.max(0, Math.min(2147483647, Math.floor(+v || 0)));   // setInt takes a 32-bit integer
   try {
     window.SteamAPI.stats.set({
-      lifetime_kills: (game && game.kills) || 0,
-      highest_level: (player && player.level) || 1,
-      lifetime_coins: (player && player.mojicoins) || 0,
+      lifetime_kills: _i32((game && game.kills) || 0),
+      highest_level: _i32((game && game.prestige && (game.prestige.count || 0) > 0) ? Math.max(PRESTIGE_LEVEL, (player && player.level) || 1) : ((player && player.level) || 1)),   // an ascended hero has been Lv 100
+      lifetime_coins: _i32((player && player.mojicoins) || 0),
       bosses_defeated: (game && game.bestiary) ? Object.keys(game.bestiary).filter((k) => k.indexOf('_boss_') === 0).length : 0,   // v0.30.x — distinct bosses (was bossDefeated keys: doubled, and shrinking on respawn)
     });
   } catch (e) {}
@@ -48941,8 +48945,11 @@ function _lxPadPoll() {
     _lxPadScanAxes(pad);   // v0.30.x — keeps the hat/stick classification current
     // Native Steam Input digital states (custom Steam controller configs), ORed in.
     let steamBtns = null;
-    if (_steamAvailable() && window.SteamAPI.input && typeof window.SteamAPI.input.snapshot === 'function') {
+    if (_steamAvailable() && window.SteamAPI.input && typeof window.SteamAPI.input.snapshot === 'function' && !(_lxSteamInputIdleUntil > performance.now())) {
       try { steamBtns = window.SteamAPI.input.snapshot(); } catch (e) { steamBtns = null; }
+      // v0.30.898 a synchronous IPC round trip every frame, answered null when no Steam controller exists: back off to one
+      // ask every 2 s after ~1 s of nulls; the first real answer resumes every-frame polling
+      if (steamBtns == null) { if (++_lxSteamInputNulls >= 60) _lxSteamInputIdleUntil = performance.now() + 2000; } else _lxSteamInputNulls = 0;
     }
     if (!pad && !steamBtns) return;
     // v0.29.7xx — the controller-connected popup is gone (per user: "there was
@@ -49144,6 +49151,9 @@ const _LX_RUMBLE_MAP = {
   levelup: [0.30, 0.50, 260],   // celebratory roll
   void:    [0.60, 0.40, 300],
 };
+// v0.30.898 launch audit: a file dropped on the window navigated to it and replaced the game - the page has no use for drops
+try { window.addEventListener('dragover', (e) => { e.preventDefault(); }); window.addEventListener('drop', (e) => { e.preventDefault(); }); } catch (e) {}
+let _lxSteamInputNulls = 0, _lxSteamInputIdleUntil = 0;   // v0.30.898 backoff for the per-frame Steam Input snapshot (see _lxPadPoll)
 let _lxPadLastInput = -Infinity;   // v0.30.897 was 0: performance.now() also starts at 0, so every session opened "pad active" for 30 s        // perf.now() of last real pad input (buttons/axes)
 let _lxRumbleLast = 0;
 function _lxPadActive(windowMs) {
@@ -155979,6 +155989,9 @@ function _prologueApexSegment() {
       // the apex segment wrote into them outlived the reset. Captured as null when
       // absent so the restore can delete them again rather than inventing an empty one.
       early: game.early || null, achievements: game.achievements || null,
+      // v0.30.898 launch audit: the apex fight's combo reached the record (and the daily combo challenge), and the first real
+      // kill then unlocked the combo achievements on Steam for a Lv 1 hero
+      comboRecord: game.comboRecord || 0, dailyState: game.dailyState || null,
     });
     // v0.27.24 — tab-durable redundancy for the restore. The window globals can
     // be cleared by another script between here and _prologueFinish; a
@@ -157099,6 +157112,8 @@ function _prologueFinish(skipped) {
       // does not come back as a fully grandfathered one.
       if (fg.early) game.early = fg.early; else delete game.early;
       if (fg.achievements) game.achievements = fg.achievements; else delete game.achievements;
+      if ('comboRecord' in fg) game.comboRecord = fg.comboRecord || 0;   // v0.30.898
+      if ('dailyState' in fg) { if (fg.dailyState) game.dailyState = fg.dailyState; else delete game.dailyState; }
     }
   } catch (e) {}
   // v0.27.24 — FAIL-SAFE: if the snapshot was truly unrecoverable, the player is

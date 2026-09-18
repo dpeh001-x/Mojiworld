@@ -1,4 +1,4 @@
-# Mojiworld — Steam Achievements (38)
+# Mojiworld — Steam Achievements (41)
 
 The game already calls `SteamAPI.achievement.unlock(id)` on unlock and re-syncs owned
 achievements on launch. For them to register on Steam you must create each one in the
@@ -46,3 +46,6 @@ icon per achievement (Steam requires both; 256×256 PNG).
 | 36 | `combo200` | Unstoppable | Reach a 200-hit combo |
 | 37 | `prestige5` | Reborn | Ascend 5 times |
 | 38 | `prestige20` | Apex Ascendant | Reach the prestige cap (20) |
+| 39 | `duoTrial` | Twin Star | Clear a Duo Trial with a partner (nobody goes down) |
+| 40 | `boonCodex` | Boon Collector | Hold every boon at least once |
+| 41 | `questMaster` | Quest Master | Complete 175 quests |

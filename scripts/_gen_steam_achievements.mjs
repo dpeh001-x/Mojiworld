@@ -38,4 +38,6 @@ rows.forEach((r, i) => { md += `| ${i + 1} | \`${r.apiname}\` | ${r.name} | ${r.
 writeFileSync(join(root, 'steam', 'ACHIEVEMENTS_STEAM.md'), md);
 
 console.log(`Wrote steam/achievements_manifest.json + steam/ACHIEVEMENTS_STEAM.md — ${rows.length} achievements`);
-if (rows.length !== 39) console.warn('WARNING: expected 39, got ' + rows.length + ' — check the parse');
+// v0.30.898: was a hardcoded 39 (the table has grown past it) - compare against the ids actually in the table instead
+const idCount = (block.match(/\bid:\s*'/g) || []).length;
+if (rows.length !== idCount) console.warn('WARNING: parsed ' + rows.length + ' of ' + idCount + ' achievement ids — check the parse');

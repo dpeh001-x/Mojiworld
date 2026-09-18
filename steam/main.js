@@ -175,7 +175,14 @@ async function createWindow() {
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) { shell.openExternal(url); return { action: 'deny' }; }
-    return { action: 'allow' };
+    return { action: 'deny' };   // v0.30.898 launch audit: was 'allow' - a blob:/data:/about: URL opened a second window with the preload
+  });
+  // v0.30.898 launch audit: the window only ever shows the game. A dropped file or a stray link navigated it away with no way
+  // back; http(s) goes to the system browser instead, anything else is refused.
+  win.webContents.on('will-navigate', (e, url) => {
+    if (String(url).startsWith('http://127.0.0.1:' + port + '/')) return;
+    e.preventDefault();
+    if (/^https?:/.test(url)) { try { shell.openExternal(url); } catch (_) {} }
   });
   win.loadURL('http://127.0.0.1:' + port + ENTRY);
   if (_st && _st.maximized && !_st.fullscreen) win.maximize();
@@ -187,8 +194,17 @@ async function createWindow() {
   if (!ON_DECK) win.on('close', () => { try { winState.saveState(_stFile, winState.snapshot(win)); } catch (e) {} });
   // v0.30.791 - LAUNCH POLISH: a renderer crash or hang used to leave a blank or frozen window with no way back
   // but the task manager. Crash: reload (the game autosaves every 30 s and on hide). Hang: ask, never guess.
-  win.webContents.on('render-process-gone', (_e, d) => {
+  // v0.30.898 launch audit: a renderer that keeps crashing (e.g. out of memory) was reloaded every 500 ms forever. Three
+  // crashes inside two minutes stop the loop and say so.
+  const _crashes = [];
+  win.webContents.on('render-process-gone', async (_e, d) => {
     console.error('[mojiworld] renderer gone: ' + (d && d.reason));
+    const now = Date.now(); _crashes.push(now); while (_crashes.length && now - _crashes[0] > 120000) _crashes.shift();
+    if (_crashes.length >= 3) {
+      try { await dialog.showMessageBox(win, { type: 'error', buttons: ['Quit'], title: 'Mojiworld', message: 'Mojiworld keeps crashing.', detail: 'Your progress up to the last save is kept. Please restart the game; if this repeats, lower Graphics Quality in Settings.' }); } catch (e) {}
+      try { app.quit(); } catch (e) {}
+      return;
+    }
     setTimeout(() => { try { if (!win.isDestroyed()) win.webContents.reload(); } catch (e) {} }, 500);
   });
   win.webContents.on('did-fail-load', (_e, code, desc, _url, isMainFrame) => {
