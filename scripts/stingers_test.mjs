@@ -39,8 +39,11 @@ try {
     spawnMonster(player.x + 300, player.y - 40, 'king', true, false); const b = game.monsters[game.monsters.length - 1];
     b.currentHp = 0; try { killMonster(b); } catch (e) { out.killErr = e.message; }
     out.victory = window._lxLastSting && window._lxLastSting.kind;
-    await sleep(1300); out.musicDuring = mus ? +mus.volume.toFixed(3) : null;
-    const vs = (typeof _lxStingEls !== 'undefined') && _lxStingEls.victory; out.stingPlaying = !!(vs && !vs.paused && vs.currentTime > 0);
+    // v0.30.x - sampled through the window, not once at its end: on a loaded machine the sleeps run long and the
+    // 2.8 s sting could finish before a single late look (seen on 2026-09-18 across every build, the sting playing fine).
+    let _sp = false;
+    for (let i = 0; i < 13; i++) { await sleep(100); const vs = (typeof _lxStingEls !== 'undefined') && _lxStingEls.victory; if (vs && !vs.paused && vs.currentTime > 0) _sp = true; }
+    out.musicDuring = mus ? +mus.volume.toFixed(3) : null; out.stingPlaying = _sp;
     try { closeAllModals(); } catch (e) {} game.paused = false;
     await sleep(5600); out.musicAfter = mus ? +mus.volume.toFixed(2) : null; out.target = +tgt.toFixed(2);
     // a split twin
