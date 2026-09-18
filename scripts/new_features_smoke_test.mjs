@@ -141,7 +141,7 @@ try {
   ok('affix pin renders for all 5 real affixes', Object.keys(affix).filter(k => k[0] !== '_').length === 5);
   ok('pin hides when the map has no affix', affix._noneHidden);
   ok('Gilded pin shows its accent + buff text', affix.gilded.disp === 'flex'
-      && affix.gilded.buff === '+60% coin' && affix.gilded.accent.trim() === '#ffd870', affix.gilded);
+      && affix.gilded.buff === '+60% Mojicoins' && affix.gilded.accent.trim() === '#ffd870', affix.gilded);
   ok('all 5 affix sigils decode (no emoji fallback)',
      ['gilded', 'teeming', 'lucid', 'hoarded', 'restless'].every(k => affix[k].iconOk),
      Object.fromEntries(['gilded', 'teeming', 'lucid', 'hoarded', 'restless'].map(k => [k, affix[k].iconOk])));
