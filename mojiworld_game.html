@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.882';
+const GAME_VERSION = 'v0.30.883';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -92806,6 +92806,7 @@ function _bossSpecialAttacks(m, dt) {
     if (m._smithTollAt == null) m._smithTollAt = now + 570;
     if (now >= m._smithTollAt && m._smithHeat === 'quenched') {
       m._smithTollAt = now + 300;   // ~5s — one to two tolls per quench
+      m._smithTollTellAt = performance.now();   // v0.30.x (audit B5) — the floor band reads the 700 ms tell from here
       if (typeof showToast === 'function') showToast('🔔 RING OF THE BROKEN ANVIL — jump the wave!', 'epic');
       if (typeof addShake === 'function') addShake(8);
       for (let k = 0; k < 10 && typeof _budgetedParticlePush === 'function'; k++) {
@@ -139646,8 +139647,10 @@ const _LX_MOB_SKILL_ART = {
   mortarLob: { img: ['meteor_marker'] },   // the landing-zone marker (a marker-only meteor_warn)
 };
 const _LX_MOB_TYPE_ART = {
-  legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },
-  zodiac_pisces: { img: ['gravitos_riftring'], fx: ['gravitos_riftring'] },   // v0.30.x boss polish (audit B2) — her Tidal Crush zone   // his 6 s arena stomp is a mob_quake of his own
+  legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },   // his 6 s arena stomp is a mob_quake of his own
+  zodiac_pisces: { img: ['gravitos_riftring'], fx: ['gravitos_riftring'] },   // v0.30.x boss polish (audit B2) — her Tidal Crush zone
+  // v0.30.x boss polish (audit B5) — the floor band their arena-wide slams draw (see _lxSlamWindup)
+  mooma: { img: ['tg_smash'] }, kingKrook: { img: ['tg_smash'] }, sundered_smith: { img: ['tg_smash'] }, zodiac_capricorn: { img: ['tg_smash'] },
   // v0.30.790 grav-smooth — the five rings his patterns cast: each was decoded and pinned on the frame of its
   // first cast (laser 22 ms, soul 36 ms, slam 22 ms, measured).
   gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield', 'gravitos_voidrift', 'gravitos_riftring'], fx: ['gravitos_singularity_zone', 'gravitos_voidrift', 'gravitos_riftring'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
@@ -149386,6 +149389,33 @@ function _lxZoneWorthy(m, mul) {
   return (m.atk || 0) * (mul || 1) >= _hp * LX_ZONE_DMG_PCT;
 }
 try { window._lxZoneWorthy = _lxZoneWorthy; } catch (e) {}
+// v0.30.x boss polish (audit B5) — ARENA-WIDE SLAMS SHOW THE FLOOR THEY HIT. Mooma's quake (half your max HP), King
+// Krook's earthquake and stomp, the Sundered Smith's anvil toll and Capricorn's hoofquake hit anyone standing on the
+// ground, and were warned only by a toast and dust at the boss's feet. For the windup the floor now glows with the
+// molten-crack band (tg_smash, tiled across the visible arena at the level the boss stands on). It is read from the
+// boss's own state every frame, like Leo's pounce circle, so it can never outlive the attack or run ahead of it - the
+// pattern clock these run on is 1.3-1.9x real time, which a frame-counted band could not follow.
+function _lxSlamWindup(m) {
+  const st = m.patternState, t = m.patternTimer || 0;
+  if (m.type === 'mooma' && st === 'quake' && t < 1200 && !m._quakeFired) return t / 1200;
+  if (m.type === 'kingKrook' && st === 'earthquake' && t < 1200 && !m._kFired) return t / 1200;
+  if (m.type === 'kingKrook' && st === 'stomp' && t < 1100 && !m._kFired) return t / 1100;
+  if (m.type === 'sundered_smith' && m._smithTollTellAt) {
+    const e = performance.now() - m._smithTollTellAt;
+    if (e >= 0 && e < 700) return e / 700;   // the toll's 700 ms tell before the waves run the floor
+  }
+  if (m.zodiacSign === 'capricorn' && m._capQuakeFiring && m._capQuakeT > 0) return 1 - m._capQuakeT / 800;
+  return -1;
+}
+function _lxPushFloorBand(out, m, prog) {
+  const W0 = (typeof W === 'number') ? W : 1280, camX = (game.camera && game.camera.x) || 0;
+  const SEG = 300, y = m.y + m.h - 42, h = 70;   // the crack line sits on the floor the boss stands on
+  const ww = (game.mapData && game.mapData.worldWidth) || (camX + W0);
+  const x0 = Math.max(0, Math.floor(camX / SEG) * SEG), x1 = Math.min(ww, camX + W0 + SEG);
+  for (let x = x0; x < x1; x += SEG) {
+    out.push({ kind: 'smash', x: x - 4, y, w: SEG + 8, h, prog: Math.max(0, Math.min(1, prog)), color: '#ff8844', dir: 'center', tg: 'tg_smash' });
+  }
+}
 function _lxAttackZones() {
   const out = [];
   if (!game.monsters || !game.monsters.length) return out;
@@ -149476,6 +149506,7 @@ function _lxAttackZones() {
         w: LEO_POUNCE_R * 2, h: 32,
         prog: _lp, color: '#ffdd66', dir: 'center', tg: 'tg_smash' });
     }
+    { const _sp = _lxSlamWindup(m); if (_sp >= 0) _lxPushFloorBand(out, m, _sp); }   // v0.30.x boss polish (audit B5) — see _lxSlamWindup
     // v0.30.x boss polish (audit B2) — Pisces' Tidal Crush: the spot it crushes, for the whole second it promises.
     // It tests a +-80 px box round the marked point (corner 113 px), so the ring is drawn 120 px out and never
     // under-promises.
