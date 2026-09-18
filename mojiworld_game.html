@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.883';
+const GAME_VERSION = 'v0.30.884';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -25978,7 +25978,8 @@ function _renderExpeditionQuestPin() {
     }
   }
   pin.innerHTML = `<span class="eq-title">📜 ${cq.title}</span><span class="eq-goal">${cq.goal}</span>` +
-                  (_progressLine ? `<span class="eq-progress">${_progressLine}</span>` : '');
+                  (_progressLine ? `<span class="eq-progress">${_progressLine}</span>` : '') +
+                  `<span class="eq-progress" style="color:#ff8a8a">⚠ Loot is REMOVED when the run ends</span>`;   // v0.30.884 — loot rule
   pin.style.display = 'block';
 }
 
@@ -47053,6 +47054,7 @@ const PLAYER_SAVE_FIELDS = [
   // v0.30.803 - Dawn's Favor: the aura's off switch, and "the player has been told" (see drawDawnAura).
   'dawnAuraOff',
   '_dawnFavorSeen',
+  '_expLootAck',   // v0.30.884 — the player accepted Bravo's loot rule once (see LX_EXP_LOOT_RULE)
   // v0.26.276 — Optional auto-equip toggle. When true, looted gear
   // scoring 5 %+ better than equipped auto-swaps in. Off by default
   // (preserves v0.25.623's "no surprise loadout changes" intent).
@@ -66263,6 +66265,49 @@ function _expeditionPickMap(floor, playerLevel) {
   if (!valid.length) return 'forest';   // ultimate fallback
   return valid[Math.floor(Math.random() * valid.length)];
 }
+// v0.30.884 — EXPEDITION LOOT IS REMOVED, AND THE GAME NOW SAYS SO (per user: "Make it very clear
+// that any Loot that a player receive from the expedition will be REMOVED").
+//
+// The rule itself was already enforced: the snapshot below, plus the v0.26.399 wrapper further down,
+// restores the bag, the worn gear, potions, boons and the Mojicoin wallet when a run ends, however it
+// ends. What the player was told was one metaphor ("come apart at the boundary") behind "Find out
+// more", a line about boons in the start toast, and nothing at all while they were picking things up.
+// Now it is said where each decision is made: at Bravo before the first run (a one-time card that
+// must be accepted), in her opening speech every time, in the start toast, on the quest pin for the
+// whole run, on every pickup, across the top of the bag with each tower item marked, and on the way
+// out, with a count of exactly what was taken.
+//
+// What is KEPT is stated as precisely: EXP and levels, and the victory rewards (the bonus Mojicoins,
+// Setshards and title) - granted after the restore, so they are the only things that cross.
+const LX_EXP_LOOT_RULE = 'Everything you loot in the tower is REMOVED when the run ends';
+// once per floor, the first time something is picked up on it
+// the corner mark on a tower item, only while a run is live (the restore removes the item anyway)
+function _lxExpLootBadge(it) {
+  if (!it || !it._expLoot || !game.expedition || !game.expedition.active) return '';
+  return '<span title="Expedition loot \u2014 REMOVED when the run ends" style="position:absolute;left:2px;bottom:2px;padding:0 3px;border-radius:3px;background:#b3261e;color:#fff;font:700 9px/13px sans-serif;pointer-events:none">\u2715 TOWER</span>';
+}
+function _lxExpLootNotice() {
+  if (!game.expedition || !game.expedition.active) return;
+  if (game.expedition._lootNoticeFloor === game.expedition.floor) return;
+  game.expedition._lootNoticeFloor = game.expedition.floor;
+  if (typeof showToast === 'function') showToast('\u26a0 ' + LX_EXP_LOOT_RULE + ' \u2014 win, die or leave.', 'rare');
+}
+// what the restore is about to take back, counted BEFORE it runs
+function _lxExpLootTally(snap) {
+  const out = { items: 0, boons: 0, potions: 0, coins: 0 };
+  try {
+    let marked = 0;
+    for (const it of (player.inventory || [])) if (it && it._expLoot) marked++;
+    for (const s in (player.equipped || {})) { const it = player.equipped[s]; if (it && it._expLoot) marked++; }
+    const grown = (player.inventory || []).length - ((snap && Array.isArray(snap.inventory)) ? snap.inventory.length : 0);
+    out.items = Math.max(0, marked, grown);
+    out.boons = Math.max(0, (player.boons || []).length - ((snap && Array.isArray(snap.boons)) ? snap.boons.length : 0));
+    const sum = (o) => { let n = 0; for (const k in (o || {})) n += (+o[k] || 0); return n; };
+    out.potions = Math.max(0, sum(player.consumables) - sum(snap && snap.consumables));
+    out.coins = Math.max(0, Math.floor((player.mojicoins || 0) - ((snap && typeof snap.mojicoins === 'number') ? snap.mojicoins : (player.mojicoins || 0))));
+  } catch (e) {}
+  return out;
+}
 // Snapshot the player's pre-expedition state. On exit/death we restore
 // from this snapshot so anything gained inside (boons / consumables /
 // expedition inventory) is wiped. Persistent: level, EXP, gear, mojicoins
@@ -66340,9 +66385,9 @@ function _startExpedition() {
     enteredAt: Date.now(),
   };
   if (typeof showToast === 'function') {
-    showToast(`⚜ EXPEDITION BEGUN — ${_diff.icon} ${_diff.label}  ·  Floor 1 of ${EXPEDITION_FLOOR_COUNT}  ·  share code ${game.expedition.seedCode} to send a friend down the same tower. Boons collected in here vanish on exit.`, 'legendary');
+    showToast(`⚜ EXPEDITION BEGUN — ${_diff.icon} ${_diff.label}  ·  Floor 1 of ${EXPEDITION_FLOOR_COUNT}  ·  share code ${game.expedition.seedCode} to send a friend down the same tower.  ·  ⚠ ${LX_EXP_LOOT_RULE.toUpperCase()}.`, 'legendary');
     // v0.30.874 — the floor is not visible anywhere else before the first fight
-    if ((player.level | 0) < LX_EXPEDITION_MIN_MOB_LEVEL) setTimeout(() => { try { showToast(`⚠ The tower does not come down to you ' + EM + ' below Lv ${LX_EXPEDITION_MIN_MOB_LEVEL} every foe is Lv ${LX_EXPEDITION_MIN_MOB_LEVEL} and its bosses Lv ${LX_EXPEDITION_MIN_MOB_LEVEL + 10}.`, 'epic'); } catch (e) {} }, 1600);
+    if ((player.level | 0) < LX_EXPEDITION_MIN_MOB_LEVEL) setTimeout(() => { try { showToast(`⚠ The tower does not come down to you — below Lv ${LX_EXPEDITION_MIN_MOB_LEVEL} every foe is Lv ${LX_EXPEDITION_MIN_MOB_LEVEL} and its bosses Lv ${LX_EXPEDITION_MIN_MOB_LEVEL + 10}.`, 'epic'); } catch (e) {} }, 1600);
 
   }
   if (typeof flash === 'function') flash(0.5);
@@ -66388,6 +66433,7 @@ function _endExpedition(reason) {
   // run start with the flag already true → Bravo on B1 would offer a
   // free boon before any mob died. Same for currentQuest leaking into
   // the persistent world's quest pin between runs.
+  const _lootGone = _lxExpLootTally(_snap);   // v0.30.884 — loot rule: counted before the restore takes it
   game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
   _expeditionRestorePlayer(_snap);
   // v0.30.455 — the loaned slots are gone as of the line above (the cap reads game.expedition.active).
@@ -66425,6 +66471,15 @@ function _endExpedition(reason) {
               : reason === 'death'    ? `⚜ Expedition ended at Floor ${_floorReached}.`
               : `⚜ Expedition abandoned at Floor ${_floorReached}.`;
     showToast(_msg, reason === 'complete' ? 'legendary' : 'rare');
+    {   // v0.30.884 — loot rule: what was taken, in numbers
+      const _p = [];
+      if (_lootGone.items)   _p.push(_lootGone.items + ' item' + (_lootGone.items > 1 ? 's' : ''));
+      if (_lootGone.potions) _p.push(_lootGone.potions + ' potion' + (_lootGone.potions > 1 ? 's' : ''));
+      if (_lootGone.boons)   _p.push(_lootGone.boons + ' boon' + (_lootGone.boons > 1 ? 's' : ''));
+      if (_lootGone.coins)   _p.push(_lootGone.coins.toLocaleString() + ' Mojicoins');
+      const _gone = _p.length ? '🗑 Expedition loot REMOVED: ' + _p.join(' · ') : '🗑 Expedition loot REMOVED — nothing picked up in the tower comes back with you.';
+      setTimeout(() => showToast(_gone, 'rare'), 1300);
+    }
     // v0.26.295 — Surface EXP retention so the player can see that
     // tower gains carried out. Two cases:
     //   • Same level → simple "+N EXP retained" line.
@@ -75830,6 +75885,11 @@ function updatePlayer(dt) {
           continue;  // skip the consumption + splice below
         }
         player.inventory.push(d.item);
+        if (game.expedition && game.expedition.active && d.item) {   // v0.30.884 — loot rule: marked for the bag, tagged in the world
+          d.item._expLoot = true;
+          game.damageNumbers.push({ taken: true, x: player.x + player.w / 2 - 46, y: player.y - 34, vy: -1.1, text: '✕ REMOVED ON EXIT', life: 80, color: '#ff6b6b', size: 11 });
+          _lxExpLootNotice();
+        }
         audio.play('pickup');
         // v0.26.317 — Distinct item-pickup SFX layered on top of the
         // existing 'pickup' synth so rare/epic drops feel weightier.
@@ -107038,9 +107098,9 @@ So.. do you need a lift?`;
       // be changed mid-descent; a player who forgets which one they picked has no other way to
       // check it, and it is the number that explains why the floor is going the way it is.
       const _dNow = _lxExpDiff();
-      text = `You're on Floor ${game.expedition.floor} of ${EXPEDITION_FLOOR_COUNT}, running ${_dNow.icon} <b>${_dNow.label}</b> — foes at ${Math.round(_dNow.stat * 100)}%, rewards at ${Math.round(_dNow.reward * 100)}%. Quit here and the run's gifts come undone.\n\nShare code <b>${game.expedition.seedCode}</b> if a friend wants the same floors.`;
+      text = `<span style="color:#ff6b6b;font-weight:800;letter-spacing:.2px">⚠ Quit here and everything you looted is REMOVED</span> — the same as dying or finishing. Only EXP and levels come back with you.\n\nYou're on Floor ${game.expedition.floor} of ${EXPEDITION_FLOOR_COUNT}, running ${_dNow.icon} <b>${_dNow.label}</b> — foes at ${Math.round(_dNow.stat * 100)}%, rewards at ${Math.round(_dNow.reward * 100)}%.\n\nShare code <b>${game.expedition.seedCode}</b> if a friend wants the same floors.`;
 
-      opts.push({ t:'Abandon this expedition', cb:() => { closeDialog(); if (typeof _endExpedition === 'function') _endExpedition('abandon'); } });
+      opts.push({ t:'✕ Abandon — all expedition loot is REMOVED', cb:() => { closeDialog(); if (typeof _endExpedition === 'function') _endExpedition('abandon'); } });   // v0.30.884 — loot rule
       opts.push({ t:'About the thing at the top\u2026', cb: _sovRumour });   // v0.30.471
       // v0.26.316 — Per user "For the expedition when clicking on
       // continuing the expedition it does not warp back to where I
@@ -107093,22 +107153,36 @@ So.. do you need a lift?`;
           openNPC(npc);   // re-render so the strip and the Begin button agree
         },
       });
-      if (game._expInfo) {
+      if (game._expInfo === 'ack') {
+        // v0.30.884 — the one-time card. A player cannot start a first run without reading and
+        // accepting the loot rule; after that it is repeated in the speech, not re-asked.
+        // The rule comes FIRST and the whole card fits the prose box's first lines: the first
+        // version opened with two lines of flavour and cut its key sentence at "...WHEN THE".
+        text = `<span style="color:#ff6b6b;font-weight:800;letter-spacing:.2px">\u26a0 EVERYTHING YOU LOOT IN THE TOWER IS REMOVED WHEN THE RUN ENDS.</span>\n\u2715 Gear (even gear you put on) \u00b7 items \u00b7 potions \u00b7 boons \u00b7 Mojicoins\n\u2713 Kept: <b>EXP and levels</b>, and the victory rewards (bonus Mojicoins, Setshards, titles)\n\n*She stops you with two fingers on your wrist.* Win, die or walk out \u2014 the same rule. I would rather you heard it from me than found out at the top.`;
+        opts.push({ t:'\u269c I understand \u2014 loot is removed. Begin', cb:() => {
+          player._expLootAck = true;
+          if (typeof saveState === 'function') saveState();
+          const _go = game._expAckNext; game._expAckNext = null;
+          if (typeof _go === 'function') _go();
+        } });
+        opts.push({ t:'\u25c0 Not yet', cb:() => { game._expInfo = null; game._expAckNext = null; openNPC(npc); } });
+      } else if (game._expInfo) {
         text = `*She turns her palm over, counting nothing.*\n\nAsk. I would rather you knew what you were walking into than found out politely.`;
-        const _say = (s) => () => { const d = document.getElementById('dialog-text'); if (d) d.textContent = s; };
-        opts.push({ t:'🗺 The descent', cb: _say(`<b>Ten floors, B1 down to B10.</b>\n\nEach is its own room with its own quest. Clear what the floor asks and the way down opens.\n\nEverything in them is built to your level. Nothing gets easier because you got stronger. That is the point.`) });
+        const _say = (s) => () => { const d = document.getElementById('dialog-text'); if (d) d.innerHTML = s; };   // v0.30.884 — was textContent: every answer showed its <b> tags as literal text (authored copy only)
+        opts.push({ t:'🗺 The descent', cb: _say(`<b>Ten floors, B1 down to B10.</b>\n\nEach is its own room with its own quest. Clear what the floor asks and the way down opens.\n\nEverything in them is built to your level — and never below Lv ${LX_EXPEDITION_MIN_MOB_LEVEL}. Nothing gets easier because you got stronger. That is the point.`) });
         opts.push({ t:'💫 The blessings', cb: _say(`<b>I meet you at every threshold.</b>\n\nClear a floor and I'll be at the next stair with three blessings. You take one.\n\nThey stack and they talk to each other — take enough of one colour and the tower plays along. That is where ten fights become a build.`) });
         opts.push({ t:'⚔ The trials', cb: _say(`<b>B5 and B10 are doors with something standing in them.</b>\n\nB5 is the Arbiter — a real fight, the tower checking whether you picked the blessings you needed.\n\nB10 is the Apex. I won't describe it. Ask me the other question for what little I'll say.`) });
-        opts.push({ t:'📜 What you keep', cb: _say(`<b>Roguelite rules.</b>\n\nBoons, items and Mojicoins gathered inside <b>come apart at the boundary</b>.\n\nWhat survives is <b>EXP and levels</b> — what the descent did to you, not what it gave you.\n\nDeath ends the run, not your life. The world up here stays as you left it.`) });
+        opts.push({ t:'📜 What you keep', cb: _say(`<b>Roguelite rules.</b>\n\n<span style="color:#ff6b6b;font-weight:800;letter-spacing:.2px">Everything you loot inside is REMOVED when the run ends</span> — win, die or walk out:\n✕ gear, even gear you put on\n✕ items and potions\n✕ boons\n✕ Mojicoins picked up inside\n\nWhat survives is <b>EXP and levels</b> — what the descent did to you, not what it gave you — and the <b>victory rewards</b>: bonus Mojicoins, Setshards, a title.\n\nDeath ends the run, not your life. The world up here stays as you left it.`) });
         opts.push({ t:'◈ The weight', cb: _say(`<b>The strip above this conversation.</b>\n\n${LX_EXPEDITION_DIFFICULTY_ORDER.map((k) => { const d = LX_EXPEDITION_DIFFICULTY[k]; return `${d.icon} <b>${d.label}</b> — everything down there hits and holds at ${_pc(d.stat)}, and pays ${_pc(d.reward)}.`; }).join('\n')}\n\nThe numbers don't match on purpose. A lost run pays for the floors you reached and nothing for the rest — so safer is worth more than the difference, and harder is worth less.\n\nIt locks when you step through. Choose up here, not on Floor 9.`) });
         opts.push({ t:'◀ Back to the portal', cb:() => { game._expInfo = null; openNPC(npc); } });
       } else {
-      text = `*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready.\n\nYou don't climb toward a sunrise here. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and carry the dream back up out of it.\n\nA grief you walk down on purpose. Ten floors. I'll be at every one.`;
-      opts.push({ t:`⚜ Begin Expedition — ${_dSel.icon} ${_dSel.label} (Lv ${_lv})`, cb:() => {
+      text = `<span style="color:#ff6b6b;font-weight:800;letter-spacing:.2px">\u26a0 Everything you loot in the tower is REMOVED when the run ends.</span> You keep only EXP, levels and the victory rewards.\n\n*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready.\n\nYou don't climb toward a sunrise here. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and carry the dream back up out of it.\n\nA grief you walk down on purpose. Ten floors. I'll be at every one.`;
+      const _ackThen = (go) => { if (player && player._expLootAck) { go(); return; } game._expAckNext = go; game._expInfo = 'ack'; openNPC(npc); };   // v0.30.884 — loot rule
+      opts.push({ t:`⚜ Begin Expedition — ${_dSel.icon} ${_dSel.label} (Lv ${_lv})`, cb:() => _ackThen(() => {   // v0.30.884 — loot rule
         game._expInfo = null;
         closeDialog();
         if (typeof _startExpedition === 'function') _startExpedition();
-      } });
+      }) });
       opts.push({ t:'📖 Find out more…', cb:() => { game._expInfo = 1; openNPC(npc); } });
       // v0.29.286 — seeded run. Entering a code replays that descent's riddles and final Echo,
       // so a run can be shared or re-attempted.
@@ -107116,14 +107190,14 @@ So.. do you need a lift?`;
       // join seeded to join with a friend"). The mechanism is unchanged and so is the honest
       // description of it: the same code gives you the same tower, played separately. It is a
       // shared descent, not a shared session, and the modal says so rather than implying co-op.
-      opts.push({ t:'🤝 Join a friend\'s descent…', cb: async () => {
+      opts.push({ t:'🤝 Join a friend\'s descent…', cb: () => _ackThen(async () => {   // v0.30.884 — loot rule
         game._expInfo = null;
         closeDialog();
         const _code = await _expeditionSeedPrompt();
         if (_code === null) return;   // cancelled — don't start a run
         if (_code) _setExpeditionSeed(_code);
         if (typeof _startExpedition === 'function') _startExpedition();
-      } });
+      }) });
       opts.push({ t:'About the thing at the top…', cb: _sovRumour });   // v0.30.471
       opts.push({ t:'Maybe later', cb:() => { game._expInfo = null; closeDialog(); } });
       }
@@ -114834,6 +114908,17 @@ function renderInventory(prefix) {
   }
 
   grid.innerHTML = '';
+  {   // v0.30.884 — loot rule: a banner over the grid for the whole run
+    const _inExp = !!(game.expedition && game.expedition.active);
+    let _bn = document.getElementById(prefix + 'exp-loot-banner');
+    if (_inExp && !_bn && grid.parentNode) {
+      _bn = document.createElement('div'); _bn.id = prefix + 'exp-loot-banner';
+      _bn.style.cssText = 'margin:0 0 8px;padding:7px 10px;border-radius:6px;border:1px solid #ff6b6b;background:rgba(120,20,20,.35);color:#ffd0d0;font-size:12px;line-height:1.35;';
+      _bn.innerHTML = '<b style="color:#ff6b6b">⚠ EXPEDITION</b> — everything you loot in the tower is <b style="color:#ff6b6b">REMOVED</b> when the run ends, even gear you put on. Marked <b style="color:#ff6b6b">✕</b>.';
+      grid.parentNode.insertBefore(_bn, grid);
+    }
+    if (_bn) _bn.style.display = _inExp ? '' : 'none';
+  }
   // Equip slots always visible — they're the "currently-worn" row, shared
   // across all tabs. Show dimmed if the active tab isn't Equip. Scope the
   // class lookup to the prefix's host so we don't dim the OTHER copy.
@@ -114851,7 +114936,7 @@ function renderInventory(prefix) {
     if (it) { const _af = itemAttrFamily(it); if (_af) el.dataset.attr = _af; else delete el.dataset.attr; }
     else delete el.dataset.attr;
     el.innerHTML = it
-      ? `${itemIconHtml(it, 42)}${_starBadgeHtml(it)}${_tierBadgeHtml(it)}<div class="label">${slot}</div>`
+      ? `${itemIconHtml(it, 42)}${_starBadgeHtml(it)}${_tierBadgeHtml(it)}${_lxExpLootBadge(it)}<div class="label">${slot}</div>`
       : `<span style="opacity:0.4; font-size:22px">${slot==='weapon'?'⚔️':slot==='armor'?'🛡️':'💍'}</span><div class="label">${slot}</div>`;
     el.onclick = () => {
       if (it) {
@@ -114962,7 +115047,7 @@ function renderInventory(prefix) {
       // The click handler stops propagation so the equip click below
       // doesn't fire; uiConfirm gates the actual splice so accidental
       // taps don't delete loot.
-      slot.innerHTML = itemIconHtml(it, 44) + _starBadgeHtml(it) + _tierBadgeHtml(it) + _classBadgeHtml(it)
+      slot.innerHTML = itemIconHtml(it, 44) + _starBadgeHtml(it) + _tierBadgeHtml(it) + _classBadgeHtml(it) + _lxExpLootBadge(it)
         + `<button class="inv-trash" data-idx="${idx}" title="Discard" type="button">🗑</button>`;
       const _trash = slot.querySelector('.inv-trash');
       if (_trash) {
