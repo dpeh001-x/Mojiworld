@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.877';
+const GAME_VERSION = 'v0.30.878';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -42638,7 +42638,10 @@ function toggleFullscreenDesktop() {
   const inFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
   // Always flip the force-desktop flag on click; persisting means the
   // user can hit the button once and have desktop layout from then on.
-  const wantDesktop = !document.body.classList.contains('force-desktop');
+  // v0.30.x menus polish (audit U5) — decided by what the screen IS doing. This flipped the saved desktop-layout
+  // flag, which boot restores and an Esc out of fullscreen leaves set, so after a relaunch or an Esc the first press
+  // only cleared the flag and a second was needed. Entering fullscreen turns the desktop layout on, leaving turns it off.
+  const wantDesktop = !inFullscreen;
   document.body.classList.toggle('force-desktop', wantDesktop);
   document.body.classList.remove('mc-portrait', 'mc-landscape', 'nag-portrait');
   try {
@@ -42676,7 +42679,7 @@ function _syncFullscreenIcon() {
   const btn = document.getElementById('fullscreen-btn');
   if (!btn) return;
   const inFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-  btn.textContent = inFs ? '⛶⤡' : '⛶';
+  btn.classList.toggle('fs-on', inFs); btn.setAttribute('aria-pressed', inFs ? 'true' : 'false');   // v0.30.x (audit U5) — was textContent, which wiped the painted icon
   btn.title = inFs
     ? 'Exit fullscreen (returns to windowed desktop layout)'
     : 'Fullscreen + Desktop layout — shows HP/MP/EXP, skill bar, all HUD elements';
@@ -108482,6 +108485,14 @@ function selectSellByTier(maxTier) {
 // global scalar, clears the selection, plays SFX, toasts, saves, and
 // re-renders the sell shop. Shared by the footer SELL button AND the
 // instant-tier path so the two never drift apart. Returns {count, gained}.
+// v0.30.x menus polish (audit U2) — what a bulk sell must not take by accident: gear you are wearing, legendaries,
+// and anything carrying star enhancement. "Select all" leaves them out; a sale that holds any asks first.
+function _lxIsEquippedItem(it) {
+  if (!it || typeof player === 'undefined' || !player || !player.equipped) return false;
+  for (const s in player.equipped) if (player.equipped[s] === it) return true;
+  return false;
+}
+function _lxSellGuarded(it) { return !!it && (_lxIsEquippedItem(it) || it.rarity === 'legendary' || (it.stars | 0) > 0); }
 function executeSellSelection() {
   if (!game._sellSelection || game._sellSelection.size === 0) return { count: 0, gained: 0 };
   const ordered = Array.from(game._sellSelection).sort((a, b) => b - a);
@@ -108867,7 +108878,7 @@ function openShop(type, opts) {
       list.appendChild(footer);
       // Toolbar handlers
       toolbar.querySelector('#sell-all').onclick = () => {
-        for (let i = 0; i < player.inventory.length; i++) game._sellSelection.add(i);
+        for (let i = 0; i < player.inventory.length; i++) { if (!_lxSellGuarded(player.inventory[i])) game._sellSelection.add(i); }   // v0.30.x (audit U2) — click a row to sell one of those on purpose
         openShop('sell');
       };
       toolbar.querySelector('#sell-clear').onclick = () => {
@@ -108913,6 +108924,18 @@ function openShop(type, opts) {
       // Footer confirm — bulk-sell (v0.26.472: shared executeSellSelection).
       footer.querySelector('#sell-confirm-btn').onclick = () => {
         if (game._sellSelection.size === 0) return;
+        // v0.30.x menus polish (audit U2) — a sale holding equipped, legendary or enhanced gear asks first
+        const _sel = Array.from(game._sellSelection).map((i) => player.inventory[i]).filter(Boolean);
+        const _eq = _sel.filter(_lxIsEquippedItem).length, _lg = _sel.filter((it) => it.rarity === 'legendary').length, _st = _sel.filter((it) => (it.stars | 0) > 0).length;
+        if ((_eq || _lg || _st) && typeof uiConfirm === 'function') {
+          const _w = [];
+          if (_eq) _w.push(_eq + ' equipped (' + (_eq === 1 ? 'it comes' : 'they come') + ' off)');
+          if (_lg) _w.push(_lg + ' legendary');
+          if (_st) _w.push(_st + ' with ★ enhancement (the stars are lost)');
+          uiConfirm({ title: 'Sell ' + _sel.length + ' item' + (_sel.length === 1 ? '' : 's') + '?', body: 'This sale includes ' + _w.join(', ') + '.\n\nSold items cannot be bought back.', yesLabel: 'Sell', noLabel: 'Keep them', danger: true })
+            .then((ok) => { if (ok) executeSellSelection(); });
+          return;
+        }
         executeSellSelection();
       };
       _refreshSummary();
@@ -110449,7 +110472,14 @@ function renderCraftingModal() {
       const btn = div.querySelector('button');
       btn.onclick = (e) => {
         e.stopPropagation();
-        _disassembleSetPiece(entry);
+        // v0.30.x menus polish (audit U3) — ask first, like discard: say what is lost
+        const _w = [];
+        if (entry.equipped) _w.push('It is equipped - it comes off first.');
+        if ((it.stars | 0) > 0) _w.push('⚠ Its ★' + (it.stars | 0) + ' enhancement will be LOST.');
+        const _ask = (typeof uiConfirm === 'function')
+          ? uiConfirm({ title: '◈ Disassemble ' + it.name + '?', body: 'Break it down for +' + CRAFT_DISASSEMBLE_REWARD + ' Setshards. The piece is destroyed.' + (_w.length ? '\n\n' + _w.join('\n') : '') + '\n\nThis cannot be undone.', yesLabel: 'Disassemble', noLabel: 'Keep it', danger: true })
+          : Promise.resolve(true);
+        Promise.resolve(_ask).then((ok) => { if (ok) _disassembleSetPiece(entry); });
       };
       disList.appendChild(div);
     }

@@ -12,10 +12,11 @@
 // player's entire character save. We bind a FIXED port + hold a single-instance
 // lock so two copies never fight over it.
 'use strict';
-const { app, BrowserWindow, shell, powerSaveBlocker, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, shell, powerSaveBlocker, ipcMain, dialog, Menu, screen } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const staticServer = require('./static_server');
+const winState = require('./window_state');   // v0.30.x final polish (audit U1) — see the file
 
 const FIXED_PORT = 47821;   // stable loopback port -> stable origin -> saves persist
 
@@ -150,9 +151,16 @@ async function createWindow() {
   const port = await staticServer.start(ROOT, ENTRY, FIXED_PORT);
   // powerSaveBlocker is NOT started here anymore — it's host-conditional (see
   // the 'moji-host-state' IPC above) so a solo Deck player can let it sleep.
+  // v0.30.x final polish (audit U1) — reopen the way the player left it: size, position (while that display is still
+  // connected), maximized, fullscreen. Not on Deck, where gamescope owns the window.
+  const _stFile = path.join(app.getPath('userData'), 'window-state.json');
+  const _st = ON_DECK ? null : winState.loadState(_stFile);
+  let _pos = {};
+  try { if (_st && winState.onScreen(_st, screen.getAllDisplays().map((d) => d.workArea))) _pos = { x: _st.x, y: _st.y }; } catch (e) {}
   const win = new BrowserWindow({
-    width: 1280, height: 800, minWidth: 960, minHeight: 560,   // 1280×800 = Steam Deck native
-    fullscreen: ON_DECK,           // gamescope expects fullscreen on Deck
+    width: _st ? _st.width : 1280, height: _st ? _st.height : 800, minWidth: 960, minHeight: 560,   // 1280×800 = Steam Deck native
+    ..._pos,
+    fullscreen: ON_DECK || !!(_st && _st.fullscreen),   // gamescope expects fullscreen on Deck
     backgroundColor: '#0b0713',
     title: 'Mojiworld',
     autoHideMenuBar: true,
@@ -170,6 +178,13 @@ async function createWindow() {
     return { action: 'allow' };
   });
   win.loadURL('http://127.0.0.1:' + port + ENTRY);
+  if (_st && _st.maximized && !_st.fullscreen) win.maximize();
+  // v0.30.x final polish (audit U1) — Alt+Enter and F11 toggle fullscreen (the page binds neither); the window's
+  // state is saved as it closes.
+  win.webContents.on('before-input-event', (e, input) => {
+    if (!ON_DECK && winState.isFullscreenKey(input)) { e.preventDefault(); win.setFullScreen(!win.isFullScreen()); }
+  });
+  if (!ON_DECK) win.on('close', () => { try { winState.saveState(_stFile, winState.snapshot(win)); } catch (e) {} });
   // v0.30.791 - LAUNCH POLISH: a renderer crash or hang used to leave a blank or frozen window with no way back
   // but the task manager. Crash: reload (the game autosaves every 30 s and on hide). Hang: ask, never guess.
   win.webContents.on('render-process-gone', (_e, d) => {
@@ -210,6 +225,9 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
   app.whenReady().then(async () => {
+    // v0.30.x final polish (audit U1) — the shipped game has no application menu. Electron's default one was live:
+    // Alt showed File / Edit / View, Ctrl+R reloaded the game and Ctrl+W closed it. A dev run keeps it.
+    if (app.isPackaged) { try { Menu.setApplicationMenu(null); } catch (e) {} }
     const w = await createWindow();
     // Cold-start friend invite: resolve the lobby once the window exists (the
     // 'moji-join' send inside waits for did-finish-load, so nothing is lost).
