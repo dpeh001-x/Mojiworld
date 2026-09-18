@@ -53,7 +53,10 @@ try {
   check(set.potions.hp_s === 10 && set.potions.mp_s === 10, 'a new hero starts with 10 HP and 10 MP potions', J(set.potions));
   const modalShown = () => page.evaluate(() => { const t = document.getElementById('tutorial-modal'); return !!(t && t.style.display && t.style.display !== 'none'); });
   const beatOn = () => page.evaluate(() => document.getElementById('story-beat-overlay').classList.contains('on'));
-  await page.waitForTimeout(2600);   // the prologue's 1.5 s hand-off + its 1 s re-assert have both run
+  // v0.30.911 (audit F5) the hand-off now waits for the Void eye-zoom to clear, so its time varies: wait for the cards
+  // to open, then past the 1 s re-assert, before looking (was a fixed 2.6 s, which the later start could beat).
+  for (let i = 0; i < 40 && !(await beatOn()); i++) await page.waitForTimeout(200);
+  await page.waitForTimeout(1300);
   const under = { beat: await beatOn(), tour: await modalShown() };
   check(under.beat && !under.tour, 'while the intro cards are up the tour waits for them (the re-assert no longer docks it underneath)', J(under));
   for (let i = 0; i < 90 && ((await beatOn()) || !(await modalShown())); i++) { if (await beatOn()) { await page.evaluate(() => document.activeElement && document.activeElement.blur()); await page.keyboard.press('Enter'); } await page.waitForTimeout(450); }
