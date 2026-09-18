@@ -85,7 +85,9 @@ try {
     const mobBefore = m.currentHp;
     hit(m, 400, false, 'aoe');
     const landed = mobBefore - m.currentHp;
-    out.lifesteal = { healed: player.hp - 1000, landed, expected: Math.floor(landed * 0.25) };
+    // the window asks 25%, but every lifesteal source shares one per-hit budget of LX_LIFESTEAL_CAP (7%, per user) since the combined cap
+    const _lsRate = Math.min(0.25, (typeof LX_LIFESTEAL_CAP === 'number') ? LX_LIFESTEAL_CAP : 0.25);
+    out.lifesteal = { healed: player.hp - 1000, landed, expected: Math.floor(landed * _lsRate) };
 
     // lifesteal must never overheal — assert the invariant, not a magic number
     reset(); m = mkMob(1e9, 1e9); game.monsters.push(m);

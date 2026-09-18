@@ -99,9 +99,11 @@ ok('someone outside the column is NOT hit (it is a pillar, not the whole room)',
    r.outOfLane.hit === false, r.outOfLane);
 ok('a grounded player takes BOTH the pass-through and the landing (landing not lost)',
    (r.onGround.hits || []).length >= 2, { hits: r.onGround.hits });
-ok('the landing is the heavier of the two (pass-through is the lighter half)',
+// v0.30.45 turned the split around: the FALL carries the payload and the landing is a 35% residual ("meteors hit on
+// the way down"), so a grounded player takes the heavy pass-through first and the light landing after it
+ok('the landing is the 35% residual of the pass-through (the fall carries the payload since v0.30.45)',
    (r.onGround.hits || []).length >= 2
-   && r.onGround.hits[r.onGround.hits.length - 1].lost > r.onGround.hits[0].lost,
+   && (() => { const q = r.onGround.hits[r.onGround.hits.length - 1].lost / Math.max(1, r.onGround.hits[0].lost); return q > 0.25 && q < 0.45; })(),
    { hits: r.onGround.hits });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 

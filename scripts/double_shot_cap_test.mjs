@@ -35,6 +35,9 @@ const r = await page.evaluate(async () => {
   game.paused = true;
   const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
   player.cls = 'archer'; player.job = 'sniper';
+  // v0.30.270 (per user) scales every boon echo by _lxBoonPotency() = min(1, level x 0.02): at a fresh hero's Lv 1 the
+  // 50% echo rounds to 1 damage. Lv 60 measures the echo at full potency, which is what these checks are about.
+  player.level = 60;
   player.hp = getMaxHp(); player.mp = 9999;
   player.equipment = {};                       // no gear multishot muddying counts
   player.tree = player.tree || {}; player.tree.rapidFire = false;
@@ -91,7 +94,7 @@ console.log('charged with/without boon:', JSON.stringify(r.chargedWith), JSON.st
 console.log('multi   with/without boon:', JSON.stringify(r.multiWith), JSON.stringify(r.multiWithout));
 console.log('universal:', JSON.stringify(r.universal));
 
-const half = (a, b2) => Math.abs(a / b2 - 0.5) < 0.02;
+const half = (a, b2) => Math.abs(a / b2 - 0.5) < 0.02 || Math.abs(a - b2 / 2) <= 0.5;   // a 17-damage arrow echoes 8.5 -> 9: allow the rounding
 ok('the boon can no longer roll +2 (max is 1)', r.rollMax === 1, { rollMax: r.rollMax });
 ok('the cap clamps to +1 even against legacy roll-2 boons', r.cappedMods === 1, { mods: r.cappedMods });
 ok('Charged Shot fires exactly ONE extra arrow with the boon',

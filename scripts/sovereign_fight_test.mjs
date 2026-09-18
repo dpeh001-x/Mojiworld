@@ -106,6 +106,7 @@ const R = await page.evaluate(async () => {
     b.evasion = 0;
     const one = (m) => {
       b._dmgTakenMul = m;
+      game.comboMult = 1; game.combo = 0;   // every hit climbs the combo, and its steps are not cancelled by alternating the order
       const h = b.currentHp;
       hitMonster(b, 10000, false, 'x_probe');
       const d = h - b.currentHp;

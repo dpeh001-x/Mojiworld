@@ -19,12 +19,16 @@ try {
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     try { loadMap('forest', 300); } catch (e) {} await sleep(300); game.paused = true; player.level = 30; player.hp = player.maxHp || 1000; game._reduceMotion = false; game._shakeMul = 1;
-    const spawnSnail = () => { spawnMonster(player.x + 140, player.y, 'snail', false); const m = game.monsters.filter((x) => x && x.type === 'snail').pop(); m.currentHp = m.maxHp; m.evasion = 0; m.invulnerable = 0; m.freezeTimer = 0; return m; };
+    const spawnSnail = () => { spawnMonster(player.x + 140, player.y, 'snail', false); const m = game.monsters.filter((x) => x && x.type === 'snail').pop(); m.currentHp = m.maxHp; m.evasion = 0; m.def = 0; m.invulnerable = 0; m.freezeTimer = 0; return m; };   // def 0: the tiers read the share of the bar a hit TAKES (a DEF'd snail took 21.6% of a '30%' hit)
     const hit = (m, dmg, crit, skill) => { game.hitStop = 0; game._kickX = 0; game._kickY = 0; m.invulnerable = 0; m._lastHitAt = 0; game.time += 120; const h0 = m.currentHp; try { hitMonster(m, dmg, crit, skill || 'melee'); } catch (e) { return { err: String(e && e.message) }; } return { stop: game.hitStop, kick: +(game._kickX || 0).toFixed(2), loss: h0 - m.currentHp, frac: +((h0 - m.currentHp) / m.maxHp).toFixed(3) }; };
     let m = spawnSnail(); o.maxHp = m.maxHp;
     o.light = hit(m, Math.max(1, Math.round(m.maxHp * 0.01)), false);
     o.lightCrit = hit(m, Math.max(1, Math.round(m.maxHp * 0.01)), true);
-    m.currentHp = m.maxHp; o.heavyFrac = hit(m, Math.round(m.maxHp * 0.3), false);      // 30% of the bar: one tier up
+    // 30% of the bar: one tier up. hitMonster scales raw damage (x0.78 on this snail even at DEF 0), so a probe hit
+    // measures that and the real one is sized to TAKE ~31% - the tiers key on what the bar lost, not the raw number
+    m.currentHp = m.maxHp; const _cal = hit(m, Math.round(m.maxHp * 0.3), false);
+    const _mul = (_cal && _cal.loss > 0) ? _cal.loss / Math.round(m.maxHp * 0.3) : 1;
+    m.currentHp = m.maxHp; o.heavyFrac = hit(m, Math.ceil(m.maxHp * 0.31 / _mul), false);
     m.currentHp = 10; o.kill = hit(m, 100000, false);
     m = spawnSnail(); game._reduceMotion = true; m.currentHp = 10; o.killNoMotion = hit(m, 100000, false); game._reduceMotion = false;
     m = spawnSnail(); game._shakeMul = 0.5; m.currentHp = 10; o.killHalf = hit(m, 100000, false); game._shakeMul = 1;
