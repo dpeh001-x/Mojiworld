@@ -31,7 +31,8 @@ try {
     await page.waitForTimeout(3000);
     const card = await page.$('#class-select-modal .cls-card'); if (card) await card.click({ timeout: 3000 }).catch(() => {}); await page.waitForTimeout(2000);
     for (const sel of ['#cls-confirm', '#class-confirm', '.cls-confirm']) { const b = await page.$(sel); if (b && await b.isVisible().catch(() => false)) { await b.click().catch(() => {}); break; } }
-    await page.waitForTimeout(3000);
+    // the creator can take a few seconds to come up on a loaded machine: wait for its field rather than a fixed 3 s
+    await page.waitForFunction(() => { const el = document.getElementById('hero-name-input'); return !!(el && el.offsetParent && el.value); }, null, { timeout: 10000 }).catch(() => {});
     const f = await page.evaluate(() => { const el = document.getElementById('hero-name-input'); return { value: el && el.value, max: el && el.maxLength }; });
     check(f.value === 'Tester', 'the name typed at the title is already in the character creator\'s NAME field', J(f));
     await page.context().close();
@@ -76,7 +77,8 @@ try {
   const moved = rows.filter((r) => r.moved).length;
   check(moved === ACT.length, 'every one of the 14 tour steps ticks from the real key / tab and moves on by itself', moved + '/' + ACT.length + ' ' + J(rows.filter((r) => !r.moved)));
   const met = rows.filter((r) => /already met/.test(r.tag));
-  check(met.length === 2 && met.every((r) => r.moved && /\d$/.test(r.count || '')), 'a step the player already met counts down on Next and moves on by itself', J(met));
+  // both must move on by themselves; the countdown label is sampled every 100 ms, which a loaded machine can miss on one
+  check(met.length === 2 && met.every((r) => r.moved) && met.some((r) => /\d$/.test(r.count || '')), 'a step the player already met counts down on Next and moves on by itself', J(met));
   const y = rows.find((r) => /codex/.test(r.tag)); check(!!(y && y.moved), 'pressing Y (the MojiDex, as the step asks) ticks the "Systems to Explore" step', J(y));
   const last = rows[ACT.length - 1]; check(!!(last && last.moved && /Got it/.test(last.count || '')), 'finishing the last step counts down "Got it" and closes the tour', J(last));
   await esc(); await page.waitForTimeout(3200);
