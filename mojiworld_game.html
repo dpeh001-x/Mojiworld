@@ -12778,7 +12778,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.863';
+const GAME_VERSION = 'v0.30.864';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -108399,7 +108399,7 @@ function executeSellSelection() {
 
 // v0.26.472 — Instant "sell tier ≤ X": selects all UNEQUIPPED gear at/below
 // maxTier and sells it in one action, skipping the multi-select review. A
-// single confirm() guards against an accidental mass-sale (one click, not the
+// single confirm (v0.30.864: the game's own dialog) guards against an accidental mass-sale (one click, not the
 // review list). Equipped gear is excluded by selectSellByTier.
 function sellByTierNow(maxTier) {
   const n = selectSellByTier(maxTier);
@@ -108409,11 +108409,18 @@ function sellByTierNow(maxTier) {
   }
   let total = 0;
   for (const idx of game._sellSelection) { const it = player.inventory[idx]; if (it) total += _sellPriceOf(it); }   // v0.26.x audit FIX — post-scalar payout
-  const ok = (typeof confirm === 'function')
-    ? confirm(`Instantly sell ${n} unequipped item${n === 1 ? '' : 's'} at Tier ${maxTier} & below for ${total}🪙?\n(Equipped gear is not affected.)`)
-    : true;
-  if (!ok) { game._sellSelection.clear(); if (typeof openShop === 'function') openShop('sell'); return { count: 0, gained: 0 }; }
-  return executeSellSelection();
+  // v0.30.864 quick-sell - THE GAME'S OWN DIALOG (per user: "quick-sell uses the browser's plain confirm box. fix this").
+  // This was the last player-facing window.confirm: a grey system box that stops the page, names the site instead of the
+  // game and looks like a phishing prompt. It asks through uiConfirm now, like Reset Rank Points and save import. The
+  // answer is async, so the sale runs when the player confirms; the tier picker ignores the return value.
+  const _qsBody = 'Sell ' + n + ' unequipped item' + (n === 1 ? '' : 's') + ' at Tier ' + maxTier + ' & below for ' + total + '🪙?\n\nEquipped gear is not affected.';
+  const _qsAsk = (typeof uiConfirm === 'function')
+    ? uiConfirm({ title: 'Quick-sell Tier ' + maxTier + ' & below?', body: _qsBody, yesLabel: 'Sell for ' + total + '🪙', noLabel: 'Keep them' })
+    : Promise.resolve(true);
+  return Promise.resolve(_qsAsk).then((ok) => {
+    if (!ok) { game._sellSelection.clear(); if (typeof openShop === 'function') openShop('sell'); return { count: 0, gained: 0 }; }
+    return executeSellSelection();
+  });
 }
 
 function openShop(type, opts) {
