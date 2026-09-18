@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.885';
+const GAME_VERSION = 'v0.30.886';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -99343,12 +99343,12 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
     if (game._lastHitSoundFrame !== hitFrame) {
       game._lastHitSoundFrame = hitFrame;
       game._hitSoundIsCrit = isCrit;
-      audio.play(isCrit ? 'crit' : 'hit');
+      _lxImpactSfx(isCrit);   // v0.30.x (audit C6) — the class's own impact
     } else if (isCrit && !game._hitSoundIsCrit) {
       // Same-frame upgrade: a regular hit fired the audio first, but
       // a later crit in the same frame should still get the crit cue.
       game._hitSoundIsCrit = true;
-      audio.play('crit');
+      _lxImpactSfx(true);
     }
     if (isCrit) {
       game.critStreak++;
@@ -160100,6 +160100,11 @@ function _playSkillSfx(id) {
 // the other SFX layers via _sfxBase + _SFX_MASTER_VOL.
 // ==================================================================
 const _UI_SFX_FILES = {
+  // v0.30.x combat feel (audit C6) — the class weapon impacts (scripts/gen_impact_sfx.mjs), see _lxImpactSfx
+  impact_warrior: 'audio/impact/hit_warrior.mp3', impact_warrior_crit: 'audio/impact/hit_warrior_crit.mp3',
+  impact_rogue: 'audio/impact/hit_rogue.mp3', impact_rogue_crit: 'audio/impact/hit_rogue_crit.mp3',
+  impact_mage: 'audio/impact/hit_mage.mp3', impact_mage_crit: 'audio/impact/hit_mage_crit.mp3',
+  impact_archer: 'audio/impact/hit_archer.mp3', impact_archer_crit: 'audio/impact/hit_archer_crit.mp3',
   ui_toggle:        'audio/ui/ui_toggle.mp3',
   boon_gain:        'audio/ui/boon_gain.mp3',
   // v0.29.126 — Sage Mira's "grand holy blessing" reveal (showSageBlessing)
@@ -160177,6 +160182,7 @@ const _UI_TOGGLE_COOLDOWN = 60;
 // jump 0.70 here plays at ~0.49 against the master — audible without
 // dominating BGM.
 const _UI_SFX_TARGET_VOL = {
+  impact_warrior: 0.42, impact_warrior_crit: 0.5, impact_rogue: 0.42, impact_rogue_crit: 0.5, impact_mage: 0.42, impact_mage_crit: 0.5, impact_archer: 0.42, impact_archer_crit: 0.5,   // v0.30.x (audit C6) — a crit lands a little louder
   ui_toggle: 0.45,        // background hover sound (bumped from 0.40)
   boon_gain: 0.80,        // celebratory — punches above
   rare_drop: 0.80,        // celebratory
@@ -160213,11 +160219,28 @@ const _UI_SFX_TARGET_VOL = {
 // reset already lives in _playUiSfx so even back-to-back plays sound
 // crisp instead of cutting off mid-clip.>
 const _UI_SFX_COOLDOWN_PER = {
+  impact_warrior: 45, impact_warrior_crit: 45, impact_rogue: 45, impact_rogue_crit: 45, impact_mage: 45, impact_mage_crit: 45, impact_archer: 45, impact_archer_crit: 45,   // v0.30.x (audit C6) — one impact per 45 ms: a many-hit frame run plays as hits, not a buzz
   jump: 40, land: 150,
   // v0.26.x -- mob-fire clips: 380 ms per-id gate (a 3-mob pack volley plays once)
   mquery: 380, mossbaton: 380, mspine: 380, mgaleblade: 380, mcryshard: 380,
   mbark: 380, mrivet: 380, mcoffinshard: 380, mstormorb: 380, mfeather: 380, mhexbolt: 380,
 };
+// v0.30.x combat feel (audit C6) — WEAPON IMPACTS. Every landed hit of every class was the same synth beep ('hit' a
+// 240 Hz square, 'crit' a chirp) while casts played recorded clips and monsters had 285 of their own. Each class now lands
+// with its own impact, normal and critical, through the same once-per-frame hit-sound block; the synth plays until the
+// clip has buffered (and for anything without a class).
+const _LX_IMPACT_CLS = { warrior: 1, rogue: 1, mage: 1, archer: 1 };
+function _lxImpactSfx(crit) {
+  try {
+    const c = (typeof player !== 'undefined' && player && player.cls) || '';
+    if (_LX_IMPACT_CLS[c]) {
+      const id = 'impact_' + c + (crit ? '_crit' : '');
+      const el = _uiSfxEl(id);   // built, and buffering, on the first hit
+      if (el && el.readyState >= 2) { _playUiSfx(id); return; }
+    }
+  } catch (e) {}
+  if (typeof audio !== 'undefined' && audio && audio.play) audio.play(crit ? 'crit' : 'hit');
+}
 function _uiSfxEl(id) {
   const path = _UI_SFX_FILES[id];
   if (!path) return null;
