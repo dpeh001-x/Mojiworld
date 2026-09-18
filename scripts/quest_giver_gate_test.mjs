@@ -1,4 +1,4 @@
-// QUEST GIVER GATES (v0.30.906, per user "Yes change Barnaby quests"). A quest may not unlock below the level of the map
+// QUEST GIVER GATES (v0.30.908, per user "Yes change Barnaby quests"). A quest may not unlock below the level of the map
 // its giver stands on (by more than 3 levels): Barnaby II-IV, Lyra V and the Kindest Hand were Lv 45-50 while Barnaby stands only in the Lv 61
 // Frosted Mansion (moved there per user earlier), reached only through Lv 61-71 monsters. Checked for EVERY quest
 // with a giver, against the maps as the game builds them (the Stage Editor bake included). Plus the prologue's card.
