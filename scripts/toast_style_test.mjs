@@ -34,8 +34,12 @@ await page.waitForTimeout(2500);
 
 const r = await page.evaluate(() => {
   const out = {};
-  { const sb = document.getElementById('story-beat-overlay'); if (sb) { sb.classList.remove('on'); sb.style.display = 'none'; } }
+  // loadMap('forest') opens the forest's first-visit story beat, and since v0.30.872 a toast raised under a story scene
+  // waits for it to close - so the beats count as seen, and the overlay is shut AFTER the map load, not before it
+  player._storyBeatsSeen = new Proxy({}, { get: () => true });
   try { loadMap('forest', 300); } catch (e) {}
+  { const sb = document.getElementById('story-beat-overlay'); if (sb) { sb.classList.remove('on'); sb.style.display = 'none'; } }
+  try { _lxToastQueue.length = 0; _lxToastWait.length = 0; } catch (e) {}
   const host = document.getElementById('toast-container');
   while (host && host.firstChild) host.removeChild(host.firstChild);
   const tiers = [['legendary', '☀ Finding Your Feet — +500c · 🍷 ×4 · 💧 ×3'], ['epic', '✨ Innate growth: +1 SP (lucky roll!)'], ['rare', '🩸 Hex: 1 more…'], [undefined, '▶ Next: reach Lv 5 → Adventurer']];

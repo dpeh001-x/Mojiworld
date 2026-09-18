@@ -43,7 +43,9 @@ await page.evaluate(() => {
 });
 await page.click('#cs-nav-next').catch(() => {});
 await page.waitForTimeout(2500);
-await page.evaluate(() => { player.level = 80; player._god = true; loadMap('forest', 300); });
+// every story beat counts as seen: the forest's first-visit beat is a multi-stanza scene, and a toast raised under a
+// story scene waits for it (v0.30.872 / v0.30.920) - closing it once let the next stanza reopen it before the later casts
+await page.evaluate(() => { player.level = 80; player._god = true; player._storyBeatsSeen = new Proxy({}, { get: () => true }); loadMap('forest', 300); });
 await page.waitForTimeout(4500);
 
 const R = await page.evaluate(async () => {
@@ -54,7 +56,12 @@ const R = await page.evaluate(async () => {
   // Count what the PLAYER sees: toast nodes carrying this text.
   const capToasts = () => Array.from(document.querySelectorAll('.toast'))
     .filter(t => /Summon cap/.test(t.textContent || '')).length;
-  const clearToasts = () => document.querySelectorAll('.toast').forEach(t => t.remove());
+  // ...and the queues: since v0.30.906 a toast arriving over a full stack WAITS its turn, and the Lv 80 jump above pays
+  // out a run of legendary quest rewards - a 'rare' cap notice queued behind them and never reached the DOM here
+  const clearToasts = () => { document.querySelectorAll('.toast').forEach(t => t.remove()); try { _lxToastWait.length = 0; _lxToastQueue.length = 0; } catch (e) {} };
+  // loadMap('forest') opens the forest's first-visit story beat, and since v0.30.872 a toast raised under a story scene
+  // waits for it to close (v0.30.920 holds the queued ones too) - so close it, or no toast reaches the screen at all
+  { const sb = document.getElementById('story-beat-overlay'); if (sb) sb.classList.remove('on'); try { _lxToastQueue.length = 0; } catch (e) {} }
 
   // Fill the pack so every further cast is a capped no-op. Cast the REAL skill once from empty:
   // beastmaster_pack tops up to the shared cap in one go, so the pack ends at whatever that cap is
@@ -76,6 +83,7 @@ const R = await page.evaluate(async () => {
   clearToasts();
   const t = performance.now();
   while (performance.now() - t < (out.windowMs || 2500) + 350) await frame();
+  clearToasts();   // what the game raised during the wait (Lv 80 rewards) would hold a 'rare' notice back
   SKILL_FNS.beastmaster_pack(); await frame();
   out.afterWindow = capToasts();
 

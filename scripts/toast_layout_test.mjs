@@ -31,6 +31,9 @@ const out = await page.evaluate(async () => {
   player.cls = player.cls || 'warrior'; player.level = 50; game.paused = false;
   loadMap('forest', 300);
   await new Promise(r => setTimeout(r, 400));
+  // loadMap('forest') opens the forest's first-visit story beat, and since v0.30.872 a toast raised under a story scene
+  // waits for it to close (v0.30.920 holds the queued ones too) - so close it, or no toast reaches the screen at all
+  { const sb = document.getElementById('story-beat-overlay'); if (sb) sb.classList.remove('on'); try { _lxToastQueue.length = 0; } catch (e) {} }
 
   // a burst of six mixed toasts — like a combat/achievement chain
   showToast('Quest complete — The Name You Left Behind', 'legendary');
@@ -59,6 +62,9 @@ const out = await page.evaluate(async () => {
     pe: toasts.length ? getComputedStyle(toasts[0]).pointerEvents : null,
     contPe: getComputedStyle(cont).pointerEvents,
     widest: Math.round(Math.max(...rects.map(q => q.width), 0)),
+    // the cap (max-width min(30vw, 340px)) lives in LAYOUT px; the wrapper is scaled to fit the window (x1.2857 at
+    // 1280x720), so a 292px plate measured 376 on screen and read as a banner
+    widestLayout: Math.max(0, ...Array.from(document.querySelectorAll('#toast-container .toast')).map(t => t.offsetWidth)),
   };
 });
 
@@ -68,7 +74,7 @@ ok('the column is anchored to the top-right corner',
    `right gap ${out.contRightGap}px, left edge at ${Math.round(out.contLeftFrac * 100)}% of the wrapper`);
 ok('no toast sits on the map-pill / quest-banner band (top centre)',
    !out.overlapsBand);
-ok('toasts are corner-sized, not banners', out.widest > 0 && out.widest <= 360, `widest ${out.widest}px`);
+ok('toasts are corner-sized, not banners', out.widestLayout > 0 && out.widestLayout <= 360, `widest ${out.widestLayout}px layout (${out.widest}px on screen)`);
 ok('toasts arrive with the corner slide-in', out.anim === 'toastSlideR', `animation: ${out.anim}`);
 ok('clicks pass straight through (nothing is blocked)',
    out.pe === 'none' && out.contPe === 'none', `toast ${out.pe}, container ${out.contPe}`);

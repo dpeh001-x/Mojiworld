@@ -62,7 +62,9 @@ try {
 
   // ---- Toasts: compact + capped.
   const toast = await page.evaluate(() => {
-    for (let i = 0; i < 9; i++) showToast('✅ Quest complete — 🗺 A Very Long Quest Name That Used To Span The Whole Screen +250🪙 +80 EXP', 'legendary');
+    // nine DIFFERENT texts: since v0.30.906 a toast whose text is already up is not shown twice, so nine copies of one
+    // line read as a stack of 1
+    for (let i = 0; i < 9; i++) showToast('✅ Quest complete — 🗺 A Very Long Quest Name That Used To Span The Whole Screen #' + (i + 1) + ' +250🪙 +80 EXP', 'legendary');
     const live = document.querySelectorAll('#toast-container .toast');
     const cs = getComputedStyle(live[0]);
     return {
@@ -73,7 +75,8 @@ try {
     };
   });
   ok('toast stack capped at 4 (9 fired)', toast.visible === 4, toast);
-  ok('legendary quest toast compact (12px, was 16px) + wrapping', toast.fontSize === '12px' && toast.whiteSpace === 'normal', toast);
+  // v0.30.537 / v0.30.872 tightened the plate further (11.5 -> 10.5px text): compact means at most 12px now
+  ok('legendary quest toast compact (12px, was 16px) + wrapping', parseFloat(toast.fontSize) <= 12 && toast.whiteSpace === 'normal', toast);
   ok('long quest toast width-capped (≤ 492px layout, was screen-wide)', toast.widthPx <= 492, toast);
 
   ok('no page errors', page._errors.length === 0, page._errors.slice(0, 5));
