@@ -41,6 +41,7 @@ try {
     const blockers = () => Array.from(document.querySelectorAll('div[id$="-modal"]')).filter(visible).map((el) => el.id || '(anon)');
     // --- a permanent loadout of 3
     game.expedition = { active: false, floor: 0 };
+    player.level = Math.max(player.level | 0, 80);   // v0.30.717: boon slots are earned at Lv 25 / 50 / 75 - a fresh hero has none
     player.boons = []; player.boonsEquipped = [];
     for (let i = 0; i < 5; i++) { const b = rollBoonInstance(ids[i]); if (b) player.boons.push(b); }
     equipBoon(0); equipBoon(1); equipBoon(2); _applyEquippedBoons();
@@ -54,7 +55,9 @@ try {
     o.capInRun = _boonCap();
     // Each pick calls _expeditionAdvanceFloor('bravo') — the transport the user described. Re-pin
     // the run each time so the harness does not walk itself past B10 and end the run mid-test.
-    const openBravo = async () => { game.expedition.active = true; game.expedition.floor = 4; game.expedition.bravoReady = true;
+    // the offer is bound to the floor it was earned on (v0.30.529) and a pick advances the floor; this harness reopens the
+    // SAME floor after the tray changed, so drop the stored offer or it re-shows boons the tray now holds
+    const openBravo = async () => { game.expedition.active = true; game.expedition.floor = 4; game.expedition.bravoReady = true; game.expedition._bravoOffer = null;
       _bravoShowBoonPick(); await sleep(260); return document.getElementById('bravo-boon-modal'); };
     // Click an offer the player does NOT already have. Bravo rolls at random, and a duplicate of a
     // live boon is deliberately declined, so a fixed index makes this test intermittently assert
@@ -81,8 +84,8 @@ try {
       const cs = cardEl ? getComputedStyle(cardEl) : null;
       const html = card ? card.innerHTML : '';
       o.art = { backdrop: !!(cs && /bravo_backdrop/.test(cs.backgroundImage)),
-                emptyLabel: /GOES HERE/.test(html),
-                replacedLabel: /TO BE REPLACED/.test(html) };
+                emptyLabel: /GOES HERE/i.test(html),
+                replacedLabel: /TO BE REPLACED/i.test(html) };
     }
     o.card1 = { open: !!card, slots: card ? card.querySelectorAll('[data-tray-target]').length : 0,
       picks: card ? card.querySelectorAll('[data-pick]').length : 0,
@@ -101,7 +104,7 @@ try {
     o.slotTapVisible = !!slot2;
     {
       const h = (document.getElementById('bravo-boon-modal') || {}).innerHTML || '';
-      o.fullLabel = { replaced: /TO BE REPLACED/.test(h), goes: /GOES HERE/.test(h) };
+      o.fullLabel = { replaced: /TO BE REPLACED/i.test(h), goes: /GOES HERE/i.test(h) };
     }
     if (slot2) slot2.click(); await sleep(160);
     o.pickedLabel = await pick();

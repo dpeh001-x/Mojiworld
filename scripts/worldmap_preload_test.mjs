@@ -153,8 +153,13 @@ ok(before.gatedPlate, 'the world-map backdrop plate is watched by the commence g
 
 // ---------------------------------------------------------------- first paint of the map
 await page.evaluate(() => { try { window._lxBootGateDone = true; } catch (e) {} });
+const _wT0 = Date.now();
 await page.keyboard.press('w');
-await page.waitForTimeout(120);      // deliberately short: this is FIRST paint, not eventual paint
+// FIRST paint, not eventual paint: read the emblems the moment the map's first render lands. A fixed 120 ms wait
+// raced that render - the same build read 77 nodes on one run and 0 on the next, and 0 read as "never rendered".
+await page.waitForFunction(() => [...document.querySelectorAll('#worldmap-grid image')].some((im) => (im.getAttribute('href') || '').includes('Sprites/world/regions/')),
+  null, { timeout: 5000, polling: 16 }).catch(() => {});
+const _wOpenMs = Date.now() - _wT0;
 const firstPaint = await page.evaluate(() => {
   const imgs = [...document.querySelectorAll('#worldmap-grid image')]
     .filter((im) => (im.getAttribute('href') || '').includes('Sprites/world/regions/'));
@@ -166,7 +171,7 @@ const firstPaint = await page.evaluate(() => {
   }
   return { nodes: imgs.length, pending };
 });
-console.log(`\n  first paint: ${firstPaint.nodes} emblem nodes, ${firstPaint.pending} with no completed fetch\n`);
+console.log(`\n  first paint: ${firstPaint.nodes} emblem nodes, ${firstPaint.pending} with no completed fetch, ${_wOpenMs} ms after W\n`);
 ok(firstPaint.nodes > 0, 'the map rendered emblem nodes');
 ok(firstPaint.pending === 0, 'no emblem was still un-fetched at the map\'s first paint',
   firstPaint.pending + ' of ' + firstPaint.nodes + ' were still loading');

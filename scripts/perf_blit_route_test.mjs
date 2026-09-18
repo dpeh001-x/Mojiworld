@@ -85,8 +85,11 @@ const r = await page.evaluate(async () => {
   player.cls = 'mage';
   for (const k in (player.skillCooldowns || {})) player.skillCooldowns[k] = 0;
   try { performMeteor(); } catch (e) { out.meteorThrew = String(e).slice(0, 100); }
-  await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (++n > 60) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
-  out.meteorHazard = (game.hazards || []).some((h) => h && (h.type === 'meteor_warn' || h.type === 'meteor'));
+  // sampled through the window: the warn lives 50 sim steps and the sim can outrun a 60-rAF wait, so one late look
+  // found a meteor that had already fallen
+  const _mLive = () => (game.hazards || []).some((h) => h && (h.type === 'meteor_warn' || h.type === 'meteor'));
+  out.meteorHazard = _mLive();
+  await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (_mLive()) out.meteorHazard = true; if (++n > 60) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   try {
     const mimg = LX_PLAYER_PROJ && LX_PLAYER_PROJ.meteor;
     out.meteorRouted = !!(mimg && mimg._lxProjCache) || !(mimg && mimg.naturalWidth > 0);

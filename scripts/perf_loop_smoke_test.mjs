@@ -91,14 +91,19 @@ const ai = await page.evaluate(async () => {
   const m = game.monsters[game.monsters.length - 1];
   m.hp = m.currentHp = 5e6; m.maxHp = 5e6; m.atk = 0; m.speed = 0; m.jump = 0;
   const hp0 = m.currentHp;
+  // count the afterimage's OWN hits: minions left from the pass above also chew on the slime, so the HP drop alone
+  // ran 1,235-1,346 on one 500-damage hit and read as a double hit
+  const calls = []; const _hm = hitMonster;
+  window.hitMonster = function (mm, d, c, tag) { if (tag === 'afterimage' && mm === m) calls.push(d); return _hm.apply(this, arguments); };
   game.afterImages = game.afterImages || [];
   game.afterImages.push({ x: m.x - 2, y: m.y - 2, facing: 1, state: 'run',
     life: 20, maxLife: 20, color: 'rgba(200,160,255,0.55)', dmg: 500, hitIds: new Set() });
   await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (++n > 30) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
-  return { hp0, hp1: m.currentHp, dropped: hp0 - m.currentHp };
+  window.hitMonster = _hm;
+  return { hp0, hp1: m.currentHp, dropped: hp0 - m.currentHp, calls };
 });
 ok('an overlapping afterimage still hits, and exactly once (hitIds intact)',
-  ai.dropped >= 400 && ai.dropped <= 1200, ai);
+  ai.calls.length === 1 && ai.calls[0] === 500 && ai.dropped >= 400, ai);
 
 // ---- town regen: ticks up, clamps at max ----------------------------------
 const regen = await page.evaluate(async () => {
