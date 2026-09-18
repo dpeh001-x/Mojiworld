@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.878';
+const GAME_VERSION = 'v0.30.879';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -118758,7 +118758,13 @@ function _lxBgScaled(img, w, h) {
   if (_c && _c._lxKey === _key) return _c;
   // Never worth it when the plate is already at (or below) the drawn size.
   const _nw = img.naturalWidth || img.width || 0, _nh = img.naturalHeight || img.height || 0;
-  if (!_nw || !_nh || (_nw <= _dw * 1.1 && _nh <= _dh * 1.1)) return img;
+  // v0.30.x art polish (audit R1) — COVER, never stretch. Eleven 4:3 plates (Withering Tide, Magma Foundry, Glasswind
+  // Steppe, Hollow Sepulchre, Ossuary Sprawl, Wayfarer's Lantern...) were drawn straight into the 16:9 box, everything
+  // ~34% too wide. A plate off the box's aspect by more than 3% is cropped to it instead, anchored at the ground (the
+  // bottom edge stays where the floor art meets the platforms) - the same rule the bgNoMirror path uses - and it is
+  // always baked, even when small enough to have been blitted raw.
+  const _cropAsp = (_nw && _nh && Math.abs((_nw / _nh) / (_dw / _dh) - 1) > 0.03) ? _dw / _dh : 0;
+  if (!_nw || !_nh || (!_cropAsp && _nw <= _dw * 1.1 && _nh <= _dh * 1.1)) return img;
   try {
     const cv = document.createElement('canvas');
     cv.width = _dw; cv.height = _dh;
@@ -118766,7 +118772,10 @@ function _lxBgScaled(img, w, h) {
     if (!g) return img;
     g.imageSmoothingEnabled = true;
     if ('imageSmoothingQuality' in g) g.imageSmoothingQuality = 'high';
-    g.drawImage(img, 0, 0, _dw, _dh);
+    if (_cropAsp) {
+      const _sw = Math.min(_nw, _nh * _cropAsp), _sh = Math.min(_nh, _nw / _cropAsp);
+      g.drawImage(img, (_nw - _sw) / 2, _nh - _sh, _sw, _sh, 0, 0, _dw, _dh);   // sides trimmed evenly, sky trimmed from the top
+    } else g.drawImage(img, 0, 0, _dw, _dh);
     cv._lxKey = _key;
     img._lxBgS = cv;
     return cv;
@@ -140392,6 +140401,8 @@ function _drawMonsterSprite(m, sx, sy) {
     else                      _st = 'sepia(0.50) saturate(2.0) hue-rotate(15deg) brightness(1.12)';
     _lxMobTintFilter = _st; _stBakedTint = true;
   }
+  // v0.30.x art polish (audit R2) — a tentacle's own colour (see _LX_OCTO_LEG_TINT); a status or hit flash still wins
+  if (!_lxMobTintFilter && typeof _LX_OCTO_LEG_TINT !== 'undefined' && _LX_OCTO_LEG_TINT[m.type]) { _lxMobTintFilter = _LX_OCTO_LEG_TINT[m.type]; _stBakedTint = true; }
   // v0.30.x — _stateImg is resolved above, before the calib block that reads m._frameIsAttack.
   if (_stateImg) {
     // v0.26.351 — Weapon-swing attack frames. A few big melee mobs author their
@@ -141290,7 +141301,7 @@ function drawMonster(m) {
     // Sprites/monsters/{type}.webp the loader populates MONSTER_SPRITES
     // and we route through the standard sprite renderer, otherwise
     // fall back to the procedural bezier tentacle.
-    if (MONSTER_SPRITES[m.type]) _drawMonsterSprite(m, sx, sy);
+    if (MONSTER_SPRITES[m.type]) { _drawMonsterSprite(m, sx, sy); _lxOctoLegBadge(m, sx, sy); }   // v0.30.x art polish (audit R2)
     else drawOctoLeg(m, sx, sy);
   }
   else if (m.type === 'kingKrook') drawKingKrook(m, sx, sy);
@@ -142985,6 +142996,29 @@ function drawOctobaby(m, sx, sy) {
 // tentacle from the parent's head edge to the leg's anchored position.
 // During the windup window (m._octoFireFlash > 0) the tentacle glows
 // brightly in its effect colour so the next attack reads visually.
+// v0.30.x art polish (audit R2) — the four tentacles share one painted purple arm, so Venom, Frostbite, Silence and
+// Shock looked identical once the art landed (the old procedural tentacle had a colour and a glyph each; the painted
+// path drew neither). Each now wears its status colour through the tint bake (Venom keeps the art's own purple) and
+// its glyph badge on the curl.
+const _LX_OCTO_LEG_TINT = {
+  octoLegFreeze:    'hue-rotate(-75deg) saturate(0.75) brightness(1.55)',           // icy blue
+  octoLegSkillLock: 'brightness(1.8) sepia(1) saturate(3.5) hue-rotate(-8deg)',     // amber
+  octoLegStun:      'sepia(1) saturate(6) brightness(1.9) hue-rotate(12deg)',       // electric yellow
+};
+const _LX_OCTO_LEG_GLYPH = {
+  octoLegPoison: ['☠', '#cc66ee'], octoLegFreeze: ['❄', '#88ccff'], octoLegSkillLock: ['🔒', '#ffaa44'], octoLegStun: ['⚡', '#ffee44'],
+};
+function _lxOctoLegBadge(m, sx, sy) {
+  const g = _LX_OCTO_LEG_GLYPH[m.type];
+  if (!g) return;
+  const cx = Math.round(sx + m.w * 0.5), cy = Math.round(sy + m.h * 0.2), r = 14;
+  ctx.fillStyle = 'rgba(10,6,18,0.8)';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.lineWidth = 2.5; ctx.strokeStyle = (m._octoFireFlash > 0) ? '#ffffff' : g[1];   // flares white on the windup, like the old tip glyph
+  ctx.stroke();
+  const t = _txtSprite(g[0], 'bold 15px sans-serif', '#fff');
+  ctx.drawImage(t.c, Math.round(cx - t.w / 2), Math.round(cy - t.h / 2));
+}
 function drawOctoLeg(m, sx, sy) {
   const out = '#0a0612';
   const body = m.color || '#d066b0';
