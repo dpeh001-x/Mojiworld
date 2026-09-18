@@ -12765,7 +12765,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.855';
+const GAME_VERSION = 'v0.30.856';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -103516,6 +103516,7 @@ function updateProjectiles(dt) {
       continue;
     }
     if (h.type === 'gravitos_singularity' && h.life > 0) {
+      if (h.life <= 180) { const _ofN = Math.ceil(h.life / 60); if (_ofN !== h._ofN) { h._ofN = _ofN; _lxOhkoFinalTick(h, _ofN); } }   // v0.30.x ohko-final
       // v0.30.578 sz-fix — remember the last frame the player counted as inside,
       // so a hit-stop / knockback nudge on the resolve frame is forgiven.
       const _gvG = game.monsters && game.monsters.find(mm => mm && mm.type === 'gravitos');
@@ -104774,6 +104775,145 @@ function _lxSzHudYield(z) {
     }
   } catch (e) {}
 }
+// v0.30.x ohko-final — THE FINAL COUNT TAKES THE SCREEN (per user: "when the timer for OHKO hits 3 and below make it
+// hazard the whole map screen, and also make it way more impactful and aesthetic"). The last three seconds of a
+// Singularity Collapse (Gravitos, its Collapse Rain, the Sovereign) used to be a small digit over the boss's core. Now:
+//   - the WHOLE SCREEN turns hazard: it darkens, glowing caution stripes in the form's own colour scroll across it,
+//     and a coloured rim fading into a dark border beats once a second. Only the safe portals are cut out, and their
+//     light pillars (drawn after this, by _lxSafeZoneBeacons) flare while the count runs, so the escape is the one
+//     bright thing on a hazard screen;
+//   - a big baked numeral in the upper third (not over the hero) punches in on each second with a chromatic split,
+//     a shockwave ring, a shake and a heartbeat; "REACH THE LIGHT" under it names the answer in the zones' gold;
+//   - the last half-second collapses: rings close onto the core and the screen whites out.
+// Everything is derived from h.life (the number the resolve fires on), so a pause freezes it with the fight. Flashing
+// parts follow the Screen Flash slider and Reduce Motion. Cheap: a clip, three fills and three drawImages a frame.
+const _LX_OF = { tile: null, pat: null, patCtx: null, digits: {} };
+function _lxOhkoFinalLive() {
+  let best = null;
+  const hz = (typeof game !== 'undefined' && game && game.hazards) || null; if (!hz) return null;
+  for (let i = 0; i < hz.length; i++) { const h = hz[i]; if (h && h.type === 'gravitos_singularity' && h.life > 0 && h.life <= 180 && (!best || h.life < best.life)) best = h; }
+  return best;
+}
+function _lxOfCol() {
+  const m = (typeof _lxGfBoss === 'function') ? _lxGfBoss() : null;
+  const p = (typeof _lxGfPhase === 'function') ? _lxGfPhase(m) : 1;
+  return (typeof _LX_GF_COL !== 'undefined' && _LX_GF_COL[p]) || ['#8a5cff', '#ffd27a', 'rgba(150,100,255,'];
+}
+function _lxOfDigit(n, col) {
+  const key = 'of_d' + n + col;
+  return _lxGfBake(key, 160, (c) => {
+    const t = String(n), y = 6;
+    c.font = '900 118px "Arial Black", Impact, Arial, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+    c.save(); c.shadowColor = col; c.shadowBlur = 28; c.lineWidth = 12; c.strokeStyle = col; c.globalAlpha = 0.85; c.strokeText(t, 0, y); c.restore();
+    c.lineWidth = 6; c.strokeStyle = 'rgba(14,3,24,0.92)'; c.strokeText(t, 0, y);
+    c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = 0.7;
+    c.fillStyle = '#ff2d6f'; c.fillText(t, -7, y); c.fillStyle = '#2de1ff'; c.fillText(t, 7, y); c.restore();
+    const g = c.createLinearGradient(0, -58, 0, 62);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, n === 1 ? '#fff6fb' : '#f6e4ff'); g.addColorStop(1, col);
+    c.fillStyle = g; c.fillText(t, 0, y);
+  });
+}
+function _lxOfPattern(col) {
+  if (!_LX_OF.tile || _LX_OF.tile._col !== col) {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64; cv._col = col;
+    const c = cv.getContext('2d'); c.fillStyle = col;
+    for (let k = -64; k < 128; k += 32) { c.beginPath(); c.moveTo(k, 64); c.lineTo(k + 14, 64); c.lineTo(k + 78, 0); c.lineTo(k + 64, 0); c.closePath(); c.fill(); }
+    _LX_OF.tile = cv; _LX_OF.pat = null;
+  }
+  if (!_LX_OF.pat || _LX_OF.patCtx !== ctx) { _LX_OF.pat = ctx.createPattern(_LX_OF.tile, 'repeat'); _LX_OF.patCtx = ctx; }
+  return _LX_OF.pat;
+}
+// once per number, from the hazard step: the heartbeat, a shake that grows toward 1, a light flash
+function _lxOhkoFinalTick(h, n) {
+  try {
+    if (typeof addShake === 'function') addShake(n <= 1 ? 13 : n === 2 ? 9 : 6);
+    if (typeof flash === 'function') flash(n <= 1 ? 0.22 : 0.14);
+    if (typeof audio !== 'undefined' && audio && audio.play) { audio.play('heartbeat'); if (n <= 1) audio.play('void'); }
+  } catch (e) {}
+}
+function _lxOhkoFinalDraw() {
+  try {
+    const h = _lxOhkoFinalLive(); if (!h) { game._ohkoFinalN = 0; return; }
+    const L = Math.max(1, h.life | 0), n = Math.max(1, Math.ceil(L / 60));
+    const top = Math.min(n * 60, (h.maxLife | 0) || n * 60);   // a Collapse Rain box (1.4 s) starts mid-number: time its punch from then
+    const k = Math.min(1, Math.max(0, (top - L) / 60));      // 0 at the tick -> ~1 at the end of the second
+    const u = Math.min(1, Math.max(0, 1 - L / 180));         // urgency across the three seconds
+    const kick = Math.exp(-k * 7);                            // the beat: 1 on the tick, gone by mid-second
+    const fm = Math.min(1, ((game._flashMul != null) ? game._flashMul : 1) * (game._reduceMotion ? 0.4 : 1));
+    const P = _lxOfCol(), col = P[0], rgba = P[2];
+    const camX = (game.camera && game.camera.x) || 0, camY = (game.camera && game.camera.y) || 0;
+    const lowFx = !!(typeof LX_PERF !== 'undefined' && LX_PERF && LX_PERF.veryLowFx);
+    game._ohkoFinalN = n;
+    ctx.save();
+    // the hazard field: the whole screen, minus every safe zone and the column it protects
+    ctx.beginPath(); ctx.rect(0, 0, W, H);
+    const slack = (typeof LX_SZ_JUMP_SLACK === 'number') ? LX_SZ_JUMP_SLACK : 150;
+    for (const z of (h.safeZones || [])) { const zx = z.x - camX + z.w / 2, zy = z.y - camY + z.h / 2; ctx.moveTo(zx + z.w / 2, zy); ctx.ellipse(zx, zy, z.w / 2, z.h / 2, 0, 0, Math.PI * 2); }
+    ctx.clip('evenodd');
+    ctx.fillStyle = 'rgba(16,3,20,' + (0.16 + 0.16 * u + 0.08 * kick * fm).toFixed(3) + ')';   // the field darkens
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+    if (!lowFx) {   // glowing caution stripes, scrolling with the count
+      const off = (L * 1.6) % 64;
+      ctx.globalAlpha = 0.07 + 0.07 * u + 0.09 * kick * fm;
+      ctx.translate(-off, 0); ctx.fillStyle = _lxOfPattern(col); ctx.fillRect(0, 0, W + 64, H); ctx.translate(off, 0);
+    }
+    ctx.globalAlpha = Math.min(1, 0.45 + 0.25 * u + 0.35 * kick * fm);   // the rim glow, beating on each second
+    ctx.drawImage(_lxGfBake('of_rim' + col, 300, (c) => {
+      const g = c.createRadialGradient(0, 0, 70, 0, 0, 150);
+      g.addColorStop(0, rgba + '0)'); g.addColorStop(0.62, rgba + '0)'); g.addColorStop(0.88, rgba + '0.38)'); g.addColorStop(1, rgba + '0.55)');
+      c.fillStyle = g; c.fillRect(-150, -150, 300, 300);
+    }), 0, 0, W, H);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = Math.min(1, 0.55 + 0.35 * u);   // and past it, the dark border
+    ctx.drawImage(_lxGfBake('of_dark', 300, (c) => {
+      const g = c.createRadialGradient(0, 0, 90, 0, 0, 150);
+      g.addColorStop(0, 'rgba(10,2,14,0)'); g.addColorStop(0.75, 'rgba(10,2,14,0)'); g.addColorStop(1, 'rgba(10,2,14,0.85)');
+      c.fillStyle = g; c.fillRect(-150, -150, 300, 300);
+    }), 0, 0, W, H);
+    ctx.restore();
+    // the numeral: upper third, punching in on each second
+    const cx = W / 2, cy = Math.round(H * 0.36);
+    if (k < 0.5) {   // the tick's shockwave
+      const e = k / 0.5, rr = Math.min(W, H) * 0.2 + e * Math.max(W, H) * 0.75;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = (1 - e) * 0.65 * Math.max(0.35, fm);
+      ctx.strokeStyle = col; ctx.lineWidth = 3 + 12 * (1 - e); ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    }
+    { // the dial: a ring around the numeral that drains with the second
+      const R = Math.min(W, H) * 0.2;
+      ctx.save(); ctx.lineCap = 'round';
+      ctx.globalAlpha = 0.22; ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.9; ctx.strokeStyle = n <= 1 ? '#ffffff' : col; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - k)); ctx.stroke();
+      ctx.restore();
+    }
+    const sc = (1 + 0.55 * Math.exp(-k * 9) + 0.06 * k) * (Math.min(W, H) * 0.46);
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, 0.72 + 0.28 * kick);
+    ctx.drawImage(_lxOfDigit(n, col), Math.round(cx - sc / 2), Math.round(cy - sc / 2), Math.round(sc), Math.round(sc));
+    ctx.font = '800 15px Inter, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '5px';
+    const ly = Math.round(cy + Math.min(W, H) * 0.2 + 26);   // under the dial
+    ctx.globalAlpha = 0.78 + 0.22 * Math.sin(L * 0.21);
+    ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(14,3,24,0.9)'; ctx.strokeText('REACH THE LIGHT', cx, ly);
+    ctx.fillStyle = '#ffd36b'; ctx.fillText('REACH THE LIGHT', cx, ly);
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    ctx.restore();
+    // the collapse: the last half-second closes onto the core and whites out
+    if (L <= 30) {
+      const t = L / 30, ox = h.cx - camX, oy = h.cy - camY, diag = Math.hypot(W, H);
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 3; i++) {
+        const r = Math.max(4, t * diag * (0.9 - i * 0.22));
+        ctx.globalAlpha = (1 - t) * (0.75 - i * 0.18) * Math.max(0.35, fm); ctx.strokeStyle = i === 0 ? '#ffffff' : col; ctx.lineWidth = 3 + 9 * (1 - t);
+        ctx.beginPath(); ctx.arc(ox, oy, r, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.42 * (1 - t) * (1 - t) * fm; ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+    }
+  } catch (e) {}
+}
 // v0.30.796 sz-all — THE BEACON. Drawn in screen space after the art post-FX, for every live safe zone: a
 // pillar of light over the rect (exactly the column LX_SZ_JUMP_SLACK protects, so every lit pixel is a
 // safe pixel), a ring expanding from the rect on spawn, a timer ring closing on the rect as the resolve
@@ -104798,11 +104938,11 @@ function _lxSafeZoneBeacons() {
           // the pillar: brightest at the rect, fading up the protected column; breathes with the zone
           const ph = _LX_SZ_BEACON_H, breath = 0.82 + 0.18 * Math.sin(t * 0.18);
           const g = ctx.createLinearGradient(0, sy, 0, sy - ph);
-          g.addColorStop(0, 'rgba(255,214,110,' + (0.55 * breath).toFixed(3) + ')'); g.addColorStop(0.45, 'rgba(255,196,80,' + (0.22 * breath).toFixed(3) + ')'); g.addColorStop(1, 'rgba(255,180,60,0)');
+          g.addColorStop(0, 'rgba(255,214,110,' + (Math.min(1, 0.55 * breath * (game._ohkoFinalN > 0 ? 1.7 : 1))).toFixed(3) + ')'); g.addColorStop(0.45, 'rgba(255,196,80,' + (Math.min(1, 0.22 * breath * (game._ohkoFinalN > 0 ? 1.9 : 1))).toFixed(3) + ')'); g.addColorStop(1, 'rgba(255,180,60,0)');
           ctx.globalCompositeOperation = 'lighter';
           ctx.fillStyle = g; ctx.fillRect(Math.round(sx), Math.round(sy - ph), Math.round(z.w), ph);
           // a hot core line down the pillar's middle so it reads at a glance even over the boss
-          ctx.globalAlpha = 0.35 * breath; ctx.fillStyle = '#fff3c4'; ctx.fillRect(Math.round(cx - 2), Math.round(sy - ph * 0.9), 4, Math.round(ph * 0.9));
+          ctx.globalAlpha = Math.min(1, 0.35 * breath * (game._ohkoFinalN > 0 ? 2.2 : 1)); ctx.fillStyle = '#fff3c4';   // v0.30.x ohko-final — flares during the final count ctx.fillRect(Math.round(cx - 2), Math.round(sy - ph * 0.9), 4, Math.round(ph * 0.9));
           ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
           // the spawn ring: expands from the rect over the first 24 frames
           if (age < 24) {
@@ -149736,21 +149876,9 @@ function drawHazards(_behindPass) {
         ctx.arc(sx, h.cy, rr, tt + r * 0.6, tt + r * 0.6 + Math.PI * 1.6);
         ctx.stroke();
       }
-      // v0.30.578 sz-fix — the last three seconds count down at the core and the
-      // final half-second whites out, so the instant it lands is unmistakable.
-      // Derived from h.life, the same number the resolve fires on.
-      if (h.life <= 180) {
-        const _n = Math.max(1, Math.ceil(h.life / 60));
-        const _sub = ((h.life - 1) % 60) / 60;          // 1 -> 0 inside each second
-        ctx.save();
-        ctx.globalAlpha = 0.45 + 0.55 * _sub;
-        ctx.font = 'bold ' + Math.round(48 + (1 - _sub) * 26) + 'px Arial, sans-serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.strokeText(String(_n), sx, h.cy - 72);
-        ctx.fillStyle = h.life <= 30 ? '#ffffff' : '#ff9cff'; ctx.fillText(String(_n), sx, h.cy - 72);
-        ctx.restore();
-        if (h.life <= 30) { ctx.fillStyle = 'rgba(255,255,255,' + (0.35 * (1 - h.life / 30)).toFixed(3) + ')'; ctx.fillRect(0, _camY, W, H); }
-      }
+      // v0.30.578 sz-fix — the last three seconds count down and the final half-second whites out, derived from
+      // h.life (the number the resolve fires on). v0.30.x ohko-final — that count now takes the whole SCREEN, drawn
+      // after the art post-FX: see _lxOhkoFinalDraw.
       // Safe zones — bright cream rect with violet outline + label.
       const zones = h.safeZones || [];
       // v0.26.172 — Authored singularity-zone sprite layered behind
@@ -153000,6 +153128,7 @@ function _lxDrawFrame(time) {
   drawIcyHud();
   // Whole-scene grading / bloom / grain art pass.
   drawArtPostFX();
+  if (typeof _lxOhkoFinalDraw === 'function') _lxOhkoFinalDraw();   // v0.30.x ohko-final — the last 3 s take the whole screen
   if (typeof _lxSafeZoneBeacons === 'function') _lxSafeZoneBeacons();   // v0.30.796 sz-all — the OHKO's answer is the last thing painted in the world
   // Update minimap (DOM-side, every few frames to avoid overhead)
   if (game.time % 4 === 0 && !_lxRenderOnly) drawMinimap();   // hz-smooth

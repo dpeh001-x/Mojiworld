@@ -27,7 +27,9 @@
 //   6. STRICT (phase 3): airborne 100 px above the zone, centre inside its
 //      width -> survives (baseline: centre outside the rect -> death)
 //   7. the telegraph counts down: with 120 frames left the draw path paints
-//      the digit "2" on the live canvas (baseline: no countdown)
+//      the digit "2" on the live canvas (baseline: no countdown). Since the
+//      final count took the whole screen (_lxOhkoFinalDraw, a baked numeral),
+//      that pass reports the digit it drew in game._ohkoFinalN.
 // Run: node scripts/singularity_safezone_test.mjs
 //      MOJI_GAME_FILE=_prev.html node scripts/singularity_safezone_test.mjs  (baseline)
 import { createRequire } from 'node:module';
@@ -132,6 +134,7 @@ const R = await page.evaluate(async () => {
   const P = CanvasRenderingContext2D.prototype; const oText = P.fillText; const digits = [];
   P.fillText = function (...a) { if (this === ctx && /^[0-9]$/.test(String(a[0]))) digits.push(String(a[0])); return oText.apply(this, a); };
   try { drawHazards(); } catch (e) { out.drawErr = String(e.message).slice(0, 80); }
+  try { if (typeof _lxOhkoFinalDraw === 'function') { _lxOhkoFinalDraw(); if (game._ohkoFinalN) digits.push(String(game._ohkoFinalN)); } } catch (e) { out.drawErr = String(e.message).slice(0, 80); }
   P.fillText = oText;
   out.countdown = digits;
   game.hazards.length = 0; game.monsters.length = 0;
