@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.876';
+const GAME_VERSION = 'v0.30.877';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -98548,7 +98548,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // v0.25.797 — Monster hit SFX. Globally cooldown-gated (80 ms) inside
   // _playMonsterSfx so AOE clears don't spam. Family resolved from m.type
   // via the alias table; non-fatal if files missing.
-  if (typeof _playMonsterSfx === 'function') _playMonsterSfx(m, 'hit');
+  // v0.30.x combat feel (audit C3) — the pain clip moved below the SHROUDED / IMMUNE / BURROWED / MISS exits
   // v0.25.781 — Mirror Self damage CAP re-tuned from 39 % → 1 % per hit
   // per user "takes about 5 minutes to kill". 100 successful hits to
   // kill, paired with the evasion 300 bump on the type def so the player
@@ -98692,6 +98692,8 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
       return;
     }
   }
+  // v0.25.797 — Monster hit SFX (globally cooldown-gated, 80 ms). v0.30.x (audit C3): past every exit that is not a hit
+  if (typeof _playMonsterSfx === 'function') _playMonsterSfx(m, 'hit');
   // Class identity multiplier — amplifies non-melee skill hits from the
   // most recent cast. Expires 2 s after the cast to catch delayed volleys.
   if (player._classSkillMul && player._classSkillMul > 1 &&
@@ -99213,6 +99215,15 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
     // v0.29.127 — per-skill impact profile: heavier skills stop time longer
     // (see _lxSkillImpact above); heavy/ultra tiers add a thin impact flash.
     let _iw = _lxSkillImpact(skill);
+    // v0.30.x combat feel (audit C2) — weigh by the cast skill (_rankSrc, the same attribution the rank bonus uses)
+    // when the tag is not a skill id; its first hit per 250 ms carries the tier, the rest land at the tag's own.
+    if (_rankSrc && _rankSrc !== skill) {
+      const _cw = _lxSkillImpact(_rankSrc);
+      if (_cw > _iw) {
+        const _now = performance.now();
+        if (game._lxImpactSrc !== _rankSrc || !(_now - (game._lxImpactAt || 0) < 250)) { game._lxImpactSrc = _rankSrc; game._lxImpactAt = _now; _iw = _cw; }
+      }
+    }
     // v0.30.393 — weight by what the hit DID as well as what cast it (see LX_KILL_STOP)
     if (finalDmg / Math.max(1, m.maxHp || finalDmg) >= 0.25 && _iw < 3) _iw++;
     const _killed = m.currentHp <= 0 && _hpBeforeWrite > 0;
@@ -140942,7 +140953,7 @@ function drawMonster(m) {
   const _flashCap = _bossCnt >= 2 ? 2
                   : (typeof _perfLowFx === 'function' && _perfLowFx()) ? 4
                   : 10;
-  let flashOn = m.hitFlash > 0 && Math.floor(m.hitFlash / 30) % 2 === 0;
+  let flashOn = m.hitFlash > 0 && (m.hitFlash <= 50 || Math.floor(m.hitFlash / 30) % 2 === 0);   // v0.30.x combat feel (audit C1) — see the note above hitMonster's flash
   if (flashOn) {
     if (game._flashBudgetUsed >= _flashCap) {
       flashOn = false;   // skip filter for this mob — over budget this frame
@@ -159485,7 +159496,7 @@ function _voiceEl(path) {
 function _classKey() {
   // Map sub-jobs back to their base archetype for voice purposes.
   // Anything unknown falls back to warrior (the default chibi).
-  const c = (typeof player !== 'undefined' && player && player.class) ? String(player.class) : '';
+  const c = (typeof player !== 'undefined' && player && (player.cls || player.class)) ? String(player.cls || player.class) : '';   // v0.30.x (audit A1) — the class lives in player.cls; .class is never set
   const base = c.toLowerCase();
   if (base.indexOf('warrior') === 0 || base.indexOf('fighter') === 0 || base.indexOf('crusader') === 0) return 'warrior';
   if (base.indexOf('mage') === 0 || base.indexOf('wizard') === 0 || base.indexOf('sage') === 0)       return 'mage';
