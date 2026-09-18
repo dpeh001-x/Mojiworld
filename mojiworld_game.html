@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.880';
+const GAME_VERSION = 'v0.30.881';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -40777,7 +40777,8 @@ window.addEventListener('keydown', e => {
   // v0.25.600 — ? / help-modal removed. All controls now live in the
   // K (keybind) modal — single source of truth. The keypress is left
   // unbound so future mappings have it free.
-  if (k === 'escape') closeAllModals();
+  // v0.30.x menus polish (audit U4) — Esc with nothing open pauses (the pause card); with anything open it closes, as before
+  if (k === 'escape') { if (!repeat && typeof _lxPauseCanOpen === 'function' && _lxPauseCanOpen()) _lxPauseOpen(); else closeAllModals(); }
   if (k === 'm') audio.toggleMute();
   if (_isAction(rawKey, 'talkNpc')) {   // v0.30.510 — physical key (see questJournal above)
     // v0.25.180 — N is the interact key:
@@ -48059,7 +48060,7 @@ function _lxPadDispatch(key, down) {
       if (!_lxPadModalRoot() && typeof openSettingsModal === 'function'
           && typeof player !== 'undefined' && player && player.cls && player.hp > 0
           && typeof game !== 'undefined' && game && !game.paused) {
-        openSettingsModal();
+        if (typeof _lxPauseOpen === 'function') _lxPauseOpen(); else openSettingsModal();   // v0.30.x (audit U4) — Start opens the pause card; Settings is one press away
         return;
       }
     } catch (e) {}
@@ -48144,6 +48145,7 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   // controller could reach none of them; bravo-boon-modal is a MANDATORY expedition choice.
   'reforge-modal', 'bravo-boon-modal', 'exp-door-modal', 'exp-puzzle-modal', 'exp-seed-modal', 'everdawn-welcome-overlay', 'game-complete-overlay',
   'edicts-modal',   // v0.30.x — was unlisted, so the stick drove the player around behind it
+  'lx-pause',       // v0.30.x (audit U4) — the pause card
   // v0.29.7xx — the wardrobe's Character Studio editor (opened from the U
   // panel): a real modal full of buttons that was never listed.
   'char-studio-overlay'];
@@ -116470,6 +116472,77 @@ function toggleSharedModal(modalId, variant, openFn) {
   openFn();
   m.dataset.variant = variant;
 }
+// v0.30.x menus polish (audit U4) — THE PAUSE CARD. Escape with nothing open ran closeAllModals() on an empty screen and
+// did nothing, so a keyboard player could pause only by finding the gear; the pad's Start opened the long Settings page.
+// Both now open this card: Resume, Settings, Hotkeys & Skills, Save slots, Return to title, and Quit on the desktop app.
+// Built on open and removed on close like the edicts panel, and registered everywhere that one is: _LX_EXTRA_PAUSE_SURFACES
+// (the pause owners and the stuck-pause watchdog), _LX_PAD_MODAL_IDS, closeAllModals and the toast dodge.
+function _lxPauseCanOpen() {
+  try {
+    if (document.getElementById('lx-pause')) return false;
+    if (window._prologueActive || typeof player === 'undefined' || !player || !player.cls || !(player.hp > 0)) return false;
+    if (typeof game === 'undefined' || !game || game.paused || game.dying > 0) return false;
+    if (typeof _QTE !== 'undefined' && _QTE.active) return false;
+    if (typeof _lxPadModalRoot === 'function' && _lxPadModalRoot()) return false;   // a surface is open: Esc closes it instead
+    return true;
+  } catch (e) { return false; }
+}
+function _lxPauseClose() {
+  const el = document.getElementById('lx-pause');
+  if (el) { try { el.remove(); } catch (e) {} }
+  if (typeof game !== 'undefined' && game) game.paused = (typeof _anyOtherModalOpen === 'function') ? !!_anyOtherModalOpen() : false;
+}
+function _lxPauseCss() {
+  if (document.getElementById('lx-pause-css')) return;
+  const st = document.createElement('style'); st.id = 'lx-pause-css';
+  st.textContent = '#lx-pause{position:fixed;inset:0;z-index:520;display:flex;align-items:center;justify-content:center;background:rgba(6,4,14,.62)}'
+    + '#lx-pause-card{min-width:270px;max-width:92vw;padding:18px 18px 16px;border-radius:14px;background:linear-gradient(180deg,#261b3e,#150f25);'
+    + 'border:1px solid #6a55a8;box-shadow:0 14px 44px rgba(0,0,0,.65);display:flex;flex-direction:column;gap:8px}'
+    + '#lx-pause .lxp-title{font-weight:800;font-size:19px;letter-spacing:3px;color:#ffe6a8;text-align:center;margin:0 0 6px;text-transform:uppercase}'
+    + '#lx-pause .lxp-btn{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:10px 14px;border-radius:9px;'
+    + 'border:1px solid #4d3f7a;background:#2a2046;color:#f1eaff;font:inherit;font-weight:600;font-size:14px;cursor:pointer;text-align:left}'
+    + '#lx-pause .lxp-btn:hover,#lx-pause .lxp-btn:focus{border-color:#ffd166;background:#3a2c62;outline:none;box-shadow:0 0 0 2px rgba(255,209,102,.3)}'
+    + '#lx-pause .lxp-btn kbd{font-size:11px;padding:1px 6px;border-radius:4px;background:#171126;border:1px solid #5a4a86;color:#cdbfff}';
+  document.head.appendChild(st);
+}
+function _lxPauseOpen() {
+  if (document.getElementById('lx-pause')) return;
+  _lxPauseCss();
+  const quit = !!(window.SteamAPI || window.MOJI_RELAY_URL);   // the desktop app, as Settings' Quit row decides it
+  const B = (a, label, hint) => '<button type="button" class="lxp-btn" data-a="' + a + '"><span>' + label + '</span>' + (hint ? '<kbd>' + hint + '</kbd>' : '') + '</button>';
+  const ov = document.createElement('div');
+  ov.id = 'lx-pause'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Paused');
+  ov.innerHTML = '<div id="lx-pause-card"><div class="lxp-title">⏸ Paused</div>'
+    + B('resume', '▶ Resume', 'Esc') + B('settings', '⚙ Settings') + B('keys', '⌨ Hotkeys &amp; Skills', 'K') + B('slots', '🗂 Save slots')
+    + B('title', '🏠 Return to title') + (quit ? B('quit', '🚪 Quit to desktop') : '') + '</div>';
+  ov.addEventListener('click', (e) => { if (e.target === ov) _lxPauseClose(); });   // a click outside the card resumes
+  ov.querySelectorAll('.lxp-btn').forEach((b) => { b.onclick = () => _lxPauseAct(b.dataset.a); });
+  ov.addEventListener('keydown', (e) => {   // arrows walk the list; Enter / Space press the focused button natively
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const bs = Array.from(ov.querySelectorAll('.lxp-btn')), i = bs.indexOf(document.activeElement);
+    const nx = bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1) + bs.length) % bs.length] || bs[0];
+    if (nx) nx.focus();
+    e.preventDefault(); e.stopPropagation();
+  });
+  document.body.appendChild(ov);
+  if (typeof game !== 'undefined' && game) game.paused = true;
+  try { const f = ov.querySelector('.lxp-btn'); if (f) f.focus({ preventScroll: true }); } catch (e) {}
+  if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('chirp'); } catch (e) {} }
+}
+function _lxPauseAct(a) {
+  if (a === 'resume') { _lxPauseClose(); return; }
+  _lxPauseClose();
+  if (a === 'settings') { if (typeof openSettingsModal === 'function') openSettingsModal(); return; }
+  if (a === 'keys') { if (typeof toggleKeybindModal === 'function') toggleKeybindModal(); return; }
+  if (a === 'slots') { if (typeof openBackupModal === 'function') openBackupModal(); return; }
+  if (a === 'quit') { try { _flushSaveStateNow(); } catch (e) {} window.close(); return; }
+  if (a === 'title') {
+    const go = () => { try { _flushSaveStateNow(); } catch (e) {} location.reload(); };   // boot lands on the title menu
+    if (typeof uiConfirm !== 'function') { go(); return; }
+    uiConfirm({ title: 'Return to the title screen?', body: 'Your progress is saved first.', yesLabel: 'Return to title', noLabel: 'Keep playing' })
+      .then((ok) => { if (ok) go(); });
+  }
+}
 function closeAllModals() {
   if (typeof _QTE !== 'undefined' && _QTE.active && typeof _qteEnd === 'function') { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); }   // v0.26.x audit -- no orphaned shackle
   // v0.25.240 (B2) — null-guard the forced-modal lookups so a missing or
@@ -116503,6 +116576,7 @@ function closeAllModals() {
   // v0.30.x — the edicts panel is REMOVED rather than hidden, so it cannot ride the
   // display:none loop below; take it down explicitly or Esc leaves it on screen.
   { const _ed = document.getElementById('edicts-modal'); if (_ed) { try { _ed.remove(); } catch (e) {} } }
+  { const _lp = document.getElementById('lx-pause'); if (_lp) { try { _lp.remove(); } catch (e) {} } }   // v0.30.x (audit U4) — the pause card, removed the same way
   for (const id of ['shop-modal','inventory-modal','powerup-modal','sage-blessing-modal','help-modal','enhance-modal','reforge-modal','attributes-modal','dev-modal','taxi-modal','codex-modal','mojidex-modal','multiplayer-modal','quest-modal','worldmap-modal','confirm-modal','craft-modal','lore-modal']) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
@@ -116893,7 +116967,7 @@ function _lxToastDodge() {
   const vis = (el) => { if (!el) return false; const cs = getComputedStyle(el); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return false; const r = el.getBoundingClientRect(); return r.width > 140 && r.height > 90; };
   let U = null; const add = (el) => { if (!vis(el)) return; const r = el.getBoundingClientRect(); U = U ? { left: Math.min(U.left, r.left), top: Math.min(U.top, r.top), right: Math.max(U.right, r.right), bottom: Math.max(U.bottom, r.bottom) } : { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; };
   for (const ov of document.querySelectorAll('.modal-overlay')) { if (!vis(ov)) continue; add(ov.querySelector(':scope > .modal') || ov.firstElementChild); }
-  for (const id of ['backup-modal', 'jukebox-modal', 'settings-modal', 'edicts-modal', 'dialog']) { const el = document.getElementById(id); if (el && vis(el)) add(el); }
+  for (const id of ['backup-modal', 'jukebox-modal', 'settings-modal', 'edicts-modal', 'lx-pause-card', 'dialog']) { const el = document.getElementById(id); if (el && vis(el)) add(el); }
   const cs0 = document.getElementById('char-studio-overlay'); if (cs0 && cs0.classList.contains('open')) add(cs0.firstElementChild || cs0);
   if (!U) { reset(); return; }
   const css = (px) => px / k;   // viewport px -> the wrapper's own px
@@ -169311,6 +169385,7 @@ const _LX_EXTRA_PAUSE_SURFACES = [
   // (z-index 90, inside the game wrapper) painted UNDER it - so dying behind the
   // panel left the player guessing where the backdrop was.
   { id: 'edicts-modal',             mode: 'exists'  },   // openEdictsPanel
+  { id: 'lx-pause',                 mode: 'exists'  },   // v0.30.x (audit U4) - the pause card, see _lxPauseOpen
   { id: 'titles-modal',             mode: 'exists'  },   // v0.30.834 - openTitlesPanel (v0.30.803): the world ran again 3 s after it opened, and you could die behind it
 ];
 function _lxExtraPauseSurfaceEls() {
