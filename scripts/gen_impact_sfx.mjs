@@ -36,6 +36,15 @@ for (const c of Object.keys(CLS)) {
   JOBS.push({ file: `hit_${c}.mp3`, desc: CLS[c] + HIT, peak: -5, len: 0.30 });
   JOBS.push({ file: `hit_${c}_crit.mp3`, desc: CLS[c] + CRIT + HIT, peak: -3, len: 0.38 });
 }
+// v0.30.x (audit C10) - the landing of a delayed ultimate (Sky Lance's dive, Skyfall Dominion's slam, the Pandemic Hex
+// finale): the cast clip is long over by then. One bigger boom, the same instant-attack rules, a longer settling tail.
+JOBS.push({ file: 'slam_ult.mp3', peak: -2, len: 0.9, dur: 1.5,
+  // the first brief ("deep BOOM") came back as sub-bass: 15-20 dB less between 200 Hz and 2 kHz than overall, i.e. inaudible
+  // on laptop, phone and Deck speakers. The crunch and the debris carry it there.
+  desc: 'A huge ultimate attack smashing into the ground: one heavy CRUNCH of shattering stone and earth with a punchy mid-range'
+    + ' THUD, bright crackling debris scattering, and a short rumble that settles quickly. Punchy and clear on small laptop'
+    + ' speakers, not just sub-bass. INSTANT attack: the loudest moment is the very first instant. No build-up, no whoosh or'
+    + ' swish before it, no second hit, no voice, no music, mono.' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const run = (args) => spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { encoding: 'utf8' });
 function pcm(file) { const b = spawnSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-i', file, '-f', 's16le', '-ac', '1', '-ar', '44100', '-'], { maxBuffer: 1 << 26 }).stdout; return b; }
@@ -94,7 +103,7 @@ for (const j of JOBS) {
   const cands = [];
   if (fromRaw) { for (const n of fs.readdirSync(fromRaw)) if (n.startsWith('imp_raw_') && n.endsWith('_' + j.file)) cands.push(path.join(fromRaw, n)); }
   else for (let a = 1; a <= rolls; a++) {
-    try { const raw = path.join(os.tmpdir(), `imp_raw_${process.pid}r${a}_${j.file}`); fs.writeFileSync(raw, await ludoSound(j.desc, 0.5, key)); cands.push(raw); }
+    try { const raw = path.join(os.tmpdir(), `imp_raw_${process.pid}r${a}_${j.file}`); fs.writeFileSync(raw, await ludoSound(j.desc, j.dur || 0.5, key)); cands.push(raw); }
     catch (e) { console.log(`  ${j.file} roll ${a}: ${e.message}`); if (/CREDITS/.test(e.message)) break; await sleep(2000); }
   }
   const scored = cands.map((raw) => { const w = trimLead(raw, raw.replace(/\.mp3$/, '.lead.wav')); return { raw, w, ...score(w) }; }).sort((a, b) => b.s - a.s);

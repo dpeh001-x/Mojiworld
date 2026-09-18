@@ -72,6 +72,7 @@ function describe(rel) {
     const who = base.replace(/^npc_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     return { cat: 'npc', when: 'NPC talk babble \u2014 plays when you open a conversation with ' + who + ' (1.2s cooldown; probed and cached on first open)' };
   }
+  if (dir === 'skill' && base === 'quick_dash') return { cat: 'skill', when: 'The dash (Shift / double-tap) — its whoosh; Cancer\'s shell scuttle uses it too (120 ms cooldown)' };
   if (dir === 'skill') return { cat: 'skill', when: 'Cast SFX — plays when the player uses the "' + base.replace(/_/g, ' ') + '" skill' };
   if (dir === 'boss')  return { cat: 'boss-voice', when: 'Boss intro VOICE — plays once when first entering the ' + base.replace(/^boss_/, '').replace(/_/g, ' ') + ' arena (gated by _bossIntrosSeen)' };
   if (dir === 'ambient') return { cat: 'ambient', when: 'Ambient loop layered under the BGM on ' + base + '-biome maps' };
@@ -93,6 +94,7 @@ function describe(rel) {
   // Weapon impacts and the victory / defeat stings fell through to the bgm catch-all below and were listed as
   // 'Background music track "hit_mage" (map theme)'. Keys: _UI_SFX_FILES impact_<cls>[_crit] and _LX_STING_FILES.
   if (dir === 'impact') {
+    if (base === 'slam_ult') return { cat: 'impact', when: 'Ultimate landing — Sky Lance touching down, Skyfall Dominion\'s slam and the Pandemic Hex finale' };
     const m = base.match(/^hit_(\w+?)(_crit)?$/);
     if (m) return { cat: 'impact', when: 'Weapon impact — ' + (/^[aeiou]/.test(m[1]) ? 'an ' : 'a ') + m[1] + ' lands a ' + (m[2] ? 'CRITICAL hit' : 'normal hit') + ' (once per frame; the synth hit covers it until the clip has loaded)' };
     return { cat: 'impact', when: 'Weapon impact: ' + base };

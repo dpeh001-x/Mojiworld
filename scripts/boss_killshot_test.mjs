@@ -101,7 +101,7 @@ console.log('lego 2nd      :', JSON.stringify(r.legoSecond));
 console.log('gravitos phase:', JSON.stringify(r.gravPhase));
 
 ok('an ordinary mob still blinks out fast — the v0.26.108 fix is untouched',
-   r.snail.fadeMs === 833 && r.snail.slowmo === 0, r.snail);   // v0.30.894: the same 50 frames, now written in ms
+   r.snail.fadeMs === 833 && r.snail.slowmo === 0, r.snail);   // v0.30.896: the same 50 frames, now written in ms
 ok('a boss kill freezes the frame (the v0.29.125 finisher, pinned)',
    r.barnaby.hitStop >= 100, { hitStop: r.barnaby.hitStop });
 ok('...and shakes the camera (finisher, pinned)', r.barnaby.shake > 0, { shake: r.barnaby.shake });
