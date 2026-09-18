@@ -12810,7 +12810,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.895';
+const GAME_VERSION = 'v0.30.896';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -64034,12 +64034,16 @@ function resetSave() {
   // breaking the visual world.
   uiConfirm({
     title: '⚠ Erase ALL progress?',
-    body: 'This will wipe your character, inventory, achievements, daily streak, and prestige.\n\nThis cannot be undone.',
+    body: 'This will wipe your character, inventory, achievements, daily streak, and prestige.\n\nA copy is kept in Save Backups (title menu) first, in case you change your mind.',
     yesLabel: 'Erase everything',
     noLabel: 'Keep playing',
     danger: true,
-  }).then((ok) => {
+  }).then(async (ok) => {
     if (!ok) return;
+    // v0.30.894 (audit U7) - New Game took a backup before replacing a hero; Erase, the more final of the two,
+    // took none. It does now, and if storage is too full for one it says so and asks again.
+    let _bk = false; try { _bk = typeof _lxCreateBackup === 'function' && _lxCreateBackup('auto · before Erase') !== false; } catch (e) { _bk = false; }
+    if (!_bk && !(await uiConfirm({ title: '⚠ No backup could be made', body: 'Browser storage is too full to keep a copy of this hero.\n\nErase anyway? This cannot be undone.', yesLabel: 'Erase without a backup', noLabel: 'Keep playing', danger: true }))) return;
     try {
       game._resetting = true;          // prevent autosave from re-saving after clear
       clearSave();
@@ -100121,7 +100125,10 @@ function _maybeLevelUp() {
 // reduce the time taken by 10times". 500 → 50 ms; sprite blink-fades
 // out across roughly 3 frames at 60 fps. Snappy feedback, no lingering
 // corpse silhouette.
-const MONSTER_FADE_MS = 50;
+// v0.30.894 (audit C4) - these were compared with game.time, which counts FRAMES, so "50" ran 50 frames
+// (0.83 s). That 0.83 s is what players have seen since v0.26.108 - the length the "10 times shorter" request
+// was judged by - so it is kept, now written in the unit it is measured in (_drawFadingMonsters converts).
+const MONSTER_FADE_MS = 833;
 // v0.29.x — BOSS FADE. The 50 ms above is v0.26.108's fix for crowds of trash
 // corpses lingering ("reduce the time taken by 10times") and it is right for
 // them — but it also blinked a BOSS out in ~3 frames, which worked against
@@ -100131,7 +100138,10 @@ const MONSTER_FADE_MS = 50;
 // beat held on an empty patch of arena. One body, an arena that is empty
 // afterwards: the crowding complaint the 50 ms fixed does not apply here. The
 // boss now dissolves across the beat it already earned.
-const BOSS_FADE_MS = 600;
+// v0.30.894 (audit C4) - "600" ran 600 frames: the greyed body stood for 10 s, through and past the boon
+// wheel at 1.5 s. One second now: it dissolves across the kill's slow-motion beat and is gone before the wheel.
+const BOSS_FADE_MS = 1000;
+const _LX_FADE_FRAME_MS = 1000 / 60;   // game.time advances once per 60 Hz sim step
 
 function _beginMonsterFade(m) {
   if (!m) return;
@@ -100150,7 +100160,7 @@ function _drawFadingMonsters() {
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
     if (!m) { list.splice(i, 1); continue; }
-    const age = now - (m._fadeStart || 0);
+    const age = (now - (m._fadeStart || 0)) * _LX_FADE_FRAME_MS;   // v0.30.894 (audit C4) - frames -> ms
     const dur = m._fadeMs || MONSTER_FADE_MS;
     if (age >= dur) { list.splice(i, 1); continue; }
     ctx.save();
@@ -117323,8 +117333,9 @@ function uiConfirm(opts) {
     modal.style.display = 'flex';
     game._uiConfirmPrevPaused = !!game.paused;
     game.paused = true;
-    // Auto-focus Confirm so Enter accepts.
-    setTimeout(() => yes.focus(), 0);
+    // Auto-focus Confirm so Enter accepts - except on a dangerous prompt, where Enter must not be the way to
+    // "Erase everything": v0.30.894 (audit U7) focuses Cancel there, so accepting takes a deliberate click.
+    setTimeout(() => (opts.danger ? no : yes).focus(), 0);
   });
 }
 
@@ -149312,6 +149323,20 @@ function drawProjectiles() {
           ctx.drawImage(_lxProjScaled(_fbImg, r * 2), -r, -r, r * 2, r * 2);   // v0.30.252 perf
         }   // procedural circle fallback removed — m_firebomb always present
         ctx.restore();
+      } else if (p.skill === 'arrow' && LX_PLAYER_PROJ.arrow && _lxPlayerProjReady(LX_PLAYER_PROJ.arrow)) {
+        // v0.30.894 (audit R3) - Sagittarius's Trajectory Shot and Hunt Mark fire skill:'arrow', but the arrow art
+        // lived only in the player / partner branch, so the Archer's zodiac shot as plain yellow blobs. Same sprite,
+        // scale and rotate-to-flight as the player's arrow, over a soft glow in the shot's own colour so it still
+        // reads as incoming.
+        const _aw = Math.max(p.w, 18) * 1.6;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(Math.atan2(p.vy || 0, p.vx || 1));
+        const _ga = ctx.globalAlpha; ctx.globalAlpha = _ga * 0.35; ctx.fillStyle = col;
+        ctx.beginPath(); ctx.ellipse(0, 0, _aw * 0.55, _aw * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = _ga;
+        ctx.drawImage(_lxProjScaled(LX_PLAYER_PROJ.arrow, Math.round(_aw)), -_aw / 2, -_aw / 2, _aw, _aw);
+        ctx.restore();
       } else {
         // Default enemy projectile
         ctx.fillStyle = col;
@@ -160888,6 +160913,10 @@ const _BGM_MAP_FILES = {
   // Hollow and the zodiac arenas already use.
   lavaCavern:                 'audio/bgm_lava_cavern.mp3',
   sauroSlope:                 'audio/bgm_lava_cavern.mp3',
+  // v0.30.894 (audit A8) - the Fiery Hideout (the rest stop off Sauro Slope) and the Bastion's Rampart had no entry,
+  // so each dropped to the world theme between two maps of its own. Same url as the neighbour: the track carries on.
+  fieryHideout:               'audio/bgm_lava_cavern.mp3',
+  bastionRampart:             'audio/bgm_bastion.mp3',
   // v0.25.859 — User-supplied Magma Foundry theme. The chain (Magma
   // Foundry / Furnace Deep / Sundered Forge) shares the new track; pre-fix
   // these maps had no parent BGM entry and fell through to bgm_boss.mp3
