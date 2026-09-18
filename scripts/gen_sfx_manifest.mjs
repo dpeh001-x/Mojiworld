@@ -90,6 +90,18 @@ function describe(rel) {
     }
     return { cat: 'voice', when: 'Player voice line: ' + base };
   }
+  // Weapon impacts and the victory / defeat stings fell through to the bgm catch-all below and were listed as
+  // 'Background music track "hit_mage" (map theme)'. Keys: _UI_SFX_FILES impact_<cls>[_crit] and _LX_STING_FILES.
+  if (dir === 'impact') {
+    const m = base.match(/^hit_(\w+?)(_crit)?$/);
+    if (m) return { cat: 'impact', when: 'Weapon impact — ' + (/^[aeiou]/.test(m[1]) ? 'an ' : 'a ') + m[1] + ' lands a ' + (m[2] ? 'CRITICAL hit' : 'normal hit') + ' (once per frame; the synth hit covers it until the clip has loaded)' };
+    return { cat: 'impact', when: 'Weapon impact: ' + base };
+  }
+  if (dir === 'stinger') {
+    if (base === 'victory') return { cat: 'stinger', when: 'Victory sting — a boss falls; the arena music fades under it and comes back (music volume)' };
+    if (base === 'defeat') return { cat: 'stinger', when: 'Defeat sting — the player dies; plays into the death screen\'s silence (music volume)' };
+    return { cat: 'stinger', when: 'Music sting: ' + base };
+  }
   if (base.startsWith('bgm_')) return { cat: 'bgm', when: 'Background music for the ' + base.slice(4).replace(/_/g, ' ') + ' area' };
   return { cat: 'bgm', when: 'Background music track "' + base + '" (map theme)' };
 }
