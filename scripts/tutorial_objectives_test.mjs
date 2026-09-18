@@ -95,6 +95,9 @@ const pad = await page.evaluate(async () => {
   const wasDone = st._done; st._done = true;
   _lxPadRootAt = -1;
   r.rootWhenDone = (() => { try { return (_lxPadModalRoot() || {}).id || null; } catch (e) { return "ERR"; } })();
+  // v0.29.796: the card is on the triggers - RT turns the page while the stick keeps playing
+  const s0 = _tutStep; window.__setBtn(7, 1); await wait(250); window.__setBtn(7, 0); await wait(250);
+  r.rtAdvanced = _tutStep === s0 + 1; r.rtFrom = s0; r.rtTo = _tutStep;
   st._done = wasDone;
   return r;
 });
@@ -105,8 +108,10 @@ ok("the left STICK moves the hero during the tutorial", pad.movedByStick > 1, pa
 ok("the D-PAD moves the hero during the tutorial", pad.movedByDpad > 1, pad.movedByDpad + "px");
 ok("the first objective TICKS from controller input alone", pad.moveStepDone === true,
    "step now: " + pad.stepAfter);
-ok("once the objective is done the pad can reach the card (Next/Back/Skip)",
-   pad.rootWhenDone === "tutorial-modal", "pad root: " + pad.rootWhenDone);
+// v0.29.796 - a docked tour never owns the pad (the old per-step hand-over left no pad route back to the game); the card
+// is on the triggers instead, so a finished step is turned with RT while the stick still plays.
+ok("once the objective is done, RT turns the card's page and the pad still drives the game",
+   pad.rtAdvanced && pad.rootWhenDone !== "tutorial-modal", "pad root: " + pad.rootWhenDone + ", step " + pad.rtFrom + " -> " + pad.rtTo);
 
 // ── FLAGGING: an objective done BEFORE its step still counts ───────────────
 await start();

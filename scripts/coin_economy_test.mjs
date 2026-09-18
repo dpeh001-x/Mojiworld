@@ -78,6 +78,9 @@ const c = await ev(() => {
   out.guardDrop = _bags.reduce((a, d) => a + (d.value || 0), 0);
   out.guardBags = _bags.length;
   out.guardAffix = (typeof _activeAffix === 'function' ? (_activeAffix() || {}).id : 'n/a');
+  // v0.30.638 - what reaches the wallet: this monster's level number (its roll stamped by the kill) x difficulty x affix
+  out.guardWant = _lxKillCoinCap(g) * (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1);
+  out.guardWallet = out.guardDrop * MOJICOIN_GAIN_MULT;
   out.guardExpect = Math.round(
     _lxCoinCurve(5785, 77128, false)
     * (typeof MONSTER_COIN_MULT === 'number' ? MONSTER_COIN_MULT : 1)
@@ -91,22 +94,26 @@ ok('curve: 3,000-HP knee, HP^0.45 above it — elderbark 5,785 -> ~970, sandhusk
 ok('a spawned elderbark carries the curved coins and the flag (table 5,785 -> ~970 ±jitter)', !c.err && c.elderbark && c.elderbark.flag && near(c.elderbark.coin, 970, 0.12), c.err || JSON.stringify(c.elderbark));
 ok('a spawned sub-knee scorpion is unchanged (~174), a spawned Virgo keeps her boss payout (~318k-330k)', !c.err && c.scorpion && near(c.scorpion.coin, 174, 0.12) && c.virgo && near(c.virgo.coin, 329664, 0.12) && c.virgo.flag, c.err || JSON.stringify({ s: c.scorpion, v: c.virgo }));
 ok('an ELDER (mini-boss, 5x HP) is curved too — every spawn is', !c.err && c.elder && c.elder.mini && c.elder.flag && c.elder.coin < 5785 * 3, c.err || JSON.stringify(c.elder));
-ok('the drop-time guard curves a monster that skipped spawnMonster (5,785 raw on 77,128 HP -> the curve x coin/difficulty/affix multipliers)', !c.err && c.guardBags >= 1 && c.guardBags <= 3 && near(c.guardDrop, c.guardExpect, 0.03), c.err || `bag ${c.guardDrop} over ${c.guardBags} bag(s), expected ${c.guardExpect} (affix ${c.guardAffix})`);
+// v0.30.638 (per user: "Lv 20 at 150 mojicoin, lv 40 at 250 ... lv 70+ 500") - an ordinary kill pays its LEVEL's number,
+// so a monster that skipped spawnMonster with a raw 5,785 in its table pays that number, never the table.
+ok('a monster that skipped spawnMonster (raw 5,785 coins) pays its level\'s number, not its table (v0.30.638)', !c.err && c.guardBags >= 1 && c.guardBags <= 3 && near(c.guardWallet, c.guardWant, 0.03) && c.guardWallet < 1000, c.err || `wallet ${Math.round(c.guardWallet)} from ${c.guardBags} bag(s), level number ${Math.round(c.guardWant)} (affix ${c.guardAffix})`);
 
 // ---- the grind, measured on a real map ----------------------------------------------
 const g = await ev(async () => {
   loadMap('thornspireThicket', 300); await new Promise((r) => setTimeout(r, 1500));
   for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
   window._prologueActive = false; game.paused = false; player.level = 90; player._god = true; player.hp = getMaxHp(); game.drops.length = 0;
-  let kills = 0, coin = 0; const start = Date.now();
+  let kills = 0, coin = 0, want = 0; const start = Date.now();
+  const risk = (typeof _diffCoinMul === 'function' ? _diffCoinMul() : 1) * (typeof _affixCoinMul === 'function' ? _affixCoinMul() : 1);
   while (kills < 300 && Date.now() - start < 30000) {
-    for (const m of game.monsters) { if (m && m.currentHp > 0 && !m._k && !m.isBoss) { m._k = true; m.currentHp = 0; try { killMonster(m); } catch (e) {} kills++; } }
-    for (let i = game.drops.length - 1; i >= 0; i--) { const d = game.drops[i]; if (d && d.type === 'mojicoin') { coin += Math.floor((d.value || 0) * 0.5); game.drops.splice(i, 1); } }
+    for (const m of game.monsters) { if (m && m.currentHp > 0 && !m._k && !m.isBoss) { m._k = true; want += _lxCoinCapForLevel(typeof _mobLevel === 'function' ? _mobLevel(m) : m.level) * risk; m.currentHp = 0; try { killMonster(m); } catch (e) {} kills++; } }
+    for (let i = game.drops.length - 1; i >= 0; i--) { const d = game.drops[i]; if (d && d.type === 'mojicoin') { coin += (d.value || 0) * MOJICOIN_GAIN_MULT; game.drops.splice(i, 1); } }
     await new Promise((r) => setTimeout(r, 40));
   }
-  return { kills, perKill: kills ? Math.round(coin / kills) : 0 };
+  return { kills, perKill: kills ? Math.round(coin / kills) : 0, expect: kills ? Math.round(want / kills) : 0 };
 });
-ok('Thornspire Thicket (Lv 56) grinds at ~700-1,600 coins per kill (was ~11,000)', !g.err && g.kills >= 50 && g.perKill >= 700 && g.perKill <= 1600, g.err || JSON.stringify(g));
+// v0.30.638: Thornspire's Lv 56-63 monsters pay their level numbers (285-323, x difficulty x affix); the roll averages out
+ok('Thornspire Thicket (Lv 56-63) pays its level numbers per kill, ~300 (was ~11,000 before the curve)', !g.err && g.kills >= 50 && near(g.perKill, g.expect, 0.08) && g.perKill < 800, g.err || JSON.stringify(g));
 
 // ---- the boss gear cap ----------------------------------------------------------------
 const b = await ev((bosses) => {

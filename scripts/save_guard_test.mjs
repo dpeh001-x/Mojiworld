@@ -100,7 +100,11 @@ const res = await page.evaluate(async () => {
   // object's fields and restore them afterwards.
   const _saved = { isHost: net.isHost, hostId: net.hostId, connected: net.connected, myId: net.myId, ws: net.ws, peers: net.peers };
   net.isHost = false; net.hostId = 1; net.connected = true; net.myId = 2; net.ws = { readyState: 1, send() {} }; net.peers = net.peers || {};
+  // v0.30.862 co-op kill trust: a guest pays only for a monster it mirrored itself, of the same type. Each frame below names
+  // a boss the guest has mirrored, so every 0 here comes from the rule that check is about, not from a missing mirror.
+  const mirror = (u, tp) => { if (_coopFindByUid(u)) return; const m = spawnMonster(700, 300, tp, true, false); if (m) { m.uid = u; m._coopMirror = true; } };
   const send = (u, extra) => {
+    mirror(u, (extra && extra.tp) || 'kingKrook');
     const before = player.setshards | 0;
     _coopApplyKill(Object.assign({ t: 'kill', id: 1, u, e: 0, c: 0, x: 700, y: 300, map: game.currentMap, tp: 'kingKrook', b: 1, bl: 50 }, extra || {}));
     return (player.setshards | 0) - before;

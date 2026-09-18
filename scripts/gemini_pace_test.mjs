@@ -20,7 +20,8 @@
 //      slowness and speed up rates" asks for;
 //   4. both twins share the pace exactly (the antiphase-decay trap this
 //      pattern already paid for once);
-//   5. DEF is 0.64x baseline, through the real stat pipeline.
+//   5. DEF is the absolute 80 that v0.30.351 pinned (per user, from the DEF audit), which is below the 0.64x profile
+//      cut it replaced - through the real stat pipeline.
 // Run: node scripts/gemini_pace_test.mjs   (MOJI_GAME_FILE overrides)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -80,9 +81,10 @@ const stats = await page.evaluate(() => {
   o.impliedProfile = g.def / o.baseAtGem;
   return o;
 });
-ok('Gemini DEF is 0.64x the unprofiled baseline (0.80 - 20%)',
-  Math.abs(stats.impliedProfile - 0.64) < 0.01,
-  `def ${stats.gemDef} vs baseline ${stats.baseAtGem} = ${stats.impliedProfile.toFixed(3)}x (was 0.80)`);
+// v0.30.351 replaced the v0.30.344 profile cut (0.80 -> 0.64 of the ramp) with an absolute DEF of 80 (_Z_DEF_ABS).
+ok('Gemini DEF is the pinned 80 (v0.30.351), still under the 0.64x cut it replaced',
+  stats.gemDef === 80 && stats.impliedProfile < 0.64,
+  `def ${stats.gemDef} vs ramp ${stats.baseAtGem} = ${stats.impliedProfile.toFixed(3)}x`);
 
 // ---- the chase, measured on a live boss ------------------------------------
 const chase = await page.evaluate(async () => {

@@ -47,8 +47,10 @@ const measure = () => page.evaluate(() => {
     rows: [...document.querySelectorAll('.stats-footer .stats-footer-row')].map((r) => r.offsetHeight) };
 });
 const a = await measure();
-checks.push(['the card is smaller: under 244 x 136 layout px (it was 286 x 158)', a.cardW <= 244 && a.cardW >= 200 && a.cardH <= 136, `${a.cardW} x ${a.cardH}`]);
-checks.push(['the bars narrow to 220 and step down in weight: HP 13, MP 11, EXP 10', [a.hp, a.mp, a.exp].every((b) => b.w === 220) && a.hp.h === 13 && a.mp.h === 11 && a.exp.h === 10, `${a.hp.w}: ${a.hp.h}/${a.mp.h}/${a.exp.h}`]);
+// v0.30.667 (per user: thicker, AAA bar frames) grew each bar 2 px for its bezel after this test was written: 13/11/10 ->
+// 15/13/12, and the card 136 -> 138. The bounds are that design's; the card is still far under the 286 x 158 original.
+checks.push(['the card is smaller: under 244 x 140 layout px (it was 286 x 158)', a.cardW <= 244 && a.cardW >= 200 && a.cardH <= 140, `${a.cardW} x ${a.cardH}`]);
+checks.push(['the bars narrow to 220 and step down in weight: HP 15, MP 13, EXP 12 (the v0.30.667 bezel)', [a.hp, a.mp, a.exp].every((b) => b.w === 220) && a.hp.h === 15 && a.mp.h === 13 && a.exp.h === 12, `${a.hp.w}: ${a.hp.h}/${a.mp.h}/${a.exp.h}`]);
 checks.push(['the numbers stay legible: 9.5 / 8.5 / 8 px, tabular, no hard stroke', a.hp.font >= 9.5 && a.mp.font >= 8.5 && a.exp.font >= 8 && [a.hp, a.mp, a.exp].every((b) => /tabular-nums/.test(b.tab) && parseFloat(b.stroke) === 0), `${a.hp.font}/${a.mp.font}/${a.exp.font}px`]);
 checks.push(['the plate tightens: crest 36, row 44 or less', a.crest === 36 && a.plate <= 44, `crest ${a.crest}, row ${a.plate}`]);
 checks.push(['the ribbons tighten: 15 px rows', a.rows.length === 2 && a.rows.every((h) => h === 15), a.rows.join('/')]);
