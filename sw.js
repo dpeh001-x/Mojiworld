@@ -169,7 +169,10 @@
 // returning browser would otherwise keep the old set.
 // v0.30.868 - v64 -> v65. Sprites/monsters/idle/scorpion_5.webp and scorpion_6.webp are REPLACED under their own
 // names (the Pincer's stray antennas cut out - pincer-antennas), so a returning browser would otherwise keep them.
-const CACHE = 'mojiworld-assets-v65';   // v0.30.868 - the Pincer's idle 5-6 without antennas
+// v0.30.895 - v65 -> v66. Sprites/ui/block_warrior / rogue / mage / archer / shield.webp are REPLACED under
+// their own names (the Block icons repainted in the skill icons' style - block-icons), so a returning browser would
+// otherwise keep the old ones.
+const CACHE = 'mojiworld-assets-v66';   // v0.30.895 - the Block icons in the skill icons' style
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
