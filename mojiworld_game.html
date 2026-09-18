@@ -12799,7 +12799,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.889';
+const GAME_VERSION = 'v0.30.890';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -47156,7 +47156,10 @@ const PLAYER_SAVE_FIELDS = [
   '_starterWeaponGiven',
   '_spdRebase472',   // v0.29.479 — one-shot class base-speed rebase latch
   'mojimon',   // v0.29.434 — MojiMon roster + upgrades + active-out + Date.now()-anchored cooldown
-  '_tutorialSeen'   // v0.26.x — per-SAVE tutorial gate (replaces the global localStorage key)
+  '_tutorialSeen',   // v0.26.x — per-SAVE tutorial gate (replaces the global localStorage key)
+  // v0.30.890 launch audit: written, read back, never saved - abandoned-quest progress, the zodiac-echo refight ladder
+  // (a reload paid full again), the per-map co-op revive clock (wall time) and the ice tower's best floor
+  '_qBank', '_zodiacEchoKills', '_coopReviveMapAt', '_iceFloorBest'
 ];
 // =========================================================================
 // v0.29.7xx — BOSS REFIGHTS (per user: "when refighting boss, still can get
@@ -47341,6 +47344,11 @@ function _lxSteamCloudPush(json, force) {
 // Boot-time sync: adopt the cloud save when it is newer / more advanced than
 // local (mirrors _lxCloudSyncOnLogin's newest-wins logic). Returns 'reloading'
 // when it applied a cloud save (caller lets the natural reload load it).
+// v0.30.890 launch audit: a restore / import / New Game / Erase replaces the local save ON PURPOSE and then reloads. The
+// boot sync below used to see an older (or Lv 1, or missing) local save against the untouched cloud copy and adopt the
+// cloud - undoing the restore and bringing a wiped hero back. Those paths now leave this flag; the next Steam boot pushes
+// the local save up (or marks the cloud copy wiped) instead of adopting.
+function _lxMarkLocalSaveAuthoritative() { try { localStorage.setItem('lx_cloud_local_wins', '1'); } catch (e) {} }
 async function _lxSteamCloudSync() {
   if (!_steamAvailable() || !window.SteamAPI.cloud) return;
   let cloudRaw = null;
@@ -47348,7 +47356,14 @@ async function _lxSteamCloudSync() {
   let localRaw = null, localSave = null, cloudSave = null;
   try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? _lxSafeJsonParse(localRaw) : null;   /* v0.29.560 proto-safe */ } catch (e) {}
   try { cloudSave = cloudRaw ? _lxSafeJsonParse(cloudRaw) : null;   /* v0.29.560 proto-safe: untrusted cloud blob */ } catch (e) { cloudSave = null; }
-  if (!cloudSave) { if (localRaw) _lxSteamCloudPush(localRaw, true); return; }   // first launch on this machine -> migrate local up
+  let _localWins = false; try { _localWins = localStorage.getItem('lx_cloud_local_wins') === '1'; } catch (e) {}   // v0.30.890
+  if (_localWins) {
+    try { localStorage.removeItem('lx_cloud_local_wins'); } catch (e) {}
+    if (localRaw) _lxSteamCloudPush(localRaw, true);
+    else { try { Promise.resolve(window.SteamAPI.cloud.write(SAVE_KEY, JSON.stringify({ _lxWiped: true, t: Date.now() }))).catch(() => {}); } catch (e) {} }
+    return;
+  }
+  if (!cloudSave || cloudSave._lxWiped) { if (localRaw) _lxSteamCloudPush(localRaw, true); return; }   // first launch on this machine (or a wiped cloud) -> migrate local up
   const localLevel = (localSave && localSave.player && localSave.player.level) || 0;
   const cloudLevel = (cloudSave && cloudSave.player && cloudSave.player.level) || 0;
   const localT = (localSave && localSave.t) || 0;
@@ -50546,6 +50561,7 @@ function importSave(input) {
         Promise.resolve(ask).then(function (go) {
           if (!go) { input.value = ''; return; }
           localStorage.setItem(SAVE_KEY, save);
+          try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
     // only, so importing a save installed a DIFFERENT character over the previous one's
     // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
@@ -50730,6 +50746,7 @@ function loadState() {
       // v0.30.x — the next autosave would overwrite this blob with the fresh character. Keep a
       // copy under _recover (same idiom as the corrupt-save path) so nothing is lost for good.
       try { if (!localStorage.getItem(SAVE_KEY + '_recover')) localStorage.setItem(SAVE_KEY + '_recover', raw); } catch (_e) {}
+      _lxKeepUnloadableSave(raw, 'auto · older save format');   // v0.30.890
       return false;
     }
     if (!s || !s.player || !s.player.cls) return false;
@@ -51315,18 +51332,33 @@ function loadState() {
       const _raw = localStorage.getItem(SAVE_KEY);
       if (_raw) {
         if (!localStorage.getItem(SAVE_KEY + '_recover')) localStorage.setItem(SAVE_KEY + '_recover', _raw);
+        _lxKeepUnloadableSave(_raw, 'auto · could not load');   // v0.30.890
         if (typeof game !== 'undefined' && game) game._saveLoadFailed = true;
         try { console.error('[mojiworld] save failed to load; original preserved at "' + SAVE_KEY + '_recover"', e); } catch (_) {}
         setTimeout(() => {
-          try { showToast('\u26A0 Your save could not be read \u2014 a copy was preserved. Do not start a new game.', 'danger'); } catch (_) {}
+          try { showToast('\u26A0 Your save could not be read. It is kept in Save Backups as "could not load" - restore it from there.', 'danger'); } catch (_) {}
         }, 3000);
       }
     } catch (_) {}
     return false;
   }
 }
+// v0.30.890 launch audit: a save that fails to load was kept once, under a key nothing reads, and the forced new-hero flow
+// then saved over it. It now also goes into Save Backups, labelled, so it can be restored from the menu.
+function _lxKeepUnloadableSave(raw, label) {
+  try {
+    if (!raw || typeof _lxGetBackups !== 'function' || typeof _lxStoreBackups !== 'function') return;
+    const arr = _lxGetBackups(); if (arr.some((b) => b && b.data === raw)) return;
+    const meta = (typeof _lxSaveMetaFrom === 'function') ? _lxSaveMetaFrom(raw) : {};
+    arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ts: Date.now(), label: label,
+      name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: raw });
+    while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
+    _lxStoreBackups(arr);
+  } catch (e) {}
+}
 function clearSave() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+  try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890 a wipe must not be undone by Steam Cloud
   // v0.30.494 — the anti-tamper marker (SAVE_KEY + '_verified') used to survive
   // "Erase everything", so the NEXT character created in this browser was graded
   // against the deleted one's {setshards, mojicoins, bankBalance}. On an unsigned
@@ -51362,14 +51394,20 @@ function _lxGetBackups() {
   try { const a = _lxSafeJsonParse(localStorage.getItem(BACKUP_KEY));   /* v0.29.560 proto-safe */ return Array.isArray(a) ? a : []; }
   catch (e) { return []; }
 }
+let _lxBackupStoreResult = 'full';   // v0.30.890 'full' | 'pruned' | 'failed' - what the last store managed
 function _lxStoreBackups(arr) {
   // Quota guard: the save blob is 10-40 KB, so 5 slots is ~200 KB worst
   // case — but painted-layer data URLs can inflate it. On quota failure
   // drop the OLDEST slot and retry until it fits or nothing is left.
-  for (let n = arr.length; n >= 0; n--) {
-    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(arr.slice(0, n))); return n === arr.length; }
+  // v0.30.890 launch audit: this counted down to an EMPTY list, which always fits - so a full storage deleted every
+  // slot, the new one included, while the caller said "Backup saved". It stops at one slot now; if even that will not
+  // fit, nothing is written and the slots already stored stay as they were.
+  if (!arr.length) { try { localStorage.setItem(BACKUP_KEY, '[]'); _lxBackupStoreResult = 'full'; return true; } catch (e) { _lxBackupStoreResult = 'failed'; return false; } }
+  for (let n = arr.length; n >= 1; n--) {
+    try { localStorage.setItem(BACKUP_KEY, JSON.stringify(arr.slice(0, n))); _lxBackupStoreResult = n === arr.length ? 'full' : 'pruned'; return n === arr.length; }
     catch (e) { /* try one slot fewer */ }
   }
+  _lxBackupStoreResult = 'failed';
   return false;
 }
 function _lxSaveMetaFrom(data) {
@@ -51399,6 +51437,7 @@ function _lxCreateBackup(label) {
     });
     while (arr.length > BACKUP_MAX) arr.pop();
     const full = _lxStoreBackups(arr);
+    if (_lxBackupStoreResult === 'failed') { if (typeof showToast === 'function') showToast('⚠ Backup FAILED - browser storage is full. Delete an old slot in Save Backups and try again.', 'danger'); try { _renderBackupSlots(); } catch (e) {} return false; }   // v0.30.890
     if (typeof showToast === 'function') showToast(full ? '🗂 Backup saved.' : '🗂 Backup saved (older slots pruned — storage full).', 'rare');
     try { _renderBackupSlots(); } catch (e) {}
     try { _lxMenuBackupCount(); } catch (e) {}
@@ -51410,6 +51449,7 @@ function _lxRestoreBackup(id) {
   if (!b || !b.data) return;
   try {
     localStorage.setItem(SAVE_KEY, b.data);
+    try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
     // only, so restoring a backup slot installed a DIFFERENT character over the previous one's
     // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
@@ -64336,6 +64376,9 @@ try {
 } catch (e) {}
 function offerPrestige(fromGuguma) {
   if (player.level < PRESTIGE_LEVEL || game._prestigeOffered) return;
+  // v0.30.890 launch audit: the ascension reloads, and the reload ends the run by putting the PRE-RUN wallet, bank, bag and
+  // boons back - over the reset the ascension had just made. Not offered until the run is over.
+  if (game.expedition && game.expedition.active) { if (fromGuguma && typeof showToast === 'function') showToast('Finish or leave the Expedition before you ascend.', 'rare'); return; }
   // v0.30.422 - HEIRLOOM: the boon Guguma keeps warm (an EQUIPPED boon chosen in her chip)
   const _heirIdx = (game._heirloomIdx | 0), _heir = (_heirIdx >= 0 && player.boons && player.boonsEquipped && player.boonsEquipped.includes(_heirIdx) && player.boons[_heirIdx]) ? JSON.parse(JSON.stringify(player.boons[_heirIdx])) : null;
   const _heirName = _heir ? (((typeof getBoonDef === 'function') && getBoonDef(_heir)) || {}).name || _heir.id : null;
@@ -64519,6 +64562,7 @@ function offerPrestige(fromGuguma) {
         player.quests.progress = {};
       }
     }
+    player._qBank = {};   // v0.30.890 banked quest progress is saved now; an ascension starts the quest log clean
     player.hp = getMaxHp(); player.mp = getMaxMp();
     showToast(`✨ ASCENSION ${p.count} — you begin anew`, 'legendary');
     flash(0.7); addShake(16); audio.play('levelup');
@@ -157203,7 +157247,7 @@ function _bossRushComplete() {
 // is async: if the cloud save is newer it writes localStorage + reloads so the
 // natural boot load picks it up — mirrors the account-cloud login-sync pattern.
 try { if (typeof _lxStartGamepad === 'function') _lxStartGamepad(); } catch (e) {}
-try { if (typeof _lxSteamCloudSync === 'function') _lxSteamCloudSync().then((r) => { if (r === 'reloading') { let _again = false; try { _again = sessionStorage.getItem('lx_steam_sync_reload') === '1'; sessionStorage.setItem('lx_steam_sync_reload', '1'); } catch (e) {} if (_again) { try { showToast('Cloud save downloaded - restart the game to load it.', 'rare'); } catch (e) {} return; } try { location.reload(); } catch (e) {} } }, () => {}); } catch (e) {}
+try { if (typeof _lxSteamCloudSync === 'function') _lxSteamCloudSync().then((r) => { if (r !== 'reloading') { try { sessionStorage.removeItem('lx_steam_sync_reload'); } catch (e) {} }   /* v0.30.890 the guard is for back-to-back adoptions only */ if (r === 'reloading') { let _again = false; try { _again = sessionStorage.getItem('lx_steam_sync_reload') === '1'; sessionStorage.setItem('lx_steam_sync_reload', '1'); } catch (e) {} if (_again) { try { showToast('Cloud save downloaded - restart the game to load it.', 'rare'); } catch (e) {} return; } try { location.reload(); } catch (e) {} } }, () => {}); } catch (e) {}
 try { if (typeof _lxSteamSyncAchievements === 'function') setTimeout(_lxSteamSyncAchievements, 1500); } catch (e) {}
 // v0.28.1 — Steam: auto-join a friend's party if launched via "Join Game"
 // (window.MOJI_JOIN), and start the rich-presence + stats heartbeat (self-
@@ -159177,7 +159221,9 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       // lx_resume stash skips the menu on the way back, landing straight in
       // the fresh-hero flow (prologue + class select).
       if (window._lxMenuNewGame && typeof hasSave === 'function' && hasSave()) {
-        try { if (typeof _lxCreateBackup === 'function') _lxCreateBackup('auto · before New Game'); } catch (e) {}
+        // v0.30.890 launch audit: the wipe below went ahead even when the backup did not land (storage full)
+        let _bkOk = true; try { if (typeof _lxCreateBackup === 'function') _bkOk = _lxCreateBackup('auto · before New Game') !== false; } catch (e) { _bkOk = false; }
+        if (!_bkOk) { lock(false); _setAuthError('Your current hero could not be backed up (browser storage is full), so New Game was cancelled. Delete an old slot in Save Backups, then try again.'); return; }
         try { sessionStorage.setItem('lx_resume', JSON.stringify({ name: res.name || name, kind: res.kind || 'character' })); } catch (e) {}
         try { if (typeof game !== 'undefined') { game._resetting = true; if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; } } } catch (e) {}
         try { if (typeof clearSave === 'function') clearSave(); else localStorage.removeItem(SAVE_KEY); } catch (e) {}
