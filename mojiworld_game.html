@@ -12816,7 +12816,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.905';
+const GAME_VERSION = 'v0.30.906';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -99908,7 +99908,7 @@ function _promptClassAdvancement(tier) {
     try {
       if (tier === 1) {
         const ins = _ADV_INSTRUCTORS[player.cls] || { npc: 'your class instructor', where: 'your home town' };
-        showToast('⚜️ LEVEL 20 — First Class Advancement is ready!', 'legendary');
+        showToast('⚜️ LEVEL 20 — First Class Advancement is ready! Your job brings your F skill.', 'legendary');
         setTimeout(() => showToast('🪞 Speak to ' + ins.npc + ' at ' + ins.where + ' to start the Mirror Self Trial, then choose your job.', 'story'), 1500);
       } else {
         showToast('⚜️ LEVEL 40 — Master Advancement is ready!', 'legendary');
@@ -100112,13 +100112,8 @@ function _maybeLevelUp() {
   // _completeQuest when q_inner_dim_trial completes — see the trigger
   // wired further down in this file. Master advancement at Lv 40 still
   // auto-opens (no second trial yet).
-  if (player.level === JOB_ADVANCE_LEVEL && !player.job) {
-    setTimeout(() => {
-      if (typeof showToast === 'function') {
-        showToast('🪞 Class Advancement awaits — speak to your class instructor about the Mirror Self Trial.', 'legendary');
-      }
-    }, 600);
-  }
+  // v0.30.x (audit F11) - the generic "Class Advancement awaits" toast that stood here is gone: _promptClassAdvancement
+  // (above, for any level >= 20 while the job is pending) says the same thing, and names the instructor and the place.
   // v0.29.937 — was strict === MASTER_ADVANCE_LEVEL: one frame, once. A player
   // who hit 40 with the portal quest unfinished got the redirect toast, and no
   // later level-up could ever re-offer the pick. Now any level-up while the
@@ -100164,6 +100159,7 @@ function _maybeLevelUp() {
       let skill = null;
       for (const id in kit) if (kit[id].slot === slotId) { skill = kit[id]; break; }
       if (!skill && slotId === 'b') continue;  // no unlock toast for the ultimate slot until its skills exist
+      if (!skill && player.level === JOB_ADVANCE_LEVEL && !player.job) continue;   // v0.30.x (audit F11) - the advancement prompt says it
       // v0.29.77 — Per user: the unlock reads as "new skill LEARNT" and
       // leads with the skill's own icon (first felt at Lv 5's X-slot).
       const label = skill
@@ -117360,9 +117356,58 @@ function _lxStoryUp() { const sb = document.getElementById('story-beat-overlay')
 setInterval(() => { try {
   if (_lxToastQueue.length && !_lxStoryUp()) { const q = _lxToastQueue; _lxToastQueue = []; for (const [t, r] of q) showToast(t, r); }
   _lxToastDodge(); } catch (e) {} }, 400);
+// v0.30.x (audit F11) - A FLOOD WAITS ITS TURN. The stack shows 4 at a time and used to delete the oldest to make room,
+// whatever it said: a level-up raises 7-8 toasts in under two seconds, so "New skill learnt" was gone within a second
+// of appearing, under map hints. Now (a) a toast whose text is already on screen is not shown twice; (b) when the stack
+// is full, a MORE important toast goes up at once in the place of the least important one (a QTE prompt or a warning
+// cannot be held back) - and if that one has not had its 2 s yet, it goes back in the queue to be shown again in full;
+// an equally or less important toast WAITS in the queue. Waiting toasts appear as soon as a slot frees, most important
+// first, then oldest; anything that waited over 8 s is dropped as stale. Nothing is lost before it can be read. Rank:
+// danger / story / legendary 3, epic 2, rare / success 1, the rest 0; a danger warning also outranks another 3.
+const _LX_TOAST_CAP = 4, _LX_TOAST_READ_MS = 2000;
+const _LX_TOAST_RANK = { danger: 3, story: 3, legendary: 3, epic: 2, rare: 1, success: 1 };
+const _lxToastWait = [];
+function _lxToastRank(r) { return _LX_TOAST_RANK[r] || 0; }
+function _lxToastDrain() {
+  try {
+    const host = document.getElementById('toast-container'); if (!host) return;
+    const now = performance.now();
+    for (let i = _lxToastWait.length - 1; i >= 0; i--) if (now - _lxToastWait[i].at > 8000) _lxToastWait.splice(i, 1);
+    while (_lxToastWait.length && host.querySelectorAll('.toast').length < _LX_TOAST_CAP) {
+      let b = 0; for (let k = 1; k < _lxToastWait.length; k++) if (_lxToastRank(_lxToastWait[k].rarity) > _lxToastRank(_lxToastWait[b].rarity)) b = k;
+      const w = _lxToastWait.splice(b, 1)[0];
+      _lxToastShow(w.txt, w.rarity);
+    }
+  } catch (e) {}
+}
 function showToast(txt, rarity) {
   if (_lxStoryUp()) { _lxToastQueue.push([txt, rarity]); if (_lxToastQueue.length > 6) _lxToastQueue.shift(); return; }   // v0.30.872
+  try {
+    const host = document.getElementById('toast-container');
+    if (host) {
+      if (_lxToastWait.length) _lxToastDrain();                                               // a slot freed some other way
+      const live = host.querySelectorAll('.toast'), rank = _lxToastRank(rarity), now = performance.now();
+      for (const el of live) if (el._lxTxt === txt) return;                                   // (a) already showing
+      for (const w of _lxToastWait) if (w.txt === txt) return;                                // ...or already waiting
+      if (live.length >= _LX_TOAST_CAP) {
+        let low = null;
+        const urgent = rarity === 'danger';                                                   // a warning never waits
+        for (const el of live) if (((el._lxRank | 0) < rank || (urgent && el._lxRar !== 'danger')) && (!low || (el._lxRank | 0) < (low._lxRank | 0))) low = el;
+        if (!low) {                                                                           // (b) wait its turn
+          _lxToastWait.push({ txt, rarity, at: now });
+          if (_lxToastWait.length > 6) { let i = 0; for (let k = 1; k < _lxToastWait.length; k++) if (_lxToastRank(_lxToastWait[k].rarity) < _lxToastRank(_lxToastWait[i].rarity)) i = k; _lxToastWait.splice(i, 1); }
+          return;
+        }
+        if (now - (low._lxAt || 0) < _LX_TOAST_READ_MS) _lxToastWait.unshift({ txt: low._lxTxt, rarity: low._lxRar, at: now });   // not read yet: again later
+        if (low.parentNode) low.parentNode.removeChild(low);                                  // (c) take its place
+      }
+    }
+  } catch (e) {}
+  _lxToastShow(txt, rarity);
+}
+function _lxToastShow(txt, rarity) {
   const t = document.createElement('div');
+  t._lxTxt = txt; t._lxRar = rarity; t._lxRank = _lxToastRank(rarity); t._lxAt = performance.now();
   t.className = 'toast';
   // v0.25.876 — Rarity is now driven by a data-attribute so CSS owns
   // the colour palette (border-left stripe, background tint, glow).
@@ -117400,7 +117445,7 @@ function showToast(txt, rarity) {
     // viewport. Drop the oldest .toast children until we're back at or
     // under the cap. The host may also contain non-.toast siblings (the
     // container is dedicated but defensive: scope to .toast only).
-    const TOAST_CAP = 4;   // v0.27.4 — 7 → 4 (per user: pop-ups flooded the screen)
+    const TOAST_CAP = _LX_TOAST_CAP;   // v0.27.4 — 7 → 4 (per user: pop-ups flooded the screen)
     try { _lxToastDodge(); } catch (e) {}   // v0.30.872 - place it before it is seen
     const live = host.querySelectorAll('.toast');
     if (live.length > TOAST_CAP) {
@@ -117413,7 +117458,7 @@ function showToast(txt, rarity) {
   // Scale lifetime with length: 3s floor, +50ms per char beyond 60, 7s cap.
   const _toastMs = Math.min(7000, 3000 + Math.max(0, (txt || '').length - 60) * 50);
   if (_toastMs > 3000) t.style.animationDuration = (_toastMs / 1000) + 's';
-  setTimeout(() => t.remove(), _toastMs);
+  setTimeout(() => { t.remove(); _lxToastDrain(); }, _toastMs);   // v0.30.x (audit F11) - a slot frees: the next waits no longer
 }
 
 // v0.25.244 (X4) — In-game replacement for the browser confirm() prompt.
@@ -152029,7 +152074,8 @@ const _DN_LIFE_DESC_CMP = (a, b) => (b.life | 0) - (a.life | 0);
 // quantization crosses a boundary or the viewport dimensions change.
 // Used by the main loop's eclipse overlay block — see loop() below.
 let _ECLIPSE_CACHE = null;
-let _LOWHP_VIG_CACHE = null;   // v0.26.x perf — low-HP vignette gradient cache (same idiom)
+let _LOWHP_VIG_CACHE = null;
+let _HURT_VIG_CACHE = null;   // v0.30.x (audit C7) - the hit edge's gradient, same idiom   // v0.26.x perf — low-HP vignette gradient cache (same idiom)
 
 // v0.26.x perf — persistent (cross-frame) cache of CRIT damage-number fill
 // gradients. The gradient is built at the translated origin (coords are size-
@@ -153771,6 +153817,19 @@ function updateUI() {
   // player.buffs key names — see L21602 / L27058 / L27091 etc.
   _updateBuffRow();
 
+  // v0.30.x (audit C7) - GETTING HIT READS. Any drop of 3%+ of max HP since the last HUD pass (every damage path, one
+  // place) arms the red edge the renderer draws: 0.35 at 3% rising to 0.9 at ~25%, times the Screen Flashes slider,
+  // halved by Reduce Motion. Chip damage and DoT ticks under 3% stay quiet; the red number still shows them.
+  {
+    const _hp = player.hp, _was = _uiLast.hurtHp; _uiLast.hurtHp = _hp;
+    if (_was != null && _hp < _was && !game.dying && player.hp > 0) {
+      const _frac = (_was - _hp) / Math.max(1, (typeof getMaxHp === 'function' ? getMaxHp() : player.maxHp) || 1);
+      if (_frac >= 0.03) {
+        const _a = Math.min(0.9, 0.35 + _frac * 2.2) * (game._flashMul != null ? game._flashMul : 1) * (game._reduceMotion ? 0.5 : 1);
+        if (_a > 0.02) game._lxHurtA = Math.max(game._lxHurtA || 0, _a);
+      }
+    }
+  }
   // Low HP vignette (rage state)
   if (d['low-hp-vignette']) {
     const on = !!player.inRage;
@@ -154327,6 +154386,22 @@ function _lxDrawFrame(time) {
       ctx.fillStyle = _LOWHP_VIG_CACHE.g;
       ctx.fillRect(0, 0, W, H);
     } catch (_e) {}
+  }
+  // v0.30.x (audit C7) - GETTING HIT READS: a red edge on a real hit, set by updateUI's HP watcher (game._lxHurtA),
+  // fading ~14% a frame (gone in about 0.45 s).
+  if (game._lxHurtA > 0.02 && !game.dying) {
+    try {
+      const _hq = Math.round(game._lxHurtA * 100);
+      if (!_HURT_VIG_CACHE || _HURT_VIG_CACHE.qa !== _hq || _HURT_VIG_CACHE.w !== W || _HURT_VIG_CACHE.h !== H) {
+        const _hg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34, W / 2, H / 2, Math.max(W, H) * 0.70);
+        _hg.addColorStop(0, 'rgba(255,0,0,0)');
+        _hg.addColorStop(1, 'rgba(210,16,24,' + (_hq / 100 * 0.75).toFixed(3) + ')');
+        _HURT_VIG_CACHE = { qa: _hq, w: W, h: H, g: _hg };
+      }
+      ctx.fillStyle = _HURT_VIG_CACHE.g;
+      ctx.fillRect(0, 0, W, H);
+    } catch (_e) {}
+    if (!_lxRenderOnly) game._lxHurtA *= 0.86;
   }
   if (game.flashOverlay > 0) {
     if (!_phaserHandlingOverlay()) {
