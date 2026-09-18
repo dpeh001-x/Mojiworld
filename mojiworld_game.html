@@ -12817,7 +12817,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.920';
+const GAME_VERSION = 'v0.30.921';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -117379,6 +117379,10 @@ setInterval(() => { try {
 // an equally or less important toast WAITS in the queue. Waiting toasts appear as soon as a slot frees, most important
 // first, then oldest; anything that waited over 8 s is dropped as stale. Nothing is lost before it can be read. Rank:
 // danger / story / legendary 3, epic 2, rare / success 1, the rest 0; a danger warning also outranks another 3.
+// v0.30.x - EXCEPT the top rank: a danger / story / legendary toast never goes stale and is never trimmed to make room
+// for one of its own rank (the queue holds up to 16 of them). A flood of level milestones and quest rewards could keep
+// the stack busy past 8 s, and several one-time notices (Dawn's Favor) mark themselves seen before the toast goes up -
+// dropping one meant the player was never told.
 const _LX_TOAST_CAP = 4, _LX_TOAST_READ_MS = 2000;
 const _LX_TOAST_RANK = { danger: 3, story: 3, legendary: 3, epic: 2, rare: 1, success: 1 };
 const _lxToastWait = [];
@@ -117388,7 +117392,7 @@ function _lxToastDrain() {
     const host = document.getElementById('toast-container'); if (!host) return;
     if (_lxStoryUp()) return;   // v0.30.920 not under a story scene
     const now = performance.now();
-    for (let i = _lxToastWait.length - 1; i >= 0; i--) if (now - _lxToastWait[i].at > 8000) _lxToastWait.splice(i, 1);
+    for (let i = _lxToastWait.length - 1; i >= 0; i--) if (now - _lxToastWait[i].at > 8000 && _lxToastRank(_lxToastWait[i].rarity) < 3) _lxToastWait.splice(i, 1);
     while (_lxToastWait.length && host.querySelectorAll('.toast').length < _LX_TOAST_CAP) {
       let b = 0; for (let k = 1; k < _lxToastWait.length; k++) if (_lxToastRank(_lxToastWait[k].rarity) > _lxToastRank(_lxToastWait[b].rarity)) b = k;
       const w = _lxToastWait.splice(b, 1)[0];
@@ -117411,7 +117415,7 @@ function showToast(txt, rarity) {
         for (const el of live) if (((el._lxRank | 0) < rank || (urgent && el._lxRar !== 'danger')) && (!low || (el._lxRank | 0) < (low._lxRank | 0))) low = el;
         if (!low) {                                                                           // (b) wait its turn
           _lxToastWait.push({ txt, rarity, at: now });
-          if (_lxToastWait.length > 6) { let i = 0; for (let k = 1; k < _lxToastWait.length; k++) if (_lxToastRank(_lxToastWait[k].rarity) < _lxToastRank(_lxToastWait[i].rarity)) i = k; _lxToastWait.splice(i, 1); }
+          if (_lxToastWait.length > 6) { let i = 0; for (let k = 1; k < _lxToastWait.length; k++) if (_lxToastRank(_lxToastWait[k].rarity) < _lxToastRank(_lxToastWait[i].rarity)) i = k; if (_lxToastRank(_lxToastWait[i].rarity) < 3 || _lxToastWait.length > 16) _lxToastWait.splice(i, 1); }
           return;
         }
         if (now - (low._lxAt || 0) < _LX_TOAST_READ_MS) _lxToastWait.unshift({ txt: low._lxTxt, rarity: low._lxRar, at: now });   // not read yet: again later

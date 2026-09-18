@@ -62,6 +62,9 @@ try {
     await sleep(900);                                                     // a few frames: the one-time notice
     out.after = { done: _lxStoryComplete(), coins: coins(), exp: killExp(), strokes: strokes(), seen: !!player._dawnFavorSeen,
       toast: /Dawn's Favor/.test(document.body.innerText) };
+    // the level-ups and quest rewards above raise a burst of legendary toasts, and since v0.30.906 the notice waits its
+    // turn in the queue rather than pushing one of them off - so wait for it to reach the screen (it must: a top-rank toast no longer goes stale)
+    for (let i = 0; i < 200 && !out.after.toast; i++) { await sleep(100); out.after.toast = /Dawn's Favor/.test(document.body.innerText); }
     // v0.30.813 - the painted aura: wait for its art, then count the layers; blank the art to see the stand-in
     for (let i = 0; i < 150 && !(LX_DAWN_ART.frames && LX_DAWN_ART.halo.naturalWidth && LX_DAWN_ART.sigil.naturalWidth && LX_DAWN_ART.frames.every((f) => f.naturalWidth)); i++) await sleep(100);
     out.artReady = !!(LX_DAWN_ART.frames && LX_DAWN_ART.frames.every((f) => f.naturalWidth > 0) && LX_DAWN_ART.halo.naturalWidth > 0 && LX_DAWN_ART.sigil.naturalWidth > 0);
