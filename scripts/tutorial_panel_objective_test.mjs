@@ -34,6 +34,9 @@ await page.waitForTimeout(9000);
 await page.evaluate(() => {
   player.cls = 'archer'; player.hp = getMaxHp();
   window._prologuePending = false; window._prologueActive = false; game._resetting = false;
+  // v0.30.789: no hero is saved while the fresh-start class select is up - finish "creation" first or the reload
+  // boots a new game again, and the pad then (correctly) drives that menu instead of the tour
+  window._lxAwaitingCreation = false; { const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; }
   _flushSaveStateNow();
 });
 await page.reload({ waitUntil: 'load', timeout: 90000 });
@@ -139,13 +142,17 @@ const trig = await page.evaluate(async () => {
   // LT skips
   r.skipBtn = !!document.getElementById('tut-skip');
   r.dockBefore = !!document.querySelector('#tutorial-modal.tut-dock');
+  // v0.30.897: one pull only ARMS the skip (a toast asks for a second pull within 2.5 s), so a stray pull cannot end the tour
+  window.__setBtn(6, 1); await wait(300); window.__setBtn(6, 0); await wait(500);
+  r.dockAfterOne = !!document.querySelector('#tutorial-modal.tut-dock');
   window.__setBtn(6, 1); await wait(300); window.__setBtn(6, 0); await wait(700);
   r.dockGone = !document.querySelector('#tutorial-modal.tut-dock');
   return r;
 });
 ok('RT advances the tour one step', trig.afterRT === trig.start + 1, `${trig.start} -> ${trig.afterRT}`);
 ok('a HELD RT does not run away with it', trig.afterHold === trig.afterRT, `held -> ${trig.afterHold}`);
-ok('LT skips the tour', trig.dockGone === true, JSON.stringify({skipBtn:trig.skipBtn,dockBefore:trig.dockBefore,dockGone:trig.dockGone}));
+ok('one LT pull does not end the tour (it asks first)', trig.dockBefore === true && trig.dockAfterOne === true, JSON.stringify({dockBefore:trig.dockBefore,dockAfterOne:trig.dockAfterOne}));
+ok('a second LT pull skips the tour', trig.dockGone === true, JSON.stringify({skipBtn:trig.skipBtn,dockBefore:trig.dockBefore,dockGone:trig.dockGone}));
 ok('the card tells pad players RT/LT', /RT next/.test(trig.hintText) && /LT skip/.test(trig.hintText), trig.hintText);
 
 let pass = 0, failed = 0;

@@ -61,6 +61,9 @@ const r = await page.evaluate(() => {
       game.monsters.push(m);
       if (variant === 'elite') m.isElite = true;
       m.currentHp = 0;
+      // v0.30.635 added an HOURLY budget on mob boons (2-4 an hour): without clearing it the normal run spent the
+      // hour's budget in its first few thousand kills and the elite run then measured 0. The budget is checked below.
+      player._boonWin = [];
       try { killMonster(m); } catch (e) {}
       orbs += game.powerupOrbs.length;
       game.powerupOrbs.length = 0;
@@ -69,6 +72,19 @@ const r = await page.evaluate(() => {
   };
   out.normal = run('normal');
   out.elite  = run('elite');
+  // the hourly budget itself: with every roll a hit, mob boons stop at _lxBoonHourCap() within the hour
+  { const _r = Math.random; Math.random = () => 0; player._boonWin = []; game.powerupOrbs = []; let orbs = 0;
+    try {
+      for (let i = 0; i < 50; i++) {
+        game.monsters.length = 0; game.drops.length = 0;
+        const m = spawnMonster(600, 300, 'snail', false, false); if (!m) break;
+        game.monsters.push(m); m.currentHp = 0;
+        try { killMonster(m); } catch (e) {}
+        orbs += game.powerupOrbs.length; game.powerupOrbs.length = 0;
+      }
+    } finally { Math.random = _r; }
+    out.hour = { orbs, cap: (typeof _lxBoonHourCap === 'function') ? _lxBoonHourCap() : null };
+    player._boonWin = []; }
 
   game.monsters.length = 0; game.drops.length = 0; game.powerupOrbs = []; game.paused = false;
   return out;
@@ -96,6 +112,8 @@ ok('elites did not go up — they are at or below 0.13% (target 0.10%)',
    e.pct != null && e.pct <= 0.13, { pct: e.pct, oneIn: e.oneIn });
 ok('boons still drop at all — this is a trickle, not a removal',
    n.orbs > 0 && e.orbs > 0, { normal: n.orbs, elite: e.orbs });
+ok('the hourly budget stops mob boons at its cap, however lucky the rolls (v0.30.635)',
+   r.hour && r.hour.cap > 0 && r.hour.orbs === r.hour.cap, r.hour);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 let pass = 0, fail = 0;

@@ -144,7 +144,12 @@ const fresh = await page.evaluate(() => {
 
 // ---- the reload. This is the whole point: QUESTS is rebuilt from source, the
 // save restores a.targetCount, and nothing used to re-state the prose.
-await page.evaluate(() => { try { if (typeof saveGame === 'function') saveGame(); } catch (e) {} });
+// v0.30.789: no hero is saved while the fresh-start class select is up, so finish "creation" before saving
+await page.evaluate(() => {
+  window._lxAwaitingCreation = false; { const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; }
+  try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
+  try { if (typeof _flushSaveStateNow === 'function') _flushSaveStateNow(); } catch (e) {}
+});
 await page.reload({ waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof QUESTS === 'object' && typeof acceptQuest === 'function', null, { timeout: 120000 });
 await page.waitForTimeout(2500);

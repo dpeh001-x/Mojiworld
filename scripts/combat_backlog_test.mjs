@@ -49,7 +49,7 @@ const r = await page.evaluate(async () => {
 const html = await (await fetch(`http://localhost:${PORT}/${PAGE}`)).text();
 const ironWill = html.includes("if (_dr > 0 && dmg > 0) dmg = Math.max(1,");
 const latches = html.includes("'_bigMeleeFiring', '_columnFiring', '_hgCharging',");
-const opening = html.includes("|| (m._stagger > 0) || (m._dirOpenT > 0);");
+const opening = html.includes("|| (m._stagger > 0) || (m._dirOpenT > 0)");   // v0.30.570 appended the Sovereign collapse hold to that condition
 const rawDt = html.includes("if (m._stagger > 0) m._stagger -= _rawDt;");
 const virgo = html.includes("if (_vCs && !m._columnFiring && !m._bigMeleeFiring) {");
 const shards = html.includes("_q._sovShardOf === m) { _q.currentHp = 0; game.monsters.splice(_si, 1); }");

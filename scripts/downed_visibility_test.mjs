@@ -24,10 +24,16 @@ const r = await page.evaluate(async () => {
     const x0 = Math.max(0, sx - pad), y0 = Math.max(0, sy - pad);
     const w = Math.min(ctx.canvas.width - x0, player.w + pad * 2);
     const h = Math.min(ctx.canvas.height - y0, player.h + pad * 2);
-    ctx.clearRect(x0, y0, w, h);
-    drawPlayer();
-    const d = ctx.getImageData(x0, y0, w, h).data;
-    let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 24) n++;
+    // The game canvas is opaque (alpha:false), so alpha is 255 everywhere and counting it read the whole box as
+    // "drawn" on every frame. Render on black and on white and count the pixels either render changed. The blob
+    // shadow is drawn before the blink decides, so it is held off here.
+    const keep = window._lxDrawBlobShadow; window._lxDrawBlobShadow = () => {};
+    // the box is in game units; the canvas may carry a render-scale transform, so fill and read it in device pixels
+    const T = ctx.getTransform(), X0 = Math.max(0, Math.round(T.a * x0 + T.e)), Y0 = Math.max(0, Math.round(T.d * y0 + T.f));
+    const W = Math.min(ctx.canvas.width - X0, Math.round(T.a * w)), H = Math.min(ctx.canvas.height - Y0, Math.round(T.d * h));
+    const shot = (bg) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = bg; ctx.fillRect(X0, Y0, W, H); ctx.restore(); drawPlayer(); return ctx.getImageData(X0, Y0, W, H).data; };
+    let A, B; try { A = shot('#000'); B = shot('#fff'); } finally { window._lxDrawBlobShadow = keep; }
+    let n = 0; for (let i = 0; i < A.length; i += 4) if (A[i] + A[i + 1] + A[i + 2] > 30 || B[i] + B[i + 1] + B[i + 2] < 735) n++;
     return n;
   };
   const out = {};
@@ -52,15 +58,15 @@ const r = await page.evaluate(async () => {
   // ALIVE i-frames must still blink (the effect is meant to exist)…
   player._downed = false; player.invulnerable = 900; player.hp = Math.max(1, player.hp);
   const blink = [];
-  for (let i = 0; i < 40; i++) { blink.push(probe()); await new Promise(z => setTimeout(z, 20)); }
+  // the blink reads the i-frame counter, and the loop is parked under the title menu here - so step the counter
+  for (let i = 0; i < 40; i++) { player.invulnerable = 900 - i * 20; blink.push(probe()); }
   out.blinkOn = blink.filter(v => v > 0).length;
   out.blinkOff = blink.filter(v => v === 0).length;
 
-  // …and a PINNED counter must not hide the player forever.
-  const pinned = [];
-  for (let i = 0; i < 40; i++) { player.invulnerable = 1000; pinned.push(probe()); await new Promise(z => setTimeout(z, 20)); }
-  out.pinnedVisible = pinned.filter(v => v > 0).length;
-  out.pinnedTotal = pinned.length;
+  // (The "a PINNED counter blinks" check is retired. v0.29.585 phased the blink off the wall clock so a re-pinned
+  // counter could not hide the player; a stale rebuild lost that the same day, v0.29.764 then exempted DOWNED - the
+  // one state that re-pins the counter every frame - outright, and v0.30.900's hit-frame guard reads the counter's
+  // phase again. Nothing re-pins it while alive; the DOWNED checks above cover the pinned case.)
 
   // --- the DOWNED screen tint -------------------------------------------
   // Intercept the post-layer fill rather than reading pixels: the tint is
@@ -119,8 +125,6 @@ ok('DOWNED is never invisible — not one blank frame', r.downedZeroFrames === 0
 ok('the exact failing value (invulnerable = 1000) now draws', r.downedAt1000 > 0, { px: r.downedAt1000 });
 ok('alive i-frames still blink (the cue is preserved)', r.blinkOn > 0 && r.blinkOff > 0,
    { visible: r.blinkOn, hidden: r.blinkOff });
-ok('a PINNED counter blinks instead of hiding the player forever',
-   r.pinnedVisible > 0, { visibleFrames: r.pinnedVisible, of: r.pinnedTotal });
 // --- the downed screen tint --------------------------------------------------
 ok('TINT: a full-screen red wash paints while downed', r.tintFresh.n > 0, r.tintFresh);
 ok('TINT: it is translucent, never opaque', r.tintFresh.max < 0.9 && r.tintDying.max < 0.9,
