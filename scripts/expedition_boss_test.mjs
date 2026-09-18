@@ -1,5 +1,8 @@
 // v0.29.316 — expedition bosses: level = capped player level + 10, stats to
 // match, and decisively above a field monster of that level.
+// v0.30.874 — ...where the TOWER level is never below LX_EXPEDITION_MIN_MOB_LEVEL (50): an under-50
+// run meets Lv-60 bosses (per user: "when players enter below level 50, the base level of the
+// monsters should be 50"). Read from the page, so a build without the floor checks as before.
 //
 //   node serve.js 8779 && node scripts/expedition_boss_test.mjs 8779
 import { chromium } from 'playwright-core';
@@ -18,7 +21,7 @@ try {
   await page.waitForTimeout(2500);
 
   const r = await page.evaluate(async () => {
-    const out = { rows: [], cap: LX_SCALED_LEVEL_CAP, mul: EXPEDITION_BOSS_MUL };
+    const out = { rows: [], cap: LX_SCALED_LEVEL_CAP, mul: EXPEDITION_BOSS_MUL, floor: (typeof LX_EXPEDITION_MIN_MOB_LEVEL === 'number') ? LX_EXPEDITION_MIN_MOB_LEVEL : 1 };
     const prevMap = game.currentMap;
     for (const L of [20, 30, 50, 70, 85, 120, 200]) {
       const row = { L };
@@ -41,7 +44,7 @@ try {
     return out;
   });
 
-  console.log('EXPEDITION BOSSES — level should be capped(player)+10, max ' + (r.cap + 10) + '\n');
+  console.log('EXPEDITION BOSSES — level should be max(' + r.floor + ', capped(player))+10, max ' + (r.cap + 10) + '\n');
   console.log('  player |  mid-boss lv / hp        | final-boss lv / hp       | field mob hp at boss lv');
   for (const row of r.rows) {
     const f = (n) => n == null ? '-' : Math.round(n).toLocaleString();
@@ -52,11 +55,11 @@ try {
   }
   console.log('');
 
-  const want = (L) => Math.min(L, r.cap) + 10;
+  const want = (L) => Math.max(r.floor, Math.min(L, r.cap)) + 10;
   for (const row of r.rows) {
-    ok(`Lv ${row.L}: mid-boss level == capped+10 (${want(row.L)})`,
+    ok(`Lv ${row.L}: mid-boss level == max(floor, capped)+10 (${want(row.L)})`,
        row.mid && row.mid.lv === want(row.L), row.mid && { got: row.mid.lv, want: want(row.L) });
-    ok(`Lv ${row.L}: final-boss level == capped+10 (${want(row.L)})`,
+    ok(`Lv ${row.L}: final-boss level == max(floor, capped)+10 (${want(row.L)})`,
        row.final && row.final.lv === want(row.L), row.final && { got: row.final.lv, want: want(row.L) });
   }
   const top = r.rows[r.rows.length - 1];
