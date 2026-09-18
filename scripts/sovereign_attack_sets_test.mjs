@@ -1,3 +1,4 @@
+// (v0.30.478 renamed the stamp _sovAtkKey/_sovAtkUntil -> _bossAtkKey/_bossAtkUntil when any boss could ship per-attack art)
 // THE SOVEREIGN OF THE SPIRE — a different pose for each of its five attacks.
 // ============================================================================
 // Per user: "using ludo.ai generate new unique attacking sprites for the
@@ -49,7 +50,7 @@ await page.evaluate(() => {
 });
 await page.click('#cs-nav-next').catch(() => {});
 await page.waitForTimeout(2500);
-await page.evaluate(() => { player.level = 99; player._god = true; loadMap('forest', 300); });
+await page.evaluate(() => { player.level = 99; player._god = true; loadMap('forest', 300); game.paused = false; });   // the title menu leaves the game paused since the v0.30.789 load flow
 await page.waitForTimeout(4000);
 
 const R = await page.evaluate(async () => {
@@ -85,23 +86,23 @@ const R = await page.evaluate(async () => {
   if (boss) {
     boss.maxHp = 1e9; boss.currentHp = 1e9; boss.atk = 0; boss.speed = 0;
     for (const short of ['swing', 'column', 'collapse', 'volley', 'drain']) {
-      boss._sovAtkKey = null; boss._sovAtkUntil = 0;
+      boss._bossAtkKey = null; boss._bossAtkUntil = 0;
       if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(boss, short, 60);
-      stamped[short] = boss._sovAtkKey || null;
+      stamped[short] = boss._bossAtkKey || null;
     }
     // the window must close on its own
     if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(boss, 'swing', 2);
-    const before = boss._sovAtkKey;
+    const before = boss._bossAtkKey;
     const t0 = game.time | 0;
-    for (let i = 0; i < 40 && (game.time | 0) < t0 + 6; i++) await new Promise(r => requestAnimationFrame(r));
-    expired = { before, liveNow: (game.time | 0) < (boss._sovAtkUntil | 0) };
+    for (let i = 0; i < 40 && (game.time | 0) < t0 + 6; i++) { game.paused = false; await new Promise(r => requestAnimationFrame(r)); }   // the boss intro card pauses
+    expired = { before, liveNow: (game.time | 0) < (boss._bossAtkUntil | 0) };
 
     // ---- 5. a different boss must be untouched --------------------------
     const other = spawnMonster(player.x + 520, player.y, 'gravitos', false);
     if (other) {
       other.atk = 0; other.speed = 0;
       if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(other, 'swing', 60);
-      otherBoss = { type: other.type, key: other._sovAtkKey || null };
+      otherBoss = { type: other.type, key: other._bossAtkKey || null };
     }
   }
   return {

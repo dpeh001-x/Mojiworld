@@ -35,7 +35,7 @@ await page.waitForFunction(() => typeof _gravitosShadowRevealCutscene === 'funct
 const r = await page.evaluate(() => {
   const out = {};
   out.fnExists = typeof _gravitosShadowRevealCutscene === 'function';
-  const km = String(typeof triggerSuperBossDeath === 'function' ? triggerSuperBossDeath : '');
+  const km = (String(typeof triggerSuperBossDeath === 'function' ? triggerSuperBossDeath : '') + String(typeof _triggerSuperBossDeathRaw === 'function' ? _triggerSuperBossDeathRaw : ''));
   // ORDER is proven by the callback plumbing itself: the shadow reveal
   // receives the Amnesiac continuation (_toAmnesiac) as its onDone, so it can
   // only ever run BEFORE the "It's him" scene — and its fail-open exits into

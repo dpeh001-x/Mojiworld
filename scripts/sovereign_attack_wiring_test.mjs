@@ -46,7 +46,7 @@ await page.evaluate(() => {
 });
 await page.click('#cs-nav-next').catch(() => {});
 await page.waitForTimeout(2500);
-await page.evaluate(() => { player.level = 99; player._god = true; loadMap('forest', 300); });
+await page.evaluate(() => { player.level = 99; player._god = true; loadMap('forest', 300); game.paused = false; });   // the title menu leaves the game paused since the v0.30.789 load flow
 await page.waitForTimeout(4000);
 
 const R = await page.evaluate(async () => {
@@ -56,7 +56,7 @@ const R = await page.evaluate(async () => {
   const boss = spawnMonster(player.x + 150, player.y, 'towerSovereign', false);
   if (!boss) return { error: 'no boss' };
   // The real fight's own setup: the expedition finale flag plus the three
-  // timers the spawn path arms. Nothing here touches _sovAtkKey.
+  // timers the spawn path arms. Nothing here touches _bossAtkKey.
   boss._expeditionFinalBoss = true;
   boss.maxHp = 1e9; boss.currentHp = 1e9;
   boss.atk = 0;                       // the boss must not kill the test dummy
@@ -93,8 +93,12 @@ const R = await page.evaluate(async () => {
   // did exactly that and reported "swing: 0 activations" while the diagnostics
   // showed _bigMeleeFiring true on 1362 of 1400 frames. The swing was firing
   // the whole time; nothing was left to observe it with.
+  // Windows are counted in GAME steps (game.time), not animation frames: the sim runs a fixed 60 Hz clock and headless
+  // Chrome can fire several frames per step, so a frame count covered a fraction of the collapse's 420-step lockout.
   const step = async (frames, arm) => {
-    for (let f = 0; f < frames; f++) {
+    const _end = (game.time | 0) + frames;
+    for (let f = 0; (game.time | 0) < _end && f < frames * 12; f++) {
+      game.paused = false;   // the boss intro card pauses the loop
       await new Promise(r => requestAnimationFrame(r));
       boss.currentHp = boss.maxHp;
       player.hp = getMaxHp();
@@ -103,6 +107,9 @@ const R = await page.evaluate(async () => {
       player.invulnerable = 60;
       boss._dirOpenT = 0; boss._dirFleeT = 0;
       boss._sovShielded = false; boss._sovExposedUntil = 0; boss._sovSpentUntil = 0;
+      // v0.30.570: the collapse holds every other attack for 420 steps after it fires - by design, and longer than a
+      // window here - so the windows after it clear that hold the same way the three above are cleared
+      if (arm === 'volley' || arm === 'drain') boss._sovCollapseUntil = 0;
       const now = game.time | 0;
       // park the timers far away unless this window is arming them
       const FAR = now + 100000;
@@ -116,7 +123,7 @@ const R = await page.evaluate(async () => {
         diag.range = bm.range; diag.swingH = bm.swingH;
         if (boss._bigMeleeFiring) diag.firing++;
         if ((boss._bigMeleeCd | 0) <= 0) diag.cdReady++; }
-      const k = boss._sovAtkKey && (game.time | 0) < (boss._sovAtkUntil | 0) ? boss._sovAtkKey : null;
+      const k = boss._bossAtkKey && (game.time | 0) < (boss._bossAtkUntil | 0) ? boss._bossAtkKey : null;
       if (k && k !== lastKey) { seen[k] = (seen[k] || 0) + 1; order.push(k.replace('towerSovereign', '')); }
       lastKey = k;
     }

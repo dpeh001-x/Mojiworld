@@ -44,7 +44,7 @@ await page.waitForFunction(() => typeof _amnesiacItsHimCutscene === 'function' |
 const r = await page.evaluate(() => {
   const out = {};
   out.fnExists = typeof _amnesiacItsHimCutscene === 'function';
-  const km = String(typeof triggerSuperBossDeath === 'function' ? triggerSuperBossDeath : '');
+  const km = (String(typeof triggerSuperBossDeath === 'function' ? triggerSuperBossDeath : '') + String(typeof _triggerSuperBossDeathRaw === 'function' ? _triggerSuperBossDeathRaw : ''));
   // v0.29.992 — card 2 sits between the Amnesiac and the Winding, so the
   // scene's continuation is the card wrapper, not the winding step directly.
   out.chainWired = km.includes('_amnesiacItsHimCutscene(_toWindingCard)') && km.includes('else _toWindingCard();');

@@ -40,7 +40,7 @@ await page.waitForTimeout(3000);
 const r = await page.evaluate(() => {
   const out = {};
   out.fnExists = typeof _lxEndingCard === 'function';
-  const km = String(typeof triggerSuperBossDeath === 'function' ? triggerSuperBossDeath : '');
+  const km = (String(typeof triggerSuperBossDeath === 'function' ? triggerSuperBossDeath : '') + String(typeof _triggerSuperBossDeathRaw === 'function' ? _triggerSuperBossDeathRaw : ''));
   // Placement, proven by the continuation plumbing in the chain source.
   // The wrapper literal encodes the ordering structurally: the card's
   // continuation IS the shadow step, so it can only play first.

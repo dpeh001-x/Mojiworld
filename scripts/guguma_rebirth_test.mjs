@@ -30,7 +30,7 @@ await page.waitForFunction(() => typeof triggerSuperBossDeath === 'function', nu
 
 const r = await page.evaluate(() => {
   const out = {};
-  const km = String(triggerSuperBossDeath);
+  const km = String(triggerSuperBossDeath) + String(typeof _triggerSuperBossDeathRaw === 'function' ? _triggerSuperBossDeathRaw : '');   // v0.30.833 wrapped the body
   // The function may exist (dead code is harmless; the clip could return),
   // but NOTHING in the kill chain may invoke it.
   out.chainDoesNotCallIt = !/_gugumaRebirthCutscene\s*\(/.test(km);
