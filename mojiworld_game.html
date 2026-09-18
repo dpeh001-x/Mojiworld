@@ -12817,7 +12817,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.919';
+const GAME_VERSION = 'v0.30.920';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -47524,11 +47524,11 @@ function _lxSteamInviteFriends() {
 // --- Steam Stats + achievement progress --------------------------------------
 // Lifetime stat counters (configure matching stat API names in Steamworks).
 let _lxSteamStatsAt = 0;
-function _lxSteamPushStats() {
+function _lxSteamPushStats(force) {
   if (!_steamAvailable() || !window.SteamAPI.stats) return;
   if (!_lxSteamTrusted()) return;   // v0.30.917
   // v0.30.898 launch audit: stored on every save (~1.5 s) - Steam rate-limits StoreStats; once a minute is plenty
-  const _now = Date.now(); if (_now - _lxSteamStatsAt < 60000) return; _lxSteamStatsAt = _now;
+  const _now = Date.now(); if (!force && _now - _lxSteamStatsAt < 60000) return; _lxSteamStatsAt = _now;
   const _i32 = (v) => Math.max(0, Math.min(2147483647, Math.floor(+v || 0)));   // setInt takes a 32-bit integer
   try {
     window.SteamAPI.stats.set({
@@ -51621,6 +51621,7 @@ const audio = {
   },
   env(freq, dur, type, peak, slide) {
     if (!this.ctx || this.muted) return;
+    if (this.ctx.state !== 'running') return;   // v0.30.920 suspended (background, pre-gesture): scheduled at a frozen clock, they burst on resume
     const t = this.ctx.currentTime;
     const o = this.ctx.createOscillator(), g = this.ctx.createGain();
     o.type = type || 'square';
@@ -51740,12 +51741,20 @@ const audio = {
   toggleMute() {
     // audio.muted is the sole source of truth; saveState() mirrors it into game.muted
     this.muted = !this.muted;
+    // v0.30.920 mute, switch away and back, unmute: the refocus skipped the resume (muted then) and this never did one
+    try { if (!this.muted && this.ctx && this.ctx.state === 'suspended' && !(typeof _lxBgMuted !== 'undefined' && _lxBgMuted)) this.ctx.resume(); } catch (e) {}
     // v0.26.x audit FIX — also persist to LX_SETTINGS. The boot sequence applies
     // LX_SETTINGS.mute ~100 ms after the save-restore (via _applySettings), so a
     // mute set with the M-key (which only wrote game.muted, never LX_SETTINGS)
     // was silently UN-muted on the next reload. Keep both channels coherent.
     try { const _s = _lxGetSettings(); _s.mute = !!this.muted; _lxSaveSettings(_s); } catch (e) {}
     saveState();
+    try {   // v0.30.920 the pair replace each other: press M three times and the stack read Muted, Unmuted - while muted
+      const _pair = (t) => t === '🔇 Muted' || t === '🔊 Unmuted';
+      const _h = document.getElementById('toast-container'); if (_h) for (const el of _h.querySelectorAll('.toast')) if (_pair(el._lxTxt)) el.remove();
+      if (typeof _lxToastWait !== 'undefined') for (let i = _lxToastWait.length - 1; i >= 0; i--) if (_pair(_lxToastWait[i].txt)) _lxToastWait.splice(i, 1);
+      if (typeof _lxToastQueue !== 'undefined') _lxToastQueue = _lxToastQueue.filter((x) => !_pair(x && x[0]));   // held under a story scene too
+    } catch (e) {}
     if (typeof showToast === 'function') showToast(this.muted ? '🔇 Muted' : '🔊 Unmuted', 'common');
     // v0.25.300 — legacy procedural music object removed; mute / unmute
     // now drives the v0.25.233 mp3 BGM elements directly via
@@ -108435,6 +108444,7 @@ function _runDialogTypewriter(text) {
       g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.045);
       o.connect(g); g.connect(c.destination);
       o.start(); o.stop(c.currentTime + 0.05);
+      o.onended = () => { try { o.disconnect(); g.disconnect(); } catch (e) {} };   // v0.30.920 one per typed letter
     } catch (_e) {}
   };
   const step = () => {
@@ -117359,6 +117369,7 @@ let _lxToastQueue = [];
 function _lxStoryUp() { const sb = document.getElementById('story-beat-overlay'); return !!(sb && sb.classList.contains('on')); }
 setInterval(() => { try {
   if (_lxToastQueue.length && !_lxStoryUp()) { const q = _lxToastQueue; _lxToastQueue = []; for (const [t, r] of q) showToast(t, r); }
+  if (_lxToastWait.length && !_lxStoryUp()) _lxToastDrain();   // v0.30.920 the scene closed: what waited under it goes up now
   _lxToastDodge(); } catch (e) {} }, 400);
 // v0.30.x (audit F11) - A FLOOD WAITS ITS TURN. The stack shows 4 at a time and used to delete the oldest to make room,
 // whatever it said: a level-up raises 7-8 toasts in under two seconds, so "New skill learnt" was gone within a second
@@ -117375,6 +117386,7 @@ function _lxToastRank(r) { return _LX_TOAST_RANK[r] || 0; }
 function _lxToastDrain() {
   try {
     const host = document.getElementById('toast-container'); if (!host) return;
+    if (_lxStoryUp()) return;   // v0.30.920 not under a story scene
     const now = performance.now();
     for (let i = _lxToastWait.length - 1; i >= 0; i--) if (now - _lxToastWait[i].at > 8000) _lxToastWait.splice(i, 1);
     while (_lxToastWait.length && host.querySelectorAll('.toast').length < _LX_TOAST_CAP) {
@@ -125215,6 +125227,7 @@ function _lxSurfaceStep(strength) {
     g.gain.exponentialRampToValueAtTime(0.0005, c.currentTime + tone[2]);
     src.connect(flt); flt.connect(g); g.connect(c.destination);
     src.start(); src.stop(c.currentTime + tone[2] + 0.02);
+    src.onended = () => { try { src.disconnect(); flt.disconnect(); g.disconnect(); } catch (e) {} };   // v0.30.920 one per step
   } catch (_e) {}
 }
 // =========================================================================
@@ -153826,7 +153839,9 @@ function updateUI() {
   // halved by Reduce Motion. Chip damage and DoT ticks under 3% stay quiet; the red number still shows them.
   {
     const _hp = player.hp, _was = _uiLast.hurtHp; _uiLast.hurtHp = _hp;
-    if (_was != null && _hp < _was && !game.dying && player.hp > 0) {
+    const _mxNow = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp, _mxWas = _uiLast.hurtMax; _uiLast.hurtMax = _mxNow;   // v0.30.920
+    const _clampOnly = _mxWas != null && _mxNow < _mxWas && _hp >= _mxNow - 1;   // v0.30.920 HP pressed down to a new, lower max
+    if (_was != null && _hp < _was && !_clampOnly && !game.dying && player.hp > 0) {
       const _frac = (_was - _hp) / Math.max(1, (typeof getMaxHp === 'function' ? getMaxHp() : player.maxHp) || 1);
       if (_frac >= 0.03) {
         const _a = Math.min(0.9, 0.35 + _frac * 2.2) * (game._flashMul != null ? game._flashMul : 1) * (game._reduceMotion ? 0.5 : 1);
@@ -157505,9 +157520,10 @@ function _bossRushAutoStart() {
   _bossRushSpawnNext(2200);
 }
 function _bossRushSpawnNext(delayMs) {
+  const _run = game.bossRush;   // v0.30.920
   setTimeout(() => {
     const br = game.bossRush;
-    if (!br || !br.active || game.currentMap !== 'boss_rush') return;
+    if (!br || br !== _run || !br.active || game.currentMap !== 'boss_rush') return;
     // Don't spawn under a pause / boss-intro overlay — re-defer instead.
     if (game.paused) { _bossRushSpawnNext(500); return; }
     const type = br.queue[br.idx];
@@ -157746,6 +157762,7 @@ renderSkillBar();
 window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls && !game._resetting) _flushSaveStateNow(); });
 window.addEventListener('beforeunload',     () => {
   if (player.cls && !game._resetting) _flushSaveStateNow();
+  try { if (!game._resetting && typeof _lxSteamPushStats === 'function') _lxSteamPushStats(true); } catch (e) {}   // v0.30.920 past the once-a-minute throttle
   // v0.29.269 — FINAL Steam Cloud mirror, SYNCHRONOUS. The flush above mirrors
   // via async IPC, which renderer teardown can drop — and its 4s throttle can
   // skip the very last save entirely. writeSync blocks until the native write
@@ -160487,7 +160504,7 @@ function _lxBackgroundMute(on) {
     _lxBgMuted = !!on;
     const own = !!(typeof audio !== 'undefined' && audio && audio.muted);
     _lxApplyMediaMuted(_lxBgMuted || own);
-    if (typeof audio !== 'undefined' && audio && audio.ctx) { try { if (_lxBgMuted) audio.ctx.suspend(); else if (!own) audio.ctx.resume(); } catch (e) {} }
+    if (typeof audio !== 'undefined' && audio && audio.ctx) { try { if (_lxBgMuted) audio.ctx.suspend(); else audio.ctx.resume(); } catch (e) {} }
   } catch (e) {}
 }
 try {
