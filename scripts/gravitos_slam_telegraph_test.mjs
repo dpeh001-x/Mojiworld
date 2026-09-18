@@ -67,7 +67,8 @@ const r = await page.evaluate(async () => {
   m.patternState = 'slam'; m.patternTimer = 0;
   m._slamPrep = false; m._slamHit = false; m._slamGather = false;
   let ringAt = null, zoneAt = null, hitAt = null, zoneRec = null, hitCx = null;
-  for (let i = 0; i < 200; i++) {
+  // v0.30.x grav-tp — the slam now holds a 1-1.5 s teleport warning before its gather, so the loop has room for it
+  for (let i = 0; i < 420; i++) {
     await frame();
     if (m.patternState !== 'slam') break;
     const t = m.patternTimer;

@@ -12778,7 +12778,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.857';
+const GAME_VERSION = 'v0.30.858';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -15523,6 +15523,7 @@ const LX_FX = (() => {
     // he was pinned to the floor. Two beats: the well he gathers at his feet,
     // then the band that marks the column he is about to crush.
     gravitos_slamring:  'gravitos_slamring.webp',  // slam wind-up gravity well
+    gravitos_voidrift:  'gravitos_voidrift.webp',  // v0.30.x grav-tp — the teleport rift (static fallback for its loop)
     gravitos_slamzone:  'gravitos_slamzone.webp',  // slam strike-column floor band
     gravitos_laserring: 'gravitos_laserring.webp', // v0.29.572 — Laser Sweep charge ring
     gravitos_tendril:   'gravitos_tendril.webp',   // crushTendrils descending tendril
@@ -15699,6 +15700,7 @@ const FX_ANIM_FRAMES = Object.create(null);
 const _FX_ANIM_KEYS = new Set([
   'deadeye_hit', 'deadeye_execute',   // v0.30.x — Deadeye line impact / Execute Round impact (fx/anim/*, ludo.ai via scripts/gen_deadeye_art.mjs)
   'grav_impact',   // v0.30.x — the Gravitos meteor landing (fx/anim/grav_impact_0..8, ludo.ai via scripts/gen_grav_impact_fx.mjs)
+  'gravitos_voidrift',   // v0.30.x grav-tp — the rift Gravitos opens before he teleports (fx/anim/gravitos_voidrift_0..8, ludo.ai via scripts/gen_gravitos_voidrift.mjs)
   'singularity',   // v0.30.x — the Singularity's accretion disc loop (fx/anim/singularity_0..8, ludo.ai via scripts/gen_singularity_disc.mjs); drawn by _lxGravBackdropDraw
   'block_warrior', 'block_rogue', 'block_mage', 'block_archer',   // v0.30.398 — the A-press stance per class
   'bolt_impact',    // v0.30.x - Magic Bolt contact burst (anim/bolt_impact_0..7, ludo.ai via gen_bolt_impact_fx.mjs). Warmed eagerly below: it is a BASIC attack, so it fires long before the staggered boot warmer would reach it.
@@ -52735,7 +52737,7 @@ const COOP_FAR_X = 1500;          // a monster farther than this from EVERY play
 const COOP_FAR_Y = 1000;          // ... waits for the next keyframe
 const LX_MP_QUICK = 30;           // send-budget tokens above which a hit leaves at once instead of in the 50 ms batch
 const _COOP_MON_CORE = { u: 1, x: 1, y: 1, vx: 1, vy: 1, f: 1, h: 1, m: 1, t: 1, b: 1, a: 1 };
-const _COOP_MON_EX = { aa: 1, fz: 1, st: 1, wd: 1, wg: 1, wb: 1, ps: 1, sp: 1, dp: 1, p: 1, sg: 1, op: 1, bk: 1, cs: 1, sf: 1 };
+const _COOP_MON_EX = { aa: 1, fz: 1, st: 1, wd: 1, wg: 1, wb: 1, ps: 1, sp: 1, dp: 1, p: 1, sg: 1, op: 1, bk: 1, cs: 1, sf: 1, tw: 1 };   // v0.30.x grav-tp: tw
 function _coopDeltaOn() {   // at least one partner on my map, and every one of them reads light frames
   if (!_coopActive()) return false;
   let n = 0;
@@ -53113,6 +53115,7 @@ function _coopTickMonsters() {
     if (m._dirOpenT > 0) _e.op = Math.min(9000, Math.round(m._dirOpenT));
     if (m._break > 0 && m._breakMax > 0) _e.bk = Math.max(0, Math.min(100, Math.round((m._break / m._breakMax) * 100)));
     if (m._cancerShellClosed) { _e.cs = 1; if (m._shellFace) _e.sf = m._shellFace === -1 ? -1 : 1; }
+    if (m._tpWarn) _e.tw = [Math.round(m._tpWarn.el || 0), Math.round(m._tpWarn.ms || 1), Math.round(m._tpWarn.x || 0), Math.round(m._tpWarn.y || 0)];   // v0.30.x grav-tp
     if (!_delta) { list.push(_e); continue; }
     let _ex = null; for (const _k in _e) { if (_COOP_MON_CORE[_k]) continue; (_ex = _ex || {})[_k] = _e[_k]; }
     const _d = [_e.u, _e.x, _e.y, _e.vx, _e.vy, _e.f, _e.h]; if (_ex) _d.push(_ex);
@@ -54377,6 +54380,8 @@ function _coopApplyMonsters(msg) {
     else { m._break = 0; }
     m._cancerShellClosed = !!e.cs;
     m._shellFace = e.sf === -1 ? -1 : (e.sf === 1 ? 1 : 0);
+    // v0.30.x grav-tp — Gravitos's teleport warning (the draw runs it on from the frame's elapsed time)
+    m._tpWarn = (Array.isArray(e.tw) && e.tw.length >= 4) ? { el: +e.tw[0] || 0, ms: Math.max(1, +e.tw[1] || 1), x: +e.tw[2] || 0, y: +e.tw[3] || 0, at: performance.now() } : null;
   }
   // Drop mirrors the host no longer reports (killed / despawned upstream).
   for (let i = game.monsters.length - 1; i >= 0; i--) {
@@ -94238,6 +94243,7 @@ function bossAI(m, dt, distToPlayer) {
       }
     }
   } else if (m.type === 'gravitos') {
+    if (typeof _lxGravTpTick === 'function') _lxGravTpTick(m, _rawDt);   // v0.30.x grav-tp — the pending blink, stale warnings
     // ==== GRAVITOS — Lv 100 endgame boss in the Singularity arena ====
     // v0.25.528 — On top of the existing 7-pattern rotation, two
     // ultimates run on independent timers and preempt the regular
@@ -95079,7 +95085,23 @@ function bossAI(m, dt, distToPlayer) {
       if (m.patternTimer > laserDur) { m.patternState = 'idle'; m.patternTimer = 0; m._laserFired = false; m._laserRingUp = false; }
     } else if (m.patternState === 'zip') {
       // ZIP — teleport across the map then dive at the player
-      if (m.patternTimer < 220 && !m._zipPrep) {
+      // v0.30.x grav-tp — first the WARNING (see _lxGravTpTick): he holds, the rift opens behind him and at the far edge.
+      // Counted in REAL ms (_rawDt): the pattern clock runs 1.3x-1.9x faster than real time. The dive's own timings
+      // start from the moment the warning ends (_tpWindMs = the pattern clock then).
+      const _zw = _lxGravTpWindMs(phase);
+      const _zWind = !m._zipPrep && !(m._tpWarn && m._tpWarn.kind === 'zip' && m._tpWarn.go);
+      if (_zWind) {
+        if (!m._tpWarn || m._tpWarn.kind !== 'zip') {
+          const _w2 = game.mapData.worldWidth, _ps = (player.x + player.w / 2) < _w2 / 2 ? 1 : -1;
+          m._tpWarn = { kind: 'zip', el: 0, ms: _zw, x: (_ps > 0 ? _w2 - m.w - 60 : 60) + m.w / 2, y: 120 + Math.random() * 140 + m.h / 2 };
+        }
+        m._tpWarn.el += _rawDt; m._tpWindMs = m.patternTimer; m.vx = 0; m.vy = 0;
+        if (m._tpWarn.el >= _zw) m._tpWarn.go = true;
+      }
+      const _zt = m.patternTimer - (m._tpWindMs || 0);
+      if (!m._zipPrep && !(m._tpWarn && m._tpWarn.go)) {
+        // winding up (above)
+      } else if (_zt < 220 && !m._zipPrep) {
         m._zipPrep = true;
         // Vanish particle burst at current position — v0.25.527 budget-guarded.
         for (let i = 0; i < 3; i++) {
@@ -95093,9 +95115,12 @@ function bossAI(m, dt, distToPlayer) {
         // Pick a new position — opposite edge of the arena from the player
         const w2 = game.mapData.worldWidth;
         const playerSide = (player.x + player.w/2) < w2 / 2 ? 1 : -1;  // 1 = player on left
-        const targetX = playerSide > 0 ? w2 - m.w - 60 : 60;
+        const _tw = m._tpWarn; m._tpWarn = null;   // v0.30.x grav-tp — to the spot the warning showed
+        const targetX = _tw ? _tw.x - m.w / 2 : (playerSide > 0 ? w2 - m.w - 60 : 60);
+        if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.3);
         m.x = targetX;
-        m.y = 120 + Math.random() * 140;
+        m.y = _tw ? _tw.y - m.h / 2 : 120 + Math.random() * 140;
+        if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.3);
         m.vx = 0; m.vy = 0;
         // Reappear burst — v0.25.527 budget-guarded.
         for (let i = 0; i < 3; i++) {
@@ -95108,9 +95133,9 @@ function bossAI(m, dt, distToPlayer) {
         }
         showToast('▸▸ GRAVITOS ZIPS', 'epic');
         addShake(8); flash(0.2);
-      } else if (m.patternTimer < 260) {
+      } else if (_zt < 260) {
         m.vx = 0; m.vy = 0;
-      } else if (m.patternTimer < 260 + (phase === 3 ? 520 : phase === 2 ? 620 : 720)) {  // v0.29.391
+      } else if (_zt < 260 + (phase === 3 ? 520 : phase === 2 ? 620 : 720)) {  // v0.29.391
         // Accelerate toward player like a comet
         const bx = m.x + m.w/2, by = m.y + m.h/2;
         const px = player.x + player.w/2, py = player.y + player.h/2;
@@ -95152,7 +95177,7 @@ function bossAI(m, dt, distToPlayer) {
           });
         }
       }
-      if (m.patternTimer > 1400) { _gravPostPunchBlink(m); m.patternState = 'idle'; m.patternTimer = 0; m._zipPrep = false; }   // v0.30.309 — stage-1 blink out of the dive
+      if (_zt > 1400) { _gravPostPunchBlink(m); m.patternState = 'idle'; m.patternTimer = 0; m._zipPrep = false; m._tpWindMs = 0; }   // v0.30.309 — stage-1 blink out of the dive
     } else if (m.patternState === 'crush') {
       // Gravity Crush — 3-5 ground telegraph columns then crush damage
       // v0.25.648 — P0 FIX. The original spawn was missing `owner:'enemy'`
@@ -95201,7 +95226,19 @@ function bossAI(m, dt, distToPlayer) {
       // The band is sized from the damage check below (|dx| < 180, so 360 px
       // wide) rather than a hand-picked number, so the marker cannot drift
       // away from the hitbox it promises.
-      if (m.patternTimer < 400) {
+      // v0.30.x grav-tp — the GATHER now runs the full teleport warning (1-1.5 s, see _lxGravTpWindMs): the rift opens
+      // behind him and a second one rides the player, where he will land. Every beat after it is unchanged.
+      // Counted in REAL ms (_rawDt): a HOLD first, then the original 400 ms gather (pattern clock); the warning runs
+      // through both, to the lock. _tpWindMs = the pattern clock when the hold ended, so every beat after is unchanged.
+      if (!m._slamPrep) {
+        const _sRate = 1.30 * ((typeof _LX_BOSS_PACE !== 'undefined' && _LX_BOSS_PACE[m.type]) || 1) * ((m._gravCadenceMul || 1) + (m._bossPhase2 ? 0.18 : 0));   // the pattern clock's speed (see the top of bossAI)
+        if (!m._tpWarn || m._tpWarn.kind !== 'slam') m._tpWarn = { kind: 'slam', el: 0, ms: _lxGravTpWindMs(phase), x: 0, y: 0, hold: Math.max(0, _lxGravTpWindMs(phase) - 400 / Math.max(1, _sRate)) };
+        const _sw0 = m._tpWarn;
+        _sw0.el += _rawDt; _sw0.x = player.x + player.w / 2; _sw0.y = m.y + m.h / 2;
+        if (!_sw0.go) { m._tpWindMs = m.patternTimer; if (_sw0.el >= _sw0.hold) _sw0.go = true; }
+      }
+      const _st = m.patternTimer - (m._tpWindMs || 0);
+      if (_st < 400) {
         if (!m._slamGather) {
           m._slamGather = true;
           if (typeof spawnSpriteBurst === 'function') {
@@ -95216,7 +95253,10 @@ function bossAI(m, dt, distToPlayer) {
         if (typeof addShake === 'function' && (game.time % 6 === 0)) addShake(2);
       } else if (!m._slamPrep) {
         m._slamPrep = true;
+        m._tpWarn = null;   // v0.30.x grav-tp
+        if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.2);
         m.x = Math.max(0, Math.min(game.mapData.worldWidth - m.w, player.x + player.w/2 - m.w/2));
+        if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.2);
         if (typeof spawnSpriteBurst === 'function') {
           // keepAspect anchors HEIGHT to size, so height is derived from the
           // 360 px strike width and the art's own 512x288 proportion.
@@ -95225,8 +95265,8 @@ function bossAI(m, dt, distToPlayer) {
             { size: _zh, life: 17, keepAspect: true });
         }
         if (typeof addShake === 'function') addShake(4);
-      } else if (m.patternTimer < 1100) {
-        if (m.patternTimer >= 650 && !m._slamHit) {
+      } else if (_st < 1100) {
+        if (_st >= 650 && !m._slamHit) {
           m._slamHit = true;
           flash(0.3);
           if (typeof addShake === 'function') addShake(10);   // v0.29.774 — the stomp lands with weight
@@ -95266,7 +95306,7 @@ function bossAI(m, dt, distToPlayer) {
           }
         }
       }
-      if (m.patternTimer > 1100) { _gravPostPunchBlink(m); m.patternState = 'idle'; m.patternTimer = 0; m._slamPrep = false; m._slamHit = false; m._slamGather = false; }   // v0.30.309 — stage-1 blink after the slam
+      if (_st > 1100) { _gravPostPunchBlink(m); m.patternState = 'idle'; m.patternTimer = 0; m._slamPrep = false; m._slamHit = false; m._slamGather = false; m._tpWindMs = 0; }   // v0.30.309 — stage-1 blink after the slam
     } else if (m.patternState === 'pull') {
       // Gravity well — pull player toward boss for 700ms
       if (m.patternTimer < 700) {
@@ -123130,7 +123170,7 @@ function _lxPrewarmSingularityDisc(mapId) {
       leadsIn = MAPS[mapId].portals.some((po) => po && po.dest === 'gravitosArena');
     }
     if (!leadsIn) return false;
-    if (typeof _fxAnimFrames === 'function') _fxAnimFrames('singularity');
+    if (typeof _fxAnimFrames === 'function') { _fxAnimFrames('singularity'); _fxAnimFrames('gravitos_voidrift'); }   // v0.30.x grav-tp — the teleport rift too
     _lxGfDiscArt();   // creates + requests the static fallback too
     return true;
   } catch (e) { return false; }
@@ -136645,6 +136685,12 @@ function _gravPostPunchBlink(m) {
     tx = 100 + Math.random() * Math.max(1, w2 - 200 - m.w);
     if (Math.abs((tx + m.w / 2) - cur) > w2 * 0.30) break;
   }
+  // v0.30.x grav-tp — the blink WARNS now: the rifts open here and at tx, and _lxGravTpTick moves him after the wind-up
+  m._tpWarn = { kind: 'blink', el: 0, ms: _lxGravTpWindMs(1), x: Math.max(40, Math.min(w2 - m.w - 40, tx)) + m.w / 2, y: m.y + m.h / 2 };
+}
+function _gravBlinkTo(m, tx) {
+  const w2 = (game.mapData && game.mapData.worldWidth) || 2400;
+  if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.2);
   if (typeof _budgetedParticlePush === 'function') {
     for (let i = 0; i < 4; i++) {
       const _ba = (i / 4) * Math.PI * 2;
@@ -136661,8 +136707,125 @@ function _gravPostPunchBlink(m) {
         vx: Math.cos(_ba) * 5, vy: Math.sin(_ba) * 5, life: 22, color: i % 2 ? '#ff88ff' : '#ffffff', size: 3 })) break;
     }
   }
+  if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.2);
   if (typeof addShake === 'function') addShake(6);
   if (typeof flash === 'function') flash(0.15);
+}
+// v0.30.x grav-tp — GRAVITOS WARNS BEFORE HE TELEPORTS (per user: "gravitos seem to be zipping around the map without
+// warning, make an aura or a pulsation that serves as a 1s - 2s hint that he is going to teleport, can create a voidrift
+// VFX as well using ludo.ai"). He relocated three ways with at most a 0.4 s tell: the ZIP jumped him to the far edge on
+// its first frame, the SLAM's 400 ms gather put him over the player, and form 1's post-punch BLINK moved him the instant
+// a punch ended. Each now winds up first - 1.5 s in form 1, 1.25 s in form 2, 1 s in form 3:
+//   - an AURA on him: the void rift (Sprites/fx/anim/gravitos_voidrift_0..8, ludo.ai via scripts/gen_gravitos_voidrift.mjs)
+//     opens behind him and violet rings fold inward, faster as the jump nears;
+//   - a RIFT where he will appear (the zip's far edge, the blink's spot), opening as the warning runs out; the slam's
+//     rift rides the player, because that is where he lands.
+// m._tpWarn = { kind, el, ms, x, y }: el/ms (elapsed / total, REAL ms - the boss's pattern clock runs 1.3x-1.9x faster,
+// so a warning counted on it would be a third shorter than it says) drive the draw; x/y is the destination's world centre.
+// Co-op guests receive it on the monster frame (tw) and draw the same warning.
+function _lxGravTpWindMs(phase) { return phase >= 3 ? 1000 : phase === 2 ? 1250 : 1500; }
+// every Gravitos AI tick: runs the pending blink, drops a warning whose move ended some other way
+function _lxGravTpTick(m, dt) {
+  const w = m._tpWarn;
+  if (!w) return;
+  if (w.kind === 'blink') {
+    // a new move (or a one-shot's warning) took over: never blink blind in the middle of it
+    if (m.patternState !== 'idle' || m._ohkoWarnUntil != null) { m._tpWarn = null; return; }
+    m.patternTimer = 0; m.vx = 0;   // hold the next move until he has gone
+    w.el += dt;
+    if (w.el >= w.ms) { m._tpWarn = null; _gravBlinkTo(m, w.x - m.w / 2); }
+    return;
+  }
+  if (m.patternState !== w.kind) { m._tpWarn = null; m._tpWindMs = 0; }
+}
+const _LX_GTP = { pops: [] };
+// a rift snapping shut where he left and open where he arrived
+function _lxGravRiftPop(x, y, size) { _LX_GTP.pops.push({ x, y, s: size, t0: performance.now() }); if (_LX_GTP.pops.length > 8) _LX_GTP.pops.shift(); }
+function _lxGravRiftImg() {
+  const arr = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames('gravitos_voidrift') : null;
+  const f = (arr && typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, 70, 640) : null;
+  if (f) return f;
+  const st = (typeof LX_FX !== 'undefined') ? LX_FX.gravitos_voidrift : null;
+  return (st && st.complete && st.naturalWidth > 0) ? st : null;
+}
+function _lxGravRiftAt(img, sx, y, size, alpha, seam, add) {
+  if (size < 4 || alpha <= 0.01) return;
+  ctx.globalAlpha = Math.min(1, alpha);
+  if (add) ctx.globalCompositeOperation = 'lighter';
+  if (img) ctx.drawImage(img, Math.round(sx - size / 2), Math.round(y - size / 2), Math.round(size), Math.round(size));
+  else {   // before the art decodes: a torn lens of void with a violet rim
+    ctx.fillStyle = 'rgba(12,2,20,0.9)'; ctx.strokeStyle = '#b06cff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(sx, y, size * 0.16, size * 0.42, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  if (seam > 0) {   // the white-hot seam brightens as the jump arrives
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.min(1, seam);
+    ctx.fillStyle = '#ffe6ff'; ctx.fillRect(Math.round(sx - 1.5), Math.round(y - size * 0.34), 3, Math.round(size * 0.68));
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+// world pass, twice: BEHIND the monsters (front=false: the bloom and the void he is folding into) and IN FRONT of them
+// (front=true: the rings folding inward, the rift's glow tearing over his body, the destination) - his own body and his
+// ward must not be able to hide a warning.
+function _lxGravRiftDraw(front) {
+  try {
+    if (typeof game === 'undefined' || !game || !game.monsters) return;
+    const camX = (game.camera && game.camera.x) || 0, now = performance.now();
+    let img = null, got = false;
+    for (let i = 0; i < game.monsters.length; i++) {
+      const m = game.monsters[i];
+      if (!m || m.type !== 'gravitos' || !m._tpWarn || m.currentHp <= 0) continue;
+      if (!got) { img = _lxGravRiftImg(); got = true; }
+      const w = m._tpWarn, el = (w.el || 0) + (w.at ? now - w.at : 0), p = Math.max(0, Math.min(1, el / Math.max(1, w.ms)));
+      const cx = m.x + m.w / 2 - camX, cy = m.y + m.h / 2, R = Math.max(m.w, m.h) * 0.62;
+      ctx.save();
+      if (!front) {
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.25 + 0.4 * p;
+        const g = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, R * 1.35);
+        g.addColorStop(0, 'rgba(176,108,255,0.6)'); g.addColorStop(0.6, 'rgba(120,40,200,0.25)'); g.addColorStop(1, 'rgba(90,20,160,0)');
+        ctx.fillStyle = g; ctx.fillRect(cx - R * 1.4, cy - R * 1.4, R * 2.8, R * 2.8);
+        ctx.globalCompositeOperation = 'source-over';
+        _lxGravRiftAt(img, cx, cy, m.h * (1.3 + 0.7 * p), 0.45 + 0.5 * p, 0);
+      } else {
+        // the rings, folding inward, faster as p -> 1
+        ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+        const T = 560 - 360 * p;   // pulse period, ms: 560 -> 200
+        for (let k = 0; k < 3; k++) {
+          const fr = ((el + k * T / 3) % T) / T;   // 0 -> 1 across a pulse
+          ctx.globalAlpha = (0.35 + 0.6 * p) * fr; ctx.strokeStyle = k === 1 ? '#f0b0ff' : '#b06cff'; ctx.lineWidth = 2 + 6 * fr;
+          ctx.beginPath(); ctx.ellipse(cx, cy, R * (1.45 - fr), R * (1.45 - fr) * 1.1, 0, 0, Math.PI * 2); ctx.stroke();
+        }
+        // the tear, glowing over his body (additive: the void adds nothing, the violet edges and the seam light him up)
+        _lxGravRiftAt(img, cx, cy, m.h * (0.9 + 0.5 * p), (0.25 + 0.55 * p) * (0.8 + 0.2 * Math.sin(el / 60)), p > 0.55 ? (p - 0.55) / 0.45 : 0, true);
+        ctx.globalCompositeOperation = 'source-over';
+        // the destination: a rift opening where he will appear
+        if (w.x || w.y) {
+          const dx = w.x - camX, dy = w.y, ds = m.h * (0.45 + 0.85 * p);
+          ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.25 + 0.45 * p;
+          const g2 = ctx.createRadialGradient(dx, dy, 4, dx, dy, ds * 0.6);
+          g2.addColorStop(0, 'rgba(210,140,255,0.6)'); g2.addColorStop(1, 'rgba(120,40,200,0)');
+          ctx.fillStyle = g2; ctx.fillRect(dx - ds * 0.6, dy - ds * 0.6, ds * 1.2, ds * 1.2);
+          ctx.globalCompositeOperation = 'source-over';
+          _lxGravRiftAt(img, dx, dy, ds, 0.35 + 0.65 * p, p > 0.5 ? (p - 0.5) / 0.5 : 0);
+          ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.3 + 0.5 * p; ctx.strokeStyle = '#d18cff'; ctx.lineWidth = 2 + 2 * p;
+          const rr = ds * 0.55 * (1.15 - 0.15 * Math.sin(el / 90));
+          ctx.beginPath(); ctx.ellipse(dx, dy, rr * 0.55, rr, 0, 0, Math.PI * 2); ctx.stroke();
+          ctx.globalCompositeOperation = 'source-over';
+        }
+      }
+      ctx.restore();
+    }
+    // the pops: a rift that snaps shut / open in 320 ms (front)
+    if (front && _LX_GTP.pops.length) {
+      if (!got) img = _lxGravRiftImg();
+      ctx.save();
+      for (let i = _LX_GTP.pops.length - 1; i >= 0; i--) {
+        const q = _LX_GTP.pops[i], k = (now - q.t0) / 320;
+        if (k >= 1 || k < 0) { _LX_GTP.pops.splice(i, 1); continue; }
+        _lxGravRiftAt(img, q.x - camX, q.y, q.s * (1 + 0.4 * k), (1 - k) * 0.95, (1 - k) * 0.9);
+      }
+      ctx.restore();
+    }
+  } catch (e) {}
 }
 const _GRAV_PUNCH_PATTERNS = { crush: 1500, slam: 1100, zip: 1400 };
 // v0.30.x — see _gravitosPunchPair. PLAY = share of the pattern window the
@@ -136709,7 +136872,8 @@ function _gravitosPunchPair(m) {
   frames._readyN = n;
   if (n === 0) return null;
   const _dur = _GRAV_PUNCH_PATTERNS[m.patternState] || 1500;
-  const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
+  const _tpOff = (m.patternState === 'zip' || m.patternState === 'slam') ? (m._tpWindMs || 0) : 0;   // v0.30.x grav-tp — the wind-up holds the coil
+  const t = Math.max(0, Math.min(1, ((m.patternTimer || 0) - _tpOff) / _dur));
   // v0.30.x — TIGHTER GAPS, LONGER LANDING (per user: "the punch animation
   // can be smoother as well, reduce the time gap and just hold the last frame
   // slightly longer").
@@ -139015,7 +139179,7 @@ const _LX_MOB_TYPE_ART = {
   legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },   // his 6 s arena stomp is a mob_quake of his own
   // v0.30.790 grav-smooth — the five rings his patterns cast: each was decoded and pinned on the frame of its
   // first cast (laser 22 ms, soul 36 ms, slam 22 ms, measured).
-  gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield'], fx: ['gravitos_singularity_zone'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
+  gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield', 'gravitos_voidrift'], fx: ['gravitos_singularity_zone', 'gravitos_voidrift'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
 };
 const _LX_MOB_FX_SEEN = new Set();
 function _lxPrewarmMobFx(type, boss) {
@@ -153068,6 +153232,7 @@ function _lxDrawFrame(time) {
   drawMemoryEchoes();   /* v0.26.465 - memory-echo apparitions */
   drawDrops();
   if (typeof drawSmoothFx === 'function') drawSmoothFx(true);   // v0.29.790 — behind-tagged bursts, under the entities
+  if (typeof _lxGravRiftDraw === 'function') _lxGravRiftDraw(false);   // v0.30.x grav-tp — the teleport warning, behind him
   drawHazards(true);   // v0.30.290 — Soul Vortex + Necrotic Ascendance pools, UNDER the monsters they engulf
   for (const m of game.monsters) {
     if (m.scaleX !== undefined && m.scaleX !== 1) {
@@ -153091,6 +153256,7 @@ function _lxDrawFrame(time) {
   // calls + expired-entry cleanup). Helper lives next to killMonster
   // so the whole fade module sits in one place.
   _drawFadingMonsters();
+  if (typeof _lxGravRiftDraw === 'function') _lxGravRiftDraw(true);   // v0.30.x grav-tp — and in front of him
   _drawAttackZones();   // v0.29.x — committed-attack zones, under the strike beam and the player
   drawProjectiles();
   drawHazards();

@@ -1,6 +1,8 @@
 // Live test: GRAVITOS STAGE-1 PASS.
 //   - after a punch pattern (crush/slam/zip) form-1 blinks to another part
-//     of the arena; forms 2/3 do NOT
+//     of the arena; forms 2/3 do NOT. Since v0.30.x grav-tp the blink WARNS
+//     first (a void rift, 1.5 s): it must be seen warning, must not move in
+//     the first ~0.8 s, and must then move
 //   - the pattern ladder never picks the same skill twice in a row
 //   - punch pacing dials are the slower/smoother values
 //   - _gravitosOnceFrame plays a set ONCE per pattern and HOLDS (no 432 ms
@@ -54,10 +56,16 @@ const r = await page.evaluate(async () => {
   // ---- stage-1 blink after each punch pattern ------------------------------
   const blinkTest = async (pattern, endTimer) => {
     m._phaseSprite = null; m.patternState = pattern; m.patternTimer = endTimer - 40;
-    m._crushFired = true; m._slamGather = true; m._slamHit = true; m._zipPrep = true;
-    const x0 = m.x;
-    await frames(12);
-    return Math.abs(m.x - x0);
+    m._crushFired = true; m._slamGather = true; m._slamHit = true; m._zipPrep = true; m._slamPrep = true; m._tpWindMs = 0;
+    m._instaTimer = m._rainTimer = m._soulTimer = 99999; m._ohkoWarnUntil = null;
+    const x0 = m.x; let warned = false, early = false;
+    for (let f = 0; f < 150; f++) {
+      await frames(1);
+      if (m._tpWarn && m._tpWarn.kind === 'blink') warned = true;
+      if (f < 45 && Math.abs(m.x - x0) > 250) early = true;
+      if (!m._tpWarn && warned && Math.abs(m.x - x0) > 250) break;
+    }
+    return { moved: Math.round(Math.abs(m.x - x0)), warned, early };
   };
   out.crushBlink = await blinkTest('crush', 1500);
   out.slamBlink = await blinkTest('slam', 1100);
@@ -106,9 +114,9 @@ const r = await page.evaluate(async () => {
 
 if (r.spawnFailed) { console.log('SPAWN FAILED: ' + r.got); process.exit(1); }
 ok('punch pacing dials are the slower/smoother values (0.85 / 1.1)', r.play === 0.85 && r.ease === 1.1, { play: r.play, ease: r.ease });
-ok('stage 1 blinks after CRUSH', r.crushBlink > 250, { moved: r.crushBlink });
-ok('stage 1 blinks after SLAM', r.slamBlink > 250, { moved: r.slamBlink });
-ok('stage 1 blinks after ZIP', r.zipBlink > 250, { moved: r.zipBlink });
+ok('stage 1 blinks after CRUSH, after a warning', r.crushBlink.moved > 250 && r.crushBlink.warned && !r.crushBlink.early, r.crushBlink);
+ok('stage 1 blinks after SLAM, after a warning', r.slamBlink.moved > 250 && r.slamBlink.warned && !r.slamBlink.early, r.slamBlink);
+ok('stage 1 blinks after ZIP, after a warning', r.zipBlink.moved > 250 && r.zipBlink.warned && !r.zipBlink.early, r.zipBlink);
 ok('form 2 does NOT blink after a punch', r.form2Moved < 80, { moved: r.form2Moved });
 ok('the ladder never repeats a pattern back-to-back (' + (r.seq || []).length + ' casts observed)',
   (r.seq || []).length >= 8 && r.repeats === 0, { repeats: r.repeats, seq: (r.seq || []).join(',') });
