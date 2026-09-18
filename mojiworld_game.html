@@ -12778,7 +12778,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.861';
+const GAME_VERSION = 'v0.30.862';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52601,6 +52601,29 @@ const COOP_PROJ_CAP     = 60;   // max enemy projectiles synced per frame
 // applied kill uids in a small ring and ignore repeats.
 const _coopKillSeen = new Set();
 const _coopKillRing = [];
+// v0.30.862 coop-trust - WHAT A GUEST ACCEPTS FOR A KILL (per user: "co-op guests trust the host's kill rewards; fix this").
+// A guest paid whatever EXP and coins a host's kill frame named, for any uid, with no upper bound - a modified or broken
+// host could hand every guest unlimited EXP and coins, or invent kills. A guest now pays only for a monster it has mirrored
+// itself (a uid seen in a host snapshot, same type), and never more than LX_COOP_REWARD_K times what its OWN monster table
+// gives that monster. The multiple covers what a guest cannot see from here: the host's level-gap scaling (up to x3), an
+// empowered tier (up to x1.8); a boss gets 18 x (260 / its level), for the boss level floor and the Nightmare echo's lift.
+// Honest kills pay exactly as before.
+const LX_COOP_REWARD_K = 6;
+const _lxCoopRewardSeen = new Map();   // uid -> what the guest's own table gives that monster (bounded, oldest out)
+function _lxCoopRewardNote(m) {
+  if (!m || m.uid == null) return;
+  _lxCoopRewardSeen.delete(m.uid);
+  const lv = Math.max(1, (m.level | 0) || ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 1));
+  _lxCoopRewardSeen.set(m.uid, { tp: m.type, e: Math.max(0, +m.exp || 0), c: Math.max(0, +m.mojicoins || 0), boss: !!(m.isBoss || m.boss || m.zodiacBoss), lv });
+  if (_lxCoopRewardSeen.size > 1024) _lxCoopRewardSeen.delete(_lxCoopRewardSeen.keys().next().value);
+}
+function _lxCoopRewardInfo(uid, m) {
+  let r = (uid != null) ? _lxCoopRewardSeen.get(uid) : null;
+  if (!r && m && m._coopMirror) { _lxCoopRewardNote(m); r = _lxCoopRewardSeen.get(m.uid); }
+  if (!r) return null;
+  const k = r.boss ? 18 * Math.max(1, 260 / r.lv) : LX_COOP_REWARD_K;
+  return { tp: r.tp, capE: Math.ceil(Math.max(1, r.e) * k), capC: Math.ceil(Math.max(1, r.c) * k) };
+}
 function _coopKillDup(uid) {                 // true if this kill uid was already applied
   if (uid == null) return false;            // no uid -> can't dedup; let it through (rare)
   const key = +uid;
@@ -54323,6 +54346,7 @@ function _coopApplyMonsters(msg) {
       net._coopSpawning = false; net._coopForceElite = false;
       if (!m || m._suppressed) continue;
       m.uid = e.u; m._coopMirror = true;
+      _lxCoopRewardNote(m);   // v0.30.862 coop-trust - remember what my own table pays for it
       // Keep our local uid counter ahead of every adopted uid, so if THIS client
       // is later promoted to host its next spawn can't collide with an inherited
       // mirror uid (host-handoff collision).
@@ -54604,10 +54628,13 @@ function _coopApplyKill(msg) {
   if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed (no peer-forged / id-less kills/XP)
   if (_coopKillDup(msg.u)) return;   // v0.27.1 — a redelivered kill frame must not re-award XP/coins
   const m = (msg.u != null) ? _coopFindByUid(msg.u) : null;
+  // v0.30.862 coop-trust - a kill of a monster I never mirrored, or of a different type, pays and counts nothing
+  const _ri = _lxCoopRewardInfo(msg.u, m);
+  if (!_ri || (msg.tp != null && String(msg.tp) !== String(_ri.tp))) return;
   // XP: scale the host's base exp by THIS peer's own non-party multipliers,
   // including the global xpCurveMul (1.35) the host applies (was omitted -> ~26%
   // short). Combo/prestige stay host-side (those are the host's; not networked).
-  let exp = Math.max(0, +msg.e || 0);
+  let exp = Math.min(Math.max(0, +msg.e || 0), _ri.capE);   // v0.30.862 coop-trust - bounded by my own table
   if (exp > 0 && typeof player !== 'undefined' && player) {
     const boost = 1 + ((player.mods && player.mods.xpBoost) || 0) + (typeof getEquipBonus === 'function' ? getEquipBonus('xpBoost') : 0);
     // v0.29.5xx — was a hardcoded x3 with a hard cliff at Lv 5: the exact
@@ -54654,7 +54681,7 @@ function _coopApplyKill(msg) {
   }
   // Coins: apply the level-based coin scaler (read from the mirror before we drop
   // it) so guests aren't over-paid the raw base; _grantMojicoins adds the global scalar.
-  let coins = Math.max(0, +msg.c || 0);
+  let coins = Math.min(Math.max(0, +msg.c || 0), _ri.capC);   // v0.30.862 coop-trust
   if (coins > 0) {
     const cm = (m && typeof _monsterCoinMult === 'function') ? _monsterCoinMult(m) : 1;
     // v0.29.5xx — REWARD PARITY (see the EXP note above). The host spawns coins
