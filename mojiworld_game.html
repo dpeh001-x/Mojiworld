@@ -12817,7 +12817,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.917';
+const GAME_VERSION = 'v0.30.918';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -29847,7 +29847,12 @@ const MONSTER_SKILL_FNS = {
   summon(m) {
     const spawnType = (m.type === 'archon') ? 'cherub' : m.type;
     const isThemed  = (m.type === 'archon');     // archon spawns full-strength cherubs
-    const positions = [-30, 30];
+    // v0.30.918 at most 4 live adds per caster. Uncapped, a stoneling or archon left alone called a pair every 9-11 s for
+    // as long as the player waited: an idle EXP farm (an archon's cherubs pay 30%) and a monster list that only grew.
+    if (m.uid == null) m.uid = (game._monUid = (game._monUid || 0) + 1);
+    const _liveAdds = (game.monsters || []).filter((x) => x && x._minionOf === m.uid && x.currentHp > 0).length;
+    const positions = [-30, 30].slice(0, Math.max(0, 4 - _liveAdds));
+    if (!positions.length) return;
     for (const dx of positions) {
       if (typeof spawnMonster === 'function') {
         spawnMonster(m.x + dx, m.y - 20, spawnType, false, false);
@@ -29862,6 +29867,7 @@ const MONSTER_SKILL_FNS = {
             child.h = Math.max(12, Math.floor(child.h * 0.6));
           }
           child._isMinion = true;
+          child._minionOf = m.uid;   // v0.30.918
           child._mskTimer = 9e9;       // disable specials on minions
           child.exp = Math.max(1, Math.floor((child.exp || 0) * 0.3));
           child.mojicoins = Math.max(1, Math.floor((child.mojicoins || 0) * 0.3));
@@ -47065,7 +47071,8 @@ const PLAYER_SAVE_FIELDS = [
   '_tutorialSeen',   // v0.26.x — per-SAVE tutorial gate (replaces the global localStorage key)
   // v0.30.890 launch audit: written, read back, never saved - abandoned-quest progress, the zodiac-echo refight ladder
   // (a reload paid full again), the per-map co-op revive clock (wall time) and the ice tower's best floor
-  '_qBank', '_zodiacEchoKills', '_coopReviveMapAt', '_iceFloorBest'
+  '_qBank', '_zodiacEchoKills', '_coopReviveMapAt', '_iceFloorBest',
+  '_downPending'   // v0.30.918 a down the save caught (see loadState)
 ];
 // =========================================================================
 // v0.29.7xx — BOSS REFIGHTS (per user: "when refighting boss, still can get
@@ -49171,6 +49178,8 @@ function _flushSaveStateNow() {
       for (const k of keys) if (obj[k] !== undefined) out[k] = obj[k];
       return out;
     };
+    // v0.30.918 a save taken while downed says so: the down is a death on a delay, and a reload must not cancel it
+    try { if (player._downed && !window._prologueActive) player._downPending = 1; else delete player._downPending; } catch (e) {}
     const s = {
       v: SAVE_VERSION, t: Date.now(),
       player: pick(player, PLAYER_SAVE_FIELDS),
@@ -50423,7 +50432,8 @@ const _LX_SAVE_MARK_KEY = SAVE_KEY + '_verified';
 // Measured: the full save cost 8-18 ms per 170 KB; this subset is a few KB.
 const _LX_SIGNED_PLAYER_KEYS = ['cls','job','master','level','exp','expToNext','mojicoins','bankBalance','bankAccrueMs','setshards',
   'skillPoints','skillRankPoints','skillRanks','baseAtk','baseDef','baseAcc','baseCrit','baseSpeed','baseJump','maxHp','maxMp',
-  'equipped','inventory','consumables','talents','boons','boonsEquipped','prestige','quests','_pqChainRuns','_pqStagePaid'];
+  'equipped','inventory','consumables','talents','boons','boonsEquipped','prestige','quests','_pqChainRuns','_pqStagePaid',
+  '_downPending'];   // v0.30.918 absent from an ordinary save, so signatures made before it still verify
 // v0.30.917 ls3 adds what the Steam gate rests on (achievements, the import baseline and verdict, the dev mark) to the
 // signed set; the ls2 list stays below so a save signed before this still verifies (as 'legacy') until its next save.
 const _LX_SIGNED_GAME_KEYS = ['boonDex','_bossKills','bossDefeated','_bossDefeatedAt','_playMs','kills','dexMilestones','dexPerm','prestige',
@@ -51142,6 +51152,19 @@ function loadState() {
     const _safeMaxMp = (typeof maxMp === 'number' && isFinite(maxMp) && maxMp > 0) ? maxMp : 50;
     player.hp = (!player.hp || player.hp <= 0 || !isFinite(player.hp)) ? _safeMaxHp : Math.min(player.hp, _safeMaxHp);
     player.mp = (!player.mp || player.mp <= 0 || !isFinite(player.mp)) ? _safeMaxMp : Math.min(player.mp, _safeMaxMp);
+    // v0.30.918 DOWNED ACROSS A RELOAD. A solo down is a death on a 30 s delay (v0.27.10), but the save held only hp 1, so
+    // closing the game on the ground loaded the hero standing with the toll unpaid. Take the toll triggerDeath takes.
+    if (player._downPending) {
+      delete player._downPending;
+      try {
+        const _t = _lxDeathToll();
+        if (_t.coins > 0) chargeCoins(_t.coins);
+        if (_t.exp > 0) player.exp = Math.max(0, (player.exp || 0) - _t.exp);
+        player.hp = _safeMaxHp; player.mp = _safeMaxMp;
+        game._lxDownReloadToll = _t;
+        if (typeof showToast === 'function') showToast('⛑ You were down when the game closed. The fall still counts: −' + _t.coins.toLocaleString() + ' Mojicoins, −' + _t.exp.toLocaleString() + ' EXP.', 'rare');
+      } catch (e) {}
+    }
     // v0.25.240 (B3) — defensive defaulters for fields that older saves
     // can lack. Object.assign doesn't add missing keys, so if a save
     // predates a field, accessing it elsewhere would throw.
@@ -64284,6 +64307,8 @@ function _amnesiacReset() {
 // it puts the reset beside Craft / Transcend / Reforge / Respec in the same currency.
 const LX_RESET_STATS_SHARDS = 1000;
 function resetStats() {
+  // v0.30.918 a tower run restores wallet and bank when it ends, so a reset bought inside it was refunded
+  if (game.expedition && game.expedition.active) { if (typeof showToast === 'function') showToast('Finish or leave the Expedition before you reset stats.', 'rare'); return; }
   const spent = player._levelUpSpent || {};
   // v0.29.471 — trainer purchases count toward "is there anything to reset",
   // otherwise a trainer-only build is told it has nothing invested.
@@ -69653,8 +69678,14 @@ function loadMap(id, entryX, entryY) {
   // up from there with player level so a Lv 80 player still faces a
   // meaningful fight.
   if (id === 'blockland_apex' && MAPS.blockland_apex._blocklandFinalBoss) {
+    const _legoTok = (MAPS.blockland_apex._legoTok = (MAPS.blockland_apex._legoTok | 0) + 1);   // v0.30.918 one timer per visit
     setTimeout(() => {
       if (game.currentMap !== 'blockland_apex') return;
+      // v0.30.918 the 10-minute window every other arena keeps (the spawn loop skips a boss while bossDefeated[map] stands).
+      // This timer ignored it, so each re-entry was a fresh full-reward kill; a quick leave-and-return spawned two.
+      if (MAPS.blockland_apex._legoTok !== _legoTok) return;
+      if (game.bossDefeated && game.bossDefeated.blockland_apex) return;
+      if ((game.monsters || []).some((x) => x && x.type === 'legosaurus' && x.currentHp > 0)) return;
       if (typeof spawnMonster !== 'function' || !monsterTypes.legosaurus) return;
       const _bx = ((game.mapData && game.mapData.worldWidth) || 1600) * 0.5;
       const _by = ((game.mapData && game.mapData.worldHeight) || 620) - 260;
@@ -76198,6 +76229,13 @@ function _tryCheatDeathRevive() {
   return false;
 }
 
+// v0.30.918 the death toll, as triggerDeath computes it outside a tower run (the reasoning lives there, at lostMojicoins).
+// Shared with loadState, which takes it from a save made while downed. Keep the two in step.
+function _lxDeathToll() {
+  const net = totalCoins();
+  const cap = Math.min(50000, 400 * Math.max(1, player.level | 0));
+  return { coins: net < 2000 ? 0 : Math.min(cap, Math.floor(net * 0.10)), exp: Math.floor((player.exp || 0) * 0.05) };
+}
 function triggerDeath() {
   // v0.30.x sov-fall — the final boss is already down: nothing can fail the run in the beat before its cutscene.
   if (game.expedition && game.expedition.active && game.expedition._finalBossDown) { player.hp = Math.max(1, player.hp | 0); return; }
@@ -101922,6 +101960,9 @@ function _lxIsSuperBoss(m) { return !!(m && (m.type === 'aetherion' || m.type ==
 // refight terms, and the gear roll is live once per 10 minutes of PLAY time per boss (game._echoGearAt, persisted; play
 // time like the boss respawn, so the clock cannot shorten it). EXP and coins are unchanged; the Duo Trial keeps its full drop.
 const LX_ECHO_GEAR_COOLDOWN_MS = 10 * 60 * 1000;
+// v0.30.918 a shade is still standing. Each summon used to add another: Nightmare shades pay 1.5x, so stacking five and
+// clearing them together multiplied the payout per fight.
+function _lxEchoBusy() { try { return (game.monsters || []).some((x) => x && x._echoBoss && x.currentHp > 0); } catch (e) { return false; } }
 function _lxPayingEcho(m) { return !!(m && m._echoBoss && !m._rushBoss && !m._duoTrial && (m._nightmareEcho || m.zodiacBoss || m.zodiacSign)); }
 function _lxBossGearCap(m) { if (_lxPayingEcho(m)) return LX_BOSS_GEAR_CAP_REFIGHT; return (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) ? LX_BOSS_GEAR_CAP_REFIGHT : LX_BOSS_GEAR_CAP; }
 // v0.30.833 - the fights that pay nothing by design: the free (non-zodiac) Echo Keeper shade, a Boss Rush echo, the
@@ -107421,6 +107462,7 @@ So… do you need a lift?`;
       // Use the existing spawnMonster path so all the per-boss logic
       // (pattern setup, sprite resolution, intro skip, etc.) fires.
       let m = null;
+      if (_lxEchoBusy()) { document.getElementById('dialog-text').textContent = '*The Echo Keeper raises one hand.*\n\nOne shade at a time. Finish the one already in the room.'; return; }   // v0.30.918
       if (typeof spawnMonster === 'function') m = spawnMonster(_x, _y, _bt, true, false);
       if (m) {
         // v0.26.467 — Stat multiplier = level-scale × ECHO_STRENGTH (1.5×),
@@ -107490,6 +107532,7 @@ So… do you need a lift?`;
         if (!net.isHost) { document.getElementById('dialog-text').textContent = '*The Echo Keeper looks past you.*\n\nThe one who holds this room must call the trial. Ask your partner to summon it.'; return; }
         const _x = (game.mapData.worldWidth || 1400) * 0.55;
         let m = null;
+        if (_lxEchoBusy()) { document.getElementById('dialog-text').textContent = '*The Echo Keeper raises one hand.*\n\nOne shade at a time. Finish the one already in the room.'; return; }   // v0.30.918
         if (typeof spawnMonster === 'function') m = spawnMonster(_x, 380, _bt, true, false);
         if (m) {
           m.maxHp = Math.floor((m.maxHp || 1) * _dmul); m.currentHp = m.maxHp;
@@ -107511,6 +107554,7 @@ So… do you need a lift?`;
     opts.push({ t:`🌙 NIGHTMARE echo (×${_nmul.toFixed(2)} · real rewards)`, cb:() => {
       const _x = (game.mapData.worldWidth || 1400) * 0.55;
       let m = null;
+      if (_lxEchoBusy()) { document.getElementById('dialog-text').textContent = '*The Echo Keeper raises one hand.*\n\nOne shade at a time. Finish the one already in the room.'; return; }   // v0.30.918
       if (typeof spawnMonster === 'function') m = spawnMonster(_x, 380, _bt, true, false);
       if (m) {
         m.maxHp     = Math.floor((m.maxHp || 1) * _nmul);
@@ -108688,7 +108732,9 @@ function _claimDailyParcel() {
     player.setshards = (player.setshards || 0) + 10;
     parts.push('2x Medium Red', '1x Elixir', '10◈ Setshards');
     // Weekly gear drop — one tier-appropriate piece (level-gated, capped < apex).
-    try {
+    // v0.30.918 WEEKLY for real. The streak keeps counting past 7 (the 14/30/60/100-day milestones) while the tier above
+    // is capped at 7, so from day 7 on this handed out a gear piece every day. Days 7, 14, 21... only.
+    if ((d.streak | 0) % 7 === 0) try {
       const _lv = player.level || 1;
       const _cap = _lv < 8 ? 3 : _lv < 40 ? 5 : 7;
       const _cats = ['weapons', 'armors', 'accessories'];
@@ -108709,7 +108755,7 @@ function _claimDailyParcel() {
   d.parcelClaimed = true;
   if (audio && audio.play) audio.play('mojicoin');
   if (typeof saveState === 'function') saveState();
-  showToast('✉ Day-' + streak + ' Parcel: ' + parts.join(', '), 'epic');
+  showToast('✉ Day-' + Math.max(streak, d.streak | 0) + ' Parcel: ' + parts.join(', '), 'epic');
 }
 // v0.26.448 — Open the Postal Wisp dialogue from anywhere (P hotkey). Reuses
 // the courier role branch via a synthetic NPC so the same menu (mail-order +
@@ -112424,10 +112470,12 @@ function renderSkillsReference(host) {
       // to zero — made permanent by the saveState() a few lines down, and shown
       // in the confirm dialog as "Cost: -258993460 Mojicoins". Same class as the
       // v0.26.1028 / v0.26.1033 / v0.27.24 fixes; this was the site they missed.
-      const _coinsNow = () => Math.max(0, Math.floor(player.mojicoins || 0));
+      // v0.30.918 wallet + bank, as Reset Stats has since v0.29.311: banking the stash made this reset free
+      const _coinsNow = () => Math.max(0, Math.floor(totalCoins()));
       const _cost = Math.floor(_coinsNow() * 0.20);
       _rpReset.title = 'Refund every spent rank — costs ' + _cost + ' Mojicoins (20% of your ' + _coinsNow() + ')';
       _rpReset.onclick = async () => {
+        if (game.expedition && game.expedition.active) { if (typeof showToast === 'function') showToast('Finish or leave the Expedition before you reset ranks.', 'rare'); return; }   // v0.30.918 the run refunds the fee
         const _fee = Math.floor(_coinsNow() * 0.20);   // re-read at click time
         const ok = (typeof uiConfirm === 'function')
           ? await uiConfirm({
@@ -112436,7 +112484,7 @@ function renderSkillsReference(host) {
               yesLabel: 'Reset (−' + _fee + ' Mojicoins)', noLabel: 'Keep my ranks' })
           : confirm('Reset all ranks for ' + _fee + ' Mojicoins (20%)? Every skill returns to rank 0.');
         if (!ok) return;
-        player.mojicoins = Math.max(0, _coinsNow() - _fee);
+        chargeCoins(Math.min(_fee, _coinsNow()));   // v0.30.918 wallet first, then the bank
         player.skillRankPoints = (player.skillRankPoints | 0) + _spent;
         player.skillRanks = {};
         if (typeof showToast === 'function') showToast('↺ Ranks reset — +' + _spent + ' RP (−' + _fee + ' Mojicoins)', 'rare');
