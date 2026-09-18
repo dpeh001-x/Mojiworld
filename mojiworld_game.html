@@ -12816,7 +12816,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.910';
+const GAME_VERSION = 'v0.30.911';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -49116,6 +49116,9 @@ function _lxPadPoll() {
 const _LX_RUMBLE_MAP = {
   hit:     [0.00, 0.30, 55],    // dealing damage — weak motor tick
   crit:    [0.20, 0.55, 90],    // crit — sharper snap
+  boss_warn:  [0.40, 0.30, 150],   // v0.30.x (audit A3) - a boss winds up
+  boss_alarm: [0.55, 0.40, 220],
+  boss_phase: [0.75, 0.55, 380],
   block:   [0.35, 0.15, 70],    // mitigation thud
   parry:   [0.45, 0.20, 80],
   death:   [0.95, 0.65, 450],   // player death — heavy
@@ -51632,6 +51635,12 @@ const audio = {
     // v0.26.x audio polish -- multi-hit skills (flurry / ricochet chains)
     // machine-gun the same synth in one burst window; gate repeats of the
     // high-frequency combat pops at 85ms. Other cues unaffected.
+    if (kind === 'boss_warn' || kind === 'boss_alarm' || kind === 'boss_phase') {   // v0.30.x (audit A3) - their own gates
+      const _n = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      this._lastBossCue = this._lastBossCue || {};
+      if (this._lastBossCue[kind] && _n - this._lastBossCue[kind] < (kind === 'boss_phase' ? 400 : 150)) return;
+      this._lastBossCue[kind] = _n;
+    }
     if (kind === 'hit' || kind === 'crit') {
       const _n = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       this._lastPop = this._lastPop || {};
@@ -51695,6 +51704,11 @@ const audio = {
     // v0.30.x — called from combat (heavy hits, Gravitos' quake, charge-ups, the Void entry) but
     // never given a branch, so every one of those calls was silent.
     else if (kind === 'hit_heavy')   { this.env(150, 0.12, 'square', 0.16, -60); this.env(90, 0.18, 'sine', 0.20, -30); }
+    // v0.30.x (audit A3) - BOSS CUES. Warnings, big calls and phase changes used the player's own 'hit' / 'crit' pops.
+    // A low brass-like blat with a square-wave edge (so laptop and Deck speakers carry it), in three weights.
+    else if (kind === 'boss_warn')   { this.env(98, 0.26, 'sawtooth', 0.15, -20); this.env(196, 0.20, 'square', 0.06, -40); setTimeout(() => { try { this.env(92, 0.30, 'sawtooth', 0.14, -25); } catch (e) {} }, 130); }
+    else if (kind === 'boss_alarm')  { this.env(82, 0.34, 'sawtooth', 0.19, -20); this.env(330, 0.16, 'square', 0.07, 140); setTimeout(() => { try { this.env(330, 0.16, 'square', 0.07, 140); this.env(78, 0.36, 'sawtooth', 0.18, -24); } catch (e) {} }, 170); }
+    else if (kind === 'boss_phase')  { this.env(55, 0.9, 'sawtooth', 0.22, 60); this.env(110, 0.7, 'triangle', 0.12, 110); setTimeout(() => { try { this.env(165, 0.5, 'sawtooth', 0.09, 200); this.env(330, 0.35, 'square', 0.05, 160); } catch (e) {} }, 220); }
     else if (kind === 'quake_hit')   { this.env(70, 0.22, 'sawtooth', 0.22, -30); setTimeout(() => { try { this.env(55, 0.25, 'sine', 0.18, -15); } catch (e) {} }, 60); }
     else if (kind === 'charge')      { this.env(300, 0.30, 'sawtooth', 0.09, 420); }
     else if (kind === 'void')        { this.env(110, 0.40, 'sine', 0.14, -60); this.env(1800, 0.25, 'triangle', 0.04, -900); }
@@ -88450,7 +88464,7 @@ function updateMonsters(dt) {
       }
       if (typeof flash === 'function') flash(0.22);
       if (typeof addShake === 'function') addShake(5);
-      if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+      if (typeof audio !== 'undefined' && audio.play) audio.play('boss_phase');
     }
     if (m.isBoss && !m._enraged && !m._aetherionEvolved &&
         !m.superBoss && m.type !== 'mirrorSelf' &&   // v0.30.584 — same: hyper alone does not opt a boss out of its shared-kit enrage
@@ -88466,7 +88480,7 @@ function updateMonsters(dt) {
       }
       if (typeof flash === 'function') flash(0.35);
       if (typeof addShake === 'function') addShake(6);
-      if (typeof audio !== 'undefined' && audio.play) audio.play('crit');
+      if (typeof audio !== 'undefined' && audio.play) audio.play('boss_phase');
       // Ember burst at the boss.
       // v0.26.052 — Budget-gated (was unbudgeted direct push). In
       // multi-boss arenas (Trinity + zodiac), simultaneous enrage
@@ -89584,7 +89598,7 @@ function updateMonsters(dt) {
         m._packCalled = (m._packCalled || 0) + 1;
         const _pcAlly = spawnMonster(m.x + (Math.random() < 0.5 ? -180 : 180), m.y - 10, m.type, false, false);
         if (_pcAlly) { _pcAlly._isPackSpawn = true; _pcAlly.exp = 0; _pcAlly.mojicoins = 0; }
-        if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+        if (typeof audio !== 'undefined' && audio.play) audio.play('boss_warn');
         for (let i = 0; i < 8; i++) {
           game.particles.push({ x: m.x + m.w/2, y: m.y, vx: (Math.random() - 0.5) * 5, vy: -Math.random() * 3,
             life: 22, color: '#66aacc', size: 2, gravity: 0.03 });
@@ -90049,7 +90063,7 @@ function updateMonsters(dt) {
                    : m.type === 'octoLegSkillLock' ? '🔒 SKILL-LOCK tentacle winding up...'
                    :                                  '⚡ STUN tentacle winding up...';
         if (typeof showToast === 'function') showToast(_lbl, 'rare');
-        if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+        if (typeof audio !== 'undefined' && audio.play) audio.play('boss_warn');
       }
       if (_ph >= 1100 && _ph < 1400 && !m._fired && player.hp > 0) {
         m._fired = true;
@@ -92809,7 +92823,7 @@ function _bossSpecialAttacks(m, dt) {
       }
       if (typeof flash === 'function') flash(0.18);
       if (typeof addShake === 'function') addShake(6);
-      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
+      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('boss_warn');
     }
   }
 
@@ -92863,7 +92877,7 @@ function _bossSpecialAttacks(m, dt) {
       }
       if (typeof flash === 'function') flash(0.30);
       if (typeof addShake === 'function') addShake(10);
-      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('crit');
+      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('boss_alarm');
     }
   }
 
@@ -92989,7 +93003,7 @@ function _bossSpecialAttacks(m, dt) {
       if (typeof flash === 'function') flash(0.45);
       if (typeof addShake === 'function') addShake(16);
       if (typeof addHitStop === 'function') addHitStop(120);
-      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('crit');
+      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('boss_alarm');
     }
 
     // v0.29.950 — RING OF THE BROKEN ANVIL (quenched only). He slams the
@@ -93023,7 +93037,7 @@ function _bossSpecialAttacks(m, dt) {
         }
         if (typeof addShake === 'function') addShake(14);
         if (typeof flash === 'function') flash(0.3);
-        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('crit');
+        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('boss_alarm');
       }, 700);
     }
   }
@@ -93746,7 +93760,7 @@ function bossAI(m, dt, distToPlayer) {
         if (typeof showToast === 'function') {
           showToast('🌊 King Gloopaloo dissolves...', 'epic');
         }
-        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
+        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('boss_warn');
       }
       // Vanish-puff (single burst at t = 100).
       if (m.patternTimer >= 100 && !m._teleportVanished) {
@@ -94107,7 +94121,7 @@ function bossAI(m, dt, distToPlayer) {
           }
           if (typeof spawnSmoothImpact === 'function') spawnSmoothImpact(_mcx + _toP * (m.w * 0.62), m.y + m.h * 0.34, '#ff9a3c');
           if (typeof addShake === 'function') addShake(9);         // was 3: this one lands
-          if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('hit'); } catch (e) {} }
+          if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('boss_warn'); } catch (e) {} }
           m._bxT = 150;
         } else {
           // v0.29.720 — per user "it should only trigger when barnaby charges
@@ -94169,11 +94183,11 @@ function bossAI(m, dt, distToPlayer) {
       if (phase === 2) {
         showToast('⚡ AETHERION SHIFTS — reality fractures', 'legendary');
         flash(0.5); addShake(10); addHitStop(90);
-        audio.play('crit');
+        audio.play('boss_phase');
       } else if (phase === 3) {
         showToast('💀 AETHERION UNLEASHED — final form!', 'legendary');
         flash(0.7); addShake(16); addHitStop(150);
-        audio.play('crit');
+        audio.play('boss_phase');
       }
     }
     // v0.25.713 — Per user request: Aetherion no longer floats mid-air.
@@ -94434,7 +94448,7 @@ function bossAI(m, dt, distToPlayer) {
       if (!m._astralAnnounced) {
         m._astralAnnounced = true;
         showToast('🌟 ASTRAL JUDGEMENT — HEAL + DODGE!', 'legendary');
-        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('crit');
+        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('boss_alarm');
       }
       // Telegraph: violet+gold spiral collapsing inward toward the boss
       if (m.patternTimer < 1500 && game.time % 2 === 0) {
@@ -94534,7 +94548,7 @@ function bossAI(m, dt, distToPlayer) {
       if (!m._orbsAnnounced) {
         m._orbsAnnounced = true;
         showToast('⚫ DEATH ORBS — DODGE!', 'legendary');
-        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('crit');
+        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('boss_alarm');
         // Charge-up swirl at boss centre
       }
       // Charge pulse particles during telegraph
@@ -94681,11 +94695,11 @@ function bossAI(m, dt, distToPlayer) {
       if (phase === 2) {
         showToast('🌑 GRAVITOS COLLAPSES — density rises', 'legendary');
         flash(0.5); addShake(10); addHitStop(90);
-        audio.play('crit');
+        audio.play('boss_phase');
       } else if (phase === 3) {
         showToast('🕳 EVENT HORIZON — everything falls', 'legendary');
         flash(0.7); addShake(16); addHitStop(160);
-        audio.play('crit');
+        audio.play('boss_phase');
       }
     }
 
@@ -94745,7 +94759,7 @@ function bossAI(m, dt, distToPlayer) {
         flash(0.4); addShake(10);
         if (typeof spawnSpriteBurst === 'function')
           spawnSpriteBurst(_ncx, _ncy, 'gravitos_blackhole', { size: 260, life: 60, spin: Math.PI });
-        audio.play('crit');
+        audio.play('boss_alarm');
         m._warpTimer = _warpCd;
         // v0.26.347 — the warp counts as "a skill" for OHKO spacing, so no
         // unavoidable OHKO lands within 8 s of yanking the player around.
@@ -95083,7 +95097,7 @@ function bossAI(m, dt, distToPlayer) {
         m._drainAnnounced = true;
         // v0.29.830 — the call to action is the mechanic now, not "heal and hope".
         showToast('💀 SOUL DRAIN — BREAK LINE OF SIGHT!', 'legendary');
-        audio.play('crit');
+        audio.play('boss_alarm');
         // v0.26.172 — Authored soul-ring telegraph sprite layered on
         // top of the procedural spiral particles. 1500 ms life matches
         // the telegraph window; slow counter-clockwise spin sells the
@@ -95201,7 +95215,7 @@ function bossAI(m, dt, distToPlayer) {
           safeZones: zones,
         });
         showToast('🕳 SINGULARITY COLLAPSE — find a safe zone!', 'legendary');
-        if (audio && audio.play) audio.play('crit');
+        if (audio && audio.play) audio.play('boss_alarm');
         flash(0.65); addShake(20); addHitStop(120);
       }
       // v0.29.555 — this gate used to be a flat `patternTimer > 4200`, and
@@ -95354,7 +95368,7 @@ function bossAI(m, dt, distToPlayer) {
           if (typeof showToast === 'function') {
             showToast('🕳 EVENT COLLAPSE RAIN — 4 boxes incoming!', 'legendary');
           }
-          if (audio && audio.play) audio.play('crit');
+          if (audio && audio.play) audio.play('boss_alarm');
           if (typeof flash === 'function') flash(0.55);
           if (typeof addShake === 'function') addShake(14);
         } else {
@@ -96702,7 +96716,7 @@ function bossAI(m, dt, distToPlayer) {
       if (!m._kAnnounced && t < 100) {
         m._kAnnounced = true;
         showToast('👑 ROYAL CHARGE — JUMP the charge, punish the dizzy!', 'legendary');
-        if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+        if (typeof audio !== 'undefined' && audio.play) audio.play('boss_warn');
       }
       if (t < 700) {
         m.vx = 0;
@@ -96759,7 +96773,7 @@ function bossAI(m, dt, distToPlayer) {
       if (!m._kAnnounced && t < 100) {
         m._kAnnounced = true;
         showToast('💣 FIREBOMB BURST!', 'epic');
-        audio.play('hit');
+        audio.play('boss_warn');
       }
       // Mouth-glow windup
       if (t < 600 && game.time % 3 === 0) {
@@ -96881,7 +96895,7 @@ function bossAI(m, dt, distToPlayer) {
       if (!m._kAnnounced && t < 100) {
         m._kAnnounced = true;
         showToast('🌋 KING KROOK SLAMS THE GROUND!', 'legendary');
-        flash(0.15); audio.play('hit');
+        flash(0.15); audio.play('boss_warn');
       }
       // Visible windup particles to reinforce the telegraph.
       if (t < 1200 && game.time % 4 === 0) {
@@ -96916,10 +96930,10 @@ function bossAI(m, dt, distToPlayer) {
         m._kColossal = Math.random() < 0.30;
         if (m._kColossal) {
           showToast('🌋 COLOSSAL STOMP — GET OFF THE GROUND!', 'legendary');
-          flash(0.30); addShake(8); audio.play('hit');
+          flash(0.30); addShake(8); audio.play('boss_warn');
         } else {
           showToast('🦶 TYRANT’S STOMP — get off the ground!', 'legendary');
-          flash(0.14); audio.play('hit');
+          flash(0.14); audio.play('boss_warn');
         }
       }
       // Windup dust, heavier and lower than the quake's, so the two slams are
@@ -96953,7 +96967,7 @@ function bossAI(m, dt, distToPlayer) {
       if (!m._kAnnounced && t < 100) {
         m._kAnnounced = true;
         showToast('🔥🔥 INCOMING FIREBALL RAIN! 🔥🔥', 'legendary');
-        flash(0.18); audio.play('hit');
+        flash(0.18); audio.play('boss_warn');
       }
       // Sky-glow particles during windup.
       if (t < 1500 && game.time % 3 === 0) {
@@ -97022,7 +97036,7 @@ function bossAI(m, dt, distToPlayer) {
           showToast('🔥🔥🔥 KING KROOK — MEGA FIREBALL! DODGE! 🔥🔥🔥', 'legendary');
         }
         if (typeof flash === 'function') flash(0.25);
-        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
+        if (typeof audio !== 'undefined' && audio && audio.play) audio.play('boss_warn');
       }
       // Mouth-charge particles — much bigger than fireBreath; intensify
       // as t approaches launch.
@@ -97323,7 +97337,7 @@ function bossAI(m, dt, distToPlayer) {
             color: '#5fd6ff',
             _sourceLabel: 'the Tidal Sweep',
           });
-          if (typeof audio !== 'undefined' && audio.play) audio.play('hit');
+          if (typeof audio !== 'undefined' && audio.play) audio.play('boss_warn');
         }
       }
     }
@@ -97358,7 +97372,7 @@ function bossAI(m, dt, distToPlayer) {
       showToast('🐙 OCTOBABY — ⚠ EIGHT-MOOD MELTDOWN ⚠', 'legendary');
       addShake(14);
       flash(0.35);
-      if (audio && audio.play) audio.play('crit');
+      if (audio && audio.play) audio.play('boss_alarm');
     }
     if (m._crazyActive) {
       m._crazyTime -= dt;
@@ -97394,7 +97408,7 @@ function bossAI(m, dt, distToPlayer) {
           }
           flash(0.7); addShake(28);
           if (typeof addHitStop === 'function') addHitStop(160);
-          if (audio && audio.play) audio.play('crit');
+          if (audio && audio.play) audio.play('boss_alarm');
           // Resolve damage. Bypass paths first: god / iframe / dodge.
           const _dodging = (player._god || player.invulnerable > 0 ||
                             (player.dodgeIframes | 0) > 0);
@@ -97544,7 +97558,7 @@ function bossAI(m, dt, distToPlayer) {
                   : m.type === 'octoLegSkillLock' ? '🔒 SKILL-LOCK tentacle winding up...'
                   :                                  '⚡ STUN tentacle winding up...';
       showToast(label, 'rare');
-      audio.play('hit');
+      audio.play('boss_warn');
     }
     if (phase >= 1100 && phase < 1400 && !m._fired) {
       m._fired = true;
@@ -98045,7 +98059,7 @@ function _lxOctoMaybeLance(leg, proj) {
                      label: 'a mood lance', color: '#ff8fa3' };
   if (typeof showToast === 'function') showToast('🦑 MOOD LANCE — dodge it', 'epic');
   if (typeof addShake === 'function') addShake(6);
-  if (typeof audio !== 'undefined' && audio.play) audio.play('crit');
+  if (typeof audio !== 'undefined' && audio.play) audio.play('boss_alarm');
   return true;
 }
 function _lxOctoMoodPulse(head) {
@@ -112946,7 +112960,7 @@ function openLevelUpPanel() {
       <button type="button" class="u-jump" data-ujump="quest"><img class="uj-ico" src="Sprites/ui/nav/quest.webp" alt="" draggable="false" onerror="this.replaceWith(document.createTextNode('\uD83D\uDCDC'))"> Quests <kbd>Q</kbd></button>
       <button type="button" class="u-jump" data-ujump="codex"><img class="uj-ico" src="Sprites/ui/nav/codex.webp" alt="" draggable="false" onerror="this.replaceWith(document.createTextNode('\uD83D\uDCD6'))"> MojiDex <kbd>Y</kbd></button>
       <button type="button" class="u-jump" data-ujump="mojidex"><img class="uj-ico" src="Sprites/ui/nav/mojidex.webp" alt="" draggable="false" onerror="this.replaceWith(document.createTextNode('\uD83D\uDC3E'))"> Compendium <kbd>L</kbd></button>
-      <button type="button" class="u-jump" data-ujump="titles">🎖 Titles</button>
+      <button type="button" class="u-jump" data-ujump="titles">🏅 Titles</button>
     </div>
     <div id="u-pane-lp" style="display:${game._uTab==='lp'?'block':'none'}">
       <!-- v0.25.539 — Top strip: SP pool (left, prominent) + current stats (right).
@@ -127756,7 +127770,7 @@ function openTitlesPanel(opts) {
         + '<p><b>Everdawn Aura</b>: wings of dawn light, a sun halo and a sunrise sigil around your character.</p>'
         + '<button type="button" class="tt-toggle" id="tt-aura">' + (player.dawnAuraOff === true ? 'Aura is off: turn it on' : 'Aura is on: turn it off') + '</button></div>'
       : '<div class="tt-favor locked"><h3>🔒 Dawn\'s Favor</h3><p>Finish the story to unlock it for good: +' + Math.round(LX_DAWN_FAVOR_EXP * 100) + '% EXP, +' + Math.round(LX_DAWN_FAVOR_COINS * 100) + '% Mojicoins and the Everdawn Aura.</p></div>';
-    ov.innerHTML = '<div class="tt-card"><div class="tt-head"><h2>🎖 Titles</h2><button type="button" class="tt-x" id="tt-close">Close ✕</button></div>'
+    ov.innerHTML = '<div class="tt-card"><div class="tt-head"><h2>🏅 Titles</h2><button type="button" class="tt-x" id="tt-close">Close ✕</button></div>'
       + ((opts && opts.fresh && done) ? '<div class="tt-fresh">✦ DAWN\'S FAVOR UNLOCKED ✦</div>' : '')
       + '<p class="tt-intro">' + owned.length + ' earned. The title you wear shows under your name, and your co-op partners see it too.</p>'
       + '<div class="tt-body">' + favor + '<div class="tt-list">' + rows + '</div></div></div>';
@@ -157311,7 +157325,15 @@ function _prologueFinish(skipped) {
       // 1.5s delay outlasts the finish teardown (overlay dissolve +
       // loadMap modal sweep raced a 600ms timer and closed the tutorial
       // the instant it opened); the re-assert catches any straggler.
-      setTimeout(() => {
+      // v0.30.x (audit F5) - and not before the Void's eye-zoom has finished: at a fixed 1.5 s the intro cards opened
+      // UNDER it (z 300 over the cards), so their entrance and the first lines of their voice-over played unseen, with
+      // the zoom's chirp on top. Now the tour waits for the zoom's overlay to clear (checked every 150 ms, at most 7 s).
+      const _lxAfterVoidIntro = (fn, left) => {
+        const _vo = document.getElementById('void-intro-overlay');
+        if (_vo && _vo.classList.contains('show') && left > 0) { setTimeout(() => _lxAfterVoidIntro(fn, left - 150), 150); return; }
+        setTimeout(fn, 250);
+      };
+      setTimeout(() => _lxAfterVoidIntro(() => {
         if (typeof _wireTutorialButtons === 'function') _wireTutorialButtons();
         if (typeof startTutorial === 'function') startTutorial();
         setTimeout(() => {
@@ -157321,7 +157343,7 @@ function _prologueFinish(skipped) {
             try { if (typeof startTutorial === 'function') startTutorial(); } catch (e) {}
           }
         }, 1000);
-      }, 1500);
+      }, 7000), 1500);
     }
   } else {
     openClassSelect();
