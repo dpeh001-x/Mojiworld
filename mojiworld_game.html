@@ -12799,7 +12799,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.890';
+const GAME_VERSION = 'v0.30.891';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -39655,6 +39655,7 @@ function _lxBankInterestLine() {
 }
 function _grantMojicoins(n, opts) {
   if (typeof n !== 'number' || !isFinite(n) || n <= 0) return 0;
+  if (typeof game !== 'undefined' && game._expExitMap && game.currentMap === game._expExitMap) return 0;   // v0.30.891 the ended run's floor pays nothing either
   // v0.26.294 — Per user "do not earn mojicoins from monsters from the
   // expedition run". Block ALL mojicoin earnings while an expedition is
   // active. Easier + safer than filtering every grant site (mob kills,
@@ -50061,6 +50062,12 @@ function _sbStoryVoicePlay(stanza) {
   } catch (e) { return false; }
 }
 function _playStoryBeat(beatId, onClose) {
+  // v0.30.891 launch audit: a timed beat (first_zodiac_kill 1.8 s after a kill) played UNDER the pause card, and the card's
+  // Esc / Enter then skipped it unseen. It waits for the card to close. A beat already seen answers false as before.
+  try { if (document.getElementById('lx-pause')) {
+    const _seen = typeof beatId === 'string' && player && player._storyBeatsSeen && player._storyBeatsSeen[beatId];
+    if (!_seen) { setTimeout(() => _playStoryBeat(beatId, onClose), 500); return true; }
+  } } catch (e) {}
   let beat;
   if (beatId && typeof beatId === 'object') {
     beat = beatId;               // inline transient beat — repeatable
@@ -66580,6 +66587,7 @@ function _endExpedition(reason) {
   // Return to Everdawn Central — but not this instant. See the v0.30.453 note above.
   const _expExitTok = (game._expExitTok = (game._expExitTok | 0) + 1);
   const _expExitMap = game.currentMap;
+  game._expExitMap = _expExitMap;   // v0.30.891 launch audit: nothing is picked up or paid on this floor until you leave it (see the drop loop)
   // Victory holds longer than death: death already has the 2.2 s overlay doing this job, while a
   // clear has a corpse, its loot and the reward toasts to land first.
   const _expExitMs = reason === 'complete' ? 2800 : 2300;
@@ -67252,7 +67260,7 @@ function _bravoShowBoonPick() {
   };
   const _onBravoKey = (e) => {
     if (e.key === 'Escape') {
-      e.preventDefault();
+      e.preventDefault(); e.stopPropagation();   // v0.30.891 as the confirm dialog
       _closeBravoModal();
     }
   };
@@ -70105,6 +70113,7 @@ function loadMap(id, entryX, entryY) {
   // the Everdawn welcome fires on void -> town specifically, not on every
   // arrival in town (you pass through it constantly).
   const _lxFromMap = game.currentMap;
+  game._expExitMap = null;   // v0.30.891 the Expedition's exit lock ends with the floor
   game.currentMap = id;
   game.mapData = _variedMapData(id);
   try { _lxSpaceOutPlatforms(game.mapData, id); } catch (e) {}   // v0.30.629 - crowded platforms pushed apart before anything reads the layout
@@ -75889,7 +75898,7 @@ function updatePlayer(dt) {
     // without auto-magnetising. Magnet drops keep the tight 25px gate since the
     // pull above already drags them to ~0 distance before pickup.
     const _pickR = d.noMagnet ? 55 : 25;
-    if (d2 < _pickR * _pickR) {
+    if (d2 < _pickR * _pickR && !(game._expExitMap && game.currentMap === game._expExitMap)) {   // v0.30.891 the run is over; this floor's loot stays here
       if (d.type === 'mojicoin') {
         const amt = Math.floor(d.value * (1 + player.mods.greed + getEquipBonus('greed')));
         // v0.26.056 — global currency scalar via _grantMojicoins. Greed mods +
@@ -100727,7 +100736,11 @@ function _killMonsterRaw(m) {
   // achievements — a 3x quest accelerator from nearly-free kills. Pack-call
   // and Keeper-hound spawns still count: they're full-HP real fights.
   const _isIllusionKill = !!m._isMirage || !!m._afkKill;   // v0.30.861 loops - an away summon's kill counts for nothing
-  const _lxTwinKill = !!(m._isTwin || m._isPiscesTwin);   // v0.30.x twin-rewards — a split twin pays nothing boss-sized (see the boss daily tick below)
+  const _lxTwinKill = !!(m._isTwin || m._isPiscesTwin);
+  // v0.30.891 launch audit: the ORIGINAL can die before its split twin. It still pays (rewards stay keyed to it), but the
+  // takedown - victory sting, slow-mo, "defeated!", the boon wheel - waits for the pair's last kill.
+  const _lxMate = _lxTwinKill ? null : ((m._twin && m._twin.currentHp > 0 && m._twin) || (m._piscesTwin && m._piscesTwin.currentHp > 0 && m._piscesTwin) || null);
+  const _lxDefer = !!_lxMate, _lxLastOfPair = !!(_lxTwinKill && m._lxDeferredTakedown);   // v0.30.x twin-rewards — a split twin pays nothing boss-sized (see the boss daily tick below)
   if (!_isIllusionKill) {
   game.kills++;
   tickDaily('kills');
@@ -100861,7 +100874,7 @@ function _killMonsterRaw(m) {
     // this just arms the counter. Multi-phase bosses (Gravitos) route their
     // NON-final phase-downs through the phase machine and return before
     // reaching this line, so only the true final kill earns the slow-mo.
-    if (!_lxTwinKill) {   // v0.30.x boss polish (audit B4) — a split twin going down is not the takedown
+    if ((!_lxTwinKill && !_lxDefer) || _lxLastOfPair) {   // v0.30.x boss polish (audit B4) — a split twin going down is not the takedown (v0.30.891: unless it is the pair's last)
       game._slowmoFrames = 54;
       if (typeof flash === 'function') flash(0.25);
       if (typeof _lxVictorySting === 'function') _lxVictorySting(m);   // v0.30.x audio polish (audit A4 / B6)
@@ -101442,7 +101455,9 @@ function _killMonsterRaw(m) {
     }
     // v0.30.x boss polish (audit B4 / B6) — only a kill that opens the boon wheel says so: twins, echoes, expedition
     // bosses and the Conductor pay no boon (see the 1.5 s timer below)
-    if (_lxTwinKill) showToast('One twin falls!', 'epic');
+    if (_lxLastOfPair) showToast(`${m._lxDeferredTakedown.name} defeated! Choose a powerup!`, 'legendary');   // v0.30.891
+    else if (_lxDefer) showToast('One twin falls!', 'epic');   // v0.30.891 the original fell first; the twin still stands
+    else if (_lxTwinKill) showToast('One twin falls!', 'epic');
     else showToast((m._expeditionBoss || m._echoBoss || m.type === 'pqConductor') ? `${m.name} defeated!` : `${m.name} defeated! Choose a powerup!`, 'legendary');
     // v0.25.679 — pass the boss's name + icon so the reveal modal can
     // theme its hero header with "From <boss name>". Falls back to the
@@ -101464,6 +101479,7 @@ function _killMonsterRaw(m) {
     // below can check the player hasn't portaled to a different map
     // between boss-death and modal-open.
     const _bossMapKey = game.currentMap;
+    if (_lxDefer) _lxMate._lxDeferredTakedown = { name: m.name || '', echo: !!m._echoBoss, exp: !!m._expeditionBoss };   // v0.30.891
     // v0.25.683 — Race-guard: if the player dies between boss death and
     // the 1.5s reveal delay (boss splash damage / orphan hazard), the
     // boon modal would pop on top of the death overlay or after respawn.
@@ -101489,7 +101505,9 @@ function _killMonsterRaw(m) {
       // v0.26.365 — Also skip for Echo Keeper re-fights (_echoBoss): per
       // user, returning to attempt a boss again grants NO boon (and no EXP/
       // coins — zeroed at echo spawn). Pure practice fight.
-      if (m._expeditionBoss || m._echoBoss || m._isTwin || m._isPiscesTwin) return;   // v0.30.x twin-rewards
+      if (_lxDefer) return;   // v0.30.891 the twin still stands: its kill opens the wheel
+      const _dt = m._lxDeferredTakedown; if (_dt && (_dt.echo || _dt.exp)) return;
+      if (m._expeditionBoss || m._echoBoss || ((m._isTwin || m._isPiscesTwin) && !_dt)) return;   // v0.30.x twin-rewards
       // v0.30.x - per user: "Train conductor boss should not drop any boons".
       // The PQ finale pays through its own quest chain (EXP, coins, the Rush
       // completion); the boon wheel on top made him the most farmable boon
@@ -108548,6 +108566,7 @@ function _claimDailyParcel() {
   if (typeof checkDaily === 'function') checkDaily();   // ensure dailyState is for today
   const d = game.dailyState;
   if (!d) { showToast('The Wisp has nothing for you yet.', 'common'); return; }
+  if (typeof game !== 'undefined' && game.expedition && game.expedition.active) { showToast('✉ The Postal Wisp cannot reach the tower. Claim today\'s parcel after the run.', 'rare'); return; }   // v0.30.891 launch audit
   if (d.parcelClaimed) { showToast('✉ Today\'s parcel already collected — back tomorrow!', 'common'); return; }
   const streak = Math.max(1, Math.min(7, d.streak || 1));
   const hp = 5 + streak * 2;              // v0.26.450 — more Small Reds: 7..19
@@ -116368,7 +116387,7 @@ function showPowerupChoice(bossInfo) {
   // take 4-12 s to click through, so the poll fires 8-24 times before
   // the boon modal can open cleanly.
   const _beat = document.getElementById('story-beat-overlay');
-  if (_beat && _beat.classList && _beat.classList.contains('on')) {
+  if ((_beat && _beat.classList && _beat.classList.contains('on')) || document.getElementById('lx-pause')) {   // v0.30.891 and not under the pause card
     setTimeout(() => showPowerupChoice(bossInfo), 500);
     return;
   }
@@ -116704,11 +116723,19 @@ function _lxPauseAct(a) {
   if (a === 'settings') { if (typeof openSettingsModal === 'function') openSettingsModal(); return; }
   if (a === 'keys') { if (typeof toggleKeybindModal === 'function') toggleKeybindModal(); return; }
   if (a === 'slots') { if (typeof openBackupModal === 'function') openBackupModal(); return; }
-  if (a === 'quit') { try { _flushSaveStateNow(); } catch (e) {} window.close(); return; }
+  // v0.30.891 launch audit: leaving mid-Expedition ends the run and removes its loot; both exits say so first
+  const _inRun = !!(typeof game !== 'undefined' && game && game.expedition && game.expedition.active);
+  const _runLine = 'This ends your Expedition run: the loot you picked up in the tower is REMOVED (the EXP stays).';
+  if (a === 'quit') {
+    const bye = () => { try { _flushSaveStateNow(); } catch (e) {} window.close(); };
+    if (!_inRun || typeof uiConfirm !== 'function') { bye(); return; }
+    uiConfirm({ title: 'Quit to desktop?', body: _runLine, yesLabel: 'Quit', noLabel: 'Keep playing' }).then((ok) => { if (ok) bye(); });
+    return;
+  }
   if (a === 'title') {
     const go = () => { try { _flushSaveStateNow(); } catch (e) {} location.reload(); };   // boot lands on the title menu
     if (typeof uiConfirm !== 'function') { go(); return; }
-    uiConfirm({ title: 'Return to the title screen?', body: 'Your progress is saved first.', yesLabel: 'Return to title', noLabel: 'Keep playing' })
+    uiConfirm({ title: 'Return to the title screen?', body: _inRun ? 'Your progress is saved first. ' + _runLine : 'Your progress is saved first.', yesLabel: 'Return to title', noLabel: 'Keep playing' })
       .then((ok) => { if (ok) go(); });
   }
 }
@@ -117268,7 +117295,7 @@ function uiConfirm(opts) {
     // handler.
     const escHandler = (e) => {
       if (e.key === 'Escape' || e.key === 'Esc') {
-        e.preventDefault();
+        e.preventDefault(); e.stopPropagation();   // v0.30.891 it closed the dialog; it must not also open the pause card
         cleanup(false);
       }
     };
@@ -118061,7 +118088,7 @@ function _closeTutorial(markSeen) {
   }
   _stopTutGhostWatch();   // v0.29.584 - tear down the ghost watch with the dock
   window._tutWantsMove = false;   // v0.27.5 — never leave the per-frame gate armed after close
-  game.paused = false;
+  game.paused = (typeof _anyOtherModalOpen === 'function') ? !!_anyOtherModalOpen() : false;   // v0.30.891 the auto-finish ran behind the U panel
   if (markSeen) {
     try { localStorage.setItem('mojiworld_tutorial_seen', '1'); } catch (e) {}
     // v0.26.x — also stamp the per-SAVE flag so this character (not just this
