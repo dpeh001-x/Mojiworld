@@ -70,7 +70,7 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
   ok('the rare-wanderer roll is gone (a map spawns only its own roster)',
      !/const wanderers\s*=/.test(s) && !/_lxWandererPool/.test(s)
      && !/Math\.random\(\) < 0\.08[\s\S]{0,400}spawnFromMap\(pick/.test(s));
-  ok('natural chests are still gated on isTown', /_chestEligible\s*=\s*!game\.mapData\.isTown/.test(s));
+  ok('natural chests are still gated on isTown', /_chestEligible\s*=\s*(_mapHasMobs\s*&&\s*)?!game\.mapData\.isTown/.test(s));   // 4085b5ba put `_mapHasMobs &&` in front
 }
 
 // ── B. LIVE ──────────────────────────────────────────────────────────────────

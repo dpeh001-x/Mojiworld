@@ -83,13 +83,21 @@ const out = await page.evaluate(async () => {
   lg._columnCd = 99999;
   // centre-to-centre 150px, inside the 180px swing range (the first version
   // parked 186px out and the telegraph never started)
-  player.x = lg.x + lg.w / 2 + 150 - player.w / 2; player.y = lg.y + lg.h - player.h;
+  // v0.30.420 grew his box to the art (224 -> 388 wide), so a fixed 150px centre gap now parks the player INSIDE his
+  // body (the overlap shoved him back ~15px) and the step-back left an edge gap under the creep's 40px floor. Park
+  // 10px off his edge instead - still inside the 262px swing range - so the step-back opens a real 100px gap. He is
+  // The player is then HELD there: parked at his feet level, off whatever ground is under that spot, they fell and a
+  // void reset threw them 900px away mid-windup - and he dutifully crept after them, undoing the measurement.
+  player.x = lg.x + lg.w + 10; player.y = lg.y + lg.h - player.h;
+  let _hold = { x: player.x, y: player.y };
+  const _pin = setInterval(() => { player.x = _hold.x; player.y = _hold.y; player.vy = 0; }, 4);
   player.hp = getMaxHp(); player.invulnerable = 4000;   // survive the swing; we measure motion
   lg._bigMeleeFiring = false; lg._bigMeleeCd = 0;
   ok('swing telegraph starts', await waitFor(() => lg._bigMeleeFiring === true, 4000), '_bigMeleeFiring ' + lg._bigMeleeFiring);
   const x0 = lg.x;
-  player.x += 90;                                       // the step-back that used to make him whiff
+  player.x += 90; _hold = { x: player.x, y: player.y };   // the step-back that used to make him whiff
   await waitFor(() => lg._bigMeleeFiring === false, 3000);
+  clearInterval(_pin);
   const moved = lg.x - x0;
   ok('boss CREEPS toward the player through the windup', moved > 8,
      'moved ' + moved.toFixed(1) + 'px (dead-root = ~0)');
@@ -100,14 +108,20 @@ const out = await page.evaluate(async () => {
   player.invulnerable = 0; player.blockTimer = 0; player._aegis = false;
   player.hp = getMaxHp();
   const hp0 = player.hp, mh = getMaxHp();
+  // Read the GORE's own damage at the choke point it goes through. The HP drop across a wait of up to 12 s also
+  // carries contact hits from the charge itself (more of them since v0.30.420 grew his box to the art): 65% of
+  // max HP from the gore read as 79-86% in total, over the 85% ceiling one run in three.
+  let goreHit = null; const _dd = _diffDmg;
+  window._diffDmg = function (d, lv, cap) { const r = _dd.apply(this, arguments); if (cap && d === Math.max(1, Math.floor(mh * 0.5))) goreHit = r; return r; };
   // Stand in the lane at charge range and stay there.
   player.x = lg.x + lg.w / 2 + 400 - player.w / 2;
   player.y = lg.y + lg.h - player.h;
   const goreLanded = await waitFor(() => goredToasts >= 1, 12000);
+  window._diffDmg = _dd;
   ok('the charge GORES a player standing in the lane', goreLanded, goredToasts + ' GORED toast(s)');
   if (goreLanded) {
     await wait(200);
-    const lost = hp0 - player.hp;
+    const lost = goreHit != null ? goreHit : hp0 - player.hp;
     const frac = lost / mh;
     ok('gore costs about half max HP (x1.3 at-level baseline)', frac >= 0.45 && frac <= 0.85,
        'lost ' + lost + ' of ' + mh + ' (' + (frac * 100).toFixed(0) + '%)');
