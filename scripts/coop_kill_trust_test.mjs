@@ -31,7 +31,8 @@ try {
     const pay = (f) => { const e0 = player.exp, lv0 = player.level, c0 = player.mojicoins || 0, k0 = (player.quests && JSON.stringify(player.quests.active || {})) || '';
       player.level = 40; _coopApplyKill(f); const out = { exp: player.exp - e0 + (player.level - lv0) * 1e9, coins: (player.mojicoins || 0) - c0 }; player.level = 40; return out; };
     const a = mirror('slime'); const honest = pay(frame(a, a.exp, a.mojicoins));
-    const b = mirror('slime'); const inflated = pay(frame(b, 1e9, 1e9));
+    const b = mirror('slime'); b.exp = a.exp; b.mojicoins = a.mojicoins;   // the same table values as the honest one, so the two payouts compare 1:1 (slime EXP rounds to 1 or 2 per spawn)
+    const inflated = pay(frame(b, 1e9, 1e9));
     const forged = pay(frame(null, 5000, 5000));
     const c = mirror('slime'); const wrongType = pay(frame(c, c.exp, c.mojicoins, { tp: 'dragon' }));
     const d = mirror('mooma', true); const bossHonest = pay(frame(d, d.exp * 10, d.mojicoins * 10));
