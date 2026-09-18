@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.881';
+const GAME_VERSION = 'v0.30.882';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -76341,6 +76341,7 @@ function triggerDeath() {
   ov.classList.remove('on'); void ov.offsetWidth; ov.classList.add('on');
   flash(0.4); addShake(12);
   audio.play('death');
+  if (typeof _lxDefeatSting === 'function') _lxDefeatSting();   // v0.30.x audio polish (audit A4) — the music ducks under a defeat phrase
   // v0.25.774 — Clear lingering visual queues so the death overlay's
   // 2.2 s fade isn't underlaid by particles / damage numbers / after-
   // images / smooth-FX from the last hit. loadMap also clears these
@@ -100722,6 +100723,7 @@ function _killMonsterRaw(m) {
     if (!_lxTwinKill) {   // v0.30.x boss polish (audit B4) — a split twin going down is not the takedown
       game._slowmoFrames = 54;
       if (typeof flash === 'function') flash(0.25);
+      if (typeof _lxVictorySting === 'function') _lxVictorySting(m);   // v0.30.x audio polish (audit A4 / B6)
     }
     if (wasNew) {
       const z = ZODIAC_SIGNS.find(s => s.id === m.zodiacSign);
@@ -160905,6 +160907,55 @@ function _bgmFade(el, target, durationMs) {
 // azureAbode, bastion, emeraldVillage, azureAcademia) can take priority
 // over both the boss and default tracks. Boss arenas still win regardless
 // of map id so the boss theme overrides any per-map track on a boss map.
+// v0.30.x audio polish (audit A4 / B6) — VICTORY AND DEFEAT STINGS. A boss kill left the boss theme looping on under the
+// boon wheel and a death was a 0.45 s synth buzz: nothing marked either ending. A real boss kill now fades the playing
+// track out under the kill slow-mo, plays a short victory fanfare and brings the track back; a death plays a short
+// defeat phrase into the death screen's quiet. Both step aside for a cinematic that owns the mix, and a track is only
+// restored if nothing else (a map change, a cinematic, another sting) has taken it over in the meantime - _bgmFade's
+// cancellation token says so. Stings follow the MUSIC volume, not the SFX one. Files: scripts/gen_stingers.mjs.
+const _LX_STING_FILES = { victory: 'audio/stinger/victory.mp3', defeat: 'audio/stinger/defeat.mp3' };
+const _lxStingEls = {};
+function _lxStingEl(kind) {
+  let a = _lxStingEls[kind];
+  if (!a) { a = new Audio(_LX_STING_FILES[kind]); a.preload = 'auto'; _lxStingEls[kind] = a; }
+  return a;
+}
+function _lxBgmPlaying() {
+  const els = [(typeof _bgmActiveMapEl !== 'undefined') ? _bgmActiveMapEl : null, (typeof _bgmBossEl !== 'undefined') ? _bgmBossEl : null, (typeof _bgmEl !== 'undefined') ? _bgmEl : null];
+  for (const el of els) if (el && !el.paused && el.volume > 0.02) return el;
+  return null;
+}
+function _lxPlaySting(kind, duckTo, fadeMs, restoreAfterMs) {
+  try {
+    if (typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix) return false;
+    if (typeof audio !== 'undefined' && audio && audio.muted) return false;
+    const vol = (typeof _bgmTargetVol === 'function') ? _bgmTargetVol() : 0.5;
+    if (!(vol > 0.01)) return false;
+    const el = _lxBgmPlaying();
+    let tok = null;
+    if (el && typeof _bgmFade === 'function') { _bgmFade(el, vol * duckTo, fadeMs); tok = el._fadeId; }
+    const s = _lxStingEl(kind);
+    s.volume = Math.min(1, vol * 1.25);
+    try { s.currentTime = 0; } catch (e) {}
+    setTimeout(() => {
+      if (typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix) return;
+      try { const p = s.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+    }, Math.min(fadeMs, 700));
+    if (el && restoreAfterMs > 0) setTimeout(() => {
+      if (el._fadeId !== tok || (typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix)) return;   // someone else has the track now
+      _bgmFade(el, (typeof _bgmTargetVol === 'function') ? _bgmTargetVol() : vol, 1800);
+    }, restoreAfterMs);
+    window._lxLastSting = { kind: kind, at: Date.now(), ducked: !!el };   // read by scripts/stingers_test.mjs
+    return true;
+  } catch (e) { return false; }
+}
+function _lxVictorySting(m) {
+  if (m && m.type === 'gravitos') return;   // his defeat is a cinematic with its own score
+  _lxPlaySting('victory', 0, 900, 4600);
+}
+// A death already fades every track to silence for the death screen (v0.25.774, just below the call); the defeat
+// phrase plays into that quiet, and loadMap brings the music back on respawn - so nothing is restored here.
+function _lxDefeatSting() { _lxPlaySting('defeat', 0, 350, 0); }
 function _setBossBgm(isBoss, mapId) {
   // v0.29.244 — a cinematic score owns the mix while it plays. loadMap fires
   // during the prologue (and during any map-changing story beat), and its
