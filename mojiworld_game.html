@@ -12778,7 +12778,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.860';
+const GAME_VERSION = 'v0.30.861';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -47265,7 +47265,8 @@ const GAME_SAVE_FIELDS = [
   // PERMANENT +ATK/+DEF was thrown away each session. Found while wiring the
   // Trainee Path, whose final rung grants through the same dexPerm store.
   'dexMilestones','dexPerm','duoTrials',
-  'boonDex'   // v0.30.421 - boon codex (lifetime; not wiped by ascension)
+  'boonDex',   // v0.30.421 - boon codex (lifetime; not wiped by ascension)
+  '_cursedChestOpened','_echoGearAt','_dailyClockHealed'   // v0.30.861 loops
 ];
 // v0.25.264 — saveState() is called from ~30 sites: every kill, quest tick,
 // boon equip, skill unlock, level-up, etc. Each call serializes the whole
@@ -47646,8 +47647,16 @@ try { window._lxSteamPresence = _lxSteamPresence; window._lxSteamTryAutoJoin = _
 let _lxInputDevice = 'kb';
 const _LX_PAD_GLYPH = { 0: 'Ⓐ', 1: 'Ⓑ', 2: 'Ⓧ', 3: 'Ⓨ', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT', 8: 'Back', 9: 'Start', 10: 'L3', 11: 'R3', 12: '✚▲', 13: '✚▼', 14: '✚◀', 15: '✚▶' };
 const _LX_KEY_LABEL = { ' ': 'Space', 'space': 'Space', 'escape': 'Esc', 'enter': 'Enter', 'shift': 'Shift', 'arrowup': '↑', 'arrowdown': '↓', 'arrowleft': '←', 'arrowright': '→', 'pageup': 'PgUp', 'pagedown': 'PgDn' };
+// v0.30.861 loops - AN AWAY PLAYER'S SUMMON EARNS NOTHING (per user: "MojiMon earns EXP while the player is away; fix this").
+// A MojiMon lives until dismissed (life 1e12), so a player could park it on a hunting map and walk away while it farmed
+// full EXP, coins and loot. After LX_AFK_MS without a real key, click, touch or pad button, a kill whose killing blow was
+// a MojiMon's or another minion's pays nothing and counts for nothing (see killMonster). The summon still fights.
+const LX_AFK_MS = 120000;
+window._lxLastInputAt = performance.now();
+function _lxPlayerAfk() { return performance.now() - (window._lxLastInputAt || 0) > LX_AFK_MS; }
 function _lxNoteInput(dev) {
   if (dev !== 'pad' && dev !== 'kb') return;
+  window._lxLastInputAt = performance.now();   // v0.30.861 loops
   if (_lxInputDevice === dev) return;
   _lxInputDevice = dev;
   try { _lxRefreshPrompts(); } catch (e) {}
@@ -47689,6 +47698,7 @@ function _lxRefreshPrompts() {
   try { if (typeof _renderQuestTracker === 'function') _renderQuestTracker(); } catch (e) {}
 }
 window.addEventListener('mousedown', () => _lxNoteInput('kb'), true);
+window.addEventListener('touchstart', () => { window._lxLastInputAt = performance.now(); }, { capture: true, passive: true });   // v0.30.861 loops - touch play is input too
 const _LX_PAD_MAP = {
   // v0.29.7xx — B is a SKILL, not a dash (per user: "pressing my controller B
   // key causes a pseudo-dash, remap it to the 1st skill key instead, then
@@ -63717,6 +63727,17 @@ function _pickDailyChallenge(day) {
 function checkDaily() {
   if (!player.cls) return;
   const day = dailyIndex();
+  // v0.30.861 loops - A DAY THAT GOES BACKWARDS GRANTS NOTHING (per user: "dailies can be re-rolled by changing the clock;
+  // fix this"). This compared day !== stored day, so a clock set forward (tomorrow's grant) and then back more than six
+  // hours (_monoNow gives the real time back then) granted TODAY again - login bonus, a fresh challenge and parcel, and a
+  // streak walked forward a day at a time paid the 14/30/60/100-day milestones on every round trip. Only a LATER day
+  // grants now; an earlier one keeps the stored day, its claims and its streak. One heal per save, for a clock that was
+  // really wrong: a stored day more than 30 days ahead is re-based to today without paying.
+  if (game.dailyState && typeof game.dailyState.day === 'number' && day < game.dailyState.day) {
+    if (game.dailyState.day - day > 30 && !game._dailyClockHealed) { game._dailyClockHealed = true; game.dailyState.day = day; }
+    tickDaily('level', player.level);
+    return;
+  }
   if (!game.dailyState || game.dailyState.day !== day) {
     const prev = game.dailyState;
     const c = _pickDailyChallenge(day);
@@ -65988,6 +66009,11 @@ function _worldAffixDay() {
   return Math.floor(t / 86400000);
 }
 // The affix for a map on a given day. Pure function of (mapId, day).
+// v0.30.861 loops - is this map nightmare-touched today? Pure function of (map, day), like the affix below.
+function _lxCurseRoll(mapId, day) {
+  const d = (day == null) ? _worldAffixDay() : day;
+  return _lxMulberry32(_lxSeedFromString('curse@' + mapId + '@' + d))() < 0.10;
+}
 function _worldAffixFor(mapId, day) {
   if (!mapId) return WORLD_AFFIXES[0];
   const m = (typeof MAPS !== 'undefined') ? MAPS[mapId] : null;
@@ -70414,11 +70440,22 @@ function loadMap(id, entryX, entryY) {
     && !(game.expedition && game.expedition.active)
     && (id.indexOf('tower_b') !== 0) && (id.indexOf('clockwork') !== 0)
     && id !== 'void' && !game.mapData._noNaturalChests;
-  if (_curseEligible && Math.random() < 0.10) {
+  // v0.30.861 loops - THE CURSE IS TODAY'S, NOT THIS LOAD'S (per user: "the cursed chest re-rolls on every map load; fix this").
+  // The 10% was rolled on every load, and the Cursed Chest it brings spawns outside the 15-minute chest cooldown, so
+  // hopping a portal back and forth farmed guaranteed legendaries. It is seeded by (map, day) like the world affix
+  // above: a nightmare-touched map stays touched all day, re-entering cannot roll it, and each map's Cursed Chest opens
+  // once per day (game._cursedChestOpened, persisted).
+  const _curseKey = id + '@' + _worldAffixDay();
+  const _curseTaken = !!(game._cursedChestOpened && game._cursedChestOpened[_curseKey]);
+  game._mapCurseKey = null;
+  if (_curseEligible && _lxCurseRoll(id)) {
     game._mapCursed = true;
+    game._mapCurseKey = _curseKey;
     try { document.body.classList.add('map-cursed'); } catch (e) {}   // v0.29.60 — dark nightmare vignette
     if (typeof showToast === 'function') {
-      showToast('🌑 This place is NIGHTMARE-TOUCHED. Stronger foes — and a Cursed Chest worth the risk. Leave, or take the gamble.', 'legendary');
+      showToast(_curseTaken
+        ? '🌑 This place is NIGHTMARE-TOUCHED today. Stronger foes — and its Cursed Chest has already been claimed.'
+        : '🌑 This place is NIGHTMARE-TOUCHED. Stronger foes — and a Cursed Chest worth the risk. Leave, or take the gamble.', 'legendary');
     }
     if (typeof flash === 'function') flash(0.4);
     if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('void'); } catch (e) {} }
@@ -70666,7 +70703,8 @@ function loadMap(id, entryX, entryY) {
   // exactly one, regardless of the normal chest cooldown/roll above:
   // a gold-tier chest flagged _cursed, spawned mid-map so it's found.
   // Opening it grants tier+1 loot but lays the hex (see openChest).
-  if (game._mapCursed && typeof spawnChest === 'function') {
+  if (game._mapCursed && typeof spawnChest === 'function'
+      && !(game._mapCurseKey && game._cursedChestOpened && game._cursedChestOpened[game._mapCurseKey])) {   // v0.30.861 loops - once per map per day
     // v0.29.847 — the cursed chest spawns from its own block and would otherwise
     // ignore the keep-out the restock loop now honours. It rebuilds the list
     // because that one is scoped to the restock branch, which does not run on a
@@ -71185,6 +71223,14 @@ function openChest(c) {
   // follows you out of the map you gambled in.
   if (c._cursed) {
     game._curseHex = { kills: 8, total: 8 };
+    // v0.30.861 loops - this map's Cursed Chest is spent for today (older days are pruned so the record never grows)
+    try {
+      const _cd = '@' + _worldAffixDay(), _co = game._cursedChestOpened || {};
+      for (const _k of Object.keys(_co)) if (_k.slice(-_cd.length) !== _cd) delete _co[_k];
+      _co[game._mapCurseKey || ((game.currentMap || '?') + _cd)] = 1;
+      game._cursedChestOpened = _co;
+      if (typeof saveState === 'function') saveState();
+    } catch (e) {}
     if (typeof showToast === 'function') {
       showToast('🩸 THE CHEST WAS CURSED. Damage taken ×3 until you slay 8 foes. Run, or fight it off!', 'legendary');
     }
@@ -98022,6 +98068,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // overwriting the real cause-of-death, and combo counter ticking on
   // corpses. One-line gate at the entry kills the whole class.
   if (!m || m.currentHp <= 0) return;
+  m._lastHitTag = skill;   // v0.30.861 loops - who landed it (killMonster reads the killing blow's)
   const _shadeRawDmg = +dmg;   // v0.30.x — Sovereign Shade: what this hit ENTERED with (see _lxShadeQueue)
   // v0.27.1 — NaN/Infinity guard. Math.max(1, NaN) === NaN (Math.max is not a NaN
   // filter), so a single caller ever passing a non-finite dmg (a 0/0 stat helper, an
@@ -99898,6 +99945,17 @@ function _ksOnDeath() {
   }
 }
 function killMonster(m) {
+  // v0.30.861 loops - see LX_AFK_MS. The drops wrapper follows triggerSuperBossDeath's pattern: nothing this kill pushes lands.
+  if (m && !m._afkKill && (m._lastHitTag === 'mojimon' || m._lastHitTag === 'minion') && typeof _lxPlayerAfk === 'function' && _lxPlayerAfk()) {
+    m._afkExp = m.exp || 0; m._afkCoins = m.mojicoins || 0; m.exp = 0; m.mojicoins = 0; m._afkKill = true;
+    const _nowA = performance.now();
+    if (!(game._afkToastAt > _nowA - 600000) && typeof showToast === 'function') { game._afkToastAt = _nowA; showToast('\u{1F4A4} You are away - your summon\u2019s kills pay nothing until you are back.', 'common'); }
+  }
+  if (!(m && m._afkKill) || !game.drops) return _killMonsterRaw(m);
+  const _dropsA = game.drops; _dropsA.push = function () { return _dropsA.length; };
+  try { return _killMonsterRaw(m); } finally { delete _dropsA.push; }
+}
+function _killMonsterRaw(m) {
   // v0.26.x — if called while the main monster loop is iterating, defer the
   // whole kill to that loop's post-iteration _pendingKills drain. Splicing
   // mid-`for...of` shifts the next element into the freed slot and the
@@ -100401,7 +100459,7 @@ function killMonster(m) {
   // ("bring the harvest from 18 stalkers"), dailies and kill-count
   // achievements — a 3x quest accelerator from nearly-free kills. Pack-call
   // and Keeper-hound spawns still count: they're full-HP real fights.
-  const _isIllusionKill = !!m._isMirage;
+  const _isIllusionKill = !!m._isMirage || !!m._afkKill;   // v0.30.861 loops - an away summon's kill counts for nothing
   const _lxTwinKill = !!(m._isTwin || m._isPiscesTwin);   // v0.30.x twin-rewards — a split twin pays nothing boss-sized (see the boss daily tick below)
   if (!_isIllusionKill) {
   game.kills++;
@@ -100683,7 +100741,7 @@ function killMonster(m) {
   // they get their share of XP/coins + a death pop (they suppressed their own
   // kill pipeline). Base exp/coins broadcast; each peer applies its own scaling.
   if (typeof _coopBroadcastKill === 'function' && net.isHost && _coopActive() && m.uid != null) {
-    _coopBroadcastKill(m, m.exp || 0, m.mojicoins || 0);
+    _coopBroadcastKill(m, m._afkKill ? (m._afkExp || 0) : (m.exp || 0), m._afkKill ? (m._afkCoins || 0) : (m.mojicoins || 0));   // v0.30.861 loops - partners still earn their share
   }
   // Bottom-right kill summary. Mojicoin amount shown is the EXPECTED
   // pickup (m.mojicoins × the global MOJICOIN_GAIN_MULT) — matches what
@@ -100904,7 +100962,7 @@ function killMonster(m) {
   // vigil_vermillion is untouched: its flat 2% is assigned AFTER every multiplier, on purpose.
   let dropChance = (tier === 2 ? 0.9 : tier === 1 ? 0.15 : 0.05) * (1 + luck) * 0.015 * (typeof _diffDropMul === 'function' ? _diffDropMul() : 1) * (typeof _edictDropMul === 'function' ? _edictDropMul() : 1) * (typeof _affixDropMul === 'function' ? _affixDropMul() : 1);   // v0.28.7 — Hard +25% / Nightmare +50% gear-drop chance · v0.29.66 Edict Weight drop bonus · v0.29.288 world affix
   // v0.29.7xx — same 40% haircut on the gear roll for an already-cleared boss.
-  if (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) dropChance *= LX_REFIGHT_REWARD_MUL;
+  if ((typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) || (typeof _lxPayingEcho === 'function' && _lxPayingEcho(m))) dropChance *= LX_REFIGHT_REWARD_MUL;   // v0.30.861 loops - a paying echo too
   // v0.29.9xx - Vermillion's item drop is a FLAT 2% (per user). Set after
   // every multiplier so luck / difficulty / edict / affix cannot inflate it,
   // and the elder tier base cannot either.
@@ -101202,7 +101260,7 @@ function killMonster(m) {
       // amount instead of nothing, so refighting is always worth something.
       // Echo/rush + expedition bosses keep their exclusions — separate modes
       // with their own payout at run end.
-      if (!m._echoBoss && !m._expeditionBoss && !m._isTwin && !m._isPiscesTwin) {   // v0.30.412 — a split twin is a mechanic, not a second boss
+      if (!m._echoBoss && !m._expeditionBoss && !m._isTwin && !m._isPiscesTwin && !m._afkKill) {   // v0.30.412 — a split twin is a mechanic, not a second boss
         const _isRefight = (typeof _lxIsBossRefight === 'function') && _lxIsBossRefight(m);
         const _bossLvl = (m.level && m.level > 0) ? m.level
                        : (typeof _mobLevel === 'function' ? _mobLevel(m) : 50);
@@ -101498,7 +101556,14 @@ const LX_BOSS_GEAR_CAP = 3;
 const LX_BOSS_GEAR_CAP_REFIGHT = 1;
 function _lxIsGearItem(it) { const sl = it && it.slot; return sl === 'weapon' || sl === 'armor' || sl === 'accessory' || sl === 'accessorie'; }
 function _lxIsSuperBoss(m) { return !!(m && (m.type === 'aetherion' || m.type === 'aetherion2' || m.superBoss) && !m._rushBoss); }
-function _lxBossGearCap(m) { return (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) ? LX_BOSS_GEAR_CAP_REFIGHT : LX_BOSS_GEAR_CAP; }
+// v0.30.861 loops - PAYING ECHOES PAY LIKE A REFIGHT (per user: "Nightmare and zodiac echoes pay gear with no cooldown; fix
+// this"). They can be summoned back to back and each kept the FIRST-kill gear terms (budget 3, full drop chance), where a
+// real refight of the same boss pays budget 1 at 40% of the chance, once per 10-minute respawn. They now get exactly the
+// refight terms, and the gear roll is live once per 10 minutes of PLAY time per boss (game._echoGearAt, persisted; play
+// time like the boss respawn, so the clock cannot shorten it). EXP and coins are unchanged; the Duo Trial keeps its full drop.
+const LX_ECHO_GEAR_COOLDOWN_MS = 10 * 60 * 1000;
+function _lxPayingEcho(m) { return !!(m && m._echoBoss && !m._rushBoss && !m._duoTrial && (m._nightmareEcho || m.zodiacBoss || m.zodiacSign)); }
+function _lxBossGearCap(m) { if (_lxPayingEcho(m)) return LX_BOSS_GEAR_CAP_REFIGHT; return (typeof _lxIsBossRefight === 'function' && _lxIsBossRefight(m)) ? LX_BOSS_GEAR_CAP_REFIGHT : LX_BOSS_GEAR_CAP; }
 // v0.30.833 - the fights that pay nothing by design: the free (non-zodiac) Echo Keeper shade, a Boss Rush echo, the
 // prologue's memory of Gravitos. The Nightmare echo ("real rewards"), the Duo Trial ("full drop") and zodiac echoes
 // (EXP in full, coins diminished) are paying modes and are NOT in this set.
@@ -101509,7 +101574,14 @@ function _lxBossGearGate(m, it, ordinary) {
   if (_lxRewardlessEcho(m)) return false;   // v0.30.833
   if (!(m.isBoss || m.boss || m.zodiacBoss)) return true;
   if (ordinary && _lxIsSuperBoss(m)) return false;
-  if (m._gearBudget == null) m._gearBudget = _lxBossGearCap(m);
+  if (m._gearBudget == null) {
+    m._gearBudget = _lxBossGearCap(m);
+    if (_lxPayingEcho(m)) {   // v0.30.861 loops - one live gear roll per 10 play-minutes per boss
+      const _ek = (typeof _lxBossKey === 'function') ? _lxBossKey(m) : String(m.type);
+      const _at = game._echoGearAt || (game._echoGearAt = {}), _now = game._playMs || 0, _d = _now - (_at[_ek] == null ? -Infinity : _at[_ek]);
+      if (_d >= 0 && _d < LX_ECHO_GEAR_COOLDOWN_MS) m._gearBudget = 0; else _at[_ek] = _now;
+    }
+  }
   if (m._gearBudget <= 0) return false;
   m._gearBudget--;
   return true;
@@ -156439,7 +156511,8 @@ function _bossRushComplete() {
   // date string, so the reward can't be re-claimed by rolling the system clock.
   const today = (typeof dailyIndex === 'function') ? dailyIndex() : new Date().toDateString();
   let payoutTxt = 'Daily reward already claimed — run logged for glory.';
-  if (game._bossRushRewardDay !== today) {
+  const _brLast = game._bossRushRewardDay;   // v0.30.861 loops - once per LATER day: a clock set back cannot re-pay it
+  if ((typeof _brLast === 'number' && typeof today === 'number') ? today > _brLast : _brLast !== today) {
     game._bossRushRewardDay = today;
     const bonus = grade === 'S' ? 20 : grade === 'A' ? 12 : grade === 'B' ? 6 : 2;
     const shards = br.downs * 2 + bonus;
