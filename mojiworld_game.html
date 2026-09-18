@@ -12810,7 +12810,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.896';
+const GAME_VERSION = 'v0.30.897';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -42370,7 +42370,10 @@ function _applySettings(s) {
     }
   }
   // Force-desktop class
-  document.body.classList.toggle('force-desktop', !!s.fdesk);
+  // v0.30.897 Steam Deck: its touch screen can report (pointer: coarse) and pull in the phone layout; the Deck has real
+  // controls, so it takes the desktop layout unless the player turned the touch controls on themselves
+  const _lxDeck = !!(typeof window !== 'undefined' && window.SteamAPI && window.SteamAPI.deck);
+  document.body.classList.toggle('force-desktop', !!s.fdesk || (_lxDeck && !document.body.classList.contains('force-mobile-ctrl')));
   // v0.26.1026 — mirror into the secondary boot key so the two stores never diverge
   // (the fullscreen button writes _lx_forceDesktop; Settings must too).
   try { if (s.fdesk) localStorage.setItem('_lx_forceDesktop', '1'); else localStorage.removeItem('_lx_forceDesktop'); } catch (e) {}
@@ -48110,6 +48113,7 @@ function _lxPadDispatch(key, down) {
     // them — never saw pad input at all. Body restores the real path: document
     // listeners fire, window listeners still fire via bubble, and capture/
     // stopPropagation semantics match the keyboard exactly.
+    try { ev._lxPad = true; } catch (e) {}   // v0.30.897 so a handler can tell the pad's B from the keyboard's Esc
     (document.body || window).dispatchEvent(ev);
   } catch (e) {}
 }
@@ -48159,6 +48163,7 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   'worldmap-modal', 'shop-modal', 'craft-modal', 'enhance-modal', 'taxi-modal',
   'multiplayer-modal', 'help-modal', 'lore-modal', 'mojidex-modal', 'tutorial-modal', 'powerup-modal',
   'sage-blessing-modal', 'keybind-modal', 'jukebox-modal-bg', 'backup-modal-bg',
+  'boss-rush-results',   // v0.30.897 it had no pad route to close
   // v0.29.668 — Steam "Full Controller Support" review pass. The title's
   // sub-panels replace the menu buttons IN PLACE (same overlay, new children),
   // so they were never separate roots — but the router resolves by id, and
@@ -48538,6 +48543,11 @@ function _lxPadMenuNav(root, pad) {
     if (moved || lateral) _lxPadItemTip(el);   // v0.30.x (audit U6) — the item's stats come up with the ring
     if (moved || lateral) { el.scrollIntoView({ block: 'nearest' }); _lxPadNavFocusing = true; try { el.focus({ preventScroll: true }); } catch (e) {} _lxPadNavFocusing = false; }   // v0.29.727 — nav focus is passage, not intent
   } catch (e) {}
+  // v0.30.897 a native <select> cannot be opened by click(): A steps its options forward (wrapping); left / right still
+  // move the ring, since a sort dropdown sits beside the items it sorts
+  const _selStep = (sel, d, wrap) => { const n = sel.options.length; if (!n) return; let i = sel.selectedIndex;
+    for (let k = 0; k < n; k++) { i = wrap ? (i + d + n) % n : Math.max(0, Math.min(n - 1, i + d)); if (!sel.options[i].disabled) break; }
+    if (i !== sel.selectedIndex && !sel.options[i].disabled) { sel.selectedIndex = i; try { sel.dispatchEvent(new Event('input', { bubbles: true })); sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {} } };
   if (lateral && isRange(el)) {
     const step = Number(el.step) || 1;
     el.value = Number(el.value) + lateral * step;
@@ -48552,6 +48562,7 @@ function _lxPadMenuNav(root, pad) {
   if (edge(0)) {
     // v0.29.668 — a click cannot type. A text field under pad focus opens the
     // virtual keyboard; everything else keeps the plain click.
+    if (el && el.tagName === 'SELECT') { _selStep(el, 1, true); return; }   // v0.30.897
     const _typeable = el && ((el.tagName === 'INPUT' && /^(text|number|search|password|url)$/.test(el.type || 'text')) || el.tagName === 'TEXTAREA');
     if (_typeable && typeof _lxPadVK !== 'undefined') { try { _lxPadVK.open(el); } catch (e) {} }
     // v0.29.806 — SVGElement has no .click() method (verified in Chrome: it is
@@ -49027,7 +49038,11 @@ function _lxPadPoll() {
             && _tm.style.display !== 'none') {
           _tutTrig = true;
           if (_rtD && !_wasRt) { const b2 = document.getElementById('tut-next'); if (b2) b2.click(); }
-          if (_ltD && !_wasLt) { const b2 = document.getElementById('tut-skip'); if (b2) b2.click(); }
+          if (_ltD && !_wasLt) {   // v0.30.897 one pull used to close the tour for good; the second pull within 2.5 s does
+            const _nowT = performance.now();
+            if ((window._lxTutSkipArm || 0) > _nowT) { window._lxTutSkipArm = 0; const b2 = document.getElementById('tut-skip'); if (b2) b2.click(); }
+            else { window._lxTutSkipArm = _nowT + 2500; try { showToast('🎮 Pull LT again to skip the tour', 'rare'); } catch (e) {} }
+          }
         }
       }
       for (const idx in _LX_PAD_MAP) {
@@ -49129,7 +49144,7 @@ const _LX_RUMBLE_MAP = {
   levelup: [0.30, 0.50, 260],   // celebratory roll
   void:    [0.60, 0.40, 300],
 };
-let _lxPadLastInput = 0;        // perf.now() of last real pad input (buttons/axes)
+let _lxPadLastInput = -Infinity;   // v0.30.897 was 0: performance.now() also starts at 0, so every session opened "pad active" for 30 s        // perf.now() of last real pad input (buttons/axes)
 let _lxRumbleLast = 0;
 function _lxPadActive(windowMs) {
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -50303,6 +50318,11 @@ function _playStoryBeat(beatId, onClose) {
   };
   const onKey = (ev) => {
     // Enter / Space advance a page; Escape skips the scene. Block bubble so combat keys don't fire underneath.
+    // v0.30.897 the pad's B is Escape too, and a thumb rests on B: the pad skips on a second press within 2 s (the line after
+    // this one - the keyboard's Esc - still skips at once)
+    if (ev.key === 'Escape' && ev._lxPad) { const _now = performance.now(); if (!(beat._lxSkipArm > _now)) { ev.preventDefault(); ev.stopPropagation(); beat._lxSkipArm = _now + 2000;
+      if (els.hint) { const _h0 = els.hint.textContent; els.hint.textContent = '▾ Ⓐ to continue · press Ⓑ again to skip the scene'; setTimeout(() => { try { if (els.hint && /again to skip/.test(els.hint.textContent)) els.hint.textContent = _h0; } catch (e) {} }, 2000); }
+      return; } }
     if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); skipRest(); return; }
     if (ev.key === 'Enter' || ev.key === ' ') {
       ev.preventDefault(); ev.stopPropagation();
@@ -116727,7 +116747,8 @@ function _lxPauseOpen() {
   const ov = document.createElement('div');
   ov.id = 'lx-pause'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Paused');
   ov.innerHTML = '<div id="lx-pause-card"><div class="lxp-title">⏸ Paused</div>'
-    + B('resume', '▶ Resume', 'Esc') + B('settings', '⚙ Settings') + B('keys', '⌨ Hotkeys &amp; Skills', 'K') + B('slots', '🗂 Save slots')
+    + B('resume', '▶ Resume', 'Esc') + B('settings', '⚙ Settings') + B('keys', '⌨ Hotkeys &amp; Skills', 'K') + B('slots', '🗂 Save slots') + B('mp', '👥 Multiplayer')
+    + ((typeof _gugumaAscendEligible === 'function' && _gugumaAscendEligible()) ? B('ascend', '✨ Ascend') : '')   // v0.30.897 pad routes to both
     + B('title', '🏠 Return to title') + (quit ? B('quit', '🚪 Quit to desktop') : '') + '</div>';
   ov.addEventListener('click', (e) => { if (e.target === ov) _lxPauseClose(); });   // a click outside the card resumes
   ov.querySelectorAll('.lxp-btn').forEach((b) => { b.onclick = () => _lxPauseAct(b.dataset.a); });
@@ -116749,6 +116770,8 @@ function _lxPauseAct(a) {
   if (a === 'settings') { if (typeof openSettingsModal === 'function') openSettingsModal(); return; }
   if (a === 'keys') { if (typeof toggleKeybindModal === 'function') toggleKeybindModal(); return; }
   if (a === 'slots') { if (typeof openBackupModal === 'function') openBackupModal(); return; }
+  if (a === 'mp') { if (typeof openMultiplayer === 'function') openMultiplayer(); return; }   // v0.30.897
+  if (a === 'ascend') { const go = document.getElementById('guguma-ascend-go'); if (go) go.click(); else if (typeof offerPrestige === 'function') { game._prestigeOffered = false; offerPrestige(true); } return; }   // v0.30.897
   // v0.30.891 launch audit: leaving mid-Expedition ends the run and removes its loot; both exits say so first
   const _inRun = !!(typeof game !== 'undefined' && game && game.expedition && game.expedition.active);
   const _runLine = 'This ends your Expedition run: the loot you picked up in the tower is REMOVED (the EXP stays).';
@@ -160367,12 +160390,13 @@ const _UI_SFX_COOLDOWN_PER = {
 // clip has buffered (and for anything without a class).
 const _LX_IMPACT_CLS = { warrior: 1, rogue: 1, mage: 1, archer: 1 };
 function _lxImpactSfx(crit) {
+  if (typeof document !== 'undefined' && document.hidden) return;   // v0.30.897 as audio.play: a background co-op tab keeps landing hits
   try {
     const c = (typeof player !== 'undefined' && player && player.cls) || '';
     if (_LX_IMPACT_CLS[c]) {
       const id = 'impact_' + c + (crit ? '_crit' : '');
       const el = _uiSfxEl(id);   // built, and buffering, on the first hit
-      if (el && el.readyState >= 2) { _playUiSfx(id); return; }
+      if (el && el.readyState >= 2) { try { if (typeof _lxPadRumble === 'function') _lxPadRumble(crit ? 'crit' : 'hit'); } catch (e) {} _playUiSfx(id); return; }   // v0.30.897 the rumble rode audio.play, which this path skips
     }
   } catch (e) {}
   if (typeof audio !== 'undefined' && audio && audio.play) audio.play(crit ? 'crit' : 'hit');
