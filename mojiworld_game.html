@@ -4821,7 +4821,10 @@
      when frames matter most). One-shot flashes (coin pop, 420ms skill-ready)
      stay: a transient is not a standing per-frame cost. */
   html.lx-nobackdrop #exp-bar.xp-near,
-  html.lx-nobackdrop .hp-fill.hp-critical {
+  html.lx-nobackdrop .hp-fill.hp-critical,
+  html.lx-nobackdrop #stats .exp-fill::before,
+  html.lx-nobackdrop .guguma-sprite,
+  html.lx-nobackdrop .guguma-sprite::before {   /* v0.30.857 hud-churn - the EXP sheen and the mascot's bounce + aura also run every frame, all game long */
     animation: none !important;
   }
   .modal h2 {
@@ -6908,6 +6911,7 @@
     -webkit-backdrop-filter: blur(6px) saturate(1.15);
     backdrop-filter: blur(6px) saturate(1.15);
     animation: toastSlideR 3s ease-out;   /* v0.29.761 — arrives from the right edge */
+    will-change: transform, opacity;   /* v0.30.857 hud-churn - up to four toasts slide in a boss fight; each gets a layer instead of a repaint per frame */
   }
   /* the rarity gem: a small lit sphere at the left edge, glowing in the accent */
   .toast::before {
@@ -7004,6 +7008,7 @@
     text-align: right; pointer-events: none;
     font-weight: bold; text-shadow: 2px 2px 4px #000;
     transition: opacity 0.3s;
+    will-change: transform;   /* v0.30.857 hud-churn - .pop scales this; without a layer of its own every pop frame re-rasterised the count's drop-shadow (unbounded clip) */
   }
   #combo-meter .combo-count {
     font-size: 34px;
@@ -7040,8 +7045,10 @@
     width: 100%;
     background: linear-gradient(90deg, #ffee88 0%, #ff8822 100%);
     border-radius: var(--moji-r-sm);
-    transition: width 0.12s linear;
-    transform-origin: right;
+    /* v0.30.857 hud-churn - drains by transform, anchored left like the old width did (it recedes from the right end). */
+    transition: transform 0.12s linear;
+    transform-origin: left;
+    will-change: transform;
   }
   #combo-meter.break { animation: comboBreak 0.45s ease-out; }
   @keyframes comboBreak {
@@ -7472,7 +7479,7 @@
     0%, 100% { transform: scale(1);    }
     50%      { transform: scale(1.06); }
   }
-  .moji-buff-pill.buff-expiring { animation: mojiBuffExpiring 420ms ease-in-out infinite; }
+  .moji-buff-pill.buff-expiring { animation: mojiBuffExpiring 420ms ease-in-out infinite; will-change: transform; }   /* v0.30.857 hud-churn - composited pulse */
   .moji-buff-pill.buff-expiring .buff-left { opacity: 1; color: var(--moji-gold, #ffd166); }
   .moji-buff-pill .buff-timer {
     position: absolute;
@@ -7480,7 +7487,13 @@
     height: 2px;
     background: linear-gradient(90deg, var(--moji-gold-soft, #ffe2a3), var(--moji-gold, #ffd166));
     border-radius: 0 999px 999px 0;
-    transition: width 120ms linear;
+    /* v0.30.857 hud-churn - the drain is a transform now, not a width: a width transition re-laid out and repainted the
+       pill every frame for 120 ms after every HUD tick (measured: the busiest layout invalidator in a Gravitos fight).
+       Same picture: the gradient spans the box either way, and a 2 px bar's rounded end does not show the squash. */
+    width: 100%;
+    transform-origin: left;
+    transition: transform 120ms linear;
+    will-change: transform;
   }
   /* Buff-specific tints. */
   .moji-buff-pill[data-buff="warCry"]      { border-color: rgba(255, 80,  80, 0.55); }
@@ -11822,7 +11835,7 @@ The sleeping world is listening.</div>
     <!-- v0.25.872 — comboTimer countdown bar so the player can feel
          how close they are to losing the streak. Drained to 0 when
          comboTimer hits 0 (resetCombo). See GAMEPLAY_AUDIT §2.3. -->
-    <div class="combo-timer-bar"><div class="combo-timer-fill" id="combo-timer-fill" style="width: 0%;"></div></div>
+    <div class="combo-timer-bar"><div class="combo-timer-fill" id="combo-timer-fill" style="transform: scaleX(0);"></div></div>
   </div>
 
   <!-- v0.25.874 — Buff icon row. Player buffs (warCry, bloodlust,
@@ -12765,7 +12778,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.856';
+const GAME_VERSION = 'v0.30.857';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -152249,7 +152262,7 @@ function _updateBuffRow() {
     const _pq = Math.round(pct / 2) * 2;   // v0.30.405 — 2% steps: the CSS transition smooths it, and the DOM stops seeing a write every frame
     if (bar && bar._lastPct !== _pq) {
       bar._lastPct = _pq;
-      bar.style.width = _pq + '%';
+      bar.style.transform = 'scaleX(' + (_pq / 100) + ')';   // v0.30.857 hud-churn - composited (see .buff-timer)
     }
     // v0.29.5xx — SECONDS REMAINING + EXPIRY FADE (per user "show a fade out
     // timer of the timespan left"). Both writes are change-gated like the bar
@@ -152586,7 +152599,7 @@ function updateUI() {
   // delta. Cap at 0 so it doesn't overshoot negative. See §2.3.
   if (d['combo-timer-fill']) {
     const _fillPct = game.combo > 0 ? Math.max(0, Math.min(100, (game.comboTimer / 2600) * 100)) : 0;
-    _uiSetStyle(d['combo-timer-fill'], 'width', (Math.round(_fillPct / 4) * 4) + '%');   // v0.30.405 — 4% steps under the CSS transition (was a fresh width every frame)
+    _uiSetStyle(d['combo-timer-fill'], 'transform', 'scaleX(' + (Math.round(_fillPct / 4) * 4) / 100 + ')');   // v0.30.405 — 4% steps under the CSS transition; v0.30.857 hud-churn - a transform, not a width
   }
 
   // v0.25.874 — Render the buff icon row from player.buffs. Each
@@ -162590,6 +162603,7 @@ function startBgm() {
     display: flex; align-items: center; justify-content: center;
     position: relative;
     animation: guguma-bounce 2.4s ease-in-out infinite;
+    will-change: transform;   /* v0.30.857 hud-churn */
   }
   .guguma-sprite::before {
     /* warm aura pulsing behind the chick */
@@ -162601,6 +162615,7 @@ function startBgm() {
     filter: blur(8px);
     z-index: -1;
     animation: guguma-aura 3s ease-in-out infinite;
+    will-change: transform, opacity;   /* v0.30.857 hud-churn - the blurred aura is rasterised once and animated as a layer */
   }
   .guguma-sprite img {
     width: 100%; height: 100%; object-fit: contain;
