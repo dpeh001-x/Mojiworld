@@ -11615,7 +11615,7 @@ The sleeping world is listening.</div>
       <button class="close-btn" onclick="closeAllModals()">✕</button>
       <h2 style="color:#ffcc44;">🛠 Developer Console</h2>
       <div style="text-align:center; margin-bottom:10px; color:#ffaa66; font-size:11px;">
-        Cheats — NOT for production play. Press <kbd>1</kbd>+<kbd>2</kbd>+<kbd>3</kbd> to toggle.
+        Cheats — NOT for production play. Developer builds only, from the 🛠 console.
       </div>
       <div id="dev-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;"></div>
       <div id="dev-log" style="margin-top:12px; padding:8px; background:rgba(0,0,0,0.5); border-radius:4px; font-size:11px; color:#ccc; min-height:24px; font-family:monospace;"></div>
@@ -12791,6 +12791,7 @@ function _lxFrameCount(dir, key, fallback) {
 function _lxDevSurface() {
   try {
     if (window.MOJI_PACKAGED === true) return false;
+    if (location.port === '47821') return false;   // v0.30.917 the Steam app's loopback server, opened in an ordinary browser
     try { if (localStorage.getItem('LX_DEV') === '1') return true; } catch (e) {}   // v0.30.894 dev-lock-web - unlocked with the lock's password
     if (location.protocol === 'file:') return true;
     const h = location.hostname;
@@ -12816,7 +12817,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.916';
+const GAME_VERSION = 'v0.30.917';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -47212,7 +47213,8 @@ const GAME_SAVE_FIELDS = [
   // Trainee Path, whose final rung grants through the same dexPerm store.
   'dexMilestones','dexPerm','duoTrials',
   'boonDex',   // v0.30.421 - boon codex (lifetime; not wiped by ascension)
-  '_cursedChestOpened','_echoGearAt','_dailyClockHealed'   // v0.30.861 loops
+  '_cursedChestOpened','_echoGearAt','_dailyClockHealed',   // v0.30.861 loops
+  '_steamAchBaseline','_importVerdict','_devTouched'   // v0.30.917 the Steam gate (see _lxSteamTrusted)
 ];
 // v0.25.264 — saveState() is called from ~30 sites: every kill, quest tick,
 // boon equip, skill unlock, level-up, etc. Each call serializes the whole
@@ -47331,8 +47333,19 @@ async function _lxSteamCloudSync() {
 // API names in the Steamworks partner site — the full id list is in STEAM.md).
 // Steam de-dupes unlocks; a local Set avoids redundant IPC. No-op without Steam.
 const _lxSteamAchDone = new Set();
+// v0.30.917 A SAVE STEAM CAN TRUST: not flagged by the signature check, not an unverified import, never touched by the dev
+// console. Anything else plays on, but it never unlocks Steam achievements or pushes stats.
+function _lxSteamTrusted() {
+  try {
+    const v = game && game._saveVerdict;
+    if (v === 'bad' || v === 'unsigned') return false;
+    if (game && (game._importVerdict === 'unverified' || game._devTouched)) return false;
+    return true;
+  } catch (e) { return false; }
+}
 function _lxSteamUnlock(id) {
   if (!id || _lxSteamAchDone.has(id)) return;
+  if (!_lxSteamTrusted()) return;   // v0.30.917
   _lxSteamAchDone.add(id);
   if (!_steamAvailable() || !window.SteamAPI.achievement) return;
   try { Promise.resolve(window.SteamAPI.achievement.unlock(String(id))).catch(() => {}); } catch (e) {}
@@ -47341,7 +47354,9 @@ function _lxSteamUnlock(id) {
 // (covers saves that predate the Steam build / first launch on Steam).
 function _lxSteamSyncAchievements() {
   if (!_steamAvailable() || !window.SteamAPI.achievement) return;
-  try { if (game && game.achievements) for (const id in game.achievements) if (game.achievements[id]) _lxSteamUnlock(id); } catch (e) {}
+  if (!_lxSteamTrusted() || (game && game._saveVerdict === 'legacy')) return;   // v0.30.917 a legacy (ls2) save syncs once it re-signs
+  const _base = new Set((game && Array.isArray(game._steamAchBaseline)) ? game._steamAchBaseline : []);   // v0.30.917 an import's own achievements
+  try { if (game && game.achievements) for (const id in game.achievements) if (game.achievements[id] && !_base.has(id)) _lxSteamUnlock(id); } catch (e) {}
 }
 try { window._lxSteamUnlock = _lxSteamUnlock; window._lxSteamSyncAchievements = _lxSteamSyncAchievements; } catch (e) {}
 // --- Steam Rich Presence + Friends "Join Game" -------------------------------
@@ -47504,6 +47519,7 @@ function _lxSteamInviteFriends() {
 let _lxSteamStatsAt = 0;
 function _lxSteamPushStats() {
   if (!_steamAvailable() || !window.SteamAPI.stats) return;
+  if (!_lxSteamTrusted()) return;   // v0.30.917
   // v0.30.898 launch audit: stored on every save (~1.5 s) - Steam rate-limits StoreStats; once a minute is plenty
   const _now = Date.now(); if (_now - _lxSteamStatsAt < 60000) return; _lxSteamStatsAt = _now;
   const _i32 = (v) => Math.max(0, Math.min(2147483647, Math.floor(+v || 0)));   // setInt takes a 32-bit integer
@@ -50408,9 +50424,16 @@ const _LX_SAVE_MARK_KEY = SAVE_KEY + '_verified';
 const _LX_SIGNED_PLAYER_KEYS = ['cls','job','master','level','exp','expToNext','mojicoins','bankBalance','bankAccrueMs','setshards',
   'skillPoints','skillRankPoints','skillRanks','baseAtk','baseDef','baseAcc','baseCrit','baseSpeed','baseJump','maxHp','maxMp',
   'equipped','inventory','consumables','talents','boons','boonsEquipped','prestige','quests','_pqChainRuns','_pqStagePaid'];
+// v0.30.917 ls3 adds what the Steam gate rests on (achievements, the import baseline and verdict, the dev mark) to the
+// signed set; the ls2 list stays below so a save signed before this still verifies (as 'legacy') until its next save.
 const _LX_SIGNED_GAME_KEYS = ['boonDex','_bossKills','bossDefeated','_bossDefeatedAt','_playMs','kills','dexMilestones','dexPerm','prestige',
   'bossRushBest','_bossRushRewardDay','_chestCooldown'];
+const _LX_SIGNED_GAME_KEYS3 = _LX_SIGNED_GAME_KEYS.concat(['achievements', 'comboRecord', 'duoTrials', '_steamAchBaseline', '_importVerdict', '_devTouched']);   // v0.30.917
 function _lxLocalSaveSigBody(s) {
+  const pick = (o, keys) => { const out = {}; if (!o) return out; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
+  return 'ls3\n' + String(s.v) + '\n' + String(s.t) + '\n' + JSON.stringify(pick(s.player, _LX_SIGNED_PLAYER_KEYS)) + '\n' + JSON.stringify(pick(s.game, _LX_SIGNED_GAME_KEYS3));
+}
+function _lxLocalSaveSigBody2(s) {   // v0.30.917 the ls2 body, kept only to verify saves signed before ls3
   const pick = (o, keys) => { const out = {}; if (!o) return out; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
   return 'ls2\n' + String(s.v) + '\n' + String(s.t) + '\n' + JSON.stringify(pick(s.player, _LX_SIGNED_PLAYER_KEYS)) + '\n' + JSON.stringify(pick(s.game, _LX_SIGNED_GAME_KEYS));
 }
@@ -50420,8 +50443,14 @@ function _lxLocalSaveVerdict(s) {
   try {
     if (!s || typeof s !== 'object') return 'bad';
     if (typeof s.sig !== 'string' || !s.sig) return 'unsigned';
-    return _lxSigEqual(_lxLocalSaveSig(s), s.sig) ? 'ok' : 'bad';
+    if (_lxSigEqual(_lxLocalSaveSig(s), s.sig)) return 'ok';
+    return _lxSigEqual(_lxHmacSaveHex(_lxLocalSaveSigBody2(s)), s.sig) ? 'legacy' : 'bad';   // v0.30.917 signed before ls3: loads, re-signs on its next save
   } catch (e) { return 'bad'; }
+}
+function _lxPickSaveFields(o, keys) {   // v0.30.917
+  const out = {}; if (!o || typeof o !== 'object') return out;
+  for (const k of keys) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k];
+  return out;
 }
 function _lxSaveMarkWrite(s) {
   try {
@@ -50429,6 +50458,8 @@ function _lxSaveMarkWrite(s) {
     localStorage.setItem(_LX_SAVE_MARK_KEY, JSON.stringify({ t: s.t, setshards: p.setshards | 0, mojicoins: Math.floor(p.mojicoins || 0), bankBalance: Math.floor(p.bankBalance || 0) }));
   } catch (e) {}
 }
+const _LX_DEV_PW_SHA = '210f5332291229ecc876d35a904a25c1495a42229d822369af74e8fa37cbda6a';   // v0.30.917
+function _lxDevPwOk(t) { try { return _lxHex(_lxSha256Bytes(_lxUtf8(String(t || '')))) === _LX_DEV_PW_SHA; } catch (e) { return false; } }
 function _lxSaveMarkRead() {
   try { const r = localStorage.getItem(_LX_SAVE_MARK_KEY); return r ? _lxSafeJsonParse(r) : null; } catch (e) { return null; }
 }
@@ -50521,7 +50552,7 @@ function importSave(input) {
         try {
           var _iv = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(inner) : 'unsigned';
           if (_iv === 'bad') _innerNote = '\n\n\u26a0 The save data inside has been EDITED: Setshards, Mojicoins and bank will reset to 0 when it loads.';
-          else if (_iv === 'unsigned' && typeof _lxSaveMarkRead === 'function' && _lxSaveMarkRead()) _innerNote = '\n\nUnsigned (older) save: currencies will be capped at your last verified values when it loads.';
+          else if (_iv === 'unsigned') _innerNote = '\n\nUnsigned save: Setshards, Mojicoins and bank reset to 0 when it loads, and it will not unlock Steam achievements.';   // v0.30.917
         } catch (_) {}
         var _importBody = (_secVerdict === 'bad')
           ? '⚠ This secure save FAILED its integrity check — it was edited or corrupted after it was exported. Importing it may be a modified/cheated save or could break your game. Continue only if you trust this file.'
@@ -50532,6 +50563,19 @@ function importSave(input) {
           : Promise.resolve(window.confirm(_importBody + '\n\nOverwrite current progress with this save?'));
         Promise.resolve(ask).then(function (go) {
           if (!go) { input.value = ''; return; }
+          // v0.30.917 CHEAT GUARD. A hand-edited file used to unlock every Steam achievement ~1.5 s after the reload (boot pushes
+          // every stored achievement). An imported save's own achievements are recorded as a baseline and never pushed; a
+          // save that did not verify loses its currencies and is marked 'unverified' (signed, so it cannot be dropped later).
+          try {
+            var _okImp = (_secVerdict !== 'bad') && (_iv === 'ok' || _iv === 'legacy');
+            inner.game = (inner.game && typeof inner.game === 'object') ? inner.game : {};
+            var _ach = (inner.game.achievements && typeof inner.game.achievements === 'object') ? inner.game.achievements : {};
+            inner.game._steamAchBaseline = Object.keys(_ach).filter(function (k) { return !!_ach[k]; });
+            inner.game._importVerdict = _okImp ? 'ok' : 'unverified';
+            if (!_okImp) { inner.player.mojicoins = 0; inner.player.setshards = 0; inner.player.bankBalance = 0; }
+            else if (typeof _lxLocalSaveSig === 'function') inner.sig = _lxLocalSaveSig(inner);   // it verified: re-sign with the baseline in
+            save = JSON.stringify(inner);
+          } catch (e) {}
           localStorage.setItem(SAVE_KEY, save);
           try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
@@ -50787,7 +50831,7 @@ function loadState() {
     // ABOVE _sanitizePlayerSaveNumerics (see the fix note there); the block
     // that used to live here was relocated so the sanitizer can't zero the
     // wallet before the migration copies it across.
-    Object.assign(player, s.player);
+    Object.assign(player, _lxPickSaveFields(s.player, PLAYER_SAVE_FIELDS));   // v0.30.917 only what a save writes
     // v0.29.856 — REPAIR A CORRUPTED STAT BLOCK ON LOAD. Saves written
     // before the applyClass ledger fix can carry base stats that Reset Stats
     // drove below the class baseline (reported: ATK -12074, Speed -0.3, MP 0).
@@ -50817,10 +50861,18 @@ function loadState() {
         }
       }
     } catch (e) {}
-    Object.assign(game,   s.game || {});
+    Object.assign(game,   _lxPickSaveFields(s.game || {}, GAME_SAVE_FIELDS));   // v0.30.917
     // v0.30.414 — LIVE SAVE INTEGRITY verdict (see _lxLocalSaveVerdict).
     try {
       game._saveVerdict = _sigVerdict;
+      // v0.30.917 a save that did not verify as ls3 re-signs cleanly on its next save, and the boot after that would push
+      // whatever achievements it carried. Count them as already earned: an ls2 signature never covered them.
+      if (_sigVerdict !== 'ok') {
+        const _a = (game.achievements && typeof game.achievements === 'object') ? game.achievements : {};
+        const _b = new Set(Array.isArray(game._steamAchBaseline) ? game._steamAchBaseline : []);
+        for (const k in _a) if (_a[k]) _b.add(k);
+        game._steamAchBaseline = [..._b];
+      }
       if (_sigVerdict === 'bad') {
         player.setshards = 0; player.mojicoins = 0; player.bankBalance = 0;
         setTimeout(() => { if (typeof showToast === 'function') showToast('⚠ Save integrity check FAILED — the save was edited or corrupted. Progress kept; Setshards, Mojicoins and bank reset.', 'danger'); }, 1800);
@@ -114142,7 +114194,7 @@ function devTeleport(mapId) {
   closeAllModals();
 }
 
-// v0.28.x — "mojisuccess gate": a subtle lock icon at the top-right unlocks the dev
+// v0.28.x — "the dev passphrase gate": a subtle lock icon at the top-right unlocks the dev
 // tools when the password is entered (complements backtick + dev-key). It sets the
 // same localStorage LX_DEV=1 flag that openDevConsole / LX_DEV_TOOLS check.
 (function _lxDevLockIcon() {
@@ -114165,7 +114217,7 @@ function devTeleport(mapId) {
       if (_unlocked()) { if (typeof openDevConsole === 'function') openDevConsole(); return; }
       var pw = null;
       try { pw = prompt('🔒 Enter dev password:'); } catch (e) {}
-      if (pw === 'mojisuccess') {
+      if (_lxDevPwOk(pw)) {   // v0.30.917 compared as a SHA-256 digest (the word itself was readable in view-source)
         try { localStorage.setItem('LX_DEV', '1'); document.body.classList.add('lx-dev'); } catch (e) {}
         render();
         if (typeof showToast === 'function') showToast('🔓 Dev tools unlocked', 'epic');
@@ -114237,6 +114289,7 @@ function _lxEndgameProfile(cls) {
   return Object.assign({ cls: cls || 'warrior', level: _LX_ENDGAME_LEVEL, sp: (_LX_ENDGAME_LEVEL - 1) * 3 }, p);
 }
 function openDevConsole() {
+  try { if (typeof game !== 'undefined' && game) game._devTouched = true; } catch (e) {}   // v0.30.917 a dev-touched save never talks to Steam
   // v0.26.1022 — hard gate at the single chokepoint. The mobile dev button and
   // the version-tag long-press reached this ungated (one tap = MAX-STATS /
   // teleport / unlock console for any player). Require the dev flag the
@@ -114354,7 +114407,7 @@ function openDevConsole() {
   }
 })();
 
-// v0.28.1 — Hidden dev unlock. Typing the passphrase "mojisuccess" in
+// v0.28.1 — Hidden dev unlock. Typing the passphrase "the dev passphrase" in
 // succession (anywhere except a text field) UNLOCKS every (DEV PANEL) key —
 // exactly the same effect as the backtick + dev-key prompt (sets localStorage
 // 'LX_DEV'='1', which every LX_DEV_TOOLS-gated handler reads) — and UNHIDES the
@@ -114364,8 +114417,8 @@ function openDevConsole() {
 // (Shift, arrows, …) don't break a run in progress. Re-lock still via ~.
 (function _lxDevSeqUnlock() {
   if (!_lxDevSurface()) return;   // v0.30.797 - no passphrase unlock on a public deploy or in the Steam build
-  const SEQ = 'mojisuccess';
-  let idx = 0, last = 0;
+  const SEQ_LEN = 11;   // v0.30.917 the passphrase is checked as a digest of the last 11 letters
+  let buf = '', last = 0;
   const isUnlocked = () => { try { return localStorage.getItem('LX_DEV') === '1'; } catch (e) { return false; } };
   function revealDevButton() {
     try {
@@ -114395,14 +114448,11 @@ function openDevConsole() {
       const key = e.key || '';
       if (key.length !== 1) return;   // Shift / Arrow / Enter / etc. — ignore, don't break the run
       const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      if (now - last > 2000) idx = 0;   // too slow — restart
+      if (now - last > 2000) buf = '';   // too slow — restart
       last = now;
       const ch = key.toLowerCase();
-      if (ch === SEQ[idx]) {
-        if (++idx >= SEQ.length) { idx = 0; unlock(); }
-      } else {
-        idx = (ch === SEQ[0]) ? 1 : 0;   // wrong letter — restart, letting it seed a fresh match
-      }
+      buf = (buf + ch).slice(-SEQ_LEN);
+      if (buf.length === SEQ_LEN && _lxDevPwOk(buf)) { buf = ''; unlock(); }
     } catch (_) {}
   }, true);
 })();

@@ -68,10 +68,16 @@ async function deliverLobbyJoin(lobbyId, win) {
 // (invoke/handle); the input snapshot is a fast synchronous read polled per frame.
 ipcMain.handle('steam:cloud-read',   (_e, name) => { try { return steam.cloud.read(name); } catch (e) { return null; } });
 ipcMain.handle('steam:cloud-write',  (_e, name, content) => { try { return steam.cloud.write(name, content); } catch (e) { return false; } });
-ipcMain.handle('steam:ach-unlock',   (_e, name) => { try { return steam.achievement.unlock(name); } catch (e) { return false; } });
+// v0.30.917 the renderer may only unlock an achievement the game ships and set the four stats it reports (a console or a
+// tampered page could otherwise unlock any name). The list is read from achievements_manifest.json beside this file;
+// if it is missing the old behaviour stands, so a packaging slip cannot silence every achievement.
+let _lxAchIds = null;
+try { _lxAchIds = new Set(JSON.parse(fs.readFileSync(path.join(__dirname, 'achievements_manifest.json'), 'utf8')).achievements.map((a) => a.apiname)); } catch (e) { console.warn('[steam] no achievement manifest - unlocks are not allowlisted'); }
+const _LX_STAT_KEYS = new Set(['lifetime_kills', 'highest_level', 'lifetime_coins', 'bosses_defeated']);
+ipcMain.handle('steam:ach-unlock',   (_e, name) => { try { if (_lxAchIds && !_lxAchIds.has(String(name))) return false; return steam.achievement.unlock(name); } catch (e) { return false; } });
 ipcMain.handle('steam:presence-set', (_e, p) => { try { return steam.presence.set(p); } catch (e) { return false; } });
 ipcMain.handle('steam:overlay-open', (_e, dialog) => { try { return steam.overlay.open(dialog); } catch (e) { return false; } });
-ipcMain.handle('steam:stats-set',    (_e, obj) => { try { return steam.stats.set(obj); } catch (e) { return false; } });
+ipcMain.handle('steam:stats-set',    (_e, obj) => { try { const o = {}; for (const k in (obj || {})) if (_LX_STAT_KEYS.has(k)) o[k] = obj[k]; return steam.stats.set(o); } catch (e) { return false; } });
 ipcMain.on('steam:input-snapshot',   (e) => { try { e.returnValue = steam.input.snapshot(); } catch (err) { e.returnValue = null; } });
 // SYNCHRONOUS cloud write — the beforeunload final mirror only. The async
 // invoke path can be torn down with the renderer mid-flight; sendSync blocks
