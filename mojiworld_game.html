@@ -12817,7 +12817,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.918';
+const GAME_VERSION = 'v0.30.919';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -59024,6 +59024,7 @@ function toggleKeybindModal() {
   if (!player.keybinds) player.keybinds = { ...KEY_TO_SLOT_DEFAULT };
   _kbPickup = null; _kbHover = null;
   renderKeybindKeyboard();
+  try { if (document.getElementById('lx-pause') && typeof _lxPauseClose === 'function') _lxPauseClose(); } catch (e) {}   // v0.30.919 K opened under the pause card
   modal.style.display = 'flex';
   game.paused = true;
 }
@@ -65133,6 +65134,7 @@ const LX_ROLL = { ms: 340, ease: 0.8, pow: 2.3, arc: 17, tuck: 0.09 };
 //         which is what a person does when they under-rotate.
 const LX_FLIP = { ms: 350, vx: 7.6, drag: 0.992, tuck: 0.14, settle: 90 };
 function quickDash(dir) {
+  if (_lxPlayerHeld()) return;   // v0.30.919
   if (player._eclipseHold) return;   // v0.30.34 - held under the eclipse
   try { if (typeof audio !== 'undefined' && audio && audio.play) audio.play('dash'); } catch (e) {}   // v0.30.x (audit A5) - the whoosh
   // v0.29.605 — a fresh dash always begins an unchained sequence.
@@ -65384,6 +65386,7 @@ function _lxBlockFx() {
   spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, key, { size, life: 27, frameGap: 3, follow: player, flipX: (player.facing || 1) < 0, scaleStartX: 1, scaleEndX: 1, scaleStartY: 1, scaleEndY: 1, opacity: 0.95 });
 }
 function startBlock() {
+  if (_lxPlayerHeld()) return;   // v0.30.919
   const P = getBlockProfile();
   player.blockTimer = P.block;
   player.parryWindow = P.parry;
@@ -73102,6 +73105,26 @@ function _lxAirJumpCap() {
 // freeze and the shackle QTE, and both the buff tick and the cooldown tick sat ~1,800 lines
 // later in the free tail - so every CC'd frame froze Holy Shield's +9999 DEF window and
 // every skill cooldown. The more you were hit, the longer your shield lasted.
+// v0.30.919 a hero who cannot act: frozen, stunned, shackled, bubbled or down (god mode aside). The keydown gates for
+// the door, the dash and the block only ever asked about hit-stun.
+function _lxPlayerHeld() {
+  try {
+    if (!player || player._god) return false;
+    return (player.frozenTimer | 0) > 0 || (player.stunTimer | 0) > 0 || (player._cancerBubble | 0) > 0 || !!player._downed
+      || (typeof _QTE !== 'undefined' && !!_QTE && !!_QTE.active);
+  } catch (e) { return false; }
+}
+// v0.30.919 the block / parry clocks for the CC early-returns (the normal path ticks them further down updatePlayer).
+// They stopped under a stun, so a block pressed just before one held its parry window open until the stun ended.
+function _lxTickBlockTimers(dt) {
+  if (player.blockCD > 0) player.blockCD -= dt;
+  if (player.parryWindow > 0) player.parryWindow -= dt;
+  if (player._ohkoParry > 0) player._ohkoParry -= dt;
+  if (player.blockTimer > 0) player.blockTimer -= dt;
+}
+// v0.30.919 closing a panel ends a shackle only when it can no longer tick (dead or down). It used to end it always, and
+// _qteEnd clears the stun: Esc, U, J or pad Start broke every shackle for free.
+function _lxQteOrphaned() { try { return !player || (player.hp | 0) <= 0 || !!player._downed; } catch (e) { return true; } }
 function _lxTickPlayerTimers(dt) {
   if (!player) return;
   if (player._lxTimersTickedAt === game.time) return;   // once per frame, whichever path reaches it first
@@ -73530,6 +73553,7 @@ function updatePlayer(dt) {
   const stunned = player.hitStun > 0;
   if (stunned) {
     _lxTickPlayerTimers(dt);   // v0.30.x — CC does not stop the clock
+    _lxTickBlockTimers(dt);   // v0.30.919 nor the block / parry clocks
     player.hitStun -= dt;
     player.state = 'hit';
     // Let physics carry knockback; apply light friction only when grounded
@@ -73606,6 +73630,7 @@ function updatePlayer(dt) {
   // apply chance + duration upstream.
   if (((player.frozenTimer | 0) > 0 || ((player.stunTimer | 0) > 0 && !(typeof _QTE !== 'undefined' && _QTE && _QTE.active))) && !player._god) {   // v0.30.368 — stun locks too
     _lxTickPlayerTimers(dt);   // v0.30.x — CC does not stop the clock
+    _lxTickBlockTimers(dt);   // v0.30.919 nor the block / parry clocks
     player.state = 'idle';
     if (player.onGround) player.vx *= 0.8;
     _playerGravityStep();
@@ -73630,6 +73655,7 @@ function updatePlayer(dt) {
   // QTE frame (timer + arrow-key edge detection + DOM card) ticks here.
   if (typeof _QTE !== 'undefined' && _QTE.active) {
     _lxTickPlayerTimers(dt);   // v0.30.x — CC does not stop the clock
+    _lxTickBlockTimers(dt);   // v0.30.919 nor the block / parry clocks
     if (player._god) { _qteEnd(false); }
     else {
       _qteFrame(dt);
@@ -105795,6 +105821,7 @@ function _defaultPortalY(x) {
   return gs[0].y;
 }
 function tryPortal() {
+  if (_lxPlayerHeld()) return false;   // v0.30.919 Up is also a shackle key: a held hero used to walk out mid-sequence
   if (window._prologueActive) return false;   // v0.30.834 - the memory has no doors: Up is a movement key there, and the hero stands ON the Void portal
   for (const po of game.portals) {
     // v0.25.470 — portals can carry an explicit `y` for tall maps (vertical
@@ -108635,7 +108662,7 @@ function closeDialog() {
   } catch (e) {}
   // v0.26.x audit -- a shackle QTE landing on the modal-open frame must not
   // survive the close as an orphaned card / stuck stun.
-  if (typeof _QTE !== 'undefined' && _QTE.active && typeof _qteEnd === 'function') { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); }
+  if (typeof _QTE !== 'undefined' && _QTE.active && typeof _qteEnd === 'function' && _lxQteOrphaned()) { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); }   // v0.30.919 only when it can no longer tick
   // v0.26.x — Brok/Furnax + Amnesiac category menus: always reopen at top level.
   // v0.26.x audit FIX — also clear the Amnesiac's narrative stage + saga
   // view. Without this, dismissing mid-script via ESC / walk-away / click-
@@ -116883,7 +116910,7 @@ function _lxPauseAct(a) {
   }
 }
 function closeAllModals() {
-  if (typeof _QTE !== 'undefined' && _QTE.active && typeof _qteEnd === 'function') { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); }   // v0.26.x audit -- no orphaned shackle
+  if (typeof _QTE !== 'undefined' && _QTE.active && typeof _qteEnd === 'function' && _lxQteOrphaned()) { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); }   // v0.26.x audit -- no orphaned shackle
   // v0.25.240 (B2) — null-guard the forced-modal lookups so a missing or
   // late-injected element doesn't throw and break Esc/X across every
   // overlay. Same pattern is now applied to the dialog close.
@@ -154474,7 +154501,12 @@ function _lxDrawFrame(time) {
 // v0.30.x pause-clock — per-monster game.time deadlines shifted while a solo game is paused (see the pause block in loop).
 const _LX_PAUSE_MON_FIELDS = ['_piscesDreamUntil', '_geminiLyingUntil', '_libraImbalanceUntil', '_hexUntil', '_doomUntil',
   '_sovereignOhkoTick', '_sovCollapseUntil', '_sovSpentUntil', '_sovExposedUntil', '_sovRegaliaEnds', '_sovRegaliaAt',
-  '_sovereignHomingAt', '_sovereignDrainAt', '_sovShardShotAt', '_astralJudgeNextAt'];
+  '_sovereignHomingAt', '_sovereignDrainAt', '_sovShardShotAt', '_astralJudgeNextAt',
+  // v0.30.919 the 29 the list missed: a menu waited out Cancer's closed shell and queued every due attack for the unpause
+  '_heavyReadyAt', '_legosaurusQuakeAt', '_octoHeavyAt', '_stormAt', '_summonAt', '_headMissileAt', '_bossAtkUntil', '_geminiLyingAt',
+  '_starLineAt', '_gemDiveAt', '_cancerShellAt', '_scuttleAt', '_bubbleAt', '_leoMarkAt', '_maneTickAt', '_virgoMarkAt', '_burrowAt',
+  '_sagArcAt', '_huntMarkAt', '_sagKickAt', '_sagKickToast', '_capQuakeAt', '_capPressureTickAt', '_capPressureToastAt', '_aquaFloodAt',
+  '_lightningAt', '_tidalAt', '_piscesDreamAt', '_dreamShotAt'];
 function loop(time) {
   // v0.26.946 — boot gate: while the opaque loading overlay is up, skip the
   // sim+render entirely (it was stealing main-thread time from the sprite
