@@ -12778,7 +12778,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.858';
+const GAME_VERSION = 'v0.30.859';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -15524,6 +15524,7 @@ const LX_FX = (() => {
     // then the band that marks the column he is about to crush.
     gravitos_slamring:  'gravitos_slamring.webp',  // slam wind-up gravity well
     gravitos_voidrift:  'gravitos_voidrift.webp',  // v0.30.x grav-tp — the teleport rift (static fallback for its loop)
+    gravitos_riftring:  'gravitos_riftring.webp',  // v0.30.x grav-tp — the translucent ring framing it (static fallback)
     gravitos_slamzone:  'gravitos_slamzone.webp',  // slam strike-column floor band
     gravitos_laserring: 'gravitos_laserring.webp', // v0.29.572 — Laser Sweep charge ring
     gravitos_tendril:   'gravitos_tendril.webp',   // crushTendrils descending tendril
@@ -15700,6 +15701,7 @@ const FX_ANIM_FRAMES = Object.create(null);
 const _FX_ANIM_KEYS = new Set([
   'deadeye_hit', 'deadeye_execute',   // v0.30.x — Deadeye line impact / Execute Round impact (fx/anim/*, ludo.ai via scripts/gen_deadeye_art.mjs)
   'grav_impact',   // v0.30.x — the Gravitos meteor landing (fx/anim/grav_impact_0..8, ludo.ai via scripts/gen_grav_impact_fx.mjs)
+  'gravitos_riftring',   // v0.30.x grav-tp — the translucent energy ring around the rift and folding in on him (fx/anim/gravitos_riftring_0..8, ludo.ai via scripts/gen_gravitos_riftring.mjs)
   'gravitos_voidrift',   // v0.30.x grav-tp — the rift Gravitos opens before he teleports (fx/anim/gravitos_voidrift_0..8, ludo.ai via scripts/gen_gravitos_voidrift.mjs)
   'singularity',   // v0.30.x — the Singularity's accretion disc loop (fx/anim/singularity_0..8, ludo.ai via scripts/gen_singularity_disc.mjs); drawn by _lxGravBackdropDraw
   'block_warrior', 'block_rogue', 'block_mage', 'block_archer',   // v0.30.398 — the A-press stance per class
@@ -123170,7 +123172,7 @@ function _lxPrewarmSingularityDisc(mapId) {
       leadsIn = MAPS[mapId].portals.some((po) => po && po.dest === 'gravitosArena');
     }
     if (!leadsIn) return false;
-    if (typeof _fxAnimFrames === 'function') { _fxAnimFrames('singularity'); _fxAnimFrames('gravitos_voidrift'); }   // v0.30.x grav-tp — the teleport rift too
+    if (typeof _fxAnimFrames === 'function') { _fxAnimFrames('singularity'); _fxAnimFrames('gravitos_voidrift'); _fxAnimFrames('gravitos_riftring'); }   // v0.30.x grav-tp — the teleport rift too
     _lxGfDiscArt();   // creates + requests the static fallback too
     return true;
   } catch (e) { return false; }
@@ -136748,6 +136750,23 @@ function _lxGravRiftImg() {
   const st = (typeof LX_FX !== 'undefined') ? LX_FX.gravitos_voidrift : null;
   return (st && st.complete && st.naturalWidth > 0) ? st : null;
 }
+// v0.30.x grav-tp — the RING (per user: "The violet ring is too simple, generate something more aesthetic, make it
+// transluscent"): the generated energy halo, drawn additively at partial alpha so the scene shows through it. Before the
+// art decodes, a faint thin stroke stands in.
+function _lxGravRingImg() {
+  const arr = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames('gravitos_riftring') : null;
+  const f = (arr && typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, 80, 640) : null;
+  if (f) return f;
+  const st = (typeof LX_FX !== 'undefined') ? LX_FX.gravitos_riftring : null;
+  return (st && st.complete && st.naturalWidth > 0) ? st : null;
+}
+function _lxGravRingAt(img, x, y, rx, ry, alpha) {
+  if (rx < 3 || ry < 3 || alpha <= 0.01) return;
+  ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.min(1, alpha);
+  if (img) ctx.drawImage(img, Math.round(x - rx), Math.round(y - ry), Math.round(rx * 2), Math.round(ry * 2));
+  else { ctx.globalAlpha = Math.min(1, alpha * 0.5); ctx.strokeStyle = '#b06cff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y, rx * 0.82, ry * 0.82, 0, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.globalCompositeOperation = 'source-over';
+}
 function _lxGravRiftAt(img, sx, y, size, alpha, seam, add) {
   if (size < 4 || alpha <= 0.01) return;
   ctx.globalAlpha = Math.min(1, alpha);
@@ -136786,13 +136805,13 @@ function _lxGravRiftDraw(front) {
         ctx.globalCompositeOperation = 'source-over';
         _lxGravRiftAt(img, cx, cy, m.h * (1.3 + 0.7 * p), 0.45 + 0.5 * p, 0);
       } else {
-        // the rings, folding inward, faster as p -> 1
-        ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+        // the rings, folding inward, faster as p -> 1 - the generated halo, translucent (was a stroked violet oval)
+        const ring = _lxGravRingImg();
         const T = 560 - 360 * p;   // pulse period, ms: 560 -> 200
         for (let k = 0; k < 3; k++) {
           const fr = ((el + k * T / 3) % T) / T;   // 0 -> 1 across a pulse
-          ctx.globalAlpha = (0.35 + 0.6 * p) * fr; ctx.strokeStyle = k === 1 ? '#f0b0ff' : '#b06cff'; ctx.lineWidth = 2 + 6 * fr;
-          ctx.beginPath(); ctx.ellipse(cx, cy, R * (1.45 - fr), R * (1.45 - fr) * 1.1, 0, 0, Math.PI * 2); ctx.stroke();
+          const rr = R * (1.5 - 1.05 * fr);
+          _lxGravRingAt(ring, cx, cy, rr, rr * 1.1, (0.18 + 0.4 * p) * Math.sin(Math.PI * Math.min(1, fr * 1.15)));
         }
         // the tear, glowing over his body (additive: the void adds nothing, the violet edges and the seam light him up)
         _lxGravRiftAt(img, cx, cy, m.h * (0.9 + 0.5 * p), (0.25 + 0.55 * p) * (0.8 + 0.2 * Math.sin(el / 60)), p > 0.55 ? (p - 0.55) / 0.45 : 0, true);
@@ -136806,10 +136825,8 @@ function _lxGravRiftDraw(front) {
           ctx.fillStyle = g2; ctx.fillRect(dx - ds * 0.6, dy - ds * 0.6, ds * 1.2, ds * 1.2);
           ctx.globalCompositeOperation = 'source-over';
           _lxGravRiftAt(img, dx, dy, ds, 0.35 + 0.65 * p, p > 0.5 ? (p - 0.5) / 0.5 : 0);
-          ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.3 + 0.5 * p; ctx.strokeStyle = '#d18cff'; ctx.lineWidth = 2 + 2 * p;
-          const rr = ds * 0.55 * (1.15 - 0.15 * Math.sin(el / 90));
-          ctx.beginPath(); ctx.ellipse(dx, dy, rr * 0.55, rr, 0, 0, Math.PI * 2); ctx.stroke();
-          ctx.globalCompositeOperation = 'source-over';
+          const rr = ds * 0.58 * (1.12 - 0.08 * Math.sin(el / 110));   // the halo framing it, breathing (was a stroked oval)
+          _lxGravRingAt(_lxGravRingImg(), dx, dy, rr * 0.62, rr, 0.3 + 0.35 * p);
         }
       }
       ctx.restore();
@@ -139179,7 +139196,7 @@ const _LX_MOB_TYPE_ART = {
   legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },   // his 6 s arena stomp is a mob_quake of his own
   // v0.30.790 grav-smooth — the five rings his patterns cast: each was decoded and pinned on the frame of its
   // first cast (laser 22 ms, soul 36 ms, slam 22 ms, measured).
-  gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield', 'gravitos_voidrift'], fx: ['gravitos_singularity_zone', 'gravitos_voidrift'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
+  gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield', 'gravitos_voidrift', 'gravitos_riftring'], fx: ['gravitos_singularity_zone', 'gravitos_voidrift', 'gravitos_riftring'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
 };
 const _LX_MOB_FX_SEEN = new Set();
 function _lxPrewarmMobFx(type, boss) {
