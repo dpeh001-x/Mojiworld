@@ -52,18 +52,9 @@ const out = await page.evaluate(async () => {
   const shown = txt.textContent || '';
   ok('NO literal asterisks are printed on screen', shown.indexOf('*') === -1,
      shown.slice(0, 70).replace(/\n/g, ' | '));
-  const dirs = txt.querySelectorAll('.sb-dir');
-  ok('the stage direction is its own element', dirs.length >= 1, `${dirs.length} found`);
-  if (dirs.length) {
-    ok('...and it kept its words', /unclenches/.test(dirs[0].textContent || ''), (dirs[0].textContent || '').slice(0, 56));
-    ok('...and it is set apart from the speech (italic)', cs(dirs[0]).fontStyle === 'italic', cs(dirs[0]).fontStyle);
-    ok('...and lighter than the speech',
-       parseInt(cs(dirs[0]).fontWeight, 10) < parseInt(cs(txt).fontWeight, 10),
-       `direction ${cs(dirs[0]).fontWeight} vs speech ${cs(txt).fontWeight}`);
-    ok('...and smaller than the speech',
-       parseFloat(cs(dirs[0]).fontSize) < parseFloat(cs(txt).fontSize),
-       `${cs(dirs[0]).fontSize} vs ${cs(txt).fontSize}`);
-  }
+  // v0.30.904 - Gravitos speaks for himself (per user: "always from gravitos voice itself"); the direction styling
+  // below is read off a beat whose speaker is not a boss
+  ok('Gravitos has no narrator direction - he says it himself', txt.querySelectorAll('.sb-dir').length === 0, `${txt.querySelectorAll('.sb-dir').length} found`);
 
   // ---- typography ---------------------------------------------------------
   const fam = cs(txt).fontFamily || '';
@@ -101,6 +92,24 @@ const out = await page.evaluate(async () => {
   ok('GUGUMA: the bird is never actually named (no reveal)', !/guguma/i.test(all), 'name must not appear');
   ok('the original ascendant beats both survive',
      /take my hand instead of my life/i.test(all) && /THE WEIGHT DECIDES/.test(all));
+
+  // ---- a stage direction on a non-boss beat -----------------------------
+  try { if (player && player._storyBeatsSeen) player._storyBeatsSeen = {}; } catch (e) {}
+  show('first_zodiac_kill');
+  await wait(200);
+  const dirs = txt.querySelectorAll('.sb-dir');
+  ok('the stage direction is its own element', dirs.length >= 1, `${dirs.length} found`);
+  if (dirs.length) {
+    ok('...and it kept its words', /looks up sharply/.test(dirs[0].textContent || ''), (dirs[0].textContent || '').slice(0, 56));
+    ok('...and it is set apart from the speech (italic)', cs(dirs[0]).fontStyle === 'italic', cs(dirs[0]).fontStyle);
+    ok('...and lighter than the speech',
+       parseInt(cs(dirs[0]).fontWeight, 10) < parseInt(cs(txt).fontWeight, 10),
+       `direction ${cs(dirs[0]).fontWeight} vs speech ${cs(txt).fontWeight}`);
+    ok('...and smaller than the speech',
+       parseFloat(cs(dirs[0]).fontSize) < parseFloat(cs(txt).fontSize),
+       `${cs(dirs[0]).fontSize} vs ${cs(txt).fontSize}`);
+  }
+
 
   // The parser must not corrupt a beat that has no directions at all.
   try { if (player && player._storyBeatsSeen) player._storyBeatsSeen = {}; } catch (e) {}

@@ -293,7 +293,7 @@ const SWAP = await page.evaluate(async () => {
   }
   if (dlgEl.style.display !== 'block') return { err: 'could not keep a dialog open to measure' };
   const before = { dialog: box('#dialog'), header: box('#dialog .dialog-header'), tabs: box('#dialog-tabs') };
-  const b = [...document.querySelectorAll('#dialog-options button')].find((x) => x.textContent.indexOf('thing at the top') >= 0);
+  const b = [...document.querySelectorAll('#dialog-options button')].find((x) => x.textContent.indexOf('thing at the bottom') >= 0);
   if (!b) return { err: 'no rumour option' };
   b.click();
   await new Promise((r) => setTimeout(r, 900));
@@ -319,7 +319,7 @@ const RUM = await page.evaluate(async () => {
   const npc = { x: 0, y: 0, name: 'Bravo', role: 'expedition', color: '#ffb0d8' };
   game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
   openNPC(npc);
-  const b = [...document.querySelectorAll('#dialog-options button')].find((x) => x.textContent.indexOf('the thing at the top') >= 0);
+  const b = [...document.querySelectorAll('#dialog-options button')].find((x) => x.textContent.indexOf('the thing at the bottom') >= 0);
   if (!b) return { err: 'no rumour option' };
   b.click();
   await new Promise((r) => setTimeout(r, 250));

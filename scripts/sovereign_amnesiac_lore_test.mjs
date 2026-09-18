@@ -90,7 +90,7 @@ const r = await page.evaluate(async () => {
   try { closeDialog(); } catch (e) {}
   await wait(120);
 
-  const bravo = await talk('expedition', /thing at the top/i);
+  const bravo = await talk('expedition', /thing at the bottom/i);
   ok('Bravo: rumour option reachable in town', !bravo.err, bravo.err);
   ok('Bravo: the rumour paints', (bravo.said || '').length > 40 && bravo.said !== bravo.intro, (bravo.said || '').slice(0, 50));
   try { closeDialog(); } catch (e) {}
