@@ -12797,7 +12797,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.884';
+const GAME_VERSION = 'v0.30.885';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -56860,7 +56860,7 @@ function _injectGiverQuests(npc, opts) {
     built.push({ t: '❗ Accept: ' + q.name, cb: () => {
       if (typeof acceptQuest === 'function') acceptQuest(id);
       closeDialog();
-      if (typeof showToast === 'function') showToast('📜 Quest accepted: ' + q.name, 'epic');
+      // v0.30.x first-hour (audit F9) — acceptQuest already says "Quest started"; a second "Quest accepted" toast doubled every accept
     } });
   }
   for (const { id, q, a } of inProgress) {
@@ -58095,6 +58095,7 @@ function _completeQuest(id) {
       });
     }, 1600);
   }
+  if (typeof _lxAct1Next === 'function' && typeof _LX_ACT1_CHAIN !== 'undefined' && _LX_ACT1_CHAIN.indexOf(id) >= 0) setTimeout(() => _lxAct1Next(id), 1500);   // v0.30.x first-hour (audit F9)
   // v0.29.648 — quest milestones (Quest Master at 175) resolve here. Nothing
   // else in the achievement system observes a turn-in.
   try { if (typeof checkAchievements === 'function') checkAchievements(); } catch (e) {}
@@ -58273,6 +58274,25 @@ function _lxPrereqMet(q) {
   const done = (typeof player !== 'undefined' && player.quests && player.quests.completed) || null;
   if (!done) return false;
   return [].concat(q.prereq).every((pr) => !!done[pr]);
+}
+// v0.30.x first-hour (audit F9) — ACT I ROLLS ON. All six chapters are hand-ins, so every turn-in sent the player walking
+// to the next chapter's giver (Old Arlen, Auntie Innie, Master Shen: four maps from town by chapter V) only to be handed
+// the next page. Turning a chapter in now starts the next one when the player's level allows it - the hand-in still goes
+// to that chapter's own giver, which the toast names - and otherwise says when it opens and whom to see.
+const _LX_ACT1_CHAIN = ['q_act1_waking', 'q_act1_sleepers', 'q_act1_quiet', 'q_act1_recipe', 'q_act1_name', 'q_act1_firstword'];
+function _lxAct1Next(doneId) {
+  try {
+    const i = _LX_ACT1_CHAIN.indexOf(doneId);
+    if (i < 0 || i >= _LX_ACT1_CHAIN.length - 1) return;
+    const nid = _LX_ACT1_CHAIN[i + 1], q = (typeof QUESTS === 'object') ? QUESTS[nid] : null;
+    if (!q || !player.quests || player.quests.completed[nid] || player.quests.active[nid]) return;
+    if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
+    if ((player.level || 1) < (q.levelReq || 1)) {
+      if (typeof showToast === 'function') showToast('📜 Next: ' + q.name + ' opens at Lv ' + q.levelReq + (q.giver ? ' — then see ' + q.giver : ''), 'story');
+      return;
+    }
+    if (acceptQuest(nid) && q.giver && typeof showToast === 'function') setTimeout(() => showToast('📜 ' + q.name + ' — hand it in to ' + q.giver, 'story'), 900);
+  } catch (e) {}
 }
 function acceptQuest(id) {
   _ensureQuests();
