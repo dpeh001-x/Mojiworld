@@ -12778,7 +12778,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.868';
+const GAME_VERSION = 'v0.30.869';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -14794,7 +14794,7 @@ function _projAnimFrame(skill, offsetMs) {
   // loop at once (the Soul Ward's up-to-5 orbs) can stagger them instead of
   // pulsing in lockstep. Omitted by every other caller, which keeps the shared
   // global clock they already had.
-  return (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _PROJ_ANIM_FRAME_MS, 320, offsetMs) : null;   // base 320 logical: biggest blit is ~250 (size 2.8 × a ~90 px hitbox)
+  return (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _PROJ_ANIM_FRAME_MS, skill === 'meteor' ? 360 : 320, offsetMs)   /* v0.30.869 fireball2x — the fireball draws up to 340 px */ : null;   // base 320 logical: biggest blit is ~250 (size 2.8 × a ~90 px hitbox)
 }
 // =========================================================================
 // LX_PLAYER_PROJ — player projectile-skill sprites (v0.25.208)
@@ -22288,7 +22288,7 @@ const SKILLS = {
   blink:        { name:'Dimensional Warp', icon:'🌀', cls:'mage', slot:'e', mp:15, cd:2400, desc:'Phase 225px across a dimension (180px when warping skyward). Deals 2.1× ATK to every monster in the path traversed (+100×50 px AoE around it). Hold ↑ while casting (or double-tap ↑) to warp skyward.' },
   arcaneBurst:  { name:'Arcane Burst',   icon:'💥', cls:'mage', slot:'w', mp:25, cd:8000, desc:'Massive 320-px AoE explosion centred on you (3× ATK, heavy knockback).' },
   // Archmage
-  meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:8000, desc:'Call a meteor down 80px ahead of you: it strikes every foe in its 360px-wide path for 4× ATK + 80 (less at the edges).' },
+  meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:8000, desc:'Call a meteor down 80px ahead of you: it strikes every foe it falls through for 4× ATK + 80, then bursts about 140px wide where it lands.' },
   elemental:    { name:'Elemental Convergence', icon:'🌟', cls:'mage', job:'archmage', slot:'c', mp:55, cd:13000, desc:'Ultimate: lightning chains through up to 8 enemies (2.5× ATK + 80, −8% per hop), stunning each for 1.2s with a 75% chance to burn (0.737× ATK/tick for 3s).' },
   // Warlock
   soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:20000, desc:'Drain nearby foes (0.25× ATK) into MP and HP, raise 1 undead thrall (skeleton or zombie, 16s, hits for 75% of your ATK) from the first victim, and call up soul orbs (2 to start, +1 every 1.5s, max 5) that orbit you for 12s and hunt — each homes into a foe within 380px and detonates (1× ATK + 10).' },   // v0.29.671 — per user (Dark Pulse report): the raise was never in the tooltip. It also hid the damage and the self-heal; the description said only "Drain HP from enemies → MP".
@@ -53414,7 +53414,7 @@ function _coopApplyHazHit(msg) {
   const cx = +msg.x, radius = Math.max(1, +msg.r || 180);
   if (!Number.isFinite(cx)) return;
   const _camY = (game.camera && game.camera.y) || 0;
-  const hbox = { x: cx - radius, y: _camY, w: radius * 2, h: (typeof H === 'number' ? H : 560) };
+  const hbox = (Number.isFinite(+msg.bt) && +msg.bh > 0) ? { x: cx - radius, y: _camY + +msg.bt, w: radius * 2, h: +msg.bh } : { x: cx - radius, y: _camY, w: radius * 2, h: (typeof H === 'number' ? H : 560) };   // v0.30.869 fireball2x — a fireball's blast has a height
   if (typeof aabb === 'function' && !aabb(hbox, player)) return;
   const _inner = Math.min(120, radius * 0.7);
   const dx = Math.abs((player.x + player.w / 2) - cx);
@@ -104032,13 +104032,14 @@ function updateProjectiles(dt) {
       const _qRad = h.radius || 180;
       const _qCamY = (game.camera && game.camera.y) || 0;
       const _qProg = 1 - h.life / (h.maxLife || h.life || 1);
-      const _qY = (_qCamY + 60) + _qProg * 400;
-      const _qR = 20 + _qProg * 15;
+      const _qG = _lxMeteorGeom(h, _qCamY);   // v0.30.869 fireball2x — the drawn fireball's teardrop, not a 20-35 px band above it
+      const _qY = _qG.hitY;
+      const _qR = _qG.hitR;
       const _qDmgBase = (typeof h._sageDmgMul === 'number') ? getAtk() * h._sageDmgMul : getAtk() * 4 + 80;   // v0.30.345 — archmage Q +15% (burst pass, per user)
       if (!h._passSet) h._passSet = new Set();
       for (const m of [...game.monsters]) {
         if (m.currentHp <= 0 || h._passSet.has(m)) continue;
-        if (Math.abs((m.x + m.w / 2) - _qCx) >= _qRad) continue;
+        if (Math.abs((m.x + m.w / 2) - _qCx) >= (_qG.halfW ? _qG.halfW + m.w / 2 : _qRad)) continue;   // v0.30.869 fireball2x — a fireball hits what it overlaps, not its whole lane
         if (!((_qY + _qR) >= m.y && (_qY - _qR) <= (m.y + m.h))) continue;
         h._passSet.add(m);
         const _qdx = Math.abs((m.x + m.w / 2) - _qCx);
@@ -104059,9 +104060,10 @@ function updateProjectiles(dt) {
       const _pCamY = (game.camera && game.camera.y) || 0;
       // Same formula as the draw path, so hitbox and sprite cannot drift apart.
       const _prog = 1 - h.life / (h.maxLife || h.life || 1);
-      const _mY = (_pCamY + 60) + _prog * 400;
-      const _mR = 20 + _prog * 15;                      // matches the drawn head
-      const _inLane = Math.abs((player.x + player.w / 2) - _pCx) < _pRad;
+      const _pG = _lxMeteorGeom(h, _pCamY);   // v0.30.869 fireball2x — the drawn fireball's teardrop (the band sat ~40 px above the rock)
+      const _mY = _pG.hitY;
+      const _mR = _pG.hitR;
+      const _inLane = Math.abs((player.x + player.w / 2) - _pCx) < (_pG.halfW ? _pG.halfW + player.w / 2 : _pRad);   // what it overlaps, not the whole lane
       const _atHeight = (_mY + _mR) >= player.y && (_mY - _mR) <= (player.y + player.h);
       if (_inLane && _atHeight) {
         h._passHit = true;                              // one hit per meteor
@@ -104097,7 +104099,8 @@ function updateProjectiles(dt) {
       const isEnemyOwned = (h.owner === 'enemy');
       // v0.25.622 — DEFENSIVE cx FALLBACK (see prior comment).
       const _cx = (h.cx != null) ? h.cx : (h.x + (h.w || 0) / 2);
-      const radius = h.radius || 180;   // v0.26.1031 — honor the authored radius so narrow fire/forge pillars hit only where telegraphed (default zodiac meteors carry no radius -> 180, unchanged)
+      const _fbB = _lxMeteorBlast(h, (game.camera && game.camera.y) || 0);   // v0.30.869 fireball2x — a fireball's blast: its landing hitbox, 25% wider
+      const radius = _fbB ? _fbB.r : (h.radius || 180);   // v0.26.1031 — honor the authored radius so narrow fire/forge pillars hit only where telegraphed (default zodiac meteors carry no radius -> 180, unchanged)
       const _inner = Math.min(120, radius * 0.7);
       // v0.25.844 — Hitbox now follows camera.y so embers / lava / etc. hit
       // wherever the player is on tall (isVerticalTower) maps. Pre-fix the
@@ -104108,14 +104111,14 @@ function updateProjectiles(dt) {
       // since v0.25.655) clearly LANDED at their feet. Both visual + hit
       // now agree: meteor strikes whatever's in the current viewport.
       const _camY = (game.camera && game.camera.y) || 0;
-      const hbox = { x: _cx - radius, y: _camY, w: radius * 2, h: H };
+      const hbox = _fbB ? { x: _cx - radius, y: _fbB.top, w: radius * 2, h: _fbB.bot - _fbB.top } : { x: _cx - radius, y: _camY, w: radius * 2, h: H };   // v0.30.869 fireball2x — where it lands, not the whole column
       if (isEnemyOwned) {
         // v0.27.0 co-op — when I'm the HOST, broadcast this meteor's detonation zone
         // so followers apply it to THEIR player (reliable event vs. reproducing the
         // per-frame detonation). A _coopMirror hazard on a follower is a VISUAL-only
         // telegraph, so it skips local damage here (the hit arrives via 'hazhit').
         if (net.isHost && typeof _coopActive === 'function' && _coopActive() && net.ws) {
-          try { net.ws.send(JSON.stringify({ t: 'hazhit', map: game.currentMap, x: Math.round(_cx), r: Math.round(radius), d: Math.round(h.damage || 30), c: h.color || '#ffaa33', sl: h._sourceLabel || '', gb: h._gravBlue ? 1 : 0 /* v0.30.816 grav-meteor-cap: gb = one of Gravitos's blue meteors */ })); } catch (e) {}
+          try { net.ws.send(JSON.stringify({ t: 'hazhit', map: game.currentMap, x: Math.round(_cx), r: Math.round(radius), bt: _fbB ? Math.round(_fbB.top - _camY) : undefined, bh: _fbB ? Math.round(_fbB.bot - _fbB.top) : undefined, d: Math.round(h.damage || 30), c: h.color || '#ffaa33', sl: h._sourceLabel || '', gb: h._gravBlue ? 1 : 0 /* v0.30.816 grav-meteor-cap: gb = one of Gravitos's blue meteors */ })); } catch (e) {}
         }
         // Player-targeted: standard pattern from the projectile-hit
         // pipeline (respects player.invulnerable / blockTimer / DEF /
@@ -149379,6 +149382,32 @@ function _lxDrainPillarWidth(hh) {
   const k = _lxDrainPillarInk();
   return Math.max(40, Math.round(hh * (k.aw / k.ah) * k.frac));
 }
+// v0.30.869 fireball2x — THE FALLING FIREBALL (per user: "the fireballs should be bigger by about 100% in all instances and
+// hitbox should match it"; on a crop of its glowing teardrop, "this part of the sprite should be the hitbox"; and "the
+// blast radius is just slightly expanded width from that when it hits the ground"). One geometry for the draw, both fall
+// hits and the landing. The frame (anim/meteor_0..8, p_meteor) has its head - the rock and the flame bulb round it - 32%
+// of the frame wide, from 58.7% (the rock's top) to 94.5% (the flame's bottom) down.
+//   sz / drawY       drawn frame size (was 100 -> 170 px through the fall; x2) and the frame's centre
+//   hitY / hitR      the hitbox's centre and half-height: the teardrop - the head plus the first two trail copies stacked
+//                    on it, from the rock of the second copy (80% size, two trail steps up) to the bottom of the head
+//   halfW            the hitbox's half-width, the head's (0 = no fireball: use the lane)     trailStep / k   trail, scale
+// Gravitos's blue meteors are not fireballs: every number for them is exactly what it was.
+function _lxMeteorGeom(h, camY) {
+  const prog = 1 - h.life / (h.maxLife || h.life || 1), topY = camY + 60;
+  if (h._gravBlue) { const y = topY + prog * 400; return { prog, k: 1, sz: 100 + prog * 70, drawY: y, hitY: y, hitR: 20 + prog * 15, halfW: 0, trailStep: 22 }; }
+  const k = 2, sz = (100 + prog * 70) * k, step = 22 * k;
+  const ballY = topY + 25.5 + prog * 384.5;   // lands with its bottom where the old one's landed (y 535 on a flat map)
+  const drawY = ballY - 0.255 * sz;
+  const top = drawY - 2 * step + 0.087 * 0.8 * sz, bot = drawY + 0.445 * sz;
+  return { prog, k, sz, drawY, hitY: (top + bot) / 2, hitR: (bot - top) / 2, halfW: 0.16 * sz, trailStep: step };
+}
+// The blast when a fireball hits the ground: its hitbox at the moment it lands, 25% wider, with the same margin above and
+// below. null for everything that is not a falling fireball (they keep their authored radius and full-height lane).
+function _lxMeteorBlast(h, camY) {
+  if (!h || h._gravBlue || h._markerOnly || h._aquaFlood || h._fireColumn) return null;
+  const g = _lxMeteorGeom({ life: 0, maxLife: 1 }, camY), r = g.halfW * 1.25, pad = r - g.halfW;
+  return { r, top: g.hitY - g.hitR - pad, bot: g.hitY + g.hitR + pad };
+}
 function drawHazards(_behindPass) {
   if (!game.hazards || game.hazards.length === 0) return;   // v0.25.451: empty-list early-out
   let _vfHz = null;   // v0.30.292 perf — each guard+draw pair below called _lxVfxFrame twice (and could land on different animation frames)
@@ -150429,7 +150458,8 @@ function drawHazards(_behindPass) {
     else if (h.type === 'meteor_warn') {
       // Warning circle — matches the meteor's blast radius
       const prog = 1 - h.life / h.maxLife;
-      const rad = h.radius || 90;
+      const _fbBlast = _lxMeteorBlast(h, (game.camera && game.camera.y) || 0);   // v0.30.869 fireball2x — a fireball's rune is its blast
+      const rad = _fbBlast ? _fbBlast.r : (h.radius || 90);
       // v0.25.655 — VIEWPORT-RELATIVE rendering. Pre-fix the marker and
       // falling-meteor visual used hardcoded world-Y values (440, 460,
       // 60-460). On flat maps (camera.y always 0) this rendered at
@@ -150521,38 +150551,48 @@ function drawHazards(_behindPass) {
       const _meteorAnim = (!h._gravBlue && typeof _projAnimFrame === 'function') ? _projAnimFrame('meteor') : null;
       // v0.25.655 — falls from viewport-top (camera.y + 60) to viewport-
       // bottom (camera.y + 460). prog goes 0 → 1 over the telegraph.
-      const meteorY = _topY + prog * 400;
+      const _mg = _lxMeteorGeom(h, _camY);   // v0.30.869 fireball2x — twice the size; drawn where the hitbox is (see _lxMeteorGeom)
+      const meteorY = _mg.drawY;
+      const _mHeadY = meteorY + (_mg.k > 1 ? 0.255 * _mg.sz : 0);   // the head (rock) centre, for the procedural stand-in
       if (_lxPlayerProjReady(_meteorSprite)) {
-        const sz = 100 + prog * 70;
+        const sz = _mg.sz;
+        // v0.30.869 fireball2x — draw only the column of the frame that has ink: every red frame and the still keep all their
+        // pixels inside x 34-67% / y 5-95% of the square, so this is the same picture for a third of the fill (twice the size
+        // is four times the area, drawn seven times with the trail). Blue keeps its full-square blit.
+        const _mBlit = (img, cx, cy, s) => {
+          if (h._gravBlue) { ctx.drawImage(img, cx - s / 2, cy - s / 2, s, s); return; }
+          const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+          ctx.drawImage(img, iw * 0.33, ih * 0.04, iw * 0.35, ih * 0.92, cx - s / 2 + s * 0.33, cy - s / 2 + s * 0.04, s * 0.35, s * 0.92);
+        };
         // v0.30.294 perf — one bake serves the head and all six trail copies:
         // a meteor shower kept many of these alive at once, each doing
         // seven full-resolution resamples per frame.
         // the loop frame is already served at ~320 px by _bossLoopFrame: no second bake (the size changes every frame of the fall, which would thrash the 5-slot cache)
         const _msDraw = _meteorAnim || _lxProjScaled(_meteorSprite, Math.round(sz));
-        ctx.drawImage(_msDraw, sx - sz/2, meteorY - sz/2, sz, sz);
+        _mBlit(_msDraw, sx, meteorY, sz);
         // Fiery wisp trail behind it
         for (let i = 1; i <= 6; i++) {
           ctx.globalAlpha = 0.45 - i * 0.06;
           const tsz = sz * (1 - i * 0.10);
-          ctx.drawImage(_msDraw, sx - tsz/2 + (Math.random() - 0.5) * 8, meteorY - tsz/2 - i * 22, tsz, tsz);
+          _mBlit(_msDraw, sx + (Math.random() - 0.5) * 8 * _mg.k, meteorY - i * _mg.trailStep, tsz);
         }
         ctx.globalAlpha = 1;
       } else {
         // v0.29.78 — blue core/glow for Gravitos, red/orange for everyone else
         ctx.fillStyle = h._gravBlue ? '#2288ff' : '#ff4422';
         ctx.beginPath();
-        ctx.arc(sx, meteorY, 20 + prog * 15, 0, Math.PI * 2);
+        ctx.arc(sx, _mHeadY, (20 + prog * 15) * _mg.k, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = h._gravBlue ? '#88e0ff' : '#ffaa22';
         ctx.beginPath();
-        ctx.arc(sx, meteorY, 12 + prog * 8, 0, Math.PI * 2);
+        ctx.arc(sx, _mHeadY, (12 + prog * 8) * _mg.k, 0, Math.PI * 2);
         ctx.fill();
         for (let i = 0; i < 2; i++) {
           ctx.fillStyle = h._gravBlue
             ? `rgba(${120 + i * 40}, ${210 + i * 20}, 255, ${0.5 - i * 0.08})`
             : `rgba(255, ${100 + i * 30}, 0, ${0.5 - i * 0.08})`;
           ctx.beginPath();
-          ctx.arc(sx + (Math.random() - 0.5) * 6, meteorY - i * 10, 10 - i, 0, Math.PI * 2);
+          ctx.arc(sx + (Math.random() - 0.5) * 6 * _mg.k, _mHeadY - i * 10 * _mg.k, (10 - i) * _mg.k, 0, Math.PI * 2);
           ctx.fill();
         }
       }
