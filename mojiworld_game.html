@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.932';
+const GAME_VERSION = 'v0.30.933';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -92868,7 +92868,8 @@ function bossAI(m, dt, distToPlayer) {
           m._summonedThisPhase = true;
           const _celestialChoir = ['cherub', 'archon', 'cherub'];
           for (let i = 0; i < 3; i++) {
-            spawnMonster(m.x + (i - 1) * 80, m.y + 40, _celestialChoir[i], false);
+            const _cm = spawnMonster(m.x + (i - 1) * 80, m.y + 40, _celestialChoir[i], false);
+            if (_cm) _cm._aetherionChoir = true;   // v0.30.933 tagged so the death sweep can find them (see killMonster)
           }
           showToast('🪽 The celestial choir answers!', 'legendary');
         }
@@ -99151,12 +99152,33 @@ function _killMonsterRaw(m) {
   // v0.30.x boss-audit — the Tower Sovereign's Singularity Collapse IS a gravitos_singularity hazard (it reuses the renderer
   // and resolver), and nothing scrubbed it: landing the final blow during its 5 s telegraph, outside the light, let the
   // one-shot land in his death cinematic - and a player killed there lost the whole ten-floor expedition.
+  // v0.30.933 the scrub named one hazard type, so the Sovereign's DRAIN PILLARS (which force HP and MP to 1 and say so
+  // past Block, warrior DR and Aegis) and his 5-shot homing volley outlived him: land the killing blow inside a
+  // pillar telegraph and the victory screen opened on a hero at 1 HP - in a tower run, that is the whole run.
+  if (m.type === 'towerSovereign') {
+    for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
+      const _h = game.hazards[_hi];
+      if (_h && _h.type === 'sovereign_drain_pillar') game.hazards.splice(_hi, 1);
+    }
+    if (game.projectiles) for (let _pi = game.projectiles.length - 1; _pi >= 0; _pi--) {
+      const _pr = game.projectiles[_pi];
+      if (_pr && _pr.owner === 'enemy' && _pr.skill === 'msovereign') game.projectiles.splice(_pi, 1);
+    }
+  }
   if (m.type === 'king' || m.type === 'gravitos' || m.type === 'towerSovereign') {
     const scrubType = (m.type === 'king') ? 'gloop_puddle' : 'gravitos_singularity';
     for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
       if (game.hazards[_hi] && game.hazards[_hi].type === scrubType) {
         game.hazards.splice(_hi, 1);
       }
+    }
+  }
+  // v0.30.933 "a boss's summons do not outlive it" holds for Mooma's adds, Octobaby's legs, the Sovereign's shards and
+  // the Conductor's mechs - but not for Aetherion's choir, so a Lv 49 archon kept casting through his death cinematic.
+  if (m.type === 'aetherion') {
+    for (let _ci = game.monsters.length - 1; _ci >= 0; _ci--) {
+      const _cm = game.monsters[_ci];
+      if (_cm && _cm._aetherionChoir) { _cm.currentHp = 0; game.monsters.splice(_ci, 1); }
     }
   }
   if (m.type === 'mooma') {
@@ -143234,7 +143256,11 @@ function zodiacBossAI(m, dt, distToPlayer) {
     // attack-anim window is stamped so the sprite visibly surges with it.
     if (m._zBaseSpeed == null) m._zBaseSpeed = m.speed || 0.8;
     m.speed = m._zBaseSpeed * (phase >= 3 ? 1.3 : phase === 2 ? 1.15 : 1);
-    if (phase > 1) {
+    // v0.30.933 the gate above compares phase to the last frame's, and phase is recomputed from live HP - so anything
+    // that heals a zodiac back over a threshold (Virgo's banish ritual, Vampiric Foes) let the escalation beat run
+    // again and again around the line: a free nova each time, plus a pattern cancel. Fire it once per phase reached.
+    if (phase > 1 && phase > (m._phaseSeen | 0)) {
+      m._phaseSeen = phase;
       showToast(`${z.glyph} ${_lxZodiacSign(z)} — Phase ${phase}!`, 'legendary');
       flash(0.5); addShake(12); addHitStop(80);
       audio.play('crit');
@@ -143695,7 +143721,10 @@ function _zodiacSpentTick(m, dt, z) {
 function _zodiacDesperationTick(m, dt, phase, z) {
   if (!player || player.hp <= 0) return;
   // Phase 1 is "warmup" — no desperation. Reset timers when entering p2/p3.
-  if (phase < 2) { m._despState = null; m._despTimer = 0; m._despCD = 0; return; }
+  // v0.30.933 this wrote 0, and the seed below only runs when _despCD is null - so from the first phase-1 frame on it
+  // was never null again, the 6 s / 3.5 s delay never applied, and HEAVENSPLIT opened its warning on the same frame
+  // as the phase toast: the phase nova was still in the air when the drop-to-1-HP landed.
+  if (phase < 2) { m._despState = null; m._despTimer = 0; m._despCD = null; return; }
   if (m._despCD == null) {
     // First time entering phase >=2 → seed initial delay so it doesn't
     // fire instantly on phase change (player just got the phase toast).
