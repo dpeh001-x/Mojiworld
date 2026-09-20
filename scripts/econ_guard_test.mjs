@@ -30,10 +30,18 @@ try {
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 }); await boot(page);
   // 1. downed, then the game closes: the reload still takes the toll
   const d0 = await page.evaluate((h) => { eval(h)(); player.mojicoins = 100000; player.bankBalance = 0; player.exp = 1000;
-    const r = _coopTryDowned(); _flushSaveStateNow(); return { r, downed: !!player._downed, ob: _isOnboardingActive() }; }, `(${hero})`);
+    // v0.30.931 — give the hero a requirement that matches its level before saving. v0.30.923 rescales EXP on load
+    // by exp/expToNext, and this harness sets level 50 on a freshly classed hero whose expToNext is still the Lv 1
+    // rung: that fraction clamps to 0.999 and the reload came back with 21 million EXP, which is the harness's
+    // fault, not the toll's.
+    try { if (typeof _lxLevelCost === 'function') player.expToNext = _lxLevelCost(player.level | 0); } catch (e) {}
+    player.exp = 1000;
+    const r = _coopTryDowned(); _flushSaveStateNow();
+    return { r, downed: !!player._downed, ob: _isOnboardingActive(), exp0: player.exp | 0 }; }, `(${hero})`);
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 180000 }); await boot(page);
   const d1 = await page.evaluate(() => ({ coins: player.mojicoins, exp: player.exp, hp: player.hp, max: getMaxHp(), pend: !!player._downPending }));
-  check(d0.downed && d1.coins >= 90000 && d1.coins < 91000 && d1.exp === 950 && d1.hp === d1.max && !d1.pend,
+  const _expWant = d0.exp0 - Math.floor(d0.exp0 * 0.05);
+  check(d0.downed && d1.coins >= 90000 && d1.coins < 91000 && Math.abs(d1.exp - _expWant) <= 2 && d1.hp === d1.max && !d1.pend,
     'a reload taken while downed pays the death toll (10% of 100k, 5% EXP; the login bonus aside) and stands up whole', J({ d0, d1 }));
   // 2. the parcel's gear piece is weekly
   const pc = await page.evaluate((h) => { eval(h)(); checkDaily(); const d = game.dailyState; const got = (k) => { d.streak = k; d.parcelClaimed = false;
