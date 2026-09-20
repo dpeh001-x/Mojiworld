@@ -7,7 +7,7 @@
 //   poolw - the same big canvas, no writes, sub-blits from earlier rects         (a packed atlas, warm)
 //   poolmix - one shelf written, then ten blits in the SAME frame               (what a fight really does)
 // WHAT THIS PROBE DOES NOT ANSWER: whether a shared pooled atlas is a good idea. Every pool case here measures
-// cheap (about 1 ms), yet a v0.30.940 candidate that put the two glyph atlases on one 2048x2048 sheet was WORSE in
+// cheap (about 1 ms), yet a candidate that put the two glyph atlases on one 2048x2048 sheet (2026-09-20, never shipped) was WORSE in
 // the game, on paired throttled runs: drawDamageNumbers 11.24 ms a frame against 3.64, and 85 draws over 8 ms
 // totalling 1863 ms against 11 totalling 203. The reason is not established - a fight blits a hundred-plus
 // sub-rects a frame from a sheet it also writes, which this does not reproduce. Use it for mint-vs-reuse, and
