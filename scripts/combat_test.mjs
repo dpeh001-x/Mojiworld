@@ -34,7 +34,13 @@ try {
   // baseAcc 20 pushes the level-gap hit rate to the 100% clamp — without it
   // even an overleveled warrior misses 10% of the time and the direct
   // hitMonster checks flake (evasion is zeroed per-check for the same reason).
-  await ev((m) => { player.cls = 'warrior'; player.level = 20; player.baseAcc = 20; player.mp = player.maxMp = 500; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap(m); }, MAP);
+  // v0.30.x - THE HERO HAD NO HP. This harness set class, level and MP and never touched hp, so the
+  // player sat at 0 and the downed tick flagged him; castSkill then refused every cast for the
+  // whole run (v0.29.625: dead and downed players do not cast), which read as "castSkill spends no
+  // MP". Give him a body, and clear the downed state the way a revive or a respawn does.
+  await ev((m) => { player.cls = 'warrior'; player.level = 20; player.baseAcc = 20; player.mp = player.maxMp = 500;
+    player.hp = player.maxHp = Math.max(player.maxHp | 0, 500); player._downed = false; player._downedUntil = 0;
+    game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap(m); }, MAP);
   await sleep(700);
 
   // (1) BASIC MELEE hits a nearby monster.
@@ -85,6 +91,18 @@ try {
     let sid = null;
     try { for (const k in SKILLS) { const s = SKILLS[k]; if (s && s.cls === 'warrior' && s.mp > 0) { sid = k; break; } } } catch (e) {}
     if (!sid) return { noSkill: true };
+    // The steps above swing a melee and then run 6 s of updateMonsters - monsters only. Nothing
+    // ticks the PLAYER's timers in this harness, so the cast lock that melee (and Somersault Smash's
+    // own flip) sets never decays, and castSkill correctly refuses: it is guarded on
+    // _skillLockTimer / _castLockUntil for every slot but the basic. In play those tick down in
+    // updatePlayer within a beat. Clear them here so this check reads the cast, not the lock.
+    player.hp = player.maxHp = Math.max(player.maxHp | 0, 500);
+    player._skillLockTimer = 0; player._castLockUntil = 0; player.attacking = false; player.attackTimer = 0;
+    // The steps above swing a melee and then run 6 s of updateMonsters - monsters only. Nothing
+    // ticks the PLAYER's timers here, so the cast lock that melee leaves never decays and castSkill
+    // is right to refuse; in play it is gone within a beat. Clear it, and the downed flag with it.
+    player.hp = player.maxHp = Math.max(player.maxHp | 0, 500); player._downed = false; player._downedUntil = 0;
+    player._skillLockTimer = 0; player._castLockUntil = 0; player.attacking = false; player.attackTimer = 0;
     player.mp = player.maxMp = 500; player.skillCooldowns = player.skillCooldowns || {};
     const mp0 = player.mp; const cd0 = (player.skillCooldowns[sid] || 0);
     let threw = null;
