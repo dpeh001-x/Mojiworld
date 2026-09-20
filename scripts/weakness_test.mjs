@@ -42,9 +42,15 @@ try {
   ok('a slime (weak to physical): melee 1.3x, magic 0.8x, each of its own baseline', sl.melee.loss === Math.floor(sl.bMelee * 1.3) && sl.magic.loss === Math.floor(sl.bMagic * 0.8), JSON.stringify([sl.bMelee, sl.melee.loss, sl.bMagic, sl.magic.loss]));
   ok('a boss is exempt: no affinity, no tag on either class', r.boss.aff === null && r.boss.melee.loss > 0 && r.boss.magic.loss > 0 && ![...r.boss.melee.nums, ...r.boss.magic.nums].some((d) => /WEAK|RESIST/.test(d.t)), JSON.stringify([r.boss.aff, r.boss.melee.loss, r.boss.magic.loss]));
   const wk = sn.magic.nums, rs = sn.melee.nums, cr = sn.magicCrit.nums;
-  ok('a WEAK hit prints an orange, big number suffixed WEAK', wk.some((d) => /WEAK$/.test(d.t) && d.c === '#ff9a3c' && d.big), JSON.stringify(wk));
-  ok('a RESIST hit prints a grey-blue number suffixed RESIST, a size under the same plain hit', rs.some((d) => /RESIST$/.test(d.t) && d.c === '#9fb4c8') && Math.max(...rs.map((d) => d.s)) < Math.max(...wk.map((d) => d.s)), JSON.stringify(rs));
-  ok('a crit on a weakness keeps the crit flag and the warm crit colour', cr.some((d) => d.crit && d.c === '#ffb347' && /WEAK/.test(d.t)), JSON.stringify(cr));
+  // v0.30.402 (per user) dropped every suffix after the number - no !, !!, the crit star, WEAK or RESIST. Colour and
+  // size carry the hierarchy now, so that is what these three read.
+  ok('a WEAK hit reads as an orange, bigger number - and carries no tag',
+     wk.some((d) => d.c === '#ff9a3c' && d.big) && !wk.some((d) => /WEAK|RESIST/.test(d.t)), JSON.stringify(wk));
+  ok('a RESIST hit reads as a grey-blue number, smaller than the weak one, and carries no tag',
+     rs.some((d) => d.c === '#9fb4c8') && !rs.some((d) => /WEAK|RESIST/.test(d.t))
+     && Math.max(...rs.map((d) => d.s)) < Math.max(...wk.map((d) => d.s)), JSON.stringify(rs));
+  ok('a crit on a weakness keeps the crit flag and the warm crit colour',
+     cr.some((d) => d.crit && d.c === '#ffb347'), JSON.stringify(cr));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();

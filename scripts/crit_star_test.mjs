@@ -38,13 +38,20 @@ const g = await page.evaluate(async () => {
   const frames = (n) => new Promise((res) => { let i = 0; const t = () => { game.paused = false; if (++i > n) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   try { loadMap('forest'); } catch (e) {} await frames(40);
   player.hp = 99999; player._god = true;
+  // Land the hits: the basic-attack miss roll reads the LEVEL GAP (monster - player), and a Lv 1 tester swinging at a
+  // Lv 4 slime missed - the pass measured three layers of "MISS" and no number at all.
+  player.level = 60;
   game.monsters = []; spawnMonster(Math.round(player.x + 80), Math.round(player.y), 'slime', false);
   const m = game.monsters[game.monsters.length - 1]; m.hp = m.currentHp = 1e9; m.maxHp = 1e9;
   // drawn strings for one drawDamageNumbers pass
+  // v0.30.815 bakes damage numbers into a glyph atlas and blits them, so the per-layer text never reaches fillText -
+  // and the atlas's own one-off glyph bake ("0".."9", ",", the star) landed in the spy as a stray star on a non-crit.
+  // Measure the drawing path itself with the atlas off; that the atlas ALSO carries the star is checked separately.
   const spy = () => { const drawn = []; const ft = CanvasRenderingContext2D.prototype.fillText, st = CanvasRenderingContext2D.prototype.strokeText;
+    _LX_DN_ATLAS_ON = false;
     CanvasRenderingContext2D.prototype.fillText = function (t, ...r) { drawn.push(String(t)); return ft.call(this, t, ...r); };
     CanvasRenderingContext2D.prototype.strokeText = function (t, ...r) { drawn.push(String(t)); return st.call(this, t, ...r); };
-    return { drawn, off: () => { CanvasRenderingContext2D.prototype.fillText = ft; CanvasRenderingContext2D.prototype.strokeText = st; } }; };
+    return { drawn, off: () => { CanvasRenderingContext2D.prototype.fillText = ft; CanvasRenderingContext2D.prototype.strokeText = st; _LX_DN_ATLAS_ON = true; } }; };
   // 1) crit
   game.damageNumbers = [];
   hitMonster(m, 1234, true, 'melee');
@@ -65,6 +72,7 @@ const g = await page.evaluate(async () => {
   game.damageNumbers.push({ x: player.x + 14, y: player.y, vy: -2, text: '-' + 321, life: 40, color: '#ff5555', big: true });
   s = spy(); try { drawDamageNumbers(); } catch (e) {} s.off();
   out.takenStar = s.drawn.filter((t) => t.includes(STAR)).length;
+  out.atlasKeepsStar = (typeof _LX_DN_ATLAS_OK !== 'undefined') && _LX_DN_ATLAS_OK.test('1,234\u2605');
   // 4) the star glyph rasterises in the damage font
   const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64; const cx = cv.getContext('2d');
   cx.font = '900 32px Impact, "Arial Black", "Trebuchet MS", sans-serif'; cx.fillStyle = '#fff'; cx.fillText(STAR, 8, 44);
@@ -80,6 +88,7 @@ ok('drawDamageNumbers draws the crit as "<damage>\u2605" on every layer (shadow,
 ok('the cached text (what the settled-number bake uses) carries the star', typeof g.critTxt === 'string' && g.critTxt.endsWith('\u2605'), { txt: g.critTxt });
 ok('a non-crit hit draws its number with NO star', g.nonCritDrawn > 0 && g.nonCritStar === 0, { drawn: g.nonCritDrawn, starred: g.nonCritStar });
 ok('damage the player takes draws with NO star', g.takenStar === 0, { starred: g.takenStar });
+ok('the glyph atlas keeps the star too (a crit blitted from the atlas is still starred)', g.atlasKeepsStar === true, { ok: g.atlasKeepsStar });
 ok('the star glyph rasterises in the damage font (not a blank)', g.starPixels > 60 && g.starWidth > 8, { pixels: g.starPixels, width: g.starWidth });
 ok('no page errors', errs.length === 0, { errs: errs.slice(0, 3) });
 

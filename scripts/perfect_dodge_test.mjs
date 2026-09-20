@@ -2,7 +2,7 @@
 // least 220 ms, the OHKO window is 200, a perfect parry buys 20 slow-mo frames, the
 // A press catches a projectile already on the player, the Tempo perfect dodge counts
 // against every boss, and the tells: yellow A on a windup and on a projectile within
-// reach, red cross on the meteor marker and the quake band.
+// reach. v0.30.402 removed the red cross from the meteor marker and the quake band (per user).
 //   MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override the served tree.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -57,8 +57,10 @@ try {
   ok('the press catches a projectile already on the player (PARRY!, 20 slow-mo frames, 350 ms i-frames) and leaves the far one alone', r.press.left === 1 && r.press.farLeft && r.press.nums.includes('PARRY!') && r.press.slowmo >= 20 && r.press.inv >= 350, JSON.stringify(r.press));
   ok('a perfect parry buys 20 slow-mo frames on top of its i-frames', r.parry && r.parry.slowmo >= 20 && r.parry.inv >= 350, JSON.stringify(r.parry));
   ok('a monster in its windup wears the yellow A; not otherwise', r.tellMob.yellow && r.tellMob.A && !r.tellMob.err && !r.tellMobOff.A, JSON.stringify([r.tellMob, r.tellMobOff]));
-  ok('an enemy meteor marker wears the red cross', r.tellMeteor.red && r.tellMeteor.cross && !r.tellMeteor.err, JSON.stringify(r.tellMeteor));
-  ok('a quake band wears the red cross', r.tellQuake.red && r.tellQuake.cross && !r.tellQuake.err, JSON.stringify(r.tellQuake));
+  // v0.30.402 took the red cross off both (per user: "very misleading") - the marker and the band ARE the telegraph,
+  // and only a dodgeable thing still wears the yellow A.
+  ok('an enemy meteor marker wears NO red cross', !r.tellMeteor.cross && !r.tellMeteor.err, JSON.stringify(r.tellMeteor));
+  ok('a quake band wears NO red cross', !r.tellQuake.cross && !r.tellQuake.err, JSON.stringify(r.tellQuake));
   ok('an enemy projectile within reach wears the yellow A; a far one does not', r.tellProjNear.yellow && r.tellProjNear.A && !r.tellProjNear.err && !r.tellProjFar.A, JSON.stringify([r.tellProjNear, r.tellProjFar]));
   ok('the Tempo perfect dodge counts against every boss except Gravitos, and every big enemy projectile', r.src.anyBoss && r.src.zodiacFilterGone && r.src.toast, JSON.stringify(r.src));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
