@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.942';
+const GAME_VERSION = 'v0.30.943';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -114668,7 +114668,7 @@ function _useCurePotion() {
   }
   useConsumable('cure');
 }
-function useConsumable(id) {
+function useConsumable(id, opts) {
   if (typeof _edictOn === 'function' && _edictOn('ascDryRun')) { if (typeof showToast === 'function') showToast('\u{1F6B1} Dry Run \u2014 potions are sealed while that Edict is borne.', 'rare'); return false; }   // v0.30.422
   if (!player.consumables[id] || player.consumables[id] <= 0) return;
   // Centralized dead guard (the inventory-click path didn't gate it). NOT gated on
@@ -114707,6 +114707,9 @@ function useConsumable(id) {
   // regardless of entry point (R/T quick keys, inventory click, mobile
   // tap, etc.). Was previously gated only inside useQuickPotion, so
   // inventory-click and direct callers bypassed the lockout entirely.
+  // v0.30.943 nothing to restore: keep the drink (see _lxDrinkUseless). Before the cooldown gate, so the
+  // message is the useful one rather than a countdown for a drink that would have done nothing anyway.
+  if (_lxDrinkUseless(p.type, !!(opts && opts.purifies))) return _lxRefuseDrink(p.type);
   if (p.type === 'hp' || p.type === 'mp') {
     if (!_potionReady(p.type)) {
       const left = (_potionCdRemainingFrames(p.type) / 60).toFixed(1);
@@ -114801,6 +114804,38 @@ function useConsumable(id) {
 // so HP and MP don't compete with each other).
 // game.time ticks once per frame at ~60 fps, so 3 s = 180 frames.
 const POTION_CD_FRAMES = 180;
+// v0.30.943 A DRINK THAT CAN DO NOTHING IS REFUSED, NOT SPENT. Every other way a potion cannot work already
+// refuses it and keeps it: the map lockout, the Aquarius heal seal ("a sealed drink would be wasted: refuse
+// it"), the Tidesworn seal, the cooldown. A FULL BAR was the one case that took the potion anyway - press the
+// HP key at full health and a Large Red Potion (1,000 coins) is gone, the toast says "Used Large Red Potion",
+// and nothing happened. With an empty bag it was worse: the auto-buy bought one and healed zero.
+// The Purifying Pulse milestone is the one reason to drink at full health - it cleanses burn, freeze, stun and
+// hitstun on a quick-key drink - so a drink that would still cleanse is not refused.
+function _lxCureNeeded() {
+  const P = (typeof player !== 'undefined') ? player : null; if (!P) return true;
+  return ((P.frozenTimer | 0) > 0 || (P.freezeTimer | 0) > 0 || (P._slowTimer | 0) > 0 || (P._poisonTimer | 0) > 0
+       || (P._skillLockTimer | 0) > 0 || (P.burnTimer | 0) > 0 || (P.hitStun | 0) > 0 || (P.stunTimer | 0) > 0
+       || (P._electrocuteTimer | 0) > 0 || (P._iceFloor | 0) > 0 || (P._virgoSin | 0) > 0);
+}
+function _lxDrinkUseless(type, purifies) {
+  try {
+    if (!type) return false;
+    if (purifies && typeof hasMilestone === 'function' && hasMilestone('purifyingPulse')
+        && ((player.hitStun | 0) > 0 || (player.burnTimer | 0) > 0 || (player.freezeTimer | 0) > 0 || (player.stunTimer | 0) > 0)) return false;
+    if (type === 'hp')   return player.hp >= getMaxHp();
+    if (type === 'mp')   return player.mp >= getMaxMp();
+    if (type === 'full') return player.hp >= getMaxHp() && player.mp >= getMaxMp();
+    if (type === 'cure') return !_lxCureNeeded();
+  } catch (e) {}
+  return false;
+}
+const _LX_FULL_SAY = { hp: '\u2764\uFE0F Already at full health', mp: '\uD83D\uDC99 Already at full mana',
+  full: '\u2B50 Full health and mana already', cure: '\uD83E\uDDEA Nothing to cure' };
+function _lxRefuseDrink(type) {
+  if (typeof showToast === 'function') showToast(_LX_FULL_SAY[type] || _LX_FULL_SAY.hp, 'common');
+  if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
+  return false;
+}
 function _potionReady(which) {
   const key = which === 'hp' ? '_potionCdHp' : '_potionCdMp';
   return (player[key] || 0) <= game.time;
@@ -114854,6 +114889,10 @@ function useQuickPotion(which, preferElixir) {
     useConsumable('full');   // gates both tracks + sets both cooldowns internally
     return;
   }
+  // v0.30.943 one guard for both legs below - the bag and the auto-buy - so a full bar neither spends a potion
+  // nor buys one. The elixir preference above still runs (it has its own check), and a Purifying Pulse
+  // drink still goes through (see _lxDrinkUseless).
+  if (_lxDrinkUseless(which, true)) return _lxRefuseDrink(which);
   // Cooldown gate — every potion use locks that slot for 3 s so players
   // can't spam-tank their way through.
   if (!_potionReady(which)) {
@@ -114889,7 +114928,7 @@ function useQuickPotion(which, preferElixir) {
   // 1) Use an existing potion if we have any.
   for (const p of pool) {
     if (player.consumables[p.id] > 0) {
-      useConsumable(p.id);
+      if (useConsumable(p.id, { purifies: true }) === false) return;   // v0.30.943 refused: no purify, no cooldown, nothing spent
       _applyPurify();
       _setPotionCd(which);
       return;
@@ -114911,8 +114950,8 @@ function useQuickPotion(which, preferElixir) {
     return;
   }
   const pick = affordable.reduce((a, b) => a.price <= b.price ? a : b);
+  const _cost = Math.ceil(pick.price * _potLvMult);   // v0.26.1032 — level-scaled like the shop; v0.30.943 hoisted, the toast says it too
   {   // v0.30.931 a run restores the wallet it snapshotted, so a potion bought on floor B7 was free by the time you left.
-    const _cost = Math.ceil(pick.price * _potLvMult);   // v0.26.1032 — level-scaled like the shop
     player.mojicoins -= _cost;
     try { if (game.expedition && game.expedition.active) game.expedition._spentInRun = ((game.expedition._spentInRun | 0) + _cost); } catch (e) {}
   }
@@ -114929,7 +114968,7 @@ function useQuickPotion(which, preferElixir) {
       text: '+' + _autoAmt, life: 40, color: '#44ff44', size: 14
     });
     audio.play('potion_hp');
-    showToast(`${pick.icon} Auto-bought for ${pick.price} Mojicoins`, 'common');
+    showToast(`${pick.icon} Auto-bought for ${_cost} Mojicoins`, 'common');   // v0.30.943 the price charged, not the base one
   } else if (pick.type === 'mp') {
     player.mp = Math.min(getMaxMp(), player.mp + _autoAmt);
     game.damageNumbers.push({
@@ -114937,7 +114976,7 @@ function useQuickPotion(which, preferElixir) {
       text: '+' + _autoAmt, life: 40, color: '#4488ff', size: 14
     });
     audio.play('potion_mp');
-    showToast(`${pick.icon} Auto-bought for ${pick.price} Mojicoins`, 'common');
+    showToast(`${pick.icon} Auto-bought for ${_cost} Mojicoins`, 'common');   // v0.30.943 the price charged, not the base one
   }
   // Sparkle burst to read the purchase clearly
   for (let k = 0; k < 8; k++) {
