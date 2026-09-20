@@ -12817,7 +12817,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.928';
+const GAME_VERSION = 'v0.30.929';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -41639,7 +41639,10 @@ function _initMobileControls() {
   // (module-scope so the garbage collector sees a live handle — a
   // bare `new MutationObserver(...)` loses its ref the moment the
   // loop iteration ends and only survives because observe() pins it).
-  window._forcedModalObservers = window._forcedModalObservers || [];
+  // v0.30.929 _initMobileControls re-runs on every mobile-mode toggle and pushed ~25 fresh MutationObservers each time,
+  // all calling _syncForcedModal, which reads layout per open modal. Disconnect the old set first.
+  try { for (const _o of (window._forcedModalObservers || [])) { try { _o.disconnect(); } catch (e) {} } } catch (e) {}
+  window._forcedModalObservers = [];
   for (const m of _forcedModals) {
     const el = document.getElementById(m.id);
     if (el) {
@@ -70330,6 +70333,7 @@ function loadMap(id, entryX, entryY) {
   // (player._ksTier) deliberately survive — only death takes those.
   game.mapKillStreak = 0;
   game.damageNumbers = [];
+  if (typeof _lxDnAtlasTrim === 'function') _lxDnAtlasTrim();   // v0.30.929 a new map does not need the last fight's number atlases
   game.hazards = [];
   // v0.30.463 — B6's void tears. Reuses the void_tear hazard the Spire already uses as a static map
   // obstacle, so the resolver, the chip-tick rate and the art all come for free. Life is the same
@@ -114713,6 +114717,10 @@ function drawMinimap() {
   // getContext on every call, ~15 Hz). Self-heals if the node isn't present yet.
   const canvas = game._mmCanvas || (game._mmCanvas = document.getElementById('minimap-canvas'));
   if (!canvas || !game.mapData) return;
+  // v0.30.929 the symbol pass ran 15x a second whether or not anything could see it: the whole minimap is display:none
+  // on touch and under 900px, and the HUD's minimise button hides the canvas. getClientRects() is empty in exactly
+  // those cases (and unlike offsetParent it is honest about position:fixed).
+  if (!canvas.getClientRects().length) return;
   const mctx = game._mmCtx || (game._mmCtx = canvas.getContext('2d'));
   const mw = canvas.width, mh = canvas.height;
   const S = mw / 208;   // v0.29.x — 2x backing store; every symbol constant scales by this
@@ -114888,6 +114896,7 @@ function drawMinimap() {
     if (m.currentHp <= 0) continue;
     const mx = (m.x + m.w / 2) * scaleX;
     const my = mmY(m.y);
+    if (!_mmOn(my)) continue;   // v0.30.929 the platform loop has culled off-window rows since v0.30.452; a tall tower's mobs were still drawn
     if (m.isBoss) {
       // v0.30.675 — the boss keeps its diamond, because the shape is the warning and a restyle must not
       // cost a player that. It is thrown rather than drawn: each corner off-centre by a fixed amount
@@ -150282,10 +150291,10 @@ function _lxDrainPillarInk() {
     const d = g.getImageData(0, 0, W, H).data;
     let x0 = W, x1 = -1;
     for (let y = Math.round(H * 0.25); y < H; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] > 16) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
-    if (x1 < 0) return FALLBACK;
+    if (x1 < 0) { img._lxInk = FALLBACK; return FALLBACK; }   // v0.30.929 remember the miss
     img._lxInk = { frac: (x1 - x0 + 1) / W, cx: ((x0 + x1) / 2 + 0.5) / W, aw: img.naturalWidth, ah: img.naturalHeight };
     return img._lxInk;
-  } catch (e) { return FALLBACK; }   // tainted canvas: the measured fallback
+  } catch (e) { try { img._lxInk = FALLBACK; } catch (_) {} return FALLBACK; }   // v0.30.929 tainted canvas (file:// / the packaged build): remember it, or every frame re-mints a canvas and throws
 }
 // The pillar's world width for a pillar of height hh: the drawn canvas width at that height, times
 // the ink fraction. 90 was the hand-set band before the art had a say.
@@ -152193,6 +152202,25 @@ const _LX_DN_ATLAS_OK = /^[0-9,]+★?$/;
 const _LX_DN_ATLAS = new Map();            // key -> atlas; insertion order is the LRU order
 const _LX_DN_ATLAS_MAX_PX = 32e6;          // ~128 MB of backing store, oldest out first (v0.30.x gb-atlas — was 12e6: a boss fight's figure atlases (~7 MP) and sticker atlases (~21 MP at render scale 1.93) have to fit together, or both churn)
 let _lxDnAtlasPx = 0;
+// v0.30.929 A BOSS FIGHT'S ATLASES WERE THE SESSION'S. Nothing released them: the cap is only consulted while a new
+// atlas is being added, so a Gravitos or zodiac fight parked its figure and sticker atlases (the comment above
+// budgets ~28 MP, and the cap allows ~128 MB of backing store) and town kept every one of them. Trimmed to a low
+// water mark on a map change and whenever the numbers have been gone for a few seconds; they rebake on demand.
+const _LX_DN_ATLAS_LOW_PX = 6e6;
+function _lxDnAtlasTrim(lowPx) {
+  try {
+    const low = lowPx || _LX_DN_ATLAS_LOW_PX;
+    if (_lxDnAtlasPx <= low) return 0;
+    let freed = 0;
+    for (const k of [..._LX_DN_ATLAS.keys()]) {
+      if (_lxDnAtlasPx <= low) break;
+      const old = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k);
+      if (old) { _lxDnAtlasPx -= old.px; freed += old.px; if (old.cv) old.cv.width = old.cv.height = 0; }
+    }
+    return freed;
+  } catch (e) { return 0; }
+}
+let _lxDnAtlasIdleAt = 0;
 let _lxDnAtlasBudget = 0;                  // builds still allowed this frame (drawDamageNumbers resets it)
 // The pop's size, snapped to a 4% ladder hung on the base size (so scale 1 is exactly the base) and then to the
 // half-pixel grid: the four frames around the apex share one atlas, and a pop needs six or seven, not ten.
@@ -152545,6 +152573,11 @@ function _dnBake(d, txt, col, baseSize) {
   } catch (e) { return null; }
 }
 function drawDamageNumbers() {
+  // v0.30.929 nothing to draw for 8 s of play: let the atlases go (see _lxDnAtlasTrim)
+  if (!(game.damageNumbers && game.damageNumbers.length)) {
+    if (!_lxDnAtlasIdleAt) _lxDnAtlasIdleAt = game.time | 0;
+    else if (((game.time | 0) - _lxDnAtlasIdleAt) > 480) { _lxDnAtlasIdleAt = game.time | 0; _lxDnAtlasTrim(); }
+  } else _lxDnAtlasIdleAt = 0;
   if (typeof LX_GFX !== 'undefined' && !LX_GFX.dmgnum) return;    // v0.29.431
   // v0.25.19 — Phase 4b gate. LXDamageNumberScene on the UI canvas owns
   // the render when flag is on. Vanilla skips entirely.
@@ -153660,7 +153693,10 @@ function updateUI() {
     if (newPct < oldPct - 0.05) {
       el.style.transition = 'none';
       _uiSetStyle(el, 'width', newPct.toFixed(1) + '%');   // through the dedup cache so it stays coherent
-      void el.offsetWidth;
+      // v0.30.929 the snap needs the style flushed before the transition goes back on, but a drain that moves HP, MP and
+      // EXP in the same tick paid three full-document reflows for it. One per frame is enough: the writes above it
+      // are already in, and the reads are the same layout.
+      if (game._lxBarFlushAt !== (game.time | 0)) { game._lxBarFlushAt = (game.time | 0); void el.offsetWidth; }
       el.style.transition = '';
     } else {
       _uiSetStyle(el, 'width', newPct.toFixed(1) + '%');
