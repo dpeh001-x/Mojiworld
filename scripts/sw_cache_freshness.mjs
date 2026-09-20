@@ -38,7 +38,8 @@ const ASSET_RE = new RegExp('\\.(' + reSrc + ')$', 'i');
 // 2. the commit where that exact key first appeared — everything after it is at risk
 let since = '';
 try {
-  const log = git(['log', '--format=%H', '-S', key, '--', 'sw.js']).split(/\r?\n/).filter(Boolean);
+  // search the REF's own history: a checkout whose HEAD lags origin would never see the bump otherwise
+  const log = git(['log', '--format=%H', '-S', key, REF, '--', 'sw.js']).split(/\r?\n/).filter(Boolean);
   since = log[log.length - 1] || '';
 } catch (e) {}
 say(!!since, 'the commit that introduced it is findable', since.slice(0, 8));
