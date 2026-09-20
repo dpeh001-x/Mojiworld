@@ -57,6 +57,8 @@ try {
       if (!p.length) p = mobs.slice().sort((a, b) => Math.abs(a.lv - L) - Math.abs(b.lv - L)).slice(0, 3);
       return p.reduce((s, m) => s + m.exp, 0) / p.length; };
     out.rungs = {}; for (const L of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 19, 24]) out.rungs[L] = Math.round(_lxLevelCost(L) / adjRaw(L));
+    // the thirties, per user "a more gradual increase in 30 to 40": each rung in kills of a same-level monster
+    out.band = {}; for (let L = 25; L <= 40; L++) out.band[L] = Math.round(_lxLevelCost(L) / adjRaw(L));
     out.firstRung = _lxLevelCost(1);
     // 3. one kill takes a fresh hero to Lv 2
     clean(1); game.monsters.length = 0;
@@ -82,6 +84,14 @@ try {
   const off = Object.entries(T).filter(([L, want]) => Math.abs(r.rungs[L] - want) > Math.max(1, want * 0.06));
   check(off.length === 0, 'every rung costs the kills it is meant to', 'want ' + J(T) + ' got ' + J(r.rungs));
   check(r.firstRung === 1, 'the first rung is one kill', 'cost ' + r.firstRung);
+  // Lv 30-40 used to run 5,461 / 6,927 / 9,102 / 11,371 / 15,748 / 23,582 and then sit near 24-27k for five
+  // levels before FALLING to 15,548 at Lv 40 - Lv 35 was a longer grind than Lv 45. It climbs now.
+  const bandUp = [];
+  for (let L = 31; L <= 40; L++) if (!(r.band[L] > r.band[L - 1])) bandUp.push(L);
+  check(bandUp.length === 0, 'every rung from 30 to 40 costs more than the one before it', 'goes backwards at ' + J(bandUp) + ' ' + J(r.band));
+  // and by roughly the x1.105 a level the rungs below the band already climb at
+  const steps = []; for (let L = 31; L <= 39; L++) steps.push(+(r.band[L] / r.band[L - 1]).toFixed(3));
+  check(steps.every((x) => x >= 1.04 && x <= 1.18), 'and climbs at the steady pace the levels below it set, with no wall in the middle', J(steps));
   check(r.firstKill.level === 2, 'one kill takes a fresh hero to Lv 2', J(r.firstKill));
   check(r.boosted.boosted >= r.boosted.carried * 2 && r.boosted.boosted <= r.boosted.carried * 2.3,
     '+100% EXP gear still doubles a kill (earned bonuses stay)', J(r.boosted));
