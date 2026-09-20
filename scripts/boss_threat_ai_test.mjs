@@ -30,9 +30,16 @@ await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'do
 await page.waitForFunction(() => typeof hitMonster === 'function' && typeof updateMonsters === 'function',
   null, { timeout: 120000 });
 
-const r = await page.evaluate(() => {
+const r = await page.evaluate(async () => {
   const out = {};
   const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
+  // A COMBAT map, or nothing below runs: the boot map is the Void, updateMonsters sweeps every wild hostile off a
+  // town/sanctuary map on its first tick, and each boss here was spliced out before its AI ever ran - the stance
+  // timers never ticked and the burst meter never bled, which read as "the threat system does nothing".
+  try { loadMap('forest', 300); } catch (e) {}
+  await new Promise((res) => setTimeout(res, 1200));
+  try { closeAllModals(); } catch (e) {}
+  game.paused = false;
   player.cls = 'warrior'; player.level = 60; player.hp = getMaxHp(); player.x = 700; player.y = 400;
   player._oneShot = false;
 
@@ -49,15 +56,21 @@ const r = await page.evaluate(() => {
     game.monsters.length = 0; game.monsters.push(m);
     return m;
   };
-  // Damage the boss the way the player does, in one burst.
-  const burst = (m, frac) => { hitMonster(m, Math.floor(m.maxHp * frac), false, 'slash'); };
+  // Damage the boss the way the player does, in one burst. The combo multiplier is pinned first: a chain of hits
+  // grows it, and the pressure meter reads the damage that LANDS, so an unpinned chain measures its own combo.
+  // ...and the punish bar is held open: it reads the same damage (x2.5 while the boss is mid-tell, which a fresh
+  // boss often is), and a stagger makes _bossThreatHit stand down - the interaction has its own check below.
+  const burst = (m, frac) => { game.comboMult = 1; game.combo = 0; m._breakMax = Infinity; hitMonster(m, Math.floor(m.maxHp * frac), false, 'slash'); };
+  // BOSS_BURST_PCT is 10% of max HP and BOSS_BREAK_PCT is 16%: a burst at or above the break fills the stagger bar
+  // instead, and _bossThreatHit deliberately stands down inside an earned window (it is checked on its own below).
+  const BURST = 0.12;
   const state = (m) => ({ guard: (m._dirGuardT | 0) > 0, ghost: (m._dirGhostT | 0) > 0,
                           flee: (m._dirFleeT | 0) > 0, burstMeter: Math.round(m._burst || 0) });
 
   // (1) HIGH HP + a hard burst -> BRACE
   {
     const m = mk('legosaurus', 0.95);
-    burst(m, 0.18);
+    burst(m, BURST);
     out.highHp = state(m);
     // and bracing actually reduces what the next hit does
     const hp0 = m.currentHp; hitMonster(m, 100000, false, 'slash');
@@ -68,12 +81,14 @@ const r = await page.evaluate(() => {
   }
 
   // (2) MID HP + a hard burst -> EVADE
-  { const m = mk('octobaby', 0.45); burst(m, 0.18); out.midHp = state(m); }
+  { const m = mk('octobaby', 0.45); burst(m, BURST); out.midHp = state(m); }
 
   // (3) LOW HP + a hard burst -> RETREAT, and it actually backs away
   {
-    const m = mk('young_confused_barnaby', 0.20);
-    burst(m, 0.18);
+    // 28% HP and the shared burst: the boss must LIVE to retreat. At 20% HP an 18%-of-max burst is 90% of what it
+    // has left and the multipliers finish it, so the "retreat" was being read off a corpse that had left the list.
+    const m = mk('young_confused_barnaby', 0.28);
+    burst(m, BURST);
     out.lowHp = state(m);
     for (let i = 0; i < 6; i++) { try { updateMonsters(16); } catch (e) {} }
     // Direction, not displacement: m.x integration needs a loaded map and this
@@ -93,6 +108,7 @@ const r = await page.evaluate(() => {
   {
     const m = mk('legosaurus', 0.95);
     for (let s2 = 0; s2 < 40; s2++) {
+      game.comboMult = 1; game.combo = 0;   // ...or the chain's own combo turns chip into a burst
       hitMonster(m, Math.floor(m.maxHp * 0.008), false, 'slash');   // 0.8% a tick
       for (let i = 0; i < 12; i++) { try { updateMonsters(16); } catch (e) {} }   // ~200ms of bleed
     }
@@ -160,7 +176,7 @@ ok('...and it drives itself AWAY from the player while retreating',
    r.movedAway === true && r.stillFleeing === true, { vx: r.fleeVx, fleeing: r.stillFleeing });
 ok('a burst UNDER the line does not trigger anything',
    r.smallBurst && !r.smallBurst.guard && !r.smallBurst.ghost && !r.smallBurst.flee, r.smallBurst);
-ok('chip damage never trips it, however long it goes on',
+ok('chip damage never builds pressure, however long it goes on',
    r.chip && !r.chip.guard && !r.chip.ghost && !r.chip.flee, r.chip);
 ok('a burst into an earned STAGGER is never answered — the punish window is safe',
    r.duringStagger && !r.duringStagger.guard && !r.duringStagger.ghost && !r.duringStagger.flee, r.duringStagger);

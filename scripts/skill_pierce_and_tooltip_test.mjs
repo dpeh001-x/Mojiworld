@@ -171,9 +171,11 @@ ok('Multi Shot (archer X) never pierced and still does not', r.fired.multiShot.a
 ok('Fireball (mage slot s) is untouched and non-piercing', r.fired.fireball.anyPierce === false, r.fired.fireball);
 
 // --- tooltips -------------------------------------------------------------
-ok('Dark Pulse tooltip now mentions the undead it raises',
-   /undead/i.test(r.desc.darkPulse || '') && /5/.test(r.desc.darkPulse || ''), { desc: r.desc.darkPulse });
-ok('Dark Pulse tooltip still states its AoE damage', /3\.5/.test(r.desc.darkPulse || ''), { desc: r.desc.darkPulse });
+// the tooltip has to match the cast: performAround(220, 1) and _undeadN = 3 (it raised 5 at 3.5x ATK when this was written)
+ok('Dark Pulse tooltip names the undead it raises, and how many',
+   /undead/i.test(r.desc.darkPulse || '') && /3 undead/.test(r.desc.darkPulse || ''), { desc: r.desc.darkPulse });
+ok('Dark Pulse tooltip still states its AoE reach and damage',
+   /220px/.test(r.desc.darkPulse || '') && /1(\.0)?× ATK/.test(r.desc.darkPulse || ''), { desc: r.desc.darkPulse });
 ok('Charged Shot tooltip states the real budget (2, and 3 at rank 10)',
    /pierces 2/i.test(r.desc.chargedShot || '') && /3 at rank 10/i.test(r.desc.chargedShot || ''), { desc: r.desc.chargedShot });
 ok('Ice Spike tooltip stops calling the base spikes piercing',
