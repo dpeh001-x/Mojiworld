@@ -45,7 +45,11 @@ ok('the in-game version chip ships no hardcoded number',
 // stale cached copy identifiable. Comparing against the animator's own last
 // commit (not today's version) means a release that doesn't touch the
 // animator never puts this test into a false failure.
-const badge = (/id="lx-build-badge"[^>]*>\s*build\s+(v0\.\d+\.\d+)/.exec(anim) || [])[1];
+// v0.30.434 made the badge's NUMBER resolve at runtime from the GitHub API, so the markup reads
+// "build …" and there has been no version in the file's text since. What stayed static — and what
+// CLAUDE.md asks to be bumped alongside GAME_VERSION on every animator change — is data-anim, the
+// offline fallback the badge shows when the API does not answer. That is the honest thing to read.
+const badge = (/id="lx-build-badge"[^>]*\bdata-anim="(v0\.\d+\.\d+)"/.exec(anim) || [])[1];
 let wantBadge = null;
 try {
   const sha = execFileSync('git', ['-C', ROOT, 'log', '-1', '--format=%H', '--', 'monster_animator.html'], { encoding: 'utf8' }).trim();
