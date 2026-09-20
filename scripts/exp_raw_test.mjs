@@ -53,7 +53,8 @@ try {
       && !(monsterTypes[t] && (monsterTypes[t].boss || monsterTypes[t].isBoss || monsterTypes[t].zodiacSign))
       && !/^(tower|express|ticket|conductor|mirror|octoLeg)/i.test(t) && !(monsterTypes[t] && monsterTypes[t].miniElite)
       && (v.exp / Math.max(1, v.hp)) <= 0.04).map(([t, v]) => ({ lv: v.lv, exp: v.exp }));
-    const adjRaw = (L) => { let p = mobs.filter((m) => Math.abs(m.lv - L) <= 2);
+    const topMobLv = mobs.reduce((a, m) => Math.max(a, m.lv), 1);
+    const adjRaw = (L0) => { const L = Math.min(L0, topMobLv); let p = mobs.filter((m) => Math.abs(m.lv - L) <= 2);
       if (!p.length) p = mobs.slice().sort((a, b) => Math.abs(a.lv - L) - Math.abs(b.lv - L)).slice(0, 3);
       return p.reduce((s, m) => s + m.exp, 0) / p.length; };
     out.rungs = {}; for (const L of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 19, 24]) out.rungs[L] = Math.round(_lxLevelCost(L) / adjRaw(L));
@@ -85,14 +86,21 @@ try {
   const off = Object.entries(T).filter(([L, want]) => Math.abs(r.rungs[L] - want) > Math.max(1, want * 0.06));
   check(off.length === 0, 'every rung costs the kills it is meant to', 'want ' + J(T) + ' got ' + J(r.rungs));
   check(r.firstRung === 1, 'the first rung is one kill', 'cost ' + r.firstRung);
+  check(Math.abs(r.band[85] / 30000 - 1) <= 0.08 && Math.abs(r.band[99] / 100000 - 1) <= 0.08,
+    'the endgame band is the one asked for: 30,000 kills at Lv 85 rising to 100,000 for 99->100',
+    '85:' + r.band[85] + ' 99:' + r.band[99]);
   // The cost of a level never goes down. The mob pool is uneven (Lv 68 monsters pay 2,081 where Lv 67 pay 2,952),
   // so the bake reads a non-decreasing EXP reference; without it a level can ask for less EXP than the one before.
   const costBack = []; for (let L = 2; L <= 99; L++) if (!(r.costs[L] > r.costs[L - 1])) costBack.push(L);
   check(costBack.length === 0, 'no level ever asks for less EXP than the one before it', 'goes backwards at ' + J(costBack));
-  // One straight line: Lv 10->19 climbs 800 -> 1,500, and every level from 19 up costs 300 more kills than the last.
-  const line = (L) => (L <= 19) ? (800 + (1500 - 800) * (L - 10) / 9) : (1500 + 300 * (L - 19));
+  // One straight line, in four legs: 800 -> 1,500 to Lv 19, then +300 a level to 19,800 at Lv 80 (where the
+  // monster roster ends), then the approach 19,800 -> 30,000 by Lv 85, then +5,000 a level to 100,000 at Lv 99.
+  const line = (L) => (L <= 19) ? (800 + (1500 - 800) * (L - 10) / 9)
+    : (L <= 80) ? (1500 + 300 * (L - 19))
+    : (L <= 85) ? (19800 + (30000 - 19800) * (L - 80) / 5)
+    : (30000 + 5000 * (L - 85));
   const offLine = []; for (let L = 11; L <= 99; L++) { const d = r.band[L] / line(L) - 1; if (Math.abs(d) > 0.45) offLine.push(L + ':' + r.band[L] + ' vs ' + Math.round(line(L))); }
-  check(offLine.length === 0, 'every rung from 11 to 99 sits on the straight line (+300 kills a level from Lv 19)', J(offLine));
+  check(offLine.length === 0, 'every rung from 11 to 99 sits on the straight line (+300 a level to Lv 80, +5,000 from Lv 85)', J(offLine));
   // And it never walls up. Two levels still step up hard and it is the MONSTERS, not the table: the Lv 68 pool
   // pays 2,081 where Lv 67 pays 2,952, and above Lv 80 there are no ordinary monsters left at all. The old curve
   // had ten such steps and a x1.91.
