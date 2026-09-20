@@ -27,7 +27,10 @@ try {
     return { waiting, exact: at === now + 3600000, label: !!label, past, never, nan }; });
   check(sage.waiting && sage.exact && sage.label && sage.past && sage.never && sage.nan, 'Sage Mira: an hour left means NOT ready (and says so); past, never-bought and a bad stamp are ready', J(sage));
   // ---- 2. reward-less echoes ----
-  const gate = await page.evaluate(() => { const W = { slot: 'weapon', name: 't' }, P = { slot: null, type: 'potion' }; const g = (m, it) => _lxBossGearGate(Object.assign({ isBoss: true }, m), it || W, true);
+  const gate = await page.evaluate(() => { const W = { slot: 'weapon', name: 't' }, P = { slot: null, type: 'potion' }; // v0.30.861 gave a PAYING echo one gear roll per 10 play-minutes, keyed per boss (game._echoGearAt). These mocks
+    // carry no type, so every one of them hashes to the same key and the second paying echo was gated by the first's
+    // stamp. Each probe is its own boss here; the cooldown has its own coverage in econ_guard_test.
+    const g = (m, it) => { game._echoGearAt = {}; return _lxBossGearGate(Object.assign({ isBoss: true }, m), it || W, true); };
     return { live: g({}), free: g({ _echoBoss: true }), rush: g({ _echoBoss: true, _rushBoss: true, zodiacBoss: true }), prologue: g({ _echoBoss: true, type: 'gravitos' }),
       nightmare: g({ _echoBoss: true, _nightmareEcho: true }), duo: g({ _echoBoss: true, _duoTrial: true }), zodiac: g({ _echoBoss: true, zodiacBoss: true }), potion: g({ _echoBoss: true }, P) }; });
   check(gate.live && !gate.free && !gate.rush && !gate.prologue && gate.nightmare && gate.duo && gate.zodiac && gate.potion, 'gear gate: free echo, Boss Rush echo and the prologue memory drop none; live boss, Nightmare, Duo Trial, zodiac echo and non-gear are untouched', J(gate));

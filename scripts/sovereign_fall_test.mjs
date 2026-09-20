@@ -68,7 +68,10 @@ const r = await page.evaluate(() => {
   // a floor by routes that never touch it (the Boss Rush, the Echo Keeper).
   const sp = String(typeof spawnMonster === 'function' ? spawnMonster : '');
   out.warmWired = sp.includes('clip_sovereign_fall.mp4') && sp.includes('_lxSovCineWarm');
-  const kmAll = String(typeof killMonster === 'function' ? killMonster : '');
+  // v0.30.861 split the kill path: killMonster is a thin AFK-drops wrapper around _killMonsterRaw, which is where
+  // the hook lives now. Read the whole path, not just the outer function.
+  const kmAll = String(typeof killMonster === 'function' ? killMonster : '')
+              + String(typeof _killMonsterRaw === 'function' ? _killMonsterRaw : '');
   out.deathHook = kmAll.includes("m.type === 'towerSovereign' && !m._isMirage && !m._sovFallPlayed");
   return out;
 });

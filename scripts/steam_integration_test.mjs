@@ -252,7 +252,10 @@ try {
     // (E3) invite button opens the overlay to friends
     const invited = _lxSteamInviteFriends();
     // (E4) stats push carries lifetime counters
+    // bosses_defeated counts DISTINCT bestiary '_boss_' keys, not game.bossDefeated (which is keyed by MAP and
+    // double-counted). Seed what the stat actually reads.
     game.kills = 137; player.mojicoins = 5400; game.bossDefeated = { a: 1, b: 1 };
+    game.bestiary = Object.assign({}, game.bestiary, { _boss_king: 1, _boss_mooma: 1 });
     _lxSteamPushStats();
     const stat = rec.stats[rec.stats.length - 1];
     return { solo, coop, invited, invOverlay: rec.overlay[0], stat };

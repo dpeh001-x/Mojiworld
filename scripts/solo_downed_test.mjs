@@ -27,7 +27,9 @@ try {
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => typeof _tryCheatDeathRevive === 'function' && typeof loadMap === 'function', null, { timeout: 45000 });
   await page.waitForTimeout(3000);
-  await page.evaluate(() => { try { player.cls = 'warrior'; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap('glasswindSteppe'); } catch (e) {} });
+  // v0.29.48 — a down DURING onboarding is deliberately silent (no banner, 5 s auto-respawn), and onboarding
+  // includes "the tutorial is not marked seen". This suite is about the ordinary solo down, so leave onboarding.
+  await page.evaluate(() => { try { player.cls = 'warrior'; player._tutorialSeen = true; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap('glasswindSteppe'); } catch (e) {} });
   await sleep(800);
   // pump the downed tick (headless rAF throttling)
   await page.evaluate(() => { window.__pump = setInterval(() => { try { if (player._downed) _coopDownedTick(80); } catch (e) {} }, 80); });

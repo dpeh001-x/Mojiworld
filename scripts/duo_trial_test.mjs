@@ -56,6 +56,11 @@ const g = await page.evaluate(async () => {
   player.setshards = 0; try { _duoTrialReward(50, 'kingKrook'); } catch (e) {} out.secondClear = player.setshards; out.refightMul = (typeof LX_REFIGHT_SHARD_MUL === 'number') ? LX_REFIGHT_SHARD_MUL : null;
   if (game._bossKills) delete game._bossKills.duo_kingKrook; game.duoTrials = 1;
   player.setshards = 0; net.isHost = false; net.hostId = 7;
+  // A guest only pays for a monster it has actually SEEN: _coopApplyKill asks _lxCoopRewardInfo for the uid's
+  // mirrored record and drops the frame when there is none, or when the frame's type disagrees with it. That
+  // hardening arrived with the v0.30.85x guest-reward work; this synthetic uid had no record, so it earned 0.
+  game.monsters.push({ uid: 999, type: 'kingKrook', _coopMirror: true, isBoss: true, level: 50,
+                       exp: 1000, mojicoins: 500, currentHp: 1, maxHp: 1, x: 0, y: 0, w: 40, h: 40 });
   try { _coopApplyKill({ t: 'kill', id: 7, u: 999, e: 0, c: 0, x: 0, y: 0, map: game.currentMap, tp: 'kingKrook', b: 1, bl: 50, dt: 1 }); } catch (e) { out.guestErr = String(e).slice(0, 120); }
   out.guestShards = player.setshards; net.isHost = true; net.hostId = 1;
   // shared fate: a partner going down fails the live trial -> plain echo frame (bx=1, no dt)

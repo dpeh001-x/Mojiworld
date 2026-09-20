@@ -7,7 +7,9 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 const require = createRequire('C:/Users/dpeh0/Mojiworld/package.json');
 const { chromium } = require('playwright-core');
-process.chdir('C:/Users/dpeh0/Mojiworld');
+// serve from SERVE_ROOT when one is given: this used to chdir to one developer's checkout unconditionally, so it
+// always graded that working copy — a candidate build passed in MOJI_GAME_FILE was a 404 and the page had no game.
+process.chdir(process.env.SERVE_ROOT || 'C:/Users/dpeh0/Mojiworld');
 const PORT = 9187;
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
 const srv = spawn(process.execPath, ['serve.js', String(PORT)], { stdio: 'ignore' });
@@ -20,11 +22,18 @@ let saveBlob;
 {
   const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
   await p.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'load', timeout: 60000 });
-  await p.waitForTimeout(11000);
+  // wait for the game itself rather than a flat 11 s: boot takes ~16 s on a loaded machine, and this evaluate
+  // then threw "player is not defined" before it had a chance to run.
+  await p.waitForFunction(() => typeof player === 'object' && player && typeof getMaxHp === 'function', null, { timeout: 120000 });
+  await p.waitForTimeout(1500);
   saveBlob = await p.evaluate(() => {
     player.cls = 'warrior'; player.job = 'knight'; player.level = 30; player.hp = getMaxHp();
     player.look = player.look || {}; player.look.name = 'DownProbe';
     window._prologuePending = false; window._prologueActive = false; game._resetting = false;
+    // v0.30.789 refuses to save a hero that has not been created yet: this probe sets player.cls by hand rather
+    // than through applyClass, so the flush wrote nothing and the blob came back null.
+    window._lxAwaitingCreation = false;
+    const _cs = document.getElementById('class-select-modal'); if (_cs) _cs.style.display = 'none';
     _flushSaveStateNow();
     return localStorage.getItem('levelx_save_v1');
   });

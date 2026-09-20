@@ -51,10 +51,13 @@ try {
     const nodes = svg ? [...svg.querySelectorAll('g')].filter(g => g.querySelector('circle')) : [];
     const texts = svg ? [...svg.querySelectorAll('text')].map(t => t.textContent) : [];
     const qm = texts.filter(t => t && t.trim() === '???').length;
-    return { hasSvg: !!svg, nodeCount: nodes.length, fogged: qm };
+    // v0.30.647 retired the "???" label; fog is now a dimmed node (opacity 0.46). Count both so the check keeps
+    // meaning: in devMode nothing may be fogged either way.
+    const dim = svg ? [...svg.querySelectorAll('g')].filter(g => g.getAttribute('opacity') === '0.46').length : -1;
+    return { hasSvg: !!svg, nodeCount: nodes.length, fogged: qm, dimmed: dim };
   });
   ok('teleport section renders the W-map SVG diagram', view.hasSvg && view.nodeCount > 50, view);
-  ok('devMode reveals ALL names (zero ??? fog labels)', view.fogged === 0, view);
+  ok('devMode reveals every map (nothing fogged: no ??? labels, no dimmed nodes)', view.fogged === 0 && view.dimmed === 0, view);
 
   // 4) full coverage: diagram positions + chip row == every MAPS id
   const coverage = await page.evaluate(() => {
@@ -71,12 +74,18 @@ try {
 
   // 3) click an UNVISITED node on the diagram → teleports there
   const nodeTp = await page.evaluate(() => {
+    // every probe above arrived somewhere, and arriving marks a map visited, so by now nothing is unvisited.
+    game.visitedMaps = { [game.currentMap]: true };
     const positions = _wmComputePositions().positions || {};
-    const target = Object.keys(positions).find(id => id !== game.currentMap && !(game.visitedMaps && game.visitedMaps[id]) && MAPS[id]);
     const modal = document.getElementById('dev-modal');
     const svg = modal.querySelector('svg');
-    // find the node <g> whose <title> contains the target's name
-    const g = [...svg.querySelectorAll('g')].find(el => { const t = el.querySelector('title'); return t && t.textContent.includes(MAPS[target].name); });
+    // The check above proves every map is reachable by a node OR a chip; some (everdawn_megamall among them) are
+    // chip-only, so pick an unvisited map that actually HAS a node rather than the first unvisited id.
+    // v0.30.646 replaced the SVG <title> with an aria-label (the hover card took over the tooltip), so read that.
+    const nodeFor = (id) => [...svg.querySelectorAll('g')].find(el => { const a = el.getAttribute('aria-label') || (el.querySelector('title') || {}).textContent || ''; return MAPS[id] && a.includes(MAPS[id].name); });
+    const target = Object.keys(positions).find(id => id !== game.currentMap && !(game.visitedMaps && game.visitedMaps[id]) && MAPS[id] && nodeFor(id));
+    if (!target) return { target: null, err: 'no unvisited node on the diagram' };
+    const g = nodeFor(target);
     if (!g) return { target, err: 'node not found' };
     g.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     return { target, now: game.currentMap, moved: game.currentMap === target };
@@ -105,9 +114,14 @@ try {
   // regression: the normal W-key travel map still fogs unvisited maps
   const fog = await page.evaluate(() => {
     devTeleport('town');
+    // the probes above teleported all over the world, and arriving marks a map visited — so by now nothing is
+    // unvisited and there is nothing left to fog. Start the fog question from a fresh traveller.
+    game.visitedMaps = { town: true };
     const host = document.createElement('div'); document.body.appendChild(host);
     _renderWorldMapDiagram(host, { mode: 'travel', isAccessible: () => ({ ok: true }) });
-    const qm = [...host.querySelectorAll('text')].filter(t => t.textContent.trim() === '???').length;
+    // v0.30.647 retired the "???" label: an unvisited node is now drawn present but dimmed (opacity 0.46 on the
+    // node group), and that dim IS the fog. Count that instead of a label the design deleted.
+    const qm = [...host.querySelectorAll('g')].filter(g => g.getAttribute('opacity') === '0.46').length;
     host.remove();
     return { fogged: qm };
   });
