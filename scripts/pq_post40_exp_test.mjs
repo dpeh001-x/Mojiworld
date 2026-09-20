@@ -63,6 +63,7 @@ const r = await page.evaluate(() => {
   const share = (id, lv) => {
     player.level = lv; player.exp = 0;
     player.quests = { active: {}, completed: {}, progress: {}, unlocked: {} };
+    player._pqStagePaid = {}; player._pqChainRuns = 0;   // each measurement is a FIRST run, not a repeat
     player.quests.active[id] = { targetCount: (QUESTS[id] && QUESTS[id].count) || 1, rewardScale: 1 };
     const _origLvUp = window._maybeLevelUp;
     window._maybeLevelUp = function () {};

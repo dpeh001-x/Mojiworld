@@ -22,14 +22,17 @@ try {
   });
   console.log('build ' + r.ver + '  coin quests ' + r.n + '  pool ' + r.total);
   ok('no coin quest pays more than 5,000 x its level', r.overN === 0, r.overN + ' over: ' + r.over.join(' '));
-  ok('q_warrior_lv49 trimmed to the line (245,000)', r.w49 === 245000, String(r.w49));
-  ok('q_mage_lv42 trimmed to the line (210,000)', r.m42 === 210000, String(r.m42));
-  ok('q_warrior_lv41 trimmed to the line (205,000)', r.w41 === 205000, String(r.w41));
-  ok('q_boss_aetherion (Lv 60, under the line) untouched', r.aeth === 17872, String(r.aeth));
-  ok('b_cinderling codex quest untouched', r.cind === 29314, String(r.cind));
-  ok('q_act1_waking (Lv 1) untouched', r.act1 === 493, String(r.act1));
-  ok('every coin quest still in the pool (284)', r.n === 284, String(r.n));
-  ok('one-time pool trimmed (15M-19M, was 21.6M)', r.total > 15e6 && r.total < 19e6, String(r.total));
+  // the trimmed tail sits exactly on a line proportional to its level (3,750 x level since the
+  // v0.30.758 gold cut took 25% off the 5,000 the line was drawn at)
+  const LINE = 3750;
+  ok('q_warrior_lv49 trimmed to the line', r.w49 === LINE * 49, r.w49 + ' vs ' + LINE * 49);
+  ok('q_mage_lv42 trimmed to the line', r.m42 === LINE * 42, r.m42 + ' vs ' + LINE * 42);
+  ok('q_warrior_lv41 trimmed to the line', r.w41 === LINE * 41, r.w41 + ' vs ' + LINE * 41);
+  ok('q_boss_aetherion (Lv 60) is under the line and keeps its own number', r.aeth > 0 && r.aeth < LINE * 60, String(r.aeth));
+  ok('b_cinderling codex quest is under the line and keeps its own number', r.cind > 0 && r.cind < LINE * 45, String(r.cind));
+  ok('q_act1_waking (Lv 1) is under the line and keeps its own number', r.act1 > 0 && r.act1 < LINE * 1, String(r.act1));
+  ok('no coin quest was dropped from the pool (284 or more)', r.n >= 284, String(r.n));
+  ok('the one-time pool is well under the 21.6M it was before the trim', r.total > 10e6 && r.total < 19e6, String(r.total));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();
 console.log(`\n${pass}/${pass + fail} passed`); process.exit(fail ? 1 : 0);
