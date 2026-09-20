@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.948';
+const GAME_VERSION = 'v0.30.949';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -12869,7 +12869,12 @@ const GAME_VERSION = 'v0.30.948';
     Object.defineProperty(P, 'src', { configurable: true, enumerable: dSrc.enumerable,
       get() { return this._lxHeldSrc != null ? abs(this._lxHeldSrc) : dSrc.get.call(this); },
       set(v) {
-        if (open || this._lxNow === true || typeof v !== 'string' || !RX.test(v) || this.isConnected || this.fetchPriority === 'high') {
+        // v0.30.x — fetchPriority is NOT on this list any more. It is a claim about what matters
+        // in a live frame ("these gate a combat effect"), and before the title there is no frame to
+        // matter in: 115 images, 13.0 MB, came through this door ahead of the menu. The paths that
+        // genuinely need art now say so explicitly - the gate's loadOne marks _lxNow, and the start
+        // map's preloader calls _lxBootHold.now() itself (see the 'high' branch in _lxPreloadMapAssets).
+        if (open || this._lxNow === true || typeof v !== 'string' || !RX.test(v) || this.isConnected) {
           this._lxHeldSrc = null; dSrc.set.call(this, v); return;
         }
         if (this._lxHeldSrc == null) held.push(this);
@@ -12879,8 +12884,25 @@ const GAME_VERSION = 'v0.30.948';
       get() { return this._lxHeldSrc != null ? false : dCmp.get.call(this); } });
     if (dPri && dPri.set && dPri.get) Object.defineProperty(P, 'fetchPriority', { configurable: true, enumerable: dPri.enumerable,
       get() { return dPri.get.call(this); },
-      set(v) { dPri.set.call(this, v); if (v === 'high') start(this); } });
-    if (typeof oDecode === 'function') P.decode = function () { start(this); return oDecode.apply(this, arguments); };
+      set(v) { dPri.set.call(this, v); if (v === 'high' && open) start(this); } });   // v0.30.x — only once the menu is up; see the src setter
+    // v0.30.x — decode() USED TO START THE DOWNLOAD. Ten parse-time loaders in this file do
+    // `img.src = ...; img.decode().catch(() => {})` back to back (v0.30.340/343, so a first draw
+    // mid-fight is not a sync decode), and that second line walked 153 images worth 11.4 MB straight
+    // past the hold before the title. None of them awaits the result. A held image's decode() now
+    // resolves when the hold lets the image go and it has decoded for real - the promise is still
+    // honest, it just stops being a download order. Anything that truly needs pixels now marks
+    // _lxNow or calls _lxBootHold.now(), both of which still bypass.
+    if (typeof oDecode === 'function') P.decode = function () {
+      if (this._lxHeldSrc == null) return oDecode.apply(this, arguments);
+      const self = this;
+      return new Promise((res) => {
+        const tick = () => {
+          if (self._lxHeldSrc != null) return void setTimeout(tick, 250);
+          try { const p = oDecode.call(self); if (p && p.then) p.then(res, res); else res(); } catch (e) { res(); }
+        };
+        tick();
+      });
+    };
     const release = (why) => {
       if (open) return; open = true;
       const q = held.filter((im) => im._lxHeldSrc != null);
