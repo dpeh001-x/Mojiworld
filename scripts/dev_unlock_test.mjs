@@ -1,5 +1,10 @@
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// v0.30.924 — the passphrase is no longer written in this file: CHANGELOG.html published it, the public site
+// serves the changelog, and the lock icon works there, so the word was the whole gate. Set LX_DEV_PW to run these.
+const DEV_PW = process.env.LX_DEV_PW || '';
+if (!DEV_PW) { console.log('SKIP dev_unlock_test — set LX_DEV_PW to the dev passphrase to run it'); process.exit(0); }
+
 // Resolve a browser that actually EXISTS. The Linux path stays first so CI is
 // untouched, but it is the only candidate this line used to have - and with
 // PW_EXE unset on a dev machine that made the launch throw before a single
@@ -34,7 +39,7 @@ try {
 
   // --- type the passphrase ---
   await page.evaluate(() => { try { document.activeElement && document.activeElement.blur(); } catch (e) {} });
-  await page.keyboard.type('mojisuccess', { delay: 40 });
+  await page.keyboard.type(DEV_PW, { delay: 40 });
   await page.waitForTimeout(300);
 
   ok('LX_DEV set after passphrase', await page.evaluate(() => localStorage.getItem('LX_DEV') === '1'));
@@ -64,7 +69,7 @@ try {
   await page2.evaluate(() => {
     const i = document.createElement('input'); i.id = '_t'; document.body.appendChild(i); i.focus();
   });
-  await page2.keyboard.type('mojisuccess', { delay: 20 });
+  await page2.keyboard.type(DEV_PW, { delay: 20 });
   await page2.waitForTimeout(200);
   ok('typing in a text field does NOT unlock', await page2.evaluate(() => localStorage.getItem('LX_DEV') === null));
 

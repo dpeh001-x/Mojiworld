@@ -7,6 +7,11 @@
 import { createRequire } from 'node:module'; import path from 'node:path';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+// v0.30.924 — the passphrase is no longer written in this file: CHANGELOG.html published it, the public site
+// serves the changelog, and the lock icon works there, so the word was the whole gate. Set LX_DEV_PW to run these.
+const DEV_PW = process.env.LX_DEV_PW || '';
+if (!DEV_PW) { console.log('SKIP dev_surface_and_intro_test — set LX_DEV_PW to the dev passphrase to run it'); process.exit(0); }
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
@@ -29,7 +34,7 @@ const probe = async (host, packaged) => {
   await page.waitForTimeout(3000);
   await page.evaluate(() => { try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; } loadMap('forest', 300); game.paused = false; });
   await page.waitForTimeout(800);
-  await page.keyboard.type('mojisuccess', { delay: 40 });          // the typed passphrase
+  await page.keyboard.type(DEV_PW, { delay: 40 });          // the typed passphrase
   await page.waitForTimeout(300);
   await page.keyboard.press('Backquote');                            // the backtick prompt / console
   await page.waitForTimeout(500);

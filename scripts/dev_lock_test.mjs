@@ -7,6 +7,11 @@ import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+// v0.30.924 — the passphrase is no longer written in this file: CHANGELOG.html published it, the public site
+// serves the changelog, and the lock icon works there, so the word was the whole gate. Set LX_DEV_PW to run these.
+const DEV_PW = process.env.LX_DEV_PW || '';
+if (!DEV_PW) { console.log('SKIP dev_lock_test — set LX_DEV_PW to the dev passphrase to run it'); process.exit(0); }
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || '10481';
 const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
@@ -56,7 +61,7 @@ try {
     const s3 = await state(page);
     check(page._dialogs.length === 1 && s3.flag !== '1' && s3.lock === '🔒' && !s3.console, 'a wrong password at the lock leaves it locked', { dialogs: page._dialogs, s3 });
     // the password
-    page._answer = 'mojisuccess'; await clickLock(page); await page.waitForTimeout(500);
+    page._answer = DEV_PW; await clickLock(page); await page.waitForTimeout(500);
     const s4 = await state(page);
     console.log('after the password:', JSON.stringify(s4));
     check(s4.flag === '1' && s4.lock === '🔓' && s4.console && s4.devClass && s4.surface, 'the lock\'s password unlocks it: 🔓, the dev console opens, the dev settings show', s4);
