@@ -9,7 +9,7 @@
 // as cards with the item's sprite, the chosen piece floated large on the bench
 // with its current affixes, an arm-then-confirm Reforge button, and a before ->
 // after strip. Fixture: Lv 60 legendary gear in every slot (the accessory
-// transcended, so ineligible) and 1,200 setshards.
+// transcended, so ineligible) and REFORGE_COST + 700 setshards, so one reforge leaves 700.
 // Run: node scripts/reforge_picker_test.mjs   (MOJI_GAME_FILE overrides)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -62,7 +62,11 @@ const open = await ev(() => {
   player.equipped.weapon = mk('weapons', 'weapon');
   player.equipped.armor = mk('armors', 'armor');
   const acc = mk('accessories', 'accessory'); acc.transcended = true; player.equipped.accessory = acc;
-  player.setshards = 1200;
+  // v0.30.431's shard-sink pass took the reforge from 500 to REFORGE_COST = 2,000, and 1,200 shards
+  // stopped being enough: the button read "Not enough Setshards" and the three checks below it were
+  // reading a reforge that never happened. Purse and expectation both come off the live constant.
+  window._rfCost = (typeof REFORGE_COST === 'number') ? REFORGE_COST : 2000;
+  player.setshards = window._rfCost + 700;
   window._rfOldArmor = player.equipped.armor; window._rfOldWeapon = player.equipped.weapon;
   reforgeRandomEquipment();
   const m = document.getElementById('reforge-modal');
@@ -104,12 +108,13 @@ ok('the Reforge button arms first (explicit confirm) instead of spending on one 
 await page.evaluate(() => { const b = document.getElementById('do-reforge'); if (b) b.click(); });   // absent on the pre-picker build
 await page.waitForTimeout(400);
 const done = await ev(() => ({
-  shards: player.setshards, armorNew: player.equipped.armor !== window._rfOldArmor, weaponSame: player.equipped.weapon === window._rfOldWeapon,
+  shards: player.setshards, cost: window._rfCost, armorNew: player.equipped.armor !== window._rfOldArmor, weaponSame: player.equipped.weapon === window._rfOldWeapon,
   stars: player.equipped.armor.stars, affixes: Array.isArray(player.equipped.armor.affixes), slot: player.equipped.armor.slot,
   last: !!document.querySelector('#reforge-preview .rf-last'), stillOpen: document.getElementById('reforge-modal').style.display === 'flex',
   benchName: (document.querySelector('#reforge-preview .rf-name') || {}).textContent || '', armorName: player.equipped.armor.name,
 }));
-ok('confirming reforges THE CHOSEN piece: armor re-rolled, weapon untouched, 500◈ spent', !done.err && done.armorNew && done.weaponSame && done.shards === 700, done.err || JSON.stringify(done));
+ok('confirming reforges THE CHOSEN piece: armor re-rolled, weapon untouched, the reforge cost spent',
+  !done.err && done.armorNew && done.weaponSame && done.shards === 700, done.err || JSON.stringify(done));
 ok('★ level, slot and affix structure survive the reforge', !done.err && done.stars === 3 && done.affixes && done.slot === 'armor', done.err || JSON.stringify(done));
 ok('the bench stays open on the new piece with a before → after strip', !done.err && done.stillOpen && done.last && done.benchName === done.armorName, done.err || JSON.stringify(done));
 const closed = await ev(() => { closeAllModals(); return document.getElementById('reforge-modal').style.display; });
