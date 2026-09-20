@@ -172,7 +172,13 @@
 // v0.30.895 - v65 -> v66. Sprites/ui/block_warrior / rogue / mage / archer / shield.webp are REPLACED under
 // their own names (the Block icons repainted in the skill icons' style - block-icons), so a returning browser would
 // otherwise keep the old ones.
-const CACHE = 'mojiworld-assets-v66';   // v0.30.895 - the Block icons in the skill icons' style
+// v0.30.947 - v66 -> v67. FORTY-FOUR AUDIO FILES ARE REPLACED UNDER THEIR OWN NAMES since the v66 bump:
+// v0.30.900 recut 31 monster / boss / npc / voice cues, and v0.30.907 trimmed 1.0-3.8 s of leading silence from
+// 13 music tracks so they loop without a gap. mp3 is in ASSET_RE, so this is exactly the case the notes above
+// keep describing - and the quiet one: stale-while-revalidate serves the OLD cut instantly and refreshes in the
+// background, so a returning player hears the gap for the whole session and the fix only the session after.
+// scripts/sw_cache_freshness.mjs now fails when an asset is replaced without this line moving.
+const CACHE = 'mojiworld-assets-v67';   // v0.30.947 - the recut sound and the gapless music
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
