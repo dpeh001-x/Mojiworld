@@ -69,7 +69,11 @@ if (!_tbl || !_rung || !_cost) throw new Error('level-cost table / _lxFirstRungE
 const _lxFirstRungExp = new Function(`${_tbl[0]}\n${_cost[0]}\n${_rung[0]}\nreturn _lxFirstRungExp;`)();
 const TABLE_RUNG = +_tbl[0].match(/\[\s*(\d+)/)[1];
 ok('source: ascension reads the first rung from the table (v0.30.524)', /player\.expToNext = _lxFirstRungExp\(\);/.test(RESET));
-ok('first rung is the table entry, not the retired literal 30', _lxFirstRungExp() === TABLE_RUNG && TABLE_RUNG > 1000, `${_lxFirstRungExp()} vs ${TABLE_RUNG}`);
+// The rung itself is the user's number, not this test's: Lv 1->2 has cost one kill since the v0.30.938
+// rebake ("one straight line from Lv 1 to Lv 100"). This line also asserted TABLE_RUNG > 1000, pinning a
+// value the design had already moved off - so it failed against a curve that was exactly as intended. What
+// the check is FOR is that the reset reads the table instead of the retired literal 30; that part stays.
+ok('first rung is the table entry, not the retired literal 30', _lxFirstRungExp() === TABLE_RUNG && TABLE_RUNG !== 30, `${_lxFirstRungExp()} vs ${TABLE_RUNG}`);
 
 const SLOTS = ['weapon','armor','accessory','body_top','body_bottom','cape','gloves','boots','helmet'];
 

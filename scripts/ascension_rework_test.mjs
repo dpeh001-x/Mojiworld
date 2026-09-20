@@ -47,8 +47,11 @@ const g = await page.evaluate(async () => {
   // Ascendant Edicts: locked at count 1 for Dry Run, Iron Foe unlocked
   out.edicts = EDICTS.filter(e => e.asc).map(e => e.id + ':' + e.asc);
   out.ironLocked = _edictLocked(EDICTS.find(e => e.id === 'ascIronFoe')); out.dryLocked = _edictLocked(EDICTS.find(e => e.id === 'ascDryRun'));
-  game.prestige.count = 2; game.edicts = { ascDryRun: true, ascIronFoe: true };
+  game.prestige.count = 2;
+  game.edicts = {}; out.capNoDry = _boonCap();
+  game.edicts = { ascDryRun: true, ascIronFoe: true };
   out.capWithDry = _boonCap();
+  out.capLevel = player.level;
   const hp0 = player.hp = 10; player.maxHp = 100; player.consumables = { hp_s: 5, mp_s: 5 };
   try { useQuickPotion('hp'); } catch (e) {} out.potionSealed = player.hp === hp0 && player.consumables.hp_s === 5;
   // base HP jitters per spawn, so compare the MEAN of eight spawns each way
@@ -61,9 +64,17 @@ const g = await page.evaluate(async () => {
 ok('PRESTIGE_LEVEL is 100 and XP freezes there', g.cap === 100 && g.frozen === true, { cap: g.cap, frozen: g.frozen, err: g.gainErr });
 ok('at 100 Guguma\'s chip appears with an heirloom picker (none + equipped boons)', g.chip && g.heirOpts === 3, { chip: g.chip, opts: g.heirOpts });
 ok('Ascend with Guguma opens the confirm, titled for her and naming the heirloom', /GUGUMA/.test(g.confirmTitle || '') && g.confirmMentionsHeirloom, { title: g.confirmTitle });
-ok('confirming resets to Lv 1, counts the ascension, and the heirloom rides through equipped', g.afterLevel === 1 && g.count === 1 && g.boons.length === 1 && g.eq[0] === 0 && g.chipGone, { lv: g.afterLevel, count: g.count, boons: g.boons, eq: g.eq });
+// v0.30.717 made boon slots a level ladder (Lv 25 / 50 / 75) and an ascension puts you at Lv 1, which is
+// below the first rung - so the reset now clamps the loadout (_lxClampBoonSlots) and the heirloom waits in
+// the BAG. This line asked for eq[0] === 0, the v0.30.422 behaviour, and failed against the newer rule.
+// The heirloom surviving at all is what the ascension promises, so that is what it checks.
+ok('confirming resets to Lv 1, counts the ascension, and the heirloom rides through in the bag', g.afterLevel === 1 && g.count === 1 && g.boons.length === 1 && g.eq.length === 0 && g.chipGone, { lv: g.afterLevel, count: g.count, boons: g.boons, eq: g.eq });
 ok('two Ascendant Edicts exist; Iron Foe unlocks at 1, Dry Run stays locked at 1', g.edicts.length === 2 && g.ironLocked === false && g.dryLocked === true, { edicts: g.edicts, iron: g.ironLocked, dry: g.dryLocked });
-ok('Dry Run: +1 boon slot and potions sealed', g.capWithDry === 4 && g.potionSealed === true, { cap: g.capWithDry, sealed: g.potionSealed });
+// Also v0.30.717: the base is the level ladder, not a flat 3, so an absolute 4 only ever held for a Lv 75+
+// character. Measured at Lv 1 after the ascension above it is 1 (0 rungs + the edict), which is correct and
+// read as a failure. The edict's contract is "+1 slot" - so compare it against the same level's cap with the
+// edict off, which holds at every level.
+ok('Dry Run: +1 boon slot and potions sealed', g.capWithDry === g.capNoDry + 1 && g.potionSealed === true, { cap: g.capWithDry, without: g.capNoDry, atLevel: g.capLevel, sealed: g.potionSealed });
 ok('Iron Foe: enemies spawn with 1.5x HP', g.ironHp === 1.5, { ratio: g.ironHp });
 ok('no page errors', errs.length === 0, { errs: errs.slice(0, 3) });
 await b.close(); srv.kill();

@@ -64,16 +64,25 @@ const restored = await page2.evaluate(() => {
   let stored = null; try { stored = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
   return {
     liveLevel: p.level, liveCoins: p.mojicoins,
+    verdict: (typeof game !== 'undefined' && game) ? game._saveVerdict : null,
     storedLevel: stored && stored.player && stored.player.level,
     equippedShape: p.equipped && typeof p.equipped,
     recoveryPresent: !!localStorage.getItem(KEY + '_recover'),
   };
 });
-// Level is the identity marker. Coins are NOT asserted exactly: boot legitimately
-// grants them (daily//login bonuses), and an earlier cut demanded an exact match
-// and failed at 123556 vs 123456 — against a load that had worked perfectly.
+// Level is the identity marker. Coins are NOT asserted to survive: 'equipped' joined
+// _LX_SIGNED_PLAYER_KEYS, so editing it in localStorage - which is what the line above does - is
+// tampering by the game's definition, and a 'bad' verdict zeroes the wallet ON PURPOSE (progress
+// kept, currencies reset, with a toast that says so). save_guard_test asserts that same reset as a
+// PASS in "edited save: money reset to 0". This check demanded coins >= 123456 from the one path
+// designed to take them away, so the two suites had been contradicting each other on every run.
+// What A2 is for is that the previously-fatal equipped:null does not stop the load - so it pins the
+// load, and pins the tamper guard as the reason the wallet is empty rather than letting a silently
+// blank character pass.
 ok('the Lv 47 character LOADS from a save with equipped:null',
-   restored.liveLevel === HERO_LV && restored.liveCoins >= HERO_COINS, restored);
+   restored.liveLevel === HERO_LV, restored);
+ok('and the tamper guard is what emptied the wallet (equipped is a signed field)',
+   restored.verdict === 'bad' && restored.liveCoins < HERO_COINS, { verdict: restored.verdict, coins: restored.liveCoins });
 ok('the stored save still holds the character (not overwritten)',
    restored.storedLevel === HERO_LV, { storedLevel: restored.storedLevel });
 ok('no recovery copy was needed — the load simply succeeded', restored.recoveryPresent === false);

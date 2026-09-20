@@ -63,6 +63,7 @@ const r = await page.evaluate(() => {
   return {
     types, afterTriple, afterRefield, afterHotkey,
     hpMult: +(st0.maxHp / maxHp).toFixed(2), atkMult: +(st0.atk / atk).toFixed(2),
+    summonHp: (typeof _lxSummonHp === 'function') ? eval('_lxSummonHp')() : null, monHp: st0.maxHp,
     trimmedAtkPts,
     // MOJIMON_UPG_PT_CAP was removed from the game in c72bec79; the budget is
   // now _mojimonPoints(). This is a reported diagnostic, not an assertion.
@@ -76,9 +77,15 @@ ok('triple summon (same + different species) fields exactly ONE', r.afterTriple 
 ok('map-travel re-field keeps exactly ONE', r.afterRefield === 1, { count: r.afterRefield });
 ok('H quick-summon path keeps exactly ONE', r.afterHotkey === 1, { count: r.afterHotkey });
 
-// v0.29.NEW — per user, "Summoned Mojimon should have the same HP as the
-// current player". Was 10× at launch, briefly 6×, now exactly 1×.
-ok('BALANCE: HP is exactly the player\'s (parity)', Math.abs(r.hpMult - 1) < 0.02, { hpMult: r.hpMult });
+// v0.29.507 put the mon at parity with the player (it had been 10x). v0.29.910 moved it again, per user
+// ("Yes i want the mojimon included as well", after "ensure that all the summons scale to the players
+// HP*15"): _mojimonStatsFor reads the shared _lxSummonHp() now, so the companion sits in the same pool as
+// the wolf, the pack, the eagle and the undead. This check asked for the retired parity number and failed
+// at hpMult 15 against a mon that was exactly where the design put it. What matters is that the mon cannot
+// DRIFT from that pool, so that is what it pins - the pool itself, not a multiplier copied into this file.
+ok('BALANCE: HP is the shared summon pool, not a number of its own',
+   r.summonHp != null && Math.abs(r.monHp / r.summonHp - 1) < 0.02,
+   { monHp: r.monHp, summonHp: r.summonHp, xPlayer: r.hpMult });
 ok('BALANCE: ATK is half the player (was 100%)', Math.abs(r.atkMult - 0.5) < 0.02, { atkMult: r.atkMult });
 ok('BALANCE: even 40 hand-edited ATK points cannot push the mon past the player',
    r.capAtk < 1.0 && Math.abs(r.capAtk - 0.5 * (1 + Math.min(15, r.trimmedAtkPts) * 0.05)) < 0.02,
