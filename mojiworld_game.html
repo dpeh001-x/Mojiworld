@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.936';
+const GAME_VERSION = 'v0.30.937';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -151491,6 +151491,17 @@ function _lxBlockIconSrc() {
 // Repoint every rendered Block icon at the current class. Cheap and idempotent —
 // called on class change, on load, and after the skill bar re-renders.
 let _lxBlockIconLast = null;
+// v0.30.937 BOSS-FIGHT LAG: THE SKILL BAR REBUILT ITSELF EVERY FRAME. A live trace of the Gravitos fight spends
+// 717 ms of every 8 s on UpdateLayoutTree and 651 ms on recalcStyle, and the invalidation tracker blames one
+// place: renderSkillBar. Setting .textContent removes the cooldown's text node and inserts a new one, which
+// dirties layout up the bar (462 'Removed from layout #text' + 462 'Node was inserted into tree' in 8 s) - and
+// in a boss fight every slot is cooling at once, ten times a second. Mutating the existing node's value says
+// the same thing without touching the tree.
+function _sbCdText(el, txt) {
+  const n = el.firstChild;
+  if (n && n.nodeType === 3 && !n.nextSibling) { if (n.nodeValue !== txt) n.nodeValue = txt; return; }
+  el.textContent = txt;
+}
 function _lxRefreshBlockIcon(force) {
   try {
     const src = _lxBlockIconSrc();
@@ -151723,22 +151734,26 @@ function renderSkillBar() {
       // v0.30.296 perf — integer gate BEFORE the string: the old compare built
       // (and discarded) two toFixed strings per cooling slot per HUD tick.
       // Rendered text is identical (both were already one decimal).
-      const pctQ = Math.round(frac * 1000);
+      // v0.30.937 0.1% steps redrew the 40px pie on EVERY frame of any cooldown under ~16 s; 0.5% is 1.8 degrees,
+      // about half a pixel at the wipe's edge, and it updates 20 times a second instead of 60.
+      const pctQ = Math.round(frac * 200);
       const cdQ = Math.round(player.blockCD / 100);
       if (bs._cdPctQ !== pctQ) {
         bs._cdPctQ = pctQ;
-        bs.root.style.setProperty('--cd-pct', (pctQ / 10).toFixed(1));
+        // v0.30.937 on the overlay, not the slot root: only .skill-cd reads --cd-pct, and writing it on the root
+        // invalidated the icon, the key chip and the MP chip alongside it (1188 subtree invalidations in 8 s).
+        bs.cdEl.style.setProperty('--cd-pct', (pctQ / 2).toFixed(1));
       }
       if (bs._cdTxtQ !== cdQ) {
         bs._cdTxtQ = cdQ;
-        bs.cdEl.textContent = (cdQ / 10).toFixed(1);
+        _sbCdText(bs.cdEl, (cdQ / 10).toFixed(1));   // v0.30.937 in place, see _sbCdText
       }
     } else if (bs._cd) {
       bs._cd = false;
       bs._cdPctQ = null;
       bs._cdTxtQ = null;
       bs.cdEl.style.display = 'none';
-      bs.root.style.removeProperty('--cd-pct');
+      bs.cdEl.style.removeProperty('--cd-pct');   // v0.30.937 written on the overlay now
     }
   }
   // -- Skill slots (live) --
@@ -151792,22 +151807,22 @@ function renderSkillBar() {
       }
       const frac = (matched.cd > 0) ? Math.min(1, cd / matched.cd) : 1;   // guard cd:0/undefined -> no Infinity/NaN width (mirrors the HUD-deck path)
       // v0.25.35 — conic-gradient pie-wipe via --cd-pct (was height fill)
-      const pctQ = Math.round(frac * 1000);   // v0.30.296 perf — same integer gate as the block slot
+      const pctQ = Math.round(frac * 200);   // v0.30.937 0.5% steps - see the block slot above
       const cdQ = Math.round(cd / 100);
       if (s._cdPctQ !== pctQ) {
         s._cdPctQ = pctQ;
-        s.root.style.setProperty('--cd-pct', (pctQ / 10).toFixed(1));
+        s.cdEl.style.setProperty('--cd-pct', (pctQ / 2).toFixed(1));   // v0.30.937 on the overlay that reads it
       }
       if (s._cdTxtQ !== cdQ) {
         s._cdTxtQ = cdQ;
-        s.cdEl.textContent = (cdQ / 10).toFixed(1);
+        _sbCdText(s.cdEl, (cdQ / 10).toFixed(1));   // v0.30.937 in place, see _sbCdText
       }
     } else if (s._cdShown) {
       s._cdShown = false;
       s._cdPctQ = null;
       s._cdTxtQ = null;
       s.cdEl.style.display = 'none';
-      s.root.style.removeProperty('--cd-pct');
+      s.cdEl.style.removeProperty('--cd-pct');   // v0.30.937 written on the overlay now
     }
   }
 }
