@@ -200,12 +200,17 @@ const horde = await ev(async () => {
   // can run two sim ticks inside one rAF — so the per-frame count must bucket
   // by game.time, not by rAF, or a legitimate 2 x 12 reads as a breach. A run
   // on the composed tip read 13 against the cap of 12 for exactly that reason.
-  let cur = 0, curT = -1, maxPerFrame = 0, total = 0, lateTint = 0, lateOther = 0, frames = 0;
+  let cur = 0, curT = -1, maxPerFrame = 0, total = 0, lateTint = 0, lateOther = 0, frames = 0, pins = 0, latePins = 0;
   const oCE = document.createElement.bind(document);
   document.createElement = function (t) {
     if (t === 'canvas') {
       const st = new Error().stack || '';
       if (/_lxTintBake|_lxDrawSoft/.test(st) && !/_lxPlainOf/.test(st)) {
+        // _lxPinned is not a composite mint and is deliberately outside the budget: it copies an <img> to a canvas
+        // ONCE per image, for the whole session, to stop the repeated ImageDecodeTasks that cost 7.3s of an 8s
+        // fight. Counting its warm-up burst here read 34 "over budget" mints while the composites peaked at 6.
+        // It is checked on its own below - a pin that recurs is the regression that would matter.
+        if (/_lxPinned/.test(st)) { pins++; if (frames > 360) latePins++; return oCE.apply(this, arguments); }
         const gt = game.time | 0;
         if (gt !== curT) { if (cur > maxPerFrame) maxPerFrame = cur; cur = 0; curT = gt; }
         cur++; total++;
@@ -227,7 +232,7 @@ const horde = await ev(async () => {
   clearInterval(drv); document.createElement = oCE;
   const cap = 12;   // _lxMintBudget's ceiling
   game.monsters = [];
-  return { maxPerFrame, total, lateTint, lateOther, cap, mobs: 46 };
+  return { maxPerFrame, total, lateTint, lateOther, cap, mobs: 46, pins, latePins };
 });
 ok('in a 45-mob + boss fight, EXPENSIVE mints per frame never exceed the budget ceiling (pre-fix: 16-22 on spike frames)',
   !horde.err && horde.maxPerFrame <= horde.cap,
@@ -242,6 +247,10 @@ ok('in a 45-mob + boss fight, EXPENSIVE mints per frame never exceed the budget 
 // Genuine thrash (the pre-fix build: 108 feather mints against 25 tint bakes
 // in the same window) blows past it by 2x; a first draft used a flat <= 10
 // and failed at 11 on a build behaving exactly as designed.
+// A pin is once per image, forever, so after warm-up the only ones left are images the fight had not shown yet
+// (a late status tint, a first cast). Measured 0-1 across runs against ~180 during warm-up; churn would be dozens.
+ok('one-time image pins stay one-time: warm-up only, not per frame',
+  !horde.err && horde.latePins <= 4 && horde.pins > 20, `${horde.pins} pins during warm-up, ${horde.latePins} in the last 240 frames`);
 ok('and feather composites never re-mint once cached: late feather mints stay within new tinted sources + one first-seen attack set',
   !horde.err && horde.lateOther <= horde.lateTint + 12,
   horde.err || `${horde.lateOther} feather mints in the last 240 frames against ${horde.lateTint} new status-tint bakes (+12 allowed)`);

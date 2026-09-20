@@ -56,7 +56,9 @@ try {
       shadowlord_clones: () => ({ clones: player._clones && player._clones[0] && player._clones[0].life }),
       hexmaster_grandhex: () => ({ orbs: player._hexOrbs && player._hexOrbs.life }),
       beastmaster_pack: () => ({ wolves: player.pack && player.pack[0] && player.pack[0].life }),
-      warlord_ult: () => ({ enrage: Math.round((player._warlordEnrageUntil - performance.now()) / 100) * 100, bloodlust: player.buffs.bloodlust }),
+      // _warlordEnrageUntil is a game.time stamp in FRAMES (set with _msFrames, compared against game.time), not a
+      // performance.now() one - read as ms it came back ~-9,400
+      warlord_ult: () => ({ enrage: Math.round(((player._warlordEnrageUntil - game.time) * (1000 / 60)) / 100) * 100, bloodlust: player.buffs.bloodlust }),
       shadowlord_ult: () => ({ shade: player._shade && player._shade.life }),
       archbishop_ult: () => ({ invulnerable: player.invulnerable }),
       ballista_ult: () => ({ turret: player._ballistaTurrets && player._ballistaTurrets[0] && player._ballistaTurrets[0].life }),

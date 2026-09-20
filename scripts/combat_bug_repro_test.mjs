@@ -95,7 +95,8 @@ ok('BUG B — that difference materially changes hit rate',
 
 // === did the shipped call site get fixed? ===================================
 const src = await page.evaluate(() => {
-  const s = eval('hitMonster').toString();
+  // hitMonster is a thin wrapper now (the AFK-kill guard); the miss roll lives in _hitMonsterCore, so read both
+  const s = String(eval('hitMonster')) + (typeof _hitMonsterCore === 'function' ? String(_hitMonsterCore) : '');
   return { usesMobLevel: /_rollHitVsLevelGap\(\s*_mobLevel\(/.test(s), usesRaw: /_rollHitVsLevelGap\(\s*m\.level\s*\|\|\s*1\s*\)/.test(s) };
 });
 ok('FIXED? hitMonster passes _mobLevel(m) to the miss roll', src.usesMobLevel === true, src);

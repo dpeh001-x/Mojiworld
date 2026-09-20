@@ -80,7 +80,10 @@ try {
     reset(); player.skillRanks = { marksman_oneshot: 5 };
     const stamps = []; const raw = {}; let armed = false;
     player.skillCooldowns = new Proxy(raw, { set(t, k, v) { if (armed && k === 'marksman_oneshot' && v > (t[k] || 0) + 1000) stamps.push(Math.round(v)); t[k] = v; return true; } });
-    castSkill('marksman_oneshot'); armed = true; await sleep(7200);
+    // The window is timed off the SIM clock (_lxDeNow = game.time x 1000/60), which runs slower than wall time in
+    // a headless page - a flat 7.2s sleep ended before the window closed, so nothing was ever stamped.
+    castSkill('marksman_oneshot'); armed = true;
+    for (let i = 0; i < 400 && !stamps.length; i++) await sleep(100);
     const deadeye = { stamps, want: Math.round(_skillRealCd('marksman_oneshot')), unranked: Math.round(SKILLS.marksman_oneshot.cd * _skillCdMul('marksman_oneshot')) };
     return { casts, pills, mpBad, cdBad, pillBad, perkBad, deadeye, groups: Object.keys(groups).length };
   });
