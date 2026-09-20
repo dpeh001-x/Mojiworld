@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.950';
+const GAME_VERSION = 'v0.30.951';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -116506,7 +116506,15 @@ function _reconcileTutGhost() {
   if (!modal || !modal.classList.contains('tut-dock')) return;
   let other = false;
   try { other = (typeof _anyOtherModalOpen === 'function') && !!_anyOtherModalOpen(); } catch (e) { other = false; }
-  modal.classList.toggle('tut-ghost', other);
+  // v0.30.951 going ghost (a panel opened over the card) and coming back changes the card's own height -
+  // measured 11px on the Quests step, the one size change still arriving in a single frame after the
+  // tween landed: the class is toggled from an 8 Hz watch that never told the fit anything had moved.
+  // It does not catch all of it - a residual ~8px on that same step still lands at once, while the card
+  // is ghosted under the open panel - but nothing on the tour lurches any more. Fires only on an actual
+  // change, or this would re-measure eight times a second for the length of the tour.
+  const _was = modal.classList.contains('tut-ghost');
+  const _now = modal.classList.toggle('tut-ghost', other);
+  if (_now !== _was) { try { _lxTutFit(); } catch (e) {} }
 }
 function _startTutGhostWatch() {
   if (_tutGhostTimer) return;
@@ -116529,6 +116537,28 @@ function _stopTutGhostWatch() {
 // the bar. This measures that band and puts the card in it.
 // Everything is read in CLIENT px and written in the dock's own units - the whole HUD is inside a scaled
 // container (the card is 460 CSS px and 887 client px at 1080p), so the ratio has to come back out.
+// v0.30.951 THE CARD CHANGES SIZE WITHOUT SNAPPING. Each step is a different height - measured across the
+// fourteen at 1280x720: 251, 251, 251, 251, 287, 246, 252, 266, 265, 251, 251, 265, 251, 250 css px - and
+// ticking an objective changes it again mid-step (the TRY IT pill becomes DONE and Guguma's line is
+// replaced). The card is anchored to the BOTTOM of the band, so every one of those was the top edge
+// jumping, by up to 41px, one frame after the text swapped. Height cannot be transitioned from `auto`,
+// so this animates from the outgoing height to the incoming one explicitly.
+// Deliberately the Web Animations API and not a CSS transition. A transition needs an inline height
+// pinned on the card for its duration, and a pin that outlives its tween - an error thrown midway, a
+// step swapped under it - leaves the card clipped at a stale height. An animation needs no pin and
+// drops back to the natural height by itself, so the worst case is that it does not run.
+let _lxTutLastH = 0, _lxTutAnim = null;
+function _lxTutSmooth(card) {
+  try {
+    const to = card.offsetHeight, from = _lxTutLastH;
+    _lxTutLastH = to;
+    if (!from || !to || Math.abs(to - from) < 4) return;   // first paint, or a change too small to see
+    if (typeof card.animate !== 'function') return;        // no WAAPI: the card resizes as it always did
+    if (_lxTutAnim) { try { _lxTutAnim.cancel(); } catch (e) {} }
+    _lxTutAnim = card.animate([{ height: from + 'px' }, { height: to + 'px' }],
+      { duration: 180, easing: 'cubic-bezier(0.2, 0.7, 0.2, 1)' });
+  } catch (e) {}
+}
 function _lxTutFit() {
   try {
     const m = document.getElementById('tutorial-modal');
@@ -116548,10 +116578,12 @@ function _lxTutFit() {
     const roomPx = Math.max(160 * k, (vh - 16 * k - lift) - ceiling);       // client px the card may occupy
     m.style.setProperty('--tut-lift', (lift / (k || 1)).toFixed(1) + 'px');
     if (card) card.style.setProperty('--tut-maxh', (roomPx / (k || 1)).toFixed(1) + 'px');
+    _lxTutSmooth(card);   // v0.30.951 carry the height change instead of snapping it
   } catch (e) {}
 }
 try { window.addEventListener('resize', () => { try { _lxTutFit(); } catch (e) {} }); } catch (e) {}
 function _ensureTutChrome() {
+  _lxTutLastH = 0;   // v0.30.951 every open starts the height tween from scratch
   const modal = document.getElementById('tutorial-modal');
   if (!modal) return;
   const card = modal.querySelector('.modal');
@@ -116726,6 +116758,10 @@ function _tutPing(tag) {
     if (typeof _renderTutPips === 'function') _renderTutPips();
     const _nb = document.getElementById('tut-next');
     if (_nb) _nb.classList.add('ready');
+    // v0.30.951 DONE is a different height from TRY IT, and Guguma's line, the step title and the pips have
+    // all just been rewritten: re-measure the band and glide, or the card jumps in place a beat before it
+    // advances. Placed after the LAST of those writes, for the same reason as the render's own call.
+    try { _lxTutFit(); } catch (e) {}
     if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('chirp'); } catch (e) {} }
     if (_tutStep < TUTORIAL_STEPS.length - 1) {
       const _at = _tutStep;
@@ -116845,7 +116881,6 @@ function _renderTutorialStep() {
   // title lives in #tut-step-title below it.
   if ($('tut-step-title')) $('tut-step-title').textContent = (step._done ? '\u2705 ' : '') + step.title;
   if ($('tut-body')) $('tut-body').innerHTML = _tutTouchify((typeof step.body === 'function') ? step.body() : step.body);
-  try { _lxTutFit(); } catch (e) {}   // v0.30.948 every step is a different height
   // v0.27.5 \u2014 INTERACTIVE OBJECTIVE PILL. Steps with a `tryIt` ask show a
   // "TRY IT" pill under the step title; the matching gameplay action (via
   // _tutPing) ticks it \u2705 live. Created once, re-rendered per step.
@@ -116971,6 +117006,11 @@ function _renderTutorialStep() {
       _tm.classList.add('tut-step-in');
     }
   }
+  // v0.30.951 the fit - and the height tween it drives - belongs at the END of the render. v0.30.948 put it
+  // beside the body write, which is a third of the way in: it measured a card still carrying the previous
+  // step's Guguma line, pips and button labels, tweened towards THAT height, and the rest of the render
+  // then snapped the card to its real one. Measured: 9 of 9 size changes jumped anyway.
+  try { _lxTutFit(); } catch (e) {}
 }
 function _closeTutorial(markSeen) {
   const modal = document.getElementById('tutorial-modal');
