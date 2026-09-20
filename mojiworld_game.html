@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.933';
+const GAME_VERSION = 'v0.30.934';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53088,6 +53088,18 @@ function _lxPqStageCount(qid) {
 // Resume stays the default everywhere (that linear flow was itself a user
 // request, v0.26.298); this just stops it being the ONLY door.
 function _lxPqRestartChain() {
+  // v0.30.934 this wiped the five completions, then called acceptQuest - which refuses below the Lv 29 gate - and
+  // loaded the lobby anyway. After an ascension (prestige keeps quests.completed and sets you back to Lv 1) picking
+  // "Run the Ticket Rush again" erased the Rush from the log, started nothing, and dropped a Lv 1 in a Lv 29 map.
+  try {
+    const _req = (typeof QUESTS !== 'undefined' && QUESTS.q_clockwork_underpass && QUESTS.q_clockwork_underpass.levelReq) | 0;
+    if (_req > 0 && (player.level | 0) < _req) {
+      if (typeof showToast === 'function') showToast('\uD83C\uDFAB The Ticket Rush starts at Lv ' + _req + ' \u2014 come back when you are ready.', 'rare');
+      if (typeof closeDialog === 'function') { try { closeDialog(); } catch (e) {} }
+      return;
+    }
+  } catch (e) {}
+
   // v0.30.407 - a restart is a repeat only if the Rush was actually finished. Milo offers "reset my papers"
   // mid-chain too, and that used to count as a run: a player who restarted after Stage 1 paid repeat
   // rates (25% coins, 50% EXP) on the first run they ever completed, permanently.
@@ -53115,14 +53127,19 @@ function _lxPqRestartChain() {
   if (typeof showToast === 'function') showToast('🎫 Ticket Rush restarted — Stage 1: Underpass Lobby', 'legendary');
   if (typeof loadMap === 'function') loadMap('clockworkUnderpassLobby', 300);
 }
+// v0.30.934 THE PQ STAGES ARE MAP-SCOPED. _lxPqDirectTick already knew that, but it reports "nothing advanced" when the
+// player is on the wrong map, and killMonster then falls through to the generic tickQuestKill - which matches on the
+// target alone. All three stages target ticketMech, so Stage 3 (the Carriage) and the Endless Express could be
+// ground out in the Stage 1 lobby, on respawning mobs, without boarding anything. One table, read by both.
+const _LX_PQ_STAGE_MAP = {
+  q_clockwork_underpass: 'clockworkUnderpassLobby',
+  q_pq_carriage:         'tower',
+  q_clockwork_express:   'clockworkExpress',
+};
 function _lxPqDirectTick() {
   if (game.expedition && game.expedition.active) return false;
   if (!player || !player.quests || !player.quests.active) return false;
-  const _QID_MAP = {
-    q_clockwork_underpass: 'clockworkUnderpassLobby',
-    q_pq_carriage:         'tower',
-    q_clockwork_express:   'clockworkExpress',
-  };
+  const _QID_MAP = _LX_PQ_STAGE_MAP;   // v0.30.934 one table (see above)
   const _curMap = game.currentMap;
   const _qids = ['q_clockwork_underpass', 'q_pq_carriage', 'q_clockwork_express'];
   let _ticked = false;   // v0.30.407 - reported to the caller: a ticket-family kill that advanced no PQ stage must still reach tickQuestKill (the class Lv-37 Conductor Sweep could never progress)
@@ -55520,6 +55537,8 @@ function tickQuestKill(monsterType, isBoss) {
   const _questMonsterType = _MONSTER_QUEST_ALIAS[monsterType] || monsterType;
   for (const id of Object.keys(player.quests.active)) {
     const q = QUESTS[id]; if (!q) continue;
+    // v0.30.934 a stage that names a map counts only on that map, whichever path brought the kill here
+    if (_LX_PQ_STAGE_MAP[id] && _LX_PQ_STAGE_MAP[id] !== game.currentMap) continue;
     // v0.26.433 — Multi-objective kill quests. A quest may carry
     // `objectives: [{target, count}, ...]` — several monster types, each with
     // its own quota. Progress is tracked per-target in a.objProgress; the
@@ -55974,6 +55993,8 @@ function tickQuestVisit(mapId) {
   // v0.25.586 — same Object.keys() snapshot fix as tickQuestKill above.
   for (const id of Object.keys(player.quests.active)) {
     const q = QUESTS[id]; if (!q) continue;
+    // v0.30.934 a stage that names a map counts only on that map, whichever path brought the kill here
+    if (_LX_PQ_STAGE_MAP[id] && _LX_PQ_STAGE_MAP[id] !== game.currentMap) continue;
     if (q.kind !== 'visit' || q.target !== mapId) continue;
     if (!player.quests.active[id]) continue;
     // v0.25.953 — Class re-check per audit. Mirrors the v0.25.698 check
@@ -55993,6 +56014,9 @@ function tickQuestVisit(mapId) {
       if (!player.quests.progress) player.quests.progress = {};
       const _next = (player.quests.progress[id] || 0) + 1;
       player.quests.progress[id] = _next;
+      // v0.30.934 ...and onto the active quest, which is what the HUD tracker and the journal bar actually read. The
+      // side table was written and deleted and never displayed, so a 4-chest quest sat at 0/4 until it finished.
+      try { const _aq = player.quests.active[id]; if (_aq) _aq.progress = _next; } catch (e) {}
       if (_next < _target) {
         granted = true; // counts as progress for HUD refresh
         continue;
@@ -105346,6 +105370,7 @@ So… do you need a lift?`;
     // v0.25.787 — Backup advancement opener.
     if (player.cls === 'rogue' &&
         player.quests && player.quests.completed && player.quests.completed.q_inner_dim_trial &&
+        (player.level | 0) >= JOB_ADVANCE_LEVEL &&   // v0.30.934 prestige keeps the completion and sets you back to Lv 1: this opener had no gate
         !player.job) {
       opts.push({ t:'Advance my class ✦',
         cb:() => { closeDialog(); if (typeof openAdvancement === 'function') openAdvancement(); } });
@@ -105417,6 +105442,7 @@ So… do you need a lift?`;
     // the advancement directly.
     if (player.cls === 'warrior' &&
         player.quests && player.quests.completed && player.quests.completed.q_inner_dim_trial &&
+        (player.level | 0) >= JOB_ADVANCE_LEVEL &&   // v0.30.934 prestige keeps the completion and sets you back to Lv 1: this opener had no gate
         !player.job) {
       opts.push({ t:'Advance my class ✦',
         cb:() => { closeDialog(); if (typeof openAdvancement === 'function') openAdvancement(); } });
@@ -105472,6 +105498,7 @@ So… do you need a lift?`;
     // v0.25.787 — Backup advancement opener.
     if (player.cls === 'mage' &&
         player.quests && player.quests.completed && player.quests.completed.q_inner_dim_trial &&
+        (player.level | 0) >= JOB_ADVANCE_LEVEL &&   // v0.30.934 prestige keeps the completion and sets you back to Lv 1: this opener had no gate
         !player.job) {
       opts.push({ t:'Advance my class ✦',
         cb:() => { closeDialog(); if (typeof openAdvancement === 'function') openAdvancement(); } });
@@ -105533,6 +105560,7 @@ So… do you need a lift?`;
     // v0.25.787 — Backup advancement opener.
     if (player.cls === 'archer' &&
         player.quests && player.quests.completed && player.quests.completed.q_inner_dim_trial &&
+        (player.level | 0) >= JOB_ADVANCE_LEVEL &&   // v0.30.934 prestige keeps the completion and sets you back to Lv 1: this opener had no gate
         !player.job) {
       opts.push({ t:'Advance my class ✦',
         cb:() => { closeDialog(); if (typeof openAdvancement === 'function') openAdvancement(); } });
