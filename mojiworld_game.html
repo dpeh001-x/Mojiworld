@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.945';
+const GAME_VERSION = 'v0.30.946';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -12904,7 +12904,21 @@ const GAME_VERSION = 'v0.30.945';
     };
     window._lxBootHold = { release, now: start, peek: () => held.find((im) => im._lxHeldSrc != null) || null,
       stats: () => ({ open, held: held.filter((im) => im._lxHeldSrc != null).length, started }) };
-    setTimeout(() => release('failsafe'), 20000);
+    // v0.30.x — THE FAILSAFE FIRED BEFORE THE THING IT WAS WAITING FOR. It was a flat 20 s, and the
+    // menu is what releases the hold normally (release('menu') / release('resume') below). Measured
+    // on a 12 Mbps line with the hold on: the title is not up until ~40 s, so at 30 s this handed
+    // 1,967 queued images to the same connection the boot gate was still drawing its last files
+    // from, and the title arrived later for it. A failsafe is for a menu that never comes, so it
+    // asks whether the menu has come: it re-checks once a second after the first 20 s, and keeps an
+    // absolute ceiling so a boot that genuinely stalls still gets its art rather than nothing.
+    const _fsFrom = Date.now();
+    const _fsTick = () => {
+      if (open) return;
+      try { const m = document.getElementById('lo-menu'); if (m && m.offsetParent !== null) return release('failsafe (menu up)'); } catch (e) {}
+      if (Date.now() - _fsFrom >= 75000) return release('failsafe (ceiling)');
+      setTimeout(_fsTick, 1000);
+    };
+    setTimeout(_fsTick, 20000);
   } catch (e) {}
 })();
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
