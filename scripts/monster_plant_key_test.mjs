@@ -56,11 +56,13 @@ try {
   const U = await boot(browser, true);
   await pressT(U);
   const open1 = await U.evaluate(() => ({ mpOpen: (typeof _LX_MP !== 'undefined' && !!_LX_MP.open), pings: window.__pings }));
-  ok('unlocked: T OPENS Monster Plant', open1.mpOpen === true, open1);
-  ok('unlocked: ping does NOT double-fire (dev takes the key)', open1.pings === 0, open1);
-  await pressT(U);
-  const open2 = await U.evaluate(() => (typeof _LX_MP !== 'undefined' && !!_LX_MP.open));
-  ok('unlocked: T again CLOSES Monster Plant (toggle)', open2 === false, { open2 });
+  // v0.30.748 removed the binding outright (per user): T is the co-op ping for everyone, dev or not, and the tool
+  // spawns arbitrary mobs and rewrites the draw offsets the whole bestiary is calibrated against. It opens from the
+  // console only.
+  ok('unlocked: T does NOT open Monster Plant either (v0.30.748 removed the binding)', open1.mpOpen === false, open1);
+  ok('unlocked: T still fires the co-op ping, like anyone else', open1.pings === 1, open1);
+  const viaConsole = await U.evaluate(() => { _lxMpToggle(); const o = !!_LX_MP.open; _lxMpToggle(); return { o, shut: !_LX_MP.open }; });
+  ok('the console call opens it and closes it again', viaConsole.o === true && viaConsole.shut === true, viaConsole);
 
   // skill bound on T wins
   const bound = await U.evaluate(() => {
@@ -81,7 +83,8 @@ try {
 
   // panel header advertises the new key
   const hdr = await U.evaluate(() => { _lxMpToggle(); const t = _LX_MP.root.textContent; _lxMpToggle(); return t.slice(0, 60); });
-  ok('overlay header shows "(T)"', hdr.includes('Monster Plant (T)'), { hdr });
+  ok('the header names the call that opens it, not a key that does nothing',
+     hdr.includes('_lxMpToggle()') && !/Monster Plant \(/.test(hdr), { hdr });
 
   ok('no page errors (unlocked)', U._errors.length === 0, U._errors.slice(0, 2));
   await U.close();

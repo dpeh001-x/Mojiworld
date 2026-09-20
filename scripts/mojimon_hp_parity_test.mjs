@@ -1,4 +1,7 @@
-// Per user: "Summoned Mojimon should have the same HP as the current player."
+// Per user: "Summoned Mojimon should have the same HP as the current player." SUPERSEDED the same month by
+// v0.29.904 ("summon HP scales to player max HP x15") and v0.29.910, which joined the MojiMon companion to that
+// shared summon pool. What this pins now: a fielded mon carries _lxSummonHp() - the pool every summon draws from -
+// it is fielded full, and the pool follows the player's max HP.
 //
 //   node serve.js 8852 && node scripts/mojimon_hp_parity_test.mjs 8852 [page]
 import { chromium } from 'playwright-core';
@@ -44,7 +47,8 @@ const r = await page.evaluate(async () => {
   dismiss(true);
   summon(TYPE, { free: true, quiet: true });
   const a = fielded();
-  const atSummon = { player: maxHp(), mon: a ? a.maxHp : null, cur: a ? a.currentHp : null };
+  const pool = () => (typeof _lxSummonHp === "function") ? _lxSummonHp() : null;
+  const atSummon = { player: maxHp(), pool: pool(), mon: a ? a.maxHp : null, cur: a ? a.currentHp : null };
 
   // --- 2. parity holds after the player's max HP moves
   const savedMods = p.mods.maxHp;
@@ -59,7 +63,7 @@ const r = await page.evaluate(async () => {
   // 18-frame `spawn` gate at the top of updateMinions, which `continue`s past
   // everything below it.
   for (let i = 0; i < 30; i++) eval('updateMinions')(1);
-  const afterLevel = { player: maxHp(), mon: a.maxHp, cur: a.currentHp, frac: a.currentHp / a.maxHp };
+  const afterLevel = { player: maxHp(), pool: pool(), mon: a.maxHp, cur: a.currentHp, frac: a.currentHp / a.maxHp };
 
   // --- 3. upgrades scale from the NEW base, not the old x10
   const base = statsFor(TYPE).maxHp;
@@ -75,15 +79,15 @@ const r = await page.evaluate(async () => {
 });
 
 ok('a mon was actually fielded', r.atSummon.mon != null, { type: r.TYPE });
-ok('SAME HP: a fresh mon\'s max HP equals the player\'s max HP',
-   r.atSummon.mon === r.atSummon.player, { player: r.atSummon.player, mon: r.atSummon.mon });
-ok('it is summoned at full health', r.atSummon.cur === r.atSummon.player, r.atSummon);
-ok('NOT the old 10x pool', r.atSummon.mon < r.atSummon.player * 2,
-   { mon: r.atSummon.mon, oldWouldHaveBeen: r.atSummon.player * 10 });
+ok('a fresh mon carries the shared summon pool (player max HP x15, v0.29.904)',
+   r.atSummon.mon === r.atSummon.pool, { player: r.atSummon.player, mon: r.atSummon.mon, pool: r.atSummon.pool });
+ok('it is fielded at full health', r.atSummon.cur === r.atSummon.mon, r.atSummon);
+ok('the pool comes from _lxSummonHp, not a hardcoded number', r.atSummon.pool === r.atSummon.player * 15,
+   { player: r.atSummon.player, pool: r.atSummon.pool });
 
-ok('parity survives the player gaining max HP',
-   r.afterLevel.mon === r.afterLevel.player,
-   { player: r.afterLevel.player, mon: r.afterLevel.mon, wasBefore: r.before.mon });
+ok('the pool follows the player gaining max HP',
+   r.afterLevel.mon === r.afterLevel.pool,
+   { player: r.afterLevel.player, pool: r.afterLevel.pool, mon: r.afterLevel.mon, wasBefore: r.before.mon });
 // Guard the check above from passing vacuously: the pool MUST actually have
 // moved, or "fraction preserved" is just reading back the value we set.
 ok('the re-sync actually fired (the pool moved)',

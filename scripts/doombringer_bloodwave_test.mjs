@@ -43,6 +43,7 @@ const r = await page.evaluate(async () => {
     return game.projectiles.filter(p => p && p.skill === 'bloodwave');
   };
   const doomR = swing('doombringer', 1);
+  out.mirrorsLeftward = /if \(p\.vx < 0\) ctx\.scale\(-1, 1\)/.test(String(drawProjectiles));   // the renderer mirrors near-horizontal art travelling left
   out.doomRight = doomR.length ? { bspr: doomR[0].bspr || null, flip: !!doomR[0].bsprFlipX, w: doomR[0].w, h: doomR[0].h, vx: doomR[0].vx } : null;
   const doomL = swing('doombringer', -1);
   out.doomLeft = doomL.length ? { bspr: doomL[0].bspr || null, flip: !!doomL[0].bsprFlipX, vx: doomL[0].vx } : null;
@@ -70,21 +71,24 @@ const r = await page.evaluate(async () => {
 });
 
 // Fetch the art the way the game would.
-const url = 'Sprites/projectiles/p_ult_doombringer.webp';
+const url = 'Sprites/projectiles/p_bloodlust_shockwave.webp';   // v0.29.694 - the swing-rider's own crescent
 const status = await page.evaluate(async (u) => { try { return (await fetch(u)).status; } catch (e) { return -1; } }, url);
 await b.close(); try { srv.kill(); } catch (e) {}
 
 console.log('doombringer facing right ->', JSON.stringify(r.doomRight));
-console.log('doombringer facing left  ->', JSON.stringify(r.doomLeft));
+console.log('doombringer facing left  ->', JSON.stringify(r.doomLeft), 'renderer mirrors leftward:', r.mirrorsLeftward);
 console.log('plain berserker          ->', JSON.stringify(r.berserker));
 console.log('art fetch                ->', status);
 
 ok('a doombringer swing launches a bloodwave at all', !!r.doomRight, {});
-ok('it uses the doombringer blade-wave sprite', r.doomRight && r.doomRight.bspr === 'bult_doombringer', r.doomRight);
-ok('the LEFT-FACING art is flipped so it reads travelling right',
-   r.doomRight && r.doomRight.flip === true, { flip: r.doomRight && r.doomRight.flip });
-ok('the flip is declared facing left too (not a one-direction fix)',
-   r.doomLeft && r.doomLeft.bspr === 'bult_doombringer' && r.doomLeft.flip === true, r.doomLeft);
+// v0.29.694 (per user "use the p_bloodlust_shockwave for shockwave projectiles produced by the bloodlust skill"):
+// the swing-rider has its OWN crescent instead of borrowing the Doombringer ult's, and that art is authored facing
+// RIGHT - so it carries no bsprFlipX, and leftward travel is mirrored by the renderer itself.
+ok('it uses the Bloodlust crescent of its own', r.doomRight && r.doomRight.bspr === 'bloodlust_wave', r.doomRight);
+ok('the right-facing art declares no flip (a flip would draw every wave backwards)',
+   r.doomRight && !r.doomRight.flip, { flip: r.doomRight && r.doomRight.flip });
+ok('facing left is the same sprite, mirrored by the renderer on vx < 0',
+   r.doomLeft && r.doomLeft.bspr === 'bloodlust_wave' && !r.doomLeft.flip && r.mirrorsLeftward, r.doomLeft);
 ok('it travels the way the player faces', r.doomRight && r.doomRight.vx > 0 && r.doomLeft && r.doomLeft.vx < 0,
    { right: r.doomRight && r.doomRight.vx, left: r.doomLeft && r.doomLeft.vx });
 ok('the wave is the enlarged size (104x74, per user "make it larger")',
@@ -96,12 +100,12 @@ ok('the ult still reads BIGGER (its waves are 100x130 and 130x170)',
    r.doomRight && (r.doomRight.w * r.doomRight.h) < (100 * 130),
    { area: r.doomRight && r.doomRight.w * r.doomRight.h, ultFollowUpArea: 100 * 130 });
 ok('EVERY berserker gets the crescent, not just Doombringers (per user)',
-   r.berserker && r.berserker.bspr === 'bult_doombringer', r.berserker);
+   r.berserker && r.berserker.bspr === 'bloodlust_wave', r.berserker);
 ok('and at the same enlarged size as a Doombringer',
    r.berserker && r.berserker.w === (r.doomRight && r.doomRight.w), { berserker: r.berserker && r.berserker.w, doombringer: r.doomRight && r.doomRight.w });
 ok('DAMAGE is untouched (this was an art change, not a buff)',
    r.doomDmg != null && r.doomDmg === r.bersDmg, { doombringer: r.doomDmg, berserker: r.bersDmg });
-ok('the sprite key resolves to the real file', r.resolved === 'p_ult_doombringer.webp', { resolved: r.resolved });
+ok('the sprite key resolves to the real file', r.resolved === 'p_bloodlust_shockwave.webp', { resolved: r.resolved });
 ok('the art downloads (no invisible projectile)', status === 200, { status });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 

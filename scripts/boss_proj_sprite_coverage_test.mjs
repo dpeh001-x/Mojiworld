@@ -75,8 +75,9 @@ const R = await page.evaluate(async (list) => {
   const unsprited = list.filter(sk => !(projK.has(sk) && blitK.has(sk)) && !dedicated.has(sk));
 
   // The 8 wired in this pass — each must actually PAINT.
+  // Barnaby's jab was renamed barnFist (it fires skill: 'barnFist', table entry p_flamefist.webp)
   const WIRED = ['tidalSweep', 'waterPillar', 'pincerSweep', 'claw',
-                 'barnJab', 'arrowRain', 'mhoming', 'mlob'];
+                 'barnFist', 'arrowRain', 'mhoming', 'mlob'];
   const painted = {}, decoded = {};
   for (const sk of WIRED) {
     const img = LX_MOB_PROJ[sk];
@@ -99,7 +100,7 @@ await browser.close(); server.kill();
 
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 135) });
-const WIRED = ['tidalSweep', 'waterPillar', 'pincerSweep', 'claw', 'barnJab', 'arrowRain', 'mhoming', 'mlob'];
+const WIRED = ['tidalSweep', 'waterPillar', 'pincerSweep', 'claw', 'barnFist', 'arrowRain', 'mhoming', 'mlob'];
 
 ok('the source scan actually found the enemy skills', R.scanned > 60, `${R.scanned} skills scanned`);
 ok('NO enemy cast falls back to the procedural ball', R.unsprited.length === 0,
