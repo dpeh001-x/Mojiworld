@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.947';
+const GAME_VERSION = 'v0.30.948';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -116466,6 +116466,7 @@ function _showTutorialModal() {
   }
   _renderTutorialStep();
   modal.style.display = 'block';
+  try { _lxTutFit(); } catch (e) {}   // v0.30.948 place it in the HUD's gap before the player sees it
   _startTutGhostWatch();   // v0.29.584 - ghost the card whenever a panel opens over it
   // game.paused intentionally left false — the tour runs alongside live play.
 }
@@ -116498,6 +116499,36 @@ function _stopTutGhostWatch() {
 }
 // v0.26.x — Inject the dock chrome once: a collapse/expand handle and the
 // "game is live" hint above the nav row. Idempotent; safe to call every open.
+// v0.30.948 THE TOUR CARD STOPS STANDING ON THE SKILL BAR. The dock is anchored bottom-left and the bar is
+// centred, so at every size they met: measured 272x60 px of overlap at 1280x720, 291x65 at 1366x768 and
+// 409x90 at 1920x1080 - the card covering the first slots of the very bar step 2 tells you to press. It was
+// only ever visual (the dock is pointer-events:none and the card is click-through in ghost mode), but the
+// tour points at things for a living. The HUD leaves a clear band on the left: under the stats card, above
+// the bar. This measures that band and puts the card in it.
+// Everything is read in CLIENT px and written in the dock's own units - the whole HUD is inside a scaled
+// container (the card is 460 CSS px and 887 client px at 1080p), so the ratio has to come back out.
+function _lxTutFit() {
+  try {
+    const m = document.getElementById('tutorial-modal');
+    if (!m || !m.classList.contains('tut-dock') || m.style.display === 'none') return;
+    const card = m.querySelector('.modal');
+    if (!card || !card.getClientRects().length) return;
+    const GAP = 10, vh = window.innerHeight || 720;
+    const cr = card.getBoundingClientRect();
+    const k = (card.offsetWidth > 0) ? (cr.width / card.offsetWidth) : 1;   // HUD scale, client px per own px
+    const seen = (id) => { const el = document.getElementById(id); if (!el || !el.getClientRects().length) return null;
+      const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || +cs.opacity < 0.05) return null;
+      return el.getBoundingClientRect(); };
+    const bar = seen('skill-bar');
+    const lift = bar ? Math.max(0, (vh - bar.top + GAP)) : 0;               // client px above the bottom
+    const top = seen('top-ui') || seen('stats');
+    const ceiling = top ? (top.bottom + GAP) : 8;
+    const roomPx = Math.max(160 * k, (vh - 16 * k - lift) - ceiling);       // client px the card may occupy
+    m.style.setProperty('--tut-lift', (lift / (k || 1)).toFixed(1) + 'px');
+    if (card) card.style.setProperty('--tut-maxh', (roomPx / (k || 1)).toFixed(1) + 'px');
+  } catch (e) {}
+}
+try { window.addEventListener('resize', () => { try { _lxTutFit(); } catch (e) {} }); } catch (e) {}
 function _ensureTutChrome() {
   const modal = document.getElementById('tutorial-modal');
   if (!modal) return;
@@ -116792,6 +116823,7 @@ function _renderTutorialStep() {
   // title lives in #tut-step-title below it.
   if ($('tut-step-title')) $('tut-step-title').textContent = (step._done ? '\u2705 ' : '') + step.title;
   if ($('tut-body')) $('tut-body').innerHTML = _tutTouchify((typeof step.body === 'function') ? step.body() : step.body);
+  try { _lxTutFit(); } catch (e) {}   // v0.30.948 every step is a different height
   // v0.27.5 \u2014 INTERACTIVE OBJECTIVE PILL. Steps with a `tryIt` ask show a
   // "TRY IT" pill under the step title; the matching gameplay action (via
   // _tutPing) ticks it \u2705 live. Created once, re-rendered per step.
@@ -164358,6 +164390,8 @@ function startBgm() {
 
   /* L82. BODY — warm pearl text, looser leading, classy serif italic terms
      stay readable on the new translucent surface */
+  /* v0.30.948 when the gap is tight the prose scrolls rather than the card growing over the HUD */
+  #tutorial-modal.tut-dock #tut-body { overflow-y: auto; overscroll-behavior: contain; }
   #tutorial-modal #tut-body {
     color: rgba(232, 218, 196, 0.92) !important;
     font: 400 13px/1.55 Inter, 'Segoe UI', system-ui, sans-serif !important;
@@ -164463,7 +164497,8 @@ function startBgm() {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     pointer-events: none;          /* clicks fall through to the game world */
-    padding: 0 0 16px 16px;
+    /* v0.30.948 the lift _lxTutFit measures, so the card clears the skill bar it is teaching */
+    padding: 0 0 calc(16px + var(--tut-lift, 0px)) 16px;
     z-index: 600;                  /* float above other modals so it stays readable */
   }
   /* v0.29.x — Per user: keep the tutorial dock BEHIND the storytelling overlay.
@@ -164537,6 +164572,8 @@ function startBgm() {
     min-width: 0 !important;
     width: min(460px, 94vw) !important;
     max-width: 460px !important;
+    max-height: var(--tut-maxh, none);   /* v0.30.948 never taller than the gap between the stats card and the bar */
+    overflow: hidden;
     text-align: center;
     /* v0.27.7 — AAA glass banner: dark cinematic glass + blur + gold hairline */
     padding: 14px 20px 12px !important;
