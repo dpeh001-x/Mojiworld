@@ -12823,7 +12823,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.930';
+const GAME_VERSION = 'v0.30.931';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -54689,7 +54689,13 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk) {
     _bossFillBreak(m, d);
     if (typeof _bossThreatHit === 'function') _bossThreatHit(m, d);
   }
-  d = Math.min(d, Math.max(1, Math.floor(m.maxHp || m.currentHp)));       // cap: no single peer packet exceeds one HP bar (anti one-shot)
+  // v0.30.931 the cap was one FULL bar, so a tampered guest client could still delete a boss in a single packet - the
+  // thing the comment says it prevents. Ordinary mobs keep the full-bar cap (a one-shot on trash is normal play);
+  // a boss takes at most half its bar from one packet, so a kill from full needs three, and honest bursts are
+  // unaffected: no legitimate single hit takes half of a boss's health.
+  const _capBar = Math.max(1, Math.floor(m.maxHp || m.currentHp));
+  const _isBoss = !!(m.isBoss || m.boss || m.isMiniBoss || m.zodiacBoss);
+  d = Math.min(d, _isBoss ? Math.max(1, Math.floor(_capBar * 0.5)) : _capBar);
   m.currentHp -= d;
   if (m.zodiacSign === 'virgo') _virgoTook(m, d);   // v0.30.366 — ritual book-keeping (peer packets too)
   // v0.29.x — was 6 (ms): with dt≈16.7/step the white hit-flash lasted ONE
@@ -68300,6 +68306,11 @@ _expeditionRestorePlayer = function (snap) {
   _expeditionRestorePlayer_v1(snap);
   if (!snap) return;
   if (typeof snap.mojicoins === 'number') player.mojicoins = Math.min(1e12, Math.max(0, snap.mojicoins));   // v0.26.1028 — re-clamp on restore (defense)
+  // v0.30.931 ...then re-take what the run actually spent (see the potion auto-buy): the restore handed it back.
+  try {
+    const _spent = (game.expedition && game.expedition._spentInRun) | 0;
+    if (_spent > 0) { if (typeof chargeCoins === 'function') chargeCoins(_spent); else player.mojicoins = Math.max(0, player.mojicoins - _spent); game.expedition._spentInRun = 0; }
+  } catch (e) {}
   if (typeof snap.bankBalance === 'number') player.bankBalance = Math.min(1e12, Math.max(0, snap.bankBalance));   // v0.29.311 — undo any in-tower bank drain (death haircut)
   if (snap.equipped) player.equipped = snap.equipped;
   if (typeof invalidateEquipBonusCache === 'function') invalidateEquipBonusCache();
@@ -108226,7 +108237,7 @@ So… do you need a lift?`;
     // sprite (a Ludo-rendered regal tiger, not an elk). Lore beat for
     // "What are you?" shifted from "prince of the high herd" to
     // "king of the storm-pride".
-    const _coins = Math.max(0, Math.floor(player.mojicoins || 0));
+    const _coins = Math.max(0, Math.floor((typeof totalCoins === 'function') ? totalCoins() : (player.mojicoins || 0)));   // v0.30.931 wallet + bank, as the click bills
     const _cost = Math.floor(_coins * 0.25);
     const _boostActive = player._spawnBoostUntil && game.time < player._spawnBoostUntil;
     text = '*Lightning pulses through its stripes. The tail lashes once.*\n\nSmall walker. The sky knows you now. I am the Stormbearer — older than the first thunder, lesser than the last. Lay a quarter of your Mojicoins at my paws and the Crest wakes to your scent. Twice the beasts, for sixty heartbeats.';
@@ -108243,14 +108254,17 @@ So… do you need a lift?`;
         // 25% of the ORIGINAL wallet again and, with _boostActive frozen false,
         // took game.time as the base and RESET the timer rather than extending it.
         // Four clicks turned 100,000 coins into 0 for the same sixty seconds.
-        const _live = Math.max(0, Math.floor(player.mojicoins || 0));
+        // v0.30.931 WALLET + BANK, like Reset Stats (v0.29.311), the death toll (v0.29.311) and the rank reset
+        // (v0.30.918). Priced off the wallet alone, the pact cost nothing at all: bank the purse, keep four coins,
+        // wake the sky for one. Collected wallet-first by chargeCoins, so the vault is not a shelter here either.
+        const _live = Math.max(0, Math.floor((typeof totalCoins === 'function') ? totalCoins() : (player.mojicoins || 0)));
         const _pay = Math.floor(_live * 0.25);
         const _liveBoost = player._spawnBoostUntil && game.time < player._spawnBoostUntil;
-        if (_pay <= 0 || (player.mojicoins || 0) < _pay) {
+        if (_pay <= 0 || _live < _pay) {   // v0.30.931
           document.getElementById('dialog-text').textContent = '*The tiger huffs — a soft thunder. The stripe-light dims and the fangs lower.*\n\nYour purse is too thin to wake the sky, small walker. Return when you carry weight worth its notice.';
           return;
         }
-        player.mojicoins -= _pay;
+        if (typeof chargeCoins === 'function') chargeCoins(_pay); else player.mojicoins -= _pay;   // v0.30.931 wallet first, then the vault
         const _base = _liveBoost ? player._spawnBoostUntil : game.time;   // extend an active pact, never restart it
         // v0.26.x — game.time is a FRAME counter (~60/s), not ms. This was
         // +60000 (≈16.7 min) and the readout divided by 1000; both now use the
@@ -116498,7 +116512,11 @@ function useQuickPotion(which, preferElixir) {
     return;
   }
   const pick = affordable.reduce((a, b) => a.price <= b.price ? a : b);
-  player.mojicoins -= Math.ceil(pick.price * _potLvMult);   // v0.26.1032 — level-scaled like the shop
+  {   // v0.30.931 a run restores the wallet it snapshotted, so a potion bought on floor B7 was free by the time you left.
+    const _cost = Math.ceil(pick.price * _potLvMult);   // v0.26.1032 — level-scaled like the shop
+    player.mojicoins -= _cost;
+    try { if (game.expedition && game.expedition.active) game.expedition._spentInRun = ((game.expedition._spentInRun | 0) + _cost); } catch (e) {}
+  }
   // Apply the potion effect inline (avoids bumping inventory for a single tick)
   // pick.value/pct is a PERCENT of max (25/50/75), not a flat amount — mirror
   // useConsumable (incl. potionBoost talent) instead of adding it raw, else a
