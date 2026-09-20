@@ -1,7 +1,18 @@
-// THE TOUR CARD STANDS IN THE HUD'S GAP, NOT ON IT (v0.30.948). The docked tutorial is anchored bottom-left and
-// the skill bar is centred, so at every size they met: 272x60 px of overlap at 1280x720, 291x65 at 1366x768 and
-// 409x90 at 1920x1080 - the card covering the first slots of the bar that step 2 tells you to press. _lxTutFit
-// measures the band under the stats card and above the bar and puts the card there, at every step and on resize.
+// THE TOUR CARD FITS THE BAND THE HUD LEAVES IT - AT EVERY STEP (v0.30.950, extends v0.30.948).
+//
+// The docked tutorial is anchored bottom-left and the skill bar is centred, so at every size they met:
+// 272x60 px of overlap at 1280x720, 291x65 at 1366x768, 409x90 at 1920x1080 - the card covering the first
+// slots of the bar that step 2 tells you to press. _lxTutFit (v0.30.948) measures the band under the stats
+// card and above the bar and puts the card there.
+//
+// Walking all fourteen steps then found what one step could not show: the band is not always big enough.
+// At 1280x720 the potions step (a two-line objective) ran 25 px over it, and because the card clips, the
+// 25 px cut off the bottom was the whole Skip / Back / Next row. At 1024x640 every step ran over, the card
+// pushed up into the stats panel, and step 5 lost its nav row again. v0.30.950 shrinks the card (372x251
+// css, from 460x313) and lets it scroll rather than clip.
+//
+// So this walks EVERY step at four sizes and asserts, for all of them: no overlap with any HUD surface,
+// nothing clipped, the nav row reachable, above the bar, on screen.
 //   [SERVE_ROOT=<dir with serve.js, data/, art>] node scripts/tutorial_card_fit_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -17,7 +28,8 @@ let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS 
 const J = (o) => JSON.stringify(o);
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
-const SIZES = [[1280, 720], [1366, 768], [1920, 1080]];
+const SIZES = [[1280, 720], [1366, 768], [1920, 1080], [1024, 640]];
+const HUD = ['skill-bar', 'top-ui', 'stats', 'quest-tracker', 'minimap', 'map-label', 'hotkey-hint', 'lx-corner'];
 try {
   for (const [w, h] of SIZES) {
     const ctx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: w, height: h } });
@@ -26,41 +38,63 @@ try {
     page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
     await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
     await page.waitForFunction(() => typeof loadMap === 'function' && typeof _showTutorialModal === 'function', null, { timeout: 180000 });
-    const r = await page.evaluate(async ({ w, h }) => {
+    const r = await page.evaluate(async ({ w, h, HUD }) => {
       try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
       for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
       applyClass('warrior'); player.level = 12; player._tutorialSeen = false;
-      loadMap('town', 300); await new Promise((x) => setTimeout(x, 1500)); game.paused = false;
+      loadMap('town', 300); await new Promise((x) => setTimeout(x, 1800)); game.paused = false;
       try { _tutStep = 0; _showTutorialModal(); } catch (e) {}
-      await new Promise((x) => setTimeout(x, 1200));
+      await new Promise((x) => setTimeout(x, 900));
       const modal = document.getElementById('tutorial-modal');
-      const card = modal && modal.querySelector('.modal');
-      if (!card || !card.getClientRects().length) return { open: false };
+      const first = modal && modal.querySelector('.modal');
+      if (!first || !first.getClientRects().length) return { open: false };
       const B = (el) => { const b = el.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom }; };
-      const c = B(card);
-      const panels = [];
-      for (const id of ['skill-bar', 'top-ui', 'stats', 'quest-tracker', 'minimap', 'map-label', 'hotkey-hint', 'lx-corner']) {
-        const el = document.getElementById(id); if (!el || !el.getClientRects().length) continue;
-        const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || +cs.opacity < 0.05) continue;
-        if (modal.contains(el)) continue;
-        panels.push({ id, ...B(el) });
+      const out = { open: true, steps: [] };
+      for (let i = 0; i < TUTORIAL_STEPS.length; i++) {
+        _tutStep = i; _renderTutorialStep();
+        await new Promise((x) => setTimeout(x, 220));
+        const card = modal.querySelector('.modal'); if (!card) continue;
+        const c = B(card);
+        const hits = [];
+        for (const id of HUD) {
+          const el = document.getElementById(id); if (!el || !el.getClientRects().length) continue;
+          const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || +cs.opacity < 0.05) continue;
+          if (modal.contains(el)) continue;
+          const o = B(el);
+          const ox = Math.min(c.r, o.r) - Math.max(c.x, o.x), oy = Math.min(c.b, o.b) - Math.max(c.y, o.y);
+          if (ox > 2 && oy > 2) hits.push(id + ' ' + Math.round(ox) + 'x' + Math.round(oy));
+        }
+        const navOut = ['tut-skip', 'tut-prev', 'tut-next'].filter((id) => {
+          const e = document.getElementById(id); if (!e || !e.getClientRects().length) return true;
+          const q = B(e); return q.y < c.y - 2 || q.b > c.b + 2 || q.x < c.x - 2 || q.r > c.r + 2; });
+        const bar = document.getElementById('skill-bar');
+        const barTop = bar && bar.getClientRects().length ? bar.getBoundingClientRect().top : null;
+        out.steps.push({ n: i + 1, t: TUTORIAL_STEPS[i].title, hits, navOut,
+          cut: Math.max(0, card.scrollHeight - card.clientHeight),
+          cssW: card.offsetWidth, cssH: card.offsetHeight,
+          overBar: barTop != null && c.b > barTop + 2,
+          off: c.x < -2 || c.y < -2 || c.r > w + 2 || c.b > h + 2 });
       }
-      const hits = panels.map((p) => ({ id: p.id,
-        ox: Math.min(c.r, p.r) - Math.max(c.x, p.x), oy: Math.min(c.b, p.b) - Math.max(c.y, p.y) }))
-        .filter((o) => o.ox > 2 && o.oy > 2);
-      const bar = panels.find((p) => p.id === 'skill-bar');
-      return { open: true, card: { x: Math.round(c.x), y: Math.round(c.y), r: Math.round(c.r), b: Math.round(c.b) },
-        barTop: bar ? Math.round(bar.y) : null, hits,
-        onScreen: c.x >= -2 && c.y >= -2 && c.r <= w + 2 && c.b <= h + 2,
-        panels: panels.map((p) => p.id) };
-    }, { w, h });
+      return out;
+    }, { w, h, HUD });
     const tag = w + 'x' + h;
-    check(r.open, tag + ': the docked tour card is on screen', J({ open: r.open, panels: r.panels }));
+    check(r.open, tag + ': the docked tour card is on screen');
     if (r.open) {
-      check(r.hits.length === 0, tag + ': the card overlaps no HUD surface', J(r.hits.length ? r.hits : { card: r.card }));
-      check(r.barTop == null || r.card.b <= r.barTop + 2, tag + ': the card sits above the skill bar',
-        J({ cardBottom: r.card.b, barTop: r.barTop }));
-      check(r.onScreen, tag + ': and stays on screen', J(r.card));
+      const D = (rows) => J(rows.slice(0, 3).map((s) => s.n + '. ' + s.t));
+      const hit = r.steps.filter((s) => s.hits.length);
+      check(hit.length === 0, tag + ': no step overlaps a HUD surface',
+        hit.length ? J(hit.slice(0, 3).map((s) => s.n + '. ' + s.t + ' ' + s.hits.join(','))) : r.steps.length + ' steps');
+      const cut = r.steps.filter((s) => s.cut > 0);
+      check(cut.length === 0, tag + ': no step is clipped by its own card',
+        cut.length ? J(cut.slice(0, 3).map((s) => s.n + '. ' + s.t + ' by ' + s.cut + 'px'))
+                   : 'tallest card ' + Math.max.apply(null, r.steps.map((s) => s.cssH)) + 'px');
+      const nav = r.steps.filter((s) => s.navOut.length);
+      check(nav.length === 0, tag + ': Skip / Back / Next stay inside the card',
+        nav.length ? J(nav.slice(0, 3).map((s) => s.n + '. ' + s.t + ' ' + s.navOut.join(','))) : '');
+      const over = r.steps.filter((s) => s.overBar);
+      check(over.length === 0, tag + ': every step sits above the skill bar', over.length ? D(over) : '');
+      const off = r.steps.filter((s) => s.off);
+      check(off.length === 0, tag + ': every step stays on screen', off.length ? D(off) : '');
     }
     check(errs.length === 0, tag + ': no page errors', J(errs.slice(0, 2)));
     await ctx.close();
