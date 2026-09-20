@@ -24,7 +24,7 @@ try {
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     player.cls = 'warrior';
     const out = { n: 0, noTarget: [], unknownMob: [], zeroCount: [], missingPrereq: [], gatedUnderPrereq: [],
-      cycles: [], noReward: [], badNumber: [], badPotion: [], overCeiling: [], paysNothing: [] };
+      cycles: [], noReward: [], badNumber: [], badPotion: [], overCeiling: [], paysNothing: [], offBand: [] };
     // real cycle detection: white / grey / black
     const colour = {};
     const visit = (id, path) => {
@@ -61,6 +61,13 @@ try {
       const paid = player.exp, cap = Math.max(1, Math.floor(_lxLevelCost(qL) * 0.80));
       if (paid > cap) out.overCeiling.push(id + ':' + paid + '>' + cap);
       if (paid <= 0) out.paysNothing.push(id);
+      // per user: a quest pays between a quarter and three fifths of a level. The Clockwork run is
+      // exempt (repeatable, level-scaled, deliberately tapered to ~1% a stage) and so is the Lv 1
+      // opener, whose whole rung costs one point of EXP.
+      if (!q.scalesToPlayer && qL > 1) {
+        const share = paid / _lxLevelCost(qL);
+        if (share < 0.23 || share > 0.61) out.offBand.push(id + '@Lv' + qL + '=' + share.toFixed(3));
+      }
     }
     return out;
   });
@@ -76,6 +83,7 @@ try {
   check(r.badPotion.length === 0, 'every potion reward names a potion that exists', J(r.badPotion.slice(0, 5)));
   check(r.overCeiling.length === 0, 'no quest pays more than 80% of its own level', J(r.overCeiling.slice(0, 5)));
   check(r.paysNothing.length === 0, 'no quest with an EXP reward pays zero', J(r.paysNothing.slice(0, 5)));
+  check(r.offBand.length === 0, 'every quest pays between a quarter and three fifths of a level', r.offBand.length + ' off: ' + J(r.offBand.slice(0, 6)));
   check(errs.length === 0, 'no page errors', errs.slice(0, 3).join(' | '));
 } finally { await browser.close(); server.kill(); }
 console.log(`${pass}/${pass + fail} checks passed`); process.exit(fail ? 1 : 0);
