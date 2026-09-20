@@ -88,7 +88,16 @@ const R = await page.evaluate(async () => {
     const ti = L.findIndex((o) => o.op === 'text' && isPrompt(o.t));
     const hasN = L.some((o) => o.op === 'text' && o.t === 'N');
     const before = ti >= 0 ? L.slice(0, ti) : [];
-    const ink = [...before].reverse().find((o) => o.op === 'fill' && /^rgba\(14, ?8, ?26, ?0\.5\)$/.test(o.style));
+    // The ink is a DARK TRANSLUCENT fill, not one exact literal: it was rgba(14,8,26,0.5) when this
+    // was written and is rgba(10,7,20,0.66) now, and pinning the string made a retune read as "the
+    // pill is gone". What the check is about is that a dark translucent plate sits under the labels.
+    const ink = [...before].reverse().find((o) => {
+      if (o.op !== 'fill') return false;
+      const m = /^rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)$/.exec(String(o.style));
+      if (!m) return false;
+      const lum = (+m[1] + +m[2] + +m[3]) / 3, al = +m[4];
+      return lum <= 40 && al >= 0.35 && al <= 0.85;
+    });
     return { f, text: ti >= 0 ? L[ti].t : null, alpha: ti >= 0 ? +L[ti].alpha.toFixed(3) : null, hasN, inkFill: ink ? ink.style : null, px: ti >= 0 ? L[ti].px : null, py: ti >= 0 ? L[ti].py : null };
   });
 
@@ -133,7 +142,8 @@ console.log('  npcs: ' + R.npcCount + (R.err ? '  err ' + R.err : ''));
 console.log('  far: ' + JSON.stringify(R.far) + '\n  near: ' + JSON.stringify(R.near) + '\n  away: ' + JSON.stringify(R.away));
 const n = R.near || {}, a = R.away || {};
 ok('PILL: N and Talk are separate labels over a fill in the prompt ink', n.promptFrames > 0 && n.text === 'Talk' && n.hasN && !!n.inkFill, `text "${n.text}", key cap ${n.hasN}, ink fill ${n.inkFill} (baseline: "[N] Talk", no fill)`);
-ok('TRANSLUCENT: the pill fill is at half alpha', !!n.inkFill && /0\.5\)$/.test(n.inkFill), `${n.inkFill || 'no pill'}`);
+const _inkAlpha = n.inkFill ? +((/([\d.]+)\)$/.exec(n.inkFill) || [])[1]) : null;
+ok('TRANSLUCENT: the pill fill is translucent, never opaque', _inkAlpha != null && _inkAlpha >= 0.35 && _inkAlpha <= 0.85, `${n.inkFill || 'no pill'} (alpha ${_inkAlpha})`);
 const alphasFalling = a.alphas && a.alphas.length >= 3 && a.alphas[a.alphas.length - 1] < a.alphas[0];
 ok('FADE: eases in below full, and keeps drawing at falling alpha for several frames after stepping away, then stops', n.firstAlpha != null && n.firstAlpha < 0.6 && alphasFalling && a.goneAtEnd, `first near alpha ${n.firstAlpha}; after leaving ${a.promptFrames} frames ${JSON.stringify(a.alphas)}; gone at end ${a.goneAtEnd} (baseline: full at once, 0 frames after leaving)`);
 ok('CONTROL: away from every NPC nothing is drawn', R.far && R.far.frames > 0 && R.far.promptFrames === 0, `prompt frames far away: ${R.far && R.far.promptFrames}`);
