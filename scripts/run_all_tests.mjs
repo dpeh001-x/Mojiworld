@@ -56,10 +56,18 @@ if (!EXE) console.warn('WARNING: no chromium found — browser suites will fail.
 else console.log(`browser: ${EXE}`);
 
 // Three port conventions coexist in the suite: 72 files hardcode :8080, 8
-// hardcode :8765, one :8090, and 18 read `process.argv[2] || '<one-off>'` where
-// every one-off is a different port in the 877x-880x range. Rather than rewrite
-// 100 files, serve the hardcoded ports and pass the primary port as argv[2] —
-// all 18 argv readers use it solely as a port, so that covers the whole tail.
+// hardcode :8765, one :8090, and the rest read their port out of argv. Serve the
+// hardcoded ports here and hand the rest what they ask for.
+//
+// TWO argv conventions, and they are incompatible. Most suites read
+// `process.argv[2]` as the PORT; 107 read it as the PAGE and take the port from
+// argv[3]. This runner passed the port in argv[2] to everyone, so those 107 were
+// handed "8080" as a filename: some opened http://localhost:<own-port>/8080 (a
+// 404 page, so every DOM check failed) and some tried to READ a file called 8080
+// and died with ENOENT in 0.3 s. worldmap_zoom_test is the clean example — 12/12
+// when run by hand, ENOENT under the runner. They have read as failing for as
+// long as they have existed, which is how a regression net stops being read.
+// argvFor() picks the order per file off the file's own source.
 const GAME_PORT = +(process.env.GAME_PORT || 8080);
 const EXTRA_PORTS = [8765, 8090];
 const servers = [];
@@ -82,9 +90,24 @@ const files = fs.readdirSync(SCRIPTS)
   .filter((f) => (WITH_NET ? true : !NET.test(f)))
   .sort();
 
+// Which convention does this suite follow? The page-first ones declare their
+// default inline (`process.argv[2] || 'mojiworld_game.html'`), so the file says
+// so itself. Every page-first suite that reads argv[3] reads it as a port
+// (checked across all 107), so handing it the port there is always right.
+const _ARGV = new Map();
+const argvFor = (file) => {
+  if (_ARGV.has(file)) return _ARGV.get(file);
+  let src = '';
+  try { src = fs.readFileSync(path.join(SCRIPTS, file), 'utf8'); } catch (e) {}
+  const pageFirst = /process\.argv\[2\]\s*\|\|\s*['"`][^'"`]*\.html['"`]/.test(src);
+  const a = pageFirst ? ['mojiworld_game.html', String(GAME_PORT)] : [String(GAME_PORT)];
+  _ARGV.set(file, a);
+  return a;
+};
+
 const run = (file) => new Promise((res) => {
   const t0 = Date.now();
-  const p = spawn(process.execPath, [path.join('scripts', file), String(GAME_PORT)], {
+  const p = spawn(process.execPath, [path.join('scripts', file), ...argvFor(file)], {
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
     // PW_EXE and MOJI_PW_EXE are both in use across the suite; set both so a
