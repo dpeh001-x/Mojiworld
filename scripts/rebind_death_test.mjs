@@ -10,9 +10,13 @@
 //     is of a detached node still showing the old key;
 //   - the capture wants a real key event (page.keyboard.press). A synthesized KeyboardEvent arms
 //     nothing and reads as "rebinding is broken";
-//   - 'p' (and enter/escape/t/i/m/9/0) is RESERVED, and the skill slots Z/X/S/C/D/F/V/G are locked to
-//     the Keyboard tab on purpose. Testing with one of those measures the refusal, which is correct
-//     behaviour and even toasts an explanation. 'o' is free.
+//   - 'p' (and enter/escape/t/i/m/9/0) is RESERVED for the action flow, and the skill slots
+//     Z/X/S/C/D/F/V/G are handled by a SEPARATE chip on the same tab -
+//     [data-skillslot], wired to _skillPickup, writing player.keybinds. An audit that queried only
+//     [data-action] concluded basic attack could not be rebound at all. It can: the Basic Attack row
+//     IS a skill chip, and the second half of this test moves it off Z and checks Z lets go.
+//     The action flow rejects those keys deliberately, which is correct and toasts an explanation.
+//     This test uses 'o' for the journal and 'r' for attack - one key cannot serve both.
 //   [SERVE_ROOT=<dir with serve.js, data/, art>] node scripts/rebind_death_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -22,6 +26,9 @@ const SERVE_ROOT = process.env.SERVE_ROOT || ROOT, PORT = process.env.PORT || '1
 const cand = process.argv.slice(2).find((a) => !a.startsWith('--'));
 const PAGE = path.resolve(SERVE_ROOT, cand || 'mojiworld_game.html');
 const ACT = 'questJournal', NEWKEY = 'o', OLDKEY = 'q';
+// a DIFFERENT free key for the attack remap: 'o' is taken by the journal bind above, and binding one
+// key to two things is exactly what the swap logic refuses - it would measure the refusal, not the remap
+const ATKKEY = 'r';
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env, MOJI_GAME_FILE: PAGE } });
 await new Promise((r) => setTimeout(r, 1800));
 let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d ? '  [' + d + ']' : '')); ok ? pass++ : fail++; };
@@ -76,6 +83,36 @@ try {
   check(restored.bind === NEWKEY, 'the bind survives save + reload', J(restored));
   check(await opensJournal(NEWKEY) === true, 'and the new key really opens the journal');
   check(await opensJournal(OLDKEY) === false, 'while the old key has let go of it');
+  // ---- BASIC ATTACK moves off Z, through the skill-slot chip on the same tab.
+  // A swing is a RISING EDGE of player.attacking, measured from a drained state: counting
+  // "attackCooldown > 0" instead leaks the previous key's gate into the next window and reads as
+  // the old key still working. Seed the edge from the LIVE value or a swing already in flight counts.
+  const swings = async (key) => {
+    await page.evaluate(async () => { for (let i = 0; i < 120; i++) {
+      if (!player.attacking && (player.attackTimer | 0) <= 0 && (player.attackCooldown | 0) <= 0) return;
+      await new Promise((r) => setTimeout(r, 25)); } });
+    await page.evaluate(() => { window.__sw = 0; window.__prev = !!player.attacking;
+      window.__swT = setInterval(() => { const a = !!player.attacking; if (a && !window.__prev) window.__sw++; window.__prev = a; }, 16); });
+    for (let i = 0; i < 3; i++) { await page.keyboard.press(key); await page.waitForTimeout(320); }
+    await page.waitForTimeout(200);
+    return page.evaluate(() => { clearInterval(window.__swT); return window.__sw; });
+  };
+  await page.evaluate(() => { try { closeAllModals(); } catch (e) {} game.paused = false; });
+  const zBefore = await swings('z');
+  check(zBefore > 0, 'basic attack swings on its default key to begin with (Z)', zBefore + ' swings');
+  await page.evaluate(async () => { try { toggleKeybindModal(); } catch (e) {} await new Promise((r) => setTimeout(r, 600)); });
+  const chip = await page.evaluate(() => { const e = document.querySelector('#keybind-modal [data-skillslot="d"]'); if (!e) return 'NO CHIP'; e.click(); return true; });
+  await page.waitForTimeout(400);
+  const sp = await page.evaluate(() => (typeof _skillPickup !== 'undefined' ? _skillPickup : 'undef'));
+  check(chip === true && sp === 'd', 'the Basic Attack row is a remappable chip, and it arms', J({ chip, pickup: sp }));
+  await page.keyboard.press(ATKKEY);
+  await page.waitForTimeout(700);
+  const slot = await page.evaluate(() => ({ key: (typeof SLOT_TO_KEY !== 'undefined' ? SLOT_TO_KEY.d : null), hasZ: !!(typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT.z) }));
+  check(String(slot.key).toLowerCase() === ATKKEY && slot.hasZ === false, 'attack moves to the new key and Z is released from the map', J(slot));
+  await page.evaluate(() => { try { closeAllModals(); } catch (e) {} game.paused = false; });
+  const zAfter = await swings('z'), newAfter = await swings(ATKKEY);
+  check(newAfter > 0, 'the new key swings', newAfter + ' swings');
+  check(zAfter === 0, 'and the old key no longer does', zAfter + ' swings on Z');
   // ---- death
   const d = await page.evaluate(async () => {
     try { closeAllModals(); } catch (e) {} game.paused = false;
