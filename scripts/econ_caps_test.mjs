@@ -39,12 +39,15 @@ try {
     return o;
   });
   console.log('build ' + r.ver);
-  ok('expedition reward helper: 2,000 at Lv 1, 10,666 at Lv 80, capped at 12,000', r.expFn && r.exp[0] === 2000 && r.exp[1] === 10666 && r.exp[2] === 12000, JSON.stringify(r.exp));
+  // the gold passes halved the expedition helper along with everything else
+  ok('expedition reward helper: 1,000 at Lv 1, 5,333 at Lv 80, capped at 6,000', r.expFn && r.exp[0] === 1000 && r.exp[1] === 5333 && r.exp[2] === 6000, JSON.stringify(r.exp));
   ok('inside the tower _grantMojicoins pays nothing', r.towerGrant === 0 && r.towerDelta === 0, r.towerGrant + ' ' + r.towerDelta);
-  ok('Lv 80 turning in q_warrior_lv49 is paid the 245,000 ceiling, not x3', r.w49paid === 245000, r.w49table + ' -> ' + r.w49paid);
-  ok('a quest under the line keeps its late-game x3 (q_boss_aetherion 53,616)', r.aethPaid === 53616, String(r.aethPaid));
+  // v0.30.758's 25% gold cut brought the per-level line down with it: 3,750 x level, not 5,000
+  ok('Lv 80 turning in q_warrior_lv49 is paid the 183,750 ceiling, not x3', r.w49paid === 3750 * 49, r.w49table + ' -> ' + r.w49paid);
+  ok('a quest under the line keeps its late-game x3 (q_boss_aetherion 39,930 after the gold cut)', r.aethPaid === 39930, String(r.aethPaid));
   ok('Ticket Rush stage 2, first run pays its dynamic reward in full', r.pqFirst > 0, String(r.pqFirst));
-  ok('Ticket Rush stage 2, repeat run pays 40% of that', r.pqFirst > 0 && Math.abs(r.pqRepeat - Math.round(r.pqFirst * 0.4)) <= 1, r.pqFirst + ' -> ' + r.pqRepeat);
+  // v0.30.833 states the repeat discount as 25% coins / 50% EXP / 25% gear chance; 40% was the v0.30.381 figure
+  ok('Ticket Rush stage 2, repeat run pays 25% of that', r.pqFirst > 0 && Math.abs(r.pqRepeat - Math.round(r.pqFirst * 0.25)) <= 1, r.pqFirst + ' -> ' + r.pqRepeat);
   ok('_pqChainRuns is saved with the player', r.pqSaved === true);
   ok('a gold chest pays 520-975 into the wallet (1,040-1,950 x0.5)', r.chestCoins >= 520 && r.chestCoins <= 975, String(r.chestCoins) + (r.chestErr ? ' ' + r.chestErr : ''));
   ok('a gold chest drops 4 HP + 3 MP potions on the ground, none straight into the bag', r.hpDrops === 4 && r.mpDrops === 3 && r.bagAfterOpen[0] === 0 && r.bagAfterOpen[1] === 0, r.hpDrops + ' ' + r.mpDrops + ' bag ' + JSON.stringify(r.bagAfterOpen));
@@ -56,8 +59,26 @@ try {
     return { err, hp: player.consumables.hp_s, mp: player.consumables.mp_s, left: game.drops.filter((d) => d.type === 'potion_hp' || d.type === 'potion_mp').length };
   });
   ok('walking over them banks 4 HP + 3 MP potions and clears the ground', !pk.err && pk.hp === 4 && pk.mp === 3 && pk.left === 0, JSON.stringify(pk));
-  const rs = await page.evaluate(() => { const b = player._pqChainRuns | 0; try { _lxPqRestartChain(); } catch (e) { return { err: String(e && e.message) }; } return { b, a: player._pqChainRuns | 0 }; });
-  ok('restarting the Ticket Rush marks the run as a repeat', !rs.err && rs.a === rs.b + 1, JSON.stringify(rs));
+  // v0.30.934 made the restart refuse below the chain's entry level (prestige keeps quests.completed
+  // and resets the level, so the old restart stranded a Lv 1 in a Lv 29 map). Stand at the gate.
+  // v0.30.934 made the restart refuse below the chain's entry level, and v0.30.407 made it count as a
+  // repeat ONLY if the Rush was actually finished (Milo offers 'reset my papers' mid-chain too, and that
+  // used to charge repeat rates on the first run a player ever completed). Both sides are read here.
+  const rs = await page.evaluate(() => {
+    player.level = Math.max(player.level | 0, ((QUESTS.q_clockwork_underpass || {}).levelReq | 0) || 29);
+    player.quests = player.quests || { active: {}, completed: {} };
+    player.quests.completed = player.quests.completed || {};
+    delete player.quests.completed.q_pq_finale;
+    const midB = player._pqChainRuns | 0;
+    try { _lxPqRestartChain(); } catch (e) { return { err: String(e && e.message) }; }
+    const midA = player._pqChainRuns | 0;
+    player.quests.completed.q_pq_finale = true;
+    const b = player._pqChainRuns | 0;
+    try { _lxPqRestartChain(); } catch (e) { return { err: String(e && e.message) }; }
+    return { b, a: player._pqChainRuns | 0, midB, midA };
+  });
+  ok('restarting a FINISHED Ticket Rush marks the run as a repeat', !rs.err && rs.a === rs.b + 1, JSON.stringify(rs));
+  ok('...and resetting your papers mid-chain does not', !rs.err && rs.midA === rs.midB, JSON.stringify(rs));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();
 console.log(`\n${pass}/${pass + fail} passed`); process.exit(fail ? 1 : 0);
