@@ -59,7 +59,10 @@ const haircut = html.includes('const lostMojicoins = (_diedInExpedition || _netW
 console.log(JSON.stringify({ ...r, bravoBound, floorsKept, haircut }));
 const checks = [
   ['gear price ladder is monotonic through tier 5', r.ladderMonotonic === true, `T4 ${r.p4} T5 ${r.p5} T6 ${r.p6}`],
-  ['the first level costs what the table says', r.firstRung != null && r.firstRung === r.tableRung && r.tableRung > 1000, `${r.firstRung} vs ${r.tableRung}`],
+  // v0.30.923 made the first rung ONE point of EXP, per the user's own pacing (Lv 1->2 in a single
+  // kill), so the >1000 half of this check had been asserting a number the design deliberately left
+  // behind. What it is for — the fresh-player literal agreeing with the table — still holds.
+  ['the first level costs what the table says', r.firstRung != null && r.firstRung === r.tableRung && r.tableRung >= 1, `${r.firstRung} vs ${r.tableRung}`],
   ["Bravo's offer is bound to the floor it was earned on", bravoBound === true],
   ['a cleared floor does not respawn on reload', floorsKept === true],
   ['a tower death waives the coin haircut the snapshot restore was meant to wipe', haircut === true],
