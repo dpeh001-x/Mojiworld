@@ -12817,7 +12817,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.922';
+const GAME_VERSION = 'v0.30.923';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -50842,6 +50842,21 @@ function loadState() {
     // that used to live here was relocated so the sanitizer can't zero the
     // wallet before the migration copies it across.
     Object.assign(player, _lxPickSaveFields(s.player, PLAYER_SAVE_FIELDS));   // v0.30.917 only what a save writes
+    // v0.30.x — RAW EXP re-derived every level cost (they are ~2.7x smaller now that the award carries no knobs), so a
+    // save written before it holds EXP on the old scale: 400,000 banked EXP against a 9,720 rung would vault a
+    // character several levels on load. Carry it across by the FRACTION of the level it represents, which is what the
+    // bar was showing, and re-stamp the requirement. Idempotent: on a save already on this scale it is a no-op.
+    try {
+      if (typeof _lxLevelCost === 'function' && player.level > 0) {
+        const _need = _lxLevelCost(player.level | 0);
+        const _had = +player.expToNext || 0;
+        if (_need > 0 && _had > 0 && _had !== _need) {
+          const _frac = Math.max(0, Math.min(0.999, (+player.exp || 0) / _had));
+          player.exp = Math.floor(_frac * _need);
+          player.expToNext = _need;
+        }
+      }
+    } catch (e) {}
     // v0.29.856 — REPAIR A CORRUPTED STAT BLOCK ON LOAD. Saves written
     // before the applyClass ledger fix can carry base stats that Reset Stats
     // drove below the class baseline (reported: ATK -12074, Speed -0.3, MP 0).
@@ -54817,8 +54832,8 @@ function _coopApplyKill(msg) {
     // v0.29.5xx — early() CARRIES the event since the consolidation (it
     // returns max(band, event)), so the separate evt factor this line used
     // to multiply in would have DOUBLE-counted every active event. Removed.
-    const early = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
-    const mon = (typeof LX_MONSTER_EXP_MULT === 'number') ? LX_MONSTER_EXP_MULT : 1;
+    // v0.30.x — raw EXP: the band, the monster knob and the x1.35 curve are gone here too, so a guest's share is the
+    // same raw number the host's own award is built from.
     // Honor the Party-Quest anti-farm damper for THIS peer's own quest state, so
     // co-op doesn't re-open a farm the host pipeline already nerfed.
     const _pqQ = { clockworkUnderpassLobby: 'q_clockwork_underpass', clockworkSpire: 'q_pq_spire', tower: 'q_pq_carriage', clockworkExpress: 'q_pq_carriage' }[game.currentMap];
@@ -54848,7 +54863,7 @@ function _coopApplyKill(msg) {
     const _diffX  = (typeof _diffExpMul  === 'function') ? _diffExpMul()  : 1;
     const _affixX = (typeof _affixExpMul === 'function') ? _affixExpMul() : 1;
     const _ksX    = (typeof _ksXpMul     === 'function') ? _ksXpMul()     : 1;
-    exp = Math.floor(exp * boost * early * mon * 1.35 * _pqMul * coop
+    exp = Math.floor(exp * boost * _pqMul * coop
                      * _prestigeXp * _diffX * _affixX * _ksX);
     player.exp = (player.exp || 0) + exp;
     if (typeof _maybeLevelUp === 'function') { try { _maybeLevelUp(); } catch (e) {} }
@@ -58056,6 +58071,7 @@ function _completeQuest(id) {
         }
       }
     } catch (e) {}
+    _questExp = Math.max(1, _questExp);   // v0.30.x raw: an early rung costs a handful of EXP, so a share of it cannot floor to nothing
     player.exp += _questExp;
     if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
   }
@@ -99841,7 +99857,12 @@ function _applyInnateLevelupRng() {
   return total;
 }
 
-// v0.29.61 — TIME-ANCHORED LEVELING CURVE (per user). Calibrated so a SOLO
+// v0.30.x — RAW EXP (per user: "remove all the levers and multipliers and change it to raw values"). Every cost below
+// is <kills for that level> x <the RAW exp of a same-level monster>, i.e. exactly what the stats table says a kill
+// pays. The user's kill targets, 2026-09-20: Lv 1->2 in 1 kill, then 10, 40, 100, 250, 280, 300, 350, 400, 800 to
+// Lv 11, 1,500 for 19->20 and 3,000 for 24->25; Lv 30 and up keep the pace they had (their cost simply drops by the
+// 2.7x of knobs that used to sit on the award). Re-derive with scripts/exp_raw_bake.mjs after editing mob EXP.
+// (superseded) v0.29.61 — TIME-ANCHORED LEVELING CURVE (per user). Calibrated so a SOLO
 // player fighting LEVEL-ADJACENT (±2) monsters at ~5 s/kill, with the ×10
 // opening EVENT OFF (steady state — the PERMANENT ×10 monster multiplier
 // LX_MONSTER_EXP_MULT stays on), reaches:
@@ -99859,32 +99880,32 @@ function _applyInnateLevelupRng() {
 // if mob EXP or the multiplier stack (LX_MONSTER_EXP_MULT / xpCurveMul /
 // early-level ×3) changes — the bake assumes the values live at v0.29.61.
 const _LX_LEVEL_COST_TABLE = [
-  9720,10115,10527,10955,11400,12667,14074,15637,17375,19305,
-  26251,35696,48539,66004,89752,99725,110807,123120,136801,152003,
-  180536,214426,254677,302483,359264,468614,611246,797292,1039965,1356500,
-  1878696,2601917,3603547,4990763,6912000,7820404,8848195,10011062,11326758,12815368,
-  14978654,17507111,20462382,23916514,27953717,32672416,38187651,44633879,52168256,60974467,
-  68208824,76301506,85354350,95481274,106809715,119482225,133658275,149516251,167255709,187099875,
-  207446196,230005094,255017176,282749217,313497000,346659039,383328994,423877934,468716183,518297470,
-  621181934,744489445,892274071,1069394634,1281674455,1536092810,1841014396,2206464337,2644457797,3169395000,
-  3760958856,4462937413,5295939443,6284420323,7457400000,11819182493,18732141874,29688444137,47053013007,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,
-  74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000,74574000000
+  1,17,67,267,667,840,2500,2917,5200,10400,
+  11152,19779,26240,30413,32613,38196,53048,61314,72188,84047,
+  91925,109416,168125,212625,287159,307286,340366,406009,453969,502412,
+  695776,963674,1334671,1848422,2559968,2896498,3277098,3707866,4195128,4746587,
+  5547828,6483934,7578811,8858059,10353261,12100943,14143408,16531031,19321600,22583043,
+  25262827,28259680,31612452,35363507,39559429,44252547,49503099,55376370,61945916,69295800,
+  76832328,85186744,94449841,104721018,116109171,128392032,141973703,156992567,173601746,191964797,
+  230067710,275738414,330473250,396069284,474693034,568918976,681863135,817204710,979421000,1173842840,
+  1392956054,1652933728,1961466014,2327562179,2761999663,4377464946,6937836669,10995711226,17427036281,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
+  27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,27619996625,
 ];
 // v0.30.x — the two Lv.1 literals below carried `expToNext:30`, a comment-era formula the
 // level-cost table replaced in v0.28.11. _maybeLevelUp only re-derives AFTER a level-up, so
 // the first rung - and the first rung after every one of 20 ascensions - was 324x too cheap.
 // Read the table lazily: the fresh-player literal may be evaluated before the const exists.
-function _lxFirstRungExp() { try { return _lxLevelCost(1) || 9720; } catch (e) { return 9720; } }
+function _lxFirstRungExp() { try { return _lxLevelCost(1) || 1; } catch (e) { return 1; } }   // v0.30.x — raw: Lv 1->2 is one kill
 function _lxLevelCost(L) {
   const T = _LX_LEVEL_COST_TABLE;
   if (L < 1) return T[0];
@@ -101128,7 +101149,9 @@ function _killMonsterRaw(m) {
   // combo multipliers compound cleanly on top.
   // v0.25.7 — bumped 1.25 → 1.35. Combined with the softer late curve
   // this takes ~8% off the L1→50 grind, which prestige compounds on.
-  const xpCurveMul = 1.35;
+  // v0.30.x — the x1.35 host curve, the permanent monster knob and the newbie band are GONE from this line: a kill
+  // pays the number in data/monster_stats.js. The level costs were re-derived against that raw number (see
+  // _LX_LEVEL_COST_TABLE), so the pace is set in kills, not in hidden multipliers.
   // v0.25.245 (S2) — multiplayer combo XP. If at least one peer is on
   // the same map within 400 px of the kill, grant bonus XP (v0.28.7: ×2,
   // was +50%). Doesn't require any new network messages — uses existing
@@ -101151,8 +101174,8 @@ function _killMonsterRaw(m) {
   // v0.29.296 — the ×3 kicker and the flat opening-event ×10 are now ONE
   // continuous ramp (see _lxEarlyExpMul): ×30 at Lv 1 → ×10 at Lv 10 → ×1 by
   // Lv 30. No cliff at Lv 6, and the boost genuinely returns to normal.
-  const _earlyLvlXpMul = (typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1;
-  const _xpGain = Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * xpCurveMul * mpCoopMul * _pqFarmMul * _earlyLvlXpMul * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * _ksXpMul() * _lxExpLevelGapMul(m) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1));   // v0.29.858 level-gap falloff · v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
+  // (the newbie band is retired for kills - see the note above the award)
+  const _xpGain = (m.exp > 0) ? Math.max(1, Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * mpCoopMul * _pqFarmMul * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * _ksXpMul() * _lxExpLevelGapMul(m) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1))) : 0;   // v0.30.x raw - a kill that pays anything pays at least 1 - v0.29.858 level-gap falloff · v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
   player.exp += _xpGain;
   // v0.29.296 — Trainee Path: count the kill, then test the ladder. Skipped
   // entirely once the path is finished so a long-running save pays nothing.
@@ -102142,7 +102165,7 @@ function _triggerSuperBossDeathRaw(m) {
 
   // Huge EXP bonus on top of normal (prestige-scaled)
   const _pXp = (game.prestige && game.prestige.xpMult) || 1;
-  player.exp += Math.floor(m.exp * 0.5 * _pXp * ((typeof _lxEarlyExpMul === 'function') ? _lxEarlyExpMul(player.level || 1) : 1) * _lxExpLevelGapMul(m) * LX_MONSTER_EXP_MULT * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
+  player.exp += Math.floor(m.exp * 0.5 * _pXp * _lxExpLevelGapMul(m) * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1));   // v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.66 Edict Weight EXP bonus
   // v0.26.x audit FIX — convert the banked bonus into levels NOW. The kill
   // flow's only _maybeLevelUp runs BEFORE this grant, so without this call a
   // Shardfather kill (a big, level-crossing bonus, more so with the ×20 EXP
