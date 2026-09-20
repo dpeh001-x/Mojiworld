@@ -88,7 +88,14 @@ const rungs = await page.evaluate(() => {
     renderEnhancementModal(it);
     const html = document.getElementById('enhance-preview').innerHTML;
     const rate = (html.match(/([0-9]+)% success/) || [])[1];
-    const cost = (html.match(/([0-9,]+) mojicoins/) || [])[1];
+    // The chip reads "🪙 1,200 Mojicoins" with the capital the currency is always written with, and
+    // this regex was lowercase and unflagged - so it found nothing and every rung reported a null
+    // price while the panel was showing them correctly. (Same slip as bank_interest_test's Felina line.)
+    // Anchor on the coin chip itself: "🪙 1,200 Mojicoins". The old regex was lowercase and
+    // unflagged so it matched nothing and every rung reported a null price while the panel was
+    // showing them correctly; case-insensitive alone then matched the FIRST Mojicoins in the panel,
+    // which is a different number entirely.
+    const cost = (html.match(/🪙\s*([0-9,]+)\s*Mojicoins/i) || [])[1];
     const btn = document.getElementById('do-enhance');
     rows.push({ s, shownRate: rate ? +rate : null, trueRate: starSuccessRate(s),
       shownCost: cost ? +cost.replace(/,/g, '') : null, trueCost: STAR_COSTS[s],
