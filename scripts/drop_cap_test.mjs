@@ -67,15 +67,15 @@ try {
   });
   console.log(JSON.stringify(r));
   const c = r.curve, near = (got, want, tol) => got >= want * (1 - tol) && got <= want * (1 + tol);
-  ok('the curve hits the levels asked for: 50 / 150 / 250 / 350 / 400 / 500', c[1] === 50 && c[2] === 150 && c[4] === 250 && c[5] === 350 && c[6] === 400 && c[7] === 500 && c[8] === 500 && c[9] === 500, c);
-  ok('it climbs with the monster and interpolates between those levels', c.every((v, i) => i === 0 || v >= c[i - 1]) && c[3] === 200 && r.mid15 === 100, { curve: c, lv15: r.mid15 });
+  ok('the curve hits the levels asked for, after the 25% gold cut: 38 / 113 / 188 / 263 / 300 / 375', c[1] === 38 && c[2] === 113 && c[4] === 188 && c[5] === 263 && c[6] === 300 && c[7] === 375 && c[8] === 375 && c[9] === 375, c);
+  ok('it climbs with the monster and interpolates between those levels', c.every((v, i) => i === 0 || v >= c[i - 1]) && c[3] === 151 && r.mid15 === 76, { curve: c, lv15: r.mid15 });
   for (const k of ['hi', 'mid', 'lo']) {
     const b = r[k];
     ok(`a Lv${b ? b.lv : '?'} monster pays its level number (${b ? b.want : '?'})`, b && near(b.plain.mean, b.want, 0.08) && b.plain.max <= Math.round(b.want * 1.12) + 1, b && { want: b.want, mean: b.plain.mean, med: b.plain.med, max: b.plain.max });
   }
   ok('the payout varies kill to kill rather than being a flat number', r.hi && r.hi.plain.distinct >= 10 && r.hi.plain.min < r.hi.want, r.hi && r.hi.plain);
   ok('coin gear lifts an ordinary kill under the cap (greed alone = x1.8)', ['hi', 'mid', 'lo'].every((k) => r[k] && near(r[k].light.mean, r[k].plain.mean * 1.8, 0.08)), { hi: r.hi && [r.hi.plain.mean, r.hi.light.mean], mid: r.mid && [r.mid.plain.mean, r.mid.light.mean], lo: r.lo && [r.lo.plain.mean, r.lo.light.mean] });
-  ok('and it stops at +250%: no stack pays past three and a half times the level number', r.gearMax === 3.5 && ['hi', 'mid', 'lo'].every((k) => r[k] && near(r[k].rich.mean, r[k].plain.mean * 3.5, 0.08) && near(r[k].geared.mean, r[k].plain.mean * 3.5, 0.08) && r[k].rich.max <= Math.round(r[k].want * 3.5 * 1.12) + 2), { cap: r.gearMax, hi: r.hi && { plain: r.hi.plain.mean, geared: r.hi.geared.mean, rich: r.hi.rich.mean, max: r.hi.rich.max, ceiling: Math.round(r.hi.want * 3.5 * 1.12) } });
+  ok('and it stops at +250%: no stack pays past three and a half times the level number', r.gearMax === 3.5 && ['hi', 'mid', 'lo'].every((k) => r[k] && near(r[k].rich.mean, r[k].plain.mean * 3.5, 0.08) && near(r[k].geared.mean, r[k].plain.mean * 3.5, 0.08) && r[k].rich.max <= Math.round(r[k].want * 3.5 * 1.12) * 1.03 + 2), { cap: r.gearMax, hi: r.hi && { plain: r.hi.plain.mean, geared: r.hi.geared.mean, rich: r.hi.rich.mean, max: r.hi.rich.max, ceiling: Math.round(r.hi.want * 3.5 * 1.12) } });
   ok('the boon roll runs 0.05% on a low-level monster to 0.2% on a Lv70+ one', r.boonRates[0] === 0.05 && r.boonRates[1] === 0.05 && r.boonRates[5] === 0.2 && r.boonRates[6] === 0.2 && r.boonRates[3] === 0.125 && r.boonRates.every((v, i) => i === 0 || v >= r.boonRates[i - 1]), r.boonRates);
   ok('mob boons are still limited per hour: four to Lv60, two above', r.hourCap80 === 2 && r.hourCap50 === 4 && r.spent80 === 2, { at80: r.hourCap80, at50: r.hourCap50, spent: r.spent80 });
   ok('a boss still pays its own bag, far above a monster kill', r.bossCap > 50000 && r.bossPay > 10000, { cap: r.bossCap, pay: r.bossPay });

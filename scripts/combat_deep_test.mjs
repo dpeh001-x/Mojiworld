@@ -83,11 +83,11 @@ const R = await page.evaluate(async () => {
   // overkill + single kill credit. Kill rewards are EXP directly on the
   // player plus mojicoin DROPS into game.drops (picked up on touch) â€” the
   // wallet is not credited at kill time, so drops are what get asserted.
-  const exp0 = player.exp, drops0 = (game.drops || []).length;
+  const exp0 = player.exp, lv0 = player.level, drops0 = (game.drops || []).length;
   hitMonster(m, 1e9, false, 'melee');
-  const expGain = player.exp - exp0, dropGain = (game.drops || []).length - drops0;
+  const expGain = player.exp - exp0, lvGain = player.level - lv0, dropGain = (game.drops || []).length - drops0;
   ok('overkill kills cleanly', m.currentHp <= 0 && Number.isFinite(m.currentHp), m.currentHp);
-  ok('kill grants EXP + spawns coin drops', expGain > 0 && dropGain > 0, `exp+${expGain} drops+${dropGain}`);
+  ok('kill grants EXP + spawns coin drops', (expGain > 0 || lvGain > 0) && dropGain > 0, `exp+${expGain} lv+${lvGain} drops+${dropGain}`);
   // corpse gate: a delayed second hit must grant nothing again
   const exp1 = player.exp, drops1 = (game.drops || []).length;
   hitMonster(m, 1e9, false, 'melee');

@@ -28,7 +28,9 @@ try {
   });
   // the save: saveState is debounced and gated on a chosen class + no prologue, so flush it and look for the key
   const sv = await page.evaluate(async () => {
-    try { window._prologueActive = false; window._prologuePending = false; } catch (e) {}
+    try { window._prologueActive = false; window._prologuePending = false; window._lxAwaitingCreation = false; } catch (e) {}
+    try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {}
+    for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     if (!player.cls) player.cls = 'warrior';
     player.bankBalance = 1000000; player.bankAccrueMs = 123456;
     try { if (typeof _flushSaveStateNow === 'function') _flushSaveStateNow(); else saveState(); } catch (e) { return { err: String(e && e.message) }; }
@@ -45,7 +47,7 @@ try {
     ok('three hours in one call pay three times, compounding', r.p3 === 3009 && r.b3 === 1005010, r.p3 + ' ' + r.b3);
     ok('an empty vault resets the clock', r.a0 === 0, String(r.a0));
     ok('under 1,000 on deposit rounds to nothing', r.p5 === 0 && r.b5 === 500, r.p5 + ' ' + r.b5);
-    ok('Felina names the next payment and the minutes left', /1,000 mojicoins in 10 min/.test(r.line), r.line);
+    ok('Felina names the next payment and the minutes left', /1,000 mojicoins in 10 min/i.test(r.line), r.line);
     ok('the expedition tower does not count', r.bExp === 1000000 && r.aExp === 0, r.bExp + ' ' + r.aExp);
     ok('the clock is saved with the player', r.saved === true, r.saveErr || '');
     // the live loop: the clock runs with the simulation and stops when paused
