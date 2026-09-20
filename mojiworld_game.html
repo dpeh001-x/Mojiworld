@@ -12817,7 +12817,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.926';
+const GAME_VERSION = 'v0.30.927';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -47222,7 +47222,12 @@ const GAME_SAVE_FIELDS = [
   'dexMilestones','dexPerm','duoTrials',
   'boonDex',   // v0.30.421 - boon codex (lifetime; not wiped by ascension)
   '_cursedChestOpened','_echoGearAt','_dailyClockHealed',   // v0.30.861 loops
-  '_steamAchBaseline','_importVerdict','_devTouched'   // v0.30.917 the Steam gate (see _lxSteamTrusted)
+  '_steamAchBaseline','_importVerdict','_devTouched',   // v0.30.917 the Steam gate (see _lxSteamTrusted)
+  // v0.30.927 both were written every session and never saved. _vermDueAt is measured in _playMs, which IS saved, so a
+  // reload left it null and the Elder's 5-minute clock restarted as the 5-second first-visit one: a full-reward
+  // mini-boss (no refight ladder) every few seconds. _worldStateByMap is a sticky per-map roll, so a reload was an
+  // opt-out from a bad one (72% of maps come back ordinary).
+  '_vermDueAt','_worldStateByMap'
 ];
 // v0.25.264 — saveState() is called from ~30 sites: every kill, quest tick,
 // boon equip, skill unlock, level-up, etc. Each call serializes the whole
@@ -97503,8 +97508,11 @@ function bossAI(m, dt, distToPlayer) {
           if (typeof addHitStop === 'function') addHitStop(160);
           if (audio && audio.play) audio.play('boss_alarm');
           // Resolve damage. Bypass paths first: god / iframe / dodge.
+          // v0.30.927 the third clause read a dodge-iframe field that occurs exactly once in this file - there. Since
+          // v0.26.966 the rogue roll grants no i-frames (it sets _dashEvadeUntil, an evade window), so the one class
+          // whose dodge this clause existed for ate 49% of max HP through the telegraph every time.
           const _dodging = (player._god || player.invulnerable > 0 ||
-                            (player.dodgeIframes | 0) > 0);
+                            (player._dashEvadeUntil && (game.time | 0) < player._dashEvadeUntil));
           if (_dodging) {
             showToast('Dodged the Meltdown!', 'epic');
           } else {
@@ -100459,6 +100467,8 @@ function _killMonsterRaw(m) {
     const _bloom = (player.mods && player.mods.deathBloom) || 0;
     if (_bloom > 0 && !m.isBoss && !m.boss && (game._bloomChain | 0) < 2) {
       game._bloomChain = (game._bloomChain | 0) + 1;
+      try {   // v0.30.927 the decrement sat in the same try as the blast, under a bare catch: two swallowed throws in a
+              // session pinned the counter at the limit and Death Bloom silently stopped detonating, with no error.
       const bx = m.x + m.w / 2, by = m.y + m.h / 2, R = 130;
       const bdmg = Math.max(1, Math.floor((m.maxHp || 1) * _bloom));
       for (const o of game.monsters.slice()) {
@@ -100487,7 +100497,7 @@ function _killMonsterRaw(m) {
         game.particles.push({ x: bx, y: by, vx: Math.cos(a) * 5, vy: Math.sin(a) * 4,
           life: 24, color: i % 2 ? '#ffaad8' : '#ff66aa', size: 3 });
       }
-      game._bloomChain = Math.max(0, (game._bloomChain | 0) - 1);
+      } finally { game._bloomChain = Math.max(0, (game._bloomChain | 0) - 1); }
     }
   } catch (e) {}
   // v0.29.60 — Cursed-chest hex: every slain foe lifts one stack. At
@@ -154699,7 +154709,9 @@ function loop(time) {
     if (_sfMs) for (let _sfI = 0; _sfI < _sfMs.length; _sfI++) { const _sfM = _sfMs[_sfI]; if (_sfM && _sfM._ohkoWarnUntil != null && _sfM._ohkoWarnUntil > _sfT) _sfM._ohkoWarnUntil++; if (_sfM && (_sfM._wardUntil | 0) > _sfT) _sfM._wardUntil++; if (_sfM && (_sfM._wardBreakUntil | 0) > _sfT) { _sfM._wardBreakUntil++; if (_sfM._wardBreakAt != null) _sfM._wardBreakAt++; } if (_sfM && _sfM._wardNextAt != null && _sfM._wardNextAt > _sfT) _sfM._wardNextAt++; if (_sfM && _sfM.type === 'gravitos') { if (_sfM._lastOhkoAt != null) _sfM._lastOhkoAt++; if (_sfM._lastOhkoEndAt != null) _sfM._lastOhkoEndAt++; if (_sfM._lastSkillAt != null) _sfM._lastSkillAt++; if (_sfM._lastSingAt != null) _sfM._lastSingAt++; } }   /* v0.30.836 ohko-gap — the OHKO gap does not run out behind a menu */
   }
   _lxPrewarmClassFx(); if (_LX_PREWARM_Q.length || _LX_PREWARM_FXQ.length) _lxPrewarmDrain();   // v0.30.358 — bakes ahead of the draw, through the same budget
-  game._playMs = (game._playMs || 0) + dt;
+  if (!game.paused) game._playMs = (game._playMs || 0) + dt;   // v0.30.927 a menu is not play: the boss respawn window
+  // (_bossDefeatedAt) and the echo-gear cooldown (_echoGearAt) are measured in this clock, and both exist to stop a
+  // player waiting out a timer in a frozen world. The bank's interest was already gated, one line below.
   if (!game.paused && typeof _lxBankAccrue === 'function') _lxBankAccrue(dt);   // v0.30.380 — bank interest on play time   // v0.26.453 - accumulated in-game playtime (ms) for boss respawn gating
   if (player._eclipseRain && !game.paused) _lxEclipseTick(dt);   // v0.30.34 - Eclipse clock: same cadence as game.time, so hit-stop cannot stretch the hold past the moon
   // v0.26.317 — Low-HP audio warning. Fires a one-shot `low_hp` SFX
