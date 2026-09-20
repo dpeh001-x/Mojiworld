@@ -24,7 +24,12 @@ try {
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     player.cls = 'warrior';
     const out = { n: 0, noTarget: [], unknownMob: [], zeroCount: [], missingPrereq: [], gatedUnderPrereq: [],
-      cycles: [], noReward: [], badNumber: [], badPotion: [], overCeiling: [], paysNothing: [], offBand: [] };
+      cycles: [], noReward: [], badNumber: [], badPotion: [], overCeiling: [], paysNothing: [], offBand: [],
+      bandShare: {}, bandN: {}, overSupply: [] };
+    // and no hunt asks for more of a monster than the world holds - the supply cap, through the
+    // deferred rounding, whose own floor is 20
+    const supply = {};
+    for (const mid in (typeof MAPS === 'object' ? MAPS : {})) for (const sp of ((MAPS[mid] || {}).spawns || [])) if (sp && sp.type) supply[sp.type] = (supply[sp.type] || 0) + ((sp.count | 0) || 1);
     // real cycle detection: white / grey / black
     const colour = {};
     const visit = (id, path) => {
@@ -41,6 +46,7 @@ try {
         if (!q.target) out.noTarget.push(id);
         else if (typeof monsterTypes === 'object' && !monsterTypes[q.target]) out.unknownMob.push(id + ':' + q.target);
         if ((q.count | 0) <= 0) out.zeroCount.push(id);
+        if (q.kind === 'kill' && (supply[q.target] | 0) === 1 && (q.count | 0) > 10) out.overSupply.push(id + ':x' + q.count + ' of 1');
       }
       for (const p of [].concat(q.prereq || [])) {
         if (!QUESTS[p]) { out.missingPrereq.push(id + ' needs ' + p); continue; }
@@ -61,12 +67,18 @@ try {
       const paid = player.exp, cap = Math.max(1, Math.floor(_lxLevelCost(qL) * 0.80));
       if (paid > cap) out.overCeiling.push(id + ':' + paid + '>' + cap);
       if (paid <= 0) out.paysNothing.push(id);
-      // per user: a quest pays between a quarter and three fifths of a level. The Clockwork run is
-      // exempt (repeatable, level-scaled, deliberately tapered to ~1% a stage) and so is the Lv 1
-      // opener, whose whole rung costs one point of EXP.
+      // per user: no quest pays more than three fifths of a level, and a ten-level band's quests are
+      // worth 40% of that band BETWEEN them. The Clockwork run is exempt (repeatable, level-scaled,
+      // its own ~1%-a-stage taper) and so is the Lv 1 opener, whose whole rung costs one point of EXP.
       if (!q.scalesToPlayer && qL > 1) {
         const share = paid / _lxLevelCost(qL);
-        if (share < 0.23 || share > 0.61) out.offBand.push(id + '@Lv' + qL + '=' + share.toFixed(3));
+        if (share > 0.61) out.offBand.push(id + '@Lv' + qL + '=' + share.toFixed(3));
+        // a class line is four copies of one quest; one player does one of them
+        if (!/^q_(rogue|archer|mage)_lv[0-9]+$/.test(id)) {
+          const bd = Math.min(9, Math.floor((qL - 1) / 10));
+          out.bandShare[bd] = (out.bandShare[bd] || 0) + share;
+          out.bandN[bd] = (out.bandN[bd] || 0) + 1;
+        }
       }
     }
     return out;
@@ -83,7 +95,18 @@ try {
   check(r.badPotion.length === 0, 'every potion reward names a potion that exists', J(r.badPotion.slice(0, 5)));
   check(r.overCeiling.length === 0, 'no quest pays more than 80% of its own level', J(r.overCeiling.slice(0, 5)));
   check(r.paysNothing.length === 0, 'no quest with an EXP reward pays zero', J(r.paysNothing.slice(0, 5)));
-  check(r.offBand.length === 0, 'every quest pays between a quarter and three fifths of a level', r.offBand.length + ' off: ' + J(r.offBand.slice(0, 6)));
+  check(r.offBand.length === 0, 'no quest pays more than three fifths of a level', r.offBand.length + ' off: ' + J(r.offBand.slice(0, 6)));
+  {
+    // Lv 1-10 is out: the whole chapter costs 2,531 kills, less than one Lv 20 level, and the
+    // 0.60 cap clips its quests - a "40% of the band" reading there means nothing.
+    const bands = Object.keys(r.bandShare).filter((b) => (r.bandN[b] | 0) >= 4 && +b >= 1);
+    // bandShare is in LEVELS: ten levels in a band, so 40% of it is 4.00
+    const off = bands.filter((b) => r.bandShare[b] / 10 < 0.34 || r.bandShare[b] / 10 > 0.46)
+      .map((b) => 'Lv' + (b * 10 + 1) + '-' + (b * 10 + 10) + '=' + r.bandShare[b].toFixed(2) + ' levels');
+    check(bands.length >= 8 && off.length === 0, 'a ten-level band of quests is worth about 40% of that band between them',
+      J(bands.map((b) => (b * 10 + 1) + ':' + r.bandShare[b].toFixed(2))));
+  }
+  check(r.overSupply.length === 0, 'no hunt asks for more of a monster than the world holds one of', J(r.overSupply.slice(0, 6)));
   check(errs.length === 0, 'no page errors', errs.slice(0, 3).join(' | '));
 } finally { await browser.close(); server.kill(); }
 console.log(`${pass}/${pass + fail} checks passed`); process.exit(fail ? 1 : 0);
