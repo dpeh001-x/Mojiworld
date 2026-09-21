@@ -12830,7 +12830,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.955';
+const GAME_VERSION = 'v0.30.956';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -105789,6 +105789,75 @@ So… do you need a lift?`;
     const _interestEarned = _lxBankAccrue(0);   // v0.30.x — was dropped, then read below: ReferenceError killed the whole banker
     const _capLine = _lxBankInterestLine();
     text = `*Abacus beads clicking, she glances up over half-moon spectacles.*\n\nWelcome to the Mojibank. I am Felina. Your savings work harder than you do, given the proper accounts. ${_interestEarned > 0 ? `\n\n*Your account earned ${_interestEarned.toLocaleString()} Mojicoins since your last visit.*` : ''}\n\nCurrent balance: ${player.bankBalance.toLocaleString()} Mojicoins. Wallet: ${Math.floor(player.mojicoins||0).toLocaleString()} Mojicoins.\n\n${_capLine}`;
+    // v0.30.956 type an amount. Rendered through the opt.render() escape hatch so it sits in the same
+    // options column as the buttons. Typing here is safe: the game's keydown handler already returns
+    // early when the event target is an INPUT, so WASD and the skill keys cannot fire into the field.
+    opts.push({ render: () => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; gap:8px; width:100%; align-items:stretch; margin:2px 0 4px;';
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.inputMode = 'numeric'; inp.autocomplete = 'off'; inp.spellcheck = false;
+      inp.id = 'bank-amt'; inp.maxLength = 18;
+      inp.placeholder = 'Amount \u2014 25000, 2.5m, all';
+      inp.style.cssText = 'flex:1 1 auto; min-width:0; padding:10px 12px; border-radius:8px;'
+        + 'background:rgba(20,14,34,0.72); border:1px solid rgba(255,214,130,0.38); color:#ffe9b8;'
+        + "font:700 14px/1.2 'Consolas','JetBrains Mono',monospace; letter-spacing:0.6px; outline:none;";
+      inp.onfocus = () => { inp.style.borderColor = 'rgba(255,214,130,0.85)'; };
+      inp.onblur  = () => { inp.style.borderColor = 'rgba(255,214,130,0.38)'; };
+      const say = (m) => { const el = document.getElementById('dialog-text'); if (el) el.textContent = m; };
+      const sum = () => 'Balance: ' + Math.floor(player.bankBalance).toLocaleString() + ' Mojicoins. Wallet: '
+        + Math.floor(player.mojicoins || 0).toLocaleString() + ' Mojicoins.';
+      const bad = () => say('*Felina taps the ledger with one nail.*\n\nA number, dear. Plain digits, or shorthand \u2014 25000, 2.5m, or "all".');
+      const deposit = () => {
+        const wallet = Math.floor(player.mojicoins || 0);
+        const room = Math.max(0, 1e12 - Math.floor(player.bankBalance));
+        const want = _lxBankParseAmt(inp.value, Math.min(wallet, room));
+        if (!isFinite(want) || want <= 0) return bad();
+        if (wallet <= 0) return say('The coin pouch is empty, dear. Come back when it is not.');
+        if (want > wallet) return say('You are carrying ' + wallet.toLocaleString() + ' Mojicoins, dear, not '
+          + want.toLocaleString() + '. The math is unforgiving.');
+        const amt = Math.min(want, room);   // never debit the wallet for coins the vault cannot hold
+        if (amt <= 0) return say('The vault is full to its ceiling, dear. Even I have limits.');
+        player.mojicoins -= amt;
+        player.bankBalance = Math.min(1e12, Math.floor(player.bankBalance) + amt);
+        player.bankLastTick = _monoNow();
+        if (typeof saveState === 'function') saveState();
+        inp.value = '';
+        say('*Felina ticks a column.*\n\n' + amt.toLocaleString() + ' Mojicoins deposited. ' + sum());
+      };
+      const withdraw = () => {
+        const bal = Math.floor(player.bankBalance);
+        const room = Math.max(0, 1e12 - Math.floor(player.mojicoins || 0));
+        const want = _lxBankParseAmt(inp.value, Math.min(bal, room));
+        if (!isFinite(want) || want <= 0) return bad();
+        if (bal <= 0) return say('The vault is dust and echoes for you, dear. Nothing to withdraw.');
+        if (want > bal) return say('Your account holds ' + bal.toLocaleString() + ' Mojicoins, dear. I do not lend.');
+        if (room <= 0) return say('Your purse is already fit to burst, dear. Spend a little of it first.');
+        const amt = Math.min(want, room);
+        player.mojicoins = Math.floor(player.mojicoins || 0) + amt;
+        player.bankBalance = Math.max(0, bal - amt);
+        player.bankLastTick = _monoNow();
+        if (typeof saveState === 'function') saveState();
+        inp.value = '';
+        say('*Felina counts it into a velvet pouch and slides it across the counter.*\n\n'
+          + amt.toLocaleString() + ' Mojicoins withdrawn. ' + sum());
+      };
+      inp.addEventListener('keydown', (e) => {
+        e.stopPropagation();   // same guard the chat box uses, belt to the handler's braces
+        if (e.key === 'Enter') { e.preventDefault(); deposit(); }
+      });
+      const mk = (label, fn) => {
+        const b = document.createElement('button');
+        b.textContent = label; b.type = 'button';
+        b.style.cssText = 'flex:0 0 auto; width:auto; margin:0; white-space:nowrap;';
+        b.onclick = () => fn();
+        return b;
+      };
+      row.appendChild(inp);
+      row.appendChild(mk('Deposit', deposit));
+      row.appendChild(mk('Withdraw', withdraw));
+      return row;
+    } });
     opts.push({ t:'Deposit 1,000 Mojicoins', cb:() => {
       if ((player.mojicoins||0) < 1000) { document.getElementById('dialog-text').textContent = 'I admire ambition, but the coin pouch needs to contain Mojicoins first. Come back when you can spare the 1,000.'; return; }   // v0.26.1033 — was |0: wrapped negative >2.147B, blocking deposits for the richest players
       player.mojicoins -= 1000; player.bankBalance = Math.min(1e12, player.bankBalance + 1000); player.bankLastTick = _monoNow();
@@ -107119,6 +107188,20 @@ function _tokenizeDialogHtml(s) {
     else out.push({ kind:'char', text: tk });
   }
   return out;
+}
+// v0.30.956 Felina takes a typed amount. The two fixed buttons (1,000 / 10,000) are useful for the
+// first hour and useless after it - a player with 20M in the wallet would be clicking "Deposit 10,000"
+// two thousand times. Accepts plain digits, thousands separators, k/m/b shorthand and "all"/"max".
+// Returns NaN for anything it cannot read, so the caller can say so rather than banking a 0.
+function _lxBankParseAmt(raw, max) {
+  const t = String(raw == null ? '' : raw).trim().toLowerCase().replace(/[,\s_]/g, '');
+  if (!t) return NaN;
+  if (t === 'all' || t === 'max') return Math.floor(Math.max(0, max));
+  const m = t.match(/^(\d+(?:\.\d+)?)(k|m|b)?$/);
+  if (!m) return NaN;
+  const mult = m[2] === 'k' ? 1e3 : m[2] === 'm' ? 1e6 : m[2] === 'b' ? 1e9 : 1;
+  const n = parseFloat(m[1]) * mult;
+  return isFinite(n) ? Math.floor(n) : NaN;
 }
 function _classifyDialogOption(label) {
   const s = String(label || '').toLowerCase();
