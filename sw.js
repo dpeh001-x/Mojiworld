@@ -178,7 +178,7 @@
 // keep describing - and the quiet one: stale-while-revalidate serves the OLD cut instantly and refreshes in the
 // background, so a returning player hears the gap for the whole session and the fix only the session after.
 // scripts/sw_cache_freshness.mjs now fails when an asset is replaced without this line moving.
-const CACHE = 'mojiworld-assets-v67';   // v0.30.947 - the recut sound and the gapless music
+const CACHE = 'mojiworld-assets-v68';   // v0.30.955 - ico_male.webp redrawn in place   // v0.30.947 - the recut sound and the gapless music
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
