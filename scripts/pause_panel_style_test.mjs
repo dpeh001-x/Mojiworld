@@ -11,7 +11,8 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 // --- static -----------------------------------------------------------------
 const src = readFileSync('mojiworld_game.html', 'utf8');
-const artRefs = src.split("Sprites/ui/panel_pause.webp").length - 1;
+// the url() itself, not the comment above it that names the file (counting both failed this check on every build)
+const artRefs = src.split("url('Sprites/ui/panel_pause.webp')").length - 1;
 ok('the CSS wires the generated art exactly once', artRefs === 1, { refs: artRefs });
 ok('the art exists on disk at a sane size', existsSync('Sprites/ui/panel_pause.webp')
    && statSync('Sprites/ui/panel_pause.webp').size > 8000
@@ -20,7 +21,7 @@ ok('the art exists on disk at a sane size', existsSync('Sprites/ui/panel_pause.w
 const tracked = execFileSync('git', ['ls-files', '--', 'Sprites/ui/panel_pause.webp'], { encoding: 'utf8' }).trim();
 ok('the art is COMMITTED (packagers ship only tracked files)', tracked === 'Sprites/ui/panel_pause.webp', { tracked });
 ok('the desktop rule has the scale-aware cap',
-   /#settings-modal[^}]*calc\(92vh \/ var\(--game-scale-y/s.test(src.slice(src.indexOf('v0.29.x (per user: "improve on the pause screen'))) , {});
+   /#settings-modal[^}]*calc\(92vh \/ var\(--game-scale-y/s.test(src.slice(src.lastIndexOf('#settings-modal {', src.indexOf('v0.29.x (per user: "improve on the pause screen')))) , {});
 
 // --- live -------------------------------------------------------------------
 const net = await import('node:net');
@@ -58,6 +59,8 @@ const run = async (w, h) => {
       h2Chip: (() => { const h2 = m.querySelector('h2'); if (!h2) return false;
         const cs2 = getComputedStyle(h2); return cs2.clipPath !== 'none' && cs2.transform !== 'none'; })(),
       rowCount: rows.length,
+      allFits: m.scrollHeight <= m.clientHeight + 1,
+      h2Tilt: (() => { const h2 = m.querySelector('h2'); return !!h2 && getComputedStyle(h2).transform !== 'none'; })(),
     };
     // the bottom controls must be reachable with the panel's own scrollbar
     m.scrollTop = 1e9;
@@ -87,11 +90,12 @@ for (const [tag, r] of [['1600x838', a], ['1366x728', c]]) {
   console.log(`--- ${tag} ---`, JSON.stringify(r));
   ok(tag + ': the panel sits fully ON screen (was centre-clipped both ends)', r.fits === true,
      { top: r.top, bottom: r.bottom, vh: r.vh });
-  ok(tag + ': the panel scrolls internally', r.scrolls === true, { scrolls: r.scrolls });
+  // v0.30.1092 - the six-card layout fits whole at these sizes; what matters is that nothing is cut off
+  ok(tag + ': nothing is cut off - the panel scrolls internally, or all of it fits', r.scrolls === true || r.allFits === true, { scrolls: r.scrolls, allFits: r.allFits });
   ok(tag + ': the FIRST row is visible at the top (the reported clip)', r.firstRowVisible === true, {});
   ok(tag + ': the bottom Import button is reachable by scrolling', r.bottomReachable === true, {});
   ok(tag + ': the generated art backs the panel', r.bgHasArt === true, {});
-  ok(tag + ': the title wears the skewed Persona chip', r.h2Chip === true, {});
+  ok(tag + ': the title is tilted (the Persona chip; a comic logo since v0.30.1092)', r.h2Tilt === true, { chip: r.h2Chip });
 }
 ok('the art decodes when served (not just present)', a.artDecodes === true && c.artDecodes === true,
    { a: a.artDecodes, c: c.artDecodes });
