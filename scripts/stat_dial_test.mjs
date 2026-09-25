@@ -9,7 +9,7 @@
 //   4. hovering a chip previews the build after it, and lights that lane's spoke
 //   5. the radar shape is the build: each vertex at r0 + ratio * (maxR - r0)
 //   6. with no SP every chip locks and the starburst dims; a maxed lane says MAX and ignores clicks
-//   7. the type is Cinzel for names (the gold plaques) and Nunito 900 for numbers
+//   7. the type is heavy italic Nunito for names (the cool pop slabs) and Nunito 900 for numbers
 //   node scripts/stat_dial_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -85,7 +85,7 @@ ok('1. seven chips, one per lane, in spoke order', hasDial && G && G.n === 7 && 
 ok('1. each chip sits at the end of its own spoke (within 2 design px)', G && G.offSpoke <= 2, G && G.offSpoke);
 ok('1. no chip overlaps another chip or the dial', G && G.overlap === 0 && G.inDisc === 0, JSON.stringify(G && { overlap: G.overlap, cornersInDisc: G.inDisc }));
 ok('5. the radar shape is the build (every vertex within 1 px of r0 + ratio * span)', G && G.shapeErr <= 1, G && G.shapeErr);
-ok('7. Cinzel names, Nunito 900 numbers, SP in the medallion', G && /Cinzel/.test(G.nameFont) && /Nunito/.test(G.numFont) && +G.numWeight >= 900 && G.center === '300', JSON.stringify(G && [G.nameFont, G.numFont, G.numWeight, G.center]));
+ok('7. Nunito names, Nunito 900 numbers, SP in the burst', G && /Nunito/.test(G.nameFont) && /Nunito/.test(G.numFont) && +G.numWeight >= 900 && G.center === '300', JSON.stringify(G && [G.nameFont, G.numFont, G.numWeight, G.center]));
 
 if (!(G && G.n === 7)) {
   ok('the dial exists - every interaction check below needs its chips', false, 'no stat dial on this build');
