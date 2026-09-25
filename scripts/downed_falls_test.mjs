@@ -48,6 +48,8 @@ try {
     for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 50)); trace.push([Math.round(performance.now() - t0), Math.round(player.y), !!player.onGround]); if (player.onGround && i > 4) break; }
     await new Promise((r) => setTimeout(r, 400));
     const el = document.getElementById('coop-downed-banner'); const secs = document.getElementById('coop-downed-secs');
+    // the skull image is a network fetch; give it up to 3 s before reading the card (a cold read on the shipped tip caught it half-way)
+    { const im = el && el.querySelector('img.cd-skull'); for (let i = 0; i < 60 && im && !(im.complete && im.naturalWidth > 0); i++) await new Promise((r) => setTimeout(r, 50)); }
     const s1 = secs ? secs.textContent : null; await new Promise((r) => setTimeout(r, 1100)); const s2 = secs ? secs.textContent : null;
     const divs = el ? [...el.querySelectorAll('div')] : [];
     return { downed, groundedBefore, floorY: Math.round(floorY), startY: Math.round(startY), endY: Math.round(player.y), onGround: !!player.onGround, stillDown: !!player._downed, hp: player.hp, trace: trace.slice(-4),
