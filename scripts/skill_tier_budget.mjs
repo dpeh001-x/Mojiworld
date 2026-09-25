@@ -10,7 +10,13 @@
 //   base kit  (slots d/s/a/e/w)  target = 100 + 30 x cd_s, capped 100..400  - the Z basic itself is the
 //                                denominator and is never edited
 //   job tier  (slots q/c)        target = 350 + 25 x cd_s, capped 500..900
-//   master    (slots x/b)        target = 1000, Bastion of Dawn 2500 (charged); DOTs are 1000 over 10 s
+//   master    (slots x/b)        target = 70 x cd_s (a 25 s G skill 1750, a 60 s ultimate 4200), Bastion of
+//                                Dawn 2500 (charged); DOTs are counted over the 10 s window
+// Since the 2026-09-25 skill audit (per user: "fix all") the master target follows the cooldown: it was a
+// flat 1000, and across the 32 master skills damage and cooldown correlated at 0.2 - a 15 s G skill and a
+// 120 s one aimed at the same number. 70% of a basic per second of table cooldown is the median the user's
+// Skill Editor patches had already settled on (G 80, B 59). The tabulation it reads measures one FULL use
+// of every multi-press skill since 08140288, so the windows and charges are budgeted whole.
 // A skill keeps its shape: every ATK multiplier and flat on its lines is scaled by the same ratio, so a
 // 12-line skill stays 12 lines at 1/12 each; only the total moves. Counts (orbs, lines, waves) are never
 // touched. Buff / utility rows (0 damage) are skipped. A row already within --tol of its target is
@@ -32,7 +38,7 @@ const KEEP = new Set(arg('keep', '').split(',').filter(Boolean));
 const MODEL = {
   base: (cd) => Math.min(400, Math.max(100, 100 + 30 * cd)),
   job: (cd) => Math.min(900, Math.max(500, 350 + 25 * cd)),
-  master: (cd, id) => id === 'crusader_ult' ? 2500 : 1000,
+  master: (cd, id) => id === 'crusader_ult' ? 2500 : Math.round(70 * cd),
 };
 const src = readFileSync(GAME, 'utf8');
 const sandbox = {}; vm.runInNewContext(readFileSync(path.join(ROOT, 'tools', 'skill_damage_scan.js'), 'utf8'), sandbox);
@@ -100,7 +106,7 @@ writeFileSync(OUT, 'LX_SKILL_PATCH:2 ' + JSON.stringify(patch));
 const order = { base: 0, job: 1, master: 2 };
 rows.sort((a, b) => a.cls.localeCompare(b.cls) || order[a.tier] - order[b.tier] || a.cd - b.cd);
 const md = [`# Skill tier proposal — from the ${ver} tabulation`, '',
-  'Targets are a % of the class basic hit, by tier and cooldown: base kit `100 + 30·cd` (100–400), job tier `350 + 25·cd` (500–900), master 1000 (Bastion of Dawn 2500). Every multiplier and flat on a skill\'s own lines is scaled by one ratio, so the number of attacks and the split between them stay as designed; only the total moves. Rows within ±' + Math.round(TOL * 100) + '% keep their numbers.', '',
+  'Targets are a % of the class basic hit, by tier and cooldown: base kit `100 + 30·cd` (100–400), job tier `350 + 25·cd` (500–900), master `70·cd` (Bastion of Dawn 2500). Every multiplier and flat on a skill\'s own lines is scaled by one ratio, so the number of attacks and the split between them stay as designed; only the total moves. Rows within ±' + Math.round(TOL * 100) + '% keep their numbers.', '',
   '| class | tier | key | skill | cd s | lines | measured | target | ratio | edits |', '|---|---|---|---|---:|---:|---:|---:|---:|---|'];
 for (const r of rows) md.push(`| ${r.cls} | ${r.tier} | ${r.slot} | ${r.name} | ${r.cd} | ${r.lines} | ${Math.round(r.measured)}% | ${r.target == null ? '—' : Math.round(r.target) + '%'} | ${r.ratio == null ? '—' : '×' + r.ratio.toFixed(2)} | ${r.edits.length ? r.edits.map((e) => e.new.replace(/\s*\/\/.*$/, '').trim()).join('<br>') : r.note} |`);
 writeFileSync(MD, md.join('\n') + '\n');
