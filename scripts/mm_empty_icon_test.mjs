@@ -1,11 +1,11 @@
-// The empty MojiMon card's icon: an inked baby buddy, not the hatching-chick emoji.
+// The empty MojiMon card's icon is the game's snail sprite, cropped, black-inked and rimmed.
 //   node scripts/mm_empty_icon_test.mjs
 //     MOJI_GAME_FILE=<build.html>   test a private build (serve.js swaps it in for the game URL)
 //     MOJI_DATA_REF=origin/main     serve data/ tables from a git ref, for when the working copy's are stale
 //     MOJI_SHOT_DIR=<dir>           also save a close-up of the card per viewport, to eyeball it
-// Per user: "change the left icon of the mojimon to something much cuter with a black outline".
-// The black line only reads on the dark card because of the pale sticker rim outside it, so the
-// rim is checked as well as the ink.
+// Per user: "Use the snail sprite as the mojimon" (after "something much cuter with a black outline").
+// The card points at the LIVE sprite with a hand-set crop window, so the crop is re-measured here
+// against the real image: a redraw that no longer fits the window fails instead of clipping.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +17,6 @@ const { chromium } = require('playwright-core');
 const PORT = String(process.env.MOJI_PORT || 9143);
 const DATA_REF = process.env.MOJI_DATA_REF || '';
 const SHOTS = process.env.MOJI_SHOT_DIR || '';
-const INK = '#140c18';
 let bad = 0, total = 0;
 const check = (ok, what, info) => { total++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${ok ? '' : '   ' + JSON.stringify(info)}`); if (!ok) bad++; };
 const gitShow = (rel) => execFileSync('git', ['show', rel], { cwd: ROOT, maxBuffer: 1 << 26 });
@@ -59,28 +58,44 @@ try {
     await page.waitForTimeout(600);
     return { ctx, page };
   };
-  const measure = (page) => page.evaluate((INK) => {
+  const measure = (page) => page.evaluate(async () => {
     const card = document.querySelector('#u-pane-mojimon .mmr-empty');
     if (!card) return null;
     card.scrollIntoView({ block: 'center' });
-    const ico = card.querySelector('.mmr-empty-ico'), svg = ico && ico.querySelector('svg.mmr-buddy');
-    const r = svg && svg.getBoundingClientRect(), c = card.getBoundingClientRect();
-    const filt = svg ? getComputedStyle(svg).filter : '';
-    const under = r && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    return {
+    const ico = card.querySelector('.mmr-empty-ico'), el = ico && ico.querySelector('i.mmr-snail');
+    const out = {
       title: (card.querySelector('.mmr-et') || {}).textContent,
       icoText: ico ? ico.textContent.trim() : null,
-      emoji: ico ? ico.querySelectorAll('.lx-emo, img').length : -1,
-      svg: !!svg, cssW: svg ? parseFloat(getComputedStyle(svg).width) : 0, cssH: svg ? parseFloat(getComputedStyle(svg).height) : 0,
-      onScreen: !!r && r.width > 0 && r.height > 0,
-      inside: !!r && r.left >= c.left - 0.5 && r.right <= c.right + 0.5 && r.top >= c.top - 0.5 && r.bottom <= c.bottom + 0.5,
-      visible: !!under && (under === svg || svg.contains(under) || ico.contains(under)),
-      ink: svg ? [...svg.querySelectorAll('[stroke]')].filter((e) => e.getAttribute('stroke').toLowerCase() === INK).length : 0,
-      eyes: svg ? [...svg.querySelectorAll('ellipse')].filter((e) => e.getAttribute('fill') === INK).length : 0,
-      rim: (filt.match(/drop-shadow/g) || []).length,
-      anim: ico ? getComputedStyle(ico).animationName : '',
+      extras: ico ? ico.querySelectorAll('.lx-emo, img, svg').length : -1,
+      snail: !!el,
     };
-  }, INK);
+    if (!el) return out;
+    const cs = getComputedStyle(el), r = el.getBoundingClientRect(), c = card.getBoundingClientRect();
+    const url = (cs.backgroundImage.match(/url\("?([^")]+)"?\)/) || [])[1] || '';
+    out.url = url.replace(location.origin + '/', '');
+    out.cssW = parseFloat(cs.width); out.cssH = parseFloat(cs.height);
+    out.inside = r.width > 0 && r.left >= c.left - 0.5 && r.right <= c.right + 0.5 && r.top >= c.top - 0.5 && r.bottom <= c.bottom + 0.5;
+    const under = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    out.visible = !!under && (under === el || ico.contains(under));
+    out.ink = (cs.filter.match(/rgb\(20, 12, 24\)/g) || []).length;
+    out.rim = (cs.filter.match(/rgb\(251, 234, 255\)/g) || []).length;
+    out.anim = getComputedStyle(ico).animationName;
+    // Load the very image the card uses, then map the CSS crop back onto its pixels.
+    const img = new Image(); img.src = url;
+    try { await img.decode(); } catch (e) {}
+    out.loaded = img.naturalWidth > 0;
+    if (!out.loaded) return out;
+    const k = parseFloat(cs.backgroundSize) / img.naturalWidth;
+    const [px, py] = cs.backgroundPosition.split(' ').map(parseFloat);
+    const win = { x: -px / k, y: -py / k, w: out.cssW / k, h: out.cssH / k };
+    const cv = document.createElement('canvas'); cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    const g = cv.getContext('2d'); g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, cv.width, cv.height).data;
+    let t = -1, b = -1, lft = cv.width, rt = -1;
+    for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) if (d[(y * cv.width + x) * 4 + 3] > 64) { if (t < 0) t = y; b = y; if (x < lft) lft = x; if (x > rt) rt = x; }
+    out.margins = { left: lft - win.x, top: t - win.y, right: win.x + win.w - (rt + 1), bottom: win.y + win.h - (b + 1) };
+    return out;
+  });
   const shot = async (page, name) => {
     if (!SHOTS) return;
     const el = await page.$('#u-pane-mojimon .mmr-empty');
@@ -95,12 +110,15 @@ try {
     const M = await measure(page);
     check(!!M && M.title === 'No MojiMon bound yet', `${name}: the empty card is up`, M && M.title);
     if (M) {
-      check(M.svg && M.emoji === 0 && M.icoText === '', `${name}: the icon is the drawn buddy, no emoji left in it`, M);
-      check(M.cssW === 58 && M.cssH === 58, `${name}: drawn at its full 58px`, { w: M.cssW, h: M.cssH });
-      check(M.onScreen && M.inside, `${name}: fully inside the card`, M);
+      check(M.snail && M.extras === 0 && M.icoText === '', `${name}: the icon is the snail, no emoji or old buddy left`, M);
+      check(M.url === 'Sprites/monsters/snail.webp', `${name}: it is the game's own snail sprite`, M.url);
+      check(M.loaded === true, `${name}: that image really loads`, M.loaded);
+      check(M.cssW === 70 && M.cssH === 49, `${name}: drawn at 70x49`, { w: M.cssW, h: M.cssH });
+      const mg = M.margins || {}, vals = Object.values(mg);
+      check(vals.length === 4 && vals.every((v) => v >= 0 && v <= 24), `${name}: the crop holds the whole snail with a thin margin (canvas px)`, mg);
+      check(M.inside, `${name}: fully inside the card`, M);
       check(M.visible, `${name}: nothing covers it`, M);
-      check(M.ink >= 10 && M.eyes === 2, `${name}: black ink outline on every shape, two ink eyes`, { ink: M.ink, eyes: M.eyes });
-      check(M.rim >= 4, `${name}: the pale rim that keeps the black line visible on the dark card`, M.rim);
+      check(M.ink >= 4 && M.rim >= 4, `${name}: black ink ring plus the pale rim that keeps it visible on the dark card`, { ink: M.ink, rim: M.rim });
       check(motion ? M.anim === 'mmr-bob' : M.anim === 'none', `${name}: ${motion ? 'bobs like the old icon' : 'holds still under reduced motion'}`, M.anim);
     }
     await shot(page, name.split(' ')[0]);
