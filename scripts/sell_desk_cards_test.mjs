@@ -95,6 +95,16 @@ try {
     const p = { desk: m.classList.contains('sell-desk'), forge: m.classList.contains('gear-forge'), stall: m.classList.contains('potion-stall') }; closeAllModals(); return { w, p };
   });
   check(!others.w.desk && others.w.forge && !others.p.desk && !others.p.forge && others.p.stall, 'the weapon and potion tabs do not wear the desk class', J(others));
+  // v0.30.1016 - a tall window: the game box (.game-wrapper, 960x560 CSS px scaled) is letterboxed, and the card must stay inside it
+  await page.setViewportSize({ width: 1280, height: 1200 }); await page.waitForTimeout(700);
+  const tall = await page.evaluate(async (tab) => {
+    const pool = [].concat(ITEM_POOL.weapons, ITEM_POOL.armors).filter((it) => !it.setId); player.inventory.length = 0; for (let i = 0; i < 16 && i < pool.length; i++) player.inventory.push({ ...pool[i] }); game._sellSelection = new Set();
+    try { closeAllModals(); } catch (e) {} openShop(tab); await new Promise((r) => setTimeout(r, 500));
+    const R = (el) => el.getBoundingClientRect(); const w = R(document.querySelector('.game-wrapper')), m = R(document.querySelector('#shop-modal .modal'));
+    const close = R(document.querySelector('#shop-modal .close-btn')), title = R(document.getElementById('shop-title'));
+    return { win: innerHeight, wrapper: [Math.round(w.top), Math.round(w.bottom)], modal: [Math.round(m.top), Math.round(m.bottom)], closeTop: Math.round(close.top), titleTop: Math.round(title.top), listMax: getComputedStyle(document.getElementById('shop-list')).maxHeight };
+  }, 'sell');
+  check(tall.modal[0] >= tall.wrapper[0] && tall.modal[1] <= tall.wrapper[1] && tall.closeTop >= tall.wrapper[0] && tall.titleTop >= tall.wrapper[0], 'TALL WINDOW: on 1280 x 1200 the card, its title and its close button stay inside the letterboxed game box', J(tall));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await ctx.close(); await browser.close(); server.kill();

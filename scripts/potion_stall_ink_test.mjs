@@ -102,6 +102,16 @@ try {
   check(/rgb\(247, 245, 239\)/.test(r.input.bg) && /rgb\(12, 11, 16\)/.test(r.input.color) && r.input.border === '2px' && /800 13px/.test(r.input.font), 'QUANTITY: paper field, ink numerals', J(r.input));
   check(/rgb\(255, 228, 92\)/.test(r.buy.on) && /rgb\(12, 11, 16\)/.test(r.buy.onColor) && r.buy.disabled2 && /rgba\(60, 58, 68/.test(r.buy.offBg) && r.buy.label === 'Buy 3', 'BUY: yellow with ink lettering when it can buy, muted when it cannot', J(r.buy));
   check(!r.gear.stall && r.gear.forge, 'the gear tab wears its own class, not the stall\'s', J(r.gear));
+  // v0.30.1016 - a tall window: the game box (.game-wrapper, 960x560 CSS px scaled) is letterboxed, and the card must stay inside it
+  await page.setViewportSize({ width: 1280, height: 1200 }); await page.waitForTimeout(700);
+  const tall = await page.evaluate(async (tab) => {
+    
+    try { closeAllModals(); } catch (e) {} openShop(tab); await new Promise((r) => setTimeout(r, 500));
+    const R = (el) => el.getBoundingClientRect(); const w = R(document.querySelector('.game-wrapper')), m = R(document.querySelector('#shop-modal .modal'));
+    const close = R(document.querySelector('#shop-modal .close-btn')), title = R(document.getElementById('shop-title'));
+    return { win: innerHeight, wrapper: [Math.round(w.top), Math.round(w.bottom)], modal: [Math.round(m.top), Math.round(m.bottom)], closeTop: Math.round(close.top), titleTop: Math.round(title.top), listMax: getComputedStyle(document.getElementById('shop-list')).maxHeight };
+  }, 'potion');
+  check(tall.modal[0] >= tall.wrapper[0] && tall.modal[1] <= tall.wrapper[1] && tall.closeTop >= tall.wrapper[0] && tall.titleTop >= tall.wrapper[0], 'TALL WINDOW: on 1280 x 1200 the card, its title and its close button stay inside the letterboxed game box', J(tall));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await ctx.close(); await browser.close(); server.kill();
