@@ -3,6 +3,7 @@
 //   R4 Spellweaver refunds at most twice a second and never touches a B ultimate (was once a frame, everything)
 //   R6 War of Banners and Bastion of Dawn wait what the Skills panel says, table cd x 0.75 (was the raw 60 s)
 //   R2/R3 War of Banners and Blade of Calamity deal their retuned numbers (per press / per cast, in ATK)
+//   War Cry + Bloodlust + Rampage count together up to +80% ATK (they added to +165%)
 //
 //   [SERVE_ROOT=<dir with serve.js + the game's data/>] [PORT=11098] node scripts/skill_audit_fixes_test.mjs [candidate.html]
 import { createRequire } from 'node:module'; import path from 'node:path';
@@ -69,17 +70,25 @@ try {
     out.wobPress = +((h0 - m.currentHp) / atk2).toFixed(2); player._warlordEnrageUntil = 0;
     as('warrior', 'berserker', 'doombringer'); m = dummy(60); h0 = m.currentHp; const atk3 = getAtk(); castSkill('doombringer_apoc'); await sleep(2500);
     out.apoc = +((h0 - m.currentHp) / atk3).toFixed(2);
+    // the three attack buffs count together up to +80% ATK
+    as('warrior', 'berserker', 'warlord');
+    const atkNone = getAtk(); player.buffs.warCry = 5000; const atkWc = getAtk();
+    player.buffs.bloodlust = 5000; player.buffs.rampage = 5000; const atkAll = getAtk();
+    player.buffs.warCry = 0; player.buffs.bloodlust = 0; player.buffs.rampage = 0;
+    const unit = (atkWc - atkNone) / 0.55;   // War Cry alone is +55%
+    out.buffs = { all: unit > 0 ? +((atkAll - atkNone) / unit).toFixed(2) : null };
     window.rollCrit = _roll;
     return out;
   });
   const M = r.meteor;
-  check(M[40] >= 3 && M[200] >= 3 && M[450] >= 3, 'Meteor lands on a monster 40, 200 and 450 px away (4x ATK + 80 each)', JSON.stringify(M));
+  check(M[40] >= 3 && M[200] >= 3 && M[450] >= 3, 'Meteor lands on a monster 40, 200 and 450 px away', JSON.stringify(M));
   check(r.weave.fireballCut >= 1000 && r.weave.fireballCut <= 3000, 'Spellweaver: a second of crits takes 1-3 s off a skill, not one per frame', JSON.stringify(r.weave));
   check(r.weave.ultCut <= 200, 'Spellweaver never cuts a B ultimate', JSON.stringify(r.weave));
   check(Math.abs(r.wob.cd - r.wob.shown) <= 1500 && r.wob.shown <= 46000, 'War of Banners waits what the panel says (45 s, not the raw 60 s)', JSON.stringify(r.wob));
   check(Math.abs(r.bastion.cd - r.bastion.shown) <= 1500 && r.bastion.shown <= 46000, 'Bastion of Dawn waits what the panel says (45 s, not the raw 60 s)', JSON.stringify(r.bastion));
   check(r.wobPress >= 1.5 && r.wobPress <= 3.5, 'War of Banners: one press is the retuned sweep + wave (2.3x ATK; was 10.9x)', r.wobPress + 'x ATK');
   check(r.apoc >= 12 && r.apoc <= 17, 'Blade of Calamity: one cast is the retuned cleaves + slam (14.6x ATK; was 20.3x)', r.apoc + 'x ATK');
+  check(r.buffs && r.buffs.all >= 0.78 && r.buffs.all <= 0.82, 'War Cry + Bloodlust + Rampage together add +80% ATK, not +165%', JSON.stringify(r.buffs));
   check(!errs.length, 'no page errors', errs.slice(0, 3).join(' | '));
 } catch (e) {
   check(false, 'test ran to completion', String(e.message || e).slice(0, 160));
