@@ -38,6 +38,32 @@ try {
     loadMap(MAP); game.paused = false;
   }, MAP);
   await page.waitForTimeout(T);   // the arena's real flow: load hold, intro, spawn, prewarm
+  // v0.30.x — ...and then until the boss's own frames have DOWNLOADED and the spawn queue is idle (45 s cap). A fixed
+  // T measured the local server's throughput instead of the queue: at page start the parse-time loaders fire
+  // thousands of image requests (every boss's frames, fx, backgrounds - the web hold is off on localhost), so on a
+  // loaded machine Gravitos's 61 form frames were sometimes still in flight at 11 s: a timeline showed the queue
+  // untouched for 20 s in one run and finished in 8.5 s in the next two. The check stays meaningful - a queue that
+  // does not bake the form leaves it raw however long this waits - and 'settle' reports how long it took.
+  const settle = await page.evaluate(async () => {
+    const t0 = performance.now();
+    const letter = (k, base) => k.length > base.length && k.indexOf(base) === 0 && (k.charCodeAt(base.length) >= 97 && k.charCodeAt(base.length) <= 122);
+    const formSets = () => {
+      const m = game.monsters.find((x) => x && x.boss && x.currentHp > 0); if (!m) return null;
+      const type = m._phaseSprite || m.type, sign = m.zodiacSign || null, out = [];
+      if (sign && typeof ZODIAC_IDLE_FRAMES !== 'undefined') { for (const S of [ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES]) if (S[sign]) out.push(S[sign]); }
+      else for (const S of [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES]) for (const k in S) if (k === type || letter(k, type)) out.push(S[k]);
+      return out;
+    };
+    while (performance.now() - t0 < 45000) {
+      const sets = formSets();
+      const loaded = !!sets && sets.every((a) => a.every((im) => !im || im.tagName === 'CANVAS' || (im.complete && im.naturalWidth > 0) || (im.complete && !im.naturalWidth)));
+      const idle = (typeof _LX_BOSS_BAKE_Q === 'undefined' || _LX_BOSS_BAKE_Q.length === 0) && (typeof _lxBakeInFlight === 'undefined' || _lxBakeInFlight === 0);
+      if (loaded && idle) return { ms: Math.round(performance.now() - t0), done: true };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { ms: 45000, done: false };
+  });
+  console.log('  settle after T: ' + JSON.stringify(settle));
   const cdp = await page.context().newCDPSession(page); const events = [];
   cdp.on('Tracing.dataCollected', (e) => { for (const ev of e.value) events.push(ev); });
   await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink.user_timing', transferMode: 'ReportEvents' });

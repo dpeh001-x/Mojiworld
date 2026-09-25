@@ -112,11 +112,39 @@ console.log(`  windowed: dpr=${before.dpr} cap(720)=${before.cap720} — ${befor
 await page.evaluate(() => { _lxApplyRenderScale(2); });
 await page.waitForTimeout(9000);   // draw loop re-runs the shrink; async re-bakes drain
 const after = await scan();
-console.log(`  scaled up: dpr=${after.dpr} cap(720)=${after.cap720} — ${after.canvases} baked canvases`);
+console.log(`  scaled up: dpr=${after.dpr} cap(720)=${after.cap720} — ${after.canvases} baked canvases, ${after.nFlagged} stored-but-undrawn at the old size (they re-bake on first draw)`);
+// v0.30.x — WHAT IS DRAWN. This test used to fail on any stored canvas below the new cap. When it was written
+// (v0.30.256) a boss set was baked only when drawn, so every stored canvas was one being drawn. Since the spawn-time
+// bake queue (v0.30.775 / 790, "grav-smooth") a boss's poses are ALL baked when he spawns, so the poses he has not
+// used since the switch sit at the old size until their first draw re-bakes them (_lxShrinkFrames; the stand-in
+// holds the pose for the ~100-300 ms bake). Which sets were caught depended on what the bosses happened to do in the
+// 9 s window: 37 frames on one run, 6 on the next, same build. The v0.30.256 promise is about what is DRAWN: every
+// boss frame drawn in the six seconds after the switch settles must be a bake at the NEW cap (or its full source).
+const drawn = await page.evaluate(async () => {
+  const oD = window._drawBossSprite;
+  const res = { draws: 0, bakes: 0, bad: [] };
+  window._drawBossSprite = function (sprite, m) {
+    res.draws++;
+    const src = sprite && sprite.tagName === 'CANVAS' ? sprite._lxSrc : null;
+    if (src && src.naturalWidth > 0) {   // a bake: is it the size the CURRENT cap would make from its source?
+      const set = src._lxSet, base = Math.max((set && set._lxBase) || 720, (set && set._lxBaseMin) || 0);
+      const srcLong = Math.max(src.naturalWidth, src.naturalHeight), want = Math.min(srcLong, _lxShrinkCap(base));
+      const cur = Math.max(sprite.width, sprite.height);
+      res.bakes++;
+      if (cur < want * 0.94 && res.bad.length < 12) res.bad.push({ type: m && m.type, st: sprite._lxSt, cur, want, src: srcLong });
+    }
+    return oD.apply(this, arguments);
+  };
+  await new Promise((r) => setTimeout(r, 6000));
+  window._drawBossSprite = oD;
+  return res;
+});
+console.log(`  drawn after the switch: ${drawn.draws} boss draws (${drawn.bakes} from bakes), ${drawn.bad.length} from a bake older than the switch`);
 
 ok('render scale actually rose (1.5 -> 2)', before.dpr < after.dpr && after.dpr === 2, { before: before.dpr, after: after.dpr });
 ok('windowed bakes matched the windowed cap', before.nFlagged === 0, before.flagged);
-ok('after the scale increase, NO frame store holds an undersized bake',
-  after.nFlagged === 0, { nFlagged: after.nFlagged, sample: after.flagged });
+ok('after the scale increase, bosses were drawn from bakes (the check below saw real frames)', drawn.bakes > 100, drawn);
+ok('after the scale increase, every boss frame DRAWN is a bake at the new cap (stored, undrawn poses re-bake on first use)',
+  drawn.bad.length === 0, { stale: drawn.bad, storedUndrawn: after.nFlagged });
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);

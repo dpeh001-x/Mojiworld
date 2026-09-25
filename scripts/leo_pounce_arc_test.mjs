@@ -62,7 +62,10 @@ const R = await page.evaluate(async () => {
     if (n === frames.length) break;
     await frame();
   }
-  const srcOf = (img) => (img && img.src) ? img.src.split('/').pop() : null;
+  // v0.30.x — a frame is named by its SOURCE file. Zodiac sets are right-sized on draw now, like every other boss
+  // set, so mid-test the <img> in a slot becomes its baked canvas - same picture, same index - which carries the
+  // file as _lxSrc, not src. Reading .src alone named a baked frame null and saw the swap as a second "frame".
+  const srcOf = (img) => { const s0 = img && (img._lxSrc || img); return (s0 && s0.src) ? s0.src.split('/').pop() : null; };
   const pick = (vy) => srcOf(_zodiacStateImg('leo', 'pounce', 0, { vy }));
 
   // 1. Sweep the arc: launch (vy very negative) -> apex (0) -> landing (positive).

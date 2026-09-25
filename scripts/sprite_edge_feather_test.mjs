@@ -46,14 +46,25 @@ try {
     const d1 = C.getContext('2d').getImageData(40, 40, 60, 60).data, d2 = D.getContext('2d').getImageData(40, 40, 60, 60).data;
     let diff = 0; for (let i = 0; i < d1.length; i += 401) if (Math.abs(d1[i] - d2[i]) > 2) diff++;
     out.cleanDiff = diff;
+    // v0.30.x — what a feather would do to this sprite, measured over the WHOLE draw: alpha removed near a cut edge.
+    // The unfeathered path no longer blits the raw image (v0.29.735: a plain high-quality downscale bake, cached, so a
+    // 567 px source is not resampled every frame), so the pixels differ by resampling - never by lost alpha.
+    const f1 = C.getContext('2d').getImageData(0, 0, 160, 160).data, f2 = D.getContext('2d').getImageData(0, 0, 160, 160).data;
+    let aC = 0, aD = 0, sum = 0; for (let i = 0; i < f1.length; i++) { sum += Math.abs(f1[i] - f2[i]); if ((i & 3) === 3) { aC += f1[i]; aD += f2[i]; } }
+    out.cleanAlphaRatio = +(aD / Math.max(1, aC)).toFixed(4); out.cleanMeanDiff = +(sum / f1.length).toFixed(3);
     return out;
   });
   ok('probe flags the clipped frame (bonebosn top edge)', !!(r.clippedEdges && r.clippedEdges.t), r.clippedEdges);
-  ok('probe leaves padded art alone (mushpup → null)', r.cleanEdges === null, { cleanEdges: r.cleanEdges });
+  // v0.30.x — the probe reports the BOTTOM edge too since the soft-bottom opt-in (King Gloopaloo / Krook, cut flat
+  // across the feet). A bottom contact is recorded but never faded unless the sprite opts in, so "alone" means no
+  // fadeable side or top - mushpup's feet sit on row 566 of 567, as they have since the art was added.
+  ok('probe leaves padded art alone (mushpup: no fadeable left / right / top edge)',
+    r.cleanEdges === null || (!r.cleanEdges.l && !r.cleanEdges.r && !r.cleanEdges.t), { cleanEdges: r.cleanEdges });
   ok('probe result is memoised on the image', r.memoised === true, { memoised: r.memoised });
   ok('feather SOFTENS the clipped top edge (row-0 alpha drops >60%)', r.softTop < r.rawTop * 0.4 && r.rawTop > 500, { rawTop: r.rawTop, softTop: r.softTop });
   ok('bottom edge untouched (feet stay planted)', Math.abs(r.softBottom - r.rawBottom) <= r.rawBottom * 0.05 + 40, { rawBottom: r.rawBottom, softBottom: r.softBottom });
-  ok('clean sprites draw pixel-identical (pass-through path)', r.cleanDiff === 0, { cleanDiff: r.cleanDiff });
+  ok('clean sprites are not feathered (pass-through path: no alpha lost, only resampling)',
+    r.cleanAlphaRatio >= 0.99 && r.cleanMeanDiff <= 2, { alphaKept: r.cleanAlphaRatio, meanDiff: r.cleanMeanDiff, sampledDiffs: r.cleanDiff });
 
   // 4) in-game smoke: spawn affected mobs and render frames without errors
   const smoke = await p.evaluate(async () => {

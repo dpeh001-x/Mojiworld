@@ -27,7 +27,15 @@ const baked = [];
 for (const [t, states] of Object.entries(calib))
   for (const [st, e] of Object.entries(states))
     if (Array.isArray(e.fs)) baked.push(`${t}.${st}`);
-ok('policy: no per-frame fs baked (bosses render at raw art proportions)', baked.length === 0, baked);
+// v0.30.x — the v0.29.216 policy ("render at raw art proportions") is the DEFAULT, not a ban on the user's own
+// authoring: fs is exactly what the animator's Copy-patch flow produces, and the user baked one on purpose - Gravitos
+// 3's soul frame 3 at x1.12, in 88f57026 (2026-09-08, per user: "After that bake these", seven LX_ANIM_PATCH:1 blobs).
+// Each authored entry is listed with its provenance; anything else still fails, which is what this check is for.
+const AUTHORED_FS = {
+  'gravitos3soul.attack': '88f57026 - user animator patch, 2026-09-08',
+};
+const unexpected = baked.filter((k) => !AUTHORED_FS[k]);
+ok('policy: no per-frame fs baked except the user-authored ones (bosses render at raw art proportions)', unexpected.length === 0, unexpected.length ? unexpected : baked);
 
 // ---- plumbing: capability present in both renderers ----
 const game = readFileSync('mojiworld_game.html', 'utf8');

@@ -18,6 +18,13 @@ await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+// v0.30.x — boot PAST the prologue. A fresh profile plays the prologue's dagger cutscene, whose capture-phase key
+// handler on window takes the first Enter / Space / Escape to end the video (_prologueDaggerCutscene) and stops it
+// there. Hiding the overlays below does not end the video, so whenever it was still playing at the Escape step the
+// gate never heard the key and "Escape erases nothing" read stillOpen:true - traced to that one handler, the gate's
+// own listener never ran. A player cannot reach the Amnesiac while the cutscene covers the screen, so this is the
+// harness, not the gate; the video's length against the page load made it pass some runs and fail others.
+await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
 const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
 try {
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });

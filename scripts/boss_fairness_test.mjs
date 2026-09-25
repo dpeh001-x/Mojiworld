@@ -69,9 +69,15 @@ const r = await page.evaluate(async () => {
   // ---------- #2: no telegraph under the floor ----------
   // Read from the live source of the AI function rather than a constants table,
   // because the timings ARE literals inside the pattern code.
-  const src = String(bossAI);
-  const fires = [...src.matchAll(/patternTimer > (\d+) && !m\._(\w+)/g)]
-    .map((m) => ({ ms: +m[1], flag: m[2] }));
+  // v0.30.x — two forms of gate, two functions. v0.29.929 moved Gravitos's four (black hole, comets, ring, decay)
+  // to `patternTimer > _gravTeleMs(m, 350)`: his pattern clock runs 1.3-1.9x real time, so a literal 350 was a
+  // 165 ms real window in form 3; the helper scales the threshold by that same factor so the REAL window is the
+  // authored number. The survey read only literals and lost those four (10 -> 6), failing a build that had made
+  // the floor stricter. The authored number is the real-time floor, so it is what gets checked. And the zodiac
+  // bosses' own AIs (ZODIAC_AI: Leo's flames, Scorpio's sting) have always lived outside bossAI.
+  const src = String(bossAI) + (typeof ZODIAC_AI === 'object' && ZODIAC_AI ? Object.values(ZODIAC_AI).map(String).join('\n') : '');
+  const fires = [...src.matchAll(/patternTimer > (?:(\d+)|_gravTeleMs\(m, (\d+)\)) && !m\._(\w+)/g)]
+    .map((m) => ({ ms: +(m[1] || m[2]), flag: m[3], realTime: !!m[2] }));
   out.fires = fires.sort((a, b) => a.ms - b.ms).slice(0, 6);
   out.minFire = fires.length ? Math.min(...fires.map((f) => f.ms)) : null;
   out.fireCount = fires.length;
@@ -144,9 +150,12 @@ const r = await page.evaluate(async () => {
       player.x = px; player.y = py;      // hold station through the channel
       if (m._drainFired) break;
     }
-    for (let i = 0; i < 8; i++) await frame();
-    return { fired: !!m._drainFired, hpBefore: Math.round(hp0), hpAfter: Math.round(player.hp),
-             drained: player.hp <= 1 };
+    // v0.30.x — the claim is that the drain TAKES you to 1 HP, so read the lowest HP after it resolves: on this 500k
+    // bar one regen tick in the eight settle frames put the reading at 2 and failed a drain that had landed.
+    let lo = player.hp;
+    for (let i = 0; i < 8; i++) { await frame(); lo = Math.min(lo, player.hp); }
+    return { fired: !!m._drainFired, hpBefore: Math.round(hp0), hpAfter: Math.round(player.hp), hpLow: Math.round(lo),
+             drained: lo <= 1 };
   };
   game.paused = false;
   out.exposedRun = await drain(false);
@@ -194,7 +203,7 @@ console.log(`  drain in the open:   ${JSON.stringify(r.exposedRun)}`);
 console.log(`  drain behind cover:  ${JSON.stringify(r.shelteredRun)}`);
 console.log(`  singularity floor: ${r.singGap} frames (${(r.singGap / 60).toFixed(0)}s)`);
 
-check(r.fireCount >= 8, 'the telegraph survey found the boss attacks', r.fireCount);
+check(r.fireCount >= 12, 'the telegraph survey found the boss attacks (bossAI + the zodiac AI, literal and real-time gates)', r.fireCount);
 check(r.minFire >= 350, 'no boss attack fires on a telegraph under 350ms', { fastest: r.minFire, worst: r.fires });
 check(r.hasLos, 'the line-of-sight helper exists', r.hasLos);
 // The escape must be REACHABLE — the whole point of the change.
