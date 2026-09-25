@@ -87,6 +87,10 @@ try {
   const belly = await page.evaluate(async () => {
     const k = (game.monsters || []).find((m) => m && m.type === 'kingKrook'); const ground = game.mapData.platforms.find((p) => p.type === 'ground').y;
     k.x = 500; k.y = ground - k.h; k.vx = 0; k.vy = 0; k.patternState = 'idle'; k.patternTimer = 0; k._kString = null; k._kRecoverMs = 0;
+    // Nothing may freeze him while facing and the shuffle are sampled. Forcing 'idle' straight out of a
+    // committed pattern is itself an attack->idle transition, which opens the boss punish-window STAGGER
+    // (frozen: no turn, no shuffle), and the free-opening / stance rolls run on their own clocks.
+    k._stagger = 0; k._staggerCd = 1e12; k._punishPrev = 'idle'; k._dirOpenT = 0; k._dirRollT = 1e12; k._dirStanceT = 1e12; k._dirGuardT = 0; k._dirGhostT = 0; k._break = 0;
     const under = () => { player.x = k.x + k.w / 2 - player.w / 2; player.y = ground - player.h; player.vy = 0; player.onGround = true; };
     under(); await new Promise((r) => setTimeout(r, 120));   // let the tick before the first sample see him already there
     const keep = setInterval(under, 30);
@@ -100,6 +104,7 @@ try {
   const chase = await page.evaluate(async () => {
     const k = (game.monsters || []).find((m) => m && m.type === 'kingKrook'); const ground = game.mapData.platforms.find((p) => p.type === 'ground').y;
     k.x = 700; k.y = ground - k.h; k.vx = 0; k.patternState = 'idle'; k.patternTimer = 0;
+    k._stagger = 0; k._staggerCd = 1e12; k._punishPrev = 'idle'; k._dirOpenT = 0; k._dirRollT = 1e12; k._dirStanceT = 1e12; k._dirGuardT = 0; k._dirGhostT = 0; k._break = 0;   // see scenario 2: a stagger or an opening here read as "he will not turn" (failed 2 in 3 on main)
     player.x = 100; player.y = ground - player.h; player.vy = 0;
     await new Promise((r) => setTimeout(r, 700));
     const left = { facing: k.facing, vx: +k.vx.toFixed(2), idle: k.patternState === 'idle' };

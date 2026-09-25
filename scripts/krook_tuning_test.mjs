@@ -72,10 +72,16 @@ console.log('\nHITS HARDER');
 check(r.krook.atk > 270, 'ATK was raised above the old 270', r.krook.atk);
 check(r.krook.atk > r.octo.atk, 'now the hardest-hitting Lv-50 boss (above octobaby)', { krook: r.krook.atk, octobaby: r.octo.atk });
 check(r.krook.atk > r.smith.atk, 'above the Lv-48 sundered_smith', { krook: r.krook.atk, smith: r.smith.atk });
-check(r.krook.atk < r.lego.atk, 'still under legosaurus, nine levels later', { krook: r.krook.atk, lego: r.lego.atk });
+// The Legosaurus ceiling was this test's own guess at "tier-appropriate" (2026-08-22). It was lifted on
+// purpose: v0.30.345 took ATK 455 -> 590 per user ("extremely easy"), so he out-hits the Lv-59 Legosaurus
+// by design. Pinned instead: the hardened value holds, so a stale rebuild cannot soften him quietly
+// (one already restored his pre-buff stats once - v0.30.266 re-landed them).
+check(r.krook.atk >= 590, 'the v0.30.345 hardening holds - ATK 590 (per user: "extremely easy")', { krook: r.krook.atk, lego: r.lego.atk });
 
 console.log('\nNOTHING ELSE MOVED');
-check(r.krook.hp === 2520000, 'HP is unchanged — this was a DEF/ATK pass, not a rework', r.krook.hp);
+// HP moved later, on purpose: v0.30.246 (per user: "Increase the stats of krook") took it 2,520,000 ->
+// 3,600,000, and v0.30.266 re-landed that after a stale rebuild restored the old number.
+check(r.krook.hp === 3600000, 'HP is the v0.30.246 3,600,000 (per user: "Increase the stats of krook")', r.krook.hp);
 check(r.krook.lv === 50, 'still Lv 50', r.krook.lv);
 
 check(errs.length === 0, 'no page errors', errs.slice(0, 3));

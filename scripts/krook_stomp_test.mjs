@@ -51,12 +51,12 @@ await page.evaluate(() => {
   const card = document.querySelector('.cls-card'); if (card) card.click();
   const modal = document.getElementById('class-select-modal'); if (modal) modal.style.display = 'none';
   try { loadMap('sauroSlope'); } catch (e) { try { loadMap(Object.keys(maps)[0]); } catch (e2) {} }
-  window._lxStep = (ms, each) => new Promise((res) => {
+  window._lxStep = (ms, each, stop) => new Promise((res) => {   // stop(): end early once the reading is in
     const t0 = performance.now();
     const tick = () => {
       game.paused = false;                      // headless boots paused, every frame
       if (each) { try { each(); } catch (e) {} }
-      if (performance.now() - t0 >= ms) return res();
+      if (performance.now() - t0 >= ms || (stop && stop())) return res();
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -82,7 +82,7 @@ const r = await page.evaluate(async () => {
   out.atStart = at(0); out.atHit = at(1100); out.atHold = at(1700);
 
   // ---- one full stomp against a GROUNDED player ----
-  const runStomp = async ({ airborne = false, iframes = false, resist = null } = {}) => {
+  const runStomp = async ({ airborne = false, iframes = false, resist = null, colossal = false } = {}) => {
     game.monsters = [];
     if (resist != null) { window._lxOldResist = getStunResist; getStunResist = () => resist; }
     player.hp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
@@ -91,27 +91,43 @@ const r = await page.evaluate(async () => {
     const m = game.monsters[0];
     await window._lxStep(260, () => { if (!airborne) { player.vx = 0; } });   // settle / land
     const hp0 = player.hp;
-    m.patternState = 'stomp'; m.patternTimer = 0; m._kAnnounced = false; m._kFired = false;
+    // v0.30.345 (per user: "wire in occasional 50% Max HP attacks with the stomp") rolls ~30% of stomps
+    // COLOSSAL at the announce - a roll this test never pinned, so its 22% check failed whenever it came up
+    // (it measured 97 against an expected 42: exactly half the bar). The variant is chosen per run now.
+    // Nothing else may take the pattern back, either - the first run on main never stomped at all (no art,
+    // no hit, no stun), two different ways. The page's first frames are slow, so a fresh boss's own AI may
+    // not have run inside the settle: its one-time init (_krookInit) then resets whatever state it finds to
+    // 'idle'. Or it did run, opened with a move of its own, and that move's end opened the punish-window
+    // STAGGER - frozen 1.4 s, the forced stomp cancelled. The free-opening and stance rolls run on their
+    // own clocks too.
+    m._krookInit = true;
+    m._stagger = 0; m._staggerCd = 1e12; m._punishPrev = 'idle'; m._dirOpenT = 0; m._dirRollT = 1e12; m._dirStanceT = 1e12; m._dirGuardT = 0; m._dirGhostT = 0; m._break = 0;
+    m.patternState = 'stomp'; m.patternTimer = 0; m._kAnnounced = true; m._kColossal = !!colossal; m._kFired = false;
     const log = []; let keySeen = null, groundedAtHit = null, fired = false;
     // hp is sampled per FRAME, so the slam can be told apart from the contact
     // chip a boss standing next to you deals anyway - the first cut of this
     // test read 40 where the hit was 39 and blamed the attack.
-    let lastHp = player.hp, dmgAtFire = null, invulnAtHit = null, stunAtFire = null;
-    await window._lxStep(2400, () => {
+    let lastHp = player.hp, dmgAtFire = null, invulnAtHit = null, stunAtFire = null, mhAtHit = null, idleSeen = 0, endState = null;
+    // Run until the stomp has landed and the boss is cleared, not for a fixed 2.4 s of wall clock: the first
+    // run's frames are the slow ones (art still decoding) and it covered ~770 ms of game time in that window,
+    // short of the 1100 ms windup.
+    await window._lxStep(12000, () => {
       if (iframes) player.invulnerable = 600;   // re-armed each frame: a player mid-dodge WHEN it lands
       if (m._gravStarKey && !keySeen) keySeen = m._gravStarKey;
       if (airborne) player.vy = Math.min(player.vy || 0, -5);   // genuinely never lands
       if (log.length < 400) log.push({ pt: Math.round(m.patternTimer || 0), st: m.patternState, k: m._gravStarKey || null });
-      if (m._kFired && !fired) {
+      if (m._kFired && !fired && m.patternState === 'stomp') {   // _kFired is shared by his other slams
         fired = true; groundedAtHit = player.onGround;
         dmgAtFire = lastHp - player.hp; invulnAtHit = player.invulnerable | 0;
+        mhAtHit = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;   // max HP rises for a while after a level change: read it AT the hit
         stunAtFire = player.stunTimer || 0;
       }
       lastHp = player.hp;
-      if (fired && (m.patternTimer || 0) > 1850) game.monsters = [];   // no follow-up pattern may pollute the reading
-    });
-    const res = { hp0, hp1: player.hp, dmg: dmgAtFire, totalDrop: hp0 - player.hp,
-      stun: stunAtFire, keySeen, groundedAtHit, fired, invulnAtHit, endState: m.patternState,
+      if (fired && m.patternState !== 'stomp') { if (endState == null) endState = m.patternState; idleSeen++; }
+      if (fired && ((m.patternTimer || 0) > 1850 || idleSeen >= 8)) game.monsters = [];   // no follow-up pattern may pollute the reading
+    }, () => fired && !game.monsters.includes(m));
+    const res = { hp0, hp1: player.hp, dmg: dmgAtFire, mhAtHit, totalDrop: hp0 - player.hp,
+      stun: stunAtFire, keySeen, groundedAtHit, fired, invulnAtHit, endState: endState || m.patternState,
       keyWhileIdle: log.filter((x) => x.st !== 'stomp').some((x) => x.k === 'kingKrookstomp') };
     if (resist != null) { getStunResist = window._lxOldResist; }
     game.monsters = [];
@@ -123,6 +139,7 @@ const r = await page.evaluate(async () => {
   out.airborne = await runStomp({ airborne: true });
   out.iframed  = await runStomp({ iframes: true });
   out.resisted = await runStomp({ resist: 0.5 });
+  out.colossal = await runStomp({ colossal: true });
 
   // ---- the art must not leak onto TAURUS, who owns a 'stomp' state too ----
   game.monsters = [];
@@ -144,7 +161,8 @@ await b.close(); srv.kill();
 
 const T = r.timeline || [];
 const G = r.grounded || {}, A = r.airborne || {}, I = r.iframed || {}, R = r.resisted || {};
-const expDmg = Math.floor((r.maxHp || 0) * 0.22);
+const expDmg = Math.floor((G.mhAtHit || 0) * 0.22);
+const C = r.colossal || {}, expCol = Math.floor((C.mhAtHit || 0) * 0.50);
 
 ok('the stomp set loads and decodes as its own 9-frame sprite',
   r.loaded && r.count === 9 && r.decoded,
@@ -169,8 +187,12 @@ ok('...and HOLDS the landed pose through the aftershock',
 
 ok('a grounded player takes the hit - 22% of true max HP',
   G.fired && G.groundedAtHit === true && Math.abs(G.dmg - expDmg) <= 2,
-  { dealt: G.dmg, expected: expDmg, maxHp: r.maxHp,
+  { dealt: G.dmg, expected: expDmg, maxHpAtHit: G.mhAtHit,
     note: 'the earthquake beside it takes 55% + all MP; this one buys time instead' });
+
+ok('a COLOSSAL stomp takes HALF the bar (v0.30.345, per user)',
+  C.fired && C.groundedAtHit === true && Math.abs(C.dmg - expCol) <= 2,
+  { dealt: C.dmg, expected: expCol, maxHpAtHit: C.mhAtHit });
 
 ok('...and is STUNNED for the full three seconds - the point of the move',
   G.stun >= 2900 && G.stun <= 3000, { stunMs: G.stun });
