@@ -1,0 +1,111 @@
+// The MojiMon tab's two top cards drawn as art (v0.30.x mm-cards).
+//   node scripts/mm_cards_test.mjs            (MOJI_GAME_FILE=<build.html> to test a private build)
+// Per user: "These buttons and fonts can be stylised, polished to be more artistic and appealing".
+import { chromium } from 'playwright-core';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PORT = process.env.PORT || '10540';
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
+let bad = 0, total = 0; const check = (ok, what, info) => { total++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${ok ? '' : '   ' + JSON.stringify(info)}`); if (!ok) bad++; };
+const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT });
+await new Promise((r) => setTimeout(r, 1500));
+const browser = await chromium.launch({ channel: 'chrome', args: ['--mute-audio'] });
+try {
+  const errs = [];
+  const boot = async (opts) => {
+    const ctx = await browser.newContext({ ...opts, serviceWorkers: 'block' }); const page = await ctx.newPage();
+    page.on('pageerror', (e) => errs.push(String(e).slice(0, 160)));
+    // a working copy may lack the bundled fonts: serve them from origin so the fonts are the real ones
+    await page.route((u) => /[/]assets[/]fonts[/].*[.]woff2$/.test(u.pathname), async (r) => {
+      const rel = decodeURIComponent(new URL(r.request().url()).pathname).replace(/^[/]/, '');
+      if (existsSync(path.join(ROOT, rel))) return r.continue();
+      try { r.fulfill({ status: 200, contentType: 'font/woff2', body: execFileSync('git', ['show', 'origin/main:' + rel], { cwd: ROOT, maxBuffer: 1 << 24 }) }); } catch (e) { r.continue(); }
+    });
+    await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
+    await page.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+    await page.waitForFunction(() => typeof loadMap === 'function' && typeof renderMojiMonPanel === 'function' && typeof openLevelUpPanel === 'function', null, { timeout: 120000 });
+    await page.evaluate(async () => {
+      for (const id of ['loading-overlay', 'class-select-modal', 'lo-auth']) { const o = document.getElementById(id); if (o) { o.style.display = 'none'; o.classList.add('fade'); } }
+      window._lxBootGateDone = true; window._prologueActive = false; player.cls = 'warrior'; player.level = 95;
+      player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { everdawn_welcome: true });
+      loadMap('town'); await new Promise((s) => setTimeout(s, 2500));
+      for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
+      for (const id of ['everdawn-welcome-overlay', 'void-intro-overlay']) { const o = document.getElementById(id); if (o) o.remove(); }
+      const mm = _mojimonEnsure(); mm.roster = {}; mm.out = null; mm.cdUntil = 0;
+      game._uTab = 'mojimon'; openLevelUpPanel(); const b = document.querySelector('[data-utab="mojimon"]'); if (b) b.click();
+      await document.fonts.ready;
+    });
+    await page.waitForTimeout(500);
+    return { ctx, page };
+  };
+  const { ctx, page } = await boot({ viewport: { width: 1280, height: 800 } });
+  const src = await page.evaluate(() => String(renderMojiMonPanel));
+  check(src.includes('15× your max HP') && src.includes('MOJIMON_ATK_MULT * 100'), 'the card still states 15x HP and the real ATK share (what u_panel_text_test pins)', null);
+  const ready = await page.evaluate(() => {
+    const q = (s) => document.querySelector('#u-pane-mojimon ' + s), cs = (el) => getComputedStyle(el);
+    const steps = [...document.querySelectorAll('#u-pane-mojimon .mmc-step')];
+    return { steps: steps.length, heads: steps.map((x) => x.querySelector('.mmc-st').textContent), kills: q('.mmc-big').textContent, killsReq: MOJIMON_KILLS_REQ.toLocaleString(),
+      chips: [...document.querySelectorAll('#u-pane-mojimon .mmc-chip')].map((x) => x.textContent.trim()), atk: Math.round(MOJIMON_ATK_MULT * 100),
+      cls: q('.mmc-cd').className, cd: q('#mojimon-cd').textContent, p: cs(q('.mmc-cd')).getPropertyValue('--p').trim(), ping: getComputedStyle(q('.mmc-ring'), '::after').animationName,
+      pts: q('.mmc-star').textContent, buddy: q('.mmc-buddy').getAttribute('src'), sub: q('.mmc-cdtx .mmc-sub').textContent, paws: document.querySelectorAll('#u-pane-mojimon .mmc-link').length, ptsReal: _mojimonPoints(), dismiss: !!q('.mmc-dismiss'),
+      fonts: { head: cs(q('.mmc-h')).fontFamily, cd: cs(q('#mojimon-cd')).fontFamily, text: cs(q('.mmc-t')).fontFamily, fred: document.fonts.check("600 14px 'Fredoka'"), nun: document.fonts.check("500 11px 'Nunito'") } };
+  });
+  console.log('ready', JSON.stringify(ready));
+  check(ready.steps === 3 && ready.heads.join('|') === 'Master|Bind|Team up' && ready.kills === ready.killsReq, 'HOW TO BIND in three steps: MASTER (the real kill count), BIND, TEAM UP', ready.heads);
+  check(ready.chips.some((c) => c.includes('15× your max HP')) && ready.chips.some((c) => c.includes(ready.atk + '% of your ATK')), 'TEAM UP carries the HP chip and the ATK chip with the real numbers', ready.chips);
+  check(/\bready\b/.test(ready.cls) && ready.cd === 'READY' && Number(ready.p) === 0 && ready.ping === 'mmc-ping', 'ready: the ring is full and pings, the readout says READY', ready);
+  check(ready.pts === String(ready.ptsReal) && !ready.dismiss, 'the upgrade points on the star are the real count; no Dismiss with nothing out', ready);
+  check(/mojimon_logo/.test(ready.buddy) && /ready when you are/.test(ready.sub) && ready.paws === 2, 'with no MojiMon yet the ring holds the MojiMon logo; paw prints walk between the steps', ready);
+  check(/^"?Fredoka/.test(ready.fonts.head) && /^"?Fredoka/.test(ready.fonts.cd) && /^"?Nunito/.test(ready.fonts.text) && ready.fonts.fred && ready.fonts.nun, 'Fredoka for the headings and the readout, Nunito for the words, both loaded', ready.fonts);
+  // on cooldown with a mon out
+  const cool = await page.evaluate(async () => {
+    const ks = Object.keys(monsterTypes).filter((k) => !monsterTypes[k].boss).slice(0, 2), mm = _mojimonEnsure();
+    for (const k of ks) mm.roster[k] = { upg: { hp: 0, atk: 0, def: 0 } };
+    mm.out = { type: ks[0], hpFrac: 0.7 }; mm.cdUntil = Date.now() + MOJIMON_CD_MS / 2; renderMojiMonPanel();
+    const q = (s) => document.querySelector('#u-pane-mojimon ' + s), pv = () => Number(getComputedStyle(q('.mmc-cd')).getPropertyValue('--p'));
+    const a = { cls: q('.mmc-cd').className, cd: q('#mojimon-cd').textContent, p: pv(), color: getComputedStyle(q('#mojimon-cd')).color };
+    await new Promise((r) => setTimeout(r, 2300));
+    const b = { cd: q('#mojimon-cd').textContent, p: pv() };
+    const d = q('.mmc-dismiss'); const name = (monsterTypes[ks[0]] || {}).name || ks[0];
+    const sp = _monsterDexSprite(ks[0], monsterTypes[ks[0]]); return { a, b, dismiss: d ? d.textContent : null, name, half: MOJIMON_CD_MS / 2000, buddy: q('.mmc-buddy').getAttribute('src'), want: sp && sp.src, sub: q('.mmc-cdtx .mmc-sub').textContent };
+  });
+  console.log('cooling', JSON.stringify(cool));
+  check(/cooling/.test(cool.a.cls) && /^\d+:\d\d$/.test(cool.a.cd) && Math.abs(cool.a.p - 0.5) < 0.01 && cool.a.color === 'rgb(255, 194, 138)', 'cooling: amber readout in m:ss and the ring half drained at half the cooldown', cool.a);
+  check(cool.b.cd !== cool.a.cd && cool.b.p < cool.a.p, 'the ticker counts down and drains the ring as it goes', cool);
+  check(cool.dismiss && cool.dismiss.includes('Dismiss ' + cool.name), 'a fielded mon gets a Dismiss button with its name', cool.dismiss);
+  check(cool.want && cool.buddy === cool.want && /resting/.test(cool.sub), 'the ring holds your H-slot MojiMon, resting while the cooldown runs', cool);
+  const back = await page.evaluate(async () => {
+    _mojimonEnsure().cdUntil = Date.now() + 900; renderMojiMonPanel();
+    await new Promise((r) => setTimeout(r, 2600));
+    const q = (s) => document.querySelector('#u-pane-mojimon ' + s);
+    const before = !!_mojimonEnsure().out; q('.mmc-dismiss').click();
+    return { cls: q('.mmc-cd').className, cd: q('#mojimon-cd').textContent, outBefore: before, outAfter: !!_mojimonEnsure().out, dismissAfter: !!q('.mmc-dismiss') };
+  });
+  console.log('back', JSON.stringify(back));
+  check(/\bready\b/.test(back.cls) && back.cd === 'READY', 'when the clock runs out the card turns READY by itself', back);
+  check(back.outBefore && !back.outAfter && !back.dismissAfter, 'Dismiss sends the mon back and the button goes', back);
+  const lay = await page.evaluate(() => {
+    const r = (s) => document.querySelector('#u-pane-mojimon ' + s).getBoundingClientRect();
+    const how = r('.mmc-how'), cd = r('.mmc-cd'), pane = r(''), over = [...document.querySelectorAll('#u-pane-mojimon .mmc-step, #u-pane-mojimon .mmc-chip, #u-pane-mojimon .mmc-cdtop, #u-pane-mojimon .mmc-pts, #u-pane-mojimon')].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.className || e.id);
+    return { side: Math.abs(how.top - cd.top) < 2 && how.right <= cd.left, inside: how.left >= pane.left - 1 && cd.right <= pane.right + 1, h: Math.round(how.height), over };
+  });
+  console.log('layout', JSON.stringify(lay));
+  check(lay.side && lay.inside && lay.over.length === 0 && lay.h < 360, 'desktop: the two cards side by side inside the pane, nothing spills out of a step or chip', lay);
+  await ctx.close();
+  const ph = await boot({ viewport: { width: 842, height: 390 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const pl = await ph.page.evaluate(() => {
+    const pane = document.getElementById('u-pane-mojimon').getBoundingClientRect();
+    const over = [...document.querySelectorAll('#u-pane-mojimon .mmc-step, #u-pane-mojimon .mmc-chip, #u-pane-mojimon .mmc-cdtop, #u-pane-mojimon .mmc-pts, #u-pane-mojimon')].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.className || e.id);
+    const cards = [...document.querySelectorAll('#u-pane-mojimon .mmc-card')].map((e) => e.getBoundingClientRect()).every((c) => c.left >= pane.left - 1 && c.right <= pane.right + 1);
+    return { cards, over, pane: Math.round(pane.width) };
+  });
+  console.log('phone', JSON.stringify(pl));
+  check(pl.cards && pl.over.length === 0, 'phone on its side: both cards inside the pane, nothing spills', pl);
+  await ph.ctx.close();
+  check(errs.length === 0, 'no page errors', errs.slice(0, 3));
+} finally { await browser.close().catch(() => {}); srv.kill(); }
+console.log(bad ? `\n${bad} of ${total} FAILED` : `\nall ${total} passed`);
+process.exit(bad ? 1 : 0);
