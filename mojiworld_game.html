@@ -13674,7 +13674,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.988';
+const GAME_VERSION = 'v0.30.989';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -99856,6 +99856,45 @@ function _ksOnDeath() {
     showToast(`💔 Slaughter boons lost — ${_KS_TIERS[had - 1].name} died with you.`, 'danger');
   }
 }
+// v0.30.989 - THE STORMBEARER'S PACT, MADE TO DO WHAT IT SAYS. Measured before:
+// 32 kills gave 35 spawns without the pact and 37 with it, peak alive 15 both
+// times - the pact only halved the delay on the one respawn each kill queues,
+// and that respawn returns early at the map cap. See the three uses below.
+const LX_STORM_PACT_CAP_MUL = 1.75;   // max alive while the pact is live (per user)
+function _lxStormPactOn() {
+  return !!(typeof player !== 'undefined' && player && player._spawnBoostUntil
+    && typeof game !== 'undefined' && game && game.time < player._spawnBoostUntil);
+}
+// The ambient ceiling for a field map, pact included. Clamped to the global
+// on-screen ceiling (MAX_ONSCREEN_MONSTERS: 36 desktop, 22 mobile) AFTER the
+// multiply, so a dense map cannot be pushed past what the frame can carry.
+function _lxFieldCap(mapD) {
+  const base = _normMonsterCap((mapD && mapD.monsterCap) || game.monsterCap || 15);
+  const cap = _lxStormPactOn() ? Math.round(base * LX_STORM_PACT_CAP_MUL) : base;
+  return Math.min(MAX_ONSCREEN_MONSTERS, cap);
+}
+// The wave that answers the pact: fill the CURRENT field map up to the pact
+// cap, one beast every 90 ms. Same pool rules as the respawn drip - weighted
+// by authored count, gated elites and bosses excluded. Bails the moment the
+// map changes, so a pulse can never land on the next map.
+function _lxStormPactWave() {
+  const mapId = game.currentMap, mapD = MAPS[mapId];
+  if (!mapD || mapD.isTown || mapD.isBossArena || mapD._expeditionMap || !Array.isArray(mapD.spawns)) return 0;
+  const pool = mapD.spawns.filter((sp) => sp && !sp.boss && sp.spawnChance == null && sp.type);
+  if (!pool.length) return 0;
+  const poolW = pool.reduce((acc, sp) => acc + Math.max(1, sp.count || 1), 0);
+  const alive = () => game.monsters.filter((x) => x && !x.isBoss && !x.isMiniBoss && x.currentHp > 0).length;
+  const need = Math.max(0, _lxFieldCap(mapD) - alive());
+  for (let i = 0; i < need; i++) {
+    setTimeout(() => {
+      if (game.currentMap !== mapId || alive() >= _lxFieldCap(MAPS[mapId])) return;
+      let roll = Math.random() * poolW, pick = pool[pool.length - 1];
+      for (const c of pool) { roll -= Math.max(1, c.count || 1); if (roll <= 0) { pick = c; break; } }
+      spawnFromMap(pick.type, false);
+    }, i * 90);
+  }
+  return need;
+}
 function killMonster(m) {
   // v0.30.861 loops - see LX_AFK_MS. The drops wrapper follows triggerSuperBossDeath's pattern: nothing this kill pushes lands.
   if (m && !m._afkKill && (m._lastHitTag === 'mojimon' || m._lastHitTag === 'minion') && typeof _lxPlayerAfk === 'function' && _lxPlayerAfk()) {
@@ -101326,7 +101365,7 @@ function _killMonsterRaw(m) {
     // (effectively +100% spawn rate) for the next 60s after the player pays
     // 25% of their mojicoins. Tracked via player._spawnBoostUntil (ms in
     // game.time domain).
-    const _boostMul = (player._spawnBoostUntil && game.time < player._spawnBoostUntil) ? 0.5 : 1;
+    const _boostMul = _lxStormPactOn() ? 0.5 : 1;   // v0.30.989 - same test, one helper (see _lxStormPactOn)
     // v0.30.322 — CO-OP SPAWN PRESSURE (per user: "spawn rate is faster by 10%
     // for each additional person in the map"). Rate +10% per extra player ->
     // the delay divides by (1 + 0.10 x extras): solo is exactly x1 (the
@@ -101364,10 +101403,12 @@ function _killMonsterRaw(m) {
         !game.monsters.some((x) => x && x.type === 'pqConductor' && x.currentHp > 0);
       if (mapD && !mapD.isTown && !mapD.isBossArena && !mapD._expeditionMap && !_pqArenaDone) {
         const activeRegular = game.monsters.filter(x => !x.isBoss && !x.isMiniBoss).length;
-        const _cap = Math.min(MAX_ONSCREEN_MONSTERS, _normMonsterCap(mapD.monsterCap || game.monsterCap || 15));   // v0.26.470 — global on-screen monster ceiling; v0.26.x — variation-compressed
+        const _cap = _lxFieldCap(mapD);   // v0.30.989 - v0.26.470 ceiling + variation compression, x1.75 during the Stormbearer's pact
         const room = _cap - activeRegular;
         if (room <= 0) return;
-        const bursts = Math.min(room, 1 + (Math.random() < 0.35 ? 1 : 0));
+        // v0.30.989 - one larger during the pact (2-3 per kill, was 1-2). A raised cap
+        // with a 1:1 kill-to-spawn drip fills by ~0.35 per kill and never gets there.
+        const bursts = Math.min(room, 1 + (Math.random() < 0.35 ? 1 : 0) + (_lxStormPactOn() ? 1 : 0));
         // v0.29.706 — WEIGHTED, AND RARE ELITES ARE NOT IN THE POOL. This picked a
         // spawn entry uniformly at random, so it ignored `count` entirely (the
         // live mix drifted to a flat one, nothing like the authored roster) and
@@ -107769,7 +107810,7 @@ So… do you need a lift?`;
     const _coins = Math.max(0, Math.floor((typeof totalCoins === 'function') ? totalCoins() : (player.mojicoins || 0)));   // v0.30.931 wallet + bank, as the click bills
     const _cost = Math.floor(_coins * 0.25);
     const _boostActive = player._spawnBoostUntil && game.time < player._spawnBoostUntil;
-    text = '*Lightning pulses through its stripes. The tail lashes once.*\n\nSmall walker. The sky knows you now. I am the Stormbearer — older than the first thunder, lesser than the last. Lay a quarter of your Mojicoins at my paws and the Crest wakes to your scent. Twice the beasts, for sixty heartbeats.';
+    text = '*Lightning pulses through its stripes. The tail lashes once.*\n\nSmall walker. The sky knows you now. I am the Stormbearer — older than the first thunder, lesser than the last. Lay a quarter of your Mojicoins at my paws and the Crest wakes to your scent. Near twice the beasts, returning twice as fast, for sixty heartbeats.';
     if (_boostActive) {
       const _left = Math.max(1, Math.ceil((player._spawnBoostUntil - game.time) / 60));
       text = '*It lowers its great head. The lightning in its stripes crackles once, in acknowledgement.*\n\nThe Crest already hunts for you, small walker. ' + _left + ' heartbeats remain. Return when the storm quiets, and we shall strike the bargain anew.';
@@ -107786,6 +107827,13 @@ So… do you need a lift?`;
         // v0.30.931 WALLET + BANK, like Reset Stats (v0.29.311), the death toll (v0.29.311) and the rank reset
         // (v0.30.918). Priced off the wallet alone, the pact cost nothing at all: bank the purse, keep four coins,
         // wake the sky for one. Collected wallet-first by chargeCoins, so the vault is not a shelter here either.
+        // v0.30.989 - a co-op guest cannot raise the host's spawns (spawnMonster refuses
+        // local spawns while following a host), so this used to take 25% of a
+        // guest's coins for nothing. Decline instead of billing.
+        if (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) {
+          document.getElementById('dialog-text').textContent = '*The tiger looks past you, toward whoever leads your party.*\n\nThis Crest answers to the one who brought you, small walker. Their coin wakes it, not yours. Keep your purse.';
+          return;
+        }
         const _live = Math.max(0, Math.floor((typeof totalCoins === 'function') ? totalCoins() : (player.mojicoins || 0)));
         const _pay = Math.floor(_live * 0.25);
         const _liveBoost = player._spawnBoostUntil && game.time < player._spawnBoostUntil;
@@ -107799,7 +107847,9 @@ So… do you need a lift?`;
         // +60000 (≈16.7 min) and the readout divided by 1000; both now use the
         // 60 fps frame convention so the boost truly lasts 60s.
         player._spawnBoostUntil = _base + 3600;
-        if (typeof showToast === 'function') showToast('⚡ Spawn rate doubled for 60s', 'rare');
+        // v0.30.989 - the promised beasts arrive now, not one kill at a time.
+        if (typeof _lxStormPactWave === 'function') _lxStormPactWave();
+        if (typeof showToast === 'function') showToast('⚡ The Crest wakes: up to 1.75× beasts, respawning twice as fast, for 60s', 'rare');
         document.getElementById('dialog-text').textContent = '*It rears and roars. A white pulse crosses the Crest, and far off, the cliff-beasts answer.*\n\nIt is done, small walker. The sky has your scent for sixty heartbeats. Hunt as you must.';
       }
     });
