@@ -1,4 +1,4 @@
-// THE DOWNED COLLAPSE: BUCKLE, TOPPLE, SPRAWL, DUST, STILL (v0.30.1054; flattened, weapon dropped v0.30.1061).
+// THE DOWNED COLLAPSE: BUCKLE, TOPPLE, SPRAWL, DUST, STILL (v0.30.1054; flattened, weapon dropped v0.30.1061; on the back v0.30.1066).
 //
 // Per user: "when the character is downed could you animate and make him lie in a position that is more believably
 // dead". The downed draw was a rigid 90-degree roll of the standing pose. Now drawPlayer's downed block runs a timeline
@@ -73,7 +73,7 @@ try {
   // the eyes: covered by the shipped downed_pose_test (closed for the whole downed draw); the face layer bakes and is not
   // drawn every hero frame, so a sample inside the buckle window is luck - not asserted here
   const L = r.late[r.late.length - 1] || {};
-  check(r.late.length >= 3 && r.late.every((s) => s.k === 1) && Math.abs(L.head - 18 * f) < 0.6 && Math.abs(L.armBack - 12 * f) < 0.6 && Math.abs(L.legL - 10 * f) < 0.6, `SPRAWL: at rest the painter is handed the full sprawl, mirrored by the fall's facing (${f > 0 ? 'right' : 'left'}) - head lolled, arms limp along the body, legs along the ground with a slight splay - nothing in the air`, J(L));
+  check(r.late.length >= 3 && r.late.every((s) => s.k === 1) && Math.abs(L.head + 12 * f) < 0.6 && Math.abs(L.armBack - 10 * f) < 0.6 && Math.abs(L.legL - 8 * f) < 0.6, `SPRAWL: at rest the painter is handed the full sprawl, mirrored by the fall's facing (${f > 0 ? 'right' : 'left'}) - on the back: chin up a little, arms limp at the sides, legs staggered, feet flopped outward`, J(L));
   check(r.wpn.standing >= 1 && r.wpn.down === 0, 'WEAPON: drawn in hand while standing, never once the topple begins - a collapsed hero has dropped it', J(r.wpn));
   check(r.dust >= r.dustBefore + 6 && r.dustFlag === 1, 'DUST: the landing kicks up a puff of dust, once', J({ before: r.dustBefore, after: r.dust, flag: r.dustFlag }));
   check(r.afterDraw.k === 0 && r.afterDraw.sq === 0 && r.own.head === 0 && r.own.armBack === 0, 'SCOPED: outside the hero draw the flags read zero and the posture map is the player\'s own', J({ afterDraw: r.afterDraw, own: r.own }));
