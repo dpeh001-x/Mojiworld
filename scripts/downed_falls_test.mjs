@@ -38,7 +38,8 @@ try {
     try { closeAllModals(); } catch (e) {}
     loadMap('town', 300); await new Promise((r) => setTimeout(r, 1500)); try { closeAllModals(); } catch (e) {} game.paused = false;
     // let the hero settle on the floor, remember it, then lift the body 220 px and down it there
-    await new Promise((r) => setTimeout(r, 600));
+    // wait for the hero to actually stand (the arrival can take a moment on a slow frame; a fixed 600 ms read him mid-air once on v0.30.1036)
+    for (let i = 0; i < 80 && !player.onGround; i++) await new Promise((r) => setTimeout(r, 50));
     const floorY = player.y, groundedBefore = !!player.onGround;
     player.y = floorY - 220; player.vy = 0; player.onGround = false; player.hp = (typeof getMaxHp === 'function') ? getMaxHp() : player.hp;
     const startY = player.y;
