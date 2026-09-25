@@ -59,14 +59,16 @@ try {
       card: { flexDir: cc.flexDirection, border: cc.borderTopWidth + ' ' + cc.borderTopColor, shadow: cc.boxShadow.slice(0, 80), font: cc.fontFamily.slice(0, 10), h: Math.round(c0.getBoundingClientRect().height), cursor: cc.cursor },
       span: { card: Math.round(cw), toolbar: Math.round(tb), footer: Math.round(ft) },
       coaster: { w: ic.width, radius: ic.borderTopLeftRadius, bg: ic.backgroundColor, border: ic.borderTopWidth + ' ' + ic.borderTopColor },
+      icon: (() => { const cell = c0.querySelector('.sell-icon'), im = cell.querySelector('img'), sp = cell.querySelector('span'); const el = im || sp; if (!el) return null; const cs = getComputedStyle(el); return { kind: im ? 'img' : 'span', w: cs.width, font: cs.fontSize, shadows: (cs.filter.match(/drop-shadow/g) || []).length, ink: /rgb\(12, 11, 16\)/.test(cs.filter), over: Math.round(el.getBoundingClientRect().height - cell.getBoundingClientRect().height) }; })(),
       tick: { pos: ck.position, top: ck.top, left: ck.left, bg: ck.backgroundColor },
       plate: getComputedStyle(modal).backgroundImage.includes('panel_p5_shop'),
       confirmDisabled: document.getElementById('sell-confirm-btn').disabled };
   });
   check(r.desk && r.display === 'grid' && r.cols >= 3 && r.rowsY >= 2 && r.n === 8 && r.inv === 8, 'GRID: the sell tab is a grid of boxes, three or more across', J({ display: r.display, cols: r.cols, rows: r.rowsY, n: r.n }));
   check(r.span.toolbar >= r.span.card * 2.5 && r.span.footer >= r.span.card * 2.5, 'SPAN: the toolbar and the SELL footer stretch across the grid', J(r.span));
-  check(r.card.flexDir === 'column' && r.card.border === '2px rgb(12, 11, 16)' && /rgb\(12, 11, 16\) 4px 4px 0px/.test(r.card.shadow) && /inset/.test(r.card.shadow) && /^Nunito/.test(r.card.font) && r.card.h <= 300 && r.card.cursor === 'pointer', 'BOX: a column with a 2px black line, an ink offset and a rarity strip, in Nunito, compact', J(r.card));
-  check(r.coaster.w === '56px' && r.coaster.radius === '50%' && r.coaster.bg === 'rgba(255, 255, 255, 0.2)' && r.coaster.border === '2px rgb(12, 11, 16)', 'COASTER: 56 px, 20% white, a 2px black ring', J(r.coaster));
+  check(r.card.flexDir === 'column' && r.card.border === '2px rgb(12, 11, 16)' && /rgb\(12, 11, 16\) 4px 4px 0px/.test(r.card.shadow) && /inset/.test(r.card.shadow) && /^Nunito/.test(r.card.font) && r.card.h <= 340 && r.card.cursor === 'pointer', 'BOX: a column with a 2px black line, an ink offset and a rarity strip, in Nunito, compact (under 340 device px with the 88 px sprite)', J(r.card));
+  check(r.coaster.w === '64px' && r.coaster.radius === '50%' && r.coaster.bg === 'rgba(255, 255, 255, 0.2)' && r.coaster.border === '2px rgb(12, 11, 16)', 'COASTER: 64 px, 20% white, a 2px black ring', J(r.coaster));
+  check(r.icon && ((r.icon.kind === 'img' && r.icon.w === '88px' && r.icon.shadows >= 4 && r.icon.ink && r.icon.over > 8) || (r.icon.kind === 'span' && r.icon.font === '52px' && r.icon.shadows >= 1)), 'ICON: the piece drawn at 88 px, overflowing the 64 px coaster, with an ink outline of drop-shadows (or its glyph at 52 px while the sprite decodes)', J(r.icon));
   check(r.tick.pos === 'absolute' && r.tick.top === '8px' && r.tick.left === '8px' && r.tick.bg === 'rgba(255, 255, 255, 0.2)', 'TICK: the check box sits in the corner of the box', J(r.tick));
   check(r.plate, 'PLATE: the comic plate (panel_p5_shop) is the desk background');
   check(r.confirmDisabled, 'FOOTER: SELL is disabled with nothing picked');
