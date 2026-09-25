@@ -1,4 +1,4 @@
-// THE ITEM TABS, INK AND POP (v0.30.1073).
+// THE ITEM TABS, INK AND POP (v0.30.1073; more pop - Fredoka, rings, halftone, the live tab a burst - v0.30.1078).
 //
 // Per user, with a screenshot of the inventory's Equip / Use / Etc row: "these buttons in the items UI can be more pop
 // designed, more cool and aesthetic". Reads the live Inventory window:
@@ -45,7 +45,7 @@ try {
     const row = document.getElementById('inv-tabs'), tabs = [...row.querySelectorAll('.inv-tab')];
     for (const t of tabs) t.style.transition = 'none';
     document.documentElement.classList.remove('lx-nobackdrop'); void document.body.offsetWidth;
-    const read = (t) => { const cs = getComputedStyle(t); return { txt: t.textContent.trim(), active: t.classList.contains('active'), border: cs.borderTopWidth + ' ' + cs.borderTopColor, radius: cs.borderTopLeftRadius, shadow: cs.boxShadow, font: cs.fontFamily.slice(0, 8) + ' ' + cs.fontWeight + ' ' + cs.fontSize, upper: cs.textTransform, bg: cs.backgroundImage.slice(0, 90), color: cs.color, transform: cs.transform }; };
+    const read = (t) => { const cs = getComputedStyle(t), b4 = getComputedStyle(t, '::before'), af = getComputedStyle(t, '::after'); return { txt: t.textContent.trim(), active: t.classList.contains('active'), border: cs.borderTopWidth + ' ' + cs.borderTopColor, radius: cs.borderTopLeftRadius, shadow: cs.boxShadow, font: cs.fontFamily.slice(0, 8) + ' ' + cs.fontWeight + ' ' + cs.fontSize, upper: cs.textTransform, bg: cs.backgroundImage.slice(0, 90), bgSize: cs.backgroundSize, color: cs.color, transform: cs.transform, burstInk: { clip: b4.clipPath.slice(0, 12), bg: b4.backgroundColor, z: b4.zIndex }, burstYellow: { clip: af.clipPath.slice(0, 12), bg: af.backgroundImage.slice(0, 90), color: af.backgroundColor } }; };
     const t0 = tabs.map(read);
     const rowCs = getComputedStyle(row); const gap = parseFloat(rowCs.columnGap || rowCs.gap); const rule = rowCs.borderBottomWidth;
     // click Use: the live chip moves
@@ -57,13 +57,13 @@ try {
   });
   const idle = r.t0.find((t) => !t.active), live = r.t0.find((t) => t.active);
   check(r.n === 3 && idle && live && live.txt.includes('Equip'), 'ROW: three chips, Equip live to start', J(r.t0.map((t) => t.txt + (t.active ? '*' : ''))));
-  check(idle.border === '3px rgb(12, 11, 16)' && idle.radius === '8px' && /rgb\(12, 11, 16\) 4px 4px 0px/.test(idle.shadow) && /inset/.test(idle.shadow) && /^Nunito/.test(idle.font) && /800 15px/.test(idle.font) && idle.upper === 'uppercase', 'CHIP: 3px ink border, paper keyline and a 4px ink offset, Nunito 800 15px in caps', J(idle));
-  check(live.border === '3px rgb(12, 11, 16)' && /rgb\(255, 228, 92\)/.test(live.bg) && live.color === 'rgb(12, 11, 16)' && /rgb\(12, 11, 16\) 5px 5px 0px/.test(live.shadow) && /rgba\(255, 228, 92/.test(live.shadow) && live.transform !== 'none', 'LIVE: the selected chip is yellow with ink lettering, a 5px offset, a yellow glow, lifted and tilted', J(live));
-  check(r.t1.filter((t) => t.active).length === 1 && r.t1[1].active && /rgb\(255, 228, 92\)/.test(r.t1[1].bg) && !r.t1[0].active && !/rgb\(255, 228, 92\)/.test(r.t1[0].bg), 'SWITCH: clicking Use moves the yellow chip to Use and Equip goes back to ink', J(r.t1.map((t) => t.txt + (t.active ? '*' : ''))));
-  check(r.gap >= 8 && r.rule === '0px', 'ROW: the chips sit 10px apart and the old rule under the row is gone', J({ gap: r.gap, rule: r.rule }));
+  check(idle.border === '3px rgb(12, 11, 16)' && idle.radius === '10px' && /rgb\(244, 241, 234\) 0px 0px 0px 2px/.test(idle.shadow) && /rgb\(12, 11, 16\) 0px 0px 0px 4px/.test(idle.shadow) && /rgb\(12, 11, 16\) 5px 5px 0px 2px/.test(idle.shadow) && /^Fredoka/.test(idle.font) && /600 17px/.test(idle.font) && idle.upper === 'uppercase' && /radial-gradient/.test(idle.bg) && /6px 6px/.test(idle.bgSize), 'CHIP: 3px ink border, a paper ring then an ink ring outside it, a 5px offset, Fredoka 600 17px caps, Ben-Day dots', J(idle));
+  check(live.color === 'rgb(12, 11, 16)' && live.transform !== 'none' && live.burstInk.clip.startsWith('polygon') && live.burstInk.bg === 'rgb(12, 11, 16)' && live.burstInk.z === '-1' && live.burstYellow.clip.startsWith('polygon') && live.burstYellow.color === 'rgb(255, 228, 92)' && /radial-gradient/.test(live.burstYellow.bg), 'LIVE: the selected tab is a comic burst - an ink jagged shape behind a halftoned yellow one - with ink lettering, tilted', J(live));
+  check(r.t1.filter((t) => t.active).length === 1 && r.t1[1].active && r.t1[1].burstYellow.clip.startsWith('polygon') && !r.t1[0].active && !r.t1[0].burstYellow.clip.startsWith('polygon'), 'SWITCH: clicking Use moves the burst to Use and Equip goes back to an ink chip', J(r.t1.map((t) => t.txt + (t.active ? '*' : ''))));
+  check(r.gap >= 14 && r.rule === '0px', 'ROW: the chips sit 18px apart (room for the rings and the burst) and the old rule under the row is gone', J({ gap: r.gap, rule: r.rule }));
   await page.mouse.move(r.hoverAt.x, r.hoverAt.y); await page.waitForTimeout(250);
   const hov = await page.evaluate(() => { document.documentElement.classList.remove('lx-nobackdrop'); void document.body.offsetWidth; const t = document.querySelectorAll('#inv-tabs .inv-tab')[2]; const cs = getComputedStyle(t); return { shadow: cs.boxShadow, transform: cs.transform, color: cs.color }; });
-  check(/rgb\(12, 11, 16\) 6px 6px 0px/.test(hov.shadow) && hov.transform !== 'none', 'HOVER: an idle chip lifts onto a 6px offset', J(hov));
+  check(/rgb\(12, 11, 16\) 7px 7px 0px 2px/.test(hov.shadow) && hov.transform !== 'none', 'HOVER: an idle chip lifts onto a 7px offset', J(hov));
   check(!r.uRead || (r.uRead.border !== '3px rgb(12, 11, 16)' && r.uRead.upper !== 'uppercase'), 'SCOPE: the U panel\'s top tabs share the class but keep their own look', J(r.uRead));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
