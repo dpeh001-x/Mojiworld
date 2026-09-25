@@ -59,20 +59,32 @@
       for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; if (player.cooldowns) for (const k of Object.keys(player.cooldowns)) player.cooldowns[k] = 0;
       game.projectiles.length = 0; if (game.hazards) game.hazards.length = 0;
     };
-    const USES = { marksman_oneshot: [Math.floor(6000 / 430), 430], marksman_ult: [Math.floor(8000 / 260), 260] };
+    // One use of a multi-press skill is every press, the same list as scripts/skill_tabulation.mjs (see the
+    // note there): measured at one press, War of Banners read 941% of a basic against 19,752% for one enrage.
+    const USES = { marksman_oneshot: [Math.floor(6000 / 430), 430], marksman_ult: [Math.floor(8000 / 260), 260],
+      warlord_ult: [20, 500], sage_ult: [10, 300], elementalist_ult: [3, 550], shinobi_seal: [4, 350], sleight: [3, 300] };
+    const RESET_POS = new Set(['shinobi_seal', 'sleight']);   // each dash charge starts back at the spawn point
+    const SPREAD_RNG = new Set(['arrowRain']);                // 22 arrows scattered by Math.random: seed it, don't pin it
     const cast = async (id) => {
       const u = USES[id];
       if (id === 'crusader_ult') { castSkill(id); await sleep(150); player._bastionArmAt = game.time - 600; player._dawnStored = getMaxHp(); castSkill(id); return 2; }
       if (!u) { castSkill(id); return 1; }
-      for (let i = 0; i < u[0]; i++) { for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; player.mp = 99999; try { castSkill(id); } catch (e) {} await sleep(u[1]); }
+      for (let i = 0; i < u[0]; i++) {
+        for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; player.mp = 99999;
+        if (RESET_POS.has(id)) { player.x = spawn.x; player.y = spawn.y; player.vx = 0; player.vy = 0; player.facing = 1; }
+        try { castSkill(id); } catch (e) {} await sleep(u[1]);
+      }
       return u[0];
     };
     const measure = async (id, ms, bare) => {
       setup(id, bare); mk(); hits = 0; if (!dummies.length) return { err: 'no dummy' };
       const d = dummies[0], hp0 = d.currentHp; let presses = 1;
-      try { presses = await cast(id); } catch (e) { return { err: 'threw: ' + String(e.message).slice(0, 80) }; }
+      if (SPREAD_RNG.has(id)) { let _s = 12345; Math.random = () => ((_s = (_s * 1103515245 + 12345) % 2147483648) / 2147483648); }
+      try { presses = await cast(id); } catch (e) { Math.random = () => 0.95; return { err: 'threw: ' + String(e.message).slice(0, 80) }; }
       const t0 = performance.now();
-      while (performance.now() - t0 < ms) { await sleep(200); d.frozen = 99999; d.stunTimer = 99999; d.vx = 0; d.vy = 0; }
+      while (performance.now() - t0 < ms) { await sleep(200); d.frozen = 99999; d.stunTimer = 99999; d.vx = 0; d.vy = 0;
+        if (SPREAD_RNG.has(id) && performance.now() - t0 > 2500) Math.random = () => 0.95; }
+      Math.random = () => 0.95;
       return { total: Math.round(hp0 - d.currentHp), lines: hits, presses };
     };
     const basics = {}; const rows = [];
