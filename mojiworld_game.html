@@ -6911,6 +6911,21 @@
   #inv-tabs .inv-tab:active, #u-inv-tabs .inv-tab:active { transform: translate(2px, 2px) !important; box-shadow: inset 0 0 0 1px rgba(244, 241, 234, 0.3), 1px 1px 0 #0c0b10 !important; }
   #inv-tabs .inv-tab:focus-visible, #u-inv-tabs .inv-tab:focus-visible { outline: 2.5px solid #ffe45c; outline-offset: 3px; }
   @media (prefers-reduced-motion: reduce) { #inv-tabs .inv-tab, #u-inv-tabs .inv-tab { transition: none; } }
+  /* =====================================================================
+     v0.30.1075 - THE TAXI MAP FILLS THE WINDOW (per user: "make it bigger to utilise more of the space, its taking only
+     a small portion"). The modal is bound by the 560 px game box and the SVG map is height-bound inside it (width
+     100%, aspect kept, _lxTaxiFit clamps its max-height); the old header - title, two lines of instructions, the
+     quote, a coins line - took about a third of that. Now: the title tight, one brief line with the coins in it, the
+     quote small, the paddings trimmed. The map's height goes from ~420 to ~520 CSS px, which at its aspect also
+     fills the modal's width.
+     ===================================================================== */
+  #taxi-modal > .modal { padding: 12px 18px 12px !important; min-width: min(96vw, 900px) !important; max-width: 920px !important; }
+  #taxi-modal #taxi-title { margin: 0 0 6px !important; padding-bottom: 4px !important; font-size: 22px; }
+  #taxi-modal #taxi-brief { text-align: center; color: #cfc6dc; font-size: 11.5px; line-height: 1.35; padding: 0 56px 0 100px; margin: 0 0 2px; }
+  #taxi-modal #taxi-brief .taxi-coins { color: #ffffff; font-weight: 700; white-space: nowrap; }
+  #taxi-modal #taxi-quote { text-align: center; color: #caa86a; font-style: italic; font-size: 10.5px; line-height: 1.3; margin: 0 0 6px; padding: 0 56px 0 100px; }
+  #taxi-modal #taxi-grid { line-height: 0; }
+  #taxi-modal #taxi-grid svg { display: block; margin: 0 auto; }
   .sell-row { border-radius: 12px; transition: background 120ms ease, transform 120ms ease, box-shadow 120ms ease; }
   .sell-row:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(8,4,22,0.42); }
   .sell-row .sell-icon { transition: transform 150ms ease; }
@@ -13560,13 +13575,11 @@ The sleeping world is listening.</div>
            slightly (background-size 230%→205%). -->
       <div id="taxi-face" title="The Taxi Uncle — real name Mr Tan Hua Chieh (nobody remembers)" style="position:absolute; top:18px; left:30px; width:74px; height:74px; border-radius:50%; z-index:4; border:3px solid #d4af5a; background-color:#241634; background-image:url('Sprites/npc/taxi_uncle.webp'); background-repeat:no-repeat; background-size:205% auto; background-position:50% 8%; transform:scaleX(-1); box-shadow:0 5px 16px rgba(0,0,0,0.6), 0 0 16px rgba(255,200,110,0.35), inset 0 0 14px rgba(10,4,24,0.5);"></div>
       <button class="close-btn" onclick="closeAllModals()">✕</button>
-      <h2>🚕 Taxi Service</h2>
-      <div style="text-align:center; margin-bottom:6px; color:#bbb; font-size:12px; padding:0 92px;"><!-- v0.30.865 polish - clear of the Taxi Uncle portrait, which covered "Click a node" -->
-        Click a node to fast-travel. Fare scales with your level (50🪙 early, up to 600🪙). Boss arenas excluded. He also remembers the last 3 monster areas you travelled to.<br><span style="color:#caa86a; font-style:italic;">"When they call for taxi, I am sure to be here, dutifully." ~ Your Taxi Uncle</span>
-      </div>
-      <div style="text-align:center; margin-bottom:8px;">
-        Mojicoins: <span class="gold" id="taxi-lumens">0</span>
-      </div>
+      <h2 id="taxi-title">🚕 Taxi Service</h2>
+      <!-- v0.30.1075 per user: the map took a small portion of the window. The header is one brief line (coins included) plus the quote, so
+           the map gets the height - the modal is bound by the 560 px game box and the map is height-bound inside it (see #taxi-brief). -->
+      <div id="taxi-brief">Click a node to fast-travel · fare 50–600🪙 by level · no boss arenas · your last 3 hunting grounds too · <span class="taxi-coins">Mojicoins <span class="gold" id="taxi-lumens">0</span></span></div>
+      <div id="taxi-quote">"When they call for taxi, I am sure to be here, dutifully." ~ Your Taxi Uncle</div>
       <div id="taxi-grid"></div>
     </div>
   </div>
@@ -15357,7 +15370,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1074';
+const GAME_VERSION = 'v0.30.1075';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -117346,9 +117359,18 @@ function _taxiFare() {
 function _lxTaxiFit(grid) {
   const md = document.querySelector('#taxi-modal > .modal'), ov = document.getElementById('taxi-modal'), sv = grid && grid.querySelector('svg');
   if (!md || !ov || !sv) return;
-  sv.style.maxHeight = '';
-  const over = md.offsetHeight - (ov.clientHeight - 16);
-  if (over > 0) sv.style.maxHeight = Math.max(220, sv.getBoundingClientRect().height / Math.max(0.01, md.getBoundingClientRect().height / md.offsetHeight) - over) + 'px';
+  // v0.30.1075 measure more than once: the first frame can precede the header's font swap and the width-driven svg's own
+  // layout, and a stale clamp left the modal overflowing the 560 px box. Same arithmetic (svg css height minus the
+  // overflow, rect/offset converting device px to css px), run now, next frame, a beat later, on fonts ready and on resize.
+  const fit = () => {
+    if (!sv.isConnected || ov.style.display === 'none') return;
+    sv.style.maxHeight = ''; void md.offsetHeight;
+    const over = md.offsetHeight - (ov.clientHeight - 16);
+    if (over > 0) sv.style.maxHeight = Math.max(220, sv.getBoundingClientRect().height / Math.max(0.01, md.getBoundingClientRect().height / md.offsetHeight) - over) + 'px';
+  };
+  fit(); requestAnimationFrame(fit); setTimeout(fit, 260);
+  try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => setTimeout(fit, 0)); } catch (e) {}
+  if (!window._lxTaxiFitResize) { window._lxTaxiFitResize = true; window.addEventListener('resize', () => { try { const g = document.getElementById('taxi-grid'); const o = document.getElementById('taxi-modal'); if (g && o && o.style.display !== 'none') _lxTaxiFit(g); } catch (e) {} }); }
 }
 function openTaxi() {
   if (!player.cls) { showToast('Pick a class first', 'common'); return; }
