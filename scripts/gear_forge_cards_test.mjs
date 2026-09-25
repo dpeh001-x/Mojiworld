@@ -1,9 +1,10 @@
-// THE BLACKSMITH FORGE AS A GRID OF CARDS (v0.30.997).
+// THE BLACKSMITH FORGE AS A GRID OF CARDS (v0.30.997; v0.30.1001 - the comic plate back, 2px black outlines, the coaster at 20% white).
 //
 // Per user, after the stall: "do the same for the weapon shop, the items can be made into compact boxes
 // with easy mouseover to click and buy". Reads the live forge:
 //   - the gear tab marks the card .gear-forge and lays the rows out as a CSS grid of boxes (3+ columns
-//     at 1280 wide), each an ink box on a paper line with a rarity strip and a paper coaster
+//     at 1280 wide), each an ink box with a 2px black line, a rarity strip and a 20%-white coaster with a black
+//     ring, over the comic plate (panel_p5_shop) the shop always had
 //   - a box's Buy is hidden at rest (affordable or not) and shows on hover; the price yields to it
 //   - clicking the box itself buys: the piece lands in the inventory and the coins drop by its price
 //   - a box you cannot afford does nothing on click and carries the "Need N more" tooltip
@@ -60,13 +61,15 @@ try {
     const prices = cards.map((c) => parseInt((c.querySelector('.price') || {}).textContent || '0', 10));
     return { forge: modal.classList.contains('gear-forge'), display: getComputedStyle(list).display, n: cards.length, cols, rowsY,
       card: { flexDir: cc.flexDirection, border: cc.borderTopWidth + ' ' + cc.borderTopColor, shadow: cc.boxShadow.slice(0, 80), font: cc.fontFamily.slice(0, 10), h: Math.round(c0.getBoundingClientRect().height), cursor: cc.cursor },
-      coaster: { w: coaster.width, radius: coaster.borderTopLeftRadius, border: coaster.borderTopWidth + ' ' + coaster.borderTopColor },
+      coaster: { w: coaster.width, radius: coaster.borderTopLeftRadius, bg: coaster.backgroundColor, border: coaster.borderTopWidth + ' ' + coaster.borderTopColor },
+      plate: getComputedStyle(modal).backgroundImage.includes('panel_p5_shop'),
       buyAtRest: { opacity: cb0.opacity, pos: cb0.position, pe: cb0.pointerEvents, bg: cb0.backgroundColor, disabled: btn0.disabled },
       asides: asides.length, asideHidden, prices: prices.slice(0, 3), coins: player.mojicoins };
   });
   check(r.forge && r.display === 'grid' && r.cols >= 3 && r.rowsY >= 2 && r.n >= 6, 'GRID: the gear tab is a grid of boxes, three or more across', J({ display: r.display, cols: r.cols, rows: r.rowsY, n: r.n }));
-  check(r.card.flexDir === 'column' && r.card.border === '2px rgb(244, 241, 234)' && /rgb\(12, 11, 16\) 4px 4px 0px/.test(r.card.shadow) && /inset/.test(r.card.shadow) && /^Nunito/.test(r.card.font) && r.card.h <= 300, 'BOX: a column with a paper line, an ink offset and a rarity strip, in Nunito, compact (under 300 device px; the old row alone was ~160)', J(r.card));
-  check(r.coaster.w === '56px' && r.coaster.radius === '50%' && r.coaster.border === '2px rgb(12, 11, 16)', 'BOX: the piece on a 56 px paper coaster with an ink ring', J(r.coaster));
+  check(r.card.flexDir === 'column' && r.card.border === '2px rgb(12, 11, 16)' && /rgb\(12, 11, 16\) 4px 4px 0px/.test(r.card.shadow) && /inset/.test(r.card.shadow) && /^Nunito/.test(r.card.font) && r.card.h <= 300, 'BOX: a column with a 2px black line, an ink offset and a rarity strip, in Nunito, compact (under 300 device px; the old row alone was ~160)', J(r.card));
+  check(r.coaster.w === '56px' && r.coaster.radius === '50%' && r.coaster.bg === 'rgba(255, 255, 255, 0.2)' && r.coaster.border === '2px rgb(12, 11, 16)', 'BOX: the piece on a 56 px coaster at 20% white with a 2px black ring', J(r.coaster));
+  check(r.plate, 'PLATE: the comic plate (panel_p5_shop) is the forge background, as before');
   check(r.buyAtRest.opacity === '0' && r.buyAtRest.pos === 'absolute' && r.buyAtRest.pe === 'none', 'BUY: hidden at rest, positioned over the price', J(r.buyAtRest));
   check(r.asides >= 1 && r.asideHidden, 'STATS: the tier-multiplier asides are hidden from the line', J({ asides: r.asides, hidden: r.asideHidden }));
   // hover the first affordable card: Buy shows, the price yields; then click the CARD (not the button) and the purchase lands
