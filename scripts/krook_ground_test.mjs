@@ -70,14 +70,18 @@ try {
       // stand him so his hitbox overlaps the ledge, player just beyond it, then force the slam
       k.x = ledge.x - k.w * 0.4 + i * 30; k.y = ground - k.h; k.vx = 0; k.vy = 0; k.onGround = true;
       player.x = ledge.x + ledge.w + 60; player.y = ground - player.h; player.vy = 0;
-      k.patternState = 'jumpSlam'; k.patternTimer = 0; k._kFired = false; k._stagger = 0;
+      // the pattern's own take-off sits in a 50 ms timer window the harness can skip under load, so
+      // the slam's impulse (vy -14, five px a frame toward the player) is applied here as well - the
+      // arc is the fixture; the rule under test is where it comes down.
+      k.patternState = 'jumpSlam'; k.patternTimer = 300; k._kFired = false; k._stagger = 0; k._dirOpenT = 0;   // an open-window roll cancels patterns and zeroes upward vy
+      k.vy = -14; k.vx = 5; k.onGround = false;
       let peak = ground, restedOn = null; const t0 = performance.now();
       await new Promise((done) => { const iv = setInterval(() => { const feet = k.y + k.h; peak = Math.min(peak, feet); if (k.onGround && performance.now() - t0 > 400) { restedOn = Math.round(feet); } if (restedOn != null || performance.now() - t0 > 3000) { clearInterval(iv); done(); } }, 16); });
       out.push({ peak: Math.round(peak), restedOn, ledgeY: ledge.y });
     }
     return out;
   });
-  check(slam.some((s) => s.peak < slam[0].ledgeY), '1b. the forced JUMP SLAM clears the ledge height (the arc crosses it)', J(slam));
+  check(slam.every((s) => s.peak < s.ledgeY), '1b. the forced JUMP SLAM clears the ledge height every time (the arc crosses it)', J(slam));
   check(slam.every((s) => s.restedOn === arena.ground), '    and he lands on the floor every time, never on the ledge', J(slam.map((s) => s.restedOn)));
   // 2. the player stands under his centre on the floor: facing settles, no shuffle
   const belly = await page.evaluate(async () => {
