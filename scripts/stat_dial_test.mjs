@@ -9,7 +9,7 @@
 //   4. hovering a chip previews the build after it, and lights that lane's spoke
 //   5. the radar shape is the build: each vertex at r0 + ratio * (maxR - r0)
 //   6. with no SP every chip locks and the starburst dims; a maxed lane says MAX and ignores clicks
-//   7. the type is Fredoka for names and Nunito 900 for numbers
+//   7. the type is Cinzel for names (the gold plaques) and Nunito 900 for numbers
 //   node scripts/stat_dial_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -85,7 +85,7 @@ ok('1. seven chips, one per lane, in spoke order', hasDial && G && G.n === 7 && 
 ok('1. each chip sits at the end of its own spoke (within 2 design px)', G && G.offSpoke <= 2, G && G.offSpoke);
 ok('1. no chip overlaps another chip or the dial', G && G.overlap === 0 && G.inDisc === 0, JSON.stringify(G && { overlap: G.overlap, cornersInDisc: G.inDisc }));
 ok('5. the radar shape is the build (every vertex within 1 px of r0 + ratio * span)', G && G.shapeErr <= 1, G && G.shapeErr);
-ok('7. Fredoka names, Nunito 900 numbers, SP in the starburst', G && /Fredoka/.test(G.nameFont) && /Nunito/.test(G.numFont) && +G.numWeight >= 900 && G.center === '300', JSON.stringify(G && [G.nameFont, G.numFont, G.numWeight, G.center]));
+ok('7. Cinzel names, Nunito 900 numbers, SP in the medallion', G && /Cinzel/.test(G.nameFont) && /Nunito/.test(G.numFont) && +G.numWeight >= 900 && G.center === '300', JSON.stringify(G && [G.nameFont, G.numFont, G.numWeight, G.center]));
 
 if (!(G && G.n === 7)) {
   ok('the dial exists - every interaction check below needs its chips', false, 'no stat dial on this build');
@@ -110,12 +110,15 @@ ok('3. +10 invests ten', s1.sp === s0.sp - 10 && s1.spent.atk === s0.spent.atk +
 const def = await box('def');
 s0 = await state();
 await page.mouse.move(def.x - 30, def.y); await page.mouse.down();
-await page.waitForTimeout(1300);
+// hold until the repeat has clearly kicked in (a starved headless timer can run late, so wait on
+// progress rather than a fixed 1.3 s), then release
+const tHold = Date.now();
+while (Date.now() - tHold < 5000) { await page.waitForTimeout(100); if ((await state()).spent.def - s0.spent.def >= 8) break; }
 await page.mouse.up();
 await page.waitForTimeout(500);
 s1 = await state();
 const held = s1.spent.def - s0.spent.def;
-ok('3. holding a chip keeps investing (400 ms, then ~12 a second)', held >= 6 && held <= 16, held);
+ok('3. holding a chip keeps investing (400 ms, then ~12 a second)', held >= 8 && held <= 20, held);
 ok('3. ...every held point is paid for, and the release adds no extra click', s0.sp - s1.sp === held, JSON.stringify({ spPaid: s0.sp - s1.sp, invested: held }));
 
 // ---- 4: hover preview ----
