@@ -14872,7 +14872,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1044';
+const GAME_VERSION = 'v0.30.1045';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -18900,8 +18900,9 @@ function _lxBossBakePump() {
     const j = Q.shift(), im = j.a[j.i];
     if (!im || im.tagName !== 'IMG' || im._lxBaking) continue;               // baked, baking, or an empty slot
     if (!im.complete) { if (++j.t < 600) Q.push(j); continue; }             // still downloading: come back (bounded)
-    if (!(im.naturalWidth > 0) || Math.max(im.naturalWidth, im.naturalHeight) <= cap) continue;   // failed, or small enough to pin on first draw
-    _lxAsyncBake(j.a, j.i, im, cap);
+    const capJ = j.a._lxBaseMin ? _lxShrinkCap(Math.max(720, j.a._lxBaseMin)) : cap;   // v0.30.x — the set's own base (_lxBossBakeBaseFor)
+    if (!(im.naturalWidth > 0) || Math.max(im.naturalWidth, im.naturalHeight) <= capJ) continue;   // failed, or small enough to pin on first draw
+    _lxAsyncBake(j.a, j.i, im, capJ);
   }
   if (Q.length) _lxBossBakeKick(_lxBakeInFlight >= budget ? 40 : 90);
 }
@@ -18925,7 +18926,7 @@ function _lxBossStandIn(sprite, m) {
   if (_form && m._lxBakedForm !== _form) { m._lxBakedForm = _form; _lxBossBakeQueue(_form, null); }
   const set = sprite._lxSet;
   if (!set || set._lxStandInOff || !(sprite.naturalWidth > 0)) return sprite;
-  const cap = _lxShrinkCap(720), long = Math.max(sprite.naturalWidth, sprite.naturalHeight);
+  const cap = _lxShrinkCap(Math.max(720, set._lxBaseMin || 0)), long = Math.max(sprite.naturalWidth, sprite.naturalHeight);   // v0.30.x — the set's own base (_lxBossBakeBaseFor)
   if (long <= cap) return sprite;                                            // under the cap: pinned on first draw, cheap
   const bc = sprite._lxBakedCv;
   if (bc) { const bl = Math.max(bc.width, bc.height); if (bl <= cap && bl >= Math.min(long, cap) * 0.95) return bc; }
@@ -19132,6 +19133,7 @@ function _lxShrinkSlot(holder, key, baseLogical) {
 }
 function _lxShrinkFrames(frames, baseLogical, pinCap) {   // v0.30.624 - pinCap: sync pins per call (default 4); the prewarm asks for 2
   if (!frames) return frames;
+  if (frames._lxBaseMin > baseLogical) baseLogical = frames._lxBaseMin;   // v0.30.x — a set drawn bigger than its caller's base (_lxBossBakeBaseFor)
   frames._lxBase = baseLogical;   // v0.30.256 — audit hook: which cap family governs this set
   const maxLong = _lxShrinkCap(baseLogical);
   // v0.29.707 — LAG FIX: the "shrunk"/"noShrink" marks are now versioned by
@@ -138921,6 +138923,15 @@ function _lxBossAtkPose(m, key, frames) {
 }
 // the five v0.30.89 call sites keep their name and their suffix argument
 function _lxSovAtkPose(m, key, frames) { return _lxBossAtkPose(m, key, frames); }
+// v0.30.x — a boss set drawn BIGGER than the shared 720-logical base keeps enough pixels not to be upscaled. The cap
+// (_lxShrinkCap) promises "the final blit is always a DOWN-scale"; 720 is the measured max for bosses in general, and
+// Aetherion's form-1 idle (calib x1.58, 1011 logical) and attack (x1.6, 1024) broke it: baked to 1065 device px and
+// drawn at 1300-1316, a x1.22 upscale - the blur the user saw. Logical px, like every other base; ~2% over the widest
+// measured draw. A function, not a const table: _loadBossFrames runs at load and must not meet a TDZ.
+function _lxBossBakeBaseFor(subdir, type) {
+  const T = { 'idle/aetherion': 1045, 'attack/aetherion': 1045 };
+  return T[subdir + '/' + type] || 0;
+}
 function _loadBossFrames(map, subdir, types) {
   // v0.29.518 — this used to request _0.._8 unconditionally for every type in
   // every set (boss attack/idle/walk + the three zodiac sets), so a boss with
@@ -138948,6 +138959,7 @@ function _loadBossFrames(map, subdir, types) {
                             // the calib key this frame should be looked up under
       arr[i] = img;
     }
+    { const _bb = _lxBossBakeBaseFor(subdir, type); if (_bb) arr._lxBaseMin = _bb; }   // v0.30.x — see _lxBossBakeBaseFor
     map[type] = arr;
   }
 }
@@ -140149,7 +140161,7 @@ function _warmMapArt(id, opts) {
   const bakeOne = (sl) => new Promise((res) => {
     const im = sl.im;
     if (!(im && im.complete && im.naturalWidth > 0)) return res();
-    const _cap = sl.capBase ? _lxShrinkCap(sl.capBase) : CAP;   // v0.29.356 — mobs bake to their own 480 base
+    const _cap = sl.capBase ? _lxShrinkCap(sl.capBase) : ((sl.holder && sl.holder._lxBaseMin) ? _lxShrinkCap(Math.max(720, sl.holder._lxBaseMin)) : CAP);   // v0.30.x — a set's own base   // v0.29.356 — mobs bake to their own 480 base
     const w = im.naturalWidth, h = im.naturalHeight;
     if (Math.max(w, h) <= _cap) { im._lxNoShrink = true; return res(); }
     const s = _cap / Math.max(w, h);
@@ -140960,6 +140972,7 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
     // feet like s, so an under-drawn frame grows in place instead of hopping.
     const _bfs = (_bc.fs && _animated && sprite._lxFi != null && _bc.fs[sprite._lxFi] > 0) ? _bc.fs[sprite._lxFi] : 1;
     const _bcs = _bc.s * _bfs;
+    m._lxCalXs = Math.abs(_bcs) || 1;   // v0.30.x — read by _softOpts.xs below
     if (_bcs !== 1 || _bc.dx || _bc.dy) { ctx.translate(_bc.dx * targetH, _bc.dy * targetH); ctx.scale(_bcs, _bcs); }
     // v0.29.253 — hitbox fractions are authored in the animator against the
     // SCALED sprite ("all scaling is baked into the box you see"), so the
@@ -140990,6 +141003,7 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   // v0.29.281 — every boss opts into the DEEP feather (~1.5× fade depth, see
   // _lxDrawSoft); star forms additionally keep their forced full-span feather.
   const _softOpts = { deep: true,
+    xs: (m.type === 'aetherion' && m._lxCalXs > 0) ? m._lxCalXs : 1,   // v0.30.x — bake for the on-screen size (see _lxDrawSoft)
     force: (typeof _LX_FORCE_FEATHER !== 'undefined' && _LX_FORCE_FEATHER.has(_feKey)),
     // v0.29.5xx — King Gloopaloo and Krook are cut flat across the bottom on
     // every attack frame; _feKey is already the resolved sprite identity.
@@ -141932,6 +141946,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // image, shared by the untinted draw and all 8 tints. This also keeps the
   // v0.29.707/708 deferral working, which is keyed to the real <img>.
   const _edgeSrc = img;
+  const _xs = (opts && opts.xs > 0) ? opts.xs : 1;   // v0.30.x — the caller's post-draw ctx scale (boss calib): the bakes below are sized for the SCREEN
   if (_lxMobTintFilter && img) {           // v0.29.5xx — baked tint swap
     const _tb = _lxTintBake(img, _lxMobTintFilter);
     if (_tb) img = _tb;
@@ -141977,7 +141992,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
     // store instead of upscaling. The no-win gate compares the source against
     // the DEVICE bucket: baking only pays when it is a real downscale.
     const _pDpr = _lxBakeDpr();
-    const _pw = Math.ceil((dw * _pDpr) / 10) * 10, _ph = Math.ceil((dh * _pDpr) / 10) * 10;
+    const _pw = Math.ceil((dw * _pDpr * _xs) / 10) * 10, _ph = Math.ceil((dh * _pDpr * _xs) / 10) * 10;
     if (_sw0 >= _pw * 1.5 && dw >= 14 && dh >= 14) {
       // v0.30.358 — deliberately NOT budgeted (see _lxPlainOf): this bake is one
       // downscale read of the source, exactly what the raw draw it replaces
@@ -142015,7 +142030,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   // A render-scale change shifts the buckets, so stale-dpr entries age out of
   // the 8-slot FIFO on their own.
   const _fDpr = _lxBakeDpr();
-  const _bw = Math.max(14, Math.ceil((dw * _fDpr) / 10) * 10), _bh = Math.max(14, Math.ceil((dh * _fDpr) / 10) * 10);   // v0.30.636 - ceil: a rounded-down bucket drew up to 5 device px short
+  const _bw = Math.max(14, Math.ceil((dw * _fDpr * _xs) / 10) * 10), _bh = Math.max(14, Math.ceil((dh * _fDpr * _xs) / 10) * 10);   // v0.30.636 - ceil: a rounded-down bucket drew up to 5 device px short
   // v0.29.735 perf — integer key, not a 5-way string concat per blit per frame.
   // _bw/_bh are 10px buckets far below 65535 so the packing cannot collide;
   // the old string keys simply age out of the FIFO once, self-healing.
@@ -142031,7 +142046,7 @@ function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
   if (!_lxMintOk()) {
     const _rw = img.naturalWidth || img.width || 0;
     const _rD = _lxBakeDpr();
-    const _rpw = Math.ceil((dw * _rD) / 10) * 10, _rph = Math.ceil((dh * _rD) / 10) * 10;
+    const _rpw = Math.ceil((dw * _rD * _xs) / 10) * 10, _rph = Math.ceil((dh * _rD * _xs) / 10) * 10;
     if (_rw >= _rpw * 1.5 && dw >= 14 && dh >= 14) {
       const _rpc = _lxPlainOf(img, _rpw, _rph);
       if (_rpc) { c.drawImage(_rpc, dx, dy, dw, dh); return; }

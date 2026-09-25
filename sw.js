@@ -181,7 +181,7 @@
 // v0.30.980 - v68 -> v69. Sprites/bosses/walk/kingKrook_5.webp and kingKrook_6.webp are REPLACED under their own
 // names (mirrored: they faced left inside a right-facing walk, so King Krook turned round every stride). Without
 // this bump a returning player's stale-while-revalidate cache keeps drawing him turning for a whole session.
-const CACHE = 'mojiworld-assets-v69';   // v0.30.980 - King Krook's walk frames 5/6 mirrored in place
+const CACHE = 'mojiworld-assets-v70';   // v0.30.1045 - Aetherion's 36 form-1 frames re-inked in place
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
