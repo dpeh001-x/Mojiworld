@@ -1,4 +1,4 @@
-// ONE LEAVE BUTTON PER DIALOG (v0.30.957).
+// ONE LEAVE BUTTON PER DIALOG (v0.30.957, widened v0.30.958).
 //
 // A generic 'Leave' is appended to every dialog whose role does not author its own options. Three
 // roles ALSO pushed a '(leave)' of their own, so the taxi, the sage and the jukebox each offered two
@@ -11,8 +11,14 @@
 // still live for the sage and the amnesiac, and would have become live for the taxi the moment his
 // button went. Leaving him any way at all now opens the next chat on his introduction instead of
 // halfway through "Fifty Mojicoins a trip...". The third check drives all three exits.
+//
+// v0.30.958 widened the sweep past the literal label: a scan of every option whose only effect is
+// closeDialog found four more under other names ('Thanks' on the rumour-monger, 'Close' on Bravo and
+// Milo). The first check below is static, over openNPC in the served file, so it covers roles that
+// live on maps this harness never loads (Bravo is ten floors into an expedition). Decline answers -
+// 'Not yet', 'Maybe later' - are deliberately allowed: they answer something.
 //   [SERVE_ROOT=<dir with serve.js, data/, art>] node scripts/dialog_single_leave_test.mjs [page.html]
-import { createRequire } from 'node:module'; import path from 'node:path'; import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module'; import path from 'node:path'; import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
@@ -41,6 +47,16 @@ const talkTo = (role, stage) => page.evaluate(async ({ role, stage }) => {
   openNPC(n); await new Promise((r) => setTimeout(r, 600));
   return true;
 }, { role, stage });
+// static: inside openNPC, no option may be a bare closer wearing a leave-ish name. Covers roles that
+// live on maps this harness never loads (Bravo is ten floors into an expedition).
+{
+  const src = readFileSync(PAGE, 'utf8');
+  const head = src.indexOf('function openNPC('), tail = src.indexOf("opts.push({ t:'Leave', cb: closeDialog });", head);
+  const body = head >= 0 && tail > head ? src.slice(head, tail) : '';
+  const dup = body.match(/opts\.push\(\{ t:'(\(leave\)|Leave|Close|Thanks|Goodbye|Farewell|Bye)',[^\n]*closeDialog[^\n]*\n/g) || [];
+  check(body.length > 0 && dup.length === 0, 'no role authors its own Leave / Close / Thanks closer beside the generic one',
+    dup.length ? J(dup.map((d) => d.trim().slice(0, 60))) : 'openNPC scanned, ' + body.length + ' chars');
+}
 try {
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof openNPC === 'function', null, { timeout: 180000 });
