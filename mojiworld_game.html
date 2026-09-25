@@ -14857,7 +14857,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1034';
+const GAME_VERSION = 'v0.30.1035';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -24282,9 +24282,10 @@ function _skillCdMul(id) {
   if (player.tree && player.tree.arrowCdMul && id === 'arrowShot') m *= player.tree.arrowCdMul;
   return m * JOB_CD_MUL;
 }
-// War of Banners and Bastion of Dawn stamp SKILLS[id].cd themselves when their window ends,
-// bypassing the multiplier above, so those two wait the table's full value.
-const _SKILL_RAW_CD = new Set(['warlord_ult', 'crusader_ult']);
+// War of Banners and Bastion of Dawn used to stamp SKILLS[id].cd themselves when their window ended,
+// bypassing the multiplier above, so those two waited the table's full value. v0.30.1035 (per user, the skill
+// audit's R6): they take the same arithmetic as every other skill, so nothing is raw any more.
+const _SKILL_RAW_CD = new Set([]);
 function _skillRealCd(id) {
   const s = SKILLS[id];
   if (!s || !(s.cd > 0)) return 0;
@@ -56820,7 +56821,7 @@ function _lxRestoreUltCd() {
     if ((player._protocolUntil || 0) > 0) open.push('marksman_ult');   // v0.30.x — Deadeye Protocol is a window too now
     // v0.30.1016 - CHARGE WHAT THE WINDOW'S OWN CLOSE WOULD HAVE CHARGED. This used one formula for all four
     // (table cd x cooldown reduction x 0.75), while each window closes on its own value: War of Banners
-    // stamps the table's 60 s (see _SKILL_RAW_CD), Meteor Sigil the cooldown its cast recorded (with the
+    // stamps what its opening press recorded (_wobFullCd), Meteor Sigil the cooldown its cast recorded (with the
     // mage's 0.9 and the rank perk), the Deadeye windows theirs (_deRealCd). Measured: a portal hop inside
     // the enrage left War of Banners on 45 s where finishing the enrage leaves it on 60 s - a free
     // quarter of the ultimate's cooldown for walking through a door.
@@ -56828,7 +56829,7 @@ function _lxRestoreUltCd() {
       const def = SKILLS[id];
       if (def && def.cd) {
         let _cd = 0;
-        if (id === 'warlord_ult') _cd = def.cd;
+        if (id === 'warlord_ult') _cd = player._wobFullCd || 0;
         else if (id === 'sage_ult') _cd = player._sageFullCd || 0;
         else if (player._deRealCd && player._deRealCd[id] > 0) _cd = player._deRealCd[id];
         if (!(_cd > 0)) {   // no recorded value: the old arithmetic
@@ -74044,7 +74045,7 @@ function updatePlayer(dt) {
     // v0.30.x — War of Banners and the Deadeye windows close on game time too (see warlord_ult / _lxDeNow).
     if ((player._warlordEnrageUntil | 0) > 0 && game.time >= player._warlordEnrageUntil) {
       player._warlordEnrageUntil = 0;
-      if (player.skillCooldowns && typeof SKILLS !== 'undefined' && SKILLS.warlord_ult) player.skillCooldowns.warlord_ult = SKILLS.warlord_ult.cd;
+      if (player.skillCooldowns && typeof SKILLS !== 'undefined' && SKILLS.warlord_ult) player.skillCooldowns.warlord_ult = player._wobFullCd || _skillRealCd('warlord_ult');   // v0.30.1035 - was the raw table cd
     }
     if (typeof _LX_DE_WINDOWS !== 'undefined') for (const _dwId in _LX_DE_WINDOWS) {
       const _dw = _LX_DE_WINDOWS[_dwId];
@@ -79235,6 +79236,7 @@ function castSkill(id) {
   // even if Quickening also fires this cast.
   if (typeof _applyLv10Cd === 'function') _applyLv10Cd(id, cdMul);
   const _rankedCd = player.skillCooldowns[id];   // v0.30.630 - after the rank perk; a Deadeye window stamps THIS when it closes
+  if (id === 'warlord_ult' && !((player._warlordEnrageUntil | 0) > game.time)) player._wobFullCd = _rankedCd;   // v0.30.1035 - War of Banners' close stamps this too
   // v0.25.269 — Quickening boon (player.mods.cdrChance, capped at 0.20).
   // Roll once per cast: on a hit, the cooldown is bypassed entirely so
   // the skill is castable again on the very next press. v0.25.559 —
@@ -87698,9 +87700,11 @@ const SKILL_FNS = {
       // ── TAP 2 (or 15 s auto-eruption) — RELEASE ──
       player._bastionArmedUntil = 0;
       player._bastionArmHeld = false;
-      // The auto path bypasses castSkill, so the real cooldown is set here;
-      // for a manual release castSkill has already set the same value.
-      player.skillCooldowns.crusader_ult = SKILLS.crusader_ult.cd;
+      // The auto path bypasses castSkill, so the real cooldown is set here; a manual release gets the same
+      // value castSkill set. v0.30.1035 (per user, the skill audit's R6): that value is the table cd with the
+      // same cuts every skill takes (x0.75, the rank perk, Hallowed Field) - it was the raw 60 s. It is
+      // still stamped over castSkill's, so a Quickening proc cannot free the party heal and shield.
+      player.skillCooldowns.crusader_ult = _skillRealCd('crusader_ult') * getCdrMult();
     }
     // v0.30.767 — DAWNBREAK. The Judgement meter, the stack toasts and the homing-orb volley are
     // retired; the charge model and its numbers live in LX_DAWN, above updatePlayer. The SUPPORT half

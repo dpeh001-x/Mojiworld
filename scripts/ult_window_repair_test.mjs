@@ -41,7 +41,7 @@ try {
     // War of Banners: the enrage finished vs cut short by a portal
     as('warrior', 'berserker', 'warlord'); castSkill('warlord_ult'); await steps(20);
     player._warlordEnrageUntil = game.time; await steps(20);
-    out.wobClose = player.skillCooldowns.warlord_ult || 0;
+    out.wobClose = player.skillCooldowns.warlord_ult || 0; out.wobShown = _skillRealCd('warlord_ult');
     await go('forest'); as('warrior', 'berserker', 'warlord'); castSkill('warlord_ult'); await steps(20);
     await go('town'); out.wobPortal = player.skillCooldowns.warlord_ult || 0;
     // Meteor Sigil: one comet, then a portal; the stale window must not charge the cooldown again
@@ -58,7 +58,8 @@ try {
     return out;
   });
   const near = (a, b, tol) => Math.abs(a - b) <= tol;
-  check(near(r.wobClose, 60000, 1500), 'War of Banners: finishing the enrage charges the table\'s 60 s', Math.round(r.wobClose));
+  // since the audit's R6 War of Banners waits what the Skills panel shows (table cd x 0.75 = 45 s), not the raw 60 s
+  check(near(r.wobClose, r.wobShown, 1500), 'War of Banners: finishing the enrage charges what the Skills panel shows', Math.round(r.wobClose) + ' vs ' + Math.round(r.wobShown));
   check(near(r.wobPortal, r.wobClose, 1500), 'War of Banners: a portal inside the enrage charges the same', Math.round(r.wobPortal) + ' vs ' + Math.round(r.wobClose));
   check(r.sigil.recorded > 0 && near(r.sigil.afterPortal, r.sigil.recorded, 1500), 'Meteor Sigil: the portal charges the cooldown its cast recorded', JSON.stringify(r.sigil));
   check(r.sigil.stale === 0 && r.sigil.later < r.sigil.afterPortal - 0.8 * r.sigil.elapsedMs + 1500, 'Meteor Sigil: the old window does not charge it again on the next map', JSON.stringify(r.sigil));
