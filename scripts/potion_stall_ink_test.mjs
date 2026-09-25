@@ -1,4 +1,4 @@
-// THE POTION STALL: INK ROWS ON THE COMIC PLATE, A SCALLOPED AWNING, EIGHT ROWS WITHOUT A SCROLL (v0.30.990, reworked v0.30.1003).
+// THE POTION STALL: INK ROWS ON THE COMIC PLATE, A SCALLOPED AWNING, EIGHT ROWS WITHOUT A SCROLL (v0.30.990, reworked v0.30.1003, the awning again v0.30.1009).
 //
 // v0.30.990 per user: "the potion shop modal can be also bigger bolder similar to the new NPC revamp ... mainly work on
 // the font, layout and buttons, the small medium and large can take up much smaller space". v0.30.1003 per user: "Same
@@ -6,7 +6,9 @@
 // pink white a bold pop unique design, make it easy to click and buy quantity without having to scroll down too much".
 // Reads the live stall:
 //   - the comic plate (panel_p5_shop) and the standard frame are back behind Nunito rows and a Fredoka sign
-//   - the awning is the SVG tile of candy-stripe scallops, about a coaster tall
+//   - the awning is the SVG tile: halftone candy stripes with a yellow pinstripe, a black dotted hem, glossy scallops
+//     with yellow pom-poms at the cusps; the alembic sits on a round paper sign hung from it (v0.30.1009, per user
+//     "top banner can be further improved and made cuter, more pop")
 //   - each potion row is ONE LINE (no wrap) with a 2px black line and a hard offset; the potion at 22 px on a 32 px
 //     coaster at 20% white with a black ring; and ALL EIGHT rows fit the list with no scroll at 1280 x 760
 //   - the steppers are chips with black lines, MAX and Buy are yellow, disabled Buy is muted, the quantity field is
@@ -49,7 +51,8 @@ try {
     // measure with the real faces in: the fallback glyphs are wider and wrap a description onto an extra line
     try { await Promise.all([document.fonts.load('600 13px Nunito'), document.fonts.load('800 13px Nunito'), document.fonts.load('600 26px Fredoka')]); } catch (e) {}
     await new Promise((r) => setTimeout(r, 150));
-    const modal = document.querySelector('#shop-modal .modal'); const cm = getComputedStyle(modal), aw = getComputedStyle(modal, '::before');
+    const modal = document.querySelector('#shop-modal .modal'); const cm = getComputedStyle(modal), aw = getComputedStyle(modal, '::before'), sg = getComputedStyle(modal, '::after');
+    const tile = decodeURIComponent(aw.backgroundImage);
     const title = getComputedStyle(document.getElementById('shop-title')); const list = document.getElementById('shop-list');
     const rows = [...list.querySelectorAll('.shop-item')];
     const first = rows[0];
@@ -67,7 +70,8 @@ try {
     const rr = first.getBoundingClientRect(), br = buy.getBoundingClientRect(), pr = coasterEl.getBoundingClientRect();
     const out = { stall: modal.classList.contains('potion-stall'),
       card: { font: cm.fontFamily.slice(0, 20), border: cm.borderTopWidth + ' ' + cm.borderTopColor, plate: /panel_p5_shop/.test(cm.backgroundImage), paperKeyline: /rgb\(244, 241, 234\) 0px 0px 0px 2px/.test(cm.boxShadow), width: Math.round(modal.getBoundingClientRect().width) },
-      awning: { svg: /data:image\/svg\+xml/.test(aw.backgroundImage), scallops: /A12 12 0 0 0 24 28/.test(decodeURIComponent(aw.backgroundImage)), h: parseFloat(aw.height), coaster: 32, repeat: aw.backgroundRepeat },
+      awning: { svg: /data:image\/svg\+xml/.test(aw.backgroundImage), scallops: /A12 12 0 0 0 24 36/.test(tile), halftone: /<pattern id='d'/.test(tile), pinstripe: /fill='#ffe45c'\/><\/pattern>/.test(tile), hemDots: (tile.match(/cy='3.5' r='1.4'/g) || []).length, gloss: (tile.match(/<ellipse/g) || []).length, poms: (tile.match(/cy='36' r='4'/g) || []).length, h: parseFloat(aw.height), repeat: aw.backgroundRepeat },
+      sign: { radius: sg.borderTopLeftRadius, bg: sg.backgroundColor, atlas: /url\(/.test(sg.backgroundImage), w: parseFloat(sg.width), shadow: sg.boxShadow, content: sg.content },
       title: { font: title.fontFamily.slice(0, 16), fill: title.webkitTextFillColor, shadow: title.textShadow.slice(0, 40) },
       row: { n: rows.length, wrap: cr.flexWrap, border: cr.borderTopWidth + ' ' + cr.borderTopColor, shadow: cr.boxShadow, heights, coasterH: Math.round(coasterH), oneLine: Math.abs((br.top + br.height / 2) - (pr.top + pr.height / 2)) < 12, buyInsideRow: br.right <= rr.right + 1,
         scroll: { sh: list.scrollHeight, ch: list.clientHeight, mTop: Math.round(modal.getBoundingClientRect().top), mBottom: Math.round(modal.getBoundingClientRect().bottom), vh: innerHeight } },
@@ -82,7 +86,9 @@ try {
     return out;
   });
   check(r.stall && /^Nunito/.test(r.card.font) && r.card.plate && !r.card.paperKeyline && r.card.border !== '3px rgb(12, 11, 16)', 'CARD: Nunito body on the comic plate (panel_p5_shop) with the standard frame - the ink plate and paper keyline are gone', J(r.card));
-  check(r.awning.svg && r.awning.scallops && r.awning.repeat === 'repeat-x' && r.awning.h >= 40 && r.awning.h <= 48, 'AWNING: the candy-stripe scallop tile, repeated across, about a coaster tall', J(r.awning));
+  check(r.awning.svg && r.awning.scallops && r.awning.halftone && r.awning.pinstripe && r.awning.hemDots >= 12 && r.awning.gloss >= 4 && r.awning.poms >= 5 && r.awning.repeat === 'repeat-x' && r.awning.h >= 48 && r.awning.h <= 60, 'AWNING: halftone candy stripes with a pinstripe, a dotted hem, four glossy scallops with pom-poms at the cusps, tiled across', J(r.awning));
+  // the boot emoji pass rewrites the v0.26 rule: content -> '', the glyph as a 1.15em atlas tile, width / height 1.15em; the sign is rings of box-shadow around it
+  check(r.sign.radius === '50%' && r.sign.bg === 'rgb(255, 246, 234)' && r.sign.atlas && r.sign.w > 16 && r.sign.w < 21 && /rgb\(255, 246, 234\) 0px 0px 0px 5px/.test(r.sign.shadow) && /rgb\(12, 11, 16\) 0px 0px 0px 7px/.test(r.sign.shadow) && /rgb\(12, 11, 16\) 3px 3px 0px 7px/.test(r.sign.shadow), 'SIGN: the alembic atlas tile on a round paper sign - a 5 px paper ring, a 2 px ink ring and a hard offset', J(r.sign));
   check(/^Fredoka/.test(r.title.font) && /rgb\(255, 255, 255\)/.test(r.title.fill) && /rgb\(12, 11, 16\) 3px 3px 0px/.test(r.title.shadow), 'SIGN: Fredoka in white with a hard ink offset', J(r.title));
   const _hs = [...r.row.heights].sort((a, b) => a - b), _med = _hs[Math.floor(_hs.length / 2)];
   check(r.row.n === 8 && r.row.wrap === 'nowrap' && r.row.oneLine && r.row.buyInsideRow && _med <= r.row.coasterH * 1.5 && _hs[_hs.length - 1] <= r.row.coasterH * 2.0, 'ROWS: eight, one line each - Buy level with the coaster, inside the row; a typical row under 1.5 coasters tall', J({ wrap: r.row.wrap, oneLine: r.row.oneLine, heights: r.row.heights, coaster: r.row.coasterH }));
