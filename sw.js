@@ -178,7 +178,10 @@
 // keep describing - and the quiet one: stale-while-revalidate serves the OLD cut instantly and refreshes in the
 // background, so a returning player hears the gap for the whole session and the fix only the session after.
 // scripts/sw_cache_freshness.mjs now fails when an asset is replaced without this line moving.
-const CACHE = 'mojiworld-assets-v68';   // v0.30.955 - ico_male.webp redrawn in place
+// v0.30.980 - v68 -> v69. Sprites/bosses/walk/kingKrook_5.webp and kingKrook_6.webp are REPLACED under their own
+// names (mirrored: they faced left inside a right-facing walk, so King Krook turned round every stride). Without
+// this bump a returning player's stale-while-revalidate cache keeps drawing him turning for a whole session.
+const CACHE = 'mojiworld-assets-v69';   // v0.30.980 - King Krook's walk frames 5/6 mirrored in place
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
