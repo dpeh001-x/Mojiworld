@@ -103,6 +103,17 @@ const r = await page.evaluate(async () => {
     m._krookInit = true;
     m._stagger = 0; m._staggerCd = 1e12; m._punishPrev = 'idle'; m._dirOpenT = 0; m._dirRollT = 1e12; m._dirStanceT = 1e12; m._dirGuardT = 0; m._dirGhostT = 0; m._break = 0;
     m.patternState = 'stomp'; m.patternTimer = 0; m._kAnnounced = true; m._kColossal = !!colossal; m._kFired = false;
+    // The art key is DRAW-path state (drawMonster clears and re-picks it every draw), so it is read where the
+    // draw leaves it. Sampled from this test's own frame callback it raced the loop: a frame that ran two sim
+    // steps could end on the step that ended the stomp, after that frame's draw, and read 'idle' next to the
+    // key the draw had just set - 3 runs in 4 on a busy machine, on a build that is right.
+    const drawn = [];
+    const _dm0 = window.drawMonster;
+    window.drawMonster = function (mm) {
+      const r = _dm0.apply(this, arguments);
+      if (mm === m && drawn.length < 4000) drawn.push({ st: m.patternState, k: m._gravStarKey || null });
+      return r;
+    };
     const log = []; let keySeen = null, groundedAtHit = null, fired = false;
     // hp is sampled per FRAME, so the slam can be told apart from the contact
     // chip a boss standing next to you deals anyway - the first cut of this
@@ -126,9 +137,11 @@ const r = await page.evaluate(async () => {
       if (fired && m.patternState !== 'stomp') { if (endState == null) endState = m.patternState; idleSeen++; }
       if (fired && ((m.patternTimer || 0) > 1850 || idleSeen >= 8)) game.monsters = [];   // no follow-up pattern may pollute the reading
     }, () => fired && !game.monsters.includes(m));
+    window.drawMonster = _dm0;
+    const idleDraws = drawn.filter((x) => x.st !== 'stomp');
     const res = { hp0, hp1: player.hp, dmg: dmgAtFire, mhAtHit, totalDrop: hp0 - player.hp,
       stun: stunAtFire, keySeen, groundedAtHit, fired, invulnAtHit, endState: endState || m.patternState,
-      keyWhileIdle: log.filter((x) => x.st !== 'stomp').some((x) => x.k === 'kingKrookstomp') };
+      keyWhileIdle: idleDraws.some((x) => x.k === 'kingKrookstomp'), idleDraws: idleDraws.length };
     if (resist != null) { getStunResist = window._lxOldResist; }
     game.monsters = [];
     return res;
@@ -174,7 +187,7 @@ ok('the draw path actually swaps King Krook onto the stomp art while it runs',
   { keySeen: G.keySeen, note: 'set via the generic _gravStarKey override slot' });
 
 ok('...and drops it again the moment the pattern ends',
-  G.keyWhileIdle === false, { keyHeldOutsideStomp: G.keyWhileIdle });
+  G.keyWhileIdle === false && G.idleDraws > 0, { keyHeldOutsideStomp: G.keyWhileIdle, idleDraws: G.idleDraws });
 
 ok('the nine frames play ONCE across the windup instead of looping four times',
   r.atStart === 0 && r.atHit === 8 && new Set(T.map((x) => x.f)).size >= 7,
