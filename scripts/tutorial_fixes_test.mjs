@@ -95,14 +95,15 @@ const closed = await page.evaluate(() => {
 });
 ok('clicking the end/Skip button closes the tutorial', closed);
 
-// 4) Fonts standardised to Calibri.
+// 4) Fonts: one rounded family across the card. Was Calibri (v0.29.x); per user in v0.30.x tut-ink,
+//    "make the fonts rounder and cuter" - Nunito, like the NPC dialog the card now copies.
 await page.evaluate(() => { try { _showTutorialModal(); } catch (e) {} });
 await page.waitForTimeout(200);
 const fonts = await page.evaluate(() => {
   const ids = ['tut-title', 'tut-step-title', 'tut-body', 'tut-guguma-line', 'tut-next'];
   return ids.map(id => { const el = document.getElementById(id); return el ? getComputedStyle(el).fontFamily.toLowerCase() : 'missing'; });
 });
-ok('all tutorial text is Calibri', fonts.every(f => f.indexOf('calibri') === 0), { fonts });
+ok('all tutorial text is Nunito', fonts.every(f => f.indexOf('nunito') === 0), { fonts });
 
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 console.log(`\n${pass}/${pass + fail} checks passed`);
