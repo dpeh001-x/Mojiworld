@@ -8,6 +8,9 @@
 //   3. the title is a plain word in engraved type - the typed "★ … ★" / "✕ … ✕" ornaments are gone
 //   4. the item carries an old -> new star chip; a plain failure says the star was kept
 //   5. a loss marks the lost star and turns the band ember
+//   6. (v0.30.993) the star row is big (30px) and the landing is flashy: earned stars light in a
+//      cascade, the new star slams in after them with rays, a ring and a spray of sparks, and the
+//      band flashes on impact
 //   node scripts/forge_result_card_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -55,6 +58,13 @@ const r = await page.evaluate(async () => {
       stars: [...document.querySelectorAll('#ec-stars .s')].map((s) => s.className.replace('s ', '')),
       offColour: (() => { const o = document.querySelector('#ec-stars .s.off'); return o ? getComputedStyle(o).color : null; })(),
       hairTop: getComputedStyle(card, '::before').backgroundImage,
+      starPx: parseFloat(getComputedStyle(document.getElementById('ec-stars')).fontSize) || 0,
+      onAnims: [...document.querySelectorAll('#ec-stars .s.on')].map((x) => { const c = getComputedStyle(x); return c.animationName + '@' + c.animationDelay; }),
+      newAnim: (() => { const n = document.querySelector('#ec-stars .s.new'); return n ? getComputedStyle(n).animationName : ''; })(),
+      raysAnim: (() => { const n = document.querySelector('#ec-stars .s.new'); return n ? getComputedStyle(n, '::before').animationName : ''; })(),
+      sparks: document.querySelectorAll('#ec-stars .s.new .sp').length,
+      flashAnim: getComputedStyle(el, '::after').animationName,
+      land: el.style.getPropertyValue('--ec-land'),
     };
   };
   const cleared = () => { el.classList.remove('go', 'fail', 'milestone'); };
@@ -80,6 +90,11 @@ ok('4. the item carries its old -> new star chip', /\u2605\s*3\s*\u2192\s*\u2605
 ok('4. a plain failure says the star was kept', /\u2605\s*4 kept/.test(r.fail.lv || '') && /held/.test(r.fail.lvClass), r.fail.lv);
 ok('5. a loss marks the lost star and names the drop', r.lost.stars.indexOf('lost') === 5 && /\u2605\s*6\s*\u2192\s*\u2605\s*5/.test(r.lost.lv || ''), JSON.stringify({ s: r.lost.stars, lv: r.lost.lv }));
 ok('5. ...on an ember-ruled band', r.lost.hairTop !== W0.hairTop && /200, 80, 64|255, 194, 178/.test(r.lost.hairTop), r.lost.hairTop.slice(0, 80));
+ok('6. the star row is big: 28px or more (was 19)', W0.starPx >= 28, W0.starPx);
+const _delays = W0.onAnims.map((a) => parseFloat(a.split('@')[1]) || 0);
+ok('6. earned stars light up in a cascade, one after another', W0.onAnims.length === 3 && W0.onAnims.every((a) => /ecStarLight/.test(a)) && _delays[0] < _delays[1] && _delays[1] < _delays[2], JSON.stringify(W0.onAnims));
+ok('6. the new star slams in after the cascade, over spinning rays, spraying sparks', /ecStarSlam/.test(W0.newAnim) && /ecRays/.test(W0.raysAnim) && W0.sparks >= 10 && parseFloat(W0.land) > _delays[2] * 1000, JSON.stringify({ n: W0.newAnim, r: W0.raysAnim, sp: W0.sparks, land: W0.land, lastOn: _delays[2] }));
+ok('6. the band flashes on the impact of a win, not of a loss', /ecFlash/.test(W0.flashAnim) && !/ecFlash/.test(r.lost.flashAnim || ''), JSON.stringify({ win: W0.flashAnim, lost: r.lost.flashAnim }));
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 let fail = 0;
 for (const x of results) { if (!x.pass) fail++; console.log(`${x.pass ? 'PASS' : 'FAIL'}  ${x.n}${x.pass ? '' : '  -- ' + x.x}`); }
