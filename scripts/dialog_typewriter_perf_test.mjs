@@ -81,7 +81,9 @@ const layouts = after.LayoutCount - before.LayoutCount, styles = after.RecalcSty
 const chars = SPEECH.replace(/<[^>]+>/g, '').length;
 let fails = 0; const ok = (name, c, x) => { if (!c) fails++; console.log(`${c ? 'PASS' : 'FAIL'}  ${name}  ${JSON.stringify(x)}`); };
 console.log(`typed ${chars} letters in ${run.ms} ms; layouts ${layouts}, style recalcs ${styles}, frames ${run.frames}, p95 ${run.p95} ms, >50 ms: ${run.long}`);
-ok('the reveal does not force layout per letter', layouts <= chars * 0.5, { layouts, letters: chars });
+// LayoutCount also carries the game's own per-frame layouts, so it moves with the frame rate. Measured at this
+// 4x setting: per-letter measuring = 310-371 layouts for 353 letters (0.9-1.05/letter); per-frame = 45-196 (<= 0.56).
+ok('the reveal does not force layout per letter', layouts <= chars * 0.75, { layouts, letters: chars });
 ok('the finished text is exactly the speech', run.text, {});
 ok('the speech lands on its own clock, punctuation holds included (not instant, not crawling)', run.ms > 3500 && run.ms < 11000, { ms: run.ms });
 ok('a skip finishes the speech at once', beh.skipped, beh);
