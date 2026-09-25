@@ -339,12 +339,12 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1.58,
       "dx": 0,
-      "dy": 0.16
+      "dy": 0.168
     },
     "walk": {
       "s": 1.0457,
       "dx": -0.02,
-      "dy": 0.01
+      "dy": 0.02
     },
     "attack": {
       "s": 1.6,
@@ -1189,6 +1189,21 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_taurus": {
+    "zodiac/idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.009
+    },
+    "zodiac/walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.009
+    },
+    "zodiac/attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.009
+    },
     "zodiac/charge": {
       "s": 1.13,
       "dx": 0,
@@ -1301,6 +1316,21 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_aries": {
+    "zodiac/idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.013
+    },
+    "zodiac/walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.013
+    },
+    "zodiac/attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.013
+    },
     "attack": {
       "ft": [
         72,
@@ -1317,6 +1347,21 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_cancer": {
+    "zodiac/idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.029
+    },
+    "zodiac/walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.029
+    },
+    "zodiac/attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.029
+    },
     "attack": {
       "s": 1,
       "dx": 0,
@@ -1383,6 +1428,21 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_sagittarius": {
+    "zodiac/idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.016
+    },
+    "zodiac/walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.016
+    },
+    "zodiac/attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.016
+    },
     "attack": {
       "ft": [
         72,
