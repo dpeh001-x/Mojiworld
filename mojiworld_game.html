@@ -14834,7 +14834,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1028';
+const GAME_VERSION = 'v0.30.1029';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -54502,6 +54502,7 @@ function _coopTryDowned() {
   player._downAlreadyRevived = _reviveSpent;
   player._downRevivable = !_onboarding && _coopPeerAliveOnMyMap() && !_reviveSpent;
   player._downed = true;
+  player._downLanded = !!player.onGround;   // v0.30.1029 a down taken on the floor needs no landing frame
   if (typeof _duoTrialFail === 'function') _duoTrialFail();   // v0.30.423 - shared fate (my own down)
   player._downedSilent = _onboarding;   // banner is suppressed while this is set
   player._downedUntil = performance.now() + (_onboarding ? COOP_DOWN_ONBOARD_MS : COOP_DOWN_MS);
@@ -54581,8 +54582,24 @@ function _coopDownedFinish() {
 // counting down. Bleed-out ends in the real death flow.
 function _coopDownedTick(dt) {
   player.invulnerable = 1000;
-  player.vx = 0; player.vy = 0;
+  player.vx = 0;
   player.hp = 1;
+  // v0.30.1029 per user ("the downed character should fall to the ground / platform, not remain hovering midair"): the
+  // old tick zeroed vy every frame, so a hit taken in a jump left the body parked in the air for the whole 30 s. Now
+  // the body keeps falling under gravity until a platform holds it - the same three calls the hitstun branch makes -
+  // and partners get one more down frame (ld:1, no toast) with the resting spot so the revive circle is on the body.
+  // The fall is best-effort and fenced: a scene without platforms (the prologue void, a harness page) must not stop the
+  // countdown or the banner below, which are what actually end the window.
+  if (player.onGround) player.vy = 0;
+  else if (game.mapData && Array.isArray(game.mapData.platforms)) {
+    try {
+      _playerGravityStep(); player.y += player.vy; checkPlatformCollision(player);
+      if (player.onGround) {
+        player.vy = 0;
+        if (!player._downLanded) { player._downLanded = true; if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'down', map: game.currentMap, x: Math.round(player.x), y: Math.round(player.y), rev: player._downRevivable ? 1 : 0, ld: 1 })); } catch (e) {} } }
+      } else if (game.mapData.worldHeight && player.y > game.mapData.worldHeight - player.h) { player.y = game.mapData.worldHeight - player.h; player.vy = 0; player.onGround = true; }   // nothing under the body at all: it comes to rest on the world floor, the window keeps running
+    } catch (e) { player.vy = 0; }
+  } else player.vy = 0;
   const left = (player._downedUntil || 0) - performance.now();
   _coopDownedBanner(Math.max(0, Math.ceil(left / 1000)));
   if (left <= 0) _coopDownedFinish();   // v0.29.50 — shared terminal (prologue-aware)
@@ -54596,51 +54613,23 @@ function _coopDownedBanner(secs) {
   // v0.29.48 — onboarding downs are silent: never build/show the banner.
   if (typeof player !== 'undefined' && player && player._downedSilent) { if (b) b.remove(); return; }
   if (!b) {
+    // v0.30.1029 (per user: "MUCH more stylish and nicer - like the shape of a crossbone with a cute looking skull with X X
+    // eyes, less words but get the same message across") - a skull-and-crossbones plate: the skull hangs over the top
+    // edge of an ink-and-paper card, the copy is the title, one line, and (when no partner can reach you) one small rule
+    // line. Same ids; the subtitle stays the first div and the rule line the last - that is how the tests read it.
+    if (!document.getElementById('coop-downed-style')) { const st = document.createElement('style'); st.id = 'coop-downed-style'; st.textContent = "#coop-downed-banner{position:fixed;top:11%;left:50%;transform:translateX(-50%);z-index:520;width:min(92vw,400px);box-sizing:border-box;padding:60px 26px 22px;text-align:center;background:linear-gradient(180deg,rgba(46,8,16,.96) 0%,rgba(20,6,10,.97) 100%);border:3px solid #0c0b10;border-radius:14px;box-shadow:0 0 0 2px #f4f1ea,8px 8px 0 #0c0b10,0 24px 60px rgba(0,0,0,.6),0 0 44px rgba(255,60,60,.22);font:800 22px/1.3 'Nunito','Alegreya',system-ui,sans-serif;color:#f7f7f5;letter-spacing:.3px;pointer-events:none}#coop-downed-banner .cd-skull{position:absolute;top:-62px;left:50%;transform:translateX(-50%);width:150px;height:126px;filter:drop-shadow(3px 4px 0 rgba(0,0,0,.45))}#coop-downed-banner .cd-title{display:block;font:600 30px/1.1 'Fredoka','Nunito',sans-serif;letter-spacing:1px;color:#fff;text-shadow:3px 3px 0 #0c0b10}#coop-downed-banner .cd-title span{color:#ff5a5a}#coop-downed-banner .cd-sub{font-size:15px;font-weight:700;color:#ffd6d6;margin-top:6px;letter-spacing:0}#coop-downed-banner .cd-rule{font-size:12px;font-weight:600;line-height:1.45;color:rgba(255,214,214,.62);margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,120,120,.25);letter-spacing:0}#coop-downed-banner button{pointer-events:auto;margin-top:14px;padding:9px 22px;border-radius:6px;cursor:pointer;background:#ff5a5a;color:#0c0b10;border:2px solid #0c0b10;box-shadow:3px 3px 0 #0c0b10;font:800 14px/1.2 'Nunito',sans-serif;letter-spacing:.4px;transition:transform 120ms ease,box-shadow 120ms ease,background 120ms ease}#coop-downed-banner button:hover{background:#ffe45c;transform:translate(-1px,-1px);box-shadow:4px 4px 0 #0c0b10}"; document.head.appendChild(st); }
     b = document.createElement('div');
     b.id = 'coop-downed-banner';
-    // v0.30.x (per user) — BIGGER. This is the one panel a player reads while
-    // they can do nothing else, and it was sized like a toast. max-width keeps
-    // it off the edges on a phone, min-width stops the box collapsing around
-    // the shorter of the three subtitles.
-    b.style.cssText = 'position:fixed; top:12%; left:50%; transform:translateX(-50%); z-index:520;'
-      + 'padding:20px 36px 22px; border-radius:16px; background:rgba(40,6,10,0.92); border:1px solid rgba(255,90,90,0.6);'
-      + 'font:800 21px/1.45 Inter,system-ui,sans-serif; color:#ffd6d6; text-align:center; letter-spacing:0.5px;'
-      + 'min-width:min(86vw,360px); max-width:min(92vw,560px);'
-      + 'box-shadow:0 14px 52px rgba(0,0,0,0.66), 0 0 30px rgba(255,60,60,0.25); pointer-events:none;';
     const revivable = !!player._downRevivable;
-    // v0.29.15 — distinct line when the single per-map revive is already spent.
-    const subtitle = revivable
-      ? 'a partner can revive you — they must stand beside you for 3s'
-      : (player._downAlreadyRevived
-          ? 'already revived on this map — no second revive here'
-          : 'no one can reach you out here…');
-    // v0.30.x (per user) — TELL THEM THE RULE. Downed solo, the old copy was
-    // "no one can reach you out here…" and nothing else, so a player who has
-    // never grouped has no way to learn that co-op revive exists at all. The
-    // explainer is only shown when a revive is NOT currently available: when it
-    // is, the subtitle above already says what to do and repeating it is noise.
-    // The wording is the actual rule, checked against the code rather than
-    // guessed — _coopReviveSpent gates on one revive per map id, and
-    // COOP_REVIVE_MS is a 3s channel stood next to the body.
-    const explain = revivable ? ''
-      : '<div style="font-size:12px; font-weight:600; line-height:1.5; letter-spacing:0;'
-        + 'color:rgba(255,214,214,0.52); margin-top:12px; padding-top:11px;'
-        + 'border-top:1px solid rgba(255,120,120,0.22);">'
-        + 'In a co-op room, a partner on your map can pick you up &mdash; they stand beside you for 3s.'
-        + '<br>One revive per map, so it is worth saving.'
-        + '</div>';
-    b.innerHTML = '⛑ <b>DOWNED</b> · <span id="coop-downed-secs" style="color:#fff;">' + secs + 's</span>'
-      + '<div style="font-size:14px; font-weight:600; color:rgba(255,214,214,0.75); margin-top:5px; letter-spacing:0;">'
-      + subtitle
-      + '</div>'
-      + explain;
+    const subtitle = revivable ? 'a partner can revive you — stand beside you for 3s'
+      : (player._downAlreadyRevived ? 'already revived on this map' : 'no one can reach you out here…');
+    const explain = revivable ? '' : '<div class="cd-rule">In a co-op room a partner beside you for 3s picks you up &middot; one revive per map</div>';
+    b.innerHTML = "<svg class='cd-skull' viewBox='0 0 140 118' aria-hidden='true'><circle cx='70' cy='58' r='54' fill='rgba(255,60,60,0.22)'/><g transform='rotate(-32 70 62)'><circle cx='26' cy='50' r='9' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><circle cx='26' cy='74' r='9' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><circle cx='114' cy='50' r='9' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><circle cx='114' cy='74' r='9' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><rect x='24' y='55' width='92' height='14' rx='4' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><rect x='27' y='57' width='86' height='10' fill='#f7f5ef'/><rect x='19' y='57' width='12' height='10' fill='#f7f5ef'/><rect x='109' y='57' width='12' height='10' fill='#f7f5ef'/></g><g transform='rotate(32 70 62)'><circle cx='26' cy='50' r='9' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><circle cx='26' cy='74' r='9' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><circle cx='114' cy='50' r='9' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><circle cx='114' cy='74' r='9' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><rect x='24' y='55' width='92' height='14' rx='4' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3'/><rect x='27' y='57' width='86' height='10' fill='#f7f5ef'/><rect x='19' y='57' width='12' height='10' fill='#f7f5ef'/><rect x='109' y='57' width='12' height='10' fill='#f7f5ef'/></g><path d='M70 12C45 12 33 29 33 50c0 12 6 21 13 25v11c0 4 3 7 7 7h34c4 0 7-3 7-7V75c7-4 13-13 13-25 0-21-12-38-37-38z' fill='#f7f5ef' stroke='#0c0b10' stroke-width='3' stroke-linejoin='round'/><path d='M46 76h48' stroke='#0c0b10' stroke-width='2.5'/><path d='M58 76v14M70 76v14M82 76v14' stroke='#0c0b10' stroke-width='2.5' stroke-linecap='round'/><circle cx='45' cy='63' r='5' fill='rgba(255,90,90,0.6)'/><circle cx='95' cy='63' r='5' fill='rgba(255,90,90,0.6)'/><path d='M49 42l13 13M62 42L49 55M78 42l13 13M91 42L78 55' stroke='#0c0b10' stroke-width='4.5' stroke-linecap='round'/><path d='M70 66l-4-6h8z' fill='#0c0b10'/></svg>" + '<b class="cd-title">DOWNED &middot; <span id="coop-downed-secs">' + secs + 's</span></b>'
+      + '<div class="cd-sub">' + subtitle + '</div>' + explain;
     const btn = document.createElement('button');
     btn.id = 'coop-downed-skip';
     btn.type = 'button';
     btn.textContent = revivable ? 'Give up — respawn now ▸' : '▸ Respawn now';
-    btn.style.cssText = 'pointer-events:auto; margin-top:16px; padding:10px 26px; border-radius:10px; cursor:pointer;'
-      + 'background:linear-gradient(180deg,#5a2030,#3a1420); border:1px solid rgba(255,120,120,0.55);'
-      + 'color:#ffdada; font:700 14px Inter,system-ui,sans-serif; letter-spacing:1px;';
     btn.onclick = () => { if (typeof _coopDownedGiveUp === 'function') _coopDownedGiveUp(); };
     b.appendChild(btn);
     document.body.appendChild(b);
@@ -54672,14 +54661,14 @@ function _duoTrialFail() {
 }
 function _coopApplyDown(msg) {
   if (!msg || msg.id == null) return;
-  if (msg.map === game.currentMap) _duoTrialFail();   // v0.30.423 · v0.30.x — a partner dying on ANOTHER map is not part of this trial (the toast was map-gated; the fail was not)
+  if (!msg.ld) { if (msg.map === game.currentMap) _duoTrialFail(); }   // v0.30.423 · v0.30.x — a partner dying on ANOTHER map is not part of this trial (the toast was map-gated; the fail was not); v0.30.1029 ld:1 is the landing update, not a new down
   const p = net.peers[msg.id]; if (!p) return;
   p._downed = true; p._reviveMs = 0;
   // v0.29.15 — a partner who has already spent their one revive on this map
   // reports rev:0; mark them so _coopReviveTick won't even start a channel.
   p._downNoRevive = (msg.rev === 0);
   if (Number.isFinite(+msg.x)) { p.x = +msg.x; p.y = +msg.y; }
-  if (msg.map === game.currentMap && typeof showToast === 'function') showToast('⛑ ' + (p.name || 'Partner') + ' is DOWN — get to them!', 'danger');
+  if (!msg.ld && msg.map === game.currentMap && typeof showToast === 'function') showToast('⛑ ' + (p.name || 'Partner') + ' is DOWN — get to them!', 'danger');   // v0.30.1029 no second toast for the landing frame
 }
 function _coopApplyUp(msg) {
   if (!msg || msg.id == null) return;
