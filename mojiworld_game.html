@@ -12830,7 +12830,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.959';
+const GAME_VERSION = 'v0.30.960';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -105042,7 +105042,7 @@ function openNPC(npc) {
         '\u2022 ZODIAC SIGILS — every zodiac boss drops one. Bring \'em here: ' + SIGIL_TRADE_SHARDS + '\u25c8 apiece, no questions.';
       opts.push({ t:`Craft Set Piece 🔧 (${player.setshards || 0}◈)`, cb:() => { game._brokMenu = null; closeDialog(); openCraftingModal(); } });
       // v0.29.7xx — the sigil trade, offered right where shards are spent.
-      opts.push({ t:`Trade Zodiac Sigil ◈ (${_lxSigilCount()} held → +${SIGIL_TRADE_SHARDS}◈)`, cb:() => { closeDialog(); _lxTradeZodiacSigil(); } });
+      opts.push({ t:`Trade all Zodiac Sigils ◈ (${_lxSigilCount()} held → +${(_lxSigilCount() * SIGIL_TRADE_SHARDS).toLocaleString()}◈)`, cb:() => { closeDialog(); _lxTradeZodiacSigil(); } });   // v0.30.960 the lot, one confirm
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
     } else {
       // v0.29.60 — Brok remembers the Hourglass verdict (the q_hourglass_5
@@ -105101,7 +105101,7 @@ function openNPC(npc) {
       text = '*Furnax feeds the furnace.*\n\nCRAFT.\n\n\u2022 CRAFT GEAR — tier 5 weapons + armor, ' + CRAFT_TIER_COST[5].shards + '\u25c8 + ' + CRAFT_TIER_COST[5].coins.toLocaleString() + ' Mojicoins; tier 6, ' + CRAFT_TIER_COST[6].shards + '\u25c8 + ' + CRAFT_TIER_COST[6].coins.toLocaleString() + ' Mojicoins. Weapons and armor only. Disassembling spares yields +' + CRAFT_DISASSEMBLE_REWARD + '\u25c8.\n\u2022 ZODIAC SIGILS — trade one for ' + SIGIL_TRADE_SHARDS + '\u25c8.';
       opts.push({ t:`Craft Set Piece 🔧 (${player.setshards || 0}◈)`, cb:() => { game._brokMenu = null; closeDialog(); openCraftingModal(); } });
       // v0.29.7xx — the sigil trade, offered right where shards are spent.
-      opts.push({ t:`Trade Zodiac Sigil ◈ (${_lxSigilCount()} held → +${SIGIL_TRADE_SHARDS}◈)`, cb:() => { closeDialog(); _lxTradeZodiacSigil(); } });
+      opts.push({ t:`Trade all Zodiac Sigils ◈ (${_lxSigilCount()} held → +${(_lxSigilCount() * SIGIL_TRADE_SHARDS).toLocaleString()}◈)`, cb:() => { closeDialog(); _lxTradeZodiacSigil(); } });   // v0.30.960 the lot, one confirm
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
     } else {
       opts.push({ t:'🛒 Shop — buy & sell', cb:() => { game._brokMenu = 'shop'; openNPC(npc); } });
@@ -109360,29 +109360,37 @@ function _lxSigilCount() {
   for (const it of (player.inventory || [])) if (it && it.zodiacSigil) n++;
   return n;
 }
+// v0.30.960 ALL OF THEM, ONE CONFIRM (per user: "trading the constell shards is 1 by 1 and not all in 1
+// shot"). A sigil is currency - one price, no other use anywhere in the game, the drop site is the
+// only other place the flag appears - so a player holding twelve was clicking Trade and Yes twelve
+// times for twelve identical toasts. Now the confirm names the count and the total, and one Yes
+// clears the lot. Removal is an in-place backwards splice, never a replaced array: the inventory
+// panel and the equip cache hold references to player.inventory itself.
 async function _lxTradeZodiacSigil() {
   const have = _lxSigilCount();
   if (have <= 0) {
     if (typeof showToast === 'function') showToast('No Zodiac Sigils to trade — each zodiac boss drops one.', 'rare');
     return;
   }
-  const i = (player.inventory || []).findIndex(it => it && it.zodiacSigil);
-  if (i < 0) return;
-  const it = player.inventory[i];
+  const total = have * SIGIL_TRADE_SHARDS;
   const ok = (typeof uiConfirm === 'function') ? await uiConfirm({
-    title: '◈ Trade Zodiac Sigil',
-    body: 'Trade ' + (it.name || 'a Zodiac Sigil') + ' for ' + SIGIL_TRADE_SHARDS + '◈ Setshards?\n\n'
-        + '• You have ' + have + ' sigil' + (have === 1 ? '' : 's') + '\n'
-        + '• The sigil is consumed.',
-    yesLabel: 'Trade (+' + SIGIL_TRADE_SHARDS + '◈)', noLabel: 'Keep it',
+    title: '◈ Trade Zodiac Sigils',
+    body: (have === 1
+        ? 'Trade your Zodiac Sigil for ' + SIGIL_TRADE_SHARDS + '◈ Setshards?\n\n'
+        : 'Trade all ' + have + ' Zodiac Sigils for ' + total.toLocaleString() + '◈ Setshards?\n\n'
+          + '• ' + SIGIL_TRADE_SHARDS + '◈ apiece\n')
+        + '• ' + (have === 1 ? 'The sigil is' : 'Every sigil is') + ' consumed.',
+    yesLabel: (have === 1 ? 'Trade' : 'Trade all') + ' (+' + total.toLocaleString() + '◈)', noLabel: have === 1 ? 'Keep it' : 'Keep them',
   }) : true;
   if (!ok) return;
-  const j = (player.inventory || []).findIndex(x => x && x.zodiacSigil);   // re-find after the await
-  if (j < 0) return;
-  const sold = player.inventory[j];
-  player.inventory.splice(j, 1);
-  player.setshards = (player.setshards | 0) + SIGIL_TRADE_SHARDS;
-  if (typeof showToast === 'function') showToast('◈ +' + SIGIL_TRADE_SHARDS + ' Setshards for ' + (sold.name || 'the sigil') + '!', 'legendary');
+  // re-count after the await, and take them all in one pass
+  let n = 0;
+  const inv = player.inventory || [];
+  for (let k = inv.length - 1; k >= 0; k--) { const x = inv[k]; if (x && x.zodiacSigil) { inv.splice(k, 1); n++; } }
+  if (n <= 0) return;
+  const paid = n * SIGIL_TRADE_SHARDS;
+  player.setshards = (player.setshards | 0) + paid;
+  if (typeof showToast === 'function') showToast('◈ +' + paid.toLocaleString() + ' Setshards for ' + n + ' Zodiac Sigil' + (n === 1 ? '' : 's') + '!', 'legendary');
   if (typeof audio !== 'undefined' && audio && audio.play) { try { audio.play('levelup'); } catch (e) {} }
   if (typeof saveState === 'function') saveState();
 }
