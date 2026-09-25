@@ -12,6 +12,8 @@
 //   3. nothing in the loadout is italic
 //   4. Equip fills a free slot, Unequip empties it, Bulk discard ticks and discards through the confirm
 //   5. the punk chrome: the heading hot pink printed over an acid-yellow offset
+//   6. every boon keycap is black; an equipped key has a hot-pink rim, an unequipped one a grey rim; the
+//      art is at least 24px with a white sticker outline, in colour when equipped and greyscale when not
 //   node scripts/boon_loadout_mono_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -61,6 +63,8 @@ const read = () => page.evaluate(async () => {
   const talent = host.querySelector('.bl-talent.is-eq');
   const italic = [...host.querySelectorAll('.bl-talent, .bl-talent *, .bl-head, .bl-head *, .bl-slots *, .bl-syn *, .bl-tools *, .bl-bag-grid *, .bl-foot, .bl-foot *')].filter((e) => getComputedStyle(e).fontStyle === 'italic').length;
   return {
+    keys: [...host.querySelectorAll('.bl-slot .bl-ico, .bl-card .bl-ico')].map((k) => { const cs = getComputedStyle(k), im = k.querySelector('img');
+      const face = (cs.backgroundImage.match(/rgb\([^)]*\)/g) || []).pop() || ''; return { eq: !!k.closest('.is-eq'), face, rim: cs.outlineColor, w: im ? im.getBoundingClientRect().width : 0, f: im ? getComputedStyle(im).filter : '' }; }),
     h3: (() => { const h = host.querySelector('.bl-head h3'); if (!h) return null; const cs = getComputedStyle(h); return { color: cs.color, shadow: cs.textShadow }; })(),
     eqBorder: [...host.querySelectorAll('.bl-slot.is-eq, .bl-card.is-eq')].map((e) => getComputedStyle(e).borderTopColor),
     slots: host.querySelectorAll('.bl-slot').length, eqSlots: host.querySelectorAll('.bl-slot.is-eq').length, eqCards, colours: colours.slice(0, 6),
@@ -71,11 +75,15 @@ const read = () => page.evaluate(async () => {
 });
 const A = await read();
 ok('the loadout renders its slots', A.slots >= 1 && A.eqSlots === 1, JSON.stringify([A.slots, A.eqSlots]));
-ok('1. equipped boons (slot and bag) are coloured, their art in full colour', A.eqCards.length === 2 && A.eqCards.every((c) => c > 40) && A.eqImg === 'none', JSON.stringify([A.eqCards, A.eqImg]));
+ok('1. equipped boons (slot and bag) are coloured, their art in full colour', A.eqCards.length === 2 && A.eqCards.every((c) => c > 40) && !/grayscale/.test(A.eqImg || 'x') && A.eqImg !== null, JSON.stringify([A.eqCards, A.eqImg]));
 ok('1. unequipped boons and empty / locked slots are black and white, their art greyscale', A.colours.length === 0 && /grayscale/.test(A.bagImg || ''), JSON.stringify([A.colours, A.bagImg]));
 ok('2. the chosen talent line takes the class colour (rogue ' + A.clsCol + ')', A.talent && A.talent.c === A.clsCol && A.talent.border > 40, JSON.stringify([A.talent, A.clsCol]));
 ok('3. nothing in the loadout is italic', A.italic === 0, A.italic);
 ok('5. punk: the heading is hot pink over an acid-yellow offset, equipped boons edged in the same pink', A.h3 && A.h3.color === 'rgb(255, 45, 149)' && /rgb\(243, 245, 66\)/.test(A.h3.shadow) && A.eqBorder.length === 2 && A.eqBorder.every((c) => c === 'rgb(255, 45, 149)'), JSON.stringify([A.h3, A.eqBorder]));
+const dark = (c) => { const n = (c.match(/[\d.]+/g) || []).map(Number); return n.length >= 3 && Math.max(n[0], n[1], n[2]) <= 40; };
+const grey = (c) => { const n = (c.match(/[\d.]+/g) || []).map(Number); return n.length >= 3 && Math.max(n[0], n[1], n[2]) - Math.min(n[0], n[1], n[2]) <= 16; };
+ok('6. every keycap is black; equipped keys rimmed pink, unequipped keys rimmed grey', A.keys.length >= 5 && A.keys.every((k) => dark(k.face)) && A.keys.filter((k) => k.eq).every((k) => k.rim === 'rgb(255, 45, 149)') && A.keys.filter((k) => !k.eq).every((k) => grey(k.rim)), JSON.stringify(A.keys.map((k) => [k.eq, k.face, k.rim])));
+ok('6. the art stands out: at least 24px, a white sticker outline, colour when equipped, greyscale when not', A.keys.every((k) => k.w >= 23.5 && /drop-shadow\(rgb\(255, 255, 255\)/.test(k.f) && (k.eq ? !/grayscale/.test(k.f) : /grayscale/.test(k.f))), JSON.stringify(A.keys.map((k) => [k.eq, Math.round(k.w), k.f.slice(0, 60)])));
 // 4. the controls
 const E = await page.evaluate(async () => {
   const host = document.getElementById('lp-boons'), out = {};
