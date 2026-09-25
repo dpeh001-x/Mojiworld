@@ -120,16 +120,30 @@ try {
       for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; if (player.cooldowns) for (const k of Object.keys(player.cooldowns)) player.cooldowns[k] = 0;
       game.projectiles.length = 0; if (game.hazards) game.hazards.length = 0;
     };
-    // "one use": one press, except the two press-driven Marksman windows (pressed at their gate for the
-    // whole window) and Bastion of Dawn (armed, pinned to full Dawn Charge, released) - as skill_budget_test.mjs
-    const USES = { marksman_oneshot: [Math.floor(6000 / 430), 430], marksman_ult: [Math.floor(8000 / 260), 260] };
+    // "one use": one press, except the press-driven skills - the two Marksman windows (pressed at their gate
+    // for the whole window), Bastion of Dawn (armed, pinned to full Dawn Charge, released) - as
+    // skill_budget_test.mjs - and, since the 2026-09-25 audit, every other skill whose cast is several
+    // presses: War of Banners (free re-presses through its 10 s enrage; a mashed B lands ~20), Meteor Sigil
+    // (10 comets), Elemental Apotheosis (3 catastrophes), Kage Rush (4 charges) and Voidrift Blink (3).
+    // Measured at one press they read at a tenth to a third of what one use deals, and a tier budget built
+    // on those rows scales them the wrong way.
+    const USES = { marksman_oneshot: [Math.floor(6000 / 430), 430], marksman_ult: [Math.floor(8000 / 260), 260],
+      warlord_ult: [20, 500], sage_ult: [10, 300], elementalist_ult: [3, 550], shinobi_seal: [4, 350], sleight: [3, 300] };
+    // The two dashes carry the player past the dummy, so each charge starts back at the spawn point: the
+    // row is what the charges deal when the player turns and cuts through again, as a player does.
+    const RESET_POS = new Set(['shinobi_seal', 'sleight']);
     const cast = async (id) => {
       const u = USES[id];
       if (id === 'crusader_ult') { castSkill(id); await sleep(150); player._bastionArmAt = game.time - 600; player._dawnStored = getMaxHp(); castSkill(id); return 2; }
       if (!u) { castSkill(id); return 1; }
-      for (let i = 0; i < u[0]; i++) { for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; player.mp = 99999; try { castSkill(id); } catch (e) {} await sleep(u[1]); }
+      for (let i = 0; i < u[0]; i++) {
+        for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; player.mp = 99999;
+        if (RESET_POS.has(id)) { player.x = _x0; player.y = _y0; player.vx = 0; player.vy = 0; player.facing = 1; }
+        try { castSkill(id); } catch (e) {} await sleep(u[1]);
+      }
       return u[0];
     };
+    const SPREAD_RNG = new Set(['arrowRain']);
     const snap = (m) => { const o = {}; for (const k of Object.keys(m)) { const v = m[k]; if (STATUS_RE.test(k) && (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string')) o[k] = v; } return o; };
     // The DAMAGE dummy is held the way skill_budget_test.mjs holds it - frozen and stunned, never moved -
     // so a piercing shard passes through it once, as in play. Resetting a knocked-back dummy into the
@@ -140,7 +154,10 @@ try {
       tagLog = (pin && TAGS.includes(id)) ? [] : null;
       if (pin) for (const m of dummies) { m.frozen = 99999; m.stunTimer = 99999; }
       const hp0 = dummies.map((m) => m.currentHp); const before = snap(dummies[0]);
-      let presses = 1; try { presses = await cast(id); } catch (e) { return { err: 'threw: ' + String(e.message).slice(0, 80) }; }
+      // Arrow Rain scatters its 22 arrows with Math.random; under the 0.95 pin every arrow fell on one spot
+      // 144 px past the aim point and the row read 0%. A seeded spread keeps the run repeatable.
+      if (SPREAD_RNG.has(id)) { let _s = 12345; Math.random = () => ((_s = (_s * 1103515245 + 12345) % 2147483648) / 2147483648); }
+      let presses = 1; try { presses = await cast(id); } catch (e) { Math.random = () => 0.95; return { err: 'threw: ' + String(e.message).slice(0, 80) }; }
       const statuses = new Set(); let kb = false; const prof = []; const t0 = performance.now();
       while (performance.now() - t0 < ms) {
         await sleep(200);
@@ -150,6 +167,7 @@ try {
           const now = snap(dummies[0]); for (const [k, v] of Object.entries(now)) { const b = before[k]; if ((typeof v === 'number' && v > (typeof b === 'number' ? b : 0)) || (v === true && b !== true) || (typeof v === 'string' && v && v !== b)) statuses.add(k); }
         }
         prof.push(Math.round(hp0[0] - dummies[0].currentHp));
+        if (SPREAD_RNG.has(id) && performance.now() - t0 > 2500) Math.random = () => 0.95;   // the arrows are all down by now
       }
       const lost = dummies.map((m, i) => Math.round(hp0[i] - m.currentHp));
       if (kb) statuses.add('knockback');
