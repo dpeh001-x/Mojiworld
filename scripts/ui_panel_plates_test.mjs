@@ -11,9 +11,9 @@ const PORT = Number(process.env.PORT || 10211); const SERVE_ROOT = process.env.M
 let pass = 0, fail = 0; const ok = (name, cond, note) => { if (cond) pass++; else fail++; console.log((cond ? 'PASS ' : 'FAIL ') + name + (note ? '  [' + note + ']' : '')); };
 const PANELS = {
   inventory: '#inventory-modal > .modal', codex: '#codex-modal > .modal',   // v0.30.409: the Skill Trainer and Skill Tree windows were removed (nothing in play opened them) taxi: '#taxi-modal > .modal', craft: '#craft-modal > .modal', help: '#help-modal > .modal', advancement: '#advancement-modal > .modal',
-  mojidex: '#mojidex-modal .mjx-modal', tutorial: '#tutorial-modal > .modal', jukebox: '#jukebox-modal', backup: '#backup-modal', powerup: '#powerup-modal > .modal', sage: '#sage-blessing-modal > .modal',
+  mojidex: '#mojidex-modal .mjx-modal', tutorial: '#tutorial-modal > .modal', backup: '#backup-modal',   // (jb-console: the jukebox is a DJ console with its own body now, no plate) powerup: '#powerup-modal > .modal', sage: '#sage-blessing-modal > .modal',
 };
-const THEMED = new Set(['mojidex', 'tutorial', 'jukebox', 'backup', 'powerup', 'sage']);
+const THEMED = new Set(['mojidex', 'tutorial', 'backup', 'powerup', 'sage']);
 // 1. the files: the panel recipe
 for (const n of Object.keys(PANELS)) {
   const f = path.join(SERVE_ROOT, 'Sprites', 'ui', `panel_p5_${n}.webp`);

@@ -1,0 +1,131 @@
+// v0.30.x jb-console — DJ VINYL'S CONSOLE (per user: "make it like DJ console concept where each button on the DJ
+// console plays a specific music", "each BGM also has a unique icon", "simple and cute, well mapped and organised").
+// One pad per track, in four colour zones (A towns, B wilds, C sacred & cosmic, D bosses) numbered like a pad bank.
+// Each pad wears its track's own icon (Sprites/ui/jukebox/<id>.webp, scripts/gen_jukebox_icons.mjs). Pads keep the
+// .jb-track / data-track-id / .locked contract the catalogue tests drive.
+const _JB_ZONES = [
+  { key: 'A', name: 'TOWNS' },
+  { key: 'B', name: 'WILDS' },
+  { key: 'C', name: 'COSMIC' },
+  { key: 'D', name: 'BOSSES' },
+];
+const _JB_SHORT = {
+  town: 'Mojiworld', shadowWovenHood: 'Shadow Hood', emeraldVillage: 'Emerald', glasswind: 'Glasswind', azureAcademia: 'Academia',
+  azureAbode: 'Abode', megamall: 'Megamall', titleTheme: 'Title Theme', honeycomb: 'Honeycomb', lavaCavern: 'Lava Cavern',
+  frozenPeak: 'Frozen Peak', tide: 'Tide Reef', dune: 'Dune Sands', octopusGrotto: 'Octo Grotto', krookThrone: 'Krook Throne',
+  hollowSepulchre: 'Sepulchre', jadeGrove: 'Jade Grove', celestialSpire: 'Celestial', stardustAtrium: 'Stardust', magmaFoundry: 'Foundry',
+  coralReef: 'Coral Reef', pearlBathhouse: 'Bathhouse', bloomReaches: 'Bloom', blockland: 'Block-land', trainPQ: 'Express',
+  expedition: 'Expedition', fungalHollow: 'Fungal', sunsetCoast: 'Sunset', skyGarden: 'Sky Garden', stormCrest: 'Storm Crest',
+  candyCanyon: 'Candy', tidalLagoon: 'Lagoon', distortedPortal: 'Portal', boneGraveyard: 'Graveyard', bastion: 'Bastion',
+  bastionThrone: 'Throne Room', sanctum: 'Sanctum', wayfarer: 'Wayfarer', void: 'The Void', zodiacSanctum: 'Zodiac',
+  zodiacHall: 'Zodiac Hall', boss: 'Boss', zodiacBoss: 'Zodiac Boss', ascension: 'Ascension', gravitosArena: 'Singularity',
+  echoArenas: 'Inner Echo',
+};
+const _JB_BADGE = 'Sprites/ui/jukebox/jb_badge.webp';
+const _jbIcon = (id) => 'Sprites/ui/jukebox/' + id + '.webp';
+const _jbEsc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let _jbTick = null;
+function _jbTrack(id) { for (const g of JUKEBOX_TRACKS) for (const t of g.tracks) if (t.id === id) return t; return null; }
+// Everything the console shows that follows the playing track: the pads, the screen, the spinning record, the meter.
+function _jbRefresh() {
+  const modal = document.getElementById('jukebox-modal');
+  const cur = _jukeboxPlaying && _jbTrack(_jukeboxPlaying.trackId);
+  if (modal) modal.classList.toggle('jb-live', !!cur);
+  const nowTitle = document.getElementById('jukebox-now-title'), nowStrip = document.getElementById('jukebox-now');
+  if (nowTitle) { nowTitle.textContent = cur ? cur.name : '— no track playing —'; nowTitle.title = cur ? cur.name : ''; }
+  if (nowStrip) nowStrip.classList.toggle('idle', !cur);
+  const lab = document.getElementById('jukebox-label');
+  if (lab) { const want = cur ? _jbIcon(cur.id) : _JB_BADGE; if (lab.getAttribute('src') !== want) lab.setAttribute('src', want); }
+  document.querySelectorAll('#jukebox-list .jb-track').forEach((r) => r.classList.toggle('playing', !!cur && r.dataset.trackId === cur.id));
+  _jbTime();
+}
+function _jbTime() {
+  const el = document.getElementById('jukebox-time'); if (!el) return;
+  if (!_jukeboxPlaying || typeof _bgmEl === 'undefined' || !_bgmEl) { el.textContent = '--:--'; return; }
+  const s = Math.max(0, Math.floor(_bgmEl.currentTime || 0));
+  el.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+// The volume wheel is the Settings music slider, turned by hand: same value, same apply, same save.
+function _jbVol() { const el = document.getElementById('set-bgm'); return el ? (parseInt(el.value, 10) || 0) : 90; }
+function _jbVolShow() {
+  const v = _jbVol(), w = document.getElementById('jukebox-vol'), n = document.getElementById('jukebox-vol-num');
+  if (w) { w.style.setProperty('--vol', v); w.setAttribute('aria-valuenow', v); }
+  if (n) n.textContent = v;
+}
+function _jbVolSet(v) {
+  const el = document.getElementById('set-bgm'); if (!el) return;
+  v = Math.max(0, Math.min(100, Math.round(v / 5) * 5));
+  if (String(v) === el.value) { _jbVolShow(); return; }
+  el.value = v; try { el.style.setProperty('--moji-slider-pct', v.toFixed(2)); } catch (e) {}
+  const lab = document.getElementById('set-bgm-val'); if (lab) lab.textContent = v + '%';
+  if (typeof applySettingsLive === 'function') { try { applySettingsLive(); } catch (e) {} }
+  _jbVolShow();
+}
+function _jbVolStep(d) { _jbVolSet(_jbVol() + d); }
+function _jbWireVol() {
+  const w = document.getElementById('jukebox-vol'); if (!w || w._jbWired) return; w._jbWired = true;
+  w.addEventListener('wheel', (e) => { e.preventDefault(); _jbVolStep(e.deltaY < 0 ? 5 : -5); }, { passive: false });
+  w.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); _jbVolStep(5); }
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); _jbVolStep(-5); }
+  });
+  let drag = null;
+  w.addEventListener('pointerdown', (e) => { drag = { y: e.clientY, v: _jbVol() }; try { w.setPointerCapture(e.pointerId); } catch (_) {} });
+  w.addEventListener('pointermove', (e) => { if (drag) _jbVolSet(drag.v + (drag.y - e.clientY) * 0.8); });
+  const end = () => { drag = null; };
+  w.addEventListener('pointerup', end); w.addEventListener('pointercancel', end);
+}
+function openJukebox() {
+  const list = document.getElementById('jukebox-list');
+  if (!list) return;
+  list.innerHTML = '';
+  let found = 0, total = 0;
+  JUKEBOX_TRACKS.forEach((group, gi) => {
+    const z = _JB_ZONES[gi] || { key: String.fromCharCode(65 + gi), name: group.group.toUpperCase() };
+    const zone = document.createElement('div');
+    zone.className = 'jb-zone'; zone.dataset.zone = z.key;
+    zone.innerHTML = '<div class="jb-zone-tab" title="' + _jbEsc(group.group) + '"><b>' + z.key + '</b><span>' + _jbEsc(z.name) + '</span></div><div class="jb-pads"></div>';
+    const pads = zone.querySelector('.jb-pads');
+    group.tracks.forEach((t, i) => {
+      total++;
+      const pad = document.createElement('button');
+      pad.type = 'button'; pad.className = 'jb-track'; pad.dataset.trackId = t.id;
+      const key = '<span class="jb-key">' + z.key + (i + 1) + '</span>';
+      // v0.29.73 — locked until heard in-world: the pad keeps its slot and number, shows a padlock, and nudges.
+      const heard = (typeof _isTrackHeard === 'function') ? _isTrackHeard(t.id) : true;
+      if (!heard) {
+        pad.classList.add('locked');
+        pad.title = 'Undiscovered — hear this theme somewhere in the Everdawn to unlock it';
+        pad.innerHTML = key + '<img class="jb-lock" src="Sprites/ui/emoji/1f512.webp" alt="" draggable="false"><span class="jb-name">???</span>';
+        pad.onclick = () => { if (typeof showToast === 'function') showToast('🔒 Hear this theme somewhere in the Everdawn to unlock it in the jukebox.', 'rare'); };
+      } else {
+        found++;
+        pad.title = t.name;
+        pad.innerHTML = key + '<img class="jb-ico" src="' + _jbIcon(t.id) + '" alt="" draggable="false" onerror="this.style.visibility=\'hidden\'">' +
+                        '<span class="jb-name">' + _jbEsc(_JB_SHORT[t.id] || t.name) + '</span>';
+        pad.onclick = () => jukeboxPlay(t);
+      }
+      pads.appendChild(pad);
+    });
+    list.appendChild(zone);
+  });
+  const fc = document.getElementById('jukebox-found'); if (fc) fc.textContent = found + ' / ' + total + ' FOUND';
+  _jbWireVol(); _jbVolShow(); _jbRefresh();
+  document.getElementById('jukebox-modal-bg').classList.add('on');
+  if (_jbTick) clearInterval(_jbTick);
+  _jbTick = setInterval(_jbTime, 250);
+  // Pause the game so the player can browse without taking hits in the background.
+  if (typeof game !== 'undefined' && game) game.paused = true;
+}
+function closeJukebox() {
+  document.getElementById('jukebox-modal-bg').classList.remove('on');
+  if (_jbTick) { clearInterval(_jbTick); _jbTick = null; }
+  if (typeof game !== 'undefined' && game && (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen())) game.paused = false;   // v0.26.1032 — don't unpause if the Codex/beat is still open on top
+}
+// SHUFFLE: a random track you have found, never the one already spinning.
+function jukeboxShuffle() {
+  const pool = [];
+  for (const g of JUKEBOX_TRACKS) for (const t of g.tracks) if ((typeof _isTrackHeard !== 'function' || _isTrackHeard(t.id)) && !(_jukeboxPlaying && _jukeboxPlaying.trackId === t.id)) pool.push(t);
+  if (!pool.length) { if (typeof showToast === 'function') showToast('🎧 Find more themes in the Everdawn to shuffle between them.', 'rare'); return; }
+  jukeboxPlay(pool[Math.floor(Math.random() * pool.length)]);
+}
