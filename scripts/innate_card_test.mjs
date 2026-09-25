@@ -17,7 +17,8 @@
 //      with different picks; with no job, a locked Job teaser; a learned talent shows one sticker and
 //      a Respec button carrying data-talent-respec; open picks keep data-talent
 //   7. a learned (equipped) talent is the one other thing in colour - its tile takes the class's colour
-//      (CLASSES[cls].color); and the Reset dialog opens in the black-and-white skin
+//      (CLASSES[cls].color); and the Reset dialog opens in its comic skin, short: the SP it gives back
+//      (5 HP points = 5 SP) and its two costs, under 120 characters
 //   node scripts/innate_card_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -111,8 +112,8 @@ if (A) {
   ok('4. level 1: no stickers or rolls, "No level-ups yet"', Z.stats.length === 0 && Z.cols.length === 0 && Z.last && /No level-ups yet/.test(Z.last.txt), JSON.stringify(Z));
 }
 const RC = await page.evaluate(async () => { player.skillPoints = 0; player._levelUpSpent = { hp: 5 }; player.coins = 5000; player.setshards = 2000; resetStats(); await new Promise((r) => setTimeout(r, 300));
-  const m = document.getElementById('confirm-modal'); const on = !!m && m.style.display !== 'none', cls = m ? m.className : ''; const n = document.getElementById('confirm-no'); if (n) n.click(); return { on, cls }; });
-ok('7. the Reset dialog opens in the black-and-white skin', RC.on && /\bskin-mono\b/.test(RC.cls), JSON.stringify(RC));
+  const m = document.getElementById('confirm-modal'); const on = !!m && m.style.display !== 'none', cls = m ? m.className : ''; const body = (document.getElementById('confirm-body') || {}).textContent || ''; const n = document.getElementById('confirm-no'); if (n) n.click(); return { on, cls, body }; });
+ok('7. the Reset dialog opens in the comic skin, short, with the SP back and both costs', RC.on && /\bskin-comic\b/.test(RC.cls) && /\+5 SP back/.test(RC.body) && /1000/.test(RC.body) && RC.body.length < 120, JSON.stringify(RC));
 ok('no page errors', errs.length === 0, errs.join(' | '));
 await b.close(); srv.kill();
 for (const r of results) console.log((r.pass ? 'PASS  ' : 'FAIL  ') + r.n + (r.pass ? '' : '  -- ' + r.x));
