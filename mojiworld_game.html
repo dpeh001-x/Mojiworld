@@ -4634,7 +4634,11 @@
     color: rgba(214, 199, 240, 0.80);
   }
   #dialog #dialog-text .typewriter-caret { display: none; }
-  #dialog #dialog-text .tw-char { opacity: 0; animation: dialogCharIn 170ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards; }
+  /* v0.30.x tw-smooth - letters land crisp; the reveal and its punctuation holds are the animation. Each letter used
+     to fade in through filter: blur(2.5px) over 170 ms: at ~70 letters a second a dozen were mid-fade at once, and
+     every one repainted the glowing text around it each frame. Measured on a 4x CPU throttle, dropping the fade
+     roughly halved the frame time while the dialog types. */
+  #dialog #dialog-text .tw-char { opacity: 1; animation: none; }
   @keyframes dialogCharIn {
     from { opacity: 0; filter: blur(2.5px); }
     to   { opacity: 1; filter: none; }
@@ -14872,7 +14876,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1045';
+const GAME_VERSION = 'v0.30.1046';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -109668,6 +109672,7 @@ function _runDialogTypewriter(text) {
   if (!el) return;
   // Cancel any in-flight reveal from a previous call
   if (dlg && dlg._twTimer) { clearInterval(dlg._twTimer); dlg._twTimer = null; }
+  const _twGen = dlg ? (dlg._twGen = (dlg._twGen | 0) + 1) : 0;   // v0.30.x tw-smooth
   // v0.30.488 — MEASURE THE FINISHED SPEECH BEFORE TYPING A CHARACTER OF IT. Per user: "it pushes
   // upwards when cut". The card is bottom-anchored and content-sized, so a prose box that grows
   // as the typewriter reveals drags the whole panel — portrait, name, difficulty strip, buttons
@@ -109708,16 +109713,16 @@ function _runDialogTypewriter(text) {
   // caret itself stays a direct child of el, so it keeps trailing the text.
   let _twCur = el;
   const _twPut = (node) => {
-    // v0.30.489 — FOLLOW THE REVEAL ONLY IF THE READER IS ALREADY AT THE BOTTOM. v0.30.484 pinned
-    // unconditionally, which meant scrolling up to re-read a line yanked you back down on the
-    // very next character — the scrollbar was there and unusable for the length of the speech.
-    // The check has to happen BEFORE the node goes in: afterwards the box is already one line
-    // taller, so "am I at the bottom" would answer no for a reader who was.
-    const _twAtBottom = (el.scrollHeight - el.clientHeight - el.scrollTop) <= 4;
     if (_twCur === el) el.insertBefore(node, caret);
     else _twCur.appendChild(node);
-    if (_twAtBottom) el.scrollTop = el.scrollHeight;
-    // cheap: both reads are already warm from the check above
+  };
+  // v0.30.489 — FOLLOW THE REVEAL ONLY IF THE READER IS ALREADY AT THE BOTTOM (scrolling up to re-read must
+  // not be yanked back down). The check has to happen BEFORE the new text goes in - afterwards the box is
+  // already a line taller. v0.30.x tw-smooth: taken once per FRAME around that frame's batch, not twice per
+  // letter; the layout it reads is the one the browser already did for the last paint.
+  const _twAtBottomNow = () => (el.scrollHeight - el.clientHeight - el.scrollTop) <= 4;
+  const _twFollow = (wasAtBottom) => {
+    if (wasAtBottom) el.scrollTop = el.scrollHeight;
     if (el.scrollHeight > el.clientHeight) {
       el.classList.toggle('lx-more', (el.scrollHeight - el.clientHeight - el.scrollTop) > 6);
     }
@@ -109841,14 +109846,30 @@ function _runDialogTypewriter(text) {
     if (ch === ',' || ch === ';' || ch === ':' || ch === '\u2014' || ch === '\u2013') return 80;
     return SPEED_MS;
   };
-  const _twTick = () => {
-    if (!dlg._twTimer) return;                 // skipped or closed underneath us
-    const _last = tokens[idx];
-    step();
-    if (idx >= tokens.length) { step(); return; }   // the finishing pass, now rather than a tick later
-    dlg._twTimer = setTimeout(_twTick, _twDelay(_last));
+  const _twRaf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : ((f) => setTimeout(() => f(performance.now()), 16));
+  let _twDue = performance.now() + SPEED_MS;
+  // The handle is an OBJECT, not a rAF id: the callers cancel with clearInterval(dlg._twTimer), and a rAF id
+  // passed there could cancel an unrelated game timer that happens to share the number. clearInterval of an
+  // object is a no-op; nulling or replacing dlg._twTimer is what ends this loop.
+  const _twHandle = { tw: _twGen };
+  const _twTick = (now) => {
+    if (dlg._twTimer !== _twHandle) return;              // skipped, closed, or superseded underneath us
+    now = now || performance.now();
+    if (now - _twDue > 250) _twDue = now - 250;           // after a long stall, catch up in a short burst, not all at once
+    if (now >= _twDue) {
+      const _atB = _twAtBottomNow();
+      while (idx < tokens.length && now >= _twDue) {
+        const _last = tokens[idx];
+        step();
+        _twDue += _twDelay(_last);
+      }
+      _twFollow(_atB);
+      if (idx >= tokens.length) { step(); return; }        // the finishing pass, now rather than a frame later
+    }
+    _twRaf(_twTick);
   };
-  dlg._twTimer = setTimeout(_twTick, SPEED_MS);
+  dlg._twTimer = _twHandle;
+  _twRaf(_twTick);
   // v0.25.851 — Expose a callable skip so the v0.25.851 global keyboard
   // listener (and any future option-click-to-skip-first path) can flush
   // the typewriter without poking at the closure.
