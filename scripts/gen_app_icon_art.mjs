@@ -9,6 +9,11 @@
 // the subject rather than cropping a painted plate. Read that file's header for why the first attempt
 // was worse and what the measurements actually demanded.
 //
+// PUNK (per user: "can we have the backdrop be a graffiti punk rock black white yellow with some pink
+// background pop style"): the plate is now scripts/gen_icon_punk.mjs - a graffiti wall and a pink
+// pop-art burst in the game's punk-skin palette. The gate plate stays in gen_icon_gate.mjs; pass
+// --gate to build the old icon from it.
+//
 // Why the foreground is lifted out of the shipped PNG rather than re-composited from a sprite:
 // scripts/_gen_guguma_icon.mjs (the old one-off) no longer runs - it reads Sprites/ui/mojiworld_logo
 // .png, which became a .webp - and its Guguma placement does not match what actually shipped anyway.
@@ -27,6 +32,7 @@
 //   node scripts/gen_app_icon_art.mjs --write     # write assets/mojiworld_icon_512.png + _184.jpg
 import sharp from 'sharp';
 import { gatePng } from './gen_icon_gate.mjs';
+import { punkPng } from './gen_icon_punk.mjs';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -146,8 +152,12 @@ await writeFile(join(TMP, 'bird.png'), birdPng);
 // legs. scripts/gen_icon_gate.mjs instead draws the gate around the geometry measured FROM the
 // subject (disc r=236 at 256,275; decoration only in the four pockets his distance transform leaves
 // clear), so there is nothing left to frame and nothing to tone-correct after the fact.
-const flat = await sharp(await gatePng()).flatten({ background: '#141024' }).png().toBuffer();
-console.log(`backdrop: painted gate ${S}x${S} (scripts/gen_icon_gate.mjs)`);
+// Since the punk plate the ink wall touches his outline - the thing the gate's measurements warned
+// against - so gen_icon_punk.mjs cuts him out as a sticker: a paper border from his own alpha and a
+// hard ink drop, so his keyline always sits on paper, never on the wall.
+const GATE = has('--gate');
+const flat = await sharp(await (GATE ? gatePng() : punkPng())).flatten({ background: '#141024' }).png().toBuffer();
+console.log(GATE ? `backdrop: painted gate ${S}x${S} (scripts/gen_icon_gate.mjs)` : `backdrop: punk wall ${S}x${S} (scripts/gen_icon_punk.mjs)`);
 
 const roundMask = await sharp(Buffer.from(
   `<svg width="${S}" height="${S}" xmlns="http://www.w3.org/2000/svg"><rect width="${S}" height="${S}" rx="${RADIUS}" fill="#fff"/></svg>`),

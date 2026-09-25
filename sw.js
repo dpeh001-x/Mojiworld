@@ -181,7 +181,10 @@
 // v0.30.980 - v68 -> v69. Sprites/bosses/walk/kingKrook_5.webp and kingKrook_6.webp are REPLACED under their own
 // names (mirrored: they faced left inside a right-facing walk, so King Krook turned round every stride). Without
 // this bump a returning player's stale-while-revalidate cache keeps drawing him turning for a whole session.
-const CACHE = 'mojiworld-assets-v70';   // v0.30.1045 - Aetherion's 36 form-1 frames re-inked in place
+// v0.30.1074 - v70 -> v71. The app icon is REPLACED under its own names (assets/mojiworld_icon_512.png,
+// mojiworld_icon_184.jpg, favicon-32.png, apple-touch-icon.png: Guguma on a punk wall instead of in the gate), so a
+// returning browser's stale-while-revalidate cache would keep the old tab and home-screen icon for a session.
+const CACHE = 'mojiworld-assets-v71';   // v0.30.1074 - the app icon's punk backdrop
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
