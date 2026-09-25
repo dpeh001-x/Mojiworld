@@ -1,4 +1,4 @@
-// THE DOWNED BODY FALLS TO THE FLOOR (v0.30.1029).
+// THE DOWNED BODY FALLS TO THE FLOOR (v0.30.1029; the sticker skull v0.30.1037).
 //
 // Per user, with a screenshot of a downed hero parked in mid-air beside Aetherion: "the downed character should fall to
 // the ground / platform, not remain hovering midair". _coopDownedTick zeroed vy every frame, so a lethal hit taken in a
@@ -50,7 +50,8 @@ try {
     const s1 = secs ? secs.textContent : null; await new Promise((r) => setTimeout(r, 1100)); const s2 = secs ? secs.textContent : null;
     const divs = el ? [...el.querySelectorAll('div')] : [];
     return { downed, groundedBefore, floorY: Math.round(floorY), startY: Math.round(startY), endY: Math.round(player.y), onGround: !!player.onGround, stillDown: !!player._downed, hp: player.hp, trace: trace.slice(-4),
-      card: el ? { skull: !!el.querySelector('svg.cd-skull'), title: (el.querySelector('.cd-title') || {}).textContent || '', firstDiv: divs[0] ? divs[0].className : null, lastDiv: divs.length > 1 ? divs[divs.length - 1].className : null, btn: (document.getElementById('coop-downed-skip') || {}).textContent, secs: [s1, s2], width: Math.round(el.getBoundingClientRect().width), font: getComputedStyle(el).fontFamily.slice(0, 8) } : null };
+      card: el ? { skull: !!el.querySelector('svg.cd-skull'), title: (el.querySelector('.cd-title') || {}).textContent || '', firstDiv: divs[0] ? divs[0].className : null, lastDiv: divs.length > 1 ? divs[divs.length - 1].className : null, btn: (document.getElementById('coop-downed-skip') || {}).textContent, secs: [s1, s2], width: Math.round(el.getBoundingClientRect().width), font: getComputedStyle(el).fontFamily.slice(0, 8),
+        skullW: Math.round((el.querySelector('svg.cd-skull') || el).getBoundingClientRect().width), skullBottom: Math.round((el.querySelector('svg.cd-skull') || el).getBoundingClientRect().bottom), skullTop: Math.round((el.querySelector('svg.cd-skull') || el).getBoundingClientRect().top), titleTop: Math.round((el.querySelector('.cd-title') || el).getBoundingClientRect().top), plateAlpha: (getComputedStyle(el).backgroundImage.match(/rgba\(46, 8, 16, ([\d.]+)\)/) || [])[1] } : null };
   });
   check(r.downed && r.groundedBefore, 'setup: the hero stood on the town floor, then went down 220 px above it', J({ floorY: r.floorY, startY: r.startY }));
   // it lands on the first platform under it - in town that is a ledge above the floor at this x - and holds there
@@ -58,6 +59,8 @@ try {
   check(r.stillDown && r.hp === 1, 'STILL DOWN: the fall did not end the window - down, hp held at 1', J({ down: r.stillDown, hp: r.hp }));
   check(r.card && r.card.skull && /DOWNED/.test(r.card.title) && r.card.firstDiv === 'cd-sub' && r.card.lastDiv === 'cd-rule' && r.card.btn === '▸ Respawn now' && /^Nunito/.test(r.card.font), 'CARD: the skull-and-crossbones plate - skull svg, DOWNED title, the subtitle first, the rule line last, the Respawn button', J(r.card));
   check(r.card && r.card.secs[0] !== r.card.secs[1], 'COUNTDOWN: the seconds tick while the body lies there', J(r.card && r.card.secs));
+  // v0.30.1037 the sticker: the skull is 200+ px wide, the words start under it, the plate is at most 340 wide and about three-quarters opaque
+  check(r.card && r.card.skullW >= 200 && r.card.skullTop >= 0 && r.card.titleTop >= r.card.skullBottom - 24 && r.card.width <= 340 && r.card.plateAlpha && parseFloat(r.card.plateAlpha) <= 0.8, 'STICKER: a 200+ px skull-and-bones fully on a 760 px screen, the title under it, a plate no wider than 340 at about three-quarters opacity', J({ skullW: r.card && r.card.skullW, skullTop: r.card && r.card.skullTop, skullBottom: r.card && r.card.skullBottom, titleTop: r.card && r.card.titleTop, width: r.card && r.card.width, alpha: r.card && r.card.plateAlpha }));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await ctx.close(); await browser.close(); server.kill();
