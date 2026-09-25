@@ -510,17 +510,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.02
+      "dy": 0.033
     },
     "walk": {
       "s": 0.949,
       "dx": 0,
-      "dy": 0.01
+      "dy": 0.023
     },
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.015,
+      "dy": 0.028,
       "ft": [
         70,
         70,
@@ -1431,17 +1431,17 @@ window.LX_ANIM_CALIB = {
     "zodiac/idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.016
+      "dy": 0.027
     },
     "zodiac/walk": {
       "s": 1,
       "dx": 0,
-      "dy": 0.016
+      "dy": 0.027
     },
     "zodiac/attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.016
+      "dy": 0.027
     },
     "attack": {
       "ft": [
