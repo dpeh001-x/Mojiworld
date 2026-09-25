@@ -52,14 +52,16 @@ try {
     return { bossArena: dlg.classList.contains('boss-arena'), shade: dlg.style.getPropertyValue('--boss-shade').slice(0, 20),
       keyline: { content: ka.content, clip: ka.clipPath.slice(0, 18), bg: ka.backgroundColor, blend: ka.mixBlendMode },
       // Chrome serialises radial sizes without the 'ellipse' keyword: "radial-gradient(42% 58% at 84% 78%, ..." / "(2.2px 22px at ..."
-      spray: { hits: hits.length, onBoss: hits.filter(([x, y]) => x > 70 && y > 40).length, aura: /radial-gradient\((ellipse )?42% 58% at 84% 78%/.test(kb.backgroundImage), drips: (kb.backgroundImage.match(/radial-gradient\((ellipse )?[\d.]+px [\d.]+px at/g) || []).length },
+      // v0.30.982 - per user the spray went back BEHIND the silhouette (the v0.30.979 arrangement): a halo at 84% 82%,
+      // hits in the bottom-right where the boss stands, drips, and the light scatter in the top-left corner
+      spray: { hits: hits.length, onBoss: hits.filter(([x, y]) => x > 70 && y > 40).length, corner: hits.filter(([x, y]) => x < 30 && y < 30).length, aura: /radial-gradient\((ellipse )?38% 50% at 84% 82%/.test(kb.backgroundImage), drips: (kb.backgroundImage.match(/radial-gradient\((ellipse )?[\d.]+px [\d.]+px at/g) || []).length },
       frame: { plate: sb.display, stroke: sa.backgroundColor },
       badge: { radius: cp.borderTopLeftRadius, shadow: cp.boxShadow, bgColor: cp.backgroundColor, dots: (cp.backgroundImage.match(/radial-gradient/g) || []).length, fontSize: cp.fontSize, transform: cp.transform,
         tri1: pb.clipPath, tri1bg: pb.backgroundColor, tri2: pa.clipPath, tri2bg: pa.backgroundColor, mark: pa.content, outline: /drop-shadow\(rgb\(12, 11, 16\) 1\.6px/.test(cp.filter) } };
   });
   check(r.bossArena && r.shade.startsWith('url('), 'the arena confirm opens as a boss card with its silhouette', J({ bossArena: r.bossArena, shade: r.shade }));
   check(r.keyline.content !== 'none' && /^polygon\(evenodd/.test(r.keyline.clip) && /rgba\(240, 232, 255/.test(r.keyline.bg) && r.keyline.blend === 'normal', 'KEYLINE: a 1 px pale evenodd ring on the ink layer, inside the black stroke', J(r.keyline));
-  check(r.spray.hits >= 16 && r.spray.onBoss === 0 && r.spray.aura && r.spray.drips >= 2, 'SPRAY: an aura, sixteen-plus hits and drips - none centred where the silhouette stands', J(r.spray));
+  check(r.spray.hits >= 12 && r.spray.onBoss >= 4 && r.spray.corner >= 3 && r.spray.aura && r.spray.drips >= 3, 'SPRAY: the halo and the hits behind the silhouette, drips, a light scatter in the far corner (the first arrangement, per user)', J(r.spray));
   check(r.frame.plate === 'none' && /rgb\(12, 11, 16\)/.test(r.frame.stroke), 'FRAME: the paper stays hidden, the stroke stays black', J(r.frame));
   check(r.badge.radius === '0px' && r.badge.shadow === 'none' && /rgba\(0, 0, 0, 0\)/.test(r.badge.bgColor) && r.badge.dots >= 9 && r.badge.fontSize === '0px' && r.badge.transform !== 'none' && r.badge.outline, 'BADGE: a tilted spray blob - no disc, no ring, nine dots, the emoji hidden, a 1.6 px black line', J({ radius: r.badge.radius, dots: r.badge.dots, fontSize: r.badge.fontSize, outline: r.badge.outline }));
   check(/polygon\(50% 0(px|%)?, 100% 100%, 0(px|%)? 100%\)/.test(r.badge.tri1) && /rgb\(12, 11, 16\)/.test(r.badge.tri1bg) && /polygon\(50% 0/.test(r.badge.tri2) && /rgb\(255, 210, 63\)/.test(r.badge.tri2bg) && r.badge.mark === '"!"', 'BADGE: a stencilled hazard triangle - black under yellow, a "!" on it', J({ tri1: r.badge.tri1, tri2bg: r.badge.tri2bg, mark: r.badge.mark }));
