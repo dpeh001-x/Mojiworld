@@ -157,7 +157,7 @@ ok('a FAILURE now raises the popup card',
   failCard.go === true && failCard.fail === true,
   { shown: failCard.go, failStyling: failCard.fail, heading: failCard.heading });
 ok('...and its heading is actually legible, not a gradient bar with the text knocked out',
-  failCard.headingClip === 'text', { computedBackgroundClip: failCard.headingClip });
+  /^text(,\s*text)*$/.test(failCard.headingClip || ''), { computedBackgroundClip: failCard.headingClip });   // v0.30.988 - the title is two layers (metal + one sheen pass): EVERY layer must be clipped to the letters
 ok('...naming the item, in Brok\'s voice, with the star bar',
   !!failCard.name && failCard.name === failRun.itemName
   && /\S/.test(failCard.flavor || '') && (failCard.starsHtml || '').length > 40,
