@@ -14716,7 +14716,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1012';
+const GAME_VERSION = 'v0.30.1013';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53677,7 +53677,7 @@ function _coopTickProjectiles() {
 // shot's first frames and on each keyframe (the guest keeps them on its copy), so a volley costs its bytes once.
 const _COOP_PJ_XF = ['_defPierce', '_ignoreDef', '_heavyFloorPct', '_srcType', '_gravBand', '_bossBand', '_healLockMs', '_sourceLabel',
   'sourceLabel', '_zodiacSign', '_radiance', '_impactMs', '_impactShake', 'freeze', 'poison', '_poisonDmg', 'slow', 'skillLock',
-  'stunHit', '_zoneAttack', 'pierce', '_noEvasion'];   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
+  'stunHit', '_zoneAttack', 'pierce', '_noEvasion', 'noGravity'];   // v0.30.1013 a guest's weight wave rides the floor too   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
 function _coopPjVal(v) {   // numbers, short strings, booleans, and one level of those (bands, radiance)
   if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
   if (typeof v === 'string') return v.slice(0, 80);
@@ -96489,7 +96489,14 @@ function bossAI(m, dt, distToPlayer) {
         m._waveFired = true;
         for (const dir of [-1, 1]) {
           game.projectiles.push({
-            x: m.x + m.w/2, y: 460,
+            x: m.x + m.w/2,
+            y: (() => {   // v0.30.1013 the lane, off the floor under him: top 8 px up (was a fixed 460 = 20 px up)
+              let _fy = null; const _cx = m.x + m.w / 2;
+              for (const pl of ((game.mapData && game.mapData.platforms) || [])) {
+                if (pl && pl.type === 'ground' && _cx >= pl.x && _cx <= pl.x + pl.w && (_fy == null || pl.y < _fy)) _fy = pl.y;
+              }
+              return (_fy == null ? 480 : _fy) - 8;
+            })(),
             vx: dir * 11, vy: 0, w: 34, h: 28, life: 150,
             damage: m.atk * 1.7, owner: 'enemy', skill: 'shock', _srcType: m.type,  // v0.25.716 — was 1.0 (+70 %)
             color: '#aa44ff', pierce: true, noGravity: true,
@@ -103753,7 +103760,12 @@ function updateProjectiles(dt) {
         p.life = 0;
       }
     }
-    if (p.skill === 'splash' || p.skill === 'shock' || p.skill === 'spore') p.vy += 0.3;
+    // v0.30.1013 - noGravity means no gravity (per user: "fix the gravitos weight wave too"). This fall was
+    // hard-coded per tag and ignored the flag, and the only splash / shock / spore shot in the game that
+    // sets noGravity is Gravitos's weight wave - "horizontal shockwaves along ground" - which therefore
+    // dropped 0.3 px/step^2 from its y-460 lane and was below a standing player's feet ~12 steps out,
+    // still under his own 340 px body. Every other shot on these tags falls exactly as before.
+    if ((p.skill === 'splash' || p.skill === 'shock' || p.skill === 'spore') && !p.noGravity) p.vy += 0.3;
     // Enemy projectile gravity (monster throws)
     if (p.owner === 'enemy') {
       if (p.skill === 'msplinter') p.vy += 0.22;
