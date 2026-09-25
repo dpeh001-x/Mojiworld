@@ -2,6 +2,8 @@
 //
 // Per user: "Innate growth can be much better, cool pop and cute mix", then "job talent should also be
 // redesigned to match", then "No this is way too cute, it needs a cool pop look, no pastel colours",
+// then (lux) "adjust the innate growth and job talent to suit this more lux style" - the tiles are
+// enamel washed in their colour now, so the no-pastel check reads that colour (--c),
 // then "Make something in between the current and this lux feel, current is too comicky".
 // Both cards were rebuilt, so this pins that every number survived, that the talent card's behaviour
 // did too, and that nothing is pastel:
@@ -13,7 +15,8 @@
 //   4. the last-roll sticker: jackpot / lucky / plain by the roll, "No level-ups yet" at level 1
 //   5. the card is black glass in a gradient-gold hairline (a border-box gradient), the title heavy
 //      Nunito, and every stat
-//      tile and talent pick a saturated colour (HSV saturation >= 0.6 - the old pastels were ~0.35)
+//      tile and talent pick washed in a saturated colour (HSV saturation >= 0.6 - the old pastels
+//      were ~0.35)
 //   6. talents: before the master advancement ONE pick card and a locked Master teaser (the U panel
 //      used to draw the job's three picks a second time as "Master Talent"); with a master, two cards
 //      with different picks; with no job, a locked Job teaser; a learned talent shows one sticker and
@@ -65,7 +68,7 @@ const read = (st) => page.evaluate(async (st) => {
     last: last ? { cls: last.className, txt: last.textContent.replace(/\s+/g, ' ').trim() } : null,
     rim: (cs.backgroundImage.match(/gradient/g) || []).length >= 3 && cs.borderTopColor !== 'rgb(255, 255, 255)', titleFont: title ? getComputedStyle(title).fontFamily : '',
     titleStyle: title ? getComputedStyle(title).fontStyle + ' ' + getComputedStyle(title).fontWeight : '',
-    fills: [...c.querySelectorAll('.lg-stat'), ...(host ? host.querySelectorAll('.lt-pick, .lt-learned') : [])].map((e) => getComputedStyle(e).backgroundColor),
+    fills: [...c.querySelectorAll('.lg-stat'), ...(host ? host.querySelectorAll('.lt-pick, .lt-learned') : [])].map((e) => { const v = getComputedStyle(e).getPropertyValue('--c').trim() || getComputedStyle(e).backgroundColor; const k = document.createElement('i'); k.style.color = v; document.body.appendChild(k); const rgb = getComputedStyle(k).color; k.remove(); return rgb; }),
     cards: cards.map((k) => ({ cls: k.className, title: (k.querySelector('.lt-title') || {}).textContent, picks: [...k.querySelectorAll('[data-talent]')].map((p) => p.getAttribute('data-talent')),
       respec: (k.querySelector('[data-talent-respec]') || { getAttribute: () => null }).getAttribute('data-talent-respec'), learned: t(k, '.lt-learned') })),
   };
@@ -85,7 +88,7 @@ if (A) {
   ok('4. a +2 roll is a jackpot sticker', A.last && /jackpot/.test(A.last.cls) && /\+2 SP/.test(A.last.txt) && /JACKPOT/.test(A.last.txt), JSON.stringify(A.last));
   ok('5. black glass in a gold hairline and a heavy Nunito title', A.rim && /Nunito/.test(A.titleFont) && +A.titleStyle.split(' ')[1] >= 900, JSON.stringify([A.rim, A.titleFont, A.titleStyle]));
   const sat = (rgb) => { const v = (rgb.match(/\d+(\.\d+)?/g) || []).slice(0, 3).map(Number); const mx = Math.max(...v), mn = Math.min(...v); return mx ? (mx - mn) / mx : 0; };
-  ok('5. no pastel: every stat tile and talent pick is a saturated colour', A.fills.length === 7 && A.fills.every((c) => sat(c) >= 0.6), JSON.stringify(A.fills.map((c) => [c, +sat(c).toFixed(2)])));
+  ok('5. no pastel: every stat tile and talent pick is washed in a saturated colour', A.fills.length === 7 && A.fills.every((c) => sat(c) >= 0.6), JSON.stringify(A.fills.map((c) => [c, +sat(c).toFixed(2)])));
   ok('6. before the master advancement: one pick card and a locked Master teaser, no duplicate', A.cards.length === 2 && A.cards[0].picks.length === 3 && (A.cards[1] || {}).picks && A.cards[1].picks.length === 0 && /lt-locked/.test(A.cards[1].cls) && /Master Talent/.test(A.cards[1].title), JSON.stringify(A.cards));
   const M = await read({ master: MID, talents: {} });
   ok('6. with a master: two pick cards, and their picks differ', M.cards.length === 2 && M.cards.every((k) => k.picks.length === 3) && M.cards[0].picks.join() !== M.cards[1].picks.join(), JSON.stringify(M.cards));
