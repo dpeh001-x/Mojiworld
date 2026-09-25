@@ -3,7 +3,7 @@
 // Per user, with the sage's card: "the aesthetics in terms of the font, the translucency, the delivery
 // needs to be much better - AAA standard". This pins each of the three:
 //   TYPE      the speech resolves to Alegreya (500 / 500 italic / 700 all loaded), 18.5 px; the name is Cinzel
-//   GLASS     the panel blurs what is behind it (18 px) and the shard texture is gone; the perf mode
+//   GLASS     the panel blurs what is behind it (18 px; 16 on the v0.30.975 ink layer) and the shard texture is gone; the perf mode
 //             (html.lx-nobackdrop) gets its near-solid ground back so the type keeps its contrast
 //   DELIVERY  a punctuated line takes measurably longer than a plain one of the same length (the
 //             cadence breathes at , . ! ?), the caret is gone, the answers rise 45 ms apart, and the
@@ -51,7 +51,9 @@ try {
     try { await Promise.all([document.fonts.load('500 18px Alegreya'), document.fonts.load('700 18px Alegreya'), document.fonts.load('italic 500 18px Alegreya')]); } catch (e) {}
     const fonts = { body500: document.fonts.check('500 18px Alegreya'), body700: document.fonts.check('700 18px Alegreya'), italic: document.fonts.check('italic 500 18px Alegreya') };
     const type = { family: cs.fontFamily, size: cs.fontSize, lineHeight: cs.lineHeight, nameFamily: cn.fontFamily };
-    const glass = { backdrop: cd.backdropFilter || cd.webkitBackdropFilter, texture: /npc_dialog_bg/.test(cd.backgroundImage), maxWidth: cd.maxWidth };
+    // v0.30.975 moved the glass onto the .dlg-ink paint layer (the cut frame); read it from there when present
+    const inkEl = dlg.querySelector(':scope > .dlg-ink'); const gs = inkEl ? getComputedStyle(inkEl) : cd;
+    const glass = { backdrop: gs.backdropFilter || gs.webkitBackdropFilter, texture: /npc_dialog_bg/.test(cd.backgroundImage + gs.backgroundImage), maxWidth: cd.maxWidth };
     const caret = txt.querySelector('.typewriter-caret'); const caretShown = caret ? getComputedStyle(caret).display !== 'none' : false;
     const delays = [...document.querySelectorAll('#dialog-options button')].map((b) => b.style.animationDelay);
     // delivery: two lines of equal length, one punctuated
@@ -72,7 +74,7 @@ try {
     // perf mode ground
     openNPC(milo); await new Promise((r) => setTimeout(r, 200));
     document.documentElement.classList.add('lx-nobackdrop');
-    const cdn = getComputedStyle(dlg); const nb = { backdrop: cdn.backdropFilter || cdn.webkitBackdropFilter, bg: cdn.backgroundImage.slice(0, 60) };
+    const cdn = getComputedStyle(inkEl || dlg); const nb = { backdrop: cdn.backdropFilter || cdn.webkitBackdropFilter, bg: cdn.backgroundImage.slice(0, 60) };
     document.documentElement.classList.remove('lx-nobackdrop'); closeDialog();
     return { fonts, type, glass, caretShown, delays, plain, punct, midway, afterSkip, afterClose, nb };
   });
@@ -80,7 +82,7 @@ try {
   check(r.fonts.body500 && r.fonts.body700 && r.fonts.italic, 'TYPE: Alegreya 500, 700 and italic all load', J(r.fonts));
   check(/^Alegreya/.test(r.type.family) && r.type.size === '18.5px', 'TYPE: the speech is set in Alegreya at 18.5 px', J(r.type));
   check(/Cinzel/.test(r.type.nameFamily), 'TYPE: the name is Cinzel', r.type.nameFamily.slice(0, 40));
-  check(/blur\(18px\)/.test(r.glass.backdrop) && !r.glass.texture, 'GLASS: an 18 px blur behind the panel and no shard texture', J(r.glass));
+  check(/blur\(1[68]px\)/.test(r.glass.backdrop) && !r.glass.texture, 'GLASS: a 16-18 px blur behind the panel and no shard texture', J(r.glass));
   check(/none|^$/.test(r.nb.backdrop) && /linear-gradient/.test(r.nb.bg), 'GLASS: perf mode strips the blur and keeps a near-solid ground', J(r.nb));
   check(!r.caretShown, 'DELIVERY: no block caret', 'shown ' + r.caretShown);
   check(r.delays.length >= 2 && r.delays[0] === '0ms' && r.delays[1] === '45ms', 'DELIVERY: answers rise 45 ms apart', J(r.delays));
