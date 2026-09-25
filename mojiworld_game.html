@@ -14857,7 +14857,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1033';
+const GAME_VERSION = 'v0.30.1034';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -23238,7 +23238,7 @@ const SKILL_TREE = {
       apply: p => { p.tree.manaShield = true; } },
     { id:'m_chain',   name:'Elemental Chain',   icon:'⚡', tier:2, cost:2, prereq:'m_affinity',desc:'Spells chain to 2 more enemies at 50% damage',
       apply: p => { p.tree.elemChain = true; p.mods.multishot += 0; } },
-    { id:'m_weave',   name:'Spellweaver',       icon:'🌀', tier:3, cost:2, prereq:'m_shield', desc:'Crits reduce all skill cooldowns by 1s',
+    { id:'m_weave',   name:'Spellweaver',       icon:'🌀', tier:3, cost:2, prereq:'m_shield', desc:'Crits take 1s off your skill cooldowns (at most twice a second; never your B ultimate)',
       apply: p => { p.tree.spellweaver = true; } },
     { id:'m_surge',   name:'Arcane Surge',      icon:'💠', tier:3, cost:3, prereq:'m_chain',  desc:'+1% spell damage per % MP current (up to +100%)',
       apply: p => { p.tree.arcaneSurge = true; } },
@@ -100041,11 +100041,18 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
     // of how many mobs the crit landed on. Matches the existing audio
     // per-frame gate (v0.25.792) so the visual + audio + mechanic all
     // align to one trigger per frame.
-    if (player.tree.spellweaver && isCrit && game._lastSpellweaverFrame !== game.time) {
-      game._lastSpellweaverFrame = game.time;
+    // v0.30.1034 - SPELLWEAVER, CAPPED (per user, the skill audit's R4: "fix all"). Once a frame was the only
+    // limit, and a mage's area and damage-over-time kit crits on several frames a second, so every critting
+    // frame took a full second off every cooldown. Measured at 40% crit over 30 s: damage +24-58% across the
+    // five mage masters, and Hexmaster cast its 34 s ultimate three times. Every other cooldown cut in the
+    // game is capped at 55% (getCdrMult). Now: at most one refund per half second (30 steps), and never on a
+    // B-slot ultimate.
+    if (player.tree.spellweaver && isCrit && game._lastSpellweaverFrame !== game.time
+        && (game.time - (game._lastSpellweaverAt != null ? game._lastSpellweaverAt : -1e9)) >= 30) {
+      game._lastSpellweaverFrame = game.time; game._lastSpellweaverAt = game.time;
       let refunded = 0;
       for (const id in player.skillCooldowns) {
-        if (player.skillCooldowns[id] > 0) {
+        if (player.skillCooldowns[id] > 0 && !(SKILLS[id] && SKILLS[id].slot === 'b')) {
           player.skillCooldowns[id] = Math.max(0, player.skillCooldowns[id] - 1000);
           refunded++;
         }
