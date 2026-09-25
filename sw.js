@@ -187,7 +187,10 @@
 // v0.30.1077 - v71 -> v72. The app icon is REPLACED under its own names AGAIN (assets/mojiworld_icon_512.png,
 // mojiworld_icon_184.jpg, favicon-32.png, apple-touch-icon.png: the punk wall becomes a black comic panel with a
 // smaller burst), so a returning browser's stale-while-revalidate cache would keep v0.30.1074's icon for a session.
-const CACHE = 'mojiworld-assets-v72';   // v0.30.1077 - the app icon as a black comic panel
+// v0.30.1083 - v72 -> v73. The app icon is REPLACED under its own names AGAIN (assets/mojiworld_icon_512.png,
+// mojiworld_icon_184.jpg, favicon-32.png, apple-touch-icon.png: the comic panel becomes a pop-art shard: one white
+// diagonal burst, pink as accents only), so a returning browser's stale cache would keep v0.30.1077's icon a session.
+const CACHE = 'mojiworld-assets-v73';   // v0.30.1083 - the app icon as a pop-art shard
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
