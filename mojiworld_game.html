@@ -15702,7 +15702,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1092';
+const GAME_VERSION = 'v0.30.1093';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -64071,6 +64071,8 @@ function _renderWorldMapDiagram(host, opts) {
   // per frame. Helps the dense clusters read without shrinking the world.
   if (opts.mode === 'travel' && !_wmEditMode) {
     let vb = { x: 0, y: 0, w: W, h: H };
+    let _wFit = null;   // v0.30.x wm-fit - the world view framed clear of the chrome (see _fitWorld below)
+    const _wMax = () => Math.max(_WW, _wFit ? _wFit.w : 0);
     // Synchronous viewBox apply — wheel/pointer events already arrive at
     // ~frame rate, and rAF is suspended in occluded windows (it would eat
     // the update entirely). A setAttribute here is a cheap single-element
@@ -64105,7 +64107,7 @@ function _renderWorldMapDiagram(host, opts) {
       // v0.30.661 — the widest view is the padded world, and once the box is wider than the canvas its
       // origin has to be allowed NEGATIVE or the pan clamp would shove the extra margin all onto one
       // side. Both ends are derived rather than written down, so they stay right at any zoom.
-      vb.w = Math.min(_WW, Math.max(W / 3.5, vb.w)); vb.h = vb.w * (H / W);
+      vb.w = Math.min(_wMax(), Math.max(W / 3.5, vb.w)); vb.h = vb.w * (H / W);
       vb.x = Math.min(Math.max(0, W - vb.w), Math.max(Math.min(0, W - vb.w), vb.x));
       vb.y = Math.min(Math.max(0, H - vb.h), Math.max(Math.min(0, H - vb.h), vb.y));
     };
@@ -64119,7 +64121,7 @@ function _renderWorldMapDiagram(host, opts) {
       const { r, sc, ox, oy } = _scrn();
       const mx = vb.x + (ev.clientX - r.left - ox) / sc;
       const my = vb.y + (ev.clientY - r.top - oy) / sc;
-      const nw = Math.min(_WW, Math.max(W / 3.5, vb.w * (ev.deltaY > 0 ? 1.15 : 1 / 1.15)));
+      const nw = Math.min(_wMax(), Math.max(W / 3.5, vb.w * (ev.deltaY > 0 ? 1.15 : 1 / 1.15)));
       const k = nw / vb.w;
       vb.x = mx - (mx - vb.x) * k;
       vb.y = my - (my - vb.y) * k;
@@ -64151,7 +64153,7 @@ function _renderWorldMapDiagram(host, opts) {
     }, true);
     svg.addEventListener('dblclick', (ev) => {
       if (ev.target && ev.target.closest && ev.target.closest('.wm-node')) return;
-      vb = { x: (W - _WW) / 2, y: (H - _WH) / 2, w: _WW, h: _WH };   // v0.30.661 — back to the padded world
+      vb = _wFit ? { x: _wFit.x, y: _wFit.y, w: _wFit.w, h: _wFit.h } : { x: (W - _WW) / 2, y: (H - _WH) / 2, w: _WW, h: _WH };   // v0.30.661 — back to the padded world (v0.30.x wm-fit: the framed one)
       _queueVB();
     });
     // v0.30.650 — the slider and the wheel are one control: the slider writes vb.w and the shared
@@ -64165,12 +64167,58 @@ function _renderWorldMapDiagram(host, opts) {
         // padded world at 0 and the same closest zoom at 100 now that the far end has moved.
         const _t = Number(_zoomEl.value) / 100;
         const mx = vb.x + vb.w / 2, my = vb.y + vb.h / 2;
-        const nw = _WW * Math.pow((W / 3.5) / _WW, _t);
+        const _wm = _wMax(), nw = _wm * Math.pow((W / 3.5) / _wm, _t);   // v0.30.x wm-fit - the far end is the framed world
         vb.h = nw * (H / W);
         vb.x = mx - nw / 2; vb.y = my - vb.h / 2; vb.w = nw;
         _clampVB(); _queueVB();
       };
     }
+    // v0.30.x wm-fit - per user: "ensure spacing, and ensure the maps are not blocked / overlapping". The header
+    // cards and the bottom tools FLOAT over the board, and at the world view the outermost places sat under them:
+    // measured at 1280x720 and 1920x1080, The Singularity under the header, The Reach of Vermillion and Gelwater
+    // Grotto under the fares, three more names clipped by one or the other. v0.30.661's fixed 12% margin predates
+    // cards this size. So the world view is now MEASURED: take the band between the lowest header card and the
+    // highest bottom tool, and if any place or its name pokes into the chrome, frame the whole node field inside
+    // that band - zoomed out only as far as that needs, re-measured because the names hold their screen size as
+    // the map zooms. Nothing moves when everything already fits. The framed view becomes the far end of the
+    // wheel, the slider and the double-click reset, so none of them can jump back under the chrome.
+    const _fitWorld = () => {
+      const sr = svg.getBoundingClientRect();
+      if (!(sr.width > 0 && sr.height > 0) || !svg.isConnected) return;
+      const vis = (e) => e.getClientRects().length && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden';
+      const hdr = [...document.querySelectorAll('#worldmap-header .wm-hd-l, #worldmap-header .wm-hd-r')].filter(vis).map((e) => e.getBoundingClientRect());
+      const tools = [...document.querySelectorAll('#worldmap-recent, #worldmap-zoomwrap')].filter(vis).map((e) => e.getBoundingClientRect()).filter((r) => r.height > 2);
+      const gap = sr.height * 0.014;
+      const band = {
+        top: Math.max(sr.top, ...hdr.map((r) => r.bottom)) + gap,
+        bottom: Math.min(sr.bottom, ...tools.map((r) => r.top)) - gap,
+        left: sr.left + gap, right: sr.right - gap,
+      };
+      if (!(band.bottom - band.top > 40)) return;
+      for (let pass = 0; pass < 4; pass++) {
+        const F = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+        for (const e of svg.querySelectorAll('.wm-disc, .wm-node-label')) {
+          if (!e.getClientRects().length) continue;
+          const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) continue;
+          const r = e.getBoundingClientRect(); if (!(r.width > 0)) continue;
+          F.left = Math.min(F.left, r.left); F.top = Math.min(F.top, r.top); F.right = Math.max(F.right, r.right); F.bottom = Math.max(F.bottom, r.bottom);
+        }
+        if (!(F.right > F.left)) return;
+        const inside = F.top >= band.top - 0.5 && F.bottom <= band.bottom + 0.5 && F.left >= band.left - 0.5 && F.right <= band.right + 0.5;
+        if (inside) return;
+        const cur = svg.viewBox.baseVal, r = svg.getBoundingClientRect();
+        const sc = Math.min(r.width / cur.width, r.height / cur.height) || 1;
+        const ox = (r.width - cur.width * sc) / 2, oy = (r.height - cur.height * sc) / 2;
+        const k = Math.min(1, (band.right - band.left) / (F.right - F.left), (band.bottom - band.top) / (F.bottom - F.top));
+        const ns = sc * k;
+        const fcx = cur.x + ((F.left + F.right) / 2 - r.left - ox) / sc, fcy = cur.y + ((F.top + F.bottom) / 2 - r.top - oy) / sc;
+        const w = r.width / ns, h = r.height / ns;
+        _wFit = { x: fcx - ((band.left + band.right) / 2 - r.left) / ns, y: fcy - ((band.top + band.bottom) / 2 - r.top) / ns, w, h };
+        vb = { x: _wFit.x, y: _wFit.y, w: _wFit.w, h: _wFit.h };
+        _queueVB();
+      }
+    };
+    svg._lxFitWorld = () => { if (!_wFit || Math.abs(vb.w - _wFit.w) < 1) _fitWorld(); };   // only while at the world view
     // v0.30.660 — the line of instructions is gone. It sat in the bottom-right corner of the board,
     // which is where the zoom control now lives, and it was the last instructional text on a screen
     // whose controls are all visible and labelled. Every corner it could move to belongs to
@@ -64195,9 +64243,18 @@ function _renderWorldMapDiagram(host, opts) {
   // the box is real. It is idempotent, so the pair costs nothing but the second pass.
   if (typeof _wmDeoverlapLabels === 'function') {
     _wmDeoverlapLabels(svg);
-    requestAnimationFrame(() => { try { _wmDeoverlapLabels(svg); } catch (e) {} });
+    requestAnimationFrame(() => { try { _wmDeoverlapLabels(svg); } catch (e) {} try { if (svg._lxFitWorld) svg._lxFitWorld(); } catch (e) {} });
   }
   if (typeof _wmPlaceSubTiles === 'function') _wmPlaceSubTiles(svg);   // v0.30.643
+  if (svg._lxFitWorld) {   // v0.30.x wm-fit
+    setTimeout(() => { try { svg._lxFitWorld(); } catch (e) {} }, 650);
+    if (!window._lxWmFitRZ) {
+      window._lxWmFitRZ = true;
+      window.addEventListener('resize', () => {
+        try { const s2 = document.querySelector('#worldmap-grid svg'); if (s2 && s2._lxFitWorld) s2._lxFitWorld(); } catch (e) {}
+      });
+    }
+  }
 }
 // v0.30.643 - the sub-label's lock icon sits to the left of centred text, so it can only be placed
 // once the SVG is attached and getComputedTextLength() answers. Runs beside the de-overlap pass,
