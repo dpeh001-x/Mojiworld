@@ -124,7 +124,7 @@ const T = r.timeline || [];
 ok('the astral set loads and decodes as its own 9-frame sprite',
   r.loaded && r.count === 9 && r.decoded, { frames: r.count, decoded: r.decoded, key: r.key });
 ok('nothing in the astral set is cut off - nothing clipped, nothing sliced mid-canvas',
-  astral.every(f => f.edge === 0 && (f.last === f.H - 1 || f.flat <= 30)),
+  astral.every(f => f.edge === 0 && (f.last >= f.H - 4 || f.flat <= 30)),   // v0.30.x — feet within three rows of the bottom ARE on it (antialias: 1323 and 1322 of 1324 read as cut; the severed set ended at 1271)
   { clippedSides: Math.max(...astral.map(f => f.edge)),
     lastOpaqueRow: astral.map(f => f.last + '/' + (f.H - 1)).join(' '),
     note: 'feet ON the bottom row = the anchor convention; the severed set stopped at 1271/1325 with 153 px',

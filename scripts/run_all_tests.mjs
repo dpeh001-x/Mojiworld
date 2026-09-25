@@ -90,22 +90,30 @@ const files = fs.readdirSync(SCRIPTS)
   .filter((f) => (WITH_NET ? true : !NET.test(f)))
   .sort();
 
-// Which convention does this suite follow? Three of them are in use and the file
-// says which one it follows:
-//   107  `process.argv[2] || 'mojiworld_game.html'`  page in argv[2], port in argv[3]
-//   102  `process.argv.slice(2).find(a => !a.startsWith('--'))`  page anywhere, port from env
-//   the rest  argv[2] is the port
-// Both page-first families take 'mojiworld_game.html' first. The trailing port is
-// read as such by every argv[3] reader (checked across all 107) and ignored by the
-// find() family, which takes PORT out of the environment this runner already sets.
+// What does this suite do with argv[2]? The runner used to hand EVERY suite the port there; the suites grew at
+// least six conventions, and anything that was not "argv[2] is a port" received the string "8080" as a page, a
+// file, a folder or a candidate build. Measured over the whole directory (v0.30.x): 63 page-reading suites were
+// still getting the port (boss_fairness opened file:///.../8080; the Krook, Gravitos, PQ and quest suites among
+// them), and animator_badge / asset_path_audit / impact_envelope / verify_playtest_build took it as a path. So:
+//   a suite that PARSES a port from argv[2]            -> [port]
+//   a suite that takes a PAGE (any of the forms below) -> ['mojiworld_game.html', port]   (argv[3] is its port)
+//   anything else                                      -> []  (its own defaults; PORT is in the environment)
+const _PAGE_FORMS = [
+  /process\.argv\[2\]\s*\|\|\s*(process\.env\.[A-Z_]+\s*\|\|\s*)?['"`][^'"`]*\.html['"`]/,   // argv[2] || [env ||] 'x.html'
+  /process\.argv\.slice\(2\)\.find\(/,                                                  // the first non-flag argument
+  /process\.argv\.slice\(2\)\.filter\(/,                                                // args[0] after dropping flags
+  /process\.argv\[2\]\s*\|\|\s*(path\.)?join\([^)]*mojiworld_game\.html/,                // argv[2] || join(root, 'mojiworld_game.html')
+  /if\s*\(process\.argv\[2\]\)\s*env\.MOJI_GAME_FILE/,                                      // argv[2] becomes MOJI_GAME_FILE
+];
+const _PORT_FORM = /(Number|parseInt)\s*\(\s*process\.argv\[2\]|\+\s*process\.argv\[2\]|process\.argv\[2\]\s*\|\|\s*['"]?\d{3,5}\b|PORT\s*=\s*process\.argv\[2\]\s*[;|]/i;
 const _ARGV = new Map();
 const argvFor = (file) => {
   if (_ARGV.has(file)) return _ARGV.get(file);
   let src = '';
   try { src = fs.readFileSync(path.join(SCRIPTS, file), 'utf8'); } catch (e) {}
-  const pageFirst = /process\.argv\[2\]\s*\|\|\s*['"`][^'"`]*\.html['"`]/.test(src)
-                 || /process\.argv\.slice\(2\)\.find\(/.test(src);
-  const a = pageFirst ? ['mojiworld_game.html', String(GAME_PORT)] : [String(GAME_PORT)];
+  const a = _PAGE_FORMS.some((re) => re.test(src)) ? ['mojiworld_game.html', String(GAME_PORT)]
+          : _PORT_FORM.test(src) ? [String(GAME_PORT)]
+          : [];
   _ARGV.set(file, a);
   return a;
 };

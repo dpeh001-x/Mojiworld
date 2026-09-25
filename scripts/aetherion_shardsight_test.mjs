@@ -84,7 +84,9 @@ const drops = await page.evaluate(async () => {
   // draft asserted "every drop" and failed on the ordinary T4-5 items, which
   // are not a regression, they are the loot he always gave.
   const shard = items.filter((i) => /^Shardsight /.test(i.name || ''));
+  const cap = (typeof LX_BOSS_GEAR_CAP === 'number') ? LX_BOSS_GEAR_CAP : null;
   return {
+    cap,
     n: items.length, shardN: shard.length,
     shardTiers: [...new Set(shard.map((i) => i.tier | 0))].sort(),
     shardRar: [...new Set(shard.map((i) => i.rarity))],
@@ -97,11 +99,13 @@ const drops = await page.evaluate(async () => {
     sample: items[0] ? { name: items[0].name, tier: items[0].tier, acc: items[0].accuracy } : null,
   };
 });
-ok('a real Aetherion kill drops its full pile', !drops.err && drops.n >= 6,
-  drops.err || `${drops.n} items`);
+// The pile is the per-fight gear budget (LX_BOSS_GEAR_CAP), read from the game: it replaced the six-piece shower as the
+// one gate on every boss gear push, and a super boss spends it on its signature loot. Pinning "6" failed a correct build.
+ok('a real Aetherion kill drops its full pile (the per-fight gear budget)', !drops.err && drops.cap > 0 && drops.n >= drops.cap,
+  drops.err || `${drops.n} items, budget ${drops.cap}`);
 if (!drops.err) {
-  ok('the super-boss pile is six Shardsight pieces, every one carrying accuracy',
-    drops.shardN === 6 && drops.shardAcc.every((v) => v > 0),
+  ok('the super-boss pile is all Shardsight - the whole budget - every piece carrying accuracy',
+    drops.shardN === drops.cap && drops.shardAcc.every((v) => v > 0),
     `${drops.shardN} Shardsight of ${drops.n} total drops · acc ${JSON.stringify(drops.shardAcc)}`);
   ok('printed accuracy rolls inside the authored 40-70 band',
     drops.shardAcc.every((v) => v >= 40 && v <= 70), JSON.stringify(drops.shardAcc));
@@ -148,22 +152,35 @@ const setGain = await page.evaluate(() => {
   player.equipped = { weapon: null, armor: null, accessory: null };
   player._equipBonusCache = null;
   const before = getAccuracy();
-  // a full set: force one piece into each slot regardless of what rolled
-  for (const slot of ['weapon', 'armor', 'accessory']) {
-    let it = null;
-    for (let i = 0; i < 40 && !it; i++) { const r = _rollAetherionShardgear(); if (r) it = r; }
-    if (it) player.equipped[slot] = it;
+  // a full set: one piece in each slot regardless of what rolled.
+  // v0.30.x — the MEDIAN of 25 rolled sets. Pieces roll 40-70 accuracy at T7 or T8, so one set lands anywhere from
+  // about +440 to +700, and the two claims below bracket a narrow window (Gemini leaves its 15% floor above ~+530;
+  // Sagittarius stays under 100% below ~+600). A single roll decided both by dice - it failed one or the other on
+  // most runs. The typical set is what these claims are about; min / median / max are reported.
+  const sets = [];
+  for (let k = 0; k < 25; k++) {
+    const eq = {};
+    for (const slot of ['weapon', 'armor', 'accessory']) {
+      let it = null;
+      for (let i = 0; i < 40 && !it; i++) { const r = _rollAetherionShardgear(); if (r) it = r; }
+      if (it) eq[slot] = it;
+    }
+    player.equipped = eq; player._equipBonusCache = null;
+    sets.push({ eq, acc: getAccuracy() });
   }
-  player._equipBonusCache = null;
+  sets.sort((x, y) => x.acc - y.acc);
+  const mid = sets[sets.length >> 1];
+  player.equipped = mid.eq; player._equipBonusCache = null;
   const after = getAccuracy();
-  const out = { before, after, gain: +(after - before).toFixed(1), evas, hits: {} };
+  const out = { before, after, gain: +(after - before).toFixed(1), evas, hits: {},
+    spread: { min: +(sets[0].acc - before).toFixed(0), median: +(mid.acc - before).toFixed(0), max: +(sets[sets.length - 1].acc - before).toFixed(0) } };
   for (const z of signs) out.hits[z] = { before: +hitAt(before, evas[z]).toFixed(2), after: +hitAt(after, evas[z]).toFixed(2) };
   player.equipped = { weapon: null, armor: null, accessory: null };
   player._equipBonusCache = null;
   return out;
 });
 ok('a full three-piece Shardsight set is a large accuracy swing',
-  setGain.gain >= 350, `accuracy ${setGain.before} -> ${setGain.after} (+${setGain.gain})`);
+  setGain.gain >= 350, `median set: accuracy ${setGain.before} -> ${setGain.after} (+${setGain.gain}); 25 sets span +${setGain.spread.min} .. +${setGain.spread.max}`);
 ok('and it measurably raises hit chance across the zodiac tier it exists for',
   Object.values(setGain.hits).filter((h) => h.after > h.before).length >= 3,
   Object.entries(setGain.hits).map(([z, h]) => `${z} ${h.before}->${h.after}`).join('  '));

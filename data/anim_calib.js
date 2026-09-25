@@ -347,7 +347,7 @@ window.LX_ANIM_CALIB = {
       "dy": 0.01
     },
     "attack": {
-      "s": 1.6,
+      "s": 1.07,
       "dx": 0,
       "dy": -0.01,
       "ft": [

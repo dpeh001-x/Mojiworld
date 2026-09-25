@@ -14891,7 +14891,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1021';
+const GAME_VERSION = 'v0.30.1022';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -93119,7 +93119,9 @@ function _aetherionTick(m, dt) {
   m.patternState = (st === 'astral') ? 'astral' : 'idle';
   m.patternTimer = A.t;
   const face = () => { m.facing = pcx > bcx ? 1 : -1; };
-  const start = (s, why) => { A.st = s; A.t = 0; face(); m._dirFleeT = 0; A.recent.push(s); if (A.recent.length > 3) A.recent.shift(); A.log.push({ s, at: now, why: why || '' }); if (A.log.length > 40) A.log.shift(); };
+  // v0.30.x — a windup plays the attack animation for its own length and the release (atkAnimUntil is on the frame clock).
+  const _AE_WIND_MS = { lanceWind: A.fast ? 300 : (phase === 3 ? 500 : 650), fractureWind: 500, shardfallWind: 450, skybreakWind: 1200 };
+  const start = (s, why) => { A.st = s; A.t = 0; face(); m._dirFleeT = 0; if (_AE_WIND_MS[s] && typeof _lxFrameNow === 'function') m.atkAnimUntil = _lxFrameNow() + _AE_WIND_MS[s] + 260; A.recent.push(s); if (A.recent.length > 3) A.recent.shift(); A.log.push({ s, at: now, why: why || '' }); if (A.log.length > 40) A.log.shift(); };
   const finish = () => { A.st = 'idle'; A.t = 0; };
   const gY = (() => { const g = (game.mapData && game.mapData.platforms || []).find((p) => p && p.type === 'ground'); return g ? g.y : (m.y + m.h); })();
   if (st === 'idle') {
@@ -93216,7 +93218,7 @@ function _aetherionTick(m, dt) {
     if (!A.astralFired) {
       A.astralFired = true;
       const base = Math.atan2((player.y + player.h / 2) - (m.y + m.h / 2), pcx - bcx);
-      for (let i = 0; i < _AE_ASTRAL_BURST; i++) _aeLance(m, base + (i - (_AE_ASTRAL_BURST - 1) / 2) * 0.17, 5.2, 1.1, 0.4);
+      for (let i = 0; i < _AE_ASTRAL_LANCES; i++) _aeLance(m, base + (i - (_AE_ASTRAL_LANCES - 1) / 2) * 0.17, 5.2, 1.1, 0.4);   // v0.30.x — the lance count (was _AE_ASTRAL_BURST, the art frame)
       fire();
     }
     if (t < _AE_ASTRAL_TELE + _AE_ASTRAL_TAIL) return;
@@ -95161,7 +95163,10 @@ function bossAI(m, dt, distToPlayer) {
     // → phase compare `NaN > 0.66 = false` → fell through to phase 3
     // immediately, locking the boss in its enrage state on spawn.
     const hpPct = m.maxHp > 0 ? m.currentHp / m.maxHp : 1;
-    const phase = hpPct > 0.66 ? 1 : hpPct > 0.33 ? 2 : 3;
+    // v0.30.x — the DIRECTOR's phases (_aetherionTick): 1 until the evolve at 50%, 2 after it, 3 below 25%. This read
+    // 66% / 33% and announced "reality fractures" and "final form!" at moments where nothing about him changed - the
+    // real turns are the evolve (its own theatre) and the last quarter (opened by the Astral Echo).
+    const phase = m._aetherionEvolved ? (hpPct < 0.25 ? 3 : 2) : 1;
     if (m.phase !== phase) {
       m.phase = phase;
       m.patternTimer = 0;
@@ -95174,9 +95179,7 @@ function bossAI(m, dt, distToPlayer) {
       m._sgSpawned = m._drainFired = m._drainAnnounced = false;   // v0.26.1026 — these 3 latches were omitted; a phase-cross mid-Singularity/Soul-Drain telegraph left them stuck true -> next cast dudded
       m._orbsFiredCount = 0; m._rainTicks = 0;
       if (phase === 2) {
-        showToast('⚡ AETHERION SHIFTS — reality fractures', 'legendary');
-        flash(0.5); addShake(10); addHitStop(90);
-        audio.play('boss_phase');
+        // v0.30.x — phase 2 IS the evolve now, and _lxAeEvolveStart announces it ("AETHERION EVOLVES") with its own theatre.
       } else if (phase === 3) {
         showToast('💀 AETHERION UNLEASHED — final form!', 'legendary');
         flash(0.7); addShake(16); addHitStop(150);
@@ -95204,7 +95207,13 @@ function bossAI(m, dt, distToPlayer) {
     const _drift     = _evolvedMob ? 0.075 : 0.04;
     const _driftCap  = _evolvedMob ? 3.0  : 1.5;
     const dx = (player.x + player.w/2) - (m.x + m.w/2);
-    m.vx += Math.sign(dx) * _drift;
+    // v0.30.x — planted while the director winds up (it sets vx 0 first; this used to add the drift straight back, so
+    // he crept through every telegraph), and a dead band: inside a third of his width he eases to a stop instead of
+    // accelerating toward a centre that flips side every frame - the slide-through that made King Krook look like he
+    // was skating (v0.30.968).
+    if (m._ae && m._ae.st && m._ae.st !== 'idle') m.vx = 0;
+    else if (Math.abs(dx) < m.w * 0.33) m.vx *= 0.8;
+    else m.vx += Math.sign(dx) * _drift;
     if (Math.abs(m.vx) > _driftCap) m.vx = Math.sign(m.vx) * _driftCap;
 
     // v0.25.714 — Cycle base tightened by ~15-20% per phase (was 2400 /
@@ -95215,38 +95224,15 @@ function bossAI(m, dt, distToPlayer) {
     const cycleBase = phase === 1 ? 1700 : phase === 2 ? 1150 : 750;   // v0.30.x — was 2000/1400/900
 
     if (m.patternState === 'idle') {
-      // v0.26.x — COMBO CHAINING (Aetherion only): occasionally fire a SECOND
-      // pattern back-to-back with NO idle gap, for a "here it comes" double-hit.
-      const _aeComboReady = m._aeCombo && m.patternTimer < cycleBase;
-      if (m.patternTimer > cycleBase || _aeComboReady) {
-        if (_aeComboReady) { m._aeCombo = false; if (typeof addShake === 'function') addShake(5); }
-        // Pick next pattern weighted by phase
-        // v0.25.714 — `astral` (Astral Judgement) added to the rotation:
-        // 10 % phase 1, 16 % phase 2, 20 % phase 3.
-        // v0.25.717 — `deathOrbs` (avoidable instakill orbs) added per user
-        // request. Available across all phases but rare in phase 1 (signals
-        // the boss's true power), regular in phase 2/3 (one-shot pressure
-        // every ~5-6 idle cycles in the late fight).
-        const roll = Math.random();
-        if (phase === 1) {
-          // 48 % volley, 26 % tear, 10 % rain, 10 % astral, 6 % deathOrbs
-          m.patternState = roll < 0.48 ? 'volley' : roll < 0.74 ? 'tear' : roll < 0.84 ? 'rain' : roll < 0.94 ? 'astral' : 'deathOrbs';
-        } else if (phase === 2) {
-          // 26 % volley, 20 % tear, 16 % beam, 12 % teleport, 14 % astral, 12 % deathOrbs
-          m.patternState = roll < 0.26 ? 'volley' : roll < 0.46 ? 'tear' : roll < 0.62 ? 'beam' : roll < 0.74 ? 'teleport' : roll < 0.88 ? 'astral' : 'deathOrbs';
-        } else {
-          // 16 % volley, 18 % beam, 18 % teleport, 14 % rain, 16 % astral, 18 % deathOrbs
-          m.patternState = roll < 0.16 ? 'volley' : roll < 0.34 ? 'beam' : roll < 0.52 ? 'teleport' : roll < 0.66 ? 'rain' : roll < 0.82 ? 'astral' : 'deathOrbs';
-        }
-        m.patternTimer = 0;
-        // Arm a follow-up combo off a NON-one-shot opener (so the chain never
-        // produces back-to-back instakills), phase-scaled, never mid-combo.
-        if (!_aeComboReady) {
-          const _comboable = (m.patternState !== 'deathOrbs' && m.patternState !== 'astral');
-          const _comboChance = phase === 1 ? 0.20 : phase === 2 ? 0.38 : 0.55;   // v0.30.x — was 0.12/0.28/0.42
-          m._aeCombo = _comboable && Math.random() < _comboChance;
-        }
-      }
+      // v0.30.x — RETIRED (per user: "ensure good boss AI"). This picked a legacy pattern whenever it saw 'idle' with
+      // patternTimer past cycleBase. Since v0.30.362 his fight is _aetherionTick's, which runs FIRST each tick and
+      // mirrors patternState to 'idle' with its own clock - so this picked a new random pattern EVERY tick while the
+      // director was between attacks. Traced in the Sanctum: idle -> astral -> deathOrbs -> volley -> deathOrbs -> beam
+      // -> astral -> beam -> idle inside 11 ticks, 230-340 "patterns" a minute, none of them ever reaching its fire
+      // point (the volley at 400 ms). They did not hit, but they were what got DRAWN: every pick switched him onto the
+      // attack art (then at a stale x1.6 calib) or the astral art for a single frame - the flicker of size the user
+      // saw. The patterns below are reachable only from here, so they are dormant now; 'astral' is not - the
+      // director mirrors it, and the Astral Judgement below still answers it on its own two-minute gate.
     } else if (m.patternState === 'volley') {
       // Shard Volley — fire 6–8 projectiles in a fan
       const count = phase === 1 ? 6 : phase === 2 ? 9 : 12;   // v0.30.x — was 6/8/10
@@ -99435,6 +99421,7 @@ function _lxOnHitProcs(m, dmg, skill) {
 // hit-stop and the hit sparks still land; he simply does not deflate. Checked before the tier chain rather than
 // inside the boss branch, so an echo or a flag-only spawn of him cannot fall through to the BIGGER mob squash.
 const _LX_NO_HIT_SQUASH = new Set(['kingKrook']);
+_LX_NO_HIT_SQUASH.add('aetherion');   // v0.30.x - 16% of his frames were drawn mid-squash in a traced fight
 // v0.30.854 - the attribution belongs to this hit alone. Whatever the hit sets off from inside (chain lightning at 50% of the
 // ALREADY-ranked damage, overkill carry, the mage's spell echo, on-kill bursts) runs with none, or the rank would be paid twice.
 function hitMonster(m, dmg, isCrit, skill) {
@@ -139509,7 +139496,10 @@ function _gravitosPunchPair(m) {
 // the same failure as the one this constant was introduced to fix, pointing
 // the other way. scripts/regen_aetherionastral.mjs --check prints the peak and
 // says which number this has to be.
-const _AE_ASTRAL_BURST = 5, _AE_ASTRAL_TELE = 1500, _AE_ASTRAL_TAIL = 420;
+// v0.30.x — _AE_ASTRAL_BURST is the ART's burst frame (the one on screen at the resolve); _AE_ASTRAL_LANCES is how many
+// lances the Astral Echo fires. They were one constant, so moving the frame for regenerated art moved the lance count
+// too (4 -> 5). The shipped set peaks at frame 4; the lance count stays at the 5 it has been since.
+const _AE_ASTRAL_BURST = 4, _AE_ASTRAL_TELE = 1500, _AE_ASTRAL_TAIL = 420, _AE_ASTRAL_LANCES = 5;
 function _aetherionAstralKey(m) {
   // Form 2 may ship its own set later; until it does the key will not resolve
   // and the caller falls back to the generic attack pose, exactly as today.

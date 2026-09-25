@@ -84,6 +84,10 @@ const scenario = await page.evaluate(() => {
     // at 120-170Hz while the sim is time-banked at 60 steps/s, so 1800 frames
     // measured as only 513 steps of fight. Scripted events key on sim time too.
     const steps = opts.frames || 1500;
+    // v0.30.x — a seeded draw where the check is a SHARE: 12 free picks at p~0.45 fall to 4 (33%) about a third of
+    // the time, so the air check failed on luck, not on the director. Seeded, it measures what the weights produce.
+    const _rnd0 = Math.random;
+    if (opts.seed) { let a = opts.seed >>> 0; Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
     const gt0 = game.time | 0;
     let i = 0, guard = 0;
     while (((game.time | 0) - gt0) < steps && guard++ < steps * 6) {
@@ -112,6 +116,7 @@ const scenario = await page.evaluate(() => {
       }
       prevProj = np; prevHz = nh;
     }
+    Math.random = _rnd0;
     const log = (m._ae && m._ae.log || []).slice();
     const picks = {}; for (const l of log) picks[l.s] = (picks[l.s] || 0) + 1;
     // windups come from the AI's own fire log (ms elapsed in the pattern at the
@@ -143,7 +148,7 @@ ok('a kiting player at range is answered with Shard Lances (lance share >= 45%)'
 const hug = await ev(async () => await window.__ae({ mode: 'hug', frames: 1500 }));
 ok('a player hugging one flank and hammering him is Echo-Stepped to the other side', !hug.err && (hug.picks.echoWind || 0) >= 1 && hug.why.some((w) => w === 'pressed'),
   hug.err || `${hug.picks.echoWind || 0} echo steps; reads: ${[...new Set(hug.why)].join(',')}; boss x ${Math.round(hug.x)} vs player x ${Math.round(hug.px)}`);
-const air = await ev(async () => await window.__ae({ mode: 'air', frames: 1500 }));
+const air = await ev(async () => await window.__ae({ mode: 'air', frames: 3000, seed: 20260925 }));
 const airShard = air.picks ? (air.picks.shardfallWind || 0) / Math.max(1, air.n) : 0;
 ok('a player living in the air draws Shardfall on the landing spot (share >= 35%)', !air.err && airShard >= 0.35 && air.why.some((w) => w === 'air'), air.err || `${(airShard * 100).toFixed(0)}% shardfall of ${air.n}; reads: ${[...new Set(air.why)].join(',')}`);
 const heal = await ev(async () => await window.__ae({ mode: 'heal', frames: 900 }));

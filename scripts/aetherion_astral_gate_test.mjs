@@ -119,6 +119,8 @@ const R = await page.evaluate(async () => {
   // boss calib chain learned _aeAstralKey, both read aetherion.attack, so
   // tuning Astral Judgement resized his ordinary swing with it.
   out.calibAe = JSON.stringify(_lxAnimCalib('aetherion', 'attack'));
+  out.shippedAe = (window.LX_ANIM_CALIB && LX_ANIM_CALIB.aetherion && LX_ANIM_CALIB.aetherion.attack) ? LX_ANIM_CALIB.aetherion.attack.s : null;
+  out.shippedAstral = (window.LX_ANIM_CALIB && LX_ANIM_CALIB.aetherionastral && LX_ANIM_CALIB.aetherionastral.attack) ? LX_ANIM_CALIB.aetherionastral.attack.s : null;
   out.calibAstral = JSON.stringify(_lxAnimCalib('aetherionastral', 'attack'));
   out.chainHasAstral = /_aeAstralKey/.test(String(typeof drawMonster === 'function' ? drawMonster : ''));
   return out;
@@ -157,12 +159,14 @@ ok('the astral set has its OWN calib entry',
 // Parsed, not pattern-matched. The regex form could not match: /s:1.6/ never
 // matches "s":1.6 because of the quote between them, and it reported a
 // correct build as broken.
+// v0.30.x — compared with what data/anim_calib.js SHIPS, not a literal: the literal pinned x1.6, which the Aetherion
+// audit measured as drawing the attacking dragon 1.5x the walking one (corrected to 1.07).
 ok('...so tuning the spell cannot resize his ordinary attack',
-   (() => { try { return JSON.parse(R.calibAe).s === 1.6; } catch (e) { return false; } })(),
-   `aetherion.attack is back to its pre-patch scale: ${R.calibAe}`);
-ok('...and the spell keeps the tuned scale',
-   (() => { try { return JSON.parse(R.calibAstral).s === 1.94; } catch (e) { return false; } })(),
-   `aetherionastral.attack: ${R.calibAstral}`);
+   (() => { try { return R.shippedAe != null && JSON.parse(R.calibAe).s === R.shippedAe && R.shippedAe !== R.shippedAstral; } catch (e) { return false; } })(),
+   `aetherion.attack resolves its own shipped scale: ${R.calibAe} (shipped ${R.shippedAe})`);
+ok('...and the spell keeps its own tuned scale',
+   (() => { try { return R.shippedAstral != null && JSON.parse(R.calibAstral).s === R.shippedAstral; } catch (e) { return false; } })(),
+   `aetherionastral.attack: ${R.calibAstral} (shipped ${R.shippedAstral})`);
 ok('CONTROL: the probe can tell the two apart', R.f1_astral.keys !== R.f2_astral.keys,
    'if these matched, the test could not distinguish a gate from a no-op');
 

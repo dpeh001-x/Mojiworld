@@ -59,7 +59,7 @@ const CANVAS_W = 1656, CANVAS_H = 1325;
 // still fits every frame's spell tail, which is 1324 when nothing hangs below
 // and drops only by however much does.
 const FOOT_ROW_MAX = CANVAS_H - 1;
-const BURST = 5;                // _AE_ASTRAL_BURST — the frame the damage lands on (moved 4->5 with this art)
+const BURST = 4;                // _AE_ASTRAL_BURST — the frame the damage lands on (back to 4: the shipped art peaks there; the lance count is _AE_ASTRAL_LANCES now)
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);

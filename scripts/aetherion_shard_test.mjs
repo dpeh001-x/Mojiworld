@@ -70,10 +70,11 @@ const R = await page.evaluate(async () => {
     const info = p ? { skill: p.skill, src: p._srcType || null, homing: !!p.homing, floorPct: p._heavyFloorPct } : null;
     let hit = false;
     for (let i = 0; i < 140; i++) {
-      if (!game.projectiles.some((z) => z.skill === 'maeshard')) { hit = player.invulnerable > 0; break; }
+      if (!game.projectiles.some((z) => z.skill === 'maeshard')) { hit = (hp0 - player.hp) > 0 || player.invulnerable > 0; break; }   // v0.30.x — a landed lance is the HP it took; post-hit i-frames are not set on this path any more, so they alone read a landed 99.7% hit as a miss
       await sleep(16);
     }
     const lost = hp0 - player.hp;
+    if (!hit && lost > 0) hit = true;   // the lance can outlive its hit in the array (it fades), so the loop may never see it gone - a landed lance is still the HP it took
     player.blockTimer = 0; player._god = false; player.invulnerable = 0; player.hp = getMaxHp();
     return { info, hit, lost, pct: +(100 * lost / getMaxHp()).toFixed(1) };
   };
