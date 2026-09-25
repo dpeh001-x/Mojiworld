@@ -86,14 +86,14 @@ try {
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     _playBossIntro('legosaurus');
     const o = document.getElementById('boss-intro-overlay');
-    const shown = { on: !!o && o.classList.contains('on'), name: (document.getElementById('boss-intro-name') || {}).textContent, title: (document.getElementById('boss-intro-title') || {}).textContent, lore: (document.getElementById('boss-intro-lore') || {}).textContent };
+    const shown = { on: !!o && o.classList.contains('on'), name: (document.getElementById('boss-intro-name') || {}).textContent, title: (document.getElementById('boss-intro-title') || {}).textContent, lore: (document.getElementById('boss-intro-lore') || {}).textContent, loreShown: (() => { const l = document.getElementById('boss-intro-lore'); return !!(l && l.textContent && getComputedStyle(l).display !== 'none'); })() };
     if (o) o.classList.remove('on'); game.paused = false;
     return { arena, named, shown };
   });
   const noCard = bi.arena.filter((a) => !a.ok);
   check(bi.arena.length >= 9 && !noCard.length, 'every boss a boss arena spawns has an intro card', noCard.map((a) => a.map + ':' + a.type).join(', ') || bi.arena.length + ' arenas');
   check(bi.named.every((n) => n.ok && n.known), 'the eight named bosses that only had a spawn banner now have a full card (name, title, lore, glyph, colour)', bi.named.filter((n) => !n.ok || !n.known).map((n) => n.t).join(', '));
-  check(bi.shown.on && /LEGOSAURUS/.test(bi.shown.name || '') && /Warped Tyrant/.test(bi.shown.title || '') && /fear wearing armour/.test(bi.shown.lore || ''), 'the card renders: LEGOSAURUS — The Warped Tyrant — with its lore', JSON.stringify(bi.shown).slice(0, 160));
+  check(bi.shown.on && /LEGOSAURUS/.test(bi.shown.name || '') && /Warped Tyrant/.test(bi.shown.title || '') && !bi.shown.loreShown, 'the card renders: LEGOSAURUS, The Warped Tyrant on its tape, and no lore paragraph (v0.30.1068, per user: "less wordy")', JSON.stringify(bi.shown).slice(0, 160));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);
