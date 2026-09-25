@@ -16,6 +16,8 @@
 //      used to draw the job's three picks a second time as "Master Talent"); with a master, two cards
 //      with different picks; with no job, a locked Job teaser; a learned talent shows one sticker and
 //      a Respec button carrying data-talent-respec; open picks keep data-talent
+//   7. a learned (equipped) talent is the one other thing in colour - its tile takes the class's colour
+//      (CLASSES[cls].color); and the Reset dialog opens in the black-and-white skin
 //   node scripts/innate_card_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -62,13 +64,15 @@ const read = (st) => page.evaluate(async (st) => {
     h: [...c.querySelectorAll('.lg-col')].map((e) => [parseFloat(e.style.getPropertyValue('--h')), parseFloat(e.style.getPropertyValue('--e'))]),
     last: last ? { cls: last.className, txt: last.textContent.replace(/\s+/g, ' ').trim() } : null,
     mono: (() => { const out = []; const els = [c, ...c.querySelectorAll('*'), ...(host ? host.querySelectorAll('.lt-card, .lt-card *') : [])];
-      for (const e of els) { if (e.closest('.lg-stat') || e.closest('.lx-emo') || e.tagName === 'IMG' || (e.classList && e.classList.contains('ui-ico'))) continue;
+      for (const e of els) { if (e.closest('.lg-stat') || e.closest('.lt-equipped') || e.closest('.lx-emo') || e.tagName === 'IMG' || (e.classList && e.classList.contains('ui-ico'))) continue;
         const cs = getComputedStyle(e);
         for (const k of ['color', 'backgroundColor', 'borderTopColor']) { const n = (cs[k].match(/[\d.]+/g) || []).map(Number); if (n.length < 3 || (n.length > 3 && n[3] === 0)) continue;
           const mx = Math.max(n[0], n[1], n[2]), mn = Math.min(n[0], n[1], n[2]); if (mx - mn > 16) out.push((e.className || e.tagName) + ' ' + k + ' ' + cs[k]); } }
       return out.slice(0, 6); })(),
     italic: [c, ...c.querySelectorAll('*'), ...(host ? host.querySelectorAll('.lt-card, .lt-card *') : [])].filter((e) => getComputedStyle(e).fontStyle === 'italic').length,
     titleFont: title ? getComputedStyle(title).fontFamily : '',
+    eq: host ? [...host.querySelectorAll('.lt-learned')].map((e) => [e.classList.contains('lt-equipped'), e.style.getPropertyValue('--c').trim()]) : [],
+    clsCol: (CLASSES[player.cls] || {}).color,
     titleStyle: title ? getComputedStyle(title).fontStyle + ' ' + getComputedStyle(title).fontWeight : '',
     fills: [...c.querySelectorAll('.lg-stat')].map((e) => { const v = getComputedStyle(e).getPropertyValue('--c').trim() || getComputedStyle(e).backgroundColor; const k = document.createElement('i'); k.style.color = v; document.body.appendChild(k); const rgb = getComputedStyle(k).color; k.remove(); return rgb; }),
     cards: cards.map((k) => ({ cls: k.className, title: (k.querySelector('.lt-title') || {}).textContent, picks: [...k.querySelectorAll('[data-talent]')].map((p) => p.getAttribute('data-talent')),
@@ -98,6 +102,7 @@ if (A) {
   ok('6. with a master: two pick cards, and their picks differ', M.cards.length === 2 && M.cards.every((k) => k.picks.length === 3) && M.cards[0].picks.join() !== M.cards[1].picks.join(), JSON.stringify(M.cards));
   const K = await read({ master: null, talents: { knight: 'crusade' }, _innateLastRoll: 1 });
   ok('6. a learned talent: one sticker naming it and a Respec for its tier', (K.cards[0] || {}).learned && K.cards[0].learned.length === 1 && /Crusade/.test(K.cards[0].learned[0]) && K.cards[0].respec === 'knight' && K.cards[0].picks.length === 0, JSON.stringify(K.cards[0]));
+  ok('7. the learned talent is shown in the class colour (warrior ' + K.clsCol + ')', K.eq.length === 1 && K.eq[0][0] === true && K.eq[0][1] === K.clsCol, JSON.stringify([K.eq, K.clsCol]));
   ok('4. a +1 roll is a lucky sticker', K.last && /lucky/.test(K.last.cls) && !/jackpot/.test(K.last.cls), JSON.stringify(K.last));
   const U = await read({ level: 2, job: null, master: null, talents: {}, _innateSp: 0, _innateLevels: 1, _innateLastRoll: 0, _innateRollCounts: [1, 0, 0] });
   ok('4. a +0 roll is a plain sticker, and one level-up gives 30 / 12 / 3 / 2', U.last && !/lucky|jackpot/.test(U.last.cls) && /unlucky/i.test(U.last.txt) && U.stats.length === 4 && /^\+30HP/.test(U.stats[0]), JSON.stringify([U.last, U.stats]));
@@ -105,6 +110,9 @@ if (A) {
   const Z = await read({ level: 1, _innateSp: 0, _innateLevels: 0, _innateLastRoll: undefined, _innateRollCounts: [0, 0, 0] });
   ok('4. level 1: no stickers or rolls, "No level-ups yet"', Z.stats.length === 0 && Z.cols.length === 0 && Z.last && /No level-ups yet/.test(Z.last.txt), JSON.stringify(Z));
 }
+const RC = await page.evaluate(async () => { player.skillPoints = 0; player._levelUpSpent = { hp: 5 }; player.coins = 5000; player.setshards = 2000; resetStats(); await new Promise((r) => setTimeout(r, 300));
+  const m = document.getElementById('confirm-modal'); const on = !!m && m.style.display !== 'none', cls = m ? m.className : ''; const n = document.getElementById('confirm-no'); if (n) n.click(); return { on, cls }; });
+ok('7. the Reset dialog opens in the black-and-white skin', RC.on && /\bskin-mono\b/.test(RC.cls), JSON.stringify(RC));
 ok('no page errors', errs.length === 0, errs.join(' | '));
 await b.close(); srv.kill();
 for (const r of results) console.log((r.pass ? 'PASS  ' : 'FAIL  ') + r.n + (r.pass ? '' : '  -- ' + r.x));
