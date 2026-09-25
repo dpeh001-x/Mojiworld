@@ -14,6 +14,10 @@
 //   5. the punk chrome: the heading hot pink printed over an acid-yellow offset
 //   6. every boon keycap is black; an equipped key has a hot-pink rim, an unequipped one a grey rim; the
 //      art is at least 24px with a white sticker outline, in colour when equipped and greyscale when not
+//   7. strength and tier: every keycap names its tier (k-common / k-rare / k-epic); --q is where the roll sits
+//      in its level band (_boonBand), the pips count round(q x 5) (at least 1), a roll at 90%+ is k-top, and the
+//      key's glow grows with q; a fixed-value boon (+1 Jump) has no --q and no pips; a maxed equipped boon says
+//      TOP ROLL; unequipped cards stay black and white throughout
 //   node scripts/boon_loadout_mono_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -103,6 +107,21 @@ const E = await page.evaluate(async () => {
 });
 ok('4. Equip fills a free slot, Unequip empties it', JSON.stringify(E.afterEquip) === '[0,2]' && JSON.stringify(E.afterUnequip) === '[2]' || (E.afterEquip.length === 2 && E.afterUnequip.length === 1 && !E.afterUnequip.includes(0)), JSON.stringify([E.afterEquip, E.afterUnequip]));
 ok('4. Bulk discard ticks a boon and discards it through the confirm', E.bulkOn && E.ticked === 1 && E.discarded === 1, JSON.stringify(E));
+const T = await page.evaluate(async () => {
+  player.boons = [['skin', 8], ['atk_p', 3], ['ls', 6], ['blink', 130], ['crit', 25], ['thorns', 35], ['jmp', 1], ['execute', 9]].map(([id, roll]) => ({ id, roll, rerolls: 0 }));
+  player.boonsEquipped = [0, 1]; game._boonBulk = false; game._boonSel = new Set(); renderBoonPanel(); await new Promise((r) => setTimeout(r, 300));
+  const host = document.getElementById('lp-boons');
+  const chroma = (v) => { let n = (v.match(/[\d.]+/g) || []).map(Number); if (/^color\(srgb/.test(v)) n = n.map((x, i) => (i < 3 ? x * 255 : x)); if (n.length < 3 || (n.length > 3 && n[3] === 0)) return 0; return Math.max(n[0], n[1], n[2]) - Math.min(n[0], n[1], n[2]); };
+  const cards = [...host.querySelectorAll('.bl-card')].map((c) => { const k = c.querySelector('.bl-ico'), b = player.boons.find((x) => getBoonDef(x).name === c.querySelector('.bl-name').textContent.trim()), d = getBoonDef(b), band = _boonBand(d);
+    const want = band.hi > band.lo ? Math.max(0, Math.min(1, (b.roll - band.lo) / (band.hi - band.lo))) : null; const blur = +((getComputedStyle(k).filter.match(/(\d+(?:\.\d+)?)px\)\s*$/) || [])[1] || 0);
+    return { name: d.name, tier: d.tier, eq: c.classList.contains('is-eq'), cls: k.className, q: k.style.getPropertyValue('--q') ? +k.style.getPropertyValue('--q') : null, want, pips: c.querySelectorAll('.bl-q i.on').length, pipsN: c.querySelectorAll('.bl-q i').length, blur, top: !!c.querySelector('.bl-top') }; });
+  const grey = [...host.querySelectorAll('.bl-card:not(.is-eq), .bl-card:not(.is-eq) *')].filter((e) => e.tagName !== 'IMG' && !e.closest('.lx-emo') && !(e.classList && e.classList.contains('coin-ico'))).filter((e) => ['color', 'backgroundColor', 'borderTopColor'].some((k) => chroma(getComputedStyle(e)[k]) > 16)).length;
+  return { cards, grey };
+});
+const C = T.cards, by = (n) => C.find((c) => c.name === n) || {};
+ok('7. every keycap names its tier; --q is the roll\'s place in its band; pips = round(q x 5)', C.length === 8 && C.every((c) => c.cls.includes('k-' + c.tier) && (c.want == null ? c.q == null && c.pipsN === 0 : Math.abs(c.q - c.want) < 0.006 && c.pipsN === 5 && c.pips === Math.max(1, Math.round(c.want * 5)))), JSON.stringify(C.map((c) => [c.name, c.cls, c.q, c.want && +c.want.toFixed(2), c.pips])));
+ok('7. a 90%+ roll is k-top, and the glow grows with the roll', C.every((c) => c.cls.includes('k-top') === (c.want != null && c.want >= 0.9)) && by('Sharp Eye').blur > by('Thorns').blur && by('Thorns').blur > by('Lifesteal').blur && by('Second Skin').blur > by('Iron Muscles').blur, JSON.stringify(C.map((c) => [c.name, c.blur])));
+ok('7. a fixed-value boon has no strength read; a maxed equipped boon says TOP ROLL; unequipped stay black and white', by('Leap Boost').q == null && by('Leap Boost').pipsN === 0 && by('Second Skin').top && !by('Iron Muscles').top && T.grey === 0, JSON.stringify([by('Leap Boost'), by('Second Skin').top, T.grey]));
 ok('no page errors', errs.length === 0, errs.join(' | '));
 await b.close(); srv.kill();
 for (const r of results) console.log((r.pass ? 'PASS  ' : 'FAIL  ') + r.n + (r.pass ? '' : '  -- ' + r.x));
