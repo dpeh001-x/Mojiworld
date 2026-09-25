@@ -82,7 +82,7 @@ try {
   check(r.fonts.body500 && r.fonts.body700 && r.fonts.italic, 'TYPE: Alegreya 500, 700 and italic all load', J(r.fonts));
   check(/^Alegreya/.test(r.type.family) && r.type.size === '18.5px', 'TYPE: the speech is set in Alegreya at 18.5 px', J(r.type));
   check(/Cinzel/.test(r.type.nameFamily), 'TYPE: the name is Cinzel', r.type.nameFamily.slice(0, 40));
-  check(/blur\(1[68]px\)/.test(r.glass.backdrop) && !r.glass.texture, 'GLASS: a 16-18 px blur behind the panel and no shard texture', J(r.glass));
+  check(/blur\(1[468]px\)/.test(r.glass.backdrop) && !r.glass.texture, 'GLASS: a 14-18 px blur behind the panel and no shard texture', J(r.glass));   // v0.30.977 ink blurs 14 px
   check(/none|^$/.test(r.nb.backdrop) && /linear-gradient/.test(r.nb.bg), 'GLASS: perf mode strips the blur and keeps a near-solid ground', J(r.nb));
   check(!r.caretShown, 'DELIVERY: no block caret', 'shown ' + r.caretShown);
   check(r.delays.length >= 2 && r.delays[0] === '0ms' && r.delays[1] === '45ms', 'DELIVERY: answers rise 45 ms apart', J(r.delays));

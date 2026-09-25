@@ -56,7 +56,8 @@ try {
   const a = await readCard();
   check(a.figure && a.padL === '262px', 'a speaker with art: the card takes the figure layout (class + 262 px stage)', J({ figure: a.figure, padL: a.padL }));
   check(a.port.pos === 'absolute' && a.port.w === '300px' && a.port.radius === '0px' && a.port.size === 'contain' && a.port.bpos === 'center bottom' && !a.port.sheen && /drop-shadow/.test(a.port.filter), 'the figure: 300 px, square, the art alone fitted whole with feet down, sticker outline', J(a.port));
-  check(/2px rgb\(23, 16, 42\)/.test(a.tag.border) && /4px 4px 0px/.test(a.tag.shadow) && a.tag.transform === 'none' && a.tag.clip === 'none', 'the name tag: flat, 2 px ink outline, hard 4 px offset shadow, no tilt', J(a.tag));
+  // v0.30.977 ink and paper: the tag's line and offset are black (#0c0b10), the offset 5 px, and it tilts a degree and a half
+  check(/2px rgb\((12, 11, 16|23, 16, 42)\)/.test(a.tag.border) && /[45]px [45]px 0px/.test(a.tag.shadow) && a.tag.clip === 'none', 'the name tag: flat, 2 px ink outline, hard offset shadow, no slant', J(a.tag));
   check(a.inkLeft === '240px' && a.inkClip === 8 && a.halftone, 'the ink box: moved right of the stage, an octagon, halftone screen in the corner', J({ inkLeft: a.inkLeft, points: a.inkClip, halftone: a.halftone }));
   check(a.hdrPos === 'absolute' && a.hdrPointer === 'none', 'the header is a click-through overlay so the figure can stand on the floor and the tag on the edge', J({ pos: a.hdrPos, pointer: a.hdrPointer }));
   // the answers still work through the overlay

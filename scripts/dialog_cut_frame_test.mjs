@@ -45,6 +45,9 @@ try {
     loadMap('town', 300); await new Promise((r) => setTimeout(r, 1500)); try { closeAllModals(); } catch (e) {} game.paused = false;
     const milo = (game.npcs || []).find((n) => n && n.role === 'usher'); if (!milo) return { no: 'no Milo' };
     openNPC(milo); await new Promise((r) => setTimeout(r, 500));
+    // the perf governor flips html.lx-nobackdrop on its own when frames run slow (a loaded test box does that);
+    // the blur is read with it off, the perf-mode ground is measured with it on further down
+    document.documentElement.classList.remove('lx-nobackdrop');
     const dlg = document.getElementById('dialog');
     const skin = dlg.querySelector(':scope > .dlg-skin'), ink = dlg.querySelector(':scope > .dlg-ink');
     const first = dlg.firstElementChild && dlg.firstElementChild.className;
@@ -73,17 +76,18 @@ try {
     return { card, layers, portrait, name, chips, bank, confirm, nb };
   });
   if (r.no) throw new Error(r.no);
-  check(r.layers.first === 'dlg-skin' && /polygon/.test(r.layers.inkClip) && /blur\(16px\)/.test(r.layers.inkBlur) && r.layers.inkZ === '0', 'live: the ink layer is a clipped, blurred box under the content', J(r.layers));
+  check(r.layers.first === 'dlg-skin' && /polygon/.test(r.layers.inkClip) && /blur\(1[46]px\)/.test(r.layers.inkBlur) && r.layers.inkZ === '0', 'live: the ink layer is a clipped, blurred box under the content', J(r.layers));   // v0.30.977 blurs 14 px
   check(/polygon/.test(r.layers.plateClip) && /linear-gradient/.test(r.layers.plateBg) && /polygon/.test(r.layers.outlineClip), 'live: the torn plate and the gold outline are painted in the skin', J({ plate: r.layers.plateClip, outline: r.layers.outlineClip }));
   check(r.card.bg === 'none' && r.card.border === '0px' && r.card.shadow === 'none' && r.card.radius === '0px', 'live: the card itself paints nothing (no background, border, shadow or radius)', J(r.card));
   // v0.30.976 - a speaker with art now stands at the side as a 300 px figure; the medallion is the art-less / confirm-card form
   check(r.portrait.clip === 'none' && ((r.portrait.figure && r.portrait.w === '300px' && r.portrait.radius === '0px') || (!r.portrait.figure && r.portrait.w === '72px' && r.portrait.radius === '50%')), 'live: the portrait is the side figure for a speaker with art (300 px, square) or the 72 px medallion otherwise', J(r.portrait));
   // v0.30.976 - in the figure layout the banner is a flat tag (no tilt, no slant); the tilted banner remains the medallion frame's
-  check(/rgb\(23, 16, 42\)/.test(r.name.fill) && /linear-gradient/.test(r.name.bg) && /Cinzel/.test(r.name.family) && (r.portrait.figure ? (r.name.transform === 'none' && r.name.clip === 'none') : (r.name.transform !== 'none' && /polygon/.test(r.name.clip))), 'live: the name is ink Cinzel on a cream plate - a flat tag beside a figure, a tilted banner beside the medallion', J(r.name));
+  // v0.30.977 ink and paper: the lettering is #0c0b10 and the figure's tag tilts a degree and a half (still no slant cut)
+  check(/rgb\((12, 11, 16|23, 16, 42)\)/.test(r.name.fill) && /linear-gradient/.test(r.name.bg) && /Cinzel/.test(r.name.family) && (r.portrait.figure ? r.name.clip === 'none' : (r.name.transform !== 'none' && /polygon/.test(r.name.clip))), 'live: the name is ink Cinzel on a paper plate - a flat tag beside a figure, a tilted banner beside the medallion', J(r.name));
   check(r.chips.length >= 2 && r.chips.every((c) => /matrix\(1, 0, -0\.17/.test(c.lean) && c.label && /matrix\(1, 0, 0\.17/.test(c.label)), 'live: every answer chip leans 10 degrees and its label leans back upright', J(r.chips));
   check(r.bank && r.bank.nested >= 2 && r.bank.straight, "live: the bank's self-rendered row keeps straight buttons", J(r.bank));
   check(r.confirm.length === 2 && r.confirm.every((c) => c.span) && r.confirm[0].text === 'Go on', 'live: the confirm card wraps Yes/No in the label span too', J(r.confirm));
-  check(/none|^$/.test(r.nb.blur) && /linear-gradient\(168deg, rgba\(17, 10, 32, 0\.96\)/.test(r.nb.bg) && r.nb.cardBg === 'none', 'live: perf mode strips the blur and the near-solid ground sits on the ink layer', J(r.nb));
+  check(/none|^$/.test(r.nb.blur) && /linear-gradient\(168deg, rgba\((17, 10, 32|14, 12, 20), 0\.9[67]\)/.test(r.nb.bg) && r.nb.cardBg === 'none', 'live: perf mode strips the blur and the near-solid ground sits on the ink layer', J(r.nb));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await ctx.close(); await browser.close(); server.kill();
