@@ -14789,7 +14789,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1015';
+const GAME_VERSION = 'v0.30.1016';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -56745,7 +56745,7 @@ function _lxRestoreUltCd() {
     if (!player || !player.skillCooldowns || typeof SKILLS === 'undefined') return;
     const open = [];
     if (player._warlordEnrageUntil) open.push('warlord_ult');
-    if (player._sageUntil || (player._sageShots | 0) > 0) open.push('sage_ult');
+    if ((player._sageUntilFr | 0) > 0 || (player._sageShots | 0) > 0) open.push('sage_ult');   // v0.30.1016 - was player._sageUntil, a name nothing writes since the sigil moved to game time
     // v0.30.x — Deadeye parks its cooldown at the short in-window gate on EVERY press and
     // relies on a scheduled timer to put the real ~22s back. That timer dies with
     // cancelPendingSkillTimers() on a map change or a death, and this repair - written
@@ -56753,12 +56753,25 @@ function _lxRestoreUltCd() {
     // ultimate kept a 450 ms cooldown for the rest of the run (~45x uptime).
     if ((player._deadeyeUntil || 0) > 0) open.push('marksman_oneshot');
     if ((player._protocolUntil || 0) > 0) open.push('marksman_ult');   // v0.30.x — Deadeye Protocol is a window too now
+    // v0.30.1016 - CHARGE WHAT THE WINDOW'S OWN CLOSE WOULD HAVE CHARGED. This used one formula for all four
+    // (table cd x cooldown reduction x 0.75), while each window closes on its own value: War of Banners
+    // stamps the table's 60 s (see _SKILL_RAW_CD), Meteor Sigil the cooldown its cast recorded (with the
+    // mage's 0.9 and the rank perk), the Deadeye windows theirs (_deRealCd). Measured: a portal hop inside
+    // the enrage left War of Banners on 45 s where finishing the enrage leaves it on 60 s - a free
+    // quarter of the ultimate's cooldown for walking through a door.
     for (const id of open) {
       const def = SKILLS[id];
       if (def && def.cd) {
-        let _mul = 1;   // v0.30.x — mirror castSkill: raw cd ignored cooldown reduction
-        try { if (typeof getCdrMult === 'function') _mul *= getCdrMult(); if (typeof JOB_CD_MUL === 'number') _mul *= JOB_CD_MUL; } catch (e) {}
-        player.skillCooldowns[id] = def.cd * _mul;
+        let _cd = 0;
+        if (id === 'warlord_ult') _cd = def.cd;
+        else if (id === 'sage_ult') _cd = player._sageFullCd || 0;
+        else if (player._deRealCd && player._deRealCd[id] > 0) _cd = player._deRealCd[id];
+        if (!(_cd > 0)) {   // no recorded value: the old arithmetic
+          let _mul = 1;   // v0.30.x — mirror castSkill: raw cd ignored cooldown reduction
+          try { if (typeof getCdrMult === 'function') _mul *= getCdrMult(); if (typeof JOB_CD_MUL === 'number') _mul *= JOB_CD_MUL; } catch (e) {}
+          _cd = def.cd * _mul;
+        }
+        player.skillCooldowns[id] = _cd;
       }
     }
   } catch (e) {}
@@ -71129,7 +71142,7 @@ function loadMap(id, entryX, entryY) {
     // re-cast, forever. Only touched when a window was actually open, so a
     // normally-ticking cooldown is never penalised by walking through a door.
     _lxRestoreUltCd();
-    player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0; player._deadeyeUntil = 0; player._protocolUntil = 0; player._deadeyeMark = null; player._deadeyeRamp = 0;   // v0.30.x — Deadeye's window resets with the others
+    player._warlordEnrageUntil = 0; player._sageUntilFr = 0; player._sageFullCd = 0; player._sageShots = 0; player._deadeyeUntil = 0; player._protocolUntil = 0; player._deadeyeMark = null; player._deadeyeRamp = 0;   // v0.30.x — Deadeye's window resets with the others
     player._bastionArmedUntil = 0; player._bastionArmHeld = false; player._dawnStored = 0; player._dawnMilestone = 0;   // v0.29.697 — an armed bastion does not survive the reset (v0.30.767: nor does its charge)
     player.doubleJumpUsed = false;
     if (typeof cancelPendingSkillTimers === 'function') cancelPendingSkillTimers();
@@ -77131,7 +77144,7 @@ function triggerDeath() {
   // timer that would have; both death paths killed the timer and repaired nothing, so
   // dying inside a Warlord / Sage / Deadeye window left the ultimate parked at its gate.
   if (typeof _lxRestoreUltCd === 'function') _lxRestoreUltCd();
-  player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0; player._deadeyeUntil = 0;
+  player._warlordEnrageUntil = 0; player._sageUntilFr = 0; player._sageFullCd = 0; player._sageShots = 0; player._deadeyeUntil = 0;
   // Cancel any queued skill setTimeout callbacks
   cancelPendingSkillTimers();
   // v0.25.605 — Force-close any open modal so the death overlay isn't
@@ -77552,7 +77565,7 @@ function respawnAtTown() {
   player._bigStabUntil       = 0;
   player._mageBigSwingUntil  = 0;
   if (typeof _lxRestoreUltCd === 'function') _lxRestoreUltCd();   // v0.30.x — see the other death path
-  player._warlordEnrageUntil = 0; player._sageUntil = 0; player._sageShots = 0; player._deadeyeUntil = 0;
+  player._warlordEnrageUntil = 0; player._sageUntilFr = 0; player._sageFullCd = 0; player._sageShots = 0; player._deadeyeUntil = 0;
   cancelPendingSkillTimers();
   for (const k in player.buffs) player.buffs[k] = 0;
   resetCombo();
