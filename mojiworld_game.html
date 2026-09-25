@@ -13294,7 +13294,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.977';
+const GAME_VERSION = 'v0.30.978';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -97471,6 +97471,14 @@ function _lxOnHitProcs(m, dmg, skill) {
 
   return { fz: Math.max(0, (m.freezeTimer | 0) - _fz0), st: Math.max(0, (m.stunTimer | 0) - _st0) };
 }
+// v0.30.x — per user: "there are occasions in which the sprite becomes small then normal sized again, rectify that"
+// (King Krook). Traced across a 40 s fight - hits, crits, burns, freezes, his jump slam and the stomp - his art held
+// its height to within 1.7% on every frame. The only thing that changed his size was this function: every hit set
+// m.scaleY to 0.98 (0.96 on a crit) and the draw squashed him about his feet, easing back over ~10 frames. On a
+// ~380 px sprite that is a 8-15 px dip per hit, and under a combo it never settles - he visibly pumps. Hit flash,
+// hit-stop and the hit sparks still land; he simply does not deflate. Checked before the tier chain rather than
+// inside the boss branch, so an echo or a flag-only spawn of him cannot fall through to the BIGGER mob squash.
+const _LX_NO_HIT_SQUASH = new Set(['kingKrook']);
 // v0.30.854 - the attribution belongs to this hit alone. Whatever the hit sets off from inside (chain lightning at 50% of the
 // ALREADY-ranked damage, overkill carry, the mage's spell echo, on-kill bursts) runs with none, or the rank would be paid twice.
 function hitMonster(m, dmg, isCrit, skill) {
@@ -98498,7 +98506,9 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // old boss level. Small mobs keep the full cartoon pop — on a 40 px
   // sprite it reads as juice, not jelly. hitFlash + hit-stop + knockback
   // still carry the impact feel on the big frames.
-  if (m.isBoss) {
+  if (_LX_NO_HIT_SQUASH.has(m.type)) {
+    // no squash (see _LX_NO_HIT_SQUASH)
+  } else if (m.isBoss) {
     m.scaleX = isCrit ? 1.05 : 1.02;
     m.scaleY = isCrit ? 0.96 : 0.98;
   } else if (m.isMiniBoss || m.w >= 80 || m.h >= 90) {
@@ -138410,6 +138420,21 @@ const _ZODIAC_SPRITE_FX = {
 // young_confused_barnaby pushed +6px down per user.
 const _BOSS_SPRITE_PUSH_DOWN = {
   young_confused_barnaby: 6,
+  // v0.30.x — per user: "he appears to be levitating, make sure he stands nicely on the true floor".
+  // Measured in krookThrone with the hero beside him: his hitbox was ON the floor (m.y + m.h = 480,
+  // onGround) and every one of his frames anchored correctly on its claws (content bottom row 915,
+  // the same row BOSS_SPRITE_META records) - and his claws still drew ~25 screen px above the line
+  // the hero's feet stand on. The lift is the floor clamp above: on a frame-trusted boss it measures
+  // the CANVAS bottom, not the claws, and every Krook frame since v0.30.706's regeneration ("nothing
+  // cut off") carries 44 empty rows under the feet (960 canvas, claws end at 915). The clamp read
+  // that empty strip as 16 px of sprite sunk into the floor and lifted him by it, ~10 px of draw box,
+  // and his calib s 1.6 (idle / walk / attack) carried it to ~16 px in the world.
+  // Every other ground boss's frames end 0-2 rows from the canvas edge, so the clamp is right for
+  // them and this is not a change to it. 10 is exactly what it took back: targetH 244 (344 x 0.7558 x
+  // 960/1024), bury 0.02 x 244 = 4.9 below the foot, but the clamp left his claws 5.2 ABOVE it.
+  // Keyed on m.type, so it covers every set he draws - the TYRANT'S STOMP carries the same 44 rows.
+  // monster_animator.html mirrors this entry (BOSS_PUSH_DOWN_PX, root-resolved for kingKrookstomp).
+  kingKrook: 10,
 };
 // v0.30.390 — WARD SHIELD ACCURACY (per user: "ensure that the boss wards indicator
 // works well and accurate"). The shield was centred on the monster's collision box;
