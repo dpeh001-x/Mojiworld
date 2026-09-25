@@ -80,8 +80,9 @@ try {
   });
   if (r.no) throw new Error(r.no);
   check(r.fonts.body500 && r.fonts.body700 && r.fonts.italic, 'TYPE: Alegreya 500, 700 and italic all load', J(r.fonts));
-  check(/^Alegreya/.test(r.type.family) && r.type.size === '18.5px', 'TYPE: the speech is set in Alegreya at 18.5 px', J(r.type));
-  check(/Cinzel/.test(r.type.nameFamily), 'TYPE: the name is Cinzel', r.type.nameFamily.slice(0, 40));
+  // v0.30.979 - the round hand: Nunito speech at 17.5 px, Fredoka name; Alegreya and Cinzel stay in the stacks as fallbacks
+  check(/^Nunito, Alegreya/.test(r.type.family) && r.type.size === '17.5px', 'TYPE: the speech is set in Nunito at 17.5 px (Alegreya the fallback)', J(r.type));
+  check(/^Fredoka/.test(r.type.nameFamily) && /Cinzel/.test(r.type.nameFamily), 'TYPE: the name is Fredoka (Cinzel the fallback)', r.type.nameFamily.slice(0, 40));
   check(/blur\(1[468]px\)/.test(r.glass.backdrop) && !r.glass.texture, 'GLASS: a 14-18 px blur behind the panel and no shard texture', J(r.glass));   // v0.30.977 ink blurs 14 px
   check(/none|^$/.test(r.nb.backdrop) && /linear-gradient/.test(r.nb.bg), 'GLASS: perf mode strips the blur and keeps a near-solid ground', J(r.nb));
   check(!r.caretShown, 'DELIVERY: no block caret', 'shown ' + r.caretShown);
