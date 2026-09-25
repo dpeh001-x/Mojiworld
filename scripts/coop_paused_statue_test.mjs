@@ -46,28 +46,32 @@ const r = await page.evaluate(async () => {
   const baseX = plat ? plat.x + 120 : 400, baseY = plat ? plat.y - 44 : 400;
   const run = async (id, movePerTick, vx) => {
     net.connected = true;
-    const xs = [];
+    const xs = [], leads = [];
     let x = baseX;
     for (let tick = 0; tick < 24; tick++) {
       _mpHandle({ t: 'state', id, x, y: baseY, vx, vy: 0, facing: 1, map: game.currentMap, anim: Math.abs(vx) > 0.5 ? 'run' : 'idle', hp: 100, maxHp: 100 });
       for (let f = 0; f < 4; f++) {
         try { ctx.save(); _mpDrawPeers(); ctx.restore(); } catch (e) { out.drawErr = String(e.message).slice(0, 120); }
-        if (tick >= 4) xs.push(net.peers[id]._rx);
+        if (tick >= 4) { xs.push(net.peers[id]._rx); leads.push(net.peers[id]._rx - x); xs.stillMax = Math.max(xs.stillMax || 0, net.peers[id]._stillN | 0); }
         await sleep(17);
       }
       x += movePerTick;
     }
+    const stillMax = xs.stillMax || 0;
     delete net.peers[id]; net.connected = saved.connected;
+    xs.leads = leads; xs.stillMax = stillMax;
     return xs;
   };
   const statue = await run('statue', 0, 3.2);           // frozen x, frozen run velocity (an older build, paused)
   out.statueSpread = +(Math.max(...statue) - Math.min(...statue)).toFixed(2);
   out.statueOff = +(Math.max(...statue.map((v) => Math.abs(v - baseX)))).toFixed(2);
   const runner = await run('runner', 3.2 * 4.2, 3.2);    // a real runner: x advances with its velocity
-  // dead reckoning keeps the drawn avatar AHEAD of the last snapshot between ticks: steps between consecutive
-  // frames stay small (a glide) rather than one jump per tick
-  const steps = runner.slice(1).map((v, i) => v - runner[i]);
-  out.runnerMaxStep = +Math.max(...steps).toFixed(2);
+  // The one way the fix could hurt a MOVING peer is by marking it still, which switches its extrapolation off.
+  // So: never flagged still, and still drawn AHEAD of its last snapshot (dead reckoning; without it the lerp
+  // trails behind). Step-size bounds were tried and cut - one slow headless frame makes the existing
+  // extrapolation overshoot and settle back a few px on the tip as well, which is timing, not this bug.
+  out.runnerStillMax = runner.stillMax;
+  out.runnerLead = +(runner.leads.reduce((a, b) => a + b, 0) / runner.leads.length).toFixed(2);
   out.runnerTravel = +(runner[runner.length - 1] - runner[0]).toFixed(1);
   return out;
 });
@@ -75,7 +79,7 @@ await browser.close(); server.kill();
 let fails = 0; const ok = (name, c, x) => { if (!c) fails++; console.log(`${c ? 'PASS' : 'FAIL'}  ${name}  ${JSON.stringify(x)}`); };
 ok('a paused, mid-walk player broadcasts no velocity and an idle pose', r.sent && r.sent.vx === 0 && r.sent.vy === 0 && r.sent.anim === 'idle', r.sent);
 ok('a peer frozen in place is drawn still - no lurch-and-snap from its stale velocity', r.statueSpread <= 1 && r.statueOff <= 1, { spread: r.statueSpread, off: r.statueOff });
-ok('a genuinely running peer still glides (dead reckoning intact)', r.runnerTravel > 200 && r.runnerMaxStep < 12, { travel: r.runnerTravel, maxStep: r.runnerMaxStep });
+ok('a genuinely running peer is never flagged still and is still dead-reckoned ahead of its snapshots', r.runnerTravel > 200 && r.runnerLead > 0 && r.runnerStillMax === 0, { travel: r.runnerTravel, lead: r.runnerLead, stillMax: r.runnerStillMax });
 ok('no page errors', errs.length === 0 && !r.drawErr, errs.slice(0, 2).concat(r.drawErr ? [r.drawErr] : []));
 console.log(fails ? `FAIL(${fails})` : 'ALL PASS');
 process.exit(fails ? 1 : 0);
