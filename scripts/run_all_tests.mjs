@@ -90,16 +90,21 @@ const files = fs.readdirSync(SCRIPTS)
   .filter((f) => (WITH_NET ? true : !NET.test(f)))
   .sort();
 
-// Which convention does this suite follow? The page-first ones declare their
-// default inline (`process.argv[2] || 'mojiworld_game.html'`), so the file says
-// so itself. Every page-first suite that reads argv[3] reads it as a port
-// (checked across all 107), so handing it the port there is always right.
+// Which convention does this suite follow? Three of them are in use and the file
+// says which one it follows:
+//   107  `process.argv[2] || 'mojiworld_game.html'`  page in argv[2], port in argv[3]
+//   102  `process.argv.slice(2).find(a => !a.startsWith('--'))`  page anywhere, port from env
+//   the rest  argv[2] is the port
+// Both page-first families take 'mojiworld_game.html' first. The trailing port is
+// read as such by every argv[3] reader (checked across all 107) and ignored by the
+// find() family, which takes PORT out of the environment this runner already sets.
 const _ARGV = new Map();
 const argvFor = (file) => {
   if (_ARGV.has(file)) return _ARGV.get(file);
   let src = '';
   try { src = fs.readFileSync(path.join(SCRIPTS, file), 'utf8'); } catch (e) {}
-  const pageFirst = /process\.argv\[2\]\s*\|\|\s*['"`][^'"`]*\.html['"`]/.test(src);
+  const pageFirst = /process\.argv\[2\]\s*\|\|\s*['"`][^'"`]*\.html['"`]/.test(src)
+                 || /process\.argv\.slice\(2\)\.find\(/.test(src);
   const a = pageFirst ? ['mojiworld_game.html', String(GAME_PORT)] : [String(GAME_PORT)];
   _ARGV.set(file, a);
   return a;
