@@ -5,7 +5,8 @@
 // Driven with a real mouse in the running game:
 //   1. seven chips, each sitting on the line of its own spoke, none overlapping another or the disc
 //   2. a click invests one point (SP -1, the stat actually applied), and "+50 HP" pops off the chip
-//   3. +10 invests ten; a HELD press keeps investing and its release is not an extra click
+//   3. there is no +10 button (per user: "And here can remove the +5 / + 10 button"); a HELD press keeps
+//      investing and its release is not an extra click
 //   4. hovering a chip previews the build after it, and lights that lane's spoke
 //   5. the radar shape is the build: each vertex at r0 + ratio * (maxR - r0)
 //   6. with no SP every chip locks and the starburst dims; a maxed lane says MAX and ignores clicks
@@ -106,13 +107,9 @@ const floatTxt = await page.evaluate(() => [...document.querySelectorAll('#lp-fx
 ok('2. a click invests exactly one point, and it applies', s1.sp === s0.sp - 1 && s1.spent.hp === s0.spent.hp + 1 && s1.maxHp === s0.maxHp + 50, JSON.stringify({ sp: [s0.sp, s1.sp], hp: [s0.spent.hp, s1.spent.hp], maxHp: [s0.maxHp, s1.maxHp] }));
 ok('2. "+50 HP" pops off the chip', floatTxt.includes('+50 HP'), JSON.stringify(floatTxt));
 
-// ---- 3: +10, then a held press ----
-const atk = await box('atk');
-s0 = await state();
-await page.mouse.click(atk.bx, atk.y);
-await page.waitForTimeout(150);
-s1 = await state();
-ok('3. +10 invests ten', s1.sp === s0.sp - 10 && s1.spent.atk === s0.spent.atk + 10 && s1.baseAtk === s0.baseAtk + 100, JSON.stringify({ sp: [s0.sp, s1.sp], atk: [s0.spent.atk, s1.spent.atk] }));
+// ---- 3: no +10 button, then a held press ----
+const bulk = await page.evaluate(() => document.querySelectorAll('#lp-grid .lu-bulk-btn, #lp-grid [data-bulk]').length);
+ok('3. no +10 button on any chip', bulk === 0, bulk);
 const def = await box('def');
 s0 = await state();
 await page.mouse.move(def.x - 30, def.y); await page.mouse.down();
