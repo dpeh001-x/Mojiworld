@@ -1,4 +1,4 @@
-// THE DOWNED BODY FALLS TO THE FLOOR (v0.30.1029; the sticker skull v0.30.1037; the supplied image v0.30.1042; the graffiti v0.30.1044).
+// THE DOWNED BODY FALLS TO THE FLOOR (v0.30.1029; the sticker skull v0.30.1037; the supplied image v0.30.1042; the graffiti v0.30.1044; the bigger button v0.30.1051).
 //
 // Per user, with a screenshot of a downed hero parked in mid-air beside Aetherion: "the downed character should fall to
 // the ground / platform, not remain hovering midair". _coopDownedTick zeroed vy every frame, so a lethal hit taken in a
@@ -70,7 +70,7 @@ try {
   // v0.30.1037 the sticker: the skull is 200+ px wide, the words start under it, the plate is at most 340 wide and about three-quarters opaque
   check(r.card && r.card.skullW >= 200 && r.card.skullTop >= 0 && r.card.titleTop >= r.card.skullBottom - 24 && r.card.width <= 340 && r.card.plateAlpha && parseFloat(r.card.plateAlpha) <= 0.8, 'STICKER: a 200+ px skull-and-bones fully on a 760 px screen, the title under it, a plate no wider than 340 at about three-quarters opacity', J({ skullW: r.card && r.card.skullW, skullTop: r.card && r.card.skullTop, skullBottom: r.card && r.card.skullBottom, titleTop: r.card && r.card.titleTop, width: r.card && r.card.width, alpha: r.card && r.card.plateAlpha }));
   const g = r.card && r.card.graffiti;
-  check(g && g.titleSplat && g.titleDrips >= 2 && /rgb\(12, 11, 16\) 3px 3px 0px/.test(g.titleShadow) && /rgba\(255, 60, 60/.test(g.titleShadow) && g.ctaSplat && /rgb\(12, 11, 16\) 5px 5px 0px/.test(g.btnShadow) && /rgba\(255, 60, 60/.test(g.btnShadow) && parseFloat(g.btnFont) >= 16 && g.btnUpper === 'uppercase' && g.btnTilt && g.inSpan, 'GRAFFITI: a red spray with drips behind the title and behind the button, ink offsets and red glows on both, the button bigger, uppercase and tilted, in a span (not a div)', J(g));
+  check(g && g.titleSplat && g.titleDrips >= 2 && /rgb\(12, 11, 16\) 3px 3px 0px/.test(g.titleShadow) && /rgba\(255, 60, 60/.test(g.titleShadow) && g.ctaSplat && /rgb\(12, 11, 16\) 7px 7px 0px/.test(g.btnShadow) && (g.btnShadow.match(/rgba?\(/g) || []).length >= 4 && /rgba\(255, 60, 60/.test(g.btnShadow) && parseFloat(g.btnFont) >= 20 && g.btnUpper === 'uppercase' && g.btnTilt && g.inSpan, 'GRAFFITI: a red spray with drips behind the title and behind the button, ink offsets and red glows on both, the button at 20 px with a 7 px ink offset, a drop and a glow, uppercase and tilted, in a span (not a div)', J(g));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await ctx.close(); await browser.close(); server.kill();
