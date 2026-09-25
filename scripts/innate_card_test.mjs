@@ -6,9 +6,9 @@
 //   1. four stat tiles, HP / MP / ATK / DEF, each = level-ups x the class's per-level gain
 //      (warrior 30/12/3/2), and each says what one level adds
 //   2. the SP bar = 3 per level-up + the lifetime bonus, with the base / bonus split
-//   3. the roll columns carry the tally, their heights are the tally on one scale with the typical
-//      tick, and the luck pill reads the average against 1 per level
-//   4. the last-roll line: jackpot / lucky / plain by the roll, "No level-ups yet" at level 1
+//   3. the roll dice carry the tally (lg-dice: three dice with 0 / 1 / 2 pips, no bar chart) and add
+//      up to the bonus, and the luck pill reads the average against 1 per level
+//   4. no "Last level" banner once you have levelled (lg-dice, per user); "No level-ups yet" at level 1
 //   5. the title is heavy Nunito; the four stat tiles are washed in saturated colours (HSV saturation
 //      >= 0.6 - pastels were ~0.35); everything else on both cards is black, white or grey (no computed
 //      text, fill or border colour with more than 16/255 of chroma - gold is ~66); nothing is italic
@@ -62,7 +62,7 @@ const read = (st) => page.evaluate(async (st) => {
   const cards = host ? [...host.querySelectorAll('.lt-card')] : [];
   return {
     stats: t(c, '.lg-stat'), sp: t(c, '.lg-sp'), cols: t(c, '.lg-col'), luck: t(c, '.lg-luck'),
-    h: [...c.querySelectorAll('.lg-col')].map((e) => [parseFloat(e.style.getPropertyValue('--h')), parseFloat(e.style.getPropertyValue('--e'))]),
+    h: [...c.querySelectorAll('.lg-col')].map((e) => e.querySelectorAll('.lg-die i').length), chart: c.querySelectorAll('.lg-chart, .lg-bar, .lg-track').length, sum: (c.querySelector('.lg-dice-sum') || {}).textContent || null,
     last: last ? { cls: last.className, txt: last.textContent.replace(/\s+/g, ' ').trim() } : null,
     mono: (() => { const out = []; const els = [c, ...c.querySelectorAll('*'), ...(host ? host.querySelectorAll('.lt-card, .lt-card *') : [])];
       for (const e of els) { if (e.closest('.lg-stat') || e.closest('.lt-equipped') || e.closest('.lx-emo') || e.tagName === 'IMG' || (e.classList && e.classList.contains('ui-ico'))) continue;
@@ -88,11 +88,10 @@ if (A) {
   ok('1. four stat stickers: 59 level-ups x warrior 30 / 12 / 3 / 2, with the per-level gain', JSON.stringify(A.stats) === JSON.stringify(['+1770HP+30 / lv', '+708MP+12 / lv', '+177ATK+3 / lv', '+118DEF+2 / lv']), JSON.stringify(A.stats));
   ok('2. the SP bar: 177 base + 63 bonus = +240 SP', A.sp.length === 1 && /\+240\s*SP/.test(A.sp[0]) && /177 base/.test(A.sp[0]) && /63 bonus/.test(A.sp[0]), JSON.stringify(A.sp));
   ok('3. the roll columns carry the tally 13 / 22 / 24', JSON.stringify(A.cols.map((s) => s.replace(/^[^+]+/, ''))) === JSON.stringify(['+0\u00d713', '+1\u00d722', '+2\u00d724']), JSON.stringify(A.cols));
-  // one scale for bars and ticks: the largest of the counts and the typical counts (59 x .25/.5/.25)
-  const top = Math.max(13, 22, 24, 29.5), wantH = [13, 22, 24].map((n) => n / top), wantE = [14.75, 29.5, 14.75].map((n) => n / top);
-  ok('3. column heights are the tally, ticks the typical roller, on one scale', A.h.length === 3 && A.h.every(([hh, ee], i) => Math.abs(hh - wantH[i]) < 0.002 && Math.abs(ee - wantE[i]) < 0.002), JSON.stringify(A.h));
+  // lg-dice: no bar chart - three dice with 0, 1 and 2 pips, and a pill adding them up (13x0 + 22x1 + 24x2 = 70; the card's bonus is 63)
+  ok('3. no bar chart: three dice showing 0, 1 and 2 pips, and the sum pill names the bonus SP', A.h.join() === '0,1,2' && A.chart === 0 && /\+63\s*SP/.test(A.sum || ''), JSON.stringify([A.h, A.chart, A.sum]));
   ok('3. the luck pill: 63 bonus over 59 rolls = avg +1.07, "Lucky"', A.luck.length === 1 && /Lucky/.test(A.luck[0]) && /\+1\.07/.test(A.luck[0]), JSON.stringify(A.luck));
-  ok('4. a +2 roll is a jackpot sticker', A.last && /jackpot/.test(A.last.cls) && /\+2 SP/.test(A.last.txt) && /JACKPOT/.test(A.last.txt), JSON.stringify(A.last));
+  ok('4. no "Last level" banner after a +2 roll (removed per user)', A.last === null, JSON.stringify(A.last));
   ok('5. a heavy Nunito title', /Nunito/.test(A.titleFont) && +A.titleStyle.split(' ')[1] >= 900, JSON.stringify([A.titleFont, A.titleStyle]));
   ok('5. the rest is black and white: no colour on either card outside the four stat tiles', A.mono.length === 0, JSON.stringify(A.mono));
   ok('5. no italics on either card', A.italic === 0, A.italic);
@@ -104,9 +103,9 @@ if (A) {
   const K = await read({ master: null, talents: { knight: 'crusade' }, _innateLastRoll: 1 });
   ok('6. a learned talent: one sticker naming it and a Respec for its tier', (K.cards[0] || {}).learned && K.cards[0].learned.length === 1 && /Crusade/.test(K.cards[0].learned[0]) && K.cards[0].respec === 'knight' && K.cards[0].picks.length === 0, JSON.stringify(K.cards[0]));
   ok('7. the learned talent is shown in the class colour (warrior ' + K.clsCol + ')', K.eq.length === 1 && K.eq[0][0] === true && K.eq[0][1] === K.clsCol, JSON.stringify([K.eq, K.clsCol]));
-  ok('4. a +1 roll is a lucky sticker', K.last && /lucky/.test(K.last.cls) && !/jackpot/.test(K.last.cls), JSON.stringify(K.last));
+  ok('4. no "Last level" banner after a +1 roll either', K.last === null, JSON.stringify(K.last));
   const U = await read({ level: 2, job: null, master: null, talents: {}, _innateSp: 0, _innateLevels: 1, _innateLastRoll: 0, _innateRollCounts: [1, 0, 0] });
-  ok('4. a +0 roll is a plain sticker, and one level-up gives 30 / 12 / 3 / 2', U.last && !/lucky|jackpot/.test(U.last.cls) && /unlucky/i.test(U.last.txt) && U.stats.length === 4 && /^\+30HP/.test(U.stats[0]), JSON.stringify([U.last, U.stats]));
+  ok('4. no banner after a +0 roll, and one level-up gives 30 / 12 / 3 / 2', U.last === null && U.stats.length === 4 && /^\+30HP/.test(U.stats[0]), JSON.stringify([U.last, U.stats]));
   ok('6. no job yet: a single locked Job teaser', U.cards.length === 1 && /lt-locked/.test(U.cards[0].cls) && /Job Talent/.test(U.cards[0].title), JSON.stringify(U.cards));
   const Z = await read({ level: 1, _innateSp: 0, _innateLevels: 0, _innateLastRoll: undefined, _innateRollCounts: [0, 0, 0] });
   ok('4. level 1: no stickers or rolls, "No level-ups yet"', Z.stats.length === 0 && Z.cols.length === 0 && Z.last && /No level-ups yet/.test(Z.last.txt), JSON.stringify(Z));
