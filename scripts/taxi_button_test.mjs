@@ -2,10 +2,11 @@
 //
 // Per user: "this taxi modal can be designed with black white and Yellow to have a strong pop comic feel" (on a
 // crop of the HUD Taxi button). Checks, in the running game:
-//   1. taxi yellow in an ink border, heavy ink lettering in capitals, a hard ink offset (a drop-shadow filter, so
-//      low-effects mode keeps it), and a black-and-white checker stripe down the left edge
+//   1. black with taxi-yellow lettering in heavy capitals, a hard yellow offset (a drop-shadow filter, so
+//      low-effects mode keeps it), and a black-and-white checker stripe down the left edge (second pass, per
+//      user: "make the background black and the TAXI yellow")
 //   2. the lettering clears #hotkey-hint, which has always overlapped the button's top edge by a few px
-//   3. it turns paper-white under the pointer, and a click still opens the Taxi window
+//   3. it flips to yellow with ink lettering under the pointer, and a click still opens the Taxi window
 //   node scripts/taxi_button_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -45,14 +46,14 @@ const A = await page.evaluate(() => {
   const z = hb ? hb.height / h.offsetHeight : 1, hr = hb ? { left: hb.left, right: hb.right, bottom: hb.bottom - (parseFloat(hs.borderBottomWidth) + parseFloat(hs.paddingBottom)) * z } : null;
   return { bg: cs.backgroundColor, border: cs.borderTopColor + ' ' + cs.borderTopWidth, color: cs.color, weight: cs.fontWeight, tt: cs.textTransform, filter: cs.filter, stripe: af.backgroundImage, stripeW: af.width, stripeLeft: af.left, txtTop: txt && txt.top, hintBottom: hr && hr.bottom, hintOverlaps: !!(hr && txt && hr.right > txt.left && hr.left < txt.right) };
 });
-ok('1. taxi yellow in an ink border, heavy ink capitals, a hard ink offset', A.bg === 'rgb(255, 228, 92)' && /^rgb\(12, 11, 16\) 2px$/.test(A.border) && A.color === 'rgb(12, 11, 16)' && +A.weight >= 900 && A.tt === 'uppercase' && /drop-shadow\(rgb\(12, 11, 16\) 2\.5px 2\.5px 0px\)/.test(A.filter), JSON.stringify(A));
+ok('1. black with heavy taxi-yellow capitals and a hard yellow offset', A.bg === 'rgb(12, 11, 16)' && A.color === 'rgb(255, 228, 92)' && +A.weight >= 900 && A.tt === 'uppercase' && /drop-shadow\(rgb\(255, 228, 92\) 2\.5px 2\.5px 0px\)/.test(A.filter), JSON.stringify(A));
 ok('1. a black-and-white checker stripe down the left edge', /^repeating-conic-gradient\(/.test(A.stripe) && /rgb\(12, 11, 16\)/.test(A.stripe) && /rgb\(244, 241, 234\)/.test(A.stripe) && A.stripeLeft === '0px' && parseFloat(A.stripeW) >= 5, JSON.stringify([A.stripe, A.stripeW, A.stripeLeft]));
 ok('2. the TAXI lettering clears the text of the Hotkeys hint above it', A.hintBottom == null || !A.hintOverlaps || A.txtTop >= A.hintBottom - 0.5, JSON.stringify([A.txtTop, A.hintBottom, A.hintOverlaps]));
 const box = await page.evaluate(() => { const r = document.getElementById('taxi-btn').getBoundingClientRect(); return { x: r.x + r.width * 0.7, y: r.y + r.height * 0.7 }; });
 await page.mouse.move(box.x, box.y); await page.waitForTimeout(300);
 await page.evaluate(() => document.getAnimations().forEach((a) => { try { a.finish(); } catch (e) {} }));   // read the hover state, not a frame of its transition
-const H = await page.evaluate(() => getComputedStyle(document.getElementById('taxi-btn')).backgroundColor);
-ok('3. it turns paper-white under the pointer', H === 'rgb(244, 241, 234)', H);
+const H = await page.evaluate(() => { const cs = getComputedStyle(document.getElementById('taxi-btn')); return cs.backgroundColor + ' / ' + cs.color; });
+ok('3. it flips to yellow with ink lettering under the pointer', H === 'rgb(255, 228, 92) / rgb(12, 11, 16)', H);
 await page.mouse.click(box.x, box.y); await page.waitForTimeout(500);
 const O = await page.evaluate(() => { const m = document.getElementById('taxi-modal'); return !!m && m.style.display !== 'none' && getComputedStyle(m).display !== 'none'; });
 ok('3. a click still opens the Taxi window', O, O);
