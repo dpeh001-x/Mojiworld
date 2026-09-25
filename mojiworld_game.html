@@ -14898,7 +14898,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1039';
+const GAME_VERSION = 'v0.30.1040';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -55753,7 +55753,14 @@ function _mpHandle(msg) {
       for (const _f of ['x','y','vx','vy','hp','maxHp','level','facing']) {
         if (msg[_f] !== undefined && !Number.isFinite(+msg[_f])) delete msg[_f];
       }
+      {   // v0.30.x peer-statue - did this snapshot move? (compared before the merge overwrites x/y)
+        const _pp = net.peers[msg.id];
+        const _mv = (msg.x === undefined || msg.y === undefined || _pp.x === undefined)
+          || Math.abs(+msg.x - +_pp.x) > 0.05 || Math.abs(+msg.y - +_pp.y) > 0.05;
+        _pp._stillN = _mv ? 0 : ((_pp._stillN | 0) + 1);
+      }
       Object.assign(net.peers[msg.id], _mpScrubStrings(msg));
+      if (net.peers[msg.id]._stillN >= 1 && net.peers[msg.id].anim === 'run') net.peers[msg.id].anim = 'idle';
       net.peers[msg.id]._last = performance.now();
       // v0.29.x — first-state stamp for the missing-avatar hint in _mpTick.
       if (net.peers[msg.id]._firstStateAt === undefined) net.peers[msg.id]._firstStateAt = performance.now();
@@ -56082,17 +56089,20 @@ function _mpTick() {
         v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined }));
     } catch (e) { /* ignore */ }
   }
+  // v0.30.x peer-statue - paused (a menu, the portal's map) or a hidden tab: the sim is not moving this player,
+  // so the partner must not be told it is. See _mpDrawPeers for the receiving half.
+  const _still = !!(game.paused || (typeof document !== 'undefined' && document.hidden));
   try {
     net.ws.send(JSON.stringify({
       t: 'state',
-      x: player.x, y: player.y, vx: player.vx, vy: player.vy,
+      x: player.x, y: player.y, vx: _still ? 0 : player.vx, vy: _still ? 0 : player.vy,
       facing: player.facing,
       map: game.currentMap,
       hp: player.hp, maxHp: (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp,
       mp: player.mp, maxMp: (typeof getMaxMp === 'function') ? getMaxMp() : player.maxMp,
       level: player.level,
       cls: player.cls, job: player.job, master: player.master,
-      anim: player.attacking ? 'attack' : (Math.abs(player.vx) > 0.5 ? 'run' : 'idle'),
+      anim: _still ? 'idle' : (player.attacking ? 'attack' : (Math.abs(player.vx) > 0.5 ? 'run' : 'idle')),
       // v0.29.9 — Per user "in coop mode my friend should be able to see
       // my full character sprite and equipment". Broadcast the sprite-layer
       // look (hair/eyes/mouth/skin) + minimal equipment visuals so peers
@@ -56453,7 +56463,10 @@ function _mpDrawPeers() {
     // units are px/frame (60 Hz fixed step), matching the sender's physics.
     const _ageMs = p._snapAt ? (performance.now() - p._snapAt) : 0;
     const _snapFrames = p._snapAt ? Math.min(8, _ageMs / 16.67) : 0;
-    let _tx = (p.x || 0) + (p.vx || 0) * _snapFrames;
+    // v0.30.x peer-statue - a peer whose snapshots stopped moving is not extrapolated (see the 'state' handler)
+    const _stillPeer = (p._stillN | 0) >= 1;
+    const _pvx = _stillPeer ? 0 : (p.vx || 0), _pvy = _stillPeer ? 0 : (p.vy || 0);
+    let _tx = (p.x || 0) + _pvx * _snapFrames;
     // v0.29.x (per user "occasionally the coordinates for my teammate does not
     // match") — three accuracy fixes to the dead-reckoned target:
     //   1. GRAVITY-AWARE: an airborne snapshot (|vy|>0.5) follows its ballistic
@@ -56466,8 +56479,8 @@ function _mpDrawPeers() {
     //      hovers frozen in the air: the avatar settles onto the nearest
     //      platform below it (downward only). The next fresh frame resumes live
     //      tracking, and the >200px snap below absorbs any correction.
-    let _ty = (p.y || 0) + (p.vy || 0) * _snapFrames
-            + ((Math.abs(p.vy || 0) > 0.5) ? 0.25 * _snapFrames * _snapFrames : 0);
+    let _ty = (p.y || 0) + _pvy * _snapFrames
+            + ((Math.abs(_pvy) > 0.5) ? 0.25 * _snapFrames * _snapFrames : 0);
     const _restY = _mpPeerRestY(p.x, p.y);
     if (_restY != null && _ty > _restY) _ty = _restY;
     if (p._snapAt && _ageMs > 400 && !p._downed && _restY != null && _restY > (p.y || 0) - 4) {
@@ -56477,7 +56490,7 @@ function _mpDrawPeers() {
     else { p._rx += (_tx - p._rx) * 0.45; p._ry += (_ty - p._ry) * 0.45; }
     const _dead = !!(p.maxHp && (p.hp || 0) <= 0) || !!p._downed;   // v0.27.9 — downed partners read as down (they hold 1 HP while down)
     const _face = (p.facing === -1) ? -1 : 1;
-    const _bob = (!_dead && p.anim === 'run') ? Math.round(Math.sin((game.time + (+id || 0) * 7) * 0.3) * 2) : 0;
+    const _bob = (!_dead && !_stillPeer && p.anim === 'run') ? Math.round(Math.sin((game.time + (+id || 0) * 7) * 0.3) * 2) : 0;
     const sx = p._rx - game.camera.x;
     // v0.29.474 — raw world Y. _mpDrawPeers runs INSIDE the camera translate,
     // like drawMonster/drawPlayer/drawMinions, all of which use raw world Y.
