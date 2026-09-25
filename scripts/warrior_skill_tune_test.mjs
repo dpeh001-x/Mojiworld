@@ -149,10 +149,12 @@ ok('GROUND SLAM COOLDOWN: authored 4 s (+1 s), committing a real 3 s',
 ok('GROUND SLAM DAMAGE: about -20% a cast (7.4-8.8x ATK)', G.perCast >= 7.4 && G.perCast <= 8.8,
    `${G.perCast}x ATK a cast (baseline: 10.2x)`);
 ok('CONTROL: Ground Slam still lands all 8 ticks', G.hits === 8, `${G.hits} hits`);
-ok('WAR OF BANNERS DAMAGE: about +50% a press (at least 12.5x ATK)', B.perPress >= 12.5,
+// The skill audit's R2 (per user, 2026-09-25: "fix all") cut both per-press numbers x0.21 (4 -> 0.85, 3.3 -> 0.7):
+// one mashed enrage had measured 19,752% of a basic. This harness read 21.3x ATK a press before, 3.8x after.
+ok('WAR OF BANNERS DAMAGE: the audit retune, x0.21 a press (2.5-5.5x ATK here)', B.perPress >= 2.5 && B.perPress <= 5.5,
    `${B.perPress}x ATK a press, ${B.total}x ATK over the enrage (baseline: 9.3x, 204x)`);
-ok('CONTROL: War of Banners cadence and lock unchanged (15-30 presses, ~60 s lock after)',
-   B.presses >= 15 && B.presses <= 30 && B.cdAfterMs > 50000, `${B.presses} presses, lock ${B.cdAfterMs} ms after the enrage (baseline: 22, ~58600)`);
+ok('CONTROL: War of Banners cadence and lock (15-30 presses, ~45 s lock after - the audit R6 gave it the global x0.75)',
+   B.presses >= 15 && B.presses <= 30 && B.cdAfterMs > 40000 && B.cdAfterMs <= 45500, `${B.presses} presses, lock ${B.cdAfterMs} ms after the enrage (baseline: 22, ~58600)`);
 if (process.env.ASSERT === '1') {
   let bad = 0;
   for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
