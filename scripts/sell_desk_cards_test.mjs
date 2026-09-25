@@ -61,6 +61,7 @@ try {
       coaster: { w: ic.width, radius: ic.borderTopLeftRadius, bg: ic.backgroundColor, border: ic.borderTopWidth + ' ' + ic.borderTopColor },
       icon: (() => { const cell = c0.querySelector('.sell-icon'), im = cell.querySelector('img'), sp = cell.querySelector('span'); const el = im || sp; if (!el) return null; const cs = getComputedStyle(el); return { kind: im ? 'img' : 'span', w: cs.width, font: cs.fontSize, shadows: (cs.filter.match(/drop-shadow/g) || []).length, ink: /rgb\(12, 11, 16\)/.test(cs.filter), over: Math.round(el.getBoundingClientRect().height - cell.getBoundingClientRect().height) }; })(),
       tick: { pos: ck.position, top: ck.top, left: ck.left, bg: ck.backgroundColor },
+      tints: cards.map((c) => { const cls = (c.className.match(/cls-(\w+)/) || [])[1] || null; const cs = getComputedStyle(c.querySelector('.sell-icon')); return { cls, bg: cs.backgroundImage.slice(0, 70), shadow: cs.boxShadow.slice(0, 90) }; }),
       plate: getComputedStyle(modal).backgroundImage.includes('panel_p5_shop'),
       confirmDisabled: document.getElementById('sell-confirm-btn').disabled };
   });
@@ -69,6 +70,9 @@ try {
   check(r.card.flexDir === 'column' && r.card.border === '2px rgb(12, 11, 16)' && /rgb\(12, 11, 16\) 4px 4px 0px/.test(r.card.shadow) && /inset/.test(r.card.shadow) && /^Nunito/.test(r.card.font) && r.card.h <= 340 && r.card.cursor === 'pointer', 'BOX: a column with a 2px black line, an ink offset and a rarity strip, in Nunito, compact (under 340 device px with the 88 px sprite)', J(r.card));
   check(r.coaster.w === '64px' && r.coaster.radius === '50%' && r.coaster.bg === 'rgba(255, 255, 255, 0.2)' && r.coaster.border === '2px rgb(12, 11, 16)', 'COASTER: 64 px, 20% white, a 2px black ring', J(r.coaster));
   check(r.icon && ((r.icon.kind === 'img' && r.icon.w === '88px' && r.icon.shadows >= 4 && r.icon.ink && r.icon.over > 8) || (r.icon.kind === 'span' && r.icon.font === '52px' && r.icon.shadows >= 1)), 'ICON: the piece drawn at 88 px, overflowing the 64 px coaster, with an ink outline of drop-shadows (or its glyph at 52 px while the sprite decodes)', J(r.icon));
+  const TINT = { warrior: '255, 90, 90', rogue: '198, 138, 255', archer: '126, 231, 135', mage: '106, 166, 255', hp: '255, 90, 90', mp: '106, 166, 255', full: '255, 209, 102', cure: '126, 231, 135' };
+  const tinted = (o, k) => !!k && new RegExp('rgba\\(' + TINT[k] + ', 0.48\\)').test(o.bg) && new RegExp('rgba\\(' + TINT[k] + ', 0.55\\)').test(o.shadow);
+  check(r.tints.some((t) => t.cls) && r.tints.every((t) => t.cls ? tinted(t, t.cls) : (t.bg === 'none' && t.shadow === 'none')), 'CLASS TINT: a class piece\'s coaster is washed and glows in its class colour; a class-less piece keeps the plain 20% white', J(r.tints.map((t) => t.cls || 'any')));
   check(r.tick.pos === 'absolute' && r.tick.top === '8px' && r.tick.left === '8px' && r.tick.bg === 'rgba(255, 255, 255, 0.2)', 'TICK: the check box sits in the corner of the box', J(r.tick));
   check(r.plate, 'PLATE: the comic plate (panel_p5_shop) is the desk background');
   check(r.confirmDisabled, 'FOOTER: SELL is disabled with nothing picked');

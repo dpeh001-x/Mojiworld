@@ -64,6 +64,7 @@ try {
       coaster: { w: coaster.width, radius: coaster.borderTopLeftRadius, bg: coaster.backgroundColor, border: coaster.borderTopWidth + ' ' + coaster.borderTopColor },
       icon: (() => { const cell = c0.querySelector(':scope > div:first-child'), im = cell.querySelector('img'), sp = cell.querySelector('span'); const el = im || sp; if (!el) return null; const cs = getComputedStyle(el); return { kind: im ? 'img' : 'span', w: cs.width, font: cs.fontSize, shadows: (cs.filter.match(/drop-shadow/g) || []).length, ink: /rgb\(12, 11, 16\)/.test(cs.filter), over: Math.round(el.getBoundingClientRect().height - cell.getBoundingClientRect().height) }; })(),
       plate: getComputedStyle(modal).backgroundImage.includes('panel_p5_shop'),
+      tint: (() => { const c = cards.find((x) => /cls-/.test(x.className)); if (!c) return null; const cs = getComputedStyle(c.querySelector(':scope > div:first-child')); return { cls: (c.className.match(/cls-(\w+)/) || [])[1], bg: cs.backgroundImage.slice(0, 70), shadow: cs.boxShadow.slice(0, 90), n: cards.filter((x) => /cls-/.test(x.className)).length }; })(),
       buyAtRest: { opacity: cb0.opacity, pos: cb0.position, pe: cb0.pointerEvents, bg: cb0.backgroundColor, disabled: btn0.disabled },
       asides: asides.length, asideHidden, prices: prices.slice(0, 3), coins: player.mojicoins };
   });
@@ -71,6 +72,9 @@ try {
   check(r.card.flexDir === 'column' && r.card.border === '2px rgb(12, 11, 16)' && /rgb\(12, 11, 16\) 4px 4px 0px/.test(r.card.shadow) && /inset/.test(r.card.shadow) && /^Nunito/.test(r.card.font) && r.card.h <= 340, 'BOX: a column with a 2px black line, an ink offset and a rarity strip, in Nunito, compact (under 340 device px with the 88 px sprite; the old row alone was ~160)', J(r.card));
   check(r.coaster.w === '64px' && r.coaster.radius === '50%' && r.coaster.bg === 'rgba(255, 255, 255, 0.2)' && r.coaster.border === '2px rgb(12, 11, 16)', 'BOX: the piece on a 64 px coaster at 20% white with a 2px black ring', J(r.coaster));
   check(r.icon && ((r.icon.kind === 'img' && r.icon.w === '88px' && r.icon.shadows >= 4 && r.icon.ink && r.icon.over > 8) || (r.icon.kind === 'span' && r.icon.font === '52px' && r.icon.shadows >= 1)), 'ICON: the piece drawn at 88 px, overflowing the 64 px coaster, with an ink outline of drop-shadows (or its glyph at 52 px while the sprite decodes)', J(r.icon));
+  const TINT = { warrior: '255, 90, 90', rogue: '198, 138, 255', archer: '126, 231, 135', mage: '106, 166, 255', hp: '255, 90, 90', mp: '106, 166, 255', full: '255, 209, 102', cure: '126, 231, 135' };
+  const tinted = (o, k) => !!k && new RegExp('rgba\\(' + TINT[k] + ', 0.48\\)').test(o.bg) && new RegExp('rgba\\(' + TINT[k] + ', 0.55\\)').test(o.shadow);
+  check(r.tint && r.tint.n === r.n && tinted(r.tint, r.tint.cls), 'CLASS TINT: every forge card carries its class and its coaster is washed and glows in the class colour (a warrior sees red)', J(r.tint));
   check(r.plate, 'PLATE: the comic plate (panel_p5_shop) is the forge background, as before');
   check(r.buyAtRest.opacity === '0' && r.buyAtRest.pos === 'absolute' && r.buyAtRest.pe === 'none', 'BUY: hidden at rest, positioned over the price', J(r.buyAtRest));
   check(r.asides >= 1 && r.asideHidden, 'STATS: the tier-multiplier asides are hidden from the line', J({ asides: r.asides, hidden: r.asideHidden }));
