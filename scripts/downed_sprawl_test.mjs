@@ -1,4 +1,4 @@
-// THE DOWNED COLLAPSE: BUCKLE, TOPPLE, SPRAWL, DUST, STILL (v0.30.1054).
+// THE DOWNED COLLAPSE: BUCKLE, TOPPLE, SPRAWL, DUST, STILL (v0.30.1054; flattened, weapon dropped v0.30.1061).
 //
 // Per user: "when the character is downed could you animate and make him lie in a position that is more believably
 // dead". The downed draw was a rigid 90-degree roll of the standing pose. Now drawPlayer's downed block runs a timeline
@@ -44,6 +44,10 @@ try {
     // _drawVectorHero reads the map _postureMap() returns straight into its bone transforms, so that is the hook.
     const _o = _postureMap; window.__seen = []; window.__blink = [];
     _postureMap = function () { const m = _o(); if (m && m.head) window.__seen.push({ t: game.time, k: window._lxDownedPoseK || 0, sq: window._lxDownedSquash || 0, head: +m.head.angle, armBack: +m.armBack.angle, legL: +m.legL.angle }); return m; };
+    // the held weapon: the procedural class weapon (HERO_VEC_WEAPON[cls], read at draw time) and the equipment-art layer
+    window.__wpn = { standing: 0, down: 0 };
+    { const w0 = HERO_VEC_WEAPON[player.cls]; if (w0) HERO_VEC_WEAPON[player.cls] = function () { if ((window._lxDownedPoseK || 0) >= 0.5) window.__wpn.down++; else window.__wpn.standing++; return w0.apply(this, arguments); }; }
+    { const e0 = _drawEquipmentLayer; _drawEquipmentLayer = function (slot) { if (slot === 'weapon') { if ((window._lxDownedPoseK || 0) >= 0.5) window.__wpn.down++; else window.__wpn.standing++; } return e0.apply(this, arguments); }; }
     const _ob = _heroBlinkFactor; _heroBlinkFactor = function () { const v = _ob(); window.__blink.push({ t: game.time, k: window._lxDownedPoseK || 0, v }); return v; };
     for (let i = 0; i < 40 && window.__seen.length < 3; i++) await new Promise((r) => setTimeout(r, 50));   // a few standing draws first (the headless frame rate wanders)
     const before = { seen: window.__seen.length, maxK: Math.max(0, ...window.__seen.map((s) => s.k)), dust: (game.particles || []).filter((p) => p && p.color === 'rgba(214,204,186,0.85)').length, face: player.facing || 1 };
@@ -55,12 +59,13 @@ try {
     const early = seen.filter((s) => s.t - t0 <= 12), late = seen.slice(-6);
     const dust = dustPeak;
     const afterDraw = { k: window._lxDownedPoseK || 0, sq: window._lxDownedSquash || 0 };
+    const wpn = { standing: window.__wpn.standing, down: window.__wpn.down };
     const own = (() => { const m = _o(); return { head: +m.head.angle, armBack: +m.armBack.angle }; })();   // read outside a hero draw (the unhooked map)
     // revive: end the down the way _coopReviveApply does, then let the get-up run
     player._downed = false; player._downedSilent = false; player._downedUntil = 0; player.hp = (typeof getMaxHp === 'function') ? getMaxHp() : player.hp; document.getElementById('coop-downed-banner')?.remove();
     // the get-up is 18 sim frames; wait for the blend to reach zero rather than a fixed beat (the headless sim rate wanders)
     let up = []; for (let i = 0; i < 80; i++) { await new Promise((r) => setTimeout(r, 50)); up = window.__seen.slice(-2); if (up.length === 2 && up.every((q) => q.k === 0)) break; }
-    return { downed, before, f: player._downFallFace || 1, early: early.slice(0, 6), earlyMaxSq: Math.max(0, ...early.map((s) => s.sq)), earlyMaxK: Math.max(0, ...early.map((s) => s.k)), earlyBlink: (() => { const inBuckle = blink.filter((b) => b.k > 0 && b.k < 0.45); const any = blink.filter((b) => b.k > 0 && b.t - t0 <= 40); return (inBuckle.length ? inBuckle : any).map((b) => b.v).slice(0, 4); })() /* the face layer bakes and is not drawn every hero frame: buckle-phase samples if any, else the first downed ones */, late, dustBefore: before.dust, dust, dustFlag: player._downDust, afterDraw, own, up };
+    return { downed, before, wpn, f: player._downFallFace || 1, early: early.slice(0, 6), earlyMaxSq: Math.max(0, ...early.map((s) => s.sq)), earlyMaxK: Math.max(0, ...early.map((s) => s.k)), earlyBlink: (() => { const inBuckle = blink.filter((b) => b.k > 0 && b.k < 0.45); const any = blink.filter((b) => b.k > 0 && b.t - t0 <= 40); return (inBuckle.length ? inBuckle : any).map((b) => b.v).slice(0, 4); })() /* the face layer bakes and is not drawn every hero frame: buckle-phase samples if any, else the first downed ones */, late, dustBefore: before.dust, dust, dustFlag: player._downDust, afterDraw, own, up };
   });
   const f = r.f;
   check(r.downed && r.before.seen >= 3 && r.before.maxK === 0, 'setup: the hero drew normally (no blend) before the down', J(r.before));
@@ -68,7 +73,8 @@ try {
   // the eyes: covered by the shipped downed_pose_test (closed for the whole downed draw); the face layer bakes and is not
   // drawn every hero frame, so a sample inside the buckle window is luck - not asserted here
   const L = r.late[r.late.length - 1] || {};
-  check(r.late.length >= 3 && r.late.every((s) => s.k === 1) && Math.abs(L.head - 26 * f) < 0.6 && Math.abs(L.armBack - 55 * f) < 0.6 && Math.abs(L.legL - 50 * f) < 0.6, `SPRAWL: at rest the painter is handed the full sprawl, mirrored by the fall's facing (${f > 0 ? 'right' : 'left'}) - head lolled, an arm flung out in front and one back over the body, a knee bent`, J(L));
+  check(r.late.length >= 3 && r.late.every((s) => s.k === 1) && Math.abs(L.head - 18 * f) < 0.6 && Math.abs(L.armBack - 12 * f) < 0.6 && Math.abs(L.legL - 10 * f) < 0.6, `SPRAWL: at rest the painter is handed the full sprawl, mirrored by the fall's facing (${f > 0 ? 'right' : 'left'}) - head lolled, arms limp along the body, legs along the ground with a slight splay - nothing in the air`, J(L));
+  check(r.wpn.standing >= 1 && r.wpn.down === 0, 'WEAPON: drawn in hand while standing, never once the topple begins - a collapsed hero has dropped it', J(r.wpn));
   check(r.dust >= r.dustBefore + 6 && r.dustFlag === 1, 'DUST: the landing kicks up a puff of dust, once', J({ before: r.dustBefore, after: r.dust, flag: r.dustFlag }));
   check(r.afterDraw.k === 0 && r.afterDraw.sq === 0 && r.own.head === 0 && r.own.armBack === 0, 'SCOPED: outside the hero draw the flags read zero and the posture map is the player\'s own', J({ afterDraw: r.afterDraw, own: r.own }));
   check(r.up.length >= 2 && r.up.every((s) => s.k === 0 && s.head === 0 && s.armBack === 0), 'GET-UP: after the revive the blend has unwound and the painter sees the standing posture again', J(r.up.slice(-2)));
