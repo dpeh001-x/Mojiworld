@@ -14588,7 +14588,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1005';
+const GAME_VERSION = 'v0.30.1006';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53549,7 +53549,7 @@ function _coopTickProjectiles() {
 // shot's first frames and on each keyframe (the guest keeps them on its copy), so a volley costs its bytes once.
 const _COOP_PJ_XF = ['_defPierce', '_ignoreDef', '_heavyFloorPct', '_srcType', '_gravBand', '_bossBand', '_healLockMs', '_sourceLabel',
   'sourceLabel', '_zodiacSign', '_radiance', '_impactMs', '_impactShake', 'freeze', 'poison', '_poisonDmg', 'slow', 'skillLock',
-  'stunHit', '_zoneAttack', 'pierce'];
+  'stunHit', '_zoneAttack', 'pierce', '_noEvasion'];   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
 function _coopPjVal(v) {   // numbers, short strings, booleans, and one level of those (bands, radiance)
   if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
   if (typeof v === 'string') return v.slice(0, 80);
@@ -53874,7 +53874,7 @@ function _lxBossExec(kind, p) {
   try {
     if (typeof net !== 'undefined' && net && net.isHost && net.ws && typeof _coopActive === 'function' && _coopActive()) {
       // fr is for a build that predates k: it takes a %-of-max-HP hit instead of nothing
-      const fr = kind === 'kkQuake' ? 0.55 : kind === 'kkStomp' ? (p.col ? 0.5 : 0.22) : kind === 'zdHp1' ? 0.9 : kind === 'scSting' ? 0.5 : kind === 'gvDrain' ? 0.9 : 0;
+      const fr = kind === 'kkQuake' ? 0.55 : kind === 'kkStomp' ? (p.col ? 0.5 : 0.22) : kind === 'zdHp1' ? 0.9 : kind === 'scSting' ? 0.5 : kind === 'gvDrain' ? 0.9 : kind === 'obMelt' ? 0.49 : 0;
       net.ws.send(JSON.stringify({ t: 'bosshit', map: game.currentMap, x: p.x | 0, y: p.y | 0, r: 0, d: 0, fr, sl: kind, c: '#ff5555', k: kind, p }));
     }
   } catch (e) {}
@@ -53950,6 +53950,37 @@ function _lxBossExecLocal(kind, p) {
     // Brief iframe so the burst hit-stop reads cleanly, but shorter than
     // HP1 since the move is non-lethal.
     player.invulnerable = Math.max(player.invulnerable, 360);
+    return true;
+  }
+  case 'obMelt': {
+    // v0.30.1006 - OCTOBABY'S EIGHT-MOOD MELTDOWN. 49% of max HP and a 1.8 s stun, unless the player is
+    // outside its reach (LX_OCTO_MELT_R from the head's centre) or inside an i-frame / evade window.
+    // Block, warrior DR, Aegis and Holy Shield still cut it for anyone who stays in.
+    if (player._god || (player.invulnerable | 0) > 0 || (player._dashEvadeUntil && (game.time | 0) < player._dashEvadeUntil)) {
+      showToast('Dodged the Meltdown!', 'epic');
+      return false;
+    }
+    const _mr = Math.max(1, +p.r || 440);
+    const _mdx = (player.x + player.w / 2) - (+p.x || 0), _mdy = (player.y + player.h / 2) - (+p.y || 0);
+    if (_mdx * _mdx + _mdy * _mdy > _mr * _mr) {
+      showToast('Out of reach - the Meltdown misses you!', 'epic');
+      return false;
+    }
+    const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
+    let dmg = Math.max(1, Math.floor(_maxHp * 0.49));
+    if (player.blockTimer > 0) { dmg = Math.max(1, Math.floor(dmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+    if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
+    if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
+    const _hsMul = (typeof _holyShieldDrMul === 'function') ? _holyShieldDrMul() : 1;
+    if (_hsMul < 1) dmg = Math.max(1, Math.floor(dmg * _hsMul));
+    game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg + ' MELTDOWN', life: 70, color: '#ff44ff', size: 22 });
+    player.hp -= dmg;
+    player.lastHitTime = game.time;
+    player._lastDamageSource = 'Octobaby Eight-Mood Meltdown';
+    player.hitStun = Math.max(player.hitStun | 0, 1800);
+    if (player.hp <= 0 && !game.dying && typeof triggerDeath === 'function') {
+      try { if (typeof _tryCheatDeathRevive !== 'function' || !_tryCheatDeathRevive()) triggerDeath(); } catch (_) {}
+    }
     return true;
   }
   case 'kkQuake': {
@@ -89213,7 +89244,14 @@ function updateMonsters(dt) {
         }
       } else {
         m._dirRollT -= dt;
-        if (m._dirRollT <= 0 && !m._bigMeleeFiring && !(m._dirGuardT > 0) && !(m._dirGhostT > 0)) {
+        // v0.30.1006 - the FREE opening waits for a clean moment: between attacks, not rising. Due mid-attack
+        // it used to cancel the attack outright (the freeze below zeroes a rising boss's vy, so a roll
+        // arriving mid-leap cut King Krook's jump slam off in the air, no shockwave, "attack is broken
+        // off" with no player cause). Deferred, never discarded - the countdown keeps running - and
+        // capped at 4 s past due, so a boss that never returns to 'idle' still gets its openings.
+        const _dirBusy = (m.patternState && m.patternState !== 'idle') || (m.vy < -0.5);
+        if (m._dirRollT <= 0 && !m._bigMeleeFiring && !(m._dirGuardT > 0) && !(m._dirGhostT > 0)
+            && (!_dirBusy || m._dirRollT < -4000)) {
           // v0.29.834 — 12-20 s -> 18-28 s. v0.29.831 made both windows real,
           // which was a buff; the break meter adds a fourth opener on top. So
           // the FREE opening gets rarer in the same pass and earned pressure
@@ -93707,7 +93745,7 @@ const _LX_BOSS_CYCLE_LATCHES = [
   // Aetherion
   '_tearFired', '_beamFired', '_astralAnnounced', '_astralFired', '_orbsAnnounced', '_orbsFired',
   // King Krook (shared _kAnnounced/_kFired guard his whole kit)
-  '_kAnnounced', '_kFired', '_megaAnnounced', '_fireAnnounced',
+  '_kAnnounced', '_kFired', '_megaAnnounced', '_fireAnnounced', '_kJumped', '_kJumpAir',   // v0.30.1006 jump slam
   // Mooma (quake/summon also reset at entry since v0.30.324; this covers her
   // slam and groundShake steps, and is harmless belt-over-braces for the rest)
   '_summonFired', '_shakeAnnounced', '_shakeJumped', '_shakeFired',
@@ -93854,6 +93892,45 @@ const _KROOK_STRINGS_P2 = [      // phase 2 earns a third beat
   ['jumpSlam', 'claw', 'claw'],
   ['claw', 'fireBreath', 'claw'],
 ];
+// v0.30.1006 - THE JUMP SLAM'S SHOCKWAVE (per user: "strengthen krook_ground shows an intermittent weak
+// jump-slam with partial % Max HP damage"). Two waves leave his feet on touchdown and run the floor,
+// one each way; they start at his flanks so the two can never overlap one player. A wave that lands
+// takes a quarter of the player's max HP - "partial": above the 15% every Krook hit already floors
+// at, below the colossal stomp's half - through block, warrior DR and Aegis, and not through the
+// out-level falloff, so it means the same thing at Lv 50 and Lv 90. They hug the floor: jump them.
+// Sized to be JUMPED, measured: a held Space-bar jump peaks at 95 px and spends ~27 sim steps above
+// 40 px, while an 84 px wave at 7.5 px a step overlaps a player for ~15 - so a jump started in a ~210 ms
+// window clears it, and a mistimed one does not. Reach: speed x life = 450 px out from each flank.
+const LX_KROOK_SLAM = { frac: 0.25, speed: 7.5, w: 84, h: 40, life: 60 };
+function _krookSlamWave(m) {
+  const feet = m.y + m.h, S = LX_KROOK_SLAM;
+  for (const dir of [-1, 1]) {
+    game.projectiles.push({
+      x: dir < 0 ? m.x + m.w * 0.25 - S.w : m.x + m.w * 0.75, y: feet - S.h,
+      vx: dir * S.speed, vy: 0, w: S.w, h: S.h, life: S.life,
+      // 'smash', not the old slam's 'shock': 'shock' borrows a ~200 px purple void-swirl sprite (it
+      // promised a wall nobody can jump) and takes a hard-coded vy += 0.3 a step that ignores noGravity
+      // (the waves sank through the floor). 'smash' draws fx_groundshock stretched to THIS hitbox and has
+      // no physics of its own - the art is the hurtbox, riding the floor.
+      damage: m.atk * 0.7, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'smash', _srcType: m.type,
+      color: '#ddaa55', noGravity: true, _krookSlam: true, _noEvasion: true,
+      _radiance: { chance: 1, frac: S.frac, flat: true, label: "King Krook's jump slam", tag: 'SLAM',
+                   color: '#ffb35a', toast: 'JUMP SLAM - jump the shockwave!' },
+    });
+  }
+  if (typeof addShake === 'function') addShake(16);
+  if (typeof flash === 'function') flash(0.2);
+  if (typeof addHitStop === 'function') addHitStop(90);
+  if (typeof audio !== 'undefined' && audio && audio.play) audio.play('quake_hit');
+  if (typeof spawnDashFx === 'function') { try { spawnDashFx({ type: 'ring', x: m.x + m.w / 2, y: feet - 4, r0: 24, r1: 230, life: 22, color: '#ffcf8a', squash: 0.3 }); } catch (e) {} }
+  if (typeof _budgetedParticlePush === 'function') {
+    for (let i = 0; i < 18; i++) {
+      const d = i % 2 ? 1 : -1;
+      if (!_budgetedParticlePush({ x: m.x + m.w / 2 + d * (20 + Math.random() * m.w * 0.4), y: feet - 3,
+        vx: d * (3 + Math.random() * 5), vy: -1 - Math.random() * 2.5, life: 26, color: '#d9a766', size: 3 + Math.random() * 3 })) break;
+    }
+  }
+}
 function _krookStartString(m, arr) {
   m._kString = arr.slice(1);
   m._kStrRecover = _krookRecover(arr.length);
@@ -97235,6 +97312,7 @@ function bossAI(m, dt, distToPlayer) {
         m._kSubTimer = 0;
         m._kAnnounced = false;
         m._kFired = false;
+        m._kJumped = false; m._kJumpAir = false;   // v0.30.1006 a fresh jump slam starts from its wind-up
       }
     } else if (m.patternState === 'claw') {
       m.vx = m.facing * 4;     // lunge
@@ -97415,27 +97493,39 @@ function bossAI(m, dt, distToPlayer) {
       }
       if (t > 1500) { m.patternState = 'idle'; m.patternTimer = 0; m._fireAnnounced = false; }
     } else if (m.patternState === 'jumpSlam') {
-      // Wind-up 0-300 ms, jump up at 300, peak ~600, slam down landing.
-      if (t < 300) m.vx = 0;
-      else if (t === 300 || (t > 290 && t < 340 && m.onGround)) {
-        m.vy = -14;
-        m.vx = m.facing * 5;
-      }
-      if (m.onGround && t > 500 && !m._kFired) {
-        m._kFired = true;
-        // Small landing shockwave (3 projectiles).
-        for (let i = -1; i <= 1; i++) {
-          game.projectiles.push({
-            x: m.x + m.w/2, y: m.y + m.h - 10,
-            vx: i * 4, vy: -2,
-            w: 22, h: 18, life: 60,
-            damage: m.atk * 0.7, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'shock', _srcType: m.type,
-            color: '#ddaa55',
-          });
+      // v0.30.1006 - THE JUMP SLAM LANDS. Measured on v0.30.984 it never did: the pattern ended at a fixed
+      // t > 1100 on the pattern clock, but a vy -14 leap is ~56 sim steps of air - about 1,300 on
+      // that clock at his pace - so the move expired MID-AIR and the landing hit could not fire
+      // (4 of 4 clean slams: a full 189 px jump, zero shockwaves). The take-off also sat in a 50 ms
+      // window, `t === 300 || (290 < t < 340 && onGround)`, that a boss not grounded at that instant
+      // skipped outright. Now Leo's pounce grammar: the take-off is LATCHED (it waits for the ground
+      // if it must), the move lives until he is actually DOWN, and the hit resolves on touchdown.
+      // Airtime and recovery count real ms (_rawDt) - the pattern clock runs 1.1-1.3x real time.
+      if (!m._kJumped) {
+        if (m.onGround) m.vx = 0;   // a slam picked while he is still airborne keeps its drift until he lands
+        if (game.time % 3 === 0 && typeof _budgetedParticlePush === 'function') {   // the crouch loads
+          _budgetedParticlePush({ x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w * 0.8, y: m.y + m.h - 4,
+            vx: (Math.random() - 0.5) * 2.5, vy: -0.6 - Math.random(), life: 18, color: '#b98a55', size: 3 });
         }
-        addShake(10);
+        if (t >= 300 && m.onGround) {
+          m._kJumped = true; m._kJumpAir = false; m._kJumpMs = 0;
+          m.vy = -14;
+          m.vx = m.facing * 5;
+        }
+      } else if (!m._kFired) {
+        m._kJumpMs = (m._kJumpMs || 0) + _rawDt;
+        if (!m.onGround) m._kJumpAir = true;
+        if (m._kJumpAir && m.onGround) {
+          m._kFired = true; m._kSlamRecovMs = 380; m.vx = 0;
+          _krookSlamWave(m);
+        } else if (m._kJumpMs > 2600) {   // something held him up: end it without a phantom hit
+          m._kFired = true; m._kSlamRecovMs = 0;
+        }
+      } else {
+        m.vx = 0;
+        m._kSlamRecovMs = (m._kSlamRecovMs || 0) - _rawDt;
+        if (m._kSlamRecovMs <= 0) { m.patternState = 'idle'; m.patternTimer = 0; m._kJumped = false; m._kJumpAir = false; }
       }
-      if (t > 1100) { m.patternState = 'idle'; m.patternTimer = 0; }
     } else if (m.patternState === 'earthquake') {
       // Telegraphed 1200 ms windup so the player can hop up to safety.
       m.vx = 0;
@@ -97623,7 +97713,24 @@ function bossAI(m, dt, distToPlayer) {
         const _speed = 2.4;
         game.projectiles.push({
           x: _sx, y: _sy,
-          vx: m.facing * _speed, vy: 0,
+          // v0.30.1006 - AIMED at the floor lane the player stands in. The horizontal speed is unchanged
+          // (2.4 px a step - slower than a running player, 2.9); the ball now DESCENDS so it arrives at
+          // the player's height as it reaches the player's x, its lowest 44 px taking the whole
+          // standing band. A player behind him or under his nose gets the floor ahead instead of a
+          // shot fired backwards through his own body. The answer is to leave its line, while he
+          // keeps swinging - a big slow shot that takes space away, not one a player can ignore.
+          vx: m.facing * _speed,
+          vy: (() => {
+            let _fl = null; const _px = player.x + player.w / 2;
+            for (const pl of ((game.mapData && game.mapData.platforms) || [])) {
+              if (pl && pl.type === 'ground' && _px >= pl.x && _px <= pl.x + pl.w && (_fl == null || pl.y < _fl)) _fl = pl.y;
+            }
+            if (_fl == null) _fl = m.y + m.h;
+            const _ty = Math.min(player.y + player.h / 2, _fl - _ballSize / 2 + 44);
+            let _dx = _px - (_sx + _ballSize / 2);
+            if (Math.sign(_dx) !== (m.facing || 1) || Math.abs(_dx) < 60) _dx = (m.facing || 1) * 600;
+            return Math.max(-1.2, Math.min(1.6, (_ty - (_sy + _ballSize / 2)) / (Math.abs(_dx) / _speed)));
+          })(),
           w: _ballSize, h: _ballSize,
           life: 400,                                  // ~6.7 s lifetime
           // v0.26.427 — Per user "megafireball should NOT be a OHKO". Was a
@@ -97640,7 +97747,14 @@ function bossAI(m, dt, distToPlayer) {
           color: '#ff7722',
           stunHit: 600,
           noGravity: true,
-          _sourceLabel: 'a Mega Fireball',
+          _sourceLabel: 'a Mega Fireball', _noEvasion: true,
+          // v0.30.1006 - v0.30.601 made every boss projectile roll one band on the at-level bar, which
+          // quietly flattened this - a 1/3-screen ball on a 1.4 s charge that its own note calls
+          // "~4x a normal hit" - to exactly what a claw swipe deals. It takes 40% of max HP now:
+          // flat (no out-level falloff), through block / warrior DR / Aegis, dodged by getting
+          // over or under it like always.
+          _radiance: { chance: 1, frac: 0.40, flat: true, label: 'a Mega Fireball', tag: 'MEGA FIREBALL',
+                       color: '#ffb347', toast: 'MEGA FIREBALL - get over it or under it!' },
         });
         // Big launch-burst particles.
         for (let i = 0; i < 20; i++) {
@@ -97882,7 +97996,11 @@ function bossAI(m, dt, distToPlayer) {
             owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'tidalSweep', _srcType: m.type,
             noGravity: true,
             color: '#5fd6ff',
-            _sourceLabel: 'the Tidal Sweep',
+            _sourceLabel: 'the Tidal Sweep', _noEvasion: true,
+            // v0.30.1006 - the phase-2 wall is the one Octobaby move that has to be JUMPED, and like Krook's
+            // slam it takes a quarter of max HP when it lands: flat, through block / warrior DR / Aegis.
+            _radiance: { chance: 1, frac: 0.25, flat: true, label: 'the Tidal Sweep', tag: 'TIDAL SWEEP',
+                         color: '#7fe3ff', toast: 'TIDAL SWEEP - jump it!' },
           });
           if (typeof audio !== 'undefined' && audio.play) audio.play('boss_warn');
         }
@@ -97916,6 +98034,7 @@ function bossAI(m, dt, distToPlayer) {
       m._crazyActive = true;
       m._crazyPhase = 'telegraph';
       m._crazyTime = 3000;
+      if (typeof showToast === 'function') showToast('MELTDOWN - get OUT of the ring!', 'epic');   // v0.30.1006 the counterplay, named
       showToast('🐙 OCTOBABY — ⚠ EIGHT-MOOD MELTDOWN ⚠', 'legendary');
       addShake(14);
       flash(0.35);
@@ -97924,6 +98043,25 @@ function bossAI(m, dt, distToPlayer) {
     if (m._crazyActive) {
       m._crazyTime -= dt;
       if (m._crazyPhase === 'telegraph') {
+        // v0.30.1006 - the reach is DRAWN as a disc by _lxDrawMeltRing (after the attack zones); this adds a
+        // bright spray where its rim crosses the floor - in a side-view arena that crossing is the line
+        // the player actually has to get past. Pushed straight into game.particles like the converging
+        // motes below, so a busy particle budget can never thin out what this attack is fair on.
+        if (game.time % 4 === 0) {
+          const _mcx = m.x + m.w / 2, _mcy = m.y + m.h / 2, _R = LX_OCTO_MELT_R;
+          let _fy = null;
+          for (const pl of ((game.mapData && game.mapData.platforms) || [])) {
+            if (pl && pl.type === 'ground' && _mcx >= pl.x && _mcx <= pl.x + pl.w) _fy = pl.y;
+          }
+          if (_fy != null && Math.abs(_fy - _mcy) < _R) {
+            const _half = Math.sqrt(_R * _R - (_fy - _mcy) * (_fy - _mcy));
+            for (const _sx of [_mcx - _half, _mcx + _half]) {
+              for (let k = 0; k < 3; k++) {
+                game.particles.push({ x: _sx + (Math.random() - 0.5) * 8, y: _fy - 2, vx: 0, vy: -2.2 - Math.random() * 2.4, life: 22, color: '#ffd1ff', size: 3 });
+              }
+            }
+          }
+        }
         // Converging particles during windup — 6 per frame, radial inward
         // toward the head's centre. Gives the player a clear visual cue.
         if ((game.time & 1) === 0) {
@@ -97956,43 +98094,10 @@ function bossAI(m, dt, distToPlayer) {
           flash(0.7); addShake(28);
           if (typeof addHitStop === 'function') addHitStop(160);
           if (audio && audio.play) audio.play('boss_alarm');
-          // Resolve damage. Bypass paths first: god / iframe / dodge.
-          // v0.30.927 the third clause read a dodge-iframe field that occurs exactly once in this file - there. Since
-          // v0.26.966 the rogue roll grants no i-frames (it sets _dashEvadeUntil, an evade window), so the one class
-          // whose dodge this clause existed for ate 49% of max HP through the telegraph every time.
-          const _dodging = (player._god || player.invulnerable > 0 ||
-                            (player._dashEvadeUntil && (game.time | 0) < player._dashEvadeUntil));
-          if (_dodging) {
-            showToast('Dodged the Meltdown!', 'epic');
-          } else {
-            const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
-            let dmg = Math.max(1, Math.floor(_maxHp * 0.49));
-            if (player.blockTimer > 0) {
-              dmg = Math.max(1, Math.floor(dmg * 0.3));
-              if (typeof triggerBlock === 'function') triggerBlock();
-            }
-            if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
-            if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
-            const _hsMul = (typeof _holyShieldDrMul === 'function') ? _holyShieldDrMul() : 1;
-            if (_hsMul < 1) dmg = Math.max(1, Math.floor(dmg * _hsMul));
-            game.damageNumbers.push({
-              taken: true, x: player.x + 14, y: player.y, vy: -2,
-              text: '-' + dmg + ' MELTDOWN', life: 70,
-              color: '#ff44ff', size: 22,
-            });
-            player.hp -= dmg;
-            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(cx, 0, 0, 0, 0.49, 'Octobaby Eight-Mood Meltdown', '#ff44ff');
-            player.lastHitTime = game.time;
-            player._lastDamageSource = 'Octobaby Eight-Mood Meltdown';
-            player.hitStun = Math.max(player.hitStun | 0, 1800);
-            // Same death-trigger pattern as v0.25.684 Gravitos fix —
-            // call triggerDeath synchronously so the overlay shows the
-            // same frame as the damage, not next frame via safety net.
-            if (player.hp <= 0 && !game.dying && typeof triggerDeath === 'function') {
-              // v0.26.1033 — honor an unused cheat-death charge on this nuke too.
-              try { if (typeof _tryCheatDeathRevive !== 'function' || !_tryCheatDeathRevive()) triggerDeath(); } catch (_) {}
-            }
-          }
+          // __V__ - resolved PER PLAYER through the boss-exec path, like King Krook's slams: each
+          // player tests their own distance to the head, their own i-frames, block and Aegis. It used to
+          // write player.hp here in the AI and broadcast a flat 49% to everyone else - no position in it.
+          _lxBossExec('obMelt', { x: Math.round(cx), y: Math.round(cy), r: LX_OCTO_MELT_R });
         }
       } else if (m._crazyPhase === 'unleash' && m._crazyTime <= 0) {
         m._crazyActive = false;
@@ -98568,6 +98673,13 @@ const LX_OCTO_ARM_GEN_HP = 0.7;    // each regrown generation is weaker, so the 
 // and there is nothing left to inflict anything, which is the same lesson the
 // damage gate teaches. The stun leg still honours getStunResist(), so stun
 // resistance keeps meaning what it means everywhere else.
+// v0.30.1006 - THE MELTDOWN HAS A REACH. 49% of max HP, and until now nothing a player could do with
+// their feet changed it: the only answers were i-frames, a block or an Aegis, so a mage or an archer
+// without the evade window simply paid half the bar every 20 s. A ring now shows how far the burst
+// reaches - the same ~450 px its own particles fly - and anyone outside it at the unleash is untouched.
+// The head sits on the floor (centre 156 px up), so on the ground the safe line is ~265 px past its
+// edge: a real run inside the ~2.3 s windup, not a free step. The old answers still work inside it.
+const LX_OCTO_MELT_R = 440;
 const LX_OCTO_AILMENT_MS = 30000;   // one pulse every 30s
 const LX_OCTO_AILMENT_TELE_MS = 1200;
 // v0.30.x — THE MOOD LANCE (per user: the tentacles should "occasional shoot
@@ -103863,7 +103975,14 @@ function updateProjectiles(dt) {
           game.projectiles.splice(i, 1); continue;
         }
         const dodgeC = getEvasion();
-        if (dodgeC > 0 && Math.random() < dodgeC) {
+        // v0.30.1006 - a projectile flagged _noEvasion is one the player must physically avoid - King Krook's
+        // slam waves and Mega Fireball, Octobaby's Tidal Sweep: each announced, each a big slice of max HP.
+        // A passive evasion roll used to delete them outright (the roll SPLICES the shot), so an evasive
+        // build shrugged off a third of its signature hits on dice - the "take it for granted" the pass
+        // is about. An ACTIVE evade window (a dodge-roll skill's _dashEvadeUntil) still rolls: that is a
+        // timed answer, like i-frames. Every other projectile keeps its roll exactly as it was.
+        const _evWindow = !!(player._dashEvadeUntil && (game.time | 0) < player._dashEvadeUntil);
+        if (dodgeC > 0 && (!p._noEvasion || _evWindow) && Math.random() < dodgeC) {
           game.damageNumbers.push({
             taken: true, x: player.x + 14, y: player.y, vy: -2,
             text: 'DODGE', life: 40, color: '#88ffcc', size: 14
@@ -149964,6 +150083,17 @@ function emitProjectileTrails() {
     const sx = p.x - camX;
     if (sx + p.w < -80 || sx > W + 80 || p.y + p.h < camY - 80 || p.y > camY + H + 80) continue;
     if (lowFx && (game.time & 1)) continue;
+    if (p._krookSlam) {   // v0.30.1006 King Krook's slam waves: embers off the leading edge
+      if (typeof _budgetedParticlePush === 'function') {
+        const _lead = p.vx > 0 ? p.x + p.w : p.x, _dir = p.vx > 0 ? 1 : -1;
+        for (let _i = 0; _i < 2; _i++) {
+          _budgetedParticlePush({ x: _lead - _dir * Math.random() * 16, y: p.y + p.h - 3 - Math.random() * 12,
+            vx: -_dir * (0.6 + Math.random() * 1.4), vy: -1.4 - Math.random() * 2.6, life: 16 + Math.random() * 10,
+            color: Math.random() < 0.5 ? '#ffb35a' : '#f5d08a', size: 2.5 + Math.random() * 2.5 });
+        }
+      }
+      continue;
+    }
     if (p.owner === 'player') {
       if (p.skill === 'fire' && (game.time & 1) === 0) {
         // v0.29.x PERF — the player fireball trail was the ONLY trail branch
@@ -151089,6 +151219,23 @@ function _lxAttackZones() {
   if (!game.monsters || !game.monsters.length) return out;
   for (const m of game.monsters) {
     if (!m || m.currentHp <= 0 || m._dying) continue;
+    // v0.30.1006 - KING KROOK'S JUMP SLAM: a quarter of max HP, so it earns a marked zone. From take-off
+    // to touchdown the stretch of floor his two waves will run - his flanks out to their full reach,
+    // the same LX_KROOK_SLAM numbers the strike reads - glows under him, tiled like the quake band.
+    if (m.type === 'kingKrook' && m.patternState === 'jumpSlam' && m._kJumped && !m._kFired && typeof LX_KROOK_SLAM !== 'undefined') {
+      const _S = LX_KROOK_SLAM, _reach = _S.speed * _S.life;
+      const _cx = m.x + m.w / 2;
+      let _gy = null;
+      for (const pl of ((game.mapData && game.mapData.platforms) || [])) {
+        if (pl && pl.type === 'ground' && _cx >= pl.x && _cx <= pl.x + pl.w && (_gy == null || pl.y < _gy)) _gy = pl.y;
+      }
+      if (_gy == null) _gy = (game.mapData && game.mapData.worldHeight) ? game.mapData.worldHeight - 60 : 480;
+      const _x0 = m.x + m.w * 0.25 - _S.w - _reach, _x1 = m.x + m.w * 0.75 + _S.w + _reach;
+      const _prog = Math.max(0, Math.min(1, (m._kJumpMs || 0) / 950));
+      for (let _x = _x0; _x < _x1; _x += 300) {
+        out.push({ kind: 'smash', x: _x, y: _gy - 42, w: Math.min(300, _x1 - _x), h: 70, prog: _prog, color: '#ff8844', dir: 'center', tg: 'tg_smash' });
+      }
+    }
     if (m._columnFiring && m._columnT > 0 && m.traits && m.traits.columnStrike
         && (m.isBoss || m.boss)) {   // boss pillars ALWAYS mark — user carve-out
       const cs = m.traits.columnStrike;
@@ -151204,6 +151351,28 @@ function _lxAttackZones() {
     }
   }
   return out;
+}
+// v0.30.1006 - OCTOBABY'S MELTDOWN, its reach drawn. LX_OCTO_MELT_R from the head's centre is where the burst
+// stops; outside it at the unleash is safe. _crazyTime counts the windup down from 3000.
+function _lxDrawMeltRing() {
+  if (!game.monsters || typeof LX_OCTO_MELT_R === 'undefined') return;
+  for (const m of game.monsters) {
+    if (!m || m.type !== 'octobaby' || !m._crazyActive || m._crazyPhase !== 'telegraph' || !(m.currentHp > 0)) continue;
+    const cx = m.x + m.w / 2 - game.camera.x, cy = m.y + m.h / 2 - ((game.camera && game.camera.y) || 0), R = LX_OCTO_MELT_R;
+    const prog = 1 - Math.max(0, Math.min(1, (m._crazyTime || 0) / 3000));
+    const pulse = 0.5 + 0.5 * Math.sin((game.time | 0) * (0.2 + prog * 0.5));
+    ctx.save();
+    ctx.globalAlpha = 0.08 + 0.16 * prog;
+    ctx.fillStyle = '#ff3fd8';
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.6 + 0.35 * pulse;
+    ctx.strokeStyle = prog > 0.82 ? '#ffffff' : '#ff66ff';
+    ctx.lineWidth = 5;
+    ctx.setLineDash([22, 12]); ctx.lineDashOffset = -((game.time | 0) * 1.5);
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
 }
 function _drawAttackZones() {
   const zones = _lxAttackZones();
@@ -155568,6 +155737,7 @@ function _lxDrawFrame(time) {
   _drawFadingMonsters();
   if (typeof _lxGravRiftDraw === 'function') _lxGravRiftDraw(true);   // v0.30.x grav-tp — and in front of him
   _drawAttackZones();   // v0.29.x — committed-attack zones, under the strike beam and the player
+  if (typeof _lxDrawMeltRing === 'function') _lxDrawMeltRing();   // v0.30.1006 Octobaby's Meltdown reach, over the zones
   drawProjectiles();
   drawHazards();
   drawAfterImages();
