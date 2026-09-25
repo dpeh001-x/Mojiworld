@@ -40,7 +40,15 @@ const r = await page.evaluate(async (FIELDS) => {
     return { n, left };
   };
   const pausedRun = await run(true), liveRun = await run(false);
-  return { pausedRun, liveRun, coop: (typeof _coopActive === 'function') && _coopActive() };
+  // the boss attack cadences (v0.30.x): the same shift, on a live monster
+  const MON = ['_barnPillarsAt', '_smithHammerAt', '_smithHeatAt', '_smithPillarsAt', '_smithTollAt', '_sovStepAt', '_vermSprayAt'];
+  game.monsters.length = 0;
+  const m = spawnMonster(player.x + 300, player.y, 'slime'); if (m) { m.currentHp = m.maxHp = 9e9; }
+  for (const f of MON) m[f] = (game.time | 0) + 600;
+  game.paused = true; const mn = await steps(120); game.paused = false;
+  const monLeft = {}; for (const f of MON) monLeft[f] = Math.round(m[f] - (game.time | 0));
+  game.monsters.length = 0;
+  return { pausedRun, liveRun, monLeft, mn, coop: (typeof _coopActive === 'function') && _coopActive() };
 }, FIELDS);
 await b.close(); srv.kill();
 let pass = 0, fail = 0;
@@ -50,6 +58,8 @@ const drained = FIELDS.filter((f) => r.pausedRun.left[f] < 600 - 20);
 ok(drained.length === 0, 'every player deadline holds while paused (600 steps set, 120 paused)', drained.map((f) => f + ':' + r.pausedRun.left[f]));
 const held = FIELDS.filter((f) => r.liveRun.left[f] > 600 - 60);
 ok(held.length === 0, 'CONTROL: unpaused, every one of them drains', held);
+const monDrained = Object.keys(r.monLeft).filter((f) => r.monLeft[f] < 600 - 20);
+ok(r.mn >= 100 && monDrained.length === 0, 'the boss attack cadences hold while paused too', monDrained.map((f) => f + ':' + r.monLeft[f]));
 ok(errs.length === 0, 'no page errors', errs.slice(0, 3));
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);
