@@ -14454,7 +14454,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1003';
+const GAME_VERSION = 'v0.30.1004';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -55156,6 +55156,8 @@ function _mpHandle(msg) {
           _pp._last = performance.now();
         }
       }
+      // v0.30.1004 - wardrobe paint: the set header, one piece, or a resend ask (see _mpPaintRecv)
+      if (msg && (msg.cps || msg.cpp || msg.cpq != null) && typeof _mpPaintRecv === 'function') _mpPaintRecv(msg);
       // v0.30.823 - what the sender's build can read (cap), whether it is away (aw), and its fx on the old carrier
       if (msg && msg.id !== net.myId && net.peers[msg.id]) {
         const _cq = net.peers[msg.id];
@@ -55382,26 +55384,161 @@ function _mpAvatarWire() {
 // their allowlist. So painted gear reaches partners on the relay that is live
 // today, with no deploy needed — the same reasoning that put look/eq there.
 // Sent only when the paint CHANGES or a NEW peer appears, never on the tick.
-const MP_PAINT_BUDGET = 44 * 1024;   // headroom under the relays' 64KB maxPayload
-function _mpPaintWire() {
+// v0.30.1004 — PAINT SYNC, PIECE BY PIECE (per user: "ensure that the custom draw
+// feature from the wardrobe stays and can be seen by other players in the room
+// as well"). Measured on v0.30.1000: the save kept every stroke, but partners
+// saw only part of it. The one-frame sender that lived here never sent the
+// full-body paint at all, and a real painted layer runs 40-50 KB of PNG, so its
+// 44 KB budget fit ONE layer and silently dropped every other.
+//
+// Now each painted piece (the full-body paint + each layer) rides its own
+// 'ping' frame, one every 300 ms, under a 56 KB cap per frame (the ws relays
+// close a socket on a frame over 64 KB). A piece over the cap goes out
+// downscaled - _lxDrawPaintImage draws into a fixed rect, so it lands at the
+// same size, only softer. A small header names the set, one hash per piece:
+//   { t:'ping', cps:{ k:h } }             the set I wear now ({} = none)
+//   { t:'ping', cpp:k, cpd:src, cph:h }   one piece (k 'paint' = full body)
+//   { t:'ping', cpq:id, cpk:[k] }         "peer <id>: resend these"
+// An edit sends only the pieces that changed; a new peer gets everything; the
+// header repeats every 15 s so a partner who lost a frame asks for exactly the
+// pieces it lacks. Still 'ping' on purpose: every deployed relay forwards it
+// verbatim, so no relay deploy is needed.
+const MP_PAINT_PART_CAP = 56 * 1024;
+const MP_PAINT_PART_GAP_MS = 300;
+const MP_PAINT_KEYS = CHAR_PAINT_LAYER_IDS.concat(['paint']);
+function _mpPaintHash(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36) + '.' + s.length.toString(36);
+}
+function _mpPaintSrc(k) {
   if (typeof player === 'undefined' || !player) return null;
-  const src = (typeof _lxCleanPaintLayers === 'function')
-    ? _lxCleanPaintLayers(player.customPaintLayers) : null;
-  if (!src) return null;
-  const order = (typeof CHAR_PAINT_RENDER_ORDER !== 'undefined') ? CHAR_PAINT_RENDER_ORDER : Object.keys(src);
-  const out = {}; let used = 0, dropped = 0;
-  for (const k of order) {
-    const v = src[k];
-    if (typeof v !== 'string' || !v) continue;
-    // Degrade by whole layers rather than truncating one into a broken PNG.
-    if (used + v.length > MP_PAINT_BUDGET) { dropped++; continue; }
-    out[k] = v; used += v.length;
+  const v = (k === 'paint') ? player.customPaint : (player.customPaintLayers && player.customPaintLayers[k]);
+  return (typeof v === 'string' && v.indexOf('data:image/png') === 0) ? v : null;
+}
+// The piece as it goes on the wire: itself when it fits, else a downscale of
+// the decoded image. null = not decoded yet (retry); '' = cannot fit at all.
+function _mpPaintWireSrc(k, src) {
+  if (src.length <= MP_PAINT_PART_CAP) return src;
+  const c = net._cpWire || (net._cpWire = {});
+  if (c[k] && c[k].src === src) return c[k].wire;
+  const img = (typeof _lxCustomPaintImage === 'function') ? _lxCustomPaintImage(src) : null;
+  if (!img) return null;
+  let wire = '';
+  for (const sc of [0.75, 0.6, 0.5, 0.4, 0.3, 0.2]) {
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(img.naturalWidth * sc));
+    cv.height = Math.max(1, Math.round(img.naturalHeight * sc));
+    const x = cv.getContext('2d');
+    x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+    x.drawImage(img, 0, 0, cv.width, cv.height);
+    const u = cv.toDataURL('image/png');
+    if (u.length <= MP_PAINT_PART_CAP) { wire = u; break; }
   }
-  if (dropped && !net._paintBudgetWarned) {
-    net._paintBudgetWarned = true;
-    try { console.warn('[mp] paint payload over ' + MP_PAINT_BUDGET + 'B; ' + dropped + ' layer(s) not sent'); } catch (e) {}
+  c[k] = { src, wire };
+  return wire;
+}
+function _mpPaintHeader() {
+  const cur = net._cpCur || {}, set = {};
+  for (const k in cur) set[k] = cur[k].h;
+  const n = Object.keys(set).length;
+  if (!n && !net._cpEver) return;   // never painted: nothing to announce
+  if (n) net._cpEver = true;
+  net._cpHdrAt = performance.now();
+  try { net.ws.send(JSON.stringify({ t: 'ping', cps: set })); } catch (e) {}
+}
+// Sender, once per _mpTick: spot edits and new peers, then send at most one
+// queued piece per MP_PAINT_PART_GAP_MS. Receiver: ask for what a header
+// promised and no piece delivered.
+function _mpPaintTick(now) {
+  const cur = net._cpCur || (net._cpCur = {});
+  let changed = null;
+  for (const k of MP_PAINT_KEYS) {
+    const src = _mpPaintSrc(k), was = cur[k];
+    if ((was ? was.src : null) === src) continue;
+    if (src) cur[k] = { src, h: _mpPaintHash(src) }; else delete cur[k];
+    (changed || (changed = [])).push(k);
   }
-  return Object.keys(out).length ? out : null;
+  const ids = Object.keys(net.peers);
+  const known = net._cpPeerSet || (net._cpPeerSet = new Set());
+  let joined = false;
+  for (const id of ids) if (!known.has(id)) { known.add(id); joined = true; }
+  if (known.size > ids.length) for (const id of Array.from(known)) if (!net.peers[id]) known.delete(id);
+  const q = net._cpQ || (net._cpQ = []);
+  if (!ids.length) { q.length = 0; return; }
+  if (changed || joined) {
+    _mpPaintHeader();
+    for (const k of (joined ? Object.keys(cur) : changed)) if (cur[k] && q.indexOf(k) < 0) q.push(k);
+  } else if (net._cpEver && now - (net._cpHdrAt || 0) > 15000) {
+    _mpPaintHeader();
+  }
+  if (q.length && now >= (net._cpNextAt || 0)) {
+    for (let n = q.length; n > 0; n--) {
+      const k = q[0], it = cur[k];
+      if (!it) { q.shift(); continue; }
+      const wire = _mpPaintWireSrc(k, it.src);
+      if (wire === null) {   // still decoding: let the others go first; give up after ~10 s
+        q.push(q.shift());
+        if ((it.wait = (it.wait || 0) + 1) > 150) q.pop();
+        continue;
+      }
+      q.shift();
+      if (!wire) { try { console.warn('[mp] painted ' + k + ' cannot fit a frame even at 20%; not sent'); } catch (e) {} continue; }
+      try { net.ws.send(JSON.stringify({ t: 'ping', cpp: k, cpd: wire, cph: it.h })); } catch (e) {}
+      net._cpNextAt = now + MP_PAINT_PART_GAP_MS;
+      break;
+    }
+  }
+  for (const id of ids) {
+    const p = net.peers[id];
+    if (!p || !p._cpAskAt || now < p._cpAskAt) continue;
+    p._cpAskAt = 0;
+    const miss = Object.keys(p._cps || {}).filter((k) => !p._cph || p._cph[k] !== p._cps[k]);
+    if (miss.length) try { net.ws.send(JSON.stringify({ t: 'ping', cpq: id, cpk: miss })); } catch (e) {}
+  }
+}
+// Receiver. Trust boundary as before: known piece ids only, PNG data URLs only,
+// bounded size, rate-limited per peer. A header drops pieces the sender no
+// longer wears; a piece whose hash changed keeps showing the old image until
+// the new one lands, so a repaint never blinks the partner bare.
+function _mpPaintRecv(msg) {
+  if (!msg || msg.id === net.myId) return;
+  if (msg.cpq != null) {
+    if (String(msg.cpq) !== String(net.myId) || !Array.isArray(msg.cpk) || !net.peers[msg.id] || !_mpRateOk(msg.id, 'cpq', 1)) return;
+    const q = net._cpQ || (net._cpQ = []);
+    for (const k of msg.cpk.slice(0, MP_PAINT_KEYS.length)) {
+      if (MP_PAINT_KEYS.indexOf(k) >= 0 && net._cpCur && net._cpCur[k] && q.indexOf(k) < 0) q.push(k);
+    }
+    return;
+  }
+  const hdr = !!(msg.cps && typeof msg.cps === 'object'), part = typeof msg.cpp === 'string';
+  if (!hdr && !part) return;
+  let p = net.peers[msg.id];
+  if (!p) {
+    if (Object.keys(net.peers).length >= MP_MAX_PEERS) return;
+    p = net.peers[msg.id] = { id: msg.id, _last: performance.now() };
+  }
+  if (hdr) {
+    if (!_mpRateOk(msg.id, 'cps', 2)) return;
+    const set = {};
+    for (const k of MP_PAINT_KEYS) { const h = msg.cps[k]; if (typeof h === 'string' && h.length <= 24) set[k] = h; }
+    p._cps = set;
+    if (p.cp) { for (const k in p.cp) if (!set[k]) delete p.cp[k]; if (!Object.keys(p.cp).length) p.cp = null; }
+    if (!set.paint) p.cpFull = null;
+    if (p._cph) for (const k in p._cph) if (!set[k]) delete p._cph[k];
+    const miss = Object.keys(set).filter((k) => !p._cph || p._cph[k] !== set[k]).length;
+    p._cpAskAt = miss ? performance.now() + 1500 + 400 * miss : 0;
+  } else {
+    const k = msg.cpp, src = msg.cpd, h = msg.cph;
+    if (MP_PAINT_KEYS.indexOf(k) < 0 || typeof src !== 'string' || src.indexOf('data:image/png') !== 0
+      || src.length > 64 * 1024 || typeof h !== 'string' || h.length > 24) return;
+    if (!_mpRateOk(msg.id, 'cpp', 6)) return;
+    if (k === 'paint') p.cpFull = src; else (p.cp || (p.cp = {}))[k] = src;
+    (p._cph || (p._cph = {}))[k] = h;
+    if (p._cps) p._cps[k] = h;
+    if (typeof _lxCustomPaintImage === 'function') _lxCustomPaintImage(src);   // decode before the first draw
+  }
+  p._last = performance.now();
 }
 // v0.29.x — version-skew hint (once per peer). A partner on a stale cached
 // build sends an older `v` — their avatar data is missing fields, so what
@@ -55499,26 +55636,9 @@ function _mpTick() {
       ti: _sendAv ? _ttlWire : undefined,
     }));
   } catch (e) { /* ignore */ }
-  // v0.29.x — PAINT SYNC. Fires only on a real edge: the paint changed, or a
-  // peer id we have not shipped to yet turned up (a late joiner missed the
-  // last broadcast). Both cases send one 'ping' carrying just 'cp' — no lk/eq,
-  // so the ordinary 2.5s carrier stays small and this never rides the 14Hz
-  // tick. A room that nobody repaints costs exactly one frame per new peer.
-  try {
-    const _peerIds = Object.keys(net.peers).sort().join(',');
-    const _cp = _mpPaintWire();
-    const _cpKey = _cp ? JSON.stringify(_cp).length + ':' + Object.keys(_cp).join(',') : '';
-    // a cheap content stamp: layer set + total byte length changes on any edit
-    const _cpStamp = _cp ? _cpKey + ':' + Object.values(_cp).reduce((a, v) => a + v.charCodeAt(v.length - 1) + v.length, 0) : '';
-    if (_cpStamp !== net._paintStamp || (_peerIds && _peerIds !== net._paintPeers)) {
-      net._paintStamp = _cpStamp;
-      net._paintPeers = _peerIds;
-      if (_peerIds) {
-        // '' clears: a peer who wiped their paint must stop showing it on ours
-        net.ws.send(JSON.stringify({ t: 'ping', cp: _cp || {} }));
-      }
-    }
-  } catch (e) { /* never let a cosmetic frame break the tick */ }
+  // v0.30.1004 — PAINT SYNC, piece by piece (see _mpPaintTick): edits, new peers,
+  // one paced piece per 300 ms, and asks for pieces a header promised.
+  try { _mpPaintTick(now); } catch (e) { /* never let a cosmetic frame break the tick */ }
   // Decay peer chat / emote lifetimes
   for (const id in net.peers) {
     const p = net.peers[id];
@@ -55750,7 +55870,7 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     // arrives on the 'ping' carrier (see _mpPaintWire) and is sanitised at
     // ingestion by _lxCleanPaintLayers. A peer who has sent none still gets
     // null here, which is the old behaviour exactly.
-    player.customPaint = null;
+    player.customPaint = (typeof p.cpFull === 'string') ? p.cpFull : null;   // v0.30.1004 - the full-body paint travels now
     player.customPaintLayers = (p.cp && typeof p.cp === 'object') ? p.cp : null;
     // Rebuild the peer's equipment map for the override hook. Generic
     // over whatever slots arrived so wardrobe visual slots (body_top /
