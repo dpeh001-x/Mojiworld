@@ -62,7 +62,7 @@ const R = await page.evaluate(async () => {
   const legs = game.monsters.filter(m => m && LEGS.includes(m.type));
   if (!legs.length) return { err: 'no legs spawned' };
   const leg = legs[0];
-  const size = { w: leg.w, h: leg.h, area: leg.w * leg.h };
+  const size = { w: leg.w, h: leg.h, area: leg.w * leg.h, typeW: monsterTypes[leg.type].w, typeH: monsterTypes[leg.type].h };
 
   // Anchoring: legs should sit near the head, not drift off.
   const hcx = head.x + head.w / 2;
@@ -74,6 +74,10 @@ const R = await page.evaluate(async () => {
   const measure = (target) => {
     target.currentHp = 1e9; target.maxHp = 1e9;
     target._defVar = 1;                 // pin the per-mob variance roll
+    // ...and the arm's own evasion and defensive traits. v0.30.267 set tentacle evasion to 180 (per user)
+    // after this test was written; a probe that can MISS reads 0 damage, and the control's 0 made every
+    // ratio below null.
+    target.evasion = 0; target.traits = null;
     const before = target.currentHp;
     hitMonster(target, RAW, false, 'probe');
     return before - target.currentHp;
@@ -110,10 +114,14 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
 
 ok('the boss still spawns its 4 tentacles', R.legCount === 4, `${R.legCount} legs`);
 // SIZE — the live fighting size, not the authored 80x60 table value.
-ok('tentacles are smaller than the old 208x156', R.size.w < 200 && R.size.h < 150,
-   `${R.size.w}x${R.size.h} (was 208x156)`);
-ok('but still substantially larger than the 80x60 base', R.size.w > 100,
-   `${R.size.w}x${R.size.h}`);
+// Since v0.30.420 (per user: every hitbox grown to the art it draws) the live BOX covers the sprite's full
+// height - 180x312 - so its raw size no longer tells "reduced" apart from "honest"; no sprite moved. The
+// reduction the user asked for lives in the arena scale the arms spawn at: 2.6 before v0.29.949, 1.7 after.
+const _scale = R.size.w / R.size.typeW;
+ok('tentacles spawn at the reduced arena scale (1.7, was 2.6)', _scale > 1.5 && _scale < 2.0,
+   `${R.size.w}x${R.size.h} = type ${R.size.typeW}x${R.size.typeH} x ${_scale.toFixed(2)}`);
+ok('but still substantially larger than their base type', R.size.w > R.size.typeW * 1.3,
+   `${R.size.w} vs type ${R.size.typeW}`);
 // DEF — measured through hitMonster, not recomputed.
 ok('tentacle def is raised', R.liveDef > 20, `live def ${R.liveDef} (authored ${R.authoredDef})`);
 ok('def now mitigates meaningfully (>12%)', R.mitigationPct != null && R.mitigationPct > 12,

@@ -89,6 +89,14 @@ const R = await page.evaluate(async () => {
     // that divided by it. Removed as a variable, and the probe takes a median
     // on top so one stray sample cannot decide a check.
     head.traits = null;
+    // ...and her EVASION. A boss's dodge roll bottoms out at a 45% hit floor, and this character's accuracy
+    // against her 151 sits near it, so a median of five could itself be a MISS: runs on main read the neutral
+    // hit as 0 (4 checks failed) or the exposed / kill-path hit as 0 ("0.00x").
+    head.evasion = 0;
+    // The BOSS WARD (v0.30.x, the lifesteal answer) is newer than this test too: on its own clock every hit
+    // lands for exactly 1. Held off, with the break meter and the stance rolls that also reshape a hit.
+    head._wardUntil = 0; head._wardNextAt = 1e12; head._wardBreakUntil = 0; head._wardGauge = 0;
+    head._break = 0; head._dirOpenT = 0; head._dirGuardT = 0; head._dirGhostT = 0; head._dirStanceT = 1e12;
   };
   const probe = () => {
     const s = [];
@@ -196,6 +204,11 @@ const R = await page.evaluate(async () => {
   // What a lance actually costs the player, through the real damage path.
   {
     player._god = false;
+    // The mood pulse above left the player poisoned, frozen, silenced and STUNNED. With a 7% passive dodge
+    // splicing the lance now and then, a poison tick could end the wait below first ("took 1 HP = 0.7% of
+    // max"), and the leftover stun made "...and it stuns" pass on its own. Both cleared; dodge held off.
+    player._poisonTimer = 0; player.freezeTimer = 0; player._skillLockTimer = 0; player.stunTimer = 0; player.hitStun = 0;
+    const _ge = window.getEvasion; window.getEvasion = () => 0;
     const before = player.hp = getMaxHp();
     const mh = getMaxHp();
     player.invulnerable = 0; player.blockTimer = 0;
@@ -210,14 +223,21 @@ const R = await page.evaluate(async () => {
     out.lanceHpLost = before - player.hp;
     out.lanceHpFracActual = +(out.lanceHpLost / mh).toFixed(3);
     out.lanceStunned = (player.hitStun || 0) > 0 || (player.stunTimer || 0) > 0;
+    window.getEvasion = _ge;
     player._god = true; player.hp = getMaxHp();
   }
 
   // --- CONTROL: an ordinary monster is untouched by any of this ----------
   const mob = spawnMonster(player.x + 200, player.y, 'horny', false);
-  mob.def = 0; mob.maxHp = 4000000; mob.currentHp = 4000000;
+  mob.def = 0; mob.maxHp = 4000000; mob.currentHp = 4000000; mob.evasion = 0; mob.traits = null;
+  // v0.30.394 gave ordinary mobs a weakness: x1.3 or x0.8 by the hit's damage class, which follows the
+  // class this test boots as - so the control swung between 130,000 and 80,000. Bosses skip it (they get
+  // the ward instead), so the fair control is a plain mob with its affinity held neutral.
+  const _aff = (typeof LX_MOB_WEAK !== 'undefined') ? LX_MOB_WEAK[mob.type] : undefined;
+  if (_aff !== undefined) delete LX_MOB_WEAK[mob.type];
   const mb = mob.currentHp; hitMonster(mob, 100000, false, 'test');
   out.dmgPlainMob = mb - mob.currentHp;
+  if (_aff !== undefined) LX_MOB_WEAK[mob.type] = _aff;
   return out;
 });
 await browser.close(); server.kill();

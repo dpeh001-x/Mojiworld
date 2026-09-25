@@ -15,6 +15,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
@@ -60,12 +61,19 @@ const H = R.head, L = R.legs || [];
 console.log(`  head: ${JSON.stringify(H)}`);
 console.log(`  leg : ${JSON.stringify(L[0])}   (x${L.length} identical: ${L.every(l => l && JSON.stringify(l) === JSON.stringify(L[0]))})`);
 
+// Combat stats only. Since v0.30.420 (per user: every hitbox grown to the art it draws) each tentacle's
+// BOX is its own art's size - 106x184, 109x199, 96x166, 116x204 - so comparing w/h here failed a build
+// that is exactly right. The stat line is what the +20% edit touched, and what a partial edit would split.
+const statLine = (l) => l && JSON.stringify({ hp: l.hp, atk: l.atk, def: l.def, eva: l.eva, exp: l.exp, coins: l.coins, speed: l.speed });
 ok('CONTROL: all four tentacles still share one stat line',
-   L.length === 4 && L.every(l => l && JSON.stringify(l) === JSON.stringify(L[0])),
+   L.length === 4 && L.every(l => statLine(l) === statLine(L[0])),
    'they are authored identically; a partial edit would show here');
 
 // The head takes all four as +20% derivations.
-for (const [k, label] of [['hp', 'HP'], ['atk', 'ATK'], ['def', 'DEF'], ['eva', 'evasion']]) {
+// DEF is no longer a +20% derivation: v0.30.351 set it outright (per user, from the DEF audit: "Octobaby
+// 100", up from the derived 32 - a Lv-50 boss had been taking more per hit than the Lv-50 field).
+ok('Octobaby DEF is the authored 100', H.def === 100, `def ${H.def} (was 32, a +20% derivation; set outright in v0.30.351)`);
+for (const [k, label] of [['hp', 'HP'], ['atk', 'ATK'], ['eva', 'evasion']]) {
   ok(`Octobaby ${label} is +20%`, near(H[k], WAS_HEAD[k] * 1.2),
      `${WAS_HEAD[k]} -> ${H[k]} (x${(H[k] / WAS_HEAD[k]).toFixed(3)})`);
 }
@@ -89,8 +97,16 @@ ok('CONTROL: rewards untouched (the ask said stats)',
    `head exp ${H.exp}/coins ${H.coins}, leg exp ${L[0].exp}`);
 ok('CONTROL: movement untouched', H.speed === WAS_HEAD.speed && L[0].speed === WAS_LEG.speed,
    `head speed ${H.speed} (a near-stationary centrepiece by design), leg speed ${L[0].speed} (anchored)`);
-ok('CONTROL: size untouched', H.w === 200 && H.h === 160 && L[0].w === 80 && L[0].h === 60,
-   'size was tuned explicitly twice before; a stat buff must not move it');
+// Size has had ONE owner since v0.30.420: the hitbox pass (per user: boxes grown to the art they draw)
+// writes each box and mirrors it into data/monster_hitboxes.js. So "a stat buff must not move size" is
+// now: every type's box still matches the table that pass wrote.
+{
+  const _hb = {}; for (const m of readFileSync(path.join(ROOT, 'data', 'monster_hitboxes.js'), 'utf8').matchAll(/(\w+):\{w:(\d+),h:(\d+)/g)) _hb[m[1]] = [+m[2], +m[3]];
+  const _ty = [['octobaby', H], ['octoLegPoison', L[0]], ['octoLegFreeze', L[1]], ['octoLegSkillLock', L[2]], ['octoLegStun', L[3]]];
+  ok('CONTROL: size is still the hitbox table\'s (a stat edit must not move it)',
+     _ty.every(([t, v]) => v && _hb[t] && v.w === _hb[t][0] && v.h === _hb[t][1]),
+     JSON.stringify(_ty.map(([t, v]) => t + ' ' + (v ? v.w + 'x' + v.h : '?') + ' vs ' + (_hb[t] ? _hb[t].join('x') : '?'))));
+}
 
 // Regrowth reads lt.hp, so the buff must reach later generations for free.
 const gen1 = Math.max(1, Math.floor(L[0].hp * (R.genStep != null ? R.genStep : 0.7)));

@@ -67,6 +67,15 @@ const r = await page.evaluate(async () => {
   // How far the legs sit from the head — the orbit signature.
   const legDistFromHead = () => Math.round(legs.reduce((acc, l) =>
     acc + Math.hypot((l.x + l.w / 2) - (head.x + head.w / 2), (l.y + l.h / 2) - (head.y + head.h / 2)), 0) / legs.length);
+  // The farthest single arm from the head. The AVERAGE above is a poor "left the formation" signal: the
+  // arms on the far side of the head walk at the player THROUGH the head, so the average barely grows even
+  // when the near arms have crossed half the arena (the formation's reach is ~380 px; frenzied arms stop
+  // 150 px short of the player, ~640 px out from here).
+  const legReach = () => Math.round(Math.max(...legs.map((l) =>
+    Math.hypot((l.x + l.w / 2) - (head.x + head.w / 2), (l.y + l.h / 2) - (head.y + head.h / 2)))));
+  // An arm out of its slot vertically: anchored, its centre sits head.h * 0.32 below the head's centre.
+  const legsDropped = () => legs.filter((l) => Math.abs((l.y + l.h / 2) - (head.y + head.h / 2)) > head.h)
+    .map((l) => l.type + ' y ' + Math.round(l.y));
   const legDistFromPlayer = () => Math.round(legs.reduce((acc, l) =>
     acc + Math.hypot((l.x + l.w / 2) - (player.x + player.w / 2), (l.y + l.h / 2) - (player.y + player.h / 2)), 0) / legs.length);
 
@@ -79,14 +88,14 @@ const r = await page.evaluate(async () => {
     projBefore += game.projectiles.filter((p) => p.owner === 'enemy').length;
   }
   out.before = { legOrbit: legDistFromHead(), legToPlayer: legDistFromPlayer(), spread: legSpread(),
-                 headX: Math.round(head.x), enraged: !!head._enraged };
+                 headX: Math.round(head.x), enraged: !!head._enraged, reach: legReach(), dropped: legsDropped() };
   out.sweepBefore = pushed.some((p) => p.skill === 'tidalSweep');
 
   // ---------- trip the transition ----------
   head.currentHp = head.maxHp * 0.4;
   const trace = [];
   let immuneFrames = 0, headShotsDuringEvent = 0, sankTo = 0;
-  let frenzyLegToPlayer = 1e9, frenzyLegOrbit = 0;
+  let frenzyLegToPlayer = 1e9, frenzyLegOrbit = 0, frenzyReach = 0;
   const startX = head.x;
   // Only the HEAD's own attacks count below. Filtering on owner === 'enemy'
   // instead counts the legs, which are SUPPOSED to be firing during the frenzy,
@@ -114,6 +123,7 @@ const r = await page.evaluate(async () => {
     if (evt === 2) {
       frenzyLegToPlayer = Math.min(frenzyLegToPlayer, legDistFromPlayer());
       frenzyLegOrbit = Math.max(frenzyLegOrbit, legDistFromHead());
+      frenzyReach = Math.max(frenzyReach, legReach());
     }
     if (!trace.length || trace[trace.length - 1][0] !== evt) trace.push([evt, i]);
   }
@@ -121,9 +131,9 @@ const r = await page.evaluate(async () => {
   out.immuneFrames = immuneFrames;
   out.headShotsDuringEvent = headShotsDuringEvent;
   out.sankTo = sankTo;
-  out.frenzy = { legToPlayer: frenzyLegToPlayer === 1e9 ? null : frenzyLegToPlayer, legOrbit: frenzyLegOrbit };
+  out.frenzy = { legToPlayer: frenzyLegToPlayer === 1e9 ? null : frenzyLegToPlayer, legOrbit: frenzyLegOrbit, reach: frenzyReach };
   out.movedArena = Math.round(Math.abs(head.x - startX));
-  out.after = { legOrbit: legDistFromHead(), evt: head._octoEvt | 0, immune: head.invulnerable | 0 };
+  out.after = { legOrbit: legDistFromHead(), evt: head._octoEvt | 0, immune: head.invulnerable | 0, dropped: legsDropped() };
 
   // ---------- the new move must actually fire ----------
   let sawSweep = false;
@@ -153,6 +163,12 @@ console.log(`  after: movedArena=${r.movedArena}px ${JSON.stringify(r.after)}   
 
 check(!r.noBoss, 'Octobaby is in the arena', r.saw);
 check(r.legCount === 4, 'all four tentacles are present', r.legCount);
+// Until v0.30.1041 the arms took the monster loop's cheap "far" tier ~880 px off the camera - gravity, no anchor -
+// and fell out of the world for good. The player enters at x 260, so one fell in every fight, and this
+// test's "before" orbit had an arm 1,300 px under the floor in it (the leave-the-head check failed 2 in 3).
+check(r.before.dropped.length === 0 && r.after.dropped.length === 0,
+      'every arm hangs in its slot, before the event and after it - none drops out of the world (v0.30.1041)',
+      { before: r.before.dropped, after: r.after.dropped });
 // The transition must be a real sequence, not an instant flag flip.
 check(r.trace.some((t) => t[0] === 1) && r.trace.some((t) => t[0] === 2) && r.trace.some((t) => t[0] === 3),
       'the transition plays all three beats: submerge, frenzy, surface', r.trace);
@@ -162,8 +178,8 @@ check(r.sankTo >= 40, 'the submerge is visible, not just a flag', r.sankTo);
 // The arena change: legs leave orbit and close on the player.
 check(r.frenzy.legToPlayer !== null && r.frenzy.legToPlayer < r.before.legToPlayer,
       'the tentacles break orbit and close on the player', { frenzy: r.frenzy.legToPlayer, before: r.before.legToPlayer });
-check(r.frenzy.legOrbit > r.before.legOrbit * 1.5,
-      'and they genuinely leave the head, not just drift', { frenzy: r.frenzy.legOrbit, orbit: r.before.legOrbit });
+check(r.frenzy.reach > r.before.reach * 1.5,
+      'and they genuinely leave the head, not just drift', { frenzyReach: r.frenzy.reach, formationReach: r.before.reach });
 check(r.movedArena > 400, 'the head surfaces somewhere else entirely', r.movedArena);
 check(r.after.evt === 0 && r.after.immune === 0, 'the event ends and the boss is hittable again', r.after);
 check(Math.abs(r.after.legOrbit - r.before.legOrbit) < r.before.legOrbit * 0.5,
