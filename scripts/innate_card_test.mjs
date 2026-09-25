@@ -1,7 +1,8 @@
-// The U panel's bottom row: the Innate Growth card and the talent cards, in the cool pop look.
+// The U panel's bottom row: the Innate Growth card and the talent cards, in the lux pop look.
 //
 // Per user: "Innate growth can be much better, cool pop and cute mix", then "job talent should also be
-// redesigned to match", then "No this is way too cute, it needs a cool pop look, no pastel colours".
+// redesigned to match", then "No this is way too cute, it needs a cool pop look, no pastel colours",
+// then "Make something in between the current and this lux feel, current is too comicky".
 // Both cards were rebuilt, so this pins that every number survived, that the talent card's behaviour
 // did too, and that nothing is pastel:
 //   1. four stat stickers, HP / MP / ATK / DEF, each = level-ups x the class's per-level gain
@@ -10,7 +11,8 @@
 //   3. the roll columns carry the tally, their heights are the tally on one scale with the typical
 //      tick, and the luck pill reads the average against 1 per level
 //   4. the last-roll sticker: jackpot / lucky / plain by the roll, "No level-ups yet" at level 1
-//   5. the card is an ink panel with a white outline, the title heavy italic Nunito, and every stat
+//   5. the card is black glass in a gradient-gold hairline (a border-box gradient), the title heavy
+//      Nunito, and every stat
 //      tile and talent pick a saturated colour (HSV saturation >= 0.6 - the old pastels were ~0.35)
 //   6. talents: before the master advancement ONE pick card and a locked Master teaser (the U panel
 //      used to draw the job's three picks a second time as "Master Talent"); with a master, two cards
@@ -61,7 +63,7 @@ const read = (st) => page.evaluate(async (st) => {
     stats: t(c, '.lg-stat'), sp: t(c, '.lg-sp'), cols: t(c, '.lg-col'), luck: t(c, '.lg-luck'),
     h: [...c.querySelectorAll('.lg-col')].map((e) => [parseFloat(e.style.getPropertyValue('--h')), parseFloat(e.style.getPropertyValue('--e'))]),
     last: last ? { cls: last.className, txt: last.textContent.replace(/\s+/g, ' ').trim() } : null,
-    rim: cs.borderTopColor === 'rgb(255, 255, 255)' && /gradient/.test(cs.backgroundImage), titleFont: title ? getComputedStyle(title).fontFamily : '',
+    rim: (cs.backgroundImage.match(/gradient/g) || []).length >= 3 && cs.borderTopColor !== 'rgb(255, 255, 255)', titleFont: title ? getComputedStyle(title).fontFamily : '',
     titleStyle: title ? getComputedStyle(title).fontStyle + ' ' + getComputedStyle(title).fontWeight : '',
     fills: [...c.querySelectorAll('.lg-stat'), ...(host ? host.querySelectorAll('.lt-pick, .lt-learned') : [])].map((e) => getComputedStyle(e).backgroundColor),
     cards: cards.map((k) => ({ cls: k.className, title: (k.querySelector('.lt-title') || {}).textContent, picks: [...k.querySelectorAll('[data-talent]')].map((p) => p.getAttribute('data-talent')),
@@ -81,7 +83,7 @@ if (A) {
   ok('3. column heights are the tally, ticks the typical roller, on one scale', A.h.length === 3 && A.h.every(([hh, ee], i) => Math.abs(hh - wantH[i]) < 0.002 && Math.abs(ee - wantE[i]) < 0.002), JSON.stringify(A.h));
   ok('3. the luck pill: 63 bonus over 59 rolls = avg +1.07, "Lucky"', A.luck.length === 1 && /Lucky/.test(A.luck[0]) && /\+1\.07/.test(A.luck[0]), JSON.stringify(A.luck));
   ok('4. a +2 roll is a jackpot sticker', A.last && /jackpot/.test(A.last.cls) && /\+2 SP/.test(A.last.txt) && /JACKPOT/.test(A.last.txt), JSON.stringify(A.last));
-  ok('5. an ink panel with a white outline and a heavy italic Nunito title', A.rim && /Nunito/.test(A.titleFont) && /italic/.test(A.titleStyle) && +A.titleStyle.split(' ')[1] >= 900, JSON.stringify([A.rim, A.titleFont, A.titleStyle]));
+  ok('5. black glass in a gold hairline and a heavy Nunito title', A.rim && /Nunito/.test(A.titleFont) && +A.titleStyle.split(' ')[1] >= 900, JSON.stringify([A.rim, A.titleFont, A.titleStyle]));
   const sat = (rgb) => { const v = (rgb.match(/\d+(\.\d+)?/g) || []).slice(0, 3).map(Number); const mx = Math.max(...v), mn = Math.min(...v); return mx ? (mx - mn) / mx : 0; };
   ok('5. no pastel: every stat tile and talent pick is a saturated colour', A.fills.length === 7 && A.fills.every((c) => sat(c) >= 0.6), JSON.stringify(A.fills.map((c) => [c, +sat(c).toFixed(2)])));
   ok('6. before the master advancement: one pick card and a locked Master teaser, no duplicate', A.cards.length === 2 && A.cards[0].picks.length === 3 && (A.cards[1] || {}).picks && A.cards[1].picks.length === 0 && /lt-locked/.test(A.cards[1].cls) && /Master Talent/.test(A.cards[1].title), JSON.stringify(A.cards));

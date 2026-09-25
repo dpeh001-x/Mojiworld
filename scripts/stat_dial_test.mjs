@@ -9,7 +9,7 @@
 //   4. hovering a chip previews the build after it, and lights that lane's spoke
 //   5. the radar shape is the build: each vertex at r0 + ratio * (maxR - r0)
 //   6. with no SP every chip locks and the starburst dims; a maxed lane says MAX and ignores clicks
-//   7. the type is heavy italic Nunito for names (the cool pop slabs) and Nunito 900 for numbers
+//   7. the type is heavy Nunito caps for names (the lux pop chips) and Nunito 900 for numbers
 //   node scripts/stat_dial_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
