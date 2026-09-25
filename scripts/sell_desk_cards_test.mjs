@@ -72,7 +72,7 @@ try {
   check(r.confirmDisabled, 'FOOTER: SELL is disabled with nothing picked');
   // click a box: picked (yellow line, tick, counted); click again: cleared
   const pick = await page.evaluate(async () => {
-    const c = document.querySelectorAll('#shop-list .sell-row')[1]; c.click(); await new Promise((r) => setTimeout(r, 200));
+    const c = document.querySelectorAll('#shop-list .sell-row')[1]; c.querySelector('.sell-check').style.transition = 'none'; c.click(); await new Promise((r) => setTimeout(r, 200));
     const on = { sel: c.classList.contains('selected'), border: getComputedStyle(c).borderTopColor, tickBg: getComputedStyle(c.querySelector('.sell-check')).backgroundColor, tick: getComputedStyle(c.querySelector('.sell-check'), '::after').content, size: game._sellSelection.size, btn: document.getElementById('sell-confirm-btn').textContent, dis: document.getElementById('sell-confirm-btn').disabled };
     c.click(); await new Promise((r) => setTimeout(r, 200));
     const off = { sel: c.classList.contains('selected'), border: getComputedStyle(c).borderTopColor, size: game._sellSelection.size, dis: document.getElementById('sell-confirm-btn').disabled };
