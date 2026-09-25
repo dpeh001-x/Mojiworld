@@ -4,7 +4,7 @@
 // first kill and a diminishing ladder after; Gravitos is Lv 100. Three orders of magnitude out, since
 // v0.25. The line now reads his level and the ladder constants, and this checks it against them.
 //
-// Yun: "Inspect my gear" opened openShop('weapon') - the buy/sell counter, titled "Brok's Forge" -
+// Yun: "Inspect my gear" (now "What needs sharpening?", v0.30.964) opened openShop('weapon') - the buy/sell counter, titled "Brok's Forge" -
 // which from a border sentinel reads as "go and sell your kit at Brok's". His greeting promises to
 // show you what to sharpen; the option now reads your equipped weapon and armour and says so, in his
 // voice, tier-aware. And the gear shop is the "Blacksmith Forge" whoever opens it, as the bench is.
@@ -56,7 +56,7 @@ try {
       player.equipped.weapon = weapon; player.equipped.armor = armor;
       try { closeAllModals(); } catch (e) {}
       openNPC(yun); await new Promise((x) => setTimeout(x, 500));
-      const b = [...document.querySelectorAll('#dialog-options button')].find((x) => /^Inspect my gear$/.test((x.textContent || '').trim()));
+      const b = [...document.querySelectorAll('#dialog-options button')].find((x) => /^What needs sharpening\?$/.test((x.textContent || '').trim()));   // v0.30.964 label
       if (!b) return { no: 'option' };
       b.click();
       let last = -1; for (let k = 0; k < 40; k++) { await new Promise((x) => setTimeout(x, 150)); const len = (document.getElementById('dialog-text').textContent || '').length; if (len === last && k > 2) break; last = len; }
@@ -73,7 +73,7 @@ try {
     return { low, mid, gap, top };
   });
   if (y.no) check(false, 'Yun: ' + y.no); else {
-    check(!y.low.shopOpen && y.low.dialogOpen, '"Inspect my gear" no longer opens the shop - the conversation stays open', J({ shop: y.low.shopOpen, dialog: y.low.dialogOpen }));
+    check(!y.low.shopOpen && y.low.dialogOpen, '"What needs sharpening?" does not open the shop - the conversation stays open', J({ shop: y.low.shopOpen, dialog: y.low.dialogOpen }));
     check(/Whittled Stick .* tier 1/.test(y.low.said) && /will not do for the border/.test(y.low.said), 'he reads a tier-1 stick for what it is', y.low.said.slice(0, 120));
     check(/Jade Spear .* tier 5, \+3/.test(y.mid.said) && /Honest steel/.test(y.mid.said) && /Lamellar will hold/.test(y.mid.said), 'a tier-5 +3 spear and matching plate get his approval', y.mid.said.slice(0, 140));
     check(/Better than mine/.test(y.gap.said) && /tier 1 under a tier-8 edge/.test(y.gap.said), 'a tier-8 blade over tier-1 rags: he flags the gap first', y.gap.said.slice(0, 160));
