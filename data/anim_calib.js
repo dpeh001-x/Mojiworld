@@ -718,7 +718,7 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0
+      "dy": 0.0225
     },
     "walk": {
       "s": 1.6,
