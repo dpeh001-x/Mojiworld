@@ -3,12 +3,15 @@
 // Per user: "This portion of the boon UI can be redesigned and stylised black and white except for those
 // that are equipped". The panel's markup was rewritten to classes (bl-*) with the logic left alone, so
 // this pins the look and that every control still does its job:
-//   1. equipped boons - in their slots and in the bag - are coloured (a saturated border) with their art
-//      in full colour; unequipped bag cards, empty and locked slots, the head, toolbar and foot are grey
-//      (no computed text, fill or border colour with more than 16/255 of chroma) and their art greyscale
+//   (since the punk pass - per user: "the base design can be more punk like this image" - the chrome is hot
+//   pink and acid yellow; the rule for the boons themselves holds)
+//   1. equipped boons - in their slots and in the bag - are coloured (a hot-pink border with a yellow
+//      offset) with their art in full colour; unequipped bag cards and empty / locked slots are grey (no
+//      computed text, fill or border colour with more than 16/255 of chroma) and their art greyscale
 //   2. the chosen talent line takes the class's colour (CLASSES[cls].color)
 //   3. nothing in the loadout is italic
 //   4. Equip fills a free slot, Unequip empties it, Bulk discard ticks and discards through the confirm
+//   5. the punk chrome: the heading hot pink printed over an acid-yellow offset
 //   node scripts/boon_loadout_mono_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -49,7 +52,7 @@ const read = () => page.evaluate(async () => {
   const host = document.getElementById('lp-boons');
   // color-mix() computes as color(srgb r g b / a) with channels 0-1
   const chroma = (v) => { let n = (v.match(/[\d.]+/g) || []).map(Number); if (/^color\(srgb/.test(v)) n = n.map((x, i) => (i < 3 ? x * 255 : x)); if (n.length < 3 || (n.length > 3 && n[3] === 0)) return 0; return Math.max(n[0], n[1], n[2]) - Math.min(n[0], n[1], n[2]); };
-  const zone = [...host.querySelectorAll('.bl-head, .bl-head *, .bl-slot:not(.is-eq), .bl-slot:not(.is-eq) *, .bl-tools, .bl-tools *, .bl-card:not(.is-eq), .bl-card:not(.is-eq) *, .bl-foot, .bl-foot *, .bl-syn > div[style*="italic"]')]
+  const zone = [...host.querySelectorAll('.bl-slot:not(.is-eq), .bl-slot:not(.is-eq) *, .bl-card:not(.is-eq), .bl-card:not(.is-eq) *')]
     .filter((e) => e.tagName !== 'IMG' && !e.closest('.lx-emo') && !(e.classList && (e.classList.contains('coin-ico') || e.classList.contains('lx-emo'))));
   const colours = [];
   for (const e of zone) { const cs = getComputedStyle(e); for (const k of ['color', 'backgroundColor', 'borderTopColor']) if (chroma(cs[k]) > 16) colours.push((e.className || e.tagName) + ' ' + k + ' ' + cs[k]); }
@@ -58,6 +61,8 @@ const read = () => page.evaluate(async () => {
   const talent = host.querySelector('.bl-talent.is-eq');
   const italic = [...host.querySelectorAll('.bl-talent, .bl-talent *, .bl-head, .bl-head *, .bl-slots *, .bl-syn *, .bl-tools *, .bl-bag-grid *, .bl-foot, .bl-foot *')].filter((e) => getComputedStyle(e).fontStyle === 'italic').length;
   return {
+    h3: (() => { const h = host.querySelector('.bl-head h3'); if (!h) return null; const cs = getComputedStyle(h); return { color: cs.color, shadow: cs.textShadow }; })(),
+    eqBorder: [...host.querySelectorAll('.bl-slot.is-eq, .bl-card.is-eq')].map((e) => getComputedStyle(e).borderTopColor),
     slots: host.querySelectorAll('.bl-slot').length, eqSlots: host.querySelectorAll('.bl-slot.is-eq').length, eqCards, colours: colours.slice(0, 6),
     eqImg: img('.bl-slot.is-eq .bl-ico img'), bagImg: img('.bl-card:not(.is-eq) .bl-ico img'),
     talent: talent ? { c: talent.style.getPropertyValue('--c').trim(), border: chroma(getComputedStyle(talent).borderTopColor) } : null, clsCol: CLASSES[player.cls].color, italic,
@@ -67,9 +72,10 @@ const read = () => page.evaluate(async () => {
 const A = await read();
 ok('the loadout renders its slots', A.slots >= 1 && A.eqSlots === 1, JSON.stringify([A.slots, A.eqSlots]));
 ok('1. equipped boons (slot and bag) are coloured, their art in full colour', A.eqCards.length === 2 && A.eqCards.every((c) => c > 40) && A.eqImg === 'none', JSON.stringify([A.eqCards, A.eqImg]));
-ok('1. everything not equipped is black and white, its art greyscale', A.colours.length === 0 && /grayscale/.test(A.bagImg || ''), JSON.stringify([A.colours, A.bagImg]));
+ok('1. unequipped boons and empty / locked slots are black and white, their art greyscale', A.colours.length === 0 && /grayscale/.test(A.bagImg || ''), JSON.stringify([A.colours, A.bagImg]));
 ok('2. the chosen talent line takes the class colour (rogue ' + A.clsCol + ')', A.talent && A.talent.c === A.clsCol && A.talent.border > 40, JSON.stringify([A.talent, A.clsCol]));
 ok('3. nothing in the loadout is italic', A.italic === 0, A.italic);
+ok('5. punk: the heading is hot pink over an acid-yellow offset, equipped boons edged in the same pink', A.h3 && A.h3.color === 'rgb(255, 45, 149)' && /rgb\(243, 245, 66\)/.test(A.h3.shadow) && A.eqBorder.length === 2 && A.eqBorder.every((c) => c === 'rgb(255, 45, 149)'), JSON.stringify([A.h3, A.eqBorder]));
 // 4. the controls
 const E = await page.evaluate(async () => {
   const host = document.getElementById('lp-boons'), out = {};
