@@ -5,7 +5,7 @@
 // painted by two inert layers under the content: a torn gold plate and a 1 px gold outline in
 // .dlg-skin's pseudo-elements, and the slanted glass ink box (.dlg-ink) with its corners cut. The name
 // sits on a tilted cream banner; the answer chips lean 10 degrees with their labels upright; the round
-// portrait medallion is unchanged.
+// portrait medallion is unchanged (v0.30.976: a speaker with art stands at the side instead - see dialog_figure_test).
 //   static: the two layers are in the markup, the block is in the sheet, labels ride in .dlg-lbl spans
 //   live:   the layers exist under the content with clip-paths; the card itself paints nothing; the
 //           portrait is still a 72 px circle; the name banner is cream with ink text; every direct
@@ -52,7 +52,7 @@ try {
     const card = { bg: cd.backgroundImage, border: cd.borderTopWidth, shadow: cd.boxShadow, radius: cd.borderTopLeftRadius };
     const layers = { first, inkClip: ci && ci.clipPath.slice(0, 40), inkBlur: ci && (ci.backdropFilter || ci.webkitBackdropFilter), inkZ: ci && ci.zIndex, plateClip: cb && cb.clipPath.slice(0, 30), plateBg: cb && cb.backgroundImage.slice(0, 30), outlineClip: ca && ca.clipPath.slice(0, 30) };
     const port = getComputedStyle(document.getElementById('dialog-portrait'));
-    const portrait = { w: port.width, h: port.height, radius: port.borderTopLeftRadius, clip: port.clipPath };
+    const portrait = { w: port.width, h: port.height, radius: port.borderTopLeftRadius, clip: port.clipPath, figure: dlg.classList.contains('dlg-figure') };
     const cn = getComputedStyle(document.getElementById('dialog-name'));
     const name = { color: cn.color, fill: cn.webkitTextFillColor, bg: cn.backgroundImage.slice(0, 40), transform: cn.transform, clip: cn.clipPath.slice(0, 20), family: cn.fontFamily.slice(0, 20) };
     const btns = [...document.querySelectorAll('#dialog-options > button')];
@@ -76,8 +76,10 @@ try {
   check(r.layers.first === 'dlg-skin' && /polygon/.test(r.layers.inkClip) && /blur\(16px\)/.test(r.layers.inkBlur) && r.layers.inkZ === '0', 'live: the ink layer is a clipped, blurred box under the content', J(r.layers));
   check(/polygon/.test(r.layers.plateClip) && /linear-gradient/.test(r.layers.plateBg) && /polygon/.test(r.layers.outlineClip), 'live: the torn plate and the gold outline are painted in the skin', J({ plate: r.layers.plateClip, outline: r.layers.outlineClip }));
   check(r.card.bg === 'none' && r.card.border === '0px' && r.card.shadow === 'none' && r.card.radius === '0px', 'live: the card itself paints nothing (no background, border, shadow or radius)', J(r.card));
-  check(r.portrait.w === '72px' && r.portrait.h === '72px' && r.portrait.radius === '50%' && r.portrait.clip === 'none', 'live: the portrait bubble is unchanged - a 72 px circle', J(r.portrait));
-  check(/rgb\(23, 16, 42\)/.test(r.name.fill) && /linear-gradient/.test(r.name.bg) && r.name.transform !== 'none' && /polygon/.test(r.name.clip) && /Cinzel/.test(r.name.family), 'live: the name is ink Cinzel on a tilted cream banner', J(r.name));
+  // v0.30.976 - a speaker with art now stands at the side as a 300 px figure; the medallion is the art-less / confirm-card form
+  check(r.portrait.clip === 'none' && ((r.portrait.figure && r.portrait.w === '300px' && r.portrait.radius === '0px') || (!r.portrait.figure && r.portrait.w === '72px' && r.portrait.radius === '50%')), 'live: the portrait is the side figure for a speaker with art (300 px, square) or the 72 px medallion otherwise', J(r.portrait));
+  // v0.30.976 - in the figure layout the banner is a flat tag (no tilt, no slant); the tilted banner remains the medallion frame's
+  check(/rgb\(23, 16, 42\)/.test(r.name.fill) && /linear-gradient/.test(r.name.bg) && /Cinzel/.test(r.name.family) && (r.portrait.figure ? (r.name.transform === 'none' && r.name.clip === 'none') : (r.name.transform !== 'none' && /polygon/.test(r.name.clip))), 'live: the name is ink Cinzel on a cream plate - a flat tag beside a figure, a tilted banner beside the medallion', J(r.name));
   check(r.chips.length >= 2 && r.chips.every((c) => /matrix\(1, 0, -0\.17/.test(c.lean) && c.label && /matrix\(1, 0, 0\.17/.test(c.label)), 'live: every answer chip leans 10 degrees and its label leans back upright', J(r.chips));
   check(r.bank && r.bank.nested >= 2 && r.bank.straight, "live: the bank's self-rendered row keeps straight buttons", J(r.bank));
   check(r.confirm.length === 2 && r.confirm.every((c) => c.span) && r.confirm[0].text === 'Go on', 'live: the confirm card wraps Yes/No in the label span too', J(r.confirm));
