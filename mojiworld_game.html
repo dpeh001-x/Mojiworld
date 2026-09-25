@@ -12830,7 +12830,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.967';
+const GAME_VERSION = 'v0.30.968';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -71201,8 +71201,16 @@ function checkPlatformCollision(entity) {
   // carries dragoonSlam); prevBottom is NOT hoisted — entity.y/vy mutate when
   // a platform snaps the entity, and later platforms must see the update.
   const _slamPierceHoist = (entity === player && entity.dragoonSlam);
+  // v0.30.968 the leap guard's twin: King Krook's own JUMP SLAM (vy -14, five px a frame toward the
+  // player) crosses the same perches, and this function rested him on whichever one his hitbox
+  // clipped on the way down. A boss body wider than the ledge falls past it to a surface that can
+  // hold it. Bosses only (the full flag idiom - isBoss from the spawn args, boss from the type
+  // def), never zodiac signs, whose arenas and movement are their own; ordinary mobs and the
+  // player are byte-identical.
+  const _ledgeMinW = (entity !== player && !entity.zodiacSign && (entity.isBoss || entity.boss)) ? entity.w * _LX_BOSS_LEDGE_MIN_FRAC : 0;
   for (const p of game.mapData.platforms) {
     if (entity.x + entity.w <= p.x || entity.x >= p.x + p.w) continue;
+    if (_ledgeMinW && p.type !== 'ground' && p.w < _ledgeMinW) continue;   // v0.30.968 see _ledgeMinW
     if (p.type === 'ground') {
       if (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
           entity.y + entity.h > p.y && entity.y + entity.h < p.y + p.h + 20 &&
@@ -90066,6 +90074,11 @@ function _lxGroundYUnder(m) {
   }
   return y;
 }
+// v0.30.968 how much of a boss's width a one-way ledge must span before the boss may stand on it.
+// 0.7 keeps Gloopaloo and Mooma on the 200 px perches they were designed around and refuses
+// Krook (347 -> 243) the 200 and 240 px ledges of his own arena. Read by _bossSeekPlatform
+// (never leap at one) and checkPlatformCollision (never rest on one).
+const _LX_BOSS_LEDGE_MIN_FRAC = 0.7;
 function _bossSeekPlatform(m, dt) {
   m._leapCD = (m._leapCD || 0) - dt;
   if (m._leapCD > 0) return;
@@ -90082,6 +90095,12 @@ function _bossSeekPlatform(m, dt) {
   let best = null, bestScore = Infinity;
   for (const p of plats) {
     if (p.type !== 'platform') continue;
+    // v0.30.968 A LEDGE NARROWER THAN THE BODY IS NO PERCH (per user: King Krook "is levitating
+    // off the ground", with a clip). This helper launched a 347 px wide boss at the arena's
+    // 200 px flank perches; he landed with a sliver of hitbox on the ledge and the rest of him
+    // - most of a 344 px body - hanging in the air over nothing, then shuffled along it for the
+    // rest of the phase. King Gloopaloo (191) and Mooma (161) fit their perches and still leap.
+    if (p.w < m.w * _LX_BOSS_LEDGE_MIN_FRAC) continue;
     if (p.y >= bossFootY - 60) continue;          // must be meaningfully above
     const horizGap = Math.max(0, Math.abs(mcx - (p.x + p.w/2)) - p.w/2);
     if (horizGap > 360) continue;                 // out of leap range
@@ -95117,11 +95136,21 @@ function bossAI(m, dt, distToPlayer) {
     }
     const t = m.patternTimer;
     const dx = (player.x + player.w/2) - (m.x + m.w/2);
-    m.facing = dx > 0 ? 1 : -1;
+    // v0.30.968 NO MORE MOONWALK (per user: "movement is horribly weird with sliding"). This line
+    // used to be `m.facing = dx > 0 ? 1 : -1` - an exact flip every tick that overrode bossAI's
+    // shared dead band (half the body width, 220 ms hold) for this one boss. With the idle
+    // shuffle below always driving toward the player's centre, a player fighting under his
+    // belly made dx change sign every couple of frames: facing flipped, vx flipped, and a 347 px
+    // crocodile slid back and forth on the spot, sprite mirroring each time. The shared block
+    // already set m.facing this tick; it owns it now, exactly as it does for every other boss.
 
     if (m.patternState === 'idle') {
-      // Slow shuffle toward the player while idling.
-      m.vx = m.facing * Math.min(2, m.speed * 1.5);
+      // Slow shuffle toward the player while idling - and stop when he has arrived. The
+      // standoff is half his width plus a stride: the player is at his flank, not under him.
+      // v0.30.968 (was an unconditional drive toward the player's centre, which is what he slid
+      // across when he got there).
+      const _kStand = m.w * 0.5 + 24;
+      m.vx = (Math.abs(dx) > _kStand) ? m.facing * Math.min(2, m.speed * 1.5) : 0;
       // v0.29.832 — three cadences now share this gate: mid-string (fast), the
       // recovery after a string (slow, the punish window), and the original
       // single-attack pace for everything else including every special.
