@@ -14136,7 +14136,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.995';
+const GAME_VERSION = 'v0.30.996';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -54869,6 +54869,9 @@ function _mpHandle(msg) {
       if (msg && msg.pbf && msg.id !== net.myId && typeof _coopApplyPartyBuff === 'function') {
         _coopApplyPartyBuff(msg);
       }
+      // v0.30.996 - Stormbearer's pact in a party: a guest's request, the host's confirmation.
+      if (msg && msg.spk && msg.id !== net.myId && typeof _lxStormPactOnRequest === 'function') _lxStormPactOnRequest(msg);
+      if (msg && msg.spa && msg.id !== net.myId && typeof _lxStormPactOnAck === 'function') _lxStormPactOnAck(msg);
       // v0.27.9 — co-op map-ping marker (carrier frames send no map → skipped).
       if (msg && msg.map === game.currentMap) _coopAddPing(+msg.x || 0, +msg.y || 0, (net.peers[msg.id] && net.peers[msg.id].name) || 'Partner', false);
       return;
@@ -100334,6 +100337,62 @@ function _lxStormPactWave() {
   }
   return need;
 }
+// v0.30.996 - THE PACT IN A PARTY (per user: "the guest does not need to pay but
+// get to experience the same rise in spawn"). Only the host runs spawns, so a
+// guest's "yes" has to reach the host. Carried on the relay's 'ping' frame with
+// a flag, exactly like the party heal / party buff channels - the deployed
+// relay forwards only known frame types verbatim - and validated the same way.
+//   guest -> host   { t:'ping', spk:1, hm }         "open the pact on this map"
+//   host  -> party  { t:'ping', spa:1, hm, left }   "it is open, <left> frames remain"
+const LX_STORM_PACT_FRAMES = 3600;   // 60 s of game.time frames
+function _lxStormPactRequest() {
+  if (typeof net === 'undefined' || !net.ws || net.ws.readyState !== 1) return false;
+  const now = performance.now();
+  if (now - (net._lastSpkAt || 0) < 1000) return false;   // flood guard
+  net._lastSpkAt = now;
+  try { net.ws.send(JSON.stringify({ t: 'ping', spk: 1, hm: game.currentMap })); return true; } catch (e) { return false; }
+}
+// Host side. A request only counts from a live peer standing on THIS map, and
+// only on a map the Stormbearer actually stands on - without that last check any
+// client could open a free pact anywhere. An active pact is NOT extended for
+// free; the host just re-broadcasts so the guest learns how long is left.
+function _lxStormPactOnRequest(msg) {
+  try {
+    if (!net.isHost) return;
+    const p = net.peers && net.peers[msg && msg.id];
+    if (!p || p.map !== game.currentMap || +p.hp <= 0) return;
+    if (!msg || msg.hm !== game.currentMap) return;
+    if (!_mpRateOk(msg.id, 'spk', 2)) return;
+    if (!(game.npcs || []).some((n) => n && n.role === 'stormbearer')) return;
+    if (!_lxStormPactOn()) {
+      player._spawnBoostUntil = game.time + LX_STORM_PACT_FRAMES;
+      _lxStormPactWave();
+      if (typeof showToast === 'function') showToast('⚡ ' + (p.name || 'Your partner') + ' woke the Crest: up to 1.75× beasts for 60s', 'rare');
+    }
+    _lxStormPactBroadcast();
+  } catch (e) {}
+}
+// Host tells everyone on its map the pact is open and how long is left. Sent on
+// a paid pact too, so guests get the same toast whoever opened it.
+function _lxStormPactBroadcast() {
+  if (typeof _coopActive !== 'function' || !_coopActive() || !net.isHost || !net.ws || net.ws.readyState !== 1) return;
+  if (!_lxStormPactOn()) return;
+  const left = Math.max(0, Math.min(LX_STORM_PACT_FRAMES * 20, Math.round(player._spawnBoostUntil - game.time)));
+  try { net.ws.send(JSON.stringify({ t: 'ping', spa: 1, hm: game.currentMap, left })); } catch (e) {}
+}
+// Guest side. Trusted only from the host, only for the map we share. The local
+// clock mirrors the host's so the dialogue can say how long is left; the spawns
+// themselves still come from the host.
+function _lxStormPactOnAck(msg) {
+  try {
+    if (!msg || msg.id !== net.hostId || msg.hm !== game.currentMap) return;
+    const left = Math.max(0, Math.min(LX_STORM_PACT_FRAMES * 20, Math.round(+msg.left || 0)));
+    if (!left) return;
+    const was = _lxStormPactOn();
+    player._spawnBoostUntil = game.time + left;
+    if (!was && typeof showToast === 'function') showToast('⚡ The Crest wakes for your party: up to 1.75× beasts for ' + Math.ceil(left / 60) + 's', 'rare');
+  } catch (e) {}
+}
 function killMonster(m) {
   // v0.30.861 loops - see LX_AFK_MS. The drops wrapper follows triggerSuperBossDeath's pattern: nothing this kill pushes lands.
   if (m && !m._afkKill && (m._lastHitTag === 'mojimon' || m._lastHitTag === 'minion') && typeof _lxPlayerAfk === 'function' && _lxPlayerAfk()) {
@@ -108229,7 +108288,9 @@ So… do you need a lift?`;
     // /herd cue with cat/tiger imagery — striped fur, glowing stripes,
     // bared fangs, lashing tail, paws, prowling. Voice / mechanics
     // identical to v0.26.187; the change is purely about matching the
-    // sprite (a Ludo-rendered regal tiger, not an elk). Lore beat for
+    // sprite (a Ludo-rendered regal tiger, not an elk).
+    // v0.30.996 — per user: "Stormbearer is NOT a tiger its a kitty". Every line the
+    // player reads calls him "the kitty"; the notes above are kept as history. Lore beat for
     // "What are you?" shifted from "prince of the high herd" to
     // "king of the storm-pride".
     const _coins = Math.max(0, Math.floor((typeof totalCoins === 'function') ? totalCoins() : (player.mojicoins || 0)));   // v0.30.931 wallet + bank, as the click bills
@@ -108241,7 +108302,9 @@ So… do you need a lift?`;
       text = '*It lowers its great head. The lightning in its stripes crackles once, in acknowledgement.*\n\nThe Crest already hunts for you, small walker. ' + _left + ' heartbeats remain. Return when the storm quiets, and we shall strike the bargain anew.';
     }
     opts.push({
-      t: _boostActive ? 'Extend the pact (' + _cost + ' 🪙)' : 'Accept (' + _cost + ' 🪙)',
+      t: (typeof _coopFollowingHost === 'function' && _coopFollowingHost())   // v0.30.996 - a party guest pays nothing
+        ? (_boostActive ? 'The Crest already hunts' : 'Accept (free in a party)')
+        : (_boostActive ? 'Extend the pact (' + _cost + ' 🪙)' : 'Accept (' + _cost + ' 🪙)'),
       cb: () => {
         // v0.30.x — READ THE WALLET AND THE PACT AT CLICK TIME, NOT AT BUILD TIME.
         // These were captured when the dialog was built and the callback never
@@ -108252,18 +108315,23 @@ So… do you need a lift?`;
         // v0.30.931 WALLET + BANK, like Reset Stats (v0.29.311), the death toll (v0.29.311) and the rank reset
         // (v0.30.918). Priced off the wallet alone, the pact cost nothing at all: bank the purse, keep four coins,
         // wake the sky for one. Collected wallet-first by chargeCoins, so the vault is not a shelter here either.
-        // v0.30.989 - a co-op guest cannot raise the host's spawns (spawnMonster refuses
-        // local spawns while following a host), so this used to take 25% of a
-        // guest's coins for nothing. Decline instead of billing.
+        // v0.30.996 - A PARTY GUEST WAKES THE CREST FOR FREE. v0.30.989 declined a guest
+        // (the host runs spawns, so billing them bought nothing) - no charge, but no
+        // effect either. Now the "yes" goes to the host, which opens the pact on the
+        // shared map; the rise reaches this guest through the host's own spawns.
+        // Nothing is promised here until the host's confirmation lands.
         if (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) {
-          document.getElementById('dialog-text').textContent = '*The tiger looks past you, toward whoever leads your party.*\n\nThis Crest answers to the one who brought you, small walker. Their coin wakes it, not yours. Keep your purse.';
+          const _sent = (typeof _lxStormPactRequest === 'function') && _lxStormPactRequest();
+          document.getElementById('dialog-text').textContent = _sent
+            ? '*The kitty turns toward your party. The lightning in its stripes answers.*\n\nNo coin from you, small walker. You walk with others; the Crest wakes for all of you, or for none.'
+            : '*The kitty waits. The storm does not stir.*\n\nYour party is beyond the sky\'s reach just now, small walker. Ask again in a moment.';
           return;
         }
         const _live = Math.max(0, Math.floor((typeof totalCoins === 'function') ? totalCoins() : (player.mojicoins || 0)));
         const _pay = Math.floor(_live * 0.25);
         const _liveBoost = player._spawnBoostUntil && game.time < player._spawnBoostUntil;
         if (_pay <= 0 || _live < _pay) {   // v0.30.931
-          document.getElementById('dialog-text').textContent = '*The tiger huffs — a soft thunder. The stripe-light dims and the fangs lower.*\n\nYour purse is too thin to wake the sky, small walker. Return when you carry weight worth its notice.';
+          document.getElementById('dialog-text').textContent = '*The kitty huffs — a soft thunder. The stripe-light dims and the fangs lower.*\n\nYour purse is too thin to wake the sky, small walker. Return when you carry weight worth its notice.';
           return;
         }
         if (typeof chargeCoins === 'function') chargeCoins(_pay); else player.mojicoins -= _pay;   // v0.30.931 wallet first, then the vault
@@ -108274,12 +108342,13 @@ So… do you need a lift?`;
         player._spawnBoostUntil = _base + 3600;
         // v0.30.989 - the promised beasts arrive now, not one kill at a time.
         if (typeof _lxStormPactWave === 'function') _lxStormPactWave();
+        if (typeof _lxStormPactBroadcast === 'function') _lxStormPactBroadcast();   // v0.30.996 - party guests get the toast + the clock
         if (typeof showToast === 'function') showToast('⚡ The Crest wakes: up to 1.75× beasts, respawning twice as fast, for 60s', 'rare');
         document.getElementById('dialog-text').textContent = '*It rears and roars. A white pulse crosses the Crest, and far off, the cliff-beasts answer.*\n\nIt is done, small walker. The sky has your scent for sixty heartbeats. Hunt as you must.';
       }
     });
-    opts.push({ t:'Why must I pay?', cb:() => { document.getElementById('dialog-text').textContent = '*The tiger tilts its great head. Whiskers twitch.*\n\nThe sky does nothing for free, small walker. Waking the Crest costs the storm a measure of itself — and of me. Your coins are not mine to keep. The mountain takes what is owed. I am only the paw that lays them down.'; } });
-    opts.push({ t:'What are you?', cb:() => { document.getElementById('dialog-text').textContent = '*The tiger does not blink.*\n\nKing of the storm-pride, once. A storm, now. The Crest needed teeth and the sky needed a body, and I forgot which I had been. Do not pity me. Pity yourself — you came up here on purpose.'; } });
+    opts.push({ t:'Why must I pay?', cb:() => { document.getElementById('dialog-text').textContent = '*The kitty tilts its great head. Whiskers twitch.*\n\nThe sky does nothing for free, small walker. Waking the Crest costs the storm a measure of itself — and of me. Your coins are not mine to keep. The mountain takes what is owed. I am only the paw that lays them down.'; } });
+    opts.push({ t:'What are you?', cb:() => { document.getElementById('dialog-text').textContent = '*The kitty does not blink.*\n\nKing of the storm-pride, once. A storm, now. The Crest needed teeth and the sky needed a body, and I forgot which I had been. Do not pity me. Pity yourself — you came up here on purpose.'; } });
   } else if (npc.role === 'cedric') {
     // v0.26.334 — Cedric the Confused Morphed Legoman. Storyline guide
     // for the block-land chain entry (blockland_meadow). Per user
