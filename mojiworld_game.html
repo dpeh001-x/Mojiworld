@@ -14920,7 +14920,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1053';
+const GAME_VERSION = 'v0.30.1054';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -129182,6 +129182,16 @@ const _LX_DEAD_EYE = { lx: 0.9, rx: 18.7, y: 7.3, r: 4.4 };
 // the crosses needed against pale skin and the bright death-flash tint, where
 // the #2a1420 plum alone went muddy.
 const _LX_DEAD_EYE_CORE = _LX_DEAD_EYE.r * 0.50;
+// v0.30.1054 THE COLLAPSE. The sprawl the downed hero settles into, in degrees per posture part for a fall facing right
+// (mirrored by the fall's facing): the head lolls, one arm is thrown past the head, the other flops forward, one knee
+// bends with its foot dangling, the other leg lies straight. Blended over the player's own wardrobe posture by
+// _postureMap while drawPlayer's downed block runs (hero-scoped: peers and studio previews never see it).
+const _LX_DEAD_POSE = { head: 26, body: 12, armBack: 55, armFront: -75, handBack: 20, handFront: -25, legL: 50, legR: -18, footL: 50, footR: -20 };
+function _lxDownedDust() {   // the puff the body kicks up when it lands
+  if (typeof game === 'undefined' || !game || !Array.isArray(game.particles) || !player) return;
+  const f = player._downFallFace || 1, bx = player.x + player.w / 2 + f * 10, by = player.y + player.h - 3;
+  for (let i = 0; i < 9; i++) game.particles.push({ x: bx + (Math.random() - 0.5) * 26, y: by - Math.random() * 4, vx: (Math.random() - 0.5) * 2.4 + f * 0.4, vy: -0.6 - Math.random() * 1.2, life: 16 + Math.random() * 12, color: 'rgba(214,204,186,0.85)', size: 2 + Math.random() * 2 });
+}
 function _lxDrawDeadEyes() {
   const E = _LX_DEAD_EYE;
   const C = _LX_DEAD_EYE_CORE;
@@ -129208,7 +129218,7 @@ function _heroBlinkFactor() {
   // deepest squash (a regular blink bottoms out at 0.12) for the whole
   // downed draw. The flag is set/cleared around drawPlayer's rotated
   // region only, so peers and previews are untouched.
-  if (window._lxDownedDraw) return 0.10;
+  if (window._lxDownedDraw || window._lxDownedPoseK > 0) return 0.10;   // v0.30.1054 closed from the first buckle frame, before the roll
   const t = (typeof game !== 'undefined' && game.time) ? game.time : 0;
   if (!_heroBlinkNext) _heroBlinkNext = t + 120 + Math.floor(Math.random() * 180);
   if (t >= _heroBlinkNext && t >= _heroBlinkEnd) {
@@ -133970,19 +133980,23 @@ function drawPlayer() {
   // signal for _heroBlinkFactor — scoped to THIS draw so co-op peers and
   // creator previews sharing the pipeline keep their own eyes open.
   {
-    let _downK = 0;
+    let _downK = 0, _poseK = 0, _squash = 0;
     if (player._downed) {
-      if (!player._downFallAt) { player._downFallAt = game.time; player._downFallFace = player.facing || 1; player._downRiseAt = 0; }
-      const _fp = Math.min(1, (game.time - player._downFallAt) / 27);
-      _downK = _fp < 0.78
-        ? (_fp / 0.78) * (_fp / 0.78)                                  // accelerating fall
-        : 1 + 0.07 * Math.sin(((_fp - 0.78) / 0.22) * Math.PI);        // settle bounce
+      if (!player._downFallAt) { player._downFallAt = game.time; player._downFallFace = player.facing || 1; player._downRiseAt = 0; player._downDust = 0; }
+      // v0.30.1054 a believable collapse (per user): the knees buckle first (a feet-anchored squash while the limbs start to
+      // fold and the eyes close), then the body topples - accelerating - into the sprawl, lands with a bounce and a puff
+      // of dust, and lies still. 40 sim frames; the get-up below runs the same blend back over 18.
+      const _fp = Math.min(1, (game.time - player._downFallAt) / 40);
+      if (_fp < 0.35) { const _b = _fp / 0.35; _squash = Math.sin(_b * Math.PI / 2); _poseK = 0.45 * _b; }
+      else if (_fp < 0.85) { const _t = (_fp - 0.35) / 0.5; _downK = _t * _t; _poseK = 0.45 + 0.55 * _t; _squash = (1 - _t) * 0.6; }
+      else { const _t = (_fp - 0.85) / 0.15; _downK = 1 + 0.07 * Math.sin(_t * Math.PI); _poseK = 1; if (!player._downDust) { player._downDust = 1; if (typeof _lxDownedDust === 'function') _lxDownedDust(); } }
     } else if (player._downFallAt) {
       if (!player._downRiseAt) player._downRiseAt = game.time;
       const _rp = (game.time - player._downRiseAt) / 18;
       if (_rp >= 1) { player._downFallAt = 0; player._downRiseAt = 0; }
-      else _downK = 1 - _rp;
+      else { _downK = 1 - _rp; _poseK = _downK; }
     }
+    window._lxDownedPoseK = _poseK; window._lxDownedPoseFace = player._downFallFace || 1; window._lxDownedSquash = _squash;
     if (_downK > 0) {
       const _pvx = sx + player.w / 2;
       const _pvy = sy + player.h - player.w * 0.40;
@@ -133994,6 +134008,7 @@ function drawPlayer() {
     }
   }
   window._chibiWeightPending = (typeof _computeChibiWeight === 'function') ? _computeChibiWeight() : null;
+  if (window._lxDownedSquash > 0) { const _q = window._lxDownedSquash, _w = window._chibiWeightPending || { sx: 1, sy: 1 }; window._chibiWeightPending = { sx: (_w.sx || 1) * (1 + 0.16 * _q), sy: (_w.sy || 1) * (1 - 0.26 * _q) }; }   // v0.30.1054 the knees buckle: a feet-anchored squash
   _chibiApply(sx, sy);
   // Block / parry shield bubble — drawn under the character so it haloes behind
   if (player.blockTimer > 0) {
@@ -134061,6 +134076,7 @@ function drawPlayer() {
   // v0.29.764 — close the downed-pose rotation; the nameplate + status row
   // below stay upright above the body, matching monster tag behaviour.
   if (window._lxDownedDraw) { window._lxDownedDraw = false; ctx.restore(); }
+  window._lxDownedPoseK = 0; window._lxDownedSquash = 0;   // v0.30.1054 hero-scoped: the next draw (a peer, a preview) stands normally
   _drawPlayerNameTag(sx, sy);
   _drawPlayerStatusIcons(sx, sy);
   return;
@@ -169953,8 +169969,12 @@ function _normalizePosture(raw) {
 }
 function _postureMap() {
   const lc = (typeof player !== 'undefined' && player) ? player.lookCustom : null;
-  if (!lc || !lc.posture) return _emptyPosture();
-  return _normalizePosture(lc.posture);
+  const out = (!lc || !lc.posture) ? _emptyPosture() : _normalizePosture(lc.posture);
+  // v0.30.1054 the collapse: window._lxDownedPoseK (0..1, set by drawPlayer's downed block for the hero draw only) blends
+  // _LX_DEAD_POSE over the player's own posture, mirrored by the fall's facing; _normalizePosture returns a fresh map
+  const _dk = window._lxDownedPoseK || 0;
+  if (_dk > 0 && typeof _LX_DEAD_POSE !== 'undefined') { const _f = window._lxDownedPoseFace || 1; for (const id in _LX_DEAD_POSE) { const e = out[id]; if (e) e.angle = (+e.angle || 0) + _LX_DEAD_POSE[id] * _dk * _f; } }
+  return out;
 }
 function _postureRad(map, part) {
   // v0.26.097 — entries are now objects; read .angle. Falls back to 0
