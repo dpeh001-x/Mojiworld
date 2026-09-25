@@ -11,6 +11,9 @@
 //   6. (v0.30.993) the star row is big (30px) and the landing is flashy: earned stars light in a
 //      cascade, the new star slams in after them with rays, a ring and a spray of sparks, and the
 //      band flashes on impact
+//   7. (v0.30.998) a failure lands too: on a plain fail the star you forged for ignites and is
+//      snuffed out, puffing embers; a lost star shatters into shards; both throw a red flash and
+//      shake the band sideways
 //   node scripts/forge_result_card_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -65,6 +68,9 @@ const r = await page.evaluate(async () => {
       sparks: document.querySelectorAll('#ec-stars .s.new .sp').length,
       flashAnim: getComputedStyle(el, '::after').animationName,
       land: el.style.getPropertyValue('--ec-land'),
+      struckAnim: (() => { const n = document.querySelector('#ec-stars .s.miss, #ec-stars .s.lost'); return n ? getComputedStyle(n).animationName : ''; })(),
+      bits: document.querySelectorAll('#ec-stars .em').length,
+      cardAnim: getComputedStyle(card).animationName,
     };
   };
   const cleared = () => { el.classList.remove('go', 'fail', 'milestone'); };
@@ -94,7 +100,10 @@ ok('6. the star row is big: 28px or more (was 19)', W0.starPx >= 28, W0.starPx);
 const _delays = W0.onAnims.map((a) => parseFloat(a.split('@')[1]) || 0);
 ok('6. earned stars light up in a cascade, one after another', W0.onAnims.length === 3 && W0.onAnims.every((a) => /ecStarLight/.test(a)) && _delays[0] < _delays[1] && _delays[1] < _delays[2], JSON.stringify(W0.onAnims));
 ok('6. the new star slams in after the cascade, over spinning rays, spraying sparks', /ecStarSlam/.test(W0.newAnim) && /ecRays/.test(W0.raysAnim) && W0.sparks >= 10 && parseFloat(W0.land) > _delays[2] * 1000, JSON.stringify({ n: W0.newAnim, r: W0.raysAnim, sp: W0.sparks, land: W0.land, lastOn: _delays[2] }));
-ok('6. the band flashes on the impact of a win, not of a loss', /ecFlash/.test(W0.flashAnim) && !/ecFlash/.test(r.lost.flashAnim || ''), JSON.stringify({ win: W0.flashAnim, lost: r.lost.flashAnim }));
+ok('6. a win flashes gold, a loss flashes red - never the other way round', /\becFlash\b/.test(W0.flashAnim) && /ecFailFlash/.test(r.lost.flashAnim || '') && !/\becFlash\b/.test(r.lost.flashAnim || ''), JSON.stringify({ win: W0.flashAnim, lost: r.lost.flashAnim }));
+ok('7. a plain fail: the slot you forged for ignites and is snuffed, puffing embers', r.fail.stars[4] === 'miss' && /ecStarMiss/.test(r.fail.struckAnim) && r.fail.bits >= 6, JSON.stringify({ s: r.fail.stars[4], a: r.fail.struckAnim, bits: r.fail.bits }));
+ok('7. a lost star shatters into shards', /ecStarShatter/.test(r.lost.struckAnim) && r.lost.bits >= 10, JSON.stringify({ a: r.lost.struckAnim, bits: r.lost.bits }));
+ok('7. both failures shake the band and flash red', /ecBandShake/.test(r.fail.cardAnim) && /ecBandShake/.test(r.lost.cardAnim) && /ecFailFlash/.test(r.fail.flashAnim || ''), JSON.stringify({ f: r.fail.cardAnim, l: r.lost.cardAnim, ff: r.fail.flashAnim }));
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 let fail = 0;
 for (const x of results) { if (!x.pass) fail++; console.log(`${x.pass ? 'PASS' : 'FAIL'}  ${x.n}${x.pass ? '' : '  -- ' + x.x}`); }
