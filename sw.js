@@ -184,7 +184,10 @@
 // v0.30.1074 - v70 -> v71. The app icon is REPLACED under its own names (assets/mojiworld_icon_512.png,
 // mojiworld_icon_184.jpg, favicon-32.png, apple-touch-icon.png: Guguma on a punk wall instead of in the gate), so a
 // returning browser's stale-while-revalidate cache would keep the old tab and home-screen icon for a session.
-const CACHE = 'mojiworld-assets-v71';   // v0.30.1074 - the app icon's punk backdrop
+// v0.30.1077 - v71 -> v72. The app icon is REPLACED under its own names AGAIN (assets/mojiworld_icon_512.png,
+// mojiworld_icon_184.jpg, favicon-32.png, apple-touch-icon.png: the punk wall becomes a black comic panel with a
+// smaller burst), so a returning browser's stale-while-revalidate cache would keep v0.30.1074's icon for a session.
+const CACHE = 'mojiworld-assets-v72';   // v0.30.1077 - the app icon as a black comic panel
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
