@@ -42,8 +42,8 @@ try {
     const noLoad = (fn) => { const L = window.loadMap; window.loadMap = () => {}; try { fn(); } catch (e) { o.restartErr = String(e.message); } window.loadMap = L; };
     player._pqChainRuns = 0; player.quests.completed.q_clockwork_underpass = true; noLoad(() => _lxPqRestartChain());
     o.restart = { earlyRuns: player._pqChainRuns, earlyMul: _lxPqRepeatMul('q_clockwork_underpass') };
-    clearQ(); player._pqChainRuns = 0; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']) player.quests.completed[id] = true; player.quests.active.q_clockwork_express = { progress: 3, targetCount: 60 }; noLoad(() => _lxPqRestartChain());
-    o.restart.afterFinaleRuns = player._pqChainRuns; o.restart.afterFinaleMul = _lxPqRepeatMul('q_clockwork_underpass'); o.restart.expressCleared = !player.quests.active.q_clockwork_express && !player.quests.completed.q_clockwork_express; clearQ();
+    clearQ(); player._pqChainRuns = 0; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']) player.quests.completed[id] = true; noLoad(() => _lxPqRestartChain());
+    o.restart.afterFinaleRuns = player._pqChainRuns; o.restart.afterFinaleMul = _lxPqRepeatMul('q_clockwork_underpass'); clearQ();
     // 3. a repeat pays 25% coins and 50% EXP at two levels (the coin factor must not reach the EXP path)
     // v0.30.x keeps a per-stage 'has paid' record (_pqStagePaid) that survives restarts, so a FIRST run needs it empty - and the very
     // first quest a save turns in also pays a one-off achievement (+3,000 coins and a level), absorbed by the throwaway run below.
@@ -74,7 +74,7 @@ try {
   ok('the direct PQ tick reports false when no PQ stage is active (so the standard quest tick runs)', r.sweep.noneActiveTick === false, String(r.sweep.noneActiveTick));
   ok('a Stage-1 Ticket Mech kill still advances Stage 1', r.sweep.stage1Progress === 1, String(r.sweep.stage1Progress));
   ok('restarting before the finale was ever cleared is not a repeat run (runs stay 0, full rates)', r.restart.earlyRuns === 0 && r.restart.earlyMul === 1, JSON.stringify(r.restart));
-  ok('restarting after a cleared finale counts the run, and resets the Express run with the chain', r.restart.afterFinaleRuns === 1 && r.restart.afterFinaleMul === LX_PQ_REPEAT_MUL_EXPECTED() && r.restart.expressCleared === true, JSON.stringify(r.restart));
+  ok('restarting after a cleared finale counts the run (the Endless Express run was removed in v0.30.992, per user)', r.restart.afterFinaleRuns === 1 && r.restart.afterFinaleMul === LX_PQ_REPEAT_MUL_EXPECTED(), JSON.stringify(r.restart));
   ok('a repeat Stage 1 pays 25% coins and 50% EXP at Lv 29 and Lv 60', [29, 60].every((lv) => Math.abs(r.repeat[lv].coinRatio - 0.25) < 0.02 && Math.abs(r.repeat[lv].expRatio - 0.5) < 0.02), JSON.stringify(r.repeat));
   ok('a floor-clear timer armed on floor 3 does nothing on floor 4 (no EXP, Bravo not ready)', r.stale.expAfterStaleTimer === 0 && r.stale.bravoAfterStaleTimer === false && r.stale.clearedFor == null, JSON.stringify(r.stale));
   ok('a regular-floor timer re-checks the room: a live mob blocks the clear, an empty room clears', r.stale.clearedWithMobAlive === false && r.stale.clearedWhenEmpty === true, JSON.stringify(r.stale));

@@ -35,6 +35,11 @@ try {
     applyClass('warrior'); player.level = 5; loadMap('town', 300); await new Promise((r) => setTimeout(r, 2000)); game.paused = false;
   });
   for (let i = 0; i < 14; i++) { const c = await page.evaluate(() => (document.body.className.match(/cinematic|sb-active/g) || []).join('+')); if (!c) break; await page.keyboard.press('Space'); await page.waitForTimeout(400); }
+  // The intro beat opens the tour from its onClose, 500 ms AFTER the beat ends, and this loop exits ~400 ms after
+  // the last page - so closing the tour straight away raced its own opening: ~100 ms of margin, and when the open
+  // landed second the 'dock is gone' check failed on a tour that had been closed correctly. Traced by stack: the
+  // reopen is the beat's onClose -> _showTutorialModal. A player cannot close a tour before it appears; wait for it.
+  await page.waitForFunction(() => { const m = document.getElementById('tutorial-modal'); const c = m && m.querySelector('.modal'); return !!(c && c.getClientRects().length && m.style.display !== 'none'); }, null, { timeout: 6000 }).catch(() => {});
   const r = await page.evaluate(async () => {
     try { closeAllModals(); } catch (e) {} game.paused = false;
     window.__toasts = []; const f = window.showToast;

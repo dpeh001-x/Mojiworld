@@ -92,7 +92,7 @@ const exp = await page.evaluate(() => {
   const out = { haveCap: typeof _lxPqStageCapFrac === 'function', curve: {}, paid: {} };
   if (!out.haveCap) return out;
   for (const lv of [30, 40, 60, 80, 90, 100, 120]) out.curve[lv] = +_lxPqStageCapFrac(lv).toFixed(4);
-  const STAGES = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale', 'q_clockwork_express'];
+  const STAGES = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];   // (the Endless Express run was removed in v0.30.992, per user)
   // Measure the RAW award. _completeQuest calls _maybeLevelUp, which spends
   // player.exp against player.expToNext — a threshold this harness has no
   // business owning, and whose stale value made a first draft of this test
@@ -161,8 +161,6 @@ if (exp.haveCap) {
       .reduce((a, id) => a + exp.paid[60][id], 0) - 2.5 * c[60]) < 0.005,
     'run at Lv 60 = ' + ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']
       .reduce((a, id) => a + exp.paid[60][id], 0).toFixed(3) + ' of a level');
-  ok('the repeatable Express is capped too — the farm cannot just move',
-    exp.paid[60]['q_clockwork_express'] <= c[60] + 0.0005, 'Express at Lv 60 = ' + exp.paid[60]['q_clockwork_express']);
   ok('a NON-PQ quest can still pay far above the PQ cap — the ceiling is PQ-only',
     exp.control !== null && exp.control > 0.10,
     `${exp.controlId} at Lv 60 = ${exp.control} of a level (PQ cap there is ${exp.curve[60]})`);

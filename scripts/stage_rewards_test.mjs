@@ -31,11 +31,9 @@ try {
     // first in this loop - read 0.0007 of a level while stages 2 and 3 read 0.01. A throwaway turn-in absorbs it; then the per-stage
     // 'has paid' record (v0.30.x) is cleared so the five runs below really are FIRST runs.
     turnIn('q_pq_carriage', 29); player._pqStagePaid = {};
-    player._pqChainRuns = 0; o.first = {}; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale', 'q_clockwork_express']) o.first[id] = turnIn(id, 29);
+    player._pqChainRuns = 0; o.first = {}; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']) o.first[id] = turnIn(id, 29);
     _grantMojicoins = _g0;
-    o.table = {}; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale', 'q_clockwork_express']) { const q = QUESTS[id]; o.table[id] = { gear: q.rewards.gearChance, pots: q.rewards.potions, capMul: q.stageCapMul }; }
-    o.dyn = QUESTS.q_clockwork_express.dynamicRewardFn ? QUESTS.q_clockwork_express.dynamicRewardFn({ targetCount: 24 }) : null;
-    player._pqChainRuns = 1; o.expressRepeat = (typeof _lxPqRepeatMul === 'function') ? _lxPqRepeatMul('q_clockwork_express') : null; player._pqChainRuns = 0;
+    o.table = {}; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']) { const q = QUESTS[id]; o.table[id] = { gear: q.rewards.gearChance, pots: q.rewards.potions, capMul: q.stageCapMul }; }
     o.exp = { floor29: +(_lxExpeditionRunTarget(29) / 10).toFixed(4), floor55: +(_lxExpeditionRunTarget(55) / 10).toFixed(4), floor80: +(_lxExpeditionRunTarget(80) / 10).toFixed(4), bonus29: _lxExpeditionCoinReward(29), bonus80: _lxExpeditionCoinReward(80) };
     return o;
   });
@@ -53,10 +51,7 @@ try {
   ok('stages 1-3 roll gear at 0.15 (0.0675 after the v0.30.756 normaliser); the finale keeps 0.90 (0.405)', ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage'].every((id) => Math.abs(r.table[id].gear - 0.0675) < 0.003) && Math.abs(r.table.q_pq_finale.gear - 0.405) < 0.003, JSON.stringify([r.table.q_clockwork_underpass.gear, r.table.q_pq_finale.gear]));
   ok('stages 1-3 carry stageCapMul 0.5; the finale none', r.table.q_clockwork_underpass.capMul === 0.5 && r.table.q_pq_spire.capMul === 0.5 && r.table.q_pq_carriage.capMul === 0.5 && !r.table.q_pq_finale.capMul);
   ok('stage potions: 2 / 1 / 1 medium HP (was 4 / 3 / 3)', r.table.q_clockwork_underpass.pots.hp_m === 2 && r.table.q_pq_spire.pots.hp_m === 1 && r.table.q_pq_carriage.pots.hp_m === 1, JSON.stringify([r.table.q_clockwork_underpass.pots, r.table.q_pq_spire.pots, r.table.q_pq_carriage.pots]));
-  // v0.30.404 halved it again: 1600 + 32N -> 800 + 16N (gear stays at the v0.30.384 0.40; the run is priced at turn-in, so no boot normaliser)
-  ok('the Endless Express run: 800 + 16/kill coins, gear 0.40 (v0.30.404; was 1600 + 32, and 3200 + 65 / 0.80 before v0.30.384)', !!r.dyn && r.dyn.mojicoins === 800 + 24 * 16 && r.dyn.gearChance === 0.40, JSON.stringify(r.dyn));
-  // v0.30.404: the repeat rate went 40% -> 25% (LX_PQ_REPEAT_MUL). 1,184 = 800 + 16 x 24 paid in full, because this IS a first run (v0.30.833)
-  ok('the Endless Express run paid at Lv 29 matches (1,184) and rides the 25% repeat rate', stage('q_clockwork_express') && f.q_clockwork_express.coins === 1184 && r.expressRepeat === 0.25, JSON.stringify([f.q_clockwork_express.coins, r.expressRepeat]));
+  // v0.30.992 — the two Endless Express run checks retired with the run (the Endless Express run was removed in v0.30.992, per user).
   // v0.30.453 (per user: the figure originally asked for was 'after 70 cap at about 0.2 per run', and two halvings had left a quarter of it):
   // a full 10-floor run is 0.30 of a level to Lv 40 and 0.20 from Lv 70, so a floor is 3% / 2%
   ok('expedition floors: 3% of a level at Lv 29, 2% at Lv 80, tapering between (v0.30.453)', Math.abs(r.exp.floor29 - 0.03) < 0.0005 && Math.abs(r.exp.floor80 - 0.02) < 0.0005 && r.exp.floor55 < 0.03 && r.exp.floor55 > 0.02, JSON.stringify(r.exp));

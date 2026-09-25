@@ -21,7 +21,7 @@ try {
     o.consts = { stageCap: LX_PQ_STAGE_CAP, stageCapLate: LX_PQ_STAGE_CAP_LATE, runAt40: LX_PQ_RUN_AT_40, runAt70: LX_PQ_RUN_AT_70, repeat: LX_PQ_REPEAT_MUL, repeatExp: typeof LX_PQ_REPEAT_EXP_MUL === 'number' ? LX_PQ_REPEAT_EXP_MUL : null, expCap: LX_EXPEDITION_COIN_CAP, expAt40: LX_EXP_RUN_AT_40, expAt70: LX_EXP_RUN_AT_70, refight: typeof LX_REFIGHT_COIN_MUL === 'number' ? LX_REFIGHT_COIN_MUL : null };
     o.capFrac = { l29: _lxPqStageCapFrac(29), l55: +_lxPqStageCapFrac(55).toFixed(4), l80: _lxPqStageCapFrac(80) };
     o.expBonus = { l29: _lxExpeditionCoinReward(29), l45: _lxExpeditionCoinReward(45), l80: _lxExpeditionCoinReward(80), l200: _lxExpeditionCoinReward(200) };
-    o.quests = {}; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale', 'q_clockwork_express']) { const q = QUESTS[id]; o.quests[id] = q && q.rewards ? { coins: q.rewards.mojicoins, exp: q.rewards.exp } : null; }
+    o.quests = {}; for (const id of ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale']) { const q = QUESTS[id]; o.quests[id] = q && q.rewards ? { coins: q.rewards.mojicoins, exp: q.rewards.exp } : null; }
     player._pqChainRuns = 0; o.repeatMulFirst = _lxPqRepeatMul('q_pq_spire'); player._pqChainRuns = 1; o.repeatMulAgain = _lxPqRepeatMul('q_pq_spire'); player._pqChainRuns = 0;
     // a boss refight: the same boss's coin value at 30% once it has been beaten before
     spawnMonster(player.x + 260, player.y, 'kingKrook', true); const b = game.monsters.filter((x) => x && x.type === 'kingKrook').pop();
@@ -47,7 +47,7 @@ try {
   const half = (now, was) => Math.abs(now / (was / 2 * 0.75) - 1) <= 0.06;
   const ratio = (a, b, want) => Math.abs(a / b - want) <= want * 0.01;
   ok('the chain keeps its authored shape after every rescale: a stage is 15% of the finale (600 / 4,000)', ratio(r.quests.q_pq_spire.coins, r.quests.q_pq_finale.coins, 0.15) && ratio(r.quests.q_clockwork_underpass.coins, r.quests.q_pq_finale.coins, 0.15) && ratio(r.quests.q_pq_carriage.coins, r.quests.q_pq_finale.coins, 0.15), JSON.stringify(r.quests));
-  ok('PQ coins halved: stages 600, finale 4,000, the express supply cache 1,500 and its run 800 + 16N (runtime table at half of v0.30.403, less v0.30.756\'s 25%)', half(r.quests.q_clockwork_underpass.coins, 591) && half(r.quests.q_pq_spire.coins, 591) && half(r.quests.q_pq_carriage.coins, 591) && half(r.quests.q_pq_finale.coins, 3942) && half(r.quests.q_clockwork_express.coins, 1826) && r.src.express && r.src.stage600 && r.src.finale4000 && r.src.cache1500, JSON.stringify([r.quests, r.src]));
+  ok('PQ coins halved: stages 600, finale 4,000 (runtime table at half of v0.30.403, less v0.30.756\'s 25%) (the Endless Express run was removed in v0.30.992, per user)', half(r.quests.q_clockwork_underpass.coins, 591) && half(r.quests.q_pq_spire.coins, 591) && half(r.quests.q_pq_carriage.coins, 591) && half(r.quests.q_pq_finale.coins, 3942) && r.src.stage600 && r.src.finale4000, JSON.stringify([r.quests, r.src]));
   ok('expedition bonus halved: 1,000 x Lv/15 capped at 6,000 (Lv 29 1,933; Lv 45 3,000; Lv 80 5,333; Lv 200 6,000)', c.expCap === 6000 && r.expBonus.l29 === 1933 && r.expBonus.l45 === 3000 && r.expBonus.l80 === 5333 && r.expBonus.l200 === 6000, JSON.stringify(r.expBonus));
   // v0.30.404 halved this to 0.12 / 0.05. v0.30.453 put it back, per user: the figure originally asked for was "after 70 cap at about
   // 0.2 per run", and two halvings had left a quarter of it - "the tail goes back to 0.20 and the pre-40 band to 0.30" (plus a

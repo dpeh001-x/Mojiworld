@@ -38,7 +38,7 @@ await page.waitForFunction(() => typeof _completeQuest === 'function' && typeof 
 
 const r = await page.evaluate(() => {
   const CHAIN = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'];
-  const ALL = CHAIN.concat(['q_clockwork_express']);
+  const ALL = CHAIN;   // (the Endless Express run was removed in v0.30.992, per user)
   const LEVELS = [40, 45, 50, 60, 70, 75, 80, 85, 95];
   // Per user: 0.50 of a level at Lv 40, tapering linearly to 0.15 at Lv 70 —
   // and past 70 it keeps scaling DOWN rather than holding flat ("after level 70

@@ -100,14 +100,19 @@ await browser.close(); server.kill();
 
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 130) });
+// Story quests carry an act numeral in QUESTS ("V · The Name You Left Behind") that the HUD drops since v0.30.985. Which six
+// quests this suite picks depends on QUESTS order, so a change elsewhere (the Endless Express run's removal) can move
+// the window onto story quests - and a verbatim match then fails on a panel that shows exactly the right two quests.
+const norm = (t) => String(t || '').replace(/^[IVXLC]+\s*·\s*/, '').trim();
+const shown = (list, name) => list.some((t) => norm(t) === norm(name));
 
 ok('both track buttons were reachable and clicked', R.clicked === 2, `clicked=${R.clicked}`);
 ok('untracked, the late quests are NOT shown (acceptance order)',
-   !R.lateNames.some(n => R.before.includes(n)),
+   !R.lateNames.some(n => shown(R.before, n)),
    `panel=${R.before.join(' | ')}`);
 // THE bug: tracking must change what the panel shows.
 ok('tracking a quest puts it in the HUD tracker',
-   R.lateNames.every(n => R.after.includes(n)),
+   R.lateNames.every(n => shown(R.after, n)),
    `tracked=${R.lateNames.join(' + ')}  panel=${R.after.join(' | ')}`);
 ok('BOTH tracked quests survive (tracking is not a single slot)',
    R.bothPinned, `pins=${R.pins ? R.pins.join(',') : 'none'}`);
