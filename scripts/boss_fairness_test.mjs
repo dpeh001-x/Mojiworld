@@ -119,7 +119,12 @@ const r = await page.evaluate(async () => {
     if (!m) return { noBoss: true };
     m.maxHp = m.currentHp = 9e9;
     player._god = false;
-    player.hp = player.maxHp;
+    // v0.30.x — the arena's live Gravitos keeps firing between runs, and a void projectile's HEAL LOCK
+    // (_lxHealLockInstall: an accessor on player.hp that refuses any raise while it lasts) silently kept this reset
+    // from happening - the sheltered run started at the 1 HP the open run's drain had left and "drained" (1 run in
+    // 8). Lift the lock and write through the restore flag the accessor honours, as the game's own restores do.
+    player._healLockUntil = 0; player._potionLockUntil = 0;
+    window._lxHpRestore = true; try { player.hp = player.maxHp; } finally { window._lxHpRestore = false; }
     const gy2 = (game.mapData.platforms || []).filter((p) => p.type === 'ground')[0].y;
     const plats = (game.mapData.platforms || []).filter((p) => p.type !== 'ground');
     if (placeSafe) {
