@@ -1,13 +1,20 @@
-// Live test: SOLO DOWNED — dying in solo now plays the 30s downed beat with a
-// "▸ Respawn now" button that fast-forwards to the normal (void) death flow.
-// Never connects to multiplayer, so this certifies the pure-solo path.
+// Live test: SOLO DOWNED — dying in solo plays the 30s downed beat with a "▸ Respawn now" button that fast-forwards to
+// the normal (void) death flow. Never connects to multiplayer, so this certifies the pure-solo path.
+//
+// 2026-09-25 — staged past onboarding and self-serving. The test used to boot into the onboarding 'void' scene with no
+// map loaded; _coopTryDowned reads _isOnboardingActive() there (the tutorial has not been seen), marks the down SILENT
+// (player._downedSilent) and _coopDownedBanner never builds the banner - so the banner / countdown / Respawn checks had
+// been red for a while regardless of the game. It now marks the tutorial and the Everdawn beats seen, loads town and
+// waits for the hero to stand before the down, and asserts the down is not silent. It also starts its own serve.js
+// (it used to expect one already on :8080): node scripts/solo_downed_test.mjs [port]; MOJI_GAME_FILE picks a candidate,
+// SERVE_ROOT the directory to serve from (default: the repo root).
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 // Resolve a browser that actually EXISTS. The Linux path stays first so CI is
-// untouched, but it is the only candidate this line used to have - and with
-// PW_EXE unset on a dev machine that made the launch throw before a single
-// assertion ran. 66 scripts shared the line, so 66 gates were passing by never
-// executing. Falling through to the local Chrome is what the tests that do run
+// untouched; falling through to the local Chrome is what the tests that do run
 // already rely on (they pass channel:'chrome').
 const EXE = [process.env.PW_EXE,
   '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
@@ -15,22 +22,35 @@ const EXE = [process.env.PW_EXE,
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
-const URL = 'http://localhost:8080/mojiworld_game.html';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SERVE_ROOT = process.env.SERVE_ROOT || ROOT;
+const PORT = process.argv[2] || process.env.PORT || '11377';
+const URL = `http://localhost:${PORT}/mojiworld_game.html`;
+const srv = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env } });
+await new Promise((r) => setTimeout(r, 1800));
 const results = [];
 const ok = (n, c, extra) => results.push({ n, pass: !!c, extra });
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox','--disable-gpu','--mute-audio'] });
 try {
-  const ctx = await browser.newContext();
+  const ctx = await browser.newContext({ serviceWorkers: 'block' });
+  await ctx.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); localStorage.setItem('mojiworld_tutorial_seen', '1'); } catch (e) {} });
   const page = await ctx.newPage();
   page._errors = []; page.on('pageerror', e => page._errors.push(String(e).slice(0, 160)));
-  await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForFunction(() => typeof _tryCheatDeathRevive === 'function' && typeof loadMap === 'function', null, { timeout: 45000 });
-  await page.waitForTimeout(3000);
-  // v0.29.48 — a down DURING onboarding is deliberately silent (no banner, 5 s auto-respawn), and onboarding
-  // includes "the tutorial is not marked seen". This suite is about the ordinary solo down, so leave onboarding.
-  await page.evaluate(() => { try { player.cls = 'warrior'; player._tutorialSeen = true; game.paused = false; window._prologueActive = false; const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none'; loadMap('glasswindSteppe'); } catch (e) {} });
-  await sleep(800);
+  await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.waitForFunction(() => typeof _tryCheatDeathRevive === 'function' && typeof loadMap === 'function' && typeof _coopTryDowned === 'function', null, { timeout: 180000 });
+  // stage past onboarding: beats seen, a class, town loaded, the hero standing (the onboarding void makes downs silent)
+  const staged = await page.evaluate(async () => {
+    try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
+    for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+    player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { tutorial_intro: true, everdawn_welcome: true }); player._tutorialSeen = true;
+    applyClass('warrior'); player.level = 60; player.talents = { warrior: 'x' }; player._tutorialSeen = true;
+    try { closeAllModals(); } catch (e) {}
+    loadMap('town', 300); await new Promise((r) => setTimeout(r, 1500)); try { closeAllModals(); } catch (e) {} game.paused = false;
+    for (let i = 0; i < 80 && !player.onGround; i++) await new Promise((r) => setTimeout(r, 50));
+    return { map: game.currentMap, onGround: !!player.onGround, onboarding: (typeof _isOnboardingActive === 'function') ? _isOnboardingActive() : null, cls: player.cls };
+  });
+  ok('staged past onboarding: town loaded, hero standing, onboarding gate off', staged.map === 'town' && staged.onGround && staged.onboarding === false, staged);
   // pump the downed tick (headless rAF throttling)
   await page.evaluate(() => { window.__pump = setInterval(() => { try { if (player._downed) _coopDownedTick(80); } catch (e) {} }, 80); });
 
@@ -38,10 +58,10 @@ try {
   const down = await page.evaluate(() => {
     player._god = false; player.hp = 0;
     const saved = _tryCheatDeathRevive();
-    return { saved, downed: !!player._downed, revivable: !!player._downRevivable, hp: player.hp,
+    return { saved, downed: !!player._downed, silent: !!player._downedSilent, revivable: !!player._downRevivable, hp: player.hp,
       dying: !!game.dying, connected: !!net.connected };
   });
-  ok('solo death enters DOWNED (no partner needed)', down.saved === true && down.downed === true && down.hp === 1 && !down.dying, down);
+  ok('solo death enters DOWNED (no partner needed), not the silent onboarding kind', down.saved === true && down.downed === true && !down.silent && down.hp === 1 && !down.dying, down);
   ok('never connected — pure solo path', down.connected === false, down);
   // banner is created by the first downed tick — give the pump a beat
   await sleep(400);
@@ -72,7 +92,7 @@ try {
 
   ok('no page errors', page._errors.length === 0, page._errors.slice(0, 5));
 } catch (e) { results.push({ n: 'HARNESS ERROR', pass: false, extra: String(e).slice(0, 300) }); }
-finally { await browser.close(); }
+finally { await browser.close(); srv.kill(); }
 const passed = results.filter(r => r.pass).length;
 console.log('\n=== SOLO DOWNED + RESPAWN FAST-FORWARD ===');
 for (const r of results) console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra !== undefined ? '  ' + JSON.stringify(r.extra) : ''}`);
