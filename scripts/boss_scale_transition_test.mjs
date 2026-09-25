@@ -109,6 +109,57 @@ const before = await scan();
 console.log(`  windowed: dpr=${before.dpr} cap(720)=${before.cap720} — ${before.canvases} baked canvases, ${before.nFlagged} undersized (expected 0: the cap matches the bakes)`);
 
 // THE TRANSITION — what entering fullscreen does.
+// v0.30.x — THE PROACTIVE RE-BAKE (per user). A first rise to 1.75, where the cap (1449 px) is still below the 1656 px
+// art, so a stale pose must genuinely re-bake - at 2 the cap reaches the art and frames are pinned whole instead.
+// Two promises: no pose is HELD (the draw path used to put the raw source back into a stale pose's slot, and
+// _lxBossStandIn held the previous pose for the whole bake; counted only for poses that were baked before the rise, so
+// frames the spawn queue has not reached yet do not count), and the rise itself brings every pose of the bosses on
+// the map to the new cap within 15 s, drawn or not (the draw-time path alone took ~36 s: a pose waited for the boss to use it). A slot is fresh when it is a canvas at the cap, or a source
+// that fits under it whole; a raw source over the cap is what a held pose looks like in the store.
+const riseA = await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((z) => setTimeout(z, ms));
+  const oD = window._drawBossSprite, holds = { n: 0, sample: [] }, wasBaked = new Set();   // sources whose pose was a bake BEFORE the rise
+  window._drawBossSprite = function (sprite, m) {
+    const set = sprite && sprite._lxSet;
+    if (sprite && sprite.tagName === 'IMG' && set && sprite.naturalWidth > 0 && wasBaked.has(sprite)
+        && Math.max(sprite.naturalWidth, sprite.naturalHeight) > _lxShrinkCap(Math.max(set._lxBase || 720, set._lxBaseMin || 0))) {
+      holds.n++; if (holds.sample.length < 6) holds.sample.push((m && m.type) + '/' + sprite._lxSt);
+    }
+    return oD.apply(this, arguments);
+  };
+  const fam = (k, t) => k === t || (k.length > t.length && k.indexOf(t) === 0 && k.charCodeAt(t.length) >= 97 && k.charCodeAt(t.length) <= 122);
+  const stale = () => {
+    const sets = new Set();
+    for (const m of game.monsters) {
+      if (!m || !(m.currentHp > 0) || !(m.isBoss || m.boss || m.zodiacBoss || m.zodiacSign)) continue;
+      if (m.zodiacSign) { for (const S of [ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES, ZODIAC_CHARGE_FRAMES]) if (S && S[m.zodiacSign]) sets.add(S[m.zodiacSign]); continue; }
+      for (const t of [m.type, m._phaseSprite]) if (t) for (const S of [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES]) for (const k in S) if (fam(k, t)) sets.add(S[k]);
+    }
+    let n = 0, total = 0; const where = [];
+    for (const a of sets) {
+      const cap = _lxShrinkCap(Math.max(a._lxBase || 720, a._lxBaseMin || 0));
+      for (const f of a) {
+        const src = f && (f.tagName === 'CANVAS' ? f._lxSrc : f);
+        if (!src || !(src.naturalWidth > 0)) continue;
+        total++;
+        const srcLong = Math.max(src.naturalWidth, src.naturalHeight), want = Math.min(srcLong, cap);
+        const fresh = f.tagName === 'CANVAS' ? Math.max(f.width, f.height) >= want * 0.94 : srcLong <= cap;
+        if (!fresh) { n++; if (where.length < 4) where.push((f._lxSt || '?') + ':' + (f.tagName === 'CANVAS' ? Math.max(f.width, f.height) : 'raw') + '<' + Math.round(want)); }
+      }
+    }
+    return { n, total, sets: sets.size, where };
+  };
+  const dpr0 = _LX_DPR;
+  for (const S of [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES, ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES]) for (const k in S) for (const f of (S[k] || [])) if (f && f.tagName === 'CANVAS' && f._lxSrc) wasBaked.add(f._lxSrc);
+  _lxApplyRenderScale(1.75);
+  const t0 = performance.now(); await sleep(300);
+  const first = stale(); let r = first;
+  while (r.n > 0 && performance.now() - t0 < 15000) { await sleep(500); r = stale(); }
+  const ms = Math.round(performance.now() - t0);
+  window._drawBossSprite = oD;
+  return { from: dpr0, to: _LX_DPR, cap: _lxShrinkCap(720), staleAtStart: first.n, ...r, ms, holds };
+});
+console.log(`  rise ${riseA.from.toFixed(2)} -> ${riseA.to}: cap(720) ${riseA.cap}, ${riseA.staleAtStart} of ${riseA.total} live-boss poses stale at the switch, ${riseA.n} after ${riseA.ms} ms; raw over-cap frames drawn: ${riseA.holds.n}`);
 await page.evaluate(() => { _lxApplyRenderScale(2); });
 await page.waitForTimeout(9000);   // draw loop re-runs the shrink; async re-bakes drain
 const after = await scan();
@@ -146,5 +197,8 @@ ok('windowed bakes matched the windowed cap', before.nFlagged === 0, before.flag
 ok('after the scale increase, bosses were drawn from bakes (the check below saw real frames)', drawn.bakes > 100, drawn);
 ok('after the scale increase, every boss frame DRAWN is a bake at the new cap (stored, undrawn poses re-bake on first use)',
   drawn.bad.length === 0, { stale: drawn.bad, storedUndrawn: after.nFlagged });
+ok('a rise below the art size re-bakes every pose of the bosses on the map - drawn or not - within 15 s',
+  riseA.staleAtStart > 0 && riseA.n === 0, riseA);
+ok('no pose is held at a rise: no raw over-cap frame reached the draw', riseA.holds.n === 0, riseA.holds);
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);

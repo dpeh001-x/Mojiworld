@@ -15702,7 +15702,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1091';
+const GAME_VERSION = 'v0.30.1092';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16033,7 +16033,11 @@ let _LX_DPR = _lxTargetDpr();
 let _lxScaledOnce = false;
 function _lxApplyRenderScale(dpr) {
   if (!(dpr > 0)) return;
+  const _lxPrevDpr = _LX_DPR;
   _LX_DPR = dpr;
+  // v0.30.x — a RISE re-bakes the bosses on the map now, not pose by pose on first draw (_lxBossRebakeForScale). Deferred:
+  // the first call runs while this script is still being evaluated, before the bake queue exists.
+  if (dpr > _lxPrevDpr * 1.001) setTimeout(() => { try { if (typeof _lxBossRebakeForScale === 'function') _lxBossRebakeForScale(); } catch (e) {} }, 0);
   // At exactly 1 with the canvas never touched, do NOTHING — byte-for-byte the
   // pre-v0.30.238 path. Mobile lands here, and mobile CSS owns the element's
   // box; writing inline width/height would be this change reaching onto the
@@ -19728,6 +19732,7 @@ function _lxBossBakePump() {
   let scanned = 0;
   while (Q.length && _lxBakeInFlight < budget && scanned++ < 80) {
     const j = Q.shift(), im = j.a[j.i];
+    if (j.rebake) { _lxRebakeJob(j); continue; }   // v0.30.x — a pose baked before the render scale rose (_lxBossRebakeForScale)
     if (!im || im.tagName !== 'IMG' || im._lxBaking) continue;               // baked, baking, or an empty slot
     if (!im.complete) { if (++j.t < 600) Q.push(j); continue; }             // still downloading: come back (bounded)
     const capJ = j.a._lxBaseMin ? _lxShrinkCap(Math.max(720, j.a._lxBaseMin)) : cap;   // v0.30.x — the set's own base (_lxBossBakeBaseFor)
@@ -19735,6 +19740,53 @@ function _lxBossBakePump() {
     _lxAsyncBake(j.a, j.i, im, capJ);
   }
   if (Q.length) _lxBossBakeKick(_lxBakeInFlight >= budget ? 40 : 90);
+}
+// v0.30.x — PROACTIVE RE-BAKE (per user). When the render scale rises, every pose of the bosses on the map that was baked
+// for the smaller scale is queued for a bigger bake at once - the current fight's first, through the same budgeted pump
+// as the spawn queue (one bake in flight during play: each landing is a GPU upload). Before this a pose was re-baked on
+// its first draw after the rise, holding the boss's previous pose meanwhile. Bosses not on the map are left to that
+// draw-time path (with the old canvas drawn meanwhile): re-baking every boss met this session would grow memory for
+// fights that are over. Only a RISE triggers it: a canvas bigger than a lowered cap is kept (see _lxShrinkFrames).
+function _lxBossRebakeForScale() {
+  if (typeof game === 'undefined' || !game || !Array.isArray(game.monsters)) return 0;
+  const stores = [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES,
+    typeof BOSS_WEAVE_FRAMES !== 'undefined' ? BOSS_WEAVE_FRAMES : null, typeof BOSS_DUCK_FRAMES !== 'undefined' ? BOSS_DUCK_FRAMES : null].filter(Boolean);
+  const zstores = [ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES,
+    typeof ZODIAC_CHARGE_FRAMES !== 'undefined' ? ZODIAC_CHARGE_FRAMES : null, typeof ZODIAC_POUNCE_FRAMES !== 'undefined' ? ZODIAC_POUNCE_FRAMES : null,
+    typeof ZODIAC_FLY_FRAMES !== 'undefined' ? ZODIAC_FLY_FRAMES : null].filter(Boolean);
+  const fam = (k, t) => k === t || (k.length > t.length && k.indexOf(t) === 0 && k.charCodeAt(t.length) >= 97 && k.charCodeAt(t.length) <= 122);
+  const sets = [], seen = new Set();
+  const add = (a) => { if (Array.isArray(a) && a.length && !seen.has(a)) { seen.add(a); sets.push(a); } };
+  for (const m of game.monsters) {
+    if (!m || !(m.currentHp > 0) || !(m.isBoss || m.boss || m.zodiacBoss || m.zodiacSign)) continue;
+    if (m.zodiacSign) { for (const S of zstores) add(S[m.zodiacSign]); continue; }
+    for (const t of [m.type, m._phaseSprite]) if (t) for (const S of stores) for (const k in S) if (fam(k, t)) add(S[k]);
+  }
+  const jobs = [];
+  for (const a of sets) {
+    const cap = _lxShrinkCap(Math.max(a._lxBase || 720, a._lxBaseMin || 0));
+    for (let i = 0; i < a.length; i++) {
+      const cv = a[i], src = (cv && cv.tagName === 'CANVAS') ? cv._lxSrc : null;
+      if (!src || !(src.naturalWidth > 0)) continue;
+      if (Math.min(Math.max(src.naturalWidth, src.naturalHeight), cap) > Math.max(cv.width, cv.height) * 1.05) jobs.push({ a, i, t: 0, rebake: true });
+    }
+  }
+  if (jobs.length) { _LX_BOSS_BAKE_Q.unshift(...jobs); _lxBossBakeKick(0); }
+  return jobs.length;
+}
+function _lxRebakeJob(j) {
+  const a = j.a, cv = a[j.i], src = (cv && cv.tagName === 'CANVAS') ? cv._lxSrc : null;
+  if (!src || !(src.naturalWidth > 0)) return;
+  const cap = _lxShrinkCap(Math.max(a._lxBase || 720, a._lxBaseMin || 0));
+  const srcLong = Math.max(src.naturalWidth, src.naturalHeight), want = Math.min(srcLong, cap);
+  if (!(want > Math.max(cv.width, cv.height) * 1.05)) return;   // fresh already: the draw path got there first
+  // one source can sit in several sets: reuse a bake another set already paid for, and wait for one in flight
+  const memo = src._lxBakedCv;
+  if (memo && memo !== cv && Math.max(memo.width, memo.height) >= want * 0.95) { a[j.i] = memo; a._readyN = 0; return; }
+  if (src._lxBaking) { if (++j.t < 600) _LX_BOSS_BAKE_Q.push(j); return; }
+  if (src._lxBakedCv === cv) src._lxBakedCv = null;
+  if (srcLong > cap) _lxAsyncBake(a, j.i, src, cap, cv);                         // bigger bake; the old canvas draws until it lands
+  else { a[j.i] = src; a._readyN = 0; }                                          // the whole source fits now: pinned on its next draw
 }
 function _lxBossBakeBump(set) {
   const t = (typeof game !== 'undefined' && game) ? (game.time | 0) : 0;
@@ -19892,7 +19944,7 @@ function _lxBitmapOffThread(im, bw, bh) {
   }
   return createImageBitmap(im, opts);
 }
-function _lxAsyncBake(frames, idx, im, maxLong) {
+function _lxAsyncBake(frames, idx, im, maxLong, prev) {   // v0.30.x — prev: a stale canvas this bake supersedes (it stays in the slot, drawn, until then)
   const w = im.naturalWidth, h = im.naturalHeight;
   const s = maxLong / Math.max(w, h);
   const bw = Math.max(1, Math.round(w * s)), bh = Math.max(1, Math.round(h * s));
@@ -19907,7 +19959,7 @@ function _lxAsyncBake(frames, idx, im, maxLong) {
     // frame arrays (counted 2-3 bakes per source on the Singularity entry),
     // and each array used to re-run the whole decode+resize for it.
     if (cv) im._lxBakedCv = cv;
-    if (cv && frames[idx] === im) { frames[idx] = cv; frames._readyN = 0; }
+    if (cv && (frames[idx] === im || (prev && frames[idx] === prev))) { frames[idx] = cv; frames._readyN = 0; }
   };
   try {
     _lxBitmapOffThread(im, bw, bh)   // v0.29.749 — blob-fed: decode leaves the main thread
@@ -19936,10 +19988,12 @@ function _lxShrinkSlot(holder, key, baseLogical) {
       const _srcLong = Math.max(_src.naturalWidth, _src.naturalHeight);
       const _want = Math.min(_srcLong, maxLong);
       if (_want > Math.max(im.width, im.height) * 1.05) {
-        if (_src._lxBakedCv === im) _src._lxBakedCv = null;
-        holder[key] = _src;
-        if (_srcLong > maxLong && typeof createImageBitmap === 'function'
-            && _lxBakeInFlight < _lxBakeBudget()) _lxAsyncBake(holder, key, _src, maxLong);
+        if (_srcLong > maxLong && typeof createImageBitmap === 'function') {   // v0.30.x — the old canvas draws until the bigger bake lands
+          if (!_src._lxBaking && _lxBakeInFlight < _lxBakeBudget()) { if (_src._lxBakedCv === im) _src._lxBakedCv = null; _lxAsyncBake(holder, key, _src, maxLong, im); }
+        } else {
+          if (_src._lxBakedCv === im) _src._lxBakedCv = null;
+          holder[key] = _src;
+        }
       }
     }
     return;
@@ -20003,12 +20057,19 @@ function _lxShrinkFrames(frames, baseLogical, pinCap) {   // v0.30.624 - pinCap:
         const _srcLong = Math.max(_src.naturalWidth, _src.naturalHeight);
         const _want = Math.min(_srcLong, maxLong);
         if (_want > Math.max(im.width, im.height) * 1.05) {
+          // v0.30.x — per user ("add the proactive re-bake"): the old canvas stays in the slot and keeps being drawn
+          // while the bigger bake runs, and the bake installs over it. Putting the raw source back made
+          // _lxBossStandIn hold the boss's previous pose for the whole bake, on the first use of every pose.
+          if (_srcLong > maxLong && canAsync) {
+            const _memo = _src._lxBakedCv;   // a bake another set sharing this source already paid for
+            if (_memo && _memo !== im && Math.max(_memo.width, _memo.height) >= _want * 0.95) { frames[i] = _memo; frames._readyN = 0; continue; }
+            if (!_src._lxBaking && _lxBakeInFlight < _lxBakeBudget()) { if (_src._lxBakedCv === im) _src._lxBakedCv = null; _lxAsyncBake(frames, i, _src, maxLong, im); }
+            pending = true;
+            continue;
+          }
           if (_src._lxBakedCv === im) _src._lxBakedCv = null;
           frames[i] = _src; frames._readyN = 0;
-          if (_srcLong > maxLong) {
-            if (canAsync && _lxBakeInFlight < _lxBakeBudget()) _lxAsyncBake(frames, i, _src, maxLong);
-            pending = true;
-          }
+          if (_srcLong > maxLong) pending = true;
           continue;
         }
       }

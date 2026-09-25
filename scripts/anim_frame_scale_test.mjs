@@ -32,7 +32,7 @@ for (const [t, states] of Object.entries(calib))
 // 3's soul frame 3 at x1.12, in 88f57026 (2026-09-08, per user: "After that bake these", seven LX_ANIM_PATCH:1 blobs).
 // Each authored entry is listed with its provenance; anything else still fails, which is what this check is for.
 const AUTHORED_FS = {
-  'gravitos3soul.attack': '88f57026 - user animator patch, 2026-09-08',
+  'gravitos3soul.attack': '88f57026 - user animator patch, 2026-09-08; confirmed intended by the user 2026-09-26',
 };
 const unexpected = baked.filter((k) => !AUTHORED_FS[k]);
 ok('policy: no per-frame fs baked except the user-authored ones (bosses render at raw art proportions)', unexpected.length === 0, unexpected.length ? unexpected : baked);
