@@ -10,6 +10,9 @@
 // touch phone keep both columns (the 820x600 window fits whole); one column only under 800 px, with the sliders
 // stretched across the row; a fade above the footer while there is more below, gone at the end and absent when
 // nothing scrolls; bigger switches on touch screens.
+// v0.30.1109, punk pop (per user: "more punk pop feel with shadow and better outlines for each section"): every card
+// a paper outline with a hard slab of its own colour behind it (ink-rimmed) and halftone dots; the tags inked
+// stickers, tilted alternately.
 //   node scripts/settings_pop_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -29,8 +32,11 @@ const open = async (w, h, mobile) => {
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof openSettingsModal === 'function', null, { timeout: 120000 });
   await page.waitForTimeout(1500);
-  await page.evaluate(async () => { const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
-    document.documentElement.classList.remove('lx-nobackdrop'); openSettingsModal(); await new Promise((r) => setTimeout(r, 400)); });
+  // headless trips the perf governor, whose reduced-effects mode strips every box-shadow: pin it off before reading
+  await page.evaluate(async () => { try { window._perfTick = function () {}; LX_PERF.veryLowFx = false; } catch (e) {}
+    const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
+    document.documentElement.classList.remove('lx-nobackdrop'); openSettingsModal(); await new Promise((r) => setTimeout(r, 400));
+    document.documentElement.classList.remove('lx-nobackdrop'); });
   return page;
 };
 const probe = () => {
@@ -57,6 +63,9 @@ const probe = () => {
     scrolls: m.scrollHeight > m.clientHeight + 1, sh: m.scrollHeight, w: Math.round(mr.width),
     fade: getComputedStyle(m.querySelector('.actions'), '::before').opacity,
     sliderW: Math.round(rc(document.getElementById('set-bgm')).width), toggleT: getComputedStyle(document.getElementById('set-mute')).transform,
+    ink: cards.map((c) => { const g = getComputedStyle(c), t = c.querySelector('.set-grp-h'), tg = getComputedStyle(t), mx = tg.transform.match(/[-0-9.e]+/g) || [];
+      return { k: c.dataset.grp, bc: g.borderTopColor, bw: g.borderTopWidth, bs: g.boxShadow, acc: tg.backgroundColor, tbw: tg.borderTopWidth, tbc: tg.borderTopColor, tilt: Math.sign(+mx[1] || 0),
+        dots: getComputedStyle(c, '::before').backgroundImage }; }),
   };
 };
 let page = await open(1280, 720);
@@ -86,6 +95,11 @@ ok('labels are Fredoka and keep the thick black outline (v0.29 typography, per u
 ok("a card's accent colours its on-toggles: Sound pink, Graphics yellow", D.bgmuteOn === 'rgb(255, 61, 139)' && D.weatherOn === 'rgb(255, 228, 92)', { sound: D.bgmuteOn, gfx: D.weatherOn });
 ok('the Fullscreen and Hotkeys buttons are not squashed (their words fit)', D.fsBtn && D.hkBtn && D.fsBtn.w >= 60 && D.hkBtn.w >= 60 && D.fsBtn.fits && D.hkBtn.fits, { fs: D.fsBtn, hk: D.hkBtn });
 ok('1280x720: the panel is on screen, Done in view, nothing cut off (fits or scrolls)', D.fitsScreen && D.doneVisible, { scrolls: D.scrolls });
+ok('punk pop: every card has a paper outline (2.5px, drawn 2px on a 1x screen) and a hard 7px slab of its own colour with an ink rim, and halftone dots',
+  D.ink.length === 6 && D.ink.every((c) => c.bc === 'rgb(247, 245, 239)' && parseFloat(c.bw) >= 2 && c.bs.includes(c.acc + ' 7px 7px 0px 0px') && c.bs.includes('rgb(12, 11, 16) 7px 7px 0px 2px') && /radial-gradient/.test(c.dots)),
+  D.ink.map((c) => c.k + ':' + c.bc + '/' + c.bw + ' ' + c.bs.slice(0, 90)).slice(0, 2));
+ok('the tags are inked stickers (a 2.5px ink edge, 2px on a 1x screen), tilted one way then the other down each column', D.ink.every((c) => parseFloat(c.tbw) >= 2 && c.tbc === 'rgb(12, 11, 16)') && J(D.ink.map((c) => c.tilt)) === '[-1,1,-1,-1,1,-1]',
+  { tilts: D.ink.map((c) => c.tilt), edge: D.ink.map((c) => c.tbw).join(',') });
 ok('1280x720: all of it fits, so there is no "more below" fade', !D.scrolls && D.fade === '0', { scrolls: D.scrolls, fade: D.fade });
 ok('an 820x600 window keeps both columns at 740 px and fits whole (no scroll, no fade)', W.side && W.w === 740 && !W.scrolls && W.fade === '0', { side: W.side, w: W.w, sh: W.sh, fade: W.fade });
 ok('under 800 px (760x600) the cards stack in one column, sliders stretched across the row', N.stacked && !N.side && N.sliderW >= 180, { stacked: N.stacked, slider: N.sliderW });
