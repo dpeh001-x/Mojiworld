@@ -13411,7 +13411,7 @@ The sleeping world is listening.</div>
        where #controls hides). Click/tap dispatches the K key so it works
        as both a label and a button. -->
   <div id="hotkey-hint" title="Open Hotkeys / Skills / Level Up panel" class="hud-drag">
-    <kbd>K</kbd>Hotkeys &amp; Skills
+    <kbd data-lx-bindlabel="characterK">K</kbd>Hotkeys &amp; Skills
   </div>
 
   <div id="skill-bar"><div class="skill-slot defense ready" title="Block / Parry — press to block for 70% less damage (a fixed stance per class, then a cooldown); a hit in its first 300 ms is parried and stuns the attacker.">
@@ -15880,7 +15880,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1162';
+const GAME_VERSION = 'v0.30.1163';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -41845,11 +41845,40 @@ function getJump() {
 // =========================================================================
 // v0.30.1153 input-fixes - a key that holds a skill is the skill's (a bind made before E / O / H were refused fired both)
 function _lxKeyHoldsSkill(k) { try { return !!(typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[k]); } catch (e) { return false; } }
+// v0.30.1163 keybinds - the key an ACTION is on, as a label (prompts, the skill bar's Block slot, the HUD chip)
+function _lxKeyLabel(action) {
+  const ab = (typeof player !== 'undefined' && player && player.actionBinds) || {};
+  const k = (ab[action] !== undefined) ? ab[action] : ((typeof ACTION_KEY_DEFAULT === 'object') ? ACTION_KEY_DEFAULT[action] : '');
+  return k ? ((typeof _kbDisplay === 'function') ? _kbDisplay(k) : String(k).toUpperCase()) : '\u2014';
+}
+function _lxRefreshBindLabels() { try { document.querySelectorAll('[data-lx-bindlabel]').forEach((el) => { const t = _lxKeyLabel(el.getAttribute('data-lx-bindlabel')); if (el.textContent !== t) el.textContent = t; }); } catch (e) {} }
+// v0.30.1163 keybinds - Shift changes what e.key reports for digits and punctuation (Shift+5 = '%'), so with Shift held for
+// Dash a key bound to 5 or ; never fired. Read such a press as its UNSHIFTED key when that key is bound and the shifted one
+// is not. The unshifted characters come from the real keyboard layout when the browser can tell (US layout otherwise).
+const _LX_UNSHIFT = { Digit1: '1', Digit2: '2', Digit3: '3', Digit4: '4', Digit5: '5', Digit6: '6', Digit7: '7', Digit8: '8', Digit9: '9', Digit0: '0',
+  Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Backquote: '`' };
+try { if (navigator.keyboard && navigator.keyboard.getLayoutMap) navigator.keyboard.getLayoutMap().then((m) => { for (const c of Object.keys(_LX_UNSHIFT)) { const v = m.get(c); if (v) _LX_UNSHIFT[c] = String(v).toLowerCase(); } }).catch(() => {}); } catch (e) {}
+function _lxKeyBound(x) {
+  if (!x) return false;
+  if (typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[x]) return true;
+  if (typeof player === 'undefined' || !player) return false;
+  if ((player.cureKey || 'shift') === x || player.interactKey === x) return true;
+  const ab = player.actionBinds || {};
+  for (const a in ACTION_KEY_DEFAULT) { if (((ab[a] !== undefined) ? ab[a] : ACTION_KEY_DEFAULT[a]) === x) return true; }
+  return false;
+}
+function _lxUnshifted(e) {
+  const k = String((e && e.key) || '').toLowerCase();
+  if (!e || !e.shiftKey || !e.code) return k;
+  const u = _LX_UNSHIFT[e.code];
+  if (!u || u === k) return k;
+  return (_lxKeyBound(u) && !_lxKeyBound(k)) ? u : k;
+}
 window.addEventListener('keydown', e => {
-  if (e && e.code) (window._lxDownByCode = window._lxDownByCode || {})[e.code] = String(e.key || '').toLowerCase();   // v0.30.1153 input-fixes - what went down on this physical key (see keyup)
+  if (e && e.code) (window._lxDownByCode = window._lxDownByCode || {})[e.code] = _lxUnshifted(e);   // v0.30.1163 keybinds - the key as the game reads it   // v0.30.1153 input-fixes - what went down on this physical key (see keyup)
   // v0.26.x - Per user: while typing in a text field (name entry / chat), let
   // the input handle the key and do NOT fire game key-functions. Lock to typing.
-  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable)) return;
   // v0.26.x — Prologue lockdown (live-playtest finding): Q/W/E/Esc etc. open
   // wardrobe / world map / quests / settings, each pausing the game under the
   // flash-forward. Allow only movement + combat keys; the cinematic overlay's
@@ -41859,7 +41888,7 @@ window.addEventListener('keydown', e => {
                     'z', 'x', 's', 'c', 'd', 'f', 'v', 'g', 'b', 'shift'];
     if (!_plgOk.includes(e.key.toLowerCase())) { e.preventDefault(); return; }
   }
-  const rawKey = e.key.toLowerCase();
+  const rawKey = _lxUnshifted(e);   // v0.30.1163 keybinds - Shift+5 reads as 5 when 5 is bound (Dash is Shift)
   if (e.isTrusted && typeof _lxNoteInput === 'function') _lxNoteInput('kb');   // v0.30.376 — a real key makes the keyboard the prompt device
   // v0.25.602 — Action-binding translation layer. If the player has
   // remapped (e.g. Jump from Space → R), translate the physical press
@@ -41885,6 +41914,7 @@ window.addEventListener('keydown', e => {
   const k = resolved;
   const repeat = e.repeat;
   game.keys[k] = true;
+  if (e.code) (window._lxDownResByCode = window._lxDownResByCode || {})[e.code] = k;   // v0.30.1163 keybinds - keyup clears exactly this (a rebind mid-hold left the hero walking)
   // v0.29.610 — queue arrow edges for the shackle QTE. See _qteFrame: polling
   // game.keys once per sim step loses any press that starts and ends between
   // two steps, which is exactly what fast tapping produces.
@@ -42392,7 +42422,9 @@ window.addEventListener('keyup', e => {
   // key and stayed held (the hero walked on). Release whatever went DOWN on this physical key too.
   try { const _dc = e.code && window._lxDownByCode; const _dk = _dc && _dc[e.code];
     if (_dk && typeof game !== 'undefined' && game && game.keys) { game.keys[_dk] = false; const _dr = (typeof _resolveActionKey === 'function') ? _resolveActionKey(_dk) : _dk; if (_dr) game.keys[_dr] = false; }
-    if (_dc) delete _dc[e.code]; } catch (_e) {}
+    if (_dc) delete _dc[e.code];
+    const _dr2 = e.code && window._lxDownResByCode; if (_dr2 && _dr2[e.code] && typeof game !== 'undefined' && game && game.keys) { game.keys[_dr2[e.code]] = false; delete _dr2[e.code]; }   // v0.30.1163 keybinds
+  } catch (_e) {}
   // v0.30.367 — a key that went DOWN in the game must come UP in the game, even if
   // focus moved into an input in between; a swallowed keyup left the key (and any
   // warrior charge on it) stuck, which killed every other slot key.
@@ -42400,7 +42432,7 @@ window.addEventListener('keyup', e => {
     if (typeof game !== 'undefined' && game && game.keys) { if (game.keys[_rk]) game.keys[_rk] = false; if (_rs !== null && game.keys[_rs]) game.keys[_rs] = false; } }
   // Don't let a keyup delivered to a focused text field clear game-key / charge
   // state (symmetry with the keydown handler's typing guard).
-  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable)) return;
   const rawKey = e.key.toLowerCase();
   // v0.25.602 — mirror the keydown action-binding translation so a
   // released remapped key correctly clears `game.keys[canonical]`
@@ -42440,6 +42472,12 @@ function _mkeyCode(k) {
   return { key: k, code: 'Key' + k.toUpperCase() };
 }
 function _mkeyDispatch(type, k) {
+  // v0.30.1163 keybinds - the deck's HP / MP buttons ARE the potions: with a skill on PgUp / PgDn the keyboard's skill
+  // precedence cast the skill instead of drinking
+  if ((k === 'pageup' || k === 'pagedown') && typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[k]) {
+    if (type === 'keydown' && typeof _useBoundPotion === 'function' && typeof game !== 'undefined' && !game.paused && player && player.hp > 0) _useBoundPotion(k);   /* the K > Potions choice for that key, as the keyboard uses it */
+    return;
+  }
   // v0.25.606 — When movement is rebound (e.g. moveLeft 'arrowleft' → 'a'),
   // the keyboard resolver `_resolveActionKey('arrowleft')` returns null
   // (stale-default neutralization), which would deafen the mobile arrow
@@ -42873,7 +42911,7 @@ function _wireMobileCooldownSweep() {
     for (const btn of btns) {
       if (btn.dataset.dynamic) continue;
       const k = (btn.dataset.mkey || '').toLowerCase();
-      const slot = KEY_TO_SLOT[k];
+      const slot = (typeof KEY_TO_SLOT_DEFAULT === 'object' && KEY_TO_SLOT_DEFAULT[k]) || KEY_TO_SLOT[k];   // v0.30.1163 keybinds - the button's slot, as its tap resolves it
       if (!slot) continue;
       const found = (typeof skillBySlot === 'function') ? skillBySlot(slot) : null;
       const iconEl = btn._cachedIconEl;
@@ -49666,7 +49704,11 @@ const _lxPadPrev = {};        // resolved-key -> pressed(bool) last poll, for ed
 let _lxPadConnectedToasted = false;
 function _lxPadResolveKey(spec) {
   if (!spec) return null;
-  if (spec.k) return spec.k;
+  if (spec.k) {   // v0.30.1163 keybinds - a pad SKILL button follows its slot to the slot's current key (Basic Attack moved to R -> pad X is R)
+    const _sl = (typeof KEY_TO_SLOT_DEFAULT === 'object') && KEY_TO_SLOT_DEFAULT[spec.k];
+    if (_sl && typeof SLOT_TO_KEY === 'object' && SLOT_TO_KEY[_sl]) return ('' + SLOT_TO_KEY[_sl]).toLowerCase();
+    return spec.k;
+  }
   const ab = (typeof player !== 'undefined' && player && player.actionBinds) || (typeof ACTION_KEY_DEFAULT === 'object' ? ACTION_KEY_DEFAULT : null);
   return (ab && ab[spec.a]) || (typeof ACTION_KEY_DEFAULT === 'object' ? ACTION_KEY_DEFAULT[spec.a] : null) || null;
 }
@@ -61273,7 +61315,7 @@ function _buildKeybindModal() {
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
         <div>
           <div style="color:#9990b8; font-size:10px; letter-spacing:2.4px; text-transform:uppercase; font-weight:600;">
-            Keyboard Remap · Press K to toggle
+            Keyboard Remap · Press <span data-lx-bindlabel="characterK">K</span> to toggle
           </div>
           <h2 style="margin:5px 0 0; font-size:22px; color:#fff; font-weight:700; letter-spacing:-0.2px;">
             ⌨ Controls &amp; Keybinds
@@ -61321,7 +61363,7 @@ function _buildKeybindModal() {
           <span style="color:#a366ff;">🥷 Taiga</span> (Rogue) ·
           <span style="color:#ff6688;">🏹 Lady Hong</span> (Archer) ·
           <span style="color:#66aaff;">🔮 Hera</span> (Mage) ·
-          <span style="color:#ffaa44;">⚔️ Will</span> (Warrior). Press <kbd>Q</kbd> any time to open the journal.
+          <span style="color:#ffaa44;">⚔️ Will</span> (Warrior). Press <kbd data-lx-bindlabel="questJournal">Q</kbd> any time to open the journal.
         </div>
       </div>
       </div><!-- /kbm-tab-controls -->
@@ -61465,6 +61507,7 @@ function _kbmApplyTab() {
 // render as clickable kbd buttons. Re-runs on every action-pickup state
 // change so the live binding reads correctly.
 function renderKbmReference() {
+  if (typeof _lxRefreshBindLabels === 'function') _lxRefreshBindLabels();   // v0.30.1163 keybinds
   const host = document.getElementById('kbm-reference-grid');
   if (!host) return;
   const ab = (player && player.actionBinds) || ACTION_KEY_DEFAULT;
@@ -61626,6 +61669,30 @@ function renderKbmReference() {
 // Capture-phase keydown handler for action-pickup mode. Lives on the
 // document so it intercepts the press BEFORE the main game keydown
 // runs (which would otherwise fire the old binding).
+// v0.30.1163 keybinds - ONE list of the keys the interface owns, for every pickup (the four used to disagree): Enter / Esc /
+// P / T / I / M / 9 / 0 as before, plus the hard-coded E (quest guide), O (photo mode), H (MojiMon), J (journal alias),
+// ` and the digits 1-8. An action may still take back its OWN default (Mute on M).
+const _LX_UI_KEYS = ['enter', 'escape', 'p', 't', 'i', 'm', '9', '0', '1', '2', '3', '4', '5', '6', '7', '8', 'e', 'o', 'h', 'j', '`'];
+function _lxUiKeyFor(k, action) { return _LX_UI_KEYS.indexOf(k) >= 0 && !(action && typeof ACTION_KEY_DEFAULT === 'object' && ACTION_KEY_DEFAULT[action] === k); }
+// v0.30.1163 keybinds - may this key hold a SKILL? null = yes, else who owns it. Shared by the skill chip and the Keyboard-tab drop.
+//   another skill's key: yes (a swap) | an interface key, the Cure key: no | an action's key: no - except Shift / PgUp / PgDn
+//   while their OWN action (Dash / the potions) is still there (the skill precedence guard wins) | a moved action's old key: no
+//   (the keydown neutralises it before skills are looked up, so the skill would never cast).
+function _lxSkillKeyProblem(k) {
+  if (!k || (typeof KB_NONBINDABLE !== 'undefined' && KB_NONBINDABLE.has(k))) return 'the interface';
+  if (typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[k]) return null;
+  if (_LX_UI_KEYS.indexOf(k) >= 0) return 'the interface';
+  const ab = (typeof player !== 'undefined' && player && player.actionBinds) || {};
+  for (const a in ACTION_KEY_DEFAULT) {
+    const cur = (ab[a] !== undefined) ? ab[a] : ACTION_KEY_DEFAULT[a];
+    if (cur === k) return ((k === 'shift' || k === 'pageup' || k === 'pagedown') && ACTION_KEY_DEFAULT[a] === k) ? null : a;
+  }
+  // the Cure key (an unset one is Shift - Reset deletes it) - checked after the Shift / Dash allowance above, since a skill on
+  // the default Shift is designed to win over both Dash and Cure; a Cure key of its own is Cure's alone
+  if (typeof player !== 'undefined' && player && (player.cureKey || 'shift') === k) return 'Cure';
+  if (typeof _isStaleDefault === 'function' && _isStaleDefault(k)) return 'a moved action (its old key stays silent)';
+  return null;
+}
 (function _wireActionPickup() {
   document.addEventListener('keydown', (ev) => {
     if (!_actionPickup) return;
@@ -61662,8 +61729,8 @@ function renderKbmReference() {
     // handler), with no toast and no way to guess what happened. Same for P (Postal Wisp) and
     // T (co-op ping). Escape is listed because it is the universal modal-close.
     {
-      const _RESERVED = ['enter', 'escape', 'p', 't', 'i', 'm', '9', '0'];
-      if (_RESERVED.indexOf(k) >= 0) {
+      // v0.30.1163 keybinds - the shared list (+ E / O / H / J / ` / 1-8); an action may take back its own default (Mute on M)
+      if (_lxUiKeyFor(k, _actionPickup)) {
         ev.preventDefault();
         ev.stopPropagation();
         showToast('That key is reserved by the interface — pick another', 'common');
@@ -61673,6 +61740,12 @@ function renderKbmReference() {
         return;
       }
     }
+    // v0.30.1163 keybinds - the Cure and Pickup keys live outside actionBinds: an action on one of them fired both (Move Left
+    // on the Cure key walked AND burned a Remedy). Refused - an action returning to its own default (Dash on Shift) excepted.
+    { const _own = ((player.cureKey || 'shift') === k && ACTION_KEY_DEFAULT[_actionPickup] !== k) ? 'Cure'   /* an unset Cure key is Shift (Reset deletes it) */
+        : (player.interactKey && player.interactKey === k && ACTION_KEY_DEFAULT[_actionPickup] !== k) ? 'Open Chest / Pickup' : null;
+      if (_own) { ev.preventDefault(); ev.stopPropagation(); showToast('\u26A0 ' + _kbDisplay(k) + ' belongs to ' + _own + ' \u2014 pick another', 'common');
+        _actionPickup = null; renderKbmReference(); if (typeof _kbRenderPotionBinds === 'function') _kbRenderPotionBinds(); return; } }
     // Apply the new binding.
     if (!player.actionBinds) player.actionBinds = { ...ACTION_KEY_DEFAULT };
     // v0.25.606 — Proper SWAP semantics. Find any other action whose
@@ -61731,12 +61804,16 @@ function renderKbmReference() {
 // nothing at all, so either could be stacked onto Move Left and persisted - every fresh
 // left-tap while afflicted then burned a Remedy. Shared check for both. Pickup keeps its
 // documented right to share a SKILL key (chest-open and the F skill are meant to overlap).
-function _lxKeyClaimedBy(k, allowSkill) {
+function _lxKeyClaimedBy(k, allowSkill, self) {   // v0.30.1163 keybinds - self: 'cure' | 'interact'
   if (!k) return null;
-  if (['enter', 'escape', 'p', 't', 'i', 'm', '9', '0'].indexOf(k) >= 0) return 'the interface';
+  if (_LX_UI_KEYS.indexOf(k) >= 0) return 'the interface';   // v0.30.1163 keybinds - the shared list
+  if (self !== 'cure' && typeof player !== 'undefined' && player && (player.cureKey || 'shift') === k) return 'Cure';   // an unset Cure key is Shift
+  if (self !== 'interact' && typeof player !== 'undefined' && player && player.interactKey && player.interactKey === k) return 'Open Chest / Pickup';
+  if (self === 'interact' && typeof _isStaleDefault === 'function' && _isStaleDefault(k)) return 'a moved action (its old key stays silent)';
+  { const _ab = (typeof player !== 'undefined' && player && player.actionBinds) || {}; for (const a in ACTION_KEY_DEFAULT) { if (self === 'cure' && a === 'dodge' && k === 'shift') continue;   /* Cure shares Shift with Dash by design - it can go home */
+    const cur = (_ab[a] !== undefined) ? _ab[a] : ACTION_KEY_DEFAULT[a]; if (cur && String(cur).toLowerCase() === k) return a; } }
   if (!allowSkill && ((typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[k]) || (typeof KEY_TO_SLOT_DEFAULT !== 'undefined' && KEY_TO_SLOT_DEFAULT[k]))) return 'a skill slot';
-  const ab = (typeof player !== 'undefined' && player && player.actionBinds) || ((typeof ACTION_KEY_DEFAULT !== 'undefined') ? ACTION_KEY_DEFAULT : {});
-  for (const a in ab) if (String(ab[a] || '').toLowerCase() === k) return a;
+  // v0.30.1163 keybinds - (the action check moved up: effective binds, and Cure may share Shift with Dash)
   return null;
 }
 (function _wireCureKeyPickup() {
@@ -61745,7 +61822,7 @@ function _lxKeyClaimedBy(k, allowSkill) {
     const k = (ev.key || '').toLowerCase();
     if (k === 'escape') { _cureKeyPickup = false; renderKbmReference(); if (typeof _kbRenderPotionBinds === 'function') _kbRenderPotionBinds(); ev.preventDefault(); ev.stopPropagation(); return; }
     // Don't let a skill-slot key double as the cure key (it would also cast).
-    const _cOwn = _lxKeyClaimedBy(k, false);   // v0.30.x — skill slots AND every other bound action
+    const _cOwn = _lxKeyClaimedBy(k, false, 'cure');   // v0.30.x — skill slots AND every other bound action
     if (_cOwn) {
       showToast('\u26A0 ' + _kbDisplay(k) + ' belongs to ' + _cOwn + ' — pick another for Cure', 'common');
       _cureKeyPickup = false; renderKbmReference(); if (typeof _kbRenderPotionBinds === 'function') _kbRenderPotionBinds();
@@ -61782,24 +61859,11 @@ function _lxKeyClaimedBy(k, allowSkill) {
        (skill dispatch wins on those) or PgUp/PgDn/Shift (precedence guards exist).
        Without this, a skill bound to e.g. '9' would also fire resetSave, and one
        bound to a remapped dodge key would never cast. */
-    if (k !== 'pageup' && k !== 'pagedown' && k !== 'shift' && !(typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT[k])) {
-      let _claimed = false;
-      const _ab = player.actionBinds || {};
-      for (const a in ACTION_KEY_DEFAULT) {
-        const cur = (_ab[a] !== undefined) ? _ab[a] : ACTION_KEY_DEFAULT[a];
-        if (cur === k) { _claimed = true; break; }
-      }
-      const _HUD = ['9','0','p','j','i','m','enter','1','2','3','4','5','6','7','8','t','e','o','h','`'];   // v0.30.1153 input-fixes - + E (quest guide), O (photo), H (MojiMon): hard-coded keys that also fired   // v0.27.22 — 'r' freed (Stage Editor locked); 't' stays claimed (co-op ping)
-      if (!_claimed && _HUD.indexOf(k) >= 0) _claimed = true;
-      if (!_claimed && typeof _isStaleDefault === 'function' && _isStaleDefault(k)) _claimed = true;   // v0.30.1153 input-fixes - a remapped action's old key is neutralised before skills are looked up: a skill there never cast
-      if (_claimed) {
-        if (typeof showToast === 'function') showToast('That key is used by a menu/action — pick another', 'common');
-        _skillPickup = null;
-        if (typeof renderKbmReference === 'function') renderKbmReference();
-        if (typeof renderKeybindKeyboard === 'function') renderKeybindKeyboard();
-        return;
-      }
-    }
+    // v0.30.1163 keybinds - the shared skill-key check (it also covers Shift / PgUp / PgDn once their own action has moved,
+    // the Cure key, and a moved action's old key); the Keyboard-tab drop now asks the same question
+    { const _why = _lxSkillKeyProblem(k);
+      if (_why) { if (typeof showToast === 'function') showToast('\u26A0 ' + _kbDisplay(k) + ' belongs to ' + _why + ' \u2014 pick another', 'common');
+        _skillPickup = null; if (typeof renderKbmReference === 'function') renderKbmReference(); if (typeof renderKeybindKeyboard === 'function') renderKeybindKeyboard(); return; } }
     if (!player.keybinds) player.keybinds = { ...KEY_TO_SLOT_DEFAULT };
     // v0.26.1020 — if the captured key already belongs to ANOTHER slot, SWAP
     // rather than clobber it (else that slot is left with no key = dead skill).
@@ -61831,7 +61895,7 @@ function _lxKeyClaimedBy(k, allowSkill) {
     if (!_interactKeyPickup) return;
     const k = (ev.key || '').toLowerCase();
     if (k === 'escape') { _interactKeyPickup = false; renderKbmReference(); ev.preventDefault(); ev.stopPropagation(); return; }
-    const _iOwn = _lxKeyClaimedBy(k, true);   // v0.30.x — validated nothing before; a skill key is still allowed on purpose
+    const _iOwn = _lxKeyClaimedBy(k, true, 'interact');   // v0.30.x — validated nothing before; a skill key is still allowed on purpose
     if (_iOwn) { showToast('\u26A0 ' + _kbDisplay(k) + ' belongs to ' + _iOwn + ' — pick another for Pickup', 'common'); _interactKeyPickup = false; renderKbmReference(); ev.preventDefault(); ev.stopPropagation(); return; }
     if (typeof player !== 'undefined' && player) player.interactKey = k;
     if (typeof saveState === 'function') saveState();
@@ -62200,6 +62264,8 @@ function onKeybindKeyClick(K) {
     showToast('That key isn\'t bindable for skills', 'common');
     return;
   }
+  { const _why = _lxSkillKeyProblem(lk);   // v0.30.1163 keybinds - the drop used to accept anything but Esc
+    if (_why) { showToast('\u26A0 ' + _kbDisplay(lk) + ' belongs to ' + _why + ' \u2014 pick another', 'common'); return; } }
   let srcKey = null;
   for (const k in player.keybinds) if (player.keybinds[k] === _kbPickup) { srcKey = k; break; }
   if (srcKey === lk) { _kbPickup = null; renderKeybindKeyboard(); return; }
@@ -111741,7 +111807,7 @@ window.addEventListener('keydown', (e) => {
   // capture listener then swallowed every Space and Enter until the hidden reveal ran out: a jump that did nothing,
   // and the spaces of a chat line typed just after talking to an NPC (measured: "hello team" posted as "helloteam").
   if (dlg.style.display === 'none') return;
-  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable)) return;
   const k = e.key;
   if (k === ' ' || k === 'Spacebar' || k === 'Enter') {
     if (typeof dlg._twSkip === 'function') dlg._twSkip();
@@ -128301,7 +128367,7 @@ function drawChests() {
       if (near) {
         const t = Math.sin(game.time * 0.15) * 2;
         // gold rim, cream ink and the gleam: the treasure prompt is the ornate one of the three
-        _lxPromptPill(ctx, sx + c.w/2, c.y - 20 + t, 'N', 'Open', { tint: '#ffcf6b', ink: '#ffe9b8', gleam: true });
+        _lxPromptPill(ctx, sx + c.w/2, c.y - 20 + t, _lxKeyLabel('talkNpc'), 'Open', { tint: '#ffcf6b', ink: '#ffe9b8', gleam: true });
       }
       // v0.26.278 — Puzzle piece marker for the sprite-path. Same
       // floating-glyph cue as the procedural-path branch below; keeps
@@ -128411,7 +128477,7 @@ function drawChests() {
       const near = Math.abs((player.x + player.w/2) - (c.x + c.w/2)) < 60;
       if (near) {
         const t = Math.sin(game.time * 0.15) * 2;
-        _lxPromptPill(ctx, sx + c.w/2, c.y - 16 + t, 'N', 'Open', { tint: '#ffcf6b', ink: '#ffe9b8', gleam: true });
+        _lxPromptPill(ctx, sx + c.w/2, c.y - 16 + t, _lxKeyLabel('talkNpc'), 'Open', { tint: '#ffcf6b', ink: '#ffe9b8', gleam: true });
       }
       // v0.26.278 — Puzzle piece marker. Floats a 🧩 glyph above the
       // chest's lid so the player can scan the Spire visually for
@@ -130587,7 +130653,7 @@ function _drawTalkPrompt(cx, y, npc, a) {
   // the bob and the breathe stay here - they are this prompt's character, not the pill's
   const t = Math.sin(game.time * 0.12) * 2.5;
   const breathe = 0.9 + Math.sin(game.time * 0.2) * 0.1;
-  _lxPromptPill(ctx, cx, y + t, 'N', 'Talk', {
+  _lxPromptPill(ctx, cx, y + t, _lxKeyLabel('talkNpc'), 'Talk', {
     tint: (npc && npc.color) || '#886bb8',
     alpha: Math.max(0, Math.min(1, a)) * breathe,
   });
@@ -157001,13 +157067,15 @@ function _sbMakeSlot(cls, key, icon, title) {
   if (title) slot.title = title;
   return slot;
 }
+// v0.30.1163 keybinds - the skill bar rebuilds when a key bind changes too (its labels froze until a class change or reload)
+function _lxSbSig() { let b = ''; try { for (const sl in SLOT_TO_KEY) b += sl + SLOT_TO_KEY[sl] + ','; } catch (e) {} const ab = (player && player.actionBinds) || {}; return `${player.cls}|${player.job}|${player.master}|${b}|${ab.block || ''}|${ab.characterK || ''}`; }
 function _sbBuild() {
   const bar = document.getElementById('skill-bar');
   bar.innerHTML = '';
   Object.keys(_sbSlots).forEach(k => delete _sbSlots[k]);
   // Defense slot (Block/Parry on A)
   const blockTitle = 'Block / Parry — press to block for 70% less damage (a fixed stance per class, then a cooldown); a hit in its first 300 ms is parried and stuns the attacker.';
-  const bs = _sbMakeSlot('skill-slot defense', 'A', _SB_SHIELD_ICON, blockTitle);
+  const bs = _sbMakeSlot('skill-slot defense', _lxKeyLabel('block'), _SB_SHIELD_ICON, blockTitle);   // v0.30.1163 keybinds - was always 'A'
   bar.appendChild(bs);
   _sbSlots.block = {
     root: bs,
@@ -157049,7 +157117,8 @@ function _sbBuild() {
       skill:  matched, skillId: matchId,
     };
   }
-  _sbBuiltFor = `${player.cls}|${player.job}|${player.master}`;
+  _sbBuiltFor = _lxSbSig();
+  if (typeof _lxRefreshBindLabels === 'function') _lxRefreshBindLabels();
 }
 // v0.26.x — Skill-bar ICONS. Replace the emoji glyph with an authored sprite
 // (Sprites/skills/<id>.webp, 2-3px black outline, game palette) when one has
@@ -157169,7 +157238,7 @@ function _applySkillIcon(el, id, emoji) {
 }
 const _SB_SLOT_IDS = ['d','s','a','e','w','q','c','x','b'];   // v0.30.296 perf
 function renderSkillBar() {
-  const signature = `${player.cls}|${player.job}|${player.master}`;
+  const signature = _lxSbSig();
   if (_sbBuiltFor !== signature) _sbBuild();
   // -- Defense slot (live) --
   const bs = _sbSlots.block;
@@ -161813,6 +161882,7 @@ renderSkillBar();
   if (!hint) return;
   hint.addEventListener('click', (e) => {
     e.preventDefault();
+    if (typeof toggleKeybindModal === 'function') { toggleKeybindModal(); return; }   // v0.30.1163 keybinds - a faked K press was dead once the panel's key moved
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k' }));
     window.dispatchEvent(new KeyboardEvent('keyup',   { key: 'k' }));
   });
@@ -175525,7 +175595,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     closeCharStudio();
   } else if (!e.repeat && typeof _isAction === 'function' && _isAction(e.key.toLowerCase(), 'wardrobe')) {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' || e.target.isContentEditable)) return;
     e.preventDefault();
     // v0.29.375 — Q no longer opens the Wardrobe. It takes you to the
     // Fashionista, who is now the only way in. (Closing with Q still works,
