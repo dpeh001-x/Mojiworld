@@ -15927,7 +15927,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1177';
+const GAME_VERSION = 'v0.30.1178';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -81068,6 +81068,14 @@ function _basicAttackGateMs() {
 // v0.29.543 — _mageUpWarp deleted. The vertical warp is a mode of the
 // blink skill again (C+↑ or double-tap ↑), on blink's own cooldown; a
 // separate G-anchored cooldown track no longer exists.
+// v0.30.1178 dash-hitbox - DOES THE ENEMY'S BODY REACH THE BAND. Flurry, Dimensional Warp, Rush's flame bursts and the Smoke
+// Dash cloud measured ONE point of the enemy (its centre or its top) against the player's, within 25-80 px. That only works
+// for enemies about the player's height: a boss on the player's floor has its centre 93+ px and its top 186+ px above the
+// player's, so the four skills passed straight through King Gloopaloo, Mooma or King Krook (and any monster taller than
+// ~95-185 px). Now the enemy's whole box must cross a vertical band [top, bot] (world y, down is +). Each caller passes the
+// old window narrowed by the player's own height, so a player-sized enemy is hit exactly as before and a small one on a
+// platform above or below is still out of reach, while a tall one standing on the player's floor is hit.
+function _lxBodyInBand(m, top, bot) { return m.y < bot && m.y + m.h > top; }
 function castSkill(id) {
   const s = SKILLS[id];
   if (!s) return;
@@ -85343,7 +85351,7 @@ const SKILL_FNS = {
         const cx = player.x + player.w/2, cy = player.y + player.h/2;
         for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
-          if (Math.abs((m.x + m.w/2) - cx) < _rushReach && Math.abs(m.y - player.y) < 60) {
+          if (Math.abs((m.x + m.w/2) - cx) < _rushReach && _lxBodyInBand(m, player.y + player.h - 60, player.y + 60)) {   // v0.30.1178 dash-hitbox - body in the band (a tall enemy's top is far above the player's)
             const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 1.5 * (_c ? getCritDmg() : 1)), _c, 'rush');   // v0.26.385; v0.26.1027 — apply crit DAMAGE (the flag alone did nothing)
           }
         }
@@ -85980,7 +85988,7 @@ const SKILL_FNS = {
         if (player.hp <= 0 || game.paused) return;
         for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
-          if (Math.abs((m.x + m.w/2) - cloudX) < 90 && Math.abs(m.y - player.y) < 80) {
+          if (Math.abs((m.x + m.w/2) - cloudX) < 90 && _lxBodyInBand(m, player.y + player.h - 80, player.y + 80)) {   // v0.30.1178 dash-hitbox - body in the band (a tall enemy's top is far above the player's)
             // v0.25.658 — P1 REBALANCE. Cloud per-tick 0.8 → 0.5.
             { const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 0.3 * (_c ? getCritDmg() : 1)), _c, 'smokeDash'); }   // v0.26.1033 — apply crit dmg (was flag-only)
           }
@@ -86028,7 +86036,8 @@ const SKILL_FNS = {
         if (m.currentHp <= 0) continue;
         const mid = m.x + m.w / 2;
         if (mid < lo - 16 || mid > hi + 16) continue;
-        if (Math.abs((m.y + m.h / 2) - (ay + by) / 2) > corridorH) continue;
+        // v0.30.1178 dash-hitbox - body in the band, not centre distance (a boss's centre sits 93+ px above the corridor line)
+        if (!_lxBodyInBand(m, (ay + by) / 2 - corridorH + player.h / 2, (ay + by) / 2 + corridorH - player.h / 2)) continue;
         // v0.25.218 — Damage tier reduced from 1.6 (guaranteed crit) to
         // 0.85 (normal crit roll) to balance the new 1 s cooldown. Net
         // DPS down ~2x but uptime up dramatically — flurry now reads as
@@ -86782,7 +86791,8 @@ const SKILL_FNS = {
       if (!m || m.currentHp <= 0) continue;
       const mcx = m.x + m.w/2, mcy = m.y + m.h/2;
       if (mcx < lo || mcx > hi) continue;
-      if (mcy < top || mcy > bot) continue;
+      // v0.30.1178 dash-hitbox - body in the band, not centre in the rect (any monster over ~94 px tall was never hit)
+      if (!_lxBodyInBand(m, top + player.h / 2, bot - player.h / 2)) continue;
       const _c = rollCrit(); hitMonster(m, Math.floor(_dmg * (_c ? getCritDmg() : 1)), _c, 'blink');   // v0.26.1027 — apply crit damage
       _hits++;
     }
