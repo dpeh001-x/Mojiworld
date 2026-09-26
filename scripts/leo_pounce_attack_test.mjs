@@ -214,8 +214,10 @@ const pct = (v) => v == null ? null : (v / r.maxHp * 100).toFixed(1) + '%';
 ok('the harness geometry fits inside the arena (self-check)',
   r.geom && r.geom.A > 0 && r.geom.BOSSX + r.geom.bossW < r.geom.WW && r.geom.apartPx > 160,
   r.geom);
+// v0.30.388 balance: every zodiac boss deals 25% less damage - the Sun Pounce went 0.6 -> 0.45 of max HP (still the
+// heaviest single zodiac hit short of Taur's near-execute). This checked the pre-balance 0.5 floor.
 ok('the tunables are live: two seconds of lag, a real radius, high damage',
-  r.tune.lag === 120 && r.tune.R >= 100 && r.tune.frac >= 0.5,
+  r.tune.lag === 120 && r.tune.R >= 100 && r.tune.frac >= 0.4,
   { lagFrames: r.tune.lag, seconds: r.tune.lag / 60, radiusPx: r.tune.R, fracOfMaxHp: r.tune.frac });
 ok('the position trail holds more than two seconds of history',
   r.trail && r.trail.n > 120 && r.trail.span >= 120, r.trail);

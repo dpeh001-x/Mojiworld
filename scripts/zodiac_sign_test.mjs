@@ -96,14 +96,23 @@ const sig = await page.evaluate(() => {
   if (!npc) return { err: 'no amnesiac NPC' };
   player.x = npc.x - 10; player.y = 400; game.camera.x = Math.max(0, npc.x - 400);
   let arcs = 0, strokes = 0, fills = 0, grads = 0;
+  // v0.30.x — the CELESTIAL SIGIL paints its static layers ONCE into offscreen bakes (_lxSigilBake, _LX_SIGIL_BAKES) and
+  // blits them with the live rotation and pulse - by design, fewer canvas ops per frame than the old path-drawn star.
+  // Counting only this frame's ctx therefore measured the blit, not the mark. Drop the bakes so this draw repaints
+  // them, and count the strokes that land ON the sigil's bake canvases as well.
+  if (typeof _LX_SIGIL_BAKES === 'object' && _LX_SIGIL_BAKES) for (const k in _LX_SIGIL_BAKES) delete _LX_SIGIL_BAKES[k];
+  const _P = CanvasRenderingContext2D.prototype, _oPS = _P.stroke, _byCv = new Map();
+  _P.stroke = function (...a) { if (this !== ctx) _byCv.set(this.canvas, (_byCv.get(this.canvas) || 0) + 1); return _oPS.apply(this, a); };
   const oA = ctx.arc, oS = ctx.stroke, oF = ctx.fill, oG = ctx.createLinearGradient;
   ctx.arc = function (...a) { arcs++; return oA.apply(this, a); };
   ctx.stroke = function (...a) { strokes++; return oS.apply(this, a); };
   ctx.fill = function (...a) { fills++; return oF.apply(this, a); };
   ctx.createLinearGradient = function (...a) { grads++; return oG.apply(this, a); };
   try { drawNPCs(); } catch (e) { return { err: String(e).slice(0, 140) }; }
-  finally { ctx.arc = oA; ctx.stroke = oS; ctx.fill = oF; ctx.createLinearGradient = oG; }
-  return { arcs, strokes, fills, grads };
+  finally { ctx.arc = oA; ctx.stroke = oS; ctx.fill = oF; ctx.createLinearGradient = oG; _P.stroke = _oPS; }
+  let bakeStrokes = 0, bakes = 0;
+  if (typeof _LX_SIGIL_BAKES === 'object' && _LX_SIGIL_BAKES) for (const k in _LX_SIGIL_BAKES) { bakes++; bakeStrokes += _byCv.get(_LX_SIGIL_BAKES[k]) || 0; }
+  return { arcs, strokes, fills, grads, bakes, bakeStrokes };
 });
 
 ok('the plaque bakes once (cached canvas)', r.same, { same: r.same });
@@ -131,8 +140,8 @@ ok('the plaque sits ABOVE the sigil',
 // failure that was purely the test picking the wrong string.
 ok('the old degenerate 3-vertex "8-point star" loop is gone',
   !src.includes('const rOuter = 16 * pulse;'), '');
-ok('the sigil draws many stroked passes (rim, inlay, ring, ray burst)',
-  !sig.err && sig.strokes >= 12, sig.err || sig);
+ok('the sigil draws many stroked passes (rim, inlay, ring, ray burst) - in its one-time bake plus the live frame',
+  !sig.err && sig.bakes > 0 && (sig.bakeStrokes + sig.strokes) >= 12, sig.err || sig);
 
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));
