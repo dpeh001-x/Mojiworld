@@ -22,7 +22,10 @@ await new Promise((r) => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
-await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'load', timeout: 60000 });
+// v0.30.x — 'load' waits for every image, and a cold localhost page queues thousands of parse-time requests (no image
+// hold off the web deploy): the run timed out at 60 s before a single check. Wait for what this test drives instead.
+await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.waitForFunction(() => typeof openNPC === 'function' && typeof loadMap === 'function' && !!document.getElementById('hero-name-input'), null, { timeout: 180000 });
 await page.waitForTimeout(9000);
 await page.evaluate(() => { const lo = document.getElementById('loading-overlay'); if (lo) lo.classList.add('fade'); });
 await page.fill('#hero-name-input', 'Lore');
@@ -46,12 +49,16 @@ const r = await page.evaluate(async () => {
 
   // open an NPC by role and click the option whose label matches
   // the dialog reveals text progressively, so read only once it stops growing
-  const settled = async (ms = 4000) => {
+  // v0.30.x — the typewriter HOLDS on punctuation (a full stop, question or exclamation 210 ms, a line break 190), so three
+  // unchanged reads 60 ms apart (180 ms) called Arlen's line finished at "Ha!". Stable only counts once the reveal is
+  // over - #dialog carries .typing while it runs - and long lines get the time they take.
+  const typing = () => { const d = document.getElementById('dialog'); return !!(d && d.classList.contains('typing')); };
+  const settled = async (ms = 9000) => {
     const el = () => document.getElementById('dialog-text');
     let last = '', stable = 0;
     for (let i = 0; i < ms / 60; i++) {
       const now = (el() || {}).textContent || '';
-      if (now === last && now.length) { if (++stable >= 3) break; } else { stable = 0; last = now; }
+      if (now === last && now.length && !typing()) { if (++stable >= 3) break; } else { stable = 0; last = now; }
       await wait(60);
     }
     return (el() || {}).textContent || '';

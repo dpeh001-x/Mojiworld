@@ -14,7 +14,10 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+import { fileURLToPath } from 'node:url';
+// v0.30.x — the tree this test lives in. It hardcoded the SHARED working copy, which grades whatever build that checkout
+// holds (routinely dozens of commits behind, with other sessions' edits in it). MOJI_SERVE_ROOT overrides.
+const ROOT = (process.env.MOJI_SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')).replace(/\\/g, '/');
 const require = createRequire(import.meta.url);
 const { chromium } = require(ROOT + '/node_modules/playwright-core');
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
@@ -92,10 +95,14 @@ try {
     };
     const states = {};
     const g0 = game.time | 0, t0 = performance.now();
-    let frames = 0;
-    while (((game.time | 0) - g0) < 600 && performance.now() - t0 < 40000) {
+    let frames = 0, pausedSamples = 0;   // v0.30.x — game.time counts while paused, so "frames ran" alone cannot see a pause
+    // v0.30.x — 1800 frames, not 600. His AI is random and so is this driver's repositioning; measured over 3600 frames
+    // the walk share per 600-frame window ran 19-33% (and one test window 51.6%), attack 21-60%, so a single short
+    // window put both thresholds inside the noise. Three times the sample, same claims.
+    while (((game.time | 0) - g0) < 1800 && performance.now() - t0 < 150000) {
       await sleep(16);
       frames++;
+      if (game.paused) pausedSamples++;
       const st = m.patternState || 'idle';
       states[st] = (states[st] || 0) + 1;
       if (Math.random() < 0.25) { player.x = m.x + m.w / 2 + (Math.random() < 0.5 ? -180 : 180); }   // keep him engaged
@@ -103,7 +110,7 @@ try {
     for (const k in orig) if (orig[k]) window[k] = orig[k];
     out.counts = counts;
     out.states = states;
-    out.samples = frames;
+    out.samples = frames; out.pausedSamples = pausedSamples;
     out.framesRan = (game.time | 0) - g0;
     out.tables = {
       atkWhileMoving: (typeof _LX_ATK_WHILE_MOVING !== 'undefined') ? Array.from(_LX_ATK_WHILE_MOVING) : null,
@@ -121,10 +128,10 @@ try {
   const C = R.counts || {}, St = R.states || {};
   const total = (C.idle | 0) + (C.walk | 0) + (C.attack | 0) + (C.weave | 0) + (C.duck | 0);
   const pct = (n) => total ? +(((n | 0) / total) * 100).toFixed(1) : 0;
-  console.log('  map ' + R.map + ' | frames ' + R.framesRan + ' | draws ' + JSON.stringify(C));
+  console.log('  map ' + R.map + ' | frames ' + R.framesRan + ' | paused ' + R.pausedSamples + '/' + R.samples + ' samples | draws ' + JSON.stringify(C));
   console.log('  states ' + JSON.stringify(St) + ' | tables ' + JSON.stringify(R.tables));
   console.log('  shares: walk ' + pct(C.walk) + '%  attack ' + pct(C.attack) + '%  idle ' + pct(C.idle) + '%  weave ' + pct(C.weave) + '%');
-  ok('FRAMES RAN: the sim actually stepped', (R.framesRan | 0) > 500, R.framesRan + ' frames');
+  ok('FRAMES RAN: the sim actually stepped', (R.framesRan | 0) > 1500, R.framesRan + ' frames');
   ok('HIS ATTACK ART IS USED: at least a fifth of his draws', pct(C.attack) >= 20, pct(C.attack) + '% of ' + total + ' draws (previous build: 5%)');
   ok('HIS DASH LEANS: the weave set is drawn at all', (C.weave | 0) > 0, (C.weave | 0) + ' weave draws (previous build: 0)');
   ok('WALK IS NO LONGER THE DEFAULT: at most half his draws', pct(C.walk) <= 50, pct(C.walk) + '% walk (previous build: 58%)');
