@@ -15753,7 +15753,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1109';
+const GAME_VERSION = 'v0.30.1110';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -15964,6 +15964,14 @@ canvas.addEventListener('click', function _wmCanvasClickTalk(ev) {
     }
   }
   if (bestNpc && typeof openNPC === 'function') {
+    // v0.30.1110 - a click on an NPC while a card is up. A confirm card is a pending decision (Boss Arena Ahead, Leave the
+    // fight?), so the click is ignored; the NPC you are already talking to keeps the conversation; any other dialog is
+    // closed properly first, so its sub-page and menus reset instead of carrying into the next conversation.
+    const _dOpen = document.getElementById('dialog');
+    if (_dOpen && _dOpen.style.display === 'block') {
+      if (_dOpen._lxConfirm || game._activeNpc === bestNpc) return;
+      closeDialog();
+    }
     openNPC(bestNpc);
   }
 });
@@ -58767,6 +58775,9 @@ function _injectGiverQuests(npc, opts) {
   // rows at the TOP level only, so the Shop/Improve/Craft pages stay clean.
   // Same for the Amnesiac's Talk/Train/Trials submenus (game._amnesiacMenu).
   if (typeof game !== 'undefined' && game && (game._brokMenu || game._amnesiacMenu)) return;
+  // v0.30.1110 - nor on the Amnesiac's story and reset pages (stage 1+, the saga view): an Accept button under
+  // "this will erase everything" read as part of the warning.
+  if (npc.role === 'amnesiac' && typeof game !== 'undefined' && game && ((game._amnesiacStage || 0) > 0 || game._amnesiacSagaView)) return;
   if (typeof _ensureQuests === 'function') _ensureQuests();
   const Q = player.quests || {};
   const active = Q.active || {}, completed = Q.completed || {}, unlocked = Q.unlocked || {};
@@ -71405,7 +71416,7 @@ function loadMap(id, entryX, entryY) {
   try {
     if (typeof game !== 'undefined' && game && game._activeNpc) {
       if (typeof closeDialog === 'function') closeDialog();
-      game._activeNpc = null; game._activeNpcSticky = false;
+      game._activeNpc = null;
     }
   } catch (e) {}
   // v0.26.946 — warm this map's frames as the transition starts (no await;
@@ -75424,9 +75435,7 @@ function updatePlayer(dt) {
   // position the player is dashing FROM this frame, not after the step.
   try { _updateDashTrail(dt); } catch (e) {}
   const k = game.keys;
-  // v0.25.243 (X3) — auto-dismiss NPC dialog when the player walks
-  // > 110 px from the NPC. Called every frame; cheap (one number compare).
-  if (game._activeNpc) _checkDialogWalkAway();
+  // v0.30.1110 - the v0.25.243 walk-away auto-close is gone: an open dialog pauses the game, so this never ran.
   if (player.dropTimer > 0) { player.dropTimer -= dt; player.dropThrough = true; }
   else player.dropThrough = false;
   // v0.25.793 — Low-HP potion hint. Fires ONCE per save (via _firstTimeTip's
@@ -108908,6 +108917,7 @@ function openNPC(npc) {
     }
   }
   _lxDialogTabs(null);   // v0.30.484 — cleared on every open so a strip cannot leak between NPCs
+  if (dlg) dlg._lxConfirm = false;   // v0.30.1110 an NPC conversation, not a confirm card
   document.getElementById('dialog-name').textContent = npc.name;
   // v0.25.243 (X3) — track which NPC the dialog belongs to so the
   // walk-away auto-dismiss in updatePlayer can compare distances.
@@ -111294,6 +111304,7 @@ function _arenaBossSpriteUrl(md) {
 function _openConfirmDialog(title, body, yesText, yesCb, noText, noCb, opts) {
   const dlg = document.getElementById('dialog');
   if (!dlg) { if (typeof yesCb === 'function') yesCb(); return; }
+  dlg._lxConfirm = true;   // v0.30.1110 a pending decision: a click on an NPC in the world must not replace it
   // v0.29.380 — boss-arena silhouette. The sprite is applied as a CSS MASK
   // so the shade is drawn in the panel's own gradient, not the boss's
   // colours (see the .boss-arena rules). Cleared in closeDialog.
@@ -111350,6 +111361,10 @@ function _lxResetDialogStages() {
   game._amnesiacSagaView = false; game._sageStage = 0; game._caravanStage = 0;
   game._expInfo = null; game._expAckNext = null;   // v0.30.969 Bravo's info / loot-rule sub-pages, cleared by her 'Maybe later' until it went
   game._npcQuestMenu = null;   // v0.30.982 the folded quest list's sub-page
+  // v0.30.1110 - the card's own state as well, so Esc / N / death (closeAllModals) leave it as clean as Leave does: the
+  // boss-arena silhouette used to ride onto the next NPC's card, and the active-NPC pointer outlived the conversation.
+  try { const _d = document.getElementById('dialog'); if (_d) { _d.classList.remove('boss-arena'); _d.style.removeProperty('--boss-shade'); _d._lxConfirm = false; } } catch (e) {}
+  game._activeNpc = null;
 }
 function closeDialog() {
   // v0.29.380 — drop the boss-arena silhouette so the next NPC chat opens
@@ -111392,27 +111407,8 @@ function closeDialog() {
   // end here, and the world started running behind a full-screen journal.
   game.paused = (typeof _anyOtherModalOpen === 'function') ? !!_anyOtherModalOpen() : false;
   game._activeNpc = null;
-  game._activeNpcSticky = false;   // v0.25.479 — clear click/tap-open flag
 }
 
-// v0.25.243 (X3) — auto-dismiss the NPC dialog if the player walks > 110 px
-// from the active NPC. Called from the player update loop.
-function _checkDialogWalkAway() {
-  const npc = game._activeNpc;
-  if (!npc) return;
-  const dlg = document.getElementById('dialog');
-  if (!dlg || dlg.style.display === 'none') return;
-  // v0.25.479 — click/tap-opened dialogs are "sticky": the user explicitly
-  // chose to talk, possibly from across the map. Don't yank the dialog away
-  // for distance. They can close it via X button or ESC.
-  if (game._activeNpcSticky) return;
-  // NPCs store an x; use it directly. Some NPCs may be on a different
-  // map id (rare) — if so just close.
-  const npcX = (typeof npc.x === 'number') ? npc.x : null;
-  if (npcX === null) { closeDialog(); return; }
-  const playerCenter = player.x + player.w / 2;
-  if (Math.abs(playerCenter - npcX) > 110) closeDialog();
-}
 
 // =========================================================================
 // SHOPS
@@ -159261,9 +159257,6 @@ window.addEventListener('pointerdown', () => audio.init(), { once: true });
     const npc = _findNpcAt(w.worldX, w.worldY, padX);
     if (!npc) return false;
     openNPC(npc);
-    // Mark this dialog as click/tap-opened so the walk-away auto-close
-    // doesn't immediately yank it shut when the player is far away.
-    game._activeNpcSticky = true;
     return true;
   }
 
