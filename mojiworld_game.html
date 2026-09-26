@@ -15876,7 +15876,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1151';
+const GAME_VERSION = 'v0.30.1152';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -56558,6 +56558,12 @@ function _lxPqStageCount(qid) {
 // in the ALL-FOUR-DONE branch, so mid-chain there was no way back to Stage 1.
 // Resume stays the default everywhere (that linear flow was itself a user
 // request, v0.26.298); this just stops it being the ONLY door.
+// v0.30.1152 pq-fixes - Milo's answer when a "Begin Stage" is refused (below the stage's level, e.g. after an ascension)
+function _lxPqBeginRefused(qid) {
+  const q = (typeof QUESTS !== 'undefined') && QUESTS[qid];
+  if (typeof closeDialog === 'function') { try { closeDialog(); } catch (e) {} }
+  if (typeof showToast === 'function') showToast(q && (player.level | 0) < (q.levelReq | 0) ? '\uD83C\uDFAB Milo checks your papers: ' + (q.name || 'this stage') + ' needs Lv ' + q.levelReq + '.' : '\uD83C\uDFAB Milo can\u2019t start that stage for you yet.', 'rare');
+}
 function _lxPqRestartChain() {
   // v0.30.934 this wiped the five completions, then called acceptQuest - which refuses below the Lv 29 gate - and
   // loaded the lobby anyway. After an ascension (prestige keeps quests.completed and sets you back to Lv 1) picking
@@ -56581,6 +56587,7 @@ function _lxPqRestartChain() {
     for (const _id of _ids) {
       if (player.quests.completed) delete player.quests.completed[_id];
       if (player.quests.active)    delete player.quests.active[_id];
+      if (player._qBank) delete player._qBank[_id];   // v0.30.1152 pq-fixes - a fresh run starts fresh (it restored last run's "10 already counted")
     }
     // v0.26.313 — clear unlocked flags so the chain unlock state restarts from
     // scratch; tickQuestUnlocks re-adds each stage as its prereq completes.
@@ -59342,6 +59349,9 @@ function _questGuidance(id, q, a) {
       for (const o of q.objectives) if ((ap[o.target] || 0) < o.count) wanted.add(o.target);
     } else if (q.target) wanted.add(q.target);
     if (wanted.size) {
+      // v0.30.1152 pq-fixes - a Ticket Rush stage counts only on its own map (_LX_PQ_STAGE_MAP): elsewhere, name that map, not the
+      // first map that spawns the target (Stage 3's Ticket Mechs also live in the Stage 1 lobby, where they count for nothing)
+      { const _stg = (typeof _LX_PQ_STAGE_MAP !== 'undefined') && _LX_PQ_STAGE_MAP[id]; if (_stg && _stg !== game.currentMap) return { icon: '→', text: _qtMapName(_stg) }; }
       let best = null, bd = Infinity;
       for (const m of (game.monsters || [])) {
         if (!m || m.hp <= 0 || m._dying || !wanted.has(m.type)) continue;
@@ -59494,6 +59504,8 @@ function _qnavDest(qid) {
   // `target` that no map spawns; the objective list is the real answer, so try
   // each in order and point at the first leg the player can actually reach.
   const huntDest = () => {
+    { const _stg = (typeof _LX_PQ_STAGE_MAP !== 'undefined') && _LX_PQ_STAGE_MAP[qid];   // v0.30.1152 pq-fixes - the stage's own map, reachable or not
+      if (_stg) { const hit = pick([_stg], (m) => m); if (hit) return { kind: 'hunt', qid, who: q.target, map: hit.c, x: null, y: null, hops: hopsOf(hit.d), verb: 'Hunt' }; } }
     const cands = [q.target, ...((q.objectives || []).map((o) => o && o.target))];
     for (const t of cands) {
       const maps = t && _LX_QNAV.mob[t];
@@ -60592,7 +60604,7 @@ function acceptQuest(id, _lxQuiet) {   // v0.30.902 _lxQuiet: the caller announc
   // v0.26.1029 — Spire chest pieces live outside quest progress; a Journal
   // abandon+re-accept left them stale so only the uncollected chests spawned and
   // 4/4 was unreachable (whole PQ soft-locked). Reset on any accept of the Spire.
-  if (id === 'q_pq_spire') player._pqSpirePieces = {};
+  if (id === 'q_pq_spire' && !(player._qBank && player._qBank.q_pq_spire)) player._pqSpirePieces = {};   // v0.30.1152 pq-fixes - a banked Spire being resumed keeps its pieces (the count, pin and summit exit all read them)
   player.quests.active[id] = { progress: 0 };
   // v0.29.877 — resume, don't restart (per user: abandoning "and then have to
   // reset"). If this quest was abandoned with progress on it, put that back.
@@ -110761,8 +110773,7 @@ So… do you need a lift?`;
       } else if (_spireUnlocked && !_spireDone && !_spireActive) {
         // v0.26.309 — Spire is now Stage 2 (was Stage 3).
         opts.push({ t:'🧩 Begin Stage 2 — Clockwork Spire', cb:() => {
-          if (typeof acceptQuest === 'function') acceptQuest('q_pq_spire');
-          player._pqSpirePieces = {};
+          if (typeof acceptQuest === 'function' && !acceptQuest('q_pq_spire')) { _lxPqBeginRefused('q_pq_spire'); return; }   // v0.30.1152 pq-fixes - refused (level): don't warp into a stage that never started
           closeDialog();
           if (typeof showToast === 'function') showToast('🧩 STAGE 2 — Climb the Spire, find 4 pieces.', 'epic');
           if (typeof loadMap === 'function') loadMap('clockworkSpire', 60);
@@ -110774,7 +110785,7 @@ So… do you need a lift?`;
         // dialog did): finish the Spire, talk to Milo in any PQ map, and the
         // only options were ride-home/stay. Same offer as town-side.
         opts.push({ t:'🚃 Begin Stage 3 — Carriage of Ascension', cb:() => {
-          if (typeof acceptQuest === 'function') acceptQuest('q_pq_carriage');
+          if (typeof acceptQuest === 'function' && !acceptQuest('q_pq_carriage')) { _lxPqBeginRefused('q_pq_carriage'); return; }   // v0.30.1152 pq-fixes - refused (level): don't warp into a stage that never started
           closeDialog();
           if (typeof showToast === 'function') showToast('🚃 STAGE 3 — Carriage of Ascension. Punch every last stowaway.', 'epic');
           if (typeof loadMap === 'function') loadMap('tower', 380);
@@ -110787,7 +110798,7 @@ So… do you need a lift?`;
         }
       } else if (_finaleUnlocked && !_finaleActive && !(player.quests && player.quests.completed && player.quests.completed.q_pq_finale)) {
         opts.push({ t:'🎩 Begin Stage 4 — Master Conductor duel', cb:() => {
-          if (typeof acceptQuest === 'function') acceptQuest('q_pq_finale');
+          if (typeof acceptQuest === 'function' && !acceptQuest('q_pq_finale')) { _lxPqBeginRefused('q_pq_finale'); return; }   // v0.30.1152 pq-fixes - refused (level): don't warp into a stage that never started
           player._pqFinaleBossPending = true;
           closeDialog();
           if (typeof showToast === 'function') showToast('🎩 STAGE 4 — Master Conductor awaits in the Express arena.', 'legendary');
@@ -110943,8 +110954,7 @@ So… do you need a lift?`;
         // Stage 2 (was Stage 3) — Spire unlock after Lobby done.
         text = 'Stage 1 cleared. Next is the Clockwork Spire — a vertical climb for four sealed puzzle pieces. The summit portal takes you straight to the Carriage for Stage 3.';
         opts.push({ t:'🧩 Begin Stage 2 — Clockwork Spire', cb:() => {
-          if (typeof acceptQuest === 'function') acceptQuest(_spireId);
-          player._pqSpirePieces = {};
+          if (typeof acceptQuest === 'function' && !acceptQuest(_spireId)) { _lxPqBeginRefused(_spireId); return; }   // v0.30.1152 pq-fixes - refused (level): don't warp into a stage that never started
           closeDialog();
           if (typeof showToast === 'function') showToast('🧩 STAGE 2 — Climb the Spire, find 4 pieces.', 'epic');
           if (typeof loadMap === 'function') loadMap('clockworkSpire', 60);
@@ -110954,7 +110964,7 @@ So… do you need a lift?`;
         // v0.26.309 — Stage 3 (NEW) — Carriage unlock after Spire done.
         text = '*Milo claps his hands.*\n\nSpire cleared, all four pieces recovered. Stage 3 is the Carriage of Ascension — ' + _lxPqStageCount('q_pq_carriage') + ' last stowaway Ticket Mechs stand between you and the Master Conductor duel. A brisk skirmish.';
         opts.push({ t:'🚃 Begin Stage 3 — Carriage of Ascension', cb:() => {
-          if (typeof acceptQuest === 'function') acceptQuest(_carriageId);
+          if (typeof acceptQuest === 'function' && !acceptQuest(_carriageId)) { _lxPqBeginRefused(_carriageId); return; }   // v0.30.1152 pq-fixes - refused (level): don't warp into a stage that never started
           closeDialog();
           if (typeof showToast === 'function') showToast('🚃 STAGE 3 — Carriage of Ascension. Defeat ' + _lxPqStageCount('q_pq_carriage') + ' Ticket Mechs.', 'epic');
           if (typeof loadMap === 'function') loadMap('tower', 380);
@@ -110964,7 +110974,7 @@ So… do you need a lift?`;
         // Stage 4 unlocked, awaiting accept. (Same as before — last stage.)
         text = 'Stages 1-3 cleared. The Master Conductor waits on the Endless Express. He scales to your strength — a fair fight. Beat him to graduate the Rush.';
         opts.push({ t:'🎩 Begin Stage 4 — Master Conductor duel', cb:() => {
-          if (typeof acceptQuest === 'function') acceptQuest(_finaleId);
+          if (typeof acceptQuest === 'function' && !acceptQuest(_finaleId)) { _lxPqBeginRefused(_finaleId); return; }   // v0.30.1152 pq-fixes - refused (level): don't warp into a stage that never started
           player._pqFinaleBossPending = true;
           closeDialog();
           if (typeof showToast === 'function') showToast('🎩 STAGE 4 — Master Conductor awaits in the Express arena.', 'legendary');
