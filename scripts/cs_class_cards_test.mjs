@@ -50,6 +50,8 @@ const r = await page.evaluate(() => {
         emoji: EMOJI.test(c.textContent) || /→/.test(c.querySelector('.cls-jobs').textContent),
         border: cs.borderTopWidth + ' ' + cs.borderTopColor,
         ring: /rgba\(4, 2, 12, 0\.55\) 0px 0px 0px 1px/.test(cs.boxShadow),
+        // v0.30.1161 the pop punk frame: an ink edge and a hard slab in the class's own colour
+        slab: (() => { const k = c.style.getPropertyValue('--cls-color').trim(); const probe = document.createElement('i'); probe.style.color = k; document.body.appendChild(probe); const rgb = getComputedStyle(probe).color; probe.remove(); return !!k && cs.boxShadow.includes(rgb); })(),
         perks: c.querySelectorAll('.cls-perk').length,
         h: c.getBoundingClientRect().height,
       };
@@ -68,7 +70,8 @@ const checks = [
   ['every job is named with its own decoded crest', C.every((c) => c.jobs >= 2 && c.jobsDecoded === c.jobs), C.map((c) => c.jobsDecoded + '/' + c.jobs).join(' ')],
   ['no emoji and no text arrow left on any card', C.every((c) => !c.emoji)],
   ['both perk plates survive the rebuild', C.every((c) => c.perks === 2)],
-  ['the frame is the gold hairline with the dark ring', C.every((c) => /^1px rgba\(255, 220, 140/.test(c.border) && c.ring), C[0] && C[0].border],
+  // v0.30.1161 per user ("make it more POP PUNK style"): was the gold hairline with the dark ring
+  ['the frame is a comic panel: an ink edge and a hard slab in the class colour', C.every((c) => /^2(\.5)?px rgb\(11, 10, 14\)/.test(c.border) && c.slab), C[0] && C[0].border],
   ['the four cards are the same height', Math.max(...C.map((c) => c.h)) - Math.min(...C.map((c) => c.h)) < 2, C.map((c) => Math.round(c.h)).join('/')],
   ['the cards clear the page nav (no clipping inside the modal\'s height cap)', r.cardsBottom <= r.navTop, `cards end ${Math.round(r.cardsBottom)}, nav starts ${Math.round(r.navTop)}`],
   ['the page nav sits inside the modal (overflow is hidden there)', r.navBottom <= r.modalBottom + 1, `nav ends ${Math.round(r.navBottom)}, modal ends ${Math.round(r.modalBottom)}`],

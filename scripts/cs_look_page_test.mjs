@@ -76,9 +76,10 @@ await browser.close(); server.kill();
 console.log('fonts:', JSON.stringify(r.fonts));
 console.log('plates:', JSON.stringify(r.plates), 'counts', JSON.stringify(r.counts), 'expected', JSON.stringify(r.expected));
 checks.push(['Cinzel and Cormorant Garamond are loaded from the bundled files', r.fonts.cinzel && r.fonts.cormorant]);
-checks.push(['title, section labels, field labels, name field, nav buttons and class names are Cinzel', ['title', 'label', 'field', 'nameInput', 'nav', 'clsName'].every((k) => r.fonts[k] === 'Cinzel'), JSON.stringify(r.fonts)]);
-checks.push(['the preamble and Guguma\'s line are Cormorant Garamond italic', r.fonts.preamble === 'Cormorant Garamond' && r.fonts.gugumaLine === 'Cormorant Garamond']);
-checks.push(['dropdown text stays a clean sans for reading', /Calibri|Segoe/.test(r.fonts.trigger), r.fonts.trigger]);
+// v0.30.1161 per user ("make it more POP PUNK style"): the creator is set in the pop pair's Nunito throughout (was Cinzel / Cormorant / Calibri)
+checks.push(['title, section labels, field labels, name field, nav buttons and class names are Nunito', ['title', 'label', 'field', 'nameInput', 'nav', 'clsName'].every((k) => r.fonts[k] === 'Nunito'), JSON.stringify(r.fonts)]);
+checks.push(['the preamble and Guguma\'s line are Nunito too, no serif', r.fonts.preamble === 'Nunito' && r.fonts.gugumaLine === 'Nunito', JSON.stringify([r.fonts.preamble, r.fonts.gugumaLine])]);
+checks.push(['dropdown text stays a clean sans for reading', /Nunito|Calibri|Segoe/.test(r.fonts.trigger), r.fonts.trigger]);
 checks.push(['each of the four plates carries its own accent colour', r.plates.length === 4 && r.plates.every((p) => /^#|^rgb/.test(p.pk)) && new Set(r.plates.map((p) => p.pk)).size === 4]);
 checks.push(['each label icon sits on a lit disc', r.plates.every((p) => p.disc)]);
 checks.push(['the count chips name how many styles / tones each plate holds', r.counts.every((c, i) => c && c.startsWith(String(r.expected[i]))), r.counts.join(' | ')]);
