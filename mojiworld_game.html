@@ -15814,7 +15814,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1118';
+const GAME_VERSION = 'v0.30.1119';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -29674,6 +29674,9 @@ const QUESTS = {
     rewards: { mojicoins: 37000, exp: 32159454, gearChance: 1.0, gearSlot: 'accessory', gearTier: 5, dawnFragment: 'frag_vigil', potions: { hp_l: 6, full: 2 } },  // v0.29.90 — boss-fight reward lift (was 23500/12000)
   },
 };
+// v0.30.1119 - a talk quest's count is its list: every progress reader falls back to count || 1, so one conversation of
+// three read 1/1 and "ready to turn in" while two people were still waiting.
+for (const _tq of Object.values(QUESTS)) if (_tq && _tq.kind === 'talk' && Array.isArray(_tq.talkTo) && _tq.count == null) _tq.count = _tq.talkTo.length;
 
 // =========================================================================
 // v0.25.824 — BESTIARY QUESTS. One auto-generated kill quest per monster
@@ -59248,6 +59251,8 @@ function _questGuidance(id, q, a) {
         if (d < bd) { bd = d; best = m; }
       }
       if (best) return { icon: _qtDirGlyph(best.x), text: 'Target nearby' };
+      const _via = _lxWarpVia(q);   // v0.30.1119 the Mirror's room has no door: see your instructor
+      if (_via) return { icon: '\u2192', text: 'Warp with ' + _via };
       for (const t of wanted) {
         const mid = _qtMobMap[t];
         if (mid && mid !== game.currentMap) return { icon: '→', text: _qtMapName(mid) };
@@ -59267,6 +59272,7 @@ function _questGuidance(id, q, a) {
   }
   // 3. Visit — name the destination map.
   if (q.kind === 'visit' && q.target) {
+    if (!MAPS[q.target]) return null;   // v0.30.1119 a gathered piece, not a place: printed the raw id ('pq_piece')
     if (q.target === game.currentMap) return { icon: '📍', text: 'You are here' };
     return { icon: '→', text: _qtMapName(q.target) };
   }
@@ -59370,13 +59376,17 @@ function _qnavDest(qid) {
   };
   const hopsOf = (d) => (Number.isFinite(d) ? d : null);
 
-  const who = q.giver || q.npc;
-  const spots = who && _LX_QNAV.npc[who];
-  const npcDest = () => {
-    if (!spots || !spots.length) return null;
-    const hit = pick(spots, (s) => s.map);
-    return hit ? { kind: 'npc', qid, who, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role, ready } : null;
+  // v0.30.1119 - who to walk to, and the verb the row prints (d.verb): see the return below.
+  const _cls = (typeof player !== 'undefined' && player) ? player.cls : null;
+  const giverWho = (q.giverByClass && q.giverByClass[_cls]) || q.giver || null;
+  const who = giverWho || (q.npcByClass && q.npcByClass[_cls]) || q.npc;
+  const npcDestFor = (name, verb) => {
+    const sp = name && _LX_QNAV.npc[name];
+    if (!sp || !sp.length) return null;
+    const hit = pick(sp, (s) => s.map);
+    return hit ? { kind: 'npc', qid, who: name, map: hit.c.map, x: hit.c.x, y: hit.c.y, hops: hopsOf(hit.d), role: hit.c.role, ready, verb } : null;
   };
+  const npcDest = () => npcDestFor(who, ready ? 'Turn in to' : 'Accept from');
   // No placed NPC — 13 boss/visit quests, plus q_inner_dim_trial whose giver is
   // the literal placeholder "your class instructor". Fall back to where the
   // objective lives so no card is left reading "location unknown". Bosses are
@@ -59391,7 +59401,7 @@ function _qnavDest(qid) {
       const maps = t && _LX_QNAV.mob[t];
       if (!maps || !maps.length) continue;
       const hit = pick(maps, (m) => m);
-      if (hit) return { kind: 'hunt', qid, who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d) };
+      if (hit) return { kind: 'hunt', qid, who: t, map: hit.c, x: null, y: null, hops: hopsOf(hit.d), verb: 'Hunt' };
     }
     return null;
   };
@@ -59399,7 +59409,34 @@ function _qnavDest(qid) {
   // whoever handed it out. Only a quest flagged readyToHandIn wants the walk
   // back — and only ~20 quests are ever flagged, because the rest complete on
   // the final kill with no return trip at all.
-  return (active && !ready) ? (huntDest() || npcDest()) : (npcDest() || huntDest());
+  // v0.30.1119 - by where the quest stands:
+  //   accepted, a talk quest        -> 'Talk to' the next person not yet heard (it pointed at the giver)
+  //   accepted, the Mirror Self     -> 'Warp with' your class instructor: that room has no door
+  //   accepted, work left           -> 'Hunt' the target, else the giver
+  //   ready                         -> 'Turn in to' the giver
+  //   not accepted, with a giver    -> 'Accept from' the giver (a class giver resolves)
+  //   not accepted, no giver        -> taken from the Journal itself: 'Hunt' (the npc: field is only whose job it is)
+  if (active && !ready) {
+    if (q.kind === 'talk' && Array.isArray(q.talkTo)) {
+      const tp = (_act && _act.talkProgress) || {};
+      const td = npcDestFor(q.talkTo.find((n) => !tp[n]), 'Talk to');
+      if (td) return td;
+    }
+    const via = _lxWarpVia(q);
+    if (via) { const vd = npcDestFor(via, 'Warp with'); if (vd) return vd; }
+    return huntDest() || npcDest();
+  }
+  if (ready || giverWho) return npcDest() || huntDest();
+  return huntDest() || npcDestFor(who, 'Find');
+}
+// v0.30.1119 - a target only a class instructor can take you to: the Mirror Self's room (the Inner Dimension) has no
+// portal in, so the hunt is 'go and see your instructor', whoever gave the quest (the trial, Auron's Aperture).
+function _lxWarpVia(q) {
+  if (!q || typeof player === 'undefined' || !player) return null;
+  const wants = [q.target].concat((q.objectives || []).map((o) => o && o.target));
+  if (wants.indexOf('mirrorSelf') < 0 || game.currentMap === 'innerDimension') return null;
+  const t = QUESTS.q_inner_dim_trial;
+  return (t && t.giverByClass && t.giverByClass[player.cls]) || null;
 }
 
 // Human label for a destination: "Nurse Joyce — Everdawn Megamall".
@@ -59448,12 +59485,19 @@ function renderQuestTracker() {
   // Everdawn beat is NOT already active, the tracker leads with a pointer.
   const _nb = (typeof _nextStoryBeat === 'function') ? _nextStoryBeat() : null;
   const _nbRow = (_nb && !(player.quests.active && player.quests.active[_nb])) ? (() => {
-    const nq = QUESTS[_nb];
-    const locked = !(player.quests.unlocked && player.quests.unlocked[_nb]);
+    let nq = QUESTS[_nb];
+    let locked = !(player.quests.unlocked && player.quests.unlocked[_nb]);
+    // v0.30.1119 - held back by a prerequisite rather than a level (the Forge waits on Brok's two errands): name the
+    // errand instead of printing a level the player already has.
+    if (locked && (player.level || 1) >= (nq.levelReq || 1) && nq.prereq) {
+      const _miss = [].concat(nq.prereq).find((p) => QUESTS[p] && !(player.quests.completed && player.quests.completed[p]));
+      if (_miss && !(player.quests.active && player.quests.active[_miss])) { nq = QUESTS[_miss]; locked = !(player.quests.unlocked && player.quests.unlocked[_miss]); }
+    }
+    const _ng = (nq.giverByClass && nq.giverByClass[player.cls]) || nq.giver;   // v0.30.1119 a class giver resolves
     return `<div class="qt-row" style="border-left:2px solid #ff9e5e; padding-left:5px;">
       <span class="qt-icon">🌅</span>
       <span class="qt-name" style="color:#ffd0a0;">Next: ${nq.name}</span>
-      <span class="qt-prog" style="color:#c9b8d8;">${locked ? 'Lv ' + (nq.levelReq || 1) : (nq.giver && nq.handIn ? 'see ' + nq.giver : 'press ' + _questKeyLabel())}</span>
+      <span class="qt-prog" style="color:#c9b8d8;">${locked ? 'Lv ' + (nq.levelReq || 1) : (_ng && (nq.handIn || nq.giverByClass || nq.giver) ? 'see ' + _ng : 'press ' + _questKeyLabel())}</span>
     </div>`;
   })() : '';
   const _freshN = _lxFreshQuestCount();   // v0.30.x ft-quest
@@ -65040,6 +65084,32 @@ function _nextStoryBeat() {
 // Shown on ACTIVE and AVAILABLE cards. The pre-existing 📍 Locate button was
 // active-only, and named the giver without ever naming a map — which is the
 // gap the user hit ("no way to find the npc"). Completed cards skip the row.
+// v0.30.1119 - the Locate line: what is left, by name, with live progress. It printed the raw target id and the static
+// count, named a talk quest's giver instead of the next person, and said 'turn in to' for quests that finish on the last kill.
+function _lxQuestLocateLine(id) {
+  const q = QUESTS[id]; if (!q) return '';
+  const a = (player.quests && player.quests.active && player.quests.active[id]) || null;
+  const nm = (t) => (typeof monsterTypes !== 'undefined' && monsterTypes[t] && monsterTypes[t].name) || t;
+  const giver = (q.giverByClass && q.giverByClass[player.cls]) || q.giver || null;
+  const back = (q.handIn && giver) ? ' \u00b7 then back to ' + giver : '';
+  if (a && a.readyToHandIn && giver) return '\ud83d\udccd Turn in to ' + giver;
+  if (Array.isArray(q.objectives) && q.objectives.length) {
+    const op = (a && a.objProgress) || {};
+    return '\ud83d\udccd ' + q.objectives.map((o) => nm(o.target) + ' ' + Math.min(op[o.target] || 0, o.count) + '/' + o.count).join(' + ') + back;
+  }
+  if (q.kind === 'talk' && Array.isArray(q.talkTo)) {
+    const tp = (a && a.talkProgress) || {}; const nx = q.talkTo.find((n) => !tp[n]);
+    return nx ? '\ud83d\udccd Talk to ' + nx + ' (' + q.talkTo.filter((n) => tp[n]).length + '/' + q.talkTo.length + ')' : '\ud83d\udccd Turn in to ' + (giver || q.npc || 'the giver');
+  }
+  const tot = (a && a.targetCount != null) ? a.targetCount : (q.count || 1), pr = Math.min((a && a.progress) || 0, tot);
+  const via = _lxWarpVia(q); if (via) return '\ud83d\udccd Warp with ' + via + ' \u2014 ' + nm(q.target) + ' ' + pr + '/' + tot + back;
+  if (q.kind === 'visit' && q.target && MAPS[q.target]) return '\ud83d\udccd ' + (MAPS[q.target].name || q.target) + back;
+  if (q.kind === 'visit') return '\ud83d\udccd ' + q.name + ' ' + pr + '/' + tot + back;
+  if (q.kind === 'kill' && q.target) return '\ud83d\udccd Defeat ' + nm(q.target) + ' ' + pr + '/' + tot + back;
+  if (q.kind === 'boss' && q.target) return '\ud83d\udccd Defeat the boss: ' + nm(q.target) + back;
+  if (giver) return '\ud83d\udccd See ' + giver;
+  return '\ud83d\udccd Check your objectives \u2014 ' + q.name;
+}
 function _qnavRowHtml(id, isDone, extraHtml) {
   if (isDone) return '';
   let d = null;
@@ -65049,7 +65119,7 @@ function _qnavRowHtml(id, isDone, extraHtml) {
   const here = (typeof game !== 'undefined' && game.currentMap) || null;
   const mob = (typeof monsterTypes !== 'undefined' && monsterTypes[d.who] && monsterTypes[d.who].name) || d.who;
   const who = d.kind === 'npc' ? d.who : mob;
-  const verb = d.kind === 'npc' ? (d.ready ? 'Turn in to' : 'Accept from') : 'Hunt';
+  const verb = d.verb || (d.kind === 'npc' ? (d.ready ? 'Turn in to' : 'Accept from') : 'Hunt');   // v0.30.1119 the destination says
 
   // hops === null means the BFS found no portal chain (warp-only arenas).
   // Say so rather than implying a walk exists.
@@ -65554,27 +65624,7 @@ function renderQuestJournal() {
     btn.onclick = () => {
       const q = QUESTS[btn.dataset.qlocate];
       if (!q) return;
-      let line = '';
-      // v0.26.433 — Multi-objective quests list every target.
-      if (Array.isArray(q.objectives) && q.objectives.length) {
-        line = '📍 ' + q.objectives.map(o => {
-          const nm = (typeof monsterTypes !== 'undefined' && monsterTypes[o.target] && monsterTypes[o.target].name) || o.target;
-          return `${o.count}× ${nm}`;
-        }).join(' + ') + (q.npc ? ` · turn in to ${q.npc}` : '');
-      // Visit quests point at a specific map.
-      } else if (q.kind === 'visit' && q.target && typeof MAPS !== 'undefined' && MAPS[q.target]) {
-        line = `📍 ${MAPS[q.target].name || q.target}` + (q.npc ? ` · ask ${q.npc}` : '');
-      } else if (q.kind === 'kill' && q.target) {
-        line = `📍 Defeat ${q.target}` + (q.count ? ` × ${q.count}` : '') + (q.npc ? ` · turn in to ${q.npc}` : '');
-      } else if (q.kind === 'talk' && q.target) {
-        line = `📍 Talk to ${q.target}`;
-      } else if (q.kind === 'boss' && q.target) {
-        line = `📍 Defeat the boss: ${q.target}`;
-      } else if (q.npc) {
-        line = `📍 See ${q.npc}`;
-      } else {
-        line = `📍 Check your objectives — ${q.name}`;
-      }
+      let line = _lxQuestLocateLine(btn.dataset.qlocate);   // v0.30.1119 live progress, real names, no 'turn in' for self-completing quests
       // v0.29.582 — always lead with WHERE. The branches below name the
       // giver and the objective but never a map, which made "Locate" unable
       // to answer the one question it is named for.

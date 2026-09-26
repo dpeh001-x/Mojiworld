@@ -20,6 +20,10 @@ const r = await p.evaluate(() => {
     const d = _qnavDest(qid);
     if (!d) { if (out.none.length < 20) out.none.push(qid); continue; }
     if (d.kind === 'npc') out.npc++; else out.hunt++;
+    // v0.30.1119 - a quest WITH a giver points at that giver until it is accepted; a giverless one (the class ladder, the
+    // Codex studies) is taken from the Journal itself and points at its hunt - its npc: field names whose job it is, and
+    // that NPC never offered it (the 2026-09-26 NPC audit). So the invariant is 'givers resolve', not 'npcs dominate'.
+    { const _q = QUESTS[qid], _g = _q && _q.giver; if (_g && _LX_QNAV.npc && _LX_QNAV.npc[_g]) { out.giv = (out.giv || 0) + 1; if (d.kind === 'npc' && d.who === _g) out.givNpc = (out.givNpc || 0) + 1; } }
     // every destination must name a real map
     if (!MAPS[d.map]) out.badMap.push(`${qid} -> ${d.map}`);
     // an npc destination must carry usable coordinates
@@ -68,7 +72,7 @@ const unexpected = r.none.filter((id) => !KNOWN_UNRESOLVED.includes(id));
 const missingExpected = KNOWN_UNRESOLVED.filter((id) => !r.none.includes(id));
 check('no unexpected unresolved quest', unexpected.length === 0, unexpected);
 check('known exceptions still the only ones', missingExpected.length === 0, `now resolvable, drop from list: ${missingExpected}`);
-check('npc destinations dominate (>=240)', r.npc >= 240, r.npc);
+check('every quest with a placed giver points at that giver (>=20 of them)', (r.givNpc || 0) === (r.giv || 0) && (r.giv || 0) >= 20, (r.givNpc || 0) + '/' + (r.giv || 0) + ' (npc ' + r.npc + ', hunt ' + r.hunt + ')');
 check('no destination names a missing map / bad coords', r.badMap.length === 0, r.badMap);
 check('route chains actually connect', !r.routes.some((x) => x.includes('CHAIN-BROKEN')), r.routes);
 check('no spot-check target unreachable', r.unreachable === 0, r.unreachable);
