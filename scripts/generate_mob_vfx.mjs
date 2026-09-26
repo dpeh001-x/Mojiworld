@@ -8,7 +8,7 @@
 // in-game render already rotates / expands / squashes them for motion.
 //
 //   node scripts/generate_mob_vfx.mjs                  # dry-run list
-//   node scripts/generate_mob_vfx.mjs --only gravity_well --generate
+//   node scripts/generate_mob_vfx.mjs --only cloudburst --generate
 //   node scripts/generate_mob_vfx.mjs --generate       # all 5
 //   flags: --force --only a,b
 // Needs LUDO_API_KEY. Resumable: skips a file that already exists.
@@ -37,7 +37,6 @@ const PREFIX = 'Game VFX sprite for a cute 2D side-scroller RPG in the Mojiworld
 
 // file (Sprites/vfx/<file>.webp) -> prompt. Keys mirror LX_VFX entries.
 const VFX = {
-  gravity_well:     'a swirling PURPLE gravity-well vortex seen TOP-DOWN (looking straight down at the ground): concentric violet energy rings spiralling inward to a bright glowing core, wispy lavender streaks dragged toward the centre, a circular flat disc shape.',
   frost_beam:       'a horizontal pale-blue FROST BEAM / ice cone firing LEFT-TO-RIGHT: a tapering jet of icy energy with jagged frost shards, crystalline glints and drifting cold mist, sharp leading edge on the right.',
   poison_cloud:     'a bubbling TOXIC POISON puddle seen TOP-DOWN: a sickly green-and-lime gradient pool with rising round bubbles and a faint noxious haze above it, a circular flat disc shape.',
   shock_ring:       'an expanding GROUND SHOCKWAVE RING seen TOP-DOWN: a bold tan-and-gold leading ring of kicked-up dust and rock with a fainter outer halo and cracked-earth glow, mostly EMPTY in the centre (a ring, not a disc).',
