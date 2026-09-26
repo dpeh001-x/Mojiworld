@@ -69,6 +69,8 @@ try {
       panels: ['.mmc-how', '.mmc-cd'].map((s) => { const c = cs(q(s)); return { pink: /rgba?\((184, 20, 95|255, 45, 149)/.test(c.backgroundImage) || c.backgroundColor === 'rgb(184, 20, 95)',
         ink: /rgb\(11, 10, 14\)/.test(c.backgroundImage) || c.borderTopColor === 'rgb(11, 10, 14)', edge: c.outlineStyle === 'solid' && c.outlineColor === 'rgb(184, 20, 95)' }; }),
       tiles: steps.map((x) => cs(x).backgroundColor),
+      // per user: "Add some black components as well rather than all purple and pink only"
+      black: { how: cs(q('.mmc-how')).backgroundColor, pts: cs(q('.mmc-pts')).backgroundColor },
       ready2: q('.mmc-cd.ready #mojimon-cd') ? cs(q('#mojimon-cd')).color : null };
   });
   console.log('ready', JSON.stringify(ready));
@@ -88,6 +90,8 @@ try {
   // per user: "reduce the yellow at the main columns, more Dark purple and Hot pink"
   check(JSON.stringify(ready.tiles) === JSON.stringify(['rgb(58, 23, 104)', 'rgb(255, 45, 149)', 'rgb(58, 23, 104)']),
     'the steps are deep purple, hot pink, deep purple - no yellow or white columns', ready.tiles);
+  check(ready.black.how === 'rgb(11, 10, 14)' && ready.black.pts === 'rgb(11, 10, 14)',
+    'black frames among the purple and pink: the How-to-bind panel and the upgrade-points plate', ready.black);
   check(ready.panels.every((p) => p.pink && p.ink && p.edge), 'both cards pink on deep purple / raspberry with an ink border and a raspberry edge (an outline, so low-effects mode keeps it)', ready.panels);
   check(ready.ready2 === 'rgb(243, 245, 66)', 'READY printed in acid yellow', ready.ready2);
   // on cooldown with a mon out
