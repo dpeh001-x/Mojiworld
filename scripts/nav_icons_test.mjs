@@ -52,7 +52,9 @@ const out = await page.evaluate(async () => {
   return { count: jumps.length, icons, tutHasArt: /Sprites\/ui\/nav\/map\.webp/.test(tut), tut };
 });
 
-ok('the jump row still has all four buttons', out.count === 4, out.count + ' buttons');
+// v0.30.803 added a Titles button and v0.30.1134 an Achievements one, both text buttons: check the four art-backed ones by key
+out.icons = out.icons.filter((i) => ['map', 'quest', 'codex', 'mojidex'].includes(i.key)); out.count = out.icons.length;
+ok('the jump row still has its four art-backed buttons (map, quest, MojiDex, Compendium)', out.count === 4, out.count + ' buttons');
 ok('every button uses an <img>, not an emoji glyph',
    out.icons.every(i => i.isImg) && out.icons.every(i => !i.stillEmoji),
    out.icons.map(i => i.key + ':' + (i.isImg ? 'img' : 'EMOJI')).join(' '));
