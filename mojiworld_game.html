@@ -15753,7 +15753,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1106';
+const GAME_VERSION = 'v0.30.1107';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -44671,6 +44671,10 @@ function applyClass(clsId) {
   player.baseDef = c.stats.def;
   player.baseCrit = c.stats.crit || 5;
   player.baseSpeed = c.stats.speed;
+  // v0.30.x bug hunt - this IS the post-v0.29.472 base, so the one-time rebase in loadState must never run on it. The latch
+  // was only ever set by that migration, so every mage and rogue created since then had the OLD-save correction applied on
+  // their first reload: a new mage went 3.74 -> 2.83 speed (-24%), a rogue 3.8 -> 3.6, and it was saved that way.
+  player._spdRebase472 = 1;
   player.baseJump = c.stats.jump;
   player.maxHp = c.stats.hp;
   player.maxMp = c.stats.mp;
@@ -52592,6 +52596,26 @@ function loadState() {
         player._spdRebase472 = 1;
       } else if (!player._spdRebase472) {
         player._spdRebase472 = 1;   // latch for warrior/archer too, so a later class change cannot double-apply
+      }
+    }
+    // v0.30.x bug hunt - REPAIR for the characters the rebase above hit by mistake: created after v0.29.472 (already on the
+    // new base, but never latched), so their first reload took the class delta off a base that did not carry it. Their
+    // speed is (class base + 0.5 x invested Speed ranks + job + master speed) + the delta, or the bare class base when the load
+    // floor lifted them; nothing else in the game
+    // lands a base speed there, so that fingerprint is what is repaired, and anything else is left alone. Idempotent.
+    {
+      const _rd2 = { rogue: -0.2, mage: -0.91 }[player.cls];
+      const _cls2 = (typeof CLASSES !== 'undefined') && CLASSES[player.cls];
+      if (_rd2 && _cls2 && _cls2.stats && typeof _cls2.stats.speed === 'number' && player._spdRebase472) {
+        const _jb = (typeof JOBS !== 'undefined' && player.job && JOBS[player.job] && JOBS[player.job].stats) ? (JOBS[player.job].stats.speed || 0) : 0;
+        const _mb = (typeof MASTERS !== 'undefined' && player.master && MASTERS[player.master] && MASTERS[player.master].stats) ? (MASTERS[player.master].stats.speed || 0) : 0;
+        const _exp = _cls2.stats.speed + 0.5 * ((player._levelUpSpent && player._levelUpSpent.speed) || 0) + _jb + _mb;
+        const _cur = player.baseSpeed || 0, _base2 = _cls2.stats.speed;
+        // (1) above the class base: the delta is still missing whole. (2) the load floor above (_lift) had already raised
+        // a hit character to the bare class base, erasing the invested ranks the delta ate into: at the base while the
+        // parts add up to more, and the hit value would have sat under the base.
+        if (Math.abs(_cur - (_exp + _rd2)) < 0.005) player.baseSpeed = _exp;
+        else if (Math.abs(_cur - _base2) < 0.005 && _exp > _base2 + 0.005 && (_exp + _rd2) < _base2 - 0.005) player.baseSpeed = _exp;
       }
     }
     // v0.25.886 — BUG-MODS-1 fix. Debug recon (agent a515c5ee) found
@@ -66559,6 +66583,7 @@ function offerPrestige(fromGuguma) {
     // else the invested base stat survives while _levelUpSpent is wiped -> re-investable.
     player.baseAcc = 0;
     player.baseSpeed = (_ascCs && _ascCs.speed) || 3.5;
+    player._spdRebase472 = 1;   // v0.30.x - the current class base: the v0.29.472 rebase must not run on it (see applyClass)
     player.baseJump  = (_ascCs && _ascCs.jump)  || 10;
     // Clear the invested-stat ledger too. Without this, a post-ascension Reset
     // Stats reverses deltas that were already wiped above (maxHp -> 1, baseAtk
