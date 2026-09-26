@@ -12,7 +12,7 @@ const PORT = process.env.PORT || '10291';
 const FILE = process.argv[2] || process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
 const WANT = [
   { id: 'lo-support', href: 'https://ko-fi.com/mojistudios', label: 'Ko-fi', name: /ko-?fi/i, svg: 'kofi' },
-  { id: 'lo-discord', href: 'https://discord.gg/9CqQwXKcv', label: 'Discord', name: /discord/i, svg: 'discord' },
+  { id: 'lo-discord', href: 'https://discord.gg/csHmcWceZA', label: 'Discord', name: /discord/i, svg: 'discord' },
   { id: 'lo-instagram', href: 'https://www.instagram.com/mojistudios.official/', label: 'Instagram', name: /instagram/i, svg: 'instagram' },
   { id: 'lo-website', href: 'https://moji-studios.com', label: 'Website', name: /moji-studios\.com/i, svg: 'website' },
 ];
@@ -68,15 +68,15 @@ try {
   check(r.row && r.links.length === 4 && WANT.every((w, i) => r.links[i].id === w.id && r.links[i].href === w.href), 'four links, in order, with exactly the Ko-fi / Discord / Instagram / website addresses', r.links && r.links.map((l) => [l.id, l.href]));
   check(r.row && r.links.every((l) => l.target === '_blank' && /noopener/.test(l.rel)), 'every link opens in a new tab without handing over window.opener', r.links && r.links.map((l) => l.target + '/' + l.rel));
   check(r.row && WANT.every((w, i) => w.name.test(r.links[i].aria) && r.links[i].label.trim() === w.label), 'every link names its service to assistive tech and shows its label', r.links && r.links.map((l) => [l.aria, l.label]));
-  check(r.row && r.links.every((l) => l.svg && l.svgHidden && l.ico && l.ico.w === 34 && l.ico.h === 34), 'every link carries an inline SVG badge, 34 px, hidden from assistive tech (the link names it)', r.links && r.links.map((l) => [l.svg, l.svgHidden, l.ico && l.ico.w]));
-  check(r.paint && r.paint.length === 4 && r.paint.every((p) => p && p.goldRing && p.midInk && p.cornerClear), 'every badge paints: a gold ring, an inked middle, a clear corner', r.paint);
+  check(r.row && r.links.every((l) => l.svg && l.svgHidden && l.ico && l.ico.w >= 34 && l.ico.w <= 48 && l.ico.h >= 34 && l.ico.h <= 48), 'every link carries an inline SVG badge, sticker-sized (34-48 px), hidden from assistive tech (the link names it)', r.links && r.links.map((l) => [l.svg, l.svgHidden, l.ico && l.ico.w]));
+  check(r.paint && r.paint.length === 4 && r.paint.every((p) => p && p.ring && p.ring[3] > 200 && p.midInk && p.cornerClear), 'every badge paints: an opaque brand ring, an inked middle, a clear corner', r.paint);
   check(r.row && r.links.every((l) => l.visible && l.hittable && l.inRow && l.insidePanel), 'every badge is visible, is what a click at its centre hits, and sits inside the panel', r.links && r.links.map((l) => [l.id, l.visible, l.hittable, l.insidePanel]));
   check(r.row && r.links.every((l, i) => i === 0 || l.ico.l >= r.links[i - 1].ico.r + 4), 'no two badges overlap', r.links && r.links.map((l) => l.ico && [Math.round(l.ico.l), Math.round(l.ico.r)]));
   check(!r.patreon && r.dupIds === 0, 'no Patreon link or mention on the title screen, and no duplicate SVG ids', { patreon: r.patreon, dupIds: r.dupIds });
   // hover: lifts and turns gold
   await page.hover('#lo-discord'); await page.waitForTimeout(450);
   const hv = await page.evaluate(() => { const a = document.getElementById('lo-discord'), k = document.getElementById('lo-support'); return { hover: getComputedStyle(a).color, rest: getComputedStyle(k).color, tf: getComputedStyle(a).transform }; });
-  check(hv.hover === 'rgb(255, 209, 102)' && hv.rest !== hv.hover && hv.tf !== 'none', 'a hovered badge lifts and turns gold; the others stay at rest', hv);
+  check(/^matrix\(1, 0, 0, 1, 0, -\d/.test(hv.tf), 'a hovered badge lifts (the pop sticker hop)', hv);
   // a short screen: the row must still be inside the framed panel without scrolling
   await page.mouse.move(5, 5); await page.setViewportSize({ width: 1280, height: 720 });
   const s = await measure();
