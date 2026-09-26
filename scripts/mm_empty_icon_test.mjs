@@ -1,9 +1,10 @@
-// The empty MojiMon card's icon is the game's snail sprite, cropped, black-inked and rimmed.
+// The empty MojiMon card: a night-meadow scene around the game's snail sprite (cropped, black-inked, rimmed).
 //   node scripts/mm_empty_icon_test.mjs
 //     MOJI_GAME_FILE=<build.html>   test a private build (serve.js swaps it in for the game URL)
 //     MOJI_DATA_REF=origin/main     serve data/ tables from a git ref, for when the working copy's are stale
 //     MOJI_SHOT_DIR=<dir>           also save a close-up of the card per viewport, to eyeball it
-// Per user: "Use the snail sprite as the mojimon" (after "something much cuter with a black outline").
+// Per user: "Use the snail sprite as the mojimon" (after "something much cuter with a black outline"), then
+// "make it look more artistic": hill, moon, glitter trail and three ? slots, in the plush style of the cards above.
 // The card points at the LIVE sprite with a hand-set crop window, so the crop is re-measured here
 // against the real image: a redraw that no longer fits the window fails instead of clipping.
 import { createRequire } from 'node:module';
@@ -80,6 +81,17 @@ try {
     out.ink = (cs.filter.match(/rgb\(20, 12, 24\)/g) || []).length;
     out.rim = (cs.filter.match(/rgb\(251, 234, 255\)/g) || []).length;
     out.anim = getComputedStyle(ico).animationName;
+    // The night-meadow scene around the snail (per user: "make it look more artistic").
+    const ground = card.querySelector('svg.mmr-ground'), gr = ground && ground.getBoundingClientRect();
+    const slots = [...card.querySelectorAll('.mmr-slots i')], tw = [...card.querySelectorAll('.mmr-trail .tw')];
+    out.scene = { ground: !!ground, moon: !!card.querySelector('svg.mmr-moon'), trail: !!card.querySelector('svg.mmr-trail'),
+      sparkles: tw.length, slots: slots.length, slotText: slots.map((s) => s.textContent).join('') };
+    out.spill = [...card.children].filter((ch) => { const q = ch.getBoundingClientRect(); return q.left < c.left - 0.5 || q.right > c.right + 0.5 || q.top < c.top - 0.5 || q.bottom > c.bottom + 0.5; }).map((ch) => ch.className.baseVal || ch.className);
+    out.onGround = !!gr && r.bottom >= gr.top && r.bottom <= c.bottom;
+    const et = getComputedStyle(card.querySelector('.mmr-et'));
+    out.gradTitle = /linear-gradient/.test(et.backgroundImage) && (et.webkitBackgroundClip === 'text' || et.backgroundClip === 'text');
+    out.moving = { crawl: out.anim, slot: slots[0] ? getComputedStyle(slots[0]).animationName : 'none', trail: tw[0] ? getComputedStyle(tw[0]).animationName : 'none',
+      sparkBefore: getComputedStyle(card, '::before').animationName, sparkAfter: getComputedStyle(card, '::after').animationName };
     // Load the very image the card uses, then map the CSS crop back onto its pixels.
     const img = new Image(); img.src = url;
     try { await img.decode(); } catch (e) {}
@@ -119,7 +131,14 @@ try {
       check(M.inside, `${name}: fully inside the card`, M);
       check(M.visible, `${name}: nothing covers it`, M);
       check(M.ink >= 4 && M.rim >= 4, `${name}: black ink ring plus the pale rim that keeps it visible on the dark card`, { ink: M.ink, rim: M.rim });
-      check(motion ? M.anim === 'mmr-bob' : M.anim === 'none', `${name}: ${motion ? 'bobs like the old icon' : 'holds still under reduced motion'}`, M.anim);
+      const sc = M.scene || {};
+      check(sc.ground && sc.moon && sc.trail && sc.sparkles >= 2 && sc.slots === 3 && sc.slotText === '???', `${name}: the scene is all there - hill, moon, glitter trail, three ? slots`, sc);
+      check(Array.isArray(M.spill) && M.spill.length === 0, `${name}: nothing spills out of the card`, M.spill);
+      check(M.onGround === true, `${name}: the snail stands on the hill`, M.onGround);
+      check(M.gradTitle === true, `${name}: the title wears the headings' pastel gradient`, M.gradTitle);
+      const mv = M.moving || {}, still = Object.values(mv).every((v) => v === 'none');
+      check(motion ? (mv.crawl === 'mmr-crawl' && mv.slot === 'mmr-bob' && mv.trail === 'mmc-tw' && mv.sparkBefore === 'mmc-tw') : still,
+        `${name}: ${motion ? 'the snail crawls, the slots bob, the sparkles twinkle' : 'nothing moves under reduced motion'}`, mv);
     }
     await shot(page, name.split(' ')[0]);
     await ctx.close();
