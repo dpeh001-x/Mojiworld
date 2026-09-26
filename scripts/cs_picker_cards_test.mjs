@@ -76,7 +76,7 @@ const checks = [
   ['the dice button is a custom icon, not an emoji', !!(r.dice && r.dice.ok) && !r.diceEmoji],
   // v0.30.1161 per user ("make it more POP PUNK style"): was a violet slab with a gold hairline and a dark ring
   ['the card is a comic plate: an ink edge and a hard 4px slab in its own accent',
-    /^1(\.5)?px rgb\(11, 10, 14\)/.test(r.plate.border) && /4px 4px 0px 0px/.test(r.plate.shadow),
+    /^1(\.5)?px rgb\(1[0-5], 1[0-2], (1[0-9]|20)\)/.test(r.plate.border) && /4px 4px 0px 0px/.test(r.plate.shadow),
     `${r.plate.border} | ${r.plate.shadow.slice(0, 90)}`],
   ['hair / eye / mouth lists mirror their tables 1:1', Object.values(r.lists).every((l) => l.items === l.options && l.items > 0)],
   ['every list item shows the part\'s own art, decoded', Object.values(r.lists).every((l) => l.itemsWithThumb === l.items && l.thumbsDecoded === l.items),

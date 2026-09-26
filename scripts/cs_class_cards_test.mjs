@@ -51,7 +51,8 @@ const r = await page.evaluate(() => {
         border: cs.borderTopWidth + ' ' + cs.borderTopColor,
         ring: /rgba\(4, 2, 12, 0\.55\) 0px 0px 0px 1px/.test(cs.boxShadow),
         // v0.30.1161 the pop punk frame: an ink edge and a hard slab in the class's own colour
-        slab: (() => { const k = c.style.getPropertyValue('--cls-color').trim(); const probe = document.createElement('i'); probe.style.color = k; document.body.appendChild(probe); const rgb = getComputedStyle(probe).color; probe.remove(); return !!k && cs.boxShadow.includes(rgb); })(),
+        // v0.30.1164 the slab is tinted by the class (a mix of its colour and the panel purple), so read it and compare across cards
+        slab: /5px 5px 0px 2px/.test(cs.boxShadow) ? cs.boxShadow.replace(/ 5px 5px 0px 2px.*/, '') : '',
         perks: c.querySelectorAll('.cls-perk').length,
         h: c.getBoundingClientRect().height,
       };
@@ -71,7 +72,7 @@ const checks = [
   ['no emoji and no text arrow left on any card', C.every((c) => !c.emoji)],
   ['both perk plates survive the rebuild', C.every((c) => c.perks === 2)],
   // v0.30.1161 per user ("make it more POP PUNK style"): was the gold hairline with the dark ring
-  ['the frame is a comic panel: an ink edge and a hard slab in the class colour', C.every((c) => /^2(\.5)?px rgb\(11, 10, 14\)/.test(c.border) && c.slab), C[0] && C[0].border],
+  ['the frame is a comic panel: an ink edge and a hard slab tinted by each class', C.every((c) => /^2(\.5)?px rgb\(1[0-5], 1[0-2], (1[0-9]|20)\)/.test(c.border) && c.slab) && new Set(C.map((c) => c.slab)).size === C.length, C.map((c) => c.slab).join(' | ')],
   ['the four cards are the same height', Math.max(...C.map((c) => c.h)) - Math.min(...C.map((c) => c.h)) < 2, C.map((c) => Math.round(c.h)).join('/')],
   ['the cards clear the page nav (no clipping inside the modal\'s height cap)', r.cardsBottom <= r.navTop, `cards end ${Math.round(r.cardsBottom)}, nav starts ${Math.round(r.navTop)}`],
   ['the page nav sits inside the modal (overflow is hidden there)', r.navBottom <= r.modalBottom + 1, `nav ends ${Math.round(r.navBottom)}, modal ends ${Math.round(r.modalBottom)}`],
