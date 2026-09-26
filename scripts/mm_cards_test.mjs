@@ -66,7 +66,7 @@ try {
         letters: document.querySelectorAll('#u-pane-mojimon .mmc-title b').length,
         plate: !!q('.mmc-plate') && /rgb\(154, 15, 80\)/.test(cs(q('.mmc-plate')).backgroundImage), burst: !!q('.mmc-toplogo img'),
         shellArt: q('.mmc-shell') && /mojimon_bg\.webp/.test(cs(q('.mmc-shell')).backgroundImage) },
-      panels: ['.mmc-how', '.mmc-cd'].map((s) => { const c = cs(q(s)); return { pink: /rgba?\(184, 20, 95/.test(c.backgroundImage) || c.backgroundColor === 'rgb(184, 20, 95)',
+      panels: ['.mmc-how', '.mmc-cd'].map((s) => { const c = cs(q(s)); return { pink: /rgba?\((184, 20, 95|255, 45, 149)/.test(c.backgroundImage) || c.backgroundColor === 'rgb(184, 20, 95)',
         ink: /rgb\(11, 10, 14\)/.test(c.backgroundImage) || c.borderTopColor === 'rgb(11, 10, 14)', edge: c.outlineStyle === 'solid' && c.outlineColor === 'rgb(184, 20, 95)' }; }),
       tiles: steps.map((x) => cs(x).backgroundColor),
       ready2: q('.mmc-cd.ready #mojimon-cd') ? cs(q('#mojimon-cd')).color : null };
@@ -85,9 +85,10 @@ try {
     'the head: MOJIMON and its tagline (same words as before), the logo on its starburst, the MojiMon art still behind the shell', hd);
   check(hd.titleFill === 'rgb(243, 245, 66)' && hd.titleStroke >= 5 && hd.extrude >= 4 && hd.letters === 7 && hd.plate,
     'MOJIMON as a comic logo: seven bouncing letters, yellow in a thick ink stroke with an ink extrusion, on a raspberry banner', hd);
-  check(JSON.stringify(ready.tiles) === JSON.stringify(['rgb(243, 245, 66)', 'rgb(184, 20, 95)', 'rgb(243, 245, 66)']),
-    'the steps are yellow, raspberry, yellow - no white tiles', ready.tiles);
-  check(ready.panels.every((p) => p.pink && p.ink && p.edge), 'both cards in raspberry and black with a raspberry edge (an outline, so low-effects mode keeps it)', ready.panels);
+  // per user: "reduce the yellow at the main columns, more Dark purple and Hot pink"
+  check(JSON.stringify(ready.tiles) === JSON.stringify(['rgb(58, 23, 104)', 'rgb(255, 45, 149)', 'rgb(58, 23, 104)']),
+    'the steps are deep purple, hot pink, deep purple - no yellow or white columns', ready.tiles);
+  check(ready.panels.every((p) => p.pink && p.ink && p.edge), 'both cards pink on deep purple / raspberry with an ink border and a raspberry edge (an outline, so low-effects mode keeps it)', ready.panels);
   check(ready.ready2 === 'rgb(243, 245, 66)', 'READY printed in acid yellow', ready.ready2);
   // on cooldown with a mon out
   const cool = await page.evaluate(async () => {
