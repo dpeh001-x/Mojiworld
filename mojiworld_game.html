@@ -15944,7 +15944,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1180';
+const GAME_VERSION = 'v0.30.1181';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -48599,6 +48599,134 @@ function _lxHuntRewardScale(q, target) {
   return Math.max(1, Math.min(LX_HUNT_REWARD_CAP, target / LX_HUNT_REF));
 }
 const SAVE_KEY = 'levelx_save_v1';
+// v0.30.1181 paint-save - the Wardrobe paint (up to 11 layers + the full-body paint, PNG data URLs: 1-3 MB on a painted hero)
+// lives under its OWN key and is written only when it changes. Every save used to re-serialise and re-write all of it: 29-65 ms
+// per save, 6-11 saves a minute in a fight, and most of the storage quota (fewer Save Backups fitted). The save carries
+// player._lxPaintRef, the id stamped on the paint record. A copy that leaves the browser or becomes a backup gets the paint
+// spliced back in (_lxSaveWithPaint: an ordinary whole save); a whole save coming back in (restore, import, cloud pull) is
+// split again by _lxSaveStoreRaw. An old save with the paint inline loads as before; its next save moves the paint out.
+const _LX_PAINT_KEY = SAVE_KEY + '_paint';
+let _lxPaintStored = null;   // v0.30.1181 paint-save - what the paint key holds: { id, full, layers } | 0 (no key) | null (unknown)
+function _lxPaintNewId() { return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+// v0.30.1181 paint-save - the record: '{"id":"..",' + the two player fields exactly as a whole save spells them (spliceable as text)
+function _lxPaintRecord(id, full, layers) {
+  return '{"id":"' + id + '","customPaint":' + JSON.stringify(full) + ',"customPaintLayers":' + JSON.stringify(layers) + '}';
+}
+function _lxPaintOf(p) {   // v0.30.1181 paint-save - the paint on a save's player object, normalised
+  const full = (p && typeof p.customPaint === 'string' && p.customPaint) ? p.customPaint : null;
+  const layers = (p && p.customPaintLayers && typeof p.customPaintLayers === 'object') ? p.customPaintLayers : {};
+  return { full, layers, has: !!full || Object.keys(layers).length > 0 };
+}
+function _lxPaintSame(rec, pp) {   // v0.30.1181 paint-save - the strings last stored? (=== is a pointer check while unchanged)
+  if (!rec || rec.full !== pp.full) return false;
+  const ka = Object.keys(rec.layers), kb = Object.keys(pp.layers);
+  if (ka.length !== kb.length) return false;
+  for (const k of kb) if (rec.layers[k] !== pp.layers[k]) return false;
+  return true;
+}
+// v0.30.1181 paint-save - the save flush's write. SAVE_KEY gets the save with a paint reference; the paint key only a CHANGED
+// paint. Returns the JSON now in SAVE_KEY; throws (quota) only when the save itself could not be stored.
+function _lxPaintWrite(s) {
+  const p = s.player, pp = _lxPaintOf(p);
+  delete p.customPaint; delete p.customPaintLayers; delete p._lxPaintRef;
+  if (!pp.has) {
+    const json = JSON.stringify(s);
+    localStorage.setItem(SAVE_KEY, json);
+    if (_lxPaintStored !== 0) { try { localStorage.removeItem(_LX_PAINT_KEY); } catch (e) {} _lxPaintStored = 0; }
+    return json;
+  }
+  if (_lxPaintStored && _lxPaintSame(_lxPaintStored, pp)) {
+    p._lxPaintRef = _lxPaintStored.id;
+    const json = JSON.stringify(s);
+    localStorage.setItem(SAVE_KEY, json);
+    return json;
+  }
+  // changed, or an old save still holding it inline: the save first (that frees an inline copy), then the paint record
+  const prev = _lxPaintStored, id = _lxPaintNewId();
+  p._lxPaintRef = id;
+  const json = JSON.stringify(s);
+  localStorage.setItem(SAVE_KEY, json);   // a throw here changed nothing: the last save and its paint stay as they were
+  try {
+    localStorage.setItem(_LX_PAINT_KEY, _lxPaintRecord(id, pp.full, pp.layers));
+    _lxPaintStored = { id, full: pp.full, layers: Object.assign({}, pp.layers) };
+    return json;
+  } catch (e) {
+    // v0.30.1181 paint-save - no room for the record: the paint goes inline, the way every save stored it before
+    delete p._lxPaintRef; p.customPaint = pp.full; p.customPaintLayers = pp.layers;
+    const inline = JSON.stringify(s);
+    try { localStorage.setItem(SAVE_KEY, inline); }
+    catch (e2) {
+      // not even that: point the save back at the record still stored (the previous paint), then fail like any full save
+      delete p.customPaint; delete p.customPaintLayers;
+      if (prev && prev.id) p._lxPaintRef = prev.id;
+      try { localStorage.setItem(SAVE_KEY, JSON.stringify(s)); } catch (e3) {}
+      throw e2;
+    }
+    try { localStorage.removeItem(_LX_PAINT_KEY); } catch (e3) {}   // the stale record is dead weight now; the next save retries
+    _lxPaintStored = 0;
+    return inline;
+  }
+}
+// v0.30.1181 paint-save - a save as it leaves the browser or becomes a backup: the paint record spliced back in where the
+// reference was, giving an ordinary whole save (every import path, and older builds, read it as they always did). The
+// record is the one paint this browser keeps, so it is used even under another id (a second tab saved in between); with
+// no record the reference is dropped, so a copy never carries a dangling one.
+function _lxSaveWithPaint(raw) {
+  try {
+    if (typeof raw !== 'string') return raw;
+    const i = raw.indexOf('"_lxPaintRef":"'); if (i < 0) return raw;
+    const j = raw.indexOf('"', i + 15); if (j < 0) return raw;
+    const rec = localStorage.getItem(_LX_PAINT_KEY);
+    const k = rec ? rec.indexOf('",') : -1;
+    if (rec && rec.indexOf('{"id":"') === 0 && k > 0) return raw.slice(0, i) + rec.slice(k + 2, -1) + raw.slice(j + 1);
+    if (raw.charAt(i - 1) === ',') return raw.slice(0, i - 1) + raw.slice(j + 1);
+    if (raw.charAt(j + 1) === ',') return raw.slice(0, i) + raw.slice(j + 2);
+    return raw;
+  } catch (e) { return raw; }
+}
+// v0.30.1181 paint-save - loadState: the paint back onto the save's player object before it is applied. The record is the one
+// paint this browser keeps: under another id than the save names (a second tab saved in between) it is still used.
+function _lxPaintLoad(sp) {
+  if (!sp || typeof sp !== 'object') return;
+  const ref = sp._lxPaintRef; delete sp._lxPaintRef;
+  _lxPaintStored = null;
+  if (_lxPaintOf(sp).has || typeof ref !== 'string') return;   // inline (an old save): loads as it is; its next save moves it out
+  let rec = null;
+  try { const r = localStorage.getItem(_LX_PAINT_KEY); rec = r ? _lxSafeJsonParse(r) : null; } catch (e) { rec = null; }
+  if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string') { try { console.warn('[save] the Wardrobe paint record is missing - loading without paint'); } catch (e) {} return; }
+  if (rec.id !== ref) { try { console.warn('[save] the Wardrobe paint record has another id than the save - using it'); } catch (e) {} }
+  sp.customPaint = rec.customPaint; sp.customPaintLayers = rec.customPaintLayers;
+  const pp = _lxPaintOf(sp);
+  _lxPaintStored = { id: rec.id, full: pp.full, layers: Object.assign({}, pp.layers) };
+}
+// v0.30.1181 paint-save - store a WHOLE save coming back in (backup restore, import, cloud pull) the new way: the save with a
+// reference, the paint under its key. Returns what SAVE_KEY now holds; throws if the save itself could not be stored.
+function _lxSaveStoreRaw(raw) {
+  let sv = null;
+  if (typeof raw === 'string' && raw.indexOf('"customPaint') >= 0) { try { sv = _lxSafeJsonParse(raw); } catch (e) { sv = null; } }
+  const sp = (sv && sv.player && typeof sv.player === 'object') ? sv.player : null;
+  const pp = _lxPaintOf(sp);
+  _lxPaintStored = null;
+  if (!sp || !pp.has) {
+    localStorage.setItem(SAVE_KEY, raw);
+    if (String(raw).indexOf('"_lxPaintRef":"') < 0) { try { localStorage.removeItem(_LX_PAINT_KEY); } catch (e) {} }   // it was the replaced save's
+    return raw;
+  }
+  let before = null; try { before = localStorage.getItem(SAVE_KEY); } catch (e) {}
+  const id = _lxPaintNewId();
+  delete sp.customPaint; delete sp.customPaintLayers; sp._lxPaintRef = id;
+  const main = JSON.stringify(sv);
+  localStorage.setItem(SAVE_KEY, main);
+  try { localStorage.setItem(_LX_PAINT_KEY, _lxPaintRecord(id, pp.full, pp.layers)); return main; }
+  catch (e) {
+    // v0.30.1181 paint-save - no room for both: store it whole (it loads, and its next save moves the paint out); if even that
+    // fails, put back the save that was there and fail
+    try { localStorage.setItem(SAVE_KEY, raw); }
+    catch (e2) { try { if (before != null) localStorage.setItem(SAVE_KEY, before); } catch (e3) {} throw e2; }
+    try { localStorage.removeItem(_LX_PAINT_KEY); } catch (e3) {}
+    return raw;
+  }
+}
 const SAVE_VERSION = 1;
 // =========================================================================
 // v0.29.560 — SECURITY: prototype-pollution guard for save deserialization.
@@ -48993,6 +49121,7 @@ function _lxSteamCloudPush(json, force) {
   const now = Date.now();
   if (!force && now - _lxSteamCloudPushT < 4000) return;   // throttle (matches _lxCloudPushSave cadence)
   _lxSteamCloudPushT = now;
+  json = _lxSaveWithPaint(json);   // v0.30.1181 paint-save - the Steam Cloud copy is a whole save, paint included
   try { Promise.resolve(window.SteamAPI.cloud.write(SAVE_KEY, json)).catch(() => {}); } catch (e) {}
 }
 // Boot-time sync: adopt the cloud save when it is newer / more advanced than
@@ -49041,7 +49170,7 @@ async function _lxSteamCloudSync() {
         const arr = _lxGetBackups();
         arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           ts: Date.now(), label: 'auto · before cloud sync',
-          name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: localRaw });
+          name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: _lxSaveWithPaint(localRaw) });   // v0.30.1181 paint-save - with the paint
         while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
         _lxStoreBackups(arr);
       }
@@ -49063,7 +49192,7 @@ async function _lxSteamCloudSync() {
     // 'reloading' was returned regardless: the next boot saw the same local-vs-cloud difference and reloaded again, for
     // ever, never reaching the menu. Reload only when the bytes are really there; otherwise play on with the local save.
     let _wrote = false;
-    try { localStorage.setItem(SAVE_KEY, cloudRaw); _wrote = localStorage.getItem(SAVE_KEY) === cloudRaw; } catch (e) {}
+    try { const _st = _lxSaveStoreRaw(cloudRaw); _wrote = localStorage.getItem(SAVE_KEY) === _st; } catch (e) {}   // v0.30.1181 paint-save - split like any whole save
     if (!_wrote) { try { game._resetting = false; } catch (e) {} try { console.warn('[steam-cloud] could not store the cloud save locally; keeping the local one'); } catch (e) {} return; }
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
     // only, so adopting a Steam Cloud save installed a DIFFERENT character over the previous one's
@@ -50936,8 +51065,8 @@ function _flushSaveStateNow() {
       game:   pick(game,   GAME_SAVE_FIELDS),
     };
     try { if (typeof _lxLocalSaveSig === 'function') s.sig = _lxLocalSaveSig(s); } catch (e) {}   // v0.30.414 — see _lxLocalSaveVerdict
-    const _json = JSON.stringify(s);
-    localStorage.setItem(SAVE_KEY, _json);
+    // v0.30.1181 paint-save - the Wardrobe paint goes under its own key, and only when it changed (see _lxPaintWrite)
+    const _json = _lxPaintWrite(s);
     try { if (s.sig && typeof _lxSaveMarkWrite === 'function') _lxSaveMarkWrite(s); } catch (e) {}
     // Server-sided MMO-lite: also push the save to the cloud account (throttled,
     // best-effort, cloud sessions only — no-op for Guest / local / offline).
@@ -52244,7 +52373,7 @@ function exportSave() {
     if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) {
       try { _flushSaveStateNow(); } catch (_) {}
     }
-    var data = localStorage.getItem(SAVE_KEY);
+    var data = _lxSaveWithPaint(localStorage.getItem(SAVE_KEY));   // v0.30.1181 paint-save - the file carries the paint
     if (!data) { if (typeof showToast === 'function') showToast('No save to export yet.', 'common'); return; }
     var payload = JSON.stringify({ _lxSave: 1, key: SAVE_KEY, savedAt: Date.now(), data: data });
     var blob = new Blob([payload], { type: 'application/json' });
@@ -52264,7 +52393,7 @@ function copySaveToClipboard() {
     if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) {
       try { _flushSaveStateNow(); } catch (_) {}
     }
-    var data = localStorage.getItem(SAVE_KEY);
+    var data = _lxSaveWithPaint(localStorage.getItem(SAVE_KEY));   // v0.30.1181 paint-save - the file carries the paint
     if (!data) { if (typeof showToast === 'function') showToast('No save to copy yet.', 'common'); return; }
     var payload = JSON.stringify({ _lxSave: 1, key: SAVE_KEY, savedAt: Date.now(), data: data });
     var done = function () { if (typeof showToast === 'function') showToast('⧉ Save copied — paste it into a .json file to keep it.', 'rare'); };
@@ -52437,7 +52566,7 @@ function _lxDownloadFile(text, filename, mime) {
 function exportSaveSecure() {
   try {
     if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) { try { _flushSaveStateNow(); } catch (_) {} }
-    var data = localStorage.getItem(SAVE_KEY);
+    var data = _lxSaveWithPaint(localStorage.getItem(SAVE_KEY));   // v0.30.1181 paint-save - the file carries the paint
     if (!data) { if (typeof showToast === 'function') showToast('No save to export yet.', 'common'); return; }
     var lvl = (typeof player !== 'undefined' && player && player.level) ? player.level : 0;
     _lxDownloadFile(_lxSecureSavePayload(data, Date.now()), 'mojiworld-secure-lv' + lvl + '.mojisave');
@@ -52513,7 +52642,7 @@ function importSave(input) {
             else if (typeof _lxLocalSaveSig === 'function') inner.sig = _lxLocalSaveSig(inner);   // it verified: re-sign with the baseline in
             save = JSON.stringify(inner);
           } catch (e) {}
-          localStorage.setItem(SAVE_KEY, save);
+          _lxSaveStoreRaw(save);   // v0.30.1181 paint-save - the paint under its own key
           try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
     // only, so importing a save installed a DIFFERENT character over the previous one's
@@ -52768,6 +52897,7 @@ function loadState() {
     // ABOVE _sanitizePlayerSaveNumerics (see the fix note there); the block
     // that used to live here was relocated so the sanitizer can't zero the
     // wallet before the migration copies it across.
+    try { _lxPaintLoad(s.player); } catch (e) {}   // v0.30.1181 paint-save - the Wardrobe paint, from its own key
     Object.assign(player, _lxPickSaveFields(s.player, PLAYER_SAVE_FIELDS));   // v0.30.917 only what a save writes
     // v0.30.x — RAW EXP re-derived every level cost (they are ~2.7x smaller now that the award carries no knobs), so a
     // save written before it holds EXP on the old scale: 400,000 banked EXP against a 9,720 rung would vault a
@@ -53380,6 +53510,7 @@ function loadState() {
 function _lxKeepUnloadableSave(raw, label) {
   try {
     if (!raw || typeof _lxGetBackups !== 'function' || typeof _lxStoreBackups !== 'function') return;
+    raw = _lxSaveWithPaint(raw);   // v0.30.1181 paint-save - the kept copy keeps the paint
     const arr = _lxGetBackups(); if (arr.some((b) => b && b.data === raw)) return;
     const meta = (typeof _lxSaveMetaFrom === 'function') ? _lxSaveMetaFrom(raw) : {};
     arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ts: Date.now(), label: label,
@@ -53390,6 +53521,7 @@ function _lxKeepUnloadableSave(raw, label) {
 }
 function clearSave() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+  try { localStorage.removeItem(_LX_PAINT_KEY); _lxPaintStored = 0; } catch (e) {}   // v0.30.1181 paint-save - the Wardrobe paint goes too
   try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890 a wipe must not be undone by Steam Cloud
   // v0.30.494 — the anti-tamper marker (SAVE_KEY + '_verified') used to survive
   // "Erase everything", so the NEXT character created in this browser was graded
@@ -53458,7 +53590,7 @@ function _lxCreateBackup(label) {
     if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) {
       try { _flushSaveStateNow(); } catch (_) {}
     }
-    const data = localStorage.getItem(SAVE_KEY);
+    const data = _lxSaveWithPaint(localStorage.getItem(SAVE_KEY));   // v0.30.1181 paint-save - the slot keeps the paint
     if (!data) { if (typeof showToast === 'function') showToast('No save to back up yet.', 'common'); return false; }
     const meta = _lxSaveMetaFrom(data);
     const arr = _lxGetBackups();
@@ -53480,7 +53612,7 @@ function _lxRestoreBackup(id) {
   const b = _lxGetBackups().find(x => x && x.id === id);
   if (!b || !b.data) return;
   try {
-    localStorage.setItem(SAVE_KEY, b.data);
+    _lxSaveStoreRaw(b.data);   // v0.30.1181 paint-save - the paint back under its own key
     try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
     // only, so restoring a backup slot installed a DIFFERENT character over the previous one's
@@ -162190,7 +162322,7 @@ window.addEventListener('beforeunload',     () => {
   try {
     if (!game._resetting && window.SteamAPI && window.SteamAPI.cloud && window.SteamAPI.cloud.writeSync) {
       const _raw = localStorage.getItem(SAVE_KEY);
-      if (_raw) window.SteamAPI.cloud.writeSync(SAVE_KEY, _raw);
+      if (_raw) window.SteamAPI.cloud.writeSync(SAVE_KEY, _lxSaveWithPaint(_raw));   // v0.30.1181 paint-save - paint included
     }
   } catch (e) {}
 });
@@ -162508,6 +162640,7 @@ function _lxCloudPushSave(json, force) {
     const now = Date.now();
     if (!force && now - _lxCloudPushAt < 15000) return;          // throttle: <= 1 push / 15s
     _lxCloudPushAt = now;
+    json = _lxSaveWithPaint(json);   // v0.30.1181 paint-save - the account copy is a whole save, paint included
     fetch(_LX_API_BASE + '/api/save', {
       method: 'POST', keepalive: !!force,
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + sess.token },
@@ -162530,7 +162663,7 @@ async function _lxCloudSyncOnLogin(session) {
   } catch (e) { return; }                 // offline -> keep local
   let localRaw = null, localSave = null;
   try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? _lxSafeJsonParse(localRaw) : null;   /* v0.29.560 proto-safe */ } catch (e) {}
-  const pushLocal = () => { try { if (localRaw) fetch(_LX_API_BASE + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + session.token }, body: localRaw }).catch(() => {}); } catch (e) {} };
+  const pushLocal = () => { try { if (localRaw) fetch(_LX_API_BASE + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + session.token }, body: _lxSaveWithPaint(localRaw) /* v0.30.1181 paint-save - paint included */ }).catch(() => {}); } catch (e) {} };
   if (!cloud) { pushLocal(); return; }    // first cloud login -> migrate local up
   const localLevel = (localSave && localSave.player && localSave.player.level) || 0;
   const cloudLevel = (cloud && cloud.player && cloud.player.level) || 0;
@@ -162555,7 +162688,7 @@ async function _lxCloudSyncOnLogin(session) {
         const arr = _lxGetBackups();
         arr.unshift({ id: 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           ts: Date.now(), label: 'auto · before cloud sync',
-          name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: localRaw });
+          name: meta.name, level: meta.level, cls: meta.cls, map: meta.map, data: _lxSaveWithPaint(localRaw) });   // v0.30.1181 paint-save - with the paint
         while (arr.length > ((typeof BACKUP_MAX !== 'undefined') ? BACKUP_MAX : 8)) arr.pop();
         _lxStoreBackups(arr);
       }
@@ -162573,7 +162706,7 @@ async function _lxCloudSyncOnLogin(session) {
         game._saveDirty = false;
       }
     } catch (e) {}
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify(cloud)); } catch (e) {}
+    try { _lxSaveStoreRaw(JSON.stringify(cloud)); } catch (e) {}   // v0.30.1181 paint-save - the paint under its own key
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
     // only, so adopting a web cloud save installed a DIFFERENT character over the previous one's
     // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
