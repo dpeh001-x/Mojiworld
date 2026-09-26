@@ -24,6 +24,9 @@ await page.waitForTimeout(1200);
 const g = await page.evaluate(async () => {
   const out = {}; const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   game.boonDex = undefined; player.boons = []; player.boonsEquipped = []; player.titles = {}; player.setshards = 0;
+  // v0.30.717 made the base cap a LEVEL ladder (Lv 25 / 50 / 75), so a fresh Lv 1 character has no slot to equip into.
+  // Lv 75 is the full ladder - the 3 this test was written against - and the Collector's Slot still stacks on top.
+  player.level = 75; out.ladder = (typeof _boonSlotsFromLevel === 'function') ? _boonSlotsFromLevel() : null;
   out.cap0 = _boonCap();
   // acquire two boons -> held; synergy pair -> syn
   const syn = BOON_SYNERGIES[0]; const ids = syn.pair;
@@ -48,7 +51,7 @@ const g = await page.evaluate(async () => {
   out.saved = GAME_SAVE_FIELDS.includes('boonDex') && _LX_SIGNED_GAME_KEYS.includes('boonDex');
   return out;
 });
-ok('cap starts at 3; acquiring boons marks them held (and seen)', g.cap0 === 3 && g.held === 2 && g.seenAfterHeld >= 2, g);
+ok('cap starts at 3 (the full Lv 75 ladder); acquiring boons marks them held (and seen)', g.cap0 === 3 && g.ladder === 3 && g.held === 2 && g.seenAfterHeld >= 2, g);
 ok('equipping a synergy pair marks the synergy awakened', g.syn === true, { syn: g.syn });
 ok('the pick modal marks its offers as seen', !g.choiceErr && g.seenAfterChoice >= 3, { seen: g.seenAfterChoice, err: g.choiceErr });
 ok('50% held pays coins + 50 setshards; 100% held opens the Collector\'s Slot (cap 4) and the title', g.ms.includes('held50') && g.ms.includes('held100') && g.shards === 50 && g.coinsUp && g.slotBonus === 1 && g.cap1 === 4 && g.title, { ms: g.ms, shards: g.shards, cap: g.cap1 });

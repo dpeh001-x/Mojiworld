@@ -16,8 +16,9 @@ ok('#1 Bishop G: the 2.5s untargetable window is gone (0.8s cast guard)',
   src.includes("the 5s immortality is the B's identity"), '');
 ok('#1 Bishop G: pillar MP refund halved to 3%',
   src.includes('getMaxMp() * 0.03') && !src.includes('getMaxMp() * 0.06'), '');
-ok('#1 Bishop B: pulses 2.6x, finale 6x (the priest stops out-nuking warlocks)',
-  src.includes('performAround(440, 2.6,') && src.includes('performAround(620, 6.0,'), '');
+// v0.30.x - the live numbers (v0.30.773 tier budget, then v0.30.1050 per user: "fix all for me"; the v0.30.20 pass set 2.6x / 6x).
+ok('#1 Bishop B: pulses 8.1x, finale 4.3x',
+  src.includes('performAround(440, 8.1,') && src.includes('performAround(620, 4.3,'), '');
 ok('#6 Dragoon: no-prey bail on the chase finisher',
   src.includes('if (!nearest) return;'), '');
 ok('#6 Dragoon: dive gaps tightened (1000->700, 700->450)',
@@ -26,9 +27,11 @@ ok('#7 Nightreaper: every batch answers audibly',
   !src.includes("if ((b & 1) === 0) audio.play('hit');"), '');
 ok('#7 Nightreaper: the dagger has a visible fall (moon-height streak)',
   src.includes('spawnSmoothSlash(tx, ty - 170, Math.PI / 2, 240,'), '');
-ok('#11 Doombringer: heat 0.007, waves 9.5/5.5, melee 6.0',
-  src.includes('LX_DOOM_HEAT_DMG = 0.007') && src.includes('wave(9.5 * _heatMul') &&
-  src.split('wave(5.5 * _heatMul').length - 1 === 2 && src.includes('performMelee(440, 6.0 * _heatMul'), '');
+// v0.30.x - v0.30.117 replaced the waves with seven homing doom-fires; v0.30.778 heat 0.007 -> 0.01; v0.30.814 (the
+// user's Skill Editor patch) each fire 3x + 5 and the cleave 6.0x -> 5.0x.
+ok('#11 Doombringer: heat 0.01, doom-fires 3x + 5, melee 5.0',
+  src.includes('LX_DOOM_HEAT_DMG = 0.01') && src.includes('damage: getAtk() * 3 * _heatMul + 5') &&
+  src.includes('performMelee(440, 5 * _heatMul'), '');
 ok('#12 Ballista: turret cadence 700->900ms',
   src.includes('tu.fireCd = 900;') && !src.includes('tu.fireCd = 700;'), '');
 
@@ -93,7 +96,9 @@ const live = await page.evaluate(async () => {
 
   // --- #13 skymark live: marked prey takes +15% from the player ---
   const dm = mk(player.x + 60);
-  dm._skyMarkUntil = 0;
+  // v0.30.x - -1, not 0: this harness never steps the sim, so game.time is 0 and "(0 | 0) >= 0" counted the plain
+  // hit as marked too (ratio exactly 1.0).
+  dm._skyMarkUntil = -1;
   const hp0 = dm.currentHp;
   hitMonster(dm, 1000, false, 'probe');
   const plain = hp0 - dm.currentHp;
@@ -113,8 +118,10 @@ ok('#5 LIVE: with a Soul Vortex open the storm anchors INTO the pool',
   live.nmAnchor.follows === false && live.nmAnchor.cxMatch === true, live.nmAnchor);
 ok('#9 LIVE: a latecomer walking into the ring is hexed by the echo pulse',
   live.hexEcho.atCast.late === 0 && live.hexEcho.lateAfter === 1 && live.hexEcho.lateHurt, live.hexEcho);
-ok('#9 LIVE: a veteran keeps exact stack pacing (no echo double-dip)',
-  live.hexEcho.atCast.vet === 1 && live.hexEcho.vetAfter === 1, live.hexEcho);
+// v0.30.x - since 9242d014 the echo lands on everyone in the ring, so a veteran takes its second stack: the old skip
+// pinned every target at one stack and made the 5-stack rupture unreachable by casting.
+ok('#9 LIVE: a veteran takes the echo\'s second stack (one cast = two stacks)',
+  live.hexEcho.atCast.vet === 1 && live.hexEcho.vetAfter === 2, live.hexEcho);
 // The x1.15 lands mid-pipeline; flat additive terms downstream dilute the
 // end-to-end ratio a little (measured 1.13 on a flat dummy). The band proves
 // the mark bites without pinning unrelated pipeline arithmetic.

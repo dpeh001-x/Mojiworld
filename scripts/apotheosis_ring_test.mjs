@@ -58,7 +58,9 @@ const r = await page.evaluate(() => {
     const P = CanvasRenderingContext2D.prototype;
     const od = P.drawImage, orr = P.rotate;
     P.drawImage = function (img) {
-      for (const k in LX_FX) if (LX_FX[k] === img) hit = k;
+      // v0.30.x - since v0.30.294 the blit is often _lxProjScaled's right-sized COPY of the art, which the source image
+      // keeps in its _lxProjCache; an identity match against LX_FX saw nothing and read every ring as "no sprite".
+      for (const k in LX_FX) { const src = LX_FX[k]; if (src === img || (src && src._lxProjCache && typeof src._lxProjCache.values === 'function' && [...src._lxProjCache.values()].includes(img))) hit = k; }
       return od.apply(this, arguments);
     };
     P.rotate = function (a) { if (a) rotated = true; return orr.apply(this, arguments); };
