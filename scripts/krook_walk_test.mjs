@@ -84,9 +84,16 @@ try {
       if (performance.now() - t0 < 18000) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
     clearInterval(god); clearInterval(hop); window._drawBossSprite = origDraw;
     // force a few claws to measure the swipe travel
+    const frame = () => new Promise((r) => requestAnimationFrame(r));
     for (let k = 0; k < 3; k++) {
-      m.patternState = 'claw'; m.patternTimer = 0; m._kFired = false; const x0 = m.x;
-      await new Promise((r) => setTimeout(r, 760)); claws.push(Math.abs(m.x - x0));
+      // v0.30.x - start from a settled, grounded idle (the first claw used to be forced over the end of the follow run),
+      // and measure only while the pose is up, which is what the check claims: a fixed 760 ms timer also counted his
+      // walk after the swipe, and 1 run in 3 caught a whole-number jump of 78-86 px that is not the swipe's motion.
+      for (let w = 0; w < 600 && !(m.patternState === 'idle' && m.onGround && !(m._stagger > 0)); w++) await frame();
+      m.vx = 0; m.patternState = 'claw'; m.patternTimer = 0; m._kFired = false;
+      let lo = m.x, hi = m.x; const tc = performance.now();
+      while (m.patternState === 'claw' && performance.now() - tc < 3000) { lo = Math.min(lo, m.x); hi = Math.max(hi, m.x); await frame(); }
+      claws.push(hi - lo);
       m.patternState = 'idle'; m.patternTimer = 0; await new Promise((r) => setTimeout(r, 300));
     }
     return { rec, claws };
