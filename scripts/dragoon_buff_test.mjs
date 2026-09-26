@@ -53,20 +53,25 @@ const out = await page.evaluate(async () => {
   await wait(600); game.paused = false;
 
   // ---- config assertions ---------------------------------------------------
-  ok('Sky Lance cooldown is 11s (was 16s)', SKILLS.dragoon_skylance.cd === 11000, 'cd ' + SKILLS.dragoon_skylance.cd);
+  // v0.30.x - re-pinned to the live numbers. Each moved in a later pass: Sky Lance cd 11 s -> 25 s (v0.30.356, per user),
+  // lances 3.0x + 12 -> 5.5x + 15 (v0.30.814, the user's Skill Editor patch), slam 7.5x -> 2.7x (v0.30.788, the user's
+  // patch). The slam KEEPS its x1.3 boss bonus, which is what this test exists for.
+  ok('Sky Lance cooldown is 25s (v0.30.356, per user)', SKILLS.dragoon_skylance.cd === 25000, 'cd ' + SKILLS.dragoon_skylance.cd);
   const src = String(SKILL_FNS.dragoon_ult || '');
-  ok('Skyfall lances are 3.0x (was 2.0x)', src.includes('* 3.0 + 12'), '');
-  ok('Skyfall slam is 7.5x with boss bonus (was 6.0x flat)', src.includes('460, 7.5') && src.includes('bossMul: 1.3'), '');
+  ok('Skyfall lances are 5.5x + 15 (v0.30.814)', src.includes('getAtk() * 5.5 + 15'), '');
+  ok('Skyfall slam is 2.7x and keeps its x1.3 boss bonus (v0.30.788)', src.includes('460, 2.7') && src.includes('bossMul: 1.3'), '');
   const paSrc = String(window.performAround || '');
   ok('performAround supports opt-in bossMul', paSrc.includes('opts.bossMul'), '');
   // The aegis orb damage lives in the aegis TICK, not the cast function —
   // assert on the served source text, which also lets the necromancer soul
   // orb (same 6.0x+40 shape) be checked as genuinely untouched.
   const pageSrc = await (await fetch(location.pathname)).text();
-  ok('Divine Aegis orbs 6.6x (was 6.0x)', pageSrc.includes('getAtk() * 6.6 + 40'), '');
+  // v0.30.772 / v0.30.773 budgeted every G and B skill against the basic attack: aegis orbs 6.6x + 40 -> 2.55x + 9 (the last x0.85 in v0.30.1050, per user), the
+  // soul orb 6.0x + 40 -> 1.45x + 10 (later 1x + 10). v0.30.767 rebuilt Bastion of Dawn as Dawnbreak - no orbs left.
+  ok('Divine Aegis orbs 2.55x + 9 (v0.30.772, then x0.85 in v0.30.1050 per user)', pageSrc.includes('getAtk() * 2.55 + 9'), '');
   const bastSrc = String(SKILL_FNS.crusader_ult || '');
-  ok('Bastion orbs 1.8x (was 1.6x)', /\* 1\.8 \+ 8/.test(bastSrc), '');
-  ok('necromancer soul orb untouched (6.0x + 40)', pageSrc.includes('getAtk() * 6.0 + 40'), '');
+  ok('Bastion of Dawn is Dawnbreak now: no 1.8x orb line left (v0.30.767)', !/\* 1\.8 \+ 8/.test(bastSrc) && bastSrc.length > 0, '');
+  ok('necromancer soul orb is its own line (1x + 10)', /getAtk\(\) \* 1 \+ 10\);[^\n]*\r?\n[^\n]*'necromancerorb'/.test(pageSrc), '');
 
   // ---- bossMul ratio measurement ------------------------------------------
   const setupPair = () => {

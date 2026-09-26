@@ -41,7 +41,10 @@ const r = await page.evaluate(async () => {
   const out = {};
   const frame = () => new Promise((res) => requestAnimationFrame(res));
   player.cls = 'warrior'; player.job = 'berserker'; player.master = 'doombringer';
-  player.level = 90; player.invulnerable = 9e9; player.hp = 99999;
+  // v0.30.x - FULL hp, not 99999: the Berserker passive adds (1 - hp/maxHp) x 0.5 ATK, and an hp far above max drove
+  // getAtk negative (-3365 on a ~300 HP character), so every damage number below read negative. invulnerable keeps it alive.
+  player.level = 90; player.invulnerable = 9e9; player.hp = getMaxHp();
+  out.atkSane = getAtk() > 0;
   player.skillRanks = player.skillRanks || {};
   player.skillRanks.doombringer_ult = 10; player.skillRanks.doombringer_apoc = 10;
   game.paused = false;
@@ -106,9 +109,9 @@ const r = await page.evaluate(async () => {
   const wave = game.projectiles.find((p) => p && p.doomBrand);
   out.waveFound = !!wave;
   out.waveDamage = wave ? Math.round(wave.damage) : null;
-  // v0.30.x — wave 8.0 -> 9.5, full heat 1.5 -> 1.7 (tester: the Doombringer
-  // pair paid under Warlord's enrage; the verdict now hits like one).
-  out.waveExpected = Math.round(atk * 9.5 * 1.7 + 30);
+  // v0.30.117 replaced the blade-waves with seven homing doom-fires; v0.30.814 (the user's Skill Editor patch) set each
+  // fire to ATK x 3 + 5, and v0.30.778 set LX_DOOM_HEAT_DMG to 0.01, so 100 heat doubles it.
+  out.waveExpected = Math.round(atk * 3 * 2 + 5);
 
   // 5. table poison check: a fresh window with nothing banked must be 0.22
   player._msWin = null; player._doomWinBonus = null;
@@ -138,8 +141,10 @@ console.log(`  hits: loss1 ${r.loss1} -> loss2 ${r.loss2} (ratio ${r.ampRatio});
 console.log(`  ult: window frac ${r.winFrac} len ${r.winLenFrames}f | fresh ${r.freshFrac} len ${r.freshLenFrames}f | wave ${r.waveDamage} vs expected ${r.waveExpected}`);
 console.log(`  integration: stacks ${r.integStacks}, heat ${r.integHeat}, damaged ${r.integHp}`);
 
-check(Math.abs(r.mulAt3 - 1.06) < 1e-9, 'three stacks read as +6% damage taken', r.mulAt3);
-check(r.stacksCapped === 10 && Math.abs(r.mulAtCap - 1.2) < 1e-9, 'stacks cap at 10 (+20%)', { stacks: r.stacksCapped, mul: r.mulAtCap });
+// v0.30.1048 (per user): Doom brand 2% -> 1% a stack.
+check(r.atkSane, 'the harness character has a positive ATK (full HP, so the Berserker passive adds nothing)', r.atkSane);
+check(Math.abs(r.mulAt3 - 1.03) < 1e-9, 'three stacks read as +3% damage taken', r.mulAt3);
+check(r.stacksCapped === 10 && Math.abs(r.mulAtCap - 1.1) < 1e-9, 'stacks cap at 10 (+10%)', { stacks: r.stacksCapped, mul: r.mulAtCap });
 check(r.mulExpired === 1 && r.stacksAfterExpiry === 0, 'expired brands read as x1 and clear', { mul: r.mulExpired, stacks: r.stacksAfterExpiry });
 check(r.brandAfterApoc === 1 && r.brandAfterSlam === 3, 'apoc brands +1 and the slam +2 (1+2=3)', { afterApoc: r.brandAfterApoc, afterSlam: r.brandAfterSlam });
 check(r.heatAfterSlam === 6, 'heat stokes +2 on a cleave hit, +4 on a slam hit', { afterApoc: r.heatAfterApoc, afterSlam: r.heatAfterSlam });
@@ -153,7 +158,7 @@ check(r.winLenFrames > r.freshLenFrames + 200, 'the window is genuinely longer (
 // 6/7 piles to be gone, leaving at most the cleave's fresh +1 (+wave brands).
 check(r.brandsClearedB1 <= 2 && r.brandsClearedB2 <= 2, 'pre-cast brand piles were consumed (only the ult\'s own fresh seeds remain)', [r.brandsClearedB1, r.brandsClearedB2]);
 check(r.heatBeforeUlt === 100 && r.heatAfterUlt === 0, 'the whole heat meter is spent', { before: r.heatBeforeUlt, after: r.heatAfterUlt });
-check(r.waveFound && Math.abs(r.waveDamage - r.waveExpected) <= 2, 'the first blade-wave carries x1.7 damage at 100 heat', { got: r.waveDamage, want: r.waveExpected });
+check(r.waveFound && Math.abs(r.waveDamage - r.waveExpected) <= 2, 'the first doom-fire carries x2 damage at 100 heat', { got: r.waveDamage, want: r.waveExpected });
 check(r.freshFrac === 0.22, 'THE TABLE IS NOT POISONED: the very next window is back to 22%', r.freshFrac);
 // >=1 stack / >=2 heat, not >=3/>=6: the apoc strikes fire on real-ms timers
 // while the harness paces on requestAnimationFrame, so how many of the 12 hits
