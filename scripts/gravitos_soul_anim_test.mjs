@@ -51,6 +51,13 @@ const out = await page.evaluate(async () => {
     res.laserSet = { total: lframes.length, decoded: lframes.filter((f) => f && f.complete && f.naturalWidth > 0).length,
       w: lframes[0] && lframes[0].naturalWidth, h: lframes[0] && lframes[0].naturalHeight };
   }
+  // v0.30.x — forms 2/3 ship their OWN soul / laser sets (gravitos2soul, gravitos3laser, ...; see _gravCastKey, "form-aware
+  // cast-set key": form 1's art cannot stand in for a later form without him visibly un-evolving mid-cast). Wait for
+  // them too, and judge "a frame of the set reached the canvas" against whichever set the draw selected.
+  for (const k of ['gravitos2soul', 'gravitos3soul', 'gravitos2laser', 'gravitos3laser']) {
+    const a = BOSS_ATTACK_FRAMES[k]; if (!a) continue; const t2 = Date.now();
+    while (Date.now() - t2 < 30000 && !a.every((f) => f && f.complete && f.naturalWidth > 0)) await new Promise((r) => setTimeout(r, 250));
+  }
   const groundY = ((game.mapData.platforms || []).find((p) => p.type === 'ground') || { y: 480 }).y;
   const t = monsterTypes.gravitos;
   const blits = [];
@@ -65,9 +72,12 @@ const out = await page.evaluate(async () => {
     ctx.save();
     try { drawMonster(m); } catch (e) { return { err: String(e.message).slice(0, 80) }; }
     ctx.restore();
-    const drewSoul = blits.some((im) => im && (frames || []).indexOf(im) >= 0);
-    const drewLaser = blits.some((im) => im && (lframes || []).indexOf(im) >= 0);
-    return { key: m._gravStarKey, drewSoul, drewLaser };
+    const sel = m._gravStarKey && BOSS_ATTACK_FRAMES[m._gravStarKey];
+    const inSet = (k) => blits.some((im) => im && (BOSS_ATTACK_FRAMES[k] || []).indexOf(im) >= 0);
+    const drewSoul = ['gravitossoul', 'gravitos2soul', 'gravitos3soul'].some(inSet);
+    const drewLaser = ['gravitoslaser', 'gravitos2laser', 'gravitos3laser'].some(inSet);
+    const drewSelected = !!sel && blits.some((im) => im && sel.indexOf(im) >= 0);
+    return { key: m._gravStarKey, drewSoul, drewLaser, drewSelected };
   };
   res.cases = {
     'soulDrain form1': pick('soulDrain', null),
@@ -109,13 +119,14 @@ if (out.set) ck(out.set.decoded === out.set.total && out.set.total >= 9,
 
 console.log('\nwhich set each state/form selects (read off the real draw):');
 const EXPECT = {
-  'soulDrain form1': 'gravitossoul', 'soulDrain form2': 'gravitossoul', 'soulDrain form3': 'gravitossoul',
+  // v0.30.x — each form's own soul set (form-aware cast art; the v0.29.567 table predates gravitos2soul / 3soul)
+  'soulDrain form1': 'gravitossoul', 'soulDrain form2': 'gravitos2soul', 'soulDrain form3': 'gravitos3soul',
   'singularity form1': 'gravitossoul', 'singularity form2': 'gravitos2star', 'singularity form3': 'gravitos3star',
   'collapseRain form1': 'gravitossoul', 'collapseRain form2': 'gravitos2star',
-  // Laser Sweep is FORM 1 ONLY, per user. Forms 2/3 deliberately fall through
-  // to their phase art — an earlier draft of this test expected all three and
-  // failed correct code.
-  'laser form1': 'gravitoslaser', 'laser form2': null, 'laser form3': null,
+  // v0.29.571 made the Laser Sweep ANIMATION form-1 only because form 1's art was all there was, and a later form must
+  // not un-evolve mid-cast. The sweep itself is in all three phases' pattern rolls (20% / 13% / 11%), and forms 2/3 now
+  // ship gravitos2laser / gravitos3laser, which _gravCastKey picks - so each form plays its own sweep.
+  'laser form1': 'gravitoslaser', 'laser form2': 'gravitos2laser', 'laser form3': 'gravitos3laser',
   'crush form1 (punch, unchanged)': 'gravitospunch', 'idle form1 (no override)': null,
 };
 for (const [label, want] of Object.entries(EXPECT)) {
@@ -126,7 +137,8 @@ for (const [label, want] of Object.entries(EXPECT)) {
 const soulCases = ['soulDrain form1', 'singularity form1', 'collapseRain form1'];
 ck(soulCases.every((k) => out.cases[k] && out.cases[k].drewSoul), 'a soul frame actually reaches the canvas on those casts');
 ck(out.cases['laser form1'] && out.cases['laser form1'].drewLaser, 'a laser frame actually reaches the canvas on the form-1 sweep');
-ck(['laser form2','laser form3'].every((k) => out.cases[k] && !out.cases[k].drewLaser), 'forms 2/3 do NOT take the laser set (form-1 only, by design)');
+ck(['soulDrain form2', 'soulDrain form3', 'laser form2', 'laser form3'].every((k) => out.cases[k] && out.cases[k].drewSelected),
+  'forms 2/3 draw their OWN soul and laser sets - never form 1\'s art', ['soulDrain form2', 'soulDrain form3', 'laser form2', 'laser form3'].map((k) => out.cases[k]));
 
 console.log('\nonce-through then hold (soulDrain, 1900ms window):');
 const p = out.progression || [];

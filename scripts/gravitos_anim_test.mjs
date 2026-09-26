@@ -123,13 +123,19 @@ const r = await page.evaluate(() => {
       if (fr.length >= 2) { pairTicks++; if (fr[1].alpha < 1) fadedAlpha = true; }
       if (fr.length) {
         if (!seen.includes(fr[0].i)) { seen.push(fr[0].i); arriveAt[fr[0].i] = t; }
-        if (frame8At === null && fr[0].i === 8) frame8At = t;
+        if (frame8At === null && fr[0].i === punchArr.length - 1) frame8At = t;   // v0.30.x — the LAST frame (16 since v0.30.341)
       }
     }
     // gaps between consecutive frame arrivals, and how long frame 8 is held
     const _g = [];
-    for (let k = 1; k <= 8; k++) if (arriveAt[k] != null && arriveAt[k - 1] != null) _g.push(arriveAt[k] - arriveAt[k - 1]);
-    out.punch = { distinct: seen.length, pairTicks, ticks, fadedAlpha, frame8At, errCt, moveTicks, maxOff,
+    for (let k = 1; k < punchArr.length; k++) if (arriveAt[k] != null && arriveAt[k - 1] != null) _g.push(arriveAt[k] - arriveAt[k - 1]);
+    // v0.30.x — the animator's per-frame ft weights, spread over the play window (see _gravitosPunchPair): the gap each
+    // frame SHOULD get. null when the set carries no authored timing (then the power curve runs).
+    const _ft = (typeof _lxCalibFt === 'function') ? _lxCalibFt('gravitospunch', 'attack') : null;
+    let _exp = null;
+    if (_ft) { const n = punchArr.length; let tot = 0; for (let k = 0; k < n; k++) tot += (_ft[k] > 0 ? _ft[k] : 48);
+      _exp = []; for (let k = 0; k < n - 1; k++) _exp.push(+((_ft[k] > 0 ? _ft[k] : 48) / tot * _GRAV_PUNCH_PLAY * 1500).toFixed(1)); }
+    out.punch = { distinct: seen.length, n: punchArr.length, expGaps: _exp, pairTicks, ticks, fadedAlpha, frame8At, errCt, moveTicks, maxOff,
       gaps: _g, maxGap: _g.length ? Math.max(..._g) : -1,
       hold8: frame8At != null ? 1500 - frame8At : -1 };
   }
@@ -164,6 +170,10 @@ const r = await page.evaluate(() => {
     // which set is being drawn this tick: punch / walk / other
     const walkArr = BOSS_WALK_FRAMES[m.type] || [];
     const drawn = [];
+    // v0.30.x — the draw reads _lxFrameNow() (v0.30.359), which re-reads performance.now only when game.time moves.
+    // This loop is synchronous, so without a frame step the "planted for 140 ms" gate could never open and a planted
+    // crush measured as idle. One game frame per tick, as the real loop does.
+    game.time = (game.time | 0) + 1;
     const _di2 = _drawBossSprite;
     _drawBossSprite = function (img) {
       if (frames.indexOf(img) >= 0) drawn.push('atkset');
@@ -258,7 +268,7 @@ console.log('walk barn:', JSON.stringify(r.walkBarn));
 console.log('glide: moving-crush', JSON.stringify(r.glideMoving), '| planted-crush', JSON.stringify(r.glidePlanted), '| lego dash', JSON.stringify(r.glideDash));
 
 const p = r.punch || {}, wg = r.walkGrav || {}, wb = r.walkBarn || {}, sf = r.subFrame || {};
-ok('the punch plays through all nine frames', p.distinct >= 9, { distinct: p.distinct });
+ok('the punch plays through every frame of its set', p.distinct >= 9 && p.distinct === p.n, { distinct: p.distinct, n: p.n });
 // v0.30.x — the crossfade is REMOVED (per user: overlapping sprites read as a
 // shadow). These two pin the replacement: exactly one sprite per frame, and
 // the smoothing carried by a sub-frame TRANSFORM instead.
@@ -271,11 +281,14 @@ ok('...and is smoothed by sub-frame MOTION instead: a small, continuous, always-
 // slightly longer". Both measured off the real frame arrivals.
 ok('the punch has TIGHTER gaps now — no long stall on the windup frame (was 333ms)',
    p.maxGap > 0 && p.maxGap <= 190, { maxGap: p.maxGap, gaps: p.gaps });
-ok('...and the gaps are near-even rather than front-loaded (max is under 1.9x the min)',
-   p.gaps && p.gaps.length >= 7 && p.maxGap <= Math.min(...p.gaps) * 1.9,
-   { min: p.gaps && Math.min(...p.gaps), max: p.maxGap });
-ok('...and the LANDED POSE holds longer (was 225ms of the 1500ms window)',
-   p.hold8 >= 450 && p.hold8 <= 800, { frame8At: p.frame8At, hold8: p.hold8 });
+// v0.30.x — the spacing is AUTHORED now (animator ft weights, 2026-08-29 calib patches): each gap must be its frame's
+// share of the play window, to within the one 16 ms tick the loop samples at. The old "near-even" check measured the
+// v0.30.309 power curve, which only runs when a set has no ft.
+const _gapErr = (p.expGaps && p.gaps && p.gaps.length === p.expGaps.length) ? Math.max(...p.gaps.map((g, k) => Math.abs(g - p.expGaps[k]))) : null;
+ok('...and each gap follows the animator-authored frame timing (within one 16 ms tick)',
+   _gapErr !== null && _gapErr < 16, { gaps: p.gaps, authored: p.expGaps, worstErr: _gapErr });
+ok('...and the LANDED POSE (the last frame) holds longer (was 225ms of the 1500ms window)',
+   p.hold8 >= 450 && p.hold8 <= 800, { lastAt: p.frame8At, hold: p.hold8 });
 // v0.30.x — QUICKER STRIDE (per user: "play the sprite animation faster ...
 // less time gap between the frames"). v0.29.952's 130ms colossus cadence is
 // reversed: the stature term now only speeds it up.

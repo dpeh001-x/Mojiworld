@@ -47,8 +47,15 @@ const read = () => page.evaluate(() => {
 // Play a card and wait for it to be READY - his art in (or the band / the glyph) - not a fixed pause: the first
 // card of a cold page can still be decoding its art at 900 ms. The auto-close is held off while it waits.
 const play = async (t) => {
+  // v0.30.x — the arena load calls _lxBiPrewarm(type) while it loads, ~500 ms before the card plays, so the art is in
+  // hand when the card opens. Calling _playBossIntro COLD on a localhost page races thousands of parse-time image
+  // requests (there is no image hold off the web deploy): the first Aetherion card measured his art still downloading
+  // at 6.7 s, and the same card 30 s later stood him up at 480 px. Warm it as the game does and wait for the download
+  // itself (bounded), so the card is judged on what it does with its art rather than on the local server's queue.
+  await page.evaluate((t) => { try { _lxBiPrewarm(t); } catch (e) {} }, t);
+  await page.waitForFunction((t) => { const im = _lxBiSprite(t); return !im || im.complete !== false; }, t, { timeout: 60000 }).catch(() => {});
   await page.evaluate((t) => { _playBossIntro(t); if (game._bossIntroTimer) { clearTimeout(game._bossIntroTimer); game._bossIntroTimer = null; } }, t);
-  await page.waitForFunction(() => { const o = document.getElementById('boss-intro-overlay'); return o.classList.contains('bi-grav') || o.classList.contains('bi-noart') || !!o.querySelector('.bi-art.bi-in'); }, null, { timeout: 6000 }).catch(() => {});
+  await page.waitForFunction(() => { const o = document.getElementById('boss-intro-overlay'); return o.classList.contains('bi-grav') || o.classList.contains('bi-noart') || !!o.querySelector('.bi-art.bi-in'); }, null, { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(700);
 };
 const close = () => page.evaluate(() => { try { _dismissBossIntro(); } catch (e) {} const o = document.getElementById('boss-intro-overlay'); if (o) o.classList.remove('on'); game.paused = false; });
