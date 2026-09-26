@@ -38,7 +38,7 @@ const PROBES = [
  "Guguma hops twice. He has been waiting all mo",
  "The Wisp hovers, satchel bigger than its body",
  "Lightning pulses through its stripes. The tai",
- "The tiger tilts its great head. Whiskers twit",
+ "The kitty tilts its great head. Whiskers twit",   // v0.30.996 per user the Stormbearer is a kitty, not a tiger
  "A stack of clicking bricks with a sword for o",
  "feathers go on the back so the arrow flies st",
  "I watched. The big archers at the Reach let m",
