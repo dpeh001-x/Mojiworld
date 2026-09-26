@@ -15814,7 +15814,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1132';
+const GAME_VERSION = 'v0.30.1133';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52543,6 +52543,19 @@ function loadState() {
         _lift('maxHp',     _cs.hp    || 1, 'Max HP');
         _lift('maxMp',     _cs.mp    || 0, 'Max MP');
         _lift('baseAcc',   0,              'ACC');
+        // v0.30.1133 swap-growth - a character with NO job and NO master is exactly class base + (level - 1) levels of
+        // growth + what it invested on top, never less; the pre-advancement class swap used to drop the growth (a Lv-19
+        // Rogue on Lv-1 stats). Lift such a save to its level's floor. Jobs / masters are left out: a few carry negative
+        // stats, so the floor would not hold for them.
+        if (!player.job && !player.master && (player.level | 0) > 1 && typeof _devLevelGains === 'function') {
+          const _g = _devLevelGains(player.cls), _n = (player.level | 0) - 1, _grown = [];
+          const _liftG = (k, min, label) => { if (typeof player[k] === 'number' && player[k] < min) { _grown.push(label); player[k] = min; } };
+          _liftG('maxHp', (_cs.hp || 1) + _g.hp * _n, 'Max HP');
+          _liftG('maxMp', (_cs.mp || 0) + _g.mp * _n, 'Max MP');
+          _liftG('baseAtk', (_cs.atk || 0) + _g.atk * _n, 'ATK');
+          _liftG('baseDef', (_cs.def || 0) + _g.def * _n, 'DEF');
+          if (_grown.length && typeof showToast === 'function') setTimeout(() => showToast('\u{1F6E0} Restored the stats your levels earned — ' + _grown.join(', ') + ' (lost in a class swap).', 'epic'), 1800);
+        }
         if (_fixed.length && typeof showToast === 'function') {
           setTimeout(() => showToast('\u{1F6E0} Repaired corrupted stats — ' + _fixed.join(', ')
             + ' were below your class baseline.', 'epic'), 1400);
@@ -66360,6 +66373,12 @@ function _openPreAdvanceClassSwap() {
           }
         } catch (e) {}
         applyClass(next);
+        // v0.30.1133 swap-growth - applyClass hands the new class its LEVEL-1 HP/MP/ATK/DEF, but the level stays: give back
+        // (level - 1) levels of the NEW class's growth (a Lv-19 swap was a Lv-19 Rogue on Lv-1 stats), then refill
+        try { const _g = _devLevelGains(player.cls), _n = Math.max(0, (player.level | 0) - 1);
+          player.maxHp += _g.hp * _n; player.maxMp += _g.mp * _n; player.baseAtk += _g.atk * _n; player.baseDef += _g.def * _n;
+          if (typeof invalidateEquipBonusCache === 'function') invalidateEquipBonusCache();
+          player.hp = getMaxHp(); player.mp = getMaxMp(); } catch (e) {}
         if (typeof showToast === 'function') showToast(`⟳ You are now ${/^[AEIOU]/i.test(c.name) ? 'an' : 'a'} ${c.name}. The road continues.`, 'legendary');
         if (typeof flash === 'function') flash(0.4);
         if (typeof saveState === 'function') saveState();
