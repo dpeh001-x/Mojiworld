@@ -46,10 +46,14 @@ try {
     const bravo = npc('Bravo'), amn = npc('The Amnesiac');
     const street = (x) => { player.x = x - player.w / 2; player.y = 480 - player.h; player.vx = 0; player.vy = 0; };
     // LEVEL + PROMPT (live frames)
-    street((bravo.x + amn.x) / 2); await W8(700); street((bravo.x + amn.x) / 2); await W8(300);
+    street((bravo.x + amn.x) / 2); await W8(700); street((bravo.x + amn.x) / 2);
+    // an off-screen NPC is not drawn, so its prompt fade is never updated: start every fade at 0 here, read on-screen NPCs only
+    for (const n of game.npcs) n._talkA = 0;
+    await W8(600);
     const tgt = _lxTalkTarget();
     out.level = { at: Math.round(player.x + player.w / 2), bravoDx: Math.round(Math.abs(player.x + player.w / 2 - bravo.x)), amnDx: Math.round(Math.abs(player.x + player.w / 2 - amn.x)), target: tgt && tgt.name };
-    out.prompt = game.npcs.filter((n) => (n._talkA || 0) > 0.3).map((n) => n.name);
+    const camX = (game.camera && game.camera.x) || 0;
+    out.prompt = game.npcs.filter((n) => n.x > camX - 40 && n.x < camX + W + 40 && (n._talkA || 0) > 0.3).map((n) => n.name);
     // LIMITS (pure reads, paused)
     game.paused = true; const f = (n) => n.y + 44;
     const at = (n, feetOff) => { player.x = n.x - player.w / 2; player.y = f(n) + feetOff - player.h; const t = _lxTalkTarget(); return t ? t.name : null; };
