@@ -160,7 +160,7 @@ try {
   check(/mc-portrait/.test(U.body) && U.talk && U.talk.vis && U.talk.b <= U.hp.t + 1 && Math.abs(U.talk.l - U.hp.l) <= 1 && uHits.length === 0, 'portrait: N sits above the potion dock and overlaps nothing', { body: U.body, talk: U.talk, hp: U.hp, hits: uHits });
   await T.ctxB.close();
   const D = await open(1366, 768, { desktop: true }); const E = await rects(D.page);
-  check(/force-mobile-ctrl/.test(E.body) && E.block && E.block.vis && E.block.l <= 30 && E.block.t <= 50 && E.talk && E.talk.vis && E.dpad && E.dpad.w === 184, 'desktop touch-controls mode gets the same deck (Block top-left, N, 184 px d-pad)', { body: E.body, block: E.block, talk: E.talk, dpad: E.dpad && E.dpad.w });
+  check(/force-mobile-ctrl/.test(E.body) && E.block && E.block.vis && E.block.l <= 30 && (E.block.t <= 50 || (E.topui && E.block.t >= E.topui.b && E.block.t <= E.topui.b + 12)) && E.talk && E.talk.vis && E.dpad && E.dpad.w === 184, 'desktop touch-controls mode gets the same deck (Block top-left - or just under the stats plate when the plate owns that corner, v0.30.x mc-dodge - N, 184 px d-pad)', { body: E.body, block: E.block, plate: E.topui, talk: E.talk, dpad: E.dpad && E.dpad.w });
   await D.ctxB.close();
 } finally { await browser.close().catch(() => {}); srv.kill(); }
 console.log(bad === 0 ? `\nall ${total} passed` : `\n${bad} of ${total} FAILED`);
