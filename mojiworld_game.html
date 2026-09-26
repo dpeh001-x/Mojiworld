@@ -15876,7 +15876,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1156';
+const GAME_VERSION = 'v0.30.1157';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -27458,6 +27458,24 @@ function _synergyPanelHtml() {
 // v0.26.288 — Render the per-floor expedition quest pin. Idempotent;
 // safe to call any time. Pulls from game.expedition.currentQuest stamped
 // by the loadMap entry hook; hides when no expedition / no active quest.
+// v0.30.1157 tower-goal - restate a Tower floor's goal from the enemies actually on it: the on-screen ceiling trims the authored
+// roster (B7: 40 written, 36 on a desktop, 22 on a phone) and the floor clears on what spawned. Only the numbers change.
+function _lxTowerGoalFromSpawns(id) {
+  const cq = game.expedition && game.expedition.currentQuest, cfg = MAPS[id] && MAPS[id]._towerFloor;
+  if (!cq || cq.id !== id || !cfg || !cfg.quest || game.currentMap !== id) return;
+  const roster = (cfg.spawns || []).filter((sp) => sp && sp.type && !sp.boss);
+  if (!roster.length) return;
+  const counts = roster.map((sp) => (game.monsters || []).filter((m) => m && m.type === sp.type && !m.isBoss && !m.ally && m.currentHp > 0).length);
+  const total = counts.reduce((a, b) => a + b, 0);
+  if (!(total > 0)) return;
+  let g = String(cfg.quest.goal || '');
+  const allN = g.match(/Defeat all (\d+) /);
+  if (!allN || +allN[1] === total) return;
+  g = g.replace(/Defeat all \d+ /, 'Defeat all ' + total + ' ');
+  g = g.replace(/\(([^)]*)\)/, (whole, inner) => { const parts = inner.split(' + '); return parts.length === counts.length && parts.every((p) => /^\d+ /.test(p)) ? '(' + parts.map((p, i) => p.replace(/^\d+/, String(counts[i]))).join(' + ') + ')' : whole; });
+  cq.goal = g;
+  if (typeof _renderExpeditionQuestPin === 'function') _renderExpeditionQuestPin();
+}
 function _renderExpeditionQuestPin() {
   const pin = document.getElementById('expedition-quest-pin');
   if (!pin) return;
@@ -72105,10 +72123,11 @@ function loadMap(id, entryX, entryY) {
     const _cfg = MAPS[id] && MAPS[id]._towerFloor;
     if (_cfg && _cfg.quest) {
       game.expedition.currentQuest = { id: id, title: _cfg.quest.title, goal: _cfg.quest.goal };
+      setTimeout(() => { try { _lxTowerGoalFromSpawns(id); } catch (e) {} }, 0);   // v0.30.1157 tower-goal - after the spawn pass below
       if (typeof showToast === 'function') {
         // Stagger so the floor / door toast (epic) plays first, then the
         // quest objective overlays cleanly above it.
-        setTimeout(() => showToast(`📜 ${_cfg.quest.title} — ${_cfg.quest.goal}`, 'rare'), 400);
+        setTimeout(() => showToast(`📜 ${_cfg.quest.title} — ${(game.expedition.currentQuest && game.expedition.currentQuest.id === id && game.expedition.currentQuest.goal) || _cfg.quest.goal}`, 'rare'), 400);   // v0.30.1157 tower-goal - the restated goal
       }
       if (typeof _renderExpeditionQuestPin === 'function') _renderExpeditionQuestPin();
     }
