@@ -15876,7 +15876,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1144';
+const GAME_VERSION = 'v0.30.1145';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -96802,7 +96802,9 @@ function bossAI(m, dt, distToPlayer) {
             x: _mcx + _toP * (m.w * 0.42) - 52,
             y: m.y + m.h * 0.30,
             vx: _toP * 2.2, vy: 0,
-            w: 104, h: 76, life: 13,
+            // v0.30.x full audit - down to his feet: 76 px at 30% of his 195 px (v0.30.420) ended 16.5 px above a grounded
+            // player's head, so only a JUMPER could be hit - the telegraphed punch rewarded standing still.
+            w: 104, h: Math.max(76, m.h * 0.70), life: 13,
             damage: (m.atk || 225) * 2.2,
             owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'barnFist', color: '#ff9a3c',
             noGravity: true,
@@ -99402,7 +99404,9 @@ function bossAI(m, dt, distToPlayer) {
         game.projectiles.push({
           x: sx, y: m.y + m.h * 0.3,
           vx: m.facing * 2, vy: 0,
-          w: 70, h: 80, life: 8,
+          // v0.30.x full audit - down to his FEET: a fixed 80 px box at 30% of his height ended 117 px above a grounded
+          // player's head once v0.30.420 grew him to 344 px (a full jump still missed by 22), so the swipe was cosmetic.
+          w: 70, h: Math.max(80, m.h * 0.7), life: 8,
           damage: m.atk * 0.9, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'claw', _srcType: m.type,
           color: '#ffaa55',
         });
@@ -99550,12 +99554,22 @@ function bossAI(m, dt, distToPlayer) {
         }
       }
       // Cone burst now starts at t=600 (was t=400), end at t=1300
-      if (t >= 600 && t < 1300 && t % 90 === 0) {
+      // v0.30.x full audit - the cone NEVER fired: t is the boss pattern clock, a float stepping ~18.4 ms (x1.18 in phase
+      // 2), so `t % 90 === 0` was never true - the toast and the mouth glow played, then nothing. One volley per 90 ms
+      // band now, latched so a band cannot fire twice or be skipped. And it is AIMED: the fan used to leave his mouth
+      // level (Krook is 344 px tall since v0.30.420), so even firing it would have passed over anyone on the floor.
+      const _fbBand = (t >= 600 && t < 1300) ? Math.floor((t - 600) / 90) : -1;
+      if (t < 600) m._fbBand = -1;
+      if (_fbBand >= 0 && _fbBand > (m._fbBand == null ? -1 : m._fbBand)) {
+        m._fbBand = _fbBand;
+        const _fbX = m.x + (m.facing > 0 ? m.w : 0), _fbY = m.y + m.h * 0.3;
+        let _fbAim = Math.atan2((player.y + player.h / 2) - (_fbY + 18), Math.abs((player.x + player.w / 2) - _fbX) || 1);
+        _fbAim = Math.max(-0.35, Math.min(0.9, _fbAim));   // his mouth: from a little up to steeply down, never behind him
         // 5-shot fan — tight cone.
         for (let i = -2; i <= 2; i++) {
-          const ang = (i * 0.16);
+          const ang = _fbAim + (i * 0.16);
           const dirX = m.facing * Math.cos(ang);
-          const dirY = Math.sin(ang) - 0.1;
+          const dirY = Math.sin(ang);
           game.projectiles.push({
             x: m.x + (m.facing > 0 ? m.w : 0), y: m.y + m.h * 0.3,
             vx: dirX * 6, vy: dirY * 6,
@@ -99570,7 +99584,7 @@ function bossAI(m, dt, distToPlayer) {
           });
         }
       }
-      if (t > 1500) { m.patternState = 'idle'; m.patternTimer = 0; m._fireAnnounced = false; }
+      if (t > 1500) { m.patternState = 'idle'; m.patternTimer = 0; m._fireAnnounced = false; m._fbBand = -1; }
     } else if (m.patternState === 'jumpSlam') {
       // v0.30.1006 - THE JUMP SLAM LANDS. Measured on v0.30.984 it never did: the pattern ended at a fixed
       // t > 1100 on the pattern clock, but a vy -14 leap is ~56 sim steps of air - about 1,300 on
