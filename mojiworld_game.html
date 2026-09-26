@@ -15876,7 +15876,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1149';
+const GAME_VERSION = 'v0.30.1150';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -66864,7 +66864,7 @@ function offerPrestige(fromGuguma) {
   // boons back - over the reset the ascension had just made. Not offered until the run is over.
   if (game.expedition && game.expedition.active) { if (fromGuguma && typeof showToast === 'function') showToast('Finish or leave the Expedition before you ascend.', 'rare'); return; }
   // v0.30.422 - HEIRLOOM: the boon Guguma keeps warm (an EQUIPPED boon chosen in her chip)
-  const _heirIdx = (game._heirloomIdx | 0), _heir = (_heirIdx >= 0 && player.boons && player.boonsEquipped && player.boonsEquipped.includes(_heirIdx) && player.boons[_heirIdx]) ? JSON.parse(JSON.stringify(player.boons[_heirIdx])) : null;
+  const _heirIdx = (Number.isInteger(game._heirloomIdx) ? game._heirloomIdx : -1),   /* v0.30.1150 pet-fixes - `| 0` made "none chosen" into bag slot 0 */ _heir = (_heirIdx >= 0 && player.boons && player.boonsEquipped && player.boonsEquipped.includes(_heirIdx) && player.boons[_heirIdx]) ? JSON.parse(JSON.stringify(player.boons[_heirIdx])) : null;
   const _heirName = _heir ? (((typeof getBoonDef === 'function') && getBoonDef(_heir)) || {}).name || _heir.id : null;
   // v0.25.775 — Prestige cap at 20 ascensions. Pre-cap each ascension
   // granted +0.30 xpMult / +0.30 dmgMult / +1 bonusAP with no ceiling —
@@ -69009,7 +69009,10 @@ function _endExpedition(reason) {
   // free boon before any mob died. Same for currentQuest leaking into
   // the persistent world's quest pin between runs.
   const _lootGone = _lxExpLootTally(_snap);   // v0.30.884 — loot rule: counted before the restore takes it
-  game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
+  // v0.30.1150 pet-fixes - the restore just below re-charges game.expedition._spentInRun (potions, fares); resetting the object
+  // first zeroed it, so death / Abandon / a clear refunded the whole run. Carry it across.
+  const _lxSpentRun = (game.expedition && game.expedition._spentInRun) | 0;
+  game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null, _spentInRun: _lxSpentRun };
   _expeditionRestorePlayer(_snap);
   // v0.30.455 — the loaned slots are gone as of the line above (the cap reads game.expedition.active).
   // Restore normally returns the pre-run loadout, so this only bites when the snapshot was lost.
@@ -81980,6 +81983,7 @@ function _mojimonFirstBindModal(type) {
 }
 function _mojimonSummon(type, opts) {
   opts = opts || {};
+  if (!opts.free && (!player || !(player.hp > 0))) return false;   // v0.30.1150 pet-fixes - H / Summon while dead fielded a MojiMon (and started its cooldown) under the death screen
   const mm = _mojimonEnsure();
   const rec = mm.roster[type];
   const t = (typeof monsterTypes === 'object') ? monsterTypes[type] : null;
@@ -103857,7 +103861,7 @@ function _killMonsterRaw(m) {
     }
   }
   // Bestiary tracking drives cosmetic unlocks
-  trackPickup('kill', { type: m.type });
+  if (!_isIllusionKill) trackPickup('kill', { type: m.type });   // v0.30.1150 pet-fixes - mirages and away-summon kills don't feed species mastery either
   if (m.isBoss) {
     // v0.30.511 — THE PERMANENT RECORD IS FOR REAL KILLS ONLY. This was the last payout in this
     // block without an echo/expedition guard; the map-cleared stamp, the setshard drop, the
@@ -108549,7 +108553,9 @@ function _trimVisualQueues() {
   }
   // Cap minions
   if (game.minions && game.minions.length > MAX_MINIONS) {
-    game.minions.splice(0, game.minions.length - MAX_MINIONS);
+    // v0.30.1150 pet-fixes - trim the oldest OTHER minions: the MojiMon sits first, and evicting it read as its defeat
+    let _over = game.minions.length - MAX_MINIONS;
+    for (let i = 0; i < game.minions.length && _over > 0;) { if (game.minions[i] && game.minions[i].mojimon) { i++; continue; } game.minions.splice(i, 1); _over--; }
   }
   if (game.particles.length > pc) game.particles.splice(0, game.particles.length - pc);
   if (game.damageNumbers.length > dc) _lxDnEvict(game.damageNumbers, dc);   // v0.30.x (audit C9) - by importance
