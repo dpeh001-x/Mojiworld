@@ -55,12 +55,15 @@ try {
       hkey: c.querySelector('.mmr-hkey').textContent, hon: c.querySelector('.mmr-hkey').classList.contains('on'), bond: c.querySelector('.mmr-bond').className,
       summon: c.querySelector('.mmr-summon') ? { t: c.querySelector('.mmr-summon').textContent, dis: c.querySelector('.mmr-summon').disabled } : null,
       rows: [...c.querySelectorAll('.mmr-row')].map((r) => ({ v: r.querySelector('.mmr-val').textContent, m: r.querySelector('.mmr-meter i').style.width, minus: r.querySelector('.minus').disabled, plus: r.querySelector('.plus').disabled })),
-      free: c.querySelector('.mmr-chip').textContent }; };
+      free: c.querySelector('.mmr-chip').textContent,
+      // per user: "Abit more black" - black cards, their point rows on a deep-purple plate
+      bg: getComputedStyle(c).backgroundColor, plate: getComputedStyle(c.querySelector('.mmr-alloc')).backgroundColor }; };
     return { ks, a: info(ks[0]), b: info(ks[1]), cap: MOJIMON_UPG_PT_CAP, pts: _mojimonPoints() };
   });
   console.log('cards', JSON.stringify(R));
   const { a, b } = R;
   check(/\bout\b/.test(a.cls) && a.name.includes('FIELDED') && a.hp === '70%' && !a.summon, 'the fielded MojiMon: a yellow-edged card, a FIELDED pill, its HP as a candy bar, no Summon', a);
+  check([a, b].every((x) => x.bg === 'rgb(14, 10, 20)' && x.plate === 'rgb(31, 13, 54)'), 'black cards, their point rows on a deep-purple plate', [a.bg, a.plate, b.bg, b.plate]);
   check(JSON.stringify(a.stats) === JSON.stringify(a.want) && JSON.stringify(b.stats) === JSON.stringify(b.want), 'the stat pills show its real max HP, attack and damage reduction', [a.stats, a.want]);
   check(a.hon && a.hkey.includes('★') && /\bon\b/.test(a.bond) && !b.hon && b.hkey.includes('☆') && !/\bon\b/.test(b.bond), 'the H-slot MojiMon has the yellow ★ H and the lit bond; the other a plain ☆ H and a quiet bond', [a.hkey, b.hkey]);
   check(b.summon && b.summon.dis && b.summon.t.includes('after the rest'), 'on cooldown the bench MojiMon\'s Summon is greyed and says it is resting', b.summon);

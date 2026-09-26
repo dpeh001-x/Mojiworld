@@ -65,7 +65,8 @@ try {
         extrude: q('.mmc-title') ? (cs(q('.mmc-title')).textShadow.match(/rgb\(11, 10, 14\)/g) || []).length : 0,
         letters: document.querySelectorAll('#u-pane-mojimon .mmc-title b').length,
         plate: !!q('.mmc-plate') && /rgb\(154, 15, 80\)/.test(cs(q('.mmc-plate')).backgroundImage), burst: !!q('.mmc-toplogo img'),
-        shellArt: q('.mmc-shell') && /mojimon_bg\.webp/.test(cs(q('.mmc-shell')).backgroundImage) },
+        shellArt: q('.mmc-shell') && /mojimon_bg\.webp/.test(cs(q('.mmc-shell')).backgroundImage),
+        shellInk: q('.mmc-shell') && /rgba\(14, 10, 20, 0\.86\)/.test(cs(q('.mmc-shell')).backgroundImage) },
       panels: ['.mmc-how', '.mmc-cd'].map((s) => { const c = cs(q(s)); return { pink: /rgba?\((184, 20, 95|255, 45, 149)/.test(c.backgroundImage) || c.backgroundColor === 'rgb(184, 20, 95)',
         ink: /rgb\(11, 10, 14\)/.test(c.backgroundImage) || c.borderTopColor === 'rgb(11, 10, 14)', edge: c.outlineStyle === 'solid' && c.outlineColor === 'rgb(184, 20, 95)' }; }),
       tiles: steps.map((x) => cs(x).backgroundColor),
@@ -83,8 +84,8 @@ try {
   check(/^"?Nunito/.test(f.head) && /^"?Nunito/.test(f.cd) && /^"?Nunito/.test(f.text) && f.headW >= 900 && f.cdW >= 900 && f.htStroke >= 4 && f.cdStroke >= 4 && f.nun,
     'pop type: heavy Nunito for the headings and the readout, printed in a thick ink stroke; Nunito for the words, loaded', f);
   const hd = ready.head;
-  check(hd.title === 'MOJIMON' && hd.tag === 'BIND · FIELD · UPGRADE · H QUICK-SUMMON' && hd.burst && hd.shellArt,
-    'the head: MOJIMON and its tagline (same words as before), the logo on its starburst, the MojiMon art still behind the shell', hd);
+  check(hd.title === 'MOJIMON' && hd.tag === 'BIND · FIELD · UPGRADE · H QUICK-SUMMON' && hd.burst && hd.shellArt && hd.shellInk,
+    'the head: MOJIMON and its tagline (same words as before), the logo on its starburst, the MojiMon art behind a near-black shell', hd);
   check(hd.titleFill === 'rgb(243, 245, 66)' && hd.titleStroke >= 5 && hd.extrude >= 4 && hd.letters === 7 && hd.plate,
     'MOJIMON as a comic logo: seven bouncing letters, yellow in a thick ink stroke with an ink extrusion, on a raspberry banner', hd);
   // per user: "reduce the yellow at the main columns, more Dark purple and Hot pink"
