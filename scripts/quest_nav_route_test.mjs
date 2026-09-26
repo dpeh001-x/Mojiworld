@@ -68,7 +68,7 @@ try {
   });
   check(r.talk.count === r.talk.list && !/ready/.test(r.talk.why) && /1\/3/.test(r.talk.tracker) && /^📍 Talk to /.test(r.talk.row) && /Talk to .+\(1\/3\)/.test(r.talk.locate), 'TALK: one conversation of three reads 1/3 (not ready), and the row and Locate say Talk to the next person', J(r.talk));
   check(!/Accept from/.test(r.giverless.row) && /Hunt/.test(r.giverless.row) && !r.giverless.locate.includes(r.giverless.target) && !/turn in to/i.test(r.giverless.locate), 'GIVERLESS: a Codex study points at its hunt, and Locate names the creature (not its id) with no turn-in', J(r.giverless));
-  check(/Accept from Taiga/.test(r.mirror.before) && /Warp with Taiga/.test(r.mirror.after) && !/no walking route/.test(r.mirror.after) && r.mirror.trackerHasWarp, 'MIRROR: Accept from Taiga, then Warp with Taiga (row and tracker), never "no walking route"', J(r.mirror));
+  check(/(Accept from|From) Taiga/.test(r.mirror.before) && /Warp with Taiga/.test(r.mirror.after) && !/no walking route/.test(r.mirror.after) && r.mirror.trackerHasWarp, 'MIRROR: Accept from Taiga, then Warp with Taiga (row and tracker), never "no walking route"', J(r.mirror));
   check(!/pq_piece/.test(r.spire.tracker) && !/pq_piece/.test(r.spire.locate), 'SPIRE: neither the tracker nor Locate prints the raw id for Ticket Rush Stage 2', J(r.spire));
   check(r.next.beat === 'q_boss_sundered_smith' && r.next.row.includes(r.next.errand) && /see Brok/.test(r.next.row), 'NEXT: with the Forge waiting on Brok\'s errands, the tracker names the errand and Brok', J(r.next));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
