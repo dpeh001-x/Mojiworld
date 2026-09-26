@@ -62,6 +62,11 @@ try {
   const R = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const out = {};
+    // v0.30.x — a fresh character's tutorial intro card (startTutorial -> 'tutorial_intro') opens on a delayed timer once
+    // the Void eye-zoom clears (audit F5), i.e. after the skip loop above, and pauses the sim: against main he stood still
+    // for all 571 samples. Mark the beats seen, as a returning player's save has them; the tour opens as its dock.
+    player._storyBeatsSeen = player._storyBeatsSeen || {};
+    if (typeof STORY_BEATS === 'object') for (const k in STORY_BEATS) player._storyBeatsSeen[k] = true;
     const maps = ['innerDimension', 'dimensionChamber', 'clockworkChamber', 'sandsChamber'];
     let m = null;
     for (const mp of maps) {
