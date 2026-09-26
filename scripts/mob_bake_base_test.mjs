@@ -68,7 +68,9 @@ for (const type of TYPES) {
     // (the Ossuary Tyrant measured zero decoded frames at 12 s: no blit at all, ratio Infinity). Breaks as soon as ready.
     while (performance.now() - t0 < 60000) {
       const set = MONSTER_FRAMES[type]; const cap = _lxShrinkCap(_mobFrameBase(m));
-      if (set && set.idle && set.walk && set.idle._lxShrunk && set.walk._lxShrunk && set.idle._lxShrunkCap === cap && set.walk._lxShrunkCap === cap) break;
+      // v0.30.x — the set he is DRAWING (idle or walk), shrunk at this cap. Pinned while he wants to chase, he draws only his
+      // walk set, so "idle AND walk" never came true and this ran to its bound on every type, every run.
+      if (set && [set.idle, set.walk].some((a) => a && a._lxShrunk && a._lxShrunkCap === cap)) break;
       await new Promise(r => setTimeout(r, 100));
     }
     await new Promise(r => setTimeout(r, 400));
@@ -93,7 +95,7 @@ for (const type of TYPES) {
     // keeps the old canvas on screen until the new one lands). Judge the frames once they have, still pinned in view.
     for (const t1 = performance.now(); performance.now() - t1 < 20000;) {
       const set2 = MONSTER_FRAMES[type], cap2 = _lxShrinkCap(_mobFrameBase(m));
-      if (set2 && set2.idle && set2.walk && set2.idle._lxShrunkCap === cap2 && set2.walk._lxShrunkCap === cap2) break;
+      if (set2 && [set2.idle, set2.walk].some((a) => a && a._lxShrunk && a._lxShrunkCap === cap2)) break;   // v0.30.x — the drawn set (see above)
       await new Promise(r => setTimeout(r, 100));
     }
     clearInterval(pin);
