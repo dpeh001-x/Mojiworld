@@ -8,7 +8,7 @@
 //   - the bond is a pill, lit mint on the H-slot MojiMon (the only one paying out), with the same tooltip;
 //   - Allocate points: a "N free" chip and a "max 15 per stat" chip, and each stat a row of candy - / + steppers,
 //     the value, a little meter filling up to the cap, and the bonus - HP pink, ATK butter, DEF sky;
-//   - no MojiMon yet: a night-meadow card - the snail crawls over a hill leaving a glitter trail, three "?" slots wait.
+//   - no MojiMon yet: a pop-comic panel - black, a yellow slash, hot-pink halftone; the snail bursts out of a yellow starburst, three "?" badges.
 // Same handlers (_mojimonUi.upg / assign / summon), same numbers and the same disabled rules (- is now also greyed
 // at 0, where it did nothing). Stylesheet: scripts/_mm_roster.css.txt, added once by _mmRosterCss(); the markup is
 // scripts/_mm_roster.js.txt.

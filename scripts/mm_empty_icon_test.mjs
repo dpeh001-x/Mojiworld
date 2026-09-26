@@ -1,10 +1,11 @@
-// The empty MojiMon card: a night-meadow scene around the game's snail sprite (cropped, black-inked, rimmed).
+// The empty MojiMon card: a pop-comic panel around the game's snail sprite (cropped, black-inked, paper-rimmed).
 //   node scripts/mm_empty_icon_test.mjs
 //     MOJI_GAME_FILE=<build.html>   test a private build (serve.js swaps it in for the game URL)
 //     MOJI_DATA_REF=origin/main     serve data/ tables from a git ref, for when the working copy's are stale
 //     MOJI_SHOT_DIR=<dir>           also save a close-up of the card per viewport, to eyeball it
 // Per user: "Use the snail sprite as the mojimon" (after "something much cuter with a black outline"), then
-// "make it look more artistic": hill, moon, glitter trail and three ? slots, in the plush style of the cards above.
+// "make it look more artistic", then "make the snail bigger" + "more POP with more POP colours like pink black and
+// yellow": black / yellow slash / pink halftone, the snail on a starburst, a two-line pop title, three ? badges.
 // The card points at the LIVE sprite with a hand-set crop window, so the crop is re-measured here
 // against the real image: a redraw that no longer fits the window fails instead of clipping.
 import { createRequire } from 'node:module';
@@ -78,18 +79,39 @@ try {
     out.inside = r.width > 0 && r.left >= c.left - 0.5 && r.right <= c.right + 0.5 && r.top >= c.top - 0.5 && r.bottom <= c.bottom + 0.5;
     const under = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     out.visible = !!under && (under === el || ico.contains(under));
-    out.ink = (cs.filter.match(/rgb\(20, 12, 24\)/g) || []).length;
-    out.rim = (cs.filter.match(/rgb\(251, 234, 255\)/g) || []).length;
+    out.ink = (cs.filter.match(/rgb\(11, 10, 14\)/g) || []).length;
+    out.rim = (cs.filter.match(/rgb\(244, 241, 234\)/g) || []).length;
     out.anim = getComputedStyle(ico).animationName;
-    // The night-meadow scene around the snail (per user: "make it look more artistic").
-    const ground = card.querySelector('svg.mmr-ground'), gr = ground && ground.getBoundingClientRect();
+    // The pop-comic panel (per user: "more POP with more POP colours like pink black and yellow").
+    const cc = getComputedStyle(card);
+    const burst = card.querySelector('.mmr-burst'), br = burst && burst.getBoundingClientRect();
     const slots = [...card.querySelectorAll('.mmr-slots i')], tw = [...card.querySelectorAll('.mmr-trail .tw')];
-    out.scene = { ground: !!ground, moon: !!card.querySelector('svg.mmr-moon'), trail: !!card.querySelector('svg.mmr-trail'),
+    out.scene = { burst: !!burst, dots: !!card.querySelector('.mmr-dots'), trail: !!card.querySelector('svg.mmr-trail'),
       sparkles: tw.length, slots: slots.length, slotText: slots.map((s) => s.textContent).join('') };
-    out.spill = [...card.children].filter((ch) => { const q = ch.getBoundingClientRect(); return q.left < c.left - 0.5 || q.right > c.right + 0.5 || q.top < c.top - 0.5 || q.bottom > c.bottom + 0.5; }).map((ch) => ch.className.baseVal || ch.className);
-    out.onGround = !!gr && r.bottom >= gr.top && r.bottom <= c.bottom;
-    const et = getComputedStyle(card.querySelector('.mmr-et'));
-    out.gradTitle = /linear-gradient/.test(et.backgroundImage) && (et.webkitBackgroundClip === 'text' || et.backgroundClip === 'text');
+    out.spill = [...card.children].filter((ch) => { const q = ch.getBoundingClientRect(); return q.width > 0 && (q.left < c.left - 0.5 || q.right > c.right + 0.5 || q.top < c.top - 0.5 || q.bottom > c.bottom + 0.5); }).map((ch) => ch.className.baseVal || ch.className);
+    const mx = r.left + r.width / 2, my = r.top + r.height / 2;
+    out.onBurst = !!br && mx > br.left && mx < br.right && my > br.top && my < br.bottom;
+    out.palette = { pink: /rgb\(255, 45, 149\)/.test(cc.backgroundImage), yellow: /rgb\(243, 245, 66\)/.test(cc.backgroundImage), ink: /rgb\(11, 10, 14\)/.test(cc.backgroundImage) };
+    const etEl = card.querySelector('.mmr-et'), et = getComputedStyle(etEl), esEl = card.querySelector('.mmr-es'), es = getComputedStyle(esEl);
+    out.popTitle = { fill: et.color, stroke: parseFloat(et.webkitTextStrokeWidth), strokeColor: et.webkitTextStrokeColor,
+      copy: /rgb\(243, 245, 66\)/.test(et.textShadow), lines: Math.round(etEl.offsetHeight / parseFloat(et.lineHeight)) };
+    out.tape = { bg: es.backgroundColor, lines: Math.round((esEl.clientHeight - parseFloat(es.paddingTop) - parseFloat(es.paddingBottom)) / parseFloat(es.lineHeight)) };
+    const etx = card.querySelector('.mmr-etx').getBoundingClientRect(), sl = card.querySelector('.mmr-slots').getBoundingClientRect();
+    out.badgesClear = sl.left > etx.right;
+    // The paper edge must survive the low-effects mode, which strips every box-shadow (html.lx-nobackdrop).
+    const root = document.documentElement, hadLow = root.classList.contains('lx-nobackdrop');
+    // Wait after each toggle: under reduced motion the game gives elements a 0.01s transition, and a read taken
+    // the instant the class flips catches box-shadow mid-transition (transparent 0px) - a false alarm. Not rAFs:
+    // headless fires several per sim step, so two of them can land inside those 10ms.
+    const settle = () => new Promise((res) => setTimeout(res, 100));
+    root.classList.remove('lx-nobackdrop'); await settle();
+    const hi = getComputedStyle(card);
+    out.frame = { edge: hi.outlineStyle === 'solid' && /rgb\(244, 241, 234\)/.test(hi.outlineColor) && parseFloat(hi.outlineWidth) >= 2, slab: /rgb\(255, 45, 149\)/.test(hi.boxShadow) };
+    root.classList.add('lx-nobackdrop'); await settle();
+    const low = getComputedStyle(card);
+    out.frame.lowEdge = low.outlineStyle === 'solid' && parseFloat(low.outlineWidth) >= 2;
+    out.frame.lowSlabDropped = low.boxShadow === 'none';
+    if (!hadLow) root.classList.remove('lx-nobackdrop');
     out.moving = { crawl: out.anim, slot: slots[0] ? getComputedStyle(slots[0]).animationName : 'none', trail: tw[0] ? getComputedStyle(tw[0]).animationName : 'none',
       sparkBefore: getComputedStyle(card, '::before').animationName, sparkAfter: getComputedStyle(card, '::after').animationName };
     // Load the very image the card uses, then map the CSS crop back onto its pixels.
@@ -125,17 +147,26 @@ try {
       check(M.snail && M.extras === 0 && M.icoText === '', `${name}: the icon is the snail, no emoji or old buddy left`, M);
       check(M.url === 'Sprites/monsters/snail.webp', `${name}: it is the game's own snail sprite`, M.url);
       check(M.loaded === true, `${name}: that image really loads`, M.loaded);
-      check(M.cssW === 70 && M.cssH === 49, `${name}: drawn at 70x49`, { w: M.cssW, h: M.cssH });
+      check(M.cssW === 104 && M.cssH === 72, `${name}: drawn at 104x72 (half as big again as 70x49)`, { w: M.cssW, h: M.cssH });
       const mg = M.margins || {}, vals = Object.values(mg);
       check(vals.length === 4 && vals.every((v) => v >= 0 && v <= 24), `${name}: the crop holds the whole snail with a thin margin (canvas px)`, mg);
       check(M.inside, `${name}: fully inside the card`, M);
       check(M.visible, `${name}: nothing covers it`, M);
-      check(M.ink >= 4 && M.rim >= 4, `${name}: black ink ring plus the pale rim that keeps it visible on the dark card`, { ink: M.ink, rim: M.rim });
+      check(M.ink >= 4 && M.rim >= 4, `${name}: black ink ring plus the paper rim`, { ink: M.ink, rim: M.rim });
       const sc = M.scene || {};
-      check(sc.ground && sc.moon && sc.trail && sc.sparkles >= 2 && sc.slots === 3 && sc.slotText === '???', `${name}: the scene is all there - hill, moon, glitter trail, three ? slots`, sc);
+      check(sc.burst && sc.dots && sc.trail && sc.sparkles >= 2 && sc.slots === 3 && sc.slotText === '???', `${name}: the panel is all there - starburst, halftone, glitter trail, three ? badges`, sc);
       check(Array.isArray(M.spill) && M.spill.length === 0, `${name}: nothing spills out of the card`, M.spill);
-      check(M.onGround === true, `${name}: the snail stands on the hill`, M.onGround);
-      check(M.gradTitle === true, `${name}: the title wears the headings' pastel gradient`, M.gradTitle);
+      check(M.onBurst === true, `${name}: the snail sits on its starburst`, M.onBurst);
+      const pal = M.palette || {};
+      check(pal.pink && pal.yellow && pal.ink, `${name}: the backdrop is pink, black and yellow`, pal);
+      const pt = M.popTitle || {};
+      check(pt.fill === 'rgb(255, 45, 149)' && pt.stroke >= 4 && pt.strokeColor === 'rgb(11, 10, 14)' && pt.copy, `${name}: the title is hot pink in a thick black stroke with a yellow copy`, pt);
+      check(pt.lines === 2, `${name}: the title stacks on exactly two lines`, pt.lines);
+      check(M.tape && M.tape.bg === 'rgb(243, 245, 66)' && M.tape.lines === 1, `${name}: the subtitle is one line of yellow tape`, M.tape);
+      check(M.badgesClear === true, `${name}: the ? badges clear the text`, M.badgesClear);
+      const fr = M.frame || {};
+      check(fr.edge && fr.slab, `${name}: a paper edge and a pink offset slab frame it`, fr);
+      check(fr.lowEdge && fr.lowSlabDropped, `${name}: in low-effects mode the edge stays and only the slab drops`, fr);
       const mv = M.moving || {}, still = Object.values(mv).every((v) => v === 'none');
       check(motion ? (mv.crawl === 'mmr-crawl' && mv.slot === 'mmr-bob' && mv.trail === 'mmc-tw' && mv.sparkBefore === 'mmc-tw') : still,
         `${name}: ${motion ? 'the snail crawls, the slots bob, the sparkles twinkle' : 'nothing moves under reduced motion'}`, mv);
