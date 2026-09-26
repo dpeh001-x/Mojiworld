@@ -14,7 +14,10 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+import { fileURLToPath } from 'node:url';
+// v0.30.x — the tree this test lives in (it hardcoded the SHARED working copy, which grades whatever build that checkout
+// happens to hold - routinely dozens of commits behind, with other sessions' edits in it). MOJI_SERVE_ROOT overrides.
+const ROOT = (process.env.MOJI_SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')).replace(/\\/g, '/');
 const require = createRequire(import.meta.url);
 const { chromium } = require(ROOT + '/node_modules/playwright-core');
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
@@ -59,6 +62,12 @@ try {
   const R = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const out = {};
+    // v0.30.x — a fresh character's tutorial intro card (startTutorial -> _playStoryBeat('tutorial_intro')) opens once
+    // the Void eye-zoom clears (audit F5: up to ~7 s after creation), which is after the skip loop above has moved on.
+    // It is a real pause owner, so King Gloopaloo stood frozen through all three patterns and threw nothing. Mark the
+    // story beats seen, as a returning player's save has them: the tour then opens as its non-blocking dock.
+    player._storyBeatsSeen = player._storyBeatsSeen || {};
+    if (typeof STORY_BEATS === 'object') for (const k in STORY_BEATS) player._storyBeatsSeen[k] = true;
     try { loadMap('gelwaterGrotto'); game.paused = false; } catch (e) { out.mapErr = String(e); }
     await sleep(1200);
     if (!game.monsters.some((x) => x.type === 'king')) {
@@ -115,6 +124,7 @@ try {
         }
       }
       out.projSizes = sizes;
+      out.pausedAtEnd = !!game.paused;   // v0.30.x — if this is true with no balls, the fight never ran (see the card note above)
     }
     // --- the idle / walk timing ---
     out.ft = {
@@ -125,6 +135,7 @@ try {
   });
   console.log('  map ' + R.map + ' | frames ' + R.framesRan + ' | feather list ' + JSON.stringify(R.featherList));
   console.log('  bottom rows  now ' + JSON.stringify(R.crisp) + '   with the old opt-in ' + JSON.stringify(R.faded));
+  console.log('  paused at the end of the projectile phase: ' + R.pausedAtEnd);
   console.log('  projectile sizes ' + JSON.stringify(R.projSizes) + ' | idle ft ' + JSON.stringify(R.ft && R.ft.idle) + ' walk ft ' + JSON.stringify(R.ft && R.ft.walk));
   const C = R.crisp || {}, Fd = R.faded || {}, P = R.projSizes || {}, FT = R.ft || {};
   ok('FRAMES RAN: the sim actually stepped', (R.framesRan | 0) > 10, `${R.framesRan} frames`);

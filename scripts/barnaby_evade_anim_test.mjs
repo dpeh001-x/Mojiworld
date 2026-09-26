@@ -71,6 +71,11 @@ const r = await page.evaluate(async () => {
   if (c && !player.cls) { try { c.click(); } catch (e) {} }
   const g = document.getElementById('class-select-modal'); if (g) g.style.display = 'none';
   player.level = 90; player.hp = player.maxHp = 9e8;
+  // v0.30.x — a fresh character's tutorial intro card (startTutorial -> 'tutorial_intro') opens on a delayed timer once
+  // the Void eye-zoom clears (audit F5). When it lands mid-toss it pauses the sim with him frozen in the air, and the
+  // landing never stamps its duck (LANDING read false 1 run in ~2). A returning player's save has these seen.
+  player._storyBeatsSeen = player._storyBeatsSeen || {};
+  if (typeof STORY_BEATS === 'object') for (const k in STORY_BEATS) player._storyBeatsSeen[k] = true;
   loadMap('forest');
   for (let i = 0; i < 240; i++) { if (game.currentMap === 'forest') break; await new Promise((res) => requestAnimationFrame(res)); }
   for (let i = 0; i < 20; i++) await new Promise((res) => requestAnimationFrame(res));
@@ -91,6 +96,20 @@ const r = await page.evaluate(async () => {
   b = game.monsters[game.monsters.length - 1];
   if (!b) return { ...out, noBoss: true };
   b.currentHp = b.maxHp = 9e9;
+  // v0.30.x — spawn queues his sets for an OFF-THREAD bake (_lxBossBakeQueue, v0.30.775/790) and, until a set has one,
+  // the draw holds his last drawn canvas as a stand-in (_lxBossStandIn) rather than bake a full-size frame on the main
+  // thread. On a cold localhost page that queue sits behind thousands of parse-time image requests, so the first hop
+  // could end before the weave set had a single bake (air weave 0, 1 run in ~2). Wait for the queue to idle and the
+  // weave / duck frames to carry their bakes (bounded), as a fight that has been on screen for a moment does.
+  // ready = what _lxBossStandIn accepts without standing in: a canvas, a frame with its bake, or one under the set's cap
+  const _baked = (im) => !!im && (im.tagName === 'CANVAS' || !!im._lxBakedCv || (im.naturalWidth > 0 && typeof _lxShrinkCap === 'function'
+    && Math.max(im.naturalWidth, im.naturalHeight) <= _lxShrinkCap(Math.max(720, (im._lxSet && im._lxSet._lxBaseMin) || 0))));
+  for (let i = 0, t0 = performance.now(); performance.now() - t0 < 45000; i++) {
+    const idle = (typeof _LX_BOSS_BAKE_Q === 'undefined' || _LX_BOSS_BAKE_Q.length === 0) && (typeof _lxBakeInFlight === 'undefined' || _lxBakeInFlight === 0);
+    if (idle && wArr.every(_baked) && dArr.every(_baked)) break;
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  out.bakedBeforeToss = wArr.filter(_baked).length + dArr.filter(_baked).length;
   // Hook by REFERENCE (frames may be right-sized into <canvas> with no .src) —
   // and count ONLY draws onto the game canvas. _lxShrinkFrames right-sizes
   // frames by drawing the very same Image references into ITS OWN offscreen
@@ -99,16 +118,20 @@ const r = await page.evaluate(async () => {
   // no player ever saw (measured: exactly one phantom violation per run).
   const mainCv = document.getElementById('game-canvas') || document.querySelector('canvas');
   const seen = { weave: 0, duck: 0 };
-  const orig = CanvasRenderingContext2D.prototype.drawImage;
-  CanvasRenderingContext2D.prototype.drawImage = function (img, ...a) {
-    try {
-      if (this.canvas === mainCv) {
-        if (wArr.indexOf(img) >= 0) seen.weave++;
-        else if (dArr.indexOf(img) >= 0) seen.duck++;
-      }
-    } catch (e) {}
-    return orig.call(this, img, ...a);
+  // v0.30.x — hook the SOFT-DRAW funnel, not ctx.drawImage. _drawBossSprite hands the frame to _lxDrawSoft, which blits
+  // a plain/feather BAKE of it (another canvas), so a drawImage hook matching frames by reference counted nothing: the
+  // weave/duck checks failed, and the settled / zero-leak checks below passed without measuring anything.
+  const _soft0 = window._lxDrawSoft, _softTaps = [];
+  window._lxDrawSoft = function (c, img) {
+    try { if (c && (c === ctx || c.canvas === mainCv)) for (const tap of _softTaps) tap(img); } catch (e) {}
+    return _soft0.apply(this, arguments);
   };
+  // v0.30.699 (barnaby-frames) made his dashIn state wear the weave lean ON THE GROUND, by design (_LX_DASH_WEAVE). That
+  // is not hangtime and not a settled-boss violation, so a weave drawn while he is in a listed dash state counts apart.
+  const _dashW = (mm) => !!(typeof _LX_DASH_WEAVE !== 'undefined' && _LX_DASH_WEAVE[mm.type] && _LX_DASH_WEAVE[mm.type].has(mm.patternState));
+  seen.dashWeave = 0;
+  _softTaps.push((img) => { if (wArr.indexOf(img) >= 0) { if (_dashW(b)) seen.dashWeave++; else seen.weave++; } else if (dArr.indexOf(img) >= 0) seen.duck++; });
+  let softAll = 0; _softTaps.push(() => { softAll++; });
   game.paused = false;
   // Toss him: airborne long enough to weave, then land to duck.
   const toss = async () => {
@@ -126,6 +149,9 @@ const r = await page.evaluate(async () => {
   // whole organic 260ms window can elapse without a single game draw in it
   // (measured: duck 0 in ~1 run in 3), which is scheduler starvation, not a
   // wiring defect; at a real 60fps the window is ~15 drawn frames.
+  // v0.30.x — the stamp is written by drawMonster on the first drawn STEP after touch-down, which can trail the physics
+  // by a frame under headless jank (read in the same rAF it measured false ~1 run in 3). Give the draw that frame.
+  for (let i = 0; i < 3 && !((b._lxDuckUntil || 0) > 0); i++) await new Promise((res) => requestAnimationFrame(res));
   out.landStamped = (b._lxDuckUntil || 0) > 0;
   b._lxDuckUntil = performance.now() + 2500;
   const dBefore0 = seen.duck;
@@ -181,38 +207,37 @@ const r = await page.evaluate(async () => {
   const wkArr = (typeof BOSS_WALK_FRAMES !== 'undefined' && BOSS_WALK_FRAMES['young_confused_barnaby']) || [];
   const idArr = (typeof BOSS_IDLE_FRAMES !== 'undefined' && BOSS_IDLE_FRAMES['young_confused_barnaby']) || [];
   let chainMode = false, chainWalkIdle = 0, chainWeaveEarly = 0;
-  const orig2 = CanvasRenderingContext2D.prototype.drawImage;
-  CanvasRenderingContext2D.prototype.drawImage = function (img, ...a) {
-    try {
-      if (this.canvas === mainCv && chainMode) {
-        if (wkArr.indexOf(img) >= 0 || idArr.indexOf(img) >= 0) chainWalkIdle++;
-      }
-    } catch (e) {}
-    return orig2.call(this, img, ...a);
-  };
+  _softTaps.push((img) => { if (chainMode && (wkArr.indexOf(img) >= 0 || idArr.indexOf(img) >= 0)) chainWalkIdle++; });   // v0.30.x — the funnel (see above)
   b._lxDuckUntil = 0; b._lxAirFrames = 0;
   const wSeen0 = seen.weave;
   chainMode = true;
   b.y -= 6; b.vy = -14; b.onGround = false;
-  for (let i = 0; i < 3; i++) await new Promise((res) => requestAnimationFrame(res));
-  chainWeaveEarly = seen.weave - wSeen0;   // the vy gate: weave within 3 frames
-  for (let i = 0; i < 900; i++) { if (b.onGround && i > 10) break; await new Promise((res) => requestAnimationFrame(res)); }
+  let airMax = 0, landI = -1;   // v0.30.x — how the chained hop went: the draw-counted air frames and when he landed
+  // v0.30.x — three SIM steps (game.time), not three rAFs: headless fires several rAFs per step and the boss is drawn on
+  // the step, so a 3-rAF window could hold no drawn frame at all (weaveEarly read 0 about 1 run in 4).
+  const _gtHop = game.time | 0;
+  for (let i = 0; i < 120 && ((game.time | 0) - _gtHop) < 3; i++) { await new Promise((res) => requestAnimationFrame(res)); airMax = Math.max(airMax, b._lxAirFrames | 0); }
+  chainWeaveEarly = seen.weave - wSeen0;   // the vy gate: weave within 3 steps
+  for (let i = 0; i < 900; i++) { if (b.onGround && i > 10) { landI = i; break; } await new Promise((res) => requestAnimationFrame(res)); airMax = Math.max(airMax, b._lxAirFrames | 0); }
+  // the landing stamp is written by the NEXT drawn step after touch-down (drawMonster, not the physics), so give the
+  // draw that frame before reading it
+  for (let i = 0; i < 3 && !((b._lxDuckUntil || 0) > 0); i++) await new Promise((res) => requestAnimationFrame(res));
   const duckAtLand = (b._lxDuckUntil || 0) > 0;
   // chained hop, inside the duck window
   b.y -= 6; b.vy = -14; b.onGround = false;
   for (let i = 0; i < 900; i++) { if (b.onGround && i > 10) break; await new Promise((res) => requestAnimationFrame(res)); }
   chainMode = false;
-  CanvasRenderingContext2D.prototype.drawImage = orig2;
-  out.chain = { weaveEarly: chainWeaveEarly, duckAtLand, walkIdleLeaks: chainWalkIdle,
+  out.chain = { weaveEarly: chainWeaveEarly, duckAtLand, airMax, landI, walkIdleLeaks: chainWalkIdle,
                 weaveTotal: seen.weave - wSeen0 };
-  CanvasRenderingContext2D.prototype.drawImage = orig;
+  out.softDraws = softAll;   // v0.30.x — every soft-draw onto the game canvas: > 0 proves the hook sees the render
+  window._lxDrawSoft = _soft0;
   out.onGround = b.onGround;
   game.monsters = [];
   return out;
 });
 await browser.close();
 
-console.log(`  live: loaded=${JSON.stringify(r.loaded)} air=${JSON.stringify(r.airSeen)} afterLand=${JSON.stringify(r.afterLand)} settled=${JSON.stringify(r.settledDelta)}`);
+console.log(`  live: softDraws=${r.softDraws} bakedBeforeToss=${r.bakedBeforeToss}/18 loaded=${JSON.stringify(r.loaded)} air=${JSON.stringify(r.airSeen)} afterLand=${JSON.stringify(r.afterLand)} settled=${JSON.stringify(r.settledDelta)}`);
 if (r.chain) console.log(`  flow: duckHold=${JSON.stringify(r.duckHold)} weavePair=${JSON.stringify(r.weavePair)} chain=${JSON.stringify(r.chain)}`);
 
 check(r.stores && r.stores.weave && r.stores.duck, 'the weave/duck frame stores exist', r.stores);
@@ -221,7 +246,7 @@ check(!r.noBoss, 'barnaby spawned', r.noBoss);
 check(r.airSeen && r.airSeen.weave > 0, 'AIRBORNE: the weave set draws while he is in the air (was the walk loop)', r.airSeen);
 check(r.landStamped === true, 'LANDING: touching down stamps the duck window (the wiring)', r.landStamped);
 check(r.afterLand && r.afterLand.duck > r.airSeen.duck, 'and the duck set draws while the window is open (the render path)', r.afterLand);
-check(r.settledDelta && r.settledDelta.frames >= 20 && r.settledDelta.violations === 0,
+check(r.softDraws > 0 && r.settledDelta && r.settledDelta.frames >= 20 && r.settledDelta.violations === 0,   // v0.30.x — and the hook saw the render
       'SETTLED: grounded frames past the duck window never draw an evade set', r.settledDelta);
 // The v0.29.960 flow contract. Skipped wholesale on builds that predate it.
 if (r.duckHold !== undefined || r.weavePair !== undefined) {

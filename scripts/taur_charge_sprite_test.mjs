@@ -55,8 +55,13 @@ await page.evaluate(() => {
   window._lxDrawSoft = function (ctx, img, dx, dy, w, h) {
     try {
       const m = window.__taur;
-      if (m && img && img.src) {
-        const f = img.src.slice(img.src.lastIndexOf('/') + 1);
+      // v0.30.x — a BAKED frame is a <canvas> with no .src; its file is on _lxSrc (an Image, or a URL). Since v0.30.1086
+      // the zodiac pickers bake their sets on draw, so once Taur's charge set had baked this recorded nothing at all and
+      // the run read "never observed a charging frame" (timing-dependent: it depends on whether the bake beat the charge).
+      let u = img && img.src, o = img && img._lxSrc;
+      for (let i = 0; !u && o && i < 4; i++) { u = (typeof o === 'string') ? o : o.src; o = (typeof o === 'string') ? null : o._lxSrc; }
+      if (m && u) {
+        const f = u.slice(u.lastIndexOf('/') + 1);
         window.__seen.push({ f, charging: !!m._braceDashing });
       }
     } catch (e) {}
@@ -67,6 +72,16 @@ await page.evaluate(() => {
   window.__taur = m;
 });
 await page.waitForTimeout(1200);
+// v0.30.x — take the BAKED path every run: bake Taur's charge set before the charge (what spawn-time pre-baking and a
+// first sighting do in play). Bounded; a set still downloading falls through and the run reads the Images instead.
+await page.waitForFunction(() => {
+  const a = (typeof ZODIAC_CHARGE_FRAMES !== 'undefined') && ZODIAC_CHARGE_FRAMES.taurus;
+  if (!a || !a.length) return true;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(a, 720);
+  return a.every((f) => f && f.tagName === 'CANVAS');
+}, null, { timeout: 45000, polling: 250 }).catch(() => {});
+const _baked = await page.evaluate(() => { const a = ZODIAC_CHARGE_FRAMES.taurus || []; return a.filter((f) => f && f.tagName === 'CANVAS').length + '/' + a.length; });
+console.log('  taurus charge frames baked before the charge: ' + _baked);
 
 // Drive the brace-dash directly: the trait's own fields, so this is the real
 // state the renderer sees rather than a flag invented by the test.
