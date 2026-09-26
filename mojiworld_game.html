@@ -15593,6 +15593,48 @@ The sleeping world is listening.</div>
   <script src="data/tile_crops.js"></script>
   <script src="data/emoji_atlas.js"></script>
 <script>
+// v0.30.1174 emoji-atlas-cdn - ONE RETRY FOR ART-CDN IMAGES (web build only). The web build streams art from jsDelivr, and a
+// transient failure there (seen: ERR_BLOCKED_BY_ORB on an NPC sprite) used to be final - the loader fell through to its
+// .png guess or the procedural fallback. There is no single image loader, but every script-set src passes this one door
+// (the boot image hold wraps it too). The two literals below are rewrite bait: the deploy turns them into the CDN folders,
+// and only then is anything installed. A CDN image's FIRST error is kept from the page's own handlers (a capture listener
+// on the image runs first), the same URL is asked again 1.2 s later with a cache-busting query, and whatever that second
+// try does reaches the page as usual. src still reads back as the URL the page set.
+(function _lxCdnImageRetry() {
+  try {
+    const bases = ['Sprites/', 'backgrounds/'].filter((b) => /^https?:\/\//.test(b));
+    if (!bases.length || typeof HTMLImageElement === 'undefined' || window._lxCdnRetry) return;
+    const P = HTMLImageElement.prototype, d = Object.getOwnPropertyDescriptor(P, 'src');
+    if (!d || !d.set || !d.get) return;
+    const onCdn = (v) => { for (let i = 0; i < bases.length; i++) if (v.lastIndexOf(bases[i], 0) === 0) return true; return false; };
+    let retries = 0;
+    const onErr = function (ev) {
+      const u = this._lxCdnAsk;
+      if (!u) return;   // v0.30.1174 emoji-atlas-cdn - not a CDN image, or the retry itself failed: the page hears it
+      this._lxCdnAsk = null;
+      ev.stopImmediatePropagation();
+      const img = this, tok = img._lxCdnTok = {};
+      setTimeout(() => {
+        if (img._lxCdnTok !== tok) return;   // v0.30.1174 emoji-atlas-cdn - the page set another src meanwhile
+        retries++;
+        const shown = d.get.call(img);
+        d.set.call(img, u + (u.indexOf('?') >= 0 ? '&' : '?') + 'lxretry=1');
+        img._lxCdnShown = shown; img._lxCdnBust = d.get.call(img);
+      }, 1200);
+    };
+    Object.defineProperty(P, 'src', { configurable: true, enumerable: d.enumerable,
+      get() { const r = d.get.call(this); return (this._lxCdnBust && r === this._lxCdnBust) ? this._lxCdnShown : r; },
+      set(v) {
+        this._lxCdnAsk = null; this._lxCdnTok = null; this._lxCdnBust = null;
+        if (typeof v === 'string' && onCdn(v)) {
+          this._lxCdnAsk = v;
+          if (!this._lxCdnHooked) { this._lxCdnHooked = true; this.addEventListener('error', onErr, true); }
+        }
+        d.set.call(this, v);
+      } });
+    window._lxCdnRetry = { bases, count: () => retries };
+  } catch (e) {}
+})();
 // v0.30.634 no-emoji - every emoji the game draws becomes a custom ludo.ai icon (per user: "ensure
 // that no emojis are used, if they are they should be changed to customised images"). 387 distinct
 // emoji in 2,531 places reach the screen through fillText and the DOM, so the swap lives at those
@@ -15604,6 +15646,10 @@ The sleeping world is listening.</div>
 (function () {
   if (typeof window === 'undefined' || window._lxEmojiRuns) return;
   const A = window.LX_EMOJI_ATLAS || null;
+  // v0.30.1174 emoji-atlas-cdn - ONE resolved atlas URL for all three sinks (canvas, the .lx-emo page tiles, SVG). On the web
+  // build 'Sprites/' below is rewritten to the art CDN; data/*.js is not, so the bare A.src asked the game's own site
+  // (404). v0.30.888 fixed only the canvas image; the page tiles and SVG drew empty boxes.
+  const SRC = (A && A.src) ? String(A.src).replace(/^Sprites\//, 'Sprites/') : '';
   const RE = /(?:[\u{1F1E6}-\u{1F1FF}]{2})|(?:[#*0-9]\uFE0F?\u20E3)|(?:\p{Extended_Pictographic}[\uFE0E\uFE0F]?[\u{1F3FB}-\u{1F3FF}]?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?[\u{1F3FB}-\u{1F3FF}]?)*)/gu;
   const TEST = /[\u{1F1E6}-\u{1F1FF}\u20E3\p{Extended_Pictographic}]/u;
   const KEEP = new Set(['\u00A9', '\u00AE', '\u2122']);   // (c) (r) (tm) are typography, not emoji
@@ -15654,8 +15700,8 @@ The sleeping world is listening.</div>
     const im = document.createElementNS(NS, 'image');
     im.setAttribute('width', A.cols * c);
     im.setAttribute('height', A.rows * c);
-    im.setAttributeNS('http://www.w3.org/1999/xlink', 'href', A.src);
-    im.setAttribute('href', A.src);
+    im.setAttributeNS('http://www.w3.org/1999/xlink', 'href', SRC);   // v0.30.1174 emoji-atlas-cdn - the resolved URL, not A.src
+    im.setAttribute('href', SRC);
     sv.appendChild(im);
     return sv;
   };
@@ -15673,7 +15719,7 @@ The sleeping world is listening.</div>
     };
     // v0.30.888 launch audit: on the web build 'Sprites/' below is rewritten to the art CDN; data/*.js is not, so a bare
     // A.src asked the game's own site for the atlas (404) and every emoji icon drew blank.
-    IMG.src = String(A.src).replace(/^Sprites\//, 'Sprites/');
+    IMG.src = SRC;   // v0.30.1174 emoji-atlas-cdn - computed once at the top, shared with the page tiles and SVG
   }
   window._lxEmojiAtlasImg = IMG;
   // ---- canvas ----
@@ -15734,8 +15780,9 @@ The sleeping world is listening.</div>
   if (A && A.src) {
     const st = document.createElement('style');
     const K = 1.15, cols = A.cols || 1, rows = A.rows || 1;
+    // v0.30.1174 emoji-atlas-cdn - the tiles' background is the resolved SRC (was the raw A.src: a 404 on web, every tile blank)
     st.textContent = '.lx-emo{display:inline-block;width:' + K + 'em;height:' + K + 'em;vertical-align:-0.22em;margin:0 0.03em;'
-      + 'background-image:url("' + A.src + '");background-repeat:no-repeat;background-size:' + (cols * K) + 'em ' + (rows * K) + 'em;'
+      + 'background-image:url("' + SRC + '");background-repeat:no-repeat;background-size:' + (cols * K) + 'em ' + (rows * K) + 'em;'
       + 'overflow:hidden;text-indent:300%;white-space:nowrap;line-height:1;color:transparent;user-select:text;}';
     (document.head || document.documentElement).appendChild(st);
   }
@@ -15880,7 +15927,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1173';
+const GAME_VERSION = 'v0.30.1174';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -165357,9 +165404,13 @@ const _monsterCustomSfx = Object.create(null);   // 'type_kind' → Audio | null
 // (from cache) if it is ever needed again. 404 markers (null) cost nothing and are kept.
 const _MONSTER_CUSTOM_SFX_CAP = 24;
 const _monsterCustomSfxReady = [];
+// v0.30.1174 emoji-atlas-cdn - monster types with NO custom clip in audio/monster/. Probing one only produced a 404 on its first
+// hit and first death before the family clip took over; listed here, it goes straight to "unavailable" (null) and never asks.
+const _MONSTER_NO_CUSTOM_SFX = new Set(['sovCrownShard']);
 function _probeMonsterCustomSfx(type, kind) {
   const ck = type + '_' + kind;
   if (_monsterCustomSfx[ck] !== undefined) return;
+  if (_MONSTER_NO_CUSTOM_SFX.has(type)) { _monsterCustomSfx[ck] = null; return; }   // v0.30.1174 emoji-atlas-cdn - no file: no 404 probe
   const a = new Audio('audio/monster/mob_' + type + '_' + kind + '.mp3');
   a.loop = false;
   a._sfxBase = _MONSTER_SFX_TARGET_VOL;
