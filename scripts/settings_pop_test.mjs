@@ -6,6 +6,10 @@
 //     keep the black outline the v0.29 typography pass asked for;
 //   - each card's accent colours its "on" toggles; the row buttons are not squashed; nothing is cut off, and the
 //     footer stays on the bottom edge when the cards scroll.
+// v0.30.1102, the narrow view (per user: "can be further slightly improved"): an 800-900 px window and a landscape
+// touch phone keep both columns (the 820x600 window fits whole); one column only under 800 px, with the sliders
+// stretched across the row; a fade above the footer while there is more below, gone at the end and absent when
+// nothing scrolls; bigger switches on touch screens.
 //   node scripts/settings_pop_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -19,8 +23,8 @@ const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore', env: 
 await new Promise((r) => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const errs = [];
-const open = async (w, h) => {
-  const page = await (await b.newContext({ viewport: { width: w, height: h } })).newPage();
+const open = async (w, h, mobile) => {
+  const page = await (await b.newContext({ viewport: { width: w, height: h }, ...(mobile ? { isMobile: true, hasTouch: true } : {}) })).newPage();
   page.on('pageerror', (e) => errs.push(`${w}x${h}: ` + String(e).slice(0, 160)));
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof openSettingsModal === 'function', null, { timeout: 120000 });
@@ -50,17 +54,27 @@ const probe = () => {
     bgmuteOn: onBg('set-bgmute'), weatherOn: onBg('set-fx-weather'),
     fsBtn: btn('set-fullscreen-row'), hkBtn: btn('set-hotkeys-row'),
     fitsScreen: mr.top >= -1 && mr.bottom <= innerHeight + 1, doneVisible: !!done && rc(done).bottom <= mr.bottom + 1 && rc(done).top >= mr.top,
-    scrolls: m.scrollHeight > m.clientHeight + 1,
+    scrolls: m.scrollHeight > m.clientHeight + 1, sh: m.scrollHeight, w: Math.round(mr.width),
+    fade: getComputedStyle(m.querySelector('.actions'), '::before').opacity,
+    sliderW: Math.round(rc(document.getElementById('set-bgm')).width), toggleT: getComputedStyle(document.getElementById('set-mute')).transform,
   };
 };
 let page = await open(1280, 720);
 const D = await page.evaluate(probe);
 await page.close();
 page = await open(820, 600);
+const W = await page.evaluate(probe);
+await page.close();
+page = await open(760, 600);
 const N = await page.evaluate(probe);
 N.footer = await page.evaluate(async () => { const m = document.getElementById('settings-modal'); m.scrollTop = 120; await new Promise((r) => setTimeout(r, 150));
   const a = m.querySelector('.actions').getBoundingClientRect(), r = m.getBoundingClientRect(), k = r.height / m.offsetHeight;
   return { gap: Math.round((r.bottom - a.bottom) / k), bw: Math.round(parseFloat(getComputedStyle(m).borderBottomWidth)) }; });
+N.fadeEnd = await page.evaluate(async () => { const m = document.getElementById('settings-modal'); m.scrollTop = 1e9; await new Promise((r) => setTimeout(r, 200));
+  return getComputedStyle(m.querySelector('.actions'), '::before').opacity; });
+await page.close();
+page = await open(844, 390, true);
+const P = await page.evaluate(probe);
 await b.close(); srv.kill();
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const J = (o) => JSON.stringify(o);
@@ -72,8 +86,12 @@ ok('labels are Fredoka and keep the thick black outline (v0.29 typography, per u
 ok("a card's accent colours its on-toggles: Sound pink, Graphics yellow", D.bgmuteOn === 'rgb(255, 61, 139)' && D.weatherOn === 'rgb(255, 228, 92)', { sound: D.bgmuteOn, gfx: D.weatherOn });
 ok('the Fullscreen and Hotkeys buttons are not squashed (their words fit)', D.fsBtn && D.hkBtn && D.fsBtn.w >= 60 && D.hkBtn.w >= 60 && D.fsBtn.fits && D.hkBtn.fits, { fs: D.fsBtn, hk: D.hkBtn });
 ok('1280x720: the panel is on screen, Done in view, nothing cut off (fits or scrolls)', D.fitsScreen && D.doneVisible, { scrolls: D.scrolls });
-ok('narrow screen: the cards stack in one column', N.stacked && !N.side, { stacked: N.stacked });
-ok('narrow screen: the cards scroll and the footer rides the bottom edge', N.scrolls && N.footer.gap >= 0 && N.footer.gap <= N.footer.bw + 1, N.footer);
+ok('1280x720: all of it fits, so there is no "more below" fade', !D.scrolls && D.fade === '0', { scrolls: D.scrolls, fade: D.fade });
+ok('an 820x600 window keeps both columns at 740 px and fits whole (no scroll, no fade)', W.side && W.w === 740 && !W.scrolls && W.fade === '0', { side: W.side, w: W.w, sh: W.sh, fade: W.fade });
+ok('under 800 px (760x600) the cards stack in one column, sliders stretched across the row', N.stacked && !N.side && N.sliderW >= 180, { stacked: N.stacked, slider: N.sliderW });
+ok('one column: the cards scroll and the footer rides the bottom edge', N.scrolls && N.footer.gap >= 0 && N.footer.gap <= N.footer.bw + 1, N.footer);
+ok('one column: a fade above the footer while there is more below, gone at the end', N.fade === '1' && N.fadeEnd === '0', { top: N.fade, end: N.fadeEnd });
+ok('a landscape touch phone (844x390) keeps both columns, scrolls under 700 px of cards, with the fade and bigger switches', P.side && P.sh < 700 && P.fade === '1' && String(P.toggleT).startsWith('matrix(1.15'), { side: P.side, sh: P.sh, fade: P.fade, toggle: P.toggleT });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + J(q.x ?? '').slice(0, 240));
 console.log(`${results.filter((q) => q.pass).length}/${results.length} checks passed`);
