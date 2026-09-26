@@ -59,15 +59,18 @@ try {
       // per user: "Abit more black" - black cards, their point rows on a deep-purple plate
       bg: getComputedStyle(c).backgroundColor, plate: getComputedStyle(c.querySelector('.mmr-alloc')).backgroundColor,
       // per user: the circle round the monster was "ugly, please make it less opaque and beautify it" - a translucent glow
-      bub: (() => { const s = getComputedStyle(c.querySelector('.mmr-bub')); return { bg: s.backgroundColor, opaque: /rgb\(/.test(s.backgroundImage),
-        bw: parseFloat(s.borderTopWidth), ba: parseFloat((s.borderTopColor.match(/rgba\([^)]*,\s*([\d.]+)\)/) || [0, 1])[1]) }; })() }; };
+      // then "The bubbles can still be improved much more" - a glass orb: a gradient rim, a glare and glints on the front
+      bub: (() => { const el = c.querySelector('.mmr-bub'), s = getComputedStyle(el), rim = getComputedStyle(el, '::before'), glass = getComputedStyle(el, '::after');
+        return { bg: s.backgroundColor, opaque: /rgb\(/.test(s.backgroundImage), bw: parseFloat(s.borderTopWidth),
+          rim: /conic-gradient/.test(rim.backgroundImage), spin: rim.animationName, glass: (glass.backgroundImage.match(/radial-gradient/g) || []).length }; })() }; };
     return { ks, a: info(ks[0]), b: info(ks[1]), cap: MOJIMON_UPG_PT_CAP, pts: _mojimonPoints() };
   });
   console.log('cards', JSON.stringify(R));
   const { a, b } = R;
   check(/\bout\b/.test(a.cls) && a.name.includes('FIELDED') && a.hp === '70%' && !a.summon, 'the fielded MojiMon: a yellow-edged card, a FIELDED pill, its HP as a candy bar, no Summon', a);
-  check([a, b].every((x) => x.bub.bg === 'rgba(0, 0, 0, 0)' && !x.bub.opaque && x.bub.bw <= 2 && x.bub.ba <= 0.5),
-    'the bubble round each monster is a translucent glow: no solid fill, a thin faint ring', [a.bub, b.bub]);
+  check([a, b].every((x) => x.bub.bg === 'rgba(0, 0, 0, 0)' && !x.bub.opaque && x.bub.bw === 0 && x.bub.rim && x.bub.glass >= 3),
+    'the bubble round each monster is a glass orb: no solid fill, a gradient rim, a glare and glints on the front', [a.bub, b.bub]);
+  check(a.bub.spin === 'mmr-spin' && b.bub.spin === 'none', 'the fielded MojiMon\'s rim turns; the benched one\'s holds still', [a.bub.spin, b.bub.spin]);
   check([a, b].every((x) => x.bg === 'rgb(14, 10, 20)' && x.plate === 'rgb(31, 13, 54)'), 'black cards, their point rows on a deep-purple plate', [a.bg, a.plate, b.bg, b.plate]);
   check(JSON.stringify(a.stats) === JSON.stringify(a.want) && JSON.stringify(b.stats) === JSON.stringify(b.want), 'the stat pills show its real max HP, attack and damage reduction', [a.stats, a.want]);
   check(a.hon && a.hkey.includes('★') && /\bon\b/.test(a.bond) && !b.hon && b.hkey.includes('☆') && !/\bon\b/.test(b.bond), 'the H-slot MojiMon has the yellow ★ H and the lit bond; the other a plain ☆ H and a quiet bond', [a.hkey, b.hkey]);
