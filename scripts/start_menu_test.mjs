@@ -89,10 +89,11 @@ try {
   ok('Continue card visible with save', await page.isVisible('#menu-continue'));
   const sub = await page.textContent('#menu-continue-sub');
   ok('Continue card shows name/level/class/map', sub.includes('Aurora') && sub.includes('Lv.42') && sub.includes('Mage'), sub.trim());
-  ok('Continue card shows class crest', await page.evaluate(() => {
+  // title-pop: the Continue badge is a pop class sticker now; wait for it to load rather than sampling it once
+  ok('Continue card shows class crest', await page.waitForFunction(() => {
     const i = document.getElementById('menu-continue-icon');
-    return i && i.style.display !== 'none' && i.complete && i.naturalWidth > 0 && i.src.includes('class_crest_mage');
-  }));
+    return i && i.style.display !== 'none' && i.complete && i.naturalWidth > 0 && (i.src.includes('class_crest_mage') || i.src.includes('menu_pop_class_mage'));
+  }, null, { timeout: 8000 }).then(() => true, () => false));
 
   await page.click('#menu-backups');
   await page.waitForSelector('#backup-now-btn', { state: 'visible', timeout: 5000 });
