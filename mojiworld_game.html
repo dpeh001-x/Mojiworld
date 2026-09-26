@@ -15876,7 +15876,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1141';
+const GAME_VERSION = 'v0.30.1142';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -27635,7 +27635,7 @@ function _boonDexCheck() {
     for (const m of BOON_DEX_MILESTONES) {
       if (d.ms[m.key] || !m.test(t)) continue;
       d.ms[m.key] = Date.now();
-      if (m.coins && typeof _grantMojicoins === 'function') _grantMojicoins(m.coins, { full: true });
+      if (m.coins && typeof _grantMojicoins === 'function') _grantMojicoins(m.coins, { full: true, hold: true });   // v0.30.x full audit - held in a run, not dropped
       if (m.shards) player.setshards = (player.setshards | 0) + m.shards;
       if (m.slot) d.slotBonus = (d.slotBonus | 0) + m.slot;
       if (m.title) { if (!player.titles || typeof player.titles !== 'object') player.titles = {}; player.titles[m.title] = true; }
@@ -27786,6 +27786,9 @@ function rerollBoon(index) {
   for (let i = 0; i < 8 && newRoll === oldRoll; i++) newRoll = _rollBoonValue(def);
   player.mojicoins -= cost;
   boon.roll = newRoll;
+  // v0.30.x full audit - inside a Tower run this is run spending: the run-end restore hands the wallet back and re-takes
+  // only _spentInRun, so without this every reroll (and the god-roll it bought for the run) was free.
+  try { if (game.expedition && game.expedition.active) game.expedition._spentInRun = ((game.expedition._spentInRun | 0) + cost); } catch (e) {}
   boon.rerolls = (boon.rerolls || 0) + 1;
   _applyEquippedBoons();
   const delta = newRoll - oldRoll;
@@ -41067,6 +41070,16 @@ function _grantMojicoins(n, opts) {
   // in _completeExpedition is granted via direct assignment AFTER
   // _endExpedition flips active to false (v0.26.293), so it slips past
   // this guard correctly.
+  // v0.30.x full audit - a LIFETIME or DAILY reward (opts.hold: MojiDex / Boon Codex milestones, the daily challenge and
+  // login) is not the run's earnings. Those sites stamp themselves claimed first, so a reward that crossed inside a run
+  // was spent for 0 and could never fire again (Compendium Complete: 80,000 listed, 0 paid). Held on the run instead
+  // and paid by _expeditionRestorePlayer after the wallet restore; the value returned is what will be paid.
+  if (opts && opts.hold && typeof game !== 'undefined' && game.expedition && game.expedition.active) {
+    const _hm = (opts.full ? 1 : MOJICOIN_GAIN_MULT) * ((typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1) * ((typeof _lxDawnCoinMul === 'function') ? _lxDawnCoinMul() : 1);
+    const _held = Math.max(0, Math.floor(n * _hm));
+    game.expedition._heldCoins = (game.expedition._heldCoins || 0) + _held;
+    return _held;
+  }
   if (typeof game !== 'undefined' && game.expedition && game.expedition.active) return 0;
   const mult = (opts && opts.full) ? 1 : MOJICOIN_GAIN_MULT;
   // v0.29.352 — Slaughter Ladder coin boon (up to +10% at RECKONING). Applied
@@ -58469,12 +58482,12 @@ function _checkDexMilestones() {
       const key = String(m.frac);
       if (frac + 1e-9 >= m.frac && !game.dexMilestones[key]) {
         game.dexMilestones[key] = Date.now();
-        if (m.coins && typeof _grantMojicoins === 'function') _grantMojicoins(m.coins, { full: true });
+        const _mdGot = (m.coins && typeof _grantMojicoins === 'function') ? _grantMojicoins(m.coins, { full: true, hold: true }) : 0;   // v0.30.x full audit - held in a run
         if (m.shards) player.setshards = (player.setshards | 0) + m.shards;
         if (m.atk) game.dexPerm.atk += m.atk;
         if (m.def) game.dexPerm.def += m.def;
         const _stat = m.atk ? ` · +${m.atk} ATK/DEF (permanent)` : '';
-        if (typeof showToast === 'function') showToast(`✦ MojiDex: ${m.name} — +${m.coins.toLocaleString()} Mojicoins · +${m.shards}◈${_stat}`, 'legendary');
+        if (typeof showToast === 'function') showToast(`✦ MojiDex: ${m.name} — +${(_mdGot || m.coins).toLocaleString()} Mojicoins${(game.expedition && game.expedition.active) ? ' (paid when the run ends)' : ''} · +${m.shards}◈${_stat}`, 'legendary');   // v0.30.x full audit - what is paid
         if (typeof flash === 'function') flash(0.25);
         try { audio.play('levelup'); } catch (e) {}
         changed = true;
@@ -66351,9 +66364,12 @@ function checkDaily() {
     const bonus = 200 * Math.min(7, streak);
     const _streakMiles = { 14: 3000, 30: 8000, 60: 20000, 100: 50000 };
     const _mileBonus = _streakMiles[streak] || 0;
-    const _granted = _grantMojicoins(bonus + _mileBonus);  // v0.26.056 — global currency scalar
+    // v0.30.x full audit - granted as two payouts so each toast shows what IT paid: the milestone toast printed the raw
+    // bonus (+3,000 on day 14) while the currency scalar paid 1,125 of it. Held (not dropped) if the day turns in a run.
+    const _granted = _grantMojicoins(bonus, { hold: true });  // v0.26.056 — global currency scalar
+    const _mileGot = _mileBonus ? _grantMojicoins(_mileBonus, { hold: true }) : 0;
     showToast(`🌅 Daily login +${_granted} Mojicoins (streak ${streak})`, 'epic');
-    if (_mileBonus) { showToast('🔥 ' + streak + '-day streak! Milestone bonus +' + _mileBonus + ' Mojicoins', 'legendary'); flash(0.4); }
+    if (_mileBonus) { showToast('🔥 ' + streak + '-day streak! Milestone bonus +' + _mileGot + ' Mojicoins', 'legendary'); flash(0.4); }
     flash(0.2); audio.play('levelup');
     // Track per-day sets for visit/talk so repeats don't count
     game.dailyState = { day, streak, challenge: c.id, progress: 0, claimed: false, seenMaps: [], seenNpcs: [] };
@@ -66389,7 +66405,7 @@ function tickDaily(kind, n) {
   }
   if (d.progress >= c.goal) {
     d.claimed = true;
-    if (c.reward.mojicoins) _grantMojicoins(c.reward.mojicoins);  // v0.26.056 — global currency scalar
+    if (c.reward.mojicoins) _grantMojicoins(c.reward.mojicoins, { hold: true });  // v0.26.056 — global currency scalar · v0.30.x held in a run, not dropped
     if (c.reward.sp)    player.skillPoints += c.reward.sp;
     showToast('✔ Daily challenge complete!', 'legendary');
     flash(0.35); audio.play('levelup');
@@ -70648,6 +70664,14 @@ _expeditionRestorePlayer = function (snap) {
   try {
     const _spent = (game.expedition && game.expedition._spentInRun) | 0;
     if (_spent > 0) { if (typeof chargeCoins === 'function') chargeCoins(_spent); else player.mojicoins = Math.max(0, player.mojicoins - _spent); game.expedition._spentInRun = 0; }
+  } catch (e) {}
+  // v0.30.x full audit - ...and PAY what the run held for later (lifetime / daily rewards earned inside it, see _grantMojicoins).
+  try {
+    const _held = (game.expedition && game.expedition._heldCoins) || 0;
+    if (_held > 0) {
+      player.mojicoins = Math.min(1e12, Math.max(0, (player.mojicoins || 0) + _held)); game.expedition._heldCoins = 0;
+      if (typeof showToast === 'function') showToast('\u2726 Rewards held for you through the Tower: +' + _held.toLocaleString() + ' Mojicoins', 'legendary');
+    }
   } catch (e) {}
   if (typeof snap.bankBalance === 'number') player.bankBalance = Math.min(1e12, Math.max(0, snap.bankBalance));   // v0.29.311 — undo any in-tower bank drain (death haircut)
   if (snap.equipped) player.equipped = snap.equipped;
