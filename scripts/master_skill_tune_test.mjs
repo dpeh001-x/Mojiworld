@@ -83,7 +83,8 @@ const cds = await page.evaluate(() => ({
   nrB: SKILLS.nightreaper_ult.cd, nrX: SKILLS.nightreaper_mark.cd,
   drX: SKILLS.dragoon_skylance.cd, baB: SKILLS.ballista_ult.cd,
 }));
-ok('Nightreaper B cooldown 50s -> 45s', cds.nrB === 45000, `${cds.nrB} ms`);
+// v0.30.x - v0.30.778 (the user's Skill Editor numbers) moved Bloodmoon Domain 45 s -> 40 s.
+ok('Nightreaper B cooldown 40s (v0.30.356 asked 45s; v0.30.778, the user\'s Skill Editor)', cds.nrB === 40000, `${cds.nrB} ms`);
 ok('Nightreaper X cooldown 22s -> 25s', cds.nrX === 25000, `${cds.nrX} ms`);
 ok('Dragoon X cooldown 11s -> 25s', cds.drX === 25000, `${cds.drX} ms`);
 ok('Ballista B cooldown untouched at 60s', cds.baB === 60000, `${cds.baB} ms`);
@@ -94,24 +95,25 @@ const src = await page.evaluate(async () => {
   const s = await r.text();
   const has = (x) => s.split(x).length - 1;
   return {
-    nrShard: has('damage: getAtk() * 0.76 + 8'),
+    // v0.30.x - the live literals (v0.30.785 / v0.30.814: the user's Skill Editor patches).
+    nrShard: has('damage: getAtk() * 1 + 5, owner: \'player\', skill: \'shard\', bspr: \'bult_nightreape'),
     nrShardOld: has('damage: getAtk() * 1.4 + 8'),
-    nrNova: has("performAround(380, 2.2, { color: '#ff2244'"),
-    nrDagger: has('getAtk() * 0.62 * (isCrit ? getCritDmg() : 1)'),
+    nrNova: has("performAround(380, 3.8, { color: '#ff2244'"),
+    nrDagger: has('getAtk() * 0.9 * (isCrit ? getCritDmg() : 1)'),
     nrSnap: has('getAtk() * 1.24 + 25'),
-    drSlam: has("performAround(340, 8.15, { color:'#88ccff'"),
+    drSlam: has("performAround(340, 16, { color:'#88ccff'"),   // v0.30.1050 (per user) - 8 -> 16
     drExtra: has('dragoon_skylance:  { extraHit: 2.34 }'),
-    baTurretUntouched: has('damage: Math.floor(getAtk() * 0.9) + 6'),
+    baTurretUntouched: has('damage: Math.floor(getAtk() * 2.1) + 25,'),   // v0.30.814 - 0.9x + 6 -> 2.1x + 25
   };
 });
-ok('Bloodmoon shuriken 1.4x -> 0.76x ATK, and the old value is gone',
+ok('Bloodmoon shuriken 1x + 5 (v0.30.785; v0.30.356 set 0.76x), and the 1.4x original is gone',
   src.nrShard === 1 && src.nrShardOld === 0, JSON.stringify({ new: src.nrShard, old: src.nrShardOld }));
-ok('Bloodmoon nova 4.0x -> 2.2x ATK', src.nrNova === 1);
-ok('Eclipse dagger 1.0x -> 0.62x ATK', src.nrDagger === 1);
+ok('Bloodmoon nova 3.8x (v0.30.814; v0.30.356 set 2.2x)', src.nrNova === 1);
+ok('Eclipse dagger 0.9x (v0.30.814; v0.30.356 set 0.62x)', src.nrDagger === 1);
 ok('Eclipse snap 2.0x -> 1.24x ATK', src.nrSnap === 1);
-ok('Sky Lance slam 5.2x -> 8.15x ATK (a BUFF against a 2.3x longer cooldown)', src.drSlam === 1);
+ok('Sky Lance slam 16x (v0.30.1050, per user; v0.30.356 set 8.15x)', src.drSlam === 1);
 ok('Sky Lance extra hit 1.5x -> 2.34x, scaled with the slam', src.drExtra === 1);
-ok('Ballista War Machine turret damage is UNCHANGED at 0.9x — it was never an anomaly',
+ok('Ballista War Machine turret 2.1x + 25 (v0.30.814; v0.30.356 left it at 0.9x — it was never an anomaly)',
   src.baTurretUntouched === 1, 'the 346.6 xATK reading was the volley bleeding into its window');
 
 // ---- what actually lands ----------------------------------------------------
@@ -138,7 +140,11 @@ const measure = async (master, cls, job, skillId) => page.evaluate(async ({ mast
     return r;
   };
   try { castSkill(skillId); } catch (e) {}
-  for (let i = 0; i < 480; i++) {
+  // v0.30.x - 480 SIM STEPS (8 s), not 480 rAFs: headless fires several rAFs per step, so a frame count cut each cast
+  // off at a random point (Eclipse read 130 and 194 xATK on two runs of one build).
+  const _t0 = game.time || 0;
+  for (let i = 0; i < 12000 && (game.time || 0) - _t0 < 480; i++) {
+    game.paused = false;
     await new Promise((r) => requestAnimationFrame(r));
     for (const x of ds) { x.currentHp = x.maxHp; x.x = x._px; x.y = x._py; x.vx = 0; x.vy = 0; }
     player.mp = 9e9; player.hp = getMaxHp();
@@ -157,14 +163,16 @@ const mNrX = await measure('nightreaper', 'rogue', 'assassin', 'nightreaper_mark
 await boot();
 const mDrX = await measure('dragoon', 'warrior', 'knight', 'dragoon_skylance');
 
-ok('Bloodmoon Domain lands near 96 xATK — the -46% the user asked for, applied to its REAL 177.1',
-  mNrB >= 70 && mNrB <= 125, `${mNrB} xATK/cast (isolated mean measured 93.8; band is wide because spread is 17%)`);
-ok('Eclipse Massacre lands near the requested 100 xATK',
-  mNrX >= 78 && mNrX <= 122, `${mNrX} xATK/cast (isolated mean 98.1, spread 2%)`);
-ok('Sky Lance lands near the requested 80 xATK',
-  mDrX >= 62 && mDrX <= 100, `${mDrX} xATK/cast (isolated mean 83.2, spread 14%)`);
-ok('and Sky Lance is now a burst button, not a sustain one: 5.05 -> ~3.3 xATK per second of cooldown',
-  (mDrX / 25) < 4.2, `${(mDrX / 25).toFixed(2)} xATK/s against 5.05 before`);
+// v0.30.x - v0.30.785 / v0.30.814 (the user's Skill Editor) raised the shuriken and the nova, so the v0.30.356 ~96 moved.
+ok('Bloodmoon Domain lands in its band (105-180 xATK; v0.30.356 aimed ~96)',
+  mNrB >= 105 && mNrB <= 180, `${mNrB} xATK/cast`);
+// v0.30.x - the bands follow the live numbers (v0.30.814 dagger 0.9x; v0.30.1050 slam 16x). v0.30.356 asked 100 / 80.
+ok('Eclipse Massacre lands in its band (100-160 xATK; v0.30.356 asked ~100)',
+  mNrX >= 100 && mNrX <= 160, `${mNrX} xATK/cast`);
+ok('Sky Lance lands in its band (220-380 xATK; v0.30.356 asked ~80)',
+  mDrX >= 220 && mDrX <= 380, `${mDrX} xATK/cast`);
+ok('Sky Lance per second of cooldown stays under 15.5 xATK/s (v0.30.356 aimed ~3.3)',
+  (mDrX / 25) < 15.5, `${(mDrX / 25).toFixed(2)} xATK/s`);
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 
 await browser.close(); server.kill();

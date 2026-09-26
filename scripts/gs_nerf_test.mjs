@@ -16,7 +16,10 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+import { fileURLToPath } from 'node:url';
+// v0.30.x - this script's own tree, not the shared checkout: a hardcoded ROOT measured the shared tree's build from
+// every worktree (and served its game file for any MOJI_GAME_FILE).
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require(ROOT + '/node_modules/playwright-core');
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
@@ -30,7 +33,7 @@ try {
   const ctxB = await browser.newContext({ viewport: { width: 1280, height: 747 }, serviceWorkers: 'block' });
   const page = await ctxB.newPage();
   await page.addInitScript(() => { try { localStorage.clear(); localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
-  await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'load', timeout: 120000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 120000 });
   await page.waitForTimeout(11000);
   const click = async (sel, ms) => {
     const el = await page.$(sel);
@@ -99,24 +102,27 @@ try {
     return out;
   });
 
-  // classify by multiplier: noise is < 8 / 100000, so every line sits within 0.0001 of its value
+  // v0.30.x - the live literals: v0.30.814 (the user's Skill Editor patch) somersault 1.5 and landing 1.5, v0.30.773
+  // ring 1.16 (v0.30.768's -25% read 0.4125 / 2.025 / 0.9); v0.30.778 cut the spin to 2 ticks. Spin and landing share a
+  // value, so classify by ORDER.
+  const SPIN = 1.5, LAND = 1.5, RING = 1.16;
   const near = (v, x) => Math.abs(v - x) < 0.0005;
-  const spin = R.lines.filter((v) => near(v, 0.4125)), land = R.lines.filter((v) => near(v, 2.025)), ring = R.lines.filter((v) => near(v, 0.9));
-  const stray = R.lines.filter((v) => !near(v, 0.4125) && !near(v, 2.025) && !near(v, 0.9));
+  const spin = R.lines.slice(0, 2), land = R.lines.slice(2, 3), ring = R.lines.slice(3);
+  const stray = [...spin.filter((v) => !near(v, SPIN)), ...land.filter((v) => !near(v, LAND)), ...ring.filter((v) => !near(v, RING))];
   const total = R.lines.reduce((a, b) => a + b, 0);
-  const oldTotal = spin.length * 0.55 + land.length * 2.7 + ring.length * 1.2;
+  const oldTotal = spin.length * SPIN + land.length * LAND + ring.length * RING;
   console.log(`  lines (x ATK, in landing order) ${JSON.stringify(R.lines)} | control ${JSON.stringify(R.control)} | frames ${R.framesRan}`);
 
   ok('FRAMES RAN: the sim actually stepped', (R.framesRan | 0) > 10, `${R.framesRan} frames`);
-  ok('EVERY LINE LANDED: 4 somersault ticks, 1 landing, 3+ ring pulses, nothing unaccounted for',
-    spin.length === 4 && land.length === 1 && ring.length >= 3 && ring.length <= 4 && stray.length === 0,
+  ok('EVERY LINE LANDED: 2 somersault ticks (v0.30.778), 1 landing, 3+ ring pulses, nothing unaccounted for',
+    spin.length === 2 && land.length === 1 && ring.length >= 3 && ring.length <= 4 && stray.length === 0,   // stray = a line off its slot's literal
     `somersault ${spin.length}, landing ${land.length}, rings ${ring.length}, unrecognised ${JSON.stringify(stray)}`);
-  ok('EACH LINE IS x0.75: 0.55 -> 0.4125, 2.7 -> 2.025, 1.2 -> 0.9',
-    spin.every((v) => near(v / 0.55, 0.75)) && land.every((v) => near(v / 2.7, 0.75)) && ring.every((v) => near(v / 1.2, 0.75)) && spin.length && land.length && ring.length,
-    `somersault ${spin[0]} (x${(spin[0] / 0.55).toFixed(4)}), landing ${land[0]} (x${(land[0] / 2.7).toFixed(4)}), ring ${ring[0]} (x${(ring[0] / 1.2).toFixed(4)})`);
-  ok('THE CAST TOTAL IS x0.75',
-    oldTotal > 0 && Math.abs(total / oldTotal - 0.75) < 0.001,
-    `${total.toFixed(4)} ATK against ${oldTotal.toFixed(4)} for the same lines at the old multipliers (x${(total / oldTotal).toFixed(4)})`);
+  ok('EACH LINE IS ITS LIVE LITERAL: somersault 1.5, landing 1.5, ring 1.16',
+    spin.every((v) => near(v, SPIN)) && land.every((v) => near(v, LAND)) && ring.every((v) => near(v, RING)) && spin.length && land.length && ring.length,
+    `somersault ${spin[0]}, landing ${land[0]}, ring ${ring[0]}`);
+  ok('THE CAST TOTAL IS THE SUM OF ITS LINES (nothing scales the cast on top)',
+    oldTotal > 0 && Math.abs(total / oldTotal - 1) < 0.001,
+    `${total.toFixed(4)} ATK against ${oldTotal.toFixed(4)} for 2 x 1.5 + 1.5 + ${ring.length} x 1.16 (x${(total / oldTotal).toFixed(4)})`);
   ok('CONTROL — performAround itself is untouched: x1.0 in, x1.0 out',
     R.control.length === 1 && near(R.control[0], 1.0),
     `direct performAround(200, 1.0) dealt ${JSON.stringify(R.control)} x ATK`);

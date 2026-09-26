@@ -80,8 +80,12 @@ const r = await page.evaluate(async () => {
     atk = getAtk();
     const hp0 = mobs.map((m) => m.currentHp);
     SKILL_FNS.nightreaper_mark();
-    for (let i = 0; i < 200; i++) {
+    // v0.30.x - count SIM STEPS (game.time), not rAFs: headless fires several rAFs per step, and 200 rAFs ended the
+    // wait before the 2.46 s snap - the nova read 0 hits and the later dagger batches never landed.
+    const t0 = game.time || 0;
+    for (let i = 0; i < 6000 && (game.time || 0) - t0 < 240; i++) {
       mobs.forEach((m, k) => { m.x = 700 + k * 60; m.vx = 0; m.vy = 0; });
+      game.paused = false;
       await frame();
     }
     // it is a SCREEN CLEAR: every dummy on camera must have been hit
@@ -112,12 +116,16 @@ check(r.daggerMean > 0.85, 'and NOT gutted — it is still a heavy per-hit multi
 // The snap is the payoff moment and was deliberately left alone.
 // Sample count varies with how many dummies survive to the snap (32-40 seen),
 // so the assertion is on the per-hit MEAN, which is the quantity left alone.
-check(r.novaN >= 20 && r.novaMean > 4.0, 'the aftershock nova is untouched — the payoff still lands', { n: r.novaN, mean: r.novaMean });
+// v0.30.356 (per user) cut the snap 2.0x + 25 -> 1.24x + 25 ATK; at this harness's ATK 20 that is 3.25 -> 2.49 before
+// crits, so the old 4.0 floor scales to 3.06. It still asserts the payoff LANDS on every dummy, and lands heavy.
+check(r.novaN >= 20 && r.novaMean > 3.0, 'the aftershock nova lands — the payoff still hits (1.24x snap since v0.30.356)', { n: r.novaN, mean: r.novaMean });
 check(r.everyoneHit, 'it is still a SCREEN CLEAR: every enemy on camera takes damage', r.everyoneHit);
 // mp is NOT asserted against a literal: the SKILLS table says 55 but reads 69
 // at runtime (something rescales it on load), so a literal here would pin a
 // number this change never touched.
-check(r.cd === 12000, 'the cooldown is unchanged — the nerf is to output, not access', { cd: r.cd, mp: r.mp });
+// v0.30.43 (per user: a true 12 s) moved the table 12000 -> 16000 (castSkill applies JOB_CD_MUL 0.75), and v0.30.356
+// (per user: "Nightreaper X ... CD to 25s") moved it to 25000.
+check(r.cd === 25000, 'the cooldown is the user\'s 25 s — the nerf is to output, not access', { cd: r.cd, mp: r.mp });
 check(errs.length === 0, 'no page errors', [...new Set(errs)].slice(0, 3));
 console.log(bad ? `\n${bad} FAILED` : '\nall green');
 process.exit(bad ? 1 : 0);
