@@ -29,14 +29,14 @@ try {
     for (const [k, j] of Object.entries(JOBS)) check(k, j, false);
     for (const [k, m] of Object.entries(MASTERS)) check(k, m, true);
     // 2. study quests pluralise
-    const study = Object.values(QUESTS).filter((q) => q && typeof q.desc === 'string' && /Bring me \d+ /.test(q.desc) && q.count > 1);
-    const singularStudies = study.filter((q) => { const m = q.desc.match(/Bring me (\d+) ([^.]+)\./); const nm = m && m[2]; const t = monsterTypes[q.target]; return t && nm === t.name && !/s$/i.test(t.name); }).map((q) => q.desc.match(/Bring me [^.]+\./)[0]).slice(0, 3);
+    const study = Object.values(QUESTS).filter((q) => q && typeof q.desc === 'string' && /(?:Bring me|Record) \d+ /.test(q.desc) && q.count > 1);
+    const singularStudies = study.filter((q) => { const m = q.desc.match(/(?:Bring me|Record) (\d+) ([^.]+)\./); const nm = m && m[2]; const t = monsterTypes[q.target]; return t && nm === t.name && !/s$/i.test(t.name); }).map((q) => q.desc.match(/Bring me [^.]+\./)[0]).slice(0, 3);
     return { sigBad, studies: study.length, singularStudies,
       gone: ['Brok the Blacksmith</b> in the Everdawn Megamall, and you can rebind', 'each star = +8% to all stats, compounding', 'The Gelmonarch', "'Advance at ten'", '+10% to ALL its stats', 'Costs 100\\u25c8', '100\\u25c8, Lv 50+)', 'reforge or transfer', 'Fifty Mojicoins a trip! Used', 'Megamall security', "kuro:'Sniper'", 'turn out dust', 'ninety heartbeats', 'candy out of the canyon', 'Talk to Milo on the R-rooftop', 'no-potion lock active inside', 'STAGE 1-3 were', 'Bring me 20 spines', 'reaches Henesys', 'the player draws within', "lichs are", 'a moods unto', "summon ${_bt}'s shade", 'Echo of ${_bt} ', 'NIGHTMARE ${_bt} ', 'I lift ${_bt} ', '${e.type}: ${e.count'].filter((t) => src.includes(t)),
       present: ['Nurse Joyce</b> in the Everdawn Megamall', 'slots open at Lv 25, 50 and 75', 'King Gloopaloo \' +', 'Costs 2000', 'for sixty heartbeats'].filter((t) => !src.includes(t)) };
   });
   check(r.sigBad.length === 0, 'every job and master signature names one of that path\u2019s own skills (15 named skills that were replaced or had wrong numbers)', J(r.sigBad.slice(0, 6)));
-  check(r.studies > 0 && r.singularStudies.length === 0, 'study quests say "Bring me 400 Emberlings", not "400 Emberling"', J({ studies: r.studies, singular: r.singularStudies }));
+  check(r.studies > 0 && r.singularStudies.length === 0, 'study quests say "Record 400 Emberlings" (v0.30.1126, was "Bring me": a study finishes on the last kill), not "400 Emberling"', J({ studies: r.studies, singular: r.singularStudies }));
   check(r.gone.length === 0, 'none of the drifted facts or raw boss ids is left in dialogue, tutorial or quest text', J(r.gone));
   check(r.present.length === 0, 'the corrected facts are there', J(r.present));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 3)));
