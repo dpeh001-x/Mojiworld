@@ -57,12 +57,17 @@ try {
       rows: [...c.querySelectorAll('.mmr-row')].map((r) => ({ v: r.querySelector('.mmr-val').textContent, m: r.querySelector('.mmr-meter i').style.width, minus: r.querySelector('.minus').disabled, plus: r.querySelector('.plus').disabled })),
       free: c.querySelector('.mmr-chip').textContent,
       // per user: "Abit more black" - black cards, their point rows on a deep-purple plate
-      bg: getComputedStyle(c).backgroundColor, plate: getComputedStyle(c.querySelector('.mmr-alloc')).backgroundColor }; };
+      bg: getComputedStyle(c).backgroundColor, plate: getComputedStyle(c.querySelector('.mmr-alloc')).backgroundColor,
+      // per user: the circle round the monster was "ugly, please make it less opaque and beautify it" - a translucent glow
+      bub: (() => { const s = getComputedStyle(c.querySelector('.mmr-bub')); return { bg: s.backgroundColor, opaque: /rgb\(/.test(s.backgroundImage),
+        bw: parseFloat(s.borderTopWidth), ba: parseFloat((s.borderTopColor.match(/rgba\([^)]*,\s*([\d.]+)\)/) || [0, 1])[1]) }; })() }; };
     return { ks, a: info(ks[0]), b: info(ks[1]), cap: MOJIMON_UPG_PT_CAP, pts: _mojimonPoints() };
   });
   console.log('cards', JSON.stringify(R));
   const { a, b } = R;
   check(/\bout\b/.test(a.cls) && a.name.includes('FIELDED') && a.hp === '70%' && !a.summon, 'the fielded MojiMon: a yellow-edged card, a FIELDED pill, its HP as a candy bar, no Summon', a);
+  check([a, b].every((x) => x.bub.bg === 'rgba(0, 0, 0, 0)' && !x.bub.opaque && x.bub.bw <= 2 && x.bub.ba <= 0.5),
+    'the bubble round each monster is a translucent glow: no solid fill, a thin faint ring', [a.bub, b.bub]);
   check([a, b].every((x) => x.bg === 'rgb(14, 10, 20)' && x.plate === 'rgb(31, 13, 54)'), 'black cards, their point rows on a deep-purple plate', [a.bg, a.plate, b.bg, b.plate]);
   check(JSON.stringify(a.stats) === JSON.stringify(a.want) && JSON.stringify(b.stats) === JSON.stringify(b.want), 'the stat pills show its real max HP, attack and damage reduction', [a.stats, a.want]);
   check(a.hon && a.hkey.includes('★') && /\bon\b/.test(a.bond) && !b.hon && b.hkey.includes('☆') && !/\bon\b/.test(b.bond), 'the H-slot MojiMon has the yellow ★ H and the lit bond; the other a plain ☆ H and a quiet bond', [a.hkey, b.hkey]);
