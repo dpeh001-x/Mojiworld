@@ -15876,7 +15876,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1153';
+const GAME_VERSION = 'v0.30.1154';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -51115,6 +51115,10 @@ function _lxBiPop(els, intro, bossType) {
   });
 }
 function _playBossIntro(bossType) {
+  // v0.30.x full audit - not under the pause card: the arena's intro timer did not check, so Esc right after walking in
+  // opened the card over it, the intro played unseen underneath, and its capture listener ate the first key meant for
+  // Resume. Held until the card closes, on the same map.
+  if (document.getElementById('lx-pause')) { const _biHoldMap = game.currentMap; setTimeout(() => { if (game.currentMap === _biHoldMap) _playBossIntro(bossType); }, 300); return; }
   // v0.26.x — Per user "ensure boss cinematic strip plays even on repeat
   // battles". Removed the first-time-per-save gate (player._bossIntrosSeen) so
   // the cinematic now plays on EVERY encounter, including re-fights / grinding.
@@ -71279,7 +71283,7 @@ function _playEverdawnWelcome() {
         game.paused = _wasPaused;
       }, 420);
     };
-    const _key = (e) => { if (e && e.key === 'F12') return; _close(); };
+    const _key = (e) => { if (e && e.key === 'F12') return; if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };   // v0.30.x full audit - the skip key stops here: J skipped the clip AND opened the journal, then the restore unpaused under it
     ov.addEventListener('click', _close);
     window.addEventListener('keydown', _key, true);
     v.addEventListener('ended', _close, { once: true });
@@ -81987,11 +81991,15 @@ function _mojimonFirstBindModal(type) {
     requestAnimationFrame(() => { wrap.style.opacity = '1'; card.style.transform = 'translateY(0) scale(1)'; });
 
     let done = false;
+    const _mmWasPaused = !!(typeof game !== 'undefined' && game.paused);   // v0.30.x full audit - the card pauses (see _LX_EXTRA_PAUSE_SURFACES)
+    if (typeof game !== 'undefined') game.paused = true;
     const close = (openTab) => {
       if (done) return; done = true;
       wrap.style.opacity = '0';
       try { window.removeEventListener('keydown', onKey, true); } catch (_) {}
-      setTimeout(() => { try { wrap.remove(); } catch (_) {} resolve(!!openTab); }, 220);
+      setTimeout(() => { try { wrap.remove(); } catch (_) {}
+        if (!_mmWasPaused && typeof game !== 'undefined' && (typeof _anyOtherModalOpen !== 'function' || !_anyOtherModalOpen())) game.paused = false;
+        resolve(!!openTab); }, 220);
     };
     const onKey = (e) => {
       if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); close(false); }
@@ -120093,6 +120101,13 @@ function showPowerupChoice(bossInfo) {
     setTimeout(() => showPowerupChoice(bossInfo), 500);
     return;
   }
+  // v0.30.x full audit - ...and not under ANY other open panel. The journal, attributes, codex and lore modals sit later
+  // in the DOM at the same z-index, so a J or U pressed within 1.5 s of the kill opened the wheel hidden beneath them -
+  // and closing that panel (closeAllModals) threw the boss boon away unseen.
+  if (typeof _lxPauseOwners === 'function' && _lxPauseOwners().some((el) => el && el.id !== 'powerup-modal')) {
+    setTimeout(() => showPowerupChoice(bossInfo), 500);
+    return;
+  }
   const modal = document.getElementById('powerup-modal');
   if (!modal) return;   // v0.26.x — guard before querySelector (avoids a throw + paused soft-lock if the modal node is missing)
   const body = modal.querySelector('.modal.powerup-reveal');
@@ -120538,8 +120553,11 @@ function closeAllModals() {
   // when the player presses Esc on a different modal.
   const cstudio = document.getElementById('char-studio-overlay');
   if (cstudio && cstudio.classList.contains('open')) {
-    cstudio.classList.remove('open');
-    if (typeof _csStopPreview === 'function') _csStopPreview();
+    // v0.30.x full audit - through the wardrobe's OWN close. Esc (and J / W / U / Y) reach this path first, and only
+    // removing .open skipped closeCharStudio's revert: an un-applied hair dye or posture was kept - and saved - without
+    // Apply or its fee. closeCharStudio reverts, flushes, clears its registries, and removes .open itself.
+    if (typeof closeCharStudio === 'function') { try { closeCharStudio(); } catch (e) { cstudio.classList.remove('open'); } }
+    else { cstudio.classList.remove('open'); if (typeof _csStopPreview === 'function') _csStopPreview(); }
   }
   // v0.25.960 — Defensive item-tooltip hide. If the player closes a
   // modal while their cursor is hovering an inventory slot (e.g. they
@@ -174906,6 +174924,9 @@ const _LX_EXTRA_PAUSE_SURFACES = [
   { id: 'lx-pause',                 mode: 'exists'  },   // v0.30.x (audit U4) - the pause card, see _lxPauseOpen
   { id: 'titles-modal',             mode: 'exists'  },   // v0.30.834 - openTitlesPanel (v0.30.803): the world ran again 3 s after it opened, and you could die behind it
 ];
+// v0.30.x full audit - the first-MojiMon celebration (_mojimonFirstBindModal) is a full-screen card at z 100060 that
+// never paused: the map is full of that species when it opens (10,000 kills bind one), and they kept hitting the hero.
+_LX_EXTRA_PAUSE_SURFACES.push({ id: 'mojimon-firstbind', mode: 'exists' });
 function _lxExtraPauseSurfaceEls() {
   const out = [];
   for (const s of _LX_EXTRA_PAUSE_SURFACES) {
@@ -175026,6 +175047,10 @@ function _anyOtherModalOpen() {
   if (document.querySelector('#exp-door-modal, #exp-puzzle-modal, .tp-backdrop')) return true;
   if (_lxExtraPauseSurfaceEls().length) return true;   // v0.30.500 — same table _lxPauseOwners reads
   if (_lxCineHoldActive()) return true;                // v0.30.500 — an entrance clip owns the pause
+  // v0.30.x full audit - the WARDROBE owns the pause too (_lxPauseOwners already says so). It was left out because
+  // closeCharStudio asks this function whether to unpause - but it removes its own .open first, so it never sees
+  // itself. Left out, closing anything stacked on it (K twice) unpaused the world under a 94%-opaque wardrobe.
+  { const _cso = document.getElementById('char-studio-overlay'); if (_cso && _cso.classList && _cso.classList.contains('open')) return true; }
   return false;
 }
 const _csCloseBtn = document.getElementById('char-studio-close');
