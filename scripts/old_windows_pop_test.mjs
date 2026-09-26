@@ -25,6 +25,10 @@ await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'do
 await page.waitForFunction(() => typeof loadMap === 'function' && typeof openCraftingModal === 'function' && typeof uiConfirm === 'function', null, { timeout: 120000 });
 await page.waitForTimeout(2500);
 const R = await page.evaluate(async () => {
+  // headless trips the perf governor into reduced-effects mode (html.lx-nobackdrop strips every box-shadow and
+  // backdrop-filter): pin full effects so the frame / slab / glass reads are real
+  const full = () => { try { window._perfTick = function () {}; LX_PERF.veryLowFx = false; } catch (e) {} document.documentElement.classList.remove('lx-nobackdrop'); };
+  full();
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   try { _lxBootGateDone = true; _prologueActive = false; localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {}
   for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
@@ -39,9 +43,9 @@ const R = await page.evaluate(async () => {
       emoStroke: emo ? getComputedStyle(emo).webkitTextStrokeWidth : null, btn: btn && { face: fam(btn), bg: getComputedStyle(btn).backgroundColor, edge: getComputedStyle(btn).borderTopColor } }; };
   const out = {};
   for (const [id, fn] of [['craft-modal', 'openCraftingModal'], ['reforge-modal', 'openReforgeModal'], ['enhance-modal', 'openEnhancementModal'], ['taxi-modal', 'openTaxi'], ['codex-modal', 'openCodex'], ['multiplayer-modal', 'openMultiplayer']]) {
-    try { closeAllModals(); } catch (e) {} try { window[fn](); } catch (e) { out[id] = 'ERR ' + e.message; continue; } await sleep(450); out[id] = read(id); }
+    try { closeAllModals(); } catch (e) {} try { window[fn](); } catch (e) { out[id] = 'ERR ' + e.message; continue; } await sleep(450); out[id] = read(id); } full();
   try { closeAllModals(); } catch (e) {}
-  const conf = async (opts) => { uiConfirm(opts); await sleep(400); const r = read('confirm-modal'); const y = document.getElementById('confirm-yes');
+  const conf = async (opts) => { uiConfirm(opts); await sleep(400); full(); const r = read('confirm-modal'); const y = document.getElementById('confirm-yes');
     r.yes = { bg: getComputedStyle(y).backgroundColor, face: fam(y) }; r.cls = document.getElementById('confirm-modal').className; document.getElementById('confirm-no').click(); await sleep(250); return r; };
   out.confirm = await conf({ title: 'Discard this item?', body: 'The Runed Sabre will be gone for good.' });
   out.comic = await conf({ title: 'Pay and refund?', body: 'x', skin: 'comic' });
