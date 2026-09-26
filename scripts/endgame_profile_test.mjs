@@ -30,11 +30,21 @@ const out = await page.evaluate(() => {
   const mk = (it, stars) => JSON.parse(JSON.stringify({ ...it, stars }));
   const STARS = (typeof MAX_STARS === 'number') ? MAX_STARS : 10;
   const live = {};
+  // v0.30.x — the per-level growth comes from the game's OWN level-up code. This file used to hardcode a copy, and the
+  // copy drifted (HP 28 / 18 / 12 here against _maybeLevelUp's 30 / 22 / 15), so "live" was not the game either. Read
+  // the four expressions from the function source and evaluate them per class; running the real level-up 99 times
+  // would also roll Innate Growth dice, which this reference build deliberately leaves out.
+  const _lvSrc = (typeof _maybeLevelUp === 'function') ? _maybeLevelUp.toString() : '';
+  const _grab = (re) => { const m = _lvSrc.match(re); return m ? m[1] : null; };
+  const _gx = { hp: _grab(/const hpGain = ([^;]+);/), mp: _grab(/const mpGain = ([^;]+);/),
+    atk: _grab(/player\.baseAtk \+= ([^;]+);/), def: _grab(/player\.baseDef \+= ([^;]+);/) };
+  const growthErr = Object.keys(_gx).filter((k) => !_gx[k]);
+  const _g = (k, cls) => { try { return Number(Function('player', 'return (' + _gx[k] + ');')({ cls })) || 0; } catch (e) { return NaN; } };
+  const growth = {};
   for (const cls of Object.keys(_LX_ENDGAME_PROFILES)) {
     const s = CLASSES[cls].stats;
-    const gAtk = cls === 'warrior' ? 3 : 2, gDef = cls === 'warrior' ? 2 : 1;
-    const gHp = cls === 'warrior' ? 28 : cls === 'mage' ? 12 : 18;
-    const gMp = cls === 'mage' ? 22 : 12;
+    const gAtk = _g('atk', cls), gDef = _g('def', cls), gHp = _g('hp', cls), gMp = _g('mp', cls);
+    growth[cls] = { atk: gAtk, def: gDef, hp: gHp, mp: gMp };
     player.cls = cls; player.level = LV;
     player.baseAtk = s.atk + gAtk * (LV - 1);
     player.baseDef = s.def + gDef * (LV - 1);
@@ -67,12 +77,17 @@ const out = await page.evaluate(() => {
   const god = (typeof _lxDevGodStats === 'function') ? _lxDevGodStats() : null;
   const peak = { atk: 0, def: 0, maxHp: 0, maxMp: 0, acc: 0 };
   for (const p of Object.values(_LX_ENDGAME_PROFILES)) for (const k of Object.keys(peak)) peak[k] = Math.max(peak[k], p[k]);
-  return { LV, SP, stars: STARS, baked: _LX_ENDGAME_PROFILES, live, god, peak };
+  return { LV, SP, stars: STARS, baked: _LX_ENDGAME_PROFILES, live, god, peak, growth, growthErr };
 });
 await browser.close();
 
 const TOL = 0.02;   // 2% — absorbs rounding, catches any real balance shift
 let bad = 0, driftBad = 0, godBad = 0;
+// v0.30.x — the growth this run used, read from _maybeLevelUp. A missing expression means the level-up code was
+// reshaped and the reference build can no longer be trusted: fail rather than fall back to a guess.
+console.log('per-level growth (from _maybeLevelUp): ' + JSON.stringify(out.growth));
+if (out.growthErr && out.growthErr.length) { console.log('  FAIL  could not read ' + out.growthErr.join(', ') + ' growth from _maybeLevelUp'); bad++; }
+for (const [c, g] of Object.entries(out.growth || {})) if (Object.values(g).some((v) => !(v > 0))) { console.log('  FAIL  ' + c + ' growth is not a positive number: ' + JSON.stringify(g)); bad++; }
 console.log(`reference: level ${out.LV}, 0 ascensions, ${out.SP} SP, best-in-slot @${out.stars}*\n`);
 console.log('class     stat     baked      live     drift');
 for (const cls of Object.keys(out.baked)) {
