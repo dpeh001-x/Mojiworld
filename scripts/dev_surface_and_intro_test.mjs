@@ -30,7 +30,7 @@ const probe = async (host, packaged) => {
   page.on('dialog', async (d) => { prompts++; try { if (d.type() === 'prompt' && answer != null) await d.accept(answer); else await d.dismiss(); } catch (e) {} });
   const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
   if (packaged) await page.addInitScript(() => { window.MOJI_PACKAGED = true; });
-  await page.goto(`http://${host}:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.goto(`http://${host}:${PORT}/mojiworld_game.html?dev=1&devlock=1`, {   /* v0.30.1180 launch-meta - the public lock needs ?devlock=1 */ waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof openDevConsole === 'function', null, { timeout: 180000 });
   await page.waitForTimeout(3000);
   await page.evaluate(() => { try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; } loadMap('forest', 300); game.paused = false; });
@@ -68,7 +68,7 @@ try {
   check(dev.surface === true && dev.icon && dev.consoleOpens && dev.bodyDev && dev.scaleDebugRow === true, 'localhost is a developer surface: ?dev=1 works, the lock icon is there, the console opens, dev-only rows show', JSON.stringify({ surface: dev.surface, icon: dev.icon, console: dev.consoleOpens, stored: dev.stored }));
   check(pub.pre.surface === false && !pub.pre.consoleOpens && !pub.pre.consoleOpenedByKeys && !pub.pre.bodyDev && pub.pre.stored !== '1' && pub.pre.scaleDebugRow === false,
     'a public hostname is shut until the passphrase: ?dev=1 is ignored and the console stays closed', JSON.stringify({ surface: pub.pre.surface, console: pub.pre.consoleOpens, byKeys: pub.pre.consoleOpenedByKeys, stored: pub.pre.stored }));
-  check(pub.pre.icon === true, 'the lock icon IS on the public link for testers (v0.30.894) — it is the gate, not the absence of one', JSON.stringify({ icon: pub.pre.icon }));
+  check(pub.pre.icon === true, 'with ?devlock=1 (v0.30.1180 launch-meta) the lock icon IS on the public link for testers (v0.30.894) — it is the gate, not the absence of one', JSON.stringify({ icon: pub.pre.icon }));
   check(pub.typed.surface === false && pub.typed.stored !== '1',
     'typing the passphrase on a public host does nothing — the typed sequence is a developer-surface convenience', JSON.stringify({ surface: pub.typed.surface, stored: pub.typed.stored }));
   check(pub.surface === true && pub.stored === '1' && pub.consoleOpens,

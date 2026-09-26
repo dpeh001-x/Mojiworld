@@ -11,14 +11,16 @@
 //   default: stages to scripts/_tmp_portable/Mojiworld/ and verifies
 //   --zip:   additionally produces Mojiworld-<ver>-windows-portable.zip (7za)
 //   --node:  node.exe to bundle (default: the running process.execPath)
+//   --out:   stage + zip under <dir> instead of scripts/_tmp_portable (only <dir>/Mojiworld and the zip are replaced)
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-const STAGE_ROOT = path.join(ROOT, 'scripts', '_tmp_portable');
-const STAGE = path.join(STAGE_ROOT, 'Mojiworld');
 const args = process.argv.slice(2);
+const OUT = args.includes('--out') ? path.resolve(args[args.indexOf('--out') + 1]) : null;   // v0.30.1180 launch-meta
+const STAGE_ROOT = OUT || path.join(ROOT, 'scripts', '_tmp_portable');
+const STAGE = path.join(STAGE_ROOT, 'Mojiworld');
 const DO_ZIP = args.includes('--zip');
 const NODE_SRC = args.includes('--node') ? args[args.indexOf('--node') + 1] : process.execPath;
 
@@ -30,12 +32,21 @@ const VERSION = ver[1];
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'steam', 'package.json'), 'utf8'));
 const filter = pkg.build.extraResources.find(e => e.from === '..').filter;
 const LAUNCHER_EXTRAS = ['serve.js', 'Mojiworld.cmd'];
+// v0.30.1180 launch-meta - a "!" entry is an electron-builder EXCLUSION (e.g. "!audio/**/_*backup*/**", the local audio
+// regeneration backups). The loop below used to copy it like a folder - cpSync("!audio/**/_*backup*") threw ENOENT, so
+// no zip was ever built - and "audio/**" swept those backups in. Now every "!" glob is skipped by every copy.
+const _globRe = (g) => new RegExp('^' + g.split('/').map((seg) => seg === '**' ? '\u0000'
+  : seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')).join('/')
+  .replace(/\u0000\//g, '(?:.*/)?').replace(/\/\u0000$/, '(?:/.*)?').replace(/\u0000/g, '.*') + '$');
+const EXCLUDE = filter.filter((e) => e.startsWith('!')).map((e) => _globRe(e.slice(1)));
+const excluded = (rel) => { const r = rel.split(path.sep).join('/'); return EXCLUDE.some((re) => re.test(r)); };
 
-fs.rmSync(STAGE_ROOT, { recursive: true, force: true });
+fs.rmSync(OUT ? STAGE : STAGE_ROOT, { recursive: true, force: true });   // v0.30.1180 launch-meta - never empty a caller's --out folder
 fs.mkdirSync(STAGE, { recursive: true });
 
-const cpDir = (rel) => { fs.cpSync(path.join(ROOT, rel), path.join(STAGE, rel), { recursive: true }); };
+const cpDir = (rel) => { fs.cpSync(path.join(ROOT, rel), path.join(STAGE, rel), { recursive: true, filter: (src) => !excluded(path.relative(ROOT, src)) }); };   // v0.30.1180 launch-meta
 const cpFile = (rel) => {
+  if (excluded(rel)) return;   // v0.30.1180 launch-meta
   const dst = path.join(STAGE, rel);
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   fs.copyFileSync(path.join(ROOT, rel), dst);
@@ -43,6 +54,7 @@ const cpFile = (rel) => {
 
 let files = 0, dirs = 0;
 for (const entry of filter) {
+  if (entry.startsWith('!')) continue;   // v0.30.1180 launch-meta - an exclusion (EXCLUDE above), not a path
   if (entry.endsWith('/**')) { cpDir(entry.slice(0, -3)); dirs++; }
   else { cpFile(entry); files++; }
 }
@@ -73,8 +85,8 @@ fs.writeFileSync(path.join(STAGE, 'PLAY_ME_FIRST.txt'), [
   '   in-game via Settings if you switch machines.',
   ' - No internet needed after unzipping. Co-op needs internet.',
   '',
-  'Problems? The hosted version always works, no download needed:',
-  '  https://raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html',
+  'Problems? The web version always works, no download needed:',
+  '  https://play.moji-studios.com/',
 ].join('\r\n'));
 
 // ---- verify the stage is playable ------------------------------------------
@@ -96,6 +108,7 @@ console.log(`staged v${VERSION}: ${dirs} asset trees + ${files} files, ${(bytes 
 if (DO_ZIP) {
   const zipName = `Mojiworld-v${VERSION}-windows-portable.zip`;
   const zipPath = path.join(STAGE_ROOT, zipName);
+  fs.rmSync(zipPath, { force: true });   // v0.30.1180 launch-meta - 7za "a" adds to an old zip of the same name instead of replacing it
   const sevenZa = path.join(ROOT, 'steam', 'node_modules', '7zip-bin', 'win', 'x64', '7za.exe');
   if (fs.existsSync(sevenZa)) {
     execFileSync(sevenZa, ['a', '-tzip', '-mx=5', zipPath, STAGE], { stdio: 'inherit' });

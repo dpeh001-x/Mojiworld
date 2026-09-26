@@ -58,7 +58,15 @@ jobs:
           # ARE runtime (the game <video>-plays 15 of them) and are too large for
           # jsDelivr's 20MB/file cap, so they ship in the artifact; the Steam
           # store art, electron build resources and upload VDFs do not.
+          # v0.30.1180 launch-meta - repo plumbing never ships either: .gitignore / .gitattributes, render.yaml (the standby relay
+          # blueprint), package*.json and any mp*/ relay folder. steam/ is trimmed to what the game loads further down.
           rsync -a ./ _site/ \
+            --exclude '/.gitignore' \
+            --exclude '/.gitattributes' \
+            --exclude '/render.yaml' \
+            --exclude '/package.json' \
+            --exclude '/package-lock.json' \
+            --exclude '/mp*/' \
             --exclude '.git' \
             --exclude '.github' \
             --exclude '.claude' \
@@ -98,6 +106,34 @@ jobs:
           # Serve the game at the site root (index.html == the game).
           cp mojiworld_game.html _site/index.html
           touch _site/.nojekyll
+
+          # v0.30.1180 launch-meta - steam/ ships ONLY what the game itself loads. A file under steam/ stays when its path is written
+          # as a quoted string in mojiworld_game.html (the story-beat, prologue, Everdawn and Gravitos cinematics); everything
+          # else goes (the review page, thumbs/, a clip nothing plays any more). Computed from the game on every deploy, so a
+          # new clip ships with the push that wires it in.
+          if [ -d _site/steam ]; then
+            kept=0; dropped=0
+            while IFS= read -r f; do
+              rel="${f#_site/}"
+              if grep -qF -e "'${rel}'" -e "\"${rel}\"" -e "\`${rel}\`" mojiworld_game.html; then
+                kept=$((kept + 1))
+              else
+                rm -f "$f"; dropped=$((dropped + 1))
+              fi
+            done < <(find _site/steam -type f)
+            find _site/steam -depth -type d -empty -delete
+            echo "steam/: shipped ${kept} file(s) the game loads, dropped ${dropped}"
+          fi
+
+          # v0.30.1180 launch-meta - the data/*.js tables load as data/<name>.js?v=<GAME_VERSION>. Pages serves the HTML and
+          # the tables with max-age=600, so for ten minutes after a deploy a browser could pair the new HTML with old tables;
+          # a versioned URL is a new cache key the moment the HTML changes. The committed file keeps the plain paths.
+          GAME_VER="$(grep -oE "GAME_VERSION = 'v[0-9.]+'" mojiworld_game.html | head -1 | grep -oE "v[0-9.]+" || true)"
+          [ -n "${GAME_VER}" ] || GAME_VER="${GITHUB_SHA:0:12}"
+          for f in _site/index.html _site/mojiworld_game.html; do
+            sed -i -E "s#(<script src=\"data/[A-Za-z0-9_.-]+\.js)\"#\1?v=${GAME_VER}\"#g" "$f"
+          done
+          echo "data/*.js versioned ?v=${GAME_VER}: $(grep -cE '<script src="data/[^"]+[?]v=' _site/index.html) script line(s)"
 
           # Custom domain — only claimed when GAME_DOMAIN is set, so the build is
           # safe to run before DNS exists. Set it (e.g. play.moji-studios.com)

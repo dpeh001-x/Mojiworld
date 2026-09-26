@@ -48,7 +48,7 @@ if "%NODE_BIN%"=="node" (
   where node >nul 2>nul
   if errorlevel 1 (
     echo Node.js was not found - opening the hosted build instead.
-    start "" "https://raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html"
+    start "" "https://play.moji-studios.com/"
     exit /b 0
   )
 )
