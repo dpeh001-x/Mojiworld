@@ -15927,7 +15927,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1175';
+const GAME_VERSION = 'v0.30.1176';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -48938,6 +48938,7 @@ const GAME_SAVE_FIELDS = [
   'dexMilestones','dexPerm','duoTrials',
   'boonDex',   // v0.30.421 - boon codex (lifetime; not wiped by ascension)
   '_cursedChestOpened','_echoGearAt','_dailyClockHealed',   // v0.30.861 loops
+  '_dailyMilesPaid','_dailyBestStreak',   // v0.30.1176 streak-guard - the login-streak milestones already paid + the best streak ever claimed
   '_steamAchBaseline','_importVerdict','_devTouched',   // v0.30.917 the Steam gate (see _lxSteamTrusted)
   // v0.30.927 both were written every session and never saved. _vermDueAt is measured in _playMs, which IS saved, so a
   // reload left it null and the Elder's 5-minute clock restarted as the 5-second first-visit one: a full-reward
@@ -66600,6 +66601,22 @@ function _pickDailyChallenge(day) {
   if (!pool.length) return DAILY_CHALLENGES[0];
   return pool[day % pool.length];
 }
+// v0.30.1176 streak-guard - EACH LOGIN-STREAK MILESTONE PAYS ONCE PER SAVE. The 14 / 30 / 60 / 100-day bonuses paid whenever the
+// streak counter reached the number, and the PC clock could walk it there again and again (forward a day at a time, let it
+// lapse, walk it up again: +120,287 coins a cycle in the audit). game._dailyMilesPaid remembers each milestone paid (the day
+// index it paid on) and game._dailyBestStreak the best streak ever claimed; a milestone in the ledger pays nothing. A save
+// from before the ledger counts every milestone its streak (or best streak) had already passed as paid.
+function _lxStreakMilestone(streak, table, prev, day) {
+  if (!game._dailyMilesPaid || typeof game._dailyMilesPaid !== 'object') {
+    game._dailyMilesPaid = {};
+    const had = Math.max((prev && prev.streak) | 0, game._dailyBestStreak | 0);
+    for (const k in table) if (+k <= had) game._dailyMilesPaid[k] = true;
+  }
+  game._dailyBestStreak = Math.max(game._dailyBestStreak | 0, streak | 0);
+  if (!table[streak] || game._dailyMilesPaid[streak]) return 0;
+  game._dailyMilesPaid[streak] = day || true;
+  return table[streak];
+}
 function checkDaily() {
   if (!player.cls) return;
   const day = dailyIndex();
@@ -66620,7 +66637,7 @@ function checkDaily() {
     const streak = (prev && (day - prev.day === 1)) ? (prev.streak || 0) + 1 : 1;
     const bonus = 200 * Math.min(7, streak);
     const _streakMiles = { 14: 3000, 30: 8000, 60: 20000, 100: 50000 };
-    const _mileBonus = _streakMiles[streak] || 0;
+    const _mileBonus = _lxStreakMilestone(streak, _streakMiles, prev, day);   // v0.30.1176 streak-guard - once per save, not once per lap
     // v0.30.x full audit - granted as two payouts so each toast shows what IT paid: the milestone toast printed the raw
     // bonus (+3,000 on day 14) while the currency scalar paid 1,125 of it. Held (not dropped) if the day turns in a run.
     const _granted = _grantMojicoins(bonus, { hold: true });  // v0.26.056 — global currency scalar
@@ -104440,12 +104457,12 @@ function _killMonsterRaw(m) {
     const _sign = ZODIAC_SIGNS.find(z => z.id === m.zodiacSign);
     if (_sign) {
       if (!player.inventory) player.inventory = [];
-      player.inventory.push({
+      const _bagged = _lxGiveSigil({   // v0.30.1176 streak-guard - through the Etc tab's cap (a full tab drops it at your feet)
         name: `${_lxZodiacSign(_sign)} Sigil`, icon: _sign.glyph || '✨',
         type: 'etc', zodiacSigil: _sign.id, rarity: 'epic',
         desc: `Zodiac Sigil (${_sign.glyph || ''} ${_sign.id}). Trade it to Brok in the Everdawn Megamall for ${(typeof SIGIL_TRADE_SHARDS === 'number' ? SIGIL_TRADE_SHARDS : 1000)}\u25c8 Setshards.`,
       });
-      if (typeof showToast === 'function') showToast(`${_sign.glyph || '✨'} ${_lxZodiacSign(_sign)} Sigil obtained!`, 'legendary');
+      if (typeof showToast === 'function') showToast(`${_sign.glyph || '✨'} ${_lxZodiacSign(_sign)} Sigil obtained!${_bagged ? '' : ' Etc tab full \u2014 it dropped at your feet, pick it up!'}`, 'legendary');   // v0.30.1176 streak-guard
     }
   }
 
@@ -114146,6 +114163,20 @@ const CRAFT_DISASSEMBLE_REWARD = 4;
 // the scroll chain (boss drop -> 3 distinct sigils -> Use tab -> set piece).
 // =========================================================================
 const SIGIL_TRADE_SHARDS = 200;   // v0.29.7xx — 1000 -> 200 (per user)
+// v0.30.1176 streak-guard - A ZODIAC SIGIL RESPECTS THE ETC TAB'S CAP like every other grant (quest reward, chest, pickup, craft):
+// it was pushed into the bag unconditionally, past the last visible slot when the tab was full. A full tab drops it at the
+// hero's feet on the quest-reward life; the pickup's own cap check keeps it on the ground until a slot is free. True = bagged.
+function _lxGiveSigil(it) {
+  if (!Array.isArray(player.inventory)) player.inventory = [];
+  const tabOf = (x) => (typeof _itemTab === 'function') ? _itemTab(x) : 'etc';
+  const tab = tabOf(it), cap = (player.invCap && typeof player.invCap[tab] === 'number') ? player.invCap[tab] : 24;
+  let used = 0;
+  for (const x of player.inventory) if (x && tabOf(x) === tab) used++;
+  if (used < cap) { player.inventory.push(it); return true; }
+  if (!Array.isArray(game.drops)) game.drops = [];
+  game.drops.push({ x: (player.x || 0) + (player.w || 28) / 2, y: (player.y || 0) + (player.h || 44) / 2, vy: -6, type: 'item', item: it, life: 150000, _questReward: true });
+  return false;
+}
 function _lxSigilCount() {
   let n = 0;
   for (const it of (player.inventory || [])) if (it && it.zodiacSigil) n++;
