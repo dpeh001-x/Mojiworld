@@ -17,10 +17,13 @@
 // Run: node scripts/grav_smooth_test.mjs   (MOJI_GAME_FILE=... for a private build)
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+// v0.30.x — the tree this test lives in (it hardcoded the SHARED working copy, which grades whatever build that checkout
+// holds). MOJI_SERVE_ROOT overrides.
+const ROOT = (process.env.MOJI_SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')).replace(/\\/g, '/');
 const require = createRequire(import.meta.url);
 const { chromium } = require(ROOT + '/node_modules/playwright-core');
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
@@ -79,7 +82,13 @@ try {
     // (dn-atlas, later build: in a boss scene the pop blits glyphs. This check is about the LIVE path, so the atlas is held off for it;
     //  scripts/dn_atlas_pop_test.mjs covers the atlas.)
     const _atWas = (typeof _LX_DN_ATLAS_ON !== 'undefined') ? _LX_DN_ATLAS_ON : null; if (_atWas !== null) _LX_DN_ATLAS_ON = false;
-    out.pop = count(() => drawDamageNumbers());
+    // v0.30.x — ...and the FX tier is pinned for this one draw. A popping crit draws its halo and the black outline (plus
+    // the gold foil off lowFx); in the VERY-low tier it is the black outline alone - the designed cheap path (_dnStress).
+    // Headless reaches that tier by missing frames (_perfTick sets LX_PERF.veryLowFx for 8 s), and a boss scene with 40+
+    // live projectiles trips it on its own, so this count read 1 about one run in three. The check is about the LIVE
+    // path's passes, not about which tier the machine happened to be in.
+    const _vlWas = window._perfVeryLowFx; window._perfVeryLowFx = () => false;
+    try { out.pop = count(() => drawDamageNumbers()); } finally { window._perfVeryLowFx = _vlWas; }
     if (_atWas !== null) _LX_DN_ATLAS_ON = _atWas;
     game.damageNumbers = saved;
     // 3. the stand-in

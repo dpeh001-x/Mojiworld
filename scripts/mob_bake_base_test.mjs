@@ -39,6 +39,12 @@ await page.evaluate(async () => {
   try { _lxBootGateDone = true; } catch (e) {} try { _prologueActive = false; } catch (e) {}
   for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
   try { window._lxIsSanctuary = () => false; } catch (e) {}
+  // v0.30.x — the render scale MOVES during a run: DRS lowers it on slow frames (headless trips it) and raises it back.
+  // _lxShrinkFrames re-bakes on a RISE and keeps the bigger bake on a DROP (a down-scaled blit is sharp; re-baking it
+  // smaller buys nothing), so a bake is bounded by the cap of the scale it was MADE at, not of the moment it is read.
+  // Record the high-water scale from here on; the boot target is the ceiling DRS returns to.
+  window.__lxDprMax = Math.max(_LX_DPR, (typeof _lxTargetDpr === 'function') ? (_lxTargetDpr() || 0) : 0);
+  { const _ars = window._lxApplyRenderScale; window._lxApplyRenderScale = function (d) { if (d > window.__lxDprMax) window.__lxDprMax = d; return _ars.apply(this, arguments); }; }
   try { loadMap('forest', 300); } catch (e) {}
   await new Promise(r => setTimeout(r, 600));
   player.invulnerable = 9e9; player.hp = player.maxHp = 999999; player.level = 99;
@@ -58,28 +64,43 @@ for (const type of TYPES) {
     game.paused = false;
     const pin = setInterval(() => { m.x = spawnX; m.vx = 0; player.x = 60; player.vx = 0; }, 30);
     const t0 = performance.now();
-    while (performance.now() - t0 < 12000) {
+    // v0.30.x — bounded by the download, not a 12 s clock: on a cold localhost page his frames can still be in flight
+    // (the Ossuary Tyrant measured zero decoded frames at 12 s: no blit at all, ratio Infinity). Breaks as soon as ready.
+    while (performance.now() - t0 < 60000) {
       const set = MONSTER_FRAMES[type]; const cap = _lxShrinkCap(_mobFrameBase(m));
       if (set && set.idle && set.walk && set.idle._lxShrunk && set.walk._lxShrunk && set.idle._lxShrunkCap === cap && set.walk._lxShrunkCap === cap) break;
       await new Promise(r => setTimeout(r, 100));
     }
     await new Promise(r => setTimeout(r, 400));
     // view 1: the blit
-    const blits = []; const orig = CanvasRenderingContext2D.prototype.drawImage;
-    CanvasRenderingContext2D.prototype.drawImage = function (img, ...a) {
-      try { if (this === ctx) {
-        const dr = a.length >= 8 ? [a[4], a[5], a[6], a[7]] : a.length >= 4 ? [a[0], a[1], a[2], a[3]] : [a[0], a[1], img.width || img.naturalWidth, img.height || img.naturalHeight];
-        if (dr[2] > 24 && dr[3] > 24) { const t = this.getTransform(); const px = (x, y) => ({ x: t.a * x + t.c * y + t.e, y: t.b * x + t.d * y + t.f });
-          const c1 = px(dr[0], dr[1]), c2 = px(dr[0] + dr[2], dr[1] + dr[3]);
-          let under = img, hops = 0; while (under && !under.src && hops++ < 4) under = under._lxBboxSrc || under._lxEdgeSrc || under._lxSrc || under._lxTintSrc || null;
-          blits.push({ rasterW: img.width || img.naturalWidth, rasterH: img.height || img.naturalHeight, src: under && under.src ? under.src.split('/').slice(-2).join('/') : null, w: Math.abs(c2.x - c1.x), h: Math.abs(c2.y - c1.y) }); } } } catch (e) {}
-      return orig.call(this, img, ...a);
+    // v0.30.x — measured at the _lxDrawSoft FUNNEL, not ctx.drawImage. The soft draw puts a DERIVED canvas on screen - a
+    // plain downscale when the frame is >= 1.5x the draw (_lxPlainOf, v0.30.358) or a feather composite - and neither
+    // carries a source pointer, so the drawImage spy could not name the tyrant's blit at all (blit null on every run,
+    // main included). The funnel still holds the frame it was handed and the rect it is drawn to: raster vs blit.
+    const _nm = (x) => { let u = x, h = 0; while (u && h++ < 5) { if (typeof u === 'string') return u; if (u.src) return u.src; u = u._lxBboxSrc || u._lxEdgeSrc || u._lxSrc || u._lxTintSrc || null; } return null; };
+    const blits = []; const _soft0 = window._lxDrawSoft;
+    window._lxDrawSoft = function (c, img, dx, dy, dw, dh) {
+      try { if (c === ctx && img) {
+        const w0 = (dw != null) ? dw : (img.width || img.naturalWidth), h0 = (dh != null) ? dh : (img.height || img.naturalHeight);
+        if (w0 > 24 && h0 > 24) { const t = c.getTransform(); const px = (x, y) => ({ x: t.a * x + t.c * y + t.e, y: t.b * x + t.d * y + t.f });
+          const c1 = px(dx, dy), c2 = px(dx + w0, dy + h0), u = _nm(img);
+          blits.push({ rasterW: img.width || img.naturalWidth, rasterH: img.height || img.naturalHeight, src: u ? u.split('/').slice(-2).join('/') : null, w: Math.abs(c2.x - c1.x), h: Math.abs(c2.y - c1.y) }); } } } catch (e) {}
+      return _soft0.apply(this, arguments);
     };
     await new Promise(r => setTimeout(r, 400));
-    CanvasRenderingContext2D.prototype.drawImage = orig; clearInterval(pin);
+    window._lxDrawSoft = _soft0;
+    // v0.30.x — if the scale moved during the window, the sets he is DRAWING re-stamp at the new cap (a rise re-bakes and
+    // keeps the old canvas on screen until the new one lands). Judge the frames once they have, still pinned in view.
+    for (const t1 = performance.now(); performance.now() - t1 < 20000;) {
+      const set2 = MONSTER_FRAMES[type], cap2 = _lxShrinkCap(_mobFrameBase(m));
+      if (set2 && set2.idle && set2.walk && set2.idle._lxShrunkCap === cap2 && set2.walk._lxShrunkCap === cap2) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    clearInterval(pin);
     const mine = blits.filter((bl) => bl.src && bl.src.toLowerCase().includes(type.toLowerCase())); const p = mine[mine.length - 1] || null;
     // view 2: every frame against the draw it serves
     const dpr = _LX_DPR, base = _mobFrameBase(m), cap = _lxShrinkCap(base);
+    const capMax = Math.ceil(base * Math.max(1, Math.min(3, window.__lxDprMax || dpr)) * 1.15);   // v0.30.x — _lxShrinkCap at the run's highest scale
     const oldRule = Math.max(160, Math.min(480, Math.ceil(Math.max(m.w || 0, m.h || 0) * 4)));
     const visLong = Math.max(m._visW || 0, m._visH || 0);
     const set = MONSTER_FRAMES[type] || {}; let minRatio = Infinity, maxBaked = 0, nBaked = 0, nDecoded = 0, worst = null;
@@ -93,7 +114,7 @@ for (const type of TYPES) {
         if (im.tagName === 'CANVAS' && !(im.src)) { nBaked++; if (rl > maxBaked) maxBaked = rl; }   // pinned canvases carry src and are not bakes
       }
     }
-    return { state: m._frameIsAttack ? 'attack' : (_mobWalking(m) ? 'walk' : 'idle'), box: m.w + 'x' + m.h, vis: Math.round(m._visW) + 'x' + Math.round(m._visH), dpr: +dpr.toFixed(3), base, cap, oldRule,
+    return { state: m._frameIsAttack ? 'attack' : (_mobWalking(m) ? 'walk' : 'idle'), box: m.w + 'x' + m.h, vis: Math.round(m._visW) + 'x' + Math.round(m._visH), dpr: +dpr.toFixed(3), base, cap, capMax, oldRule,
       blit: p ? { raster: p.rasterW + 'x' + p.rasterH, blit: Math.round(p.w) + 'x' + Math.round(p.h), upscale: +(Math.max(p.w, p.h) / Math.max(p.rasterW, p.rasterH)).toFixed(3), src: p.src } : null,
       frames: { decoded: nDecoded, baked: nBaked, minRatio: +minRatio.toFixed(3), worst, maxBaked } };
   }, type);
@@ -103,7 +124,9 @@ const T = out.ossuaryTyrant, B = out.blightElder;
 ok('end to end: the Ossuary Tyrant draws from a raster at least as large as its blit (was 789 px from 710, an 11% up-scale = the blur)', T && T.blit && T.blit.upscale <= 1.02, T && T.blit);
 ok('end to end: Blight Elder too (was 4% over)', B && B.blit && B.blit.upscale <= 1.02, B && B.blit);
 ok('per frame: no decoded frame of any type is smaller than the draw it serves (state scales and render scale in)', TYPES.every((k) => out[k] && !out[k].err && out[k].frames.decoded > 0 && out[k].frames.minRatio >= 0.99), TYPES.map((k) => k + ':' + (out[k] && out[k].frames && out[k].frames.minRatio)));
-ok('per frame: no baked raster exceeds its cap (memory stays bounded by the base rule)', TYPES.every((k) => out[k] && !out[k].err && out[k].frames.maxBaked <= out[k].cap + 1), TYPES.map((k) => k + ':' + (out[k] && out[k].frames && out[k].frames.maxBaked + '<=' + out[k].cap)));
+// v0.30.x — against the cap of the scale the bake was made at (the run's highest), not the cap of the moment: a DRS drop
+// after the bake read as "exceeds its cap" about one run in three while memory was bounded exactly as the rule says.
+ok('per frame: no baked raster exceeds its cap (memory stays bounded by the base rule, at the scale it was baked for)', TYPES.every((k) => out[k] && !out[k].err && out[k].frames.maxBaked <= Math.max(out[k].cap, out[k].capMax || 0) + 1), TYPES.map((k) => k + ':' + (out[k] && out[k].frames && out[k].frames.maxBaked + '<=' + out[k].cap)));
 ok('the base covers the observed draw in logical px and never drops below the old rule', TYPES.every((k) => out[k] && !out[k].err && out[k].base >= out[k].oldRule && out[k].base * 1.001 >= Math.max(...out[k].vis.split('x').map(Number))), TYPES.map((k) => k + ':' + (out[k] && out[k].base + ' vs ' + out[k].vis)));
 ok('types the old rule already covered keep exactly their old base (slime 188, Paths Bane 480)', ['slime', 'pathsBane'].every((k) => out[k] && !out[k].err && out[k].base === out[k].oldRule), ['slime', 'pathsBane'].map((k) => k + ':' + (out[k] && out[k].base + '/' + out[k].oldRule)));
 const ek = out.echoKnight;
