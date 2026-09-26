@@ -5,7 +5,7 @@
 //   1. the band is smoked black glass: near-black, translucent, blurred where blur is available,
 //      faded at both ends, and no purple box / thick border / rounded corners
 //   2. the star row leads, the new star is marked (and popped), the empty slots stay visible
-//   3. the title is a plain word in engraved type - the typed "★ … ★" / "✕ … ✕" ornaments are gone
+//   3. the title is a plain word - the typed "★ … ★" / "✕ … ✕" ornaments are gone
 //   4. the item carries an old -> new star chip; a plain failure says the star was kept
 //   5. a loss marks the lost star and turns the band ember
 //   6. (v0.30.993) the star row is big (30px) and the landing is flashy: earned stars light in a
@@ -14,6 +14,9 @@
 //   7. (v0.30.998) a failure lands too: on a plain fail the star you forged for ignites and is
 //      snuffed out, puffing embers; a lost star shatters into shards; both throw a red flash and
 //      shake the band sideways
+//   (v0.30.1170) the lettering follows the ceremony windows' MojiMon pop: the title is the comic logo in Nunito with an
+//      ink outline and a slab (drop-shadow filters - the fill stays clipped to the letters), no old serif is left on
+//      the card, and the hairlines are berry and butter; the black-glass band and every animation are unchanged
 //   node scripts/forge_result_card_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -56,6 +59,8 @@ const r = await page.evaluate(async () => {
       mask: cs.webkitMaskImage || cs.maskImage || '', backdrop: cs.backdropFilter || cs.webkitBackdropFilter || '',
       order: kids, heading: document.getElementById('ec-heading').textContent,
       headingFont: getComputedStyle(document.getElementById('ec-heading')).fontFamily,
+      faces: ['ec-heading', 'ec-name', 'ec-lv', 'ec-flavor', 'ec-pity'].map((id) => { const e = document.getElementById(id); return e ? getComputedStyle(e).fontFamily.split(',')[0].split('"').join('').trim() : null; }),
+      headingFilter: getComputedStyle(document.getElementById('ec-heading')).filter,
       lv: (document.getElementById('ec-lv') || {}).textContent || null,
       lvClass: (document.getElementById('ec-lv') || {}).className || '',
       stars: [...document.querySelectorAll('#ec-stars .s')].map((s) => s.className.replace('s ', '')),
@@ -88,10 +93,11 @@ const W0 = r.win;
 ok('1. smoked black glass: near-black (every channel <= 16) and translucent (alpha 0.7-0.9)', W0.bg.length === 4 && W0.bg[0] <= 16 && W0.bg[1] <= 16 && W0.bg[2] <= 16 && W0.bg[3] >= 0.7 && W0.bg[3] <= 0.9, JSON.stringify(W0.bg));
 ok('1. a band across the panel, faded at both ends: full overlay width, a gradient mask, no border, square ends', W0.width >= W0.overlayWidth - 2 && /gradient/.test(W0.mask) && W0.border === 0 && W0.radius === 0, JSON.stringify({ w: W0.width, of: W0.overlayWidth, mask: W0.mask.slice(0, 40), border: W0.border, radius: W0.radius }));
 ok('1. it blurs what is behind it wherever blur is on (low-fx mode strips it by design)', r.lowFx || /blur/.test(W0.backdrop), `${W0.backdrop} lowFx=${r.lowFx}`);
-ok('1. ruled by a gold hairline', /gradient/.test(W0.hairTop), W0.hairTop.slice(0, 60));
+ok('1. ruled by a hairline (berry and butter since v0.30.1170)', /gradient/.test(W0.hairTop), W0.hairTop.slice(0, 60));
 ok('2. the star row leads the band', W0.order[0] === 'ec-stars', JSON.stringify(W0.order));
 ok('2. ten slots: three earned, the new fourth marked, six empty but visible', W0.stars.length === 10 && W0.stars.filter((s) => s === 'on').length === 3 && W0.stars[3] === 'new' && W0.stars.slice(4).every((s) => s === 'off') && /rgba\(255, 255, 255, 0\.1[0-9]*\)/.test(W0.offColour || ''), JSON.stringify({ s: W0.stars, off: W0.offColour }));
-ok('3. titles are plain words in engraved Cinzel - no typed star / cross ornaments', W0.heading === 'ENHANCED' && r.fail.heading === 'FAILED' && r.lost.heading === 'STAR LOST' && /Cinzel/.test(W0.headingFont), JSON.stringify([W0.heading, r.fail.heading, r.lost.heading, W0.headingFont]));
+ok('3. titles are plain words in the comic face (Nunito since v0.30.1170) - no typed star / cross ornaments', W0.heading === 'ENHANCED' && r.fail.heading === 'FAILED' && r.lost.heading === 'STAR LOST' && /Nunito/.test(W0.headingFont), JSON.stringify([W0.heading, r.fail.heading, r.lost.heading, W0.headingFont]));
+ok('3. no old serif is left on the card, and the title wears an ink outline and a slab on a win and a loss', [W0, r.fail, r.lost].every((c) => c.faces.every((x) => x === null || x === 'Nunito')) && (W0.headingFilter.match(/drop-shadow/g) || []).length >= 5 && (r.lost.headingFilter.match(/drop-shadow/g) || []).length >= 5, JSON.stringify({ faces: [W0.faces, r.lost.faces], filter: W0.headingFilter.slice(0, 90) }));
 ok('4. the item carries its old -> new star chip', /\u2605\s*3\s*\u2192\s*\u2605\s*4/.test(W0.lv || ''), W0.lv);
 ok('4. a plain failure says the star was kept', /\u2605\s*4 kept/.test(r.fail.lv || '') && /held/.test(r.fail.lvClass), r.fail.lv);
 ok('5. a loss marks the lost star and names the drop', r.lost.stars.indexOf('lost') === 5 && /\u2605\s*6\s*\u2192\s*\u2605\s*5/.test(r.lost.lv || ''), JSON.stringify({ s: r.lost.stars, lv: r.lost.lv }));
