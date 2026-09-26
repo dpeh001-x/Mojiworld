@@ -12,7 +12,8 @@
 // nothing scrolls; bigger switches on touch screens.
 // v0.30.1109, punk pop (per user: "more punk pop feel with shadow and better outlines for each section"): every card
 // a paper outline with a hard slab of its own colour behind it (ink-rimmed) and halftone dots; the tags inked
-// stickers, tilted alternately.
+// stickers, tilted alternately. Then the headers as pop banners (per user: "the headers can be more heavily designed
+// with better pop feels"): white comic lettering outlined in ink, a Ben-Day screen, a numbered badge, a sparkle.
 //   node scripts/settings_pop_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -65,7 +66,8 @@ const probe = () => {
     sliderW: Math.round(rc(document.getElementById('set-bgm')).width), toggleT: getComputedStyle(document.getElementById('set-mute')).transform,
     ink: cards.map((c) => { const g = getComputedStyle(c), t = c.querySelector('.set-grp-h'), tg = getComputedStyle(t), mx = tg.transform.match(/[-0-9.e]+/g) || [];
       return { k: c.dataset.grp, bc: g.borderTopColor, bw: g.borderTopWidth, bs: g.boxShadow, acc: tg.backgroundColor, tbw: tg.borderTopWidth, tbc: tg.borderTopColor, tilt: Math.sign(+mx[1] || 0),
-        dots: getComputedStyle(c, '::before').backgroundImage }; }),
+        dots: getComputedStyle(c, '::before').backgroundImage, fill: tg.color, stroke: tg.webkitTextStrokeWidth, tdrop: tg.textShadow, screen: tg.backgroundImage,
+        badge: getComputedStyle(t, '::before').content, badgeBg: getComputedStyle(t, '::before').backgroundColor, spark: getComputedStyle(t, '::after').clipPath }; }),
   };
 };
 let page = await open(1280, 720);
@@ -100,6 +102,10 @@ ok('punk pop: every card has a paper outline (2.5px, drawn 2px on a 1x screen) a
   D.ink.map((c) => c.k + ':' + c.bc + '/' + c.bw + ' ' + c.bs.slice(0, 90)).slice(0, 2));
 ok('the tags are inked stickers (a 2.5px ink edge, 2px on a 1x screen), tilted one way then the other down each column', D.ink.every((c) => parseFloat(c.tbw) >= 2 && c.tbc === 'rgb(12, 11, 16)') && J(D.ink.map((c) => c.tilt)) === '[-1,1,-1,-1,1,-1]',
   { tilts: D.ink.map((c) => c.tilt), edge: D.ink.map((c) => c.tbw).join(',') });
+ok('the headers are pop banners: white comic lettering with a thick ink outline and drop, a Ben-Day screen, a numbered ink badge and a paper sparkle',
+  D.ink.every((c) => c.fill === 'rgb(255, 255, 255)' && parseFloat(c.stroke) >= 3 && /rgb[(]12, 11, 16[)] 2.5px 2.5px/.test(c.tdrop) && /radial-gradient/.test(c.screen)
+    && /counter[(]lx-sgh/.test(c.badge) && c.badgeBg === 'rgb(12, 11, 16)' && /polygon/.test(c.spark)),
+  D.ink.slice(0, 1).map((c) => ({ fill: c.fill, stroke: c.stroke, badge: c.badge, spark: (c.spark || '').slice(0, 20) })));
 ok('1280x720: all of it fits, so there is no "more below" fade', !D.scrolls && D.fade === '0', { scrolls: D.scrolls, fade: D.fade });
 ok('an 820x600 window keeps both columns at 740 px and fits whole (no scroll, no fade)', W.side && W.w === 740 && !W.scrolls && W.fade === '0', { side: W.side, w: W.w, sh: W.sh, fade: W.fade });
 ok('under 800 px (760x600) the cards stack in one column, sliders stretched across the row', N.stacked && !N.side && N.sliderW >= 180, { stacked: N.stacked, slider: N.sliderW });
