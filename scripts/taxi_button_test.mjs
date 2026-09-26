@@ -7,6 +7,9 @@
 //      user: "make the background black and the TAXI yellow")
 //   2. the lettering clears #hotkey-hint, which has always overlapped the button's top edge by a few px
 //   3. it flips to yellow with ink lettering under the pointer, and a click still opens the Taxi window
+//   4. the "K Hotkeys & Skills" hint above it in the same style (per user: "The K hotkeys & skills could improve
+//      with a similar style as well"): black, yellow capitals, a yellow offset, the K a yellow keycap; the cab's
+//      lettering clears the hint's whole box; under the pointer it flips to yellow; a click still opens a panel
 //   node scripts/taxi_button_test.mjs        (MOJI_GAME_FILE to test a candidate)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -57,6 +60,21 @@ ok('3. it flips to yellow with ink lettering under the pointer', H === 'rgb(255,
 await page.mouse.click(box.x, box.y); await page.waitForTimeout(500);
 const O = await page.evaluate(() => { const m = document.getElementById('taxi-modal'); return !!m && m.style.display !== 'none' && getComputedStyle(m).display !== 'none'; });
 ok('3. a click still opens the Taxi window', O, O);
+await page.keyboard.press('Escape'); await page.evaluate(() => { if (typeof closeAllModals === 'function') closeAllModals(); }); await page.waitForTimeout(400);
+const K = await page.evaluate(() => {
+  const h = document.getElementById('hotkey-hint'), t = document.getElementById('taxi-btn'), cs = getComputedStyle(h), k = h.querySelector('kbd'), ks = getComputedStyle(k);
+  const tn = [...t.childNodes].find((n) => n.nodeType === 3 && /taxi/i.test(n.textContent)); const rg = document.createRange(); rg.selectNodeContents(tn);
+  return { bg: cs.backgroundColor, color: cs.color, weight: cs.fontWeight, tt: cs.textTransform, filter: cs.filter, kBg: ks.backgroundColor, kColor: ks.color, hintBottom: h.getBoundingClientRect().bottom, taxiText: rg.getBoundingClientRect().top };
+});
+ok('4. the hint: black, heavy yellow capitals, a yellow offset, the K a yellow keycap with an ink letter', K.bg === 'rgb(12, 11, 16)' && K.color === 'rgb(255, 228, 92)' && +K.weight >= 900 && K.tt === 'uppercase' && /drop-shadow\(rgb\(255, 228, 92\)/.test(K.filter) && K.kBg === 'rgb(255, 228, 92)' && K.kColor === 'rgb(12, 11, 16)', JSON.stringify(K));
+ok('4. the cab\'s lettering clears the hint\'s whole box', K.taxiText >= K.hintBottom - 0.5, JSON.stringify([K.taxiText, K.hintBottom]));
+const hb = await page.evaluate(() => { const r = document.getElementById('hotkey-hint').getBoundingClientRect(); return { x: r.x + r.width * 0.5, y: r.y + r.height * 0.5 }; });
+await page.mouse.move(hb.x, hb.y); await page.waitForTimeout(300); await page.evaluate(() => document.getAnimations().forEach((a) => { try { a.finish(); } catch (e) {} }));
+const KH = await page.evaluate(() => { const cs = getComputedStyle(document.getElementById('hotkey-hint')); return cs.backgroundColor + ' / ' + cs.color; });
+ok('4. the hint flips to yellow with ink lettering under the pointer', KH === 'rgb(255, 228, 92) / rgb(12, 11, 16)', KH);
+await page.mouse.click(hb.x, hb.y); await page.waitForTimeout(700);
+const KO = await page.evaluate(() => [...document.querySelectorAll('.modal-overlay, [id$="-modal"]')].filter((m) => m.id !== 'taxi-modal' && getComputedStyle(m).display !== 'none' && m.getBoundingClientRect().height > 40).map((m) => m.id));
+ok('4. a click on the hint still opens a panel', KO.length > 0, JSON.stringify(KO));
 ok('no page errors', errs.length === 0, errs.join(' | '));
 await b.close(); srv.kill();
 for (const r of results) console.log((r.pass ? 'PASS  ' : 'FAIL  ') + r.n + (r.pass ? '' : '  -- ' + r.x));
