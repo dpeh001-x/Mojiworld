@@ -13,7 +13,8 @@
 // v0.30.1109, punk pop (per user: "more punk pop feel with shadow and better outlines for each section"): every card
 // a paper outline with a hard slab of its own colour behind it (ink-rimmed) and halftone dots; the tags inked
 // stickers, tilted alternately. Then the headers as pop banners (per user: "the headers can be more heavily designed
-// with better pop feels"): white comic lettering outlined in ink, a Ben-Day screen, a numbered badge, a sparkle.
+// with better pop feels"): white comic lettering outlined in ink, a Ben-Day screen, a numbered badge, a sparkle. And
+// the sliders as punk meters (per user: "the bars can have some gradient or stylish aesthetics").
 //   node scripts/settings_pop_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -68,6 +69,12 @@ const probe = () => {
       return { k: c.dataset.grp, bc: g.borderTopColor, bw: g.borderTopWidth, bs: g.boxShadow, acc: tg.backgroundColor, tbw: tg.borderTopWidth, tbc: tg.borderTopColor, tilt: Math.sign(+mx[1] || 0),
         dots: getComputedStyle(c, '::before').backgroundImage, fill: tg.color, stroke: tg.webkitTextStrokeWidth, tdrop: tg.textShadow, screen: tg.backgroundImage,
         badge: getComputedStyle(t, '::before').content, badgeBg: getComputedStyle(t, '::before').backgroundColor, spark: getComputedStyle(t, '::after').clipPath }; }),
+    // slider parts cannot be read with getComputedStyle, so read the last top-level rule that styles them
+    meter: (() => { const last = (part) => { let hit = null; for (const sh of document.styleSheets) { let rs; try { rs = sh.cssRules; } catch (e) { continue; }
+        for (const r of rs) if (r.selectorText && r.selectorText.includes('#settings-modal#settings-modal') && !r.selectorText.includes(':hover') && r.selectorText.endsWith(part)) hit = r; } return hit ? hit.style : null; };
+      const tr = last('::-webkit-slider-runnable-track'), th = last('::-webkit-slider-thumb');
+      // a background shorthand holding var() leaves its longhands empty in the CSSOM - read the shorthand text
+      return tr && th ? { img: tr.background, size: tr.background, h: tr.height, thumb: th.background, mt: th.marginTop } : null; })(),
   };
 };
 let page = await open(1280, 720);
@@ -106,6 +113,10 @@ ok('the headers are pop banners: white comic lettering with a thick ink outline 
   D.ink.every((c) => c.fill === 'rgb(255, 255, 255)' && parseFloat(c.stroke) >= 3 && /rgb[(]12, 11, 16[)] 2.5px 2.5px/.test(c.tdrop) && /radial-gradient/.test(c.screen)
     && /counter[(]lx-sgh/.test(c.badge) && c.badgeBg === 'rgb(12, 11, 16)' && /polygon/.test(c.spark)),
   D.ink.slice(0, 1).map((c) => ({ fill: c.fill, stroke: c.stroke, badge: c.badge, spark: (c.spark || '').slice(0, 20) })));
+ok('the sliders are punk meters: a tint-to-colour fill with hazard stripes and a gloss line sized to the value, a ruled channel, a pinned knob',
+  !!D.meter && /color-mix/.test(D.meter.img) && /repeating-linear-gradient[(]-45deg/.test(D.meter.img) && /repeating-linear-gradient[(]90deg/.test(D.meter.img)
+    && (D.meter.size.match(/moji-slider-pct/g) || []).length === 3 && D.meter.h === '10px' && /radial-gradient/.test(D.meter.thumb) && D.meter.mt === '-7.5px',
+  D.meter && { h: D.meter.h, mt: D.meter.mt, size: (D.meter.size || '').slice(0, 60) });
 ok('1280x720: all of it fits, so there is no "more below" fade', !D.scrolls && D.fade === '0', { scrolls: D.scrolls, fade: D.fade });
 ok('an 820x600 window keeps both columns at 740 px and fits whole (no scroll, no fade)', W.side && W.w === 740 && !W.scrolls && W.fade === '0', { side: W.side, w: W.w, sh: W.sh, fade: W.fade });
 ok('under 800 px (760x600) the cards stack in one column, sliders stretched across the row', N.stacked && !N.side && N.sliderW >= 180, { stacked: N.stacked, slider: N.sliderW });
