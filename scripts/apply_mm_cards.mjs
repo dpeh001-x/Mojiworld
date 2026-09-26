@@ -1,4 +1,6 @@
 // The MojiMon tab's two top cards, made cute.
+// v0.30.1109 (per user: "needs more POP feel"): the look was redone as pop comic - pink, black and yellow - in
+// _mm_cards.css.txt, with the pane head moved into it (.mmc-shell / .mmc-top). The notes below describe the first, cute pass.
 // ============================================================================
 // Per user, on the "⛓ MOJIMON" rules card and the "Summon cooldown" card: "These buttons and fonts can be
 // stylised, polished to be more artistic and appealing"; on the first sample: "Can be further improved and made

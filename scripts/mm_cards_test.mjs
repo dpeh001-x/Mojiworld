@@ -1,6 +1,8 @@
 // The MojiMon tab's two top cards drawn as art (v0.30.x mm-cards).
 //   node scripts/mm_cards_test.mjs            (MOJI_GAME_FILE=<build.html> to test a private build)
-// Per user: "These buttons and fonts can be stylised, polished to be more artistic and appealing".
+// Per user: "These buttons and fonts can be stylised, polished to be more artistic and appealing"; then "the how to bind
+// and SUMMON READY tabs section needs more POP feel, especially the top MOJIMON header" - the head and both cards in the
+// pop palette: hot pink, acid yellow, ink and paper, heavy Nunito printed in a thick ink stroke.
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +53,17 @@ try {
       chips: [...document.querySelectorAll('#u-pane-mojimon .mmc-chip')].map((x) => x.textContent.trim()), atk: Math.round(MOJIMON_ATK_MULT * 100),
       cls: q('.mmc-cd').className, cd: q('#mojimon-cd').textContent, p: cs(q('.mmc-cd')).getPropertyValue('--p').trim(), ping: getComputedStyle(q('.mmc-ring'), '::after').animationName,
       pts: q('.mmc-star').textContent, buddy: q('.mmc-buddy').getAttribute('src'), sub: q('.mmc-cdtx .mmc-sub').textContent, paws: document.querySelectorAll('#u-pane-mojimon .mmc-link').length, ptsReal: _mojimonPoints(), dismiss: !!q('.mmc-dismiss'),
-      fonts: { head: cs(q('.mmc-h')).fontFamily, cd: cs(q('#mojimon-cd')).fontFamily, text: cs(q('.mmc-t')).fontFamily, fred: document.fonts.check("600 14px 'Fredoka'"), nun: document.fonts.check("500 11px 'Nunito'") } };
+      fonts: { head: cs(q('.mmc-h')).fontFamily, cd: cs(q('#mojimon-cd')).fontFamily, text: cs(q('.mmc-t')).fontFamily,
+        headW: Number(cs(q('.mmc-h')).fontWeight), cdW: Number(cs(q('#mojimon-cd')).fontWeight),
+        htStroke: parseFloat(cs(q('.mmc-ht')).webkitTextStrokeWidth), cdStroke: parseFloat(cs(q('#mojimon-cd')).webkitTextStrokeWidth), nun: document.fonts.check("900 14px 'Nunito'") },
+      // the pop pass: the pane head, and both cards in pink / black / yellow with a paper edge
+      head: { title: q('.mmc-title') && q('.mmc-title').textContent, tag: q('.mmc-tag') && q('.mmc-tag').textContent,
+        titleFill: q('.mmc-title') && cs(q('.mmc-title')).color, titleStroke: q('.mmc-title') && parseFloat(cs(q('.mmc-title')).webkitTextStrokeWidth),
+        titleCopy: q('.mmc-title') && /rgb\(243, 245, 66\)/.test(cs(q('.mmc-title')).textShadow), burst: !!q('.mmc-toplogo img'),
+        shellArt: q('.mmc-shell') && /mojimon_bg\.webp/.test(cs(q('.mmc-shell')).backgroundImage) },
+      panels: ['.mmc-how', '.mmc-cd'].map((s) => { const c = cs(q(s)); return { pink: /rgba?\(255, 45, 149/.test(c.backgroundImage) || c.backgroundColor === 'rgb(255, 45, 149)',
+        ink: /rgb\(11, 10, 14\)/.test(c.backgroundImage) || c.borderTopColor === 'rgb(11, 10, 14)', edge: c.outlineStyle === 'solid' && c.outlineColor === 'rgb(244, 241, 234)' }; }),
+      ready2: q('.mmc-cd.ready #mojimon-cd') ? cs(q('#mojimon-cd')).color : null };
   });
   console.log('ready', JSON.stringify(ready));
   check(ready.steps === 3 && ready.heads.join('|') === 'Master|Bind|Team up' && ready.kills === ready.killsReq, 'HOW TO BIND in three steps: MASTER (the real kill count), BIND, TEAM UP', ready.heads);
@@ -59,7 +71,15 @@ try {
   check(/\bready\b/.test(ready.cls) && ready.cd === 'READY' && Number(ready.p) === 0 && ready.ping === 'mmc-ping', 'ready: the ring is full and pings, the readout says READY', ready);
   check(ready.pts === String(ready.ptsReal) && !ready.dismiss, 'the upgrade points on the star are the real count; no Dismiss with nothing out', ready);
   check(/mojimon_logo/.test(ready.buddy) && /ready when you are/.test(ready.sub) && ready.paws === 2, 'with no MojiMon yet the ring holds the MojiMon logo; paw prints walk between the steps', ready);
-  check(/^"?Fredoka/.test(ready.fonts.head) && /^"?Fredoka/.test(ready.fonts.cd) && /^"?Nunito/.test(ready.fonts.text) && ready.fonts.fred && ready.fonts.nun, 'Fredoka for the headings and the readout, Nunito for the words, both loaded', ready.fonts);
+  const f = ready.fonts;
+  check(/^"?Nunito/.test(f.head) && /^"?Nunito/.test(f.cd) && /^"?Nunito/.test(f.text) && f.headW >= 900 && f.cdW >= 900 && f.htStroke >= 4 && f.cdStroke >= 4 && f.nun,
+    'pop type: heavy Nunito for the headings and the readout, printed in a thick ink stroke; Nunito for the words, loaded', f);
+  const hd = ready.head;
+  check(hd.title === 'MOJIMON' && hd.tag === 'BIND · FIELD · UPGRADE · H QUICK-SUMMON' && hd.burst && hd.shellArt,
+    'the head: MOJIMON and its tagline (same words as before), the logo on its starburst, the MojiMon art still behind the shell', hd);
+  check(hd.titleFill === 'rgb(255, 45, 149)' && hd.titleStroke >= 5 && hd.titleCopy, 'MOJIMON printed hot pink in a thick ink stroke with a yellow copy', hd);
+  check(ready.panels.every((p) => p.pink && p.ink && p.edge), 'both cards in pink and black with a paper edge (an outline, so low-effects mode keeps it)', ready.panels);
+  check(ready.ready2 === 'rgb(243, 245, 66)', 'READY printed in acid yellow', ready.ready2);
   // on cooldown with a mon out
   const cool = await page.evaluate(async () => {
     const ks = Object.keys(monsterTypes).filter((k) => !monsterTypes[k].boss).slice(0, 2), mm = _mojimonEnsure();
@@ -73,7 +93,7 @@ try {
     const sp = _monsterDexSprite(ks[0], monsterTypes[ks[0]]); return { a, b, dismiss: d ? d.textContent : null, name, half: MOJIMON_CD_MS / 2000, buddy: q('.mmc-buddy').getAttribute('src'), want: sp && sp.src, sub: q('.mmc-cdtx .mmc-sub').textContent };
   });
   console.log('cooling', JSON.stringify(cool));
-  check(/cooling/.test(cool.a.cls) && /^\d+:\d\d$/.test(cool.a.cd) && Math.abs(cool.a.p - 0.5) < 0.01 && cool.a.color === 'rgb(255, 194, 138)', 'cooling: amber readout in m:ss and the ring half drained at half the cooldown', cool.a);
+  check(/cooling/.test(cool.a.cls) && /^\d+:\d\d$/.test(cool.a.cd) && Math.abs(cool.a.p - 0.5) < 0.01 && cool.a.color === 'rgb(244, 241, 234)', 'cooling: paper readout in m:ss and the ring half drained at half the cooldown', cool.a);
   check(cool.b.cd !== cool.a.cd && cool.b.p < cool.a.p, 'the ticker counts down and drains the ring as it goes', cool);
   check(cool.dismiss && cool.dismiss.includes('Dismiss ' + cool.name), 'a fielded mon gets a Dismiss button with its name', cool.dismiss);
   check(cool.want && cool.buddy === cool.want && /resting/.test(cool.sub), 'the ring holds your H-slot MojiMon, resting while the cooldown runs', cool);
