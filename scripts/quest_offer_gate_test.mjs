@@ -1,6 +1,7 @@
 // QUEST OFFER GATE (v0.30.1115, the 2026-09-26 NPC audit). One test for "can this quest be accepted now", read by the
 // marker, the dialog rows, the Journal's Available list and the guide:
-//   - LEFTOVERS: a wrong-class quest (class swap) and an over-level one (ascension) left unlocked are not listed as
+//   - LEFTOVERS: a wrong-class quest (class swap) is not listed; an over-level one (ascension) is listed with a lock, not an
+//     Accept (v0.30.1127: the gate pill is designed); neither can be accepted or guided to. Earlier wording: not listed as
 //     Available and are not guided to
 //   - DISTORTED: no job -> acceptQuest refuses and Taiga shows no marker for it; with a job -> Taiga's gold marker and
 //     acceptQuest takes it
@@ -39,10 +40,14 @@ try {
     // LEFTOVERS
     fresh('rogue', 30); loadMap('town', 300); await W8(900); try { closeAllModals(); } catch (e) {}
     const wrongCls = Object.entries(QUESTS).find(([id, q]) => q.cls === 'warrior' && (q.levelReq || 1) <= 30 && !q.prereq);
-    const overLv = Object.entries(QUESTS).find(([id, q]) => !q.cls && !q.prereq && (q.levelReq || 1) >= 60 && q.name);
+    const overLv = Object.entries(QUESTS).find(([id, q]) => !q.cls && !q.prereq && q.kind !== 'boss' && (q.levelReq || 1) >= 60 && q.name);
     player.quests.unlocked[wrongCls[0]] = true; player.quests.unlocked[overLv[0]] = true;
     const jt = await journalIds(); const guide = _qnavGuideList();
-    out.leftovers = { wrongCls: wrongCls[0], overLv: overLv[0], availableCards: jt.length, listed: [wrongCls[0], overLv[0]].filter((id) => jt.includes(id)), guided: [wrongCls[0], overLv[0]].filter((id) => guide.includes(id)),
+    toggleQuestJournal(); await W8(250); { const tb = [...document.querySelectorAll('#quest-modal [data-qtab]')].find((t) => t.dataset.qtab === 'available'); if (tb) { tb.click(); await W8(200); } }
+    const lockCard = [...document.querySelectorAll('#quest-modal .qj-card')].find((c) => (c.textContent || '').includes(overLv[1].name));
+    const gateView = { overCard: !!lockCard, lock: !!(lockCard && lockCard.querySelector('.qj-btn.locked')), gatePill: !!(lockCard && lockCard.querySelector('.qj-pill.lvgate')) };
+    try { closeAllModals(); } catch (e) {}
+    out.leftovers = { gateView, wrongCls: wrongCls[0], overLv: overLv[0], availableCards: jt.length, listed: [wrongCls[0], overLv[0]].filter((id) => jt.includes(id)), guided: [wrongCls[0], overLv[0]].filter((id) => guide.includes(id)),
       accept: [acceptQuest(wrongCls[0], true), acceptQuest(overLv[0], true)] };
     // DISTORTED
     fresh('rogue', 40); player.quests.completed.q_inner_dim_trial = true; player.quests.unlocked.q_distorted_portal = true;
@@ -60,6 +65,7 @@ try {
     out.agree = { marker: mk && mk.rank, rows };
     return out;
   });
+  check(r.leftovers.gateView.overCard && r.leftovers.gateView.lock && r.leftovers.gateView.gatePill, 'GATED: the over-level quest stays in Open with its level-gate pill and a lock where Accept was', J(r.leftovers.gateView));
   check(r.leftovers.availableCards > 0 && r.leftovers.listed.length === 0 && r.leftovers.guided.length === 0 && r.leftovers.accept.every((a) => !a), 'LEFTOVERS: a wrong-class and an over-level quest left unlocked are neither listed as Available nor guided to (acceptQuest refuses both)', J(r.leftovers));
   check(r.distorted.noJob.marker !== 2 && r.distorted.noJob.accepted === false, 'DISTORTED: without a job, no marker over Taiga and acceptQuest refuses', J(r.distorted.noJob));
   check(r.distorted.withJob.marker === 2 && r.distorted.withJob.offered && r.distorted.withJob.accepted === true, 'DISTORTED: with a job, Taiga shows the gold marker, offers the trial, and acceptQuest takes it', J(r.distorted.withJob));
