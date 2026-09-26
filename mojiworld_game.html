@@ -15754,7 +15754,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1112';
+const GAME_VERSION = 'v0.30.1113';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -15958,8 +15958,10 @@ canvas.addEventListener('click', function _wmCanvasClickTalk(ev) {
   for (const npc of game.npcs) {
     if (!npc) continue;
     const dx = wx - npc.x;
-    const dy = wy - (npc.y + 22);
-    if (Math.abs(dx) <= 40 && Math.abs(dy) <= 56) {
+    // v0.30.1113 the box runs from the feet up to the drawn head (was +-56 px around a point 22 px below the NPC's y)
+    const _feet = npc.y + 44, _top = _feet - _lxNpcDrawnH(npc);
+    const dy = wy - (_top + _feet) * 0.5;
+    if (Math.abs(dx) <= 40 && wy >= _top - 4 && wy <= _feet + 12) {
       const d2 = dx * dx + dy * dy;
       if (d2 < bestD2) { bestD2 = d2; bestNpc = npc; }
     }
@@ -42070,6 +42072,8 @@ window.addEventListener('keydown', e => {
       const dlgOpen = dlg && dlg.style.display && dlg.style.display !== 'none';
       if (dlgOpen) {
         closeAllModals();
+      } else if (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen()) {
+        // v0.30.1113 another window is up (a shop, a story beat, the advancement card): N does not open a dialog under it
       } else {
         const pcx = player.x + player.w / 2;
         // Chest first — matches Mojiworld's "look at the thing you're on"
@@ -42079,14 +42083,8 @@ window.addEventListener('keydown', e => {
         if (nearChest) {
           openChest(nearChest);
         } else {
-          // Pick the CLOSEST NPC within 80 px (v0.25.62).
-          let nearNpc = null, nearDx = 81;
-          if (game.npcs) {
-            for (const npc of game.npcs) {
-              const dx = Math.abs(pcx - npc.x);
-              if (dx < nearDx) { nearDx = dx; nearNpc = npc; }
-            }
-          }
+          // v0.30.1113 the shared talk target (was: the horizontally closest NPC within 80 px, at any height)
+          const nearNpc = _lxTalkTarget();
           if (nearNpc) openNPC(nearNpc);
           // v0.25.180 — Codex no longer falls out of N.
         }
@@ -42544,9 +42542,7 @@ function _wireDynamicFButton() {
           if (!c.opened && Math.abs(px - (c.x + c.w/2)) < 40 && Math.abs(py - (c.y + c.h)) < 60) return 'interact';
         }
         // (v0.26.949 — no portal branch: portals are entered with ▲ only)
-        for (const npc of (game.npcs || [])) {
-          if (Math.abs(px - npc.x) < 60) return 'interact';
-        }
+        if (typeof _lxTalkTarget === 'function' && _lxTalkTarget()) return 'interact';   // v0.30.1113 the shared talk target
         const qSkill = (typeof skillBySlot === 'function') ? skillBySlot('q') : null;
         const lvReq = (typeof slotLevelReq === 'function') ? slotLevelReq('q') : 25;
         if (qSkill && player.level >= lvReq) return 'q';
@@ -42554,7 +42550,10 @@ function _wireDynamicFButton() {
     } catch (e) { /* fall through to block */ }
     return 'block';
   };
-  const pick = () => (fState() === 'block' ? 'a' : 'f');
+  // v0.30.1113 - 'interact' next to an NPC sends the talk key: F opens chests only (and is the Q skill at Lv 25+), so the
+  // hand used to show beside an NPC and the tap opened nothing.
+  const chestNear = () => { try { const px = player.x + player.w/2, py = player.y + player.h; return (game.chests || []).some((c) => !c.opened && Math.abs(px - (c.x + c.w/2)) < 40 && Math.abs(py - (c.y + c.h)) < 60); } catch (e) { return false; } };
+  const pick = () => { const st = fState(); return st === 'block' ? 'a' : (st === 'interact' && !chestNear()) ? 'n' : 'f'; };
   const fIco = btn.querySelector('.mc-icon');
   const paintF = () => {
     if (!fIco) return;
@@ -108548,6 +108547,29 @@ function tryPortal() {
   return false;
 }
 
+// v0.30.1113 - ONE answer to "who would the talk key talk to right now", read by the N key, the [N] Talk prompt, the
+// phone's interact button and tryInteract (they had four reaches and no height test between them). Nearest in 2D
+// within 70 px across; an NPC may stand a step below you (never through the floor you are on) and up to one storey
+// above - every town shop stands on a ledge over the street, and talking up to it is how the town is played.
+const LX_TALK_DX = 70, LX_TALK_UP = 270, LX_TALK_DOWN = 60;
+function _lxTalkTarget() {
+  if (typeof game === 'undefined' || !game || !Array.isArray(game.npcs) || typeof player === 'undefined' || !player) return null;
+  const px = player.x + player.w / 2, pf = player.y + player.h;
+  let best = null, bestD = Infinity;
+  for (const npc of game.npcs) {
+    if (!npc || typeof npc.x !== 'number') continue;
+    const dx = Math.abs(px - npc.x); if (dx >= LX_TALK_DX) continue;
+    const up = pf - ((npc.y || 0) + 44);   // > 0: the NPC's feet are above the player's
+    if (up > LX_TALK_UP || up < -LX_TALK_DOWN) continue;
+    const d = dx * dx + up * up;
+    if (d < bestD) { bestD = d; best = npc; }
+  }
+  return best;
+}
+// v0.30.1113 - the height an NPC is DRAWN at (sprite height x its per-NPC scale), for the click / tap hit tests.
+function _lxNpcDrawnH(npc) {
+  try { const n = npc && npc.name; const h = _npcSpriteTargetHeight(n) * ((typeof _lxNpcScale === 'function') ? _lxNpcScale(n) : 1); return (h > 0) ? h : 64; } catch (e) { return 64; }
+}
 function tryInteract(mode) {
   // v0.25.913 — Debug recon (agent a100c1013) flagged that
   // tryInteract had no cooldown. Holding F (or repeated touch-taps on
@@ -108594,11 +108616,7 @@ function tryInteract(mode) {
   // portals; F is reserved for chests / pickups / job signature casts.
   // NPC — v0.26.x audit FIX — nearest in-range NPC (mirrors the N-key handler).
   if (mode === 'npc' || mode === 'all') {
-    let _best = null, _bestD = Infinity;
-    for (const npc of game.npcs) {
-      const _dx = Math.abs(_pcx - npc.x);
-      if (_dx < 60 && _dx < _bestD) { _bestD = _dx; _best = npc; }
-    }
+    const _best = _lxTalkTarget();   // v0.30.1113 the shared talk target
     if (_best) { openNPC(_best); return; }
   }
 }
@@ -108927,9 +108945,9 @@ function openNPC(npc) {
   // walk-away auto-dismiss in updatePlayer can compare distances.
   game._activeNpc = npc;
   // Daily "talk to N different NPCs" challenge — deduped by role in tickDaily
-  if (typeof tickDaily === 'function') tickDaily('talk', npc.role || npc.name);
+  if (typeof tickDaily === 'function' && !npc._remote) tickDaily('talk', npc.role || npc.name);   // v0.30.1113 not the P-key courier
   // v0.29.331 — advance any active talk quest that names this NPC.
-  if (typeof _questTalkTo === 'function') { try { _questTalkTo(npc.name); } catch (e) {} }
+  if (typeof _questTalkTo === 'function' && !npc._remote) { try { _questTalkTo(npc.name); } catch (e) {} }
   let text = '', opts = [];
   if (npc.role === 'potion') {
     // v0.25.807 — Nurse Joyce given proper character voice.
@@ -111491,7 +111509,10 @@ function openPostalWisp() {
   const dlg = document.getElementById('dialog');
   if (dlg && dlg.style.display === 'block') { if (typeof closeDialog === 'function') closeDialog(); return; }
   if (typeof closeAllModals === 'function') closeAllModals();
-  if (typeof openNPC === 'function') openNPC({ role: 'courier', name: 'Postal Wisp' });
+  // v0.30.1113 - closeAllModals keeps the forced windows (advancement, a story beat, the expedition door); the courier's
+  // card must not open under one. _remote: a hotkey call is not a visit, so it counts for no daily or quest talk.
+  if (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen()) return;
+  if (typeof openNPC === 'function') openNPC({ role: 'courier', name: 'Postal Wisp', _remote: true });
 }
 
 // v0.26.462 — Per user "sell low-tier equipment to merchants such as Brok
@@ -130376,7 +130397,7 @@ function drawNPCs() {
         if (line) npc._chat = { text: line, life: 3200, maxLife: 3200 };
       }
     }
-    const near = Math.abs((player.x + player.w/2) - npc.x) < 70;
+    const near = (npc === _lxTalkTarget());   // v0.30.1113 the prompt marks the one NPC the talk key would open
     if (!near && npc._chat) {
       const fade = npc._chat.life < 500 ? npc._chat.life / 500 : 1;
       _drawBubble(cx, labelHeadY - 12, npc._chat.text, { fade });
@@ -159240,7 +159261,7 @@ window.addEventListener('pointerdown', () => audio.init(), { once: true });
     for (const npc of game.npcs) {
       const cx = npc.x;                  // npc.x is centre
       const feetY = npc.y + 44;
-      const headY = feetY - _HIT_TOP;
+      const headY = feetY - Math.max(_HIT_TOP, _lxNpcDrawnH(npc));   // v0.30.1113 up to the drawn head
       if (worldX < cx - padX)             continue;
       if (worldX > cx + padX)             continue;
       if (worldY < headY)                 continue;
