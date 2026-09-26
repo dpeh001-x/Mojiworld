@@ -15876,7 +15876,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1150';
+const GAME_VERSION = 'v0.30.1151';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -72602,7 +72602,7 @@ function loadMap(id, entryX, entryY) {
         // pending timers, both seeing game.currentMap===_biMap -> the intro played
         // twice (mid-fight cinematic). Only the latest entry's timer now fires.
         const _biMap = id; const _biGen = game._bossIntroGen = (game._bossIntroGen || 0) + 1;
-        setTimeout(() => { if (game.currentMap === _biMap && game._bossIntroGen === _biGen && !game._gravitosCinePlaying) _playBossIntro(_bossSpawn.type); }, _introDelay);   // v0.26.1028 — bail if the player left the arena during the delay; v0.27.24 — suppressed while the Gravitos entry video owns the screen
+        setTimeout(() => { if (game.currentMap === _biMap && game._bossIntroGen === _biGen && !game._gravitosCinePlaying && !(game.bossDefeated && game.bossDefeated[_biMap])) _playBossIntro(_bossSpawn.type); }, _introDelay);   /* v0.30.1151 boss-fixes - not for a boss still on its respawn window (the spawn loop skips it) */   // v0.26.1028 — bail if the player left the arena during the delay; v0.27.24 — suppressed while the Gravitos entry video owns the screen
       }
     }
   }
@@ -103192,6 +103192,14 @@ function _lxStormPactOnAck(msg) {
     if (!was && typeof showToast === 'function') showToast('⚡ The Crest wakes for your party: up to 1.75× beasts for ' + Math.ceil(left / 60) + 's', 'rare');
   } catch (e) {}
 }
+// v0.30.1151 boss-fixes - a boss kill that earned the boon wheel keeps it when you step out (or fall) inside the 1.5 s
+// reveal: the wheel opens as soon as you are up, unpaused and out of an expedition (retries for ~40 s, then lets go).
+function _lxDeliverPendingBoon(tries) {
+  const info = game._pendingBossBoon; if (!info) return;
+  const ok = player && player.hp > 0 && !(game.dying > 0) && !game.paused && !(game.expedition && game.expedition.active) && typeof showPowerupChoice === 'function';
+  if (ok) { game._pendingBossBoon = null; try { showPowerupChoice(info); } catch (e) {} return; }
+  if ((tries | 0) < 40) setTimeout(() => _lxDeliverPendingBoon((tries | 0) + 1), 1000); else game._pendingBossBoon = null;
+}
 function killMonster(m) {
   // v0.30.861 loops - see LX_AFK_MS. The drops wrapper follows triggerSuperBossDeath's pattern: nothing this kill pushes lands.
   if (m && !m._afkKill && (m._lastHitTag === 'mojimon' || m._lastHitTag === 'minion') && typeof _lxPlayerAfk === 'function' && _lxPlayerAfk()) {
@@ -103619,6 +103627,13 @@ function _killMonsterRaw(m) {
       if (game.hazards[_hi] && game.hazards[_hi].type === scrubType) {
         game.hazards.splice(_hi, 1);
       }
+    }
+  }
+  // v0.30.1151 boss-fixes - Libra's summons too: her Scale Lanterns and Scale Stormcallers (_libraOrb) stayed up and kept hitting after her death
+  if (m.zodiacSign === 'libra' || m.type === 'zodiac_libra') {
+    for (let _li = game.monsters.length - 1; _li >= 0; _li--) {
+      const _lm = game.monsters[_li];
+      if (_lm && _lm !== m && _lm._libraOrb && !(game._pendingKills && game._pendingKills.includes(_lm))) { _lm.currentHp = 0; game.monsters.splice(_li, 1); }
     }
   }
   // v0.30.933 "a boss's summons do not outlive it" holds for Mooma's adds, Octobaby's legs, the Sovereign's shards and
@@ -104496,7 +104511,10 @@ function _killMonsterRaw(m) {
     // boon next time they kill the boss (the bonus drops on the ground
     // are already there for the taking).
     setTimeout(() => {
-      if (game.dying > 0 || (player && player.hp <= 0)) return;
+      // v0.30.1151 boss-fixes - does this kill pay the wheel at all? (the same exclusions as below: a deferred twin, an echo /
+      // expedition boss, the Conductor) - if so, leaving or falling in this 1.5 s window queues it instead of losing it
+      const _lxBoonDue = () => { const _d = m._lxDeferredTakedown; return !(_lxDefer || (_d && (_d.echo || _d.exp)) || m._expeditionBoss || m._echoBoss || ((m._isTwin || m._isPiscesTwin) && !_d) || m.type === 'pqConductor'); };
+      if (game.dying > 0 || (player && player.hp <= 0)) { if (_lxBoonDue()) { game._pendingBossBoon = _bossInfo; setTimeout(() => _lxDeliverPendingBoon(0), 1200); } return; }
       // v0.25.953 — Map-change race-guard per audit. If the player used
       // an escape portal between boss death and this 1500 ms tick (or
       // a debug warp / multiplayer trigger swapped maps), opening the
@@ -104504,7 +104522,7 @@ function _killMonsterRaw(m) {
       // wrong gameplay context. Skip if the player has left the
       // arena. They can still re-enter and re-trigger the boon roll
       // via the bossDefeated bonus paths if needed.
-      if (_bossMapKey && game.currentMap !== _bossMapKey) return;
+      if (_bossMapKey && game.currentMap !== _bossMapKey) { if (_lxBoonDue()) { game._pendingBossBoon = _bossInfo; setTimeout(() => _lxDeliverPendingBoon(0), 1200); } return; }   // v0.30.1151 boss-fixes - queued, not lost
       // v0.26.277 — Skip the boon-pick wheel when this is an
       // expedition boss kill. The expedition completion path
       // (_completeExpedition) has its own grand reward flow with
