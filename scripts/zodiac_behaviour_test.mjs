@@ -19,7 +19,11 @@ const browser = await chromium.launch(process.env.PW_EXE
   : { channel: process.env.PW_CHANNEL || 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 60000 });
+// v0.30.x — 'load' waits for every image on the page, and a cold localhost page queues thousands of parse-time
+// requests (no image hold off the web deploy): one run timed out at 60 s before a check ran. Wait for the functions
+// this test calls instead, then the same settle.
+await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.waitForFunction(() => typeof _zodiacGaitTick === 'function' && typeof monsterTypes === 'object' && typeof ZODIAC_SIGNS !== 'undefined', null, { timeout: 180000 });
 await page.waitForTimeout(8000);
 
 const o = await page.evaluate(() => {
@@ -47,18 +51,27 @@ const o = await page.evaluate(() => {
 
   // TAUR — contact knockback scales with momentum, and the bulldoze fires.
   {
+    // v0.30.x — HIS arena's width (zod_taurus, 1800 px). Since his hitbox row landed (283 px wide) the 800 px boot Void
+    // left him no run-up: he reached the player before the 2.6 s push cooldown first ran out, so the bulldoze could not
+    // fire here at all (0 in 30 s) while it fires in the fight itself.
+    const TWW = (typeof MAPS === 'object' && MAPS.zod_taurus && MAPS.zod_taurus.worldWidth) || 1800;
     const m = mk('taurus', 0.75); resetPlayer();
-    let pushes = 0, maxKb = 0;
+    m.x = Math.round(TWW * 0.75); player.x = Math.round(TWW * 0.25);
+    let pushes = 0, maxKb = 0, awayTicks = 0, maxAway = 0, minMom = 9;
     for (let i = 0; i < 1800; i++) {                    // ~30 s
       game.time = (game.time | 0) + 1;
       const before = player.vx;
       const dist = Math.abs((player.x + player.w / 2) - (m.x + m.w / 2));
       _zodiacGaitTick(m, 16.667, dist, 2, zOf('taurus'));
       if (Math.abs(player.vx - before) > 4) pushes++;
+      const _tdir = Math.sign((player.x + player.w / 2) - (m.x + m.w / 2)) || 1;   // v0.30.x — "never retreats"
+      if (m.vx * _tdir < -0.01) { awayTicks++; maxAway = Math.max(maxAway, Math.abs(m.vx)); }
+      minMom = Math.min(minMom, m._gMomentum || 0);
       maxKb = Math.max(maxKb, m._playerKbMul || 0);
       player.vx *= 0.85; m.vy = 0; m.x += m.vx;
-      m.x = Math.max(20, Math.min(WW - m.w - 8, m.x));
+      m.x = Math.max(20, Math.min(TWW - m.w - 8, m.x));
     }
+    r.taur_awayTicks = awayTicks; r.taur_maxAwaySpeed = +maxAway.toFixed(1); r.taur_minMomentum = +minMom.toFixed(2);
     r.taur_kbMulMax = +maxKb.toFixed(2);
     r.taur_forcePushes = pushes;
   }
@@ -156,6 +169,12 @@ if (o.fatal) { console.log('FATAL:', o.fatal); await browser.close(); server.kil
 ok('taur contact knockback scales past 3x', o.taur_kbMulMax > 3, `max ${o.taur_kbMulMax}x`);
 ok('taur force push actually fires', o.taur_forcePushes > 0, `${o.taur_forcePushes} in 30s`);
 ok('taur push is not spammy', o.taur_forcePushes <= 15, `${o.taur_forcePushes} in 30s`);
+// v0.30.x — his gait's own promise ("UNSTOPPABLE. Never retreats"). The momentum had no floor, so standing beside him
+// sank it below zero and turned his stride around: 780 of 1800 ticks walking away, up to 5 px/frame here, and 29 px/frame
+// into the wall in a live fight.
+ok('taur never retreats: his stride never points away from the player, momentum never below zero',
+  o.taur_awayTicks === 0 && o.taur_minMomentum >= 0,
+  `${o.taur_awayTicks} ticks away (max ${o.taur_maxAwaySpeed} px/frame), lowest momentum ${o.taur_minMomentum}`);
 ok('cancer undertow pulls player in', o.cancer_pullTicks > 100, `${o.cancer_pullTicks} ticks`);
 ok('cancer riptide fires', o.cancer_riptides > 0, `${o.cancer_riptides} in 30s`);
 ok('cancer respects i-frames', o.cancer_iframeLeaks === 0, `${o.cancer_iframeLeaks} leaks`);
