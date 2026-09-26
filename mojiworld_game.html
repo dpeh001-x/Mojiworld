@@ -15880,7 +15880,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1166';
+const GAME_VERSION = 'v0.30.1167';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -48741,7 +48741,8 @@ const PLAYER_SAVE_FIELDS = [
   // v0.30.890 launch audit: written, read back, never saved - abandoned-quest progress, the zodiac-echo refight ladder
   // (a reload paid full again), the per-map co-op revive clock (wall time) and the ice tower's best floor
   '_qBank', '_zodiacEchoKills', '_coopReviveMapAt', '_iceFloorBest',
-  '_downPending'   // v0.30.918 a down the save caught (see loadState)
+  '_downPending',   // v0.30.918 a down the save caught (see loadState)
+  '_cdCarry'   // v0.30.x cooldown integrity - what was still cooling down (see _lxCdSnapshot)
 ];
 // =========================================================================
 // v0.29.7xx — BOSS REFIGHTS (per user: "when refighting boss, still can get
@@ -50863,6 +50864,7 @@ function _flushSaveStateNow() {
     };
     // v0.30.918 a save taken while downed says so: the down is a death on a delay, and a reload must not cancel it
     try { if (player._downed && !window._prologueActive) player._downPending = 1; else delete player._downPending; } catch (e) {}
+    try { player._cdCarry = _lxCdSnapshot(); } catch (e) { delete player._cdCarry; }   // v0.30.x cooldown integrity
     const s = {
       v: SAVE_VERSION, t: Date.now(),
       player: pick(player, PLAYER_SAVE_FIELDS),
@@ -53077,6 +53079,10 @@ function loadState() {
     // can lack. Object.assign doesn't add missing keys, so if a save
     // predates a field, accessing it elsewhere would throw.
     if (!player.skillCooldowns) player.skillCooldowns = {};
+    // v0.30.x cooldown integrity - what the save says was still cooling down (see _lxCdSnapshot). A save without the
+    // field (older than this build) loads with nothing cooling, as before.
+    try { _lxCdRestore(player._cdCarry); } catch (e) {}
+    delete player._cdCarry;
     if (!player.consumables)    player.consumables = {};
     if (typeof player.customPaint !== 'string' || player.customPaint.indexOf('data:image/png') !== 0) {
       player.customPaint = null;
@@ -58326,6 +58332,51 @@ function cancelPendingSkillTimers() {
   if (!arr || !arr.length) return;
   for (const id of arr) clearTimeout(id);
   arr.length = 0;
+}
+// v0.30.x COOLDOWN INTEGRITY (per user: "ensure that the cooldowns cannot be sneakily reset by players or cheat").
+// Skill cooldowns, a chain skill's unspent charges, an open window's deferred cooldown and the potion / Second Wind
+// clocks lived only in memory, so a reload - F5, quit and Continue, killing the game - handed every one back ready.
+// The save now carries each as REMAINING time: it resumes where it stopped and never runs down while the game is shut
+// (the frame clock is the rAF timestamp capped at 100 ms, so the device clock cannot run it down either).
+function _lxCdSnapshot() {
+  const out = { cd: {}, ch: {} };
+  const live = player.skillCooldowns || {};
+  // An open window (War of Banners, Meteor Sigil, the Deadeye windows) parks its skill at a short gate and stamps the
+  // real cooldown when it closes; a reload closes it without the stamp. Charge it the way a portal hop does
+  // (_lxRestoreUltCd), on a copy - the window is still open in THIS session.
+  const copy = Object.assign({}, live);
+  player.skillCooldowns = copy;
+  try { _lxRestoreUltCd(); } finally { player.skillCooldowns = live; }
+  for (const id in copy) { const v = +copy[id]; if (v > 0 && isFinite(v)) out.cd[id] = Math.ceil(v); }
+  // Sleight / Kage Rush / Apotheosis spend charges behind a short gate and refill on the press after the last one:
+  // unsaved, a reload mid-chain refilled a full set.
+  for (const k of ['_sleightCharges', '_kageCharges', '_apoCharges']) { const c = player[k] | 0; if (c > 0) out.ch[k] = c; }
+  if ((player._apoCharges | 0) > 0 && Array.isArray(player._apoHand)) out.apoHand = player._apoHand.slice(0, 4);
+  const t = game.time || 0, left = (k) => Math.max(0, Math.ceil((+player[k] || 0) - t));   // game-time deadlines, in frames
+  out.potHp = left('_potionCdHp'); out.potMp = left('_potionCdMp'); out.sw = left('_secondWindCD');
+  return out;
+}
+function _lxCdRestore(c) {
+  const ok = c && typeof c === 'object';
+  const cds = {};
+  if (ok && c.cd && typeof c.cd === 'object') {
+    for (const id of Object.keys(c.cd)) {
+      const def = Object.prototype.hasOwnProperty.call(SKILLS, id) ? SKILLS[id] : null, v = +c.cd[id];
+      if (!def || !(v > 0) || !isFinite(v)) continue;   // unknown ids and junk drop
+      cds[id] = Math.min(v, Math.max(60000, (+def.cd || 0) * 2));   // a corrupt number cannot lock a skill for ever
+    }
+  }
+  player.skillCooldowns = cds;
+  const ch = (ok && c.ch && typeof c.ch === 'object') ? c.ch : {};
+  player._sleightCharges = Math.max(0, Math.min(3, ch._sleightCharges | 0));
+  player._kageCharges = Math.max(0, Math.min(LX_KAGE_CHARGES, ch._kageCharges | 0));
+  const hand = (ok && Array.isArray(c.apoHand)) ? c.apoHand.filter((e) => LX_APO_ELEMENTS.includes(e)) : [];
+  player._apoCharges = hand.length ? Math.max(0, Math.min(LX_APO_CHARGES, ch._apoCharges | 0, hand.length)) : 0;
+  if (player._apoCharges > 0) player._apoHand = hand;
+  const t = game.time || 0, fr = (v, hi) => { v = +v; return (v > 0 && isFinite(v)) ? t + Math.min(v, hi) : 0; };
+  player._potionCdHp = fr(ok && c.potHp, POTION_CD_FRAMES);
+  player._potionCdMp = fr(ok && c.potMp, POTION_CD_FRAMES);
+  player._secondWindCD = fr(ok && c.sw, 7200);
 }
 
 // =========================================================================
@@ -66696,7 +66747,12 @@ function _openPreAdvanceClassSwap() {
             if (typeof showToast === 'function') setTimeout(() => showToast('\u21BA ' + _apBack + ' AP refunded from the old skill tree', 'rare'), 900);
           }
         } catch (e) {}
+        const _cdKeep = player.skillCooldowns;   // v0.30.x cooldown integrity - see below
         applyClass(next);
+        // v0.30.x cooldown integrity - applyClass clears every cooldown (right for a NEW hero), so swapping away and back
+        // here handed every skill back ready. Skill ids are per class: the new kit starts clean either way, the old one
+        // keeps ticking, and a swap back finds it where it was.
+        if (_cdKeep && typeof _cdKeep === 'object') player.skillCooldowns = _cdKeep;
         // v0.30.1133 swap-growth - applyClass hands the new class its LEVEL-1 HP/MP/ATK/DEF, but the level stays: give back
         // (level - 1) levels of the NEW class's growth (a Lv-19 swap was a Lv-19 Rogue on Lv-1 stats), then refill
         try { const _g = _devLevelGains(player.cls), _n = Math.max(0, (player.level | 0) - 1);
@@ -81059,6 +81115,9 @@ function castSkill(id) {
   const _preCastCd = player.skillCooldowns[id] || 0, _preCastMp = player.mp;   // v0.26.1030 — for refund if the SKILL_FN no-ops
   player.skillCooldowns[id] = computedCd;
   player.mp -= cost;
+  // v0.30.x cooldown integrity - persist a long cooldown now (the 1.5 s debounced save), not at the next 15 s autosave:
+  // casting and then killing the game before that flush brought the skill back ready on the next launch.
+  if (computedCd >= 10000 && typeof saveState === 'function') saveState();
   // v0.25.796 — Skill SFX. Single chokepoint covers every active skill
   // (alias map collapses families of skills onto shared clips so a single
   // audio/skill/strike.mp3 handles Slash + Power Strike + Stab, etc.).
