@@ -15927,7 +15927,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1174';
+const GAME_VERSION = 'v0.30.1175';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -109005,6 +109005,27 @@ function _defaultPortalY(x) {
   }
   return gs[0].y;
 }
+// v0.30.1175 arrivals - WHERE A HERO LANDS WHEN THE DESTINATION HAS NO DOOR BACK to the map they left. tryPortal used a flat
+// x = 100: in Everdawn Central that is inside the Bastion door's trigger (every new game and every respawn walks in from the
+// Void), and in the Hall of Echoes inside its only exit - one Up press (Up is also climb) and you were through it. Now the
+// nearest spot to the preferred x whose centre clears every door on the map by the trigger (50 px) plus a margin, searching
+// into the map first. The margin also covers loadMap's portal spacer, which may nudge a door a little after this runs.
+function _lxClearArrivalX(destMap, prefX) {
+  const pw = (typeof player !== 'undefined' && player && player.w) || 28;
+  const ww = (destMap && destMap.worldWidth) || 2000;
+  const lo = 8, hi = ww - pw - 8, CLEAR = 50 + 26;
+  const doors = ((destMap && destMap.portals) || []).map((p) => p && p.x).filter((x) => typeof x === 'number' && isFinite(x));
+  const clear = (x) => doors.every((dx) => Math.abs(x + pw / 2 - dx) >= CLEAR);
+  const inward = prefX < ww / 2 ? 1 : -1;
+  for (const dir of [inward, -inward]) {
+    for (let d = 0; d <= ww; d += 8) {
+      const x = prefX + dir * d;
+      if (x < lo || x > hi) break;
+      if (clear(x)) return x;
+    }
+  }
+  return prefX;   // v0.30.1175 arrivals - a map packed with doors end to end: keep the old spot
+}
 function tryPortal() {
   if (_lxPlayerHeld()) return false;   // v0.30.919 Up is also a shackle key: a held hero used to walk out mid-sequence
   if (window._prologueActive) return false;   // v0.30.834 - the memory has no doors: Up is a movement key there, and the hero stands ON the Void portal
@@ -109058,7 +109079,12 @@ function tryPortal() {
       // hard Lv-40 gate to stay aligned with the Distorted-Portal advancement
       // quest (per user). Listed here so the boss-arena bypass skips it.
       const _hardGateBoss = (po.dest === 'confusedVigil');
-      if (po.levelGate && (player.level || 0) < po.levelGate && (_hardGateBoss || !(dest && dest.isBossArena))) {
+      // v0.30.1175 arrivals - NO GATE ON THE WAY OUT OF A BOSS ARENA. The way into an arena only warns (the next line;
+      // Confused Vigil excepted), so a gate on the exit trapped an under-levelled player: the Singularity's only door (to
+      // the Zodiac Sanctum, Lv 70) refused anyone under 70 who had walked in. A door from an arena to an ORDINARY map is
+      // open to all; a door into another arena (Sundered Forge -> Confused Vigil) keeps its gate.
+      const _arenaExit = !!(MAPS[game.currentMap] && MAPS[game.currentMap].isBossArena) && !(dest && dest.isBossArena);
+      if (po.levelGate && !_arenaExit && (player.level || 0) < po.levelGate && (_hardGateBoss || !(dest && dest.isBossArena))) {
         showToast(`Sealed — return at Lv ${po.levelGate}+`, 'rare');
         return false;
       }
@@ -109163,7 +109189,7 @@ function tryPortal() {
       const _entryOffset = 50 + (player.w / 2) + 6;
       const entryX = backPortal
         ? (backPortal.x + (backPortal.x < destMap.worldWidth / 2 ? _entryOffset : -_entryOffset))
-        : 100;
+        : _lxClearArrivalX(destMap, 100);   // v0.30.1175 arrivals - was a flat 100, inside the Bastion door / the Hall of Echoes exit
       // Y override fires only when the back-portal explicitly carries
       // one — preserves loadMap's existing ground/tower defaults for
       // ground-band portals. loadMap accepts a 3rd `entryY` parameter
