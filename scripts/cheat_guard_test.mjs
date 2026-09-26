@@ -9,7 +9,9 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); c
 const { chromium } = require('playwright-core');
 const SERVE_ROOT = process.env.SERVE_ROOT || ROOT, PORT = process.env.PORT || '11311';
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const cand = args[0], MAIN = path.resolve(args[1] || path.join(ROOT, 'steam', 'main.js'));
+// v0.30.x — the main.js path is the argument that IS a .js file: run_all_tests hands page-taking suites
+// ['mojiworld_game.html', <port>], and the port in this slot read as a file path ("...\8080", ENOENT).
+const cand = args[0], MAIN = path.resolve(args.slice(1).find((a) => /\.js$/i.test(a)) || path.join(ROOT, 'steam', 'main.js'));
 const env = { ...process.env }; if (cand) env.MOJI_GAME_FILE = path.resolve(SERVE_ROOT, cand); else delete env.MOJI_GAME_FILE;
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: SERVE_ROOT, env });
 const server2 = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), '47821'], { stdio: 'ignore', cwd: SERVE_ROOT, env });

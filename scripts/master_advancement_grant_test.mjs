@@ -76,13 +76,22 @@ const r = await page.evaluate(async () => {
   out.layer1 = {
     completed: !!player.quests.completed.q_distorted_portal,
     modalOpened: await until(modalOpen, 4000),
-    toast: toasts.some((t) => /MASTER Advancement/i.test(t)),
+    // v0.30.x — the toast is on its own 600 ms timer and the pick can be on screen before it fires (one run read
+    // toast:false with the modal open and the master then granted). Reading it the instant the modal showed made the
+    // check a race; give the toast its own window.
+    toast: await until(() => toasts.some((t) => /MASTER Advancement/i.test(t)), 2500),
   };
   // ---- and the pick actually GRANTS: click a master card ----
   let granted = null;
   if (modalOpen()) {
     const card = document.querySelector('#advancement-options .class-card');
-    if (card) { card.click(); await wait(300); granted = player.master; }
+    // v0.30.519 — ARM, THEN COMMIT: one click arms the card (and must grant nothing - a stray tap on a modal that
+    // auto-opens after a level-up used to decide the character for good); the second click takes the mastery.
+    if (card) {
+      card.click(); await wait(300);
+      out.layer1.armedOnly = { master: player.master || null, armed: !!card._armed, confirm: !!card.querySelector('.cls-confirm') };
+      card.click(); await wait(300); granted = player.master;
+    }
   }
   out.layer1.granted = granted;
   out.layer1.grantedValid = !!(granted && MASTERS[granted] && MASTERS[granted].from === 'warlock');
@@ -134,7 +143,9 @@ check(!r.gate.modal && r.gate.redirect, 'quest NOT done: still redirected to the
 check(r.layer1.completed, 'completing the quest records it', r.layer1);
 check(r.layer1.modalOpened, 'LAYER 1: quest completion OPENS the master pick (the reported bug)', r.layer1);
 check(r.layer1.toast, 'with a toast naming the moment', r.layer1);
-check(r.layer1.grantedValid, 'and clicking a card actually grants a master of the right job', r.layer1);
+check(!!(r.layer1.armedOnly && r.layer1.armedOnly.master === null && r.layer1.armedOnly.armed && r.layer1.armedOnly.confirm),
+  'one click only ARMS the card (the permanent-choice confirm shows, no master yet)', r.layer1.armedOnly);
+check(r.layer1.grantedValid, 'and the second click grants a master of the right job', r.layer1);
 check(r.layer2.pending === true, 'LAYER 2: the pending predicate sees the stranded state at Lv 41', r.layer2);
 check(r.layer2.modalOpened, 'and a level-up past 40 re-offers the pick (old code required exactly 40)', r.layer2);
 check(r.saveLanded, 'the stranded save actually landed before reload', r.saveLanded);
