@@ -101,6 +101,19 @@ const VOICES = {
     //     adult and deliberately darker.
     accept: { minF0: 280, maxF0: 520, minVowelBand: 0.25 },
   },
+  mystery_sage: {
+    // Reported (2026-09-26): the "???" NPC's voice "doesn't match" (earlier tester note: "sounds like a bored sigh").
+    // "???" is Sage Mira (sage_mira.webp): a young-looking elf woman with long silver hair in white-and-gold robes,
+    // calm and mysterious, who offers the 12-hour boon. The old clip measured f0 130 Hz. Shipped: take 3 of four,
+    // f0 380 Hz / vowel-band 0.85 (the others 613 and 525 Hz squeaks, and a thinner 416 Hz take).
+    desc: 'Animal Crossing style character voice BABBLE for a video game: nonsense vocal syllables only, NOT real '
+      + 'words, NOT speech, NOT singing. Single voice, clean dry studio recording, no music, no background noise. '
+      + 'A SERENE YOUNG ELF SAGE WOMAN with long silver hair: a soft, airy, gentle feminine voice, calm and kind '
+      + 'and a little mysterious, light lilting unhurried syllables with a faint magical shimmer, clear and '
+      + 'graceful. NOT a sigh, NOT bored, NOT low-pitched, NOT male, NOT old, NOT a squeaky child, NOT an animal.',
+    dur: 1.0,
+    accept: { minF0: 230, maxF0: 460, minVowelBand: 0.25 },
+  },
 };
 
 const only = arg('only');
@@ -160,8 +173,18 @@ for (const k of keys) {
       body: JSON.stringify({ description: v.desc, duration: v.dur, loop: false }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text().catch(() => '')).slice(0, 140)}`);
-    const j = await res.json();
-    const url = j.url || (j.result && j.result.url);
+    let j = await res.json();
+    // 2026-09-26: /audio/sound-effect answers with a JOB ({id, status}); the finished job at GET /assets/jobs/<id>
+    // carries result [{url}]. A job is paid the moment it is accepted: always poll it, never re-POST.
+    for (let _t = 0; j && j.id && !(j.url || (j.result && (j.result.url || (Array.isArray(j.result) && j.result[0])))) && _t < 120; _t++) {
+      if (j.status === 'failed' || j.status === 'error' || j.status === 'cancelled') throw new Error('job ' + j.status);
+      await new Promise((r) => setTimeout(r, Math.max(3000, Number(j.poll_after_ms) || 4000)));
+      const pr = await fetch(`${API}/assets/jobs/${j.id}`, { headers: { Authorization: `ApiKey ${apiKey}` }, signal: AbortSignal.timeout(30000) });
+      if (pr.status === 429) continue;
+      if (!pr.ok) throw new Error(`job HTTP ${pr.status}`);
+      j = await pr.json();
+    }
+    const url = j.url || (Array.isArray(j.result) && j.result[0] && j.result[0].url) || (j.result && j.result.url);
     if (!url) throw new Error(`no url in ${JSON.stringify(j).slice(0, 160)}`);
     const a = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT) });
     if (!a.ok) throw new Error(`download HTTP ${a.status}`);

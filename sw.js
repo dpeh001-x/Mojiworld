@@ -193,7 +193,9 @@
 // v0.30.1100 - v73 -> v74. The app icon is REPLACED under its own names AGAIN (assets/mojiworld_icon_512.png,
 // mojiworld_icon_184.jpg, favicon-32.png, apple-touch-icon.png: the white shard turns black, dark hot pink slashes
 // and a ringed sticker), so a returning browser's stale cache would keep v0.30.1083's icon for a session.
-const CACHE = 'mojiworld-assets-v74';   // v0.30.1100 - the app icon: black shard, dark hot pink
+// v0.30.x sage-voice - v74 -> v75. audio/npc/npc_mystery_sage.mp3 ("???", Sage Mira) is REPLACED under its own
+// name (recast from a 130 Hz sigh to a soft young elf woman), so a returning browser would otherwise keep the old clip.
+const CACHE = 'mojiworld-assets-v75';   // v0.30.x sage-voice - the ??? NPC's voice recast
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
