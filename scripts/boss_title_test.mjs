@@ -1,4 +1,5 @@
-// The boss title, typeset: tier tag, engraved Cinzel name, Cormorant italic epithet, baked once.
+// The boss title, typeset: tier tag, engraved name, epithet, baked once (Cinzel + Cormorant until v0.30.1167; Nunito since,
+// per user: "Classy black, fix mismatches").
 // Per user: "The words font text can be more aesthetic and better improved".
 //   node scripts/boss_title_test.mjs [file.html] [port]
 import { createRequire } from 'node:module';
@@ -67,7 +68,7 @@ const r = await page.evaluate(async () => {
   await wait(300);
   out.reused = !!bar && barEntry() === bar;
   out.card = keys.some((k) => k.startsWith('card|'));
-  out.fonts = { cinzel: document.fonts.check('700 20px Cinzel'), corm: document.fonts.check('italic 500 20px "Cormorant Garamond"') };
+  out.fonts = { heavy: document.fonts.check('900 20px Nunito'), body: document.fonts.check('700 20px Nunito'), bakeFont: bar ? bar.font : null };
   return out;
 });
 const [pg, pk] = r.parts;
@@ -78,7 +79,7 @@ checks.push(['the bake carries ink and fits over the bar', !!r.bar && r.ink > 50
 checks.push(['the bar no longer re-renders the title text every frame (and it did draw)', r.titleRedrawn === false && r.barDrawn === true && !r.drawErr, r.drawErr || (r.barDrawn ? '' : 'the bar did not draw')]);
 checks.push(['the same bake is reused frame after frame', r.reused]);
 checks.push(['the bar title starts clear of the stats card over the bar', r.clear.blitX !== null && r.clear.blitX >= r.clear.statsRight - 1, `title starts at x ${r.clear.blitX}, card ends at ${r.clear.statsRight}`]);
-checks.push(['both title faces are loaded: Cinzel and Cormorant Garamond italic', r.fonts.cinzel && r.fonts.corm]);
+checks.push(['the title faces are loaded and baked: Nunito 900 for the name, Nunito 700 for the epithet', r.fonts.heavy && r.fonts.body && /Nunito/.test(r.fonts.bakeFont || ''), r.fonts.bakeFont]);
 checks.push(['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')]);
 } catch (e) {
   checks.push(['the run completed without a crash', false, String((e && e.message) || e).split('\n')[0].slice(0, 160)]);

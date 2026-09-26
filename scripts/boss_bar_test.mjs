@@ -186,7 +186,7 @@ ok('with the art blocked, the procedural plate still draws (fallback intact)',
 ok('exactly two authored types are hyper bosses: gravitos and the Sovereign', JSON.stringify(r.hyperTypes) === JSON.stringify(['gravitos', 'towerSovereign']), { hyper: r.hyperTypes });
 ok("the Sovereign's bar carries the HYPER BOSS prefix", (r.sovereign || []).some((t) => /HYPER BOSS/.test(t) && /SOVEREIGN/.test(t)), { painted: r.sovereign });
 ok('both embedded faces load (Cinzel for titles, Exo 2 for the boss name; offline, no machine fonts)', r.fontLoaded === true, {});
-ok('the name draws IN the boss-name face (engraved Cinzel since the typeset title)', typeof r.nameFont === 'string' && /Cinzel/.test(r.nameFont), { font: r.nameFont });
+ok('the name draws IN the boss-name face (engraved Nunito since v0.30.1167; Cinzel before)', typeof r.nameFont === 'string' && /Nunito/.test(r.nameFont), { font: r.nameFont });
 ok('the name is stroke-outlined (dark ring + accent ring)', r.nameOutlined >= 2, { strokes: r.nameOutlined });
 ok('the HP readout is outlined over the ribbon', r.hpOutlined === true, {});
 ok('no page errors', errs.length === 0, errs.slice(0, 3));

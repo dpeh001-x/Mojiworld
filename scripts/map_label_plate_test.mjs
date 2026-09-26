@@ -77,7 +77,8 @@ ok(look.stops.length >= 2 && look.stops.every((s) => s.sum <= 60), 'every colour
   JSON.stringify(look.stops.map((s) => s.sum)));
 ok(look.stops.length >= 2 && look.stops.every((s) => s.a > 0 && s.a < 1), 'and semi-opaque, not solid',
   JSON.stringify(look.stops.map((s) => s.a)));
-ok(/Alegreya|Cinzel/.test(look.font), 'set in the house display serif, not the default sans', look.font);
+// v0.30.1167 per user ("Classy black, fix mismatches"): the HUD's serif became Nunito (was Alegreya SC)
+ok(/^"?Nunito/.test(look.font), 'set in the HUD\'s Nunito caps, not a stray serif or the default sans', look.font);
 ok(parseFloat(look.ls) >= 1, 'with real letter-spacing', look.ls);
 ok(/gradient/.test(look.before), 'the flanking rules are drawn');
 // the old lilac ring is gone: the border must be neutral, not purple

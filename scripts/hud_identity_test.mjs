@@ -50,7 +50,7 @@ const r = await page.evaluate(async () => {
   out.crest = { loaded: img.complete && img.naturalWidth > 0, inFrame: img.parentElement === por, w: por.offsetWidth, h: por.offsetHeight };
   out.badge = { text: document.getElementById('level').textContent.trim(), lv: String(player.level), cx: (br.left + br.right) / 2, pl: pr.left, pr: pr.right, bb: br.bottom, bt: br.top, pb: pr.bottom };
   const nm = document.getElementById('hud-player-name'), ncs = getComputedStyle(nm);
-  out.name = { font: ncs.fontFamily, size: parseFloat(ncs.fontSize), clip: ncs.webkitBackgroundClip || ncs.backgroundClip, cinzel: document.fonts.check('700 15px Cinzel') };
+  out.name = { font: ncs.fontFamily, size: parseFloat(ncs.fontSize), clip: ncs.webkitBackgroundClip || ncs.backgroundClip, fill: ncs.webkitTextFillColor || ncs.color, nunito: document.fonts.check('900 15px Nunito') };
   const stats = document.getElementById('stats'); const w0 = stats.getBoundingClientRect().width;
   const nm0 = player.look.name; player.look.name = 'Maximiliana Starborne of the Ninth Tide'; updateUI(); await wait(120);
   out.long = { overflow: nm.scrollWidth > nm.clientWidth + 2, dw: Math.abs(stats.getBoundingClientRect().width - w0) };
@@ -71,7 +71,8 @@ const r = await page.evaluate(async () => {
 });
 checks.push(['the crest sits in the gilded medallion and loads', r.crest.loaded && r.crest.inFrame && r.crest.w >= 34 && r.crest.h >= 34, JSON.stringify(r.crest)]);
 checks.push(['the level medal shows the level on the medallion\'s lower edge', r.badge.text === r.badge.lv && r.badge.cx > r.badge.pl && r.badge.cx < r.badge.pr && r.badge.bb > r.badge.pb && r.badge.bt < r.badge.pb, `Lv ${r.badge.text}`]);
-checks.push(['the name is engraved gold, set in Cinzel', /^"?Cinzel/.test(r.name.font) && r.name.size >= 13 && r.name.clip === 'text' && r.name.cinzel, `${r.name.font.split(',')[0]} ${r.name.size}px clip:${r.name.clip}`]);
+// v0.30.1167 per user ("Classy black, fix mismatches"): was engraved Cinzel gold
+checks.push(['the name is set in the HUD\'s Nunito, solid cream (no gold gradient)', /^"?Nunito/.test(r.name.font) && r.name.size >= 13 && r.name.clip !== 'text' && /244, 241, 234/.test(r.name.fill) && r.name.nunito, `${r.name.font.split(',')[0]} ${r.name.size}px clip:${r.name.clip}`]);
 checks.push(['a long name ends in an ellipsis instead of widening the panel', r.long.overflow && r.long.dw <= 1, `panel width moved ${r.long.dw.toFixed(1)} px`]);
 // color-mix() reports the rim as color(srgb r g b / a) with 0-1 channels; bring it to 0-255 to compare
 const rgb = (s) => { const k = /^color\(srgb/.test(s) ? 255 : 1; return (s.match(/[\d.]+/g) || []).slice(0, 3).map((v) => Math.round(Number(v) * k)).join(','); };
