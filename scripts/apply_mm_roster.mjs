@@ -1,4 +1,6 @@
 // The MojiMon roster cards, in the cute style of the cards above them (v0.30.1007 mm-cards).
+// v0.30.1114 (per user: "the roster also has to have a pop feel but not to such large extents"): the cards were redone pop-lite in
+// _mm_roster.css.txt - the tab's palette and ink, small hard shadows, no bursts or tilts. The notes below describe the first pass.
 // ============================================================================
 // Per user: "do the same cute style for the roster cards".
 //   - each MojiMon is a plush card (stitched seam, star-dot sprinkle, a pastel glow; mint when it is fielded);
@@ -8,7 +10,7 @@
 //   - the bond is a pill, lit mint on the H-slot MojiMon (the only one paying out), with the same tooltip;
 //   - Allocate points: a "N free" chip and a "max 15 per stat" chip, and each stat a row of candy - / + steppers,
 //     the value, a little meter filling up to the cap, and the bonus - HP pink, ATK butter, DEF sky;
-//   - no MojiMon yet: a pop-comic panel - black, a yellow slash, hot-pink halftone; the snail bursts out of a yellow starburst, three "?" badges.
+//   - no MojiMon yet: a pop-comic panel - black, a yellow slash, a raspberry halftone field; the snail bursts out of a yellow starburst, three "?" badges.
 // Same handlers (_mojimonUi.upg / assign / summon), same numbers and the same disabled rules (- is now also greyed
 // at 0, where it did nothing). Stylesheet: scripts/_mm_roster.css.txt, added once by _mmRosterCss(); the markup is
 // scripts/_mm_roster.js.txt.

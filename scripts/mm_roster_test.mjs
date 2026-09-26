@@ -60,9 +60,9 @@ try {
   });
   console.log('cards', JSON.stringify(R));
   const { a, b } = R;
-  check(/\bout\b/.test(a.cls) && a.name.includes('FIELDED') && a.hp === '70%' && !a.summon, 'the fielded MojiMon: a mint card, a FIELDED pill, its HP as a candy bar, no Summon', a);
+  check(/\bout\b/.test(a.cls) && a.name.includes('FIELDED') && a.hp === '70%' && !a.summon, 'the fielded MojiMon: a yellow-edged card, a FIELDED pill, its HP as a candy bar, no Summon', a);
   check(JSON.stringify(a.stats) === JSON.stringify(a.want) && JSON.stringify(b.stats) === JSON.stringify(b.want), 'the stat pills show its real max HP, attack and damage reduction', [a.stats, a.want]);
-  check(a.hon && a.hkey.includes('★') && /\bon\b/.test(a.bond) && !b.hon && b.hkey.includes('☆') && !/\bon\b/.test(b.bond), 'the H-slot MojiMon has the gold ★ H and the lit bond; the other a plain ☆ H and a quiet bond', [a.hkey, b.hkey]);
+  check(a.hon && a.hkey.includes('★') && /\bon\b/.test(a.bond) && !b.hon && b.hkey.includes('☆') && !/\bon\b/.test(b.bond), 'the H-slot MojiMon has the yellow ★ H and the lit bond; the other a plain ☆ H and a quiet bond', [a.hkey, b.hkey]);
   check(b.summon && b.summon.dis && b.summon.t.includes('after the rest'), 'on cooldown the bench MojiMon\'s Summon is greyed and says it is resting', b.summon);
   check(a.rows[0].v === '2' && a.rows[0].m === Math.round(2 / R.cap * 100) + '%' && a.rows[2].minus && !a.rows[0].minus, 'each stat row: its points, a meter up to the cap, and - greyed at 0', a.rows);
   check(b.rows[1].v === String(R.cap) && b.rows[1].plus && b.rows[1].m === '100%', 'a stat at the cap: + greyed and the meter full', b.rows[1]);
@@ -84,7 +84,7 @@ try {
   console.log('actions', JSON.stringify(act));
   check(act.up === 1 && act.shown === '1' && act.down === 0, '+ and - move the points and the card shows it', act);
   check(act.assigned === R.ks[1] && act.lit, '☆ H hands the H slot over and that card\'s bond lights up', act);
-  check(!act.dis && act.txt.includes('Summon') && act.out === R.ks[1], 'ready: ✨ Summon is a live mint button and it fields the MojiMon', act);
+  check(!act.dis && act.txt.includes('Summon') && act.out === R.ks[1], 'ready: ✨ Summon is a live yellow button and it fields the MojiMon', act);
   // layout, desktop and a phone on its side
   const layout = async (pg) => pg.evaluate(async () => {
     const mm = _mojimonEnsure(); mm.out = null; mm.cdUntil = Date.now() + 60000;

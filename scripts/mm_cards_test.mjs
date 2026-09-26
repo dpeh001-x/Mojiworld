@@ -2,7 +2,9 @@
 //   node scripts/mm_cards_test.mjs            (MOJI_GAME_FILE=<build.html> to test a private build)
 // Per user: "These buttons and fonts can be stylised, polished to be more artistic and appealing"; then "the how to bind
 // and SUMMON READY tabs section needs more POP feel, especially the top MOJIMON header" - the head and both cards in the
-// pop palette: hot pink, acid yellow, ink and paper, heavy Nunito printed in a thick ink stroke.
+// pop palette, heavy Nunito printed in a thick ink stroke. Then "reduce the amount of white, make the hot pink less in
+// occurence, use more darker pink instead, the top MOJIMON can be better designed": raspberry does the work, hot pink is
+// an accent, no white tiles or edges, and MOJIMON is a comic logo lockup.
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,13 +58,17 @@ try {
       fonts: { head: cs(q('.mmc-h')).fontFamily, cd: cs(q('#mojimon-cd')).fontFamily, text: cs(q('.mmc-t')).fontFamily,
         headW: Number(cs(q('.mmc-h')).fontWeight), cdW: Number(cs(q('#mojimon-cd')).fontWeight),
         htStroke: parseFloat(cs(q('.mmc-ht')).webkitTextStrokeWidth), cdStroke: parseFloat(cs(q('#mojimon-cd')).webkitTextStrokeWidth), nun: document.fonts.check("900 14px 'Nunito'") },
-      // the pop pass: the pane head, and both cards in pink / black / yellow with a paper edge
+      // the pop pass (v2): the head as a comic logo on a raspberry banner, both cards raspberry and black with a raspberry
+      // edge - hot pink only as an accent, and no white tiles or edges (per user: "reduce the amount of white")
       head: { title: q('.mmc-title') && q('.mmc-title').textContent, tag: q('.mmc-tag') && q('.mmc-tag').textContent,
         titleFill: q('.mmc-title') && cs(q('.mmc-title')).color, titleStroke: q('.mmc-title') && parseFloat(cs(q('.mmc-title')).webkitTextStrokeWidth),
-        titleCopy: q('.mmc-title') && /rgb\(243, 245, 66\)/.test(cs(q('.mmc-title')).textShadow), burst: !!q('.mmc-toplogo img'),
+        extrude: q('.mmc-title') ? (cs(q('.mmc-title')).textShadow.match(/rgb\(11, 10, 14\)/g) || []).length : 0,
+        letters: document.querySelectorAll('#u-pane-mojimon .mmc-title b').length,
+        plate: !!q('.mmc-plate') && /rgb\(154, 15, 80\)/.test(cs(q('.mmc-plate')).backgroundImage), burst: !!q('.mmc-toplogo img'),
         shellArt: q('.mmc-shell') && /mojimon_bg\.webp/.test(cs(q('.mmc-shell')).backgroundImage) },
-      panels: ['.mmc-how', '.mmc-cd'].map((s) => { const c = cs(q(s)); return { pink: /rgba?\(255, 45, 149/.test(c.backgroundImage) || c.backgroundColor === 'rgb(255, 45, 149)',
-        ink: /rgb\(11, 10, 14\)/.test(c.backgroundImage) || c.borderTopColor === 'rgb(11, 10, 14)', edge: c.outlineStyle === 'solid' && c.outlineColor === 'rgb(244, 241, 234)' }; }),
+      panels: ['.mmc-how', '.mmc-cd'].map((s) => { const c = cs(q(s)); return { pink: /rgba?\(184, 20, 95/.test(c.backgroundImage) || c.backgroundColor === 'rgb(184, 20, 95)',
+        ink: /rgb\(11, 10, 14\)/.test(c.backgroundImage) || c.borderTopColor === 'rgb(11, 10, 14)', edge: c.outlineStyle === 'solid' && c.outlineColor === 'rgb(184, 20, 95)' }; }),
+      tiles: steps.map((x) => cs(x).backgroundColor),
       ready2: q('.mmc-cd.ready #mojimon-cd') ? cs(q('#mojimon-cd')).color : null };
   });
   console.log('ready', JSON.stringify(ready));
@@ -77,8 +83,11 @@ try {
   const hd = ready.head;
   check(hd.title === 'MOJIMON' && hd.tag === 'BIND · FIELD · UPGRADE · H QUICK-SUMMON' && hd.burst && hd.shellArt,
     'the head: MOJIMON and its tagline (same words as before), the logo on its starburst, the MojiMon art still behind the shell', hd);
-  check(hd.titleFill === 'rgb(255, 45, 149)' && hd.titleStroke >= 5 && hd.titleCopy, 'MOJIMON printed hot pink in a thick ink stroke with a yellow copy', hd);
-  check(ready.panels.every((p) => p.pink && p.ink && p.edge), 'both cards in pink and black with a paper edge (an outline, so low-effects mode keeps it)', ready.panels);
+  check(hd.titleFill === 'rgb(243, 245, 66)' && hd.titleStroke >= 5 && hd.extrude >= 4 && hd.letters === 7 && hd.plate,
+    'MOJIMON as a comic logo: seven bouncing letters, yellow in a thick ink stroke with an ink extrusion, on a raspberry banner', hd);
+  check(JSON.stringify(ready.tiles) === JSON.stringify(['rgb(243, 245, 66)', 'rgb(184, 20, 95)', 'rgb(243, 245, 66)']),
+    'the steps are yellow, raspberry, yellow - no white tiles', ready.tiles);
+  check(ready.panels.every((p) => p.pink && p.ink && p.edge), 'both cards in raspberry and black with a raspberry edge (an outline, so low-effects mode keeps it)', ready.panels);
   check(ready.ready2 === 'rgb(243, 245, 66)', 'READY printed in acid yellow', ready.ready2);
   // on cooldown with a mon out
   const cool = await page.evaluate(async () => {
@@ -93,7 +102,7 @@ try {
     const sp = _monsterDexSprite(ks[0], monsterTypes[ks[0]]); return { a, b, dismiss: d ? d.textContent : null, name, half: MOJIMON_CD_MS / 2000, buddy: q('.mmc-buddy').getAttribute('src'), want: sp && sp.src, sub: q('.mmc-cdtx .mmc-sub').textContent };
   });
   console.log('cooling', JSON.stringify(cool));
-  check(/cooling/.test(cool.a.cls) && /^\d+:\d\d$/.test(cool.a.cd) && Math.abs(cool.a.p - 0.5) < 0.01 && cool.a.color === 'rgb(244, 241, 234)', 'cooling: paper readout in m:ss and the ring half drained at half the cooldown', cool.a);
+  check(/cooling/.test(cool.a.cls) && /^\d+:\d\d$/.test(cool.a.cd) && Math.abs(cool.a.p - 0.5) < 0.01 && cool.a.color === 'rgb(255, 194, 223)', 'cooling: light-pink readout in m:ss and the ring half drained at half the cooldown', cool.a);
   check(cool.b.cd !== cool.a.cd && cool.b.p < cool.a.p, 'the ticker counts down and drains the ring as it goes', cool);
   check(cool.dismiss && cool.dismiss.includes('Dismiss ' + cool.name), 'a fielded mon gets a Dismiss button with its name', cool.dismiss);
   check(cool.want && cool.buddy === cool.want && /resting/.test(cool.sub), 'the ring holds your H-slot MojiMon, resting while the cooldown runs', cool);

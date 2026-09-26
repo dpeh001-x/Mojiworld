@@ -1,4 +1,4 @@
-// The empty MojiMon card: a pop-comic panel around the game's snail sprite (cropped, black-inked, paper-rimmed).
+// The empty MojiMon card: a pop-comic panel around the game's snail sprite (cropped, ringed in black ink).
 //   node scripts/mm_empty_icon_test.mjs
 //     MOJI_GAME_FILE=<build.html>   test a private build (serve.js swaps it in for the game URL)
 //     MOJI_DATA_REF=origin/main     serve data/ tables from a git ref, for when the working copy's are stale
@@ -80,7 +80,7 @@ try {
     const under = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     out.visible = !!under && (under === el || ico.contains(under));
     out.ink = (cs.filter.match(/rgb\(11, 10, 14\)/g) || []).length;
-    out.rim = (cs.filter.match(/rgb\(244, 241, 234\)/g) || []).length;
+    out.rim = (cs.filter.match(/rgb\(244, 241, 234\)/g) || []).length;   // v2: the white rim is gone (per user: "reduce the amount of white")
     out.anim = getComputedStyle(ico).animationName;
     // The pop-comic panel (per user: "more POP with more POP colours like pink black and yellow").
     const cc = getComputedStyle(card);
@@ -91,14 +91,14 @@ try {
     out.spill = [...card.children].filter((ch) => { const q = ch.getBoundingClientRect(); return q.width > 0 && (q.left < c.left - 0.5 || q.right > c.right + 0.5 || q.top < c.top - 0.5 || q.bottom > c.bottom + 0.5); }).map((ch) => ch.className.baseVal || ch.className);
     const mx = r.left + r.width / 2, my = r.top + r.height / 2;
     out.onBurst = !!br && mx > br.left && mx < br.right && my > br.top && my < br.bottom;
-    out.palette = { pink: /rgb\(255, 45, 149\)/.test(cc.backgroundImage), yellow: /rgb\(243, 245, 66\)/.test(cc.backgroundImage), ink: /rgb\(11, 10, 14\)/.test(cc.backgroundImage) };
+    out.palette = { pink: /rgb\(184, 20, 95\)/.test(cc.backgroundImage), yellow: /rgb\(243, 245, 66\)/.test(cc.backgroundImage), ink: /rgb\(11, 10, 14\)/.test(cc.backgroundImage) };
     const etEl = card.querySelector('.mmr-et'), et = getComputedStyle(etEl), esEl = card.querySelector('.mmr-es'), es = getComputedStyle(esEl);
     out.popTitle = { fill: et.color, stroke: parseFloat(et.webkitTextStrokeWidth), strokeColor: et.webkitTextStrokeColor,
-      copy: /rgb\(243, 245, 66\)/.test(et.textShadow), lines: Math.round(etEl.offsetHeight / parseFloat(et.lineHeight)) };
+      copy: /rgb\(184, 20, 95\)/.test(et.textShadow), lines: Math.round(etEl.offsetHeight / parseFloat(et.lineHeight)) };
     out.tape = { bg: es.backgroundColor, lines: Math.round((esEl.clientHeight - parseFloat(es.paddingTop) - parseFloat(es.paddingBottom)) / parseFloat(es.lineHeight)) };
     const etx = card.querySelector('.mmr-etx').getBoundingClientRect(), sl = card.querySelector('.mmr-slots').getBoundingClientRect();
     out.badgesClear = sl.left > etx.right;
-    // The paper edge must survive the low-effects mode, which strips every box-shadow (html.lx-nobackdrop).
+    // The raspberry edge must survive the low-effects mode, which strips every box-shadow (html.lx-nobackdrop).
     const root = document.documentElement, hadLow = root.classList.contains('lx-nobackdrop');
     // Wait after each toggle: under reduced motion the game gives elements a 0.01s transition, and a read taken
     // the instant the class flips catches box-shadow mid-transition (transparent 0px) - a false alarm. Not rAFs:
@@ -109,8 +109,8 @@ try {
     // The slab is read from the stylesheet, not the computed style: on a slow run the game's frame watchdog re-adds
     // lx-nobackdrop while the test waits, and a computed read then sees 'none' through no fault of the card.
     const slabRule = [...document.styleSheets].flatMap((ss) => { try { return [...ss.cssRules]; } catch (e) { return []; } })
-      .some((rl) => rl.selectorText && card.matches(rl.selectorText) && /var\(--pk\)/.test(rl.style.boxShadow || ''));
-    out.frame = { edge: hi.outlineStyle === 'solid' && /rgb\(244, 241, 234\)/.test(hi.outlineColor) && parseFloat(hi.outlineWidth) >= 2, slab: slabRule };
+      .some((rl) => rl.selectorText && card.matches(rl.selectorText) && /var\(--pkd\)/.test(rl.style.boxShadow || ''));
+    out.frame = { edge: hi.outlineStyle === 'solid' && /rgb\(184, 20, 95\)/.test(hi.outlineColor) && parseFloat(hi.outlineWidth) >= 2, slab: slabRule };
     root.classList.add('lx-nobackdrop'); await settle();
     const low = getComputedStyle(card);
     out.frame.lowEdge = low.outlineStyle === 'solid' && parseFloat(low.outlineWidth) >= 2;
@@ -157,21 +157,21 @@ try {
       check(vals.length === 4 && vals.every((v) => v >= 0 && v <= 24), `${name}: the crop holds the whole snail with a thin margin (canvas px)`, mg);
       check(M.inside, `${name}: fully inside the card`, M);
       check(M.visible, `${name}: nothing covers it`, M);
-      check(M.ink >= 4 && M.rim >= 4, `${name}: black ink ring plus the paper rim`, { ink: M.ink, rim: M.rim });
+      check(M.ink >= 4 && M.rim === 0, `${name}: a black ink ring, and no white rim`, { ink: M.ink, rim: M.rim });
       const sc = M.scene || {};
       check(sc.burst && sc.dots && sc.trail && sc.sparkles >= 2 && sc.slots === 3 && sc.slotText === '???', `${name}: the panel is all there - starburst, halftone, glitter trail, three ? badges`, sc);
       check(Array.isArray(M.spill) && M.spill.length === 0, `${name}: nothing spills out of the card`, M.spill);
       check(M.onBurst === true, `${name}: the snail sits on its starburst`, M.onBurst);
       const pal = M.palette || {};
-      check(pal.pink && pal.yellow && pal.ink, `${name}: the backdrop is pink, black and yellow`, pal);
+      check(pal.pink && pal.yellow && pal.ink, `${name}: the backdrop is raspberry, black and yellow`, pal);
       const pt = M.popTitle || {};
-      check(pt.fill === 'rgb(255, 45, 149)' && pt.stroke >= 4 && pt.strokeColor === 'rgb(11, 10, 14)' && pt.copy, `${name}: the title is hot pink in a thick black stroke with a yellow copy`, pt);
+      check(pt.fill === 'rgb(243, 245, 66)' && pt.stroke >= 4 && pt.strokeColor === 'rgb(11, 10, 14)' && pt.copy, `${name}: the title is yellow in a thick black stroke with a raspberry copy`, pt);
       check(pt.lines === 2, `${name}: the title stacks on exactly two lines`, pt.lines);
       check(M.tape && M.tape.bg === 'rgb(243, 245, 66)' && M.tape.lines === 1, `${name}: the subtitle is one line of yellow tape`, M.tape);
       check(M.badgesClear === true, `${name}: the ? badges clear the text`, M.badgesClear);
       const fr = M.frame || {};
-      check(fr.edge && fr.slab, `${name}: a paper edge and a pink offset slab frame it`, fr);
-      check(fr.lowEdge, `${name}: in low-effects mode the paper edge stays`, fr);
+      check(fr.edge && fr.slab, `${name}: a raspberry edge and a raspberry offset slab frame it`, fr);
+      check(fr.lowEdge, `${name}: in low-effects mode the edge stays`, fr);
       const mv = M.moving || {}, still = Object.values(mv).every((v) => v === 'none');
       check(motion ? (mv.crawl === 'mmr-crawl' && mv.slot === 'mmr-bob' && mv.trail === 'mmc-tw' && mv.sparkBefore === 'mmc-tw') : still,
         `${name}: ${motion ? 'the snail crawls, the slots bob, the sparkles twinkle' : 'nothing moves under reduced motion'}`, mv);
