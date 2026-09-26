@@ -15927,7 +15927,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1178';
+const GAME_VERSION = 'v0.30.1179';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53154,6 +53154,12 @@ function loadState() {
     // time so the renderer's bail kicks in from frame 1.
     if (typeof _refreshEqEmptyFlag === 'function') _refreshEqEmptyFlag();
     if (!Array.isArray(player.inventory)) player.inventory = [];
+    // v0.30.1179 coop-rarity - heal items a save carries from before the fix (a co-op drop whose rarity was
+    // 'x" onmouseover=...'), in the bag and every equipped slot - see _lxRepairSavedItem.
+    { let _fx = 0;
+      for (const _it of player.inventory) if (_lxRepairSavedItem(_it)) _fx++;
+      if (player.equipped && typeof player.equipped === 'object') for (const _sl in player.equipped) if (_lxRepairSavedItem(player.equipped[_sl])) _fx++;
+      if (_fx) { player._equipBonusCache = null; console.warn('[save] repaired ' + _fx + ' item(s) with an unknown rarity or bad fields'); } }
     // v0.25.945 — Slot-string migration. Pre-v0.25.945 every accessory
     // drop landed with slot:'accessorie' (a slice(0,-1) bug on
     // 'accessories'). Sweep every item in inventory + equipped slots and
@@ -54232,6 +54238,60 @@ function _mpScrubStrings(obj) {
     if (typeof obj[k] === 'string') obj[k] = obj[k].replace(/[<>]/g, '').slice(0, 64);
   }
   return obj;
+}
+// v0.30.1179 coop-rarity - the item rarity ids the game knows. Every class="rarity-text-..." built as HTML reads this, so a
+// rarity that is anything else (a co-op host's 'x" onmouseover="..."', an array, a number) prints as 'common'.
+function _lxRarityCls(r) {
+  return (r === 'common' || r === 'rare' || r === 'epic' || r === 'legendary' || r === 'god') ? r : 'common';
+}
+// v0.30.1179 coop-rarity - heal one item in place (loadState runs it over the bag and every equipped slot, and it is the
+// last step of _lxScrubInboundItem): a rarity that is not a known id -> 'common'; stars / tier / dropLevel that are
+// not finite numbers -> numbers (stars is printed into aria-label="..."); " backtick < > out of name / baseName / slot /
+// icon / cls (no real item uses them; an apostrophe stays - "Hunter's Shortbow"). True when it changed anything.
+function _lxRepairSavedItem(it) {
+  if (!it || typeof it !== 'object') return false;
+  let fixed = false;
+  if (it.rarity != null && _lxRarityCls(it.rarity) !== it.rarity) { it.rarity = 'common'; fixed = true; }
+  for (const k of ['stars', 'tier', 'dropLevel']) {
+    if (it[k] != null && !(typeof it[k] === 'number' && Number.isFinite(it[k]))) { const x = +it[k]; it[k] = Number.isFinite(x) ? x : 0; fixed = true; }
+  }
+  for (const k of ['name', 'baseName', 'slot', 'icon', 'cls']) {
+    if (typeof it[k] === 'string' && /["\x60<>]/.test(it[k])) { it[k] = it[k].replace(/["\x60<>]/g, ''); fixed = true; }
+  }
+  return fixed;
+}
+// v0.30.1179 coop-rarity - a loot item that arrives from the network (the co-op host's drop frame). _mpScrubStrings only
+// took < > off the top-level strings, so a quote walked out of class="rarity-text-..." into onmouseover=, and nested
+// strings were never touched. This builds a fresh copy: every string at every depth loses " ' backtick < > (capped at 64,
+// as before), every number is finite (JSON.parse reads 1e999 as Infinity), prototype keys and odd key names are
+// dropped, then _lxRepairSavedItem pins rarity / stars / tier / dropLevel. A base item this client knows whose name
+// owns an apostrophe gets its spelling back (trusted local text - a local drop of it carries the same).
+function _lxScrubInboundItem(src, depth) {
+  const d = depth | 0;
+  if (!src || typeof src !== 'object' || d > 4) return null;
+  const out = Array.isArray(src) ? [] : {};
+  let n = 0;
+  for (const k of Object.keys(src)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype' || !/^[\w$]{1,40}$/.test(k) || ++n > 200) continue;
+    const v = src[k];
+    if (typeof v === 'string') out[k] = v.replace(/["'\x60<>]/g, '').slice(0, 64);
+    else if (typeof v === 'number') out[k] = Number.isFinite(v) ? Math.max(-1e15, Math.min(1e15, v)) : 0;
+    else if (typeof v === 'boolean' || v === null) out[k] = v;
+    else if (typeof v === 'object') { const c = _lxScrubInboundItem(v, d + 1); if (c) out[k] = c; }
+  }
+  if (d) return out;
+  _lxRepairSavedItem(out);
+  if (!_lxScrubInboundItem._apos) {
+    const a = [];
+    try { for (const c in ITEM_POOL) for (const b of (ITEM_POOL[c] || [])) if (b && typeof b.name === 'string' && b.name.indexOf("'") >= 0) a.push(b.name); } catch (e) {}
+    _lxScrubInboundItem._apos = a;
+  }
+  for (const nm of _lxScrubInboundItem._apos) {
+    const bare = nm.replace(/'/g, '');
+    if (out.baseName === bare) out.baseName = nm;
+    if (typeof out.name === 'string' && out.name.indexOf(bare) >= 0) out.name = out.name.replace(bare, () => nm);
+  }
+  return out;
 }
 // v0.25.548 — Render the 5 channel pills inside the multiplayer modal.
 // Selected channel is highlighted in cream/gold; clicking a pill swaps
@@ -56461,7 +56521,7 @@ function _coopApplyDrop(msg) {
     // drop path was missed (the recurring "MP peer string → innerHTML" class).
     // The item is a flat descriptor, so top-level string scrubbing covers the
     // rendered fields; strips <> and caps length.
-    const _it = _mpScrubStrings(msg.it);
+    const _it = _lxScrubInboundItem(msg.it);   // v0.30.1179 coop-rarity - was _mpScrubStrings: a quote in rarity / stars still broke out of an attribute
     game.drops.push({ x: +msg.x || 0, y: +msg.y || 0, vy: -4, type: 'item', item: _it,
       life: Math.max(1000, +msg.l || DROP_LIFE_MS), noMagnet: !!msg.nm, _coopMirror: true });
     // v0.30.685 — boss loot (the only drops the host tags nm) opens this follower's own
@@ -56471,7 +56531,7 @@ function _coopApplyDrop(msg) {
   } else if (msg.k === 'orb') {
     if (!game.powerupOrbs) game.powerupOrbs = [];
     const pw = (typeof POWERUPS !== 'undefined' && POWERUPS.length) ? _weightedBoonPick(POWERUPS) : null;   // v0.29.372 — rarity-weighted
-    game.powerupOrbs.push({ x: +msg.x || 0, y: +msg.y || 0, w: 26, h: 26, pw, rarity: String(msg.rr || 'common').slice(0, 12),
+    game.powerupOrbs.push({ x: +msg.x || 0, y: +msg.y || 0, w: 26, h: 26, pw, rarity: _lxRarityCls(msg.rr),   /* v0.30.1179 coop-rarity - a known id, like the items */
       bob: 0, life: 30000, collected: false, vy: -4, _coopMirror: true });
   }
 }
@@ -112661,7 +112721,7 @@ function openShop(type, opts) {
           `<div class="sell-check"></div>` +
           `<div class="sell-icon">${iconHtml}</div>` +
           `<div class="sell-name">` +
-            `<b class="rarity-text-${it.rarity || 'common'}">${it.name}${isEquipped ? ' <span style="color:#ff8;font-size:10px;">(equipped)</span>' : ''}</b>` +
+            `<b class="rarity-text-${_lxRarityCls(it.rarity)}">${it.name}${isEquipped ? ' <span style="color:#ff8;font-size:10px;">(equipped)</span>' : ''}</b>` +
             `<div class="sell-desc">${itemStatString(it)}</div>` +
           `</div>` +
           `<div class="sell-value">${val}<span class="coin-ico"></span></div>`;
@@ -112765,7 +112825,7 @@ function makeShopRow(icon, name, desc, price, cb, rarity, btnText, item) {
   d.innerHTML = `
     ${iconCell}
     <div class="name">
-      <div class="rarity-text-${rarity || 'common'}"><b>${name}</b></div>
+      <div class="rarity-text-${_lxRarityCls(rarity)}"><b>${name}</b></div>
       <div style="font-size:11px;color:#bbb">${desc}</div>
     </div>
     <div class="price">${price}<span class="coin-ico"></span></div>
@@ -114019,7 +114079,7 @@ function renderReforgeModal(selSlot) {
   rack.innerHTML = '';
   for (const c of cands) {
     const it = c.item;
-    const rar = (it && it.rarity) || 'common';
+    const rar = _lxRarityCls(it && it.rarity);   // v0.30.1179 coop-rarity - printed into two class="..." attributes below
     const div = document.createElement('div');
     div.className = 'reforge-card' + (c.ok ? '' : ' off') + (c.slot === selSlot ? ' selected' : '');
     div.innerHTML = '<div class="inv-slot rarity-' + rar + '"' + (it ? itemAttrAttr(it) : '') + ' style="width:64px; height:64px; flex-shrink:0;">'
@@ -114047,7 +114107,7 @@ function renderReforgeModal(selSlot) {
   const aff = _reforgeAffixLines(it);
   const last = (game._reforgeLast && game._reforgeLast.slot === sel.slot) ? game._reforgeLast : null;
   prev.style.display = 'block';
-  prev.innerHTML = '<div class="rf-name rarity-text-' + (it.rarity || 'common') + '">' + it.name + '</div>'
+  prev.innerHTML = '<div class="rf-name rarity-text-' + _lxRarityCls(it.rarity) + '">' + it.name + '</div>'
     + '<div class="rf-sub">' + sel.slot + ' · ★' + (it.stars || 0) + ' · ' + (it.rarity || 'common') + ' · Lv ' + (it.dropLevel || 1) + '</div>'
     + '<div class="rf-block"><div class="rf-h">CURRENT BONUS AFFIXES</div>' + (aff.length ? aff.map((l) => '<div>' + l + '</div>').join('') : '<div style="opacity:0.6;">none</div>') + '</div>'
     + '<div class="rf-block"><div class="rf-h">CURRENT STATS</div><div>' + itemStatString(it, true) + '</div></div>'
@@ -114352,7 +114412,7 @@ function renderCraftingModal() {
       div.innerHTML = `
         <div class="icon" style="position:relative;">${itemIconHtml(it, 32)}${(typeof _starBadgeHtml === 'function') ? _starBadgeHtml(it) : ''}${(typeof _tierBadgeHtml === 'function') ? _tierBadgeHtml(it) : ''}</div>
         <div class="info">
-          <div class="name rarity-text-${it.rarity}">${it.name}${equippedTag}</div>
+          <div class="name rarity-text-${_lxRarityCls(it.rarity)}">${it.name}${equippedTag}</div>
           <div style="font-size:10px;color:#aa66cc;">${set ? set.icon : '◈'} ${setName} Set Piece</div>
         </div>
         <button class="enhance-btn" style="background:linear-gradient(180deg,#aa44cc,#5522aa);border-color:#cc88ff;font-size:11px;padding:5px 10px;flex-shrink:0;">+${CRAFT_DISASSEMBLE_REWARD}◈</button>
@@ -114394,7 +114454,7 @@ function renderCraftingModal() {
     div.innerHTML = `
       <div class="icon" style="position:relative;">${itemIconHtml(it, 32)}</div>
       <div class="info">
-        <div class="name rarity-text-${it.rarity}">${it.name}${clsBadge}</div>
+        <div class="name rarity-text-${_lxRarityCls(it.rarity)}">${it.name}${clsBadge}</div>
         <div style="font-size:10px;color:#bbb;">${itemStatString(it)}</div>
         <div style="font-size:10px;color:#aa66cc;">${set ? (set.icon + ' ' + setName + ' · ') : ''}T${it.tier} ${entry.slot}</div>
       </div>
@@ -119533,7 +119593,7 @@ function attachTooltip(el, it) {
           <div style="color:${active3 ? '#88ff88' : '#777'};">3pc: ${_setBonusFmt(set.bonus3)}</div>
         </div>`;
     }
-    tt.innerHTML = `<div class="name rarity-text-${it.rarity}">${itemIconHtml(it, 24)} ${it.name}</div>
+    tt.innerHTML = `<div class="name rarity-text-${_lxRarityCls(it.rarity)}">${itemIconHtml(it, 24)} ${it.name}</div>
       <div style="font-size:10px;color:#bbb;text-transform:capitalize;margin-bottom:4px;">${it.rarity}${it.tier ? ' · T' + it.tier : ''} ${it.slot || ''}${itemAttrChipHtml(it) ? ' ' + itemAttrChipHtml(it) : ''}</div>
       ${clsLine}
       ${starLine}
