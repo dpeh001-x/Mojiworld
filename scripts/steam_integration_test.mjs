@@ -421,10 +421,13 @@ try {
     const quitBtn = document.querySelector('#set-quit-row button');
     window.__pad.buttons.forEach((_, i) => window.__press(i, false)); _lxPadPoll();
     let steps = 0, focused = null;
-    while (steps++ < 120) {
-      window.__press(13, true); _lxPadPoll(); window.__press(13, false); _lxPadPoll();
-      focused = document.querySelector('.pad-focus');
-      if (focused === quitBtn) break;
+    // Since v0.30.1095 Settings is TWO columns, and DOWN alone loops the left one forever (the ring visits
+    // Done -> Resolution ... Tutorial -> Reset -> Done). Walk it the way a player does: down a column, then
+    // RIGHT into the next. Quit to Desktop is the last row of the right column.
+    const tap = (b) => { window.__press(b, true); _lxPadPoll(); window.__press(b, false); _lxPadPoll(); focused = document.querySelector('.pad-focus'); };
+    outer: for (let col = 0; col < 4; col++) {
+      for (let i = 0; i < 30; i++) { steps++; tap(13); if (focused === quitBtn) break outer; }
+      tap(15);
     }
     const reached = focused === quitBtn;
     localStorage.removeItem(SAVE_KEY);
