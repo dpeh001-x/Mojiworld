@@ -56,7 +56,7 @@ try {
     };
     const WALK = BOSS_WALK_FRAMES.kingKrook, IDLE = (typeof BOSS_IDLE_FRAMES !== 'undefined' && BOSS_IDLE_FRAMES.kingKrook) || [];
     let cur = null;
-    const origDraw = window._drawBossSprite, origDI = CanvasRenderingContext2D.prototype.drawImage;
+    const origDraw = window._drawBossSprite, origSoft = window._lxDrawSoft;
     window._drawBossSprite = function (img, mm, sx, sy, ...rest) {
       const st = WALK.indexOf(img) >= 0 ? 'walk' : IDLE.indexOf(img) >= 0 ? 'idle' : null;
       if (mm === m && st) {
@@ -64,11 +64,13 @@ try {
         const T0 = this && this.getTransform ? null : null;
         const gctx = (typeof ctx !== 'undefined') ? ctx : null, T = gctx.getTransform();
         cur = { st, i: st === 'walk' ? WALK.indexOf(img) : IDLE.indexOf(img), bf, anchor: T.a * (sx + m.w / 2) + T.e, sc: T.a, x: m.x, fc: m.facing };
-        CanvasRenderingContext2D.prototype.drawImage = function (...a) {
-          if (a.length >= 5 && cur && cur.bx == null && bf != null) { const t = this.getTransform(), dx = a[a.length - 4], dw = a[a.length - 2]; cur.bx = t.a * (dx + (0.5 + bf) * dw) + t.e; }
-          return origDI.apply(this, a); };
+        // v0.30.x - the belly is read off _lxDrawSoft's placement rect (where the frame is PUT), not off ctx.drawImage
+        // (whatever bake or composite reaches it). _drawBossSprite blits every boss frame through _lxDrawSoft.
+        window._lxDrawSoft = function (c, im, dx, dy, dw, dh, ...rest) {
+          if (cur && cur.bx == null && bf != null) { const w = (dw != null) ? dw : ((im && (im._lxDrawW || im.width)) || 0), t = c.getTransform(); cur.bx = t.a * (dx + (0.5 + bf) * w) + t.e; }
+          return origSoft.call(this, c, im, dx, dy, dw, dh, ...rest); };
       }
-      try { return origDraw.call(this, img, mm, sx, sy, ...rest); } finally { CanvasRenderingContext2D.prototype.drawImage = origDI; }
+      try { return origDraw.call(this, img, mm, sx, sy, ...rest); } finally { window._lxDrawSoft = origSoft; }
     };
     const rec = []; const t0 = performance.now();
     const god = setInterval(() => { player.maxHp = 1e12; player.hp = 1e12; }, 50);
@@ -101,7 +103,7 @@ try {
     check(walk.length > 60 && frameMeans.length >= 7, 'he walked through most of his walk cycle while following the hero', { n: walk.length, frames: frameMeans.length });
     check(walkSpread <= 6, 'walking, his body holds its place over his feet: the belly moves under 6 px frame to frame (the unregistered art swung it ~45)', { walkSpread, frameMeans });
     const walkAvg = frameMeans.reduce((x, y) => x + y[1], 0) / (frameMeans.length || 1);
-    check(Math.abs(walkAvg - idleMed) <= 4, 'starting or stopping a walk does not jump his body: walk and idle place the belly within 4 px (it was 15 px off)', { walkAvg, idleMed });
+    check(Math.abs(walkAvg - idleMed) <= 4, 'starting or stopping a walk does not jump his body: walk and idle place the belly within 4 px (v0.30.1038\'s -0.0371 trim put it 15 px off)', { walkAvg, idleMed });
     const maxClaw = Math.max(...R.claws);
     check(R.claws.length >= 3 && maxClaw <= 60, 'the claw swipe is a step, not a skate: under 60 px of travel with the pose up (was ~170)', R.claws);
   }
