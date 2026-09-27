@@ -16046,7 +16046,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1204';
+const GAME_VERSION = 'v0.30.1205';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16184,6 +16184,77 @@ const GAME_VERSION = 'v0.30.1204';
     setTimeout(_fsTick, 20000);
   } catch (e) {}
 })();
+// v0.30.1205 lazy-art2 - MAP-TIED ART waits for its map, like boss frames (lazy-art): a monster sheet ('mon:<type>'), an NPC sheet
+// ('npc:<name>'), a floor / platform tile ('tile:<key>') and a map prop ('prop:<key>') are marked _lxLazy when created, so
+// the hold above PARKS them until asked (_lxArt2Want): by _lxLazyWantMap (map entry, portal neighbours, the preloaders),
+// spawnMonster, a frame / idle set being built, the draw fallbacks' self-heal and the dex portraits. Asked once = asked for good.
+const _LX_ART2 = { reg: Object.create(null), want: Object.create(null), path: new Map(), boot: false, later: [], laterT: 0 };
+// v0.30.1205 lazy-art2 - sweep: false = a monster / NPC sheet load started outside the boot sweep (a self-heal, a retry): that load is a want
+function _lxArt2Mark(key, img, path, sweep) {
+  if (!img || !key) return img;
+  if (sweep === false) _LX_ART2.want[key] = true;
+  (_LX_ART2.reg[key] = _LX_ART2.reg[key] || []).push(img); img._lxArt2Key = key;
+  if (!_LX_ART2.want[key] && window._lxBootHold) { img._lxLazy = true; if (path) _LX_ART2.path.set(path, img); }   // v0.30.1205 lazy-art2 - ?lxhold=0: eager, as before
+  return img;
+}
+function _lxArt2Want(key, hi) {
+  if (!key) return 0;
+  _LX_ART2.want[key] = true;
+  // v0.30.1205 lazy-art2 - before the menu is up a background ask (a portal neighbour, a frame set being built) waits for it: the
+  // title files go first (a map being entered asks with hi and starts at once)
+  try { const H = window._lxBootHold; if (!hi && H && !H.stats().open) { if (_LX_ART2.later.indexOf(key) < 0) _LX_ART2.later.push(key); if (!_LX_ART2.laterT) _LX_ART2.laterT = setTimeout(_lxArt2Later, 400); return 0; } } catch (e) {}
+  let n = 0; const a = _LX_ART2.reg[key];
+  if (a) for (const im of a) { try { if (typeof _lxWantImg === 'function' && _lxWantImg(im, hi)) n++; } catch (e) {} }
+  return n;
+}
+function _lxArt2Later() {
+  _LX_ART2.laterT = 0;
+  try { const H = window._lxBootHold; if (H && !H.stats().open) { _LX_ART2.laterT = setTimeout(_lxArt2Later, 400); return; } } catch (e) {}
+  for (const k of _LX_ART2.later.splice(0)) _lxArt2Want(k);
+}
+// v0.30.1205 lazy-art2 - a sheet still parked or on its way (the self-heals must not start a second copy of it)
+function _lxArt2Busy(key) { const a = _LX_ART2.reg[key]; if (a) for (const im of a) if (im && !im.complete) return true; return false; }
+// v0.30.1205 lazy-art2 - the key's image that has not failed (loaded, on its way or parked), for an <img> that loads the same file itself
+function _lxArt2Img(key) { const a = _LX_ART2.reg[key]; if (a) for (const im of a) if (im && !(im.complete && !(im.naturalWidth > 0))) return im; return null; }
+function _lxArt2Drawable(im) { return (im && typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement && !(im.complete && im.naturalWidth > 0)) ? null : im; }
+// v0.30.1205 lazy-art2 - the boot loader's DEFERRED list names the tile, NPC and prop files too: a parked one is left to its map
+function _lxArt2LazyPath(p) { const im = _LX_ART2.path.get(p); return !!(im && !im._lxWanted); }
+// v0.30.1205 lazy-art2 - types pushed straight into game.monsters (not through spawnMonster) by the type that brings them
+const _LX_ART2_ADDS = { octobaby: ['octoLegPoison', 'octoLegFreeze', 'octoLegSkillLock', 'octoLegStun'] };
+function _lxArt2WantMon(type, hi) { if (!type) return 0; let n = _lxArt2Want('mon:' + type, hi); for (const a of (_LX_ART2_ADDS[type] || [])) n += _lxArt2Want('mon:' + a, hi); return n; }
+// v0.30.1205 lazy-art2 - _pickFloorTheme reads the CURRENT map's id; ask it about this one (a portal neighbour)
+function _lxArt2FloorTheme(id) {
+  const md = (typeof MAPS === 'object' && MAPS[id]) || null;
+  if (!md || typeof _pickFloorTheme !== 'function' || typeof game === 'undefined' || !game) return null;
+  const cm = game.currentMap;
+  try { game.currentMap = id; return _pickFloorTheme(md); } catch (e) { return null; } finally { game.currentMap = cm; }
+}
+function _lxArt2MapKeys(id) {
+  const md = (typeof MAPS === 'object' && MAPS[id]) || null, out = [];
+  if (!md) return out;
+  const add = (k) => { if (k && out.indexOf(k) < 0) out.push(k); };
+  const mon = (t) => { add('mon:' + t); for (const a of (_LX_ART2_ADDS[t] || [])) add('mon:' + a); };
+  try { for (const t of _lxMapBossTypes(id)) mon(t); } catch (e) { for (const sp of (md.spawns || [])) if (sp && sp.type) mon(sp.type); }   // v0.30.1205 lazy-art2 - lazy-art's list: every spawn type too
+  for (const n of (md.npcs || [])) if (n && n.name) add('npc:' + n.name);
+  if (md.isBossArena) add('npc:Echo Keeper');   // v0.30.1205 lazy-art2 - loadMap adds him on an arena already won
+  try {
+    const th = _lxArt2FloorTheme(id);
+    if (th && _THEME_FLOOR_KEY[th]) add('tile:' + _THEME_FLOOR_KEY[th]);
+    if (th && _THEME_PLATFORM_KEY[th]) add('tile:' + _THEME_PLATFORM_KEY[th]);
+    if (MAP_FLOOR_OVERRIDES[id]) add('tile:' + MAP_FLOOR_OVERRIDES[id]);
+    const po = MAP_PLATFORM_OVERRIDES[id]; if (po) { if (po.default) add('tile:' + po.default); for (const tg in (po.byTag || {})) add('tile:' + po.byTag[tg]); }
+    if (md.sanctum) add('tile:pillarSanctum');
+  } catch (e) {}
+  try { for (const pr of (MAP_PROPS[id] || [])) if (pr && pr.key) add('prop:' + pr.key); } catch (e) {}
+  return out;
+}
+function _lxArt2WantMap(id, hi) { let n = 0; for (const k of _lxArt2MapKeys(id)) n += _lxArt2Want(k, hi); return n; }
+// v0.30.1205 lazy-art2 - settles when every sheet the map asked for has loaded or failed (the veil waits on it, bounded)
+function _lxArt2Settled(id) {
+  const ims = []; for (const k of _lxArt2MapKeys(id)) for (const im of (_LX_ART2.reg[k] || [])) ims.push(im);
+  if (typeof _lxImgSettled !== 'function') return Promise.resolve(ims.length);
+  return Promise.all(ims.map(_lxImgSettled)).then(() => ims.length);
+}
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
 // connection or in a future refactor where #version-tag is conditionally
@@ -17225,6 +17296,7 @@ const LX_OBJECTS = (() => {
       img.onerror = null;
       img.src = LX_OBJECTS_BASE + k + '.png';
     };
+    if (k !== 'column_pillar') _lxArt2Mark('prop:' + k, img, LX_OBJECTS_BASE + k + '.webp');   // v0.30.1205 lazy-art2 - a map prop waits for its map (the zodiac pillar stays eager)
     img.src = LX_OBJECTS_BASE + k + '.webp';
     out[k] = img;
   }
@@ -17376,6 +17448,7 @@ const LX_TILES = (() => {
         if (baked) out[k] = baked;
       }
     };
+    _lxArt2Mark('tile:' + k, img, base + cfg.file);   // v0.30.1205 lazy-art2 - a tile waits for a map of its theme
     img.src = base + cfg.file;
     out[k] = img;
   }
@@ -17425,6 +17498,7 @@ const LX_TILES = (() => {
       out[k] = null;
       console.warn('[LX_TILES] floor file missing:', LX_FLOOR_PER_MAP_BASE + file);
     };
+    _lxArt2Mark('tile:' + k, img, LX_FLOOR_PER_MAP_BASE + file);   // v0.30.1205 lazy-art2
     img.src = LX_FLOOR_PER_MAP_BASE + file;
     out[k] = img;
   }
@@ -17445,6 +17519,7 @@ const LX_TILES = (() => {
       out[k] = null;
       console.warn('[LX_TILES] platform file missing:', LX_PLATFORM_PER_MAP_BASE + file);
     };
+    _lxArt2Mark('tile:' + k, img, LX_PLATFORM_PER_MAP_BASE + file);   // v0.30.1205 lazy-art2
     img.src = LX_PLATFORM_PER_MAP_BASE + file;
     out[k] = img;
   }
@@ -51581,6 +51656,7 @@ function _lxBiScan(im) {
   return { x: ax, y: ay, w: bx - ax, h: by - ay, W, H };
 }
 function _lxBiBox(img, done) {           // done(box), or done(null) when the image itself failed
+  try { if (img && img._lxArt2Key && !img._lxWanted) _lxArt2Want(img._lxArt2Key, true); } catch (e) {}   // v0.30.1205 lazy-art2 - a dex portrait waits for this load: ask for it
   const src = img && img.src;
   if (!src) { done(null); return; }
   const hit = _LX_BI_BOX.get(src);
@@ -66772,6 +66848,10 @@ function _monsterDexSprite(k, t) {
     if (typeof BOSS_SPRITES !== 'undefined' && _rdy(_orig(BOSS_SPRITES[k]))) return _orig(BOSS_SPRITES[k]);
     if (typeof MONSTER_SPRITES !== 'undefined' && _rdy(_orig(MONSTER_SPRITES[k]))) return _orig(MONSTER_SPRITES[k]);
   } catch (e) {}
+  // v0.30.1205 lazy-art2 - a sheet not loaded yet (parked or on its way): hand back its image. Every dex surface builds an <img> from its
+  // src, and that <img> fetches the file itself when it is shown (loading=lazy is honoured); the MojiDex thumbs and
+  // portrait measure it through _lxBiBox, which asks for it; the MojiMon world draw filters it through _lxArt2Drawable
+  try { if (typeof _LX_ART2 !== 'undefined') { const p = _lxArt2Img('mon:' + k); if (p) return p; } } catch (e) {}
   return null;
 }
 
@@ -72337,6 +72417,7 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
           if (typeof MONSTER_SPRITES !== 'undefined' && MONSTER_SPRITES[sp.type]) track(MONSTER_SPRITES[sp.type]);
           const set = (typeof _monsterFramesFor === 'function') ? _monsterFramesFor(sp.type) : null;
           if (set) for (const mode in set) (set[mode] || []).forEach(track);
+          for (const im of (_LX_ART2.reg['mon:' + sp.type] || [])) track(im);   // v0.30.1205 lazy-art2 - the sheet itself (MONSTER_SPRITES learns it only once loaded)
         } catch (e) {}
       }
       for (const n of (md.npcs || [])) {
@@ -72349,6 +72430,7 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
             ((typeof NPC_IDLE_FRAMES !== 'undefined' && NPC_IDLE_FRAMES[base]) || []).forEach(track);
           }
           if (typeof _NPC_SPRITES !== 'undefined' && _NPC_SPRITES[n.name]) track(_NPC_SPRITES[n.name]);
+          for (const im of (_LX_ART2.reg['npc:' + n.name] || [])) track(im);   // v0.30.1205 lazy-art2 - her sheet (NPC_SPRITES learns it only once loaded)
         } catch (e) {}
       }
       try { if (md.bg && typeof BG_IMAGES !== 'undefined' && BG_IMAGES[md.bg]) track(BG_IMAGES[md.bg]); } catch (e) {}
@@ -72573,13 +72655,13 @@ function _lxStreamWorld() {
     const id = q.shift();
     if (!id || seen.has(id)) continue;
     seen.add(id); order.push(id);
-    for (const n of _lxMapNeighbors(id)) if (!seen.has(n)) q.push(n);
+    if (!window._lxBootHold || order.length === 1) for (const n of _lxMapNeighbors(id)) if (!seen.has(n)) q.push(n);   // v0.30.1205 lazy-art2 - one step out, not the whole portal graph
   }
   // Desktop: append every unreachable-by-portal map too (taxi/warp targets).
-  if (!coarse && typeof MAPS !== 'undefined') for (const id in MAPS) if (!seen.has(id)) order.push(id);
+  if (!coarse && !window._lxBootHold && typeof MAPS !== 'undefined') for (const id in MAPS) if (!seen.has(id)) order.push(id);   // v0.30.1205 lazy-art2 - not every map
   let i = 0;
   const nextMap = () => {
-    if (i >= order.length) { if (!coarse) setTimeout(_lxStreamMonWorld, 800); return; }
+    if (i >= order.length) { if (!coarse && !window._lxBootHold) setTimeout(_lxStreamMonWorld, 800); return; }   // v0.30.1205 lazy-art2 - a spawn asks for its own sheet now
     const step = () => setTimeout(nextMap, 120);
     _lxWarmMap(order[i++]).then(step, step);
   };
@@ -75075,6 +75157,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // paid a sync decode + first-draw bake mid-fight (measured 8-9 ms inside
   // drawMonster). Both calls are memoized, so repeat spawns cost nothing.
   try {
+    try { _lxArt2WantMon(type, true); } catch (e) {}   // v0.30.1205 lazy-art2 - a summon, an event or boss add, a PQ wave, a Tower floor, a co-op mirror
     if (typeof _monsterFramesFor === 'function') _monsterFramesFor(type);
     const _st = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[type] : null;
     if (_st && _st.decode) _st.decode().catch(() => {});
@@ -83216,7 +83299,7 @@ function _mojimonDraw(mn, sx, sy) {
   }
   // Undecoded frames fall back to the static dex sprite, exactly like the
   // wild-monster path falls back to its static art.
-  const spr = frame || ((typeof _monsterDexSprite === 'function') ? _monsterDexSprite(mn.type, t || {}) : null);
+  const spr = frame || _lxArt2Drawable((typeof _monsterDexSprite === 'function') ? _monsterDexSprite(mn.type, t || {}) : null);   // v0.30.1205 lazy-art2 - loaded art only
   const footY = sy + mn.h;
   ctx.save();
   if (mn.spawn > 0) ctx.globalAlpha = Math.max(0.25, 1 - mn.spawn / 18);
@@ -141253,6 +141336,7 @@ function _loadEntitySprite(map, metaMap, basePath, type, label, fileBase, _attem
       metaMap[type] = { bboxBottomY: _detectSpriteBboxBottom(img) };
     };
     img.onerror = onMiss;
+    if (basePath === 'Sprites/monsters/') _lxArt2Mark('mon:' + type, img, basePath + fname + ext, _LX_ART2.boot);   // v0.30.1205 lazy-art2 - a monster sheet waits for a map (or a spawn) that has him
     img.src = basePath + fname + ext;
   };
   tryExt('.webp', () => {
@@ -141294,7 +141378,7 @@ const MONSTER_SPRITE_ALIASES = {
 (function _loadMonsterSprites() {
   for (const type of MONSTER_SPRITE_TYPES) {
     const fileBase = MONSTER_SPRITE_ALIASES[type];
-    _loadEntitySprite(MONSTER_SPRITES, MONSTER_SPRITE_META, 'Sprites/monsters/', type, 'MonsterSprite', fileBase);
+    _LX_ART2.boot = true; try { _loadEntitySprite(MONSTER_SPRITES, MONSTER_SPRITE_META, 'Sprites/monsters/', type, 'MonsterSprite', fileBase); } finally { _LX_ART2.boot = false; }   // v0.30.1205 lazy-art2 - the boot sweep: these park
   }
 })();
 // v0.29.x — DRAW-TIME SELF-HEAL. If a REGISTERED type is being drawn but its
@@ -141309,6 +141393,7 @@ const _MONSTER_SPRITE_TYPE_SET = new Set(MONSTER_SPRITE_TYPES);
 const _monSpriteRetryAt = Object.create(null);
 function _lxNudgeMonsterSprite(type) {
   if (!type || MONSTER_SPRITES[type] || !_MONSTER_SPRITE_TYPE_SET.has(type)) return;
+  try { _lxArt2Want('mon:' + type, true); if (_lxArt2Busy('mon:' + type)) return; } catch (e) {}   // v0.30.1205 lazy-art2 - drawn before its sheet: ask, and do not fetch a second copy
   const now = Date.now();
   if (_monSpriteRetryAt[type] && now - _monSpriteRetryAt[type] < 60000) return;
   _monSpriteRetryAt[type] = now;
@@ -141495,6 +141580,7 @@ function _lxLoadNpcSpriteInto(name) {
       const img = new Image();
       img.onload = () => onLoad(img);
       img.onerror = onMiss;
+      _lxArt2Mark('npc:' + name, img, 'Sprites/npc/' + filename, _LX_ART2.boot);   // v0.30.1205 lazy-art2 - an NPC sheet waits for a map that has her
       img.src = 'Sprites/npc/' + filename;
     };
     const altExt = registered.endsWith('.webp') ? '.png'
@@ -141518,6 +141604,9 @@ function _lxLoadNpcSpriteInto(name) {
   // to starting the game"). This fill was fire-and-forget: the reveal gate never
   // waited for NPC_SPRITES to populate, so NPCs could pop in after the world
   // showed. The gate's 30s safety cap still bounds a pathological connection.
+  // v0.30.1205 lazy-art2 - with the hold on every sheet is created now and parked until wanted; a pool of six would wait on parked
+  // sheets forever (nothing awaits _lxNpcSpritesReady since v0.30.794)
+  if (window._lxBootHold) { _LX_ART2.boot = true; try { for (const n of names) _lxLoadNpcSpriteInto(n); } finally { _LX_ART2.boot = false; } window._lxNpcSpritesReady = Promise.resolve(names.length); return; }
   window._lxNpcSpritesReady = (typeof _lxAsyncPool === 'function')
     ? _lxAsyncPool(6, names, _lxLoadNpcSpriteInto)
     : Promise.allSettled(names.map(_lxLoadNpcSpriteInto));
@@ -141531,6 +141620,7 @@ const _NPC_SPRITE_RETRY = Object.create(null);   // name -> attempts (-1 = in-fl
 let _npcSpriteRetryInFlight = 0;
 function _lxRetryNpcSprite(name) {
   if (!name || NPC_SPRITES[name] || !NPC_SPRITE_FILES[name]) return;
+  try { _lxArt2Want('npc:' + name, true); if (_lxArt2Busy('npc:' + name)) return; } catch (e) {}   // v0.30.1205 lazy-art2 - drawn before her sheet: ask, and do not fetch a second copy
   const tries = _NPC_SPRITE_RETRY[name] || 0;
   if (tries === -1 || tries >= 4 || _npcSpriteRetryInFlight >= 2) return;
   _NPC_SPRITE_RETRY[name] = -1;
@@ -141589,6 +141679,7 @@ function _npcIdleFrame(npcName) {
   if (!file) return null;
   const base = file.replace(/\.(png|webp|jpg|jpeg)$/i, '');
   let arr = NPC_IDLE_FRAMES[base];
+  if (arr === undefined) { try { _lxArt2Want('npc:' + npcName); } catch (e) {} }   // v0.30.1205 lazy-art2 - her idle set is being built: her sheet too
   if (arr === undefined) {
     const _n = _lxFrameCount('npc/idle', base, _BOSS_ANIM_MAX);   // v0.29.519
     arr = new Array(_n).fill(null);
@@ -142234,6 +142325,7 @@ function _lxMapBackdrops(id) {
 function _lxLazyWantMap(id, hi) {
   try { for (const t of _lxMapBossTypes(id)) _lxBossArtWant(t, hi); } catch (e) {}
   try { for (const im of _lxMapBackdrops(id)) _lxWantImg(im, hi); } catch (e) {}
+  try { _lxArt2WantMap(id, hi); } catch (e) {}   // v0.30.1205 lazy-art2 - and its monster / NPC sheets, tiles and props
 }
 // v0.30.1196 lazy-art - settles when an image has loaded or failed (a parked one: at once - it is not coming)
 function _lxImgSettled(im) {
@@ -145540,6 +145632,7 @@ function _monsterFramesFor(type) {
   let set = MONSTER_FRAMES[type];
   if (set) return set;
   set = MONSTER_FRAMES[type] = {};
+  try { _lxArt2WantMon(type); } catch (e) {}   // v0.30.1205 lazy-art2 - whoever builds a type's frames needs its sheet
   for (const mode of ['idle', 'walk', 'attack']) {
     const n = _lxFrameCount('monsters/' + mode, type, _BOSS_ANIM_MAX);   // v0.29.519
     const arr = new Array(n).fill(null);
@@ -164051,7 +164144,8 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   ]);
   const BAZAAR = REQUIRED.filter(p => BAZAAR_PATHS.has(p));
   const CRITICAL = REQUIRED.filter(p => CRITICAL_PATHS.has(p));
-  const DEFERRED = REQUIRED.filter(p => !BAZAAR_PATHS.has(p) && !CRITICAL_PATHS.has(p) && !(typeof _lxLazyBgPath === 'function' && _lxLazyBgPath(p)));   // v0.30.1196 lazy-art - a parked backdrop waits for its map
+  // v0.30.1205 lazy-art2 - and a parked tile / NPC / prop file waits for its map too (the tiles came twice: here and from LX_TILES)
+  const DEFERRED = REQUIRED.filter(p => !BAZAAR_PATHS.has(p) && !CRITICAL_PATHS.has(p) && !(typeof _lxLazyBgPath === 'function' && _lxLazyBgPath(p)) && !(typeof _lxArt2LazyPath === 'function' && _lxArt2LazyPath(p)));   // v0.30.1196 lazy-art - a parked backdrop waits for its map
 
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
@@ -167112,6 +167206,7 @@ function _lxReadyGate(mapId, opts) {
     let t = Date.now();
     try { if (typeof _lxLazyWantMap === 'function') _lxLazyWantMap(id, true); } catch (e) {}   // v0.30.1196 lazy-art - started now, awaited below
     const _lzBoss = (typeof _lxBossArtSettled === 'function') ? _lxBossArtSettled(id) : null, _lzBg = (typeof _lxBackdropSettled === 'function') ? _lxBackdropSettled(id) : null;
+    try { if (typeof _lxArt2Settled === 'function') await capped(_lxArt2Settled(id), CAP * 0.4); } catch (e) {}   // v0.30.1205 lazy-art2 - the monster / NPC sheets, tiles and props land before the veil lifts
     paint(5, 'Decoding sprites…');
     // For the WHOLE gate, not just the drain: every frame the game draws under
     // the veil bakes unmetered, so NPCs, the player and anything in view are

@@ -32,7 +32,12 @@ const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof spawnMonster === 'function' && typeof drawMonster === 'function'
   && typeof _lxMobPlantDy === 'function' && typeof MONSTER_SPRITE_META === 'object', null, { timeout: 120000 });
+await page.evaluate(() => { if (typeof _lxArt2WantMon === 'function') for (const t of ['echoKnight', 'boneGolem', 'grumpsquid', 'seastar', 'future_lyra', 'slime']) _lxArt2WantMon(t, true); });   // v0.30.x lazy-art2 - a monster sheet loads when wanted: ask for the six measured below
 await page.waitForFunction(() => MONSTER_SPRITE_META.echoKnight && MONSTER_SPRITE_META.echoKnight.bboxBottomY != null, null, { timeout: 60000 });
+// v0.30.x lazy-art2 - and the boot image hold has let go (the menu is up): the old wait for the boot burst implied it, and
+// until then the attack frames the spawn below builds are queued behind the title
+await page.waitForFunction(() => ['echoKnight', 'boneGolem', 'grumpsquid', 'seastar', 'future_lyra', 'slime'].every((t) => MONSTER_SPRITES[t] && MONSTER_SPRITES[t].naturalWidth > 0 && MONSTER_SPRITE_META[t])
+  && (!window._lxBootHold || window._lxBootHold.stats().open), null, { timeout: 90000 });
 
 const r = await page.evaluate(async () => {
   try { window._lxIsSanctuary = () => false; } catch (e) {}

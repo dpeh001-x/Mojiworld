@@ -41,22 +41,24 @@ try {
   await page.waitForFunction(() => window._lxWorldStreamed === true, null, { timeout: 20000 });
   ok('world streamer kicked after reveal', true);
 
+  const LAZY2 = await page.evaluate(() => typeof _lxArt2Want === 'function');   // v0.30.x lazy-art2 - the streamer warms this map and its portal neighbours only
   const t0 = Date.now();
   await page.waitForFunction(() => {
     const total = Object.keys(MAPS).length;
     const done = Object.keys(window._lxMapPreloaded || {}).filter(k => MAPS[k]).length;
     return done >= total;
-  }, null, { timeout: 260000, polling: 1000 }).catch(() => {});
+  }, null, { timeout: LAZY2 ? 15000 : 260000, polling: 1000 }).catch(() => {});   // v0.30.x lazy-art2
   const maps = await page.evaluate(() => ({
     total: Object.keys(MAPS).length,
     warmed: Object.keys(window._lxMapPreloaded || {}).filter(k => MAPS[k]).length,
   }));
-  ok(`ALL maps warmed in background (${maps.warmed}/${maps.total}, ${Math.round((Date.now()-t0)/1000)}s)`, maps.warmed >= maps.total, maps);
+  if (LAZY2) ok(`only this map and its portal neighbours warmed, not the world (${maps.warmed}/${maps.total})`, maps.warmed > 0 && maps.warmed <= 12, maps);   // v0.30.x lazy-art2
+  else ok(`ALL maps warmed in background (${maps.warmed}/${maps.total}, ${Math.round((Date.now()-t0)/1000)}s)`, maps.warmed >= maps.total, maps);
 
   // Registry sweeps (desktop path): monster types + proj/FX/summon frames filled.
   await page.waitForFunction(() =>
     typeof MONSTER_FRAMES !== 'undefined' && Object.keys(MONSTER_FRAMES).length >= Object.keys(monsterTypes).length * 0.95,
-    null, { timeout: 60000, polling: 1000 }).catch(() => {});
+    null, { timeout: LAZY2 ? 1000 : 60000, polling: 1000 }).catch(() => {});   // v0.30.x lazy-art2
   const regs = await page.evaluate(() => ({
     monTypes: Object.keys(monsterTypes).length,
     monFrames: Object.keys(MONSTER_FRAMES || {}).length,
@@ -64,7 +66,8 @@ try {
     fx: Object.keys(FX_ANIM_FRAMES || {}).length, fxKeys: _FX_ANIM_KEYS.size,
     summons: Object.keys(SUMMON_ANIM_FRAMES || {}).length,
   }));
-  ok('every monster type\'s anim frames requested', regs.monFrames >= regs.monTypes * 0.95, regs);
+  if (LAZY2) ok('no every-monster-type sweep: frames only for the monsters met (' + regs.monFrames + ' of ' + regs.monTypes + ')', regs.monFrames < regs.monTypes * 0.5, regs);   // v0.30.x lazy-art2
+  else ok('every monster type\'s anim frames requested', regs.monFrames >= regs.monTypes * 0.95, regs);
   ok('all projectile anim sets requested', regs.proj >= regs.projKeys, regs);
   ok('all FX anim sets requested', regs.fx >= regs.fxKeys, regs);
   ok('summon anim sets requested', regs.summons > 0, regs);

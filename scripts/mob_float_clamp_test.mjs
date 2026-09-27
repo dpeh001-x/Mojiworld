@@ -37,7 +37,9 @@ const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['-
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
 await page.goto(`http://localhost:${PORT}/_mob_probe.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof game === 'object' && typeof player === 'object', null, { timeout: 180000 });
+await page.evaluate(() => { if (typeof _lxArt2Want === 'function') for (const t of MONSTER_SPRITE_TYPES) _lxArt2Want('mon:' + t); });   // v0.30.x lazy-art2 - sheets load when wanted: this survey reads them all
 await page.waitForTimeout(7000);
+await page.waitForFunction(() => typeof _lxArt2Want !== 'function' || MONSTER_SPRITE_TYPES.every((t) => MONSTER_SPRITES[t]), null, { timeout: 90000 }).catch(() => {});   // v0.30.x lazy-art2
 await page.evaluate(() => {
   window._lxBootGateDone = true; window._prologueActive = false;
   for (const id of ['loading-overlay','class-select-modal','advancement-modal','boot-gate','intro-overlay'])

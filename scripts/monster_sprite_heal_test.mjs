@@ -45,6 +45,7 @@ try {
   await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => typeof MONSTER_SPRITES === 'object' && typeof _lxNudgeMonsterSprite === 'function', null, { timeout: 30000 });
   // Wait for the boot load burst to settle (headless decodes trickle in).
+  await page.evaluate(() => { if (typeof _lxArt2Want === 'function') for (const t of MONSTER_SPRITE_TYPES) _lxArt2Want('mon:' + t); });   // v0.30.x lazy-art2 - sheets load when wanted: ask for all, the boot burst this test reproduces
   await page.waitForFunction(() => Object.keys(MONSTER_SPRITES).length >= 80, null, { timeout: 90000 });
 
   const boot = await page.evaluate(() => ({
