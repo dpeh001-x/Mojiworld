@@ -222,6 +222,7 @@
 // v0.30.1263 - v90 -> v91. 13 Sprites/vfx statics, 10 Sprites/vfx/anim sets and the fx quake burst
 // (Sprites/fx/quake_ring.webp + anim/quakeRing_0..8) are REPLACED under their own names (pop restyle), so a returning
 // browser would keep drawing the old effects for a session.
+// v0.30.1274 - v91 -> v92. v0.30.1274 - edge-fixed projectiles: 35 sets tapered or inset (same names)
 // v0.30.x region-pop - v92 -> v93. all 83 Sprites/world/regions icons are REPLACED under their own names (pop-punk redraw, matched to
 // each map's monsters), so a returning browser would otherwise keep the old icons until its cache refreshed.
 const CACHE = 'mojiworld-assets-v93';   // v0.30.x region-pop - the 83 pop-punk area icons (same names)
