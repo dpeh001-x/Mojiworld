@@ -34,6 +34,9 @@ ok('the backdrop is a stage: berry drapes and a valance, the two speakers kept',
 // cs-stage6 (per user: "The back stage can look more muted, the ground can look more pronounced, make the image flow")
 ok('a muted backstage: dusty burst and drapes, not the berry of the earlier passes', svg.includes('stop-color="#8e5c80"') && svg.includes('stop-color="#9a4c78"') && !svg.includes('#b0457f') && !svg.includes('#b03c74'));
 ok('a pronounced floor: starts at the horizon (y 300), boards to a vanishing point, a lit edge, a light pool', svg.includes('<rect y="300" width="400" height="100" fill="url(#floor)"/>') && (svg.match(/<path d="M200,120L/g) || []).length >= 20 && svg.includes('clip-path="url(#floorClip)"') && svg.includes('fill="url(#floorPool)"'));
+// cs-stage7 (per user: "the podium especially the shadow on the podium looks weird, please rectify, push the character
+// vertically up slightly")
+ok('the podium has soft shadows - no hard offset block under the drum, a soft contact shadow under the feet', !svg.includes('transform="translate(6 8)"') && svg.includes('fill="url(#podShadow)"') && svg.includes('fill="url(#contact)"') && svg.includes('<ellipse cx="200" cy="330" rx="122" ry="22" fill="url(#top)"'));
 ok('not cluttered: no posters, graffiti or brickwork, two sparkles', !svg.includes('clipPath id="pc') && !svg.includes('stroke-width="9"') && !svg.includes('wallm') && (svg.match(/d="M0,-12L2\.6,-2\.6/g) || []).length === 2);
 ok('no caution tape stripes', !/repeating-linear|#ffe07a" fill-opacity/.test(svg));
 
@@ -53,7 +56,7 @@ const r = await page.evaluate(() => {
   const cs = getComputedStyle(w), be = getComputedStyle(w, '::before'), af = getComputedStyle(w, '::after');
   const vis = (q) => { const e = w.querySelector(q); return !!e && getComputedStyle(e).display !== 'none'; };
   return { bg: cs.backgroundImage, beforeContent: be.content, afterContent: af.content, ring: vis('.cs-stage-ring'), twinkle: vis('.cs-twinkle'),
-    canvasFilter: getComputedStyle(document.getElementById('cs-look-canvas')).filter };
+    canvasFilter: getComputedStyle(document.getElementById('cs-look-canvas')).filter, canvasTranslate: getComputedStyle(document.getElementById('cs-look-canvas')).translate };
 });
 // the URL the box actually paints, loaded the way the browser would
 const loaded = await page.evaluate(async (bg) => { const u = bg.includes('url("') ? bg.split('url("')[1].split('")')[0] : null; if (!u) return { url: null };
@@ -64,6 +67,8 @@ ok('the illustration loads', loaded.ok === true && /stage_pop.svg/.test(loaded.u
 ok('the old pseudos are off (no prism, tape or glow layers)', r.beforeContent === 'none' && r.afterContent === 'none', { before: r.beforeContent, after: r.afterContent });
 ok('the old ring and twinkles are off', !r.ring && !r.twinkle, { ring: r.ring, twinkle: r.twinkle });
 ok('the figure wears a white sticker edge', /drop-shadow\(rgb\(255, 255, 255\)/.test(r.canvasFilter), r.canvasFilter);
+ok('no hard ink drop on the figure (it read as a dark twin of the legs on the podium)', !/drop-shadow\(rgba\(13, 10, 20/.test(r.canvasFilter), r.canvasFilter);
+ok('the figure stands 5% higher (a share of its own height, so the phone box moves alike)', r.canvasTranslate === '0px -5%', r.canvasTranslate);
 ok('no page errors', errs.length === 0, errs.slice(0, 2));
 console.log(fails ? `FAIL(${fails})` : 'ALL PASS');
 process.exit(fails ? 1 : 0);
