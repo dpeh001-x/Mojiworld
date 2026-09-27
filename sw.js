@@ -197,7 +197,9 @@
 // name (recast from a 130 Hz sigh to a soft young elf woman), so a returning browser would otherwise keep the old clip.
 // v0.30.x cs-stage4 - v79 -> v80. Sprites/ui/cs/stage_pop.svg (the character-creation stage) is REPLACED under its own
 // name (the backdrop becomes a punk gig wall), so a returning browser would otherwise show v0.30.1194's stage once.
-const CACHE = 'mojiworld-assets-v80';   // v0.30.x cs-stage4 - the creator stage's gig-wall backdrop (same name)
+// v0.30.x cs-stage4 - v80 -> v81. Sprites/ui/cs/stage_pop.svg (the character-creation stage) is REPLACED under its own
+// name (the backdrop becomes a punk gig wall), so a returning browser would otherwise show v0.30.1194's stage once.
+const CACHE = 'mojiworld-assets-v81';   // v0.30.x cs-stage5 - the creator stage becomes a comic theatre stage (same name)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
