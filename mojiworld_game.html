@@ -16045,7 +16045,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1237';
+const GAME_VERSION = 'v0.30.1238';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -157982,6 +157982,16 @@ function _lxDnAtlasPx4(b0, scale) {
   const k = Math.ceil(Math.log(Math.max(0.05, scale)) / _LX_DN_ATLAS_LN - 1e-6);
   return Math.max(4, Math.ceil(b0 * Math.pow(_LX_DN_ATLAS_STEP, k) * 2) / 2);
 }
+// v0.30.1238 FIGHT LAG - the render scale the number atlases are keyed on: the highest this map has used. The governor
+// eases the scale when a fight runs slow and gives it back when that did not help; keyed on the live value, every
+// figure and sticker atlas was rebuilt at the dip and again on the way back - a build is the frame's hitch. A new
+// map starts from the live scale. _lxDnAtlasBlit / _lxGbAtlasBlit draw an atlas at the live scale either way.
+var _lxDnDprMap, _lxDnDprHi = 0;
+function _lxDnAtlasDpr(now) {
+  let m = null; try { m = (typeof game !== 'undefined' && game) ? game.currentMap : null; } catch (e) {}
+  if (m !== _lxDnDprMap) { _lxDnDprMap = m; _lxDnDprHi = now; } else if (now > _lxDnDprHi) _lxDnDprHi = now;
+  return _lxDnDprHi;
+}
 function _lxDnAtlasGet(b0, px, baseSize, d, col, tk, lowFx, stress, dpr) {
   const key = b0 + '|' + px + '|' + (d.crit ? 1 : 0) + (d.big ? 1 : 0) + (tk ? 1 : 0) + '|' + col + '|' + (lowFx ? 1 : 0) + (stress ? 1 : 0) + '|' + dpr;
   let at = _LX_DN_ATLAS.get(key);
@@ -158067,17 +158077,18 @@ function _lxDnAtlasBlit(at, txt, scale, rotated, fit) {
   const n = txt.length; let wTot = 0;
   for (let i = 0; i < n; i++) { const c0 = at.cells.get(txt[i]); if (!c0) return false; wTot += c0.adv; }
   const dpr = at.dpr;
+  const dNow = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.max(0.25, Math.min(3, _LX_DPR)) : dpr, q = dNow / dpr;   // v0.30.1238 an atlas keyed on the map's top scale, drawn at the live one
   if (!rotated) {
     const tf = (typeof ctx.getTransform === 'function') ? ctx.getTransform() : null;
     if (!tf) return false;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    const oy = Math.round(tf.f - at.base * dpr * r);
+    const oy = Math.round(tf.f - at.base * dNow * r);
     for (let row = 0; row < at.rows; row++) {
       let pen = -wTot / 2;
       for (let i = 0; i < n; i++) {
         const c0 = at.cells.get(txt[i]);
-        ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, Math.round(tf.e + (pen - at.pad) * dpr * r), oy, c0.sw * r, at.cellH * r);
+        ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, Math.round(tf.e + (pen - at.pad) * dNow * r), oy, c0.sw * r * q, at.cellH * r * q);
         pen += c0.adv;
       }
     }
@@ -158191,6 +158202,7 @@ function _lxGbAtlasBlit(at, txt, scale, rotated, fit, crit) {
   const n = txt.length; let wTot = 0;
   for (let i = 0; i < n; i++) { const c0 = at.cells.get(txt[i]); if (!c0) return false; wTot += c0.adv; }
   const dpr = at.dpr, a0 = ctx.globalAlpha;
+  const dNow = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.max(0.25, Math.min(3, _LX_DPR)) : dpr, q = dNow / dpr;   // v0.30.1238 see _lxDnAtlasBlit
   const tf = rotated ? null : ((typeof ctx.getTransform === 'function') ? ctx.getTransform() : null);
   if (!rotated && !tf) return false;
   ctx.save();
@@ -158203,10 +158215,10 @@ function _lxGbAtlasBlit(at, txt, scale, rotated, fit, crit) {
     ctx.globalAlpha = a0 * R.a;
     let pen = -wTot / 2;
     if (tf) {   // no rotation: whole device pixels, as the figure atlas (v0.30.466)
-      const dy = Math.round(tf.f + (oy - at.base) * dpr * r);
+      const dy = Math.round(tf.f + (oy - at.base) * dNow * r);
       for (let i = 0; i < n; i++) {
         const c0 = at.cells.get(txt[i]);
-        ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, Math.round(tf.e + (pen - at.pad + ox) * dpr * r), dy, c0.sw * r, at.cellH * r);
+        ctx.drawImage(at.cv, c0.sx, row * at.rowH, c0.sw, at.cellH, Math.round(tf.e + (pen - at.pad + ox) * dNow * r), dy, c0.sw * r * q, at.cellH * r * q);
         pen += c0.adv;
       }
     } else {
@@ -158574,11 +158586,11 @@ function drawDamageNumbers() {
     let _dnAtlasDone = false;
     if (_dnAtlasable && (_dnLowFx_top || _dnFading)) {   // the pop in a boss / heavy scene (the frames that need it); the fade tail everywhere (see the gate above)
       const _b0 = baseSize | 0, _apx = _lxDnAtlasPx4(_b0, scale || 1);
-      const _at = _lxDnAtlasGet(_b0, _apx, baseSize, d, col, _dnTk, _dnLowFx_top, _dnStress, _dnDprNow);
+      const _at = _lxDnAtlasGet(_b0, _apx, baseSize, d, col, _dnTk, _dnLowFx_top, _dnStress, _lxDnAtlasDpr(_dnDprNow));   // v0.30.1238 sticky scale
       if (_at && _lxDnAtlasBlit(_at, txt, scale || 1, !!(rot && !_dnLowFx_top), (_b0 * (scale || 1)) / _apx)) _dnAtlasDone = true;
     } else if (d._gbVolc && _LX_GB_ATLAS_ON && _dnLowFx_top && _LX_DN_ATLAS_OK.test(txt)) {   // v0.30.x gb-atlas — a sticker's live frames
       const _b0 = baseSize | 0, _apx = _lxDnAtlasPx4(_b0, scale || 1);
-      const _at = _lxGbAtlasGet(_b0, _apx, !!d.crit, col, _dnStress, _dnDprNow);
+      const _at = _lxGbAtlasGet(_b0, _apx, !!d.crit, col, _dnStress, _lxDnAtlasDpr(_dnDprNow));   // v0.30.1238 sticky scale
       if (_at && _lxGbAtlasBlit(_at, txt, scale || 1, !!rot, (_b0 * (scale || 1)) / _apx, !!d.crit)) _dnAtlasDone = true;
     }
     const _dnLowFx = _dnLowFx_top || _dnStress;
