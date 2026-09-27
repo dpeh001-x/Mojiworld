@@ -5,6 +5,11 @@
 //   it slightly comic style, not so cluttered" - the wall, posters and graffiti go; the backdrop is a theatre stage: berry
 //   drapes tied back each side and a scalloped valance across the top, all flat comic cel shading with ink outlines and
 //   hard drops. The speakers stay, standing in front of the drapes. Two sparkles, not four.
+//   final-polish cs-stage6 (per user): "The back stage can look more muted, the ground can look more pronounced, make the
+//   image flow". The wall, burst, rays and drapes drop to dusty, low-saturation tones; the floor starts higher (y 300) and is
+//   a lit lilac stage - boards running back to a vanishing point, seams closing up toward the horizon, a crisp lit edge, a
+//   pool where the beams land, soft shadows under the drapes and speakers; the bottom rim is lighter so the floor reads.
+//   Everything - beams, drape curves, floor boards, the pool - leads the eye to the hero on the podium.
 //   node scripts/gen_cs_stage_svg.cjs [out.svg]
 const fs = require('fs');
 const OUT = process.argv[2] || require('path').join(__dirname, '..', 'Sprites', 'ui', 'cs', 'stage_pop.svg');
@@ -30,7 +35,7 @@ for (let i = 0; i < 24; i += 2) {
   rays += `<path d="M${cx},${cy}L${f(cx + R * Math.cos(a0))},${f(cy + R * Math.sin(a0))}L${f(cx + R * Math.cos(a1))},${f(cy + R * Math.sin(a1))}Z"/>`;
 }
 // podium: a drum seen from slightly above - top ellipse at y 344, front face down to y 376
-const PX = 200, PY = 344, RX = 142, RY = 24, H = 32;
+const PX = 200, PY = 344, RX = 122, RY = 22, H = 30;   // cs-stage6 - narrower (was 142 / 24 / 32) so the floor shows round it
 const face = `M${PX - RX},${PY}L${PX - RX},${PY + H}A${RX},${RY} 0 0 0 ${PX + RX},${PY + H}L${PX + RX},${PY}A${RX},${RY} 0 0 1 ${PX - RX},${PY}Z`;
 const silhouette = `M${PX - RX},${PY}A${RX},${RY} 0 0 1 ${PX + RX},${PY}L${PX + RX},${PY + H}A${RX},${RY} 0 0 1 ${PX - RX},${PY + H}Z`;
 let ticks = '';
@@ -41,7 +46,8 @@ const amp = (x, flip) => {
   let slats = ''; for (let y = top + 10; y < top + h - 6; y += 7) slats += `<path d="M${x + 7},${y}H${x + w - 7}"/>`;
   let knobs = ''; for (let i = 0; i < 5; i++) knobs += `<rect x="${x + 10 + i * 12}" y="${hy + 6}" width="6" height="6" rx="1.5" fill="#d9b457"/>`;
   const cx = x + w / 2, cy = top + h / 2;
-  return `<g transform="${flip ? `translate(${2 * x + w} 0) scale(-1 1)` : ''}">` +
+  return `<ellipse cx="${x + w / 2 + 6}" cy="${top + h + 3}" rx="46" ry="8" fill="${INK}" fill-opacity=".45"/>` +
+    `<g transform="${flip ? `translate(${2 * x + w} 0) scale(-1 1)` : ''}">` +
     `<rect x="${x + 5}" y="${hy + 6}" width="${w}" height="${top + h - hy}" fill="${INK}" fill-opacity=".8"/>` +
     `<rect x="${x}" y="${top}" width="${w}" height="${h}" rx="4" fill="#1a1224" stroke="${INK}" stroke-width="4"/>` +
     `<g stroke="#2e2340" stroke-width="3">${slats}</g>` +
@@ -52,16 +58,20 @@ const amp = (x, flip) => {
     `${knobs}</g>`;
 };
 const sparkle = (x, y, s, fill) => `<path transform="translate(${x} ${y}) scale(${s})" d="M0,-12L2.6,-2.6L12,0L2.6,2.6L0,12L-2.6,2.6L-12,0L-2.6,-2.6Z" fill="${fill}" stroke="${INK}" stroke-width="${f(2 / s)}" stroke-linejoin="round"/>`;
+// the stage floor's boards: runs back to a vanishing point above the hero's head, seams closing up toward the horizon
+let boards = '';
+for (let x = -520; x <= 920; x += 58) boards += `<path d="M200,120L${x},400" stroke-opacity=".28" stroke-width="2"/>`;
+for (const y of [307, 316, 328, 344, 364, 390]) boards += `<path d="M0,${y}H400" stroke-opacity=".2" stroke-width="1.8"/>`;
 // a drape, tied back: the inner edge sweeps from the top to a tie and flares to the floor. Flat cel shading - one dark
 // band along the inner edge, three ink fold lines, one light fold - an ink outline and a hard drop. Mirrored for the right.
-const DRAPE = 'M-8,22L86,22C72,92 54,170 48,226C58,262 82,300 100,334L-8,334Z';
+const DRAPE = 'M-8,22L86,22C72,92 54,170 48,226C56,254 74,282 90,304L-8,304Z';
 const drape = (flip) => `<g${flip ? ' transform="translate(400 0) scale(-1 1)"' : ''}>` +
   `<path d="${DRAPE}" transform="translate(5 4)" fill="${INK}" fill-opacity=".6"/>` +
   `<path d="${DRAPE}" fill="url(#drape)"/>` +
-  `<path d="M86,22C72,92 54,170 48,226C58,262 82,300 100,334L80,334C64,300 48,262 40,226C45,176 60,100 70,22Z" fill="#5e1a40" fill-opacity=".75"/>` +
+  `<path d="M86,22C72,92 54,170 48,226C56,254 74,282 90,304L72,304C58,282 46,254 40,226C45,176 60,100 70,22Z" fill="#4a2038" fill-opacity=".7"/>` +
   `<path d="M36,22C33,110 26,190 24,226" fill="none" stroke="#f08ab6" stroke-opacity=".45" stroke-width="4" stroke-linecap="round"/>` +
   `<g fill="none" stroke="${INK}" stroke-opacity=".55" stroke-width="2.5" stroke-linecap="round">` +
-  `<path d="M18,22C18,110 14,190 12,226C16,262 24,300 26,334"/><path d="M52,22C48,110 38,190 34,226C42,262 56,300 64,334"/></g>` +
+  `<path d="M18,22C18,110 14,190 12,226C15,254 22,282 24,304"/><path d="M52,22C48,110 38,190 34,226C40,254 50,282 58,304"/></g>` +
   `<path d="${DRAPE}" fill="none" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>` +
   `<rect x="-10" y="216" width="64" height="15" rx="5" transform="rotate(-7 22 223)" fill="#e8c86a" stroke="${INK}" stroke-width="3.5"/>` +
   `</g>`;
@@ -78,36 +88,41 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" prese
 <!-- Mojiworld - character-creation stage, comic pop punk (v0.30.x final-polish cs-stage3, cs-stage5 theatre stage). Generated by
      scripts/gen_cs_stage_svg.cjs; no dots by request. -->
 <defs>
-<radialGradient id="bg" cx="50%" cy="36%" r="78%"><stop offset="0" stop-color="#5b2c76"/><stop offset=".5" stop-color="#3c1c57"/><stop offset="1" stop-color="#170a24"/></radialGradient>
+<radialGradient id="bg" cx="50%" cy="36%" r="78%"><stop offset="0" stop-color="#4c3560"/><stop offset=".5" stop-color="#2f2140"/><stop offset="1" stop-color="#140d1c"/></radialGradient>
 <radialGradient id="fade" cx="50%" cy="37%" r="60%"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
 <mask id="raym"><rect width="400" height="400" fill="url(#fade)"/></mask>
-<radialGradient id="burstG" cx="50%" cy="42%" r="60%"><stop offset="0" stop-color="#b0457f"/><stop offset=".7" stop-color="#8a2f68"/><stop offset="1" stop-color="#6c2254"/></radialGradient>
-<radialGradient id="halo" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ffe3f1" stop-opacity=".55"/><stop offset=".6" stop-color="#ffc3e0" stop-opacity=".16"/><stop offset="1" stop-color="#ffc3e0" stop-opacity="0"/></radialGradient>
+<radialGradient id="burstG" cx="50%" cy="42%" r="60%"><stop offset="0" stop-color="#8e5c80"/><stop offset=".7" stop-color="#724866"/><stop offset="1" stop-color="#58374f"/></radialGradient>
+<radialGradient id="halo" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ffe3f1" stop-opacity=".4"/><stop offset=".6" stop-color="#ffc3e0" stop-opacity=".16"/><stop offset="1" stop-color="#ffc3e0" stop-opacity="0"/></radialGradient>
 <linearGradient id="beam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff1f8" stop-opacity=".3"/><stop offset=".75" stop-color="#ffd6ea" stop-opacity=".07"/><stop offset="1" stop-color="#ffd6ea" stop-opacity="0"/></linearGradient>
-<linearGradient id="drape" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b03c74"/><stop offset=".6" stop-color="#94305f"/><stop offset="1" stop-color="#6e2249"/></linearGradient>
-<linearGradient id="floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b153d"/><stop offset="1" stop-color="#0c0612"/></linearGradient>
+<linearGradient id="drape" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9a4c78"/><stop offset=".6" stop-color="#7d3d63"/><stop offset="1" stop-color="#5c2c4b"/></linearGradient>
+<linearGradient id="floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8a6aa0"/><stop offset=".3" stop-color="#5c4274"/><stop offset="1" stop-color="#22152e"/></linearGradient>
+<radialGradient id="floorPool" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ffe9f5" stop-opacity=".42"/><stop offset=".6" stop-color="#ffd8ec" stop-opacity=".14"/><stop offset="1" stop-color="#ffd8ec" stop-opacity="0"/></radialGradient>
+<clipPath id="floorClip"><rect y="300" width="400" height="100"/></clipPath>
 <linearGradient id="top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6d3e8"/><stop offset=".45" stop-color="#d59ac4"/><stop offset="1" stop-color="#9c5aa0"/></linearGradient>
 <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d4508c"/><stop offset=".6" stop-color="#a8366f"/><stop offset="1" stop-color="#6e1f4a"/></linearGradient>
 <radialGradient id="pool" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff" stop-opacity=".7"/><stop offset=".55" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
 <linearGradient id="gloss" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
 <linearGradient id="rimShade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${INK}" stop-opacity=".55"/><stop offset=".22" stop-color="${INK}" stop-opacity="0"/><stop offset=".78" stop-color="${INK}" stop-opacity="0"/><stop offset="1" stop-color="${INK}" stop-opacity=".55"/></linearGradient>
-<linearGradient id="bottom" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#07030b" stop-opacity=".85"/><stop offset=".45" stop-color="#07030b" stop-opacity=".3"/><stop offset="1" stop-color="#07030b" stop-opacity="0"/></linearGradient>
+<linearGradient id="bottom" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#07030b" stop-opacity=".62"/><stop offset=".45" stop-color="#07030b" stop-opacity=".16"/><stop offset="1" stop-color="#07030b" stop-opacity="0"/></linearGradient>
 <radialGradient id="vig" cx="50%" cy="42%" r="72%"><stop offset=".6" stop-color="#0a0512" stop-opacity="0"/><stop offset="1" stop-color="#0a0512" stop-opacity=".6"/></radialGradient>
 <clipPath id="faceClip"><path d="${face}"/></clipPath>
 </defs>
 <rect width="400" height="400" fill="url(#bg)"/>
-<g fill="#ffd9ee" fill-opacity=".06" mask="url(#raym)">${rays}</g>
+<g fill="#ffd9ee" fill-opacity=".035" mask="url(#raym)">${rays}</g>
 <!-- the burst behind the hero: hard ink shadow, ink outline, a lighter inner cut -->
-<path d="${burst(206, 174, 150, 118, 0)}" fill="${INK}" fill-opacity=".85"/>
+<path d="${burst(206, 174, 150, 118, 0)}" fill="${INK}" fill-opacity=".6"/>
 <path d="${burst(200, 168, 150, 118, 0)}" fill="url(#burstG)" stroke="${INK}" stroke-width="6" stroke-linejoin="round"/>
-<path d="${burst(200, 168, 112, 92, 5)}" fill="#c35a92" fill-opacity=".38"/>
+<path d="${burst(200, 168, 112, 92, 5)}" fill="#a87896" fill-opacity=".28"/>
 <ellipse cx="200" cy="170" rx="106" ry="100" fill="url(#halo)"/>
 <!-- two spotlight beams crossing onto the podium -->
 <path d="M28,-20L78,-20L262,336L150,336Z" fill="url(#beam)"/>
 <path d="M322,-20L372,-20L250,336L138,336Z" fill="url(#beam)"/>
 <!-- floor, then the amp stacks standing on it at each side -->
-<rect y="330" width="400" height="70" fill="url(#floor)"/>
-<path d="M0,330H400" stroke="#ffd4ea" stroke-opacity=".35" stroke-width="2"/>
+<rect y="300" width="400" height="100" fill="url(#floor)"/>
+<g clip-path="url(#floorClip)" fill="none" stroke="${INK}" stroke-linecap="round">${boards}</g>
+<ellipse cx="200" cy="344" rx="178" ry="46" fill="url(#floorPool)"/>
+<path d="M0,300.5H400" stroke="#f3dcef" stroke-opacity=".6" stroke-width="2.5"/><path d="M0,303H400" stroke="${INK}" stroke-opacity=".5" stroke-width="2"/>
+<ellipse cx="34" cy="308" rx="70" ry="8" fill="${INK}" fill-opacity=".35"/><ellipse cx="366" cy="308" rx="70" ry="8" fill="${INK}" fill-opacity=".35"/>
 <!-- the drapes frame the stage; the speakers stand in front of them -->
 ${drape(false)}${drape(true)}
 ${amp(-18, false)}${amp(342, true)}
@@ -119,7 +134,7 @@ ${amp(-18, false)}${amp(342, true)}
 <path d="${face}" fill="none" stroke="${INK}" stroke-width="5" stroke-linejoin="round"/>
 <ellipse cx="${PX}" cy="${PY}" rx="${RX}" ry="${RY}" fill="url(#top)" stroke="${INK}" stroke-width="5"/>
 <ellipse cx="${PX}" cy="${PY}" rx="${RX - 22}" ry="${RY - 6}" fill="none" stroke="#fff" stroke-opacity=".38" stroke-width="2.5"/>
-<ellipse cx="${PX}" cy="${PY}" rx="98" ry="17" fill="url(#pool)"/>
+<ellipse cx="${PX}" cy="${PY}" rx="86" ry="15" fill="url(#pool)"/>
 <path d="M${PX - RX + 26},${PY - 13}A${RX - 10},${RY - 5} 0 0 1 ${PX + RX - 26},${PY - 13}" fill="none" stroke="url(#gloss)" stroke-width="3" stroke-linecap="round"/>
 <ellipse cx="${PX}" cy="${PY + 2}" rx="44" ry="8" fill="${INK}" fill-opacity=".45"/>
 <!-- stickers: a butter star and a berry star, hard shadows, ink outlines; sparkles -->

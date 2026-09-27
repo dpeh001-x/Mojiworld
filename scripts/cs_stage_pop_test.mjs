@@ -31,6 +31,9 @@ ok('a shadow rim at the bottom and an edge vignette', /id="bottom"/.test(svg) &&
 const smallEll = (svg.match(/<ellipse[^>]*>/g) || []).filter((e) => { const m = / rx="([0-9.]+)"/.exec(e); return m && +m[1] < 8; }).length;
 ok('no dots: no <circle>, no <pattern>, no small ellipses', !/<circle/.test(svg) && !/<pattern/.test(svg) && smallEll === 0, { smallEll });
 ok('the backdrop is a stage: berry drapes and a valance, the two speakers kept', svg.includes('id="drape"') && (svg.match(/fill="url\(#drape\)"/g) || []).length === 3 && svg.includes('stroke="#e8c86a" stroke-width="3"') && (svg.match(/stroke="#3b2e4f"/g) || []).length === 2);
+// cs-stage6 (per user: "The back stage can look more muted, the ground can look more pronounced, make the image flow")
+ok('a muted backstage: dusty burst and drapes, not the berry of the earlier passes', svg.includes('stop-color="#8e5c80"') && svg.includes('stop-color="#9a4c78"') && !svg.includes('#b0457f') && !svg.includes('#b03c74'));
+ok('a pronounced floor: starts at the horizon (y 300), boards to a vanishing point, a lit edge, a light pool', svg.includes('<rect y="300" width="400" height="100" fill="url(#floor)"/>') && (svg.match(/<path d="M200,120L/g) || []).length >= 20 && svg.includes('clip-path="url(#floorClip)"') && svg.includes('fill="url(#floorPool)"'));
 ok('not cluttered: no posters, graffiti or brickwork, two sparkles', !svg.includes('clipPath id="pc') && !svg.includes('stroke-width="9"') && !svg.includes('wallm') && (svg.match(/d="M0,-12L2\.6,-2\.6/g) || []).length === 2);
 ok('no caution tape stripes', !/repeating-linear|#ffe07a" fill-opacity/.test(svg));
 
