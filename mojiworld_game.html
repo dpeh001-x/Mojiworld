@@ -16072,7 +16072,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1244';
+const GAME_VERSION = 'v0.30.1245';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -104532,6 +104532,27 @@ function _lxDeliverPendingBoon(tries) {
   if (ok) { game._pendingBossBoon = null; try { showPowerupChoice(info); } catch (e) {} return; }
   if ((tries | 0) < 40) setTimeout(() => _lxDeliverPendingBoon((tries | 0) + 1), 1000); else game._pendingBossBoon = null;
 }
+// v0.30.x final-polish (boss-afterlife) - see the call in killMonster.
+const _LX_BOSS_HAZARD_TYPES = new Set(['gravitos_singularity', 'sovereign_drain_pillar', 'gloop_puddle', 'blackhole', 'venom_pool', 'venom_burst']);
+function _lxBossAfterlifeScrub(m) {
+  try {
+    if (Array.isArray(game.projectiles)) for (let i = game.projectiles.length - 1; i >= 0; i--) {
+      const p = game.projectiles[i];
+      if (p && p.owner === 'enemy') game.projectiles.splice(i, 1);
+    }
+    if (Array.isArray(game.hazards)) for (let i = game.hazards.length - 1; i >= 0; i--) {
+      const h = game.hazards[i]; if (!h) continue;
+      const t = String(h.type || '');
+      const bossTear = t === 'void_tear' && typeof h._sourceLabel === 'string' && h._sourceLabel.indexOf("Aetherion's") === 0;
+      if (h.owner === 'enemy' || t.indexOf('mob_') === 0 || _LX_BOSS_HAZARD_TYPES.has(t) || bossTear) game.hazards.splice(i, 1);
+    }
+    if (typeof player !== 'undefined' && player) {
+      player._poisonTimer = 0; player._poisonTickAcc = 0; player._poisonDmg = 0;
+      player.burnTimer = 0; player._burnTickAcc = 0;
+      player._electrocuteTimer = 0; player._electrocuteTickAcc = 0; player._electrocuteDmg = 0;
+    }
+  } catch (e) {}
+}
 function killMonster(m) {
   // v0.30.861 loops - see LX_AFK_MS. The drops wrapper follows triggerSuperBossDeath's pattern: nothing this kill pushes lands.
   if (m && !m._afkKill && (m._lastHitTag === 'mojimon' || m._lastHitTag === 'minion') && typeof _lxPlayerAfk === 'function' && _lxPlayerAfk()) {
@@ -105012,6 +105033,21 @@ function _killMonsterRaw(m) {
       if (li >= 0) game.monsters.splice(li, 1);
     }
     m._legRefs = [];
+  }
+  // v0.30.x final-polish (boss-afterlife) - per user: "I seem to be felled by octobaby after killing the boss for some unknown
+  // reason ... check for other bosses". The per-boss scrubs above each named one hazard; what a fight leaves behind is more
+  // than that. Measured on every boss (kill mid-fight, then 6 s with no input): Octobaby's tentacle darts (octoLeg, homing,
+  // each hit floored at 15% of max HP by _lxBossHpFloor) kept landing after the head died - 60% of a full bar in one run -
+  // and the Venom Tentacle's poison kept ticking; Scorpio's poison took 40%, Aetherion's electrocute 25%, King Krook's burn
+  // 15%; burn / poison / shock also outlived King Gloopaloo, Mooma, Sundered Smith, Aries, Leo and Gemini; Cancer's bubble
+  // and Libra's scale beam were still in the air; Gravitos's Gravity Crush column and Aries's Cracked Arena tile still
+  // resolved. So when the LAST boss of a fight dies (a surviving twin or partner keeps the fight on), every enemy projectile
+  // goes, every enemy hazard goes (owner 'enemy', the mob_* family and the boss-only types - never a player skill's hazard,
+  // which carries no owner, and never the Void's own map tears), and the damage-over-time on the hero is cleansed.
+  if ((m.isBoss || m.boss) && typeof _lxBossAfterlifeScrub === 'function') {
+    const _lxFightOn = (game.monsters || []).some((o) => o && o !== m && o.currentHp > 0 && (o.isBoss || o.boss) &&
+      !(game._pendingKills && game._pendingKills.includes(o)));
+    if (!_lxFightOn) _lxBossAfterlifeScrub(m);
   }
   // Reverse cleanup: when a leg dies (player kills it), drop it from
   // the head's _legRefs so the head doesn't hold a stale reference.
