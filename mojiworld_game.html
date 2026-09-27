@@ -16058,7 +16058,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1229';
+const GAME_VERSION = 'v0.30.1230';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -67820,10 +67820,64 @@ function resetStats() {
 // panel and the phone deck (Basic Attack, Settings' Done, the shop's Buy, Level Up's +) and over the desktop minimap.
 // It sits under the panels now (z 65; the stylesheet hides it while one is open) and takes the first spot where
 // nothing but the game view is underneath: bottom-right, bottom-left, under the phone's top menu row, then the rest.
+// v0.30.1230 ui-polish2 - PHONES: THE EXPANDED CARD FITS BETWEEN THE CONTROLS. The pill finds a clear spot (below), but the full
+// card (the level-cap offer, 480 x 166) had none: wherever it went it sat on the d-pad, the potions or the skill buttons, and the
+// 15-point sampling below could step between small buttons. With the touch deck up the card is sized down (zoom 1 .. 0.6 - the
+// look untouched) until a spot clear of every deck button exists - clear of the HUD card, nameplate and tracker too if it can
+// be at 0.72 or more - nearest the upper middle. None even at 0.6: an offer Guguma raised herself (the level-up at the cap)
+// folds to the pill; one the player opened from the pill stays, at the least-covered spot. true = placed here.
+function _lxAscendPhoneFit(el) {
+  const b = document.body, card = el.firstElementChild;
+  if (!card || !card.classList.contains('guguma-tutorial')) return false;   // the pill: the dock below
+  if (!b.classList.contains('mc-landscape') || b.classList.contains('hide-mobile-ctrl')) {   // not a phone layout (any more): full size, next frame
+    if (card.style.zoom) { el._lxFitW = 0; requestAnimationFrame(() => { card.style.zoom = ''; }); } return false; }
+  const W = window.innerWidth, H = window.innerHeight, m = 6;
+  const rects = (sel) => [...document.querySelectorAll(sel)].map((q) => { const cs = getComputedStyle(q); if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+    const r = q.getBoundingClientRect(); return (r.width && r.height) ? [r.left - m, r.top - m, r.right + m, r.bottom + m] : null; }).filter(Boolean);
+  const hard = rects('#mobile-deck .mc-btn, #mobile-deck .mc-dpad, #mobile-ctrl .mc-btn, #mobile-ctrl-toggle, #skill-bar, #fullscreen-btn, #settings-btn');
+  const soft = rects('#top-ui, #map-label, #world-affix-pin, #mp-btn, #quest-tracker, #minimap');
+  const hit = (x, y, w, h, L) => L.some((q) => x < q[2] && x + w > q[0] && y < q[3] && y + h > q[1]);
+  const r0 = el.getBoundingClientRect();
+  const keep = hard.map((q) => [q[0] + 4, q[1] + 4, q[2] - 4, q[3] - 4]);   // placed with 6 px to spare, kept while 2 px remain (a pulsing button does not re-fit it)
+  if (el._lxFitW === W && el._lxFitH === H && card.style.zoom && !hit(r0.left, r0.top, r0.width, r0.height, keep)) return true;   // placed, still clear
+  if (el._lxNoFit === W + 'x' + H) return false;   // nothing fits this screen (opened from the pill): the dock's spot, not a re-try every tick
+  // the fit resizes the card, and a resize inside the card's own ResizeObserver callback is a loop error: it runs next frame,
+  // the card out of sight until then (no flash of the full-size card over the deck)
+  if (!el._lxFitNow) {
+    el.style.visibility = 'hidden';
+    if (!el._lxFitQ) { el._lxFitQ = true; requestAnimationFrame(() => { el._lxFitQ = false; el._lxFitNow = true;
+      try { _lxAscendDock(el); } catch (e) {} finally { el._lxFitNow = false; el.style.visibility = ''; } }); }
+    return true;
+  }
+  const spotAt = (z, needSoft) => {
+    card.style.zoom = String(z);
+    const r = el.getBoundingClientRect(), w = r.width, h = r.height; if (w > W || h > H) return null;
+    const ax = (W - w) / 2, ay = (H - h) * 0.4, xs = new Set([m, W - m - w, ax]), ys = new Set([m, H - m - h, ay]);
+    for (const q of hard.concat(soft)) { xs.add(q[2]); xs.add(q[0] - w); ys.add(q[3]); ys.add(q[1] - h); }
+    let best = null;
+    for (const x of xs) { if (x < 0 || x + w > W) continue;
+      for (const y of ys) { if (y < 0 || y + h > H || hit(x, y, w, h, hard) || (needSoft && hit(x, y, w, h, soft))) continue;
+        const d = Math.hypot(x - ax, y - ay); if (!best || d < best[2]) best = [x, y, d]; } }
+    return best;
+  };
+  const Z = [1, 0.9, 0.8, 0.72, 0.66, 0.6];
+  let pick = null;
+  for (const z of Z) { if (z < 0.72) break; const p = spotAt(z, true); if (p) { pick = [z, p]; break; } }
+  if (!pick) for (const z of Z) { const p = spotAt(z, false); if (p) { pick = [z, p]; break; } }
+  el._lxFitW = W; el._lxFitH = H;
+  if (!pick) {
+    if (el._lxAuto) { el._lxAuto = false; _gugumaAscendChip(true, false); return true; }   // (a frame callback here, not the observer's)
+    el._lxNoFit = W + 'x' + H; return false;   // opened from the pill: the smallest size, at the dock's least-covered spot
+  }
+  card.style.zoom = String(pick[0]);
+  el.style.left = Math.round(pick[1][0]) + 'px'; el.style.top = Math.round(pick[1][1]) + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto';
+  return true;
+}
 function _lxAscendDock(el) {
   el = el || document.getElementById('guguma-ascend');
   if (!el || !el.isConnected) return;
   const r = el.getBoundingClientRect(); if (!r.width || !r.height) return;   // hidden while a panel is open: keep its spot
+  if (_lxAscendPhoneFit(el)) return;   // v0.30.1230 ui-polish2 - the expanded card on a phone: sized and placed clear of the deck
   const W = window.innerWidth, H = window.innerHeight, w = r.width, h = r.height, m = 12;
   const bare = (e) => !e || e === document.body || e === document.documentElement || e.id === 'game' || (e.classList && e.classList.contains('game-wrapper'));
   const hits = (x, y) => { let n = 0; for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) {
@@ -67885,6 +67939,7 @@ function _gugumaAscendChip(show, expanded) {
   if (!show) { if (el) el.remove(); return; }
   if (!el) { el = document.createElement('div'); el.id = 'guguma-ascend'; el.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:65;max-width:min(520px,92vw);'; document.body.appendChild(el); }   /* v0.30.1182 phone-fit - under the panels (was 100040, over all of them) */
   if (!el._lxDockRO) { try { el._lxDockRO = new ResizeObserver(() => _lxAscendDock(el)); el._lxDockRO.observe(el); } catch (e) {} }   // v0.30.1182 phone-fit - docks whenever it shows or changes size
+  el._lxAuto = !!(expanded && window._lxAscAuto); el._lxFitW = 0; el._lxNoFit = '';   // v0.30.1230 ui-polish2 - raised by Guguma (may fold on a phone) or opened by the player
   const eq = (player.boonsEquipped || []).map(i => ({ i, b: player.boons && player.boons[i] })).filter(x => x.b);
   const heirOpts = '<option value="-1">none</option>' + eq.map(x => { const d = (typeof getBoonDef === 'function') ? getBoonDef(x.b) : null; return '<option value="' + x.i + '"' + (game._heirloomIdx === x.i ? ' selected' : '') + '>' + (d ? d.name : x.b.id) + '</option>'; }).join('');
   if (!expanded) {
@@ -67908,7 +67963,7 @@ function _gugumaAscendPrompt(quiet) {
   if (!player || window._prologueActive || (player.level || 0) < PRESTIGE_LEVEL) { _gugumaAscendChip(false); return; }
   if (game.prestige && (game.prestige.count || 0) >= 20) { _gugumaAscendChip(false); return; }
   game._prestigeOffered = true;   // the legacy per-level-up offer stays quiet; Guguma owns it now
-  _gugumaAscendChip(true, !quiet);
+  window._lxAscAuto = !quiet; try { _gugumaAscendChip(true, !quiet); } finally { window._lxAscAuto = false; }   // v0.30.1230 ui-polish2 - Guguma raised it herself
 }
 // v0.30.x — THE PROLOGUE IS PLAYED AT LEVEL 100 AND THIS CHIP OUTLIVED IT.
 // Per user, on a brand-new character: "This is showing when i just created my
@@ -122091,10 +122146,38 @@ function _lxAreaTitle(id) {
 // is open the stack moves into the wider free gutter beside it, narrowed to fit; failing that, below the panel; failing
 // that, compact plates in a narrow gutter; with no room anywhere it stays put but turns translucent. It checks when a
 // toast appears and while any is showing.
+// v0.30.1230 ui-polish2 - PHONES: the stack's corner (top-right, under the menu row) is where hud-clear put the affix chip, the
+// Multi chip and the quest tracker, so three toasts covered all of them. With the touch deck up and no panel open the stack
+// sits in the free band between the HUD card (left) and that column (right): centred, under the menu row and the area
+// nameplate, and it stops above the deck's buttons. false = not a phone layout (or no room): the stack keeps its corner.
+function _lxToastPhoneSpot(host, pr, k, reset) {
+  const b = document.body;
+  if (!b.classList.contains('mc-landscape') || b.classList.contains('hide-mobile-ctrl')) return false;
+  const W = window.innerWidth, H = window.innerHeight;
+  const box = (el) => { if (!el) return null; const cs = getComputedStyle(el); if (cs.display === 'none' || cs.visibility === 'hidden') return null;
+    const r = el.getBoundingClientRect(); return (r.width > 0 && r.height > 0) ? r : null; };
+  let top = 0, left = 0, right = W;
+  for (const el of document.querySelectorAll('#mobile-ctrl .mc-btn, #map-label')) { const r = box(el); if (r && r.bottom < H / 2) top = Math.max(top, r.bottom); }
+  const hud = box(document.getElementById('top-ui')); if (hud && hud.right < W / 2) left = hud.right;
+  for (const id of ['world-affix-pin', 'mp-btn', 'quest-tracker']) { const r = box(document.getElementById(id)); if (r && r.left > W / 2) right = Math.min(right, r.left); }
+  // the column: as wide as a toast may be (min(30vw, 340px) in the wrapper's px) and centred in the band
+  const tw = Math.min(right - left - 12, Math.min(W * 0.3, 340) * k + 8), cx = (left + right) / 2, x0 = cx - tw / 2, x1 = cx + tw / 2;
+  let bottom = H;
+  for (const el of document.querySelectorAll('#mobile-deck .mc-btn, #mobile-deck .mc-dpad, #skill-bar')) { const r = box(el);
+    if (r && r.top > top && r.left < x1 && r.right > x0) bottom = Math.min(bottom, r.top); }
+  const y0 = top + 4, maxH = bottom - 6 - y0;
+  if (tw < 90 || maxH < 40) return false;
+  const css = (px) => Math.round(px / k);   // viewport px -> the wrapper's own px
+  const key = ['ph', css(x0 - pr.left), css(pr.right - x1), css(y0 - pr.top), css(maxH)].join('|');
+  if (host._lxDodge === key) return true;
+  reset(); host._lxDodge = key; host.classList.add('lx-toast-phone');
+  host.style.left = css(x0 - pr.left) + 'px'; host.style.right = css(pr.right - x1) + 'px'; host.style.top = css(y0 - pr.top) + 'px'; host.style.maxHeight = css(maxH) + 'px';
+  return true;
+}
 function _lxToastDodge() {
   const host = document.getElementById('toast-container'); if (!host) return;
-  const reset = () => { if (!host._lxDodge) return; host._lxDodge = null; host.classList.remove('lx-dodge', 'lx-dodge-left', 'lx-dodge-dim', 'lx-dodge-narrow');
-    for (const p of ['left', 'right', 'top', 'maxWidth']) host.style[p] = ''; host.style.removeProperty('--lx-toast-max'); };
+  const reset = () => { if (!host._lxDodge) return; host._lxDodge = null; host.classList.remove('lx-dodge', 'lx-dodge-left', 'lx-dodge-dim', 'lx-dodge-narrow', 'lx-toast-phone');   // v0.30.1230 ui-polish2 - + the phone spot
+    for (const p of ['left', 'right', 'top', 'maxWidth', 'maxHeight']) host.style[p] = ''; host.style.removeProperty('--lx-toast-max'); };
   if (!host.querySelector('.toast')) { reset(); return; }
   const par = host.offsetParent || host.parentElement; if (!par) return;
   const pr = par.getBoundingClientRect(); const k = (pr.width / Math.max(1, par.offsetWidth)) || 1;
@@ -122103,7 +122186,7 @@ function _lxToastDodge() {
   for (const ov of document.querySelectorAll('.modal-overlay')) { if (!vis(ov)) continue; add(ov.querySelector(':scope > .modal') || ov.firstElementChild); }
   for (const id of ['backup-modal', 'jukebox-modal', 'settings-modal', 'edicts-modal', 'lx-pause-card', 'dialog']) { const el = document.getElementById(id); if (el && vis(el)) add(el); }
   const cs0 = document.getElementById('char-studio-overlay'); if (cs0 && cs0.classList.contains('open')) add(cs0.firstElementChild || cs0);
-  if (!U) { reset(); return; }
+  if (!U) { if (!_lxToastPhoneSpot(host, pr, k, reset)) reset(); return; }   // v0.30.1230 ui-polish2 - no panel: on a phone, the free band
   const css = (px) => px / k;   // viewport px -> the wrapper's own px
   const right = css(pr.right - U.right), left = css(U.left - pr.left), below = css(pr.bottom - U.bottom);
   const key = [Math.round(right), Math.round(left), Math.round(below)].join('|'); if (host._lxDodge === key) return;
@@ -174169,6 +174252,15 @@ function startBgm() {
   #attributes-modal#attributes-modal #u-inv-tabs .inv-tab { padding-top: 8px; padding-bottom: 8px; }
 </style>
 
+<style id="lx-ui-polish2-css">
+  /* v0.30.1230 ui-polish2 - 1) phones: the toast stack centred in the free band (see _lxToastPhoneSpot); the plates keep their look */
+  #toast-container.lx-toast-phone { align-items: center; }
+  /* v0.30.1230 ui-polish2 - 2) the U panel's shortcut row on a touch screen or a narrow window (the close hints' test since
+     ui-text-fixes): no keys to press, so the key chips go, and the six shortcuts fit on one line at 844 and 667 */
+  @media (pointer: coarse), (max-width: 900px) {
+    #attributes-modal#attributes-modal #u-jump-row#u-jump-row .u-jump kbd { display: none !important; }
+  }
+</style>
 <style id="lx-ui-text-fixes-css">
   /* v0.30.1193 ui-text-fixes - 1) while a panel is open the tour card steps aside entirely (ghosted, its nav row, fold handle and
      key chips still drew over the panel). The ghost watch clears the class when the panel closes, and the card is back. */
