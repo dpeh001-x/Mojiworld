@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1279';
+const GAME_VERSION = 'v0.30.1280';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -23315,6 +23315,7 @@ var _CUTE_MAT = {
   concrete: { face: 'concrete', cap: 'concrete', built: 1 }, toybrick: { face: 'toybrick', cap: 'toybrick', built: 1 },
   basalt: { face: 'basalt', cap: 'rock' }, rock: { face: 'rock', cap: 'rock' }, moss: { cap: 'moss', lit: 'moss' },
 };
+_CUTE_MAT.kawara.pop = 1;   // v0.30.1280 - the pagoda roof-tile floor is a pop floor too: no grain or mottle over its inked tiles
 function _cuteBuiltFace(ctx, sx, fy, w, fh, style, rng, C, ground) {
   const mix = C.mix, R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha, HI = C.faceHi || C.top;
   ctx.save();
@@ -23460,14 +23461,27 @@ function _cuteBuiltFace3(ctx, sx, fy, w, fh, style, rng, C, ground, HI) {
 }
 function _cuteBuiltFace4(ctx, sx, fy, w, fh, style, rng, C, ground, HI) {
   const mix = C.mix, R = (a, b) => a + rng() * (b - a), A0 = ctx.globalAlpha;
-  if (style === 'kawara') {                 // v0.30.628 - kawara along a wall top, as the backdrop paints it: staggered arched tiles, outlined, lit top-left
-    const t = ground ? 10 : 6, tw = ground ? 9 : 6, r = tw / 2;
-    ctx.fillStyle = C.bodyDk; ctx.fillRect(sx, fy, w, fh);
-    for (let yy = fy - t * 0.35, row = 0; yy < fy + fh; yy += t * 0.72, row++) {
+  if (style === 'kawara') {                 // v0.30.1280 POP KAWARA (per user: "do the pagoda roof-tile floor in pop too"). The small
+    // soft-lit scales under grain read as a busy blur; now the ink is the ground and each roof tile is a bold arch in one of
+    // three tones of the floor's own colour (a touch richer), cel-shaded in hard shapes - a lit crescent round its crown, a
+    // shaded foot that darkens the valleys between the next row's arches - with a white glint ticked along it on some. Rows overlap as
+    // before, each laid half a tile over; a slab gets one row sized to its face.
+    const INK = C.OUT, gp = ground ? 2 : 1.5, tw = ground ? 16 : Math.max(8, Math.min(12, fh * 1.1)), t = ground ? 16 : Math.max(6, fh + 2), r = tw / 2;
+    const sat = (hex, k) => { let h = String(hex).slice(1); if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      const n = parseInt(h, 16), rr = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255, m = (rr + g + b) / 3, f = (v) => Math.max(0, Math.min(255, Math.round(m + (v - m) * k)));
+      return '#' + ((f(rr) << 16) | (f(g) << 8) | f(b)).toString(16).padStart(6, '0'); };
+    const T = [0.22, 0.42, 0.62].map((k) => sat(mix(C.body, HI, k), 1.25));
+    ctx.fillStyle = INK; ctx.fillRect(sx, fy, w, fh);
+    const arch = (x, y, ww, hh) => { const rr = ww / 2; ctx.beginPath(); ctx.moveTo(x, y + hh); ctx.lineTo(x, y + rr); ctx.arc(x + rr, y + rr, rr, Math.PI, 0); ctx.lineTo(x + ww, y + hh); ctx.closePath(); };
+    for (let yy = fy - t * 0.12, row = 0; yy < fy + fh; yy += t * 0.72, row++) {
       for (let xx = sx - ((row & 1) ? r : 0) - tw; xx < sx + w + tw; xx += tw) {
-        ctx.beginPath(); ctx.moveTo(xx, yy + t); ctx.lineTo(xx, yy + r); ctx.arc(xx + r, yy + r, r, Math.PI, 0); ctx.lineTo(xx + tw, yy + t); ctx.closePath();
-        ctx.fillStyle = mix(C.body, HI, R(0.36, 0.52)); ctx.fill(); ctx.strokeStyle = C.OUT; ctx.lineWidth = 1; ctx.stroke();
-        ctx.strokeStyle = mix(HI, '#ffffff', 0.35); ctx.globalAlpha = A0 * 0.55; ctx.beginPath(); ctx.arc(xx + r, yy + r, Math.max(0.5, r - 1.2), Math.PI * 1.05, Math.PI * 1.55); ctx.stroke(); ctx.globalAlpha = A0;
+        const x0 = xx + gp / 2, y0 = yy + gp / 2, ww = tw - gp, hh = t - gp / 2, tone = T[Math.floor(rng() * 3)];
+        ctx.save(); arch(x0, y0, ww, hh); ctx.fillStyle = tone; ctx.fill(); ctx.clip();
+        ctx.fillStyle = mix(tone, INK, 0.42); ctx.fillRect(x0, y0 + hh * 0.62, ww, hh);                     // the shaded foot
+        ctx.lineWidth = Math.max(1.4, ww * 0.16); ctx.strokeStyle = mix(tone, '#ffffff', 0.36); ctx.lineCap = 'butt';
+        ctx.beginPath(); ctx.arc(x0 + ww / 2, y0 + ww / 2, ww / 2 - ctx.lineWidth / 2, Math.PI * 1.0, Math.PI * 1.62); ctx.stroke();   // the lit crescent
+        ctx.restore();
+        if (rng() < 0.4 && ww > 6) { ctx.lineWidth = Math.max(1, ww * 0.09); ctx.strokeStyle = 'rgba(255,255,255,0.92)'; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(x0 + ww / 2, y0 + ww / 2, ww / 2 - Math.max(1.4, ww * 0.16) * 0.5, Math.PI * 1.14, Math.PI * 1.32); ctx.stroke(); }   // a glint along the crescent
       }
     }
   } else if (style === 'parquet') {         // herringbone slats, alternating direction
@@ -23546,9 +23560,21 @@ function _cuteBuiltCap(ctx, sx, y, w, cap, style, rng, C) {
     ctx.globalAlpha = A0 * 0.9; ctx.fillStyle = '#b8402e'; ctx.fillRect(sx, y + cap - 1.6, w, 1.4);
   } else if (style === 'marble') {          // polish and a gold edge
     ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.5; ctx.fillRect(sx + 3, y + cap * 0.3, w - 6, 1.2); ctx.globalAlpha = A0 * 0.85; ctx.fillStyle = '#d9b45a'; ctx.fillRect(sx, y + cap - 1.5, w, 1.2);
-  } else if (style === 'kawara') {          // v0.30.628 - the ridge: cap-tile joints, its shadow line, a moonlit rim
-    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.6; for (let xx = sx + R(10, 22); xx < sx + w - 4; xx += R(26, 34)) ctx.fillRect(Math.round(xx), y + 1, 1, cap - 1);
-    ctx.globalAlpha = A0 * 0.8; ctx.fillStyle = C.bodyDk; ctx.fillRect(sx, y + cap - 1.6, w, 1.6); ctx.globalAlpha = A0 * 0.45; ctx.fillStyle = '#ffffff'; ctx.fillRect(sx + 2, y + cap * 0.3, w - 4, 1);
+  } else if (style === 'kawara') {          // v0.30.1280 pop - the ridge: flat ridge tiles, each its own tone, cel-shaded in hard bands (a lit
+    // top, a shaded lip), inked joints with a gold stud on each, a gold line along the lip and a white glint - no soft sheen
+    const mix = C.mix, INK = C.OUT, GOLD = '#e0b24e', js = []; for (let xx = sx + R(14, 30); xx < sx + w - 8; xx += R(26, 36)) js.push(Math.round(xx));
+    const lb = Math.max(1.5, cap * 0.34), sb = Math.max(1.5, cap * 0.26);
+    for (let i = 0, x0 = sx; i <= js.length; i++) {
+      const x1 = i < js.length ? js[i] : sx + w, t0 = mix(C.top, (i & 1) ? C.topLt : C.topDk, 0.1 + rng() * 0.14);
+      ctx.fillStyle = t0; ctx.fillRect(x0, y, x1 - x0, cap);
+      ctx.fillStyle = mix(t0, '#ffffff', 0.3); ctx.fillRect(x0, y, x1 - x0, lb);
+      ctx.fillStyle = mix(t0, INK, 0.34); ctx.fillRect(x0, y + cap - sb, x1 - x0, sb);
+      if (x1 - x0 > 12) { ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fillRect(x0 + 3, y + Math.max(1.5, lb * 0.4), Math.min(10, (x1 - x0) * 0.28), 1.3); }
+      x0 = x1;
+    }
+    ctx.fillStyle = GOLD; ctx.fillRect(sx, y + cap - 1.8, w, 1.4);                                           // the gold lip line
+    ctx.fillStyle = INK; for (const jx of js) ctx.fillRect(jx - 0.8, y, 1.6, cap);                          // inked joints
+    if (cap >= 7) for (const jx of js) { ctx.beginPath(); ctx.arc(jx, y + cap * 0.55, Math.min(2.1, cap * 0.18), 0, 6.2832); ctx.fillStyle = GOLD; ctx.fill(); ctx.lineWidth = 1.1; ctx.strokeStyle = INK; ctx.stroke(); }   // a gold stud on each
   } else if (style === 'toybrick') {        // plastic gloss
     ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.35; ctx.fillRect(sx + 2, y + cap * 0.3, w - 4, 1.2);
   } else return false;
