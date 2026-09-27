@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1270';
+const GAME_VERSION = 'v0.30.1271';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -18387,6 +18387,18 @@ function _projAnimFrame(skill, offsetMs) {
   // loop at once (the Soul Ward's up-to-5 orbs) can stagger them instead of
   // pulsing in lockstep. Omitted by every other caller, which keeps the shared
   // global clock they already had.
+  // v0.30.1271 - while a frame is still the raw webp (its off-thread shrink in flight or not yet started) and a sibling is
+  // already baked, draw the nearest baked sibling: the raw frame's first draw is the decode + upload stall the shrink
+  // exists to avoid. Bounded to 1.5 s per frame, so a bake that keeps failing can never freeze the loop on one frame.
+  const _lxPf = _lxProjLoopPick(arr, skill, offsetMs);
+  if (_lxPf && _lxPf.tagName === 'IMG' && !_lxPf._lxNoShrink) {
+    const _now = performance.now();
+    if (!_lxPf._lxHoldT) _lxPf._lxHoldT = _now;
+    if (_now - _lxPf._lxHoldT < 1500) { const _i = arr.indexOf(_lxPf); for (let d = 1; _i >= 0 && d < arr.length; d++) { const _c = arr[(_i - d + arr.length) % arr.length]; if (_c && _c.tagName === 'CANVAS') return _c; } }
+  }
+  return _lxPf;
+}
+function _lxProjLoopPick(arr, skill, offsetMs) {
   return (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, _PROJ_ANIM_FRAME_MS, skill === 'meteor' ? 360 : 320, offsetMs)   /* v0.30.869 fireball2x — the fireball draws up to 340 px */ : null;   // base 320 logical: biggest blit is ~250 (size 2.8 × a ~90 px hitbox)
 }
 // =========================================================================
@@ -145721,7 +145733,7 @@ const _LX_FX_SKILL = {
   beastmaster_pack: 'fa:beastmaster_pack fx:beastmaster_pack',
   beastmaster_ult: 'fa:beastmaster_ult fx:beastmaster_ult sa:werewolf sm:werewolf',
   blink: 'fx:blink',
-  bloodlust: 'fx:bloodlust',
+  bloodlust: 'fx:bloodlust bp:bloodlust_wave pa:bloodlust_wave',
   celestialAurora: 'fx:celestial_aurora',
   chargedShot: 'fx:charged_shot pp:arrow',
   crusader_aegis: 'bp:bult_holyorb fa:crusader_aegis fx:crusader_aegis',
@@ -145861,7 +145873,11 @@ function _lxFxAnimGo(tag) {
   const k = tag.slice(3);
   try {
     if (tag[0] === 'f') { if (typeof _fxAnimFrames === 'function') _fxAnimFrames(k); }
-    else if (tag[0] === 'p') { if (typeof _projAnimFrame === 'function') _projAnimFrame(k); }
+    // v0.30.1271 - a projectile loop is also QUEUED for the prewarm drain, the way class and mob effect sets are: _projAnimFrame
+    // alone only creates the Image objects, so the frames were still raw 768 px webps when the first projectile drew them
+    // and _lxProjScaled baked each one from the raw file on the main thread (51-57 ms a frame at CPU x4, measured on the
+    // Bloodlust wave). The drain shrinks them off-thread (_lxAsyncBake) once decoded, at the base _projAnimFrame uses.
+    else if (tag[0] === 'p') { if (typeof _projAnimFrame === 'function') { _projAnimFrame(k); if (typeof _lxQueueFxSet === 'function' && PROJ_ANIM_FRAMES[k]) _lxQueueFxSet(PROJ_ANIM_FRAMES[k], k === 'meteor' ? 360 : 320); } }
     else if (typeof _summonAnimFrame === 'function') { _summonAnimFrame(k, 'walk'); _summonAnimFrame(k, 'attack'); }
   } catch (e) {}
 }
