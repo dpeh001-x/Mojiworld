@@ -219,7 +219,10 @@
 // - bumped anyway so the new cast of files is fetched fresh alongside the game that asks for them.
 // v0.30.x mage-orb - v89 -> v90. Sprites/projectiles/p_mage_orb.webp and anim/bolt_0..8 (the mage Z bolt) are REPLACED under their own names
 // (pop-punk orb, electric loop), so a returning browser would otherwise keep the old bolt until its cache refreshed.
-const CACHE = 'mojiworld-assets-v90';   // v0.30.x mage-orb - the mage's pop-punk Magic Bolt (same names)
+// v0.30.1263 - v90 -> v91. 13 Sprites/vfx statics, 10 Sprites/vfx/anim sets and the fx quake burst
+// (Sprites/fx/quake_ring.webp + anim/quakeRing_0..8) are REPLACED under their own names (pop restyle), so a returning
+// browser would keep drawing the old effects for a session.
+const CACHE = 'mojiworld-assets-v91';   // v0.30.1263 - pop VFX
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
