@@ -53,7 +53,7 @@ const r = await page.evaluate(async () => {
     fallback = { id: noRegion, hasImg: !!ic2.querySelector('img'), text: (ic2.textContent || '').trim() };
   }
   const subCs = getComputedStyle(el.querySelector('.at-sub'));
-  return { withRegion, fallback, subShadow: subCs.textShadow };
+  return { withRegion, fallback, subShadow: subCs.textShadow, subBg: subCs.backgroundColor };
 });
 
 ok('the card names the map', r.withRegion.name === 'Emerald Thicket', { name: r.withRegion.name });
@@ -67,8 +67,9 @@ ok('THICKER: a hairline stroke adds real weight (font-weight alone is weak here)
 const alphas = [...String(r.withRegion.filter).matchAll(/rgba?\([^)]*?([\d.]+)\s*\)/g)].map(m => +m[1]);
 ok('MORE OPAQUE: the darkest name shadow is >= 0.80 (was 0.62)',
    Math.max(...alphas) >= 0.8, { alphas, filter: String(r.withRegion.filter).slice(0, 110) });
-ok('MORE OPAQUE: the sub-line gained a tight dark seat',
-   /0\.8[0-9]|0\.86/.test(String(r.subShadow)), { subShadow: String(r.subShadow).slice(0, 110) });
+// v0.30.x final-polish (area-pop) - the sub-line now sits on solid black tape, which reads over any backdrop without a seat
+ok('MORE OPAQUE: the sub-line gained a tight dark seat (or sits on solid ink tape)',
+   /0\.8[0-9]|0\.86/.test(String(r.subShadow)) || r.subBg === 'rgb(13, 10, 20)', { subShadow: String(r.subShadow).slice(0, 110), subBg: r.subBg });
 
 // 3. the world-map icon
 ok('ICON: renders an <img>, not an emoji glyph', r.withRegion.usesImg === true, r.withRegion);
