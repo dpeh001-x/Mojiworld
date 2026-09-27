@@ -217,7 +217,9 @@
 // (pop-punk redraw), so a returning browser would otherwise keep the old art until its cache refreshed.
 // v0.30.x own-shots - v88 -> v89. Sprites/projectiles gains msandball / mjellyglob / manglerlure and their anim/ loops (new names, no replacement)
 // - bumped anyway so the new cast of files is fetched fresh alongside the game that asks for them.
-const CACHE = 'mojiworld-assets-v89';   // v0.30.x own-shots - Sandhusk / Jellybean / Lanternjaw own shots
+// v0.30.x mage-orb - v89 -> v90. Sprites/projectiles/p_mage_orb.webp and anim/bolt_0..8 (the mage Z bolt) are REPLACED under their own names
+// (pop-punk orb, electric loop), so a returning browser would otherwise keep the old bolt until its cache refreshed.
+const CACHE = 'mojiworld-assets-v90';   // v0.30.x mage-orb - the mage's pop-punk Magic Bolt (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
