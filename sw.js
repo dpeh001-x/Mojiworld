@@ -195,7 +195,9 @@
 // and a ringed sticker), so a returning browser's stale cache would keep v0.30.1083's icon for a session.
 // v0.30.x sage-voice - v74 -> v75. audio/npc/npc_mystery_sage.mp3 ("???", Sage Mira) is REPLACED under its own
 // name (recast from a 130 Hz sigh to a soft young elf woman), so a returning browser would otherwise keep the old clip.
-const CACHE = 'mojiworld-assets-v79';   // v0.30.1184 - edge-fixed block / volley / leo slam / qte / forge / gloop / void tear (same names)
+// v0.30.x cs-stage4 - v79 -> v80. Sprites/ui/cs/stage_pop.svg (the character-creation stage) is REPLACED under its own
+// name (the backdrop becomes a punk gig wall), so a returning browser would otherwise show v0.30.1194's stage once.
+const CACHE = 'mojiworld-assets-v80';   // v0.30.x cs-stage4 - the creator stage's gig-wall backdrop (same name)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
