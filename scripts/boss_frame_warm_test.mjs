@@ -57,6 +57,15 @@ const R = await page.evaluate(async () => {
   game.paused = false; player._god = true;
   const out = { err: null };
   out.hasWarm = (typeof _lxWarmBossFrames === 'function');
+  // v0.30.x lazy-art - boss art loads when wanted. Ask for the sets measured below and let them LAND first, as an eager boot had
+  // them: asking loads, it does not warm (_lxWarmed is _lxWarmBossFrames's alone), so "start cold" still holds, and the
+  // first-draw comparison is decoded (warmed) frames against loaded-but-undecoded ones, not against frames still in flight.
+  if (typeof _lxBossArtWant === 'function') {
+    for (const t of ['gravitos', 'zodiac_leo', 'zodiac_virgo']) _lxBossArtWant(t);
+    const _in = () => [BOSS_ATTACK_FRAMES.gravitos, BOSS_IDLE_FRAMES.gravitos, BOSS_WALK_FRAMES.gravitos, BOSS_ATTACK_FRAMES.gravitospunch,
+      ZODIAC_IDLE_FRAMES.leo, ZODIAC_ATTACK_FRAMES.leo, ZODIAC_ATTACK_FRAMES.virgo].every((a) => (a || []).every((im) => im && im.complete));
+    for (let i = 0; i < 900 && !_in(); i++) await sleep(100);
+  }
 
   const sets = (map, key) => (map && map[key]) || [];
   // _lxShrinkFrames REPLACES a slot's <img> with a baked <canvas> in place once the set

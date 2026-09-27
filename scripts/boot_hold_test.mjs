@@ -2,7 +2,7 @@
 // held until the menu is up. One build, one throttled link (48 Mbps, 20 ms), booted three ways:
 //   A  a made-up public hostname with ?lxhold=0  - the old behaviour, as the control
 //   B  the same hostname, default                - the hold
-//   C  localhost                                 - the hold must not exist (local art, harnesses, the packaged app)
+//   C  localhost                                 - the hold exists here too (v0.30.x lazy-art: it parks lazy art on every build)
 // B must start far fewer requests before the menu and reach it no later than A; then everything held must still
 // arrive, the world must be enterable, and nothing may throw.
 //
@@ -75,7 +75,7 @@ try {
   await Bk.ctx.close();
   const C = await browser.newPage(); await C.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 240000 });
   await C.waitForFunction(() => typeof GAME_VERSION === 'string', null, { timeout: 240000 });
-  check(await C.evaluate(() => typeof window._lxBootHold === 'undefined'), 'C: on localhost the hold does not exist');
+  check(await C.evaluate(() => !!window._lxBootHold && typeof window._lxBootHold.want === 'function'), 'C: on localhost the hold exists too (it parks boss frames and far backdrops)');   // v0.30.x lazy-art
 } catch (e) { check(false, 'harness error', String(e.message).slice(0, 300)); }
 await browser.close(); server.kill();
 console.log(`\n${pass}/${pass + fail} checks passed`); process.exit(fail ? 1 : 0);

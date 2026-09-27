@@ -19,7 +19,7 @@ try {
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     window._LX_BG_RETRY_MS = [60, 60, 60, 60];   // the test's schedule
     // the shipped Underpass backdrop is wired and loads
-    const up = BG_IMAGES.clockworkUnderpass; const t0 = performance.now();
+    const up = BG_IMAGES.clockworkUnderpass; if (up && typeof _lxWantImg === 'function') _lxWantImg(up, true); const t0 = performance.now();   // v0.30.x lazy-art - a far backdrop loads when wanted
     while (up && !up._loaded && performance.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 50));
     o.underpassLoaded = !!(up && up._loaded); o.underpassPath = up && (up._lxPath || up.src);
     // a backdrop that 404s: retried on the schedule, then marked failed

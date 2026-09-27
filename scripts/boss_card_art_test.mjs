@@ -36,6 +36,8 @@ const R = await page.evaluate(async () => {
   const out = {};
   // 1. a zodiac card with its idle set baked (complete + naturalWidth + _lxSrc: what _lxShrinkFrames' bake looks like)
   const set = ZODIAC_IDLE_FRAMES.leo || [];
+  // v0.30.x lazy-art - boss art loads when wanted: ask for Leo's, and wait for the whole idle set (the check below bakes every frame)
+  if (typeof _lxBossArtWant === 'function') { _lxBossArtWant('zodiac_leo'); for (let i = 0; i < 300 && !(set.length && set.every((im) => im && im.complete && im.naturalWidth > 0)); i++) await sleep(100); }
   for (let i = 0; i < 200 && !(set[0] && set[0].complete && set[0].naturalWidth > 0); i++) await sleep(100);
   for (let i = 0; i < set.length; i++) { const im = set[i]; if (im && im.tagName === 'IMG' && im.naturalWidth > 0) { const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64; cv.complete = true; cv.naturalWidth = 64; cv.naturalHeight = 64; cv._lxSrc = im; set[i] = cv; } }
   const spr = _lxBiSprite('zodiac_leo');

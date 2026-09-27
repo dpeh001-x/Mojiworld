@@ -16006,7 +16006,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1195';
+const GAME_VERSION = 'v0.30.1196';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16040,18 +16040,25 @@ const GAME_VERSION = 'v0.30.1195';
   try {
     const h = location.hostname, qs = location.search || '';
     const local = location.protocol === 'file:' || h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || window.MOJI_PACKAGED === true;
-    if (/[?&]lxhold=0\b/.test(qs) || (local && !/[?&]lxhold=1\b/.test(qs))) return;
+    // v0.30.1196 lazy-art - ON for every build now (file://, localhost and the packaged app too): a cold local boot measured
+    // 416 MB / 2,338 files before the title (22 s), and the lazy art below needs the hold to park it. ?lxhold=0 turns it
+    // off, and the lazy art with it (everything then loads at boot, as before).
+    if (/[?&]lxhold=0\b/.test(qs)) return;
     const P = HTMLImageElement.prototype;
     const dSrc = Object.getOwnPropertyDescriptor(P, 'src'), dCmp = Object.getOwnPropertyDescriptor(P, 'complete');
     const dPri = Object.getOwnPropertyDescriptor(P, 'fetchPriority'), oDecode = P.decode;
     if (!dSrc || !dSrc.set || !dSrc.get || !dCmp || !dCmp.get) return;
-    let held = [], open = false, started = 0;
+    let held = [], open = false, started = 0; const lazyQ = [];   // v0.30.1196 lazy-art - parked lazy images
     const RX = /(^|\/)(Sprites|backgrounds)\//;
     const abs = (v) => { try { return new URL(v, document.baseURI).href; } catch (e) { return String(v); } };
-    const start = (img) => { const u = img._lxHeldSrc; if (u == null) return false; img._lxHeldSrc = null; started++; dSrc.set.call(img, u); return true; };
+    const start = (img) => { const u = img._lxHeldSrc; if (u == null) return false; img._lxHeldSrc = null; started++; dSrc.set.call(img, u);
+      const w = img._lxDecodeQ; if (w) { img._lxDecodeQ = null; for (const r of w) { try { const p = oDecode.call(img); if (p && p.then) p.then(r, r); else r(); } catch (e) { r(); } } }   // v0.30.1196 lazy-art - decode()s that waited on a parked image
+      return true; };
     Object.defineProperty(P, 'src', { configurable: true, enumerable: dSrc.enumerable,
       get() { return this._lxHeldSrc != null ? abs(this._lxHeldSrc) : dSrc.get.call(this); },
       set(v) {
+        // v0.30.1196 lazy-art - a LAZY image (boss frames, a far map's backdrop) is parked, menu or not, until it is wanted
+        if (this._lxLazy === true && !this._lxWanted && typeof v === 'string' && RX.test(v) && !this.isConnected) { if (this._lxHeldSrc == null) lazyQ.push(this); this._lxHeldSrc = v; return; }
         // v0.30.x — fetchPriority is NOT on this list any more. It is a claim about what matters
         // in a live frame ("these gate a combat effect"), and before the title there is no frame to
         // matter in: 115 images, 13.0 MB, came through this door ahead of the menu. The paths that
@@ -16067,7 +16074,7 @@ const GAME_VERSION = 'v0.30.1195';
       get() { return this._lxHeldSrc != null ? false : dCmp.get.call(this); } });
     if (dPri && dPri.set && dPri.get) Object.defineProperty(P, 'fetchPriority', { configurable: true, enumerable: dPri.enumerable,
       get() { return dPri.get.call(this); },
-      set(v) { dPri.set.call(this, v); if (v === 'high' && open) start(this); } });   // v0.30.x — only once the menu is up; see the src setter
+      set(v) { dPri.set.call(this, v); if (v === 'high' && open && !(this._lxLazy === true && !this._lxWanted)) start(this); } });   // v0.30.1196 lazy-art - a priority is not a want   // v0.30.x — only once the menu is up; see the src setter
     // v0.30.x — decode() USED TO START THE DOWNLOAD. Ten parse-time loaders in this file do
     // `img.src = ...; img.decode().catch(() => {})` back to back (v0.30.340/343, so a first draw
     // mid-fight is not a sync decode), and that second line walked 153 images worth 11.4 MB straight
@@ -16077,6 +16084,7 @@ const GAME_VERSION = 'v0.30.1195';
     // _lxNow or calls _lxBootHold.now(), both of which still bypass.
     if (typeof oDecode === 'function') P.decode = function () {
       if (this._lxHeldSrc == null) return oDecode.apply(this, arguments);
+      if (this._lxLazy === true && !this._lxWanted) { const me = this; return new Promise((res) => { (me._lxDecodeQ = me._lxDecodeQ || []).push(res); }); }   // v0.30.1196 lazy-art - settles once wanted and decoded (no polling)
       const self = this;
       return new Promise((res) => {
         const tick = () => {
@@ -16088,7 +16096,7 @@ const GAME_VERSION = 'v0.30.1195';
     };
     const release = (why) => {
       if (open) return; open = true;
-      const q = held.filter((im) => im._lxHeldSrc != null);
+      const q = held.filter((im) => im._lxHeldSrc != null && !(im._lxLazy === true && !im._lxWanted));   // v0.30.1196 lazy-art - parked art stays parked
       const rank = (im) => im.isConnected ? 0 : /\/bosses\//.test(im._lxHeldSrc || '') ? 2 : 1;
       q.sort((a, b) => rank(a) - rank(b));   // stable: parse order within a rank
       held = q;                              // stats() keeps counting what has not started yet
@@ -16107,8 +16115,13 @@ const GAME_VERSION = 'v0.30.1195';
       };
       for (let k = 0; k < 16; k++) next();
     };
-    window._lxBootHold = { release, now: start, peek: () => held.find((im) => im._lxHeldSrc != null) || null,
-      stats: () => ({ open, held: held.filter((im) => im._lxHeldSrc != null).length, started }) };
+    window._lxBootHold = { release, now: start, peek: () => held.find((im) => im._lxHeldSrc != null && !(im._lxLazy === true && !im._lxWanted)) || null,
+      want: (img) => { if (!img) return false; img._lxWanted = true; return start(img); },   // v0.30.1196 lazy-art
+      // v0.30.1196 lazy-art - the queued (not lazy) images whose URL matches: started now, all returned (a boss base portrait)
+      match: (re) => { const out = []; for (const im of held) { const u = (im._lxHeldSrc != null) ? im._lxHeldSrc : dSrc.get.call(im); if (u && re.test(u)) { if (im._lxHeldSrc != null && !(im._lxLazy === true && !im._lxWanted)) start(im); out.push(im); } } return out; },
+      // v0.30.1196 lazy-art - held = still to stream (it drains after the menu); parked = lazy art nothing has asked for yet
+      stats: () => ({ open, held: held.filter((im) => im._lxHeldSrc != null && !(im._lxLazy === true && !im._lxWanted)).length, started,
+        parked: lazyQ.concat(held).filter((im) => im._lxLazy === true && !im._lxWanted && im._lxHeldSrc != null).length }) };
     // v0.30.x — THE FAILSAFE FIRED BEFORE THE THING IT WAS WAITING FOR. It was a flat 20 s, and the
     // menu is what releases the hold normally (release('menu') / release('resume') below). Measured
     // on a 12 Mbps line with the hold on: the title is not up until ~40 s, so at 30 s this handed
@@ -16123,6 +16136,9 @@ const GAME_VERSION = 'v0.30.1195';
       if (Date.now() - _fsFrom >= 75000) return release('failsafe (ceiling)');
       setTimeout(_fsTick, 1000);
     };
+    // v0.30.1196 lazy-art - a page that opens the world without the menu (a deep link, a test harness: window._lxBootGateDone)
+    const _wdTick = () => { if (open) return; if (window._lxBootGateDone) return release('world up'); setTimeout(_wdTick, 400); };
+    setTimeout(_wdTick, 400);
     setTimeout(_fsTick, 20000);
   } catch (e) {}
 })();
@@ -72080,6 +72096,7 @@ function _lxSpriteHealStart() {
   }, 20000);
 }
 function _lxPreloadMapAssets(id, onProgress, prio) {
+  if (prio === 'high') { try { _lxLazyWantMap(id, true); } catch (e) {} }   // v0.30.1196 lazy-art - the boot map / an arena about to open
   // v0.26.962 — collect now, load/decode through a x6 pool below (the
   // all-at-once version contributed to the iOS boot kill).
   // v0.27.11 — optional prio ('high' | 'low'): stamped on every tracked image.
@@ -72089,7 +72106,7 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
   // streamer ('low') never competes with what the player is looking at.
   const _imgs = [];
   const track = (img) => {
-    if (!img || !img.src) return;
+    if (!img || !img.src || _lxParked(img)) return;   // v0.30.1196 lazy-art - parked art (a far backdrop) is not this preload's
     if (prio && 'fetchPriority' in img) { try { img.fetchPriority = prio; } catch (e) {} }
     if (prio === 'high' && window._lxBootHold) { try { window._lxBootHold.now(img); } catch (e) {} }   // v0.30.806 - a held image the map needs (browsers without fetchPriority)
     _imgs.push(img);
@@ -72482,6 +72499,7 @@ function loadMap(id, entryX, entryY) {
   // the gate covers the boot map, this covers every later map enter).
   try {
     window._lxMapPreloaded = window._lxMapPreloaded || {};
+    try { _lxLazyWantMap(id, true); } catch (e) {}   // v0.30.1196 lazy-art - this map's boss art and backdrop, on every entry
     if (!window._lxMapPreloaded[id]) { window._lxMapPreloaded[id] = 1; _lxPreloadMapAssets(id, null, 'high'); }
     // v0.27.6 — neighbor prefetch: 3s after arriving (the entered map's own
     // load settles first), warm every map reachable through this map's portals
@@ -72489,6 +72507,7 @@ function loadMap(id, entryX, entryY) {
     setTimeout(() => { try {
       const _ns = _lxMapNeighbors(id);
       for (const n of _ns) {
+        try { _lxLazyWantMap(n); } catch (e) {}   // v0.30.1196 lazy-art - next door: its backdrop, and the boss art of an arena behind a portal
         if (typeof _lxWarmMap === 'function') _lxWarmMap(n);
         // v0.29.39 — also warm each neighbor's arrival-cinematic clip so the
         // beat that fires on entering it plays instantly + stutter-free.
@@ -72595,7 +72614,8 @@ function loadMap(id, entryX, entryY) {
     };
     if (typeof _warmMapArt === 'function') {
       let _fadeDone = false;
-      const _fadeGo = () => { if (!_fadeDone) { _fadeDone = true; _fadeRelease(); } };
+      const _fadeGen = game._lxFadeGen = (game._lxFadeGen || 0) + 1;   // v0.30.1196 lazy-art - only the latest map entry lifts the veil
+      const _fadeGo = () => { if (!_fadeDone && game._lxFadeGen === _fadeGen) { _fadeDone = true; if (typeof _lxVeilBackdrop === 'function') _lxVeilBackdrop(id, _fadeGen, _fadeRelease); else _fadeRelease(); } };
       // v0.29.457 — the 1400 ms cap was sized for field maps; a boss arena's
       // five-form frame sets need 2-4 s to decode+bake, and whatever missed
       // the window used to decode MID-FIGHT (measured: 74 frame spikes >33 ms,
@@ -123394,6 +123414,16 @@ const BG_IMG = BG_IMAGES.main;
 // v0.25.93 — dungeon added so the vanilla canvas fallback path stays in
 // sync with Phaser's pickBgKey (5-image cycle, not 4).
 const _BG_CYCLE = ['forest', 'valley', 'meadow', 'misty', 'dungeon'];
+// v0.30.1196 lazy-art - a backdrop is fetched when its map (or a map next door) is entered, not at boot. The cycle plates,
+// main and the town fallback stay on the ordinary stream: _pickBGImage picks among whichever of them have LOADED, so a
+// map without a plate of its own only gets its usual backdrop once they are all in.
+(function _lxLazyBackdrops() {
+  try {
+    const keep = new Set(_BG_CYCLE.concat(['main', 'everdawnMegamall']));
+    for (const k in BG_IMAGES) if (BG_IMAGES[k] && !keep.has(k)) BG_IMAGES[k]._lxLazy = true;
+    if (_ART_PACK !== 'cinematic') for (const im of BG_CINEMATIC_VARIANTS) if (im) im._lxLazy = true;
+  } catch (e) {}
+})();
 
 // Cheap string hash so the same mapId always picks the same bg slot.
 function _hashStr(s) {
@@ -141890,6 +141920,7 @@ function _loadBossFrames(map, subdir, types) {
       const img = new Image();
       img.decoding = 'async';
       img.onerror = () => { /* frame absent — handled by the contiguous-run check */ };
+      img._lxLazy = true;   // v0.30.1196 lazy-art - parked by the boot image hold until the boss is wanted (_lxBossArtWant)
       img.src = 'Sprites/bosses/' + subdir + '/' + type + '_' + i + '.webp';
       img._lxFi = i; img._lxSet = arr;   // frame index — keys the per-frame calib scale (fs); v0.30.775 — _lxSet: the set, for _lxBossStandIn
       img._lxSt = subdir;   // v0.30.68 — state dir ('idle'|'walk'|'attack'|'duck'|'weave'),
@@ -141938,7 +141969,108 @@ function _lxBossFrameMaps() {
   ]) if (m) out.push(m);
   return out;
 }
+// v0.30.1196 lazy-art - parked = a lazy image nothing has asked for yet (boss frames, a far backdrop). See _lxBootImageHold.
+function _lxParked(img) { return !!(img && img._lxLazy === true && !img._lxWanted && img._lxHeldSrc != null); }
+// v0.30.1196 lazy-art - hi: this is for the map being entered, so it jumps the background stream (Chromium re-prioritises queued
+// and in-flight requests); a portal neighbour is prefetched at the ordinary priority
+function _lxHi(img) { try { if (img && !(img.complete && img.naturalWidth > 0) && 'fetchPriority' in img && img.fetchPriority !== 'high') img.fetchPriority = 'high'; } catch (e) {} }
+function _lxWantImg(img, hi) {
+  if (hi) _lxHi(img);
+  if (!img || img._lxWanted) return false;
+  img._lxWanted = true;
+  try { if (img._lxHeldSrc != null && window._lxBootHold && window._lxBootHold.want) return window._lxBootHold.want(img); } catch (e) {}
+  return false;
+}
+// v0.30.1196 lazy-art - a boss's own sets: its key and keys that continue it in lowercase or a digit (gravitos -> gravitos2,
+// gravitospunch; king does NOT take kingKrook), idle first; a zodiac_<sign> type takes its sign's six sets
+function _lxBossArtSets(type) {
+  const out = [];
+  if (!type) return out;
+  const mine = (k) => { if (k === type) return true; if (k.length <= type.length || k.indexOf(type) !== 0) return false; const c = k.charCodeAt(type.length); return (c >= 97 && c <= 122) || (c >= 48 && c <= 57); };
+  try {
+    for (const map of [typeof BOSS_IDLE_FRAMES !== 'undefined' ? BOSS_IDLE_FRAMES : null, typeof BOSS_WALK_FRAMES !== 'undefined' ? BOSS_WALK_FRAMES : null,
+      typeof BOSS_ATTACK_FRAMES !== 'undefined' ? BOSS_ATTACK_FRAMES : null, typeof BOSS_WEAVE_FRAMES !== 'undefined' ? BOSS_WEAVE_FRAMES : null,
+      typeof BOSS_DUCK_FRAMES !== 'undefined' ? BOSS_DUCK_FRAMES : null]) { if (map) for (const k in map) if (mine(k) && map[k] && map[k].length) out.push(map[k]); }
+    const sign = /^zodiac[_-]/.test(type) ? type.replace(/^zodiac[_-]/, '') : null;
+    if (sign) for (const map of [ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES, ZODIAC_CHARGE_FRAMES, ZODIAC_POUNCE_FRAMES, ZODIAC_FLY_FRAMES]) if (map && map[sign] && map[sign].length) out.push(map[sign]);
+  } catch (e) {}
+  return out;
+}
+// v0.30.1196 lazy-art - and its BASE portraits (Sprites/bosses/<type>*, attack/<type>*, zodiac/<sign>): not lazy, but after the
+// menu they queue behind ~1,000 other images, and BOSS_SPRITES / BOSS_SPRITE_META only learn a key once its portrait has
+// loaded (_warmMapArt and the size derive walk those keys). Started now and kept, so the veil can wait for them too.
+const _LX_BOSS_BASE = Object.create(null);
+function _lxBossBaseWant(type) {
+  if (!type || _LX_BOSS_BASE[type] || !window._lxBootHold || !window._lxBootHold.match) return _LX_BOSS_BASE[type] || [];
+  const sign = /^zodiac[_-]/.test(type) ? type.replace(/^zodiac[_-]/, '') : null;
+  const re = sign ? new RegExp('/bosses/zodiac/' + sign + '[.](?:webp|png)') : new RegExp('/bosses/(?:attack/)?' + type.replace(/[^A-Za-z0-9_]/g, '') + '[a-z0-9]*[.](?:webp|png)');
+  try { return (_LX_BOSS_BASE[type] = window._lxBootHold.match(re)); } catch (e) { return []; }
+}
+function _lxBossArtWant(type, hi) {
+  let n = 0;
+  try { const b = _lxBossBaseWant(type); if (hi) for (const im of b) _lxHi(im); } catch (e) {}
+  for (const arr of _lxBossArtSets(type)) for (const im of arr) { if (hi) _lxHi(im); if (_lxParked(im) && _lxWantImg(im)) n++; }
+  return n;
+}
+// v0.30.1196 lazy-art - what a map needs: every type it spawns or declares (the list _warmMapArt warms), and its backdrop
+function _lxMapBossTypes(id) {
+  const md = (typeof MAPS === 'object' && MAPS[id]) || null, out = [];
+  if (!md) return out;
+  for (const sp of (md.spawns || [])) if (sp && sp.type && out.indexOf(sp.type) < 0) out.push(sp.type);
+  if (md.bossType && out.indexOf(md.bossType) < 0) out.push(md.bossType);
+  for (const k of (md.bossSequence || [])) if (k && out.indexOf(k) < 0) out.push(k);
+  if (id === 'tower_b5') out.push('towerArbiter'); else if (id === 'tower_b10') out.push('towerSovereign');   // v0.30.1196 lazy-art - spawned at runtime (_expeditionSpawnTowerBoss)
+  if (id === 'boss_rush') { try { for (const t of _bossRushRoster()) if (t && out.indexOf(t) < 0) out.push(t); } catch (e) {} }   // v0.30.1196 lazy-art - the echoes this save has earned
+  return out;
+}
+function _lxMapBackdrops(id) {
+  const md = (typeof MAPS === 'object' && MAPS[id]) || null;
+  if (!md || typeof BG_IMAGES === 'undefined') return [];
+  if (md.bg && BG_IMAGES[md.bg]) return [BG_IMAGES[md.bg]];
+  if (md.sanctum || md.singularity || md.isCarriage || md.isZodiac || md.isZodiacHub || md.isVoid) return [];   // v0.30.1196 lazy-art - drawn procedurally
+  const out = []; for (const k of (md.isTown ? ['everdawnMegamall', 'valley'] : _BG_CYCLE.concat(['main']))) if (BG_IMAGES[k]) out.push(BG_IMAGES[k]);
+  return out;
+}
+function _lxLazyWantMap(id, hi) {
+  try { for (const t of _lxMapBossTypes(id)) _lxBossArtWant(t, hi); } catch (e) {}
+  try { for (const im of _lxMapBackdrops(id)) _lxWantImg(im, hi); } catch (e) {}
+}
+// v0.30.1196 lazy-art - settles when an image has loaded or failed (a parked one: at once - it is not coming)
+function _lxImgSettled(im) {
+  return new Promise((res) => {
+    if (!im || _lxParked(im) || im.complete) { res(); return; }
+    im.addEventListener('load', () => res(), { once: true }); im.addEventListener('error', () => res(), { once: true });
+  });
+}
+function _lxBossArtSettled(id) {
+  const ims = []; for (const t of _lxMapBossTypes(id)) { for (const im of (_LX_BOSS_BASE[t] || [])) ims.push(im); for (const arr of _lxBossArtSets(t)) for (const im of arr) if (im) ims.push(im); }
+  return Promise.all(ims.map(_lxImgSettled)).then(() => ims.length);
+}
+function _lxBackdropSettled(id) {
+  return Promise.all(_lxMapBackdrops(id).map((im) => _lxImgSettled(im).then(() => { try { if (im.naturalWidth > 0 && im.decode) return im.decode().catch(() => {}); } catch (e) {} }))).then(() => true);
+}
+// v0.30.1196 lazy-art - the veil's last word (loadMap's _fadeGo): a map's own backdrop still on its way holds the veil up to
+// 3 s more, then the sky gradient shows as it always has; a newer map entry takes the veil over
+function _lxVeilBackdrop(id, gen, go) {
+  const md = (typeof MAPS === 'object' && MAPS[id]) || null, im = (md && md.bg && typeof BG_IMAGES !== 'undefined') ? BG_IMAGES[md.bg] : null;
+  const t0 = Date.now();
+  const tick = () => {
+    if (game._lxFadeGen !== gen) return;
+    const ready = !im || im._loaded || im._lxFailed || _lxParked(im) || (im.complete && !(im.naturalWidth > 0));
+    if (ready || Date.now() - t0 > 3000) { try { if (im && im._loaded && Date.now() - t0 > 50) _lxPrimeBackdrop(id); } catch (e) {} go(); return; }   // v0.30.1196 lazy-art - it came late: bake its draw size under the veil
+    setTimeout(tick, 100);
+  };
+  tick();
+}
+// v0.30.1196 lazy-art - the boot loader's DEFERRED list names every backdrop file too: a parked one is left to its map
+function _lxLazyBgPath(p) {
+  if (!window._lxBootHold || typeof BG_IMAGES === 'undefined') return false;
+  for (const k in BG_IMAGES) { const im = BG_IMAGES[k]; if (im && im._lxLazy && !im._lxWanted && im._lxPath === p) return true; }
+  try { for (const im of BG_CINEMATIC_VARIANTS) if (im && im._lxLazy && !im._lxWanted && im._lxPath === p) return true; } catch (e) {}
+  return false;
+}
 function _lxWarmBossFrames(type) {
+  try { _lxBossArtWant(type, true); } catch (e) {}   // v0.30.1196 lazy-art - a boss spawning or being summoned asks for its art
   if (!type || _LX_BOSS_WARMED[type]) return 0;
   _LX_BOSS_WARMED[type] = true;
   let n = 0;
@@ -143033,9 +143165,11 @@ function _warmMapArt(id, opts) {
   // cap already wrap this call for every map, so the gate was the only thing
   // keeping field-map art cold.
   if (!def) return Promise.resolve(0);
+  try { _lxLazyWantMap(id, true); } catch (e) {}   // v0.30.1196 lazy-art
   const slots = [];   // {holder, key, im, bakeKey} — holder[key] is replaced by the bake
   const addImg = (holder, key, bakeKey, capBase) => {
     if (_LX_WARM_SKIP && bakeKey && _LX_WARM_SKIP.test(bakeKey)) return;   // deferred to a later pass
+    if (_lxParked(holder && holder[key])) return;   // v0.30.1196 lazy-art - another boss's parked art (king takes kingKrook by prefix): its load would never settle
     const im = holder && holder[key];
     if (im && typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement) slots.push({ holder, key, im, bakeKey, capBase });
   };
@@ -163714,7 +163848,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
   ]);
   const BAZAAR = REQUIRED.filter(p => BAZAAR_PATHS.has(p));
   const CRITICAL = REQUIRED.filter(p => CRITICAL_PATHS.has(p));
-  const DEFERRED = REQUIRED.filter(p => !BAZAAR_PATHS.has(p) && !CRITICAL_PATHS.has(p));
+  const DEFERRED = REQUIRED.filter(p => !BAZAAR_PATHS.has(p) && !CRITICAL_PATHS.has(p) && !(typeof _lxLazyBgPath === 'function' && _lxLazyBgPath(p)));   // v0.30.1196 lazy-art - a parked backdrop waits for its map
 
   const overlay = document.getElementById('loading-overlay');
   const bar = document.getElementById('loading-bar');
@@ -164251,6 +164385,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     const collect = (v, depth) => {
       if (!v || depth > 3 || seen.has(v)) return;
       if (typeof HTMLImageElement !== 'undefined' && v instanceof HTMLImageElement) {
+        if (typeof _lxParked === 'function' && _lxParked(v)) return;   // v0.30.1196 lazy-art - parked art is not the boot's to wait for
         seen.add(v); imgs.push(v); return;
       }
       if (typeof v !== 'object') return;
@@ -166772,6 +166907,8 @@ function _lxReadyGate(mapId, opts) {
   const rec = { id, boot: !!opts.boot, decodeMs: 0, shrinkMs: 0, baked: 0, bakeMs: 0, backdrop: false, bgm: -1, ms: 0, capped: false };
   const run = (async () => {
     let t = Date.now();
+    try { if (typeof _lxLazyWantMap === 'function') _lxLazyWantMap(id, true); } catch (e) {}   // v0.30.1196 lazy-art - started now, awaited below
+    const _lzBoss = (typeof _lxBossArtSettled === 'function') ? _lxBossArtSettled(id) : null, _lzBg = (typeof _lxBackdropSettled === 'function') ? _lxBackdropSettled(id) : null;
     paint(5, 'Decoding sprites…');
     // For the WHOLE gate, not just the drain: every frame the game draws under
     // the veil bakes unmetered, so NPCs, the player and anything in view are
@@ -166794,6 +166931,11 @@ function _lxReadyGate(mapId, opts) {
     } catch (e) {}
     rec.decodeMs = Date.now() - t; t = Date.now();
     paint(32, 'Preparing monsters…');
+    let _lzLate = !!_lzBoss;   // v0.30.1196 lazy-art - still landing when the wait below gives up
+    try { if (_lzBoss) await capped(_lzBoss.then(() => { _lzLate = false; }), CAP * 0.35); } catch (e) {}   // v0.30.1196 lazy-art - the boss frames land before the veil lifts
+    // v0.30.1196 lazy-art - art that lands after that cap (a slow link, a busy disk) is warmed again once it is all in, if the
+    // player is still here: _warmMapArt only takes what is still unbaked, and its size derive only what is still unmeasured
+    try { if (_lzLate && !opts.boot) _lzBoss.then((n) => { try { if (n && game.currentMap === id && typeof _warmMapArt === 'function') _warmMapArt(id, opts.skip ? { skip: opts.skip } : undefined); } catch (e) {} }); } catch (e) {}
     try { if (typeof _warmMapArt === 'function') await capped(_warmMapArt(id, opts.skip ? { skip: opts.skip } : undefined), CAP * 0.3); } catch (e) {}
     rec.shrinkMs = Date.now() - t; t = Date.now();
     try {
@@ -166816,6 +166958,7 @@ function _lxReadyGate(mapId, opts) {
     } catch (e) {}
     rec.bakeMs = Date.now() - t; t = Date.now();
     paint(74, 'Painting the backdrop…');
+    try { if (_lzBg) await capped(_lzBg, CAP * 0.35); } catch (e) {}   // v0.30.1196 lazy-art - no blank sky on entry
     rec.backdrop = _lxPrimeBackdrop(id);
     paint(82, 'Tuning the music…');
     try {
