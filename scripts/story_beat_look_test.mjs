@@ -58,12 +58,16 @@ const out = await page.evaluate(async () => {
 
   // ---- typography ---------------------------------------------------------
   const fam = cs(txt).fontFamily || '';
-  ok('the body is set in a SERIF, not the UI sans', _isSerif(fam), fam.slice(0, 66));
-  ok('...and it resolved to a real installed face, not a fallback',
-     !/Times New Roman/i.test(fam.split(',')[0]), fam.split(',')[0]);
+  // Per user (2026-09-27): "This can be more pop punked designed especially the font" - the serif-and-gold card became
+  // the game's pop-punk lettering. The body and the speaker are heavy Nunito now (bundled), the body in an ink stroke, the
+  // speaker on a skewed raspberry banner. The serif checks that stood here pinned the look this replaced.
+  const _isPop = (el) => /^"?Nunito/.test(cs(el).fontFamily || '') && Number(cs(el).fontWeight) >= 900;
+  ok('the body is set in the pop-punk type (heavy Nunito), not the old serif', _isPop(txt) && !_isSerif(fam), fam.slice(0, 40) + ' ' + cs(txt).fontWeight);
+  ok('...and that face is actually loaded, not a fallback', document.fonts.check("900 23px 'Nunito'"), fam.split(',')[0]);
+  ok('the body is inked: a stroke under the fill', parseFloat(cs(txt).webkitTextStrokeWidth) >= 3, cs(txt).webkitTextStrokeWidth);
   ok('the body got bigger', parseFloat(cs(txt).fontSize) >= 23, cs(txt).fontSize);
-  ok('the speaker is set in the same serif', _isSerif(cs(spk).fontFamily || ''), (cs(spk).fontFamily || '').slice(0, 50));
-  ok('the speaker has real letter-spacing', parseFloat(cs(spk).letterSpacing) >= 6, cs(spk).letterSpacing);
+  ok('the speaker is set in the same pop type', _isPop(spk), (cs(spk).fontFamily || '').slice(0, 30) + ' ' + cs(spk).fontWeight);
+  ok('the speaker sits on the raspberry banner', /linear-gradient/.test(getComputedStyle(spk, '::before').backgroundImage), getComputedStyle(spk, '::before').backgroundImage.slice(0, 60));
   const stage = document.getElementById('story-beat-stage');
   ok('the stage is wider for the larger type', parseFloat(cs(stage).maxWidth) >= 860, cs(stage).maxWidth);
 

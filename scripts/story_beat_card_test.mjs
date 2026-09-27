@@ -44,10 +44,14 @@ const r = await page.evaluate(async () => {
   out.text = (document.getElementById('story-beat-text').textContent || '').slice(0, 30);
   const cs = (el, p) => getComputedStyle(el, p || null);
   const txt = document.getElementById('story-beat-text'), stage = document.getElementById('story-beat-stage'), hint = document.getElementById('story-beat-hint');
-  out.letterbox = cs(ov, '::after').content !== 'none' && /030108/.test(cs(ov, '::after').backgroundImage.replace(/rgb\((\d+), (\d+), (\d+)\)/g, (m, a, b, c) => [a, b, c].map((v) => (+v).toString(16).padStart(2, '0')).join('')));
+  // v0.30.x sb-pop (per user: "This can be more pop punked designed especially the font"): the gold title card became
+  // pop-punk lettering. The bars are ink with raspberry edges now, the jewel rules are off, the face is heavy Nunito.
+  const _hex = (s) => s.replace(/rgb\((\d+), (\d+), (\d+)\)/g, (m, a, b, c) => [a, b, c].map((v) => (+v).toString(16).padStart(2, '0')).join(''));
+  out.letterbox = cs(ov, '::after').content !== 'none' && /0b0a0e/.test(_hex(cs(ov, '::after').backgroundImage)) && /b8145f/.test(_hex(cs(ov, '::after').backgroundImage));
   out.plate = cs(stage, '::before').content !== 'none' && /radial-gradient/.test(cs(stage, '::before').backgroundImage);
-  out.ornamentTop = cs(stage, '::after').content.indexOf('◆') >= 0;
-  out.ornamentBottom = cs(hint, '::before').content.indexOf('◆') >= 0;
+  out.ornamentTop = cs(stage, '::after').display === 'none';      // the gold jewel rules are off in the pop card
+  out.ornamentBottom = cs(hint, '::before').display === 'none';
+  out.hintTape = cs(hint).backgroundColor === 'rgb(11, 10, 14)' && /^"?Nunito/.test(cs(hint).fontFamily);
   out.shadowStops = (cs(txt).textShadow.match(/rgba?\(/g) || []).length;   // the ink ring (8) + drop + bloom
   out.fontPx = parseFloat(cs(txt).fontSize); out.weight = cs(txt).fontWeight; out.font = cs(txt).fontFamily.split(',')[0];
   out.stroke = cs(txt).webkitTextStrokeWidth;
@@ -60,13 +64,13 @@ console.log(JSON.stringify({ ...r, dimmer }));
 if (SHOT) await page.screenshot({ path: SHOT });
 const checks = [
   ['the prologue beat is up on its second stanza', r.on === true && /^Below, a world/.test(r.text), r.text],
-  ['the card is letterboxed', r.letterbox === true],
+  ['the card is letterboxed (ink bars, raspberry edges)', r.letterbox === true],
   ['the words sit on a feathered plate', r.plate === true],
-  ['gold rules with a jewel frame the stanza', r.ornamentTop === true && r.ornamentBottom === true, `${r.ornamentTop}/${r.ornamentBottom}`],
-  ['the lettering carries an ink ring, a drop shadow and a bloom', r.shadowStops >= 10 && parseFloat(r.stroke) > 0, `stops ${r.shadowStops}, stroke ${r.stroke}`],
-  ['the epilogue face is a 28px bold serif', r.fontPx === 28 && String(r.weight) === '700', `${r.fontPx}px / ${r.weight} / ${r.font}`],
+  ['the old gold jewel rules are off; the cue is black pop tape', r.ornamentTop === true && r.ornamentBottom === true && r.hintTape === true, `${r.ornamentTop}/${r.ornamentBottom}/${r.hintTape}`],
+  ['the lettering is inked: a thick stroke and a stepped shadow', r.shadowStops >= 3 && parseFloat(r.stroke) >= 4, `stops ${r.shadowStops}, stroke ${r.stroke}`],
+  ['the epilogue face is heavy Nunito, big', r.fontPx >= 26 && Number(r.weight) >= 900 && /Nunito/.test(r.font), `${r.fontPx}px / ${r.weight} / ${r.font}`],
   ['the ground is dimmer', dimmer],
-  ['the cue pulses instead of bouncing', r.hintAnim === 'storyBeatCue', r.hintAnim],
+  ['the cue on its tape still pulses (the v0.30.1189 never-dim pulse)', !!r.hintAnim && r.hintAnim !== 'none', r.hintAnim],
   ['no page errors', errs.length === 0, errs.join(' | ')],
 ];
 let fails = 0;
