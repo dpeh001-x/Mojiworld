@@ -72,6 +72,29 @@ server-side but not yet applied on login.
   (`state.acceptWebSocket`) — more complex (in-memory room maps must be rebuilt
   from `getWebSockets()`), so deferred until traffic justifies it.
 
+## Launch hardening (mp-relay, 2026-09-27)
+
+- **Frame cap:** inbound frames over 64 KB are dropped unread; the sender gets one `error{code:'frame_too_large'}`.
+- **Room cap:** 5 players per party-code room (the game's party of five); 50 per public lobby channel
+  (`lobby__ch1..5`, under the game's 64-peer view; the game moves a player on from a full one). Counted per player
+  token, so a re-join past your own half-dead socket or a second tab is never locked out; 2x cap sockets is the
+  hard bound. `error{code:'room_full'}` + close.
+- **Hibernation API:** sockets are `state.acceptWebSocket()`ed; an idle DO is evicted (no duration billed) and
+  rebuilt from per-socket attachments on wake. The game's `{"t":"ka"}` keepalive is answered by the runtime.
+  The reaper is an alarm (was a `setInterval` that kept the DO awake); positions save on leave and at most once a
+  minute while connected, only when changed (was every 15 s).
+- **Per-room Durable Objects (opt-in):** a socket dialled as `wss://<host>/?room=<room id>` goes to
+  `idFromName('room:' + id)`. The shipped client dials the bare URL and names its room only in `hello`, so it
+  stays on the `global` DO together with the whole `/api`. Moving the client to `?room=` is a separate, coordinated
+  change: members of one party on old and new builds would otherwise sit in different DOs.
+- **Auth:** PBKDF2-SHA256 (100k) for new passwords; a legacy SHA-256 account is verified and re-hashed on its next
+  good login; sessions expire after a year unused (sliding; older tokens start their clock on first use); one
+  `401 Invalid username or password.` for unknown user and wrong password; an alarm sweeps lapsed `rl:` / `fail:` /
+  `tok:` keys.
+- **Tunables** (wrangler `[vars]`, bounded): `ROOM_CAP`, `LOBBY_CAP`, `IDLE_KILL_MS`, `SAVE_MS`, `TOKEN_TTL_MS`, `GC_MS`,
+  `THROTTLE_MS`, `FAIL_TTL_MS`.
+- **Rollback caution:** an account that logged in on this build is stored as PBKDF2; an older build cannot verify it.
+
 ## Files
 
 | File | Role |

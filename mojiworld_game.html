@@ -16006,7 +16006,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1197';
+const GAME_VERSION = 'v0.30.1198';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -57668,6 +57668,35 @@ function _mpHandle(msg) {
     }
     case 'error':
       _mpPushLog('[server] ' + escapeHtml(msg.message || msg.code || 'error'), 'sys');
+      // v0.30.1198 mp-relay - a full room is an answer, not a dropped line: the relay closes the socket right after this
+      // frame, and re-dialling it (10 tries over ~105 s under "connection lost - reconnecting") cannot help.
+      if (msg.code === 'room_full') {
+        net._userClosed = true;
+        if (net._reconnectTimer) { clearTimeout(net._reconnectTimer); net._reconnectTimer = null; }
+        net._reconnectTries = 0;
+        const _fullCh = _clampChannel(net.channel || 1);
+        // v0.30.1198 mp-relay - the public lobby: move on to the next channel by itself, each channel once (starting from
+        // where this run began). A party code never hops - friends would end up on different channels.
+        if (net.baseRoom === 'lobby') {
+          const _hop = net._fullHop, _from = (_hop && Date.now() - _hop.at < 30000) ? _hop.from : _fullCh;
+          const _next = (_fullCh % CHANNEL_COUNT) + 1;
+          if (_next !== _from) {
+            net._fullHop = { from: _from, at: Date.now() };
+            if (typeof player !== 'undefined' && player) player.channel = _next;
+            try { localStorage.setItem(MP_CHANNEL_KEY, String(_next)); } catch (e) {}
+            try { if (typeof _renderChannelPills === 'function') _renderChannelPills(_next); } catch (e) {}
+            _mpBanner('Lobby channel ' + _fullCh + ' is full - trying channel ' + _next + '...', 'work', { dismiss: false });
+            const _u = net._lastUrl, _n = net._lastName, _r = net._lastRoom;
+            net._reconnectTimer = setTimeout(() => { net._reconnectTimer = null; mpConnect(_u, _n, _r); }, 300);
+            break;
+          }
+          net._fullHop = null;
+        }
+        const _fullWhat = net.baseRoom === 'lobby' ? 'Every lobby channel is full - try again soon, or play with a party code.'
+          : 'Party ' + String(net.baseRoom || net.roomId || '').toUpperCase() + ' (Ch ' + _fullCh + ') is full - try another channel or party code.';
+        _mpStatus(_fullWhat, '#ff8888');
+        _mpBanner(_fullWhat, 'bad', { retry: () => mpConnect(net._lastUrl, net._lastName, net._lastRoom) });
+      }
       break;
   }
   // Roster render is triggered ONLY by welcome/joined/left (which call it in

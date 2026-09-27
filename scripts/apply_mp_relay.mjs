@@ -1,29 +1,63 @@
-// Mojiworld multiplayer on Cloudflare Durable Objects — stable, always-on,
-// persistent MMO-lite. One global DO holds all rooms in memory (a port of the
-// fidelity-tested relay in ../mp/server.mjs) AND persists per-player saves to DO
-// storage, so a returning player respawns where they logged off.
-//
-// Protocol (identical to the in-game `net` client):
-//   C->S: hello{name,room,token?,cls,job,master,level,map,x,y,facing,hp,maxHp,mp,maxMp}
-//         state{...presence}  chat{text}  emote{kind}
-//   S->C: welcome{id,room,players[],you?}  joined{id,...}  left{id}
-//         state{id,...}  chat{id,name,text}  emote{id,kind}
-//         error{code,message}   mp-relay (2026-09-27): room_full | room_mismatch | frame_too_large
-// `you` (new) = the player's saved record for their token, or null. The client
-// applies it on welcome to restore position/level. Back-compatible: clients that
-// send no token and ignore `you` behave exactly like against the plain relay.
+// Co-op relay launch hardening (infra audit 2026-09-26, #5 + #6) - mp-cf/, the Cloudflare Worker + Durable Object
+// that is the game's shipped co-op relay AND its account / cloud-save API.
+// ============================================================================
+// What was wrong:
+//   1) no inbound frame cap. A comment in onMessage promised "the inbound frame cap", but nothing enforced it (mp/ and
+//      server/ cap at 64 KB): any client could push ~1 MB frames that were parsed and fanned out to the whole room.
+//   2) no per-room cap: one room could grow without bound, and every frame costs (players - 1) sends.
+//   3) every socket and the whole API share ONE Durable Object, idFromName('global').
+//   4) auth: one round of salted SHA-256; session tokens never expired; login said 404 "no account" vs 401 "wrong
+//      password" (a free username oracle); the rl: / fail: throttle keys were never deleted.
+// What happens now:
+//   1) a frame over 64 KB is dropped before JSON.parse (the sender is told once, the socket stays up). The game keeps
+//      every frame under 56 KB by design, so nothing it sends is affected.
+//   2) 5 players per room = the game's party of five (LX_PARTY_MAX_ALLIES 4 + you), counted per player token so a
+//      re-join past one's own half-dead socket (or a 2nd tab) is never locked out; 10 sockets hard bound. Refusal is
+//      { t:'error', code:'room_full', message } + close - the frame server/server.js already sends.
+//   3) a socket that names its room in the URL (?room=<room id>) is routed to idFromName('room:' + id). The shipped
+//      game dials the bare URL and names its room only inside 'hello', after the socket is bound to a DO, and a
+//      WebSocket cannot move between DOs - so today's clients (and all of /api, i.e. every stored account) stay on
+//      'global' untouched. Switching the client to ?room= is a separate, coordinated step (old and new builds of one
+//      party would otherwise sit in different DOs and not see each other).
+//   4) PBKDF2-SHA256 x100k for new passwords; a legacy SHA-256 account is verified the old way on login and re-hashed
+//      on the spot; tokens are { u, exp } with a 365-day sliding expiry (pre-existing string tokens keep working and
+//      start their clock); one 401 "Invalid username or password." for both failures, and every attempt pays one
+//      PBKDF2 so timing does not tell them apart either; an alarm sweeps lapsed rl: / fail: / tok: keys.
+// Also extends mp-cf/_cf_test.mjs + _api_test.mjs (the wrangler-dev tests) and adds a README section.
+// Only ever touches files under ${ROOT}/mp-cf - never mojiworld_game.html. Guarded + atomic + idempotent. EOL-aware.
+import { readFileSync, writeFileSync, renameSync, statSync, existsSync } from 'node:fs';
+const ROOT = (process.env.LX_MP_ROOT || 'C:/Users/dpeh0/Mojiworld').replace(/[\\/]+$/, '');
+const die = (m) => { console.error('ABORT ' + m); process.exit(1); };
+const files = [];   // { path, before, after }
+function edit(rel, marker, lo, hi, fn) {
+  const path = ROOT + '/mp-cf/' + rel;
+  if (/mojiworld_game\.html$/i.test(path)) die('refusing to touch the game file');
+  if (!existsSync(path)) die(rel + ' missing under ' + ROOT);
+  const before = readFileSync(path, 'utf8');
+  if (before.includes(marker)) { console.log('  ' + rel + ': already applied'); return; }
+  const crlf = (before.match(/\r\n/g) || []).length, lf = (before.match(/\n/g) || []).length;
+  const EOL = crlf > lf / 2 ? '\r\n' : '\n';
+  let s = before;
+  const J = (...L) => L.join(EOL);
+  const once = (a, b, what) => { const n = s.split(a).length - 1; if (n !== 1) die(rel + ': ' + what + ' matched ' + n); s = s.replace(a, () => b); };
+  const region = (start, end, must, repl, what) => {   // replace [start, end) - both unique, close together, and holding `must`
+    const a = s.indexOf(start), b = s.indexOf(end, a);
+    if (a < 0 || s.indexOf(start, a + 1) >= 0 || b < 0 || s.indexOf(end, b + 1) >= 0 || b - a > 2500) die(rel + ': ' + what + ' region not found cleanly');
+    for (const m of must) if (!s.slice(a, b).includes(m)) die(rel + ': ' + what + ' region lacks ' + JSON.stringify(m));
+    s = s.slice(0, a) + repl + s.slice(b);
+  };
+  fn({ J, once, region, EOL });
+  const grew = s.length - before.length;
+  if (grew < lo || grew > hi) die(rel + ': size moved ' + grew);
+  if (!s.includes(marker)) die(rel + ': marker missing after edit');
+  files.push({ path, rel, before, after: s, grew });
+}
+const RAW = (t) => t.replace(/^\n/, '');   // String.raw blocks: LF in the script, EOL of the target file on the way in
 
-// v0.29.x — 'look' + 'eq' (full peer avatar, matching mp/server.mjs since
-// v0.29.11) and 'v' (client build stamp for version-skew detection).
-const PRESENCE_FIELDS = ['name', 'cls', 'job', 'master', 'level', 'map', 'x', 'y', 'vx', 'vy',
-  'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim', 'look', 'eq', 'v',
-  // v0.29.x — 'ti' = the peer's worn title, shown under their nameplate.
-  // Without it here the field is stripped off 'state' and a partner's title
-  // only lands via the slower 2.5s 'ping' carrier.
-  'ti'];
-const SAVE_FIELDS = ['x', 'y', 'map', 'level', 'hp', 'maxHp', 'mp', 'maxMp', 'cls', 'job', 'master'];
-const CTRL = /[\u0000-\u001f\u007f]/g;
-const STR_CAP = 48, RATE = 40, BURST = 60;
+// ---------------------------------------------------------------- mp-cf/src/index.js
+edit('src/index.js', 'const FRAME_CAP = 64 * 1024;', 14000, 24000, ({ J, once, region, EOL }) => {
+  const B = (t) => RAW(t).replace(/\n/g, EOL);
+  once('const REAP_MS = 15000, IDLE_KILL_MS = 30000;', B(String.raw`
 // mp-relay (2026-09-27) - launch hardening (infra audit 2026-09-26, #5 + #6). Defaults; a wrangler [var] of the same name
 // overrides ROOM_CAP / LOBBY_CAP / IDLE_KILL_MS / SAVE_MS / TOKEN_TTL_MS / GC_MS / THROTTLE_MS / FAIL_TTL_MS (bounded).
 //   FRAME_CAP     inbound frames over 64 KB are dropped unread (onMessage's forward-list comment has promised this cap
@@ -63,84 +97,36 @@ const tooBig = (raw) => {
 const roomParam = (url) => { const r = url.searchParams.get('room'); return r ? r.slice(0, 64) : null; };
 // mp-relay (2026-09-27) - a short hash, so an unchanged position is not written again
 const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
-const REAP_MS = 15000, IDLE_KILL_MS = 30000;   // app-level liveness (game ticks ~14/s, so any live client is never silent)
+const REAP_MS = 15000, IDLE_KILL_MS = 30000;`), 'the REAP_MS constants');
 
-const pick = (msg, st) => {
-  for (const k of PRESENCE_FIELDS) if (k in msg) {
-    let v = msg[k];
-    if (typeof v === 'string') v = v.replace(CTRL, '').slice(0, STR_CAP);
-    st[k] = v;
-  }
-  return st;
-};
-const saveOf = (st) => { const o = {}; for (const k of SAVE_FIELDS) if (k in st) o[k] = st[k]; return o; };
-// Save key is scoped to the ROOM (which includes the channel suffix) so the same
-// browser token in two channels/tabs can't clobber one global save or restore a
-// foreign channel's position. `aliveSt` skips persisting a dead snapshot so a
-// returning player isn't respawned at the spot they died.
-const saveKey = (conn) => 'save:' + conn.token + ':' + conn.roomId;
-const aliveSt = (st) => !(Number.isFinite(+st.hp) && +st.hp <= 0);
+  once('//         state{id,...}  chat{id,name,text}  emote{id,kind}', J(
+    '//         state{id,...}  chat{id,name,text}  emote{id,kind}',
+    '//         error{code,message}   mp-relay (2026-09-27): room_full | room_mismatch | frame_too_large'), 'the protocol doc');
 
-// ---- HTTP account + cloud-save API (server-sided MMO-lite) --------------------
-// Simple, self-contained auth on DO storage: register/login return a bearer token
-// that GET/POST /api/save use to load/store the player's FULL character save
-// (level, gear, boons, coins, ...) so it syncs across devices. Passwords are
-// per-account salted PBKDF2-SHA256, 100k rounds (Web Crypto). mp-relay (2026-09-27) - they were one round of salted
-// SHA-256; such a record is re-hashed on its next good login. Sessions expire after a year unused (sliding).
-const ACCT_KEY = (u) => 'acct:' + u;      // account record, keyed by lowercased username
-const TOK_KEY = (t) => 'tok:' + t;        // session token -> lowercased username (multi-device)
-const CSAVE_KEY = (u) => 'csave:' + u;    // full cloud save JSON, keyed by account
-const CSAVE_CAP = 512 * 1024;             // max stored save size (bytes)
-const U_RE = /^[a-zA-Z0-9_]{3,16}$/;
-const okUser = (u) => typeof u === 'string' && U_RE.test(u);
-const okPass = (p) => typeof p === 'string' && p.length >= 6 && p.length <= 64;
-const CORS = {
-  'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET, POST, OPTIONS',
-  'access-control-allow-headers': 'content-type, authorization',
-  'access-control-max-age': '86400',
-};
-const jsonResp = (obj, status) => new Response(JSON.stringify(obj), {
-  status: status || 200, headers: { 'content-type': 'application/json', ...CORS },
-});
-const randHex = (n) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a).map((b) => b.toString(16).padStart(2, '0')).join(''); };
-const randToken = () => (crypto.randomUUID ? crypto.randomUUID() : randHex(16));
-async function hashPw(password, salt) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + password));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+  once('// per-account salted SHA-256 (Web Crypto) \u2014 good for a game, not bank-grade.', J(
+    '// per-account salted PBKDF2-SHA256, 100k rounds (Web Crypto). mp-relay (2026-09-27) - they were one round of salted',
+    '// SHA-256; such a record is re-hashed on its next good login. Sessions expire after a year unused (sliding).'), 'the auth doc line');
+
+  once('function eqHash(a, b) {', B(String.raw`
 // mp-relay (2026-09-27) - PBKDF2-SHA256 (WebCrypto), 256-bit, hex. 100k iterations is the Workers ceiling.
 async function pbkdf2Hex(password, salt, iters) {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: new TextEncoder().encode(salt), iterations: iters }, key, 256);
   return Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
-function eqHash(a, b) {   // length-safe constant-time-ish compare of two hex hashes
-  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
-  let d = 0; for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return d === 0;
-}
+function eqHash(a, b) {`), 'eqHash');
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    // The WebSocket relay AND the HTTP account/cloud-save API are both served by
-    // the one global Durable Object (shared storage). Route both to it.
+  once(J("    if (request.headers.get('Upgrade') === 'websocket' || url.pathname.startsWith('/api/')) {",
+         "      return env.ROOMS.get(env.ROOMS.idFromName('global')).fetch(request);"), B(String.raw`
     if (request.headers.get('Upgrade') === 'websocket' || url.pathname.startsWith('/api/')) {
       // mp-relay (2026-09-27) - a socket that names its room in the URL (?room=<room id>) gets that room's OWN Durable
       // Object, so one busy party no longer queues behind every other. The shipped game still dials the bare URL and
       // names its room only in 'hello' - after the socket is bound to a DO, and a WebSocket cannot move between DOs -
       // so those sockets, and the whole /api (accounts, tokens, saves), stay on 'global' with every stored key in place.
       const room = url.pathname.startsWith('/api/') ? null : roomParam(url);
-      return env.ROOMS.get(env.ROOMS.idFromName(room ? 'room:' + room : 'global')).fetch(request);
-    }
-    return new Response('Mojiworld MP (Durable Object). WebSocket relay + /api/{register,login,save}.\n', {
-      status: 200, headers: { 'content-type': 'text/plain' },
-    });
-  },
-};
+      return env.ROOMS.get(env.ROOMS.idFromName(room ? 'room:' + room : 'global')).fetch(request);`), 'the worker route');
 
-export class MojiRoom {
+  region('  constructor(state) {', '  room(r) {', ['this.storage = state.storage;', 'this.hb = null;'], B(String.raw`
   constructor(state, env) {
     this.state = state;
     this.storage = state.storage;
@@ -169,15 +155,9 @@ export class MojiRoom {
     for (const ws of state.getWebSockets()) this._connFromAtt(ws);
   }
 
-  room(r) { return this.rooms.get(r) || (this.rooms.set(r, new Map()), this.rooms.get(r)); }
-  broadcast(roomId, obj, exceptId) {
-    const m = this.rooms.get(roomId); if (!m) return;
-    const s = JSON.stringify(obj);
-    for (const [id, c] of m) { if (id !== exceptId) { try { c.ws.send(s); } catch (_) {} } }
-  }
+`), 'the constructor');
 
-  async fetch(request) {
-    if (request.headers.get('Upgrade') !== 'websocket') return this.handleApi(request);
+  region('    const pair = new WebSocketPair();', '  allow(conn, now) {', ['ws.accept();', 'this.ensureReaper();', "ws.addEventListener('message'"], B(String.raw`
     const pair = new WebSocketPair();
     const client = pair[0], ws = pair[1];
     this.state.acceptWebSocket(ws);   // mp-relay (2026-09-27) - hibernatable (was ws.accept() + listeners)
@@ -199,12 +179,12 @@ export class MojiRoom {
   }
   async webSocketError(ws) { await this.webSocketClose(ws); }
 
-  allow(conn, now) {
-    conn.tokens = Math.min(BURST, conn.tokens + (now - conn.last) / 1000 * RATE);
-    if (conn.tokens < 1) return false;
-    conn.tokens -= 1; return true;
-  }
+`), 'the socket accept');
+  INDEX_PART2({ J, once, region, B });
+});
 
+function INDEX_PART2({ J, once, region, B }) {
+  once(J('  async onMessage(ws, conn, raw) {', '    let msg; try { msg = JSON.parse(raw); } catch { return; }'), B(String.raw`
   async onMessage(ws, conn, raw) {
     if (conn.closed) return;   // mp-relay (2026-09-27) - a refused / reaped socket says nothing more
     // mp-relay (2026-09-27) - the 64 KB inbound cap: an oversized frame is dropped before JSON.parse, so it is never parsed or
@@ -216,15 +196,18 @@ export class MojiRoom {
       }
       return;
     }
-    let msg; try { msg = JSON.parse(raw); } catch { return; }
-    if (!msg || typeof msg !== 'object') return;
-    const now = Date.now();
-    if (!this.allow(conn, now)) { conn.last = now; return; }
-    conn.last = now;
-    if (now - conn.attAt > 5000) this._att(ws, conn, now);   // mp-relay (2026-09-27) - "last heard" survives hibernation
-    try {
-      if (msg.t === 'hello') {
-        if (conn.id !== null) return;                 // one identity per socket
+    let msg; try { msg = JSON.parse(raw); } catch { return; }`), 'the onMessage head');
+
+  once(J('    if (!this.allow(conn, now)) { conn.last = now; return; }', '    conn.last = now;'), J(
+    '    if (!this.allow(conn, now)) { conn.last = now; return; }',
+    '    conn.last = now;',
+    '    if (now - conn.attAt > 5000) this._att(ws, conn, now);   // mp-relay (2026-09-27) - "last heard" survives hibernation'), 'the liveness stamp');
+
+  once(J("        conn.roomId = String(msg.room || 'lobby').slice(0, 64);",
+         '        conn.id = this.nextId++;',
+         '        conn.token = msg.token ? String(msg.token).slice(0, 64) : null;',
+         '        const st = pick(msg, { id: conn.id });',
+         '        this.room(conn.roomId).set(conn.id, { ws, st });'), B(String.raw`
         const roomId = String(msg.room || 'lobby').slice(0, 64);
         const token = msg.token ? String(msg.token).slice(0, 64) : null;
         // mp-relay (2026-09-27) - a per-room DO serves only the room it was dialled for, and a room holds one party
@@ -235,34 +218,14 @@ export class MojiRoom {
         conn.token = token;
         const st = pick(msg, { id: conn.id });
         this.room(conn.roomId).set(conn.id, { ws, st, tok: token });
-        this._att(ws, conn, now);   // mp-relay (2026-09-27) - who this socket is, for after a hibernation
-        const you = conn.token ? (await this.storage.get(saveKey(conn))) || null : null;
-        const others = [];
-        for (const [oid, c] of this.rooms.get(conn.roomId)) if (oid !== conn.id) others.push(c.st);
-        ws.send(JSON.stringify({ t: 'welcome', id: conn.id, room: conn.roomId, players: others, you }));
-        this.broadcast(conn.roomId, { t: 'joined', ...st }, conn.id);
-        return;
-      }
-      if (conn.id === null || !this.rooms.get(conn.roomId)?.has(conn.id)) return;
-      const me = this.rooms.get(conn.roomId).get(conn.id);
-      if (msg.t === 'state') {
-        pick(msg, me.st);
-        this._att(ws, conn, now);   // mp-relay (2026-09-27) - keep the hibernation snapshot current
-        this.broadcast(conn.roomId, { t: 'state', ...me.st }, conn.id);
-      } else if (msg.t === 'chat') {
-        const text = String(msg.text || '').replace(CTRL, '').trim().slice(0, 200);
-        if (text) this.broadcast(conn.roomId, { t: 'chat', id: conn.id, name: me.st.name || '?', text }, conn.id);
-      } else if (msg.t === 'emote') {
-        this.broadcast(conn.roomId, { t: 'emote', id: conn.id, kind: String(msg.kind || '').replace(CTRL, '').slice(0, 24) }, conn.id);
-      } else if (msg.t === 'mon' || msg.t === 'dmg' || msg.t === 'kill' || msg.t === 'proj' || msg.t === 'haz' || msg.t === 'hazhit' || msg.t === 'bosshit' || msg.t === 'drop' || msg.t === 'down' || msg.t === 'up' || msg.t === 'revive' || msg.t === 'ping') {
-        // v0.27.0 — casual co-op host-authoritative monster sync. Forward verbatim
-        // to the room; the relay never inspects game state. Bounded by the inbound
-        // frame cap + per-connection rate limit already enforced above.
-        this.broadcast(conn.roomId, { ...msg, id: conn.id }, conn.id);
-      }
-    } catch (_) { /* never let one bad message break the room */ }
-  }
+        this._att(ws, conn, now);   // mp-relay (2026-09-27) - who this socket is, for after a hibernation`), 'the hello join');
 
+  once(J('        pick(msg, me.st);', "        this.broadcast(conn.roomId, { t: 'state', ...me.st }, conn.id);"), J(
+    '        pick(msg, me.st);',
+    '        this._att(ws, conn, now);   // mp-relay (2026-09-27) - keep the hibernation snapshot current',
+    "        this.broadcast(conn.roomId, { t: 'state', ...me.st }, conn.id);"), 'the state relay');
+
+  region('  async onClose(ws, conn) {', '  // ---- HTTP API: accounts + cloud saves', ['clearInterval(this.hb)', 'ensureReaper() {', 'setInterval(', 'saveOf(me.st)'], B(String.raw`
   async onClose(ws, conn) {
     this.conns.delete(ws);
     if (!conn || conn.closed) return;   // mp-relay (2026-09-27) - the reaper and the runtime may both report one close
@@ -370,69 +333,29 @@ export class MojiRoom {
     if (next < Infinity) await this.storage.setAlarm(Math.max(next, now + 1000));
   }
 
-  // ---- HTTP API: accounts + cloud saves --------------------------------------
-  async handleApi(request) {
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
-    const path = new URL(request.url).pathname;
-    try {
-      if (path === '/api/register' && request.method === 'POST') return await this.apiRegister(request);
-      if (path === '/api/login' && request.method === 'POST') return await this.apiLogin(request);
-      if (path === '/api/save' && request.method === 'GET') return await this.apiGetSave(request);
-      if (path === '/api/save' && request.method === 'POST') return await this.apiPutSave(request);
-      return jsonResp({ ok: false, error: 'not found' }, 404);
-    } catch (_) {
-      return jsonResp({ ok: false, error: 'server error' }, 500);
-    }
-  }
+`), 'onClose + the setInterval reaper');
+  INDEX_PART3({ J, once, region, B });
+}
 
-  // Per-IP sliding-window throttle. Register/login share the one global DO with
-  // the WebSocket relay, so an unauthenticated request flood serializes ahead of
-  // live gameplay and stalls every room. Keyed on the requester's IP so a flood
-  // only slows its own source, never other players. Returns true if allowed.
-  async _ipThrottle(request, bucket, limit, windowMs) {
-    const ip = request.headers.get('cf-connecting-ip') || 'unknown';
-    const rk = 'rl:' + bucket + ':' + ip, now = Date.now();
-    const r = (await this.storage.get(rk)) || { n: 0, reset: now + windowMs };
-    if (now > r.reset) { r.n = 0; r.reset = now + windowMs; }
-    r.n += 1;
-    await this.storage.put(rk, r);
-    await this._gcArm();   // mp-relay (2026-09-27) - an rl: key is swept once its window lapses
-    return r.n <= limit;
-  }
+function INDEX_PART3({ J, once, region, B }) {
+  once("this._ipThrottle(request, 'reg', 5, 60 * 1000)", "this._ipThrottle(request, 'reg', 5, this.throttleMs)", 'the register throttle');
+  once("this._ipThrottle(request, 'login', 15, 60 * 1000)", "this._ipThrottle(request, 'login', 15, this.throttleMs)", 'the login throttle');
+  once(J('    await this.storage.put(rk, r);', '    return r.n <= limit;'), J(
+    '    await this.storage.put(rk, r);',
+    '    await this._gcArm();   // mp-relay (2026-09-27) - an rl: key is swept once its window lapses',
+    '    return r.n <= limit;'), 'the throttle write');
 
-  async apiRegister(request) {
-    let body; try { body = await request.json(); } catch { return jsonResp({ ok: false, error: 'bad request' }, 400); }
-    const name = String((body && body.username) || '');
-    const pass = String((body && body.password) || '');
-    if (!okUser(name)) return jsonResp({ ok: false, error: 'Username must be 3-16 chars (letters, digits, underscore).' }, 400);
-    if (!okPass(pass)) return jsonResp({ ok: false, error: 'Password must be 6-64 characters.' }, 400);
-    if (!(await this._ipThrottle(request, 'reg', 5, this.throttleMs)))
-      return jsonResp({ ok: false, error: 'Too many registrations — try again shortly.' }, 429);
-    const key = name.toLowerCase();
-    if (await this.storage.get(ACCT_KEY(key))) return jsonResp({ ok: false, error: 'That name is already taken.' }, 409);
-    const salt = randHex(16);
-    const hash = await pbkdf2Hex(pass, salt, PBKDF2_ITERS);   // mp-relay (2026-09-27) - PBKDF2-SHA256 x100k (was one SHA-256)
-    const token = randToken();
-    await this.storage.put(ACCT_KEY(key), { name, salt, hash, kdf: KDF, it: PBKDF2_ITERS, created: Date.now() });
-    await this._putToken(token, key);
-    return jsonResp({ ok: true, name, token, kind: 'cloud' });
-  }
+  once(J('    const hash = await hashPw(pass, salt);',
+         '    const token = randToken();',
+         '    await this.storage.put(ACCT_KEY(key), { name, salt, hash, created: Date.now() });',
+         '    await this.storage.put(TOK_KEY(token), key);'), J(
+    '    const hash = await pbkdf2Hex(pass, salt, PBKDF2_ITERS);   // mp-relay (2026-09-27) - PBKDF2-SHA256 x100k (was one SHA-256)',
+    '    const token = randToken();',
+    '    await this.storage.put(ACCT_KEY(key), { name, salt, hash, kdf: KDF, it: PBKDF2_ITERS, created: Date.now() });',
+    '    await this._putToken(token, key);'), 'the register hash');
 
-  async apiLogin(request) {
-    let body; try { body = await request.json(); } catch { return jsonResp({ ok: false, error: 'bad request' }, 400); }
-    const name = String((body && body.username) || '');
-    const pass = String((body && body.password) || '');
-    if (!okUser(name) || !okPass(pass)) return jsonResp({ ok: false, error: 'Invalid username or password.' }, 400);
-    if (!(await this._ipThrottle(request, 'login', 15, this.throttleMs)))
-      return jsonResp({ ok: false, error: 'Too many attempts — try again shortly.' }, 429);
-    const key = name.toLowerCase();
-    const ip = request.headers.get('cf-connecting-ip') || 'unknown';
-    // Brute-force lockout scoped to (ip + username), NOT the target account alone.
-    // The old 'fail:'+key let anyone lock a victim out of their own CORRECT password
-    // by spamming wrong ones (the gate runs before the password check). Keying on the
-    // requester's IP means the counter only ever throttles the attacking source; the
-    // victim logging in from their own IP is never gated by someone else's failures.
-    const fk = 'fail:' + ip + ':' + key, now = Date.now();
+  region('    const fr = (await this.storage.get(fk)) || { n: 0, until: 0 };', "    return jsonResp({ ok: true, name: acct.name, token, kind: 'cloud' });",
+    ["'No account with that name", "'Wrong password.'", 'const hash = await hashPw(pass, acct.salt);'], B(String.raw`
     const fr0 = await this.storage.get(fk);
     if (fr0 && fr0.until && now < fr0.until) return jsonResp({ ok: false, error: 'Too many attempts \u2014 try again shortly.' }, 429);
     // mp-relay (2026-09-27) - a failure counter forgets FAIL_TTL after its last failure (a legacy record has no 'at': old)
@@ -462,12 +385,9 @@ export class MojiRoom {
     if (fr0) this.storage.delete(fk).catch(() => {});
     const token = randToken();
     await this._putToken(token, key);
-    return jsonResp({ ok: true, name: acct.name, token, kind: 'cloud' });
-  }
+`), 'the login check');
 
-  async _userForToken(request) {
-    const auth = request.headers.get('authorization') || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  once(J('    if (!token) return null;', '    return (await this.storage.get(TOK_KEY(token))) || null;', '  }'), B(String.raw`
     if (!token || token.length > 128) return null;   // mp-relay (2026-09-27) - (a 2 KB+ key made storage.get throw: a 500)
     // mp-relay (2026-09-27) - sessions expire: tok:<t> = { u, exp }, and exp slides forward on use (re-stamped at most about
     // once a day). A token minted before expiry existed (a bare username string) keeps working; its clock starts now.
@@ -532,22 +452,124 @@ export class MojiRoom {
       for (let i = 0; i < rk.length; i += 128) { const o = {}; for (const k of rk.slice(i, i + 128)) o[k] = restamp[k]; await this.storage.put(o); }
     }
     return soonest;
-  }
+  }`), 'the token lookup');
+}
 
-  async apiGetSave(request) {
-    const key = await this._userForToken(request);
-    if (!key) return jsonResp({ ok: false, error: 'unauthorized' }, 401);
-    const save = (await this.storage.get(CSAVE_KEY(key))) || null;
-    return jsonResp({ ok: true, save });
-  }
+// ---------------------------------------------------------------- mp-cf/_cf_test.mjs (wrangler dev protocol test)
+edit('_cf_test.mjs', "code === 'room_full'", 2500, 6500, ({ J, once, EOL }) => {
+  const B = (t) => RAW(t).replace(/\n/g, EOL);
+  once(J('function client() {', '  const ws = new WebSocket(URL); const msgs = [];'), J(
+    'function client(u) {   // mp-relay (2026-09-27) - u: a ?room= URL (default: the bare relay URL, like the game)',
+    '  const ws = new WebSocket(u || URL); const msgs = [];'), 'client()');
+  once(J('console.log(`\\n${pass} passed, ${fail} failed`);', 'process.exit(fail ? 1 : 0);'), B(String.raw`
+// ---- mp-relay (2026-09-27): 64 KB frame cap, party-of-five room cap, per-room Durable Objects, keepalive ----
+const until = async (f, ms = 3000) => { const t0 = Date.now(); while (!f() && Date.now() - t0 < ms) await wait(50); return f(); };
+const RUN = Date.now().toString(36);
+const F1 = client(); await F1.ready; F1.send({ t: 'hello', name: 'Big', room: 'frame' + RUN + '__ch1' });
+const F2 = client(); await F2.ready; F2.send({ t: 'hello', name: 'Watch', room: 'frame' + RUN + '__ch1' });
+await until(() => F1.last('welcome') && F2.last('welcome'));
+F1.send({ t: 'ping', pad: 'x'.repeat(70 * 1024) });
+F1.send({ t: 'ping', pad: 'y'.repeat(50 * 1024) });
+await until(() => F2.all('ping').length >= 2, 1500);
+const pads = F2.all('ping').map((m) => String(m.pad || '').length);
+ok(pads.length === 1 && pads[0] === 50 * 1024, 'frame cap: a 70 KB frame is dropped, a 50 KB one still relays ' + JSON.stringify(pads));
+ok(F1.all('error').filter((m) => m.code === 'frame_too_large').length === 1 && F1.ws.readyState === 1, 'frame cap: the sender is told once and stays connected');
+F1.close(); F2.close();
 
-  async apiPutSave(request) {
-    const key = await this._userForToken(request);
-    if (!key) return jsonResp({ ok: false, error: 'unauthorized' }, 401);
-    const text = await request.text();
-    if (!text || text.length > CSAVE_CAP) return jsonResp({ ok: false, error: 'save missing or too large' }, 413);
-    let save; try { save = JSON.parse(text); } catch { return jsonResp({ ok: false, error: 'bad save json' }, 400); }
-    await this.storage.put(CSAVE_KEY(key), save);
-    return jsonResp({ ok: true });
+const CAPR = 'cap' + RUN + '__ch1', PT = [];
+for (let i = 0; i < 5; i++) { const c = client(); await c.ready; c.send({ t: 'hello', token: TOK + '_c' + i, name: 'P' + i, room: CAPR }); PT.push(c); await until(() => c.last('welcome')); }
+const X6 = client(); await X6.ready; X6.send({ t: 'hello', token: TOK + '_c6', name: 'Sixth', room: CAPR });
+await until(() => X6.ws.readyState === 3 || X6.last('welcome'));
+ok(X6.last('error') && X6.last('error').code === 'room_full' && !X6.last('welcome') && X6.ws.readyState === 3, 'room cap: a 6th player gets room_full and is disconnected');
+ok(!PT[0].all('joined').some((j) => j.name === 'Sixth'), 'room cap: the party never saw the refused player');
+const G0 = client(); await G0.ready; G0.send({ t: 'hello', token: TOK + '_c0', name: 'P0again', room: CAPR });
+await until(() => G0.last('welcome') || G0.last('error'));
+ok(!!G0.last('welcome'), 'room cap: the same player re-joining a full room (old socket still open) gets in');
+PT[4].close(); await until(() => PT[0].last('left'));
+const Y6 = client(); await Y6.ready; Y6.send({ t: 'hello', token: TOK + '_c7', name: 'Next', room: CAPR });
+await until(() => Y6.last('welcome') || Y6.last('error'));
+ok(!!Y6.last('welcome'), 'room cap: a freed slot admits the next player');
+for (const c of [...PT, G0, Y6]) c.close();
+const LB = [];
+for (let i = 0; i < 7; i++) { const c = client(); await c.ready; c.send({ t: 'hello', token: TOK + '_l' + i, name: 'L' + i, room: 'lobby__ch4' }); LB.push(c); await until(() => c.last('welcome') || c.last('error')); }
+ok(LB.every((c) => c.last('welcome')), 'room cap: the public lobby is no party - 7 players share lobby channel 4');
+for (const c of LB) c.close();
+
+const RA = 'solo' + RUN + '__ch1', RB = 'solo' + RUN + '__ch2';
+const at = (r) => URL + '/?room=' + encodeURIComponent(r);
+const R1 = client(at(RA)); await R1.ready; R1.send({ t: 'hello', name: 'R1', room: RA });
+const R2 = client(at(RB)); await R2.ready; R2.send({ t: 'hello', name: 'R2', room: RB });
+await until(() => R1.last('welcome') && R2.last('welcome'));
+ok(R1.last('welcome') && R1.last('welcome').id === 1 && R2.last('welcome') && R2.last('welcome').id === 1, 'per-room DO: each ?room= socket is player #1 of its own Durable Object');
+const R3 = client(at(RA)); await R3.ready; R3.send({ t: 'hello', name: 'R3', room: RA });
+await until(() => R3.last('welcome'));
+ok(R3.last('welcome') && R3.last('welcome').players.some((p) => p.name === 'R1'), 'per-room DO: players dialling the same room meet');
+const R4 = client(at(RA)); await R4.ready; R4.send({ t: 'hello', name: 'R4', room: RB });
+await until(() => R4.last('welcome') || R4.ws.readyState === 3);
+ok(R4.last('error') && R4.last('error').code === 'room_mismatch' && !R4.last('welcome'), 'per-room DO: a hello naming another room is refused');
+R1.ws.send('{"t":"ka"}');
+await until(() => R1.all('ka').length > 0, 1500);
+ok(R1.all('ka').length === 1, 'keepalive: the relay answers {"t":"ka"} (the runtime replies; the DO can stay asleep)');
+for (const c of [R1, R2, R3, R4]) c.close();
+await wait(150);
+
+`) + J('console.log(`\\n${pass} passed, ${fail} failed`);', 'process.exit(fail ? 1 : 0);'), 'the summary lines');
+});
+
+// ---------------------------------------------------------------- mp-cf/_api_test.mjs (wrangler dev API test)
+edit('_api_test.mjs', 'the same 401 as a wrong password', 300, 1200, ({ J, once }) => {
+  once(J('// 6. unknown user',
+    "ok((await post('/api/login', { username: 'nobody_' + Math.floor(Math.random() * 1e6), password: P })).status === 404, 'unknown user -> 404');"), J(
+    '// 6. unknown user - mp-relay (2026-09-27): the very same 401 + message as a wrong password (it was 404: a username oracle)',
+    "r = await post('/api/login', { username: 'nobody_' + Math.floor(Math.random() * 1e6), password: P });",
+    'const jUnknown = { status: r.status, ...(await r.json()) };',
+    "r = await post('/api/login', { username: U, password: 'wrongwrong' });",
+    'const jWrong = { status: r.status, ...(await r.json()) };',
+    "ok(jUnknown.status === 401 && jWrong.status === 401 && jUnknown.error === jWrong.error, 'unknown user -> the same 401 as a wrong password ' + JSON.stringify([jUnknown.error, jWrong.error]));"),
+    'the unknown-user check');
+});
+
+// ---------------------------------------------------------------- mp-cf/README.md
+edit('README.md', '## Launch hardening', 1000, 3200, ({ J, once }) => {
+  once('## Files', J(
+    '## Launch hardening (mp-relay, 2026-09-27)',
+    '',
+    '- **Frame cap:** inbound frames over 64 KB are dropped unread; the sender gets one `error{code:\'frame_too_large\'}`.',
+    '- **Room cap:** 5 players per party-code room (the game\'s party of five); 50 per public lobby channel',
+    '  (`lobby__ch1..5`, under the game\'s 64-peer view; the game moves a player on from a full one). Counted per player',
+    '  token, so a re-join past your own half-dead socket or a second tab is never locked out; 2x cap sockets is the',
+    '  hard bound. `error{code:\'room_full\'}` + close.',
+    '- **Hibernation API:** sockets are `state.acceptWebSocket()`ed; an idle DO is evicted (no duration billed) and',
+    '  rebuilt from per-socket attachments on wake. The game\'s `{"t":"ka"}` keepalive is answered by the runtime.',
+    '  The reaper is an alarm (was a `setInterval` that kept the DO awake); positions save on leave and at most once a',
+    '  minute while connected, only when changed (was every 15 s).',
+    '- **Per-room Durable Objects (opt-in):** a socket dialled as `wss://<host>/?room=<room id>` goes to',
+    '  `idFromName(\'room:\' + id)`. The shipped client dials the bare URL and names its room only in `hello`, so it',
+    '  stays on the `global` DO together with the whole `/api`. Moving the client to `?room=` is a separate, coordinated',
+    '  change: members of one party on old and new builds would otherwise sit in different DOs.',
+    '- **Auth:** PBKDF2-SHA256 (100k) for new passwords; a legacy SHA-256 account is verified and re-hashed on its next',
+    '  good login; sessions expire after a year unused (sliding; older tokens start their clock on first use); one',
+    '  `401 Invalid username or password.` for unknown user and wrong password; an alarm sweeps lapsed `rl:` / `fail:` /',
+    '  `tok:` keys.',
+    '- **Tunables** (wrangler `[vars]`, bounded): `ROOM_CAP`, `LOBBY_CAP`, `IDLE_KILL_MS`, `SAVE_MS`, `TOKEN_TTL_MS`, `GC_MS`,',
+    '  `THROTTLE_MS`, `FAIL_TTL_MS`.',
+    '- **Rollback caution:** an account that logged in on this build is stored as PBKDF2; an older build cannot verify it.',
+    '',
+    '## Files'), 'the Files heading');
+});
+
+// ---------------------------------------------------------------- write everything (all edits computed first)
+if (!files.length) { console.log('already applied'); process.exit(0); }
+for (const f of files) {
+  writeFileSync(f.path + '.tmp', f.after, 'utf8');
+  if (statSync(f.path + '.tmp').size < f.before.length) die(f.rel + ': tmp smaller than the original');
+}
+for (const f of files) {
+  let done = false, lastErr = null;
+  for (let a = 1; a <= 8 && !done; a++) {
+    try { renameSync(f.path + '.tmp', f.path); done = true; }
+    catch (e) { lastErr = e; if (e.code !== 'EPERM' && e.code !== 'EBUSY') throw e; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500 * a); }
   }
+  if (!done) die(f.rel + ': rename kept failing: ' + lastErr.code);
+  console.log('applied: mp-relay ' + f.rel + ' (+' + f.grew + ' chars)');
 }

@@ -36,8 +36,12 @@ const token2 = j.token;
 r = await post('/api/login', { username: U, password: 'wrongwrong' });
 ok(r.status === 401, 'wrong password -> 401');
 
-// 6. unknown user
-ok((await post('/api/login', { username: 'nobody_' + Math.floor(Math.random() * 1e6), password: P })).status === 404, 'unknown user -> 404');
+// 6. unknown user - mp-relay (2026-09-27): the very same 401 + message as a wrong password (it was 404: a username oracle)
+r = await post('/api/login', { username: 'nobody_' + Math.floor(Math.random() * 1e6), password: P });
+const jUnknown = { status: r.status, ...(await r.json()) };
+r = await post('/api/login', { username: U, password: 'wrongwrong' });
+const jWrong = { status: r.status, ...(await r.json()) };
+ok(jUnknown.status === 401 && jWrong.status === 401 && jUnknown.error === jWrong.error, 'unknown user -> the same 401 as a wrong password ' + JSON.stringify([jUnknown.error, jWrong.error]));
 
 // 7. save round-trip (both tokens see the same account save)
 const SAVE = { v: 1, cls: 'mage', level: 42, mojicoins: 1234, inventory: [{ id: 'x', stars: 3 }] };
