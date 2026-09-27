@@ -8,6 +8,8 @@
 // dark purple comic burst with plum rays; the memory panel "more POP and PUNK features" - taped corners, a ransom-note title,
 // a starburst clock, a labelled will meter, built once and updated in place; Guguma's chirp and shouted word.
 // Pass 3 (per user, of the panel and balloon): "more Blue and purple, reduce on the pink" - hot pink is left on the Cheep! only.
+// Title card (per user): "pink darkpurple and dark blue, with pink being minimal" - a navy banner, dark blue rim and bar edges,
+// plum and dark blue rays; pink only on the kicker letters; the stanzas after it pale lavender.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,6 +55,8 @@ try {
           return { cls: t.classList.contains('plg-title'), kick: k && k.textContent, head: hd && hd.textContent, kickBg: k && getComputedStyle(k).backgroundColor,
             burst: /svg/.test(b0.backgroundImage) && /(%23|#)3a1768/i.test(b0.backgroundImage), rays: /conic-gradient/.test(ra.backgroundImage) && /106, 47, 176/.test(ra.backgroundImage),
             banner: !!hb && /linear-gradient/.test(hb.backgroundImage) && /matrix/.test(hb.transform), slab: !!ha && ha.backgroundColor === 'rgb(11, 10, 14)' && /matrix/.test(ha.transform),
+            pal: { banner: hb && hb.backgroundImage, rays: ra.backgroundImage, rim: k && getComputedStyle(k).borderTopColor, kickTxt: k && getComputedStyle(k).color,
+              barEdge: getComputedStyle(document.querySelector('#prologue-cine .plg-top')).borderBottomColor },
             headColor: hd && getComputedStyle(hd).color, barZ: getComputedStyle(document.querySelector('#prologue-cine .plg-top')).zIndex }; })(),
         skip: (() => { const b = document.getElementById('plg-skip'); return b ? { cls: b.className, txt: b.textContent, font: getComputedStyle(b).fontFamily } : null; })(),
         hintKeys: document.querySelectorAll('#prologue-cine .plg-hint kbd').length };
@@ -60,6 +64,7 @@ try {
       await new Promise((s) => setTimeout(s, 1100));
       out.banner1 = getComputedStyle(document.getElementById('plg-text'), '::before').content !== 'none';
       out.title1 = document.getElementById('plg-text').classList.contains('plg-title');
+      out.color1 = getComputedStyle(document.getElementById('plg-text')).color;
       out.lines1 = Math.round(document.getElementById('plg-text').offsetHeight / parseFloat(getComputedStyle(document.getElementById('plg-text')).lineHeight));
       document.getElementById('prologue-cine').remove();
       _prologueOverlay(['The memory frays.\n\nThe Void reclaims.', 'x'], () => {}, { noPovVideo: true });   // the post-Void strip's first stanza
@@ -98,6 +103,9 @@ try {
     check(T.cls && T.kick === 'IN A DIFFERENT REALM' && T.head === 'AT THE FAR END OF THE DREAM' && T.kickBg === 'rgb(11, 10, 14)' && T.banner && T.slab && T.headColor === 'rgb(255, 224, 122)',
       `${name}: the title card - a black kicker tag over the yellow headline on its banner and ink slab`, T);
     check(T.burst && T.rays, `${name}: dark purple - the headline stands on a dark purple comic burst with plum rays`, { burst: T.burst, rays: T.rays });
+    check(/27, 58, 134/.test(T.pal.banner || '') && /36, 71, 158/.test(T.pal.rays || '') && T.pal.rim === 'rgb(63, 99, 216)' && T.pal.barEdge === 'rgb(36, 71, 158)'
+      && T.pal.kickTxt === 'rgb(255, 111, 183)' && S.color1 === 'rgb(230, 222, 250)',
+      `${name}: dark blue + dark purple lead the title card, pink kept to the kicker letters; the stanzas after it pale lavender`, { pal: T.pal, color1: S.color1 });
     check(T.barZ === '1', `${name}: the letterbox bars sit above the rays`, { barZ: T.barZ });
     check(!S.title1 && !S.banner1 && S.strip && !S.strip.title && S.strip.kids === 0 && S.strip.before === 'none', `${name}: other stanzas are inked text off the banner - the post-Void strip's first stanza too`, { t1: S.title1, b1: S.banner1, strip: S.strip });
     check(S.skip && /plg-skip-pop/.test(S.skip.cls) && /Skip prologue/.test(S.skip.txt) && /^"?Nunito/.test(S.skip.font) && S.hintKeys === 2, `${name}: a pop Skip button and keycap hints`, { skip: S.skip, keys: S.hintKeys });
