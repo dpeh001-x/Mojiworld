@@ -118,7 +118,13 @@ const out = await page.evaluate(async () => {
   // Stand in the lane at charge range and stay there.
   player.x = lg.x + lg.w / 2 + 400 - player.w / 2;
   player.y = lg.y + lg.h - player.h;
+  // strike-knock: HELD in the lane, like the windup half above. A boss's shot throws the player now (~110 px along its
+  // flight), and 100 px down this lane is a launch pad: standing free, a fire-spit that landed before the charge threw
+  // the player onto the pad and out of the charge's reach (5 runs in 6). "Stay there" is what this half measures.
+  const _laneHold = { x: player.x, y: player.y };
+  const _lanePin = setInterval(() => { if (goredToasts < 1) { player.x = _laneHold.x; player.y = _laneHold.y; player.vx = 0; player.vy = 0; } }, 4);
   const goreLanded = await waitFor(() => goredToasts >= 1, 12000);
+  clearInterval(_lanePin);
   window._diffDmg = _dd;
   ok('the charge GORES a player standing in the lane', goreLanded, goredToasts + ' GORED toast(s)');
   if (goreLanded) {

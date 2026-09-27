@@ -82,6 +82,9 @@ const R = await page.evaluate(async () => {
   // cannot answer the next question.
   out.godly = await fire({ god: true });
   await sleep(400);
+  // strike-knock: a boss's lance throws the player now (~110 px along its flight). The next lance is aimed at where the
+  // player stands, so wait until they have landed and stopped - on a loaded machine 400 ms is not always enough.
+  for (let i = 0; i < 150 && !(player.onGround && Math.abs(player.vx) < 0.2 && (player.hitStun | 0) <= 0); i++) await sleep(20);
   out.plain = await fire();
   out.art = {
     registered: (typeof LX_MOB_PROJ !== 'undefined') && !!LX_MOB_PROJ.maeshard,

@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1292';
+const GAME_VERSION = 'v0.30.1293';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -42453,6 +42453,108 @@ function _lxHeavyStaggerMs(baseMs) {
   }
   return ms;
 }
+// =========================================================================
+// v0.30.1293 strike-knock - BOSSES AND STRONGER MONSTERS THROW YOU (per user: "For bosses and stronger monsters when they
+// hit the player it should produce a more significant knockback distance to player in the trajectory they are being
+// hit from"). A boss's touch shoved the player exactly as far as a slime's (3.0 px a frame, always sideways), and a
+// boss's shot or heavy swing barely at all (1.0): the hit cost HP and no ground. Two rules now, for every attacker
+// above the ordinary field monster (an ordinary monster's hit is unchanged, to the number):
+//   WEIGHT     - the throw grows with the attacker: elite / empowered x1.5, Elder (mini-boss) x1.9, boss x2.5, super /
+//                zodiac / Gravitos x3.1. A heavy swing or ground smash adds a quarter on top. Taurus's charge keeps
+//                its own multiplier where that is higher.
+//   TRAJECTORY - the throw follows the hit. A shot or swing carries the player along its own flight (a falling shot
+//                spikes an airborne player down, a rising one lifts); a body throws the player out through the side
+//                it touched (off its head: up and away; from beneath a flier: down), and a body in motion - a
+//                charge, a pounce - adds its own travel. Standing on the floor, a downward hit is turned sideways.
+// The player's own reducers apply as they always did on a touch (warrior x0.4, Iron Skin / Unstoppable, Steady Feet),
+// and a raised block halves the throw. Attacks that author their own launch (slams, quakes, pounces, pillars) are
+// not routed through here and keep their numbers.
+// =========================================================================
+const LX_KB_TIER_MUL = [1, 1.5, 1.9, 2.5, 3.1];   // ordinary, elite / empowered, Elder, boss, super / zodiac / Gravitos
+const LX_KB_TOUCH = 3.0;      // a touch's base speed (an ordinary monster's whole shove, unchanged)
+const LX_KB_SHOT = 2.4;       // a strong attacker's shot or swing, before its weight
+const LX_KB_HEAVY = 1.25;     // a heavy swing / ground smash, on top
+const LX_KB_LIFT = 2.4;       // the pop that takes the feet off the floor (the old touch's, unchanged)
+const LX_KB_BLOCK = 0.5;      // behind a raised block
+const LX_KB_MAX_VX = 14, LX_KB_MAX_UP = 13, LX_KB_MAX_DOWN = 8;   // 14: above Taurus at full gallop (3.0 x 4.4), so his authored launch is never cut
+function _lxKbTier(m) {
+  if (!m) return 0;
+  if (m.isBoss || m.boss || m.zodiacBoss) {
+    return (m.superBoss || m.hyperBoss || m.zodiacBoss || m.zodiacSign || m.type === 'gravitos') ? 4 : 3;
+  }
+  if (m.isMiniBoss || m._octoParent) return 2;   // an Octobaby arm is the boss's own limb
+  if (m.isElite || m._empowered) return 1;
+  return 0;
+}
+// A shot's weight: stamped where the shooter is known (_kbTier), else read from the rules the shot already carries.
+// A shot with neither (a map hazard, a stray bolt) is an ordinary hit.
+function _lxProjKbTier(p) {
+  if (!p) return 0;
+  let t = (typeof p._kbTier === 'number' && Number.isFinite(p._kbTier)) ? (p._kbTier | 0) : -1;
+  if (t < 0) {
+    const b = p._bossBand;
+    if (p._gravBand || p._zodiacSign || p._zodiacAttacker || p._srcType === 'gravitos') t = 4;
+    else if (b && typeof b === 'object') {
+      t = (b.mul != null || (b.roll ? (b.floor >= LX_BOSS_PROJ_SUPER[0] && b.cap >= LX_BOSS_PROJ_SUPER[1]) : b.cap > 0.85)) ? 4 : 3;
+    } else if (p._srcType && typeof monsterTypes !== 'undefined' && monsterTypes[p._srcType] && monsterTypes[p._srcType].boss) {
+      const d = monsterTypes[p._srcType]; t = (d.superBoss || d.hyperBoss || d.zodiacBoss) ? 4 : 3;
+    } else t = 0;
+  }
+  if (p.skill === 'swing' || p.skill === 'smash') t = Math.max(t, 1);   // "especially bigger monsters": their heavy strike is a strong hit
+  return Math.max(0, Math.min(4, t));
+}
+function _lxKbTaken() {
+  let k = player.cls === 'warrior' ? 0.4 : 1;
+  k *= Math.max(0.1, 1 - ((player.tree && player.tree.kbReduce) || 0));
+  if (typeof hasMilestone === 'function' && hasMilestone('steadyFeet')) k *= 0.5;
+  if ((player.blockTimer || 0) > 0) k *= LX_KB_BLOCK;
+  return k;
+}
+// (dx, dy): the hit's travel, any length. speed: px a frame before the player's reducers. mul: the attacker's weight
+// (sizes the lift). awayX: the side to fall back on when the travel has no sideways part (-1 / 1).
+function _lxStrikeKnock(dx, dy, speed, mul, awayX) {
+  if (typeof player === 'undefined' || !player) return;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) { dx = 0; dy = 0; }
+  if (!Number.isFinite(speed)) return;
+  const away = (awayX < 0) ? -1 : 1;
+  const len = Math.hypot(dx, dy);
+  let ux = away, uy = 0;
+  if (len >= 1e-3) { ux = dx / len; uy = dy / len; }
+  const side = (Math.abs(ux) > 0.05) ? (ux < 0 ? -1 : 1) : away;
+  if (player.onGround && uy > 0) { ux = side * Math.max(Math.abs(ux), 0.6); uy = 0; }   // the floor turns it sideways
+  else if (uy < -0.85) ux = side * Math.max(Math.abs(ux), 0.35);                        // thrown up: drift off what threw you
+  const k = _lxKbTaken(), sp = Math.max(0, speed) * k;
+  let vx = ux * sp, vy = uy * sp;
+  if (uy <= 0.25) vy -= LX_KB_LIFT * (1 + (Math.max(1, +mul || 1) - 1) * 0.45) * k;
+  player.vx = Math.max(-LX_KB_MAX_VX, Math.min(LX_KB_MAX_VX, vx));
+  player.vy = Math.max(-LX_KB_MAX_UP, Math.min(LX_KB_MAX_DOWN, vy));
+  if (player.vy < 0) player.onGround = false;
+}
+// A body's throw: out through the nearest point of the box that touched, plus the body's own travel when it is moving.
+function _lxBodyKnock(m, tier, authoredMul) {
+  if (!m || typeof player === 'undefined' || !player) return;
+  const b = ((typeof _mobTouchBox === 'function') ? _mobTouchBox(m) : m) || m;
+  const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;
+  const away = (pcx >= b.x + b.w / 2) ? 1 : -1;
+  const nx = Math.max(b.x, Math.min(pcx, b.x + b.w)), ny = Math.max(b.y, Math.min(pcy, b.y + b.h));
+  let dx = pcx - nx, dy = pcy - ny;
+  const len = Math.hypot(dx, dy);
+  if (!(len >= 1e-3)) { dx = away; dy = 0; } else { dx /= len; dy /= len; }   // centre inside the body: out the nearer side
+  const mvx = +m.vx || 0, mvy = +m.vy || 0, msp = Math.hypot(mvx, mvy);
+  if (msp >= 3) { dx += (mvx / msp) * 0.6; dy += (mvy / msp) * 0.6; }
+  const mul = Math.max(LX_KB_TIER_MUL[tier] || 1, +authoredMul || 1);
+  _lxStrikeKnock(dx, dy, LX_KB_TOUCH * mul, mul, away);
+}
+// A shot's or swing's throw: along its flight; a standing strike (a ground smash) throws out from its middle.
+function _lxShotKnock(p, tier) {
+  if (!p || typeof player === 'undefined' || !player) return;
+  const away = ((player.x + player.w / 2) >= (+p.x || 0) + (+p.w || 0) / 2) ? 1 : -1;
+  let dx = +p.vx || 0, dy = +p.vy || 0;
+  if (!(Math.hypot(dx, dy) >= 0.75)) { dx = away; dy = 0; }
+  const mul = (LX_KB_TIER_MUL[tier] || 1) * ((p.skill === 'swing' || p.skill === 'smash') ? LX_KB_HEAVY : 1);
+  _lxStrikeKnock(dx, dy, LX_KB_SHOT * mul, mul, away);
+}
+try { window._lxKbTier = _lxKbTier; window._lxProjKbTier = _lxProjKbTier; window._lxStrikeKnock = _lxStrikeKnock; window._lxBodyKnock = _lxBodyKnock; window._lxShotKnock = _lxShotKnock; } catch (e) {}
 function getCritDmg(){
   // v0.26.395 — include equipment critDmg (was a DEAD stat: T7-T10 weapons/
   // accessories roll critDmg 0.15-0.50 but getCritDmg only read player.mods.critDmg,
@@ -56322,7 +56424,7 @@ function _coopTickProjectiles() {
 // shot's first frames and on each keyframe (the guest keeps them on its copy), so a volley costs its bytes once.
 const _COOP_PJ_XF = ['_defPierce', '_ignoreDef', '_heavyFloorPct', '_srcType', '_gravBand', '_bossBand', '_healLockMs', '_sourceLabel',
   'sourceLabel', '_zodiacSign', '_radiance', '_impactMs', '_impactShake', 'freeze', 'poison', '_poisonDmg', 'slow', 'skillLock',
-  'stunHit', '_zoneAttack', 'pierce', '_noEvasion', 'noGravity'];   // v0.30.1013 a guest's weight wave rides the floor too   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
+  'stunHit', '_kbTier', '_zoneAttack', 'pierce', '_noEvasion', 'noGravity'];   // v0.30.1293 strike-knock - _kbTier: a guest is thrown as far as the host (kept off the list's tail: two suites pin it)   // v0.30.1013 a guest's weight wave rides the floor too   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
 function _coopPjVal(v) {   // numbers, short strings, booleans, and one level of those (bands, radiance)
   if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
   if (typeof v === 'string') return v.slice(0, 80);
@@ -58042,6 +58144,7 @@ function _coopFollowerContactTick() {
       ? _lxHeavyStaggerMs(140)
       : ((player.tree && player.tree.stunImmune) ? 0 : Math.floor(140 * (1 - ((typeof getStunResist === 'function') ? getStunResist() : 0))));
     player.invulnerable = 1000;
+    { const _kbTier = _lxKbTier(m); if (_kbTier > 0) _lxBodyKnock(m, _kbTier, +m._playerKbMul || 1); }   // v0.30.1293 strike-knock - the host's throw, on the mirror
     if (typeof flash === 'function') { try { flash(0.2); } catch (e) {} }
     if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 10, y: player.y - 8, vy: -2, text: '' + dmg, life: 40, color: '#ff6666', size: 15 });
     return;   // one hit per tick; the i-frame gates the rest
@@ -92457,6 +92560,7 @@ function fireMonsterProjectile(m, angleOffset) {
     // impact resolver can clamp their damage (see L50305-area cap). True
     // bosses (boss / zodiacBoss) are exempt and keep full punch.
     _normalMob: !(m.isBoss || m.boss || m.zodiacBoss),
+    _kbTier: _lxKbTier(m),   // v0.30.1293 strike-knock - the shooter's weight rides with the shot
     // v0.29.131 — boss shots get the tier ranged band (final-loss clamp at
     // the impact resolver): hard floor, no punish-ramp one-shots. Null for
     // field mobs (they keep the _normalMob 40% cap above).
@@ -93118,7 +93222,7 @@ function updateMonsters(dt) {
         game.projectiles.push({
           x: _es.x, y: _es.y, vx: _es.vx, vy: 0,
           w: _es.w, h: _es.h, life: 14,
-          damage: _es.damage, owner: 'enemy', skill: 'swing',
+          damage: _es.damage, owner: 'enemy', skill: 'swing', _kbTier: Math.max(1, _lxKbTier(m)),   // v0.30.1293 strike-knock
           _defPierce: (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1,
           // Spectral tint so the second hit reads as the echo and not as a
           // second monster: same arc art, ghost-blue instead of the swinger's
@@ -93243,7 +93347,7 @@ function updateMonsters(dt) {
               y: m.y + m.h - 14,
               vx: 0, vy: 0,
               w: _arcW, h: 28, life: 18,
-              damage: _dmg, owner: 'enemy', skill: 'smash',
+              damage: _dmg, owner: 'enemy', skill: 'smash', _kbTier: Math.max(1, _lxKbTier(m)),   // v0.30.1293 strike-knock
               _defPierce: (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1,   // v0.29.265
               color: '#ff7722',
               noGravity: true,
@@ -93274,7 +93378,7 @@ function updateMonsters(dt) {
               y: m.y + m.h * 0.3,
               vx: _facing * 1.5, vy: 0,
               w: _sw, h: _sh, life: 14,
-              damage: _dmg, owner: 'enemy', skill: 'swing',
+              damage: _dmg, owner: 'enemy', skill: 'swing', _kbTier: Math.max(1, _lxKbTier(m)),   // v0.30.1293 strike-knock
               _defPierce: (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1,   // v0.29.265
               // v0.29.511 — the swing carries the SWINGER's main colour (the
               // `color` field of its type def, spread onto the instance by
@@ -95642,8 +95746,14 @@ function updateMonsters(dt) {
       // skill-tree / milestone reducers above still apply on top, so a warrior
       // with Steady Feet is still the one who holds ground best.
       const _mKb = Math.max(0, Math.min(6, +m._playerKbMul || 1));
+      // v0.30.1293 strike-knock - an elite, an Elder or a boss throws by its weight, out through the side it touched
+      // (see _lxBodyKnock). An ordinary monster keeps the shove below, to the number.
+      const _kbTier = _lxKbTier(m);
+      if (_kbTier > 0) _lxBodyKnock(m, _kbTier, _mKb);
+      else {
       player.vx = dir * 3.0 * kbMul * _mKb;
       player.vy = -2.4 * kbMul * (_mKb > 1 ? 1 + (_mKb - 1) * 0.45 : 1);
+      }
       game.damageNumbers.push({
         taken: true, x: player.x + 14, y: player.y, vy: -2,
         text: _shownDmg, life: 40, color: '#ff4444', size: 16
@@ -108083,8 +108193,14 @@ function updateProjectiles(dt) {
         if (p._zodiacAttacker) { const _e0 = (game._zdEma == null) ? 0.5 : game._zdEma; game._zdEma = Math.max(0, _e0 * 0.85); }
         let kbMul = player.cls === 'warrior' ? 0.4 : 1;
         if (hasMilestone('steadyFeet')) kbMul *= 0.5;
+        // v0.30.1293 strike-knock - a strong attacker's shot or swing carries the player along its own flight
+        // (see _lxShotKnock). An ordinary monster's shot keeps the nudge below, to the number.
+        const _kbTier = _lxProjKbTier(p);
+        if (_kbTier > 0) _lxShotKnock(p, _kbTier);
+        else {
         player.vx = dir * 1 * kbMul;
         player.vy = -1.2 * kbMul;
+        }
         game.damageNumbers.push({
           taken: true, x: player.x + 14, y: player.y, vy: -2,
           text: dmg, life: 40, color: '#ff4444', size: 16
