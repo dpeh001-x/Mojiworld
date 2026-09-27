@@ -2131,6 +2131,12 @@
     opacity: 1;
     transform: translateY(0);
   }
+  /* v0.30.1186 save-notices - saves are failing: the chip stays up as a red "Not saving" badge (danger-toast palette) until one lands */
+  #save-indicator.lx-save-fail {
+    opacity: 1; transform: none; pointer-events: auto; cursor: pointer;
+    background: linear-gradient(135deg, rgba(64,18,28,0.92), rgba(30,12,40,0.9));
+    border-color: rgba(230,90,90,0.75); color: #ffdcdc; box-shadow: 0 0 8px rgba(255,70,70,0.35);
+  }
 
   /* v0.25.793 — Map transition fade-overlay. A full-canvas semi-opaque
      black panel that fades in over loadMap() entry and out after the
@@ -15950,7 +15956,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1185';
+const GAME_VERSION = 'v0.30.1186';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -51095,6 +51101,7 @@ function _flushSaveStateNow() {
     // v0.25.793 — Surface a save-confirmation blip in the corner so the
     // player sees that progress was committed. The CSS handles the 200ms
     // fade in + 700ms hold + 200ms fade out via the .blip class.
+    if (game._saveFailing) _lxSaveFailing(null);   // v0.30.1186 save-notices - saving again: the sticky badge goes
     if (typeof _blipSaveIndicator === 'function') _blipSaveIndicator();
   } catch (e) {
     // v0.25.905 — Debug recon (agent a110e0b8) flagged that the bare
@@ -51108,11 +51115,12 @@ function _flushSaveStateNow() {
     // understands why progress isn't persisting.
     const isQuota = (e && (e.name === 'QuotaExceededError'
                           || e.code === 22 || e.code === 1014));
+    try { _lxSaveFailing(isQuota ? 'full' : 'blocked'); } catch (_) {}   // v0.30.1186 save-notices - sticky until a save lands
     if (isQuota) {
       if (!game._quotaWarned) {
         game._quotaWarned = true;
         if (typeof showToast === 'function') {
-          showToast('⚠ Save full — try removing painted layers in Wardrobe', 'danger');
+          showToast(_lxSaveFailAdvice('full'), 'danger');   // v0.30.1186 save-notices - was the Wardrobe hint for everyone
         }
         try { if (typeof console !== 'undefined') console.warn('[saveState] QuotaExceededError — save failed; user warned.'); } catch (_) {}
       }
@@ -52821,6 +52829,9 @@ function loadState() {
     // queue a toast on next session start so the player understands why
     // their progress reset. The toast fires from a setTimeout so it lands
     // after the game's UI is ready to display toasts.
+    // v0.30.1186 save-notices - `{}` / null / a bare value is not an older format ("save vundefined vs game v1", a junk backup):
+    // it is corrupt, and goes down the could-not-be-read path.
+    if (!s || typeof s !== 'object' || (s.v == null && !s.player)) throw new Error('save holds no version and no hero');
     if (s && s.v !== SAVE_VERSION) {
       try {
         console.warn('[save] schema mismatch — save v' + s.v + ' vs game v' + SAVE_VERSION + '. Starting fresh.');
@@ -52831,7 +52842,7 @@ function loadState() {
         // typical class-pick time + a moment of clarity before the toast.
         setTimeout(() => {
           if (typeof showToast === 'function') {
-            showToast('⚠ Save format updated (v' + s.v + ' → v' + SAVE_VERSION + '). Starting fresh.', 'rare');
+            _lxSaveNotice('⚠ Save format updated (' + (s.v == null ? 'unversioned' : 'v' + s.v) + ' → v' + SAVE_VERSION + '). Your old save is kept in Save Backups; starting fresh.', 'rare');   // v0.30.1186 save-notices
           }
         }, 6000);
       } catch (_e) {}
@@ -52842,6 +52853,7 @@ function loadState() {
       return false;
     }
     if (!s || !s.player || !s.player.cls) return false;
+    try { window._lxLoadedSaveT = (+s.t > 0) ? +s.t : 0; } catch (e) {}   // v0.30.1186 save-notices - the stamp of the save being continued
     // v0.25.452 — sanitize critical numeric fields BEFORE Object.assign
     // so any NaN / Infinity / out-of-range value on the persisted save
     // is repaired before it reaches the player struct.
@@ -52893,6 +52905,7 @@ function loadState() {
         const _qa2 = s.player.quests && s.player.quests.active;
         if (_qa2) for (const _qk2 in _qa2) { const _q2 = _qa2[_qk2]; if (_q2 && _q2.objProgress) _remap(_q2.objProgress); } }
     } catch (e) {}
+    var _lxNoHp = !(typeof s.player.hp === 'number' && isFinite(s.player.hp)), _lxNoMp = !(typeof s.player.mp === 'number' && isFinite(s.player.mp));   // v0.30.1186 save-notices
     _sanitizePlayerSaveNumerics(s.player);
     // v0.26.x audit -- nested numerics the top-level sanitizer missed: a
     // corrupted import propagates NaN through quest-progress math and buff
@@ -53267,6 +53280,7 @@ function loadState() {
     const _safeMaxMp = (typeof maxMp === 'number' && isFinite(maxMp) && maxMp > 0) ? maxMp : 50;
     player.hp = (!player.hp || player.hp <= 0 || !isFinite(player.hp)) ? _safeMaxHp : Math.min(player.hp, _safeMaxHp);
     player.mp = (!player.mp || player.mp <= 0 || !isFinite(player.mp)) ? _safeMaxMp : Math.min(player.mp, _safeMaxMp);
+    if (_lxNoHp) player.hp = _safeMaxHp; if (_lxNoMp) player.mp = _safeMaxMp;   // v0.30.1186 save-notices - an old / minimal save starts at full, not at 100 of 643
     // v0.30.918 DOWNED ACROSS A RELOAD. A solo down is a death on a 30 s delay (v0.27.10), but the save held only hp 1, so
     // closing the game on the ground loaded the hero standing with the toll unpaid. Take the toll triggerDeath takes.
     if (player._downPending) {
@@ -53502,13 +53516,16 @@ function loadState() {
     // survives even if the session goes on to save over the original.
     try {
       const _raw = localStorage.getItem(SAVE_KEY);
+      const _lxHero = !!_raw && _lxSaveMayHoldHero(_raw);   // v0.30.1186 save-notices - `{}` holds no hero: nothing to keep
       if (_raw) {
-        if (!localStorage.getItem(SAVE_KEY + '_recover')) localStorage.setItem(SAVE_KEY + '_recover', _raw);
+        if (_lxHero && !localStorage.getItem(SAVE_KEY + '_recover')) localStorage.setItem(SAVE_KEY + '_recover', _raw);
         _lxKeepUnloadableSave(_raw, 'auto · could not load');   // v0.30.890
         if (typeof game !== 'undefined' && game) game._saveLoadFailed = true;
         try { console.error('[mojiworld] save failed to load; original preserved at "' + SAVE_KEY + '_recover"', e); } catch (_) {}
         setTimeout(() => {
-          try { showToast('\u26A0 Your save could not be read. It is kept in Save Backups as "could not load" - restore it from there.', 'danger'); } catch (_) {}
+          // v0.30.1186 save-notices - shown in the title menu (a toast here sat under the title overlay and expired unseen)
+          try { _lxSaveNotice(_lxHero ? '\u26A0 Your save could not be read. It is kept in Save Backups as "could not load" - restore it from there.'
+            : '\u26A0 Your save could not be read: it was empty, with no hero to restore. Starting a new adventure.', 'danger'); } catch (_) {}
         }, 3000);
       }
     } catch (_) {}
@@ -53517,7 +53534,65 @@ function loadState() {
 }
 // v0.30.890 launch audit: a save that fails to load was kept once, under a key nothing reads, and the forced new-hero flow
 // then saved over it. It now also goes into Save Backups, labelled, so it can be restored from the menu.
+// v0.30.1186 save-notices - a save notice the player can actually see. While the title overlay is up (z 9999 over the toasts,
+// and the menu appears long after a 3-6 s toast has expired) it goes INTO the title menu, under Save Backups, on the
+// menu's own amber warning card; if the menu is skipped (resume / deep link) it is shown as a toast once the overlay lifts.
+function _lxSaveNotice(msg, kind) {
+  try {
+    const ov = document.getElementById('loading-overlay');
+    const up = !!ov && !ov.classList.contains('fade') && getComputedStyle(ov).display !== 'none';
+    const menu = up && document.getElementById('lo-menu');
+    if (menu) {
+      let n = document.getElementById('menu-save-notice');
+      if (!n) { n = document.createElement('div'); n.id = 'menu-save-notice'; n.className = 'menu-warn'; n.setAttribute('role', 'alert'); n.style.margin = '2px 0 0'; menu.appendChild(n); }
+      n.textContent = msg; n.hidden = false;
+      let seen = false;
+      const iv = setInterval(() => {
+        try {
+          if (ov.classList.contains('menu-up') && getComputedStyle(menu).display !== 'none') seen = true;
+          if (ov.classList.contains('fade') || getComputedStyle(ov).display === 'none') { clearInterval(iv); if (!seen && typeof showToast === 'function') showToast(msg, kind); }
+        } catch (e) { clearInterval(iv); }
+      }, 500);
+      return;
+    }
+  } catch (e) {}
+  try { if (typeof showToast === 'function') showToast(msg, kind); } catch (e) {}
+}
+// v0.30.1186 save-notices - may these bytes hold a hero? Unparseable bytes: maybe (keep them). A parsed blob without a
+// player object (`{}`, null, a number): no - nothing to restore, so no junk Save Backups slot or _recover copy.
+function _lxSaveMayHoldHero(raw) {
+  try { const o = JSON.parse(raw); return !!(o && typeof o === 'object' && o.player && typeof o.player === 'object'); } catch (e) { return true; }
+}
+// v0.30.1186 save-notices - the title's "saved X ago": the stamp of the save being continued, not the boot's own autosave
+function _lxMenuSaveT(meta) { return (typeof window._lxLoadedSaveT === 'number') ? window._lxLoadedSaveT : ((meta && meta.t) || 0); }
+// v0.30.1186 save-notices - saves are failing: advice that fits most players (the Wardrobe hint only with painted layers)
+function _lxSaveFailAdvice(why) {
+  if (why === 'blocked') return '\u26A0 Progress is not saving: this browser is blocking site storage. Allow storage for this site to keep playing safely.';
+  let paint = false;
+  try { paint = (typeof player.customPaint === 'string' && !!player.customPaint) || (!!player.customPaintLayers && Object.keys(player.customPaintLayers).length > 0); } catch (e) {}
+  return '\u26A0 Progress is not saving: browser storage is full. Free up space (delete old snapshots in Save Backups, or clear other site data) and export a backup (Save Backups \u25B8 Secure Save).'
+    + (paint ? ' Painted Wardrobe layers take a lot of room too - removing some helps.' : '');
+}
+// v0.30.1186 save-notices - the corner save chip becomes a sticky "Not saving" badge while saves fail (why: 'full' | 'blocked'),
+// and goes back to the quiet "saved" blip the moment one lands (why: null). Click it for the advice + Save Backups.
+function _lxSaveFailing(why) {
+  try {
+    const el = document.getElementById('save-indicator');
+    if (!why) {
+      if (typeof game !== 'undefined' && game) { game._saveFailing = null; game._quotaWarned = false; game._saveDisabledWarned = false; }
+      if (el && el.classList.contains('lx-save-fail')) { el.classList.remove('lx-save-fail'); if (el._lxOrigText != null) el.textContent = el._lxOrigText; el.title = el._lxOrigTitle || 'Progress saved'; el.onclick = null; }
+      return;
+    }
+    if (typeof game !== 'undefined' && game) game._saveFailing = why;
+    if (!el) return;
+    if (!el.classList.contains('lx-save-fail')) { el._lxOrigText = el.textContent; el._lxOrigTitle = el.title; }
+    el.classList.add('lx-save-fail'); el.textContent = '\u26A0 Not saving';
+    el.title = _lxSaveFailAdvice(why) + ' (click for Save Backups)';
+    el.onclick = () => { try { showToast(_lxSaveFailAdvice(why), 'danger'); if (typeof openBackupModal === 'function') openBackupModal(); } catch (e) {} };
+  } catch (e) {}
+}
 function _lxKeepUnloadableSave(raw, label) {
+  if (!_lxSaveMayHoldHero(raw)) return;   // v0.30.1186 save-notices - `{}` has no hero to restore: no junk slot
   try {
     if (!raw || typeof _lxGetBackups !== 'function' || typeof _lxStoreBackups !== 'function') return;
     raw = _lxSaveWithPaint(raw);   // v0.30.1181 paint-save - the kept copy keeps the paint
@@ -164129,7 +164204,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         const sub = document.getElementById('menu-continue-sub');
         const name = meta.name || localStorage.getItem(MP_NAME_KEY) || 'Hero';
         if (sub) sub.textContent = name + ' · Lv.' + (meta.level || 1) + ' ' + (_MENU_CLS[meta.cls] || meta.cls)
-          + (meta.map ? ' · ' + meta.map : '') + (meta.t ? ' · saved ' + (typeof _lxTimeAgo === 'function' ? _lxTimeAgo(meta.t) : '') : '');
+          + (meta.map ? ' · ' + meta.map : '') + (_lxMenuSaveT(meta) ? ' · saved ' + (typeof _lxTimeAgo === 'function' ? _lxTimeAgo(_lxMenuSaveT(meta)) : '') : '');   // v0.30.1186 save-notices
         // v0.27.9 — class portrait beside the Continue label.
         const icon = document.getElementById('menu-continue-icon');
         if (icon && _MENU_CLS[meta.cls]) { icon.src = 'Sprites/ui/menu/menu_pop_class_' + meta.cls + '.webp';   /* v0.30.1118 title-pop - a pop class sticker, not the gold crest */   /* v0.30.x — was .png; the crest art is .webp-only, so this 404ed (and onerror-hid) on every boot */ icon.style.display = ''; }
