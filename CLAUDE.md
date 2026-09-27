@@ -107,6 +107,11 @@ Rules:
 - The hook is Node because this machine has no Python (the .py mobile hooks
   no-op here for the same reason). Keep it fail-open: it targets one known
   failure mode and must never brick an unrelated push.
+- Keep it fast: it reads each file of the pushed commit ONCE (v0.30.1233). Reading the
+  10 MB game blob per marker made one check take 5-10 min, so typed pushes lost
+  every race and sessions shipped from uninspected scripts.
+  `node scripts/push_gate_test.mjs` pins it: the unchanged tip passes in under a
+  minute, and one cut marker per file blocks.
 
 ## Mobile UI branch (automated)
 
