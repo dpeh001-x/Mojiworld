@@ -2,6 +2,9 @@
 // more final boss kind of stage"). All twelve zod_* arenas get a back layer (grade, constellation, sigil ring),
 // a floor layer (rim light, floor sigil, platform underglow) and a front layer (motes, phase vignette), all from
 // the sign's own data; nothing leaks onto other boss arenas or the Zodiac hub.
+// Plus (per user: "the zodiac symbol at the back can be sharper ... and the zodiac circle can be improved"): the
+// sigil is baked at device resolution, and its twelve glyphs are vector paths - baking it draws no text at all,
+// because text sent those codepoints to the colour emoji font.
 //   node scripts/zodiac_stage_test.mjs [port]   (MOJI_GAME_FILE honored)
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -45,6 +48,13 @@ try {
         stars: d.s.length, edgesOk: d.e.every(([a, q]) => a < d.s.length && q < d.s.length),
         pal: _MAP_FLOOR_PAL['zod_' + z.id], band: mean(0, Math.round(ch * 0.2), cw, Math.round(ch * 0.25)) };
     }
+    // the sigil: device resolution, vector glyphs, no text drawn while it is baked
+    { const P = CanvasRenderingContext2D.prototype, oF = P.fillText, oS = P.strokeText; let texts = 0;
+      P.fillText = function () { texts++; return oF.apply(this, arguments); }; P.strokeText = function () { texts++; return oS.apply(this, arguments); };
+      const want = Math.max(1, Math.min(2, ctx.canvas.width / W));
+      try { _lxZodMint(ZODIAC_SIGNS[0], want); } finally { P.fillText = oF; P.strokeText = oS; }
+      out.sigil = { texts, want, s: _LX_ZOD.s, ringW: _LX_ZOD.ring.width, glyphW: _LX_ZOD.glyph.width, inner: !!_LX_ZOD.inner,
+        paths: Object.keys(_LX_ZOD_GLYPH_D).filter((k) => _lxZodGlyph(k)).length }; }
     // phase escalation on one sign: the corners darken from phase 1 to phase 3
     loadMap('zod_aries'); await wait(1500); game.paused = true;
     const boss = game.monsters.find((m) => m && m.zodiacSign === 'aries');
@@ -63,6 +73,8 @@ try {
     ok(`${id}: back, floor and front layers draw`, s.calls.back >= 1 && s.calls.floor >= 1 && s.calls.front >= 1, s.calls);
     ok(`${id}: its constellation and sigil are minted`, s.minted && s.stars >= 4 && s.edgesOk, { stars: s.stars, edgesOk: s.edgesOk });
   }
+  ok('the sigil is baked at device resolution (it was 1x and stretched)', Math.abs(r.sigil.s - r.sigil.want) < 0.01 && r.sigil.ringW === Math.ceil(640 * r.sigil.want) && r.sigil.glyphW === Math.ceil(280 * r.sigil.want), r.sigil);
+  ok('twelve vector glyph paths, and baking the sigil draws no text (no colour-emoji font)', r.sigil.paths === 12 && r.sigil.texts === 0 && r.sigil.inner, r.sigil);
   const pals = Object.values(r.signs).map((s) => JSON.stringify(s.pal));
   ok('twelve distinct platform palettes (they were four shared blue-greys)', new Set(pals).size === 12, pals);
   const warm = (id) => { const [R, , B] = r.signs[id].band; return R > B * 1.15; }, cool = (id) => { const [R, , B] = r.signs[id].band; return B > R * 1.1; };
