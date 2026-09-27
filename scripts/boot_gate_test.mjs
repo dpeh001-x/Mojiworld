@@ -36,8 +36,12 @@ async function bootOnce(throttleKbps) {
     if (snap && snap.revealed) { tReveal = Date.now() - t0; break; }
     await new Promise(r => setTimeout(r, 100));
   }
+  // v0.30.x title-first - with title-first the menu no longer waits for the first-paint set: it streams in right after (unthrottled run)
+  let tf = false, gatedAfter = null;
+  try { tf = await page.evaluate(() => !!window._lxTitleFirst); } catch (e) {}
+  if (tf && !throttleKbps && snap && snap.revealed) { const t1 = Date.now(); while (Date.now() - t1 < 90000) { const g = await page.evaluate(() => { const s = window._lxBootStats; return !!(s && s.gated >= s.gatedTotal); }); if (g) { gatedAfter = Date.now() - t1; break; } await new Promise(r => setTimeout(r, 250)); } }
   await b.close();
-  return { snap, tReveal, errs };
+  return { snap, tReveal, errs, tf, gatedAfter };
 }
 
 // Run 1 — unthrottled sanity.
@@ -47,7 +51,8 @@ ok('gate reveals (unthrottled)', fast.tReveal != null, { ms: fast.tReveal });
 ok('gated set is a small fraction of the full manifest',
    fast.snap && fast.snap.gatedTotal < fast.snap.allTotal * 0.35,
    fast.snap && { gated: fast.snap.gatedTotal, all: fast.snap.allTotal });
-ok('gated set fully loaded at reveal', fast.snap && fast.snap.gated >= fast.snap.gatedTotal, fast.snap);
+ok('gated set fully loaded at reveal (title-first: streamed in right after it)', fast.snap && (fast.snap.gated >= fast.snap.gatedTotal || (fast.tf && fast.gatedAfter != null)),   // v0.30.x title-first
+   Object.assign({}, fast.snap, { titleFirst: fast.tf, gatedAfterMs: fast.gatedAfter }));
 ok('no page errors (unthrottled)', fast.errs.length === 0, fast.errs.slice(0, 3));
 
 // Run 2 — throttled to 12 Mbps (12,288 kbps → 1.5 MB/s): the world must open

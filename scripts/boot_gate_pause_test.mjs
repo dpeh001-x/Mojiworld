@@ -42,6 +42,9 @@ await page.waitForFunction(() => typeof loadMap === 'function', null, { timeout:
 // The title menu mounts behind a decode gate capped at 30s.
 await page.waitForFunction(() => { const a = document.getElementById('lo-auth'); return a && a.classList.contains('shown'); },
   null, { timeout: 90000 });
+// v0.30.x title-first - the menu can be up before the Void's entry beat (Guguma's eye-zoom and its chirp, ~3 s after the boot loads the
+// Void) has played: let it finish, so the sounds counted below are the ones a keypress makes
+await page.waitForFunction(() => { const o = document.getElementById('void-intro-overlay'); return !o || !o.classList.contains('show'); }, null, { timeout: 20000 }).catch(() => {});
 
 // Count every skill cast and every sound, through whatever path reaches them.
 await page.evaluate(() => {
@@ -106,6 +109,8 @@ await page.keyboard.down('d');
 const after = await page.evaluate(async () => {
   window._lxSpriteWatch = [];
   await new Promise(r => setTimeout(r, 1800));
+  // v0.30.x title-first - the ready gate that follows may still wait (bounded, 20 s cap) for the start map's art, which arrives after the menu now
+  { const t0 = Date.now(); while (window._lxTitleFirst && window._lxSpriteGateHolding && Date.now() - t0 < 25000) await new Promise(r => setTimeout(r, 200)); }
   return { holding: !!window._lxSpriteGateHolding, done: !!window._lxSpriteGateDone,
     paused: game.paused, keysLatched: Object.keys(game.keys || {}).filter(k => game.keys[k]) };
 });

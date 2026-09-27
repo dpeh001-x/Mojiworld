@@ -52,7 +52,10 @@ try {
   });
   ok('town NPCs LOADED before reveal (DJ Vinyl/Postal Wisp/Milo/Guguma/Bravo)',
      fetched.djVinyl && fetched.postalWisp && fetched.milo && fetched.guguma && fetched.bravo, fetched);
-  ok('TOWN background loaded before reveal', fetched.townBg, fetched);
+  // v0.30.x title-first - with title-first the town's backdrop streams in after the menu; it must be in when the world opens
+  const __tf = await page.evaluate(() => !!window._lxTitleFirst);
+  const __townCheck = (atWorld) => ok('TOWN background loaded before reveal (title-first: before the world opens)', fetched.townBg || (__tf && atWorld), Object.assign({}, fetched, { titleFirst: __tf, atWorld }));
+  if (!__tf) __townCheck(false);
   ok('case-fixed Whisper sprite loads (was 404 whisper.webp)', fetched.whisper, fetched);
 
   // Enter a name -> class select appears.
@@ -63,6 +66,10 @@ try {
   await page.click('#auth-submit');
   await page.waitForFunction(() => { const c = document.getElementById('class-select-modal'); return c && getComputedStyle(c).display !== 'none'; }, null, { timeout: 20000 });
   ok('class select opens after naming', true);
+  if (__tf) {   // v0.30.x title-first - the world opens when the loading overlay fades (after the commence gate)
+    await page.waitForFunction(() => { const o = document.getElementById('loading-overlay'); return !o || o.classList.contains('fade'); }, null, { timeout: 150000 }).catch(() => {});
+    __townCheck(await page.evaluate(() => { try { const b = BG_IMAGES.everdawnCentral; return !!(b && (b._loaded || (b.complete && b.naturalWidth > 0))); } catch (e) { return false; } }));
+  }
 
   // Pick a class through the REAL path and time the cinematic's arrival.
   const t0 = Date.now();

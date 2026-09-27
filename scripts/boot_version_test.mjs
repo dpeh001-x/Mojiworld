@@ -16,11 +16,15 @@ await new Promise(r => setTimeout(r, 1200));
 const b = await chromium.launch({ channel: 'msedge', headless: true });
 const res = []; const ok = (n, c, x) => res.push({ n, pass: !!c, x: String(x ?? '') });
 const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
-await p.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+// v0.30.x title-first - the front page is up only until the page has loaded (the title menu no longer waits for the town art): a slow
+// line keeps it up long enough to sample, and the sample is taken as soon as the version line is filled, not after load
+const __cdp = await p.context().newCDPSession(p);
+await __cdp.send('Network.enable'); await __cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: 2e6, uploadThroughput: 1e6 });
+await p.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'commit', timeout: 60000 });
 
 // ── LOADING SCREEN (front page), sampled early while the bar is still up ────
-await p.waitForFunction(() => !!document.getElementById('lo-boot-version'), null, { timeout: 30000 });
-await p.waitForTimeout(1500);
+await p.waitForFunction(() => { const e = document.getElementById('lo-boot-version'); return !!(e && e.textContent.trim()); }, null, { timeout: 60000 });   // v0.30.x title-first
+await p.waitForTimeout(300);
 const boot = await p.evaluate(() => {
   const el = document.getElementById('lo-boot-version');
   const ov = document.getElementById('loading-overlay');
@@ -38,6 +42,7 @@ ok('front page: it is actually VISIBLE (computed opacity > 0.5)', boot.opacity >
 ok('front page: it shows the running GAME_VERSION', boot.text && boot.text === boot.gv, `"${boot.text}" vs GAME_VERSION ${boot.gv}`);
 ok('front page: it sits at the BOTTOM of the screen', boot.bottomGap >= 0 && boot.bottomGap < 40, boot.bottomGap + 'px from the bottom edge');
 
+await __cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });   // v0.30.x title-first - full speed again
 // ── MAIN MENU ───────────────────────────────────────────────────────────────
 await p.waitForFunction(() => { const a = document.getElementById('lo-auth'); return a && !a.hidden; }, null, { timeout: 140000 });
 await p.waitForTimeout(1600);

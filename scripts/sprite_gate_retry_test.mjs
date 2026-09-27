@@ -29,7 +29,8 @@ const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 
-const SAVE = JSON.stringify({ player: { cls: 'warrior', level: 5, hp: 100, maxHp: 100, mp: 50, maxMp: 50,
+// v0.30.x title-first - v: 1, or loadState reads the save as an old format and starts a new hero in the Void (not town)
+const SAVE = JSON.stringify({ v: 1, t: Date.now(), player: { cls: 'warrior', level: 5, hp: 100, maxHp: 100, mp: 50, maxMp: 50,
   exp: 0, expToNext: 100, mojicoins: 0, baseAtk: 5, baseDef: 0, baseAcc: 0 }, game: { currentMap: 'town' } });
 const bootTo = async (ctx, label, errs) => {
   const page = await ctx.newPage();
