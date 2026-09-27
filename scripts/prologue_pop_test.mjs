@@ -7,6 +7,7 @@
 // Pass 2 (per user): the title card "can be improved, use Dark purple also" - a black kicker tag over the headline banner on a
 // dark purple comic burst with plum rays; the memory panel "more POP and PUNK features" - taped corners, a ransom-note title,
 // a starburst clock, a labelled will meter, built once and updated in place; Guguma's chirp and shouted word.
+// Pass 3 (per user, of the panel and balloon): "more Blue and purple, reduce on the pink" - hot pink is left on the Cheep! only.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,6 +78,10 @@ try {
         chips: hud.querySelectorAll('.plg-rn').length, tapes: hud.querySelectorAll('.plg-tape').length, wl: q('.plg-hud-wl') && q('.plg-hud-wl').textContent,
         star: !!q('.plg-hud-clock') && /polygon/.test(getComputedStyle(q('.plg-hud-clock')).clipPath), panelBg: getComputedStyle(hud).backgroundColor,
         godTxt: q('.plg-hud-god') && !q('.plg-hud-god').hidden ? q('.plg-hud-god').textContent : '' };
+      out.hud.blue = { bar: getComputedStyle(q('.plg-hud-bar')).outlineColor, clock: getComputedStyle(q('.plg-hud-clock'), '::before').backgroundColor,
+        name: getComputedStyle(q('.plg-hud-name')).backgroundColor, tag: coach.querySelector('.plg-coach-name') && getComputedStyle(coach.querySelector('.plg-coach-name')).backgroundColor,
+        pink: [hud, ...hud.querySelectorAll('*'), coach, ...coach.querySelectorAll('*')].filter((e) => { const c = getComputedStyle(e); return [c.color, c.backgroundColor, c.borderTopColor, c.outlineColor].includes('rgb(255, 45, 149)'); })
+          .map((e) => e.className || e.tagName).join(',') };
       { const sp = q('.plg-hud-clock span'); window._prologueLeftMs = 25400; window._prologueLastTick = Date.now(); _prologueTick(); out.hud.sameNode = !!sp && sp === q('.plg-hud-clock span'); out.hud.clock2 = sp && sp.textContent; }
       out.coach = { cls: coach.className, txt: coach.textContent, name: !!coach.querySelector('.plg-coach-name'), font: getComputedStyle(coach).fontFamily,
         kbd: coach.querySelector('kbd') ? getComputedStyle(coach.querySelector('kbd')).backgroundColor : null,
@@ -100,6 +105,8 @@ try {
     check(/plg-hud/.test(h.cls) && /^"?Nunito/.test(h.font) && h.title === 'MEMORY OF WHAT YOU BECOME' && h.clock === '0:26' && h.god && /INVULNERABLE/.test(h.godTxt) && h.titleStroke >= 3 && h.chips === 3,
       `${name}: the memory panel - a ransom-note title, the clock, the invulnerable tape`, h);
     check(h.tapes === 2 && h.star && h.wl === 'WILL' && h.panelBg === 'rgb(26, 11, 46)', `${name}: punk panel pieces - dark purple, taped corners, a starburst clock, a labelled will meter`, h);
+    check(h.blue.bar === 'rgb(47, 107, 255)' && h.blue.clock === 'rgb(154, 107, 255)' && h.blue.name === 'rgb(106, 47, 176)' && h.blue.tag === 'rgb(106, 47, 176)' && h.blue.pink === 'plg-coach-sfx',
+      `${name}: blue and purple lead the panel and balloon - hot pink is down to Guguma's Cheep!`, h.blue);
     check(h.sameNode && /^0:2\d$/.test(h.clock2 || ''), `${name}: the panel is built once and updated in place (its pulses no longer restart every tick)`, { same: h.sameNode, clock2: h.clock2 });
     check(h.name === 'GRAVITOS, THE WEIGHT-BEARER' && h.keys === 9 && parseFloat(h.will) > 0 && parseFloat(h.will) < h.barW, `${name}: the will bar, the name tape and the nine keycaps`, h);
     const c = S.coach;
