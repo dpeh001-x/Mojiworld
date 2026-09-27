@@ -20,9 +20,13 @@ const massSide = async (f) => { const { data, info } = await sharp(path.join(ROO
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = (y * W + x) * 4; if (data[p + 3] > 200 && data[p] > 235 && data[p + 1] > 170) { cx += x; m++; } } return m ? cx / m / W : 0.5; };
 ok('the ballista ultimate faces right at rest (its muzzle flash sits right of centre)', (await massSide('Sprites/fx/anim/ballista_ult_0.webp')) > 0.5);
 const g = readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8');
-ok('...and turns with the caster (flipX by facing) at its new 364 size', g.includes("'ballista_ult', { size: 364, life: 80, flipX: player.facing < 0 });"));
+// v0.30.1285 (per user: "as big as the ballista summon") - the burst stands on the ground at the turret, at the turret's size,
+// facing with the caster, at a constant scale (no half-size start)
+ok('...and it stands at the turret, turret-sized, turning with the caster', g.includes("spawnSpriteBurst(ax, ay + 18 + 85, 'ballista_ult', { size: 255, life: 80, anchorBottom: true, flipX: player.facing < 0, scaleStartX: 1, scaleEndX: 1, scaleStartY: 1, scaleEndY: 1 });")
+  && !g.includes("player.y + player.h / 2, 'ballista_ult'"));
+ok('the other skill bursts are drawn 1.35x bigger', g.includes('{ size: first ? 405 : 203,') && g.includes("{ size: 378, life: 42, spin: 0 });") && g.includes("{ size: 324, life: 56, spin: 0 });") && g.includes("'skyhunter_ult', { size: 378, life: 90, spin: 0.5 });"));
 ok('the volley flips with its caster or turret instead of rotating upside down', !/'ballista_volley',[\s\S]{0,40}angle: (player|tu)\.facing > 0 \? 0 : Math\.PI/.test(g)
-  && g.includes("'ballista_volley', { size: 240, life: 22, flipX: tu.facing < 0 });") && (g.match(/size: 320, life: 28, flipX: player\.facing < 0 \}/g) || []).length === 2);
+  && g.includes("'ballista_volley', { size: 240, life: 22, flipX: tu.facing < 0 });") && (g.match(/size: 432, life: 28, flipX: player\.facing < 0 \}/g) || []).length === 2);
 ok('the marksman bow sits on the canvas shape its spawn squeezes to (452x756 still, 560x938 frames)', await (async () => {
   const a = await sharp(path.join(ROOT, 'Sprites/fx/marksman_oneshot.webp')).metadata(), b = await sharp(path.join(ROOT, 'Sprites/fx/anim/marksman_oneshot_0.webp')).metadata();
   return a.width === 452 && a.height === 756 && b.width === 560 && b.height === 938; })());
