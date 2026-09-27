@@ -215,7 +215,9 @@
 // under their own names (pop-style trails recoloured to the redesigned monsters), so a returning browser would keep the old ones.
 // v0.30.x proj-pop - v87 -> v88. twelve Sprites/projectiles stills and 27 anim/ frames (mdark, splash, mtidemark) are REPLACED under their own names
 // (pop-punk redraw), so a returning browser would otherwise keep the old art until its cache refreshed.
-const CACHE = 'mojiworld-assets-v88';   // v0.30.x proj-pop - pop-punk projectiles + their loops (same names)
+// v0.30.x own-shots - v88 -> v89. Sprites/projectiles gains msandball / mjellyglob / manglerlure and their anim/ loops (new names, no replacement)
+// - bumped anyway so the new cast of files is fetched fresh alongside the game that asks for them.
+const CACHE = 'mojiworld-assets-v89';   // v0.30.x own-shots - Sandhusk / Jellybean / Lanternjaw own shots
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
