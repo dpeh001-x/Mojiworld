@@ -686,6 +686,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "starbeam": 9,
    "starburst": 9,
    "taurus_boulder": 9,
+   "tidalSweep": 9,
    "tsunami": 9,
    "venom": 9,
    "voidring": 9,
