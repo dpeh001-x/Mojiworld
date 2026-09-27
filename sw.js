@@ -195,7 +195,7 @@
 // and a ringed sticker), so a returning browser's stale cache would keep v0.30.1083's icon for a session.
 // v0.30.x sage-voice - v74 -> v75. audio/npc/npc_mystery_sage.mp3 ("???", Sage Mira) is REPLACED under its own
 // name (recast from a 130 Hz sigh to a soft young elf woman), so a returning browser would otherwise keep the old clip.
-const CACHE = 'mojiworld-assets-v78';   // v0.30.1177 - regenerated sage / hexmaster / ballista / doombringer ults, lightning pillar, lava pool (same names)
+const CACHE = 'mojiworld-assets-v79';   // v0.30.1184 - edge-fixed block / volley / leo slam / qte / forge / gloop / void tear (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
