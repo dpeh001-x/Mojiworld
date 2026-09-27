@@ -26,6 +26,7 @@ const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const URL = 'file:///' + path.join(ROOT, args[0] || 'mojiworld_game.html').split(path.sep).join('/');
 const browser = await chromium.launch({ channel: 'msedge', args: ['--allow-file-access-from-files'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
 let bad = 0;

@@ -20,6 +20,7 @@ const browser = await chromium.launch({ channel: 'chrome', args: ['--mute-audio'
 try {
   // render scale 2 (the desktop cap): the case where pixelation would show
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 747 }, deviceScaleFactor: 2, serviceWorkers: 'block' })).newPage();
+  await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
   const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 160)));
   const TBL = path.join(process.env.TEMP || '', 'gs_tables');
   if (existsSync(TBL)) await page.route((u) => /data[/]sprite_(bbox|edges|frame_index)[.]js/.test(u.pathname), (r) => { try { r.fulfill({ status: 200, contentType: 'application/javascript', body: readFileSync(path.join(TBL, r.request().url().split('/').pop().split('?')[0])) }); } catch (e) { r.continue(); } });

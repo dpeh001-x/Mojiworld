@@ -68,9 +68,13 @@ try {
   }));
   if (LAZY2) ok('no every-monster-type sweep: frames only for the monsters met (' + regs.monFrames + ' of ' + regs.monTypes + ')', regs.monFrames < regs.monTypes * 0.5, regs);   // v0.30.x lazy-art2
   else ok('every monster type\'s anim frames requested', regs.monFrames >= regs.monTypes * 0.95, regs);
-  ok('all projectile anim sets requested', regs.proj >= regs.projKeys, regs);
-  ok('all FX anim sets requested', regs.fx >= regs.fxKeys, regs);
-  ok('summon anim sets requested', regs.summons > 0, regs);
+  const LAZYFX = await page.evaluate(() => typeof _lxFxWant === 'function');   // v0.30.x lazy-fx - a set is asked for by whoever will play it
+  if (LAZYFX) ok('no every-set sweep: projectile anim sets only for what is in play (' + regs.proj + ' of ' + regs.projKeys + ')', regs.proj < regs.projKeys * 0.5, regs);   // v0.30.x lazy-fx
+  else ok('all projectile anim sets requested', regs.proj >= regs.projKeys, regs);
+  if (LAZYFX) ok('no every-set sweep: effect anim sets only for what is in play (' + regs.fx + ' of ' + regs.fxKeys + ')', regs.fx < regs.fxKeys * 0.5, regs);   // v0.30.x lazy-fx
+  else ok('all FX anim sets requested', regs.fx >= regs.fxKeys, regs);
+  if (LAZYFX) ok('summon anim sets only for the character\'s summons (' + regs.summons + ')', regs.summons <= 12, regs);   // v0.30.x lazy-fx
+  else ok('summon anim sets requested', regs.summons > 0, regs);
 
   // Neighbor prefetch hook: _lxMapNeighbors resolves portal dests.
   const nb = await page.evaluate(() => {

@@ -10,6 +10,7 @@ const PORT = Number(process.env.PORT || 10173); const SERVE_ROOT = process.env.M
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT }); await new Promise((r) => setTimeout(r, 1200));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] }); const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
 const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 120)));
 let pass = 0, fail = 0; const ok = (name, cond, note) => { if (cond) pass++; else fail++; console.log((cond ? 'PASS ' : 'FAIL ') + name + (note ? '  [' + note + ']' : '')); };
 try {

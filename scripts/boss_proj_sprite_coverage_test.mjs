@@ -47,6 +47,7 @@ const browser = await chromium.launch({
   headless: true,
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
 await page.goto(`http://localhost:${PORT}/${GAME}`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(9000);
 await page.evaluate(() => { const lo = document.getElementById('loading-overlay'); if (lo) lo.classList.add('fade'); });

@@ -47,6 +47,7 @@ const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio
 await new Promise((r) => setTimeout(r, 1800));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
+await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
 const errs = [], missed = [];
 page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
 page.on('response', (r) => { const u = r.url(); if (/anim\/lightning|p_lightning/.test(u) && r.status() >= 400) missed.push(u.split('/').pop() + ' -> ' + r.status()); });

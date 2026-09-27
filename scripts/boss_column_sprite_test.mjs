@@ -23,6 +23,7 @@ const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT
 await new Promise((r) => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
 const bad404 = [];
 page.on('response', (r) => { if (r.status() >= 400 && /(fx|tg)_col_/.test(r.url())) bad404.push(r.status() + ' ' + r.url().split('/').pop()); });
 await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });

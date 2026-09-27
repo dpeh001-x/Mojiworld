@@ -16045,7 +16045,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1233';
+const GAME_VERSION = 'v0.30.1234';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16253,6 +16253,23 @@ function _lxArt2Settled(id) {
   const ims = []; for (const k of _lxArt2MapKeys(id)) for (const im of (_LX_ART2.reg[k] || [])) ims.push(im);
   if (typeof _lxImgSettled !== 'function') return Promise.resolve(ims.length);
   return Promise.all(ims.map(_lxImgSettled)).then(() => ims.length);
+}
+// v0.30.1234 lazy-fx - SKILL, SHOT, SUMMON AND GEAR ART waits for whoever uses it, like map art (lazy-art2): the static sprites of
+// LX_FX, LX_MOB_PROJ, LX_PLAYER_PROJ, LX_BULT_PROJ, LX_MOB_CAST, LX_SUMMON and LX_ITEMS are marked _lxLazy when created,
+// so the hold above PARKS them until asked (_lxFxWant): the character's skills and gear, the monsters of the map in play
+// and next door, a cast, and - last resort - any ready check that finds one parked. eager: art anyone can trigger any
+// time (boon procs, the parry, generic telegraphs, the boss bar, generic shots, potions).
+const _LX_FX = { eager: /^Sprites\/(?:fx\/(?:ui_bossbar_fill|ui_bossbar_frame|parry_riposte|nova_ring|bloom_burst|echo_slash|time_ripple|crescendo_hit|execute_mark|skin_ward|coin_burst|doppel_flash|rampage_aura|overflow_arc|frost_bloom|tg_swing|tg_smash|tg_dash|fx_heavyswing|fx_groundshock|quake_ring|boss_shield|meteor_marker|meteor_marker_blue|deadeye_tracer|smoke_puff)|projectiles\/(?:mstormorb|mstone)|items\/(?:(?:small|medium|large)_(?:red|blue)_potion|elixir|status_cure_remedy))\.(?:webp|png)$/,
+  // v0.30.1234 lazy-fx - off: this art stays eager (?lxfx=0, or window._lxFxEager set before the page runs - the suites that inspect
+  // one sprite directly); the hold's other lazy art is unchanged
+  off: !!window._lxFxEager || /[?&]lxfx=0\b/.test(location.search || ''),
+  open: false, later: [], laterT: 0, animQ: [], animT: 0, anim: Object.create(null), cast: Object.create(null),
+  mob: Object.create(null), mobHi: Object.create(null), mobLo: Object.create(null), c: undefined, j: undefined, m: undefined, eq: Object.create(null) };
+function _lxFxMark(img, path) {
+  if (!img || typeof path !== 'string' || !window._lxBootHold || _LX_FX.off || _LX_FX.eager.test(path)) return img;   // v0.30.1234 lazy-fx - ?lxhold=0 / ?lxfx=0: eager, as before
+  img._lxLazy = true;
+  try { _LX_ART2.path.set(path, img); } catch (e) {}   // v0.30.1234 lazy-fx - the boot loader's DEFERRED list leaves it to its ask
+  return img;
 }
 // v0.25.885 — Null-guard. Debug recon (BUG-DOM-1) flagged that this
 // runs at script-load time, BEFORE DOMContentLoaded — so on a slow
@@ -17960,13 +17977,17 @@ const LX_MOB_PROJ = (() => {
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
     img.decoding = 'async';
+    _lxFxMark(img, 'Sprites/projectiles/' + f);   // v0.30.1234 lazy-fx - parked until a skill, a monster or a draw asks
     img.src = 'Sprites/projectiles/' + f;
     if (img.decode) img.decode().catch(() => {});   // v0.30.343 — see vfx static loader
     out[k] = img;
   }
   return out;
 })();
-function _lxMobProjReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+function _lxMobProjReady(img) {
+  if (img && img._lxLazy === true && !img._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(img, true);   // v0.30.1234 lazy-fx - shown while parked: ask
+  return !!(img && img.complete && img.naturalWidth > 0);
+}
 // v0.26.162 — Render-mode dispatch table for the v0.26.162 themed-
 // projectile pack. Keys map to the LX_MOB_PROJ sprite key; values
 // configure how drawProjectiles renders them at runtime:
@@ -18271,13 +18292,17 @@ const LX_PLAYER_PROJ = (() => {
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
     img.decoding = 'async';
+    _lxFxMark(img, 'Sprites/projectiles/' + f);   // v0.30.1234 lazy-fx - parked until a skill, a monster or a draw asks
     img.src = 'Sprites/projectiles/' + f;
     if (img.decode) img.decode().catch(() => {});   // v0.30.343 — see vfx static loader
     out[k] = img;
   }
   return out;
 })();
-function _lxPlayerProjReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+function _lxPlayerProjReady(img) {
+  if (img && img._lxLazy === true && !img._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(img, true);   // v0.30.1234 lazy-fx - shown while parked: ask
+  return !!(img && img.complete && img.naturalWidth > 0);
+}
 // v0.25.276 — Skill-id → projectile-sprite lookup. Replaces an IIFE
 // that ran per-projectile-per-frame inside drawProjectiles, allocating
 // a closure object every iteration. With 30–60 projectiles in flight
@@ -18367,6 +18392,7 @@ const LX_BULT_PROJ = (() => {
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
     img.decoding = 'async';
+    _lxFxMark(img, 'Sprites/projectiles/' + f);   // v0.30.1234 lazy-fx - parked until a skill, a monster or a draw asks
     img.src = 'Sprites/projectiles/' + f;
     if (img.decode) img.decode().catch(() => {});   // v0.30.343 — see vfx static loader
     out[k] = img;
@@ -18429,13 +18455,17 @@ const LX_SUMMON = (() => {
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
     img.decoding = 'async';
+    _lxFxMark(img, 'Sprites/summons/' + f);   // v0.30.1234 lazy-fx - parked until the skill that summons it is castable
     img.src = 'Sprites/summons/' + f;
     if (img.decode) img.decode().catch(() => {});   // v0.30.343 — see vfx static loader
     out[k] = img;
   }
   return out;
 })();
-function _lxSummonReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+function _lxSummonReady(img) {
+  if (img && img._lxLazy === true && !img._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(img, true);   // v0.30.1234 lazy-fx - shown while parked: ask
+  return !!(img && img.complete && img.naturalWidth > 0);
+}
 // v0.26.x — Summon WALK/ATTACK frame loader. Lazy-loads the 9-frame loops from
 // Sprites/summons/anim/<key>_<state>_0..8.webp (generated by
 // scripts/generate_summon_anim.mjs — padded + True-Sized, so they share the
@@ -19070,12 +19100,16 @@ const LX_FX = (() => {
         img.src = _altSrc;
       };
     }
+    _lxFxMark(img, _fullPath);   // v0.30.1234 lazy-fx - parked until a skill, a monster or a draw asks
     img.src = _fullPath;
     out[k] = img;
   }
   return out;
 })();
-function _lxFxReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+function _lxFxReady(img) {
+  if (img && img._lxLazy === true && !img._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(img, true);   // v0.30.1234 lazy-fx - shown while parked: ask
+  return !!(img && img.complete && img.naturalWidth > 0);
+}
 // v0.29.511 — per-source TINT for an FX sprite. Returns a cached offscreen
 // canvas holding `img` recoloured to `color`, or `img` itself if anything is
 // not ready (caller can always draw the result).
@@ -19457,6 +19491,7 @@ const LX_ITEMS = (() => {
     // Sprites/items/ dir) OR a full repo-relative path (e.g. the equipment
     // pack under Sprites/equipment/<slot>/). Mirrors the LX_MOB_CAST verbatim
     // -path convention so both styles coexist in one registry.
+    _lxFxMark(img, f.includes('/') ? f : ('Sprites/items/' + f));   // v0.30.1234 lazy-fx - parked until worn or shown in a panel
     img.src = f.includes('/') ? f : ('Sprites/items/' + f);
     out[k] = null;  // placeholder — render code checks _itemReady()
     // Stash the in-flight image so onload sets it later. By keying on k
@@ -19465,7 +19500,10 @@ const LX_ITEMS = (() => {
   }
   return out;
 })();
-function _itemReady(img) { return img && img.complete && img.naturalWidth > 0; }
+function _itemReady(img) {
+  if (img && img._lxLazy === true && !img._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(img, true);   // v0.30.1234 lazy-fx - shown while parked: ask
+  return img && img.complete && img.naturalWidth > 0;
+}
 // Returns an Image or null. Always check _itemReady() before drawImage.
 function _itemSprite(it) {
   const k = _itemKey(it);
@@ -19481,6 +19519,7 @@ function _itemSprite(it) {
 function itemIconHtml(it, sizePx) {
   const sz = sizePx || 28;
   const img = _itemSprite(it);
+  if (!img) { const _lz = _lxFxItemImgHtml(it, sz); if (_lz) return _lz; }   // v0.30.1234 lazy-fx - parked or on its way: the panel's <img> fetches it
   if (img) {
     return `<img src="${img.src}" width="${sz}" height="${sz}" style="display:inline-block;vertical-align:middle;image-rendering:auto;" alt="${(it.name||'').replace(/"/g,'&quot;')}">`;
   }
@@ -19633,12 +19672,16 @@ const LX_MOB_CAST = (() => {
         img.src = _altSrc;
       };
     }
+    _lxFxMark(img, _fullPath);   // v0.30.1234 lazy-fx - parked until a skill, a monster or a draw asks
     img.src = _fullPath;
     out[k] = img;
   }
   return out;
 })();
-function _lxMobCastReady(img) { return !!(img && img.complete && img.naturalWidth > 0); }
+function _lxMobCastReady(img) {
+  if (img && img._lxLazy === true && !img._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(img, true);   // v0.30.1234 lazy-fx - shown while parked: ask
+  return !!(img && img.complete && img.naturalWidth > 0);
+}
 const LX_MOB_CAST_DURATION = 280;  // ms — total aura visible window
 // =========================================================================
 // LX_HAIR — sprite-based hairstyles (v0.25.178)
@@ -27235,7 +27278,7 @@ const POWERUPS = [
 // panel shows them on first open (it doesn't redraw on async decode like the
 // skill bar). _boonIconUrl kicks off each Image load now, decoded well before
 // the player ever opens the U-panel Boons tab.
-try { if (typeof _boonIconUrl === 'function') for (const _bp of POWERUPS) _boonIconUrl(_bp.id); } catch (e) {}
+try { if (typeof _boonIconUrl === 'function' && (!window._lxBootHold || _LX_FX.off)) for (const _bp of POWERUPS) _boonIconUrl(_bp.id); } catch (e) {}   // v0.30.1234 lazy-fx - hold on: boonIconHtml's <img> and the orb's first draw load their own
 
 const BOON_EQUIP_CAP     = 3;   // v0.25.261 — tightened 5 → 3 so boon picks feel like real build commitments
 // v0.30.717 — BOON SLOTS ARE EARNED BY LEVEL (per user: "For Boons try to limit the number of boons
@@ -72788,7 +72831,7 @@ function _lxStreamWorld() {
       }
       if (_fi < _fxKeys.length) setTimeout(_fxStep, 180);
     };
-    _fxStep();
+    if (!window._lxBootHold || _LX_FX.off) _fxStep();   // v0.30.1234 lazy-fx - hold on: a set is asked for by whoever will play it (_lxFxWant)
   } catch (e) {}
   // PHASE 2: portal-BFS map sweep from the player's current map — nearest maps
   // stream first, so the next map is resident before they walk through.
@@ -75300,6 +75343,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // paid a sync decode + first-draw bake mid-fight (measured 8-9 ms inside
   // drawMonster). Both calls are memoized, so repeat spawns cost nothing.
   try {
+    try { if (typeof _lxFxWantMob === 'function') _lxFxWantMob(type, true); } catch (e) {}   // v0.30.1234 lazy-fx - its shots and effects
     try { _lxArt2WantMon(type, true); } catch (e) {}   // v0.30.1205 lazy-art2 - a summon, an event or boss add, a PQ wave, a Tower floor, a co-op mirror
     if (typeof _monsterFramesFor === 'function') _monsterFramesFor(type);
     const _st = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[type] : null;
@@ -81986,6 +82030,7 @@ function _lxBodyInSpan(m, left, right) { return m.x < right && m.x + m.w > left;
 function castSkill(id) {
   const s = SKILLS[id];
   if (!s) return;
+  try { if (typeof _lxFxWantSkill === 'function') _lxFxWantSkill(id, 2); } catch (e) {}   // v0.30.1234 lazy-fx - the last ask before its first draw
   // v0.29.625 — DEAD PLAYERS DO NOT CAST (user BUG12: "Despite being dead, I
   // can still use skills"). castSkill is the choke point EVERY cast path funnels
   // through — the held-key poll in updatePlayer, the edge-triggered Z keydown,
@@ -142530,6 +142575,7 @@ function _lxMapBackdrops(id) {
   return out;
 }
 function _lxLazyWantMap(id, hi) {
+  try { if (typeof _lxFxWantMap === 'function') _lxFxWantMap(id, hi); } catch (e) {}   // v0.30.1234 lazy-fx - its monsters' shots and effects
   try { for (const t of _lxMapBossTypes(id)) _lxBossArtWant(t, hi); } catch (e) {}
   try { for (const im of _lxMapBackdrops(id)) _lxWantImg(im, hi); } catch (e) {}
   try { _lxArt2WantMap(id, hi); } catch (e) {}   // v0.30.1205 lazy-art2 - and its monster / NPC sheets, tiles and props
@@ -142569,6 +142615,7 @@ function _lxLazyBgPath(p) {
   return false;
 }
 function _lxWarmBossFrames(type) {
+  try { if (typeof _lxFxWantMob === 'function') _lxFxWantMob(type, true); } catch (e) {}   // v0.30.1234 lazy-fx - a summoned boss's shots and effects
   try { _lxBossArtWant(type, true); } catch (e) {}   // v0.30.1196 lazy-art - a boss spawning or being summoned asks for its art
   if (!type || _LX_BOSS_WARMED[type]) return 0;
   _LX_BOSS_WARMED[type] = true;
@@ -145447,9 +145494,284 @@ function _lxPrewarmFxDrain(force) {
     if (now && now.tagName !== 'CANVAS' && !now._lxNoShrink && !j.arr._lxShrunk && j.tries++ < 600) _LX_PREWARM_FXQ.push(j);
   }
 }
+// v0.30.1234 lazy-fx - what each skill draws, MEASURED: every skill of every class, job and master cast in turn against pinned
+// dummies, recording every sprite and animation set it touched. fx: LX_FX, fa: its _fxAnimFrames set, pp: LX_PLAYER_PROJ,
+// bp: LX_BULT_PROJ, pa: a _projAnimFrame set, sm: LX_SUMMON, sa: a summon's walk + attack sets. The class's hit sparks and
+// stance, and any sprite named for the class, job or master, come by rule (_lxFxClassTags); a skill this table misses
+// still asks at its first cast (castSkill), and a sprite at its first draw (the ready checks).
+const _LX_FX_SKILL = {
+  arcaneBurst: 'fa:arcane_burst fa:arcane_shockwave fx:arcane_burst fx:arcane_shockwave',
+  archbishop_grail: 'fa:archbishop_grail fx:archbishop_grail fx:celestial_aurora',
+  archbishop_ult: 'fa:archbishop_ult fx:archbishop_ult fx:holy_ring',
+  arrowRain: 'fx:arrow_rain pp:arrow',
+  arrowShot: 'pp:arrow',
+  backstab: 'fx:backstab',
+  ballista_ult: 'bp:bult_ballista fa:ballista_ult fx:ballista_ult sm:ballista_turret',
+  ballista_volley: 'fa:ballista_volley fx:ballista_volley pp:arrow',
+  beastmaster_pack: 'fa:beastmaster_pack fx:beastmaster_pack',
+  beastmaster_ult: 'fa:beastmaster_ult fx:beastmaster_ult sa:werewolf sm:werewolf',
+  blink: 'fx:blink',
+  bloodlust: 'fx:bloodlust',
+  celestialAurora: 'fx:celestial_aurora',
+  chargedShot: 'fx:charged_shot pp:arrow',
+  crusader_aegis: 'bp:bult_holyorb fa:crusader_aegis fx:crusader_aegis',
+  crusader_ult: 'fa:bastion_aura fa:bastion_pillar fa:crusader_ult fx:bastion_aura fx:bastion_pillar fx:crusader_ult',
+  darkPulse: 'fx:hexmaster_darkpulse fx:smoke_puff sa:skeleton sa:zombie sm:skeleton sm:zombie',
+  deathBlossom: 'fx:death_blossom fx:death_blossom1',
+  doombringer_apoc: 'fa:doombringer_apoc fx:doombringer_apoc fx:dust_ring sm:sword',
+  doombringer_ult: 'bp:bult_doomfire fa:doombringer_ult fx:doombringer_ult pa:p_doom_fireball',
+  dragoon_skylance: 'fa:dragoon_skylance fx:dragoon_impact fx:dragoon_skylance',
+  dragoon_ult: 'bp:bult_dragoon fa:dragoon_ult fx:dragoon_ult',
+  eagleEye: 'fx:eagle_eye',
+  elemental: 'fx:archmage_elemental fx:elemental_link',
+  elementalArrows: 'fx:elemental_arrows pp:arrow sa:wolf sa:wolf_alpha sa:wolf_sky',
+  elementalist_cascade: 'fa:cascade_fire fa:cascade_ice fa:cascade_lightning fa:cascade_void fa:elementalist_cascade fx:cascade_fire fx:cascade_ice fx:cascade_lightning fx:cascade_void fx:elementalist_cascade fx:fireball',
+  elementalist_ult: 'bp:apo_fire bp:apo_ice bp:apo_lightning bp:apo_void bp:bult_elementalist fa:elementalist_ult fx:apo_ring fx:elementalist_ult pa:p_apo_fire pa:p_apo_ice pa:p_apo_lightning pa:p_apo_void',
+  evadeRoll: 'fx:evade_burst pp:arrow',
+  fireball: 'fx:fireball_ring pp:fireball',
+  flurry: 'fx:flurry',
+  groundSlam: 'fa:ground_slam fx:dust_ring fx:ground_slam',
+  guardian: 'fa:knight_guardian fx:knight_guardian',
+  hexmaster_grandhex: 'bp:hexmaster_hexorb fa:hexmaster_grandhex fx:hexmaster_grandhex pa:p_hexmaster_hexorb',
+  hexmaster_ult: 'bp:bult_hexorb fa:hexmaster_ult fx:hexmaster_ult',
+  holyLight: 'fx:holy_light',
+  holyShield: 'fa:holy_shield fa:holy_wave fx:holy_shield fx:holy_wave',
+  iceSpike: 'fx:ice_spike fx:ice_spike_ring pp:icespike',
+  magicBolt: 'fx:magic_bolt pa:bolt pp:mage_orb',
+  marksman_oneshot: 'fa:deadeye_hit fa:marksman_oneshot fx:deadeye_reticle fx:marksman_oneshot',
+  marksman_ult: 'bp:bult_deadeye_exec bp:bult_marksman fa:deadeye_execute fa:deadeye_hit fa:marksman_ult fx:deadeye_execute fx:deadeye_reticle fx:marksman_ult',
+  meteor: 'fx:meteor pa:meteor pp:meteor',
+  multiShot: 'fx:multi_shot pp:arrow',
+  necromancer_harvest: 'fa:soul_vortex fx:soul_vortex fx:soul_vortex1 pa:p_necromancer_soulorb',
+  necromancer_ult: 'bp:bult_holyorb fa:necro_maelstrom fa:necromancer_ult fx:necro_maelstrom fx:necromancer_ult pa:p_necromancer_soulorb',
+  nightreaper_mark: 'fa:nightreaper_eclipse fx:nightreaper_eclipse fx:smoke_puff',
+  nightreaper_ult: 'bp:bult_nightreaper fa:nightreaper_ult fx:nightreaper_ult',
+  phantom_cut: 'fx:phantom_cut fx:smoke_puff',
+  phantom_ult: 'bp:bult_phantom fa:phantom_ult fx:phantom_ult',
+  powerStrike: 'fx:power_strike pa:warrior_shockwave pp:warrior_shockwave',
+  rampage: 'fa:warcry fx:rampage fx:rampage_pulse fx:warcry',
+  rush: 'fx:rush',
+  sage_meteorshower: 'fa:sage_meteorshower fx:fireball fx:sage_meteorshower',
+  sage_ult: 'bp:bult_sage fa:sage_meteor_impact fa:sage_ult fx:sage_meteor_impact fx:sage_ult',
+  shadowStrike: 'fx:shadow_strike',
+  shadowlord_clones: 'fa:clone_strike fa:shadowlord_clones fx:clone_sigil fx:clone_strike fx:shadowlord_clones sa:clone_center sa:clone_left sa:clone_right sm:clone_center sm:clone_left sm:clone_right',
+  shadowlord_ult: 'fa:shadowlord_ult fx:shadowlord_ult',
+  shinobi_seal: 'fa:shinobi_seal fx:shinobi_seal',
+  shinobi_ult: 'fa:shinobi_ult fx:shinobi_ult',
+  skyhunter_gale: 'bp:gale_skyhunter fa:skyhunter_gale fx:skyhunter_gale sa:wolf_sky',
+  skyhunter_ult: 'bp:bult_skyhunter fa:skyhunter_ult fx:skyhunter_ult sa:eagle sm:eagle',
+  sleight: 'fa:phantom_voidrift fx:phantom_voidrift fx:phantom_voidrift2',
+  smokeBomb: 'fx:shin_shuriken fx:shin_shuriken2 pp:kunai pp:shuriken',
+  smokeDash: 'fx:smoke_dash',
+  snipe_railgun: 'fx:railshot',
+  soulSiphon: 'fx:hexmaster_summon pa:p_necromancer_soulorb sa:skeleton sa:zombie sm:skeleton sm:zombie',
+  throwDagger: 'fx:throw_dagger',
+  warCry: 'fa:warcry fx:fx_warcry_mark fx:warcry',
+  warlord_ult: 'bp:bult_warlord fa:warlord_ult fx:warlord_ult pa:p_ult_warlord',
+  warlord_warcry: 'fa:warlord_banner fx:warlord_banner fx:warlord_banner_planted pa:shockwave pp:shockwave',
+  wildBond: 'fx:wild_bond sa:werewolf sa:wolf sm:wolf',
+};
+// v0.30.1234 lazy-fx - a boss's own shots and effects: measured (600 frames in his arena) plus the fire sites a sample does not
+// reach; the rest of any monster's art comes by rule (_lxFxMobTags)
+const _LX_FX_BOSS = {
+  aetherion: 'fa:ae_evolve fa:fx_shard fa:fx_voidbeam fx:ae_evolve fx:fx_shard fx:fx_voidbeam mp:deathOrb mp:maeshard mp:voidring pa:deathOrb pa:maeshard pa:meteor pa:voidring',
+  gravitos: 'fa:grav_impact fa:gravitos_riftring fa:gravitos_voidrift fa:singularity fx:grav_impact fx:gravitos_riftring fx:gravitos_slamring fx:gravitos_slamzone fx:gravitos_voidrift mp:comet mp:gravbolt mp:gravdrop mp:shock mp:voidring mp:wave pa:comet pa:gravdrop pa:voidring pa:wave',
+  king: 'mp:goo mp:splash pa:goo pa:splash',
+  kingKrook: 'mp:claw mp:mfirebomb pa:firebomb',
+  mirrorSelf: 'mp:msplinter pa:msplinter',
+  mooma: 'mp:shock mp:spore pa:spore',
+  octobaby: 'mp:bubble mp:mink mp:octoHead mp:octoLeg mp:splash mp:tidalSweep pa:bubble pa:mink pa:octoHead pa:octoLeg',
+  pqConductor: 'fx:fx_col_conductor mp:mticket',
+  sundered_smith: 'mp:forgeHammer mp:quake pa:meteor pa:quake',
+  towerArbiter: 'fx:fx_col_arbiter',
+  towerSovereign: 'fx:fx_col_sovereign mp:msovereign pa:msovereign',
+  young_confused_barnaby: 'fx:fx_col_barnaby mp:barnFist pa:meteor',
+  zodiac_aquarius: 'mp:droplet mp:waterPillar mp:wave mp:whirl pa:droplet pa:wave pa:whirl',
+  zodiac_aries: 'mp:fire mp:zodiac mp:zodiacHoming pa:meteor pa:zodiac',
+  zodiac_cancer: 'mp:cancerBubble mp:pincer mp:pincerSweep mp:tsunami pa:cancerBubble pa:pincer pa:tsunami',
+  zodiac_capricorn: 'mp:ice mp:icePillar mp:stalactite pa:ice pa:icePillar pa:stalactite',
+  zodiac_gemini: 'mp:gemini_shard pa:gemini_shard',
+  zodiac_leo: 'fa:fx_leo_slam fx:fx_leo_slam mp:roar mp:starbeam mp:starburst pa:meteor pa:roar pa:starbeam pa:starburst',
+  zodiac_libra: 'mp:scale pa:scale',
+  zodiac_pisces: 'mp:bubble mp:droplet mp:whirl pa:bubble pa:droplet pa:whirl',
+  zodiac_sagittarius: 'mp:arrowRain mp:markedShot mp:starbeam pa:markedShot pa:starbeam',
+  zodiac_scorpio: 'mp:venom pa:meteor pa:venom',
+  zodiac_taurus: 'fa:tg_dash_zodiac_taurus fx:fx_taurus_gore mp:quake mp:taurus_boulder pa:quake pa:taurus_boulder',
+  zodiac_virgo: 'mp:radiantLance',
+};
+function _lxFxOwn(o, k) { return !!(o && k && Object.prototype.hasOwnProperty.call(o, k)); }
+// v0.30.1234 lazy-fx - a tag's registry image (null for an animation set or an unknown key)
+function _lxFxImg(tag) {
+  const k = tag.slice(3);
+  try {
+    switch (tag.slice(0, 2)) {
+      case 'fx': return _lxFxOwn(LX_FX, k) ? LX_FX[k] : null;
+      case 'pp': return _lxFxOwn(LX_PLAYER_PROJ, k) ? LX_PLAYER_PROJ[k] : null;
+      case 'bp': return _lxFxOwn(LX_BULT_PROJ, k) ? LX_BULT_PROJ[k] : null;
+      case 'mp': return _lxFxOwn(LX_MOB_PROJ, k) ? LX_MOB_PROJ[k] : null;
+      case 'mc': return _lxFxOwn(LX_MOB_CAST, k) ? LX_MOB_CAST[k] : null;
+      case 'sm': return _lxFxOwn(LX_SUMMON, k) ? LX_SUMMON[k] : null;
+      case 'it': return _lxFxOwn(LX_ITEMS, '_pending_' + k) ? LX_ITEMS['_pending_' + k] : null;
+    }
+  } catch (e) {}
+  return null;
+}
+// v0.30.1234 lazy-fx - ask for one tag. hi (a map being entered, a monster appearing): a sprite at once, ahead of the background
+// stream; an animation set at the FRONT of a queue paced like the old sweep (three sets a beat when calm, one while the
+// player fights), so it never competes with a boss's frames under the veil. hi === 2 (a cast): a set at once too.
+// Otherwise it waits for the menu (the title files go first, as lazy-art2's asks do), then joins the back of the queue.
+function _lxFxWant(tag, hi) {
+  if (!tag || !window._lxBootHold || _LX_FX.off) return;
+  const F = _LX_FX;
+  if (!hi && !F.open) {
+    try { F.open = !!window._lxBootHold.stats().open; } catch (e) {}
+    if (!F.open) { if (F.later.indexOf(tag) < 0) F.later.push(tag); if (!F.laterT) F.laterT = setTimeout(_lxFxLater, 400); return; }
+  }
+  const p = tag.slice(0, 2);
+  if (p === 'fa' || p === 'pa' || p === 'sa') {
+    const st = F.anim[tag];
+    if (st === 2) return;
+    if (hi === 2) { _lxFxAnimGo(tag); return; }
+    if (st === 1) { const i = hi ? F.animQ.indexOf(tag) : -1; if (i > 0) { F.animQ.splice(i, 1); F.animQ.unshift(tag); } return; }
+    F.anim[tag] = 1; if (hi) F.animQ.unshift(tag); else F.animQ.push(tag);
+    if (!F.animT) F.animT = setTimeout(_lxFxAnimStep, 60);
+    return;
+  }
+  const im = _lxFxImg(tag);
+  if (im && typeof _lxWantImg === 'function') _lxWantImg(im, hi);
+}
+function _lxFxLater() {
+  const F = _LX_FX; F.laterT = 0;
+  try { F.open = !!window._lxBootHold.stats().open; } catch (e) { F.open = true; }
+  if (!F.open) { F.laterT = setTimeout(_lxFxLater, 400); return; }
+  for (const t of F.later.splice(0)) _lxFxWant(t);
+}
+function _lxFxAnimGo(tag) {
+  _LX_FX.anim[tag] = 2;
+  const k = tag.slice(3);
+  try {
+    if (tag[0] === 'f') { if (typeof _fxAnimFrames === 'function') _fxAnimFrames(k); }
+    else if (tag[0] === 'p') { if (typeof _projAnimFrame === 'function') _projAnimFrame(k); }
+    else if (typeof _summonAnimFrame === 'function') { _summonAnimFrame(k, 'walk'); _summonAnimFrame(k, 'attack'); }
+  } catch (e) {}
+}
+function _lxFxAnimStep() {
+  const F = _LX_FX; F.animT = 0;
+  const n = (typeof _lxCombatHot === 'function' && _lxCombatHot()) ? 1 : 3;
+  for (let i = 0; i < n && F.animQ.length;) { const t = F.animQ.shift(); if (F.anim[t] === 2) continue; _lxFxAnimGo(t); i++; }
+  if (F.animQ.length) F.animT = setTimeout(_lxFxAnimStep, 180);
+}
+// v0.30.1234 lazy-fx - the art this character can cast: every skill of its class, job and master (learned or not - any of them
+// can go on the bar), the class's hit sparks and stance, anything named for the class, job or master, and the rank /
+// variant sprites beside a listed one (death_blossom1, shin_shuriken2, soul_vortex1, phantom_voidrift2)
+function _lxFxClassTags() {
+  const out = [], c = (typeof player !== 'undefined' && player) ? player.cls : null;
+  if (!c) return out;
+  const add = (t) => { if (out.indexOf(t) < 0) out.push(t); };
+  try {
+    const rx = new RegExp('(^|_)(?:' + [c, player.job, player.master].filter(Boolean).join('|') + ')(?:_|\\d|$)');
+    for (const k in LX_FX) if (rx.test(k)) { add('fx:' + k); if (_FX_ANIM_KEYS.has(k)) add('fa:' + k); }
+    for (const id in SKILLS) {
+      const sk = SKILLS[id];
+      if (!sk || sk.cls !== c || (sk.job && sk.job !== player.job) || (sk.master && sk.master !== player.master)) continue;
+      for (const t of (_LX_FX_SKILL[id] || '').split(' ')) if (t) add(t);
+    }
+    for (const t of out.slice()) if (t.indexOf('fx:') === 0) { const b = t.slice(3); for (const k in LX_FX) if (k !== b && k.indexOf(b) === 0 && /^_?\d+$/.test(k.slice(b.length))) add('fx:' + k); }
+  } catch (e) {}
+  return out;
+}
+function _lxFxWantClass() { for (const t of _lxFxClassTags()) _lxFxWant(t); }
+// v0.30.1234 lazy-fx - castSkill re-runs every frame a key is held: once per skill (its table row, at once)
+function _lxFxWantSkill(id, hi) {
+  if (!id || _LX_FX.cast[id]) return;
+  _LX_FX.cast[id] = 1;
+  for (const t of (_LX_FX_SKILL[id] || '').split(' ')) if (t) _lxFxWant(t, hi);
+}
+function _lxFxWantGear() {
+  try { const eq = player.equipped || {}; for (const sl in eq) { const it = eq[sl], k = it && _itemKey(it); if (k) _lxFxWant('it:' + k); } } catch (e) {}
+}
+// v0.30.1234 lazy-fx - one compare a frame (from _lxPrewarmClassFx): a class, job or master change, or a gear slot that changed
+function _lxFxTick() {
+  if (!window._lxBootHold || _LX_FX.off || typeof player === 'undefined' || !player) return;
+  const F = _LX_FX;
+  if (player.cls !== F.c || player.job !== F.j || player.master !== F.m) { F.c = player.cls; F.j = player.job; F.m = player.master; _lxFxWantClass(); }
+  const eq = player.equipped;
+  if (eq) { let ch = false; for (const sl in eq) if (F.eq[sl] !== eq[sl]) { F.eq[sl] = eq[sl]; ch = true; } if (ch) _lxFxWantGear(); }
+}
+// v0.30.1234 lazy-fx - right after the title (the hold lets go): the saved character's skills and gear, frame loop or not
+(function _lxFxBoot() {
+  const go = () => { try { const H = window._lxBootHold; if (!H) return; if (!H.stats().open) { setTimeout(go, 500); return; } _LX_FX.open = true; _lxFxTick(); } catch (e) {} };
+  setTimeout(go, 500);
+})();
+// v0.30.1234 lazy-fx - a monster type's art: its shot (the sprite, the cast flash, the shot's loop), any sprite or set its
+// definition names (a trait's column sprite), the art keyed on its name (swing_ / tg_col_ / tg_dash_ / fx_col_), its
+// skill kind's and type's pre-warm art, a boss's measured shots and effects, and the shackle sigils a boss can throw
+function _lxFxMobTags(type) {
+  let out = _LX_FX.mob[type];
+  if (out) return out;
+  out = [];
+  const t = (typeof monsterTypes !== 'undefined' && type) ? monsterTypes[type] : null;
+  if (!t) return out;
+  const add = (x) => { if (out.indexOf(x) < 0) out.push(x); };
+  const key = (k) => {
+    if (typeof k !== 'string' || !k || k.length > 48) return;
+    if (_lxFxOwn(LX_MOB_PROJ, k)) add('mp:' + k);
+    if (_lxFxOwn(LX_MOB_CAST, k)) add('mc:' + k);
+    if (_PROJ_ANIM_KEYS.has(k)) add('pa:' + k);
+    if (_lxFxOwn(LX_FX, k)) add('fx:' + k);
+    if (_FX_ANIM_KEYS.has(k)) add('fa:' + k);
+  };
+  const walk = (o, d) => { if (!o || d > 3) return; for (const k in o) { const v = o[k]; if (typeof v === 'string') key(v); else if (v && typeof v === 'object') walk(v, d + 1); } };
+  try {
+    walk(t, 0);
+    for (const pre of ['swing_', 'tg_col_', 'tg_dash_']) key(pre + type);
+    key('fx_col_' + type.toLowerCase());
+    const sk = (typeof MONSTER_SKILLS !== 'undefined') ? MONSTER_SKILLS[type] : null;
+    walk(sk && _LX_MOB_SKILL_ART[sk.kind], 0); walk(_LX_MOB_TYPE_ART[type], 0);
+    for (const x of (_LX_FX_BOSS[type] || '').split(' ')) if (x) add(x);
+    const zs = /^zodiac_/.test(type) ? type.slice(7) : null;
+    if (zs) { key('tg_col_zodiac'); key('fx_col_zodiac'); }
+    if (t.boss || zs) { const th = (typeof _qteThemeFor === 'function') ? _qteThemeFor({ type, zodiacSign: zs }) : null; for (const q of ['qte_chains', 'qte_break', th && th.fx]) key(q); }
+  } catch (e) { return out; }   // v0.30.1234 lazy-fx - asked before the tables exist: not kept, the next ask builds it whole
+  return (_LX_FX.mob[type] = out);
+}
+function _lxFxWantMob(type, hi) {
+  const memo = hi ? _LX_FX.mobHi : _LX_FX.mobLo;
+  if (!type || memo[type]) return;
+  memo[type] = 1;
+  for (const t of _lxFxMobTags(type)) _lxFxWant(t, hi);
+}
+// v0.30.1234 lazy-fx - the map's monsters: lazy-art's list (spawns, declared bosses, Tower / Hall of Echoes bosses) + the adds
+function _lxFxMapTypes(id) {
+  const out = [];
+  try { for (const t of _lxMapBossTypes(id)) { out.push(t); for (const a of ((typeof _LX_ART2_ADDS !== 'undefined' && _LX_ART2_ADDS[t]) || [])) out.push(a); } } catch (e) {}
+  return out;
+}
+function _lxFxWantMap(id, hi) { for (const t of _lxFxMapTypes(id)) _lxFxWantMob(t, hi); }
+// v0.30.1234 lazy-fx - settles when the map's monster shots and effects have loaded or failed (the veil waits on it, bounded)
+function _lxFxMapSettled(id) {
+  const ims = [];
+  for (const t of _lxFxMapTypes(id)) for (const x of _lxFxMobTags(t)) { const im = /^(?:mp|mc|fx):/.test(x) ? _lxFxImg(x) : null; if (im && ims.indexOf(im) < 0) ims.push(im); }
+  if (typeof _lxImgSettled !== 'function') return Promise.resolve(ims.length);
+  return Promise.all(ims.map(_lxImgSettled)).then(() => ims.length);
+}
+// v0.30.1234 lazy-fx - a gear icon still parked or on its way: an <img> of the file for a panel that renders once (it fetches the
+// file itself; the emoji replaces it if the file is missing). null when the icon is not lazy art or its file failed.
+function _lxFxItemImgHtml(it, sz) {
+  try {
+    const k = _itemKey(it), im = k && _lxFxOwn(LX_ITEMS, '_pending_' + k) ? LX_ITEMS['_pending_' + k] : null;
+    if (!im || im._lxLazy !== true || (im.complete && !(im.naturalWidth > 0))) return null;
+    const u = im.src;
+    if (!u) return null;
+    const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const fb = '<span style="font-size:' + Math.round(sz * 0.85) + 'px;line-height:1;">' + ((it && it.icon) || '\u25c7') + '</span>';
+    return '<img src="' + esc(u) + '" width="' + sz + '" height="' + sz + '" style="display:inline-block;vertical-align:middle;image-rendering:auto;" alt="' + esc((it && it.name) || '') + '" data-fb="' + esc(fb) + '" onerror="this.outerHTML=this.dataset.fb">';
+  } catch (e) { return null; }
+}
 let _lxFxWarmCls = null, _lxFxWarmJob = null, _lxFxWarmMaster = null;
 function _lxPrewarmClassFx() {
   if (typeof player === 'undefined' || !player || !player.cls) return;
+  try { if (typeof _lxFxTick === 'function') _lxFxTick(); } catch (e) {}   // v0.30.1234 lazy-fx - the skills' and the gear's art
   if (player.cls === _lxFxWarmCls && player.job === _lxFxWarmJob && player.master === _lxFxWarmMaster) return;   // one compare a frame
   _lxFxWarmCls = player.cls; _lxFxWarmJob = player.job; _lxFxWarmMaster = player.master;
   try {
@@ -145498,7 +145820,7 @@ function _lxPrewarmMobFx(type, boss) {
     const t = (typeof monsterTypes !== 'undefined') ? monsterTypes[type] : null;
     if (!t) return;
     const FX = (typeof LX_FX !== 'undefined' && LX_FX) || {}, pins = [];
-    const one = (im) => { if (im && im.tagName === 'IMG' && pins.indexOf(im) < 0) pins.push(im); };
+    const one = (im) => { if (im && im.tagName === 'IMG' && pins.indexOf(im) < 0) { if (im._lxLazy === true && !im._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(im, true); pins.push(im); } };   // v0.30.1234 lazy-fx - asked for before its pin queues
     one(FX['swing_' + type]); one(FX['tg_col_' + type]);
     const tr = t.traits;
     if (tr && typeof tr === 'object') for (const k in tr) { const v = tr[k]; if (v && typeof v === 'object') for (const f in v) if (typeof v[f] === 'string' && FX[v[f]]) one(FX[v[f]]); }
@@ -167557,7 +167879,9 @@ function _lxReadyGate(mapId, opts) {
     let t = Date.now();
     try { if (typeof _lxLazyWantMap === 'function') _lxLazyWantMap(id, true); } catch (e) {}   // v0.30.1196 lazy-art - started now, awaited below
     const _lzBoss = (typeof _lxBossArtSettled === 'function') ? _lxBossArtSettled(id) : null, _lzBg = (typeof _lxBackdropSettled === 'function') ? _lxBackdropSettled(id) : null;
+    const _lzFx = (typeof _lxFxMapSettled === 'function') ? _lxFxMapSettled(id) : null;   // v0.30.1234 lazy-fx - the map's monster shots and effects, loading beside the sheets
     try { if (typeof _lxArt2Settled === 'function') await capped(_lxArt2Settled(id), CAP * 0.4); } catch (e) {}   // v0.30.1205 lazy-art2 - the monster / NPC sheets, tiles and props land before the veil lifts
+    try { if (_lzFx) await capped(_lzFx, CAP * 0.05); } catch (e) {}   // v0.30.1234 lazy-fx - and a moment more for them
     paint(5, 'Decoding sprites…');
     // For the WHOLE gate, not just the drain: every frame the game draws under
     // the veil bakes unmetered, so NPCs, the player and anything in view are

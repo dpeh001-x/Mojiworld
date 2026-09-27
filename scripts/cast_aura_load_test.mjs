@@ -18,6 +18,7 @@ await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
 const errs = [], failedReq = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
 page.on('response', (r) => { if (/projectiles\/cast\//.test(r.url()) && r.status() >= 400) failedReq.push(r.status() + ' ' + r.url().split('/').pop()); });
 page.on('requestfailed', (r) => { if (/projectiles\/cast\//.test(r.url())) failedReq.push('failed ' + r.url().split('/').pop()); });

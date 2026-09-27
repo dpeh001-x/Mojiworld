@@ -54,6 +54,7 @@ const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore', env: 
 await new Promise((r) => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
+await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
 const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
 await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof SKILL_FNS === 'object' && typeof drawProjectiles === 'function' && typeof LX_PLAYER_PROJ === 'object', null, { timeout: 120000 });

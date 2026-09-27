@@ -18,6 +18,7 @@ const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT
 await new Promise((r) => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
 await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`,
   { waitUntil: 'load', timeout: 120000 });
 await page.waitForFunction(() => typeof drawProjectiles === 'function' && typeof LX_MOB_PROJ !== 'undefined'

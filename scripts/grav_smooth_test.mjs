@@ -42,6 +42,7 @@ const browser = await chromium.launch({ channel: 'chrome', args: ['--mute-audio'
 try {
   const ctxB = await browser.newContext({ viewport: { width: 1920, height: 1080 }, serviceWorkers: 'block' });
   const page = await ctxB.newPage();
+  await page.addInitScript(() => { window._lxFxEager = true; });   // v0.30.x lazy-fx - this suite inspects the art itself: it stays eager here
   page.on('pageerror', () => {});
   for (const f of ['sprite_bbox.js', 'sprite_edges.js', 'sprite_frame_index.js']) {
     try { const body = readFileSync(path.join(T, f)); await page.route('**/data/' + f + '*', (r) => r.fulfill({ status: 200, contentType: 'application/javascript', body })); } catch (e) {}
