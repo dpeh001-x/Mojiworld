@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1302';
+const GAME_VERSION = 'v0.30.1303';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -125274,6 +125274,7 @@ function _lxSkyHidden() {
   return S;
 }
 function drawBackground() {
+  try { _LX_ZOD.graded = null; if (_LX_ZOD.gbg && !(game.mapData && game.mapData.isZodiac)) { _LX_ZOD.gbg.width = 0; _LX_ZOD.gbg = null; _LX_ZOD.gbgKey = null; } } catch (e) {}   // v0.30.1303 perf - see _lxZodGradedBg
   // v0.25.16 — Phaser handles the bg image + sky + haze when active.
   // Vanilla just clears to transparent here so the Phaser layer shows
   // through. Boss-arena decor still rides on vanilla (painted on top).
@@ -125431,6 +125432,9 @@ function drawBackground() {
     // device pixels. Chrome does not antialias an axis-aligned image edge (bg_fill_skip_test sees 0 px change without this),
     // but an engine that does would blend that column with what is under it - so it keeps a 2 px strip of sky.
     if (_LX_SKY.hidden && !_nm) { ctx.fillStyle = _skyGradCache; ctx.fillRect(_bgW - shift - 1, 0, 2, H); }
+    // v0.30.1303 perf - a zodiac domain's backdrop is drawn already graded (_lxZodGradedBg); drawBossDecor re-grades the pillars
+    const _zg = (_md.isZodiac && !_bgVid && !_nm && _bgY === 0 && _bgH === H && _bgW === W && !window._lxNoFillSkip && typeof _lxZodGradedBg === 'function') ? _lxZodGradedBg(_bgSrc, _bgW, _bgH) : null;
+    if (_zg) _LX_ZOD.graded = { src: _bgSrc, shift, bw: _bgW, bh: _bgH, g: _LX_ZOD.gbgSpec };
     // v0.30.566 — a mid-map clip switch (the Singularity's finale) crosses from the outgoing clip;
     // the plate is only the underlay when there was no clip before this one.
     const _bgUnder = (_bgVid && _lxMapVideoAlpha < 1)
@@ -125442,7 +125446,7 @@ function drawBackground() {
       if (!_nm) { ctx.save(); ctx.translate(2 * _bgW - shift, 0); ctx.scale(-1, 1); ctx.drawImage(_pl, 0, _bgY, _bgW, _bgH); ctx.restore(); }   // v0.30.593 everdawn-bg
       ctx.globalAlpha = _lxMapVideoAlpha;
     }
-    ctx.drawImage(_bgSrc, -shift, _bgY, _bgW, _bgH);
+    ctx.drawImage(_zg || _bgSrc, -shift, _bgY, _bgW, _bgH);
     // Second copy — mirrored. Translating to (2*_bgW - shift) puts its right
     // edge at x=(2*_bgW-shift) and after scale(-1,1) its left edge ends up at
     // x=(_bgW-shift), exactly where the first copy's right edge lands. Pixels
@@ -125451,7 +125455,7 @@ function drawBackground() {
       ctx.save();
       ctx.translate(2 * _bgW - shift, 0);
       ctx.scale(-1, 1);
-      ctx.drawImage(_bgSrc, 0, _bgY, _bgW, _bgH);
+      ctx.drawImage(_zg || _bgSrc, 0, _bgY, _bgW, _bgH);
       ctx.restore();
     }
     if (_bgVid) ctx.globalAlpha = 1;   // v0.30.564 — end of the ramp blend, before the tint
@@ -127449,12 +127453,8 @@ function _lxZodStageBack(c, camX, camY, W, H) {
   c.save();
   // 1. grade: re-hue the shared backdrop into the sign's colour ('color' keeps its light and shade), sink it
   //    into the sign's night (multiply), then a heavy sky from the top - deeper each phase
-  c.globalCompositeOperation = 'color'; c.fillStyle = col.base || sky[2]; c.globalAlpha = 0.55; c.fillRect(0, 0, W, H);
-  c.globalCompositeOperation = 'multiply'; c.fillStyle = sky[1]; c.globalAlpha = 0.62 + 0.08 * (phase - 1); c.fillRect(0, 0, W, H);
-  c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
-  c.fillStyle = _lxZodGrad('sky' + H, () => { const g = c.createLinearGradient(0, 0, 0, H * 0.6);
-    g.addColorStop(0, _lxZodHexA(sky[0], 0.9)); g.addColorStop(0.6, _lxZodHexA(sky[0], 0.3)); g.addColorStop(1, _lxZodHexA(sky[0], 0)); return g; });
-  c.fillRect(0, 0, W, H);
+  //    v0.30.1303 perf - baked into the backdrop whenever drawBackground could (_lxZodGradedBg); painted here only when it could not
+  if (!_LX_ZOD.graded) _lxZodGradeOnto(c, _lxZodSpecFor(z, phase), W, H);
   // 2. the constellation, huge, slow parallax, twinkling
   const cx = W / 2 - (camX - 450) * 0.12, cy = 150 - (camY || 0) * 0.1;
   c.globalCompositeOperation = low ? 'source-over' : 'lighter';
@@ -127463,8 +127463,9 @@ function _lxZodStageBack(c, camX, camY, W, H) {
   // 3. the sigil ring behind the arena centre (world x 900, ~y 250), turning; faster each phase
   const rx = 900 - camX, ry = 150 - (camY || 0), spin = t * (0.05 + 0.07 * (phase - 1));   // v0.30.1296: was 250, behind the top platform
   // a glow pooled behind the ring makes it the focal point of the stage
-  if (!low) { const halo = c.createRadialGradient(rx, ry, 30, rx, ry, 360); halo.addColorStop(0, _lxZodHexA(aura, 0.34 + 0.08 * (phase - 1))); halo.addColorStop(1, _lxZodHexA(aura, 0));
-    c.globalAlpha = 1; c.fillStyle = halo; c.fillRect(rx - 360, ry - 360, 720, 720); }
+  if (!low) {   // v0.30.1303 perf - one gradient per sign and phase, placed by a translate (was a new gradient every frame)
+    const halo = _lxZodGrad('halo' + phase, () => { const hg = c.createRadialGradient(0, 0, 30, 0, 0, 360); hg.addColorStop(0, _lxZodHexA(aura, 0.34 + 0.08 * (phase - 1))); hg.addColorStop(1, _lxZodHexA(aura, 0)); return hg; });
+    c.globalAlpha = 1; c.fillStyle = halo; c.translate(rx, ry); c.fillRect(-360, -360, 720, 720); c.translate(-rx, -ry); }
   _lxZodDrawSigil(c, rx, ry, spin, 0.55 + 0.12 * (phase - 1) + 0.08 * Math.sin(t * 2), low);
   // 4. god-rays from above
   if (!low) {
@@ -127512,16 +127513,17 @@ function _lxZodStageFloor(c, camX, groundY) {
     for (const pl of (game.mapData.platforms || [])) {
       if (!pl || pl.type === 'ground') continue;
       const px = pl.x - camX + pl.w / 2, py = pl.y + (pl.h || 12) + 4, gw = pl.w * 0.62;
-      const ug = c.createRadialGradient(px, py, 2, px, py, gw);
-      ug.addColorStop(0, _lxZodHexA(aura, 0.42 + 0.1 * (phase - 1) + 0.08 * Math.sin(t * 2.4 + pl.x))); ug.addColorStop(1, _lxZodHexA(aura, 0));
-      c.fillStyle = ug; c.save(); c.translate(px, py); c.scale(1, 0.32); c.translate(-px, -py);
-      c.beginPath(); c.arc(px, py, gw, 0, 6.283); c.fill(); c.restore();
+      // v0.30.1303 perf - one gradient per platform width (was a new one per platform per frame); its pulse is the draw's alpha
+      const ug = _lxZodGrad('ug' + gw, () => { const g = c.createRadialGradient(0, 0, 2, 0, 0, gw); g.addColorStop(0, _lxZodHexA(aura, 1)); g.addColorStop(1, _lxZodHexA(aura, 0)); return g; });
+      c.globalAlpha = Math.max(0, Math.min(1, 0.42 + 0.1 * (phase - 1) + 0.08 * Math.sin(t * 2.4 + pl.x)));
+      c.fillStyle = ug; c.save(); c.translate(px, py); c.scale(1, 0.32);
+      c.beginPath(); c.arc(0, 0, gw, 0, 6.283); c.fill(); c.restore();
     }
   }
   c.restore(); c.save();
   // rim light along the ground edge
-  const rg = c.createLinearGradient(0, groundY - 26, 0, groundY + 4);
-  rg.addColorStop(0, _lxZodHexA(aura, 0)); rg.addColorStop(1, _lxZodHexA(aura, 0.7 + 0.1 * (phase - 1)));
+  const rg = _lxZodGrad('rim' + groundY + '|' + phase, () => { const g = c.createLinearGradient(0, groundY - 26, 0, groundY + 4);   // v0.30.1303 perf - once per sign, floor and phase
+    g.addColorStop(0, _lxZodHexA(aura, 0)); g.addColorStop(1, _lxZodHexA(aura, 0.7 + 0.1 * (phase - 1))); return g; });
   c.globalCompositeOperation = low ? 'source-over' : 'lighter';
   c.fillStyle = rg; c.fillRect(-camX, groundY - 26, 1800, 30);
   c.fillStyle = _lxZodHexA(hi, 0.8); c.fillRect(-camX, groundY - 1, 1800, 2);
@@ -127541,6 +127543,76 @@ function _lxZodStageFront(c, W, H) {
   c.restore();
 }
 // the arena floor line (the top of the highest ground slab), for the floor layer
+// v0.30.1303 perf - THE GRADE, BAKED. _lxZodStageBack re-hued ('color'), sank ('multiply') and skied (a gradient) the whole
+// screen every frame: three full-screen passes over a picture that only scrolls, two of them in blend modes this GPU pays
+// extra for - 3 of the 12.4 screens of fill a zodiac fight paints a frame (fill probe, High, 1080p), the most of any
+// boss. The grade is the same for every pixel of the backdrop (the colour and the multiply are constants, the sky runs
+// down the screen and a domain's backdrop never moves vertically), and each step is affine in the pixel, so it commutes
+// with the blit: the backdrop is graded once per sign and phase (_lxZodGradedBg) and drawn already graded. The two rune
+// pillars stand between the backdrop and the grade, so drawBossDecor redraws each pillar's rectangle the way the frame
+// used to - the backdrop there ungraded, the pillar, then the grade clipped to it (_lxZodPillarRegrade).
+// window._lxNoFillSkip = true paints the old way (scripts/zod_grade_bake_test.mjs compares the two).
+function _lxZodGradeSpec(z, phase) {
+  const col = z.colors || {}, sky = z.sky || ['#000', '#222', '#444'];
+  return { key: z.id + '|' + phase, color: col.base || sky[2], mul: sky[1], mulA: 0.62 + 0.08 * (phase - 1), sky0: sky[0], sg: null, sgH: 0 };
+}
+function _lxZodSpecFor(z, phase) {
+  const Z = _LX_ZOD, key = z.id + '|' + phase;
+  if (!Z.spec || Z.spec.key !== key) Z.spec = _lxZodGradeSpec(z, phase);
+  return Z.spec;
+}
+// the three passes, in the order _lxZodStageBack painted them, over (0, 0, w, h) in c's current transform
+function _lxZodGradeOnto(c, g, w, h) {
+  c.save();
+  c.globalCompositeOperation = 'color'; c.fillStyle = g.color; c.globalAlpha = 0.55; c.fillRect(0, 0, w, h);
+  c.globalCompositeOperation = 'multiply'; c.fillStyle = g.mul; c.globalAlpha = g.mulA; c.fillRect(0, 0, w, h);
+  c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+  if (!g.sg || g.sgH !== h) {
+    const sg = c.createLinearGradient(0, 0, 0, h * 0.6);
+    sg.addColorStop(0, _lxZodHexA(g.sky0, 0.9)); sg.addColorStop(0.6, _lxZodHexA(g.sky0, 0.3)); sg.addColorStop(1, _lxZodHexA(g.sky0, 0));
+    g.sg = sg; g.sgH = h;
+  }
+  c.fillStyle = g.sg; c.fillRect(0, 0, w, h);
+  c.restore();
+}
+// the backdrop source, graded at its own resolution: one canvas, re-baked only when the sign, the phase or the size changes
+function _lxZodGradedBg(src, bw, bh) {
+  const z = _lxZodSignNow(); if (!z || !src) return null;
+  const boss = _lxZodBoss(z), phase = boss ? (boss.phase || 1) : 1;
+  const Z = _LX_ZOD, sw = src.naturalWidth || src.width || 0, sh = src.naturalHeight || src.height || 0;
+  if (!sw || !sh) return null;
+  const key = z.id + '|' + phase + '|' + sw + 'x' + sh + '|' + bw + 'x' + bh;
+  if (Z.gbg && Z.gbgSrc === src && Z.gbgKey === key) return Z.gbg;
+  try {
+    const g = _lxZodSpecFor(z, phase);
+    const cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+    const x = cv.getContext('2d');
+    x.drawImage(src, 0, 0, sw, sh);
+    x.setTransform(sw / bw, 0, 0, sh / bh, 0, 0);
+    _lxZodGradeOnto(x, g, bw, bh);
+    if (Z.gbg) Z.gbg.width = 0;   // the previous phase's bake, released
+    Z.gbg = cv; Z.gbgSrc = src; Z.gbgKey = key; Z.gbgSpec = g;
+    return cv;
+  } catch (e) { return null; }
+}
+// one pillar, composed as the frame used to compose it, inside its own rectangle
+function _lxZodPillarRegrade(img, x, y, w, h) {
+  const D = _LX_ZOD.graded;
+  ctx.save();
+  // the clip snaps to whole device pixels: an antialiased edge would mix in the already-graded backdrop, and the grade
+  // below would then grade that part of the edge pixel twice
+  const m = ctx.getTransform();
+  if (m.b === 0 && m.c === 0 && m.a > 0 && m.d > 0) {
+    const x0 = (Math.floor(m.a * (x - 2) + m.e) - m.e) / m.a, x1 = (Math.ceil(m.a * (x + w + 2) + m.e) - m.e) / m.a;
+    const y0 = (Math.floor(m.d * (y - 2) + m.f) - m.f) / m.d, y1 = (Math.ceil(m.d * (y + h + 2) + m.f) - m.f) / m.d;
+    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
+  } else { ctx.beginPath(); ctx.rect(x - 2, y - 2, w + 4, h + 4); ctx.clip(); }
+  ctx.drawImage(D.src, -D.shift, 0, D.bw, D.bh);   // the backdrop under it, ungraded, where drawBackground placed it
+  ctx.save(); ctx.translate(2 * D.bw - D.shift, 0); ctx.scale(-1, 1); ctx.drawImage(D.src, 0, 0, D.bw, D.bh); ctx.restore();
+  try { _lxDrawSoft(ctx, img, x, y, w, h); } catch (e) {}
+  _lxZodGradeOnto(ctx, D.g, W, H);
+  ctx.restore();
+}
 function _lxZodGroundY() {
   let y = null; for (const pl of ((game.mapData && game.mapData.platforms) || [])) if (pl && pl.type === 'ground' && (y == null || pl.y < y)) y = pl.y;
   return y == null ? 480 : y;
@@ -128245,6 +128317,7 @@ function drawBossDecor() {
     for (const px of [Math.round(ww * 0.12), Math.round(ww * 0.88)]) {
       const sx = px - game.camera.x;
       if (sx < -dw || sx > W + dw) continue;
+      if (_LX_ZOD.graded) { _lxZodPillarRegrade(img, sx - dw / 2, baseY - dh, dw, dh); continue; }   // v0.30.1303 perf - the backdrop is graded already: this pillar's rectangle is re-graded exactly as before
       try { _lxDrawSoft(ctx, img, sx - dw / 2, baseY - dh, dw, dh); } catch (e) {}   // v0.29.239 — edge feather
     }
   }
