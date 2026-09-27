@@ -1460,6 +1460,9 @@ window.LX_ANIM_CALIB = {
   },
   "zodiac_scorpio": {
     "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.125,
       "ft": [
         72,
         60,
@@ -1472,6 +1475,16 @@ window.LX_ANIM_CALIB = {
         96
       ],
       "ftAuto": true
+    },
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.125
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.125
     }
   },
   "anglerfish": {
