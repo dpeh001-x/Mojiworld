@@ -154,6 +154,18 @@ try {
       A.select(t);
       await new Promise((r) => setTimeout(r, 130));
       const ent = A.MAN[t];
+      // 2026-09-28 - WAIT FOR THE DECODE, not a fixed 130 ms. select() is what starts a type's frame loads, and decodedN
+      // counts the decoded prefix, so a fixed settle read "0/9" whenever the machine was busy: one run failed axolotl,
+      // bellowsbat and snail, the next (heavier load) 159 states over 53 types - and every one of them decoded 9/9 within
+      // 0.4-1.9 s when given the time. Poll until every state of this type is fully decoded, up to 10 s; a frame that
+      // really never decodes still fails the check below.
+      const _t0 = performance.now();
+      while (performance.now() - _t0 < 10000) {
+        let all = true;
+        for (const st of A.STATES) { if (!ent.states[st]) continue; const m = A.gameMetrics(st); if (m && m.decoded < m.frames) { all = false; break; } }
+        if (all) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
       for (const st of A.STATES) {
         if (!ent.states[st]) continue;
         const m = A.gameMetrics(st);
