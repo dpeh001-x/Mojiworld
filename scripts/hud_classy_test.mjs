@@ -66,7 +66,7 @@ ok('the stats card keeps its class-coloured rim', !!R.acc && nums(R.rim).length 
 ok('the location plate stays near-black and semi-opaque', R.mlStops.length >= 2 && R.mlStops.every((s) => s.sum <= 60 && s.a > 0 && s.a < 1), R.mlStops);
 ok('toasts sit on neutral ink, still translucent (no violet / brown / blue cast)', R.toasts.length >= 3 && R.toasts.every((c) => neutral(c) && c[3] <= 0.7), R.toasts);
 ok('the minimap and the skill bar are neutral ink, not navy / violet', neutral(R.mm) && !/180, 140, 232|60, 40, 90/.test(R.sb), { minimap: R.mm, skills: R.sb.slice(0, 90) });
-ok('SCOPE: the quest tracker keeps the look the user chose in v0.30.987 (navy, gold rim, Inter)', !!R.qt && /^"?Inter/.test(R.qt.font) && R.qt.border === 'rgb(221, 170, 102)', R.qt);
+ok('SCOPE: the quest tracker is pop punk now (per user 2026-09-27: "this can be more POP PUNK styled as well" - the v0.30.987 navy / gold / Inter look retired): Nunito and an ink rim', !!R.qt && /Nunito/.test(R.qt.font) && R.qt.border === 'rgb(13, 10, 20)', R.qt);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + J(q.x ?? '').slice(0, 220));
 console.log(`${results.filter((q) => q.pass).length}/${results.length} checks passed`);
