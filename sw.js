@@ -205,7 +205,9 @@
 // (soft podium shadows, the podium raised), so a returning browser would otherwise show v0.30.1211's once.
 // v0.30.x cs-stage8 - v83 -> v84. Sprites/ui/cs/stage_pop.svg (the character-creation stage) is REPLACED under its own name again
 // (a measured contact shadow under the hero's feet), so a returning browser would otherwise show v0.30.1216's once.
-const CACHE = 'mojiworld-assets-v84';   // v0.30.x cs-stage8 - the creator stage: a real contact shadow (same name)
+// v0.30.x cs-stage9 - v84 -> v85. Sprites/ui/cs/stage_pop.svg (the character-creation stage) is REPLACED under its own name again
+// (a cel-shaded contact shadow under the hero), so a returning browser would otherwise show v0.30.1218's once.
+const CACHE = 'mojiworld-assets-v85';   // v0.30.x cs-stage9 - the creator stage: a cel-shaded contact shadow (same name)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

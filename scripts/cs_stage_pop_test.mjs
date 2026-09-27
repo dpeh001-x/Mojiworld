@@ -36,10 +36,17 @@ ok('a muted backstage: dusty burst and drapes, not the berry of the earlier pass
 ok('a pronounced floor: starts at the horizon (y 300), boards to a vanishing point, a lit edge, a light pool', svg.includes('<rect y="300" width="400" height="100" fill="url(#floor)"/>') && (svg.match(/<path d="M200,120L/g) || []).length >= 20 && svg.includes('clip-path="url(#floorClip)"') && svg.includes('fill="url(#floorPool)"'));
 // cs-stage7 (per user: "the podium especially the shadow on the podium looks weird, please rectify, push the character
 // vertically up slightly")
-ok('the podium has soft shadows - no hard offset block under the drum, a soft contact shadow under the feet', !svg.includes('transform="translate(6 8)"') && svg.includes('fill="url(#podShadow)"') && svg.includes('fill="url(#contact)"') && svg.includes('<ellipse cx="200" cy="330" rx="122" ry="22" fill="url(#top)"'));
+ok('the podium has soft shadows - no hard offset block under the drum, a soft contact shadow under the feet', !svg.includes('transform="translate(6 8)"') && svg.includes('fill="url(#podShadow)"') && svg.includes('fill="url(#shadowCel)"') && svg.includes('<ellipse cx="200" cy="330" rx="122" ry="22" fill="url(#top)"'));
 // cs-stage8 (per user, on a crop of the feet: "add a suitable sized shadow ellipse to make it look realistic")
-const core = /<ellipse cx="([0-9.]+)" cy="([0-9.]+)" rx="([0-9.]+)" ry="([0-9.]+)" fill="url\(#contactCore\)"/.exec(svg);
-ok('a realistic contact shadow: a dark core under the soles, wider than the feet (x 175-222, soles at y 332.6)', !!core && Math.abs(+core[1] - 198.5) < 2 && +core[2] >= 332 && +core[2] <= 337 && +core[1] - +core[3] < 170 && +core[1] + +core[3] > 228 && svg.includes('fill="url(#contact)"'), core && core.slice(1));
+// cs-stage9 (per user: "The shadow can be much more nicer, please make it better"): cel-shaded - a flat plum oval with a
+// crisp edge wider than the feet, a darker tone under the soles, a faint soft bed; no near-black blur
+const ell = (id) => { const m = new RegExp('<ellipse cx="([0-9.]+)" cy="([0-9.]+)" rx="([0-9.]+)" ry="([0-9.]+)" fill="url\\(#' + id + '\\)"').exec(svg); return m && m.slice(1).map(Number); };
+const cel = ell('shadowCel'), core = ell('shadowCore'), bed = ell('shadowBed');
+ok('a realistic contact shadow: a cel oval under the soles, wider than the feet (x 175-222, soles at y 332.6), a darker core inside it', !!cel && !!core && !!bed &&
+  Math.abs(cel[0] - 198.5) < 5 && cel[1] >= 332 && cel[1] <= 338 && cel[0] - cel[2] < 170 && cel[0] + cel[2] > 228 &&
+  core[2] < cel[2] && core[3] < cel[3] && Math.abs(core[1] - 332.6) < 3, { cel, core, bed });
+const flatStop = /<radialGradient id="shadowCel"[^\n]*?<stop offset="0" stop-color="(#[0-9a-f]{6})" stop-opacity="([0-9.]+)"\/><stop offset="(\.[0-9]+)"/.exec(svg);
+ok('the cel oval is flat with a crisp edge (flat past 80% of its radius) and tinted plum, not a near-black blur', !!flatStop && +flatStop[3] >= 0.8 && flatStop[1] !== '#12081a' && flatStop[1] !== '#0d0a14', flatStop && flatStop.slice(1));
 ok('not cluttered: no posters, graffiti or brickwork, two sparkles', !svg.includes('clipPath id="pc') && !svg.includes('stroke-width="9"') && !svg.includes('wallm') && (svg.match(/d="M0,-12L2\.6,-2\.6/g) || []).length === 2);
 ok('no caution tape stripes', !/repeating-linear|#ffe07a" fill-opacity/.test(svg));
 
