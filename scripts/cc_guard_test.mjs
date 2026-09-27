@@ -53,8 +53,10 @@ try {
     for (let i = 0; i < 90; i++) updatePlayer(1000 / 60); const out = { pw0, pw: player.parryWindow, bt: player.blockTimer, cd: player.blockCD };
     player.frozenTimer = 0; return out;`);
   check(bc.pw0 > 0 && bc.pw <= 0 && bc.bt <= 0, 'the block and parry clocks keep running under a freeze', J(bc));
-  // 5. boss deadlines ride the pause
-  const pz = await run(`loadMap('graniteBluffs', 200); await new Promise((r) => setTimeout(r, 400)); const m = game.monsters.find((x) => x && x.currentHp > 0); if (!m) return { err: 'no mob' };
+  // 5. boss deadlines ride the pause. Measured from a SETTLED map: for the first second or two after loadMap the loop runs
+  // a few frames a second while the new map's art decodes and bakes (4 rAF/s measured, against ~50 once warm), so a pause
+  // begun 400 ms in saw the clock move 3-10 steps and failed "ran > 10" although every deadline moved exactly with it.
+  const pz = await run(`loadMap('graniteBluffs', 200); for (let i = 0; i < 20; i++) { const g0 = game.time; await new Promise((r) => setTimeout(r, 400)); if (game.time - g0 >= 16) break; } const m = game.monsters.find((x) => x && x.currentHp > 0); if (!m) return { err: 'no mob' };
     m._cancerShellAt = (game.time | 0) + 600; m._stormAt = (game.time | 0) + 600; const s0 = m._cancerShellAt, st0 = m._stormAt, t0 = game.time;
     game.paused = true; await new Promise((r) => setTimeout(r, 1200)); game.paused = false;
     return { ran: (game.time - t0) | 0, shell: m._cancerShellAt - s0, storm: m._stormAt - st0 };`);
