@@ -15994,7 +15994,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1191';
+const GAME_VERSION = 'v0.30.1192';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -51319,6 +51319,7 @@ function _zodiacAnimeStrip(intro, sign) {
 // _anyOtherModalOpen all reach for #boss-intro-overlay and its children by name); see the CSS block of the same
 // version for the look. _zodiacAnimeStrip is no longer called: its art and name live in the card.
 const _LX_BI_BOX = new Map();   // image URL -> its opaque content box, natural px
+const _LX_BI_WAIT = new Map();  // v0.30.1192 boss-bake - image URL -> callers waiting on its scan (the prewarm and the card)
 function _lxBiRgb(hex) {
   let h = String(hex || '').replace('#', '');
   if (h.length === 3) h = h.split('').map((c) => c + c).join('');
@@ -51375,19 +51376,24 @@ function _lxBiBox(img, done) {           // done(box), or done(null) when the im
   if (!src) { done(null); return; }
   const hit = _LX_BI_BOX.get(src);
   if (hit !== undefined) { done(hit); return; }
-  const finish = (b) => { if (b) _LX_BI_BOX.set(src, b); done(b); };   // v0.30.x full audit - a failed load (null) is not cached: one 404 or network blip blanked this boss's card for the session
+  // v0.30.1192 boss-bake - the arena prewarm calls this INSIDE loadMap: a cold full-size portrait used to decode
+  // synchronously in drawImage there. decode() off the main thread first, scan in a task of its own, and a second ask
+  // for the same art while one is in flight waits for it.
+  { const _w = _LX_BI_WAIT.get(src); if (_w) { _w.push(done); return; } _LX_BI_WAIT.set(src, [done]); }
+  const _warm = (im, then) => { let went = false; const run = () => { if (!went) { went = true; setTimeout(then, 0); } }; try { if (typeof im.decode === 'function') { im.decode().then(run, run); setTimeout(run, 4000); return; } } catch (e) {} run(); };   // v0.30.1192 boss-bake
+  const finish = (b) => { if (b) _LX_BI_BOX.set(src, b); const _q = _LX_BI_WAIT.get(src) || [done]; _LX_BI_WAIT.delete(src); for (const f of _q) { try { f(b); } catch (e) {} } };   /* v0.30.1192 boss-bake - every waiter */   // v0.30.x full audit - a failed load (null) is not cached: one 404 or network blip blanked this boss's card for the session
   const read = (im) => { try { return _lxBiScan(im); } catch (e) { return undefined; } };   // undefined = tainted
   const go = () => {
     if (!(img.naturalWidth > 0)) { finish(null); return; }
     const r = read(img);
     if (r !== undefined) { finish(r || _lxBiBoxFallback(img)); return; }
     const c = new Image(); c.crossOrigin = 'anonymous';
-    c.onload = () => { const r2 = read(c); finish(r2 || _lxBiBoxFallback(img)); };
+    c.onload = () => _warm(c, () => { const r2 = read(c); finish(r2 || _lxBiBoxFallback(img)); });   // v0.30.1192 boss-bake - decoded first
     c.onerror = () => finish(_lxBiBoxFallback(img));
     c.src = src;
   };
-  if (img.complete) go();
-  else { img.addEventListener('load', go, { once: true }); img.addEventListener('error', () => finish(null), { once: true }); }
+  if (img.complete) _warm(img, go);   // v0.30.1192 boss-bake - decoded off the main thread, scanned in its own task
+  else { img.addEventListener('load', () => _warm(img, go), { once: true }); img.addEventListener('error', () => finish(null), { once: true }); }
 }
 function _lxBiLay(els, b) {
   const crop = els.biCrop, img = els.biImg;
@@ -143120,20 +143126,9 @@ function _warmMapArt(id, opts) {
     // after). The frames are already decoded + baked at this point, so the
     // scans here cost the same total ms but land under the fade where nothing
     // is animating. Zodiac signs pre-derive through their sign key.
-    try {
-      for (const sp of _types) {
-        if (!sp.type) continue;
-        if (sp.type.indexOf('zodiac_') === 0) {
-          try { _deriveBossRefHeight(sp.type.slice(7), sp.type.slice(7)); } catch (e) {}
-          continue;
-        }
-        for (const k of Object.keys(BOSS_SPRITES || {})) {
-          if (k !== sp.type && k.indexOf(sp.type) !== 0) continue;
-          try { _deriveBossRefHeight(k, null); } catch (e) {}
-          try { if (typeof _deriveBossRefBodyH === 'function') _deriveBossRefBodyH(k, null); } catch (e) {}
-        }
-      }
-    } catch (e) {}
+    // v0.30.1192 boss-bake - the same derive, one idle frame per task and only while the player is on this map (it used to
+    // be one synchronous loop here that, behind a held pump, landed as a multi-second freeze on the NEXT map)
+    try { if (typeof _lxBossRefDerive === 'function') return _lxBossRefDerive(id, _types).then(() => n, () => n); } catch (e) {}
     return n;
   });
 }
@@ -143574,6 +143569,78 @@ function _deriveBossRefHeight(key, sign) {
   const med = hs[hs.length >> 1];              // median is robust to an outlier frame
   _bossRefContentH.set(key, med);
   return med;
+}
+// v0.30.1192 boss-bake - ONE draw for both boxes. _spriteContentBox (alpha > 64) and _spriteBodyBox (alpha > 235) each drew
+// the same capped source into a canvas of their own and read it back, so a boss form paid every decode and readback
+// twice. Same source, same size, same thresholds, same per-image caches: the same answers, bit for bit.
+function _lxBossBoxesOnce(img, wantBody) {
+  if (!img) return;
+  const needC = img._lxCBox === undefined, needB = !!wantBody && img._lxBBox === undefined;
+  if (!needC && !needB) return;
+  const _s = _lxBoxSourceOf(img);
+  const W = _s.W, H = _s.H;
+  if (!W || !H) return;                        // v0.30.1192 boss-bake - not decoded yet: left uncached, as the two scanners do
+  let c = null;
+  try { const cv = document.createElement('canvas'); cv.width = W; cv.height = H; c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(_s.img, 0, 0, W, H); } catch (_) { c = null; }
+  const box = (aMin) => {
+    if (!c) return null;
+    try {
+      const _e = _lxEdgeRows(c, 0, 0, W, H, aMin);
+      const top = _e ? _e.top : -1, bottom = _e ? _e.bottom : -1;
+      if (top >= 0 && bottom >= top) return (_s.scale === 1) ? { top, bottom } : { top: Math.round(top * _s.scale), bottom: Math.round(bottom * _s.scale) };
+    } catch (_) {}
+    return null;
+  };
+  if (needC) img._lxCBox = box(64);
+  if (needB) img._lxBBox = box(235);
+}
+// v0.30.1192 boss-bake - the boss-sizing PRE-DERIVE, one idle frame per task, on its own map only. Each frame is decode()d
+// off the main thread, then measured (both boxes, one draw) in a task of its own; the derive calls that close a form
+// read only cached boxes. Off the map = stop (resolves at once): measured frames keep their boxes and the next warm
+// of that map finishes the rest. Holds, like the bake pump, while a blackout or the entry film owns the screen.
+function _lxBossRefDerive(mapId, types) {
+  const jobs = [], seen = Object.create(null);
+  for (const sp of (types || [])) {
+    if (!sp || !sp.type) continue;
+    if (sp.type.indexOf('zodiac_') === 0) { const g = sp.type.slice(7); if (!seen['z:' + g]) { seen['z:' + g] = 1; jobs.push({ key: g, sign: g, body: false }); } continue; }
+    for (const k of Object.keys(BOSS_SPRITES || {})) {
+      if (k !== sp.type && k.indexOf(sp.type) !== 0) continue;
+      if (!seen['b:' + k]) { seen['b:' + k] = 1; jobs.push({ key: k, sign: null, body: typeof _deriveBossRefBodyH === 'function' }); }
+    }
+  }
+  if (!jobs.length) return Promise.resolve();
+  return new Promise((done) => {
+    let j = 0, i = 0;
+    const here = () => !mapId || typeof game === 'undefined' || !game || game.currentMap === mapId;
+    const step = () => {
+      try {
+        if (!here()) { done(); return; }
+        if (typeof _lxBakeBudget === 'function' && _lxBakeBudget() === 0) { setTimeout(step, 250); return; }
+        while (j < jobs.length) {
+          const jb = jobs[j];
+          const set = jb.sign ? (typeof ZODIAC_IDLE_FRAMES !== 'undefined' && ZODIAC_IDLE_FRAMES[jb.sign]) : (typeof BOSS_IDLE_FRAMES !== 'undefined' && BOSS_IDLE_FRAMES[jb.key]);
+          const open = _bossRefContentH.get(jb.key) == null || (jb.body && _bossRefBodyH.get(jb.key) == null);
+          if (open && set && i < set.length) {
+            const im = set[i++];
+            if (im && (im._lxCBox === undefined || (jb.body && im._lxBBox === undefined))) {
+              const src = (im._lxSrc && im._lxSrc.naturalWidth > 0) ? im._lxSrc : im;
+              if (!((src.naturalWidth || src.width) > 0)) continue;   // v0.30.1192 boss-bake - not loaded: nothing to measure (the scanners skip it too)
+              let went = false;
+              const scan = () => { if (went) return; went = true; setTimeout(() => { try { if (here()) _lxBossBoxesOnce(im, jb.body); } catch (e) {} step(); }, 0); };
+              try { if (typeof src.decode === 'function') { src.decode().then(scan, scan); setTimeout(scan, 3000); return; } } catch (e) {}
+              scan(); return;
+            }
+            continue;
+          }
+          try { _deriveBossRefHeight(jb.key, jb.sign); } catch (e) {}
+          if (jb.body) { try { _deriveBossRefBodyH(jb.key, null); } catch (e) {} }
+          j++; i = 0;
+        }
+        done();
+      } catch (e) { done(); }
+    };
+    setTimeout(step, 0);
+  });
 }
 // v0.29.185 — the v0.29.183/184 per-state geometry guard (legosaurus / mooma
 // / kingKrook) was REMOVED: its defect class — states shipping on different
