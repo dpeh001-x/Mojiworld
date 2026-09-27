@@ -15950,7 +15950,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1184';
+const GAME_VERSION = 'v0.30.1185';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -48697,12 +48697,13 @@ function _lxSaveWithPaint(raw) {
 function _lxPaintLoad(sp) {
   if (!sp || typeof sp !== 'object') return;
   const ref = sp._lxPaintRef; delete sp._lxPaintRef;
+  const localOnly = sp._lxPaintLocalOnly === true; delete sp._lxPaintLocalOnly;   // v0.30.1185 cloud-paint-cap - cloud copy without its paint: this device's
   _lxPaintStored = null;
-  if (_lxPaintOf(sp).has || typeof ref !== 'string') return;   // inline (an old save): loads as it is; its next save moves it out
+  if (_lxPaintOf(sp).has || (typeof ref !== 'string' && !localOnly)) return;   // inline (an old save): loads as it is; its next save moves it out
   let rec = null;
   try { const r = localStorage.getItem(_LX_PAINT_KEY); rec = r ? _lxSafeJsonParse(r) : null; } catch (e) { rec = null; }
-  if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string') { try { console.warn('[save] the Wardrobe paint record is missing - loading without paint'); } catch (e) {} return; }
-  if (rec.id !== ref) { try { console.warn('[save] the Wardrobe paint record has another id than the save - using it'); } catch (e) {} }
+  if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string') { if (!localOnly) { try { console.warn('[save] the Wardrobe paint record is missing - loading without paint'); } catch (e) {} } return; }
+  if (rec.id !== ref && !localOnly) { try { console.warn('[save] the Wardrobe paint record has another id than the save - using it'); } catch (e) {} }
   sp.customPaint = rec.customPaint; sp.customPaintLayers = rec.customPaintLayers;
   const pp = _lxPaintOf(sp);
   _lxPaintStored = { id: rec.id, full: pp.full, layers: Object.assign({}, pp.layers) };
@@ -48717,7 +48718,8 @@ function _lxSaveStoreRaw(raw) {
   _lxPaintStored = null;
   if (!sp || !pp.has) {
     localStorage.setItem(SAVE_KEY, raw);
-    if (String(raw).indexOf('"_lxPaintRef":"') < 0) { try { localStorage.removeItem(_LX_PAINT_KEY); } catch (e) {} }   // it was the replaced save's
+    // v0.30.1185 cloud-paint-cap - a cloud save pushed without its paint (_lxPaintLocalOnly) keeps this device's paint record
+    if (String(raw).indexOf('"_lxPaintRef":"') < 0 && String(raw).indexOf('"_lxPaintLocalOnly":true') < 0) { try { localStorage.removeItem(_LX_PAINT_KEY); } catch (e) {} }   // it was the replaced save's
     return raw;
   }
   let before = null; try { before = localStorage.getItem(SAVE_KEY); } catch (e) {}
@@ -162688,6 +162690,52 @@ async function _lxApiAuth(kind, username, password) {
     return { ...base, _status: r.status };
   } catch (e) { return { ok: false, error: 'offline', _network: true }; }
 }
+// v0.30.1185 cloud-paint-cap - the account cloud refuses a save over 512 KB (CSAVE_CAP in mp-cf/src/index.js answers 413; keep
+// this in step with it). A painted Wardrobe (1-3 MB of PNG layers) put a painted hero's whole save over it, so their progress
+// never reached the account cloud. A push that would not fit goes WITHOUT the paint, marked _lxPaintLocalOnly: the progress
+// syncs, the paint stays on this device, and a pull of it keeps the paint the receiving device already has (a fresh device
+// gets the progress unpainted). A 413 anyway (a lower cap on the server) retries once without the paint. Steam Cloud has no
+// such cap and still gets the whole save.
+const _LX_CLOUD_SAVE_CAP = 512 * 1024;
+let _lxCloudPaintToastShown = false;   // v0.30.1185 cloud-paint-cap - once per session
+function _lxSaveNoPaint(raw) {   // v0.30.1185 cloud-paint-cap - the save minus its paint, marked as kept on the device
+  try {
+    if (typeof raw !== 'string') return raw;
+    const i = raw.indexOf('"_lxPaintRef":"');
+    if (i >= 0) { const j = raw.indexOf('"', i + 15); if (j > 0) return raw.slice(0, i) + '"_lxPaintLocalOnly":true' + raw.slice(j + 1); }
+    if (raw.indexOf('"customPaint') < 0) return raw;
+    const sv = _lxSafeJsonParse(raw);   // the paint inline (an old save, or storage too full for the paint record)
+    if (!sv || !sv.player || typeof sv.player !== 'object' || !_lxPaintOf(sv.player).has) return raw;
+    delete sv.player.customPaint; delete sv.player.customPaintLayers; sv.player._lxPaintLocalOnly = true;
+    return JSON.stringify(sv);
+  } catch (e) { return raw; }
+}
+// v0.30.1185 cloud-paint-cap - the body for an account-cloud push of a save as stored: whole (paint included) when it fits the
+// cap, else without the paint - and then, once per session, a toast saying so
+function _lxCloudSaveBody(raw, noPaint) {
+  if (!noPaint) { const whole = _lxSaveWithPaint(raw); if (typeof whole !== 'string' || whole.length <= _LX_CLOUD_SAVE_CAP) return whole; }
+  const bare = _lxSaveNoPaint(raw);
+  if (bare !== raw && !_lxCloudPaintToastShown) {
+    _lxCloudPaintToastShown = true;
+    try { if (typeof showToast === 'function') showToast('Your wardrobe paint is too big for cloud sync \u2014 it stays on this device; progress still syncs.', 'rare'); } catch (e) {}
+  }
+  return bare;
+}
+// v0.30.1185 cloud-paint-cap - the one account-cloud POST of a save as stored (the flush / pagehide push and the first-login
+// push); refused as too large anyway (413: the server's cap is below _LX_CLOUD_SAVE_CAP) -> once more without the paint
+function _lxCloudPost(token, raw, force) {
+  const post = (b) => fetch(_LX_API_BASE + '/api/save', {
+    method: 'POST', keepalive: !!force,
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+    body: b,
+  });
+  const body = _lxCloudSaveBody(raw);
+  post(body).then((r) => {
+    if (!r || r.status !== 413) return;
+    const bare = _lxCloudSaveBody(raw, true);
+    if (bare !== body) return post(bare);
+  }).catch(() => {});
+}
 let _lxCloudPushAt = 0;
 function _lxCloudPushSave(json, force) {
   try {
@@ -162696,12 +162744,7 @@ function _lxCloudPushSave(json, force) {
     const now = Date.now();
     if (!force && now - _lxCloudPushAt < 15000) return;          // throttle: <= 1 push / 15s
     _lxCloudPushAt = now;
-    json = _lxSaveWithPaint(json);   // v0.30.1181 paint-save - the account copy is a whole save, paint included
-    fetch(_LX_API_BASE + '/api/save', {
-      method: 'POST', keepalive: !!force,
-      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + sess.token },
-      body: json,
-    }).catch(() => {});
+    _lxCloudPost(sess.token, json, force);   // v0.30.1185 cloud-paint-cap - whole when it fits the cloud's cap, else without the paint
   } catch (e) {}
 }
 // Reconcile the account's cloud save with the local one on sign-in. Cloud wins on
@@ -162719,7 +162762,7 @@ async function _lxCloudSyncOnLogin(session) {
   } catch (e) { return; }                 // offline -> keep local
   let localRaw = null, localSave = null;
   try { localRaw = localStorage.getItem(SAVE_KEY); localSave = localRaw ? _lxSafeJsonParse(localRaw) : null;   /* v0.29.560 proto-safe */ } catch (e) {}
-  const pushLocal = () => { try { if (localRaw) fetch(_LX_API_BASE + '/api/save', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + session.token }, body: _lxSaveWithPaint(localRaw) /* v0.30.1181 paint-save - paint included */ }).catch(() => {}); } catch (e) {} };
+  const pushLocal = () => { try { if (localRaw) _lxCloudPost(session.token, localRaw, false);   /* v0.30.1185 cloud-paint-cap - without the paint when over the cap */ } catch (e) {} };
   if (!cloud) { pushLocal(); return; }    // first cloud login -> migrate local up
   const localLevel = (localSave && localSave.player && localSave.player.level) || 0;
   const cloudLevel = (cloud && cloud.player && cloud.player.level) || 0;
