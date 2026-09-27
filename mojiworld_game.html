@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1294';
+const GAME_VERSION = 'v0.30.1295';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -81760,20 +81760,39 @@ function _tickClassIdentity(dt) {
     if (player._warCharge && player._warCharge.cls === 'archer') player.vx = 0;
     // v0.30.684 - per user: the overcharge should be visible while Railshot CHARGES, not only at release.
     // A ring pulses at the bow every few frames and grows with the draw, so a held rail reads from
-    // across the screen and a full draw is unmistakable. Throttled by frame, skipped under adaptive
-    // low-FX, and scoped to this one skill - it is the only per-frame cost the charge adds.
+    // across the screen and a full draw is unmistakable. Throttled by frame and scoped to this one
+    // skill - it is the only per-frame cost the charge adds.
+    // v0.30.1295 - per user: holding F must raise the whirling power sprite. Three things kept it off screen:
+    //  1. the very-low FX tier skipped the ring outright, and that tier engages on its own - the Low preset,
+    //     the frame watchdog, 2+ bosses, 23+ monsters, a boss with 40 shots in the air - while the release
+    //     rings were never gated, so the whirl showed on release and not during the draw. It now thins to
+    //     one ring at a time instead of vanishing.
+    //  2. the art was never asked for ahead of its first draw: lazy-fx's skill table was measured on TAP
+    //     casts, which draw no ring, so the first hold after boot drew nothing while it downloaded. The
+    //     snipe_railgun row of _LX_FX_SKILL names railshot_charge now.
+    //  3. each ring restarted at angle 0 with its spin flipped, which read as flicker, not a whirl. The
+    //     rings now share one phase that keeps turning (_whirl), so the live rings rotate together as one
+    //     sprite, and the first ring lands on the first frame of the hold instead of up to 9 frames in.
+    // Sticky, so a crowded smoothFx pool cannot evict the draw's only ring.
     if (player._warCharge && player._warCharge.cls === 'archer' &&
-        player._warCharge.skillId === 'snipe_railgun' &&
-        !(typeof _perfVeryLowFx === 'function' && _perfVeryLowFx())) {
-      const _rcP = player._warCharge.power || 0;
-      const _rcGap = _rcP >= 0.999 ? 5 : 9;
-      if (((game.time | 0) % _rcGap) === 0) {
+        player._warCharge.skillId === 'snipe_railgun') {
+      const _rcC = player._warCharge;
+      const _rcP = _rcC.power || 0;
+      const _rcThin = (typeof _perfVeryLowFx === 'function') && _perfVeryLowFx();
+      const _rcGap = _rcThin ? 14 : (_rcP >= 0.999 ? 5 : 9);
+      const _rcW = (player.facing || 1) * (0.8 + 1.2 * _rcP) / 14;   // rad a frame: the old per-ring spin, spread evenly
+      _rcC._whirl = ((_rcC._whirl || 0) + _rcW) % (Math.PI * 2);
+      if (_rcC._ringAt == null || (game.time | 0) - _rcC._ringAt >= _rcGap) {
+        _rcC._ringAt = game.time | 0;
         const _rcF = player.facing || 1;
+        const _rcLife = Math.max(14, _rcGap + 4);   // thinned, each ring still outlives the gap: one is always up
         spawnSpriteBurst(player.x + player.w / 2 + _rcF * 26, player.y + 24, 'railshot_charge', {
-          size: 110 + 360 * _rcP,
-          life: 14,
-          spin: (((game.time | 0) % (2 * _rcGap)) ? 1 : -1) * (0.8 + 1.2 * _rcP),
-          opacity: 0.28 + 0.56 * _rcP,
+          size: 140 + 330 * _rcP,
+          life: _rcLife,
+          angle: _rcC._whirl,
+          spin: _rcW * _rcLife,
+          opacity: 0.42 + 0.42 * _rcP,
+          sticky: true,
         });
       }
     }
@@ -89000,10 +89019,14 @@ const SKILL_FNS = {
       // became 700, and the two layers turning against each other is what sells the power - a
       // single bigger circle just looks like a bigger circle.
       const _rsSize = 230 + 470 * _rsChg;
+      // v0.30.1295 - sticky, both rings: a full-draw release queues ~9 fx at once (the rail sprite, these two rings, the
+      // muzzle flare, three beams, the hit bursts) and the smoothFx pool keeps 6-14, fewer under low FX and combat
+      // load. It evicts the oldest first - the rail sprite, then these rings - so in a busy fight the whirl was gone
+      // the frame after it appeared.
       spawnSpriteBurst(sx + dir * 40, sy, 'railshot_charge',
-        { size: _rsSize, life: 24 + Math.round(16 * _rsChg), spin: 0.9 + 1.4 * _rsChg });
+        { size: _rsSize, life: 24 + Math.round(16 * _rsChg), spin: 0.9 + 1.4 * _rsChg, sticky: true });
       spawnSpriteBurst(sx + dir * 40, sy, 'railshot_charge',
-        { size: _rsSize * 0.58, life: 20 + Math.round(12 * _rsChg), spin: -(1.6 + 2.0 * _rsChg), opacity: 0.78 });
+        { size: _rsSize * 0.58, life: 20 + Math.round(12 * _rsChg), spin: -(1.6 + 2.0 * _rsChg), opacity: 0.78, sticky: true });
       spawnSmoothExplosion(sx + dir * 40, sy, 40 + 90 * _rsChg, '#ffffff', '#aaddff88',
         { life: 16 + Math.round(8 * _rsChg) });
     }
@@ -146346,7 +146369,8 @@ const _LX_FX_SKILL = {
   sleight: 'fa:phantom_voidrift fx:phantom_voidrift fx:phantom_voidrift2',
   smokeBomb: 'fx:shin_shuriken fx:shin_shuriken2 pp:kunai pp:shuriken',
   smokeDash: 'fx:smoke_dash',
-  snipe_railgun: 'fx:railshot',
+  // v0.30.1295 - railshot_charge is Railshot's HOLD ring (_tickClassIdentity): a tap cast - what this table measured - never draws it
+  snipe_railgun: 'fx:railshot fx:railshot_charge',
   soulSiphon: 'fx:hexmaster_summon pa:p_necromancer_soulorb sa:skeleton sa:zombie sm:skeleton sm:zombie',
   throwDagger: 'fx:throw_dagger',
   warCry: 'fa:warcry fx:fx_warcry_mark fx:warcry',
