@@ -16049,7 +16049,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1222';
+const GAME_VERSION = 'v0.30.1223';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -131682,7 +131682,8 @@ const _LX_PROMPT_M = Object.create(null);
 const _LX_PROMPT_FONT = '900 11px Nunito, "Segoe UI", system-ui, sans-serif';   // v0.30.1197 pop punk: the HUD's Nunito, heavy
 // v0.30.1197 - is Nunito in yet? Widths measured on a fallback face would be cached for the session (prompt metrics, name tags,
 // portal bakes), so those caches wait for it.
-function _lxPopFontReady() { try { return !(document.fonts && document.fonts.check) || document.fonts.check('900 11px Nunito'); } catch (e) { return true; } }
+var _lxPopFontOk = false;   // v0.30.1223 FIGHT LAG - latched: document.fonts.check ran per tag / label / prompt per frame
+function _lxPopFontReady() { if (_lxPopFontOk) return true; try { return (_lxPopFontOk = !(document.fonts && document.fonts.check) || document.fonts.check('900 11px Nunito')); } catch (e) { return true; } }
 const _LX_PROMPT_CAP = 16, _LX_PROMPT_PAD = 8, _LX_PROMPT_GAP = 6, _LX_PROMPT_H = 22;
 function _lxPromptMetrics(g, key, label) {
   const k = key + '|' + label;
@@ -145616,7 +145617,7 @@ const _MOB_SPRITE_CACHE = new Map();
 // blit is 1:1 (or a downscale) on the device store at every render scale.
 // The dpr is bucketed to quarter steps so a fractional fitScale cannot mint a
 // new cache generation per pixel of window resize.
-function _lxBakeDpr() {
+function _lxBakeDprRaw() {   // v0.30.1223 the live bucket; _lxBakeDpr (below) makes it sticky within a map
   const d = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? Math.min(3, _LX_DPR) : 1;
   // v0.30.636 - ROUND UP, to eighths. Nearest-quarter rounding could land BELOW the live scale (1.33 ->
   // 1.25, 1.6 -> 1.5), so every bake keyed on it was blitted as a 6-7% upscale. Rounding up keeps each
@@ -145624,6 +145625,18 @@ function _lxBakeDpr() {
   // enough that dragging a window cannot mint a cache generation per pixel.
   return Math.max(1, Math.ceil(d * 8 - 1e-6) / 8);
 }
+function _lxBakeDpr() {
+  const v = _lxBakeDprRaw();
+  // v0.30.1223 FIGHT LAG - sticky within a map. The resolution governor lowers the scale when a fight runs slow and, when
+  // that bought nothing, gives it back a few seconds later; each move re-minted every cache keyed here (the backdrop
+  // plate alone ~1 s at 4x CPU), twice, at the worst moment. A lower bucket keeps this map's bakes, drawn back as a
+  // downscale; a higher bucket or a new map re-bakes as before.
+  let m = null; try { m = (typeof game !== 'undefined' && game) ? game.currentMap : null; } catch (e) {}
+  if (m !== _lxBakeDprMap) { _lxBakeDprMap = m; _lxBakeDprHi = v; return v; }
+  if (v > _lxBakeDprHi) _lxBakeDprHi = v;
+  return _lxBakeDprHi;
+}
+var _lxBakeDprMap, _lxBakeDprHi = 0;   // v0.30.1223 see _lxBakeDpr
 function _getCachedScaledSprite(keyPrefix, sprite, srcW, srcH, targetW, targetH) {
   // Bail if dimensions invalid (defensive — callers shouldn't pass these
   // but the cache key would be poisoned).
@@ -146421,6 +146434,23 @@ function _lxFrameNow() {
 // monster's windup, an enemy projectile within reach; a RED ring with a cross
 // means "move" — the ground telegraphs (the meteor marker, the quake band) that
 // no block or parry answers.
+// v0.30.1223 FIGHT LAG - the tell's glyph, baked once per colour and scale. It was fillText with a system-ui font set per
+// ring per frame, a font parse each time; a pack mid-windup paid it for every ring. Same glyph, same spot (16 px box
+// centred on the ring, text at +0.5 px as before); globalAlpha still applies at the blit.
+var _LX_TELL_GLYPH;
+function _lxTellGlyph(red) {
+  const sc = (typeof _lxBakeDpr === 'function') ? _lxBakeDpr() : 1, key = (red ? 'r' : 'y') + sc;
+  const G = _LX_TELL_GLYPH || (_LX_TELL_GLYPH = {});
+  let c = G[key];
+  if (!c) {
+    c = document.createElement('canvas'); c.width = c.height = Math.ceil(16 * sc);
+    const g = c.getContext('2d'); g.scale(sc, sc);
+    g.fillStyle = red ? '#ffb3b3' : '#ffe9a8'; g.font = '700 11px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(red ? '\u2715' : 'A', 8, 8.5);
+    G[key] = c;
+  }
+  return c;
+}
 function _drawTell(x, y, kind, k, alphaMul) {   // v0.30.402 — alphaMul: the projectile tell is drawn fainter
   const t = game.time | 0, pulse = 0.5 + 0.5 * Math.sin(t * 0.45);
   const r = 9 + 2 * pulse, red = kind === 'move';
@@ -146428,8 +146458,7 @@ function _drawTell(x, y, kind, k, alphaMul) {   // v0.30.402 — alphaMul: the p
   ctx.globalAlpha = (0.55 + 0.45 * pulse) * (k == null ? 1 : Math.max(0.35, Math.min(1, k))) * (alphaMul == null ? 1 : alphaMul);
   ctx.fillStyle = red ? 'rgba(60,0,0,0.6)' : 'rgba(40,30,0,0.6)'; ctx.beginPath(); ctx.arc(x, y, r - 1, 0, Math.PI * 2); ctx.fill();
   ctx.lineWidth = 2.5; ctx.strokeStyle = red ? '#ff4d4d' : '#ffd166'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = red ? '#ffb3b3' : '#ffe9a8'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(red ? '\u2715' : 'A', x, y + 0.5);
+  ctx.drawImage(_lxTellGlyph(red), x - 8, y - 8, 16, 16);   // v0.30.1223 baked glyph, see _lxTellGlyph
   ctx.restore();
 }
 function _drawBossWardShield(m, sx, sy) {
