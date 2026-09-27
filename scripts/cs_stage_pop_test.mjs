@@ -1,8 +1,10 @@
 // The character-creation preview stage, pop punk (final polish, cs-stage). Per user: "Remake the background behind the
 // character, it can be more pop and punk style, do not use polkadots". Reads the computed layers of the stage box and its
-// pseudos: the painted violet alcove is gone, a berry / plum sunburst, an ink floor and inked stickers are in, the corner
-// carries caution tape, the old ring / prism / twinkles are off, the figure wears a sticker edge - and no layer anywhere in
-// the box is a tiled dot (a radial gradient on a small repeating tile).
+// pseudos: the painted violet alcove is gone, a soft plum sunburst, a lit stage floor with boards and inked stickers are in,
+// a shadow rim closes the bottom, the old ring / prism / twinkles are off, the figure wears a sticker edge - and no layer
+// anywhere in the box is a tiled dot (a radial gradient on a small repeating tile). Second pass (cs-stage2, per user: "less
+// intense background, add a shadow rim at the bottom, remove the yellow black strips, the floor and background can be
+// better"): no caution tape, and the rays are two close plums rather than berry against plum.
 //   node scripts/cs_stage_pop_test.mjs [page.html] [port]    (MOJI_GAME_FILE / this repo's game by default)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -36,10 +38,12 @@ const r = await page.evaluate(() => {
 await browser.close(); server.kill();
 let fails = 0; const ok = (n, c, x) => { if (!c) fails++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}  ${JSON.stringify(x).slice(0, 220)}`); };
 ok('the painted violet alcove is gone', !/cs_preview_bg/.test(r.bg), r.bg.slice(0, 120));
-ok('a berry / plum sunburst sits behind the figure', /repeating-conic-gradient/.test(r.bg) && /178, 58, 110/.test(r.bg) && /74, 33, 112/.test(r.bg), null);
-ok('an ink floor with a berry lip', /linear-gradient\(rgba\(0, 0, 0, 0\) 79%/.test(r.bg) || /79%, rgb\(13, 10, 20\) 79%/.test(r.bg), null);
+ok('a soft plum sunburst sits behind the figure (two close plums, not berry against plum)', /repeating-conic-gradient/.test(r.bg) && /107, 52, 116/.test(r.bg) && /81, 42, 110/.test(r.bg) && !/178, 58, 110/.test(r.bg), null);
+ok('a shadow rim closes the bottom of the box', /linear-gradient\(0deg, rgba\(10, 6, 16, 0\.78\) 0%/.test(r.bg), null);
+ok('a spotlight pool where the figure stands', /radial-gradient\(38% 9% at 50% 86%, rgba\(255, 210, 236, 0\.62\)/.test(r.bg), null);
+ok('a lit stage floor: a pale horizon line, then plum falling off to ink', /rgba\(255, 214, 236, 0\.62\) 78%/.test(r.bg) && /rgb\(74, 38, 96\) 78\.9%/.test(r.bg), null);
 ok('inked stickers: a bolt, a star and sparks', (r.bg.match(/data:image\/svg\+xml/g) || []).length >= 4, (r.bg.match(/data:image\/svg\+xml/g) || []).length);
-ok('caution tape across the top-left corner', /repeating-linear-gradient/.test(r.before) && /matrix/.test(r.beforeTf), { before: r.before.slice(0, 80), tf: r.beforeTf });
+ok('no caution tape - the pseudo carries the stage boards instead', !/repeating-linear-gradient/.test(r.before) && /repeating-conic-gradient/.test(r.before) && r.beforeTf === 'none', { before: r.before.slice(0, 80), tf: r.beforeTf });
 ok('no polka dots in the box or its pseudos', r.dots.every((d) => !d), r.dots);
 ok('the old ring and twinkles are off', !r.ring && !r.twinkle, { ring: r.ring, twinkle: r.twinkle });
 ok('the figure wears a white sticker edge', /drop-shadow\(rgb\(255, 255, 255\)/.test(r.canvasFilter), r.canvasFilter);
