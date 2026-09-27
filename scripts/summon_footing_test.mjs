@@ -7,6 +7,8 @@
 // it stands on (gap > 0 = floating). The pet art is three-quarter view, so the LOWEST paw must sit below the floor by the
 // far paws' height (_LX_SUMMON_FAR_FOOT) - that is what plants the far paws; the undead keep their 3 px bite; the ballista's
 // back edge (y 665 of its 768 canvas) must be under the foot line.
+// Then per user: "the ballista is too deep down" (its back edge now sits ON the foot line, not 4 px under) and
+// "werewolf is slightly deep down as well" (its far-foot height is 17/484: the dark middle paw is lifted mid-stride).
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,9 +97,9 @@ try {
     const u = [rng(k + ':skeleton'), rng(k + ':zombie')], p = rng(k + ':' + pet), w = rng(k + ':werewolf'), b = rng(k + ':ballista'), bb = rng(k + ':ballistaBack'), bs = rng(k + ':ballistaOnSurface');
     check(u.every((r) => r && r[0] >= -6 && r[1] <= -1), `${k}: the undead stand on the surface, 1-6 px into it (unchanged)`, u);
     check(!!p && p[1] <= -2 && p[0] >= -7, `${k}: the ${pet}'s lowest paw is 2-7 px under the surface, so its far paws meet it (was 0 - far paws floating)`, p);
-    check(!!w && w[1] <= -10 && w[0] >= -18, `${k}: the werewolf's lowest paw is 10-18 px under, so its far paws meet the floor (was 0 - far paws ~12 px up)`, w);
-    check(!!b && !!bb && !!bs && bs[0] === 0 && bs[1] === 0 && bb[1] <= -3 && bb[0] >= -6 && b[0] >= -30,
-      `${k}: the ballista stands on the surface with the back of its base 3-6 px under the foot line`, { lowest: b, back: bb, onSurface: bs });
+    check(!!w && w[1] <= -4 && w[0] >= -10, `${k}: the werewolf's lowest paw is 4-10 px under, so its planted far paws meet the floor (was 0 - floating; then 12-15 - too deep)`, w);
+    check(!!b && !!bb && !!bs && bs[0] === 0 && bs[1] === 0 && bb[1] <= 1 && bb[0] >= -1 && b[0] >= -26,
+      `${k}: the ballista stands on the surface with the back of its base on the foot line (was 4 px under - too deep)`, { lowest: b, back: bb, onSurface: bs });
   }
   check(errs.length === 0, 'no page errors', errs.slice(0, 3));
 } finally { await browser.close(); srv.kill(); }

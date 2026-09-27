@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1277';
+const GAME_VERSION = 'v0.30.1278';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -18660,7 +18660,7 @@ const _MINION_LIFT = 13;
 // much plus 1 px, so every paw meets the floor. (v0.30.749's "pushed lower than they should" was the far paws 7-10 px
 // UNDER the floor; this puts them 1 px under.) The undead minions need none: both feet are within 1-2 px of each other
 // and drawMinions already plants them 3 px deep.
-const _LX_SUMMON_FAR_FOOT = { wolf: 0.026, wolf_alpha: 0.018, wolf_sky: 0.036, werewolf: 0.074 };
+const _LX_SUMMON_FAR_FOOT = { wolf: 0.026, wolf_alpha: 0.018, wolf_sky: 0.036, werewolf: 0.035 };   // v0.30.1278 per user "werewolf is slightly deep down": 17/484 - its dark middle paw is lifted mid-stride, so 36/484 sank it ~7 px too far
 function _summonAnimFrame(key, state) {
   if (!key || !state) return null;
   const tag = key + '_' + state;
@@ -79645,6 +79645,7 @@ function updatePlayer(dt) {
         }
       }
       pet._tgtRef = tgt;   // v0.29.815 — hysteresis anchor for _allyTargetScore
+      let _petFollow = null;   // v0.30.1278 pet-follow
       if (tgt && (_fbTgt || bestSq < 900 * 900)) {
         // v0.29.847 — SURROUND, DON'T STACK (minion parity). Every wolf used
         // to steer at the target's exact centre, so four of them converged into
@@ -79688,6 +79689,7 @@ function updatePlayer(dt) {
           pet._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 220;
           pet._roamUntil = _tW + 120 + Math.floor(Math.random() * 180);
         }
+        _petFollow = _lxPetFollowLevel(pet);   // v0.30.1278 pet-follow - you are on another level: head (and jump) for you
         const dx = pet._roamTX - _pcx;
         pet.facing = Math.sign(dx) || pet.facing || 1;
         pet.vx += Math.sign(dx) * 0.18;
@@ -79707,7 +79709,7 @@ function updatePlayer(dt) {
       // via _allyPlatformStep so the wolf can stand on any platform.
       const _dyP = player.y - pet.y;
       if (Math.abs(_dyP) > 600) { pet.y = player.y + player.h - (pet.h || 36 * (pet.scale || 1)); pet.vy = 0; pet.onGround = false; }   /* v0.30.1273 summon-plant - foot on the player's foot line */
-      _allyPlatformStep(pet, tgt);
+      _allyPlatformStep(pet, tgt || _petFollow);   // v0.30.1278 pet-follow - idle: jump toward you
       if (_checkContact && _totalDmg > 0) {
         pet.hp = Math.max(0, pet.hp - _totalDmg);
         pet.dmgCD = 1000;
@@ -79875,6 +79877,7 @@ function updatePlayer(dt) {
         }
       }
       pet._tgtRef = tgt;   // v0.29.815 — hysteresis anchor for _allyTargetScore
+      let _petFollow = null;   // v0.30.1278 pet-follow
       if (tgt && (_fbTgt || bestSq < 900 * 900)) {
         const dx = (tgt.x + tgt.w/2) - _pcx;
         const targetVx = Math.sign(dx) * Math.min(4.0, Math.abs(dx) / 26);
@@ -79899,6 +79902,7 @@ function updatePlayer(dt) {
           pet._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 140;
           pet._roamUntil = _tW + 120 + Math.floor(Math.random() * 180);
         }
+        _petFollow = _lxPetFollowLevel(pet);   // v0.30.1278 pet-follow - you are on another level: head (and jump) for you
         const dx = pet._roamTX - _pcx;
         pet.facing = Math.sign(dx) || pet.facing || 1;
         pet.vx += Math.sign(dx) * 0.15;
@@ -79915,7 +79919,7 @@ function updatePlayer(dt) {
       }
       const _dyP = player.y - pet.y;
       if (Math.abs(_dyP) > 600) { pet.y = player.y + player.h - (pet.h || 36 * (pet.scale || 1)); pet.vy = 0; pet.onGround = false; }   /* v0.30.1273 summon-plant - foot on the player's foot line */
-      _allyPlatformStep(pet, tgt);
+      _allyPlatformStep(pet, tgt || _petFollow);   // v0.30.1278 pet-follow - idle: jump toward you
       if (_checkContact && _totalDmg > 0) {
         pet.hp = Math.max(0, pet.hp - _totalDmg);
         pet.dmgCD = 1000;
@@ -83126,6 +83130,26 @@ function _lxBodyGapY(a, b) {
   return Math.max(0, b.y - (a.y + a.h), a.y - (b.y + b.h));
 }
 const _LX_UNDEAD_STEP = { bodyAware: true };
+// v0.30.1278 pet-follow (per user: "make the idle pets follow me onto platforms too") - an idle pet only roamed left and
+// right around the player, and _allyPlatformStep jumps only toward a target, so when you stood on a platform above it
+// the wolf paced the floor underneath. While you stand on another level (feet more than a step apart) the idle pet
+// heads for your x and, when you are above, gets a jump target on your foot line (the chase's own -11 jump, ~120 px).
+// Out of reach for 2.5 s (a ledge higher than one jump, or a one-way platform it cannot drop through) it hops to your
+// side, feet on your foot line, with a paw puff - as it already does across a portal.
+function _lxPetFollowLevel(pet) {
+  const pFoot = player.y + player.h, eFoot = pet.y + pet.h;
+  if (!player.onGround || Math.abs(pFoot - eFoot) <= 28) { pet._lxFollowSince = 0; return null; }
+  const t = game.time || 0;
+  if (!pet._lxFollowSince) pet._lxFollowSince = t;
+  if (pet.onGround && t - pet._lxFollowSince > 150) {
+    pet.x = player.x + player.w / 2 - pet.w / 2 - (player.facing || 1) * 50;
+    pet.y = pFoot - pet.h; pet.vx = 0; pet.vy = 0; pet.onGround = false; pet._lxFollowSince = 0;
+    for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; game.particles.push({ x: pet.x + pet.w / 2, y: pFoot - 8, vx: Math.cos(a) * 2.5, vy: Math.sin(a) * 1.5 - 0.6, life: 26, color: i % 2 ? '#8a6a44' : '#cfc2a8', size: 3 }); }
+    return null;
+  }
+  pet._roamTX = player.x + player.w / 2;   // head for you instead of a roam point
+  return pFoot < eFoot ? { x: player.x, y: pFoot - pet.h, w: player.w, h: pet.h } : null;   // jump only when you are above
+}
 function _allyPlatformStep(ally, target, opts) {   // v0.30.623 summon-ai - opts.bodyAware (the undead)
   if (ally.vy == null) ally.vy = 0;
   if (ally.onGround == null) ally.onGround = false;
@@ -133668,7 +133692,10 @@ function drawBallistaTurrets() {
       ctx.save();
       if (f < 0) { ctx.translate(2 * sx, 0); ctx.scale(-1, 1); }
       if (typeof _lxUseEntityImageQuality === 'function') _lxUseEntityImageQuality(ctx);
-      ctx.drawImage((typeof _lxProjScaled === 'function') ? _lxProjScaled(_tspr, SZ) : _tspr, drawX, drawY, SZ, SZ);   // v0.30.292 perf — turret art through the downscale cache
+      // v0.30.1278 per user "the ballista is too deep down": its back edge now sits ON the foot line (it was 4 px under, the
+      // front plates ~24 px under). drawY above stays whole - that line is a landed-fix marker - and the draw moves up 4.
+      const _drawYBack = drawY - 4;
+      ctx.drawImage((typeof _lxProjScaled === 'function') ? _lxProjScaled(_tspr, SZ) : _tspr, drawX, _drawYBack, SZ, SZ);
       ctx.restore();
     } else {
       // Procedural fallback — dark-steel mount + pivoting crossbow + core.
