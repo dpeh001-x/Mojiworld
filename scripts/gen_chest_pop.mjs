@@ -1,11 +1,16 @@
-// Pop-punk TREASURE CHESTS (per user: "work on the chest sprites open and unopened to make them look more pop and punk
-// style"). Each of the six Sprites/objects/chest_<tier>[_open].webp is restyled with ludo.ai image-edit from ITSELF, so the
-// shape, the straight-on front view and the open / closed state carry over; only the rendering changes (thick black ink,
-// flat glossy cel colour, the chest's own materials). --pick fits the chosen candidate back into the ORIGINAL art's content
-// box on the 768 canvas: drawChests stretches the whole canvas into the chest's box and plants the shadow from the content
-// bottom, so the box is what keeps every chest the same size and on the same spot.
+// Pop-punk TREASURE CHESTS, redesigned (per user: "work on the chest sprites open and unopened to make them look more pop and punk
+// style", then of a sticker pass: "remove the stars and lightning, what i meant was the whole design of the chest and the outline,
+// redo", and the chosen direction "C - chubby cartoon"). A new chest design - a puffy rounded lid wider than the body, a fat
+// hand-inked black outline, bold simple shapes, flat cel colour and oversized glossy highlights, a big round keyhole - in three tiers
+// and two states:
+//   chest_wood        the pick of the design preview (--seed installs a text-to-image take as the wooden chest)
+//   chest_silver/gold image-edit of the NEW wooden chest, materials only, so the family shares one design
+//   chest_*_open      image-edit of the tier's new closed chest (straight-on, lid up, empty inside)
+// --pick fits the chosen candidate back into the ORIGINAL art's content box on the 768 canvas: drawChests stretches the whole
+// canvas into the chest's box and plants the shadow from the content bottom, so the box keeps every chest the same size and spot.
+//   node scripts/gen_chest_pop.mjs --seed <png>                      the wooden chest from a design take
 //   LUDO_API_KEY=... node scripts/gen_chest_pop.mjs [key ...]      two candidates each -> scripts/_tmp_chest_pop/
-//   node scripts/gen_chest_pop.mjs --pick chest_wood=1,chest_gold_open=2 ...
+//   node scripts/gen_chest_pop.mjs --pick chest_silver=1,chest_gold_open=2 ...
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -19,33 +24,31 @@ const DEST = process.env.CHEST_POP_DEST || OBJ;
 // the pre-pop art's content boxes (trim threshold 4) on the 768 canvas: [left, top, width, height]
 const BOX = { chest_wood: [75, 147, 616, 464], chest_wood_open: [48, 0, 673, 768], chest_silver: [51, 180, 663, 481],
   chest_silver_open: [0, 124, 768, 644], chest_gold: [76, 189, 615, 426], chest_gold_open: [0, 102, 768, 666] };
-const MATERIAL = { wood: 'a brown wooden chest with dark-wood corner trim and a grey iron round clasp plate',
-  silver: 'an all-silver polished metal chest with riveted metal bands and an oval metal clasp',
-  gold: 'a wooden chest with bright gold metal trim, gold corner bands and a gold lock plate' };
-const prompt = (key) => {
+const MATERIAL = { wood: 'warm brown wooden planks with dark iron trim and a dark iron round keyhole lock',
+  silver: 'polished silver-grey metal - the lid and body are shiny silver metal with darker steel trim and a steel round keyhole lock',
+  gold: 'warm brown wooden planks with bright shiny GOLD trim bands, gold corners and a gold round keyhole lock' };
+const NOPE = 'NO stickers, NO stars, NO lightning bolts, NO decals, no neon, no rainbow. Transparent background, a single object, centred, '
+  + 'no ground, no drop shadow, no text.';
+const prompt = (key) => {   // silver / gold from the wooden chest
   const tier = key.split('_')[1];
-  return 'Redraw THIS treasure chest as a bold POP PUNK cartoon game sprite. Keep the same object, the same shape and proportions, the '
-    + 'same straight-on front view and the same CLOSED state, and its materials - ' + MATERIAL[tier] + '. Make it clearly more graphic and '
-    + 'punchy: a MUCH thicker bold black ink outline (about three times thicker) around the whole chest and every plank, band and plate, '
-    + 'flat saturated cel colours with hard-edged shading, big crisp graphic white highlight shapes, a little Ben-Day halftone dot shading '
-    + 'in the darkest shadows, and two or three small sticker decals slapped on the front - a hot pink star and a yellow lightning bolt. '
-    + 'Keep the chest\'s own colours for its materials; no neon glow, no rainbow. Transparent background, a single object, centred, no '
-    + 'ground, no drop shadow, no text.';
+  return 'Edit THIS treasure chest: keep EXACTLY the same design, shape, proportions, puffy rounded lid, fat black ink outline, glossy white '
+    + 'highlight shapes, round keyhole lock and straight-on front view - change ONLY its materials and colours to ' + MATERIAL[tier] + '. ' + NOPE;
 };
-
-// The OPEN chests are made from the NEW closed ones (so the decals, ink and colours match between the two states), with
-// gen_chest_open.mjs's camera and emptiness rules.
-const promptOpen = (key) => {
+const promptOpen = (key) => {   // the open state from the tier's new closed chest
   const tier = key.split('_')[1];
-  return 'Edit THIS treasure chest into its OPEN state. Keep the EXACT same art: ' + MATERIAL[tier] + ', the same pop punk sticker style, '
-    + 'the same thick black ink outline, the same hot pink star and yellow lightning bolt sticker decals on the front, the same colours and '
-    + 'shading, transparent background. CRITICAL CAMERA: a perfectly STRAIGHT-ON FRONT view, symmetric left to right, exactly like the closed '
-    + 'chest - no 3/4 view, no perspective. The lid is HINGED AT THE BACK and swung UP and slightly back so it sits ABOVE the body; we see the '
-    + 'flat inner face of the raised lid straight-on. CRITICAL: the chest is EMPTY inside - a plain dark hollow interior with a visible back '
-    + 'inner wall and floor; NO coins, NO gold, NO treasure, NO gems, NO glow, NO light rays, no items of any kind. The body stays the same '
-    + 'size and shape as the closed chest in the lower part; the open lid adds height above. Single object, centred, no ground, no shadow, no text.';
+  return 'Edit THIS treasure chest into its OPEN state. Keep the EXACT same art: ' + MATERIAL[tier] + ', the same chubby pop punk cartoon '
+    + 'design, the same fat black ink outline, the same glossy highlights, the same colours. CRITICAL CAMERA: a perfectly STRAIGHT-ON FRONT '
+    + 'view, symmetric left to right, exactly like the closed chest - no 3/4 view, no perspective. The puffy lid is HINGED AT THE BACK and swung '
+    + 'UP and slightly back so it sits ABOVE the body; we see the inner face of the raised lid straight-on. CRITICAL: the chest is EMPTY inside - '
+    + 'a plain dark hollow interior with a visible back inner wall; NO coins, NO gold, NO treasure, NO gems, NO glow, NO light rays, no items. '
+    + 'The body stays the same size and shape as the closed chest in the lower part; the open lid adds height above. ' + NOPE;
 };
 const argv = process.argv.slice(2);
+if (argv[0] === '--seed') {   // the wooden chest straight from a design take
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.copyFileSync(argv[1], path.join(OUT, 'chest_wood_1.png'));
+  argv.splice(0, argv.length, '--pick', 'chest_wood=1');
+}
 if (argv[0] === '--pick') {
   for (const p of argv.slice(1).join(',').split(',').filter(Boolean)) {
     const [key, n] = p.split('='); const src = path.join(OUT, `${key}_${n}.png`);
@@ -103,7 +106,7 @@ for (const k of (argv.length ? argv : Object.keys(BOX))) {
   if (fs.existsSync(path.join(OUT, `${k}_2.png`))) { console.log('have', k); continue; }
   process.stdout.write(k + ' ... ');
   const open = k.endsWith('_open');
-  const src = fs.readFileSync(open ? path.join(process.env.CHEST_OPEN_FROM || DEST, k.replace('_open', '') + '.webp') : path.join(process.env.CHEST_SRC || OBJ, k + '.webp'));
+  const src = fs.readFileSync(path.join(process.env.CHEST_OPEN_FROM || DEST, (open ? k.replace('_open', '') : 'chest_wood') + '.webp'));   // closed tiers edit the new wooden chest; opens edit their own closed chest
   const bufs = [];
   for (let i = 0; i < 2; i++) bufs.push(...(await edit(src, open ? promptOpen(k) : prompt(k), 1)));   // n=1 twice: two independent takes
   for (let i = 0; i < bufs.length; i++) fs.writeFileSync(path.join(OUT, `${k}_${i + 1}.png`), await sharp(bufs[i]).png().toBuffer());
