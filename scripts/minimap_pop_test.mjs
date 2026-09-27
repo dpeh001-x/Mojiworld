@@ -1,7 +1,8 @@
-// The minimap, pop punk funk (final polish, minimap-pop). Per user: "redesigning the minimap to look slightly more pop punk funk
-// style, ensure AAA grade". Held: an inked plum panel with a hard drop; the map's name on a berry sticker tag; a round yellow
-// sticker minimise button; an inked striped plum screen; and on the canvas itself cream platforms with an ink keyline, a mint
-// floor with an ink edge, and a butter camera box - while the symbol shapes stay (minimap_symbols_test owns those).
+// The minimap: its old panel and map, with pop-punk sticker SYMBOLS (final polish, minimap-symbols). Per user, after the full
+// pop-punk-funk minimap (v0.30.1262): "I prefer the OLD minimap, but just ensure that the symbols are more pop punk style".
+// Held: the panel, ground, platforms and camera box are the old ones again; each symbol is a sticker - a white die-cut rim and
+// an ink keyline around a flat fill (portal gate, NPC ring, player star); the NPC ring is still hollow; the player's star keeps
+// its green. minimap_symbols_test owns each symbol's colour identity; this pins the sticker treatment and the revert.
 //   node scripts/minimap_pop_test.mjs [page.html] [port]    (MOJI_GAME_FILE / this repo's game by default)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -23,33 +24,42 @@ await page.waitForTimeout(3000);
 const r = await page.evaluate(async () => {
   for (const x of ['loading-overlay', 'class-select-modal']) { const o = document.getElementById(x); if (o) o.style.display = 'none'; }
   window._prologueActive = false; loadMap('town'); await new Promise((res) => setTimeout(res, 1500));
-  game.paused = false; drawMinimap();
-  const q = (s) => getComputedStyle(document.querySelector(s));
-  const mm = q('#minimap'), nm = q('#minimap-name'), mb = q('#minimap-min'), cv = q('#minimap-canvas');
-  const c = document.getElementById('minimap-canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-  let cream = 0, ink = 0, mint = 0, butter = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    const R = d[i], G = d[i + 1], B = d[i + 2], A = d[i + 3]; if (A < 150) continue;   // the floor is drawn 78% opaque
-    if (R > 235 && G > 225 && B > 245) cream++;
-    else if (R < 30 && G < 30 && B < 40) ink++;
-    else if (G > 150 && G > R + 50 && G > B + 10) mint++;
-    else if (R > 230 && G > 200 && B < 150) butter++;
-  }
-  return { panelBg: mm.backgroundImage.slice(0, 40), panelBorder: mm.borderTopWidth + ' ' + mm.borderTopColor, panelDrop: mm.boxShadow,
-    tagBg: nm.backgroundImage.slice(0, 40), tagBorder: nm.borderTopColor, tagRot: nm.transform, tagFill: nm.color,
-    btnBg: mb.backgroundColor, btnRadius: mb.borderTopLeftRadius, btnBorder: mb.borderTopColor,
-    screenBorder: cv.borderTopWidth + ' ' + cv.borderTopColor, stripes: /repeating-linear-gradient/.test(cv.backgroundImage),
-    px: { cream, ink, mint, butter } };
+  game.paused = false; game.monsters.length = 0; drawMinimap();
+  const mm = getComputedStyle(document.getElementById('minimap')), nm = getComputedStyle(document.getElementById('minimap-name'));
+  const c = document.getElementById('minimap-canvas'), ctx = c.getContext('2d');
+  const W = game.mapData.worldWidth || 800, H = game.mapData.worldHeight || 540, sx = c.width / W, S = c.width / 208;
+  const win = (cx, cy, rad) => { const x0 = Math.max(0, Math.round(cx - rad)), y0 = Math.max(0, Math.round(cy - rad)); return ctx.getImageData(x0, y0, Math.min(c.width - x0, rad * 2), Math.min(c.height - y0, rad * 2)).data; };
+  const count = (d, pred) => { let n = 0; for (let i = 0; i < d.length; i += 4) if (pred(d[i], d[i + 1], d[i + 2], d[i + 3])) n++; return n; };
+  const white = (a, b, g, al) => al > 200 && a > 235 && b > 235 && g > 235, ink = (a, b, g, al) => al > 200 && a < 30 && b < 30 && g < 40;
+  const po = (game.mapData.portals || [])[0], n0 = (game.npcs || [])[0];
+  const sy = (y) => (typeof mmY === 'function') ? mmY(y) : y * (c.height / H);
+  const portal = po ? win(po.x * sx, po.y * (c.height / H), 9 * S) : null;
+  const npcX = n0 ? (n0.x + (n0.w || 40) / 2) * sx : 0, npcY = n0 ? (n0.y || 436) * (c.height / H) : 0;
+  const npc = n0 ? win(npcX, npcY, 5 * S) : null;
+  const centre = n0 ? ctx.getImageData(Math.round(npcX), Math.round(npcY), 1, 1).data : null;
+  // a die-cut rim is CONTINUOUS: sample 24 points round the ring just outside its ink keyline
+  let rimHits = 0;
+  if (n0) for (let k = 0; k < 24; k++) { const a = k / 24 * Math.PI * 2; let best = 0;
+    for (const rr of [3.6, 3.8, 4.0, 4.2, 4.4]) { const px = ctx.getImageData(Math.round(npcX + Math.cos(a) * rr * S), Math.round(npcY + Math.sin(a) * rr * S), 1, 1).data; if (px[3] > 150) best = Math.max(best, Math.min(px[0], px[1], px[2])); }
+    if (best > 190) rimHits++; }
+  const pl = win((player.x + player.w / 2) * sx, player.y * (c.height / H), 7 * S);
+  return {
+    panelBg: mm.backgroundColor, panelImg: mm.backgroundImage, panelDrop: mm.boxShadow, nameBg: nm.backgroundImage,
+    portal: portal ? { white: count(portal, white), ink: count(portal, ink), gold: count(portal, (a, b, g, al) => al > 200 && a > 230 && b > 180 && g < 110) } : null,
+    npc: npc ? { white: count(npc, white), ink: count(npc, ink), teal: count(npc, (a, b, g, al) => al > 180 && b > 170 && g > 180 && a < 150) } : null,
+    npcRim: rimHits,
+    npcHollow: centre ? !(centre[3] > 200 && centre[1] > 170 && centre[2] > 180 && centre[0] < 150) : null,
+    player: { white: count(pl, white), ink: count(pl, ink), green: count(pl, (a, b, g, al) => al > 200 && b > 200 && a < 180 && g < 200) },
+  };
 });
 await browser.close(); server.kill();
 let fails = 0; const ok = (n, c, x) => { if (!c) fails++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}  ${c ? '' : JSON.stringify(x).slice(0, 260)}`); };
-ok('the panel is an inked plum plate with a hard drop', /linear-gradient/.test(r.panelBg) && /rgb\(13, 10, 20\)/.test(r.panelBorder) && parseFloat(r.panelBorder) >= 2 && /rgb\(13, 10, 20\) 4px 4px 0px/.test(r.panelDrop), r);
-ok("the map's name is a berry sticker tag with an ink edge, tilted", /linear-gradient/.test(r.tagBg) && r.tagBorder === 'rgb(13, 10, 20)' && r.tagRot !== 'none' && r.tagFill === 'rgb(255, 224, 122)', r);
-ok('the minimise button is a round yellow sticker', r.btnBg === 'rgb(255, 224, 122)' && r.btnRadius === '50%' && r.btnBorder === 'rgb(13, 10, 20)', r);
-ok('the map sits on an inked, striped screen (stripes, not dots)', /rgb\(13, 10, 20\)/.test(r.screenBorder) && r.stripes, r);
-ok('on the canvas: cream platforms with an ink keyline', r.px.cream > 150 && r.px.ink > 300, r.px);
-ok('on the canvas: a mint floor', r.px.mint > 2000, r.px);
-ok('on the canvas: a butter camera box', r.px.butter > 150, r.px);
+ok('the old minimap panel is back (plain ink plate, no berry tag, no hard drop)', r.panelImg === 'none' && r.nameBg === 'none' && r.panelDrop === 'none', r);
+ok('the portal is a sticker: gold gate, white die-cut rim, ink keyline', r.portal && r.portal.gold > 20 && r.portal.white > 12 && r.portal.ink > 12, r.portal);
+ok('the NPC is a sticker ring: teal, white rim, ink keyline', r.npc && r.npc.teal > 8 && r.npc.white > 8 && r.npc.ink > 4, r.npc);
+ok('...its white die-cut rim runs round most of it (a sticker, not spray - the old graffiti ring scores ~7/24)', r.npcRim >= 11, { rimHitsOf24: r.npcRim });
+ok('...and still hollow (someone to talk to, not a foe)', r.npcHollow === true, r.npcHollow);
+ok('the player is a green star sticker with a white rim and ink keyline', r.player.green > 10 && r.player.white > 6 && r.player.ink > 6, r.player);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 console.log(fails ? `FAIL(${fails})` : 'ALL PASS');
 process.exit(fails ? 1 : 0);

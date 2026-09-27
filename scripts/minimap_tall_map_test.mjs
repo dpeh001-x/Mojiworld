@@ -39,11 +39,15 @@ try {
       for (let i = 0; i < 3; i++) { try { drawMinimap(); } catch (e) {} await sleep(50); }
       const px = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
       let ink = 0, sig = ''; let bottomGreen = 0;
+      // v0.30.x final-polish (minimap-symbols) - the row signature skips the columns under the player marker. The marker moves
+      // with the player by design; the signature is there to prove the WORLD (ground band, platforms) stays put. It passed before
+      // only because the old graffiti portal's overspray happened to fill the rows the marker crosses.
+      const pmx = (player.x + player.w / 2) * (cv.width / (d.worldWidth || 800)), pmPad = 14 * (cv.width / 208);
       for (let y = 0; y < cv.height; y++) {
         let n = 0;
         for (let x = 0; x < cv.width; x++) {
           const i = (y * cv.width + x) * 4;
-          if (px[i + 3] > 16) { ink++; n++; }
+          if (px[i + 3] > 16) { ink++; if (Math.abs(x - pmx) > pmPad) n++; }
         }
         if (y % 6 === 0) sig += (n > 2 ? '1' : '0');
       }
