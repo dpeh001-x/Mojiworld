@@ -705,17 +705,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0.0225
+      "dy": 0.03
     },
     "walk": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0
+      "dy": 0.03
     },
     "attack": {
       "s": 1.6,
       "dx": 0,
-      "dy": 0,
+      "dy": 0.028,
       "ft": [
         72,
         60,
@@ -871,6 +871,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.0682
     },
     "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.06,
       "ft": [
         72,
         60,
@@ -883,6 +886,16 @@ window.LX_ANIM_CALIB = {
         96
       ],
       "ftAuto": true
+    },
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.06
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.06
     }
   },
   "gravitos3laser": {
