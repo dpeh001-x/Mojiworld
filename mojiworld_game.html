@@ -16045,7 +16045,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1231';
+const GAME_VERSION = 'v0.30.1232';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -68186,6 +68186,27 @@ function offerPrestige(fromGuguma) {
   });
 }
 
+// v0.30.1232 recalc-perf - THE COMBO POP REPLAYS WITHOUT A FORCED REFLOW. It restarted with remove('pop') + offsetWidth +
+// add('pop'): a whole-page style and layout flush in the middle of every frame that landed a hit. The first replay of a
+// session still does that, once, and copies the keyframes and timing of the CSS animation it starts (so whatever the
+// stylesheet says the pop looks like is what replays); every later pop replays that copy through one reusable Web
+// Animation - cancel + play restarts it on the next frame, like a fresh CSS animation, with no flush.
+let _lxComboPopFx;   // v0.30.1232 recalc-perf - undefined: not copied yet; null: no CSS pop to copy (the old restart is kept)
+function _lxComboPopReplay(el) {
+  const restart = () => { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); };
+  if (_lxComboPopFx === undefined) {
+    _lxComboPopFx = null; restart();
+    const nm = getComputedStyle(el).animationName, a = el.getAnimations().find((x) => x.animationName === nm);
+    if (nm && nm !== 'none' && a && a.effect) {
+      const kf = a.effect.getKeyframes().map((k) => { const o = Object.assign({}, k); delete o.computedOffset; return o; });
+      _lxComboPopFx = { kf, t: a.effect.getTiming() };
+    }
+    return;
+  }
+  if (!_lxComboPopFx) { restart(); return; }
+  const pa = el._lxPopAnim;
+  if (pa) { pa.cancel(); pa.play(); } else el._lxPopAnim = el.animate(_lxComboPopFx.kf, _lxComboPopFx.t);
+}
 function bumpCombo(n = 1) {
   if (typeof _tutPing === 'function') { _tutPing('attack'); _tutPing('combo'); }
   const prev = game.combo;
@@ -68206,8 +68227,13 @@ function bumpCombo(n = 1) {
     game._lastComboPopFrame = game.time;
     const el = game._comboMeterEl || (game._comboMeterEl = document.getElementById('combo-meter'));
     if (el) {
-      el.style.opacity = 1;
-      el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+      if (el.style.opacity !== '1') el.style.opacity = 1;   // v0.30.1232 recalc-perf - written only when it changes
+      // v0.30.1232 recalc-perf - see _lxComboPopReplay. The class does the first pop (and the one the break flash hands back
+      // to); under the break flash nothing replays - the .break rule used to win the animation there.
+      if (!el.classList.contains('pop')) el.classList.add('pop');
+      else if (!el.classList.contains('break')) {
+        try { _lxComboPopReplay(el); } catch (e) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+      }
     }
   }
   // Milestone buffs — cross 50 / 100 / 150 for escalating rewards
@@ -68254,6 +68280,7 @@ function resetCombo() {
         // Force reflow so the animation restarts even if already classed.
         void el.offsetWidth;
         el.classList.add('break');
+        if (el._lxPopAnim) { try { el._lxPopAnim.cancel(); } catch (e) {} }   // v0.30.1232 recalc-perf - the break flash wins over a pop, as .break did
         // Clean up the class after the animation so it can fire again
         // next time. 450 ms matches the keyframe duration.
         setTimeout(() => { if (el) el.classList.remove('break'); }, 480);
