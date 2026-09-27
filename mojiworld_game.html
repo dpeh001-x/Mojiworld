@@ -16049,7 +16049,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1214';
+const GAME_VERSION = 'v0.30.1215';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -81839,6 +81839,12 @@ function _basicAttackGateMs() {
 // old window narrowed by the player's own height, so a player-sized enemy is hit exactly as before and a small one on a
 // platform above or below is still out of reach, while a tall one standing on the player's floor is hit.
 function _lxBodyInBand(m, top, bot) { return m.y < bot && m.y + m.h > top; }
+// v0.30.1215 dash-wide - DOES THE ENEMY'S BODY REACH THE SPAN - the sideways twin of _lxBodyInBand. The same four skills still
+// measured the enemy's CENTRE against their horizontal reach, so a boss (150-400 px wide) was missed while the skill's band
+// covered half his body, and the up Warp hit him only with the player at his exact middle. Now the box must cross [left, right]
+// (world x). Each caller passes its old centre window narrowed by half the player's width on each side: a player-sized enemy
+// is hit exactly as before, a small one outside the reach is still missed, a wide one is hit once his body is in the band.
+function _lxBodyInSpan(m, left, right) { return m.x < right && m.x + m.w > left; }
 function castSkill(id) {
   const s = SKILLS[id];
   if (!s) return;
@@ -86114,7 +86120,7 @@ const SKILL_FNS = {
         const cx = player.x + player.w/2, cy = player.y + player.h/2;
         for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
-          if (Math.abs((m.x + m.w/2) - cx) < _rushReach && _lxBodyInBand(m, player.y + player.h - 60, player.y + 60)) {   // v0.30.1178 dash-hitbox - body in the band (a tall enemy's top is far above the player's)
+          if (_lxBodyInSpan(m, cx - _rushReach + player.w / 2, cx + _rushReach - player.w / 2) /* v0.30.1215 dash-wide - body in the span, not the centre */ && _lxBodyInBand(m, player.y + player.h - 60, player.y + 60)) {   // v0.30.1178 dash-hitbox - body in the band (a tall enemy's top is far above the player's)
             const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 1.5 * (_c ? getCritDmg() : 1)), _c, 'rush');   // v0.26.385; v0.26.1027 — apply crit DAMAGE (the flag alone did nothing)
           }
         }
@@ -86723,7 +86729,7 @@ const SKILL_FNS = {
       if (m.y + m.h < player.y - 60 || m.y > player.y + player.h + 60) continue;
       const mid = m.x + m.w/2;
       const a = Math.min(startX, tx), b = Math.max(startX, tx);
-      if (mid > a - 20 && mid < b + 20) {
+      if (_lxBodyInSpan(m, a - 20 + player.w / 2, b + 20 - player.w / 2)) {   // v0.30.1215 dash-wide - body in the span, not the centre
         // Decide which "lane" the target sits in for a small damage bonus on
         // the mid lane (straight-line hit gets the biggest punch).
         const midY = m.y + m.h / 2;
@@ -86751,7 +86757,7 @@ const SKILL_FNS = {
         if (player.hp <= 0 || game.paused) return;
         for (const m of game.monsters.slice()) {
           if (m.currentHp <= 0) continue;
-          if (Math.abs((m.x + m.w/2) - cloudX) < 90 && _lxBodyInBand(m, player.y + player.h - 80, player.y + 80)) {   // v0.30.1178 dash-hitbox - body in the band (a tall enemy's top is far above the player's)
+          if (_lxBodyInSpan(m, cloudX - 90 + player.w / 2, cloudX + 90 - player.w / 2) /* v0.30.1215 dash-wide - body in the span, not the centre */ && _lxBodyInBand(m, player.y + player.h - 80, player.y + 80)) {   // v0.30.1178 dash-hitbox - body in the band (a tall enemy's top is far above the player's)
             // v0.25.658 — P1 REBALANCE. Cloud per-tick 0.8 → 0.5.
             { const _c = rollCrit(); hitMonster(m, Math.floor(getAtk() * 0.3 * (_c ? getCritDmg() : 1)), _c, 'smokeDash'); }   // v0.26.1033 — apply crit dmg (was flag-only)
           }
@@ -86798,7 +86804,7 @@ const SKILL_FNS = {
       for (const m of game.monsters.slice()) {
         if (m.currentHp <= 0) continue;
         const mid = m.x + m.w / 2;
-        if (mid < lo - 16 || mid > hi + 16) continue;
+        if (!_lxBodyInSpan(m, lo - 16 + player.w / 2, hi + 16 - player.w / 2)) continue;   // v0.30.1215 dash-wide - body in the span, not the centre
         // v0.30.1178 dash-hitbox - body in the band, not centre distance (a boss's centre sits 93+ px above the corridor line)
         if (!_lxBodyInBand(m, (ay + by) / 2 - corridorH + player.h / 2, (ay + by) / 2 + corridorH - player.h / 2)) continue;
         // v0.25.218 — Damage tier reduced from 1.6 (guaranteed crit) to
@@ -87553,7 +87559,7 @@ const SKILL_FNS = {
     for (const m of game.monsters.slice()) {
       if (!m || m.currentHp <= 0) continue;
       const mcx = m.x + m.w/2, mcy = m.y + m.h/2;
-      if (mcx < lo || mcx > hi) continue;
+      if (!_lxBodyInSpan(m, lo + player.w / 2, hi - player.w / 2)) continue;   // v0.30.1215 dash-wide - body in the span (the up warp hit a boss only at his exact middle)
       // v0.30.1178 dash-hitbox - body in the band, not centre in the rect (any monster over ~94 px tall was never hit)
       if (!_lxBodyInBand(m, top + player.h / 2, bot - player.h / 2)) continue;
       const _c = rollCrit(); hitMonster(m, Math.floor(_dmg * (_c ? getCritDmg() : 1)), _c, 'blink');   // v0.26.1027 — apply crit damage
