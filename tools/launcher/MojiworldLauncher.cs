@@ -9,7 +9,9 @@
 //   1. If nothing is already serving on :8765, start `node serve.js 8765`
 //      hidden from the game folder (the exe's own directory, or the live one).
 //   2. Open the default browser at the game URL.
-//   3. If Node.js is missing entirely, offer the hosted raw.githack build.
+//   3. If Node.js is missing entirely, offer the hosted build at https://play.moji-studios.com/
+//      (v0.30.1208 launcher-link - it offered the raw.githack developer preview; Mojiworld.cmd and
+//      PLAY_ME_FIRST.txt moved to the same address in v0.30.1180).
 // The spawned server outlives the stub on purpose — the next launch finds
 // the port open and goes straight to the browser (live mode restarts it).
 // Built by tools/launcher/build_launcher.ps1 with the .NET Framework csc.exe
@@ -31,13 +33,15 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Moji-studios & DADPEH")]
 [assembly: AssemblyProduct("Mojiworld")]
 [assembly: AssemblyCopyright("(c) Moji-studios & DADPEH")]
-[assembly: AssemblyVersion("0.30.433.0")]
-[assembly: AssemblyFileVersion("0.30.433.0")]
+[assembly: AssemblyVersion("0.30.1208.0")]
+[assembly: AssemblyFileVersion("0.30.1208.0")]
 
 static class MojiworldLauncher
 {
     const int PORT = 8765;
-    const string HOSTED = "https://raw.githack.com/dpeh001-x/Mojiworld/main/mojiworld_game.html";
+    // v0.30.1208 launcher-link - the public web build, the same address as Mojiworld.cmd's fallback and the
+    // game's og:url. Was the raw.githack developer preview (branch tip, CDN lag, no share card).
+    const string HOSTED = "https://play.moji-studios.com/";
     const string LIVE_MARKER = ".mojiworld-live";
     const string LIVE_SIBLING = "Mojiworld-live";
     static readonly string URL = "http://localhost:" + PORT + "/mojiworld_game.html";
