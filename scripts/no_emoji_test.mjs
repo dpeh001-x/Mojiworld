@@ -52,7 +52,7 @@ await page.addInitScript(() => {
   const oF = P.fillText, oS = P.strokeText, oD = P.drawImage;
   P.fillText = function (t, ...a) { if (has(t) && window.__nat.fill.length < 400) window.__nat.fill.push(String(t)); return oF.call(this, t, ...a); };
   P.strokeText = function (t, ...a) { if (has(t) && window.__nat.stroke.length < 400) window.__nat.stroke.push(String(t)); return oS.call(this, t, ...a); };
-  P.drawImage = function (img, ...a) { if (img && window._lxEmojiAtlasImg && img === window._lxEmojiAtlasImg) window.__nat.atlasDraws++; return oD.call(this, img, ...a); };
+  P.drawImage = function (img, ...a) { if (img && ((window._lxEmojiAtlasImg && img === window._lxEmojiAtlasImg) || (window._lxEmojiAtlasPin && img === window._lxEmojiAtlasPin))) window.__nat.atlasDraws++; return oD.call(this, img, ...a); };   // emoji-pin: the atlas's canvas copy counts
   window.__hasEmoji = has;
 });
 await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'load', timeout: 120000 });

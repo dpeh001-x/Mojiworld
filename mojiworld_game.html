@@ -15827,10 +15827,23 @@ The sleeping world is listening.</div>
   window._lxEmojiStrip = strip;
   // ---- the atlas image ----
   const IMG = new Image(); let READY = false;
+  // v0.30.1241 emoji-pin - THE ATLAS IS DECODED AT BOOT, NOT BY THE FIRST STATUS ICON OF A FIGHT (lag pass, per user). Canvas
+  // emoji blit from this 1536x1088 sheet, and the sheet was an <img>: the first canvas that drew an emoji - the burn icon
+  // over the first mob a fight set alight, an 18x21 bake - paid its whole decode and GPU upload inside one drawImage,
+  // measured at 46-49 ms under a 4-6x CPU throttle in every fight profile, and the browser's image cache is free to drop
+  // it and charge again later. A canvas copy is decoded once and kept (the same thing _lxPinned does for game art): made
+  // here, on the loading screen, and forced through its first raster at once by drawing it into a 1x1 scratch.
+  let PIN = null;
   if (A && A.src) {
     IMG.decoding = 'async';
     IMG.onload = () => {
       READY = true;
+      try {
+        const pv = document.createElement('canvas'); pv.width = IMG.naturalWidth; pv.height = IMG.naturalHeight;
+        pv.getContext('2d').drawImage(IMG, 0, 0);
+        const sc = document.createElement('canvas'); sc.width = sc.height = 1; sc.getContext('2d').drawImage(pv, 0, 0, 1, 1);
+        PIN = pv; window._lxEmojiAtlasPin = pv;
+      } catch (e) { PIN = null; }
       // glyph bakes minted before the atlas decoded would keep a blank tile; drop the known caches
       try { if (window._lxStatusIconBakes && window._lxStatusIconBakes.clear) window._lxStatusIconBakes.clear(); } catch (e) {}
       try { window.dispatchEvent(new Event('lx-emoji-ready')); } catch (e) {}
@@ -15862,7 +15875,7 @@ The sleeping world is listening.</div>
           if (q.e) {
             if (!stroke && READY && q.idx >= 0) {
               const c = A.cell, sx = (q.idx % A.cols) * c, sy = Math.floor(q.idx / A.cols) * c;
-              ctx.drawImage(IMG, sx, sy, c, c, cx + (adv - es) / 2, top, es, es);
+              ctx.drawImage(PIN || IMG, sx, sy, c, c, cx + (adv - es) / 2, top, es, es);   // v0.30.1241 emoji-pin
             }
           } else if (q.s) (stroke ? oStroke : oFill).call(ctx, q.s, cx, y);
           cx += w[i];
@@ -16045,7 +16058,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1240';
+const GAME_VERSION = 'v0.30.1241';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
