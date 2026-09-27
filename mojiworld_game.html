@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1301';
+const GAME_VERSION = 'v0.30.1302';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -125231,6 +125231,48 @@ function _lxBgScaled(img, w, h) {
     return cv;
   } catch (e) { return img; }   // tainted canvas under file:// — draw unscaled
 }
+// v0.30.1302 perf - IS THE SKY SEEN? drawBackground paints a full-screen gradient first and then, on almost every map, an
+// opaque backdrop over all of it: a whole screen of fill each frame that nothing ever shows. Measured in live boss fights
+// at High (the fill probe counts screens of pixels painted per frame on the main canvas), it was 1 of the 5.4-12.4
+// screens every fight paints - and the owner's Intel iGPU is fill-bound in a boss fight. 103 of the 104 backdrops have no
+// alpha at all. This answers, once per frame and before the sky is painted, whether the standard backdrop path will
+// cover the screen with something opaque. It resolves the pick and the map clip for that path, so each still runs once a
+// frame. The special backdrops (procedural sanctum / carriage / zodiac / hub, the void) and the procedural sky keep it.
+// window._lxNoFillSkip = true restores the full-fill path (scripts/bg_fill_skip_test.mjs compares the two).
+const _LX_SKY = { pre: false, pick: null, vid: null, hidden: false };
+function _lxBgOpaque(img) {
+  if (!img) return false;
+  if (img._lxOpaque !== undefined) return img._lxOpaque;
+  let ok = false;
+  try {
+    // a nearest-neighbour sample of the plate's alpha, once per image. A tainted canvas (file://, a CDN without
+    // CORS) throws here and the sky simply stays.
+    const c = document.createElement('canvas'); c.width = 96; c.height = 54;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    x.imageSmoothingEnabled = false; x.drawImage(img, 0, 0, 96, 54);
+    const d = x.getImageData(0, 0, 96, 54).data; ok = true;
+    for (let i = 3; i < d.length; i += 4) if (d[i] < 255) { ok = false; break; }
+    c.width = c.height = 0;
+  } catch (e) { ok = false; }
+  img._lxOpaque = ok;
+  return ok;
+}
+function _lxSkyHidden() {
+  const S = _LX_SKY; S.pre = false; S.pick = null; S.vid = null; S.hidden = false;
+  try {
+    const md = game.mapData;
+    const authored = !!(md.bg && BG_IMAGES[md.bg] && BG_IMAGES[md.bg]._loaded);
+    if (((md.sanctum || md.isCarriage || md.isZodiac || md.isZodiacHub) && !authored) || md.isVoid) return S;   // drawBackground's own branches paint on the sky
+    S.pick = _pickBGImage();
+    S.vid = (typeof _lxMapVideoFrame === 'function') ? _lxMapVideoFrame(game.currentMap) : null;
+    S.pre = true;
+    if (window._lxNoFillSkip) return S;
+    // a map clip is h264 (no alpha), but while it fades in the sky can show through it; a plate is sampled once
+    if (S.vid) S.hidden = (typeof HTMLVideoElement !== 'undefined' && S.vid instanceof HTMLVideoElement) && _lxMapVideoAlpha >= 1;
+    else if (S.pick) S.hidden = _lxBgOpaque(S.pick);
+  } catch (e) { S.hidden = false; }
+  return S;
+}
 function drawBackground() {
   // v0.25.16 — Phaser handles the bg image + sky + haze when active.
   // Vanilla just clears to transparent here so the Phaser layer shows
@@ -125252,7 +125294,7 @@ function drawBackground() {
     _skyGradCache.addColorStop(0.88, _mixHex(b, c, 0.65));
     _skyGradCache.addColorStop(1.00, c);
   }
-  ctx.fillStyle = _skyGradCache; ctx.fillRect(0, 0, W, H);
+  if (!_lxSkyHidden().hidden) { ctx.fillStyle = _skyGradCache; ctx.fillRect(0, 0, W, H); }   // v0.30.1302 perf - only where it is seen
 
   // v0.25.268 — if a special map (sanctum / carriage / zodiac hub / zodiac
   // arena) has an explicit authored bg image loaded, fall through to the
@@ -125330,11 +125372,11 @@ function drawBackground() {
   // Fix: flip the SECOND copy horizontally so the seam matches its own mirror
   // (right edge meets right edge, perfectly continuous). Also round shift to
   // integer pixels to avoid sub-pixel blur during slow camera movement.
-  const bgPick = _pickBGImage();
+  const bgPick = _LX_SKY.pre ? _LX_SKY.pick : _pickBGImage();   // v0.30.1302 perf - resolved once, by _lxSkyHidden
   // v0.30.564 — a map with a backdrop video (see _LX_MAP_VIDEO) paints the clip in this slot once it
   // has a decodable frame. The plate (bgPick) is the fallback until then - and forever, if the clip
   // never arrives - so nothing below this line changes for a map without one.
-  const _bgVid = (typeof _lxMapVideoFrame === 'function') ? _lxMapVideoFrame(game.currentMap) : null;
+  const _bgVid = _LX_SKY.pre ? _LX_SKY.vid : ((typeof _lxMapVideoFrame === 'function') ? _lxMapVideoFrame(game.currentMap) : null);
   if (bgPick || _bgVid) {
     const parallax = 0.12;
     /* v0.29.5xx — vertical parallax on tall tower maps, reworked (per user
@@ -125385,6 +125427,10 @@ function drawBackground() {
     // painted straight (832x464 to the screen is a near-1:1 blit, one texture copy). While the ramp
     // runs, the plate is painted first and the clip fades over it so the swap is never a pop.
     const _bgSrc = _bgVid ? _lxVideoCached(_bgVid, _bgW, _bgH) : _lxBgScaled(bgPick, _bgW, _bgH);   // v0.30.x video-cache
+    // v0.30.1302 perf - with the sky skipped, the mirror seam is the one backdrop edge that can land mid-screen, between two
+    // device pixels. Chrome does not antialias an axis-aligned image edge (bg_fill_skip_test sees 0 px change without this),
+    // but an engine that does would blend that column with what is under it - so it keeps a 2 px strip of sky.
+    if (_LX_SKY.hidden && !_nm) { ctx.fillStyle = _skyGradCache; ctx.fillRect(_bgW - shift - 1, 0, 2, H); }
     // v0.30.566 — a mid-map clip switch (the Singularity's finale) crosses from the outgoing clip;
     // the plate is only the underlay when there was no clip before this one.
     const _bgUnder = (_bgVid && _lxMapVideoAlpha < 1)
