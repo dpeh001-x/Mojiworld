@@ -41,7 +41,7 @@ try {
     const coop = q('#menu-coop'), prim = q('#lo-menu .menu-item.primary'), cont = q('#menu-continue-icon');
     const fr = frame.getBoundingClientRect(), cp = q('.lo-copy').getBoundingClientRect();
     return {
-      bg: cs(q('.lo-bg')).backgroundImage, bgLoads: await load('backgrounds/title_keyart_pop.webp'),
+      bg: cs(q('.lo-bg')).backgroundImage, bgLoads: await load('backgrounds/title_keyart_pop_4k.webp'),
       ornate: cs(q('.lo-ornate')).borderImageSource, paperClip: cs(frame, '::after').clipPath.slice(0, 8), offset: cs(q('.lo-corner.br')).backgroundColor, tilt: cs(frame).rotate,
       logo: { content: cs(logo).content, loads: await load('Sprites/ui/mojiworld_logo_pop.webp'), filter: cs(logo).filter, anim: cs(logo).animationName },
       lede: { col: cs(lede).color, ink: cs(lede, '::before').backgroundColor, off: cs(lede, '::after').backgroundColor }, rule: cs(rule).backgroundImage.includes('H294'),
@@ -56,7 +56,7 @@ try {
   const hov = await page.evaluate(() => getComputedStyle(document.getElementById('menu-coop'), '::after').backgroundColor);
   await ctx.close();
   console.log('desktop', JSON.stringify(D).slice(0, 1400));
-  check(D.bg.includes('title_keyart_pop.webp') && D.bgLoads > 1000, 'the backdrop is the POP render (title_keyart_pop.webp), and it loads', [D.bg.slice(0, 90), D.bgLoads]);
+  check(D.bg.includes('title_keyart_pop_4k.webp') && D.bgLoads >= 3000, 'the backdrop is the POP render in 4K (title_keyart_pop_4k.webp, v0.30.1244: at least 3000 px wide), and it loads', [D.bg.slice(0, 90), D.bgLoads]);
   check(D.ornate === 'none' && D.paperClip === 'polygon(' && D.offset === 'rgb(255, 46, 136)' && D.tilt === '-1.2deg', 'the gold filigree frame is gone: a hand-cut ink card with a hot-pink offset, tilted', [D.ornate, D.paperClip, D.offset, D.tilt]);
   check(D.logo.content.includes('mojiworld_logo_pop.webp') && D.logo.loads > 500 && /drop-shadow/.test(D.logo.filter) && !/lo-logo-glow/.test(D.logo.anim), 'MOJIWORLD is the lemon recolour, with a hard ink drop and no glow box', D.logo);
   check(D.lede.col === 'rgb(255, 228, 92)' && D.lede.ink === 'rgb(12, 11, 16)' && D.lede.off === 'rgb(255, 46, 136)' && D.rule, '"Once upon a time" is lemon on an ink tag with a pink offset; the divider is straight rules', [D.lede, D.rule]);

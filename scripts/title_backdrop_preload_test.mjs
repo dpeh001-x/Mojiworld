@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const PAGE = process.argv[2] || process.env.MOJI_GAME_FILE || 'mojiworld_game.html', PORT = +(process.argv[3] || 9939);
-const ART = 'backgrounds/title_keyart_pop.webp';
+const ART = 'backgrounds/title_keyart_pop_4k.webp';   // v0.30.1244 - the 4K upscale (per user: "make it more HQ")
 let fails = 0; const ok = (n, c, x) => { if (!c) fails++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}  ${JSON.stringify(x)}`); };
 const html = fs.readFileSync(path.resolve(ROOT, PAGE), 'utf8');
 const head = html.slice(0, html.indexOf('</head>'));
