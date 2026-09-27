@@ -16046,7 +16046,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1202';
+const GAME_VERSION = 'v0.30.1203';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -22703,7 +22703,7 @@ function _cutePlatformSprite(w, h, tint, ground, theme, variant) {
   // v0.30.597 — padded 12px ABOVE the slab for the decor that stands on its surface.
   // v0.30.609 — and as deep BELOW as the art (_cuteGeom.depth): a floating platform's face, keel and
   // what hangs from it sit under the one-way collision box, so the bake follows the art, not the box.
-  const PAD = 2, PAD_TOP = _CUTE_PAD_TOP, G = _cuteGeom(w, h, ground);
+  const PAD = 2, PAD_TOP = _CUTE_PAD_TOP, G0 = _cuteGeom(w, h, ground), Gb = (_CUTE_MAT[theme] && _CUTE_MAT[theme].built) ? _cuteBuiltGeomOf(G0, w, h, ground, theme) : null, G = (Gb && Gb.depth > G0.depth) ? Gb : G0;   // v0.30.1203 - a built structure may run deeper than an island
   // v0.30.636 - BAKE AT DEVICE RESOLUTION. Minted at logical size and blitted in logical units, every
   // platform and floor was upscaled by the render scale: the HD probe measured 1.36x on a 1.33 screen
   // (~1.9x at 1080p fullscreen). The paint runs under a scale transform, so its geometry is untouched,
@@ -22834,7 +22834,8 @@ function _cuteDepthCap(G, variant, ground, h) {
   const d = ground ? 0 : ((variant | 0) >> 4), full = G.depth != null ? G.depth : Math.ceil(G.faceH + (G.keel || 0) + (G.hang || 0));
   if (!(d > 0) || d >= full) return G;
   const faceH = Math.max(h, Math.min(G.faceH, d)), keel = Math.max(0, Math.min(G.keel || 0, d - faceH)), hang = (d - faceH - keel) >= 11 ? (G.hang || 0) : 0;
-  return Object.assign({}, G, { faceH, keel, hang, wrap: Math.min(G.wrap || 0, Math.max(0, faceH - G.cap - 5)), depth: Math.ceil(faceH + keel + hang) });
+  const under = G.under ? Math.max(0, Math.min(G.under, d - faceH - keel)) : 0, uk = under >= 4 ? under : 0;   // v0.30.1203 - a built structure is cut to the room too
+  return Object.assign({}, G, { faceH, keel, hang, under: uk, wrap: Math.min(G.wrap || 0, Math.max(0, faceH - G.cap - 5)), depth: Math.ceil(faceH + keel + hang + uk) });
 }
 let _lxJoinMd = null, _lxJoinN = -1;
 function _lxGroundJoin(p) {
@@ -23100,8 +23101,10 @@ function _cuteBuiltCap(ctx, sx, y, w, cap, style, rng, C) {
   } else if (style === 'tile') {            // polish: a hard specular line and a faint reflection under it
     ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.55; ctx.fillRect(sx + 3, y + cap * 0.28, w - 6, 1.2); ctx.globalAlpha = A0 * 0.18; ctx.fillRect(sx + 3, y + cap * 0.28 + 2, w - 6, Math.max(1, cap * 0.3));
     ctx.globalAlpha = A0 * 0.5; ctx.fillStyle = C.topDk; for (let xx = sx + R(10, 24); xx < sx + w - 4; xx += 24) ctx.fillRect(Math.round(xx), y + cap * 0.6, 1, cap * 0.4);
-  } else if (style === 'paving') {          // stone tops and their joints
-    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.55; for (let xx = sx + R(12, 30); xx < sx + w - 5; xx += R(22, 40)) ctx.fillRect(Math.round(xx), y + cap * 0.35, 1.2, cap * 0.65);
+  } else if (style === 'paving') {          // stone tops and their joints; v0.30.1203 - each kerb stone its own tone
+    const js = []; for (let xx = sx + R(12, 30); xx < sx + w - 5; xx += R(22, 40)) js.push(Math.round(xx));
+    for (let i = 0, x0 = sx; i <= js.length; i++) { const x1 = i < js.length ? js[i] : sx + w; ctx.fillStyle = rng() < 0.5 ? '#000000' : '#ffffff'; ctx.globalAlpha = A0 * R(0.03, 0.13); ctx.fillRect(x0, y, x1 - x0, cap); x0 = x1; }
+    ctx.fillStyle = C.topDk; ctx.globalAlpha = A0 * 0.55; for (const jx of js) ctx.fillRect(jx, y + cap * 0.35, 1.2, cap * 0.65);
     ctx.globalAlpha = A0 * 0.35; for (let n = 0, N = Math.round(w / 9); n < N; n++) ctx.fillRect(R(sx, sx + w), R(y + 2, y + cap - 1), 1, 1);
   } else if (style === 'metal') {           // tread plate: small raised diagonal ticks
     ctx.lineWidth = 1.2; ctx.strokeStyle = C.topLt; ctx.globalAlpha = A0 * 0.6;
@@ -23125,10 +23128,121 @@ function _cuteBuiltCap(ctx, sx, y, w, cap, style, rng, C) {
   ctx.globalAlpha = A0; return true;
 }
 // v0.30.626 - a built floating platform is a flat slab: no keel, nothing hanging, no end wrap.
+// v0.30.1203 - TERRAIN v5 (per user: "I am just wondering if the floors can be further improved to make it look nicer"). A
+// built floating platform stops being a rounded bar: its slab is square-cut and tucked under a 2px lip, and under it
+// stands the structure its material is built as - corbelled courses for masonry, the joists of a deck, a riveted truss
+// for metal, a chamfered underside for cast or polished slabs, lacquered brackets under a pagoda's tiles, a second toy
+// brick. Structure, not props: nothing grows on it and nothing hangs from it (v0.30.626 holds), it is cut to the room
+// below like everything else (v0.30.628), and collision is untouched.
+var _CUTE_BUILT_FAM = { cobble: 'mason', paving: 'mason', snowpave: 'mason', brick: 'mason', temple: 'mason', mosaic: 'mason',
+  tile: 'chamfer', marble: 'chamfer', concrete: 'chamfer', wood: 'deck', boardwalk: 'deck', parquet: 'deck', mosswood: 'deck',
+  metal: 'truss', kawara: 'bracket', toybrick: 'toy' };
 function _cuteBuiltGeom(G, w, h, ground) {
   if (ground || G.block) return G;
-  const faceH = Math.max(h, Math.min(18, 12 + w * 0.02));
-  return Object.assign({}, G, { island: false, keel: 0, hang: 0, wrap: 0, faceH, cap: Math.max(5, Math.min(7, faceH * 0.4)), depth: Math.ceil(faceH) });
+  const faceH = Math.max(h, Math.min(14, 10 + w * 0.016));   // v0.30.1203 - a slab now, the structure under it carries the depth
+  return Object.assign({}, G, { island: false, keel: 0, hang: 0, wrap: 0, faceH, cap: Math.max(5, Math.min(7, faceH * 0.45)), depth: Math.ceil(faceH) });
+}
+// v0.30.1203 - the slab above plus the structure its material stands on: the theme picks the family, the width the depth.
+// (A separate function so the v0.30.626 signature line above stays whole - it is a landed-fix marker.)
+function _cuteBuiltGeomOf(G, w, h, ground, theme) {
+  const B = _cuteBuiltGeom(G, w, h, ground);
+  if (B === G) return G;
+  const fam = _CUTE_BUILT_FAM[theme] || '';
+  const under = Math.round(fam === 'mason' ? (w >= 70 ? Math.min(14, 9 + w * 0.015) : 6) : fam === 'deck' ? 8 : fam === 'truss' ? (w >= 60 ? 10 : 6)
+    : fam === 'chamfer' ? 6 : fam === 'bracket' ? (w >= 40 ? 10 : 5) : fam === 'toy' ? 7 : 0);
+  return Object.assign(B, { fam, under, depth: Math.ceil(B.faceH + under) });
+}
+// v0.30.1203 - what a built floating platform stands on, drawn under its slab before the slab (the slab's keyline caps it).
+// Its own seeded stream, so the slab above keeps the texture it had; never deeper than G.under.
+function _cuteBuiltUnder(ctx, sx, yb, w, G, theme, rng, C) {
+  const U = G.under, fam = G.fam, mix = C.mix, A0 = ctx.globalAlpha, R = (a, b) => a + rng() * (b - a), HI = C.faceHi || C.top;
+  if (!(U >= 4) || w < 16) return;
+  ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = 2; ctx.strokeStyle = C.OUT;
+  const box = (x0, y0, bw, bh, fill, rad) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x0, y0, bw, bh, rad); else ctx.rect(x0, y0, bw, bh); ctx.fillStyle = fill; ctx.fill(); ctx.stroke(); };
+  const shade = (x0, y0, bw, bh, al) => { const g = ctx.createLinearGradient(0, y0, 0, y0 + bh); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,' + al + ')'); ctx.fillStyle = g; ctx.fillRect(x0, y0, bw, bh); };
+  if (fam === 'mason') {                    // corbel courses, each narrower than the one above: blocks, lit tops, mortar joints
+    const two = U >= 10 && w >= 70, h1 = two ? Math.round(U * 0.55) : U, h2 = U - h1;
+    const a1 = Math.max(4, Math.round(w * 0.06)), a2 = a1 + Math.max(6, Math.round(w * 0.09));
+    const course = (xa, xb, y0, ch, tone, bw) => {   // blocks of their own tone, a lit top, a shaded foot, mortar between
+      if (xb - xa < 8 || ch < 3) return;
+      const path = () => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(xa, y0 - 1.5, xb - xa, ch + 1.5, [0, 0, 2, 2]); else ctx.rect(xa, y0 - 1.5, xb - xa, ch + 1.5); };
+      const joints = []; for (let xx = xa + R(bw * 0.35, bw * 0.9); xx < xb - 4; xx += bw * R(0.8, 1.2)) joints.push(Math.round(xx));
+      ctx.save(); path(); ctx.clip();
+      for (let i = 0, x0 = xa; i <= joints.length; i++) { const x1 = i < joints.length ? joints[i] : xb; ctx.fillStyle = mix(tone, rng() < 0.5 ? '#000000' : '#ffffff', R(0, 0.09)); ctx.fillRect(x0, y0 - 2, x1 - x0 + 0.5, ch + 3); x0 = x1; }
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(xa, y0, xb - xa, 1);
+      shade(xa, y0, xb - xa, ch, 0.26);
+      ctx.fillStyle = C.OUT; ctx.globalAlpha = A0 * 0.55; for (const jx of joints) ctx.fillRect(jx, y0, 1.3, ch);
+      ctx.fillStyle = '#ffffff'; ctx.globalAlpha = A0 * 0.14; for (const jx of joints) ctx.fillRect(jx + 1.3, y0, 1, ch);
+      ctx.globalAlpha = A0; ctx.restore();
+      path(); ctx.stroke();
+    };
+    course(sx + a1, sx + w - a1, yb, h1, mix(C.body, HI, 0.1), Math.max(12, h1 * 2.6));
+    if (two) course(sx + a2, sx + w - a2, yb + h1, h2, mix(C.body, '#000000', 0.1), Math.max(10, h2 * 2.6));
+  } else if (fam === 'deck') {              // the stringer the planks are nailed to: a beam with slant-cut ends and its grain
+    const a = Math.max(5, Math.round(w * 0.09)), bh = Math.min(U - 1, 6), xa = sx + a, xb = sx + w - a, cut = Math.min(4, bh * 0.7);
+    const beam = () => { ctx.beginPath(); ctx.moveTo(xa, yb - 1.5); ctx.lineTo(xb, yb - 1.5); ctx.lineTo(xb - cut, yb + bh); ctx.lineTo(xa + cut, yb + bh); ctx.closePath(); };
+    beam(); ctx.fillStyle = mix(C.body, '#000000', 0.08); ctx.fill();
+    ctx.save(); beam(); ctx.clip();
+    ctx.strokeStyle = C.bodyDk; ctx.lineWidth = 0.9; ctx.globalAlpha = A0 * 0.5;
+    for (let g = 0; g < 2; g++) { const gy = yb + bh * (0.35 + g * 0.35); ctx.beginPath(); ctx.moveTo(xa, gy); for (let xx = xa; xx <= xb; xx += 10) ctx.lineTo(xx, gy + Math.sin((xx + g * 17) * 0.07) * 0.7); ctx.stroke(); }
+    ctx.globalAlpha = A0; ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(xa, yb, xb - xa, 1); shade(xa, yb, xb - xa, bh, 0.22);
+    ctx.fillStyle = C.bodyDk; for (let xx = xa + 8; xx < xb - 6; xx += 22) ctx.fillRect(Math.round(xx), yb + 1, 1.6, 1.6);   // the nails
+    ctx.restore();
+    beam(); ctx.stroke();
+  } else if (fam === 'truss' && (w < 60 || U < 8)) {   // too short for a truss: the bottom flange of an I-beam, riveted
+    box(sx + 4, yb - 1.5, w - 8, Math.min(U, 4) + 1.5, mix(C.body, HI, 0.12), [0, 0, 1.5, 1.5]);
+    ctx.fillStyle = C.topLt; for (let xx = sx + 9; xx < sx + w - 7; xx += 12) { ctx.beginPath(); ctx.arc(xx, yb + 1.2, 0.9, 0, 6.2832); ctx.fill(); }
+  } else if (fam === 'truss') {             // a riveted Warren truss: struts zig-zag down to a bottom chord and back up
+    const a = Math.max(4, Math.round(w * 0.05)), xa = sx + a, xb = sx + w - a, cy = yb + U - 2.5;
+    const n = Math.max(2, Math.round((xb - xa) / 16)), seg = (xb - xa) / n, pts = [];
+    for (let i = 0; i <= n; i++) pts.push([xa + i * seg, (i & 1) ? cy : yb]);
+    const strut = (lw, col) => { ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (const p of pts) ctx.lineTo(p[0], p[1]); ctx.stroke(); };
+    strut(4, C.OUT); strut(1.8, mix(C.body, HI, 0.18));
+    const last = (n & 1) ? n : n - 1;
+    ctx.strokeStyle = C.OUT; ctx.lineWidth = 2;
+    if (last > 1) box(xa + seg, cy - 1.5, seg * (last - 1), 3, mix(C.body, HI, 0.12), 1);
+    ctx.fillStyle = C.topLt; for (let i = 1; i <= last; i += 2) { ctx.beginPath(); ctx.arc(pts[i][0], cy, 1.1, 0, 6.2832); ctx.fill(); }
+  } else if (fam === 'chamfer') {           // a cast or cut slab's underside: bevelled back at both ends, a drip groove (gold on marble)
+    const k = Math.min(U, 6), a = 3;
+    ctx.beginPath(); ctx.moveTo(sx + a, yb - 1.5); ctx.lineTo(sx + w - a, yb - 1.5); ctx.lineTo(sx + w - a - k * 1.6, yb + k); ctx.lineTo(sx + a + k * 1.6, yb + k); ctx.closePath();
+    ctx.fillStyle = mix(C.body, '#000000', 0.12); ctx.fill(); ctx.stroke();
+    ctx.save(); ctx.clip(); shade(sx, yb, w, k, 0.22);
+    ctx.fillStyle = theme === 'marble' ? '#d9b45a' : C.OUT; ctx.globalAlpha = A0 * (theme === 'marble' ? 0.85 : 0.35);
+    ctx.fillRect(sx + a + k * 1.2, yb + k * 0.45, w - 2 * (a + k * 1.2), 1);
+    ctx.restore();
+  } else if (fam === 'bracket') {           // a pagoda eave: a lacquered beam and the round rafter ends under it, capped in gold
+    const lac = mix(C.body, '#a8352a', 0.55), bh = Math.min(4, U * 0.4);
+    if (w >= 40 && U >= 8) {
+      const rr = Math.min(2.6, (U - bh) * 0.42), ry = yb + bh + rr + 0.3, n = Math.max(2, Math.round((w - 16) / 9)), st = (w - 16) / n;
+      for (let i = 0; i <= n; i++) {
+        const cx = sx + 8 + i * st;
+        ctx.beginPath(); ctx.arc(cx, ry, rr, 0, 6.2832); ctx.fillStyle = mix(lac, '#000000', 0.15); ctx.fill(); ctx.lineWidth = 1.6; ctx.stroke();
+        ctx.fillStyle = '#d9b45a'; ctx.globalAlpha = A0 * 0.9; ctx.beginPath(); ctx.arc(cx, ry, rr * 0.38, 0, 6.2832); ctx.fill(); ctx.globalAlpha = A0;
+      }
+      ctx.lineWidth = 2;
+    }
+    box(sx + 4, yb - 1.5, w - 8, bh + 1.5, lac, [0, 0, 1, 1]);
+    ctx.fillStyle = '#d9b45a'; ctx.globalAlpha = A0 * 0.8; ctx.fillRect(sx + 6, yb + bh - 1.2, w - 12, 0.9); ctx.globalAlpha = A0;
+  } else if (fam === 'toy') {               // a smaller toy brick clicked on underneath
+    const a = Math.max(5, Math.round(w * 0.2));
+    box(sx + a, yb - 1.5, w - 2 * a, U + 1.5, mix(C.top, C.body, 0.35), [0, 0, 2, 2]);
+    ctx.save(); ctx.beginPath(); ctx.rect(sx + a + 1, yb, w - 2 * a - 2, U - 1); ctx.clip();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(sx + a + 2, yb + 1, 1.2, U - 3); shade(sx + a, yb, w - 2 * a, U, 0.2); ctx.restore();
+  }
+  ctx.globalAlpha = A0; ctx.restore();
+}
+// v0.30.1203 - broad soft light and shade along a ground's length, so a long floor stops repeating one strip of texture
+function _cuteMottle(ctx, x, y, w, h, rng, al) {
+  if (!(w > 40 && h > 3)) return;
+  const A0 = ctx.globalAlpha, n = Math.max(2, Math.round(w / 130));
+  for (let i = 0; i < n; i++) {
+    const cx = x + (i + 0.2 + rng() * 0.6) * (w / n), cy = y + h * (0.25 + rng() * 0.5), rx = 50 + rng() * 90, ry = Math.max(h * 0.7, 8), dark = rng() < 0.5;
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, dark ? 'rgba(0,0,0,1)' : 'rgba(255,255,255,1)'); g.addColorStop(1, dark ? 'rgba(0,0,0,0)' : 'rgba(255,255,255,0)');
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(rx, ry); ctx.globalAlpha = A0 * al * (dark ? 1.1 : 0.9) * (0.6 + rng() * 0.4);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 1, 0, 6.2832); ctx.fill(); ctx.restore();
+  }
+  ctx.globalAlpha = A0;
 }
 // v0.30.626 - WHAT EACH MAP IS FLOORED IN, read off its own backdrop. Every town has a floor of its own; the
 // open country splits into meadow grass (unlisted), dark moss, rock, basalt and Block-land's toy bricks.
@@ -23502,7 +23616,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const rng = _cuteRng((Math.round(w) * 73856093) ^ (Math.round(h) * 19349663) ^ ((theme || 'g').charCodeAt(0) * 83492791) ^ (((variant | 0) + 1) * 40503));
   const edge = _CUTE_EDGE[theme] || 'flat';
   const built = !!(_CUTE_MAT[theme] && _CUTE_MAT[theme].built);   // v0.30.626
-  const G = _cuteDepthCap(built ? _cuteBuiltGeom(_cuteGeom(w, h, ground), w, h, ground) : _cuteGeom(w, h, ground), variant, ground, h), cap = G.cap, wrap = G.wrap;   // v0.30.628 - cut to the room below
+  const G = _cuteDepthCap(built ? _cuteBuiltGeomOf(_cuteGeom(w, h, ground), w, h, ground, theme) : _cuteGeom(w, h, ground), variant, ground, h), cap = G.cap, wrap = G.wrap;   // v0.30.628 - cut to the room below
   // v4: a ground side that abuts another ground piece (variant bit 1 = left, 2 = right) is filled
   // flush, 1px into the pad so the seam column is opaque, and draws no keyline; where it stands
   // proud of a lower neighbour (bits 2-6 / 7-11) only that riser is outlined.
@@ -23510,7 +23624,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const eL = jl ? (variant >> 2) & 31 : 0, eR = jr ? (variant >> 7) & 31 : 0;
   const xs = sx, xe = sx + w, ww = w, fx0 = jl ? xs - 1 : xs, fx1 = jr ? xe + 1 : xe;
   const inset = G.island ? 3 : 0, x0 = xs + inset, x1 = xe - inset, yb = y + G.faceH;
-  const r = ground ? 4 : Math.min(6, G.faceH / 2);
+  const r = ground ? 4 : built ? 2 : Math.min(6, G.faceH / 2), bi = (built && !ground) ? 2 : 0;   // v0.30.1203 - a built slab is square-cut, its body tucked 2px under the lip
   const flatTop = built || theme === 'stone' || theme === 'lava' || theme === 'cosmic' || theme === 'basalt';
   const dip = flatTop ? 0 : (ground ? 1.5 : 1.1);   // the rolling top: crests ON the collision line, dips this far below it
   const keelPts = [];   // the underside, drawn from the seeded stream ONCE: filled, clipped and stroked alike
@@ -23524,10 +23638,10 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
       ctx.lineTo(x0 + 6, yb);
       ctx.quadraticCurveTo(x0 - 1, yb - 2, x0, y + cap * 0.5);
       ctx.closePath();
-    } else if (ctx.roundRect) ctx.roundRect(fx0, y, fx1 - fx0, G.faceH, ground ? [jl ? 0 : r, jr ? 0 : r, 0, 0] : [r, r, 3, 3]);
-    else ctx.rect(fx0, y, fx1 - fx0, G.faceH);
+    } else if (ctx.roundRect) ctx.roundRect(fx0 + bi, y, fx1 - fx0 - bi * 2, G.faceH, ground ? [jl ? 0 : r, jr ? 0 : r, 0, 0] : built ? [r, r, 2, 2] : [r, r, 3, 3]);
+    else ctx.rect(fx0 + bi, y, fx1 - fx0 - bi * 2, G.faceH);
   };
-  const rr = ground ? 4 : Math.min(cap, 5);
+  const rr = ground ? 4 : built ? 2.5 : Math.min(cap, 5);
   const topA = xs + (jl ? 0 : rr), topB = xe - (jr ? 0 : rr);
   const tops = _cuteTopPts(topA, topB, dip, rng);
   const segs = _cuteEdgePts(ww, edge, rng);
@@ -23556,6 +23670,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   // 1. what hangs below goes first, so the face covers where it roots
   if (G.island && G.keel && G.hang) _cuteHangers(ctx, x0, x1, yb, theme, rng, C, keelPts);   // v0.30.628 - nothing hangs without room
+  if (built && !ground && G.under) _cuteBuiltUnder(ctx, xs, yb, ww, G, theme, _cuteRng(((Math.round(w) * 2654435761) ^ (((variant | 0) + 7) * 97)) >>> 0), C);   // v0.30.1203 - the structure under a built slab, drawn first
   // 2. the face: bounce-lit under the lip, darkening with depth, material, grain, bevelled ends,
   //    occlusion under the lip, and on a ground a fade into the keyline colour at the foot
   face();
@@ -23565,6 +23680,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   ctx.save(); face(); ctx.clip();
   _cuteMaterial(ctx, xs, y + cap, ww, (yb + G.keel) - (y + cap), theme, rng, C, ground);
   grainOver(xs, y, ww, G.faceH + G.keel + 2, 0.32);
+  if (ground) _cuteMottle(ctx, xs, y + cap, ww, G.faceH - cap, _cuteRng(((Math.round(w) * 40503) ^ 0x2545f491) >>> 0), 0.2);   // v0.30.1203 - a long floor stops repeating
   if (!ground) {
     const bL = ctx.createLinearGradient(x0, 0, x0 + 4, 0); bL.addColorStop(0, 'rgba(255,255,255,0.22)'); bL.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = bL; ctx.fillRect(x0, y, 4, G.faceH + G.keel);
     const bR = ctx.createLinearGradient(x1 - 4, 0, x1, 0); bR.addColorStop(0, 'rgba(0,0,0,0)'); bR.addColorStop(1, 'rgba(0,0,0,0.26)'); ctx.fillStyle = bR; ctx.fillRect(x1 - 4, y, 4, G.faceH + G.keel);
@@ -23593,6 +23709,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   }
   _cuteCapTexture(ctx, xs, y, ww, cap, theme, rng, C);
   grainOver(xs, y - 2, ww, cap + wrap + 4, 0.22);
+  if (ground) _cuteMottle(ctx, xs, y - 2, ww, cap + 4, _cuteRng(((Math.round(w) * 69069) ^ 0x1b873593) >>> 0), 0.18);   // v0.30.1203
   ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.fillRect(topA, y + 2, Math.max(0, topB - topA), 1.4);   // rim light, below the dips
   ctx.restore();
   ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; capStroke();
