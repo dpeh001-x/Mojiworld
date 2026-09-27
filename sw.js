@@ -207,7 +207,11 @@
 // (a measured contact shadow under the hero's feet), so a returning browser would otherwise show v0.30.1216's once.
 // v0.30.x cs-stage9 - v84 -> v85. Sprites/ui/cs/stage_pop.svg (the character-creation stage) is REPLACED under its own name again
 // (a cel-shaded contact shadow under the hero), so a returning browser would otherwise show v0.30.1218's once.
-const CACHE = 'mojiworld-assets-v85';   // v0.30.x cs-stage9 - the creator stage: a cel-shaded contact shadow (same name)
+// v0.30.1228 - v85 -> v86. Eighteen monsters' art is REPLACED under its own names - the static sprite and all 27
+// idle/walk/attack frames of cookie, blockRhirhi, seasponge (reefmaw.webp), towerShardling, drownedCur, blockEle, blockHupo,
+// blockPopo, blockGary, horny, sparkSprite, stormKitty, coralImp, voltipup, stump, tidepoolTurtle, towerWarden and
+// mournshade - so a returning browser's stale-while-revalidate cache would keep drawing the old monsters for a session.
+const CACHE = 'mojiworld-assets-v86';   // v0.30.1228 - 18 redesigned monsters
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

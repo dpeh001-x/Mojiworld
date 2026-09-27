@@ -26,11 +26,6 @@
 window.LX_MOB_OFFSET_DATA = {
   "archon": 3,
   "blightElder": 45,
-  "blockEle": 2,
-  "blockGary": 3,
-  "blockHupo": 2,
-  "blockPopo": 2,
-  "blockRhirhi": 3,
   "blockTigreal": 2,
   "boneGolem": -5,
   "boneWraith": 1,
@@ -38,10 +33,9 @@ window.LX_MOB_OFFSET_DATA = {
   "brinekraken": 3,
   "cinderling": 2,
   "conductorMech": 5,
-  "cookie": 1,
+  "cookie": 2,
   "cosmicMochi": 6,
   "deranged_kuro": 2,
-  "drownedCur": 2,
   "elderbark": 5,
   "emberling": 1,
   "expressTicketMech": 2,
@@ -51,9 +45,10 @@ window.LX_MOB_OFFSET_DATA = {
   "graveReaver": 22,
   "grumpsquid": 3,
   "gummy": 4,
+  "horny": 2,
   "lichkin": 3,
   "mayo": 4,
-  "mournshade": 2,
+  "mournshade": -13,
   "nimbusFox": 2,
   "orange": 1,
   "ossuaryTyrant": 44,
@@ -67,24 +62,25 @@ window.LX_MOB_OFFSET_DATA = {
   "shardlich": 7,
   "skywisp": 1,
   "slime": -3,
-  "stormKitty": 2,
-  "stump": 5,
+  "sparkSprite": -1,
+  "stump": 2,
   "ticketMech": 9,
   "tidefish": 1,
   "tideling": 1,
   "towerHexer": 12,
   "towerOssifer": 9,
-  "towerShardling": 7,
-  "voltipup": 37,
+  "towerShardling": 6,
+  "voltipup": 2,
 };
 window.LX_MOB_SCALE_DATA = {
   "anglerfish": 1.017,
   "archon": 0.609,
   "bellowsbat": 0.711,
   "blightElder": 0.611,
-  "blockGary": 0.772,
-  "blockPopo": 0.922,
-  "blockRhirhi": 0.84,
+  "blockEle": 0.866,
+  "blockGary": 0.779,
+  "blockHupo": 0.9,
+  "blockPopo": 1.012,
   "blockTigreal": 0.95,
   "boneWraith": 0.761,
   "bonebosn": 0.585,
@@ -93,10 +89,8 @@ window.LX_MOB_SCALE_DATA = {
   "cloudbun": 0.698,
   "clownfish": 0.874,
   "conductorMech": 1.22,
-  "coralImp": 0.874,
   "cosmicMochi": 0.978,
   "deranged_kuro": 0.715,
-  "drownedCur": 0.679,
   "echoKnight": 0.633,
   "elderbark": 0.662,
   "emberling": 0.861,
@@ -114,7 +108,6 @@ window.LX_MOB_SCALE_DATA = {
   "meloncholy": 0.866,
   "mirageStalker": 0.749,
   "mirrorSelf": 1.2,
-  "mournshade": 0.829,
   "nimbusFox": 0.746,
   "octoLegFreeze": 0.703,
   "octoLegPoison": 0.796,
@@ -128,7 +121,6 @@ window.LX_MOB_SCALE_DATA = {
   "pinechad": 0.617,
   "pufferfish": 0.76,
   "razorgale": 0.882,
-  "seasponge": 0.89,
   "sepulchreHound": 0.763,
   "seraph": 0.738,
   "shardlich": 0.631,
@@ -149,37 +141,44 @@ window.LX_MOB_SCALE_DATA = {
   "towerHexer": 0.876,
   "towerOssifer": 0.831,
   "towerSeer": 0.87,
-  "towerShardling": 0.848,
   "towerSovereign": 0.88,
   "towerStormcaller": 0.883,
-  "towerWarden": 0.74,
-  "voltipup": 1.378,
   "willeo": 0.729,
   "zombie": 0.754,
   "forgewight": 0.695,   // v0.30.420 - box grown to the art; draw compensated
   "goblinMauler": 0.761,   // v0.30.420 - box grown to the art; draw compensated
   "boneGolem": 0.763,   // v0.30.420 - box grown to the art; draw compensated
   "fatDragon": 0.629,   // v0.30.420 - box grown to the art; draw compensated
-  "blockEle": 0.873,   // v0.30.420 - box grown to the art; draw compensated
   "future_lyra": 0.83,   // v0.30.420 - box grown to the art; draw compensated
   "vigil_vermillion": 0.741,   // v0.30.420 - box grown to the art; draw compensated
   "young_bloodthirsty_vermillion": 0.74,   // v0.30.420 - box grown to the art; draw compensated
   "seahorse": 0.773,   // v0.30.420 - box grown to the art; draw compensated
-  "stormKitty": 0.828,   // v0.30.420 - box grown to the art; draw compensated
   "wraith": 0.806,   // v0.30.420 - box grown to the art; draw compensated
   "towerStalker": 0.901,   // v0.30.420 - box grown to the art; draw compensated
   "seastar": 0.904,   // v0.30.420 - box grown to the art; draw compensated
   "jellyfish": 0.733,   // v0.30.420 - box grown to the art; draw compensated
-  "blockHupo": 0.908,   // v0.30.420 - box grown to the art; draw compensated
+  "blockRhirhi": 0.841,
   "potato_uncle": 0.714,   // v0.30.420 - box grown to the art; draw compensated
   "mummy": 0.878,   // v0.30.420 - box grown to the art; draw compensated
   "skeleton": 0.857,   // v0.30.420 - box grown to the art; draw compensated
   "gummy": 0.944,   // v0.30.420 - box grown to the art; draw compensated
   "lanternWisp": 0.886,   // v0.30.420 - box grown to the art; draw compensated
   "cinderling": 0.844,   // v0.30.420 - box grown to the art; draw compensated
-  "tidepoolTurtle": 0.839,   // v0.30.420 - box grown to the art; draw compensated
+  "cookie": 1.018,
+  "coralImp": 0.874,
+  "drownedCur": 1.087,
+  "horny": 1.114,
+  "mournshade": 0.925,
   "scorpion": 0.938,   // v0.30.420 - box grown to the art; draw compensated
   "mushpup": 0.875,   // v0.30.420 - box grown to the art; draw compensated
+  "seasponge": 0.895,
   "snail": 1.333,   // v0.30.420 - box grown to the art; draw compensated
+  "sparkSprite": 1.012,
+  "stormKitty": 0.838,
+  "stump": 1,
+  "tidepoolTurtle": 1.255,
+  "towerShardling": 0.933,
+  "towerWarden": 0.857,
   "towerWisp": 1.459,   // v0.30.420 - box grown to the art; draw compensated
+  "voltipup": 1.017,
 };
