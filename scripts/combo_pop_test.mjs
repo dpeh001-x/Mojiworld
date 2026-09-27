@@ -6,9 +6,9 @@
 //  4. the pop keeps its keyframe name, so a break (both classes on) still plays comboBreak
 //  5. the drain bar is still a transform over a full-width box (hud_churn_test's contract)
 //  6. the sticker plates survive the low-graphics mode (html.lx-nobackdrop strips every box-shadow)
-//  7. louder (per user: "can add greater punk and pop elements more eye popping"): a comic starburst behind the count -
-//     a clip-path polygon that changes colour at every tier and grows at the top ones - COMBO as torn tape, and one
-//     halftone fan (the meter's ::before / ::after)
+//  7. clean and compact (per user: "Looks about messy, the outlines around the numbers can be more, make it more compact
+//     and less messy"): the numbers carry a real text stroke (>= 5 px, painted under the fill), one burst behind the
+//     count takes the tier colour, no halftone fan or torn tape, and the meter stays within 100 px tall at 1280x720
 //   node scripts/combo_pop_test.mjs [page.html] [port]
 import { createRequire } from 'node:module'; import path from 'node:path';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -69,15 +69,16 @@ try {
       const cnt = document.getElementById('combo-count'), b = getComputedStyle(cnt, '::before');
       return { tier: el.dataset.tier, text: m.textContent, plate: getComputedStyle(m, '::before').backgroundColor, label: getComputedStyle(l, '::before').backgroundColor,
         burst: b.backgroundColor, burstClip: b.clipPath.slice(0, 8), burstW: parseFloat(b.width), tape: getComputedStyle(l, '::before').clipPath.slice(0, 8),
-        fan: [getComputedStyle(el, '::before').backgroundImage.slice(0, 15), getComputedStyle(el, '::after').backgroundImage.slice(0, 15)] }; }));
+        fan: getComputedStyle(el, '::before').content, stroke: parseFloat(getComputedStyle(cnt).webkitTextStrokeWidth), paint: getComputedStyle(cnt).paintOrder,
+        multStroke: parseFloat(getComputedStyle(m).webkitTextStrokeWidth), h: Math.round(el.getBoundingClientRect().height) }; }));
   }
   check(tiers.map((t) => t.tier).join() === '0,1,2,3,4' && tiers.map((t) => t.text).join() === '×1.00,×1.45,×2.20,×3.55,×5 MAX',
     '2. the multiplier sticker grades with it: tiers 0-4, ×1.00 .. ×5 MAX', tiers.map((t) => t.tier + ' ' + t.text));
   check(new Set(tiers.map((t) => t.plate)).size === 5 && tiers[4].label !== tiers[0].label, '3. each tier paints its own sticker; MAX turns the COMBO sticker', tiers.map((t) => t.plate + ' / ' + t.label));
-  check(tiers.every((t) => t.burstClip === 'polygon(' && t.tape === 'polygon(') && new Set(tiers.map((t) => t.burst)).size === 5
-    && tiers[4].burstW > tiers[1].burstW + 12 && tiers[0].fan.every((f) => f.startsWith('radial-gradient')),
-    '7. a starburst behind the count steps colour at every tier and grows at the top; COMBO is torn tape; one halftone fan',
-    tiers.map((t) => [t.tier, t.burst, Math.round(t.burstW), t.burstClip, t.tape].join(' ')));
+  check(tiers.every((t) => t.burstClip === 'polygon(' && t.tape !== 'polygon(' && t.fan === 'none' && t.stroke >= 5 && /^stroke/.test(t.paint) && t.h <= 100)
+    && tiers.slice(0, 4).every((t) => t.multStroke >= 3) && new Set(tiers.map((t) => t.burst)).size === 5,
+    '7. clean: a real stroke on the numbers, one tier-coloured burst, no halftone or tape, within 100 px tall',
+    tiers.map((t) => [t.tier, t.burst, 'stroke ' + t.stroke, t.paint, 'mult ' + t.multStroke, 'fan ' + t.fan, 'tape ' + t.tape, 'h ' + t.h].join(' ')));
   // 4. break still wins over the pop
   const anim = await page.evaluate(() => { const el = document.getElementById('combo-meter'); el.classList.add('pop', 'break'); const a = getComputedStyle(el).animationName; el.classList.remove('break'); const b = getComputedStyle(el).animationName; el.classList.remove('pop'); return { both: a, pop: b }; });
   check(anim.both === 'comboBreak' && anim.pop === 'comboPop', '4. a break still plays comboBreak over the pop', anim);
