@@ -16006,7 +16006,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1198';
+const GAME_VERSION = 'v0.30.1199';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -57932,6 +57932,29 @@ function _mpNoteVersion(peer, v) {
   } catch (e) {}
 }
 // Called from the main loop after updatePlayer runs
+// v0.30.1199 mp-idle-traffic - is a presence ('state') frame due this tick? A change goes out at once, then one repeat (so
+// receivers mark the player still and stop dead-reckoning), then only a heartbeat: 1.25 s idle on the ground, 2 s paused or
+// hidden (a change made while parked waits for the beat), 200 ms where receivers would move a silent player (they settle
+// a peer silent for 400 ms onto the platform _mpPeerRestY guesses). Receivers time a peer out at 5 s at the earliest.
+const LX_MP_IDLE_HB_MS = 1250, LX_MP_STILL_HB_MS = 2000, LX_MP_AIR_HB_MS = 200;
+function _mpHoldBeat(p) {   // off the ground, or standing where a receiver's platform guess would move me
+  if (!p.onGround) return true;
+  try { const ry = (typeof _mpPeerRestY === 'function') ? _mpPeerRestY(p.x, p.y) : null; return ry != null && ry > p.y - 4 && Math.abs(ry - p.y) > 0.5; } catch (e) { return false; }
+}
+function _mpStateDue(still, now, avStr) {
+  const p = player;
+  const anim = still ? 'idle' : (p.attacking ? 'attack' : (Math.abs(p.vx) > 0.5 ? 'run' : 'idle'));
+  const sig = [Math.round(p.x * 10), Math.round(p.y * 10), still ? 0 : Math.round((p.vx || 0) * 100), still ? 0 : Math.round((p.vy || 0) * 100),
+    p.facing, game.currentMap, Math.round(p.hp || 0), (typeof getMaxHp === 'function') ? getMaxHp() : p.maxHp, Math.round(p.mp || 0),
+    (typeof getMaxMp === 'function') ? getMaxMp() : p.maxMp, p.level, p.cls, p.job, p.master, anim, avStr].join('|');
+  const gap = now - (net._stAt || 0), same = sig === net._stSig;
+  let due;
+  if (!same) due = !(still && net._stStill && net._stSame > 0 && gap < LX_MP_STILL_HB_MS && !_mpHoldBeat(p));
+  else if (!(net._stSame > 0)) due = true;
+  else due = gap >= LX_MP_AIR_HB_MS && (gap >= (still ? LX_MP_STILL_HB_MS : LX_MP_IDLE_HB_MS) || _mpHoldBeat(p));
+  if (due) { net._stSame = same ? (net._stSame | 0) + 1 : 0; net._stSig = sig; net._stAt = now; net._stStill = still; net._stSent = (net._stSent | 0) + 1; }
+  return due;
+}
 function _mpTick() {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
   const now = performance.now();
@@ -57985,7 +58008,8 @@ function _mpTick() {
   // v0.30.x peer-statue - paused (a menu, the portal's map) or a hidden tab: the sim is not moving this player,
   // so the partner must not be told it is. See _mpDrawPeers for the receiving half.
   const _still = !!(game.paused || (typeof document !== 'undefined' && document.hidden));
-  try {
+  // v0.30.1199 mp-idle-traffic - only when something changed, or its heartbeat is due (see _mpStateDue); the rest of the tick runs as before
+  if (_mpStateDue(_still, now, _avStr)) try {
     net.ws.send(JSON.stringify({
       t: 'state',
       x: player.x, y: player.y, vx: _still ? 0 : player.vx, vy: _still ? 0 : player.vy,
@@ -58378,7 +58402,9 @@ function _mpDrawPeers() {
             + ((Math.abs(_pvy) > 0.5) ? 0.25 * _snapFrames * _snapFrames : 0);
     const _restY = _mpPeerRestY(p.x, p.y);
     if (_restY != null && _ty > _restY) _ty = _restY;
-    if (p._snapAt && _ageMs > 400 && !p._downed && _restY != null && _restY > (p.y || 0) - 4) {
+    // v0.30.1199 mp-idle-traffic - not for a peer standing still: its snapshot IS where it stands (a heartbeat 1-2 s apart
+    // would otherwise drop it onto the guessed platform - a few px off on some maps - on every beat)
+    if (p._snapAt && _ageMs > 400 && !_stillPeer && !p._downed && _restY != null && _restY > (p.y || 0) - 4) {
       _tx = p.x || 0; _ty = _restY;
     }
     if (p._rx == null || Math.abs((p.x || 0) - p._rx) > 200 || Math.abs((p.y || 0) - (p._ry || 0)) > 200) { p._rx = _tx; p._ry = _ty; }
