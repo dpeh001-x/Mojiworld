@@ -16073,7 +16073,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1247';
+const GAME_VERSION = 'v0.30.1248';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -56732,6 +56732,22 @@ function _isOnboardingActive() {
   return false;
 }
 const COOP_DOWN_ONBOARD_MS = 5000;   // short auto-respawn window during onboarding
+// v0.30.1248 downed-ui - a down is an ONBOARDING down (short 5 s window, no revive) only while onboarding is on screen: the
+// prologue, a story beat, or the tour card itself. _isOnboardingActive() also answers yes for any character whose
+// _tutorialSeen was never stamped, which made every down silent for that character forever (no DOWNED card).
+function _lxDownOnboarding() {
+  try {
+    if (window._prologueActive || window._prologuePending) return true;
+    if (document.body && document.body.classList.contains('sb-active')) return true;
+    const tut = document.getElementById('tutorial-modal');
+    if (tut && !tut.hidden && getComputedStyle(tut).display !== 'none') return true;
+  } catch (e) {}
+  return false;
+}
+// v0.30.1248 downed-ui - the DOWNED card stays hidden only where it would sit over a cinematic (the prologue, a story beat).
+function _lxDownSilent() {
+  try { return !!(window._prologueActive || window._prologuePending || (document.body && document.body.classList.contains('sb-active'))); } catch (e) { return false; }
+}
 function _coopTryDowned() {
   if (player._downed) {
     // v0.29.944 — an OHKO routed through the revive chain while ALREADY down
@@ -56762,14 +56778,14 @@ function _coopTryDowned() {
   // only if this map's single team revive hasn't been spent in the last 10 min.
   // After that, going down is a real death — breaks the infinite revive loop and
   // the leave-and-return refresh exploit.
-  const _onboarding = _isOnboardingActive();
+  const _onboarding = _lxDownOnboarding();   // v0.30.1248 downed-ui - on screen, not "tour flag unset"
   const _reviveSpent = _coopReviveSpent(game.currentMap);
   player._downAlreadyRevived = _reviveSpent;
   player._downRevivable = !_onboarding && _coopPeerAliveOnMyMap() && !_reviveSpent;
   player._downed = true;
   player._downLanded = !!player.onGround;   // v0.30.1029 a down taken on the floor needs no landing frame
   if (typeof _duoTrialFail === 'function') _duoTrialFail();   // v0.30.423 - shared fate (my own down)
-  player._downedSilent = _onboarding;   // banner is suppressed while this is set
+  player._downedSilent = _onboarding && _lxDownSilent();   // v0.30.1248 downed-ui - the tour shows the card too   // banner is suppressed while this is set
   player._downedUntil = performance.now() + (_onboarding ? COOP_DOWN_ONBOARD_MS : COOP_DOWN_MS);
   player.hp = 1;                     // keeps every death gate quiet while down
   player.invulnerable = 2000;
@@ -159646,7 +159662,7 @@ function updateUI() {
   const _safeMaxHp = maxHp > 0 ? maxHp : 1;
   const _safeMaxMp = maxMp > 0 ? maxMp : 1;
   const _safeExpToNext = (player.expToNext && player.expToNext > 0) ? player.expToNext : 1;
-  const _hpPct = Math.max(0, Math.min(100, (player.hp / _safeMaxHp) * 100));
+  const _hpPct = player._downed ? 0 : Math.max(0, Math.min(100, (player.hp / _safeMaxHp) * 100));   // v0.30.1248 downed-ui - a down reads 0 (hp is held at 1 inside)
   const _mpPct = Math.max(0, Math.min(100, (player.mp / _safeMaxMp) * 100));
   const _xpPct = Math.max(0, Math.min(100, (player.exp / _safeExpToNext) * 100));
   // v0.26.x perf — skip the string build AND style write when the pct hasn't
@@ -159754,17 +159770,17 @@ function updateUI() {
   }
   const _sc = _uiLast._stat || (_uiLast._stat = {});
   const _scName = (player.look && player.look.name) || '';
-  if (_sc.hp !== player.hp || _sc.mhp !== maxHp || _sc.mp !== player.mp || _sc.mmp !== maxMp ||
+  if (_sc.hp !== player.hp || _sc.dn !== !!player._downed || _sc.mhp !== maxHp || _sc.mp !== player.mp || _sc.mmp !== maxMp ||
       _sc.exp !== player.exp || _sc.etn !== player.expToNext || _sc.coin !== player.mojicoins ||
       _sc.shard !== (player.setshards | 0) || _sc.atk !== _hAtk || _sc.def !== _hDef ||
       _sc.crit !== _hCrit || _sc.acc !== (player.baseAcc | 0) || _sc.kills !== game.kills ||
       _sc.lvl !== player.level || _sc.name !== _scName) {
-    _sc.hp = player.hp; _sc.mhp = maxHp; _sc.mp = player.mp; _sc.mmp = maxMp;
+    _sc.hp = player.hp; _sc.dn = !!player._downed; _sc.mhp = maxHp; _sc.mp = player.mp; _sc.mmp = maxMp;
     _sc.exp = player.exp; _sc.etn = player.expToNext; _sc.coin = player.mojicoins;
     _sc.shard = (player.setshards | 0); _sc.atk = _hAtk; _sc.def = _hDef;
     _sc.crit = _hCrit; _sc.acc = (player.baseAcc | 0); _sc.kills = game.kills;
     _sc.lvl = player.level; _sc.name = _scName;
-  _uiSetText(d['hp-text'],  _fmtBig(Math.max(0, Math.ceil(player.hp))) + ' / ' + _fmtBig(maxHp));
+  _uiSetText(d['hp-text'],  _fmtBig(player._downed ? 0 : Math.max(0, Math.ceil(player.hp))) + ' / ' + _fmtBig(maxHp));
   _uiSetText(d['mp-text'],  _fmtBig(Math.ceil(player.mp))               + ' / ' + _fmtBig(maxMp));
   // v0.26.x — EXP readout shows a whole-number fill % alongside the values.
   const _xpPctTxt = player.expToNext > 0 ? Math.floor((player.exp / player.expToNext) * 100) : 0;
