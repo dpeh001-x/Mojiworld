@@ -43,6 +43,9 @@ try {
   // serve.js swaps MOJI_GAME_FILE in at this URL, so art resolves from the root
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html?lxhold=0`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof drawProjectiles === 'function' && typeof _PROJ_SPRITE_BLIT !== 'undefined', null, { timeout: 120000 });
+  // Let the boot's image flood finish (the title menu shows when it has): started earlier, the nine frames
+  // queue behind 100+ sprites on localhost's six connections and this test flaked with 0 of 9 loaded.
+  await page.waitForFunction(() => { const m = document.getElementById('lo-menu'); return !!m && m.offsetParent !== null; }, null, { timeout: 150000 }).catch(() => {});
   await page.waitForTimeout(1500);
   const r = await page.evaluate(async () => {
     const out = { animKey: _PROJ_ANIM_KEYS.has('tidalSweep'), still: (LX_MOB_PROJ.tidalSweep || {}).src || '' };
