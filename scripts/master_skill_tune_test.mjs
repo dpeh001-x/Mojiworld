@@ -101,7 +101,7 @@ const src = await page.evaluate(async () => {
     nrNova: has("performAround(380, 3.8, { color: '#ff2244'"),
     nrDagger: has('getAtk() * 0.9 * (isCrit ? getCritDmg() : 1)'),
     nrSnap: has('getAtk() * 1.24 + 25'),
-    drSlam: has("performAround(340, 16, { color:'#88ccff'"),   // v0.30.1050 (per user) - 8 -> 16
+    drSlam: has("performAround(180, 16, { color:'#88ccff'"),   // v0.30.x balance (per user: "make them not stand out too much against others"): 340 -> 180 px   // v0.30.1050 (per user) - 8 -> 16
     drExtra: has('dragoon_skylance:  { extraHit: 2.34 }'),
     baTurretUntouched: has('damage: Math.floor(getAtk() * 2.1) + 25,'),   // v0.30.814 - 0.9x + 6 -> 2.1x + 25
   };
@@ -111,7 +111,7 @@ ok('Bloodmoon shuriken 1x + 5 (v0.30.785; v0.30.356 set 0.76x), and the 1.4x ori
 ok('Bloodmoon nova 3.8x (v0.30.814; v0.30.356 set 2.2x)', src.nrNova === 1);
 ok('Eclipse dagger 0.9x (v0.30.814; v0.30.356 set 0.62x)', src.nrDagger === 1);
 ok('Eclipse snap 2.0x -> 1.24x ATK', src.nrSnap === 1);
-ok('Sky Lance slam 16x (v0.30.1050, per user; v0.30.356 set 8.15x)', src.drSlam === 1);
+ok('Sky Lance slam 16x on 180 px (16x: v0.30.1050, per user; the circle: v0.30.x balance (per user: "make them not stand out too much against others"))', src.drSlam === 1);
 ok('Sky Lance extra hit 1.5x -> 2.34x, scaled with the slam', src.drExtra === 1);
 ok('Ballista War Machine turret 2.1x + 25 (v0.30.814; v0.30.356 left it at 0.9x — it was never an anomaly)',
   src.baTurretUntouched === 1, 'the 346.6 xATK reading was the volley bleeding into its window');
@@ -169,10 +169,10 @@ ok('Bloodmoon Domain lands in its band (105-180 xATK; v0.30.356 aimed ~96)',
 // v0.30.x - the bands follow the live numbers (v0.30.814 dagger 0.9x; v0.30.1050 slam 16x). v0.30.356 asked 100 / 80.
 ok('Eclipse Massacre lands in its band (100-160 xATK; v0.30.356 asked ~100)',
   mNrX >= 100 && mNrX <= 160, `${mNrX} xATK/cast`);
-ok('Sky Lance lands in its band (220-380 xATK; v0.30.356 asked ~80)',
-  mDrX >= 220 && mDrX <= 380, `${mDrX} xATK/cast`);
-ok('Sky Lance per second of cooldown stays under 15.5 xATK/s (v0.30.356 aimed ~3.3)',
-  (mDrX / 25) < 15.5, `${(mDrX / 25).toFixed(2)} xATK/s`);
+ok('Sky Lance lands in its band (65-125 xATK; v0.30.356 asked ~80)',
+  mDrX >= 65 && mDrX <= 125, `${mDrX} xATK/cast`);
+ok('Sky Lance per second of cooldown stays under 5 xATK/s (v0.30.356 aimed ~3.3)',
+  (mDrX / 25) < 5, `${(mDrX / 25).toFixed(2)} xATK/s`);
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 
 await browser.close(); server.kill();

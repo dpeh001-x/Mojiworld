@@ -105,7 +105,7 @@ const r = await page.evaluate(async () => {
 // v0.30.814 (the user's Skill Editor patch): each fire is ATK x 3 + 5 (was 4.6x + 24, then 3.7x + 24 at v0.30.330);
 // v0.30.778 set LX_DOOM_HEAT_DMG to 0.01, so 100 heat is x2 (was x1.7).
 const expectCold = Math.round(r.atk * 3 + 5);
-const expectHot = Math.round(r.atk * 3 * 2 + 5);
+const expectHot = Math.round(r.atk * 3 * 1.5 + 5);   // v0.30.x balance (per user: "make them not stand out too much against others"): LX_DOOM_HEAT_DMG 0.01 -> 0.005
 ok('the doom-fire sprite is registered, decoded and animated',
   r.art.registered && r.art.ready && /p_doom_fireball/.test(r.art.src)
   && r.art.animKey === 'p_doom_fireball' && r.art.inAnimSet, r.art);
@@ -120,7 +120,7 @@ ok('they measurably CLOSE on the target when the real update runs',
   r.converged, { closedPx: r.closed.map(v => Math.round(v)) });
 ok('killing the mark mid-volley re-acquires instead of wasting the rest',
   r.retargeted, r.retargetSample);
-ok('Calamity Heat still multiplies the barrage (+100% at 100)',
+ok('Calamity Heat still multiplies the barrage (+50% at 100)',
   r.hotDmg === expectHot, { hot: r.hotDmg, expected: expectHot, cold: r.shot.dmg });
 ok('the tooltip describes the skill that now exists',
   /homing/i.test(r.desc) && /single target/i.test(r.desc) && !/blade-wave/i.test(r.desc)

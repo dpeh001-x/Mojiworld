@@ -146,9 +146,11 @@ console.log(`  War of Banners: ${JSON.stringify(R.wob)}`);
 const G = R.gs || {}, B = R.wob || {};
 ok('GROUND SLAM COOLDOWN: authored 4 s (+1 s), committing a real 3 s',
    R.cd && R.cd.groundSlam === 4000 && G.realCdMs === 3000, `authored ${R.cd && R.cd.groundSlam} ms, real ${G.realCdMs} ms (baseline: 3000 / 2250)`);
-ok('GROUND SLAM DAMAGE: about -20% a cast (7.4-8.8x ATK)', G.perCast >= 7.4 && G.perCast <= 8.8,
+// v0.30.x balance (per user: "make them not stand out too much against others"): every Ground Slam line -25% (measured on the candidate, band +-10%).
+ok('GROUND SLAM DAMAGE: -25% a line (6.1-7.5x ATK a cast)', G.perCast >= 6.1 && G.perCast <= 7.5,
    `${G.perCast}x ATK a cast (baseline: 10.2x)`);
-ok('CONTROL: Ground Slam still lands all 8 ticks', G.hits === 8, `${G.hits} hits`);
+// v0.30.778 (the user's Skill Editor numbers) cut the somersault to two ticks: 2 + the landing + 3 rings = 6.
+ok('CONTROL: Ground Slam still lands all 6 hits', G.hits === 6, `${G.hits} hits`);
 // The skill audit's R2 (per user, 2026-09-25: "fix all") cut both per-press numbers x0.21 (4 -> 0.85, 3.3 -> 0.7):
 // one mashed enrage had measured 19,752% of a basic. This harness read 21.3x ATK a press before, 3.8x after.
 ok('WAR OF BANNERS DAMAGE: the audit retune, x0.21 a press (2.5-5.5x ATK here)', B.perPress >= 2.5 && B.perPress <= 5.5,

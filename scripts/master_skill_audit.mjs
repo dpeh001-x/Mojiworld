@@ -113,6 +113,12 @@ const runMaster = async (master, info) => page.evaluate(async ({ master, info, S
     player.hp = getMaxHp(); player.mp = 9e9;
   };
   game.paused = false;
+  // v0.30.x - pins: comboMult is a session-long streak (1 -> 5) and critStreak adds up to +15%, so an unpinned run
+  // read each skill at whatever rung the previous casts had left. Crit chance 0, but a skill's own forced crits count.
+  try { Object.defineProperty(game, 'comboMult', { get: () => 1, set() {}, configurable: true }); } catch (e) {}
+  try { Object.defineProperty(game, 'critStreak', { get: () => 0, set() {}, configurable: true }); } catch (e) {}
+  window.getCrit = () => 0;   // crit CHANCE 0; forced crits (guaranteed stacks, sure-crit finishers) still land - they are the skill
+  player._storyBeatsSeen = new Proxy({}, { get: () => true });
   player.cls = info.cls; player.job = info.job; player.master = master;
   player.level = 50; player._god = true;
   player.baseAtk = 400; player.baseAcc = 900;
@@ -143,7 +149,11 @@ const runMaster = async (master, info) => page.evaluate(async ({ master, info, S
     };
     let castErr = null;
     if (castId) { try { castSkill(castId); } catch (e) { castErr = String(e).slice(0, 90); } }
-    for (let i = 0; i < frames; i++) {
+    // v0.30.x - `frames` are SIM STEPS (game.time), not rAFs: headless fires several rAFs per step, so the "8 s" window
+    // was ~2-3 s of game time and cut channels, dives and delayed pulses short.
+    const _t0 = game.time || 0;
+    for (let i = 0; i < frames * 40 && (game.time || 0) - _t0 < frames; i++) {
+      game.paused = false;
       await new Promise((r) => requestAnimationFrame(r));
       for (const x of ds) { x.currentHp = x.maxHp; x.x = x._px; x.y = x._py; x.vx = 0; x.vy = 0; }
       player.mp = 9e9; player.hp = getMaxHp();

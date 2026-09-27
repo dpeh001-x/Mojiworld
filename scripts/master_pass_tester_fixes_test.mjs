@@ -17,8 +17,9 @@ ok('#1 Bishop G: the 2.5s untargetable window is gone (0.8s cast guard)',
 ok('#1 Bishop G: pillar MP refund halved to 3%',
   src.includes('getMaxMp() * 0.03') && !src.includes('getMaxMp() * 0.06'), '');
 // v0.30.x - the live numbers (v0.30.773 tier budget, then v0.30.1050 per user: "fix all for me"; the v0.30.20 pass set 2.6x / 6x).
-ok('#1 Bishop B: pulses 8.1x, finale 4.3x',
-  src.includes('performAround(440, 8.1,') && src.includes('performAround(620, 4.3,'), '');
+// v0.30.x balance (per user: "make them not stand out too much against others"): the pulses keep 8.1x on a 260 px circle (was 440); the finale is unchanged.
+ok('#1 Bishop B: pulses 8.1x (260 px), finale 4.3x',
+  src.includes('performAround(260, 8.1,') && src.includes('performAround(620, 4.3,'), '');
 ok('#6 Dragoon: no-prey bail on the chase finisher',
   src.includes('if (!nearest) return;'), '');
 ok('#6 Dragoon: dive gaps tightened (1000->700, 700->450)',
@@ -30,7 +31,7 @@ ok('#7 Nightreaper: the dagger has a visible fall (moon-height streak)',
 // v0.30.x - v0.30.117 replaced the waves with seven homing doom-fires; v0.30.778 heat 0.007 -> 0.01; v0.30.814 (the
 // user's Skill Editor patch) each fire 3x + 5 and the cleave 6.0x -> 5.0x.
 ok('#11 Doombringer: heat 0.01, doom-fires 3x + 5, melee 5.0',
-  src.includes('LX_DOOM_HEAT_DMG = 0.01') && src.includes('damage: getAtk() * 3 * _heatMul + 5') &&
+  src.includes('LX_DOOM_HEAT_DMG = 0.005') && src.includes('damage: getAtk() * 3 * _heatMul + 5') &&
   src.includes('performMelee(440, 5 * _heatMul'), '');
 ok('#12 Ballista: turret cadence 700->900ms',
   src.includes('tu.fireCd = 900;') && !src.includes('tu.fireCd = 700;'), '');

@@ -111,7 +111,7 @@ const r = await page.evaluate(async () => {
   out.waveDamage = wave ? Math.round(wave.damage) : null;
   // v0.30.117 replaced the blade-waves with seven homing doom-fires; v0.30.814 (the user's Skill Editor patch) set each
   // fire to ATK x 3 + 5, and v0.30.778 set LX_DOOM_HEAT_DMG to 0.01, so 100 heat doubles it.
-  out.waveExpected = Math.round(atk * 3 * 2 + 5);
+  out.waveExpected = Math.round(atk * 3 * 1.5 + 5);   // v0.30.x balance (per user: "make them not stand out too much against others"): full heat +100% -> +50%
 
   // 5. table poison check: a fresh window with nothing banked must be 0.22
   player._msWin = null; player._doomWinBonus = null;
@@ -158,7 +158,7 @@ check(r.winLenFrames > r.freshLenFrames + 200, 'the window is genuinely longer (
 // 6/7 piles to be gone, leaving at most the cleave's fresh +1 (+wave brands).
 check(r.brandsClearedB1 <= 2 && r.brandsClearedB2 <= 2, 'pre-cast brand piles were consumed (only the ult\'s own fresh seeds remain)', [r.brandsClearedB1, r.brandsClearedB2]);
 check(r.heatBeforeUlt === 100 && r.heatAfterUlt === 0, 'the whole heat meter is spent', { before: r.heatBeforeUlt, after: r.heatAfterUlt });
-check(r.waveFound && Math.abs(r.waveDamage - r.waveExpected) <= 2, 'the first doom-fire carries x2 damage at 100 heat', { got: r.waveDamage, want: r.waveExpected });
+check(r.waveFound && Math.abs(r.waveDamage - r.waveExpected) <= 2, 'the first doom-fire carries x1.5 damage at 100 heat', { got: r.waveDamage, want: r.waveExpected });
 check(r.freshFrac === 0.22, 'THE TABLE IS NOT POISONED: the very next window is back to 22%', r.freshFrac);
 // >=1 stack / >=2 heat, not >=3/>=6: the apoc strikes fire on real-ms timers
 // while the harness paces on requestAnimationFrame, so how many of the 12 hits

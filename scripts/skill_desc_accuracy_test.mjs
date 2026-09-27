@@ -53,12 +53,12 @@ try {
     claim('archbishop_grail', `(${fmt(2 * lit('archbishop_grail', /const dmg = Math\.floor\(getAtk\(\) \* ([\d.]+)\);/))}× ATK each)`);
     { const c = lit('doombringer_ult', /performMelee\(440, ([\d.]+) \* _heatMul/), f = lit('doombringer_ult', /getAtk\(\) \* ([\d.]+) \* _heatMul \+/);
       claim('doombringer_ult', `a ${fmt(c)}× ATK melee cleave`); claim('doombringer_ult', `doom-fires (${fmt(f)}× ATK each)`);
-      claim('doombringer_ult', `(~${fmt(c + 7 * f)}x ATK total, ~${fmt(2 * (c + 7 * f))}x at full heat)`); }
+      claim('doombringer_ult', `(~${fmt(c + 7 * f)}x ATK total, ~${fmt((1 + LX_DOOM_HEAT_MAX * LX_DOOM_HEAT_DMG) * (c + 7 * f))}x at full heat)`); }   // v0.30.x - full heat read from the constants (was a fixed x2)
     claim('shinobi_ult', `(${fmt(lit('shinobi_ult', /performAround\(175, ([\d.]+),/))}× ATK in 175 px each)`);
     claim('shinobi_ult', `then a ${fmt(lit('shinobi_ult', /performAround\(330, ([\d.]+),/))}× ATK shockwave finale`);
     claim('sleight', `for ${fmt(lit('sleight', /getAtk\(\) \* ([\d.]+) \* ramp/))}× ATK`);
     { const [a, b] = lit2('elemental', /getAtk\(\) \* ([\d.]+) \* jumpMul \+ (\d+)/); claim('elemental', `(${fmt(a)}× ATK + ${b}, −8% per hop)`); }
-    claim('archbishop_ult', `five holy pulses (${fmt(lit('archbishop_ult', /performAround\(440, ([\d.]+),/))}× ATK`);
+    claim('archbishop_ult', `five holy pulses (${fmt(lit('archbishop_ult', /performAround\(\d+, ([\d.]+), \{ color: '#fff1a0'/))}× ATK`);
     claim('phantom_ult', `shards (${fmt(lit('phantom_ult', /damage: getAtk\(\) \* ([\d.]+) \+/))}× ATK each)`);
     claim('nightreaper_ult', `shuriken (${fmt(lit('nightreaper_ult', /damage: getAtk\(\) \* ([\d.]+) \+ 5/))}× ATK each)`);
     claim('arcaneBurst', `(${fmt(lit('arcaneBurst', /performAround\(_abAoe, ([\d.]+),/))}× ATK, heavy knockback)`);
