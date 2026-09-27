@@ -16049,7 +16049,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1221';
+const GAME_VERSION = 'v0.30.1222';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -163585,20 +163585,112 @@ function _lxCloudSaveBody(raw, noPaint) {
   }
   return bare;
 }
+// v0.30.1222 cloud-close-push - the push when the tab goes away. Browsers refuse a keepalive body over 64 KB, and the
+// pagehide push was keepalive: a late-game save (~87 KB) never left, and it had restarted the 15 s throttle, so the
+// hide flush's push was skipped too. Now the hide pushes by an ordinary fetch (the page is usually still alive), and
+// pagehide sends keepalive only what fits - the save as is, or gzipped for a relay that said it takes gzip ("gz":1).
+const _LX_KEEPALIVE_MAX = 60 * 1024;   // v0.30.1222 cloud-close-push - under the 64 KB keepalive limit, with a margin
+let _lxCloudLast = null;     // v0.30.1222 cloud-close-push - the last push: { raw, ok (landed), done (settled), ka (keepalive), ac }
+let _lxCloudGz = false;      // v0.30.1222 cloud-close-push - the relay takes a gzipped save (its /api/save answered "gz":1)
+let _lxCloudClosing = false; // v0.30.1222 cloud-close-push - between a pagehide and the next pageshow
+// v0.30.1222 cloud-close-push - a save as stored, minus what changes by itself (stamp, signature, clocks): two flushes of the
+// same progress compare equal
+function _lxCloudKey(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw.replace(/^\{"v":([^,]*),"t":\d+,/, '{"v":$1,').replace(/,"sig":"[^"]*"\}$/, '}')
+    .replace(/"(_playMs|_timeHW|bankLastTick|bankAccrueMs)":-?[\d.]+(?:e[-+]?\d+)?/g, '"$1":0');
+}
+function _lxCloudHas(raw) {   // v0.30.1222 cloud-close-push - the last push was this save: { ok, done, ka } of it, else null
+  const l = _lxCloudLast;
+  return (l && (l.raw === raw || _lxCloudKey(l.raw) === _lxCloudKey(raw))) ? l : null;
+}
+// v0.30.1222 cloud-close-push - note a push as it starts. An ordinary one can be cancelled - only by a close push of the
+// same save replacing it (a slow push is never cut short by the next regular one: that could starve a slow link)
+function _lxCloudTrack(raw, abortable) {
+  const rec = { raw, ok: false, done: false, ka: !abortable, ac: (abortable && typeof AbortController === 'function') ? new AbortController() : null };
+  _lxCloudLast = rec;
+  return rec;
+}
+function _lxCloudLanded(rec, r) {   // v0.30.1222 cloud-close-push - a 2xx: mark it, and learn whether the relay takes gzip
+  if (!r || !r.ok) return false;
+  rec.ok = true;
+  try { r.json().then((j) => { if (j && j.gz === 1) _lxCloudGz = true; }).catch(() => {}); } catch (e) {}
+  return true;
+}
+// v0.30.1222 cloud-close-push - gzip a string. The stream is fed by hand (not a Blob), so where CompressionStream transforms
+// synchronously (Chrome) this resolves inside the current task: it can run from pagehide.
+function _lxGzip(str) {
+  const src = new TextEncoder().encode(str);
+  const rd = new ReadableStream({ start(c) { c.enqueue(src); c.close(); } }).pipeThrough(new CompressionStream('gzip')).getReader();
+  const parts = []; let n = 0;
+  const pump = () => rd.read().then(({ value, done }) => {
+    if (!done) { parts.push(value); n += value.byteLength; return pump(); }
+    const out = new Uint8Array(n); let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.byteLength; }
+    return out;
+  });
+  return pump();
+}
+function _lxCloudSess() {   // v0.30.1222 cloud-close-push - the signed-in cloud session, or null
+  const sess = (typeof LXAuth !== 'undefined') ? LXAuth.session() : null;
+  return (sess && sess.kind === 'cloud' && sess.token) ? sess : null;
+}
+// v0.30.1222 cloud-close-push - the page was hidden: push the save now, past the throttle, unless the cloud has it (landed or
+// on its way), or the close push just went (the unload's own hide comes after pagehide in Chrome)
+function _lxCloudHidePush() {
+  try {
+    const sess = _lxCloudSess(); if (!sess) return;
+    const raw = localStorage.getItem(SAVE_KEY); if (!raw) return;
+    const l = _lxCloudLast;
+    if (_lxCloudClosing && l && l.ka && (l.ok || !l.done)) return;
+    const h = _lxCloudHas(raw);
+    if (h && (h.ok || !h.done)) return;
+    _lxCloudPushAt = Date.now();   // the 15 s throttle counts from this push
+    _lxCloudPost(sess.token, raw, false);
+  } catch (e) {}
+}
+// v0.30.1222 cloud-close-push - pagehide: a keepalive push of what fits - the body as is (<= 60 KB), or gzipped for a relay
+// that takes it. Else skipped: the hide push carried the save (an older relay is never sent gzip). A save that landed, or
+// is already going by keepalive, is not pushed again.
+function _lxCloudClosePush() {
+  try {
+    _lxCloudClosing = true;
+    const sess = _lxCloudSess(); if (!sess) return;
+    const raw = localStorage.getItem(SAVE_KEY); if (!raw) return;
+    const h = _lxCloudHas(raw);
+    if (h && (h.ok || (h.ka && !h.done))) return;
+    const body = _lxCloudSaveBody(raw);
+    const send = (b, gz) => {
+      if (h && !h.done && h.ac) { try { h.ac.abort(); } catch (e) {} }   // this save's ordinary push still on its way:
+      const rec = _lxCloudTrack(raw, false);                                // the close would cut it - this one replaces it
+      _lxCloudPushAt = Date.now();
+      const hd = { 'content-type': 'application/json', authorization: 'Bearer ' + sess.token };
+      if (gz) hd['content-encoding'] = 'gzip';
+      fetch(_LX_API_BASE + '/api/save', { method: 'POST', keepalive: true, headers: hd, body: b })
+        .then((r) => { _lxCloudLanded(rec, r); }, () => {}).then(() => { rec.done = true; });
+    };
+    const len = (typeof body !== 'string') ? Infinity : (body.length > _LX_KEEPALIVE_MAX ? body.length : new TextEncoder().encode(body).length);
+    if (len <= _LX_KEEPALIVE_MAX) { send(body, false); return; }
+    if (!_lxCloudGz || typeof CompressionStream !== 'function') return;   // an older relay: skipped, the hide push has it
+    _lxGzip(body).then((b) => { if (b && b.byteLength <= _LX_KEEPALIVE_MAX) send(b, true); }).catch(() => {});
+  } catch (e) {}
+}
 // v0.30.1185 cloud-paint-cap - the one account-cloud POST of a save as stored (the flush / pagehide push and the first-login
 // push); refused as too large anyway (413: the server's cap is below _LX_CLOUD_SAVE_CAP) -> once more without the paint
 function _lxCloudPost(token, raw, force) {
+  const rec = _lxCloudTrack(raw, !force);   // v0.30.1222 cloud-close-push - what went, and whether it landed
   const post = (b) => fetch(_LX_API_BASE + '/api/save', {
-    method: 'POST', keepalive: !!force,
+    method: 'POST', keepalive: !!force, signal: rec.ac ? rec.ac.signal : undefined,   // v0.30.1222 cloud-close-push - a close push may replace it
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
     body: b,
   });
   const body = _lxCloudSaveBody(raw);
   post(body).then((r) => {
+    if (_lxCloudLanded(rec, r)) return;   // v0.30.1222 cloud-close-push - landed (and the relay may have said it takes gzip)
     if (!r || r.status !== 413) return;
     const bare = _lxCloudSaveBody(raw, true);
-    if (bare !== body) return post(bare);
-  }).catch(() => {});
+    if (bare !== body) return post(bare).then((r2) => { _lxCloudLanded(rec, r2); });
+  }).catch(() => {}).then(() => { rec.done = true; });   // v0.30.1222 cloud-close-push - settled, landed or not
 }
 let _lxCloudPushAt = 0;
 function _lxCloudPushSave(json, force) {
@@ -163622,6 +163714,7 @@ async function _lxCloudSyncOnLogin(session) {
     const r = await fetch(_LX_API_BASE + '/api/save', { headers: { authorization: 'Bearer ' + session.token } });
     const j = await r.json().catch(() => ({}));
     if (!j || !j.ok) return;             // unauthorized / server error -> keep local
+    if (j.gz === 1) _lxCloudGz = true;   // v0.30.1222 cloud-close-push - this relay takes a gzipped save
     cloud = j.save;                       // may be null
   } catch (e) { return; }                 // offline -> keep local
   let localRaw = null, localSave = null;
@@ -163683,7 +163776,10 @@ async function _lxCloudSyncOnLogin(session) {
   pushLocal();                                                          // local is more advanced / cloud stale -> keep + push up
 }
 try { window._lxCloudPushSave = _lxCloudPushSave; window._lxCloudSyncOnLogin = _lxCloudSyncOnLogin; } catch (e) {}
-try { window.addEventListener('pagehide', () => { try { const raw = localStorage.getItem(SAVE_KEY); if (raw) _lxCloudPushSave(raw, true); } catch (e) {} }); } catch (e) {}
+// v0.30.1222 cloud-close-push - on window, registered after the hide flush above it (so the save is fresh when this runs)
+try { window.addEventListener('visibilitychange', () => { if (document.hidden) _lxCloudHidePush(); }); } catch (e) {}
+try { window.addEventListener('pagehide', () => { _lxCloudClosePush(); }); } catch (e) {}   // v0.30.1222 cloud-close-push
+try { window.addEventListener('pageshow', () => { _lxCloudClosing = false; }); } catch (e) {}   // v0.30.1222 cloud-close-push - back from the bfcache
 
 const LXAuth = {
   async register(username, password) {

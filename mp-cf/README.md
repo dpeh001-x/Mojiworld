@@ -95,6 +95,14 @@ server-side but not yet applied on login.
   `THROTTLE_MS`, `FAIL_TTL_MS`.
 - **Rollback caution:** an account that logged in on this build is stored as PBKDF2; an older build cannot verify it.
 
+## Gzipped save push (cloud-close-push, 2026-09-27)
+
+- `POST /api/save` also takes the save gzipped (`Content-Encoding: gzip`; CORS allows the header). The game's last
+  push when a tab closes is a keepalive request, and browsers refuse a keepalive body over 64 KB (a late-game save is
+  ~90 KB, ~20 KB gzipped). Bodies are read under a 3 x `CSAVE_CAP` byte bound, gunzipped under the same bound, then
+  checked against `CSAVE_CAP` as before. `/api/save` answers carry `"gz":1`; the game gzips only toward a relay that
+  said so, so an older deploy is never sent a gzipped body. **Needs a `wrangler deploy` to take effect.**
+
 ## Files
 
 | File | Role |

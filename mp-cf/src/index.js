@@ -97,9 +97,43 @@ const okPass = (p) => typeof p === 'string' && p.length >= 6 && p.length <= 64;
 const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET, POST, OPTIONS',
-  'access-control-allow-headers': 'content-type, authorization',
+  // cloud-close-push (2026-09-27) - content-encoding: the game's tab-close push may send the save gzipped (see readSaveBody)
+  'access-control-allow-headers': 'content-type, authorization, content-encoding',
   'access-control-max-age': '86400',
 };
+// cloud-close-push (2026-09-27) - a save POST may come gzipped: the game's last push when a tab closes is a keepalive
+// request, and browsers refuse a keepalive body over 64 KB (a late-game save is ~90 KB; ~20 KB gzipped). The game gzips
+// only toward a relay whose /api/save answers carry "gz":1, so an older relay is never sent one.
+// readCapped: the bytes of a stream, or null once past max (then the rest is not read)
+async function readCapped(stream, max) {
+  const rd = stream.getReader(), parts = [];
+  let n = 0;
+  for (;;) {
+    const { value, done } = await rd.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) { try { await rd.cancel(); } catch (_) {} return null; }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.byteLength; }
+  return out;
+}
+// cloud-close-push (2026-09-27) - the text of a save POST: '' when empty, null when surely over CSAVE_CAP characters (more
+// than 3 UTF-8 bytes per character is impossible, so 3 x CSAVE_CAP bytes bounds it - plain or gunzipped: a gzip bomb
+// stops there), undefined for a broken gzip body. A body that starts with the gzip magic bytes is gunzipped whatever its
+// headers say (a JSON save starts with "{"), so one the edge already inflated still reads as plain.
+async function readSaveBody(request) {
+  if (!request.body) return '';
+  let bytes = await readCapped(request.body, CSAVE_CAP * 3);
+  if (bytes && bytes.length > 1 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    try { bytes = await readCapped(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')), CSAVE_CAP * 3); }
+    catch (_) { return undefined; }
+  }
+  if (bytes === null) return null;
+  return new TextDecoder().decode(bytes);
+}
 const jsonResp = (obj, status) => new Response(JSON.stringify(obj), {
   status: status || 200, headers: { 'content-type': 'application/json', ...CORS },
 });
@@ -538,16 +572,17 @@ export class MojiRoom {
     const key = await this._userForToken(request);
     if (!key) return jsonResp({ ok: false, error: 'unauthorized' }, 401);
     const save = (await this.storage.get(CSAVE_KEY(key))) || null;
-    return jsonResp({ ok: true, save });
+    return jsonResp({ ok: true, save, gz: 1 });   // cloud-close-push (2026-09-27) - gz: this relay takes a gzipped save POST
   }
 
   async apiPutSave(request) {
     const key = await this._userForToken(request);
     if (!key) return jsonResp({ ok: false, error: 'unauthorized' }, 401);
-    const text = await request.text();
+    const text = await readSaveBody(request);   // cloud-close-push (2026-09-27) - plain or gzipped, read under the cap
+    if (text === undefined) return jsonResp({ ok: false, error: 'bad save json' }, 400);
     if (!text || text.length > CSAVE_CAP) return jsonResp({ ok: false, error: 'save missing or too large' }, 413);
     let save; try { save = JSON.parse(text); } catch { return jsonResp({ ok: false, error: 'bad save json' }, 400); }
     await this.storage.put(CSAVE_KEY(key), save);
-    return jsonResp({ ok: true });
+    return jsonResp({ ok: true, gz: 1 });   // cloud-close-push (2026-09-27) - gz: see apiGetSave
   }
 }
