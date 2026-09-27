@@ -3,6 +3,8 @@
 // Each is drawn at the velocity its real spawn gives it, heading left and heading right, and graded on the
 // canvas transform in force at its drawImage: the art's top must be up on screen, its nose must point the way
 // it travels, and Cancer's clap claws - fired at each other - must be mirror images.
+// Plus (per user: "make Cancer's pincer sweep grounded on the floor too"): the sweep's claw is drawn with its
+// underside on its hitbox bottom, and a real sweep forced in Cancer's arena spawns that hitbox on the floor.
 //   node scripts/zodiac_proj_upright_test.mjs [port]   (MOJI_GAME_FILE honored)
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -43,14 +45,30 @@ try {
         let tf = null;
         const P = CanvasRenderingContext2D.prototype, orig = P.drawImage, tell = window._drawTell;
         window._drawTell = () => {};   // the in-reach parry hint draws first; mute it
-        P.drawImage = function (...a) { if (!tf && this === ctx && a.length >= 5) { const t = this.getTransform(); tf = { a: t.a, b: t.b, c: t.c, d: t.d }; } return orig.apply(this, a); };
+        P.drawImage = function (...a) { if (!tf && this === ctx && a.length >= 5) { const t = this.getTransform(); tf = { a: t.a, b: t.b, c: t.c, d: t.d, dy: a[2], dh: a[4] }; } return orig.apply(this, a); };
         try { drawProjectiles(); } catch (e) { out.err = String(e); }
         P.drawImage = orig; window._drawTell = tell;
         // art up (0,-1) -> screen (-c, -d); art nose (1,0) -> screen (a, b)
-        out[k][name] = tf ? { upX: +(-tf.c).toFixed(3), upY: +(-tf.d).toFixed(3), noseX: +tf.a.toFixed(3), vx } : null;
+        out[k][name] = tf ? { upX: +(-tf.c).toFixed(3), upY: +(-tf.d).toFixed(3), noseX: +tf.a.toFixed(3), vx,
+          // the claw's underside, in the sprite's local frame (origin = hitbox centre): must equal h / 2
+          underside: +(tf.dy + tf.dh * (1 - (_PROJ_SPRITE_BLIT[k].groundPad || 0))).toFixed(2), half: h / 2 } : null;
       }
     }
     game.projectiles.length = 0;
+    // a REAL sweep: Cancer in its own arena, forced into the phase-3 sweep, one AI step past the fire time
+    try {
+      loadMap('zod_cancer');
+      const t1 = Date.now(); let m = null;
+      while (Date.now() - t1 < 8000 && !(m = game.monsters.find((x) => x && x.zodiacSign === 'cancer'))) await new Promise(z => setTimeout(z, 100));
+      if (m) {
+        game.projectiles.length = 0;
+        m.patternState = 'sweep'; m.patternTimer = 100; m._cancerFired = false;
+        (ZODIAC_AI.cancer || _zodiacAiGeneric)(m, 1, 300, 3, ZODIAC_SIGNS.find((z) => z.id === 'cancer'));   // Cancer's own AI - the generic one is only its fallback
+        const p = game.projectiles.find((q) => q.skill === 'pincerSweep');
+        const ground = game.mapData.platforms.filter((q) => q.type === 'ground').map((q) => q.y);
+        out.spawn = p ? { bottom: p.y + p.h, ground: Math.min(...ground), feet: m.y + m.h } : { none: true, state: m.patternState };
+      } else out.spawn = { noBoss: true };
+    } catch (e) { out.spawn = { err: String(e).slice(0, 120) }; }
     return out;
   }, CASES);
   for (const k of Object.keys(CASES)) for (const [name, v] of Object.entries(r[k] || {})) {
@@ -59,6 +77,9 @@ try {
     ok(`${k} ${name}: upright (the art's top is up on screen)`, v.upY < 0, v);
     ok(`${k} ${name}: faces the way it travels`, Math.sign(v.noseX) === Math.sign(v.vx), v);
   }
+  for (const [name, v] of Object.entries(r.pincerSweep || {})) if (v)
+    ok(`pincerSweep ${name}: the claw's underside is drawn on its hitbox bottom (grounded)`, Math.abs(v.underside - v.half) < 0.6, v);
+  ok("a real sweep in Cancer's arena spawns its hitbox on the floor", !!(r.spawn && typeof r.spawn.bottom === 'number' && r.spawn.bottom === r.spawn.ground), r.spawn);
   const L = r.pincer && r.pincer['from left, diving right'], R = r.pincer && r.pincer['from right, diving left'];
   ok("Cancer's two clap claws are mirror images", L && R && Math.abs(L.upX + R.upX) < 0.01 && Math.abs(L.upY - R.upY) < 0.01, { L, R });
   ok('no page errors', errs.length === 0 && !r.err, errs.concat(r.err || []));
