@@ -211,7 +211,9 @@
 // idle/walk/attack frames of cookie, blockRhirhi, seasponge (reefmaw.webp), towerShardling, drownedCur, blockEle, blockHupo,
 // blockPopo, blockGary, horny, sparkSprite, stormKitty, coralImp, voltipup, stump, tidepoolTurtle, towerWarden and
 // mournshade - so a returning browser's stale-while-revalidate cache would keep drawing the old monsters for a session.
-const CACHE = 'mojiworld-assets-v86';   // v0.30.1228 - 18 redesigned monsters
+// v0.30.1236 - v86 -> v87. Sprites/fx/swing_{blockRhirhi,blockHupo,blockPopo,blockGary,towerWarden}.webp are REPLACED
+// under their own names (pop-style trails recoloured to the redesigned monsters), so a returning browser would keep the old ones.
+const CACHE = 'mojiworld-assets-v87';   // v0.30.1236 - pop swing trails
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
