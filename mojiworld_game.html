@@ -16045,7 +16045,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1239';
+const GAME_VERSION = 'v0.30.1240';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -67903,6 +67903,54 @@ function _lxAscendPhoneFit(el) {
   el.style.left = Math.round(pick[1][0]) + 'px'; el.style.top = Math.round(pick[1][1]) + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto';
   return true;
 }
+// v0.30.1240 ui-small - THE TOUCH DECK BY ITS BOXES. A locked skill button lets touches through, so the dock's point test
+// (elementsFromPoint) never saw it, and 15 sample points can step between small buttons: at 568x320 the pill settled on
+// a locked skill button. Every visible deck button counts here by its box (2 px to spare). [] = not a phone layout.
+function _lxAscendDeckRects() {
+  const b = document.body;
+  if (!b.classList.contains('mc-landscape') || b.classList.contains('hide-mobile-ctrl')) return [];
+  const out = [];
+  for (const q of document.querySelectorAll('#mobile-deck .mc-btn, #mobile-deck .mc-dpad, #mobile-ctrl .mc-btn, #mobile-ctrl-toggle, #skill-bar, .mc-menu, .mc-chat-btn, #fullscreen-btn, #settings-btn')) {
+    const cs = getComputedStyle(q); if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    const r = q.getBoundingClientRect(); if (r.width && r.height) out.push([r.left, r.top, r.right, r.bottom]);
+  }
+  return out;
+}
+function _lxAscendDeckHits(x, y, w, h, R) {   // v0.30.1240 ui-small - deck buttons under a box, weighted over the point samples
+  R = R || _lxAscendDeckRects(); let n = 0;
+  for (const q of R) if (x < q[2] + 2 && x + w > q[0] - 2 && y < q[3] + 2 && y + h > q[1] - 2) n++;
+  return n * 3;
+}
+// v0.30.1240 ui-small - A SMALL PHONE: THE PILL FINDS THE GAP BETWEEN THE CONTROLS. Called when the dock's six spots are all
+// taken. Tries every spot flush against a deck button's edge (and the dock's own anchors), full size first, then sized
+// down (0.9 / 0.8 / 0.7 - the look untouched), and takes the one clear of every deck button and of anything but the game
+// view (the dock's point test), nearest the middle under the menu row. A size change is applied a frame later: this runs
+// inside the pill's own ResizeObserver callback, where a resize is a loop error. true = placed (or placing next frame).
+function _lxAscendPillSpot(el, w, h, top) {
+  const pill = el.firstElementChild, W = window.innerWidth, H = window.innerHeight;
+  if (!pill || pill.id !== 'guguma-ascend-pill' || !w || !h) return false;
+  const R = _lxAscendDeckRects(); if (!R.length) return false;   // not a phone layout: the dock's spot stands
+  const bare = (e) => !e || e === document.body || e === document.documentElement || e.id === 'game' || (e.classList && e.classList.contains('game-wrapper'));
+  const clear = (x, y, pw, ph) => { for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) {
+    if (!bare(document.elementsFromPoint(x + (i + 0.5) * pw / 5, y + (j + 0.5) * ph / 3).find((q) => !el.contains(q)))) return false; } return true; };
+  const z0 = parseFloat(pill.style.zoom) || 1, m = 4;
+  for (const z of [1, 0.9, 0.8, 0.7]) {
+    const pw = w * z / z0, ph = h * z / z0, ax = (W - pw) / 2, ay = Math.min(top, H - m - ph);
+    const xs = new Set([m, W - m - pw, ax]), ys = new Set([m, H - m - ph, ay, (H - ph) / 2]);
+    for (const q of R) { xs.add(q[2] + m); xs.add(q[0] - m - pw); ys.add(q[3] + m); ys.add(q[1] - m - ph); }
+    const C = [];
+    for (const x of xs) { if (x < 0 || x + pw > W) continue;
+      for (const y of ys) { if (y < 0 || y + ph > H || _lxAscendDeckHits(x, y, pw, ph, R)) continue; C.push([x, y, Math.hypot(x - ax, y - ay)]); } }
+    C.sort((a, b) => a[2] - b[2]);
+    const pick = C.slice(0, 60).find((c) => clear(c[0], c[1], pw, ph));
+    if (!pick) continue;
+    const put = () => { el.style.left = Math.round(pick[0]) + 'px'; el.style.top = Math.round(pick[1]) + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto'; };
+    if (z === z0) put();
+    else requestAnimationFrame(() => { try { if (el.firstElementChild !== pill) return; pill.style.zoom = (z === 1) ? '' : String(z); put(); } catch (e) {} });
+    return true;
+  }
+  return false;
+}
 function _lxAscendDock(el) {
   el = el || document.getElementById('guguma-ascend');
   if (!el || !el.isConnected) return;
@@ -67913,17 +67961,19 @@ function _lxAscendDock(el) {
   const hits = (x, y) => { let n = 0; for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) {
     const px = x + (i + 0.5) * w / 5, py = y + (j + 0.5) * h / 3;
     if (px < 0 || py < 0 || px > W || py > H) { n++; continue; }
-    if (!bare(document.elementsFromPoint(px, py).find((q) => !el.contains(q)))) n++; } return n; };
+    if (!bare(document.elementsFromPoint(px, py).find((q) => !el.contains(q)))) n++; } return n + _lxAscendDeckHits(x, y, w, h); };   // v0.30.1240 ui-small - + deck buttons by their boxes
   if (hits(r.left, r.top) === 0) return;   // where it is, nothing is underneath
   let top = m;   // under the phone's top menu row
   for (const b of document.querySelectorAll('.mc-menu, .mc-chat-btn')) { const q = b.getBoundingClientRect(); if (q.width && q.bottom < H / 3) top = Math.max(top, q.bottom + 8); }
   const spots = [[W - m - w, H - m - h], [m, H - m - h], [(W - w) / 2, top], [W - m - w, top], [m, top], [(W - w) / 2, (H - h) / 2]];
   let best = null, bestN = 1e9;
   for (const [x, y] of spots) { const n = hits(x, y); if (n < bestN) { best = [x, y]; bestN = n; } if (!n) break; }
+  if (bestN > 0 && _lxAscendPillSpot(el, w, h, top)) return;   // v0.30.1240 ui-small - all six taken (a small phone): the gap between the controls
   if (!best) return;
   el.style.left = Math.max(0, Math.round(best[0])) + 'px'; el.style.top = Math.max(0, Math.round(best[1])) + 'px'; el.style.right = 'auto'; el.style.bottom = 'auto';
 }
 try { window.addEventListener('resize', () => { try { const el = document.getElementById('guguma-ascend'); if (!el) return;
+  if (el.firstElementChild && el.firstElementChild.id === 'guguma-ascend-pill') el.firstElementChild.style.zoom = '';   /* v0.30.1240 ui-small - full size again on a new screen */
   el.style.left = ''; el.style.top = ''; el.style.right = '18px'; el.style.bottom = '18px'; _lxAscendDock(el); } catch (e) {} }); } catch (e) {}
 // v0.30.1182 phone-fit - the title menu scrolls on a short screen (a landscape phone shows New Game and Co-op; Settings,
 // Save Backups and the links sit below the fold) and nothing said so. A "More" tab sits on the menu's bottom edge
@@ -165640,6 +165690,16 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       el.removeAttribute('hidden');
       el.style.display = (p === id) ? (p === 'lo-menu' ? 'flex' : 'block') : 'none';
     }
+    // v0.30.1240 ui-small - a short screen (568x320): the logo kept the top of the card and the step's buttons sat below the fold,
+    // under the "More" tab. The card scrolls itself so the panel's last button clears that tab (36 px), never past the
+    // field that takes the focus. Measured next frame, the panel's slide-in offset taken out.
+    if (id !== 'lo-menu') requestAnimationFrame(() => { try {
+      const pn = document.getElementById(id), st = pn && pn.closest('.lo-stack'); if (!st || !pn.offsetHeight) return;
+      const f = pn.querySelector(id === 'menu-coop-panel' ? '#menu-coop-code' : '#auth-user') || pn, sr = st.getBoundingClientRect();
+      const k = st.offsetHeight / (sr.height || 1), dy = new DOMMatrix(getComputedStyle(pn).transform).f;
+      const need = pn.getBoundingClientRect().bottom - dy - (sr.bottom - 36), room = f.getBoundingClientRect().top - dy - sr.top - 4;
+      if (need > 0 && room > 0) st.scrollTop += Math.min(need, room) * k;
+    } catch (e) {} });
   }
   window._lxMenuBackupCount = function () {
     try {
@@ -174672,6 +174732,18 @@ function startBgm() {
   @media (pointer: coarse), (max-width: 900px) {
     #attributes-modal#attributes-modal #u-jump-row#u-jump-row .u-jump kbd { display: none !important; }
   }
+</style>
+<style id="lx-ui-small-css">
+  /* v0.30.1240 ui-small - 2) the U panel's shortcut row on a small phone: every panel is 92vw of the real window there, so at
+     568x320 the row is ~453 px and the six shortcuts (~536 px) wrapped. Sizes only, in steps: tighter padding and gaps,
+     then each shortcut scaled. The look (colours, font, borders) is untouched. */
+  @media (max-width: 700px) {
+    #attributes-modal#attributes-modal #u-jump-row#u-jump-row { gap: 3px; }
+    #attributes-modal#attributes-modal #u-jump-row#u-jump-row .u-jump { padding: 4px 5px 4px 4px; gap: 3px; }
+    #attributes-modal#attributes-modal #u-jump-row#u-jump-row .u-jump .uj-ico { width: 16px; height: 16px; flex: 0 0 16px; }
+  }
+  @media (max-width: 620px) { #attributes-modal#attributes-modal #u-jump-row#u-jump-row .u-jump { zoom: 0.86; } }
+  @media (max-width: 540px) { #attributes-modal#attributes-modal #u-jump-row#u-jump-row .u-jump { zoom: 0.76; } }
 </style>
 <style id="lx-ui-text-fixes-css">
   /* v0.30.1193 ui-text-fixes - 1) while a panel is open the tour card steps aside entirely (ghosted, its nav row, fold handle and
