@@ -8,6 +8,9 @@
 // built slab hangs nothing below itself, toy bricks carry studs, and a split material (moss on planks)
 // keeps its face's own hue. Then the tables: every map resolves to a known floor, every town's floor
 // is its own, every listed map has a sampled palette, and drawPlatforms paints with that palette.
+// (v0.30.1203) Terrain v5: a built floating platform stands on a structure of its own (courses, a beam, a truss, a chamfer,
+// rafter ends, a second brick), so "hangs nothing" is measured below that structure; and every bake is read through
+// its own scale - since v0.30.636 a bake is minted at device resolution, and the 1x reader sampled the wrong pixels.
 //   node scripts/floor_material_test.mjs        MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -28,21 +31,24 @@ try {
     const P = _CUTE_PAD_TOP, out = { mats: {} }, pal = { top: '#b89a78', body: '#5a4632', exact: true };
     const lum = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
     const stats = (cv, w, h, ground, theme) => {
-      const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data, W = cv.width, at = (x, y) => (y * W + x) * 4;
-      const G = _CUTE_MAT[theme].built ? _cuteBuiltGeom(_cuteGeom(w, h, ground), w, h, ground) : _cuteGeom(w, h, ground);
-      let solid = 0, air = 0, inside = 0, opaque = 0, below = 0, studs = 0;
+      const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data, W = cv.width, s = cv.width / (cv._lxLW || cv.width);
+      const at = (x, y) => (Math.min(cv.height - 1, Math.max(0, Math.round(y * s))) * W + Math.min(W - 1, Math.max(0, Math.round(x * s)))) * 4;
+      const G = _CUTE_MAT[theme].built ? _cuteBuiltGeomOf(_cuteGeom(w, h, ground), w, h, ground, theme) : _cuteGeom(w, h, ground);
+      let solid = 0, air = 0, inside = 0, opaque = 0, below = 0, studs = 0, under = 0;
+      const LH = cv.height / s, LW = W / s, DEP = G.depth || G.faceH;
       for (const f of [0.25, 0.4, 0.5, 0.6, 0.75]) { const x = Math.round(2 + w * f); if (d[at(x, P + 2) + 3] > 200) solid++; if (d[at(x, P - 5) + 3] < 40) air++; }
-      for (let y = 0; y < cv.height; y++) for (let x = 6; x < W - 6; x++) { const a = d[at(x, y) + 3], ry = y - P; if (ry >= 0 && ry < h) { inside++; if (a > 230) opaque++; } if (ry > G.faceH + 3 && a > 60) below++; if (ry <= -2 && ry >= -5 && a > 200) studs++; }
+      for (let y = 0; y < LH; y++) for (let x = 6; x < LW - 6; x++) { const a = d[at(x, y) + 3], ry = y - P; if (ry >= 0 && ry < h) { inside++; if (a > 230) opaque++; } if (ry > DEP + 3 && a > 60) below++; if (ry > G.faceH + 2 && ry <= DEP && a > 60) under++; if (ry <= -2 && ry >= -5 && a > 200) studs++; }
       const ky = P + Math.round(G.cap + 5); let key = 255; for (let x = 1; x <= 6; x++) { const i = at(x, ky); if (d[i + 3] > 150) key = Math.min(key, lum(d, i)); }
-      return { solid, air, opaque: +(opaque / Math.max(1, inside)).toFixed(2), below, studs, key: key | 0 };
+      return { solid, air, opaque: +(opaque / Math.max(1, inside)).toFixed(2), below, under, studs, key: key | 0 };
     };
     for (const th of Object.keys(_CUTE_MAT)) {
       const p = _cutePlatformSprite(120, 12, pal, false, th, 0), g = _cutePlatformSprite(400, 60, pal, true, th, 0);
       out.mats[th] = { built: !!_CUTE_MAT[th].built, plat: p ? stats(p, 120, 12, false, th) : null, ground: g ? stats(g, 400, 60, true, th) : null };
     }
     // split: moss on planks keeps a brown face under a green top
-    const mw = _cutePlatformSprite(200, 60, { top: '#688d5c', body: '#614c34', exact: true }, true, 'mosswood', 0), md = mw.getContext('2d').getImageData(100, P + 3, 1, 40).data;
-    out.split = { top: [md[0], md[1], md[2]], face: [md[35 * 4], md[35 * 4 + 1], md[35 * 4 + 2]] };
+    const mw = _cutePlatformSprite(200, 60, { top: '#688d5c', body: '#614c34', exact: true }, true, 'mosswood', 0), ms = mw.width / (mw._lxLW || mw.width);
+    const md = mw.getContext('2d').getImageData(Math.round(100 * ms), Math.round((P + 3) * ms), 1, Math.round(40 * ms)).data, fi = Math.round(35 * ms) * 4;
+    out.split = { top: [md[0], md[1], md[2]], face: [md[fi], md[fi + 1], md[fi + 2]] };
     const KNOWN = new Set(Object.keys(_CUTE_MAT).concat(['grass', 'stone', 'ice', 'lava', 'sand', 'candy', 'swamp', 'cosmic', 'honey', 'coral']));
     const cur = game.currentMap, pick = {}; for (const id of Object.keys(MAPS)) { game.currentMap = id; pick[id] = _pickFloorTheme(MAPS[id]); } game.currentMap = cur;
     out.unknown = Object.entries(pick).filter(([, m]) => !KNOWN.has(m)).map(([k, m]) => k + ':' + m);
@@ -54,7 +60,8 @@ try {
     const p = m.plat, g = m.ground;
     ok(`${th}: both bakes exist, the surface is at the collision line and the box is opaque`, p && g && p.solid === 5 && g.solid === 5 && p.opaque >= 0.9 && g.opaque >= 0.9, { plat: p, ground: g });
     ok(`${th}: the keyline is dark down the edge`, p.key < 90 && g.key < 90, [p.key, g.key]);
-    if (m.built) ok(`${th}: a built slab hangs nothing below itself`, p.below === 0 && g.below === 0, [p.below, g.below]);
+    if (m.built) ok(`${th}: a built slab hangs nothing below its own structure`, p.below === 0 && g.below === 0, [p.below, g.below]);
+    if (m.built) ok(`${th}: a built floating platform stands on a structure of its own (terrain v5, v0.30.1203)`, p.under > 150, p.under);
     if (th === 'toybrick') ok('toybrick: studs stand on the surface', p.studs > 20 && g.studs > 40, [p.studs, g.studs]);
     else ok(`${th}: nothing stands above the surface of a built slab`, !m.built || (p.studs === 0 && g.studs === 0), [p.studs, g.studs]);
   }
