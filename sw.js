@@ -233,7 +233,9 @@
 // v0.30.1292 - v97 -> v98. 30 Sprites/projectiles stills and 30 Sprites/projectiles/anim loops
 // (pop-punk rework, 300 files) are REPLACED or ADDED under their own names, so a returning
 // browser would keep drawing the old effects for a session.
-const CACHE = 'mojiworld-assets-v98';   // v0.30.1292 - pop projectiles
+// v0.30.1294 chest-pop - v98 -> v99. the six Sprites/objects/chest_<tier>[_open].webp sprites are REPLACED under
+// their own names (pop-punk redraw), so a returning browser would otherwise keep the old art until its cache refreshed.
+const CACHE = 'mojiworld-assets-v99';   // v0.30.1294 - treasure chests redrawn pop punk (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
