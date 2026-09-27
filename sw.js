@@ -230,7 +230,10 @@
 // Barnaby), so a returning browser would otherwise keep v0.30.1275's icon until its cache refreshed.
 // v0.30.1290 talent-pop - v96 -> v97. all 78 Sprites/talents icons and the 27 Sprites/talents/bg card plates are REPLACED under
 // their own names (pop-punk redraw), so a returning browser would otherwise keep the old art until its cache refreshed.
-const CACHE = 'mojiworld-assets-v97';   // v0.30.1290 - talent icons + card plates redrawn pop punk (same names)
+// v0.30.1292 - v97 -> v98. 30 Sprites/projectiles stills and 30 Sprites/projectiles/anim loops
+// (pop-punk rework, 300 files) are REPLACED or ADDED under their own names, so a returning
+// browser would keep drawing the old effects for a session.
+const CACHE = 'mojiworld-assets-v98';   // v0.30.1292 - pop projectiles
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
