@@ -16,6 +16,11 @@
 // _summonContentBottomFrac, and compares that against the pet's own hitbox foot line (y + h) - the
 // same line _allyPlatformStep lands it on. Draws are matched to owners by horizontal centre, so the
 // three skills are told apart.
+//
+// v0.30.x summon-plant (per user: "ensure that the summons do not appear as floating and their feet are all grounded on
+// the floor / platform"): the art is three-quarter view, so with the LOWEST paw on the line the far paws hung above the
+// floor (the werewolf's ~12 px). Each pet now sinks by its far paws' height (_LX_SUMMON_FAR_FOOT x its content height)
+// + 1 px, so the expected delta is that - not 0. The v0.30.749 complaint (far paws 7-10 px UNDER) stays excluded by TOL.
 //   node scripts/summon_grounding_test.mjs        MOJI_GAME_FILE / PORT
 import { createRequire } from 'node:module'; import path from 'node:path';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -114,20 +119,26 @@ try {
     }
     CanvasRenderingContext2D.prototype.drawImage = _orig;
     out.hits = hits;
+    const _key = { 'Wild Bond': 'wolf_alpha', 'Call of the Wild': 'wolf_alpha', 'Apex Bond': 'werewolf' };   // player.master = beastmaster
+    for (const h of hits) {
+      const k = _key[h.name], spr = LX_SUMMON[k], b = (typeof _spriteContentBox === 'function') ? _spriteContentBox(spr) : null;
+      const far = (typeof _LX_SUMMON_FAR_FOOT === 'object' && _LX_SUMMON_FAR_FOOT[k]) || 0;
+      h.exp = (far && b) ? Math.round(far * (b.bottom - b.top + 1) / (spr.naturalHeight || spr.height) * h.drawH) + 1 : 0;
+    }
     return out;
   });
   console.log(`build ${r.ver}   summons up: ${r.summoned}   shared wolf cap in use: ${r.cap}`);
-  for (const h of r.hits) console.log(`  ${h.name.padEnd(18)} drawH ${String(h.drawH).padStart(4)}   feet y=${h.feet}  floor y=${h.floor}  delta ${h.feet - h.floor >= 0 ? '+' : ''}${h.feet - h.floor}px`);
+  for (const h of r.hits) console.log(`  ${h.name.padEnd(18)} drawH ${String(h.drawH).padStart(4)}   feet y=${h.feet}  floor y=${h.floor}  delta ${h.feet - h.floor >= 0 ? '+' : ''}${h.feet - h.floor}px  (far-paw plant +${h.exp}px)`);
   const byName = (n) => r.hits.filter((h) => h.name === n);
   for (const n of ['Wild Bond', 'Call of the Wild', 'Apex Bond']) {
     const got = byName(n);
-    ok(`${n}: drawn on its foot line, not under it`,
-      got.length > 0 && got.every((h) => Math.abs(h.feet - h.floor) <= TOL),
-      got.length ? got.map((h) => (h.feet - h.floor >= 0 ? '+' : '') + (h.feet - h.floor) + 'px').join(', ') : 'never drawn');
+    ok(`${n}: planted by its far paws' height, so every paw meets the floor (not floating, not sunk)`,
+      got.length > 0 && got.every((h) => h.exp >= 2 && Math.abs(h.feet - h.floor - h.exp) <= TOL),
+      got.length ? got.map((h) => (h.feet - h.floor >= 0 ? '+' : '') + (h.feet - h.floor) + 'px vs +' + h.exp + 'px').join(', ') : 'never drawn');
   }
   ok('every wolf summon is level (none sunk, none floating)',
-    r.hits.length > 0 && r.hits.every((h) => Math.abs(h.feet - h.floor) <= TOL),
-    `${r.hits.length} drawn, worst ${r.hits.reduce((m, h) => Math.max(m, Math.abs(h.feet - h.floor)), 0)}px off`);
+    r.hits.length > 0 && r.hits.every((h) => h.exp >= 2 && Math.abs(h.feet - h.floor - h.exp) <= TOL),
+    `${r.hits.length} drawn, worst ${r.hits.reduce((m, h) => Math.max(m, Math.abs(h.feet - h.floor - h.exp)), 0)}px off the far-paw plant`);
   ok('the shared wolf cap is 5', r.cap === 5, `pet + pack = ${r.cap}`);
   ok('no page errors', errs.length === 0, errs.join(' | '));
 } finally { await browser.close(); server.kill(); }
