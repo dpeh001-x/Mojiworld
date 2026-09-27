@@ -65,16 +65,25 @@ try {
   ok('WALKING ticks step 1 ✅ (real key press through the input path)', afterMove.done === true && afterMove.tag === 'DONE', afterMove);
   ok('movement gate disarmed after the tick', afterMove.wantsMove === false, afterMove);
 
-  // Auto-advance lands on step 2 (attack). Fire the attack ping like the combat code does.
+  // v0.30.1186 — the tick no longer jumps after 1.1 s: it holds the step for
+  // a 15 s countdown shown on Next. Check it holds, counts, then auto-advances.
   await sleep(1400);
-  const s2 = await page.evaluate(() => ({ step: _tutStep, pill: (document.getElementById('tut-try') || {}).textContent || '' }));
-  ok('auto-advanced to step 2 (Move & Fight)', s2.step === 1, s2);
+  const hold = await page.evaluate(() => ({ step: _tutStep, next: document.getElementById('tut-next').textContent }));
+  ok('ticked step HOLDS past 1.4 s (no instant jump)', hold.step === 0, hold);
+  ok('Next shows the countdown', /\b1[0-4]s\b/.test(hold.next), hold);
+  await page.waitForFunction(() => _tutStep === 1, null, { timeout: 18000 }).catch(() => {});
+  const s2 = await page.evaluate(() => ({ step: _tutStep, next: document.getElementById('tut-next').textContent, pill: (document.getElementById('tut-try') || {}).textContent || '' }));
+  ok('auto-advanced to step 2 (Move & Fight) after 15 s', s2.step === 1, s2);
+  ok('Next label reset on the new step', !/\ds$/.test(s2.next.trim()), s2);
+  // Fire the attack ping like the combat code does.
   await page.evaluate(() => _tutPing('attack'));
   const s2done = await page.evaluate(() => (document.getElementById('tut-try') || {}).classList.contains('done'));
   ok('attack action ticks step 2 ✅', s2done === true);
 
-  // Step 3 (panels): the real U-panel opener pings 'panel'.
-  await sleep(1400);
+  // Step 3 (panels): the real U-panel opener pings 'panel'. Next skips the wait.
+  await sleep(600);
+  await page.evaluate(() => document.getElementById('tut-next').click());   // the .ready pulse never reads as 'stable' to page.click
+  await sleep(300);
   const s3 = await page.evaluate(() => ({ step: _tutStep }));
   ok('auto-advanced to step 3 (Menus & Panels)', s3.step === 2, s3);
   await page.evaluate(() => _tutPing('panel'));
