@@ -36,7 +36,7 @@ Reviewers can bookmark the stable preview build (whatever is currently under rev
 
 For players who want the game on disk: grab
 **`Mojiworld-vX.Y.Z-windows-portable.zip`** from
-[**Releases**](https://github.com/dpeh001-x/Mojiworld/releases) (first release coming soon), unzip the
+[**Releases**](https://github.com/dpeh001-x/Mojiworld/releases/latest) (latest: [portable-v0.30.1256](https://github.com/dpeh001-x/Mojiworld/releases/tag/portable-v0.30.1256)), unzip the
 whole folder anywhere, and double-click **`Mojiworld.cmd`**. The browser opens
 the game — that is the entire install. No Node, no runtime, no admin: the zip
 bundles the official signed Node.js runtime, so the launch chain is
