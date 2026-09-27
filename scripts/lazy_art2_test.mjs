@@ -114,7 +114,7 @@ try {
     while (performance.now() - t0 < 45000 && !sweep && same < 25) { await new Promise((r) => setTimeout(r, 100)); if (asked.length === last) same++; else { same = 0; last = asked.length; } }
     window._lxWarmMap = O.w; window._lxStreamMonWorld = O.m;
     const ok = new Set([here].concat(nbs));
-    return { here, neighbours: nbs.length, asked: asked.length, outside: asked.filter((id) => !ok.has(id)).length, monsterSweep: sweep };
+    return { here, neighbours: nbs.length, asked: asked.length, outside: asked.filter((id) => !ok.has(id)).length, monsterSweep: sweep, nbs, outsideIds: asked.filter((id) => !ok.has(id)), nowOn: game.currentMap };
   });
   console.log('streamer: ' + JSON.stringify(st));
   check(st.asked > 0 && st.outside === 0 && !st.monsterSweep, `the world streamer warms only this map and its ${st.neighbours} portal neighbours (asked ${st.asked}, ${st.outside} beyond; every-monster sweep: ${st.monsterSweep})`, st);
