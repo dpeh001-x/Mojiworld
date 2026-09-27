@@ -225,7 +225,8 @@
 // v0.30.1274 - v91 -> v92. v0.30.1274 - edge-fixed projectiles: 35 sets tapered or inset (same names)
 // v0.30.x region-pop - v92 -> v93. all 83 Sprites/world/regions icons are REPLACED under their own names (pop-punk redraw, matched to
 // each map's monsters), so a returning browser would otherwise keep the old icons until its cache refreshed.
-const CACHE = 'mojiworld-assets-v93';   // v0.30.x region-pop - the 83 pop-punk area icons (same names)
+// v0.30.1277 - v93 -> v94. Sprites/fx/anim/forge_success_0..8, forge_fail_0..8 and Sprites/fx/forge_success.webp are REPLACED under their own names (HD forge animation)
+const CACHE = 'mojiworld-assets-v94';   // v0.30.1277 - HD forge animation
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

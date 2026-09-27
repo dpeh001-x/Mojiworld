@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1276';
+const GAME_VERSION = 'v0.30.1277';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -114567,18 +114567,50 @@ function _afterForgeFx(fn) {
     try { fn(); } catch (e) {}
   }, _FORGE_FX_MS);
 }
+// v0.30.1277 - _lxForgeFxCanvas: the frames are KEPT (they used to be fire-and-forget
+// Image objects, free to be collected and their decode dropped) and decode()d up
+// front; the player draws them to a canvas, which cannot paint a blank frame the
+// way a background-image URL swap does while a 1024 px image decodes.
 const _forgeFxPreloaded = {};
 function _preloadForgeFx(kind) {
-  if (_forgeFxPreloaded[kind]) return;
-  _forgeFxPreloaded[kind] = true;
-  for (let i = 0; i < 9; i++) { const im = new Image(); im.src = 'Sprites/fx/anim/forge_' + kind + '_' + i + '.webp'; }
+  if (_forgeFxPreloaded[kind]) return _forgeFxPreloaded[kind];
+  const arr = [];
+  for (let i = 0; i < 9; i++) {
+    const im = new Image(); im.decoding = 'async';
+    im.src = 'Sprites/fx/anim/forge_' + kind + '_' + i + '.webp';
+    if (im.decode) im.decode().catch(() => {});
+    arr.push(im);
+  }
+  return (_forgeFxPreloaded[kind] = arr);
+}
+// Frame geometry, measured off the v0.30.1277 frames by the build: the resting anvil's
+// width and vertical centre, and the highest ink any frame reaches (fractions of the square).
+const _FORGE_FX_ANVIL_W = 0.686, _FORGE_FX_ANVIL_CY = 0.79, _FORGE_FX_TOP = 0.234;
+// The canvas lives inside the overlay and is sized from the box computed at play
+// time (el._forgeD = drawn frame, el._forgeBH = box height), at up to 2x DPR.
+function _forgeFxCanvas(el) {
+  let cv = el.querySelector('canvas.forge-fx-cv');
+  if (!cv) { cv = document.createElement('canvas'); cv.className = 'forge-fx-cv'; cv.style.cssText = 'display:block;width:100%;height:100%;'; el.appendChild(cv); }
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const D = el._forgeD || el.clientWidth || 224, BH = el._forgeBH || el.clientHeight || 198;
+  cv.width = Math.round(D * dpr); cv.height = Math.round(BH * dpr); cv._D = D * dpr;
+  return cv;
+}
+// Draws frame f with the art's top at the box top. A frame that has not decoded
+// is SKIPPED - the last good frame holds - instead of painting nothing.
+function _forgeFxDraw(cv, frames, f) {
+  const im = frames && frames[f];
+  if (!im || !im.complete || !im.naturalWidth) return false;
+  const c = cv.getContext('2d'), D = cv._D;
+  c.clearRect(0, 0, cv.width, cv.height);
+  c.drawImage(im, 0, -_FORGE_FX_TOP * D, D, D);
+  return true;
 }
 function _playForgeFxAnim(kind) {
   const el = document.getElementById('enhance-forge-fx');
   if (!el) return;
   _preloadForgeFx(kind);
   if (_forgeFxTimer) { clearInterval(_forgeFxTimer); _forgeFxTimer = null; }
-  const base = 'Sprites/fx/anim/forge_' + kind + '_';
   // v0.26.x — Lift the result animation ABOVE the toast layer. Toasts live in
   // #toast-container at z-index 400, a SIBLING of the modal-overlay (z-index
   // 100). Because #enhance-forge-fx is trapped inside that z-100 stacking
@@ -114591,29 +114623,39 @@ function _playForgeFxAnim(kind) {
   const modalPanel = document.querySelector('#enhance-modal .modal');
   if (modalPanel) {
     const r = modalPanel.getBoundingClientRect();
-    const sz = Math.max(60, Math.round(r.width * 0.30));   // ~30% of modal width, scale-aware
+    // v0.30.1277 - ENLARGED (per user). D is the drawn frame, sized so the ANVIL draws at
+    // 30% of the modal width (it was ~23%), whatever share of the frame it fills. The
+    // box is cropped to the art's own top and extended below so the ANVIL - not the
+    // empty headroom above it - lands on the modal centre, and D is clamped so the
+    // tallest spark still fits inside the viewport rather than being cut by it.
+    const _cyM = r.top + r.height / 2;
+    const _up = _FORGE_FX_ANVIL_CY - _FORGE_FX_TOP;               // art above the anvil centre, in D
+    let D = Math.round(r.width * 0.30 / _FORGE_FX_ANVIL_W);
+    D = Math.max(60, Math.min(D, Math.floor((_cyM - 6) / _up)));
+    const sz = D, _bh = Math.round(2 * _up * D);
     if (!el._forgeHome) el._forgeHome = el.parentElement;
     if (el.parentElement !== document.body) document.body.appendChild(el);
     el.style.position = 'fixed';
     el.style.zIndex = '600';                               // above --moji-z-toast (400)
     el.style.width = sz + 'px';
-    el.style.height = sz + 'px';
+    el.style.height = _bh + 'px';
     // v0.30.x - CENTRED, both axes (per user: "central positioning of the
     // animation"). It was pinned to the top of the modal and nudged 10px right,
     // which put a smoking anvil squarely over the modal's own title - the user's
     // screenshot shows "Enhan____Forge" with the middle of the word behind smoke.
     el.style.left = Math.round(r.left + r.width / 2 - sz / 2) + 'px';
-    el.style.top  = Math.round(r.top + r.height / 2 - sz / 2) + 'px';
+    el.style.top  = Math.round(_cyM - _bh / 2) + 'px';
+    el._forgeD = D; el._forgeBH = _bh;
     el.style.transform = 'none';
-    el.style.backgroundSize = 'contain';
-    el.style.backgroundRepeat = 'no-repeat';
-    el.style.backgroundPosition = 'center center';
+    el.style.backgroundImage = 'none';
     el.style.pointerEvents = 'none';
     el.style.filter = 'drop-shadow(0 0 18px rgba(255,200,90,0.45))';
   }
   const _restore = () => {
     el.style.display = 'none';
     el.style.backgroundImage = 'none';
+    const _cv = el.querySelector('canvas.forge-fx-cv');
+    if (_cv) _cv.getContext('2d').clearRect(0, 0, _cv.width, _cv.height);
     if (el._forgeHome) {
       el._forgeHome.appendChild(el);
       el._forgeHome = null;
@@ -114622,7 +114664,8 @@ function _playForgeFxAnim(kind) {
   };
   let f = 0;
   el.style.display = 'block';
-  el.style.backgroundImage = 'url("' + base + '0.webp")';
+  const _frames = _preloadForgeFx(kind), _cvs = _forgeFxCanvas(el);
+  _forgeFxDraw(_cvs, _frames, 0);
   _forgeFxTimer = setInterval(() => {
     // v0.30.x - STOP IF THE FORGE IS GONE. This element is reparented to <body>
     // and positioned `fixed` so it can out-rank the toast layer, which means
@@ -114637,7 +114680,7 @@ function _playForgeFxAnim(kind) {
     }
     f++;
     if (f > _FORGE_FX_FRAMES - 1) { clearInterval(_forgeFxTimer); _forgeFxTimer = null; _restore(); return; }
-    el.style.backgroundImage = 'url("' + base + f + '.webp")';
+    _forgeFxDraw(_cvs, _frames, f);
   }, _FORGE_FX_FRAME_MS);
 }
 function _playForgeAnim(kind) {
