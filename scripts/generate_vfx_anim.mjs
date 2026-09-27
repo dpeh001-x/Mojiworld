@@ -8,7 +8,7 @@
 // baked-in transform would double up. Output -> Sprites/vfx/anim/<key>_0..8.webp
 //
 //   node scripts/generate_vfx_anim.mjs                       # dry-run list
-//   node scripts/generate_vfx_anim.mjs --only quake_ring --generate
+//   node scripts/generate_vfx_anim.mjs --only poison_cloud --generate
 //   node scripts/generate_vfx_anim.mjs --generate            # all 9
 // Needs LUDO_API_KEY. Resumable: skips a VFX whose 9 frames already exist.
 import sharp from 'sharp';
@@ -34,7 +34,6 @@ const VFX = {
   lava_pool:       { file: 'lava_pool.webp',       prompt: 'a molten lava layer seen from the side — the glowing surface bubbles pop and ripple, molten orange-yellow highlights slide across it, and small embers rise off the top.' },
   lightning_pillar:{ file: 'lightning_pillar.webp',prompt: 'a vertical lightning bolt column — bright electric-blue and white arcs crackle, fork and snap along its length, sparks flicker off it, and the energized core pulses brighter and dimmer.' },
   poison_cloud:    { file: 'poison_cloud.webp',    prompt: 'a floating toxic-green poison gas cloud — the cloud gently billows and roils, glossy green bubbles swell and pop, wisps of vapour curl and rise, and a sickly green glow pulses.' },
-  quake_ring:      { file: 'quake_ring.webp',      prompt: 'a billowing dust-and-smoke earthquake burst — the tan and grey dust clouds churn and roll, small pebbles jitter and shake, and faint dust motes drift outward (in-place churn, no expansion).' },
   shock_ring:      { file: 'shock_ring.webp',      prompt: 'a translucent shockwave ring — energy pulses and ripples around the ring, a faint air-distortion shimmer flickers across it, and light crackles along its rim (in-place pulse, no expansion).' },
   cloudburst:      { file: 'cloudburst.webp',      prompt: 'a small cartoon storm raincloud seen from the side — the cloud puff gently billows and swells as if breathing, the raindrops beneath it streak downward and fresh droplets keep falling in a continuous seamless loop, and a faint cyan spark flickers inside the cloud body.' },
 };

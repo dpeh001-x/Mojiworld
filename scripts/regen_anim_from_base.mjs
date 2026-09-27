@@ -99,9 +99,6 @@ const TARGETS = {
   cloudburst: { base: 'Sprites/vfx/cloudburst.webp', dir: 'Sprites/vfx/anim',
     motion: 'The cloud burst blooms outward from nothing: it swells and billows rapidly, churning and rolling as it expands, ' +
       'then thins and dissipates into wisps that fade away at the edges.' },
-  quake_ring: { base: 'Sprites/vfx/quake_ring.webp', dir: 'Sprites/vfx/anim',
-    motion: 'The shockwave ring expands outward from the centre: the ring grows steadily wider and thinner as it travels, ' +
-      'dust and debris kick up along its leading edge, and the whole ring fades as it spreads.' },
   // v0.30.x — Doombringer's homing doom-fire. The key IS the anim key: frames
   // land as Sprites/projectiles/anim/p_doom_fireball_0..8.webp, which is what
   // _projAnimFrame('p_doom_fireball') loads for the bult_doomfire sprite.
