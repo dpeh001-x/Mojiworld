@@ -18,13 +18,13 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 const WANT = {
   skyGarden: [
-    { x: 100, dest: 'azureAcademia', name: '◀ The Azure Academia' },
+    { x: 100, dest: 'cloudstepIsles', name: '◀ Cloudstep Isles' },   // new-maps: Cloudstep Isles now lies between the Academia and the Garden
     { x: 2184, dest: 'frostbiteHollow', name: '◀ Frostbite Hollow', y: 337 },
   ],
   forest: [
     { x: 211, y: 480, dest: 'town', name: '▶ Everdawn Central' },
     { x: 1939, dest: 'mushroom', name: '◀ Fungal Hollow', y: 476 },
-    { x: 3014, y: 480, dest: 'azureAcademia', name: '◀ The Azure Academia' },
+    { x: 3014, y: 480, dest: 'glimmerwood', name: '▶ Glimmerwood' },   // new-maps: Glimmerwood now lies between the Thicket and the Academia
   ],
   ancient: [
     { x: 2600, dest: 'wildflowerPlains', name: '▶ Wildflower Plains' },

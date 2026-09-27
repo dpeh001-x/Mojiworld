@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// DJ Vinyl's console: one icon per BGM (46), plus the console's little drift-car badge.
+// DJ Vinyl's console: one icon per BGM (47), plus the console's little drift-car badge.
 // =============================================================================
 // Per user: "make the jukebox design WAY more hip popular and stylish with drift phonk vibes, make sure that each BGM
 // also has a unique icon, make it like DJ console concept where each button on the DJ console plays a specific music",
@@ -56,6 +56,7 @@ export const SUBJECTS = {
   fungalHollow:    'A cute red mushroom with white spots',
   sunsetCoast:     'A big glowing orange and pink sun setting into calm sea waves',   // v2 - v1 drew only the palm, too close to the lagoon
   skyGarden:       'A floating grassy island with flowers and a tiny waterfall',
+  cloudstepIsles:  'A little staircase of fluffy pink clouds rising to a small floating icy-blue rock island',   // new-maps: the old Glasswind theme, back as Cloudstep Isles
   stormCrest:      'A dark thundercloud with a bright yellow lightning bolt',
   candyCanyon:     'A big rainbow swirl lollipop',
   tidalLagoon:     'A tiny sandy island with one palm tree in a turquoise lagoon',

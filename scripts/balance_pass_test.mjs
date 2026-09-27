@@ -61,7 +61,7 @@ const tables = await page.evaluate(() => ({
 }));
 ok('town portals match the Ctrl-editor bake exactly',
   JSON.stringify(tables.portals) === JSON.stringify([
-    { x: 153, y: 480, dest: 'bastion', name: '🏰 The Bastion — Courtyard' },
+    { x: 153, y: 480, dest: 'cadetsStrand', name: "◀ Cadet's Strand" },   // new-maps: Cadet's Strand now lies between Everdawn and the Bastion
     { x: 1479, dest: 'everdawn_megamall', name: '⬥ Everdawn Megamall', y: 480 },
     { x: 2735, y: 480, dest: 'forest', name: '◀ Emerald Thicket' },
   ]), JSON.stringify(tables.portals));

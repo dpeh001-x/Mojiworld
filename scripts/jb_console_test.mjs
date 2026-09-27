@@ -32,7 +32,7 @@ for (const id of [...IDS, 'jb_badge']) {
 }
 const dupes = [...art.hashes.values()].filter((v) => v.length > 1);
 console.log(`catalogue: ${IDS.length} tracks | icons missing ${JSON.stringify(art.missing)} wrong ${JSON.stringify(art.wrong)} duplicated ${JSON.stringify(dupes)}`);
-check(IDS.length === 46 && art.missing.length === 0, 'every one of the 46 tracks has its own icon file, and the console has its badge', art.missing);
+check(IDS.length === 47 && art.missing.length === 0, 'every one of the 47 tracks has its own icon file, and the console has its badge', art.missing);   // new-maps: + Cloudstep Isles
 check(art.wrong.length === 0, 'each icon is a 256 px square on a transparent background', art.wrong);
 check(dupes.length === 0 && art.hashes.size === IDS.length + 1, 'no two tracks share an icon', dupes);
 
@@ -109,8 +109,8 @@ try {
     const tracks = r.tracks;
     console.log('zones', JSON.stringify(r.zones.map((z) => z.key + ':' + z.n)), '| play', JSON.stringify(r.play), '| stop', JSON.stringify(r.stop));
     console.log('shuffle', r.shuffle.map((x) => x.id).join(','), '| vol', JSON.stringify(r.volKeys), 'down', r.volDown, 'saved', r.volSaved, '| layout', JSON.stringify(r.layout), '| closed', JSON.stringify(r.closed));
-    check(r.pads === 46 && r.zones.length === 4 && r.zones.map((z) => z.key).join('') === 'ABCD' && r.zones.every((z, i) => z.n === tracks[i]), 'one pad per track, 46, in four colour zones A-D (towns 8, wilds 26, cosmic 7, bosses 5)', r.zones.map((z) => [z.key, z.n]));
-    check(r.zones.every((z) => z.keys.every((k, i) => k === z.key + (i + 1))), 'the pads are numbered like a pad bank: A1..A8, B1..B26, C1..C7, D1..D5', r.zones.map((z) => z.keys.slice(0, 3)));
+    check(r.pads === 47 && r.zones.length === 4 && r.zones.map((z) => z.key).join('') === 'ABCD' && r.zones.every((z, i) => z.n === tracks[i]), 'one pad per track, 47, in four colour zones A-D (towns 8, wilds 27, cosmic 7, bosses 5)', r.zones.map((z) => [z.key, z.n]));
+    check(r.zones.every((z) => z.keys.every((k, i) => k === z.key + (i + 1))), 'the pads are numbered like a pad bank: A1..A8, B1..B27, C1..C7, D1..D5', r.zones.map((z) => z.keys.slice(0, 3)));
     check(r.icons.every((x) => x.src === `Sprites/ui/jukebox/${x.id}.webp` && x.ok) && new Set(r.icons.map((x) => x.src)).size === r.icons.length, 'every found pad shows its own track\'s icon, loaded', r.icons.filter((x) => !x.ok || x.src !== `Sprites/ui/jukebox/${x.id}.webp`));
     check(r.locked.length === r.lockedWant.length && r.locked.every((l) => l.lock && l.text.includes('???')) && r.leak.length === 0, 'an undiscovered track keeps its pad with a padlock and "???" - its name is not given away', { locked: r.locked.length, want: r.lockedWant.length, leak: r.leak });
     check(r.play.lit.join() === 'frozenPeak' && r.play.live && r.play.spin === 'running' && r.play.label === 'Sprites/ui/jukebox/frozenPeak.webp' && r.play.title === 'Frozen Peak' && r.play.src.endsWith('bgm_frozen_peak.mp3') && !r.play.idle,
