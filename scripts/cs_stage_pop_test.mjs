@@ -37,6 +37,9 @@ ok('a pronounced floor: starts at the horizon (y 300), boards to a vanishing poi
 // cs-stage7 (per user: "the podium especially the shadow on the podium looks weird, please rectify, push the character
 // vertically up slightly")
 ok('the podium has soft shadows - no hard offset block under the drum, a soft contact shadow under the feet', !svg.includes('transform="translate(6 8)"') && svg.includes('fill="url(#podShadow)"') && svg.includes('fill="url(#contact)"') && svg.includes('<ellipse cx="200" cy="330" rx="122" ry="22" fill="url(#top)"'));
+// cs-stage8 (per user, on a crop of the feet: "add a suitable sized shadow ellipse to make it look realistic")
+const core = /<ellipse cx="([0-9.]+)" cy="([0-9.]+)" rx="([0-9.]+)" ry="([0-9.]+)" fill="url\(#contactCore\)"/.exec(svg);
+ok('a realistic contact shadow: a dark core under the soles, wider than the feet (x 175-222, soles at y 332.6)', !!core && Math.abs(+core[1] - 198.5) < 2 && +core[2] >= 332 && +core[2] <= 337 && +core[1] - +core[3] < 170 && +core[1] + +core[3] > 228 && svg.includes('fill="url(#contact)"'), core && core.slice(1));
 ok('not cluttered: no posters, graffiti or brickwork, two sparkles', !svg.includes('clipPath id="pc') && !svg.includes('stroke-width="9"') && !svg.includes('wallm') && (svg.match(/d="M0,-12L2\.6,-2\.6/g) || []).length === 2);
 ok('no caution tape stripes', !/repeating-linear|#ffe07a" fill-opacity/.test(svg));
 

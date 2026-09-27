@@ -14,6 +14,10 @@
 //   character vertically up slightly". The figure now stands 5% higher (CSS), so the podium rises to meet the feet (top at
 //   y 330, was 344); its hard ink offset block becomes a soft shadow on the floor under the drum, and the contact shadow is
 //   a soft gradient centred exactly under the feet instead of a solid ink disc behind them.
+//   final-polish cs-stage8 (per user, on a crop of the feet): "add a suitable sized shadow ellipse to make it look realistic".
+//   Measured from the preview canvas's own pixels, at 1280x720 and on an 842x325 phone alike: the feet end at y 332.6 and
+//   span x 175-222 in these units. So the contact shadow is two ellipses centred there: a wide soft ambient one, and a dark
+//   tight core wider than the feet and their white edge, centred at the soles so it shows round and in front of them - the way a real contact shadow is darkest where the soles touch.
 //   node scripts/gen_cs_stage_svg.cjs [out.svg]
 const fs = require('fs');
 const OUT = process.argv[2] || require('path').join(__dirname, '..', 'Sprites', 'ui', 'cs', 'stage_pop.svg');
@@ -41,6 +45,8 @@ for (let i = 0; i < 24; i += 2) {
 // podium: a drum seen from slightly above - top ellipse at y 344, front face down to y 376
 const PX = 200, PY = 330, RX = 122, RY = 22, H = 30;   // cs-stage6 - narrower (was 142 / 24 / 32); cs-stage7 - raised with the figure (PY was 344)
 const face = `M${PX - RX},${PY}L${PX - RX},${PY + H}A${RX},${RY} 0 0 0 ${PX + RX},${PY + H}L${PX + RX},${PY}A${RX},${RY} 0 0 1 ${PX - RX},${PY}Z`;
+// where the hero's feet land, measured from the preview canvas (see cs-stage8 above)
+const FEET_X = 198.5, FEET_Y = 332.6;
 let ticks = '';
 for (let x = PX - RX + 12; x < PX + RX; x += 16) ticks += `<rect x="${x}" y="${PY - 30}" width="5" height="${H + 64}"/>`;
 // an amp stack: cabinet with a slatted grille and one big cone, a head on top with a row of knobs (short bars, not dots)
@@ -101,7 +107,8 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" prese
 <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8a6aa0"/><stop offset=".3" stop-color="#5c4274"/><stop offset="1" stop-color="#22152e"/></linearGradient>
 <radialGradient id="floorPool" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ffe9f5" stop-opacity=".42"/><stop offset=".6" stop-color="#ffd8ec" stop-opacity=".14"/><stop offset="1" stop-color="#ffd8ec" stop-opacity="0"/></radialGradient>
 <radialGradient id="podShadow" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#0d0a14" stop-opacity=".62"/><stop offset=".7" stop-color="#0d0a14" stop-opacity=".3"/><stop offset="1" stop-color="#0d0a14" stop-opacity="0"/></radialGradient>
-<radialGradient id="contact" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#2a1530" stop-opacity=".55"/><stop offset=".6" stop-color="#2a1530" stop-opacity=".22"/><stop offset="1" stop-color="#2a1530" stop-opacity="0"/></radialGradient>
+<radialGradient id="contact" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#2a1530" stop-opacity=".45"/><stop offset=".6" stop-color="#2a1530" stop-opacity=".26"/><stop offset="1" stop-color="#2a1530" stop-opacity="0"/></radialGradient>
+<radialGradient id="contactCore" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#12081a" stop-opacity=".85"/><stop offset=".72" stop-color="#12081a" stop-opacity=".62"/><stop offset="1" stop-color="#12081a" stop-opacity="0"/></radialGradient>
 <clipPath id="floorClip"><rect y="300" width="400" height="100"/></clipPath>
 <linearGradient id="top" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6d3e8"/><stop offset=".45" stop-color="#d59ac4"/><stop offset="1" stop-color="#9c5aa0"/></linearGradient>
 <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d4508c"/><stop offset=".6" stop-color="#a8366f"/><stop offset="1" stop-color="#6e1f4a"/></linearGradient>
@@ -141,7 +148,8 @@ ${amp(-18, false)}${amp(342, true)}
 <ellipse cx="${PX}" cy="${PY}" rx="${RX - 22}" ry="${RY - 6}" fill="none" stroke="#fff" stroke-opacity=".38" stroke-width="2.5"/>
 <ellipse cx="${PX}" cy="${PY}" rx="86" ry="15" fill="url(#pool)"/>
 <path d="M${PX - RX + 26},${PY - 13}A${RX - 10},${RY - 5} 0 0 1 ${PX + RX - 26},${PY - 13}" fill="none" stroke="url(#gloss)" stroke-width="3" stroke-linecap="round"/>
-<ellipse cx="${PX}" cy="${PY + 1}" rx="38" ry="8" fill="url(#contact)"/>
+<ellipse cx="${FEET_X}" cy="${FEET_Y + 2.5}" rx="58" ry="12" fill="url(#contact)"/>
+<ellipse cx="${FEET_X}" cy="${FEET_Y + 2}" rx="38" ry="8" fill="url(#contactCore)"/>
 <!-- stickers: a butter star and a berry star, hard shadows, ink outlines; sparkles -->
 <path d="${star(78, 86, 25, 11, -14)}" transform="translate(5 5)" fill="${INK}"/>
 <path d="${star(78, 86, 25, 11, -14)}" fill="#ffe07a" stroke="${INK}" stroke-width="4.5" stroke-linejoin="round"/>
