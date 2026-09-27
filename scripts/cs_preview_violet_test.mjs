@@ -30,6 +30,10 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const sharp = require('sharp'); sharp.cache(false);
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
+// v0.30.x final-polish (cs-stage) - per user the violet alcove plate this suite pins was replaced by a built pop-punk stage
+// ("Remake the background behind the character ... do not use polkadots"). scripts/cs_stage_pop_test.mjs guards the stage now;
+// this suite still runs against any build from before that change.
+if (readFileSync(path.join(ROOT, FILE), 'utf8').includes('final-polish (cs-stage)')) { console.log('SKIP  superseded by cs_stage_pop_test (the violet plate was replaced per user)'); process.exit(0); }
 const SHOT = path.join(ROOT, 'scripts', '_cs_test_shot.png');
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 210) });
