@@ -26,7 +26,7 @@ ok('...and it stands at the turret, turret-sized, turning with the caster', g.in
   && !g.includes("player.y + player.h / 2, 'ballista_ult'"));
 ok('the other skill bursts are drawn 1.35x bigger', g.includes('{ size: first ? 405 : 203,') && g.includes("{ size: 378, life: 42, spin: 0 });") && g.includes("{ size: 324, life: 56, spin: 0 });") && g.includes("'skyhunter_ult', { size: 378, life: 90, spin: 0.5 });"));
 ok('the volley flips with its caster or turret instead of rotating upside down', !/'ballista_volley',[\s\S]{0,40}angle: (player|tu)\.facing > 0 \? 0 : Math\.PI/.test(g)
-  && g.includes("'ballista_volley', { size: 240, life: 22, flipX: tu.facing < 0 });") && (g.match(/size: 432, life: 28, flipX: player\.facing < 0 \}/g) || []).length === 2);
+  && g.includes("'ballista_volley', { size: 324, life: 22, flipX: tu.facing < 0 });") && (g.match(/size: 432, life: 28, flipX: player\.facing < 0 \}/g) || []).length === 2);
 ok('the marksman bow sits on the canvas shape its spawn squeezes to (452x756 still, 560x938 frames)', await (async () => {
   const a = await sharp(path.join(ROOT, 'Sprites/fx/marksman_oneshot.webp')).metadata(), b = await sharp(path.join(ROOT, 'Sprites/fx/anim/marksman_oneshot_0.webp')).metadata();
   return a.width === 452 && a.height === 756 && b.width === 560 && b.height === 938; })());
