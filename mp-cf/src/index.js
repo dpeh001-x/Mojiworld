@@ -165,7 +165,8 @@ export default {
       // Object, so one busy party no longer queues behind every other. The shipped game still dials the bare URL and
       // names its room only in 'hello' - after the socket is bound to a DO, and a WebSocket cannot move between DOs -
       // so those sockets, and the whole /api (accounts, tokens, saves), stay on 'global' with every stored key in place.
-      const room = url.pathname.startsWith('/api/') ? null : roomParam(url);
+      // mp-room-route (2026-09-27) - ROOM_DO = "0" (a wrangler var): every socket to 'global' again, ?room= or not
+      const room = (url.pathname.startsWith('/api/') || /^(0|false|off)$/i.test(String((env && env.ROOM_DO) || ''))) ? null : roomParam(url);
       return env.ROOMS.get(env.ROOMS.idFromName(room ? 'room:' + room : 'global')).fetch(request);
     }
     return new Response('Mojiworld MP (Durable Object). WebSocket relay + /api/{register,login,save}.\n', {
@@ -183,6 +184,9 @@ export class MojiRoom {
     this.nextId = 1;
     // mp-relay (2026-09-27) - tunables: the defaults at the top, or a wrangler [var] of the same name within bounds
     const e = env || {};
+    // mp-room-route (2026-09-27) - who this DO is: the saved positions live on 'global' (see _posGet)
+    this.env = e;
+    try { this._isGlobal = !(e.ROOMS && state.id && state.id.equals) || state.id.equals(e.ROOMS.idFromName('global')); } catch (_) { this._isGlobal = true; }
     const num = (k, d, lo, hi) => { const n = Number(e[k]); return (e[k] != null && e[k] !== '' && n >= lo && n <= hi) ? n : d; };
     this.cap = Math.floor(num('ROOM_CAP', ROOM_CAP, 2, 64));
     this.lobbyCap = Math.floor(num('LOBBY_CAP', LOBBY_CAP, 2, 500));
@@ -211,6 +215,8 @@ export class MojiRoom {
   }
 
   async fetch(request) {
+    // mp-room-route (2026-09-27) - the saved-position store, DO to DO only: the Worker never forwards /__pos (only upgrades and /api/*)
+    if (request.headers.get('Upgrade') !== 'websocket' && new URL(request.url).pathname === '/__pos') return this._posApi(request);
     if (request.headers.get('Upgrade') !== 'websocket') return this.handleApi(request);
     const pair = new WebSocketPair();
     const client = pair[0], ws = pair[1];
@@ -270,7 +276,7 @@ export class MojiRoom {
         const st = pick(msg, { id: conn.id });
         this.room(conn.roomId).set(conn.id, { ws, st, tok: token });
         this._att(ws, conn, now);   // mp-relay (2026-09-27) - who this socket is, for after a hibernation
-        const you = conn.token ? (await this.storage.get(saveKey(conn))) || null : null;
+        const you = conn.token ? await this._posGet(conn) : null;   // mp-room-route (2026-09-27) - from 'global', whichever DO this is
         const others = [];
         for (const [oid, c] of this.rooms.get(conn.roomId)) if (oid !== conn.id) others.push(c.st);
         ws.send(JSON.stringify({ t: 'welcome', id: conn.id, room: conn.roomId, players: others, you }));
@@ -308,7 +314,7 @@ export class MojiRoom {
       if (me && me.ws === ws) {
         // mp-relay (2026-09-27) - the save on leave, skipped when the periodic save already holds this exact record
         const rec = saveOf(me.st);
-        if (conn.token && aliveSt(me.st) && fnv(JSON.stringify(rec)) !== conn.svh) { try { await this.storage.put(saveKey(conn), rec); } catch (_) {} }
+        if (conn.token && aliveSt(me.st) && fnv(JSON.stringify(rec)) !== conn.svh) { try { await this._posPut(conn, rec); } catch (_) {} }   // mp-room-route (2026-09-27)
         m.delete(conn.id);
         this.broadcast(conn.roomId, { t: 'left', id: conn.id }, conn.id);
         if (m.size === 0) this.rooms.delete(conn.roomId);
@@ -344,6 +350,38 @@ export class MojiRoom {
     try { ws.send(JSON.stringify({ t: 'error', code, message })); } catch (_) {}
     try { ws.serializeAttachment({ closed: 1 }); } catch (_) {}
     try { ws.close(4001, code); } catch (_) {}
+  }
+
+  // mp-room-route (2026-09-27) - "respawn where you logged off" records (save:<token>:<room id>) live on 'global' for every DO. A per-room
+  // DO (?room=) used to keep them in its own storage: moving a room off 'global' lost every record it held there once, and
+  // a party on older (bare URL) and newer builds kept two diverging copies. Now a per-room DO reads / writes them on
+  // 'global' (DO to DO); 'global' itself uses its storage as before.
+  async _posGet(conn) {
+    const k = saveKey(conn);
+    if (this._isGlobal) return (await this.storage.get(k)) || null;
+    try {
+      const j = await Promise.race([this._posCall({ k }), new Promise((res) => setTimeout(() => res(null), 3000))]);
+      return (j && j.rec) || null;   // no answer in 3 s: no restore this time (as for a new player)
+    } catch (_) { return null; }
+  }
+  async _posPut(conn, rec) {
+    const k = saveKey(conn);
+    if (this._isGlobal) return this.storage.put(k, rec);
+    const j = await this._posCall({ k, rec, put: 1 });
+    if (!j || !j.ok) throw new Error('position not saved');
+  }
+  async _posCall(body) {
+    const g = this.env.ROOMS.get(this.env.ROOMS.idFromName('global'));
+    const r = await g.fetch('https://global.do/__pos', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return r.json();
+  }
+  async _posApi(request) {   // mp-room-route (2026-09-27) - on 'global': { k } -> { rec }, { k, rec, put } -> stored
+    if (!this._isGlobal) return jsonResp({ ok: false, error: 'not global' }, 404);
+    let b; try { b = await request.json(); } catch (_) { b = null; }
+    const k = String((b && b.k) || '');
+    if (!/^save:/.test(k) || k.length > 200) return jsonResp({ ok: false, error: 'bad key' }, 400);
+    if (b.put) { await this.storage.put(k, b.rec); return jsonResp({ ok: true }); }
+    return jsonResp({ ok: true, rec: (await this.storage.get(k)) || null });
   }
 
   // mp-relay (2026-09-27) - rebuild one socket's player from its attachment (a DO woken from hibernation)
@@ -391,7 +429,7 @@ export class MojiRoom {
       if (me && aliveSt(me.st) && now - conn.svAt >= this.saveMs) {
         const rec = saveOf(me.st), h = fnv(JSON.stringify(rec));
         conn.svAt = now;
-        if (h !== conn.svh) { conn.svh = h; this.storage.put(saveKey(conn), rec).catch(() => {}); }
+        if (h !== conn.svh) { conn.svh = h; gone.push(this._posPut(conn, rec).catch(() => {})); }   // mp-room-route (2026-09-27) - awaited below
         this._att(ws, conn, now);
       }
     }

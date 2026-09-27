@@ -103,6 +103,15 @@ server-side but not yet applied on login.
   checked against `CSAVE_CAP` as before. `/api/save` answers carry `"gz":1`; the game gzips only toward a relay that
   said so, so an older deploy is never sent a gzipped body. **Needs a `wrangler deploy` to take effect.**
 
+## The game dials `?room=` (mp-room-route, 2026-09-27)
+
+- The game now dials `wss://<host>/?room=<room id>` (the exact room it names in `hello`), so each party code and lobby
+  channel gets its own Durable Object; every room / channel switch is a fresh connect. `/api` stays on `global`.
+- "Respawn where you logged off" records (`save:<token>:<room id>`) stay on `global`: a per-room DO reads and writes them
+  there (DO-to-DO `POST /__pos`, never forwarded from outside), so no record is lost or split when a room moves DOs.
+- `ROOM_DO = "0"` (wrangler var) routes every socket to `global` again. Two builds of one party only meet on the same DO:
+  an older client (bare URL) lands on `global`, a newer one on the room's DO. **Needs a `wrangler deploy`.**
+
 ## Files
 
 | File | Role |

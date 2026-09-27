@@ -305,10 +305,12 @@ async function gamePart(relayBase, RUN) {
   const srv = spawn(process.execPath, [REPO + '/serve.js', String(GP)], { stdio: 'ignore', cwd: REPO });
   cleanup.push(() => srv.kill());
   const party = [];   // five players already in the party
-  for (let i = 0; i < 5; i++) { const c = sock(relayBase.replace(/^http/, 'ws')); await c.ready; c.send({ t: 'hello', token: 'full' + i + RUN, name: 'F' + i, room: rid }); party.push(c); await until(() => c.last('welcome'), 5000); }
+  // mp-room-route (2026-09-27) - the game dials ?room=<room id> (its own DO on the new relay): the test sockets that share its room do too
+  const inRoom = (r) => relayBase.replace(/^http/, 'ws') + '/?room=' + encodeURIComponent(r);
+  for (let i = 0; i < 5; i++) { const c = sock(inRoom(rid)); await c.ready; c.send({ t: 'hello', token: 'full' + i + RUN, name: 'F' + i, room: rid }); party.push(c); await until(() => c.last('welcome'), 5000); }
   const fillers = [...party];   // every socket that sits in a room for the game to bump into
   const kaT = setInterval(() => { for (const c of fillers) c.send('{"t":"ka"}'); }, 2000);   // B reaps a socket silent for 6 s
-  const fill = async (rid2, n, tag) => { for (let i = 0; i < n; i++) { const c = sock(relayBase.replace(/^http/, 'ws')); await c.ready;
+  const fill = async (rid2, n, tag) => { for (let i = 0; i < n; i++) { const c = sock(inRoom(rid2)); await c.ready;   // mp-room-route (2026-09-27)
     c.send({ t: 'hello', token: tag + i + RUN, name: tag + i, room: rid2 }); fillers.push(c); await until(() => c.last('welcome') || c.last('error'), 5000); } };
   cleanup.push(() => clearInterval(kaT));
   await wait(1200);

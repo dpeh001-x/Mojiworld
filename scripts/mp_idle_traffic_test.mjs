@@ -126,7 +126,7 @@ async function main() {
 
 async function PART2({ A, B, NEW, OLD, sock, statesFrom, errs }) {
   const RUN = Date.now().toString(36), room = 'idle' + RUN;
-  const W = sock(NEW); await W.ready;
+  const W = sock(NEW + '/?room=' + encodeURIComponent(room + '__ch1')); await W.ready;   // mp-room-route (2026-09-27) - in the game's room DO
   W.send({ t: 'hello', token: 'w' + RUN, name: 'Counter', room: room + '__ch1', map: 'town', x: 0, y: 0 });
   await until(() => W.msgs.some((m) => m.t === 'welcome'), 5000);
   const kaT = setInterval(() => W.send('{"t":"ka"}'), 10000); cleanup.push(() => clearInterval(kaT));   // the relay reaps a silent socket
