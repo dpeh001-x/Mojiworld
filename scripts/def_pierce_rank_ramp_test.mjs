@@ -11,9 +11,10 @@
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FILE = process.argv.slice(2).find((a) => !a.startsWith('--')) || 'mojiworld_game.html';
+const FILE = process.argv.slice(2).find((a) => !a.startsWith('--')) || (process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html');
 const URL = 'file:///' + path.join(ROOT, FILE).split(path.sep).join('/');
 
 const browser = await chromium.launch({ channel: 'msedge', args: ['--allow-file-access-from-files'] });

@@ -9,11 +9,13 @@ import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PAGE = process.argv[2] || 'mojiworld_game.html';
-const PORT = Number(process.argv[3] || 11235);
+const PAGE = process.argv[2] || FILE;
+const PORT = Number(process.argv[3] || process.env.PORT || 11235);
 const checks = [];
 for (const f of ['cinzel-700-latin.woff2', 'cormorant-garamond-500-italic-latin.woff2', 'cormorant-garamond-600-latin.woff2', 'LICENSE-OFL.txt']) {
   const p = path.join(ROOT, 'assets', 'fonts', f);

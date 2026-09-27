@@ -6,6 +6,8 @@
 //   node scripts/skygarden_gate_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -13,7 +15,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const net_ = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net_.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT = process.argv[2];
+let PORT = process.argv[2] || process.env.PORT;
 for (let p = 8767; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
 const { spawn } = await import('node:child_process');
 const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });
@@ -21,7 +23,7 @@ await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof MAPS !== 'undefined' && MAPS.skyGarden && typeof tryPortal === 'function',
   null, { timeout: 120000 });
 

@@ -5,6 +5,8 @@
 // v0.29.218, so it now feathers (correctly) and can't be the control.
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const PORT = process.env.PORT || '8080';
 // Resolve a browser that actually EXISTS. The Linux path stays first so CI is
 // untouched, but it is the only candidate this line used to have - and with
 // PW_EXE unset on a dev machine that made the launch throw before a single
@@ -22,7 +24,7 @@ const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['-
 try {
   const p = await b.newContext({ serviceWorkers: 'block' }).then(c => c.newPage());
   const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 140)));
-  await p.goto('http://localhost:8080/monster_animator.html', { waitUntil: 'domcontentloaded' });
+  await p.goto(`http://localhost:${PORT}/monster_animator.html`, { waitUntil: 'domcontentloaded' });
   await p.waitForFunction(() => window.__core && window.__core.softDraw && window.__app, null, { timeout: 30000 });
   await p.waitForTimeout(1200);
 

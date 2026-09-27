@@ -12,6 +12,8 @@
 //
 //   node scripts/comet_orientation_test.mjs        MOJI_SERVE_ROOT / PORT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs'); const sharp = require('sharp');
 const PORT = Number(process.env.PORT || 11401); const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
@@ -48,7 +50,7 @@ async function axisOfDiff(aB64, bB64, tag) {
   return { deg: rad * 180 / Math.PI, mass: rawMass, windowMass: m, at: `${Math.round(ccx)},${Math.round(ccy)}` };
 }
 try {
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof _projAnimFrame === 'function', null, { timeout: 180000 });
   await page.waitForTimeout(6000);
   const r = await page.evaluate(async () => {

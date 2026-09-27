@@ -2,6 +2,9 @@
 // driven by actual clicks/typing (not by setting globals).
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const PORT = process.env.PORT || '8080';
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 // Resolve a browser that actually EXISTS. The Linux path stays first so CI is
 // untouched, but it is the only candidate this line used to have - and with
 // PW_EXE unset on a dev machine that made the launch throw before a single
@@ -14,7 +17,7 @@ const EXE = [process.env.PW_EXE,
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
-const URL = 'http://localhost:8080/mojiworld_game.html';
+const URL = `http://localhost:${PORT}/${FILE}`;
 const results = [];
 const ok = (n, c, extra) => results.push({ n, pass: !!c, extra });
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox','--disable-gpu','--mute-audio'] });

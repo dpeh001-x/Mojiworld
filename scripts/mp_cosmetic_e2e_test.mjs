@@ -12,6 +12,8 @@
 //   node scripts/mp_cosmetic_e2e_test.mjs
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -19,7 +21,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const net_ = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net_.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT = null;
+let PORT = process.env.PORT || null;
 for (let p = 8767; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
 const { spawn } = await import('node:child_process');
 // the relay serves the game from the repo root too, so one process covers both
@@ -34,7 +36,7 @@ const mkPage = async (label) => {
   const p = await (await b.newContext({ viewport: { width: 1100, height: 640 } })).newPage();
   p.on('pageerror', e => errs.push(label + ': ' + String(e).slice(0, 140)));
   await p.addInitScript((u) => { window.MOJI_RELAY_URL = u; }, WS);
-  await p.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await p.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await p.waitForFunction(() => typeof mpConnect === 'function' && typeof _mpDrawPeers === 'function',
     null, { timeout: 120000 });
   await p.evaluate(() => {

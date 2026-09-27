@@ -7,8 +7,10 @@
 // request from another map is ignored. The NPC dialog types itself out - wait for
 // text, never read it mid-sentence.
 import { chromium } from 'playwright-core';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const PORT = process.env.PORT || 8080;
-const URL = 'http://localhost:' + PORT + '/mojiworld_game.html', WS = 'ws://localhost:' + PORT;
+const URL = 'http://localhost:' + PORT + '/' + FILE, WS = 'ws://localhost:' + PORT;
 const ROOM = 'spk' + Math.floor(Math.random() * 1e6);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const res = []; const ok = (n, c, x) => res.push({ n, pass: !!c, x });

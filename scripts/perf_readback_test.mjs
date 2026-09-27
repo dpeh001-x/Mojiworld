@@ -10,11 +10,13 @@
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = 'C:/Users/dpeh0/Mojiworld';
-const PORT = process.env.PERF_PORT || '9499';
+const PORT = process.env.PERF_PORT || process.env.PORT || '9499';
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 1500));
-const URL = 'http://localhost:' + PORT + '/' + (process.argv[2] || 'mojiworld_game.html');
+const URL = 'http://localhost:' + PORT + '/' + (process.argv[2] || FILE);
 const browser = await chromium.launch({ channel: 'chrome', args: [
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });

@@ -8,7 +8,9 @@
 //   node serve.js 8802 && node scripts/mage_dash_sprite_test.mjs 8802
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
-const PORT = process.argv[2] || '8802';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const PORT = process.argv[2] || process.env.PORT || '8802';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -16,7 +18,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox','--disable-gpu','--mute-audio'] });
 const page = await (await b.newContext({ serviceWorkers: 'block' })).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => { try { return typeof eval('quickDash') === 'function' && !!eval('player'); } catch { return false; } }, null, { timeout: 180000 });
 
 const out = await page.evaluate(() => {

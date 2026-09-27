@@ -11,8 +11,10 @@
 //   node scripts/map_backdrop_video_test.mjs [path/to/mojiworld_game.html]
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
-const GAME = process.argv[2] || 'mojiworld_game.html';
+const GAME = process.argv[2] || FILE;
 const src = readFileSync(GAME, 'utf8');
 
 // gravitosFinale is not a map but a STATE of gravitosArena (once form 2 falls); it shares that

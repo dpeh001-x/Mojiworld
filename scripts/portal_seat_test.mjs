@@ -12,6 +12,8 @@
 // 5px above it, and the name label covers no more than 12px of the portal's top.
 //   node scripts/portal_seat_test.mjs        MOJI_SERVE_ROOT / PORT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
 const PORT = Number(process.env.PORT || 11661); const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
@@ -24,7 +26,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
 const KINDS = ['plain', 'boss', 'town'];
 try {
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof drawPortals === 'function' && typeof MAPS === 'object' && typeof LX_WORLD === 'object' && LX_WORLD && LX_WORLD.portal && _lxWorldReady(LX_WORLD.portal), null, { timeout: 180000 });
   await page.waitForTimeout(1500);
   const r = await page.evaluate((KINDS) => {

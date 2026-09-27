@@ -6,12 +6,14 @@
 //   node serve.js 8819 && node scripts/additions_audit_test.mjs 8819
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
-const PORT = process.argv[2] || '8819';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const PORT = process.argv[2] || process.env.PORT || '8819';
 // Second arg picks the page, so this can audit a copy of the PUSHED tree
 // rather than the working copy:
 //   git show origin/main:mojiworld_game.html > _tmp_pushed.html
 //   node scripts/additions_audit_test.mjs 8819 _tmp_pushed.html
-const PAGE = process.argv[3] || 'mojiworld_game.html';
+const PAGE = process.argv[3] || FILE;
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });

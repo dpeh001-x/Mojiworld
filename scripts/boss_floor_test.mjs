@@ -22,6 +22,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
@@ -94,7 +96,7 @@ const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT
 await new Promise((r) => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 120000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'load', timeout: 120000 });
 await page.waitForFunction(() => typeof spawnMonster === 'function' && typeof game !== 'undefined' && typeof player !== 'undefined', null, { timeout: 60000 });
 await page.waitForTimeout(4000);
 const S = await page.evaluate(() => {

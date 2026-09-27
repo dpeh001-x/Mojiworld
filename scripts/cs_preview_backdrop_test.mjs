@@ -11,8 +11,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { stats, gate } from './gen_cs_preview_backdrop.mjs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const PAGE = process.argv[2] || 'mojiworld_game.html';
+const PAGE = process.argv[2] || FILE;
 const html = readFileSync(path.join(ROOT, PAGE), 'utf8');
 const checks = [];
 const count = (needle) => html.split(needle).length - 1;

@@ -8,11 +8,13 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PAGE = process.argv[2] || 'mojiworld_game.html';
-const PORT = Number(process.argv[3] || 11191);
+const PAGE = process.argv[2] || FILE;
+const PORT = Number(process.argv[3] || process.env.PORT || 11191);
 // MOJI_SERVE_ROOT: grade a tree other than the shared working copy, which parallel sessions
 // leave tens of commits behind origin/main. Both the server AND the static read use it, or the
 // two halves of this test would be reading two different builds.

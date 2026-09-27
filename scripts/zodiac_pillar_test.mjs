@@ -4,7 +4,9 @@
 //   node serve.js 8793 && node scripts/zodiac_pillar_test.mjs 8793
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
-const PORT = process.argv[2] || '8793';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const PORT = process.argv[2] || process.env.PORT || '8793';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -13,7 +15,7 @@ const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['-
 const ctx = await b.newContext({ serviceWorkers: 'block', viewport: { width: 1280, height: 800 } });
 const page = await ctx.newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 200)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => { try { return typeof eval('drawBossDecor') === 'function' && !!eval('MAPS'); } catch { return false; } }, null, { timeout: 120000 });
 // The decor bails early until the sprite has decoded. Without this wait every
 // case draws 0 and the "non-zodiac draws none" check passes for the wrong

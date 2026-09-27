@@ -3,15 +3,17 @@
 // the bottom-right column in the game's own 960x560 px with three quests tracked.   node scripts/hud_column_test.mjs
 import { chromium } from 'playwright-core';
 import fs from 'node:fs'; import path from 'node:path'; import net from 'node:net'; import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 
 const OUT = 'C:/Users/dpeh0/AppData/Local/Temp/claude/C--Users-dpeh0-Mojiworld/cccfc943-3283-40e4-b3cf-d58b9676da30/scratchpad/';
 const free = (p) => new Promise((r) => { const s = net.createServer(); s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT; for (let p = 18631; p <= 18729 && !PORT; p++) if (await free(p)) PORT = String(p);
+let PORT = process.env.PORT; for (let p = 18631; p <= 18729 && !PORT; p++) if (await free(p)) PORT = String(p);
 const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore', env: process.env });
 await new Promise((r) => setTimeout(r, 2000));
 const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })).newPage();
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof loadMap === 'function', null, { timeout: 120000 });
 await page.waitForTimeout(2500);
 const R = await page.evaluate(async () => {

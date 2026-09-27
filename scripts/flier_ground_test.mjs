@@ -14,8 +14,10 @@
 // file guards the source so a rebuild from a stale base cannot silently drop either line.
 //   node scripts/flier_ground_test.mjs [path/to/mojiworld_game.html]
 import { readFileSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
-const GAME = process.argv[2] || 'mojiworld_game.html';
+const GAME = process.argv[2] || FILE;
 const src = readFileSync(GAME, 'utf8');
 
 ok('the Spireling (towerWisp) is a flier', /towerWisp:\s*\{[^}]*flies:true/.test(src), {});

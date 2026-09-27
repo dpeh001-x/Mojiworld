@@ -9,6 +9,8 @@
 //
 // Negative control: on v0.30.536 the button wipes immediately and there is no gate at all.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
 const PORT = Number(process.env.PORT || 11021); const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
@@ -27,7 +29,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
 const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
 try {
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof _amnesiacReset === 'function', null, { timeout: 180000 });
   await page.waitForTimeout(6000);
 
@@ -111,7 +113,7 @@ try {
     return o;
   });
 
-  const src = await (await fetch(`http://localhost:${PORT}/mojiworld_game.html`)).text();
+  const src = await (await fetch(`http://localhost:${PORT}/${FILE}`)).text();
   const routed = /_amnesiacWipeGate\(_amnesiacReset\)/.test(src);
   const noDirect = !/closeDialog\(\); _amnesiacReset\(\); \}/.test(src);
 

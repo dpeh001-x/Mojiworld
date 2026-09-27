@@ -12,6 +12,9 @@
 // (8/8 on v0.30.854). The first two labels say REAL worker code; with MIRROR_WS set they mean whatever relay that is.
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const PORT = process.env.PORT || '8080';
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 
 // Resolve a browser that actually EXISTS. The Linux path stays first so CI is
 // untouched, but it is the only candidate this line used to have - and with
@@ -25,7 +28,7 @@ const EXE = [process.env.PW_EXE,
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
-const URL = 'http://localhost:8080/mojiworld_game.html';
+const URL = `http://localhost:${PORT}/${FILE}`;
 const WS  = process.env.MIRROR_WS || 'ws://localhost:8787';
 const ROOM = 'mirror' + Math.floor(Math.random() * 1e9);
 

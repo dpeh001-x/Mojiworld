@@ -10,9 +10,11 @@
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const URL = 'file:///' + path.join(ROOT, process.argv[2] || 'mojiworld_game.html').split(path.sep).join('/');
+const URL = 'file:///' + path.join(ROOT, process.argv[2] || FILE).split(path.sep).join('/');
 // --allow-file-access-from-files: this test getImageData()s the loaded sprite to
 // measure its opaque box live, and a file:// image taints the canvas without it.
 const browser = await chromium.launch({ channel: 'chrome', args: ['--allow-file-access-from-files'] });

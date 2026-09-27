@@ -10,6 +10,8 @@
 //   node scripts/gravitos_star_idle_removal_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync, readFileSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -53,7 +55,7 @@ ok('all 36 star idle/walk files are removed from disk', onDisk === 0, { stillThe
 
 // --- 4. runtime: nothing requests them, base forms animate, star attack works -
 const net = await import('node:net');
-let PORT = process.argv[2];
+let PORT = process.argv[2] || process.env.PORT;
 if (!PORT) {
   const free = (p) => new Promise((r) => { const s = net.createServer();
     s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
@@ -68,7 +70,7 @@ const page = await (await b.newContext()).newPage();
 const asked = [], bad = [];
 page.on('request', r => { const u = r.url(); if (/gravitos[23]star_\d\.webp/.test(u) && /\/(idle|walk)\//.test(u)) asked.push(u.split('/').slice(-3).join('/')); });
 page.on('response', r => { if (r.status() >= 400) bad.push(r.status() + ' ' + r.url().split('/').slice(-3).join('/')); });
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof BOSS_IDLE_FRAMES === 'object' && typeof BOSS_ATTACK_FRAMES === 'object', { timeout: 120000 });
 await page.waitForTimeout(12000);
 

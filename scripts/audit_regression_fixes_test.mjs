@@ -11,6 +11,8 @@
 //
 // Negative control: 1, 3 and 4 fail on v0.30.508.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
 const PORT = Number(process.env.PORT || 10901); const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
@@ -22,7 +24,7 @@ const browser = await chromium.launch({ executablePath: EXE, headless: true, arg
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
 try {
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof _lxCineHoldActive === 'function', null, { timeout: 180000 });
   await page.waitForTimeout(6000);
 
@@ -90,7 +92,7 @@ try {
   });
 
   // Static half — count the install sites and the clears in the served source.
-  const src = await (await fetch(`http://localhost:${PORT}/mojiworld_game.html`)).text();
+  const src = await (await fetch(`http://localhost:${PORT}/${FILE}`)).text();
   const installs = (src.match(/localStorage\.setItem\(SAVE_KEY,/g) || []).length;
   const clears = (src.match(/removeItem\(_LX_SAVE_MARK_KEY\)/g) || []).length;
   const holdFlag = /if \(game\._gravitosCinePlaying\) return true;/.test(src);

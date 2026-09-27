@@ -3,10 +3,12 @@
 //   [SERVE_ROOT=<dir with mp/, data/, art>] node scripts/coop_fidelity_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const SERVE_ROOT = process.env.SERVE_ROOT || ROOT, PORT = process.env.PORT || '11123';
-const PAGE = path.basename(process.argv.slice(2).find((a) => !a.startsWith('--')) || 'mojiworld_game.html');
+const PAGE = path.basename(process.argv.slice(2).find((a) => !a.startsWith('--')) || FILE);
 const relay = spawn(process.execPath, [path.join(SERVE_ROOT, 'mp', 'server.mjs')], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env, PORT } });
 let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d ? '  [' + d + ']' : '')); ok ? pass++ : fail++; };
 const J = (o) => JSON.stringify(o);

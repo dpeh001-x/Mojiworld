@@ -1,11 +1,14 @@
 // Verify all 10 previously-dead traits now FIRE, each driven through its
 // real trigger condition. One page, ten scenarios.
 import { chromium } from 'playwright-core';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const PORT = process.env.PORT || '8080';
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const EXE = 'C:\\Users\\dpeh0\\Mojiworld\\scripts'.length ? (process.env.MOJI_PW_EXE || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe') : '';
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox','--disable-gpu','--mute-audio'] });
 const page = await (await browser.newContext()).newPage();
 const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 140)));
-await page.goto('http://localhost:8080/mojiworld_game.html', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => typeof loadMap === 'function' && typeof hitMonster === 'function', null, { timeout: 45000 });
 await page.waitForTimeout(2500);
 

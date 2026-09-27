@@ -4,13 +4,15 @@ import { createRequire } from 'node:module';
 const req = createRequire('file:///C:/Users/dpeh0/Mojiworld/package.json');
 const { chromium } = req('playwright-core');
 import { spawn } from 'node:child_process';
-const PORT = 9007;
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const PORT = Number(process.env.PORT || 9007);
 const server = spawn(process.execPath, ['C:/Users/dpeh0/Mojiworld/serve.js', String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'load', timeout: 60000 });
 await page.waitForTimeout(10000);
 
 const R = await page.evaluate(() => {

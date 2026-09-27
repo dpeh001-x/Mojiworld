@@ -27,8 +27,9 @@
 // ============================================================================
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 
-const PORT = process.argv[2] || '8766';
+const PORT = process.argv[2] || process.env.PORT || '8766';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe'].find(existsSync);
 if (!EXE) { console.error('Chrome not found'); process.exit(1); }

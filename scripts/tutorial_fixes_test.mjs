@@ -7,7 +7,10 @@
 //  4. Tutorial text is standardised to Calibri.
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
-const URL = 'http://localhost:8090/mojiworld_game.html';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const PORT = process.env.PORT || '8090';
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const URL = `http://localhost:${PORT}/${FILE}`;
 // Resolve a browser that actually EXISTS. The Linux path stays first so CI is
 // untouched, but it is the only candidate this line used to have - and with
 // PW_EXE unset on a dev machine that made the launch throw before a single

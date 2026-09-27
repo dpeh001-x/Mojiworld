@@ -19,12 +19,14 @@ import sharp from 'sharp';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 sharp.cache(false);
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DIR = join(ROOT, 'Sprites', 'bosses', 'walk');
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
-const game = readFileSync(join(ROOT, process.argv[2] || 'mojiworld_game.html'), 'utf8').replace(/\r\n/g, '\n');
+const game = readFileSync(join(ROOT, process.argv[2] || FILE), 'utf8').replace(/\r\n/g, '\n');
 const m = game.match(/const _BOSS_WALK_WEIGHTS = (\{.*?\});/s);
 ok('the walk-timing table ships', !!m, '');
 const table = m ? JSON.parse(m[1]) : {};

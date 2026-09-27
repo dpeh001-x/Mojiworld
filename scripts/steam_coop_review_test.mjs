@@ -13,6 +13,8 @@
 //   node scripts/steam_coop_review_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync, readFileSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -36,7 +38,7 @@ ok('no Render URL remains anywhere in the game file', !game.includes('onrender.c
 const net = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT = process.argv[2];
+let PORT = process.argv[2] || process.env.PORT;
 for (let p = 8767; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
 const { spawn } = await import('node:child_process');
 const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });
@@ -47,7 +49,7 @@ const CODE = 'RV' + Math.random().toString(36).slice(2, 7).toUpperCase();
 const boot = async (who) => {
   const page = await (await b.newContext()).newPage();
   page._errs = []; page.on('pageerror', e => page._errs.push(who + ': ' + String(e).slice(0, 140)));
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof mpConnect === 'function' && typeof net === 'object', { timeout: 120000 });
   return page;
 };

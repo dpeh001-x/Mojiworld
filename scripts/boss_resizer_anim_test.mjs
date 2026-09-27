@@ -12,6 +12,7 @@
 //   node scripts/boss_resizer_anim_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync, readFileSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -39,7 +40,7 @@ const gameSeq = {
 const net_ = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net_.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT = process.argv[2];
+let PORT = process.argv[2] || process.env.PORT;
 for (let p = 8767; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
 const { spawn } = await import('node:child_process');
 const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });

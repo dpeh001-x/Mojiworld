@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import net_ from 'node:net';
 import { spawn } from 'node:child_process';
 import { headBody } from './gravitos3_headbody_fs.mjs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -24,7 +25,7 @@ for (let i = 0; i < 9; i++) nodeH.push((await headBody(`Sprites/bosses/idle/grav
 
 const free = (p) => new Promise((r) => { const s = net_.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT = process.argv[2];
+let PORT = process.argv[2] || process.env.PORT;
 for (let p = 8791; p <= 8899 && !PORT; p++) if (await free(p)) PORT = String(p);
 const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 2000));

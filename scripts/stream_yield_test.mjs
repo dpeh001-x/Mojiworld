@@ -13,14 +13,16 @@
 //          and nothing over 40 ms may land while it does.
 //   node scripts/stream_yield_test.mjs [build.html]
 import { chromium } from 'playwright-core'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn as _spawn } from 'node:child_process';
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const _PORT = process.env.PERF_PORT || '9494';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const _PORT = process.env.PERF_PORT || process.env.PORT || '9494';
 const _srv = _spawn(process.execPath, [path.join(ROOT, 'serve.js'), _PORT], { stdio: 'ignore' }); await new Promise((r) => setTimeout(r, 1500));
 const browser = await chromium.launch({ channel: 'chrome', args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] });
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 async function scene(fight) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 120)));
-  await page.goto('http://localhost:' + _PORT + '/' + (process.argv[2] || 'mojiworld_game.html') + '?dev=1', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:' + _PORT + '/' + (process.argv[2] || FILE) + '?dev=1', { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof _lxCombatHot === 'function', { timeout: 60000 });
   await page.evaluate(() => { const o = document.getElementById('loading-overlay'); if (o) o.style.display = 'none'; window._lxBootGateDone = true; const c = document.querySelector('#class-select-modal .cls-card'); if (c && !player.cls) { try { c.click(); } catch (e) {} } const g = document.getElementById('class-select-modal'); if (g) g.style.display = 'none'; try { _prologueActive = false; } catch (e) {}
     // the perf harnesses' recipe: a real map, not the prologue void (where spawns are refused)

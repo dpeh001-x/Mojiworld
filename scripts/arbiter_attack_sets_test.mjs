@@ -13,13 +13,15 @@
 // inferred from the files.
 //   node scripts/arbiter_attack_sets_test.mjs [build.html]
 import { chromium } from 'playwright-core'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn as _spawn } from 'node:child_process';
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const _PORT = process.env.PERF_PORT || '9475';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const _PORT = process.env.PERF_PORT || process.env.PORT || '9475';
 const _srv = _spawn(process.execPath, [path.join(ROOT, 'serve.js'), _PORT], { stdio: 'ignore' }); await new Promise((r) => setTimeout(r, 1400));
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const browser = await chromium.launch({ channel: 'chrome' });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 160)));
-await page.goto('http://localhost:' + _PORT + '/' + (process.argv[2] || 'mojiworld_game.html') + '?dev=1', { waitUntil: 'domcontentloaded' });
+await page.goto('http://localhost:' + _PORT + '/' + (process.argv[2] || FILE) + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof loadMap === 'function' && typeof _lxBossAtkPose === 'function', { timeout: 60000 });
 await page.evaluate(() => { const o = document.getElementById('loading-overlay'); if (o) o.style.display = 'none'; window._lxBootGateDone = true; const c = document.querySelector('#class-select-modal .cls-card'); if (c && !player.cls) { try { c.click(); } catch (e) {} } const g = document.getElementById('class-select-modal'); if (g) g.style.display = 'none'; try { _prologueActive = false; } catch (e) {} });
 await page.waitForTimeout(6000);

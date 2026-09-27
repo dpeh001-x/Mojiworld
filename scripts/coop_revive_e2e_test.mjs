@@ -11,6 +11,8 @@
 //   node scripts/coop_revive_e2e_test.mjs [gamePort] [relayPort]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -19,7 +21,7 @@ const net_ = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net_.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
 const pick = async (from) => { for (let p = from; p <= from + 300; p++) if (await free(p)) return String(p); throw new Error('no port'); };
-const GAME_PORT = process.argv[2] || await pick(8767);
+const GAME_PORT = process.argv[2] || process.env.PORT || await pick(8767);
 const RELAY_PORT = process.argv[3] || await pick(9310);
 const { spawn } = await import('node:child_process');
 const srv = spawn(process.execPath, ['serve.js', GAME_PORT], { stdio: 'ignore' });
@@ -40,7 +42,7 @@ const errs = [];
 const open = async (tag) => {
   const pg = await ctx.newPage();
   pg.on('pageerror', e => errs.push(tag + ': ' + String(e).slice(0, 120)));
-  await pg.goto(`http://localhost:${GAME_PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await pg.goto(`http://localhost:${GAME_PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await pg.waitForFunction(() => typeof mpConnect === 'function' && typeof _coopTryDowned === 'function'
     && typeof _coopReviveTick === 'function', null, { timeout: 120000 });
   return pg;

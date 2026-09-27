@@ -16,13 +16,15 @@ import sharp from 'sharp';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 sharp.cache(false);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'Sprites', 'fx', 'anim');
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 // Accept an absolute candidate path so a build can be tested before it ships.
-const TARGET = process.argv[2] || 'mojiworld_game.html';
+const TARGET = process.argv[2] || FILE;
 const game = readFileSync(isAbsolute(TARGET) ? TARGET : join(ROOT, TARGET), 'utf8');
 
 // THE REGRESSION CHECK. Fails on every build before this one.

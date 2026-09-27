@@ -15,6 +15,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const srv = require(path.join(ROOT, 'steam', 'static_server.js'));
@@ -31,7 +32,7 @@ const EXE = [process.env.MOJI_PW_EXE,
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
-const PORT = 47901;
+const PORT = Number(process.env.PORT || 47901);
 const results = [];
 const ok = (n, c, extra) => results.push({ n, pass: !!c, extra });
 

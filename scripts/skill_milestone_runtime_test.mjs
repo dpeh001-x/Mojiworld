@@ -6,7 +6,9 @@
 //   node serve.js 8772 && node scripts/skill_milestone_runtime_test.mjs 8772
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
-const PORT = process.argv[2] || '8772';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const PORT = process.argv[2] || process.env.PORT || '8772';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 if (!EXE) { console.error('no browser'); process.exit(2); }
@@ -18,7 +20,7 @@ try {
   const page = await ctx.newPage();
   const errs = [];
   page.on('pageerror', e => errs.push(String(e).slice(0, 180)));
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForFunction(() => typeof game !== 'undefined' && typeof hitMonster === 'function', null, { timeout: 60000 });
   await page.waitForTimeout(2500);
 

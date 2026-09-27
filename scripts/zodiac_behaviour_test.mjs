@@ -9,6 +9,8 @@ import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || 8889;
@@ -22,7 +24,7 @@ const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 // v0.30.x — 'load' waits for every image on the page, and a cold localhost page queues thousands of parse-time
 // requests (no image hold off the web deploy): one run timed out at 60 s before a check ran. Wait for the functions
 // this test calls instead, then the same settle.
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof _zodiacGaitTick === 'function' && typeof monsterTypes === 'object' && typeof ZODIAC_SIGNS !== 'undefined', null, { timeout: 180000 });
 await page.waitForTimeout(8000);
 

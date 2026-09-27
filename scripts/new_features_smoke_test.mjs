@@ -9,8 +9,10 @@
 // Requires a local server (node serve.js <port>) and Chrome/Edge.
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 
-const PORT = process.argv[2] || '8770';
+const PORT = process.argv[2] || process.env.PORT || '8770';
 const EXES = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
@@ -34,7 +36,7 @@ try {
   page.on('pageerror', e => pageErrors.push(String(e).slice(0, 200)));
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 200)); });
 
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   // Wait for the game globals rather than a fixed sleep. NOTE: `game` and
   // `player` are top-level `const`s, so they live in the global LEXICAL scope
   // and never appear on `window` — probe the bare identifiers.

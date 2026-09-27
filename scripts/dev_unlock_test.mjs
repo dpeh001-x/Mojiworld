@@ -1,5 +1,8 @@
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const PORT = process.env.PORT || '8765';
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 // v0.30.924 — the passphrase is no longer written in this file: CHANGELOG.html published it, the public site
 // serves the changelog, and the lock icon works there, so the word was the whole gate. Set LX_DEV_PW to run these.
 const DEV_PW = process.env.LX_DEV_PW || '';
@@ -17,7 +20,7 @@ const EXE = [process.env.PW_EXE,
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
-const URL = 'http://localhost:8765/mojiworld_game.html';
+const URL = `http://localhost:${PORT}/${FILE}`;
 const results = [];
 const ok = (n, c, extra) => { results.push({ n, pass: !!c }); console.log((c ? 'PASS ' : 'FAIL ') + n + (extra ? ' — ' + extra : '')); };
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });

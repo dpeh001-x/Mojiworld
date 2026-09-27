@@ -3,8 +3,10 @@
 //   node serve.js 8862 && node scripts/skill_icon_test.mjs 8862 [page]
 import { chromium } from 'playwright-core';
 import { existsSync, readdirSync } from 'node:fs';
-const PORT = process.argv[2] || '8862';
-const PAGE = process.argv[3] || 'mojiworld_game.html';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const PORT = process.argv[2] || process.env.PORT || '8862';
+const PAGE = process.argv[3] || FILE;
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });

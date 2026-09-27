@@ -10,8 +10,10 @@
 // only the piece that changed; a cleared piece disappears; a lost frame is
 // asked for and recovered; and her own save keeps every stroke.
 import { chromium } from 'playwright-core';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const PORT = process.env.PORT || 8080;
-const URL = 'http://localhost:' + PORT + '/mojiworld_game.html', WS = 'ws://localhost:' + PORT;
+const URL = 'http://localhost:' + PORT + '/' + FILE, WS = 'ws://localhost:' + PORT;
 const ROOM = 'paint' + Math.floor(Math.random() * 1e6);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const res = []; const ok = (n, c, x) => res.push({ n, pass: !!c, x });

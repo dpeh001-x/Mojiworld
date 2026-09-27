@@ -10,13 +10,15 @@
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const browser = await chromium.launch({ channel: 'chrome' });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = [], failed404 = [];
 page.on('pageerror', (e) => errs.push(String(e).slice(0, 160)));
 page.on('response', (r) => { if (r.status() >= 400 && /backgrounds\//.test(r.url())) failed404.push(r.status() + ' ' + r.url().split('/').pop()); });
-await page.goto('file:///' + path.join(ROOT, 'mojiworld_game.html').replace(/\\/g, '/'), { waitUntil: 'domcontentloaded' });
+await page.goto('file:///' + path.join(ROOT, FILE).replace(/\\/g, '/'), { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof MAPS !== 'undefined' && typeof BG_IMAGES !== 'undefined', { timeout: 60000 }).catch(() => {});
 
 const out = await page.evaluate(async () => {

@@ -28,9 +28,11 @@
 // ============================================================================
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 
-const PAGE = process.argv[2] || 'mojiworld_game.html';
-const PORT = process.argv[3] || '8767';
+const PAGE = process.argv[2] || FILE;
+const PORT = process.argv[3] || process.env.PORT || '8767';
 const EXE = [process.env.PW_EXE,
   '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
   'C:/Program Files/Google/Chrome/Application/chrome.exe',

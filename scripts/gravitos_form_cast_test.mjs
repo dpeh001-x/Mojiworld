@@ -8,6 +8,8 @@
 //   node scripts/gravitos_form_cast_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
@@ -30,7 +32,7 @@ console.log(`# present: ${KEYS.join(', ') || '(none)'}\n# absent : ${ABSENT.join
 ok('at least one form ships its own cast art', KEYS.length > 0, { present: KEYS.length });
 
 const net = await import('node:net');
-let PORT = process.argv[2];
+let PORT = process.argv[2] || process.env.PORT;
 if (!PORT) {
   const free = (p) => new Promise((r) => { const s = net.createServer();
     s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
@@ -45,7 +47,7 @@ const page = await (await b.newContext()).newPage();
 const errs = [], bad = [];
 page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 page.on('response', r => { if (r.status() >= 400) bad.push(r.status() + ' ' + r.url().split('/').slice(-2).join('/')); });
-await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof _gravCastKey === 'function' && typeof BOSS_ATTACK_FRAMES === 'object', { timeout: 120000 });
 
 const r = await page.evaluate(async ({ KEYS, ABSENT }) => {

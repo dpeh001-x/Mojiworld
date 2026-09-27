@@ -6,15 +6,17 @@
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = 'C:/Users/dpeh0/Mojiworld';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
-const PORT = process.env.PERF_PORT || '9504';
+const PORT = process.env.PERF_PORT || process.env.PORT || '9504';
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 1500));
 const browser = await chromium.launch({ channel: 'chrome', args: ['--disable-background-timer-throttling'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = []; page.on('pageerror', (e) => errs.push(String(e).slice(0, 160)));
-await page.goto(`http://localhost:${PORT}/${process.argv[2] || 'mojiworld_game.html'}?dev=1`, { waitUntil: 'domcontentloaded' });
+await page.goto(`http://localhost:${PORT}/${process.argv[2] || FILE}?dev=1`, { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof _lxEdgesTouched === 'function', { timeout: 90000 });
 await page.evaluate(() => {
   const o = document.getElementById('loading-overlay'); if (o) o.style.display = 'none';

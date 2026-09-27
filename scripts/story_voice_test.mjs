@@ -6,11 +6,13 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PAGE = process.argv[2] || 'mojiworld_game.html';
-const PORT = Number(process.argv[3] || 11267);
+const PAGE = process.argv[2] || FILE;
+const PORT = Number(process.argv[3] || process.env.PORT || 11267);
 const checks = [];
 const html = readFileSync(path.join(ROOT, PAGE), 'utf8');
 const CLIPS = [1, 2, 3].map((n) => `audio/story/gravitos_gate_${n}.mp3`);

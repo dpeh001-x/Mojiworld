@@ -16,8 +16,9 @@ import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FILE = process.argv[2] || 'mojiworld_game.html';
+const FILE = process.argv[2] || (process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html');
 let bad = 0;
 const check = (c, n, extra) => { console.log(`  ${c ? 'PASS' : 'FAIL'}  ${n}${!c && extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 140) : ''}`); if (!c) bad++; };
 

@@ -5,12 +5,14 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const sharp = require('sharp');
-const PAGE = process.argv[2] || 'mojiworld_game.html';
-const PORT = Number(process.argv[3] || 11319);
+const PAGE = process.argv[2] || FILE;
+const PORT = Number(process.argv[3] || process.env.PORT || 11319);
 
 // ---- on disk: nine frames, one canvas size, alpha content that holds still and actually changes
 const disk = { n: 0, sizes: new Set(), drift: 0, identical: 0 };

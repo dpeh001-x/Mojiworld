@@ -12,6 +12,8 @@
 //
 // Negative control: all four fail on v0.30.510.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
 const PORT = Number(process.env.PORT || 10941); const SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT;
@@ -23,7 +25,7 @@ const browser = await chromium.launch({ executablePath: EXE, headless: true, arg
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
 try {
-  await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+  await page.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof killMonster === 'function' && typeof zodiacDefeated === 'function' && typeof loadMap === 'function', null, { timeout: 180000 });
   await page.waitForTimeout(6000);
 
@@ -106,7 +108,7 @@ try {
     return o;
   });
 
-  const src = await (await fetch(`http://localhost:${PORT}/mojiworld_game.html`)).text();
+  const src = await (await fetch(`http://localhost:${PORT}/${FILE}`)).text();
   const swapClears = /_apBack|player\.treeUnlocked = \{\}; player\.tree = \{\};\s*\r?\n\s*if \(_apBack/.test(src);
   const bankReady = /readyToHandIn: !!a\.readyToHandIn/.test(src);
   const restoreReady = /if \(_bank\.readyToHandIn\) _a\.readyToHandIn = true;/.test(src);

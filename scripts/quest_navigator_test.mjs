@@ -5,11 +5,13 @@
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
+const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const b = await chromium.launch({ channel: 'chrome' });
 const p = await b.newPage();
-const url = 'file:///' + path.join(ROOT, process.argv[2] || 'mojiworld_game.html').split(path.sep).join('/');
+const url = 'file:///' + path.join(ROOT, process.argv[2] || FILE).split(path.sep).join('/');
 await p.goto(url, { waitUntil: 'domcontentloaded' });
 await p.waitForFunction(() => typeof QUESTS !== 'undefined' && typeof _qnavDest === 'function', { timeout: 60000 });
 
