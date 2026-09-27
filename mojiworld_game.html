@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1271';
+const GAME_VERSION = 'v0.30.1272';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -23149,8 +23149,8 @@ function _lxGroundJoin(p) {
     for (const a of g) {
       let f = 0;
       for (const b of g) {
-        if (b === a || Math.abs(b.y - a.y) > 24) continue;
-        const gL = a.x - (b.x + b.w), gR = b.x - (a.x + a.w), e = Math.max(0, Math.min(31, Math.round(b.y - a.y)));
+        if (b === a || Math.abs(b.y - a.y) > 32) continue;   // v0.30.1272 - was 24: every ramp's two pieces join (a 28px dune step)
+        const gL = a.x - (b.x + b.w), gR = b.x - (a.x + a.w), e = 0;   // v0.30.1272 - no riser: a ramp (_lxGroundRamps) is laid against every joined step
         if (gL >= -8 && gL <= 2) f |= 1 | (e << 2);
         if (gR >= -8 && gR <= 2) f |= 2 | (e << 7);
       }
@@ -23158,6 +23158,87 @@ function _lxGroundJoin(p) {
     }
   }
   return p._lxJoin | 0;
+}
+// v0.30.1272 - GROUND RAMPS (per user: "some parts with jagged floors there can be a slope or smoothing done"). Four maps build
+// their rises from stepped ground pieces - Sauro Slope, Dune Sands, Octopus Grotto, Lava Cavern: 28 steps of 2-28px. Each
+// step becomes a ramp laid on the LOWER piece against the riser: a smoothstep from the lower top (flat at its far end) up
+// to the higher top (flat at the seam) over ~3.5x the rise, 14-72px. Collision follows it (checkPlatformCollision asks
+// _lxRampAt), so feet ride up and down it instead of popping up the step or dropping off it, and drawPlatforms paints it
+// over the seam in the floor's own cap. Cached per platforms array; maps without steps pay one property read.
+function _lxGroundRamps(md) {
+  const ps = md && md.platforms; if (!ps) return null;
+  if (md._lxRampsSrc === ps && md._lxRampsN === ps.length) return md._lxRamps;
+  const g = ps.filter((q) => q && q.type === 'ground'), out = [];
+  for (const a of g) for (const b of g) {
+    if (a === b) continue;
+    const gap = b.x - (a.x + a.w); if (gap < -8 || gap > 2) continue;   // b abuts a's right side (the _lxGroundJoin rule)
+    const dy = b.y - a.y; if (dy === 0 || Math.abs(dy) > 32) continue;
+    const lo = dy > 0 ? b : a, hi = dy > 0 ? a : b, xj = (a.x + a.w + b.x) / 2;
+    const L = Math.max(14, Math.min(72, Math.round(Math.abs(dy) * 3.5), lo.w - 8));
+    const up = hi === b ? 1 : -1;   // +1: the ramp climbs to the right (it sits left of the seam), -1: to the left
+    out.push({ lo, hi, xj, x0: up > 0 ? xj - L : xj, x1: up > 0 ? xj : xj + L, yLo: lo.y, yHi: hi.y, up });
+  }
+  md._lxRampsSrc = ps; md._lxRampsN = ps.length; md._lxRamps = out.length ? out : null;
+  return md._lxRamps;
+}
+function _lxRampY(r, x) {   // the surface at x: the lower top at the far end, the higher top at the seam, smoothstep between
+  let u = (x - r.x0) / (r.x1 - r.x0); if (r.up < 0) u = 1 - u; u = Math.max(0, Math.min(1, u));
+  return r.yLo + (r.yHi - r.yLo) * u * u * (3 - 2 * u);
+}
+function _lxRampAt(x) {
+  const md = (typeof game !== 'undefined' && game) ? game.mapData : null, rs = md ? _lxGroundRamps(md) : null;
+  if (!rs) return null;
+  for (let i = 0; i < rs.length; i++) { const r = rs[i]; if (x >= r.x0 && x <= r.x1) return { r, y: _lxRampY(r, x) }; }
+  return null;
+}
+function _lxDrawRampFlat(r, tint) {   // the fallback when the lower piece has no bake: a plain cap band along the curve
+  const cam = game.camera.x;
+  if (r.x1 - cam < -4 || r.x0 - cam > W + 4) return;
+  const mix = _mixHex, P = (tint && tint.exact) ? tint : ((typeof _cuteMapPalette === 'function' && _cuteMapPalette(tint)) || tint);
+  const top = P.top, body = P.body, OUT = mix(body, '#05030a', 0.62), topLt = mix(top, '#ffffff', 0.38), topDk = mix(top, body, 0.42);
+  const capT = _cuteGeom(r.lo.w, r.lo.h, true).cap, N = Math.max(6, Math.ceil((r.x1 - r.x0) / 3));
+  const pts = []; for (let i = 0; i <= N; i++) { const wx = r.x0 + (r.x1 - r.x0) * i / N; pts.push([wx - cam, _lxRampY(r, wx)]); }
+  if (r.up > 0) pts.push([r.x1 - cam + 2, r.yHi]); else pts.unshift([r.x0 - cam - 2, r.yHi]);   // 2px over the higher piece: its riser line is covered
+  const xa = pts[0][0], xb = pts[pts.length - 1][0], yBase = r.yLo + capT;
+  const line = (o) => { ctx.moveTo(pts[0][0], pts[0][1] + o); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1] + o); };
+  const band = (o0, o1) => { ctx.beginPath(); line(o0); for (let i = pts.length - 1; i >= 0; i--) ctx.lineTo(pts[i][0], pts[i][1] + o1); ctx.closePath(); };
+  ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(xa, yBase); for (const [x, y] of pts) ctx.lineTo(x, Math.min(yBase, y + capT - 1)); ctx.lineTo(xb, yBase); ctx.closePath();
+  ctx.fillStyle = body; ctx.fill();                                                        // the face under the ramp's cap
+  band(0, capT); ctx.fillStyle = top; ctx.fill();                                          // the cap, following the curve
+  band(0, Math.min(3, capT * 0.3)); ctx.fillStyle = topLt; ctx.fill();                     // a lit strip along its crest
+  band(capT - Math.min(3, capT * 0.25), capT); ctx.fillStyle = topDk; ctx.fill();          // a shaded strip along its foot
+  ctx.beginPath(); line(0); ctx.lineWidth = 2; ctx.strokeStyle = OUT; ctx.stroke();        // the ink along the crest
+  ctx.globalAlpha = 0.3; ctx.beginPath(); line(2); ctx.lineWidth = 1.4; ctx.strokeStyle = '#ffffff'; ctx.stroke();   // rim light
+  ctx.restore();
+}
+// The ramp is the lower piece itself, bent up: every 1px column of its baked sprite (cap, ink, edge, decor, the top of its
+// face) is lifted by the ramp's rise at that x, so the slope wears exactly the floor's own cap. Each column is lifted whole
+// and ends 10px under the old cap (so its wavy edge is covered), the last 6px fading into the unmoved face; 1px carries on
+// past the seam to close any gap between the pieces. Baked once per ramp (per bake of its lower piece); one drawImage a frame.
+function _lxDrawRamp(r, tint, theme) {
+  const cam = game.camera.x;
+  if (r.x1 - cam < -6 || r.x0 - cam > W + 6) return;
+  const lo = r.lo, spr = (typeof _cutePlatformSprite === 'function') ? _cutePlatformSprite(lo.w, lo.h, tint, true, theme, _lxGroundJoin(lo)) : null;
+  if (!spr) { _lxDrawRampFlat(r, tint); return; }
+  let b = r._bake;
+  if (!b || b.spr !== spr) {
+    const PT = _CUTE_PAD_TOP, s = spr.width / (spr._lxLW || spr.width), cap = _cuteGeom(lo.w, lo.h, true).cap, rise = r.yLo - r.yHi;
+    const bx0 = Math.floor(r.up > 0 ? r.x0 : r.x0 - 1), bw = Math.ceil(r.x1 - r.x0) + 2, keep = PT + cap + 10, bh = Math.ceil(rise + keep + 1);
+    const cv = document.createElement('canvas'); cv.width = Math.ceil(bw * s); cv.height = Math.ceil(bh * s);
+    const c = cv.getContext('2d'); c.scale(s, s);
+    for (let i = 0; i < bw; i++) {
+      const wx = bx0 + i + 0.5, inZone = wx >= r.x0 && wx <= r.x1, pastSeam = r.up > 0 ? wx > r.x1 : wx < r.x0;
+      const d = inZone ? r.yLo - _lxRampY(r, wx) : pastSeam ? rise : 0;   // past the seam: level with the higher top; past the far end: not lifted
+      const lx = Math.max(0.5, Math.min(lo.w - 1.5, wx - 0.5 - lo.x)) + 2;   // the same x in the lower piece's bake (2px side pad)
+      c.drawImage(spr, lx * s, 0, s, (keep + d) * s, i, rise - d, 1, keep + d);
+    }
+    const fy = rise + PT + cap + 4, gr = c.createLinearGradient(0, fy, 0, fy + 6);   // fade the carried face into the unmoved one
+    gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,1)');
+    c.globalCompositeOperation = 'destination-out'; c.fillStyle = gr; c.fillRect(0, fy, bw, bh - fy);
+    b = r._bake = { spr, cv, bx0, by0: r.yHi - PT, bw, bh };
+  }
+  ctx.drawImage(b.cv, b.bx0 - cam, b.by0, b.bw, b.bh);
 }
 // Painterly grain: one seeded 96x96 value-noise tile, wrapped at the edges so it repeats without a
 // seam, composited in 'overlay' (mid-grey does nothing; lighter and darker blotches modulate).
@@ -76557,11 +76638,17 @@ function checkPlatformCollision(entity) {
   // def), never zodiac signs, whose arenas and movement are their own; ordinary mobs and the
   // player are byte-identical.
   const _ledgeMinW = (entity !== player && !entity.zodiacSign && (entity.isBoss || entity.boss)) ? entity.w * _LX_BOSS_LEDGE_MIN_FRAC : 0;
+  const _rmp = (entity.vy >= 0 && typeof _lxRampAt === 'function') ? _lxRampAt(entity.x + entity.w / 2) : null;   // v0.30.1272 - a ground ramp under the feet (_lxGroundRamps)
   for (const p of game.mapData.platforms) {
     if (entity.x + entity.w <= p.x || entity.x >= p.x + p.w) continue;
     if (_ledgeMinW && p.type !== 'ground' && p.w < _ledgeMinW) continue;   // v0.30.968 see _ledgeMinW
     if (p.type === 'ground') {
-      if (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
+      if (_rmp && (p === _rmp.r.lo || p === _rmp.r.hi)) {
+        // v0.30.1272 - on a ramp the surface is the ramp's; a walker already on the ground sticks to it going down (only from the
+        // higher top's level down, so nothing is ever pulled through a floating platform)
+        const _ft = entity.y + entity.h;
+        if (_ft < p.y + p.h + 20 && (_ft > _rmp.y || (prevOnGround && _ft > _rmp.y - 12 && _ft >= _rmp.r.yHi - 1))) { entity.y = _rmp.y - entity.h; entity.vy = 0; entity.onGround = true; }
+      } else if (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
           entity.y + entity.h > p.y && entity.y + entity.h < p.y + p.h + 20 &&
           entity.vy >= 0) {
         entity.y = p.y - entity.h; entity.vy = 0; entity.onGround = true;
@@ -129691,6 +129778,8 @@ function drawPlatforms() {
       _drawCutePlatform(sx, p.y, p.w, p.h, _ptf, false, _th, _lxPlatVariant(p) | (_lxPlatDepthCap(p) << 4));   // v0.30.628 - the room below rides in the variant   // v0.30.609 — one of three seeded variants
     }
   }
+  // v0.30.1272 - the ramps between stepped ground pieces (_lxGroundRamps), painted over each seam in the floor's cap
+  if (!(game.mapData && game.mapData.isVoid)) { const _rs = _lxGroundRamps(game.mapData); if (_rs) for (const r of _rs) _lxDrawRamp(r, _ptf, _th); }
   // v0.25.482 — outlinePlatforms post-pass. Strokes a 2 px near-black
   // border around every platform body for the underwater maps.
   // v0.25.772 — DISABLED. After v0.25.766 every map's floor + platform
