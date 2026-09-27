@@ -213,7 +213,9 @@
 // mournshade - so a returning browser's stale-while-revalidate cache would keep drawing the old monsters for a session.
 // v0.30.1236 - v86 -> v87. Sprites/fx/swing_{blockRhirhi,blockHupo,blockPopo,blockGary,towerWarden}.webp are REPLACED
 // under their own names (pop-style trails recoloured to the redesigned monsters), so a returning browser would keep the old ones.
-const CACHE = 'mojiworld-assets-v87';   // v0.30.1236 - pop swing trails
+// v0.30.x proj-pop - v87 -> v88. twelve Sprites/projectiles stills and 27 anim/ frames (mdark, splash, mtidemark) are REPLACED under their own names
+// (pop-punk redraw), so a returning browser would otherwise keep the old art until its cache refreshed.
+const CACHE = 'mojiworld-assets-v88';   // v0.30.x proj-pop - pop-punk projectiles + their loops (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
