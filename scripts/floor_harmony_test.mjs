@@ -36,24 +36,34 @@ try {
     const out = { maps: {}, keep: {} };
     for (const [k, v] of Object.entries(KEEP)) out.keep[k] = _MAP_FLOOR_PAL[k] ? [_MAP_FLOOR_PAL[k].top, _MAP_FLOOR_PAL[k].body] : null;
     const cv = document.getElementById('game'), g = cv.getContext('2d'), od = window._drawCutePlatform;
+    const mean = () => { const d = g.getImageData(0, 0, cv.width, cv.height).data; let r = 0, gg = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 16) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++; } return [r / n, gg / n, b / n]; };
+    const calm = () => { try { game.monsters.length = 0; player.hp = 1e7; game.paused = false; } catch (e) {} };
+    // the first map after boot fades in from black: spend that fade on a map we do not measure
+    try { closeAllModals(); } catch (e) {} loadMap('town', 400);
+    for (let i = 0; i < 20; i++) { calm(); await sleep(200); }
     for (const key of MAPSET) {
       const md = MAPS[key]; if (!md) { out.maps[key] = { err: 'no map' }; continue; }
       try { closeAllModals(); } catch (e) {} game.paused = false; player.hp = 1e7;
       loadMap(key, Math.min((md.width || md.worldWidth || 1600) * 0.35, 900));
-      for (let i = 0; i < 14; i++) { try { game.monsters.length = 0; player.hp = 1e7; game.paused = false; } catch (e) {} await sleep(170); }
+      // its painted backdrop must be in: until it lands the game draws a fallback sky, a different scene altogether
+      try { if (typeof _lxLazyWantMap === 'function') _lxLazyWantMap(key, true); } catch (e) {}
+      if (typeof _lxBackdropSettled === 'function') await Promise.race([_lxBackdropSettled(key), sleep(20000)]);
+      const bg = (md.bg && typeof BG_IMAGES !== 'undefined') ? BG_IMAGES[md.bg] : null, bgIn = !bg || bg._loaded || bg.naturalWidth > 0;
+      for (let i = 0; i < 12; i++) { calm(); await sleep(170); }   // and the veil lifts
       window._drawCutePlatform = function () {};
-      await sleep(300);
-      const d = g.getImageData(0, 0, cv.width, cv.height).data; let r = 0, gg = 0, b = 0, n = 0;
-      for (let i = 0; i < d.length; i += 16) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++; }
+      // measure once the scene has settled: three readings 200ms apart that agree within 2 levels
+      let m0 = mean(), m = m0, settled = false;
+      for (let i = 0; i < 30 && !settled; i++) { calm(); await sleep(200); m = mean(); settled = Math.abs(m[0] - m0[0]) + Math.abs(m[1] - m0[1]) + Math.abs(m[2] - m0[2]) < 2; m0 = m; }
       window._drawCutePlatform = od;
-      const hx = (v) => Math.round(v / n).toString(16).padStart(2, '0');
-      out.maps[key] = { scene: '#' + hx(r) + hx(gg) + hx(b), body: _MAP_FLOOR_PAL[key] && _MAP_FLOOR_PAL[key].body };
+      const hx = (v) => Math.round(v).toString(16).padStart(2, '0');
+      out.maps[key] = { scene: '#' + hx(m[0]) + hx(m[1]) + hx(m[2]), body: _MAP_FLOOR_PAL[key] && _MAP_FLOOR_PAL[key].body, settled, bgIn };
     }
     return out;
   }, { MAPSET, KEEP });
   for (const key of MAPSET) {
     const m = res.maps[key] || {};
-    if (m.err || !m.body) { ok(`${key}: its floor sits in its scene's colour`, false, m); continue; }
+    if (m.err || !m.body || !m.bgIn) { ok(`${key}: its floor sits in its scene's colour (backdrop loaded)`, false, m); continue; }
     const s = lab(m.scene), f = lab(m.body), dAB = Math.hypot(f[1] - s[1], f[2] - s[2]);
     ok(`${key}: its floor sits in its scene's colour (a*b* distance <= 10)`, dAB <= 10, { scene: m.scene, floorBody: m.body, dAB: +dAB.toFixed(1) });
   }
