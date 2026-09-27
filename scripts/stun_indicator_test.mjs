@@ -72,7 +72,7 @@ const r = await ev(async () => {
   const cFrozen = st(() => { player._cancerBubble = 0; player.stunTimer = 0; player.frozenTimer = 800; });
   const cBastion = st(() => { player.frozenTimer = 0; player._bastionArmedUntil = game.time + 600; });
   player._bastionArmedUntil = 0;
-  // 4. the banner text above the head
+  // 4. the banner text above the head (the sticker draws the label, then the seconds on its ink chip: read both)
   const texts = []; const _ft = CanvasRenderingContext2D.prototype.fillText;
   CanvasRenderingContext2D.prototype.fillText = function (t, x, y, mw) { texts.push(String(t)); return _ft.call(this, t, x, y, mw); };
   player.stunTimer = 1200;
@@ -90,7 +90,7 @@ const r = await ev(async () => {
   player._ctrlKind = null; player.stunTimer = 1000;
   try { _playerControlWatch(); _playerControlWatch(); _playerControlWatch(); } catch (e) {}
   window.showToast = _st; player.stunTimer = 0; player._ctrlKind = null;
-  return { afterTick, movedStunned, movedAfter, has, cStun, cBubble, cFrozen, cBastion, banner: texts.find((t) => /STUNNED/.test(t)) || null, rectsStunned, rectsCalm, toasts: toasts.filter((t) => /STUNNED/.test(t)).length };
+  return { afterTick, movedStunned, movedAfter, has, cStun, cBubble, cFrozen, cBastion, banner: (() => { const i = texts.findIndex((t) => /STUNNED/.test(t)); return i < 0 ? null : texts.slice(i, i + 2).join(' '); })(), rectsStunned, rectsCalm, toasts: toasts.filter((t) => /STUNNED/.test(t)).length };
 });
 ok('the stun counts down (1.5s stun is gone after 2s of ticks) — it used to be permanent', !r.err && r.afterTick <= 0, r.err || `stunTimer after 120 ticks: ${r.afterTick}`);
 ok('a stunned player cannot move; movement returns when it ends', !r.err && r.movedStunned < 2 && r.movedAfter > 8, r.err || `moved while stunned ${r.movedStunned}px, after ${r.movedAfter}px`);

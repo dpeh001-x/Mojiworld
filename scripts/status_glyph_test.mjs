@@ -4,7 +4,7 @@
 // show the status affliction".
 //
 // Every affliction the row and the control banner show is a small vector icon
-// in one style (dark disc, tinted rim, tinted glyph), drawn on the canvas at
+// in one style (a pop sticker: the tint disc in an ink ring on an ink offset, the glyph white on an ink keyline), drawn on the canvas at
 // any size/DPR. Static kinds bake once; the stun's stars spin live. Also
 // writes a strip of every glyph at 3x to STATUS_GLYPH_STRIP (default
 // scratch) so the set can be looked at.
@@ -102,21 +102,43 @@ const r = await ev((KINDS) => {
   const sg = strip.getContext('2d'); sg.fillStyle = '#1a1d25'; sg.fillRect(0, 0, strip.width, strip.height);
   const tints = { burn: '#ff8844', frozen: '#88ddff', chill: '#aaeeff', poison: '#aa66ee', slow: '#88aacc', ice: '#aaddff', shock: '#ffdd44', shield: '#ffe9a0', stun: '#ffd166', stagger: '#ffd166', bubble: '#66ccff', silence: '#ff99cc', bastion: '#ffe08a' };
   KINDS.forEach((k, i) => { _lxStatusGlyph(sg, k, 40 + i * 64, 38, 26, tints[k], 12); sg.fillStyle = '#cfd4dc'; sg.font = '11px sans-serif'; sg.textAlign = 'center'; sg.fillText(k, 40 + i * 64, 82); });
-  // second row: the on-character overlay composition at true scale (a 28x44 hero silhouette), bubbled / frozen / stunned
-  strip.height = 200; sg.fillStyle = '#1a1d25'; sg.fillRect(0, 0, strip.width, strip.height);
+  // second row: the on-character overlay at true scale, painted by the game's own _lxControlOverlayPaint on a silhouette as tall
+  // as the drawn chibi (a 28x44 box whose hair reaches ~46 px above it), bubbled / frozen / stunned
+  strip.height = 262; sg.fillStyle = '#1a1d25'; sg.fillRect(0, 0, strip.width, strip.height);
   KINDS.forEach((k, i) => { _lxStatusGlyph(sg, k, 40 + i * 64, 38, 26, tints[k], 12); sg.fillStyle = '#cfd4dc'; sg.font = '11px sans-serif'; sg.textAlign = 'center'; sg.fillText(k, 40 + i * 64, 82); });
-  const hero = (x, y) => { sg.fillStyle = '#3b2f2f'; sg.fillRect(x, y, 28, 44); sg.fillStyle = '#e0b08a'; sg.fillRect(x + 6, y + 2, 16, 14); sg.fillStyle = '#4a6fa5'; sg.fillRect(x + 4, y + 18, 20, 18); };
+  const hero = (x, y) => { sg.fillStyle = '#3b2f2f'; sg.beginPath(); sg.arc(x + 14, y - 16, 27, 0, Math.PI * 2); sg.fill(); sg.fillRect(x + 6, y + 30, 16, 14); sg.fillStyle = '#e0b08a'; sg.fillRect(x + 4, y - 20, 20, 22); sg.fillStyle = '#4a6fa5'; sg.fillRect(x + 4, y + 4, 20, 26); };
   [['bubble', 'Bubble Prison'], ['frozen', 'Frozen'], ['stun', 'Stunned']].forEach(([k, label], i) => {
-    const x = 60 + i * 170, y = 118; hero(x, y);
+    const x = 60 + i * 170, y = 176; hero(x, y);
     const cx = x + 14, cy = y + 22;
-    if (k === 'bubble') { const r = 44 * 0.78; const gr = sg.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r); gr.addColorStop(0, 'rgba(200,240,255,0.10)'); gr.addColorStop(0.75, 'rgba(120,200,255,0.16)'); gr.addColorStop(1, 'rgba(140,220,255,0.42)'); sg.fillStyle = gr; sg.beginPath(); sg.arc(cx, cy, r, 0, Math.PI * 2); sg.fill(); sg.lineWidth = 2; sg.strokeStyle = 'rgba(170,230,255,0.95)'; sg.stroke(); sg.lineWidth = 2.5; sg.strokeStyle = 'rgba(255,255,255,0.8)'; sg.beginPath(); sg.arc(cx, cy, r * 0.72, Math.PI * 1.12, Math.PI * 1.5); sg.stroke(); }
-    if (k === 'frozen') { sg.fillStyle = 'rgba(150,220,255,0.28)'; sg.strokeStyle = 'rgba(200,240,255,0.9)'; sg.lineWidth = 2; sg.beginPath(); sg.rect(x - 4, y - 4, 36, 52); sg.fill(); sg.stroke(); }
-    sg.globalAlpha = 0.92; _lxStatusGlyph(sg, k, cx, y + 44 * 0.38, 16, tints[k], 12); sg.globalAlpha = 1;
-    sg.fillStyle = '#cfd4dc'; sg.font = '11px sans-serif'; sg.textAlign = 'center'; sg.fillText(label + ' — on the character, 1x', cx, 190);
+    if (typeof _lxControlOverlayPaint === 'function') _lxControlOverlayPaint(sg, k, x, y, 28, 44, 12, tints[k]);
+    sg.fillStyle = '#cfd4dc'; sg.font = '11px sans-serif'; sg.textAlign = 'center'; sg.fillText(label + ' — on the character, 1x', cx, 252);
   });
   document.body.appendChild(strip);
   return { has, ops, dupes, spins, texts: texts.slice(0, 8), emojiText, bakeKeys, ovErr, bubbleArcMax, bubbleGlyph, calmArcs, calmGlyphs, ph: player.h || 40 };
 }, KINDS);
+// POP PUNK (per user: "Can have a more pop design for the status afflictions", and of the ice box "instead of the
+// rectangle can think of a better design POP PUNK style"): the sticker wears the affliction's colour, the ice is a
+// faceted chunk round the whole drawn figure, and the overhead stack clears the face. The build before fails all three.
+const pop = await ev(() => {
+  const out = {};
+  const c = document.createElement('canvas'); c.width = 24; c.height = 24; const g = c.getContext('2d');
+  _lxStatusGlyph(g, 'burn', 12, 12, 10, '#ff8844', 0); out.disc = Array.from(g.getImageData(4, 12, 1, 1).data);
+  if (typeof _lxControlOverlayPaint === 'function') {
+    const c2 = document.createElement('canvas'); c2.width = 300; c2.height = 300; const g2 = c2.getContext('2d');
+    let lines = 0; const _l = g2.lineTo; g2.lineTo = function () { lines++; return _l.apply(this, arguments); };
+    _lxControlOverlayPaint(g2, 'frozen', 136, 120, 28, 44, 12, '#88ddff');
+    out.iceLines = lines; out.iceHead = g2.getImageData(150, 120 - 36, 1, 1).data[3];
+  }
+  const draws = [], texts = []; const P = CanvasRenderingContext2D.prototype, _di = P.drawImage, _ft = P.fillText;
+  const k = (typeof W === 'number' && W > 0) ? ctx.canvas.width / W : 1;
+  P.drawImage = function (im, x, y) { if (this === ctx && arguments.length >= 5) draws.push(y); return _di.apply(this, arguments); };
+  P.fillText = function (t, x, y) { if (this === ctx) { const m = this.getTransform(); texts.push({ t: String(t), y: (m.b * x + m.d * y + m.f) / k }); } return _ft.apply(this, arguments); };
+  player.burnTimer = 900; player.stunTimer = 1200; player._ctrlKind = null;
+  try { _drawPlayerStatusIcons(200, 300); } finally { P.drawImage = _di; P.fillText = _ft; player.burnTimer = 0; player.stunTimer = 0; player._ctrlKind = null; }
+  out.rowTop = draws.length ? Math.min(...draws) : null; out.rowBottom = draws.length ? Math.max(...draws) + 20 : null;
+  const lab = texts.find((x) => /STUNNED/.test(x.t)); out.bannerY = lab ? Math.round(lab.y) : null;
+  return out;
+});
 ok('in a Bubble Prison the overlay draws a sphere around the whole sprite and the bubble glyph at 32px over the chest', !r.err && !r.ovErr && r.bubbleArcMax >= (r.ph || 40) * 0.7 && r.bubbleGlyph && r.bubbleGlyph.r >= 14,
   r.err || r.ovErr || `sphere r ${r.bubbleArcMax} (sprite h ${r.ph}); glyph ${JSON.stringify(r.bubbleGlyph)}`);
 ok('the overlay draws nothing when nothing afflicts the player', !r.err && !r.ovErr && r.calmArcs === 0 && r.calmGlyphs === 0, r.err || r.ovErr || `calm arcs ${r.calmArcs} glyphs ${r.calmGlyphs}`);
@@ -127,6 +149,9 @@ ok("the stun's stars spin (two frames differ)", !r.err && r.spins, r.err || `spi
 ok('the status row draws no emoji text any more', !r.err && r.emojiText && r.emojiText.length === 0, r.err || `emoji drawn: ${r.emojiText && r.emojiText.join(' | ')}`);
 ok('the banner label still says STUNNED', !r.err && r.texts && r.texts.some((t) => /STUNNED/.test(t)), r.err || JSON.stringify(r.texts));
 ok('static icons bake once per kind (burn + silence baked, stun drawn live)', !r.err && r.bakeKeys && r.bakeKeys.some((k) => /^burn\|/.test(k)) && r.bakeKeys.some((k) => /^silence\|/.test(k)) && !r.bakeKeys.some((k) => /^stun\|/.test(k)), r.err || JSON.stringify(r.bakeKeys));
+ok('the glyph sticker wears the affliction colour (the disc is the tint, not a dark disc)', !pop.err && pop.disc && pop.disc[0] > 200 && pop.disc[1] > 100 && pop.disc[2] < 120, pop.err || JSON.stringify(pop.disc));
+ok('the frozen overlay is a faceted ice chunk round the whole figure (10+ corners, up over the head), not a box', !pop.err && pop.iceLines >= 10 && pop.iceHead > 0, pop.err || `corners ${pop.iceLines}, alpha over the head ${pop.iceHead}`);
+ok('the overhead stack clears the face: the status row sits over the head (sy - 40 or higher) and the banner over the row', !pop.err && pop.rowBottom != null && pop.rowBottom <= 300 - 40 && pop.bannerY != null && pop.bannerY < pop.rowTop, pop.err || `row ${pop.rowTop}..${pop.rowBottom} for sy 300, banner label at ${pop.bannerY}`);
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 try { const el = await page.$('#_glyph_strip'); if (el) { await el.screenshot({ path: STRIP }); console.log('strip -> ' + STRIP); } } catch (e) { console.log('strip failed: ' + e); }
 // the overlay on the real character, rendered by the live frame: bubbled for a moment
