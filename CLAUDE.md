@@ -343,8 +343,8 @@ Buckets:
   **A stale index means art on disk that the game never asks for** — so treat
   the regenerate as part of the drop, not an afterthought.
 - `tools/` — dev tools: the six standalone pages (`sprite_maker`, `sprite_preview`, `map_editor`, `map_placement_tool`, `monster_sound_review`, `zodiac_vfx_review`) plus calibration/asset utilities and `tools/launcher/` (the csc source for `Mojiworld.exe`). A tool page that reads repo-root art needs `<base href="../">` in its `<head>` — that is how `zodiac_vfx_review` keeps its 430 `Sprites/` URLs working from a subdirectory.
-- `tools/_archive/` — 104 one-off scripts (`_patch_*`, `_chlog_*`, `_b60_*`, `_bake_*`, `_gen_*`, `_forge_ui_*`, `_dev_*`) archived 2026-08-03. Each ran once; none is wired into the game, the build or any test. They were 68% of `tools/`, so finding a real tool meant reading past them. Most `_patch_*` files are already unrunnable — they hardcode `C:/Users/Xenon/Desktop/Mojiworld/…`, a machine this repo has not lived on. **Do not add new one-offs to `tools/` root** — either write them under `tools/_archive/` or use `scripts/_tmp_*` (gitignored). See `tools/_archive/README.md`.
-- `scripts/` — build, bake and test utilities. `_tmp_*` is gitignored scratch.
+- `tools/_archive/` — removed 2026-09-27 (per user: stale one-offs; recoverable from git history). Only `_equip_rows.json` stays, the equipment table `scripts/generate_equipment_sprites.mjs` and `tools/gen_equip_prompts.js` read. **Do not add one-off scripts to `tools/` or `scripts/`** — use `scripts/_tmp_*` (gitignored).
+- `scripts/` — build, bake and test utilities. `_tmp_*` is gitignored scratch. The one-off `apply_*` / `apply_changelog_*` patch scripts were removed 2026-09-27 (each had run once); a patch that is kept on purpose must be named by a doc, a skill or another script.
 - `docs/prompts/` — asset-generation prompt libraries (ludo.ai, Gemini, audio) + production .docx.
 - `docs/design/` — specs, lore, balance, roadmaps.
 - `docs/reports/` — audits, playtest reports, session summaries.
