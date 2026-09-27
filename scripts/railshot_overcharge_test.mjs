@@ -169,6 +169,7 @@ try {
       return ringSizes();
     };
     o.busyRings = await busyRelease();
+    o.busyRail = (game.smoothFx || []).filter((f) => f.spriteKey === 'railshot').length;   // v0.30.1297 - read in the same turn as the rings
     return o;
   });
   const ratio = (a, b) => (b ? +(a / b).toFixed(2) : 0);
@@ -195,6 +196,7 @@ try {
   ok('a ring is up the whole time the key is held', wf.gaps === 0 && wh.gaps === 0, show(wf) + ' ' + show(wh));
   ok('the very-low FX tier thins the rings instead of deleting them', wl.gaps === 0 && wl.rings >= 2 && wl.rings / wl.ticks < 0.6 * (wf.rings / wf.ticks), show(wl));
   ok('in a busy fight the release rings outlive the fx cap', r.busyRings.length >= 2 && big(r.busyRings) >= 650, r.busyRings.join(', ') || 'evicted');
+  ok('...and so does the rail sprite itself', r.busyRail >= 1, String(r.busyRail));   // v0.30.1297
   ok('no page errors', errs.length === 0, errs.join(' | '));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass}/${pass + fail} checks passed`);
