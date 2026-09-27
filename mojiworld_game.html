@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1299';
+const GAME_VERSION = 'v0.30.1300';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -42557,6 +42557,23 @@ function _lxShotKnock(p, tier) {
   const mul = (LX_KB_TIER_MUL[tier] || 1) * ((p.skill === 'swing' || p.skill === 'smash') ? LX_KB_HEAVY : 1);
   _lxStrikeKnock(dx, dy, LX_KB_SHOT * mul, mul, away);
 }
+// v0.30.1300 spire-knock - AN AUTHORED KNOCKBACK COUNTS (per user, v0.26.127: the Clockwork Spire's fireballs "may have a
+// heavy knockback to player to push him or her out of the platform"). The fireball declared `knockback: 18` and nothing
+// ever read the field: measured, a hit carried the player 10.8 px on platforms 115-250 px wide. A projectile that
+// declares knockback > 0 now throws the player along its flight at that many px a frame, before the player's own
+// reducers and the clamps in _lxStrikeKnock. It outranks the shooter's weight: it is the attack's own statement.
+const LX_KB_AUTHORED_MAX = 30;
+function _lxAuthoredKnock(p) {
+  if (!p || typeof player === 'undefined' || !player) return false;
+  const kb = Math.min(LX_KB_AUTHORED_MAX, +p.knockback);
+  if (!(kb > 0)) return false;
+  const away = ((player.x + player.w / 2) >= (+p.x || 0) + (+p.w || 0) / 2) ? 1 : -1;
+  let dx = +p.vx || 0, dy = +p.vy || 0;
+  if (!(Math.hypot(dx, dy) >= 0.75)) { dx = away; dy = 0; }
+  _lxStrikeKnock(dx, dy, kb, Math.max(1, kb / (LX_KB_TOUCH * 2)), away);
+  return true;
+}
+try { window._lxAuthoredKnock = _lxAuthoredKnock; } catch (e) {}
 try { window._lxKbTier = _lxKbTier; window._lxProjKbTier = _lxProjKbTier; window._lxStrikeKnock = _lxStrikeKnock; window._lxBodyKnock = _lxBodyKnock; window._lxShotKnock = _lxShotKnock; } catch (e) {}
 function getCritDmg(){
   // v0.26.395 — include equipment critDmg (was a DEAD stat: T7-T10 weapons/
@@ -56427,7 +56444,7 @@ function _coopTickProjectiles() {
 // shot's first frames and on each keyframe (the guest keeps them on its copy), so a volley costs its bytes once.
 const _COOP_PJ_XF = ['_defPierce', '_ignoreDef', '_heavyFloorPct', '_srcType', '_gravBand', '_bossBand', '_healLockMs', '_sourceLabel',
   'sourceLabel', '_zodiacSign', '_radiance', '_impactMs', '_impactShake', 'freeze', 'poison', '_poisonDmg', 'slow', 'skillLock',
-  'stunHit', '_kbTier', '_zoneAttack', 'pierce', '_noEvasion', 'noGravity'];   // v0.30.1293 strike-knock - _kbTier: a guest is thrown as far as the host (kept off the list's tail: two suites pin it)   // v0.30.1013 a guest's weight wave rides the floor too   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
+  'stunHit', '_kbTier', 'knockback', '_zoneAttack', 'pierce', '_noEvasion', 'noGravity'];   // v0.30.1293 strike-knock - _kbTier: a guest is thrown as far as the host (kept off the list's tail: two suites pin it)   // v0.30.1013 a guest's weight wave rides the floor too   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
 function _coopPjVal(v) {   // numbers, short strings, booleans, and one level of those (bands, radiance)
   if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
   if (typeof v === 'string') return v.slice(0, 80);
@@ -108224,7 +108241,8 @@ function updateProjectiles(dt) {
         // v0.30.1293 strike-knock - a strong attacker's shot or swing carries the player along its own flight
         // (see _lxShotKnock). An ordinary monster's shot keeps the nudge below, to the number.
         const _kbTier = _lxProjKbTier(p);
-        if (_kbTier > 0) _lxShotKnock(p, _kbTier);
+        if (_lxAuthoredKnock(p)) { /* v0.30.1300 spire-knock - the shot's own authored throw (see _lxAuthoredKnock) */ }
+        else if (_kbTier > 0) _lxShotKnock(p, _kbTier);
         else {
         player.vx = dir * 1 * kbMul;
         player.vy = -1.2 * kbMul;
@@ -116455,9 +116473,11 @@ function updateSpireFireballs(dt) {
   const vx = fromLeft ? 7 : -7;
   // Push the fireball as an enemy projectile via the existing pipeline
   // so collision / damage / draw all work without new render code.
-  // `knockback` is the standard projectile-knockback field (see hit
-  // handler at L~33000-area); 18 is roughly 2× a normal mob projectile
-  // — enough to launch the player off a 4-tile wide spire platform.
+  // v0.30.1300 spire-knock - `knockback` is the throw, in px a frame along the fireball's flight (_lxAuthoredKnock).
+  // TUNED TO CLEAR A PLATFORM FROM ITS MIDDLE: the Spire's floors are 115-250 px wide, so the widest needs 139 px.
+  // Measured, a mage thrown at 11 travels 226-232 px with no input and 206 px holding back against it; 9 falls 1 px
+  // short on the widest floor when the player holds back, and the old 18 (14 after the clamp) flung 245-305 px.
+  // Jumping the fireball, a block (half the throw) and a warrior's footing (x0.4) are the answers to it.
   game.projectiles.push({
     x: sx, y: aimY, vx, vy: 0,
     w: 22, h: 18, life: 200,
@@ -116466,7 +116486,7 @@ function updateSpireFireballs(dt) {
     skill: 'fire',
     color: '#ff7a22',
     noGravity: true,
-    knockback: 18,
+    knockback: 11,
     burnChance: 0.5, burnDmg: 4,
   });
   // Telegraph the spawn with a small particle puff at the spawn edge so
