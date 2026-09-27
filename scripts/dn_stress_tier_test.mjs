@@ -25,6 +25,7 @@ try {
   const page = await ctx.newPage(); const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof drawDamageNumbers === 'function' && typeof _LX_DN_ATLAS !== 'undefined', null, { timeout: 180000 });
+  await page.evaluate(() => { try { _LX_DN_WORKER_ON = false; } catch (e) {} });   // v0.30.1239 the Worker atlas build lands a frame or more later; this test reads atlases the same frame
   await page.evaluate(async () => {
     try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }

@@ -16045,7 +16045,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1238';
+const GAME_VERSION = 'v0.30.1239';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -157942,6 +157942,56 @@ function _lxDnTaken(d, txt) { return !!(d && d.taken) && !d.crit && _LX_DN_FIG.t
 // One ROW PER PASS of the live path (shadow, halo, outline, rim, fill + highlight): drawn row by row across the
 // whole number, a digit's halo can never tint its neighbour's outline, exactly as when each pass was one call.
 let _LX_DN_ATLAS_ON = true;
+// v0.30.1239 FIGHT LAG - FIGURE ATLASES ARE BUILT ON A WORKER. An atlas build was the single biggest hitch in a fight: at 4x
+// CPU 44-105 ms of main thread per atlas (~11 ms to record the strokes, ~30 ms to raster and upload them on first draw),
+// ~60 of them in a 12 s mob fight. The Worker runs this file's own _lxDnAtlasBuild (with _lxPlainGrad and _mixHex),
+// stringified here, on an OffscreenCanvas and hands back an ImageBitmap: the main thread pays ~0.3 ms to post and
+// ~0.3 ms to draw it, and the pixels are the build's own. Until it lands the number draws live, as it always did
+// while its atlas was not built yet. _LX_DN_WORKER_ON = false builds on the main thread (a test that reads an atlas
+// the same frame); a job that fails builds there next time; a Worker error or six failures retire the Worker.
+let _LX_DN_WORKER_ON = true;
+var _LX_DN_W = null, _lxDnWDead = false, _lxDnWFails = 0;
+const _lxDnWPend = new Map(), _lxDnWSync = new Set();
+// the originals, captured as the script loads: a probe or test that wraps one later must not become the Worker source
+var _lxDnWSrc = [_mixHex, _lxPlainGrad, _lxDnAtlasBuild];
+function _lxDnAtlasFree(cv) { try { if (cv && typeof cv.close === 'function') cv.close(); else if (cv) cv.width = cv.height = 0; } catch (e) {} }
+function _lxDnWorker() {
+  if (_LX_DN_W) return _LX_DN_W;
+  if (_lxDnWDead) return null;
+  try {
+    if (typeof Worker !== 'function' || typeof OffscreenCanvas !== 'function' || typeof OffscreenCanvas.prototype.transferToImageBitmap !== 'function' || typeof Blob !== 'function' || typeof URL === 'undefined' || !URL.createObjectURL) { _lxDnWDead = true; return null; }
+    if (!['_mixHex', '_lxPlainGrad', '_lxDnAtlasBuild'].every((n, i) => String(_lxDnWSrc[i]).indexOf('function ' + n + '(') === 0)) { _lxDnWDead = true; return null; }
+    const src = [
+      'const document = { createElement: function () { return new OffscreenCanvas(1, 1); } };',
+      'const _dnPlainGrad = new Map();',
+      'const _LX_DN_ATLAS_CHARS = ' + JSON.stringify(_LX_DN_ATLAS_CHARS) + ';',
+      _lxDnWSrc[0].toString(), _lxDnWSrc[1].toString(), _lxDnWSrc[2].toString(),
+      'onmessage = function (e) { const j = e.data; let at = null; try { at = _lxDnAtlasBuild(j.b0, j.px, j.baseSize, j.d, j.col, j.tk, j.lowFx, j.stress, j.dpr); } catch (err) { at = null; }',
+      '  if (!at || !at.cv || !at.cv.width) { postMessage({ key: j.key, fail: 1 }); return; }',
+      '  let bm = null; try { bm = at.cv.transferToImageBitmap(); } catch (err) { postMessage({ key: j.key, fail: 1 }); return; }',
+      '  postMessage({ key: j.key, bm: bm, cells: Array.from(at.cells.entries()), pad: at.pad, base: at.base, cellH: at.cellH, rowH: at.rowH, rows: at.rows, dpr: at.dpr, px: at.px }, [bm]); };',
+    ].join('\n');
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    w.onmessage = (e) => { try { _lxDnWAdopt(e.data); } catch (err) {} };
+    w.onerror = () => { _lxDnWDead = true; _LX_DN_W = null; _lxDnWPend.clear(); try { w.terminate(); } catch (err) {} };
+    _LX_DN_W = w;
+  } catch (e) { _lxDnWDead = true; _LX_DN_W = null; }
+  return _LX_DN_W;
+}
+// A finished job joins the cache as a built atlas would (same entry shape, cv an ImageBitmap), under the same budget.
+function _lxDnWAdopt(m) {
+  if (!m || !m.key) return;
+  _lxDnWPend.delete(m.key);
+  if (m.fail) { _lxDnWSync.add(m.key); if (++_lxDnWFails >= 6) _lxDnWDead = true; return; }
+  if (_LX_DN_ATLAS.get(m.key)) { _lxDnAtlasFree(m.bm); return; }
+  const at = { cv: m.bm, cells: new Map(m.cells), pad: m.pad, base: m.base, cellH: m.cellH, rowH: m.rowH, rows: m.rows, dpr: m.dpr, px: m.px };
+  _LX_DN_ATLAS.set(m.key, at); _lxDnAtlasPx += at.px;
+  for (const k of _LX_DN_ATLAS.keys()) {
+    if (_lxDnAtlasPx <= _LX_DN_ATLAS_MAX_PX || k === m.key) break;
+    const old = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k);
+    if (old) { _lxDnAtlasPx -= old.px; _lxDnAtlasFree(old.cv); }
+  }
+}
 const _LX_DN_ATLAS_CHARS = '0123456789,★';
 const _LX_DN_ATLAS_OK = /^[0-9,]+★?$/;
 const _LX_DN_ATLAS = new Map();            // key -> atlas; insertion order is the LRU order
@@ -157960,7 +158010,7 @@ function _lxDnAtlasTrim(lowPx) {
     for (const k of [..._LX_DN_ATLAS.keys()]) {
       if (_lxDnAtlasPx <= low) break;
       const old = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k);
-      if (old) { _lxDnAtlasPx -= old.px; freed += old.px; if (old.cv) old.cv.width = old.cv.height = 0; }
+      if (old) { _lxDnAtlasPx -= old.px; freed += old.px; _lxDnAtlasFree(old.cv); }   // v0.30.1239 a Worker atlas is an ImageBitmap
     }
     return freed;
   } catch (e) { return 0; }
@@ -157999,6 +158049,19 @@ function _lxDnAtlasGet(b0, px, baseSize, d, col, tk, lowFx, stress, dpr) {
     if (at) { _LX_DN_ATLAS.delete(key); _LX_DN_ATLAS.set(key, at); }   // most recently used goes last
     return at;
   }
+  // v0.30.1239 FIGHT LAG - built on the Worker (see _LX_DN_WORKER_ON): post once, draw live until it lands. A job out for
+  // 2 s is taken as lost and this key builds here; so does a key whose job failed.
+  const _pt = _lxDnWPend.get(key);
+  if (_pt !== undefined) { if (performance.now() - _pt < 2000) return null; _lxDnWPend.delete(key); _lxDnWSync.add(key); }
+  const _w = (_LX_DN_WORKER_ON && !_lxDnWSync.has(key)) ? _lxDnWorker() : null;
+  if (_w) {
+    if (_lxDnWPend.size < 24) {
+      _lxDnWPend.set(key, performance.now());
+      try { _w.postMessage({ key, b0, px, baseSize, d: { crit: !!d.crit, big: !!d.big }, col, tk: !!tk, lowFx: !!lowFx, stress: !!stress, dpr }); }
+      catch (e) { _lxDnWPend.delete(key); _lxDnWSync.add(key); }
+    }
+    return null;
+  }
   if (_lxDnAtlasBudget <= 0) return null;   // not this frame: the caller draws live, as it always did
   _lxDnAtlasBudget--;
   at = _lxDnAtlasBuild(b0, px, baseSize, d, col, tk, lowFx, stress, dpr);
@@ -158008,7 +158071,7 @@ function _lxDnAtlasGet(b0, px, baseSize, d, col, tk, lowFx, stress, dpr) {
     for (const k of _LX_DN_ATLAS.keys()) {
       if (_lxDnAtlasPx <= _LX_DN_ATLAS_MAX_PX || k === key) break;
       const old = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k);
-      if (old) { _lxDnAtlasPx -= old.px; old.cv.width = old.cv.height = 0; }
+      if (old) { _lxDnAtlasPx -= old.px; _lxDnAtlasFree(old.cv); }   // v0.30.1239 a Worker atlas is an ImageBitmap
     }
   }
   return at;
@@ -158143,7 +158206,7 @@ function _lxGbAtlasGet(b0, px, crit, col, stress, dpr) {
     for (const k of _LX_DN_ATLAS.keys()) {
       if (_lxDnAtlasPx <= _LX_DN_ATLAS_MAX_PX || k === key) break;
       const old = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k);
-      if (old) { _lxDnAtlasPx -= old.px; old.cv.width = old.cv.height = 0; }
+      if (old) { _lxDnAtlasPx -= old.px; _lxDnAtlasFree(old.cv); }   // v0.30.1239 a Worker atlas is an ImageBitmap
     }
   }
   return at;

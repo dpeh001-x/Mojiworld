@@ -24,6 +24,7 @@ try {
   await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
   await page.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof drawDamageNumbers === 'function', null, { timeout: 120000 });
+  await page.evaluate(() => { try { _LX_DN_WORKER_ON = false; } catch (e) {} });   // v0.30.1239 the Worker atlas build lands a frame or more later; this test reads atlases the same frame
   await page.evaluate(() => {
     for (const id of ['loading-overlay', 'class-select-modal', 'lo-auth']) { const o = document.getElementById(id); if (o) { o.style.display = 'none'; o.classList.add('fade'); } }
     window._lxBootGateDone = true; window._prologueActive = false;
