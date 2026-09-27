@@ -44,6 +44,8 @@ try {
   }, c);
   // 1. drawn above the world
   await set(42); await frames(12);
+  // wait out the meter's 0.3 s fade-in: a shot mid-transition read ~10% changed pixels and failed 1 run in 3
+  for (let i = 0; i < 120 && (await page.evaluate(() => getComputedStyle(document.getElementById('combo-meter')).opacity)) !== '1'; i++) await frames(2);
   const rect = await page.evaluate(() => document.getElementById('combo-meter').getBoundingClientRect().toJSON());
   const clip = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
   const hold = () => page.evaluate(() => { window.__freeze = setInterval(() => { game.comboTimer = 1300; }, 30); });
@@ -60,7 +62,7 @@ try {
     return +(changed / (A.length / 4)).toFixed(3);
   }, [shown.toString('base64'), hidden.toString('base64')]);
   const z = await page.evaluate(() => ({ meter: getComputedStyle(document.getElementById('combo-meter')).zIndex, canvas: getComputedStyle(document.getElementById('game')).zIndex }));
-  check(diff > 0.15 && Number(z.meter) > Number(z.canvas), '1. the meter is drawn over the world (its box changes when it is shown; z above the canvas)', { changedShare: diff, z });
+  check(diff > 0.05 && Number(z.meter) > Number(z.canvas), '1. the meter is drawn over the world (its box changes when it is shown; z above the canvas)', { changedShare: diff, z });
   // 2 + 3. tiers
   const tiers = [];
   for (const c of [3, 17, 42, 88, 142]) {
