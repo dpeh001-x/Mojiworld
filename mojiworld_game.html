@@ -13230,6 +13230,19 @@ Current ACC: 0
        Toggled once per acquisition/death, never per frame. */
     #map-label.boss-veiled { opacity: 0; transform: translateX(-50%) translateY(-12px); pointer-events: none; }
   </style>
+  <style>
+    /* v0.30.1191 hud-clear - THE HUD MAKES WAY: a right-hand panel with the hero or a portal under it fades (see
+       _lxHudClearTick). Clicks still land on it, and pointing at it brings it back. */
+    .lx-hud-yield { opacity: 0.3 !important; transition: opacity 180ms ease; }
+    .lx-hud-yield:hover { opacity: 1 !important; }
+    /* v0.30.1191 hud-clear - PHONES: the menu row (MAP ... CHAT) is fixed to the SCREEN's top edge (14 px + a 46-50 px
+       button) but these live in the scaled 960x560 game box, where they landed under it. They drop below the row:
+       68 screen px = 68 / --game-scale box px. The Multi chip and the affix chip share that line, the tracker sits under it. */
+    body.mc-landscape:not(.hide-mobile-ctrl) #map-label { top: calc((68px + env(safe-area-inset-top, 0px)) / var(--game-scale, 1)); }
+    body.mc-landscape:not(.hide-mobile-ctrl) #world-affix-pin { top: calc((68px + env(safe-area-inset-top, 0px)) / var(--game-scale, 1)); right: calc(44px + env(safe-area-inset-right, 0px)); }
+    body.mc-landscape:not(.hide-mobile-ctrl) #mp-btn { top: calc((68px + env(safe-area-inset-top, 0px)) / var(--game-scale, 1)) !important; right: calc(10px + env(safe-area-inset-right, 0px)) !important; }
+    body.mc-landscape:not(.hide-mobile-ctrl) #quest-tracker { top: calc((68px + env(safe-area-inset-top, 0px)) / var(--game-scale, 1) + 32px); }
+  </style>
   <div id="map-label">The Void</div>
 
   <div id="tower-hud" style="display:none"></div>
@@ -15981,7 +15994,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1190';
+const GAME_VERSION = 'v0.30.1191';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -121468,6 +121481,28 @@ function openHelp() {
 // Smaller font, drift-up fade animation, rarity-tinted border. Stacks up to
 // 4 pills before evicting the oldest. Auto-removes via CSS animation +
 // JS-side timeout for double-safety.
+// v0.30.1191 hud-clear - the pills' own spot (bottom:182, right:10) is the quest tracker's too. When it overlaps the tracker
+// the zone moves just above it (room for four pills below the top-right chips), else beside it; measured when a pill is
+// added and cached until the tracker or the window changes. No tracker, or a tracker dragged away: the CSS spot.
+let _lxCzKey = null;
+function _lxCoinZoneClear(host) {
+  try {
+    const qt = document.getElementById('quest-tracker'), qr = qt ? qt.getBoundingClientRect() : null;
+    const on = !!(qr && qr.width > 0 && qr.height > 0);
+    const key = on ? [qr.left, qr.top, qr.right, qr.bottom, innerWidth, innerHeight].map(Math.round).join(',') : '';
+    if (key === _lxCzKey) return;
+    _lxCzKey = key; host.style.bottom = ''; host.style.right = '';
+    if (!on) return;
+    const P = host.offsetParent, pr = P && P.getBoundingClientRect(); if (!pr || !(P.offsetWidth > 0)) return;
+    const k = pr.width / P.offsetWidth, hr = host.getBoundingClientRect();
+    const x0 = hr.right - Math.max(hr.width, 150 * k), y0 = hr.bottom - 4 * 24 * k;   // four pills stack up from the bottom-right corner
+    if (!(x0 < qr.right + 4 * k && hr.right > qr.left - 4 * k && y0 < qr.bottom + 4 * k && hr.bottom > qr.top - 4 * k)) return;
+    const cs = getComputedStyle(host), b0 = parseFloat(cs.bottom) || 0, r0 = parseFloat(cs.right) || 0;
+    const above = qr.top - 6 * k - 4 * 24 * k >= pr.top + 96 * k;
+    const by = above ? qr.top - 6 * k : qr.bottom, rx = above ? qr.right : qr.left - 8 * k;
+    host.style.bottom = (b0 + (hr.bottom - by) / k).toFixed(1) + 'px'; host.style.right = (r0 + (hr.right - rx) / k).toFixed(1) + 'px';
+  } catch (e) {}
+}
 function showCoinToast(amt, rarity) {
   const host = document.getElementById('coin-toast-zone');
   if (!host) return;
@@ -121481,6 +121516,7 @@ function showCoinToast(amt, rarity) {
   if (rarity) t.setAttribute('data-rarity', rarity);
   t.innerHTML = `<span class="coin-amt">+${amt}</span><span class="coin-icon">🪙</span>`;
   host.appendChild(t);
+  _lxCoinZoneClear(host);   // v0.30.1191 hud-clear
   setTimeout(() => { if (t && t.parentNode) t.parentNode.removeChild(t); }, 3200);
 }
 // v0.26.061 — Per user "Could you provide the amount of EXP and Mojicoin
@@ -121540,6 +121576,7 @@ function showKillToast(expGain, mojicoinGain) {
     `<span class="kill-sep">·</span>` +
     `<span class="coin-amt">+${_moj}</span><span class="coin-icon">🪙</span>` + _ks;
   host.appendChild(t);
+  _lxCoinZoneClear(host);   // v0.30.1191 hud-clear
   host._lxAgg = { t: _tNow, el: t, exp: _exp, moj: _moj };   // v0.30.277 — same-frame merge target
   setTimeout(() => { if (t && t.parentNode) t.parentNode.removeChild(t); }, 3200);
 }
@@ -130747,6 +130784,68 @@ function _lxPortalArrow(name, x) {
   const a = f <= 0.4 ? '◀' : '▶';
   return /^[◀▶]/.test(name) ? a + name.slice(1) : name.slice(0, -1) + a;
 }
+// v0.30.1191 hud-clear - THE HUD MAKES WAY. Every 6th frame: the hero's drawn box (art + name tag, wider than the hitbox) and
+// every on-screen portal (+ its plate while it shows) go to screen px through the camera; a listed panel over any of them
+// gets lx-hud-yield (opacity 0.3), with 10 px of hysteresis so an edge does not flicker. Panel and canvas rects are
+// re-read every 30 frames only (they move on resize, a drag or a new tracker row), so the tick forces no layout.
+const _LX_HUD_YIELD_IDS = ['quest-tracker', 'hotkey-hint', 'taxi-btn', 'minimap', 'world-affix-pin', 'pq-objective-pin', 'lx-corner'];
+let _lxHcN = 0, _lxHcRectN = -1e9, _lxHcRects = null, _lxHcCv = null;
+function _lxHudClearTick() {
+  if ((++_lxHcN) % 6) return;
+  try {
+    if (typeof game === 'undefined' || !game || !game.camera || typeof player === 'undefined' || !player) return;
+    if (!_lxHcRects || _lxHcN - _lxHcRectN >= 30) {
+      _lxHcRectN = _lxHcN; _lxHcRects = []; const cv = document.getElementById('game'); _lxHcCv = cv ? cv.getBoundingClientRect() : null;
+      for (const id of _LX_HUD_YIELD_IDS) { const el = document.getElementById(id); if (!el) continue; const r = el.getBoundingClientRect(); _lxHcRects.push([el, (r.width > 0 && r.height > 0) ? r : null]); }
+    }
+    const R = _lxHcCv; if (!R || !(R.width > 0)) return;
+    const k = R.width / W, cx = game.camera.x || 0, cy = game.camera.y || 0;
+    const box = (x, y, w, h) => [R.left + (x - cx) * k, R.top + (y - cy) * k, R.left + (x + w - cx) * k, R.top + (y + h - cy) * k];
+    const T = [box(player.x - 22, player.y - 48, player.w + 44, player.h + 70)];
+    const pcx = player.x + player.w / 2, pfy = player.y + player.h;
+    for (const po of (game.portals || [])) {
+      const sx = po.x - cx; if (sx + 110 < 0 || sx - 110 > W) continue;
+      const fy = (typeof po.y === 'number') ? po.y : ((typeof _defaultPortalY === 'function') ? _defaultPortalY(po.x) : 480);
+      T.push(box(po.x - 56, fy - 142, 112, 142));
+      if (Math.abs(pcx - po.x) < 100 && Math.abs(pfy - fy) < 120) { const lw = po._lblW || 150, lh = po._lblH || 46; T.push(box(po.x - lw / 2, _lxPortalLblTop(fy, lh, po.x, lw), lw, lh)); }
+    }
+    for (const e of _lxHcRects) {
+      const el = e[0], r = e[1], on = el.classList.contains('lx-hud-yield'), m = on ? 10 : 0;
+      let hit = false;
+      if (r) for (const t of T) if (t[0] < r.right + m && t[2] > r.left - m && t[1] < r.bottom + m && t[3] > r.top - m) { hit = true; break; }
+      if (hit !== on) el.classList.toggle('lx-hud-yield', hit);
+    }
+  } catch (e) {}
+}
+// v0.30.1191 hud-clear - which strips of the top of the screen are taken: the boss plate (drawSuperBossBar records its box),
+// the prologue's memory card and the area nameplate. [[x0, x1, bottom], ...] in canvas px; re-read every 10 frames, and
+// only asked while a portal plate is showing.
+let _lxTbAt = -1e9, _lxTbV = null;
+function _lxTopBands() {
+  const t = game.time | 0; if (_lxTbV && t >= _lxTbAt && t - _lxTbAt < 10) return _lxTbV;
+  const out = [];
+  if (game._bbLabelVeiled && game._lxBossPlateBox) out.push(game._lxBossPlateBox);
+  try {
+    const cv = document.getElementById('game'), R = cv && cv.getBoundingClientRect();
+    if (R && R.width > 0) {
+      const kk = W / R.width;
+      for (const id of ['prologue-hud', 'map-label']) {
+        const el = document.getElementById(id); if (!el || el.classList.contains('boss-veiled')) continue;
+        const r = el.getBoundingClientRect(); if (!(r.width > 0 && r.height > 0) || parseFloat(getComputedStyle(el).opacity) < 0.05) continue;
+        out.push([(r.left - R.left) * kk, (r.right - R.left) * kk, (r.bottom - R.top) * kk + 4]);
+      }
+    }
+  } catch (e) {}
+  _lxTbAt = t; _lxTbV = out; return out;
+}
+// v0.30.1191 hud-clear - the world-y of a portal plate's top: where it has always sat (its bottom edge at feetY - 117), unless
+// that is under one of the strips above - then it hangs under the portal's floor. cx / w: the plate's world centre and width.
+function _lxPortalLblTop(feetY, h, cx, w) {
+  const top = Math.max(6, feetY - 143 - (h - 26));
+  const sTop = top - ((game.camera && game.camera.y) || 0), x0 = cx - w / 2 - ((game.camera && game.camera.x) || 0), x1 = x0 + w;
+  for (const b of _lxTopBands()) if (sTop < b[2] && x0 < b[1] && x1 > b[0]) return feetY + 8;
+  return top;
+}
 function drawPortals() {
   // v0.25.172 — Painterly portal sprite (Sprites/world/portal.webp)
   // replaces the old procedural ellipse + radial-gradient + sparkle
@@ -130889,7 +130988,7 @@ function drawPortals() {
       // v0.30.x — the plate grew 26 -> 46 tall; the TOP moves up by the difference so its bottom edge
       // stays exactly where it has always sat relative to the portal (feetY - 117).
       ctx.drawImage(po._lblSprite, Math.round(sx - (po._lblW || 150) / 2),
-        Math.round(Math.max(6, _lblFeetY - 143 - ((po._lblH || 46) - 26))),
+        Math.round(_lxPortalLblTop(_lblFeetY, po._lblH || 46, po.x, po._lblW || 150)),   // v0.30.1191 hud-clear - under its floor when the top strip is taken
         (po._lblW || 150), (po._lblH || 46));   // v0.28.4 — was hardcoded 350 (see above); clamp keeps top-pad portals' labels on-screen; v0.30.619: 13px higher, riding with the portal
     }
   }
@@ -159053,6 +159152,7 @@ function _lxDrawFrame(time) {
   if (typeof _lxSafeZoneBeacons === 'function') _lxSafeZoneBeacons();   // v0.30.796 sz-all — the OHKO's answer is the last thing painted in the world
   // Update minimap (DOM-side, every few frames to avoid overhead)
   if (game.time % 4 === 0 && !_lxRenderOnly) drawMinimap();   // hz-smooth
+  if (!_lxRenderOnly && typeof _lxHudClearTick === 'function') _lxHudClearTick();   // v0.30.1191 hud-clear - the HUD makes way for the hero / portals
 
   // Flash overlay — v0.25.25: Phaser owns the visual when active, but
   // the decay step still runs on the main thread so game.flashOverlay
@@ -160133,6 +160233,8 @@ function drawSuperBossBar() {
   //    baseline is pinned at 24px and the bar drops to suit the measured top rail (hy0).
   const _bbTall = (typeof LX_FX !== 'undefined' && _lxFxReady(LX_FX.ui_bossbar_frame)) ? _BB_GEOM.hy0 * barH / (_BB_GEOM.hy1 - _BB_GEOM.hy0) : 0;
   const x = Math.round((W - barW) / 2), y = Math.max(34, Math.round(24 + 12 + _bbTall));
+  // v0.30.1191 hud-clear - the plate's box for _lxTopBands: the bar, plus the frame's bottom rail when the art is in
+  game._lxBossPlateBox = [x, x + barW, y + barH + (_bbTall > 0 ? (_BB_GEOM.H - _BB_GEOM.hy1) * barH / (_BB_GEOM.hy1 - _BB_GEOM.hy0) : 0) + 4];
   const hpPct = Math.max(0, sb.currentHp / sb.maxHp);
   const phase = sb.phase || 1;
 
