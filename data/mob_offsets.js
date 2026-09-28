@@ -64,7 +64,7 @@ window.LX_MOB_OFFSET_DATA = {
   "skywisp": 1,
   "slime": -3,
   "sparkSprite": -1,
-  "stump": 2,
+  "stump": 5,
   "thornmaw": 1,
   "ticketMech": 9,
   "tidefish": 1,
