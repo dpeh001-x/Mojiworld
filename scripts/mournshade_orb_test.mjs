@@ -22,7 +22,9 @@ const browser = await chromium.launch({ executablePath: EXE, headless: true, arg
 const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
 const errs = [], bad = [];
 page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 160)));
-page.on('response', (r) => { if (/mmournorb/.test(r.url()) && r.status() >= 400) bad.push(r.status() + ' ' + r.url().replace(/^.*Sprites\//, '')); });
+const okFrames = new Set();
+page.on('response', (r) => { if (!/mmournorb/.test(r.url())) return; const u = r.url().replace(/^.*Sprites\//, '');
+  if (r.status() >= 400) bad.push(r.status() + ' ' + u); else if (/anim\/mmournorb_\d/.test(u)) okFrames.add(u); });
 try {
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof spawnMonster === 'function', null, { timeout: 180000 });
@@ -39,18 +41,22 @@ try {
     await sleep(800);
     const add = (type, dx) => { const m = spawnMonster(player.x + dx, player.y - 40, type, false); if (m) { m.maxHp = m.hp = m.currentHp = 1e9; m.speed = 0; } return m; };
     add('mournshade', 260); add('towerSeer', -260);
-    const shots = {}, t0 = performance.now();
+    // each shot is read the moment fireMonsterProjectile pushes it (a poll sees it a few frames old)
+    const shots = {}, t0 = performance.now(), orig = fireMonsterProjectile;
+    fireMonsterProjectile = function () {
+      const n0 = game.projectiles.length, ret = orig.apply(this, arguments);
+      for (const p of game.projectiles.slice(n0)) if (p && p.owner === 'enemy') (shots[p.skill] = shots[p.skill] || []).push({ w: p.w, life: p.life, speed: Math.hypot(p.vx, p.vy) });
+      return ret;
+    };
     while (performance.now() - t0 < 15000) {
-      for (const p of game.projectiles) {
-        if (!p || p.owner !== 'enemy' || p._mtRec) continue; p._mtRec = 1;
-        (shots[p.skill] = shots[p.skill] || []).push({ w: p.w, life: p.life, speed: Math.hypot(p.vx, p.vy) });
-      }
       if ((shots.mmournorb || []).length >= 4 && (shots.mlantern || []).length >= 2) break;
       await sleep(50);
     }
-    const fr = _projAnimFrame('mmournorb');
+    fireMonsterProjectile = orig;
+    const fr = _projAnimFrame('mmournorb');   // an Image, or (the v0.30.1271 loop hold) a baked canvas of one
     return { defs: { mournshade: monsterTypes.mournshade.shoot, towerSeer: monsterTypes.towerSeer.shoot }, shots,
-      frameCount: _lxFrameCount('projectiles/anim', 'mmournorb', 0), loop: fr ? String(fr.src || '').replace(/^.*Sprites\//, '') : null,
+      frameCount: _lxFrameCount('projectiles/anim', 'mmournorb', 0), loopOk: !!(fr && (fr.naturalWidth || fr.width) > 0),
+      loop: fr ? (fr.src ? String(fr.src).replace(/^.*Sprites\//, '') : 'baked ' + (fr.width | 0) + 'px canvas') : null,
       animKey: _PROJ_ANIM_KEYS.has('mmournorb'), blit: _PROJ_SPRITE_BLIT.mmournorb || null,
       still: !!(LX_MOB_PROJ.mmournorb && LX_MOB_PROJ.mmournorb.naturalWidth), cast: !!LX_MOB_CAST.mmournorb, ver: GAME_VERSION };
   });
@@ -62,7 +68,7 @@ try {
   // base 41 x 1.35 x (76/40)^0.6 x jitter [0.75, 1.40] = 61..114 px; the Seer (w 54) with mlantern's 34 base: 38..71
   check(mw.length && Math.min(...mw) >= 60 && Math.max(...mw) <= 115, 'his balls are the larger authored size (61-114 px)', `${Math.min(...mw)}-${Math.max(...mw)} px`);
   check(M.every((s) => Math.abs(s.speed - 4.6) < 0.3 && s.life === 125), 'and fly slower and longer (4.6 speed, 125 life: same reach as the old shot)', M.slice(0, 2).map((s) => s.speed.toFixed(2) + '/' + s.life).join(', '));
-  check(r.animKey && r.frameCount === 9 && /projectiles\/anim\/mmournorb_\d\.webp/.test(r.loop || ''), 'the nine-frame swirl loop is keyed, indexed and is what the renderer draws', `key ${r.animKey}, index ${r.frameCount}, drawing ${r.loop}`);
+  check(r.animKey && r.frameCount === 9 && r.loopOk && okFrames.size === 9, 'the nine-frame swirl loop is keyed, indexed, all nine frames load, and the renderer gets a frame', `key ${r.animKey}, index ${r.frameCount}, ${okFrames.size}/9 frames served, drawing ${r.loop}`);
   check(r.still && r.cast && r.blit && r.blit.mode === 'spin', 'the still, the purple hand flash and the draw mode are registered', JSON.stringify({ still: r.still, cast: r.cast, blit: r.blit }));
   check(!bad.length, 'every mmournorb file is served', bad.slice(0, 3).join(' | '));
   check(!errs.length, 'no page errors', errs.slice(0, 2).join(' | '));
