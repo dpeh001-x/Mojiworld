@@ -250,7 +250,9 @@
 // v0.30.1338 flat-props - v105 -> v106. twelve Sprites/objects props (the market stalls, shuriken rack, throne, anvil, wagon,
 // crate stack, well and five more) are REPLACED under their own names (redrawn flat for the side-scroller), so a returning browser
 // would otherwise keep the angled art until its cache refreshed.
-const CACHE = 'mojiworld-assets-v106';   // v0.30.1338 - flat world props
+// v0.30.1346 flat-props-2 - v106 -> v107. the hearth, the signpost and the three fountains in Sprites/objects are REPLACED under
+// their own names (redrawn flat for the side-scroller), so a returning browser would otherwise keep the angled art until its cache refreshed.
+const CACHE = 'mojiworld-assets-v107';   // v0.30.1346 - flat world props II
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

@@ -7,6 +7,10 @@
 //   - a flat take edited with the ORIGINAL as reference_image (for its style): the reference won - back to 3/4, or broken alpha;
 //   - text-to-image with perspective 'Side-Scroll', art_style 'Cel-Shaded' and each prop's own parts and colours: flat. A "thick
 //     bold outline" came back as a chunky sticker band, so the outline is asked for at MEDIUM weight (the projectile-pass wording).
+// v0.30.1346: the hearth, the signpost and the three fountains (per user: "do the hearth and signpost, the fountains as well"), same
+// recipe. A fountain seen flat shows its water as a thin band, not an ellipse. The hearth kept a short chimney over its hood (asked
+// twice for none), the signpost was re-rolled from dark walnut to the town's honey-brown; all first takes otherwise but the large
+// fountain (take 2, the deeper blue trim).
 // Shipped takes (2 per prop, some re-rolled with a sharper description): anvil take 2, every other first take; the glyph stone
 // (a rough boulder at first), well (a box of thatch), tatami (a hairline) and crate stack (two crates) needed a second prompt,
 // and the crate stack kept its first take (three wide crates) over the re-roll (a tower three times too narrow for its spot).
@@ -30,6 +34,9 @@ const BOX = {
   shadow_shuriken_rack: [768, 768, 126, 70, 519, 698], shadow_tatami: [768, 768, 38, 449, 684, 318],
   wagon_empty: [709, 709, 47, 343, 616, 366], celestial_arcane_glyph_stone: [768, 768, 240, 91, 281, 578],
   crate_stack: [567, 567, 135, 106, 296, 461], well_stone: [768, 768, 134, 167, 502, 601],
+  bastion_throne_hearth: [992, 992, 214, 308, 626, 684], signpost_wood: [768, 768, 191, 168, 385, 599],
+  azure_large_waterfountain: [1984, 1984, 253, 382, 1489, 1601], azure_waterfountain: [850, 850, 169, 151, 513, 699],
+  town_fountain_small_east: [768, 768, 89, 208, 591, 377],
 };
 // what each prop IS - its parts, materials and colours as the old art drew them
 const DESC = {
@@ -44,7 +51,12 @@ const DESC = {
   wagon_empty: "an empty light-brown wooden wagon seen exactly from the side: a plank box body with dark iron corner brackets, two big wooden spoked wheels with dark iron rims (front and back), and a long wooden pull handle sticking out to the left",
   celestial_arcane_glyph_stone: "a smooth, cleanly cut grey stone obelisk seen flat from the front: a tall slim shape with straight parallel sides and a pointed pyramid tip, one flat front face carved with big bold glowing cyan magic runes in two neat columns, a few small cracks, crisp edges (not a rough natural boulder)",
   crate_stack: "three light honey-brown wooden shipping crates stacked in a column, each a flat rectangle of planks with a darker wooden frame, a coil of tan rope lying on the top crate, a burnt black stencil mark on the bottom crate",
-  well_stone: "a round grey cobblestone well seen flat from the front: a stone wall with a wooden rim, two wooden posts on either side holding a triangular gable roof of golden straw thatch shaped like an upside-down V, a wooden crossbeam with a crank, a rope and a small wooden bucket hanging in the middle"
+  well_stone: "a round grey cobblestone well seen flat from the front: a stone wall with a wooden rim, two wooden posts on either side holding a triangular gable roof of golden straw thatch shaped like an upside-down V, a wooden crossbeam with a crank, a rope and a small wooden bucket hanging in the middle",
+  bastion_throne_hearth: "a COMPACT grey stone-brick fireplace seen flat and symmetric from the front, about as wide as it is tall: a SHORT sloped stone hood shaped like a trapezoid on top (NO tall chimney stack), a stone mantel ledge across the front, an arched firebox in the CENTRE with bright orange flames, a round copper kettle hanging from an iron hook in the middle over the fire, and a small wooden stool with a red seat standing beside the fireplace on the right, also seen straight from the front",
+  signpost_wood: "a wooden signpost of light warm honey-brown wood seen flat from the side: a tall post with two flat wooden arrow boards nailed near its top - the top board pointing left, the lower board pointing right - each a flat plank with a pointed tip and NO lettering, and a small brass lantern hanging from a hook on the post; the post continues well below the boards to the ground; the boards are flat shapes in the picture plane, no thickness shown",
+  azure_large_waterfountain: 'a grand three-tier water fountain of white marble with deep royal blue trim, seen flat from the side at eye level: a wide low round base pool with a white rim and blue sapphire gems set around it, a blue-and-white pillar with sapphire gems holding two stacked scalloped basins, clear blue water spilling over the basin rims in thin streams, and a white crystal spire finial with a blue gem on top; each basin is a wide shallow shape with only a thin sliver of water surface showing',
+  azure_waterfountain: 'a water fountain seen flat from the side at eye level: a wide white marble bowl with a blue band on a short white pillar, standing in a low round white marble base pool of blue water, and a tall blue crystal-shaped water jet rising from the middle of the bowl; the bowl and the pool show only a thin sliver of their water surface',
+  town_fountain_small_east: 'two identical small cream sandstone fountains standing side by side, each seen flat from the side at eye level: a round bowl on a short pedestal with turquoise water showing only as a thin sliver at the rim, and a small turquoise water jet splashing up from the middle'
 };
 const CAMERA = 'CRITICAL CAMERA: a flat, straight-on FRONT view for a 2D side-scrolling platformer game - the camera looks at the object '
   + 'exactly from the front at eye level, like a theatre flat. NO 3/4 view, NO side face visible, NO isometric, no vanishing point, no '
@@ -117,7 +129,7 @@ for (const k of keys) {
   if (!DESC[k]) { console.log('skip unknown', k); continue; }
   const have = fs.readdirSync(RAW).filter((f) => f.startsWith(k + '_')).length;
   process.stdout.write(`${k} x${N} ... `);
-  const bufs = await generate({ image_type: 'sprite', art_style: 'Cel-Shaded', perspective: 'Side-Scroll', aspect_ratio: k === 'shadow_tatami' ? 'ar_16_9' : 'ar_1_1',
+  const bufs = await generate({ image_type: 'sprite', art_style: 'Cel-Shaded', perspective: 'Side-Scroll', aspect_ratio: (k === 'shadow_tatami' || k === 'town_fountain_small_east') ? 'ar_16_9' : 'ar_1_1',
     n: N, augment_prompt: false, prompt: `${DESC[k]}. ${CAMERA} ${CLEAN} ${STYLE}` });
   bufs.forEach((b, i) => fs.writeFileSync(path.join(RAW, `${k}_${have + i + 1}.png`), b));   // raw first, untouched
   console.log(bufs.length);
