@@ -265,7 +265,10 @@
 // browser would keep drawing the old art for a session.
 // stump-root - v119 -> v120. Stumpy's 28 images (back root planted) and Thornmaw's 9 walk frames (both feet step) are
 // replaced under their own names, so a returning browser would otherwise keep the old frames until its cache refreshed.
-const CACHE = 'mojiworld-assets-v120';   // stump-root - Stumpy's back root planted, Thornmaw walks on both feet
+// v0.30.1398 - v120 -> v121. Elderbark attack 0..8 are REPLACED under their own names
+// (redrawn crisp: 4k upscale + shock filter), so a returning
+// browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v121';   // v0.30.1398 - Elderbark attack frames redrawn crisp
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
