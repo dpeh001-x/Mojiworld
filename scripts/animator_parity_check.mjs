@@ -130,6 +130,7 @@ await new Promise((r) => setTimeout(r, 2200));
     ['ATK_NOSHRINK', setOf(gameSrc, /const _BOSS_ATK_NOSHRINK = new Set\(\[([^\]]*)\]\);/), setOf(animSrc, /const ATK_NOSHRINK = new Set\(\[([^\]]*)\]\);/)],
     ['BOSS_ATK_SCALE', mapOf(gameSrc, /const _BOSS_ATK_SCALE = \{([^}]*)\}/), mapOf(animSrc, /const BOSS_ATK_SCALE = \{([^}]*)\}/)],
     ['FOOT_NUDGE', mapOf(gameSrc, /const _MOB_SPRITE_FOOT_NUDGE = \{([^}]*)\}/), mapOf(animSrc, /const FOOT_NUDGE_FRAC = \{([^}]*)\}/)],
+    ['BOSS_KEY_FRAME', mapOf(gameSrc, /const LX_BOSS_KEY_FRAME = \{([^}]*)\}/), mapOf(animSrc, /const LX_BOSS_KEY_FRAME = \{([^}]*)\}/)],   // v0.30.1394 anim-key
   ];
   // per-type px pushes: the game writes them as lines, the animator as two maps
   const gamePost = {}, gamePre = {};

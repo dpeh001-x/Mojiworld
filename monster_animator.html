@@ -90,7 +90,7 @@
       <div class="mut" style="font-size:11px;margin-top:3px">renders EXACTLY what the game renders</div>
       <!-- build badge: the NUMBER is resolved live - the GAME_VERSION of the commit this
            page is served from (v0.30.434 badge rework). data-anim = this file's own version, the offline fallback -->
-      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600" data-anim="v0.30.978">build …</span>
+      <div style="font-size:11px;margin-top:4px"><span id="lx-build-badge" style="background:#123524;color:#7ddba0;border:1px solid #2a5c40;border-radius:10px;padding:1px 8px;font-weight:600" data-anim="v0.30.1394">build …</span>
         <a id="lx-latest-link" href="animator.html" title="Cache-proof launcher: resolves main's current commit via the GitHub API and opens that exact build — use this if the badge looks old" style="color:#5b8cff;margin-left:6px">latest&#8599;</a></div>
       <script>
       // v0.29.246 — LIVE badge freshness probe. The static build string only
@@ -227,7 +227,8 @@
  *   GROUND_BURY_FRAC / FLOATING_GROUND_BLEED / _BURY_MAX_PX ·
  *   _MOB_SPRITE_FOOT_NUDGE + per-type px nudges · _BOSS_SPRITE_PUSH_DOWN ·
  *   boss content-norm (_BOSS_SIZE_STRICT / _BOSS_ATK_NOSHRINK /
- *   _BOSS_ATK_SCALE / _BOSS_BODYLOCK) · frame clocks (130/80/48ms).
+ *   _BOSS_ATK_SCALE / _BOSS_BODYLOCK) · frame clocks (130/80/48ms) ·
+ *   LX_BOSS_KEY_FRAME (each attack set's blow - where the game lands the hit).
  * DATA stays in the shared external files (data/anim_calib.js + data/mob_offsets.js are
  * loaded by the game itself; the manifests are auto-generated).
  * ========================================================================== */
@@ -622,8 +623,24 @@
     return Math.floor(t / GAME_FRAME_MS[st]) % n;
   }
 
+  // v0.30.1394 anim-key - WHERE THE GAME LANDS THE HIT (per user: keep the hand-set timings; show the blows). Verbatim port of
+  // mojiworld_game.html's LX_BOSS_KEY_FRAME / _lxBossKeyFrame (KEEP IN SYNC - animator_parity_check compares them): a set's KEY
+  // frame is its blow. A generated timing's blow is its strike, the frame held longest; these hand-set sets hold another
+  // frame longest, so their blow is named. In the game every attack's hit lands as its key frame starts.
+  const LX_BOSS_KEY_FRAME = {
+    gravitos: 5, gravitoslaser: 6, gravitos2laser: 7, gravitos2star: 6, legosaurusdash: 6,
+    towerArbiter: 6, towerArbiterverdict: 5, gravitospunch: 5, gravitossoul: 5, gravitos3soul: 5,
+  };
+  function keyFrame(key, n, ft) {
+    const k = LX_BOSS_KEY_FRAME[key];
+    if (Number.isInteger(k) && k >= 0 && k < n) return k;
+    if (!Array.isArray(ft)) return -1;
+    let s = 0, b = -1; for (let i = 0; i < n; i++) { const v = ft[i] > 0 ? ft[i] : 48; if (v > b) { b = v; s = i; } }
+    return s;
+  }
   window.__core = {
     MAN, HB, STATES, COL, BAKED_CALIB, BAKED_HB, clamp, DISPLAY_H,
+    keyFrame, LX_BOSS_KEY_FRAME,   // v0.30.1394 anim-key
     softDraw, edgesTouched,   // v0.29.198 — game-parity edge feather
     geometry, gameFrameIndex, decodedN, plantScale, plantYOff, baseImg,
     setGameScale: v => { gameScale = !!v; }, getGameScale: () => gameScale,
@@ -1194,6 +1211,14 @@
 
   let columns = [];   // [{state, cx, groundY}] — this paint's layout
   let hbRects = [];   // [{x,y,w,h,st,previewH}] — this paint's hitbox rects
+  // v0.30.1394 anim-key - the stage marks the moment the game lands the attack: while the attack's key frame is on screen
+  function drawKeyMark(cx, top) {
+    const arr = frames.attack; if (!cur || !arr || !arr.length) return;
+    const ft = (C._ftFor ? C._ftFor('attack') : null), k = C.keyFrame((window.__app && window.__app.owner) ? window.__app.owner() : cur, arr.length, ft);   // the calib owner, like _ftFor
+    if (k < 0 || pickFrame('attack', arr) !== k) return;
+    ctx.save(); ctx.font = '800 13px system-ui'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#1a1206'; ctx.fillStyle = '#ffd66b';
+    const label = '⚔ HIT — blow f' + (k + 1); ctx.strokeText(label, cx, top); ctx.fillText(label, cx, top); ctx.restore();
+  }
   function paint() {
     ctx.clearRect(0, 0, cv.width, cv.height);
     columns = []; hbRects = [];
@@ -1210,6 +1235,7 @@
       drawGround(cx, groundY, cv.width * 0.8, '', '#fff');
       if (idleRef) drawIdleRef(cx, groundY, cv.width * 0.8);
       for (const st of states) { drawState(ent, st, cx, groundY, st === focusState ? 1 : 0.4); columns.push({ state: st, cx, groundY }); }
+      if (focusState === 'attack') drawKeyMark(cx, 22);   // v0.30.1394 anim-key
       if (hbEdit && ent.states[focusState]) { const r = drawAtkHitbox(ent, focusState, cx, groundY); if (r) hbRects.push(r); }
       ctx.fillStyle = COL[focusState]; ctx.font = '600 12px system-ui'; ctx.textAlign = 'center';
       ctx.fillText('overlay — editing: ' + focusState, cx, groundY + 20);
@@ -1219,6 +1245,7 @@
         const cx = slotW * (i + 0.5);
         if (idleRef && !(cur === _rootOf(cur) && st === 'idle')) drawIdleRef(cx, groundY, slotW * 0.86);
         drawState(ent, st, cx, groundY, 1);
+        if (st === 'attack') drawKeyMark(cx, 22);   // v0.30.1394 anim-key
         if (hbEdit) { const r = drawAtkHitbox(ent, st, cx, groundY); if (r) hbRects.push(r); }
         drawGround(cx, groundY, slotW * 0.86, st, COL[st]);
         columns.push({ state: st, cx, groundY, slotW });
@@ -1398,13 +1425,18 @@
     const tuned = ftArr ? ftArr.filter(x => Math.round(+x) !== baseMs).length : 0;
     let total = 0; for (let k = 0; k < n; k++) total += ms(k);
     const cycle = (st === 'idle' && n > 1) ? total * 2 - ms(0) - ms(n - 1) : total;
+    // v0.30.1394 anim-key - the attack's blow: where the game lands the hit (a hand-set timing can hold another frame longer - noted)
+    const _kf = (st === 'attack' && window.__core.keyFrame && window.__app && window.__app.cur) ? window.__core.keyFrame(window.__app.owner ? window.__app.owner() : window.__app.cur, n, ftArr) : -1;
+    let _held = -1; if (_kf >= 0 && ftArr) { let b = -1; for (let k = 0; k < n; k++) if (ms(k) > b) { b = ms(k); _held = k; } }
     let cells = '';
     for (let k = 0; k < n; k++) {
       cells += `<div class="ftcell" data-i="${k}" title="frame ${k + 1} — click to show it" style="display:flex;flex-direction:column;align-items:center;gap:2px;padding:3px;border-radius:6px;cursor:pointer;${k === i ? 'background:#1c2a3a;outline:1px solid #4a7fb8' : ''}">` +
         `<canvas data-thumb="${k}" width="40" height="40" style="width:40px;height:40px;background:#0b0f16;border-radius:4px"></canvas>` +
-        `<input type="number" class="ftms" data-i="${k}" value="${ms(k)}" min="16" max="2000" step="5" style="width:48px;font-size:10px;text-align:center;padding:1px 2px" title="frame ${k + 1}: ms on screen" /></div>`;
+        `<input type="number" class="ftms" data-i="${k}" value="${ms(k)}" min="16" max="2000" step="5" style="width:48px;font-size:10px;text-align:center;padding:1px 2px" title="frame ${k + 1}: ms on screen" />` +
+        (k === _kf ? `<span class="ftkey" title="the blow: the game lands the hit as this frame starts" style="font-size:9px;font-weight:800;color:#ffd66b">\u2694 blow</span>` : '') + `</div>`;
     }
-    return `<div class="mut" style="font-size:11px;margin:6px 0 2px">⏱ <b>timing</b> · ms each frame stays on screen (game default ${baseMs}) · cycle <b id="ft-total">${cycle}</b> ms${tuned ? ` · <b>${tuned} tuned</b>` : ''}</div>` +
+    return `<div class="mut" style="font-size:11px;margin:6px 0 2px">⏱ <b>timing</b> · ms each frame stays on screen (game default ${baseMs}) · cycle <b id="ft-total">${cycle}</b> ms${tuned ? ` · <b>${tuned} tuned</b>` : ''}` +
+      (_kf >= 0 ? ` · <span style="color:#ffd66b">\u2694 blow <b>f${_kf + 1}</b></span> (the hit lands here in-game${(_held >= 0 && ms(_held) > ms(_kf)) ? `; held longest: f${_held + 1}` : ''})` : '') + `</div>` +
       `<div id="ft-strip" style="display:flex;gap:2px;overflow-x:auto;padding:4px 0">${cells}</div>` +
       `<div style="display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 6px">` +
         `<button class="reset" data-ftp="even" title="every frame back to the game default">even</button>` +
