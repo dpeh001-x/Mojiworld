@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1355';
+const GAME_VERSION = 'v0.30.1356';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -144208,16 +144208,20 @@ function _lxMidSwing(m) {
 // hit-stop (40-150 ms, from dozens of skills), the parry slow-mo, a pause, and time the step clock drops on a slow frame all
 // stop the AI while the wall clock runs on, so the strike frame played early and the sprite trailed it. Whatever time the AI
 // misses pushes every regular monster's attack timeline - and its proximity-swing clock - forward by that much, so the
-// animation waits with the AI. Bosses keep their own timing (see _lxMidSwing); a co-op guest mirrors the host, whose AI
+// animation waits with the AI - a boss's attack pose too, since v0.30.1356 boss-swing; a co-op guest mirrors the host, whose AI
 // a freeze on this machine does not stop.
 const _LX_MOB_ANIM_CLOCKS = ['atkAnimUntil', '_tellUntil', '_swingUntil', '_swingAtkUntil', '_swStrikeAt', '_swStrikeEnd', '_swNextAt', '_proxRestUntil', '_proxAtkMinUntil'];
 function _lxMobAnimHold(ms) {
   if (!(ms > 0) || typeof game === 'undefined' || !game || !Array.isArray(game.monsters)) return;
   if (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) return;
   for (const m of game.monsters) {
-    if (!m || m.isBoss || m.boss || m.zodiacBoss) continue;
+    if (!m) continue;
     if (m._animSt === 'attack' && typeof m._animStAt === 'number') m._animStAt += ms;
     for (const k of _LX_MOB_ANIM_CLOCKS) if (typeof m[k] === 'number' && m[k] > 0) m[k] += ms;
+    // v0.30.1356 boss-swing - a boss's pose waits too: the zodiac state clock (the attack epoch is pushed above)
+    if (m.isBoss || m.boss || m.zodiacBoss) {
+      if (m._zAnim && m._zAnim.state === 'attack' && typeof m._zAnim.since === 'number') m._zAnim.since += ms;
+    }
   }
 }
 // time the step clock drops (a frame over 100 ms, a backlog past four steps) never reaches the AI either; the step that
@@ -144226,6 +144230,17 @@ function _lxMobAnimHoldGate(ms) {
   if (!(ms > 0) || typeof game === 'undefined' || !game) return;
   game._lxMobGateHeld = (game._lxMobGateHeld || 0) + ms;
   _lxMobAnimHold(ms);
+}
+// v0.30.1356 boss-swing - a HELD attack clock is read where the hold left it: at the held step's wall time, not the few ms later the
+// draw comes (or up to a whole step later, drawing between steps on a fast screen) - else a paused swing on a frame
+// boundary flickers between the two frames. While monster AI runs this is the live clock.
+function _lxHeldShift(now) {
+  const w = (typeof game !== 'undefined' && game) ? (game._lxMobHeldWall || 0) : 0;
+  return w > 0 ? w - now : 0;
+}
+function _lxHeldNow() {
+  const n = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  return n + _lxHeldShift(n);
 }
 function _lxSwingLength(m, n, ft) {
   const p = _lxSwingPlan(m, n, ft);
@@ -144337,6 +144352,48 @@ function _bossAnimPhase(frames, m, state, desync) {
   if (!m || !frames || !frames.length) return 0;
   return _mobAnimPhase(m, state, desync);
 }
+// v0.30.1356 boss-swing - A BOSS'S TELEGRAPHED SWING LANDS ON ITS BLOW (per user: "a timing pass on the boss swings"). A boss's attack
+// frames walked the wall clock from the moment its pose began, looping, while the swing or column they lead into fires when
+// the AI's telegraph countdown runs out: 450-820 ms, against strike frames 160-460 ms into their sets. Every telegraphed
+// boss swing drew its blow early and was back in its windup, or at rest, when the sprite appeared - measured on Aries, the
+// strike frame at 0.16 s and the swing at 0.64 s; with two hit-stops the gap passed 0.9 s, and on a slow step clock the
+// pose ran out before the swing fired at all. The countdown that releases the attack now walks its windup, as it does for
+// a regular monster (v0.30.1341): the windup plays at its own pace (no slower than half, no faster than double speed), its
+// last frame holds until the release, and the strike frame starts on the step the swing or column fires. From there the
+// set plays on the wall clock as before.
+// The live telegraph this boss is releasing, when `key` is the set it plays: the ms left and the telegraph length.
+function _lxBossTelegraph(m, key) {
+  if (!m || !m.traits) return null;
+  const _own = !!(m._bossAtkKey && key === m._bossAtkKey);   // per-attack art: the Sovereign's and the Arbiter's swing / column sets
+  const _bm = m.traits.bigMelee, _cs = m.traits.columnStrike;
+  if (_bm && m._bigMeleeFiring && m._bigMeleeT > 0 && (_own || key === (m._phaseSprite || m.type))) return { rem: m._bigMeleeT, tel: _bm.telegraphMs || m._bigMeleeT };
+  if (_cs && m._columnFiring && m._columnT > 0 && _own) return { rem: m._columnT, tel: _cs.telegraphMs || m._columnT };
+  return null;
+}
+// Sets the set's clock (the attack epoch, or the zodiac state clock) from that countdown and returns the ms into the set to
+// draw - or null when no telegraphed attack owns it. The first draw after the release shows the strike frame.
+function _lxBossWindupSync(m, key, n, ft, zodiac) {
+  if (!m || !(n > 1) || !ft) return null;
+  if (zodiac && !(m._zAnim && m._zAnim.state === 'attack')) return null;
+  const now = _lxHeldNow();   // a held world reads where the hold left it
+  const tg = _lxBossTelegraph(m, key);
+  const prefix = _lxFtPrefix(n, ft, _lxFtStrike(n, ft));
+  let c;
+  if (tg) {
+    const sub = Math.max(0, Math.min(_LX_SIM_STEP_MS, now - ((typeof game !== 'undefined' && game && game._lxMobRanWall) || now)));
+    const rate = Math.max(0.5, Math.min(2, prefix / Math.max(1, tg.tel)));
+    c = Math.max(0, Math.min(prefix - 0.5, Math.max(0, prefix - tg.tel * rate) + Math.max(0, tg.tel - tg.rem + sub) * rate));
+    m._lxBossWind = key; m._lxBossWindAt = now;
+    m.atkAnimUntil = Math.max(m.atkAnimUntil || 0, now + tg.rem + 300);   // the pose lasts until the swing lands, however long the countdown runs
+  } else if (m._lxBossWind === key) {
+    m._lxBossWind = null;
+    const cur = zodiac ? now - m._zAnim.since : (m._animSt === 'attack' ? now - m._animStAt : 0);
+    if (now - (m._lxBossWindAt || 0) > 250 || cur >= prefix) return null;
+    c = prefix;
+  } else return null;
+  if (zodiac) m._zAnim.since = now - c; else { m._animSt = 'attack'; m._animStAt = now - c; }
+  return c;
+}
 function _bossAttackFrame(key, m) {
   const _fr = BOSS_ATTACK_FRAMES[key];
   const _ft = _fr ? _lxCalibFt(key, 'attack') : null;   // v0.30.315 — animator frame timing
@@ -144344,7 +144401,8 @@ function _bossAttackFrame(key, m) {
     const n = _lxFtReadyN(_fr);
     if (n === 0) return null;
     if (n === 1) return _fr[0];
-    return _lxFtWalk(_fr, n, _ft, _bossAnimPhase(_fr, m, 'attack', false), false);
+    if (m) _lxBossWindupSync(m, key, n, _ft, false);   // v0.30.1356 boss-swing - a telegraphed swing / column: its countdown walks the windup
+    return _lxFtWalk(_fr, n, _ft, _bossAnimPhase(_fr, m, 'attack', false) + (m ? _lxHeldShift((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) : 0), false);   // a held pose reads where the hold left it
   }
   return _bossLoopFrame(_fr, _BOSS_ATK_FRAME_MS, undefined, _bossAnimPhase(_fr, m, 'attack', false));
 }
@@ -145547,6 +145605,7 @@ function _zodiacStateImg(sign, state, elapsedMs, m) {
       _zf._readyN = _zn;
       if (_zn === 0) return null;
       if (_zn === 1) return _zf[0];
+      if (m) { const _zc = _lxBossWindupSync(m, 'zodiac_' + sign, _zn, _zft, true); if (_zc !== null) elapsedMs = _zc; else if (m._zAnim && m._zAnim.state === 'attack') elapsedMs += _lxHeldShift((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()); }   // v0.30.1356 boss-swing
       return _zf[_lxFtIndex(_zn, _zft, elapsedMs, false)];
     }
     return _zodiacRelFrame(_zf, _BOSS_ATK_FRAME_MS, elapsedMs, false);
@@ -147956,7 +148015,7 @@ function _monsterStateFrame(m) {
       if (n === 0) return null;
       if (n === 1) return set.attack[0];
       const _entered = m._animSt !== 'attack';
-      let _elapsed = now + _mobAnimPhase(m, 'attack', false);
+      let _elapsed = _lxHeldNow() + _mobAnimPhase(m, 'attack', false);   // v0.30.1356 boss-swing - a held swing reads where the hold left it
       const _len = _lxSwingLength(m, n, _ftA);
       // v0.30.1341 swing-sync - a TELEGRAPHED windup (a heavy swing, a shot, a column) is walked by the AI countdown that releases it, not
       // the wall clock, so its strike frame starts on the very step the swing / shot / column fires - whatever the step clock did
@@ -162676,6 +162735,10 @@ function loop(time) {
     const _lxW = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     if (game._lxMobRanAt !== game.time && typeof _lxMobAnimHold === 'function') _lxMobAnimHold(_lxW - Math.max(game._lxMobStepWall || _lxW, game._lxMobRanWall || 0) - (game._lxMobGateHeld || 0));
     game._lxMobStepWall = _lxW; game._lxMobGateHeld = 0;
+    if (game._lxMobRanAt !== game.time && !(typeof _coopFollowingHost === 'function' && _coopFollowingHost())) {   // v0.30.1356 boss-swing - where a held world stands (see _lxHeldNow):
+      if (!(game._lxMobHeldWall > 0)) game._lxMobHeldOff = Math.max(0, _lxW - (game._lxMobRanWall || _lxW));   // the pose on screen when it froze, not the AI step before it
+      game._lxMobHeldWall = _lxW + (game._lxMobHeldOff || 0);
+    } else { game._lxMobHeldWall = 0; game._lxMobHeldOff = 0; }
   }
 
   // Screen shake decay
