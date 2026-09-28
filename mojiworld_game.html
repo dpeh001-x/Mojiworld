@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1332';
+const GAME_VERSION = 'v0.30.1333';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -99354,10 +99354,17 @@ function bossAI(m, dt, distToPlayer) {
       m.vx += Math.sign(dxg) * 0.08;
       const driftCap = phase === 3 ? 3.0 : phase === 2 ? 2.2 : 1.6;
       if (Math.abs(m.vx) > driftCap) m.vx = Math.sign(m.vx) * driftCap;
+      // v0.30.1333 memory-glide - his 0.08/tick start sat under the walk threshold, and the walk-latch kill zeroes that
+      // every tick, so between teleports the memory's titan stood frozen. Start the stride above it: he walks at you.
+      if (window._prologueActive && Math.abs(dxg) > 220 && !m._tpWarn && typeof _lxMobWalkOn === 'function') {
+        const _gOn = _lxMobWalkOn(m) * 1.3;
+        if (Math.abs(m.vx) < _gOn) m.vx = Math.sign(dxg) * _gOn;
+      }
     } else if (m.patternState !== 'zip') {
       // Planted for the whole attack — re-zeroed every frame so knockback
       // shoves and stale drift can't leak into the animation window.
       m.vx = 0; m.vy = 0;
+      m._walkLatch = false; m._animXV = 0; m._lxLastMoveAt = 0;   // v0.30.1333 memory-glide - the attack draws from frame 0, not after the stride's 140 ms
     }
 
     // v0.25.641 — Cycle compression for endgame difficulty. Pre-fix the
@@ -100035,7 +100042,10 @@ function bossAI(m, dt, distToPlayer) {
       if (_zWind) {
         if (!m._tpWarn || m._tpWarn.kind !== 'zip') {
           const _w2 = game.mapData.worldWidth, _ps = (player.x + player.w / 2) < _w2 / 2 ? 1 : -1;
-          m._tpWarn = { kind: 'zip', el: 0, ms: _zw, x: (_ps > 0 ? _w2 - m.w - 60 : 60) + m.w / 2, y: 120 + Math.random() * 140 + m.h / 2 };
+          const _zmv = _lxMemoryView(m);   // v0.30.1333 memory-view - the dive still crosses the screen, on screen
+          const _zps = _zmv ? ((player.x + player.w / 2) < (game.camera.x || 0) + W / 2 ? 1 : -1) : _ps;
+          const _zx = _zmv ? (_zps > 0 ? _zmv.R : _zmv.L) : (_ps > 0 ? _w2 - m.w - 60 : 60);
+          m._tpWarn = { kind: 'zip', el: 0, ms: _zw, x: _zx + m.w / 2, y: 120 + Math.random() * 140 + m.h / 2 };
         }
         m._tpWarn.el += _rawDt; m._tpWindMs = m.patternTimer; m.vx = 0; m.vy = 0;
         if (m._tpWarn.el >= _zw) m._tpWarn.go = true;
@@ -100062,6 +100072,7 @@ function bossAI(m, dt, distToPlayer) {
         if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.3);
         m.x = targetX;
         m.y = _tw ? _tw.y - m.h / 2 : 120 + Math.random() * 140;
+        m._animPX = m.x; m._animXV = 0; m._walkLatch = false;   // v0.30.1333 memory-glide - a teleport is not a stride
         if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.3);
         m.vx = 0; m.vy = 0;
         // Reappear burst — v0.25.527 budget-guarded.
@@ -100198,6 +100209,7 @@ function bossAI(m, dt, distToPlayer) {
         m._tpWarn = null;   // v0.30.x grav-tp
         if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.2);
         m.x = Math.max(0, Math.min(game.mapData.worldWidth - m.w, player.x + player.w/2 - m.w/2));
+        m._animPX = m.x; m._animXV = 0; m._walkLatch = false;   // v0.30.1333 memory-glide - a teleport is not a stride
         if (typeof _lxGravRiftPop === 'function') _lxGravRiftPop(m.x + m.w / 2, m.y + m.h / 2, m.h * 1.2);
         if (typeof spawnSpriteBurst === 'function') {
           // keepAspect anchors HEIGHT to size, so height is derived from the
@@ -124275,7 +124287,16 @@ function updateCamera() {
     // Smooth follow with look-ahead based on player velocity — camera leads the
     // direction the player is moving for a more fluid feel
     const lookAhead = Math.max(-120, Math.min(120, player.vx * 18));   /* v0.26.x feel: lead the runner (~genre-norm 100px+), was +-80 @ x12 */
-    const targetX = player.x + player.w/2 - W/2 + lookAhead;
+    let targetX = player.x + player.w/2 - W/2 + lookAhead;
+    // v0.30.1333 memory-frame - the prologue memory keeps Gravitos in shot (he stood just past the edge, or was left behind
+    // when the hero walked on). Both fit: aim between them. Too far apart: the hero 160 px from the edge that faces him.
+    if (window._prologueActive && game.currentMap === 'gravitosArena') {
+      const _fg = (game.monsters || []).find((q) => q && q.type === 'gravitos' && q.currentHp > 0);
+      if (_fg) {
+        const _fpc = player.x + player.w / 2, _fbc = _fg.x + _fg.w / 2;
+        targetX = Math.abs(_fbc - _fpc) <= W - 270 ? (_fpc + _fbc) / 2 - W / 2 : _fpc - W / 2 + Math.sign(_fbc - _fpc) * (W / 2 - 160);
+      }
+    }
     // Critically-damped lerp factor (higher when target is far, softer when close)
     const dx = targetX - game.camera.x;
     const ease = 0.08 + Math.min(0.08, Math.abs(dx) / 600);
@@ -144319,12 +144340,22 @@ function _gravCastKey(m, base) {
 // v0.29.772): a random arena spot at least ~30% of the world away from where
 // he stands, clamped inside the walls, wearing the zip's vanish/reappear
 // particle language so it reads as HIS kind of teleport.
+// v0.30.1333 memory-view - the prologue memory is a new player's first look at him, and his relocations (post-punch
+// blink, zip) landed off camera ~12 s of its 30 s. While the memory runs they land inside the player's view instead.
+function _lxMemoryView(m) {
+  if (!window._prologueActive || typeof game === 'undefined' || !game || !game.camera) return null;
+  const w2 = (game.mapData && game.mapData.worldWidth) || 2400, cx = game.camera.x || 0;
+  const L = Math.max(40, cx + 40), R = Math.min(w2 - m.w - 40, cx + W - m.w - 40);
+  return R > L ? { L, R } : null;
+}
 function _gravPostPunchBlink(m) {
   if (m._phaseSprite) return;                                   // stage 1 only
   const w2 = (game.mapData && game.mapData.worldWidth) || 2400;
   const cur = m.x + m.w / 2;
   let tx = cur;
   for (let i = 0; i < 8; i++) {
+    const _mv = _lxMemoryView(m);   // v0.30.1333 memory-view - inside the view, a clear step away
+    if (_mv) { tx = _mv.L + Math.random() * (_mv.R - _mv.L); if (Math.abs((tx + m.w / 2) - cur) > 200) break; continue; }
     tx = 100 + Math.random() * Math.max(1, w2 - 200 - m.w);
     if (Math.abs((tx + m.w / 2) - cur) > w2 * 0.30) break;
   }
@@ -144343,6 +144374,7 @@ function _gravBlinkTo(m, tx) {
   }
   m.x = Math.max(40, Math.min(w2 - m.w - 40, tx));
   m.vx = 0; m.vy = 0;
+  m._animPX = m.x; m._animXV = 0; m._walkLatch = false;   // v0.30.1333 memory-glide - a teleport is not a stride
   if (typeof _budgetedParticlePush === 'function') {
     for (let i = 0; i < 4; i++) {
       const _ba = (i / 4) * Math.PI * 2;
@@ -146104,9 +146136,21 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
     // v0.29.x — per-frame scale (fs[frameIdx]) folds into s. Anchored at the
     // feet like s, so an under-drawn frame grows in place instead of hopping.
     const _bfs = (_bc.fs && _animated && sprite._lxFi != null && _bc.fs[sprite._lxFi] > 0) ? _bc.fs[sprite._lxFi] : 1;
-    const _bcs = _bc.s * _bfs;
+    // v0.30.1333 calib-ease - Gravitos's per-state offsets (the punch's dx 0.1 = ~75 px, Soul Drain's dy, walk's s) GLIDE
+    // to the new state's values over ~80 ms instead of jumping on the first frame of it. Visual only: the hit-region
+    // stash below keeps reading _bc.s, the settled value.
+    let _ecs = _bc.s, _ecx = _bc.dx || 0, _ecy = _bc.dy || 0;
+    if (m.type === 'gravitos') {
+      const _en = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now(), _ee = m._lxCalE;
+      if (_ee && _en - _ee.t < 500) {
+        const _ek = 1 - Math.exp(-Math.max(0, _en - _ee.t) / 80);
+        _ee.s += (_ecs - _ee.s) * _ek; _ee.dx += (_ecx - _ee.dx) * _ek; _ee.dy += (_ecy - _ee.dy) * _ek; _ee.t = _en;
+        _ecs = _ee.s; _ecx = _ee.dx; _ecy = _ee.dy;
+      } else m._lxCalE = { s: _ecs, dx: _ecx, dy: _ecy, t: _en };
+    }
+    const _bcs = _ecs * _bfs;
     m._lxCalXs = Math.abs(_bcs) || 1;   // v0.30.x — read by _softOpts.xs below
-    if (_bcs !== 1 || _bc.dx || _bc.dy) { ctx.translate(_bc.dx * targetH, _bc.dy * targetH); ctx.scale(_bcs, _bcs); }
+    if (_bcs !== 1 || _ecx || _ecy) { ctx.translate(_ecx * targetH, _ecy * targetH); ctx.scale(_bcs, _bcs); }
     // v0.29.253 — hitbox fractions are authored in the animator against the
     // SCALED sprite ("all scaling is baked into the box you see"), so the
     // stashed visual box must include calib s (not per-frame fs — hit regions
@@ -164025,6 +164069,19 @@ function _prologueApexSegment() {
       if (typeof _lxCineHold === 'function') _lxCineHold(0);
       if (!window._prologueActive) return;
       if (typeof closeAllModals === 'function') { try { closeAllModals(); } catch (e) {} }
+      // v0.30.1333 memory-frame - he spawned at x 930, so the fight opened on a sliver of him at the screen edge
+      try {
+        const _og = (game.monsters || []).find((q) => q && q.type === 'gravitos');
+        if (_og) {
+          const _opc = player.x + player.w / 2, _ow = (game.mapData && game.mapData.worldWidth) || 2400;
+          if (Math.abs((_og.x + _og.w / 2) - _opc) > 520) {
+            const _odir = (_og.x + _og.w / 2) >= _opc ? 1 : -1;
+            _og.x = Math.max(40, Math.min(_ow - _og.w - 40, _opc + _odir * 520 - _og.w / 2));
+            _og._animPX = _og.x; _og._animXV = 0; _og._walkLatch = false;
+          }
+          for (let _oi = 0; _oi < 90; _oi++) updateCamera();   // settle on the framing now, not in a visible swoop
+        }
+      } catch (e) {}
       game.paused = false;
       // v0.29.108 (per user) — 15s of TRUE GODMODE from the moment you enter the
       // Singularity and the fight arms: the character takes ZERO damage. Uses the
