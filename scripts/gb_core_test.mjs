@@ -31,7 +31,9 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+import { fileURLToPath } from 'node:url';
+// the repo this script lives in (was the hardcoded shared checkout, which served another tree's game)
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require(ROOT + '/node_modules/playwright-core');
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
@@ -70,6 +72,16 @@ try {
   }
   // .fade is what the boot gate waits for: without it the loop spins without ever stepping the sim
   await page.evaluate(() => { const o = document.getElementById('loading-overlay'); if (o) { o.classList.add('fade'); o.style.display = 'none'; } });
+  // v0.30.1116 beat queue: an arrival story beat can open AFTER the loop above saw the sim running, and it pauses the
+  // sim mid-test (seen on v0.30.1271: 3 runs in 7 measured with the overlay up - no live number drawn, the pile
+  // still rising). Mark every beat seen so no new one starts, then page through any beat already on screen
+  await page.evaluate(() => { try { player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; } catch (e) {} });
+  for (let i = 0; i < 40; i++) {
+    const on = await page.evaluate(() => { const o = document.getElementById('story-beat-overlay'); return !!(o && o.classList.contains('on')); });
+    if (!on) break;
+    await page.keyboard.press('Enter').catch(() => {}); await page.waitForTimeout(400);
+  }
+  await page.waitForTimeout(600);
 
   const R = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -158,8 +170,11 @@ try {
       let armed = false;
       ctx.fillText = function (txt) { if (armed) fonts[String(txt)] = ctx.font; return ft.apply(this, arguments); };
       window.drawDamageNumbers = function () { armed = true; try { return origDraw.apply(this, arguments); } finally { armed = false; } };
-      const wF = performance.now();
-      while (Object.keys(fonts).length < 3 && performance.now() - wF < 3000) await sleep(16);
+      const wF = performance.now(), gt0 = game.time, p0 = game.paused;
+      // 10 s, was 3 s: headroom for a loaded headless machine (the real miss was a story beat pausing the sim - see
+      // the beat dismissal before this evaluate; fontDiag below says which if it ever comes back)
+      while (Object.keys(fonts).length < 3 && performance.now() - wF < 10000) await sleep(16);
+      out.fontDiag = { dt: game.time - gt0, paused0: p0, paused: game.paused, n: game.damageNumbers.length, beat: !!document.querySelector('#story-beat-overlay[style*="flex"], #story-beat-overlay.show'), tut: (() => { const t = document.getElementById('tutorial-modal'); return !!(t && t.offsetParent); })(), gfx: (typeof LX_GFX !== 'undefined') ? LX_GFX.dmgnum : null, ph: (typeof _phaserHandlingDamageNumbers === 'function') ? _phaserHandlingDamageNumbers() : null, veryLow: (typeof _perfVeryLowFx === 'function') ? _perfVeryLowFx() : null, open: [...document.querySelectorAll('[id]')].filter((e) => e.offsetParent && /modal|overlay|dialog|popup|panel/i.test(e.id) && getComputedStyle(e).position !== 'static').map((e) => e.id).slice(0, 8), map: game.map || game.mapId || null };
       window.drawDamageNumbers = origDraw; delete ctx.fillText;
       if (_atlasWas !== null) _LX_DN_ATLAS_ON = _atlasWas;
       out.fonts = fonts;
@@ -175,10 +190,20 @@ try {
     return out;
   });
 
-  const src = readFileSync(path.join(ROOT, FILE), 'utf8');
+  const src = readFileSync(path.resolve(ROOT, FILE), 'utf8');
+  // v0.30.1239: figure atlases are built on a Worker from the stringified _lxDnAtlasBuild; the face it draws in is the
+  // one that source names, so read the Worker's actual source off the running page
+  const wSrc = await page.evaluate(() => (typeof _lxDnWSrc !== 'undefined' && _lxDnWSrc[2]) ? String(_lxDnWSrc[2]) : '');
   // the two DRAW sites build their font by concatenation; v0.30.790's _lxWarmCombatFonts names the same face in a
   // literal warm-up list, which is not a place a number is drawn - counting it failed this check on every build since
   const impactSites = (src.match(/\+ 'px Impact, "Arial Black", "Trebuchet MS", sans-serif'/g) || []).length;
+  // v0.30.837 (8a4dbbb8) added a FOURTH site: B/G stickers blit from their own glyph atlas (_lxGbAtlasBuild). Name each
+  // site by its function so a moved or re-fonted one is caught, not just a changed count
+  const IMPACT = `px Impact, "Arial Black", "Trebuchet MS", sans-serif'`;
+  const fnHas = (name) => { const i = src.indexOf('function ' + name + '('); return i >= 0 && src.slice(i, i + 1600).includes(IMPACT); };
+  const siteOk = { bake: fnHas('_dnBake'), dnAtlas: fnHas('_lxDnAtlasBuild'), gbAtlas: fnHas('_lxGbAtlasBuild'),
+    live: src.includes(`ctx.font = '900 ' + _fsKey + '` + IMPACT),
+    worker: wSrc.indexOf('function _lxDnAtlasBuild(') === 0 && wSrc.includes(IMPACT) };
   const stretch = /LX_GB_WIDEN/.test(src);
   const ring = /LX_GB_RING/.test(src);
   const shadowTracks = /ctx\.lineWidth = LX_GB_WHITE \/ \(scale \|\| 1\);/.test(src) && /c\.lineWidth = LX_GB_WHITE;/.test(src);
@@ -194,11 +219,11 @@ try {
   ok('THE CORE OUTWEIGHS THE FRAME: 50 core, 15 white, 11 black',
     D.size === 50 && D.white === 15 && D.black === 11 && (D.white - D.black) / 2 <= 3,
     `core ${D.size}, visible white ${(D.white - D.black) / 2}px, black ring ${D.black / 2}px; B/G ink ${R.ink.bg.w}x${R.ink.bg.h} vs crit ${R.ink.crit.w}x${R.ink.crit.h}`);
-  ok('THE FACE IS UNTOUCHED: Impact at all three sites (bake, live, glyph atlas), no horizontal stretch',
+  ok('THE FACE IS UNTOUCHED: Impact at all four sites (bake, live, figure atlas + its Worker, B/G atlas), no horizontal stretch',
     // v0.30.815 (boss fights, smoother round two): a popping number blits glyphs from an atlas that is rasterised in the
     // same face - the third site, beside the bake and the live draw
-    impactSites === 3 && !stretch,
-    `Impact-led font sites ${impactSites}/3, stretch present ${stretch} (an Arial Black pass and a stretch were both rejected)`);
+    impactSites === 4 && Object.values(siteOk).every(Boolean) && !stretch,
+    `Impact-led font sites ${impactSites}/4 ${JSON.stringify(siteOk)}, stretch present ${stretch} (an Arial Black pass and a stretch were both rejected)`);
   ok('THE BURST IS VERTICAL: step 0, every row on the same x',
     D.step === 0 && D.pitch === 32 && R.rows.n === 4 && R.rows.dx.every((v) => v === 0) && R.rows.volc,
     `step ${D.step}, pitch ${D.pitch}, offsets ${JSON.stringify(R.rows.dx)}`);
@@ -220,7 +245,7 @@ try {
   const F = R.fonts || {};
   ok('THE FONT: every live number in a frame draws in Impact, not only the first of its size',
     Object.keys(F).length === 3 && Object.values(F).every((f) => /Impact/.test(f)),
-    Object.entries(F).map(([t, f]) => t + ' in ' + f).join('; ') || 'no live number drawn');
+    Object.entries(F).map(([t, f]) => t + ' in ' + f).join('; ') || ('no live number drawn ' + JSON.stringify(R.fontDiag)));
   const P = R.pile || { n: 0, y: [] };
   ok('THE PILE: the newest row sits at the foe, in front, and each older one a pitch higher',
     P.colVolc && P.n === 4 && P.newestInFront && P.y.every((y, i) => Math.abs(y - (P.foeY - (P.n - 1 - i) * D.pitch)) < 1),

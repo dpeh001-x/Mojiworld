@@ -52,10 +52,19 @@ const r = await page.evaluate(async () => {
       src: img && img.src ? img.src.split('/').pop() : null,
     };
   };
-  // force a decode attempt for anything still pending
+  // v0.30.1234 lazy-fx: an FX sprite is PARKED (no src, path on _lxHeldSrc) until its class casts it or asks for it,
+  // and decode() on a src-less image never settles - this await hung the suite until the harness killed it. Ask for
+  // each one the way the game does (the skill's own _LX_FX_SKILL tags), then wait for real pixels, bounded
+  const _hs = window._lxBootHold; try { if (_hs && _hs.release) _hs.release('menu'); } catch (e) {}
+  for (const k of ['warlord_banner_planted', 'rampage_pulse']) {
+    if (typeof _lxFxWant === 'function') _lxFxWant('fx:' + k, true);
+    else if (typeof _lxWantImg === 'function' && LX_FX && LX_FX[k]) _lxWantImg(LX_FX[k], true);
+  }
   for (const k of ['warlord_banner_planted', 'rampage_pulse']) {
     const im = LX_FX && LX_FX[k];
-    if (im && !im.complete) { try { await im.decode(); } catch (e) {} }
+    const t0 = performance.now();
+    while (im && !(im.complete && im.naturalWidth > 0) && performance.now() - t0 < 20000) await new Promise((r) => setTimeout(r, 100));
+    if (im && im.getAttribute('src')) { try { await Promise.race([im.decode(), new Promise((r) => setTimeout(r, 5000))]); } catch (e) {} }
   }
   out.banner = probe('warlord_banner_planted');
   out.ring = probe('rampage_pulse');

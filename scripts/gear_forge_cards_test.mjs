@@ -62,7 +62,7 @@ try {
     return { forge: modal.classList.contains('gear-forge'), display: getComputedStyle(list).display, n: cards.length, cols, rowsY,
       card: { flexDir: cc.flexDirection, border: cc.borderTopWidth + ' ' + cc.borderTopColor, shadow: cc.boxShadow.slice(0, 80), font: cc.fontFamily.slice(0, 10), h: Math.round(c0.getBoundingClientRect().height), cursor: cc.cursor },
       coaster: { w: coaster.width, radius: coaster.borderTopLeftRadius, bg: coaster.backgroundColor, border: coaster.borderTopWidth + ' ' + coaster.borderTopColor },
-      icon: (() => { const cell = c0.querySelector(':scope > div:first-child'), im = cell.querySelector('img'), sp = cell.querySelector('span'); const el = im || sp; if (!el) return null; const cs = getComputedStyle(el); return { kind: im ? 'img' : 'span', w: cs.width, font: cs.fontSize, shadows: (cs.filter.match(/drop-shadow/g) || []).length, ink: /rgb\(12, 11, 16\)/.test(cs.filter), over: Math.round(el.getBoundingClientRect().height - cell.getBoundingClientRect().height) }; })(),
+      icon: (() => { const cell = c0.querySelector(':scope > div:first-child'), im = cell.querySelector('img'), sp = cell.querySelector('span'); const el = im || sp; if (!el) return null; const cs = getComputedStyle(el); return { kind: im ? 'img' : 'span', w: cs.width, font: cs.fontSize, shadows: (cs.filter.match(/drop-shadow/g) || []).length, ink: /rgb\(12, 11, 16\)/.test(cs.filter), svgInk: /url\(["']?#lx-ink-2px["']?\)/.test(cs.filter) && (() => { const f = document.getElementById('lx-ink-2px'), fl = f && f.querySelector('feFlood'), mo = f && f.querySelector('feMorphology'); return !!(fl && /^#0c0b10$/i.test(fl.getAttribute('flood-color')) && mo && mo.getAttribute('operator') === 'dilate' && parseFloat(mo.getAttribute('radius')) >= 1); })(), over: Math.round(el.getBoundingClientRect().height - cell.getBoundingClientRect().height) }; })(),
       plate: getComputedStyle(modal).backgroundImage.includes('panel_p5_shop'),
       tint: (() => { const c = cards.find((x) => /cls-/.test(x.className)); if (!c) return null; const cs = getComputedStyle(c.querySelector(':scope > div:first-child')); return { cls: (c.className.match(/cls-(\w+)/) || [])[1], bg: cs.backgroundImage.slice(0, 70), shadow: cs.boxShadow.slice(0, 90), n: cards.filter((x) => /cls-/.test(x.className)).length }; })(),
       buyAtRest: { opacity: cb0.opacity, pos: cb0.position, pe: cb0.pointerEvents, bg: cb0.backgroundColor, disabled: btn0.disabled },
@@ -71,7 +71,9 @@ try {
   check(r.forge && r.display === 'grid' && r.cols >= 3 && r.rowsY >= 2 && r.n >= 6, 'GRID: the gear tab is a grid of boxes, three or more across', J({ display: r.display, cols: r.cols, rows: r.rowsY, n: r.n }));
   check(r.card.flexDir === 'column' && r.card.border === '2px rgb(12, 11, 16)' && /rgb\(12, 11, 16\) 4px 4px 0px/.test(r.card.shadow) && /inset/.test(r.card.shadow) && /^Nunito/.test(r.card.font) && r.card.h <= 340, 'BOX: a column with a 2px black line, an ink offset and a rarity strip, in Nunito, compact (under 340 device px with the 88 px sprite; the old row alone was ~160)', J(r.card));
   check(r.coaster.w === '64px' && r.coaster.radius === '50%' && r.coaster.bg === 'rgba(255, 255, 255, 0.2)' && r.coaster.border === '2px rgb(12, 11, 16)', 'BOX: the piece on a 64 px coaster at 20% white with a 2px black ring', J(r.coaster));
-  check(r.icon && ((r.icon.kind === 'img' && r.icon.w === '88px' && r.icon.shadows >= 4 && r.icon.ink && r.icon.over > 8) || (r.icon.kind === 'span' && r.icon.font === '52px' && r.icon.shadows >= 1)), 'ICON: the piece drawn at 88 px, overflowing the 64 px coaster, with an ink outline of drop-shadows (or its glyph at 52 px while the sprite decodes)', J(r.icon));
+  // v0.30.1265 (b57302c0, per user): the four 2 px drop-shadows became the inventory's 1.5 px SVG ink outline,
+  // filter url(#lx-ink-2px) - a dilated #0c0b10 silhouette under the art - so the img is checked for that filter
+  check(r.icon && ((r.icon.kind === 'img' && r.icon.w === '88px' && r.icon.svgInk && r.icon.over > 8) || (r.icon.kind === 'span' && r.icon.font === '52px' && r.icon.shadows >= 1)), 'ICON: the piece drawn at 88 px, overflowing the 64 px coaster, with the #lx-ink-2px ink outline (or its glyph at 52 px while the sprite decodes)', J(r.icon));
   const TINT = { warrior: '255, 90, 90', rogue: '198, 138, 255', archer: '126, 231, 135', mage: '106, 166, 255', hp: '255, 90, 90', mp: '106, 166, 255', full: '255, 209, 102', cure: '126, 231, 135' };
   const tinted = (o, k) => !!k && new RegExp('rgba\\(' + TINT[k] + ', 0.48\\)').test(o.bg) && new RegExp('rgba\\(' + TINT[k] + ', 0.55\\)').test(o.shadow);
   check(r.tint && r.tint.n === r.n && tinted(r.tint, r.tint.cls), 'CLASS TINT: every forge card carries its class and its coaster is washed and glows in the class colour (a warrior sees red)', J(r.tint));
@@ -87,9 +89,18 @@ try {
     return { idx, price, x: r.left + 20, y: r.top + 20, coins: player.mojicoins, inv: (player.inventory || []).filter(Boolean).length, name: cards[idx].querySelector('.name b').textContent };
   });
   if (buy.no) throw new Error(buy.no);
+  // hover, then wait for the fade to settle (a loaded machine read it before it started, or 0.9996 mid-way); nudge
+  // the pointer once more if :hover has not taken yet
   await page.mouse.move(buy.x, buy.y); await page.waitForTimeout(300);
+  for (let k = 0; k < 20; k++) {
+    const op = await page.evaluate((idx) => +getComputedStyle(document.querySelectorAll('#shop-list .shop-item')[idx].querySelector('button')).opacity, buy.idx);
+    if (op >= 0.99) break;
+    if (k === 5) await page.mouse.move(buy.x + 2, buy.y + 2);
+    await page.waitForTimeout(100);
+  }
   const hovered = await page.evaluate((idx) => { const c = document.querySelectorAll('#shop-list .shop-item')[idx]; const b = getComputedStyle(c.querySelector('button')), p = getComputedStyle(c.querySelector('.price')); return { buyOpacity: b.opacity, buyBg: b.backgroundColor, priceOpacity: p.opacity, cursor: getComputedStyle(c).cursor }; }, buy.idx);
-  check(hovered.buyOpacity === '1' && /rgb\(255, 228, 92\)/.test(hovered.buyBg) && hovered.priceOpacity === '0' && hovered.cursor === 'pointer', 'HOVER: Buy rises in yellow over the price, the box shows a pointer', J(hovered));
+  // the fade may still be settling on a loaded machine (0.9996 / 0.0004 read) - judge the end state, not the last digit
+  check(+hovered.buyOpacity >= 0.99 && /rgb\(255, 228, 92\)/.test(hovered.buyBg) && +hovered.priceOpacity <= 0.01 && hovered.cursor === 'pointer', 'HOVER: Buy rises in yellow over the price, the box shows a pointer', J(hovered));
   await page.mouse.click(buy.x, buy.y); await page.waitForTimeout(500);
   const after = await page.evaluate(() => ({ coins: player.mojicoins, inv: (player.inventory || []).filter(Boolean).length, open: document.getElementById('shop-modal').style.display }));
   check(after.coins === buy.coins - buy.price && after.inv === buy.inv + 1, `CLICK: clicking the box itself bought ${buy.name} - coins down by ${buy.price}, one more item held`, J({ before: buy.coins, after: after.coins, inv: [buy.inv, after.inv] }));
