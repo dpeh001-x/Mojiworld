@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1304';
+const GAME_VERSION = 'v0.30.1305';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -130862,6 +130862,24 @@ function drawPlatforms() {
   // if (_outlineMode) { ... } // intentionally removed
 }
 
+// v0.30.1305 chest-plant (per user: "ensure they are all grounded to the floor / platform") - the surface under a chest. Chests
+// are spawned at p.y - 24 (the map spawner) or p.y - 28 (the clockwork spire) with a 30 px box, and drawChests stretched the
+// art into a fixed box below that, so closed chests sank 2-5 px, open ones 6-10 px (the raised lid grows the box upward only),
+// and the spire's floated 2 px. The nearest ground / platform top within 14 px of the box foot, over the chest's centre;
+// cached per position (the spire moves chests with their shelves). No surface: the spawner's own relation (foot - 6).
+function _lxChestFloorY(c) {
+  const at = c.x + ',' + c.y;
+  if (c._lxFloorAt === at) return c._lxFloorY;
+  const cx = c.x + c.w / 2, foot = c.y + c.h;
+  let best = null;
+  for (const p of (game.mapData && game.mapData.platforms) || []) {
+    if (!p || (p.type !== 'ground' && p.type !== 'platform') || cx < p.x || cx > p.x + p.w) continue;
+    if (Math.abs(p.y - foot) > 14) continue;
+    if (best === null || Math.abs(p.y - foot) < Math.abs(best - foot)) best = p.y;
+  }
+  c._lxFloorAt = at; c._lxFloorY = best === null ? foot - 6 : best;
+  return c._lxFloorY;
+}
 function drawChests() {
   if (!game.chests || game.chests.length === 0) return;   // v0.25.451: empty-list early-out
   const OUT = '#1a0818';
@@ -130869,7 +130887,7 @@ function drawChests() {
     const sx = c.x - game.camera.x;
     if (sx + c.w < 0 || sx > W) continue;
     if (!_lxRenderOnly) c.bob += 0.05;   // hz-smooth
-    const by = 0;
+    let by = 0;   // v0.30.1305 chest-plant - set below once the art's content box is known
     // Shadow
     // v0.29.6xx — SIT IT UNDER THE CHEST (per user). The box maths was already
     // right (shadow and sprite centres agree to 0.0px); the gap was the ART.
@@ -130893,6 +130911,10 @@ function drawChests() {
         const _shTop = c.y - 6 - _shLid;
         const _shH   = c.h + 10 + _shLid;
         _shY = _shTop + _shH * ((_cb.bottom + 1) / _srcH) + 1;
+        // v0.30.1305 chest-plant - the art's lowest painted row lands 1 px into the surface under the chest (the pets' bite),
+        // closed or open, whatever the spawn offset; the shadow moves with it.
+        by = _lxChestFloorY(c) + 2 - _shY;
+        _shY += by;
       }
     }
     ctx.fillStyle = 'rgba(0,0,0,0.3)';

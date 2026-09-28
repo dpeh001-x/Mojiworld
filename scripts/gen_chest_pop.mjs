@@ -21,16 +21,23 @@ const ROOT = path.resolve(HERE, '..');
 const OBJ = path.join(ROOT, 'Sprites', 'objects');
 const OUT = process.env.CHEST_POP_OUT || path.join(HERE, '_tmp_chest_pop');
 const DEST = process.env.CHEST_POP_DEST || OBJ;
-// the pre-pop art's content boxes (trim threshold 4) on the 768 canvas: [left, top, width, height]
+// the content boxes (trim threshold 4) each sprite is fitted into on the 768 canvas: [left, top, width, height]. Wood and
+// silver keep the pre-pop boxes. The GOLD boxes are larger - per user "for the gold chest can make it look more grand": a
+// wider, taller box with the SAME bottom row, so the gold chest stands bigger than the others and is still planted the same.
 const BOX = { chest_wood: [75, 147, 616, 464], chest_wood_open: [48, 0, 673, 768], chest_silver: [51, 180, 663, 481],
-  chest_silver_open: [0, 124, 768, 644], chest_gold: [76, 189, 615, 426], chest_gold_open: [0, 102, 768, 666] };
+  chest_silver_open: [0, 124, 768, 644], chest_gold: [24, 60, 720, 555], chest_gold_open: [0, 0, 768, 768] };
 const MATERIAL = { wood: 'warm brown wooden planks with dark iron trim and a dark iron round keyhole lock',
   silver: 'polished silver-grey metal - the lid and body are shiny silver metal with darker steel trim and a steel round keyhole lock',
-  gold: 'warm brown wooden planks with bright shiny GOLD trim bands, gold corners and a gold round keyhole lock' };
+  gold: 'a GRAND royal treasure chest: the lid and body are rich shiny GOLD with ornate gold filigree scrollwork, rows of gold studs, a big '
+    + 'faceted red ruby set in the gold lock plate above the round keyhole, a small gold crown crest rising from the top of the lid, and a few '
+    + 'deep red velvet panels showing between the gold bands' };
 const NOPE = 'NO stickers, NO stars, NO lightning bolts, NO decals, no neon, no rainbow. Transparent background, a single object, centred, '
   + 'no ground, no drop shadow, no text.';
 const prompt = (key) => {   // silver / gold from the wooden chest
   const tier = key.split('_')[1];
+  if (tier === 'gold') return 'Edit THIS treasure chest into its GRAND royal version: keep the same chubby cartoon design family - the puffy '
+    + 'rounded lid wider than the body, the fat black ink outline, glossy white highlight shapes, round keyhole and straight-on front view - but make '
+    + 'it lavish and impressive: ' + MATERIAL.gold + '. It should clearly look like the most valuable chest. ' + NOPE;
   return 'Edit THIS treasure chest: keep EXACTLY the same design, shape, proportions, puffy rounded lid, fat black ink outline, glossy white '
     + 'highlight shapes, round keyhole lock and straight-on front view - change ONLY its materials and colours to ' + MATERIAL[tier] + '. ' + NOPE;
 };

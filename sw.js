@@ -237,7 +237,9 @@
 // their own names (pop-punk redraw), so a returning browser would otherwise keep the old art until its cache refreshed.
 // v0.30.1298 chest-redesign - v99 -> v100. the six Sprites/objects/chest_<tier>[_open].webp sprites are REPLACED again under
 // their own names (pop-punk redraw), so a returning browser would otherwise keep the old art until its cache refreshed.
-const CACHE = 'mojiworld-assets-v100';   // v0.30.1298 - treasure chests redesigned, chubby pop punk (same names)
+// v0.30.1305 gold-grand - v100 -> v101. Sprites/objects/chest_gold.webp and chest_gold_open.webp are REPLACED under their own names
+// (the grand gold chest), so a returning browser would otherwise keep the plain one until its cache refreshed.
+const CACHE = 'mojiworld-assets-v101';   // v0.30.1305 - the grand gold chest (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
