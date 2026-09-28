@@ -66,6 +66,37 @@ try {
   check(S.every((s) => Math.abs(s.speed - 5.4) < 0.35 && s.life === 110), 'and the authored flight (5.4 speed, 110 life)', S.slice(0, 2).map((s) => s.speed.toFixed(2) + '/' + s.life).join(', '));
   check(r.animKey && r.frameCount === 9 && r.loopOk && okFrames.size === 9, 'the nine-frame flicker loop is keyed, indexed, all nine frames load, and the renderer gets a frame', `key ${r.animKey}, index ${r.frameCount}, ${okFrames.size}/9 frames served, drawing ${r.loop}`);
   check(r.still && r.cast && r.blit && r.blit.mode === 'static', 'the still, the hand flash and the upright draw mode are registered', JSON.stringify({ still: r.still, cast: r.cast, blit: r.blit }));
+  // v0.30.1379 - per user "make the wisp-light burst golden on hit too": the shot bursts gold (its own art, 1.4x the orb, no
+  // radius floor) on a hit and where it fizzles, and it is a burst only - nobody is splashed. Real shots, placed by hand.
+  const B = await page.evaluate(async () => {
+    const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+    const frames = async (n) => { const t = game.time; for (let k = 0; k < 400 && game.time < t + n; k++) await sleep(10); };
+    game.monsters.length = 0; game.projectiles.length = 0; if (game.hazards) game.hazards.length = 0;
+    player._god = false; player.maxHp = 1e6; player.hp = 1e6; player.parryWindow = 0; game.paused = false;
+    const bs = LX_FX.wisp_burst; for (let k = 0; k < 120 && !(bs && _lxFxReady(bs)); k++) await sleep(50);   // lazy art: asked for, then loaded
+    const m = spawnMonster(player.x + 300, player.y - 60, 'lanternWisp', false); m.maxHp = m.currentHp = 1e9;
+    const shot = () => { const n0 = game.projectiles.length; fireMonsterProjectile(m); const p = game.projectiles[n0]; game.monsters.length = 0; return p; };
+    const run = async (place) => {
+      game.projectiles.length = 0; game.damageNumbers.length = 0; game.smoothFx = []; player.invulnerable = 0; player.hp = 1e6;
+      const p = shot(); if (!p) return { err: 'no shot' };
+      p._noEvasion = true; place(p); const hp0 = player.hp, n0 = game.particles.length;
+      await frames(3);
+      const gold = game.particles.slice(n0).filter((q) => q.color === '#ffc84a' || q.color === '#fff1b8').length;
+      const sb = (game.smoothFx || []).find((f) => f.type === 'spriteBurst' && f.spriteKey === 'wisp_burst');
+      return { lost: Math.round(hp0 - player.hp), nums: game.damageNumbers.filter((d) => d.taken).map((d) => ({ text: String(d.text), color: d.color })), gold, size: sb ? sb.size : 0, w: p.w };
+    };
+    const pc = () => ({ x: player.x + player.w / 2, y: player.y + player.h / 2 });
+    const out = {};
+    out.direct = await run((p) => { const c = pc(); p.x = c.x - p.w / 2; p.y = c.y - p.h / 2; p.vx = 0; p.vy = 0; p.life = 30; });
+    out.near = await run((p) => { const c = pc(); p.x = player.x - 8 - p.w; p.y = c.y - p.h / 2; p.vx = 0; p.vy = 0; p.life = 1; });
+    player._god = true;
+    return out;
+  });
+  const D = B.direct || {}, N = B.near || {};
+  check(D.lost > 0 && D.nums && D.nums.length === 1 && D.nums[0].color === '#ffcc44' && D.gold >= 6 && D.size > 0,
+    'a direct hit bursts gold: one gold number, the golden burst art and sparks', JSON.stringify(D));
+  check(D.size && Math.abs(D.size - 2 * Math.round(D.w * 1.4)) <= 1, 'the burst spans 1.4x the orb (no radius floor: a small shot, a small burst)', `orb ${D.w} px -> burst ${D.size} px`);
+  check(N.size > 0 && N.lost === 0 && !(N.nums || []).length, 'an orb that fizzles just clear of the hero bursts gold but splashes nobody', JSON.stringify(N));
   check(!bad.length, 'every mwisplight file is served', bad.slice(0, 3).join(' | '));
   check(!errs.length, 'no page errors', errs.slice(0, 2).join(' | '));
 } catch (e) { check(false, 'harness error', String(e.message).slice(0, 300)); }
