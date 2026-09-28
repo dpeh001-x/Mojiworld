@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1331';
+const GAME_VERSION = 'v0.30.1332';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -134919,6 +134919,7 @@ function _heroVecWeaponUsesHorizontalCarry(animName) {
   return animName === 'idle'
     || animName === 'walk'
     || animName === 'jump'
+    || animName === 'land'
     || animName === 'dash_rogue_ninja'
     || animName === 'dash_warrior_bash'
     || animName === 'paint_pose_rest'
@@ -136211,11 +136212,153 @@ function _heroVecArcherLegStance(t, neutral, wide) {
   else k = 1 - _heroEaseInOutSine((t - 0.82) / 0.18);
   return neutral + (wide - neutral) * k;
 }
-function _heroVecJumpRise() {
-  return ((typeof player !== 'undefined' && player.vy) || 0) < -0.4;
+// v0.30.1332 - SMOOTH JUMP (per user: "Player character jump and falling animation can add more frames to make it animate more
+// smooth and naturally"). The vector hero's jump was three held poses picked by vy thresholds (rise below -0.4, fall above
+// 0.55, one apex pose between) and the air test dropped to IDLE for the frame or two around the apex where |vy| <= 0.5,
+// so a jump read: idle -> rise (held ~20 frames) -> idle flash -> fall (held) -> idle. It is now a continuous arc:
+//   - the air state is held from take-off to touchdown (_heroVecAirTick), so the apex never flashes idle;
+//   - the pose is blended between six keyframes along a SMOOTHED vy - launch, rise, apex, fall, plummet (a long drop:
+//     arms up, legs reaching, a small flutter) - so every sim frame of the arc is its own in-between;
+//   - take-off eases out of the idle / walk pose over 4 frames and a double jump re-kicks the launch;
+//   - LANDING is a pose of its own ('land'): the knees take the hit for 3 frames, scaled by the fall speed, then it eases
+//     into idle or walk over the next 11, ending exactly on that pose. The whole-body squash of v0.29.127 is untouched.
+// A pose is { rot, def, bob } per bone; _hvPoseOf reads any HERO_VEC_* anim into one, _hvKeyPose builds one from a
+// keyframe, _hvMixPose blends two. State lives on the drawn player object, stepped once per game.time.
+const HV_BONES = ['spine', 'head', 'armL', 'armR', 'handL', 'legL', 'legR'];
+// r* = bone rotations (rad), sx / sy = torso stretch (the head counter-scales so it stays round), by = torso lift,
+// ly / lly = right / left leg lift (px)
+const HV_JUMP_KEYS = {
+  launch:  { spine: -0.20, head: -0.14, armL: -1.25, armR:  1.20, handL: 0, legL:  0.30, legR: -0.12, sx: 0.92, sy: 1.08, by: -2.8, ly: -0.6, lly: 0 },
+  rise:    { spine: -0.12, head: -0.12, armL: -0.95, armR:  0.95, handL: 0, legL:  0.72, legR: -0.38, sx: 0.96, sy: 1.02, by: -2.0, ly: -2.0, lly: 0 },
+  apex:    { spine:  0.02, head:  0.02, armL: -0.62, armR:  0.62, handL: 0, legL:  0.46, legR: -0.30, sx: 1.00, sy: 1.00, by: -0.6, ly: -2.4, lly: -1.2 },
+  fall:    { spine:  0.16, head:  0.10, armL:  0.36, armR:  0.52, handL: 0, legL:  0.44, legR: -0.60, sx: 1.03, sy: 0.97, by:  1.2, ly: -2.0, lly: 0 },
+  plummet: { spine:  0.10, head:  0.06, armL: -1.10, armR:  1.05, handL: 0, legL:  0.18, legR: -0.24, sx: 0.97, sy: 1.04, by:  0.6, ly: -0.8, lly: 0 },
+  land:    { spine:  0.24, head:  0.14, armL:  0.62, armR:  0.34, handL: 0, legL:  0.66, legR: -0.70, sx: 1.07, sy: 0.92, by:  3.0, ly:  0.0, lly: 0 },
+};
+const HV_LAND_HIT = 3, HV_LAND_N = 14, HV_TAKEOFF_N = 4, HV_LAUNCH_N = 10;
+const _hvSmooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+function _hvPoseOf(name, t) {
+  const A = HERO_VEC_ANIMS[name] || {}, D = HERO_VEC_DEFORM[name] || {}, B = HERO_VEC_BOB[name] || {};
+  const P = { rot: {}, def: {}, bob: {} };
+  for (const b of HV_BONES) {
+    P.rot[b] = A[b] ? A[b](t) : 0;
+    const d = D[b] ? D[b](t) : null; P.def[b] = d ? { sx: d.sx, sy: d.sy } : { sx: 1, sy: 1 };
+    const o = B[b] ? B[b](t) : null; P.bob[b] = o ? { x: o.x || 0, y: o.y || 0 } : { x: 0, y: 0 };
+  }
+  return P;
 }
-function _heroVecJumpFall() {
-  return ((typeof player !== 'undefined' && player.vy) || 0) > 0.55;
+function _hvKeyPose(k) {
+  const P = { rot: {}, def: {}, bob: {} };
+  for (const b of HV_BONES) { P.rot[b] = k[b] || 0; P.def[b] = { sx: 1, sy: 1 }; P.bob[b] = { x: 0, y: 0 }; }
+  P.def.spine = { sx: k.sx, sy: k.sy }; P.def.head = { sx: 1 / k.sx, sy: 1 / k.sy };
+  P.bob.spine = { x: 0, y: k.by }; P.bob.legR = { x: 0, y: k.ly }; P.bob.legL = { x: 0, y: k.lly || 0 };
+  return P;
+}
+function _hvMixPose(A, B, w) {
+  if (w <= 0) return A; if (w >= 1) return B;
+  const P = { rot: {}, def: {}, bob: {} }, L = (a, b) => a + (b - a) * w;
+  for (const b of HV_BONES) {
+    P.rot[b] = L(A.rot[b], B.rot[b]);
+    P.def[b] = { sx: L(A.def[b].sx, B.def[b].sx), sy: L(A.def[b].sy, B.def[b].sy) };
+    P.bob[b] = { x: L(A.bob[b].x, B.bob[b].x), y: L(A.bob[b].y, B.bob[b].y) };
+  }
+  return P;
+}
+// one channel set (rot / def / bob) per bone, read from a pose function - how the jump and land anims plug into HERO_VEC_*
+function _hvChannels(kind, poseFn) { const o = {}; for (const b of HV_BONES) o[b] = () => poseFn()[kind][b]; return o; }
+const HV_JUMP_KP = {};
+for (const k in HV_JUMP_KEYS) HV_JUMP_KP[k] = _hvKeyPose(HV_JUMP_KEYS[k]);
+// The air state, stepped once per game.time on the drawn player: held from take-off (off the ground and |vy| > 0.5) to
+// touchdown (onGround), or to 8 still frames off the ground (a rope, a hover) so nothing sticks in the jump pose.
+function _heroVecAirTick() {
+  const p = player, now = (game && game.time) || 0;
+  if (p._hvT === now) return !!p._hvAir;
+  const dt = (p._hvT == null) ? 1 : Math.max(0, Math.min(8, now - p._hvT));
+  p._hvT = now;
+  const vy = p.vy || 0;
+  let air = !!p._hvAir;
+  if (!air) {
+    if (!p.onGround && Math.abs(vy) > 0.5) {
+      air = true; p._hvTakeAt = now; p._hvVs = vy; p._hvStill = 0; p._hvPeak = Math.max(0, vy);
+      p._hvLaunchAt = vy < -3 ? now : -1e9; p._hvFrom = Math.abs(p.vx || 0) > 0.5 ? 'walk' : 'idle';
+    }
+  } else {
+    p._hvStill = Math.abs(vy) <= 0.5 ? (p._hvStill || 0) + dt : 0;
+    if (p.onGround || p._hvStill > 8) {
+      air = false;
+      if (p.onGround) { p._hvLandAt = now; p._hvLandV = Math.max(p._hvPeak || 0, p._hvVs || 0); p._hvLandFrom = p._hvLastAir || null; }
+    } else {
+      if (vy < (p._hvPrevVy || 0) - 4) { p._hvLaunchAt = now; p._hvVs = vy; }   // a double jump / bounce: a fresh launch
+      p._hvVs += (vy - p._hvVs) * (1 - Math.pow(0.6, dt));
+      if (vy > (p._hvPeak || 0)) p._hvPeak = vy;
+    }
+  }
+  p._hvPrevVy = vy; p._hvAir = air;
+  return air;
+}
+// The arc along the smoothed vy: rise (<= -6) -> apex (0) -> fall (+4 .. +8) -> plummet (>= +13)
+function _heroVecJumpPose() {
+  const p = player, now = (game && game.time) || 0;
+  if (p._hvPoseT === now && p._hvPoseK === 'jump' && p._hvPose) return p._hvPose;
+  const vs = (p._hvVs != null) ? p._hvVs : (p.vy || 0), K = HV_JUMP_KP;
+  let P;
+  if (vs <= -6) P = K.rise;
+  else if (vs <= 0) P = _hvMixPose(K.rise, K.apex, _hvSmooth((vs + 6) / 6));
+  else if (vs <= 4) P = _hvMixPose(K.apex, K.fall, _hvSmooth(vs / 4));
+  else if (vs <= 8) P = K.fall;
+  else P = _hvMixPose(K.fall, K.plummet, _hvSmooth((vs - 8) / 5));
+  if (vs > 8) {   // a long drop: the arms flutter a little
+    const f = _hvSmooth((vs - 8) / 5) * 0.14 * Math.sin(now * 0.45);
+    P = { rot: Object.assign({}, P.rot, { armL: P.rot.armL + f, armR: P.rot.armR - f }), def: P.def, bob: P.bob };
+  }
+  const la = now - (p._hvLaunchAt != null ? p._hvLaunchAt : -1e9);
+  if (la >= 0 && la < HV_LAUNCH_N) P = _hvMixPose(K.launch, P, _hvSmooth(la / HV_LAUNCH_N));
+  const ta = now - (p._hvTakeAt != null ? p._hvTakeAt : -1e9);
+  if (ta >= 0 && ta < HV_TAKEOFF_N) P = _hvMixPose(_hvPoseOf(p._hvFrom || 'idle', _heroVecTimeNorm(p._hvFrom || 'idle')), P, _hvSmooth((ta + 1) / (HV_TAKEOFF_N + 1)));
+  p._hvPoseT = now; p._hvPoseK = 'jump'; p._hvPose = P; p._hvLastAir = P;
+  return P;
+}
+function _heroVecLandActive() {
+  const p = player, a = ((game && game.time) || 0) - (p._hvLandAt != null ? p._hvLandAt : -1e9);
+  return a >= 0 && a < HV_LAND_N;
+}
+// Landing: the last air pose -> the knees take it (3 frames, deeper for a harder fall) -> idle / walk by frame 14
+function _heroVecLandPose() {
+  const p = player, now = (game && game.time) || 0;
+  if (p._hvPoseT === now && p._hvPoseK === 'land' && p._hvPose) return p._hvPose;
+  const a = now - (p._hvLandAt != null ? p._hvLandAt : -1e9);
+  const gName = Math.abs(p.vx || 0) > 0.5 ? 'walk' : 'idle', G = _hvPoseOf(gName, _heroVecTimeNorm(gName));
+  const s = Math.max(0.3, Math.min(1, ((p._hvLandV || 0) - 2) / 10));
+  const hit = _hvMixPose(G, HV_JUMP_KP.land, s);
+  let P;
+  if (a < 0 || a >= HV_LAND_N) P = G;
+  else if (a < HV_LAND_HIT) P = _hvMixPose(p._hvLandFrom || HV_JUMP_KP.fall, hit, _hvSmooth((a + 1) / HV_LAND_HIT));
+  else P = _hvMixPose(hit, G, _hvSmooth((a - HV_LAND_HIT + 1) / (HV_LAND_N - HV_LAND_HIT)));
+  p._hvPoseT = now; p._hvPoseK = 'land'; p._hvPose = P;
+  return P;
+}
+// The hair trails the arc (head-local px, + = down): it drops behind the head on the rise and lifts on the fall, then on
+// touchdown it flops down past rest and springs back (continuing from where it hung in the air). Eased once per frame.
+function _heroVecHairLag() {
+  const p = player, now = (game && game.time) || 0;
+  if (p._hvHairT === now) return p._hvHairDy || 0;
+  const dt = (p._hvHairT == null) ? 1 : Math.max(0, Math.min(8, now - p._hvHairT));
+  p._hvHairT = now;
+  let target = 0;
+  if (p._hvAir) target = Math.max(-3.2, Math.min(2.4, -(p._hvVs || 0) * 0.3));
+  else {
+    const a = now - (p._hvLandAt != null ? p._hvLandAt : -1e9);
+    if (a >= 0 && a < 20) {
+      if (a === 0 || p._hvHairLand == null) p._hvHairLand = p._hvHairDy || 0;
+      const s = Math.max(0.3, Math.min(1, ((p._hvLandV || 0) - 2) / 10)), e = Math.exp(-a * 0.2), w = a * 0.45;
+      target = (p._hvHairLand * Math.cos(w) + 3.0 * s * Math.sin(w)) * e;
+      p._hvHairDy = target; return target;   // the spring is already smooth: no easing on top
+    }
+    p._hvHairLand = null;
+  }
+  p._hvHairDy = (p._hvHairDy || 0) + (target - (p._hvHairDy || 0)) * (1 - Math.pow(0.65, dt));
+  if (Math.abs(p._hvHairDy) < 0.02) p._hvHairDy = 0;
+  return p._hvHairDy;
 }
 function _heroVecWalkArmSwing(t, side) {
   const phase = ((t % 1) + 1) % 1;
@@ -136599,14 +136742,9 @@ const HERO_VEC_ANIMS = {
     legL:  t => _heroVecWalkLegAngle(t, 'left'),
     legR:  t => _heroVecWalkLegAngle(t, 'right'),
   },
-  jump: {
-    spine: () => _heroVecJumpRise() ? -0.12 : (_heroVecJumpFall() ? 0.16 : 0.02),
-    head:  () => _heroVecJumpRise() ? -0.12 : (_heroVecJumpFall() ? 0.10 : 0.02),
-    armL:  () => _heroVecJumpRise() ? -0.95 : (_heroVecJumpFall() ? 0.36 : -0.62),
-    armR:  () => _heroVecJumpRise() ? 0.95 : (_heroVecJumpFall() ? 0.52 : 0.62),
-    legL:  () => _heroVecJumpRise() ? 0.72 : (_heroVecJumpFall() ? 0.44 : 0.22),
-    legR:  () => _heroVecJumpRise() ? -0.38 : (_heroVecJumpFall() ? -0.60 : -0.48),
-  },
+  // v0.30.1332 - the smooth jump: a continuous arc plus a landing (see _heroVecJumpPose / _heroVecLandPose)
+  jump: _hvChannels('rot', _heroVecJumpPose),
+  land: _hvChannels('rot', _heroVecLandPose),
   // v0.25.398 - Rogue quick dash: anticipation -> launch -> smear -> brake.
   // Weapon is still drawn with deform:false so its dimensions stay fixed.
   dash_rogue_ninja: {
@@ -136901,14 +137039,9 @@ const HERO_VEC_DEFORM = {
   // resolves back to (1, 1). Net effect: torso elongates on the rise +
   // squashes on the apex/fall, but the head sprite keeps its proper
   // round chibi proportions throughout.
-  jump: {
-    spine: () => _heroVecJumpRise()
-      ? ({ sx: 0.96, sy: 1.02 })
-      : (_heroVecJumpFall() ? ({ sx: 1.03, sy: 0.97 }) : ({ sx: 1, sy: 1 })),
-    head:  () => _heroVecJumpRise()
-      ? ({ sx: 1 / 0.96, sy: 1 / 1.02 })
-      : (_heroVecJumpFall() ? ({ sx: 1 / 1.03, sy: 1 / 0.97 }) : ({ sx: 1, sy: 1 })),
-  },
+  // v0.30.1332 - the smooth jump keeps this rule: each keyframe's head counter-scales its spine (HV_JUMP_KEYS)
+  jump: _hvChannels('def', _heroVecJumpPose),
+  land: _hvChannels('def', _heroVecLandPose),
   dash_rogue_ninja: {
     spine: t => {
       const p = _heroVecRogueDashPose(t);
@@ -137057,11 +137190,8 @@ const HERO_VEC_BOB = {
     legL:  t => _heroVecWalkLegBob(t, 'left'),
     legR:  t => _heroVecWalkLegBob(t, 'right'),
   },
-  jump: {
-    spine: () => ({ x: 0, y: _heroVecJumpRise() ? -2.0 : (_heroVecJumpFall() ? 1.2 : -0.2) }),
-    head:  () => ({ x: 0, y: 0 }),
-    legR:  () => ({ x: 0, y: -2 }),
-  },
+  jump: _hvChannels('bob', _heroVecJumpPose),
+  land: _hvChannels('bob', _heroVecLandPose),
   dash_rogue_ninja: {
     spine: t => {
       const p = _heroVecRogueDashPose(t);
@@ -137246,7 +137376,7 @@ const HERO_VEC_BOB = {
   },
 };
 function _heroVecAnimFor() {
-  const inAir = Math.abs(player.vy) > 0.5 && !player.onGround;
+  const inAir = _heroVecAirTick();   // v0.30.1332 - held from take-off to touchdown: the apex no longer drops to idle for a frame
   const walking = !inAir && Math.abs(player.vx) > 0.5;
   const now = (game && game.time) || 0;
   const cls = (typeof player !== 'undefined' && player.cls) || 'default';
@@ -137289,6 +137419,7 @@ function _heroVecAnimFor() {
   if (cls === 'rogue' && (player._rogueDashPoseUntil | 0) > now) return 'dash_rogue_ninja';
   if (cls === 'warrior' && (player._warriorBashUntil | 0) > now) return 'dash_warrior_bash';
   if (inAir) return 'jump';
+  if (_heroVecLandActive()) return 'land';   // v0.30.1332 - the knees take the landing, then ease into idle / walk
   if (walking) return 'walk';
   return 'idle';
 }
@@ -138195,6 +138326,8 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       // (degrees, 0 = natural). The hero renders live each frame, so changing
       // the hue applies to the on-screen character immediately. Saturate a
       // touch so the dye reads as vivid rather than washed-out.
+      const _hvHairDy = (!opts.animName && typeof _heroVecHairLag === 'function') ? _heroVecHairLag() : 0;   // v0.30.1332 - the hair trails the jump
+      if (_hvHairDy) { ctx.save(); ctx.translate(0, _hvHairDy); }
       const _hairHue = (lookCustom && (lookCustom.hairHue | 0)) || 0;
       const _hairPrevFilter = ctx.filter;
       const _hairSrc = _lxFaceLayerSrc(_hairSprite);
@@ -138222,6 +138355,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
         ctx.drawImage(_hairSrc, -58, -52, 108, 108);
         if (_hairHue) ctx.filter = _hairPrevFilter || 'none';
       }
+      if (_hvHairDy) ctx.restore();
     }
     // v0.25.832 — Vector front-hair fallback removed (see comment at the
     // back-pass branch above). When _hairSprite hasn't decoded yet the
