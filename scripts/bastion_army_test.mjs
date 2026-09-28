@@ -7,6 +7,7 @@
 //   - GOOFY FOUR: Flop, Munch, Daisy and Mope are NPCs (role 'soldier') with their own lines and a 9-frame idle; they stand on the
 //     floor but fail the line - uneven gaps, not all facing the throne; drawn at the ranks' size
 //   - OUTLINES: every soldier still and frame has one silhouette ink weight (13-17 px at 1024) with 93%+ of its edge inked
+//   - v0.30.1405: NO GROUND SHADOW: no still or frame carries the animator's faint ground shadow (stray faint px away from the figure)
 //   node scripts/bastion_army_test.mjs
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url); const sharp = require('sharp'); sharp.cache(false);
@@ -72,6 +73,15 @@ const inkOf = async (rel) => { const { data: d, info } = await sharp(path.join(R
 const all = [...SERIOUS.flatMap((k) => [`objects/${k}.webp`, ...frames('objects/anim', k)]), ...Object.values(SQUAD).flatMap((b) => [`npc/${b}.webp`, ...frames('npc/idle', b)])];
 const inkBad = []; let lo = 99, hi = 0; for (const rel of all) { const r = await inkOf(rel); lo = Math.min(lo, r.med); hi = Math.max(hi, r.med); if (r.med < 13 || r.med > 17 || r.share < 0.93) inkBad.push(`${rel} ${r.med}px ${(r.share * 100).toFixed(0)}%`); }
 ok(`one silhouette ink weight on all ${all.length} soldier stills and frames (13-17 px, 93%+ inked)`, all.length === 70 && !inkBad.length, inkBad.join(', ') || `${lo}-${hi} px`);
+// v0.30.1405: the sprite animator left a faint ground shadow under Flop's feet (frames 1-6, ~7% opacity) that pulsed with the loop.
+// A stray is a faint pixel (alpha 4-127) more than 3 px from the figure's solid ink; the figures' own anti-aliased edges sit within 1-2 px.
+const strayOf = async (rel) => { const { data: d, info } = await sharp(path.join(ROOT, 'Sprites', rel)).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); const W = info.width, H = info.height, N = W * H;
+  const solid = new Uint8Array(N); for (let p = 0; p < N; p++) solid[p] = d[p * 4 + 3] >= 128 ? 1 : 0;
+  let n = 0; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const a = d[(y * W + x) * 4 + 3]; if (a < 4 || a >= 128) continue; let near = false;
+    for (let v = -3; v <= 3 && !near; v++) for (let u = -3; u <= 3; u++) { const X = x + u, Y = y + v; if (X >= 0 && Y >= 0 && X < W && Y < H && solid[Y * W + X]) { near = true; break; } } if (!near) n++; }
+  return n; };
+const strayBad = []; for (const rel of all) { const n = await strayOf(rel); if (n >= 50) strayBad.push(`${rel} ${n}`); }
+ok('no faint ground shadow around any soldier (under 50 stray faint px in every still and frame)', !strayBad.length, strayBad.join(', '));
 ok('drawWorldProps still mirrors a prop with flip:true', /if \(prop\.flip\) \{ ctx\.save\(\); ctx\.translate\(2 \* sx \+ w, 0\); ctx\.scale\(-1, 1\);/.test(G));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
