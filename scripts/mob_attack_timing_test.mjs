@@ -56,12 +56,13 @@ try {
     const m = spawnSnail(400); if (!m) return Object.assign(o, { spawnErr: 'no snail spawned' });
     m.vx = 0; m.currentHp = m.maxHp || 100; o.type = m.type;
     const now = performance.now();
-    // an instant hit: the strike is on screen at the hit, then the swing plays out and holds its settle
+    // an instant hit: a short lead-in through the end of the windup (swing-lead: it used to snap straight to the strike),
+    // the strike held, then the swing plays out and holds its settle
     m._animSt = null; m._atkStrikeMs = undefined; m._swingUntil = 0; m.atkAnimUntil = now + 3000;
     const seq = []; const s0 = performance.now();
     while (performance.now() - s0 < 900) { const f = _monsterStateFrame(m); seq.push([Math.round(performance.now() - s0), idx(f)]); await new Promise((r) => setTimeout(r, 8)); }
     o.instFirst = seq[0][1]; o.instLast = seq[seq.length - 1][1]; o.instMin = Math.min(...seq.map((x) => x[1])); o.instMax = Math.max(...seq.map((x) => x[1]));
-    const after6 = seq.find((x) => x[1] >= 7); o.instStrikeMs = after6 ? after6[0] : -1; o.instLate6 = seq.some((x) => x[0] > 220 && x[1] === 6);   // the strike frame gives way to the follow-through no earlier than its 155ms hold (sampling gaps only push it later)
+    const after6 = seq.find((x) => x[1] >= 7); o.instStrikeMs = after6 ? after6[0] : -1; const at6 = seq.find((x) => x[1] >= 6); o.inst6At = at6 ? at6[0] : -1; o.instLate6 = seq.some((x) => x[0] > 380 && x[1] === 6);   // the strike frame gives way to the follow-through no earlier than its 155ms hold (sampling gaps only push it later)
     o.instMonotone = seq.every((x, i) => i === 0 || x[1] >= seq[i - 1][1]); o.instSamples = seq.filter((x, i) => i % 6 === 0).map((x) => x[0] + ':' + x[1]).join(' ');
     // a telegraphed attack: the strike frame begins as the telegraph ends
     m._animSt = null; m._atkStrikeMs = 450; m._swingUntil = 0; m.atkAnimUntil = performance.now() + 2000;
@@ -83,8 +84,8 @@ try {
   });
   ok("the game reads the Echo Knight's baked timing (strike frame 6, held 155ms)", !!g.ft && g.ft.length === 9 && g.ft[6] === 155, g.ft && g.ft.join('/'));
   ok('Echo Knight attack frames decoded in the harness', g.ready === 9, String(g.ready));
-  ok('instant hit: the strike frame (6) is on screen at the hit, held ~155ms, then the swing settles', g.instFirst === 6 && g.instStrikeMs >= 140 && g.instStrikeMs <= 600 && g.instLate6 === false && g.instLast === 8, JSON.stringify([g.instFirst, g.instStrikeMs, g.instLast]));
-  ok('the swing plays once - frames only ever advance, no wrap back to the windup', g.instMonotone === true && g.instMin === 6 && g.instMax === 8, JSON.stringify([g.instMonotone, g.instMin, g.instMax]) + ' ' + (g.instMonotone ? '' : g.instSamples));
+  ok('instant hit: a short lead-in from the late windup (not a snap to the strike), the strike frame (6) by ~120ms, held ~155ms, then the swing settles', g.instFirst < 6 && g.instFirst >= 2 && g.inst6At >= 60 && g.inst6At <= 180 && g.instStrikeMs - g.inst6At >= 120 && g.instStrikeMs <= 700 && g.instLate6 === false && g.instLast === 8, JSON.stringify([g.instFirst, g.inst6At, g.instStrikeMs, g.instLast]));
+  ok('the swing plays once - frames only ever advance, no wrap back to the windup', g.instMonotone === true && g.instMin === g.instFirst && g.instMax === 8, JSON.stringify([g.instMonotone, g.instMin, g.instMax]) + ' ' + (g.instMonotone ? '' : g.instSamples));
   ok('telegraphed 450ms attack: windup frames before the telegraph ends, the strike frame right after', g.teleFirst === 0 && g.teleBeforeMax <= 5 && g.teleAtStrike === true, JSON.stringify([g.teleFirst, g.teleBeforeMax, g.teleAtStrike]) + ' ' + (g.teleAtStrike ? '' : g.teleSamples));
   ok('an Echo Knight beside the player: one full swing from the windup, then a rest, then another', g.proxStarts === true && g.proxFirst === 0 && g.proxRests === true && g.proxAgain === true, JSON.stringify([g.proxStarts, g.proxFirst, g.proxRests, g.proxAgain]));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

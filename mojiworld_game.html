@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1321';
+const GAME_VERSION = 'v0.30.1322';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -93527,7 +93527,7 @@ function updateMonsters(dt) {
           m.shootTimer = m.shootCd + Math.random() * (m.shootCdVar || 1200);   // v0.29.639
           if (m.boss || m.isBoss) m._postShotHold = 320;
         }
-      } else if (_shootOnScreen && m.shootTimer <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !((m.boss || m.isBoss) && (m._dashing || m._dashT > 0)) && !(m._dashCharging > 0) && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {   // v0.29.263 — winded bosses hold their shots   // v0.30.x — a dashCharge holds the shot too: the Horncap fired its mob-sized horn point-blank from inside its own silhouette mid-charge, which read as the sprite glitching ("weird dash animation"). The boss clause above never covered ordinary mobs.
+      } else if (_shootOnScreen && m.shootTimer <= 0 && !_lxMidSwing(m) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !((m.boss || m.isBoss) && (m._dashing || m._dashT > 0)) && !(m._dashCharging > 0) && dxs < _shootMaxX && dxs > _shootMinX && dys < _shootMaxY && m.aggroTarget) {   // v0.29.263 — winded bosses hold their shots   // v0.30.x — a dashCharge holds the shot too: the Horncap fired its mob-sized horn point-blank from inside its own silhouette mid-charge, which read as the sprite glitching ("weird dash animation"). The boss clause above never covered ordinary mobs.
         // v0.29.4xx — a BOSS never snap-fires mid-stride: it always takes the
         // telegraph path (with or without attack art) and charges for 520 ms,
         // planted by _mobCasting. Deliberate: stop -> charge -> fire -> beat.
@@ -93748,7 +93748,7 @@ function updateMonsters(dt) {
         if (m.x + m.w < _bcx || m.x > _bcx + W || m.y + m.h < _bcy || m.y > _bcy + H) _bmOnScreen = false;
       }
       // PHASE 1 — start telegraph when cd is up + in range + on screen.
-      if (!m._bigMeleeFiring && !m._columnFiring && m._bigMeleeCd <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _bmInRange && _bmOnScreen) {   // v0.30.371 — not while spent   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
+      if (!m._bigMeleeFiring && !m._columnFiring && m._bigMeleeCd <= 0 && !_lxMidSwing(m) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _bmInRange && _bmOnScreen) {   // v0.30.371 — not while spent   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
         m._bigMeleeFiring = true;
         m._bigMeleeT = bm.telegraphMs;
         m.vx = 0;   // root during windup (stickMul bosses start creeping next tick)
@@ -94161,7 +94161,7 @@ function updateMonsters(dt) {
         if (m.x + m.w < _ccx || m.x > _ccx + W || m.y + m.h < _ccy || m.y > _ccy + H) _csOnScreen = false;
       }
       // PHASE 1 — start telegraph
-      if (!m._columnFiring && !m._bigMeleeFiring && m._columnCd <= 0 && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && _csInRange && _csOnScreen) {   // v0.29.263 — winded bosses hold column strikes · v0.29.x — nor a retreating one
+      if (!m._columnFiring && !m._bigMeleeFiring && m._columnCd <= 0 && !_lxMidSwing(m) && !(m._shootWindup > 0) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && _csInRange && _csOnScreen) {   // v0.29.263 — winded bosses hold column strikes · v0.29.x — nor a retreating one
         m._columnFiring = true;
         m._columnT = cs.telegraphMs;
         m._columnTargetX = _playerCx;    // v0.26.218
@@ -94170,6 +94170,15 @@ function updateMonsters(dt) {
         // zones and the strike can never disagree.
         m._columnLanes = _columnLanesFor(cs, _playerCx);
         if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'column', 66);   // v0.30.89
+        // v0.30.1322 swing-lead - THE PILLAR IS CAST, NOT WALKED INTO. A column strike stamped no attack window, so a monster
+        // calling one (the Archon's Pillar of Light, measured) kept its walk loop playing while the light came down on the
+        // player. It now plants and plays its attack through the telegraph, the strike frame landing as the pillar falls -
+        // what the heavy swing below has always done. Bosses keep their own authored column patterns.
+        if (!(m.isBoss || m.boss || m.zodiacBoss)) {
+          const _csNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+          m.vx = 0; m.atkAnimUntil = _csNow + cs.telegraphMs + 300;
+          m._atkStrikeMs = cs.telegraphMs; m._animSt = null; m._tellUntil = _csNow + cs.telegraphMs;
+        }
       }
       // PHASE 2 — telegraph tick (vertical particle warning line)
       if (m._columnFiring && m._columnT > 0) {
@@ -94676,13 +94685,18 @@ function updateMonsters(dt) {
     if (m.type === 'cherub' && m.currentHp > 0 && !m.isBoss) {
       // Decrement the blink-invuln timer so the cherub can be hit again.
       if ((m._blinkInvuln || 0) > 0) m._blinkInvuln -= dt;
+      if ((m._blinkCd || 0) > 0) m._blinkCd -= dt;   // v0.30.1322 swing-lead - see below
       // Blink-teleport when the player closes inside 80 px. Per-frame
       // gate of ~5%, so on average ~1 blink every 20 frames the player
       // is in range — feels jittery without being obnoxious.
       const dxc = (player.x + player.w / 2) - (m.x + m.w / 2);
       const dyc = (player.y + player.h / 2) - (m.y + m.h / 2);
       const closeEnough = (dxc * dxc + dyc * dyc) < 80 * 80;
-      if (closeEnough && (m._blinkInvuln || 0) <= 0 && Math.random() < 0.05) {
+      // v0.30.1322 swing-lead - BLINKS YOU CAN READ (per user: cherubs "zipping around when attacking"). The 5% roll ran every
+      // frame the player was within 80 px, with only its 240 ms i-frames between blinks: measured, 5 teleports of ~130 px
+      // in 12 s, several of them in the middle of a swing, each cutting the swing and restarting it. A cherub now blinks at
+      // most once every 2.4-3.3 s, never while it is swinging, and lands facing the player.
+      if (closeEnough && (m._blinkInvuln || 0) <= 0 && (m._blinkCd || 0) <= 0 && !_lxMidSwing(m) && !_mobAttackAnim(m) && Math.random() < 0.05) {
         // Teleport horizontally 80-140 px to the OPPOSITE side of the player
         const dir = dxc > 0 ? 1 : -1;            // away from player
         const dist = 80 + Math.random() * 60;
@@ -94691,6 +94705,9 @@ function updateMonsters(dt) {
         const ww = (game.mapData && game.mapData.worldWidth) || 2400;
         m.x = Math.max(20, Math.min(ww - m.w - 20, newX));
         m._blinkInvuln = 240;                    // ~14 frames of i-frames
+        m._blinkCd = 2400 + Math.random() * 900;   // v0.30.1322 swing-lead
+        m._animPX = m.x; m._animXV = 0; m._walkLatch = false;   // a teleport is not a stride: no walk-frame flash on arrival
+        m.facing = ((player.x + player.w / 2) >= (m.x + m.w / 2)) ? 1 : -1;
         m.invulnerable = Math.max(m.invulnerable || 0, 240);
         // Pop particles at both endpoints
         const burst = (cx, cy) => {
@@ -95796,8 +95813,11 @@ function updateMonsters(dt) {
         const _adx = Math.abs(_dxn);
         if (_adx < _need && _adx > 0.01) {
           const _push = 0.4 * (1 - _adx / _need);
-          m.x     -= Math.sign(_dxn) * _push;
-          _next.x += Math.sign(_dxn) * _push;
+          // v0.30.1322 swing-lead - a monster planted in its swing is not slid by the crowd pass (measured: 0.7-0.8 px a
+          // frame under its attack art, the nudge landing on it twice a frame as both "m" and "next"). The free
+          // neighbour still moves; two planted ones wait until one of them finishes its swing.
+          if (!_lxMobPlanted(m)) m.x -= Math.sign(_dxn) * _push;
+          if (!_lxMobPlanted(_next)) _next.x += Math.sign(_dxn) * _push;
         }
       }
     }
@@ -144332,20 +144352,41 @@ function _lxFtTotal(n, ft) { let t = 0; for (let i = 0; i < n; i++) t += (ft[i] 
 function _lxFtStrike(n, ft) { let s = 0, best = -1; for (let i = 0; i < n; i++) { const v = ft[i] > 0 ? ft[i] : 48; if (v > best) { best = v; s = i; } } return s; }
 function _lxFtPrefix(n, ft, idx) { let t = 0; for (let i = 0; i < Math.min(idx, n); i++) t += (ft[i] > 0 ? ft[i] : 48); return t; }
 function _lxFtIndexOnce(n, ft, t) { let _t = Math.max(0, t || 0); for (let i = 0; i < n; i++) { _t -= (ft[i] > 0 ? ft[i] : 48); if (_t < 0) return i; } return n - 1; }
-function _lxSwingClock(m, n, ft, elapsed) {
-  const strike = _lxFtStrike(n, ft), prefix = _lxFtPrefix(n, ft, strike);
-  const sm = m ? m._atkStrikeMs : undefined;
-  if (sm === -1) return elapsed;
-  if (!(sm > 0) || sm < prefix * 0.5) return prefix + elapsed;
-  if (elapsed < sm) return elapsed * (prefix / sm);
-  return prefix + (elapsed - sm);
-}
-function _lxSwingLength(m, n, ft) {
+// v0.30.1322 swing-lead - A SWING NEVER SNAPS INTO ITS STRIKE (per user: the Archon's attack is "disjointed", the Astrofox's
+// "transition between the animations is not smooth"). Two cases used to jump straight to the strike frame from whatever the
+// monster was showing: an instant swing (a contact hit, no telegraph) by design, and a telegraph shorter than half the
+// windup. The Astrofox's shot is the second: a 240 ms telegraph against a 482 ms windup, 1 ms under the cut, so every shot
+// went idle -> frame 6, a pose that rears up 17% taller than idle. Measured in play: all of its attacks entered at 6, the
+// Archon's contact swings at 4. Now the windup is compressed up to 2x to fit, and whatever does not fit is taken off its
+// START, so the frames leading into the strike always play. An instant swing gets a 120 ms lead-in the same way (the
+// last ~240 ms of windup at 2x): the strike pose lands 120 ms after the contact instead of on it, and nothing snaps.
+// A natural swing and any telegraph of at least half the windup play exactly as before.
+const LX_SWING_LEAD_MS = 120, LX_SWING_MAX_RATE = 2;
+function _lxSwingPlan(m, n, ft) {
   const strike = _lxFtStrike(n, ft), prefix = _lxFtPrefix(n, ft, strike), total = _lxFtTotal(n, ft);
   const sm = m ? m._atkStrikeMs : undefined;
-  if (sm === -1) return total;
-  if (!(sm > 0) || sm < prefix * 0.5) return total - prefix;
-  return sm + (total - prefix);
+  if (sm === -1) return { prefix, total, lead: prefix, skip: 0, rate: 1 };
+  const lead = (sm > 0) ? sm : Math.min(LX_SWING_LEAD_MS, prefix);
+  if (!(lead > 0)) return { prefix, total, lead: 0, skip: prefix, rate: 1 };
+  const rate = Math.min(LX_SWING_MAX_RATE, prefix / lead);
+  return { prefix, total, lead, skip: Math.max(0, prefix - lead * rate), rate };
+}
+function _lxSwingClock(m, n, ft, elapsed) {
+  const p = _lxSwingPlan(m, n, ft);
+  if (elapsed < p.lead) return p.skip + elapsed * p.rate;
+  return p.prefix + (elapsed - p.lead);
+}
+// v0.30.1322 swing-lead - a monster mid-swing does not start another attack's windup (that restarted the swing from its
+// first frame, measured on the Archon: frame 5 -> 0 when its shot came due during a contact swing). The attack waits for
+// the swing to finish. Bosses keep their own timing.
+function _lxMidSwing(m) {
+  if (!m || m.isBoss || m.boss) return false;
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  return now < (m._swingUntil || 0);
+}
+function _lxSwingLength(m, n, ft) {
+  const p = _lxSwingPlan(m, n, ft);
+  return p.lead + (p.total - p.prefix);
 }
 function _lxFtWalk(frames, n, ft, offsetMs, pingpong) {
   const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -145241,9 +145282,12 @@ function _mobWalking(m) {
 // _bossLoopFrame/_bossPingPongFrame.
 function _mobAnimPhase(m, state, desync) {
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-  if (m._animSt !== state) { m._animSt = state; m._animStAt = now; }
+  // v0.30.1322 swing-lead - out of an attack, idle and walk start on their first frame: every set ends its swing on the
+  // rest pose they start from (measured on the Archon, cherub and Astrofox), so the seam disappears. The per-mob seed
+  // only spread a pack out; mobs finish their swings at different moments anyway.
+  if (m._animSt !== state) { m._animNoSeed = (m._animSt === 'attack'); m._animSt = state; m._animStAt = now; }
   if (m._animSeed === undefined) m._animSeed = (Math.random() * 2048) | 0;
-  return (desync ? m._animSeed : 0) - m._animStAt;
+  return ((desync && !m._animNoSeed) ? m._animSeed : 0) - m._animStAt;
 }
 // v0.29.419 — CASTING: is this mob mid-cast, i.e. committed to an attack it is
 // actively charging? Only the two deliberate windups qualify:
@@ -145261,7 +145305,8 @@ function _mobCasting(m) {
   // v0.29.4xx — _postShotHold: the boss recovery beat after a released shot
   // (see the shoot machine). Rooted the same way the windup is, so a boss
   // attack reads stop -> charge -> fire -> beat -> move, never a drive-by.
-  return !!(m._shootWindup > 0 || m._bigMeleeFiring || m._postShotHold > 0);
+  return !!(m._shootWindup > 0 || m._bigMeleeFiring || m._postShotHold > 0 ||
+    (m._columnFiring && m._columnT > 0 && !(m.isBoss || m.boss || m.zodiacBoss)));   // v0.30.1322 swing-lead - a column telegraph plants its caster
 }
 // True when the mob should be DRAWN attacking: any cast, plus the authored
 // attack-animation window (contact hits, parries, skill pulses). Distinct from
