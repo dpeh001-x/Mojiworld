@@ -270,7 +270,9 @@
 // browser would keep drawing the old art for a session.
 // v0.30.1404 army-2 - v123 -> v124. The three serious throne-room soldiers (Sprites/objects/bastion_soldier_{bucket,shield,visor}.webp)
 // are REPLACED under their own names by the regenerated, complete art (per user: several were incomplete).
-const CACHE = 'mojiworld-assets-v124';   // v0.30.1404 - the throne-room soldiers redrawn whole
+// v0.30.1405 army-3 - v124 -> v125. Seven squad idle frames (Sprites/npc/idle/soldier_flop_1..6.webp and soldier_mope_4.webp)
+// are REPLACED under their own names with a faint animator ground shadow cleared.
+const CACHE = 'mojiworld-assets-v125';   // v0.30.1405 - the squad's idle frames without the pulsing ground shadow
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
