@@ -8,7 +8,8 @@
 //   - HONEST: it still travels ~360 px, in the direction the brace locked
 //   - ONE POSE: the dash holds a single attack frame (his walk cycle skated under a 22 px/tick body); the brace keeps
 //     the attack loop as its tell
-//   - THE SLASH: attack frame 5's art keeps its crescent clear of the image's bottom edge
+//   - THE SLASH: no attack frame's art reaches its image's bottom edge (frame 5's crescent was sliced flat there; the
+//     set was redrawn in v0.30.1401 on a 630x640 canvas - see pathsbane_swing_art_test)
 //   [PORT=13882] node scripts/pathsbane_lunge_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
@@ -84,11 +85,11 @@ check(st.length >= 6 && st[0] <= 0.45 * peak && st[st.length - 1] <= 0.45 * peak
 check(R.travel >= 320 && R.travel <= 400 && R.dir === -1, 'HONEST: ~360 px toward where the brace locked (left, at the player)', { travel: R.travel, dir: R.dir });
 check(R.dashN > 0 && R.dashWalk === 0 && R.dashPoses.length === 1 && /^attack\//.test(R.dashPoses[0]), 'ONE POSE: the dash holds a single attack frame - no walk cycle skating under it', { poses: R.dashPoses, walkSteps: R.dashWalk, of: R.dashN });
 check(R.braceN > 0 && R.braceAtk >= 0.8 * R.braceN, 'the brace keeps the attack pose as its tell', { attack: R.braceAtk, of: R.braceN });
-// the slash: frame 5's art has no crescent on its bottom rows
-{
+// the slash: no attack frame's art on its bottom rows
+for (let fi = 0; fi < 9; fi++) {
   // read the served art's pixels in the page (no native decoder needed)
-  const px = await page.evaluate(async () => {
-    const im = new Image(); im.src = 'Sprites/monsters/attack/pathsBane_5.webp?t=' + Date.now();
+  const px = await page.evaluate(async (fi) => {
+    const im = new Image(); im.src = 'Sprites/monsters/attack/pathsBane_' + fi + '.webp?t=' + Date.now();
     await im.decode();
     const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
     const g = c.getContext('2d'); g.drawImage(im, 0, 0);
@@ -96,9 +97,9 @@ check(R.braceN > 0 && R.braceAtk >= 0.8 * R.braceN, 'the brace keeps the attack 
     let bottom = 0, low = 0;
     for (let x = 0; x < W; x++) { if (d[(5 * W + x) * 4 + 3] > 8) bottom++; for (let y = 0; y < 6; y++) if (d[(y * W + x) * 4 + 3] > 64) low++; }
     return { W, H, bottom, low };
-  });
+  }, fi);
   const bottom = px.bottom, low = px.low;
-  check(px.W === 574 && px.H === 640 && bottom === 0 && low === 0,'THE SLASH: attack frame 5\'s crescent ends before the image\'s bottom edge (was sliced flat there)', { bottomRowPx: bottom, opaqueInLast6Rows: low });
+  check(px.W === 630 && px.H === 640 && bottom === 0 && low === 0, 'THE SLASH: attack frame ' + fi + '\'s art ends before the image\'s bottom edge (frame 5\'s crescent was sliced flat there)', { W: px.W, H: px.H, bottomRowPx: bottom, opaqueInLast6Rows: low });
 }
 check(errs.length === 0, 'no page errors', errs.slice(0, 3));
 await browser.close(); server.kill();

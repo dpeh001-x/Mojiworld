@@ -268,7 +268,7 @@
 // v0.30.1398 - v120 -> v121. Elderbark attack 0..8 are REPLACED under their own names
 // (redrawn crisp: 4k upscale + shock filter), so a returning
 // browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v122';   // v0.30.1399 - Virga's idle and static redrawn (same names)
+const CACHE = 'mojiworld-assets-v123';   // v0.30.1401 - Path's Bane's attack redrawn (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

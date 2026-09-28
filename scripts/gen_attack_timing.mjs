@@ -137,6 +137,7 @@ export const LX_MOB_ATK_BASE_BY_TYPE = { fatDragon: 96 };
 // from this table (new art) falls back to the apex rule and the bake names it: pick its frame and add it here.
 // Hand-set timings (conductorMech, forgewight) are never touched, so they are not listed. Only the strike's POSITION
 // comes from here; how long it is held still follows the art's prominence below.
+// v0.30.1401 pathsBane 5 -> 4: his attack was redrawn (per user - one scythe, swung); his blow is the full crescent, frame 4.
 export const LX_MOB_STRIKE_BY_TYPE = {
   anglerfish: 4, archon: 4, axolotl: 5, bellowsbat: 5, blightElder: 5, blockEle: 3, blockGary: 4,
   blockHupo: 3, blockPopo: 4, blockRhirhi: 3, blockTigreal: 4, boneGolem: 5, boneWraith: 4, bonebosn: 5,
@@ -146,7 +147,7 @@ export const LX_MOB_STRIKE_BY_TYPE = {
   goblinScout: 4, graveReaver: 4, grumpsquid: 4, gummy: 4, honeyBuzz: 6, horny: 4, jellyfish: 4,
   lanternWisp: 4, lichkin: 5, mayo: 5, meloncholy: 3, mirageStalker: 4, mournshade: 3, mummy: 7,
   mushpup: 6, mushroom: 6, nimbusFox: 6, nougatBear: 6, octoLegFreeze: 6, octoLegPoison: 7, octoLegSkillLock: 5,
-  octoLegStun: 4, orange: 5, ossuaryTyrant: 5, pathsBane: 5, pearlSprite: 4, petalfly: 5, pinechad: 3,
+  octoLegStun: 4, orange: 5, ossuaryTyrant: 5, pathsBane: 4, pearlSprite: 4, petalfly: 5, pinechad: 3,
   potato_uncle: 6, pufferfish: 4, razorgale: 5, sandhusk: 4, scorpion: 5, seahorse: 5, seasponge: 4,
   seastar: 4, sepulchreHound: 4, seraph: 5, shardlich: 5, skeleton: 5, skywisp: 6, slime: 4,
   smithgolem: 4, snail: 5, sparkSprite: 3, sparkling: 4, spectreCannoneer: 5, sproutle: 6, stoneling: 5,
