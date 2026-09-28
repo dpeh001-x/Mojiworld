@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1314';
+const GAME_VERSION = 'v0.30.1315';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -110854,7 +110854,7 @@ function updateParticles(dt) {
       if (d.life > 0) {
         if (w !== r) arr[w] = d;
         w++;
-      }
+      } else if (d._bk && d._bk.cv && typeof d._bk.cv.close === 'function') { d._bk.cv.close(); d._bk = undefined; }   // v0.30.1315 perf - a Worker-baked bitmap goes with its number
     }
     if (w !== arr.length) arr.length = w;
     // v0.25.855 — redundant post-compaction splice removed (matches the
@@ -159510,25 +159510,36 @@ let _LX_DN_WORKER_ON = true;
 var _LX_DN_W = null, _lxDnWDead = false, _lxDnWFails = 0;
 const _lxDnWPend = new Map(), _lxDnWSync = new Set();
 // the originals, captured as the script loads: a probe or test that wraps one later must not become the Worker source
-var _lxDnWSrc = [_mixHex, _lxPlainGrad, _lxDnAtlasBuild, _lxGbAtlasBuild];   // v0.30.1307 perf - the gold sticker builder too
+var _lxDnWSrc = [_mixHex, _lxPlainGrad, _lxDnAtlasBuild, _lxGbAtlasBuild, _dnBake, _lxDnTaken, _lxVolcGrad];   // v0.30.1307 perf - the gold sticker builder too; v0.30.1315 perf - the settled-number bake
 function _lxDnAtlasFree(cv) { try { if (cv && typeof cv.close === 'function') cv.close(); else if (cv) cv.width = cv.height = 0; } catch (e) {} }
 function _lxDnWorker() {
   if (_LX_DN_W) return _LX_DN_W;
   if (_lxDnWDead) return null;
   try {
     if (typeof Worker !== 'function' || typeof OffscreenCanvas !== 'function' || typeof OffscreenCanvas.prototype.transferToImageBitmap !== 'function' || typeof Blob !== 'function' || typeof URL === 'undefined' || !URL.createObjectURL) { _lxDnWDead = true; return null; }
-    if (!['_mixHex', '_lxPlainGrad', '_lxDnAtlasBuild', '_lxGbAtlasBuild'].every((n, i) => String(_lxDnWSrc[i]).indexOf('function ' + n + '(') === 0)) { _lxDnWDead = true; return null; }
+    if (!['_mixHex', '_lxPlainGrad', '_lxDnAtlasBuild', '_lxGbAtlasBuild', '_dnBake', '_lxDnTaken', '_lxVolcGrad'].every((n, i) => String(_lxDnWSrc[i]).indexOf('function ' + n + '(') === 0)) { _lxDnWDead = true; return null; }
     const src = [
       'const document = { createElement: function () { return new OffscreenCanvas(1, 1); } };',
       'const _dnPlainGrad = new Map();',
       'const _LX_DN_ATLAS_CHARS = ' + JSON.stringify(_LX_DN_ATLAS_CHARS) + ';',
       'const LX_GB_WHITE = ' + LX_GB_WHITE + ', LX_GB_BLACK = ' + LX_GB_BLACK + ', LX_GB_DILATE = ' + LX_GB_DILATE + ', LX_GB_SHADOW_X = ' + LX_GB_SHADOW_X + ', LX_GB_SHADOW_Y = ' + LX_GB_SHADOW_Y + ', LX_GB_SHADOW_A = ' + LX_GB_SHADOW_A + ';',
       _lxDnWSrc[0].toString(), _lxDnWSrc[1].toString(), _lxDnWSrc[2].toString(), _lxDnWSrc[3].toString(),
-      'onmessage = function (e) { const j = e.data; let at = null; try { at = j.kind === "gb" ? _lxGbAtlasBuild(j.b0, j.px, j.crit, j.col, j.stress, j.dpr) : _lxDnAtlasBuild(j.b0, j.px, j.baseSize, j.d, j.col, j.tk, j.lowFx, j.stress, j.dpr); } catch (err) { at = null; }',
+      // v0.30.1315 perf - the settled-number bake and what it reads: its gradient caches, and the render scale and FX tier it bakes at
+      'const LX_GB_GLOW = ' + JSON.stringify(LX_GB_GLOW) + ', _LX_DN_FIG = ' + _LX_DN_FIG + ';',
+      'const _dnCritGrad = new Map(), _dnBigGrad = new Map(), _dnVolcGrad = new Map();',
+      'let _LX_DPR = 1, _lxBkDeco = true;',
+      'function _perfLowFx() { return !_lxBkDeco; }',
+      _lxDnWSrc[4].toString(), _lxDnWSrc[5].toString(), _lxDnWSrc[6].toString(),
+      'function _lxBkJob(j) { let b = null; try { _LX_DPR = j.dpr; _lxBkDeco = !!j.deco; b = _dnBake(j.d, j.txt, j.col, j.baseSize); } catch (err) { b = null; }',
+      '  if (!b || !b.cv || !b.cv.width) { postMessage({ key: j.key, bake: 1, fail: 1 }); return; }',
+      '  let bm = null; try { bm = b.cv.transferToImageBitmap(); } catch (err) { postMessage({ key: j.key, bake: 1, fail: 1 }); return; }',
+      '  postMessage({ key: j.key, bake: 1, bm: bm, ax: b.ax, ay: b.ay, w: b.w, h: b.h, dpr: b.dpr }, [bm]); }',
+      'onmessage = function (e) { const j = e.data; if (j.kind === "bk") { _lxBkJob(j); return; } let at = null; try { at = j.kind === "gb" ? _lxGbAtlasBuild(j.b0, j.px, j.crit, j.col, j.stress, j.dpr) : _lxDnAtlasBuild(j.b0, j.px, j.baseSize, j.d, j.col, j.tk, j.lowFx, j.stress, j.dpr); } catch (err) { at = null; }',
       '  if (!at || !at.cv || !at.cv.width) { postMessage({ key: j.key, fail: 1 }); return; }',
       '  let bm = null; try { bm = at.cv.transferToImageBitmap(); } catch (err) { postMessage({ key: j.key, fail: 1 }); return; }',
       '  postMessage({ key: j.key, bm: bm, cells: Array.from(at.cells.entries()), pad: at.pad, base: at.base, cellH: at.cellH, rowH: at.rowH, rows: at.rows, dpr: at.dpr, px: at.px, shx: at.shx, shy: at.shy }, [bm]); };',
     ].join('\n');
+    _lxDnWSrcText = src;   // v0.30.1315 perf - the bake Worker runs the same source
     const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
     w.onmessage = (e) => { try { _lxDnWAdopt(e.data); } catch (err) {} };
     w.onerror = () => { _lxDnWDead = true; _LX_DN_W = null; _lxDnWPend.clear(); try { w.terminate(); } catch (err) {} };
@@ -159539,6 +159550,7 @@ function _lxDnWorker() {
 // A finished job joins the cache as a built atlas would (same entry shape, cv an ImageBitmap), under the same budget.
 function _lxDnWAdopt(m) {
   if (!m || !m.key) return;
+  if (m.bake) { _lxDnBakeAdopt(m); return; }   // v0.30.1315 perf - a settled number's bitmap (see _dnBakeRequest)
   _lxDnWPend.delete(m.key);
   if (m.fail) { _lxDnWSync.add(m.key); if (++_lxDnWFails >= 6) _lxDnWDead = true; return; }
   if (_LX_DN_ATLAS.get(m.key)) { _lxDnAtlasFree(m.bm); return; }
@@ -159549,6 +159561,53 @@ function _lxDnWAdopt(m) {
     const old = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k);
     if (old) { _lxDnAtlasPx -= old.px; _lxDnAtlasFree(old.cv); }
   }
+}
+// v0.30.1315 perf - SETTLED NUMBERS ARE BAKED ON A WORKER. A number that settles draws from its own bitmap (_dnBake,
+// v0.30.340): a small canvas of stroked text, made on the main thread. Its FIRST blit is where Chrome rasterises those
+// strokes and uploads them, and that was the damage numbers' stutter: 7 ms on average and up to 20 ms a number in a mob
+// fight, and one 59 ms bake in a Gravitos fight. The same _dnBake now runs on a Worker of its own (the glyph atlases'
+// Worker, a second instance: behind an atlas build a bake waited 75 ms at the median and 700 ms at worst). It is asked
+// for on a number's first frame, while it pops, so the bitmap lands already rastered before the number settles ten frames
+// later, and its first blit costs a hundredth of a millisecond. Until it lands the number draws as it did while its bake
+// was not made yet. A job out longer than _LX_DN_BK_WAIT ms, a failed one, a number first seen already settled, or no
+// Worker, and it bakes on the main thread as before.
+var _lxDnWSrcText = '';   // set by _lxDnWorker (a var: no temporal dead zone whenever that first runs)
+let _lxDnBkSeq = 0, _lxDnBkFails = 0, _LX_DN_BKW = null, _lxDnBkWDead = false;
+const _lxDnBkPend = new Map();
+const _LX_DN_BK_WAIT = 400;
+function _lxDnBkWorker() {
+  if (_LX_DN_BKW) return _LX_DN_BKW;
+  if (_lxDnBkWDead || !_lxDnWorker() || !_lxDnWSrcText) return null;
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob([_lxDnWSrcText], { type: 'text/javascript' })));
+    w.onmessage = (e) => { try { _lxDnWAdopt(e.data); } catch (err) {} };
+    w.onerror = () => { _lxDnBkWDead = true; _LX_DN_BKW = null; try { w.terminate(); } catch (err) {} };
+    _LX_DN_BKW = w;
+  } catch (e) { _lxDnBkWDead = true; _LX_DN_BKW = null; }
+  return _LX_DN_BKW;
+}
+// what the bake depends on: a number restyled after its job went out (a B/G row) must not take the old picture
+function _dnBakeSig(d) { return (d.color || '#ffffff') + '|' + (d.size || 14) + '|' + (d.crit ? 1 : 0) + (d.big ? 1 : 0) + (d._gbVolc ? 1 : 0) + (d.taken ? 1 : 0) + '|' + d.text; }
+function _dnBakeRequest(d, txt, col, baseSize, dpr, deco) {
+  if (!_LX_DN_WORKER_ON || _lxDnWDead || _lxDnBkFails >= 6 || _lxDnBkPend.size >= 48) return false;
+  const w = _lxDnBkWorker(); if (!w) return false;
+  const key = 'bk|' + (++_lxDnBkSeq);
+  try { w.postMessage({ kind: 'bk', key, d: { crit: !!d.crit, big: !!d.big, _gbVolc: !!d._gbVolc, taken: !!d.taken }, txt, col, baseSize, dpr, deco: !!deco }); }
+  catch (e) { return false; }
+  d._bkQ = key; d._bkQt = performance.now(); d._bkSig = _dnBakeSig(d);
+  _lxDnBkPend.set(key, d);
+  return true;
+}
+// true while this number's Worker bake is out and young enough to wait for
+function _dnBakeWait(d) { return d._bkQ !== undefined && (performance.now() - d._bkQt) < _LX_DN_BK_WAIT; }
+function _lxDnBakeAdopt(m) {
+  const d = _lxDnBkPend.get(m.key); _lxDnBkPend.delete(m.key);
+  const bm = m.bm || null;
+  if (!d || d._bkQ !== m.key) { _lxDnAtlasFree(bm); return; }
+  d._bkQ = undefined;
+  if (m.fail || !bm) { d._bkQfail = 1; _lxDnBkFails++; return; }   // this one bakes on the main thread; six failures stop asking
+  if (d.life <= 0 || d._bk || d._bkSig !== _dnBakeSig(d)) { _lxDnAtlasFree(bm); return; }
+  d._bk = { cv: bm, ax: m.ax, ay: m.ay, w: m.w, h: m.h, dpr: m.dpr };
 }
 const _LX_DN_ATLAS_CHARS = '0123456789,★';
 const _LX_DN_ATLAS_OK = /^[0-9,]+★?$/;
@@ -160161,6 +160220,10 @@ function drawDamageNumbers() {
     const col = d.color || '#ffffff';
     const _dnTk = _lxDnTaken(d, txt);
     const _dnAtlasable = _LX_DN_ATLAS_ON && !d._gbVolc && _LX_DN_ATLAS_OK.test(txt);   // v0.30.815 dn-atlas
+    // v0.30.1315 perf - its settled bitmap, asked of the number Worker while it pops (see _dnBakeRequest). A render-scale change
+    // retires the bitmap here and asks for the new one there too, rather than rebaking every number on screen at once.
+    if (d._bk && d._bk.dpr !== _dnDprNow) { _lxDnAtlasFree(d._bk.cv); d._bk = undefined; if (!d._bkQfail && d._bkQ === undefined) _dnBakeRequest(d, txt, col, baseSize, _dnDprNow, !_dnLowFx_top); }
+    else if (age < 10 && d._bk === undefined && d._bkQ === undefined && !d._bkQfail) _dnBakeRequest(d, txt, col, baseSize, _dnDprNow, !_dnLowFx_top);
     const _dnFading = age >= 10 && d.life < fadeFrames;   // v0.30.695 taken-foil - draw it like a hit we dealt
 
     // v0.30.340 — settled numbers draw their baked bitmap (see _dnBake above).
@@ -160178,7 +160241,7 @@ function drawDamageNumbers() {
     if (age >= 10 && !rot && d.life < fadeFrames && scale <= 1.2 && !_dnAtlasable) {   // v0.30.815 dn-atlas — a figure fades from the atlas instead: constant outline
       let _fb = d._bk;
       if (_fb && _fb.dpr !== _dnDprNow) _fb = d._bk = undefined;   // a render-scale change retired it (as below)
-      if (_fb === undefined && _dnBakeBudget > 0) { _dnBakeBudget--; _fb = d._bk = _dnBake(d, txt, col, baseSize); }   // a short-lived number that never settled bakes here, so it never draws full-size for a frame
+      if (_fb === undefined && _dnBakeBudget > 0 && !_dnBakeWait(d)) { _dnBakeBudget--; _fb = d._bk = _dnBake(d, txt, col, baseSize); }   // a short-lived number that never settled bakes here, so it never draws full-size for a frame (v0.30.1315: unless its Worker bake is on the way)
       if (_fb) {
         ctx.drawImage(_fb.cv, -_fb.ax, -_fb.ay, _fb.w, _fb.h);   // the current transform carries the shrink; alpha is already set
         ctx.restore();
@@ -160190,7 +160253,7 @@ function drawDamageNumbers() {
       // v0.30.466 — the governor can change the render scale between the bake and the blit;
       // a raster from the old scale is retired so the next frame rebakes at the live one.
       if (_bk && _bk.dpr !== _dnDprNow) _bk = d._bk = undefined;
-      if (_bk === undefined && _dnBakeBudget > 0) { _dnBakeBudget--; _bk = d._bk = _dnBake(d, txt, col, baseSize); }
+      if (_bk === undefined && _dnBakeBudget > 0 && !_dnBakeWait(d)) { _dnBakeBudget--; _bk = d._bk = _dnBake(d, txt, col, baseSize); }   // v0.30.1315 perf - not while its Worker bake is on the way
       if (_bk) {
         // v0.30.460 — CANCEL THE BOB FOR THE BLIT. This is the v0.29.408 bug again, in the path that
         // did not exist when it was fixed. That fix made the live outline a true constant by writing
