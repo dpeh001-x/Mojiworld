@@ -67,6 +67,10 @@
     // tool -- seeing a boss's animations side by side against its own idle --
     // was unavailable for precisely the sets that need it most.
     if (key.startsWith('towerSovereign')) return 'towerSovereign';
+    // Likewise King Krook's stomp and the Arbiter's verdict / column, which
+    // gen_boss_resize_manifest.mjs sizes from the same boss in baseType().
+    if (key.startsWith('kingKrook')) return 'kingKrook';
+    if (key.startsWith('towerArbiter')) return 'towerArbiter';
     return key;
   }
   // Human label for a (key, state) pair: the form, then the move.
@@ -93,7 +97,9 @@
   const MOVE = { idle: 0, walk: 1, attack: 2, dash: 3, duck: 4, weave: 5,
                  laser: 6, punch: 7, soul: 8, star: 9,
                  // the Sovereign's cast sets, in the order the fight uses them
-                 swing: 10, column: 11, collapse: 12, volley: 13, drain: 14 };
+                 swing: 10, column: 11, collapse: 12, volley: 13, drain: 14,
+                 // King Krook's stomp; the Arbiter's verdict is his swing
+                 stomp: 10, verdict: 10 };
   const rank = (a) => {
     const boss = bossOf(a.key);
     const rest = a.key === boss ? '' : a.key.slice(boss.length);
