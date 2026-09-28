@@ -147,6 +147,60 @@ const JOBS = [
       + 'at both edges. Inside the glow, clearly visible: faint floating curse runes, coiling wisps of purple smoke '
       + 'and small skull-shaped motes rising. Eerie and bright, NOT a thin lightning bolt, NOT a wire',
   },
+  // v0.30.x - per user, "yes regenerate those five columns too": the audit after the five above found these arts
+  // running into their own image borders (Blight Elder 77 px, Legosaurus 159, Ossuary Tyrant 80, Tomb Wraith 138, the
+  // zodiac fallback 210) - a hard cut where the beam is stretched to the column. Each keeps its caster's theme and
+  // colours, in SATURATED colour (the sprite matte keys pale white light out as background).
+  {
+    key: 'blightelder',
+    file: 'fx_col_blightelder.webp',
+    W: 256, H: 1024, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // Blight Elder: column color #88cc66 over shell #2a3014 - the current art is a faceted jade crystal pillar
+    beam: 'BLIGHT ELDER theme: a WIDE THICK column of glowing sickly jade-green blight light (#88cc66) that fills the '
+      + 'full width of the frame edge to edge, bright lime-green core, faceted crystal-shard edges down both sides with '
+      + 'deep moss-green (#2a3014) shading, and clearly visible drifting blight spores and tiny glowing seed pods rising '
+      + 'inside the light. Strongly coloured, luminous, NOT a thin line, NOT pale white',
+  },
+  {
+    key: 'legosaurus',
+    file: 'fx_col_legosaurus.webp',
+    W: 256, H: 1024, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // Legosaurus: column color #ff8844 - the current art is a pillar of burning toy bricks
+    beam: 'LEGOSAURUS toy-brick theme: a WIDE THICK column of roaring orange fire (#ff8844) that fills the full width '
+      + 'of the frame edge to edge, bright yellow-orange core, with chunky red and orange toy building bricks (studded '
+      + 'plastic blocks) tumbling down inside the flames and glowing embers flying off the sides. Bold, fiery and '
+      + 'playful, strongly coloured, NOT a thin line',
+  },
+  {
+    key: 'ossuarytyrant',
+    file: 'fx_col_ossuarytyrant.webp',
+    W: 256, H: 1024, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // Ossuary Tyrant: column color #c8c0a0 over shell #4a4434 - the current art is a pale bone pillar
+    beam: 'OSSUARY TYRANT bone theme: a WIDE THICK column of warm bone-amber spectral light that fills the full width '
+      + 'of the frame edge to edge, saturated ivory-amber (#d8b878) body with a golden-bone core and dusty brown '
+      + '(#4a4434) shading at both edges, with clearly visible bone shards, small skulls and grave dust tumbling down '
+      + 'inside the glow. Strongly coloured and eerie, NOT pure white, NOT a plain bar',
+  },
+  {
+    key: 'tombwraith',
+    file: 'fx_col_tombwraith.webp',
+    W: 558, H: 1218, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // Tomb Wraith: column color #aaff77 - the current art is twisting lime-green wisps
+    beam: 'TOMB WRAITH theme: a WIDE THICK column of ghostly lime-green spirit light (#aaff77) that fills the full width '
+      + 'of the frame edge to edge, bright green-white core, soft deep-green translucent falloff, with coiling wraith '
+      + 'wisps spiralling up the shaft and faint drifting grave-dust motes inside the light. Haunting and luminous, NOT a '
+      + 'thin wavy line, NOT scattered strands',
+  },
+  {
+    key: 'zodiac',
+    file: 'fx_col_zodiac.webp',
+    W: 512, H: 1120, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // the zodiac fallback beam ("cosmic starfield column"), drawn for a column-casting sign without its own art
+    beam: 'ZODIAC cosmic theme: a WIDE THICK column of deep blue cosmic starlight (#3a6aff) that fills the full width '
+      + 'of the frame edge to edge, bright cyan core, swirling violet (#8a5aff) nebula clouds, with clearly visible '
+      + 'twinkling star points, thin constellation lines and faint zodiac sigils drifting inside the light. Strongly '
+      + 'coloured and celestial, NOT a thin line',
+  },
 ];
 
 async function fetchBuf(url) {

@@ -1,12 +1,17 @@
 // COLUMN STRIKE ART READS AS LIGHT. Per user, with a screenshot of Path's Bane's Tomb Column: "the weird green column
 // ... ensure that it is made much nicer and check if other monsters are using the same or similar style of art".
-// His beam was a hard-edged rectangle of flat green stripes over a fully opaque near-black band (62% of its opaque
-// pixels dark) that also ran into its image border; the audit found the Tomb Hexer's beam a bare thread (4% of its
-// central band filled) and Archon's, the Sovereign's and Barnaby's plain bars. All five were regenerated through
-// scripts/gen_boss_column_fx.mjs. drawProjectiles stretches this art to 1.6x the column width and its full height,
+// His beam was a hard-edged rectangle of flat green stripes over a fully opaque near-black band (52% of its opaque
+// pixels near-black) that also ran into its image border; the audit found the Tomb Hexer's beam a bare thread (4% of
+// its central band filled) and Archon's, the Sovereign's and Barnaby's plain bars. All five were regenerated through
+// scripts/gen_boss_column_fx.mjs; then (per user, "yes regenerate those five columns too") the five that still ran into
+// their image borders went through it as well - Blight Elder, Legosaurus and the Ossuary Tyrant re-fitted (their art
+// kept), the Tomb Wraith and the zodiac fallback redrawn. drawProjectiles stretches this art to 1.6x the column width
+// and its full height,
 // so these are properties of the files themselves:
-//   - THE FIVE: no opaque pixel on any border, no dark slab (<= 10% dark - the Hexer's deep-purple edge shading is 6), a real shaft (>= 70% of the central band)
-//   - THE FAMILY: no fx_col_* is a dark slab (<= 40% dark - Legosaurus's bricks sit at 38) or a bare thread (>= 20%)
+//   - THE TEN: no opaque pixel on any border, no dark slab (<= 10% of opaque pixels near-black), a real shaft (>= 70%
+//     of the central band)
+//   - THE FAMILY: every fx_col_* stays inside its image, is no dark slab (<= 15% near-black) and no bare thread (>= 20%)
+// "Near-black" is every channel under 60 - luminance alone called the zodiac's deep nebula blue dark.
 //   node scripts/column_art_test.mjs
 import { createRequire } from 'node:module'; import path from 'node:path'; import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -24,21 +29,22 @@ async function metrics(file) {
     if ((x === 0 || y === 0 || x === W - 1 || y === H - 1) && a > 16) border++;
     const inBand = x > W * 0.3 && x < W * 0.7 && y > H * 0.1 && y < H * 0.9;
     if (inBand) bandN++;
-    if (a > 128) { op++; if (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2] < 70) dark++; if (inBand) band++; }
+    if (a > 128) { op++; if (Math.max(data[i], data[i + 1], data[i + 2]) < 60) dark++; if (inBand) band++; }
   }
   return { border, darkPct: +(100 * dark / Math.max(1, op)).toFixed(1), bandPct: +(100 * band / Math.max(1, bandN)).toFixed(1) };
 }
 const FIVE = ['pathsbane', 'archon', 'sovereign', 'tombhexer', 'barnaby'];
-for (const k of FIVE) {
+const TEN = [...FIVE, 'blightelder', 'legosaurus', 'ossuarytyrant', 'tombwraith', 'zodiac'];
+for (const k of TEN) {
   const m = await metrics(path.join(FX, `fx_col_${k}.webp`));
   check(m.border === 0, `${k}: no opaque pixel touches the image border (a stretched beam shows a hard cut there)`, m);
-  check(m.darkPct <= 10, `${k}: reads as light, not a dark slab (<= 10% of its opaque pixels dark; the old Path's Bane beam was 62)`, m);
+  check(m.darkPct <= 10, `${k}: reads as light, not a dark slab (<= 10% of its opaque pixels near-black; the old Path's Bane beam was 52)`, m);
   check(m.bandPct >= 70, `${k}: a real shaft, not a thread (>= 70% of its central band filled)`, m);
 }
 const all = fs.readdirSync(FX).filter((n) => /^fx_col_.*\.webp$/.test(n)).sort();
 const bad = [];
-for (const n of all) { const m = await metrics(path.join(FX, n)); if (m.darkPct > 40 || m.bandPct < 20) bad.push({ n, ...m }); }
-check(all.length >= 15 && bad.length === 0, `the family (${all.length} column arts): none is a dark slab or a bare thread`, bad);
+for (const n of all) { const m = await metrics(path.join(FX, n)); if (m.border > 0 || m.darkPct > 15 || m.bandPct < 20) bad.push({ n, ...m }); }
+check(all.length >= 15 && bad.length === 0, `the family (${all.length} column arts): each stays inside its image, none is a dark slab or a bare thread`, bad);
 // the casters still name these files
 const src = fs.readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8');
 const named = FIVE.filter((k) => src.includes(`sprite:'fx_col_${k}'`) || src.includes(`fx_col_${k}:`));

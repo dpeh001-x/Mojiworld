@@ -258,7 +258,7 @@
 // v0.30.1369 krook-monocle - v112 -> v113. King Krook's walk frames Sprites/bosses/walk/kingKrook_5.webp and _6.webp are
 // REPLACED under their own names (per user: his monocle jumped to his other eye while he walked), so a returning browser would
 // otherwise keep the old two frames until its cache refreshed.
-const CACHE = 'mojiworld-assets-v113';   // v0.30.1369 - King Krook's walk keeps the monocle on his far eye
+const CACHE = 'mojiworld-assets-v114';   // v0.30.1373 - five more column-strike arts rebuilt
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
