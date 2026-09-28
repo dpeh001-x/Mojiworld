@@ -55,8 +55,25 @@ export const LX_ATK_HOLD = { strike: 2.2, side: 1.5, first: 1.2, last: 1.6 };
 //   towerSovereignvolley  f6 - the staff thrust and the blast (stored f6 was right; the rule's f4 is the flame
 //                              still building)
 // Boss damage runs on its pattern clocks, not on these frames: this only moves which pose the loop holds longest.
-// Every other boss set still follows the apex rule (or is hand-set); list one here when its art says otherwise.
+// The rest of the generated boss sets are picked just below; hand-set timings are never touched.
 export const LX_BOSS_STRIKE_BY_TYPE = { kingKrook: 4, towerSovereignswing: 5, towerSovereignvolley: 6 };
+// v0.30.1355 boss-pick - EVERY OTHER GENERATED BOSS SET, picked from its art the same way (per user: "review the other 45 boss
+// attack sets too"; 16 of the 45 are hand-set and are left as authored). 23 already held their blow; six did not:
+//   gravitos3        f4 -> f5  the orb still charging -> the fire beam blasting out
+//   king             f6 -> f3  the crown spike flourish after it -> the ice spray at full length
+//   sundered_smith   f4 -> f5  the hammer overhead -> the slam
+//   zodiac_aries     f2 -> f4  rearing up -> the fire vortex
+//   zodiac_capricorn f6 -> f4  a plain stance -> the lunge in its ice burst
+//   zodiac_virgo     f4 -> f6  an ordinary wingbeat -> the radiance (it peaks on f7-f8, but a boss strike keeps two
+//                              frames of settle after it, the rule every 720 ms boss swing is built on)
+// kingKrookstomp's picker runs on its pattern clock (_krookStompFrame), so its pick only shows in the animator.
+Object.assign(LX_BOSS_STRIKE_BY_TYPE, {
+  aetherion: 4, aetherion2: 4, gravitos2: 6, gravitos2punch: 4, gravitos2soul: 4, gravitos3: 5,
+  gravitos3laser: 4, king: 3, kingKrookstomp: 6, mooma: 5, octobaby: 6, pqConductor: 6,
+  sundered_smith: 5, towerSovereign: 6, towerSovereigncollapse: 4, towerSovereigncolumn: 2, towerSovereigndrain: 5, young_confused_barnaby: 4,
+  zodiac_aquarius: 6, zodiac_aries: 4, zodiac_capricorn: 4, zodiac_gemini: 4, zodiac_leo: 4, zodiac_libra: 6,
+  zodiac_pisces: 4, zodiac_sagittarius: 6, zodiac_scorpio: 6, zodiac_taurus: 4, zodiac_virgo: 6,
+});
 
 // cb entries are [top, bottom, bodyTop, bodyBottom] in source pixels (see
 // scripts/gen_anim_manifest.mjs). Returns the default dwell array for n frames.
