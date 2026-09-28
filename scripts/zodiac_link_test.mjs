@@ -6,7 +6,8 @@
 // One page, a fresh warrior, real killMonster calls:
 //   1. every sign has last words in its own voice (the question finished, the three notes remembered), each once per save,
 //      on its first real defeat only - before the Amnesiac's first_zodiac_kill, which now hears the bird sing out of turn;
-//   2. the twelfth plays its words, then zodiac_twelve_done with the one-song stanza, over its own film (clip_zodiac_one_song);
+//   2. the twelfth plays its words, then zodiac_twelve_done with the one-song stanza, over its own film (clip_zodiac_one_song),
+//      which plays WITH its soundtrack at the cinematic volume while the beat's score waits, then hands the score back;
 //   3. Old Arlen notices the bird singing out of turn only once a House has gone dark;
 //   4. the Codex tells the origin (epigraph, intro, House + age per card, last words once dark); arenas are Houses; the
 //      entrance banner shows plain text;
@@ -21,7 +22,7 @@ let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; co
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env } });
 await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
-const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
+const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio', '--autoplay-policy=no-user-gesture-required'] });   // a player who just won a fight has interacted
 const errs = [], J = (x) => JSON.stringify(x).slice(0, 320);
 try {
   const ctx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1280, height: 720 } });
@@ -76,7 +77,11 @@ try {
     const watch = async (ms, hold) => { const seq = []; const t0 = Date.now(); let quiet = 0, held = false;
       while (Date.now() - t0 < ms) { if (beatOn()) { const s = spk() + ' | ' + btxt().slice(0, 60); if (s !== seq[seq.length - 1]) seq.push(s);
           if (hold && !held && hold.test(btxt())) { held = true; for (let i = 0; i < 150; i++) { const v = document.getElementById('story-beat-clip'); if (v && v.readyState >= 2) break; await sleep(100); }
-            const v = document.getElementById('story-beat-clip'); film.clip = v ? { src: (v.currentSrc || v.src || '').split('/').pop(), ready: v.readyState, w: v.videoWidth, dur: Math.round(v.duration || 0) } : null; }
+            const v = document.getElementById('story-beat-clip'); film.clip = v ? { src: (v.currentSrc || v.src || '').split('/').pop(), ready: v.readyState, w: v.videoWidth, dur: Math.round(v.duration || 0) } : null;
+            if (v) { await sleep(1500);   // its soundtrack: playing, audible, the score silent under it; then the score's hand-back
+              film.clip.sound = { muted: v.muted, vol: +v.volume.toFixed(2), bytes: v.webkitAudioDecodedByteCount || 0, scoreSilent: _cineBgm.paused || _cineBgm.volume < 0.02, cine: +_cineVol().toFixed(2) };
+              v.dispatchEvent(new Event('ended')); await sleep(3500);   // its end (serve.js has no Range support, so a seek cannot reach it here; in play it runs to the end)
+              film.clip.rise = { vol: +_cineBgm.volume.toFixed(2), playing: !_cineBgm.paused }; } }
           ov().click(); quiet = 0; } else if (seq.length && ++quiet > 20) break; await sleep(150); }
       try { closeAllModals(); } catch (e) {} game.paused = false; return seq; };
     const kill = (id, tags) => { const m = { type: 'zodiac_' + id, name: 'Z', isZodiac: true, zodiacSign: id, x: player.x + 60, y: player.y, w: 60, h: 60, level: 85, exp: 0, mojicoins: 0,
@@ -88,6 +93,8 @@ try {
     out.arlenAfter = await arlen();
     for (const z of ZODIAC_SIGNS) if (z.id !== 'pisces') game.bestiary['_boss_zodiac_' + z.id] = 1;
     out.k12err = kill('pisces'); out.seq12 = await watch(30000, /The twelfth sign exhales/); out.film = film.clip || null;
+    { const s0 = _lxGetSettings(); try { _lxSaveSettings({ ...s0, mute: true }); _sbAttachClip('zodiac_twelve_done'); const v = document.getElementById('story-beat-clip'); out.muteCase = v ? { muted: v.muted } : null; }
+      catch (e) { out.muteCase = { err: String(e.message).slice(0, 60) }; } try { _sbDetachClip(); _lxSaveSettings(s0); } catch (e) {} }
     out.cdxAfter = await codex('zodiac');
     out.seen = UNDER.filter((k) => player._storyBeatsSeen[k]).sort();
     out.wcArlen = wc(out.arlenAfter);
@@ -102,6 +109,8 @@ try {
   ok('1. once per save: a second kill and an echo shade play nothing', !R.k1again && R.seqAgain.length === 0 && !R.kEcho && R.seqEcho.length === 0, J({ again: R.seqAgain, echo: R.seqEcho }));
   ok('2. the twelfth: its words, then zodiac_twelve_done with the one-song stanza', !R.k12err && /^Pisces the Twin Current \| I was the last of us/.test(R.seq12[0] || '') && R.seq12.some((s) => /^ \| Twelve ages\. Twelve champions\. One song\./.test(s)) && R.twelveDone.some((t) => /born at dawn to the same three notes/.test(t)) && R.twelveDone.some((t) => /the bird sings them one more time/.test(t) && /it waits\.$/.test(t)), J(R.seq12));
   ok('2. the reveal plays over its own film: clip_zodiac_one_song, 1280 wide, the 31 s trailer, decoding', !!R.film && R.film.src === 'clip_zodiac_one_song.mp4' && R.film.ready >= 2 && R.film.w === 1280 && R.film.dur >= 30, J(R.film));
+  ok('2. the trailer plays WITH its soundtrack: unmuted at the cinematic volume, audio decoding, the score silent under it', !!R.film && !!R.film.sound && R.film.sound.muted === false && R.film.sound.bytes > 0 && Math.abs(R.film.sound.vol - Math.min(1, R.film.sound.cine / 0.62)) < 0.02 && R.film.sound.scoreSilent, J(R.film && R.film.sound));
+  ok('2. when the trailer ends the score rises; with the game muted the trailer is silent', !!R.film && !!R.film.rise && R.film.rise.playing && R.film.rise.vol > 0.1 && !!R.muteCase && R.muteCase.muted === true, J({ rise: R.film && R.film.rise, mute: R.muteCase }));
   ok('3. Old Arlen: the bird sings out of turn only once a House is dark, within 60 words', /not one early, not one late/.test(R.arlenBefore) && !/out of turn/.test(R.arlenBefore) && /Lately it sings out of turn, whenever one of those Houses goes dark/.test(R.arlenAfter) && R.wcArlen <= 60, J({ before: R.arlenBefore.slice(-80), after: R.arlenAfter.slice(-120), words: R.wcArlen }));
   ok('4. the Codex tells the origin: epigraph, intro, a House and an age on every card', R.epi === 'Twelve ages. Twelve champions. One song.' && /first asking became Gravitos/.test(R.cdxBefore) && /born at dawn to the same three notes/.test(R.cdxBefore) && /ring of Houses/.test(R.cdxBefore) && /House of the Ram · the first age/.test(R.cdxBefore) && /House of the Fishes · the twelfth age/.test(R.cdxBefore), J({ epi: R.epi, cdx: R.cdxBefore.slice(0, 200) }));
   ok('4. a card keeps its last words only once its House is dark', !/I was the first\./.test(R.cdxBefore) && /I was the first\./.test(R.cdxAfter) && /Who is counting us\?/.test(R.cdxAfter), J({ before: /I was the first/.test(R.cdxBefore), after: /I was the first/.test(R.cdxAfter) }));
