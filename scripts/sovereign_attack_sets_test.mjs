@@ -67,16 +67,21 @@ const R = await page.evaluate(async () => {
   }
   // v0.30.1196 (9e6f0fcf) lazy boss art: the Sovereign's sets (cast-only, BOSS_FRAMES_ONLY) stay parked until
   // the boss is wanted - spawnMonster(...,isBoss) -> _lxWarmBossFrames -> _lxBossArtWant. Ask the way a boss spawn does,
-  // then wait for decode.
+  // then wait for decode. (An ask made before the title menu waits for the menu - v0.30.1254 title-first - and this page
+  // skips the menu, so open the hold the way the menu does first.)
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
   if (typeof _lxWarmBossFrames === 'function') _lxWarmBossFrames('towerSovereign');
-  // Wait for decode if the boot gate has not finished with them.
-  for (let t = 0; t < 60; t++) {
+  // Wait until every frame has SETTLED - loaded or failed - up to 90 s. The five sets are 45 big frames, and on a busy
+  // machine they share the line with the images the game streams after the title: measured on an 8 Mbps link, all five
+  // were still 0/9 at 16 s with nothing wrong, which the old 15 s wait reported as "does not decode". A missing or broken
+  // file still settles at once and still fails the check below.
+  for (let t = 0; t < 360; t++) {
     let done = true;
     for (const k of KEYS) {
       const set = BOSS_ATTACK_FRAMES[k] || [];
       let d = 0; for (const f of set) if (f && f.complete && f.naturalWidth > 0) d++;
       art[k].decoded = d; art[k].frames = set.length;
-      if (set.length === 0 || d < set.length) done = false;
+      if (set.length === 0 || set.some((f) => !(f && f.complete))) done = false;
     }
     if (done) break;
     await sleep(250);

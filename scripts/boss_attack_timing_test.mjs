@@ -76,6 +76,11 @@ await page.waitForTimeout(6500);
 const ev = async (fn, arg) => { try { return await page.evaluate(fn, arg); } catch (e) { return { err: String(e).slice(0, 140) }; } };
 
 const g = await ev(async () => {
+  // Boss art is lazy (v0.30.1196): parked until a boss asks for it, and this test never asked - King Krook's frames sat
+  // parked ("ready 0") and Leo's never drew, every run. Do what a spawn does and ask for both bosses' art, after opening
+  // the hold the way the title menu does (an ask made before the menu waits for it - v0.30.1254 title-first).
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
+  try { _lxWarmBossFrames('kingKrook'); _lxWarmBossFrames('zodiac_leo'); } catch (e) {}
   const ft = _lxCalibFt('kingKrook', 'attack');
   const zft = _lxCalibFt('zodiac_leo', 'attack');
   // the pure index walk, over one full cycle at 1ms resolution
@@ -83,10 +88,18 @@ const g = await ev(async () => {
   const hk = ft ? hist(ft.length, ft) : null;
   // the real boss picker, sampled on the wall clock over a stamped attack
   const frames = BOSS_ATTACK_FRAMES.kingKrook;
-  for (let i = 0; i < 60 && !(frames && frames._readyN >= 2); i++) { try { _lxFtReadyN(frames); } catch (e) {} await new Promise((r) => setTimeout(r, 100)); }
+  // wait until every frame has SETTLED (loaded or failed), up to 90 s: boss frames are big and on a busy machine they
+  // share the line with the images the game streams after the title - a slow download is not missing art
+  const settled = (s) => !!s && s.length > 1 && s.every((f) => f && f.complete);
+  const leo = () => (typeof ZODIAC_ATTACK_FRAMES !== 'undefined' && ZODIAC_ATTACK_FRAMES.leo) || [];
+  for (let i = 0; i < 900 && !(settled(frames) && settled(leo())); i++) await new Promise((r) => setTimeout(r, 100));
+  try { _lxFtReadyN(frames); } catch (e) {}
   const m = { type: 'kingKrook', isBoss: true, x: 0, y: 0, w: 160, h: 160, currentHp: 1, atkAnimUntil: performance.now() + 2000 };
-  const seen = new Map(); const t0 = performance.now();
-  while (performance.now() - t0 < 720) { const f = _bossAttackFrame('kingKrook', m); if (f) { const i = frames.indexOf(f); seen.set(i, (seen.get(i) || 0) + 1); } await new Promise((r) => setTimeout(r, 4)); }
+  // sampled on a CONTROLLED clock, 4 ms a step (the picker and its phase both read performance.now): on the wall clock a
+  // busy page - the image stream after the title, measured on an 8 Mbps link - stalled the 4 ms sampler for hundreds of
+  // ms and skipped whole frames (77 samples, frames 1-3 never seen)
+  const seen = new Map(); const P = performance, oNow = P.now, t0 = oNow.call(P); let tc = t0; P.now = () => tc;
+  try { for (let e = 0; e < 720; e += 4) { tc = t0 + e; const f = _bossAttackFrame('kingKrook', m); if (f) { const i = frames.indexOf(f); seen.set(i, (seen.get(i) || 0) + 1); } } } finally { P.now = oNow; }
   const zn = (ZODIAC_ATTACK_FRAMES.leo || []).length;
   const zh = (zft && zn > 1) ? (() => { const h = new Array(zn).fill(0); for (let t = 0; t < 720; t += 1) { const fr = _zodiacStateImg('leo', 'attack', t, { patternState: 'attack' }); const i = ZODIAC_ATTACK_FRAMES.leo.indexOf(fr); if (i >= 0) h[i]++; } return h; })() : null;
   return { ft, hk, zft, zh, ready: frames ? frames._readyN : 0, seen: [...seen.entries()].sort((a, b) => a[0] - b[0]), total: ft ? ft.reduce((a, b) => a + b, 0) : 0 };
