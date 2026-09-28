@@ -5,6 +5,8 @@
 // Plus (per user: "the zodiac symbol at the back can be sharper ... and the zodiac circle can be improved"): the
 // sigil is baked at device resolution, and its twelve glyphs are vector paths - baking it draws no text at all,
 // because text sent those codepoints to the colour emoji font.
+// Plus (per user: "The floors and platform can be more grand as well"): every platform in a zod_* arena draws as a
+// celestial altar and the ground as a temple floor - the cute slab never draws there - and the layout is unchanged.
 //   node scripts/zodiac_stage_test.mjs [port]   (MOJI_GAME_FILE honored)
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -33,16 +35,26 @@ try {
     ['loading-overlay', 'lo-menu'].forEach((id) => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
     const calls = { back: 0, floor: 0, front: 0 };
     for (const k of ['back', 'floor', 'front']) { const fn = '_lxZodStage' + k[0].toUpperCase() + k.slice(1), o = window[fn]; window[fn] = function () { calls[k]++; return o.apply(this, arguments); }; }
-    const draw = () => { for (const k in calls) calls[k] = 0; _lxDrawFrame(performance.now()); return Object.assign({}, calls); };
+    // floors: count altar draws that succeeded and cute-slab draws, per frame
+    let altars = 0, cute = 0;
+    { const oA = window._lxZodPlatDraw, oC = window._drawCutePlatform;
+      window._lxZodPlatDraw = function () { const r = oA.apply(this, arguments); if (r) altars++; return r; };
+      window._drawCutePlatform = function () { cute++; return oC.apply(this, arguments); }; }
+    const layout = (id) => JSON.stringify((MAPS[id].platforms || []).map((p) => [p.x, p.y, p.w, p.h, p.type]));
+    const draw = () => { for (const k in calls) calls[k] = 0; altars = 0; cute = 0; _lxDrawFrame(performance.now()); return Object.assign({ altars, cute }, calls); };
     // mean colour of a region of the game canvas (the backdrop band above the platforms)
     const mean = (x, y, w, h) => { const d = ctx.getImageData(x, y, w, h).data; let r = 0, g = 0, bl = 0, n = 0; for (let i = 0; i < d.length; i += 16) { r += d[i]; g += d[i + 1]; bl += d[i + 2]; n++; } return [r / n, g / n, bl / n]; };
     const cw = ctx.canvas.width, ch = ctx.canvas.height;
     const out = { signs: {} };
     try { LX_PERF.veryLowFx = false; } catch (e) {}
     for (const z of ZODIAC_SIGNS) {
+      const before = layout('zod_' + z.id);
       loadMap('zod_' + z.id); await wait(1500);
       game.paused = true;
+      draw();   // the first frame mints the sign's art; the floors bake from it
       const c = draw();
+      c.visible = game.mapData.platforms.filter((p) => p.x - game.camera.x + p.w >= 0 && p.x - game.camera.x <= W).length;
+      c.sameLayout = layout('zod_' + z.id) === before;
       const d = _LX_ZOD_STARS[z.id];
       out.signs[z.id] = { calls: c, minted: _LX_ZOD.sign === z.id && !!_LX_ZOD.cons && !!_LX_ZOD.ring, element: z.element,
         stars: d.s.length, edgesOk: d.e.every(([a, q]) => a < d.s.length && q < d.s.length),
@@ -70,6 +82,8 @@ try {
     return out;
   });
   for (const [id, s] of Object.entries(r.signs)) {
+    ok(`${id}: every visible platform is an altar or the temple floor, never the cute slab`, s.calls.altars === s.calls.visible && s.calls.visible >= 3 && s.calls.cute === 0, s.calls);
+    ok(`${id}: the platform layout is unchanged`, s.calls.sameLayout, s.calls);
     ok(`${id}: back, floor and front layers draw`, s.calls.back >= 1 && s.calls.floor >= 1 && s.calls.front >= 1, s.calls);
     ok(`${id}: its constellation and sigil are minted`, s.minted && s.stars >= 4 && s.edgesOk, { stars: s.stars, edgesOk: s.edgesOk });
   }
@@ -82,7 +96,7 @@ try {
   ok('cold signs read cool: Capricorn and Aquarius are blue', cool('capricorn') && cool('aquarius'), { cap: r.signs.capricorn.band, aqu: r.signs.aquarius.band });
   ok('the stage closes in as the boss drops a phase (corners darker at phase 3)', r.p3 < r.p1 - 3, { p1: r.p1, p3: r.p3 });
   ok('very-low-fx spawns no motes', r.lowMotes === 0, r.lowMotes ?? r.lowErr);
-  for (const id of ['octopusGrotto', 'zodiacHall']) if (r[id]) ok(`${id}: none of the zodiac stage draws there`, r[id].back === 0 && r[id].floor === 0 && r[id].front === 0, r[id]);
+  for (const id of ['octopusGrotto', 'zodiacHall']) if (r[id]) ok(`${id}: none of the zodiac stage draws there (no altars either)`, r[id].back === 0 && r[id].floor === 0 && r[id].front === 0 && r[id].altars === 0 && r[id].cute > 0, r[id]);
   ok(`the layers cost little per frame (${r.ms.toFixed(2)} ms)`, r.ms < 5, r.ms);
   ok('no page errors', errs.length === 0, errs);
 } finally { await b.close(); srv.kill(); }
