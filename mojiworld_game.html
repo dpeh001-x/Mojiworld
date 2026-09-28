@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1367';
+const GAME_VERSION = 'v0.30.1368';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -18977,6 +18977,7 @@ const LX_FX = (() => {
     // v0.30.x - the bolt's energy burst on contact (ludo.ai; see
     // scripts/gen_bolt_impact_fx.mjs). 8 frames live in fx/anim/bolt_impact_*.
     bolt_impact:        'bolt_impact.webp',
+    mourn_burst:        'mourn_burst.webp',   // v0.30.1368 Mournshade's power ball bursting (LX_ORB_BURST)
     grav_impact:        'grav_impact.webp',   // v0.30.x — the Gravitos meteor landing: a blue void impact (ludo.ai via scripts/gen_grav_impact_fx.mjs); 9 frames in fx/anim/grav_impact_*
     meteor:             'meteor.webp',
     multi_shot:         'multi_shot.webp',
@@ -92351,6 +92352,46 @@ function _fireShotFor(m) {
     fireMonsterProjectile(m);
   }
 }
+// v0.30.1368 - BURSTING SHOTS (per user, of Mournshade's power ball: "make the ball's hit burst purple too and cause splash
+// damage"). A shot listed here BURSTS instead of simply vanishing: on the player (a direct hit), on a summon that eats it,
+// on a floor or platform top it drops onto, or where it fizzles out at the end of its flight. Every burst is drawn in the
+// shot's own colours (a violet explosion, a flare and a ring of sparks), and it SPLASHES: anyone in the blast the ball did
+// not strike directly takes `splash` of the shot's damage through the hazard defence stack (DEF curve, block / warrior /
+// Aegis), so a near miss still costs something. A direct hit is the direct damage alone - never both. The burst is a
+// one-frame 'mob_orbburst' hazard, resolved where _applyHazardDR lives; it is never synced (every client bursts its own
+// copy of the ball), so a guest can never be splashed twice.
+//   r      blast radius as a multiple of the ball's size (floor 70 px)
+//   splash share of the shot's damage a bystander takes
+//   num    colour of the damage numbers the ball deals (the taken-number halo and foil mix from it)
+//   fx     the LX_FX burst sprite (warmed with the monster via _LX_MOB_TYPE_ART); the colours draw a fallback blast until it loads
+const LX_ORB_BURST = {
+  mmournorb: { r: 1.0, splash: 0.55, fx: 'mourn_burst', color: '#b04cff', deep: '#4a1080', glow: '#e3b8ff', num: '#c46aff', label: "Mournshade's burst", src: 'mournshade' },
+};
+function _lxOrbBurst(p, cx, cy, direct) {
+  const B = LX_ORB_BURST[p.skill];
+  if (!B || p._burst) return;
+  p._burst = true;
+  const R = Math.max(70, Math.round((p.w || 80) * B.r));
+  (game.hazards || (game.hazards = [])).push({
+    type: 'mob_orbburst', x: cx - R, y: cy - R, w: R * 2, h: R * 2, cx, cy, radius: R, life: 1, maxLife: 1,
+    damage: Math.max(1, Math.floor((p.damage || 0) * B.splash)), direct: !!direct, fx: B.fx, color: B.color, deep: B.deep, glow: B.glow, num: B.num,
+    owner: 'enemy', _coopMirror: true, _sourceLabel: B.label, _srcType: B.src, _defPierce: p._defPierce,
+    // the field-mob loss cap a direct hit gets (1.35x the shot, see _projLost), scaled by the splash share
+    _capLost: p._normalMob ? Math.max(1, Math.floor((p.damage || 0) * B.splash * 1.35)) : 0,
+  });
+}
+// the platform top (or ground) the ball's centre dropped onto this frame, or null
+function _lxOrbFloorHit(p) {
+  const pl = game.mapData && game.mapData.platforms;
+  if (!Array.isArray(pl)) return null;
+  const cx = p.x + p.w / 2, cy = p.y + p.h / 2, py = cy - (p.vy || 0);
+  for (const s of pl) {
+    if (cx < s.x || cx > s.x + s.w) continue;
+    if (p.vy > 0 && py < s.y && cy >= s.y) return s.y;
+    if (s.type === 'ground' && cy >= s.y && cy <= s.y + s.h + 40) return s.y;
+  }
+  return null;
+}
 function fireMonsterProjectile(m, angleOffset) {
   // v0.29.820 — per-projectile ceiling for non-boss maps (see _lxMobShotCap).
   if (_lxLiveMobShots() >= _lxMobShotCap()) return;
@@ -108093,6 +108134,11 @@ function updateProjectiles(dt) {
       const _pcx = p.x + (p.w || 0) / 2, _pcy = p.y + (p.h || 0) / 2;
       const _projOffScreen = (_pcx < _camX522 || _pcx > _camX522 + W ||
                               _pcy < _camY522 || _pcy > _camY522 + H);
+      // v0.30.1368 - a bursting shot (LX_ORB_BURST) bursts on a floor or platform top it drops onto
+      if (LX_ORB_BURST[p.skill] && !p._burst) { const _flY = _lxOrbFloorHit(p); if (_flY != null) { _lxOrbBurst(p, _pcx, _flY, false); hit = true; } }
+      if (hit) {
+        // burst on the floor this frame
+      } else
       if (_projOffScreen) {
         // Ignore damage; let the projectile keep updating until life
         // expires or it crosses the world bound.
@@ -108101,6 +108147,7 @@ function updateProjectiles(dt) {
       // (see _lxSummonProjHit). Checked before the player so a wolf actually
       // body-blocks for you; the projectile is consumed unless it pierces.
       if (_lxSummonProjHit(p)) {
+        if (LX_ORB_BURST[p.skill]) _lxOrbBurst(p, _pcx, _pcy, false);
         if (!p.pierce) hit = true;
       } else
       if (aabb(p, player) && player.invulnerable <= 0) {
@@ -108408,7 +108455,7 @@ function updateProjectiles(dt) {
         }
         game.damageNumbers.push({
           taken: true, x: player.x + 14, y: player.y, vy: -2,
-          text: dmg, life: 40, color: '#ff4444', size: 16
+          text: dmg, life: 40, color: (LX_ORB_BURST[p.skill] && LX_ORB_BURST[p.skill].num) || '#ff4444', size: 16
         });
         addShake(5);
         flash(0.18);
@@ -108417,6 +108464,7 @@ function updateProjectiles(dt) {
         // shouldn't despawn on first contact. The player's post-hit iframe (~1.2s,
         // the aabb entry gate above) naturally spaces re-hits, so the return leg
         // can land instead of the shot dying on the first clip — no per-frame hit.
+        if (LX_ORB_BURST[p.skill]) _lxOrbBurst(p, p.x + p.w / 2, p.y + p.h / 2, true);
         if (!p.pierce) hit = true;
       }
     }
@@ -108469,6 +108517,8 @@ function updateProjectiles(dt) {
       addShake(Math.round(6 * _expScale));
       flash(0.22 * _expScale);
     }
+    // v0.30.1368 - a bursting shot that reaches the end of its flight bursts where it is
+    if (!hit && p.life <= 0 && p.owner === 'enemy' && LX_ORB_BURST[p.skill] && !p._burst) _lxOrbBurst(p, p.x + p.w / 2, p.y + p.h / 2, false);
     // v0.25.556 — projectile despawn now uses world height (was canvas H,
     // which on vertical-tower maps killed projectiles the moment they
     // crossed the canvas-bottom-equivalent in world space — way before
@@ -108565,6 +108615,41 @@ function updateProjectiles(dt) {
         if (h.life <= 0) game.hazards.splice(i, 1);
         continue;     // skip damage application for off-screen mob hazards
       }
+    }
+    // v0.30.1368 - mob_orbburst: a bursting shot's one-frame blast (see LX_ORB_BURST)
+    if (h.type === 'mob_orbburst') {
+      const _R = h.radius || 80;
+      // the burst art, growing out to the blast's edge; until it has loaded, a violet-to-deep-purple blast in its place
+      // (no additive flare: over a bright map it washed the purple out to white). Sparks in both tones either way.
+      const _bs = (h.fx && typeof LX_FX !== 'undefined') ? LX_FX[h.fx] : null;
+      if (_bs && typeof _lxFxReady === 'function' && _lxFxReady(_bs) && typeof spawnSpriteBurst === 'function') spawnSpriteBurst(h.cx, h.cy, h.fx, { size: _R * 2, life: 24, fadeOut: 0.3 });
+      else if (typeof spawnSmoothExplosion === 'function') spawnSmoothExplosion(h.cx, h.cy, _R, h.color, (h.deep || h.color) + '99', { life: 26 });
+      for (let j = 0; j < 14; j++) {
+        const _a = (j / 14) * Math.PI * 2, _v = 2.5 + Math.random() * 3.5;
+        const _sp = { x: h.cx, y: h.cy, vx: Math.cos(_a) * _v, vy: Math.sin(_a) * _v - 0.6, life: 26, color: (j & 1) ? h.color : h.glow, size: 3 + Math.random() * 3 };
+        if (typeof _budgetedParticlePush === 'function') _budgetedParticlePush(_sp); else game.particles.push(_sp);
+      }
+      if (typeof addShake === 'function') addShake(4);
+      // the splash: the player inside the blast, unless the ball struck them directly (that hit already landed)
+      const _nx = Math.max(player.x, Math.min(h.cx, player.x + player.w)), _ny = Math.max(player.y, Math.min(h.cy, player.y + player.h));
+      if (!h.direct && player.hp > 0 && player.invulnerable <= 0 && (_nx - h.cx) * (_nx - h.cx) + (_ny - h.cy) * (_ny - h.cy) <= _R * _R) {
+        let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul(h._defPierce)));
+        dmg = _applyHazardDR(dmg);   // block / warrior / Aegis, as every mob_ hazard
+        let _lost = player._god ? 0 : _diffDmg(dmg);
+        if (h._capLost > 0 && _lost > h._capLost) _lost = h._capLost;   // never more than the splash share of what a direct hit could cost
+        player.hp -= _lost;
+        player.invulnerable = Math.max(player.invulnerable, 500);
+        player._hitIframeAt = game.time;   // a HIT-granted window: the hero stays visible through the hit (see the blink gate, audit C5)
+        player.hitStun = Math.max(player.hitStun || 0, 150);
+        player._lastDamageSource = h._sourceLabel;
+        const _kd = Math.sign((player.x + player.w / 2) - h.cx) || 1;
+        player.vx = _kd * (player.cls === 'warrior' ? 0.9 : 2.2); player.vy = Math.min(player.vy, -2);
+        game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: dmg, life: 40, color: h.num || h.color, size: 16 });
+        game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y - 24, vy: -1.4, text: 'SPLASH', life: 36, color: h.glow || '#e3b8ff', size: 12 });
+        flash(0.12);
+      }
+      game.hazards.splice(i, 1);
+      continue;
     }
     // v0.30.x — venom_burst: the Deluge's impact art. No damage of its own.
     if (h.type === 'venom_burst') {
@@ -147584,6 +147669,7 @@ const _LX_MOB_SKILL_ART = {
   mortarLob: { img: ['meteor_marker'] },   // the landing-zone marker (a marker-only meteor_warn)
 };
 const _LX_MOB_TYPE_ART = {
+  mournshade: { fx: ['mourn_burst'] },   // v0.30.1368 his power ball's burst (LX_ORB_BURST)
   legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },   // his 6 s arena stomp is a mob_quake of his own
   zodiac_pisces: { img: ['gravitos_riftring'], fx: ['gravitos_riftring'] },   // v0.30.x boss polish (audit B2) — her Tidal Crush zone
   // v0.30.x boss polish (audit B5) — the floor band their arena-wide slams draw (see _lxSlamWindup)
