@@ -25,7 +25,7 @@
 // un-bakes a type), so the dev tool keeps working. Missing file = game runs fine.
 window.LX_MOB_OFFSET_DATA = {
   "archon": 3,
-  "blightElder": 45,
+  "blightElder": 30,
   "blockTigreal": 2,
   "boneGolem": -5,
   "boneWraith": 1,
@@ -52,7 +52,7 @@ window.LX_MOB_OFFSET_DATA = {
   "mournshade": -13,
   "nimbusFox": 2,
   "orange": 1,
-  "ossuaryTyrant": 44,
+  "ossuaryTyrant": 23,
   "pearlSprite": 2,
   "pinechad": 2,
   "pufferfish": 1,

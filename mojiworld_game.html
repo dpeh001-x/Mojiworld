@@ -16149,7 +16149,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1412';
+const GAME_VERSION = 'v0.30.1413';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -21308,6 +21308,8 @@ function _lxMobSetYOff(type, px) {
 //         animation frame's height here would mis-scale the anchor.
 // targetH — the rendered BODY height, before any _ATK_FRAME_SCALE blow-up
 //         (callers scale the returned dy by that factor, as drawMonster does).
+// v0.30.1413 - plant vet (per user): every grounded monster measured through this draw; the house plant is feet ~2-6 px into
+// the floor. LX_MOB_OFFSET_DATA values are fixed px - re-measure a type after changing its LX_MOB_SCALE_DATA.
 function _lxMobPlantDy(type, isFloating, srcH, targetH) {
   const meta = (typeof MONSTER_SPRITE_META === 'object') ? MONSTER_SPRITE_META[type] : null;
   // Fallback srcH x 0.92 when bbox detection returns null — assumes the ~8%
@@ -146941,6 +146943,18 @@ function _lxRecordBossRect(m, tr0, x0, y0, w, h) {
     m._lxDrawRect = { x: Math.min(p1.x, p2.x), y: Math.min(p1.y, p2.y), w: Math.abs(p2.x - p1.x), h: Math.abs(p2.y - p1.y), t: game.time | 0 };
   } catch (e) {}
 }
+// v0.30.1413 - how much of its canvas height a sprite's figure fills, from the baked bbox table ("top,bottom,W,H"; 0 when
+// the table has no row), and the table key of a sprite image. Used to fit a boss's still to the frames it stands in for.
+function _lxBBoxFill(k) {
+  const T = (typeof window !== 'undefined') && window.LX_SPRITE_BBOX, r = T && k && T[k];
+  if (!r) return 0;
+  const a = String(r).split(','), t = +a[0], b = +a[1], h = +a[3];
+  return (h > 0 && b >= t) ? (b - t + 1) / h : 0;
+}
+function _lxSpriteKeyOf(im) {
+  const src = String((im && (im.src || (im._lxSrc && im._lxSrc.src))) || ''), i = src.indexOf('/Sprites/');
+  return i < 0 ? '' : src.slice(i + 9).split('?')[0];
+}
 function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   sprite = _lxBossStandIn(sprite, m);   // v0.30.775 — never a raw over-cap frame on the main thread while its set bakes
   const _lxTr0 = (typeof ctx.getTransform === 'function' && ((m._wardUntil | 0) > (game.time | 0) || (typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)))) ? ctx.getTransform() : null;   // v0.30.390 — the caller's space · v0.30.405 — only while the ward or its break window needs the rect (five Web API objects a boss draw otherwise)
@@ -147184,7 +147198,16 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
     // after the Sovereign/Gravitos keys and before _phaseSprite, like them:
     // a cast set is more specific than the body it plays on.
     const _bk  = _lxSovArtKey(m) || m._gravStarKey || m._aeAstralKey || m._phaseSprite || (m.zodiacSign ? ('zodiac_' + m.zodiacSign) : m.type);   // v0.30.119 — Sovereign cast sets first
-    const _bc  = _lxAnimCalib(_bk, _bst);
+    let _bc  = _lxAnimCalib(_bk, _bst);
+    // v0.30.1413 - a STILL standing in for a state that has frames (drawn for a moment after a boss spawns, before they
+    // decode) takes that state's calibration only if it is drawn like the frames. When its figure fills its canvas
+    // more than 25% differently from frame 0's, the calibration was made for the frames' figure: the still is scaled to
+    // match them instead and keeps its own plant. Aetherion's idle still (fill 0.58 against 0.34, s 1.58, dy 0.168)
+    // drew 466 px tall and 95 px into the floor for that moment (per user, "fix the Aetherion glitch").
+    if (!_animated && sprite && typeof _lxFrameCount === 'function' && _lxFrameCount('bosses/' + _bst, _bk, 0) > 0) {
+      const _ffill = _lxBBoxFill('bosses/' + _bst + '/' + _bk + '_0.webp'), _sfill = _lxBBoxFill(_lxSpriteKeyOf(sprite));
+      if (_ffill > 0 && _sfill > 0 && (_sfill / _ffill > 1.25 || _sfill / _ffill < 0.8)) _bc = { s: (_bc.s || 1) * _ffill / _sfill, dx: 0, dy: 0 };
+    }
     // v0.29.x — per-frame scale (fs[frameIdx]) folds into s. Anchored at the
     // feet like s, so an under-drawn frame grows in place instead of hopping.
     const _bfs = (_bc.fs && _animated && sprite._lxFi != null && _bc.fs[sprite._lxFi] > 0) ? _bc.fs[sprite._lxFi] : 1;
@@ -149312,7 +149335,7 @@ function _drawMonsterSprite(m, sx, sy) {
   } else {
     const _cachedSprite = _getCachedScaledSprite(m.type, sprite, srcW, srcH, targetW, targetH);
     if (_cachedSprite) {
-      _lxDrawSoft(ctx, _cachedSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset));   // v0.29.x — edge feather
+      _lxDrawSoft(ctx, _cachedSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.x — edge feather · v0.30.1413 explicit size: a tint bake carries no logical size
     } else {
       _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.x — edge feather
     }
