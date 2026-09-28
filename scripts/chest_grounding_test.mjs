@@ -37,6 +37,15 @@ try {
       const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(img, 0, 0); const d = c.getImageData(0, 0, w, h).data; let bot = -1;
       for (let y = h - 1; y >= 0 && bot < 0; y--) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 40) { bot = y; break; }
       const f = (bot + 1) / h; cache.set(img, f); return f; };
+    // the chest art is lazy (it loads when a map asks for it): ask for all six and wait for them to decode, or the first chests
+    // drawn are the procedural fallback and never reach drawImage
+    const keys = ['wood', 'silver', 'gold'].flatMap((t) => ['chest_' + t, 'chest_' + t + '_open']);
+    for (let t = 0; t < 150; t++) {
+      const imgs = keys.map((k) => LX_OBJECTS[k]);
+      if (imgs.every((im) => im && im.complete && im.naturalWidth > 0)) break;
+      for (const im of imgs) if (im && typeof _lxWantImg === 'function') { try { _lxWantImg(im, true); } catch (e) {} }
+      await wait(100);
+    }
     const rows = [];
     for (const [where, surf] of [['ground', G], ['platform', ledge]]) for (const off of [24, 28]) {
       game.chests = []; game.monsters = [];
