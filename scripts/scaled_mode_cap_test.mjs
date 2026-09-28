@@ -43,8 +43,10 @@ try {
 
     // ---- TRAIN RUSH (expressScaling) ----
     // Drive the real spawnMonster path with the express flag on the map.
+    // v0.29.619 spawnMonster refuses every non-boss spawn on an isTown map (_lxIsSanctuary) and the test boots in
+    // town, so the borrowed mapData must say it is not a town or nothing spawns and every train-rush check reads {}.
     const prevMapData = game.mapData;
-    game.mapData = Object.assign({}, game.mapData || {}, { expressScaling: true });
+    game.mapData = Object.assign({}, game.mapData || {}, { expressScaling: true, isTown: false });
     out.express = {};
     for (const L of [20, 50, 85, 120, 200]) {
       player.level = L;
@@ -61,7 +63,7 @@ try {
     game.monsters.length = 0;
 
     // ---- non-scaled content must be untouched ----
-    game.mapData = Object.assign({}, prevMapData || {}, { expressScaling: false });
+    game.mapData = Object.assign({}, prevMapData || {}, { expressScaling: false, isTown: false });
     player.level = 200;
     game.monsters.length = 0;
     let plain = null;

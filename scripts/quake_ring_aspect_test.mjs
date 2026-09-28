@@ -6,6 +6,14 @@
 // it into a flat ellipse box squashes it into a smear. This intercepts the real
 // ctx.drawImage call during drawHazards and measures what was actually painted,
 // rather than re-deriving the maths that produced it.
+//
+// 51d8efda / v0.29.x moved the telegraph onto art of its OWN,
+// Sprites/vfx/(anim/)quake_plume* (quake_plume_anim_test covers the set), and
+// v0.30.1263 redrew it (the plume billows up from a small puff). v0.30.1270
+// then deleted the nine Sprites/vfx/anim/quake_ring_* frames outright. This
+// suite still matched /quake_ring/ URLs, so it recorded 0 draws - it now
+// identifies the plume by quake_plume (or _lxSrc for a re-baked canvas) and
+// asserts no quake_ring frame is ever asked for (a 404 there = a regression).
 // Run: node scripts/quake_ring_aspect_test.mjs [file.html]
 import { chromium } from 'playwright-core';
 import path from 'node:path';
@@ -36,11 +44,20 @@ await page.evaluate(() => {
   try { loadMap('blockland_apex'); } catch (e) {}
 });
 await page.waitForTimeout(7000);
+// v0.30.1196+ image hold + lazy vfx frames: release the hold, prime the plume
+// set through the game's own path, then wait for every frame to decode.
+await page.evaluate(() => {
+  try { if (window._lxBootHold) _lxBootHold.release('menu'); } catch (e) {}
+  try { _lxQuakePlumeFrame(0); } catch (e) {}
+  try { if (typeof _lxWantImg === 'function') { _lxWantImg(LX_VFX.quakePlume, true); for (const im of (VFX_ANIM_FRAMES.quakePlume || [])) _lxWantImg(im, true); } } catch (e) {}
+});
+await page.waitForFunction(() => { const a = VFX_ANIM_FRAMES.quakePlume;
+  return a && a.length && a.every((f) => f && f.complete && f.naturalWidth > 0); }, { timeout: 60000 }).catch(() => {});
 
 const r = await page.evaluate(async () => {
   // content box of the source art, measured live so the test cannot drift from
   // the asset the game actually loads
-  const src = _lxVfxFrame('quakeRing');
+  const src = _lxVfxFrame('quakePlume');
   const cc = document.createElement('canvas');
   cc.width = src.naturalWidth || src.width; cc.height = src.naturalHeight || src.height;
   const cx2 = cc.getContext('2d'); cx2.drawImage(src, 0, 0);
@@ -65,8 +82,8 @@ const r = await page.evaluate(async () => {
   const calls = [];
   const keep = ctx.drawImage;
   ctx.drawImage = function (img, ...a) {
-    const u = (img && (img.currentSrc || img.src)) || '';
-    if (/quake_ring/i.test(u)) {
+    const u = (img && (img.currentSrc || img.src || img._lxSrc)) || '';
+    if (/quake_plume/i.test(u)) {
       calls.push({ args: a.length >= 8 ? a.slice(4) : a, sw: img.naturalWidth || img.width, sh: img.naturalHeight || img.height, u: u.split('/').pop() });
     }
     return keep.apply(ctx, [img, ...a]);
@@ -92,7 +109,8 @@ const r = await page.evaluate(async () => {
     out.dstRatio = dh / dw;
     out.distortion = out.dstRatio / out.srcRatio;
     // content base = canvas bottom (0.9987 of the canvas in every frame)
-    out.contentBottomY = dy + dh * 0.9987;
+    // quake_plume (v0.30.1263): base rows 762-765 of 768 -> ~0.995 of the canvas
+    out.contentBottomY = dy + dh * 0.995;
     out.baseOffset = out.contentBottomY - (h.y + 16);
   }
 
@@ -107,18 +125,19 @@ const r = await page.evaluate(async () => {
     game.hazards.push({ ...h, life });
     const k2 = ctx.drawImage;
     ctx.drawImage = function (img, ...a) {
-      const u = (img && (img.currentSrc || img.src)) || '';
-      if (/quake_ring/i.test(u)) seen.push(u.split('/').pop());
+      const u = (img && (img.currentSrc || img.src || img._lxSrc)) || '';
+      if (/quake_(plume|ring)/i.test(u)) seen.push(u.split('/').pop());
       return k2.apply(ctx, [img, ...a]);
     };
     try { drawHazards(); } catch (e) {}
     ctx.drawImage = k2;
   }
   out.framesSeen = [...new Set(seen)].sort();
-  out.ringFrames = out.framesSeen.filter((f) => {
-    const m = f.match(/quake_ring_(\d+)\./);
-    return m && +m[1] >= 3;
-  });
+  // quake_ring is no longer the telegraph's art at all (and its anim frames are
+  // deleted since v0.30.1270): any quake_ring draw here is a regression.
+  out.ringFrames = out.framesSeen.filter((f) => /quake_ring/i.test(f));
+  out.plumeFrames = out.framesSeen.filter((f) => /quake_plume_\d+\./.test(f));
+  out.ringReq = performance.getEntriesByType('resource').map((e) => e.name).filter((n) => /quake_ring/i.test(n) && /vfx\/anim/.test(n));
   out.samples = seen.length;
   return out;
 });
@@ -136,7 +155,9 @@ console.log(`  frames used across the whole telegraph (${r.samples} samples): ${
 
 check(r.nCalls >= 1, 'the plume sprite is actually drawn during the telegraph', r.nCalls);
 check(r.samples > 0, 'the sweep actually sampled draws (else the ring check is vacuous)', r.samples);
-check(r.ringFrames.length === 0, 'no debris-ring frame (3-8) is ever used — plume only', r.ringFrames);
+check(r.ringFrames.length === 0, 'no quake_ring art is ever drawn for the telegraph — plume only', r.ringFrames);
+check(r.plumeFrames.length >= 6, 'the telegraph walks the plume animation (several distinct quake_plume frames)', r.framesSeen);
+check(r.ringReq.length === 0, 'nothing requests the deleted vfx/anim/quake_ring_* frames (v0.30.1270)', r.ringReq);
 if (r.drawn) {
   check(Math.abs(r.distortion - 1) <= 0.02, 'the source canvas is painted undistorted (not squashed)', { srcRatio: r.srcRatio, dstRatio: r.dstRatio, distortion: r.distortion });
   check(r.baseOffset >= -8 && r.baseOffset <= 14, 'the plume base sits on the ground line, not buried below it', r.baseOffset);

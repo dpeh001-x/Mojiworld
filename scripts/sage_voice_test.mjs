@@ -18,7 +18,10 @@ const m = voiceReport(CLIP);
 console.log('clip', JSON.stringify(m));
 check(m.f0 >= 230 && m.f0 <= 460 && m.vowelBand >= 0.25, 'the ??? clip sits in a young woman\'s pitch band with real voice in it (the old one was a 130 Hz sigh)', m);
 const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
-check(/sage-voice/.test(sw) && /^const CACHE = 'mojiworld-assets-v\d+';.*sage-voice/m.test(sw), 'sw.js bumps its asset cache for the replaced clip, so returning browsers drop the old one', sw.match(/^const CACHE.*$/m));
+// v0.30.1155 shipped the clip with cache generation v75 ("sage-voice"). Later bumps (e.g. v91, v0.30.1263 pop
+// VFX) rewrite that comment, so pin the generation: any >= 75 still drops the old clip for returning browsers.
+const swGen = Number((sw.match(/^const CACHE = 'mojiworld-assets-v(\d+)';/m) || [])[1] || 0);
+check(swGen >= 75, 'sw.js bumps its asset cache for the replaced clip, so returning browsers drop the old one', sw.match(/^const CACHE.*$/m));
 const size = fs.statSync(CLIP).size;
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT });
 await new Promise((r) => setTimeout(r, 1500));

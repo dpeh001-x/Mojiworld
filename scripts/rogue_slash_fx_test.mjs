@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9262;
+const PORT = Number(process.env.PORT || 9262);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -130,9 +130,12 @@ if (out.hasArc) {
      `hit edge ${Math.round(out.hitPastCentre)}px vs arc rim ${Math.round(out.arcOuterPastCentre)}px `
      + `(${Math.round(out.hitPastCentre - out.arcOuterPastCentre)}px beyond the art)`);
 }
-ok('the thrust lance survives, slimmed, as the core of the strike',
-   !!out.lance && out.lance.length === 86 && out.lance.thickness === 5,
-   out.lance ? `length ${out.lance.length}, thickness ${out.lance.thickness}` : 'no lance');
+// v0.30.26 (ec35f9ef, per user: "can remove the triangle stab portion of the
+// rogue basic attack, keep the arc slash") - the spawnStabImpact lance is gone
+// on purpose; the crescent is the whole strike now. Pin its absence.
+ok('the thrust lance is gone - the crescent alone is the strike (v0.30.26)',
+   !out.lance && out.hasArc,
+   out.lance ? `lance still drawn: length ${out.lance.length}, thickness ${out.lance.thickness}` : 'no lance');
 
 let pass = 0, failed = 0;
 for (const r of res) { if (r.pass) { pass++; console.log(`  PASS  ${r.n}` + (r.extra ? `  (${r.extra})` : '')); }

@@ -1,4 +1,5 @@
 // v0.30.411 setshard economy test: repeat-kill ladder for a normal boss and a
+// v0.30.967: the Express gate now guards refights only (q_pq_finale completed); a run in progress spawns its Conductor.
 // zodiac boss, twin exclusion (shards + sigil), Express respawn gate,
 // flat 1500 respec cost (v0.30.431), prestige reset (static).
 //   node scripts/setshard_economy_test.mjs [file.html] [port]
@@ -92,13 +93,25 @@ const res = await page.evaluate(async () => {
   ok('respec cost is a flat 1500 at every level (v0.30.431, per user; the v0.30.412 level curve is retired)', JSON.stringify(rc) === JSON.stringify([1500, 1500, 1500, 1500, 1500, 1500]), JSON.stringify(rc));
 
   // ---- Express respawn gate ----
+  // v0.30.967 (3fca1a85, per user: "stage 4 of train pq is still bugged"): the 10-minute gate guards REFIGHTS only -
+  // it bites once q_pq_finale is completed. A run still waiting on its Conductor spawns him inside the window.
+  const _clearCond = () => { game.monsters = game.monsters.filter((m) => !(m && m.type === 'pqConductor')); };
+  player.quests = player.quests || {}; player.quests.completed = player.quests.completed || {};
+  delete player.quests.completed.q_pq_finale;
   player._pqFinaleBossPending = true;
   game.bossDefeated.clockworkExpress = true;
   game._bossDefeatedAt.clockworkExpress = game._playMs || 0;
   loadMap('clockworkExpress'); await wait(900); game.paused = false;
+  const cond0 = game.monsters.some((m) => m && m.type === 'pqConductor' && m.currentHp > 0);
+  ok('a run in progress (finale not completed) spawns the conductor even inside the gate (v0.30.967)', cond0 && player._pqFinaleBossPending === false, `spawned=${cond0} pending=${player._pqFinaleBossPending}`);
+  _clearCond(); loadMap('town'); await wait(500);
+  player.quests.completed.q_pq_finale = true;   // a refight: the finale is done
+  player._pqFinaleBossPending = true;
+  game._bossDefeatedAt.clockworkExpress = game._playMs || 0;
+  loadMap('clockworkExpress'); await wait(900); game.paused = false;
   const cond1 = game.monsters.some((m) => m && m.type === 'pqConductor' && m.currentHp > 0);
   ok('conductor does NOT respawn inside the 10-min gate', !cond1 && player._pqFinaleBossPending === true, `spawned=${cond1} pending=${player._pqFinaleBossPending}`);
-  loadMap('town'); await wait(500);
+  _clearCond(); loadMap('town'); await wait(500);
   game._bossDefeatedAt.clockworkExpress = (game._playMs || 0) - 11 * 60 * 1000;
   loadMap('clockworkExpress'); await wait(900); game.paused = false;
   const cond2 = game.monsters.some((m) => m && m.type === 'pqConductor' && m.currentHp > 0);

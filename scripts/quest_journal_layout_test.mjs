@@ -90,7 +90,17 @@ const bar = await page.evaluate(() => {
   // a chip that is two pixels shorter than a tab while sitting beside it.
   const boxes = [...tabs, ...chips].map((e) => e.getBoundingClientRect());
   const oneRow = boxes.every((a) => boxes.every((b) => a.top < b.bottom - 2 && b.top < a.bottom - 2));
+  // v0.30.1182 (dc585e1a, "journal chips wrap"): .qj-bar / .qj-filter may wrap. The game is a fixed
+  // 960x560 box, so once v0.30.1140's pop-punk stickers made the controls wider than the bar they
+  // wrap at EVERY viewport - on one row they ran past the panel edge. Count the rows by clustering
+  // and require every control inside the bar horizontally.
+  const rowTops = []; for (const bx of [...boxes].sort((p, q) => p.top - q.top))
+    if (!rowTops.some((t) => Math.abs(t - bx.top) < bx.height / 2)) rowTops.push(bx.top);
+  const barBox = bars[0] ? bars[0].getBoundingClientRect() : null;
+  const inside = !!barBox && boxes.every((bx) => bx.left >= barBox.left - 1 && bx.right <= barBox.right + 1);
+  const scale = barBox && bars[0].offsetHeight ? barBox.height / bars[0].offsetHeight : 1;
   return {
+    rowCount: rowTops.length, inside, cssSpan: Math.round((Math.max(...boxes.map((b) => b.bottom)) - Math.min(...boxes.map((b) => b.top))) / scale),
     bars: bars.length, tabs: tabs.length, chips: chips.length,
     rows: oneRow ? 1 : 2,
     span: Math.round(Math.max(...boxes.map((b) => b.bottom)) - Math.min(...boxes.map((b) => b.top))),
@@ -99,7 +109,10 @@ const bar = await page.evaluate(() => {
     byKey,
   };
 });
-check('the status tabs and the category chips share ONE row', bar.bars === 1 && bar.rows === 1, bar);
+// v0.30.1182: one toolbar still, but it may wrap to two rows (never three - that was the 472 px of
+// chrome this suite was written against), and no control may hang past the panel edge.
+check('the status tabs and the category chips share ONE toolbar of at most two rows', bar.bars === 1 && bar.rowCount <= 2, bar);
+check('...and every tab and chip sits inside the toolbar (nothing runs off the panel)', bar.inside, bar);
 check('three status tabs and four category chips', bar.tabs === 3 && bar.chips === 4, bar);
 check('the category counts partition the visible tab (they used to contradict it)',
   bar.tabCount !== null && bar.parts === bar.tabCount, { parts: bar.parts, tab: bar.tabCount, byKey: bar.byKey });

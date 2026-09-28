@@ -17,9 +17,9 @@ const net_ = await import('node:net');
 const free = (p) => new Promise((r) => { const s = net_.createServer();
   s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
 let PORT = process.argv[2] || process.env.PORT;
-for (let p = 8767; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
+for (let p = 13430; p <= 13449 && !PORT; p++) if (await free(p)) PORT = String(p);
 const { spawn } = await import('node:child_process');
-const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore' });
+const srv = spawn(process.execPath, ['serve.js', PORT], { stdio: 'ignore', env: { ...process.env } });
 await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
@@ -34,10 +34,12 @@ await page.waitForFunction(() => typeof _PROJ_ANIM_KEYS !== 'undefined' && typeo
 // means the projectile falls through to the procedural draw and no frame is
 // blitted at all. (First run of this test failed on exactly that, and it was
 // the test's omission, not a hole in the wiring.)
-await page.evaluate(() => { try { _projAnimFrame('shockwave'); } catch (e) {} });
+// v0.30.731 (8dc64589) gave Somersault Smash's bloodwave its own crescent loop (anim/warrior_shockwave_0..8): kick both sets
+await page.evaluate(() => { try { _projAnimFrame('shockwave'); _projAnimFrame('warrior_shockwave'); } catch (e) {} });
 await page.waitForFunction(() => { try { const f = PROJ_ANIM_FRAMES.shockwave, st = LX_PLAYER_PROJ.shockwave;
   return !!(st && st.complete && st.naturalWidth > 0
-    && f && f.length === 9 && f.every(i => i && i.complete && i.naturalWidth > 0)); } catch (e) { return false; } },
+    && f && f.length === 9 && f.every(i => i && i.complete && i.naturalWidth > 0)
+  && (PROJ_ANIM_FRAMES.warrior_shockwave || []).length === 9 && PROJ_ANIM_FRAMES.warrior_shockwave.every(i => i && i.complete && i.naturalWidth > 0)); } catch (e) { return false; } },
   null, { timeout: 40000 }).catch(() => {});
 
 await page.waitForTimeout(2500);   // let the boot settle before driving the renderer
@@ -59,7 +61,7 @@ const r = await page.evaluate(async () => {
   const real = proto.drawImage;
   const drawn = [];
   proto.drawImage = function (img, ...rest) {
-    try { if (img && img.src) drawn.push(img.src.split('/').slice(-2).join('/')); } catch (e) {}
+    try { const u = img && (img.src || (img._lxSrc && (typeof img._lxSrc === 'string' ? img._lxSrc : img._lxSrc.src))); if (u) drawn.push(u.split('/').slice(-2).join('/')); } catch (e) {}
     return real.apply(this, [img, ...rest]);
   };
   const shot = (skill) => {
@@ -79,25 +81,28 @@ const r = await page.evaluate(async () => {
   game.projectiles = [];
 
   // does the loader actually advance through the loop over time?
+  // v0.30.1271 (f38a6b80): while a frame is still a raw webp the loop holds a baked sibling for up to 1.5 s, so the first
+  // pass through a cold loop repeats frames by design. Walk it for 2 s first (the bakes finish), then sample.
+  for (let k = 0; k < 80; k++) { _projAnimFrame('shockwave'); await new Promise(r => setTimeout(r, 25)); }
   const seen = new Set();
-  for (let k = 0; k < 40; k++) { const im = _projAnimFrame('shockwave'); if (im) seen.add(im.src); await new Promise(r => setTimeout(r, 25)); }
+  for (let k = 0; k < 40; k++) { const im = _projAnimFrame('shockwave'); if (im) seen.add(im.src || (im._lxSrc && im._lxSrc.src) || im); await new Promise(r => setTimeout(r, 25)); }
   out.distinctOverTime = seen.size;
   return out;
 });
 
-const isFrame = (a) => a.length > 0 && a.every(s => /anim\/shockwave_\d\.webp$/.test(s));
+const isFrame = (a, k = 'shockwave') => a.length > 0 && a.every(s => new RegExp('anim/' + k + '_\\d\\.webp$').test(s));
 ok('the frame set is registered and all nine decode',
   r.registered && r.frames === 9 && r.decoded && r.srcs === 9,
   { registered: r.registered, frames: r.frames, decoded: r.decoded, distinctFiles: r.srcs });
 ok('the generic branch has a TABLE now, not a hardcoded bolt',
-  r.table && r.table.shockwave === 'shockwave' && r.table.bloodwave === 'shockwave' && r.table.bolt === 'bolt',
+  r.table && r.table.shockwave === 'shockwave' && r.table.bloodwave === 'warrior_shockwave' && r.table.bolt === 'bolt',   // v0.30.731: bloodwave has its own set
   r.table);
 ok('the loader advances through the loop over time', r.distinctOverTime >= 4,
   { distinct: r.distinctOverTime, of: 9 });
 ok('a shockwave projectile draws an ANIM FRAME, not the static sprite',
   isFrame(r.drawnShockwave), { drawn: r.drawnShockwave.slice(0, 2), raw: r.raw_shockwave, threw: r.drawThrew });
-ok('...and so does the bloodwave rider that shares the art',
-  isFrame(r.drawnBloodwave), { drawn: r.drawnBloodwave.slice(0, 2) });
+ok('...and so does the Somersault Smash bloodwave, from its own crescent set (v0.30.731)',
+  isFrame(r.drawnBloodwave, 'warrior_shockwave'), { drawn: r.drawnBloodwave.slice(0, 2) });
 ok('a skill NOT in the table still draws its own static sprite',
   r.drawnDagger.some(s => /p_dagger\.webp$/.test(s)) && !r.drawnDagger.some(s => /anim\/shockwave/.test(s)),
   { drawn: r.drawnDagger.slice(0, 3) });

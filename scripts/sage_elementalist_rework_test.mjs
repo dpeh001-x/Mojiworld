@@ -6,11 +6,14 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const GAME = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
-const src = readFileSync(GAME, 'utf8');
+// A worktree checkout is CRLF while the blob is LF: normalise so the multi-line anchor matches either copy.
+const src = readFileSync(GAME, 'utf8').replace(/\r\n/g, '\n');
 
 // ---- source ---------------------------------------------------------------
-ok('Sage G is Pyre Columns: 16-frame telegraph, 110ms stagger, 95px lane at 3x',
-  src.includes("name:'Pyre Columns'") && src.includes('_sageDmgMul: 3.0, _fireColumn: true,') &&
+// v0.30.345 (3c0de75b, "sage X +30%", per user) and v0.30.391 ("+25% burst", per user) retuned the
+// pyre multiplier 3.0 -> 3.9 -> 6; the 6 landed with v0.30.785 (3c51eff1, the user's Skill Editor patch).
+ok('Sage G is Pyre Columns: 16-frame telegraph, 110ms stagger, 95px lane at 6x',
+  src.includes("name:'Pyre Columns'") && src.includes('_sageDmgMul: 6, _fireColumn: true,') &&
   src.includes('life: 16, maxLife: 16, fireAt: 16, cx: ox') && src.includes('}, i * 110);'), '');
 ok('pyre lanes launch foes skyward and erupt a pillar (no rock-fall)',
   src.includes('m.vy = h._fireColumn ? -9 : -4;') && src.includes("if (h._fireColumn) {\n        // v0.30.x - PYRE telegraph"), '');
@@ -22,8 +25,9 @@ ok('Sage B tooltip is honest (tap x10, ahead, refund)',
 ok('Cascade: the glacier wall is gone, four beats remain',
   !src.includes('const ICE_BLOCKS = [') && src.includes("showToast('FROST - ' + n + ' frozen', 'rare');") &&
   src.includes("showToast('STORM - ' + hops + ' chained', 'rare');") && src.includes("showToast('CONVERGENCE x' + amp.toFixed(2)"), '');
+// v0.30.53 (32b8d18f, per user) retired the 1.5 s HOLD-B Apotheosis for three random catastrophes per cooldown.
 ok('Cascade + Apotheosis tooltips describe the real skills',
-  /desc:'Four elements in sequence: a Pyre column/.test(src) && /desc:'HOLD B to charge \(1\.5s\)/.test(src), '');
+  /desc:'Four elements in sequence: a Pyre column/.test(src) && /desc:'Three catastrophes, then the cooldown: each press/.test(src), '');
 
 // ---- live -----------------------------------------------------------------
 const net_ = await import('node:net');

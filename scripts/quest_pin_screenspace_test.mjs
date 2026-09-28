@@ -51,7 +51,11 @@ const measure = (mapId, standX, standY) => page.evaluate(async (a) => {
       acceptQuest(id);
       if (!player.quests.active[id]) continue;
       const d0 = _qnavDest(id);
-      if (d0 && d0.map !== a.mapId) { qid = id; break; }
+      // v0.30.1152 (pq-fixes) — a Ticket Rush stage quest now points at its
+      // stage map "reachable or not", so the first off-map kill quest can have
+      // no walking route and no pin at all (q_clockwork_underpass from the
+      // forest). Pick one whose route really resolves to a portal here.
+      if (d0 && d0.map !== a.mapId && _qnavHeading(d0)) { qid = id; break; }
       delete player.quests.active[id];
     } catch (e) {}
   }
@@ -63,15 +67,22 @@ const measure = (mapId, standX, standY) => page.evaluate(async (a) => {
   const orig = CanvasRenderingContext2D.prototype.fillText;
   CanvasRenderingContext2D.prototype.fillText = function (t, x, y, ...rest) {
     if (t === '📍') {
+      // v0.30.238 (0f01d736) — the backing store is W*_LX_DPR px and every
+      // frame starts from setTransform(_LX_DPR), so the device matrix carries
+      // that base scale (1.6x at this viewport). Divide it back out: what is
+      // graded is the pin's position in the 960x560 SCREEN space the target is
+      // drawn in, world translates included — the thing the bug broke.
       const m = this.getTransform();
-      hits.push({ devY: m.d * y + m.f, devX: m.a * x + m.e,
+      const s = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : 1;
+      hits.push({ devY: (m.d * y + m.f) / s, devX: (m.a * x + m.e) / s,
                   camY: (game.camera && game.camera.y) || 0 });
     }
     return orig.call(this, t, x, y, ...rest);
   };
   game.paused = false;
+  const standX = (a.standX == null) ? h.x : a.standX;
   for (let i = 0; i < 70; i++) {
-    player.x = a.standX; player.y = a.standY; player.vx = 0; player.vy = 0;
+    player.x = standX; player.y = a.standY; player.vx = 0; player.vy = 0;
     await new Promise((res) => requestAnimationFrame(res));
   }
   CanvasRenderingContext2D.prototype.fillText = orig;
@@ -92,7 +103,10 @@ const measure = (mapId, standX, standY) => page.evaluate(async (a) => {
 // Vertical map, camera scrolled deep — where the bug lived.
 const vert = await measure('honeycombHollow', 600, 3300);
 // Flat map — where it never showed; guards against a fix that breaks the easy case.
-const flat = await measure('forest', 1700, 400);
+// Stand at the heading (null) so the pin is on screen whichever quest the
+// picker lands on - the first reachable one now sits at x~211, which from
+// x 1700 drew the off-screen edge chevron instead of a pin.
+const flat = await measure('forest', null, 400);
 await browser.close();
 
 console.log(`  honeycombHollow: ${JSON.stringify(vert)}`);

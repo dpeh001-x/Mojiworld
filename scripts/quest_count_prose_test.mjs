@@ -14,6 +14,12 @@
 // spelled — directly beside its own target's name that differs from the live
 // count. That is graded against the quest data, never against literals, so
 // any future retune that re-breaks prose fails here by construction.
+//
+// v0.30.912 (f8939fd1, per user: every hand-written quest to the point) then
+// rewrote all five Act-1 descs; none quotes a number any more, and Joyce's
+// "She counts." beat became her sleepers' ledger. So the per-quest checks now
+// ask what the sweep asks - any number the prose puts beside its creature is
+// the live count - instead of requiring a numeral to be there.
 // Run: node scripts/quest_count_prose_test.mjs [file.html]
 import { chromium } from 'playwright-core';
 import path from 'node:path';
@@ -58,6 +64,8 @@ const r = await page.evaluate(async () => {
       count: q ? q.count : null,
       saysTen: new RegExp('\\bten\\s+' + esc(word), 'i').test(desc),
       saysLive: q ? new RegExp('\\b' + q.count + '\\s+' + esc(word), 'i').test(desc) : false,
+      saysWrong: q ? [...desc.matchAll(new RegExp('\\b(\\d{1,4}|' + Object.keys(WORDS).join('|') + ')\\s+' + esc(word), 'gi'))]
+        .some((m) => { const t = m[1].toLowerCase(); return (/^\d+$/.test(t) ? +t : WORDS[t]) !== q.count; }) : true,
     };
   }
   const sleepers = (QUESTS.q_act1_sleepers && QUESTS.q_act1_sleepers.desc) || '';
@@ -65,6 +73,7 @@ const r = await page.evaluate(async () => {
     count: QUESTS.q_act1_sleepers ? QUESTS.q_act1_sleepers.count : null,
     standaloneTen: /\bTen\.\s/.test(sleepers),
     namesNoStaleNumber: /She counts\./.test(sleepers),
+    ledger: /Joyce/.test(sleepers) && /ledger/i.test(sleepers),
   };
 
   // --- THE SWEEP: no quest quotes a wrong number beside its own creature ---
@@ -109,11 +118,10 @@ console.log(`  sweep hits: ${JSON.stringify(r.sweep.slice(0, 6))}${r.sweep.lengt
 
 for (const id in r.known) {
   const k = r.known[id];
-  check(!k.saysTen, `${id}: no longer says "ten" beside its creature`, k);
-  check(k.saysLive, `${id}: quotes the live count beside its creature`, k);
+  check(k.count > 0 && !k.saysWrong, `${id}: any number beside its creature is the live count`, k);
 }
 check(!r.sleepers.standaloneTen, 'q_act1_sleepers: the standalone "Ten." sentence is gone', r.sleepers);
-check(r.sleepers.namesNoStaleNumber, 'and Joyce still counts - the beat survives without a number', r.sleepers);
+check(r.sleepers.ledger, "and Joyce's beat survives without a number (v0.30.912: her sleepers' ledger)", r.sleepers);
 check(r.sweep.length === 0, 'SWEEP: no kill quest quotes a wrong number beside its own creature', r.sweep.slice(0, 5));
 check(errs.length === 0, 'no page errors', [...new Set(errs)].slice(0, 3));
 console.log(bad ? `\n${bad} FAILED` : '\nall green');

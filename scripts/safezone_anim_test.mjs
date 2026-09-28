@@ -56,6 +56,13 @@ const r = await page.evaluate(async () => {
   const out = { keyed: _FX_ANIM_KEYS.has('gravitos_singularity_zone') };
   const arr = _fxAnimFrames('gravitos_singularity_zone') || [];
   void LX_FX.safezone_shield;
+  // v0.30.1196 (image hold) + v0.30.1234 (lazy fx): the shield is parked until the fight asks for it.
+  // Ask the way the game does - release the hold like the title menu, then spawn Gravitos through
+  // spawnMonster, whose _lxPrewarmBossSets -> _lxPrewarmMobFx wants _LX_MOB_TYPE_ART.gravitos
+  // (safezone_shield included). The boss is removed again before anything is drawn.
+  try { if (window._lxBootHold && _lxBootHold.release) _lxBootHold.release('menu'); } catch (e) {}
+  try { loadMap('gravitosArena'); spawnMonster(600, 300, 'gravitos', true); } catch (e) {}
+  game.monsters.length = 0;
   for (let i = 0; i < 200; i++) { if (arr.length && arr.every((f) => f && f.complete && f.naturalWidth > 0) && LX_FX.safezone_shield && LX_FX.safezone_shield.complete) break; await wait(50); }
   out.frames = arr.length; out.decoded = arr.filter((f) => f && f.complete && f.naturalWidth > 0).length;
   // draw one zone and record what lands on it

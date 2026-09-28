@@ -78,7 +78,9 @@ const r = await page.evaluate(() => {
 
 const html = await (await fetch(`http://localhost:${PORT}/${PAGE}`)).text();
 const stamped = html.includes("player._pqStagePaid[id] = 1;");
-const persisted = html.includes("'_pqStagePaid',") && html.includes("'_pqChainRuns','_pqStagePaid']");
+// v0.30.918 (db20a52c) appended '_downPending' to _LX_SIGNED_PLAYER_KEYS, so the
+// signed list no longer ENDS at '_pqStagePaid' - it only has to contain it.
+const persisted = html.includes("'_pqStagePaid',") && /'_pqChainRuns','_pqStagePaid'[,\]]/.test(html);
 
 console.log(JSON.stringify({ ...r, stamped, persisted }));
 const checks = [

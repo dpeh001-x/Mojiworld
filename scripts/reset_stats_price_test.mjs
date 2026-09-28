@@ -72,7 +72,11 @@ try {
     `coins ${r.paid.coinsPaid}/${r.paid.expectCoins}, shards ${r.paid.shardsPaid}`);
   ok('...and still does its job: SP refunded and the invested ledger cleared', r.paid.refunded > 0 && r.paid.spentCleared,
     `+${r.paid.refunded} SP, ledger cleared ${r.paid.spentCleared}`);
-  ok('the confirm quotes BOTH prices before you agree to it', /Mojicoins/.test(r.body) && /1000◈|1,000◈/.test(r.body) && /setshards/i.test(r.body), r.body.slice(-120));
+  // v0.30.1060 (3253128f, per user: "shorter more concise description ... more pop comic art") the body is
+  // two cost chips - "<coins> [coin icon]" + "1000 ◈" - over one line of fine print naming the Mojicoins.
+  // The word "Setshards" moved to the text-only fallback; the ◈ chip is the shard price.
+  const _coinChip = new RegExp('Cost\\s*' + r.paid.expectCoins + '\\s*\\+');
+  ok('the confirm quotes BOTH prices before you agree to it', /Mojicoins/.test(r.body) && _coinChip.test(r.body) && /1,?000\s*◈/.test(r.body), r.body.slice(-120));
   ok('short on shards: the reset is refused and the coins are NOT taken', r.short.coinsCharged === 0 && r.short.shardsCharged === 0,
     `coins charged ${r.short.coinsCharged}, shards charged ${r.short.shardsCharged}`);
   ok('...and the invested points are left exactly where they were', r.short.spGained === 0 && r.short.stillInvested,

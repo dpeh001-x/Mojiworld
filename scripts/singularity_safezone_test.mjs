@@ -93,7 +93,15 @@ const R = await page.evaluate(async () => {
   if (gv) { gv.phase = 1; gv.speed = 0; }
 
   // Run one case: place the player via `place` (called every frame), resolve, report the hp fraction.
+  // FLAKY fix: headless runs several sim ticks per 16 ms sleep, so the walk below could step life 3 -> 0 inside one
+  // sleep and resolve the collapse while player._god was still on - a silent "survived" (the far / platform CONTROLS
+  // failed that way at the suite's own commit, v0.30.856). A walk that overshoots is detected and re-run.
   const run = async (label, place, opts) => {
+    let r = null;
+    for (let a = 0; a < 5; a++) { r = await run1(label, place, opts); if (!r.early) { r.tries = a + 1; break; } }
+    return r;
+  };
+  const run1 = async (label, place, opts) => {
     game.hazards = game.hazards.filter((h) => h.type !== 'gravitos_singularity');
     const h = { type: 'gravitos_singularity', x: 0, y: 0, w: 4000, h: 2000, cx: player.x + 400, cy: floor - 200,
                 life: 40, maxLife: 210, atk: 99999, safeZones: [zone()] };
@@ -104,6 +112,7 @@ const R = await page.evaluate(async () => {
       place(h.life); if (gv) { gv.x = player.x + 900; gv.y = player.y; }
       game.paused = false; await sleep(16); f++;
     }
+    if (!game.hazards.includes(h) || !(h.life >= 1)) return { label, early: true, hit: false, hpFrac: 1, resolved: true };
     place(1);
     player._god = false;                           // only the resolve frame can hurt
     const hp0 = player.hp;
@@ -144,7 +153,7 @@ const R = await page.evaluate(async () => {
 await browser.close(); server.kill();
 
 const c = R;
-for (const k of ['standing', 'airborne', 'grace', 'far', 'platform', 'strict']) console.log(`  ${k.padEnd(9)} ${c[k].label.padEnd(34)} hit=${c[k].hit}  hp ${c[k].hpFrac}  resolved=${c[k].resolved}`);
+for (const k of ['standing', 'airborne', 'grace', 'far', 'platform', 'strict']) console.log(`  ${k.padEnd(9)} ${c[k].label.padEnd(34)} hit=${c[k].hit}  hp ${c[k].hpFrac}  resolved=${c[k].resolved}  tries=${c[k].tries}`);
 console.log(`  countdown digits at 120 frames left: ${JSON.stringify(c.countdown)}${c.drawErr ? '  drawErr ' + c.drawErr : ''}`);
 ok('CONTROL: standing in the zone survives', c.standing.resolved && !c.standing.hit);
 ok('airborne over the zone survives (a jump inside the light is still inside)', c.airborne.resolved && !c.airborne.hit,

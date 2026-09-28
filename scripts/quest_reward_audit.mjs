@@ -25,16 +25,17 @@ const data = await page.evaluate(() => {
     const r = q.rewards || {};
     if (!r.exp) return null;
     const L = Math.max(1, q.levelReq || 1);
-    const early = _lxQuestExpMul(L);
-    const authored = Math.floor(r.exp * early);
-    const frac = Math.max(0.04, Math.min(0.35, r.exp / 30000));
-    const floor = Math.floor(_lxLevelCost(L) * frac);
-    // v0.29.320 — multipliers apply to the AUTHORED value only; the floor is
-    // already curve-relative. Mirrors _completeQuest.
-    const authoredPaid = Math.floor(authored * LX_QUEST_EXP_MULT * _lxQuestRewardMul(L));
-    const raw = q.noExpFloor ? authoredPaid : Math.max(authoredPaid, floor);
-    const ceiling = Math.floor(_lxLevelCost(L) * 0.80);
-    const paid = Math.min(raw, ceiling);
+    // v0.30.941 (b901083f, per user: "there are no levers as it causes alot of
+    // confusion") - no early ramp, no x16 knob (LX_QUEST_EXP_MULT, folded into
+    // the authored numbers), no Lv 30+ EXP weighting, no curve floor outside the
+    // level-scaled Clockwork run. v0.30.944 (81146112) - the ceiling is
+    // LX_QUEST_SHARE_HI (60%) of the level, not 80%, and binds at Lv 1 too.
+    // Modelled at the design level, so the scaled path (Lv 40+ only) is inert.
+    const authoredPaid = Math.max(0, Math.floor(r.exp));
+    const floor = 0;
+    const raw = authoredPaid;
+    const ceiling = Math.max(1, Math.floor(_lxLevelCost(L) * LX_QUEST_SHARE_HI));
+    const paid = Math.max(1, Math.min(raw, ceiling));
     return { qid, name: q.name, L, kind: q.kind, story: !!q.story,
       authoredExp: r.exp, coins: r.mojicoins || 0,
       levelCost: _lxLevelCost(L), paid, pctOfLevel: paid / _lxLevelCost(L),
@@ -75,10 +76,10 @@ for (const [lo, hi] of bands) {
 }
 
 const negligible = data.rows.filter(r => r.pctOfLevel < 0.02).sort((a, b2) => a.pctOfLevel - b2.pctOfLevel);
-const huge = data.rows.filter(r => r.pctOfLevel > 0.79).sort((a, b2) => b2.pctOfLevel - a.pctOfLevel);
+const huge = data.rows.filter(r => r.clamped).sort((a, b2) => b2.pctOfLevel - a.pctOfLevel);
 console.log(`\n=== NEGLIGIBLE (<2% of a level) — ${negligible.length} ===`);
 for (const r of negligible.slice(0, 15)) console.log(`  Lv ${String(r.L).padStart(3)}  ${pct(r.pctOfLevel).padStart(7)}  ${r.qid}`);
-console.log(`\n=== AT/OVER THE 80% CEILING — ${huge.length} ===`);
+console.log(`\n=== AT/OVER THE 60% CEILING (v0.30.944) — ${huge.length} ===`);
 for (const r of huge.slice(0, 15)) console.log(`  Lv ${String(r.L).padStart(3)}  ${pct(r.pctOfLevel).padStart(7)}  ${r.qid}${r.clamped ? '  [clamped]' : ''}`);
 
 console.log('\n=== STORY CHAINS — payout must not go DOWN as the chain advances ===');

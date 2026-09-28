@@ -13,6 +13,15 @@
 //
 // This drives the real resolver against a real mob on a real map, so it fails
 // on the old build rather than passing vacuously.
+//
+// v0.29.899 (ac37f60a) changed WHAT a same-map objective resolves to, per user:
+// "ensure that the navigator points either at the NPC or the portal and not
+// anything else." A hunt on the map you stand on now resolves to the quest's
+// own giver when they stand on this map, and to null (no pin) otherwise -
+// never to a monster. The resolver still has to find things on THIS map (the
+// original bug made that impossible), so this now checks: the giver on this
+// map IS found, with a real height; a giver-less hunt pins nothing, and in
+// particular no live mob.
 // Run: node scripts/quest_pin_heading_test.mjs [file.html]
 import { chromium } from 'playwright-core';
 import path from 'node:path';
@@ -49,22 +58,40 @@ const r = await page.evaluate(async () => {
     const live = (game.monsters || []).filter((m) => m && !m.dead && m.type);
     if (!live.length) { out[mapId] = { noMobs: true }; continue; }
     const target = live[0];
-    const d = { map: mapId, who: target.type, kind: 'kill' };
-    const h = (typeof _qnavHeading === 'function') ? _qnavHeading(d) : null;
-    // The nearest instance of that type is what the compass should choose.
-    let nearest = null, nd = Infinity;
-    for (const m of live) {
-      if (m.type !== target.type) continue;
-      const dist = Math.abs((m.x || 0) - (player.x || 0));
-      if (dist < nd) { nd = dist; nearest = m; }
+    // A hunt on the map you stand on, with no giver here: "you are here", no pin.
+    const bare = _qnavHeading({ map: mapId, who: target.type, kind: 'hunt' });
+    const onMob = (p) => !!(p && live.some((m) => Math.abs(m.x - p.x) < 1));
+    out[mapId] = { type: target.type, mobs: live.length,
+      bare: bare ? { x: Math.round(bare.x), y: Math.round(bare.y) } : null, pinsAMob: onMob(bare) };
+  }
+
+  // The same-map resolve that the original bug made impossible: a hunt quest
+  // whose GIVER stands on the map you are on resolves to that giver, found on
+  // this map's live NPC list. The hunt maps above have no NPCs, so use the
+  // giver's own map from the navigator's index (_LX_QNAV, built by _qnavDest).
+  {
+    try { _qnavBuild(); } catch (e) {}
+    let qid = null, gmap = null, gname = null;
+    for (const id in QUESTS) {
+      const q = QUESTS[id];
+      if (!q || q.cls || !q.target || q.giverByClass) continue;
+      const g = q.giver || q.npc;
+      const sp = g && _LX_QNAV.npc[g];
+      if (sp && sp.length && sp[0].map && MAPS[sp[0].map]) { qid = id; gmap = sp[0].map; gname = g; break; }
     }
-    out[mapId] = {
-      type: target.type, mobs: live.length,
-      heading: h ? { x: Math.round(h.x), y: Math.round(h.y) } : null,
-      nearestAt: nearest ? { x: Math.round(nearest.x), y: Math.round(nearest.y) } : null,
-      matchesNearest: !!(h && nearest && Math.abs(h.x - nearest.x) < 1),
-      yIsFinite: !!(h && Number.isFinite(h.y)),
-    };
+    if (!qid) { out.giver = { noQuest: true }; }
+    else {
+      loadMap(gmap);
+      await new Promise((res) => setTimeout(res, 900));
+      const npc = (game.npcs || []).find((n) => n && n.name === gname && Number.isFinite(n.x));
+      const h = _qnavHeading({ map: gmap, who: QUESTS[qid].target, kind: 'hunt', qid });
+      const live = (game.monsters || []).filter((m) => m && !m.dead);
+      out.giver = { qid, map: gmap, who: gname, npcX: npc ? Math.round(npc.x) : null,
+        heading: h ? { x: Math.round(h.x), y: Math.round(h.y) } : null,
+        matchesGiver: !!(h && npc && Math.abs(h.x - npc.x) < 1),
+        yIsFinite: !!(h && Number.isFinite(h.y)),
+        pinsAMob: !!(h && live.some((m) => Math.abs(m.x - h.x) < 1 && !(npc && Math.abs(npc.x - h.x) < 1))) };
+    }
   }
 
   // The off-map branch must still work — it was never broken, and a fix that
@@ -86,9 +113,17 @@ console.log(`  off-map: ${JSON.stringify(r.offMap)}`);
 for (const k of ['honeycombHollow', 'forest']) {
   const x = r[k] || {};
   check(!x.noMobs && x.mobs > 0, `${k}: the map has live mobs to point at`, x);
-  check(x.heading !== null, `${k}: the compass resolves an objective on THIS map (was null)`, x);
-  check(x.matchesNearest === true, `${k}: and it points at the nearest one, not just any`, x);
-  check(x.yIsFinite === true, `${k}: with a real height, so the pin sits on the target`, x);
+  check(x.bare === null, `${k}: a hunt with no giver here pins nothing (v0.29.899)`, x);
+  check(x.pinsAMob === false, `${k}: and never a live monster`, x);
+}
+{
+  const x = r.giver || {};
+  console.log(`  giver: ${JSON.stringify(x)}`);
+  check(!x.noQuest && x.npcX !== null, 'harness: a hunt quest whose giver stands on a map', x);
+  check(!!x.heading, 'the compass resolves an objective on THIS map (was null)', x);
+  check(x.matchesGiver === true, "and it points at the quest's own giver (v0.29.899)", x);
+  check(x.yIsFinite === true, 'with a real height, so the pin sits on the target', x);
+  check(x.pinsAMob === false, 'and not at a monster', x);
 }
 check(r.offMap.landsOnAPortal === true,
       'an off-map objective still points at the exit portal', r.offMap);

@@ -20,15 +20,35 @@ checks.push(['loadMap asks for the disc', /_lxPrewarmSingularityDisc\(id\)/.test
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--no-sandbox', '--mute-audio'] });
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = [];
-page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 120)));
-await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
-await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'load', timeout: 60000 });
-await page.waitForTimeout(9000);
-await page.fill('#hero-name-input', 'Disc'); await page.click('#cs-nav-next').catch(() => {}); await page.waitForTimeout(800);
-await page.evaluate(() => { const c = document.querySelector('#class-options .class-card'); if (c) c.click(); });
-await page.waitForTimeout(1500);
+// each boot gets its own context, so its own HTTP + memory cache (see the cold check below)
+const boot = async () => {
+  const page = await (await browser.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
+  page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 120)));
+  await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
+  await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'load', timeout: 60000 });
+  await page.waitForTimeout(9000);
+  await page.fill('#hero-name-input', 'Disc'); await page.click('#cs-nav-next').catch(() => {}); await page.waitForTimeout(800);
+  await page.evaluate(() => { const c = document.querySelector('#class-options .class-card'); if (c) c.click(); });
+  await page.waitForTimeout(1500);
+  return page;
+};
+// A COLD arena load, in a fresh context. It used to run in the same page right after the lead map had decoded all
+// sixteen frames: resetting FX_ANIM_FRAMES does not empty Chromium's memory cache, so the "new" Images came back
+// complete at once, _lxGfDiscArt returned a loop frame and (correctly) never needed the static fallback - the check
+// failed at its own commit (v0.30.594, 2f19dd89) on this machine. Nothing in the game changed; the load was not cold.
+const cold = await (await boot()).evaluate(async () => {
+  const wait = (ms) => new Promise((x) => setTimeout(x, ms));
+  const out = {};
+  const t0 = performance.now(); loadMap('gravitosArena');
+  out.requestedOnArenaLoad = !!(FX_ANIM_FRAMES.singularity && FX_ANIM_FRAMES.singularity.length);
+  out.staticRequested = !!(_LX_GF && _LX_GF.discImg);
+  let firstArt = null;
+  for (let i = 0; i < 80; i++) { if (_lxGfDiscArt()) { firstArt = Math.round(performance.now() - t0); break; } await wait(100); }
+  out.msToArt = firstArt;
+  return out;
+});
+const page = await boot();
 const r = await page.evaluate(async () => {
   const wait = (ms) => new Promise((x) => setTimeout(x, ms));
   const out = {};
@@ -42,16 +62,9 @@ const r = await page.evaluate(async () => {
     await wait(6000);
     out.decodedOnLead = (FX_ANIM_FRAMES.singularity || []).filter((f) => f && f.complete && f.naturalWidth > 0).length;
   }
-  // a cold arena load, no lead: the disc must still be requested at load, before any draw
-  FX_ANIM_FRAMES.singularity = undefined; if (typeof _LX_GF !== 'undefined') _LX_GF.discImg = null;
-  const t0 = performance.now(); loadMap('gravitosArena');
-  out.requestedOnArenaLoad = !!(FX_ANIM_FRAMES.singularity && FX_ANIM_FRAMES.singularity.length);
-  out.staticRequested = !!(_LX_GF && _LX_GF.discImg);
-  let firstArt = null;
-  for (let i = 0; i < 80; i++) { if (_lxGfDiscArt()) { firstArt = Math.round(performance.now() - t0); break; } await wait(100); }
-  out.msToArt = firstArt;
   return out;
 });
+Object.assign(r, cold);
 await browser.close(); server.kill();
 console.log(JSON.stringify(r));
 checks.push(['a map leads into the arena', !!r.lead, String(r.lead)]);

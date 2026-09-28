@@ -84,10 +84,14 @@ const r2 = await page.evaluate(() => {
   const qid = btn.dataset.qtrack;
   btn.click();
   const after = document.querySelector(`#quest-list [data-qtrack="${qid}"]`);
-  return { qid, qnav: game.qnav, label: (after && after.textContent || '').trim() };
+  return { qid, qnav: game.qnav, label: (after && after.textContent || '').trim(),
+    aria: after && after.getAttribute('aria-label'), title: after && after.getAttribute('title') };
 });
 check(r2.qnav === r2.qid, 'Track sets game.qnav to the quest id', r2);
-check(/Tracking/.test(r2.label), 'the tracked button repaints as Tracking', r2.label);
+// v0.30.755 (5f47c3ed) dropped the word from the button - it was printed once
+// per row down the whole list; the button is a bare compass and the state rides
+// its gold colour, aria-label and title. Check the repaint through those.
+check(r2.aria === 'Stop tracking' && /^Tracking/.test(r2.title || ''), 'the tracked button repaints as Tracking (aria-label + title)', r2);
 
 const r3 = await page.evaluate(() => {
   const btn = document.querySelector(`#quest-list [data-qtrack="${game.qnav}"]`);

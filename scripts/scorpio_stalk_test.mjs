@@ -43,6 +43,9 @@ await page.fill('#hero-name-input', 'Sting');
 await page.evaluate(() => { const m = document.getElementById('class-select-modal'); for (const el of m.querySelectorAll('button,div,li')) { if (el.children.length > 3) continue; if (getComputedStyle(el).display === 'none') continue; if (/^\s*warrior\s*$/i.test((el.textContent || '').trim())) { el.click(); return; } } });
 await page.click('#cs-nav-next').catch(() => {});
 await page.waitForTimeout(2500);
+// v0.30.1116 beat queue: a queued story beat (the zodiac's own arrival beat among them) holds game.paused and hiding
+// #story-beat-overlay does not dispose of it - mark every beat seen before the map loads or the sim never steps.
+await page.evaluate(() => { player._storyBeatsSeen = player._storyBeatsSeen || {}; if (typeof STORY_BEATS === 'object') for (const k in STORY_BEATS) player._storyBeatsSeen[k] = true; });
 await page.evaluate(() => { player.level = 90; loadMap('forest', 300); });
 await page.waitForTimeout(5000);
 
@@ -52,6 +55,10 @@ const R = await page.evaluate(async () => {
   try { _lxCineHold(0); } catch (e) {}
   game.paused = false; player._god = true;
   const out = {};
+  // Frame-exact waits: game.time is the sim's frame counter. A wall-clock sleep(16/20) saw ZERO sim steps under load
+  // (the post-dart read then returned the injected 5 px/frame untouched) or several (the burrow window ran long), so
+  // every wait below counts sim frames instead, with a wall-clock bail so a stuck pause fails loudly rather than hangs.
+  const frames = async (n) => { const t0 = game.time; const d = Date.now() + 5000; while (game.time - t0 < n && Date.now() < d) await sleep(4); return game.time - t0; };
   out.drift = (typeof SCORPIO_DRIFT_MAX !== 'undefined') ? SCORPIO_DRIFT_MAX : null;
   out.track = (typeof SCORPIO_BURROW_TRACK !== 'undefined') ? SCORPIO_BURROW_TRACK : null;
 
@@ -72,7 +79,9 @@ const R = await page.evaluate(async () => {
   player.x = m.x + 700; player.y = m.y;
   // FREE DRIFT, for the record. Left alone the creep does not reach its own cap at all:
   // the physics loop's drag (~0.94/frame) balances the +0.05/frame acceleration at
-  // ~0.78 px/frame. So the cap is not what she cruises at — it is what she is pulled
+  // ~0.78 px/frame. (Since the v0.30.x walk-latch kill in updateMonsters - "only move horizontally when the walking
+  // sprite plays" - a grounded mob's vx below _lxMobWalkOn (0.28 here) is zeroed every tick, so free drift now reads 0.)
+  // So the cap is not what she cruises at — it is what she is pulled
   // back DOWN to, which is the next measurement.
   pin(); m.vx = 0;
   let free = 0;
@@ -88,7 +97,7 @@ const R = await page.evaluate(async () => {
   let peak = 0;
   for (let k = 0; k < 6; k++) {
     pin(); m.vx = 5;
-    await sleep(20);
+    await frames(1);
     const v = Math.abs(m.vx || 0);
     if (v > peak) peak = v;
   }
@@ -102,11 +111,13 @@ const R = await page.evaluate(async () => {
   m._burrowGroundY = m.y; m._burrowing = false; m._burrowAt = (game.time | 0) + 999999;
   player.x = m.x + 900; player.y = m.y;
   const x0 = m.x, gap0 = (player.x + player.w / 2 - m.w / 2) - m.x;
-  for (let i = 0; i < 33; i++) {
-    m.patternState = 'burrow'; m.patternTimer = 400;
-    player.x = x0 + 900; player.vx = 0; player.vy = 0;
-    await sleep(16);
-  }
+  { const t0 = game.time, dl = Date.now() + 8000;
+    while (game.time - t0 < 33 && Date.now() < dl) {
+      m.patternState = 'burrow'; m.patternTimer = 400;
+      player.x = x0 + 900; player.vx = 0; player.vy = 0;
+      await sleep(4);
+    }
+    out.burrowFrames = game.time - t0; }
   const closed = (m.x - x0) / gap0;
   out.closedFrac = +closed.toFixed(4);
   m.patternState = 'idle'; m._noGravity = false; m._invulnBurrow = false; m._burrowGroundY = null;
@@ -120,7 +131,7 @@ console.log(`SCORPIO_DRIFT_MAX     = ${R.drift}   (84 px/s was 1.4; 72 px/s is 1
 console.log(`SCORPIO_BURROW_TRACK  = ${R.track}`);
 console.log(`free drift, cap never reached           : ${R.freeDrift} px/frame  = ${(R.freeDrift * 60).toFixed(0)} px/s`);
 console.log(`one frame after a skitter dart          : ${R.peakDrift} px/frame  = ${(R.peakDrift * 60).toFixed(0)} px/s   (the cap, less drag)`);
-console.log(`gap closed over the 33-frame travel win : ${(R.closedFrac * 100).toFixed(1)}%`);
+console.log(`gap closed over the 33-frame travel win : ${(R.closedFrac * 100).toFixed(1)}%   (${R.burrowFrames} sim frames)`);
 
 const checks = [
   ['the drift cap is a named constant, not a literal', R.drift !== null, String(R.drift)],

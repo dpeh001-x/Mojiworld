@@ -118,6 +118,13 @@ const r = await page.evaluate(() => {
   out.afterRecheck_gods = godsIn().length;
 
   // --- 6. rarity registration ----------------------------------------------
+  // The burst goes through _budgetedParticlePush's PER-FRAME budget, and this
+  // evaluate is one frame: the grant above already emitted a god burst, and
+  // headless trips LX_PERF.veryLowFx (cap 40). Both left 20 of the 70 here.
+  // Open a fresh frame at the desktop budget so the count measures the burst.
+  try { if (typeof LX_PERF !== 'undefined' && LX_PERF) { LX_PERF.lowFx = false; LX_PERF.veryLowFx = false; } } catch (e) {}
+  try { game.monsters.length = 0; game._lowFxCache = null; } catch (e) {}
+  try { _frameParticleCount = 0; } catch (e) {}
   game.particles.length = 0;
   try { emitRarityBurst(player.x + player.w / 2, player.y + player.h / 2, 'god'); } catch (e) {}
   out.burstParticles = game.particles.length;
