@@ -10,13 +10,10 @@
 //     is of a detached node still showing the old key;
 //   - the capture wants a real key event (page.keyboard.press). A synthesized KeyboardEvent arms
 //     nothing and reads as "rebinding is broken";
-//   - 'p' (and enter/escape/t/i/m/9/0) is RESERVED for the action flow, and the skill slots
-//     Z/X/S/C/D/F/V/G are handled by a SEPARATE chip on the same tab -
-//     [data-skillslot], wired to _skillPickup, writing player.keybinds. An audit that queried only
-//     [data-action] concluded basic attack could not be rebound at all. It can: the Basic Attack row
-//     IS a skill chip, and the second half of this test moves it off Z and checks Z lets go.
-//     The action flow rejects those keys deliberately, which is correct and toasts an explanation.
-//     This test uses 'o' for the journal and 'r' for attack - one key cannot serve both.
+//   - since the v0.30.1328 keyboard remap every function - actions and skills alike - sits in ONE table and takes any key
+//     but Esc; a key another function holds SWAPS with it. The Basic Attack row is the [data-skillslot="d"] chip (its
+//     wait shows as _kbCapture === 'skill:d'); the second half of this test moves it off Z and checks Z lets go.
+//     This test uses the FREE keys 'i' for the journal and 'j' for attack, so no swap is involved - one key per job.
 //   [SERVE_ROOT=<dir with serve.js, data/, art>] node scripts/rebind_death_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -25,10 +22,10 @@ const { chromium } = require('playwright-core');
 const SERVE_ROOT = process.env.SERVE_ROOT || ROOT, PORT = process.env.PORT || '11345';
 const cand = process.argv.slice(2).find((a) => !a.startsWith('--'));
 const PAGE = path.resolve(SERVE_ROOT, cand || 'mojiworld_game.html');
-const ACT = 'questJournal', NEWKEY = 'o', OLDKEY = 'q';
-// a DIFFERENT free key for the attack remap: 'o' is taken by the journal bind above, and binding one
-// key to two things is exactly what the swap logic refuses - it would measure the refusal, not the remap
-const ATKKEY = 'r';
+const ACT = 'questJournal', NEWKEY = 'i', OLDKEY = 'q';
+// a DIFFERENT free key for the attack remap: 'i' is taken by the journal bind above, and binding it again would
+// measure a swap, not the remap
+const ATKKEY = 'j';
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env, MOJI_GAME_FILE: PAGE } });
 await new Promise((r) => setTimeout(r, 1800));
 let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d ? '  [' + d + ']' : '')); ok ? pass++ : fail++; };
@@ -62,7 +59,7 @@ try {
   await page.evaluate(async () => { try { toggleKeybindModal(); } catch (e) {} await new Promise((r) => setTimeout(r, 600)); });
   const armed = await page.evaluate((ACT) => { const e = document.querySelector('#keybind-modal [data-action="' + ACT + '"]'); if (!e) return 'NO CHIP'; e.click(); return true; }, ACT);
   await page.waitForTimeout(400);
-  const pickup = await page.evaluate(() => (typeof _actionPickup !== 'undefined' ? _actionPickup : 'undef'));
+  const pickup = await page.evaluate(() => (typeof _kbCapture !== 'undefined' ? _kbCapture : 'undef'));
   check(armed === true && pickup === ACT, 'clicking the key chip arms a capture', J({ armed, pickup }));
   await page.keyboard.press(NEWKEY);
   await page.waitForTimeout(700);
@@ -103,12 +100,12 @@ try {
   await page.evaluate(async () => { try { toggleKeybindModal(); } catch (e) {} await new Promise((r) => setTimeout(r, 600)); });
   const chip = await page.evaluate(() => { const e = document.querySelector('#keybind-modal [data-skillslot="d"]'); if (!e) return 'NO CHIP'; e.click(); return true; });
   await page.waitForTimeout(400);
-  const sp = await page.evaluate(() => (typeof _skillPickup !== 'undefined' ? _skillPickup : 'undef'));
-  check(chip === true && sp === 'd', 'the Basic Attack row is a remappable chip, and it arms', J({ chip, pickup: sp }));
+  const sp = await page.evaluate(() => (typeof _kbCapture !== 'undefined' ? _kbCapture : 'undef'));
+  check(chip === true && sp === 'skill:d', 'the Basic Attack row is a remappable chip, and it arms', J({ chip, pickup: sp }));
   await page.keyboard.press(ATKKEY);
   await page.waitForTimeout(700);
-  const slot = await page.evaluate(() => ({ key: (typeof SLOT_TO_KEY !== 'undefined' ? SLOT_TO_KEY.d : null), hasZ: !!(typeof KEY_TO_SLOT !== 'undefined' && KEY_TO_SLOT.z) }));
-  check(String(slot.key).toLowerCase() === ATKKEY && slot.hasZ === false, 'attack moves to the new key and Z is released from the map', J(slot));
+  const slot = await page.evaluate(() => ({ key: (typeof SLOT_TO_KEY !== 'undefined' ? SLOT_TO_KEY.d : null), zSilent: _resolveActionKey('z') === null }));   // KEY_TO_SLOT keeps the canonical z
+  check(String(slot.key).toLowerCase() === ATKKEY && slot.zSilent === true, 'attack moves to the new key and Z is released (silent)', J(slot));
   await page.evaluate(() => { try { closeAllModals(); } catch (e) {} game.paused = false; });
   const zAfter = await swings('z'), newAfter = await swings(ATKKEY);
   check(newAfter > 0, 'the new key swings', newAfter + ' swings');

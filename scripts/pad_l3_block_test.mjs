@@ -40,7 +40,7 @@ const out = await page.evaluate(async () => {
     && _LX_PAD_ACTIONS.some(a => a.s && a.s.a === 'dodge');
   // a rebind of Block must carry the pad with it
   const savedBinds = player.actionBinds;
-  player.actionBinds = Object.assign({}, savedBinds || {}, { block: 'g' });
+  player.actionBinds = Object.assign({}, savedBinds || {}, { block: 'i' });   // a FREE key: since the v0.30.1328 keyboard remap a key holds one job, and G is the Master Signature
   r.resolvedAfterRebind = _lxPadResolveKey(_LX_PAD_MAP[10]);
   player.actionBinds = savedBinds;
 
@@ -80,7 +80,7 @@ await browser.close(); server.kill();
 ok('L3 is bound to the block action', out.mapped === '{"a":"block"}', out.mapped);
 ok('it resolves to the Block key', out.resolved === 'a', `resolved to "${out.resolved}"`);
 ok('rebinding Block in Hotkeys carries the pad with it',
-   out.resolvedAfterRebind === 'g', `after rebinding block->g, L3 resolves to "${out.resolvedAfterRebind}"`);
+   out.resolvedAfterRebind === 'i', `after rebinding block->i, L3 resolves to "${out.resolvedAfterRebind}"`);
 ok('the pad remapper shows a readable label, not a raw id',
    out.label === 'Block / Parry', `label "${out.label}"`);
 ok('Block is assignable in the pad remapper', out.remapperHasBlock);

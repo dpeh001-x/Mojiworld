@@ -1,7 +1,8 @@
 // v0.30.x — Five UI / input findings from a parallel audit.
 //   1. closeDialog released the pause unconditionally (every sibling asks who else is open).
 //   2. Seven surfaces the pause registry treats as blocking were absent from the pad registry.
-//   3. The Cure / Pickup rebinds accepted keys another action already owned, and persisted them.
+//   3. The Cure / Pickup rebinds accepted keys another action already owned, and persisted them (the key then did two jobs).
+//      Since the v0.30.1328 keyboard remap such a bind SWAPS: the key moves over and its old function takes the other key.
 //   4. The boss-intro skip listeners were attached once and never removed.
 //   5. The gamepad poller ran a second rAF chain at display refresh, out-running the 60 Hz sim.
 //
@@ -62,16 +63,18 @@ const r = await page.evaluate(() => {
   const need = ['reforge-modal', 'bravo-boon-modal', 'exp-door-modal', 'exp-puzzle-modal', 'exp-seed-modal', 'everdawn-welcome-overlay', 'game-complete-overlay'];
   out.padMissing = need.filter((id) => _LX_PAD_MODAL_IDS.indexOf(id) < 0);
 
-  // ---- 3. rebinding Pickup / Cure onto Move Left is refused and nothing is persisted
-  const ik0 = player.interactKey, ck0 = player.cureKey;
-  _interactKeyPickup = true; document.dispatchEvent(key('ArrowLeft'));
-  out.interactAfterArrow = player.interactKey; out.interactPickupCleared = !_interactKeyPickup;
-  _cureKeyPickup = true; document.dispatchEvent(key('ArrowLeft'));
-  out.cureAfterArrow = player.cureKey; out.curePickupCleared = !_cureKeyPickup;
-  // ...while a harmless key still binds
-  _interactKeyPickup = true; document.dispatchEvent(key('j'));
+  // ---- 3. Cure / Pickup onto Move Left's key: the key moves over, Move Left SWAPS (no key does two jobs, and the save
+  //      never holds one key twice) - through the K panel's own capture, which only listens while the panel is open
+  _lxBindReset(); toggleKeybindModal();
+  const one = () => { const t = _lxBindTable(), seen = {}; for (const id in t.keyOf) { const k = t.keyOf[id]; if (k && seen[k]) return false; if (k) seen[k] = 1; } return true; };
+  _kbCapture = 'cure'; document.dispatchEvent(key('ArrowLeft'));
+  out.cureSwap = { cure: player.cureKey, left: player.actionBinds.moveLeft, one: one(), cleared: _kbCapture === null };
+  _lxBindReset(); _kbCapture = 'interact'; document.dispatchEvent(key('ArrowLeft'));
+  out.pickupSwap = { pickup: player.interactKey, left: player.actionBinds.moveLeft, one: one(), cleared: _kbCapture === null };
+  // ...while a free key simply binds
+  _lxBindReset(); _kbCapture = 'interact'; document.dispatchEvent(key('j'));
   out.interactAfterJ = player.interactKey;
-  player.interactKey = ik0; player.cureKey = ck0; _interactKeyPickup = false; _cureKeyPickup = false;
+  _lxBindReset(); toggleKeybindModal(); const ik0 = player.interactKey, ck0 = player.cureKey;
   out.ik0 = ik0; out.ck0 = ck0;
   return out;
 });
@@ -87,8 +90,8 @@ const checks = [
   ['closeDialog keeps the pause while the Journal is still open', r.stillPausedUnderJournal === true],
   ['...and reconciles to whatever else is open once the Journal is gone', r.pauseReconciled === true, 'owners: ' + (r.otherOwners || []).join(',')],
   ['every pause-owner surface is in the pad registry', r.padMissing && r.padMissing.length === 0, 'missing: ' + (r.padMissing || []).join(',')],
-  ['Pickup refuses Move Left and is not persisted onto it', r.interactAfterArrow !== 'arrowleft' && r.interactPickupCleared === true],
-  ['Cure refuses Move Left and is not persisted onto it', r.cureAfterArrow !== 'arrowleft' && r.curePickupCleared === true],
+  ['Cure onto the Move Left key swaps: Cure takes the left arrow, Move Left takes R (one key per job, saved so)', r.cureSwap && r.cureSwap.cure === 'arrowleft' && r.cureSwap.left === 'r' && r.cureSwap.one && r.cureSwap.cleared, JSON.stringify(r.cureSwap)],
+  ['Pickup (no key) onto the Move Left key: Pickup takes it and Move Left is left unbound - never two jobs on one key', r.pickupSwap && r.pickupSwap.pickup === 'arrowleft' && r.pickupSwap.left === '' && r.pickupSwap.one && r.pickupSwap.cleared, JSON.stringify(r.pickupSwap)],
   ['a free key still binds Pickup', r.interactAfterJ === 'j'],
   ['the boss-intro skip listeners are removed when the intro closes', introRemoved === true],
   ['the gamepad poller is capped at the sim cadence', pollCapped === true],

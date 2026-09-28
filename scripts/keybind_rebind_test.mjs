@@ -4,8 +4,11 @@
 //      _isAction, so the two cancelled and the test could only pass when nothing was remapped:
 //      rebinding Talk-to-NPC or the Bestiary made it permanently unreachable, saved to disk.
 //   2. The Wardrobe's default key is the EMPTY STRING, so binding it handed "" to whatever it
-//      displaced — stranding a real action with no key at all.
-//   3. Action pickup had no reserved-key list, so Enter could be bound away from chat silently.
+//      displaced — stranding a real action with no key at all, silently. Since the v0.30.x keyboard
+//      remap every key can take every function, so the displaced one IS left unbound - but visibly:
+//      its chip reads UNBOUND and a toast names it.
+//   3. Enter could be bound away from chat silently. Now Enter is a function (Chat) like any other:
+//      binding Enter to Move Left SWAPS Chat onto the left arrow, so chat is moved, never lost.
 //
 //   node scripts/keybind_rebind_test.mjs        MOJI_SERVE_ROOT / PORT override
 //
@@ -62,12 +65,10 @@ try {
     // renderKbmReference() takes no arguments and bails unless #kbm-reference-grid exists, so
     // the host is ensured first. Without this the chip query returned zero and both bind checks
     // "passed" against nothing.
-    if (!document.getElementById('kbm-reference-grid')) {
-      const g = document.createElement('div'); g.id = 'kbm-reference-grid'; document.body.appendChild(g);
-    }
-    if (typeof renderKbmReference === 'function') { try { renderKbmReference(); } catch (e) { o.renderErr = String(e.message).slice(0, 90); } }
+    // v0.30.1328 keyboard remap - the chips live in the panel's Keyboard tab and a key is only taken while the panel is open
+    try { if (typeof toggleKeybindModal === 'function') toggleKeybindModal(); } catch (e) { o.renderErr = String(e.message).slice(0, 90); }
     await sleep(300);
-    const chipFor = (action) => document.querySelector('.kbm-action-chip[data-action="' + action + '"]');
+    const chipFor = (action) => document.querySelector('#keybind-modal .kbm-action-chip[data-action="' + action + '"]');
     o.chipsFound = document.querySelectorAll('.kbm-action-chip[data-action]').length;
 
     // 2 — bind the Wardrobe (default '') onto a key another action owns
@@ -82,11 +83,11 @@ try {
       wardChip.click(); await sleep(80);
       await press('w');
       o.afterSwap = { wardrobe: player.actionBinds.wardrobe, displaced: player.actionBinds[ownerOfW] };
-      o.strandedCount = Object.keys(ACTION_KEY_DEFAULT)
-        .filter((a) => a !== 'wardrobe')
-        .filter((a) => { const v = player.actionBinds[a] !== undefined ? player.actionBinds[a] : ACTION_KEY_DEFAULT[a]; return v === '' || v == null; }).length;
+      const dc = chipFor(ownerOfW);
+      o.displacedChip = dc ? { cls: dc.className, txt: dc.textContent } : null;
+      o.toasts = [...document.querySelectorAll('.toast, [class*="toast"]')].map((t) => t.textContent).filter((t) => /has no key now/.test(t)).length;
     }
-    player.actionBinds = { ...before };
+    _lxBindReset();
 
     // 3 — try to bind a reserved key
     const leftChip = chipFor('moveLeft');
@@ -94,9 +95,9 @@ try {
     if (leftChip) {
       leftChip.click(); await sleep(80);
       await press('Enter');
-      o.enterBound = player.actionBinds.moveLeft;
+      o.enterBound = player.actionBinds.moveLeft; o.chatNow = player.actionBinds.chat;
     }
-    player.actionBinds = { ...ACTION_KEY_DEFAULT };
+    _lxBindReset();
     return o;
   });
 
@@ -118,8 +119,11 @@ try {
   ok('the Wardrobe really does ship unbound', r.wardrobeDefaultEmpty === true);
   ok('the keybind chips are reachable (the pickup really ran)', (r.chipsFound || 0) > 0 && r.wardChip === true && r.leftChip === true,
     `chips=${r.chipsFound} ward=${r.wardChip} left=${r.leftChip}`);
-  ok('binding the Wardrobe strands nobody', r.strandedCount === 0, `${r.strandedCount} action(s) left with no key; ${JSON.stringify(r.afterSwap)}`);
-  ok('Enter is refused as an action bind', r.enterBound !== 'enter', 'moveLeft=' + JSON.stringify(r.enterBound));
+  ok('binding the Wardrobe onto the World Map key leaves World Map visibly unbound (chip + toast), never silently',
+    r.afterSwap && r.afterSwap.wardrobe === 'w' && r.afterSwap.displaced === '' && r.displacedChip && /is-off/.test(r.displacedChip.cls) && /unbound/i.test(r.displacedChip.txt),
+    JSON.stringify({ afterSwap: r.afterSwap, chip: r.displacedChip, toasts: r.toasts }));
+  ok('Enter binds Move Left and Chat swaps onto the left arrow - chat is moved, never lost', r.enterBound === 'enter' && r.chatNow === 'arrowleft',
+    'moveLeft=' + JSON.stringify(r.enterBound) + ' chat=' + JSON.stringify(r.chatNow));
   ok('no page errors', errs.length === 0, errs.join(' | '));
 } finally {
   await browser.close(); server.kill();

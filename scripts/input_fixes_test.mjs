@@ -1,6 +1,7 @@
 // Input + audio fixes from the second bug hunt (v0.30.x input-fixes).
 //   node scripts/input_fixes_test.mjs            (MOJI_GAME_FILE=<build.html> to test a private build)
-// 1) the skill pickup refuses E / O / H; 2) and a remapped action's old key; 3) a key pressed plain and released under
+// 1) a skill bound to E / O / H takes the key alone (one key, one job since the v0.30.1328 keyboard remap - the Quest Guide / Photo
+// Mode / MojiMon swap onto the skill's old key); 2) and a moved action's old key; 3) a key pressed plain and released under
 // Shift doesn't stick; 4) SFX at 0 plays no footsteps and no dialogue blips; 5) phone: F beside a chest opens it with
 // the F skill moved to another key.
 import { chromium } from 'playwright-core';
@@ -38,14 +39,19 @@ const open = async (vp, map) => {
 };
 try {
   const { ctx, p } = await open({ viewport: { width: 1280, height: 720 } }, 'mushroom');
-  // 1) + 2) the skill pickup
-  const bindTry = async (key) => { await p.evaluate(() => { toggleKeybindModal(); _skillPickup = 'a'; }); await p.keyboard.press(key); await p.waitForTimeout(200); const r = await p.evaluate((k) => !!KEY_TO_SLOT[k === 'Space' ? ' ' : k], key); await p.evaluate(() => { try { closeAllModals(); } catch (e) {} game.paused = false; }); return r; };
-  const eoh = { e: await bindTry('e'), o: await bindTry('o'), h: await bindTry('h') };
-  check(!eoh.e && !eoh.o && !eoh.h, 'a skill can no longer be bound to E, O or H (their own actions fired alongside it)', eoh);
-  await p.evaluate(() => { player.actionBinds = Object.assign({}, player.actionBinds || {}, { jump: 'r' }); try { applyKeybinds(); } catch (e) {} });
-  const space = await bindTry('Space');
-  await p.evaluate(() => { delete player.actionBinds.jump; try { applyKeybinds(); } catch (e) {} });
-  check(!space, 'with Jump moved to R, a skill cannot be bound to Space (Jump\'s old key is neutralised, so it could never cast)', { space });
+  // 1) + 2) a skill onto E / O / H, and onto Space once Jump has moved: the bind is taken, the key's function swaps onto the
+  // skill's old key, and holding the key holds ONLY the skill (they used to fire together, so these binds were refused)
+  const bindTry = async (key, id) => { await p.evaluate(() => { _lxBindReset(); toggleKeybindModal(); document.querySelector('#kbm-fn-list [data-fn="skill:a"]').click(); }); await p.keyboard.press(key); await p.waitForTimeout(200);
+    await p.evaluate(() => { try { closeAllModals(); } catch (e) {} game.paused = false; game.keys = {}; }); await p.keyboard.down(key);
+    const r = await p.evaluate((id) => ({ skill: _lxFnKey('skill:a'), moved: id ? _lxFnKey(id) : null, held: Object.keys(game.keys).filter((k) => game.keys[k]).join() }), id);
+    await p.keyboard.up(key); return r; };
+  const eoh = { e: await bindTry('e', 'questGuide'), o: await bindTry('o', 'photo'), h: await bindTry('h', 'mojimon') };
+  check(eoh.e.skill === 'e' && eoh.o.skill === 'o' && eoh.h.skill === 'h' && [eoh.e, eoh.o, eoh.h].every((r) => r.moved === 's' && r.held === 's'),
+    'a skill bound to E, O or H takes the key alone - the Quest Guide / Photo Mode / MojiMon swaps onto S, the key holds only the skill', eoh);
+  await p.evaluate(() => { _lxBindReset(); _kbAssign('jump', 'r'); });
+  const space = await bindTry('Space', null);
+  await p.evaluate(() => { _lxBindReset(); });
+  check(space.skill === ' ' && space.held === 's', 'with Jump moved to R, a skill bound to Space casts there (the old Jump key is free for it)', space);
 
   // 3) Shift-release with a punctuation-bound Move Right
   await p.evaluate(async () => { player.actionBinds = Object.assign({}, player.actionBinds || {}, { moveRight: '.' }); try { applyKeybinds(); } catch (e) {} player.x = 400; player.vx = 0; await new Promise((s) => setTimeout(s, 600)); });
@@ -83,10 +89,10 @@ try {
 
   // 5) phone: F beside a chest with the F skill moved to R
   const P = await open({ viewport: { width: 842, height: 390 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }, 'mushroom');
-  await P.p.evaluate(() => { toggleKeybindModal(); _skillPickup = 'q'; });
+  await P.p.evaluate(() => { toggleKeybindModal(); document.querySelector('#kbm-fn-list [data-fn="skill:q"]').click(); });
   await P.p.keyboard.press('r'); await P.p.waitForTimeout(200);
   await P.p.evaluate(() => { try { closeAllModals(); } catch (e) {} game.paused = false; });
-  const moved = await P.p.evaluate(() => KEY_TO_SLOT.r === 'q');
+  const moved = await P.p.evaluate(() => _lxFnKey('skill:q') === 'r');
   await P.p.evaluate(async () => { for (let i = 0; i < 60 && !(player.onGround && Math.abs(player.vx) < 0.05); i++) await new Promise((s) => setTimeout(s, 50)); game.chests.push({ x: player.x + player.w / 2 - 17, y: player.y + player.h - 30, w: 35, h: 30, opened: false, tier: 'wood', bob: 0 }); game._lastInteractT = 0; });
   await P.p.waitForTimeout(700);
   const fb = await P.p.evaluate(() => { const b = document.querySelector('#mobile-deck [data-dynamic="f-block"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, st: b.dataset.fstate }; });
