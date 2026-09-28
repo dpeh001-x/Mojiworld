@@ -51,7 +51,7 @@ await page.waitForTimeout(2500);
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 220) });
 const ev = async (fn, arg) => { try { return await page.evaluate(fn, arg); } catch (e) { return { err: String(e).slice(0, 160) }; } };
-const reset = () => page.evaluate(() => { player._bastionArmedUntil = 0; player._bastionArmHeld = false; player._warCharge = null; player.skillCooldowns.crusader_ult = 0; player._judgeStacks = 5; player.mp = 2000; player.frozenTimer = 0; player._cancerBubble = 0; player.hitStun = 0; for (const k in game.keys) game.keys[k] = false; });
+const reset = () => page.evaluate(() => { player._bastionArmedUntil = 0; player._bastionArmHeld = false; player._warCharge = null; player.skillCooldowns.crusader_ult = 0; player._judgeStacks = 5; player.mp = 2000; player.frozenTimer = 0; player._cancerBubble = 0; player.hitStun = 0; player._skillLockTimer = 0; player._bastionBlockToastAt = -1e9; for (const k in game.keys) game.keys[k] = false; });
 await page.evaluate(() => {
   game.paused = false; player.level = 90; player.master = 'crusader'; player.job = 'knight'; player.cls = 'warrior';
   player.mp = 2000; player.maxMp = 2000; player._judgeStacks = 5; player.hp = player.maxHp = 40000; player._god = true;
@@ -64,7 +64,12 @@ const released = () => page.evaluate(() => (player._bastionArmedUntil | 0) === 0
 
 // 1. the video: a stale charge on ANOTHER key (stuck key state) — B must still arm and release
 await reset();
-await page.evaluate(() => { const other = Object.keys(KEY_TO_SLOT).find((k) => KEY_TO_SLOT[k] && KEY_TO_SLOT[k] !== 'b' && KEY_TO_SLOT[k] !== 'd') || 'v'; game.keys[other] = true; player._warCharge = { slotKey: other, start: game.time - 300, skillId: 'stale', power: 1, cls: 'warrior', frames: 60 }; window._staleKey = other; });
+await page.evaluate(() => { const other = Object.keys(KEY_TO_SLOT).find((k) => KEY_TO_SLOT[k] && KEY_TO_SLOT[k] !== 'b' && KEY_TO_SLOT[k] !== 'd') || 'v'; game.keys[other] = true; player._warCharge = { slotKey: other, start: game.time - 300, skillId: 'stale', power: 1, cls: 'warrior', frames: 60 }; window._staleKey = other;
+  // FLAKY fix (2026-09-28 triage): the stuck key is 'x' = slot s = Somersault Smash, and the poll loop really casts it while
+  // the key reads down; its flip sets _skillLockTimer (320 ms) and a B tap landing inside that lock is refused, so 1a / 1b
+  // passed or failed by timing (1b failed on its own commit v0.30.368 here). With that skill on cooldown the stale charge
+  // and the stuck key state stay exactly as in the video; only the unrelated cast is gone.
+  try { const f = skillBySlot(KEY_TO_SLOT[other]); if (f && f.id) player.skillCooldowns[f.id] = 1e9; } catch (e) {} });
 await page.keyboard.press('b'); await page.waitForTimeout(150);
 const a1 = await armed();
 await page.waitForTimeout(500); await page.keyboard.press('b'); await page.waitForTimeout(200);
@@ -73,6 +78,7 @@ ok('with a stale charge stuck on another key, B still ARMS (the video\'s dead-B 
 ok('...and a second tap RELEASES it (no more waiting 15s for the auto-eruption)', r1, `released ${r1}`);
 
 // 2. a keyup that lands while an input has focus still clears the key state
+await page.evaluate(() => { try { const f = skillBySlot(KEY_TO_SLOT[window._staleKey]); if (f && f.id) player.skillCooldowns[f.id] = 0; } catch (e) {} });
 await reset();
 const k2 = await ev(async () => {
   const inp = document.createElement('input'); inp.id = '_t_inp'; document.body.appendChild(inp);

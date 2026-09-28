@@ -40,17 +40,22 @@ async function bootOnce(throttleKbps) {
   let tf = false, gatedAfter = null;
   try { tf = await page.evaluate(() => !!window._lxTitleFirst); } catch (e) {}
   if (tf && !throttleKbps && snap && snap.revealed) { const t1 = Date.now(); while (Date.now() - t1 < 90000) { const g = await page.evaluate(() => { const s = window._lxBootStats; return !!(s && s.gated >= s.gatedTotal); }); if (g) { gatedAfter = Date.now() - t1; break; } await new Promise(r => setTimeout(r, 250)); } }
+  let manifest = 0;
+  try { manifest = await page.evaluate(async () => { const t = await (await fetch(location.href, { cache: 'no-store' })).text(); const i = t.indexOf('const REQUIRED = ['), j = i < 0 ? -1 : t.indexOf('];', i); if (j < 0) return 0; const NL = String.fromCharCode(10); const body = t.slice(i, j).split(NL).filter(l => !l.trim().startsWith('//')).join(NL); return new Set(body.match(/'[^']+[.](?:webp|png|jpg|gif)'/g) || []).size; }); } catch (e) {}
   await b.close();
-  return { snap, tReveal, errs, tf, gatedAfter };
+  return { snap, tReveal, errs, tf, gatedAfter, manifest };
 }
 
 // Run 1 — unthrottled sanity.
 const fast = await bootOnce(0);
 ok('boot stats are exposed', !!fast.snap, fast.snap);
 ok('gate reveals (unthrottled)', fast.tReveal != null, { ms: fast.tReveal });
+// v0.30.1196 / v0.30.1205 (9e6f0fcf, 9d78e8f3) lazy-art: parked backdrops, tiles, NPC sheets and props left DEFERRED (they load
+// with their map), so allTotal is no longer the full manifest (80 of ~255). Measure the gated set against the manifest itself:
+// the REQUIRED literal in the served page (a lower bound - NPC_SPRITE_FILES entries are appended at boot).
 ok('gated set is a small fraction of the full manifest',
-   fast.snap && fast.snap.gatedTotal < fast.snap.allTotal * 0.35,
-   fast.snap && { gated: fast.snap.gatedTotal, all: fast.snap.allTotal });
+   fast.snap && fast.manifest > 0 && fast.snap.gatedTotal < fast.manifest * 0.35,
+   fast.snap && { gated: fast.snap.gatedTotal, manifest: fast.manifest, deferredNow: fast.snap.allTotal });
 ok('gated set fully loaded at reveal (title-first: streamed in right after it)', fast.snap && (fast.snap.gated >= fast.snap.gatedTotal || (fast.tf && fast.gatedAfter != null)),   // v0.30.x title-first
    Object.assign({}, fast.snap, { titleFirst: fast.tf, gatedAfterMs: fast.gatedAfter }));
 ok('no page errors (unthrottled)', fast.errs.length === 0, fast.errs.slice(0, 3));

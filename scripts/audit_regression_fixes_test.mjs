@@ -93,7 +93,17 @@ try {
 
   // Static half — count the install sites and the clears in the served source.
   const src = await (await fetch(`http://localhost:${PORT}/${FILE}`)).text();
-  const installs = (src.match(/localStorage\.setItem\(SAVE_KEY,/g) || []).length;
+  // v0.30.1181 paint-save moved every SAVE_KEY write into two helpers: _lxPaintWrite (the save flush) and
+  // _lxSaveStoreRaw (import / backup restore / both cloud adopts), whose bodies hold 9 fallback setItem calls
+  // between them. An install SITE is now a call of either helper (or a raw setItem outside them).
+  const _strip = (s, name) => {
+    const i = s.indexOf('function ' + name + '('); if (i < 0) return s;
+    let d = 0, j = s.indexOf('{', i);
+    for (; j < s.length; j++) { if (s[j] === '{') d++; else if (s[j] === '}' && --d === 0) break; }
+    return s.slice(0, i) + s.slice(j + 1);
+  };
+  const srcNoHelpers = _strip(_strip(src, '_lxPaintWrite'), '_lxSaveStoreRaw');
+  const installs = (srcNoHelpers.match(/localStorage\.setItem\(SAVE_KEY,|_lxPaintWrite\(|_lxSaveStoreRaw\(/g) || []).length;
   const clears = (src.match(/removeItem\(_LX_SAVE_MARK_KEY\)/g) || []).length;
   const holdFlag = /if \(game\._gravitosCinePlaying\) return true;/.test(src);
   const drainFn = /function _lxDrainPendingSweeps\(\)/.test(src);

@@ -42,14 +42,19 @@ const boot = async (url, keep) => {
 };
 try {
   const base = `http://play.mojiworld.test:${PORT}/mojiworld_game.html`;
-  const A = (await boot(base + '?lxhold=0')).r;
-  const Bk = await boot(base, true); const B = Bk.r;
+  // v0.30.821 (40d95462) quiet console: a public hostname silences console.log, so the '[boot] image hold released' line only
+  // reaches the harness with ?log=1 (it changes nothing but the console)
+  const A = (await boot(base + '?lxhold=0&log=1')).r;
+  const Bk = await boot(base + '?log=1', true); const B = Bk.r;
   console.log('build ' + B.ver);
   console.log(`  A hold off: menu ${A.menuMs} ms, ${A.reqs} requests (${A.art} art) started before it`);
   console.log(`  B hold on : menu ${B.menuMs} ms, ${B.reqs} requests (${B.art} art) started before it`);
   check(A.menu && B.menu, 'both boots reach the title menu');
   check(A.early === null, 'A: ?lxhold=0 switches the hold off');
-  check(!!B.early && B.early.st.held > 800, 'B: on a public hostname the parse-time loaders are held', B.early ? JSON.stringify(B.early.st) : 'no hold');
+  // v0.30.1196 (9e6f0fcf) lazy-art: most parse-time art is now PARKED by the hold (stats().parked, waits for its map / boss)
+  // rather than queued (held); and since v0.30.1254 (537ad850) title-first the menu can be up - hold open - by the first
+  // sample. Held + parked is what the hold kept from starting.
+  check(!!B.early && B.early.st.held + B.early.st.parked > 800, 'B: on a public hostname the parse-time loaders are held', B.early ? JSON.stringify(B.early.st) : 'no hold');
   check(!!B.early && !!B.early.sample && /\/Sprites\//.test(B.early.sample.src) && B.early.sample.complete === false && B.early.sample.w === 0, 'a held image reads as still loading: src answers, complete is false', B.early ? JSON.stringify(B.early.sample) : '');
   check(B.art < A.art * 0.4, 'B starts far fewer art requests before the menu', `${B.art} vs ${A.art}`);
   check(B.menuMs <= A.menuMs + 1500, 'B reaches the menu no later than A', `${B.menuMs} vs ${A.menuMs} ms`);

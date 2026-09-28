@@ -36,6 +36,9 @@ const out = await page.evaluate(async () => {
     const m = MAPS[id];
     rows.push({ id, want, got: m && m.bg, ok: !!(m && m.bg === want) });
   }
+  // v0.30.1196 (9e6f0fcf) lazy-art: a far map's backdrop is PARKED until its map is wanted, so nothing decodes on its own any
+  // more. Ask the way the game does: each Block-land map through loadMap's want (_lxLazyWantMap), then every other plate.
+  for (const id of Object.keys(EXPECT)) { try { if (typeof _lxLazyWantMap === 'function') _lxLazyWantMap(id, true); } catch (_) {} }
   // wait for the three blockland plates to decode
   const keys = ['blockland', 'blockland1', 'blocklandLegosaurus'];
   const t0 = Date.now();
@@ -53,6 +56,8 @@ const out = await page.evaluate(async () => {
   // map table says so inline, so it is whitelisted rather than reported.
   const INTENTIONAL_ORPHANS = new Set(['voidBlack']);
   const all = Object.keys(REG || {});
+  for (const id in MAPS) { try { if (typeof _lxLazyWantMap === 'function') _lxLazyWantMap(id); } catch (_) {} }   // v0.30.1196 lazy-art
+  for (const k of all) { try { if (REG[k] && typeof _lxWantImg === 'function') _lxWantImg(REG[k]); } catch (_) {} }   // plates no map names (cinematics)
   const t1 = Date.now();
   while (REG && Date.now() - t1 < 45000) {
     if (all.every((k) => !REG[k] || REG[k].complete)) break;

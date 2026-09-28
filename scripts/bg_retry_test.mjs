@@ -30,9 +30,12 @@ try {
     o.failedListHas = (typeof _LX_BG_FAILED !== 'undefined') && _LX_BG_FAILED.some((p) => p === bad._lxPath);
     // standing in a map whose backdrop failed: one toast naming the file, and an on-demand retry
     const toasts = []; const _st = window.showToast; window.showToast = function (t, k) { toasts.push(String(t)); };
+    // v0.30.866 (bc0a0d55, "no engine words" in toasts): the toast names the build version; the file path went to console.warn
+    const warns = []; const _cw = console.warn; console.warn = function () { warns.push([].map.call(arguments, String).join(' ')); };
     BG_IMAGES.__lxTestBad = bad; const md = game.mapData; const savedBg = md.bg, savedFlag = md._bgFailToast; md.bg = '__lxTestBad'; md._bgFailToast = false; bad._lxFailedAt = 0;
     try { drawBackground(); drawBackground(); drawBackground(); } catch (e) { o.drawErr = String(e && e.message); }
-    o.toastCount = toasts.length; o.toastNamesFile = toasts.length > 0 && toasts[0].indexOf(bad._lxPath) >= 0;
+    o.toastCount = toasts.length; o.toastNamesVersion = toasts.length > 0 && toasts[0].indexOf(GAME_VERSION) >= 0;
+    o.warnNamesFile = warns.filter((w) => w.indexOf(bad._lxPath) >= 0).length; console.warn = _cw;
     o.demandRetry = (bad._lxTries | 0) > o.badTries;
     // recovery: point the failed image at a real file and retry - it loads and clears the failure
     bad._lxPath = 'backgrounds/bg_v3_forest.webp'; bad._lxRetryPending = false; if (typeof _lxBgRetry === 'function') _lxBgRetry(bad, 'test');
@@ -46,7 +49,7 @@ try {
   ok('retry machinery exists', r.has === true);
   ok('a backdrop that 404s is retried on the schedule (4 retries, cache-busted) and then marked failed', r.badFailed === true && r.badErrN === 5 && r.badTries === 4 && r.badSrcBusted === true, JSON.stringify([r.badFailed, r.badErrN, r.badTries, r.badSrcBusted]));
   ok('the failure is recorded for reporting', r.failedListHas === true);
-  ok('standing in its map names the file on screen once, not every frame', r.toastCount === 1 && r.toastNamesFile === true, JSON.stringify([r.toastCount, r.toastNamesFile]));
+  ok('standing in its map toasts once (with the version) and logs the file once, not every frame', r.toastCount === 1 && r.toastNamesVersion === true && r.warnNamesFile === 1, JSON.stringify([r.toastCount, r.toastNamesVersion, r.warnNamesFile]));
   ok('standing in its map retries the backdrop on demand', r.demandRetry === true, JSON.stringify([r.badTries]));
   ok('a retry that succeeds clears the failure and the plate draws again', r.recovered === true);
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

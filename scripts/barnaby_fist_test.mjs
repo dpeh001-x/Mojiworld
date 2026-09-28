@@ -35,6 +35,10 @@ await page.waitForTimeout(1200);
 const r = await page.evaluate(() => {
   const out = {};
   game.paused = true;
+  // v0.30.1196 lazy-art (9e6f0fcf): boss frames stay parked until the boss is wanted. The Barnaby below is built by
+  // hand, so ask for his art the way spawnMonster does (isBoss -> _lxWarmBossFrames -> _lxBossArtWant); touching
+  // BOSS_ATTACK_FRAMES no longer starts the fetch.
+  try { if (typeof _lxWarmBossFrames === 'function') _lxWarmBossFrames('young_confused_barnaby'); } catch (e) {}
   out.registered = !!LX_MOB_PROJ.barnFist;
   out.artReady = !!(LX_MOB_PROJ.barnFist && LX_MOB_PROJ.barnFist.complete && LX_MOB_PROJ.barnFist.naturalWidth > 0);
   out.src = LX_MOB_PROJ.barnFist ? LX_MOB_PROJ.barnFist.src.split('/').pop() : '';
