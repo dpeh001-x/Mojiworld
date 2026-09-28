@@ -260,7 +260,7 @@
 // otherwise keep the old two frames until its cache refreshed.
 // fruit-four - v114 -> v115. Pinechad, Meloncholy, Thornmaw and Elderbark are redrawn and re-animated under their
 // own names (statics + 27 frames each), so a returning browser would otherwise keep the old art until its cache refreshed.
-const CACHE = 'mojiworld-assets-v116';   // v0.30.1380 - column telegraph warnings
+const CACHE = 'mojiworld-assets-v117';   // v0.30.1382 - Virga's walk, fly and attack redrawn (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

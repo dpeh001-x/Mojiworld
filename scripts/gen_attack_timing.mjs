@@ -74,6 +74,10 @@ Object.assign(LX_BOSS_STRIKE_BY_TYPE, {
   zodiac_aquarius: 6, zodiac_aries: 4, zodiac_capricorn: 4, zodiac_gemini: 4, zodiac_leo: 4, zodiac_libra: 6,
   zodiac_pisces: 4, zodiac_sagittarius: 6, zodiac_scorpio: 6, zodiac_taurus: 4, zodiac_virgo: 6,
 });
+// v0.30.1382 virga-flap - Virga's attack set is redrawn (per user: a full wing-flap strike, "a bird that is levitating mid air").
+// Its blow is now f4: both wings driven fully down, the ring of light at its widest (f2 is the wings raised and glowing,
+// f3 the ring's first flash, f5 the wings sweeping back out). Still two frames of settle after it and more.
+Object.assign(LX_BOSS_STRIKE_BY_TYPE, { zodiac_virgo: 4 });
 
 // cb entries are [top, bottom, bodyTop, bodyBottom] in source pixels (see
 // scripts/gen_anim_manifest.mjs). Returns the default dwell array for n frames.
