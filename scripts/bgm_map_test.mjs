@@ -6,6 +6,10 @@
 // Audio responses are delayed here so every first visit hits that window.
 //   MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override the served tree.
 //   BGM_DELAY (ms, default 2500) delays audio responses; BGM_SWEEP=all visits every map.
+// 2026-09-28: the veteran save also marks the Singularity's entry cutscene seen. That clip (v0.27.24) plays on the first
+// entry of each session by design, and ducks the music to 15% for its ~15 s, then hands it back at full volume. The sweep
+// samples each map ~3 s in, so it read Gravitos Arena mid-clip (volume 0.08) and then zod_aries - visited next - while the
+// clip still held the duck: two false failures. A player cannot leave the arena mid-clip; the game is paused under it.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
@@ -20,7 +24,7 @@ try {
   await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof game === 'object' && typeof loadMap === 'function' && typeof _setBossBgm === 'function' && typeof _lxReadyGate === 'function' && typeof _bgmMapEl === 'function', null, { timeout: 180000 }); await page.waitForTimeout(6000);
   // a veteran save: every story beat seen (so no cutscene owns the mix on arrival), the loading score handed back
-  await page.evaluate(() => { try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; } try { player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; } catch (e) {} try { if (typeof _cineScoreStop === 'function') _cineScoreStop(1, false); } catch (e) {} try { if (typeof _lxMenuBgmStop === 'function') _lxMenuBgmStop(); } catch (e) {} player.level = 99; });
+  await page.evaluate(() => { try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; } try { player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; player._gravitosCineSeen = true; } catch (e) {} try { if (typeof _cineScoreStop === 'function') _cineScoreStop(1, false); } catch (e) {} try { if (typeof _lxMenuBgmStop === 'function') _lxMenuBgmStop(); } catch (e) {} player.level = 99; });
   await page.waitForTimeout(800);
   // visit a map the way the game does (loadMap runs the gate and the fade), then read what is audible
   const visit = (id) => page.evaluate(async (id) => {
