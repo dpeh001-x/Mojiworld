@@ -16149,7 +16149,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1396';
+const GAME_VERSION = 'v0.30.1397';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -103248,6 +103248,25 @@ const _LX_NO_HIT_SQUASH = new Set(['kingKrook']);
 _LX_NO_HIT_SQUASH.add('aetherion');   // v0.30.x - 16% of his frames were drawn mid-squash in a traced fight
 // v0.30.854 - the attribution belongs to this hit alone. Whatever the hit sets off from inside (chain lightning at 50% of the
 // ALREADY-ranked damage, overkill carry, the mage's spell echo, on-kill bursts) runs with none, or the rank would be paid twice.
+// v0.30.1397 class-hit - which of its class's three hit sparks a skill lands with (per user: "different skills should have
+// the varying hit sprites to choose from so make sure to use them"). The spark hashed the hit's TAG - 'melee', 'aoe',
+// 'fire', 'arrow' - and many skills share one (every AoE skill hits as 'aoe'), so a class's kit landed with one or two
+// designs. It now keys on the CAST skill (the same attribution the rank bonus uses, _rankSrc) and deals the three
+// designs round-robin over each class's skills in kit order (SKILLS, the basic first on the base design), so
+// neighbouring skills never share one. A basic's bare tag takes the base design; anything unlisted keeps the old hash.
+let _LX_HIT_VAR = null;
+function _lxHitVariant(key) {
+  if (!_LX_HIT_VAR) {
+    _LX_HIT_VAR = Object.create(null);
+    const n = Object.create(null);
+    try { for (const id in SKILLS) { const c = SKILLS[id] && SKILLS[id].cls; if (!c) continue; n[c] = n[c] | 0; _LX_HIT_VAR[id] = n[c]++ % 3; } } catch (e) {}
+  }
+  if (!key) return 0;
+  if (key in _LX_HIT_VAR) return _LX_HIT_VAR[key];
+  if (key === 'melee' || key === 'bolt' || key === 'arrow' || key === 'dagger' || key === 'basic') return 0;
+  let h = 0; for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return ((h % 3) + 3) % 3;
+}
 function hitMonster(m, dmg, isCrit, skill) {
   const _rs = _lxRankSrc; _lxRankSrc = null;
   try { return _hitMonsterCore(m, dmg, isCrit, skill, _rs); } finally { _lxRankSrc = _rs; }
@@ -104433,6 +104452,11 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // Now only the deepest tier suppresses it — which, since v0.29.391, is also
   // what a genuine bullet-hell boss phase engages.
   const _veryLowFxImpact = (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx());
+  // v0.30.1397 class-hit - and even that tier no longer hides it (per user: "the hit sprite animations for each class is not
+  // being used / displayed"). Measured in the field: the very-low tier was on for 61-98% of frames on a loaded machine
+  // (the frame watchdog, 2+ bosses, 23+ mobs, the Low preset all switch it on), and each class queued 0-2 sparks in 12 s
+  // of fighting - the mage none. A hit spark is feedback, not eye-candy, so under that tier it THINS instead: at most
+  // one every 4 frames (it is one per frame otherwise).
   // v0.29.4xx — BASICS INCLUDED (per user "the hit damage sprites are not
   // playing when monsters are hit"): the exclusion list below used to skip
   // slash/bolt/arrow/dagger — the vast majority of hits a player actually
@@ -104444,8 +104468,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   const _isBasicHit = (skill === 'bolt' || skill === 'slash' || skill === 'arrow' || skill === 'dagger' || skill === 'basic' || skill === 'melee');
   if (typeof player !== 'undefined' && player && skill
       && !MISS_EXEMPT_SKILLS.has(skill)
-      && !_veryLowFxImpact
-      && game._lastClassHitFxFrame !== game.time
+      && (_veryLowFxImpact ? (!(game._lastClassHitFxFrame >= 0) || Math.abs(game.time - game._lastClassHitFxFrame) >= 4) : game._lastClassHitFxFrame !== game.time)
       && typeof spawnSpriteBurst === 'function') {
     const _hitKey = ({ warrior: 'hit_warrior', rogue: 'hit_rogue', mage: 'hit_mage', archer: 'hit_archer' })[player.cls];
     if (_hitKey) {
@@ -104455,9 +104478,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
       // to a variant DETERMINISTICALLY, so one skill always lands with the
       // same design while different skills read differently. Draw-side LX_FX
       // handling already no-ops until a variant's file decodes.
-      let _hv = 0;
-      for (let _hi = 0; _hi < skill.length; _hi++) _hv = (_hv * 31 + skill.charCodeAt(_hi)) | 0;
-      const _hVar = ((_hv % 3) + 3) % 3;
+      const _hVar = _lxHitVariant(_rankSrc || skill);   // v0.30.1397 class-hit - by the cast skill, round-robin over the kit
       // v0.29.279 — sparks at 50% of the original size (96/72 → 48/36).
       // v0.29.439 — per user: land on the EDGE, scale with the damage dealt,
       // 85% opacity, bigger than before but not by much.

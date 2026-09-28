@@ -61,7 +61,7 @@ const out = await page.evaluate(() => {
     densePull:      trial(0, 20, 'groundSlam', false),
     // Quiet field — worked before and must still work.
     quietField:     trial(0, 2, 'groundSlam', false),
-    // Deepest tier must STILL suppress it.
+    // The deepest tier no longer hides it (per user: the class sparks were "not being used / displayed") - it thins it.
     veryLowFx:      trial(1, 0, 'groundSlam', true),
     // v0.29.491 INVERTED this: basics were the majority of hits a player
     // lands and the gate excluded them, so most players never saw the
@@ -98,6 +98,31 @@ const out = await page.evaluate(() => {
   }
   res.forcedLowFx = keys.slice();
 
+  // the deepest tier THINS it: hits on 8 consecutive frames -> sparks on frames 0 and 4 only
+  pl.cls = 'warrior';
+  g.monsters = []; const t4 = mk(); g.monsters.push(t4);
+  P.lowFx = false; P.veryLowFx = true; g._lastClassHitFxFrame = -1e9; keys = [];
+  const T0 = g.time;
+  for (let f = 0; f < 8; f++) { g.time = T0 + 1000 + f; g._lowFxCache = null; for (let i = 0; i < 12; i++) { try { hit(t4, 100, false, 'groundSlam'); } catch (e) {} } }
+  res.thinned = keys.length; g.time = T0; P.veryLowFx = false;
+  // per user: "different skills should have the varying hit sprites to choose from" - each kit skill, cast (hitMonster
+  // reads the cast skill from _lxRankSrc, as the rank bonus does) and landing as the shared 'aoe' tag
+  const kits = {};
+  for (const c of ['warrior', 'rogue', 'mage', 'archer']) {
+    pl.cls = c;
+    const SK = eval('SKILLS'), ids = Object.keys(SK).filter((id) => SK[id] && SK[id].cls === c);
+    const list = ids.map((id) => {
+      g.monsters = []; const t = mk(); g.monsters.push(t); keys = [];
+      for (let i = 0; i < 40 && !keys.length; i++) { g._lastClassHitFxFrame = -1; g._lowFxCache = null; try { eval('_lxRankSrc = ' + JSON.stringify(id)); hit(t, 100, false, 'aoe'); } catch (e) {} }
+      try { eval('_lxRankSrc = null'); } catch (e) {}
+      return [id, keys[0] || null];
+    });
+    g.monsters = []; const tb = mk(); g.monsters.push(tb); keys = [];
+    for (let i = 0; i < 40 && !keys.length; i++) { g._lastClassHitFxFrame = -1; g._lowFxCache = null; try { hit(tb, 100, false, ({ warrior: 'melee', rogue: 'dagger', mage: 'bolt', archer: 'arrow' })[c]); } catch (e) {} }
+    kits[c] = { list, bare: keys[0] || null };
+  }
+  res.kits = kits;
+
   try { eval('spawnSpriteBurst = savedBurst'); } catch (e) {}
   g.monsters = saved.mon; g.projectiles = saved.proj;
   P.lowFx = saved.low; P.veryLowFx = saved.very; pl.cls = saved.cls; g._lowFxCache = null;
@@ -110,12 +135,20 @@ ok('BOSS FIGHT now shows the class hit spark (this was the reported bug)',
    isHit(out.bossFight), out.bossFight);
 ok('DENSE PULL (>14 mobs) now shows it too', isHit(out.densePull), out.densePull);
 ok('quiet field still shows it (no regression)', isHit(out.quietField), out.quietField);
-ok('the deepest FX tier STILL suppresses it', Array.isArray(out.veryLowFx) && out.veryLowFx.length === 0, out.veryLowFx);
+ok('the deepest FX tier no longer hides it - a boss-fight hit still sparks (per user: not being displayed)', isHit(out.veryLowFx), out.veryLowFx);
+ok('...it THINS it: one spark every 4 frames under that tier (2 across 8 frames of hits)', out.thinned === 2, { sparks: out.thinned });
 ok('basic attacks ALSO spark now (v0.29.491)', isHit(out.basicAttack), out.basicAttack);
 ok('still coalesced to ONE spark per frame across 30 hits', out.sameFrameSparks === 1, { sparks: out.sameFrameSparks });
 for (const c of ['warrior', 'rogue', 'mage', 'archer'])
   ok(`${c} emits its own hit key`, isHit(out.perClass[c]) && out.perClass[c][0].indexOf('hit_' + c) === 0, out.perClass[c]);
 
+for (const c of ['warrior', 'rogue', 'mage', 'archer']) {
+  const K = (out.kits && out.kits[c]) || { list: [] }, ks = K.list.map((e) => e[1]);
+  ok(`${c}: every kit skill lands its class's spark`, ks.length > 0 && ks.every((k) => k && k.indexOf('hit_' + c) === 0), K.list);
+  ok(`${c}: neighbouring kit skills never share a design`, ks.every((k, i) => i === 0 || k !== ks[i - 1]), K.list);
+  ok(`${c}: the kit uses all three designs`, new Set(ks).size === 3, K.list);
+  ok(`${c}: a basic's bare tag lands the base design`, K.bare === 'hit_' + c, K.bare);
+}
 ok('CONTROL: with LX_PERF.lowFx forced ON the spark still fires — the gate really did move off lowFx',
    isHit(out.forcedLowFx), out.forcedLowFx);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
