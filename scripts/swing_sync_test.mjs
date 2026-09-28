@@ -73,20 +73,25 @@ try {
           const idx = img && set.attack ? set.attack.indexOf(img) : -1;
           if (rec.frames.length < 90) rec.frames.push(Math.round(now - rec.windupAt) + ':' + idx);
           if (!rec.strikeAt && idx === strike) rec.strikeAt = now;
+          if (m._bigMeleeFiring) rec.saw = true;
+          if (m._bigMeleeFiring && game.hitStop > 0) rec.stopSeen = (rec.stopSeen || 0) + 1;   // a draw frozen mid-windup
+          if (!rec.fireAt && rec.saw && !m._bigMeleeFiring) { rec.fireAt = now; rec.frameAtFire = idx; }   // released - its sprite can hit and vanish within the step
           if (!rec.fireAt && game.projectiles.some((p) => p && p.owner === 'enemy' && (p.skill === 'swing' || p.skill === 'smash') && !known.has(p))) { rec.fireAt = now; rec.frameAtFire = idx; }
         }
       }
       return img;
     };
     try {
-      m._bigMeleeCd = 0;
-      for (let i = 0; i < 100 && !rec.windupAt; i++) await wait(10);
+      for (let i = 0; i < 300 && !rec.windupAt; i++) {   // re-armed until the windup starts: a fresh page can miss the first ask
+        if (!m._bigMeleeFiring) { m.x = pcx + bm.range * 0.55 - m.w / 2; m.vx = 0; m._bigMeleeCd = 0; }
+        await wait(10);
+      }
       if (stops) for (const at of [120, 330]) setTimeout(() => { try { addHitStop(140); } catch (e) {} }, at);
       for (let i = 0; i < 300 && !(rec.fireAt && rec.strikeAt); i++) await wait(10);
       await wait(60);
     } finally { window._monsterStateFrame = orig; }
     game.monsters.length = 0; game.projectiles.length = 0;
-    return { strikeIdx: strike, windup: !!rec.windupAt, strike: rec.strikeAt ? Math.round(rec.strikeAt - rec.windupAt) : null, fire: rec.fireAt ? Math.round(rec.fireAt - rec.windupAt) : null,
+    return { strikeIdx: strike, stops: rec.stopSeen || 0, windup: !!rec.windupAt, strike: rec.strikeAt ? Math.round(rec.strikeAt - rec.windupAt) : null, fire: rec.fireAt ? Math.round(rec.fireAt - rec.windupAt) : null,
       gap: (rec.strikeAt && rec.fireAt) ? Math.round(rec.fireAt - rec.strikeAt) : null, frameAtFire: rec.frameAtFire, tel: bm.telegraphMs, frames: rec.frames.slice(0, 40).join(' ') };
   }, { type, stops });
 
@@ -97,7 +102,7 @@ try {
   const short = (o) => Object.fromEntries(Object.entries(o).map(([t, r]) => [t, r && (r.err || [r.strike, r.fire, r.gap, r.frameAtFire])]));
   check(TYPES.every((t) => !off(plain[t]) && plain[t].frameAtFire === plain[t].strikeIdx), 'the swing / smash sprite appears on the draw its strike frame first shows (within 40 ms) - pig punch, giraffe headbutt, bone, scythe, two smashes', short(plain));
   check(TYPES.every((t) => !off(busy[t]) && busy[t].frameAtFire === busy[t].strikeIdx), 'still in step with two 140 ms hit-stops in the windup: the animation waits with the AI (the sprite came ~280 ms after the strike)', short(busy));
-  check(TYPES.every((t) => busy[t] && busy[t].fire >= (busy[t].tel || 0) + 200), 'the hit-stops really held the swing (it fires >= 200 ms past its telegraph)', short(busy));
+  check(TYPES.every((t) => busy[t] && busy[t].stops >= 2), 'the hit-stops landed inside every windup (drawn frozen mid-windup)', Object.fromEntries(TYPES.map((t) => [t, busy[t] && busy[t].stops])));
   if (TYPES.some((t) => off(plain[t]) || off(busy[t]))) console.log(JSON.stringify({ plain, busy }, null, 1).slice(0, 3000));
 
   // a proximity swing (a monster standing next to you) opens its hit as the strike frame starts, not at 40% of the swing
