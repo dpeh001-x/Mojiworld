@@ -142,6 +142,9 @@ const r = await page.evaluate(() => {
     columnStrike: { dmgMul: 1.25, width: 120, range: 580, cdMs: 7400, telegraphMs: 720, color: '#aa66ff', sprite: 'fx_col_zodiac' } });
   // a boss with NO telegraph art: zone still exists, draw must not throw
   // an ARTLESS zone must paint NOTHING now — not a fallback rectangle
+  // v0.30.x - every column caster has its own warning now (per user, "Add warning pillars"; the Master Conductor got
+  // his), so there is no artless caster left to borrow: take his entry out of LX_FX for this block and put it back.
+  const _tgStash = LX_FX['tg_col_pqConductor']; delete LX_FX['tg_col_pqConductor'];
   {
     const t = monsterTypes.pqConductor || {};
     const m = Object.assign({}, t, { type: 'pqConductor', name: t.name || 'pqConductor',
@@ -166,6 +169,7 @@ const r = await page.evaluate(() => {
     for (let i = 0; i < 80 && (m._columnFiring || m._columnT > 0); i++) { try { updateMonsters(16); } catch (e) {} }
   }
   out.noArtReady = !!(LX_FX && LX_FX['tg_col_pqConductor']);
+  if (_tgStash) LX_FX['tg_col_pqConductor'] = _tgStash;
 
   game.monsters.length = 0; game.projectiles.length = 0;
   return out;
