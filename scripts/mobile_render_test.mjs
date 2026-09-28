@@ -65,10 +65,12 @@ const safeArea = html.includes('body { padding: env(safe-area-inset-top) env(saf
 const zoomClamp = html.includes('var maxL = Math.max(0, p.clientWidth / z - el.offsetWidth);');
 const uiScaleStamp = html.includes('game._uiScale = _uk;');
 const bossPlate = html.includes('const barW = Math.min(660 * _uiK, W - 120)');
-const dnScale = html.includes('const baseSize = ((d.size || 14) + 4) * _dnUiK;');
+const dnScale = html.includes('const baseSize = ((d.size || 14) + 4) * _dnUiK');   // the HUD size multiplies it (since the taken-damage size, a taken figure's LX_DN_TAKEN_SCALE follows)
 const dnTrim = ev.ok && ev.ids === '1,3,4' && html.includes('_lxDnEvict(game.damageNumbers, MAX_DN);');   // oldest plain hits went, order kept
 // v0.30.751 (97cb0f88, B/G numbers) added a front-loaded arrival shake (+ _shx / + _shy) to the same translate; the clamp is unchanged
-const dnEdge = /ctx\.translate\(Math\.max\(28, Math\.min\(W - 28, sx\)\)[^;]*d\.y/.test(html);
+// the taken-damage size made the margin per number (_dnEdge): still 28 px for every number, wider only for a grown taken figure
+const dnEdge = /ctx\.translate\(Math\.max\(28, Math\.min\(W - 28, sx\)\)[^;]*d\.y/.test(html)
+  || (/ctx\.translate\(Math\.max\(_dnEdge, Math\.min\(W - _dnEdge, sx\)\)[^;]*d\.y/.test(html) && html.includes('const _dnEdge = d._tkBig ? Math.max(28, baseSize * 1.5) : 28;'));
 console.log(JSON.stringify({ ...r, safeArea, zoomClamp, uiScaleStamp, bossPlate, dnScale, dnTrim, dnEdge }));
 const checks = [
   ['body.cinematic follows the death overlay', r.cineIdle === false && r.cineOn === true && r.cineOff === false, `${r.cineIdle}/${r.cineOn}/${r.cineOff}`],
