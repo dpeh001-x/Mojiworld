@@ -90,8 +90,8 @@ try {
       p._noEvasion = true; place(p); const hp0 = player.hp, n0 = game.particles.length;
       await frames(3);
       const violet = game.particles.slice(n0).filter((q) => q.color === '#b04cff' || q.color === '#e3b8ff').length;
-      const sprite = (game.smoothFx || []).some((f) => f.type === 'spriteBurst' && f.spriteKey === 'mourn_burst');
-      return { lost: Math.round(hp0 - player.hp), bursts: bursts.slice(), nums: taken(), violet, sprite, w: p.w };
+      const sb = (game.smoothFx || []).find((f) => f.type === 'spriteBurst' && f.spriteKey === 'mourn_burst'), sprite = !!sb;
+      return { lost: Math.round(hp0 - player.hp), bursts: bursts.slice(), nums: taken(), violet, sprite, size: sb ? sb.size : 0, w: p.w };
     };
     const pc = () => ({ x: player.x + player.w / 2, y: player.y + player.h / 2 });
     const out = {};
@@ -108,6 +108,9 @@ try {
     'a direct hit bursts purple: one purple number, the purple burst art and violet sparks, no splash on top', JSON.stringify({ lost: D.lost, bursts: D.bursts, nums: D.nums, violet: D.violet, sprite: D.sprite }));
   check(N.lost > 0 && N.bursts && N.bursts.length === 1 && !N.bursts[0].direct && N.nums.some((n) => n.text === 'SPLASH') && N.lost < (D.lost || 0),
     'a ball that fizzles just clear of the player SPLASHES them, for less than a direct hit', JSON.stringify({ lost: N.lost, direct: D.lost, nums: N.nums }));
+  // v0.30.1370 - per user "make the splash burst radius a bit bigger": the blast (and its art, drawn at 2x the radius) reaches
+  // 1.3x the ball's size, floor 70 px
+  check(D.size && Math.abs(D.size - 2 * Math.max(70, Math.round(D.w * 1.3))) <= 1, 'the blast reaches 1.3x the ball (the burst art spans it)', `ball ${D.w} px -> burst ${D.size} px (want ${2 * Math.max(70, Math.round((D.w || 0) * 1.3))})`);
   check(Fl.bursts && Fl.bursts.length === 1 && !Fl.bursts[0].direct && Fl.lost === 0 && Fl.violet >= 6,
     'a ball that drops onto the ground bursts there (out of reach: no damage)', JSON.stringify(Fl));
   check(Fa.bursts && Fa.bursts.length === 1 && Fa.lost === 0 && !(Fa.nums || []).length, 'a burst 250 px away splashes nobody', JSON.stringify({ lost: Fa.lost, nums: Fa.nums }));
