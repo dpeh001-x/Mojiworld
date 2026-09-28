@@ -76,8 +76,10 @@ const r = await page.evaluate(async () => {
 
 // the spawn sites, read from the shipped file rather than trusted
 const { readFileSync } = await import('node:fs');
-const src = readFileSync('mojiworld_game.html', 'utf8');
-const enemyFireSpawns = (src.match(/owner: 'enemy', skill: 'fire'/g) || []).length;
+const src = readFileSync(process.env.MOJI_GAME_FILE || 'mojiworld_game.html', 'utf8');
+// v0.30.601 (4797ae92) tags zodiac shots with _zodiacSign/_zodiacAttacker between owner
+// and skill, so match one projectile literal (one line) holding both, in either order.
+const enemyFireSpawns = (src.match(/^[^\n]*(?:owner: 'enemy'[^\n]*skill: 'fire'[,\s}]|skill: 'fire'[,\s}][^\n]*owner: 'enemy')[^\n]*$/gm) || []).length;
 
 ok('the ember sprite is registered for the enemy fire key and decoded',
   r.art.registered && r.art.ready && /m_ariesember/.test(r.art.src), r.art);

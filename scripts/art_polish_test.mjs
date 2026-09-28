@@ -25,12 +25,19 @@ try {
     const sleep = (ms) => new Promise((res) => setTimeout(res, ms)); const out = {};
     try { localStorage.setItem('mojiworld_prologue_seen', '1'); _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+    // v0.30.1196 (9e6f0fcf) lazy-art: the image hold is on for local builds too and opens only when the title menu
+    // is up. This suite skips the menu, so open the hold the way the menu does (a far map's backdrop then loads
+    // when loadMap wants it).
+    try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}
     player.cls = 'warrior'; player.level = 60; player._tutorialSeen = true; player._storyBeatsSeen = new Proxy({}, { get: () => true });
     try { LX_PERF.veryLowFx = false; } catch (e) {}
     // R1 — what the bake draws for a 4:3 plate and for a 16:9 one
     const bake = async (map) => {
       loadMap(map, 300); await sleep(1500);
-      const img = _pickBGImage(); for (let i = 0; i < 60 && !(img && img.naturalWidth); i++) await sleep(100);
+      // v0.30.1196 (9e6f0fcf) lazy-art: a far map's backdrop is parked until wanted, and _pickBGImage answers only
+      // once it has loaded - so want the map's own plate and re-pick while it streams in
+      try { const bi = BG_IMAGES[game.mapData.bg]; if (bi && typeof _lxWantImg === 'function') _lxWantImg(bi, true); } catch (e) {}
+      let img = _pickBGImage(); for (let i = 0; i < 300 && !(img && img.naturalWidth && (!BG_IMAGES[game.mapData.bg] || img === BG_IMAGES[game.mapData.bg])); i++) { await sleep(100); img = _pickBGImage(); }
       if (!img || !img.naturalWidth) return { map, err: 'no plate' };
       delete img._lxBgS; const calls = []; const P = CanvasRenderingContext2D.prototype, _di = P.drawImage;
       P.drawImage = function (...a) { if (a[0] === img) calls.push(a.slice(1).map((v) => Math.round(v))); return _di.apply(this, a); };
@@ -51,7 +58,10 @@ try {
       window._lxTintBake = function (img, f) { seen.tint.push(f); return _tb.apply(this, arguments); };
       window._txtSprite = function (t) { seen.glyph.push(t); return _ts.apply(this, arguments); };
       l.hitFlash = 0; l.freezeTimer = l.burnTimer = l.stunTimer = 0;
-      try { const sx = l.x - game.camera.x, sy = l.y - (game.camera.y || 0); ctx.save(); drawMonster(l); ctx.restore(); } catch (e) { seen.err = e.message; }
+      // the arms spread by Octobaby's width (m.w * 0.85), and at today's size the far arm lands past the canvas edge,
+      // where drawMonster culls it before any art - centre the camera on each arm while it draws
+      const _cam = game.camera.x; game.camera.x = Math.round(l.x + l.w / 2 - W / 2);
+      try { ctx.save(); drawMonster(l); ctx.restore(); } catch (e) { seen.err = e.message; } finally { game.camera.x = _cam; }
       out.legs[l.type] = { tint: seen.tint.filter(Boolean)[0] || null, glyph: seen.glyph.find((g) => /[☠❄🔒⚡]/u.test(g)) || null, err: seen.err };
     }
     window._lxTintBake = _tb; window._txtSprite = _ts;

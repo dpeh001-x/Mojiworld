@@ -39,7 +39,12 @@ await page.waitForTimeout(4000);
 
 const r = await page.evaluate(async () => {
   const out = {};
-  out.badge = (document.body.innerText.match(/build v0\.[\d.]+/) || [])[0] || null;
+  // v0.30.434 (f0d9f726): the badge NUMBER is resolved live from GitHub; a local page
+  // reads "build - local (animator vX)". The file's own version now lives in data-anim
+  // (bumped on every animator change), so that is what must have moved.
+  { const bb = document.getElementById('lx-build-badge');
+    const v = bb && bb.getAttribute('data-anim');
+    out.badge = v && (bb.textContent || '').includes(v) ? 'build ' + v : null; }
   const A = window.__app;
   out.hasApp = !!A;
   if (!A) return out;

@@ -64,6 +64,20 @@ try {
       _applyEquippedBoons();
       try { if (typeof _detectActiveSynergies === 'function') _detectActiveSynergies(); } catch (e) {}
     };
+    // 2026-09-28 triage (v0.30.1271) - the window is now PINNED. It used to read the combo meter and the crit dice
+    // along with the boon: 200 swings climb game.comboMult toward x5, cross the 50-hit +50% comboAtk buff (8 s, drained
+    // by the live rAF loop running under the awaits) and the 100-hit guaranteed crits, stack the crit-streak bonus
+    // (+3% a chained crit, to +15%) and every crit came from an
+    // unseeded Math.random. Paired builds read identically (ATK 211 / 431 / 232 on v0.30.1271 and on this suite's
+    // era), yet single runs swung Iron Muscles between +7.8% and +19.8% against an 11% cap and, now and then,
+    // collapsed one whole window - the sweep logged Keen Edge at -27.8%, a rerun at -6.3%. Swing i of every window
+    // now draws from the same seed (1000 + i) and starts from an empty combo and crit streak (the same pinned harness
+    // reads Keen Edge +103.2% / Iron Muscles +9.8% on v0.30.1271 AND on the era build - ATK x2.04 / x1.0995), so the ratio is the boon's alone.
+    const _rand = Math.random;
+    const seed = (s) => { let a = s >>> 0; Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+    const pinCombo = () => { game.combo = 0; game.comboTimer = 0; game.comboMult = 1; game.critStreak = 0; game.critStreakTimer = 0;
+      player.buffs.comboAtk = 0; player.buffs.comboXp = 0; player._guaranteedCrit = 0; };
     const dps = async (cls, swings) => {
       game.monsters.length = 0;
       const d = spawnMonster(player.x + 60, player.y, 'slime', false, false);
@@ -73,12 +87,14 @@ try {
       for (let i = 0; i < swings; i++) {
         d.maxHp = d.currentHp = HP0; d.def = 0; d.evasion = 0; d.freezeTimer = 0; d.burnTimer = 0;
         d.x = player.x + 60; d.y = player.y;
+        pinCombo(); seed(1000 + i);
         player.skillCooldowns = {}; player.mp = 9e6; player.facing = 1;
         try { castSkill(basic); } catch (e) {}
         for (let f = 0; f < 12; f++) { game.time++; try { updatePlayer(16); updateMonsters(16); updateProjectiles(16); } catch (e) {} }
         dealt += (HP0 - d.currentHp);
         if (i % 40 === 39) await new Promise((r) => setTimeout(r, 2));
       }
+      Math.random = _rand;
       return dealt / swings;
     };
 

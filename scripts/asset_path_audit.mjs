@@ -60,7 +60,18 @@ for (const F of FILES) {
     const lineStart = src.lastIndexOf('\n', m.index) + 1;
     const before = src.slice(lineStart, m.index);
     const inComment = before.includes('//') || /^\s*\*/.test(before);
-    missingLiteral.push({ file: F, line: lineOf(m.index), path: p, inComment });
+    // Code parked behind an early `return;` and marked `eslint-disable-next-line
+    // no-unreachable` never runs either: _loadHero (legacy hero sheets, disabled
+    // v0.25.449, "drop the teen_*.webp sheets back ... and remove the early-return")
+    // still names Sprites/character/hero/teen_idle.webp. A hit counts as dead only
+    // while the block holding the marker is still open at the hit.
+    let dead = false;
+    const mk = src.lastIndexOf('eslint-disable-next-line no-unreachable', m.index);
+    if (mk >= 0 && m.index - mk < 8000) {
+      let depth = 0; dead = true;
+      for (let i = mk; i < m.index; i++) { const c = src[i]; if (c === '{') depth++; else if (c === '}' && --depth < 0) { dead = false; break; } }
+    }
+    missingLiteral.push({ file: F, line: lineOf(m.index), path: p, inComment, dead });
   }
 
   // --- 2. concatenated:  'Sprites/x/' + id + '.png' -------------------------
@@ -92,8 +103,9 @@ console.log('=== BUILT PATHS whose directory has ZERO files of that extension ==
 if (!brokenPattern.length) console.log('  (none)');
 for (const b of brokenPattern) console.log(`  ${b.file}:${b.line}  ${b.dir}/*.${b.wants}  -> dir has [${b.counts}]`);
 
-const inCode = missingLiteral.filter(m => !m.inComment);
+const inCode = missingLiteral.filter(m => !m.inComment && !m.dead);
 const inDocs = missingLiteral.filter(m => m.inComment);
+const inDead = missingLiteral.filter(m => !m.inComment && m.dead);
 console.log(`\n=== LITERAL paths in CODE with no file on disk ===`);
 if (!inCode.length) console.log('  (none)');
 const byDir = new Map();
@@ -112,5 +124,9 @@ if (inDocs.length) {
   console.log(`\n=== (informational) ${inDocs.length} more sit inside comments — asset requests / notes, not requests ===`);
   for (const m of inDocs.slice(0, 6)) console.log(`  ${m.file}:${m.line}  ${m.path}`);
 }
-console.log(`\nin-code missing: ${inCode.length}   broken-pattern dirs: ${brokenPattern.length}   (in-comment, ignored: ${inDocs.length})`);
+if (inDead.length) {
+  console.log(`\n=== (informational) ${inDead.length} more sit in code marked unreachable — never requested ===`);
+  for (const m of inDead.slice(0, 6)) console.log(`  ${m.file}:${m.line}  ${m.path}`);
+}
+console.log(`\nin-code missing: ${inCode.length}   broken-pattern dirs: ${brokenPattern.length}   (in-comment, ignored: ${inDocs.length}; unreachable, ignored: ${inDead.length})`);
 process.exit((inCode.length || brokenPattern.length) ? 1 : 0);

@@ -5,7 +5,8 @@
 // crazy burst the longer the time + the more damage taken" and "ensure no cut-offs of the sprite
 // edges". Checked, through the real paths:
 //   A. the bank: only while armed, only HP actually lost on a hit - never a heal, never a self-cost
-//   B. the model: 6x at zero, 16x for a full hold, 40x with a full health bar taken as well
+//   B. the model: 5x at zero, 15x for a full hold, 45x with a full health bar taken as well (v0.30.788, 1fd9a21d:
+//      the user's Skill Editor patch set LX_DAWN to 5 / 10 / 2 - it was 6 / 10 / 1.5 when this suite was written)
 //   C. the burst: a full charge out-damages a panic release by the model's ratio, and reaches further
 //   D. the support half survives: full heal, 15s party shield (20s at rank 10), cooldown at release
 //   E. death voids the stance; the armed banner reads the charge
@@ -151,8 +152,9 @@ ok('A. HP lost without a hit (a skill cost) is never banked', r.afterCost === r.
 ok('A. the armed banner reads the charge', /Dawn \d+%/.test(r.banner || ''), r.banner);
 ok('A. the rune ward draws under the paladin while armed', r.auraDraws > 0, r.auraDraws);
 const M = r.model;
-ok('B. 6x at zero, 16x for a full hold, 15x for a full health bar taken, 40x for both', M.zero === 6 && M.hold === 16 && M.tank === 15 && M.both === 40, JSON.stringify(M));
-ok('B. both halves cap: holding past 10s or overfilling adds nothing', M.longer === 16 && M.overfull === 40 && Math.abs(M.fullC - 1) < 1e-9, JSON.stringify(M));
+// v0.30.788 (1fd9a21d) - the user's patch retuned LX_DAWN to base 5 / time +10 / damage amp x(1 + 2d): 5x, 15x, 15x, 45x.
+ok('B. 5x at zero, 15x for a full hold, 15x for a full health bar taken, 45x for both', M.zero === 5 && M.hold === 15 && M.tank === 15 && M.both === 45, JSON.stringify(M));
+ok('B. both halves cap: holding past 10s or overfilling adds nothing', M.longer === 15 && M.overfull === 45 && Math.abs(M.fullC - 1) < 1e-9, JSON.stringify(M));
 const ratio = r.high.near / Math.max(1, r.low.near), want = r.high.mul / r.low.mul;
 ok('C. a full charge out-damages a panic release by the model ratio', Math.abs(ratio / want - 1) < 0.2, `damage x${ratio.toFixed(2)} vs model x${want.toFixed(2)} (${r.low.near} -> ${r.high.near})`);
 ok('C. the charged burst reaches a foe at 450px; the panic release does not', r.high.far > 0 && r.low.far === 0, `low ${r.low.far}, high ${r.high.far}`);
@@ -160,7 +162,10 @@ ok('D. release (through castSkill, MP under cost): full heal, 15s shield, cooldo
   r.high.healed && r.high.shield === 15000 && r.high.cd && r.high.disarmed && r.high.emptied, JSON.stringify(r.high));
 ok('D. rank 10: 20s shield and a x1.2 Dawnbreak', r.r10.shield === 20000 && r.r10bonus && r.r10bonus.burstMul === 1.2 && Math.abs(r.r10.near / r.high.near - 1.2) < 0.2, `shield ${r.r10.shield}, near ${r.high.near} -> ${r.r10.near}`);
 ok('E. death voids the stance and everything it stored', !r.death.armed && r.death.stored === 0, JSON.stringify(r.death));
-ok('the description teaches the charge', /DAWN CHARGE/.test(r.desc) && /40×/.test(r.desc), '');
+// v0.30.785 (3c51eff1) - the description now splits the full-charge total the way the code does (a 0.7 detonation
+// plus two 0.15 after-waves, performAround in SKILL_FN.crusader_ult), so it quotes 31.5x and 6.75x instead of one 45x.
+const _dN = (x) => String(+x.toFixed(2)) + '×';
+ok('the description teaches the charge', /DAWN CHARGE/.test(r.desc) && r.desc.includes(_dN(M.both * 0.7)) && r.desc.includes(_dN(M.both * 0.15)), `${_dN(M.both * 0.7)} / ${_dN(M.both * 0.15)}`);
 ok('all three sets are animated fx keys', r.anim, '');
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 

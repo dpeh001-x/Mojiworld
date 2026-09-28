@@ -65,14 +65,20 @@ ok('town portals match the Ctrl-editor bake exactly',
     { x: 1479, dest: 'everdawn_megamall', name: '⬥ Everdawn Megamall', y: 480 },
     { x: 2735, y: 480, dest: 'forest', name: '◀ Emerald Thicket' },
   ]), JSON.stringify(tables.portals));
-ok('Apotheosis +30%: 7.8 / 9.1 / 10.4 / 9.75, flat 78',
-  tables.apo && tables.apo.fire.mul === 7.8 && tables.apo.ice.mul === 9.1
-  && tables.apo.lightning.mul === 10.4 && tables.apo.void.mul === 9.75
-  && tables.apo.fire.flat === 78, JSON.stringify(tables.apo));
-ok('Krook is sturdier and deadlier: DEF 125 -> 375, ATK 455 -> 590',
-  tables.krook.def === 375 && tables.krook.atk === 590, JSON.stringify(tables.krook));
+// v0.30.814 (075d3b43) - the user's Skill Editor patch retuned all four catastrophes (was 7.8 / 9.1 / 10.4 / 9.75, flat 78).
+ok('Apotheosis: 7.5 / 7 / 7.2 / 8, flat 38 / 38 / 48 / 159',
+  tables.apo && tables.apo.fire.mul === 7.5 && tables.apo.ice.mul === 7
+  && tables.apo.lightning.mul === 7.2 && tables.apo.void.mul === 8
+  && tables.apo.fire.flat === 38 && tables.apo.ice.flat === 38 && tables.apo.lightning.flat === 48 && tables.apo.void.flat === 159, JSON.stringify(tables.apo));
+// v0.30.351 (a8177142) - "seven boss DEF values set by hand off the audit": Krook DEF 375 -> 120. The ATK half stands.
+ok('Krook is deadlier: ATK 455 -> 590, DEF hand-set to 120',
+  tables.krook.def === 120 && tables.krook.atk === 590, JSON.stringify(tables.krook));
 
-// ---- Deadeye rebound: a lone target takes the bounces -----------------------
+// ---- Deadeye Protocol: a lone target takes the volley ---------------------------
+// v0.30.610 (99afedd3, per user) revamped Deadeye Protocol: the homing 'gale' rounds with 3 rebounds are gone, and a
+// press inside its 8 s window fires a volley of 5 homing SINGLE-TARGET rounds (p.onlyTarget; 7 on a Deadeye-marked
+// foe). The v0.30.345 ask this protected - the ult pours real damage into one foe - is tested on that volley now.
+// (Before this update the hit check below passed on '0 shots -> 0 hits', i.e. vacuously.)
 const deadeye = await page.evaluate(async () => {
   loadMap('forest', 300);
   await new Promise((r) => setTimeout(r, 1500));
@@ -89,27 +95,29 @@ const deadeye = await page.evaluate(async () => {
   const px = dummy.x, py = dummy.y;
   let hits = 0;
   const orig = window.hitMonster;
-  window.hitMonster = function (m, d, c, sk) { if (m === dummy && sk === 'gale') hits++; return orig.apply(this, arguments); };
-  let shots = 0;
-  const origPush = game.projectiles.push.bind(game.projectiles);
-  const before = game.projectiles.length;
+  window.hitMonster = function (m, d, c, sk) { if (m === dummy && sk === 'marksman_ult') hits++; return orig.apply(this, arguments); };
+  // the rounds are scheduled one line-gap apart (scheduleSkillTimer), so collect them over the frames, not at cast
+  const seen = new Set(); let single = true;
+  const scan = () => { for (const p of game.projectiles) if (p && p.skill === 'marksman_ult' && p.owner === 'player' && !seen.has(p)) {
+    seen.add(p); if (p.homing !== dummy || !p.onlyTarget) single = false; } };
   try { castSkill('marksman_ult'); } catch (e) { window.hitMonster = orig; return { err: String(e).slice(0, 140) }; }
-  shots = game.projectiles.filter((p) => p && p.skill === 'gale' && p.owner === 'player').length;
-  const sample = game.projectiles.find((p) => p && p.skill === 'gale');
-  const hasRebound = sample ? (sample.rebound | 0) : 0;
   for (let i = 0; i < 300; i++) {
     await new Promise((r) => requestAnimationFrame(r));
+    scan();
     dummy.currentHp = dummy.maxHp; dummy.x = px; dummy.y = py; dummy.vx = 0; dummy.vy = 0;
-    if (!game.projectiles.some((p) => p && p.skill === 'gale')) break;
+    if (i > 60 && !game.projectiles.some((p) => p && p.skill === 'marksman_ult')) break;
   }
+  const shots = seen.size;
+  player._protocolUntil = 0;   // close the Overclock window so it cannot swallow the mage casts below
+  for (let i = 0; i < 5; i++) await new Promise((r) => requestAnimationFrame(r));
   window.hitMonster = orig;
-  return { shots, hits, hasRebound };
+  return { shots, hits, single };
 });
-ok('Deadeye rounds carry 3 rebounds', !deadeye.err && deadeye.hasRebound === 3,
-  deadeye.err || `rebound field = ${deadeye.hasRebound}`);
-ok('a LONE target takes far more hits than shots fired — the bounces land',
-  !deadeye.err && deadeye.hits >= deadeye.shots * 2,
-  `${deadeye.shots} shots -> ${deadeye.hits} hits (pre-fix: hits == shots, pierce sails through once)`);
+ok('Deadeye Protocol: a press fires a volley of 5 single-target rounds locked on the foe', !deadeye.err && deadeye.shots === 5 && deadeye.single,
+  deadeye.err || `${deadeye.shots} rounds, all locked on the dummy: ${deadeye.single}`);
+ok('a LONE target takes every round of the volley',
+  !deadeye.err && deadeye.shots > 0 && deadeye.hits >= deadeye.shots,
+  `${deadeye.shots} rounds -> ${deadeye.hits} hits`);
 
 // ---- Krook stomps, deterministic --------------------------------------------
 const stomp = await page.evaluate(async () => {
@@ -160,8 +168,14 @@ const mage = await page.evaluate(async () => {
   player.mp = 99999; player.skillCooldowns = {};
   game.hazards.length = 0;
   try { castSkill('sage_meteorshower'); } catch (e) { return { err: 'sage: ' + String(e).slice(0, 100) }; }
-  await new Promise((r) => setTimeout(r, 900));
-  const sageMul = (game.hazards.find((h) => h && typeof h._sageDmgMul === 'number') || {})._sageDmgMul || null;
+  // 2026-09-28 triage - poll each frame instead of one read at 900 ms. The five columns erupt 110 ms apart and each
+  // lives 16 frames (was 45 before the Pyre Columns remake), so the last one is gone by ~700 ms of game time: the
+  // fixed wait read a corpse (null) whenever the headless frame rate kept up.
+  let sageMul = null;
+  for (let i = 0; i < 120 && sageMul == null; i++) {
+    await new Promise((r) => requestAnimationFrame(r));
+    sageMul = (game.hazards.find((h) => h && typeof h._sageDmgMul === 'number') || {})._sageDmgMul || null;
+  }
   player.master = 'elementalist'; player.skillCooldowns = {}; player.mp = 99999;
   game.hazards.length = 0;
   try { castSkill('elementalist_cascade'); } catch (e) { return { sageMul, err: 'casc: ' + String(e).slice(0, 100) }; }
@@ -170,8 +184,10 @@ const mage = await page.evaluate(async () => {
   const cascMul = (game.hazards.find((h) => h && typeof h._sageDmgMul === 'number') || {})._sageDmgMul || null;
   return { sageMul, cascMul };
 });
-ok('Pyre Columns lane multiplier is 3.9 (+30%)', mage.sageMul === 3.9, `got ${mage.sageMul}${mage.err ? ' · ' + mage.err : ''}`);
-ok('Prismatic Cascade pyre leg is 2.9 (+32%)', mage.cascMul === 2.9, `got ${mage.cascMul}${mage.err ? ' · ' + mage.err : ''}`);
+// v0.30.785 (3c51eff1) - the user's Skill Editor patch: Pyre Columns lane 3.9 -> 6.
+ok('Pyre Columns lane multiplier is 6', mage.sageMul === 6, `got ${mage.sageMul}${mage.err ? ' · ' + mage.err : ''}`);
+// v0.30.814 (075d3b43) - the user's Skill Editor patch: Prismatic Cascade pyre leg 2.9 -> 3.5.
+ok('Prismatic Cascade pyre leg is 3.5', mage.cascMul === 3.5, `got ${mage.cascMul}${mage.err ? ' · ' + mage.err : ''}`);
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 
 await browser.close(); server.kill();

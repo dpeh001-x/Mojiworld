@@ -63,8 +63,11 @@ const r = await ev(() => {
   const atkRange = _boonRangeText(atk); player.level = lv0;
   const rmin = Math.min(...rolls), rmax = Math.max(...rolls);
   // the panel: an equipped Lifesteal at roll 15 prints its numbers in percent
-  const hadBoons = player.boons, hadEq = player.boonsEquipped;
+  const hadBoons = player.boons, hadEq = player.boonsEquipped, hadLv = player.level;
   player.boons = [{ id: 'ls', roll: 15, rerolls: 0 }]; player.boonsEquipped = [0];   // the panel reads equipped SLOT indices
+  // v0.30.717 (6f900ceb) - boon slots are earned by level (Lv 25 / 50 / 75); a fresh Lv 1 hero has none, so slot 0
+  // rendered as a padlock and the roll line this check reads was never drawn. Lv 25 opens the first slot.
+  player.level = Math.max(25, player.level | 0);
   let panelHtml = '';
   try {
     if (typeof openLevelUpPanel === 'function') openLevelUpPanel();   // builds the loadout DOM (#lp-boons) lazily
@@ -72,7 +75,7 @@ const r = await ev(() => {
     const el = document.getElementById('lp-boons'); panelHtml = el ? el.innerHTML : '';
     if (typeof closeAllModals === 'function') closeAllModals();
   } catch (e) { panelHtml = 'ERR ' + e; }
-  player.boons = hadBoons; player.boonsEquipped = hadEq;
+  player.boons = hadBoons; player.boonsEquipped = hadEq; player.level = hadLv;
   return { has, bad, lsVal, lsRange, skinRange, mirrorRange, band, rmin, rmax, atkRange, burn2: burn.fmt(2), burn3: burn.fmt(3), mp5: mp.fmt(5), panelHas: /Roll 1\.5%/.test(panelHtml) && /0\.5%.{1,3}1\.5%/.test(panelHtml), panelRaw: /range 5-15/.test(panelHtml), panelLen: panelHtml.length };
 });
 ok('the shared boon value/range formatters exist', !r.err && r.has, r.err || '');

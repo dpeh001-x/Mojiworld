@@ -54,7 +54,14 @@ for (const d of DIRS) {
 }
 
 const broken  = rows.filter(r => r.err);
-const lowRes  = rows.filter(r => !r.err && Math.max(r.w, r.h) < MIN_PX);
+// Small marks that are only ever drawn SMALLER than MIN_PX: the rule is about art
+// scaled UP, so these answer to their own floor instead - longest edge >= 4x the
+// largest size the game draws them at (2x headroom at DPR 2). Keep the draw
+// size in sync with the game when one changes.
+//   fx/safezone_shield.webp - v0.30.582 (a4f1a07a): 128px by design
+//     (scripts/gen_safezone_icon.mjs asserts it), drawn at Math.min(24, z.h * 0.42).
+const SMALL_OK = { 'fx/safezone_shield.webp': 24 };
+const lowRes  = rows.filter(r => !r.err && Math.max(r.w, r.h) < (SMALL_OK[`${r.d}/${r.f}`] ? SMALL_OK[`${r.d}/${r.f}`] * 4 : MIN_PX));
 const tiny    = rows.filter(r => !r.err && r.kb < MIN_KB);
 const opaque  = rows.filter(r => !r.err && r.alphaMin === 255 && !OPAQUE_OK.test(r.d));
 
