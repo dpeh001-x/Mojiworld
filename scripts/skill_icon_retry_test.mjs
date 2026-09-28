@@ -25,10 +25,11 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+import { fileURLToPath } from 'node:url';
+const ROOT = process.env.SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require(ROOT + '/node_modules/playwright-core');
-const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
+const FILE = 'mojiworld_game.html';   // serve.js serves MOJI_GAME_FILE (inherited env) at this path
 const PORT = Number(process.env.PORT || 13131);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT });
 await new Promise((r) => setTimeout(r, 1200));
@@ -38,7 +39,7 @@ const browser = await chromium.launch({ channel: 'msedge', headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await page.addInitScript(() => { try { localStorage.clear(); } catch (e) {} });
-  const bad = [], retryUrls = [];
+  const bad = [], retryUrls = [], buffReqs = [];
   page.on('response', (r) => {
     const u = r.url();
     if (!/Sprites\/skills\//.test(u)) return;
@@ -46,6 +47,7 @@ try {
     // expected and must not be counted as real failures - a first run reported 4 and
     // failed its own check on evidence it had manufactured.
     if (r.status() >= 400 && !/__no_such_skill__/.test(u)) bad.push(r.status() + ' ' + u.split('/').pop());
+    if (/__not_a_skill__/.test(u)) buffReqs.push(u.split('/').pop());
     if (/\?r=\d/.test(u)) retryUrls.push(u.split('/').pop());
   });
   await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'load', timeout: 120000 });
@@ -123,14 +125,27 @@ try {
     out.triesUsed = _skillIconTries[victim] | 0;
 
     // -- an id with no art must stop asking ---------------------------------
+    // v0.30.791 (d4981d5e) - _skillIconUrl answers null for any id that is not
+    // in SKILLS without probing ("buff ids fell through to four 404s each"), so
+    // a bare ghost id is never fetched at all and read 0 tries / 'undefined'.
+    // The cap is a property of SKILL ids with no file on disk: register the
+    // ghost as a skill for the probe, then remove it (triage 2026-09-28).
     const ghost = '__no_such_skill__';
-    for (let i = 0; i < 8; i++) {
-      _skillIconUrl(ghost);
-      _skillIconFailAt[ghost] = performance.now() - 99999;   // never wait
-      await sleep(80);
-    }
+    SKILLS[ghost] = { name: 'Ghost', icon: '?', cls: 'warrior', slot: 'x', mp: 0, cd: 0, desc: '' };
+    try {
+      for (let i = 0; i < 8; i++) {
+        _skillIconUrl(ghost);
+        _skillIconFailAt[ghost] = performance.now() - 99999;   // never wait
+        await sleep(80);
+      }
+    } finally { delete SKILLS[ghost]; }
     out.ghostTries = _skillIconTries[ghost] | 0;
     out.ghostStatus = _skillIconStatus[ghost];
+    // ...and a NON-skill id costs nothing: no probe, no status, no request
+    const buffId = '__not_a_skill__';
+    for (let i = 0; i < 4; i++) { _skillIconUrl(buffId); await sleep(40); }
+    out.buffStatus = _skillIconStatus[buffId];
+    out.buffTries = _skillIconTries[buffId] | 0;
 
     // -- the gate must still be latched open --------------------------------
     out.gate = _lxSkillIconGate;
@@ -159,6 +174,9 @@ try {
   ok('IT RETRIES A BOUNDED NUMBER OF TIMES: a missing icon stops asking',
     R.ghostTries <= 3 && R.ghostStatus === 'fail',
     `an id with no file used ${R.ghostTries} tries and settled on '${R.ghostStatus}'`);
+  ok('A NON-SKILL ID IS NEVER PROBED (v0.30.791): no status, no tries, no request',
+    R.buffStatus === undefined && R.buffTries === 0 && buffReqs.length === 0,
+    `status ${R.buffStatus}, tries ${R.buffTries}, requests ${JSON.stringify(buffReqs)}`);
   ok('RETRIES CARRY A CACHE-BUSTER: the retry is not served the cached failure',
     retryUrls.length > 0,
     `retry requests seen: ${JSON.stringify(retryUrls)}`);

@@ -89,7 +89,9 @@ const errs = [];
   const hits = new Map(); let aborted = 0;
   // per user this is not just NPC sprites: backgrounds and icons fault too
   const faultFirst2 = (route) => {
-    const u = route.request().url(); const n = (hits.get(u) || 0) + 1; hits.set(u, n);
+    // a blip is per FILE: since v0.30.386 (b7a317aa) _lxBgRetry re-requests a backdrop as <file>?r=N, and keying on
+    // the full URL aborted every one of those fresh URLs on its first hit - no backdrop could ever recover
+    const u = route.request().url().split('?')[0]; const n = (hits.get(u) || 0) + 1; hits.set(u, n);
     if (n <= 2) { aborted++; route.abort(); } else route.continue();
   };
   await ctx.route('**/Sprites/npc/*.webp', faultFirst2);

@@ -18,7 +18,8 @@ const J = (o) => JSON.stringify(o);
 // the Meltdown's dodge clause is inside the Octobaby AI, reached only from a live boss pattern: read the source
 const src = readFileSync(PAGE, 'utf8');
 check(!/player\.dodgeIframes/.test(src), 'the Meltdown no longer tests dodgeIframes, a field nothing writes');
-check(/_dodging = \(player\._god \|\| player\.invulnerable > 0 \|\|\s*\n\s*\(player\._dashEvadeUntil/.test(src), 'it tests the rogue dash evade window instead');
+// v0.30.1006 (11b93ac6) rebuilt the Meltdown as the obMelt boss-exec case; its dodge clause moved there
+check(/case 'obMelt'[\s\S]{0,900}?player\._dashEvadeUntil && \(game\.time \| 0\) < player\._dashEvadeUntil\)\)\s*\{\s*showToast\('Dodged the Meltdown!'/.test(src), 'it tests the rogue dash evade window instead');
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const boot = async (page) => { await page.waitForFunction(() => { const m = document.getElementById('lo-menu'); return typeof loadState === 'function' && m && getComputedStyle(m).display !== 'none'; }, null, { timeout: 180000 }); };
@@ -47,7 +48,8 @@ try {
     try { _lxBootGateDone = true; } catch (e) {}
     loadMap('forest', 300); await new Promise((r) => setTimeout(r, 900)); game.paused = false; await new Promise((r) => setTimeout(r, 600));
     game.paused = true; const a = game._playMs; await new Promise((r) => setTimeout(r, 900));
-    const b = game._playMs; game.paused = false; await new Promise((r) => setTimeout(r, 900));
+    // headless here runs 2-15 sim frames per 900 ms under load (running read 133-883 ms): poll up to 6 s for it
+    const b = game._playMs; game.paused = false; { const t0 = performance.now(); do { await new Promise((r) => setTimeout(r, 300)); } while (game._playMs - b <= 200 && performance.now() - t0 < 6000); }
     const c = game._playMs; return { paused: b - a, running: c - b };
   });
   check(pm.paused === 0 && pm.running > 200, 'play time stops in the pause menu and runs again after it', J(pm));

@@ -79,11 +79,17 @@ const r = await page.evaluate(async () => {
   try {
     const ks = await caches.keys();
     out.cacheKeys = ks.filter((k) => k.startsWith('mojiworld-assets-'));
+    // v0.30.312 shipped generation v7; sw.js has been bumped on every art
+    // replacement since (v91 at v0.30.1263). Read the live generation from the
+    // served worker and require it to be >= v7 instead of pinning v7 itself.
+    const swSrc = await fetch('sw.js', { cache: 'no-store' }).then((x) => x.text()).catch(() => '');
+    const mm = /const CACHE = '(mojiworld-assets-v([0-9]+))'/.exec(swSrc);
+    out.liveCache = mm ? mm[1] : null; out.liveGen = mm ? +mm[2] : 0;
     // pull one sprite through the SW, then confirm it landed in the v7 cache
     const u = 'Sprites/bosses/zodiac/pounce/leo_0.webp';
     await fetch(u).then((x) => x.blob()).catch(() => null);
     await new Promise((res) => setTimeout(res, 900));
-    const c = await caches.open('mojiworld-assets-v7');
+    const c = await caches.open(out.liveCache || 'mojiworld-assets-v7');
     out.spriteCached = !!(await c.match(new Request(location.origin + '/' + u)) || await c.match(u));
   } catch (e) { out.swErr = String(e).slice(0, 120); }
 
@@ -132,9 +138,9 @@ const r = await page.evaluate(async () => {
 });
 
 ok('boot-phase SW reload guard is armed', r.reloadArmed === true, { reloadArmed: r.reloadArmed });
-ok('the v7 asset cache generation is live (and no stale generations)',
-  Array.isArray(r.cacheKeys) && r.cacheKeys.includes('mojiworld-assets-v7') && r.cacheKeys.length === 1, { cacheKeys: r.cacheKeys, swErr: r.swErr });
-ok('a sprite fetched through the worker lands in the v7 cache', r.spriteCached === true, { spriteCached: r.spriteCached, swErr: r.swErr });
+ok('the shipping asset cache generation (>= v7) is live (and no stale generations)',
+  r.liveGen >= 7 && Array.isArray(r.cacheKeys) && r.cacheKeys.includes(r.liveCache) && r.cacheKeys.length === 1, { liveCache: r.liveCache, cacheKeys: r.cacheKeys, swErr: r.swErr });
+ok('a sprite fetched through the worker lands in the live cache', r.spriteCached === true, { liveCache: r.liveCache, spriteCached: r.spriteCached, swErr: r.swErr });
 ok('contact-loop dials present (130ms base, strike weights 2.2-2.6)',
   r.atkMs === 130 && /2\.2,2\.6,2\.6/.test(r.weights || ''), { atkMs: r.atkMs, weights: r.weights });
 ok('strike frames dwell ~2x+ the windup frames (the "hold these frames" ask)',

@@ -49,7 +49,23 @@ const run = (map) => page.evaluate(async (mapId) => {
   player.cls = 'mage'; player.job = 'warlock'; player.master = 'necromancer';
   player.level = 60; player.mp = player.maxMp = 999; player._god = true;
   for (const k in (player.skillCooldowns || {})) player.skillCooldowns[k] = 0;
-  await new Promise((res) => { let n = 0; const t = () => { game.paused = false; player.vx = 0; if (++n > 60) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  // 5e942d73 (per user: "do not affect monsters that are not seen on the
+  // screen") gates the vacuum to the camera box + 40 px. Standing on the
+  // Abyssal Trench floor the camera bottom is ~140 px under the pool, so the
+  // below-probes (+170/+200) sat OFF SCREEN - under the world floor, even - and
+  // were skipped by that gate, not by the floor guard this suite pins
+  // (traced: camY 1840, probes at y 2447/2477 > 2440). Underwater the hero is
+  // now lifted into open water, 900 px above the floor, and held there so the
+  // camera centres on him and every probe is in view (checked as a premise).
+  const _uw = !!(game.mapData && game.mapData.isUnderwater);
+  // Land: lifted to y 180 (Sauro Slope is one screen tall, camera at 0), so
+  // its below-probe is ON screen too and the LAND control is skipped by the
+  // floor guard it names, not vacuously by the gate (it was at y 637 > 600).
+  const _liftY = _uw ? ((game.mapData.worldHeight || 2400) - 900) : 180;
+  window._svPin = () => { if (_liftY != null) { player.y = _liftY; player.vy = 0; } };
+  await new Promise((res) => { let n = 0, last = null, same = 0; const t = () => { game.paused = false; player.vx = 0; window._svPin();
+    const cyNow = Math.round((game.camera && game.camera.y) || 0); same = (cyNow === last) ? same + 1 : 0; last = cyNow;
+    if ((++n > 60 && same > 10) || n > 600) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
 
   // The unit under test is THE GUARD (`m.y > cy + 12` skips), which applies
   // to every mob type. Three harness generations died to physics noise -
@@ -71,7 +87,7 @@ const run = (map) => page.evaluate(async (mapId) => {
     m.x = px0 + dx - m.w / 2; m.y = py0 + dy - m.h / 2; m.vx = 0; m.vy = 0;
     return m;
   };
-  window._svHold = () => { for (const m of game.monsters) if (m && m._svTag) { m.vx = 0; m.vy = 0; } };
+  window._svHold = () => { window._svPin(); for (const m of game.monsters) if (m && m._svTag) { m.vx = 0; m.vy = 0; } };
   // Offsets sized against the pool ellipse (RX 230 / RY 96) and suck field
   // (RX 430 / RY 300): each probe starts in the suck ring, far enough out
   // that converging to the ellipse rim (where a _noGravity mob stops) moves
@@ -87,6 +103,9 @@ const run = (map) => page.evaluate(async (mapId) => {
   if (!h) return { noPool: true };
   const cx = h.cx, cy = h.y + h.h / 2;
   const d0 = {}, y0 = {};
+  // premise for 5e942d73's gate: every probe inside the camera box + 40 px
+  const _cT = ((game.camera && game.camera.y) || 0) - 40, _cB = ((game.camera && game.camera.y) || 0) + H + 40;
+  const onScreen = game.monsters.filter((m) => m && m._svTag).every((m) => m.y + m.h >= _cT && m.y <= _cB);
   for (const m of game.monsters) if (m._svTag) {
     d0[m._svTag] = Math.round(Math.hypot(cx - (m.x + m.w / 2), cy - (m.y + m.h / 2)));
     y0[m._svTag] = Math.round(m.y - cy);   // premise check: below-mobs really are below at cast time
@@ -94,7 +113,7 @@ const run = (map) => page.evaluate(async (mapId) => {
 
   await new Promise((res) => { let n = 0; const t = () => { game.paused = false; window._svHold(); if (++n > 360) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
 
-  const out = { underwater: !!(game.mapData && game.mapData.isUnderwater), d0, y0, d1: {}, hp: {}, poolAlive: game.hazards.some((x) => x && x.type === 'soul_vortex') };
+  const out = { onScreen, underwater: !!(game.mapData && game.mapData.isUnderwater), d0, y0, d1: {}, hp: {}, poolAlive: game.hazards.some((x) => x && x.type === 'soul_vortex') };
   for (const m of game.monsters) if (m._svTag) {
     out.d1[m._svTag] = Math.round(Math.hypot(cx - (m.x + m.w / 2), cy - (m.y + m.h / 2)));
     out.hp[m._svTag] = m.currentHp;
@@ -106,8 +125,8 @@ const run = (map) => page.evaluate(async (mapId) => {
 
 const uw = await run('abyssalTrench');
 ok('the test map is underwater and the below-mobs really start below (premise)',
-  uw.underwater === true && uw.poolAlive && uw.y0.below > 12 && uw.y0.below2 > 12,
-  { underwater: uw.underwater, poolAlive: uw.poolAlive, y0: uw.y0 });
+  uw.underwater === true && uw.poolAlive && uw.y0.below > 12 && uw.y0.below2 > 12 && uw.onScreen === true,
+  { underwater: uw.underwater, poolAlive: uw.poolAlive, y0: uw.y0, onScreen: uw.onScreen });
 ok('UNDERWATER: a mob below the pool is pulled toward it (the video\'s case)',
   uw.d1.below < uw.d0.below - 40,
   { before: uw.d0.below, after: uw.d1.below, note: 'previous build: parked at the rim forever; a frozen probe stops at the ellipse rim, hence -40' });
@@ -120,7 +139,7 @@ ok('UNDERWATER: the above-mob still converges (regression)',
   uw.d1.above < uw.d0.above - 60, { before: uw.d0.above, after: uw.d1.above });
 
 const land = await run('sauroSlope');
-ok('LAND control: the map is not underwater and the pool lives', land.underwater === false && land.poolAlive, { underwater: land.underwater });
+ok('LAND control: the map is not underwater and the pool lives', land.underwater === false && land.poolAlive && land.onScreen === true, { underwater: land.underwater, onScreen: land.onScreen });
 ok('LAND control: a mob below the pool centre is STILL ignored - the floor guard is untouched',
   Math.abs(land.d1.below - land.d0.below) < 40,
   { before: land.d0.below, after: land.d1.below, note: 'on land, below the pool means under the floor it sits on' });

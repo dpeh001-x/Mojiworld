@@ -27,7 +27,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9421;
+const PORT = Number(process.env.PORT || 9421);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -88,12 +88,15 @@ const R = await page.evaluate(async () => {
   castSkill('darkPulse');
   const near = mk(150), marked = mk(-260);
   run(60, () => { near.currentHp = near.maxHp; marked.currentHp = marked.maxHp; }, null);
+  // dfef3813 (v0.30.x balance, per user): Dark Pulse raises 3 undead, not 5. The bar was "4+ of 5" - the same
+  // 80% of the pack is now ceil(0.8 * pack), read from the live pack rather than pinned.
+  const packN = game.minions.length, need = Math.max(1, Math.ceil(packN * 0.8));
   let assistFrames = 0, total = 0;
   run(60 * 6, (f) => {
     near.currentHp = near.maxHp; marked.currentHp = marked.maxHp;
     near.x = near._px; marked.x = marked._px;
     if (f % 20 === 0) { try { hitMonster(marked, 500, false, 'probe'); } catch (e) {} }
-  }, () => { total++; if (onTgt(marked) >= 4) assistFrames++; });
+  }, () => { total++; if (onTgt(marked) >= need) assistFrames++; });
   const assistPct = +(assistFrames / total * 100).toFixed(1);
 
   // ---- 2. wolf + eagle honour the mark too --------------------------------
@@ -134,6 +137,12 @@ const R = await page.evaluate(async () => {
   // _lxPlayerFocus does not exist on the pre-fix build — treat that as "no
   // focus system" rather than crashing, so the baseline runs to real FAILs.
   const _pf = (typeof _lxPlayerFocus === 'function') ? _lxPlayerFocus() : null;
+  // With 3 undead (dfef3813) the whole pack is standing on B by the time the mark lapses, so ordinary scoring keeps it
+  // there on distance alone and "some went to A" no longer tells a released pack from a held one. Make it tell: move
+  // A beside the pack and B well away (both still in leash). A released pack re-scores and takes A; a held one stays.
+  { const _pk = game.minions.reduce((s2, mn) => s2 + mn.x + mn.w / 2, 0) / Math.max(1, game.minions.length);
+    a4._px = _pk - a4.w / 2 + 30; b4._px = _pk - b4.w / 2 - 320; }
+  run(45, () => { a4.currentHp = a4.maxHp; b4.currentHp = b4.maxHp; a4.x = a4._px; b4.x = b4._px; }, null);
   const afterExpiry = { focus: !!_pf, onA: onTgt(a4), onB: onTgt(b4) };
 
   // ---- 5. a REMOVED (not killed) mark releases the pack -------------------
@@ -148,7 +157,7 @@ const R = await page.evaluate(async () => {
   run(60, () => { g1.currentHp = g1.maxHp; g1.x = g1._px; }, null);
   const ghostHeld = onTgt(ghost);
 
-  return { assistPct, wolfPct, eaglePct, summonStamped, afterExpiry, ghostHeld,
+  return { packN, need, assistPct, wolfPct, eaglePct, summonStamped, afterExpiry, ghostHeld,
            minionCount: game.minions.length };
 });
 await browser.close(); server.kill();
@@ -157,7 +166,7 @@ const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 125) });
 
 ok('the undead pack converges on the marked target', R.assistPct >= 70,
-   `${R.assistPct}% of frames with 4+/5 on the mark (pre-fix: 0%)`);
+   `${R.assistPct}% of frames with ${R.need}+/${R.packN} on the mark (pre-fix: 0%)`);
 ok('the wolf hunts the mark', R.wolfPct >= 60, `${R.wolfPct}% of frames`);
 ok('the eagle shoots the mark', R.eaglePct >= 60, `${R.eaglePct}% of frames`);
 ok('summon hits never stamp a mark (no self-lock)', !R.summonStamped);

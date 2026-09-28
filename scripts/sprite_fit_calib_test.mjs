@@ -16,7 +16,10 @@ const calib = (() => { const a = calibSrc.indexOf('window.LX_ANIM_CALIB = ') + '
 const sOf = (key, st) => { const c = calib[key] && calib[key][st]; return (c && c.s != null) ? c.s : 1; };
 // every v0.30.408 attack scale is gone: the padded types were already sized by _ATK_FRAME_SCALE, and the Ossuary
 // Tyrant's rest frames already match its idle in play (the static audit's "three smallest frames" misread it)
-for (const key of ['pathsBane', 'tombKeeper', 'echoKnight', 'conductorMech', 'ossuaryTyrant']) ok(`calib ${key}.attack.s is 1 (v0.30.408's scale reverted)`, Math.abs(sOf(key, 'attack') - 1) < 0.001, String(sOf(key, 'attack')));
+// tombKeeper left this list at fe2d03eb (animator patch per user: idle/walk 1.56, attack 2.05 - a hand-set
+// calib like forgewight's); the real-attack body check below still guards it against the stacking
+ok('calib tombKeeper.attack.s is its animator-baked 2.05 (fe2d03eb)', Math.abs(sOf('tombKeeper', 'attack') - 2.05) < 0.001, String(sOf('tombKeeper', 'attack')));
+for (const key of ['pathsBane', 'echoKnight', 'conductorMech', 'ossuaryTyrant']) ok(`calib ${key}.attack.s is 1 (v0.30.408's scale reverted)`, Math.abs(sOf(key, 'attack') - 1) < 0.001, String(sOf(key, 'attack')));
 ok('calib forgewight.attack.s is back at its hand-set 1.26', Math.abs(sOf('forgewight', 'attack') - 1.26) < 0.001, String(sOf('forgewight', 'attack')));
 ok('zodiac_cancer carries no walk/attack scale (reverted)', Math.abs(sOf('zodiac_cancer', 'walk') - 1) < 0.001 && Math.abs(sOf('zodiac_cancer', 'attack') - 1) < 0.001, JSON.stringify(calib.zodiac_cancer));
 // --- the served build: real attacks -----------------------------------------------------------------------------

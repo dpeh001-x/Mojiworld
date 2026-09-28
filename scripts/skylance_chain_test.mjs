@@ -43,7 +43,7 @@ await page.evaluate(() => new Promise((res) => { let n = 0;
     const c = document.querySelector('.cls-card'); if (c) c.click();
     const m = document.getElementById('class-select-modal'); if (m) m.style.display = 'none';
     if (++n > 150) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); }));
-await page.evaluate(() => { try { loadMap('sauroSlope'); } catch (e) {} });
+await page.evaluate(() => { try { player._god = true; loadMap('sauroSlope'); } catch (e) {} });
 await page.waitForTimeout(1500);
 
 const wiring = await page.evaluate(() => {
@@ -64,6 +64,8 @@ const cast = await page.evaluate(async (rank10) => {
   spawnMonster(Math.round(player.x) + 200, player.y - 30, 'slime', false);
   const mon = game.monsters[0];
   if (mon) { mon.hp = mon.currentHp = 5e8; mon.maxHp = 5e8; }
+  player._god = true; player._downed = false; player.dragoonSlam = 0;
+  player.hp = Math.max(player.hp, (typeof getMaxHp === 'function' ? getMaxHp() : player.maxHp) | 0);
   await new Promise((r) => { let n = 0; const t = () => { game.paused = false; if (++n > 90) return r(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   out.groundY = Math.round(player.y); out.settled = !!player.onGround;
   if (player.skillCooldowns) player.skillCooldowns.dragoon_skylance = 0;
@@ -74,14 +76,28 @@ const cast = await page.evaluate(async (rank10) => {
   const t0 = performance.now();
   window.performAround = function (...a) { out.impacts.push(Math.round(performance.now() - t0)); return origAround.apply(this, a); };
   let prevY = player.y;
+  out.chain = [];
+  const origChain = window._lxSkyLanceChain;
+  window._lxSkyLanceChain = function (fn, d) {
+    return origChain(function () {
+      out.chain.push({ ms: Math.round(performance.now() - t0), slam: player.dragoonSlam | 0, onGround: !!player.onGround });
+      return fn.apply(this, arguments);
+    }, d);
+  };
   const origFn = SKILL_FNS.dragoon_skylance;
   SKILL_FNS.dragoon_skylance = function (...a) { out.fired = (out.fired | 0) + 1; return origFn.apply(this, a); };
   // Warrior skill keys are HOLD-TO-CHARGE: the cast lands on KEYUP. Holding the
   // key for the whole observation window meant the skill fired after it, and
   // the first cut of this test read zero impacts on a build that works.
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', bubbles: true }));
-  await new Promise((r) => { let n = 0; const t = () => { game.paused = false; if (++n > 18) return r(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  // SIM STEPS, not rAFs (triage 2026-09-28): on a loaded headless run the sim
+  // can sit on one step for many rAFs, and a keydown + keyup that both land
+  // between two steps is never seen as a press - the cast read "fired: 0".
+  // Hold for >= 18 steps (the old intent at ~60 fps), rAF cap as a backstop.
+  const hold0 = game.time;
+  await new Promise((r) => { let n = 0; const t = () => { game.paused = false; if ((game.time - hold0 >= 18 && n > 18) || ++n > 900) return r(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   document.dispatchEvent(new KeyboardEvent('keyup', { key: 'g', code: 'KeyG', bubbles: true }));
+  const obs0 = game.time;
   await new Promise((r) => { let n = 0; const t = () => {
     game.paused = false;
     // an upward jump of >60px while a slam is live, with the player still well
@@ -90,8 +106,9 @@ const cast = await page.evaluate(async (rank10) => {
       out.aborts.push({ ms: Math.round(performance.now() - t0), gap: Math.round(out.groundY - prevY) });
     }
     prevY = player.y;
-    if (++n > 280) return r(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+    if ((game.time - obs0 >= 280 && n > 280) || ++n > 3000) return r(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   SKILL_FNS.dragoon_skylance = origFn;
+  window._lxSkyLanceChain = origChain;
   window.performAround = origAround; window.getSkillLv10 = realLv10;
   game.monsters = [];
   return out;
@@ -105,13 +122,20 @@ const cast = await page.evaluate(async (rank10) => {
 const helper = await page.evaluate(async () => {
   if (typeof _lxSkyLanceChain !== 'function') return { missing: true };
   const out = {};
-  const frames = (n) => new Promise((r) => { let i = 0; const t = () => { game.paused = false; if (++i > n) return r(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  // counts SIM STEPS (game.time), with a rAF cap so a stalled sim cannot hang
+  const frames = (n) => new Promise((r) => { const g0 = game.time; let i = 0; const t = () => { game.paused = false; if (game.time - g0 >= n || ++i > n * 30) return r(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   const savedY = player.y, savedX = player.x, savedVy = player.vy;
   // A: a dive still in flight defers the chain
   let ran = false;
   player.y = savedY - 3000; player.vy = 0; player.onGround = false; player.dragoonSlam = 1;
   _lxSkyLanceChain(() => { ran = true; }, 60);
-  await frames(30);
+  // hold the dive aloft (y re-pinned each rAF, slam flag untouched) for >= 300 ms
+  // of wall clock - the chain's retry is setTimeout, so the window must outlast
+  // its 60 ms + 90 ms polls - and >= 10 sim steps, well inside the 180-step cap.
+  await new Promise((r) => { const g0 = game.time, w0 = performance.now(); let i = 0;
+    const t = () => { game.paused = false; player.y = Math.min(player.y, 0); player.vy = Math.min(player.vy, 0);
+      if ((performance.now() - w0 >= 300 && game.time - g0 >= 10) || ++i > 900) return r(); requestAnimationFrame(t); };
+    requestAnimationFrame(t); });
   out.stillAirborne = !player.onGround;      // the premise of check A
   out.deferredWhileSlamming = !ran;
   // B: it runs as soon as the dive resolves
@@ -142,8 +166,9 @@ ok('...and is not delayed at all when nothing is in flight',
   helper.promptWhenClear === true, { promptMs: helper.promptMs });
 
 ok('a real G press never aborts a dive that has not landed',
-  cast.aborts.length === 0,
-  { aborts: cast.aborts, note: 'measured before the fix: 1 abort at +940ms with the player 126px up' });
+  cast.chain.length >= 1 && cast.chain.every((c) => c.slam === 0),
+  { chain: cast.chain, yJumps: cast.aborts,
+    note: 'every chained dive must fire with the previous slam resolved (slam 0); measured before the fix: 1 abort at +940ms with the player 126px up' });
 
 ok('the G press actually casts the skill', (cast.fired | 0) === 1,
   { fired: cast.fired | 0, settledOnGround: cast.settled,

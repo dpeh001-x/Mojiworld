@@ -91,6 +91,10 @@ const R = await page.evaluate(async () => {
   clearToasts();
   const t2 = performance.now();
   while (performance.now() - t2 < (out.windowMs || 2500) + 350) await frame();
+  // as for the window check above: the Lv 80 jump keeps paying out unlock notices (Lv 20 advancement, Clockwork
+  // Underpass, Mirror Self Trial...) during the wait, and four of them outrank a 'rare' notice, which then WAITS its turn
+  // (v0.30.906) - on the tip it sat in _lxToastWait and this read 0. Clear what the wait raised before the burst.
+  clearToasts();
   const b2 = capToasts();
   for (let i = 0; i < 5; i++) { SKILL_FNS.wildBond(); await frame(); }
   out.rangerBurst = capToasts() - b2;

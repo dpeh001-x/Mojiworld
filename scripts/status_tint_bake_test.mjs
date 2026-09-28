@@ -49,6 +49,14 @@ const r = await page.evaluate(async () => {
   // Some types (snail, sparkling) draw with per-call shimmer/anim noise that
   // would swamp a tint comparison — probe candidates and take the first whose
   // back-to-back draws are pixel-stable.
+  // v0.30.1205 (9d78e8f3) lazy-art2: monster sheets park until a map or a draw asks for them, and v0.30.1196 holds
+  // images until the title menu - so MONSTER_SPRITES is EMPTY here. Release the hold and ask for the anim-less types.
+  try { _lxBootHold.release('menu'); } catch (e) {}
+  const _want = MONSTER_SPRITE_TYPES.filter((k) => !MONSTER_ANIMS[k]).slice(0, 24);
+  for (const k of _want) { try { _lxArt2WantMon(k, true); } catch (e) {} }
+  { const t0 = performance.now(); while (performance.now() - t0 < 30000 && _want.filter((k) => MONSTER_SPRITES[k] && MONSTER_SPRITES[k].complete && MONSTER_SPRITES[k].naturalWidth).length < 8) await new Promise((r) => setTimeout(r, 200)); }
+  // the game ctx is OPAQUE since 6c0aab9e (perf: opaque canvas, alpha:false): clearRect leaves black at alpha 255,
+  // so the sprite's pixels are the non-black ones, not the alpha>30 ones (that counted the whole black region)
   const cands = Object.keys(MONSTER_SPRITES).filter((k) =>
     !MONSTER_ANIMS[k] && MONSTER_SPRITES[k] && MONSTER_SPRITES[k].complete && MONSTER_SPRITES[k].naturalWidth).slice(0, 10);
   let t = null, m = null;
@@ -60,7 +68,7 @@ const r = await page.evaluate(async () => {
       try { _drawMonsterSprite(mm, 640, 400); } catch (e) { return null; }
       const d = ctx.getImageData(340, 40, 600, 560).data;
       let r = 0, g = 0, b = 0, n = 0;
-      for (let i = 0; i < d.length; i += 4) { if (d[i + 3] < 30) continue; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+      for (let i = 0; i < d.length; i += 4) { if (d[i] + d[i + 1] + d[i + 2] < 24) continue; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
       return n ? { n, r: r / n, g: g / n, b: b / n } : null;
     };
     for (let i = 0; i < 4; i++) { try { _drawMonsterSprite(mm, 640, 400); } catch (e) {} await frame(); }
@@ -85,7 +93,7 @@ const r = await page.evaluate(async () => {
     const d = ctx.getImageData(340, 40, 600, 560).data;
     let r = 0, g = 0, b = 0, n = 0;
     for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] < 30) continue;
+      if (d[i] + d[i + 1] + d[i + 2] < 24) continue;
       r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
     }
     const leak = (typeof _lxMobTintFilter !== 'undefined') ? _lxMobTintFilter : '(absent)';

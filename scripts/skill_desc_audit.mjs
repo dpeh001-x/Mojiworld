@@ -65,6 +65,32 @@ const R = await page.evaluate(() => {
     return (cache[id] = out);
   };
 
+  // HAZARD ENGINES. A skill that drops a field (game.hazards.push({ type: 'x' }))
+  // does its per-tick work in the hazard loop's `h.type === 'x'` branch, which
+  // never names the skill id. 45969fd9 (v0.30.631) rewrote Celestial Aurora's
+  // text to say it heals "co-op partners on your map" - true: the aurora_field
+  // tick calls _coopPartyHeal - but that branch sits ~40 lines from any mention
+  // of celestialAurora, so the OVER pass reported a lie that was not one.
+  // The claim pass (only) also reads each pushed hazard type's tick branch, from
+  // its `h.type === 'x'` test to the next hazard branch. NUM stays on ctxFor, so
+  // numbers are held to exactly the old evidence (triage 2026-09-28).
+  const hzCache = {};
+  const hazardCtxFor = (id) => {
+    if (hzCache[id] != null) return hzCache[id];
+    let out = '';
+    const types = new Set([...strip(String(FN[id] || '')).matchAll(/type:\s*'([a-z0-9_]+)'/gi)].map((m) => m[1]));
+    for (const t of types) {
+      const re = new RegExp("h\\.type === '" + t + "'", 'g');
+      let m, n = 0;
+      while ((m = re.exec(html)) && n < 10) {
+        const end = html.indexOf('h.type ===', m.index + 12);
+        out += strip(html.slice(m.index, Math.min(end < 0 ? html.length : end, m.index + 8000)));
+        n++;
+      }
+    }
+    return (hzCache[id] = out);
+  };
+
   const numIn = (ctx, n) => {
     const s = String(n);
     if (new RegExp('(?<![\\d.])' + s.replace('.', '\\.') + '(?![\\d])').test(ctx)) return true;
@@ -121,6 +147,9 @@ const R = await page.evaluate(() => {
   const selfTest = {
     caught: numAudit(probeId, 'Deals 99× ATK over 77s within 4321px, healing 63%.', ''),
     controlClean: Object.keys(S).slice(0, 6).every((id) => numAudit(id, S[id].desc).length === 0),
+    // an aurora-free skill claiming co-op must still read as unsupported through the hazard context
+    hazardNoVouch: (() => { const id = Object.keys(S).find((k) => typeof FN[k] === 'function' && !/hazards\.push/.test(String(FN[k])) && !CLAIMS[4].code.test(strip(String(FN[k])))); return !!id && !CLAIMS[4].code.test(hazardCtxFor(id)); })(),
+    auroraSeen: CLAIMS[4].code.test(hazardCtxFor('celestialAurora')),
   };
 
   const under = [], over = [], num = [];
@@ -129,7 +158,7 @@ const R = await page.evaluate(() => {
     if (typeof FN[id] !== 'function' || !d) continue;
     const src = strip(String(FN[id])), ctx = ctxFor(id);
     for (const c of BEHAV) if (c.code.test(src) && !c.desc.test(d)) under.push(`${id} silent on [${c.k}]`);
-    for (const c of CLAIMS) if (c.desc.test(d) && !c.code.test(src) && !c.code.test(ctx)) over.push(`${id} claims [${c.k}] unsupported`);
+    for (const c of CLAIMS) if (c.desc.test(d) && !c.code.test(src) && !c.code.test(ctx) && !c.code.test(hazardCtxFor(id))) over.push(`${id} claims [${c.k}] unsupported`);
     const n = numAudit(id, d);
     if (n.length) num.push(`${id}: ${n.join(', ')}`);
   }
@@ -142,7 +171,8 @@ server.kill();
 const bad = [];
 console.log(`skills audited: ${R.total}`);
 console.log(`self-test: injected lies caught ${R.selfTest.caught.length}/4, real descriptions clean: ${R.selfTest.controlClean}`);
-if (R.selfTest.caught.length < 4 || !R.selfTest.controlClean) {
+console.log(`self-test: hazard context vouches only for hazards (no-hazard skill clean: ${R.selfTest.hazardNoVouch}, aurora tick seen: ${R.selfTest.auroraSeen})`);
+if (R.selfTest.caught.length < 4 || !R.selfTest.controlClean || !R.selfTest.hazardNoVouch || !R.selfTest.auroraSeen) {
   bad.push('SELF-TEST FAILED - the audit is not trustworthy on this run');
 }
 for (const [label, list] of [['UNDER-DOCUMENTED', R.under], ['OVER-PROMISED', R.over], ['NUMERIC MISMATCH', R.num]]) {

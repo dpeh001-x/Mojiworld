@@ -42,6 +42,11 @@ await page.fill('#hero-name-input', 'Knight');
 await page.evaluate(() => { const m = document.getElementById('class-select-modal'); for (const el of m.querySelectorAll('button,div,li')) { if (el.children.length > 3) continue; if (getComputedStyle(el).display === 'none') continue; if (/^\s*warrior\s*$/i.test((el.textContent || '').trim())) { el.click(); return; } } });
 await page.click('#cs-nav-next').catch(() => {});
 await page.waitForTimeout(2500);
+// v0.30.1116 (beat queue) - a story beat that fires while another is up, or while the map is
+// still settling, is QUEUED and plays ~0.5 s later, pausing the sim (_playStoryBeat). Hiding
+// #story-beat-overlay does not dispose of a queued beat, so one landed mid-bout at random and
+// froze whichever bout it hit ("no contact"). Mark every beat seen before the map loads.
+await page.evaluate(() => { try { player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; } catch (e) {} });
 await page.evaluate(() => { player.level = 100; player.job = 'knight'; loadMap('forest', 300); });
 await page.waitForTimeout(5000);
 
@@ -57,6 +62,17 @@ const R = await page.evaluate(async () => {
   const GUARD_PCT = 20, THORNS = 0.50;
 
   const reflects = [];   // every hitMonster(..., 'thorns') the frame loop produced
+  // The MP the Mana Shield charged for each hit (2 MP : 1 HP, _lxManaShieldAbsorb). Read as
+  // player.mp before/after the shield's own call, so the shield bout can be graded against
+  // the FULL hit (HP lost + HP the MP paid for) instead of against a separate unshielded hit
+  // with its own damage roll.
+  const mpPaid = [];
+  const origMs = window._lxManaShieldAbsorb;
+  if (typeof origMs === 'function') window._lxManaShieldAbsorb = function (d) {
+    const mp0 = player.mp; const r = origMs.apply(this, arguments);
+    if (mp0 - player.mp > 0) mpPaid.push(mp0 - player.mp);
+    return r;
+  };
   const origHit = window.hitMonster || hitMonster;
   window.hitMonster = function (m, dmg, isCrit, skill) {
     if (skill === 'thorns') reflects.push({ t: game.time | 0, dmg: +dmg });
@@ -70,7 +86,7 @@ const R = await page.evaluate(async () => {
   // One contact window against `type`. Returns the hit taken and the two reflects.
   const bout = async (type, isBoss, opts) => {
     opts = opts || {};
-    reflects.length = 0; taken.length = 0;
+    reflects.length = 0; taken.length = 0; mpPaid.length = 0;
     game.monsters.length = 0;
     player.hp = getMaxHp(); player.mp = getMaxMp(); player._god = false;
     player.invulnerable = 0; player.blockTimer = 0;
@@ -107,7 +123,7 @@ const R = await page.evaluate(async () => {
     if (!taken.length || reflects.length < 2) return { partial: true, why };
     const hit = taken[0];
     const vals = reflects.slice(0, 2).map((r) => r.dmg).sort((a, b) => a - b);
-    return { type, hit, guardian: vals[0], thorns: vals[1], atk: m.atk, why };
+    return { type, hit, guardian: vals[0], thorns: vals[1], atk: m.atk, mpPaid: mpPaid[0] || 0, why };
   };
 
   // ORDER MATTERS. A level-84 Scorpio's touch is several times a mid-gear player's whole
@@ -121,7 +137,7 @@ const R = await page.evaluate(async () => {
   player.level = 100;
   out.boss = await bout('zodiac_scorpio', true, {});
 
-  arr.push = origPush; window.hitMonster = origHit;
+  arr.push = origPush; window.hitMonster = origHit; if (origMs) window._lxManaShieldAbsorb = origMs;
   player.tree.manaShield = false; player.mods.thorns = 0;
   player._guardianReflect = 0; player._god = true; game.monsters.length = 0;
   out.pct = GUARD_PCT; out.thornsPct = THORNS;
@@ -151,7 +167,15 @@ const checks = [
   ['and neither is a multiple of the player\'s whole HP pool', !!B && B.guardian < R.maxHp * 3 && B.thorns < R.maxHp * 3, B ? B.guardian + '/' + B.thorns + ' vs maxHp ' + R.maxHp : ''],
   ['the reflect still fires and still hurts', !!B && B.guardian > 0 && B.thorns > B.guardian, B ? B.guardian + ' / ' + B.thorns : ''],
   ['an ordinary mob is covered too, not just bosses', !!M && near(M.guardian, Math.floor(M.hit * R.pct / 100), 2) && near(M.thorns, Math.floor(M.hit * R.thornsPct), 2), M ? M.guardian + '/' + M.thorns + ' of ' + M.hit : 'no contact'],
-  ['paying for the hit in MP does not shrink the reflect', !!S && !!M && near(S.guardian, M.guardian, 2), S && M ? S.guardian + ' with shield vs ' + M.guardian + ' without' : ''],
+  // Roll-independent: the shield bout is its own hit, so it is graded against itself. The
+  // full hit is the HP lost plus the HP the MP bought (floor(mpPaid / 2) at 2 MP : 1 HP);
+  // v0.30.764 promises both reflects are a share of THAT, not of the HP part alone. (Was an
+  // absolute compare with the unshielded bout, which failed on an ordinary damage roll.)
+  ['harness: the Mana Shield really paid MP for the shielded hit', !!S && S.mpPaid > 0, S ? 'mp paid ' + S.mpPaid : 'no contact'],
+  ['paying for the hit in MP does not shrink the reflect', !!S && S.mpPaid > 0
+    && near(S.guardian, Math.floor((S.hit + Math.floor(S.mpPaid / 2)) * R.pct / 100), 1)
+    && near(S.thorns, Math.floor((S.hit + Math.floor(S.mpPaid / 2)) * R.thornsPct), 1),
+    S ? `guardian ${S.guardian} / thorns ${S.thorns} of full hit ${S.hit}+${Math.floor(S.mpPaid / 2)} (mp ${S.mpPaid})` : ''],
   ['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')],
 ];
 let bad = 0; for (const [n, ok, x] of checks) { if (!ok) bad++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '   [' + x + ']' : ''}`); }

@@ -117,9 +117,14 @@ const out = await page.evaluate(async () => {
 
 
   // The parser must not corrupt a beat that has no directions at all.
+  // v0.30.1116 (8aff2437) plays story beats ONE at a time: a beat fired while another is on screen waits its turn. The
+  // first_zodiac_kill card above is still open here, so gravitos_gate used to queue behind it and this check read the
+  // OLD card's text. Page the open beat closed first (as the player would), then play the next one.
+  for (let i = 0; i < 12 && ov.classList.contains('on'); i++) { ov.click(); await wait(150); }
+  for (let i = 0; i < 20 && ov.classList.contains('on'); i++) await wait(100);
   try { if (player && player._storyBeatsSeen) player._storyBeatsSeen = {}; } catch (e) {}
   show('gravitos_gate');
-  await wait(200);
+  for (let i = 0; i < 20 && !/Singularity/.test(txt.textContent || ''); i++) await wait(100);
   ok('a beat still renders correctly after the parser change',
      (txt.textContent || '').indexOf('*') === -1 && /Singularity does not echo/i.test(txt.textContent || ''),
      (txt.textContent || '').slice(0, 60).replace(/\n/g, ' | '));

@@ -32,7 +32,12 @@ ok('the Pages workflow override matches the in-file literal (sed must find it)',
 const api = (game.match(/return 'https:\/\/([^']+)';\s*\n\}\)\(\);/) || [])[1];
 ok('the auth/save API base is the same host (one server to keep alive)',
    api === 'mojiworld-mp.dpeh001.workers.dev', { api });
-ok('no Render URL remains anywhere in the game file', !game.includes('onrender.com'), {});
+// v0.29.719 (0237a555) names the retired host ONCE on purpose: a saved URL matching it is swapped for the default
+// (the retired-relay trap). That migration test is the only mention allowed - nothing may still DIAL Render.
+const RENDER_MIGRATION = '/mojiworld-mp.onrender.com/i.test(_savedUrl)';
+ok('the retired-relay migration swaps a saved Render URL for the default', game.split(RENDER_MIGRATION).length === 2
+   && /onrender\.com\/i\.test\(_savedUrl\)\)\s*\{\s*localStorage\.setItem\(MP_URL_KEY, MP_DEFAULT_URL\)/.test(game), {});
+ok('no Render URL remains anywhere in the game file (besides that migration)', !game.split(RENDER_MIGRATION).join('').includes('onrender.com'), {});
 
 // --- live: host + joiner through the game's own connect path ----------------
 const net = await import('node:net');
