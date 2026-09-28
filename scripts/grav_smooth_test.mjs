@@ -77,6 +77,10 @@ try {
     fading._bk = _dnBake(fading, '1234\u2605', '#ffd24a', (18 + 4) * uiK);   // it settled earlier and holds its bake
     game.damageNumbers = [fading];
     drawDamageNumbers();   // (dn-atlas: the first fading figure of a size builds its glyph atlas - text, once. Count the warm draw.)
+    // v0.30.1239 (0f568a2f) dn-worker - that atlas is now built on a Worker and comes back a few frames later; until it lands the
+    // figure draws live text by design. Wait (<= 2.5 s) for the blit, then count the warm draw as before.
+    for (let w = 0, d = performance.now(); performance.now() - d < 2500; w++) { fading.life = 3; game.damageNumbers = [fading]; const c = count(() => drawDamageNumbers()); if (c.drawImage >= 1 && c.fillText === 0) break; await sleep(40); }
+    fading.life = 3; game.damageNumbers = [fading];
     out.fade = count(() => drawDamageNumbers());
     const popping = mk(37, 40);                                    // age 3: mid pop
     game.damageNumbers = [popping];

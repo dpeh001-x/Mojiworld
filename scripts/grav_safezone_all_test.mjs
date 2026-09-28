@@ -119,7 +119,10 @@ try {
     const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
     const mm = document.getElementById('minimap'); if (!mm) return { noMinimap: true };
     const op = () => +parseFloat(getComputedStyle(mm).opacity).toFixed(2);
-    game.hazards.length = 0; await sleep(300); const before = op();
+    // v0.30.1191 (04ad067e) hud-clear - a panel over the HERO now dims to 0.3 on its own (.lx-hud-yield), and the placement loop
+    // above leaves him at the right edge, under the minimap. Stand him clear first, so 'before' reads the panel's own opacity.
+    player.x = game.camera.x + 200; player.vx = player.vy = 0;
+    game.hazards.length = 0; await sleep(600); const before = op();
     const camX = game.camera.x; const z = { x: camX + 760, y: 420, w: 102, h: 60 };
     const hz = { type: 'gravitos_singularity', life: 70, maxLife: 84, safeZones: [z], x: z.x, y: z.y, w: z.w, h: z.h };
     let during = 1;   // keep the zone alive for 700 ms whatever the game does to a stray hazard, and take the lowest opacity seen
