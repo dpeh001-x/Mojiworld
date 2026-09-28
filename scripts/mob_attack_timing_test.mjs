@@ -54,6 +54,7 @@ try {
     while (!(set.attack && set.attack[8] && set.attack[8].complete && set.attack[8].naturalWidth > 0) && performance.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 50));
     o.ready = set.attack ? set.attack.filter((f) => f && f.complete && f.naturalWidth > 0).length : 0;
     game.paused = true;   // the picker runs on the wall clock; the live loop must not hit anyone meanwhile
+    const _hold = window._lxMobAnimHold; window._lxMobAnimHold = function () {};   // v0.30.1341 swing-sync: a paused world holds its swings - the picker is measured alone here
     const idx = (f) => set.attack.indexOf(f);
     const m = spawnSnail(400); if (!m) return Object.assign(o, { spawnErr: 'no snail spawned' });
     m.vx = 0; m.currentHp = m.maxHp || 100; o.type = m.type;
@@ -81,7 +82,7 @@ try {
     const p1 = _monsterStateFrame(m2); o.proxRests = !isAtk(p1);
     await new Promise((r) => setTimeout(r, 500));
     const p2 = _monsterStateFrame(m2); o.proxAgain = isAtk(p2);
-    game.paused = false;
+    game.paused = false; window._lxMobAnimHold = _hold;
     return o;
   });
   ok(`the game reads the Echo Knight's baked timing (strike frame ${LX_MOB_STRIKE_BY_TYPE.echoKnight}, its crescent slash, held 155ms)`, !!g.ft && g.ft.length === 9 && g.S === LX_MOB_STRIKE_BY_TYPE.echoKnight && g.ft[g.S] === 155, g.ft && g.ft.join('/'));
