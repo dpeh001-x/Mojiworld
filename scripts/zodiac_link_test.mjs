@@ -6,7 +6,7 @@
 // One page, a fresh warrior, real killMonster calls:
 //   1. every sign has last words in its own voice (the question finished, the three notes remembered), each once per save,
 //      on its first real defeat only - before the Amnesiac's first_zodiac_kill, which now hears the bird sing out of turn;
-//   2. the twelfth plays its words, then zodiac_twelve_done with the one-song stanza;
+//   2. the twelfth plays its words, then zodiac_twelve_done with the one-song stanza, over its own film (clip_zodiac_one_song);
 //   3. Old Arlen notices the bird singing out of turn only once a House has gone dark;
 //   4. the Codex tells the origin (epigraph, intro, House + age per card, last words once dark); arenas are Houses; the
 //      entrance banner shows plain text;
@@ -72,8 +72,12 @@ try {
     // ---- the kills: the order of every scene that comes up
     const ov = () => document.getElementById('story-beat-overlay'), beatOn = () => !!(ov() && ov().classList.contains('on'));
     const spk = () => (document.getElementById('story-beat-speaker') || {}).textContent || '', btxt = () => (document.getElementById('story-beat-text') || {}).textContent || '';
-    const watch = async (ms) => { const seq = []; const t0 = Date.now(); let quiet = 0;
-      while (Date.now() - t0 < ms) { if (beatOn()) { const s = spk() + ' | ' + btxt().slice(0, 60); if (s !== seq[seq.length - 1]) seq.push(s); ov().click(); quiet = 0; } else if (seq.length && ++quiet > 20) break; await sleep(150); }
+    const film = {};   // hold: the page to stop on until the scene's film decodes (then it is read into film.clip)
+    const watch = async (ms, hold) => { const seq = []; const t0 = Date.now(); let quiet = 0, held = false;
+      while (Date.now() - t0 < ms) { if (beatOn()) { const s = spk() + ' | ' + btxt().slice(0, 60); if (s !== seq[seq.length - 1]) seq.push(s);
+          if (hold && !held && hold.test(btxt())) { held = true; for (let i = 0; i < 150; i++) { const v = document.getElementById('story-beat-clip'); if (v && v.readyState >= 2) break; await sleep(100); }
+            const v = document.getElementById('story-beat-clip'); film.clip = v ? { src: (v.currentSrc || v.src || '').split('/').pop(), ready: v.readyState, w: v.videoWidth, dur: Math.round(v.duration || 0) } : null; }
+          ov().click(); quiet = 0; } else if (seq.length && ++quiet > 20) break; await sleep(150); }
       try { closeAllModals(); } catch (e) {} game.paused = false; return seq; };
     const kill = (id, tags) => { const m = { type: 'zodiac_' + id, name: 'Z', isZodiac: true, zodiacSign: id, x: player.x + 60, y: player.y, w: 60, h: 60, level: 85, exp: 0, mojicoins: 0,
       currentHp: 0, maxHp: 1, hp: 0, atk: 1, def: 1, vx: 0, vy: 0, dead: false, zodiacBoss: true, isBoss: true, ...(tags || {}) };
@@ -83,7 +87,7 @@ try {
     out.kEcho = kill('taurus', { _echoBoss: true }); out.seqEcho = await watch(3500);
     out.arlenAfter = await arlen();
     for (const z of ZODIAC_SIGNS) if (z.id !== 'pisces') game.bestiary['_boss_zodiac_' + z.id] = 1;
-    out.k12err = kill('pisces'); out.seq12 = await watch(12000);
+    out.k12err = kill('pisces'); out.seq12 = await watch(30000, /The twelfth sign exhales/); out.film = film.clip || null;
     out.cdxAfter = await codex('zodiac');
     out.seen = UNDER.filter((k) => player._storyBeatsSeen[k]).sort();
     out.wcArlen = wc(out.arlenAfter);
@@ -97,6 +101,7 @@ try {
   ok('1. the first real defeat: its words, then the Amnesiac hears the bird sing out of turn', !R.k1err && /^Ariel the Ember Ram \| I was the first/.test(R.seq1[0] || '') && R.seq1.some((s) => /^The Amnesiac \| he looks up sharply/.test(s)) && R.seq1.some((s) => /^The Amnesiac \| Here in the plaza, the bird on the top perch just sang/.test(s)), J(R.seq1));
   ok('1. once per save: a second kill and an echo shade play nothing', !R.k1again && R.seqAgain.length === 0 && !R.kEcho && R.seqEcho.length === 0, J({ again: R.seqAgain, echo: R.seqEcho }));
   ok('2. the twelfth: its words, then zodiac_twelve_done with the one-song stanza', !R.k12err && /^Pisces the Twin Current \| I was the last of us/.test(R.seq12[0] || '') && R.seq12.some((s) => /^ \| Twelve ages\. Twelve champions\. One song\./.test(s)) && R.twelveDone.some((t) => /born at dawn to the same three notes/.test(t)) && R.twelveDone.some((t) => /the bird sings them one more time/.test(t) && /it waits\.$/.test(t)), J(R.seq12));
+  ok('2. the reveal plays over its own film: clip_zodiac_one_song, 1280 wide, the 31 s trailer, decoding', !!R.film && R.film.src === 'clip_zodiac_one_song.mp4' && R.film.ready >= 2 && R.film.w === 1280 && R.film.dur >= 30, J(R.film));
   ok('3. Old Arlen: the bird sings out of turn only once a House is dark, within 60 words', /not one early, not one late/.test(R.arlenBefore) && !/out of turn/.test(R.arlenBefore) && /Lately it sings out of turn, whenever one of those Houses goes dark/.test(R.arlenAfter) && R.wcArlen <= 60, J({ before: R.arlenBefore.slice(-80), after: R.arlenAfter.slice(-120), words: R.wcArlen }));
   ok('4. the Codex tells the origin: epigraph, intro, a House and an age on every card', R.epi === 'Twelve ages. Twelve champions. One song.' && /first asking became Gravitos/.test(R.cdxBefore) && /born at dawn to the same three notes/.test(R.cdxBefore) && /ring of Houses/.test(R.cdxBefore) && /House of the Ram · the first age/.test(R.cdxBefore) && /House of the Fishes · the twelfth age/.test(R.cdxBefore), J({ epi: R.epi, cdx: R.cdxBefore.slice(0, 200) }));
   ok('4. a card keeps its last words only once its House is dark', !/I was the first\./.test(R.cdxBefore) && /I was the first\./.test(R.cdxAfter) && /Who is counting us\?/.test(R.cdxAfter), J({ before: /I was the first/.test(R.cdxBefore), after: /I was the first/.test(R.cdxAfter) }));
