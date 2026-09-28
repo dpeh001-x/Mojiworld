@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1380';
+const GAME_VERSION = 'v0.30.1381';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -56940,6 +56940,7 @@ function _coopTickProjectiles() {
 const _COOP_PJ_XF = ['_defPierce', '_ignoreDef', '_heavyFloorPct', '_srcType', '_gravBand', '_bossBand', '_healLockMs', '_sourceLabel',
   'sourceLabel', '_zodiacSign', '_radiance', '_impactMs', '_impactShake', 'freeze', 'poison', '_poisonDmg', 'slow', 'skillLock',
   'stunHit', '_kbTier', 'knockback', '_zoneAttack', 'pierce', '_noEvasion', 'noGravity'];   // v0.30.1293 strike-knock - _kbTier: a guest is thrown as far as the host (kept off the list's tail: two suites pin it)   // v0.30.1013 a guest's weight wave rides the floor too   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
+_COOP_PJ_XF.push('_zSz', '_zVis');   // v0.30.1381 zodiac-proj-size - a guest's copy arrives sized, never grown twice
 function _coopPjVal(v) {   // numbers, short strings, booleans, and one level of those (bands, radiance)
   if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
   if (typeof v === 'string') return v.slice(0, 80);
@@ -107673,6 +107674,7 @@ function updateProjectiles(dt) {
   for (let i = game.projectiles.length - 1; i >= 0; i--) {
     const p = game.projectiles[i];
     _lxRankSrc = (p && p.rs) || null;   // v0.30.854 - rank attribution
+    if (p && !p._zSz && (p._zodiacAttacker || p._zodiacSign)) _lxZodProjSize(p);   // v0.30.1381 zodiac-proj-size
     _lxKillEnt = p;   // v0.30.1320 - a hit this shot lands names its maker (_lxResolveKiller)
     game._fxOrigin = (p && p.owner === 'player') ? 'me' : 'local';   // v0.30.823 - my shot's fx are mine; an enemy shot's are made on every screen
     // Enemy-owned projectile with `homing: true` — gently steer toward player.
@@ -156747,6 +156749,52 @@ function _getBeamGradient(w) {
   return g;
 }
 
+// v0.30.1381 zodiac-proj-size - the zodiac bosses' shots, bigger (per user: "make the other zodiac projectiles bigger too
+// vary based on your discretion", after Aquarius's waves). Measured as drawn (visible art, logical px) they were 3-45 px
+// beside bosses 160-390 px wide: Virgo's lances 9 x 4, Sagittarius's rain 16 x 3, the zodiac bolt 19 x 12, a 14 px droplet.
+// [visual x, hitbox x, anchor]: the picture grows by the first factor, the hitbox by the smaller second, so the art stays a
+// little bigger than what hurts. Anchor 'b': a shot riding the floor (vy ~0) grows UP from its bottom. Applied once per
+// shot (_lxZodProjSize, from updateProjectiles and drawProjectiles), to zodiac shots only - the keys ordinary monsters
+// and the player share are untouched. The pillars and Virgo's lances keep their hitboxes: those already cover the art.
+const _LX_ZOD_PROJ_SIZE = {
+  zodiac: [3, 1.35],            // the bolt every sign fires - 19 x 12 -> ~58 x 22
+  zodiacHoming: [2, 1.3],       // 42 x 22 -> ~84 x 44
+  fire: [1.7, 1.35],            // Aries's ember - 37 x 39 -> ~63 x 66
+  quake: [1.8, 1.3, 'b'],       // Taurus's stomp line and trample columns - ~42 x 35 -> ~76 x 62
+  taurus_boulder: [1.7, 1.3],   // 43 x 40 -> ~73 x 68
+  gemini_shard: [2.6, 1.4],     // Gemini's shards - 20-32 px -> 52-83 px
+  pincer: [1.45, 1.25],         // Cancer's clap claws - 61 x 36 -> ~88 x 52
+  cancerBubble: [1.7, 1.3],     // a 52 px bubble -> ~88 px
+  pincerSweep: [1.45, 1.25, 'b'],   // 70 x 45 -> ~102 x 65, still on the floor
+  roar: [1.9, 1.35],            // Leo's roar - 38 -> ~72
+  radiantLance: [6.5, 1],       // Virgo's starburst lances - 9 x 4 -> ~62 x 23 (their 26 px hitbox already covers the shaft)
+  scale: [1.35, 1.15],          // Libra's sigil - 89 x 34 -> ~120 x 46
+  venom: [2.6, 1.4],            // Scorpio's stinger - 18 x 22 -> ~47 x 57
+  arrow: [2.6, 1.3],            // Sagittarius's arrows - 29 x 7 -> ~72 x 18
+  arrowRain: [3.2, 1.3],        // 16 x 3 -> ~50 x 11
+  starbeam: [1.9, 1.3],         // 46 x 12 -> ~87 x 23
+  markedShot: [2.4, 1.35],      // 28 x 14 -> ~67 x 34
+  ice: [2.8, 1.35],             // Capricorn's shard - 20 x 10 -> ~56 x 23
+  icePillar: [2.8, 1],          // the spire erupting from the floor - 40 px long on its 110 px hitbox -> ~112 px
+  droplet: [2.6, 1.35],         // Aquarius's droplets - 14 -> ~36
+  waterPillar: [2.3, 1],        // her erupting pillar - 44 px on its 100 px hitbox -> ~101 px
+  tsunami: [2.8, 1.4, 'b'],     // her phase-3 wall - 152 x 60 -> ~430 x 170, bigger than her wave, a quarter below the floor
+  mdark: [2, 1.3],              // Pisces's dark orb - 27 -> ~54
+  whirl: [2.3, 1.4],            // Pisces's vortex - 21 -> ~48
+};
+function _lxZodProjSize(p) {
+  p._zSz = true;
+  const t = _LX_ZOD_PROJ_SIZE[p.skill];
+  if (!t || p.owner === 'player') return;
+  const v = t[0], hx = t[1], w0 = p.w || 0, h0 = p.h || 0;
+  if (hx !== 1 && w0 > 0 && h0 > 0) {
+    const w1 = Math.round(w0 * hx), h1 = Math.round(h0 * hx);
+    p.x -= (w1 - w0) / 2;
+    p.y -= (t[2] === 'b' && Math.abs(p.vy || 0) < 0.5) ? (h1 - h0) : (h1 - h0) / 2;
+    p.w = w1; p.h = h1;
+  }
+  p._zVis = v / hx;   // the draw multiplies this on top of the (grown) hitbox, so the picture lands on v
+}
 function drawProjectiles() {
   // v0.25.451 — empty-list early-out (no projectiles in town/idle frames).
   if (!game.projectiles || game.projectiles.length === 0) return;
@@ -156757,6 +156805,7 @@ function drawProjectiles() {
     // this specific projectile (every type with a pre-rendered texture).
     // Voidbeam and any unmapped future type return null → vanilla renders.
     if (_phaserHandlingProjectile(p)) continue;
+    if (!p._zSz && (p._zodiacAttacker || p._zodiacSign)) _lxZodProjSize(p);   // v0.30.1381 zodiac-proj-size - a shot drawn before its first update
     const sx = p.x - camX;
     // Frustum cull — projectiles outside a 60 px buffer of the viewport
     // don't need drawing (still update, just skip paint).
@@ -157099,7 +157148,7 @@ function drawProjectiles() {
       } else if (p.skill === 'mdark') {
         if (_lxMobProjReady(LX_MOB_PROJ.mdark)) {
           // v0.26.170 — multiplier 1.1 → 0.5.
-          const r = p.w * 0.5;
+          const r = p.w * 0.5 * (p._zVis || 1);   // v0.30.1381 zodiac-proj-size - Pisces's orb
           ctx.drawImage(_lxProjScaled(_projAnimFrame('mdark') || LX_MOB_PROJ.mdark, Math.round(r * 2)), cx - r, cy - r, r * 2, r * 2);   // v0.30.294 perf
         }   // procedural circle fallback removed — sprite always present
         // v0.25.21 — sparkle emission extracted to emitProjectileTrails()
@@ -157279,7 +157328,7 @@ function drawProjectiles() {
         // file, before any mirroring. No sprite currently pairs rot with a flip;
         // if one ever does, measure rot on the UNflipped art and it still holds.
         if (_blit.rot) ctx.rotate(_blit.rot);
-        const r = p.w * (_blit.size || 1.2);
+        const r = p.w * (_blit.size || 1.2) * (p._zVis || 1);   // v0.30.1381 zodiac-proj-size
         // v0.29.553 — RESPECT THE SOURCE ASPECT (per user: p_gravbolt "appears
         // squished"). This blit forced every sprite into a SQUARE r*2 × r*2 box
         // — the table's own comment even said "square aspect" — so any art that
@@ -157477,7 +157526,7 @@ function drawProjectiles() {
         // lived only in the player / partner branch, so the Archer's zodiac shot as plain yellow blobs. Same sprite,
         // scale and rotate-to-flight as the player's arrow, over a soft glow in the shot's own colour so it still
         // reads as incoming.
-        const _aw = Math.max(p.w, 18) * 1.6;
+        const _aw = Math.max(p.w, 18) * 1.6 * (p._zVis || 1);   // v0.30.1381 zodiac-proj-size
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(Math.atan2(p.vy || 0, p.vx || 1));
