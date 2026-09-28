@@ -5,7 +5,17 @@ now does the whole middle of this; nothing gets transcribed by hand any more.
 
 ## 1. The tester reviews
 
-Send them `tools/sound_review.html` (open from disk or the raw.githack URL).
+Send them `tools/sound_review.html` (open from disk or the raw.githack URL:
+https://raw.githack.com/dpeh001-x/Mojiworld/main/tools/sound_review.html). It covers monster hit and death
+sounds, NPC voices, **skill sounds** (every clip a skill really plays; a shared clip lists all its skills) and the
+fallback family sounds. Before sending a fresh round, refresh the names from the running game and rebuild:
+
+```bash
+node scripts/gen_sfx_manifest.mjs
+node scripts/dump_sound_review_names.mjs
+node scripts/gen_sound_review.mjs
+```
+
 They play, give a verdict (good / not sure / needs work), and write what the
 sound *should* be. They hand back **either**:
 

@@ -16,9 +16,16 @@
 //
 // Inputs:  data/sfx_manifest.js          (run scripts/gen_sfx_manifest.mjs first)
 //          tools/sound_review_names.json (display names; see REFRESHING below)
+//
+// SKILLS (added per user: "the updated NPC and monster and skills SFX html commenter for my tester"): a skill clip is
+// listed only when a skill really plays it - names.skills maps each clip to every skill that resolves to it through
+// _playSkillSfx (a shared clip lists all of them). Clips no skill plays (old generic buckets) are left out: the tester
+// could never hear them in game, so a verdict on them would be noise.
 // Output:  tools/sound_review.html
 //
-// REFRESHING THE NAMES: sound_review_names.json is a snapshot of MAPS[].npcs and
+// REFRESHING THE NAMES: `node scripts/dump_sound_review_names.mjs` rewrites sound_review_names.json from a running
+// game (monsters, every map's NPCs by voice key, every skill by the clip it plays). Before that script it was a
+// hand-made snapshot of MAPS[].npcs and
 // LX_MONSTER_STATS/monsterTypes taken from a running game. Monsters and NPCs get
 // added far more slowly than clips do, so a snapshot is fine; when it drifts,
 // open mojiworld_game.html and re-dump those two tables. Anything missing from
@@ -42,7 +49,7 @@ const titleCase = (s) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperC
 // silently dropped for failing the monster lookup.
 const FAMILY = { bat: 'Bats & fliers', beast: 'Beasts', dragon: 'Dragons', ghost: 'Ghosts & undead', plant: 'Plants & fungi' };
 
-const rows = [];
+const rows = [], unplayed = [];
 for (const clip of MANIFEST) {
   if (clip.cat === 'monster-hit' || clip.cat === 'monster-die') {
     const kind = clip.cat === 'monster-hit' ? 'hit' : 'die';
@@ -62,6 +69,20 @@ for (const clip of MANIFEST) {
       when: kind === 'hit' ? `Played every time you hit ${m.name || key}.` : `Played when ${m.name || key} dies.` });
     continue;
   }
+  if (clip.cat === 'skill') {
+    const us = (NAMES.skills || {})[clip.id] || [];
+    if (!us.length) { unplayed.push(clip.id); continue; }
+    const CLS_ORDER = { Warrior: 0, Rogue: 1, Mage: 2, Archer: 3 };
+    const cls = [...new Set(us.map((u) => u.cls).filter(Boolean))], jobs = [...new Set(us.map((u) => u.job).filter(Boolean))];
+    const tier = Math.max(...us.map((u) => (u.job ? 1 : 0) + (/^x$|^b$/.test(u.slot) ? 1 : 0)));
+    const names = us.map((u) => u.name);
+    rows.push({ id: clip.id, file: clip.file, sec: 'skill', kind: 'skill', key: clip.id, kb: clip.kb,
+      name: names.join(' / '), sub: [cls.join(' & '), jobs.join(', ')].filter(Boolean).join(' · '),
+      lv: (CLS_ORDER[cls[0]] ?? 4) * 10 + tier,
+      when: names.length > 1 ? `One sound shared by ${names.length} skills: ${names.join(', ')}. Played when you use any of them.`
+                             : `Played when you use ${names[0]}.` });
+    continue;
+  }
   if (clip.cat === 'npc') {
     const key = clip.id.replace(/^npc_/, '');
     const n = NAMES.npcs[key];
@@ -73,13 +94,14 @@ for (const clip of MANIFEST) {
   }
 }
 
-const ORDER = { hit: 0, die: 1, npc: 2, family: 3 };
+const ORDER = { hit: 0, die: 1, npc: 2, skill: 3, family: 4 };
 rows.sort((a, b) => ORDER[a.sec] - ORDER[b.sec] || (a.lv || 0) - (b.lv || 0) || a.name.localeCompare(b.name));
 
 const SECTIONS = [
   { id: 'hit',    label: 'Monster hit sounds',   blurb: 'The sound when you land a hit on a monster. You hear these more than any other sound in the game, so they matter most.' },
   { id: 'die',    label: 'Monster death sounds', blurb: 'The sound when a monster dies.' },
   { id: 'npc',    label: 'NPC voices',           blurb: 'The little babble a character makes when you start talking to them. It should suit their personality.' },
+  { id: 'skill',  label: 'Skill sounds',         blurb: 'The sound your character makes when you use a skill. Some skills share one sound - those are listed together, so judge whether it suits all of them.' },
   { id: 'family', label: 'Fallback sounds',      blurb: 'Shared backup sounds. You hear these the first time you meet any creature of that kind, before its own sound has loaded.' },
 ];
 
@@ -90,3 +112,4 @@ await writeFile(join(root, 'tools', 'sound_review.html'), html);
 
 const per = SECTIONS.map((s) => `${s.id}:${rows.filter((r) => r.sec === s.id).length}`).join('  ');
 console.log(`Wrote tools/sound_review.html — ${rows.length} clips  (${per})`);
+if (unplayed.length) console.log(`  left out ${unplayed.length} skill clips no skill plays: ${unplayed.join(' ')}`);

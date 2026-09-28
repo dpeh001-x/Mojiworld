@@ -198,6 +198,13 @@ export function contextFor(m) {
     const who = n.name ? `${n.name}${n.role ? ', ' + n.role : ''}` : key;
     return { who, boss: false, line: `${who}${n.maps && n.maps.length ? ' (seen in ' + n.maps.slice(0, 2).join(', ') + ')' : ''}. ${m.when}.` };
   }
+  if (m.cat === 'skill') {   // names.skills (scripts/dump_sound_review_names.mjs): every skill that plays this clip
+    const us = (NAMES.skills || {})[m.id] || [];
+    if (us.length) {
+      const who = us.map((u) => u.name + (u.cls ? ' (' + [u.cls, u.job].filter(Boolean).join(' ') + ')' : '')).join(', ');
+      return { who, boss: false, line: `The cast sound of the skill${us.length > 1 ? 's' : ''} ${who}. ${m.when}.` };
+    }
+  }
   return { who: m.id, boss: false, line: `${m.id}: ${m.when}.` };
 }
 export function compose(m, comment) {
