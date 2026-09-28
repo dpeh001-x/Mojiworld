@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1340';
+const GAME_VERSION = 'v0.30.1341';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -92684,6 +92684,7 @@ function _lxDrainPendingSweeps() {
   }
 }
 function updateMonsters(dt) {
+  game._lxMobRanAt = game.time; game._lxMobRanWall = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();   // v0.30.1341 swing-sync - see _lxMobAnimHold
   // v0.29.619 — SANCTUARY SWEEP. Layer 2 of the town guarantee: spawnMonster
   // already refuses wild spawns here, so this only ever fires for something
   // that bypassed it -- a direct game.monsters.push (the gummy split does
@@ -144172,6 +144173,31 @@ function _lxMidSwing(m) {
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   return now < (m._swingUntil || 0);
 }
+// v0.30.1341 swing-sync - A MONSTER'S ATTACK ANIMATION WAITS FOR ITS AI (per user, two clips: the pigs' swing sprite came after the
+// punch, the giraffes' before the headbutt - "ensure they are timed correctly"). The attack frames play on the wall clock;
+// the swing, smash, shot or proximity hit they are timed to comes from monster AI, which only runs on a simulated step. A
+// hit-stop (40-150 ms, from dozens of skills), the parry slow-mo, a pause, and time the step clock drops on a slow frame all
+// stop the AI while the wall clock runs on, so the strike frame played early and the sprite trailed it. Whatever time the AI
+// misses pushes every regular monster's attack timeline - and its proximity-swing clock - forward by that much, so the
+// animation waits with the AI. Bosses keep their own timing (see _lxMidSwing); a co-op guest mirrors the host, whose AI
+// a freeze on this machine does not stop.
+const _LX_MOB_ANIM_CLOCKS = ['atkAnimUntil', '_tellUntil', '_swingUntil', '_swingAtkUntil', '_swStrikeAt', '_swStrikeEnd', '_swNextAt', '_proxRestUntil', '_proxAtkMinUntil'];
+function _lxMobAnimHold(ms) {
+  if (!(ms > 0) || typeof game === 'undefined' || !game || !Array.isArray(game.monsters)) return;
+  if (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) return;
+  for (const m of game.monsters) {
+    if (!m || m.isBoss || m.boss || m.zodiacBoss) continue;
+    if (m._animSt === 'attack' && typeof m._animStAt === 'number') m._animStAt += ms;
+    for (const k of _LX_MOB_ANIM_CLOCKS) if (typeof m[k] === 'number' && m[k] > 0) m[k] += ms;
+  }
+}
+// time the step clock drops (a frame over 100 ms, a backlog past four steps) never reaches the AI either; the step that
+// follows takes it off its own wall-clock hold, so nothing is held twice
+function _lxMobAnimHoldGate(ms) {
+  if (!(ms > 0) || typeof game === 'undefined' || !game) return;
+  game._lxMobGateHeld = (game._lxMobGateHeld || 0) + ms;
+  _lxMobAnimHold(ms);
+}
 function _lxSwingLength(m, n, ft) {
   const p = _lxSwingPlan(m, n, ft);
   return p.lead + (p.total - p.prefix);
@@ -147901,6 +147927,24 @@ function _monsterStateFrame(m) {
       const _entered = m._animSt !== 'attack';
       let _elapsed = now + _mobAnimPhase(m, 'attack', false);
       const _len = _lxSwingLength(m, n, _ftA);
+      // v0.30.1341 swing-sync - a TELEGRAPHED windup (a heavy swing, a shot, a column) is walked by the AI countdown that releases it, not
+      // the wall clock, so its strike frame starts on the very step the swing / shot / column fires - whatever the step clock did
+      // meanwhile (a hit-stop, the slow-mo, a stall, a vsync-snapped step running faster or slower than real time). Between steps
+      // it runs at most one step ahead; the swing is kept alive past the strike however long the windup took, and the draw after
+      // it fires shows the strike frame. From there the swing plays on the wall clock.
+      if (m._atkStrikeMs > 0) {
+        const _rem = (m._bigMeleeFiring && m._bigMeleeT > 0) ? m._bigMeleeT : (m._shootWindup > 0) ? m._shootWindup : (m._columnFiring && m._columnT > 0) ? m._columnT : 0;
+        if (_rem > 0) {
+          const _sub = Math.max(0, Math.min((typeof _LX_SIM_STEP_MS === 'number') ? _LX_SIM_STEP_MS : 16.67, now - ((typeof game !== 'undefined' && game && game._lxMobRanWall) || now)));
+          _elapsed = Math.max(0, Math.min(m._atkStrikeMs - 0.5, m._atkStrikeMs - _rem + _sub));
+          m._animStAt = now - _elapsed;
+          m._swingUntil = Math.max(m._swingUntil || 0, now + _len - _elapsed);
+          m._lxWindup = true;
+        } else if (m._lxWindup) {
+          m._lxWindup = false;
+          if (_elapsed < m._atkStrikeMs) { _elapsed = m._atkStrikeMs; m._animStAt = now - _elapsed; }
+        }
+      }
       if (_entered) { m._swingUntil = Math.max(m._swingUntil || 0, now + _len); m._swingAtkUntil = m.atkAnimUntil || 0; }
       else if (_elapsed >= _len && (m.atkAnimUntil || 0) > (m._swingAtkUntil || 0) && (m.atkAnimUntil || 0) - now >= _len * 0.5) {
         // the attack window was pushed out AFTER this swing began (a new hit) and the swing has
@@ -162198,6 +162242,7 @@ function loop(time) {
   // regardless of monitor refresh instead of fast-forwarding.
   {
     let _elapsed = Math.max(0, Math.min(100, time - lastTime));
+    if (!_lxSimOnly && time - lastTime > 100 && typeof _lxMobAnimHoldGate === 'function' && typeof game !== 'undefined' && game && !((game._lxMobRanWall || 0) > lastTime)) _lxMobAnimHoldGate(time - lastTime - 100);   // v0.30.1341 swing-sync - unless a hidden-tab pump ran the AI meanwhile
     // v0.30.264 — keep the REAL wall-clock frame time visible to the perf
     // monitor. See the _perfTick call below for the bug this repairs.
     if (!_lxSimOnly) {
@@ -162212,7 +162257,7 @@ function loop(time) {
     if (_lxSimAccumMs < _LX_SIM_STEP_MS) { if (!_lxSimOnly) { _lxPaceStats.skipped++; if (_LX_SMOOTH.on) _lxDrawBetween(time); } _lxNextFrame(); return; }   // v0.30.x hz-smooth
     _lxSimAccumMs -= _LX_SIM_STEP_MS;
     // Clamp the backlog so a long stall / tab-away can't unleash a burst.
-    if (_lxSimAccumMs > _LX_SIM_STEP_MS * 4) _lxSimAccumMs = _LX_SIM_STEP_MS * 4;
+    if (_lxSimAccumMs > _LX_SIM_STEP_MS * 4) { if (!_lxSimOnly && typeof _lxMobAnimHoldGate === 'function') _lxMobAnimHoldGate(_lxSimAccumMs - _LX_SIM_STEP_MS * 4); _lxSimAccumMs = _LX_SIM_STEP_MS * 4; }   // v0.30.1341 swing-sync
     _lxPaceStats.steps++;
     if (_LX_SMOOTH.on) { try { _lxSmoothSnap(); } catch (e) {} }   // v0.30.x hz-smooth — before the step moves anything
   }
@@ -162593,6 +162638,13 @@ function loop(time) {
     // Web-Worker pump instead (avoids double-stepping). Solo is unaffected
     // (_lxCoopWorldStep no-ops when not in co-op).
     if (game.paused && !document.hidden) _lxCoopWorldStep(dt);
+  }
+  {   // v0.30.1341 swing-sync - a step on which monster AI did not run (a hit-stop, the slow-mo hold, photo mode, a pause, the hero down)
+      // holds the attack animations by the WALL time since the previous step, less what the gate already held for dropped
+      // time: a frozen swing stays frozen however far the step clock drifts from the wall clock (a snapped step runs fast)
+    const _lxW = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (game._lxMobRanAt !== game.time && typeof _lxMobAnimHold === 'function') _lxMobAnimHold(_lxW - Math.max(game._lxMobStepWall || _lxW, game._lxMobRanWall || 0) - (game._lxMobGateHeld || 0));
+    game._lxMobStepWall = _lxW; game._lxMobGateHeld = 0;
   }
 
   // Screen shake decay
