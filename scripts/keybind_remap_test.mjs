@@ -71,11 +71,11 @@ try {
 
   // 2. the shipped keys: each fires its function and nothing else
   const DEF = [['w', { toggleWorldMap: 1 }], ['q', { toggleQuestJournal: 1 }], ['j', {}], ['e', { _qnavCycle: 1 }], ['r', { _useCurePotion: 1 }],
-    ['Shift', { quickDash: 1 }], ['p', { openPostalWisp: 1 }], ['h', { _mojimonQuickSummon: 1 }], ['o', { togglePhotoMode: 1 }], ['Enter', { _mpOpenChat: 1 }],
+    ['Shift', { quickDash: 1 }], ['p', { openPostalWisp: 1 }], ['h', { _mojimonQuickSummon: 1 }], ['o', { togglePhotoMode: 1 }], ['Enter', {}],
     ['y', { toggleLoreMap: 1 }], ['l', { toggleLoreMap: 1 }], ['m', { mute: 1 }], ['a', { startBlock: 1 }], ['u', { toggleSharedModal: 1 }], ['i', {}]];
   const defBad = [];
   for (const [k, want] of DEF) { const got = await press(k); if (!same(got, want)) defBad.push({ k, want, got }); }
-  check(!defBad.length, 'every shipped key fires exactly its own function - Shift is Dash only (Cure is R), J (the old journal alias) and I do nothing', defBad);
+  check(!defBad.length, 'every shipped key fires exactly its own function - Shift is Dash only (Cure is R), J (the old journal alias) and I do nothing, and Enter (Chat) does nothing out of co-op', defBad);
   const f = await press('f');
   check(!f['tryInteract:chest'], 'F is the class signature only - it no longer also opens chests (N does)', f);
   await page.evaluate(() => { player._emote = null; game.paused = false; });
@@ -85,6 +85,12 @@ try {
   const ping = await press('t');
   await page.evaluate(() => { net.connected = false; });
   check(same(ping, { _coopSendPing: 1 }), 'T pings while online', ping);
+  // v0.30.1330 - Chat is a co-op function (per user: "make enter not open chat outside co-op"): Enter opens the bar in a room
+  // (socket open and welcomed, faked as the co-op suites do) and only there - out of one it is in the shipped-keys row above
+  await page.evaluate(() => { window._kbNet = { c: net.connected, w: net.ws, m: net.myId }; net.connected = true; net.ws = { readyState: 1, send() {} }; net.myId = 1; });
+  const chatOn = await press('Enter');
+  await page.evaluate(() => { const w = window._kbNet; net.connected = w.c; net.ws = w.w; net.myId = w.m; });
+  check(same(chatOn, { _mpOpenChat: 1 }), 'Enter opens the chat in a co-op room (out of one it does nothing)', chatOn);
 
   // 3. the panel: one Keyboard tab (+ Potions, Controller) listing every function
   await page.evaluate(() => { window.toggleKeybindModal = window._kbRealToggle; toggleKeybindModal(); });
