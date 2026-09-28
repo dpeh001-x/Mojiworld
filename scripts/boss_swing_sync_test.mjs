@@ -24,6 +24,10 @@ const CASES = [
   ['young_confused_barnaby', 'swing', 'young_confused_barnaby'], ['sundered_smith', 'swing', 'sundered_smith'],
   ['zodiac_aries', 'swing', 'zodiac_aries'], ['zodiac_capricorn', 'swing', 'zodiac_capricorn'], ['zodiac_pisces', 'swing', 'zodiac_pisces'],
   ['towerSovereign', 'column', 'towerSovereigncolumn'], ['towerArbiter', 'column', 'towerArbitercolumn'],
+  // v0.30.1358 boss-column - the bosses that cast their trait column with their own attack set (no per-attack column art)
+  ['pqConductor', 'column', 'pqConductor'], ['legosaurus', 'column', 'legosaurus'], ['young_confused_barnaby', 'column', 'young_confused_barnaby'],
+  ['zodiac_taurus', 'column', 'zodiac_taurus'], ['zodiac_virgo', 'column', 'zodiac_virgo'], ['zodiac_scorpio', 'column', 'zodiac_scorpio'],
+  ['zodiac_sagittarius', 'column', 'zodiac_sagittarius'], ['zodiac_aquarius', 'column', 'zodiac_aquarius'],
 ];
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT });
 await new Promise((r) => setTimeout(r, 1500));
@@ -77,6 +81,7 @@ try {
         if (!rec.windupAt && firing()) rec.windupAt = now;
         if (rec.windupAt) {
           if (firing()) rec.saw = true;
+          if (firing() && typeof _mobCasting === 'function' && _mobCasting(m)) rec.rooted = true;   // planted by its cast
           if (firing() && game.hitStop > 0) rec.stopSeen = (rec.stopSeen || 0) + 1;   // a draw frozen mid-windup
           if (rec.seq.length < 60) rec.seq.push(Math.round(now - rec.windupAt) + ':' + idx);
           if (!rec.strikeAt && idx === strike) rec.strikeAt = now;
@@ -95,17 +100,28 @@ try {
       for (let i = 0; i < 500 && !rec.fireAt; i++) await wait(10);
       await wait(60);
     } finally { done = true; window._drawBossSprite = oD; window.bossAI = oAI; game.monsters.length = 0; game.projectiles.length = 0; }
-    return { strike, tel: T && T.telegraphMs, stops: rec.stopSeen || 0, windup: !!rec.windupAt, strikeMs: rec.strikeAt ? Math.round(rec.strikeAt - rec.windupAt) : null,
+    return { strike, tel: T && T.telegraphMs, stops: rec.stopSeen || 0, rooted: !!rec.rooted, windup: !!rec.windupAt, strikeMs: rec.strikeAt ? Math.round(rec.strikeAt - rec.windupAt) : null,
       fireMs: rec.fireAt ? Math.round(rec.fireAt - rec.windupAt) : null, frameAtFire: rec.frameAtFire, seq: rec.seq.slice(0, 40).join(' ') };
   }, { c, stops });
   const res = [];
   for (const c of CASES) { await measure(c, false); for (const s of [false, true]) res.push({ c, s, r: await measure(c, s) }); }   // the first run warms the bakes
   const off = (s) => res.filter((x) => x.s === s && !(x.r && x.r.windup && x.r.fireMs != null && x.r.frameAtFire === x.r.strike && x.r.strikeMs != null && Math.abs(x.r.fireMs - x.r.strikeMs) <= 40));
   const brief = (list) => list.map((x) => `${x.c[2]} strike@${x.r && x.r.strikeMs} fire@${x.r && x.r.fireMs} drawn f${x.r && x.r.frameAtFire}`);
-  check(off(false).length === 0, 'plain: as each telegraphed boss swing / column is released, the frame on screen is its strike frame (11 attacks)', brief(off(false)));
+  check(off(false).length === 0, 'plain: as each telegraphed boss swing / column is released, the frame on screen is its strike frame (19 attacks)', brief(off(false)));
   check(off(true).length === 0, 'with two 140 ms hit-stops in the windup: still the strike frame on the release (the windup waits with the countdown)', brief(off(true)));
   check(res.filter((x) => x.s).every((x) => x.r && x.r.stops >= 2), 'the hit-stops landed inside every windup (drawn frozen mid-windup)', res.filter((x) => x.s).map((x) => `${x.c[2]} ${x.r && x.r.stops}`));
   if (off(false).length || off(true).length) console.log(JSON.stringify(res.map((x) => [x.c[2], x.s, x.r && x.r.seq])).slice(0, 5000));
+  const casts = res.filter((x) => !x.s && x.c[1] === 'column' && !/^tower/.test(x.c[0]));
+  check(casts.length === 8 && casts.every((x) => x.r && x.r.rooted), 'a boss casting its column is planted through the telegraph (eight casts; it used to idle or walk while the pillar fell)', casts.map((x) => `${x.c[0]} ${x.r && x.r.rooted}`));
+  // who casts: not a boss mid-pattern (its choreography owns the body), not one with per-attack column art
+  const who = await page.evaluate(() => {
+    if (typeof _lxBossColumnCast !== 'function') return { missing: true };
+    const G = game.mapData.platforms.filter((q) => q.type === 'ground').sort((a, b) => b.w - a.w)[0];
+    const mk = (t) => { const m = spawnMonster(G.x + 900, G.y - 200, t, true, false) || game.monsters[game.monsters.length - 1]; if (/^zodiac_/.test(t)) { m.zodiacBoss = true; m.zodiacSign = t.slice(7); } return m; };
+    const sc = mk('zodiac_scorpio'), sv = mk('towerSovereign'); const o = { idle: _lxBossColumnCast(sc), sovereign: _lxBossColumnCast(sv) };
+    sc.patternState = 'burrow'; o.midPattern = _lxBossColumnCast(sc); game.monsters.length = 0; return o;
+  });
+  check(who.idle === true && who.midPattern === false && who.sovereign === false, 'a boss casts its column unless a pattern owns it or it has per-attack column art', who);
   // 3. a paused world holds a boss's swing where it is: Aries' swing, paused on the very draw it is released
   const paused = await page.evaluate(async () => {
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
