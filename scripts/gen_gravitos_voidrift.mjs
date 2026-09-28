@@ -12,6 +12,9 @@
 //   node scripts/gen_gravitos_voidrift.mjs              # dry run: prints the briefs
 //   node scripts/gen_gravitos_voidrift.mjs --generate   # needs LUDO_API_KEY; writes the base + 9 frames
 //   flags: --skip-base (animate the base already on disk)
+//   then:  node scripts/trim_dark_shell.mjs Sprites/fx/gravitos_voidrift.webp Sprites/fx/anim/gravitos_voidrift_{0..8}.webp
+//          (v0.30.1348, per user: the "bold dark outline" this brief asks for comes back as a black shell round the glow,
+//          and read as a heavy black cut-out in game)
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const sharp = require('sharp');

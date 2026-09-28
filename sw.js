@@ -252,7 +252,7 @@
 // would otherwise keep the angled art until its cache refreshed.
 // v0.30.1346 flat-props-2 - v106 -> v107. the hearth, the signpost and the three fountains in Sprites/objects are REPLACED under
 // their own names (redrawn flat for the side-scroller), so a returning browser would otherwise keep the angled art until its cache refreshed.
-const CACHE = 'mojiworld-assets-v107';   // v0.30.1346 - flat world props II
+const CACHE = 'mojiworld-assets-v108';   // v0.30.1348 - the Gravitos void rift without its black shell
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
