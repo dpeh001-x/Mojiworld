@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1362';
+const GAME_VERSION = 'v0.30.1363';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -93690,6 +93690,7 @@ function updateMonsters(dt) {
         m._bdPhase = 'brace';
         m._bdGored = false;              // v0.30.x - gore lands at most once per charge
         m._bdT = bd.telegraphMs || 850;
+        m._animSt = null;   // v0.30.1363 key-frame - the dash set starts HERE: its authored brace (f0-f1, 850 ms) ends as the launch comes (f2)
         m._bdDir = _bdDx > 0 ? 1 : -1;   // locked NOW, not at launch
         m.facing = m._bdDir;
       }
@@ -95859,6 +95860,7 @@ function updateMonsters(dt) {
       // attack loop exactly when a contact hit lands (same time-based field
       // every other attack path uses, so it self-clears).
       try { m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + (m.isBoss ? 650 : 760); } catch (_) {}
+      if (m.isBoss || m.boss) try { m._lxContactAt = _lxHeldNow(); } catch (_) {}   // v0.30.1363 key-frame - its pose leads into its blow (_lxBossContactLead)
       // Knight Guardian reflect — bounce the cast's rolled percentage back.
       // v0.29.671 — was a hardcoded 50%; Holy Shield stamps its own 50 below.
       if (player._guardianReflect && game.time < player._guardianReflect && m.currentHp > 0) {
@@ -100037,6 +100039,7 @@ function bossAI(m, dt, distToPlayer) {
     } else if (m.patternState === 'laser') {
       // LASER SWEEP — charge, paint a warning beam, then fire tracking lasers
       const chargeTime = phase === 3 ? 350 : phase === 2 ? 420 : 500;  // v0.29.391 — P2 telegraph shortens
+      m._lxLaserChargeMs = chargeTime;   // v0.30.1363 key-frame - the laser set's key frame lands on this release
       // v0.29.572 — LASER SWEEP charge ring. The caster frames are pinned to
       // the boss's canvas and scale, so the spectacle lives in an FX sprite.
       if (!m._laserRingUp) {
@@ -144401,6 +144404,46 @@ function _bossAnimPhase(frames, m, state, desync) {
 // a regular monster (v0.30.1341): the windup plays at its own pace (no slower than half, no faster than double speed), its
 // last frame holds until the release, and the strike frame starts on the step the swing or column fires. From there the
 // set plays on the wall clock as before.
+// v0.30.1363 key-frame - THE KEY FRAME LANDS ON THE ATTACK (per user: "keep the hand set timings, but ensure to time the attack accurately
+// to the key frames"). A set's key frame is its blow. For a generated timing that is its strike, the frame held longest;
+// seven hand-set sets hold another frame longest, so their blow is named here (picked from the art, v0.30.1355 review).
+// The authored timings stay as authored and keep their proportions; only where they sit against the attack moves.
+const LX_BOSS_KEY_FRAME = { gravitos: 5, gravitoslaser: 6, gravitos2laser: 7, gravitos2star: 6, legosaurusdash: 6,
+  towerArbiter: 6, towerArbiterverdict: 5 };
+function _lxBossKeyFrame(key, n, ft) {
+  const k = LX_BOSS_KEY_FRAME[key];
+  return (Number.isInteger(k) && k >= 0 && k < n) ? k : _lxFtStrike(n, ft);
+}
+// A once-through set timed so its key frame STARTS at `hit`: the frames before it share [0, hit] in their authored
+// proportions, the key frame and the rest share [hit, end] the same way (end at or before hit: the rest at their authored
+// durations), and the last frame holds after. Every frame plays, from the first, and the blow lands on the attack.
+// e, hit and end in the same ms.
+function _lxKeyedIdx(n, ft, key, e, hit, end) {
+  const pre = _lxFtPrefix(n, ft, key), tot = _lxFtTotal(n, ft), post = tot - pre;
+  let c;
+  if (e < hit) c = hit > 0 ? (Math.max(0, e) / hit) * pre : pre;
+  else c = pre + ((end > hit) ? Math.min(1, (e - hit) / (end - hit)) * post : Math.min(post, e - hit));
+  let acc = 0;
+  for (let i = 0; i < n; i++) { acc += (ft[i] > 0 ? ft[i] : 48); if (c < acc) return i; }
+  return n - 1;
+}
+// A boss's contact hit lands BEFORE its attack pose starts (the hit is what starts it), so the pose used to begin on frame 0
+// after the damage and reach its blow 0.3-0.7 s later - the Arbiter's (f6, 687 ms in) never within its 650 ms window. The
+// first draw after a contact hit now starts the set so its key frame shows LX_BOSS_CONTACT_LEAD_MS after the hit, the last
+// frames of the windup leading into it at their own pace (as a regular monster's contact swing does, v0.30.1322). A swing
+// already on its way to its blow is left alone. pre = ms into the set where the key frame starts.
+const LX_BOSS_CONTACT_LEAD_MS = 120;
+function _lxBossContactLead(m, key, pre) {
+  const at = m._lxContactAt;
+  if (!(at > 0)) return;
+  m._lxContactAt = 0;
+  if (m._lxBossWind === key) return;   // a telegraphed swing owns the clock
+  const now = _lxHeldNow();
+  if (now - at > 250) return;          // a stale stamp: the pose it was for is long gone
+  const cur = m._animSt === 'attack' ? now - m._animStAt : -1;
+  if (cur >= 0 && cur < pre) return;
+  m._animSt = 'attack'; m._animStAt = at + LX_BOSS_CONTACT_LEAD_MS - pre;
+}
 // The live telegraph this boss is releasing, when `key` is the set it plays: the ms left and the telegraph length.
 // v0.30.1358 boss-column - does this boss cast its trait column with its own attack set? Not when it has per-attack column art (the
 // Sovereign's and the Arbiter's play through _lxSovAtkPose), not mid-pattern (its choreography owns the body), and only with
@@ -144429,7 +144472,7 @@ function _lxBossWindupSync(m, key, n, ft, zodiac) {
   if (zodiac && !(m._zAnim && m._zAnim.state === 'attack')) return null;
   const now = _lxHeldNow();   // a held world reads where the hold left it
   const tg = _lxBossTelegraph(m, key);
-  const prefix = _lxFtPrefix(n, ft, _lxFtStrike(n, ft));
+  const prefix = _lxFtPrefix(n, ft, _lxBossKeyFrame(key, n, ft));   // v0.30.1363 key-frame - its blow, not just its longest frame
   let c;
   if (tg) {
     const sub = Math.max(0, Math.min(_LX_SIM_STEP_MS, now - ((typeof game !== 'undefined' && game && game._lxMobRanWall) || now)));
@@ -144454,6 +144497,7 @@ function _bossAttackFrame(key, m) {
     if (n === 0) return null;
     if (n === 1) return _fr[0];
     if (m) _lxBossWindupSync(m, key, n, _ft, false);   // v0.30.1356 boss-swing - a telegraphed swing / column: its countdown walks the windup
+    if (m && m._lxContactAt) _lxBossContactLead(m, key, _lxFtPrefix(n, _ft, _lxBossKeyFrame(key, n, _ft)));   // v0.30.1363 key-frame - a contact hit
     return _lxFtWalk(_fr, n, _ft, _bossAnimPhase(_fr, m, 'attack', false) + (m ? _lxHeldShift((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) : 0), false);   // a held pose reads where the hold left it
   }
   return _bossLoopFrame(_fr, _BOSS_ATK_FRAME_MS, undefined, _bossAnimPhase(_fr, m, 'attack', false));
@@ -144884,6 +144928,14 @@ function _gravitosLaserFrame(m) {
   frames._readyN = n;
   if (n === 0) return null;
   const _ph = (m.phase | 0) || (m._phaseSprite === 'gravitos3' ? 3 : m._phaseSprite === 'gravitos2' ? 2 : 1);
+  // v0.30.1363 key-frame - THE BLAST ON THE RELEASE. The nine frames were spread evenly over the whole pattern, so the lightning (form 1, f6)
+  // and the chest blast (form 2, f7) came 0.3-0.6 s after the bolts had already fired. The key frame now starts on the
+  // release (the AI's chargeTime): the frames before it share the charge in their authored proportions, the rest the tail.
+  const _lk = _gravCastKey(m, 'laser'), _lft = n > 1 ? _lxCalibFt(_lk, 'attack') : null;
+  if (_lft) {
+    const _f = _gravTeleMs(m, 1) || 1, _rel = m._lxLaserChargeMs || (_ph === 3 ? 350 : _ph === 2 ? 420 : 500);
+    return frames[_lxKeyedIdx(n, _lft, _lxBossKeyFrame(_lk, n, _lft), (m.patternTimer || 0) / _f, _rel / _f, (_GRAV_LASER_DUR[_ph] || 1200) / _f)];
+  }
   const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / (_GRAV_LASER_DUR[_ph] || 1200)));
   return frames[Math.min(n - 1, Math.floor(t * n))];
 }
@@ -144909,8 +144961,25 @@ function _gravitosOnceFrame(m, key) {
   frames._readyN = n;
   if (n === 0) return null;
   const _dur = _GRAV_ONCE_DUR[m.patternState] || 1400;
+  // v0.30.1363 key-frame - a pattern with one moment of attack plays its key frame ON it, the frames before sharing the wait in their authored
+  // proportions and the rest the window after (was: spread evenly across the window, the blow landing after the release in
+  // every pattern, and 3.8 s before a Singularity resolved)
+  const _hit = _gravOnceHitMs(m), _oft = (_hit != null && n > 1) ? _lxCalibFt(key, 'attack') : null;
+  if (_oft) { const _f = _gravTeleMs(m, 1) || 1; return frames[_lxKeyedIdx(n, _oft, _lxBossKeyFrame(key, n, _oft), (m.patternTimer || 0) / _f, _hit / _f, _dur / _f)]; }
   const t = Math.max(0, Math.min(1, (m.patternTimer || 0) / _dur));
   return frames[Math.min(n - 1, Math.floor(t * n))];
+}
+// v0.30.1363 key-frame - when each Gravitos pattern drawn by _gravitosOnceFrame acts, on its pattern clock (the AI's own thresholds): the wave
+// fires past 400, the four ring / comet / hole / decay casts past _gravTeleMs(350), a Singularity resolves when its hazard's
+// 330 steps run out, a Collapse Rain's first box when its 84 do. Pull and Crush Tendrils have no single moment: null.
+function _gravOnceHitMs(m) {
+  switch (m.patternState) {
+    case 'wave': return 400;
+    case 'blackhole': case 'chaseComets': case 'orbitalRing': case 'decayFloor': return _gravTeleMs(m, 350);
+    case 'singularity': return _gravTeleMs(m, 330 * 1000 / 60);
+    case 'collapseRain': return _gravTeleMs(m, 84 * 1000 / 60);
+    default: return null;
+  }
 }
 // v0.30.312 — CONTACT-MELEE PLAYBACK (per user: "gravitos seem to run the
 // attack sprite consecutively too quickly ... hold these frames longer").
@@ -144938,6 +145007,12 @@ function _gravitosContactFrame(m, key) {
   const _wOf = (i) => _ftw ? ((_ftw[i] > 0 ? _ftw[i] : _GRAV_ATK_FRAME_MS) / _GRAV_ATK_FRAME_MS) : (_GRAV_ATK_WEIGHTS[i] || 1);
   let _total = 0;
   for (let i = 0; i < n; i++) _total += _wOf(i);
+  if (m._lxContactAt) {   // v0.30.1363 key-frame - a contact hit: the key frame shows just after it
+    let _k = 0, _kw = -1; for (let i = 0; i < n; i++) if (_wOf(i) > _kw) { _kw = _wOf(i); _k = i; }
+    if (_ftw) _k = _lxBossKeyFrame(key, n, _ftw);
+    let _pre = 0; for (let i = 0; i < _k; i++) _pre += _wOf(i) * _GRAV_ATK_FRAME_MS;
+    _lxBossContactLead(m, key, _pre);
+  }
   const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const _off = _bossAnimPhase(frames, m, 'attack', false) || 0;
   let _t = (Math.max(0, _now + _off) / _GRAV_ATK_FRAME_MS) % _total;
