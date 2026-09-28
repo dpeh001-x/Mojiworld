@@ -22,6 +22,9 @@
 // alpha feather and is asserted to finish with ZERO opaque pixels on all four
 // borders, which none of the shared zodiac art managed.
 //
+// v0.30.1387 - per user, "the bottom of the warning pillar can look more flat 2d": a warning's 3/4 base ring is unrolled into a
+// flat side-view band by scripts/flatten_tg_col_base.mjs (it keeps the feathered bottom margin).
+//
 //   node scripts/gen_zodiac_column_fx.mjs            # dry-run, print the plan
 //   node scripts/gen_zodiac_column_fx.mjs --generate # call Ludo (LUDO_API_KEY)
 //   flags: --only taurus,scorpio  --force
@@ -29,6 +32,7 @@ import { mkdir, writeFile, rename, access } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { flatten } from './flatten_tg_col_base.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(repoRoot, 'Sprites', 'fx');
@@ -169,7 +173,8 @@ async function gen(job) {
                                              background: { r: 0, g: 0, b: 0, alpha: 0 } } })
         .composite([{ input: inner, left: Math.round((job.W - cw) / 2), top: 0 }]).png().toBuffer();
       const feathered = await feather(canvas, job.W, job.H, job.featherX, job.featherY);
-      const out = await sharp(feathered).webp({ quality: 92 }).toBuffer();
+      let out = await sharp(feathered).webp({ quality: 92 }).toBuffer();
+      if (job.kind === 'tg') { const f = await flatten(out); if (!f.skipped) out = f.img; }   // flat side-view base
 
       // Assert: zero opaque pixels on any border, and the sprite is not a slab.
       const { data: p2, info: i2 } = await sharp(out).ensureAlpha().raw().toBuffer({ resolveWithObject: true });

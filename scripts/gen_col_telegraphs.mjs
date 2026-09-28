@@ -10,6 +10,9 @@
 // warnings (Path's Bane, Archon, the Tomb Hexer, Blight Elder, the Ossuary Tyrant, the Tomb Wraith) and the
 // Sovereign's and the zodiac fallback's rethemed to their new beams. Every theme is in SATURATED colour - the sprite
 // matte keys pale white light out as background. Now async-job ludo, raws saved before fitting.
+// v0.30.1387 - per user, "the bottom of the warning pillar can look more flat 2d": the rune ring ludo draws at the base is seen from
+// above at 3/4, so the fit runs scripts/flatten_tg_col_base.mjs, which unrolls it into a flat side-view band. The
+// prompt keeps asking for the ring - asking for a side-view base instead gave plain stripe pillars.
 //
 // A telegraph must read as a WARNING, not the attack: ghostly, translucent
 // core, hard bright edges, a rune ring at the base where the pillar will land.
@@ -22,6 +25,7 @@ import { mkdir, writeFile, rename, readFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { flatten } from './flatten_tg_col_base.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(repoRoot, 'Sprites', 'fx');
@@ -95,7 +99,8 @@ async function fit(raw) {
   const W = 288, H = 512;
   let content; try { content = await sharp(raw).trim().toBuffer(); } catch { content = raw; }
   const inner = await sharp(content).resize(W, H, { fit: 'fill', withoutEnlargement: false }).png().toBuffer();
-  const out = await sharp(inner).webp({ quality: 92 }).toBuffer();
+  let out = await sharp(inner).webp({ quality: 92 }).toBuffer();
+  { const f = await flatten(out); if (!f.skipped) out = f.img; }   // the 3/4 base ring -> a flat side-view band
   const { data: px, info } = await sharp(out).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let clear = 0; for (let i = 3; i < px.length; i += 4) if (px[i] < 20) clear++;
   return { out, pct: 100 * clear / (info.width * info.height) };
