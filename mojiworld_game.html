@@ -13569,7 +13569,7 @@ The sleeping world is listening.</div>
       </div>
       <div style="margin-top:10px; padding:8px 10px; background:rgba(30,15,55,0.4); border-radius:4px; font-size:11px; color:#c8b0e0; line-height:1.5;">
         <b>Play with friends.</b> Pick a <b>Party Code</b> (or hit <b>🎲 New code</b>) and share it — anyone who enters the same code + connects lands in your party. On the same map you now <b>fight the same monsters together</b>: shared HP, shared kills, shared XP &amp; coins. <b>Co-op bonus:</b> fight side by side and every kill pays <span class="gold">double EXP</span> &mdash; more with a bigger party.<br>
-        <b>In-world chat:</b> press <kbd>Enter</kbd> to type, <kbd>Esc</kbd> to cancel. Max <b>60 characters</b> per bubble. Works offline — bubbles float above your own character.
+        <b>In-world chat:</b> in a co-op room, press <kbd>Enter</kbd> to type, <kbd>Esc</kbd> to cancel. Max <b>60 characters</b> per bubble; it floats above your character for everyone in the room.
       </div>
     </div>
   </div>
@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1329';
+const GAME_VERSION = 'v0.30.1330';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -26223,7 +26223,7 @@ const LX_BIND_FNS = (() => {
   add({ id: 'cure', canon: 'r', def: 'r', label: 'Cure (drinks a Remedy)', short: 'Cure', group: 'items', store: 'cure' });
   add({ id: 'interact', canon: '#interact', def: '', label: 'Open Chest (extra key)', short: 'Chest', group: 'items', store: 'interact' });
   act('questGuide', 'Quest Guide: next quest', 'Guide', 'menus'); act('mojimon', 'Summon MojiMon', 'MojiMon', 'fight');
-  act('chat', 'Chat', 'Chat', 'social'); act('ping', 'Co-op Ping', 'Ping', 'social');
+  act('chat', 'Co-op Chat', 'Chat', 'social'); act('ping', 'Co-op Ping', 'Ping', 'social');
   act('mail', 'Mail (Postal Wisp)', 'Mail', 'menus'); act('photo', 'Photo Mode', 'Photo', 'menus');
   const EMO = { 1: '😊', 2: '😂', 3: '😲', 4: '❤', 5: '👍', 6: '😢', 7: '😡', 8: '⚔️', 9: '💤', 0: '👋' };
   for (const d of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']) act('emote' + d, 'Emote ' + EMO[d], EMO[d], 'social', { emo: EMO[d] });
@@ -43175,6 +43175,13 @@ function _lxFnPrompt(id) {
   try { if (f && typeof _lxInputDevice !== 'undefined' && _lxInputDevice === 'pad' && typeof _lxPadGlyphForKey === 'function') { const g = _lxPadGlyphForKey(k || ('lx:' + f.canon)); if (g) return g; } } catch (e) {}
   return k ? _kbDisplay(k) : '—';
 }
+// v0.30.1330 - CHAT IS FOR CO-OP (per user): the chat is live only in a co-op room (socket open and welcomed: _coopActive).
+// try/catch: the boot-time label refresh can run before net's declaration is reached.
+function _lxChatLive() { try { return typeof _coopActive === 'function' && !!_coopActive(); } catch (e) { return false; } }
+// the desktop HUD strip names Chat only while it works; joining, a drop and a manual disconnect (which never fires
+// onclose) all change that, so the state is watched rather than hooked
+let _lxChatStripLive = false;
+setInterval(() => { try { const on = _lxChatLive(); if (on !== _lxChatStripLive) { _lxChatStripLive = on; _lxRefreshBindLabels(); } } catch (e) {} }, 1000);
 function _lxRefreshBindLabels() {
   try {
     document.querySelectorAll('[data-lx-bindlabel]').forEach((el) => { const t = _lxKeyLabel(el.getAttribute('data-lx-bindlabel')); if (el.textContent !== t) el.textContent = t; });
@@ -43184,7 +43191,7 @@ function _lxRefreshBindLabels() {
     if (cs) {
       const kbd = (id) => { const k = _lxFnKey(id); return k ? '<kbd>' + _kbDisplay(k) + '</kbd>' : ''; };
       const part = (ids, label) => { const ks = ids.map(kbd).filter(Boolean); return ks.length ? ks.join('/') + ' ' + label : ''; };
-      const html = [part(['characterK'], 'Controls'), part(['chat'], 'Chat'), part(['talkNpc'], 'Talk'), part(['codex'], 'MojiDex'),
+      const html = [part(['characterK'], 'Controls'), (_lxChatLive() ? part(['chat'], 'Chat') : ''), part(['talkNpc'], 'Talk'), part(['codex'], 'MojiDex'),
         part(['attributesU'], 'Items'), part(['hpPotion', 'mpPotion'], 'Pots'), part(['mute'], 'Mute')].filter(Boolean).join(' &nbsp;·&nbsp; ');
       if (cs.dataset.kbHtml !== html) { cs.dataset.kbHtml = html; cs.innerHTML = (typeof _lxKbdHtml === 'function') ? _lxKbdHtml(html) : html; }
     }
@@ -43580,12 +43587,15 @@ window.addEventListener('keydown', e => {
     if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
   }
 
-  // Chat — Enter opens the input at any time (online OR offline).
-  // Offline messages float as a local bubble only; online messages also
-  // relay to the room. Escape cancels. Input is gated by maxlength=60.
+  // Chat - the Chat key (Enter by default) opens the input in a co-op room; a message relays to the room and floats
+  // over your head. Escape cancels. Input is gated by maxlength=60.
+  // v0.30.1330 - CHAT IS FOR CO-OP (per user: "make enter not open chat outside co-op"). Out of a room the bar only floated a
+  // bubble over your own head, and while it was open it swallowed every key: an Enter pressed through the prologue left
+  // W, U and K typing into it. Out of co-op the key is still consumed here (preventDefault + return, as before), so it
+  // opens nothing and cannot click a HUD button that was left holding focus either.
   if (k === 'enter' && !net.chatOpen && !game.paused && player.cls && player.hp > 0) {
     e.preventDefault();
-    _mpOpenChat();
+    if (_lxChatLive()) _mpOpenChat();
     return;
   }
   // v0.25.600 — ? / help-modal removed. All controls now live in the
