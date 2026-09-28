@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1383';
+const GAME_VERSION = 'v0.30.1384';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -156808,6 +156808,38 @@ const _LX_ZOD_PROJ_SIZE = {
   mdark: [2, 1.3],              // Pisces's dark orb - 27 -> ~54
   whirl: [2.3, 1.4],            // Pisces's vortex - 21 -> ~48
 };
+// v0.30.1384 zodiac-anim-smooth - the loops, smoother (per user: "make the zodiac projectile animations smoother too").
+// Measured frame to frame (zs/analyze): Gemini's shard is a near-invisible outline in frames 1-5 (it blinked out for
+// half of every loop), Scorpio's venom turns into a different shape in 4-6, Cancer's bubble goes dark in 5-7,
+// Capricorn's ice dissolves into a cloud in 3-5; the claws, scale, tsunami, dark orb and quake repeat a pose (hold, jump,
+// hold, jump); the wave snaps its spray off at the loop and the droplet's swirl jumps there. Each gets an ORDER of its
+// own frames: ping-pong over the solid ones, the repeated poses dropped, the clean close. Biggest step against the old
+// loop's mean step: shard 3.58 -> 0.15, bubble 2.86 -> 1.01, ice 2.49 -> 0.88, venom 2.12 -> 1.18, wave 2.46 -> 1.24,
+// droplet 1.30 -> 1.11; and no near-duplicate step left (hold) in the de-duplicated five. The eight other loops
+// (bolt, boulder, roar, lances, star beam, marked shot, spire, vortex) were already even and play as they were.
+const _LX_ZOD_ANIM_SEQ = {
+  gemini_shard: [6, 7, 8, 0, 8, 7],
+  venom: [7, 8, 0, 1, 2, 3, 2, 1, 0, 8],
+  cancerBubble: [8, 0, 1, 2, 3, 4, 3, 2, 1, 0],
+  ice: [6, 7, 8, 0, 1, 2, 1, 0, 8, 7],
+  quake: [0, 1, 2, 3, 4, 5, 6],
+  pincer: [0, 1, 2, 3, 6],
+  scale: [0, 1, 2, 3, 4, 5, 6],
+  tsunami: [0, 1, 2, 3, 5, 6, 7],
+  mdark: [0, 1, 2, 4, 5, 6, 7],
+  wave: [0, 1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1],
+  droplet: [0, 1, 2, 3, 4, 5, 6, 7],
+};
+// the frame a zodiac shot shows: its loop's own order, from a phase of its own (a volley no longer flashes in lockstep).
+// _projAnimFrame still loads, bakes and decode-gates the loop; a frame not baked yet falls back to what it picked.
+function _lxZodAnimFrame(p) {
+  if (p._zAnimOff == null) p._zAnimOff = Math.random() * 4000;
+  const f = _projAnimFrame(p.skill, p._zAnimOff);
+  const seq = _LX_ZOD_ANIM_SEQ[p.skill], arr = PROJ_ANIM_FRAMES[p.skill];
+  if (!f || !seq || !arr || (arr._readyN || 0) < arr.length) return f;
+  const c = arr[seq[Math.floor(Math.max(0, performance.now() + p._zAnimOff) / _PROJ_ANIM_FRAME_MS) % seq.length]];
+  return (c && (c.tagName === 'CANVAS' || c._lxNoShrink)) ? c : f;
+}
 function _lxZodProjSize(p) {
   p._zSz = true;
   const t = _LX_ZOD_PROJ_SIZE[p.skill];
@@ -157175,7 +157207,7 @@ function drawProjectiles() {
         if (_lxMobProjReady(LX_MOB_PROJ.mdark)) {
           // v0.26.170 — multiplier 1.1 → 0.5.
           const r = p.w * 0.5 * (p._zVis || 1);   // v0.30.1381 zodiac-proj-size - Pisces's orb
-          ctx.drawImage(_lxProjScaled(_projAnimFrame('mdark') || LX_MOB_PROJ.mdark, Math.round(r * 2)), cx - r, cy - r, r * 2, r * 2);   // v0.30.294 perf
+          ctx.drawImage(_lxProjScaled(((p._zodiacAttacker || p._zodiacSign) ? _lxZodAnimFrame(p) : _projAnimFrame('mdark')) || LX_MOB_PROJ.mdark, Math.round(r * 2)), cx - r, cy - r, r * 2, r * 2);   // v0.30.294 perf
         }   // procedural circle fallback removed — sprite always present
         // v0.25.21 — sparkle emission extracted to emitProjectileTrails()
       } else if (p.skill === 'msplinter') {
@@ -157311,7 +157343,7 @@ function drawProjectiles() {
         // right element thanks to the v0.26.162 color table.
         const _blit = _PROJ_SPRITE_BLIT[p.skill];
         // v0.26.340 — use the animated VFX frame when available; else static.
-        const _sprite = _projAnimFrame(p.skill) || LX_MOB_PROJ[p.skill];
+        const _sprite = ((p._zodiacAttacker || p._zodiacSign) ? _lxZodAnimFrame(p) : _projAnimFrame(p.skill)) || LX_MOB_PROJ[p.skill];   // v0.30.1384 zodiac-anim-smooth
         ctx.save();
         ctx.translate(cx, cy);
         // v0.26.x — per-projectile translucency (e.g. mink ink cloud reads as a
@@ -157333,6 +157365,12 @@ function drawProjectiles() {
           ctx.scale(_fl, 1);
           ctx.rotate(_tilt);
         } else if (_blit.mode === 'spin') {
+          if (p._zodiacAttacker || p._zodiacSign) {
+            // v0.30.1384 zodiac-anim-smooth - a zodiac shot spins by the CLOCK (the same turn per second at 60, 120 or 144 Hz;
+            // per drawn frame it ran 2.4x fast on a 144 Hz screen) and never past 0.2 rad per 60 Hz frame: Gemini's
+            // shard turned 31 deg a frame and Pisces's vortex 20, fast enough to strobe backwards
+            if (!_lxRenderOnly) { const _tn = performance.now(), _dk = p._spinT ? Math.min(4, (_tn - p._spinT) / 16.667) : 1; p._spinT = _tn; p._spin = (p._spin || 0) + Math.min(0.2, _blit.spinRate || 0.12) * _dk; }
+          } else
           p._spin = (p._spin || 0) + (_lxRenderOnly ? 0 : 1) * (_blit.spinRate || 0.12);
           ctx.rotate(p._spin);
         }
