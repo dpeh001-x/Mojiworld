@@ -66,7 +66,8 @@ const R = await page.evaluate(async () => {
   const P = CanvasRenderingContext2D.prototype, origDI = P.drawImage, origDM = _drawMonsterSprite; let inM = false, best = null;
   P.drawImage = function (...a) { if (inM) { const dw = a.length >= 9 ? a[7] : a[3], dh = a.length >= 9 ? a[8] : a[4]; if (dw * dh > (best ? best.w * best.h : 0)) best = { w: dw, h: dh }; } return origDI.apply(this, a); };
   window._drawMonsterSprite = function (mm) { if (mm !== m) return origDM.apply(this, arguments); inM = true; try { return origDM.apply(this, arguments); } finally { inM = false; } };
-  const measure = async (im) => { force = im; best = null; for (let i = 0; i < 6; i++) await new Promise((r) => requestAnimationFrame(r)); await W8(200); best = null; for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(r)); return best; };
+  // wait for a real draw of him after the reset (a cold first run can skip several frames before one lands)
+  const measure = async (im) => { force = im; best = null; for (let i = 0; i < 6; i++) await new Promise((r) => requestAnimationFrame(r)); await W8(200); best = null; for (let i = 0; i < 120 && !best; i++) await new Promise((r) => requestAnimationFrame(r)); return best; };
   const bi = await measure(idle), ba = await measure(atk0);
   P.drawImage = origDI; window._drawMonsterSprite = origDM; window._monsterStateFrame = origSF;
   const rowOf = (k) => (window.LX_SPRITE_BBOX || {})[k];
