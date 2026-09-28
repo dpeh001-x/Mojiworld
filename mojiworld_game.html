@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1322';
+const GAME_VERSION = 'v0.30.1323';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -62844,7 +62844,8 @@ function toggleWorldMap() {
     void _spinGrid.offsetWidth;
     _spinGrid.classList.add('wm-globe-spin');
     const _spinSvg = _spinGrid.querySelector('svg');
-    const _spinDone = () => { _spinGrid.classList.remove('wm-globe-spin'); if (_spinGrid._spinT) { clearTimeout(_spinGrid._spinT); _spinGrid._spinT = null; } };
+    const _spinDone = () => { _spinGrid.classList.remove('wm-globe-spin'); if (_spinGrid._spinT) { clearTimeout(_spinGrid._spinT); _spinGrid._spinT = null; }
+      try { const _s = _spinGrid.querySelector('svg'); if (_s && typeof _wmDeoverlapLabels === 'function') _wmDeoverlapLabels(_s); } catch (e) {} };   // v0.30.x final-polish (here-line) - place the labels at rest
     if (_spinSvg) _spinSvg.addEventListener('animationend', _spinDone, { once: true });
     // Hard fallback: occluded/throttled windows freeze CSS animations at the
     // 0% keyframe and never fire animationend — without this the map would
@@ -66198,6 +66199,7 @@ function _renderWorldMapDiagram(host, opts) {
     // under all 80 silent places on every render.
     if (_subTxt) {
       if (_subTile) sub.setAttribute('data-lx-sub', '1');
+      sub.setAttribute('class', 'wm-node-sub');   // v0.30.x final-polish (here-line) - seated by _wmDeoverlapLabels like the names
       g.appendChild(sub);
       if (_subTile) g.appendChild(_subTile);
     }
@@ -66422,7 +66424,7 @@ function _renderWorldMapDiagram(host, opts) {
   }
   if (typeof _wmPlaceSubTiles === 'function') _wmPlaceSubTiles(svg);   // v0.30.643
   if (svg._lxFitWorld) {   // v0.30.x wm-fit
-    setTimeout(() => { try { svg._lxFitWorld(); } catch (e) {} }, 650);
+    setTimeout(() => { try { _wmDeoverlapLabels(svg); } catch (e) {} try { svg._lxFitWorld(); } catch (e) {} try { _wmDeoverlapLabels(svg); } catch (e) {} }, 650);   // v0.30.x final-polish (here-line) - place at rest, frame round what was placed, then place once more at the framed scale (the pass pads in screen px), so what stands is what a re-run would choose
     if (!window._lxWmFitRZ) {
       window._lxWmFitRZ = true;
       window.addEventListener('resize', () => {
@@ -66443,7 +66445,11 @@ function _wmPlaceSubTiles(svg) {
     if (!(w > 0) && txt) w = (txt.textContent || '').length * 5.8;   // off-document fallback
     const sz = parseFloat(tile.getAttribute('width')) || 12;
     const y = txt ? (parseFloat(txt.getAttribute('y')) || 70) : 70;
-    tile.setAttribute('x', (-w / 2 - sz - 2).toFixed(1));
+    // v0.30.x final-polish (here-line) - the line now takes a seat, so its text can start anywhere: measure from its own x and anchor
+    const tx = txt ? (parseFloat(txt.getAttribute('x')) || 0) : 0;
+    const anc = (txt && txt.getAttribute('text-anchor')) || 'middle';
+    const x0 = anc === 'end' ? tx - w : anc === 'start' ? tx : tx - w / 2;
+    tile.setAttribute('x', (x0 - sz - 2).toFixed(1));
     tile.setAttribute('y', (y - sz + 1).toFixed(1));
   }
 }
@@ -66493,7 +66499,24 @@ function _wmDeoverlapLabels(svg) {
     live.push({ t, g, disc, here: parseFloat(t.getAttribute('font-size')) >= 20,
       key: (t.getAttribute('class') || '').indexOf('wm-lbl-far') >= 0 });
   }
-  if (!live.length) return;
+  // v0.30.x final-polish (here-line) - THE "YOU ARE HERE" LINE TAKES A SEAT. It was a plain <text> fixed 70 units under its node, and on a
+  // map this dense that spot is somebody else's: it lay on a neighbouring disc for 50 of the 80 places you can stand
+  // (The Bastion's sat on Hidden Pagoda). It is seated LAST, round the names as they settled - so every name keeps
+  // exactly the seat it would have had (seated earlier it took a seat a name needed, and a name with no clean seat is
+  // not drawn) - from its own ring (SUB_SEATS), never dropped, its old seat preferred. Unlike a name it scales with
+  // the map like the disc it belongs to, so its seats are map units (k = 1).
+  const subs = [];
+  for (const t of svg.querySelectorAll('text.wm-node-sub')) {
+    if (!t.hasAttribute('data-y0')) t.setAttribute('data-y0', t.getAttribute('y') || '70');
+    _wmPlaceNodeLabel(t, 0, parseFloat(t.getAttribute('data-y0')) || 70, 'middle');   // back to its old seat: idempotent
+    if (!(t.textContent || '').trim()) continue;
+    const g = t.parentNode;
+    const disc = g && g.querySelector && g.querySelector('.wm-disc');
+    if (!disc) continue;
+    const tile = g.querySelector('svg[data-lx-subtile]');
+    subs.push({ t, g, disc, sub: true, lead: tile ? (parseFloat(tile.getAttribute('width')) || 12) + 2 : 0 });
+  }
+  if (!live.length && !subs.length) return;
   // obstacles that are not labels: every disc on the board, and every pill that is showing
   const blocks = [];
   for (const c of svg.querySelectorAll('g.wm-node .wm-disc')) blocks.push(c.getBoundingClientRect());
@@ -66501,13 +66524,10 @@ function _wmDeoverlapLabels(svg) {
     if (getComputedStyle(p).opacity === '0') continue;
     const r = p.getBoundingClientRect(); if (r.width) blocks.push(r);
   }
-  // v0.30.x final-polish (new-maps) — ...and the "▸ YOU ARE HERE" line under the current node. It is a plain <text>, not a name, so no seat
-  // ever saw it: the current map's name took the free seat under its node and sat on it (Everdawn Central, once
-  // Cadet's Strand left that seat clear; Emerald Thicket already overlapped it by 3 px).
-  for (const s of svg.querySelectorAll('g.wm-node > text:not(.wm-node-label)')) {
-    if (!(s.textContent || '').trim() || getComputedStyle(s).opacity === '0') continue;
-    const r = s.getBoundingClientRect(); if (r.width) blocks.push(r);
-  }
+  // v0.30.x final-polish (new-maps) made the "▸ YOU ARE HERE" line an obstacle here. v0.30.x final-polish (here-line) seats it instead - last,
+  // round the names - so the line moves out of a name's way rather than the name out of the line's.
+  const discAt = [];   // every node's centre, to keep the line nearer its own node than any other
+  for (const c of svg.querySelectorAll('g.wm-node .wm-disc')) { const r = c.getBoundingClientRect(); discAt.push({ g: c.closest('g.wm-node'), x: r.left + r.width / 2, y: r.top + r.height / 2 }); }
   const hit = (a, b) => a.left - PAD < b.right && a.right + PAD > b.left && a.top - PAD < b.bottom && a.bottom + PAD > b.top;
   const area = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
                          Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
@@ -66526,6 +66546,30 @@ function _wmDeoverlapLabels(svg) {
     [64, 6, 'start'], [-64, 6, 'end'],
     [48, -50, 'start'], [-48, -50, 'end'],
   ];
+  // v0.30.x final-polish (here-line) - the line's own seats, in map units round its node (y is the baseline): its old seat under the node
+  // first, then over it (above the level pill), beside it and on the diagonals - all outside the halo (r 34) and the
+  // dashed orbit (r 40) the current node wears.
+  const SUB_SEATS = [
+    [0, 70, 'middle'], [0, -48, 'middle'],
+    [44, 4, 'start'], [-44, 4, 'end'],
+    [30, 46, 'start'], [-30, 46, 'end'],
+    [30, -34, 'start'], [-30, -34, 'end'],
+  ];
+  // ...then, for the crowded places, a finer ring: 16 bearings at each distance, nearest first, with the edge of the
+  // text that faces the node on the ring (beside it: starting or ending there; above or below: centred), each also
+  // slid along the ring - the text is wide and the gaps are often off-centre. 38 sits just outside the halo, inside
+  // the faint orbit: a fallback, which is why it all comes after the eight seats above.
+  // The last two distances sit ON the node's own halo: when every other seat is taken, crossing its own decoration beats
+  // touching another place (Cadet's Strand, in the thick of Everdawn's roads, needs this). Clear seats are taken first
+  // whatever their order, so these are only ever used when nothing further out is clear.
+  for (const R of [38, 48, 60, 74, 90, 34, 30]) for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2, px = Math.sin(a) * R, py = Math.cos(a) * R;   // i = 0 straight under, then round
+    const side = Math.abs(px) > R * 0.38;
+    const x = Math.round(px), y = Math.round(py + (side ? 4 : py > 0 ? 9 : -3)), anc = side ? (px > 0 ? 'start' : 'end') : 'middle';
+    SUB_SEATS.push([x, y, anc]);
+    if (side) SUB_SEATS.push([x, y - 10, anc], [x, y + 10, anc]);
+    else SUB_SEATS.push([x - 22, y, anc], [x + 22, y, anc]);
+  }
   live.sort((a, b) => (b.here - a.here) || (b.key - a.key));
   const placed = [];
   const seat = (L, skipRect) => {
@@ -66534,21 +66578,29 @@ function _wmDeoverlapLabels(svg) {
     const cx = dc.left + dc.width / 2, cy = dc.top + dc.height / 2;
     const y0 = parseFloat(L.t.getAttribute('data-y0')) || 0;
     const w = base.width, h = base.height;
+    const k = L.sub ? 1 : kz;                                        // v0.30.x final-polish (here-line) - a name holds its screen size; the line scales with the map
+    const lead = (L.lead || 0) * pxPerU;                             // a lead tile hangs before the text, whatever the anchor
     let best = null, bestCost = Infinity;
-    for (const [sx, sy, anchor] of SEATS) {
+    for (const [sx, sy, anchor] of (L.sub ? SUB_SEATS : SEATS)) {
       // where the box lands for this seat, without touching the DOM
-      const left = cx + sx * kz * pxPerU - (anchor === 'middle' ? w / 2 : anchor === 'end' ? w : 0);
-      const top = base.top + (sy - y0) * kz * pxPerU;
-      const r = { left, right: left + w, top, bottom: top + h };
+      const left = cx + sx * k * pxPerU - (anchor === 'middle' ? w / 2 : anchor === 'end' ? w : 0);
+      const top = base.top + (sy - y0) * k * pxPerU;
+      const r = { left: left - lead, right: left + w, top, bottom: top + h };
       if (r.left < rect.left + 4 || r.right > rect.right - 4 || r.top < rect.top + 4 || r.bottom > rect.bottom - 4) continue;
       let cost = 0;
       for (const b of blocks) if (hit(r, b)) cost += area(r, b) + 40;
       for (const p of placed) { if (p === skipRect) continue; if (hit(r, p)) cost += area(r, p) + 80; }   // a name over a name is worse
+      if (L.sub) {   // v0.30.x final-polish (here-line) - and the line must read as its node's: the edge of it that faces its node (the box's point
+        // nearest that node) must be nearer to it than to any other node. A hard tier, not a weight: a line beside the
+        // wrong node says the wrong thing, worse than a crowded seat, so an ambiguous seat is taken only when all are.
+        const ax = Math.max(r.left, Math.min(cx, r.right)), ay = Math.max(r.top, Math.min(cy, r.bottom)), own = Math.hypot(ax - cx, ay - cy);
+        if (discAt.some((d) => d.g !== L.g && Math.hypot(ax - d.x, ay - d.y) <= own)) cost += 1e5;
+      }
       if (cost < bestCost) { bestCost = cost; best = { sx, sy, anchor, r }; }
       if (cost === 0) break;                                            // first clear seat wins
     }
     if (!best) return null;
-    _wmPlaceNodeLabel(L.t, best.sx * kz, best.sy * kz, best.anchor);
+    _wmPlaceNodeLabel(L.t, best.sx * k, best.sy * k, best.anchor);
     best.cost = bestCost; best.label = L;
     return best;
   };
@@ -66561,7 +66613,7 @@ function _wmDeoverlapLabels(svg) {
     const i = placed.indexOf(L._seat.r);
     const got = seat(L, L._seat.r);
     if (got && got.cost < L._seat.cost) { if (i >= 0) placed[i] = got.r; L._seat = got; }
-    else _wmPlaceNodeLabel(L.t, L._seat.sx * kz, L._seat.sy * kz, L._seat.anchor);   // keep the better of the two
+    else _wmPlaceNodeLabel(L.t, L._seat.sx * (L.sub ? 1 : kz), L._seat.sy * (L.sub ? 1 : kz), L._seat.anchor);   // keep the better of the two
   }
   // And a name with nowhere clean to go is not drawn at all. This is the old cartographer's last
   // resort and the honest one: a name printed through a disc is worse than no name, and this map has
@@ -66577,6 +66629,16 @@ function _wmDeoverlapLabels(svg) {
     const tol = L.here ? Infinity : band === 'near' ? 620 : L.key ? 110 : 90;
     L.t.classList.toggle('wm-lbl-drop', !!(L._seat && L._seat.cost > tol));
   }
+  // v0.30.x final-polish (here-line) - and now the "YOU ARE HERE" line, round the names that are showing (a name that is not drawn is no
+  // obstacle), each measured where it actually stands: a name moved in the second round can stand somewhere other
+  // than its recorded seat says (Wayfarer's Lantern's did, and the line took the spot it really filled). It keeps its
+  // least-bad seat whatever that costs: it is where you are, so it is never dropped.
+  if (subs.length) {
+    placed.length = 0;
+    for (const L of live) if (L._seat && !L.t.classList.contains('wm-lbl-drop')) placed.push(L.t.getBoundingClientRect());
+    for (const L of subs) { const got = seat(L, null); if (got) placed.push(got.r); }
+  }
+  if (typeof _wmPlaceSubTiles === 'function') _wmPlaceSubTiles(svg);   // v0.30.x final-polish (here-line) - a lead tile follows its line to its seat
 }
 // v0.26.x exploit FIX — destination level-gate lookup for W-map fast-travel.
 // Scans every map's portals once and records, per destination, the MAX
@@ -120739,6 +120801,7 @@ function _lxTaxiFit(grid) {
     sv.style.maxHeight = ''; void md.offsetHeight;
     const over = md.offsetHeight - (ov.clientHeight - 16);
     if (over > 0) sv.style.maxHeight = Math.max(220, sv.getBoundingClientRect().height / Math.max(0.01, md.getBoundingClientRect().height / md.offsetHeight) - over) + 'px';
+    try { if (typeof _wmDeoverlapLabels === 'function') _wmDeoverlapLabels(sv); } catch (e) {}   // v0.30.x final-polish (here-line) - the taxi map's labels re-seated at its settled size
   };
   fit(); requestAnimationFrame(fit); setTimeout(fit, 260);
   try { if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => setTimeout(fit, 0)); } catch (e) {}
