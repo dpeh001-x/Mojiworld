@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1357';
+const GAME_VERSION = 'v0.30.1358';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -93809,6 +93809,17 @@ function updateMonsters(dt) {
           m.vx = 0; m.atkAnimUntil = _csNow + cs.telegraphMs + 300;
           m._atkStrikeMs = cs.telegraphMs; m._animSt = null; m._tellUntil = _csNow + cs.telegraphMs;
         }
+        // v0.30.1358 boss-column - A BOSS CASTS ITS PILLAR TOO (per user: "also check the column casts on the other bosses"). Eight bosses
+        // call a trait column with no cast of their own - the Master Conductor, Legosaurus, Barnaby, Taurus, Virgo, Scorpio,
+        // Sagittarius, Aquarius - and played their idle loop, or kept walking, while the pillar came down. One with attack art
+        // and no pattern running now plants and plays its attack through the telegraph, the strike frame drawn as the pillar
+        // falls (_lxBossWindupSync). The Sovereign and the Arbiter keep their per-attack column art; a boss mid-pattern keeps
+        // its choreography.
+        m._lxColumnCast = !!((m.isBoss || m.boss || m.zodiacBoss) && typeof _lxBossColumnCast === 'function' && _lxBossColumnCast(m));
+        if (m._lxColumnCast) {
+          const _csNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+          m.vx = 0; m.atkAnimUntil = _csNow + cs.telegraphMs + 300; m._tellUntil = _csNow + cs.telegraphMs;
+        }
       }
       // PHASE 2 — telegraph tick (vertical particle warning line)
       if (m._columnFiring && m._columnT > 0) {
@@ -144360,12 +144371,24 @@ function _bossAnimPhase(frames, m, state, desync) {
 // last frame holds until the release, and the strike frame starts on the step the swing or column fires. From there the
 // set plays on the wall clock as before.
 // The live telegraph this boss is releasing, when `key` is the set it plays: the ms left and the telegraph length.
+// v0.30.1358 boss-column - does this boss cast its trait column with its own attack set? Not when it has per-attack column art (the
+// Sovereign's and the Arbiter's play through _lxSovAtkPose), not mid-pattern (its choreography owns the body), and only with
+// an attack set to play.
+function _lxBossColumnCast(m) {
+  if (!m) return false;
+  const _fn = (typeof _LX_BOSS_ATK_SETS !== 'undefined') ? _LX_BOSS_ATK_SETS[m.type] : null, _pk = _fn && _fn('column');
+  if (_pk && typeof BOSS_ATTACK_FRAMES !== 'undefined' && BOSS_ATTACK_FRAMES[_pk] && BOSS_ATTACK_FRAMES[_pk].length) return false;
+  if (m.patternState && m.patternState !== 'idle') return false;
+  const _set = m.zodiacBoss ? ((typeof ZODIAC_ATTACK_FRAMES !== 'undefined') ? ZODIAC_ATTACK_FRAMES[m.zodiacSign] : null)
+    : ((typeof BOSS_ATTACK_FRAMES !== 'undefined') ? BOSS_ATTACK_FRAMES[m._phaseSprite || m.type] : null);
+  return !!(_set && _set.length > 1);
+}
 function _lxBossTelegraph(m, key) {
   if (!m || !m.traits) return null;
   const _own = !!(m._bossAtkKey && key === m._bossAtkKey);   // per-attack art: the Sovereign's and the Arbiter's swing / column sets
   const _bm = m.traits.bigMelee, _cs = m.traits.columnStrike;
   if (_bm && m._bigMeleeFiring && m._bigMeleeT > 0 && (_own || key === (m._phaseSprite || m.type))) return { rem: m._bigMeleeT, tel: _bm.telegraphMs || m._bigMeleeT };
-  if (_cs && m._columnFiring && m._columnT > 0 && _own) return { rem: m._columnT, tel: _cs.telegraphMs || m._columnT };
+  if (_cs && m._columnFiring && m._columnT > 0 && (_own || (m._lxColumnCast && key === (m._phaseSprite || m.type)))) return { rem: m._columnT, tel: _cs.telegraphMs || m._columnT };   // v0.30.1358 boss-column - or its own set, casting
   return null;
 }
 // Sets the set's clock (the attack epoch, or the zodiac state clock) from that countdown and returns the ms into the set to
@@ -145218,7 +145241,7 @@ function _mobCasting(m) {
   // (see the shoot machine). Rooted the same way the windup is, so a boss
   // attack reads stop -> charge -> fire -> beat -> move, never a drive-by.
   return !!(m._shootWindup > 0 || m._bigMeleeFiring || m._postShotHold > 0 ||
-    (m._columnFiring && m._columnT > 0 && !(m.isBoss || m.boss || m.zodiacBoss)));   // v0.30.1322 swing-lead - a column telegraph plants its caster
+    (m._columnFiring && m._columnT > 0 && (!(m.isBoss || m.boss || m.zodiacBoss) || m._lxColumnCast)));   // v0.30.1322 swing-lead - a column telegraph plants its caster (a casting boss too, v0.30.1358 boss-column)
 }
 // True when the mob should be DRAWN attacking: any cast, plus the authored
 // attack-animation window (contact hits, parries, skill pulses). Distinct from
