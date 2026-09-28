@@ -62,6 +62,7 @@ const R = await page.evaluate(async () => {
   out.bossWalkFields = document.querySelectorAll('#ft-strip input.ftms').length;
   out.bossWalkNote = /keeps the engine clock/.test((document.getElementById('fr-card') || {}).textContent || '');
   out.badge = (document.getElementById('lx-build-badge') || {}).textContent;
+  out.badgeAnim = (document.getElementById('lx-build-badge') || { getAttribute: () => null }).getAttribute('data-anim');
   return out;
 });
 ok('a regular monster gets the timing strip on walk: one ms field + thumbnail per frame', R.stripFields > 1 && R.stripFields === R.walkFrames && R.thumbs === R.walkFrames, { mob: R.mob, fields: R.stripFields, frames: R.walkFrames, thumbs: R.thumbs });
@@ -69,7 +70,11 @@ ok('typing a value writes CALIB ft[] and the live preview clock (_ftFor) reads i
 ok('preset "hold last" triples the last frame at the game default', R.ftAfterHold.length > 0 && R.ftAfterHold[R.ftAfterHold.length - 1] === Math.round(R.walkBase * 3), { last: R.ftAfterHold[R.ftAfterHold.length - 1], base: R.walkBase });
 ok('preset "even" restores every frame to the game default; "clear" removes ft', R.ftAfterEven.every((x) => x === R.walkBase) && R.ftAfterClear === undefined, { even: R.ftAfterEven.slice(0, 4), cleared: R.ftAfterClear });
 ok('a boss gets the strip on attack but NOT on walk (the game does not re-time boss walk)', R.bossAttackFields > 1 && R.bossWalkFields === 0 && R.bossWalkNote === true, { boss: R.boss, attack: R.bossAttackFields, walk: R.bossWalkFields, note: R.bossWalkNote });
-ok('the build badge names this build', /build v0\.30\.\d+/.test(R.badge || ''), { badge: R.badge });
+// v0.30.434 (f0d9f726) the number is resolved from GitHub for the commit the page is served from; served from
+// localhost there is no commit to resolve, so the badge names the animator file's own version (data-anim) instead.
+// scripts/animator_badge_test.mjs pins the GitHub-resolved states.
+ok('the build badge names this build', /build v0\.30\.\d+/.test(R.badge || '') ||
+  (/^v0\.30\.\d+$/.test(R.badgeAnim || '') && (R.badge || '') === 'build \u00b7 local (animator ' + R.badgeAnim + ')'), { badge: R.badge, anim: R.badgeAnim });
 ok('no page errors', errs.length === 0, { errs: errs.slice(0, 3) });
 await browser.close(); server.kill();
 let pass = 0; for (const t of results) { console.log((t.pass ? '  PASS  ' : '  FAIL  ') + t.n); if (!t.pass) console.log('        ' + JSON.stringify(t.x).slice(0, 360)); if (t.pass) pass++; }

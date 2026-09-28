@@ -3,7 +3,9 @@
 // projectile worth up to half the bar (_heavyFloorPct) and it steers at the player with no link to him, and his
 // Fracture / Shardfall / Sky-Break columns are meteor_warn hazards that resolve on the player regardless - so a final
 // blow landed with a salvo or a wall in the air hit the player during his death cinematic. The Sovereign got this fix
-// in v0.30.933. CONTROL: another source's projectile and hazard survive the same death.
+// in v0.30.933. CONTROL: another source's projectile and hazard survive the same death while a partner boss keeps the
+// fight on. Since v0.30.1245 the LAST boss of a fight takes every enemy projectile and hazard with it
+// (_lxBossAfterlifeScrub), so the control needs a live partner; killing the partner then clears the rest.
 //   node scripts/aetherion_death_scrub_test.mjs [page] [port]
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -32,6 +34,7 @@ const R = await page.evaluate(async () => {
   loadMap('forest', 300); game.paused = false; await sleep(1200);
   game.monsters.length = 0; game.projectiles.length = 0; game.hazards.length = 0;
   const m = spawnMonster(player.x + 400, player.y - 200, 'aetherion', true);
+  const partner = spawnMonster(player.x + 900, player.y - 200, 'slime', true);   // keeps the fight on (flag-only boss)
   try { _dismissBossIntro(); } catch (e) {}
   game.paused = true;   // nothing moves or resolves while we set up and kill
   _aeLance(m, 0, 4.6, 1, 0.5); _aeLance(m, 1.2, 4.6, 1, 0.5);
@@ -48,8 +51,13 @@ const R = await page.evaluate(async () => {
     ctlProj: game.projectiles.filter((p) => p.skill === 'splash').length,
     ctlHaz: game.hazards.filter((h) => h._sourceLabel === 'Test Meteor').length,
   };
+  killMonster(partner);   // the last boss: now nothing hostile outlives the fight
+  const last = {
+    ctlProj: game.projectiles.filter((p) => p.skill === 'splash').length,
+    ctlHaz: game.hazards.filter((h) => h._sourceLabel === 'Test Meteor').length,
+  };
   game.paused = false;
-  return { before, after };
+  return { before, after, last, partnerBoss: !!partner.isBoss };
 });
 await b.close(); srv.kill();
 let pass = 0, fail = 0;
@@ -58,6 +66,7 @@ ok(R.before.lances === 2 && R.before.cols === 2, 'setup: two Shard Lances and tw
 ok(R.after.lances === 0, 'his Shard Lances die with him (homing, up to half the bar)', R.after);
 ok(R.after.cols === 0, 'his meteor columns (Fracture / Shardfall / Sky-Break) die with him', R.after);
 ok(R.after.ctlProj === 1 && R.after.ctlHaz === 1, 'CONTROL: another source\'s projectile and hazard survive his death', R.after);
+ok(R.last.ctlProj === 0 && R.last.ctlHaz === 0, 'the LAST boss of the fight takes every enemy projectile and hazard with it (v0.30.1245)', R.last);
 ok(errs.length === 0, 'no page errors', errs.slice(0, 3));
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);

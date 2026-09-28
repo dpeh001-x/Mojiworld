@@ -1,4 +1,4 @@
-// ANIMATOR — an owned set's sliders edit the OWNER's calibration.
+// ANIMATOR — an owned set's sliders edit the calibration the game reads for it.
 // ============================================================================
 // Per user, on the aetherionastral entry: "I cant seem to edit this".
 //
@@ -13,6 +13,16 @@
 //
 // This drives the REAL slider element and dispatches a real 'input' event, so
 // it exercises the path a person actually uses rather than calling setVal.
+//
+// v0.30.234 (1cc646ed, per user: "it should be sized independently, do not let
+// my previous calib affect aetherion.attack") the game's calib key chain names
+// _aeAstralKey, so Astral Judgement reads its OWN aetherionastral calib. The
+// animator followed: calibration is self-keyed again, ART_OWNER stays for
+// geometry and the content-norm reference only. The same symptom now lives the
+// other way round - a slider that edited Aetherion's numbers would look dead
+// AND grow his ordinary swing - so this pins: the slider writes the set's own
+// key, leaves Aetherion alone, and the patch's type, calib and hitbox blocks
+// all describe that one entity (the v0.30.230 deletion hazard, by construction).
 // Run: node scripts/animator_owner_edit_test.mjs
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -82,6 +92,7 @@ const R = await page.evaluate(async () => {
   const btn = document.getElementById('copycur');
   if (btn) { btn.click(); await new Promise(r => setTimeout(r, 400)); }
   out.ownerHbStates = Object.keys((A.HBX()[A.ownerOf('aetherionastral')]) || {}).length;
+  out.selfHbStates = Object.keys((A.HBX().aetherionastral) || {}).length;
   out.patchRaw = copied;
   try { out.patch = copied ? JSON.parse(copied) : null; } catch (e) { out.patch = null; }
   return out;
@@ -99,14 +110,15 @@ console.log(`  patch type: ${R.patch && R.patch.type}  calib states ${R.patch &&
 ok('ownerOf is exposed to the controls layer', R.ownerExported,
    'without it the edit path cannot know which entity it is really editing');
 ok('aetherionastral is owned by aetherion', R.owner === 'aetherion', `ownerOf -> ${R.owner}`);
-ok('moving its slider writes to AETHERION',
-   !!(R.astral && R.astral.ok && R.astral.onOwner === R.astral.want && R.astral.onOwner !== R.astral.before),
-   `aetherion.attack.s ${R.astral && R.astral.before} -> ${R.astral && R.astral.onOwner} (slider asked for ${R.astral && R.astral.want}); it used to land on a key nothing reads`);
+// v0.30.234 - the game reads aetherionastral's own calib, so that is where the write belongs.
+ok('moving its slider writes the SET\'s own calib and leaves Aetherion\'s alone',
+   !!(R.astral && R.astral.ok && R.astral.onSelf === R.astral.want && R.astral.onOwner === R.astral.before),
+   `aetherionastral.attack.s = ${R.astral && R.astral.onSelf} (slider asked for ${R.astral && R.astral.want}); aetherion.attack.s ${R.astral && R.astral.before} -> ${R.astral && R.astral.onOwner}`);
 ok('CONTROL: an ordinary entity still edits itself',
    !!(R.king && R.king.ok && R.king.onSelf === R.king.want),
    `king.attack.s = ${R.king && R.king.onSelf} (asked ${R.king && R.king.want}), ownerOf('king') = ${R.selfOwner}`);
-ok('the copy-patch names the OWNER', !!(R.patch && R.patch.type === 'aetherion'),
-   `patch type = ${R.patch && R.patch.type} — a patch under 'aetherionastral' bakes a key the game never reads for calib`);
+ok('the copy-patch names the set itself (the key the game reads since v0.30.234)', !!(R.patch && R.patch.type === 'aetherionastral'),
+   `patch type = ${R.patch && R.patch.type} — a patch under 'aetherion' would bake the spell's sizing onto his ordinary swing`);
 ok('...and carries a full calib block, not a partial one',
    !!(R.patch && R.patch.calib && Object.keys(R.patch.calib).length >= 2),
    `${R.patch && R.patch.calib ? Object.keys(R.patch.calib).length : 0} states — the baker replaces the block, so a partial one would drop the rest`);
@@ -114,9 +126,12 @@ ok('...and carries a full calib block, not a partial one',
 // HITBOXES from the selected set: aetherionastral has none, so the patch carried
 // no hitbox block, and the baker's "removed when absent" rule then deleted all
 // three of Aetherion's authored hitboxes when the patch was applied for real.
-ok('...and the OWNER hitboxes, so baking cannot delete them',
-   !!(R.patch && R.patch.hitbox && Object.keys(R.patch.hitbox).length >= 3),
-   `${R.patch && R.patch.hitbox ? Object.keys(R.patch.hitbox).length : 0} hitbox states in the patch; the owner has ${R.ownerHbStates} — absent means DELETED at bake time`);
+// v0.30.234 - the hazard is closed by construction now: every block describes the entity the patch names, so
+// the absent hitbox block can only touch aetherionastral (which has none), never Aetherion's three.
+const patchHb = R.patch && R.patch.hitbox ? Object.keys(R.patch.hitbox).length : 0;
+ok('...and the hitboxes of the entity it names, so baking cannot delete another\'s',
+   !!(R.patch && R.patch.type === 'aetherionastral' && patchHb === R.selfHbStates && R.ownerHbStates >= 3),
+   `${patchHb} hitbox states in the patch; aetherionastral has ${R.selfHbStates}, Aetherion (untouched by this patch) has ${R.ownerHbStates} — absent means DELETED at bake time`);
 ok('CONTROL: no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 
 let bad = 0;

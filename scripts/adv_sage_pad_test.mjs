@@ -69,6 +69,15 @@ const out = await page.evaluate(async () => {
     window.__setBtn(0, 1); await wait(120); window.__setBtn(0, 0); await wait(600);
     r.advJobAfter = player.job;
   }
+  // applyJob opens the job's TALENT pick in this same modal 700 ms later (setTimeout(openTalentPick, 700)). Hiding the
+  // modal before that timer fires raced it: the talent pick re-showed the modal under the sage blessing and kept the
+  // pad. Wait for the talent pick (up to 2.5 s), then close it.
+  for (let i = 0; i < 25; i++) {
+    const h2 = document.querySelector('#advancement-modal h2');
+    const am = document.getElementById('advancement-modal');
+    if (am && am.style.display === 'flex' && h2 && /Talent/i.test(h2.textContent)) break;
+    await wait(100);
+  }
   try { document.getElementById('advancement-modal').style.display = 'none'; game.paused = false; } catch (e) {}
   await wait(300);
 

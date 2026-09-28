@@ -86,6 +86,10 @@ await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentload
 await page.waitForFunction(() => typeof spawnMonster === 'function'
   && typeof _aetherionAstralFrame === 'function' && typeof BOSS_ATTACK_FRAMES !== 'undefined',
   null, { timeout: 120000 });
+// v0.30.1196 (9e6f0fcf, lazy-art): boss frames are parked by the boot image hold until the boss is wanted, so the
+// astral set never starts loading on its own. Spawn Aetherion first - the game's own path (spawnMonster ->
+// _lxWarmBossFrames -> _lxBossArtWant) asks for his sets, aetherionastral included - then wait for the decode.
+await page.evaluate(() => { game.monsters = []; spawnMonster(600, 380, 'aetherion', true); game.monsters = []; });
 await page.waitForFunction(() => { try { const f = BOSS_ATTACK_FRAMES.aetherionastral;
   return !!(f && f.length && f.every(i => i && i.complete && i.naturalWidth > 0)); } catch (e) { return false; } },
   null, { timeout: 60000 }).catch(() => {});

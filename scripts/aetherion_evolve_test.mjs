@@ -34,7 +34,15 @@ await page.fill('#hero-name-input', 'Ascend');
 await page.evaluate(() => { const m = document.getElementById('class-select-modal'); for (const el of m.querySelectorAll('button,div,li')) { if (el.children.length > 3) continue; if (getComputedStyle(el).display === 'none') continue; if (/^\s*warrior\s*$/i.test((el.textContent || '').trim())) { el.click(); return; } } });
 await page.click('#cs-nav-next').catch(() => {});
 await page.waitForTimeout(2500);
-await page.evaluate(() => { player.level = 60; loadMap('forest', 300); });
+// v0.30.1116 (8aff2437) story beats queue: a beat fired while another is on screen waits its turn and then
+// PAUSES the world. Hiding the overlay no longer disposes of a pending one, so an arrival beat landing mid-run
+// froze the sim with his ascension half-played (flaky: it depended on when the beat's timer fired). Every beat
+// is marked seen up front - the story is not what this suite measures.
+await page.evaluate(() => {
+  player._storyBeatsSeen = player._storyBeatsSeen || {};
+  try { for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; } catch (e) {}
+  player.level = 60; loadMap('forest', 300);
+});
 await page.waitForTimeout(4500);
 
 const R = await page.evaluate(async () => {
@@ -56,12 +64,14 @@ const R = await page.evaluate(async () => {
     m.currentHp = Math.floor(m.maxHp * 0.42);          // cross the 50% line
     const samples = [];
     let burstAt = -1, swapAt = -1, t0 = -1;
-    for (let i = 0; i < 90; i++) {
-      const now = performance.now();
+    // sample until the beat has finished (bounded at 6 s), not a fixed 90 samples - a loaded machine runs fewer
+    // sim steps per wall-clock sample, and the 1400 ms beat then outlived the loop.
+    const tEnd = performance.now() + 6000;
+    for (let i = 0; performance.now() < tEnd; i++) {      const now = performance.now();
       if (m._aeEvoT >= 0 && t0 < 0) t0 = now;
       if (swapAt < 0 && m._phaseSprite === 'aetherion2') swapAt = m._aeEvoT;
       if (burstAt < 0 && (game.smoothFx || []).some((f) => f.spriteKey === 'ae_evolve')) burstAt = m._aeEvoT;
-      samples.push({ evoT: Math.round(m._aeEvoT), white: +(m._aeEvoWhite || 0).toFixed(2), phase: m._phaseSprite || null, inv: Math.round(m.invulnerable), sx: +(m.scaleX || 1).toFixed(2) });
+      samples.push({ paused: !!game.paused, evoT: Math.round(m._aeEvoT), white: +(m._aeEvoWhite || 0).toFixed(2), phase: m._phaseSprite || null, inv: Math.round(m.invulnerable), sx: +(m.scaleX || 1).toFixed(2) });
       if (m._aeEvoT === -1 && i > 10) break;
       await sleep(25);
     }

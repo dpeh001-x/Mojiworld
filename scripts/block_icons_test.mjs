@@ -35,7 +35,10 @@ console.log('art:', JSON.stringify(art));
 check(Object.values(art).every((a) => a.hash), 'all five Block icons (warrior, rogue, mage, archer, and the steel shield before a class) are the regenerated art', Object.fromEntries(Object.entries(art).map(([k, a]) => [k, a.hash])));
 check(Object.values(art).every((a) => a.w === 512 && a.h === 512 && a.corners), 'each is 512 px square on a transparent background, like the icons it replaces', art);
 const sw = readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
-check(/^const CACHE = 'mojiworld-assets-v\d+';[^\n]*Block icons/m.test(sw), 'sw.js moved its cache generation, so a returning browser drops the old icons', (sw.match(/^const CACHE[^\n]*/m) || [])[0]);
+// v0.30.895 shipped the icons behind cache v66; every later sw.js bump (v0.30.947 onward) rewrites that line's
+// comment, so assert the generation is at or above v66 instead of pinning the v66 comment.
+const swGen = +((sw.match(/^const CACHE = 'mojiworld-assets-v(\d+)';/m) || [])[1] || 0);
+check(swGen >= 66,'sw.js moved its cache generation, so a returning browser drops the old icons', (sw.match(/^const CACHE[^\n]*/m) || [])[0]);
 
 // ---------- in the game ----------
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT });

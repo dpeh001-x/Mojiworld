@@ -63,6 +63,11 @@ try {
     game.monsters.length = 0; game.hazards.length = 0; game.projectiles.length = 0;
     const m = spawnMonster(player.x + 300, player.y - 40, 'towerSovereign', true, false);
     if (!m) return { err: 'no sovereign' };
+    // v0.30.1245 (d893cafb) killMonster runs _lxBossAfterlifeScrub when the LAST boss of a fight dies and clears every
+    // enemy projectile and boss hazard, so a lone Sovereign's death now takes the controls with it by design. A partner
+    // boss keeps the fight on, so the "nothing else" half still tells his own scrub from the fight-end one.
+    const partner = spawnMonster(player.x + 500, player.y - 40, 'slime', true);
+    if (!partner) return { err: 'no partner boss' };
     game.hazards.push({ type: 'sovereign_drain_pillar', x: player.x, y: 0, w: 60, h: 600, life: 84, maxLife: 84 });
     game.hazards.push({ type: 'gloop_puddle', x: 0, y: 0, w: 10, h: 10, life: 50 });
     game.projectiles.push({ owner: 'enemy', skill: 'msovereign', homing: true, x: 0, y: 0, w: 8, h: 8, vx: 1, vy: 0, life: 200, damage: 5 });
@@ -74,10 +79,16 @@ try {
                   others: game.hazards.filter((h) => h && h.type === 'gloop_puddle').length,
                   roamers: game.projectiles.filter((p) => p && p.skill === 'msovereign').length,
                   otherShots: game.projectiles.filter((p) => p && p.skill === 'other').length };
+    // ...and when the partner (the last boss) falls, the fight-end scrub takes the rest.
+    partner.currentHp = 0; try { killMonster(partner); } catch (e) {}
+    out.afterFight = { others: game.hazards.filter((h) => h && h.type === 'gloop_puddle').length,
+                       otherShots: game.projectiles.filter((p) => p && p.skill === 'other').length };
     game.hazards.length = 0; game.projectiles.length = 0; game.monsters.length = 0; return out;
   });
   check(!sov.err && sov.pillars === 0 && sov.roamers === 0 && sov.others === 1 && sov.otherShots === 1,
     'the Sovereign\'s death clears his drain pillars and homing volley, and nothing else', J(sov));
+  check(!sov.err && sov.afterFight && sov.afterFight.others === 0 && sov.afterFight.otherShots === 0,
+    'when the last boss of the fight dies, the rest of the fight\'s leftovers go too (v0.30.1245)', J(sov.afterFight));
   // 4. Aetherion's choir leaves with him
   const choir = await page.evaluate(() => {
     game.monsters.length = 0;
