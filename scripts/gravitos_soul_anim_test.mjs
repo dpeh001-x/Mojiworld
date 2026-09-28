@@ -28,6 +28,11 @@ await page.waitForFunction(() => typeof drawMonster === 'function' && typeof BOS
 
 const out = await page.evaluate(async () => {
   const res = {};
+  // v0.30.1196 (9e6f0fcf) made boss art lazy: frames decode only once the boss
+  // is wanted. Release the image hold like the title menu does and ask for
+  // Gravitos the way spawnMonster does (all his forms' cast sets).
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
+  if (typeof _lxWarmBossFrames === 'function') _lxWarmBossFrames('gravitos');
   // the set must LOAD at all — that was the whole bug
   const frames = BOSS_ATTACK_FRAMES.gravitossoul;
   res.registered = !!frames;

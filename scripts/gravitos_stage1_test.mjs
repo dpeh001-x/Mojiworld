@@ -58,14 +58,21 @@ const r = await page.evaluate(async () => {
     m._phaseSprite = null; m.patternState = pattern; m.patternTimer = endTimer - 40;
     m._crushFired = true; m._slamGather = true; m._slamHit = true; m._zipPrep = true; m._slamPrep = true; m._tpWindMs = 0;
     m._instaTimer = m._rainTimer = m._soulTimer = 99999; m._ohkoWarnUntil = null;
-    const x0 = m.x; let warned = false, early = false;
-    for (let f = 0; f < 150; f++) {
+    // "early" is judged in REAL ms since the warning opened, not in rAF frames:
+    // the warning is counted on _rawDt, and on a slow headless host 45 frames
+    // can span well over 1.5 s, which read as "moved early" against a correct
+    // build (it failed at its own commit, af35f956, for that reason).
+    const x0 = m.x; let warned = false, early = false, warnAt = null, movedAfterMs = null;
+    for (let f = 0; f < 400; f++) {
       await frames(1);
-      if (m._tpWarn && m._tpWarn.kind === 'blink') warned = true;
-      if (f < 45 && Math.abs(m.x - x0) > 250) early = true;
-      if (!m._tpWarn && warned && Math.abs(m.x - x0) > 250) break;
+      if (m._tpWarn && m._tpWarn.kind === 'blink') { warned = true; if (warnAt == null) warnAt = performance.now(); }
+      if (Math.abs(m.x - x0) > 250) {
+        movedAfterMs = warnAt == null ? -1 : Math.round(performance.now() - warnAt);
+        if (warnAt == null || movedAfterMs < 800) early = true;
+        break;
+      }
     }
-    return { moved: Math.round(Math.abs(m.x - x0)), warned, early };
+    return { moved: Math.round(Math.abs(m.x - x0)), warned, early, movedAfterMs };
   };
   out.crushBlink = await blinkTest('crush', 1500);
   out.slamBlink = await blinkTest('slam', 1100);

@@ -18,18 +18,25 @@ const ck = (label, ok, extra) => { console.log(`${ok ? 'ok   ' : 'MISS '} ${labe
 
 console.log(`HEAD ${git(['rev-parse', '--short', 'HEAD']).trim()}  ${git(['log', '-1', '--format=%s']).trim().slice(0, 60)}\n`);
 
-for (const [key, fn, states] of [
-  ['gravitospunch', '_gravitosPunchFrame', 'crush / slam / zip'],
-  ['gravitossoul', '_gravitosSoulFrame', 'soulDrain + form-1 singularity/collapseRain'],
-  ['gravitoslaser', '_gravitosLaserFrame', 'laser'],
+// v0.29.592 (65175fc1) routed the three keys through _gravCastKey(m, base) so
+// forms 2/3 play their own gravitos2punch / gravitos3laser / ... sets (form 1
+// falls back to gravitos<base>), and the frame pick now tests the key by
+// SUFFIX (/punch$/ ...). v0.30.341 (162e7c5e) grew the punch set to 16 frames
+// (the shipped 9 plus 7 in-betweens).
+ck('cast-key resolver defined', cnt('function _gravCastKey(m, base) {') === 1 && cnt("const k = 'gravitos' + suf + base;") === 1);
+console.log('');
+for (const [key, fn, states, base, nFrames] of [
+  ['gravitospunch', '_gravitosPunchFrame', 'crush / slam / zip', 'punch', 16],
+  ['gravitossoul', '_gravitosSoulFrame', 'soulDrain + form-1 singularity/collapseRain', 'soul', 9],
+  ['gravitoslaser', '_gravitosLaserFrame', 'laser', 'laser', 9],
 ]) {
   console.log(`--- ${key}  (${states}) ---`);
   ck('type registered for loading', cnt(`\n  '${key}',`) === 1);
   ck('frame picker defined', cnt(`function ${fn}(`) === 1);
-  ck('draw override sets the key', cnt(`m._gravStarKey = '${key}';`) === 1);
-  ck('frame pick consults it', cnt(`_spriteKey === '${key}' && ${fn}(m)`) === 1);
-  const frames = tree.filter((f) => new RegExp(`Sprites/bosses/attack/${key}_\\d\\.webp$`).test(f)).length;
-  ck('9 frames committed', frames === 9, `(${frames})`);
+  ck('draw override sets the key', cnt(`m._gravStarKey = _gravCastKey(m, '${base}');`) === 1);
+  ck('frame pick consults it', cnt(`(/${base}$/.test(_spriteKey) && ${fn}(m))`) === 1);
+  const frames = tree.filter((f) => new RegExp(`Sprites/bosses/attack/${key}_\\d+\\.webp$`).test(f)).length;
+  ck(`${nFrames} frames committed`, frames === nFrames, `(${frames})`);
   console.log('');
 }
 console.log('--- laser FX ring ---');
@@ -41,8 +48,8 @@ ck('ring flag reset on pattern exit', cnt('m._laserFired = false; m._laserRingUp
 console.log('');
 console.log('--- frame index ---');
 const idx = git(['show', 'HEAD:data/sprite_frame_index.js']);
-for (const k of ['gravitospunch', 'gravitossoul', 'gravitoslaser'])
-  ck(`${k} indexed as 9`, idx.includes(`"${k}": 9`));
+for (const [k, n] of [['gravitospunch', 16], ['gravitossoul', 9], ['gravitoslaser', 9]])
+  ck(`${k} indexed as ${n}`, idx.includes(`"${k}": ${n}`));
 
 console.log(bad ? `\n${bad} problem(s) — NOT fully wired` : '\nAll Gravitos cast sets are wired in HEAD.');
 process.exit(bad ? 1 : 0);

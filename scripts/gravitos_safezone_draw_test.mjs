@@ -30,6 +30,19 @@ const check = (ok, label, detail) => { console.log(`  ${ok ? 'PASS' : 'FAIL'}  $
 
 await page.goto(URL + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof drawHazards === 'function' && typeof MAPS !== 'undefined', { timeout: 90000 });
+// v0.30.1234 (lazy fx) - Gravitos' fx art, the safe-zone ring included, loads
+// only when his type is asked for. Release the image hold as the title menu
+// does, ask for it the way spawnMonster does, and wait for the ring to decode;
+// without this the draw falls back to nothing and the checks below read 0 blits.
+await page.evaluate(() => {
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
+  if (typeof _lxFxWantMob === 'function') _lxFxWantMob('gravitos', true);
+});
+await page.waitForFunction(() => {
+  const ok = (im) => !!(im && im.complete && im.naturalWidth > 0);
+  const fr = typeof _fxAnimFrames === 'function' ? _fxAnimFrames('gravitos_singularity_zone') : null;
+  return (fr && fr.length && fr.every(ok)) || (typeof LX_FX !== 'undefined' && ok(LX_FX.gravitos_singularity_zone));
+}, null, { timeout: 60000 }).catch(() => console.log('  (safe-zone ring art never decoded - the blit checks will say so)'));
 
 const r = await page.evaluate(() => {
   loadMap('gravitosArena');

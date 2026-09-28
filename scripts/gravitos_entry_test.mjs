@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9164;
+const PORT = Number(process.argv[2] || process.env.PORT || 9164);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -48,7 +48,9 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
     mid = await page.evaluate(() => ({
       gate: !!window._lxBootGateDone,
       beatVisible: (() => { const sb = document.getElementById('story-beat-overlay'); return !!sb && sb.getClientRects().length > 0 && getComputedStyle(sb).display !== 'none'; })(),
-      cineGone: !document.getElementById('gravitos-entry-cine') && !document.querySelector('video'),
+      // v0.30.x map backdrop clips: the arena keeps a looping 1px <video id="map-bg-video-gravitosArena"> that the canvas
+      // samples for its sky, so "no <video> at all" is no longer the end state - no CINEMATIC video is.
+      cineGone: !document.getElementById('gravitos-entry-cine') && !document.querySelector('video:not([id^="map-bg-video-"])'),
     }));
     if (mid.cineGone && mid.beatVisible) break;
   }
@@ -82,6 +84,10 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
     const lo = document.getElementById('loading-overlay');
     if (lo) { lo.style.display = 'none'; lo.classList.remove('fade'); }
     window._lxBootGateDone = false;                    // gate re-armed, as at boot
+    // v0.29.721: the rescue arms only once the menu has been seen and stays pinned while the menu is UP (per user: the
+    // boot and the menu are not wedges). The wedge it guards comes after the player has left the menu, and a real exit
+    // (_finishHide) takes #lo-auth away with the overlay - so leave it here: the menu is no longer up.
+    { const au = document.getElementById('lo-auth'); if (au) au.classList.remove('shown'); window._lxBootMenuSeen = true; }
     player.cls = player.cls || 'warrior';
     game.paused = false;
     loadMap('forest', 300);

@@ -52,6 +52,10 @@ await page.waitForFunction(() => typeof _gravCastKey === 'function' && typeof BO
 
 const r = await page.evaluate(async ({ KEYS, ABSENT }) => {
   const dec = (s) => { let n = 0; for (const im of (s || [])) if (im && im.complete && im.naturalWidth > 0) n++; return n; };
+  // v0.30.1196 (9e6f0fcf) lazy-art: boss art stays parked until the boss is wanted. Release the image hold the way
+  // the title menu does, then ask for Gravitos's sets the way spawnMonster does (_lxWarmBossFrames -> _lxBossArtWant).
+  try { if (window._lxBootHold && _lxBootHold.release) _lxBootHold.release('menu'); } catch (e) {}
+  _lxWarmBossFrames('gravitos');
   const t0 = Date.now();
   while (Date.now() - t0 < 30000 && KEYS.some(k => dec(BOSS_ATTACK_FRAMES[k]) < 9)) await new Promise(z => setTimeout(z, 300));
   const out = { decoded: {}, keys: {}, picked: {}, fallback: {}, registered: {}, absentReg: {} };

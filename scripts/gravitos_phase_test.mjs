@@ -12,7 +12,8 @@ const GRADED = [
   'const chargeTime = phase === 3 ? 350 : phase === 2 ? 420 : 500;',
   'const speed = phase === 3 ? 14 : phase === 2 ? 12.5 : 11;',
   'const laserDur = chargeTime + (phase === 3 ? 1100 : phase === 2 ? 900 : 700);',
-  'm.patternTimer < 260 + (phase === 3 ? 520 : phase === 2 ? 620 : 720)',
+  // v0.30.858 (af35f956): the zip dive clock is _zt = m.patternTimer minus the teleport wind-up.
+  '_zt < 260 + (phase === 3 ? 520 : phase === 2 ? 620 : 720)',
   'const accel = phase === 3 ? 2.0 : phase === 2 ? 1.7 : 1.4;',
   'const vc = phase === 3 ? 22 : phase === 2 ? 19.5 : 17;',
   'const count = phase === 3 ? 7 : phase === 2 ? 5 : 3;',

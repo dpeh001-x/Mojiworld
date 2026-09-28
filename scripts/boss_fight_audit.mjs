@@ -16,6 +16,12 @@
 //                        stun never ticked down and read as a 49 s stunlock.
 //   • currentHp        — the LIVE hp field. Draining m.hp instead crossed no
 //                        phase thresholds at all.
+// And one it must UNDO: the solo downed beat (v0.27.10). A max-HP execute
+// (Gravitos) downs the player; a downed updatePlayer returns at its first gate,
+// so no CC timer ticks for the REST of the run - every later boss read "hits"
+// 5400 and Octobaby's 1.5 s mood-pulse stun read as a 64.9 s stunlock. The
+// harness refills to getMaxHp() (player.maxHp sat at half of it) and stands
+// the player back up after each step, counting the downs instead.
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -71,12 +77,24 @@ for (const type of BOSSES) {
       // roams the lower platforms) as sunk for 64 s while it was onGround the
       // whole time. Anything below every surface, and not standing on one, is
       // genuinely out of the world.
+      const topY = (game.mapData.platforms || []).reduce((a, p) => Math.min(a, p.y), gy);   // highest ledge on the map
       const floorY = (game.mapData.platforms || []).reduce((a, p) => Math.max(a, p.y), gy);
 
       game.monsters.length = 0;
       for (const k of ['projectiles', 'particles', 'hazards', 'minions', 'fxInstances']) if (game[k]) game[k].length = 0;
       game.keys = {};                                  // no input: worst case for CC escape
       player.level = 200; player.maxHp = 999999; player.hp = 999999;
+      const _M = Math.max(999999, getMaxHp()); player.maxHp = _M; player.hp = _M;
+      let downs = 0;
+      const _undown = () => {
+        if (!player._downed) return;
+        downs++;
+        player._downed = false; player._downedUntil = 0; player._downedSilent = false;
+        try { clearTimeout(player._downedAutoTimer); } catch (e) {}
+        try { const b = document.getElementById('coop-downed-banner'); if (b) b.remove(); } catch (e) {}
+        player.stunTimer = 0; player.frozenTimer = 0; player.hitStun = 0;
+      };
+      _undown(); downs = 0;
       player.x = ww * 0.5; player.y = gy - 80; player.vx = 0; player.vy = 0;
       player.invulnerable = 0; player._god = false; player.stunTimer = 0; player.frozenTimer = 0;
 
@@ -97,13 +115,16 @@ for (const type of BOSSES) {
         try { window.__step(16.667); } catch (e) { out.threw = String(e).slice(0, 140); break; }
         if (player.hp < hp0) hits++;
         player.hp = player.maxHp;
+        _undown();
         if (game.monsters.indexOf(m) < 0) { died = true; break; }
         if (![m.x, m.y, m.vx, m.vy].every(Number.isFinite)) { out.nan = true; break; }
 
         const ph = m.phase != null ? m.phase : m._phase;
         if (ph !== prevPhase) { phases++; prevPhase = ph; }
         if (m.x < -300 || m.x > ww + 300) off++;
-        if (m.y < gy - 900) air++;
+        // measured from the HIGHEST surface, not the top wide slab: Mooma's designed shake leap (vy -22) from the
+        // y 30 perch on wayfarersLantern1 peaks 473 px above it - 9 px past the old slab-900 line, a false stranding
+        if (m.y + m.h < topY - 600) air++;
         // FEET below every surface in the map.
         //
         // Two calibration mistakes were made here before this line settled, both
@@ -137,7 +158,7 @@ for (const type of BOSSES) {
         }
       }
       Object.assign(out, {
-        killable: game.monsters.indexOf(m) < 0, phases, hits, off, air, under,
+        killable: game.monsters.indexOf(m) < 0, phases, hits, off, air, under, downs,
         maxUnderSec: +(maxUnderRun / 60).toFixed(1), maxMon, maxProj, maxPart,
         maxStunSec: +(maxStun / 60).toFixed(1), maxFrzSec: +(maxFrz / 60).toFixed(1),
       });
@@ -149,7 +170,7 @@ for (const type of BOSSES) {
   const p = (v, n) => String(v ?? '-').padStart(n);
   console.log(String(type).padEnd(25) + p(r.phases, 4) + p(r.hits, 6) + p(r.under, 6) + p(r.air, 5) +
     p(r.off, 5) + p(r.maxMon, 5) + p(r.maxProj, 5) + p(r.maxPart, 5) + p(r.maxStunSec, 5) +
-    p(r.maxFrzSec, 5) + '  ' + (r.killable ? 'y' : 'NO') +
+    p(r.maxFrzSec, 5) + '  ' + (r.killable ? 'y' : 'NO') + (r.downs ? '  downs ' + r.downs : '') +
     (r.threw || r.fatal ? '  ERR ' + (r.threw || r.fatal) : ''));
 }
 

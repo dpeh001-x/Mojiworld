@@ -28,8 +28,11 @@ for (const a of assigns) {
 ok('every star-key assignment sits inside the singularity/collapseRain guard',
    guarded === assigns.length, { guarded, of: assigns.length });
 // idle/walk are only consulted when NOT attacking, and those patterns attack.
+// v0.29.957 (96f450eb) added weave/duck stances to the same guards
+// (`!_bossAttacking && !_bossWeaveImg && ...`), so match the leading
+// !_bossAttacking term rather than the whole old expression.
 ok('idle/walk lookups are skipped while attacking (so a star key can never reach them)',
-   /_bossWalking = !_bossAttacking/.test(src) && /_bossIdleImg = \(!_bossAttacking && !_bossWalking\)/.test(src), {});
+   /_bossWalking = !_bossAttacking\b/.test(src) && /_bossIdleImg = \(!_bossAttacking && !_bossWalking\b[^?]*\) \? _bossIdleFrame\(/.test(src), {});
 
 // --- 2. the generated frame index no longer advertises the deleted sets ------
 const idx = JSON.parse(readFileSync('data/sprite_frame_index.js', 'utf8')
@@ -73,6 +76,13 @@ page.on('response', r => { if (r.status() >= 400) bad.push(r.status() + ' ' + r.
 await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof BOSS_IDLE_FRAMES === 'object' && typeof BOSS_ATTACK_FRAMES === 'object', { timeout: 120000 });
 await page.waitForTimeout(12000);
+// v0.30.1196 (9e6f0fcf) made boss art lazy: it decodes only once the boss is
+// wanted. Release the image hold like the title menu does, then ask for
+// Gravitos the way spawnMonster does (covers gravitos2/3 and the star sets).
+await page.evaluate(() => {
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
+  if (typeof _lxWarmBossFrames === 'function') _lxWarmBossFrames('gravitos');
+});
 
 const r = await page.evaluate(async () => {
   const dec = (set) => { const f = set || []; let n = 0; for (const im of f) if (im && im.complete && im.naturalWidth > 0) n++; return n; };

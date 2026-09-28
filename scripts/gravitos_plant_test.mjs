@@ -7,6 +7,8 @@
 //   • 'zip' — the comet dive IS the attack; its handler owns velocity.
 //   • 'slam' — its lift/plummet writes vy every frame AFTER the plant, so the
 //     handler wins its windows; the plant only kills the between-window drift.
+// (v0.29.774 retired the slam lift/plummet: the slam is planted throughout and
+// repositions by its lock - see section 4. v0.29.938 added idle's recovery beat.)
 // This drives bossAI directly (the function that owns the plant) with seeded
 // stale velocity, and asserts what survives.
 // Run: node scripts/gravitos_plant_test.mjs [game-file]
@@ -52,19 +54,26 @@ const out = await page.evaluate(() => {
   }
 
   // 2. idle must drift (and engage the walk latch that picks the walk sprite)
+  // v0.29.938 added a RECOVERY BEAT: for the first 600 ms of idle after every
+  // pattern the drift is bled (vx *= 0.4) so the idle set gets a visible
+  // standstill. The drift therefore lives in idle's 600 ms..cycleBase window
+  // (1100 ms at phase 1) - pin the timer there, and check the beat separately.
   {
-    const m = mk('idle', 100);
+    const m = mk('idle', 700);
     m.vx = 0; m.vy = 0;
     let maxVx = 0, walked = false;
     for (let i = 0; i < 60; i++) {
       try { bossAI(m, 16.7, 300); } catch (e) { res.idle.err = String(e.message).slice(0, 60); break; }
-      m.patternTimer = 100;                  // pin inside idle so the chooser never fires a pattern
+      m.patternTimer = 700;                  // pin inside idle's drift window so the chooser never fires a pattern
       maxVx = Math.max(maxVx, Math.abs(m.vx));
       if (typeof _mobWalking === 'function' && _mobWalking(m)) walked = true;
     }
     res.idle.maxVx = +maxVx.toFixed(2);
     res.idle.walkLatch = walked;
     res.idle.stateStillIdle = m.patternState === 'idle';
+    // the recovery beat: a drifting boss that re-enters idle's first 600 ms settles
+    for (let i = 0; i < 30; i++) { try { bossAI(m, 16.7, 300); } catch (e) { break; } m.patternTimer = 100; }
+    res.idle.beatVx = +Math.abs(m.vx).toFixed(3);
   }
 
   // 3. zip's dive keeps its velocity (the exception)
@@ -75,16 +84,25 @@ const out = await page.evaluate(() => {
     res.zip.speed = +Math.hypot(m.vx, m.vy).toFixed(2);
   }
 
-  // 4. slam: lift window keeps its handler-written vy; the reposition gap is planted
+  // 4. slam. v0.29.774 (GROUNDED SLAM TELEGRAPH, after v0.29.772 pinned him to
+  // the floor) retired the rise (vy=-6) and the plummet: the slam is now a
+  // gather at his feet, a LOCK that moves him over the player's column, a warn
+  // band, and the stomp. Its motion is the lock's reposition, not velocity, so
+  // every window stays planted and the lock must land him on the player.
   {
-    const lift = mk('slam', 200);
-    try { bossAI(lift, 16.7, 300); } catch (e) { res.slam.err = String(e.message).slice(0, 60); }
-    res.slam.liftVy = lift.vy;
-    res.slam.liftVx = lift.vx;
-    const gap = mk('slam', 460);
-    gap._slamPrep = true;
-    try { bossAI(gap, 16.7, 300); } catch (e) { res.slam.err2 = String(e.message).slice(0, 60); }
-    res.slam.gapVy = gap.vy; res.slam.gapVx = gap.vx;
+    const gather = mk('slam', 200);
+    try { bossAI(gather, 16.7, 300); } catch (e) { res.slam.err = String(e.message).slice(0, 60); }
+    res.slam.gatherVy = gather.vy; res.slam.gatherVx = gather.vx;
+    const lock = mk('slam', 460);
+    lock.x = 1400;                          // far from the player, so the lock has to move him
+    lock._tpWarn = { kind: 'slam', el: 0, ms: 0, x: 0, y: 0, hold: 0, go: true }; lock._tpWindMs = 0;   // the teleport warning has run
+    try { bossAI(lock, 16.7, 300); } catch (e) { res.slam.err2 = String(e.message).slice(0, 60); }
+    res.slam.lockDx = Math.round((lock.x + lock.w / 2) - (player.x + player.w / 2));
+    res.slam.lockVy = lock.vy; res.slam.lockVx = lock.vx; res.slam.lockPrep = !!lock._slamPrep;
+    const strike = mk('slam', 700);
+    strike._slamPrep = true;
+    try { bossAI(strike, 16.7, 300); } catch (e) { res.slam.err3 = String(e.message).slice(0, 60); }
+    res.slam.strikeVy = strike.vy; res.slam.strikeVx = strike.vx;
   }
   return res;
 });
@@ -101,12 +119,13 @@ check(out.idle.maxVx > 0.6, 'idle drift accelerates toward the player', out.idle
 check(out.idle.walkLatch, 'the walk latch engages while drifting (walk sprite plays)', out.idle);
 console.log('\nthe two movement attacks keep their motion:');
 check(out.zip.speed > 1, 'zip dive still accelerates', out.zip);
-check(out.slam.liftVy === -6, 'slam lift still writes vy=-6 (handler wins after the plant)', out.slam);
-check(out.slam.liftVx === 0, 'slam lift has NO horizontal drift', out.slam);
-// timer 460 with prep done falls straight through slam's else-if chain to the
-// plummet branch (vy = 16·√gravMul) — there IS no planted hover window in slam,
-// so the right assertion is: dive speed intact, horizontal drift dead.
-check(out.slam.gapVy >= 16 && out.slam.gapVx === 0, 'slam plummet keeps its dive with zero horizontal drift', out.slam);
+check(out.idle.beatVx < 0.2, 'the v0.29.938 recovery beat bleeds the drift in idle\'s first 600 ms', out.idle);
+// v0.29.774: no lift, no plummet - the slam is planted and repositions by the lock
+check(out.slam.gatherVy === 0 && out.slam.gatherVx === 0, 'slam gather is planted (no rise since v0.29.774)', out.slam);
+// inside the stomp's own |dx| < 180 damage check (it lands a few px off centre after the lock's side effects)
+check(out.slam.lockPrep && Math.abs(out.slam.lockDx) < 60, 'slam lock repositions him over the player column', out.slam);
+check(out.slam.lockVx === 0 && out.slam.lockVy === 0, 'slam lock has NO drift (a reposition, not a glide)', out.slam);
+check(out.slam.strikeVy === 0 && out.slam.strikeVx === 0, 'slam warn/strike window is planted', out.slam);
 console.log(errs.length ? '\npage errors: ' + errs.slice(0, 3).join(' | ') : '\nno page errors');
 console.log(bad ? `\n${bad} check(s) failed` : '\nall good — planted while attacking, walking while idle, zip and slam keep their choreography');
 process.exit(bad || errs.length ? 1 : 0);
