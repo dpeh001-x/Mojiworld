@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1373';
+const GAME_VERSION = 'v0.30.1374';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -136532,6 +136532,33 @@ function _hvMageCastBody(t) {
   return { x, y };
 }
 // A glow and a spinning four-point spark on the wand tip as the bolt leaves (the bolt spawns on the cast frame)
+// v0.30.1374 - _lxArcherFlash: THE ARCHER'S STRING FLASH (per user: "push further with the archer string flash"). On the
+// release frame (HERO_VEC_ARCHER_RELEASE_T, the frame the arrow leaves) the loosed string lights up at the drawing hand:
+// a warm glow, a glint stretched along the shot, the string whipping forward and three streaks after the arrow, gone in
+// ~70 ms, travelling forward with the hand's release snap. Drawn in the drawing hand's frame turned back to the
+// character's own (forward = toward the target, mirrored with the hero), just ahead of the hand so it never whites the
+// hand out, and faded by the swing's weight.
+const HV_ARCHER_FLASH_T = 0.18;
+function _hvArcherStringFlash(c, t, w) {
+  const u = (t - HERO_VEC_ARCHER_RELEASE_T) / HV_ARCHER_FLASH_T;
+  if (!(u >= 0 && u < 1) || !(w > 0)) return;
+  const a = Math.pow(1 - u, 1.6) * w, e = _heroEaseOutCubic(u);
+  c.save(); c.translate(6, 0); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+  const R = 7 + 7 * e, g = c.createRadialGradient(0, 0, 0, 0, 0, R);
+  g.addColorStop(0, 'rgba(255,236,170,' + (0.75 * a) + ')'); g.addColorStop(0.5, 'rgba(255,190,90,' + (0.35 * a) + ')'); g.addColorStop(1, 'rgba(255,170,60,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.fill();
+  const L = 9 + 8 * e, S = 3 + 2 * e;   // the glint: long along the shot, short across it
+  c.fillStyle = 'rgba(255,248,215,' + (0.9 * a) + ')';
+  c.beginPath(); c.moveTo(L, 0); c.lineTo(1, 0.9); c.lineTo(0, S); c.lineTo(-1, 0.9); c.lineTo(-L * 0.55, 0); c.lineTo(-1, -0.9); c.lineTo(0, -S); c.lineTo(1, -0.9); c.closePath(); c.fill();
+  c.strokeStyle = 'rgba(255,240,200,' + (0.8 * a) + ')'; c.lineWidth = 1.2;   // the string whipping forward
+  c.beginPath(); c.arc(-4 + 10 * e, 0, 9, -0.95, 0.95); c.stroke();
+  c.strokeStyle = 'rgba(255,220,150,' + (0.65 * a) + ')'; c.lineWidth = 1;   // streaks after the arrow
+  for (const [yy, k] of [[-2.2, 0.8], [0, 1], [2.2, 0.7]]) {
+    const x0 = 6 + 16 * e;
+    c.beginPath(); c.moveTo(x0, yy); c.lineTo(x0 + 12 * k * (1 - u * 0.5), yy); c.stroke();
+  }
+  c.restore();
+}
 function _hvMageCastGlow(c, t, w) {
   const p = t < 0.05 ? t / 0.05 : Math.max(0, 1 - (t - 0.05) / 0.38), a = p * (w == null ? 1 : w);
   if (a <= 0.01) return;
@@ -138089,6 +138116,14 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     if (animName === 'attack_mage' && cls === 'mage' && !onlyPaintLayer && !hideCleanGroundSmashWeapon) drawBone('handL', () => {   // v0.30.1371 - the cast glow
       applyWeaponCarryRotation(); applyMageWandCounter(); _hvMageCastGlow(ctx, t, _hvFlowW);
     }, { deform: false, weaponLock: true });
+    if (animName === 'attack_archer' && cls === 'archer' && !onlyPaintLayer && t >= HERO_VEC_ARCHER_RELEASE_T && t < HERO_VEC_ARCHER_RELEASE_T + HV_ARCHER_FLASH_T) {   // v0.30.1374 - the string flash
+      ctx.save(); applyChain('root'); const _rootM = ctx.getTransform(); ctx.restore();
+      drawBone('handR', () => {
+        const _rel = _rootM.inverse().multiply(ctx.getTransform());
+        ctx.rotate(-Math.atan2(_rel.b, _rel.a));
+        _hvArcherStringFlash(ctx, t, _hvFlowW);
+      }, { deform: false });
+    }
   }
   // v0.25.137 — outlines bumped +1 px (was 1). Eye / mouth / weapon
   // strokes also +1 below for consistency.
