@@ -4,6 +4,9 @@
 // with exactly the price is paid; the help panel, the shard tooltip and Brok's menu quote the new numbers.
 //   node scripts/setshard_sinks_test.mjs      MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override the served tree
 // Negative control: v0.30.430 crafts at 1,000 / 2,000, transcends at 4,000, reforges at 500 and respecs on a level curve.
+// v0.30.961 (f4700b75, per user: "the price should be much much much more") re-priced the craft ladder: T5 8,000 ◈ +
+// 250,000 coins, T6 14,000 ◈ + 500,000 (T7/T8 added, T9+ uncraftable). The craft pins and the tooltip check follow it;
+// transcend / reforge / respec are unchanged from v0.30.431.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
@@ -27,18 +30,20 @@ try {
     player.setshards = REFORGE_COST; const paid = await _reforgeApply({ slot: 'weapon', item: w }); o.reforgePaid = { done: !!paid, left: player.setshards, starsKept: paid ? paid.stars : null };
     // the texts a player reads
     const html = document.body.innerHTML;
-    o.help = { craft: /3,?500◈|3500◈/.test(html) && /5,?000◈|5000◈/.test(html), reforge: /2,?000◈ per reforge|2000◈ per reforge|Reforge Bench \(2,?000◈\)|Reforge Bench \(2000◈\)/.test(html), old: /Reforge Bench \(500◈\)|500◈ per reforge|\(1000◈\), Reforge/.test(html) };
+    // v0.30.961: the smiths' CRAFT menus are built from CRAFT_TIER_COST at talk time, so read the table-driven text
+    // the same way they do (T5 low end) rather than scanning the page, which only ever held the static tooltip + a comment.
+    o.help = { craft: CRAFT_TIER_COST[5].shards === 8000 && CRAFT_TIER_COST[CRAFT_TIER_MAX].shards >= 14000, reforge: /2,?000◈ per reforge|2000◈ per reforge|Reforge Bench \(2,?000◈\)|Reforge Bench \(2000◈\)/.test(html), old: /Reforge Bench \(500◈\)|500◈ per reforge|\(1000◈\), Reforge/.test(html) };
     const tip = (document.querySelector('.stat-item.shard-item') || {}).title || ''; o.tooltip = tip;
     return o;
   });
   console.log('build ' + r.ver + ' craft ' + JSON.stringify(r.craft5) + ' / ' + JSON.stringify(r.craft6) + ' transcend ' + r.transcend + ' reforge ' + r.reforge + ' respec ' + JSON.stringify(r.respec));
-  ok('craft T5 costs 3,500 ◈ + 50,000 coins; T6 5,000 ◈ + 100,000 coins', r.craft5 && r.craft5.shards === 3500 && r.craft5.coins === 50000 && r.craft6 && r.craft6.shards === 5000 && r.craft6.coins === 100000, JSON.stringify([r.craft5, r.craft6]));
+  ok('craft T5 costs 8,000 ◈ + 250,000 coins; T6 14,000 ◈ + 500,000 coins (v0.30.961, per user)', r.craft5 && r.craft5.shards === 8000 && r.craft5.coins === 250000 && r.craft6 && r.craft6.shards === 14000 && r.craft6.coins === 500000, JSON.stringify([r.craft5, r.craft6]));
   ok('transcend costs 8,000 ◈', r.transcend === 8000, String(r.transcend));
   ok('reforge costs 2,000 ◈', r.reforge === 2000, String(r.reforge));
   ok('respec is a flat 1,500 ◈ at every level', r.respec.every((v) => v === 1500), JSON.stringify(r.respec));
   ok('the reforge gate is real: 1,999 ◈ is refused and keeps its shards; 2,000 ◈ pays, leaves 0 and keeps the stars', r.reforgeShort.refused && r.reforgeShort.left === 1999 && r.reforgePaid.done && r.reforgePaid.left === 0 && r.reforgePaid.starsKept === 3, JSON.stringify([r.reforgeShort, r.reforgePaid]));
   ok('the help panel and Brok quote the new prices and none of the old ones', r.help.craft && r.help.reforge && !r.help.old, JSON.stringify(r.help));
-  ok('the HUD shard tooltip states the flat 1,500 respec and the 3,500 / 5,000 crafts, and no longer says the respec scales', /Respec \(1,?500◈\)/.test(r.tooltip) && /tier 5 \(3,?500◈\)/.test(r.tooltip) && /tier 6 \(5,?000◈\)/.test(r.tooltip) && !/scales with your level/.test(r.tooltip), r.tooltip.slice(-160));
+  ok('the HUD shard tooltip states the flat 1,500 respec and the 8,000 / 14,000 crafts (v0.30.961), not the old 3,500 / 5,000, and no longer says the respec scales', /Respec \(1,?500◈\)/.test(r.tooltip) && /tier 5 \(8,?000◈\)/.test(r.tooltip) && /tier 6 \(14,?000◈\)/.test(r.tooltip) && !/\(3,?500◈\)|\(5,?000◈\)/.test(r.tooltip) && !/scales with your level/.test(r.tooltip), r.tooltip.slice(-160));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();
