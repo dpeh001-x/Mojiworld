@@ -15,7 +15,8 @@
 //   2. it is never smaller than the authored box, so nothing that lands today stops landing;
 //   3. end to end, standing on the sprite but outside the old box now takes damage;
 //   4. standing clear of the sprite still takes none — the box did not simply become huge;
-//   5. ground monsters are untouched.
+//   5. ground monsters follow the same rule since v0.30.x touch-sil (per user: touching a monster's silhouette hurts, from
+//      any side): their touch box holds their authored box and their silhouette box too.
 // Run: node scripts/flying_contact_test.mjs [file.html] [port]
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -71,13 +72,15 @@ const R = await page.evaluate(async () => {
                    tb.x + tb.w >= art.x + art.w - 0.5 && tb.y + tb.h >= art.y + art.h - 0.5;
     const notSmaller = tb.x <= m.x + 0.5 && tb.y <= m.y + 0.5 &&
                        tb.x + tb.w >= m.x + m.w - 0.5 && tb.y + tb.h >= m.y + m.h - 0.5;
-    return { t, box: { x: m.x, y: m.y, w: m.w, h: m.h }, vis: { w: m._visW, h: m._visH }, tb, art, covers, notSmaller,
+    const sv = (typeof _atkMonBox === 'function') ? _atkMonBox(m, true) : null;   // the silhouette box (touch flag: no arrow lift)
+    const coversSil = !!sv && tb.x <= sv.x + 0.5 && tb.y <= sv.y + 0.5 && tb.x + tb.w >= sv.x + sv.w - 0.5 && tb.y + tb.h >= sv.y + sv.h - 0.5;
+    return { t, box: { x: m.x, y: m.y, w: m.w, h: m.h }, vis: { w: m._visW, h: m._visH }, tb, art, covers, notSmaller, coversSil,
              grew: +((tb.w * tb.h) / Math.max(1, m.w * m.h)).toFixed(2) };
   };
   for (const t of fliers) { const r = await measure(t); if (r) out.rows.push(r); }
   for (const t of ground) {
     const r = await measure(t);
-    if (r) out.live.push({ t, unchanged: r.tb.w === r.box.w && r.tb.h === r.box.h });
+    if (r) out.live.push({ t, ok: r.notSmaller && r.coversSil, grew: r.grew });
   }
 
   // end to end, on the worst offender: stand ON the sprite but OUTSIDE the old box
@@ -91,7 +94,7 @@ const R = await page.evaluate(async () => {
     for (let i = 0; i < 40 && !(m._visW > 0); i++) await sleep(50);
     const tb = (typeof _mobTouchBox === 'function') ? _mobTouchBox(m) : { x: m.x, y: m.y, w: m.w, h: m.h };
     place(m, tb);
-    m.facing = ((player.x + player.w / 2) >= (m.x + m.w / 2)) ? 1 : -1;   // contact is facing-gated
+    m.facing = ((player.x + player.w / 2) >= (m.x + m.w / 2)) ? 1 : -1;   // faces you (touching no longer needs it; older builds did)
     const hp0 = player.hp;
     const hx = player.x, hy = player.y;
     // Hold both of them IN THE FRAME LOOP, not on a setInterval. The interval version of this was
@@ -139,7 +142,7 @@ for (const r of R.rows) {
 }
 const notCovering = R.rows.filter((r) => !r.covers).map((r) => r.t);
 const shrunk = R.rows.filter((r) => !r.notSmaller).map((r) => r.t);
-const groundChanged = R.live.filter((r) => !r.unchanged).map((r) => r.t);
+const groundOff = R.live.filter((r) => !r.ok).map((r) => r.t);
 console.log(`\non the sprite: ${R.onSprite} damage   |   clear of it: ${R.offSprite} damage`);
 
 const checks = [
@@ -149,7 +152,7 @@ const checks = [
   ['no flier\'s touch box is smaller than its authored box', shrunk.length === 0, shrunk.join(', ')],
   ['standing on the sprite, outside the old box, now takes damage', R.onSprite > 0 && R.onOverlap === true, R.onSprite + ' hp, boxes overlapped: ' + R.onOverlap],
   ['standing clear of the sprite still takes none', R.offSprite <= 0 && R.offOverlap === false, R.offSprite + ' hp (regen can tick it up a point, so this is <= 0), overlapped: ' + R.offOverlap],
-  ['ground monsters are untouched', groundChanged.length === 0, groundChanged.join(', ')],
+  ['ground monsters\' touch boxes hold their silhouette boxes too', R.live.length >= 4 && groundOff.length === 0, groundOff.join(', ') || R.live.map((r) => r.t + ' x' + r.grew).join(', ')],
   ['no page errors', errs.length === 0, errs.slice(0, 2).join(' | ')],
 ];
 let bad = 0; for (const [n, ok, x] of checks) { if (!ok) bad++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '   [' + x + ']' : ''}`); }

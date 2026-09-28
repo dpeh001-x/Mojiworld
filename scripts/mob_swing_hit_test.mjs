@@ -1,8 +1,9 @@
 // Live test: a monster's proximity swing hurts (per user: "some monsters such as drowned cur, gummibeau, skywisp
 // also have a problem where it has an animation but i dont take damage even when nearby within 80px") and the
 // Skywisp shows its storm-cloud cast (per user: "Skywisp attack animation doesnt indicate the cloud appearing").
-//   near + facing  : a monster standing just short of body contact swings - and the swing lands
-//   facing away    : no hit (the contact path's dodge-behind rule still holds)
+//   near + facing  : a monster standing just short of its touch box swings - and the swing lands (the touch box is its
+//                    authored box + its silhouette box since v0.30.x touch-sil, so "just short" is measured from that)
+//   facing away    : its swing does not land (a swing is thrown forward; a TOUCH hurts from any side since touch-sil)
 //   out of reach   : no swing, no hit
 //   cloudburst     : the caster plays its attack animation and its cloud forms right beside it, on the player's
 //                    side (per user: "skywisp should float and make the cloud should spawn close to it, remove the
@@ -43,19 +44,23 @@ try {
     const name = m.label || m.type;
     // gap between edges: just short of the touch box (a swing, not a bump), or far out of reach
     const pw = player.w, reach = 0.7 * m.w - pw / 2;
-    const gap = mode === 'far' ? m.w * 1.6 : Math.max(4, reach * 0.45);
+    // the touch box's overhang past the authored box on your side (0 until the monster is first drawn): "near" stands
+    // halfway between touching it and the swing's reach
+    const oh = () => { const tb = (typeof _mobTouchBox === 'function') ? _mobTouchBox(m) : m; return Math.max(0, m.x - tb.x); };
+    let gap = mode === 'far' ? m.w * 1.6 : Math.max(4, reach * 0.45);
+    const gapNow = () => (mode === 'far') ? gap : (gap = oh() + Math.max(1, (reach - oh()) * 0.5));
     // facing away is LOCKED: the AI turns an idle monster back to the player between our ticks
     if (mode === 'away') Object.defineProperty(m, 'facing', { configurable: true, get: () => 1, set() {} });
     // only this monster: the Drowned Cur's packCall summons hounds that bite under the same name
     const solo = () => { for (let i = game.monsters.length - 1; i >= 0; i--) if (game.monsters[i] !== m) game.monsters.splice(i, 1); };
-    const place = () => { solo(); m.x = PX + pw + gap; m.y = ground - m.h; m.vx = 0; m.vy = 0; m._mskTimer = 1e9;
-      if (mode !== 'away') m.facing = -1; if (game.hazards) game.hazards.length = 0; };
+    const place = () => { solo(); if (mode !== 'away') m.facing = -1; m.x = PX + pw + gapNow(); m.y = ground - m.h; m.vx = 0; m.vy = 0; m._mskTimer = 1e9;
+      if (game.hazards) game.hazards.length = 0; };
     place();
     // pin after EVERY AI step, not every 40 ms: between ticks a hopper (Gummibeau, jump 5) could start a hop and
     // never be "standing still", so it never swung and the run proved nothing
     const _oUM = window.updateMonsters;
     window.updateMonsters = function () { const r = _oUM.apply(this, arguments); try { place(); } catch (e) {} return r; };
-    const touching = typeof aabb === 'function' && typeof _mobTouchBox === 'function' ? aabb(player, _mobTouchBox(m)) : null;
+    let touching = null;   // read at the end, once the monster has been drawn (its touch box needs its drawn size)
     let hits = 0, swingsSeen = 0, lastSw = 0, swingHits = 0, wasDone = !!m._swHitDone;
     const t0 = performance.now();
     while (performance.now() - t0 < 6500) {
@@ -65,13 +70,14 @@ try {
       if (player._lastDamageSource === name) { hits++; player._lastDamageSource = null; }
       if (m._swHitDone && !wasDone) swingHits++; wasDone = !!m._swHitDone;   // the swing itself connected
     }
+    place(); touching = typeof aabb === 'function' && typeof _mobTouchBox === 'function' ? aabb(player, _mobTouchBox(m)) : null;
     window.updateMonsters = _oUM;
-    return { type, mode, gap: Math.round(gap), touching, hits, swingHits, swingsSeen, name };
+    return { type, mode, gap: Math.round(gap), oh: Math.round(oh()), touching, hits, swingHits, swingsSeen, name };
   }, [map, type, mode]);
   for (const [map, type] of CASES) {
     const near = await run(map, type, 'near'), away = await run(map, type, 'away'), far = await run(map, type, 'far');
     ok(`${type}: standing just short of you (not touching), its swing HURTS you`, near.touching === false && near.swingHits >= 1 && near.hits >= 1, near);
-    ok(`${type}: facing away, its swing does not land (dodge-behind still works)`, away.swingHits === 0, away);
+    ok(`${type}: facing away, its swing does not land (a swing is thrown forward)`, away.swingHits === 0, away);
     ok(`${type}: out of reach, its swing does not land`, far.swingHits === 0, far);
   }
   // the Skywisp's cloud cast

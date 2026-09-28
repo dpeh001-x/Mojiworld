@@ -16149,7 +16149,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1399';
+const GAME_VERSION = 'v0.30.1400';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -58700,7 +58700,7 @@ function _coopFollowerContactTick() {
   for (let i = 0; i < arr.length; i++) {
     const m = arr[i];
     if (!m || !m._coopMirror || m.currentHp <= 0) continue;
-    if (typeof aabb === 'function' && !aabb(player, m)) continue;
+    if (typeof aabb === 'function' && !aabb(player, (typeof _mobTouchBox === 'function') ? _mobTouchBox(m) : m)) continue;   // v0.30.1400 touch-sil - the host's touch box
     const dodgeC = (typeof getEvasion === 'function') ? getEvasion() : 0;
     if (dodgeC > 0 && Math.random() < dodgeC) {
       if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: 'DODGE', life: 40, color: '#88ffcc', size: 14 });
@@ -76783,7 +76783,7 @@ function aabb(a, b) {
 // at the head/midsection connect. ONLY for PLAYER attacks — m.h is untouched, so
 // movement/AI and monster->player contact still use the authored hitbox.
 // Falls back to the raw monster when not yet drawn (off-screen, no _sprTopOff).
-function _atkMonBox(m) {
+function _atkMonBox(m, touch) {   // v0.30.1400 touch-sil - touch: the body only, for _mobTouchBox (no arrow lift)
   if (!m) return m;
   // v0.26.x — Player-attack hit region = a CENTRED fraction of the target's
   // rendered VISUAL box (m._visW/_visH, stashed in the sprite draw). Sprites are
@@ -76832,7 +76832,7 @@ function _atkMonBox(m) {
     // mid-fight distance. 24 closes that with margin. The extension is upward
     // ONLY — into the empty space directly above the boss's head, which is
     // exactly where an arcing arrow travels.
-    const _lift = 24;
+    const _lift = touch ? 0 : 24;   // v0.30.1400 touch-sil - the lift is for arrows, not part of the body a touch meets
     return { x: _cx - _w / 2, y: (_bot - _h) - _lift, w: _w, h: _h + _lift };
   }
   const f = m.isZodiac ? 0.80 : (m.isBoss ? 0.60 : 0.90);
@@ -76898,16 +76898,22 @@ function _atkMonBoxCached(m) {
 //
 // Strictly ADDITIVE: the union with the authored box, so nothing that lands today can stop landing,
 // and a flier that has not been drawn yet (never on screen, no _visW) keeps its authored box exactly.
-// Everything else about contact is untouched — the facing gate still lets you dodge behind a mob,
-// and parry, evasion, i-frames and the on-screen gate all still run first.
+// Everything else about contact is untouched — parry, evasion, i-frames and the on-screen gate all still run first.
 //
-// GROUND monsters are deliberately left alone. Their sprites overhang their boxes too, but extending
-// their contact box upward would start damaging players who jump over a tall mob's head, which is a
-// balance change nobody asked for. This is scoped to fliers, which is what was reported.
+// v0.30.1400 touch-sil - EVERY MONSTER AND BOSS, FROM ANY SIDE (per user: touching a monster's silhouette hitbox damages the
+// player whichever way the monster or boss is facing). The fliers' rule above is now everyone's: once drawn, a monster's
+// touch box is its authored box united with its SILHOUETTE box - the region your attacks hit, the orange box the animator
+// draws and its hitbox editor sets - so a ground monster's drawn head and a boss's drawn body hurt too, and a box the
+// editor shifts forward (ox, mirrored with the facing) is followed as the monster turns. Measured on the previous build,
+// all 124 non-zodiac types: ground touch areas grow x1.61 median (x3.39 at most, the Ossuary Tyrant), bosses x1.24,
+// fliers unchanged; of the 12 zodiac signs only Scorpio changes (x1.88). Jumping over a monster now means clearing its
+// drawn head (the old reason ground monsters were
+// left out). The facing gate (v0.26.x) no longer applies to touching; it still gates the proximity swing's reach, which
+// is a blow thrown forward, not a touch. A small boss's box leaves out its 24 px arrow lift (_atkMonBox's touch flag):
+// that is empty air above its head, there so arcing shots connect, not its body.
 function _mobTouchBox(m) {
   if (!m || !m._visW || !m._visH) return m;                      // not drawn yet — authored box
-  if (typeof _lxMobIsFloating !== 'function' || !_lxMobIsFloating(m)) return m;
-  const v = (typeof _atkMonBoxCached === 'function') ? _atkMonBoxCached(m) : null;
+  const v = (typeof _atkMonBox === 'function') ? _atkMonBox(m, true) : null;   // fresh, not the per-frame cache: it follows a facing flip this step
   if (!v || v === m) return m;
   const x0 = Math.min(m.x, v.x), y0 = Math.min(m.y, v.y);
   const x1 = Math.max(m.x + m.w, v.x + v.w), y1 = Math.max(m.y + m.h, v.y + v.h);
@@ -95658,10 +95664,13 @@ function updateMonsters(dt) {
     // damage (its facing holds ~220ms via _facingHoldT and doesn't flip in the
     // close deadzone, giving a real dodge window). Bosses + minibosses keep
     // omnidirectional contact damage (their own threat identity).
+    // v0.30.1400 touch-sil - per user, TOUCHING hurts from any side: _faceOk now gates only the proximity swing's reach (a blow
+    // thrown forward), never a touch of the monster's box (authored + silhouette, _mobTouchBox).
     const _faceOk = (m.isBoss || m.isMiniBoss) ? true
       : (((player.x + player.w / 2) >= (m.x + m.w / 2) ? 1 : -1) === (m.facing || 1));
-    const _swReach = !m.isBoss && player.invulnerable <= 0 && _faceOk && !aabb(player, _mobTouchBox(m)) && _lxSwingReachHit(m);   // v0.30.1310 - a proximity swing's strike
-    if (_onScreen && (_swReach || aabb(player, _mobTouchBox(m))) && player.invulnerable <= 0 && _faceOk) {   // v0.30.x — fliers hit with the sprite you can see
+    const _touch = _onScreen && aabb(player, _mobTouchBox(m));
+    const _swReach = !m.isBoss && player.invulnerable <= 0 && _faceOk && !_touch && _lxSwingReachHit(m);   // v0.30.1310 - a proximity swing's strike
+    if (_onScreen && (_swReach || _touch) && player.invulnerable <= 0) {   // v0.30.x — fliers hit with the sprite you can see
       if (_swReach) m._swHitDone = true;
       // Parry window — perfect timing on Z completely negates + stuns
       if (player.parryWindow > 0) {
