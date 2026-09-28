@@ -10,7 +10,7 @@ window.LX_NPC_OFFSET_DATA = {
   "Old Arlen": -3,
   "Petunia": -2,
   "The Amnesiac": -1,
-  "Will": -2,
+  "Will": 2,
 };
 window.LX_NPC_SCALE_DATA = {
   "Fashionista": 1.13,
