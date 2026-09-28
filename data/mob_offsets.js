@@ -36,7 +36,7 @@ window.LX_MOB_OFFSET_DATA = {
   "cookie": 2,
   "cosmicMochi": 6,
   "deranged_kuro": 2,
-  "elderbark": 11,
+  "elderbark": 1,
   "emberling": 1,
   "expressTicketMech": 2,
   "fatDragon": 2,

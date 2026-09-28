@@ -260,7 +260,10 @@
 // otherwise keep the old two frames until its cache refreshed.
 // fruit-four - v114 -> v115. Pinechad, Meloncholy, Thornmaw and Elderbark are redrawn and re-animated under their
 // own names (statics + 27 frames each), so a returning browser would otherwise keep the old art until its cache refreshed.
-const CACHE = 'mojiworld-assets-v118';   // v0.30.1387 - column warnings flattened (same names)
+// v0.30.1391 - v118 -> v119. Elderbark (static + idle / walk / attack 0..8) is REPLACED under its own names
+// (a slight outline; the attack frames sharpened), so a returning
+// browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v119';   // v0.30.1391 - Elderbark outlined + sharpened
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
