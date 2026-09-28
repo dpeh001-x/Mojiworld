@@ -1,5 +1,5 @@
 // Dawn's Favor - what finishing the story unlocks (v0.30.803) - and the Titles panel that carries it. The aura is
-// painted art since v0.30.813 (scripts/gen_everdawn_aura.mjs).
+// painted art since v0.30.813, and one crest - the Conqueror's Crest, Sprites/fx/dawn_crest.webp - since v0.30.1325.
 // One character is measured before and after it holds the Conqueror title (what a finished save looks like):
 // coins and kill EXP must pay exactly +10%, the aura must draw and switch off, titles must be choosable, the
 // credits must lead into the panel, and the U panel must offer it. Nothing may change for an unfinished save.
@@ -31,6 +31,7 @@ try {
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     try { _playStoryBeat = function () { return false; }; } catch (e) {}   // a fresh character's story beats would own the pause
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+    try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}   // v0.30.1325 - this test skips the title menu, which is what lets held art load (v0.30.1254 title-first holds even _lxNow art until then)
     loadMap('forest', 300); await sleep(1500);
     for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
     game.paused = false;
@@ -65,14 +66,13 @@ try {
     // the level-ups and quest rewards above raise a burst of legendary toasts, and since v0.30.906 the notice waits its
     // turn in the queue rather than pushing one of them off - so wait for it to reach the screen (it must: a top-rank toast no longer goes stale)
     for (let i = 0; i < 200 && !out.after.toast; i++) { await sleep(100); out.after.toast = /Dawn's Favor/.test(document.body.innerText); }
-    // v0.30.813 - the painted aura: wait for its art, then count the layers; blank the art to see the stand-in
-    for (let i = 0; i < 150 && !(LX_DAWN_ART.frames && LX_DAWN_ART.halo.naturalWidth && LX_DAWN_ART.sigil.naturalWidth && LX_DAWN_ART.frames.every((f) => f.naturalWidth)); i++) await sleep(100);
-    out.artReady = !!(LX_DAWN_ART.frames && LX_DAWN_ART.frames.every((f) => f.naturalWidth > 0) && LX_DAWN_ART.halo.naturalWidth > 0 && LX_DAWN_ART.sigil.naturalWidth > 0);
+    // v0.30.1325 - the crest: wait for its art, then count the layers; blank the art to see the stand-in
+    for (let i = 0; i < 150 && !(LX_DAWN_ART.crest && LX_DAWN_ART.crest.naturalWidth); i++) await sleep(100);
+    out.artReady = !!(LX_DAWN_ART.crest && LX_DAWN_ART.crest.naturalWidth > 0);
     out.painted = layers();
-    // v0.30.817 - translucent: every painted layer is see-through, and the wings' cross-fade holds its cover between frames
-    { const A = LX_DAWN_WINGS_ALPHA, p = LX_DAWN_XFADE_P; const cover = [0, 0.25, 0.5, 0.75, 1].map((f) => 1 - (1 - A * Math.pow(1 - f, p)) * (1 - A * Math.pow(f, p)));
-      out.sheer = { wings: A, halo: LX_DAWN_HALO_ALPHA, sigil: LX_DAWN_SIGIL_ALPHA, maxDrawn: Math.max.apply(null, out.painted.alphas), cover: cover.map((c) => +c.toFixed(3)) }; }
-    const keepHalo = LX_DAWN_ART.halo; LX_DAWN_ART.halo = new Image(); out.standIn = layers(); LX_DAWN_ART.halo = keepHalo;
+    // v0.30.817 - translucent (per user, 60% for the crest since v0.30.1325): no painted layer is drawn above it
+    out.sheer = { crest: LX_DAWN_CREST_ALPHA, glow: LX_DAWN_GLOW_ALPHA, maxDrawn: Math.max.apply(null, out.painted.alphas) };
+    const keepCrest = LX_DAWN_ART.crest; LX_DAWN_ART.crest = new Image(); out.standIn = layers(); LX_DAWN_ART.crest = keepCrest;
     player.dawnAuraOff = true; out.off = layers(); out.offStrokes = out.off.strokes; player.dawnAuraOff = false;
     // motes are particles, and particles live in WORLD x: scroll the camera and see where they are born
     loadMap('forest', 1500); await sleep(1500); hush(); game.paused = false;
@@ -113,9 +113,9 @@ try {
     check(r.escCloses, 'Escape closes the panel and releases the pause');
     check(r.after.done && Math.abs(cr - 1.10) < 0.0005, 'a finished save earns exactly +10% Mojicoins', `${r.before.coins} -> ${r.after.coins} (x${cr.toFixed(4)})`);
     check(Math.abs(er - 1.10) < 0.0005, 'and exactly +10% EXP from a kill', `${r.before.exp} -> ${r.after.exp} (x${er.toFixed(4)})`);
-    check(r.artReady && r.painted.images >= 4 && r.painted.strokes === 0, 'the Everdawn Aura is painted: halo, wings (cross-faded, with bloom) and sigil are drawn as art', JSON.stringify(r.painted));
-    check(r.sheer.maxDrawn <= 0.62 && r.sheer.wings <= 0.6 && r.sheer.halo <= 0.6 && r.sheer.sigil <= 0.6 && r.sheer.cover.every((c) => Math.abs(c - r.sheer.wings) <= 0.02),
-      'the aura is translucent: no layer is drawn above 62% and the wings hold their cover through the cross-fade', JSON.stringify(r.sheer));
+    check(r.artReady && r.painted.images >= 2 && r.painted.strokes === 0, 'the Everdawn Aura is painted: the crest and its glow are drawn as art', JSON.stringify(r.painted));
+    check(Math.abs(r.sheer.crest - 0.6) < 1e-9 && r.sheer.glow <= 0.6 && r.sheer.maxDrawn <= 0.62,
+      'the crest is drawn at 60% (per user) and no layer above 62%', JSON.stringify(r.sheer));
     check(r.standIn.strokes === 9 && r.standIn.images === 0, 'until the art has decoded the nine-ray stand-in is drawn instead', JSON.stringify(r.standIn));
     check(r.off.strokes === 0 && r.off.images === 0, 'switched off, nothing is drawn', JSON.stringify(r.off));
     check(r.motes.camX > 500 && r.motes.n >= 2 && r.motes.worstDx <= 45, 'with the camera scrolled, motes are born at the hero (world x), not at the screen x', JSON.stringify(r.motes));
@@ -131,9 +131,9 @@ try {
   const u = await page.evaluate(() => { const row = document.getElementById('u-jump-row'); const t = row && row.querySelector('[data-ujump="titles"]');
     const lbl = row ? row.textContent.replace(/\s+/g, ' ') : ''; if (t) t.click(); return { lbl, opened: !!document.getElementById('titles-modal') }; });
   check(/Compendium L/.test(u.lbl) && !/MojiDex L/.test(u.lbl) && u.opened, 'U panel: the L button says Compendium, and Titles opens the panel', u.lbl);
-  const art = ['Sprites/fx/dawn_halo.webp', 'Sprites/fx/dawn_sigil.webp', 'Sprites/fx/dawn_aura.webp']; for (let i = 0; i < 9; i++) art.push('Sprites/fx/anim/dawn_aura_' + i + '.webp');
+  const art = ['Sprites/fx/dawn_crest.webp'];
   const served = await page.evaluate(async (list) => { const bad = []; for (const u of list) { try { const r = await fetch(u); if (!r.ok || !/webp/.test(r.headers.get('content-type') || '')) bad.push(u + ' ' + r.status); } catch (e) { bad.push(u + ' ' + e.message); } } return bad; }, art);
-  check(served.length === 0, 'all 12 aura files are served as WebP', served.slice(0, 3).join(' | '));
+  check(served.length === 0, 'the crest is served as WebP', served.slice(0, 3).join(' | '));
   check(!errs.length, 'no page errors', errs.slice(0, 2).join(' | '));
 } catch (e) { check(false, 'harness error', String(e.message).slice(0, 300)); }
 await browser.close(); server.kill();
