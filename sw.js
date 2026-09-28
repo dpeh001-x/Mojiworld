@@ -241,7 +241,7 @@
 // (the grand gold chest), so a returning browser would otherwise keep the plain one until its cache refreshed.
 // v0.30.1308 silver-embellish - v101 -> v102. Sprites/objects/chest_silver.webp and chest_silver_open.webp are REPLACED under
 // their own names (the embellished silver chest), so a returning browser would otherwise keep the plain one until its cache refreshed.
-const CACHE = 'mojiworld-assets-v102';   // v0.30.1308 - the embellished silver chest (same names)
+const CACHE = 'mojiworld-assets-v103';   // v0.30.1311 - five zodiac bosses redrawn (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

@@ -17,7 +17,9 @@
 import sharp from 'sharp';
 import { readFileSync } from 'node:fs';
 sharp.cache(false);
-const A = 24, MIN = 50, K = 0.913;
+// v0.30.x zodiac rework (per user): the redrawn Virgo is composed at 0.879 of its v0.30.293 size inside the same >= 50 px
+// margin, so the recompose factor is 0.913 x 0.879 and calib s = 1/K = 1.246 keeps her the same size on screen.
+const A = 24, MIN = 50, K = 0.8025;
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 200) });
 

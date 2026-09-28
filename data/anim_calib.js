@@ -1154,17 +1154,17 @@ window.LX_ANIM_CALIB = {
   },
   "zodiac_virgo": {
     "zodiac/idle": {
-      "s": 1.095,
+      "s": 1.246,
       "dx": 0,
       "dy": 0
     },
     "zodiac/walk": {
-      "s": 1.095,
+      "s": 1.246,
       "dx": 0,
       "dy": 0
     },
     "zodiac/attack": {
-      "s": 1.095,
+      "s": 1.246,
       "dx": 0,
       "dy": 0
     },
@@ -1178,11 +1178,11 @@ window.LX_ANIM_CALIB = {
         72,
         60,
         60,
-        60,
-        60,
         90,
         132,
         90,
+        60,
+        60,
         96
       ],
       "ftAuto": true
@@ -1300,16 +1300,31 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_aquarius": {
+    "zodiac/idle": {
+      "s": 1.279,
+      "dx": 0,
+      "dy": 0
+    },
+    "zodiac/walk": {
+      "s": 1.279,
+      "dx": 0,
+      "dy": 0
+    },
+    "zodiac/attack": {
+      "s": 1.279,
+      "dx": 0,
+      "dy": 0
+    },
     "attack": {
       "ft": [
         72,
         60,
         60,
+        60,
+        60,
         90,
         132,
         90,
-        60,
-        60,
         96
       ],
       "ftAuto": true
@@ -1412,16 +1427,31 @@ window.LX_ANIM_CALIB = {
     }
   },
   "zodiac_pisces": {
+    "zodiac/idle": {
+      "s": 1.05,
+      "dx": 0,
+      "dy": 0
+    },
+    "zodiac/walk": {
+      "s": 1.05,
+      "dx": 0,
+      "dy": 0
+    },
+    "zodiac/attack": {
+      "s": 1.05,
+      "dx": 0,
+      "dy": 0
+    },
     "attack": {
       "ft": [
         72,
         60,
         60,
-        60,
-        60,
         90,
         132,
         90,
+        60,
+        60,
         96
       ],
       "ftAuto": true
@@ -1429,17 +1459,17 @@ window.LX_ANIM_CALIB = {
   },
   "zodiac_sagittarius": {
     "zodiac/idle": {
-      "s": 1,
+      "s": 1.092,
       "dx": 0,
       "dy": 0.027
     },
     "zodiac/walk": {
-      "s": 1,
+      "s": 1.092,
       "dx": 0,
       "dy": 0.027
     },
     "zodiac/attack": {
-      "s": 1,
+      "s": 1.092,
       "dx": 0,
       "dy": 0.027
     },
@@ -3557,6 +3587,86 @@ window.LX_ATK_HITBOX = {
       "h": 1.02,
       "ox": -0.006,
       "oy": 0.289
+    }
+  },
+  "zodiac_sagittarius": {
+    "idle": {
+      "w": 0.5495,
+      "h": 0.5495,
+      "ox": 0,
+      "oy": 0
+    },
+    "walk": {
+      "w": 0.5495,
+      "h": 0.5495,
+      "ox": 0,
+      "oy": 0
+    },
+    "attack": {
+      "w": 0.5495,
+      "h": 0.5495,
+      "ox": 0,
+      "oy": 0
+    }
+  },
+  "zodiac_pisces": {
+    "idle": {
+      "w": 0.5714,
+      "h": 0.5714,
+      "ox": 0,
+      "oy": 0
+    },
+    "walk": {
+      "w": 0.5714,
+      "h": 0.5714,
+      "ox": 0,
+      "oy": 0
+    },
+    "attack": {
+      "w": 0.5714,
+      "h": 0.5714,
+      "ox": 0,
+      "oy": 0
+    }
+  },
+  "zodiac_aquarius": {
+    "idle": {
+      "w": 0.4691,
+      "h": 0.4691,
+      "ox": 0,
+      "oy": 0
+    },
+    "walk": {
+      "w": 0.4691,
+      "h": 0.4691,
+      "ox": 0,
+      "oy": 0
+    },
+    "attack": {
+      "w": 0.4691,
+      "h": 0.4691,
+      "ox": 0,
+      "oy": 0
+    }
+  },
+  "zodiac_virgo": {
+    "idle": {
+      "w": 0.5273,
+      "h": 0.5273,
+      "ox": 0,
+      "oy": 0
+    },
+    "walk": {
+      "w": 0.5273,
+      "h": 0.5273,
+      "ox": 0,
+      "oy": 0
+    },
+    "attack": {
+      "w": 0.5273,
+      "h": 0.5273,
+      "ox": 0,
+      "oy": 0
     }
   }
 };

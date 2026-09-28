@@ -81,7 +81,7 @@ zodiac_libra:{w:181,h:250,mul:1.104},
 zodiac_scorpio:{w:217,h:218,mul:1.3028,zmul:1.2,dy:40},
 zodiac_sagittarius:{w:303,h:387,mul:0.7545},
 zodiac_capricorn:{w:231,h:244,mul:1.2295,zmul:1.3},
-zodiac_aquarius:{w:199,h:277,mul:1.1119},
+zodiac_aquarius:{w:277,h:313,mul:0.984},
 zodiac_pisces:{w:311,h:339,mul:0.9322,f:1},
 // --- end zodiac ---
 // --- added from the live game (scripts/gen_mob_hitboxes.mjs) ---
