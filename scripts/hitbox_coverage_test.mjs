@@ -8,6 +8,8 @@
 // idle and walk sets, and frames vary by a few %), and the sprite itself did not move: the game's own visual target
 // size (m._visH, what every frame is scaled to before pose normalisation) is within 6% of the pre-change build's value
 // - that is what the draw multiplier compensates.
+// v0.30.1399: an expect row may carry "pose": "top" - the base state is then judged at its TALLEST frames (a flapping idle's
+// rest pose) instead of its median frame; a flapper spends most of its loop with the wings down (Virga's redrawn idle).
 //   node scripts/hitbox_coverage_test.mjs [--all]     (default: the 30 tallest; --all is ~12 minutes)
 //   MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override the served tree.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -24,6 +26,7 @@ const errs = []; page.on('pageerror', (e) => errs.push(String(e.message).slice(0
 try {
   await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof game === 'object' && typeof drawMonster === 'function' && typeof monsterTypes === 'object', null, { timeout: 180000 }); await page.waitForTimeout(6000);
+  await page.evaluate((pose) => { window._lxHbPose = pose; }, Object.fromEntries(types.map((t) => [t, EXPECT[t].pose || null])));   // v0.30.1399: "top" = judge at the tallest frames
   await page.evaluate((base) => { window._lxHbBase = base; }, Object.fromEntries(types.map((t) => [t, EXPECT[t].baseState || null])));   // the state each box was planned from
   const r = await page.evaluate(async (list) => {
     const o = { ver: GAME_VERSION, types: {} }; const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -55,7 +58,7 @@ try {
         const by = { idle: [], walk: [], attack: [] }; for (const s of samples) by[s.st].push(s);
         const med = (arr) => { const s = arr.slice().sort((a, b) => a - b); return s.length ? s[s.length >> 1] : null; }; const sc = samples.length ? samples[0].sc : 1;
         // the base state is judged at its median height (the frames within 6% of it); staggered frames were never sampled
-        const stat = (arr) => { if (!arr.length) return null; const hs = arr.map((s) => s.v.h); const H = med(hs); const q = arr.filter((s) => Math.abs(s.v.h - H) < H * 0.06); const use = q.length ? q : arr; return { n: arr.length, visH: +(H / sc).toFixed(1), visW: +(med(use.map((s) => s.v.w)) / sc).toFixed(1), cover: +med(use.map((s) => s.hb.h / (s.v.h - Math.max(0, s.v.y + s.v.h - (s.hb.y + s.hb.h))))).toFixed(3), widthRatio: +med(use.map((s) => s.hb.w / s.v.w)).toFixed(3) }; };
+        const stat = (arr) => { if (!arr.length) return null; const hs = arr.map((s) => s.v.h); const H = (window._lxHbPose && window._lxHbPose[type] === 'top') ? Math.max(...hs) : med(hs); const q = arr.filter((s) => Math.abs(s.v.h - H) < H * 0.06); const use = q.length ? q : arr; return { n: arr.length, visH: +(H / sc).toFixed(1), visW: +(med(use.map((s) => s.v.w)) / sc).toFixed(1), cover: +med(use.map((s) => s.hb.h / (s.v.h - Math.max(0, s.v.y + s.v.h - (s.hb.y + s.hb.h))))).toFixed(3), widthRatio: +med(use.map((s) => s.hb.w / s.v.w)).toFixed(3) }; };
         const cands = ['idle', 'walk', 'attack'].filter((st) => by[st].length); const planned = list.length && window._lxHbBase && window._lxHbBase[type];
         const baseSt = (planned && by[planned].length >= 8) ? planned : (by.idle.length >= 20) ? 'idle' : cands.sort((a, b) => by[b].length - by[a].length)[0];
         o.types[type] = { box: { w: m.w, h: m.h }, state: baseSt, base: baseSt ? stat(by[baseSt]) : null, visH: visH0, visW: visW0 };

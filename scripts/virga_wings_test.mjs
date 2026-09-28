@@ -17,7 +17,8 @@
 //   4. anim_calib carries s = 1/k on the exact keys the renderer looks up, so
 //      the recompose is cancelled and she is the SAME size on screen
 //   5. fly keeps the user's own s, and the redrawn walk / fly carry their size
-//      compensation as a uniform fs (idle / attack carry none)
+//      compensation as a uniform fs; since v0.30.1399 the redrawn idle does too
+//      (attack carries none)
 // Run: node scripts/virga_wings_test.mjs
 import sharp from 'sharp';
 import { readFileSync } from 'node:fs';
@@ -88,8 +89,13 @@ ok("...and fly does NOT carry the recompose compensation (it was never rescaled)
 const fsOf = (k) => (V[k] && Array.isArray(V[k].fs)) ? V[k].fs : null;
 const uni = (k, v) => { const f = fsOf(k); return !!f && f.length === 9 && f.every((x) => x === v); };
 ok("the redrawn walk and fly keep her body size through a uniform per-frame scale (fs), not s",
-   uni("zodiac/walk", 1.055) && uni("zodiac/fly", 1.101) && sOf("zodiac/fly") === 1.14 && !fsOf("zodiac/idle") && !fsOf("zodiac/attack"),
+   uni("zodiac/walk", 1.055) && uni("zodiac/fly", 1.101) && sOf("zodiac/fly") === 1.14 && !fsOf("zodiac/attack"),
    "walk fs " + JSON.stringify(fsOf("zodiac/walk")) + ", fly fs " + JSON.stringify(fsOf("zodiac/fly")) + ", fly s " + sOf("zodiac/fly"));
+// v0.30.1399 virga-idle: the idle is redrawn too (one full wingbeat per pass, 9 frames, the user's pick) and follows the same
+// rule: s stays 1/K (the hit region's), a uniform fs keeps her body its old size on screen.
+ok("the redrawn idle keeps her body size through a uniform per-frame scale (fs 1.086), not s",
+   uni("zodiac/idle", 1.086) && sOf("zodiac/idle") === want,
+   "idle fs " + JSON.stringify(fsOf("zodiac/idle")) + ", s " + sOf("zodiac/idle"));
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
