@@ -244,7 +244,10 @@
 // v0.30.1312 - v103 -> v104. 7 projectile stills + loops and the vfx quake plume + loop
 // (outlines trimmed, 80 files) are REPLACED under their own names, so a returning
 // browser would keep drawing the old effects for a session.
-const CACHE = 'mojiworld-assets-v104';   // v0.30.1312 - trimmed outlines
+// v0.30.1318 - v104 -> v105. 24 outline-trimmed files (mstarshot still + loop, mrivet 5/7,
+// mblightseed 4-7, quake plume still + 1-7) are cleaned and REPLACED under their own names, so a returning
+// browser would keep drawing the old effects for a session.
+const CACHE = 'mojiworld-assets-v105';   // v0.30.1318 - clean trimmed outlines
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
