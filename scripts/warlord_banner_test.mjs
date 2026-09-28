@@ -87,6 +87,10 @@ const R = await page.evaluate(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   try { loadMap('forest'); game.paused = false; player._god = true; } catch (e) {}
   await sleep(1500);
+  // v0.30.1234 lazy fx art: skill fx decode only once the skill asks for them (warlord_warcry ->
+  // 'fx:warlord_banner_planted'); ask the way a cast does, and release the image hold (v0.30.1196) like the title menu.
+  try { if (window._lxBootHold && _lxBootHold.release) _lxBootHold.release('menu'); } catch (e) {}
+  try { if (typeof _lxFxWantSkill === 'function') _lxFxWantSkill('warlord_warcry', true); } catch (e) {}
   const img = LX_FX && LX_FX.warlord_banner_planted;
   for (let i = 0; i < 100 && !(img && img.complete && img.naturalWidth > 0); i++) await sleep(100);
   if (!(img && img.naturalWidth > 0)) return { err: 'banner image never decoded' };
@@ -105,7 +109,9 @@ const R = await page.evaluate(async () => {
   P.drawImage = function (...a) {
     if (this === ctx) {
       const src = a[0];
-      const cache = img._lxProjCache ? Object.values(img._lxProjCache) : [];
+      // v0.30.636 made _lxProjScaled's cache a Map (oldest-first eviction); Object.values() of a Map is []
+      const pc = img._lxProjCache;
+      const cache = pc ? (typeof pc.values === 'function' && pc instanceof Map ? [...pc.values()] : Object.values(pc)) : [];
       const isBanner = src === img || cache.includes(src);
       if (isBanner && a.length === 5) draws.push({ preScaled: src !== img, dw: a[3], dh: a[4] });
     }

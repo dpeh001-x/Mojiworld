@@ -73,11 +73,14 @@ const undisc = await page.evaluate(() => {
   const spriteShown = hrefs.some(h => h === 'Sprites/world/regions/' + cand + '.webp');
   const labelText = node ? Array.from(node.querySelectorAll('.wm-node-label, text'))
     .map(t => t.textContent).join(' ') : '';
-  const nameFogged = /\?\?\?/.test(labelText) && !(labelText.includes((MAPS[cand].name || '')) && (MAPS[cand].name || '').length > 2);
+  // v0.30.647 (d6b2a44b): the fog prints no "???" any more - an unvisited node's label is empty. What this protects
+  // is unchanged: the real NAME must not show until you have been there ("???" or nothing both keep it hidden).
+  const nm = (MAPS[cand].name || '');
+  const nameFogged = (labelText.trim() === '' || /\?\?\?/.test(labelText)) && !(nm.length > 2 && labelText.includes(nm));
   return { cand, spriteShown, nameFogged, labelText };
 });
 ok('undiscovered region NOW shows its painted symbol', undisc.skipped || undisc.spriteShown, undisc);
-ok('undiscovered region keeps its NAME fogged as "???"', undisc.skipped || undisc.nameFogged, undisc);
+ok('undiscovered region keeps its NAME fogged (no text since v0.30.647, was "???")', undisc.skipped || undisc.nameFogged, undisc);
 
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 console.log(`\n${pass}/${pass + fail} checks passed`);

@@ -54,6 +54,11 @@ try {
         _tutStep = i; _renderTutorialStep();
         await new Promise((x) => setTimeout(x, 220));
         const card = modal.querySelector('.modal'); if (!card) continue;
+        // v0.30.951 (_lxTutSmooth) tweens the card's height between steps with a 180 ms Web Animation. On a loaded
+        // headless box that tween is still running at 220 ms, and a card measured mid-tween reads as "clipped by
+        // 7-8 px" with its nav row outside it. Measure the height the card SETTLES at: wait the tween out.
+        try { await Promise.race([Promise.all(card.getAnimations().map((an) => an.finished.catch(() => {}))),
+          new Promise((x) => setTimeout(x, 2000))]); } catch (e) {}
         const c = B(card);
         const hits = [];
         for (const id of HUD) {

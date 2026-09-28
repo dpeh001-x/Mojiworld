@@ -15,7 +15,7 @@ const EXE = [process.env.PW_EXE,
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
-const URL = 'http://localhost:8765/mojiworld_game.html';
+const URL = 'http://localhost:' + (process.env.PORT || 8765) + '/mojiworld_game.html';
 const R = []; const ok = (n, c, x) => { R.push(!!c); console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? ' — ' + x : '')); };
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
@@ -37,23 +37,32 @@ const r = await page.evaluate(() => {
   // clean baseline: no combo, no boosts
   game.combo = 0; player.mods = player.mods || {}; player.mods.xpBoost = 0;
   const m = spawnMonster(player.x + 60, player.y, 'slime', false, false);
+  // v0.30.923 (bb8fe7e4): a kill pays the raw stats-table number. Pin a round exp and a same-level
+  // mob so the level-gap falloff (v0.29.858) and the max(1, ...) floor cannot hide a stray multiplier.
+  m.level = player.level; m.exp = 400;
   const baseExp = m.exp;
   const before = player.exp | 0;
   const beforeLvl = player.level;
+  const f = (n) => (typeof window[n] === 'function') ? window[n]() : 1;
+  const sit = { diff: f('_diffExpMul'), affix: f('_affixExpMul'), ks: f('_ksXpMul'), dawn: f('_lxDawnExpMul'), gear: 1 + (player.mods.xpBoost || 0) + getEquipBonus('xpBoost') };
   m.currentHp = 0; killMonster(m);
   const gain = (player.exp | 0) - before;
   const evt = (typeof LX_EVENT_EXP_MULT === 'number') ? LX_EVENT_EXP_MULT : 1;
   const mult = (typeof LX_MONSTER_EXP_MULT === 'number') ? LX_MONSTER_EXP_MULT : null;
-  return { baseExp, gain, evt, mult, lvlChanged: player.level !== beforeLvl, map: game.currentMap };
+  return { sit, baseExp, gain, evt, mult, lvlChanged: player.level !== beforeLvl, map: game.currentMap };
 });
 console.log(JSON.stringify(r));
-ok('LX_MONSTER_EXP_MULT is 1 (was 2)', r.mult === 1, 'mult=' + r.mult);
-// expected: floor(base * boost(1) * combo(>=1: first kill comboBonus=1) * prestige(1)
-//           * comboXp(1) * xpCurve(1.35) * coop(1) * pq(1) * early(1) * evt * 1)
-const expected = Math.floor(r.baseExp * 1.35 * r.evt * 1);
-const expectedOld = Math.floor(r.baseExp * 1.35 * r.evt * 2);
-ok('kill awards exactly the HALVED amount', !r.lvlChanged && r.gain === expected, `gain=${r.gain} expected=${expected} (old would be ${expectedOld})`);
-ok('award is half the pre-change value', r.gain * 2 === expectedOld, `${r.gain}*2 == ${expectedOld}`);
+// v0.30.923 (bb8fe7e4) retired the monster knob and the x1.35 curve from the kill award: "a kill pays
+// what the stats table says". LX_EXP.monster (2 since v0.29.869) survives only as a record, and the
+// halving this suite protected is now subsumed - the award carries NO monster multiplier at all.
+ok('the knob is a record only (LX_MONSTER_EXP_MULT is still defined)', typeof r.mult === 'number', 'mult=' + r.mult);
+// expected: the raw table number times only the SITUATIONAL, earned multipliers the award line lists
+// (difficulty, world affix, kill streak, dawn, gear xpBoost) - read live, since the save/map may carry one.
+const sitMul = Object.values(r.sit).reduce((a, b) => a * b, 1);
+const expected = Math.max(1, Math.floor(r.baseExp * sitMul));
+const expectedOld = Math.floor(r.baseExp * 1.35 * r.mult);
+ok('kill awards exactly the raw table EXP', !r.lvlChanged && r.gain === expected, `gain=${r.gain} expected=${expected} (old would be ${expectedOld})`);
+ok('neither the knob nor the x1.35 curve is applied', r.gain < expectedOld, `${r.gain} < ${expectedOld}`);
 ok('no page errors', errs.length === 0, errs.join(' | '));
 await b.close();
 const fails = R.filter(x => !x).length;

@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9192;
+const PORT = process.env.PORT || 9192;
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -83,6 +83,10 @@ const out = await page.evaluate(async () => {
   document.getElementById('tut-collapse').click();
   await wait(200);
   r.collapsedAgain = modal.classList.contains('tut-collapsed');
+  // v0.29.727 pops the pad's on-screen keyboard (#pad-vk) when a text field takes focus within 4 s of pad use.
+  // Whether the boot menu's name field has focused by now is load timing; when it has, pad-vk is the modal root
+  // and this read "root=pad-vk". Dismiss it the way its own close key does, so Settings is judged on its own.
+  try { if (typeof _lxPadVK !== 'undefined') _lxPadVK.close(); if (document.activeElement) document.activeElement.blur(); } catch (e) {}
   openSettingsModal();
   await wait(300);
   const btn = document.getElementById('set-tutorial-open');
@@ -146,7 +150,8 @@ ok('that button brings the minimised tour back',
    `collapsed=${out.collapsedAgain} reopened=${out.reopenedFromSettings}`);
 
 ok("the U panel carries a jump row for the pad-unreachable panels",
-   out.uOpen === true && out.jumpLabels && out.jumpLabels.join(",") === "map,quest,codex,mojidex",
+   out.uOpen === true && out.jumpLabels && // v0.30.803 (e2a37ac1) added Titles and v0.30.1144 (02b2e8c3) Achievements to the row
+   out.jumpLabels.join(",") === "map,quest,codex,mojidex,titles,achv",
    JSON.stringify(out.jumpLabels));
 ok("its buttons are visible and the U panel is a pad root",
    out.jumpsVisible === true && !!out.uIsPadRoot, "padRoot=" + out.uIsPadRoot + " visible=" + out.jumpsVisible);

@@ -13,7 +13,9 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+import { fileURLToPath } from 'node:url';
+// derived from this script's own location (was hardcoded to the shared working copy)
+const ROOT = process.env.SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require(ROOT + '/node_modules/playwright-core');
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
@@ -61,6 +63,11 @@ try {
     const out = { cases: {} };
     try { loadMap('forest'); game.paused = false; } catch (e) { out.err = String(e); return out; }
     await sleep(1200);
+    // The inner foil is a lowFx-gated layer (skipped under _perfLowFx, as the crit's gold rim is).
+    // Headless Chrome here trips the perf governor into LX_PERF.lowFx/veryLowFx, which strips it and
+    // made this check fail on every build since v0.30.695 - pin the governor off before measuring.
+    try { _perfTick = function () {}; } catch (e) {}
+    try { if (typeof LX_PERF === 'object' && LX_PERF) { LX_PERF.lowFx = false; LX_PERF.veryLowFx = false; } } catch (e) {}
     player._god = true; game.monsters.length = 0; game.projectiles.length = 0; game.hazards.length = 0;
     const cv = document.getElementById('game');
     const cx2 = cv.getContext('2d');
@@ -153,15 +160,23 @@ try {
       const P = CanvasRenderingContext2D.prototype;
       const oGrad = P.createLinearGradient, oStroke = P.strokeText, oFill = P.fillText, oClip = P.clip;
       const rec = { grads: 0, strokes: [], fills: [], clips: 0 };
-      P.createLinearGradient = function (...a) { rec.grads++; return oGrad.apply(this, a); };
-      P.strokeText = function (...a) { rec.strokes.push({ w: +(+this.lineWidth).toFixed(2), c: String(this.strokeStyle) }); return oStroke.apply(this, a); };
-      P.fillText = function (...a) { rec.fills.push(typeof this.fillStyle === 'string' ? String(this.fillStyle) : 'GRADIENT'); return oFill.apply(this, a); };
-      P.clip = function (...a) { rec.clips++; return oClip.apply(this, a); };
+      // Record ONLY the calls drawDamageNumbers makes: with the governor pinned to full fx the
+      // world/HUD text drawn after it (gradient nameplates etc.) otherwise lands in the last-N slices.
+      const oDn = drawDamageNumbers; let inDn = false;
+      drawDamageNumbers = function (...a) { inDn = true; try { return oDn.apply(this, a); } finally { inDn = false; } };
+      P.createLinearGradient = function (...a) { if (inDn) rec.grads++; return oGrad.apply(this, a); };
+      P.strokeText = function (...a) { if (inDn) rec.strokes.push({ w: +(+this.lineWidth).toFixed(2), c: String(this.strokeStyle) }); return oStroke.apply(this, a); };
+      // v0.30.735 (21f7f887, per user) gave PLAIN hits a white-crown ramp (_lxPlainGrad) too, so a
+      // gradient alone no longer marks the dealt treatment: label that shared ramp PLAIN-RAMP.
+      const isPlainRamp = (g) => { try { for (const m of _dnPlainGrad.values()) for (const v of m.values()) if (v === g) return true; } catch (e) {} return false; };
+      P.fillText = function (...a) { if (inDn) rec.fills.push(typeof this.fillStyle === 'string' ? String(this.fillStyle) : (isPlainRamp(this.fillStyle) ? 'PLAIN-RAMP' : 'GRADIENT')); return oFill.apply(this, a); };
+      P.clip = function (...a) { if (inDn) rec.clips++; return oClip.apply(this, a); };
       const camY = (game.camera && game.camera.y) || 0;
       game.damageNumbers.push(Object.assign({ x: game.camera.x + LX, y: camY + LY, vy: 0, life: 300, maxLife: 300, size: 15 }, extra));
       await waitFrames(14);            // settle past the pop-in, then a few drawn frames
       const snapshot = { grads: rec.grads, strokes: rec.strokes.slice(-6), fills: rec.fills.slice(-4), clips: rec.clips };
       P.createLinearGradient = oGrad; P.strokeText = oStroke; P.fillText = oFill; P.clip = oClip;
+      drawDamageNumbers = oDn;
       game.damageNumbers.length = 0;
       return snapshot;
     };
@@ -198,7 +213,7 @@ try {
   const foilOf = (x) => colouredStrokes(x).filter((k) => k.w <= 2.5).map((k) => k.c);
   ok('GRADIENT FILL: the number the player took is filled with a gradient, like a dealt hit',
     (T.fills || []).includes('GRADIENT'), 'fills ' + JSON.stringify((T.fills || []).slice(-2)));
-  ok('CONTROL: the same number untagged is still a flat fill, with no coloured marks',
+  ok('CONTROL: the same number untagged keeps the plain fill (flat, or the v0.30.735 plain ramp), with no coloured marks',
     !(P.fills || []).includes('GRADIENT') && colouredStrokes(P).length === 0,
     'fills ' + JSON.stringify((P.fills || []).slice(-1)) + ', coloured strokes ' + JSON.stringify(colouredStrokes(P).map((k) => k.c)));
   ok('INNER FOIL: a light 2 px stroke mixed from its own colour rides the glyph',

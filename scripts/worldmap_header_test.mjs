@@ -49,7 +49,7 @@ await page.waitForTimeout(2200);
 const a = await page.evaluate(() => {
   const h = document.getElementById('worldmap-header');
   const f = (sel) => { const el = h.querySelector(sel); if (!el) return null; const cs = getComputedStyle(el);
-    return { face: cs.fontFamily.split(',')[0].replace(/"/g, ''), size: parseFloat(cs.fontSize), style: cs.fontStyle, track: cs.letterSpacing, text: (el.textContent || '').trim().slice(0, 24) }; };
+    return { face: cs.fontFamily.split(',')[0].replace(/"/g, ''), size: parseFloat(cs.fontSize), style: cs.fontStyle, tt: cs.textTransform, track: cs.letterSpacing, text: (el.textContent || '').trim().slice(0, 24) }; };
   const bar = document.getElementById('worldmap-progress');
   const counts = (document.getElementById('worldmap-counts').textContent || '').match(/(\d+)\s*\/\s*(\d+)/);
   const closes = [...document.querySelectorAll('button')].filter((b) => (b.textContent || '').trim() === '✕' && b.offsetParent !== null)
@@ -103,12 +103,13 @@ const a = await page.evaluate(() => {
     closes, overlap, headerH: Math.round(hr.height) };
 });
 checks.push(['exactly one close button is on screen, not two', a.closes.length === 1, JSON.stringify(a.closes)]);
-// v0.30.650 moved the map's display face from Cinzel to Marcellus SC; either is the map's face
-checks.push(['the title is set in the map display face, tracked and in caps', !!a.title && /Alegreya|Marcellus|Cinzel/.test(a.title.face) && parseFloat(a.title.track) >= 2, a.title ? `${a.title.face} ${a.title.size}px, tracking ${a.title.track}` : 'no title']);
-checks.push(['the chip pairs a Cormorant label with a display-face place name',
-  !!a.chipKey && /Cormorant/.test(a.chipKey.face) && a.chipKey.style === 'italic' && !!a.chipName && /Alegreya|Marcellus|Cinzel/.test(a.chipName.face),
+// v0.30.650 moved the map's display face from Cinzel to Marcellus SC; v0.30.1085 (a433bc69, per user "The world
+// map header can be more punk too") set the whole header in chunky 900 Nunito - title, sticker, place, count, key.
+checks.push(['the title is set in the pop face (Nunito), tracked and in caps', !!a.title && /Nunito/.test(a.title.face) && parseFloat(a.title.track) >= 1.5 && a.title.tt === 'uppercase', a.title ? `${a.title.face} ${a.title.size}px, tracking ${a.title.track}` : 'no title']);
+checks.push(['the chip pairs a caps sticker label with the place name, both in the pop face',
+  !!a.chipKey && /Nunito/.test(a.chipKey.face) && a.chipKey.tt === 'uppercase' && !!a.chipName && /Nunito/.test(a.chipName.face),
   a.chipKey && a.chipName ? `"${a.chipKey.text}" ${a.chipKey.face} + "${a.chipName.text}" ${a.chipName.face}` : 'missing']);
-checks.push(['the count and the key hint are set in Cormorant', !!a.counts && /Cormorant/.test(a.counts.face) && !!a.key && /Cormorant/.test(a.key.face), a.counts ? a.counts.face + ' ' + a.counts.size + 'px' : '']);
+checks.push(['the count and the key hint are set in the pop face', !!a.counts && /Nunito/.test(a.counts.face) && !!a.key && /Nunito/.test(a.key.face), a.counts ? a.counts.face + ' ' + a.counts.size + 'px' : '']);
 checks.push(['the discovery bar matches the count it sits beside', a.total > 0 && Math.abs(a.barPct - (a.visited / a.total) * 100) < 0.6, `${a.visited}/${a.total} = ${((a.visited / a.total) * 100).toFixed(1)}%, bar ${a.barPct}%`]);
 checks.push(['nothing in the header runs under the close button', a.overlap === null, a.overlap || 'clear']);
 // v0.30.660 — the header no longer takes a slice of the modal: it floats over the map, so its own

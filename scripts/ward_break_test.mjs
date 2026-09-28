@@ -38,7 +38,9 @@ try {
     // 5. drawing: the gauge bar under the shield (labelled from 85%), the shatter quarters, then the ring alone
     const img = LX_FX.boss_shield;
     const capture = () => { const c = { shield: 0, quarters: 0, rects: 0, labels: [], err: null }; const P = CanvasRenderingContext2D.prototype; const oI = P.drawImage, oR = P.fillRect, oT = P.fillText;
-      P.drawImage = function (im, ...a) { if (im === img) { if (a.length >= 8) c.quarters++; else c.shield++; } return oI.apply(this, [im, ...a]); };
+      // the ward draws _lxPinned(img) (v0.30.405): a canvas that keeps its source on _lxSrc. Minting that pin is itself a
+      // drawImage(img) onto an offscreen canvas, so count only draws that land on the GAME canvas.
+      P.drawImage = function (im, ...a) { if (this === ctx && (im === img || (im && im._lxSrc === img))) { if (a.length >= 8) c.quarters++; else c.shield++; } return oI.apply(this, [im, ...a]); };
       P.fillRect = function (...a) { c.rects++; return oR.apply(this, a); }; P.fillText = function (t, ...a) { c.labels.push(String(t)); return oT.apply(this, [t, ...a]); };
       try { drawMonster(m); } catch (e) { c.err = String(e && e.message); } finally { P.drawImage = oI; P.fillRect = oR; P.fillText = oT; } return c; };
     m._wardUntil = now() + 90; m._wardGauge = 0.9; const dWard = capture(); o.drawWard = { shield: dWard.shield, quarters: dWard.quarters, label: dWard.labels.includes('BREAK'), err: dWard.err };

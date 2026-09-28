@@ -114,28 +114,35 @@ try {
     out.bodyReHidden = getComputedStyle(body).display === 'none';
     return out;
   });
-  ok('hero objective is BIG (15px) with 3D keycaps', aaa.heroSize === '15px' && aaa.kbdCap === '3px', aaa);
+  // v0.30.1018 (858cd60e, per user: "make it take less space, make the fonts rounder and cuter") set the dock's
+  // objective to Nunito 800 12.5px, the same size as Guguma's line - it is no longer a 15px hero. Pin that size
+  // (and that it is not SMALLER than her line) plus the 3D keycaps, which survived the restyle.
+  const guguSize = await page.evaluate(() => { const g = document.getElementById('tut-guguma-line'); return g ? parseFloat(getComputedStyle(g).fontSize) : 0; });
+  ok('objective is 12.5px (v0.30.1018), not smaller than the Guguma line, with 3D keycaps',
+    aaa.heroSize === '12.5px' && parseFloat(aaa.heroSize) >= guguSize && aaa.kbdCap === '3px', { ...aaa, guguSize });
   ok('prose hidden behind Details on objective steps', aaa.hasTry && aaa.bodyHiddenByDefault && aaa.detailsBtnShown, aaa);
   ok('Details toggle reveals + re-hides the prose', aaa.bodyShownAfterDetails && aaa.bodyReHidden, aaa);
   // completion sweep fires on tick
   const flash = await page.evaluate(() => { _tutPing('attack'); return document.querySelector('#tutorial-modal .modal').classList.contains('tut-flash-done'); });
   ok('completion sweep animates the card', flash === true);
 
-  // Informational steps: pill hidden, body visible, no Details button.
+  // v0.29.576 (70cf8c69, per user: "ensure each step of the tutorial is completable") gave EVERY step a TRY IT
+  // objective, so the informational (pill-less) steps these two checks used to render no longer exist. What they
+  // protected - no step without a real objective, and the pill/Details chrome on each - is checked on every step.
   const style = await page.evaluate(() => {
-    const infoIdx = TUTORIAL_STEPS.findIndex(s => !s.tryIt);
-    _tutStep = infoIdx; _renderTutorialStep();
-    const m = document.getElementById('tutorial-modal');
-    return {
-      infoIdx,
-      hiddenOnInfoStep: document.getElementById('tut-try').style.display === 'none',
-      bodyVisible: getComputedStyle(document.getElementById('tut-body')).display !== 'none',
-      detailsHidden: getComputedStyle(document.getElementById('tut-details-btn')).display === 'none',
-      hasTryOff: !m.classList.contains('has-try'),
-    };
+    const bad = [];
+    for (let i = 0; i < TUTORIAL_STEPS.length; i++) {
+      _tutStep = i; _renderTutorialStep();
+      const m = document.getElementById('tutorial-modal'), pill = document.getElementById('tut-try');
+      const hasObj = typeof TUTORIAL_STEPS[i].tryIt === 'string' && TUTORIAL_STEPS[i].tryIt.trim().length > 0;
+      const pillShown = pill.style.display !== 'none' && (/TRY IT/i.test(pill.textContent) || pill.classList.contains('done'));   // steps ticked earlier in this run show DONE
+      const gated = m.classList.contains('has-try') && getComputedStyle(document.getElementById('tut-body')).display === 'none';
+      if (!hasObj || !pillShown || !gated) bad.push({ i, t: TUTORIAL_STEPS[i].title, hasObj, pillShown, gated });
+    }
+    return { steps: TUTORIAL_STEPS.length, bad };
   });
-  ok('informational steps hide the pill (no fake objectives)', style.hiddenOnInfoStep === true, style);
-  ok('informational steps show prose directly (no Details gate)', style.bodyVisible && style.detailsHidden && style.hasTryOff, style);
+  ok('every tour step carries a real TRY IT objective (v0.29.576)', style.steps >= 14 && style.bad.every(b => b.hasObj), style);
+  ok('every step shows its pill with the prose behind Details', style.bad.length === 0, style);
 
   // Screenshot for a visual check: full page + log the card's box.
   await page.evaluate(() => {

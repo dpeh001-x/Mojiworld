@@ -10,7 +10,8 @@
 //     cannot re-inflate it)
 //   * per-volley near-death odds derived from the shipped chance
 //     (0.2 -> 0.08 per pillar; >=1-in-3-pillar-volley 49% -> 22%)
-//   * judgment execute at 5 sins measures ~75% of max HP (was 95%)
+//   * judgment execute at 5 sins measures ~75% of max HP (was 95%) - then x0.75
+//     from v0.30.388 (fad6c33b, every zodiac boss deals 25% less): ~56%
 //   * the ROTATION is untouched: starburst cadence/waves, mark cycle length
 //     and sin threshold are asserted unchanged.
 //
@@ -111,7 +112,8 @@ const out = await page.evaluate(async () => {
   const jl = hp1 - player.hp;
   const jf = jl / mh;
   ok('judgment execute fires on 5 sins', fired, 'lost ' + jl);
-  ok('judgment costs ~75% of max HP (was 95%)', jf >= 0.70 && jf <= 0.80, (jf * 100).toFixed(0) + '%');
+  // v0.30.388 (fad6c33b): the execute is 0.75 * LX_ZODIAC_DMG_MUL (0.75) = 0.5625 of the bar.
+  ok('judgment costs ~56% of max HP (0.75 x zodiac 0.75; was 95%)', jf >= 0.52 && jf <= 0.60, (jf * 100).toFixed(0) + '%');
 
   // ---- rotation untouched --------------------------------------------------
   const src = String(ZODIAC_AI && ZODIAC_AI.virgo || '');

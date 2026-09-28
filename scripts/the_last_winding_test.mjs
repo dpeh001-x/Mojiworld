@@ -38,7 +38,10 @@ await page.waitForFunction(() => typeof _gugumaToyboxCutscene === 'function' || 
 const r = await page.evaluate(() => {
   const out = {};
   out.fnExists = typeof _gugumaToyboxCutscene === 'function';
-  const km = String(typeof triggerSuperBossDeath === 'function' ? triggerSuperBossDeath : '');
+  // v0.30.378 (d903b0f4) split the kill into a drops-gate wrapper (triggerSuperBossDeath) around
+  // _triggerSuperBossDeathRaw, which now holds the ending chain - read the raw body when it exists.
+  const km = String(typeof _triggerSuperBossDeathRaw === 'function' ? _triggerSuperBossDeathRaw
+    : (typeof triggerSuperBossDeath === 'function' ? triggerSuperBossDeath : ''));
   out.chainWired = km.includes('_gugumaToyboxCutscene') && km.includes('_epilogueText');
   // The played path must mark the beat seen (repeat-kill parity with the old
   // text) and the fallback must be the ONLY route into _playStoryBeat.

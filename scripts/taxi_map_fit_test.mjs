@@ -56,7 +56,8 @@ try {
   check(mapShare >= 0.80, `MAP: the map stands ${(mapShare * 100).toFixed(0)}% of the modal's height (at least 80%; v0.30.1073 gave ~68%)`, J({ svg: r.svg, modal: r.modal }));
   check(widthShare >= 0.85, `MAP: and ${(widthShare * 100).toFixed(0)}% of its inner width (at least 85%)`, J({ svgW: r.svg.w, innerW: Math.round(r.innerW) }));
   check(headerShare <= 0.16, `HEADER: title to map is ${(headerShare * 100).toFixed(0)}% of the modal (at most 16%; was ~30%)`, J({ headerH: r.headerH, modalH: r.modal.h }));
-  check(r.brief && r.brief.h <= r.brief.lineH * 2.2 && /Click a node/.test(r.brief.text) && /Mojicoins/.test(r.brief.text) && r.coins === '12345', 'BRIEF: one short line (two at most) with the instructions and the coins', J(r.brief));
+  // v0.30.1193 (24068ed1, ui-text-fixes) prints the coins with thousands separators ("12,345"): compare digits only.
+  check(r.brief && r.brief.h <= r.brief.lineH * 2.2 && /Click a node/.test(r.brief.text) && /Mojicoins/.test(r.brief.text) && String(r.coins || '').replace(/[^0-9]/g, '') === '12345', 'BRIEF: one short line (two at most) with the instructions and the coins', J(r.brief));
   check(r.quote && /dutifully/.test(r.quote), 'QUOTE: the Taxi Uncle still gets his line', J(r.quote));
   check(r.modal.top >= r.overlay.top && r.modal.bottom <= r.overlay.bottom + 1 && r.svg.bottom <= r.modal.bottom, 'FIT: the modal sits inside the overlay and the map inside the modal', J({ overlay: r.overlay, modal: r.modal }));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));

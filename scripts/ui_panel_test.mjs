@@ -65,8 +65,10 @@ const o = await page.evaluate(() => {
   out.orderThrows = orderThrows;
 
   // ---- B. open / visible / closes / no leak, per panel --------------------
+  // v0.30.415 (8ff8ece0, per user: "remove this skill trainer and skill tree, it is not being used in the game
+  // at all") deleted openSkillsModal / skills-modal and openSkillTree / skilltree-modal. Skills live in the U
+  // panel's Skills tab, which is attributes-modal - covered by the openAttributes row below.
   const PANELS = [
-    ['openSkillsModal', 'skills-modal'], ['openSkillTree', 'skilltree-modal'],
     ['openAttributes', 'attributes-modal'], ['openLevelUpPanel', 'attributes-modal'],
     ['openSkillsReference', 'attributes-modal'], ['openCodex', 'codex-modal'],
     ['openMojidex', 'mojidex-modal'], ['openCraftingModal', 'craft-modal'],
