@@ -11,6 +11,12 @@
 // recipe. A fountain seen flat shows its water as a thin band, not an ellipse. The hearth kept a short chimney over its hood (asked
 // twice for none), the signpost was re-rolled from dark walnut to the town's honey-brown; all first takes otherwise but the large
 // fountain (take 2, the deeper blue trim).
+// v0.30.1352 (per user): "The old sign post and throne heath is better keep them" - both restored byte for byte and dropped from here;
+// and the Azure fountains need "good blackoutline like the old signpost". Outline weight, the median ink width at the silhouette edge:
+// the old props sit at 2.0-2.6% of sqrt(area) with the whole edge inked; the MEDIUM wording gave ~1%, and the long grand-fountain
+// description drowned any outline wording (0.3-0.5%, a third of its edge un-inked). A shorter description with BOLD gives the large
+// fountain 19 px on its 1984 canvas (the old art: 16), THICK gives the small one 13 px on its 850 canvas (the old: 12) - on screen,
+// at 2.85x and 1x, the two draw the same line. An image-edit asked only to add the outline returned the take unchanged.
 // Shipped takes (2 per prop, some re-rolled with a sharper description): anvil take 2, every other first take; the glyph stone
 // (a rough boulder at first), well (a box of thatch), tatami (a hairline) and crate stack (two crates) needed a second prompt,
 // and the crate stack kept its first take (three wide crates) over the re-roll (a tower three times too narrow for its spot).
@@ -34,7 +40,6 @@ const BOX = {
   shadow_shuriken_rack: [768, 768, 126, 70, 519, 698], shadow_tatami: [768, 768, 38, 449, 684, 318],
   wagon_empty: [709, 709, 47, 343, 616, 366], celestial_arcane_glyph_stone: [768, 768, 240, 91, 281, 578],
   crate_stack: [567, 567, 135, 106, 296, 461], well_stone: [768, 768, 134, 167, 502, 601],
-  bastion_throne_hearth: [992, 992, 214, 308, 626, 684], signpost_wood: [768, 768, 191, 168, 385, 599],
   azure_large_waterfountain: [1984, 1984, 253, 382, 1489, 1601], azure_waterfountain: [850, 850, 169, 151, 513, 699],
   town_fountain_small_east: [768, 768, 89, 208, 591, 377],
 };
@@ -52,9 +57,7 @@ const DESC = {
   celestial_arcane_glyph_stone: "a smooth, cleanly cut grey stone obelisk seen flat from the front: a tall slim shape with straight parallel sides and a pointed pyramid tip, one flat front face carved with big bold glowing cyan magic runes in two neat columns, a few small cracks, crisp edges (not a rough natural boulder)",
   crate_stack: "three light honey-brown wooden shipping crates stacked in a column, each a flat rectangle of planks with a darker wooden frame, a coil of tan rope lying on the top crate, a burnt black stencil mark on the bottom crate",
   well_stone: "a round grey cobblestone well seen flat from the front: a stone wall with a wooden rim, two wooden posts on either side holding a triangular gable roof of golden straw thatch shaped like an upside-down V, a wooden crossbeam with a crank, a rope and a small wooden bucket hanging in the middle",
-  bastion_throne_hearth: "a COMPACT grey stone-brick fireplace seen flat and symmetric from the front, about as wide as it is tall: a SHORT sloped stone hood shaped like a trapezoid on top (NO tall chimney stack), a stone mantel ledge across the front, an arched firebox in the CENTRE with bright orange flames, a round copper kettle hanging from an iron hook in the middle over the fire, and a small wooden stool with a red seat standing beside the fireplace on the right, also seen straight from the front",
-  signpost_wood: "a wooden signpost of light warm honey-brown wood seen flat from the side: a tall post with two flat wooden arrow boards nailed near its top - the top board pointing left, the lower board pointing right - each a flat plank with a pointed tip and NO lettering, and a small brass lantern hanging from a hook on the post; the post continues well below the boards to the ground; the boards are flat shapes in the picture plane, no thickness shown",
-  azure_large_waterfountain: 'a grand three-tier water fountain of white marble with deep royal blue trim, seen flat from the side at eye level: a wide low round base pool with a white rim and blue sapphire gems set around it, a blue-and-white pillar with sapphire gems holding two stacked scalloped basins, clear blue water spilling over the basin rims in thin streams, and a white crystal spire finial with a blue gem on top; each basin is a wide shallow shape with only a thin sliver of water surface showing',
+  azure_large_waterfountain: "a tall, elegant cartoon three-tier water fountain seen flat from the side: white marble with royal blue trim and blue diamond gems, a slender pillar holding two scalloped basins (the upper one smaller), a tall pointed crystal spire on top, thin streams of water falling from both basins into a wide low round pool",
   azure_waterfountain: 'a water fountain seen flat from the side at eye level: a wide white marble bowl with a blue band on a short white pillar, standing in a low round white marble base pool of blue water, and a tall blue crystal-shaped water jet rising from the middle of the bowl; the bowl and the pool show only a thin sliver of their water surface',
   town_fountain_small_east: 'two identical small cream sandstone fountains standing side by side, each seen flat from the side at eye level: a round bowl on a short pedestal with turquoise water showing only as a thin sliver at the rim, and a small turquoise water jet splashing up from the middle'
 };
@@ -66,6 +69,17 @@ const CLEAN = 'Clean polished cartoon game-prop art: a clean black ink outline o
   + 'sticker border - around the silhouette and the main shapes, and NO white sticker border outside the black outline. Smooth flat colour '
   + 'fills with one soft shade and a small highlight, simple readable shapes, minimal texture (a few simple strokes for wood grain at most), '
   + 'no grain, no noise, no painterly brushwork.';
+// v0.30.1352 outline wordings (per user, the Azure fountains: "good blackoutline like the old signpost"): a prop listed in OUTLINE takes
+// its wording in place of CLEAN's MEDIUM line. BOLD measured 1.7-1.9% on the tall fountain, THICK 2.7-3.5% (see the header).
+const BOLD = 'Clean polished cartoon game-prop art: a BOLD, clean, solid black ink outline of even thickness around the whole silhouette '
+  + 'and around every part - thick and clearly readable like a classic cartoon game sticker, but not a chunky band - and NO white border '
+  + 'outside the black outline. Smooth flat colour fills with one soft shade and a small highlight, simple readable shapes, minimal '
+  + 'texture, no grain, no noise, no painterly brushwork.';
+const THICK = 'Clean polished cartoon game-prop art, like a mobile game sticker: a thick, even, bold solid BLACK ink outline around the whole '
+  + 'silhouette and around every part, including around the falling water streams, and NO white sticker border outside the black outline. '
+  + 'Smooth flat colour fills with one soft shade and a small highlight, simple readable shapes, minimal texture, no grain, no noise, no '
+  + 'painterly brushwork.';
+const OUTLINE = { azure_large_waterfountain: BOLD, azure_waterfountain: THICK };
 const STYLE = 'The object\'s own natural colours (no neon, no rainbow). A single object, centred, full object visible, transparent '
   + 'background, no ground, no floor, no cast shadow, no text.';
 const argv = process.argv.slice(2);
@@ -130,7 +144,7 @@ for (const k of keys) {
   const have = fs.readdirSync(RAW).filter((f) => f.startsWith(k + '_')).length;
   process.stdout.write(`${k} x${N} ... `);
   const bufs = await generate({ image_type: 'sprite', art_style: 'Cel-Shaded', perspective: 'Side-Scroll', aspect_ratio: (k === 'shadow_tatami' || k === 'town_fountain_small_east') ? 'ar_16_9' : 'ar_1_1',
-    n: N, augment_prompt: false, prompt: `${DESC[k]}. ${CAMERA} ${CLEAN} ${STYLE}` });
+    n: N, augment_prompt: false, prompt: `${DESC[k]}. ${CAMERA} ${OUTLINE[k] || CLEAN} ${STYLE}` });
   bufs.forEach((b, i) => fs.writeFileSync(path.join(RAW, `${k}_${have + i + 1}.png`), b));   // raw first, untouched
   console.log(bufs.length);
 }
