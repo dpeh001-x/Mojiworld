@@ -56,10 +56,19 @@ const r = await ev(async () => {
   game.paused = true;                                   // the test steps the sim by hand
   player.level = 90; player._god = false; player.maxHp = 500000; player.hp = getMaxHp(); player.invulnerable = 0; player.blockTimer = 0; player.stunTimer = 0; player.frozenTimer = 0;
   const toasts = []; const _st = window.showToast; window.showToast = (t, k) => { toasts.push(String(t)); };
-  const step = (n, f) => { for (let i = 0; i < n; i++) { game.time++; try { updateMonsters(16); } catch (e) {} if (f) f(); } };
+  // PIN THE PUNISH WINDOW OFF. A boss stagger / opening (the break system) freezes bossAI
+  // - and with it the SPENT countdown and the phase recompute - for ~1.4 s whenever
+  // an attack->idle transition opens one. Whether that happened during warm-up was
+  // luck, and it decided both the phase-2 probe (a staggered boss never re-reads its
+  // HP, so _despCD stayed null - v0.30.933 258a2164 made null the phase-1 value) and
+  // whether the 8 s window was padded by a free freeze. Unpinned, this suite passed
+  // about one run in three on its own era build. Pinned, it measures the window.
+  let _pin = null;
+  const step = (n, f) => { for (let i = 0; i < n; i++) { game.time++; if (_pin) { _pin._stagger = 0; _pin._dirOpenT = 0; _pin._break = 0; } try { updateMonsters(16); } catch (e) {} if (f) f(); } };
   game.monsters = []; game.hazards.length = 0; game.projectiles.length = 0;
   spawnMonster(player.x + 520, player.y, 'zodiac_leo', true);
   const m = game.monsters[game.monsters.length - 1];
+  _pin = m;
   m._bossIntroDone = true; step(120); m.invulnerable = 0;
   m.currentHp = Math.floor(m.maxHp * 0.45);               // phase 2: the desperation is live
   step(30);
