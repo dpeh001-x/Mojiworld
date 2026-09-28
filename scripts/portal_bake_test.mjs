@@ -8,6 +8,9 @@
 // graph edit: a wrong dest, an overlapping pair (the exact bug the forest bake
 // comment records), or a severed link can strand a whole biome.
 //   node scripts/portal_bake_test.mjs [port]
+// 2026-09-28: the mushroom Jade Grove portal is expected at y 301, not 337. v0.29.765 (392e11f2) moved it there on purpose,
+// the same day this test was written: the user's own Ctrl-editor paste lifted it 36 px onto the ledge whose top is y 300,
+// and the hardbake was corrected to match. The test kept the pre-paste 337 and failed that one check ever since.
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
 // tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
@@ -32,7 +35,7 @@ const WANT = {
   ],
   mushroom: [
     { x: 260, dest: 'forest', name: '◀ Emerald Thicket', y: 480 },
-    { x: 654, dest: 'jadeGrove', name: '◀ The Jade Grove', y: 337 },
+    { x: 654, dest: 'jadeGrove', name: '◀ The Jade Grove', y: 301 },   // v0.29.765: on the y-300 ledge, from the user's paste
     { x: 2160, dest: 'wildflowerPlains', name: '▶ Wildflower Plains', y: 480 },
   ],
 };
