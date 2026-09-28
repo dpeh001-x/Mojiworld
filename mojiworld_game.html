@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1319';
+const GAME_VERSION = 'v0.30.1320';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -41334,7 +41334,104 @@ const player = {
 };
 
 // Starting potions
-player.consumables = { hp_s: 10, mp_s: 10 };   // v0.30.x per user: "10 hp and 10 MP potions"
+player.consumables = { hp_s: 10, mp_s: 10 };
+// v0.30.1320 - WHO FELLED YOU (per user: "when killed do not say felled by msplinter or the projectile it should always be the
+// monster or boss name"). The death screen printed player._lastDamageSource as written - a shot's sprite key (msplinter),
+// a monster's type id, an attack's label. That label stays as it is (the pothole icon reads it); beside it
+// player._lastKiller holds the NAME of what dealt the hit, resolved the moment a hit is written:
+//   1. in the projectile / hazard loops, the shot or hazard being processed names its maker: every enemy shot and hazard
+//      made during a monster's turn in updateMonsters is stamped with that monster's name (_lxBy, see _lxKillStampSince);
+//   2. in updateMonsters, the monster whose turn it is (contact, melee, a boss's own attacks);
+//   3. otherwise the label: a type id, or a monster / boss name inside it ("King Krook's earthquake" -> King Krook); a
+//      shot's sprite key names the nearest monster that fires it; a status tick names the monster that last hit you; an
+//      attack named without its boss ("the Sun Pounce") names the boss on the map; a pothole or lava keeps its own words.
+let _lxKillEnt = null, _lxKillMob = null, _lxKillArrP = null, _lxKillArrH = null, _lxKillMarkP = 0, _lxKillMarkH = 0, _lxKillNames = null;
+function _lxPrettyId(s) {   // a raw id (boneWraith, zod_aries) reads as words; a real name is left alone
+  s = String(s || '');
+  if (!s || /\s/.test(s) || !/^[a-z]/.test(s)) return s;
+  const t = s.replace(/^zod_/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function _lxMobDisplayName(m) {   // the name, without a boss's ", the Ember Tyrant" title
+  if (!m) return '';
+  const t = (typeof monsterTypes !== 'undefined' && m.type) ? monsterTypes[m.type] : null;
+  return _lxPrettyId(m.name || (t && t.name) || m.type || '').split(', ')[0];
+}
+function _lxKillMark() {
+  _lxKillArrP = game.projectiles; _lxKillMarkP = game.projectiles ? game.projectiles.length : 0;
+  _lxKillArrH = game.hazards; _lxKillMarkH = game.hazards ? game.hazards.length : 0;
+}
+function _lxKillStampSince(mob) {   // the enemy shots / hazards made since the last mark get mob's name (null: made by no monster's turn)
+  const nm = mob ? _lxMobDisplayName(mob) : null;
+  const st = (arr, from, same) => { if (!arr) return; for (let i = same ? from : 0; i < arr.length; i++) { const e = arr[i]; if (e && e.owner !== 'player' && e._lxBy === undefined) e._lxBy = nm; } };
+  st(game.projectiles, _lxKillMarkP, game.projectiles === _lxKillArrP && !!game.projectiles && game.projectiles.length >= _lxKillMarkP);
+  st(game.hazards, _lxKillMarkH, game.hazards === _lxKillArrH && !!game.hazards && game.hazards.length >= _lxKillMarkH);
+  _lxKillMark();
+}
+function _lxNameInLabel(s) {   // the longest monster / boss name standing as whole words inside a label, as its short name
+  const T = (typeof monsterTypes !== 'undefined') ? monsterTypes : {}, nk = Object.keys(T).length;
+  if (!_lxKillNames || _lxKillNames.n !== nk) {   // rebuilt when types are added (the zodiac twelve are made at boot)
+    const map = new Map();
+    for (const k in T) { const n = T[k] && T[k].name; if (!n) continue; const full = String(n), short = full.split(', ')[0];
+      if (full.length >= 4) map.set(full, short); if (short.length >= 4) map.set(short, short); }
+    _lxKillNames = [...map.entries()].sort((a, b) => b[0].length - a[0].length); _lxKillNames.n = nk;
+  }
+  for (const [n, short] of _lxKillNames) {
+    const i = s.indexOf(n); if (i < 0) continue;
+    const a = s.charAt(i - 1), b = s.charAt(i + n.length);
+    if (!/[A-Za-z]/.test(a) && !/[A-Za-z]/.test(b)) return short;
+  }
+  return '';
+}
+function _lxNearestMob(test) {   // the name of the nearest live monster passing test, or ''
+  let best = null, bd = 1e18; const px = player.x + (player.w || 28) / 2;
+  for (const m of (game.monsters || [])) { if (!m || m.currentHp <= 0 || !test(m)) continue; const d = Math.abs(m.x + (m.w || 0) / 2 - px); if (d < bd) { bd = d; best = m; } }
+  return best ? _lxMobDisplayName(best) : '';
+}
+function _lxIsBossMob(m) { return !!(m.boss || m.isBoss || m.zodiacBoss); }
+function _lxLastHitHere(maxAge) {   // the monster that last hit you on this map (within maxAge frames), or null
+  const lh = player._lxLastMobHit;
+  return (lh && lh.map === game.currentMap && ((game.time | 0) - lh.t) < maxAge) ? lh : null;
+}
+function _lxKillerFromLabel(label) {
+  const s = String(label || '').trim(); if (!s) return '';
+  const T = (typeof monsterTypes !== 'undefined') ? monsterTypes : {};
+  if (T[s] && T[s].name) return String(T[s].name).split(', ')[0];
+  const recent = _lxLastHitHere(600);   // ~10 s (game.time counts frames)
+  if (/^m[a-z]+$/.test(s))   // a shot's sprite key: the nearest live monster that fires it, else who just hit you, else the boss here
+    return _lxNearestMob((m) => m.shoot === s) || (recent ? recent.name : '') || _lxNearestMob(_lxIsBossMob) || 'an unseen monster';
+  const nm = _lxNameInLabel(s); if (nm) return nm;
+  if (/\b(DOT|shock)\b/.test(s)) { const lh = _lxLastHitHere(1e9); if (lh) return lh.name; }   // a status tick: the monster that last hit you here
+  if (!/pothole|lava/i.test(s)) { const b = _lxNearestMob(_lxIsBossMob); if (b) return b; }   // an attack named without its boss ("the Sun Pounce", "Leo's Royal Roar"): the boss here
+  return s;
+}
+function _lxResolveKiller(label) {   // -> { name, mob } - mob: the name came from a monster
+  const e = _lxKillEnt;
+  if (e && e.owner !== 'player') {
+    if (e._lxBy) return { name: e._lxBy, mob: true };
+    if (e._srcType && typeof monsterTypes !== 'undefined' && monsterTypes[e._srcType]) return { name: _lxPrettyId(monsterTypes[e._srcType].name || e._srcType), mob: true };
+    if (e._owner && typeof e._owner === 'object') return { name: _lxMobDisplayName(e._owner), mob: true };
+  }
+  if (_lxKillMob) return { name: _lxMobDisplayName(_lxKillMob), mob: true };
+  const n = _lxKillerFromLabel(label), T = (typeof monsterTypes !== 'undefined') ? monsterTypes : {};
+  const isMob = !!n && (!!_lxNameInLabel(n) || !!T[String(label || '')]);   // a name, an elite's prefixed one included
+  if (!isMob && e && e.owner !== 'player' && game.projectiles && game.projectiles.indexOf(e) >= 0) {   // an enemy shot with no known maker: whoever last hit you, lately
+    const lh = _lxLastHitHere(600); if (lh) return { name: lh.name, mob: true };
+  }
+  return { name: n, mob: isMob };
+}
+(function _lxKillerHook() {
+  try {
+    let _src = '';
+    Object.defineProperty(player, '_lastDamageSource', { configurable: true, enumerable: true,
+      get() { return _src; },
+      set(v) {
+        _src = v;
+        try { const k = _lxResolveKiller(v); player._lastKiller = k.name; if (k.mob && k.name) player._lxLastMobHit = { name: k.name, t: game.time | 0, map: game.currentMap }; }
+        catch (e) { player._lastKiller = ''; }
+      } });
+  } catch (e) {}
+})();   // v0.30.x per user: "10 hp and 10 MP potions"
 
 // =========================================================================
 // DERIVED STATS
@@ -81041,7 +81138,7 @@ function triggerDeath() {
   // v0.30.664 — name the killer. The screen already knew it and spent it mid-sentence in the prose.
   const slainEl = document.getElementById('death-slain');
   if (slainEl) {
-    const _src = player._lastDamageSource || '';
+    const _src = player._lastKiller || ((typeof _lxKillerFromLabel === 'function') ? _lxKillerFromLabel(player._lastDamageSource) : player._lastDamageSource) || '';   // v0.30.1320 - the monster or boss, never a shot's sprite key
     if (_src) { slainEl.innerHTML = 'felled by <b></b>'; slainEl.querySelector('b').textContent = _src; slainEl.hidden = false; }
     else slainEl.hidden = true;
   }
@@ -93139,8 +93236,10 @@ function updateMonsters(dt) {
   // v0.26.x — defer in-loop kills (thorns reflect etc.) to the _pendingKills
   // drain after this loop, so a splice can't skip the next monster's tick.
   game._iteratingMonsters = true;
+  _lxKillEnt = null; _lxKillMob = null; _lxKillStampSince(null);   // v0.30.1320 - what exists now was made by no monster's turn
   for (const m of game.monsters) {
     _mobIdx++;
+    _lxKillStampSince(_lxKillMob); _lxKillMob = m;   // v0.30.1320 - the last monster's shots / hazards carry its name; this one's turn begins
     if (window.__UMS) {
       const _n = performance.now();
       if (window.__UMprev != null) {
@@ -96171,6 +96270,7 @@ function updateMonsters(dt) {
       }
     }
   }
+  _lxKillStampSince(_lxKillMob); _lxKillMob = null;   // v0.30.1320 - the last turn's shots / hazards, then no monster's turn
   game._iteratingMonsters = false;   // v0.26.x — loop done; drain may splice now
   // v0.26.x — DEBUG: close the LAST monster's timing slice (the delta scheme
   // above only records each mob when the NEXT iteration starts).
@@ -107781,6 +107881,7 @@ function updateProjectiles(dt) {
   for (let i = game.projectiles.length - 1; i >= 0; i--) {
     const p = game.projectiles[i];
     _lxRankSrc = (p && p.rs) || null;   // v0.30.854 - rank attribution
+    _lxKillEnt = p;   // v0.30.1320 - a hit this shot lands names its maker (_lxResolveKiller)
     game._fxOrigin = (p && p.owner === 'player') ? 'me' : 'local';   // v0.30.823 - my shot's fx are mine; an enemy shot's are made on every screen
     // Enemy-owned projectile with `homing: true` — gently steer toward player.
     // v0.25.590 — Math.hypot → Math.sqrt(squared). hypot is ~2× slower than
@@ -108713,6 +108814,7 @@ function updateProjectiles(dt) {
   for (let i = game.hazards.length - 1; i >= 0; i--) {
     const h = game.hazards[i];
     _lxRankSrc = (h && h.rs) || null;   // v0.30.854 - rank attribution
+    _lxKillEnt = h;   // v0.30.1320 - a hit this hazard lands names its maker (_lxResolveKiller)
     game._fxOrigin = (h && h.owner === 'enemy') ? 'local' : 'me';   // v0.30.823
     // v0.25.589 — migrate hazards authored with `timer:` instead of
     // `life:`/`maxLife:`. The v0.25.581 zodiac AI rewrite created
@@ -161663,7 +161765,7 @@ function _lxCoopWorldStep(dt) {
     const _pSnap = game.paused ? {
       x: player.x, y: player.y, vx: player.vx, vy: player.vy, hp: player.hp,
       hitStun: player.hitStun, invulnerable: player.invulnerable,
-      lastHitTime: player.lastHitTime, _lastDamageSource: player._lastDamageSource,
+      lastHitTime: player.lastHitTime, _lastDamageSource: player._lastDamageSource, _lastKiller: player._lastKiller, _lxLastMobHit: player._lxLastMobHit,
       burnTimer: player.burnTimer, burnDmg: player.burnDmg, _burnTickAcc: player._burnTickAcc,
       _poisonTimer: player._poisonTimer, _poisonDmg: player._poisonDmg, _poisonTickAcc: player._poisonTickAcc,
       _slowTimer: player._slowTimer, frozenTimer: player.frozenTimer, freezeTimer: player.freezeTimer,
@@ -161673,7 +161775,7 @@ function _lxCoopWorldStep(dt) {
     game._fxOrigin = 'world';
     updateMonsters(dt);        // enemy AI/physics + monster→player contact & hazard damage
     game._fxOrigin = 'me';
-    updateProjectiles(dt); _lxRankSrc = null;     // enemy projectiles keep flying + hitting (i-frame-respecting)
+    updateProjectiles(dt); _lxRankSrc = null; _lxKillEnt = null; _lxKillMob = null;     // enemy projectiles keep flying + hitting (i-frame-respecting)
     game._fxOrigin = 'me';
     if (_pSnap) { window._lxHpRestore = true; try { for (const _k in _pSnap) player[_k] = _pSnap[_k]; } finally { window._lxHpRestore = false; } }   // v0.30.633 seal-fix - the undo passes the heal lock
     // Death check — MUST run here too. The normal check lives in loop(), which
@@ -161792,6 +161894,7 @@ const LX_LOOP_THROW_RECOVER = 120;   // throws in one run before the scene is cl
 const LX_LOOP_THROW_GIVEUP = 900;    // throws in one run before the player is asked to reload
 let _lxLoopThrowRun = 0, _lxLoopThrowAt = 0, _lxLoopRecoveries = 0;
 function _lxLoopThrew(err) {
+  _lxKillEnt = null; _lxKillMob = null;   // v0.30.1320 - so does the killer attribution
   _lxRankSrc = null;   // v0.30.854 - a throw inside the projectile / hazard loops skips their reset
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   if (now - _lxLoopThrowAt > LX_LOOP_THROW_GAP_MS) _lxLoopThrowRun = 0;
@@ -162550,7 +162653,7 @@ function loop(time) {
     if (typeof _tickBossCourage === 'function') _tickBossCourage(dt);               // v0.26.x — low-level-boss Brave Dodge / Counter
     if (typeof _lxVermillionTick === 'function') _lxVermillionTick();               // v0.29.9xx — Vermillion 5-min hunt clock (Fractured Reflection)
     game._fxOrigin = 'world'; updateMonsters(dt); game._fxOrigin = 'me';   // v0.30.823 - fx born in monster AI are the world's
-    updateProjectiles(dt); game._fxOrigin = 'me'; _lxRankSrc = null;   // v0.30.854 - no attribution outlives the loops
+    updateProjectiles(dt); game._fxOrigin = 'me'; _lxRankSrc = null; _lxKillEnt = null; _lxKillMob = null;   // v0.30.854 - no attribution outlives the loops
     emitProjectileTrails();   // v0.25.21 — runs every frame regardless of render path
     updateMinions(dt);
     updateParticles(dt);
