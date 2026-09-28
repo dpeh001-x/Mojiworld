@@ -42,7 +42,10 @@ const R = await page.evaluate(() => {
     // ONLY the main canvas: _lxProjScaled blits into an offscreen cache
     // canvas with the same 5-arg shape and the same aspect, so counting it
     // made the ratio assertion pass on the wrong call.
-    if (a.length === 5 && this === ctx) calls.push({ w: a[3], h: a[4] });
+    // v0.30.396 (9655df03) - an enemy shot within reach of the player also
+    // gets a yellow parry tell (_drawTell, a 16x16 glyph blit) drawn BEFORE the
+    // sprite, so skip blits made from inside _drawTell: they are not the ticket.
+    if (a.length === 5 && this === ctx && !/_drawTell/.test(new Error().stack || '')) calls.push({ w: a[3], h: a[4] });
     return orig.apply(this, a);
   };
   try { drawProjectiles(); } catch (e) { P.drawImage = orig; return { err: String(e.message).slice(0, 100) }; }
@@ -50,7 +53,7 @@ const R = await page.evaluate(() => {
   game.projectiles.length = 0;
   for (const p of saved) game.projectiles.push(p);
   // The ticket is the only 5-arg blit in this frame; take the largest.
-  const c = calls[0] || null;   // the ticket is the only main-canvas blit here
+  const c = calls[0] || null;   // the ticket is the only main-canvas blit here (tells excluded above)
   return { srcW, srcH, drawn: c, nCalls: calls.length };
 });
 await browser.close(); server.kill();

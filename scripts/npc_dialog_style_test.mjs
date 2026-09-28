@@ -10,6 +10,18 @@
 // formula, and the WORST stop must still clear AA. That is what makes
 // "readable" a fact rather than a preference. Edge-contact is measured too —
 // on the decoded art itself, by counting warm pixels in its outer columns.
+//
+// REDESIGNED SINCE, PER USER (these checks follow the current card):
+//   - v0.30.973 (1b2f237c, per user "AAA standard") took the painted shard texture OFF the panel: glass,
+//     no texture ("the texture is what the eye read, not the scene"). The art file still ships (and
+//     scripts/restore_npc_dialog_bg.mjs can put it back), so the file checks stay; the panel now must
+//     NOT carry it. The warm rendered edges are the v0.30.975 torn gold plate.
+//   - v0.30.558 shipped the game's first @font-face and v0.30.979 (e4540563, per user "more roundish,
+//     cuter, but legible") set the speech and answers in a self-hosted Nunito: the copy must lead with a
+//     face that is either a system UI face or a bundled webfont that ACTUALLY LOADS.
+//   - the answer chips are dark glass (rgba plate) under a translucent sheen: contrast is scored on each
+//     stop COMPOSITED over the chip's own plate and the panel's darkest plate (the old alpha-blind read
+//     scored an 8%-white sheen as solid white). Weight 700 or heavier (the chips are 800).
 //   node scripts/npc_dialog_style_test.mjs [port]
 import { chromium } from 'playwright-core';
 import { existsSync, statSync } from 'node:fs';
@@ -56,6 +68,7 @@ const r = await page.evaluate(async () => {
   // the art layer must STRETCH (100% 100%), not cover-crop, so its edge
   // artwork lands on the frame border at every panel size
   out.stretched = /100% 100%/.test(out.panelSize);
+  out.panelBgColor = cs(dlg).backgroundColor;
 
   // --- WCAG contrast, worst gradient stop per button ---------------------
   const lum = ([R, G, B]) => { const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
@@ -63,12 +76,19 @@ const r = await page.evaluate(async () => {
   const ratio = (a, b2) => { const [x, y] = [lum(a), lum(b2)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
   const rgbs = (str) => (str.match(/rgba?\(([^)]+)\)/g) || []).map(m2 =>
     m2.replace(/rgba?\(|\)/g, '').split(',').slice(0, 3).map(Number));
+  // stops WITH alpha, so a translucent layer is composited over what is under it (not read as opaque)
+  const rgbas = (str) => (str.match(/rgba?\(([^)]+)\)/g) || []).map(m2 => {
+    const v = m2.replace(/rgba?\(|\)/g, '').split(',').map(Number); return [v[0], v[1], v[2], v.length > 3 ? v[3] : 1]; });
+  const over = (top, under) => [0, 1, 2].map(i => top[i] * top[3] + under[i] * (1 - top[3]));
+  const PLATE = [20, 10, 36];   // the panel's darkest plate (same worst case the voices use below)
   out.contrast = {};
   for (const [k, el] of Object.entries(kinds)) {
     const st = cs(el);
     const fg = rgbs(st.color)[0];
-    const stops = rgbs(st.backgroundImage);
-    const worst = stops.length ? Math.min(...stops.map(s2 => ratio(fg, s2))) : 0;
+    const base = over(rgbas(st.backgroundColor)[0] || [0, 0, 0, 0], PLATE);   // the chip's plate over the panel
+    const stops = rgbas(st.backgroundImage).map(s2 => over(s2, base));
+    if (!stops.length) stops.push(base);
+    const worst = Math.min(...stops.map(s2 => ratio(fg, s2)));
     out.contrast[k] = { worst: Math.round(worst * 10) / 10, stops: stops.length, fg: st.color };
   }
   out.font = { size: cs(kinds.plain).fontSize, weight: cs(kinds.plain).fontWeight };
@@ -89,6 +109,12 @@ const r = await page.evaluate(async () => {
   // display face like Trebuchet, which is what <body> hands down by default
   out.copyUsesUiFace = /^(system-ui|"?Segoe UI"?|-apple-system)/i.test(tc.fontFamily.trim())
     && !/^"?Trebuchet/i.test(tc.fontFamily.trim());
+  // v0.30.979: or a bundled webfont that really loads (declared by @font-face and fetched OK)
+  const lead = tc.fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, '');
+  try { await document.fonts.load(`${tc.fontWeight} ${tc.fontSize} "${lead}"`, 'Abc'); } catch (e) {}
+  out.copyLead = lead;
+  out.copyLeadLoaded = [...document.fonts].some((ff) => ff.family.replace(/["']/g, '') === lead && ff.status === 'loaded');
+  out.copyUsesUiFace = out.copyUsesUiFace || (out.copyLeadLoaded && !/^Trebuchet/i.test(lead));
   // darkest stop of the panel's base plate — the worst case behind any glyph
   const plate = [20, 10, 36];
   const voice = (sel) => { const el = txt.querySelector(sel); return el ? rgbs(cs(el).color)[0] : null; };
@@ -174,9 +200,8 @@ console.log('font   :', JSON.stringify(r.font), '| all light text:', r.allLightT
 console.log('copy   :', JSON.stringify(r.copy));
 console.log('voices :', JSON.stringify(r.voices), '| distinctness:', r.voicesDistinct, '| art alpha:', r.edge.alpha);
 
-ok('the painted backdrop is in the panel background stack', r.artInStack === true, {});
-ok('the art layer STRETCHES to the frame (100% 100%), so its edges meet the border',
-   r.stretched === true, { size: r.panelSize });
+// v0.30.973 per user: glass, no texture - the painted plate must stay OFF the panel
+ok('the panel is glass, not the painted texture (v0.30.973)', r.artInStack === false, { bg: r.panelBg.slice(0, 80) });
 ok('the art decodes as a WIDE plate (authored for the panel shape, not a square crop)',
    r.edge.ok === true && r.edge.w > r.edge.h, r.edge);
 ok('warm gold ink reaches the LEFT edge strip of the art', r.edge.left >= 8, r.edge);
@@ -192,8 +217,8 @@ for (const k of ['plain', 'shop', 'action', 'leave']) {
 // No "all light text" rule any more: the shop button is deliberately dark
 // lettering on a bright gold slab. What has to hold is the contrast bar above,
 // which is the thing that actually decides whether a label can be read.
-ok('button text is set at a readable size and weight (>= 13px, 700)',
-   parseFloat(r.font.size) >= 13 && r.font.weight === '700', r.font);
+ok('button text is set at a readable size and weight (>= 13px, >= 700)',
+   parseFloat(r.font.size) >= 13 && parseInt(r.font.weight, 10) >= 700, r.font);
 
 ok('the art SURVIVES the composite — warm shards visible in the RENDERED left edge',
    r.rendered.left >= 25, r.rendered);
@@ -207,8 +232,8 @@ ok('...and the edges read dramatically warmer than the centre (the design is edg
    r.rendered.left >= r.rendered.centre * 2 && r.rendered.right >= r.rendered.centre * 2,
    { ...r.rendered, leftRatio: +(r.rendered.left / Math.max(1, r.rendered.centre)).toFixed(1),
      rightRatio: +(r.rendered.right / Math.max(1, r.rendered.centre)).toFixed(1) });
-ok('dialogue copy resolves to a real system UI face (no @font-face ships, so a named webfont would silently fall back)',
-   r.copyUsesUiFace === true, { family: r.copy.family });
+ok('dialogue copy resolves to a real face - a system UI face or a bundled webfont that loaded (v0.30.979 Nunito)',
+   r.copyUsesUiFace === true, { family: r.copy.family, lead: r.copyLead, loaded: r.copyLeadLoaded });
 ok('dialogue copy is set larger and heavier for body reading (>= 16px, >= 600)',
    parseFloat(r.copy.size) >= 16 && parseInt(r.copy.weight, 10) >= 600, r.copy);
 ok('speech clears strict body contrast on the panel plate (>= 7:1)', r.voices.speech >= 7, r.voices);

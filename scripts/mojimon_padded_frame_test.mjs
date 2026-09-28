@@ -58,36 +58,42 @@ const out = await page.evaluate(async () => {
   if (!mn) return R;
   mn.x = 400; mn._animPX = 400; mn._animXV = 0; mn._walkLatch = false;
 
-  // spy: ellipse radii + sprite draw height per _mojimonDraw call
-  const cap = { ellipse: null, imgH: null };
+  // v0.29.480 (3da6d04c) removed the class-coloured under-glow ellipse per user
+  // ("i just want the monster tinted"), so the glow can no longer pop: assert it
+  // stays gone, and pin the compensation on the SPRITE blit itself. The blit is
+  // identified by identity (the canvas _mojimonTinted[Frame] returned) — other
+  // 5-arg drawImage calls (HUD icons, 64px) follow it — and measured against the
+  // body height the draw stamps on mn._visH before the padded-frame scale.
+  const cap = { ellipse: 0, imgH: null, bodyH: null };
+  let sprOut = null;
+  const oTF = window._mojimonTintedFrame, oT = window._mojimonTinted;
+  window._mojimonTintedFrame = function () { return (sprOut = oTF.apply(this, arguments)); };
+  window._mojimonTinted = function () { return (sprOut = oT.apply(this, arguments)); };
   const oE = ctx.ellipse.bind(ctx), oD = ctx.drawImage.bind(ctx);
-  ctx.ellipse = function (x, y, rx, ry, ...r) { cap.ellipse = { rx: +rx.toFixed(1), ry: +ry.toFixed(1) }; return oE(x, y, rx, ry, ...r); };
-  ctx.drawImage = function (img, dx, dy, w, h) { if (arguments.length >= 5) cap.imgH = +h.toFixed(1); return oD.apply(this, arguments); };
-  const draw = () => { cap.ellipse = null; cap.imgH = null; try { _mojimonDraw(mn, 300, 300); } catch (e) { R.push({ n: 'draw threw', pass: false, d: e.message }); } return { ...cap }; };
+  ctx.ellipse = function () { cap.ellipse++; return oE.apply(null, arguments); };
+  ctx.drawImage = function (img, dx, dy, w, h) { if (arguments.length >= 5 && sprOut && img === sprOut && cap.imgH == null) cap.imgH = +h.toFixed(1); return oD.apply(this, arguments); };
+  const draw = () => { cap.ellipse = 0; cap.imgH = null; sprOut = null; try { _mojimonDraw(mn, 300, 300); } catch (e) { R.push({ n: 'draw threw', pass: false, d: e.message }); } cap.bodyH = mn._visH; return { ...cap }; };
 
   mn.atkAnimUntil = 0; mn._animSt = null;
   const idle = draw();
   mn.atkAnimUntil = performance.now() + 500; mn._animSt = null;
   const atk = draw();
   ctx.ellipse = oE; ctx.drawImage = oD;
+  window._mojimonTintedFrame = oTF; window._mojimonTinted = oT;
 
-  ok('idle draw captured', !!(idle.ellipse && idle.imgH), JSON.stringify(idle));
-  ok('attack draw captured', !!(atk.ellipse && atk.imgH), JSON.stringify(atk));
-  // v0.29.459 made the pre-scale body height FRAME-DEPENDENT (dh derives from
-  // the current frame's source size, clamped 0.85–1.20), so idle-vs-attack
-  // comparisons drift ~10% by design and cannot detect the pop. The decisive
-  // invariant lives WITHIN the attack draw: glow radius ry = bodyH × 0.55 and
-  // sprite box = bodyH × 2.327, so imgH / (ry / 0.55) ≈ 2.327 when the glow is
-  // body-sized — and ≈ 1.0 if it ballooned to frame size (the old bug).
-  if (atk.ellipse && atk.imgH) {
-    const bodyH = atk.ellipse.ry / 0.55;
-    const comp = atk.imgH / bodyH;
-    ok('glow is body-sized during the swing (no pop)', comp > 2.0 && comp < 2.7,
-       `imgH/(ry/0.55) = ${comp.toFixed(2)} (body-sized ≈ 2.33, frame-sized ≈ 1.0)`);
+  ok('idle draw captured', !!(idle.imgH && idle.bodyH), JSON.stringify(idle));
+  ok('attack draw captured', !!(atk.imgH && atk.bodyH), JSON.stringify(atk));
+  ok('no under-glow ellipse in either state (removed v0.29.480, so it cannot pop)', idle.ellipse === 0 && atk.ellipse === 0, idle.ellipse + '/' + atk.ellipse);
+  // the compensation: the padded attack frame's box is scaled ~2.327x the body
+  // (_ATK_FRAME_SCALE.forgewight) so the creature keeps its idle size.
+  if (atk.imgH && atk.bodyH) {
+    const comp = atk.imgH / atk.bodyH;
+    ok('attack sprite box scales ~2.327x the body (padded-frame compensation)', comp > 2.0 && comp < 2.7,
+       `imgH/bodyH = ${comp.toFixed(2)} (_ATK_FRAME_SCALE = ${_ATK_FRAME_SCALE[T]})`);
   }
-  if (idle.ellipse && idle.imgH) {
-    const r = idle.imgH / (idle.ellipse.ry / 0.55);
-    ok('idle glow matches the idle body 1:1', r > 0.9 && r < 1.1, r.toFixed(2));
+  if (idle.imgH && idle.bodyH) {
+    const r = idle.imgH / idle.bodyH;
+    ok('idle sprite box is the body 1:1', r > 0.9 && r < 1.1, r.toFixed(2));
   }
   game.minions.length = 0;
   return R;

@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9193;
+const PORT = Number(process.env.PORT || 9193);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -31,6 +31,11 @@ const out = await page.evaluate(async () => {
   player.cls = 'archer';
   openLevelUpPanel();
   await wait(700);
+  // v0.30.1196 the boot image hold parks images (localhost too) until the title menu releases it and a
+  // panel asks for them; release it the way the menu does, ask for the four, and give them time to decode.
+  try { if (window._lxBootHold) _lxBootHold.release('menu'); } catch (e) {}
+  for (const im of document.querySelectorAll('#u-jump-row .u-jump img.uj-ico')) { try { if (typeof _lxWantImg === 'function') _lxWantImg(im, true); } catch (e) {} }
+  for (let k = 0; k < 50; k++) { const ims = [...document.querySelectorAll('#u-jump-row .u-jump img.uj-ico')]; if (ims.length && ims.every((i) => i.complete && i.naturalWidth > 0)) break; await wait(200); }
   const jumps = [...document.querySelectorAll('#u-jump-row .u-jump')];
   const icons = jumps.map((b) => {
     const img = b.querySelector('img.uj-ico');
@@ -46,9 +51,13 @@ const out = await page.evaluate(async () => {
       stillEmoji: /[\u{1F300}-\u{1FAFF}]/u.test(b.textContent || ''),
     };
   });
-  // the tutorial prompt should show the same art
+  // the tutorial prompt should show the same art - on the PAD route, the only one that points at the U-panel
+  // buttons. v0.30.897 (688bb267) started _lxPadLastInput at -Infinity (it was 0, so every session opened "pad
+  // active" for 30 s and this check rode that bug); act as a pad player who just pressed a button.
+  try { _lxPadLastInput = performance.now(); } catch (e) {}
   const tut = (typeof _tutTouchify === 'function')
     ? _tutTouchify('Unfold the map — press <kbd>W</kbd>') : '';
+  try { _lxPadLastInput = -Infinity; } catch (e) {}
   return { count: jumps.length, icons, tutHasArt: /Sprites\/ui\/nav\/map\.webp/.test(tut), tut };
 });
 
@@ -63,8 +72,9 @@ ok('all four point at Sprites/ui/nav/ art',
    out.icons.map(i => i.src).join(' '));
 ok('all four DECODED (no broken/missing file)',
    out.icons.every(i => i.decoded), out.icons.map(i => i.key + ':' + i.nw + 'px').join(' '));
-ok('they are sized for the row (20px)',
-   out.icons.every(i => i.w === '20px'), out.icons.map(i => i.w).join(' '));
+// v0.30.1182 (dc585e1a) phone-fit tightened the jump row to one line at 720 px: the icons are 18px now
+ok('they are sized for the row (18px)',
+   out.icons.every(i => i.w === '18px'), out.icons.map(i => i.w).join(' '));
 ok('no 404 was served for any nav icon', failed404.length === 0, failed404.join(' | ') || 'none');
 ok('the tutorial prompt shows the same art', out.tutHasArt === true, out.tut);
 

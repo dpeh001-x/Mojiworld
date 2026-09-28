@@ -48,17 +48,21 @@ const r = await page.evaluate(async () => {
     player.quests.active.q_pq_spire = { progress: 0 };
     openNPC(MILO);
     // the dialog text is a TYPEWRITER reveal - poll until it stops growing,
-    // or a fixed wait races it and reads a half-typed line
+    // or a fixed wait races it and reads a half-typed line. The reveal PAUSES on the blank line
+    // after the italic stage direction, so "stopped growing for one poll" read "...stub.\n\n" and
+    // failed on a loaded machine: wait for the question itself, then for it to stop growing.
     let _prev = -1;
-    for (let w = 0; w < 30; w++) {
+    for (let w = 0; w < 60; w++) {
       await new Promise((z) => setTimeout(z, 150));
       const L2 = dlgText().length;
-      if (L2 > 20 && L2 === _prev) break;
+      if (/Back on the rails/.test(dlgText()) && L2 === _prev) break;
       _prev = L2;
     }
     out.spire = { warpedOnOpen: loads.length > 0, text: dlgText().slice(0, 160), opts: dlgOpts() };
     // decline
-    const notNow = [...document.querySelectorAll('#dialog-options button')].find((b2) => /Not right now/.test(b2.textContent));
+    // v0.30.969 (3e4fff98) dropped Milo's own 'Not right now' - a close-only duplicate of the shared 'Leave' row
+    const notNow = [...document.querySelectorAll('#dialog-options button')].find((b2) => /^\s*(Leave|Not right now)\s*$/.test(b2.textContent));
+    out.spire.declined = !!notNow;
     if (notNow) notNow.click();
     out.spire.warpedAfterDecline = loads.length > 0;
 
@@ -93,10 +97,11 @@ ok('with a stage open, talking to Milo asks instead of warping',
   r.spire && !r.spire.warpedOnOpen && /Back on the rails|hop/i.test(r.spire.text || ''),
   { warpedOnOpen: r.spire.warpedOnOpen, text: r.spire.text });
 ok('the question offers the hop and a way out',
-  r.spire.opts.some((t) => /Hop back on/.test(t)) && r.spire.opts.some((t) => /Not right now/.test(t)),
+  // the way out is the shared 'Leave' row since v0.30.969 (3e4fff98: fifteen close-only duplicates removed, Milo's included)
+  r.spire.opts.some((t) => /Hop back on/.test(t)) && r.spire.opts.some((t) => /^\s*(Leave|Not right now)\s*$/.test(t)),
   { opts: r.spire.opts });
 ok('declining leaves the player exactly where they were',
-  !r.spire.warpedAfterDecline, { warped: r.spire.warpedAfterDecline });
+  r.spire.declined && !r.spire.warpedAfterDecline, { declined: r.spire.declined, warped: r.spire.warpedAfterDecline });
 ok('saying yes warps to the right stage - and only then',
   r.finale.loads.length === 1 && r.finale.loads[0].map === 'clockworkExpress',
   { loads: r.finale.loads });

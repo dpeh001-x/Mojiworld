@@ -16,6 +16,16 @@
 // 341k then 195k single-target across runs), so this guard checks the
 // DETERMINISTIC properties that were actually changed, and reads the vortex's
 // damage off a hazard the engine really spawned rather than off source text.
+//
+// RETUNED SINCE, PER USER (the buff numbers below are no longer the design):
+//   - v0.30.174 (0c0ae5ae) the user's tuner patch set the DECLARED cd 30 -> 40 s
+//     on purpose ("the deliberate correction to the skill that measured the
+//     highest throughput"); it stays the longest mage slot-x by design. The
+//     APPLIED cooldown after baseline CDR (~20 s) is still inside the 30 s pool,
+//     so the no-dead-window promise is checked against the cooldown the engine
+//     really sets, and a recast RELOCATES the pool (one pool, v0.30.171).
+//   - v0.30.284 (054a883c, "warlock nerf per user") cut the drain 2.2 -> 1.1x
+//     and the user's Skill Editor patch v0.30.785 (3c51eff1) set it to 1.2x.
 // Run: node scripts/necromancer_buff_test.mjs   (MOJI_GAME_FILE overrides)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -24,7 +34,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9323;
+const PORT = Number(process.env.PORT || 9323);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -67,6 +77,12 @@ const R = await page.evaluate(async () => {
   const poolLifeMs = pool ? (pool.life / 60) * 1000 : 0;
   // per-second rate: dmg is floor(h.atk * TICK/60) applied every TICK frames
   const perSecond = pool ? pool.atk : 0;
+  // the cooldown the engine actually applied (declared cd after CDR)
+  const appliedCd = (player.skillCooldowns || {}).necromancer_harvest || 0;
+  // an early recast relocates the pool: never two live pools
+  player.skillCooldowns = {}; player._castLockUntil = 0; player.mp = 99999;
+  castSkill('necromancer_harvest');
+  const poolsAfterRecast = (game.hazards || []).filter(h => h && h.type === 'soul_vortex').length;
 
   const cds = {};
   for (const id of ['necromancer_harvest', 'hexmaster_grandhex', 'sage_meteorshower',
@@ -76,7 +92,7 @@ const R = await page.evaluate(async () => {
     cds[id] = SKILLS[id] ? SKILLS[id].cd : null;
   }
   return {
-    cds, poolLifeMs, perSecond, atkAtCast,
+    cds, poolLifeMs, perSecond, atkAtCast, appliedCd, poolsAfterRecast,
     ratio: pool ? +(pool.atk / atkAtCast).toFixed(3) : 0,
     harvestDesc: SKILLS.necromancer_harvest.desc,
     spawned: !!pool,
@@ -94,24 +110,23 @@ const maxUltPeer = Math.max(...ultPeers.map(k => R.cds[k]));
 
 ok('Soul Vortex actually spawns a pool', R.spawned);
 // The core fix: no window where the signature skill is unavailable AND expired.
-ok('Soul Vortex has no dead window (cd <= pool life)',
-   R.cds.necromancer_harvest <= R.poolLifeMs,
-   `cd=${R.cds.necromancer_harvest / 1000}s poolLife=${R.poolLifeMs / 1000}s`);
-ok('Soul Vortex is no longer the longest slot-x in the mage set',
-   R.cds.necromancer_harvest <= maxXPeer,
-   `necromancer=${R.cds.necromancer_harvest / 1000}s longestPeer=${maxXPeer / 1000}s`);
-ok('Soul Vortex drains at the buffed 2.2x ATK/sec',
-   Math.abs(R.ratio - 2.2) < 0.01, `measured ${R.ratio}x ATK/sec off the live hazard`);
+// v0.30.174: judged on the APPLIED cooldown (declared 40 s after CDR).
+ok('Soul Vortex has no dead window (applied cd <= pool life)',
+   R.appliedCd > 0 && R.appliedCd <= R.poolLifeMs,
+   `appliedCd=${R.appliedCd / 1000}s (declared ${R.cds.necromancer_harvest / 1000}s) poolLife=${R.poolLifeMs / 1000}s`);
+ok('declared cd is the user-tuned 40 s (v0.30.174)',
+   R.cds.necromancer_harvest === 40000, `necromancer=${R.cds.necromancer_harvest / 1000}s longestPeer=${maxXPeer / 1000}s`);
+ok('an early recast relocates the pool (one live pool)', R.poolsAfterRecast === 1, `${R.poolsAfterRecast} pool(s)`);
+// v0.30.284 nerf per user, v0.30.785 user patch: 1.2x
+ok('Soul Vortex drains at the user-tuned 1.2x ATK/sec',
+   Math.abs(R.ratio - 1.2) < 0.01, `measured ${R.ratio}x ATK/sec off the live hazard`);
 ok('tooltip states the rate the code actually applies',
-   R.harvestDesc.includes('2.2×'), R.harvestDesc.slice(0, 100));
+   R.harvestDesc.includes(`${+R.ratio.toFixed(2)}×`), R.harvestDesc.slice(0, 100));
 ok('Necrotic Ascendance is not the longest ult in the mage set',
    R.cds.necromancer_ult <= maxUltPeer, `necromancer=${R.cds.necromancer_ult / 1000}s longestPeer=${maxUltPeer / 1000}s`);
 
-// sustained vortex throughput per minute — the figure the buff targets
-const before = 1.8 * 30 * (60 / 45);
-const after = (R.perSecond / R.atkAtCast) * (R.poolLifeMs / 1000) * (60 / (R.cds.necromancer_harvest / 1000));
-ok('sustained vortex output per minute improved >= 50%', after >= before * 1.5,
-   `${before.toFixed(0)}x ATK/min -> ${after.toFixed(0)}x ATK/min`);
+// (the ">= 50% more output per minute" check measured the v0.29.865 buff,
+// which the user reversed in v0.30.284 - retired with it.)
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

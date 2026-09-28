@@ -74,6 +74,10 @@ try {
     game.paused = false; window._prologueActive = false;
     let m = null;
     try { m = spawnMonster(player.x + 60, player.y, 'sparkling'); } catch (e) {}
+    // v0.29.619 (39ec4db5, Sanctuary rule): in town spawnMonster returns a typeless
+    // { _suppressed: true } stub, so drawMonster(stub) never reached the sparkling
+    // nudge and only a still-pending boot retry could heal it (timing luck).
+    if (m && m._suppressed) m = null;
     if (!m) { m = { type: 'sparkling', x: (game.camera.x || 0) + 200, y: 300, w: 34, h: 34, currentHp: 10, maxHp: 10, facing: 1 }; game.monsters.push(m); }
     m.x = (game.camera.x || 0) + 200; m.y = 300;
     try { drawMonster(m); } catch (e) { return { err: String(e) }; }

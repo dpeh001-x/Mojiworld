@@ -13,7 +13,7 @@
 //
 // Section 1 casts every one of the thirty-four and asserts that EVERY hit the hook saw came out of
 // _lxDeColumn with a row. Sections 2-6 are the things that would quietly rot: a basic attack outside
-// the window must not stack, the window must close, a row must fit its 20px pitch, Deadeye must not
+// the window must not stack, the window must close, a row keeps its fixed B/G size (was: fit a 20px pitch, until v0.30.735), Deadeye must not
 // be double-counted, and a wide AoE must not leave a foe pointing at an unheld column.
 //   node scripts/master_skill_column_test.mjs [port]
 import { createRequire } from 'node:module';
@@ -138,7 +138,10 @@ const closes = await page.evaluate(async () => {
   // clear the arena so the SKILL cannot keep the window alive: what is under test is that the
   // window closes on its own, not that a ten-second aura stops dealing damage
   game.monsters.length = 0; game.projectiles.length = 0;
-  await sleep(5000);   // past OPEN (180f) + HOLD (45f)
+  // past OPEN (180f) + HOLD (45f), counted in GAME frames: a fixed 5 s sleep saw only ~170 of them on a
+  // loaded headless box, so the window was honestly still open and this check failed at its own era.
+  const t0 = game.time | 0;
+  for (let w = 0; w < 300 && (game.time | 0) - t0 < 260; w++) await sleep(100);
   const stillOpen = (game.time | 0) <= (player._gbStackUntil | 0);
   const ms = window._gbArena(1);
   player._gbStackUntil = stillOpen ? (player._gbStackUntil | 0) : 0;   // _gbArena zeroes it; keep the real answer
@@ -176,10 +179,15 @@ const sizes = await page.evaluate(async () => {
   const rows = game.damageNumbers.filter((d) => d && d._deRow !== undefined);
   player.baseAtk = 400;
   return { rows: rows.length, max: rows.reduce((a, d) => Math.max(a, d.size | 0), 0),
-           cap: (typeof LX_COL_ROW_MAX !== 'undefined') ? LX_COL_ROW_MAX : null,
+           size: (typeof LX_GB_ROW_SIZE !== 'undefined') ? LX_GB_ROW_SIZE : null,
            crit: rows.filter((d) => d.crit).length };
 });
-check('no stacked row is taller than the 20px pitch it sits in', sizes.rows > 0 && sizes.max <= (sizes.cap || 14), sizes);
+// v0.30.729-735 gb-volcano / gb-pop, per user ("larger than the normal attack damage size", "can overlap much
+// more, be bigger"): B/G rows no longer shrink to fit a 20px pitch - LX_COL_ROW_MAX is gone and every row
+// is drawn at the fixed LX_GB_ROW_SIZE (50 at v0.30.1271), clear of a crit's 18. The invariant is now that
+// a huge hit does not blow a row up past that size, and a row never reads smaller than a crit.
+check('every stacked row is the fixed B/G row size - a 9000-ATK hit does not blow it up, and it clears a crit',
+  sizes.rows > 0 && sizes.size > 18 && sizes.max <= sizes.size, sizes);
 check('stacked rows drop the crit pop, like Deadeye\'s do', sizes.rows > 0 && sizes.crit === 0, sizes);
 
 // ---------------------------------------------------------------- 5. Deadeye is not double-counted
@@ -218,7 +226,9 @@ const de = await page.evaluate(async () => {
 });
 check('no damage number is ever put in a column twice', de.calls > 0 && de.twice === 0,
   { columnCalls: de.calls, columnedTwice: de.twice, tagsSeenByHook: de.tags });
-check('Deadeye\'s own column still fills', de.colN > 0 && de.colTotal > 0, { rows: de.colN, total: de.colTotal });
+// v0.30.760 de-gold, per user ("remove the total damage line, keep the rows"): no column carries a total
+// any more, so the fill is read from its row count alone.
+check('Deadeye\'s own column still fills', de.colN > 0, { rows: de.colN, total: de.colTotal });
 
 // ---------------------------------------------------------------- 6. a wide AoE leaves no orphan column
 const orphans = await page.evaluate(async () => {

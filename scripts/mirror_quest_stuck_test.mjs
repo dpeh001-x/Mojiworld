@@ -11,8 +11,9 @@
 // afterwards, and it is then unsatisfiable for the life of the save.
 //
 // Pinned here: (a) the door stays open while any mirrorSelf quest is live, for
-// all four classes; (b) a save that already killed the Mirror gets the credit
-// it earned and routes to its hand-in; (c) the repair never fires for a player
+// all four classes; (b) a save that already killed the Mirror can earn the quest
+// by fighting again (no free credit since v0.30.521) and routes to its hand-in;
+// (c) the repair never fires for a player
 // who has NOT beaten the Mirror.
 //   node scripts/mirror_quest_stuck_test.mjs
 import { chromium } from 'playwright-core';
@@ -72,20 +73,28 @@ ok('with an unsatisfied Mirror quest, every instructor still opens the Inner Dim
   sealed.length === 0,
   { sealed, note: 'the door was gated on !completed.q_inner_dim_trial, so it sealed the moment the trial was done' });
 
-// ---- (b) an already-earned kill is credited and routed to its hand-in ------
+// ---- (b) the stuck save is now UNSTUCK BY THE FIGHT, not by a free credit ---
+// v0.30.521 (44c8f71e): the credit-on-unlock repair was written for a SEALED room. With (a)'s door
+// open it contradicted the gate - it ran on every Journal open and Auron paid 3200 coins for zero
+// kills. The repair now yields while the door is open, so the save keeps its 0/1 and earns it: the
+// door is open, a Mirror kill counts, and the hand-in still routes to Auron rather than auto-paying.
 await setStuck('archer');
 const repaired = await page.evaluate(() => {
   if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
   const a = (player.quests.active || {}).q_lyra_aperture;
+  const before = { progress: a ? a.progress : null, completed: !!(player.quests.completed || {}).q_lyra_aperture,
+    doorOpen: typeof _lxNeedsMirrorSelf === 'function' && _lxNeedsMirrorSelf() };
+  if (typeof tickQuestKill === 'function') tickQuestKill('mirrorSelf', true);
+  const a2 = (player.quests.active || {}).q_lyra_aperture;
   const done = !!(player.quests.completed || {}).q_lyra_aperture;
-  return { stillActive: !!a, progress: a ? a.progress : null, ready: a ? !!a.readyToHandIn : null,
+  return { before, stillActive: !!a2, progress: a2 ? a2.progress : null, ready: a2 ? !!a2.readyToHandIn : null,
     completed: done, need: QUESTS.q_lyra_aperture.count, handIn: !!QUESTS.q_lyra_aperture.handIn,
     giver: QUESTS.q_lyra_aperture.giver };
 });
-ok('a save that already beat the Mirror gets the credit it earned',
-  (repaired.progress >= repaired.need) || repaired.completed, repaired);
-ok('...and it routes to Auron for the hand-in rather than auto-paying',
-  repaired.completed === false && repaired.ready === true, repaired);
+ok('a stuck save is not handed a kill it has not made (v0.30.521), and its door is open',
+  repaired.before.progress === 0 && !repaired.before.completed && repaired.before.doorOpen, repaired);
+ok('...a Mirror kill satisfies it and routes to Auron for the hand-in rather than auto-paying',
+  repaired.completed === false && repaired.ready === true && repaired.progress >= repaired.need, repaired);
 
 // ---- (c) the repair must NOT fire for someone who never beat the Mirror ----
 const untouched = await page.evaluate(() => {

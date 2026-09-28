@@ -148,7 +148,8 @@ try {
      ['gilded', 'teeming', 'lucid', 'hoarded', 'restless'].every(k => affix[k].iconOk),
      Object.fromEntries(['gilded', 'teeming', 'lucid', 'hoarded', 'restless'].map(k => [k, affix[k].iconOk])));
   ok('Teeming buff text lists all three riders',
-      affix.teeming.buff === '+15% EXP · +25% drop · +14% elite', affix.teeming.buff);
+      // v0.29.859 (dcccc09c, per user "levelling stops outrunning the quest log"): Teeming EXP 1.15 -> 1.05
+      affix.teeming.buff === '+5% EXP · +25% drop · +14% elite', affix.teeming.buff);
 
   // ---- 6) affix multipliers are live and feed the reward chain ----
   const mul = await page.evaluate(() => {

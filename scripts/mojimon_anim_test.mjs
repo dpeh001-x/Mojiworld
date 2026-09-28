@@ -78,15 +78,23 @@ const out = await page.evaluate(async () => {
 
   // REAL STRIKE PATH — updateMinions must stamp atkAnimUntil on a melee hit
   game.monsters.length = 0;
-  const foe = spawnMonster(mn.x + 20, mn.y, 'snail', false, false);
+  // v0.29.619 (39ec4db5, Sanctuary rule): spawnMonster refuses a wild spawn in a
+  // town and returns { _suppressed: true } — the page boots into town, so the
+  // strike needs a field map. Load one and re-field the companion there.
+  try { for (const k of Object.keys(STORY_BEATS)) (player._storyBeatsSeen = player._storyBeatsSeen || {})[k] = true; } catch (e) {}
+  loadMap('forest');
+  game.monsters.length = 0;
+  if (!game.minions.includes(mn)) { try { _mojimonSummon(T, {}); } catch (e) {} }
+  const mn2 = (game.minions || []).find((m) => m && m.mojimon) || mn;
+  const foe = spawnMonster(mn2.x + 20, mn2.y, 'snail', false, false);
   if (foe && !foe._suppressed) {
     foe.currentHp = 1e9; foe.maxHp = 1e9;
-    mn.atkAnimUntil = 0;
+    mn2.atkAnimUntil = 0;
     let stamped = false;
     for (let i = 0; i < 240 && !stamped; i++) {
       game.time++;
       try { updateMinions(16.67); } catch (e) {}
-      if (mn.atkAnimUntil > 0) stamped = true;
+      if (mn2.atkAnimUntil > 0) stamped = true;
     }
     ok('a real melee strike stamps the attack window', stamped, stamped ? 'stamped within ' + '240 frames' : 'never stamped');
   } else ok('a real melee strike stamps the attack window', false, 'foe spawn failed');

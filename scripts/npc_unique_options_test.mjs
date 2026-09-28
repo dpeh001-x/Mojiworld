@@ -86,7 +86,12 @@ try {
       window.__toasts = []; const f = window.showToast; if (f && !f.__w) { window.showToast = function (m) { try { window.__toasts.push(String(m).slice(0, 100)); } catch (e) {} return f.apply(this, arguments); }; window.showToast.__w = true; }
       btn.click();
       // the dialog typewriters text in: wait until it stops growing rather than reading a prefix
-      { let last = -1; for (let k = 0; k < 40; k++) { await new Promise((x) => setTimeout(x, 150)); const len = (document.getElementById('dialog-text').textContent || '').length; if (len === last && k > 2) break; last = len; } }
+      // v0.30.973 (1b2f237c) paced the typewriter: a line break holds 190 ms and a full stop 210 ms, so
+      // "one 150 ms tick without growth" fired on the pause after the *stage direction* and read only that.
+      // Wait for the typewriter itself to finish (dialog._twTimer is nulled by its last step), then settle.
+      { const dlg = document.getElementById('dialog'); let last = -1, still = 0;
+        for (let k = 0; k < 120; k++) { await new Promise((x) => setTimeout(x, 150)); const len = (document.getElementById('dialog-text').textContent || '').length;
+          still = (len === last) ? still + 1 : 0; last = len; if (!(dlg && dlg._twTimer) && still >= 2 && k > 2) break; } }
       const lv = document.getElementById('attributes-modal');   // openLevelUpPanel shows the U panel
       const full = (document.getElementById('dialog-text').textContent || '').replace(/\s+/g, ' ').trim();
       return { labels, full, said: full.slice(0, 140),
