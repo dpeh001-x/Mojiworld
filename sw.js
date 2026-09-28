@@ -255,7 +255,7 @@
 // v0.30.1352 flat-props-3 - v108 -> v109. the signpost and the hearth are RESTORED and the two Azure fountains REPLACED under
 // their own names (per user: the old signpost and hearth are better; the fountains redrawn with a bold black outline), so a returning
 // browser would otherwise keep the v0.30.1346 art until its cache refreshed.
-const CACHE = 'mojiworld-assets-v110';   // v0.30.1361 - Path's Bane attack frame 5 re-tapered
+const CACHE = 'mojiworld-assets-v111';   // v0.30.1365 - five column-strike arts redrawn
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

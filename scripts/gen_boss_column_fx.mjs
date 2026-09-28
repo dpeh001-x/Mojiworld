@@ -58,13 +58,17 @@ const JOBS = [
     // drew exactly that: a thin wavy filament, not a column. Beside the other
     // beams it read as a wire. The braid is now an INTERNAL motif inside a
     // full-width shaft, which is how arbiter/sovereign/legosaurus are built.
+    // v3 (v0.30.x, per user "check if other monsters are using the same or similar style"): v2 still came back a
+    // blank gold gradient bar - the ribbons are now spelled out as bright spiralling strands, Arbiter-style.
     beam: 'lost-sentinel sandstone theme: a WIDE THICK column that fills the full width of the '
-      + 'frame edge to edge, heavy solid shaft of warm dusty gold and pale sandstone light '
-      + '(#d8c878) with deep worn-brown edge shading (#6a4a18) down both sides. INSIDE the broad '
+      + 'frame edge to edge, heavy solid shaft of SATURATED warm amber-gold light (#e0a830) with a '
+      + 'bright yellow core and deep worn-brown edge shading (#6a4a18) down both sides - strongly coloured, no pale or white areas. INSIDE the broad '
       + 'shaft, two brighter ribbons of light wind slowly around each other as if the column '
       + 'cannot decide which way to face, with drifting sand motes and small crumbling watchtower '
       + 'brick flecks rising through it and a faint worn stone sigil glow. Broad and imposing like '
-      + 'a falling pillar of light, not a thin beam and not a wire',
+      + 'a falling pillar of light, not a thin beam and not a wire. Built like a golden judgement pillar: the two '
+      + 'ribbons are BRIGHT twisting strands spiralling around the core with crisp edges and sparks, and the sand '
+      + 'motes and brick flecks are distinct specks with contrast - NOT a smooth blank gradient bar, NOT empty',
   },
   {
     key: 'conductor',
@@ -89,6 +93,59 @@ const JOBS = [
       + 'light: slowly turning clock hands, a few brass gear outlines, small punched ticket stubs '
       + 'and drifting steam wisps rising. The clockwork is a subtle hint inside the light, NOT a '
       + 'solid machine, NOT a metal grille, NOT a wall of gears. Bright, radiant and imposing',
+  },
+  // v0.30.x - per user, with a screenshot of Path's Bane's Tomb Column: "the weird green column ... ensure that it is
+  // made much nicer and check if other monsters are using the same or similar style of art". His beam was a hard-edged
+  // rectangle of flat green stripes over a fully opaque near-black band - a dark slab blotting out the stage. The
+  // audit of every fx_col_* found the same flat-bar family in four more: Archon (a bare thin gold line), the
+  // Sovereign (a plain tapered white bar), the Tomb Hexer (a faint thin lightning thread) and Barnaby (v2 of his
+  // prompt still came back a blank gold gradient). Each is rebuilt here as LIGHT with a themed motif inside it.
+  {
+    key: 'pathsbane',
+    file: 'fx_col_pathsbane.webp',
+    W: 555, H: 1215, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // his palette: color #88aa66 withered green over shell #4a2a1a; the hooded reaper with an hourglass on his chest
+    beam: 'withered reaper TOMB theme: a WIDE THICK column of BRIGHT spectral light that fills the full width of the '
+      + 'frame edge to edge, blazing pale jade-white core down the centre, sickly withered green (#88aa66) mid-body '
+      + 'glowing like a ghost lantern, soft translucent faded-green falloff at both edges. It is LIGHT - luminous, '
+      + 'glowing and semi-transparent - NOT dark, NOT black, NOT a dark slab, NOT flat stripes. FAINT and GHOSTLY '
+      + 'inside the glow: streams of hourglass sand grains falling down the shaft, curling wisps of grave mist, '
+      + 'drifting withered leaves and dust, and pale crescent scythe-arc streaks of light sweeping across it. A '
+      + 'reaper\'s judgement falling from the sky, eerie and beautiful',
+  },
+  {
+    key: 'archon',
+    file: 'fx_col_archon.webp',
+    W: 552, H: 1206, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // Archon: color #ffe88a, the angelic caster; his pillar is "the judgment of heaven"
+    // v1/v2 of this prompt came back as feathers and halo rings with no beam: the sprite matte keys pale white-gold
+    // light out as background. The shaft is now SATURATED amber-gold (no white), the feathers a faint hint inside it.
+    beam: 'celestial ARCHON theme: the MAIN SUBJECT is ONE continuous solid shaft of SATURATED amber-gold holy light running '
+      + 'unbroken from the top of the frame to the bottom and filling its full width, rich deep gold (#ffc233) body, '
+      + 'bright yellow-gold (#ffe066) core, orange-amber (#e8901a) glowing edges - strongly coloured light with no '
+      + 'white areas - like a sunbeam of judgement. Only FAINT hints '
+      + 'inside the bright shaft: a few ghostly white feathers and thin halo-ring glints. The light itself dominates - '
+      + 'NOT scattered objects, NOT separate feathers floating in empty space, NOT a thin line',
+  },
+  {
+    key: 'sovereign',
+    file: 'fx_col_sovereign.webp',
+    W: 552, H: 1206, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // the Sovereign of the Spire: color #fff5d0 ivory over shell #3a1a0a; his crown shards orbit him in the fight
+    beam: 'SOVEREIGN OF THE SPIRE theme: a WIDE THICK regal column of ivory-gold light that fills the full width of '
+      + 'the frame edge to edge, white-hot core, ivory (#fff5d0) body with warm gilded edges and a soft translucent '
+      + 'falloff. Inside the glow, clearly visible: tumbling golden crown shards, faint ornate gilded filigree bands '
+      + 'and sparkling motes rising. Majestic - a king\'s decree falling from above - NOT a plain beam, NOT a flat bar',
+  },
+  {
+    key: 'tombhexer',
+    file: 'fx_col_tombhexer.webp',
+    W: 512, H: 1120, contentW: 0.66, featherX: 0.06, featherY: 0.05,
+    // the Tomb Hexer (both Spire hexers): color #c8a8ff / #c88aff violet over shell #4a2a8a; he casts hex bolts
+    beam: 'TOMB HEXER curse theme: a WIDE THICK column of violet hex light that fills the full width of the frame edge '
+      + 'to edge, bright lilac-white core down the centre, violet (#c88aff) body, soft deep-purple translucent falloff '
+      + 'at both edges. Inside the glow, clearly visible: faint floating curse runes, coiling wisps of purple smoke '
+      + 'and small skull-shaped motes rising. Eerie and bright, NOT a thin lightning bolt, NOT a wire',
   },
 ];
 
@@ -115,62 +172,103 @@ async function feather(buf, W, H, fx, fy) {
   return sharp(data, { raw: { width: W, height: H, channels: C } }).png().toBuffer();
 }
 
-async function gen(job) {
-  const dest = join(DIR, job.file);
-  if (!has('--force') && await exists(dest)) { console.log(`  ${job.file} exists — skip`); return; }
+
+// v0.30.x - ludo's image endpoint answers 202 + a job now: poll GET /assets/jobs/{id}?wait=30 until it settles
+// (a sync 200 is returned as-is). The old sync parse failed with "no url in response".
+async function ludoResult(res) {
+  if (!res.ok) throw new Error(`image ${res.status}: ${(await res.text()).slice(0, 140)}`);
+  const j = await res.json();
+  if (res.status !== 202 || !j.id) return j;
+  for (let i = 0; i < 40; i++) {
+    const r = await fetch(`${API}/assets/jobs/${j.id}?wait=30`, { headers: { Authorization: `ApiKey ${apiKey}` }, signal: AbortSignal.timeout(60000) });
+    if (!r.ok) throw new Error(`job HTTP ${r.status}`);
+    const q = await r.json();
+    if (q.status === 'succeeded') return q.result;
+    if (q.status === 'failed' || q.status === 'cancelled') throw new Error('job ' + q.status + ': ' + JSON.stringify(q.error || '').slice(0, 120));
+    await sleep(Math.max(1000, q.poll_after_ms || 2000));
+  }
+  throw new Error('job timed out');
+}
+async function ludoImage(prompt, ratio) {
+  const res = await fetch(`${API}/assets/image`, {
+    method: 'POST',
+    headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: ratio, n: 1, augment_prompt: false, prompt }),
+    signal: AbortSignal.timeout(120000),
+  });
+  const data = await ludoResult(res);
+  const url = Array.isArray(data) ? data[0]?.url : (data?.url || data?.images?.[0]?.url);
+  if (!url) throw new Error('no url in result');
+  return fetchBuf(url);
+}
+
+// The fit recipe (unchanged): trim, stretch to contentW of the canvas, centre, feather, webp; then the assertion that
+// no opaque pixel touches a border and the beam is not a solid slab.
+async function fit(raw, job) {
+  let content; try { content = await sharp(raw).trim().toBuffer(); } catch { content = raw; }
+  const cw = Math.round(job.W * job.contentW);
+  const inner = await sharp(content).resize(cw, job.H, { fit: 'fill' }).png().toBuffer();
+  const canvas = await sharp({ create: { width: job.W, height: job.H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: inner, left: Math.round((job.W - cw) / 2), top: 0 }]).png().toBuffer();
+  const feathered = await feather(canvas, job.W, job.H, job.featherX, job.featherY);
+  const out = await sharp(feathered).webp({ quality: 92 }).toBuffer();
+  const { data: p2, info: i2 } = await sharp(out).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const A = (x, y) => p2[(y * i2.width + x) * i2.channels + 3];
+  let border = 0, clear = 0;
+  for (let x = 0; x < i2.width; x++) { if (A(x, 0) > 16) border++; if (A(x, i2.height - 1) > 16) border++; }
+  for (let y = 0; y < i2.height; y++) { if (A(0, y) > 16) border++; if (A(i2.width - 1, y) > 16) border++; }
+  for (let i = 3; i < p2.length; i += 4) if (p2[i] < 20) clear++;
+  const pct = 100 * clear / (i2.width * i2.height);
+  if (border !== 0) throw new Error(`border bleed ${border}px after feather`);
+  return { out, pct, w: i2.width, h: i2.height };
+}
+
+async function writeAtomic(f, buf) { await mkdir(dirname(f), { recursive: true }); await writeFile(f + '.tmp', buf); await rename(f + '.tmp', f); }
+
+// One generation: the RAW result is written to disk before any post-processing (a fitting bug once threw away paid
+// jobs that only lived in memory), then fitted. With --out the fitted beam is a candidate in that folder; without it,
+// it installs over Sprites/fx/<file>.
+async function gen(job, k, outDir) {
+  const dest = outDir ? join(outDir, `${job.key}_${k}.webp`) : join(DIR, job.file);
+  if (!outDir && !has('--force') && await exists(dest)) { console.log(`  ${job.file} exists — skip`); return; }
   let lastErr;
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
       const ratio = attempt >= 3 ? 'ar_1_1' : 'ar_9_16';
-      const res = await fetch(`${API}/assets/image`, {
-        method: 'POST',
-        headers: { Authorization: `ApiKey ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_type: 'sprite', art_style: 'Anime/Manga', aspect_ratio: ratio,
-                               n: 1, augment_prompt: false, prompt: BEAM_BASE + job.beam + BEAM_TAIL }),
-        signal: AbortSignal.timeout(120000),
-      });
-      if (!res.ok) throw new Error(`image ${res.status}: ${(await res.text()).slice(0, 140)}`);
-      const data = await res.json();
-      const url = Array.isArray(data) ? data[0]?.url : (data?.url || data?.images?.[0]?.url);
-      if (!url) throw new Error('no url in response');
-      const raw = await fetchBuf(url);
-      let content; try { content = await sharp(raw).trim().toBuffer(); } catch { content = raw; }
-      const cw = Math.round(job.W * job.contentW);
-      const inner = await sharp(content).resize(cw, job.H, { fit: 'fill' }).png().toBuffer();
-      const canvas = await sharp({ create: { width: job.W, height: job.H, channels: 4,
-                                             background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-        .composite([{ input: inner, left: Math.round((job.W - cw) / 2), top: 0 }]).png().toBuffer();
-      const feathered = await feather(canvas, job.W, job.H, job.featherX, job.featherY);
-      const out = await sharp(feathered).webp({ quality: 92 }).toBuffer();
-      // Assert: no opaque pixel on any border, and it is not a solid slab.
-      const { data: p2, info: i2 } = await sharp(out).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-      const A = (x, y) => p2[(y * i2.width + x) * i2.channels + 3];
-      let border = 0, clear = 0;
-      for (let x = 0; x < i2.width; x++) { if (A(x, 0) > 16) border++; if (A(x, i2.height - 1) > 16) border++; }
-      for (let y = 0; y < i2.height; y++) { if (A(0, y) > 16) border++; if (A(i2.width - 1, y) > 16) border++; }
-      for (let i = 3; i < p2.length; i += 4) if (p2[i] < 20) clear++;
-      const pct = (100 * clear / (i2.width * i2.height));
-      if (border !== 0) throw new Error(`border bleed ${border}px after feather`);
-      await mkdir(DIR, { recursive: true });
-      await writeFile(dest + '.tmp', out); await rename(dest + '.tmp', dest);
-      console.log(`  ok -> ${job.file} ${i2.width}x${i2.height} ${out.length}b, transparent ${pct.toFixed(1)}%, border 0 (ratio ${ratio})`);
-      if (pct < 8) console.warn(`     WARNING: ${job.file} is nearly opaque — inspect it`);
+      const raw = await ludoImage(BEAM_BASE + job.beam + BEAM_TAIL, ratio);
+      await writeAtomic(join(outDir || join(repoRoot, 'scripts', '_tmp_col_raw'), 'raw', `${job.key}_${k}_a${attempt}.png`), raw);
+      const r = await fit(raw, job);
+      await writeAtomic(dest, r.out);
+      console.log(`  ok -> ${dest} ${r.w}x${r.h} ${r.out.length}b, transparent ${r.pct.toFixed(1)}%, border 0 (ratio ${ratio})`);
+      if (r.pct < 8) console.warn(`     WARNING: ${job.key} is nearly opaque — inspect it`);
       return;
-    } catch (e) { lastErr = e; if (attempt < 4) await sleep(3000 * attempt); }
+    } catch (e) { lastErr = e; console.warn(`  ${job.key} #${k} attempt ${attempt}: ${e.message}`); if (/HTTP 402|image 402/.test(e.message)) break; if (attempt < 4) await sleep(3000 * attempt); }
   }
-  console.error(`  FAIL ${job.file}: ${lastErr && lastErr.message}`);
+  console.error(`  FAIL ${job.key} #${k}: ${lastErr && lastErr.message}`);
   process.exitCode = 2;
 }
 
 const only = arg('--only');
 const jobs = JOBS.filter((j) => !only || only.split(',').includes(j.key));
+// --from-raw <png>: fit a saved raw result and install it (needs exactly one --only key)
+if (arg('--from-raw')) {
+  if (jobs.length !== 1) { console.error('--from-raw needs exactly one --only key'); process.exit(1); }
+  const { readFile } = await import('node:fs/promises');
+  const r = await fit(await readFile(arg('--from-raw')), jobs[0]);
+  await writeAtomic(join(DIR, jobs[0].file), r.out);
+  console.log(`installed ${jobs[0].file} from ${arg('--from-raw')}: transparent ${r.pct.toFixed(1)}%, border 0`);
+  process.exit(0);
+}
 if (!has('--generate')) {
   console.log('# boss column STRIKE beams (ludo.ai)\n');
   for (const j of jobs) console.log(`  ${j.key.padEnd(10)} -> Sprites/fx/${j.file}  ${j.W}x${j.H}`);
   console.log('\n# Re-run with --generate (needs LUDO_API_KEY). Flags: --only <keys> --force');
+  console.log('#   --candidates N --out <dir>   write N fitted candidates per key to <dir> (raws in <dir>/raw) instead of installing');
+  console.log('#   --from-raw <png> --only <key>  fit a saved raw result and install it');
   process.exit(0);
 }
 if (!apiKey) { console.error('LUDO_API_KEY not set'); process.exit(1); }
-console.log(`generating ${jobs.length} boss column beam(s)...`);
-for (const j of jobs) { await gen(j); await sleep(800); }
+const outDir = arg('--out'), N = Math.max(1, +(arg('--candidates') || 1));
+console.log(`generating ${jobs.length} boss column beam(s) x ${outDir ? N : 1}...`);
+for (const j of jobs) for (let k = 1; k <= (outDir ? N : 1); k++) { await gen(j, k, outDir); await sleep(800); }
 console.log('done.');
