@@ -152,6 +152,16 @@ ok(before.gatedPlate, 'the world-map backdrop plate is watched by the commence g
   before.plateBeforeReveal ? 'it finished in time, but nothing held the door for it' : 'not watched at all');
 
 // ---------------------------------------------------------------- first paint of the map
+// CLOSE THE CHAT BEFORE PRESSING W (test fix, 2026-09-28, at v0.30.1328). The Enter presses that skip the prologue
+// above can land after the world is live, and Enter there opens the chat bar (offline too - it floats a local bubble).
+// The chat input stops every key while it has focus, so the W below typed a "w" into the chat, the map never opened,
+// and the first-paint check read "0 emblem nodes" for a map nobody had asked for (seen at v0.30.1317). The emblems
+// themselves render: toggleWorldMap() draws 85 nodes with 82 region emblems. So the test closes the chat the way a
+// player does - Escape, its own cancel key - and says where the keyboard focus is, so a key that goes nowhere shows.
+const _chatWasOpen = await page.evaluate(() => { try { return !!(net && net.chatOpen); } catch (e) { return false; } });
+if (_chatWasOpen) { await page.keyboard.press('Escape'); await page.waitForTimeout(200); }
+const _focusAtW = await page.evaluate(() => { const a = document.activeElement; return a ? (a.id || a.tagName) : '(none)'; });
+console.log(`  before W: the chat ${_chatWasOpen ? 'was open (closed with Escape)' : 'was closed'}, keyboard focus on ${_focusAtW}`);
 await page.evaluate(() => { try { window._lxBootGateDone = true; } catch (e) {} });
 const _wT0 = Date.now();
 await page.keyboard.press('w');
