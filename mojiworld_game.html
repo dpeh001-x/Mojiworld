@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1325';
+const GAME_VERSION = 'v0.30.1326';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -159890,6 +159890,9 @@ function _lxDnAtlasTrim(lowPx) {
   } catch (e) { return 0; }
 }
 let _lxDnAtlasIdleAt = 0;
+// v0.30.1326 perf - a boss is alive (the file's idiom, isBoss || boss || zodiacBoss): its fight is on, or about to be. Asked only
+// when the idle trim is due. (_perfBossCount counts isBoss alone, and goes stale while the Low preset pins lowFx.)
+function _lxDnBossAlive() { try { for (const m of (game.monsters || [])) if (m && m.currentHp > 0 && (m.isBoss || m.boss || m.zodiacBoss)) return true; } catch (e) {} return false; }
 let _lxDnAtlasBudget = 0;                  // builds still allowed this frame (drawDamageNumbers resets it)
 // The pop's size, snapped to a 4% ladder hung on the base size (so scale 1 is exactly the base) and then to the
 // half-pixel grid: the four frames around the apex share one atlas, and a pop needs six or seven, not ten.
@@ -160090,11 +160093,19 @@ function _lxGbPrewarm() {
     const b0 = ((LX_GB_ROW_SIZE + 4) * uiK) | 0;
     const dprNow = Math.max(0.25, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1)));
     const dpr = _lxDnAtlasDpr(dprNow);
+    // v0.30.1326 perf - BOTH LADDERS, THE ONE IN USE FIRST. A loaded machine fights in the second FX tier, where every sticker
+    // takes the stress sheet ('s0'), and this asked for the normal one only: in a Gravitos kit-bot fight 36% of sticker
+    // frames missed their sheet and drew as live stroked text, while the nine normal sheets sat in the cache unused until
+    // they were evicted. The tier flips during a fight (18+ numbers on screen is stress too), so both are asked for; with
+    // two rows fewer and no star cell both ladders fit the cache beside the figure atlases.
+    const stressNow = (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) || ((game.damageNumbers || []).length > 18);
     let n = 0;
-    for (let k = 0; k <= 8; k++) {
-      const px = _lxDnAtlasPx4(b0, Math.pow(_LX_DN_ATLAS_STEP, k));
-      const key = 'gb|' + b0 + '|' + px + '|n|' + LX_GB_ROW_COL + '|' + dpr;
-      if (!_LX_DN_ATLAS.has(key) && _lxGbAtlasRequest(b0, px, false, LX_GB_ROW_COL, false, dpr, key)) n++;
+    for (const stress of (stressNow ? [true, false] : [false, true])) {
+      for (let k = 0; k <= 8; k++) {
+        const px = _lxDnAtlasPx4(b0, Math.pow(_LX_DN_ATLAS_STEP, k));
+        const key = 'gb|' + b0 + '|' + px + '|' + (stress ? 's0' : 'n') + '|' + LX_GB_ROW_COL + '|' + dpr;
+        if (!_LX_DN_ATLAS.has(key) && _lxGbAtlasRequest(b0, px, false, LX_GB_ROW_COL, stress, dpr, key)) n++;
+      }
     }
     return n;
   } catch (e) { return 0; }
@@ -160128,16 +160139,23 @@ function _lxGbAtlasBuild(b0, px, crit, col, stress, dpr) {
     const cv = document.createElement('canvas'); const c = cv.getContext('2d');
     const font = '900 ' + px + 'px Impact, "Arial Black", "Trebuchet MS", sans-serif';
     c.font = font;
-    const mAll = c.measureText(_LX_DN_ATLAS_CHARS);
+    const GBC = _LX_DN_ATLAS_CHARS.replace(/[^0-9,]/g, '');   // v0.30.1326 perf - a sticker is never a crit (the B/G stack clears it): no star cell
+    const mAll = c.measureText(GBC);
     const asc = Math.ceil(mAll.actualBoundingBoxAscent || px), desc = Math.ceil(mAll.actualBoundingBoxDescent || px * 0.3);
-    const rows = [{ p: 'sstroke', a: LX_GB_SHADOW_A, sh: 1 }, { p: 'sfill', a: LX_GB_SHADOW_A, sh: 1 }];
+    // v0.30.1326 perf - TWO ROWS FEWER, THE SAME PICTURE. A sticker draws every row as a full glyph cell per glyph, most of it
+    // transparent margin: at the 2.4x overshoot a six-digit sticker was 36-42 draws covering several screens' worth of
+    // cells. The silhouette's stroke and fill are one row now, composited in the cell at their own alpha (0.8 each, so
+    // their overlap is 0.96, as it was on screen) and drawn at 1; the fill and its dilate are one row (the same gold,
+    // opaque). Across glyphs nothing moves: the rows that stay keep their order, and each merged pair is a single colour,
+    // so a neighbour cannot tell which glyph's pass landed first. A third fewer draws and a third less fill per sticker.
+    const rows = [{ p: 'shadow', a: 1, sh: 1 }];
     if (!stress && 9 * S / 2 > reach) rows.push({ p: 'halo', w: 9, a: 0.35, sh: 0, crit: 1 });
     if (!stress && 7 * S / 2 > reach) rows.push({ p: 'halo', w: 7, a: 0.35, sh: 0, crit: 0 });
-    rows.push({ p: 'white', a: 1, sh: 0 }, { p: 'black', a: 1, sh: 0 }, { p: 'fill', a: 1, sh: 0 }, { p: 'dil', a: 1, sh: 0 });
+    rows.push({ p: 'white', a: 1, sh: 0 }, { p: 'black', a: 1, sh: 0 }, { p: 'fill', a: 1, sh: 0 });
     const pad = Math.ceil(Math.max(LX_GB_WHITE, LX_GB_BLACK, rows.some((r) => r.w === 9) ? 9 * S : 0) / 2 + 2);
     const base = asc + pad, cellH = Math.ceil((base + desc + pad) * dpr), rowH = cellH + 2;
     const cells = new Map(); let x = 0;
-    for (const ch of _LX_DN_ATLAS_CHARS) {
+    for (const ch of GBC) {
       const adv = c.measureText(ch).width; const sw = Math.ceil((Math.ceil(adv) + pad * 2) * dpr);
       cells.set(ch, { sx: x, sw, adv }); x += sw + 2;
     }
@@ -160156,13 +160174,11 @@ function _lxGbAtlasBuild(b0, px, crit, col, stress, dpr) {
         c.beginPath(); c.rect(cell.sx, r * rowH, cell.sw, cellH); c.clip();
         c.setTransform(dpr, 0, 0, dpr, cell.sx + pad * dpr, r * rowH + base * dpr);
         c.font = font; c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.lineJoin = 'round'; c.lineCap = 'round';
-        if (R.p === 'sstroke') { c.lineWidth = LX_GB_WHITE; c.strokeStyle = '#000'; c.strokeText(ch, 0, 0); }
-        else if (R.p === 'sfill') { c.fillStyle = '#000'; c.fillText(ch, 0, 0); }
+        if (R.p === 'shadow') { c.globalAlpha = LX_GB_SHADOW_A; c.lineWidth = LX_GB_WHITE; c.strokeStyle = '#000'; c.strokeText(ch, 0, 0); c.fillStyle = '#000'; c.fillText(ch, 0, 0); }   // restore() resets the alpha
         else if (R.p === 'halo') { c.lineWidth = R.w * S; c.strokeStyle = col; c.strokeText(ch, 0, 0); }
         else if (R.p === 'white') { c.lineWidth = LX_GB_WHITE; c.strokeStyle = '#ffffff'; c.strokeText(ch, 0, 0); }
         else if (R.p === 'black') { c.lineWidth = LX_GB_BLACK; c.strokeStyle = '#000'; c.strokeText(ch, 0, 0); }
-        else if (R.p === 'fill') { c.fillStyle = fillStyle; c.fillText(ch, 0, 0); }
-        else { c.lineWidth = LX_GB_DILATE; c.strokeStyle = fillStyle; c.strokeText(ch, 0, 0); }
+        else if (R.p === 'fill') { c.fillStyle = fillStyle; c.fillText(ch, 0, 0); c.lineWidth = LX_GB_DILATE; c.strokeStyle = fillStyle; c.strokeText(ch, 0, 0); }
         c.restore();
       }
     }
@@ -160307,7 +160323,7 @@ function drawDamageNumbers() {
   // v0.30.929 nothing to draw for 8 s of play: let the atlases go (see _lxDnAtlasTrim)
   if (!(game.damageNumbers && game.damageNumbers.length)) {
     if (!_lxDnAtlasIdleAt) _lxDnAtlasIdleAt = game.time | 0;
-    else if (((game.time | 0) - _lxDnAtlasIdleAt) > 480) { _lxDnAtlasIdleAt = game.time | 0; _lxDnAtlasTrim(); }
+    else if (((game.time | 0) - _lxDnAtlasIdleAt) > 480) { _lxDnAtlasIdleAt = game.time | 0; if (!_lxDnBossAlive()) _lxDnAtlasTrim(); }   // v0.30.1326 perf - not while a boss lives: walking up to it must not throw its prewarmed ladders away
   } else _lxDnAtlasIdleAt = 0;
   if (typeof LX_GFX !== 'undefined' && !LX_GFX.dmgnum) return;    // v0.29.431
   // v0.25.19 — Phase 4b gate. LXDamageNumberScene on the UI canvas owns
