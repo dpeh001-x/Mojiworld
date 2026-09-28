@@ -25,7 +25,8 @@ try {
   await page.evaluate(() => {
     for (const id of ['loading-overlay', 'class-select-modal', 'lo-auth']) { const o = document.getElementById(id); if (o) { o.style.display = 'none'; o.classList.add('fade'); } }
     window._lxBootGateDone = true; window._prologueActive = false;
-    player.level = 100; player.cls = 'mage'; player._god = false;
+    player.level = 100; player.cls = 'mage'; player._god = true;   // god through the arena intro: the boss's opener used to DOWN the
+    // real ~100-HP mage while the intro video played (flaky: game.time 240 passed, 790 failed), and a down re-pins hp to 1 every frame
     loadMap('gravitosArena'); game.paused = false;
   });
   await page.waitForFunction(() => game.monsters.some((m) => m && m.type === 'gravitos' && m.currentHp > 0), null, { timeout: 60000 });
@@ -33,6 +34,7 @@ try {
 
   const r = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
+    player._god = false; player._downed = false; player._downedUntil = 0; player.invulnerable = 0;   // mortal again for the strikes (the cap is on the real damage path)
     const out = { cap: (typeof LX_GRAV_METEOR_CAP !== 'undefined') ? LX_GRAV_METEOR_CAP : null };
     const boss = () => game.monsters.find((x) => x && x.type === 'gravitos' && x.currentHp > 0);
     const quiet = () => { const sb = document.getElementById('story-beat-overlay'); for (let k = 0; k < 12 && sb && sb.classList.contains('on'); k++) sb.click(); const bi = document.getElementById('boss-intro-overlay'); if (bi) bi.classList.remove('on'); game.paused = false;
@@ -47,8 +49,9 @@ try {
       if (passHit) h._passHit = true;
       game.hazards.push(h); const before = player.hp;
       for (let k = 0; k < 80 && game.hazards.includes(h) && player.hp === before; k++) { quiet(); player.x = cx - player.w / 2; await sleep(30); }
+      const hitHp = player.hp;   // read at the hit: the natural regen tick can add 1 HP inside the 120 ms settle below (lost 29,999)
       await sleep(120);
-      return { lost: Math.round(before - player.hp), passHit: !!h._passHit, src: player._lastDamageSource };
+      return { lost: Math.round(before - hitHp), passHit: !!h._passHit, src: player._lastDamageSource };
     };
     const grav = (dmg, label) => ({ damage: dmg, _gravBlue: true, _sourceLabel: label, _gravBand: (typeof _gravHeavyBand === 'function') ? _gravHeavyBand(3, 'skill') : null });
     out.fall = [await strike(grav(5e6, 'a Decay Pillar'), false), await strike(grav(5e6, 'a Crush Tendril'), false), await strike(grav(5e6, 'a Gravity Crush column'), false)];

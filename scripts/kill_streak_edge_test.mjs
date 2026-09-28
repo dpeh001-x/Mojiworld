@@ -95,10 +95,17 @@ const r3 = await page.evaluate(() => {
   player._ksTier = 0; game.mapKillStreak = 0;
   const px = player.x + player.w / 2, py = player.y + player.h / 2;
   let uid = 900000;
-  const kill = (over) => _coopApplyKill(Object.assign({
-    t: 'kill', id: 7, u: ++uid, e: 1000, c: 10,
-    x: Math.round(px), y: Math.round(py), map: game.currentMap, tp: 'slime', b: 0, il: 0,
-  }, over || {}));
+  // v0.30.862 (a23b19ec, per user) coop-trust: a guest pays and counts a host kill only for a
+  // monster it MIRRORED (a uid seen in a host snapshot, same type). Record each uid the way the
+  // snapshot path does before the kill frame lands, or every frame is dropped as untrusted.
+  const kill = (over) => {
+    ++uid;
+    _lxCoopRewardNote({ uid, type: 'slime', exp: 1000, mojicoins: 10, level: 1 });
+    return _coopApplyKill(Object.assign({
+      t: 'kill', id: 7, u: uid, e: 1000, c: 10,
+      x: Math.round(px), y: Math.round(py), map: game.currentMap, tp: 'slime', b: 0, il: 0,
+    }, over || {}));
+  };
   let picks = 0;
   const realTrack = window.trackPickup;
   window.trackPickup = function (...a) { picks++; return realTrack ? realTrack.apply(this, a) : undefined; };

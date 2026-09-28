@@ -28,7 +28,20 @@ const r = await page.evaluate(() => {
   const out = { chapters: [] };
   const npcNames = new Set();
   for (const id in MAPS) for (const n of (MAPS[id].npcs || [])) if (n && n.name) npcNames.add(n.name);
-  const spawnMaps = (t) => Object.keys(MAPS).filter((id) => (MAPS[id].spawns || []).some((s) => s.type === t));
+  // v0.29.955 (421bf4f0, per user) — vigil_vermillion left every map roster: he is an
+  // Elder spawned on the Fractured Reflection by his own 5-minute clock
+  // (_lxVermillionTick). A roster-only scan reads "spawns nowhere" for chapter III,
+  // so clocked spawners count too — but only when the game's own clock really
+  // spawns that type on that map (read from the function source, not assumed).
+  const clocked = {};
+  try {
+    const src = String(_lxVermillionTick);
+    const map = (src.match(/currentMap\s*!==\s*'([A-Za-z0-9_]+)'/) || [])[1];
+    const type = (src.match(/spawnMonster\([^)]*'([a-z_]+)'/) || [])[1];
+    if (map && type && MAPS[map]) (clocked[type] = clocked[type] || []).push(map);
+  } catch (e) {}
+  const spawnMaps = (t) => Object.keys(MAPS).filter((id) => (MAPS[id].spawns || []).some((s) => s.type === t)
+    || (clocked[t] || []).includes(id));
   for (const qid of ids) {
     const q = QUESTS[qid];
     if (!q) { out.chapters.push({ qid, missing: true }); continue; }

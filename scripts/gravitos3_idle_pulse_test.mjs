@@ -62,10 +62,13 @@ await b.close(); srv.kill();
 
 const drawn = idle.map((h, i) => h * r.idle.s * ((r.idle.fs && r.idle.fs[i]) || 1));
 
-ok('the idle calib carries a per-frame scale', Array.isArray(r.idle.fs) && r.idle.fs.length === 9,
+// d3038e7d (2026-08-29, same day) - Gravitos-3's idle was REDRAWN (7 of 9 frames) with the pulse fixed in the art: new art, no fs
+// 1.010x; the fs baked from the old frames made it 1.044x, so it was deleted rather than recomputed. The pulse is now guarded
+// on the drawn titan (the old pulse was 1.055x) and on the calib staying free of a stale per-frame table.
+ok('the idle calib carries NO per-frame scale (d3038e7d: the redrawn art is level on its own; a stale fs fights it)', !r.idle.fs,
   { fs: r.idle.fs, s: r.idle.s });
-ok('the DRAWN head and body no longer pulses',
-  spread(drawn) < 1.005,
+ok('the DRAWN head and body no longer pulses (redrawn art 1.010x; the pulse was 1.055x)',
+  spread(drawn) < 1.02,
   { beforePx: idle, drawnSpread: spread(drawn).toFixed(4) + 'x',
     wasSpread: spread(idle).toFixed(3) + 'x',
     note: 'head+body = opaque AND dark (excludes the lava veins and flame crest), inside a 40% central band (excludes the wings)' });

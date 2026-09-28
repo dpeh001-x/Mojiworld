@@ -73,11 +73,13 @@ const band = await page.evaluate(() => {
   return { base: g('LX_PANDEMIC_FINALE_BASE'), per: g('LX_PANDEMIC_FINALE_PER_STACK'),
     cap: g('LX_PANDEMIC_FINALE_CAP'), at: g('LX_GRANDHEX_RUPTURE_AT'), icd: g('LX_GRANDHEX_RUPTURE_ICD') };
 });
-ok('the finale band comes down: 10.0-16.0x ATK -> 5.0-9.5x',
-  band.base === 5.0 && band.cap === 9.5,
+// v0.30.814 (075d3b43) — the user's Skill Editor patch took the band down
+// again: 5.0-9.5x (this change) -> 3.5-6x -> 2.0-4.5x, 0.5x per average stack.
+ok('the finale band comes down: 10.0-16.0x ATK -> 2.0-4.5x (v0.30.814)',
+  band.base === 2 && band.cap === 4.5,
   `base ${band.base}, per-stack ${band.per}, cap ${band.cap}`);
-ok('a fully cursed field still erupts for 9.0x — the largest nova in the game (next is 7.5x)',
-  Math.min(band.cap, band.base + band.per * (band.at - 1)) === 9.0,
+ok('a fully cursed field erupts for 4.0x (v0.30.814)',
+  Math.min(band.cap, band.base + band.per * (band.at - 1)) === 4.0,
   `${band.base} + ${band.per} x ${band.at - 1} stacks = ${Math.min(band.cap, band.base + band.per * (band.at - 1))}x`);
 ok('REGRESSION GUARD: the v0.30.330 rupture breaker is present',
   band.icd === 180, `LX_GRANDHEX_RUPTURE_ICD = ${band.icd} frames`);
@@ -120,8 +122,8 @@ ok('...at every curse depth, not just a full one',
 ok('CURSE DEPTH is what raises it — the thing the kit is actually about',
   shape.byDepth[4] > shape.byDepth[0] && [1, 2, 3, 4].every((d) => shape.byDepth[d] > shape.byDepth[d - 1]),
   Object.entries(shape.byDepth).map(([d, v]) => `${d} stacks ${v}x`).join('  '));
-ok('an uncursed field erupts for the 5.0x floor, not 10.0x',
-  shape.byDepth[0] === 5.0, `${shape.byDepth[0]}x`);
+ok('an uncursed field erupts for the 2.0x floor (v0.30.814), not 10.0x',
+  shape.byDepth[0] === 2.0, `${shape.byDepth[0]}x`);
 
 // ---- what it is worth: the same measurement the audit used ------------------
 const dps = await page.evaluate(async () => {

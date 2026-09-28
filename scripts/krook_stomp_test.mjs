@@ -39,9 +39,6 @@ await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'do
 await page.waitForFunction(() => typeof spawnMonster === 'function'
   && typeof _krookStompFrame === 'function' && typeof BOSS_ATTACK_FRAMES !== 'undefined',
   null, { timeout: 120000 });
-await page.waitForFunction(() => { try { const f = BOSS_ATTACK_FRAMES.kingKrookstomp;
-  return !!(f && f.length && f.every((i) => i && i.complete && i.naturalWidth > 0)); } catch (e) { return false; } },
-  null, { timeout: 60000 }).catch(() => {});
 
 // Boot into a real map with a real player, then hand the page one helper that
 // runs genuine frames - the pattern advances on dt, so nothing here may fake it.
@@ -61,7 +58,16 @@ await page.evaluate(() => {
     };
     requestAnimationFrame(tick);
   });
+  // v0.30.1196 (9e6f0fcf) lazy-art: boss frames stay parked until the boss is WANTED - spawnMonster ->
+  // _lxWarmBossFrames -> _lxBossArtWant. Spawn King Krook once through that path so the stomp set is
+  // asked for, then clear him; the decode wait below only means something after this.
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
+  spawnMonster(Math.round(player.x) + 220, player.y - 40, 'kingKrook', true);
+  game.monsters = [];
 });
+await page.waitForFunction(() => { try { const f = BOSS_ATTACK_FRAMES.kingKrookstomp;
+  return !!(f && f.length && f.every((i) => i && i.complete && i.naturalWidth > 0)); } catch (e) { return false; } },
+  null, { timeout: 60000 }).catch(() => {});
 await page.waitForTimeout(1200);
 
 const r = await page.evaluate(async () => {

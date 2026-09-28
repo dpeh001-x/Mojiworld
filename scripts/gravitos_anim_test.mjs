@@ -44,6 +44,9 @@ const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof drawMonster === 'function' && typeof loadMap === 'function',
   null, { timeout: 120000 });
+// v0.30.1196 (9e6f0fcf) lazy-art - boss frames load only once the boss is wanted (a boss spawn asks through _lxWarmBossFrames).
+// This suite builds its bosses by hand, never through spawnMonster, so it asks for their art the same way before waiting on it.
+await page.evaluate(() => { for (const t of ['gravitos', 'legosaurus', 'young_confused_barnaby']) { try { _lxWarmBossFrames(t); } catch (e) {} } });
 await page.waitForFunction(() => {
   const ready = (arr) => arr && arr.length >= 9 && (arr._readyN >= 9
     || arr.slice(0, 9).every(f => f && ((f.complete && f.naturalWidth > 0) || (!f.src && f.width > 0))));

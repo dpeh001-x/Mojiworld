@@ -130,11 +130,22 @@ try {
   check(sr.status === 0 && tags >= 5 && vtags === tags, 'the deploy loads every data/*.js as ?v=<GAME_VERSION> (HTML and tables cannot skew)', { tags, vtags, GV });
   // README, steam/package.json, the launcher, the new root files
   const readme = readMeta('README.md') || '';
-  check(!/\| *Reset save[^|]*\| *`T`/.test(readme) && !/Dev console[^|]*\| *hold `1`/.test(readme) && /\[\*\*Releases\*\*\]\(https:\/\/github\.com\/dpeh001-x\/Mojiworld\/releases\)/.test(readme),
+  // 1130d0ed (after v0.30.1256's first portable release) points the link at /releases/latest - either form is the Releases page
+  check(!/\| *Reset save[^|]*\| *`T`/.test(readme) && !/Dev console[^|]*\| *hold `1`/.test(readme) && /\[\*\*Releases\*\*\]\(https:\/\/github\.com\/dpeh001-x\/Mojiworld\/releases(\/latest)?\)/.test(readme),
     'README: the stale "Reset save (T)" and "Dev console 1+2+3" rows are gone; Download still links Releases', { resetRow: /Reset save/.test(readme), devRow: /Dev console \|/.test(readme) });
   let spkg = null; try { spkg = JSON.parse(readMeta('steam/package.json')); } catch (e) {}
   const filt = spkg ? (spkg.build.extraResources.find((e) => e.from === '..') || {}).filter || [] : [];
-  check(!!spkg && GV && spkg.version === GV && filt.includes('manifest.webmanifest') && filt.includes('assets/mojiworld_icon_512.png'), 'steam/package.json version = GAME_VERSION, and the depot/zip filter ships the manifest + its 512 icon', { steam: spkg && spkg.version, game: GV });
+  // The committed version only equals GAME_VERSION on the commit that stamped it (v0.30.1180 did, via
+  // apply_launch_meta_files.mjs). Every game push since moves GAME_VERSION and leaves the wrapper alone: the
+  // stamp happens at PACKAGING - steam-build.yml runs tools/sync_steam_version.mjs --write before the build.
+  // So: the committed version is a real release no newer than the game, and the build step still syncs it.
+  const vnum = (v) => String(v || '').split('.').map(Number).reduce((a, n) => a * 100000 + (n | 0), 0);
+  const sbuild = readMeta('.github/workflows/steam-build.yml') || '';
+  const syncs = /run: node tools\/sync_steam_version\.mjs --write[\s\S]*?npm run dist:steam/.test(sbuild);
+  check(!!spkg && GV && /^\d+\.\d+\.\d+$/.test(spkg.version || '') && vnum(spkg.version) <= vnum(GV) && syncs
+    && filt.includes('manifest.webmanifest') && filt.includes('assets/mojiworld_icon_512.png'),
+    'steam/package.json is stamped with GAME_VERSION at build (steam-build syncs it), and the depot/zip filter ships the manifest + its 512 icon',
+    { steam: spkg && spkg.version, game: GV, syncs });
   const cmd = readMeta('Mojiworld.cmd') || '', bpz = readMeta('scripts/build_portable_zip.mjs') || '';
   check(/start "" "https:\/\/play\.moji-studios\.com\/"/.test(cmd) && !/raw\.githack/.test(cmd) && /https:\/\/play\.moji-studios\.com\//.test(bpz) && !/raw\.githack/.test(bpz),
     'the launcher fallback (Mojiworld.cmd) and PLAY_ME_FIRST.txt point at https://play.moji-studios.com/', { cmd: /play\.moji-studios/.test(cmd), bpz: /play\.moji-studios/.test(bpz) });

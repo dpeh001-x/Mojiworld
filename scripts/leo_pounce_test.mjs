@@ -29,24 +29,38 @@ const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof spawnMonster === 'function' && typeof _zodiacAnimTick === 'function'
   && typeof ZODIAC_POUNCE_FRAMES !== 'undefined', null, { timeout: 120000 });
-await page.waitForFunction(() => { try { const f = ZODIAC_POUNCE_FRAMES.leo;
-  return !!(f && f.length && f.every(i => i && i.complete && i.naturalWidth > 0)); } catch (e) { return false; } },
-  null, { timeout: 40000 }).catch(() => {});
+// v0.30.1196 (9e6f0fcf) lazy-art: boss frames are parked until the boss is WANTED
+// (spawnMonster -> _lxWarmBossFrames -> _lxBossArtWant), so waiting for the pounce set
+// to decode before any Regulus exists waits forever. Release the boot hold the way the
+// title menu does, spawn him once through the game's own path, then wait.
+await page.evaluate(() => {
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
+  const keep = game.monsters; game.monsters = [];
+  spawnMonster(500, 400, 'zodiac_leo', true);
+  try { if (typeof _lxWantImg === 'function' && typeof ZODIAC_SPRITES !== 'undefined' && ZODIAC_SPRITES.leo) _lxWantImg(ZODIAC_SPRITES.leo, true); } catch (e) {}
+  game.monsters = keep;
+});
+await page.waitForFunction(() => { try { const f = ZODIAC_POUNCE_FRAMES.leo, b = ZODIAC_SPRITES.leo;
+  return !!(f && f.length && f.every(i => i && i.complete && i.naturalWidth > 0) && b && b.naturalWidth > 0); } catch (e) { return false; } },
+  null, { timeout: 60000 }).catch(() => {});
 await page.waitForTimeout(1200);
 
 const r = await page.evaluate(() => {
   const out = {};
+  // Big frames are re-baked into canvases (_lxBakeToLong) that keep the original
+  // <img> on _lxSrc: identify files and compare source canvases through it.
+  const orig = (i) => (i && i._lxSrc) || i;
   const fr = ZODIAC_POUNCE_FRAMES.leo;
   out.frames = fr ? fr.length : 0;
   out.decoded = !!(fr && fr.length && fr.every(i => i && i.complete && i.naturalWidth > 0));
-  out.srcs = fr ? fr.map(i => i.src.split('/').slice(-2).join('/')) : [];
+  out.srcs = fr ? fr.map(i => String(orig(i).src || '').split('/').slice(-2).join('/')) : [];
   // only Regulus ships a pounce set today
   out.otherSigns = Object.keys(ZODIAC_POUNCE_FRAMES).filter(k => k !== 'leo'
     && ZODIAC_POUNCE_FRAMES[k] && ZODIAC_POUNCE_FRAMES[k].length);
   // the base sprite the frames must overlay pixel-for-pixel
-  const baseImg = (typeof ZODIAC_SPRITES !== 'undefined') ? ZODIAC_SPRITES.leo : null;
-  out.sameCanvas = !!(baseImg && fr && fr[0] && baseImg.naturalWidth === fr[0].naturalWidth
-    && baseImg.naturalHeight === fr[0].naturalHeight);
+  const baseImg = (typeof ZODIAC_SPRITES !== 'undefined') ? orig(ZODIAC_SPRITES.leo) : null;
+  out.sameCanvas = !!(baseImg && fr && fr[0] && baseImg.naturalWidth === orig(fr[0]).naturalWidth
+    && baseImg.naturalHeight === orig(fr[0]).naturalHeight);
 
   game.paused = false;
   game.monsters = [];
@@ -70,7 +84,7 @@ const r = await page.evaluate(() => {
   leo.onGround = false; leo._zAnim = null;
   const st = _zodiacAnimTick(leo, now()).state;
   const img = (typeof _zodiacFrame === 'function') ? _zodiacFrame('leo', st) : null;
-  out.drawn = img ? img.src.split('/').slice(-2).join('/') : null;
+  out.drawn = img ? String(orig(img).src || '').split('/').slice(-2).join('/') : null;
 
   // a sign with NO pounce set must be unaffected
   game.monsters = [];

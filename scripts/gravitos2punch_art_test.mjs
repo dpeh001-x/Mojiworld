@@ -49,6 +49,9 @@ const g = await page.evaluate(async () => {
   game.monsters = []; spawnMonster(Math.round(player.x + 300), Math.round(player.y), 'gravitos', false);
   const m = game.monsters[game.monsters.length - 1]; m.hp = m.currentHp = 1e9; m.maxHp = 1e9; m.atk = 0; m.isBoss = true;
   m._phaseSprite = 'gravitos2'; m.phase = 2;   // form 2 art
+  // v0.30.1196 (9e6f0fcf) lazy-art - boss frames load only once the boss is wanted, and spawnMonster asks only for a boss spawn
+  // (isBoss / isMiniBoss). This one is spawned plain and flagged after, so ask the way a boss spawn does.
+  if (typeof _lxWarmBossFrames === 'function') _lxWarmBossFrames('gravitos');
   const key = (typeof _gravCastKey === 'function') ? _gravCastKey(m, 'punch') : null; out.key = key;
   const fr = BOSS_ATTACK_FRAMES[key] || []; for (let i = 0; i < 300; i++) { if (fr.length === 9 && fr.every((im) => im && im.complete && im.naturalWidth > 0)) break; await wait(50); }
   out.decoded = fr.filter((im) => im && im.complete && im.naturalWidth > 0).length; out.natural = fr[0] && (fr[0].naturalWidth + 'x' + fr[0].naturalHeight);

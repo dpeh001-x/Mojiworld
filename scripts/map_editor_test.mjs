@@ -4,6 +4,8 @@
 // and import. Data is baked from the live game (scripts/extract_map_data.mjs).
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 // Resolve a browser that actually EXISTS. The Linux path stays first so CI is
 // untouched, but it is the only candidate this line used to have - and with
 // PW_EXE unset on a dev machine that made the launch throw before a single
@@ -16,7 +18,10 @@ const EXE = [process.env.PW_EXE,
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
-const URL = 'file:///home/user/Mojiworld/tools/map_editor.html';
+// The editor is a sibling of this script's folder. This used to be a hardcoded
+// Linux path (file:///home/user/Mojiworld/...), so on any other checkout the
+// goto threw before a single assertion ran. Derive it from the script itself.
+const URL = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', 'tools', 'map_editor.html')).href;
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu'] });

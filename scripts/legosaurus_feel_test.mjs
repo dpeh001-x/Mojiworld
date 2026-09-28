@@ -37,6 +37,14 @@ await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentload
 await page.waitForFunction(() => typeof spawnMonster === 'function' && typeof _lxCalibFt === 'function'
   && typeof _lxFtWalk === 'function' && typeof updateProjectiles === 'function', null, { timeout: 120000 });
 await page.waitForTimeout(2500);
+// v0.30.1196 (9e6f0fcf) lazy-art: boss frames stay parked until the boss is WANTED (spawnMonster ->
+// _lxWarmBossFrames -> _lxBossArtWant), so nothing below would ever decode. Spawn Legosaurus once through
+// the game's own path to ask for his sets (legosaurusdash included), then clear him.
+await page.evaluate(() => {
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
+  spawnMonster(600, 380, 'legosaurus', true);
+  game.monsters = [];
+});
 // the dash checks walk the REAL frame images - wait for all 9 to decode
 await page.waitForFunction(() => typeof BOSS_ATTACK_FRAMES !== 'undefined' && typeof _lxFtReadyN === 'function'
   && BOSS_ATTACK_FRAMES.legosaurusdash && _lxFtReadyN(BOSS_ATTACK_FRAMES.legosaurusdash) === 9,

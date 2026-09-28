@@ -2,13 +2,15 @@
 // Asserts: both mobs carry it, the hazard spawns in the AIR, the telegraph is
 // harmless, the rain damages inside the column only, and it renders + expires.
 import { createRequire } from 'node:module';
-const req = createRequire('file:///C:/Users/dpeh0/Mojiworld/package.json');
+import path from 'node:path'; import { fileURLToPath } from 'node:url';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const req = createRequire(path.join(ROOT, 'package.json'));
 const { chromium } = req('playwright-core');
 import { spawn } from 'node:child_process';
 // tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
-const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
+const FILE = 'mojiworld_game.html';   // serve.js swaps in MOJI_GAME_FILE for this path
 const PORT = Number(process.env.PORT || 8981);
-const server = spawn(process.execPath, ['C:/Users/dpeh0/Mojiworld/serve.js', String(PORT)], { stdio: 'ignore' });
+const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT, env: { ...process.env } });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
@@ -114,25 +116,38 @@ const R = await page.evaluate(async () => {
   const ctx = canvas.getContext('2d');
   const drawn = [];
   const orig = ctx.drawImage;
+  const cbArt = _lxVfxFrame('cloudburst');
+  const isCbScaled = (src) => !!(cbArt && cbArt._lxProjCache && cbArt._lxProjCache.get && [...cbArt._lxProjCache.values()].includes(src));
   ctx.drawImage = function (src, ...rest) {
-    try { drawn.push(String(src && src.src || (src && src.tagName) || '?').split('/').slice(-2).join('/')); } catch (e) {}
+    try { drawn.push(src === cbArt || isCbScaled(src) ? 'cloudburst(art)' : String(src && src.src || (src && src.tagName) || '?').split('/').slice(-2).join('/')); } catch (e) {}
     return orig.apply(this, [src, ...rest]);
   };
   let drawErr = null;
   const boxes = [];
-  for (const t of [0, 17, 33, 61, 90]) {
-    game.time = t;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    try { drawHazards(); } catch (e) { drawErr = String(e).slice(0, 180); break; }
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const coverBox = () => {
+    const W = canvas.width, H = canvas.height, shots = [];
+    for (const bg of ['#000', '#fff']) {
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H); ctx.restore();
+      drawHazards();
+      shots.push(ctx.getImageData(0, 0, W, H).data);
+    }
+    const [b, w] = shots;
     let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
-    for (let y = 0; y < canvas.height; y++)
-      for (let x = 0; x < canvas.width; x++)
-        if (d[(y * canvas.width + x) * 4 + 3] > 24) {
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        if (Math.max(b[i], b[i + 1], b[i + 2]) > 24 || Math.min(w[i], w[i + 1], w[i + 2]) < 231) {
           if (x < x0) x0 = x; if (x > x1) x1 = x;
           if (y < y0) y0 = y; if (y > y1) y1 = y;
         }
-    if (x1 > 0) boxes.push({ t, w: x1 - x0 + 1, h: y1 - y0 + 1 });
+      }
+    return x1 > 0 ? { w: x1 - x0 + 1, h: y1 - y0 + 1 } : null;
+  };
+  for (const t of [0, 17, 33, 61, 90]) {
+    game.time = t;
+    let bx = null;
+    try { bx = coverBox(); } catch (e) { drawErr = String(e).slice(0, 180); break; }
+    if (bx) boxes.push({ t, w: bx.w, h: bx.h });
   }
   ctx.drawImage = orig;
   ok('drawHazards runs clean', !drawErr, drawErr || 'no throw');
@@ -141,27 +156,26 @@ const R = await page.evaluate(async () => {
      boxes.map(b => `${b.w}x${b.h}`).join(' '));
   // Cloud ALONE (telegraph phase, no rain curtain): an upright blit must not
   // change width at all. This is the assertion the gravity well would fail.
-  h4.tick = 0;
+  // v0.30.1313 (6664afda, _lxCloudCast): the cloud now CONDENSES - it draws at 30% width on tick 0 and grows to full
+  // size over ticks 0..22 of its 42-tick telegraph. So the no-tumble frames are taken at tick 30 (grown, still
+  // telegraphing, no rain), and the grow-in is pinned separately: tick 0 must be narrower than the grown cloud.
+  h4.tick = 0; game.time = 0;
+  const seedBox = coverBox();
+  h4.tick = 30;
   const cloudBoxes = [];
   for (const t of [0, 17, 33, 61, 90, 140]) {
     game.time = t;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawHazards();
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
-    for (let y = 0; y < canvas.height; y++)
-      for (let x = 0; x < canvas.width; x++)
-        if (d[(y * canvas.width + x) * 4 + 3] > 24) {
-          if (x < x0) x0 = x; if (x > x1) x1 = x;
-          if (y < y0) y0 = y; if (y > y1) y1 = y;
-        }
-    if (x1 > 0) cloudBoxes.push({ w: x1 - x0 + 1, h: y1 - y0 + 1 });
+    const bx = coverBox();
+    if (bx) cloudBoxes.push({ w: bx.w, h: bx.h });
   }
   const cws = cloudBoxes.map(b => b.w), chs = cloudBoxes.map(b => b.h);
   const wSpread = cws.length ? Math.max(...cws) - Math.min(...cws) : -1;
   const hSpread = chs.length ? Math.max(...chs) - Math.min(...chs) : -1;
-  ok('cloud silhouette never tumbles (width fixed)', cws.length >= 4 && wSpread === 0,
+  ok('cloud silhouette never tumbles (width fixed)', cws.length >= 4 && wSpread === 0 && Math.max(...cws) < canvas.width * 0.8,
      `widths ${cws.join(',')}`);
+  ok('the cloud condenses: tick 0 draws narrower than the grown cloud (v0.30.1313)',
+     !!seedBox && cws.length > 0 && seedBox.w < Math.min(...cws) * 0.6,
+     `tick0 ${seedBox ? seedBox.w : 'none'} vs grown ${cws.join(',')}`);
   // Height is NOT expected to be pixel-identical: the cloud bobs by
   // sin(t*0.08)*2, a sub-pixel vertical translate, so the measured bbox edge
   // shifts by up to the 4 px of bob travel. Anything beyond that would mean

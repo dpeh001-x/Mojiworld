@@ -22,7 +22,9 @@ const src = readFileSync(PAGE, 'utf8');
 check(['alegreya-500-normal-latin', 'alegreya-500-italic-latin', 'alegreya-700-normal-latin'].every((f) => src.includes(`assets/fonts/${f}.woff2`)), 'static: the three Alegreya cuts are declared');
 check(['alegreya-500-normal-latin', 'alegreya-500-italic-latin', 'alegreya-700-normal-latin'].every((f) => existsSync(path.join(SERVE_ROOT, 'assets', 'fonts', f + '.woff2'))), 'static: and the files ship beside the others');
 check(src.includes('THE NPC DIALOG, AAA PASS') && /backdrop-filter: blur\(18px\) saturate\(1\.35\) brightness\(0\.92\);/.test(src), 'static: the glass block is present');
-check(/const _twDelay = \(t\) => \{/.test(src) && /dlg\._twTimer = setTimeout\(_twTick, SPEED_MS\);/.test(src), 'static: the paced typewriter replaces the fixed interval');
+// v0.30.1046 (1238d4c3) the paced tick is frame-synced: it reschedules itself on requestAnimationFrame under an
+// object handle on dlg._twTimer (the per-character delays of _twDelay are unchanged), no longer on setTimeout.
+check(/const _twDelay = \(t\) => \{/.test(src) && /_twDue \+= _twDelay\(_last\);/.test(src) && /dlg\._twTimer = _twHandle;\s*_twRaf\(_twTick\);/.test(src), 'static: the paced typewriter replaces the fixed interval');
 check(/b\.style\.animationDelay = \(Math\.min\(8, optDiv\.childElementCount\) \* 45\) \+ 'ms';/.test(src), 'static: answers are staggered');
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env, MOJI_GAME_FILE: PAGE } });
 await new Promise((r) => setTimeout(r, 1800));
@@ -46,7 +48,12 @@ try {
     openNPC(milo);
     await document.fonts.ready;
     await new Promise((r) => setTimeout(r, 400));
-    const dlg = document.getElementById('dialog'), txt = document.getElementById('dialog-text'), name = document.getElementById('dialog-name');
+    // The frame watchdog (_lxSetNoBackdrop) trips html.lx-nobackdrop on a loaded headless machine - sticky for the session,
+    // and it strips every backdrop-filter, so the GLASS read saw "none" on some runs only. Latch the watchdog (it returns
+    // early once _lxNoBackdropOn is set) and strip the class, so the full-quality glass is what gets measured.
+    try { _lxNoBackdropOn = true; } catch (e) {}
+    document.documentElement.classList.remove('lx-nobackdrop'); document.body.offsetWidth;
+    const dlg = document.getElementById('dialog'), txt =document.getElementById('dialog-text'), name = document.getElementById('dialog-name');
     const cs = getComputedStyle(txt), cd = getComputedStyle(dlg), cn = getComputedStyle(name);
     try { await Promise.all([document.fonts.load('500 18px Alegreya'), document.fonts.load('700 18px Alegreya'), document.fonts.load('italic 500 18px Alegreya')]); } catch (e) {}
     const fonts = { body500: document.fonts.check('500 18px Alegreya'), body700: document.fonts.check('700 18px Alegreya'), italic: document.fonts.check('italic 500 18px Alegreya') };

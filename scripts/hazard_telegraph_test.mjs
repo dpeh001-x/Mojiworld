@@ -4,6 +4,17 @@
 // has hit before (a black-hole telegraph drawn 56 px smaller than its kill
 // radius — visually dodged, still lethal).
 //
+// v0.29.672 (b1b4d831) — _diffDmg shields a PAUSED player from every damage
+// path, and this harness steps the sim itself while the title screen holds
+// game.paused, so every probe read "no damage" (boundary 0). Unpause first.
+// v0.30.869 (497895e6, per user) — a falling fireball hits with the fireball
+// you see: its landing blast is the drawn teardrop 25% wider (r 68 px) in a
+// ground band tied to the camera, and its ground rune is drawn at that same
+// radius, ignoring the authored one. Hazards that are not falling fireballs
+// (Gravitos's blue meteors, pyres) keep their authored radius. So the expected
+// radius is now READ FROM THE DRAW (the rune's width as drawHazards paints it),
+// and the player stands inside the blast band instead of on an arbitrary floor.
+//
 // Method: spawn a meteor_warn of known radius with NO monsters present, so
 // contact damage and projectiles cannot confound the result, then binary-search
 // the outermost player-centre distance that still takes damage. The expected
@@ -32,9 +43,12 @@ await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'load', timeout
 await page.waitForTimeout(8000);
 
 const rows = await page.evaluate(() => {
+  game.paused = false;
+  // updatePlayer is left out on purpose: the probe needs the box to stay where
+  // it is put, and damage resolves in updateProjectiles' hazard loop.
   const step = (dt) => {
+    game.paused = false;
     game.time = (game.time | 0) + 1;
-    if (typeof updatePlayer === 'function') updatePlayer(dt);
     updateMonsters(dt); updateProjectiles(dt);
   };
   const arena = Object.entries(MAPS)
@@ -45,33 +59,51 @@ const rows = await page.evaluate(() => {
   const ww = game.mapData.worldWidth;
   const gy = (game.mapData.platforms || []).filter(p => p.w > 900).sort((a, b) => a.y - b.y)[0].y;
 
-  const hitsAt = (radius, pw, centreDist) => {
+  const camY = () => (game.camera && game.camera.y) || 0;
+  const mkHaz = (radius, blue) => ({ type: 'meteor_warn', x: ww * 0.5 - radius, y: gy - 40, cx: ww * 0.5, timer: 20,
+    damage: 5000, color: '#f84', owner: 'enemy', radius, _gravBlue: !!blue });
+  // the radius the ground rune is DRAWN at: sprite width - 20 px halo, or the
+  // procedural ellipse's x radius (ry 14) when the rune has not decoded
+  const drawnRadius = (radius, blue) => {
+    game.hazards.length = 0; const h = mkHaz(radius, blue); h.maxLife = 20; h.life = 10; game.hazards.push(h);
+    const P = CanvasRenderingContext2D.prototype, oE = P.ellipse, oI = P.drawImage; let got = null;
+    const gY = camY() + 440 + 8;
+    P.ellipse = function (x, y, rx, ry) { if (got == null && ry === 14) got = rx; return oE.apply(this, arguments); };
+    P.drawImage = function (im, ...a) { if (got == null && a.length === 4 && Math.abs(a[1] - gY) < 0.5 && a[3] === 70) got = (a[2] - 20) / 2; return oI.apply(this, [im, ...a]); };
+    try { drawHazards(false); } catch (e) {} finally { P.ellipse = oE; P.drawImage = oI; }
+    game.hazards.length = 0;
+    return got;
+  };
+  const hitsAt = (radius, pw, centreDist, blue) => {
     game.monsters.length = 0;
     for (const k of ['projectiles', 'particles', 'hazards', 'minions']) if (game[k]) game[k].length = 0;
     game.keys = {};
     player.level = 200; player.maxHp = 9999999; player.hp = 9999999;
     player.invulnerable = 0; player._god = false; player.stunTimer = 0; player.frozenTimer = 0;
     player.blockTimer = 0; player._aegis = false;
-    player.w = pw; player.y = gy - 60; player.vx = 0; player.vy = 0;
+    player.w = pw; player.vx = 0; player.vy = 0;
+    { const b = _lxMeteorBlast({}, camY()); player.y = (b.top + b.bot) / 2 - player.h / 2; }   // inside the landing band
     const cx = ww * 0.5;
     player.x = cx + centreDist - pw / 2;
-    game.hazards.push({ type: 'meteor_warn', x: cx - radius, y: gy - 40, cx, timer: 20,
-      damage: 5000, color: '#f84', owner: 'enemy', radius });
+    game.hazards.push(mkHaz(radius, blue));
     const hp0 = player.hp;
     for (let i = 0; i < 90 && game.hazards.length; i++) step(16.667);
     return player.hp < hp0;
   };
-  const boundary = (radius, pw) => {
+  const boundary = (radius, pw, blue) => {
     let lo = 0, hi = radius * 3;
-    for (let i = 0; i < 22; i++) { const mid = (lo + hi) / 2; if (hitsAt(radius, pw, mid)) lo = mid; else hi = mid; }
+    for (let i = 0; i < 22; i++) { const mid = (lo + hi) / 2; if (hitsAt(radius, pw, mid, blue)) lo = mid; else hi = mid; }
     return Math.round(lo);
   };
 
   const origW = player.w;
   const out = [];
-  for (const [radius, pw] of [[90, 30], [90, 10], [90, 80], [180, 30], [180, 80], [60, 30]]) {
-    const b = boundary(radius, pw);
-    out.push({ radius, pw, boundary: b, effective: b - pw / 2 });
+  // red falling fireballs (authored radius ignored since v0.30.869) and
+  // Gravitos's blue meteors (authored radius honoured)
+  for (const blue of [false, true]) for (const [radius, pw] of [[90, 30], [90, 10], [90, 80], [180, 30], [180, 80], [60, 30]]) {
+    const drawn = drawnRadius(radius, blue);
+    const b = boundary(radius, pw, blue);
+    out.push({ kind: blue ? 'blue' : 'red', authored: radius, radius: drawn, pw, boundary: b, effective: b - pw / 2 });
   }
   player.w = origW;
   return { out };
@@ -79,13 +111,13 @@ const rows = await page.evaluate(() => {
 
 if (rows.fatal) { console.log('FATAL:', rows.fatal); await browser.close(); server.kill(); process.exit(1); }
 
-console.log('radius  playerW  damage boundary  effective radius (boundary - halfW)');
+console.log('kind  authored  drawn  playerW  damage boundary  effective radius (boundary - halfW)');
 console.log('-'.repeat(70));
 const fails = [];
 for (const r of rows.out) {
-  const ok = Math.abs(r.effective - r.radius) <= 3;
-  console.log(`  ${String(r.radius).padStart(4)}   ${String(r.pw).padStart(4)}       ${String(r.boundary).padStart(5)}px            ${String(r.effective).padStart(5)}px  ${ok ? 'ok' : 'MISMATCH'}`);
-  if (!ok) fails.push(`radius ${r.radius} / playerW ${r.pw}: damages out to an effective ${r.effective}px, telegraph drawn at ${r.radius}px`);
+  const ok = r.radius != null && r.radius > 0 && Math.abs(r.effective - r.radius) <= 3;
+  console.log(`  ${r.kind}  ${String(r.authored).padStart(4)}  ${String(r.radius).padStart(5)}   ${String(r.pw).padStart(4)}       ${String(r.boundary).padStart(5)}px            ${String(r.effective).padStart(5)}px  ${ok ? 'ok' : 'MISMATCH'}`);
+  if (!ok) fails.push(`${r.kind} authored ${r.authored} / playerW ${r.pw}: damages out to an effective ${r.effective}px, telegraph drawn at ${r.radius}px`);
 }
 console.log(`\n${rows.out.length} geometries probed`);
 if (fails.length) { console.log('FAIL — damage area does not match the drawn telegraph:'); fails.forEach(f => console.log('  ' + f)); }

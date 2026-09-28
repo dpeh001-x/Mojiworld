@@ -18,6 +18,27 @@ page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
 await page.goto('file:///' + path.join(ROOT, FILE).replace(/\\/g, '/'), { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof hitMonster === 'function' && typeof spawnMonster === 'function', { timeout: 60000 });
 
+// v0.29.619 — spawnMonster refuses every non-boss spawn in a town
+// (_lxIsSanctuary -> a detached { _suppressed: true } stub), and the harness
+// boots in town, so fire() returned null for every hit and the suite read
+// "no spark" although the spark path is intact. Stand in a field map first.
+await page.evaluate(() => {
+  player._storyBeatsSeen = player._storyBeatsSeen || {};
+  if (typeof STORY_BEATS === 'object') for (const k in STORY_BEATS) player._storyBeatsSeen[k] = true;
+  loadMap('forest');
+});
+// v0.30.1196 / v0.30.1234 — fx art is lazy and parked behind the boot image
+// hold until something asks for it, so the rendered-alpha probe below found
+// hit_mage undecoded and drew nothing. Release the hold the way the title menu
+// does, ask for the sprite, and wait for it to decode before measuring.
+await page.evaluate(() => {
+  try { _lxBootHold.release('menu'); } catch (e) {}
+  const i = LX_FX && LX_FX.hit_mage;
+  if (i && typeof _lxWantImg === 'function') _lxWantImg(i, true);
+});
+await page.waitForFunction(() => { const i = LX_FX && LX_FX.hit_mage; return !!(i && i.complete && i.naturalWidth > 0); },
+  { timeout: 30000 }).catch(() => {});
+
 const out = await page.evaluate(() => {
   const R = [];
   const ok = (n, c, d) => R.push({ n, pass: !!c, d: d || '' });

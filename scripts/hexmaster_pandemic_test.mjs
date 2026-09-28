@@ -170,9 +170,13 @@ ok('with the window closed it is nearest-only again', infected2 === 1,
 ok('the eruption scales with hex stacks on the field',
    R.finale.has && R.finale.stacked > R.finale.empty,
    `empty field ${R.finale.empty}x vs 16 stacks ${R.finale.stacked}x`);
+// v0.30.814 (075d3b43) — the user's Skill Editor patch retuned the finale to
+// 2x + 0.5x per average stack, capped at 4.5x (was 16x here), and set the orb
+// impact to 1x ATK (the 1.7 this rework pinned had drifted to 1.8 by then).
+// Pin the shipped literals; the cap still has to hold.
 ok('...and is capped so a swarm cannot run away with it',
-   R.finale.has && R.finale.stacked <= 16.0001, `${R.finale.stacked}x vs cap 16x`);
-ok('orb impact damage raised', R.orbMul === 1.7, `LX_PANDEMIC_ORB_MUL ${R.orbMul}`);
+   R.finale.has && R.finale.stacked <= 4.5001, `${R.finale.stacked}x vs cap 4.5x`);
+ok('orb impact damage is the v0.30.814 1x ATK', R.orbMul === 1, `LX_PANDEMIC_ORB_MUL ${R.orbMul}`);
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

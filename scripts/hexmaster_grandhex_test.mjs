@@ -93,17 +93,40 @@ const R = await page.evaluate(async () => {
   solo.maxHp = 1e9; solo.currentHp = 1e9; solo.atk = 0;
   const keepAlive = () => { solo.currentHp = solo.maxHp; player.hp = getMaxHp(); player.invulnerable = 60; };
 
-  SKILL_FNS.hexmaster_grandhex();
+  // v0.30.187 (6915d5ab) — each cast also summons three seeking hex-eyes that
+  // land up to nine MORE stacks on a lone body, so with the ward live the pile
+  // tips and resets inside a single cast and "cast 2 > cast 1" reads 4 -> 4.
+  // Dismiss the ward the instant each cast summons it so this phase measures
+  // the cast + echo pacing it was written for; T2b below tests the ward.
+  const dropWard = () => { player._hexOrbs = null; };
+  SKILL_FNS.hexmaster_grandhex(); dropWard();
   await waitFrames(Math.ceil(1500 * 0.06) + 30);          // let the echo land
   keepAlive();
   const afterCast1 = stacksOf(solo);
   await waitFrames(Math.ceil((playedCd - 1500) * 0.06));  // the rest of the cooldown
   keepAlive();
   const justBeforeCast2 = stacksOf(solo);
-  SKILL_FNS.hexmaster_grandhex();
+  SKILL_FNS.hexmaster_grandhex(); dropWard();
   await waitFrames(Math.ceil(1500 * 0.06) + 30);
   keepAlive();
   const afterCast2 = stacksOf(solo);
+
+  // ---- T2b: with the ward live, ONE cast tips a lone target (v0.30.187) ----
+  game.monsters.length = 0;
+  const solo2 = spawnMonster(player.x + 120, player.y, 'horny', false);
+  if (!solo2) return { error: 'no solo2 mob' };
+  solo2.maxHp = 1e9; solo2.currentHp = 1e9; solo2.atk = 0;
+  let wardRuptures = 0;
+  const oHitW = window.hitMonster;
+  window.hitMonster = function (m, dmg, isCrit, skill) { if (m === solo2 && skill === 'grandhexRupture') wardRuptures++; return oHitW.apply(this, arguments); };
+  player._hexOrbs = null;
+  SKILL_FNS.hexmaster_grandhex();
+  for (let i = 0; i < 8; i++) {                           // ~4 s: the ward's nine strikes land in ~2.2 s
+    await waitFrames(30);
+    solo2.currentHp = solo2.maxHp; player.hp = getMaxHp(); player.invulnerable = 60;
+  }
+  window.hitMonster = oHitW;
+  player._hexOrbs = null;
 
   // ---- T3/T4: rupture splashes and infects the neighbour ------------------
   game.monsters.length = 0;
@@ -161,7 +184,7 @@ const R = await page.evaluate(async () => {
   // stack field directly changes ONE thing, so this sweep isolates the
   // multiplier and proves it lands once per hit rather than compounding.
 
-  return { playedCd, stackMs, afterCast1, justBeforeCast2, afterCast2,
+  return { playedCd, stackMs, afterCast1, justBeforeCast2, afterCast2, wardRuptures,
            splashDmg, bStacksBefore, bStacksAfter, sawRupture,
            cleanTook, hexedTook, cleanBurn, hexedBurn, sweep,
            hasVuln: typeof LX_HEX_VULN_PER_STACK !== 'undefined' };
@@ -181,6 +204,8 @@ ok('casting again ACCUMULATES instead of resetting to one', R.afterCast2 > R.aft
    `${R.afterCast1} -> ${R.afterCast2} stacks across two casts`);
 ok('5 stacks reachable by casting alone (2 per cast)', R.afterCast1 >= 2 && R.afterCast2 >= 4,
    `cast1 ${R.afterCast1}, cast2 ${R.afterCast2} -> cast 3 tips the rupture`);
+ok('with the hex-eye ward live, one cast tips a LONE target into a rupture (v0.30.187)', R.wardRuptures >= 1,
+   `${R.wardRuptures} rupture(s) on the lone target from one cast`);
 ok('the rupture fires when the pile tips', R.sawRupture === true);
 ok('the rupture SPLASHES onto a neighbour', R.splashDmg > 0, `neighbour took ${R.splashDmg}`);
 ok('the splash infects the neighbour with a stack', R.bStacksAfter > R.bStacksBefore,

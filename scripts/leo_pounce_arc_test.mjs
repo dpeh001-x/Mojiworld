@@ -55,9 +55,15 @@ const R = await page.evaluate(async () => {
   const frames = (typeof ZODIAC_POUNCE_FRAMES !== 'undefined') ? ZODIAC_POUNCE_FRAMES['leo'] : null;
   out.frameCount = frames ? frames.length : 0;
   if (!frames || !frames.length) return out;
+  // v0.30.1196 (9e6f0fcf) lazy-art: zodiac frames stay parked until the boss is WANTED (spawnMonster ->
+  // _lxWarmBossFrames -> _lxBossArtWant). The forest never spawns Regulus, so spawn him once through the
+  // game's own path to ask for his sets, then clear him. The fetch starts only now, so allow it 20 s.
+  try { if (window._lxBootHold && window._lxBootHold.release) window._lxBootHold.release('menu'); } catch (e) {}
+  spawnMonster(Math.round(player.x) + 300, player.y - 40, 'zodiac_leo', true);
+  game.monsters = [];
   // wait for decode so _readyN is real
   const t0 = performance.now();
-  while (performance.now() - t0 < 3000) {
+  while (performance.now() - t0 < 20000) {
     let n = 0; while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
     if (n === frames.length) break;
     await frame();

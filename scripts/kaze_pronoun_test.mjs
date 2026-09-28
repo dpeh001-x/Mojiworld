@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9393;
+const PORT = +process.env.PORT || 9393;
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -48,12 +48,16 @@ const R = await page.evaluate(async () => {
   // Open Kaze's dialogue through the real NPC path.
   // #dialog-text renders with a typewriter, so a fixed sleep reads a partial
   // string. Poll until it stops growing.
+  // v0.30.973 gave the typewriter pauses (a stop holds 210 ms, each line break 190 ms), so the
+  // gap after the stage direction alone outlasts a 200 ms "stable" window: wait for #dialog to
+  // drop its .typing class (the reveal's own end signal) as well as for the text to hold still.
   const settled = async () => {
     let last = '', stable = 0;
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 300; i++) {
       await new Promise(r => setTimeout(r, 50));
       const t = (document.getElementById('dialog-text') || {}).textContent || '';
-      if (t === last && t.length) { if (++stable >= 4) return t; } else { stable = 0; last = t; }
+      const typing = !!document.querySelector('#dialog.typing');
+      if (t === last && t.length && !typing) { if (++stable >= 4) return t; } else { stable = 0; last = t; }
     }
     return last;
   };
@@ -93,7 +97,12 @@ const taigaReply = (R.replies.find(r => /ascendant training/i.test(r.label)) || 
 
 ok('Kaze dialogue actually opened', /I am Kaze/i.test(R.intro), R.intro.slice(0, 60));
 // The reported line.
-ok('her stage direction uses "She"', /\bShe speaks without opening them\b/.test(stage), stage);
+// v0.30.536 (0e6a0ef9, per user: "no prose stage directions") cut "She speaks without opening
+// them." - her stage direction now carries no pronoun at all. What must hold: whenever it names
+// her by pronoun, the pronoun is "She".
+ok('her stage direction never calls her anything but "She"',
+   !/\b(He|His|Him)\b/.test(stage) && (!/\b(She|Her)\b/i.test(stage) || /\bShe\b/.test(stage))
+   && /Cross-legged on the pagoda peak/.test(stage), stage);
 ok('no "He" left in her stage direction', !/\bHe\b/.test(stage), stage);
 // Collateral: these must NOT have been swept.
 ok('Taiga is still "he" in her reply', /\bhe holds the formal seal\b/.test(taigaReply),
