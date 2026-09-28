@@ -47,7 +47,9 @@ const JOBS = {
   shardlich:     'a pale blue glass-shard arc — dozens of sharp translucent ice-glass slivers fanned along the sweep, cold frost mist',
   ossuaryTyrant: 'a bone-white reaping arc built from interlocking rib bones and skull fragments, sickly pale grave-light along the edge',
   echoKnight:    'a violet-steel greatsword slash with a second GHOSTED echo arc trailing just behind it, pale afterimage doubling the sweep',
-  pathsBane:     'a great scythe reap — a long dark amber curved blade trail with crimson-black energy bleeding along the cutting edge',
+  // v0.30.1406 - the shipped art is the old crescent recoloured to his redrawn attack's green trail (tools/_archive/
+  // _recolor_swing_pathsbane.cjs); a regenerated one must stay in that green, or it clashes with his own trail on the hit.
+  pathsBane:     'a great scythe reap — a wide curved crescent of glowing green tomb light, a white-hot core and a bright green (#4af58a) rim',
   blockPopo:     'a chunky bright-yellow toy-block sweep — square blocky segments arcing through the air like a builder-brick swipe, cheerful',
   blockHupo:     'a chunky warm-orange toy-block sweep — square blocky segments arcing through the air, small flame-lick accents, cheerful',
   blockRhirhi:   'a chunky plum-pink toy-block sweep — square blocky segments arcing through the air with sparkle accents, cheerful',

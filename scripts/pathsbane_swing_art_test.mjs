@@ -6,6 +6,8 @@
 //   - FILES: nine frames on the 630x640 canvas; the rest poses (0 and 8) keep his old size (389 px) and foot row (603),
 //     so the attack starts and ends on the pose his idle hands over; no frame's art touches an image edge
 //   - IN GAME: the attack's rest pose draws at his idle body size (within 3%), and his strike is frame 4, the full crescent
+//   - THE HIT'S CRESCENT (v0.30.1406, per user "wire it"): the heavy-swing crescent drawn over the hitbox on that beat is in his
+//     trail's green, not the crimson reap that clashed with it (no red-dominant pixel, mostly green or white-hot)
 //   [PORT=13897] node scripts/pathsbane_swing_art_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +32,13 @@ const rest = [F[0], F[8]];
 check(rest.every((f) => Math.abs(f.h - 389) <= 4 && Math.abs(f.foot - 603) <= 1) && Math.abs(F[0].cx - F[8].cx) <= 2,
   'FILES: the rest poses keep his old size (389 px) and foot row (603), and match each other', rest.map((f) => ({ h: f.h, foot: f.foot, cx: f.cx })));
 check(F.every((f) => f.edge === 0), 'FILES: no frame\'s art touches an image edge (no cut blade or slash)', F.map((f) => f.edge));
+{
+  const { data: d } = await sharp(path.join(ROOT, 'Sprites', 'fx', 'swing_pathsBane.webp')).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  let n = 0, red = 0, green = 0, white = 0;
+  for (let o = 0; o < d.length; o += 4) { if (d[o + 3] < 128) continue; n++; const r = d[o], g = d[o + 1], b = d[o + 2];
+    if (r > g + 30 && r > b + 30) red++; else if (g > r + 30 && g > b) green++; else if (r > 190 && g > 220 && b > 190) white++; }
+  check(n > 5000 && red === 0 && (green + white) / n >= 0.95, 'THE HIT\'S CRESCENT: the heavy-swing crescent is in his trail\'s green, not a crimson reap', { px: n, red, green, white });
+}
 // IN GAME
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT, env: { ...process.env, MOJI_GAME_FILE: path.resolve(ROOT, process.argv[2] || process.env.MOJI_GAME_FILE || 'mojiworld_game.html') } });
 await new Promise((r) => setTimeout(r, 1500));
