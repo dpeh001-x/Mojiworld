@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1308';
+const GAME_VERSION = 'v0.30.1309';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -162902,6 +162902,96 @@ function _lxBossTitleClearX(bandTop, bandBot) {
   _LX_BT_CLR.x = clr;
   return clr;
 }
+// v0.30.1309 boss-bar pop - THE BOSS BAR, CACHED AND A LITTLE POP PUNK (per user: "go ahead with the boss HP bar optimization, make
+// it a little pop punk styled"). A GPU-bound Gravitos fight ran ~29% faster with the whole bar switched off (6 of 6 paired
+// windows), and the bar redrew everything every frame: two large gradient vignettes, a 5-piece painted frame, and the HP
+// readout stroked and filled twice. The parts that only change with the bar's geometry are now baked once at the device
+// scale (_lxBakeDpr, sticky within a map): the veil + bloom (at HALF height, blitted squashed - they always were drawn
+// squashed, and the HUD-clearance probe reads squashed draws as atmosphere, not plate) and the frame. The readout is one
+// canvas redrawn IN PLACE only when its text changes (the K/M format moves it about once per 1% of HP). What tests read
+// off the live draw - the trough, the fill, the ember chip, the chip and ward text - still draws every frame.
+// The pop part lives inside the bakes, so it costs nothing per frame: an ink drop shadow under the painted frame (the
+// plate reads as a sticker lifted off the arena), the readout in the HUD's heavy numerals with an ink ring and an ink
+// drop, and the percentage on a butter sticker badge. The painted frame and ribbon art stay (per user: keep painted plates).
+const _LX_BB = { vg: null, vgKey: '', fr: null, frKey: '', txt: null, mctx: null };
+window._LX_BB_TXT = null;   // the readout bake {cv, hp, pct, outlined} - a test reads the text off it, as it reads _LX_BT_CACHE
+const _LX_BB_INK = '#0d0a14', _LX_BB_BUTTER = '#ffe07a';
+function _lxBbCanvas(w, h) { const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.ceil(w)); cv.height = Math.max(1, Math.ceil(h)); return cv; }
+function _lxBbRR(c, x, y, w, h, r) { c.beginPath(); if (c.roundRect) c.roundRect(x, y, w, h, r); else c.rect(x, y, w, h); }
+function _lxBbVeilGlow(x, y, barW, barH, cx, G, key) {
+  const s = _lxBakeDpr(); key += '|' + s;
+  if (_LX_BB.vgKey === key && _LX_BB.vg) return _LX_BB.vg;
+  const vh = G.vr * 0.135, gh = G.glowR * G.glowSy, hw = Math.max(G.vr, G.glowR);
+  const x0 = Math.floor(cx - hw) - 2, x1 = Math.ceil(cx + hw) + 2;
+  const y0 = Math.floor(Math.min(y - 4 - vh, y + barH / 2 - gh)) - 2, y1 = Math.ceil(Math.max(y - 4 + vh, y + barH / 2 + gh)) + 2;
+  const w = x1 - x0, h2 = (y1 - y0) / 2;
+  const cv = _lxBbCanvas(w * s, h2 * s), c = cv.getContext('2d');
+  c.setTransform(s, 0, 0, s * 0.5, -x0 * s, -y0 * s * 0.5);   // logical px -> half-height device px
+  c.save(); c.translate(cx, y - 4); c.scale(1, 0.135); c.fillStyle = G.veil; c.fillRect(-G.vr, -G.vr, G.vr * 2, G.vr * 2); c.restore();
+  c.save(); c.translate(cx, y + barH / 2); c.scale(1, G.glowSy); c.fillStyle = G.glow; c.fillRect(-G.glowR, -G.glowR, G.glowR * 2, G.glowR * 2); c.restore();
+  if (_LX_BB.vg) _LX_BB.vg.cv.width = 0;
+  _LX_BB.vgKey = key;
+  return (_LX_BB.vg = { cv, x: x0, y: y0, w, h: h2 });
+}
+// The painted frame, 3-sliced exactly as the live draw did, over its own ink drop shadow. The shadow is the frame's
+// silhouette offset down-right, cut out of the hollow so it never darkens the ribbon.
+function _lxBbFrame(x, y, barW, barH, cx, frame, key) {
+  const s = _lxBakeDpr(); key += '|' + s;
+  if (_LX_BB.frKey === key && _LX_BB.fr) return _LX_BB.fr;
+  const g = _BB_GEOM, k = barH / (g.hy1 - g.hy0), fh = g.H * k, ft = y - g.hy0 * k;
+  const capL = g.capL * k, capR = g.capR * k, floW = (g.floX1 - g.floX0) * k;
+  const dL = x - g.hx0 * k, dR = x + barW + (g.W - g.hx1) * k, SH = 3;
+  const x0 = Math.floor(dL) - 1, y0 = Math.floor(ft) - 1, x1 = Math.ceil(dR + SH) + 1, y1 = Math.ceil(ft + fh + SH) + 1, w = x1 - x0, h = y1 - y0;
+  const slice = (c, ox, oy) => {
+    const mL = dL + capL, mR = dR - capR;
+    c.drawImage(frame, 0, 0, g.capL, g.H, dL + ox, ft + oy, capL, fh);
+    c.drawImage(frame, g.W - g.capR, 0, g.capR, g.H, dR - capR + ox, ft + oy, capR, fh);
+    c.drawImage(frame, g.capL, 0, g.floX0 - g.capL, g.H, mL + ox, ft + oy, Math.max(0, cx - floW / 2 - mL), fh);
+    c.drawImage(frame, g.floX1, 0, g.W - g.capR - g.floX1, g.H, cx + floW / 2 + ox, ft + oy, Math.max(0, mR - (cx + floW / 2)), fh);
+    if (floW > 0) c.drawImage(frame, g.floX0, 0, g.floX1 - g.floX0, g.H, cx - floW / 2 + ox, ft + oy, floW, fh);
+  };
+  const cv = _lxBbCanvas(w * s, h * s), c = cv.getContext('2d'), sh = _lxBbCanvas(w * s, h * s), d = sh.getContext('2d');
+  d.setTransform(s, 0, 0, s, -x0 * s, -y0 * s); slice(d, SH, SH);
+  d.globalCompositeOperation = 'source-in'; d.fillStyle = _LX_BB_INK; d.globalAlpha = 0.9; d.fillRect(x0, y0, w, h);
+  d.globalAlpha = 1; d.globalCompositeOperation = 'destination-out';
+  const ext = g.cin * k; d.fillRect(x - ext, y, barW + 2 * ext, barH);
+  c.drawImage(sh, 0, 0); sh.width = 0;
+  c.setTransform(s, 0, 0, s, -x0 * s, -y0 * s); slice(c, 0, 0);
+  if (_LX_BB.fr) _LX_BB.fr.cv.width = 0;
+  _LX_BB.frKey = key;
+  return (_LX_BB.fr = { cv, x: x0, y: y0, w, h });
+}
+// The HP readout: "62%" on a butter sticker, then "24K / 39K" in heavy numerals with an ink ring and an ink drop. One
+// canvas for the life of the page, resized and redrawn in place when the text changes - never a fresh canvas per hit.
+function _lxBbText(hpTxt, pctTxt, barH) {
+  const s = _lxBakeDpr(), key = hpTxt + '|' + pctTxt + '|' + barH + '|' + s;
+  let t = _LX_BB.txt;
+  if (t && t.key === key) return t;
+  if (!_LX_BB.mctx) _LX_BB.mctx = _lxBbCanvas(4, 4).getContext('2d');
+  const m = _LX_BB.mctx, fHp = '900 12px Nunito, "Segoe UI", system-ui, sans-serif', fPct = '900 11px Nunito, "Segoe UI", system-ui, sans-serif';
+  m.font = fHp; const hw = Math.ceil(m.measureText(hpTxt).width);
+  m.font = fPct; const pw = Math.ceil(m.measureText(pctTxt).width);
+  const bh = Math.max(12, barH - 7), bw = pw + 10, gap = 7, pad = 4;
+  const w = pad + bw + 2 + gap + hw + pad + 2, h = barH + 6;
+  if (!t) t = _LX_BB.txt = { cv: document.createElement('canvas') };
+  t.cv.width = Math.ceil(w * s); t.cv.height = Math.ceil(h * s);   // resizing clears it
+  const c = t.cv.getContext('2d'); c.setTransform(s, 0, 0, s, 0, 0);
+  const cy = h / 2, bx = pad, by = cy - bh / 2;
+  c.save(); c.translate(bx + bw / 2, cy); c.rotate(-0.05);
+  c.fillStyle = _LX_BB_INK; _lxBbRR(c, -bw / 2 + 1.5, -bh / 2 + 1.5, bw, bh, 4); c.fill();
+  c.fillStyle = _LX_BB_BUTTER; _lxBbRR(c, -bw / 2, -bh / 2, bw, bh, 4); c.fill();
+  c.lineWidth = 1.5; c.strokeStyle = _LX_BB_INK; c.stroke();
+  c.font = fPct; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = _LX_BB_INK; c.fillText(pctTxt, 0, 0.5);
+  c.restore();
+  const tx = bx + bw + 2 + gap;
+  c.font = fHp; c.textAlign = 'left'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+  c.fillStyle = _LX_BB_INK; c.fillText(hpTxt, tx + 1.5, cy + 2);
+  c.lineWidth = 3; c.strokeStyle = _LX_BB_INK; c.strokeText(hpTxt, tx, cy + 0.5);
+  c.fillStyle = '#f4f1ea'; c.fillText(hpTxt, tx, cy + 0.5);
+  t.key = key; t.hp = hpTxt; t.pct = pctTxt; t.outlined = true; t.w = w; t.h = h;
+  window._LX_BB_TXT = t;
+  return t;
+}
 function drawSuperBossBar() {
   // v0.25.25 — Phase 5b gate kept as a no-op for back-compat (returns
   // false after v0.25.806 Phaser removal). Decay still happens via
@@ -163020,6 +163110,10 @@ function drawSuperBossBar() {
 
   // 1. VEIL. An elliptical vignette rather than the old hard-edged rectangle: the
   //    plate has to stay legible over any arena without announcing a grey box.
+  // v0.30.1309 boss-bar pop - with the art in, veil + bloom are one cached blit (_lxBbVeilGlow), still drawn squashed
+  const _bbVg = _bbArt ? _lxBbVeilGlow(x, y, barW, barH, _cx, _G, _G.key) : null;
+  if (_bbVg) { ctx.save(); ctx.translate(_bbVg.x, _bbVg.y); ctx.scale(1, 2); ctx.drawImage(_bbVg.cv, 0, 0, _bbVg.w, _bbVg.h); ctx.restore(); }
+  if (!_bbVg) {
   ctx.save();
   ctx.translate(_cx, y - 4);
   ctx.scale(1, 0.135);
@@ -163036,6 +163130,7 @@ function drawSuperBossBar() {
   ctx.fillStyle = _G.glow;
   ctx.fillRect(-_G.glowR, -_G.glowR, _G.glowR * 2, _G.glowR * 2);
   ctx.restore();
+  }
   // v0.30.571 — THE CUTOFF. The hollow is not a rectangle (a capsule's ends are rounded, a
   //    chevron's angled) and the trough and fill were, so at each end the fill stopped flat
   //    inside the cap with dark wedges in the corners. Both now run _bbExt past the bar on
@@ -163089,12 +163184,9 @@ function drawSuperBossBar() {
   }
 
   // 5. Scale notches, inside the fill only — over the empty trough they are noise.
-  if (fillW > 8) {
-    ctx.save();
-    ctx.beginPath(); ctx.rect(x, y, fillW - 2, barH); ctx.clip();
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    for (let _i = 1; _i < 10; _i++) ctx.fillRect(Math.round(x + barW * _i / 10), y + 1, 1, barH - 2);
-    ctx.restore();
+  if (fillW > 8) {   // v0.30.1309 boss-bar pop - no clip: a notch past the fill edge is skipped (the clip only ever hid it); ink notches
+    ctx.fillStyle = 'rgba(13,10,20,0.34)';
+    for (let _i = 1; _i < 10; _i++) { const _nx = Math.round(x + barW * _i / 10); if (_nx + 1 <= x + fillW - 2) ctx.fillRect(_nx, y + 1, 1, barH - 2); }
   }
   // Bevel: a dark lip along the top of the recess, a lit one along the bottom.
   ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x - _bbExt, y, barW + 2 * _bbExt, 1);
@@ -163121,16 +163213,9 @@ function drawSuperBossBar() {
   //    aspect with the hollow's edge on the bar's edge), and the centre crest span
   //    (floX0..floX1, never stretched). Only the two plain rail spans stretch.
   if (_bbArt) {
-    const _g = _BB_GEOM, _s = barH / (_g.hy1 - _g.hy0), _fh = _g.H * _s, _ft = y - _g.hy0 * _s;
-    const _capL = _g.capL * _s, _capR = _g.capR * _s, _floW = (_g.floX1 - _g.floX0) * _s;
-    const _dL = x - _g.hx0 * _s;                                   // source x 0 lands here
-    const _dR = x + barW + (_g.W - _g.hx1) * _s;                   // source x W lands here
-    ctx.drawImage(_bbFrame, 0, 0, _g.capL, _g.H, _dL, _ft, _capL, _fh);
-    ctx.drawImage(_bbFrame, _g.W - _g.capR, 0, _g.capR, _g.H, _dR - _capR, _ft, _capR, _fh);
-    const _mL = _dL + _capL, _mR = _dR - _capR;
-    ctx.drawImage(_bbFrame, _g.capL, 0, _g.floX0 - _g.capL, _g.H, _mL, _ft, Math.max(0, _cx - _floW / 2 - _mL), _fh);
-    ctx.drawImage(_bbFrame, _g.floX1, 0, _g.W - _g.capR - _g.floX1, _g.H, _cx + _floW / 2, _ft, Math.max(0, _mR - (_cx + _floW / 2)), _fh);
-    if (_floW > 0) ctx.drawImage(_bbFrame, _g.floX0, 0, _g.floX1 - _g.floX0, _g.H, _cx - _floW / 2, _ft, _floW, _fh);
+    // v0.30.1309 boss-bar pop - the 3-sliced frame and its ink drop shadow, baked once per geometry (_lxBbFrame)
+    const _bbFr = _lxBbFrame(x, y, barW, barH, _cx, _bbFrame, _G.key);
+    ctx.drawImage(_bbFr.cv, _bbFr.x, _bbFr.y, _bbFr.w, _bbFr.h);
   } else {
     ctx.strokeStyle = _P.rim; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, barW, barH);
   }
@@ -163177,6 +163262,9 @@ function drawSuperBossBar() {
   };
   const _pctTxt = (hpPct * 100).toFixed(hpPct > 0 && hpPct < 0.1 ? 1 : 0) + '%';
   const _hpTxt = _hpFmt(sb.currentHp) + ' / ' + _hpFmt(sb.maxHp);
+  // v0.30.1309 boss-bar pop - with the art in, the readout is the pop bake (_lxBbText), redrawn only when its text changes
+  if (_bbArt) { const _rt = _lxBbText(_hpTxt, _pctTxt, barH); ctx.drawImage(_rt.cv, Math.round(x + barW - 8 - _rt.w), Math.round(y + barH / 2 - _rt.h / 2), _rt.w, _rt.h); }
+  else {
   ctx.save();
   ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.8)';
@@ -163192,6 +163280,7 @@ function drawSuperBossBar() {
   ctx.fillText(_pctTxt, x + barW - 18 - _hw, y + barH / 2 + 0.5);
   try { ctx.letterSpacing = '0px'; } catch (e) {}
   ctx.restore();
+  }
   // v0.29.x — STATE CHIP. Ordered by what matters most to the player's next
   // input: a window you can punish outranks a defence you should wait out.
   const _bst = (sb._stagger   > 0) ? { t: 'BREAK',      c: '#ffdd55' }
@@ -163200,24 +163289,19 @@ function drawSuperBossBar() {
              : (sb._dirGhostT > 0) ? { t: 'EVADING',    c: '#cdb6ff' }
              : (sb._dirGuardT > 0) ? { t: 'BRACING',    c: '#9fd4ff' }
              : null;
-  if (_bst) {
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'right';
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  if (_bst) {   // v0.30.1309 boss-bar pop - the state as a tilted sticker tag: ink drop, its own colour, ink ring, ink text
     const _chipY = _bbChipY(y, barH);   // v0.30.565 — clears the measured frame bottom (was a fixed +26)
-    ctx.strokeText(_bst.t, x + barW, _chipY);
-    ctx.fillStyle = _bst.c;
-    ctx.fillText(_bst.t, x + barW, _chipY);
+    ctx.save();
+    ctx.font = '900 11px Nunito, "Segoe UI", system-ui, sans-serif';
+    const _cw = Math.ceil(ctx.measureText(_bst.t).width) + 14, _ch = 17;
+    ctx.translate(x + barW - _cw / 2, _chipY - 1); ctx.rotate(-0.05);
+    ctx.fillStyle = _LX_BB_INK; _lxBbRR(ctx, -_cw / 2 + 2, -_ch / 2 + 2, _cw, _ch, 4); ctx.fill();
+    ctx.fillStyle = _bst.c; _lxBbRR(ctx, -_cw / 2, -_ch / 2, _cw, _ch, 4); ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = _LX_BB_INK; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = _LX_BB_INK;
+    ctx.fillText(_bst.t, 0, 0.5);
+    ctx.restore();
   }
-  // v0.29.x — TITLE CARD. For the first 1.9s after acquisition (the same
-  // _bbSeen stamp the intro sweep rides), the boss's name is drawn large at
-  // centre-screen in the embedded Cinzel face with the full outline
-  // treatment, easing in over 280ms with a 10px settle, holding, and fading
-  // out over the last 450ms — with a thin ornamental rule beneath it. The
-  // AAA name-reveal beat, built from nothing but the font and name the bar
-  // already owns. _nmTxt carries the HYPER prefix automatically.
   const _tcT = _bbNow - sb._bbSeen;
   if (_tcT < 1900) {
     const _ti = Math.min(1, _tcT / 280);
@@ -163250,14 +163334,11 @@ function drawSuperBossBar() {
     ctx.font = '700 12px system-ui, "Segoe UI", sans-serif';
     const _ww = 26 + ctx.measureText(_wTxt).width + 12;
     const _wx = Math.round(x + barW / 2 - _ww / 2);
-    ctx.fillStyle = 'rgba(10,20,34,0.86)';
-    ctx.strokeStyle = '#7fd8ff';
-    ctx.lineWidth = 1.5;
-    if (ctx.roundRect) {
-      ctx.beginPath(); ctx.roundRect(_wx, _wy, _ww, _wh, 9); ctx.fill(); ctx.stroke();
-    } else {
-      ctx.fillRect(_wx, _wy, _ww, _wh); ctx.strokeRect(_wx, _wy, _ww, _wh);
-    }
+    // v0.30.1309 boss-bar pop - a sticker: ink drop, dark body, ink ring, cyan hairline
+    ctx.fillStyle = _LX_BB_INK; _lxBbRR(ctx, _wx + 2, _wy + 2, _ww, _wh, 9); ctx.fill();
+    ctx.fillStyle = 'rgba(10,20,34,0.94)'; _lxBbRR(ctx, _wx, _wy, _ww, _wh, 9); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = _LX_BB_INK; ctx.stroke();
+    ctx.lineWidth = 1; ctx.strokeStyle = '#7fd8ff'; _lxBbRR(ctx, _wx + 2, _wy + 2, _ww - 4, _wh - 4, 7); ctx.stroke();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.font = '13px "Segoe UI Emoji", system-ui, sans-serif';

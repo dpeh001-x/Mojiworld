@@ -74,7 +74,8 @@ const r = await page.evaluate(() => {
     const painted = [];
     ctx.fillText = function (t) { painted.push(String(t)); return real.apply(this, arguments); };
     const _diT = ctx.drawImage;
-    ctx.drawImage = function (img) { const bt = _lxBakeOf(img); if (bt) painted.push(_lxBakeText(bt)); return _diT.apply(this, arguments); };
+    // v0.30.1309 boss-bar pop: the HP readout is a bake too - read its text off window._LX_BB_TXT
+    ctx.drawImage = function (img) { const bt = _lxBakeOf(img); if (bt) painted.push(_lxBakeText(bt)); const hb = window._LX_BB_TXT; if (hb && img === hb.cv) painted.push(hb.pct, hb.hp); return _diT.apply(this, arguments); };
     try { drawSuperBossBar(); } catch (e) { painted.push('THREW:' + e); }
     ctx.fillText = real; ctx.drawImage = _diT;
     return painted;
@@ -125,7 +126,7 @@ const r = await page.evaluate(() => {
       return _ft.apply(this, arguments);
     };
     const _diN = ctx.drawImage;
-    ctx.drawImage = function (img) { const bt = _lxBakeOf(img); if (bt && bt.parts.name.includes('LEGOSAURUS')) { nameFont = bt.font; if (bt.outlined) strokes.push(bt.parts.name, bt.parts.name); } return _diN.apply(this, arguments); };
+    ctx.drawImage = function (img) { const bt = _lxBakeOf(img); if (bt && bt.parts.name.includes('LEGOSAURUS')) { nameFont = bt.font; if (bt.outlined) strokes.push(bt.parts.name, bt.parts.name); } const hb = window._LX_BB_TXT; if (hb && img === hb.cv && hb.outlined) strokes.push(hb.hp, hb.pct); return _diN.apply(this, arguments); };
     try { drawSuperBossBar(); } catch (e) { strokes.push('THREW:' + e); }
     ctx.strokeText = _st; ctx.fillText = _ft; ctx.drawImage = _diN;
     out.nameFont = nameFont;

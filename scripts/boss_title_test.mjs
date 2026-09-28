@@ -60,7 +60,8 @@ const r = await page.evaluate(async () => {
   const seen = []; const ft = ctx.fillText, st = ctx.strokeText, di = ctx.drawImage; let blitX = null;
   ctx.fillText = function (t) { seen.push(String(t)); return ft.apply(this, arguments); };
   ctx.strokeText = function (t) { seen.push(String(t)); return st.apply(this, arguments); };
-  ctx.drawImage = function (img, dx) { if (bar && img === bar.cv) blitX = dx; return di.apply(this, arguments); };
+  // v0.30.1309 boss-bar pop: the HP readout is baked - its blit counts as the "%" that proves the bar drew
+  ctx.drawImage = function (img, dx) { if (bar && img === bar.cv) blitX = dx; const hb = window._LX_BB_TXT; if (hb && img === hb.cv) seen.push(hb.pct, hb.hp); return di.apply(this, arguments); };
   try { drawSuperBossBar(); } catch (e) { out.drawErr = String(e.message); } finally { ctx.fillText = ft; ctx.strokeText = st; ctx.drawImage = di; }
   out.titleRedrawn = seen.some((t) => /GRAVITOS|WEIGHT/i.test(t));
   out.barDrawn = seen.some((t) => /%/.test(t));   // the HP readout: proof the bar really drew in this call
