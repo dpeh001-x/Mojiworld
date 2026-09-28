@@ -138,8 +138,14 @@ const r = await page.evaluate(() => {
     // frame SHOULD get. null when the set carries no authored timing (then the power curve runs).
     const _ft = (typeof _lxCalibFt === 'function') ? _lxCalibFt('gravitospunch', 'attack') : null;
     let _exp = null;
-    if (_ft) { const n = punchArr.length; let tot = 0; for (let k = 0; k < n; k++) tot += (_ft[k] > 0 ? _ft[k] : 48);
-      _exp = []; for (let k = 0; k < n - 1; k++) _exp.push(+((_ft[k] > 0 ? _ft[k] : 48) / tot * _GRAV_PUNCH_PLAY * 1500).toFixed(1)); }
+    if (_ft) { const n = punchArr.length, w = (k) => (_ft[k] > 0 ? _ft[k] : 48); let tot = 0; for (let k = 0; k < n; k++) tot += w(k);
+      // punch-key (v0.30.1364): the blow lands ON the punch - the frames before the key frame share the wind-up to the
+      // Crush's 500, the key plays its own authored length, the rest share what is left of the play window (_lxKeyedPos)
+      const key = (typeof _gravPunchHitMs === 'function' && typeof _lxBossKeyFrame === 'function') ? _lxBossKeyFrame('gravitospunch', n, _ft) : -1;
+      _exp = [];
+      if (key >= 0) { const f = _gravTeleMs(m, 1) || 1, hit = 500, end = _GRAV_PUNCH_PLAY * 1500, kd = w(key) * f; let pre = 0; for (let k = 0; k < key; k++) pre += w(k); const rest = tot - pre - w(key);
+        for (let k = 0; k < n - 1; k++) _exp.push(+(k < key ? w(k) / pre * hit : k === key ? kd : w(k) / rest * (end - hit - kd)).toFixed(1)); }
+      else for (let k = 0; k < n - 1; k++) _exp.push(+(w(k) / tot * _GRAV_PUNCH_PLAY * 1500).toFixed(1)); }
     out.punch = { distinct: seen.length, n: punchArr.length, expGaps: _exp, pairTicks, ticks, fadedAlpha, frame8At, errCt, moveTicks, maxOff,
       gaps: _g, maxGap: _g.length ? Math.max(..._g) : -1,
       hold8: frame8At != null ? 1500 - frame8At : -1 };
@@ -290,7 +296,7 @@ ok('the punch has TIGHTER gaps now — no long stall on the windup frame (was 33
 // share of the play window, to within the one 16 ms tick the loop samples at. The old "near-even" check measured the
 // v0.30.309 power curve, which only runs when a set has no ft.
 const _gapErr = (p.expGaps && p.gaps && p.gaps.length === p.expGaps.length) ? Math.max(...p.gaps.map((g, k) => Math.abs(g - p.expGaps[k]))) : null;
-ok('...and each gap follows the animator-authored frame timing (within one 16 ms tick)',
+ok('...and each gap follows the animator-authored frame timing, the blow on the punch (within one 16 ms tick)',
    _gapErr !== null && _gapErr < 16, { gaps: p.gaps, authored: p.expGaps, worstErr: _gapErr });
 ok('...and the LANDED POSE (the last frame) holds longer (was 225ms of the 1500ms window)',
    p.hold8 >= 450 && p.hold8 <= 800, { lastAt: p.frame8At, hold: p.hold8 });

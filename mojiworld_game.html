@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1365';
+const GAME_VERSION = 'v0.30.1366';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -144416,7 +144416,7 @@ function _bossAnimPhase(frames, m, state, desync) {
 // seven hand-set sets hold another frame longest, so their blow is named here (picked from the art, v0.30.1355 review).
 // The authored timings stay as authored and keep their proportions; only where they sit against the attack moves.
 const LX_BOSS_KEY_FRAME = { gravitos: 5, gravitoslaser: 6, gravitos2laser: 7, gravitos2star: 6, legosaurusdash: 6,
-  towerArbiter: 6, towerArbiterverdict: 5 };
+  towerArbiter: 6, towerArbiterverdict: 5, gravitospunch: 5 };   // v0.30.1366 punch-key - form 1's punch: the fist lands, the shockwave starts (f5)
 function _lxBossKeyFrame(key, n, ft) {
   const k = LX_BOSS_KEY_FRAME[key];
   return (Number.isInteger(k) && k >= 0 && k < n) ? k : _lxFtStrike(n, ft);
@@ -144429,10 +144429,37 @@ function _lxKeyedIdx(n, ft, key, e, hit, end) {
   const pre = _lxFtPrefix(n, ft, key), tot = _lxFtTotal(n, ft), post = tot - pre;
   let c;
   if (e < hit) c = hit > 0 ? (Math.max(0, e) / hit) * pre : pre;
-  else c = pre + ((end > hit) ? Math.min(1, (e - hit) / (end - hit)) * post : Math.min(post, e - hit));
+  else { const kd = ft[key] > 0 ? ft[key] : 48, rest = post - kd;   // v0.30.1366 punch-key - the blow plays its own authored length
+    c = (e - hit < kd) ? pre + (e - hit) : pre + kd + ((end > hit + kd) ? Math.min(1, (e - hit - kd) / (end - hit - kd)) * rest : Math.min(rest, e - hit - kd)); }
   let acc = 0;
   for (let i = 0; i < n; i++) { acc += (ft[i] > 0 ? ft[i] : 48); if (c < acc) return i; }
   return n - 1;
+}
+// v0.30.1366 punch-key - _lxKeyedIdx's twin for a CROSSFADED player: the frame and how far into it (0-1), and a HOLD - the key frame starts at
+// `hit` and stays until `hold` (a charge carries the blow), plays its own authored length, then the rest share what is left.
+function _lxKeyedPos(n, ft, key, e, hit, end, hold) {
+  const pre = _lxFtPrefix(n, ft, key), tot = _lxFtTotal(n, ft), h = Math.max(hit, hold || 0);
+  const kd = ft[key] > 0 ? ft[key] : 48, rest = tot - pre - kd;
+  let c;
+  if (e < hit) c = hit > 0 ? (Math.max(0, e) / hit) * pre : pre;
+  else if (e < h) c = pre;
+  else if (e - h < kd) c = pre + (e - h);
+  else c = pre + kd + ((end > h + kd) ? Math.min(1, (e - h - kd) / (end - h - kd)) * rest : Math.min(rest, e - h - kd));
+  let acc = 0;
+  for (let i = 0; i < n; i++) { const w = (ft[i] > 0 ? ft[i] : 48); if (c < acc + w) return { i, f: (c - acc) / w }; acc += w; }
+  return { i: n - 1, f: 1 };
+}
+// v0.30.1366 punch-key - when each of Gravitos's punches lands, in pattern ms after its teleport wind-up (the AI's own thresholds): Gravity
+// Crush drives the fist into the floor as its columns rise (past 500), Body Slam hits at 650, the Zip launches its charge at
+// 260 and chases for 720 / 620 / 520 by HP tier - the fist is held out through it.
+function _gravPunchHitMs(m) {
+  const ph = (m.phase | 0) || 1;
+  switch (m.patternState) {
+    case 'crush': return { hit: 500, hold: 500 };
+    case 'slam': return { hit: 650, hold: 650 };
+    case 'zip': return { hit: 260, hold: 260 + (ph === 3 ? 520 : ph === 2 ? 620 : 720) };
+    default: return null;
+  }
 }
 // A boss's contact hit lands BEFORE its attack pose starts (the hit is what starts it), so the pose used to begin on frame 0
 // after the damage and reach its blow 0.3-0.7 s later - the Arbiter's (f6, 687 ms in) never within its 650 ms window. The
@@ -144811,6 +144838,17 @@ function _gravitosPunchPair(m) {
   // replacing the power-curve spacing. Window + tail hold are unchanged.
   const _ftp = _lxCalibFt(_gravCastKey(m, 'punch'), 'attack');
   const tW = Math.min(1, t / _GRAV_PUNCH_PLAY);
+  // v0.30.1366 punch-key - THE PUNCH LANDS ON THE PUNCH (per user: "do the punches too"). The frames were spread over the play window by weight,
+  // so the blow fell wherever the weights put it - measured on the step each punch landed: form 1's Crush on f9 (its blow,
+  // f5, four frames gone), form 3's on f4 (before its f6), the Body Slam on the final pose (f15), the Zip launching on f6 and
+  // at f12 mid-charge. The key frame now starts on the punch - the frames before it share the wind-up in their
+  // authored proportions, the Zip holds it through its charge, the rest share what is left of the window.
+  const _gph = (_ftp && n > 1) ? _gravPunchHitMs(m) : null;
+  if (_gph) {
+    const _f = _gravTeleMs(m, 1) || 1, _pk = _gravCastKey(m, 'punch');
+    const _P = _lxKeyedPos(n, _ftp, _lxBossKeyFrame(_pk, n, _ftp), ((m.patternTimer || 0) - _tpOff) / _f, _gph.hit / _f, (_dur * _GRAV_PUNCH_PLAY) / _f, _gph.hold / _f);
+    return { a: frames[_P.i], b: frames[Math.min(n - 1, _P.i + 1)], f: Math.min(1, _P.f), i: _P.i, n };
+  }
   if (_ftp) {
     let _tot = 0;
     for (let i2 = 0; i2 < n; i2++) _tot += (_ftp[i2] > 0 ? _ftp[i2] : 48);
