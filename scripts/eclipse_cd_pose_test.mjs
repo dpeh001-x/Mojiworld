@@ -26,25 +26,26 @@ const browser = await chromium.launch({
   headless: true,
 });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`,
-  { waitUntil: 'load', timeout: 60000 });
-await page.waitForTimeout(9000);
-await page.evaluate(() => { const lo = document.getElementById('loading-overlay'); if (lo) lo.classList.add('fade'); });
-await page.fill('#hero-name-input', 'EclipseTest');
-await page.evaluate(() => {
-  const m = document.getElementById('class-select-modal');
-  for (const el of m.querySelectorAll('button,div,li')) {
-    if (el.children.length > 3) continue;
-    if (getComputedStyle(el).display === 'none') continue;
-    if (/^\s*rogue\s*$/i.test((el.textContent || '').trim())) { el.click(); return; }
-  }
-});
-await page.click('#cs-nav-next').catch(() => {});
-await page.waitForTimeout(2500);
-await page.evaluate(() => {
+// 2026-09-28 - direct boot. The character-creation flow this test drove (#hero-name-input, the class carousel) is not how
+// the game boots any more, so the test timed out before any assertion; the newer tests' boot is used instead
+// (postgame_unlock_test / smooth_jump_test). The player settings below are the ones the old flow applied after it.
+await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.waitForFunction(() => typeof loadMap === 'function' && typeof _drawVectorHero === 'function', null, { timeout: 180000 });
+await page.waitForTimeout(4000);
+await page.evaluate(async () => {
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
+  try { _playStoryBeat = function () { return false; }; } catch (e) {}
+  for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+  try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}   // v0.30.1254 title-first holds art until the menu this skips
   player.level = 99; player._god = true;
   player.cls = 'rogue'; player.job = 'assassin'; player.master = 'nightreaper';
-  loadMap('forest', 300);
+  loadMap('forest', 300); await sleep(1500);
+  for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
+  game.paused = false;
+  // the hair sprite is lazy art: let it decode so the hero is drawn whole
+  const hair = (typeof LX_HAIR !== 'undefined' && typeof _migrateHairId === 'function') ? LX_HAIR[_migrateHairId((player.lookCustom || {}).hairId)] : null;
+  for (let i = 0; i < 100 && hair && !(typeof _lxHairReady === 'function' && _lxHairReady(hair)); i++) await sleep(100);
 });
 await page.waitForTimeout(4000);
 
