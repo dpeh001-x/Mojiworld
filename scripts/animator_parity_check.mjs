@@ -49,6 +49,18 @@ try {
 } catch (e) {
   ok('data/sprite_frame_index.js is current', false, 'run: node scripts/gen_sprite_frame_index.mjs');
 }
+// The boss resizer's table is baked from the same boss art (per-frame boxes and
+// row profiles). Nothing checked it, so it went stale for 25 bosses at once and
+// tools/boss_resizer.html measured frames that were no longer on disk.
+try {
+  execFileSync(process.execPath, [join(root, 'scripts', 'gen_boss_resize_manifest.mjs'), '--check'],
+    { cwd: root, stdio: 'pipe' });
+  ok('data/boss_resize_manifest.js is current', true);
+} catch (e) {
+  ok('data/boss_resize_manifest.js is current', false,
+    (String(e.stderr || '').split('\n')[0].slice(0, 1000) || String(e.message || e).slice(0, 200))
+    + '  -> node scripts/gen_boss_resize_manifest.mjs');
+}
 
 // ---------- 2. the manifest describes the art that is on disk -------------
 // Regenerate into a scratch copy and compare: a missing entity means art that
