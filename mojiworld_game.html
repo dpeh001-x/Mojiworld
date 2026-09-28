@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1303';
+const GAME_VERSION = 'v0.30.1304';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -125165,7 +125165,11 @@ function drawSkyLifeOverlay() {
 // drawn as before.
 let _LX_VID_CACHE_ON = true;
 const _LX_VID_CACHE = new WeakMap();
+// v0.30.1304 perf - a tint for the frame's copy, requested by drawBackground for the next call only (the signature line
+// below is a landed-fix marker, so the tint rides this one-shot slot instead of a fourth parameter)
+let _lxVidTintReq = null;
 function _lxVideoCached(v, wCss, hCss) {
+  const tint = _lxVidTintReq; _lxVidTintReq = null;
   if (!_LX_VID_CACHE_ON || !v || typeof HTMLVideoElement === 'undefined' || !(v instanceof HTMLVideoElement)
       || typeof v.requestVideoFrameCallback !== 'function' || typeof OffscreenCanvas === 'undefined') return v;
   const dpr = (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : 1;
@@ -125182,18 +125186,37 @@ function _lxVideoCached(v, wCss, hCss) {
     try { v.requestVideoFrameCallback(onFrame); } catch (e) { c.armed = false; return v; }
   }
   if (c.bw !== cw || c.bh !== ch) c.dirty = true;
+  if ((c.tint || null) !== (tint || null)) c.dirty = true;
   if (c.dirty && v.readyState >= 2 && v.videoWidth && c.cx) {
     try {
       if (c.oc.width !== cw || c.oc.height !== ch) { c.oc.width = cw; c.oc.height = ch; }
       c.cx.imageSmoothingEnabled = true;
       if ('imageSmoothingQuality' in c.cx) c.cx.imageSmoothingQuality = 'high';
       c.cx.drawImage(v, 0, 0, cw, ch);
+      if (tint) { c.cx.fillStyle = tint; c.cx.fillRect(0, 0, cw, ch); }
       const next = c.oc.transferToImageBitmap();   // hands the pixels over without a copy; the canvas starts blank again
       if (c.bmp && typeof c.bmp.close === 'function') c.bmp.close();
+      next._lxTintOf = tint || null; c.tint = tint || null;
       c.bmp = next; c.bw = cw; c.bh = ch; c.dirty = false;
     } catch (e) { return v; }
   }
-  return (c.bmp && c.bw === cw && c.bh === ch) ? c.bmp : v;
+  return (c.bmp && c.bw === cw && c.bh === ch && (c.tint || null) === (tint || null)) ? c.bmp : v;
+}
+// v0.30.1304 perf - a backdrop with its map's tint baked in (see drawBackground): one canvas per source, re-made when the tint changes
+function _lxBgTinted(src, tint) {
+  if (!tint || !src) return src;
+  const w = src.naturalWidth || src.width || 0, h = src.naturalHeight || src.height || 0;
+  if (!w || !h) return src;
+  const T = src._lxTintBake;
+  if (T && T._lxTintOf === tint && T.width === w && T.height === h) return T;
+  try {
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const x = cv.getContext('2d'); x.drawImage(src, 0, 0, w, h); x.fillStyle = tint; x.fillRect(0, 0, w, h);
+    cv._lxTintOf = tint;
+    if (T) T.width = 0;
+    src._lxTintBake = cv;
+    return cv;
+  } catch (e) { return src; }
 }
 function _lxBgScaled(img, w, h) {
   if (!img || !(w > 0) || !(h > 0)) return img;
@@ -125427,7 +125450,24 @@ function drawBackground() {
     // v0.30.564 — a plate is baked once at drawn size; a clip is a new frame every draw, so it is
     // painted straight (832x464 to the screen is a near-1:1 blit, one texture copy). While the ramp
     // runs, the plate is painted first and the clip fades over it so the swap is never a pop.
+    // v0.30.1304 perf - the map's tint is worked out BEFORE the backdrop is drawn, so a settled one can be baked into it (the clip
+    // frame's copy, or a tinted copy of the plate) instead of painted over the whole screen every frame: one screen of fill
+    // a frame in the Singularity. It paints the old way while it eases after a form change, or while a clip fades in.
+    let _tint = null, _tintBake = null;
+    if (_md.bgTint) {
+      _tint = _md.bgTint; _tintBake = _tint;
+      if (game.currentMap === 'gravitosArena' && typeof _lxGravTintTo === 'number') {
+        if (_lxGravTintCur == null) _lxGravTintCur = _lxGravTintTo;
+        _lxGravTintCur += (_lxGravTintTo - _lxGravTintCur) * 0.035;   // ~1.2 s to settle
+        _tint = 'rgba(0,0,8,' + _lxGravTintCur.toFixed(3) + ')';
+        _tintBake = (_tint === 'rgba(0,0,8,' + _lxGravTintTo.toFixed(3) + ')') ? _tint : null;
+      }
+      if (window._lxNoFillSkip || (_bgVid && _lxMapVideoAlpha < 1)) _tintBake = null;
+    }
+    _lxVidTintReq = (_bgVid && _tintBake) ? _tintBake : null;
     const _bgSrc = _bgVid ? _lxVideoCached(_bgVid, _bgW, _bgH) : _lxBgScaled(bgPick, _bgW, _bgH);   // v0.30.x video-cache
+    const _bgPlateT = (!_bgVid && _tintBake) ? _lxBgTinted(_bgSrc, _tintBake) : null;
+    const _tintApplied = !!_tintBake && (_bgPlateT ? _bgPlateT._lxTintOf === _tintBake : (!!_bgSrc && _bgSrc._lxTintOf === _tintBake));
     // v0.30.1302 perf - with the sky skipped, the mirror seam is the one backdrop edge that can land mid-screen, between two
     // device pixels. Chrome does not antialias an axis-aligned image edge (bg_fill_skip_test sees 0 px change without this),
     // but an engine that does would blend that column with what is under it - so it keeps a 2 px strip of sky.
@@ -125446,7 +125486,7 @@ function drawBackground() {
       if (!_nm) { ctx.save(); ctx.translate(2 * _bgW - shift, 0); ctx.scale(-1, 1); ctx.drawImage(_pl, 0, _bgY, _bgW, _bgH); ctx.restore(); }   // v0.30.593 everdawn-bg
       ctx.globalAlpha = _lxMapVideoAlpha;
     }
-    ctx.drawImage(_zg || _bgSrc, -shift, _bgY, _bgW, _bgH);
+    ctx.drawImage(_zg || _bgPlateT || _bgSrc, -shift, _bgY, _bgW, _bgH);
     // Second copy — mirrored. Translating to (2*_bgW - shift) puts its right
     // edge at x=(2*_bgW-shift) and after scale(-1,1) its left edge ends up at
     // x=(_bgW-shift), exactly where the first copy's right edge lands. Pixels
@@ -125455,7 +125495,7 @@ function drawBackground() {
       ctx.save();
       ctx.translate(2 * _bgW - shift, 0);
       ctx.scale(-1, 1);
-      ctx.drawImage(_zg || _bgSrc, 0, _bgY, _bgW, _bgH);
+      ctx.drawImage(_zg || _bgPlateT || _bgSrc, 0, _bgY, _bgW, _bgH);
       ctx.restore();
     }
     if (_bgVid) ctx.globalAlpha = 1;   // v0.30.564 — end of the ramp blend, before the tint
@@ -125466,15 +125506,7 @@ function drawBackground() {
     // v0.30.x — the Singularity darkens with each Gravitos form (per user:
     // "darker with gravitos2 and even darker with gravitos3"). The authored
     // 0.42 is form 1; the target is set at each form transition and eased here.
-    if (_md.bgTint) {
-      let _tint = _md.bgTint;
-      if (game.currentMap === 'gravitosArena' && typeof _lxGravTintTo === 'number') {
-        if (_lxGravTintCur == null) _lxGravTintCur = _lxGravTintTo;
-        _lxGravTintCur += (_lxGravTintTo - _lxGravTintCur) * 0.035;   // ~1.2 s to settle
-        _tint = 'rgba(0,0,8,' + _lxGravTintCur.toFixed(3) + ')';
-      }
-      ctx.fillStyle = _tint; ctx.fillRect(0, 0, W, H);
-    }
+    if (_tint && !_tintApplied) { ctx.fillStyle = _tint; ctx.fillRect(0, 0, W, H); }   // v0.30.1304 perf - worked out above; skipped when baked in
     // v0.30.x — the Singularity's living sky: lens halo, infalling stars, the accretion disc (see _lxGravBackdropDraw)
     if (game.currentMap === 'gravitosArena' && typeof _lxGravBackdropDraw === 'function') _lxGravBackdropDraw();
     // v0.29.x — mid-ground parallax ridges: the derived depth layers between
