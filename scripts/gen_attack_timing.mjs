@@ -46,10 +46,21 @@ const GROUP = (process.argv.find((a) => a.startsWith('--group=')) || '').slice(8
 
 export const LX_ATK_BASE_MS = 60;
 export const LX_ATK_HOLD = { strike: 2.2, side: 1.5, first: 1.2, last: 1.6 };
+// v0.30.1347 boss-pick - THE STRIKE, PICKED FROM THE ART, for the boss sets whose apex guess drifted off it (per user: "fix
+// the three drifted boss timings too"). Their baked timings no longer matched the rule, and the rule itself was
+// wrong for two of them once the art was looked at:
+//   kingKrook             f4 - the claw fully out (stored f6 was him pulling it back; the rule agrees on f4)
+//   towerSovereignswing   f5 - the fire arc sweeping round (stored f4 was the staff still overhead, the rule's f6
+//                              the follow-through)
+//   towerSovereignvolley  f6 - the staff thrust and the blast (stored f6 was right; the rule's f4 is the flame
+//                              still building)
+// Boss damage runs on its pattern clocks, not on these frames: this only moves which pose the loop holds longest.
+// Every other boss set still follows the apex rule (or is hand-set); list one here when its art says otherwise.
+export const LX_BOSS_STRIKE_BY_TYPE = { kingKrook: 4, towerSovereignswing: 5, towerSovereignvolley: 6 };
 
 // cb entries are [top, bottom, bodyTop, bodyBottom] in source pixels (see
 // scripts/gen_anim_manifest.mjs). Returns the default dwell array for n frames.
-export function defaultAttackFt(n, cb, frameH) {
+export function defaultAttackFt(n, cb, frameH, strikeAt) {
   if (!(n > 1)) return null;
   let strike = Math.round((n - 1) / 2);
   if (Array.isArray(cb) && cb.length === n && frameH > 0) {
@@ -64,6 +75,7 @@ export function defaultAttackFt(n, cb, frameH) {
     // and it sits inside the swing, not on the resting first/last frames
     if (apex >= 1 && apex <= n - 3 && (hi - lo) / frameH > 0.03) strike = Math.min(n - 3, Math.max(2, apex + 1));
   }
+  if (Number.isInteger(strikeAt) && strikeAt >= 0 && strikeAt < n) strike = strikeAt;   // v0.30.1347 boss-pick - the art's own blow
   const ft = new Array(n);
   for (let i = 0; i < n; i++) {
     let k = 1;
@@ -174,7 +186,7 @@ function main() {
     if (n < 2) continue;
     const cur = calib[key] && calib[key].attack;
     if (cur && Array.isArray(cur.ft) && !cur.ftAuto) { kept++; continue; }   // authored: never touched
-    const ft = e.group === 'boss' ? defaultAttackFt(n, st.cb, st.h) : defaultMobAttackFt(n, st.cb, st.h, LX_MOB_ATK_BASE_BY_TYPE[key], LX_MOB_STRIKE_BY_TYPE[key]);   // v0.30.382; strike-pick
+    const ft = e.group === 'boss' ? defaultAttackFt(n, st.cb, st.h, LX_BOSS_STRIKE_BY_TYPE[key]) : defaultMobAttackFt(n, st.cb, st.h, LX_MOB_ATK_BASE_BY_TYPE[key], LX_MOB_STRIKE_BY_TYPE[key]);   // v0.30.382; strike-pick
     if (!ft) continue;
     const same = cur && Array.isArray(cur.ft) && cur.ft.length === ft.length && cur.ft.every((v, i) => v === ft[i]) && cur.ftAuto === true;
     if (same) continue;

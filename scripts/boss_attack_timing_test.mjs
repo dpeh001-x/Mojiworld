@@ -18,7 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { defaultAttackFt, LX_ATK_BASE_MS, LX_ATK_HOLD } from './gen_attack_timing.mjs';
+import { defaultAttackFt, LX_ATK_BASE_MS, LX_ATK_HOLD, LX_BOSS_STRIKE_BY_TYPE } from './gen_attack_timing.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
@@ -42,7 +42,7 @@ ok('the artist\'s authored timings are untouched (legosaurus, gravitos2star spot
   Object.keys(AUTHORED).every((k) => calib[k] && calib[k].attack && JSON.stringify(calib[k].attack.ft) === JSON.stringify(AUTHORED[k]) && !calib[k].attack.ftAuto),
   Object.keys(AUTHORED).map((k) => k + '=' + (calib[k] && calib[k].attack ? JSON.stringify(calib[k].attack.ft) : '-')).join(' '));
 const auto = bossAtk.filter((k) => calib[k] && calib[k].attack && calib[k].attack.ftAuto);
-const ruleOk = auto.every((k) => { const st = M[k].states.attack; return JSON.stringify(calib[k].attack.ft) === JSON.stringify(defaultAttackFt(st.count | 0, st.cb, st.h)); });
+const ruleOk = auto.every((k) => { const st = M[k].states.attack; return JSON.stringify(calib[k].attack.ft) === JSON.stringify(defaultAttackFt(st.count | 0, st.cb, st.h, LX_BOSS_STRIKE_BY_TYPE[k])); });
 ok(`baked timings (${auto.length}) follow the default rule exactly`, auto.length > 0 && ruleOk);
 const nine = auto.filter((k) => (M[k].states.attack.count | 0) === 9);
 const totals = nine.map((k) => calib[k].attack.ft.reduce((a, b) => a + b, 0));
@@ -92,8 +92,8 @@ const g = await ev(async () => {
   return { ft, hk, zft, zh, ready: frames ? frames._readyN : 0, seen: [...seen.entries()].sort((a, b) => a[0] - b[0]), total: ft ? ft.reduce((a, b) => a + b, 0) : 0 };
 });
 ok('the game reads King Krook\'s baked timing', !g.err && Array.isArray(g.ft) && g.total === 720, g.err || `ft ${g.ft && g.ft.join('/')} total ${g.total}`);
-// Krook's strike sits at frame 6 - the frame after his raised apex, which the
-// box rule picks over the middle frame - so read the strike off the timing.
+// Krook's strike is frame 4, his claw fully out - picked from the art (v0.30.1347, LX_BOSS_STRIKE_BY_TYPE) - so read
+// the strike off the timing rather than assuming one.
 const sIdx = Array.isArray(g.ft) ? g.ft.indexOf(Math.max(...g.ft)) : -1;
 ok(`over one cycle the strike frame (${sIdx}) is on screen 2.2x as long as a windup frame (pure walk)`, !g.err && g.hk && sIdx > 0 && g.hk[sIdx] === 132 && g.hk[1] === 60 && g.hk[g.hk.length - 1] === 96, g.err || `dwells ${g.hk && g.hk.join('/')}`);
 const peak = g.seen && g.seen.length ? g.seen.reduce((a, b) => (b[1] > a[1] ? b : a)) : null;
