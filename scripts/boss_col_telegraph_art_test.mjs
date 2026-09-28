@@ -47,6 +47,10 @@ await page.waitForFunction(() => typeof updateMonsters === 'function' && typeof 
 
 // the LX_FX loader decodes all five
 const decoded = await page.evaluate(async (keys) => {
+  // v0.30.1234 lazy-fx: a monster type's art (tg_col_<type>, and tg_col_zodiac for a zodiac
+  // sign) is fetched only once that type is wanted - ask the way a spawn does, past the hold.
+  try { window._lxBootHold && _lxBootHold.release && _lxBootHold.release('menu'); } catch (e) {}
+  try { for (const t of ['legosaurus', 'young_confused_barnaby', 'towerArbiter', 'towerSovereign', 'zodiac_taurus']) _lxFxWantMob(t, true); } catch (e) {}
   const t0 = Date.now();
   while (Date.now() - t0 < 20000) {
     const state = keys.map(k => ({ k, reg: !!(LX_FX && LX_FX[k]),
@@ -179,8 +183,10 @@ console.log('paint (art ready):', JSON.stringify(r.paintReady), '| paint (artles
 ok('Legosaurus pillar zone carries its own art', r.lego && r.lego.tg === 'tg_col_legosaurus', r.lego);
 ok('Barnaby pillar zone carries its own art', r.barnaby && r.barnaby.tg === 'tg_col_young_confused_barnaby', r.barnaby);
 ok('the Arbiter pillar zone carries its own art', r.arbiter && r.arbiter.tg === 'tg_col_towerArbiter', r.arbiter);
-ok('a zodiac column sign shares the zodiac telegraph, like its strike beam',
-   r.zodiac && r.zodiac.tg === 'tg_col_zodiac', r.zodiac);
+// v0.30.91 (cf5ac68e): the four zodiac column signs got their own art, keyed 'tg_col_' + m.type,
+// and the zodiac special-case in _lxAttackZones went; tg_col_zodiac stays as the shared fallback.
+ok('a zodiac column sign carries its own sign telegraph (v0.30.91)',
+   r.zodiac && r.zodiac.tg === 'tg_col_zodiac_taurus', r.zodiac);
 ok('a devastating boss swing zone carries the kind art', r.swingTg === 'tg_swing', { tg: r.swingTg });
 ok('the dash lane carries the kind art', r.dashTg === 'tg_dash', { tg: r.dashTg });
 ok('a LIVE zone with decoded art paints drawImage-ONLY — zero plain rectangles',

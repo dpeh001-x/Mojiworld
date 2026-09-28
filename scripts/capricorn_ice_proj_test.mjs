@@ -46,7 +46,11 @@ const r = await page.evaluate(async () => {
       damage: 10, owner, skill, color: '#aaeeff', _zodiacAttacker: owner === 'enemy' }];
     const srcs = [];
     CanvasRenderingContext2D.prototype.drawImage = function (img, ...a) {
-      const s = img && (img.src || (img.tagName === 'CANVAS' ? 'canvas' : ''));
+      // Decoded art is re-baked into a right-sized canvas (_lxBakeToLong / _lxBitmapToCanvas)
+      // that keeps the original on _lxSrc - read the name through it, or every sprite
+      // reads as a bare 'canvas' once it has decoded.
+      const o = img && img.tagName === 'CANVAS' ? img._lxSrc : null;
+      const s = img && (img.src || (o && (o.src || (typeof o === 'string' ? o : ''))) || (img.tagName === 'CANVAS' ? 'canvas' : ''));
       if (s) srcs.push(String(s).split('/').slice(-1)[0]);
       return orig.call(this, img, ...a);
     };
@@ -67,10 +71,23 @@ const r = await page.evaluate(async () => {
     }
     return { blits: last, frames: false, waitedMs: 15000 };
   };
-  out.enemyIce = probe('enemy', 'ice', 16, 14);
-  out.playerIce = probe('player', 'ice', 16, 14);
-  out.enemyStarbeam = probe('enemy', 'starbeam', 30, 8);
-  out.enemyIcePillar = probe('enemy', 'icePillar', 16, 14);
+  // v0.30.1196 / v0.30.1234 lazy-fx: projectile art is parked until something draws it,
+  // and on localhost the boot image hold parks it until the title menu. Release the hold
+  // the way the menu does; the first draw is then the ask, so poll until the art lands.
+  try { _lxBootHold.release('menu'); } catch (e) {}
+  const probeUntil = async (owner, skill, w, h) => {
+    let last = [];
+    for (let t = 0; t < 40; t++) {
+      last = probe(owner, skill, w, h);
+      if (last.some(s => /\.webp$/.test(s))) return last;
+      await new Promise(r => setTimeout(r, 250));
+    }
+    return last;
+  };
+  out.enemyIce = await probeUntil('enemy', 'ice', 16, 14);
+  out.playerIce = await probeUntil('player', 'ice', 16, 14);
+  out.enemyStarbeam = await probeUntil('enemy', 'starbeam', 30, 8);
+  out.enemyIcePillar = await probeUntil('enemy', 'icePillar', 16, 14);
   // AFTER the plain probes, never before: settle() draws for up to 15 s and that
   // is long enough to move page state under the checks that follow it.
   out.iceAnim = await settle("ice", 16, 14, new RegExp("^ice_\\d\\.webp$"));
@@ -90,7 +107,8 @@ ok('...and it is HIS shard, not the player ice spike or the unfired spire',
   r.enemyIce.some(s => /capricorn_ice|^ice_\d\.webp$/.test(s)),
   { blits: r.enemyIce });
 ok("the PLAYER's ice spike is untouched by that wiring",
-  r.playerIce.some(s => /p_icespike\.webp$/.test(s)),
+  // v0.30.1250 restored the mage ice spike's nine-frame loop, so p_icespike_N.webp counts too
+  r.playerIce.some(s => /p_icespike(_\d)?\.webp$/.test(s)),
   { blits: r.playerIce,
     note: "'ice' is a shared skill key; the player branch runs first and must keep winning" });
 ok('the regenerated star-beam still draws',

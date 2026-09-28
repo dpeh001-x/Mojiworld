@@ -173,7 +173,10 @@ ok('TIDAL SWEEP: 25% of max HP at Lv 50 and Lv 90', near(pct(O.sweepLv50, 'the T
 ok('TIDAL SWEEP: passive evasion cannot roll it away (90% evasion)', near(pct(O.sweepLv90eva90, 'the Tidal Sweep'), 25), O.sweepLv90eva90);
 // ── wiring ────────────────────────────────────────────────────────────────────
 const src = readFileSync(FILE, 'utf8');
-ok('co-op: guests keep the must-dodge rule on mirrored shots', src.includes("'pierce', '_noEvasion'];"), '');
+// v0.30.1013 appended 'noGravity' to the mirrored-field list, so the list no longer ENDS at
+// '_noEvasion' - read the whole _COOP_PJ_XF array and require the field anywhere in it.
+const _xf = (src.match(/const _COOP_PJ_XF = \[([\s\S]*?)\];/) || [])[1] || '';
+ok('co-op: guests keep the must-dodge rule on mirrored shots', /'_noEvasion'/.test(_xf) && /'pierce'/.test(_xf), '');
 ok('the slam waves draw as a ground shockwave sized to their hitbox (not the old purple swirl)',
   src.includes("skill: 'smash', _srcType: m.type,") && src.includes("_krookSlam: true,"), '');
 ok("the Meltdown's reach is drawn every frame of its windup", src.includes('function _lxDrawMeltRing() {')

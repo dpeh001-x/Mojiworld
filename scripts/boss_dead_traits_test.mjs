@@ -80,7 +80,10 @@ const r = await page.evaluate(() => {
           if (zones.some(z => z && z.kind === 'dash')) zoneSeen++;
         } catch (e) {}
       }
-      player.x = 700; player.y = 300;   // pin: isolate the mob's behaviour
+      // v0.30.424 (130e4fac): the bigMelee vertical gate is FEET-to-feet (|player feet - mob feet| <
+      // swingH), so pinning a 44 px player's TOP to a 230 px knight's top put the feet 186 px apart and
+      // the heavy never started. Pin the player standing on the mob's floor line instead.
+      player.x = 700; player.y = m.y + m.h - player.h;   // pin: isolate the mob's behaviour
       player.hp = player.maxHp;             // survive without inflating the pool
     }
     return { swings, braceFrames, movedDuringBrace, zoneSeen, dashFrames, dashTravel: Math.round(dashTravel) };
@@ -124,7 +127,7 @@ const r = await page.evaluate(() => {
       if (p && p.owner === 'enemy' && p.skill === 'swing') firedAfterDeath++;
     }
     if (!killed && dead._echoT > 0) { dead.currentHp = 0; killed = true; }   // die during the echo window
-    player.x = 700; player.y = 300;
+    player.x = 700; player.y = dead.y + dead.h - player.h;   // feet-to-feet, as in run()
   }
   out.deathCancelled = (killed && firedAfterDeath === 0);
   out.deathWindowReached = killed;
@@ -132,7 +135,9 @@ const r = await page.evaluate(() => {
   // ---- HOURGLASS CHARGE -------------------------------------------------
   const st = mk('towerStalker', 400);
   out.hgDeclared = st.traits.hourglassCharge;
-  out.stalkerOtherTraits = Object.keys(st.traits).filter(k => k !== 'hourglassCharge');
+  // v0.30.574 (74d21f53) gave the trait per-holder knobs, hourglassDashMs / hourglassDistance: they
+  // tune the same lunge, so they do not count as another trait that stripping would leave behind.
+  out.stalkerOtherTraits = Object.keys(st.traits).filter(k => !/^hourglass/.test(k));
   st._hgCd = 0;                                // arm the lunge immediately
   const startX = st.x;
   const b = run(st, 400, 16);

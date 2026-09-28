@@ -86,13 +86,20 @@ const src = await page.evaluate(() => {
     pingWorld: /const py = pg\.y;/.test(s),
     noPeerDouble: !/const sy = p\._ry - \(\(game\.camera/.test(s),
     noPingDouble: !/const py = pg\.y - \(\(game\.camera/.test(s),
-    lastHitBoth: (s.match(/lastHitTime: player\.lastHitTime,/g) || []).length,
+    // v0.29.674 (1fdd9b9b) added a THIRD `lastHitTime: player.lastHitTime,` - the
+    // co-op ghost-statue pause snapshot in _lxCoopWorldStep, not a boss swap -
+    // so a bare count reads 3. Count per swap site instead: each boss-swap
+    // snapshot is the block that saves _iceJumpStartY, and every one of them
+    // must carry lastHitTime within its own body.
+    swapSites: s.split('_iceJumpStartY: player._iceJumpStartY,').length - 1,
+    lastHitBoth: s.split('_iceJumpStartY: player._iceJumpStartY,').slice(1)
+      .filter(c => c.slice(0, 1500).includes('lastHitTime: player.lastHitTime,')).length,
   };
 });
 ok('the stair CULL now compares in world space, like its draw', src.stairCullWorld, src);
 ok('the ping marker uses world Y', src.pingWorld && src.noPingDouble, src);
 ok('no drawer inside the translate still subtracts camera.y', src.noPeerDouble && src.noPingDouble, src);
-ok('lastHitTime is snapshotted at both boss-swap sites', src.lastHitBoth === 2, src);
+ok('lastHitTime is snapshotted at both boss-swap sites', src.swapSites >= 2 && src.lastHitBoth === src.swapSites, src);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 await b.close();

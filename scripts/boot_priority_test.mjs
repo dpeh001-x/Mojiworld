@@ -37,7 +37,10 @@ try {
   // Parse-time bulk loads are LOW priority the moment they exist.
   await page.waitForFunction(() => typeof BG_IMAGES !== 'undefined', null, { timeout: 30000 });
   const prio = await page.evaluate(() => {
-    const bgs = Object.values(BG_IMAGES).filter(i => i && i.fetchPriority !== undefined);
+    // v0.30.789 seeds a returning player in town, and the boot stamps that start map's plate HIGH before this
+    // first read can run (measured 93/94 on v0.30.789 itself; v0.30.1196 routes it via _lxLazyWantMap) - so the start map's bg
+    // (everdawnCentral, asserted HIGH below) is the one plate that is not LOW here; every OTHER bg must be.
+    const bgs = Object.values(BG_IMAGES).filter(i => i && i.fetchPriority !== undefined && i !== BG_IMAGES.everdawnCentral);
     const lowBgs = bgs.filter(i => i.fetchPriority === 'low').length;
     return { bgs: bgs.length, lowBgs };
   });
@@ -62,12 +65,22 @@ try {
   const kickMs = Date.now() - t0;
   ok(`streamer kicks AFTER the start map settles (~8s; got ${Math.round(kickMs / 100) / 10}s)`, kickMs >= 6000, { kickMs });
 
-  // fx sweep is paced, not a burst: shortly after kick only a fraction of the
-  // proj/fx sets exist; the rest trickle in on the 180ms chunks.
+  // v0.30.1234 (lazy-fx): with the boot image hold on, the streamer's phase-1 fx sweep no longer runs at all - a
+  // proj/fx set is asked for by whoever will play it (_lxFxWant). Still no burst: after the kick the count stays
+  // well short of the full key list, and a set that is asked for is created on demand.
   const early = await page.evaluate(() => Object.keys(PROJ_ANIM_FRAMES || {}).length + Object.keys(FX_ANIM_FRAMES || {}).length);
   await sleep(4000);
   const later = await page.evaluate(() => Object.keys(PROJ_ANIM_FRAMES || {}).length + Object.keys(FX_ANIM_FRAMES || {}).length);
-  ok(`fx sweep paced in chunks (early ${early} -> later ${later}, total 86)`, later > early && later >= 80, { early, later });
+  const total = await page.evaluate(() => (typeof _PROJ_ANIM_KEYS !== 'undefined' ? _PROJ_ANIM_KEYS.size : 0) + (typeof _FX_ANIM_KEYS !== 'undefined' ? _FX_ANIM_KEYS.size : 0));
+  ok(`no fx burst after the kick (early ${early} -> later ${later} of ${total} sets)`, total > 40 && later < total / 2, { early, later, total });
+  const onDemand = await page.evaluate(async () => {
+    const k = [..._FX_ANIM_KEYS].find(x => !FX_ANIM_FRAMES[x]);
+    if (!k) return { k: null };
+    _lxFxWant('fa:' + k, true);
+    for (let i = 0; i < 40 && !FX_ANIM_FRAMES[k]; i++) await new Promise(r => setTimeout(r, 100));
+    return { k, made: !!FX_ANIM_FRAMES[k] };
+  });
+  ok('an fx set that is asked for is created on demand (_lxFxWant)', onDemand.made === true, onDemand);
 
   // Streamer-warmed maps get LOW priority on their tracked images.
   await page.waitForFunction(() => Object.keys(window._lxMapPreloaded || {}).length >= 4, null, { timeout: 30000 }).catch(() => {});

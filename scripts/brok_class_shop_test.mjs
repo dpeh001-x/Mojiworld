@@ -13,7 +13,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9234;
+const PORT = process.env.PORT || 9234;
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -65,7 +65,11 @@ const out = await page.evaluate(async () => {
     shards: (typeof CRAFT_COST_SHARDS !== 'undefined') ? CRAFT_COST_SHARDS : null,
     coins: (typeof CRAFT_COST_MOJICOINS !== 'undefined') ? CRAFT_COST_MOJICOINS : null,
   };
-  const cm = document.getElementById('craft-modal');
+  // v0.30.961 (f4700b75): the price is no longer static modal text - renderCraftingModal
+  // fills #craft-price-line from CRAFT_TIER_COST each time the bench opens. Render it,
+  // then read that line.
+  try { renderCraftingModal(); } catch (e) {}
+  const cm = document.getElementById('craft-price-line');
   forge.blurb = cm ? (cm.textContent || '').replace(/\s+/g, ' ').slice(0, 300) : null;
   return { ...r, forge };
 });
@@ -85,10 +89,12 @@ const lv90 = out.racks['warrior@90'], lv10 = out.racks['warrior@10'];
 ok('a Lv 90 rack is richer than a Lv 10 rack (endgame gates intact)',
    lv90 && lv10 && lv90.mine > lv10.mine, `Lv10 ${lv10 && lv10.mine} vs Lv90 ${lv90 && lv90.mine}`);
 
-ok('the T5 forge costs 50,000 mojicoins', out.forge.coins === 50000, `CRAFT_COST_MOJICOINS = ${out.forge.coins}`);
-ok('the shard cost is unchanged at 200', out.forge.shards === 200, `CRAFT_COST_SHARDS = ${out.forge.shards}`);
+// v0.30.961 (f4700b75) retuned the T5 forge: 50,000 -> 250,000 coins (half the T5 market
+// price) and 3,500 -> 8,000 shards, as the base of a T5-T8 price ladder.
+ok('the T5 forge costs 250,000 mojicoins', out.forge.coins === 250000, `CRAFT_COST_MOJICOINS = ${out.forge.coins}`);
+ok('the T5 shard cost is 8,000', out.forge.shards === 8000, `CRAFT_COST_SHARDS = ${out.forge.shards}`);
 ok('the forge blurb quotes the real cost, not a stale one',
-   !!(out.forge.blurb && out.forge.blurb.includes('50,000') && !out.forge.blurb.includes('3,000')),
+   !!(out.forge.blurb && out.forge.blurb.includes('250,000') && out.forge.blurb.includes('8,000\u25c8') && !out.forge.blurb.includes('3,000')),
    out.forge.blurb ? out.forge.blurb.slice(0, 170) : 'no blurb');
 
 let pass = 0, failed = 0;

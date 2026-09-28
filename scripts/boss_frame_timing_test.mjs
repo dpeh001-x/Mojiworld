@@ -110,7 +110,31 @@ const r = await page.evaluate(async () => {
   m.patternState = 'idle'; m.patternTimer = 0;
 
   // control: a type WITHOUT ft keeps the plain clock (no throw, frames advance)
-  out.noFt = _lxCalibFt('kingKrook', 'attack') === null;
+  // v0.30.363 (61201559) baked auto frame timing (ft, ftAuto) into the boss attacks, kingKrook included,
+  // so a hardcoded control type now HAS ft - and so does every boss in BOSS_ATTACK_FRAMES. Strip kingKrook's
+  // ft for the control (restored below), and prove it reads null AND its frames advance on the plain clock.
+  const _ctl = BOSS_ATTACK_FRAMES && BOSS_ATTACK_FRAMES.kingKrook ? 'kingKrook' : null;
+  const _ctlCal = _ctl && window.LX_ANIM_CALIB[_ctl] && window.LX_ANIM_CALIB[_ctl].attack;
+  const _ctlFt = _ctlCal ? _ctlCal.ft : undefined, _ctlAuto = _ctlCal ? _ctlCal.ftAuto : undefined;
+  if (_ctlCal) { delete _ctlCal.ft; delete _ctlCal.ftAuto; _lxAnimCalibRefresh(); }
+  out.noFtNull = _ctl ? _lxCalibFt(_ctl, 'attack') === null : false;
+  out.noFtType = _ctl;
+  out.noFt = false;
+  if (_ctl) {
+    game.monsters = [];
+    spawnMonster(Math.round(player.x + 300), Math.round(player.y), _ctl, false);
+    const mc = game.monsters[game.monsters.length - 1];
+    if (mc) { mc.hp = mc.currentHp = 1e9; mc.maxHp = 1e9; mc.atk = 1; mc.isBoss = true; }
+    const fr = BOSS_ATTACK_FRAMES[_ctl], seen = new Set();
+    for (let w = 0; w < 60 && mc; w++) {
+      await frames(3);
+      try { const x = _bossAttackFrame(_ctl, mc); if (x) seen.add(fr.indexOf(x)); } catch (e) { out.noFtErr = String(e); break; }
+    }
+    out.noFtFrames = seen.size;
+    // frames that never decoded read as "no frame" rather than a clock fault, as for the checks above
+    out.noFt = out.noFtNull && !out.noFtErr && (seen.size >= 2 || seen.size === 0);
+  }
+  if (_ctlCal) { if (_ctlFt !== undefined) _ctlCal.ft = _ctlFt; if (_ctlAuto !== undefined) _ctlCal.ftAuto = _ctlAuto; }
   game.monsters = [];
   // cleanup injection
   delete window.LX_ANIM_CALIB.gravitos.attack.ft;
@@ -126,7 +150,7 @@ ok('boss ATTACK loop dwells per-frame by ft (long frame 0, quick middles)',
 ok('boss IDLE ping-pong honors ft', r.idle === 'undecoded' || r.idleHonored === true, { idle: r.idle });
 ok('gravitos punch pair maps its window by ft as relative weights',
   r.punch === 'undecoded' || r.punchHonored === true, { punch: r.punch });
-ok('a type without ft keeps the plain engine clock', r.noFt === true, { noFt: r.noFt });
+ok('a type without ft keeps the plain engine clock', r.noFt === true, { noFt: r.noFt, type: r.noFtType, frames: r.noFtFrames, err: r.noFtErr });
 ok('no page errors', errs.length === 0, { errs: errs.slice(0, 3) });
 
 await b.close(); srv.kill();

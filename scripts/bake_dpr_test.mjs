@@ -56,8 +56,29 @@ async function probe(dsf) {
   await page.evaluate(() => {
     game.monsters.length = 0;
     try { spawnMonster(player.x + 200, player.y - 40, 'skeleton', false); } catch (e) {}
+    // Every mob now has idle/walk/attack frame sets, and _getCachedScaledSprite is the STATIC-sprite path drawMonster
+    // takes only while no state frame is ready. This probe used to rely on the skeleton's first draws landing before
+    // its frames decoded - a race that stopped landing after v0.30.1192 (d0999692 moved the boss pre-derive off
+    // loadMap, so frames are ready first). Pin the static path for this one mob instead, through the real draw.
+    try {
+      const _sf = window._monsterStateFrame;
+      if (typeof _sf === 'function' && !_sf._lxBakeProbe) {
+        window._monsterStateFrame = function (m) { return (m && m._lxBakeProbe) ? null : _sf.apply(this, arguments); };
+        window._monsterStateFrame._lxBakeProbe = true;
+      }
+      const sk = game.monsters.find((q) => q && q.type === 'skeleton'); if (sk) sk._lxBakeProbe = true;
+    } catch (e) {}
   });
-  await page.waitForTimeout(2500);   // let it draw a few frames so the cache mints
+  // The static path bakes only once MONSTER_SPRITES.skeleton has decoded (_lxBakeDownscaled returns null for an
+  // incomplete image), and since v0.30.1205 lazy-art2 that sheet is parked until wanted - on a loaded machine it could
+  // still be in flight after a fixed 2.5 s, so one pass saw an empty cache. Ask for it, then wait for the bake itself.
+  await page.evaluate(() => { try { if (typeof _lxArt2WantMon === 'function') _lxArt2WantMon('skeleton', true); } catch (e) {} });
+  await page.waitForFunction(() => { const s = (typeof MONSTER_SPRITES !== 'undefined') && MONSTER_SPRITES.skeleton;
+    return !!(s && s.complete && s.naturalWidth > 0); }, null, { timeout: 30000 }).catch(() => {});
+  await page.waitForFunction(() => { if (typeof _MOB_SPRITE_CACHE === 'undefined') return false;
+    for (const k of _MOB_SPRITE_CACHE.keys()) if (k.indexOf('skeleton_') === 0) return true; return false; },
+    null, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(300);   // a few more frames on the minted cache
   const R = await page.evaluate(() => {
     const out = {
       dpr: (typeof _LX_DPR !== 'undefined') ? _LX_DPR : null,

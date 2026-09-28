@@ -25,13 +25,21 @@ try {
   await g.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded' });
   await g.waitForFunction(() => typeof BOSS_SPRITES === 'object' && typeof BOSS_SPRITE_TYPES !== 'undefined');
   // wait until all boss statics have decoded (png bosses load after a .webp probe + fallback)
-  await g.waitForFunction(() => BOSS_SPRITE_TYPES.every(t => BOSS_SPRITES[t]), null, { timeout: 90000 }).catch(() => {});
+  // Since the test was written BOSS_SPRITE_TYPES also holds CAST SETS - attack-only frame sets
+  // drawn mid-pattern (v0.29.560 gravitossoul, v0.29.570 gravitoslaser, the form-2/3 sets,
+  // v0.30.89 Sovereign, v0.30.236 kingKrookstomp, v0.30.241 aetherionastral, v0.30.478 Arbiter).
+  // None has an idle set, and the ones in the game's BOSS_FRAMES_ONLY (v0.29.809) have no
+  // static body sprite either - the loader skips them on purpose. Bodies keep the full check.
+  await g.waitForFunction(() => BOSS_SPRITE_TYPES.every(t => BOSS_FRAMES_ONLY.has(t) || BOSS_SPRITES[t]), null, { timeout: 90000 }).catch(() => {});
   const gr = await g.evaluate(async () => {
     const load = (src) => new Promise((res) => { const i = new Image(); i.onload = () => res(true); i.onerror = () => res(false); i.src = src; });
-    const out = { statics: {}, frames: {} };
+    const CAST = new Set([...BOSS_FRAMES_ONLY, 'gravitospunch', 'gravitossoul', 'gravitoslaser',
+      'gravitos2star', 'gravitos3star', 'gravitos2punch', 'gravitos2soul', 'gravitos2laser',
+      'gravitos3punch', 'gravitos3soul', 'gravitos3laser', 'kingKrookstomp']);
+    const out = { statics: {}, frames: {}, framesOnly: [...BOSS_FRAMES_ONLY] };
     for (const t of BOSS_SPRITE_TYPES) {
-      out.statics[t] = !!BOSS_SPRITES[t];
-      const idle = t === 'gravitospunch' ? true : await load('Sprites/bosses/idle/' + t + '_0.webp');
+      if (!BOSS_FRAMES_ONLY.has(t)) out.statics[t] = !!BOSS_SPRITES[t];
+      const idle = CAST.has(t) ? true : await load('Sprites/bosses/idle/' + t + '_0.webp');
       const atk  = await load('Sprites/bosses/attack/' + t + '_0.webp');
       out.frames[t] = idle && atk;
     }
@@ -39,7 +47,7 @@ try {
   });
   const missingStatic = Object.entries(gr.statics).filter(([k, v]) => !v).map(([k]) => k);
   const missingFrames = Object.entries(gr.frames).filter(([k, v]) => !v).map(([k]) => k);
-  ok('game: every boss static sprite decoded (' + Object.keys(gr.statics).length + ' bosses)', missingStatic.length === 0, { missingStatic });
+  ok('game: every boss static sprite decoded (' + Object.keys(gr.statics).length + ' bosses)', missingStatic.length === 0 && Object.keys(gr.statics).length >= 18, { missingStatic, framesOnly: gr.framesOnly });
   ok('game: every boss idle+attack frame decoded', missingFrames.length === 0, { missingFrames });
   ok('game: no page errors', gErr.length === 0, gErr.slice(0, 3));
   await g.close();

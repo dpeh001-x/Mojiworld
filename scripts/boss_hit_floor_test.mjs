@@ -34,8 +34,10 @@ try {
     o.stamped = shoot('kingKrook'); o.plain = shoot(null); o.leg = shoot('octoLegFreeze');
     window.getEvasion = oldEva; player.hp = M; game.projectiles.length = 0;
     // 3. the shipped source: the stamps at every creation site, the contact floor before the difficulty scale
+    //    v0.30.1006 (11b93ac6): Krook's jump-slam landing wave left 'shock' for 'smash' (_krookSlamWave - the
+    //    shock sprite sank through the floor); it keeps its stamp, so shock is 1 site and smash 1.
     const src = await (await fetch(location.pathname)).text(); const count = (t) => src.split(t).length - 1;
-    o.src = { claw: count("skill: 'claw', _srcType: m.type,"), firebomb: count("skill: 'firebomb', _srcType: m.type,"), shock: count("skill: 'shock', _srcType: m.type,"), bubble: count("skill: 'bubble', _srcType: m.type,"), octoHead: count("skill: 'octoHead', _srcType: m.type,"), tidalSweep: count("skill: 'tidalSweep', _srcType: m.type,"), octoLeg: count("skill: 'octoLeg', _srcType: m.type,"), mink: count("skill: 'mink', _srcType: m.type,"),
+    o.src = { claw: count("skill: 'claw', _srcType: m.type,"), firebomb: count("skill: 'firebomb', _srcType: m.type,"), shock: count("skill: 'shock', _srcType: m.type,"), smash: count("skill: 'smash', _srcType: m.type,"), bubble: count("skill: 'bubble', _srcType: m.type,"), octoHead: count("skill: 'octoHead', _srcType: m.type,"), tidalSweep: count("skill: 'tidalSweep', _srcType: m.type,"), octoLeg: count("skill: 'octoLeg', _srcType: m.type,"), mink: count("skill: 'mink', _srcType: m.type,"),
       contact: src.indexOf("if (_shownDmg > 0) _shownDmg = _lxBossHpFloor(m.type, _shownDmg);") >= 0, proj: src.indexOf("if (p._srcType && _projLost > 0) _projLost = _lxBossHpFloor(p._srcType, _projLost);") >= 0 };
     return o;
   });
@@ -47,7 +49,7 @@ try {
   ok('a 1-damage fireball stamped as Krook\'s lands for exactly 15% of max HP (the floor, after the scale)', r.stamped && !r.stamped.err && r.stamped.loss === r.floor && r.stamped.left === 0, JSON.stringify(r.stamped));
   ok('a tentacle\'s stamped shot lands for exactly 15% too', r.leg && !r.leg.err && r.leg.loss === r.floor, JSON.stringify(r.leg));
   ok('the same shot without a source stamp lands for next to nothing (the floor is theirs alone)', r.plain && !r.plain.err && r.plain.loss > 0 && r.plain.loss < r.floor, JSON.stringify(r.plain));
-  ok('every creation site is stamped: claw 1, firebomb 4, shock 2, bubble 2, octoHead 1, tidalSweep 1, octoLeg 2, mink 1', r.src.claw === 1 && r.src.firebomb === 4 && r.src.shock === 2 && r.src.bubble === 2 && r.src.octoHead === 1 && r.src.tidalSweep === 1 && r.src.octoLeg === 2 && r.src.mink === 1, JSON.stringify(r.src));
+  ok('every creation site is stamped: claw 1, firebomb 4, shock 1, smash 1, bubble 2, octoHead 1, tidalSweep 1, octoLeg 2, mink 1', r.src.claw === 1 && r.src.firebomb === 4 && r.src.shock === 1 && r.src.smash === 1 && r.src.bubble === 2 && r.src.octoHead === 1 && r.src.tidalSweep === 1 && r.src.octoLeg === 2 && r.src.mink === 1, JSON.stringify(r.src));
   ok('the contact path floors the landed number beside the Conductor floor; the projectile path floors the landed number on the stamp', r.src.contact && r.src.proj, JSON.stringify([r.src.contact, r.src.proj]));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }

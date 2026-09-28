@@ -1,4 +1,4 @@
-// Boss level floor: an outleveled boss scales up so it cannot be one-shot,
+// Boss level floor (RETIRED v0.29.762 - see the note above the probe): an outleveled boss scaled up so it could not be one-shot,
 // early bosses (< Lv 40) stay EASY (half rate, half ceiling), at-level fights
 // are untouched, and rewards scale with the fight so it is farm-neutral.
 //
@@ -19,87 +19,59 @@ const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 180)));
 await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => { try { return typeof eval('spawnMonster') === 'function' && !!eval('player'); } catch { return false; } }, null, { timeout: 180000 });
 
+// v0.29.762 (644fe6fa, per user "remove all modifiers"): data/monster_stats.js
+// became the single source of truth and _lxApplyStatTable runs LAST in
+// spawnMonster, so the v0.29.536/538 level floor and early-boss ease no longer
+// reach a boss's stats (they still compute, and are then overwritten). The
+// protected promise is now the table's own: "Edit a number, reload, and that
+// is exactly what you fight" - at ANY player level, with no hidden floor, and
+// bosses exempt from the stat jitter (v0.30.490). This pins that contract.
 const r = await page.evaluate(async () => {
   const g = eval('game'), p = eval('player');
+  const S = eval('LX_MONSTER_STATS');
+  const RJ = (typeof LX_REWARD_JITTER === 'number') ? LX_REWARD_JITTER : 0;
+  const MJ = (typeof LX_MONSTER_JITTER === 'number') ? LX_MONSTER_JITTER : 0;
   g.mapData = g.mapData || {};
   g.mapData.platforms = [{ type: 'ground', x: 0, y: 448, w: 4000, h: 40 }];
-  const spawnAt = (lvl, type) => {
+  const spawnAt = (lvl, type, boss = true) => {
     p.cls = p.cls || 'warrior'; p.level = lvl;
     g.monsters = [];
-    eval('spawnMonster')(800, 400, type, true, false);
+    eval('spawnMonster')(800, 400, type, boss, false);
     const m = g.monsters[0];
-    return m ? { maxHp: m.maxHp, atk: m.atk, exp: m.exp, coins: m.mojicoins,
-                 mul: m._lvFloorMul || 1, ease: m._lvEaseMul || 1 } : null;
+    return m ? { maxHp: m.maxHp, atk: m.atk, exp: m.exp, coins: m.mojicoins } : null;
   };
-
-  const out = {};
-  out.atLevel  = spawnAt(10, 'king');    // at-level: EASED, not floored
-  out.at86     = spawnAt(86, 'king');    // the user's report
-  out.at200    = spawnAt(200, 'king');   // prestige: the sub-40 cap
-  out.mooma16  = spawnAt(16, 'mooma');   // graded ease partway up the ramp
-  out.krook86  = spawnAt(86, 'kingKrook');   // Lv-50 boss: full-rate floor
-  out.krook50  = spawnAt(50, 'kingKrook');   // at-level: untouched, no ease
-  // scripted + self-scaling content must stay outside both mechanisms
+  const row = (type) => S[type] && { hp: S[type].hp, atk: S[type].atk, exp: S[type].exp, coin: S[type].coin };
+  const out = { RJ, MJ, rows: {} };
+  for (const t of ['king', 'mooma', 'kingKrook', 'mirrorSelf', 'towerArbiter', 'snail']) out.rows[t] = row(t);
+  out.king10   = spawnAt(10, 'king');      // at-level
+  out.king86   = spawnAt(86, 'king');      // the old floor case
+  out.king200  = spawnAt(200, 'king');     // prestige
+  out.mooma16  = spawnAt(16, 'mooma');
+  out.krook86  = spawnAt(86, 'kingKrook');
+  out.krook50  = spawnAt(50, 'kingKrook');
   out.mirror86 = spawnAt(86, 'mirrorSelf');
   g.tower = { floor: 5 };
   out.towerBoss = spawnAt(86, 'towerArbiter');
   g.tower = null;
-  // normal mobs must be unaffected by the floor entirely
-  p.level = 86; g.monsters = [];
-  eval('spawnMonster')(800, 400, 'snail', false, false);
-  out.snail86 = { mul: g.monsters[0] && (g.monsters[0]._lvFloorMul || 1) };
+  // the boot map is a sanctuary, where spawnMonster suppresses non-boss spawns - use a field map
+  try { eval('loadMap')('forest'); } catch (e) {}
+  out.snail86 = spawnAt(86, 'snail', false);
   return out;
 });
 
-// --- the at-level EASE (v0.29.NEW, per user: first encounters too hard) ----
-ok('EASE: at-level Gloopaloo is cut to 35% (178,500 -> 62,475 HP)',
-   r.atLevel.ease === 0.35 && r.atLevel.maxHp === 62475, r.atLevel);
-// Ratio, not the exact integer: the post-spawn difficulty and level-curve
-// blocks re-multiply and re-floor ATK after the ease (same story as the
-// floored-ATK check below), so 36 -> 29 rather than the formula's 28.
-ok('EASE: his ATK is cut to ~80% at Lv 10',
-   Math.abs(r.atLevel.atk / 36 - 0.80) < 0.03, { atk: r.atLevel.atk, was: 36, ratio: +(r.atLevel.atk / 36).toFixed(3) });
-ok('EASE: graded — Mooma (Lv 16) sits partway up the ramp at 48%',
-   Math.abs(r.mooma16.ease - 0.48) < 0.01, { ease: r.mooma16.ease, hp: r.mooma16.maxHp });
-ok('EASE: rewards stay authored (the fight was retuned, not its pay)',
-   r.atLevel.exp === 195 && r.atLevel.coins === 1170, { exp: r.atLevel.exp, coins: r.atLevel.coins });
-ok('EASE: at-level fight is not floored (mul 1)', r.atLevel.mul === 1, { mul: r.atLevel.mul });
-ok('EASE: Lv-40+ bosses are untouched by it', r.krook50.ease === 1, { ease: r.krook50.ease });
-
-// --- the overlevel FLOOR, now from the eased base ---------------------------
-ok('Lv 86 vs Gloopaloo: the floor engages', r.at86.mul > 1, { mul: r.at86.mul });
-ok('half rate below 40: gap 76 lands ~4.8x of the EASED base',
-   Math.abs(r.at86.mul - 4.8) < 0.05 && r.at86.maxHp === Math.floor(62475 * r.at86.mul),
-   { mul: r.at86.mul, hp: r.at86.maxHp });
-ok('the one-shot is gone: ~300k HP is far past any single hit',
-   r.at86.maxHp > 250000, { hp: r.at86.maxHp, preFloorBase: 62475 });
-ok('capped at 6x even for a prestige character',
-   r.at200.mul === 6 && r.at200.maxHp === 62475 * 6, { mul: r.at200.mul, hp: r.at200.maxHp });
-ok('a Lv-40+ boss floors at FULL rate (Krook, gap 36 -> ~4.6x)',
-   Math.abs(r.krook86.mul - 4.6) < 0.05, { mul: r.krook86.mul });
-ok('at-level Krook untouched', r.krook50.mul === 1, r.krook50);
-
-// --- exclusions -------------------------------------------------------------
-ok('the scripted Mirror fight is outside both mechanisms',
-   r.mirror86.mul === 1 && r.mirror86.ease === 1, r.mirror86);
-ok('tower bosses are outside both (they scale per-floor already)',
-   r.towerBoss.mul === 1 && r.towerBoss.ease === 1, r.towerBoss);
-// Compare RATIOS, not the exact rounding path: two post-spawn blocks
-// (BOSS_DIFFICULTY_ATK_MUL and the v0.29.224 level-curve parity) re-multiply
-// boss ATK after the floor, so integer flooring at each stage shifts the final
-// value by a point or two. The intent is quarter-rate growth: at mul 4.8, ATK
-// ~1.95x while HP is 4.8x.
-const _atkRatio = r.at86.atk / r.atLevel.atk;
-const _want = 1 + (r.at86.mul - 1) * 0.25;
-ok('ATK grows at a quarter rate — a nudge, not a wall',
-   Math.abs(_atkRatio - _want) < 0.12 && _atkRatio < r.at86.mul / 2,
-   { atkRatio: +_atkRatio.toFixed(3), intended: +_want.toFixed(3), hpMul: r.at86.mul });
-ok('FARM-NEUTRAL: floored EXP scales by the same factor as HP',
-   Math.abs(r.at86.exp / r.atLevel.exp - r.at86.mul) < 0.02,
-   { atLevel: r.atLevel.exp, floored: r.at86.exp, mul: r.at86.mul });
-ok('coins scale with it', Math.abs(r.at86.coins / r.atLevel.coins - r.at86.mul) < 0.02,
-   { atLevel: r.atLevel.coins, floored: r.at86.coins });
-ok('normal mobs are untouched by the floor', r.snail86.mul === 1, r.snail86);
+const R = r.rows;
+const exact = (m, t) => !!m && !!t && m.maxHp === t.hp && m.atk === t.atk;
+const payOk = (m, t) => !!m && !!t && Math.abs(m.exp - t.exp) <= Math.ceil(t.exp * r.RJ) + 1 && Math.abs(m.coins - t.coin) <= Math.ceil(t.coin * r.RJ) + 1;
+ok('the stat table is loaded and holds the bosses under test', R.king && R.mooma && R.kingKrook && R.mirrorSelf && R.towerArbiter && R.snail, R);
+ok('at-level Gloopaloo spawns EXACTLY his table HP/ATK (no hidden ease)', exact(r.king10, R.king), { got: r.king10, table: R.king });
+ok('Lv 86 vs Gloopaloo: the same table numbers - no hidden level floor', exact(r.king86, R.king), { got: r.king86, table: R.king });
+ok('Lv 200 prestige: still the table numbers', exact(r.king200, R.king), { got: r.king200, table: R.king });
+ok('Mooma at Lv 16 spawns her table row', exact(r.mooma16, R.mooma), { got: r.mooma16, table: R.mooma });
+ok('a Lv-50 boss is the table at level and overleveled alike (Krook 50 / 86)', exact(r.krook50, R.kingKrook) && exact(r.krook86, R.kingKrook), { at50: r.krook50, at86: r.krook86, table: R.kingKrook });
+ok('the scripted Mirror fight is its table row', exact(r.mirror86, R.mirrorSelf), { got: r.mirror86, table: R.mirrorSelf });
+ok('a tower boss spawns its table row (per-floor scaling lives in the expedition spawner)', exact(r.towerBoss, R.towerArbiter), { got: r.towerBoss, table: R.towerArbiter });
+ok('boss rewards are the table pay within the reward jitter, at any level', payOk(r.king10, R.king) && payOk(r.king86, R.king) && payOk(r.krook86, R.kingKrook), { k10: r.king10, k86: r.king86, table: R.king, RJ: r.RJ });
+ok('a normal mob is its table row within the stat jitter, at any level', !!r.snail86 && Math.abs(r.snail86.maxHp - R.snail.hp) <= Math.ceil(R.snail.hp * r.MJ) + 1, { got: r.snail86, table: R.snail });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 await b.close();

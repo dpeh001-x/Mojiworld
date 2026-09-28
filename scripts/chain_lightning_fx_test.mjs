@@ -53,6 +53,13 @@ await page.waitForTimeout(4000);
 
 const R = await page.evaluate(async () => {
   game.paused = false;
+  // Pin the frame-time governor OFF. Slow headless Chrome trips _perfTick into lowFx +
+  // veryLowFx within seconds, and since the graduated caps (_smoothFxCap: 14 x 0.7 x 0.7,
+  // floor 6) that leaves room for exactly two hops' worth of fx - measured 6 entries, 2 arcs
+  // for 5 hops - plus a thinner particle cap. That is the load response doing its job on a
+  // slow box, not the chain's design; this test grades the full-quality chain.
+  try { _perfTick = function () {}; } catch (e) {}
+  if (typeof LX_PERF === 'object' && LX_PERF) { LX_PERF.lowFx = false; LX_PERF.veryLowFx = false; LX_PERF.lowFxUntil = 0; LX_PERF.veryLowFxUntil = 0; }
   player.maxMp = 999999; player.mp = 999999; player.baseAtk = 500;
   player.skillCooldowns = {}; player._castLockUntil = 0;
   game.monsters.length = 0; game.smoothFx = []; game.particles.length = 0;

@@ -40,7 +40,14 @@ try {
   // (2)+(3) BEFORE reveal: previously-missing town NPCs + town bg must be LOADED.
   // (Resource-timing entries evict past the 250-entry buffer, so probe the actual
   // registry Image objects — the ground truth the renderer reads.)
-  const fetched = await page.evaluate(() => {
+  // v0.30.1205 (9d78e8f3) lazy-art2: an NPC sheet is map-tied art - parked by the boot hold until a map that has her
+  // is asked for, so a new player (who starts in The Void, v0.30.789) no longer pulls town's NPCs before the menu.
+  // The rotted-out registry NPCs must still be REGISTERED and load: ask for town the way entering it does
+  // (_lxArt2WantMap(id, hi), via _lxLazyWantMap), Whisper by her own key, then read the registry Images.
+  const fetched = await page.evaluate(async () => {
+    try { _lxArt2WantMap('town', true); _lxArt2Want('npc:Whisper', true); } catch (e) {}
+    const _up = (n) => { const i = NPC_SPRITES[n]; return !!(i && i.complete && i.naturalWidth > 0); };
+    for (let k = 0; k < 100; k++) { try { if (['DJ Vinyl', 'Postal Wisp', 'Milo', 'Guguma', 'Bravo', 'Whisper'].every(_up)) break; } catch (e) {} await new Promise(r => setTimeout(r, 200)); }
     const npcUp = (name) => { try { const i = NPC_SPRITES[name]; return !!(i && i.complete && i.naturalWidth > 0); } catch (e) { return false; } };
     let townBg = false; try { const b = BG_IMAGES.everdawnCentral; townBg = !!(b && (b._loaded || (b.complete && b.naturalWidth > 0))); } catch (e) {}
     return {
@@ -50,7 +57,7 @@ try {
       townBg,
     };
   });
-  ok('town NPCs LOADED before reveal (DJ Vinyl/Postal Wisp/Milo/Guguma/Bravo)',
+  ok('town NPCs load when town is asked for (DJ Vinyl/Postal Wisp/Milo/Guguma/Bravo)',
      fetched.djVinyl && fetched.postalWisp && fetched.milo && fetched.guguma && fetched.bravo, fetched);
   // v0.30.x title-first - with title-first the town's backdrop streams in after the menu; it must be in when the world opens
   const __tf = await page.evaluate(() => !!window._lxTitleFirst);
