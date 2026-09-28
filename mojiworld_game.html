@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1352';
+const GAME_VERSION = 'v0.30.1353';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -20443,8 +20443,8 @@ function _lxBossBakePump() {
     if (!im || im.tagName !== 'IMG' || im._lxBaking) continue;               // baked, baking, or an empty slot
     if (!im.complete) { if (++j.t < 600) Q.push(j); continue; }             // still downloading: come back (bounded)
     const capJ = j.a._lxBaseMin ? _lxShrinkCap(Math.max(720, j.a._lxBaseMin)) : cap;   // v0.30.x — the set's own base (_lxBossBakeBaseFor)
-    if (!(im.naturalWidth > 0) || Math.max(im.naturalWidth, im.naturalHeight) <= capJ) continue;   // failed, or small enough to pin on first draw
-    _lxAsyncBake(j.a, j.i, im, capJ);
+    if (!(im.naturalWidth > 0) || (Math.max(im.naturalWidth, im.naturalHeight) <= capJ && !_lxBossBigRaw(im))) continue;   // failed, or small enough to pin on first draw
+    _lxAsyncBake(j.a, j.i, im, Math.min(capJ, Math.max(im.naturalWidth, im.naturalHeight)));   // v0.30.1353 endgame-glide - a big frame under its cap bakes at its own size
   }
   if (Q.length) _lxBossBakeKick(_lxBakeInFlight >= budget ? 40 : 90);
 }
@@ -20508,6 +20508,10 @@ function _lxBossBakeBump(set) {
   for (const j of rest) Q.push(j);
   _lxBossBakeKick(0);
 }
+// v0.30.1353 endgame-glide - a boss frame this big is never minted on the main thread, even under its set's cap: it bakes
+// off-thread at its own size, like an over-cap frame does, and the stand-in holds meanwhile. Only walk/gravitos3 (base
+// 1025, 1656x1214 frames) met it: the first stride of form 3 pinned nine 2 Mpx canvases on the main thread.
+function _lxBossBigRaw(im) { return !!(im && im._lxSet && im.tagName === 'IMG' && im.naturalWidth > 0 && im.naturalWidth * im.naturalHeight >= 1500000); }
 function _lxBossStandIn(sprite, m) {
   if (!sprite || !m || sprite.tagName !== 'IMG') return sprite;
   // a boss that has reached a new form (gravitos -> gravitos2) queues that form the first time it draws in it
@@ -20516,7 +20520,7 @@ function _lxBossStandIn(sprite, m) {
   const set = sprite._lxSet;
   if (!set || set._lxStandInOff || !(sprite.naturalWidth > 0)) return sprite;
   const cap = _lxShrinkCap(Math.max(720, set._lxBaseMin || 0)), long = Math.max(sprite.naturalWidth, sprite.naturalHeight);   // v0.30.x — the set's own base (_lxBossBakeBaseFor)
-  if (long <= cap) return sprite;                                            // under the cap: pinned on first draw, cheap
+  if (long <= cap && !_lxBossBigRaw(sprite)) return sprite;                  // under the cap: pinned on first draw, cheap (v0.30.1353 endgame-glide - unless big)
   const bc = sprite._lxBakedCv;
   if (bc) { const bl = Math.max(bc.width, bc.height); if (bl <= cap && bl >= Math.min(long, cap) * 0.95) return bc; }
   _lxBossBakeBump(set);
@@ -20790,6 +20794,13 @@ function _lxShrinkFrames(frames, baseLogical, pinCap) {   // v0.30.624 - pinCap:
       // 9 slots per mob per frame (matches the _lxEdgesTouched 404 memo).
       if (im.complete) im._lxNoShrink = true; else pending = true;
       continue;
+    }
+    // v0.30.1353 endgame-glide - under the cap but too big to mint here (_lxBossBigRaw): baked off-thread at its own size
+    if (canAsync && Math.max(im.naturalWidth, im.naturalHeight) <= maxLong && _lxBossBigRaw(im)) {
+      const _bn = Math.max(im.naturalWidth, im.naturalHeight), _bm = im._lxBakedCv;
+      if (_bm && Math.max(_bm.width, _bm.height) >= _bn * 0.95) { frames[i] = _bm; frames._readyN = 0; continue; }
+      if (_lxBakeInFlight < _lxBakeBudget()) _lxAsyncBake(frames, i, im, _bn);
+      pending = true; continue;
     }
     if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) {
       // v0.30.405 — pinned, not raw; a few a call, and a frame that missed this call's budget is NOT marked, so the next call reaches it
@@ -99374,9 +99385,12 @@ function bossAI(m, dt, distToPlayer) {
       if (Math.abs(m.vx) > driftCap) m.vx = Math.sign(m.vx) * driftCap;
       // v0.30.1333 memory-glide - his 0.08/tick start sat under the walk threshold, and the walk-latch kill zeroes that
       // every tick, so between teleports the memory's titan stood frozen. Start the stride above it: he walks at you.
-      if (window._prologueActive && Math.abs(dxg) > 220 && !m._tpWarn && typeof _lxMobWalkOn === 'function') {
+      // v0.30.1353 endgame-glide - and in the real fight (per user: "Yes fix the endgame Gravitos fight too"): measured
+      // frozen there the same way, 0 / 0 / 16 px walked between moves in 30 s of forms 1 / 2 / 3. The stride starts at
+      // the walk threshold and the 0.08/tick above builds it to the form's drift cap, which it never passes.
+      if (Math.abs(dxg) > 220 && !m._tpWarn && typeof _lxMobWalkOn === 'function') {
         const _gOn = _lxMobWalkOn(m) * 1.3;
-        if (Math.abs(m.vx) < _gOn) m.vx = Math.sign(dxg) * _gOn;
+        if (Math.abs(m.vx) < _gOn) m.vx = Math.sign(dxg) * Math.min(driftCap, _gOn);
       }
     } else if (m.patternState !== 'zip') {
       // Planted for the whole attack — re-zeroed every frame so knockback
