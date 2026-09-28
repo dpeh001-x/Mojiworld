@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1335';
+const GAME_VERSION = 'v0.30.1336';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -56475,7 +56475,7 @@ const COOP_FAR_X = 1500;          // a monster farther than this from EVERY play
 const COOP_FAR_Y = 1000;          // ... waits for the next keyframe
 const LX_MP_QUICK = 30;           // send-budget tokens above which a hit leaves at once instead of in the 50 ms batch
 const _COOP_MON_CORE = { u: 1, x: 1, y: 1, vx: 1, vy: 1, f: 1, h: 1, m: 1, t: 1, b: 1, a: 1 };
-const _COOP_MON_EX = { aa: 1, fz: 1, st: 1, wd: 1, wg: 1, wb: 1, ps: 1, sp: 1, dp: 1, p: 1, sg: 1, op: 1, bk: 1, cs: 1, sf: 1, tw: 1 };   // v0.30.x grav-tp: tw
+const _COOP_MON_EX = { iv: 1, aa: 1, fz: 1, st: 1, wd: 1, wg: 1, wb: 1, ps: 1, sp: 1, dp: 1, p: 1, sg: 1, op: 1, bk: 1, cs: 1, sf: 1, tw: 1 };   // v0.30.x grav-tp: tw
 function _coopDeltaOn() {   // at least one partner on my map, and every one of them reads light frames
   if (!_coopActive()) return false;
   let n = 0;
@@ -56836,6 +56836,7 @@ function _coopTickMonsters() {
     // host's actual monster deals. One number closes it.
     _e.a = Math.round(m.atk || 0);
     if (m.atkAnimUntil && m.atkAnimUntil > now) _e.aa = Math.min(2000, Math.round(m.atkAnimUntil - now));
+    if ((m.invulnerable | 0) > 0) _e.iv = Math.min(6000, m.invulnerable | 0);   // v0.30.1336 coop-regen - a guest refuses the hit too (was predicted, then refilled)
     if ((m.freezeTimer | 0) > 0) _e.fz = Math.min(3000, m.freezeTimer | 0);   // v0.30.x — status was never mirrored
     if ((m.stunTimer   | 0) > 0) _e.st = Math.min(1500, m.stunTimer   | 0);
     if (m.isBoss && (m._wardUntil | 0) > (game.time | 0)) _e.wd = Math.min(600, (m._wardUntil | 0) - (game.time | 0));
@@ -58140,6 +58141,7 @@ function _coopApplyMonsters(msg) {
       const _nowV = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       m.atkAnimUntil = Math.max(m.atkAnimUntil || 0, _nowV + Math.min(2000, +e.aa || 0));
     }
+    m.invulnerable = (e.iv > 0) ? Math.min(6000, +e.iv | 0) : 0;   // v0.30.1336 coop-regen - the host owns it; hitMonster's IMMUNE gate reads it
     m.freezeTimer = (e.fz > 0) ? Math.min(3000, +e.fz | 0) : 0;   // v0.30.x — mirrored like the gauge: the host owns it
     m.stunTimer   = (e.st > 0) ? Math.min(1500, +e.st | 0) : 0;
     // v0.30.x coop-audit — THE STALE-WARD DROP BELONGS TO wd. It sat in the else of the wb test below, and the host sends wb
@@ -103924,8 +103926,12 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
     // host frame every tick, so a guest could never help shatter. Procs ride the same packet.
     const _gp = _lxOnHitProcs(m, dmg, skill);
     _coopSendDamage(m, _preWardDmg, isCrit, skill, _gp);
-    m.currentHp = Math.max(0, m.currentHp - finalDmg);
-    _coopNotePending(m, finalDmg);   // v0.30.827 - stays subtracted from the host's HP until the host has had time to apply it
+    // v0.30.1336 coop-regen - predict what the HOST will apply: it caps one hit on a boss at 50% of max HP
+    // (_coopHostApplyDamage), and only its kill removes a mirror. A prediction past either showed a dead or half-dead
+    // boss that the next host frame refilled, and a mirror left at 0 HP stopped forwarding hits at all.
+    const _lxPred = (m.isBoss || m.boss || m.isMiniBoss || m.zodiacBoss) ? Math.min(finalDmg, Math.max(1, Math.floor((m.maxHp || m.currentHp) * 0.5))) : finalDmg;
+    m.currentHp = Math.max(1, m.currentHp - _lxPred);
+    _coopNotePending(m, _lxPred);   // v0.30.827 - stays subtracted from the host's HP until the host has had time to apply it
     if (m.zodiacSign === 'virgo') _virgoTook(m, finalDmg);   // v0.30.366 — the no-overkill write books too
     // v0.29.x — was 6ms (one frame); match the solo 50ms flash duration.
     m.hitFlash = Math.max(m.hitFlash | 0, 50);
