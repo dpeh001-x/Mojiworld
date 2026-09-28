@@ -5,7 +5,7 @@
 //   MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT / MOJI_CALIB_FILE / MOJI_MANIFEST_FILE override the inputs.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn, execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
-import { defaultMobAttackFt, LX_MOB_ATK_BASE_BY_TYPE } from './gen_attack_timing.mjs';
+import { defaultMobAttackFt, LX_MOB_ATK_BASE_BY_TYPE, LX_MOB_STRIKE_BY_TYPE } from './gen_attack_timing.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 let pass = 0, fail = 0; const ok = (name, cond, note) => { if (cond) pass++; else fail++; console.log((cond ? 'PASS ' : 'FAIL ') + name + (note ? '  [' + note + ']' : '')); };
@@ -18,18 +18,19 @@ const mobs = Object.keys(M).filter((k) => M[k].group === 'monster' && M[k].state
 const ftOf = (k) => (calib[k] && calib[k].attack && Array.isArray(calib[k].attack.ft)) ? calib[k].attack.ft : null;
 const missing = mobs.filter((k) => !ftOf(k));
 ok(`every monster attack set (${mobs.length}) carries a per-frame timing`, missing.length === 0, missing.length ? 'missing: ' + missing.slice(0, 6).join(' ') : `${mobs.length} sets`);
-const ruleBad = mobs.filter((k) => { const st = M[k].states.attack; const want = defaultMobAttackFt(st.count | 0, st.cb, st.h, LX_MOB_ATK_BASE_BY_TYPE[k]); const got = ftOf(k); return !(got && calib[k].attack.ftAuto === true && got.length === want.length && got.every((v, i) => v === want[i])); });
-ok('baked monster timings follow the individualised rule exactly', mobs.length > 0 && ruleBad.length === 0, ruleBad.slice(0, 5).join(' '));
+const handSet = (k) => !!(calib[k] && calib[k].attack && Array.isArray(calib[k].attack.ft) && !calib[k].attack.ftAuto);   // the generator never touches these
+const ruleBad = mobs.filter((k) => { if (handSet(k)) return false; const st = M[k].states.attack; const want = defaultMobAttackFt(st.count | 0, st.cb, st.h, LX_MOB_ATK_BASE_BY_TYPE[k], LX_MOB_STRIKE_BY_TYPE[k]); const got = ftOf(k); return !(got && calib[k].attack.ftAuto === true && got.length === want.length && got.every((v, i) => v === want[i])); });
+ok(`baked monster timings follow the individualised rule exactly (${mobs.filter(handSet).length} hand-set kept)`, mobs.length > 0 && ruleBad.length === 0, ruleBad.slice(0, 5).join(' '));
 const strikeOf = (ft) => ft ? ft.indexOf(Math.max(...ft)) : -1;
 const distinct = new Set(mobs.map((k) => (ftOf(k) || []).join('/')));
 ok(`the timings are individual: ${distinct.size} distinct patterns across ${mobs.length} monsters (>= 12)`, distinct.size >= 12);
 const strikes = { snail: strikeOf(ftOf('snail')), thornmaw: strikeOf(ftOf('thornmaw')), tideling: strikeOf(ftOf('tideling')), towerWisp: strikeOf(ftOf('towerWisp')) };
-ok("the strike frame follows each monster's own apex (snail 5, thornmaw 4, tideling 6, towerWisp 7)", strikes.snail === 5 && strikes.thornmaw === 4 && strikes.tideling === 6 && strikes.towerWisp === 7, JSON.stringify(strikes));
+ok("the strike frame is each monster's own blow, picked from its art (snail 5, thornmaw 4, tideling 6, towerWisp 4)", strikes.snail === 5 && strikes.thornmaw === 4 && strikes.tideling === 6 && strikes.towerWisp === 4, JSON.stringify(strikes));
 const sn = ftOf('snail'), gq = ftOf('grumpsquid');
 ok('a rearing snail holds its strike 2.8x (200ms); a squid that barely moves 1.8x (130ms)', !!sn && !!gq && Math.max(...sn) === 200 && Math.max(...gq) === 130, `snail ${sn && sn.join('/')}  grumpsquid ${gq && gq.join('/')}`);
 const fd = ftOf('fatDragon'); ok('Plumpdrake keeps its authored 96ms base', !!fd && Math.min(...fd) === 96, fd && fd.join('/'));
 const perFrame = mobs.map((k) => { const f = ftOf(k) || [0]; return f.reduce((a, b) => a + b, 0) / f.length; }).sort((a, b) => a - b);
-ok('every swing averages 88-130ms a frame (not rushed, not a crawl; was a flat 72)', perFrame.length > 0 && perFrame[0] >= 88 && perFrame[perFrame.length - 1] <= 130, perFrame[0].toFixed(1) + '..' + perFrame[perFrame.length - 1].toFixed(1));
+ok('every swing averages 86-130ms a frame (not rushed, not a crawl; was a flat 72) - 86 is the Elderbark, whose blow is its last frame, so no settle frame follows it', perFrame.length > 0 && perFrame[0] >= 86 && perFrame[perFrame.length - 1] <= 130, perFrame[0].toFixed(1) + '..' + perFrame[perFrame.length - 1].toFixed(1));
 try { execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'gen_attack_timing.mjs'), '--check'], { stdio: 'pipe' }); ok("the generator's --check passes on the shipped data (drift guard)", true); }
 catch (e) { ok("the generator's --check passes on the shipped data (drift guard)", false, String(e.stdout || e.stderr || e).slice(0, 160)); }
 // ---- the game ----
@@ -45,6 +46,7 @@ try {
   const g = await page.evaluate(async () => {
     const o = {}; const ft = (typeof _lxCalibFt === 'function') ? _lxCalibFt('echoKnight', 'attack') : null; o.ft = ft;
     if (!ft) return o;
+    const S = ft.indexOf(Math.max(...ft)); o.S = S;   // its blow (strike-pick)
     try { loadMap('forest', 300); } catch (e) { o.mapErr = String(e && e.message); }   // the boot map is a town: no spawns there
     await new Promise((r) => setTimeout(r, 400));
     const spawnSnail = (dx) => { spawnMonster(player.x + dx, player.y, 'echoKnight'); const list = game.monsters.filter((x) => x && x.type === 'echoKnight'); return list[list.length - 1]; };   // per user: the snail has no dedicated attack sprites - the Echo Knight's slash is the gauge
@@ -62,14 +64,14 @@ try {
     const seq = []; const s0 = performance.now();
     while (performance.now() - s0 < 900) { const f = _monsterStateFrame(m); seq.push([Math.round(performance.now() - s0), idx(f)]); await new Promise((r) => setTimeout(r, 8)); }
     o.instFirst = seq[0][1]; o.instLast = seq[seq.length - 1][1]; o.instMin = Math.min(...seq.map((x) => x[1])); o.instMax = Math.max(...seq.map((x) => x[1]));
-    const after6 = seq.find((x) => x[1] >= 7); o.instStrikeMs = after6 ? after6[0] : -1; const at6 = seq.find((x) => x[1] >= 6); o.inst6At = at6 ? at6[0] : -1; o.instLate6 = seq.some((x) => x[0] > 380 && x[1] === 6);   // the strike frame gives way to the follow-through no earlier than its 155ms hold (sampling gaps only push it later)
+    const after6 = seq.find((x) => x[1] >= S + 1); o.instStrikeMs = after6 ? after6[0] : -1; const at6 = seq.find((x) => x[1] >= S); o.inst6At = at6 ? at6[0] : -1; o.instLate6 = seq.some((x) => x[0] > 380 && x[1] === S);   // the strike frame gives way to the follow-through no earlier than its 155ms hold (sampling gaps only push it later)
     o.instMonotone = seq.every((x, i) => i === 0 || x[1] >= seq[i - 1][1]); o.instSamples = seq.filter((x, i) => i % 6 === 0).map((x) => x[0] + ':' + x[1]).join(' ');
     // a telegraphed attack: the strike frame begins as the telegraph ends
     m._animSt = null; m._atkStrikeMs = 450; m._swingUntil = 0; m.atkAnimUntil = performance.now() + 2000;
     const tseq = []; const t1 = performance.now();
     while (performance.now() - t1 < 700) { const f = _monsterStateFrame(m); tseq.push([Math.round(performance.now() - t1), idx(f)]); await new Promise((r) => setTimeout(r, 8)); }
     const before = tseq.filter((x) => x[0] < 430).map((x) => x[1]); const at = tseq.filter((x) => x[0] >= 465 && x[0] < 590).map((x) => x[1]);
-    o.teleBeforeMax = Math.max(...before); o.teleAtStrike = at.length > 0 && at.every((v) => v === 6); o.teleFirst = tseq[0][1]; o.teleSamples = 'n=' + at.length + ' ' + tseq.filter((x) => x[0] >= 380).map((x) => x[0] + ':' + x[1]).join(' ');
+    o.teleBeforeMax = Math.max(...before); o.teleAtStrike = at.length > 0 && at.every((v) => v === S); o.teleFirst = tseq[0][1]; o.teleSamples = 'n=' + at.length + ' ' + tseq.filter((x) => x[0] >= 380).map((x) => x[0] + ':' + x[1]).join(' ');
     // proximity: one swing then a rest, not a loop
     const m2 = spawnSnail(90); if (!m2) return Object.assign(o, { spawnErr: 'no second knight' }); m2.vx = 0;   // centres 125px apart: inside the 1.2x-width (132px) proximity radius, not in contact m2.currentHp = m2.maxHp || 100; m2.atkAnimUntil = 0; m2._swingUntil = 0; m2._proxRestUntil = 0;
     const isAtk = (f) => set.attack.indexOf(f) >= 0;
@@ -82,11 +84,11 @@ try {
     game.paused = false;
     return o;
   });
-  ok("the game reads the Echo Knight's baked timing (strike frame 6, held 155ms)", !!g.ft && g.ft.length === 9 && g.ft[6] === 155, g.ft && g.ft.join('/'));
+  ok(`the game reads the Echo Knight's baked timing (strike frame ${LX_MOB_STRIKE_BY_TYPE.echoKnight}, its crescent slash, held 155ms)`, !!g.ft && g.ft.length === 9 && g.S === LX_MOB_STRIKE_BY_TYPE.echoKnight && g.ft[g.S] === 155, g.ft && g.ft.join('/'));
   ok('Echo Knight attack frames decoded in the harness', g.ready === 9, String(g.ready));
-  ok('instant hit: a short lead-in from the late windup (not a snap to the strike), the strike frame (6) by ~120ms, held ~155ms, then the swing settles', g.instFirst < 6 && g.instFirst >= 2 && g.inst6At >= 60 && g.inst6At <= 180 && g.instStrikeMs - g.inst6At >= 120 && g.instStrikeMs <= 700 && g.instLate6 === false && g.instLast === 8, JSON.stringify([g.instFirst, g.inst6At, g.instStrikeMs, g.instLast]));
+  ok('instant hit: a short lead-in from the late windup (not a snap to the strike), the strike frame by ~120ms, held ~155ms, then the swing settles', g.instFirst < g.S && g.instFirst >= g.S - 3 && g.inst6At >= 60 && g.inst6At <= 180 && g.instStrikeMs - g.inst6At >= 120 && g.instStrikeMs <= 700 && g.instLate6 === false && g.instLast === 8, JSON.stringify([g.instFirst, g.inst6At, g.instStrikeMs, g.instLast]));
   ok('the swing plays once - frames only ever advance, no wrap back to the windup', g.instMonotone === true && g.instMin === g.instFirst && g.instMax === 8, JSON.stringify([g.instMonotone, g.instMin, g.instMax]) + ' ' + (g.instMonotone ? '' : g.instSamples));
-  ok('telegraphed 450ms attack: windup frames before the telegraph ends, the strike frame right after', g.teleFirst === 0 && g.teleBeforeMax <= 5 && g.teleAtStrike === true, JSON.stringify([g.teleFirst, g.teleBeforeMax, g.teleAtStrike]) + ' ' + (g.teleAtStrike ? '' : g.teleSamples));
+  ok('telegraphed 450ms attack: windup frames before the telegraph ends, the strike frame right after', g.teleFirst === 0 && g.teleBeforeMax <= g.S - 1 && g.teleAtStrike === true, JSON.stringify([g.teleFirst, g.teleBeforeMax, g.teleAtStrike]) + ' ' + (g.teleAtStrike ? '' : g.teleSamples));
   ok('an Echo Knight beside the player: one full swing from the windup, then a rest, then another', g.proxStarts === true && g.proxFirst === 0 && g.proxRests === true && g.proxAgain === true, JSON.stringify([g.proxStarts, g.proxFirst, g.proxRests, g.proxAgain]));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }

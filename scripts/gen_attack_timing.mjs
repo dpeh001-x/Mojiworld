@@ -41,6 +41,8 @@ const CALIB = process.env.MOJI_CALIB_FILE || path.join(ROOT, 'data', 'anim_calib
 const OUT = process.env.MOJI_CALIB_OUT || CALIB;
 const MANIFEST = process.env.MOJI_MANIFEST_FILE || path.join(ROOT, 'data', 'anim_calib_manifest.js');
 const CHECK = process.argv.includes('--check');
+// v0.30.1337 - --group=monster / --group=boss limits the bake (and the check) to one group
+const GROUP = (process.argv.find((a) => a.startsWith('--group=')) || '').slice(8) || null;
 
 export const LX_ATK_BASE_MS = 60;
 export const LX_ATK_HOLD = { strike: 2.2, side: 1.5, first: 1.2, last: 1.6 };
@@ -93,8 +95,35 @@ export function defaultAttackFt(n, cb, frameH) {
 // The game walks the result ONCE per attack (v0.30.382, _monsterStateFrame).
 export const LX_MOB_ATK_BASE_MS = 72;
 export const LX_MOB_ATK_BASE_BY_TYPE = { fatDragon: 96 };
+// v0.30.1337 strike-pick - THE STRIKE IS PICKED FROM THE ART, NOT GUESSED (per user: "re-pick the strike frames from the art
+// too"). The apex rule below (strike = the frame after the highest content top) was right for half the sets and wrong
+// for the other half: a raised weapon is the WIND-UP (Gary rearing back, the Ossuary Tyrant's bone overhead, the Tomb
+// Keeper's spear), and a set whose effects linger put the strike on its recovery pose (Stormkitty, Grave Reaver,
+// Seraph, Rotter). Every monster attack set was reviewed frame by frame on 2026-09-28 and its blow recorded here - the
+// contact, the impact, the release, or a burst at its biggest. 55 of the 108 generated sets moved. A set missing
+// from this table (new art) falls back to the apex rule and the bake names it: pick its frame and add it here.
+// Hand-set timings (conductorMech, forgewight) are never touched, so they are not listed. Only the strike's POSITION
+// comes from here; how long it is held still follows the art's prominence below.
+export const LX_MOB_STRIKE_BY_TYPE = {
+  anglerfish: 4, archon: 4, axolotl: 5, bellowsbat: 5, blightElder: 5, blockEle: 3, blockGary: 4,
+  blockHupo: 3, blockPopo: 4, blockRhirhi: 3, blockTigreal: 4, boneGolem: 5, boneWraith: 4, bonebosn: 5,
+  brinekraken: 5, cherub: 5, cinderling: 6, cloudbun: 5, clownfish: 4, cookie: 3, coralImp: 5,
+  cosmicMochi: 5, deranged_kuro: 4, drownedCur: 4, echoKnight: 4, elderbark: 8, emberling: 5, expressTicketMech: 6,
+  fatDragon: 6, fatLizard: 4, frog: 5, frostkin: 3, future_lyra: 5, glasswindHare: 5, goblinMauler: 5,
+  goblinScout: 4, graveReaver: 4, grumpsquid: 4, gummy: 4, honeyBuzz: 6, horny: 4, jellyfish: 4,
+  lanternWisp: 4, lichkin: 5, mayo: 5, meloncholy: 5, mirageStalker: 4, mournshade: 3, mummy: 7,
+  mushpup: 6, mushroom: 6, nimbusFox: 6, nougatBear: 6, octoLegFreeze: 6, octoLegPoison: 7, octoLegSkillLock: 5,
+  octoLegStun: 4, orange: 5, ossuaryTyrant: 5, pathsBane: 5, pearlSprite: 4, petalfly: 5, pinechad: 4,
+  potato_uncle: 6, pufferfish: 4, razorgale: 5, sandhusk: 4, scorpion: 5, seahorse: 5, seasponge: 4,
+  seastar: 4, sepulchreHound: 4, seraph: 5, shardlich: 5, skeleton: 5, skywisp: 6, slime: 4,
+  smithgolem: 4, snail: 5, sparkSprite: 3, sparkling: 4, spectreCannoneer: 5, sproutle: 6, stoneling: 5,
+  stormKitty: 4, stump: 4, thornmaw: 4, thunderMole: 3, ticketMech: 4, tidefish: 5, tideling: 6,
+  tidepoolTurtle: 3, tombKeeper: 5, tombWraith: 5, towerHexer: 6, towerOssifer: 4, towerSeer: 4, towerShardling: 4,
+  towerStalker: 4, towerStormcaller: 6, towerWarden: 4, towerWisp: 4, vigil_vermillion: 6, voltipup: 3, willeo: 5,
+  wraith: 5, young_bloodthirsty_vermillion: 4, zombie: 4,
+};
 export const LX_MOB_HOLD = { strikeMin: 1.8, strikeSlope: 2.5, strikeMax: 2.8, side: 1.5, first: 1.2, last: 1.6, pulse: 1.8, clearApex: 0.03 };
-export function defaultMobAttackFt(n, cb, frameH, base) {
+export function defaultMobAttackFt(n, cb, frameH, base, strikeAt) {
   if (!(n > 1)) return null;
   base = base > 0 ? base : LX_MOB_ATK_BASE_MS;
   let strike = Math.round((n - 1) / 2), prom = 0;
@@ -112,6 +141,7 @@ export function defaultMobAttackFt(n, cb, frameH, base) {
       else if (apex >= n - 2) strike = n - 2;
     }
   }
+  if (Number.isInteger(strikeAt) && strikeAt >= 0 && strikeAt < n) strike = strikeAt;   // v0.30.1337 strike-pick - the art's own blow
   const strikeHold = prom < LX_MOB_HOLD.clearApex ? LX_MOB_HOLD.pulse : Math.min(LX_MOB_HOLD.strikeMax, LX_MOB_HOLD.strikeMin + prom * LX_MOB_HOLD.strikeSlope);
   const ft = new Array(n);
   for (let i = 0; i < n; i++) {
@@ -132,16 +162,19 @@ function main() {
   const man = readFileSync(MANIFEST, 'utf8');
   const M = JSON.parse(man.slice(man.indexOf('{'), man.lastIndexOf('}') + 1));
   let baked = 0, kept = 0, stale = 0;
+  const unpicked = [], cur0 = (k) => calib[k] && calib[k].attack && Array.isArray(calib[k].attack.ft) && !calib[k].attack.ftAuto;   // hand-set
   const report = [];
   for (const key of Object.keys(M).sort()) {
     const e = M[key];
     if (!e || (e.group !== 'boss' && e.group !== 'monster') || !e.states || !e.states.attack) continue;   // v0.30.382 - monsters too
+    if (GROUP && e.group !== GROUP) continue;
     const st = e.states.attack;
     const n = st.count | 0;
+    if (e.group === 'monster' && n > 1 && !(cur0(key)) && !(key in LX_MOB_STRIKE_BY_TYPE)) unpicked.push(key);
     if (n < 2) continue;
     const cur = calib[key] && calib[key].attack;
     if (cur && Array.isArray(cur.ft) && !cur.ftAuto) { kept++; continue; }   // authored: never touched
-    const ft = e.group === 'boss' ? defaultAttackFt(n, st.cb, st.h) : defaultMobAttackFt(n, st.cb, st.h, LX_MOB_ATK_BASE_BY_TYPE[key]);   // v0.30.382
+    const ft = e.group === 'boss' ? defaultAttackFt(n, st.cb, st.h) : defaultMobAttackFt(n, st.cb, st.h, LX_MOB_ATK_BASE_BY_TYPE[key], LX_MOB_STRIKE_BY_TYPE[key]);   // v0.30.382; strike-pick
     if (!ft) continue;
     const same = cur && Array.isArray(cur.ft) && cur.ft.length === ft.length && cur.ft.every((v, i) => v === ft[i]) && cur.ftAuto === true;
     if (same) continue;
@@ -153,6 +186,7 @@ function main() {
       report.push(key + ': ' + ft.join('/'));
     }
   }
+  if (unpicked.length) console.log('no art-picked strike (apex rule used) - pick one and add it to LX_MOB_STRIKE_BY_TYPE: ' + unpicked.join(' '));
   if (CHECK) {
     if (stale) { console.error(`gen_attack_timing --check: ${stale} attack set(s) lack the default timing - run node scripts/gen_attack_timing.mjs`); process.exit(1); }
     console.log(`gen_attack_timing --check: ok (${kept} authored kept)`);
