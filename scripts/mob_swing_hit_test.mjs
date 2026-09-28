@@ -4,8 +4,9 @@
 //   near + facing  : a monster standing just short of body contact swings - and the swing lands
 //   facing away    : no hit (the contact path's dodge-behind rule still holds)
 //   out of reach   : no swing, no hit
-//   cloudburst     : the caster plays its attack animation, and while the cloud telegraphs a vapour tether runs
-//                    from the caster into it (drawn by the hazard, so a co-op guest's mirror draws it too)
+//   cloudburst     : the caster plays its attack animation and its cloud forms right beside it, on the player's
+//                    side (per user: "skywisp should float and make the cloud should spawn close to it, remove the
+//                    tether" - the v0.30.1310 vapour tether is gone)
 //   node scripts/mob_swing_hit_test.mjs [port]   (MOJI_GAME_FILE honored)
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -84,20 +85,22 @@ try {
     const now = performance.now();
     const r = MONSTER_SKILL_FNS.cloudburst(m);
     const cloud = game.hazards.find((h) => h.type === 'mob_cloudburst');
-    const origin = cloud && Math.abs(cloud.srcX - (m.x + m.w / 2)) < 1 && Math.abs(cloud.srcY - (m.y + m.h * 0.4)) < 1;
-    // count the tether's middle stroke (#9fc4ef) while telegraphing and after
+    // beside the caster: the cloud's centre within one cloud-width of the wisp's centre, on the player's side, at its height
+    const wcx = m.x + m.w / 2, wcy = m.y + m.h / 2;
+    const beside = cloud ? { dx: Math.round(cloud.cx - wcx), dy: Math.round(cloud.cy - wcy) } : null;
+    const besideOk = !!beside && Math.abs(beside.dx) <= m.w / 2 + 140 && Math.abs(beside.dy) <= 60 && Math.sign(beside.dx) === Math.sign((player.x + player.w / 2) - wcx);
+    // the v0.30.1310 tether's middle stroke (#9fc4ef) must no longer be drawn at any point
     const tether = (tick) => { if (!cloud) return -1; cloud.tick = tick; let n = 0; const P = CanvasRenderingContext2D.prototype, o = P.stroke;
       P.stroke = function () { if (this === ctx && String(this.strokeStyle).toLowerCase() === '#9fc4ef') n++; return o.apply(this, arguments); };
       try { drawHazards(); } catch (e) { n = -2; } finally { P.stroke = o; } return n; };
     const during = tether(10), after = tether((cloud && cloud.warn || 42) + 5);
     return { ret: r, anim: (m.atkAnimUntil || 0) > now + 300, attacking: typeof _mobAttackAnim === 'function' && _mobAttackAnim(m),
-      facesPlayer: m.facing === ((player.x + player.w / 2) >= (m.x + m.w / 2) ? 1 : -1), cloud: !!cloud, origin, during, after,
-      coop: typeof _COOP_HZ_XF !== 'undefined' && _COOP_HZ_XF.includes('srcX') && _COOP_HZ_XF.includes('srcY') };
+      facesPlayer: m.facing === ((player.x + player.w / 2) >= (m.x + m.w / 2) ? 1 : -1), cloud: !!cloud, beside, besideOk, during, after };
   });
   ok('Skywisp cast: the cloud forms', cast.cloud && cast.ret !== false, cast);
   ok('Skywisp cast: it turns to you and plays its attack animation', cast.anim && cast.attacking && cast.facesPlayer, cast);
-  ok('Skywisp cast: the cloud remembers where it was cast from (and co-op carries it)', cast.origin && cast.coop, cast);
-  ok('Skywisp cast: a vapour tether runs from it into the cloud while it telegraphs, and is gone once the rain starts', cast.during >= 1 && cast.after === 0, cast);
+  ok('Skywisp cast: the cloud forms right beside the wisp, on your side, at its height', cast.besideOk, cast);
+  ok('Skywisp cast: no vapour tether is drawn, while it telegraphs or after', cast.during === 0 && cast.after === 0, cast);
   ok('no page errors', errs.length === 0, errs);
 } finally { await b.close(); srv.kill(); }
 let pass = 0;

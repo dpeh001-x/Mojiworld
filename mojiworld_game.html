@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1312';
+const GAME_VERSION = 'v0.30.1313';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -32109,15 +32109,18 @@ const MONSTER_SKILL_FNS = {
     for (const _h of game.hazards) if (_h && _h.type === 'mob_cloudburst') return false;
     // v0.30.1310 - _lxCloudCast (per user: "Skywisp attack animation doesnt indicate the cloud appearing"). The cloud
     // appeared over the player while the wisp drifted on in its idle loop: nothing tied the squall to its caster.
-    // The caster now turns to the player and plays its attack animation, and a stream of vapour pours from its
-    // body to the spot where the cloud condenses (gravity 0, timed to arrive as the cloud forms).
+    // The caster now turns to the player and plays its attack animation.
+    // v0.30.1313 - and the cloud forms BESIDE it (per user: "skywisp should float and make the cloud should spawn close
+    // to it, remove the tether"): the wisp floats on and conjures its squall at its own side, toward the player,
+    // at its own altitude. The squall no longer lands over the player's head - it rains where the wisp is, so the
+    // wisp has to float over you to catch you, and you can see exactly which wisp made it.
     const _cast = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     m.atkAnimUntil = Math.max(m.atkAnimUntil || 0, _cast + 720);
     m.facing = ((player.x + player.w / 2) >= (m.x + m.w / 2)) ? 1 : -1;
-    // Spawn over the player but deliberately imperfect, so the squall is
-    // dodgeable by walking rather than a guaranteed hit.
-    const cx = player.x + player.w / 2 + (Math.random() * 70 - 35);
-    const cy = Math.max(34, player.y - 150);
+    // The cloud's near edge touches the wisp (the cloud draws radius x 2.3 = ~138 px wide), level with its top.
+    const _ww = (game.mapData && game.mapData.worldWidth) || 1800;
+    const cx = Math.max(70, Math.min(_ww - 70, m.x + m.w / 2 + m.facing * (m.w / 2 + 64)));
+    const cy = Math.max(34, m.y + m.h * 0.3);
     game.hazards.push({
       type: 'mob_cloudburst',
       cx, cy, x: cx - 60, y: cy - 34, w: 120, h: 68,
@@ -32130,8 +32133,6 @@ const MONSTER_SKILL_FNS = {
       tick: 0,
       color: '#bfe4ff',
     });
-    { const _hz = game.hazards[game.hazards.length - 1];   // ${VER} - the cast origin, for the vapour tether
-      if (_hz && _hz.type === 'mob_cloudburst') { _hz.srcX = m.x + m.w / 2; _hz.srcY = m.y + m.h * 0.4; } }
     // Condensing puffs drawn INWARD to the cloud as it forms.
     for (let i = 0; i < 14; i++) {
       const ang = (i / 14) * Math.PI * 2;
@@ -56813,7 +56814,7 @@ function _coopTickHazards() {
 const _COOP_HZ_TYPES = { gravitos_singularity: 1, sovereign_drain_pillar: 1, blackhole: 1, gloop_puddle: 1, void_tear: 1,
   mob_quake: 1, mob_shockwave: 1, mob_poisoncloud: 1, mob_lightning: 1, mob_frostbeam: 1, mob_cloudburst: 1 };
 const _COOP_HZ_XF = ['stun', 'colorTele', 'poison', 'maxRadius', 'bolt', 'tele', 'slow', 'dir', 'warn', 'reach', 'downdraft',
-  'atk', '_bhAwakened', '_bhCoreRadius', '_bhPullRadius', '_gravBand', 'footY', 'srcX', 'srcY'];   // ${VER} srcX/srcY: the cloudburst's cast origin
+  'atk', '_bhAwakened', '_bhCoreRadius', '_bhPullRadius', '_gravBand', 'footY'];
 // Detonations: a guest mirror lags the host, so the frame that drops a hazard the host just resolved can arrive before
 // the guest's copy counts down to its own resolve - and the guest walked out of a one-shot. The hazard loop stamps each
 // synced hazard that runs out; its uid rides the frames for 400 ms and the guest resolves its copy at once.
@@ -158174,28 +158175,12 @@ function drawHazards(_behindPass) {
       // blitted upright at 1:1 — the top-down ground discs elsewhere in this
       // renderer are the ones that need flattening, not this.
       ctx.save();
-      // ${VER} - _lxCloudCast tether: a vapour stream from the Skywisp that cast this cloud into it, drawn while the
-      // cloud telegraphs, reaching the cloud over its first 14 frames, with beads of vapour running along it.
-      if (warning && h.srcX != null) {
-        const tx0 = h.srcX - game.camera.x, ty0 = h.srcY, kk = Math.min(1, (h.tick || 0) / 14), tt = game.time || 0;
-        const qx = (tx0 + sx) / 2, qy = Math.min(ty0, cy) - 40;
-        const pt = (u) => { const a = 1 - u; return [a * a * tx0 + 2 * a * u * qx + u * u * sx, a * a * ty0 + 2 * a * u * qy + u * u * cy]; };
-        ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        for (const [lw, col, al] of [[14, '#4f79b8', 0.3], [7, '#9fc4ef', 0.75], [2.5, '#ffffff', 0.9]]) {
-          ctx.globalAlpha = al * fade; ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath();
-          for (let i = 0; i <= 24; i++) { const u = (i / 24) * kk, p = pt(u), wob = Math.sin(u * 12 - tt * 0.35) * 4 * (1 - u); i ? ctx.lineTo(p[0], p[1] + wob) : ctx.moveTo(p[0], p[1] + wob); }
-          ctx.stroke();
-        }
-        ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.95 * fade;
-        for (let j = 0; j < 4; j++) { const p = pt(((tt * 0.04 + j / 4) % 1) * kk); ctx.beginPath(); ctx.arc(p[0], p[1], 3.5, 0, Math.PI * 2); ctx.fill(); }
-        ctx.restore();
-      }
       // Gentle bob + a pulse while it is still telegraphing, so the warning
       // window reads as "something is about to happen here".
       const bob = Math.sin((game.time || 0) * 0.08) * 2;
       const pulse = warning ? 0.55 + Math.sin((game.time || 0) * 0.3) * 0.2 : 0.92;
       ctx.globalAlpha = pulse * fade;
-      const cw = h.radius * 2.3 * (h.srcX != null ? Math.min(1, 0.3 + 0.7 * ((h.tick || 0) / 22)) : 1), ch = cw * 0.78;   // ${VER} - it condenses: grows in as the tether fills it
+      const cw = h.radius * 2.3 * Math.min(1, 0.3 + 0.7 * ((h.tick || 0) / 22)), ch = cw * 0.78;   // v0.30.1313 - _lxCloudCast: the cloud condenses beside its wisp, growing in
       if (_lxVfxReady((_vfHz = _lxVfxFrame('cloudburst')))) {
         ctx.drawImage(_lxProjScaled(_vfHz, Math.round(Math.max(cw, ch))), sx - cw / 2, cy - ch / 2 + bob, cw, ch);   // v0.30.294 perf
       } else {
