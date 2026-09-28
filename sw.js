@@ -268,7 +268,9 @@
 // v0.30.1398 - v120 -> v121. Elderbark attack 0..8 are REPLACED under their own names
 // (redrawn crisp: 4k upscale + shock filter), so a returning
 // browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v123';   // v0.30.1401 - Path's Bane's attack redrawn (same names)
+// v0.30.1404 army-2 - v123 -> v124. The three serious throne-room soldiers (Sprites/objects/bastion_soldier_{bucket,shield,visor}.webp)
+// are REPLACED under their own names by the regenerated, complete art (per user: several were incomplete).
+const CACHE = 'mojiworld-assets-v124';   // v0.30.1404 - the throne-room soldiers redrawn whole
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
