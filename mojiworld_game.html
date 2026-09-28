@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1387';
+const GAME_VERSION = 'v0.30.1388';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -44748,12 +44748,13 @@ function _lxGfxSwitchChanged() {
 // v0.30.x (settings audit) - the Resolution slider's top stop means "no cap": fill the window whatever its size.
 const _LX_SCALE_FIT = 4.0;
 function _lxScaleLabel(v) { v = parseFloat(v); return v >= _LX_SCALE_FIT - 0.001 ? 'Fit' : v.toFixed(2) + '×'; }
-function openSettingsModal() {
-  const s = _lxGetSettings();
-  try {   // v0.30.x grav-gpu
-    const g = _lxGpuInfo(), el = document.getElementById('set-gpu-val');
-    if (el) { el.textContent = g.name + (g.software ? ' \u00B7 software (slow)' : g.integrated ? ' \u00B7 integrated' : ''); el.style.color = g.software ? '#ff8a7a' : g.integrated ? '#ffd27a' : ''; el.title = g.raw; }
-  } catch (e) {}
+// v0.30.1388 settings-sync - THE SETTINGS CONTROLS MIRROR THE SAVED SETTINGS FROM BOOT (per user: "the damage numbers are not displaying
+// when I attack or receive damage"). applySettingsLive() reads every control and saves what it reads. The controls were only
+// filled from the saved settings when the Settings window OPENED, and the effect switches start off in the markup - so an
+// apply made before that (the jukebox's volume wheel, v0.30.988) saved damage numbers, weather, ambient life and shadows
+// as OFF, and every slider at its markup default. Measured: LX_GFX.dmgnum true -> false and fxDmgNum: false saved, from one
+// turn of the wheel. The fill now runs at boot and before any apply that finds it has not.
+function _lxSettingsToUi(s) {
   {
     _lxGfxBase = s.gfxBase || ((s.gfx && s.gfx !== 'custom') ? s.gfx : 'high');
     const sel = document.getElementById('set-gfx');
@@ -44787,6 +44788,17 @@ function openSettingsModal() {
   document.getElementById('set-debug').classList.toggle('on', !!s.debug);
   document.getElementById('set-reducemotion').classList.toggle('on', !!s.reduceMotion);
   document.getElementById('set-difficulty').value = s.difficulty || 'normal';
+  window._lxSettingsUiSynced = true;
+}
+function _lxSettingsUiEnsure() { if (!window._lxSettingsUiSynced) { try { _lxSettingsToUi(_lxGetSettings()); } catch (e) {} } }
+function openSettingsModal() {
+  const s = _lxGetSettings();
+  try {   // v0.30.x grav-gpu
+    const g = _lxGpuInfo(), el = document.getElementById('set-gpu-val');
+    if (el) { el.textContent = g.name + (g.software ? ' \u00B7 software (slow)' : g.integrated ? ' \u00B7 integrated' : ''); el.style.color = g.software ? '#ff8a7a' : g.integrated ? '#ffd27a' : ''; el.title = g.raw; }
+  } catch (e) {}
+  _lxSettingsToUi(s);   // v0.30.1388 settings-sync - the controls, from the saved settings
+  const _shEl = document.getElementById('set-shake'), _flEl = document.getElementById('set-flash');   // wired below
   {   // v0.29.779 — wire the Tutorial button (idempotent; the modal is reused)
     const _tb = document.getElementById('set-tutorial-open');
     if (_tb && !_tb._wired) {
@@ -45017,6 +45029,7 @@ function _jbVolShow() {
   if (n) n.textContent = v;
 }
 function _jbVolSet(v) {
+  if (typeof _lxSettingsUiEnsure === 'function') _lxSettingsUiEnsure();   // v0.30.1388 settings-sync
   const el = document.getElementById('set-bgm'); if (!el) return;
   v = Math.max(0, Math.min(100, Math.round(v / 5) * 5));
   if (String(v) === el.value) { _jbVolShow(); return; }
@@ -45152,6 +45165,7 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 function applySettingsLive() {
+  _lxSettingsUiEnsure();   // v0.30.1388 settings-sync - never read controls the saved settings have not filled
   const s = {
     scale: parseFloat(document.getElementById('set-scale').value) || 2.0,
     bgm:   parseInt(document.getElementById('set-bgm').value, 10) || 0,
@@ -45342,7 +45356,22 @@ function resetSettings() {
   _applySettings(_keep);
 }
 // Apply persisted settings on init (after a tick to let DOM + audio be ready)
-setTimeout(() => { _applySettings(_lxGetSettings()); }, 100);
+setTimeout(() => {
+  let _s0 = _lxGetSettings();
+  // v0.30.1388 settings-sync - ONE-TIME REPAIR of a store the bug above wrote: all four effect switches off at once (no graphics preset turns
+  // damage numbers off, so this is the wheel's signature, not a choice). They come back on; a player who wants them off
+  // turns them off again and it sticks - the repair runs once (its own key, which a settings save cannot drop).
+  try {
+    if (!localStorage.getItem('LX_FXWIPE_FIX1')) {
+      if (_s0.fxDmgNum === false && _s0.fxWeather === false && _s0.fxAmbient === false && _s0.fxShadows === false) {
+        _s0 = { ..._s0, fxDmgNum: true, fxWeather: true, fxAmbient: true, fxShadows: true }; _lxSaveSettings(_s0);
+      }
+      localStorage.setItem('LX_FXWIPE_FIX1', '1');
+    }
+  } catch (e) {}
+  try { _lxSettingsToUi(_s0); } catch (e) {}
+  _applySettings(_s0);
+}, 100);
 
 // =========================================================================
 // FULLSCREEN FIT — scale the fixed 960x560 game-wrapper to the device
