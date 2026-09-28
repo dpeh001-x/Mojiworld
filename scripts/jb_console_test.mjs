@@ -51,6 +51,9 @@ try {
     await page.evaluate(async () => {
       for (const id of ['loading-overlay', 'class-select-modal', 'lo-auth']) { const o = document.getElementById(id); if (o) { o.style.display = 'none'; o.classList.add('fade'); } }
       window._lxBootGateDone = true; window._prologueActive = false; player.cls = 'warrior'; player.level = 30;
+      // a fresh character's first visit to town plays the Everdawn welcome clip, and its 'press any key to skip' listener (window,
+      // capture) ate the volume wheel's first arrow press below: two presses read as one (55, not 60). Seen, as a returning player has.
+      player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { everdawn_welcome: true });
       loadMap('town'); await new Promise((s) => setTimeout(s, 2500));
       for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
       // every third track undiscovered
