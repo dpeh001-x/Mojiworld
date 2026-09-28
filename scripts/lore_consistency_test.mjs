@@ -39,8 +39,11 @@ try {
     // Old Arlen's directions against the route finder
     const text = () => (document.getElementById('dialog-text') || {}).textContent || '';
     const arlen = (game.npcs || []).find((n) => n && n.name === 'Old Arlen'); if (arlen) { openNPC(arlen); await sleep(300); }
-    const r1 = _qnavRoute('town', 'slimeCave'), r2 = _qnavRoute('town', 'boss');
-    out.arlen = { text: text().slice(0, 700), grotto: r1 && r1.next && r1.next.portal.dest, mooma: r2 && r2.next && r2.next.portal.dest };
+    // read off the route finder: the first map out of town, which side of town its exit stands on, and every map on the way.
+    // No map id is named here: Cadet's Strand (v0.30.1301) came to stand between the west exit and the Bastion, and a map
+    // inserted next fails this check until he names that one too.
+    const hop = (q) => (q && q.next) ? { x: q.next.portal.x, first: (MAPS[q.next.portal.dest] || {}).name || '', names: q.hops.map((h) => (MAPS[h.portal.dest] || {}).name || '') } : {};
+    out.arlen = { text: text().slice(0, 700), townW: MAPS.town.worldWidth, grotto: hop(_qnavRoute('town', 'slimeCave')), mooma: hop(_qnavRoute('town', 'boss')) };
     try { closeAllModals(); } catch (e) {}
     const innie = (game.npcs || []).find((n) => n && n.name === 'Auntie Innie'); if (innie) { openNPC(innie); await sleep(300); }
     out.innie = [...document.querySelectorAll('#dialog-options button')].map((b) => b.textContent); try { closeAllModals(); } catch (e) {}
@@ -56,7 +59,11 @@ try {
   });
   check(r.arrows.total > 40 && r.arrows.shownWrong === 0, 'every portal arrow points to the side of the map its portal stands on', J({ total: r.arrows.total, wrongAsWritten: r.arrows.rawWrong, wrongShown: r.arrows.shownWrong, bad: r.arrows.bad }));
   check(/^▶/.test(r.arrows.townEast || ''), 'Everdawn Central\u2019s east exit reads "▶ Emerald Thicket"', J(r.arrows.townEast));
-  check(r.arlen.grotto === 'bastion' && /West, out through the Bastion/.test(r.arlen.text) && r.arlen.mooma === 'forest' && /Emerald Thicket[\s\S]*Mooma/.test(r.arlen.text), 'Old Arlen sends you west for Gelwater Grotto and east for Mooma, as the maps do', J({ grotto: r.arlen.grotto, mooma: r.arlen.mooma }));
+  { const A = r.arlen, g = A.grotto || {}, m = A.mooma || {}, T = A.text || '';
+    const inOrder = (...w) => { let k = 0; for (const x of w) { if (!x) return false; k = T.indexOf(x, k); if (k < 0) return false; k += x.length; } return true; };
+    check(g.x < A.townW / 2 && inOrder('West', g.first, 'Bastion', 'Sunset Coast', 'Gelwater Grotto') && (g.names || []).some((n) => /Bastion/.test(n))
+      && (g.names || []).includes('Sunset Coast') && (g.names || []).includes('Gelwater Grotto') && m.x >= A.townW / 2 && inOrder('East', m.first, 'Mooma'),
+      'Old Arlen sends you west for Gelwater Grotto and east for Mooma, naming the first map out of town, as the maps do', J({ grotto: g, mooma: m, said: T.slice(0, 160) })); }
   check(r.innie.includes('Why set up in the plaza?') && !r.innie.includes('Why the Megamall?'), 'Auntie Innie is asked about the plaza she stands in', J(r.innie));
   check(r.cards.act.length === 0 && r.cards.crossings === 5, 'region cards are the Six Crossings, not a second set of acts', J(r.cards));
   check(r.amn.length === 0, 'the Amnesiac is "he" in every story-beat stage direction', J(r.amn));
