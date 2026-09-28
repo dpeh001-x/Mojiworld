@@ -62,6 +62,8 @@ const r = await page.evaluate(() => {
   try { SKILL_FNS.shadowlord_ult(); out.castThrew = null; } catch (e) { out.castThrew = String(e).slice(0, 140); }
   out.summoned = !!player._shade;
   out.life = player._shade ? player._shade.life : 0;
+  // v0.30.57 (65b51654, per user: "20 seconds"): LX_SHADE_LIFE 12000 -> 20000; ranks add 1 s each (_lxRankDurMs)
+  out.lifeWant = (typeof _lxRankDurMs === 'function') ? _lxRankDurMs('shadowlord_ult', 20000) : 20000;
   out.behind = player._shade ? Math.round(player._shade.x - (player.x + player.w / 2)) : 0;
 
   // ---- follow: move the hero, tick, the shade trails behind the facing ----
@@ -110,7 +112,9 @@ const r = await page.evaluate(() => {
     const od = P.drawImage, os = P.scale, oe = P.ellipse;
     P.drawImage = function (img) { blits++; if (img && img.tagName === 'CANVAS') canvasSrc = true; return od.apply(this, arguments); };
     P.scale = function (a) { if (a === -1) flipped = true; return os.apply(this, arguments); };
-    P.ellipse = function () { ellipses++; return oe.apply(this, arguments); };
+    // v0.30.57 (65b51654) the shade re-bakes the live mimicked pose with _drawVectorHero on an offscreen
+    // canvas, whose body parts are ellipses; the under-glow disc was on the GAME ctx - count only those.
+    P.ellipse = function () { if (this === ctx) ellipses++; return oe.apply(this, arguments); };
     try { drawSovereignShade(); } catch (e) { blits = -1; }
     P.drawImage = od; P.scale = os; P.ellipse = oe;
     return { blits, flipped, canvasSrc, ellipses };
@@ -174,8 +178,8 @@ const r = await page.evaluate(() => {
 });
 
 ok('cooldown is 60 seconds', r.cd === 60000, { cd: r.cd });
-ok('the cast summons the shade, 12s, one step behind the hero', r.summoned && !r.castThrew && r.life === 12000 && r.behind < 0,
-  { summoned: r.summoned, life: r.life, behind: r.behind, threw: r.castThrew });
+ok('the cast summons the shade, 20s (+1s a rank), one step behind the hero', r.summoned && !r.castThrew && r.life === r.lifeWant && r.behind < 0,
+  { summoned: r.summoned, life: r.life, want: r.lifeWant, behind: r.behind, threw: r.castThrew });
 ok('it FOLLOWS: settles ~46px behind the facing direction', r.followDx <= -30 && r.followDx >= -60, { dx: r.followDx });
 ok('...and swaps sides when the hero turns, mirroring the facing', r.followDxFlipped >= 30 && r.facingMirrors,
   { dxFlipped: r.followDxFlipped, facingMirrors: r.facingMirrors });

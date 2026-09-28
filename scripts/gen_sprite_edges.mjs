@@ -33,10 +33,13 @@
 // when that edge is clean. A sprite with no cut edges stores "". A sprite
 // ABSENT from the table is unknown, not clean, and still probes live.
 import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+// the checkout this script lives in (or MOJI_ROOT) - it used to hardcode the shared working copy, so running it from a
+// worktree rewrote another tree's table from that tree's art
+const ROOT = process.env.MOJI_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'data', 'sprite_edges.js');
 const CHECK = process.argv.includes('--check');
 // Every tree whose sprites can reach the feather probe.
@@ -59,7 +62,8 @@ console.log('sprites to probe: ' + keys.length);
 
 const browser = await chromium.launch({ channel: 'msedge', args: ['--allow-file-access-from-files'] });
 const page = await browser.newPage();
-await page.goto('file:///C:/Users/dpeh0/Mojiworld/data/', { waitUntil: 'domcontentloaded' }).catch(() => {});
+// this checkout's art, not a hardcoded tree: the images resolve against this page's URL
+await page.goto(pathToFileURL(join(ROOT, 'data') + '/').href, { waitUntil: 'domcontentloaded' }).catch(() => {});
 await page.setContent('<body></body>');
 
 const CHUNK = 150;
@@ -91,7 +95,7 @@ for (let i = 0; i < keys.length; i += CHUNK) {
       const img = await new Promise((r) => {
         const im = new Image();
         im.onload = () => r(im); im.onerror = () => r(null);
-        im.src = 'file:///C:/Users/dpeh0/Mojiworld/Sprites/' + rel;
+        im.src = new URL('../Sprites/' + rel, location.href).href;
       });
       if (!img || !img.naturalWidth) continue;      // 404 / broken: leave absent
       try { if (img.decode) await img.decode(); } catch (e) {}

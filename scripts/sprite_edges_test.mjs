@@ -13,10 +13,17 @@
 //
 //   node scripts/sprite_edges_test.mjs [--n=400]
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+// The tree under test is the one this script lives in (SERVE_ROOT overrides). It hardcoded
+// C:/Users/dpeh0/Mojiworld, so a worktree or a staged build was checked against the shared
+// working copy's table and art instead of its own.
+const ROOT = (process.env.SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')).split('\\').join('/');
+const ROOT_URL = 'file:///' + ROOT.replace(/^\/+/, '') + '/';
 
 const N = +((process.argv.find((a) => a.startsWith('--n=')) || '').split('=')[1] || 400);
-const src = readFileSync('C:/Users/dpeh0/Mojiworld/data/sprite_edges.js', 'utf8');
+const src = readFileSync(ROOT + '/data/sprite_edges.js', 'utf8');
 // Anchor on the assignment: the header comment contains braces of its own
 // (the Sprites/{monsters,bosses,...} regenerate hint), so indexOf('{') lands
 // inside a comment rather than on the payload.
@@ -33,12 +40,12 @@ const page = await browser.newPage();
 // A page created with setContent alone has no file:// origin, so every
 // file:/// image load is blocked and the probe silently reads nothing.
 // Navigate to a real file URL first (this is what the generator does).
-await page.goto('file:///C:/Users/dpeh0/Mojiworld/data/', { waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.goto(ROOT_URL + 'data/', { waitUntil: 'domcontentloaded' }).catch(() => {});
 
 const CHUNK = 150;
 const live = {};
 for (let i = 0; i < keys.length; i += CHUNK) {
-  const got = await page.evaluate(async (batch) => {
+  const got = await page.evaluate(async ({ batch, base }) => {
     const S = 48;
     const cv = document.createElement('canvas');
     cv.width = S; cv.height = S;
@@ -61,7 +68,7 @@ for (let i = 0; i < keys.length; i += CHUNK) {
       const img = await new Promise((r) => {
         const im = new Image();
         im.onload = () => r(im); im.onerror = () => r(null);
-        im.src = 'file:///C:/Users/dpeh0/Mojiworld/Sprites/' + rel;
+        im.src = base + rel;
       });
       if (!img || !img.naturalWidth) { out[rel] = '__MISSING__'; continue; }
       try { if (img.decode) await img.decode(); } catch (e) {}
@@ -69,7 +76,7 @@ for (let i = 0; i < keys.length; i += CHUNK) {
       out[rel] = (v === '|||') ? '' : v;
     }
     return out;
-  }, keys.slice(i, i + CHUNK));
+  }, { batch: keys.slice(i, i + CHUNK), base: ROOT_URL + 'Sprites/' });
   Object.assign(live, got);
 }
 await browser.close();

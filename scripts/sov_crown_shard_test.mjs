@@ -13,10 +13,12 @@ const src = readFileSync(GAME, 'utf8').replace(/\r\n/g, '\n');
 ok('the OHKO repeat cadence is the lengthened one (24 / 18 / 13.5 s)', /_sp === 1 \? 1440 : _sp === 2 \? 1080 : 810/.test(src));
 ok('the old 16 / 12 / 9 s cadence is gone', !/_sp === 1 \? 960 : _sp === 2 \? 720 : 540/.test(src));
 ok('the first collapse is pushed from 8 s to 12 s', /_sovereignOhkoTick = \(game\.time \|\| 0\) \+ 720;/.test(src));
-ok('the collapse still costs the Sovereign its SPENT window', /_sovSpentUntil = \(game\.time \| 0\) \+ 210 \+ 150;/.test(src));
+// v0.30.570 (ec408425, balance): the collapse telegraph is 5 s (300), so SPENT = telegraph + 2.5 s moved with it
+ok('the collapse still costs the Sovereign its SPENT window', /_sovSpentUntil = \(game\.time \| 0\) \+ 300 \+ 150;/.test(src));
 // ---- the shards, in a running fight ------------------------------------------
 const free = (p) => new Promise((r) => { const s = net.createServer(); s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
-let PORT; for (let p = 8961; p <= 8999 && !PORT; p++) if (await free(p)) PORT = String(p);
+const P0 = +(process.env.PORT || 8961);
+let PORT; for (let p = P0; p <= P0 + 38 && !PORT; p++) if (await free(p)) PORT = String(p);
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT, env: { ...process.env } });
 await new Promise((r) => setTimeout(r, 1800));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
@@ -27,25 +29,26 @@ await page.waitForFunction(() => typeof game === 'object' && typeof spawnMonster
 await page.evaluate(() => new Promise((res) => { let n = 0; const t = () => { window._lxBootGateDone = true; try { _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const o = document.getElementById(id); if (o) o.style.display = 'none'; } const c = document.querySelector('.cls-card'); if (c) c.click(); if (++n > 150) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); }));
 await page.waitForTimeout(1200);
 const r = await page.evaluate(async () => {
+  const steps = (n) => new Promise((res) => { const t0 = game.time; let k = 0; const t = () => { game.paused = false; if (game.time - t0 >= n || ++k > 3000) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   const out = {}; const frames = (n) => new Promise((res) => { let i = 0; const t = () => { game.paused = false; if (++i >= n) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   try { loadMap('forest'); } catch (e) {} await frames(20);
   player.hp = player.maxHp = 999999; player._god = true;
   game.monsters = []; game.projectiles = [];
-  spawnMonster(Math.round(player.x + 260), Math.round(player.y), 'towerSovereign', false);
+  spawnMonster(Math.round(player.x + 260), Math.round(player.y), 'towerSovereign', true, false);   // as _expeditionSpawnTowerBoss does
   const m = game.monsters.filter((x) => x && x.type === 'towerSovereign').pop();
   if (!m) return { err: 'no sovereign' };
   m.currentHp = m.maxHp = 400000; m.atk = 300; m._expeditionFinalBoss = true; m._sovPhase = 1;
   m._sovereignOhkoTick = (game.time | 0) + 999999;   // keep the collapse out of this measurement
   m._sovereignDrainAt = (game.time | 0) + 999999; m._sovereignHomingAt = (game.time | 0) + 999999;
   m._sovRegaliaAt = 0;                                // raise the Regalia on the next tick
-  await frames(30);
+  await steps(4);
   const shards = () => (game.monsters || []).filter((q) => q && q._sovShardOf === m && q.currentHp > 0);
   out.shardCount = shards().length; out.shielded = !!m._sovShielded;
   if (!out.shardCount) return out;
   out.shardAtk = shards()[0].atk;
   // FAR: park the player well outside the notice radius and let them settle on the orbit
   player.x = m.x + 1400; player.y = m.y;
-  await frames(90);
+  await steps(60);
   const cx = m.x + m.w / 2, cy = m.y + m.h * 0.38;
   const distTo = (q, ax, ay) => Math.hypot((q.x + q.w / 2) - ax, (q.y + q.h / 2) - ay);
   // the orbit is an ELLIPSE (x radius _orbR, y radius _orbR*0.55), so a plain radius check is
@@ -57,7 +60,7 @@ const r = await page.evaluate(async () => {
   game.projectiles = [];
   player.x = cx - player.w / 2 + 40; player.y = cy - player.h / 2;
   const before = Math.round(Math.min(...shards().map((q) => distTo(q, player.x + player.w / 2, player.y + player.h / 2))));
-  await frames(120);
+  await steps(150);
   const after = Math.round(Math.min(...shards().map((q) => distTo(q, player.x + player.w / 2, player.y + player.h / 2))));
   out.nearestBefore = before; out.nearestAfter = after;
   out.maxLeash = Math.round(Math.max(...shards().map((q) => distTo(q, m.x + m.w / 2, m.y + m.h * 0.38))));

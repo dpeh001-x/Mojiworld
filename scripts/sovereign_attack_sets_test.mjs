@@ -65,6 +65,10 @@ const R = await page.evaluate(async () => {
     for (const f of (set || [])) { if (f && f.complete && f.naturalWidth > 0) decoded++; }
     art[k] = { frames: (set || []).length, decoded };
   }
+  // v0.30.1196 (9e6f0fcf) lazy boss art: the Sovereign's sets (cast-only, BOSS_FRAMES_ONLY) stay parked until
+  // the boss is wanted - spawnMonster(...,isBoss) -> _lxWarmBossFrames -> _lxBossArtWant. Ask the way a boss spawn does,
+  // then wait for decode.
+  if (typeof _lxWarmBossFrames === 'function') _lxWarmBossFrames('towerSovereign');
   // Wait for decode if the boot gate has not finished with them.
   for (let t = 0; t < 60; t++) {
     let done = true;
