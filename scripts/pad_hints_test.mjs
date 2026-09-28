@@ -73,10 +73,12 @@ try {
     out.uFoot = ((document.querySelector('.u-close-hint') || {}).textContent) || ''; try { closeAllModals(); } catch (e) {}
     // the tour: its pad table and Guguma's lines
     out.tour = _tutTouchify('<kbd>C</kbd>|<kbd>D</kbd>|<kbd>B</kbd>|<kbd>E</kbd>|<kbd>K</kbd>').replace(/<[^>]+>/g, '');
-    const iDoors = TUTORIAL_STEPS.findIndex((s) => /Three doors/.test(s.gugumaLine || ''));
-    const iQ = TUTORIAL_STEPS.findIndex((s) => /Press Q and see/.test(s.gugumaLine || ''));
+    // v0.30.1018 (858cd60e) cut Guguma to a few words: the doors line lost "Three doors" and no line says "Press Q" any
+    // more - find the doors step by its pad variant, and prove the Q translation on the renderer's own pass (_lxPadKeys)
+    const iDoors = TUTORIAL_STEPS.findIndex((s) => !!s.gugumaLinePad);
+    const iQ = -1;
     const gl = (i) => { try { _tutStep = i; _renderTutorialStep(); } catch (e) {} return ((document.getElementById('tut-guguma-line') || {}).textContent) || ''; };
-    out.gDoors = gl(iDoors); out.gQ = gl(iQ); try { _closeTutorial(true); } catch (e) {} try { closeAllModals(); } catch (e) {}
+    out.gDoors = gl(iDoors); out.gQ = _lxPadKeys('Press Q and see who is waiting on you.'); try { _closeTutorial(true); } catch (e) {} try { closeAllModals(); } catch (e) {}
     // the Back-chord routes for H and E, through the real poller
     let summons = 0, guides = 0; const _ms = window._mojimonQuickSummon, _qc = window._qnavCycle;
     window._mojimonQuickSummon = () => { summons++; }; window._qnavCycle = () => { guides++; };
@@ -94,6 +96,10 @@ try {
     for (const q of Object.keys(player.quests.active || {})) delete player.quests.active[q];
     for (const q of ['q_act1_waking', 'q_act1_sleepers', 'q_act1_quiet', 'q_act1_recipe', 'q_act1_name', 'q_act1_firstword']) { delete player.quests.completed[q]; delete player.quests.unlocked[q]; }
     tickQuestUnlocks(); acceptQuest('q_act1_waking');
+    // the Trainee Path ladder (EARLY_HOOKS / STORY_HOOKS) is its own system with its own "Next" toasts: finish it, so only
+    // the chapter toasts are counted. Since v0.30.923 (bb8fe7e4, raw EXP per user) a turn-in's EXP levels this Lv 3-5
+    // hero, the level-up scores the ladder, and a pending rung ("The Call", "Pest Control") announced itself alongside
+    { const st = _earlyState(); for (const h of EARLY_HOOKS.concat(STORY_HOOKS)) st.done[h.id] = st.done[h.id] || 1; }
     player.level = 3; await wait(2500); toasts.length = 0;   // the tour's close queues its own Act I pointer 1.4 s out
     player.quests.active.q_act1_waking.readyToHandIn = true;
     _completeQuest('q_act1_waking'); await wait(3200);

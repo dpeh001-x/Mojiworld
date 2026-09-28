@@ -33,10 +33,14 @@ try {
     // 3. a perfect parry on its own: the beat and the i-frames
     game._slowmoFrames = 0; player.invulnerable = 0; try { triggerParry(null); } catch (e) { o.parryErr = String(e && e.message); } o.parry = { slowmo: game._slowmoFrames, inv: player.invulnerable };
     // 4. the tells
-    const cap = (fn) => { const c = { strokes: [], texts: [], err: null }; const P = CanvasRenderingContext2D.prototype; const oS = P.stroke, oT = P.fillText;
+    // v0.30.1223 (660275e2) bakes the tell glyph once per colour (_lxTellGlyph) and blits it: fillText('A') runs only on the
+    // first bake, so a later tell shows up as a drawImage of the baked yellow ('y') or red ('r') glyph canvas instead.
+    const glyphKind = (img) => { const G = window._LX_TELL_GLYPH || (typeof _LX_TELL_GLYPH !== 'undefined' ? _LX_TELL_GLYPH : null); if (!G || !img) return null; for (const k in G) if (G[k] === img) return k[0]; return null; };
+    const cap = (fn) => { const c = { strokes: [], texts: [], glyphs: [], err: null }; const P = CanvasRenderingContext2D.prototype; const oS = P.stroke, oT = P.fillText, oD = P.drawImage;
       P.stroke = function (...a) { c.strokes.push(String(this.strokeStyle)); return oS.apply(this, a); }; P.fillText = function (t, ...a) { c.texts.push(String(t)); return oT.apply(this, [t, ...a]); };
-      try { fn(); } catch (e) { c.err = String(e && e.message); } finally { P.stroke = oS; P.fillText = oT; }
-      return { yellow: c.strokes.includes('#ffd166'), red: c.strokes.includes('#ff4d4d'), A: c.texts.includes('A'), cross: c.texts.includes('\u2715'), err: c.err }; };
+      P.drawImage = function (img, ...a) { const g = glyphKind(img); if (g) c.glyphs.push(g); return oD.apply(this, [img, ...a]); };
+      try { fn(); } catch (e) { c.err = String(e && e.message); } finally { P.stroke = oS; P.fillText = oT; P.drawImage = oD; }
+      return { yellow: c.strokes.includes('#ffd166'), red: c.strokes.includes('#ff4d4d'), A: c.texts.includes('A') || c.glyphs.includes('y'), cross: c.texts.includes('✕') || c.glyphs.includes('r'), err: c.err }; };
     spawnMonster(player.x + 140, player.y, 'snail', false); const m = game.monsters.filter((x) => x && x.type === 'snail').pop(); m.currentHp = m.maxHp; game.camera.x = Math.max(0, player.x - 200);
     m._tellUntil = _lxFrameNow() + 800; o.tellMob = cap(() => drawMonster(m)); m._tellUntil = 0; o.tellMobOff = cap(() => drawMonster(m));
     const cx = player.x + 200; game.hazards.length = 0;

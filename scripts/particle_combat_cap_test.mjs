@@ -70,12 +70,6 @@ const r = await page.evaluate(() => {
     out.arenaAdmission = admitted;
   }
 
-  // sprite resolution untouched: the decoded boss frames keep native size
-  try {
-    const f = (typeof BOSS_ATTACK_FRAMES !== 'undefined') && BOSS_ATTACK_FRAMES.aetherionastral;
-    out.spriteNative = f && f[0] ? f[0].naturalWidth : null;
-  } catch (e) { out.spriteNative = 'err'; }
-
   // measured cost: update+draw one heavy frame at the old flat cap vs the new
   const cost = (n) => {
     game.particles = [];
@@ -96,6 +90,20 @@ const r = await page.evaluate(() => {
   out.msAtArenaCap = cost(_particleCap());
   game.particles = []; game.monsters = [];
   return out;
+});
+// sprite resolution untouched: the decoded boss frames keep native size. Since v0.30.1196 (9e6f0fcf, lazy-art) boss art is
+// parked until its boss is wanted, so an unwanted set reads naturalWidth 0 - ask for Aetherion's art the way a spawn does
+// (_lxWarmBossFrames; the astral set is his by the art-key prefix) and wait for the frame to arrive before reading it.
+r.spriteNative = await page.evaluate(async () => {
+  try {
+    const f = (typeof BOSS_ATTACK_FRAMES !== 'undefined') && BOSS_ATTACK_FRAMES.aetherionastral;
+    if (!f || !f[0]) return null;
+    try { if (window._lxBootHold) _lxBootHold.release('menu'); } catch (e) {}
+    try { _lxWarmBossFrames('aetherion'); } catch (e) {}
+    try { if (typeof _lxWantImg === 'function') _lxWantImg(f[0], true); } catch (e) {}
+    for (let i = 0; i < 200 && !(f[0].complete && f[0].naturalWidth > 0); i++) await new Promise((res) => setTimeout(res, 100));
+    return f[0].naturalWidth;
+  } catch (e) { return 'err'; }
 });
 await b.close(); srv.kill();
 

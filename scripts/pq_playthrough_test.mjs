@@ -203,6 +203,9 @@ const r = await page.evaluate(async () => {
   // Abandoning Stage 2 part-way and re-taking it: the path that once
   // soft-locked, because the collected pieces outlived the abandon and only
   // the uncollected chests respawned, so 4/4 became unreachable.
+  // v0.29.877 (abandon banks progress; re-accept resumes, per user) + v0.30.1152 (48f0c218: a resumed Spire
+  // keeps its pieces) changed the shape: the two pieces collected before the abandon are KEPT, so only the
+  // two uncollected chests come back - and those must be enough to finish (kept + back === 4).
   clear(); player.quests.completed.q_clockwork_underpass = true;
   if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
   acceptQuest('q_pq_spire');
@@ -212,11 +215,13 @@ const r = await page.evaluate(async () => {
   if (typeof abandonQuest === 'function') { try { abandonQuest('q_pq_spire'); } catch (e) {} }
   else { delete player.quests.active.q_pq_spire; }
   acceptQuest('q_pq_spire');
+  const _keptPieces = Object.keys(player._pqSpirePieces || {}).length;
   await goTo('clockworkSpire'); await settle();
   pc = (game.chests || []).filter((x) => x && x._pqPuzzlePiece);
   for (const ch of pc) { try { openChest(ch); } catch (e) { out.edgeErr = String(e).slice(0, 80); break; } }
   out.abandonReaccept = step('abandonReaccept', {
     chestsBack: pc.length,
+    keptPieces: _keptPieces,
     finished: !!player.quests.completed.q_pq_spire,
   });
 
@@ -269,7 +274,7 @@ check(r.afterReload && r.afterReload.finaleActive && r.afterReload.s1 && r.after
       'the whole chain survives a save and reload mid-run', r.afterReload);
 check(r.reentry.progressKept === 5 && r.reentry.stillActive,
       'leaving a stage map and returning keeps progress and does not re-accept', r.reentry);
-check(r.abandonReaccept.chestsBack === 4 && r.abandonReaccept.finished,
+check(r.abandonReaccept.keptPieces === 2 && r.abandonReaccept.chestsBack === 2 && r.abandonReaccept.finished,
       'abandoning Stage 2 part-way and re-taking it can still be finished (no soft-lock)', r.abandonReaccept);
 check(r.strayKill.err === null && r.strayKill.leaked === false,
       'a kill on a PQ map with no PQ quest running is a harmless no-op', r.strayKill);

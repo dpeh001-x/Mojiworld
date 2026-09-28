@@ -62,7 +62,9 @@ for (const i of [5, 6]) {
   }
 }
 const sw = readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
-check(/^const CACHE = 'mojiworld-assets-v\d+';[^\n]*Pincer/m.test(sw), 'sw.js moved its cache generation for the replaced frames, so a returning browser drops the antennas', (sw.match(/^const CACHE[^\n]*/m) || [])[0]);
+// v0.30.868 shipped the antenna-free frames under cache v65. Later generations rewrite the
+// CACHE line's comment (v0.30.1263 pop VFX, v91), so pin the number (>= 65), not the Pincer comment.
+check(+((sw.match(/^const CACHE = 'mojiworld-assets-v(\d+)';/m) || [])[1] || 0) >= 65, 'sw.js moved its cache generation for the replaced frames, so a returning browser drops the antennas', (sw.match(/^const CACHE[^\n]*/m) || [])[0]);
 
 // ---------- in the game ----------
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT });

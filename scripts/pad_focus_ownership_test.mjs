@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9201;
+const PORT = Number(process.env.PORT || 9201);   // PORT env: 9201 can be another session's server
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -34,6 +34,11 @@ await page.waitForTimeout(9000);
 await page.evaluate(() => {
   player.cls = 'archer'; player.hp = getMaxHp();
   window._prologuePending = false; window._prologueActive = false; game._resetting = false;
+  // a fresh profile now boots into character creation, and _flushSaveStateNow refuses to save while the class picker
+  // is up (_lxAwaitingCreation) - so this archer was never stored and the reload came back to a new game, the picker
+  // owning the pad. Close creation the way picking a class does before flushing.
+  window._lxAwaitingCreation = false;
+  { const csm = document.getElementById('class-select-modal'); if (csm) csm.style.display = 'none'; }
   _flushSaveStateNow();
 });
 await page.reload({ waitUntil: 'load', timeout: 90000 });
@@ -52,6 +57,12 @@ const out = await page.evaluate(async () => {
   player._tutorialSeen = false;
   player._storyBeatsSeen = { tutorial_intro: true, tutorial_outro: true };
   if (typeof _wireTutorialButtons === 'function') _wireTutorialButtons();
+  // the pad is in hand when the tour opens: the expanded legend shows only on .pad-on, which _ensureTutChrome stamps
+  // from _lxPadActive() when the card is SHOWN (the same since v0.29.800 - this check failed on its own commit, where
+  // the tour opened before the probe pad had ever been touched)
+  window.__setBtn(15, 1);   // held until the poll has seen it: a loaded headless can skip a short tap
+  for (let i = 0; i < 60 && !_lxPadActive(30000); i++) await wait(50);
+  window.__setBtn(15, 0); await wait(120);
   startTutorial(); await wait(700);
   const r = {};
   const rootNow = () => { _lxPadRootAt = -1; const e = _lxPadModalRoot(); return e ? (e.id || '(anon)') : null; };

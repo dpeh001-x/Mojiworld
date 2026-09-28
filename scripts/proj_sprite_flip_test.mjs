@@ -14,7 +14,14 @@
 // sprite's own top/bottom asymmetry — a vertically symmetric sprite would make
 // the flip invisible, and an assertion that cannot see its own effect is worth
 // nothing.
-// Run: node scripts/proj_sprite_flip_test.mjs   (MOJI_GAME_FILE overrides)
+//
+// v0.30.1242 (6c48115e, per user) replaced octoHead's orient + flipY with the
+// new 'face' blit (_lxProjFaceUpright): the art is upright facing right, and
+// orient + flipY left it belly-up one way or the other. So octoHead now must
+// NOT flip vertically in either direction - it mirrors horizontally on a
+// leftward shot instead. The generic flipX / flipY support this suite was
+// written for is still checked, on a temporary blit entry.
+// Run: node scripts/proj_sprite_flip_test.mjs   (MOJI_GAME_FILE overrides, PORT env)
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +29,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9353;
+const PORT = process.env.PORT || 9353;
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -75,10 +82,10 @@ const R = await page.evaluate(async () => {
 
   // Spy on the real draw. One octoHead, flat heading so the orient rotate is 0
   // and any scale we see is the flip rather than a side effect of rotation.
-  const spy = (skill) => {
+  const spy = (skill, vx = 6) => {
     game.projectiles.length = 0;
     game.projectiles.push({
-      x: player.x + 60, y: player.y, vx: 6, vy: 0, w: 40, h: 40,
+      x: player.x + 60, y: player.y, vx, vy: 0, w: 40, h: 40,
       life: 200, damage: 1, owner: 'enemy', skill,
     });
     const scales = [];
@@ -89,13 +96,19 @@ const R = await page.evaluate(async () => {
     return scales;
   };
 
-  const octo = spy('octoHead');
+  const octo = spy('octoHead');          // rightward shot
+  const octoL = spy('octoHead', -6);     // leftward shot (v0.30.1242 'face' mirrors here)
   // A sibling that must NOT be flipped — proves the change is targeted rather
   // than a blanket mirror on every blitted projectile.
   const leg = spy('octoLeg');
+  // The flipY key itself still reaches the canvas: lend it to octoLeg for one
+  // draw, then restore the table entry exactly as it was.
+  const legBlit = _PROJ_SPRITE_BLIT['octoLeg'];
+  _PROJ_SPRITE_BLIT['octoLeg'] = Object.assign({}, legBlit, { flipY: true });
+  let legFlipped; try { legFlipped = spy('octoLeg'); } finally { _PROJ_SPRITE_BLIT['octoLeg'] = legBlit; }
 
   return {
-    asym, octo, leg,
+    asym, octo, octoL, leg, legFlipped,
     blitOcto: _PROJ_SPRITE_BLIT['octoHead'],
     blitLeg: _PROJ_SPRITE_BLIT['octoLeg'],
   };
@@ -108,13 +121,18 @@ const hasVFlip = (list) => Array.isArray(list) && list.some(s => s[0] === 1 && s
 
 ok('the sprite is vertically asymmetric, so a flip is visible',
    R.asym && Math.abs(R.asym.ratio - 1) > 0.02, `top/bottom alpha ratio ${R.asym && R.asym.ratio}`);
-ok('octoHead blit declares flipY', !!(R.blitOcto && R.blitOcto.flipY), JSON.stringify(R.blitOcto));
-ok('the flip actually reaches the canvas during drawProjectiles',
-   hasVFlip(R.octo), 'ctx.scale calls: ' + JSON.stringify(R.octo));
+// v0.30.1242: octoHead is 'face' (upright art, mirrored by heading), no flipY.
+ok('octoHead uses the upright face blit at size 1, no flipY (v0.30.1242)',
+   !!(R.blitOcto && R.blitOcto.mode === 'face' && R.blitOcto.size === 1.0 && !R.blitOcto.flipY), JSON.stringify(R.blitOcto));
+ok('octoHead is never drawn belly-up: no vertical flip on a rightward or a leftward shot',
+   !hasVFlip(R.octo) && !hasVFlip(R.octoL), 'right: ' + JSON.stringify(R.octo) + ' left: ' + JSON.stringify(R.octoL));
+ok('octoHead mirrors horizontally on a leftward shot and not on a rightward one',
+   R.octoL.some(s => s[0] === -1 && s[1] === 1) && !R.octo.some(s => s[0] === -1),
+   'right: ' + JSON.stringify(R.octo) + ' left: ' + JSON.stringify(R.octoL));
+ok('the flipY key still reaches the canvas during drawProjectiles',
+   hasVFlip(R.legFlipped), 'ctx.scale calls: ' + JSON.stringify(R.legFlipped));
 ok('octoLeg is NOT flipped (change is targeted, not a blanket mirror)',
    !hasVFlip(R.leg), 'ctx.scale calls: ' + JSON.stringify(R.leg));
-ok('octoHead keeps its orient mode and size', !!(R.blitOcto && R.blitOcto.mode === 'orient' && R.blitOcto.size === 1.0),
-   JSON.stringify(R.blitOcto));
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

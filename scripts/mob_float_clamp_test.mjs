@@ -22,11 +22,18 @@
 // The clamp is not the bug and must not be loosened - it is what keeps mobs out
 // of the floor. The bug is art that spends more of the budget than it is given.
 //
-// Run against a live build; needs the probe server on :8766.
-//   node scripts/mob_float_clamp_test.mjs
+// Self-serving since the triage of v0.30.1271: it used to need a hand-run probe
+// server on :8766 serving a scratch _mob_probe.html that no longer exists, so it
+// could only time out. It now starts serve.js itself (MOJI_GAME_FILE picks the
+// build, as serve.js does for /mojiworld_game.html).
+//   PORT=<port> node scripts/mob_float_clamp_test.mjs
 // ============================================================================
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 
 const PORT = process.argv[2] || process.env.PORT || '8766';
@@ -34,9 +41,12 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe'].find(existsSync);
 if (!EXE) { console.error('Chrome not found'); process.exit(1); }
 
+const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT });
+process.on('exit', () => { try { srv.kill(); } catch (e) {} });
+await new Promise((r) => setTimeout(r, 1500));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox','--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
-await page.goto(`http://localhost:${PORT}/_mob_probe.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof game === 'object' && typeof player === 'object', null, { timeout: 180000 });
 await page.evaluate(() => { if (typeof _lxArt2Want === 'function') for (const t of MONSTER_SPRITE_TYPES) _lxArt2Want('mon:' + t); });   // v0.30.x lazy-art2 - sheets load when wanted: this survey reads them all
 await page.waitForTimeout(7000);
@@ -76,7 +86,7 @@ const rows = await page.evaluate(() => {
   }
   return out;
 });
-await b.close();
+await b.close(); srv.kill();
 
 const float = rows.filter((r) => r.lift > 0.5).sort((a, b) => b.lift - a.lift);
 console.log(`  ${rows.length} ground monsters measured; budget is 6.00 px of canvas below the feet.\n`);

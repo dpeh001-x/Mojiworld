@@ -38,6 +38,11 @@ const URL = process.env.MOJI_GAME_URL || `http://localhost:${PORT}/${FILE}`;
 // Skills that deliberately refund or grant MP on cast (documented in-source):
 // bloodlust's cast surge, and the warlord/sage ult "free spam" windows.
 const MP_REFUND_BY_DESIGN = new Set(['bloodlust', 'warlord_ult', 'sage_ult']);
+// Two-tap skills (v0.29.697, per user): tap 1 ARMS for free - no MP, no cooldown,
+// the cast fn returns '_lxNoCast' - and tap 2 RELEASES, paying the MP and starting
+// the cooldown. Bastion of Dawn (crusader_ult) is one. The sweep taps these twice:
+// the arm must be free, the release must spend MP and set the cooldown.
+const TWO_TAP = new Set(['crusader_ult']);
 
 const results = [];
 const ok = (n, c, extra) => results.push({ n, pass: !!c, extra });
@@ -49,7 +54,8 @@ try {
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof castSkill === 'function', null, { timeout: 45000 });
   await page.waitForTimeout(2500);
 
-  const out = await page.evaluate(async () => {
+  const out = await page.evaluate(async (twoTap) => {
+    const TWO_TAP = new Set(twoTap);
     const report = {};
     window._prologueActive = false; window._prologuePending = false;
     const cs = document.getElementById('class-select-modal'); if (cs) cs.style.display = 'none';
@@ -90,8 +96,19 @@ try {
         const buffs0 = JSON.stringify(player.buffs), mp0 = player.mp, hp0 = player.hp;
         let threw = null;
         try { castSkill(id); } catch (e) { threw = String(e).slice(0, 110); }
-        const mpSpent = mp0 - player.mp;                 // read BEFORE regen ticks
-        const cdSet = (player.skillCooldowns[id] || 0) > 0;
+        let mpSpent = mp0 - player.mp;                   // read BEFORE regen ticks
+        let cdSet = (player.skillCooldowns[id] || 0) > 0;
+        let armFree = null;
+        if (TWO_TAP.has(id) && !threw) {
+          // tap 1 armed: free and ready. Tap 2 is a NEW press a few frames later.
+          armFree = mpSpent === 0 && !cdSet && (player._bastionArmedUntil | 0) > game.time;
+          await advance(15); player._bastionArmHeld = false;
+          player.mp = 99999; player.skillCooldowns = {}; player._skillLockTimer = 0;
+          const mp1 = player.mp;
+          try { castSkill(id); } catch (e) { threw = String(e).slice(0, 110); }
+          mpSpent = mp1 - player.mp;
+          cdSet = (player.skillCooldowns[id] || 0) > 0;
+        }
         let maxProj = game.projectiles.length;
         const watch = setInterval(() => { if (game.projectiles.length > maxProj) maxProj = game.projectiles.length; }, 4);
         await advance(240);
@@ -99,17 +116,17 @@ try {
         let dmg = 0;
         for (const d of dummies) { const h = HP0 - d.currentHp; if (h > 0) dmg += h; }
         rows.push({ id, mpCost: s.mp, mpSpent, cd: s.cd, cdSet, dmg: Math.round(dmg),
-          proj: maxProj, buffed: JSON.stringify(player.buffs) !== buffs0, healed: player.hp > hp0, threw });
+          armFree, proj: maxProj, buffed: JSON.stringify(player.buffs) !== buffs0, healed: player.hp > hp0, threw });
       }
       return rows;
     };
 
     for (const c of ['warrior', 'mage', 'rogue', 'archer']) report[c] = await runClass(c);
     return report;
-  });
+  }, [...TWO_TAP]);
 
   let total = 0;
-  const threw = [], inert = [], free = [], nocd = [], harness = [];
+  const threw = [], inert = [], free = [], nocd = [], harness = [], armPaid = [];
   for (const [cls, rows] of Object.entries(out)) {
     for (const r of rows) {
       if (r.harness) { harness.push(`${cls}/${r.id}: ${r.harness}`); continue; }
@@ -118,6 +135,7 @@ try {
       if (r.dmg === 0 && r.proj === 0 && !r.buffed && !r.healed) inert.push(`${cls}/${r.id}`);
       if (r.mpCost > 0 && r.mpSpent === 0 && !MP_REFUND_BY_DESIGN.has(r.id)) free.push(`${cls}/${r.id} (${r.mpCost} MP)`);
       if (r.cd > 0 && !r.cdSet) nocd.push(`${cls}/${r.id}`);
+      if (r.armFree === false) armPaid.push(`${cls}/${r.id}`);
     }
   }
   ok(`all 4 classes enumerated (${total} skills)`, total >= 60, total);
@@ -125,6 +143,7 @@ try {
   ok('every skill does something (damage / projectile / buff / heal)', inert.length === 0, inert.slice(0, 10));
   ok('every costed skill actually spends MP', free.length === 0, free.slice(0, 8));
   ok('every skill with a cooldown sets it (not spammable)', nocd.length === 0, nocd.slice(0, 8));
+  ok('two-tap skills arm for free and pay at release', armPaid.length === 0, armPaid);
   ok('harness spawned dummies for every skill', harness.length === 0, harness.slice(0, 5));
   ok('no page errors during the sweep', errs.length === 0, errs.slice(0, 5));
 } catch (e) { results.push({ n: 'HARNESS ERROR', pass: false, extra: String(e).slice(0, 300) }); }

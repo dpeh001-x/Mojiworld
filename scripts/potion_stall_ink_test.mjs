@@ -24,7 +24,8 @@ const cand = process.argv.slice(2).find((a) => !a.startsWith('--'));
 const PAGE = path.resolve(SERVE_ROOT, cand || 'mojiworld_game.html');
 let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d ? '  [' + d + ']' : '')); ok ? pass++ : fail++; };
 const J = (o) => JSON.stringify(o);
-const src = readFileSync(PAGE, 'utf8');
+// the worktree checkout of the game is CRLF (the blob is LF): the multi-line anchor below is LF, so normalise first
+const src = readFileSync(PAGE, 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10));
 const iBlock = src.indexOf('THE POTION STALL, INK AND PAPER'), iOld = src.indexOf('button[id^="pot-buy"] {\n    background: linear-gradient(180deg, #82d684');
 check(iBlock > 0 && iOld > 0 && iBlock > iOld, 'static: the stall block sits after the older stall rules in the sheet', `block ${iBlock}, old green rule ${iOld}`);
 check(src.includes("itemIconHtml(p, 28) : p.icon"), 'static: the potion icon renders at 28 px for the 36 px coaster');

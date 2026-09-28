@@ -5,8 +5,15 @@
 //                the mob — otherwise every touch stutters the chase.
 //   C. WALK WINS a MOVING mob near the player plays its WALK cycle; the
 //                proximity pose is for standing still.
-//   D. ATTACK    a committed cast still beats walk, and contact hits still
-//                animate (v0.29.273 must not regress).
+//   D. ATTACK    a committed cast is PLANTED (vx zeroed in updateMonsters) and
+//                the planted mob plays its attack frames, and contact hits
+//                still animate (v0.29.273 must not regress).
+//                v0.30.x (23cf165c, per user "make sure monsters only move
+//                horizontally when the walking sprite plays") made WALK outrank
+//                every attack pose in _monsterStateFrame: a mob that is really
+//                moving is drawn walking. A cast still reads because the plant
+//                zeroes its vx first, so D now checks the plant + the planted
+//                frame, instead of a cast flag on a mob still doing vx 2.
 import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,9 +59,24 @@ const out = await page.evaluate(() => {
   ok('STILL mob next to player plays attack pose', (_monsterStateFrame(still) || {})._tag === 'attack',
      'got ' + ((_monsterStateFrame(still) || {})._tag));
 
+  // D — the physics half: updateMonsters zeroes vx on any casting mob, right before integration
+  const _um = String(typeof updateMonsters === 'function' ? updateMonsters : '');
+  ok('updateMonsters plants a casting mob (vx = 0)', /_mobCasting\(m\)\)\s*m\.vx\s*=\s*0/.test(_um));
+  // ...and the planted caster plays its attack frames, with the player FAR away so the
+  // proximity pose cannot be what picked them
+  player.x = 5000;
+  const planted = mob({ vx: 0, _shootWindup: 200 });
+  ok('a PLANTED caster plays attack, not idle', (_monsterStateFrame(planted) || {})._tag === 'attack',
+     'got ' + ((_monsterStateFrame(planted) || {})._tag));
+  const plantedMelee = mob({ vx: 0, _bigMeleeFiring: true });
+  ok('a planted heavy-swing telegraph plays attack', (_monsterStateFrame(plantedMelee) || {})._tag === 'attack',
+     'got ' + ((_monsterStateFrame(plantedMelee) || {})._tag));
+  // v0.30.x (23cf165c) — walk outranks the attack pose when the mob really moves
+  // (e.g. shoved mid-cast): the art yields, it does not slide under a swing
   const castingWhileMoving = mob({ vx: 2.0, _shootWindup: 200 });
-  ok('CASTING beats walk even if vx set', (_monsterStateFrame(castingWhileMoving) || {})._tag === 'attack',
+  ok('a caster that is really moving is drawn WALKING (walk outranks, v0.30.x)', (_monsterStateFrame(castingWhileMoving) || {})._tag === 'walk',
      'got ' + ((_monsterStateFrame(castingWhileMoving) || {})._tag));
+  player.x = 0;
 
   const farIdle = mob({ vx: 0 });
   player.x = 5000;                                // far away, standing still

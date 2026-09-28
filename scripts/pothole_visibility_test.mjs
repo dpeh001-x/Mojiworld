@@ -40,7 +40,7 @@ for (const k of SPRITES) {
   ok(`${k} is not cut off at the canvas edge`, border === 0, `${border} opaque px on the border`);
 }
 
-const PORT = 9124;
+const PORT = process.env.PORT || 9124;
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -132,13 +132,14 @@ const live = await page.evaluate(async (SPRITES) => {
     const d = ctx.getImageData(bx, by, 180, 110).data;
     ctx.restore();
     const gl = 0.2126 * GROUND[0] + 0.7152 * GROUND[1] + 0.0722 * GROUND[2];
-    let brighter = 0, darker = 0;
+    let brighter = 0, darker = 0, dim = 0;
     for (let i = 0; i < d.length; i += 4) {
       const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
       if (lum > gl + 25) brighter++;
       else if (lum < gl - 25) darker++;
+      if (lum < gl - 10) dim++;
     }
-    return { brighter, darker };
+    return { brighter, darker, dim };
   };
   const thicket = measure('thornspireThicket');
   ok('the thicket pit paints bright pixels on dark ground (it used to paint none)',
@@ -147,7 +148,21 @@ const live = await page.evaluate(async (SPRITES) => {
   ok('the crypt pit paints bright pixels too', crypt.brighter > 400,
      `${crypt.brighter} bright px, ${crypt.darker} dark px`);
   // the dark opening must still be there — a pit that is all rim reads as a rug
-  ok('the pit still has a dark opening', thicket.darker > 200, `${thicket.darker} dark px`);
+  // v0.29.683 (a5538ef3, per user "the potholes should also be 50% opacity") blits the whole pit at half alpha, so
+  // even a pure-black opening can darken the ground by at most half its luminance (~20 here) and the
+  // original 25-below-ground bar is unreachable by construction (v0.30.603's commit notes the same). The
+  // opening is measured at 10 below ground instead. v0.30.603 (7922f169, per user: "make it look more flat")
+  // regenerated both pits side-on; the earth sliver is now a faint line (155 source px under lum 40, was 4,460)
+  // that no longer darkens this ground at half alpha, so the rendered opening is judged on the crypt pit and
+  // the earth pit keeps a dark core in its own art (earthCore below).
+  ok('the pit still has a dark opening (half-alpha blit: crypt pit darker than the ground by > 10)', crypt.dim > 200,
+     `crypt ${crypt.dim} px, thicket ${thicket.dim} px (${thicket.darker} / ${crypt.darker} at the old 25 bar)`);
+  const earthCore = (() => { const im = imgs.pothole_earth; if (!im || !im.naturalWidth) return 0;
+    const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+    const x = c.getContext('2d'); x.drawImage(im, 0, 0); const d = x.getImageData(0, 0, c.width, c.height).data; let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] >= 128 && 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2] < 40) n++;
+    return n; })();
+  ok('the earth pit art still carries a dark opening of its own', earthCore >= 100, `${earthCore} opaque px under lum 40`);
 
   return out;
 }, SPRITES);

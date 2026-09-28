@@ -137,12 +137,21 @@ try {
     let steam = null; window.SteamAPI = { available: true, cloud: { write: (k, v) => { steam = v; return Promise.resolve(); } } };
     try { _lxSteamCloudPush(localStorage.getItem('levelx_save_v1'), true); } finally { delete window.SteamAPI; }
     const sv = steam ? JSON.parse(steam) : { player: {} };
-    return { hero: __heroHash(), steam: __hashOf(sv.player.customPaint, sv.player.customPaintLayers), steamRef: '_lxPaintRef' in sv.player };
+    const wholeLen = (_lxSaveWithPaint(localStorage.getItem('levelx_save_v1')) || '').length;
+    return { hero: __heroHash(), steam: __hashOf(sv.player.customPaint, sv.player.customPaintLayers), steamRef: '_lxPaintRef' in sv.player,
+      wholeLen, cap: (typeof _LX_CLOUD_SAVE_CAP === 'number') ? _LX_CLOUD_SAVE_CAP : Infinity };
   });
   await p.waitForTimeout(500);
   const cbRaw = cloudBodies.length ? cloudBodies[cloudBodies.length - 1] : '{"player":{}}';
-  const cloudHash = await p.evaluate((t) => { const pl = JSON.parse(t).player || {}; return __hashOf(pl.customPaint, pl.customPaintLayers) + ('_lxPaintRef' in pl ? ':ref' : ''); }, cbRaw);
-  check(cloudHash === d.hero && d.steam === d.hero && !d.steamRef, 'the account cloud and Steam Cloud copies carry the paint (whole saves)', { cloud: cloudHash, steam: d.steam, hero: d.hero, pushes: cloudBodies.length });
+  const cl = await p.evaluate((t) => { const pl = JSON.parse(t).player || {}; return { hash: __hashOf(pl.customPaint, pl.customPaintLayers) + ('_lxPaintRef' in pl ? ':ref' : ''),
+    localOnly: pl._lxPaintLocalOnly === true, painted: !!(pl.customPaint || (pl.customPaintLayers && Object.keys(pl.customPaintLayers).length)), level: pl.level }; }, cbRaw);
+  // v0.30.1185 cloud-paint-cap (319fbf1d): the account cloud refuses a save over 512 KB, so a whole save that would not fit
+  // is pushed WITHOUT its paint, marked _lxPaintLocalOnly (progress syncs, the paint stays on the device). The 12 noise
+  // layers here make the whole save ~0.9 MB, so the cloud copy must be the bare, marked one - never a dangling reference;
+  // under the cap it must still be the whole save. Steam Cloud has no cap and always gets the whole save.
+  const cloudOk = d.wholeLen <= d.cap ? cl.hash === d.hero : (cl.localOnly && !cl.painted && !/:ref$/.test(cl.hash) && cl.level != null);
+  check(cloudBodies.length > 0 && cloudOk && d.steam === d.hero && !d.steamRef, 'the account cloud copy carries the paint when it fits the cap (else progress only, marked local-only); Steam Cloud carries the whole save',
+    { cloud: cl, steam: d.steam, hero: d.hero, wholeLen: d.wholeLen, cap: d.cap, pushes: cloudBodies.length });
   // storage full while writing the paint record: the save keeps the paint inline, then heals once there is room
   const e = await p.evaluate(() => {
     __applyPaint(__mkPaint(13)); window.__failPaint = true; let threw = null; try { __flush(); } catch (x) { threw = String(x); }

@@ -87,7 +87,10 @@ const r = await page.evaluate(async () => {
   await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (++n > 40) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   const cs = (typeof LX_OBJECTS !== 'undefined') && LX_OBJECTS.chest_gold;
   out.chestArt = !!(cs && cs.complete && cs.naturalWidth > 0);
-  out.chestRouted = !!(cs && cs._lxProjCache && Object.keys(cs._lxProjCache).some((k) => k !== '_n'));
+  // v0.30.636 (eaedec4e) made _lxProjCache a Map (oldest-first eviction) - Object.keys() of a Map is
+  // always empty, so count its bakes through .size; the old object form keeps its '_n' counter check.
+  const pc = cs && cs._lxProjCache;
+  out.chestRouted = !!(pc && (pc instanceof Map ? pc.size > 0 : Object.keys(pc).some((k) => k !== '_n')));
 
   // ---- drop orb still draws (emoji fallback branch) ------------------------
   game.drops = game.drops || [];

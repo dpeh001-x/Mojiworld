@@ -28,7 +28,10 @@ try {
       '} mojicoins since your last visit', '} mojicoins total', 'mojicoins ${canAfford', 'A mojicoin is a', '</span> setshards</span>', '◈ setshards.`', 'Legosaurus of Blockland', "name:'Block-Land'",
       'Bubble Bloom', 'Painting Everdawn Bazaar', "'Will — The Bastion Throne'", 'Brok in Everdawn Central', 'Why the vermilion banners', 'codex/mojidex', 'or skill tree (K)', 'Close (Q or Esc)',
       'Bestiary in the U panel', '10× your max HP', '0-1 bonus SP', 'binomial(1, 0.5)', 'per VIT point', 'VIT (Vitality)', 'Sixteen endings', 'Sixteen ways they end', '<em>Lv 57.</em>',
-      '10,000 Mojicoins short of 10,000 Mojicoins', 'Respec (1,500◈)'].filter((t) => src.includes(t));
+      '10,000 Mojicoins short of 10,000 Mojicoins',
+      // v0.30.952 (d03d3914): respec went flat (_lxRespecCost() = 1,500) after this audit, so the tooltip's 'Respec (1,500◈)' is right
+      // again and the audit's own replacement is the stale copy now.
+      'Respec (grows with your level)'].filter((t) => src.includes(t));
     try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     applyClass('warrior'); player.level = 60; player._tutorialSeen = true; player._storyBeatsSeen = new Proxy({}, { get: () => true });

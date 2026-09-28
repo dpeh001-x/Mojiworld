@@ -73,7 +73,8 @@ const r = await page.evaluate(async () => {
     player.skillCooldowns[slot.skillId] = 5300;
     await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (++n > 10) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
     const txt = slot.cdEl.textContent;
-    const pct = slot.root.style.getPropertyValue('--cd-pct');
+    // v0.30.937 (9463fcab) writes --cd-pct on the .skill-cd overlay (the only reader), not the slot root
+    const pct = slot.cdEl.style.getPropertyValue('--cd-pct');
     out.cdText = txt; out.cdPct = pct;
     out.cdFormat = /^\d+\.\d$/.test(txt) && /^\d+(\.\d)?$/.test(pct);
     player.skillCooldowns[slot.skillId] = 0;

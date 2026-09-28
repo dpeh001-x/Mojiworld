@@ -51,14 +51,24 @@ const r = await page.evaluate(async () => {
   out.nagOutside = !!nag && !nag.closest('.game-wrapper');
   return out;
 });
+// v0.30.900 (5c34dd1c, audit C9) - the overflow trim became _lxDnEvict: lowest importance first (plain hits, then labels, big
+// hits, crits, damage taken), oldest first within a rank, spliced IN PLACE - still no reordering, so it is asserted
+// on the function itself rather than on the old head-splice literal.
+const ev = await page.evaluate(() => {
+  if (typeof _lxDnEvict !== 'function') return { ok: false, why: 'no _lxDnEvict' };
+  const L = [{ text: '1', id: 0 }, { text: '5', crit: true, id: 1 }, { text: '2', id: 2 }, { text: '9', taken: true, id: 3 }, { text: '3', id: 4 }];
+  _lxDnEvict(L, 3);
+  return { ok: true, ids: L.map((d) => d.id).join(',') };
+});
 const html = await (await fetch(`http://localhost:${PORT}/${PAGE}`)).text();
 const safeArea = html.includes('body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }');
 const zoomClamp = html.includes('var maxL = Math.max(0, p.clientWidth / z - el.offsetWidth);');
 const uiScaleStamp = html.includes('game._uiScale = _uk;');
 const bossPlate = html.includes('const barW = Math.min(660 * _uiK, W - 120)');
 const dnScale = html.includes('const baseSize = ((d.size || 14) + 4) * _dnUiK;');
-const dnTrim = html.includes('game.damageNumbers.splice(0, game.damageNumbers.length - MAX_DN);');
-const dnEdge = html.includes('ctx.translate(Math.max(28, Math.min(W - 28, sx)), d.y);');
+const dnTrim = ev.ok && ev.ids === '1,3,4' && html.includes('_lxDnEvict(game.damageNumbers, MAX_DN);');   // oldest plain hits went, order kept
+// v0.30.751 (97cb0f88, B/G numbers) added a front-loaded arrival shake (+ _shx / + _shy) to the same translate; the clamp is unchanged
+const dnEdge = /ctx\.translate\(Math\.max\(28, Math\.min\(W - 28, sx\)\)[^;]*d\.y/.test(html);
 console.log(JSON.stringify({ ...r, safeArea, zoomClamp, uiScaleStamp, bossPlate, dnScale, dnTrim, dnEdge }));
 const checks = [
   ['body.cinematic follows the death overlay', r.cineIdle === false && r.cineOn === true && r.cineOff === false, `${r.cineIdle}/${r.cineOn}/${r.cineOff}`],
@@ -69,7 +79,7 @@ const checks = [
   ['the HUD size setting is stamped for the canvas readouts', uiScaleStamp],
   ['the boss plate follows the HUD size', bossPlate],
   ['damage numbers follow the HUD size', dnScale],
-  ['damage-number overflow trims the oldest without reordering', dnTrim],
+  ['damage-number overflow trims the least important, oldest first, without reordering', dnTrim, JSON.stringify(ev)],
   ['a damage number at the screen edge is pulled inside it', dnEdge],
   ['no page errors', errs.length === 0, errs.join(' | ')],
 ];

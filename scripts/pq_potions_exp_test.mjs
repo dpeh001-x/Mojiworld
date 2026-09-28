@@ -102,6 +102,10 @@ const exp = await page.evaluate(() => {
   const _realLevelUp = window._maybeLevelUp;
   const payAt = (id, lv) => {
     player.level = lv; player.exp = 0;
+    // A stage now pays full ONCE (_lxPqStagePaid, per-stage record that survives Milo's restart; later payouts
+    // of the same stage are repeats at LX_PQ_REPEAT_EXP_MUL). This sweep pays each stage at six levels, so
+    // clear the record and the run counter each time - every number here is a FIRST run's.
+    player._pqStagePaid = {}; player._pqChainRuns = 0;
     player.quests = { active: {}, completed: {}, unlocked: {}, progress: {} };
     player.quests.active[id] = { progress: 0, targetCount: 99 };
     window._maybeLevelUp = () => {};

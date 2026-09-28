@@ -33,9 +33,12 @@ try {
     const patch = await mk(x => { x.fillStyle = '#000000'; x.fillRect(0, 0, 64, 64);
       x.fillStyle = '#d05030'; x.fillRect(0, 40, 64, 24); });
     out.sampler.darkWithPatch = _lxDominantColor(patch);
-    // grey majority vs saturated minority: saturation weighting should favour colour
+    // grey majority vs saturated minority: saturation weighting should favour colour.
+    // v0.29.393 (687b24e2) samples only BELOW the top 42% (_LX_SKY_CUT - that band is sky by construction),
+    // so the colour is a full-height stripe (40% of the width) rather than the old top band, which the cut
+    // now discards whole; grey still covers the larger share of every sampled row.
     const greyVsColour = await mk(x => { x.fillStyle = '#8a8a8a'; x.fillRect(0, 0, 64, 64);
-      x.fillStyle = '#20c060'; x.fillRect(0, 0, 64, 26); });
+      x.fillStyle = '#20c060'; x.fillRect(0, 0, 26, 64); });
     out.sampler.greyVsColour = _lxDominantColor(greyVsColour);
     out.sampler.notReady = _lxDominantColor({ _loaded: false, naturalWidth: 0 });
 
@@ -45,13 +48,22 @@ try {
       try { loadMap(id); } catch (e) { continue; }
       await new Promise(res => setTimeout(res, 700));
       const md = game.mapData;
-      const bg = _pickBGImage();
-      const dom = bg ? _lxDominantColor(bg) : null;
+      // v0.29.393 (687b24e2): the tint samples the map's OWN backdrop (_lxOwnBackdrop, never _pickBGImage's
+      // substitute art) with its sky stops handed in for rejection; v0.30.448 serves the same answer from
+      // the baked data/map_platform_tint.js. Sample exactly that way. The memo ignores the stops: clear it.
+      let bg = _lxOwnBackdrop(md) || (md.bg && typeof BG_IMAGES !== 'undefined' ? BG_IMAGES[md.bg] : null);
+      if (bg && !bg._loaded) { try { _lxBootHold.release('menu'); } catch (e) {} try { _lxWantImg(bg, true); } catch (e) {}
+        for (let i = 0; i < 40 && !bg._loaded; i++) await new Promise(res => setTimeout(res, 250)); }
+      if (bg && !bg._loaded) bg = null;
+      if (bg) delete bg._lxDom;
+      const dom = bg ? _lxDominantColor(bg, md.sky) : null;
+      if (bg) delete bg._lxDom;
+      const domTop = dom ? _mixHex(dom, '#ffffff', 0.12) : null;
       // force a fresh resolve so we read what the renderer would use now
       delete _MAP_PLATFORM_TINT_CACHE[game.currentMap];
       const tint = _mapPlatformTint(md);
       out.rows.push({ id, hasBg: !!bg, dominant: dom, sky0: (md.sky && md.sky[0]) || null,
-        top: tint.top, body: tint.body,
+        top: tint.top, body: tint.body, domTop, authored: !!md.platTint,
         cached: !!(_MAP_PLATFORM_TINT_CACHE[game.currentMap] || {}).fromBg });
     }
     return out;
@@ -86,8 +98,9 @@ try {
      { resolved: withBg.length, of: r.rows.length });
   ok('tints are now derived from the backdrop, not the sky',
      withBg.every(x => x.cached), withBg.map(x => ({ id: x.id, fromBg: x.cached })));
-  ok('tint.top tracks the backdrop colour', withBg.every(x => dist(x.dominant, x.top) < 45),
-     withBg.map(x => ({ id: x.id, d: dist(x.dominant, x.top) })));
+  // the lit cap is the sampled colour nudged 12% to white (_mapPlatformTint); an authored platTint wins outright
+  ok('tint.top tracks the backdrop colour', withBg.every(x => x.authored || dist(x.domTop, x.top) <= 6),
+     withBg.map(x => ({ id: x.id, d: dist(x.domTop, x.top) })));
   ok('body is a darkened version of the same hue',
      withBg.every(x => dist(x.top, x.body) > 40), withBg.map(x => ({ id: x.id, d: dist(x.top, x.body) })));
   // the change is only worth making if backdrop and sky actually disagree

@@ -22,7 +22,9 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+import { fileURLToPath } from 'node:url';
+// the repo this script lives in (was hardcoded to the shared working copy, so a worktree tested someone else's tree)
+const ROOT = process.env.SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require(ROOT + '/node_modules/playwright-core');
 const FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
@@ -91,13 +93,18 @@ try {
     // Put live monsters inside the 150 px radius and give the player the boon.
     player.mods = player.mods || {}; player.mods.riposteNova = 0.8;
     player._riposteAt = -9999;
-    const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;
     // the zone populates a moment after the gate opens - wait for it, with a
     // wall-clock guard, rather than measuring an empty arena and reporting zero
+    // A new game now ends in town, and spawnMonster refuses non-boss spawns there (v0.29.619): with no zone to
+    // populate, the nova met nobody and reported 0/0 - so step into the forest (story beats marked seen, v0.30.1116
+    // queues them and pauses the sim) and wait for its spawns.
+    try { player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; } catch (e) {}
+    if (!game.monsters.some((m) => m && m.currentHp > 0)) { try { loadMap('forest'); } catch (e) {} game.paused = false; }
     const mw0 = performance.now();
     while (!game.monsters.some((m) => m && m.currentHp > 0) && performance.now() - mw0 < 15000) await sleep(200);
     const live = game.monsters.filter((m) => m && m.currentHp > 0).slice(0, 3);
     out.movedMonsters = live.length;
+    const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;   // after the map change
     live.forEach((m, i) => { m.x = pcx + (i - 1) * 40; m.y = pcy - m.h / 2; m.currentHp = Math.max(m.currentHp, 99999); m.maxHp = Math.max(m.maxHp || 0, 99999); });
     const hp0 = live.map((m) => m.currentHp);
     log = [];

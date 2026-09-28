@@ -89,10 +89,26 @@ const r = await page.evaluate(async () => {
   // found a meteor that had already fallen
   const _mLive = () => (game.hazards || []).some((h) => h && (h.type === 'meteor_warn' || h.type === 'meteor'));
   out.meteorHazard = _mLive();
-  await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (_mLive()) out.meteorHazard = true; if (++n > 60) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  // The red meteor draws its nine-frame loop when it has one (the static only gates the draw), and the loop frame is served
+  // pre-shrunk (~320 px canvas, _projAnimFrame / _bossLoopFrame): no second bake of the static - so the old "static has a
+  // _lxProjCache" check was only ever met vacuously (static not decoded yet). Count what the meteor actually blits instead:
+  // the static's bake or a baked loop frame is routed; the raw full-res webp is not (the first cast may blit a few raw loop
+  // frames while their off-thread shrink is in flight - bounded by v0.30.1271 - so the check asks for baked draws, not zero raw).
+  const mimg = LX_PLAYER_PROJ && LX_PLAYER_PROJ.meteor;
+  const _mArt = (src) => { const a = (typeof PROJ_ANIM_FRAMES !== 'undefined' && PROJ_ANIM_FRAMES.meteor) || [];
+    return src === mimg || (mimg && src === mimg._lxProjCache) || a.indexOf(src) >= 0 || (src && src._lxSrc && /meteor/.test(String(src._lxSrc.src || src._lxSrc))); };
+  const md = { baked: 0, raw: 0 }; const _di = CanvasRenderingContext2D.prototype.drawImage;
+  CanvasRenderingContext2D.prototype.drawImage = function (src) {
+    try { if (_mArt(src)) { if (src.tagName === 'CANVAS') md.baked++; /* a bake: the static's _lxProjCache or a shrunk loop frame (~533 px here) */ else if (src.tagName === 'IMG') md.raw++; } } catch (e) {}
+    return _di.apply(this, arguments); };
   try {
-    const mimg = LX_PLAYER_PROJ && LX_PLAYER_PROJ.meteor;
-    out.meteorRouted = !!(mimg && mimg._lxProjCache) || !(mimg && mimg.naturalWidth > 0);
+    await new Promise((res) => { let n = 0; const t = () => { game.paused = false;
+      for (const h of (game.hazards || [])) if (h && h.type === 'meteor_warn' && typeof h.cx === 'number') game.camera.x = h.cx - 640;   // on screen, so it draws
+      if (_mLive()) out.meteorHazard = true; if (++n > 60) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
+  } finally { CanvasRenderingContext2D.prototype.drawImage = _di; }
+  out.meteorDraws = md;
+  try {
+    out.meteorRouted = !!(mimg && mimg._lxProjCache) || md.baked > 0 || !(mimg && mimg.naturalWidth > 0);
   } catch (e) { out.meteorRouted = true; }
   game.hazards = [];
 

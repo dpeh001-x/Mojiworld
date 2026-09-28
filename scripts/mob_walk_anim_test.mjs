@@ -84,7 +84,16 @@ const R = await page.evaluate(async () => {
   // Mirrors the DRAW precedence exactly (walk outranks the incidental attack
   // pose), or the test would classify frames into a state the player never sees.
   const stateOf = (m) => (typeof _mobWalking === 'function' && _mobWalking(m)) ? 'walk'
-                       : ((typeof _mobAttackAnim === 'function' && _mobAttackAnim(m)) ? 'attack' : 'idle');
+                       : (((typeof _mobAttackAnim === 'function' && _mobAttackAnim(m)) || performance.now() < (m._swingUntil || 0)) ? 'attack' : 'idle');
+  // (v0.30.382 proximity swings hold attack art through m._swingUntil - _monsterStateFrame reads it too)
+  // Frames where a same-row neighbour overlaps are CROWD frames: the v0.25.653
+  // mob-mob soft spread moves m.x directly (0.4 px/step at most, never through
+  // vx), so it is measured apart from the drive this test is about.
+  const crowded = (m) => game.monsters.some((o) => o !== m && o.currentHp > 0 && Math.abs(o.y - m.y) < Math.max(m.h, o.h) * 0.5   // the spread tests the PUSHER's height
+    && Math.abs((o.x + o.w / 2) - (m.x + m.w / 2)) < (m.w + o.w) * 0.45);
+  const crowd = { frames: 0, maxDx: 0 };
+  const run = new Map(); let maxRun = 0;   // consecutive non-walk, non-crowd frames WITH motion, per mob
+  const wasCrowded = new Map();
   const last = new Map(); for (const m of mobs) last.set(m, m.x);
   const startX = new Map(); for (const m of mobs) startX.set(m, m.x);
   for (let f = 0; f < 900; f++) {
@@ -94,10 +103,14 @@ const R = await page.evaluate(async () => {
       if (!m || m.currentHp <= 0) continue;
       m.currentHp = m.maxHp;
       const dx = m.x - last.get(m); last.set(m, m.x);
-      bump(stateOf(m), dx);
+      const st = stateOf(m);
+      const cNow = crowded(m), cWas = wasCrowded.get(m); wasCrowded.set(m, cNow);   // a push lands before the pair reads apart
+      if (st !== 'walk' && (cNow || cWas)) { crowd.frames++; crowd.maxDx = Math.max(crowd.maxDx, Math.abs(dx)); run.set(m, 0); continue; }
+      bump(st, dx);
+      const r = (st !== 'walk' && Math.abs(dx) > 0.02) ? (run.get(m) || 0) + 1 : 0; run.set(m, r); if (r > maxRun) maxRun = r;
     }
   }
-  out.stat = stat;
+  out.stat = stat; out.crowd = crowd; out.maxRun = maxRun;
   // Travel per mob, so "nothing moved" cannot masquerade as "nothing slid".
   out.travelled = {}; for (const m of mobs) out.travelled[m.type] = Math.round(Math.abs(m.x - startX.get(m)));
 
@@ -156,13 +169,29 @@ ok('the walk threshold is relative to each mob\'s own speed', R.hasRelThreshold 
 // works on. The bar is therefore VISIBILITY, not purity: before the fix the
 // peak was 0.55 px/frame (~33 px/s of travel under a static sprite); after, it
 // is at most 0.12 (~7 px/s). 0.20 sits between the two.
-const SLIDE_MAX = 0.20;
-ok(`no visible horizontal slide under idle art (< ${SLIDE_MAX} px/frame)`,
+//
+// Triage of v0.30.1271: two later, deliberate mechanics broke the flat ceiling
+// without bringing the slide back, so they are now measured apart:
+//   * CROWD frames (a neighbour overlapping on the same row) belong to the
+//     v0.25.653 soft spread named above. Its nudge is 0.4 * (1 - overlap) px per
+//     step; mobs bunch far more since the v0.30.383 "start from rest" chase, so
+//     it landed at 0.2-0.7 px/frame in most runs. Bounded, not zero-asserted.
+//   * v0.30.383 PLANTED FEET drops the walk latch the moment an attack window
+//     opens and then HALVES vx each tick ("a shove dies out"), so the first 1-3
+//     steps of a swing decelerate under attack art (seen up to 1.0 px). That
+//     is a stop, not a slide: asserted as a short RUN, never a sustained one.
+// The original drift (the walk latch's dead band) was sustained sub-threshold
+// travel under idle art, which both remaining checks still catch.
+const SLIDE_MAX = 0.20, DECEL_RUN = 6;
+ok(`no visible horizontal slide under idle art (< ${SLIDE_MAX} px/frame, crowd frames apart)`,
    idle.maxDx < SLIDE_MAX,
    `max ${idle.maxDx.toFixed(2)} px/frame over ${idle.frames} idle frames, ${idle.absDx.toFixed(1)}px total (was 0.55 / 4.9px)`);
-ok(`...nor under attack art (< ${SLIDE_MAX} px/frame)`,
-   atk.maxDx < SLIDE_MAX,
-   `max ${atk.maxDx.toFixed(2)} px/frame over ${atk.frames} attack frames, ${atk.absDx.toFixed(1)}px total (was 0.57 / 5.7px)`);
+ok(`...and motion outside walk only ever a stop: no run longer than ${DECEL_RUN} frames (v0.30.383 halving decel)`,
+   R.maxRun <= DECEL_RUN,
+   `longest run ${R.maxRun} frames; attack art max ${atk.maxDx.toFixed(2)} px/frame over ${atk.frames} frames, ${atk.absDx.toFixed(1)}px total`);
+// Crowd frames are reported, not asserted: they also carry the planted decel of a
+// mob that stopped beside a neighbour, so no single ceiling separates the two.
+console.log(`  crowd frames outside walk (v0.25.653 spread, not asserted): ${R.crowd.frames}, max ${R.crowd.maxDx.toFixed(2)} px/frame`);
 ok('what is left outside walk is a rounding error next to what is inside it',
    (idle.absDx + atk.absDx) < walk.absDx * 0.05,
    `${(idle.absDx + atk.absDx).toFixed(1)}px outside walk vs ${walk.absDx.toFixed(0)}px inside`);
