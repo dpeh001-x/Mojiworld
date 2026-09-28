@@ -5,14 +5,19 @@
 // genuinely cut), so her wings faded and clipped. fly, composed with 66px of
 // margin, was always clean — that is the reference this restores.
 //
+// v0.30.1382 virga-flap: walk, fly and attack are redrawn with full wing flaps (per user). The fly frames now sit
+// inside the same >= 50 px margin as the rest, and the redrawn walk / fly carry a uniform per-frame scale (fs) that
+// keeps her body its old size on screen - in fs, never in s, because the hit region is cut from the calib-s box.
+//
 // Asserted here, no browser needed:
-//   1. every idle/walk/attack frame now clears a real margin on L/R/T
-//   2. the shipped edge table says "" (uncut) for all 27
+//   1. every idle/walk/attack/fly frame clears a real margin on L/R/T
+//   2. the shipped edge table says "" (uncut) for all 36
 //   3. the canvas is still 1332x1332 — the renderer derives draw size from the
 //      source long edge, so a changed canvas would silently resize the boss
 //   4. anim_calib carries s = 1/k on the exact keys the renderer looks up, so
 //      the recompose is cancelled and she is the SAME size on screen
-//   5. fly is untouched
+//   5. fly keeps the user's own s, and the redrawn walk / fly carry their size
+//      compensation as a uniform fs (idle / attack carry none)
 // Run: node scripts/virga_wings_test.mjs
 import sharp from 'sharp';
 import { readFileSync } from 'node:fs';
@@ -35,7 +40,7 @@ const margins = async (p) => {
 };
 
 let worst = 1e9, worstAt = '', badCanvas = [];
-for (const st of ['idle', 'walk', 'attack']) {
+for (const st of ['idle', 'walk', 'attack', 'fly']) {
   for (let i = 0; i < 9; i++) {
     const p = `Sprites/bosses/zodiac/${st}/virgo_${i}.webp`;
     const { W, H, m } = await margins(p);
@@ -43,20 +48,17 @@ for (const st of ['idle', 'walk', 'attack']) {
     if (W !== 1332 || H !== 1332) badCanvas.push(`${st}/${i} ${W}x${H}`);
   }
 }
-ok('every idle/walk/attack frame clears the feather probe by a real margin',
+ok('every idle/walk/attack/fly frame clears the feather probe by a real margin',
    worst >= MIN, `tightest: ${worstAt} at ${worst}px (was 0-3px; probe cell is ~28px)`);
 ok('the canvas is unchanged at 1332x1332 (draw size derives from the long edge)',
-   badCanvas.length === 0, badCanvas.join(', ') || 'all 27 frames 1332x1332');
+   badCanvas.length === 0, badCanvas.join(', ') || 'all 36 frames 1332x1332');
 
-let flyWorst = 1e9;
-for (let i = 0; i < 9; i++) flyWorst = Math.min(flyWorst, (await margins(`Sprites/bosses/zodiac/fly/virgo_${i}.webp`)).m);
-ok('CONTROL: fly is untouched and still clean', flyWorst >= 60, `fly tightest margin ${flyWorst}px`);
 
 const es = readFileSync('data/sprite_edges.js', 'utf8');
 const tbl = JSON.parse(es.slice(es.indexOf('window.LX_SPRITE_EDGES = ') + 25, es.indexOf('};', es.indexOf('window.LX_SPRITE_EDGES = ')) + 1));
-const keys = Object.keys(tbl).filter((k) => /virgo/.test(k) && /zodiac\/(idle|walk|attack)/.test(k));
+const keys = Object.keys(tbl).filter((k) => /virgo/.test(k) && /zodiac\/(idle|walk|attack|fly)/.test(k));
 const flagged = keys.filter((k) => tbl[k] !== '');
-ok('the shipped edge table marks all 27 frames uncut', keys.length === 27 && flagged.length === 0,
+ok('the shipped edge table marks all 36 frames uncut', keys.length === 36 && flagged.length === 0,
    `${keys.length} keys, ${flagged.length} still flagged${flagged.length ? ': ' + flagged.slice(0, 3).join(', ') : ''}`);
 ok('CONTROL: the table still flags a genuinely cut sprite elsewhere (probe not neutered)',
    Object.values(tbl).some((v) => v !== ''), 'some sprites must still read as cut');
@@ -81,6 +83,13 @@ ok("calib compensates the recompose on all three states (same on-screen size)",
 // invariant is "fly never carries 1/K", not "fly has no entry".
 ok("...and fly does NOT carry the recompose compensation (it was never rescaled)",
    sOf("zodiac/fly") !== want, "fly s=" + sOf("zodiac/fly") + " (1/K=" + want + " here would resize the one clean state)");
+// v0.30.1382 virga-flap - the redrawn walk / fly draw her body smaller on the same canvas (the full flaps need the
+// room); a uniform fs puts it back to its old size (measured by a head + chest template match against the static).
+const fsOf = (k) => (V[k] && Array.isArray(V[k].fs)) ? V[k].fs : null;
+const uni = (k, v) => { const f = fsOf(k); return !!f && f.length === 9 && f.every((x) => x === v); };
+ok("the redrawn walk and fly keep her body size through a uniform per-frame scale (fs), not s",
+   uni("zodiac/walk", 1.055) && uni("zodiac/fly", 1.101) && sOf("zodiac/fly") === 1.14 && !fsOf("zodiac/idle") && !fsOf("zodiac/attack"),
+   "walk fs " + JSON.stringify(fsOf("zodiac/walk")) + ", fly fs " + JSON.stringify(fsOf("zodiac/fly")) + ", fly s " + sOf("zodiac/fly"));
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
