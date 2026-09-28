@@ -16147,7 +16147,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1306';
+const GAME_VERSION = 'v0.30.1307';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -70150,6 +70150,7 @@ function _lxPrewarmBossSets(type, zodiacSign) {
   try {
     if (!type) return;
     if (typeof _lxPrewarmMobFx === 'function') _lxPrewarmMobFx(type, true);   // v0.30.636 - a boss's swing, column, telegraph and ward art too
+    if (typeof _lxGbPrewarm === 'function') _lxGbPrewarm();   // v0.30.1307 perf - the gold sticker ladder, on the number Worker, before the first hit
     const stores = [];
     const add = (S) => { if (typeof S !== 'undefined' && S) stores.push(S); };
     try { add(BOSS_IDLE_FRAMES); } catch (e) {}
@@ -159476,23 +159477,24 @@ let _LX_DN_WORKER_ON = true;
 var _LX_DN_W = null, _lxDnWDead = false, _lxDnWFails = 0;
 const _lxDnWPend = new Map(), _lxDnWSync = new Set();
 // the originals, captured as the script loads: a probe or test that wraps one later must not become the Worker source
-var _lxDnWSrc = [_mixHex, _lxPlainGrad, _lxDnAtlasBuild];
+var _lxDnWSrc = [_mixHex, _lxPlainGrad, _lxDnAtlasBuild, _lxGbAtlasBuild];   // v0.30.1307 perf - the gold sticker builder too
 function _lxDnAtlasFree(cv) { try { if (cv && typeof cv.close === 'function') cv.close(); else if (cv) cv.width = cv.height = 0; } catch (e) {} }
 function _lxDnWorker() {
   if (_LX_DN_W) return _LX_DN_W;
   if (_lxDnWDead) return null;
   try {
     if (typeof Worker !== 'function' || typeof OffscreenCanvas !== 'function' || typeof OffscreenCanvas.prototype.transferToImageBitmap !== 'function' || typeof Blob !== 'function' || typeof URL === 'undefined' || !URL.createObjectURL) { _lxDnWDead = true; return null; }
-    if (!['_mixHex', '_lxPlainGrad', '_lxDnAtlasBuild'].every((n, i) => String(_lxDnWSrc[i]).indexOf('function ' + n + '(') === 0)) { _lxDnWDead = true; return null; }
+    if (!['_mixHex', '_lxPlainGrad', '_lxDnAtlasBuild', '_lxGbAtlasBuild'].every((n, i) => String(_lxDnWSrc[i]).indexOf('function ' + n + '(') === 0)) { _lxDnWDead = true; return null; }
     const src = [
       'const document = { createElement: function () { return new OffscreenCanvas(1, 1); } };',
       'const _dnPlainGrad = new Map();',
       'const _LX_DN_ATLAS_CHARS = ' + JSON.stringify(_LX_DN_ATLAS_CHARS) + ';',
-      _lxDnWSrc[0].toString(), _lxDnWSrc[1].toString(), _lxDnWSrc[2].toString(),
-      'onmessage = function (e) { const j = e.data; let at = null; try { at = _lxDnAtlasBuild(j.b0, j.px, j.baseSize, j.d, j.col, j.tk, j.lowFx, j.stress, j.dpr); } catch (err) { at = null; }',
+      'const LX_GB_WHITE = ' + LX_GB_WHITE + ', LX_GB_BLACK = ' + LX_GB_BLACK + ', LX_GB_DILATE = ' + LX_GB_DILATE + ', LX_GB_SHADOW_X = ' + LX_GB_SHADOW_X + ', LX_GB_SHADOW_Y = ' + LX_GB_SHADOW_Y + ', LX_GB_SHADOW_A = ' + LX_GB_SHADOW_A + ';',
+      _lxDnWSrc[0].toString(), _lxDnWSrc[1].toString(), _lxDnWSrc[2].toString(), _lxDnWSrc[3].toString(),
+      'onmessage = function (e) { const j = e.data; let at = null; try { at = j.kind === "gb" ? _lxGbAtlasBuild(j.b0, j.px, j.crit, j.col, j.stress, j.dpr) : _lxDnAtlasBuild(j.b0, j.px, j.baseSize, j.d, j.col, j.tk, j.lowFx, j.stress, j.dpr); } catch (err) { at = null; }',
       '  if (!at || !at.cv || !at.cv.width) { postMessage({ key: j.key, fail: 1 }); return; }',
       '  let bm = null; try { bm = at.cv.transferToImageBitmap(); } catch (err) { postMessage({ key: j.key, fail: 1 }); return; }',
-      '  postMessage({ key: j.key, bm: bm, cells: Array.from(at.cells.entries()), pad: at.pad, base: at.base, cellH: at.cellH, rowH: at.rowH, rows: at.rows, dpr: at.dpr, px: at.px }, [bm]); };',
+      '  postMessage({ key: j.key, bm: bm, cells: Array.from(at.cells.entries()), pad: at.pad, base: at.base, cellH: at.cellH, rowH: at.rowH, rows: at.rows, dpr: at.dpr, px: at.px, shx: at.shx, shy: at.shy }, [bm]); };',
     ].join('\n');
     const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
     w.onmessage = (e) => { try { _lxDnWAdopt(e.data); } catch (err) {} };
@@ -159507,7 +159509,7 @@ function _lxDnWAdopt(m) {
   _lxDnWPend.delete(m.key);
   if (m.fail) { _lxDnWSync.add(m.key); if (++_lxDnWFails >= 6) _lxDnWDead = true; return; }
   if (_LX_DN_ATLAS.get(m.key)) { _lxDnAtlasFree(m.bm); return; }
-  const at = { cv: m.bm, cells: new Map(m.cells), pad: m.pad, base: m.base, cellH: m.cellH, rowH: m.rowH, rows: m.rows, dpr: m.dpr, px: m.px };
+  const at = { cv: m.bm, cells: new Map(m.cells), pad: m.pad, base: m.base, cellH: m.cellH, rowH: m.rowH, rows: m.rows, dpr: m.dpr, px: m.px, shx: m.shx, shy: m.shy };   // v0.30.1307 perf - a sticker atlas's drop too
   _LX_DN_ATLAS.set(m.key, at); _lxDnAtlasPx += at.px;
   for (const k of _LX_DN_ATLAS.keys()) {
     if (_lxDnAtlasPx <= _LX_DN_ATLAS_MAX_PX || k === m.key) break;
@@ -159712,6 +159714,42 @@ function _lxDnAtlasBlit(at, txt, scale, rotated, fit) {
 // > 7.5); below that the opaque border covers it on every pop frame, and on a fading frame it would show through the
 // half-transparent border as at most a 9% gold tint. Low-fx only, where the live path draws no glow, flash or highlight:
 // those are the heavy scenes, and elsewhere nothing changes.
+// v0.30.1307 perf - ask the number Worker for a gold sticker atlas (the figure atlases have gone there since v0.30.1239).
+// true: posted now, or already out, or the queue is full - the sticker draws live this frame, as it did while its atlas
+// was not built. false: this key builds on the main thread as before (no Worker, the Worker is gone, or its job failed
+// or was lost for 2 s).
+function _lxGbAtlasRequest(b0, px, crit, col, stress, dpr, key) {
+  if (!key) key = 'gb|' + b0 + '|' + px + '|' + (stress ? 's' + (crit ? 1 : 0) : 'n') + '|' + col + '|' + dpr;
+  const pt = _lxDnWPend.get(key);
+  if (pt !== undefined) { if (performance.now() - pt < 2000) return true; _lxDnWPend.delete(key); _lxDnWSync.add(key); return false; }
+  if (!_LX_DN_WORKER_ON || _lxDnWSync.has(key)) return false;
+  const w = _lxDnWorker(); if (!w) return false;
+  if (_lxDnWPend.size >= 24) return true;
+  _lxDnWPend.set(key, performance.now());
+  try { w.postMessage({ kind: 'gb', key, b0, px, crit: !!crit, col, stress: !!stress, dpr }); return true; }
+  catch (e) { _lxDnWPend.delete(key); _lxDnWSync.add(key); return false; }
+}
+// v0.30.1307 perf - THE GOLD STICKER LADDER, ASKED FOR WHEN A BOSS SPAWNS. A B/G sticker pops from 0.06x through a ~2.4x
+// overshoot, so a fight's first stickers need about nine atlas sizes within their first frames. Each was a synchronous
+// build and then a first-draw texture upload of a 1-3.5 MP sheet: 45-115 ms hitches in the first seconds of a boss fight
+// (probe, Gravitos: 8 sticker builds in seconds 2-5 and none after - a cold start, not churn). The sizes are known in
+// advance - one base size, one gold, the 1.12 ladder - so the Worker builds them while the boss makes its entrance.
+function _lxGbPrewarm() {
+  try {
+    if (!_LX_GB_ATLAS_ON || !_LX_DN_WORKER_ON || !_lxDnWorker()) return 0;   // without the Worker, a prewarm would be the hitch itself
+    const uiK = (game._uiScale > 0) ? game._uiScale : 1;
+    const b0 = ((LX_GB_ROW_SIZE + 4) * uiK) | 0;
+    const dprNow = Math.max(0.25, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : ((typeof window !== 'undefined' && window.devicePixelRatio) || 1)));
+    const dpr = _lxDnAtlasDpr(dprNow);
+    let n = 0;
+    for (let k = 0; k <= 8; k++) {
+      const px = _lxDnAtlasPx4(b0, Math.pow(_LX_DN_ATLAS_STEP, k));
+      const key = 'gb|' + b0 + '|' + px + '|n|' + LX_GB_ROW_COL + '|' + dpr;
+      if (!_LX_DN_ATLAS.has(key) && _lxGbAtlasRequest(b0, px, false, LX_GB_ROW_COL, false, dpr, key)) n++;
+    }
+    return n;
+  } catch (e) { return 0; }
+}
 let _LX_GB_ATLAS_ON = true;
 function _lxGbAtlasGet(b0, px, crit, col, stress, dpr) {
   const key = 'gb|' + b0 + '|' + px + '|' + (stress ? 's' + (crit ? 1 : 0) : 'n') + '|' + col + '|' + dpr;
@@ -159720,6 +159758,7 @@ function _lxGbAtlasGet(b0, px, crit, col, stress, dpr) {
     if (at) { _LX_DN_ATLAS.delete(key); _LX_DN_ATLAS.set(key, at); }
     return at;
   }
+  if (_lxGbAtlasRequest(b0, px, crit, col, stress, dpr, key)) return null;   // v0.30.1307 perf - on the number Worker: live until it lands
   if (_lxDnAtlasBudget <= 0) return null;
   _lxDnAtlasBudget--;
   at = _lxGbAtlasBuild(b0, px, crit, col, stress, dpr);
