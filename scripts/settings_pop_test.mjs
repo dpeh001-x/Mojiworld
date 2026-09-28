@@ -45,7 +45,7 @@ const probe = () => {
   const m = document.getElementById('settings-modal'), rc = (e) => e.getBoundingClientRect();
   const cols = [...m.querySelectorAll('.set-cols > .set-col')], cards = [...m.querySelectorAll('.set-grp')];
   const ids = ['set-scale', 'set-uiscale', 'set-fullscreen-row', 'set-fdesk', 'set-bgm', 'set-sfx', 'set-mute', 'set-bgmute', 'set-difficulty', 'set-hotkeys-row',
-    'set-tutorial-open', 'set-debug', 'set-gfx', 'set-gpu-row', 'set-fx-weather', 'set-fx-ambient', 'set-fx-shadows', 'set-fx-dmgnum', 'set-lowfx', 'set-reducemotion',
+    'set-tutorial-open', 'set-debug', 'set-gfx', 'set-sharp-row', 'set-gpu-row', 'set-fx-weather', 'set-fx-ambient', 'set-fx-shadows', 'set-fx-dmgnum', 'set-lowfx', 'set-reducemotion',
     'set-shake', 'set-flash', 'set-cbrarity', 'set-quit-row', 'save-import-file'];
   const whites = [...m.querySelectorAll('*')].filter((e) => { const c = getComputedStyle(e).backgroundColor.match(/[0-9.]+/g);
     return c && (c.length < 4 || +c[3] > 0.5) && +c[0] >= 225 && +c[1] >= 225 && +c[2] >= 225 && e.getClientRects().length; }).map((e) => e.id || e.className || e.tagName);
@@ -97,7 +97,8 @@ await b.close(); srv.kill();
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const J = (o) => JSON.stringify(o);
 ok('six cards in two side-by-side columns: Screen, Sound, Game | Graphics, Comfort, Save', J(D.cards) === J(['Screen', 'Sound', 'Game', 'Graphics', 'Comfort', 'Save']) && J(D.perCol) === '[3,3]' && D.side, { cards: D.cards, perCol: D.perCol, side: D.side });
-ok('every setting is still in the panel exactly once (25 rows)', D.idCounts.every((n) => n === 1) && D.rows === 25, { counts: D.idCounts.join(''), rows: D.rows });
+// v0.30.1227 (86c075f5) added the Sharp Display row to the Graphics card: 26 rows
+ok('every setting is still in the panel exactly once (26 rows)', D.idCounts.every((n) => n === 1) && D.rows === 26, { counts: D.idCounts.join(''), rows: D.rows });
 ok('dark: cards are #15131c panels and nothing has a paper-white background', D.cardBg === 'rgb(21, 19, 28)' && !D.whites.length, { card: D.cardBg, whites: D.whites.slice(0, 4) });
 ok('the title is a tilted Fredoka logo with a pink drop', /^"?Fredoka/.test(D.h2Font) && /rgb[(]255, 61, 139[)]/.test(D.h2Shadow) && D.h2Tilt !== 'none', { font: D.h2Font, tilt: D.h2Tilt });
 ok('labels are Fredoka and keep the thick black outline (v0.29 typography, per user)', /^"?Fredoka/.test(D.labFont) && D.labStroke === '3px', { font: D.labFont, stroke: D.labStroke });
