@@ -44,12 +44,14 @@ try {
       let n = 0, sx = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b2[i]) + Math.abs(a[i + 1] - b2[i + 1]) + Math.abs(a[i + 2] - b2[i + 2]) > 30) { n++; sx += (i / 4) % 300; }
       return { n, x: n ? Math.round(sx / n) : null };
     };
-    // the trail strokes: every stroke() in the trail colours, with its alpha
-    const TRAIL = /^rgba\((255,255,255|255,240,180|210,170,255),([0-9.e-]+)\)$/;
+    // the trail strokes: every stroke() in the trail colours, with its alpha. The warrior's trail has been a faint red
+    // crescent since the overhead chop (a filled gradient, rgba(255,96,96,a) at its head): its gradient alphas count too.
+    const TRAIL = /^rgba\((255,255,255|255,240,180|210,170,255),([0-9.e-]+)\)$/, CRESCENT = /^rgba\((255,96,96),([0-9.e-]+)\)$/;
     const trailAlphas = (cls, t) => {
-      const orig = CanvasRenderingContext2D.prototype.stroke, got = [];
+      const orig = CanvasRenderingContext2D.prototype.stroke, oStop = CanvasGradient.prototype.addColorStop, got = [];
       CanvasRenderingContext2D.prototype.stroke = function (...args) { const m = TRAIL.exec(String(this.strokeStyle).replace(/\s/g, '')); if (m) got.push(+m[2]); return orig.apply(this, args); };
-      try { draw(cls, t, 1); } finally { CanvasRenderingContext2D.prototype.stroke = orig; }
+      CanvasGradient.prototype.addColorStop = function (o, col) { const m = CRESCENT.exec(String(col).replace(/\s/g, '')); if (m) got.push(+m[2]); return oStop.call(this, o, col); };
+      try { draw(cls, t, 1); } finally { CanvasRenderingContext2D.prototype.stroke = orig; CanvasGradient.prototype.addColorStop = oStop; }
       return got;
     };
     const out = {};
@@ -77,7 +79,7 @@ try {
   ok('the other classes draw no stab burst', o.warrior === 0 && o.archer === 0 && o.mage === 0, { warrior: o.warrior, archer: o.archer, mage: o.mage });
   const none = (arr) => arr.every((a) => a < 0.005);
   ok('warrior: the swing arc draws nothing before or after the swing (no faint arc by the feet / behind the head)', none(o.warTrail.t0) && none(o.warTrail.t1), o.warTrail);
-  ok('warrior: the swing arc still peaks as bright as before', o.warTrail.peak >= 0.6, o.warTrail.peak);
+  ok('warrior: the swing trail still shows mid-swing (the gold arc, since the chop a faint red crescent)', o.warTrail.peak >= 0.3, o.warTrail.peak);
   ok('rogue: the stab line draws nothing before or after the stab (no dot on the hand)', none(o.rogueTrail.t0) && none(o.rogueTrail.t1), o.rogueTrail);
   ok('rogue: the stab line still peaks as bright as before', o.rogueTrail.peak >= 0.6, o.rogueTrail.peak);
   ok('no page errors', errs.length === 0, errs);

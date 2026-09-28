@@ -188,14 +188,20 @@ try {
     const mDef = POWERUPS.find((p) => p.id === 'multi');
     res.multiRange = { min: mDef.min, max: mDef.max };
     {
-      const shot = () => {
+      const shot = async () => {
         game.projectiles.length = 0; player.skillCooldowns = {}; player.mp = 9e6;
         try { castSkill('arrowShot'); } catch (e) {}
+        // since the arrow leaves on the drawn release (_lxArrowSync), a real cast fires it a few game frames later:
+        // step the game clock past the release and let the release timer run
+        if (typeof HV_ARCHER_RELEASE_RAW_T === 'number') {
+          game.paused = false; game.time += Math.ceil(HV_ARCHER_RELEASE_RAW_T * HERO_VEC_ATTACK_FRAMES) + 1;
+          for (let k = 0; k < 40 && !game.projectiles.some((p) => p && p.skill === 'arrow'); k++) await new Promise((r) => setTimeout(r, 10));
+        }
         game.time++; try { updateProjectiles(16); } catch (e) {}
         return game.projectiles.map((p) => Math.round(p.damage || 0));
       };
-      build('archer'); const off = shot();
-      build('archer'); equip('multi'); const on = shot();
+      build('archer'); const off = await shot();
+      build('archer'); equip('multi'); const on = await shot();
       const sum = (a) => a.reduce((x, y) => x + y, 0);
       res.echo = { off, on, offTotal: sum(off), onTotal: sum(on),
         gainPct: +(((sum(on) - sum(off)) / Math.max(1, sum(off))) * 100).toFixed(1) };

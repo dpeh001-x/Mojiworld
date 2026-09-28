@@ -3,7 +3,10 @@
 //   * nothing before the release frame (the arrow leaves at HERO_VEC_ARCHER_RELEASE_T)
 //   * just after it, a warm flash appears, and it sits AHEAD of the archer (toward the target) whichever way it faces
 //   * it is gone well before the swing ends
+//   * it sits where the nocked arrow leaves the bow (the bow grip in the aimed pose), not at the drawing hand
 //   * the other classes draw no flash
+//   * a real Z shot: no arrow on the press, the arrow leaves on the drawn release frame (per user: "sync the arrow
+//     release timing"; it flew ~240 ms before the drawn release)
 //   node scripts/archer_flash_test.mjs [port]   (MOJI_GAME_FILE honored)
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -41,17 +44,32 @@ try {
     const flashOf = (cls, t, f) => {
       if (typeof real !== 'function') return { n: 0, x: null };
       const a = frame(cls, t, f); window._hvArcherStringFlash = function () {}; const b2 = frame(cls, t, f); window._hvArcherStringFlash = real;
-      let n = 0, sx = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b2[i]) + Math.abs(a[i + 1] - b2[i + 1]) + Math.abs(a[i + 2] - b2[i + 2]) > 30) { n++; sx += (i / 4) % 300; }
-      return { n, x: n ? Math.round(sx / n) : null };
+      let n = 0, sx = 0, sy = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b2[i]) + Math.abs(a[i + 1] - b2[i + 1]) + Math.abs(a[i + 2] - b2[i + 2]) > 30) { n++; sx += (i / 4) % 300; sy += Math.floor((i / 4) / 300); }
+      return { n, x: n ? Math.round(sx / n) : null, y: n ? Math.round(sy / n) : null };
     };
-    const R = HERO_VEC_ARCHER_RELEASE_T, out = {};
+    // the release on the RAW animation clock (the shot has played on a quicker, warped clock since _lxArrowSync)
+    const R = (typeof HV_ARCHER_RELEASE_RAW_T === 'number') ? HV_ARCHER_RELEASE_RAW_T : HERO_VEC_ARCHER_RELEASE_T, out = {};
     for (const cls of ['archer', 'warrior', 'mage', 'rogue']) {
       try { applyClass(cls); } catch (e) {}
       loadMap('town'); await wait(700); player.vx = 0; player.attacking = false;
       if (cls === 'archer') for (const f of [1, -1]) out['archer' + f] = { before: flashOf(cls, R - 0.01, f).n, after: flashOf(cls, R + 0.04, f), gone: flashOf(cls, R + 0.22, f).n };
       else out[cls] = flashOf(cls, R + 0.04, 1).n;
     }
-    return { out, CX };
+    // the bow grip in the aimed pose (the procedural bow's origin), canvas y
+    const realW = HERO_VEC_WEAPON.archer; let gy = null;
+    try { applyClass('archer'); } catch (e) {} loadMap('town'); await wait(500);
+    HERO_VEC_WEAPON.archer = function (c, o) { gy = c.getTransform().transformPoint(new DOMPoint(0, 0)).y; return realW.call(this, c, o); };
+    try { frame('archer', R - 0.01, 1); } finally { HERO_VEC_WEAPON.archer = realW; }
+    // a REAL cast: the arrow must leave on the drawn release - nothing on the press, then one arrow once the game clock
+    // reaches the release frame (R x HERO_VEC_ATTACK_FRAMES after the cast), not ~240 ms before it
+    game.paused = false; player.skillCooldowns = {}; player.attacking = false; player._heroAtkAt = 0; player.mp = 9e6;
+    game.projectiles.length = 0;
+    const g0 = game.time, relF = R * HERO_VEC_ATTACK_FRAMES;
+    castSkill('arrowShot');
+    const onPress = game.projectiles.filter((p) => p && p.skill === 'arrow').length;
+    let firstAt = null;
+    for (let k = 0; k < 120 && firstAt == null; k++) { await wait(8); game.paused = false; if (game.projectiles.some((p) => p && p.skill === 'arrow')) firstAt = game.time - g0; }
+    return { out, CX, gripY: gy, sync: { onPress, firstAt, relF: Math.round(relF * 100) / 100 } };
   });
   const o = r.out;
   for (const f of [1, -1]) {
@@ -60,8 +78,11 @@ try {
     ok(`archer ${tag}: a warm flash right after the release`, x.after.n >= 60, x.after);
     ok(`archer ${tag}: the flash sits ahead of the archer, toward the target`, x.after.x != null && (f > 0 ? x.after.x > r.CX + 8 : x.after.x < r.CX - 8), x.after);
     ok(`archer ${tag}: it is gone well before the swing ends`, x.gone === 0, x.gone);
+    ok(`archer ${tag}: the flash sits where the nocked arrow leaves the bow (grip height), not at the drawing hand`, x.after.y != null && r.gripY != null && Math.abs(x.after.y - r.gripY) <= 6, { flashY: x.after.y, gripY: r.gripY });
   }
   ok('the other classes draw no string flash', o.warrior === 0 && o.mage === 0 && o.rogue === 0, { warrior: o.warrior, mage: o.mage, rogue: o.rogue });
+  // the headless clock steps ~2 frames at a time, so "on the release" is within 3 frames of it
+  ok('a real shot: no arrow on the press, the arrow leaves on the drawn release frame', r.sync.onPress === 0 && r.sync.firstAt != null && Math.abs(r.sync.firstAt - r.sync.relF) <= 3, r.sync);
   ok('no page errors', errs.length === 0, errs);
 } finally { await b.close(); srv.kill(); }
 let pass = 0;

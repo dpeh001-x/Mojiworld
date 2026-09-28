@@ -16149,7 +16149,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1394';
+const GAME_VERSION = 'v0.30.1395';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -82805,7 +82805,7 @@ function castSkill(id) {
   // v0.25.796 — Skill SFX. Single chokepoint covers every active skill
   // (alias map collapses families of skills onto shared clips so a single
   // audio/skill/strike.mp3 handles Slash + Power Strike + Stab, etc.).
-  if (typeof _playSkillSfx === 'function') _playSkillSfx(id);
+  if (typeof _playSkillSfx === 'function' && !(id === 'arrowShot' && typeof HV_ARCHER_RELEASE_MS === 'number')) _playSkillSfx(id);   // v0.30.1395 - the arrow's sound plays on its release
   // Milestone: Spell Echo — spells prime next basic attack for 3s
   if (hasMilestone('spellEcho') && isSpell && s.slot !== 'd') {
     player._spellEcho = 3000;
@@ -83129,7 +83129,19 @@ function castSkill(id) {
   // v0.30.854 - rank attribution: hits landed by this code are this skill's, and so are the projectiles / hazards it creates
   const _rsPrev = _lxRankSrc, _rsP0 = game.projectiles.length, _rsH0 = game.hazards ? game.hazards.length : 0;
   let _castNoOp = false; _lxRankSrc = id;
-  try { _castNoOp = (f && f() === '_lxNoCast'); }
+  try {
+    if (id === 'arrowShot' && f && typeof HV_ARCHER_RELEASE_MS === 'number') {   // v0.30.1395 - _lxArrowSync: the arrow leaves on the drawn release
+      // due on the GAME clock the animation runs on (frames), so a slow frame rate cannot put the two apart; a pause
+      // freezes both
+      const _arMap = game.currentMap, _arDue = (game.time || 0) + HV_ARCHER_RELEASE_RAW_T * HERO_VEC_ATTACK_FRAMES;
+      const _arFire = () => {
+        if (player.hp <= 0 || game.currentMap !== _arMap) return;
+        if (game.paused || (game.time || 0) < _arDue - 0.5) { scheduleSkillTimer(_arFire, 8); return; }
+        f(); if (typeof _playSkillSfx === 'function') _playSkillSfx(id);
+      };
+      scheduleSkillTimer(_arFire, Math.max(0, HV_ARCHER_RELEASE_MS - 34));
+    } else _castNoOp = (f && f() === '_lxNoCast');
+  }
   finally { _lxRankSrc = _rsPrev; _lxRankStampNew(game.projectiles, _rsP0, id); _lxRankStampNew(game.hazards, _rsH0, id); }
   if (_castNoOp) { player.skillCooldowns[id] = _preCastCd; player.mp = _preCastMp; }
   // v0.29.362 — DOPPEL CAST (Tier-1). A successful cast has a chance to fire
@@ -135377,10 +135389,12 @@ const HERO_VEC_WEAPON = {
     c.beginPath();
     c.moveTo(0, -16); c.quadraticCurveTo(9, 0, 0, 16);
     c.stroke();
-    c.strokeStyle = '#efe0b0'; c.lineWidth = 1;
-    c.beginPath();
-    c.moveTo(0, -16); c.lineTo(0, 16);
-    c.stroke();
+    if (!_hvBowPulled) {   // v0.30.1395 - while drawn, the string is pulled back to the hand (_drawVectorHero)
+      c.strokeStyle = '#efe0b0'; c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(0, -16); c.lineTo(0, 16);
+      c.stroke();
+    }
     c.fillStyle = '#3a2010';
     c.fillRect(-1, -3, 2.5, 6);
     c.strokeStyle = OUT; c.lineWidth = 1.5;
@@ -136213,26 +136227,36 @@ function _heroVecAttackLegBob(t, side) {
 // v0.25.206 — More dramatic. Bigger arc (−2.95 to +2.50, total 5.45
 // vs prior 4.30 = +27%), anticipation HOLD at apex of windup,
 // faster snap-strike, heavier follow-through.
-function _heroVecWarriorFrontArm(t) {
-  // Sword-side (front) arm. Negative = up/back, positive = forward/down.
-  if (t < 0.18) return -0.30 - _heroEaseOutCubic(t / 0.18) * 2.65;          // fast windup overhead-back to −2.95
-  if (t < 0.27) return -2.95;                                                // ANTICIPATION HOLD — sword cocked
-  if (t < 0.55) return -2.95 + _heroEaseOutCubic((t - 0.27) / 0.28) * 5.45; // SNAP strike to +2.50
-  return 2.50 - _heroVecAttackRecover(t) * 1.95;                            // heavy follow-through to +0.55
+// v0.30.1395 - _lxWarriorChop: THE WARRIOR'S CHOP (per user: "the warrior hand arm weapon swing" can be improved). The swing
+// was a windmill: the sword arm went overhead, forward, down and round to up-behind (5.45 rad), the off-hand mirrored it
+// the other way, and the blade - authored along the hand's -y, back up the forearm - ended pointing up and back while
+// the empty-looking front hand reached forward. Now it is an overhead chop: both arms rise forward and over the head
+// together with the blade hanging behind, chop forward and down with the wrist whipping the blade over the top so it
+// extends out of the hands, follow through low, and lift the blade back to its forward carry (so the exit blend barely
+// moves it). One winding throughout (no wrap), so the flow blends never spin a limb.
+const HV_WAR_KEYS = [
+  // t, sword arm, off arm, wrist, ease into this key
+  [0.00, -0.30, -0.10, 0.20],
+  [0.18, -3.50, -3.20, 1.60, 'out'],
+  [0.27, -3.66, -3.36, 1.74, 'io'],   // cocked overhead, blade hanging behind
+  [0.52, -1.05, -0.85, 2.45, 'out'],  // the chop lands: arms forward-down, the blade cutting forward-down past the hands
+  [0.62, -0.72, -0.55, 2.67, 'out'],  // follow-through
+  [0.80, -0.50, -0.35, 2.43, 'io'],
+  [1.00, -0.30, -0.15, 1.87, 'io'],   // the blade back up to its forward carry
+];
+function _hvWarKey(t, col) {
+  const K = HV_WAR_KEYS;
+  if (t <= K[0][0]) return K[0][col];
+  for (let i = 1; i < K.length; i++) if (t <= K[i][0]) {
+    const a = K[i - 1], b = K[i], u = (t - a[0]) / (b[0] - a[0]);
+    const e = b[4] === 'out' ? _heroEaseOutCubic(u) : b[4] === 'io' ? _heroEaseInOutSine(u) : u;
+    return a[col] + (b[col] - a[col]) * e;
+  }
+  return K[K.length - 1][col];
 }
-function _heroVecWarriorBackArm(t) {
-  // Off-hand grip arm — mirrors front arm so both hands stay on the
-  // hilt through the entire swing.
-  if (t < 0.18) return 0.30 + _heroEaseOutCubic(t / 0.18) * 2.65;
-  if (t < 0.27) return 2.95;
-  if (t < 0.55) return 2.95 - _heroEaseOutCubic((t - 0.27) / 0.28) * 5.45;
-  return -2.50 + _heroVecAttackRecover(t) * 1.95;
-}
-function _heroVecWarriorWrist(t) {
-  if (t < 0.27) return -0.36 - _heroEaseOutCubic(t / 0.27) * 0.20;
-  if (t < 0.55) return -0.56 + _heroEaseOutCubic((t - 0.27) / 0.28) * 1.18;
-  return 0.62 - _heroVecAttackRecover(t) * 0.62;
-}
+function _heroVecWarriorFrontArm(t) { return _hvWarKey(t, 1); }
+function _heroVecWarriorBackArm(t) { return _hvWarKey(t, 2); }
+function _heroVecWarriorWrist(t) { return _hvWarKey(t, 3); }
 function _heroVecWarriorBodyBob(t) {
   return {
     x: -_heroVecAttackWindup(t) * 2.4 + _heroVecAttackStrike(t) * 5.5 - _heroVecAttackRecover(t) * 3.0,
@@ -136501,7 +136525,7 @@ function _heroVecRogueLegBob(t, side) {
 // v0.25.191 — Archer attack: pull bowstring → hold → release.
 // v0.25.394 — With the bow anchored to the left hand, armL holds the
 // bow steady forward-up while armR pulls and releases the string.
-function _heroVecArcherFrontArm(t) {
+function _heroVecArcherFrontArmBase(t) {   // v0.30.1395 - _heroVecArcherFrontArm (the draw block) adds the lift toward the line of the shot
   // v0.25.194 — Bow stays realistic. Front arm raises quickly into a
   // stable forward-up hold, locks there through the entire draw +
   // release (no rotation while aiming), with only a small recoil
@@ -136670,7 +136694,9 @@ function _hvAttackFlow(animName, t, opts) {
     P = _hvMixPose(_hvAttackBase(preview), A, w);
   }
   if (!preview) player._heroAtkLast = P;
-  const ch = (k) => { const o = {}; for (const b of HV_BONES) { const v = P[k][b]; o[b] = () => v; } return o; };
+  // v0.30.1395 - the head stays on the torso: a swing may nod it sideways or dip it, never lift it off the neck (the swings
+  // lifted it straight up - the warrior 6 units mid-chop, the rogue and mage 1.5 - a visible gap under the chin)
+  const ch = (k) => { const o = {}; for (const b of HV_BONES) { let v = P[k][b]; if (k === 'bob' && b === 'head' && v && v.y < 0) v = { x: v.x, y: 0 }; o[b] = () => v; } return o; };
   return { rot: ch('rot'), def: ch('def'), bob: ch('bob'), w };
 }
 // The hair trails the head: head-local offset against the head's swing speed (spine + head rotation, rad per unit t)
@@ -136704,25 +136730,31 @@ function _hvMageCastBody(t) {
 // ~70 ms, travelling forward with the hand's release snap. Drawn in the drawing hand's frame turned back to the
 // character's own (forward = toward the target, mirrored with the hero), just ahead of the hand so it never whites the
 // hand out, and faded by the swing's weight.
-const HV_ARCHER_FLASH_T = 0.18;
+const HV_ARCHER_FLASH_T = 0.11;   // v0.30.1395 - in the archer's warped time since the draw quickened (still ~75 ms)
+// v0.30.1395 - _lxArcherFlash2: the release flash redesigned and moved to where the arrow really leaves (per user: "this part
+// of the archer can be redesigned and positioned at the arrow shooting height"). It sat at the drawing hand, above the
+// shot, as a glow, a bracket arc and three dashes. Now it is drawn where the nocked arrow leaves the bow - the bow grip
+// in the aimed pose just before the release, on the drawn arrow's line - turned to the aim (arrow-up / arrow-down tilt it):
+// a bright core, a squashed shock ring punched out along the flight, two chevrons racing after the arrow and a long
+// thin glint on the flight line - all warm gold, gone in ~70 ms.
 function _hvArcherStringFlash(c, t, w) {
   const u = (t - HERO_VEC_ARCHER_RELEASE_T) / HV_ARCHER_FLASH_T;
   if (!(u >= 0 && u < 1) || !(w > 0)) return;
-  const a = Math.pow(1 - u, 1.6) * w, e = _heroEaseOutCubic(u);
-  c.save(); c.translate(6, 0); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
-  const R = 7 + 7 * e, g = c.createRadialGradient(0, 0, 0, 0, 0, R);
-  g.addColorStop(0, 'rgba(255,236,170,' + (0.75 * a) + ')'); g.addColorStop(0.5, 'rgba(255,190,90,' + (0.35 * a) + ')'); g.addColorStop(1, 'rgba(255,170,60,0)');
-  c.fillStyle = g; c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.fill();
-  const L = 9 + 8 * e, S = 3 + 2 * e;   // the glint: long along the shot, short across it
-  c.fillStyle = 'rgba(255,248,215,' + (0.9 * a) + ')';
-  c.beginPath(); c.moveTo(L, 0); c.lineTo(1, 0.9); c.lineTo(0, S); c.lineTo(-1, 0.9); c.lineTo(-L * 0.55, 0); c.lineTo(-1, -0.9); c.lineTo(0, -S); c.lineTo(1, -0.9); c.closePath(); c.fill();
-  c.strokeStyle = 'rgba(255,240,200,' + (0.8 * a) + ')'; c.lineWidth = 1.2;   // the string whipping forward
-  c.beginPath(); c.arc(-4 + 10 * e, 0, 9, -0.95, 0.95); c.stroke();
-  c.strokeStyle = 'rgba(255,220,150,' + (0.65 * a) + ')'; c.lineWidth = 1;   // streaks after the arrow
-  for (const [yy, k] of [[-2.2, 0.8], [0, 1], [2.2, 0.7]]) {
-    const x0 = 6 + 16 * e;
-    c.beginPath(); c.moveTo(x0, yy); c.lineTo(x0 + 12 * k * (1 - u * 0.5), yy); c.stroke();
+  const a = Math.pow(1 - u, 1.4) * w, e = _heroEaseOutCubic(u);
+  c.save(); c.globalCompositeOperation = 'lighter'; c.lineCap = 'round'; c.lineJoin = 'round';
+  const R = 4 + 5 * e, g = c.createRadialGradient(1, 0, 0, 1, 0, R);   // the core
+  g.addColorStop(0, 'rgba(255,250,225,' + (0.95 * a) + ')'); g.addColorStop(0.45, 'rgba(255,208,110,' + (0.5 * a) + ')'); g.addColorStop(1, 'rgba(255,170,60,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(1, 0, R, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(255,226,150,' + (0.75 * a) + ')'; c.lineWidth = 1.4;   // the shock ring, across the flight
+  c.beginPath(); c.ellipse(3 + 9 * e, 0, 1.4 + 2.6 * e, 4 + 7 * e, 0, 0, Math.PI * 2); c.stroke();
+  for (const [x0, x1, s] of [[6, 24, 3.2], [11, 32, 2.4]]) {   // two chevrons racing after the arrow
+    const x = x0 + (x1 - x0) * e, h = s * (1 - 0.35 * e);
+    c.strokeStyle = 'rgba(255,236,176,' + (0.85 * a) + ')'; c.lineWidth = 1.3;
+    c.beginPath(); c.moveTo(x - h, -h); c.lineTo(x, 0); c.lineTo(x - h, h); c.stroke();
   }
+  const gl = c.createLinearGradient(-3, 0, 16 + 18 * e, 0);   // the glint on the flight line
+  gl.addColorStop(0, 'rgba(255,248,220,0)'); gl.addColorStop(0.25, 'rgba(255,248,220,' + (0.9 * a) + ')'); gl.addColorStop(1, 'rgba(255,220,140,0)');
+  c.strokeStyle = gl; c.lineWidth = 1.1; c.beginPath(); c.moveTo(-3, 0); c.lineTo(16 + 18 * e, 0); c.stroke();
   c.restore();
 }
 // v0.30.1377 - _lxRogueBurst: THE ROGUE'S STAB BURST (per user: "add the rogue stab impact burst too"). At full extension
@@ -136751,6 +136783,38 @@ function _hvRogueStabBurst(c, t, w, big) {
   }
   c.restore();
 }
+// v0.30.1395 - _lxArcherDraw: THE ARCHER'S DRAW (per user: "the archer pulling bow position of attack can also be nicer").
+// The bow was held by the far arm (its shoulder 12 units behind the body's centre), so even raised it sat at the chest
+// centre, hugged against the body, below the chin, with the drawing hand beside it. Now the shoulder turns toward the
+// target and the arm reaches: the bow is held out ahead of the body near shoulder height (drawn in front of the head
+// while aimed, where the big chibi head used to cover it), and a visible string is pulled back to the drawing hand at
+// the chin with an arrow nocked on it, snapping straight on the release. Reach eases in with the raise, holds through
+// the release, and eases back out in the recovery.
+let _hvBowPulled = false;   // the starter bow skips its own straight string while the pulled one is drawn
+// v0.30.1395 - _lxArrowSync: THE ARROW LEAVES ON THE RELEASE (per user: "sync the arrow release timing"; picked: the arrow
+// waits for the release, the draw quickens). The arrow used to fly the instant Z was pressed while the drawn release came
+// ~240 ms later. Now the shot plays on a warped clock - raise, pull and anchor twice as fast, the release at raw time
+// HV_ARCHER_RELEASE_RAW_T (~120 ms), the recoil and recovery stretched over the rest - and castSkill fires the real arrow
+// (and its sound) HV_ARCHER_RELEASE_MS after the press, on that same frame. Every archer curve keeps its own shape; they
+// are read at the warped time (curve time HERO_VEC_ARCHER_RELEASE_T = the release).
+const HV_ARCHER_RELEASE_RAW_T = 0.29;
+const HV_ARCHER_RELEASE_MS = Math.round(HV_ARCHER_RELEASE_RAW_T * HERO_VEC_ATTACK_FRAMES * 1000 / 60);
+function _hvArcherWarp(t) {
+  const R = HV_ARCHER_RELEASE_RAW_T, C = HERO_VEC_ARCHER_RELEASE_T;
+  return t <= R ? t * C / R : C + (t - R) * (1 - C) / (1 - R);
+}
+function _hvArcherReachK(t) {
+  if (t < 0.10) return _heroEaseOutCubic(_heroClamp01(t / 0.10));
+  if (t < 0.70) return 1;
+  return 1 - _heroEaseInOutSine(_heroClamp01((t - 0.70) / 0.22));
+}
+const HV_ARCHER_REACH = { x: 14, y: -2, stretch: 0.25, lift: 0.38 };
+function _hvArcherReach(t) {
+  const k = _hvArcherReachK(t);
+  return { bob: { x: HV_ARCHER_REACH.x * k, y: HV_ARCHER_REACH.y * k }, def: { sx: 1, sy: 1 + HV_ARCHER_REACH.stretch * k } };
+}
+// the bow arm, lifted toward the line of the shot while aiming (the bow counter-rotation reads this, so it cancels the lift too)
+function _heroVecArcherFrontArm(t) { return _heroVecArcherFrontArmBase(t) - HV_ARCHER_REACH.lift * _hvArcherReachK(t); }
 function _hvMageCastGlow(c, t, w) {
   const p = t < 0.05 ? t / 0.05 : Math.max(0, 1 - (t - 0.05) / 0.38), a = p * (w == null ? 1 : w);
   if (a <= 0.01) return;
@@ -137589,7 +137653,7 @@ const HERO_VEC_DEFORM = {
   // v0.25.191 — Archer attack deform: minimal squash/stretch. Weapon arm
   // holds steady; string arm has tension during the draw.
   attack_archer: {
-    armL:  t => ({ sx: 1, sy: 1 }),
+    armL:  t => _hvArcherReach(t).def,   // v0.30.1395 - the bow arm reaches
     armR:  t => ({ sx: 1, sy: 1 + _heroVecAttackStrike(t) * 0.06 }),
     legL:  t => _heroVecAttackMovingLegDeform(t, 'left'),
     legR:  t => _heroVecAttackMovingLegDeform(t, 'right'),
@@ -137756,6 +137820,7 @@ const HERO_VEC_BOB = {
     head:  t => ({ x: _heroVecAttackStrike(t) * 0.4, y: -Math.sin(t * Math.PI) * 0.6 }),
     legL:  t => _heroVecAttackMovingLegBob(t, 'left', null, _heroVecArcherAttackSpineBob),
     legR:  t => _heroVecAttackMovingLegBob(t, 'right', null, _heroVecArcherAttackSpineBob),
+    armL:  t => _hvArcherReach(t).bob,   // v0.30.1395 - the shoulder turns toward the target
     handL: () => ({ x: HERO_VEC_ARCHER_WEAPON_HAND_INSET_X, y: 0 }),
   },
   // v0.25.194 — Warrior 2-handed slash bob: heavier forward lurch.
@@ -138032,9 +138097,11 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // 1 px below, giving a slightly tighter foot-to-leg silhouette.
   const LEG_FOOT_Y = 13.0;
   const animName = opts.animName || _heroVecAnimFor();
-  const t = (opts.animTime != null) ? opts.animTime : _heroVecTimeNorm(animName);
+  const _tRaw = (opts.animTime != null) ? opts.animTime : _heroVecTimeNorm(animName);
+  const t = (animName === 'attack_archer' && typeof _hvArcherWarp === 'function') ? _hvArcherWarp(_tRaw) : _tRaw;   // v0.30.1395 - the quicker draw (_lxArrowSync)
   const _hvFlow = (typeof _hvAttackFlow === 'function') ? _hvAttackFlow(animName, t, opts) : null;   // v0.30.1371 - basic swings ease in and settle out
   const _hvFlowW = _hvFlow ? _hvFlow.w : 1;
+  _hvBowPulled = (animName === 'attack_archer' && t > 0.06 && t < HERO_VEC_ARCHER_RELEASE_T);   // v0.30.1395 - the pulled string replaces the starter bow's straight one
   const anim = _hvFlow ? _hvFlow.rot : (HERO_VEC_ANIMS[animName] || {});
   const deform = _hvFlow ? _hvFlow.def : (HERO_VEC_DEFORM[animName] || {});
   const bob = _hvFlow ? _hvFlow.bob : (HERO_VEC_BOB[animName] || {});
@@ -138240,6 +138307,46 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
         ctx.moveTo(0, -19);
         ctx.lineTo(0, -19 - 42 * big * stabA);
         ctx.stroke();
+      } else if (animName === 'attack_warrior') {
+        // v0.30.1395 - _lxWarriorChop: a smooth, faint red crescent rides the blade's own tip through the chop (per user: "the
+        // swing arc can be smoother instead of a line, make it faintly red", then "can trail longer from the start of the
+        // swing"). The blade's recent poses - back to where the chop starts, the blade cocked behind the head - are walked
+        // through the same chain the sword is drawn with (applyChain's pose override), smoothed into one curve, and filled
+        // as a crescent that is widest at the blade and tapers to nothing at the start of the swing - no hard edge line.
+        // It replaced a fixed arc around the shoulder that swept the floor on the far side of the body from the sword.
+        if (t > 0.22 && t < 0.84) {
+          const mats = [];
+          for (let k = 0; k <= 24; k++) {
+            const tk = t - k * 0.016; if (tk < 0.19) break;   // back to the top of the windup
+            ctx.save();
+            applyChain('handL', { deform: false, weaponLock: true, pose: k ? _hvAttackFlow(animName, tk, { animName }) : null });
+            applyWeaponCarryRotation();
+            mats.push(ctx.getTransform()); ctx.restore();
+          }
+          const tip = [], inn = [], n = mats.length;
+          mats.forEach((m, i) => {
+            const a = m.transformPoint(new DOMPoint(0, -34)), b2 = m.transformPoint(new DOMPoint(0, -12));   // reaching past the blade tip, so the sweep shows around the big chibi head
+            const w = 1 - 0.92 * Math.pow(i / Math.max(1, n - 1), 0.8);   // widest at the blade, tapering to a point at the start
+            tip.push(a); inn.push({ x: a.x + (b2.x - a.x) * w, y: a.y + (b2.y - a.y) * w });
+          });
+          if (n > 2) {
+            const up = _heroClamp01((t - 0.22) / 0.1), out = 1 - _heroClamp01((t - 0.6) / 0.24);
+            const fade = up * out * _hvFlowW;
+            // a smooth path through the points: quadratic segments between midpoints
+            const smooth = (pts, first) => {
+              if (first) ctx.moveTo(pts[0].x, pts[0].y); else ctx.lineTo(pts[0].x, pts[0].y);
+              for (let i = 1; i < pts.length - 1; i++) ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + pts[i + 1].x) / 2, (pts[i].y + pts[i + 1].y) / 2);
+              ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+            };
+            ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+            const head = tip[0], tail = tip[n - 1];
+            const gr = ctx.createLinearGradient(head.x, head.y, tail.x, tail.y);
+            gr.addColorStop(0, 'rgba(255,96,96,' + (0.5 * fade) + ')'); gr.addColorStop(0.5, 'rgba(240,62,74,' + (0.3 * fade) + ')'); gr.addColorStop(1, 'rgba(220,40,60,' + (0.1 * fade) + ')');
+            ctx.fillStyle = gr;
+            ctx.beginPath(); smooth(tip, true); smooth(inn.slice().reverse(), false); ctx.closePath(); ctx.fill();
+            ctx.restore();
+          }
+        }
       } else {
         applyChain('armL', { deform: false }); // origin at shoulder; keep trail aligned to unscaled weapon
         const isWar = animName === 'attack_warrior';
@@ -138309,12 +138416,14 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       applyWeaponCarryRotation(); applyMageWandCounter(); _hvMageCastGlow(ctx, t, _hvFlowW);
     }, { deform: false, weaponLock: true });
     if (animName === 'attack_archer' && cls === 'archer' && !onlyPaintLayer && t >= HERO_VEC_ARCHER_RELEASE_T && t < HERO_VEC_ARCHER_RELEASE_T + HV_ARCHER_FLASH_T) {   // v0.30.1374 - the string flash
-      ctx.save(); applyChain('root'); const _rootM = ctx.getTransform(); ctx.restore();
-      drawBone('handR', () => {
-        const _rel = _rootM.inverse().multiply(ctx.getTransform());
-        ctx.rotate(-Math.atan2(_rel.b, _rel.a));
-        _hvArcherStringFlash(ctx, t, _hvFlowW);
-      }, { deform: false });
+      // v0.30.1395 - where the nocked arrow leaves the bow (the grip in the aimed pose just before the release), turned to the
+      // aim (the live aim; a preview shoots level)
+      const _aim = (!opts.animName && typeof getArcherAim === 'function') ? getArcherAim() : { cosA: 1, sinA: 0 };
+      ctx.save(); applyChain('handL', { deform: false, weaponLock: true, pose: _hvAttackFlow(animName, HERO_VEC_ARCHER_RELEASE_T - 0.01, { animName }) }); const _gM = ctx.getTransform(); ctx.restore();
+      ctx.save(); applyChain('root');
+      const _gp = ctx.getTransform().inverse().transformPoint(_gM.transformPoint(new DOMPoint(0, 0)));
+      ctx.translate(_gp.x + 2, _gp.y); ctx.rotate(Math.atan2(_aim.sinA, _aim.cosA));
+      _hvArcherStringFlash(ctx, t, _hvFlowW); ctx.restore();
     }
     if (animName === 'attack_rogue' && cls === 'rogue' && !onlyPaintLayer) drawBone('handL', () => {   // v0.30.1377 - the stab burst
       _hvRogueStabBurst(ctx, t, _hvFlowW, _heroVecRogueBigStabActive());
@@ -138379,11 +138488,11 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
       const b = chain[i];
       const r = HERO_VEC_RIG[b];
       ctx.translate(r.x, r.y);
-      const bobFn = bob[b];
+      const bobFn = (opts.pose ? opts.pose.bob : bob)[b];   // v0.30.1395 - opts.pose: walk the chain in another pose (the warrior's smear)
       if (bobFn) { const o = bobFn(t); ctx.translate(o.x || 0, o.y || 0); }
-      const rotFn = anim[b];
+      const rotFn = (opts.pose ? opts.pose.rot : anim)[b];
       if (rotFn) ctx.rotate(rotFn(t));
-      const defFn = deform[b];
+      const defFn = (opts.pose ? opts.pose.def : deform)[b];
       if (defFn) {
         const d = defFn(t);
         ctx.scale(d.sx, d.sy);
@@ -138671,24 +138780,8 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     _drawCustomPaintLayerPinned('body_bottom', 'spine', ctx);
     _drawCustomPaintLayerPinned('body_top', 'spine', ctx);
   });
-  drawWeaponLayerStack();
-  if (_drawsLayer('armL') && !_baseReplacedByPaint('armL')) drawBone('armL', () => {
-    // v0.25.501 — Limb cel-shade direction read from runtime override
-    // (default upper-RIGHT light: shadow falls lower-left). Tunable
-    // live via key 6 (Cel-Shading Studio) and bakeable via its
-    // Generate Code button.
-    // v0.25.900 — Arms use the shorter armLimb path (matches armR above).
-    _drawShadedBody(HERO_VEC_PARTS.armLimb, LIMB_BASE, LIMB_SHD, LIMB_DEEP, ..._celOff('limb', 4, -3, 'concave'));
-  });
-  // BUG-001 R6 — armL paint moved to the "LIMB PAINT (body-root)" block below.
-  // v0.25.899 — handL: removed _drawGloss (matches handR change above)
-  // and switched to BODY_STROKE_W outline.
-  if (_drawsLayer('armL') && !_baseReplacedByPaint('armL')) drawBone('handL', () => {
-    ctx.fillStyle = SKIN.base;
-    // v0.25.438 — same +1 ellipse offset as handR (see comment above).
-    ctx.lineWidth = BODY_STROKE_W;
-    ctx.beginPath(); ctx.ellipse(1, 0, 2.7, 2.1, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  }, { deform: false });
+  // v0.30.1395 - the weapon (every layer of it: the class weapon, equipped weapon art, weapon paint, the swing trails) and
+  // the front arm + hand are drawn AFTER the head - see below the helmet
   drawHeadAttached(() => {
     // v0.25.155 — back-hair lock(s) ALWAYS draw FIRST, before any head
     // silhouette / ears / shading. Sits behind the head.
@@ -138930,6 +139023,79 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   // chibi-scale block, so it mirrors + scales with the character.
   _drawEquipmentLayer('front', ctx, { onlyLayer: onlyPaintLayer });
   if (!onlyPaintLayer) drawHeadAttached(() => { _drawCustomPaintLayerPinned('helmet', 'head', ctx); }, headDrawOpts);
+  // v0.30.1395 - LAYER ORDER: the weapon in front of the head, the front arm and hand in front of the weapon
+  drawWeaponLayerStack();
+  // v0.30.1395 - the pulled string and the nocked arrow: from both bow tips back to the drawing hand, found through the
+  // same chains the bow and the hand are drawn with; the nock eases from the bow's string line to the hand as it draws
+  if (animName === 'attack_archer' && cls === 'archer' && !onlyPaintLayer && _hvBowPulled) {
+    const pull = _heroClamp01((t - 0.06) / 0.12) * _hvFlowW;
+    ctx.save(); applyChain('handL', { deform: false, weaponLock: true }); applyWeaponCarryRotation(); if (_archerBowCounter) ctx.rotate(_archerBowCounter); const Mb = ctx.getTransform(); ctx.restore();
+    ctx.save(); applyChain('handR', { deform: false }); const Mh = ctx.getTransform(); ctx.restore();
+    const top = Mb.transformPoint(new DOMPoint(0, -16)), bot = Mb.transformPoint(new DOMPoint(0, 16)), grip = Mb.transformPoint(new DOMPoint(0, 0));
+    const hand = Mh.transformPoint(new DOMPoint(0, 0));
+    const H = { x: grip.x + (hand.x - grip.x) * pull, y: grip.y + (hand.y - grip.y) * pull };
+    const px = Math.hypot(Mb.a, Mb.b);
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // the pulled string runs to the starter bow's tips; an equipped bow's art carries its own string (and other tips),
+    // so there only the nocked arrow is drawn
+    const _eqBow = (typeof _lxHeroHasEquipWeaponArt === 'function') && _lxHeroHasEquipWeaponArt();
+    if (!_eqBow) {
+      ctx.strokeStyle = '#efe0b0'; ctx.lineWidth = Math.max(1, 1.0 * px);
+      ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.lineTo(H.x, H.y); ctx.lineTo(bot.x, bot.y); ctx.stroke();
+    }
+    const dx = grip.x - H.x, dy = grip.y - H.y, L = Math.hypot(dx, dy);
+    if (L > 4 * px) {   // the arrow: from the nock through the grip, its head a little past the bow
+      const ux = dx / L, uy = dy / L, tx = grip.x + ux * 7 * px, ty = grip.y + uy * 7 * px;
+      ctx.globalAlpha = _heroClamp01((pull - 0.25) / 0.3);
+      ctx.strokeStyle = '#1a0818'; ctx.lineWidth = 2.6 * px; ctx.beginPath(); ctx.moveTo(H.x, H.y); ctx.lineTo(tx, ty); ctx.stroke();
+      ctx.strokeStyle = '#a06a32'; ctx.lineWidth = 1.2 * px; ctx.beginPath(); ctx.moveTo(H.x, H.y); ctx.lineTo(tx, ty); ctx.stroke();
+      ctx.fillStyle = '#e8eef4'; ctx.strokeStyle = '#1a0818'; ctx.lineWidth = 0.8 * px;
+      ctx.beginPath(); ctx.moveTo(tx + ux * 4.5 * px, ty + uy * 4.5 * px); ctx.lineTo(tx - uy * 2.2 * px, ty + ux * 2.2 * px); ctx.lineTo(tx + uy * 2.2 * px, ty - ux * 2.2 * px); ctx.closePath(); ctx.fill(); ctx.stroke();
+      // the fletching (per user: "improve the design of the feather end of the arrow to look more realistic"): two
+      // shield-cut feather vanes set just ahead of the nock - tall at the back, sloping down to the shaft at the front -
+      // with a pale edge, barbs raking back along the feather, the shaft showing between them and a dark notched nock
+      const P = (a, b) => ({ x: H.x + (ux * a - uy * b) * px, y: H.y + (uy * a + ux * b) * px });
+      for (const s of [1, -1]) {
+        const v = [P(1.4, 0.4 * s), P(1.5, 2.7 * s), P(3.2, 3.0 * s), P(5.4, 2.2 * s), P(8.6, 0.4 * s)];
+        const c1 = P(2.2, 3.2 * s), c2 = P(7.2, 1.7 * s);
+        ctx.fillStyle = '#ff2f86'; ctx.strokeStyle = '#1a0818'; ctx.lineWidth = 0.7 * px;
+        ctx.beginPath(); ctx.moveTo(v[0].x, v[0].y); ctx.lineTo(v[1].x, v[1].y); ctx.quadraticCurveTo(c1.x, c1.y, v[2].x, v[2].y);
+        ctx.lineTo(v[3].x, v[3].y); ctx.quadraticCurveTo(c2.x, c2.y, v[4].x, v[4].y); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,214,232,0.9)'; ctx.lineWidth = 0.45 * px;   // the pale outer edge of the feather
+        ctx.beginPath(); ctx.moveTo(v[1].x, v[1].y); ctx.quadraticCurveTo(c1.x, c1.y, v[2].x, v[2].y); ctx.lineTo(v[3].x, v[3].y); ctx.stroke();
+        ctx.strokeStyle = 'rgba(150,10,70,0.55)'; ctx.lineWidth = 0.35 * px;   // barbs raking back from the shaft
+        for (const a of [2.6, 3.8, 5.0, 6.2]) {
+          const edge = a < 3.2 ? 2.7 : a < 5.4 ? 3.0 - (a - 3.2) * 0.36 : 2.2 - (a - 5.4) * 0.6;
+          const q0 = P(a + 0.6, 0.5 * s), q1 = P(a - 0.4, Math.max(0.6, edge - 0.35) * s);
+          ctx.beginPath(); ctx.moveTo(q0.x, q0.y); ctx.lineTo(q1.x, q1.y); ctx.stroke();
+        }
+      }
+      const sh0 = P(0.2, 0), sh1 = P(9.2, 0);   // the shaft between the vanes
+      ctx.strokeStyle = '#a06a32'; ctx.lineWidth = 1.0 * px; ctx.beginPath(); ctx.moveTo(sh0.x, sh0.y); ctx.lineTo(sh1.x, sh1.y); ctx.stroke();
+      const n0 = P(-0.4, 0), n1 = P(1.3, 0);   // the nock, notched onto the string
+      ctx.strokeStyle = '#1a0818'; ctx.lineWidth = 1.7 * px; ctx.beginPath(); ctx.moveTo(n0.x, n0.y); ctx.lineTo(n1.x, n1.y); ctx.stroke();
+      ctx.strokeStyle = '#efe0b0'; ctx.lineWidth = 0.5 * px; const nn = P(-0.4, 0), nm = P(0.4, 0);
+      ctx.beginPath(); ctx.moveTo(nn.x, nn.y); ctx.lineTo(nm.x, nm.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (_drawsLayer('armL') && !_baseReplacedByPaint('armL')) drawBone('armL', () => {
+    // v0.25.501 — Limb cel-shade direction read from runtime override
+    // (default upper-RIGHT light: shadow falls lower-left). Tunable
+    // live via key 6 (Cel-Shading Studio) and bakeable via its
+    // Generate Code button.
+    // v0.25.900 — Arms use the shorter armLimb path (matches armR above).
+    _drawShadedBody(HERO_VEC_PARTS.armLimb, LIMB_BASE, LIMB_SHD, LIMB_DEEP, ..._celOff('limb', 4, -3, 'concave'));
+  });
+  // BUG-001 R6 — armL paint moved to the "LIMB PAINT (body-root)" block below.
+  // v0.25.899 — handL: removed _drawGloss (matches handR change above)
+  // and switched to BODY_STROKE_W outline.
+  if (_drawsLayer('armL') && !_baseReplacedByPaint('armL')) drawBone('handL', () => {
+    ctx.fillStyle = SKIN.base;
+    // v0.25.438 — same +1 ellipse offset as handR (see comment above).
+    ctx.lineWidth = BODY_STROKE_W;
+    ctx.beginPath(); ctx.ellipse(1, 0, 2.7, 2.1, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }, { deform: false });
   // ===================================================================
   // LIMB PAINT (body-root) — BUG-001 R6 fix (v0.26.x)
   // The four limb paint layers render HERE, at body-root, on top of the
