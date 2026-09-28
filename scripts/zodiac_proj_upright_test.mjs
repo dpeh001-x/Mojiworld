@@ -5,6 +5,10 @@
 // it travels, and Cancer's clap claws - fired at each other - must be mirror images.
 // Plus (per user: "make Cancer's pincer sweep grounded on the floor too"): the sweep's claw is drawn with its
 // underside on its hitbox bottom, and a real sweep forced in Cancer's arena spawns that hitbox on the floor.
+// Plus (per user: "For the waves especially by boss aqua it is inverted and way too small", then "much bigger and
+// vertically downwards below the floor line"): Aquarius's ground wave - upright both ways, drawn in at least a 480 px box
+// (was 80), its foot sunk a quarter to a half of the wave below its hitbox bottom (the floor line), and a real 'waves'
+// cast in her arena spawns both hitboxes on the floor, centred on her.
 //   node scripts/zodiac_proj_upright_test.mjs [port]   (MOJI_GAME_FILE honored)
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
@@ -22,7 +26,8 @@ await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 // the spawns: Aquarius tsunami vx +-9 vy 0; Cancer sweep vx +-7 vy 0; Cancer clap vx -+3 vy 8 (from either side)
 const CASES = { tsunami: [['right', 9, 0, 80, 60], ['left', -9, 0, 80, 60]], pincerSweep: [['right', 7, 0, 40, 22], ['left', -7, 0, 40, 22]],
-  pincer: [['from left, diving right', 3, 8, 32, 38], ['from right, diving left', -3, 8, 32, 38]] };
+  pincer: [['from left, diving right', 3, 8, 32, 38], ['from right, diving left', -3, 8, 32, 38]],
+  wave: [['right', 5, 0, 190, 70], ['left', -5, 0, 190, 70]] };   // Aquarius's ground wave: vx +-5, the 190 x 70 hitbox
 try {
   const page = await (await b.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
   const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
@@ -45,13 +50,13 @@ try {
         let tf = null;
         const P = CanvasRenderingContext2D.prototype, orig = P.drawImage, tell = window._drawTell;
         window._drawTell = () => {};   // the in-reach parry hint draws first; mute it
-        P.drawImage = function (...a) { if (!tf && this === ctx && a.length >= 5) { const t = this.getTransform(); tf = { a: t.a, b: t.b, c: t.c, d: t.d, dy: a[2], dh: a[4] }; } return orig.apply(this, a); };
+        P.drawImage = function (...a) { if (!tf && this === ctx && a.length >= 5) { const t = this.getTransform(); tf = { a: t.a, b: t.b, c: t.c, d: t.d, dy: a[2], dw: a[3], dh: a[4] }; } return orig.apply(this, a); };
         try { drawProjectiles(); } catch (e) { out.err = String(e); }
         P.drawImage = orig; window._drawTell = tell;
         // art up (0,-1) -> screen (-c, -d); art nose (1,0) -> screen (a, b)
         out[k][name] = tf ? { upX: +(-tf.c).toFixed(3), upY: +(-tf.d).toFixed(3), noseX: +tf.a.toFixed(3), vx,
           // the claw's underside, in the sprite's local frame (origin = hitbox centre): must equal h / 2
-          underside: +(tf.dy + tf.dh * (1 - (_PROJ_SPRITE_BLIT[k].groundPad || 0))).toFixed(2), half: h / 2 } : null;
+          underside: +(tf.dy + tf.dh * (1 - (_PROJ_SPRITE_BLIT[k].groundPad || 0))).toFixed(2), half: h / 2, dw: +(+tf.dw).toFixed(1), dy: +(+tf.dy).toFixed(2), dh: +(+tf.dh).toFixed(2) } : null;
       }
     }
     game.projectiles.length = 0;
@@ -69,6 +74,20 @@ try {
         out.spawn = p ? { bottom: p.y + p.h, ground: Math.min(...ground), feet: m.y + m.h } : { none: true, state: m.patternState };
       } else out.spawn = { noBoss: true };
     } catch (e) { out.spawn = { err: String(e).slice(0, 120) }; }
+    // a REAL wave cast: Aquarius in her arena, forced into 'waves' - both shots on the floor, centred on her
+    try {
+      loadMap('zod_aquarius');
+      const t2 = Date.now(); let a = null;
+      while (Date.now() - t2 < 8000 && !(a = game.monsters.find((x) => x && x.zodiacSign === 'aquarius'))) await new Promise(z => setTimeout(z, 100));
+      if (a) {
+        game.projectiles.length = 0;
+        a.patternState = 'waves'; a.patternTimer = 0; a._aquaFired = false;
+        (ZODIAC_AI.aquarius || _zodiacAiGeneric)(a, 1, 500, 1, ZODIAC_SIGNS.find((z) => z.id === 'aquarius'));
+        const ws = game.projectiles.filter((q) => q.skill === 'wave');
+        const ground = game.mapData.platforms.filter((q) => q.type === 'ground').map((q) => q.y);
+        out.waves = ws.length === 2 ? { bottoms: ws.map((q) => q.y + q.h), ground: Math.min(...ground), mid: (ws[0].x + ws[0].w / 2 + ws[1].x + ws[1].w / 2) / 2, her: a.x + a.w / 2 } : { n: ws.length, state: a.patternState };
+      } else out.waves = { noBoss: true };
+    } catch (e) { out.waves = { err: String(e).slice(0, 120) }; }
     return out;
   }, CASES);
   for (const k of Object.keys(CASES)) for (const [name, v] of Object.entries(r[k] || {})) {
@@ -79,6 +98,14 @@ try {
   }
   for (const [name, v] of Object.entries(r.pincerSweep || {})) if (v)
     ok(`pincerSweep ${name}: the claw's underside is drawn on its hitbox bottom (grounded)`, Math.abs(v.underside - v.half) < 0.6, v);
+  for (const [name, v] of Object.entries(r.wave || {})) if (v) {
+    // the art's foot is row 520.5 of 768 and the wave 208 rows tall: how much of it sits below the floor line
+    const sink = (v.dy + v.dh * 520.5 / 768 - v.half) / (v.dh * 208 / 768);
+    ok(`wave ${name}: sunk below the floor line - a quarter to a half of the wave under it`, sink >= 0.25 && sink <= 0.5, Object.assign({ sink: +sink.toFixed(3) }, v));
+    ok(`wave ${name}: drawn big enough to read (>= 480 px box; was 80)`, v.dw >= 480, v);
+  }
+  const W = r.waves;
+  ok("a real 'waves' cast in Aquarius's arena spawns both waves on the floor, centred on her", !!(W && W.bottoms && W.bottoms.every((y) => y === W.ground) && Math.abs(W.mid - W.her) < 1), W);
   ok("a real sweep in Cancer's arena spawns its hitbox on the floor", !!(r.spawn && typeof r.spawn.bottom === 'number' && r.spawn.bottom === r.spawn.ground), r.spawn);
   const L = r.pincer && r.pincer['from left, diving right'], R = r.pincer && r.pincer['from right, diving left'];
   ok("Cancer's two clap claws are mirror images", L && R && Math.abs(L.upX + R.upX) < 0.01 && Math.abs(L.upY - R.upY) < 0.01, { L, R });
