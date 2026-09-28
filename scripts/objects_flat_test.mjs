@@ -6,6 +6,8 @@
 //     data/sprite_edges.js marks no left or right edge as cut (the art is 24 px clear of the canvas sides - a cut edge is feathered)
 //   - FLAT FRONT: where the object is symmetric, its silhouette mirrors onto itself (IoU >= 0.85). The old 3/4 art: market_stall_2
 //     0.762, shadow_shuriken_rack 0.655, bastion_throne_scribe_desk 0.597, market_stall_1 0.865 (new 0.947 / 0.891 / 0.861 / 0.945)
+// v0.30.1346: the hearth, the signpost and the three fountains join. The fountains were symmetric already (tilted to show their water;
+//   old 0.98 / 0.98 / 0.93, new 0.99 / 0.99 / 0.99) and join the mirror check; the hearth's stool and the signpost's boards do not.
 //   node scripts/objects_flat_test.mjs
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url); const sharp = require('sharp'); sharp.cache(false);
@@ -14,8 +16,11 @@ let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; co
 // key: [canvas, old bottom row]
 const PROPS = { bastion_anvil: [768, 767], bastion_throne: [992, 991], bastion_throne_prayer_candle: [425, 424], bastion_throne_scribe_desk: [768, 707],
   market_stall_1: [768, 766], market_stall_2: [768, 766], shadow_shuriken_rack: [768, 766], shadow_tatami: [768, 766], wagon_empty: [709, 707],
-  celestial_arcane_glyph_stone: [768, 667], crate_stack: [567, 566], well_stone: [768, 766] };
-const SYMMETRIC = ['market_stall_1', 'market_stall_2', 'shadow_shuriken_rack', 'bastion_throne_scribe_desk', 'bastion_throne_prayer_candle', 'celestial_arcane_glyph_stone', 'crate_stack', 'well_stone'];
+  celestial_arcane_glyph_stone: [768, 667], crate_stack: [567, 566], well_stone: [768, 766],
+  bastion_throne_hearth: [992, 991], signpost_wood: [768, 766], azure_large_waterfountain: [1984, 1980], azure_waterfountain: [850, 849],
+  town_fountain_small_east: [768, 584] };
+const SYMMETRIC = ['market_stall_1', 'market_stall_2', 'shadow_shuriken_rack', 'bastion_throne_scribe_desk', 'bastion_throne_prayer_candle', 'celestial_arcane_glyph_stone', 'crate_stack', 'well_stone',
+  'azure_large_waterfountain', 'azure_waterfountain', 'town_fountain_small_east'];
 const table = (file, name) => { const t = fs.readFileSync(path.join(ROOT, 'data', file), 'utf8'); return JSON.parse(t.slice(t.indexOf(name + ' = ') + name.length + 3, t.lastIndexOf(';'))); };
 const BB = table('sprite_bbox.js', 'window.LX_SPRITE_BBOX'), ED = table('sprite_edges.js', 'window.LX_SPRITE_EDGES');
 const rows = [];
