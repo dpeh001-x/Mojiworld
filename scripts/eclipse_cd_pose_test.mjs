@@ -17,7 +17,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9497;
+const PORT = Number(process.env.PORT || 9497);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -88,7 +88,10 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
 const ninja = R.seen['attack_rogue_ninja'] || 0;
 const share = R.frames ? ninja / R.frames : 0;
 ok('the cast pins the rogue under the moon', R.held && R.frames > 20, `pinned for ${R.frames} sampled frames`);
-ok('the STAMPED cooldown is 12 s (not the table value)', Math.abs(R.stampedCd - 12000) <= 600,
+// The 12 s asked for in v0.30.43 has been retuned twice since: v0.30.174 (0c0ae5ae, the user's skill-tuner patch) re-banded the
+// master cooldowns, 16000 -> 22000, and v0.30.356 (f6fb5b77, per user "Nightreaper X ... CD to 25s") set the table to 25000.
+// What is pinned is still the STAMP, not the table: 25000 x JOB_CD_MUL 0.75 = 18.75 s in play.
+ok('the STAMPED cooldown is the table 25 s x JOB_CD_MUL (18.75 s in play)', R.table === 25000 && Math.abs(R.stampedCd - 25000 * (R.jobMul || 1) * (R.cdrMult || 1)) <= 600 && Math.abs(R.stampedCd - 18750) <= 600,
    `stamped ${R.stampedCd}ms (table ${R.table} x JOB_CD_MUL ${R.jobMul} x cdr ${R.cdrMult})`);
 ok('the ninjutsu stance is the pose for the WHOLE pin', share >= 0.95,
    `attack_rogue_ninja on ${Math.round(share * 100)}% of pinned frames  ${JSON.stringify(R.seen)}`);

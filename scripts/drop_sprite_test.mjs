@@ -62,10 +62,20 @@ const ready = await page.evaluate(async () => {
 });
 
 const r = await page.evaluate((info) => {
+  // v0.30.287 (6edd29e4, perf) blits the equipment art through _lxProjScaled: a 2x bake CANVAS cached on the source image
+  // (img._lxProjCache), which has no .src. A blit is credited to its source when it is that image or one of its bakes.
+  const _srcOf = (img) => {
+    if (img && img.src) return String(img.src);
+    for (const it of [{ name: 'Iron Sword', slot: 'weapon', rarity: 'epic', icon: '🗡' }]) {
+      const s = (typeof _itemSprite === 'function') ? _itemSprite(it) : null;
+      if (s && s._lxProjCache && s._lxProjCache.values && [...s._lxProjCache.values()].includes(img)) return String(s.src) + '#bake';
+    }
+    return '';
+  };
   const spy = (fn) => {
     const blits = [], texts = [];
     const oDI = ctx.drawImage, oFT = ctx.fillText;
-    ctx.drawImage = function (img, ...a) { blits.push({ src: String(img && img.src || ''), w: a[2], h: a[3] }); return oDI.apply(this, [img, ...a]); };
+    ctx.drawImage = function (img, ...a) { blits.push({ src: _srcOf(img), w: a[2], h: a[3] }); return oDI.apply(this, [img, ...a]); };
     ctx.fillText = function (t, ...a) { texts.push(String(t)); return oFT.apply(this, [t, ...a]); };
     try { fn(); } catch (e) { return { err: String(e).slice(0, 140) }; }
     finally { ctx.drawImage = oDI; ctx.fillText = oFT; }

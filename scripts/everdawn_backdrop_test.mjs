@@ -73,7 +73,12 @@ const R = await page.evaluate(async () => {
   CanvasRenderingContext2D.prototype.drawImage = function (img, ...a) {
     if (this === ctx && a.length === 4 && a[2] >= W - 1) {
       const m = this.getTransform();
-      window._bgDraws.push({ kind: (img && img.tagName) || 'img', mirrored: m.a < 0, dx: a[0], dy: a[1], dw: a[2], dh: a[3], f: game.time | 0 });
+      // v0.30.844 (60fb1750) video-cache: the clip is pulled once per VIDEO frame into an ImageBitmap
+      // (_LX_VID_CACHE) and that bitmap is what gets blitted. It is the video's own frame, not a mix canvas,
+      // so a draw of the town element's current cached bitmap counts as painting the video.
+      let vk = null;
+      try { if (typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap) { const tv = document.getElementById('map-bg-video-town'); const vc = tv && _LX_VID_CACHE.get(tv); if (vc && vc.bmp === img) vk = 'VIDEO(bmp)'; } } catch (e) {}
+      window._bgDraws.push({ kind: (img && img.tagName) || vk || 'img', mirrored: m.a < 0, dx: a[0], dy: a[1], dw: a[2], dh: a[3], f: game.time | 0 });
     }
     return _od.call(this, img, ...a);
   };

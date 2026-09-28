@@ -30,8 +30,10 @@ try {
     // The EXP hook has been rewritten twice since v0.30.404 put it in: v0.30.x keyed it on _lxPqRepeatMul(id) ("one source of truth
     // with the coin / gear discount"), and v0.30.833 reads that multiplier ONCE, before the stage-paid stamp (read after it, every
     // FIRST run was paid as a repeat). The rule - a repeat's EXP is multiplied by LX_PQ_REPEAT_EXP_MUL - is what is pinned.
+    // v0.30.941 (b901083f, per user "there are no levers") folded the x16 quest EXP knob into every authored number, so the
+    // stage / finale / cache literals now read exp 44800 / 32000 / 104000 / 80000 (was 2800 / 2000 / 6500 / 5000). The coins are unmoved.
     o.src = { repeatExp: src.indexOf("if (_pqRepeatMul !== 1) _questExp = Math.floor(_questExp * LX_PQ_REPEAT_EXP_MUL);") >= 0 && src.indexOf("const _pqRepeatMul = _lxPqRepeatMul(id);") >= 0, express: src.indexOf('mojicoins: 800 + N * 16,') >= 0,
-      stage600: src.split('rewards: { mojicoins: 600, exp: 2800, gearChance: 0.15, gearTier: ').length - 1 === 2 && src.indexOf('rewards: { mojicoins: 600, exp: 2000, gearChance: 0.15, gearTier: 3') >= 0, finale4000: src.indexOf('rewards: { mojicoins: 4000, exp: 6500, gearChance: 0.90, gearTier: 5') >= 0, cache1500: src.indexOf('rewards: { mojicoins: 1500, exp: 5000, gearChance: 0.40, gearTier: 4') >= 0 };
+      stage600: src.split('rewards: { mojicoins: 600, exp: 44800, gearChance: 0.15, gearTier: ').length - 1 === 2 && src.indexOf('rewards: { mojicoins: 600, exp: 32000, gearChance: 0.15, gearTier: 3') >= 0, finale4000: src.indexOf('rewards: { mojicoins: 4000, exp: 104000, gearChance: 0.90, gearTier: 5') >= 0, cache1500: src.indexOf('rewards: { mojicoins: 1500, exp: 80000, gearChance: 0.40, gearTier: 4') >= 0 };
     return o;
   });
   console.log('build ' + r.ver + '  consts ' + JSON.stringify(r.consts) + '  refight ' + JSON.stringify(r.refight));

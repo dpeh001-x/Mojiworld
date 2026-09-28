@@ -45,8 +45,10 @@ ok('hidden below the Fireball unlock level (was: shown from Lv 1)', r.mageBelowR
 ok('shown once Fireball is unlocked', r.mageAtReq.shown === true);
 ok('hidden with zero stacks', r.mageNoStacks.shown === false);
 ok('never shown for a non-mage', r.warrior.shown === false);
-ok('label states the payoff at 3 stacks', /×3\s*→\s*Fireball \+36%/.test(r.mageAtReq.html), r.mageAtReq.html.slice(-70));
-ok('label scales with stacks (5 → +60%)', /×5\s*→\s*Fireball \+60%/.test(r.mageFull.html), r.mageFull.html.slice(-70));
+// v0.29.698 (6811edc9, per user, "make this mage fireball gauge more subtle") dropped the
+// redundant "×N →" prefix - the lit pips carry the count; the payoff figure stays.
+ok('label states the payoff at 3 stacks', />Fireball \+36%</.test(r.mageAtReq.html), r.mageAtReq.html.slice(-70));
+ok('label scales with stacks (5 → +60%)', />Fireball \+60%</.test(r.mageFull.html), r.mageFull.html.slice(-70));
 ok('still renders 5 pip slots', (r.mageAtReq.html.match(/🔥/g) || []).length === 5);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 

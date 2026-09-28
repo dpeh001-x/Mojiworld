@@ -5,6 +5,11 @@
 // from the body (user-reported floating leg). Assert: across the whole 0..1
 // timeline, each leg's x/y offset stays within a tight band of the spine's
 // x/y translate, for BOTH classes' dash poses.
+// v0.30.753 (93d4d1fa, per user "it should always be joined to the main torso"): the rogue's RESOLVED pose now
+// runs through _heroVecRogueDashJoin, which shifts both hips by HIP_FOLLOW x lean (13 px/rad, ~12 px at the 0.92
+// apex) to follow the torso's ROTATION, then layers the sprint (hip pull / tuck / drop). Those offsets are the
+// joint fix itself and are measured in pixels by rogue_dash_pose_test.mjs; what this suite pins for the rogue is
+// the v0.29.105 premise underneath - the AUTHORED keys (HERO_VEC_ROGUE_DASH_KEYS) still track the spine translate.
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
 // tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
@@ -41,9 +46,22 @@ try {
   ]) {
     const scan = await page.evaluate(({ fn }) => {
       let worstX = 0, worstY = 0, at = 0;
+      // the authored rogue keys, eased exactly as _heroVecRogueDashPose eases them, before the v0.30.753 join layer
+      const authored = (t) => {
+        const keys = HERO_VEC_ROGUE_DASH_KEYS, q = _heroClamp01(t);
+        for (let i = 0; i < keys.length - 1; i++) {
+          const a = keys[i], b = keys[i + 1];
+          if (q >= a.p && q <= b.p) {
+            const u = _heroEaseInOutSine((q - a.p) / (b.p - a.p || 1)), out = {};
+            for (const k of Object.keys(a)) if (k !== 'p') out[k] = a[k] + (b[k] - a[k]) * u;
+            return out;
+          }
+        }
+        return Object.assign({}, keys[keys.length - 1]);
+      };
       for (let i = 0; i <= 100; i++) {
         const t = i / 100;
-        const p = window[fn](t);
+        const p = fn === '_heroVecRogueDashPose' ? authored(t) : window[fn](t);
         const dx = Math.max(Math.abs(p.legLX - p.x), Math.abs(p.legRX - p.x));
         const dy = Math.max(Math.abs(p.legLY - p.y), Math.abs(p.legRY - p.y));
         if (dx > worstX) { worstX = dx; at = t; }

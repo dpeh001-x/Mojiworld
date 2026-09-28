@@ -14,6 +14,12 @@
 //   node scripts/damage_number_outline_test.mjs      MOJI_GAME_FILE / MOJI_SERVE_ROOT / PORT override
 // Negative control v0.30.459: baked numbers run 5.69-6.71 device px against the live path's flat
 // 6.43 — a 1.0 px spread between numbers visible at the same moment.
+// v0.30.830 (3f1fdaa3, Gravitos lag round three): the glyph atlas buckets its size x1.12 ROUNDED UP and blits the
+// glyphs scaled down to the exact size - "<=12%, pop / fade frames only" - so an ATLAS blit's outline legitimately
+// sits up to one bucket (plus the half-pixel rounding of the bucket size) under 5 CSS px. The v0.30.460 guarantee
+// - a SETTLED number's outline never rides the bob - is untouched and is what the bake checks below pin; atlas
+// blits are pinned to that bucket band instead of to a constant. Settled numbers now blit the bake 1:1 in device
+// space (a 3-argument drawImage under an identity transform, v0.30.466), which the old hook never counted.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
@@ -36,7 +42,7 @@ try {
     loadMap('forest', 300); await sleep(700);
     const c = ctx; if (!c) return { err: 'no ctx' };
     const dpr = Math.max(1, Math.min(3, (typeof _LX_DPR === 'number' && _LX_DPR > 0) ? _LX_DPR : (window.devicePixelRatio || 1)));
-    const live = [], baked = [];
+    const live = [], baked = [], bake = [];   // baked = atlas glyph blits, bake = the settled bitmap
     const oST = c.strokeText.bind(c), oDI = c.drawImage.bind(c);
     // the black readability stroke only — the coloured halo and the gold foil are decoration and are
     // meant to scale with the glyph
@@ -47,11 +53,14 @@ try {
     c.drawImage = function (img) {
       try {
         const m = c.getTransform();
+        if (arguments.length === 3 && img && img.tagName === 'CANVAS') bake.push(5 * dpr * Math.abs(m.a));   // 1:1 device blit of the bake
         if (arguments.length === 5 && img && img.tagName === 'CANVAS') {
           const bakedCssW = img.width / dpr;               // the bake is at device resolution
-          baked.push(5 * (arguments[3] / bakedCssW) * Math.abs(m.a));
+          bake.push(5 * (arguments[3] / bakedCssW) * Math.abs(m.a));
         }
-        if (arguments.length === 9 && img && img.tagName === 'CANVAS') {   // dn-atlas: a glyph cell, baked at the render scale with a 5 px outline
+        // v0.30.1239 (_LX_DN_WORKER_ON): a figure atlas is built on a Worker and lands as an ImageBitmap, not a canvas
+        const _isAtlas = img && (img.tagName === 'CANVAS' || (typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap));
+        if (arguments.length === 9 && _isAtlas) {   // dn-atlas: a glyph cell, baked at the render scale with a 5 px outline
           baked.push(5 * dpr * (arguments[7] / arguments[3]) * Math.abs(m.a));
         }
       } catch (e) {}
@@ -60,29 +69,39 @@ try {
     // A spread of ages and phases so pop-in, settle, bob and fade are all on screen together —
     // exactly the situation in the report, where several hits overlap at once.
     const camX = (game.camera && game.camera.x) || 0, camY = (game.camera && game.camera.y) || 0;
-    game.damageNumbers.length = 0;
+    const seed = () => { game.damageNumbers.length = 0;
     for (let i = 0; i < 14; i++) {
       game.damageNumbers.push({ x: camX + 140 + (i % 5) * 150, y: camY + 180 + Math.floor(i / 5) * 80, vy: 0,
         text: String(90000 + i * 137), maxLife: 60, life: 40 - (i % 12), crit: i % 3 === 0, big: i % 4 === 0,
         color: i % 3 === 0 ? '#ffd84a' : '#ffffff', size: 14 });
-    }
+    } };
+    // v0.30.1239: the atlases are posted to a Worker and the number draws live until one lands (a frame or more
+    // later), so warm them on an unmeasured pass, wait for the Worker to answer, then re-seed and measure.
+    seed(); const nL = live.length, nB = baked.length, nK = bake.length;
+    for (let f = 0; f < 26; f++) { try { drawDamageNumbers(); } catch (e) { return { err: String(e.message).slice(0, 100) }; } await sleep(16); }
+    for (let w = 0; w < 100 && typeof _lxDnWPend !== 'undefined' && _lxDnWPend.size > 0; w++) await sleep(20);
+    live.length = nL; baked.length = nB; bake.length = nK; seed();
     for (let f = 0; f < 26; f++) { try { drawDamageNumbers(); } catch (e) { return { err: String(e.message).slice(0, 100) }; } await sleep(16); }
     c.strokeText = oST; c.drawImage = oDI;
     const st = (a) => a.length ? { n: a.length, min: +Math.min(...a).toFixed(3), max: +Math.max(...a).toFixed(3), spread: +(Math.max(...a) - Math.min(...a)).toFixed(3) } : { n: 0 };
-    const all = live.concat(baked);
-    return { dpr: +dpr.toFixed(4), live: st(live), baked: st(baked), all: st(all), expect: +(5 * dpr).toFixed(3) };
+    const settled = live.concat(bake);
+    return { dpr: +dpr.toFixed(4), live: st(live), baked: st(baked), bake: st(bake), settled: st(settled), expect: +(5 * dpr).toFixed(3) };
   });
   if (r.err) throw new Error(r.err);
-  console.log(`dpr ${r.dpr}  target ${r.expect} device px  ·  live ${r.live.min}-${r.live.max}  baked ${r.baked.min}-${r.baked.max}`);
-  ok('both draw paths actually ran — settled numbers blit, unsettled ones stroke live', r.live.n > 0 && r.baked.n > 0,
-    `live ${r.live.n}, baked ${r.baked.n}`);
+  console.log(`dpr ${r.dpr}  target ${r.expect} device px  ·  live ${r.live.min}-${r.live.max}  bake ${r.bake.min}-${r.bake.max}  atlas ${r.baked.min}-${r.baked.max}`);
+  ok('all three draw paths actually ran — settled numbers blit the bake, the fade blits the atlas, the rest stroke live', r.live.n > 0 && r.bake.n > 0 && r.baked.n > 0,
+    `live ${r.live.n}, bake ${r.bake.n}, atlas ${r.baked.n}`);
   ok('the live path holds the outline at a true constant (the v0.29.408 guarantee)', r.live.spread <= 0.01, `spread ${r.live.spread}px`);
-  ok('the BAKED path holds it too — the bob no longer rides the outline', r.baked.spread <= 0.15,
-    `${r.baked.min} to ${r.baked.max} device px, spread ${r.baked.spread}px (was 1.015 on v0.30.459)`);
-  ok('every number on screen agrees within a fifth of a pixel, whichever path drew it', r.all.spread <= 0.2,
-    `overall ${r.all.min} to ${r.all.max}, spread ${r.all.spread}px`);
-  ok('and they all sit on the intended 5 CSS px anchor', Math.abs(r.all.min - r.expect) <= 0.2 && Math.abs(r.all.max - r.expect) <= 0.2,
-    `target ${r.expect}, observed ${r.all.min}-${r.all.max}`);
+  ok('the BAKED path holds it too — the bob no longer rides the outline', r.bake.spread <= 0.15,
+    `${r.bake.min} to ${r.bake.max} device px, spread ${r.bake.spread}px (was 1.015 on v0.30.459)`);
+  ok('every settled number on screen agrees within a fifth of a pixel, whichever path drew it', r.settled.spread <= 0.2,
+    `overall ${r.settled.min} to ${r.settled.max}, spread ${r.settled.spread}px`);
+  ok('and they all sit on the intended 5 CSS px anchor', Math.abs(r.settled.min - r.expect) <= 0.2 && Math.abs(r.settled.max - r.expect) <= 0.2,
+    `target ${r.expect}, observed ${r.settled.min}-${r.settled.max}`);
+  // one x1.12 bucket below, less the half-pixel ceil of a ~10 px faded glyph (0.5/10): r >= 0.84; never above
+  ok('atlas glyphs stay inside the v0.30.830 bucket band (never above 5 CSS px, at most one bucket under)',
+    r.baked.max <= r.expect + 0.05 && r.baked.min >= r.expect * 0.84,
+    `target ${r.expect}, band ${(r.expect * 0.84).toFixed(3)}-${r.expect}, observed ${r.baked.min}-${r.baked.max}`);
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();

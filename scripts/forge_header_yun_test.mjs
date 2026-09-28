@@ -59,7 +59,11 @@ try {
       const b = [...document.querySelectorAll('#dialog-options button')].find((x) => /^What needs sharpening\?$/.test((x.textContent || '').trim()));   // v0.30.964 label
       if (!b) return { no: 'option' };
       b.click();
-      let last = -1; for (let k = 0; k < 40; k++) { await new Promise((x) => setTimeout(x, 150)); const len = (document.getElementById('dialog-text').textContent || '').length; if (len === last && k > 2) break; last = len; }
+      // v0.30.973 (1b2f237c) paced the typewriter: a stop holds 210 ms and each line break 190, so a paragraph-break pause
+      // outlasts two 150 ms samples and a length-settle read stopped after the first paragraph. Wait for the
+      // reveal itself to finish (#dialog loses .typing when the last token is placed).
+      const dlgEl = document.getElementById('dialog');
+      for (let k = 0; k < 150; k++) { await new Promise((x) => setTimeout(x, 100)); if (k > 1 && !dlgEl.classList.contains('typing')) break; }
       const shop = document.getElementById('shop-modal');
       return { said: (document.getElementById('dialog-text').textContent || '').replace(/\s+/g, ' ').trim(),
         shopOpen: !!(shop && shop.getClientRects().length && getComputedStyle(shop).display !== 'none'),

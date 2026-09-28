@@ -65,15 +65,25 @@ try {
   const key = async (k, hold) => { await page.evaluate(() => document.activeElement && document.activeElement.blur()); if (hold) { await page.keyboard.down(k); await page.waitForTimeout(hold); await page.keyboard.up(k); } else await page.keyboard.press(k); };
   const tab = (t) => page.evaluate((t) => _lxOpenUPanelTab(t), t);
   const hitSnail = async () => { for (let j = 0; j < 12 && (await st()).step === 5; j++) { await page.evaluate(() => { const m = (game.monsters || []).find((m) => m && m.currentHp > 0 && !m.isBoss); if (m) { player.x = m.x - 45; player.facing = 1; } }); await key('z'); await page.waitForTimeout(250); } };
-  const ACT = [['move', () => key('ArrowRight', 700)], ['attack', () => key('z')], ['panel', () => key('u')], ['tab_items', () => tab('items')],
+  // move is ticked per game frame while the key is held; right after the cards close a loaded machine can go the whole
+  // 700 ms hold without a frame, so hold again (still the real key) until the step ticks.
+  const moveTick = async () => { for (let j = 0; j < 6; j++) { await key('ArrowRight', 700); const s = await st(); if (s.step !== 0 || /\d+s?$/.test(s.next || '')) break; } };
+  const ACT = [['move', moveTick], ['attack', () => key('z')], ['panel', () => key('u')], ['tab_items', () => tab('items')],
     ['potion', async () => { await esc(); await key('PageUp'); }], ['combo', hitSnail], ['panel (already met)', null], ['tab_items (already met)', null],
     ['tab_boons', () => tab('boons')], ['worldmap', async () => { await esc(); await key('w'); }], ['quest', async () => { await esc(); await key('q'); }],
     ['tab_mojimon', async () => { await esc(); await tab('mojimon'); }], ['codex (Y)', async () => { await esc(); await key('y'); }], ['tab_skills (last)', async () => { await esc(); await tab('skills'); }]];
   const rows = [];
   for (let i = 0; i < ACT.length; i++) {
     const s0 = await st(); if (!s0.open || s0.step !== i) { rows.push({ i, tag: ACT[i][0], bad: J(s0) }); break; }
-    const t0 = Date.now(); let count = null; if (ACT[i][1]) await ACT[i][1]();
-    let s1 = s0; while (Date.now() - t0 < 7000) { s1 = await st(); if (!s1.open || s1.step !== i) break; if (!count && /\d$/.test(s1.next || '')) count = s1.next; await page.waitForTimeout(100); }
+    // v0.30.1188 (90d87a3e) a ticked step no longer jumps on after 1.1 s: it counts "Next ▶ 15s" down and moves on at 0,
+    // and since v0.30.1193 that read pauses while the card is ghosted under an open panel. So: the real key must TICK the
+    // step within 7 s (the countdown starts), then panels are closed and the step must still move on by itself (<= 20 s).
+    const t0 = Date.now(); let count = null, ticked = false; if (ACT[i][1]) await ACT[i][1]();
+    let s1 = s0; while (Date.now() - t0 < 7000) { s1 = await st(); if (!s1.open || s1.step !== i) break; if (!count && /\d+s?$/.test(s1.next || '')) count = s1.next; if (count) { ticked = true; break; } await page.waitForTimeout(100); }
+    if (s1.open && s1.step === i && ticked) {
+      await esc(); const t1 = Date.now();
+      while (Date.now() - t1 < 20000) { s1 = await st(); if (!s1.open || s1.step !== i) break; await page.waitForTimeout(150); }
+    }
     rows.push({ i, tag: ACT[i][0], moved: !s1.open || s1.step !== i, ms: Date.now() - t0, count });
     await page.waitForTimeout(150);
   }

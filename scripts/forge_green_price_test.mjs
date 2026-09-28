@@ -71,9 +71,11 @@ await browser.close();
 const OLD = [100, 250, 600, 1400, 3200, 7000, 16000, 40000, 90000, 210000];
 console.log(`  costs: [${r.costs.join(', ')}]`);
 console.log(`  rich ${JSON.stringify(r.rich)}\n  exact ${JSON.stringify(r.exact)}\n  broke ${JSON.stringify(r.broke)}`);
-check(r.costs[0] === 100, 'the ★0→1 step stays at 100 (early upgrades stay easy — durable rule)', r.costs[0]);
+// Retuned twice per user since v0.29.752: v0.30.188 (82cdfd19) cut every rung 15%, v0.30.430 (9d80acc2)
+// scaled STAR_COSTS x1.5. The ladder now reads 130 ... 32000 / 44600 / 64000; pinned to those literals.
+check(r.costs[0] === 130, 'the ★0→1 step is 130 (100 -15% x1.5, v0.30.430) and still the cheapest rung by far', r.costs[0]);
 check(r.costs.slice(1, 7).every((c, i) => c > OLD[i + 1]), 'the ★2 through ★7 forges all cost more than before', r.costs.slice(1, 7));
-check(r.costs[7] === 25000 && r.costs[8] === 35000 && r.costs[9] === 50000, 'the ★8/★9/★10 forges are exactly 25000 / 35000 / 50000 (per user)', r.costs.slice(7));
+check(r.costs[7] === 32000 && r.costs[8] === 44600 && r.costs[9] === 64000, 'the ★8/★9/★10 forges are exactly 32000 / 44600 / 64000 (v0.30.430, per user)', r.costs.slice(7));
 check(r.costs.every((c, i) => i === 0 || c > r.costs[i - 1]), 'the curve is still strictly increasing', r.costs);
 const isGreen = (p) => p && p.rgb && p.rgb.g > p.rgb.r && p.rgb.g > p.rgb.b;
 check(r.rich.go && isGreen(r.rich) && !r.rich.disabled, 'affordable → button carries the go-class and computes GREEN', r.rich);

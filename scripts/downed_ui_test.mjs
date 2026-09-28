@@ -68,8 +68,10 @@ try {
   const d = await p.evaluate(() => __down(() => { player._tutorialSeen = false; const t = document.getElementById('tutorial-modal'); if (t) { t.hidden = false; t.style.display = 'block'; } }));
   check(d.downed && d.card && /^[1-5]s$/.test(d.secs || ''), 'during the tour the down keeps its short window but shows the card and countdown', d);
   // 5) standing up again: the HUD shows the real HP (the 0 is only while downed)
-  const e = await p.evaluate(async () => { player._downed = false; player.hp = 123; await __frames(15, 5000); return { hpText: (document.getElementById('hp-text') || {}).textContent || '', barW: parseFloat((document.getElementById('hp-bar') || { style: {} }).style.width) }; });
-  check(/^123 \//.test(e.hpText) && e.barW > 0, 'up again, the HUD shows the real HP', e);
+  // The warrior's out-of-combat regen (+1 HP every 40 ticks) can land inside the 15-frame wait (123 -> 124 on a slow run), so the
+  // HUD is held to the LIVE hp read in the same breath, and that hp to 123 plus at most a few regen ticks.
+  const e = await p.evaluate(async () => { player._downed = false; player.hp = 123; await __frames(15, 5000); return { hp: player.hp, mx: getMaxHp(), hpText: (document.getElementById('hp-text') || {}).textContent || '', barW: parseFloat((document.getElementById('hp-bar') || { style: {} }).style.width) }; });
+  check(e.hp >= 123 && e.hp <= 126 && e.hpText.startsWith(Math.floor(e.hp) + ' /') && e.barW > 0 && Math.abs(e.barW - 100 * e.hp / e.mx) < 1.5, 'up again, the HUD shows the real HP', e);
   check(errs.length === 0, 'no page errors', errs);
 } finally { await browser.close(); srv.kill(); }
 console.log('');
