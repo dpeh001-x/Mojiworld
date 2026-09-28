@@ -61,6 +61,10 @@ try {
       return { mean: +(sum / a.length).toFixed(4), rows: rows.size, geo: m.ax === bk.ax && m.ay === bk.ay && m.w === bk.w && m.h === bk.h };
     };
     // SETTLE + PIXELS, full FX then Low FX
+    // v0.30.1326: the bake Worker starts on its first job (its own boot and fonts: 0.1-0.4 s, longer on a loaded machine), as it does in a
+    // fight's first seconds; warm it first, so SETTLE measures the steady state and not that one-off start
+    { const wd = mk(KINDS[0], 0, 45, 45); _dnBakeRequest(wd, txtOf(wd), wd.color, ((wd.size || 14) + 4) * uiK, Math.max(0.25, Math.min(3, _LX_DPR || 1)), true);
+      const t0 = performance.now(); while (!wd._bk && performance.now() - t0 < 5000) await sleep(20); if (wd._bk) _lxDnAtlasFree(wd._bk.cv); }
     o.settle = []; o.pix = [];
     for (const low of [false, true]) {
       window._perfLowFx = () => low;
@@ -125,7 +129,8 @@ try {
         player.hp = 999999; player.mp = 99999; if (game.paused) game.paused = false;
         const now = performance.now(); if (now - lastCast > 90) { lastCast = now; for (const id of kit) if ((player.skillCooldowns[id] || 0) <= 0) { try { castSkill(id); } catch (e) {} } }
         requestAnimationFrame(tick); };
-      requestAnimationFrame(tick); await sleep(8000); stop = true;
+      // v0.30.1326: at least 8 s, then until 12 numbers have settled (20 s at most) - a loaded machine settles few in 8 s
+      requestAnimationFrame(tick); { const t0 = performance.now(); while (performance.now() - t0 < 20000 && (performance.now() - t0 < 8000 || adopts + mainBakes < 12)) await sleep(250); } stop = true;
       window._lxDnBakeAdopt = _ad; lat.sort((a, b) => a - b);
       o.fight = { adopts, mainBakes, p50: Math.round(lat[lat.length >> 1] || -1), p95: Math.round(lat[Math.floor(lat.length * 0.95)] || -1) };
     }

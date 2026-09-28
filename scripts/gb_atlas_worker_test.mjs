@@ -37,7 +37,7 @@ try {
     const purge = () => { for (const k of [..._LX_DN_ATLAS.keys()]) if (k.indexOf('gb|') === 0) { const a = _LX_DN_ATLAS.get(k); _LX_DN_ATLAS.delete(k); if (a) { _lxDnAtlasPx -= a.px; _lxDnAtlasFree(a.cv); } } for (const k of [..._lxDnWPend.keys()]) if (k.indexOf('gb|') === 0) _lxDnWPend.delete(k); };
     const uiK = (game._uiScale > 0) ? game._uiScale : 1, b0 = ((LX_GB_ROW_SIZE + 4) * uiK) | 0, col = LX_GB_ROW_COL;
     const dprNow = Math.max(0.25, Math.min(3, _LX_DPR || 1)); let dpr = _lxDnAtlasDpr(dprNow);
-    const ladder = () => { const out = []; for (let k = 0; k <= 8; k++) { const px = _lxDnAtlasPx4(b0, Math.pow(_LX_DN_ATLAS_STEP, k)); out.push('gb|' + b0 + '|' + px + '|n|' + col + '|' + dpr); } return out; };
+    const ladder = (vs) => { const out = []; for (const v of (vs || ['n', 's0'])) for (let k = 0; k <= 8; k++) { const px = _lxDnAtlasPx4(b0, Math.pow(_LX_DN_ATLAS_STEP, k)); out.push('gb|' + b0 + '|' + px + '|' + v + '|' + col + '|' + dpr); } return out; };   // v0.30.1326: both ladders are prewarmed
     const waitKeys = async (keys, ms) => { const t0 = performance.now(); while (performance.now() - t0 < ms) { if (keys.every((k) => _LX_DN_ATLAS.get(k))) return Math.round(performance.now() - t0); await sleep(50); } return -1; };
     // WORKER: the biggest ladder size
     purge(); mainBuilds = 0;
@@ -66,7 +66,7 @@ try {
     // PREWARM
     purge(); mainBuilds = 0;
     o.prewarmPosted = _lxGbPrewarm();
-    o.prewarmMs = await waitKeys(ladder(), 8000);
+    o.prewarmMs = await waitKeys(ladder(), 15000);
     o.prewarmMainBuilds = mainBuilds;
     // a boss spawning asks for it: King Krook's throne, no number drawn
     purge(); mainBuilds = 0;
@@ -74,7 +74,7 @@ try {
     let boss = null; for (let i = 0; i < 100 && !boss; i++) { await sleep(100); boss = game.monsters.find((m) => m && (m.isBoss || m.boss) && m.currentHp > 0) || null; }
     dpr = _lxDnAtlasDpr(Math.max(0.25, Math.min(3, _LX_DPR || 1)));
     o.boss = boss ? boss.type : null;
-    o.bossMs = await waitKeys(ladder(), 8000);
+    o.bossMs = await waitKeys(ladder(), 15000);
     o.bossNumbers = (game.damageNumbers || []).length;
     // FALLBACK
     purge(); mainBuilds = 0; const _on = _LX_DN_WORKER_ON; _LX_DN_WORKER_ON = false;
@@ -91,7 +91,7 @@ try {
   ok('a sticker atlas miss goes to the Worker and lands as an ImageBitmap, nothing built on the main thread', r.worker && r.missReturn === null && r.landMs >= 0 && r.isBitmap && r.workerMainBuilds === 0, `${r.landMs} ms, bitmap ${r.isBitmap}, ${r.workerMainBuilds} main builds`);
   ok('the Worker atlas matches a main-thread build (layout and pixels)', r.fieldsMatch && r.pix && r.pix.mean <= 0.05 && r.pix.d4 <= r.pix.n * 0.001, JSON.stringify(r.pix));
   ok('drawing it the first time costs a fraction of a fresh main-thread build', r.drawWorker >= 0 && r.drawMain > 0 && r.drawWorker < r.drawMain * 0.5, `${r.drawWorker.toFixed(2)} vs ${r.drawMain.toFixed(2)} ms`);
-  ok('_lxGbPrewarm asks for the nine ladder sizes, and they arrive off the main thread', r.prewarmPosted === 9 && r.prewarmMs >= 0 && r.prewarmMainBuilds === 0, `${r.prewarmPosted} posted, ${r.prewarmMs} ms, ${r.prewarmMainBuilds} main builds`);
+  ok('_lxGbPrewarm asks for both nine-size ladders (normal and stress), and they arrive off the main thread', r.prewarmPosted === 18 && r.prewarmMs >= 0 && r.prewarmMainBuilds === 0, `${r.prewarmPosted} posted, ${r.prewarmMs} ms, ${r.prewarmMainBuilds} main builds`);
   ok('a boss spawning has the ladder ready before any number is drawn', !!r.boss && r.bossMs >= 0, `${r.boss}: ${r.bossMs} ms`);
   ok('with the Worker off it builds on the main thread, as before', r.fallback.got && r.fallback.canvas && r.fallback.mainBuilds === 1, JSON.stringify(r.fallback));
   ok('no page errors', errs.length === 0, errs.join(' | '));
