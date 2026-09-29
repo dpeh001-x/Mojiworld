@@ -56,8 +56,11 @@ const o = await page.evaluate(() => {
                H({ t: 'mon' }), H({ t: 'proj', id: 7 }), H({ t: 'hazhit' })].filter(Boolean);
 
   // ---- kill frames: downed gate + boss + NaN + wrong map + forged -------
-  const kf = (over) => Object.assign({ t: 'kill', id: 7, u: ++uid, e: 100, c: 1,
+  // v0.30.862: a guest pays a host's kill only for a monster it mirrored (_lxCoopRewardInfo), so every frame's monster is noted as
+  // seen first - wrong-map, forged and NaN frames are still refused before that record is read
+  const kf = (over) => { const f = Object.assign({ t: 'kill', id: 7, u: ++uid, e: 100, c: 1,
     x: Math.round(px()), y: Math.round(py()), map: MAP, tp: 'slime', b: 0, il: 0 }, over || {});
+    _lxCoopRewardNote({ uid: f.u, type: f.tp, exp: f.e, mojicoins: f.c, level: 60, isBoss: !!f.b }); return f; };
   player._downed = true;  H(kf());
   r.downedNoStreak = (game.mapKillStreak | 0) === 0;
   player._downed = false; H(kf({ b: 1 }));

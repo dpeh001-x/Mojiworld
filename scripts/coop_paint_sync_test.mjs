@@ -118,7 +118,8 @@ try {
   // ---- and it stays: Alice's own save keeps every stroke --------------------
   const kept = await A.evaluate(() => { const before = player.customPaintLayers, same = (o) => !!o && Object.keys(before).length === Object.keys(o).length && Object.keys(before).every((k) => o[k] === before[k]);
     if (typeof _flushSaveStateNow === 'function') _flushSaveStateNow(); else saveState();
-    const sv = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}'); const inSave = sv.player || sv;
+    // v0.30.1181: the paint layers live under their own key (SAVE_KEY + '_paint'); _lxSaveWithPaint splices them back the way the game does
+    const sv = JSON.parse(((typeof _lxSaveWithPaint === 'function') ? _lxSaveWithPaint(localStorage.getItem(SAVE_KEY)) : localStorage.getItem(SAVE_KEY)) || '{}'); const inSave = sv.player || sv;
     player.customPaintLayers = {}; loadState();
     return { inSave: same(inSave.customPaintLayers), reloaded: same(player.customPaintLayers) }; });
   ok('her save keeps every painted layer, and they load back', kept.inSave && kept.reloaded, kept);

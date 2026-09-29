@@ -29,7 +29,9 @@ const EXE = [process.env.PW_EXE,
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
 const URL = `http://localhost:${PORT}/${FILE}`;
-const WS  = process.env.MIRROR_WS || 'ws://localhost:8787';
+// the node relay (PORT=n node mp/server.mjs) serves the page and the socket on one port, so with PORT set the socket follows it;
+// MIRROR_WS still names any other relay (wrangler dev on :8787 for the worker itself)
+const WS  = process.env.MIRROR_WS || (process.env.PORT ? 'ws://localhost:' + PORT : 'ws://localhost:8787');
 const ROOM = 'mirror' + Math.floor(Math.random() * 1e9);
 
 const results = [];
@@ -74,8 +76,8 @@ try {
   for (const P of [A, B]) await P.evaluate(() => { window.__pump = setInterval(() => { try { _mpTick(); } catch (e) {} }, 90); });
   await sleep(2500);
 
-  ok('A connected via REAL worker code', await ev(A, () => net.connected));
-  ok('B connected via REAL worker code', await ev(B, () => net.connected));
+  ok('A connected to the relay (' + WS + ')', await ev(A, () => net.connected));
+  ok('B connected to the relay (' + WS + ')', await ev(B, () => net.connected));
 
   // 1) Field-by-field mirror: what B's peer draw APPLIES == A's ground truth.
   const applied = await ev(B, () => {

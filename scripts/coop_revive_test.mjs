@@ -45,8 +45,11 @@ try {
   await ev(B, (m) => loadMap(m), MAP); await sleep(1500);
 
   // Position both at the same spot so the revive radius is satisfied.
-  await ev(A, () => { player.x = 600; player.y = 300; player.hp = player.maxHp = 3000; });
-  await ev(B, () => { player.x = 600; player.y = 300; player.hp = player.maxHp = 3000; player._god = false; });
+  // v0.30.1029: a downed body falls until it lands, so both stand ON the ground (x 600 is mid-air at y 300 on this map)
+  await ev(A, () => { const g = game.mapData.platforms.find((p) => p.type === 'ground' && p.x <= 600 && p.x + p.w >= 640);
+    player.x = 600; player.y = (g ? g.y : 480) - player.h; player.vx = 0; player.vy = 0; player.onGround = true; player.hp = player.maxHp = 3000; });
+  await ev(B, () => { const g = game.mapData.platforms.find((p) => p.type === 'ground' && p.x <= 600 && p.x + p.w >= 640);
+    player.x = 600; player.y = (g ? g.y : 480) - player.h; player.vx = 0; player.vy = 0; player.onGround = true; player.hp = player.maxHp = 3000; player._god = false; });
   // v0.29.48 (per user): a down during ONBOARDING - the prologue, a story beat, or before the first-run tutorial is marked seen - is
   // silent (no DOWNED banner), cannot be revived and auto-respawns after 5 s (_isOnboardingActive / COOP_DOWN_ONBOARD_MS). This test's
   // fresh characters had never seen the tutorial, so the banner and the revive it asserts could not happen. They have seen it now.
@@ -68,6 +71,7 @@ try {
   ok('partner sees the DOWN state', await ev(A, () => Object.values(net.peers).some(p => p && p._downed)));
 
   // 2) A stands beside the body; the pump drives _coopReviveTick -> channel fills -> 'revive' sent.
+  await B.waitForFunction(() => !!player._downLanded, null, { timeout: 6000 }).catch(() => {}); await sleep(300);   // v0.30.1029: where the body LANDED
   await ev(A, () => { const down = Object.values(net.peers).find(p => p && p._downed); if (down) { player.x = (down.x || 600); player.y = (down.y || 300); } });
   await B.waitForFunction(() => player._downed === false && player.hp > 1, null, { timeout: 15000 }).catch(() => {});
   const revived = await ev(B, () => ({ downed: !!player._downed, hp: player.hp, max: (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp, banner: !!document.getElementById('coop-downed-banner') }));

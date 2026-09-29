@@ -66,6 +66,7 @@ try {
     if (!peer) return { noPeer: true };
     peer.map = game.currentMap;
     peer.x = 500; peer.y = player.y; peer.vx = 3; peer.vy = 0; peer.anim = 'run';
+    peer._stillN = 0;                                 // v0.30.1040: a partner whose snapshots stopped moving draws still - this one runs
     peer._rx = 500; peer._ry = player.y;              // converged on the snapshot
     peer._snapAt = performance.now() - 120;           // snapshot is ~7 frames old
     for (let i = 0; i < 12; i++) { try { _mpDrawPeers(); } catch (e) {} }
@@ -79,7 +80,8 @@ try {
     const sent = [];
     const origSend = net.ws.send.bind(net.ws);
     net.ws.send = (s) => { try { const o = JSON.parse(s); if (o.t === 'state') sent.push(!!o.look); } catch (e) {} return origSend(s); };
-    const tick = () => { net._lastTickAt = 0; try { _mpTick(); } catch (e) {} };
+    // v0.30.1199: an idle hero sends a state frame only on a change (then a slowing heartbeat) - move one px a tick so every tick is due
+    const tick = () => { player.x += 1; net._lastTickAt = 0; try { _mpTick(); } catch (e) {} };
     for (let i = 0; i < 30; i++) { tick(); await new Promise(r => setTimeout(r, 20)); }
     const steadyWith = sent.filter(Boolean).length, steadyTotal = sent.length;
     // equip swap -> next tick must carry look/eq
