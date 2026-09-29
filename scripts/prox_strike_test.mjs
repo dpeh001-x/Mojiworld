@@ -48,6 +48,7 @@ try {
       // TWO swings: the first of a fresh type (its decoded-frame count not yet tallied) and the next one after its rest
       const P = performance, orig = P.now, t0 = orig.call(P); let t = t0, sw = null, lastStamp = 0; const swings = [], seen = [];
       P.now = () => t;
+      game._lxMobHeldWall = 0; game._lxMobHeldOff = 0;   // v0.30.1424: this loop is its own clock - a paused world's held wall time (v0.30.1356 _lxHeldNow) would pin the frame picker where the pause began
       try {
         for (let e = 0; e <= 3600 && swings.length <= 2; e += 2) { t = t0 + e; m.x = player.x + player.w / 2; m.vx = 0;
           const f = set.attack.indexOf(_monsterStateFrame(m)); if (!seen.length || seen[seen.length - 1][1] !== f) seen.push([e, f]);

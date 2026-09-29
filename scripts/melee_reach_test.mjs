@@ -25,7 +25,8 @@ const GOLDEN = { scorpion: 67, mummy: 81.5, nougatBear: 78, thornmaw: 76, elderb
 // single-line defs
 const found = {};
 for (const m of src.matchAll(/^  ([a-zA-Z_][a-zA-Z0-9_]*): *\{ name:'[^']*', *w:(\d+), h:(\d+)[^\n]*?bigMelee:\{([^}]*)\}/gm)) {
-  const r = /range:(\d+)/.exec(m[4]); if (r) found[m[1]] = { w: +m[2], range: +r[1] };
+  const r = /range:(\d+)/.exec(m[4]); const a = /arcW:(\d+)/.exec(m[4]); const k = /kind:'(\w+)'/.exec(m[4]);
+  if (r) found[m[1]] = { w: +m[2], range: +r[1], arcW: a ? +a[1] : 220, kind: k && k[1] };
 }
 // legosaurus: two-line def
 { const lw = /legosaurus:    \{ name:'Legosaurus, the Warped Tyrant', w:(\d+), h:/.exec(src);
@@ -38,6 +39,18 @@ const off = [];
 for (const t of Object.keys(GOLDEN)) { if (!found[t]) continue; const reach = found[t].range - found[t].w / 2;
   if (Math.abs(reach - GOLDEN[t]) > 1.01) off.push(t + ': reach ' + reach + ' vs golden ' + GOLDEN[t] + ' (w ' + found[t].w + ', range ' + found[t].range + ')'); }
 ok('each swinger reaches exactly as far beyond its box edge as before the boxes grew (+/-1 px)', off.length === 0, off);
+// v0.30.1424 smash-reach: a 'smash' fires a ground shock +-arcW/2 about the box CENTRE, so its reach beyond the edge
+// (arcW/2 - w/2) shrank with every box that grew, exactly as the trigger's did - and nothing carried it over (Blight
+// Elder's shock reached 10 px past a 240 px box while he started it from 119). Golden: 2da338dc again.
+const SMASH_GOLDEN = { elderbark: 65, forgewight: 55, blightElder: 65, tombKeeper: 104, blockEle: 48, blockTigreal: 69,
+  potato_uncle: 113, boneGolem: 75 };
+const smashers = Object.keys(found).filter((t) => found[t].kind === 'smash'); const sOff = [];
+for (const t of smashers) { const reach = found[t].arcW / 2 - found[t].w / 2;
+  if (!(t in SMASH_GOLDEN) || Math.abs(reach - SMASH_GOLDEN[t]) > 1.01) sOff.push(t + ': shock reaches ' + reach + ' past the edge vs golden ' + SMASH_GOLDEN[t] + ' (w ' + found[t].w + ', arcW ' + found[t].arcW + ')'); }
+ok('each smash\'s ground shock reaches exactly as far beyond its box edge as before the boxes grew (+/-1 px)',
+  sOff.length === 0 && smashers.length === Object.keys(SMASH_GOLDEN).length, sOff.concat(smashers.length === Object.keys(SMASH_GOLDEN).length ? [] : ['smashers: ' + smashers.join(',')]));
+ok('the smash shock is still centred on the box (if this changes, the smash golden changes meaning)',
+  /x: m\.x \+ m\.w\/2 - _arcW\/2,/.test(src), null);
 const extra = Object.keys(found).filter((t) => !(t in GOLDEN));
 ok('no swinger has appeared that this table does not pin (add its golden reach when one does)', extra.length === 0, extra);
 ok('the zodiac swing signs carry their reach onto the new absolute box',

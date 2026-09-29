@@ -54,16 +54,16 @@ try {
     m._bdCd = 99999;
     await sleep(400);
     m.atkAnimUntil = 0;                                  // clear any window an earlier quake opened
-    const hz0 = game.hazards.filter((h) => h.type === 'mob_quake').length;
+    const hz0 = new Set(game.hazards.filter((h) => h.type === 'mob_quake'));   // v0.30.1424: by identity - an older quake expiring in the window hid a count
     o.before = m.atkAnimUntil || 0;
     m._legosaurusQuakeAt = (game.time | 0);              // fire on the next tick
     const t0 = performance.now();
     while (performance.now() - t0 < 400) await new Promise((res) => requestAnimationFrame(res));
     o.after = m.atkAnimUntil || 0;
     o.now = performance.now();
-    o.quakeFired = game.hazards.filter((h) => h.type === 'mob_quake').length > hz0;
+    o.quakeFired = game.hazards.some((h) => h.type === 'mob_quake' && !hz0.has(h));
     // the quake itself must be untouched: still a real hazard with damage and its telegraph
-    const hz = game.hazards.filter((h) => h.type === 'mob_quake').pop();
+    const hz = game.hazards.filter((h) => h.type === 'mob_quake' && !hz0.has(h)).pop();
     o.hazard = hz ? { w: hz.w, life: hz.maxLife, dmg: hz.damage > 0, stun: hz.stun } : null;
     return o;
   });

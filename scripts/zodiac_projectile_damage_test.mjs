@@ -52,6 +52,7 @@ try {
         player.invulnerable = 0; player.lastHitTime = -9999;
         Object.assign(player, (extra && extra.player) || {});
         game.projectiles.length = 0;
+        game.monsters.length = 0;   // v0.30.1424: a monster left near the player lands its own touch (v0.30.1400: from any side) inside the reading
         const before = player.hp;
         game.projectiles.push({
           x: player.x + player.w / 2 - 6, y: player.y + player.h / 2 - 6, vx: 0, vy: 0,
