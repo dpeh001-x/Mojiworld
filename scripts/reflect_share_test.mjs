@@ -78,6 +78,10 @@ const R = await page.evaluate(async () => {
     if (skill === 'thorns') reflects.push({ t: game.time | 0, dmg: +dmg });
     return origHit.apply(this, arguments);
   };
+  // v0.30.1400 sweep: the player's evasion is pinned to 0. A touch that rolled DODGE pushed a red "DODGE" ahead of the first hit,
+  // which parsed as NaN and failed the reflect checks at random (about 1 run in 3, on every build) - this test is about the
+  // reflect share, not the dodge.
+  const origEva = window.getEvasion; window.getEvasion = () => 0;
   const arr = game.damageNumbers;
   const origPush = arr.push.bind(arr);
   const taken = [];      // the red "damage taken" numbers, i.e. what reached the HP bar
@@ -137,7 +141,7 @@ const R = await page.evaluate(async () => {
   player.level = 100;
   out.boss = await bout('zodiac_scorpio', true, {});
 
-  arr.push = origPush; window.hitMonster = origHit; if (origMs) window._lxManaShieldAbsorb = origMs;
+  arr.push = origPush; window.hitMonster = origHit; if (origMs) window._lxManaShieldAbsorb = origMs; window.getEvasion = origEva;
   player.tree.manaShield = false; player.mods.thorns = 0;
   player._guardianReflect = 0; player._god = true; game.monsters.length = 0;
   out.pct = GUARD_PCT; out.thornsPct = THORNS;

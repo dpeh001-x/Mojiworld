@@ -122,7 +122,10 @@ async function PROBE(file) {
       REC = null; o._crazyT = 999999;
       return { dx, ranTo: Math.round(player.x + player.w / 2 - cx), teleSteps: tele, src };
     };
-    R.octo = { meltEdge: await melt(190, 60), meltFar: await melt(520, 60), meltRun: await melt(170, 60, true) };
+    // v0.30.1400 touch-sil: 190 and 170 px from the head are now INSIDE Octobaby's drawn body (its touch box reaches +204..+221 px
+    // in the Meltdown telegraph, per user: touching the silhouette hurts), and one touch there takes the whole HP bar, which ended
+    // the run before the Meltdown landed. 250 px is clear of the body and still well inside the Meltdown's 440 px reach.
+    R.octo = { meltEdge: await melt(250, 60), meltFar: await melt(520, 60), meltRun: await melt(250, 60, true) };
     const sweep = async (lv, eva) => {
       await settle(); o._crazyT = 999999; o._crazyActive = false; o._enraged = true; o._octoEvt = 0; o._octoSweepWarn = 0; o._octoSweepT = 1;
       player.x = o.x + o.w / 2 + 380; player.y = GO - player.h; player.vx = 0; player.vy = 0; await setLv(lv); EVA = eva || 0;
