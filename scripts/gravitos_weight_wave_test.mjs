@@ -93,7 +93,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const src = readFileSync(FILE, 'utf8');
 ok('no page errors', errs.length === 0, errs);
 ok("the 'wave' pattern's literal is found in bossAI", R.literalFound, '');
-ok('the fall line honours noGravity', src.includes("if ((p.skill === 'splash' || p.skill === 'shock' || p.skill === 'spore') && !p.noGravity) p.vy += 0.3;"), '');
+ok('the fall line honours noGravity', src.includes("if ((p.skill === 'splash' || p.skill === 'shock' || p.skill === 'spore') && !_lxOwnFall && !p.noGravity) p.vy += 0.3;")   /* v0.30.1425: + !_lxOwnFall - an enemy shot that declares its own fall takes that instead; noGravity still wins */, '');
 ok('co-op: a guest\'s mirrored wave carries noGravity too', src.includes("'_noEvasion', 'noGravity'];"), '');
 ok('THE WAVE RIDES THE FLOOR: its height never changes over its run (it used to sink through by ~12 steps)',
   R.ride && R.ride.n >= 30 && R.ride.yMax - R.ride.yMin <= 1, R.ride);
