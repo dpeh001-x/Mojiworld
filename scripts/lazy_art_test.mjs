@@ -19,7 +19,7 @@ const ORIGIN_MB = 416;   // origin 76542b3d (v0.30.1172) in this harness: 2,338 
 // his art, calib or BOSS_DRAW_SCALE moves it - re-measure on the parent build then
 const ORIGIN_VIS = { king: 314, gravitos: 578, zodiac_scorpio: 302 };
 // and the boss sizing derive's values (_bossRefContentH c: / _bossRefBodyH b:) on the parent build, same caveat
-const ORIGIN_DERIVED = { 'c:king': 589, 'b:king': 587, 'c:gravitos': 567, 'b:gravitos': 564, 'c:gravitos2': 1118, 'b:gravitos2': 1115, 'c:gravitos3': 917, 'b:gravitos3': 905, 'c:scorpio': 786 };
+const ORIGIN_DERIVED = { 'c:king': 589, 'b:king': 587, 'c:gravitos': 567, 'b:gravitos': 564, 'c:gravitos2': 1118, 'b:gravitos2': 1115, 'c:gravitos3': 902, 'b:gravitos3': 896, 'c:scorpio': 786 };
 let bad = 0, total = 0; const check = (ok, what, info) => { total++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${ok ? '' : '   ' + JSON.stringify(info)}`); if (!ok) bad++; };
 // files the (possibly stale) working copy lacks are served from origin/main, like the font route
 const MISSING = new Set();

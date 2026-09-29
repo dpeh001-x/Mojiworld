@@ -280,7 +280,7 @@
 // browser would keep drawing the old art for a session.
 // nine-mobs - v128 -> v129. Tomb Hexer, Ossifer, Bone Golem, Thundermole, Bones, Petalfly, Sunbun, Ossuary Tyrant and Drowned
 // Cur are redrawn and re-animated under their own names, so a returning browser would otherwise keep the old art.
-const CACHE = 'mojiworld-assets-v131';   // v0.30.1447 - the Rogue's crescent hit spark (hit_rogue_3) mirrored (same names)
+const CACHE = 'mojiworld-assets-v132';   // v0.30.1449 - Gravitos form 3 re-animated (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

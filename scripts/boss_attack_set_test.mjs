@@ -29,6 +29,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { bodyScale } from './gravitos3_body_register.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SET = join(root, 'Sprites', 'bosses', 'attack');
@@ -85,7 +86,9 @@ async function measure(buf) {
       if (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 <= BODY_LUM) darkRow[y]++;
     }
     if (data[i + 3] <= ALPHA) continue;
-    if (x === 0 || y === 0 || x === w - 1 || y === h - 1) border++;
+    // v0.30.1449 - the floor row is where his feet stand (every form-3 frame plants them on the canvas bottom, as his still
+    // always did); a cut there would show as a slice elsewhere. Top, left and right stay strict.
+    if (x === 0 || y === 0 || x === w - 1) border++;
     if (x > x1) x1 = x; if (y > y1) y1 = y;
     if (data[i + 3] >= 160 && data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 <= BODY_LUM) {
       if (y < by0) by0 = y; if (y > by1) by1 = y; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
@@ -123,8 +126,12 @@ for (const key of KEYS) {
   const inkBodies = ms.map((m) => m.bodyInk);
   const drift = spr(inkBodies);
   if (prof.kind === 'planted') {
-    ok('the titan is one size all the way through', drift <= prof.maxBodyDrift,
-      `dark-ink body ${Math.min(...inkBodies)}..${Math.max(...inkBodies)} = ${(drift * 100).toFixed(1)}%`);
+    // v0.30.1449 - one size = his HEAD AND TORSO, registered against his still (the pop-style art inks his flames and wing bones as black as his armour, so dark-pixel extents follow the wings). Frames where the
+    // spirits cover him (match < 0.6) do not vote.
+    const regs = []; for (const b of bufs) regs.push(await bodyScale(b));
+    const seen = regs.filter((q) => q.score >= 0.6).map((q) => q.s), bd = seen.length ? (Math.max(...seen) - Math.min(...seen)) / Math.max(...seen) : 1;
+    ok('the titan is one size all the way through', seen.length >= 3 && bd <= prof.maxBodyDrift,
+      `head/torso scale ${seen.join(', ')} over ${seen.length} readable frames = ${(bd * 100).toFixed(1)}% (dark-ink rows, wings included: ${(drift * 100).toFixed(1)}%)`);
   } else {
     const reach = spr(widths);
     const shape = spr(widths.map((w2, i) => w2 / bodies[i]));
