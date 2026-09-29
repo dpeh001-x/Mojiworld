@@ -28,7 +28,7 @@ try {
     spawnMonster(player.x + 300, player.y, 'kingKrook', true); const kk = game.monsters.filter((x) => x && x.type === 'kingKrook').pop(); o.krook = kk ? { atk: kk.atk, pre: kk._atkPreZodiacCut, cut: !!kk._zodiacAtkCut } : null;
     // the max-HP-fraction skills carry the multiplier (static: the shipped source)
     const src = await (await fetch(location.pathname)).text();
-    o.fracSites = ['_rm * 0.20 * LX_ZODIAC_DMG_MUL', '_km * 0.12 * LX_ZODIAC_DMG_MUL', '_sm * 0.24 * LX_ZODIAC_DMG_MUL', '_max * 0.015 * LX_ZODIAC_DMG_MUL', '_max * 0.75 * LX_ZODIAC_DMG_MUL'].map((t) => src.indexOf(t) >= 0);
+    o.fracSites = ['fr: +(0.20 * LX_ZODIAC_DMG_MUL)', '_km * 0.12 * LX_ZODIAC_DMG_MUL', '_sm * 0.24 * LX_ZODIAC_DMG_MUL', '_max * 0.015 * LX_ZODIAC_DMG_MUL', '_max * 0.75 * LX_ZODIAC_DMG_MUL'].map((t) => src.indexOf(t) >= 0);
     return o;
   }, SIGNS);
   console.log('build ' + r.ver + '  leo spawned ' + JSON.stringify(r.spawned.leo));
