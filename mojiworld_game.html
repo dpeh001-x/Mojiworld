@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1421';
+const GAME_VERSION = 'v0.30.1422';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -125568,6 +125568,19 @@ function _lxBgTinted(src, tint) {
     return cv;
   } catch (e) { return src; }
 }
+// v0.30.1422 ONE SIZE FOR A ONE-COPY PLATE. drawBackground draws a bgNoMirror plate at its own aspect, wide enough to cover the parallax
+// travel; _lxPrimeBackdrop (the boot ready-gate and every map entry's veil) pre-bakes the plate so the first visible frame is a
+// 1:1 blit. The prime used to size that bake W x H (or the tower's 1.45x, which the one-copy branch overrides), and since
+// _lxBgScaled keeps ONE bake per image, a wrong-size prime was not merely wasted: it evicted the draw's bake and the next frame
+// baked the whole plate again - measured on Everdawn Central (2912x1632 baked 1182x662, then 960x560, then 1182x662) and The
+// Weight-Bearer's Stair. Both now size it here. Returns a shared object (drawBackground calls this every frame): read, not kept.
+const LX_BG_PARALLAX = 0.12;
+const _LX_NM_SIZE = { w: 0, h: 0, travel: 0 };
+function _lxNoMirrorSize(worldWidth, srcAsp) {
+  const S = _LX_NM_SIZE, travel = Math.max(0, ((worldWidth || W) - W)) * LX_BG_PARALLAX, k = Math.max(1, (W + travel) / (H * srcAsp));
+  S.h = Math.round(H * k); S.w = Math.ceil(S.h * srcAsp); S.travel = travel;
+  return S;
+}
 function _lxBgScaled(img, w, h) {
   if (!img || !(w > 0) || !(h > 0)) return img;
   // v0.30.255 — bake at DEVICE resolution (see _lxBakeDpr). The v0.30.246 bake
@@ -125752,7 +125765,7 @@ function drawBackground() {
   // never arrives - so nothing below this line changes for a map without one.
   const _bgVid = _LX_SKY.pre ? _LX_SKY.vid : ((typeof _lxMapVideoFrame === 'function') ? _lxMapVideoFrame(game.currentMap) : null);
   if (bgPick || _bgVid) {
-    const parallax = 0.12;
+    const parallax = LX_BG_PARALLAX;   // v0.30.1422 - shared with _lxNoMirrorSize
     /* v0.29.5xx — vertical parallax on tall tower maps, reworked (per user
        "improve on the vertical parallax"). Three fixes over the v0.25.470-era
        pass:
@@ -125787,9 +125800,8 @@ function drawBackground() {
     if (_nm) {
       const _srcAsp = _bgVid ? ((_bgVid.videoWidth || _bgVid.width || W) / (_bgVid.videoHeight || _bgVid.height || H))
                              : ((bgPick && bgPick.naturalWidth > 0 && bgPick.naturalHeight > 0) ? bgPick.naturalWidth / bgPick.naturalHeight : W / H);
-      const _travel = Math.max(0, ((_md.worldWidth || W) - W)) * parallax;
-      const _k = Math.max(1, (W + _travel) / (H * _srcAsp));
-      _bgH = Math.round(H * _k); _bgW = Math.ceil(_bgH * _srcAsp);
+      const _nms = _lxNoMirrorSize(_md.worldWidth, _srcAsp), _travel = _nms.travel;   // v0.30.1422 - the size _lxPrimeBackdrop pre-bakes
+      _bgH = _nms.h; _bgW = _nms.w;
       _bgY = H - _bgH;
       if (_md.bgCropTop != null) _bgY = Math.round((H - _bgH) * _md.bgCropTop);   // v0.30.1417 the share of the sky overscan cut from the top (default 1: all of it)
       const _sh = Math.max(0, Math.min(_travel, (game.camera.x || 0) * parallax));
@@ -171191,6 +171203,20 @@ function _lxPrimeBackdrop(id) {
     // the exact sizing drawBackground uses, so this IS the cache it will hit
     let bgW = W, bgH = H;
     if (md.isVerticalTower && md.worldHeight && md.worldHeight > H) { bgH = Math.round(H * 1.45); bgW = Math.round(W * 1.45); }
+    // v0.30.1422 - a one-copy (bgNoMirror) plate is drawn at its own aspect, over the parallax travel (drawBackground's branch runs
+    // after the tower branch and overrides it). With a map clip that already has a frame, the draw sizes by the CLIP's aspect,
+    // the plate being only the underlay of its fade-in - and once the fade is done nothing draws the plate at all, so there is
+    // nothing to bake (a bake then would only evict the underlay's). A clip still loading leaves the plate showing: its own size.
+    if (md.bgNoMirror) {
+      let asp = img.naturalWidth / img.naturalHeight;
+      const vk = (typeof _lxMapVideoKeyFor === 'function') ? _lxMapVideoKeyFor(id) : id;
+      const v = (typeof _LX_MAP_VIDEO !== 'undefined' && _LX_MAP_VIDEO[vk] && typeof _lxMapVideoEls !== 'undefined') ? _lxMapVideoEls[vk] : null;
+      if (v && v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0) {
+        if (_lxMapVideoAlphaFor === vk && _lxMapVideoAlpha >= 1) return true;
+        asp = v.videoWidth / v.videoHeight;
+      }
+      const s = _lxNoMirrorSize(md.worldWidth, asp); bgW = s.w; bgH = s.h;
+    }
     _lxBgScaled(img, bgW, bgH);
     return true;
   } catch (e) { return false; }
