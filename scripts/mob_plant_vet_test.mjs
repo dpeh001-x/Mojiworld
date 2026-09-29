@@ -7,6 +7,8 @@
 //     frames were planted by their own feet)
 //   - STILL SIZE: Octobaby's arms draw their still (shown before their frames decode) at their frames' size - a tinted
 //     copy was drawn with no size and came out 37% too big, 80-100 px into the floor
+//   - STILL FIT (v0.30.1416, per user "fix the Ossuary Tyrant and Blight Elder stills too"): their stills fill ~20% more of
+//     their canvas than their frames and drew 19% big, 34-36 px deep; they now draw like idle frame 0
 //   [PORT=13904] node scripts/mob_plant_vet_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +56,7 @@ check(inHouse(R.ossuaryTyrant.idle.bury) && inHouse(R.blightElder.idle.bury), 'S
 check(Math.abs(R.forgewight.attack.bury - R.forgewight.idle.bury) <= 2, 'ATTACK DROP: the Forgewight\'s attack starts where its idle stands (it dropped 8 px)', { idle: R.forgewight.idle.bury, attack: R.forgewight.attack.bury });
 const legs = ['octoLegFreeze', 'octoLegStun', 'octoLegSkillLock'];
 check(legs.every((t) => Math.abs(R[t].still.h / R[t].idle.h - 1) <= 0.05 && Math.abs(R[t].still.bury - R[t].idle.bury) <= 3), 'STILL SIZE: Octobaby\'s arms draw their still at their frames\' size and depth (was 37% too big, 80-100 px deep)', legs.map((t) => ({ t, still: R[t].still, idle: R[t].idle })));
+check(['ossuaryTyrant', 'blightElder'].every((t) => Math.abs(R[t].still.h / R[t].idle.h - 1) <= 0.05 && Math.abs(R[t].still.bury - R[t].idle.bury) <= 4), 'STILL FIT: the Ossuary Tyrant\'s and Blight Elder\'s stills draw at their idle frame\'s size and depth (were 19% big, 34-36 px deep)', ['ossuaryTyrant', 'blightElder'].map((t) => ({ t, still: R[t].still, idle: R[t].idle })));
 check(errs.length === 0, 'no page errors', errs.slice(0, 3));
 await browser.close(); server.kill();
 console.log(`\n${pass}/${pass + fail} checks passed`); process.exit(fail ? 1 : 0);

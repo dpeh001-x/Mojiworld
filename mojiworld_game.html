@@ -16149,7 +16149,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1415';
+const GAME_VERSION = 'v0.30.1416';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -146963,6 +146963,22 @@ function _lxBBoxFill(k) {
   const a = String(r).split(','), t = +a[0], b = +a[1], h = +a[3];
   return (h > 0 && b >= t) ? (b - t + 1) / h : 0;
 }
+// v0.30.1416 - a MONSTER still standing in for frames that draw its figure differently: where frame 0 of the state would
+// draw - scaled to its figure, its figure's bottom on frame 0's. Null when the two fill their canvas alike (within 15%),
+// which is every monster but the Ossuary Tyrant and Blight Elder (per user, "fix the ... stills too").
+function _lxMobStillFit(m, still, targetH, dyOffset) {
+  const T = (typeof window !== 'undefined') && window.LX_SPRITE_BBOX;
+  if (!T || !m) return null;
+  const st = (typeof _mobWalking === 'function' && _mobWalking(m)) ? 'walk' : 'idle';
+  const sr = T[_lxSpriteKeyOf(still)], fr = T['monsters/' + st + '/' + m.type + '_0.webp'];
+  if (!sr || !fr) return null;
+  const [sT, sB, sW, sH] = String(sr).split(',').map(Number), [fT, fB, , fH] = String(fr).split(',').map(Number);
+  if (!(sH > 0 && fH > 0 && sW > 0 && sB >= sT && fB >= fT)) return null;
+  const k = ((fB - fT + 1) / fH) / ((sB - sT + 1) / sH);
+  if (k > 1 / 1.15 && k < 1.15) return null;
+  const h = targetH * k, w = h * (sW / sH), foot = dyOffset + targetH * (fB + 1) / fH;
+  return { w, h, y: foot - h * (sB + 1) / sH };
+}
 function _lxSpriteKeyOf(im) {
   const src = String((im && (im.src || (im._lxSrc && im._lxSrc.src))) || ''), i = src.indexOf('/Sprites/');
   return i < 0 ? '' : src.slice(i + 9).split('?')[0];
@@ -149345,6 +149361,14 @@ function _drawMonsterSprite(m, sx, sy) {
       _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_frameW / 2), _lxWholePx(dyOffset), _frameW, targetH);   // v0.29.x — edge feather
     }
   } else {
+    const _sFit = (typeof _lxMobStillFit === 'function') ? _lxMobStillFit(m, sprite, targetH, dyOffset) : null;   // v0.30.1416 - see _lxMobStillFit
+    if (_sFit) {
+      const _fitSrc = _getCachedScaledSprite(m.type, sprite, srcW, srcH, targetW, targetH) || sprite;
+      _lxDrawSoft(ctx, _fitSrc, _lxWholePx(-_sFit.w / 2), _lxWholePx(_sFit.y), _sFit.w, _sFit.h);
+      if (_stBakedTint) _lxMobTintFilter = _stPrevTint;
+      ctx.restore();
+      return;
+    }
     const _cachedSprite = _getCachedScaledSprite(m.type, sprite, srcW, srcH, targetW, targetH);
     if (_cachedSprite) {
       _lxDrawSoft(ctx, _cachedSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.x — edge feather · v0.30.1413 explicit size: a tint bake carries no logical size
