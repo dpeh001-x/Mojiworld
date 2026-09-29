@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1419';
+const GAME_VERSION = 'v0.30.1420';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -91633,7 +91633,7 @@ const SKILL_FNS = {
       const px = _px(), py = _py();
       spawnSpriteBurst(px, py, 'crusader_ult', { size: Math.min(1400, Math.round(2 * _R / 0.78)), life: 54, sticky: true,
         scaleStartX: 0.7, scaleEndX: 1.04, scaleStartY: 0.7, scaleEndY: 1.04 });
-      performAround(_R, _mul * 0.7, { color: '#ffe08a', kb: 10 + 12 * _C, noShock: true });
+      performAround(_R, _mul * 0.7, { color: '#ffe08a', kb: 10 + 12 * _C, noShock: true, sureHit: true });   // v0.30.1420 bastion-fix - see below
       flash(0.18 + 0.22 * _C); addShake(8 + 16 * _C);
     }, 490);
     // 3. ...and the dawn keeps breaking: two after-waves, each 20% wider, 15% of the burst apiece.
@@ -91644,7 +91644,11 @@ const SKILL_FNS = {
       const px = _px(), py = _py(), r = Math.round(_R * (1 + 0.2 * _w));
       spawnSpriteBurst(px, py, 'crusader_ult', { size: Math.min(1600, Math.round(2 * r / 0.78)), life: 34, opacity: 0.35, behind: true, sticky: true,
         scaleStartX: 0.85, scaleEndX: 1.08, scaleStartY: 0.85, scaleEndY: 1.08 });
-      performAround(r, _mul * 0.15, { color: '#ffe08a', kb: 5, noShock: true });
+      // v0.30.1420 bastion-fix - DAWNBREAK DOES NOT MISS (per user: "most of the time the attack misses"). Every hit rolled the
+      // target's evasion, three times a release: measured at level 100, a fully charged burst missed 60% of its hits on Leo
+      // (evasion 503) and 62% on Scorpio (737), 18% on King Krook - the whole 10-15 s charge spent on MISS. It is a stored
+      // burst paid for by holding the stance and taking the hits, so it lands. Every other skill still rolls its miss.
+      performAround(r, _mul * 0.15, { color: '#ffe08a', kb: 5, noShock: true, sureHit: true });
       addShake(4 + 6 * _C);
     }, 490 + _w * 240);
   },
@@ -92302,7 +92306,8 @@ function performAround(radius, dmgPct, opts = {}) {
       // punches through armour, so its slams hit bosses harder, not trash.
       const _bMul = (opts.bossMul > 1 && (m.isBoss || m.boss)) ? opts.bossMul : 1;
       const dmg = Math.floor((getAtk() * dmgPct * _bMul + Math.random() * 8) * (crit ? getCritDmg() : 1));
-      hitMonster(m, dmg, crit, 'aoe');
+      if (opts.sureHit) player._lxSureHit = true;   // v0.30.1420 bastion-fix - this hit does not roll a miss
+      try { hitMonster(m, dmg, crit, 'aoe'); } finally { player._lxSureHit = false; }
       applyEnhOnHit(m, dmg, enh);
       spawnSmoothImpact(m.x + m.w/2, m.y + m.h/2, opts.color || '#ffffff');
       if (opts.kb) {
@@ -103595,7 +103600,8 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // boss dodges at ×2.5 evasion +60 flat for 5-10 s. Resolved here so every
   // attack path shares one roll.
   const _lxEffEva = (m._dirGhostT > 0) ? Math.floor((m.evasion || 0) * 2.5) + 60 : (m.evasion || 0);
-  const _lxBasicMiss = (!MISS_EXEMPT_SKILLS.has(skill) && typeof player !== 'undefined' && player && !player._oneShot)
+  // v0.30.1420 bastion-fix - player._lxSureHit: performAround's sureHit option, set only around its own hitMonster call
+  const _lxBasicMiss = (!MISS_EXEMPT_SKILLS.has(skill) && typeof player !== 'undefined' && player && !player._oneShot && !player._lxSureHit)
     ? ((!m.boss && !_rollHitVsLevelGap(_mobLevel(m))) || (_lxEffEva > 0 && !_rollAccuracyHit(getAccuracy(), _lxEffEva, m.boss ? 0.45 : 0.15)))
     : false;
   // v0.29.298 — SYNERGY: Shatter Point (freeze + critd). A hit on a FROZEN
@@ -140050,6 +140056,13 @@ function _lxStar(g, x, y, ro, ri, rot) {
   for (let i = 0; i < 8; i++) { const a = rot + i * Math.PI / 4, rr = (i % 2 === 0) ? ro : ri; const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr; if (i === 0) g.moveTo(px, py); else g.lineTo(px, py); }
   g.closePath(); g.fill();
 }
+// v0.30.1420 bastion-fix - the armed Bastion's banner. _playerControlState still returns it only when no hard control (stun,
+// freeze, stagger, silence, bubble) is on; the overhead draw then stacks it one slot above that control instead of dropping it
+// (per user: "if hit with another debuff the timer disappears temporarily").
+function _lxBastionBanner() {
+  if (!player || !((player._bastionArmedUntil | 0) > (game.time | 0))) return null;
+  return { kind: 'bastion', hard: false, emoji: '☀', label: 'BASTION ARMED', detail: 'Dawn ' + Math.round(_lxDawnCharge().c * 100) + '% · tap B', tint: '#ffe08a', remain: ((player._bastionArmedUntil | 0) - (game.time | 0)) * 16.7, total: 15000 };
+}
 function _playerControlState() {
   if (!player || player.hp <= 0) return null;
   const _qte = (typeof _QTE !== 'undefined' && _QTE && _QTE.active);
@@ -140061,7 +140074,7 @@ function _playerControlState() {
   if ((player.stunTimer | 0) > 0 && !_qte) return { kind: 'stun', hard: true, emoji: '💫', label: 'STUNNED', tint: '#ffd166', remain: player.stunTimer | 0, total: player._ctrlTotal_stun || 3000 };
   if ((player._heavyStunUntil | 0) > (game.time | 0) && (player.hitStun | 0) > 0) return { kind: 'stagger', hard: true, emoji: '💫', label: 'STAGGERED', tint: '#ffd166', remain: ((player._heavyStunUntil | 0) - (game.time | 0)) * 16.7, total: 1000 };
   if ((player._skillLockTimer | 0) > 0) return { kind: 'silence', hard: true, emoji: '🔒', label: 'SILENCED', detail: 'no skills', tint: '#ff99cc', remain: player._skillLockTimer | 0, total: player._ctrlTotal_silence || 3500 };
-  if ((player._bastionArmedUntil | 0) > (game.time | 0)) return { kind: 'bastion', hard: false, emoji: '☀', label: 'BASTION ARMED', detail: 'Dawn ' + Math.round(_lxDawnCharge().c * 100) + '% · tap B', tint: '#ffe08a', remain: ((player._bastionArmedUntil | 0) - (game.time | 0)) * 16.7, total: 15000 };
+  { const _bb = _lxBastionBanner(); if (_bb) return _bb; }   // v0.30.1420 bastion-fix - its own reader
   return null;
 }
 // remember each status's opening length so the bar drains from full
@@ -140160,7 +140173,7 @@ function _drawHealLockTimer(sx, sy, lifted) {
   // cross at its head, the tenths on an ink chip, the fuse under it. It takes the banner's slot over the head, or
   // stacks above the banner when both show; in its last two seconds it throbs.
   const bump = remainF <= 120 ? 1 + Math.sin(now * 0.45) * 0.045 : 1;
-  _lxStatusSticker(sx + (player.w || 28) / 2, Math.max(14, sy - LX_STATUS_BANNER_Y - (lifted ? 30 : 0)), 'heallock', '#ff4d6d', 'HEAL LOCK', secs, frac, bump);
+  _lxStatusSticker(sx + (player.w || 28) / 2, Math.max(14, sy - LX_STATUS_BANNER_Y - (+lifted || 0) * 30), 'heallock', '#ff4d6d', 'HEAL LOCK', secs, frac, bump);
 }
 function _drawPlayerStatusIcons(sx, sy) {
   if (!player || player.hp <= 0) return;
@@ -140200,8 +140213,10 @@ function _drawPlayerStatusIcons(sx, sy) {
   }
   // v0.30.1251 pop - the banner and the seal ride over the row; with no row they drop into its place, just over the head
   { const _up = icons.length ? 0 : LX_STATUS_BANNER_Y - LX_STATUS_ROW_Y - 6;
+    const _bst = (_ctl && _ctl.kind !== 'bastion') ? _lxBastionBanner() : null;   // v0.30.1420 bastion-fix - a debuff over an armed Bastion
     if (_ctl) _drawPlayerControlBanner(sx, sy + _up, _ctl);
-    if (_hl) _drawHealLockTimer(sx, sy + _up, !!_ctl); }
+    if (_bst) _drawPlayerControlBanner(sx, sy + _up - 30, _bst);
+    if (_hl) _drawHealLockTimer(sx, sy + _up, (_ctl ? 1 : 0) + (_bst ? 1 : 0)); }
   if (icons.length === 0) return;
   ctx.save();
   // v0.30.1251 pop - the row rides just over the head (LX_STATUS_ROW_Y) at full strength, stickers 17 px apart, bobbing
