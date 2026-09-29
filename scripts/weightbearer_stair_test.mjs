@@ -10,7 +10,8 @@
 // there; [8] the area card and the minimap; [9] it plays for 3 s; [11] THE CLIMB WALKS - held Right carries the hero from the
 // Sanctum door up all twenty ramped risers to the Singularity's door; [12] nobody is stranded - a Lv 50 hero leaves the arena
 // onto the Stair and walks down to the Sanctum, while the Stair keeps the Lv 70 W-map gate; [13] its own backdrop (one copy),
-// its own theme (served, in the jukebox with its icon); [10] no page errors. Baselines ([4], [5]) were read from main
+// its own theme (served, in the jukebox with its icon); [14] its backdrop moves - the clip takes over, plays on a loop, and the
+// sphere pass follows it; [10] no page errors. Baselines ([4], [5]) were read from main
 // (v0.30.1415) before the Stair existed, so against main the Stair checks fail and the baseline checks pass.
 //   node scripts/weightbearer_stair_test.mjs [page.html] [port]    (MOJI_GAME_FILE / this repo's game by default)
 import { createRequire } from 'node:module';
@@ -518,6 +519,29 @@ try {
     !av.err && av.src === 'backgrounds/bg_v4_weightbearerStair.webp' && av.size && av.size[0] >= 1280 && Math.abs(asp - 16 / 9) < 0.02 && av.noMirror, av);
   ok('[13] its own theme: audio/bgm_weightbearer_stair.mp3 is served as audio, and the jukebox lists it with its own pad icon',
     !av.err && av.bgm === 'audio/bgm_weightbearer_stair.mp3' && av.status === 200 && /audio\/mpeg/.test(av.type) && av.bytes > 1e6 && av.jb === av.bgm && av.icon === 256, av);
+
+  // [14] ITS BACKDROP MOVES (per user: "make the map animated"). backgrounds/weightbearerStair.mp4 takes over from the plate,
+  // plays on a loop, and the living-sphere pass is handed the clip's box: a clip draws at its own aspect (1344x768, 1.75), and
+  // the pass reads the clip's sphere, not the plate's, below 1.767.
+  const vid = await safe(async () => {
+    __nm.settle(); loadMap('weightbearerStair'); await __nm.frames(10, __nm.settle);
+    const o = window._lxStairSkyDraw; let seen = null;
+    window._lxStairSkyDraw = function (a, b, c, d) { seen = [c, d]; return o.apply(this, arguments); };
+    let v = null;
+    for (const w0 = performance.now(); performance.now() - w0 < 20000;) {
+      __nm.settle(); v = _lxMapVideoEls.weightbearerStair;
+      if (v && v.readyState >= 2 && _lxMapVideoAlphaFor === 'weightbearerStair' && _lxMapVideoAlpha >= 1) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const t1 = v ? v.currentTime : -1; await new Promise((r) => setTimeout(r, 1200)); const t2 = v ? v.currentTime : -1;
+    window._lxStairSkyDraw = o;
+    return { table: _LX_MAP_VIDEO.weightbearerStair || null, ready: !!(v && v.readyState >= 2), size: v ? [v.videoWidth, v.videoHeight] : null,
+      dur: v ? +(+v.duration).toFixed(2) : null, loop: !!(v && v.loop), advanced: +(t2 - t1).toFixed(2), wrapped: t2 < t1,
+      alpha: +(+_lxMapVideoAlpha).toFixed(2), pass: seen ? +(seen[0] / seen[1]).toFixed(3) : null };
+  }, undefined, 60000);
+  ok('[14] its backdrop moves: backgrounds/weightbearerStair.mp4 takes over from the plate, plays on a loop, and the sphere pass follows the clip',
+    !vid.err && vid.table === 'backgrounds/weightbearerStair.mp4' && vid.ready && !!vid.size && vid.size[0] === 1344 && vid.size[1] === 768 && vid.loop
+      && vid.alpha >= 1 && (vid.advanced > 0.5 || vid.wrapped) && vid.pass !== null && vid.pass < 1.767, vid);
 
   // [10]
   ok('[10] no page errors', errs.length === 0, errs.slice(0, 3));

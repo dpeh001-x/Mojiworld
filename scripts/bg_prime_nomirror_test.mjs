@@ -6,11 +6,12 @@
 // small enough to blit raw at their drawn size).
 // Per map, in a fresh browser context (cold image cache): enter it with loadMap - the real veil path - with _lxBgScaled hooked,
 // and log every BAKE (the image's cached canvas changed) with its size and whether the veil was still up. Held: [1] no bake lands
-// after the veil lifts - also with the plate's download held back until the veil gate has primed without it, so the veil's own
+// after the veil lifts - also with the plate's download held back until the veil starts waiting for it, so the veil's own
 // last-moment prime (_lxVeilBackdrop) is what bakes it just before the veil lifts; [2] nothing baked under the veil is a size the draw never asks for (no wasted or
-// evicting bake); [3] the prime asks the drawn size (read off _lxPrimeBackdrop's own call). Town's clip (everdawn.mp4) paints
-// over its plate once it has a frame, so town is run with reduced motion, the path where the plate is what shows; with the clip
-// the log is printed for the record (the prime then asks the clip's box, the plate being its fade-in underlay). Against the
+// evicting bake); [3] the prime asks the drawn size (read off _lxPrimeBackdrop's own call). A map with a clip (town's
+// everdawn.mp4, the Stair's weightbearerStair.mp4) paints it over its plate once it has a frame, so those maps are held with
+// reduced motion, the path where the plate is what shows; with the clip the log is printed for the record (the prime then asks
+// the clip's box, the plate being its fade-in underlay). Against the
 // build before the fix, the late entries of the plates that bake fail [1], and [3] fails on every map.
 //   node scripts/bg_prime_nomirror_test.mjs [page.html] [port]    (MOJI_GAME_FILE / this repo's game by default)
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -25,7 +26,7 @@ const WATCHDOG = setTimeout(async () => { ok('the run finishes inside 12 minutes
 // one cold entry: boot, hook, loadMap(id), watch until the veil is down and 45 more game frames have drawn
 async function enter(id, reduced, late) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, serviceWorkers: 'block', reducedMotion: reduced ? 'reduce' : 'no-preference' });
-  // LATE: the plate's download is held - however early the boot asked for it - until the veil gate has primed without it, so the
+  // LATE: the plate's download is held - however early the boot asked for it - until the veil starts waiting for it, so the
   // veil's last word (_lxVeilBackdrop) is what primes it, just before the veil lifts: the path where a wrong-size prime leaves the
   // re-bake to a frame the player sees
   let releaseLate = () => {}; const lateGate = new Promise((r) => { releaseLate = r; });
@@ -36,7 +37,7 @@ async function enter(id, reduced, late) {
     await page.goto(`http://localhost:${PORT}/${PAGE_URL}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
     await page.waitForFunction(() => typeof MAPS === 'object' && typeof loadMap === 'function' && typeof _lxBgScaled === 'function' && typeof _lxPrimeBackdrop === 'function', null, { timeout: 180000 });
     await page.waitForTimeout(4000);
-    // the plate is let through once the veil gate's own prime has run without it (or after 8 s, whatever happens)
+    // the plate is let through once the veil starts waiting for it (_lxVeilBackdrop called), or after 8 s, whatever happens
     if (late) { await page.exposeFunction('__lxReleasePlate', () => { setTimeout(releaseLate, 150); }); setTimeout(releaseLate, 8000); }
     const r = await page.evaluate(async (id) => {
       const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
@@ -55,8 +56,10 @@ async function enter(id, reduced, late) {
       window._lxPrimeBackdrop = function (pid) { inPrime = true; try { const v = origPrime.apply(this, arguments);
         if (pid === id) { const L = log.filter((e) => e.prime); if (L.length) primeAsk = [L[L.length - 1].w, L[L.length - 1].h];
           primeBy.push(/_lxVeilBackdrop|\btick\b/.test(String(new Error().stack || '')) ? 'veil' : 'gate');
-          if (!v && typeof window.__lxReleasePlate === 'function') window.__lxReleasePlate(); }   // LATE: the gate primed without the plate - let it through
+        }
         return v; } finally { inPrime = false; } };
+      const origVeil = window._lxVeilBackdrop;   // LATE: the veil has started waiting - let the plate through now
+      window._lxVeilBackdrop = function () { if (typeof window.__lxReleasePlate === 'function') window.__lxReleasePlate(); return origVeil.apply(this, arguments); };
       loadMap(id);
       let lifted = null, cv = null;
       for (const t0 = performance.now(); performance.now() - t0 < 15000; await sleep(16)) {
@@ -65,7 +68,7 @@ async function enter(id, reduced, late) {
           cv = { alphaFor: (typeof _lxMapVideoAlphaFor !== 'undefined') ? _lxMapVideoAlphaFor : null, alpha: (typeof _lxMapVideoAlpha !== 'undefined') ? +(+_lxMapVideoAlpha).toFixed(2) : null }; }
         if (lifted !== null && (game.time | 0) - lifted > 45) break;
       }
-      window._lxBgScaled = orig; window._lxPrimeBackdrop = origPrime;
+      window._lxBgScaled = orig; window._lxPrimeBackdrop = origPrime; window._lxVeilBackdrop = origVeil;
       const drawn = log.filter((e) => !e.prime && !e.veil);
       return { id, plate: img ? [img.naturalWidth, img.naturalHeight] : null, lifted, clip: cv, primeAsk, primeBy, drawAsk: drawn.length ? [drawn[drawn.length - 1].w, drawn[drawn.length - 1].h] : null,
         bakes: log.filter((e) => e.baked).map((e) => `${e.w}x${e.h}${e.prime ? ' prime' : ''}${e.veil ? ' veil' : ' AFTER'} f${e.f}`), calls: log.length };
@@ -83,16 +86,17 @@ try {
   const plates = await pg.evaluate(() => Object.fromEntries(Object.keys(MAPS).filter((k) => MAPS[k] && MAPS[k].bgNoMirror && MAPS[k].bg && BG_IMAGES[MAPS[k].bg])
     .map((k) => { const im = BG_IMAGES[MAPS[k].bg]; return [k, String(im._lxPath || im.getAttribute('src') || im.src || '').split('/').pop()]; })));
   const ids = Object.keys(plates);
+  const clips = await pg.evaluate(() => Object.keys((typeof _LX_MAP_VIDEO !== 'undefined' && _LX_MAP_VIDEO) || {}));   // maps whose backdrop is a clip
   await probe.close();
   ok('[0] the game has one-copy (bgNoMirror) maps to check', ids.length >= 3, plates);
   const runs = [];
-  for (const id of ids) runs.push(await enter(id, id === 'town'));
+  for (const id of ids) runs.push(await enter(id, clips.includes(id)));
   // the same entries with the plate arriving late, so _lxVeilBackdrop primes it right before the veil lifts
-  for (const id of ids) { const r = await enter(id, id === 'town', plates[id]); r.id = id + ' (plate late)'; runs.push(r); }
-  if (ids.includes('town')) { const withClip = await enter('town', false); withClip.id = 'town (with its clip)'; runs.push(withClip); }
+  for (const id of ids) { const r = await enter(id, clips.includes(id), plates[id]); r.id = id + ' (plate late)'; runs.push(r); }
+  for (const id of ids.filter((k) => clips.includes(k))) { const w = await enter(id, false); w.id = id + ' (with its clip)'; runs.push(w); }
   for (const r of runs) {
     console.log(`      ${r.id}: plate ${r.plate} | prime asked ${r.primeAsk} by ${r.primeBy} | draw asks ${r.drawAsk} | bakes [${r.bakes.join(', ')}] | veil down at f${r.lifted}${r.clip && r.clip.alphaFor ? ` (clip ${r.clip.alphaFor} at alpha ${r.clip.alpha})` : ''}`);
-    if (r.id === 'town (with its clip)') continue;   // recorded, not held: the clip, not the plate, is what shows once it has a frame
+    if (r.id.endsWith('(with its clip)')) continue;   // recorded, not held: the clip, not the plate, is what shows once it has a frame
     if (r.id.endsWith('(plate late)')) ok(`[1] ${r.id}: primed by the veil, and still no bake lands after it lifts`, r.primeBy.includes('veil') && r.lifted !== null && !r.bakes.some((b) => b.includes('AFTER')), r);
     if (r.id.endsWith('(plate late)')) continue;
     ok(`[1] ${r.id}: no bake lands after the veil lifts`, r.lifted !== null && !r.bakes.some((b) => b.includes('AFTER')), r);

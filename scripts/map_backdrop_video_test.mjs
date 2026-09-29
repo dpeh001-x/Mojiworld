@@ -19,8 +19,10 @@ const src = readFileSync(GAME, 'utf8');
 
 // gravitosFinale is not a map but a STATE of gravitosArena (once form 2 falls); it shares that
 // map's plate as its fallback
-const CLIPS = { town: 'backgrounds/everdawn.mp4', gravitosArena: 'backgrounds/gravitos.mp4', gravitosFinale: 'backgrounds/gravitosfinale.mp4' };
-const PLATES = { town: 'backgrounds/bg_v3_everdawn_central.webp', gravitosArena: 'backgrounds/bg_v3_gravitosArena.webp', gravitosFinale: 'backgrounds/bg_v3_gravitosArena.webp' };
+const CLIPS = { town: 'backgrounds/everdawn.mp4', gravitosArena: 'backgrounds/gravitos.mp4', gravitosFinale: 'backgrounds/gravitosfinale.mp4',
+  weightbearerStair: 'backgrounds/weightbearerStair.mp4' };   // the Stair's sky (per user: "make the map animated")
+const PLATES = { town: 'backgrounds/bg_v3_everdawn_central.webp', gravitosArena: 'backgrounds/bg_v3_gravitosArena.webp', gravitosFinale: 'backgrounds/bg_v3_gravitosArena.webp',
+  weightbearerStair: 'backgrounds/bg_v4_weightbearerStair.webp' };
 for (const [id, clip] of Object.entries(CLIPS)) {
   const mb = existsSync(clip) ? statSync(clip).size / 1048576 : 0;
   ok(`${id}: the clip ships (${clip})`, mb > 0.5 && mb < 12, { mb: +mb.toFixed(1) });
