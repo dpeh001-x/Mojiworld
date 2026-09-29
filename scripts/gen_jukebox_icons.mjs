@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// DJ Vinyl's console: one icon per BGM (47), plus the console's little drift-car badge.
+// DJ Vinyl's console: one icon per BGM (48), plus the console's little drift-car badge.
 // =============================================================================
 // Per user: "make the jukebox design WAY more hip popular and stylish with drift phonk vibes, make sure that each BGM
 // also has a unique icon, make it like DJ console concept where each button on the DJ console plays a specific music",
@@ -74,6 +74,7 @@ export const SUBJECTS = {
   boss:            'Two crossed swords over a red shield',
   zodiacBoss:      'A glowing golden ram horn helmet with stars',
   ascension:       'A pair of white angel wings around a glowing golden gate',
+  weightbearerStair: 'A short flight of floating pale stone stairs rising toward a small black sphere with a glowing blue-white ring of light',   // v0.30.1417 (v2 shipped)
   gravitosArena:   'A black singularity sphere with glowing blue gravity rings and tiny orbiting planets',
   echoArenas:      'A cracked hand mirror with rippling echo sound rings',
   // the console's badge (not a track)
