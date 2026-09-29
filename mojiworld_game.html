@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1449';
+const GAME_VERSION = 'v0.30.1450';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -41666,10 +41666,20 @@ function _lxKillMark() {
 }
 function _lxKillStampSince(mob) {   // the enemy shots / hazards made since the last mark get mob's name (null: made by no monster's turn)
   const nm = mob ? _lxMobDisplayName(mob) : null;
-  const st = (arr, from, same) => { if (!arr) return; for (let i = same ? from : 0; i < arr.length; i++) { const e = arr[i]; if (e && e.owner !== 'player' && e._lxBy === undefined) e._lxBy = nm; } };
+  // v0.30.1450 parry-aim - and the maker's uid (_lxSrcUid), so a parried shot finds the monster that fired it (_lxParrySource)
+  const uid = mob ? _lxMobUid(mob) : null;
+  const st = (arr, from, same) => { if (!arr) return; for (let i = same ? from : 0; i < arr.length; i++) { const e = arr[i]; if (e && e.owner !== 'player' && e._lxBy === undefined) { e._lxBy = nm; e._lxSrcUid = uid; } } };
   st(game.projectiles, _lxKillMarkP, game.projectiles === _lxKillArrP && !!game.projectiles && game.projectiles.length >= _lxKillMarkP);
   st(game.hazards, _lxKillMarkH, game.hazards === _lxKillArrH && !!game.hazards && game.hazards.length >= _lxKillMarkH);
   _lxKillMark();
+}
+// v0.30.1450 parry-aim - a monster's stable id, handed out the way the co-op sync does when one was made without it.
+function _lxMobUid(m) { if (m.uid == null) m.uid = (game._monUid = (game._monUid || 0) + 1); return m.uid; }
+// the live monster that fired shot p, or null (made by no monster's turn, a co-op copy, or its maker is dead)
+function _lxParrySource(p) {
+  const u = p && p._lxSrcUid; if (u == null) return null;
+  for (const m of (game.monsters || [])) if (m && m.uid === u && m.currentHp > 0) return m;
+  return null;
 }
 function _lxNameInLabel(s) {   // the longest monster / boss name standing as whole words inside a label, as its short name
   const T = (typeof monsterTypes !== 'undefined') ? monsterTypes : {}, nk = Object.keys(T).length;
@@ -70104,16 +70114,19 @@ function _lxProjWillHit(p, steps, pad) {
 function _lxParryCatch() {
   if (!game.projectiles || !player) return false;
   let caught = 0;
+  let _pfShooter = null, _pfSd = Infinity;   // v0.30.1450 parry-aim - the shooter of the caught shot closest to the player
   for (let i = game.projectiles.length - 1; i >= 0; i--) {
     const p = game.projectiles[i];
     if (!p || p.owner !== 'enemy') continue;
     if (!_lxProjWillHit(p, LX_PARRY_CATCH_STEPS, LX_PARRY_CATCH_PAD)) continue;
+    { const _s = _lxParrySource(p), _d = Math.abs((p.x + (p.w || 8) / 2) - (player.x + player.w / 2)) + Math.abs((p.y + (p.h || 8) / 2) - (player.y + player.h / 2));
+      if (_s && _d < _pfSd) { _pfSd = _d; _pfShooter = _s; } }
     game.projectiles.splice(i, 1); caught++;
   }
   if (!caught) return false;
   let nearest = null, nd = Infinity;
   for (const mm of (game.monsters || [])) { if (!mm || mm.currentHp <= 0) continue; const d = Math.abs(mm.x - player.x); if (d < nd) { nd = d; nearest = mm; } }
-  triggerParry(nearest);
+  triggerParry(_pfShooter || nearest);   // v0.30.1450 parry-aim - the shooter; the nearest monster only when no shooter is known
   return true;
 }
 function _lxBlockFx() {
@@ -70223,6 +70236,7 @@ function triggerParry(source) {
   if (source && source.currentHp !== undefined) {
     source.stunTimer = Math.max(source.stunTimer || 0, 900);
     source.vx = -((source.x + source.w/2) - (player.x + player.w/2)) * 0.05;
+    source.vx = Math.max(-5, Math.min(5, source.vx));   // v0.30.1450 parry-aim - a parried shooter across the room is shoved like a melee foe
   }
   // Class-specific parry reward
   if (player.cls === 'rogue' && source && source.currentHp !== undefined) {
@@ -108960,7 +108974,7 @@ function updateProjectiles(dt) {
             const d = Math.abs(mm.x - player.x);
             if (d < nd) { nd = d; nearest = mm; }
           }
-          triggerParry(nearest);
+          triggerParry(_lxParrySource(p) || nearest);   // v0.30.1450 parry-aim - the shooter; the nearest only when unknown
           game.projectiles.splice(i, 1); continue;
         }
         const dodgeC = getEvasion();
