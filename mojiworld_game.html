@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1438';
+const GAME_VERSION = 'v0.30.1439';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -76218,12 +76218,29 @@ function spawnFromMap(type, boss, opts) {
     y = p.y - m.h;
     lockedPlat = { x: p.x, y: p.y, w: p.w };
   } else if (platList.length && Math.random() < 0.6) {
-    const p = platList[Math.floor(Math.random() * platList.length)];
-    x = p.x + Math.random() * (p.w - m.w);
+    // a perch it fits on: p.w - m.w went negative for a walker wider than its perch (an Echo Knight is 170 px, the Vigil's perches
+    // 60-80), so its centre could start past the edge and it dropped off. Wider than every perch, it is centred on one.
+    const _fits = platList.filter((q) => q.w >= m.w);
+    const _pl = _fits.length ? _fits : platList;
+    const p = _pl[Math.floor(Math.random() * _pl.length)];
+    x = p.x + (p.w >= m.w ? Math.random() * (p.w - m.w) : (p.w - m.w) / 2);
     y = p.y - m.h;
   } else {
     x = Math.random() * (game.mapData.worldWidth - 100) + 50;
     y = 480 - m.h;
+    // STAND ON THE FLOOR - not inside it, not above it (the Weight-Bearer's Stair report). 480 is the floor of a flat one-screen
+    // map only. Where a raised ground piece covers x (a hill, a ledge, a step) the feet began INSIDE it - on 13 maps for 20-77% of
+    // x (Glimmerwood 77%), and on the Stair's deep steps they stayed stuck - and on a tall map (the Gate, the Kelp Forest, Cloudstep
+    // Isles...) the walker began in the air and dropped onto the first surface below. Stand it on that ground's top, or on the
+    // surface it would have landed on. Over a pit there is no surface, and it falls as before.
+    const _cx = x + m.w / 2;
+    let _top = null;
+    for (const _p of (game.mapData.platforms || [])) {
+      if (!_p || _cx < _p.x || _cx > _p.x + _p.w) continue;
+      if (_p.type === 'ground' && _p.y < 478 && 480 < _p.y + (_p.h || 60)) { _top = _p.y; break; }   // the line runs through this ground
+      if (_p.y >= 478 && (_top === null || _p.y < _top)) _top = _p.y;                                 // else the first surface below it
+    }
+    if (_top !== null) y = _top - m.h;
   }
   const spawned = spawnMonster(x, y, type, !!boss);
   if (spawned && lockedPlat) {
