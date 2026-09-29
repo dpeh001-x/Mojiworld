@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1435';
+const GAME_VERSION = 'v0.30.1436';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -57551,7 +57551,7 @@ function _lxBossExec(kind, p) {
   try {
     if (typeof net !== 'undefined' && net && net.isHost && net.ws && typeof _coopActive === 'function' && _coopActive()) {
       // fr is for a build that predates k: it takes a %-of-max-HP hit instead of nothing
-      const fr = kind === 'kkQuake' ? 0.55 : kind === 'kkStomp' ? (p.col ? 0.5 : 0.22) : kind === 'zdHp1' ? 0.9 : kind === 'scSting' ? 0.5 : kind === 'gvDrain' ? 0.9 : kind === 'obMelt' ? 0.49 : 0;
+      const fr = kind === 'kkQuake' ? 0.55 : kind === 'kkStomp' ? (p.col ? 0.5 : 0.22) : kind === 'zdHp1' ? 0.9 : kind === 'scSting' ? 0.5 : kind === 'gvDrain' ? 0.9 : kind === 'obMelt' ? 0.49 : kind === 'lrRoar' ? Math.min(1, +p.fr || 0) : 0;
       net.ws.send(JSON.stringify({ t: 'bosshit', map: game.currentMap, x: p.x | 0, y: p.y | 0, r: 0, d: 0, fr, sl: kind, c: '#ff5555', k: kind, p }));
     }
   } catch (e) {}
@@ -57655,6 +57655,26 @@ function _lxBossExecLocal(kind, p) {
     player.lastHitTime = game.time;
     player._lastDamageSource = 'Octobaby Eight-Mood Meltdown';
     player.hitStun = Math.max(player.hitStun | 0, 1800);
+    if (player.hp <= 0 && !game.dying && typeof triggerDeath === 'function') {
+      try { if (typeof _tryCheatDeathRevive !== 'function' || !_tryCheatDeathRevive()) triggerDeath(); } catch (_) {}
+    }
+    return true;
+  }
+  case 'lrRoar': {
+    // v0.30.1436 leo-roar - LEO'S ROYAL ROAR, run by each player against its own position (the host at the roar, or after its
+    // aggro swap; every guest from the broadcast). Caught on the side the roar was fired toward, within p.reach of his body
+    // edge (v0.30.1432 big-reach: 340 px past his body edge, both sides), unless in an i-frame window. p.fr is the share of
+    // the RECEIVER's max HP (20% x the zodiac damage cut). A player sitting in a menu is out of the fight, as in the world step.
+    if ((player.invulnerable | 0) > 0 || (typeof game !== 'undefined' && game && game.paused)) return false;
+    const _lrx = +p.x || 0, _lrd = (+p.dir > 0) ? 1 : -1, _lrc = player.x + player.w / 2;
+    if (Math.sign(_lrc - _lrx) !== _lrd || !(Math.abs(_lrc - _lrx) - (+p.hw || 0) - player.w / 2 < (+p.reach || 340))) return false;
+    player.hitStun = 400;
+    player.vx = _lrd * 5;
+    const _rd = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * Math.min(1, Math.max(0, +p.fr || 0)));
+    player.hp -= (player._god ? 0 : _rd);
+    player.lastHitTime = game.time;
+    player._lastDamageSource = "Leo's Royal Roar";
+    if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _rd + ' ROAR', life: 55, color: '#ffdd44', size: 18, big: true });
     if (player.hp <= 0 && !game.dying && typeof triggerDeath === 'function') {
       try { if (typeof _tryCheatDeathRevive !== 'function' || !_tryCheatDeathRevive()) triggerDeath(); } catch (_) {}
     }
@@ -95416,7 +95436,7 @@ function updateMonsters(dt) {
             // finally block below, so hugging the boss while the mon tanks
             // is not free invulnerability.
             _bTapHits = [];   // v0.29.459 — taunt swap uses the same positional re-apply as co-op
-            game._bossHitTap = (cx, cy, r, d, fr, sl, c, k) => { if (!k) _bTapHits.push({ cx, cy, r, d, fr, sl, c }); };   // v0.30.x coop-exec — an execute aimed at the companion was never re-applied
+            game._bossHitTap = (cx, cy, r, d, fr, sl, c, k, p) => { if (!k || k === 'lrRoar') _bTapHits.push({ cx, cy, r, d, fr, sl, c, k, p }); };   /* v0.30.1436 leo-roar: the roar is positional - a player in its cone is roared while the mon tanks, as before */   // v0.30.x coop-exec — an execute aimed at the companion was never re-applied
           }
         }
       }
@@ -155544,19 +155564,10 @@ const ZODIAC_AI = {
         showToast('Leo ROARS!', 'epic');
         addShake(16); flash(0.35); audio.play('crit');
         const rdir = Math.sign((player.x + player.w/2) - (m.x + m.w/2)) || m._leoRoarDir;   // v0.26.402 — re-aim at fire so a moving player is still caught
-        if (Math.abs((player.x + player.w/2) - (m.x + m.w/2)) - m.w / 2 - player.w / 2 < 340 &&   // v0.30.1432 big-reach: 340 px past his body edge, both sides (his LEFT edge was the test: 124 px of reach on his right, 392 on his left)
-            Math.sign((player.x + player.w/2) - (m.x + m.w/2)) === rdir && player.invulnerable <= 0) {
-          player.hitStun = 400;
-          player.vx = rdir * 5;
-          // v0.26.402 — Royal Roar now bites: 20% maxHP if caught in the cone.
-          const _rm = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-          const _rd = Math.floor(_rm * 0.20 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25%
-          player.hp -= (player._god ? 0 : _rd);
-          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 260, 0, 0.20, "Leo's Royal Roar", '#ffdd44');
-          player.lastHitTime = game.time;
-          player._lastDamageSource = "Leo's Royal Roar";
-          if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _rd + ' ROAR', life: 55, color: '#ffdd44', size: 18, big: true });
-        }
+        // v0.30.1436 leo-roar - the roar is a boss execute now (_lxBossExec 'lrRoar', below): every player runs the same cone
+        // against its own position. In co-op a guest was roared only when the targeted player was, inside a 260 px circle
+        // round his centre (about 112 px past his edge, and behind him as well), for 20% of max HP where the host took 15%.
+        if (typeof _lxBossExec === 'function') _lxBossExec('lrRoar', { x: Math.round(m.x + m.w / 2), y: Math.round(m.y + m.h / 2), hw: Math.round(m.w / 2), dir: rdir, reach: 340, fr: +(0.20 * LX_ZODIAC_DMG_MUL).toFixed(4) });
         for (let i = -3; i <= 3; i++) {
           game.projectiles.push({
             x: m.x + m.w/2, y: m.y + m.h/2,
