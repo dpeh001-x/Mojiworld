@@ -11,12 +11,14 @@ const grab = (name) => {
 };
 // Stub the MAPS table + _monoNow the affix picker reads.
 const harness = `
+const MOBS = { spawns: [{ type: 'slime', count: 6 }] };   // a field map has monsters: one with none rolls no affix (the Stair report)
 const MAPS = {
   town:    { isTown: true },
   arena:   { isBossArena: true },
   void:    { isVoid: true },
-  forest:  {}, magmaFoundry: {}, cryptHollow: {}, jadeGrove: {}, duneSands: {},
-  tower_b3:{}, clockworkA: {},
+  forest: MOBS, magmaFoundry: MOBS, cryptHollow: MOBS, jadeGrove: MOBS, duneSands: MOBS,
+  tower_b3: MOBS, clockworkA: MOBS,
+  quietRoad: { spawns: [] }, pureClimb: {},
 };
 function _monoNow() { return 0; }
 `;
@@ -47,6 +49,13 @@ for (const m of excluded) for (let d = 0; d < 400; d++) {
   if (F._worldAffixFor(m, d).id !== 'none') { leak = { m, d }; break; }
 }
 ok('towns / arenas / void / tower / clockwork stay unaffixed', leak === null, leak);
+// 4b) a map with no monsters never gets one either: every affix is about what its monsters give (the Weight-Bearer's Stair,
+// Frozen Peak's pure climb, the Zodiac Sanctum)
+let quietLeak = null;
+for (const m of ['quietRoad', 'pureClimb']) for (let d = 0; d < 400; d++) {
+  if (F._worldAffixFor(m, d).id !== 'none') { quietLeak = { m, d }; break; }
+}
+ok('a map with no monsters stays unaffixed', quietLeak === null, quietLeak);
 
 // 5) distribution roughly matches the weights over many (map, day) draws
 const counts = {};

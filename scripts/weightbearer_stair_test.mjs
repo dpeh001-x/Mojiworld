@@ -2,7 +2,7 @@
 // map, make a very epic legendary intermediary map between the zodiac hall that leads up to the gravitos map, generate the
 // necessary artwork and music necessary" / "make it AAA standard"). The old direct link zodiacHall <-> gravitosArena becomes
 // zodiacHall <-> weightbearerStair <-> gravitosArena. Built on new_maps_test's harness. Held: [1] it is a real map (name, a
-// BG_IMAGES backdrop, known monsters, fixedLayout, bridge, a world-map pin); [2] both new links have doors both ways and the old
+// BG_IMAGES backdrop, no monsters - a quiet road since the spawn report, per user - fixedLayout, bridge, a world-map pin); [2] both new links have doors both ways and the old
 // link is gone both ways; [3] every door touching the Stair is WALKED both ways through the real tryPortal() and lands beside
 // its paired door on solid ground; [4] walking from town still reaches every map it reached before, plus the Stair; [5] no old
 // map moves further from town or respawns elsewhere (a bridge costs 0 hops: no monster is buffed); [6] the W map draws the
@@ -287,8 +287,9 @@ function installHelpers() {
     let mini = null; try { drawMinimap(); } catch (e) { mini = String((e && e.message) || e).slice(0, 120); }
     return { map: game.currentMap, part, name, src, loaded, mini };
   };
-  // [9] Three real seconds on the map: monsters spawn and stay inside the world, and so does the hero. A monster read
-  // mid-fall is left to the game's own below-world rescue: only one still outside 0.4 s later counts.
+  // [9] Three real seconds on the map: nothing spawns (a quiet road, per user: "random monsters spawning when it should not"),
+  // and the hero stays inside the world. A monster read mid-fall is left to the game's own below-world rescue: only one still
+  // outside 0.4 s later counts.
   H.play = async (id, ms) => {
     H.settle();
     if (!MAPS[id]) return { err: 'not in MAPS' };
@@ -379,9 +380,9 @@ try {
   // [1] each new map is a real, finished map
   for (const id of NEW) {
     const m = data.maps[id];
-    const good = !!m && !!m.name && m.bgImage && m.spawns > 0 && m.unknownMonsters.length === 0 && m.fixedLayout && m.bridge
+    const good = !!m && !!m.name && m.bgImage && m.spawns === 0 && m.unknownMonsters.length === 0 && m.fixedLayout && m.bridge
       && typeof m.wmX === 'number' && typeof m.wmY === 'number' && isFinite(m.wmX) && isFinite(m.wmY);
-    ok(`[1] ${id}: a name, a BG_IMAGES backdrop, known monsters, fixedLayout, bridge, a world-map pin`, good, m || { missing: 'not in MAPS' });
+    ok(`[1] ${id}: a name, a BG_IMAGES backdrop, no monsters (a quiet road), fixedLayout, bridge, a world-map pin`, good, m || { missing: 'not in MAPS' });
   }
   // [2] the graph: the new links, both ways (exactly one door each way), and the replaced direct link gone, both ways
   const badLinks = data.links.filter((l) => l.ab < 1 || l.ba < 1 || (l.n && (l.ab !== l.n || l.ba !== l.n)))
@@ -460,8 +461,8 @@ try {
     const e0 = errs.length;
     const r = await safe((a) => __nm.play(...a), [id, 3000], 30000);
     r.errors = errs.slice(e0, e0 + 2);
-    const good = !r.err && r.map === id && r.frames >= 20 && r.spawned > 0 && r.now > 0 && r.heroIn && r.outside.length === 0 && errs.length === e0;
-    ok(`[9] ${id} plays for 3 s: monsters spawn and stay inside the world, the hero stays in it, no page errors`, good, r);
+    const good = !r.err && r.map === id && r.frames >= 20 && r.spawned === 0 && r.now === 0 && r.heroIn && r.outside.length === 0 && errs.length === e0;
+    ok(`[9] ${id} plays for 3 s: nothing spawns (a quiet road), the hero stays in the world, no page errors`, good, r);
   }
 
   // [11] THE CLIMB WALKS. From the Sanctum door, the real Right key held down carries the hero up all twenty 30 px risers to
