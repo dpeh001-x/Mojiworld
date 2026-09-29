@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1439';
+const GAME_VERSION = 'v0.30.1440';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -43185,9 +43185,68 @@ function _lxKbTaken() {
   if ((player.blockTimer || 0) > 0) k *= LX_KB_BLOCK;
   return k;
 }
+// v0.30.1440 kb-leeway - KNOCKBACK WITH LEEWAY, THE SOVEREIGN AND GRAVITOS ONLY (per user: "regulate them so that players dont
+// get repeatedly punished or stuck by the knockback such as by tower sovereign and gravitos. Set some leeway not to be knocked
+// back too much" - "mainly cause of the OHKO" - "the rest of the boss can maintain their knockback"). Measured on the previous
+// build, a level-100 mage at close range for 30 s: the Sovereign threw the player 23-24 times, in chains of up to 16 throws each
+// within 1.5 s of the last, Gravitos 14-17 times in chains of up to 9, each throw 9-12 px a frame. While the Sovereign's
+// Singularity Collapse charged, a player holding the light was thrown out of it up to 8 times (its body and its homing shots)
+// and spent up to three quarters of the 5 s telegraph outside the only place that survives it. For these two only - their
+// bodies, their shots, Gravitos's charge and slam:
+//   CAP     - a throw is at most 8 px a frame sideways and 5 up.
+//   LEEWAY  - a throw within 1.5 s of their last one is halved; the third and every later one in the chain is a quarter.
+//             A quiet 1.5 s resets it.
+//   SHELTER - while their one-shot charges (the Sovereign's collapse, any of Gravitos's) a throw is a quarter again, and a
+//             player standing in the light is not thrown at all.
+// Damage, stagger and the stun roll are unchanged, and every other monster and boss keeps its knockback to the number.
+const LX_KB_REG_TYPES = new Set(['towerSovereign', 'gravitos']);
+const LX_KB_REG_WIN = 90;                    // game steps (1.5 s): a throw inside this of their last one chains
+const LX_KB_REG_CHAIN = [1, 0.5, 0.25];      // the first throw, the second, the third and every later one
+const LX_KB_REG_MAX_VX = 8, LX_KB_REG_MAX_UP = 5;
+const LX_KB_REG_OHKO = 0.25;                 // while their one-shot charges
+function _lxKbRegOwner(src) {                // 'towerSovereign' / 'gravitos' for their bodies and shots, else null
+  if (!src) return null;
+  if (typeof src === 'string') return LX_KB_REG_TYPES.has(src) ? src : null;
+  const t = src.type || src._srcType;
+  if (t && LX_KB_REG_TYPES.has(t)) return t;
+  if (src.owner === 'enemy') {
+    if (src.skill === 'msovereign') return 'towerSovereign';   // the homing volley carries no _srcType
+    if (src._gravBand) return 'gravitos';
+  }
+  return null;
+}
+function _lxKbRegOhko(owner) {               // null, or { inLight } while the collapse / one of Gravitos's one-shots charges
+  const hs = (typeof game !== 'undefined' && game && game.hazards) || [];
+  for (const h of hs) {
+    if (h && h.type === 'gravitos_singularity' && h.life > 0 && h.safeZones && h.safeZones.length)
+      return { inLight: !!(typeof _lxSzInside === 'function' && _lxSzInside(h, false)) };
+  }
+  if (owner === 'gravitos') {   // its warning, before the field is down (the same test its AI uses for "a one-shot is live")
+    const g = ((typeof game !== 'undefined' && game && game.monsters) || []).find((x) => x && x.type === 'gravitos' && x.currentHp > 0);
+    if (g && (g._ohkoWarnUntil != null || g.patternState === 'collapseRain' || g.patternState === 'soulDrain' || g.patternState === 'singularity')) return { inLight: false };
+  }
+  return null;
+}
+function _lxKbRegulate(owner) {              // the multiplier for a throw from owner, counted in the chain; 1 for anyone else, 0 = no throw
+  if (!owner || !LX_KB_REG_TYPES.has(owner) || typeof player === 'undefined' || !player) return 1;
+  const t = (game && game.time) | 0;
+  const n = (player._kbRegAt != null && t - player._kbRegAt <= LX_KB_REG_WIN) ? (player._kbRegN | 0) + 1 : 0;
+  player._kbRegN = n; player._kbRegAt = t;
+  let r = LX_KB_REG_CHAIN[Math.min(n, LX_KB_REG_CHAIN.length - 1)];
+  const oh = _lxKbRegOhko(owner);
+  if (oh) { if (oh.inLight) return 0; r *= LX_KB_REG_OHKO; }
+  return r;
+}
+function _lxKbRegSet(vx, vy, owner) {        // an authored throw (Gravitos's charge and slam): the same cap, leeway and shelter
+  if (LX_KB_REG_TYPES.has(owner)) {
+    const r = _lxKbRegulate(owner); if (r === 0) return;
+    vx = Math.max(-LX_KB_REG_MAX_VX, Math.min(LX_KB_REG_MAX_VX, vx * r)); vy = Math.max(-LX_KB_REG_MAX_UP, vy * r);
+  }
+  player.vx = vx; player.vy = vy;
+}
 // (dx, dy): the hit's travel, any length. speed: px a frame before the player's reducers. mul: the attacker's weight
 // (sizes the lift). awayX: the side to fall back on when the travel has no sideways part (-1 / 1).
-function _lxStrikeKnock(dx, dy, speed, mul, awayX) {
+function _lxStrikeKnock(dx, dy, speed, mul, awayX, owner) {   // v0.30.1440 kb-leeway - owner: _lxKbRegOwner of the attacker
   if (typeof player === 'undefined' || !player) return;
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) { dx = 0; dy = 0; }
   if (!Number.isFinite(speed)) return;
@@ -43201,6 +43260,10 @@ function _lxStrikeKnock(dx, dy, speed, mul, awayX) {
   const k = _lxKbTaken(), sp = Math.max(0, speed) * k;
   let vx = ux * sp, vy = uy * sp;
   if (uy <= 0.25) vy -= LX_KB_LIFT * (1 + (Math.max(1, +mul || 1) - 1) * 0.45) * k;
+  if (owner) {   // v0.30.1440 kb-leeway - the Sovereign / Gravitos: cap, leeway, shelter
+    const _r = _lxKbRegulate(owner); if (_r === 0) return;
+    vx = Math.max(-LX_KB_REG_MAX_VX, Math.min(LX_KB_REG_MAX_VX, vx * _r)); vy = Math.max(-LX_KB_REG_MAX_UP, vy * _r);
+  }
   player.vx = Math.max(-LX_KB_MAX_VX, Math.min(LX_KB_MAX_VX, vx));
   player.vy = Math.max(-LX_KB_MAX_UP, Math.min(LX_KB_MAX_DOWN, vy));
   if (player.vy < 0) player.onGround = false;
@@ -43218,7 +43281,7 @@ function _lxBodyKnock(m, tier, authoredMul) {
   const mvx = +m.vx || 0, mvy = +m.vy || 0, msp = Math.hypot(mvx, mvy);
   if (msp >= 3) { dx += (mvx / msp) * 0.6; dy += (mvy / msp) * 0.6; }
   const mul = Math.max(LX_KB_TIER_MUL[tier] || 1, +authoredMul || 1);
-  _lxStrikeKnock(dx, dy, LX_KB_TOUCH * mul, mul, away);
+  _lxStrikeKnock(dx, dy, LX_KB_TOUCH * mul, mul, away, _lxKbRegOwner(m));
 }
 // A shot's or swing's throw: along its flight; a standing strike (a ground smash) throws out from its middle.
 function _lxShotKnock(p, tier) {
@@ -43227,7 +43290,7 @@ function _lxShotKnock(p, tier) {
   let dx = +p.vx || 0, dy = +p.vy || 0;
   if (!(Math.hypot(dx, dy) >= 0.75)) { dx = away; dy = 0; }
   const mul = (LX_KB_TIER_MUL[tier] || 1) * ((p.skill === 'swing' || p.skill === 'smash') ? LX_KB_HEAVY : 1);
-  _lxStrikeKnock(dx, dy, LX_KB_SHOT * mul, mul, away);
+  _lxStrikeKnock(dx, dy, LX_KB_SHOT * mul, mul, away, _lxKbRegOwner(p));
 }
 // v0.30.1300 spire-knock - AN AUTHORED KNOCKBACK COUNTS (per user, v0.26.127: the Clockwork Spire's fireballs "may have a
 // heavy knockback to player to push him or her out of the platform"). The fireball declared `knockback: 18` and nothing
@@ -43242,7 +43305,7 @@ function _lxAuthoredKnock(p) {
   const away = ((player.x + player.w / 2) >= (+p.x || 0) + (+p.w || 0) / 2) ? 1 : -1;
   let dx = +p.vx || 0, dy = +p.vy || 0;
   if (!(Math.hypot(dx, dy) >= 0.75)) { dx = away; dy = 0; }
-  _lxStrikeKnock(dx, dy, kb, Math.max(1, kb / (LX_KB_TOUCH * 2)), away);
+  _lxStrikeKnock(dx, dy, kb, Math.max(1, kb / (LX_KB_TOUCH * 2)), away, _lxKbRegOwner(p));
   return true;
 }
 try { window._lxAuthoredKnock = _lxAuthoredKnock; } catch (e) {}
@@ -100715,8 +100778,7 @@ function bossAI(m, dt, distToPlayer) {
           player.hitStun = 800;
           // v0.26.069 — Post-boss-charge iframe 900 → 1800 ms.
           player.invulnerable = 1800;
-          player.vx = Math.sign(m.vx) * 9;
-          player.vy = -5;
+          _lxKbRegSet(Math.sign(m.vx) * 9, -5, _lxKbRegOwner(m));   // v0.30.1440 kb-leeway - was vx 9 / vy -5 flat
           // v0.25.773 — Attribute on the death overlay (was missing).
           player._lastDamageSource = (m.name || m.type || 'a boss') + "'s charge";
           game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: _zipLost || dmg, life: 44, color:'#ff4466', size: 18 });
@@ -100845,8 +100907,7 @@ function bossAI(m, dt, distToPlayer) {
             player.hitStun = 900;                        // long stun — easy to stun
             // v0.26.069 — Post-boss-slam iframe 900 → 1800 ms.
             player.invulnerable = 1800;
-            player.vx = Math.sign((player.x + player.w/2) - cx) * 8;
-            player.vy = -5;
+            _lxKbRegSet(Math.sign((player.x + player.w/2) - cx) * 8, -5, _lxKbRegOwner(m));   // v0.30.1440 kb-leeway - was vx 8 / vy -5 flat
             // v0.25.773 — Attribute on the death overlay (was missing).
             player._lastDamageSource = (m.name || m.type || 'a boss') + "'s slam";
             game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: _slamLost || dmg, life: 44, color:'#ff4444', size: 18 });
