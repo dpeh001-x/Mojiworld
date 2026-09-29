@@ -36,7 +36,10 @@ try {
     if (!player.cls) { applyClass('warrior'); player.level = 80; }
     player._tutorialSeen = true; player._gravitosCineSeen = true; player._miraNamed = false;
     const UNDER = ['zodiac_twelve_done', 'mira_twelve_reveal', 'amnesiac_twelve_dream'];
-    player._storyBeatsSeen = {}; for (const k of Object.keys(STORY_BEATS)) if (!UNDER.includes(k)) player._storyBeatsSeen[k] = true;
+    // the Twelve fall before the ending (q_zodiac_twelve gates the Petition), so the ending stays unplayed here: since
+    // story-depth a finished story has its own lines for both of them (siblings_reunion, story_dawn_test)
+    const AFTER = ['epilogue_gravitos', 'siblings_reunion'];
+    player._storyBeatsSeen = {}; for (const k of Object.keys(STORY_BEATS)) if (!UNDER.includes(k) && !AFTER.includes(k)) player._storyBeatsSeen[k] = true;
     if (!game.bestiary) game.bestiary = {};
     for (const z of ZODIAC_SIGNS) delete game.bestiary['_boss_zodiac_' + z.id];
     const text = () => (document.getElementById('dialog-text') || {}).textContent || '';

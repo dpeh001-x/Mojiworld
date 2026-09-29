@@ -30,7 +30,7 @@ try {
     const wait = (ms) => new Promise((res) => setTimeout(res, ms)); const out = {};
     try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
-    applyClass('warrior'); player.level = 60; player._tutorialSeen = true; player._storyBeatsSeen = new Proxy({}, { get: () => true });
+    applyClass('warrior'); player.level = 60; player._tutorialSeen = true; player._storyBeatsSeen = new Proxy({}, { get: (t, k) => k !== 'epilogue_gravitos' });   // every beat but the ending: since story-depth a finished story has its own lines (story_dawn_test)
     // seventeen endings
     const E = (typeof _LX_MASTER_ENDINGS === 'object') ? _LX_MASTER_ENDINGS : {};
     out.endings = { masters: Object.keys(MASTERS).sort().join(','), lines: Object.keys(E).sort().join(','), distinct: new Set(Object.values(E)).size };
