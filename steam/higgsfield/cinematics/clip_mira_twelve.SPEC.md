@@ -13,7 +13,7 @@ bosses, then there will be a reveal that mira is the amnesiac's sister".
   beat right behind `zodiac_twelve_done` (from both of its triggers: the
   twelfth zodiac kill and `_lxZodiacTwelveReconcile`); a save that beat the
   Twelve before this build hears it the next time it talks to Mira or the
-  Amnesiac (`_lxSiblingBeatFirst`). Muted, plays once and holds its last frame
+  Amnesiac (`_lxSiblingBeatFirst`). Plays once WITH its soundtrack (since v0.30.1418) and holds its last frame
   behind the stanza text, lazy, fail-open (the beat reads as text-only).
 - Also listed in `steam/package.json` `extraResources`.
 
@@ -29,7 +29,7 @@ a ring that is no longer on his hand.
 ## Generation (2026-09-28, one attempt)
 
 - Model **`seedance_2_0`** · std · 720p · 8 s · 16:9 · genre `drama` ·
-  `generate_audio: false` (story-beat clips play muted) · **36 credits**
+  `generate_audio: false` (generated silent; the soundtrack is mixed from the game, see Sound) · **36 credits**
   (house economy; never 1080p).
 - Job id: `a61b9181-6411-4afb-b80b-022ada73b08b`.
 - References: `start_image` = `backgrounds/bg_v3_wayfarersLantern2.webp`
@@ -52,12 +52,26 @@ a ring that is no longer on his hand.
 > resolve. Somber, tender, hushed tone. Film grain, epic cinematic scale. No
 > text, no UI.
 
+## Sound (v0.30.1418)
+
+Mixed from the game's own audio with ffmpeg, synced to the shot (8 cues), mastered to -18 LUFS
+(measured -18.4, peak -5.4 dBFS; the zodiac trailer is mixed to -14, this is a quieter scene):
+the Gate's own theme (`audio/bgm_wayfarer.mp3` from 10 s, through its soft stretch)
+and the Gate's own air (`audio/ambient/temple.mp3`); the cosmic hum
+(`audio/ambient/cosmic.mp3`), a portal shimmer and a thread of holy light as the
+zodiac wheel appears (2.2 s); a low turn under the wheel (4.1 s); a breath of
+cloth as she stands; and, as she looks down the road, three notes from the
+distant town, far off and echoing (`audio/npc/npc_guguma.mp3`, 6.85 s). AAC
+160 kb/s, 48 kHz stereo. In game it plays at the cinematic volume while the
+scene's score (the Gate's theme) waits silent, then rises.
+
 ## Encode
 
 Raw 4,843,713 bytes (H.264, index at the end). Shipped re-encode, the
 cinematic-slim recipe: libx264 High / yuv420p, veryslow, **CRF 22** (the
 highest CRF with SSIM ≥ 0.985 vs the raw: 0.9862), +faststart, no audio
 track; same 1280×720, 24 fps, 193 frames, 8.04 s → **2,941,005 bytes**.
+With the soundtrack muxed in (the video stream copied untouched): **3,105,605 bytes**.
 
 ## QA (frame captures)
 

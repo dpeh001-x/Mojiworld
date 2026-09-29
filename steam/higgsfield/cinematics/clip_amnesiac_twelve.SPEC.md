@@ -11,7 +11,7 @@ bosses, then there will be a reveal that mira is the amnesiac's sister".
 - Wired in `mojiworld_game.html` → `STORY_BEAT_CLIPS.amnesiac_twelve_dream`,
   the backdrop of the `amnesiac_twelve_dream` beat: his half of the reveal,
   played by `_lxSiblingBeatFirst` the first time you talk to him after Mira's
-  scene (`mira_twelve_reveal`), before his dialogue opens. Muted, plays once
+  scene (`mira_twelve_reveal`), before his dialogue opens. Plays once WITH its soundtrack (since v0.30.1418)
   and holds its last frame behind the stanza text, lazy, fail-open.
 - Also listed in `steam/package.json` `extraResources`.
 
@@ -27,7 +27,7 @@ say yet. ("A woman one step behind me, the whole way up.")
 ## Generation (2026-09-28, one attempt)
 
 - Model **`seedance_2_0`** · std · 720p · 8 s · 16:9 · genre `drama` ·
-  `generate_audio: false` (story-beat clips play muted) · **36 credits**
+  `generate_audio: false` (generated silent; the soundtrack is mixed from the game, see Sound) · **36 credits**
   (house economy; never 1080p).
 - Job id: `f448dcae-fdbf-4ffb-82b3-2da2b5fb3f76`.
 - References: `start_image` = `backgrounds/bg_v3_everdawn_central.webp`
@@ -49,12 +49,25 @@ say yet. ("A woman one step behind me, the whole way up.")
 > eyes widen with quiet recognition, grief and tenderness. Hushed, bittersweet,
 > intimate tone. Film grain, epic cinematic scale. No text, no UI.
 
+## Sound (v0.30.1418)
+
+Mixed from the game's own audio with ffmpeg, synced to the shot (7 cues), mastered to -18 LUFS
+(measured -18.3, peak -4.0 dBFS): Everdawn Central's own theme
+(`audio/bgm_mojiworld.mp3` from 20.5 s, a soft stretch) and its morning air
+(`audio/ambient/town.mp3`); a reversed shimmer swelling into the memory of Mira
+(1.5 s) and a thread of holy light while she stands one step behind him; a
+breath of wind as she dissolves (3.6 s); a low swell under the push-in to his
+face, landing as his lips part (7.3 s). AAC 160 kb/s, 48 kHz stereo. In game it
+plays at the cinematic volume while the scene's score (Everdawn Central's
+theme) waits silent, then rises.
+
 ## Encode
 
 Raw 2,794,626 bytes (H.264, index at the end). Shipped re-encode, the
 cinematic-slim recipe: libx264 High / yuv420p, veryslow, **CRF 26** (the
 highest CRF tried; SSIM vs the raw 0.9852 ≥ 0.985), +faststart, no audio
 track; same 1280×720, 24 fps, 193 frames, 8.04 s → **951,863 bytes**.
+With the soundtrack muxed in (the video stream copied untouched): **1,116,870 bytes**.
 
 ## QA (frame captures)
 
