@@ -26,7 +26,8 @@ try {
   const R = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     // the rift art decoded (so [2] also proves the art still draws)
-    for (let i = 0; i < 100 && !_lxGravRiftImg(); i++) { try { if (typeof _fxAnimFrames === 'function') _fxAnimFrames('gravitos_voidrift'); } catch (e) {} await sleep(100); }
+    // ...and form 1's own rift, which the pass below draws since each form has its own (rift-forms; an older build ignores the form)
+    for (let i = 0; i < 100 && !(_lxGravRiftImg() && _lxGravRiftImg(1)); i++) { try { if (typeof _fxAnimFrames === 'function') { _fxAnimFrames('gravitos_voidrift'); _fxAnimFrames('gravitos1_voidrift'); } } catch (e) {} await sleep(100); }
     const P = CanvasRenderingContext2D.prototype, fr = P.fillRect, di = P.drawImage, log = { bars: [], pink: 0, art: 0 };
     const hook = () => {
       P.fillRect = function (x, y, w, h) { if (Math.abs(w) <= 6 && Math.abs(h) >= 100) log.bars.push({ w, h: Math.round(h), style: String(this.fillStyle) });
