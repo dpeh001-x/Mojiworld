@@ -69,8 +69,8 @@ try {
   const b = await walk('interdimensionalAscension', 'boss_rush'); const bu = await up();
   check(b.map === 'boss_rush' && b.ground && b.hits.length === 0 && bu.stayed, 'Interdimensional Ascension -> the Hall of Echoes lands clear of its exit, and Up there stays in the hall', { b, bu });
   // 5) a Lv 50 hero can walk out of the Singularity
-  const g = await p.evaluate(async () => { player.level = 50; const r = await __walk('gravitosArena', (q) => q.dest === 'zodiacHall'); player.level = 100; return r; });
-  check(g.map === 'zodiacHall', 'a Lv 50 hero in the Singularity can take its exit to the Zodiac Sanctum (was: "Sealed - return at Lv 70+")', g);
+  const g = await p.evaluate(async () => { player.level = 50; const r = await __walk('gravitosArena', (q) => q.dest === 'weightbearerStair'); player.level = 100; return r; });
+  check(g.map === 'weightbearerStair', 'a Lv 50 hero in the Singularity can take its exit to the Weight-Bearer\'s Stair, the way down to the Zodiac Sanctum (was: "Sealed - return at Lv 70+")', g);
   // control: the Barnaby gate (a door INTO an arena) still holds
   const c = await p.evaluate(async () => { player.level = 30; const r = await __walk('sundered_forge', (q) => q.dest === 'confusedVigil'); player.level = 100; return r; });
   check(c.map === 'sundered_forge', 'the Lv 40 gate into Confused Vigil still holds at Lv 30', c);

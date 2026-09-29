@@ -159,7 +159,7 @@ async function prologue() {
   const armed = await p.waitForFunction(() => !!document.getElementById('prologue-hud') && !game.paused && game.currentMap === 'gravitosArena', null, { timeout: 150000 }).then(() => true, () => false);
   if (!armed) { check(false, 'prologue: the Gravitos fight arms', await p.evaluate(() => ({ map: game.currentMap, paused: game.paused, hud: !!document.getElementById('prologue-hud'), active: !!window._prologueActive, t: game.time | 0 }))); await ctx.close(); return; }
   const pr = await p.evaluate(async () => {
-    const po = game.portals.find((q) => q.dest === 'zodiacHall'); if (!po) return { err: 'no Zodiac portal' };
+    const po = game.portals.find((q) => q.dest === 'weightbearerStair'); if (!po) return { err: 'no Stair portal' };   // the Singularity's one door (was the Zodiac Sanctum's)
     const fy = (typeof po.y === 'number') ? po.y : _defaultPortalY(po.x);
     window.__lbl = null; window.__bb = null; const w0 = Date.now(), t0 = game.time | 0;
     while ((game.time | 0) - t0 < 30 && Date.now() - w0 < 30000) { player.x = po.x - player.w / 2 - 30; player.y = fy - player.h; player.vx = 0; player.vy = 0; await new Promise((s) => setTimeout(s, 30)); }
@@ -167,7 +167,7 @@ async function prologue() {
     const lbl = L.slice(0, 4), card = document.getElementById('prologue-hud'), cr = card ? __rect(card) : null;
     return { lbl: lbl.map(Math.round), plate: B.map(Math.round), boss: __hit(lbl, B), card: cr ? __hit(__cvs(lbl), cr) : null, cr: cr && cr.map(Math.round) };
   });
-  check(!pr.err && pr.boss === false, 'prologue: the "Zodiac Sanctum" portal plate is clear of the Gravitos boss plate', pr);
+  check(!pr.err && pr.boss === false, 'prologue: the "Weight-Bearer\'s Stair" portal plate is clear of the Gravitos boss plate', pr);
   check(!pr.err && pr.card === false, 'prologue: ...and of the memory card under it', pr);
   await ctx.close();
 }
