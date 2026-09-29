@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1442';
+const GAME_VERSION = 'v0.30.1443';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -56752,6 +56752,7 @@ function _coopReelectTick() {
 }
 function _coopRecomputeHost() {
   if (!_coopActive() || net.myId == null) { net.isHost = true; net.hostId = net.myId; return; }
+  if (typeof _coopKeyedOn === 'function' && _coopKeyedOn()) { _coopRecomputeKeyed(); return; }   // v0.30.1443 coop-keyed - every partner reads cap 4: each map elects its own runner
   const _useAway = _coopAllCap(), _selfAway = _useAway && !!net._away;   // v0.30.823 - see part C above
   let lowest = _selfAway ? Infinity : +net.myId, hostId = _selfAway ? null : +net.myId;
   // v0.29.471 — a peer silent longer than this cannot be host. Matches the
@@ -56792,6 +56793,136 @@ function _coopRecomputeHost() {
     for (const _m of game.monsters) if (_m && _m._coopMirror) delete _m._coopMirror;
   }
 }
+// v0.30.1443 - CO-OP: WHO RUNS WHICH WORLD (per user: "monsters dont seem to die properly in pq for players in coop mode, same goes
+// with expedition" / "also it caused disconnection issues"). Two-client runs of the PQ stages (100 kills in lockstep) and a
+// 60 s stress fight showed the sync itself was sound when both players stood on the ROOM HOST's map. It broke everywhere else:
+//  1. ONE HOST PER ROOM. The lowest id in the room ran the monsters, wherever it was. Everyone on any other map ran their
+//     OWN copy of it - so two friends in the Ticket Rush while a third stood in town (or any public lobby channel, where
+//     the lowest id is a stranger) each fought private monsters: your partner's hits never landed on yours, and theirs
+//     never died on your screen. Now each MAP has its own runner: whoever already runs it (sends its monster frames)
+//     keeps it; somebody arriving - or back from away - adopts that world; if nobody runs it, the first there does, else
+//     the lowest id there.
+//     A runner who leaves hands its world on intact - one of the players still there adopts the mirrors it was showing.
+//  2. EXPEDITION FLOORS ARE ORDINARY MAPS. A run's floor is forest, candyCanyon... under the world's own map id, so a
+//     partner in the open world on that map (or the room host) became your "host": you saw its monsters, not your floor,
+//     your hits went to its world, and the floor that needed every foe dead could never clear. An expedition run is now
+//     a private instance: its frames are stamped (xi), and nobody mirrors, hits into or draws a player in another world.
+//  3. A RUNNER ALONE SENDS NOTHING. The room host used to stream its map 20x a second to the whole room even with nobody
+//     there; a runner now streams only while somebody shares its map, so per-map runners cost less than the old one.
+// All of it is negotiated (cap 4): with an older build in the room the old room-wide election stands.
+const COOP_CLAIM_MS = 1500;    // a partner whose monster frame for my map key is this fresh is running that map
+const COOP_ARRIVE_MS = 3000;   // for this long after I enter a map key, whoever was already there keeps it; two players whose
+                               // arrivals land within it of each other arrived together (a slow link can hold presence ~2 s)
+const _COOP_XI_RE = /^\{"t":"(mon|dmg|kill|proj|haz|hazhit|bosshit|drop|down|up|revive|ping)"/;
+const _COOP_XI_WORLD = { mon: 1, dmg: 1, kill: 1, proj: 1, haz: 1, hazhit: 1, bosshit: 1, drop: 1, down: 1, up: 1, revive: 1 };
+function _coopInst() {   // '' is the shared world; an expedition run is a private instance (one id per run, plus its floor)
+  const x = (typeof game !== 'undefined' && game) ? game.expedition : null;
+  if (!x || !x.active) return '';
+  if (!x._coopRun) x._coopRun = Math.floor(Math.random() * 2176782336).toString(36);
+  return 'x' + x._coopRun + '.' + (x.floor | 0);
+}
+function _coopPeerInst(id) { const p = (id != null && net.peers) ? net.peers[id] : null; return (p && typeof p.xi === 'string') ? p.xi : ''; }
+function _coopMapKey() { return game.currentMap + '|' + _coopInst(); }
+function _coopPeerKey(p) { return (p && p.map) + '|' + ((p && typeof p.xi === 'string') ? p.xi : ''); }
+function _coopKeyedOn() {   // I have partners and every one reads cap 4: per-map runners and instances (alone in a room: the old rules)
+  if (!_coopActive()) return false;
+  let n = 0;
+  for (const id in net.peers) { const p = net.peers[id]; if (!p) continue; if ((p.cap | 0) < 4) return false; n++; }
+  return n > 0;
+}
+function _coopKeyHasPeers() {   // does a partner share my map key? (older builds: always yes - their rules)
+  if (!_coopKeyedOn()) return true;
+  // no staleness cut here, unlike the election: a partner whose presence beat is late (a busy or throttled tab) still gets
+  // every kill and monster frame, as it did from the old room host - a frame too many costs nothing, a kill missed costs it
+  const key = _coopMapKey();
+  for (const id in net.peers) {
+    const p = net.peers[id];
+    if (!p || +id === +net.myId) continue;
+    if (_coopPeerKey(p) === key) return true;
+  }
+  return false;
+}
+// Every inbound frame passes here first: remember each partner's world and who runs which map; drop world frames from
+// another instance (a ping keeps its look and cap, but its heals, buffs, pact and map pin belong to that other world).
+function _coopNoteFrame(msg) {
+  const t = msg.t, id = msg.id;
+  if (id == null || id === net.myId || !(_COOP_XI_WORLD[t] || t === 'ping')) return true;
+  const xi = (typeof msg.xi === 'string') ? msg.xi.slice(0, 32) : '';
+  const p = net.peers && net.peers[id];
+  if (p) {
+    if ((p.xi || '') !== xi) p._keyAt = performance.now();   // it changed world: it did not arrive before anybody
+    p.xi = xi;
+    if (t === 'mon' && typeof msg.map === 'string') { p._monKey = msg.map + '|' + xi; p._monAt = performance.now(); }
+    if (t === 'ping' && msg.hs != null) { p._hsSelf = (+msg.hs === +id); p._hsKey = String(msg.hy || '').slice(0, 48) + '|' + xi; p._hsAt = performance.now(); }   // who it follows; itself = it runs that map
+  }
+  if (xi === _coopInst()) return true;
+  if (t === 'ping') { delete msg.phl; delete msg.pbf; delete msg.spk; delete msg.spa; delete msg.map; delete msg.fx; delete msg.pj; delete msg.po; return true; }
+  return false;
+}
+// My map key may have changed (loadMap, a new floor, a run begun or ended): stamp the arrival, re-elect before the map spawns.
+function _coopOnMapKey() {
+  const k = _coopMapKey();
+  if (net._keyFor !== k) { net._keyFor = k; net._keyAt = performance.now(); if (net._authKey && net._authKey !== k) net._authKey = null; }
+  if (_coopKeyedOn()) _coopRecomputeHost();   // (the old room-wide rules never re-elected on a map change: they still do not)
+}
+// Every _mpTick: tell the room at once when my world changes, and re-elect four times a second (staleness, away, arrivals).
+function _coopKeyTick(now) {
+  if (!_coopActive()) return;
+  const xi = _coopInst();
+  if (xi !== (net._xiSent || '')) { net._xiSent = xi; try { net.ws.send(JSON.stringify({ t: 'ping', xs: 1 })); } catch (e) {} }   // the send wrapper stamps xi
+  if (net._keyFor !== _coopMapKey()) _coopOnMapKey();
+  // (a stamp AHEAD of now - a test's virtual clock, put back - counts as due, so it cannot hold either beat for minutes)
+  else if (_coopKeyedOn() && (now - (+net._keyTickAt || 0) >= 250 || now < +net._keyTickAt)) { net._keyTickAt = now; _coopRecomputeHost(); }
+  if (_coopKeyedOn() && (now - (+net._hsAt || 0) >= 2500 || now < +net._hsAt)) _coopSayHost();   // and re-say whom I follow every 2.5 s
+}
+// Tell the room whom I follow on which map (hs = my own id: I run it). Sent on every change and every 2.5 s, so two players
+// who each believed they arrived alone settle within one ping - the lower id keeps the map - and a runner never yields to a
+// newcomer who is following it.
+function _coopSayHost() {
+  net._hsAt = performance.now(); net._hsSaid = net.hostId + '@' + _coopMapKey();
+  try { net.ws.send(JSON.stringify({ t: 'ping', hs: net.hostId, hy: game.currentMap })); } catch (e) {}
+}
+function _coopRecomputeKeyed() {
+  const now = performance.now(), me = +net.myId, key = _coopMapKey();
+  if (net._keyFor !== key) { net._keyFor = key; net._keyAt = now; }
+  const on = [];
+  for (const id in net.peers) {
+    const n = +id, p = net.peers[id];
+    if (!p || !Number.isFinite(n) || n === me) continue;
+    if (Number.isFinite(+p._last) && (now - p._last) > _LX_HOST_STALE_MS) continue;
+    if (p._away) continue;
+    if (_coopPeerKey(p) !== key) continue;
+    on.push(n);
+  }
+  // it runs my map: it streams its monsters here, or says so itself. A monster frame from before it said it follows someone
+  // else is no claim: a host back from away (or one that just yielded) follows whoever ran the world meanwhile, every time
+  const claims = on.filter((n) => { const p = net.peers[n];
+    return (p._monKey === key && (now - (+p._monAt || 0)) < COOP_CLAIM_MS && (p._hsSelf || !(+p._hsAt > +p._monAt))) || (p._hsSelf && p._hsKey === key); });
+  // I am the incumbent only if I have been confirming it all along: a runner whose tab slept (no ticks) comes back as a
+  // newcomer and adopts the world that went on without it, instead of rolling it back to what it last saw
+  const mine = net.isHost && net._authKey === key && (now - (+net._authAt || 0)) < COOP_CLAIM_MS;
+  let host;
+  if (!on.length) host = me;                                                        // alone here: my own world
+  else if (net._away) host = Math.min(...(claims.length ? claims : on));              // away: somebody present runs it
+  else if (mine) {                                                                  // I run it; two runners meeting: the lower id keeps it
+    const lower = claims.filter((n) => n < me); host = lower.length ? Math.min(...lower) : me;
+  } else if (claims.length) host = Math.min(...claims);                              // somebody runs it: follow them
+  else if ((now - (+net._keyAt || 0)) < COOP_ARRIVE_MS) {                          // just arrived: whoever was already here
+    const first = on.filter((n) => !(+net.peers[n]._keyAt > +net._keyAt));          // (arrived together = nobody was first: lowest id)
+    host = first.length ? Math.min(...first) : Math.min(me, ...on);
+  } else host = Math.min(me, ...on);                                                 // nobody runs it: the lowest id here
+  const was = !!net.isHost;
+  net.hostId = host;
+  net.isHost = (host === me);
+  net._authKey = net.isHost ? key : null;
+  net._authAt = net.isHost ? now : 0;
+  // taking over keeps the world: the mirrors I was showing become my monsters (same uids, so partners keep theirs too)
+  if (net.isHost && !was && typeof game !== 'undefined' && game && Array.isArray(game.monsters)) {
+    for (const _m of game.monsters) if (_m && _m._coopMirror) delete _m._coopMirror;
+  }
+  if (was !== net.isHost && typeof _mpRenderPlayerList === 'function') { try { _mpRenderPlayerList(); } catch (e) {} }
+  if (net._hsSaid !== host + '@' + key) _coopSayHost();   // whom I follow changed (or where): say so at once
+}
 // The host's current map (from presence), or our own map when we ARE the host.
 function _coopHostMap() {
   if (net.isHost) return game.currentMap;
@@ -56806,6 +56937,7 @@ function _coopHostMap() {
 // True only when I'm a NON-host actively mirroring the host's monsters on the
 // SAME map. When false I simulate my own monsters (solo / host / split-up).
 function _coopFollowingHost() {
+  if (typeof _coopInst === 'function' && _coopPeerInst(net.hostId) !== _coopInst()) return false;   // v0.30.1443 coop-keyed - an expedition run is its own world
   return _coopActive() && !net.isHost && _coopHostMap() === game.currentMap;
 }
 function _coopFindByUid(uid) {
@@ -56830,7 +56962,7 @@ function _coopFindByUid(uid) {
 //
 // New frames are only used between builds that advertise them (cap, on the 2.5 s look-sync ping and at once on a
 // roster change): with an older build on the map everything falls back to the old separate frames.
-const LX_COOP_CAP = 3;            // what this build reads: 2 = bundled host frames, batched hits, fx frames, away handoff; 3 = light monster frames (v0.30.827)
+const LX_COOP_CAP = 4;            // what this build reads: 2 = bundled host frames, batched hits, fx frames, away handoff; 3 = light monster frames (v0.30.827); 4 = per-map runners + private expedition instances (v0.30.1443, see _coopRecomputeKeyed)
 const LX_MP_RATE = 36;            // my own token bucket, kept inside the relay's 40 / s ...
 const LX_MP_BURST = 50;           // ... and its burst of 60
 const LX_MP_RESERVE = 10;         // tokens a droppable frame may never spend: they belong to kills, hits and drops
@@ -56933,6 +57065,7 @@ function _lxMpBudgetWrap(ws) {
     const raw = ws.send.bind(ws); let tokens = LX_MP_BURST, last = performance.now();
     net._budget = { sent: 0, skipped: 0, tokens: () => Math.min(LX_MP_BURST, tokens + (performance.now() - last) / 1000 * LX_MP_RATE) };   // v0.30.827 - tokens(): how healthy my budget is
     ws.send = function (s) {
+      if (typeof s === 'string' && typeof _coopInst === 'function') { const _xi = _coopInst(); if (_xi && s.charCodeAt(s.length - 1) === 125 && _COOP_XI_RE.test(s)) s = s.slice(0, -1) + ',"xi":"' + _xi + '"}'; }   // v0.30.1443 coop-keyed - stamp my world on what the relay forwards verbatim
       const now = performance.now();
       tokens = Math.min(LX_MP_BURST, tokens + (now - last) / 1000 * LX_MP_RATE); last = now;
       const droppable = typeof s === 'string' && (s.startsWith('{"t":"state"') || s.startsWith('{"t":"mon"')
@@ -57188,6 +57321,7 @@ try {
 // HOST: broadcast the authoritative monster list (throttled). Called each frame.
 function _coopTickMonsters() {
   if (!_coopActive() || !net.isHost) return;
+  if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;   // v0.30.1443 coop-keyed - nobody shares my map: nothing to send
   const now = performance.now();
   if (now - (net._coopMonAt || 0) < COOP_MON_TICK_MS) return;
   net._coopMonAt = now;
@@ -57276,6 +57410,7 @@ function _coopTickMonsters() {
 // i-frame-respecting player-damage path. Throttled; snapshot + follower dead-reckon.
 function _coopTickProjectiles() {
   if (!_coopActive() || !net.isHost) return;
+  if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;   // v0.30.1443 coop-keyed - nobody shares my map: nothing to send
   if (_coopBundleOn()) return;   // v0.30.823 - rides the monster frame
   const now = performance.now();
   if (now - (net._coopProjAt || 0) < COOP_PROJ_TICK_MS) return;
@@ -57360,6 +57495,7 @@ function _coopApplyProjectiles(msg) {
 // projectile sync alone misses.
 function _coopTickHazards() {
   if (!_coopActive() || !net.isHost) return;
+  if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;   // v0.30.1443 coop-keyed - nobody shares my map: nothing to send
   if (_coopBundleOn()) return;   // v0.30.823 - rides the monster frame
   const now = performance.now();
   if (now - (net._coopHazAt || 0) < COOP_PROJ_TICK_MS) return;
@@ -57425,6 +57561,7 @@ function _coopHazList() {
 const COOP_DROP_CAP = 40;   // max drops broadcast per tick (payload bound; drops are rare)
 function _coopTickDrops() {
   if (typeof _coopActive !== 'function' || !_coopActive() || !net.isHost || !net.ws) return;
+  if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;   // v0.30.1443 coop-keyed - nobody shares my map: nothing to send
   let sent = 0;
   const drops = game.drops || [];
   for (let i = 0; i < drops.length && sent < COOP_DROP_CAP; i++) {
@@ -58668,6 +58805,7 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk) {
 // the death pop so co-op progression works for everyone, not just the host.
 function _coopBroadcastKill(m, exp, coins) {
   if (!_coopActive() || !net.isHost || !m) return;
+  if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;   // v0.30.1443 coop-keyed - nobody shares my map: nothing to send
   // v0.29.356 — `il` tags illusion kills. Mirages already ship e:0/c:0, but the
   // guest side also awards quest/bestiary credit and (new) Slaughter-Ladder
   // streak credit off this frame — both must be able to tell a real kill from
@@ -59066,6 +59204,7 @@ function _mpRateOk(id, kind, perSec) {
 }
 function _mpHandle(msg) {
   if (!msg || typeof msg !== 'object') return;   // v0.27.0 — a malformed/JSON-null relay frame must not throw on switch(msg.t)
+  if (typeof _coopNoteFrame === 'function' && !_coopNoteFrame(msg)) return;   // v0.30.1443 coop-keyed - whose world is this frame from, and who runs which map
   switch (msg.t) {
     case 'mon':   // v0.27.0 host monster state (non-host mirrors); v0.30.823 - its projectiles, hazards and fx ride along
       _coopApplyMonsters(msg);
@@ -59234,7 +59373,12 @@ function _mpHandle(msg) {
           || Math.abs(+msg.x - +_pp.x) > 0.05 || Math.abs(+msg.y - +_pp.y) > 0.05;
         _pp._stillN = _mv ? 0 : ((_pp._stillN | 0) + 1);
       }
+      const _lxMapWas = net.peers[msg.id].map;   // v0.30.1443 coop-keyed
       Object.assign(net.peers[msg.id], _mpScrubStrings(msg));
+      if (net.peers[msg.id].map !== _lxMapWas) {   // it changed map: it did not arrive before anybody, and a leaving runner hands its world on now
+        net.peers[msg.id]._keyAt = performance.now();
+        if (typeof _coopKeyedOn === 'function' && _coopKeyedOn()) { try { _coopRecomputeHost(); } catch (e) {} }
+      }
       if (net.peers[msg.id]._stillN >= 1 && net.peers[msg.id].anim === 'run') net.peers[msg.id].anim = 'idle';
       net.peers[msg.id]._last = performance.now();
       // v0.29.x — first-state stamp for the missing-avatar hint in _mpTick.
@@ -59570,6 +59714,7 @@ function _mpTick() {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
   const now = performance.now();
   _coopAwayTick(); _coopFxCollect(); _coopActionFlush(false);   // v0.30.823 - every frame; each paces itself (v0.30.824: fx are collected every frame)
+  if (typeof _coopKeyTick === 'function') _coopKeyTick(now);   // v0.30.1443 coop-keyed - re-elect four times a second; announce a new world at once
   // v0.29.x (peer-coordinate accuracy) — AIRBORNE-FLIP FLUSH. Send an immediate
   // state frame the moment we leave the ground or land (the two instants where
   // a partner's linear extrapolation of our old velocity is most wrong), instead
@@ -59982,6 +60127,7 @@ function _mpDrawPeers() {
   for (const id in net.peers) {
     const p = net.peers[id];
     if (!p || p.map !== myMap) continue;
+    if (typeof _coopInst === 'function' && (p.xi || '') !== _coopInst()) continue;   // v0.30.1443 coop-keyed - a partner in another world is not drawn in mine
     // v0.27.2 — smooth (lerp) the render position toward the last-received snapshot so
     // peers GLIDE instead of teleporting at the ~14 Hz tick. Snap on a big jump (respawn
     // / map edge) instead of sliding across the screen. facing / anim / vx / vy are all
@@ -74838,6 +74984,7 @@ function loadMap(id, entryX, entryY) {
   const _lxFromMap = game.currentMap;
   game._expExitMap = null;   // v0.30.891 the Expedition's exit lock ends with the floor
   game.currentMap = id;
+  try { if (typeof _coopOnMapKey === 'function') _coopOnMapKey(); } catch (e) {}   // v0.30.1443 coop-keyed - elect this map's runner before it spawns
   game.mapData = _variedMapData(id);
   try { _lxSpaceOutPlatforms(game.mapData, id); } catch (e) {}   // v0.30.629 - crowded platforms pushed apart before anything reads the layout
   if (typeof _lxGravArenaReset === 'function') _lxGravArenaReset();   // v0.30.x — intact Singularity on every entry
@@ -93350,7 +93497,8 @@ function updateMonsters(dt) {
   // mirrors rather than let them resurrect under local AI on an otherwise-empty
   // map. (When we became host, net.isHost is true so this is skipped — mirrors are
   // adopted as our own authoritative monsters.)
-  if (typeof _coopActive === 'function' && _coopActive() && !net.isHost) {
+  if (typeof _coopKeyedOn === 'function' && _coopKeyedOn() && !net.isHost) { try { _coopRecomputeHost(); } catch (e) {} }   // v0.30.1443 coop-keyed - the runner left: one of us inherits its world first
+  if (typeof _coopActive === 'function' && _coopActive() && !net.isHost && !_coopFollowingHost()) {
     for (let i = game.monsters.length - 1; i >= 0; i--) {
       const _m = game.monsters[i];
       if (_m && _m._coopMirror) game.monsters.splice(i, 1);
@@ -93441,7 +93589,7 @@ function updateMonsters(dt) {
   if (typeof _coopActive === 'function' && _coopActive() && net.isHost && net.peers) {
     for (const _pid in net.peers) {
       const _pp = net.peers[_pid];
-      if (_pp && _pp.map === game.currentMap && Number.isFinite(+_pp.x)) {
+      if (_pp && _pp.map === game.currentMap && Number.isFinite(+_pp.x) && (typeof _coopInst !== 'function' || (_pp.xi || '') === _coopInst())) {   // v0.30.1443 coop-keyed - monsters chase partners in their own world only
         (_vfPeers = _vfPeers || []).push({ x: +_pp.x, y: +_pp.y || 0 });
         const _ppAlive = !_pp._downed && !(_pp.maxHp && (+_pp.hp || 0) <= 0);
         if (_ppAlive) {
