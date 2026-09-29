@@ -68740,6 +68740,62 @@ try { window.addEventListener('resize', () => { try { const el = document.getEle
 // v0.30.1182 phone-fit - the title menu scrolls on a short screen (a landscape phone shows New Game and Co-op; Settings,
 // Save Backups and the links sit below the fold) and nothing said so. A "More" tab sits on the menu's bottom edge
 // while there is more below; a tap scrolls on; it goes away at the end.
+// v0.30.1426 - THE TITLE COMES ALIVE (per user: "go ahead with 1, 2 and 3,4 make all of them unique exciting AAA cinematic
+// grade"). The key art's sky - the sunburst, the rolling clouds, the sun that swells toward a dawn that never comes, the
+// crystal spire - plays as a 16 s ping-pong loop (backgrounds/title_sky_loop.mp4, generated from the art itself as its own
+// first and last frame) laid over the 4K still INSIDE .lo-bg, so it rides the same Ken Burns drift and sits under the same
+// vignette. Only the sky: the loop sits on the art's own coordinates (its 1280x416 frame is the art's x 14..3825, y 0..1239)
+// and is masked out across the far hills, where loop and still agree, so the heroes, the town and the tower keep the crisp
+// 4K still. Nothing is asked for until the title menu has been up 2.5 s (never at boot); reduced motion, data saver and 2G
+// skip it; it fades in over the still it starts on and is torn down the moment the overlay leaves or anything fails - the
+// still is always the fallback.
+const LX_TITLE_LOOP = { src: 'backgrounds/title_sky_loop.mp4', artW: 3840, artH: 2144, x0: 14, w: 3811, h: 2144 * 416 / 720 };
+function _lxTitleLoopArm(overlay) {
+  try {
+    if (!overlay || document.getElementById('lo-title-loop')) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const con = navigator.connection || {};
+    if (con.saveData || /(^|-)2g$/.test(con.effectiveType || '')) return;
+    setTimeout(() => { try { _lxTitleLoopStart(overlay); } catch (e) {} }, 2500);
+  } catch (e) {}
+}
+function _lxTitleLoopStart(overlay) {
+  if (!overlay.classList.contains('menu-up') || overlay.classList.contains('fade') || document.getElementById('lo-title-loop')) return;
+  const bg = overlay.querySelector('.lo-bg');
+  if (!bg) return;
+  if (document.hidden) {   // a background tab waits until it is looked at
+    const once = () => { if (document.hidden) return; document.removeEventListener('visibilitychange', once); _lxTitleLoopStart(overlay); };
+    document.addEventListener('visibilitychange', once);
+    return;
+  }
+  const T = LX_TITLE_LOOP, v = document.createElement('video'), mask = 'linear-gradient(to bottom, #000 0%, #000 81.7%, transparent 96.2%)';
+  v.id = 'lo-title-loop'; v.muted = true; v.defaultMuted = true; v.loop = true; v.playsInline = true; v.preload = 'auto'; v.tabIndex = -1;
+  for (const a of ['muted', 'playsinline', 'disablepictureinpicture']) v.setAttribute(a, '');
+  v.setAttribute('aria-hidden', 'true');
+  Object.assign(v.style, { position: 'absolute', pointerEvents: 'none', opacity: '0', transition: 'opacity 1.4s ease', objectFit: 'fill', maskImage: mask, webkitMaskImage: mask });
+  const place = () => {   // the art is drawn center/cover in .lo-bg: put the loop on the art's own pixels
+    const W = bg.clientWidth, H = bg.clientHeight, k = Math.max(W / T.artW, H / T.artH);
+    const ox = (W - T.artW * k) / 2, oy = (H - T.artH * k) / 2;
+    Object.assign(v.style, { left: (ox + T.x0 * k) + 'px', top: oy + 'px', width: (T.w * k) + 'px', height: (T.h * k) + 'px' });
+  };
+  let obs = null;
+  const down = () => {
+    try { if (obs) obs.disconnect(); } catch (e) {}
+    window.removeEventListener('resize', place);
+    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+    try { v.remove(); } catch (e) {}
+  };
+  obs = new MutationObserver(() => { if (overlay.classList.contains('fade') || !overlay.classList.contains('menu-up')) down(); });
+  obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+  window.addEventListener('resize', place);
+  v.addEventListener('error', down, { once: true });
+  v.addEventListener('playing', () => { requestAnimationFrame(() => { v.style.opacity = '1'; }); }, { once: true });
+  place();
+  bg.appendChild(v);
+  v.src = T.src;
+  const p = v.play();
+  if (p && p.catch) p.catch(down);
+}
 function _lxTitleMoreCue(stack) {
   const ov = document.getElementById('loading-overlay');
   if (!stack || !ov || stack._lxMoreCue) return;
@@ -168930,6 +168986,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     // flash, frame settle, title reveal, menu cascade, embers) + version tag.
     try {
       overlay.classList.add('menu-up');
+      try { if (typeof _lxTitleLoopArm === 'function') _lxTitleLoopArm(overlay); } catch (e) {}   // v0.30.1426 - the title's sky comes alive
       const _vt = document.getElementById('lo-version');
       if (_vt) _vt.textContent = (typeof GAME_VERSION !== 'undefined' ? GAME_VERSION : '');   // v0.29.736 — bare version; it lives on the menu card now, the game's name is the logo above it
     } catch (e) {}
