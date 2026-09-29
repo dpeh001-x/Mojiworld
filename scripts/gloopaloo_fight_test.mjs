@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
-const PORT = 9112;
+const PORT = Number(process.env.PORT || 9112);
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore' });
 await new Promise(r => setTimeout(r, 1200));
 const browser = await chromium.launch({
@@ -42,10 +42,15 @@ const R = await page.evaluate(async () => {
   player.x = 400; player.y = 300; player.facing = 1; player.invulnerable = 99999;
 
   const puddles = () => (game.hazards || []).filter(h => h && h.type === 'gloop_puddle');
+  // He stands on the floor, as in the game. A fixed y stopped doing that when v0.30.420 grew his box 112x98 -> 191x230 to
+  // fit his art: at y=300 his sole sat 50 px under the forest floor (480), and the drip - which lands on the first surface at
+  // or below his sole (v0.29.608) - found none.
+  const floorUnder = (cx) => { let y = -Infinity; for (const pl of ((game.mapData && game.mapData.platforms) || [])) if (pl && cx >= pl.x && cx <= pl.x + pl.w && pl.y > y) y = pl.y; return y; };
   const mkKing = (px, py) => {
     game.monsters.length = 0; game.hazards.length = 0; game.projectiles.length = 0;
     const m = spawnMonster(900, 300, 'king', true);
-    m.x = px; m.y = py; m.vx = 0; m.vy = 0; m.onGround = true;
+    const fy = floorUnder(px + m.w / 2);
+    m.x = px; m.y = fy > -Infinity ? fy - m.h : py; m.vx = 0; m.vy = 0; m.onGround = true;
     m.patternState = 'idle'; m.patternTimer = 0;
     m._stagger = 0; m._staggerCd = 0; m._punishPrev = 'idle';
     m._leapCD = 99999;                       // keep _bossSeekPlatform out of the way
