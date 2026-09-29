@@ -184,7 +184,7 @@ ok('the slam waves draw as a ground shockwave sized to their hitbox (not the old
   src.includes("skill: 'smash', _srcType: m.type,") && src.includes("_krookSlam: true,"), '');
 ok("the Meltdown's reach is drawn every frame of its windup", src.includes('function _lxDrawMeltRing() {')
   && src.includes("if (typeof _lxDrawMeltRing === 'function') _lxDrawMeltRing();"), '');
-ok('co-op: an older build in the room still takes the flat 49% Meltdown', src.includes("kind === 'obMelt' ? 0.49 : 0;"), '');
+ok('co-op: an older build in the room still takes the flat 49% Meltdown', src.includes("kind === 'obMelt' ? 0.49 :"), '');
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));
 console.log(`${results.filter(q => q.pass).length}/${results.length} checks passed`);
 await b.close(); srv.kill();

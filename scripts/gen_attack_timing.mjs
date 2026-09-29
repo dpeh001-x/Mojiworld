@@ -190,7 +190,7 @@ export function defaultMobAttackFt(n, cb, frameH, base, strikeAt) {
 }
 function main() {
   const src = readFileSync(CALIB, 'utf8');
-  const m = src.match(/^([\s\S]*?)window\.LX_ANIM_CALIB = ([\s\S]*?);\nwindow\.LX_ATK_HITBOX = ([\s\S]*?);\n$/);
+  const m = src.match(/^([\s\S]*?)window\.LX_ANIM_CALIB = ([\s\S]*?);\r?\nwindow\.LX_ATK_HITBOX = ([\s\S]*?);\r?\n$/);   // a CRLF checkout too
   if (!m) { console.error('anim_calib.js: unexpected layout'); process.exit(2); }
   const header = m[1], calib = JSON.parse(m[2]), hitbox = JSON.parse(m[3]);
   const man = readFileSync(MANIFEST, 'utf8');

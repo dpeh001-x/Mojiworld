@@ -58,6 +58,7 @@ const milo = async (clickRe) => {
     // read the text BEFORE closing - closeDialog() clears it, and reading
     // after returned "" for every no-click call, which looked like a dialog
     // that never opened
+    const _dl = document.getElementById('dialog'); if (_dl && typeof _dl._twSkip === 'function') _dl._twSkip();   // v0.30.973: the typewriter is paced - show all of it
     const txt = ((document.getElementById('dialog-text') || {}).textContent || '').slice(0, 240);
     let clicked = null;
     if (re) { const hit = btns.find((x) => new RegExp(re).test(x.textContent)); if (hit) { clicked = hit.textContent.trim(); hit.click(); } }
@@ -97,7 +98,7 @@ const accepted20 = await page.evaluate(() => !!(player.quests.active && player.q
 // save when the player is simply too low.
 ok('an under-levelled player gets the level refusal, not "the game is broken"',
   !/logbook|filing clerks|squints at his clipboard/i.test(d20.txt || '')
-  && /looks you over|minimum|Lv\s*29/i.test(d20.txt || ''),
+  && /minimum|Lv\s*29/i.test(d20.txt || ''),   // v0.30.543 dropped the "looks you over" opening
   { lv: 20, levelReq: entry.need, milo: (d20.txt || '').slice(0, 150) });
 
 ok('an under-levelled player is never offered a Start button that cannot work',

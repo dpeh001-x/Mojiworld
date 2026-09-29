@@ -30,7 +30,7 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
 // ---- the data -----------------------------------------------------------------
 const CAL = process.env.MOJI_CALIB_FILE || path.join(ROOT, 'data', 'anim_calib.js');
 const src = readFileSync(CAL, 'utf8');
-const mm = src.match(/window\.LX_ANIM_CALIB = ([\s\S]*?);\nwindow\.LX_ATK_HITBOX = /);
+const mm = src.match(/window\.LX_ANIM_CALIB = ([\s\S]*?);\r?\nwindow\.LX_ATK_HITBOX = /);   // the checkout is CRLF (core.autocrlf), the blob LF
 const calib = mm ? JSON.parse(mm[1]) : {};
 const man = readFileSync(process.env.MOJI_MANIFEST_FILE || path.join(ROOT, 'data', 'anim_calib_manifest.js'), 'utf8');
 const M = JSON.parse(man.slice(man.indexOf('{'), man.lastIndexOf('}') + 1));

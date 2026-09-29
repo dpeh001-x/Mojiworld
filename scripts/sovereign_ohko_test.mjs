@@ -133,7 +133,7 @@ const R = await page.evaluate(async () => {
   for (let i = 0; i < 30 && !hz2; i++) { game.paused = false; await sleep(35); hz2 = game.hazards.find((h) => h.type === 'gravitos_singularity'); }
   if (!hz2) return Object.assign(out, { err2: 'second collapse never fired' });
   player._god = false; player.hp = getMaxHp(); player.invulnerable = 0; player._ohkoParry = 0; player._lastDamageSource = '';
-  hz2.safeZones = []; hz2.life = 2;                    // resolve now, nowhere safe
+  hz2.safeZones = []; hz2._lastSafeTick = null; hz2.life = 2;   // resolve now, nowhere safe (v0.30.578: and no recent in-zone stamp to forgive it)
   for (let i = 0; i < 8; i++) { game.paused = false; await sleep(35); }
   out.deathLabel = player._lastDamageSource; out.hpAfter = player.hp;
   return out;
