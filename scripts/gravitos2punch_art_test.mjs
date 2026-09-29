@@ -69,7 +69,8 @@ const g = await page.evaluate(async () => {
   const blitH = () => { const c = []; const P = CanvasRenderingContext2D.prototype, oD = P.drawImage;
     // effective height: dest rect x the current transform's vertical scale (the calib s is applied through ctx.scale, invisible to the raw rect)
     P.drawImage = function (im, ...a) { if (this === ctx) { const T = this.getTransform(); const sy = Math.abs(T.d) || 1; const dh = a.length >= 8 ? a[7] : a[3], dy = a.length >= 8 ? a[5] : a[1]; if (dh > 0) c.push({ h: dh * sy, b: T.f + (dy + dh) * T.d }); } return oD.call(this, im, ...a); };
-    let err = null; try { drawMonster(m); } catch (e) { err = String(e).slice(0, 80); } P.drawImage = oD;
+    let err = null; m._lxCalE = null;   // v0.30.1333: Gravitos eases his scale over ~80 ms between states - measure each state settled
+    try { drawMonster(m); } catch (e) { err = String(e).slice(0, 80); } P.drawImage = oD;
     const big = c.filter((d) => d.h > 30).sort((p, q) => q.h - p.h)[0]; return big || { err: err || 'no blit' }; };
   const idleFr = (BOSS_IDLE_FRAMES && BOSS_IDLE_FRAMES.gravitos2) || [];
   for (let i = 0; i < 200; i++) { if (idleFr.length && idleFr.every((im) => im && im.complete && im.naturalWidth)) break; await wait(50); }

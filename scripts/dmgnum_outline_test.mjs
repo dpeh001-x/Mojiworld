@@ -31,10 +31,16 @@ const r = await page.evaluate(async () => {
   game.paused = false;
   // x deliberately off the pixel grid: the bug is about fractional placement
   const mk = (x, life) => ({ x: x + 0.37, y: 300.61, text: '93,800', color: '#ffd84a', life, maxLife: life + 1, crit: true, size: 22, vy: 0, wobbleDir: 1 });
+  // v0.30.1315: a settled number's bake is asked of a Worker on its first frame and arrives as an ImageBitmap (the main-thread
+  // bake is held back for up to 400 ms meanwhile). Draw that first frame, let the reply land, then measure the rest.
+  game.damageNumbers = [mk(400, 40), mk(700, 56)];
+  drawDamageNumbers(); for (const d of game.damageNumbers) d.life--;
+  const _list = game.damageNumbers; game.damageNumbers = [];   // the live loop leaves them alone while the Worker answers
+  for (let k = 0; k < 40 && !_list.every((d) => d._bk || d._bkQfail); k++) await new Promise((r) => setTimeout(r, 25));
   const blits = [], strokes = [];
   const _di = ctx.drawImage, _st = ctx.strokeText;
   ctx.drawImage = function (im, ...a) {
-    if (im && im.tagName === 'CANVAS') {
+    if (im && (im.tagName === 'CANVAS' || (typeof ImageBitmap !== 'undefined' && im instanceof ImageBitmap))) {   // v0.30.1315: the Worker's bake is a bitmap
       const t = this.getTransform();
       const rec = { args: a.length, rasterW: im.width, rasterH: im.height, a: +t.a.toFixed(4) };
       if (a.length === 2) { rec.devX = +(t.a * a[0] + t.e).toFixed(4); rec.devY = +(t.d * a[1] + t.f).toFixed(4); rec.devW = im.width * t.a; rec.devH = im.height * t.d; }
@@ -51,8 +57,8 @@ const r = await page.evaluate(async () => {
     if (String(this.strokeStyle) === '#000000') strokes.push(+(this.lineWidth * this.getTransform().a).toFixed(3));
     return _pst.apply(this, arguments);
   };
-  game.damageNumbers = [mk(400, 40), mk(700, 56)];
-  for (let i = 0; i < 14; i++) { drawDamageNumbers(); for (const d of game.damageNumbers) d.life--; }
+  game.damageNumbers = _list;
+  for (let i = 1; i < 14; i++) { drawDamageNumbers(); for (const d of game.damageNumbers) d.life--; }
   ctx.drawImage = _di; _P.strokeText = _pst;
   const whole = (v) => Math.abs(v - Math.round(v)) < 0.01;
   return {
