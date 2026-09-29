@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1424';
+const GAME_VERSION = 'v0.30.1425';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -92676,6 +92676,9 @@ const LX_ORB_BURST = {
   mmournorb: { r: 1.3, splash: 0.55, fx: 'mourn_burst', color: '#b04cff', deep: '#4a1080', glow: '#e3b8ff', num: '#c46aff', label: "Mournshade's burst", src: 'mournshade' },
   // v0.30.1379 - per user: "make the wisp-light burst golden on hit too": the Lantern Wisp's shot bursts gold - a burst only, no splash
   mwisplight: { r: 1.4, min: 0, splash: 0, fx: 'wisp_burst', color: '#ffc84a', deep: '#a8601a', glow: '#fff1b8', num: '#ffcc44', label: "Lantern Wisp's wisp-light", src: 'lanternWisp' },
+  // v0.30.1425 enemy-gravity - Stumpy's mortar lob lands now, and bursts over the 56 px marker it draws: its explode: 60 was a
+  // player-only flag. The marked circle is the attack, so the whole hit lands on anyone inside it.
+  mlob: { r: 1, min: 60, splash: 1, color: '#d07a3a', deep: '#5a3014', glow: '#ffcf8a', num: '#e8904a', label: "Stumpy's mortar", src: 'stump' },
 };
 function _lxOrbBurst(p, cx, cy, direct) {
   const B = LX_ORB_BURST[p.skill];
@@ -101503,7 +101506,7 @@ function bossAI(m, dt, distToPlayer) {
               vy: Math.sin(ang) * 4.2 - 1.2,
               w: 18, h: 18, life: 110,
               damage: m.atk * 0.6, owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'spore',
-              color: '#cc88ee', gravity: 0.05,
+              color: '#cc88ee', gravity: 0.3,   // v0.30.1425 enemy-gravity: the fall it has always played at (the spore tag's 0.3; the 0.05 it declared was never applied)
             });
           }
         }
@@ -101833,7 +101836,7 @@ function bossAI(m, dt, distToPlayer) {
         for (let i = 0; i < BOMBS; i++) {
           const ang = (i / BOMBS) * Math.PI * 2 - Math.PI / 2;   // start at top, fan around
           game.projectiles.push({
-            x: cx, y: cy,
+            x: cx - 28.5, y: cy - 28.5,   // v0.30.1425 enemy-gravity: centred on his mouth (the bomb's top-left sat there)
             vx: Math.cos(ang) * SPEED,
             vy: Math.sin(ang) * SPEED,
             // v0.26.170 — Hitbox 22 → 57 to match rendered firebomb sprite.
@@ -108115,12 +108118,19 @@ function updateProjectiles(dt) {
     // sets noGravity is Gravitos's weight wave - "horizontal shockwaves along ground" - which therefore
     // dropped 0.3 px/step^2 from its y-460 lane and was below a standing player's feet ~12 steps out,
     // still under his own 340 px body. Every other shot on these tags falls exactly as before.
-    if ((p.skill === 'splash' || p.skill === 'shock' || p.skill === 'spore') && !p.noGravity) p.vy += 0.3;
+    const _lxOwnFall = p.owner === 'enemy' && !p.noGravity && !p.homing && typeof p.gravity === 'number';   // v0.30.1425 enemy-gravity: see below
+    if ((p.skill === 'splash' || p.skill === 'shock' || p.skill === 'spore') && !_lxOwnFall && !p.noGravity) p.vy += 0.3;   // the v0.30.1013 marked literal stays whole
     // Enemy projectile gravity (monster throws)
     // v0.30.x full audit - ...unless the shot says noGravity: Pisces' Dream Bolt (mdark, noGravity: true) fell 58 px by
     // 200 px out and rarely connected - the same per-tag physics v0.30.1013 fixed for splash / shock / spore above.
+    // v0.30.1425 enemy-gravity - an enemy shot that DECLARES its fall (gravity: N) falls at exactly that. The fall used to
+    // come only from this per-tag list, so every declared one was ignored: Stumpy's mortar lob (solved for 0.18) flew
+    // up and faded ~260 px over the floor and never hit, King Krook's firebombs flew in straight lines, Sagittarius's
+    // Trajectory Shot sailed over a target on its right. A homing shot steers itself (Cancer's bubbles), as on the
+    // player side; tags without a declared fall keep their list value.
     if (p.owner === 'enemy' && !p.noGravity) {
-      if (p.skill === 'msplinter') p.vy += 0.22;
+      if (_lxOwnFall) p.vy += p.gravity;
+      else if (p.skill === 'msplinter') p.vy += 0.22;
       else if (p.skill === 'mspore') p.vy += 0.14;
       else if (p.skill === 'mtoxic') p.vy += 0.16;
       else if (p.skill === 'mdark' || p.skill === 'msandball' || p.skill === 'mjellyglob' || p.skill === 'manglerlure') p.vy += 0.06;   // v0.30.x final-polish (own-shots) - the orb's arc
@@ -156133,14 +156143,17 @@ const ZODIAC_AI = {
       m._sagArcAt = (game.time | 0) + 300;
       const _dx = (player.x + player.w/2) - (m.x + m.w/2);
       const _dy = (player.y + player.h/2) - (m.y + m.h/2);
-      // Initial upward velocity + horizontal aim — gravity 0.40
-      // pulls it back down into the parabolic arc.
-      const _arrowSpeed = 9;
-      const _ang = Math.atan2(_dy - 80, _dx) - 0.25;  // bias upward so the arc clears terrain
+      // v0.30.1425 enemy-gravity - the arc is real now (its gravity 0.40 was declared and never applied, so the shot flew
+      // straight: ~125 px over a target on its right, and the -0.25 "upward" bias tilted it DOWN on the left). Aimed like
+      // the mortar: a flight time from the distance (20-60 frames at ~9 px a frame across), then the launch that brings
+      // the arc down on where you stood - a flat shot up close, a high lob far away. Step aside and it lands behind you.
+      const _T = Math.max(20, Math.min(60, Math.abs(_dx) / 9));
+      const _vx0 = _dx / _T, _vy0 = _dy / _T - 0.40 * _T / 2;
+      const _ang = Math.atan2(_vy0, _vx0);   // the bow-tip sparks below follow the launch
       game.projectiles.push({
-        x: m.x + m.w/2, y: m.y + m.h/2,
-        vx: Math.cos(_ang) * _arrowSpeed,
-        vy: Math.sin(_ang) * _arrowSpeed,
+        x: m.x + m.w/2 - 9, y: m.y + m.h/2 - 4,
+        vx: _vx0,
+        vy: _vy0,
         w: 18, h: 8, life: 220,
         damage: (m.atk || 200) * 0.85, owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'arrow',
         color: '#ffcc44',
@@ -156630,13 +156643,24 @@ const ZODIAC_AI = {
       for (const h of game.hazards) {
         if (!h._aquaFlood || !h._aquaElectrified || (game.time | 0) > h._aquaElectrified) continue;
         if (_pcx2 >= h.x && _pcx2 <= h.x + h.w && _pcy2 >= h.y - 20 && _pcy2 <= h.y + h.h + 20) {
-          if ((player._aquaShockAt | 0) < (game.time | 0) && player.invulnerable <= 0) {
-            player._aquaShockAt = (game.time | 0) + 36;
+          // v0.30.1425 aqua-pool - ONE shock per electrify. It shocked every 36 frames through the 90-frame window: three
+          // 35% shocks = 105% of max HP, each rooting you (hitStun) in water that slows you, so a player caught mid-lane
+          // died from full. Now the lightning lands once per electrify, takes the block / warrior / Aegis cut every
+          // hazard takes, opens a hit-granted i-frame window, and never lands on a player sitting in a menu (the co-op
+          // world keeps running). Still 35% of max HP unblocked: standing in the water is the mistake it punishes.
+          if (h._aquaShockOf !== h._aquaElectrified && player.invulnerable <= 0 && !game.paused) {
+            h._aquaShockOf = h._aquaElectrified;
             const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-            const _shock = Math.floor(_max * 0.35);
+            let _shock = _max * 0.35;
+            if (player.blockTimer > 0) { _shock *= 0.3; if (typeof triggerBlock === 'function') triggerBlock(); }
+            if (player.cls === 'warrior' && typeof _warriorDr === 'function') _shock *= _warriorDr();
+            if (player._aegis) _shock *= 0.5;
+            _shock = Math.max(1, Math.floor(_shock));
             player.hp -= (player._god ? 0 : _shock);
             if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.35, "Aquarius's Conductive Pool", '#ffee44');
             player.lastHitTime = game.time;
+            player.invulnerable = Math.max(player.invulnerable || 0, 600);
+            player._hitIframeAt = game.time;   // a HIT-granted window (see the blink gate)
             player._lastDamageSource = "Aquarius's Conductive Pool";
             player.hitStun = 200;
             if (game.damageNumbers) {
