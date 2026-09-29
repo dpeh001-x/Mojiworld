@@ -49,8 +49,8 @@ try {
       dur: +v.duration.toFixed(2) };
   });
   ok('1. the title loop is never asked for before the title menu is up', early === 0 && reqs.length > 0, { early, total: reqs.length });
-  ok('1. it plays muted and looping inside the title backdrop, faded in over the still', !T.none && T.inBg && T.muted && T.loop && T.ready >= 2 && T.adv > 0.3 && T.op === '1'
-    && T.w === 1280 && T.h === 416 && Math.abs(T.dur - 16) < 0.1, J(T));
+  ok('1. it plays muted and looping inside the title backdrop in HD (1920x624), faded in over the still', !T.none && T.inBg && T.muted && T.loop && T.ready >= 2 && T.adv > 0.3 && T.op === '1'
+    && T.w === 1920 && T.h === 624 && Math.abs(T.dur - 16) < 0.1, J(T));
   ok('1. it sits on the key art\'s own pixels and is masked out across the hills', !T.none && T.fit && /linear-gradient/.test(T.mask), J({ fit: T.fit, want: T.want, got: T.got, mask: T.mask }));
   await page.setViewportSize({ width: 1600, height: 640 }); await page.waitForTimeout(400);
   const R = await page.evaluate(() => { const v = document.getElementById('lo-title-loop'), bg = document.querySelector('#loading-overlay .lo-bg'); if (!v) return null;
