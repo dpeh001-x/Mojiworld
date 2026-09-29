@@ -8,6 +8,14 @@
 //   charged / special-requirement    up to 2500%          (Bastion of Dawn at a full Dawn Charge)
 // Q, C and the basic d/s/a/e/w kit are NOT in scope and are not asserted here (clarified 2026-09-16).
 //
+// SINCE v0.30.1050 (per user, the 2026-09-25 skill audit "fix all", recommendation R7) the flat 1000% above is RETIRED: a master
+// G / B skill is budgeted 70% of a basic per second of its table cooldown (a 25 s G skill 1750%, a 60 s ultimate 4200%), Bastion
+// of Dawn still 2500% at a full charge - the rule scripts/skill_tier_budget.mjs proposes against. And a skill whose one use is
+// several presses is measured over that whole use, as scripts/skill_tabulation.mjs does: War of Banners 20 presses, Meteor Sigil
+// 10 comets, Elemental Apotheosis 3 casts, Kage Rush 4 charges (each from the spawn point, as a player turns and cuts again).
+// Divine Aegis's orbs swing 39-143 px from the player and strike within 29 px, so its dummy stands inside the ring (90 px).
+// A row still out of band after that is a BALANCE question for the user - never re-tune a skill to pass this test.
+//
 // Nothing here is read off a multiplier. Each skill is cast once at a stationary dummy - evasion 0,
 // crits pinned OFF, Math.random pinned - and the dummy's HP loss is totalled over a 10 s window, so a
 // DOT, a channel, a summon's bites and a delayed detonation all count as they land. hitMonster is
@@ -32,7 +40,9 @@ const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const PORT = Number(process.env.PORT || 11001);
 const TOL = 0.20;                                   // ±20% of budget
-const BUDGET = { crusader_ult: 2500 };              // everything else in scope: 1000
+const BUDGET = { crusader_ult: 2500 };              // v0.30.1050: everything else in scope is 70% of a basic per second of table cd
+const budgetOf = (id, cdMs) => BUDGET[id] || Math.round(70 * ((+cdMs || 0) / 1000));
+const USES = { warlord_ult: [20, 500], sage_ult: [10, 300], elementalist_ult: [3, 550], shinobi_seal: [4, 350] };   // one FULL use (skill_tabulation.mjs)
 const SKIP = new Set(['bloodlust', 'guardian', 'eagleEye', 'shadowlord_ult', 'shadowlord_clones', 'archbishop_ult']);
 // buffs / an echo of the player's own hits / an invulnerability ult / a summon that landed 2 hits in
 // 10 s on one dummy - none is a damage skill this test can hold to a budget
@@ -49,8 +59,8 @@ try {
   await page.goto(`http://localhost:${PORT}/mojiworld_game.html?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof castSkill === 'function', null, { timeout: 180000 });
   await page.waitForTimeout(8000);
-  const r = await page.evaluate(async ({ SKIP: _skipList }) => {
-    const SKIP = new Set(_skipList);            // crosses the page boundary as an array
+  const r = await page.evaluate(async ({ SKIP: _skipList, USES }) => {
+    const SKIP = new Set(_skipList);            // crosses the page boundary as an array (USES is a plain object, it crosses as is)
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
@@ -105,7 +115,8 @@ try {
     const once = async (id, dx, ms) => { setup(id); dummy = mk(dx); if (!dummy) return { total: 0, lines: 0 }; lines = 0; const hp0 = dummy.currentHp;
       try { castSkill(id); } catch (e) {} await hold(ms || 10000); return { total: Math.round(hp0 - dummy.currentHp), lines }; };
     const press = async (id, n, gap) => { setup(id); dummy = mk(150); lines = 0; const hp0 = dummy.currentHp;
-      for (let i = 0; i < n; i++) { for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; player.mp = 99999; try { castSkill(id); } catch (e) {} await sleep(gap); dummy.frozen = 99999; dummy.stunTimer = 99999; dummy.vx = 0; }
+      for (let i = 0; i < n; i++) { if (id === 'shinobi_seal') { player.x = _x0; player.y = _y0; player.vx = 0; player.vy = 0; }   // each charge from the spawn point
+        for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; player.mp = 99999; try { castSkill(id); } catch (e) {} await sleep(gap); dummy.frozen = 99999; dummy.stunTimer = 99999; dummy.vx = 0; }
       await hold(1500); return { total: Math.round(hp0 - dummy.currentHp), lines }; };
     const out = { ver: GAME_VERSION, rows: {} };
     const basics = { warrior: 'slash', rogue: 'stab', mage: 'magicBolt', archer: 'arrowShot' };
@@ -117,6 +128,8 @@ try {
         let m;
         if (id === 'marksman_oneshot') m = await press(id, Math.floor(6000 / 430), 430);
         else if (id === 'marksman_ult') m = await press(id, Math.floor(8000 / 260), 260);
+        else if (USES[id]) m = await press(id, USES[id][0], USES[id][1]);   // v0.30.1050: one FULL use
+        else if (id === 'crusader_aegis') m = await once(id, 90);            // inside the orbs' ring, not on its edge
         else if (id === 'arrowRain') m = await once(id, 200);
         else if (id === 'crusader_ult') {
           setup(id); dummy = mk(150); lines = 0; const hp0 = dummy.currentHp;
@@ -124,17 +137,17 @@ try {
           for (const k of Object.keys(player._cd || {})) player._cd[k] = 0; castSkill(id); await hold(6000);
           m = { total: Math.round(hp0 - dummy.currentHp), lines };
         } else m = await once(id);
-        out.rows[id] = { cls, slot: sk.slot, total: m.total, lines: m.lines, basic: b.total, name: sk.name };
+        out.rows[id] = { cls, slot: sk.slot, total: m.total, lines: m.lines, basic: b.total, name: sk.name, cd: sk.cd };
       }
     }
     Math.random = _rnd; window.hitMonster = _hm;
     return out;
-  }, { SKIP: [...SKIP] });
+  }, { SKIP: [...SKIP], USES });
   console.log(`build ${r.ver}`);
   let worst = { d: 0 };
   for (const [id, x] of Object.entries(r.rows)) {
     if (x.slot === 'd') { console.log(`\n== ${x.cls}  basic ${id} = ${x.total} ==`); continue; }
-    const budget = BUDGET[id] || 1000, pct = x.basic ? x.total / x.basic * 100 : 0, d = pct / budget - 1;
+    const budget = budgetOf(id, x.cd), pct = x.basic ? x.total / x.basic * 100 : 0, d = pct / budget - 1;
     if (Math.abs(d) > Math.abs(worst.d)) worst = { id, d };
     ok(`${x.cls}/${x.slot} ${id.padEnd(22)} ${String(Math.round(pct)).padStart(5)}% of basic in ${String(x.lines).padStart(3)} lines  (budget ${budget}%)`,
       Math.abs(d) <= TOL, (d >= 0 ? '+' : '') + (d * 100).toFixed(0) + '%');
