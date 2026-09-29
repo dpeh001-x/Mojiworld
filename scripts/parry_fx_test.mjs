@@ -11,13 +11,22 @@
 //   4. THE NOVA WEARS IT: a Riposte Nova proc spawns parry_riposte, not
 //      nova_ring (previous build: nova_ring, the Nova Step DASH shockwave)
 //   5. IT LANDS ON WHAT IT DAMAGED: every monster the nova actually hit gets
-//      its own flash — which is what the request names
+//      its own flash — which is what the request names. Since the parry-shield
+//      pass that flash is the CLASS's shield (parry_<class>), not parry_riposte
 //   6. THE ROGUE COUNTER WEARS IT: the parry counter-strike, which had no
-//      effect of its own at all, now flashes on every landed counter
+//      effect of its own at all, now flashes on every landed counter (parry_rogue,
+//      on the monster)
 //   7. AND ONLY WHEN IT DISHES DAMAGE: 'melee' is not MISS_EXEMPT, so that
 //      counter can whiff — a whiff, and a dead target, must NOT flash
 //   8. CONTROL — THE FALLBACK SURVIVES: nova_ring is still spawned by Nova
 //      Step's own dash, and still sits behind the nova as its 404 fallback
+//   9. THE CLASS SHIELDS ARE REGISTERED, INDEXED AND DECODED: parry_warrior /
+//      _rogue / _mage / _archer each have a still and seven decoded frames, and
+//      _lxFrameCount knows all four (per user: "The parry sprite needs a complete
+//      overhaul to fit the game and all classes nicely")
+//  10. EVERY CLASS'S PARRY FLASHES ITS SHIELD ON THE PLAYER: triggerParry spawns
+//      parry_<class> riding the player (follow), sticky, fadeTail 0.3, lifted
+//      (pivotY 0.595) - and the class's stance burst still riding them gives way
 // Run: node scripts/parry_fx_test.mjs   (MOJI_GAME_FILE=... for a baseline)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -83,11 +92,21 @@ try {
       await sleep(150); fr = _fxAnimFrames('parry_riposte');
     }
     out.frames = { n: fr ? fr.length : 0, decoded: fr ? fr.filter((f) => f && f.complete && f.naturalWidth > 0).length : 0 };
+    // ---- the class shields (parry-shield) ---------------------------------
+    out.cls = {};
+    for (const c of ['warrior', 'rogue', 'mage', 'archer']) {
+      const k = 'parry_' + c, im = (typeof LX_FX !== 'undefined') ? LX_FX[k] : null;
+      let f = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames(k) : null;
+      for (let i = 0; i < 60 && !(f && f.length && f.every((x) => x && x.complete && x.naturalWidth > 0)); i++) { await sleep(150); f = _fxAnimFrames(k); }
+      out.cls[c] = { w: (im && im.complete) ? im.naturalWidth : 0, key: (typeof _FX_ANIM_KEYS !== 'undefined') && _FX_ANIM_KEYS.has(k),
+        idx: (typeof _lxFrameCount === 'function') ? _lxFrameCount('fx/anim', k, -1) : 'no fn', n: f ? f.length : 0, dec: f ? f.filter((x) => x && x.complete && x.naturalWidth > 0).length : 0 };
+    }
 
     // ---- spy on the burst spawner ----------------------------------------
     let log = [];
     const realBurst = window.spawnSpriteBurst;
-    window.spawnSpriteBurst = function (x, y, key, opt) { log.push({ x: Math.round(x), y: Math.round(y), key, size: Math.round((opt && opt.size) || 0) }); return realBurst.apply(this, arguments); };
+    window.spawnSpriteBurst = function (x, y, key, opt) { log.push({ x: Math.round(x), y: Math.round(y), key, size: Math.round((opt && opt.size) || 0),
+      follow: !!(opt && opt.follow), sticky: !!(opt && opt.sticky), fadeTail: opt ? opt.fadeTail : undefined, pivotY: opt ? opt.pivotY : undefined }); return realBurst.apply(this, arguments); };
 
     // ---- 1. the Riposte Nova ---------------------------------------------
     // Put live monsters inside the 150 px radius and give the player the boon.
@@ -108,6 +127,7 @@ try {
     live.forEach((m, i) => { m.x = pcx + (i - 1) * 40; m.y = pcy - m.h / 2; m.currentHp = Math.max(m.currentHp, 99999); m.maxHp = Math.max(m.maxHp || 0, 99999); });
     const hp0 = live.map((m) => m.currentHp);
     log = [];
+    out.novaCls = player.cls;   // the per-monster flash is this class's shield
     _riposteProc();
     out.novaLog = log.slice();
     out.novaDamaged = live.filter((m, i) => m.currentHp < hp0[i]).length;
@@ -128,7 +148,7 @@ try {
       const h0 = src.currentHp;
       log = [];
       triggerParry(src);
-      const flashed = log.some((b) => b.key === 'parry_riposte');
+      const flashed = log.some((b) => b.key === 'parry_rogue' && !b.follow);   // on the monster, not the shield riding the player
       if (src.currentHp < h0) { hits++; if (flashed) flashOnHit++; }
       else { misses++; if (flashed) flashOnMiss++; }
       await sleep(20);
@@ -141,10 +161,23 @@ try {
       player.invulnerable = 0; player.blockTimer = 0; player.parryWindow = 0;
       log = [];
       triggerParry(src);
-      deadFlash = log.some((b) => b.key === 'parry_riposte');
+      deadFlash = log.some((b) => b.key === 'parry_rogue' && !b.follow);
     }
     out.counter = { hits, misses, flashOnHit, flashOnMiss, deadFlash };
     out.counterLog = log.slice();
+
+    // ---- 3. every class's parry flashes its own shield on the player ----------
+    out.burst = {};
+    for (const c of ['warrior', 'rogue', 'mage', 'archer']) {
+      player.cls = c; player.invulnerable = 0; player.blockTimer = 0; player.parryWindow = 0;
+      game.smoothFx = [];
+      startBlock();
+      const stance = game.smoothFx.find((f) => f && f.follow === player && f.spriteKey === LX_BLOCK_FX[c]);
+      log = [];
+      triggerParry(null);
+      const b = log.find((e) => e.key === 'parry_' + c && e.follow);
+      out.burst[c] = { spawned: !!b, sticky: !!(b && b.sticky), fadeTail: b ? b.fadeTail : null, pivotY: b ? b.pivotY : null, stanceCut: !!stance && stance.life <= 1 };
+    }
     player.cls = wasCls;
     window.spawnSpriteBurst = realBurst;
     out.helper = typeof _lxParryFx;
@@ -170,8 +203,8 @@ try {
     NL.some((b) => b.key === 'parry_riposte' && b.size > 200) && !NL.some((b) => b.key === 'nova_ring'),
     `${NL.length} bursts: ${NL.map((b) => b.key).join(', ')} (previous build: nova_ring)`);
   ok('IT LANDS ON WHAT IT DAMAGED: one flash per monster the nova hit',
-    R.novaDamaged > 0 && NL.filter((b) => b.key === 'parry_riposte' && b.size < 200).length >= R.novaDamaged,
-    `${R.novaDamaged} damaged, ${NL.filter((b) => b.key === 'parry_riposte' && b.size < 200).length} per-monster flashes`);
+    R.novaDamaged > 0 && NL.filter((b) => b.key === 'parry_' + R.novaCls && b.size < 200).length >= R.novaDamaged,
+    `${R.novaDamaged} damaged, ${NL.filter((b) => b.key === 'parry_' + R.novaCls && b.size < 200).length} per-monster parry_${R.novaCls} flashes`);
   ok('THE ROGUE COUNTER WEARS IT: every landed counter-strike flashes (it had nothing before)',
     R.haveSource && CT.hits > 0 && CT.flashOnHit === CT.hits,
     `${CT.flashOnHit}/${CT.hits} landed counters flashed`);
@@ -181,6 +214,13 @@ try {
   ok('CONTROL — THE FALLBACK SURVIVES: nova_ring still spawned by the dash and behind the nova',
     novaSpawns === 2 && R.helper === 'function',
     `${novaSpawns} nova_ring spawn sites (expected 2: Nova Step's dash, and the nova's 404 fallback)`);
+  const C = R.cls || {}, B = R.burst || {}, CL = ['warrior', 'rogue', 'mage', 'archer'];
+  ok('THE CLASS SHIELDS ARE REGISTERED, INDEXED AND DECODED: a still + seven frames each',
+    CL.every((c) => C[c] && C[c].w > 0 && C[c].key && C[c].idx === 7 && C[c].n === 7 && C[c].dec === 7),
+    CL.map((c) => c + ' ' + (C[c] ? `${C[c].w}px key ${C[c].key} idx ${C[c].idx} ${C[c].dec}/${C[c].n}` : 'missing')).join('; '));
+  ok("EVERY CLASS'S PARRY FLASHES ITS SHIELD ON THE PLAYER, and the stance burst gives way",
+    CL.every((c) => B[c] && B[c].spawned && B[c].sticky && B[c].fadeTail === 0.3 && B[c].pivotY === 0.595 && B[c].stanceCut),
+    CL.map((c) => c + ' ' + JSON.stringify(B[c])).join('; '));
 } finally { await browser.close().catch(() => {}); server.kill(); }
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }
