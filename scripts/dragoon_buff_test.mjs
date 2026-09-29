@@ -60,7 +60,7 @@ const out = await page.evaluate(async () => {
   // patch). The slam KEEPS its x1.3 boss bonus, which is what this test exists for.
   ok('Sky Lance cooldown is 25s (v0.30.356, per user)', SKILLS.dragoon_skylance.cd === 25000, 'cd ' + SKILLS.dragoon_skylance.cd);
   const src = String(SKILL_FNS.dragoon_ult || '');
-  ok('Skyfall lances are 5.5x + 15 (v0.30.814)', src.includes('getAtk() * 5.5 + 15'), '');
+  ok('Skyfall lances are 6.5x + 15 (5.5x v0.30.814; 6.5x v0.30.1428 per user: dragoon "very very underpowered")', src.includes('getAtk() * 6.5 + 15'), '');
   ok('Skyfall slam is 2.7x and keeps its x1.3 boss bonus (v0.30.788)', src.includes('460, 2.7') && src.includes('bossMul: 1.3'), '');
   const paSrc = String(window.performAround || '');
   ok('performAround supports opt-in bossMul', paSrc.includes('opts.bossMul'), '');
@@ -70,7 +70,7 @@ const out = await page.evaluate(async () => {
   const pageSrc = await (await fetch(location.pathname)).text();
   // v0.30.772 / v0.30.773 budgeted every G and B skill against the basic attack: aegis orbs 6.6x + 40 -> 2.55x + 9 (the last x0.85 in v0.30.1050, per user), the
   // soul orb 6.0x + 40 -> 1.45x + 10 (later 1x + 10). v0.30.767 rebuilt Bastion of Dawn as Dawnbreak - no orbs left.
-  ok('Divine Aegis orbs 2.55x + 9 (v0.30.772, then x0.85 in v0.30.1050 per user)', pageSrc.includes('getAtk() * 2.55 + 9'), '');
+  ok('Divine Aegis orbs 3.3x + 9 (2.55x after v0.30.1050; 3.3x v0.30.1428 per user: crusader "very very underpowered")', pageSrc.includes('getAtk() * 3.3 + 9'), '');
   const bastSrc = String(SKILL_FNS.crusader_ult || '');
   ok('Bastion of Dawn is Dawnbreak now: no 1.8x orb line left (v0.30.767)', !/\* 1\.8 \+ 8/.test(bastSrc) && bastSrc.length > 0, '');
   ok('necromancer soul orb is its own line (1x + 10)', /getAtk\(\) \* 1 \+ 10\);[^\n]*\r?\n[^\n]*'necromancerorb'/.test(pageSrc), '');

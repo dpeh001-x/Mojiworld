@@ -34,7 +34,7 @@ const KNOWN = [
   ['warlord_ult', 'life: 36, damage: getAtk() *'], ['crusader_aegis', 'const dmg = Math.floor(getAtk() *'], ['dragoon_ult', 'performAround(460,'],
   // damage that lives outside the body: a helper, a hazard resolver, an update loop, a timer
   ['magicBolt', 'damage: (getAtk() *'], ['arcaneBurst', 'performAround(_abAoe,'], ['meteor', ': getAtk() *'],
-  ['dragoon_skylance', 'bossMul: 1.6'], ['skyhunter_ult', 'x: _eCx, y: _eCy'], ['wildBond', "rollCrit(), 'pet')"],
+  ['dragoon_skylance', "color:'#88ccff', kb:14, bossMul:"], ['skyhunter_ult', 'x: _eCx, y: _eCy'], ['wildBond', "rollCrit(), 'pet')"],
 ];
 const missing = KNOWN.filter(([id, frag]) => { const s = skills.find((x) => x.id === id); return !s || !s.lines.some((l) => l.text.includes(frag)); });
 check(!missing.length, 'the lines the budget pass edited are found under their skills', missing.length ? missing.map((m) => m.join(':')).join(', ') : KNOWN.length + ' known lines');

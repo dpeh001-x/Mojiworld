@@ -75,7 +75,7 @@
     skyhunter_ult: [{ frag: 'x: _eCx, y: _eCy' }],
     crusader_aegis: [{ frag: 'paladin/crusader "slightly"' }],
     nightreaper_mark: [{ frag: '* (isCrit ? getCritDmg() : 1)));' }],
-    dragoon_skylance: [{ frag: "color:'#88ccff', kb:14, bossMul: 1.6" }],
+    dragoon_skylance: [{ frag: "color:'#88ccff', kb:14, bossMul:" }],   // v0.30.1428 number-free, like the others: the boss multiplier moved 1.6 -> 2.2
     rush: [{ frag: "hitMonster(m, dmg, _rc, 'rush');", above: 3 }],   // the dash-through hit in the player update: 1.8x, computed on the line above
     soulSiphon: [{ frag: 'const dmg = Math.floor(getAtk() *', ctx: "'necromancerorb'", span: 20 }],   // the Soul Ward's orbs (12 s, one every 1.5 s) are most of what it deals
   };

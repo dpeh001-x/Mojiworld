@@ -99,6 +99,7 @@ const R = await page.evaluate(async () => {
     player.mods = player.mods || {}; player.mods.thorns = THORNS;
     player._guardianReflect = (game.time | 0) + 3000;
     player._guardianReflectPct = GUARD_PCT;
+    player._guardianReflectAtk = 0;   // v0.30.1428: Guardian's ATK retaliation is pinned by knight_reflect_test; this test pins the SHARE of the hit
     const m = spawnMonster(player.x + 120, player.y, type, isBoss, false);
     if (!m) return null;
     m.currentHp = m.maxHp = 1e9;               // it must survive the whole window

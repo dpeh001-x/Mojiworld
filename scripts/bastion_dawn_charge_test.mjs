@@ -153,8 +153,9 @@ ok('A. the armed banner reads the charge', /Dawn \d+%/.test(r.banner || ''), r.b
 ok('A. the rune ward draws under the paladin while armed', r.auraDraws > 0, r.auraDraws);
 const M = r.model;
 // v0.30.788 (1fd9a21d) - the user's patch retuned LX_DAWN to base 5 / time +10 / damage amp x(1 + 2d): 5x, 15x, 15x, 45x.
-ok('B. 5x at zero, 15x for a full hold, 15x for a full health bar taken, 45x for both', M.zero === 5 && M.hold === 15 && M.tank === 15 && M.both === 45, JSON.stringify(M));
-ok('B. both halves cap: holding past 10s or overfilling adds nothing', M.longer === 15 && M.overfull === 45 && Math.abs(M.fullC - 1) < 1e-9, JSON.stringify(M));
+// v0.30.1428 (per user: crusader "very very underpowered") - LX_DAWN base 5.5 / time +12 / amp x(1 + 2d): 5.5x, 17.5x, 16.5x, 52.5x.
+ok('B. 5.5x at zero, 17.5x for a full hold, 16.5x for a full health bar taken, 52.5x for both', M.zero === 5.5 && M.hold === 17.5 && M.tank === 16.5 && M.both === 52.5, JSON.stringify(M));
+ok('B. both halves cap: holding past 10s or overfilling adds nothing', M.longer === 17.5 && M.overfull === 52.5 && Math.abs(M.fullC - 1) < 1e-9, JSON.stringify(M));
 const ratio = r.high.near / Math.max(1, r.low.near), want = r.high.mul / r.low.mul;
 ok('C. a full charge out-damages a panic release by the model ratio', Math.abs(ratio / want - 1) < 0.2, `damage x${ratio.toFixed(2)} vs model x${want.toFixed(2)} (${r.low.near} -> ${r.high.near})`);
 ok('C. the charged burst reaches a foe at 450px; the panic release does not', r.high.far > 0 && r.low.far === 0, `low ${r.low.far}, high ${r.high.far}`);
