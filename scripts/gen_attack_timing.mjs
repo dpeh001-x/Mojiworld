@@ -237,4 +237,3 @@ function main() {
   for (const r of report) console.log('  ' + r);
 }
 if (process.argv[1] && /gen_attack_timing\.mjs$/.test(process.argv[1])) main();
-// gate: a retired landed-fix literal (v0.30.1421 re-picked the Tyrant's strike; Path's Bane keeps a narrowed marker), kept as text for one push: ossuaryTyrant: 5, pathsBane: 4, pearlSprite: 4,
