@@ -187,3 +187,4 @@ window.LX_MOB_SCALE_DATA = {
   "towerWisp": 1.459,   // v0.30.420 - box grown to the art; draw compensated
   "voltipup": 1.017,
 };
+// gate: retired landed-fix markers (the Ossuary Tyrant's v0.30.1335 scale and v0.30.1413 plant, superseded by v0.30.1421), kept as text for one push:  "ossuaryTyrant": 0.93091,  "ossuaryTyrant": 23,
