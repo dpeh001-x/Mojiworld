@@ -153,16 +153,18 @@ const R = await page.evaluate(async () => {
     }
     return seq;
   };
-  const P1 = ['leap','gooBarrage','latch','gluespray','leap','quake'];
-  const seqA = rotation(mkKing(800, 300), 12);
-  ok('rotation is the fixed 6-beat cycle, twice through',
+  // The v0.29.591 cycle (leap, goo, LATCH, glue, leap, quake) lost the latch to a stale write; the jump pass then grew the
+  // latch-less cycle to eight beats with five leaps. The restore puts the latch back after the goo barrage as a 9th beat.
+  const P1 = ['leap','gooBarrage','latch','leap','leap','gluespray','leap','quake','leap'];
+  const seqA = rotation(mkKing(800, 300), 18);
+  ok('rotation is the fixed 9-beat cycle, twice through',
      seqA.join(',') === P1.concat(P1).join(','), seqA.join(','));
-  const seqB = rotation(mkKing(800, 300), 12);
+  const seqB = rotation(mkKing(800, 300), 18);
   ok('a second fight rolls the identical sequence', seqA.join(',') === seqB.join(','), seqB.join(','));
   const kp2 = mkKing(800, 300); kp2._bossPhase2 = true;
-  const seqP2 = rotation(kp2, 6);
+  const seqP2 = rotation(kp2, 9);
   ok('phase 2 swaps only the opening leap for a teleport',
-     seqP2.join(',') === ['teleport','gooBarrage','latch','gluespray','leap','quake'].join(','), seqP2.join(','));
+     seqP2.join(',') === ['teleport'].concat(P1.slice(1)).join(','), seqP2.join(','));
 
   // -- 7. The barrage is a shape, not a tracker ----------------------------
   const gooFan = (moveMidway) => {
