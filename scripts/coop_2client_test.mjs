@@ -30,6 +30,8 @@ const ROOM = 'cert' + (process.env.RUN_TAG || Math.floor(Math.random() * 1e6));
 const results = [];
 const ok = (n, c, extra) => { results.push({ n, pass: !!c, extra }); };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// Poll a page until fn returns { ok: true } (every 100 ms, up to ms); returns the last v either way.
+const until = async (page, fn, arg, ms = 4000) => { const t0 = Date.now(); for (;;) { const r = await page.evaluate(fn, arg); if (r.ok || Date.now() - t0 > ms) return r.v; await sleep(100); } };
 
 async function boot(browser, name) {
   const ctx = await browser.newContext();
@@ -110,20 +112,22 @@ try {
   const tUid = bUids[0];
   const hpBefore = await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); return m ? m.currentHp : null; }, tUid);
   await ev(B, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) hitMonster(m, Math.max(1, Math.floor(m.currentHp * 0.25)), false, 'certtest'); }, tUid);
-  await sleep(500);
-  const hpAfter = await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); return m ? m.currentHp : 'GONE'; }, tUid);
+  // v0.30.1443 coop-keyed - every wait below polls (up to 4 s) instead of sleeping a fixed 0.4-0.7 s. This relay also serves the
+  // game's files, and while both pages lazy-load the map's art a guest frame took up to 1.2 s to reach the host (measured on one
+  // clock: 0.06-0.71 s guest -> relay and 0.05-0.64 s relay -> host, with up to 40+ file requests in the 1.5 s before it), so a fixed
+  // wait failed these checks on every build under load. The deployed relay serves no files. A frame that never arrives still fails.
+  const hpAfter = await until(A, ({ u, b }) => { const m = game.monsters.find(x => x.uid === u); const v = m ? m.currentHp : 'GONE'; return { ok: v === 'GONE' || v < b, v }; }, { u: tUid, b: hpBefore });
   ok('non-host damage reached host (shared HP)', typeof hpAfter === 'number' && hpAfter < hpBefore, { tUid, hpBefore, hpAfter });
-  await sleep(400);
-  const hpMirror = await ev(B, (u) => { const m = game.monsters.find(x => x.uid === u); return m ? m.currentHp : 'GONE'; }, tUid);
+  const hpMirror = await until(B, ({ u, h }) => { const m = game.monsters.find(x => x.uid === u); const v = m ? m.currentHp : 'GONE'; return { ok: v === 'GONE' || Math.abs(v - h) <= 2, v }; }, { u: tUid, h: hpAfter });
   ok('reduced HP synced back to non-host', hpMirror === 'GONE' || Math.abs(hpMirror - hpAfter) <= 2, { hpAfter, hpMirror });
 
   // SHARED KILL: non-host lands the lethal blow; host removes it + broadcasts kill.
   const xpBefore = await ev(B, () => player.exp || 0);
   await ev(B, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) hitMonster(m, 9999999, true, 'certtest'); }, tUid);
-  await sleep(700);
-  ok('killed monster gone on host', await ev(A, (u) => !game.monsters.some(x => x.uid === u), tUid), { tUid });
-  ok('killed monster gone on non-host', await ev(B, (u) => !game.monsters.some(x => x.uid === u), tUid), { tUid });
-  const xpAfter = await ev(B, () => player.exp || 0);
+  const gone = (u) => { const v = !game.monsters.some(x => x.uid === u); return { ok: v, v }; };
+  ok('killed monster gone on host', await until(A, gone, tUid), { tUid });
+  ok('killed monster gone on non-host', await until(B, gone, tUid), { tUid });
+  const xpAfter = await until(B, (b) => { const v = player.exp || 0; return { ok: v > b, v }; }, xpBefore);
   ok('non-host gained XP from the shared kill', xpAfter > xpBefore, { xpBefore, xpAfter });
 
   // HOST-side kill also reaches the peer: host kills a different monster directly.
@@ -134,8 +138,7 @@ try {
   // the hit) - measured: with accuracy pinned, the host's 9,999 still left it at 1 HP one run in three. Out-level the target, zero its
   // evasion and i-frames, drop its defensive traits, and the KILL - and its trip to the partner - is what is tested.
   await ev(A, (u) => { const m = game.monsters.find(x => x.uid === u); if (m) { player.level = Math.max(player.level | 0, 120); m.evasion = 0; m.invulnerable = 0; m.traits = null; m.currentHp = 1; hitMonster(m, 9999, false, 'hosttest'); } }, tUid2);
-  await sleep(700);
-  ok('host kill removes monster on non-host too', await ev(B, (u) => !game.monsters.some(x => x.uid === u), tUid2), { tUid2 });
+  ok('host kill removes monster on non-host too', await until(B, gone, tUid2), { tUid2 });
 
   ok('no page errors on host', A._errors.length === 0, A._errors.slice(0, 5));
   ok('no page errors on non-host', B._errors.length === 0, B._errors.slice(0, 5));

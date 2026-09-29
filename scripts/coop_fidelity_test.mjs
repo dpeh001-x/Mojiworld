@@ -38,7 +38,10 @@ try {
   await B.evaluate(({ ws, room }) => mpConnect(ws, 'Guest', room), { ws: WS, room: ROOM }); await wait(B, () => net.myId != null);
   for (const P of [A, B]) await P.evaluate(() => { loadMap('glasswindSteppe', 900); game.paused = false; });
   const caps = await wait(A, () => Object.values(net.peers).some((p) => (p.cap | 0) >= 2)) && await wait(B, () => Object.values(net.peers).some((p) => (p.cap | 0) >= 2));
-  check(caps && await A.evaluate(() => net.isHost) && !(await B.evaluate(() => net.isHost)), 'both builds advertise cap 2 within a tick of meeting; A hosts');
+  // v0.30.1443 coop-keyed - each map elects its own runner now. The two pages load the map within a millisecond of each other, so
+  // each can believe it arrived alone for one presence frame; the lower id takes the map as soon as the other's arrival lands.
+  const settled = await wait(A, () => net.isHost, 2000) && await wait(B, () => !net.isHost, 2000);
+  check(caps && settled && await A.evaluate(() => net.isHost) && !(await B.evaluate(() => net.isHost)), 'both builds advertise cap 2 within a tick of meeting; A hosts (the map\'s election settles within a presence frame)');
   await A.evaluate(() => { game.monsters.length = 0; for (let i = 0; i < 3; i++) { const m = spawnMonster(player.x + 260 + i * 60, player.y - 20, 'slime', false); m.maxHp = m.currentHp = 5e6; m.speed = 0; } });
   await wait(B, () => game.monsters.filter((m) => m._coopMirror).length === 3);
   // ---- 2. each sees the other's skills, and a copy is only a picture ----
@@ -108,15 +111,21 @@ try {
   const gotDrop = await wait(B, () => (game.drops || []).some((d) => d && d.item && d.item.name === 'Test Blade'), 4000);
   check(idle.live === null && idle.paused === idle.guest, 'a boss beside the host targets the host - until the host pauses, then the partner', J(idle));
   check(gotDrop, 'a paused host still relays the loot');
-  // ---- 5. away: the next player takes the world at once, and gives it back ----
+  // ---- 5. away: the next player takes the world at once, and keeps it when the host comes back (per-map runners) ----
   await A.evaluate(() => { game.monsters.length = 0; const m = spawnMonster(player.x + 300, player.y - 20, 'slime', false); m.maxHp = m.currentHp = 5e6; }); await wait(B, () => game.monsters.some((m) => m._coopMirror));
   // the page is not really hidden, so the detector would undo a hand-set away on the next frame: hold it still
   const t0 = Date.now(); await A.evaluate(() => { window.__awayTick = _coopAwayTick; _coopAwayTick = function () {}; _coopSetAway(true); });
   const took = await wait(B, () => net.isHost === true, 3000); const tookMs = Date.now() - t0;
   const afterB = await B.evaluate(() => ({ mons: game.monsters.length, mirrors: game.monsters.filter((m) => m._coopMirror).length })); const aFollows = await wait(A, () => net.isHost === false && game.monsters.some((m) => m._coopMirror), 4000);
   check(took && tookMs < 1500 && afterB.mons >= 1 && afterB.mirrors === 0 && aFollows, 'host says "away": the guest owns the world within 1.5 s, its mirrors become real, the old host follows', `${tookMs} ms ` + J(afterB));
-  await A.evaluate(() => { _coopSetAway(false); _coopAwayTick = window.__awayTick; }); const back = await wait(A, () => net.isHost === true, 3000) && await wait(B, () => net.isHost === false, 3000);
-  check(back, 'and takes it back on return');
+  // v0.30.1443 coop-keyed - per-map runners: the partner who ran the world while I was away keeps it, and I follow it. The old
+  // room-wide rule handed it back to the lowest id - a second handoff for nothing, and on this build it would have depended
+  // on how long I was away (under 1.5 s my last monster frame still counted as running it). Held 2 s: no flip back later.
+  await A.evaluate(() => { _coopSetAway(false); _coopAwayTick = window.__awayTick; });
+  const back = await wait(A, () => net.isHost === false && game.monsters.some((m) => m._coopMirror), 3000) && await wait(B, () => net.isHost === true, 3000);
+  await A.waitForTimeout(2000);
+  const held = !(await A.evaluate(() => net.isHost)) && await B.evaluate(() => net.isHost);
+  check(back && held, 'and on return the old host follows the partner who ran the world meanwhile - one runner, no second handoff');
   const det = await A.evaluate(() => { const realNow = performance.now.bind(performance); let t = realNow(); performance.now = () => t; const hid = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
     game.monsters.length = 0;   // while the guest hosted, its spawner may have rolled a natural boss - and a boss rightly blocks the paused handoff
     const out = {}; try { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); net._hiddenAt = 0; _coopAwayTick(); t += 9000; _coopAwayTick(); out.at9s = !!net._away; t += 1500; _coopAwayTick(); out.at10s = !!net._away;
