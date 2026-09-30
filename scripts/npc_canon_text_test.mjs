@@ -4,7 +4,7 @@
 //     the dreaming was lifted); Guguma no longer says "stolen dream"
 //   - MIRA: at the gate she stands on the step she could not cross; her copy at the foot of the Ascension says so
 //   - TOWER: the Expedition goes down - no "at the top", B10 is not an apex
-//   - PLACES: Will names Mara for the Bastion's steel and Barnaby as the one who keeps her forge (barnaby-bastion: he
+//   - PLACES: Will says the Bastion's blades are older than its walls (the woman at the gate left them) and Barnaby keeps her forge (barnaby-bastion: he
 //     is back in the Courtyard, per user - no line sends him to the Frosted Mansion); Vermillion's breathing mountain is
 //     the Sauro Slope; Wynn's hamlet is the Frosted Mansion
 //   - PLATES: Ren is a thief, Milo an usher (the gate belongs to Mira)

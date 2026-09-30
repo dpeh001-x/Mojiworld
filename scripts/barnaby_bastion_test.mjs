@@ -6,9 +6,11 @@
 //   2. REACH: the talk key picks him from the courtyard floor under the step, and his card names him;
 //   3. LEVELS: Barnaby II-IV and Lyra V open at 45 again, the Kindest Hand at 50; the Journal routes them to the Bastion;
 //   4. NO MANSION: no quest, shop line or Will page sends you to the Frosted Mansion or calls him "of Glasswind";
-//   5. CANON: Mara kept his forge until she rode out with the Doomed Expedition (why that night had two jobs), every knight on
-//      the roll swore "We stand until", the Smith armed the Twelve with the Bastion's own Taur among them, and the officer's
-//      theory is the epilogue's receipt ("put somewhere small");
+//   5. CANON: his forge and its blades are older than the Bastion - the woman at the gate (Mira, per user, in place of a smith
+//      "Mara" nobody ever met) left them and walked up the road, so the forge stood cold the night the sky fell (why that night
+//      had two jobs); nobody says her name (the epilogue: she hears it aloud first from her brother), the Codex names her only
+//      once she has told you; every knight on the roll swore "We stand until", the Smith armed the Twelve with the Bastion's
+//      own Taur among them, and the officer's theory is the epilogue's receipt ("put somewhere small");
 //   6. MOVES WITH THE STORY: 'Which wall did you hold?' answers with the oath, then "until someone pushes" once the Bull's
 //      House is dark (the anvil gets the words too); after the ending his gloves stay off and he chooses the forge; his idle
 //      bubbles come from his own pool in each state, drawn by the real bubble tick;
@@ -70,6 +72,11 @@ try {
     out.descs = ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish', 'q_lyra_forge', 'q_kindest_hand'].map(D);
     out.voice = Object.values(LX_SHOP_VOICE.Barnaby).join(' ');
     out.epilogue = document.documentElement.outerHTML.includes('The smith who was put somewhere small.');
+    // the Codex's Doomed Expedition page: her blades, and her name only once she has told it
+    const cdx = (named) => { const had = player._miraNamed; player._miraNamed = named; const host = document.getElementById('lore-body') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'lore-body' }));
+      _renderLoreTab('expedition'); const t = host.textContent.replace(/\s+/g, ' '); player._miraNamed = had; return t; };
+    out.cdx = { before: cdx(false), after: cdx(true) };
+    out.mara = /\bMara\b/.test(document.documentElement.outerHTML);
     await go('bastionThrone', 700); const will = (game.npcs || []).find((n) => n.name === 'Will' || n.role === 'champion');
     openNPC(will); await sleep(300); await settle(); await click(/Who fights beside you\?/); await settle(); out.will = text(); await close();
     // ---- 6. the story moves: before / the Bull's House dark / after the ending
@@ -98,11 +105,16 @@ try {
   const [five, roll, , fin, forge] = R.descs;
   ok('[5] I: the Bastion\'s smith, the officer\'s "put somewhere small" (the epilogue\'s receipt), his forge in the Bastion Courtyard',
     /Barnaby, the Bastion's smith/.test(five) && /put somewhere small/.test(five) && /Bastion Courtyard/.test(five) && R.epilogue, five.slice(0, 120));
-  ok('[5] II: Mara\'s bench, and every knight on the roll swore "We stand until"', /Mara's old bench/.test(roll) && /swore "We stand until\."/.test(roll), roll.slice(150, 330));
+  ok('[5] II: the forge\'s old bench, and every knight on the roll swore "We stand until"', /the forge's old bench/.test(roll) && /swore "We stand until\."/.test(roll), roll.slice(150, 330));
   ok('[5] IV: the Smith armed the Twelve, the Bastion\'s own Taur among them', /armed the Twelve, the Bastion's own Taur among them/.test(fin), fin.slice(-330, -150));
-  ok('[5] V: the night the sky fell the Bastion had no smith, Mara had ridden out with the Doomed Expedition', /Bastion had no smith: Mara had ridden out with the Doomed Expedition/.test(forge) && /^Barnaby starts with someone else/.test(forge), forge.slice(0, 160));
-  ok('[5] his card: Mara kept this forge until she rode out with the Doomed Expedition; Will: "Barnaby keeps her forge now."',
-    /Mara kept this forge until she rode out with the Doomed Expedition/.test(R.voice) && /Barnaby keeps her forge now\./.test(R.will) && /Elena keeps our records/.test(R.will), R.will.slice(0, 60));
+  ok('[5] V: a blade older than the Bastion; the night the sky fell its forge had stood cold since the woman at the gate walked up the road',
+    /a Bastion blade older than the Bastion/.test(forge) && /Bastion had no smith: its forge had stood cold since the woman at the gate walked up the road/.test(forge) && /^Barnaby starts with someone else/.test(forge), forge.slice(0, 160));
+  ok('[5] his card and Will: the woman at the gate left the forge and its blades; "Barnaby keeps her forge now."; nobody names her',
+    /The woman at the gate left it cold, every rack full/.test(R.voice) && /the woman at the gate left them racked in her forge, and none has broken\. Barnaby keeps her forge now\./.test(R.will)
+    && /Elena keeps our records/.test(R.will) && !/\bMira\b/.test(R.voice + R.will + all), R.will.slice(80, 220));
+  ok('[5] the Codex: the Doomed carried Bastion blades made by the woman at the gate - by Mira once she has told you; no "Mara" left',
+    /Bastion blades made by the woman at the gate, older than the Bastion itself/.test(R.cdx.before) && /Bastion blades made by Mira, older than the Bastion itself/.test(R.cdx.after) && !/Mira/.test(R.cdx.before) && !R.mara,
+    { before: (R.cdx.before.match(/finest ever made.{0,90}/) || [''])[0], after: (R.cdx.after.match(/finest ever made.{0,60}/) || [''])[0], mara: R.mara });
   ok('[6] before the Bull\'s House is dark: the oath, the western breach, "the right wall", his own bubble', /We stand until\./.test(R.pre.wall || '') && /western breach/.test(R.pre.wall || '') && !/SOMEONE PUSHES|gloves lie/.test(R.pre.card) && R.pre.bub === 'We stand until. Until what?', { wall: R.pre.wall, bub: R.pre.bub });
   ok('[6] once it is dark: the anvil and the answer carry "until someone pushes"', /SOMEONE PUSHES/.test(R.taur.card) && /until someone pushes/.test(R.taur.wall || '') && R.taur.bub === 'We stand until someone pushes.', { card: R.taur.card.slice(0, 80), wall: R.taur.wall, bub: R.taur.bub });
   ok('[6] after the ending: his gloves stay off and he chooses the forge', /gloves lie on the bench/.test(R.dawn.card) && /I would choose it again/.test(R.dawn.card) && R.dawn.bub === 'Gloves off. First morning.', { card: R.dawn.card.slice(0, 120), bub: R.dawn.bub });
