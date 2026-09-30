@@ -145,7 +145,8 @@ for (const c of ['warrior', 'rogue', 'mage', 'archer'])
 for (const c of ['warrior', 'rogue', 'mage', 'archer']) {
   const K = (out.kits && out.kits[c]) || { list: [] }, ks = K.list.map((e) => e[1]);
   ok(`${c}: every kit skill lands its class's spark`, ks.length > 0 && ks.every((k) => k && k.indexOf('hit_' + c) === 0), K.list);
-  ok(`${c}: neighbouring kit skills never share a design`, ks.every((k, i) => i === 0 || k !== ks[i - 1]), K.list);
+  // v0.30.1459 - the Rogue's third design is the shuriken skills' own mark (per user), so two shuriken skills side by side share it
+  ok(`${c}: neighbouring kit skills never share a design (except the Rogue's shuriken mark)`, ks.every((k, i) => i === 0 || k !== ks[i - 1] || k === 'hit_rogue_3'), K.list);
   ok(`${c}: the kit uses all three designs`, new Set(ks).size === 3, K.list);
   ok(`${c}: a basic's bare tag lands the base design`, K.bare === 'hit_' + c, K.bare);
 }
