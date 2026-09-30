@@ -24,8 +24,8 @@ const DECK = '#mobile-deck .mc-btn, #mobile-ctrl .mc-btn, #mobile-deck .mc-dpad,
 async function boot(opts) {
   const ctx = await browser.newContext({ ...opts, serviceWorkers: 'block' }); const p = await ctx.newPage();
   p.on('pageerror', (e) => errs.push(String(e).slice(0, 160)));
-  // the game's own crash notes (_lxCrashNotes: window 'error' events it survives, e.g. a ResizeObserver loop) count too
-  p.on('console', (m) => { if (m.type() === 'error' && /^\[(error|promise)\] v0/.test(m.text())) errs.push(m.text().slice(0, 160)); });
+  // the game's own crash notes (_lxCrashNotes: window 'error' events it survives, e.g. a ResizeObserver loop) count too; since v0.30.1454 a ResizeObserver loop is a [layout] warning (no crash toast for players) - still a failure here
+  p.on('console', (m) => { if ((m.type() === 'error' && /^\[(error|promise)\] v0/.test(m.text())) || (m.type() === 'warning' && /^\[layout\] v0/.test(m.text()))) errs.push(m.text().slice(0, 160)); });
   // a file the (stale) working copy lacks - fonts, some sprites - comes from origin, as the font route does
   await p.route((u) => u.hostname === 'localhost' && !u.pathname.endsWith('.html') && !existsSync(path.join(ROOT, decodeURIComponent(u.pathname))), async (r) => {
     const rel = decodeURIComponent(new URL(r.request().url()).pathname).replace(/^[/]/, '');
