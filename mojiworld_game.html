@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1453';
+const GAME_VERSION = 'v0.30.1454';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16193,7 +16193,16 @@ const GAME_VERSION = 'v0.30.1453';
       if (now - lastToast > 30000 && typeof showToast === 'function') { lastToast = now; showToast('⚠ Something went wrong, but the game kept running. If it keeps happening, please report it with your version (' + GAME_VERSION + ').', 'danger'); }
     } catch (e) {}
   };
-  window.addEventListener('error', (ev) => { note('error', ev && (ev.message || (ev.error && ev.error.message))); });
+  // v0.30.1454 ro-notice - "ResizeObserver loop completed with undelivered notifications" (older Chrome: "... loop limit
+  // exceeded") is the browser saying a resize it observed will be delivered next frame. Nothing threw - the event carries
+  // no error object - so it is no crash for a player to report: one console note on a developer surface (the quiet
+  // console mutes it for players), no toast. A real Error that happens to carry the same words still counts as an error.
+  function _lxRoNotice(ev) { return !!(ev && !ev.error && typeof ev.message === 'string' && /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)/.test(ev.message)); }
+  let roSeen = false;
+  window.addEventListener('error', (ev) => {
+    if (_lxRoNotice(ev)) { if (!roSeen) { roSeen = true; try { console.warn('[layout] ' + GAME_VERSION + ' ' + ev.message); } catch (e) {} } return; }
+    note('error', ev && (ev.message || (ev.error && ev.error.message)));
+  });
   window.addEventListener('unhandledrejection', (ev) => { const r = ev && ev.reason; note('promise', r && (r.message || r)); });
   try { window.__lxCrashNotes = true; } catch (e) {}   // scripts/launch_smoke_probe.mjs reads this
 })();
@@ -69121,7 +69130,12 @@ try { setInterval(_lxPanelUpTick, 100); } catch (e) {}
 function _gugumaAscendChip(show, expanded) {
   let el = document.getElementById('guguma-ascend');
   if (!show) { if (el) el.remove(); return; }
-  if (!el) { el = document.createElement('div'); el.id = 'guguma-ascend'; el.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:65;max-width:min(520px,92vw);'; document.body.appendChild(el); }   /* v0.30.1182 phone-fit - under the panels (was 100040, over all of them) */
+  // v0.30.1454 ro-notice - THE CHIP IS AS WIDE AS ITS CONTENT, WHEREVER IT IS DOCKED. The dock places it by left/top with right:auto,
+  // and a fixed box with no width shrinks to the room left of it: the card opened from a pill docked at left 1114 laid
+  // out 166 px wide (351 tall), the dock stepped it 12 px left, it grew 12 px inside that same ResizeObserver callback -
+  // a loop notice every frame for ~30 frames while the card crawled to full size, and the first one raised the crash
+  // toast. width:max-content (still capped by max-width) takes the room out of the sum: docking only ever moves it.
+  if (!el) { el = document.createElement('div'); el.id = 'guguma-ascend'; el.style.cssText = 'position:fixed;right:18px;bottom:18px;z-index:65;width:max-content;max-width:min(520px,92vw);'; document.body.appendChild(el); }   /* v0.30.1182 phone-fit - under the panels (was 100040, over all of them) */
   if (!el._lxDockRO) { try { el._lxDockRO = new ResizeObserver(() => _lxAscendDock(el)); el._lxDockRO.observe(el); } catch (e) {} }   // v0.30.1182 phone-fit - docks whenever it shows or changes size
   el._lxAuto = !!(expanded && window._lxAscAuto); el._lxFitW = 0; el._lxNoFit = '';   // v0.30.1230 ui-polish2 - raised by Guguma (may fold on a phone) or opened by the player
   if (LX_ASCENSION_LOCKED) {   // v0.30.1453 ascension-locked - Guguma still meets you at the cap, but the way back is shut: no heirloom pick, no Ascend
