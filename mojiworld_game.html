@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1455';
+const GAME_VERSION = 'v0.30.1456';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -38044,6 +38044,8 @@ const MAPS = {
     worldHeight: 1100,
     levelReq: 1,   // the sweep below opens every non-boss map anyway; monster levels come from MOB_NATURAL_LEVEL
     platTint: { top: '#cfd3ec', body: '#34365f' },   // = its floor palette: pale marble treads on deep indigo, read against the mid-tone sky
+    bgTint: 'rgba(10,8,30,0.4)',   // v0.30.1456 - a darker sky, baked into the backdrop copy (per user: "a dark cloud misty feel")
+    stairMist: true,   // v0.30.1456 - cloud banks and a mist sea behind the climb, a faint haze in front (_lxStairMistDraw)
     stairUnder: true,   // v0.30.1455 - each flight's underside is one carved stringer, not a sawtooth of flat feet (_lxStairUnder, per user)
     noGroundRamps: true,   // v0.30.1455 - flat treads and square risers, each step eased (per user: "the stairs can be non-sloped")
     fixedLayout: true,
@@ -126666,6 +126668,7 @@ function drawBackground() {
     if (_tint && !_tintApplied) { ctx.fillStyle = _tint; ctx.fillRect(0, 0, W, H); }   // v0.30.1304 perf - worked out above; skipped when baked in
     // v0.30.x — the Singularity's living sky: lens halo, infalling stars, the accretion disc (see _lxGravBackdropDraw)
     if (game.currentMap === 'gravitosArena' && typeof _lxGravBackdropDraw === 'function') _lxGravBackdropDraw();
+    if (_md.stairMist && typeof _lxStairMistDraw === 'function') _lxStairMistDraw(false);   // v0.30.1456 the clouds, behind the climb and UNDER the sphere's glow and motes, which light them
     if (game.currentMap === 'weightbearerStair' && typeof _lxStairSkyDraw === 'function') _lxStairSkyDraw(shift, _bgY, _bgW, _bgH);   // v0.30.1417 the Stair's living sphere
     // v0.29.x — mid-ground parallax ridges: the derived depth layers between
     // the 0.12 backdrop and the 1.0 play field (see _lxMidgroundFor above).
@@ -131946,6 +131949,89 @@ function _lxStairSkyDraw(shift, bgY, bgW, bgH) {
         ctx.globalAlpha = Math.sin(Math.PI * q) * (0.28 + ((i * 0.31) % 1) * 0.22);
         ctx.drawImage(mote, bx + Math.cos(ang) * rad - ms / 2, by + Math.sin(ang) * rad * 0.7 - ms / 2, ms, ms);
       }
+    }
+    ctx.restore();
+  } catch (e) {}
+}
+// v0.30.1456 THE STAIR'S WEATHER (per user: "Make the ambience of the map have a dark cloud misty feel without causing too much lag",
+// then "The dark clouds can be more transluscent, more aesthetic"). The road up was a clear pastel night. Its sky is now darker
+// (the map's bgTint, baked into the backdrop copy the way the Singularity's is, so it costs no fill); a thin dark overcast hangs
+// along the top of the screen, translucent dark cloud banks with silver linings drift low across the sky and a sea of cloud rolls
+// under the climb - all behind the stairs, so every tread and riser stays crisp, and under the sphere's glow and gold motes, which
+// light them - and a faint haze drifts in front, under the damage numbers and the day's grade. Each layer is ONE strip, baked once
+// (clumps of light puffs, dense only where a cloud is thick so the stars show through its edges, with streamers; wrapped so the
+// strip tiles with no seam; the lining cut from the silhouette itself) and blitted at most twice a frame with its own parallax and
+// drift: four layers, <= 10 draws, no per-frame gradients or filters. Reduced motion stills the drift; very-low FX and the
+// weather toggle drop the haze in front.
+//   w x h: the strip (css px), s: its blit scale, par: horizontal parallax, drift: px/s leftward, screen top = y0 - camera.y * fy,
+//   a: the layer's alpha; m clumps of pp puffs (r0 + r1, stretched sx wide), cw x ch, on a base line (a fraction of h) domed up
+//   (down: hanging), shaded from dark at the base to lite at the dome, ba: their alpha - light, so a cloud is only dense where it
+//   is thick and the sky shows through its edges; wisp: thin streamers trailing from its base; rim / ra / rd: the silver lining;
+//   ceil / floor: the even dark body the strip runs on with past its top / foot
+const _LX_STAIR_MIST = [
+  { k: 'top', w: 1024, h: 190, s: 1.3, par: 0.08, drift: 3, y0: -24, fy: 0.03, a: 0.8, m: 5, pp: 22, wisp: 4, r0: 22, r1: 36, sx: 1.35, cw: 260, ch: 76, base: 0.18, down: true, dark: '12,11,30', lite: '48,42,88', ba: 0.3, rim: '160,146,214', ra: 0.5, rd: 8, ceil: 0.5, floor: 0, front: false },
+  { k: 'far', w: 1024, h: 190, s: 1.3, par: 0.14, drift: 4, y0: 210, fy: 0.06, a: 0.85, m: 5, pp: 20, wisp: 4, r0: 20, r1: 36, sx: 1.25, cw: 210, ch: 84, base: 0.72, down: false, dark: '22,19,48', lite: '70,60,118', ba: 0.32, rim: '214,196,246', ra: 0.72, rd: 11, ceil: 0, floor: 0, front: false },
+  { k: 'sea', w: 1024, h: 170, s: 1.35, par: 0.34, drift: 9, y0: 470, fy: 0.24, a: 0.85, m: 9, pp: 18, wisp: 3, r0: 22, r1: 34, sx: 1.3, cw: 180, ch: 62, base: 0.6, down: false, dark: '44,40,82', lite: '112,102,160', ba: 0.34, rim: '220,210,248', ra: 0.62, rd: 10, ceil: 0, floor: 0.62, front: false },
+  { k: 'haze', w: 1024, h: 150, s: 1.5, par: 1.25, drift: 16, y0: 360, fy: 0.12, a: 0.26, m: 6, pp: 10, wisp: 0, r0: 18, r1: 22, sx: 3.2, cw: 300, ch: 22, base: 0.55, down: false, dark: '118,110,166', lite: '164,156,206', ba: 0.5, rim: '', ra: 0, rd: 0, ceil: 0, floor: 0, front: true },
+];
+function _lxStairMistBake(L) {
+  if (L.cv) return L.cv;
+  const mk = () => { const cv = document.createElement('canvas'); cv.width = L.w; cv.height = L.h; return cv; };   // mist carries no detail: one texel per css px
+  const A = mk(), a = A.getContext('2d'), rng = _cuteRng((L.k.charCodeAt(0) * 2654435761) >>> 0);
+  const D = L.dark.split(',').map(Number), E = L.lite.split(',').map(Number), sx = L.sx || 1;
+  const puff = (x, y, r, t, al, wx) => {   // a (wx or sx)-wide soft disc shaded t of the way from dark to lite, drawn at x and one strip-width either side (no seam)
+    const col = D.map((v, i) => Math.round(v + (E[i] - v) * t)).join(','), k = wx || sx;
+    for (const ox of [-L.w, 0, L.w]) {
+      const px = x + ox; if (px + r * k < 0 || px - r * k > L.w) continue;
+      a.save(); a.translate(px, y); a.scale(k, 1);
+      const g = a.createRadialGradient(0, 0, 0, 0, 0, r);
+      g.addColorStop(0, 'rgba(' + col + ',' + al.toFixed(3) + ')'); g.addColorStop(0.55, 'rgba(' + col + ',' + (al * 0.85).toFixed(3) + ')'); g.addColorStop(1, 'rgba(' + col + ',0)');
+      a.fillStyle = g; a.fillRect(-r, -r, r * 2, r * 2); a.restore();
+    }
+  };
+  for (let i = 0; i < L.m; i++) {   // the clumps: puffs spread along a base line, domed away from it
+    const cx = (i + rng() * 0.8) * L.w / L.m, base = L.h * L.base + (rng() - 0.5) * L.h * 0.1, cw = L.cw * (0.7 + rng() * 0.6), ch = L.ch * (0.6 + rng() * 0.7);
+    for (let j = 0; j < L.pp; j++) {
+      const u = rng() * 2 - 1, dome = Math.sqrt(1 - u * u), r = L.r0 + rng() * L.r1 * (0.5 + dome * 0.5), d = rng() * ch * dome;
+      puff(cx + u * cw * 0.5, L.down ? base + d : base - d, r, Math.pow(d / Math.max(1, ch), 0.8), L.ba * (0.6 + rng() * 0.4));
+    }
+    for (let j = 0; j < (L.wisp | 0); j++) {   // streamers: long thin puffs drawn out sideways from the clump's base
+      const side = j & 1 ? 1 : -1, d = rng() * ch * 0.3;
+      puff(cx + side * cw * (0.4 + rng() * 0.35), L.down ? base + d : base - d, L.r0 * (0.45 + rng() * 0.35), 0.3, L.ba * 0.55, 3.4 + rng() * 1.6);
+    }
+  }
+  if (L.ra) {   // the silver lining: the silhouette in the rim colour, less itself shifted away from the light - a soft band on
+    // that side, laid OVER the body (it adds light where the cloud is thin, so a translucent edge still catches it)
+    const B = mk(), b = B.getContext('2d');
+    b.drawImage(A, 0, 0); b.globalCompositeOperation = 'source-in'; b.fillStyle = 'rgb(' + L.rim + ')'; b.fillRect(0, 0, L.w, L.h);
+    b.globalCompositeOperation = 'destination-out'; b.drawImage(A, 0, L.down ? -L.rd : L.rd);
+    a.globalAlpha = L.ra; a.drawImage(B, 0, 0); a.globalAlpha = 1;
+  }
+  a.globalCompositeOperation = 'destination-in';   // soft top and bottom edges
+  const gv = a.createLinearGradient(0, 0, 0, L.h); gv.addColorStop(0, 'rgba(0,0,0,0)'); gv.addColorStop(0.3, 'rgba(0,0,0,1)'); gv.addColorStop(0.7, 'rgba(0,0,0,1)'); gv.addColorStop(1, 'rgba(0,0,0,0)');
+  a.fillStyle = gv; a.fillRect(0, 0, L.w, L.h);
+  a.globalCompositeOperation = 'destination-over';   // the even body on the side that runs on, which the fill past the strip meets with no edge
+  if (L.ceil) { const g = a.createLinearGradient(0, 0, 0, L.h * 0.65); g.addColorStop(0, 'rgba(' + L.dark + ',' + L.ceil + ')'); g.addColorStop(1, 'rgba(' + L.dark + ',0)'); a.fillStyle = g; a.fillRect(0, 0, L.w, L.h * 0.65); }
+  if (L.floor) { const g = a.createLinearGradient(0, L.h * 0.35, 0, L.h); g.addColorStop(0, 'rgba(' + L.dark + ',0)'); g.addColorStop(1, 'rgba(' + L.dark + ',' + L.floor + ')'); a.fillStyle = g; a.fillRect(0, L.h * 0.35, L.w, L.h * 0.65); }
+  a.globalCompositeOperation = 'source-over';
+  L.cv = A; return A;
+}
+function _lxStairMistDraw(front) {
+  try {
+    if (front && ((typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) || (typeof LX_GFX !== 'undefined' && LX_GFX && LX_GFX.weather === false))) return;
+    const camX = (game.camera && game.camera.x) || 0, camY = (game.camera && game.camera.y) || 0, t = game._reduceMotion ? 0 : (game.time || 0) / 60;
+    ctx.save();
+    if (front) _lxUndoWorldShift();   // the haze is a screen layer, drawn inside the tall map's world pass
+    for (const L of _LX_STAIR_MIST) {
+      if (L.front !== !!front) continue;
+      const cv = _lxStairMistBake(L), dw = L.w * L.s, dh = L.h * L.s, y = Math.round(L.y0 - camY * L.fy);
+      if (y > H || y + dh < 0) continue;
+      const off = ((camX * L.par + t * L.drift) % dw + dw) % dw;
+      ctx.globalAlpha = L.a;
+      for (let x = -off; x < W; x += dw) ctx.drawImage(cv, x, y, dw, dh);
+      ctx.fillStyle = 'rgb(' + L.dark + ')';
+      if (L.ceil && y > 0) { ctx.globalAlpha = L.a * L.ceil; ctx.fillRect(0, 0, W, y + 0.5); }
+      if (L.floor && y + dh < H) { ctx.globalAlpha = L.a * L.floor; ctx.fillRect(0, y + dh - 0.5, W, H - y - dh + 0.5); }
     }
     ctx.restore();
   } catch (e) {}
@@ -164316,6 +164402,7 @@ function _lxDrawFrame(time) {
   drawSmoothFx();
   if (typeof _lxDeadeyeDraw === 'function') _lxDeadeyeDraw();   // v0.30.x — Deadeye reticle, tracers, impact sparks, held columns
   drawWorldArtOverlay();
+  if (game.mapData && game.mapData.stairMist && typeof _lxStairMistDraw === 'function') _lxStairMistDraw(true);   // v0.30.1456 the Stair's haze, in front
   drawCalibrationGrid();   // v0.25.749 — debug grid for size-comparison across maps
   if (typeof _qnavDrawCompass === 'function') _qnavDrawCompass();
   if (typeof _qnavDrawKey === 'function') _qnavDrawKey();   // compact directional key
