@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1456';
+const GAME_VERSION = 'v0.30.1457';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -19262,6 +19262,7 @@ const LX_FX = (() => {
     fx_col_sovereign:   'fx_col_sovereign.webp',   // v0.29.316 — The Sovereign — pale cream-white shaftar
     gravitos_blackhole: 'gravitos_blackhole.webp', // Gravitos blackhole pattern
     gravitos_singularity_zone: 'gravitos_singularity_zone.webp', // safe-zone marker
+    safezone_ring:             'safezone_ring.webp',             // v0.30.1457 - the gold sigil ring round a safe zone (timer + spawn rings; gen_safezone_ring.mjs, per user)
     safezone_shield:           'safezone_shield.webp',           // v0.30.582 — the shelter mark inside the zone (replaces the SAFE word); v0.30.583 — gold, so it reads on the cyan-and-navy portal
     gravitos_soulring:  'gravitos_soulring.webp',  // Soul Drain telegraph ring
     // v0.29.774 — slam telegraph, replacing the airborne tell the boss lost when
@@ -111613,7 +111614,95 @@ function _lxOhkoFinalDraw() {
 // pillar of light over the rect (exactly the column LX_SZ_JUMP_SLACK protects, so every lit pixel is a
 // safe pixel), a ring expanding from the rect on spawn, a timer ring closing on the rect as the resolve
 // nears, and a chevron at the screen edge for a zone that is off screen. The ground marker is untouched.
+// v0.30.1457 - THE BEACON, REDRAWN (per user: "the rectangular column seems dysjointed from the safe zone, there is no need to put
+// 378px as well, make the design much better", then "the beam needs to be behind the circle and ring, and the plain ring can be
+// further embelished, please generate something nice"). The pillar was a flat box standing on the rect's TOP edge over a round
+// orb inside the rect: a hard slab with a gap under it. Now the light rises from BEHIND the orb - _lxSzBeam, drawn by drawHazards
+// just before the rift, so the orb and its shield stand in front of it: a dome of light round its crown, a tapered
+// beam of five nested layers (brightest in the core, soft at the sides, fading up the column), light threads and gold motes
+// climbing it, all inside the rect's width and the protected column (every lit pixel is still a safe pixel; see _lxSzInside).
+// The plain timer ellipse is now a gold sigil ring (runes, filigree, four topaz - Sprites/fx/safezone_ring.webp, generated),
+// ROUND and drawn first (per user: "try to put the ring behind the beam and make it retain its circularity"): an upright halo
+// over the orb, the beam rising through it, shrinking toward the beam as the collapse nears (_lxSzHalo). Off screen: ONE pointer per side (the nearest zone), and only while no zone is on screen -
+// it used to sit on top of the zone you could already see, once per zone - a badge whose tip points the way, no pixel count.
 const _LX_SZ_BEACON_H = 150;   // = LX_SZ_JUMP_SLACK: the protected column
+function _lxSzPaintMote(c) {
+  const g = c.createRadialGradient(0, 0, 0, 0, 0, 6);
+  g.addColorStop(0, 'rgba(255,250,228,1)'); g.addColorStop(0.35, 'rgba(255,222,136,0.85)'); g.addColorStop(1, 'rgba(255,196,90,0)');
+  c.fillStyle = g; c.beginPath(); c.arc(0, 0, 6, 0, Math.PI * 2); c.fill();
+}
+// the beam, in the WORLD pass (drawHazards, before the orb): from the orb's eye up the protected column, clipped to the rect's width
+function _lxSzBeam(z, camX) {
+  try {
+    const t = game.time, flare = game._ohkoFinalN > 0, still = !!game._reduceMotion;
+    const sx = z.x - camX, sy = z.y, cx = sx + z.w / 2, ph = _LX_SZ_BEACON_H;
+    const breath = 0.82 + 0.18 * Math.sin(t * 0.18), boost = flare ? 1.8 : 1;
+    const top = sy - ph, base = sy + z.h * 0.5, span = base - top, crown = sy + z.h * 0.22;   // rooted in the eye: the orb, drawn next, covers the root
+    ctx.save();
+    ctx.beginPath(); ctx.rect(Math.round(sx), Math.round(top), Math.round(z.w), Math.ceil(span) + 1); ctx.clip();   // the rect's column, nothing past it
+    ctx.globalCompositeOperation = 'lighter';
+    // 1. a dome of light round the orb's crown - it peeks out behind the orb as a halo
+    const gr = ctx.createRadialGradient(cx, crown, 0, cx, crown, z.w * 0.56);
+    gr.addColorStop(0, 'rgba(255,238,178,' + Math.min(1, 0.55 * breath * boost).toFixed(3) + ')'); gr.addColorStop(0.55, 'rgba(255,210,110,' + Math.min(1, 0.2 * breath * boost).toFixed(3) + ')'); gr.addColorStop(1, 'rgba(255,196,90,0)');
+    ctx.fillStyle = gr; ctx.fillRect(sx, crown - z.w * 0.56, z.w, z.w * 0.56 + (base - crown));
+    // 2. the beam: five nested tapered layers, narrower = brighter, each fading up the column
+    const gv = ctx.createLinearGradient(0, base, 0, top);
+    gv.addColorStop(0, 'rgba(255,220,128,1)'); gv.addColorStop(0.45, 'rgba(255,200,92,0.42)'); gv.addColorStop(1, 'rgba(255,190,80,0)');
+    ctx.fillStyle = gv;
+    for (let i = 0; i < 5; i++) {
+      const f = 1 - i * 0.19, sway = still ? 0 : Math.sin(t * 0.06 + i * 1.3) * 0.03, w0 = z.w * (0.96 * f + sway), w1 = z.w * (0.62 * f + sway);
+      ctx.globalAlpha = Math.min(1, (0.09 + i * 0.045) * breath * boost);
+      ctx.beginPath(); ctx.moveTo(cx - w0 / 2, base); ctx.lineTo(cx - w1 / 2, top); ctx.lineTo(cx + w1 / 2, top); ctx.lineTo(cx + w0 / 2, base); ctx.closePath(); ctx.fill();
+    }
+    // 3. the core thread, fading as it climbs (flares in the final count), so the beam reads at a glance even over the boss
+    const gc = ctx.createLinearGradient(0, base, 0, top + ph * 0.1); gc.addColorStop(0, 'rgba(255,246,206,1)'); gc.addColorStop(1, 'rgba(255,246,206,0)');
+    ctx.globalAlpha = Math.min(1, 0.34 * breath * (flare ? 2.2 : 1)); ctx.fillStyle = gc; ctx.fillRect(Math.round(cx - 1.5), Math.round(top + ph * 0.1), 3, Math.round(span - ph * 0.1));
+    // 4. light threads and gold motes climbing the column (reduced motion keeps the beam still)
+    if (!still) {
+      ctx.fillStyle = '#fff1c0';
+      for (let i = 0; i < 3; i++) {
+        const q = ((t * 1.7 + i * 53) % span), yy = base - q, xx = cx + (i - 1) * z.w * 0.2 + Math.sin(t * 0.05 + i * 2.1) * 3;
+        const y0 = Math.max(top, yy - 22); if (yy - y0 < 2) continue;   // inside the column, never past its top
+        ctx.globalAlpha = 0.45 * Math.sin(Math.PI * q / span); ctx.fillRect(Math.round(xx - 0.75), Math.round(y0), 1.5, Math.round(yy - y0));
+      }
+      const mote = _lxGfBake('sz_mote', 12, _lxSzPaintMote);
+      for (let i = 0; i < 9; i++) {
+        const q = ((t * (0.8 + (i % 3) * 0.25) + i * 31) % span) / span, yy = base - q * span, xx = cx + Math.sin(t * 0.035 + i * 1.7) * z.w * 0.3, ms = 4 + (i % 3);
+        if (yy - ms / 2 < top) continue;
+        ctx.globalAlpha = Math.sin(Math.PI * q) * 0.85; ctx.drawImage(mote, xx - ms / 2, yy - ms / 2, ms, ms);
+      }
+    }
+    ctx.restore();
+  } catch (e) {}
+}
+// the gold sigil ring, ROUND (per user: "make it retain its circularity"), radius rr about (cx, cy), turning in its own plane;
+// a plain gold circle stands in until the art decodes
+function _lxSzRing(cx, cy, rr, alpha, spin, late) {
+  const img = (typeof LX_FX !== 'undefined') ? LX_FX.safezone_ring : null;
+  ctx.save();
+  if (img && img.complete && img.naturalWidth > 0) {
+    ctx.translate(cx, cy); ctx.rotate(spin);
+    ctx.globalAlpha = alpha; ctx.drawImage(img, -rr, -rr, rr * 2, rr * 2);
+    if (late) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = alpha * (0.45 + 0.35 * Math.abs(Math.sin(game.time * 0.3))); ctx.drawImage(img, -rr, -rr, rr * 2, rr * 2); }
+  } else {
+    ctx.globalAlpha = alpha; ctx.strokeStyle = late ? '#ffffff' : '#ffd36b'; ctx.lineWidth = late ? 3 : 2;
+    ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.restore();
+}
+// the ring in the WORLD pass, drawn FIRST (per user: "put the ring behind the beam"): an upright halo standing just above the orb,
+// its foot dipping behind the orb's crown, the beam rising through its centre. It stays round and inside the zone's width and the
+// protected column (every lit pixel a safe pixel), grows into place as the zone appears, shrinks toward the beam as the collapse
+// nears and flares white in the last second.
+function _lxSzHalo(z, h, camX) {
+  try {
+    const frac = h.life / Math.max(1, h.maxLife), age = (h.maxLife | 0) - (h.life | 0);
+    const rMax = Math.min(z.w / 2 - 1, (_LX_SZ_BEACON_H + z.h * 0.15) / 2 - 1);
+    const grow = age < 24 ? 0.6 + 0.4 * (1 - Math.pow(1 - age / 24, 2)) : 1;
+    const r = rMax * (0.74 + 0.26 * frac) * grow, cx = z.x - camX + z.w / 2, cy = z.y + z.h * 0.15 - r;
+    _lxSzRing(cx, cy, r, age < 24 ? 0.95 * age / 24 : 0.95, game._reduceMotion ? 0 : game.time * 0.004, h.life <= 60);
+  } catch (e) {}
+}
 function _lxSafeZoneBeacons() {
   try {
     if (typeof game === 'undefined' || !game || !game.hazards) return;
@@ -111621,46 +111710,36 @@ function _lxSafeZoneBeacons() {
     _lxSzHudYield(_live ? _live.safeZones[0] : null);
     if (!_live) return;
     const camX = (game.camera && game.camera.x) || 0, camY = (game.camera && game.camera.y) || 0;
-    const t = game.time;
+    const t = game.time, still = !!game._reduceMotion;
+    let anyOn = false; const off = { l: null, r: null };
     for (const h of game.hazards) {
       if (!h || h.type !== 'gravitos_singularity' || !(h.life > 0) || !h.safeZones) continue;
-      const age = (h.maxLife | 0) - (h.life | 0), frac = h.life / Math.max(1, h.maxLife);
       for (const z of h.safeZones) {
-        const sx = z.x - camX, sy = z.y - camY, cx = sx + z.w / 2;
-        const onScreen = sx + z.w > 0 && sx < W;
-        ctx.save();
-        if (onScreen) {
-          // the pillar: brightest at the rect, fading up the protected column; breathes with the zone
-          const ph = _LX_SZ_BEACON_H, breath = 0.82 + 0.18 * Math.sin(t * 0.18);
-          const g = ctx.createLinearGradient(0, sy, 0, sy - ph);
-          g.addColorStop(0, 'rgba(255,214,110,' + (Math.min(1, 0.55 * breath * (game._ohkoFinalN > 0 ? 1.7 : 1))).toFixed(3) + ')'); g.addColorStop(0.45, 'rgba(255,196,80,' + (Math.min(1, 0.22 * breath * (game._ohkoFinalN > 0 ? 1.9 : 1))).toFixed(3) + ')'); g.addColorStop(1, 'rgba(255,180,60,0)');
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.fillStyle = g; ctx.fillRect(Math.round(sx), Math.round(sy - ph), Math.round(z.w), ph);
-          // a hot core line down the pillar's middle so it reads at a glance even over the boss
-          ctx.globalAlpha = Math.min(1, 0.35 * breath * (game._ohkoFinalN > 0 ? 2.2 : 1)); ctx.fillStyle = '#fff3c4';   // v0.30.x ohko-final — flares during the final count ctx.fillRect(Math.round(cx - 2), Math.round(sy - ph * 0.9), 4, Math.round(ph * 0.9));
-          ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
-          // the spawn ring: expands from the rect over the first 24 frames
-          if (age < 24) {
-            const k = age / 24, rr = 30 + 190 * (1 - Math.pow(1 - k, 2));
-            ctx.globalAlpha = (1 - k) * 0.85; ctx.strokeStyle = '#ffe089'; ctx.lineWidth = 3 + 6 * (1 - k);
-            ctx.beginPath(); ctx.ellipse(cx, sy + z.h / 2, rr, rr * 0.42, 0, 0, Math.PI * 2); ctx.stroke();
-          }
-          // the timer ring: closes onto the rect as the resolve nears; the last second turns white
-          { const rr = z.w * 0.5 + 24 * frac + 6; const late = h.life <= 60;
-            ctx.globalAlpha = 0.55 + 0.35 * (1 - frac); ctx.strokeStyle = late ? '#ffffff' : '#ffd36b'; ctx.lineWidth = late ? 3 : 2;
-            ctx.beginPath(); ctx.ellipse(cx, sy + z.h / 2, rr, rr * 0.42, 0, 0, Math.PI * 2); ctx.stroke(); }
-        } else {
-          // off screen: a chevron at the edge, at the zone's height, pointing the way
-          const left = sx + z.w / 2 < 0, ex = left ? 14 : W - 14, ey = Math.max(24, Math.min(H - 24, sy + z.h / 2));
-          const pulse = 0.7 + 0.3 * Math.sin(t * 0.3);
-          ctx.globalAlpha = pulse; ctx.fillStyle = '#ffd36b'; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
-          ctx.beginPath(); ctx.moveTo(ex + (left ? 26 : -26), ey - 18); ctx.lineTo(ex, ey); ctx.lineTo(ex + (left ? 26 : -26), ey + 18); ctx.lineTo(ex + (left ? 14 : -14), ey); ctx.closePath(); ctx.stroke(); ctx.fill();
-          const _d = Math.round(Math.abs((left ? -sx - z.w : sx - W)) );
-          ctx.font = 'bold 12px system-ui, sans-serif'; ctx.textAlign = left ? 'left' : 'right'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.fillStyle = '#fff3c4';
-          ctx.strokeText('SAFE ' + _d + 'px', ex + (left ? 32 : -32), ey); ctx.fillText('SAFE ' + _d + 'px', ex + (left ? 32 : -32), ey);
+        const sx = z.x - camX, cx = sx + z.w / 2;
+        if (!(sx + z.w > 0 && sx < W)) {   // off screen: remember the nearest on each side
+          const left = cx < 0, d = left ? -(sx + z.w) : sx - W, k = left ? 'l' : 'r';
+          if (!off[k] || d < off[k].d) off[k] = { z, d, left };
+          continue;
         }
-        ctx.restore();
+        anyOn = true;   // (its ring, beam and orb are all drawn in the world pass, by drawHazards)
       }
+    }
+    if (anyOn) return;   // a zone on screen is the one to run to: no pointer over it
+    const shield = (typeof LX_FX !== 'undefined') ? LX_FX.safezone_shield : null;
+    for (const k of ['l', 'r']) {
+      const o = off[k]; if (!o) continue;
+      const dir = o.left ? -1 : 1, bob = still ? 0 : Math.sin(t * 0.2) * 3, ex = (o.left ? 36 : W - 36) + dir * bob;
+      const ey = Math.max(40, Math.min(H - 40, o.z.y - camY + o.z.h / 2)), pulse = 0.5 + 0.5 * Math.sin(t * 0.25);
+      ctx.save(); ctx.translate(ex, ey); ctx.scale(dir, 1);   // drawn pointing right; mirrored for the left edge
+      ctx.globalAlpha = 0.3 + 0.35 * pulse; ctx.strokeStyle = '#ffe089'; ctx.lineWidth = 2;   // a pulse ring
+      ctx.beginPath(); ctx.arc(0, 0, 21 + 4 * pulse, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.95;   // the badge: a disc with a tip at the zone's side
+      ctx.beginPath(); ctx.moveTo(29, 0); ctx.arc(0, 0, 17, 0.6, Math.PI * 2 - 0.6); ctx.closePath();
+      ctx.fillStyle = 'rgba(24,14,40,0.9)'; ctx.fill(); ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.strokeStyle = '#ffd36b'; ctx.stroke();
+      ctx.scale(dir, 1);   // the shield reads the right way round on either edge
+      if (shield && shield.complete && shield.naturalWidth > 0) { ctx.globalAlpha = 1; ctx.drawImage(shield, -12, -12, 24, 24); }
+      else { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(8, -6); ctx.quadraticCurveTo(8, 6, 0, 11); ctx.quadraticCurveTo(-8, 6, -8, -6); ctx.closePath(); ctx.fill(); }
+      ctx.restore();
     }
   } catch (e) {}
 }
@@ -149567,7 +149646,7 @@ const _LX_MOB_TYPE_ART = {
   mooma: { img: ['tg_smash'] }, kingKrook: { img: ['tg_smash'] }, sundered_smith: { img: ['tg_smash'] }, zodiac_capricorn: { img: ['tg_smash'] },
   // v0.30.790 grav-smooth — the five rings his patterns cast: each was decoded and pinned on the frame of its
   // first cast (laser 22 ms, soul 36 ms, slam 22 ms, measured).
-  gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield', 'gravitos1_voidrift', 'gravitos1_riftring'], fx: ['gravitos_singularity_zone', 'gravitos1_voidrift', 'gravitos1_riftring'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
+  gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield', 'safezone_ring', 'gravitos1_voidrift', 'gravitos1_riftring'], fx: ['gravitos_singularity_zone', 'gravitos1_voidrift', 'gravitos1_riftring'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
 };
 const _LX_MOB_FX_SEEN = new Set();
 function _lxPrewarmMobFx(type, boss) {
@@ -160922,6 +161001,7 @@ function drawHazards(_behindPass) {
       const _szReady = !!_szImg;
       for (const z of zones) {
         const _zx = z.x - _camX;
+        if (typeof _lxSzHalo === 'function') { _lxSzHalo(z, h, _camX); _lxSzBeam(z, _camX); }   // v0.30.1457 - the ring behind the beam, the beam behind the orb (per user)
         if (_szReady) {
           ctx.save();
           ctx.globalAlpha = 0.92 + Math.sin(tt * 1.3) * 0.06;
