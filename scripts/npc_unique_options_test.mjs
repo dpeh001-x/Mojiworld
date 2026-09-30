@@ -60,7 +60,7 @@ const clearCine = async () => { for (let i = 0; i < 14; i++) { const c = await p
 const CASES = [
   { who: 'Will',   map: 'bastionThrone',  role: 'champion', label: 'Tell me if I am enough.',      reply: /ground you refuse to give/ },
   { who: 'Yun',    map: 'emeraldVillage', role: 'sentinel', label: 'What have you seen out there?', reply: /boundary stones/ },
-  { who: 'Stride', map: 'bastion',        role: 'arena',    label: /^Put me through a set/,        panel: /Stride/ },
+  { who: 'Stride', map: 'jadeGrove',      role: 'arena',    label: /^Put me through a set/,        panel: /Stride/ },
   { who: 'Elena',  map: 'bastionThrone',  role: 'scribe',   label: /^Set my deeds in the ledger/,  panel: /Elena/ },
   { who: 'Auron',  map: 'azureAcademia',  role: 'scholar',  label: /^Add my forms to the tome/,    panel: /Auron/ },
 ];
