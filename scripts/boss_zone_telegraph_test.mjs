@@ -144,13 +144,15 @@ const r = await page.evaluate(() => {
     out.weakBoss = { started, hasZone: !!zones().find(z => z.kind === 'column') };
   }
 
-  // (3c) the "immense" gate governs everything else: the same trivial boss's
-  // SWING is unmarked.
+  // (3c) v0.30.1460 swing-redesign - every boss swing is marked now (per user: "Every boss swing"), by its own art
+  // as a faint ghost; the "immense" gate still governs the punish: the trivial boss's swing does not stagger.
   {
     const m = mk('young_confused_barnaby', 790);
     m.atk = 1; m._columnCd = 99999;
     const started = tickUntil(() => m._bigMeleeFiring === true, 40);
-    out.weakSwing = { started, hasZone: !!zones().find(z => z.kind === 'swing') };
+    const wz = zones().find(z => z.kind === 'swing');
+    tickUntil(() => !!enemyProj('swing'), 80); const wp = enemyProj('swing');
+    out.weakSwing = { started, hasZone: !!wz, ghost: !!(wz && wz.sg), zoneAttack: wp ? !!wp._zoneAttack : null };
   }
 
   // (4) DASH — Legosaurus's brace-dash. Contact damage, not a projectile, so
@@ -211,8 +213,8 @@ ok('a NON-BOSS heavy fires with NO zone — trash mobs stop wearing boxes',
    r.smash && r.smash.fired === true && r.smash.hasZone === false, r.smash);
 ok('a boss PILLAR is always marked, even from a trivial boss — the user carve-out',
    r.weakBoss && r.weakBoss.started >= 0 && r.weakBoss.hasZone === true, r.weakBoss);
-ok('a boss swing that is NOT devastating to this player stays unmarked',
-   r.weakSwing && r.weakSwing.started >= 0 && r.weakSwing.hasZone === false, r.weakSwing);
+ok('a boss swing that is NOT devastating is still marked, by its own ghost - and still does not stagger',
+   r.weakSwing && r.weakSwing.started >= 0 && r.weakSwing.hasZone === true && r.weakSwing.ghost === true && r.weakSwing.zoneAttack === false, r.weakSwing);
 const dz = r.dash || {};
 console.log('dash  :', JSON.stringify(dz));
 ok('the dash lane appears during the brace', dz.hasZone === true, dz);
