@@ -15,7 +15,9 @@ import { execFileSync } from 'node:child_process';
 const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const GAME = process.argv[2] || FILE;
-const src = readFileSync(GAME, 'utf8');
+// A Windows checkout is CRLF (core.autocrlf) while the pushed blob is LF: the checks below read the source's structure, so
+// they read it with LF line ends (two of them span a line break and failed in every checkout).
+const src = readFileSync(GAME, 'utf8').replace(/\r\n/g, '\n');
 
 // gravitosFinale is not a map but a STATE of gravitosArena (once form 2 falls); it shares that
 // map's plate as its fallback
@@ -53,7 +55,14 @@ ok('...and resets globalAlpha after the mirrored copy', /if \(_bgVid\) ctx\.glob
 ok('loadMap sleeps the other clips and warms this one', src.includes('_lxMapVideoRest(id); _lxMapVideoEnsure(id);'), {});
 // the finale: a clip switch driven by the fight, riding the same hooks as the arena's tint
 ok('the map resolves its clip key (gravitosArena -> gravitosFinale once form 2 falls)', /function _lxMapVideoKeyFor\(mapId\)[\s\S]{0,200}mapId === 'gravitosArena' && _lxGravFinaleBg\) return 'gravitosFinale'/.test(src), {});
-ok('the draw site still asks by MAP id, so the marker and the hook did not move', src.split('_lxMapVideoFrame(game.currentMap)').length - 1 === 1, {});
+// v0.30.1302 (the sky-fill skip) added a second caller: _lxSkyHidden resolves the frame once a frame into _LX_SKY.vid, and
+// drawBackground reuses it, asking itself only when that pre-pass did not run. Both must still ask by MAP id (the clip is
+// resolved inside, through _lxMapVideoKeyFor), so every call passes game.currentMap - and there are exactly those two.
+{
+  const calls = [...src.matchAll(/(?<!function )_lxMapVideoFrame\(([^)]*)\)/g)].map((m) => m[1]);
+  ok('the draw site still asks by MAP id, so the marker and the hook did not move (two callers since v0.30.1302)',
+    calls.length === 2 && calls.every((a) => a === 'game.currentMap'), { calls });
+}
 ok('form 2 falling sets the finale flag (in _lxGravCollapse, phase 3)', /if \(\(phase \| 0\) === 3\) _lxGravFinaleBg = true;/.test(src), {});
 ok('form 1 falling warms the finale clip, paused (phase 2)', /\(phase \| 0\) === 2\) \{ const _fv = _lxMapVideoEnsure\('gravitosFinale'\); if \(_fv\) \{ try \{ _fv\.autoplay = false; _fv\.pause\(\);/.test(src), {});
 ok('every arena entry clears it (in _lxGravArenaReset)', /_lxGravTintTo = _LX_GRAV_TINT\[1\];\n\s*_lxGravFinaleBg = false;/.test(src), {});
