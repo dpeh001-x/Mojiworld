@@ -11,8 +11,12 @@
 //   5. flat treads (per user: "the stairs can be non-sloped"): no seam is ramped, and each of the twenty steps up is a square
 //      riser the join variant carries at its full 30 px (so its keyline runs the whole riser); no page errors;
 //   6. one wall (per user: "the blocks transition should aim to be continuous"): below each riser the mortar lines either side
-//      of the seam (two 6 px windows' row profiles, high-passed) correlate at lag 0 (the courses used to jump half a course).
-// The build before fails 1-6.   node scripts/stair_polish_test.mjs     MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
+//      of the seam (two 6 px windows' row profiles, high-passed) correlate at lag 0 (the courses used to jump half a course);
+//   7. the weather (per user: "a dark cloud misty feel without causing too much lag", then "The dark clouds can be more
+//      transluscent, more aesthetic"): a darker sky (bgTint), four baked strips a frame - overcast, banks and sea before the
+//      sphere's glow (which lights them) and the platforms, the haze after the entities - in <= 10 blits, no canvas made per
+//      frame, the haze dropped at very-low FX, no drift under reduced motion, none on another map.
+// The build before fails 1-7.   node scripts/stair_polish_test.mjs     MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
@@ -118,9 +122,36 @@ try {
         }
       }
     }
-    // a flat map's ground keeps its foot
+    // ---- 7. the weather: one frame's blits on the main canvas, in order, against the platforms pass
+    const mistOf = (img) => (typeof _LX_STAIR_MIST !== 'undefined' && _LX_STAIR_MIST.find((L) => L.cv && L.cv === img)) || null;
+    // one whole game frame, bracketed by its own drawBackground calls (the game does not render on every animation frame)
+    const oneFrame = async () => { const P = CanvasRenderingContext2D.prototype, oDI = P.drawImage, oPl = window.drawPlatforms, oBg = window.drawBackground, oCE = document.createElement;
+      const rec = { bg: 0, n: 0, pl: -1, halo: -1, mist: [], made: 0 }, on = () => rec.bg === 1;
+      const haloOf = () => (typeof _LX_GF !== 'undefined' && _LX_GF.bakes && _LX_GF.bakes.ws_halo) || null;   // the sphere's glow (_lxStairSkyDraw)
+      window.drawBackground = function () { rec.bg++; return oBg.apply(this, arguments); };
+      P.drawImage = function (img, ...a) { if (this === main && on()) { rec.n++; const L = mistOf(img); if (L) rec.mist.push({ k: L.k, at: rec.n, x: +a[0].toFixed(2) }); else if (img && img === haloOf()) rec.halo = rec.n; } return oDI.apply(this, [img, ...a]); };
+      window.drawPlatforms = function () { if (on()) rec.pl = rec.n; return oPl.apply(this, arguments); };
+      document.createElement = function (t) { if (on() && String(t).toLowerCase() === 'canvas') rec.made++; return oCE.apply(this, arguments); };
+      for (let i = 0; i < 180 && rec.bg < 2; i++) await new Promise((r) => requestAnimationFrame(r));
+      P.drawImage = oDI; window.drawPlatforms = oPl; window.drawBackground = oBg; document.createElement = oCE; return rec; };
+    // a headless browser paints slowly, so the frame-time governor soon turns very-low FX on (which drops the haze): each
+    // recording starts from a clear governor
+    const unslow = () => { LX_PERF.veryLowFx = false; LX_PERF.veryLowFxUntil = 0; LX_PERF.lowFx = false; LX_PERF.slowFrames = 0; };
+    out.mist = { flag: !!game.mapData.stairMist, tint: game.mapData.bgTint || null };
+    await standAt(2500); await frame(); await frame(); unslow();   // the sphere is on screen here
+    { const f = await oneFrame(); const ks = [...new Set(f.mist.map((m) => m.k))];
+      out.mist.keys = ks; out.mist.blits = f.mist.length; out.mist.made = f.made;
+      out.mist.orderOk = f.pl > 0 && f.mist.filter((m) => m.k !== 'haze').every((m) => m.at <= f.pl) && f.mist.filter((m) => m.k === 'haze').every((m) => m.at > f.pl);
+      out.mist.glowOver = f.halo > 0 && f.mist.filter((m) => m.k !== 'haze').every((m) => m.at < f.halo);
+      if (typeof _lxStairMistDraw === 'function') { const t0 = performance.now(); for (let i = 0; i < 60; i++) { _lxStairMistDraw(false); _lxStairMistDraw(true); } out.mist.msPerFrame = +((performance.now() - t0) / 60).toFixed(3); } }
+    { LX_PERF.veryLowFx = true; LX_PERF.veryLowFxUntil = performance.now() + 60000; await frame(); const f = await oneFrame(); out.mist.veryLow = [...new Set(f.mist.map((m) => m.k))]; unslow(); }
+    { game._reduceMotion = true; await frame(); const f1 = await oneFrame(); await sleep(600); const f2 = await oneFrame(); game._reduceMotion = false;
+      const far = (f) => (f.mist.find((m) => m.k === 'far') || {}).x; out.mist.still = [far(f1), far(f2)];
+      await frame(); const g1 = await oneFrame(); await sleep(600); const g2 = await oneFrame(); out.mist.moving = [far(g1), far(g2)]; }
+    // a flat map's ground keeps its foot, and has no weather
     loadMap('town', 300); await sleep(1500);
     out.townFootless = game.mapData.platforms.filter((p) => p.type === 'ground' && (_lxGroundJoin(p) & 4096)).length;
+    { const f = await oneFrame(); out.townMist = f.mist.length; }
     return out;
   });
   const fillsOk = (key) => R.fills.length === 3 && R.fills.every((f) => f[key].length >= 1 && f[key].every((y) => y[0] <= 0 && y[1] >= 560));
@@ -133,6 +164,11 @@ try {
   ok('4. the notches under the risers show the stone on screen, not the sky', R.notch.n >= 12 && R.notch.good / R.notch.n >= 0.9, J(R.notch));
   ok('5. flat treads: no seam is ramped and each of the 20 steps up is a riser as tall as the step; no page errors', R.ramps === 0 && R.risers.length === 20 && R.risers.every((d) => d === 0) && errs.length === 0, J({ ramps: R.ramps, risers: R.risers, errs: errs.slice(0, 3) }));
   ok('6. one wall: below every riser on screen the seam\'s rows either side keep their mortar lines in line (correlation >= 0.5)', R.cont.seams >= 6 && R.cont.worst >= 0.5, J(R.cont));
+  const M = R.mist || {};
+  ok('7a. the weather: a darker sky and four baked strips a frame in <= 10 blits - overcast, banks and sea under the sphere glow and before the platforms, the haze after the entities - with no canvas made per frame',
+    M.flag && /^rgba\(/.test(M.tint || '') && ['top', 'far', 'sea', 'haze'].every((k) => (M.keys || []).includes(k)) && M.blits <= 10 && M.orderOk && M.glowOver && M.made === 0, J(M));
+  ok('7b. very-low FX drops the haze; reduced motion stills the drift (it moves otherwise); another map has none',
+    (M.veryLow || []).length === 3 && !(M.veryLow || []).includes('haze') && M.still && M.still[0] === M.still[1] && M.moving && M.moving[0] !== M.moving[1] && R.townMist === 0, J({ veryLow: M.veryLow, still: M.still, moving: M.moving, town: R.townMist }));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 300), false); }
 await browser.close(); server.kill();
 console.log(`\n${pass}/${pass + fail} checks passed`); process.exit(fail ? 1 : 0);
