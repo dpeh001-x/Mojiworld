@@ -61,7 +61,7 @@ const out = await page.evaluate(async () => {
   ok('Sky Lance cooldown is 25s (v0.30.356, per user)', SKILLS.dragoon_skylance.cd === 25000, 'cd ' + SKILLS.dragoon_skylance.cd);
   const src = String(SKILL_FNS.dragoon_ult || '');
   ok('Skyfall lances are 6.5x + 15 (5.5x v0.30.814; 6.5x v0.30.1428 per user: dragoon "very very underpowered")', src.includes('getAtk() * 6.5 + 15'), '');
-  ok('Skyfall slam is 2.7x and keeps its x1.3 boss bonus (v0.30.788)', src.includes('460, 2.7') && src.includes('bossMul: 1.3'), '');
+  ok('Skyfall slam is 16x and keeps its x1.3 boss bonus (2.7x v0.30.788; 16x v0.30.1462, the mobbing pass, per user)', src.includes('460, 16') && src.includes('bossMul: 1.3'), '');
   const paSrc = String(window.performAround || '');
   ok('performAround supports opt-in bossMul', paSrc.includes('opts.bossMul'), '');
   // The aegis orb damage lives in the aegis TICK, not the cast function —
