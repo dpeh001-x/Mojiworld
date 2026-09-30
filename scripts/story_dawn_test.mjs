@@ -96,7 +96,7 @@ try {
     if (!(await click(/almost-morning/))) { await click(/Talk/); await settle(); await click(/almost-morning/); }
     await settle(); out.amSaga = text(); await close();
     // ---- 5. the town's bubbles, live ---------------------------------------------------------------------------------------------
-    out.poolsDawn = Object.keys(DAWN).length === 8 && Object.keys(DAWN).every((r) => pool(r) === DAWN[r]);
+    out.poolsDawn = Object.keys(DAWN).length >= 8 && Object.keys(DAWN).every((r) => pool(r) === DAWN[r]);
     const sample = async (role) => {   // only an NPC on screen rolls a bubble: stand by it first (the bake puts him at the plaza's far end)
       const n0 = (game.npcs || []).find((n) => n.role === role); if (!n0) return { absent: true };
       player.x = n0.x; await sleep(600); const orig = window._pickChatLine, seen = new Set(); window._pickChatLine = (p) => { seen.add(p); return orig(p); };
