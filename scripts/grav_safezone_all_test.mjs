@@ -1,6 +1,7 @@
 // Gravitos safe zones in every form (sz-all): the rain's box is never rolled under a HUD panel, the boxes are
-// 4 s apart on the wall clock in form 3, every live zone carries a beacon (pillar / edge chevron), a zone with
-// no art still paints bright, and the rift art warms with the boss.
+// 4 s apart on the wall clock in form 3, every live zone carries a beacon (a beam behind the orb and a gold sigil ring / an
+// edge pointer with no text, none while a zone is on screen), a zone with no art still paints bright, and the rift art warms
+// with the boss.
 //   PORT=9731 node scripts/grav_safezone_all_test.mjs [candidate.html]
 import { chromium } from 'playwright-core';
 import path from 'node:path';
@@ -39,11 +40,11 @@ try {
   const st = await page.evaluate(() => ({
     beacon: typeof _lxSafeZoneBeacons === 'function', spans: typeof _lxSzHudCoveredSpans === 'function',
     fx: (_LX_MOB_TYPE_ART.gravitos.fx || []).includes('gravitos_singularity_zone'),
-    img: ['gravitos_singularity_zone', 'safezone_shield'].every((k) => (_LX_MOB_TYPE_ART.gravitos.img || []).includes(k)),
+    img: ['gravitos_singularity_zone', 'safezone_shield', 'safezone_ring'].every((k) => (_LX_MOB_TYPE_ART.gravitos.img || []).includes(k)),
   }));
   console.log('\nTHE PIECES ARE THERE');
   check(st.beacon && st.spans, 'beacon + HUD-span helpers defined', st);
-  check(st.fx && st.img, "the rift anim, rift still and shield are in the boss's warm list", st);
+  check(st.fx && st.img, "the rift anim, rift still, shield and sigil ring are in the boss's warm list", st);
 
   // ---- 2. placement: 40 boxes rolled with the player at every screen position, none under a panel --------
   const pl = await page.evaluate(async () => {
@@ -85,20 +86,39 @@ try {
     game.hazards.push(h);
     const px = (x, y) => { const d = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data; return d[0] + d[1] + d[2]; };
     const P = CanvasRenderingContext2D.prototype; const oFT = P.fillText, oFR = P.fillRect; const texts = [], fills = [];
-    // wipe the screen black, run only the beacon pass, read the pillar
-    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-    const before = px(z.x - camX + z.w / 2, z.y - camY - 60);
-    P.fillRect = function (...a) { if (this === ctx) fills.push(a); return oFR.apply(this, a); };
+    // wipe the screen black, run the zone's two passes (drawHazards in the world, then the beacon), read the beam - and the
+    // same frame with the beam stubbed out, so the arena's own veil is not counted as the beam's light
+    const oDI = P.drawImage, seq = [], rings = [];
+    const both = (withBeam) => {
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+      const keepBeam = window._lxSzBeam; if (!withBeam) window._lxSzBeam = () => {};
+      else window._lxSzBeam = function () { seq.push('beam'); return keepBeam.apply(this, arguments); };
+      P.drawImage = function (img, ...a) { if (this === ctx) { const src = String((img && (img.currentSrc || img.src)) || ''); if (/gravitos_singularity_zone/.test(src)) seq.push('orb'); else if (/safezone_ring/.test(src)) { seq.push('ring'); const m = this.getTransform(); rings.push([m.a, m.b, m.c, m.d, m.e, m.f, a[2], a[3]]); } } return oDI.apply(this, [img, ...a]); };
+      try { ctx.save(); ctx.translate(0, -camY); drawHazards(); ctx.restore(); _lxSafeZoneBeacons(); } finally { P.drawImage = oDI; window._lxSzBeam = keepBeam; }
+      let sideMax = 0;   // a band either side of the column, from its top down to the orb
+      for (let yy = z.y - camY - 140; yy <= z.y - camY - 52; yy += 6) for (const xx of [z.x - camX - 28, z.x - camX - 14, z.x - camX - 5, z.x - camX + z.w + 5, z.x - camX + z.w + 14, z.x - camX + z.w + 28]) sideMax = Math.max(sideMax, px(xx, yy));
+      return { pillar: px(z.x - camX + z.w / 2, z.y - camY - 60), side: px(z.x - camX - 40, z.y - camY - 60), sideMax };
+    };
+    const without = both(false); seq.length = 0; rings.length = 0; const withB = both(true);
+    const before = without.pillar, pillar = withB.pillar, side = withB.side;
+    const orderOk = seq.indexOf('ring') >= 0 && seq.indexOf('beam') > seq.indexOf('ring') && seq.indexOf('orb') > seq.indexOf('beam');
+    // round: equal, square axes and a square draw box; placed: centred on the zone, no wider than it (every lit pixel a safe pixel)
+    const ringRound = rings.length > 0 && rings.every((q) => Math.abs(Math.hypot(q[0], q[1]) - Math.hypot(q[2], q[3])) < 1e-6 && Math.abs(q[0] * q[2] + q[1] * q[3]) < 1e-6 && Math.abs(q[6] - q[7]) < 1e-6);
+    const ringFit = rings.length > 0 && rings.every((q) => Math.abs(q[4] - (z.x - camX + z.w / 2)) < 1 && Math.hypot(q[0], q[1]) * q[6] / 2 <= z.w / 2);
+    const ringArt = !!(LX_FX.safezone_ring && LX_FX.safezone_ring.complete && LX_FX.safezone_ring.naturalWidth > 0);
+    // off screen: the pointer - one per side, no text, and none while a zone is on screen
+    const boxMax = (x0, y0, r) => { let m = 0; for (let yy = y0 - r; yy <= y0 + r; yy += 2) for (let xx = x0 - r; xx <= x0 + r; xx += 2) m = Math.max(m, px(xx, yy)); return m; };
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const pz = { x: camX - 600, y: z.y, w: z.w, h: z.h }; h.safeZones.push(pz);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
     _lxSafeZoneBeacons();
-    P.fillRect = oFR;
-    const pillar = px(z.x - camX + z.w / 2, z.y - camY - 60), side = px(z.x - camX - 40, z.y - camY - 60);
-    const pillarFill = fills.find((a) => a[3] === 150 && Math.abs(a[0] - (z.x - camX)) < 1 && Math.abs(a[2] - z.w) < 1);
-    // off screen: the chevron and its label
+    const pointerWithZoneOnScreen = boxMax(36, z.y - camY + z.h / 2, 18);
+    h.safeZones.length = 0; h.safeZones.push(z);
     z.x = camX - 600; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
     P.fillText = function (...a) { if (this === ctx) texts.push(String(a[0])); return oFT.apply(this, a); };
     _lxSafeZoneBeacons();
     P.fillText = oFT;
-    const chevron = px(21, z.y - camY + z.h / 2);
+    const chevron = boxMax(36, z.y - camY + z.h / 2, 18);
     // no art at all: the ground marker's fallback, inside drawHazards, must still be bright and inside the rect
     z.x = camX + 420; const keepFx = LX_FX.gravitos_singularity_zone; const animArr = (typeof _fxAnimFrames === 'function') ? _fxAnimFrames('gravitos_singularity_zone') : null; const keepAnim = animArr ? animArr.slice() : null;
     LX_FX.gravitos_singularity_zone = undefined; if (animArr) animArr.length = 0;   // the frames array is cached by the game: empty it in place
@@ -106,12 +126,16 @@ try {
     let drawErr = null; try { ctx.save(); ctx.translate(0, -camY); drawHazards(); ctx.restore(); } catch (e) { drawErr = String(e).slice(0, 120); } finally { P.fillRect = oFR; }
     LX_FX.gravitos_singularity_zone = keepFx; if (animArr && keepAnim) animArr.push(...keepAnim);
     game.hazards.length = 0;
-    return { before, pillar, side, pillarFill: !!pillarFill, chevron, texts: texts.filter((t) => /^SAFE/.test(t)), zoneFills: zf.length, gold: zf.filter((o) => /255[^0-9]+190[^0-9]+70|255[^0-9]+224[^0-9]+140/.test(o.fs)).length, drawErr, fills: zf.map((o) => o.fs).slice(0, 6), stub: { fn: typeof window._fxAnimFrames, sameArr: !!(animArr && animArr === _fxAnimFrames('gravitos_singularity_zone')), frames: animArr ? animArr.length : null } };
+    return { before, pillar, side, sideMax: withB.sideMax, sideMax0: without.sideMax, seq: seq.slice(0, 12), orderOk, ringArt, ringRound, ringFit, ring: rings[0] && rings[0].map((v) => Math.round(v * 100) / 100), pointerWithZoneOnScreen, chevron, texts, zoneFills: zf.length, gold: zf.filter((o) => /255[^0-9]+190[^0-9]+70|255[^0-9]+224[^0-9]+140/.test(o.fs)).length, drawErr, fills: zf.map((o) => o.fs).slice(0, 6), stub: { fn: typeof window._fxAnimFrames, sameArr: !!(animArr && animArr === _fxAnimFrames('gravitos_singularity_zone')), frames: animArr ? animArr.length : null } };
   });
-  console.log(`\nBEACON  pillar px ${bc.pillar} (black ${bc.before}, beside ${bc.side})  chevron px ${bc.chevron}  labels ${JSON.stringify(bc.texts)}  fallback fills ${bc.zoneFills} (gold ${bc.gold})${bc.drawErr ? '  drawErr ' + bc.drawErr : ''}`);
-  check(bc.pillarFill && bc.pillar > bc.before + 60, 'a pillar of light stands over the zone, exactly the rect wide and 150 tall', bc);
-  check(bc.side <= bc.before + 8, 'the pillar does not spill beside the rect', bc);
-  check(bc.chevron > 60 && bc.texts.length >= 1, 'an off-screen zone gets an edge chevron with a SAFE label', bc);
+  console.log(`\nBEACON  beam px ${bc.pillar} (without it ${bc.before}; beside ${bc.side}, band ${bc.sideMax}/${bc.sideMax0})  order ${JSON.stringify(bc.seq)}  pointer px ${bc.chevron} (with a zone on screen ${bc.pointerWithZoneOnScreen})  texts ${JSON.stringify(bc.texts)}  fallback fills ${bc.zoneFills} (gold ${bc.gold})${bc.drawErr ? '  drawErr ' + bc.drawErr : ''}`);
+  check(bc.pillar > bc.before + 60, 'a beam of light rises up the zone\'s column (against the same frame without it)', bc);
+  check(bc.orderOk, 'the ring is drawn first, then the beam, then the rift orb: the ring behind the beam, the beam behind the orb (per user)', bc.seq);
+  check(bc.ringRound && bc.ringFit, 'the ring stays round (no perspective squash) and sits centred on the zone, no wider than it (per user)', { round: bc.ringRound, fit: bc.ringFit, ring: bc.ring });
+  check(bc.ringArt && bc.seq.includes('ring'), 'the timer ring is the gold sigil art, not a plain ellipse', { ringArt: bc.ringArt, seq: bc.seq });
+  check(bc.side <= bc.before + 8 && bc.sideMax <= bc.sideMax0 + 8, 'the beam adds nothing beside the column: every lit pixel is a safe pixel', bc);
+  check(bc.chevron > 150 && bc.texts.length === 0, 'an off-screen zone gets an edge pointer with no text (no "SAFE 378px")', bc);
+  check(bc.pointerWithZoneOnScreen <= 8, 'no pointer while a zone is on screen (it sat on top of the zone you could already see)', bc);
   check(!bc.drawErr && bc.zoneFills >= 5 && bc.gold >= 5, 'with no art the zone still paints a gold fill + rim, all inside the rect', bc);
 
   // ---- 3b. the HUD yields: a panel over a live zone fades, and comes back after the zone resolves ---------------

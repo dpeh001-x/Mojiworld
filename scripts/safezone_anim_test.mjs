@@ -73,7 +73,10 @@ const r = await page.evaluate(async () => {
   const oFR = ctx.fillRect, oDI = ctx.drawImage;
   ctx.fillRect = function (x, y, w, h) { fills.push({ x, y, w, h }); return oFR.apply(this, arguments); };
   ctx.drawImage = function (img, ...a) { if (a.length >= 4) { blits.push({ x: a[0], y: a[1], w: a[2], h: a[3] }); srcs.add((img.src || '').split('/').pop()); } return oDI.apply(this, [img, ...a]); };
-  try { for (let t = 0; t < 40; t++) { game.time = t; drawHazards(); } } finally { ctx.fillRect = oFR; ctx.drawImage = oDI; }
+  // the ring and the beam behind the orb (_lxSzHalo, _lxSzBeam) stand over the rect: grav_safezone_all_test and
+  // gravitos_safezone_draw_test measure them; this measures the portal and its shield, so they sit out
+  const keepBeam = window._lxSzBeam, keepHalo = window._lxSzHalo; window._lxSzBeam = () => {}; window._lxSzHalo = () => {};
+  try { for (let t = 0; t < 40; t++) { game.time = t; drawHazards(); } } finally { ctx.fillRect = oFR; ctx.drawImage = oDI; window._lxSzBeam = keepBeam; window._lxSzHalo = keepHalo; }
   const near = (o) => o.w < 900 && Math.abs(o.x - Z.x) < 200 && Math.abs(o.y - Z.y) < 200;
   const exact = (o) => Math.abs(o.x - Z.x) < 0.5 && Math.abs(o.y - Z.y) < 0.5 && Math.abs(o.w - Z.w) < 0.5 && Math.abs(o.h - Z.h) < 0.5;
   const inside = (o) => o.x >= Z.x - 0.5 && o.y >= Z.y - 0.5 && o.x + o.w <= Z.x + Z.w + 0.5 && o.y + o.h <= Z.y + Z.h + 0.5;

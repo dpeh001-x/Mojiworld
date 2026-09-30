@@ -64,7 +64,10 @@ const r = await page.evaluate(() => {
   // Anything drawn on/around the zone: within a generous window of it, but not
   // the full-screen veil (which is deliberately arena-wide).
   const near = (o) => o.w < 900 && Math.abs(o.x - Z.x) < 200 && Math.abs(o.y - Z.y) < 200;
-  const outside = (o) => (o.x < Z.x - 0.5) || (o.y < Z.y - 0.5) ||
+  // The column above the rect is safe too (LX_SZ_JUMP_SLACK: _lxSzInside counts feet up to 150 px over the floor), and the
+  // beam drawn behind the orb lights it, as the beacon has since v0.30.796 - but nothing past the rect's width, nothing below it.
+  const COL = (typeof LX_SZ_JUMP_SLACK === 'number') ? LX_SZ_JUMP_SLACK : 150;
+  const outside = (o) => (o.x < Z.x - 0.5) || (o.y < Z.y - COL - 0.5) ||
                          (o.x + o.w > Z.x + Z.w + 0.5) || (o.y + o.h > Z.y + Z.h + 0.5);
 
   const zoneStrokes = strokeRects.filter(near);
@@ -92,8 +95,8 @@ check(r.zoneBlits.length > 0, 'the ring sprite is drawn on the zone (guards a va
 check(r.coversZone, 'the sprite blit covers the zone rect exactly', r.zoneBlits);
 
 console.log('\nNOTHING PAINTS OUTSIDE THE LETHAL BOUNDARY');
-check(r.fillsOutside.length === 0, 'no fill extends past the safe rect', r.fillsOutside);
-check(r.blitsOutside.length === 0, 'no sprite blit extends past the safe rect', r.blitsOutside);
+check(r.fillsOutside.length === 0, 'no fill extends past the safe rect (or the column it protects above)', r.fillsOutside);
+check(r.blitsOutside.length === 0, 'no sprite blit extends past the safe rect (or the column it protects above)', r.blitsOutside);
 
 check(errs.length === 0, 'no page errors', errs.slice(0, 3));
 console.log(bad === 0 ? '\nALL PASS' : `\n${bad} FAILED`);
