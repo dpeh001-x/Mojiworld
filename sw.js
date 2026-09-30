@@ -280,7 +280,9 @@
 // browser would keep drawing the old art for a session.
 // nine-mobs - v128 -> v129. Tomb Hexer, Ossifer, Bone Golem, Thundermole, Bones, Petalfly, Sunbun, Ossuary Tyrant and Drowned
 // Cur are redrawn and re-animated under their own names, so a returning browser would otherwise keep the old art.
-const CACHE = 'mojiworld-assets-v135';   // v0.30.1463 - Barnaby's nine attack frames redrawn (same names)
+// v0.30.1468 - v135 -> v136. Aquarius idle 2..7 are REPLACED under their own names (their missing black outline
+// painted back in), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v136';   // v0.30.1468 - Aquarius idle frames re-inked (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
