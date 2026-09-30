@@ -78,6 +78,11 @@ Object.assign(LX_BOSS_STRIKE_BY_TYPE, {
 // Its blow is now f4: both wings driven fully down, the ring of light at its widest (f2 is the wings raised and glowing,
 // f3 the ring's first flash, f5 the wings sweeping back out). Still two frames of settle after it and more.
 Object.assign(LX_BOSS_STRIKE_BY_TYPE, { zodiac_virgo: 4 });
+// v0.30.1463 barnaby-punch - Barnaby's punch is redrawn from his idle (per user: "fully lunge like in gravitos"): f0 is the
+// idle, f1-5 cock the burning fist back, f6 drives it through, f7-8 are the full lunge. Its blow is f6, the drive with the
+// fire streaking off the knuckles - still two frames of settle after it. His boxer haymaker plays the set on its own clock
+// (_barnabyPunchFrame); this timing is the contact / telegraphed-swing / animator loop.
+Object.assign(LX_BOSS_STRIKE_BY_TYPE, { young_confused_barnaby: 6 });
 
 // cb entries are [top, bottom, bodyTop, bodyBottom] in source pixels (see
 // scripts/gen_anim_manifest.mjs). Returns the default dwell array for n frames.

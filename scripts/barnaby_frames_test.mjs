@@ -97,6 +97,9 @@ try {
       _bossAttackFrame: wrap('_bossAttackFrame', 'attack'),
       _bossWeaveFrame: wrap('_bossWeaveFrame', 'weave'),
       _bossDuckFrame: wrap('_bossDuckFrame', 'duck'),
+      // v0.30.1463 barnaby-punch - his haymaker plays through its own picker (m, key), ahead of _bossAttackFrame
+      _barnabyPunchFrame: (() => { const o = window._barnabyPunchFrame; if (typeof o !== 'function') return null;
+        window._barnabyPunchFrame = function () { const r = o.apply(this, arguments); if (r) counts.attack++; return r; }; return o; })(),
     };
     const states = {};
     const g0 = game.time | 0, t0 = performance.now();

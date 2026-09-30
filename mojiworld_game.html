@@ -16190,7 +16190,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1462';
+const GAME_VERSION = 'v0.30.1463';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -146707,6 +146707,34 @@ function _lxBossWindupSync(m, key, n, ft, zodiac) {
   if (zodiac) m._zAnim.since = now - c; else { m._animSt = 'attack'; m._animStAt = now - c; }
   return c;
 }
+// v0.30.1463 barnaby-punch - THE HAYMAKER PLAYS ONCE (per user: "fully lunge like in gravitos"). His punch set is redrawn
+// from his idle: f0 IS the idle frame, f1-5 cock the burning fist back, f6 drives it through, f7-8 are the full lunge. The
+// generic loop replayed it over one exchange and drew the lunge on the slip back out; like Gravitos's punch and Krook's
+// stomp it now follows the move's own clock (_bxT, the boxer AI's): the cock-back over the tell, the drive through the dash,
+// the full lunge the instant the fist is thrown and held while it flies, then back to guard in reverse over the slip (the
+// drive streak skipped), so the flame dies as he pulls out. The settle beat shows f0, his idle. His heavy swing starts
+// whenever the dash brings him into range, so its telegraph usually overlaps the exchange: the haymaker keeps the body
+// from the tell to the end of the slip while the swing's clock runs on underneath (_lxBossWindupSync, called here only
+// for that), and a swing or column cast still live in the settle beat or the footwork plays its own windup
+// (_bossAttackFrame) into its release. Until all nine frames decode the generic path draws.
+const _BARNABY_PUNCH_BACK = [7, 5, 4, 3, 2, 1, 0];
+function _barnabyPunchFrame(m, key) {
+  if (key !== 'young_confused_barnaby' || !m) return null;
+  const st = m._bxState, T = m._bxT || 0, cl = (v) => Math.max(0, Math.min(1, v));
+  const own = st === 'wind' || st === 'dashIn' || st === 'jab' || st === 'fade';
+  if (!own && (st !== 'settle' || _lxBossTelegraph(m, key))) return null;
+  const fr = BOSS_ATTACK_FRAMES[key];
+  if (!fr || _lxFtReadyN(fr) < 9) return null;
+  if (own) { const ft = _lxCalibFt(key, 'attack'); if (ft) _lxBossWindupSync(m, key, 9, ft, false); }
+  let i;
+  if (st === 'wind') i = Math.min(5, Math.floor(cl(1 - T / 260) * 7));
+  else if (st === 'dashIn') i = 6;
+  else if (st === 'jab') i = (T <= 0 || T > 95) ? 7 : 8;   // T is 0 for the one draw before the throw, then counts 150 down
+  else if (st === 'fade') { const p = cl(1 - T / 420); i = p < 0.2 ? 8 : _BARNABY_PUNCH_BACK[Math.min(6, Math.floor((p - 0.2) / 0.8 * 7))]; }
+  else if (st === 'settle') i = 0;
+  else return null;
+  return fr[i] || null;
+}
 function _bossAttackFrame(key, m) {
   const _fr = BOSS_ATTACK_FRAMES[key];
   const _ft = _fr ? _lxCalibFt(key, 'attack') : null;   // v0.30.315 — animator frame timing
@@ -151546,6 +151574,7 @@ function drawMonster(m) {
        || (/soul$/.test(_spriteKey) && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
        || (/astral$/.test(_spriteKey) && _aetherionAstralFrame(m))   // v0.30.x - burst timed to the resolve
        || (/stomp$/.test(_spriteKey) && _krookStompFrame(m))   // v0.30.236 — once-through, lands on the slam
+       || (m.type === 'young_confused_barnaby' && _barnabyPunchFrame(m, _spriteKey))   // v0.30.1463 barnaby-punch - the haymaker plays once, on his boxer clock
        || (m.type === 'gravitos' && m.patternState && m.patternState !== 'idle' && _gravitosOnceFrame(m, _spriteKey))   // v0.30.309 — no looping sets on Gravitos
        || (m.type === 'gravitos' && _gravitosContactFrame(m, _spriteKey))   // v0.30.312 — weighted strike-holds for contact melee (the last 48 ms path)
        || _bossAttackFrame(_spriteKey, m) || BOSS_ATTACK_SPRITES[_spriteKey])
