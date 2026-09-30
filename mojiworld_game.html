@@ -16190,7 +16190,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1466';
+const GAME_VERSION = 'v0.30.1467';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -42699,6 +42699,7 @@ function _lxBankAccrue(dt) {
   player.bankAccrueMs = acc;
   if (paid > 0) {
     player._bankInterestTotal = (player._bankInterestTotal || 0) + paid;
+    player.bankInterestSince = Math.min(1e12, (isFinite(player.bankInterestSince) ? Math.max(0, +player.bankInterestSince) : 0) + paid);   // v0.30.1467 - Felina reads it out on your next visit
     try { if (typeof showToast === 'function') showToast('🏦 Mojibank interest: +' + paid.toLocaleString() + (paid === 1 ? ' Mojicoin' : ' Mojicoins')); } catch (_) {}
   }
   return paid;
@@ -42711,6 +42712,16 @@ function _lxBankInterestLine() {
   const next = Math.floor(b * LX_BANK_RATE_PER_HOUR);
   if (next < 1) return '*You earn 0.1 % of your balance every hour of play — under 1,000 on deposit that rounds to nothing, dear.*';
   return '*You earn 0.1 % of your balance every hour of play. Next payment: ' + next.toLocaleString() + ' Mojicoins in ' + mins + ' min.*';
+}
+// v0.30.1467 - WHAT THE ACCOUNT EARNED SINCE YOUR LAST VISIT (per user: "ensure that felina interest rates work"). Since v0.30.380
+// the play clock pays each hour as it passes, so the accrue call Felina makes on opening almost never had anything left to pay
+// and her "Your account earned ... since your last visit" line could not show. Every payment is tallied in
+// player.bankInterestSince (saved, 0 - 1e12) and read out - then cleared - the next time you talk to her.
+function _lxBankSinceVisit() {
+  if (typeof player === 'undefined' || !player) return 0;
+  const got = isFinite(player.bankInterestSince) ? Math.max(0, Math.floor(+player.bankInterestSince)) : 0;
+  player.bankInterestSince = 0;
+  return got;
 }
 function _grantMojicoins(n, opts) {
   if (typeof n !== 'number' || !isFinite(n) || n <= 0) return 0;
@@ -50635,6 +50646,7 @@ const PLAYER_SAVE_FIELDS = [
   // v0.29.311 — the balance is NO LONGER death-proof: percentage coin
   // penalties (death, Reset Stats) size off wallet + bank and collect
   // from both via totalCoins() / chargeCoins().
+  'bankInterestSince',   // v0.30.1467 - interest paid since the last talk with Felina (she reads it out, then clears it)
   'bankBalance','bankLastTick','bankAccrueMs',   // v0.30.380 — play-time interest clock (ms into the current hour)
   // v0.26.258 — Lost-and-Found Curator Marbella. Object mapping
   // 'type:milestone' (e.g. 'snail:100') → true once claimed so the
@@ -54663,6 +54675,7 @@ const _SAVE_NUMERIC_GUARDS = [
   ['skillRankPoints', 0,    0,   1e9],
   ['setshards',       0,    0,   1e9],
   ['bankBalance',     0,    0,   1e12],
+  ['bankInterestSince', 0,  0,   1e12],   // v0.30.1467 - display only (Felina's "since your last visit"): NaN or junk -> 0
   ['bankAccrueMs',    0,    0,   3600000],   // v0.30.380 — at most one hour banked; a tampered save pays one payment, not a fortune   // was unguarded — a NaN/Infinity here propagated into the wallet on "Withdraw all"
   // v0.26.x — persisted cooldown/boost timestamps: NaN/Infinity from a corrupted
   // save -> 0 (sage ready / spawn-boost off). lo/hi never clamp a valid value.
@@ -68741,7 +68754,7 @@ function tickDaily(kind, n) {
 // made both of them effectively free — deposit everything, die for 0, reset
 // stats for 0. They now measure against TOTAL net worth (wallet + vault) and
 // draw the charge from the wallet first, falling through to the bank for the
-// remainder. The bank keeps its real value (1.5 %/day interest, no fee) but
+// remainder. The bank keeps its real value (interest - 0.1 % an hour of play since v0.30.380 - and no fee) but
 // is no longer a penalty shelter.
 //
 // Both helpers are the single source of truth for that rule — any future
@@ -72641,7 +72654,7 @@ function _expeditionAdvanceFloor(door) {
 const EXPEDITION_PUZZLES = [
   { q: 'Which element does Aetherion command?', opts:['Lightning','Fire','Frost','Stone'], a:0 },
   { q: 'How many zodiac signs guard the Twelve?', opts:['7','10','12','13'], a:2 },
-  { q: 'What does the Mojibank cap interest at?', opts:['10,000 Mojicoins','50,000 Mojicoins','100,000 Mojicoins','1,000,000 Mojicoins'], a:1 },
+  { q: 'How much interest does the Mojibank pay?', opts:['1.5% a day','0.1% a day','0.1% an hour of play','1% an hour of play'], a:2 },   // v0.30.1467 - was "What does the Mojibank cap interest at?" (50,000): the v0.26.257 bank; since v0.30.380 there is no cap
   { q: 'Which boon synergy doubles healing on burning targets?', opts:['Sanguine Flame','Iron Will','Razor Storm','Phoenix Heart'], a:0 },
   { q: 'How many stars can gear be enhanced to?', opts:['5','8','10','15'], a:2 },
   { q: 'Which class gains +5% all-status resist innately?', opts:['Warrior','Mage','Rogue','Archer'], a:1 },
@@ -113721,18 +113734,17 @@ So… do you need a lift?`;
     opts.push({ t:'Why set up in the plaza?', cb:() => { document.getElementById('dialog-text').textContent = 'Foot traffic, dear. Every adventurer from Everdawn to the North needs a bed eventually. I undercut the chain inns by half and stuff the pillows myself. Capitalism with cushions.'; } });
   } else if (npc.role === 'banker') {
     // v0.26.257 — Mojibank Manager Felina. Long-term economy lever.
-    // Deposit Mojicoins to earn 1.5 % daily interest, capped at 50000c
-    // balance to prevent infinite-stacking scaling. Withdraw anytime,
-    // no fee. Interest accrual is real-time: every interaction
-    // (and every saveState load) we compute hours-since-last-tick and
-    // credit the appropriate fraction. Saved via player.bankBalance +
-    // player.bankLastTick (ms epoch).
+    // It paid 1.5 % a day of wall-clock on the first 50,000 until v0.30.380; now the play clock pays 0.1 % of the whole
+    // balance every hour of play (_lxBankAccrue) and bankLastTick is stamped but read by nothing. v0.30.1467: what was paid since
+    // your last visit is tallied in bankInterestSince and read out here (_lxBankSinceVisit).
     if (typeof player.bankBalance !== 'number' || !isFinite(player.bankBalance)) player.bankBalance = 0;
     if (typeof player.bankLastTick !== 'number' || !isFinite(player.bankLastTick)) player.bankLastTick = _monoNow();
     // v0.30.380 — interest is paid by the play clock (see _lxBankAccrue): 0.1% of the
     // whole balance per hour of game time, on the hour. Nothing accrues while the
     // game is closed or paused, so there is no clock to roll forward and no cap.
-    const _interestEarned = _lxBankAccrue(0);   // v0.30.x — was dropped, then read below: ReferenceError killed the whole banker
+    // v0.30.1467 - any whole hour still due is paid (and tallied) first; what she reads out is the tally since your last visit.
+    // (The v0.30.513 literal stays whole: _lxBankAccrue always returns 0 or more, so this always reads the tally.)
+    const _interestEarned = _lxBankAccrue(0) >= 0 ? _lxBankSinceVisit() : 0;   // v0.30.x — was dropped, then read below: ReferenceError killed the whole banker
     const _capLine = _lxBankInterestLine();
     text = `*Abacus beads clicking, she glances up over half-moon spectacles.*\n\nWelcome to the Mojibank. I am Felina. Your savings work harder than you do, given the proper accounts. ${_interestEarned > 0 ? `\n\n*Your account earned ${_interestEarned.toLocaleString()} Mojicoins since your last visit.*` : ''}\n\nCurrent balance: ${player.bankBalance.toLocaleString()} Mojicoins. Wallet: ${Math.floor(player.mojicoins||0).toLocaleString()} Mojicoins.\n\n${_capLine}`;
     // v0.30.956 type an amount. Rendered through the opt.render() escape hatch so it sits in the same
@@ -113828,7 +113840,7 @@ So… do you need a lift?`;
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina counts ${_amt.toLocaleString()} Mojicoins into a velvet pouch and slides it across the counter.*\n\nDo come back. Your money was very fond of us.`;
     } });
-    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands.*\n\nEvery hour you play, your whole balance earns 0.1 % — on the hour, compounding, no cap. The clock runs only while the game does. Withdraw anytime, no fee.\n\nNot a hiding place: death\'s 35 % and the unlearning fee take your purse first, my ledgers second.'; } });
+    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands.*\n\nEvery hour you play, your whole balance earns 0.1 % — on the hour, compounding, no cap. The clock runs only while the game does. Withdraw anytime, no fee.\n\nNot a hiding place: death\'s 10 % and the unlearning fee take your purse first, my ledgers second.'; } });
   } else if (npc.role === 'bravoGuide') {
     // v0.26.289 — Per-floor Bravo. Three states:
     //   1. Player just arrived, quest not yet cleared → flavor flavor,
