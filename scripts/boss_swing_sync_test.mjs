@@ -19,7 +19,7 @@ const check = (ok, what, info) => { total++; console.log(`${ok ? 'PASS' : 'FAIL'
 // [boss type, attack, the set it plays] - the strike of each set is read from the game (the generated sets are v0.30.1355's
 // art picks, pinned by boss_attack_timing_test; the hand-set verdict is pinned below)
 const CASES = [
-  ['towerSovereign', 'swing', 'towerSovereignswing'], ['towerArbiter', 'swing', 'towerArbiterverdict'],
+  ['towerSovereign', 'swing', 'towerSovereignswing'], ['towerArbiter', 'swing', 'towerArbiter'],   // v0.30.1465 his heavy swing plays his purple sword set (per user)
   ['pqConductor', 'swing', 'pqConductor'], ['legosaurus', 'swing', 'legosaurus'],
   ['young_confused_barnaby', 'swing', 'young_confused_barnaby'], ['sundered_smith', 'swing', 'sundered_smith'],
   ['zodiac_aries', 'swing', 'zodiac_aries'], ['zodiac_capricorn', 'swing', 'zodiac_capricorn'], ['zodiac_pisces', 'swing', 'zodiac_pisces'],
@@ -70,7 +70,7 @@ try {
       await wait(50);
     }
     for (let i = 0; i < 60 && !m.onGround; i++) await wait(50);
-    const ft = _lxCalibFt(key, 'attack'), strike = _lxFtStrike(ft.length, ft);
+    const ft = _lxCalibFt(key, 'attack'), strike = _lxBossKeyFrame(key, ft.length, ft);   // v0.30.1465 the game's own blow (LX_BOSS_KEY_FRAME, else the longest hold)
     const firing = () => (atk === 'swing' ? !!m._bigMeleeFiring : !!m._columnFiring);
     const rec = { windupAt: 0, strikeAt: 0, fireAt: 0, frameAtFire: -2, saw: false, seq: [] };
     const oD = window._drawBossSprite; let rafN = 0, lastRaf = -1, done = false;

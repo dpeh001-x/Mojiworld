@@ -16190,7 +16190,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1464';
+const GAME_VERSION = 'v0.30.1465';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -94479,6 +94479,7 @@ function updateMonsters(dt) {
         // to the static sprite when no attack frames have decoded.
         const _bmNow = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         m.atkAnimUntil = _bmNow + bm.telegraphMs + 300;
+        m._lxHeavyAtkUntil = m.atkAnimUntil;   // v0.30.1465 swing-timing - the heavy swing's own attack window (see _bossAttacking)
         m._atkStrikeMs = bm.telegraphMs; m._animSt = null; m._tellUntil = _bmNow + bm.telegraphMs;   /* v0.30.396 */   // v0.30.382 — the strike frame lands as the telegraph ends
       }
       // PHASE 2 — telegraph tick (particles + flash).
@@ -108787,6 +108788,12 @@ function _tickSpireDrift() {
   }
 }
 function updateProjectiles(dt) {
+  // v0.30.1465 swing-timing - a swing that connected finishes its strike and trail on screen (see _lxSwingSpent)
+  if (game._lxSwingFx && game._lxSwingFx.length) {
+    for (const q of game._lxSwingFx) { q.life -= 1; q.x += q.vx || 0; }
+    game._lxSwingFx = game._lxSwingFx.filter((q) => q.life > 0 && q._sgMapData === game.mapData);
+  }
+  const _sgBefore = game.projectiles && game.projectiles.length ? game.projectiles.filter((q) => q.skill === 'swing' && q._sgM) : null;
   // v0.26.217 — Pre-filter live mobs once per frame for the per-projectile
   // collision loops below. Pre-fix every projectile iterated game.monsters
   // and ran `if (m.currentHp <= 0) continue;` on each entry. With N
@@ -109352,6 +109359,9 @@ function updateProjectiles(dt) {
       if (hit) {
         // burst on the floor this frame
       } else
+      if (_lxSwingSpent(p)) {
+        // v0.30.1465 swing-timing - the strike's peak frame is over: the trail is drawn, it hurts no one
+      } else
       if (_projOffScreen) {
         // Ignore damage; let the projectile keep updating until life
         // expires or it crosses the world bound.
@@ -109748,6 +109758,7 @@ function updateProjectiles(dt) {
       game.projectiles.splice(i, 1);
     }
   }
+  if (_sgBefore && _sgBefore.length) for (const q of _sgBefore) if (q.life > 0 && game.projectiles.indexOf(q) < 0) { q._sgMapData = game.mapData; (game._lxSwingFx || (game._lxSwingFx = [])).push(q); }   // v0.30.1465 swing-timing
 
   // Hazards (meteor telegraphs)
   // v0.25.520 — Off-screen hazard damage gate. On tall vertical-tower
@@ -146103,7 +146114,10 @@ const _LX_BOSS_ATK_SETS = {
   // the Arbiter's two are named for the move, not the gesture: `swing` IS the verdict
   // (v0.30.467 made that swing land for 35% of max HP one time in four) and `column` is
   // the pillar of judgment. Any other key he might fire falls through to his one set.
-  towerArbiter: (k) => (k === 'swing' ? 'towerArbiterverdict' : k === 'column' ? 'towerArbitercolumn' : null),
+  // v0.30.1465 swing-timing - per user ("ensure that for towerarbiter the strike plays with this sequence"): his heavy swing plays
+  // his own purple sword set (raise, swirl, the slam on f6 as the hit lands) - the gold verdict set did not match his
+  // purple strike. The verdict is rolled when the swing lands, so the windup cannot know which to show.
+  towerArbiter: (k) => (k === 'swing' ? 'towerArbiter' : k === 'column' ? 'towerArbitercolumn' : null),
 };
 function _lxBossAtkPose(m, key, frames) {
   if (!m) return;
@@ -151481,7 +151495,11 @@ function drawMonster(m) {
   // false for the whole moving half of the dash. Restored here.
   // v0.30.89 — a live Sovereign attack window is attacking outright (see note).
   const _sovAtkLive = !!(m._bossAtkKey && (game.time | 0) < (m._bossAtkUntil | 0));   // v0.30.478 — any boss with per-attack art
-  const _bossAttacking = _sovAtkLive || (((m.patternState && m.patternState !== 'idle'
+  // v0.30.1465 swing-timing - A COMMITTED HEAVY SWING IS AN ATTACK even while the boss moves: Legosaurus creeps through its windup
+  // (stickMul) and the Master Conductor keeps stepping, so the planted gate below drew their WALK frames on the strike.
+  // Only a swing that fired counts (firing, or its cooldown started); one cancelled mid-windup drops the art at once.
+  const _lxHeavyAtk = _nowAtk < (m._lxHeavyAtkUntil || 0) && (m._bigMeleeFiring || m._bigMeleeCd > 0);
+  const _bossAttacking = _sovAtkLive || _lxHeavyAtk || (((m.patternState && m.patternState !== 'idle'
                           && !_BOSS_MOVE_DRAW_STATES.has(m.patternState))
                        || (m.atkAnimUntil && _nowAtk < m.atkAnimUntil))
                        && (_lxPlanted || m._braceDashing || _LX_ATK_WHILE_MOVING.has(m.type)));   // v0.30.699 barnaby-frames
@@ -158855,10 +158873,11 @@ function _lxZodProjSize(p) {
 }
 function drawProjectiles() {
   // v0.25.451 — empty-list early-out (no projectiles in town/idle frames).
-  if (!game.projectiles || game.projectiles.length === 0) return;
+  const _sgKept = game._lxSwingFx && game._lxSwingFx.length ? game._lxSwingFx : null;   // v0.30.1465 swing-timing - swings that connected, still drawing
+  if ((!game.projectiles || game.projectiles.length === 0) && !_sgKept) return;
   const camX = game.camera.x;
   const _pjCamY = (game.camera && game.camera.y) || 0;   // v0.29.x perf — was re-derived per projectile
-  for (const p of game.projectiles) {
+  for (const p of (_sgKept ? game.projectiles.concat(_sgKept) : game.projectiles)) {
     // v0.25.21 — Phase 4c-2 gate: ask LXProjectileScene whether it owns
     // this specific projectile (every type with a pre-rendered texture).
     // Voidbeam and any unmapped future type return null → vanilla renders.
@@ -159437,7 +159456,7 @@ function drawProjectiles() {
         if (_sgShape && _lxFxReady(_sgArt)) {
           const _sgAI = _lxSwingAnimInfo(_sgShape), _sgAn = _sgAI && _lxSwingAnim(p._swingType);
           _lxDrawSwingArt(_lxPinned(_sgArt), _sgShape, { x: p.x + p._sgM.dx, y: p.y + p._sgM.dy, w: p._sgM.w, h: p._sgM.h }, p._sgF, p.x, p.y, p.w, p.h, ((p._sgL0 || 14) - p.life + 1) / 4, _sgAn ? Math.min(1, p.life / 4) : _swingAlpha, camX,
-            _sgAn ? _sgAn[Math.min(_sgAI.n - 1, _sgAI.k + Math.floor(((p._sgL0 || 14) - p.life) / 2.6))] : null, !!p._sgBoss);
+            _sgAn ? _sgAn[_lxSwingFrameIdx(_sgAI, (p._sgL0 || 14) - p.life)] : null, !!p._sgBoss);   // v0.30.1465 swing-timing
         } else {   // an unshaped swing (Path's Bane, Pisces) or art still decoding: the old stretched draw
         ctx.save();
         // (a) danger-zone glow across the exact hitbox (elliptical so it reads
@@ -160066,6 +160085,18 @@ function _lxDrawSwingArt(img, shape, mb, facing, hx, hy, hw, hh, reveal, alpha, 
 }
 // A boss swing's windup: the swing's OWN art where it will land, faint, charging along its path as the windup runs out
 // (it was one orange hazard crescent stretched 20-50% over every hitbox - tg_swing - read as an unrelated extra hit).
+// v0.30.1465 swing-timing - THE HIT LANDS ON THE PEAK FRAME (per user: "hit the player at the peak frame (frame 5)"). An animated
+// swing holds its 5th frame (P.anim.k) for its first LX_SWING_PEAK_TICKS updates and can hurt only then; the trail frames
+// after it are drawn and harmless. A swing that connects (or is parried or dodged) leaves the projectile list at once,
+// which used to take its strike and trail off the screen on the very frame it hit: it now finishes drawing from
+// game._lxSwingFx. Before this a hit showed no strike at all, and a hero walking in late was hit under the fading trail.
+const LX_SWING_PEAK_TICKS = 4;   // ~67 ms: the strike frame on screen, and the only frames that hurt
+function _lxSwingFrameIdx(K, t) { return t < LX_SWING_PEAK_TICKS ? K.k : Math.min(K.n - 1, K.k + 1 + Math.floor((t - LX_SWING_PEAK_TICKS) / 2.5)); }
+function _lxSwingSpent(p) {
+  if (!p || p.skill !== 'swing' || !p._sgL0) return false;
+  const K = _lxSwingAnimInfo(_lxSwingShapeOf(p._swingType));
+  return !!K && (p._sgL0 - p.life) >= LX_SWING_PEAK_TICKS;
+}
 function _lxSwingGhost(z) {
   const art = LX_FX['swing_' + z.sg.type]; if (!_lxFxReady(art)) return false;
   const img = _lxPinned(art), a = 0.18 + 0.37 * z.prog, shape = _lxSwingShapeOf(z.sg.type), camX = game.camera.x;

@@ -65,7 +65,7 @@ const r = await page.evaluate(async () => {
     return { key: m._bossAtkKey || m.type, w: Math.round(m._visW || 0), h: Math.round(m._visH || 0) };
   };
   out.sizes.base = await measure(null, 'towerArbiter');
-  out.sizes.verdict = await measure('swing', 'towerArbiterverdict');
+  out.sizes.verdict = await measure('swing', 'towerArbiter');   // v0.30.1465 swing-timing - the heavy swing plays his purple sword set (per user)
   out.sizes.column = await measure('column', 'towerArbitercolumn');
   // a boss with no per-attack art must be untouched by the generalised resolver
   game.monsters.length = 0;
@@ -81,7 +81,7 @@ console.log(JSON.stringify(r));
 const b = r.sizes.base, v = r.sizes.verdict, c = r.sizes.column;
 const near = (x, y) => x && y && y.h > 0 && Math.abs(x.h - y.h) / y.h < 0.08 && Math.abs(x.w - y.w) / y.w < 0.12;
 ok('both sword sets load their nine frames', r.frames.towerArbiterverdict === 9 && r.frames.towerArbitercolumn === 9, r.frames);
-ok('the big swing draws the VERDICT set', v.key === 'towerArbiterverdict', v);
+ok('the big swing draws his purple sword set (v0.30.1465, per user: "ensure that for towerarbiter the strike plays with this sequence")', v.key === 'towerArbiter', v);
 ok('the column strike draws the COLUMN set', c.key === 'towerArbitercolumn', c);
 // v0.30.x — these two used to require the sets to carry the base attack's own s, which is
 // what the first pass baked. They are authored per set in the animator now (verdict 2.18,
@@ -95,10 +95,10 @@ ok('both sets carry an explicit calibration entry, not the s:1 default a missing
   && r.calib.towerArbiterverdict.s > 1.2 && r.calib.towerArbitercolumn.s > 1.2,
   { base: r.calib.towerArbiter && r.calib.towerArbiter.s, verdict: r.calib.towerArbiterverdict && r.calib.towerArbiterverdict.s, column: r.calib.towerArbitercolumn && r.calib.towerArbitercolumn.s });
 ok('...and each renders at the size its own calibration asks for, relative to his base attack',
-  b.h > 0 && Math.abs((v.h / b.h) / (r.calib.towerArbiterverdict.s / r.calib.towerArbiter.s) - 1) < 0.06
+  b.h > 0 && Math.abs(v.h / b.h - 1) < 0.06   // the swing IS his base set now
   && Math.abs((c.h / b.h) / (r.calib.towerArbitercolumn.s / r.calib.towerArbiter.s) - 1) < 0.06,
   { base: b, verdict: v, column: c,
-    wantVerdictX: +(r.calib.towerArbiterverdict.s / r.calib.towerArbiter.s).toFixed(3), gotVerdictX: +(v.h / b.h).toFixed(3),
+    gotSwingX: +(v.h / b.h).toFixed(3),
     wantColumnX: +(r.calib.towerArbitercolumn.s / r.calib.towerArbiter.s).toFixed(3), gotColumnX: +(c.h / b.h).toFixed(3) });
 ok('each form has its own frame timing (they are different gestures, not one set twice)',
   r.calib.towerArbiterverdict && r.calib.towerArbitercolumn
