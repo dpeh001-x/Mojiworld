@@ -16179,7 +16179,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1454';
+const GAME_VERSION = 'v0.30.1455';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -23300,23 +23300,31 @@ function _lxGroundJoin(p) {
       let f = 0;
       for (const b of g) {
         if (b === a || Math.abs(b.y - a.y) > 32) continue;   // v0.30.1272 - was 24: every ramp's two pieces join (a 28px dune step)
-        const gL = a.x - (b.x + b.w), gR = b.x - (a.x + a.w), e = 0;   // v0.30.1272 - no riser: a ramp (_lxGroundRamps) is laid against every joined step
+        const gL = a.x - (b.x + b.w), gR = b.x - (a.x + a.w), e = md.noGroundRamps ? Math.max(0, Math.min(31, b.y - a.y)) : 0;   // v0.30.1272 - no riser: a ramp (_lxGroundRamps) is laid against every joined step; v0.30.1455 - a noGroundRamps map's steps are risers again (how far this piece stands above that neighbour)
         if (gL >= -8 && gL <= 2) f |= 1 | (e << 2);
         if (gR >= -8 && gR <= 2) f |= 2 | (e << 7);
       }
       a._lxJoin = f;
     }
   }
-  return p._lxJoin | 0;
+  return (p._lxJoin | 0) | (md.stairUnder ? _LX_FOOTLESS : 0);   // v0.30.1455 - a stairUnder map's pieces have no flat foot (_lxStairUnder)
 }
+const _LX_FOOTLESS = 4096;   // v0.30.1455 - variant bit 12 of a ground piece: no foot shade, no bottom keyline (bits 0-11 are the join)
 // v0.30.1272 - GROUND RAMPS (per user: "some parts with jagged floors there can be a slope or smoothing done"). Four maps build
 // their rises from stepped ground pieces - Sauro Slope, Dune Sands, Octopus Grotto, Lava Cavern: 28 steps of 2-28px. Each
 // step becomes a ramp laid on the LOWER piece against the riser: a smoothstep from the lower top (flat at its far end) up
 // to the higher top (flat at the seam) over ~3.5x the rise, 14-72px. Collision follows it (checkPlatformCollision asks
 // _lxRampAt), so feet ride up and down it instead of popping up the step or dropping off it, and drawPlatforms paints it
 // over the seam in the floor's own cap. Cached per platforms array; maps without steps pay one property read.
+// v0.30.1455 - the player's sprite offset while a flat step's snap eases out (see checkPlatformCollision): the rise, fading over 130 ms
+function _lxStepEaseOff() {
+  const e = (typeof player !== 'undefined' && player) ? player._lxStepEase : null; if (!e) return 0;
+  const k = (performance.now() - e.at) / 130; if (k >= 1) { player._lxStepEase = null; return 0; }
+  return Math.round(e.d * (1 - k) * (1 - k));
+}
 function _lxGroundRamps(md) {
   const ps = md && md.platforms; if (!ps) return null;
+  if (md.noGroundRamps) return null;   // v0.30.1455 - crisp steps: a level tread and a square riser, the hero stepping up each (the Weight-Bearer's Stair, per user)
   if (md._lxRampsSrc === ps && md._lxRampsN === ps.length) return md._lxRamps;
   const g = ps.filter((q) => q && q.type === 'ground'), out = [];
   for (const a of g) for (const b of g) {
@@ -23340,6 +23348,162 @@ function _lxRampAt(x) {
   if (!rs) return null;
   for (let i = 0; i < rs.length; i++) { const r = rs[i]; if (x >= r.x0 && x <= r.x1) return { r, y: _lxRampY(r, x) }; }
   return null;
+}
+// v0.30.1455 - THE STAIR'S UNDERSIDE (per user: the Weight-Bearer's Stair "can be much improved there are weird cutoffs"). A flight
+// is a chain of abutting ground pieces, each a box with a flat foot, so under the stair the sky met a sawtooth of flat cut-offs,
+// one step per riser, each with its own dark foot band and keyline. On a map flagged stairUnder the pieces draw no foot
+// (_LX_FOOTLESS) and each chain gets ONE smooth underside line: every notch filled from the lower foot, tapering into the
+// next over the piece whose foot is higher (<= 160 px), widened and rounded over +-24 px, and sunk 8 px below the lowest foot so no stone pokes through.
+// ONE WALL, NOT A ROW OF BLOCKS (per user: "the blocks transition should aim to be continuous"). Each piece painted its own
+// bricks from its own top, so with the Stair's 30 px rises every other block's courses sat half a course (6 px) off its
+// neighbour's, its light-to-dark ran from its own top and a faint seam showed at every join. Now a tile per piece covers its
+// whole face, from just under its tread down to the underside line, painted in world coordinates: the 28 x 12 bricks lie on
+// one grid for the whole flight (each brick's shade, joint and crack hashed from its place), the grain is world-anchored, the
+// mottle is laid once per flight, and the light under the treads follows their softened line across the risers. What stays
+// per step is what a step really has: the shade under its own lip and the keyline down its riser. The underside's shadow,
+// its keyline, a sky-lit chamfer and a gilded inlay with studs (the gold of the Stair's sky) finish the line. Each tile is
+// baked once at device resolution; per frame: one blit per piece on screen.
+const _LX_UNDER_STEP = 4;
+function _lxStairUnder(md) {
+  const ps = md && md.platforms; if (!ps) return null;
+  if (md._lxUnderSrc === ps && md._lxUnderN === ps.length) return md._lxUnder;
+  const g = ps.filter((q) => q && q.type === 'ground').sort((a, b) => a.x - b.x), chains = [], D = _LX_UNDER_STEP;
+  let cur = null;
+  for (const p of g) {   // the _lxGroundRamps seam rule: a piece within -8..2 px of the last one's right side joins its chain
+    const gap = cur ? p.x - cur.x1 : 99;
+    if (gap >= -8 && gap <= 2) { cur.ps.push(p); cur.x1 = Math.max(cur.x1, p.x + p.w); }
+    else { cur = { ps: [p], x0: p.x, x1: p.x + p.w }; chains.push(cur); }
+  }
+  const out = [];
+  for (const c of chains) {
+    if (c.ps.length < 2) continue;   // a lone block has no seam to close
+    const nS = Math.floor((c.x1 - c.x0) / D) + 2, S = new Float32Array(nS), U = new Float32Array(nS), T = new Float32Array(nS);
+    for (let i = 0, k = 0; i < nS; i++) {
+      const x = Math.min(c.x1 - 0.5, c.x0 + i * D);
+      while (k < c.ps.length - 1 && x >= c.ps[k].x + c.ps[k].w) k++;
+      S[i] = c.ps[k].y + c.ps[k].h; U[i] = S[i]; T[i] = c.ps[k].y + _cuteGeom(c.ps[k].w, c.ps[k].h, true).cap;
+    }
+    for (let k = 0; k + 1 < c.ps.length; k++) {   // each seam's wedge, under the piece whose foot is higher
+      const a = c.ps[k], b = c.ps[k + 1], fa = a.y + a.h, fb = b.y + b.h;
+      if (fa === fb) continue;
+      const L = Math.min(fa > fb ? b.w : a.w, 160), xA = fa > fb ? b.x : b.x - L;
+      for (let i = Math.max(0, Math.floor((xA - c.x0) / D)); i < nS; i++) {
+        const x = c.x0 + i * D; if (x > xA + L) break;
+        if (x >= xA) U[i] = Math.max(U[i], fa + (fb - fa) * (x - xA) / L);
+      }
+    }
+    { const T = U.slice(); for (let i = 0; i < nS; i++) { let m = T[i]; for (let j = -6; j <= 6; j++) { const q = i + j; if (q >= 0 && q < nS && T[q] > m) m = T[q]; } U[i] = m; } }   // widen every foot 24 px each way first, so a corner rounds out BELOW the stone, never into it
+    for (let pass = 0; pass < 3; pass++) {   // round the corners (+-24 px) and pull back under every foot, three rounds
+      const T = U.slice();
+      for (let i = 0; i < nS; i++) { let sum = 0, m = 0; for (let j = -6; j <= 6; j++) { const q = i + j; if (q >= 0 && q < nS) { sum += T[q]; m++; } } U[i] = Math.max(sum / m, S[i]); }
+    }
+    for (let i = 0; i < nS; i++) U[i] += 8;   // sunk 8 px: no stone pokes through
+    for (let pass = 0; pass < 3; pass++) {   // the line under the treads' lips, softened the same way: the face's light follows it across the risers
+      const Q = T.slice();
+      for (let i = 0; i < nS; i++) { let sum = 0, m = 0; for (let j = -6; j <= 6; j++) { const q = i + j; if (q >= 0 && q < nS) { sum += Q[q]; m++; } } T[i] = sum / m; }
+    }
+    const wide = c.ps.reduce((a, q) => (q.w > a.w ? q : a), c.ps[0]);   // the courses keep the widest piece's (a landing's) rows
+    const o = { ps: c.ps, x0: c.x0, x1: c.x1, n: nS, S, U, T, row0: wide.y + _cuteGeom(wide.w, wide.h, true).cap + 2, mot: [], tiles: [] };
+    const rng = _cuteRng(((Math.round(c.x0) * 69069) ^ 0x2545f491) >>> 0), nM = Math.max(2, Math.round((c.x1 - c.x0) / 130));
+    for (let i = 0; i < nM; i++) {   // _cuteMottle's soft blotches, laid once per flight in world coordinates so no tile edge cuts one
+      const x = c.x0 + (i + 0.2 + rng() * 0.6) * ((c.x1 - c.x0) / nM), tY = _lxStairLineY(o, T, x), hg = Math.max(8, _lxStairLineY(o, U, x) - tY), dark = rng() < 0.5;
+      o.mot.push({ x, y: tY + hg * (0.25 + rng() * 0.5), rx: 50 + rng() * 90, ry: Math.max(hg * 0.7, 8), dark, al: 0.2 * (dark ? 1.1 : 0.9) * (0.6 + rng() * 0.4) });
+    }
+    out.push(o);
+  }
+  md._lxUnderSrc = ps; md._lxUnderN = ps.length; md._lxUnder = out;
+  return out;
+}
+function _lxStairLineY(c, A, x) {   // a flight's line at world x: A = c.U (the underside) or c.T (under the treads' lips, softened)
+  const f = (x - c.x0) / _LX_UNDER_STEP, i = Math.max(0, Math.min(c.n - 2, Math.floor(f))), u = Math.max(0, Math.min(1, f - i));
+  return A[i] * (1 - u) + A[i + 1] * u;
+}
+function _lxStairUnderY(c, x) { return _lxStairLineY(c, c.U, x); }   // the underside line at world x
+function _lxStairHash(a, b, s) {   // a brick's own number in [0, 1), from its row, its place in the row and a salt
+  let h = (Math.imul(a | 0, 374761393) + Math.imul(b | 0, 668265263) + Math.imul(s | 0, 1274126177)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1103515245); h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function _lxStairUnderTile(c, k, P) {
+  const dpr = (typeof _lxPlatBakeDpr === 'function') ? _lxPlatBakeDpr() : 1, key = dpr + '|' + P.top + '|' + P.body;
+  const t0 = c.tiles[k]; if (t0 && t0.key === key) return t0;
+  const ps = c.ps, b = ps[k], D = _LX_UNDER_STEP, capOf = (q) => _cuteGeom(q.w, q.h, true).cap, cap = capOf(b), top = b.y + cap + 1;
+  // the piece's column from just under its cap keyline down to the underside; it reaches 1 px into a neighbour standing as high
+  // or higher (below that one's lip shade), so two tiles leave no hairline at a fractional camera, and 1 px out at a flight's end
+  const L = k > 0 ? ps[k - 1] : null, N = k + 1 < ps.length ? ps[k + 1] : null;
+  const tL = !L ? top : (L.y <= b.y ? Math.max(top, L.y + capOf(L) + 9) : null), tR = !N ? top : (N.y <= b.y ? Math.max(top, N.y + capOf(N) + 9) : null);
+  const x0 = b.x - (tL != null ? 1 : 0), x1 = b.x + b.w + (tR != null ? 1 : 0), w = x1 - x0;
+  let uMax = _lxStairUnderY(c, x1); for (let x = x0; x < x1; x += D) uMax = Math.max(uMax, _lxStairUnderY(c, x));
+  const hh = Math.ceil(uMax + 12 - top);
+  const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.ceil(w * dpr)); cv.height = Math.max(1, Math.ceil(hh * dpr));
+  const g = cv.getContext('2d'); g.scale(dpr, dpr); g.translate(-x0, -top);   // painted in world coordinates
+  const mix = _mixHex, body = P.body, tp = P.top, U = c.U, T = c.T;
+  const C = { bodyLt: mix(body, tp, 0.30), bodyDk: mix(body, '#000000', 0.40), OUT: mix(body, '#05030a', 0.62) };   // _paintCutePlatform's palette
+  const UNDER = mix(C.bodyDk, C.OUT, 0.55), RIM = mix(tp, '#ffffff', 0.3);
+  const along = (A, dy) => { g.moveTo(x0, _lxStairLineY(c, A, x0) + dy); for (let x = Math.ceil(x0 / D) * D; x < x1; x += D) g.lineTo(x, _lxStairLineY(c, A, x) + dy); g.lineTo(x1, _lxStairLineY(c, A, x1) + dy); };
+  const back = (A, dy) => { g.lineTo(x1, _lxStairLineY(c, A, x1) + dy); for (let x = Math.floor(x1 / D) * D; x > x0; x -= D) g.lineTo(x, _lxStairLineY(c, A, x) + dy); g.lineTo(x0, _lxStairLineY(c, A, x0) + dy); };
+  // 0. a soft contact shadow on the sky
+  g.beginPath(); along(U, 3); g.lineWidth = 6; g.strokeStyle = 'rgba(10,8,24,0.16)'; g.stroke();
+  // 1. the face, clipped from under the caps down to the underside
+  g.save(); g.beginPath(); g.moveTo(x0, tL != null ? tL : top); g.lineTo(b.x, tL != null ? tL : top); g.lineTo(b.x, top); g.lineTo(b.x + b.w, top);
+  g.lineTo(b.x + b.w, tR != null ? tR : top); g.lineTo(x1, tR != null ? tR : top); back(U, 0); g.closePath(); g.clip();
+  g.fillStyle = body; g.fillRect(x0, top, w, hh);   // the mortar
+  const BH = 12, BW = 28;   // _cuteMaterial's 'stone' ground bricks, on ONE grid for the whole flight
+  for (let row = Math.floor((top - c.row0) / BH); c.row0 + row * BH < uMax + 2; row++) {
+    const yy = c.row0 + row * BH, off = (row & 1) ? BW / 2 : 0, edge = (j) => j * BW - off + _lxStairHash(row, j, 1) * 4 - 2;
+    for (let j = Math.floor((x0 + off) / BW) - 1; edge(j) < x1; j++) {
+      const xa = edge(j), xb = edge(j + 1), a0 = Math.max(x0, xa + 1), a1 = Math.min(x1, xb - 1);
+      if (a1 <= a0) continue;
+      g.fillStyle = mix(body, tp, 0.06 + 0.16 * _lxStairHash(row, j, 2)); g.fillRect(a0, yy + 1, a1 - a0, BH - 2);
+      g.fillStyle = C.bodyLt; g.fillRect(a0, yy + 1, a1 - a0, 1);
+      g.fillStyle = C.bodyDk; g.fillRect(a0, yy + BH - 2, a1 - a0, 1);
+      if (_lxStairHash(row, j, 3) < 0.18) { const cx = xa + 2 + (xb - xa - 4) * _lxStairHash(row, j, 4); g.strokeStyle = C.bodyDk; g.lineWidth = 1; g.beginPath(); g.moveTo(cx, yy + 2); g.lineTo(cx + _lxStairHash(row, j, 5) * 6 - 3, yy + BH - 3); g.stroke(); }
+    }
+  }
+  g.save(); g.globalCompositeOperation = 'overlay'; g.globalAlpha = 0.32; g.fillStyle = _cuteGrain(g); g.fillRect(x0, top, w, hh); g.restore();   // the grain, world-anchored
+  for (const m of c.mot) {   // the flight's mottle
+    if (m.x + m.rx < x0 || m.x - m.rx > x1) continue;
+    const rg = g.createRadialGradient(0, 0, 0, 0, 0, 1), ink = m.dark ? '0,0,0' : '255,255,255';
+    rg.addColorStop(0, 'rgba(' + ink + ',1)'); rg.addColorStop(1, 'rgba(' + ink + ',0)');
+    g.save(); g.translate(m.x, m.y); g.scale(m.rx, m.ry); g.globalAlpha = m.al; g.fillStyle = rg; g.beginPath(); g.arc(0, 0, 1, 0, 6.2832); g.fill(); g.restore();
+  }
+  g.fillStyle = '#ffffff';   // the light under the treads, along their softened line, so it runs on across the risers
+  for (let q = 0; q < 6; q++) { g.globalAlpha = 0.1 * (1 - (q + 0.5) / 6); g.beginPath(); along(T, 1 + q * 6); back(T, 7.5 + q * 6); g.closePath(); g.fill(); }
+  g.globalAlpha = 1;
+  const gAO = g.createLinearGradient(0, b.y + cap - 1, 0, b.y + cap + 8);   // the shade under this step's own lip
+  gAO.addColorStop(0, 'rgba(0,0,0,0.36)'); gAO.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gAO; g.fillRect(b.x, top, b.w, b.y + cap + 8 - top);
+  g.fillStyle = UNDER;   // the underside's shade: twelve 7 px bands along its own line, 0.92 easing to 0 over 6-90 px above it
+  for (let q = 0; q < 12; q++) { const tA = 6 + q * 7, tB = tA + 7.5; g.globalAlpha = 0.92 * Math.pow(1 - (q + 0.5) / 12, 1.5); g.beginPath(); along(U, -tA); back(U, -tB); g.closePath(); g.fill(); }
+  g.globalAlpha = 1;
+  g.beginPath(); along(U, 0); back(U, -6); g.closePath(); g.fill();   // the last 6 px are all shadow
+  g.restore();
+  // 2. the keylines this tile covers: a riser, down to the lower tread beside it, and a flight's open end, down to the underside
+  g.lineJoin = 'round'; g.lineCap = 'round'; g.lineWidth = 2; g.strokeStyle = C.OUT; g.beginPath();
+  if (L && L.y > b.y && L.y + 1 > top) { g.moveTo(b.x + 1, top - 1); g.lineTo(b.x + 1, L.y + 1); }
+  if (N && N.y > b.y && N.y + 1 > top) { g.moveTo(b.x + b.w - 1, top - 1); g.lineTo(b.x + b.w - 1, N.y + 1); }
+  if (!L) { g.moveTo(b.x, top - 1); g.lineTo(b.x, _lxStairUnderY(c, b.x)); }
+  if (!N) { g.moveTo(b.x + b.w, top - 1); g.lineTo(b.x + b.w, _lxStairUnderY(c, b.x + b.w)); }
+  g.stroke();
+  // 3. the underside's edge: the gilded inlay and its studs, the sky-lit chamfer, the floor's keyline
+  g.beginPath(); along(U, -7); g.lineWidth = 1.4; g.strokeStyle = 'rgba(231,196,120,0.55)'; g.stroke();
+  g.fillStyle = 'rgba(246,220,154,0.85)';
+  for (let x = Math.floor((x0 - 48) / 96) * 96 + 48; x <= x1; x += 96) g.fillRect(x - 1.5, _lxStairUnderY(c, x) - 8.5, 3, 3);
+  g.beginPath(); along(U, -2.5); g.lineWidth = 1.2; g.globalAlpha = 0.32; g.strokeStyle = RIM; g.stroke(); g.globalAlpha = 1;
+  g.beginPath(); along(U, 0); g.lineWidth = 2; g.strokeStyle = C.OUT; g.stroke();
+  const t = { key, cv, x: x0, y: top, w, h: hh };
+  c.tiles[k] = t; return t;
+}
+function _lxStairUnderDraw(tint) {
+  const md = game.mapData, chains = _lxStairUnder(md);
+  if (!chains || !chains.length) return;
+  const cam = game.camera.x, camY = game.camera.y || 0;
+  const P = (tint && tint.exact) ? tint : ((typeof _cuteMapPalette === 'function' && _cuteMapPalette(tint)) || tint);
+  for (const c of chains) for (let k = 0; k < c.ps.length; k++) {
+    const b = c.ps[k];
+    if (b.x + b.w - cam < -4 || b.x - cam > W + 4 || b.y + b.h + 60 < camY - 30 || b.y > camY + H + 30) continue;
+    const t = _lxStairUnderTile(c, k, P);
+    ctx.drawImage(t.cv, t.x - cam, t.y, t.w, t.h);
+  }
 }
 function _lxDrawRampFlat(r, tint) {   // the fallback when the lower piece has no bake: a plain cap band along the curve
   const cam = game.camera.x;
@@ -24242,8 +24406,8 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
     for (const t of tops) ctx.quadraticCurveTo(t[0], y - dip, t[1], y + dip);
     if (jr) ctx.moveTo(xe, y + cap); else { ctx.quadraticCurveTo(xe, y, xe, y + rr); ctx.lineTo(xe, y + cap + wrap); }
     _cuteEdgeDraw(ctx, xs, y + cap, segs, droop);
-    if (eL > 0) { ctx.moveTo(xs + 1, y + dip); ctx.lineTo(xs + 1, y + Math.min(eL, cap) + 1); }
-    if (eR > 0) { ctx.moveTo(xe - 1, y + dip); ctx.lineTo(xe - 1, y + Math.min(eR, cap) + 1); }
+    if (eL > 0) { ctx.moveTo(xs + 1, y + dip); ctx.lineTo(xs + 1, y + Math.min(eL, h) + 1); }   // v0.30.1455 - the whole riser (only a noGroundRamps map has one now)
+    if (eR > 0) { ctx.moveTo(xe - 1, y + dip); ctx.lineTo(xe - 1, y + Math.min(eR, h) + 1); }
     ctx.stroke();
   };
   const grain = _cuteGrain(ctx), gox = Math.floor(rng() * 96), goy = Math.floor(rng() * 96);
@@ -24269,10 +24433,12 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const gAO = ctx.createLinearGradient(0, y + cap - 1, 0, y + cap + 8);
   gAO.addColorStop(0, 'rgba(0,0,0,0.36)'); gAO.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = gAO; ctx.fillRect(xs, y + cap - 1, ww, 9 + wrap);
-  if (ground) { const gB = ctx.createLinearGradient(0, y + h * 0.55, 0, y + h); gB.addColorStop(0, 'rgba(0,0,0,0)'); gB.addColorStop(1, C.OUT); ctx.globalAlpha = _pa * a * 0.55; ctx.fillStyle = gB; ctx.fillRect(xs, y + h * 0.55, ww, h * 0.45); ctx.globalAlpha = _pa * a; }
+  const _footless = ground && ((variant | 0) & 4096);   // v0.30.1455 - _LX_FOOTLESS: the stringer below carries the foot (_lxStairUnder)
+  if (ground && !_footless) { const gB = ctx.createLinearGradient(0, y + h * 0.55, 0, y + h); gB.addColorStop(0, 'rgba(0,0,0,0)'); gB.addColorStop(1, C.OUT); ctx.globalAlpha = _pa * a * 0.55; ctx.fillStyle = gB; ctx.fillRect(xs, y + h * 0.55, ww, h * 0.45); ctx.globalAlpha = _pa * a; }
   ctx.restore();
   ctx.lineWidth = 2; ctx.strokeStyle = C.OUT;
-  if (ground) { ctx.beginPath(); if (jl) ctx.moveTo(xs, y + h); else { ctx.moveTo(xs, y + cap * 0.5); ctx.lineTo(xs, y + h); } ctx.lineTo(xe, y + h); if (!jr) ctx.lineTo(xe, y + cap * 0.5); ctx.stroke(); }
+  if (ground && _footless) { ctx.beginPath(); if (!jl) { ctx.moveTo(xs, y + cap * 0.5); ctx.lineTo(xs, y + h); } if (!jr) { ctx.moveTo(xe, y + h); ctx.lineTo(xe, y + cap * 0.5); } ctx.stroke(); }   // v0.30.1455 - the sides only
+  else if (ground) { ctx.beginPath(); if (jl) ctx.moveTo(xs, y + h); else { ctx.moveTo(xs, y + cap * 0.5); ctx.lineTo(xs, y + h); } ctx.lineTo(xe, y + h); if (!jr) ctx.lineTo(xe, y + cap * 0.5); ctx.stroke(); }
   else { face(); ctx.stroke(); }
   // 3. the cap: the layer you stand on - a rolling top, a sunlit layer over a shadowed one, its edge
   //    hanging over the face and curling down the ends of a floating platform
@@ -37878,6 +38044,8 @@ const MAPS = {
     worldHeight: 1100,
     levelReq: 1,   // the sweep below opens every non-boss map anyway; monster levels come from MOB_NATURAL_LEVEL
     platTint: { top: '#cfd3ec', body: '#34365f' },   // = its floor palette: pale marble treads on deep indigo, read against the mid-tone sky
+    stairUnder: true,   // v0.30.1455 - each flight's underside is one carved stringer, not a sawtooth of flat feet (_lxStairUnder, per user)
+    noGroundRamps: true,   // v0.30.1455 - flat treads and square risers, each step eased (per user: "the stairs can be non-sloped")
     fixedLayout: true,
     bridge: true,
     taxiAccessible: true,
@@ -77607,7 +77775,9 @@ function checkPlatformCollision(entity) {
       } else if (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
           entity.y + entity.h > p.y && entity.y + entity.h < p.y + p.h + 20 &&
           entity.vy >= 0) {
+        const _rise = entity.y + entity.h - p.y;   // v0.30.1455 - how far the feet sat inside the piece: a walked-into riser, when large
         entity.y = p.y - entity.h; entity.vy = 0; entity.onGround = true;
+        if (entity === player && prevOnGround && _rise > 10 && _rise <= 40 && game.mapData && game.mapData.noGroundRamps) player._lxStepEase = { d: _rise, at: performance.now() };   // v0.30.1455 - drawn eased (_lxStepEaseOff)
       }
     } else {
       // v0.26.149 — Per user "Make dragoon G skill fall and penetrate
@@ -132079,6 +132249,7 @@ function drawPlatforms() {
   }
   // v0.30.1272 - the ramps between stepped ground pieces (_lxGroundRamps), painted over each seam in the floor's cap
   if (!(game.mapData && game.mapData.isVoid)) { const _rs = _lxGroundRamps(game.mapData); if (_rs) for (const r of _rs) _lxDrawRamp(r, _ptf, _th); }
+  if (game.mapData && game.mapData.stairUnder) _lxStairUnderDraw(_ptf);   // v0.30.1455 - a flight's underside, one carved stringer (_lxStairUnder)
   // v0.25.482 — outlinePlatforms post-pass. Strokes a 2 px near-black
   // border around every platform body for the underwater maps.
   // v0.25.772 — DISABLED. After v0.25.766 every map's floor + platform
@@ -133015,6 +133186,17 @@ function _lxDayPhase() {
   _LX_DAYPH = { t: now, phase, alpha, style: alpha ? 'rgba(' + tint + ',' + alpha + ')' : '' };
   return _LX_DAYPH;
 }
+// v0.30.1455 - SCREEN FILLS INSIDE THE WORLD PASS (per user: the Weight-Bearer's Stair's sky had "a transluscent white horizontal
+// cutoff"). The frame loop translates the world by -round(camera.y) on vertically scrolling maps (and by the photo-mode pan) and
+// does not restore before its late overlays, so a screen fill there covered the world's TOP screen instead of the screen: on the
+// 1100 px Stair the dusk/night tint stopped in a hard line across the sky at y = 590 - camera.y (the stun vignette slid the same
+// way). This undoes exactly those translates, as _qnavDrawCompass has since v0.29.896 (the transient hit-zoom punch stays, as it
+// does there). Call it between a save and a restore.
+function _lxUndoWorldShift() {
+  const pp = game._photoMode && game._photoPan;
+  const ox = Math.round((pp && pp.x) || 0), oy = Math.round((game.camera && game.camera.y) || 0) + Math.round((pp && pp.y) || 0);
+  if (ox || oy) ctx.translate(ox, oy);
+}
 function _drawDayNightTint() {
   if (!LX_AMBIENT_V2) return;
   const ph = _lxDayPhase();
@@ -133022,8 +133204,10 @@ function _drawDayNightTint() {
   const m = game.mapData, id = game.currentMap || '';
   if (!m || m.isVoid || m.isBossArena) return;
   if (id.indexOf('tower_b') === 0 || id.indexOf('clockwork') === 0) return;
+  ctx.save(); _lxUndoWorldShift();   // v0.30.1455 - the whole screen at any camera height (see _lxUndoWorldShift)
   ctx.fillStyle = ph.style;                                  // prebuilt string, no per-frame concat
   ctx.fillRect(-30, -30, W + 60, H + 60);
+  ctx.restore();
 }
 
 function updateAmbient() {
@@ -140825,6 +141009,7 @@ function _drawControlVignette() {
   if (!c || !c.hard) return;
   if (typeof W !== 'number' || typeof H !== 'number') return;
   ctx.save();
+  _lxUndoWorldShift();   // v0.30.1455 - centred on the screen on tall maps too (it rode camera.y off the top)
   ctx.globalAlpha = 0.22 + Math.sin(game.time * 0.3) * 0.08;
   if (!window._lxCtrlVigGrad || window._lxCtrlVigGrad._tint !== c.tint || window._lxCtrlVigGrad._w !== W) {
     const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.72);
@@ -164120,7 +164305,7 @@ function _lxDrawFrame(time) {
   drawBallistaTurrets();
   if (typeof _mpDrawPeers === 'function') _mpDrawPeers();   // ghost peers underneath
   if (typeof _lxDawnAuraDraw === 'function') _lxDawnAuraDraw();   // v0.30.767 — the armed Bastion: dawn column + rune ward, under the paladin
-  drawPlayer();
+  { const _se = _lxStepEaseOff(); if (_se) { ctx.save(); ctx.translate(0, _se); drawPlayer(); ctx.restore(); } else drawPlayer(); }   // v0.30.1455 - a flat step's snap, eased
   drawAegisOrbs();
   drawNecromancerOrbs();   // v0.29.911 — Soul Ward orbs (necromancer)
   drawHexOrbs();           // v0.30.x — Grand Hex ward orbs (hexmaster)
