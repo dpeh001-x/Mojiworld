@@ -7,8 +7,8 @@
 // its paired door on solid ground; [4] walking from town still reaches every map it reached before, plus the Stair; [5] no old
 // map moves further from town or respawns elsewhere (a bridge costs 0 hops: no monster is buffed); [6] the W map draws the
 // node and its lanes, not the old lane, no overlapping discs, its name and region icon; [7] the taxi offers it and drives
-// there; [8] the area card and the minimap; [9] it plays for 3 s; [11] THE CLIMB WALKS - held Right carries the hero from the
-// Sanctum door up all twenty ramped risers to the Singularity's door; [12] nobody is stranded - a Lv 50 hero leaves the arena
+// there; [8] the area card and the minimap; [9] it plays for 3 s; [11] THE CLIMB WALKS UP FLAT STEPS - no ramps (per user), held Right
+// carries the hero from the Sanctum door up all twenty square risers, each step eased, to the Singularity's door; [12] nobody is stranded - a Lv 50 hero leaves the arena
 // onto the Stair and walks down to the Sanctum, while the Stair keeps the Lv 70 W-map gate; [13] its own backdrop (one copy),
 // its own theme (served, in the jukebox with its icon); [14] its backdrop moves - the clip takes over, plays on a loop, and the
 // sphere pass follows it; [10] no page errors. Baselines ([4], [5]) were read from main
@@ -465,28 +465,35 @@ try {
     ok(`[9] ${id} plays for 3 s: nothing spawns (a quiet road), the hero stays in the world, no page errors`, good, r);
   }
 
-  // [11] THE CLIMB WALKS. From the Sanctum door, the real Right key held down carries the hero up all twenty 30 px risers to
-  // the Singularity's door: every riser is ramped (_lxGroundRamps), so the main road never needs a jump. The hero is kept safe
-  // (settle) the whole way; the run ends at the door or after 75 s of wall time.
+  // [11] THE CLIMB WALKS UP FLAT STEPS (per user: "the stairs can be non-sloped for here" - flat treads and square risers). No
+  // seam carries a ramp (the map is noGroundRamps); a ground piece has no side wall, so held Right still carries the hero from the
+  // Sanctum door up all twenty 30 px risers to the Singularity's door, each riser a snap onto the next tread that the sprite eases
+  // (_lxStepEaseOff) instead of popping. The hero is kept safe (settle) the whole way; the run ends at the door or after 75 s.
   const st = await safe(async () => {
     __nm.settle(); loadMap('weightbearerStair'); await __nm.frames(15, __nm.settle);
     const md = game.mapData, door = (game.portals || []).find((q) => q.dest === 'gravitosArena');
     player.x = 140 - player.w / 2; player.y = 1040 - player.h - 1; player.vx = 0; player.vy = 0;
     await __nm.frames(10, __nm.settle);
+    window.__lxEases = new Set(); window.__lxEaseStop = false;   // every eased step, by its start time
+    (function watch() { const e = player._lxStepEase; if (e) window.__lxEases.add(e.at); if (!window.__lxEaseStop) requestAnimationFrame(watch); })();
     return { ramps: (_lxGroundRamps(md) || []).length, door: door ? { x: door.x, y: door.y } : null, feet: Math.round(player.y + player.h) };
   }, undefined, 60000);
   let pos = { err: 'not walked' };
+  const at = () => safe(() => { __nm.settle(); return { cx: Math.round(player.x + player.w / 2), feet: Math.round(player.y + player.h), gnd: !!player.onGround, map: game.currentMap, eased: window.__lxEases ? window.__lxEases.size : 0 }; }, undefined, 10000);
   if (!st.err) {
     await page.keyboard.down('ArrowRight');
     for (const w0 = Date.now(); Date.now() - w0 < 75000;) {
       await new Promise((r) => setTimeout(r, 400));
-      pos = await safe(() => { __nm.settle(); return { cx: Math.round(player.x + player.w / 2), feet: Math.round(player.y + player.h), gnd: !!player.onGround, map: game.currentMap }; }, undefined, 10000);
+      pos = await at();
       if (pos.err || pos.map !== 'weightbearerStair' || pos.cx >= 3780) break;
     }
     await page.keyboard.up('ArrowRight');
+    await new Promise((r) => setTimeout(r, 800));
+    if (!pos.err && pos.map === 'weightbearerStair') pos = await at();
+    await safe(() => { window.__lxEaseStop = true; return 1; }, undefined, 5000);
   }
-  ok('[11] the climb walks: held Right carries the hero from the Sanctum door (feet 1040) up all 20 ramped risers to the Singularity\'s door (feet 440)',
-    !st.err && st.ramps === 20 && st.feet === 1040 && !!st.door && !pos.err && pos.map === 'weightbearerStair' && pos.cx >= 3780 && Math.abs(pos.feet - 440) <= 2 && pos.gnd, { st, pos });
+  ok('[11] the climb walks up flat steps: no seam is ramped, and held Right carries the hero from the Sanctum door (feet 1040) up all 20 square risers, each eased, to the Singularity\'s door (feet 440)',
+    !st.err && st.ramps === 0 && st.feet === 1040 && !!st.door && !pos.err && pos.map === 'weightbearerStair' && pos.cx >= 3740 && Math.abs(pos.feet - 440) <= 2 && pos.gnd && pos.eased >= 18, { st, pos });
 
   // [12] NOBODY IS STRANDED. The arena's door keeps its Lv 70 gate (so the W map still locks the Stair under 70) but it is a
   // door OUT of an arena, which never blocks; the Stair's door down to the Sanctum carries no gate at all.
