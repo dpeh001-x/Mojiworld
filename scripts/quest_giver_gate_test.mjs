@@ -2,6 +2,8 @@
 // its giver stands on (by more than 3 levels): Barnaby II-IV, Lyra V and the Kindest Hand were Lv 45-50 while Barnaby stands only in the Lv 61
 // Frosted Mansion (moved there per user earlier), reached only through Lv 61-71 monsters. Checked for EVERY quest
 // with a giver, against the maps as the game builds them (the Stage Editor bake included). Plus the prologue's card.
+// barnaby-bastion (per user): Barnaby keeps the Bastion's forge now, in the Lv 6 Courtyard, so his quests open at their
+// authored levels again - II-IV and Lyra V at 45, the Kindest Hand at 50 - and Brok's Barnaby I points at the Bastion.
 //   [SERVE_ROOT=<dir with serve.js, data/, art>] node scripts/quest_giver_gate_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import { existsSync } from 'node:fs';
@@ -43,10 +45,10 @@ try {
     }
     const src = document.documentElement.outerHTML;
     return { bad, barn, barnabyAt: where.Barnaby || [], eons: src.includes('EONS FROM NOW'), realm: src.includes('IN A DIFFERENT REALM — AT THE FAR END OF THE DREAM'),
-      pointer: /he keeps his forge in the Frosted Mansion/.test((QUESTS.q_barnaby_five || {}).desc || ''), five: (QUESTS.q_barnaby_five || {}).levelReq };
+      pointer: /His forge is in the Bastion Courtyard/.test((QUESTS.q_barnaby_five || {}).desc || ''), five: (QUESTS.q_barnaby_five || {}).levelReq };
   });
   check(r.bad.length === 0, 'no quest unlocks well below the level of the map its giver stands on', J(r.bad));
-  check(J(r.barnabyAt) === J(['glasswindHamlet']) && Object.values(r.barn).every((lv) => lv >= 61), "Barnaby stays in the Frosted Mansion and his quests (and the Kindest Hand after them) open at Lv 61", J({ at: r.barnabyAt, lv: r.barn }));
+  check(J(r.barnabyAt) === J(['bastion']) && Object.entries(r.barn).every(([id, lv]) => lv === (id === 'q_kindest_hand' ? 50 : 45)), "Barnaby stands in the Bastion Courtyard and his quests open at 45 again (the Kindest Hand after them at 50)", J({ at: r.barnabyAt, lv: r.barn }));
   check(r.five === 45 && r.pointer, "Brok's Barnaby I stays Lv 45 and says where Barnaby's forge is", J({ lv: r.five, pointer: r.pointer }));
   check(!r.eons && r.realm, 'the prologue opens IN A DIFFERENT REALM', J({ eons: r.eons, realm: r.realm }));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 3)));
