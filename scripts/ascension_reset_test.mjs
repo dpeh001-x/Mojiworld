@@ -29,6 +29,7 @@ try {
 
   const r = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    LX_ASCENSION_LOCKED = false;   // v0.30.1453 ascension is locked for players; this suite drives the feature itself, so it opens the lock
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     const o = { ver: GAME_VERSION, runs: {} };

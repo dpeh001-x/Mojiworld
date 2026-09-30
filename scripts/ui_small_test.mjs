@@ -36,6 +36,7 @@ async function boot(vw, vh) {
   await p.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
   await p.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await p.waitForFunction(() => typeof loadMap === 'function' && typeof _gugumaAscendPrompt === 'function' && typeof openLevelUpPanel === 'function' && typeof openJukebox === 'function', null, { timeout: 150000 });
+  await p.evaluate(() => { LX_ASCENSION_LOCKED = false; });   // v0.30.1453 ascension is locked for players; this suite drives the feature itself, so it opens the lock
   await p.evaluate(() => {
     window.__frames = async (n, ms) => { const t0 = game.time | 0, w0 = Date.now(); while ((game.time | 0) - t0 < n && Date.now() - w0 < (ms || 30000)) await new Promise((s) => setTimeout(s, 40)); return (game.time | 0) - t0; };
     window.__box = (el) => { if (!el) return null; const cs = getComputedStyle(el), r = el.getBoundingClientRect(); return (cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0) ? [r.left, r.top, r.right, r.bottom] : null; };

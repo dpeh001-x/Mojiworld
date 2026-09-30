@@ -82,6 +82,7 @@ try {
 
   // 4) Ascend from the pause menu with no heirloom picked
   const H = await p.evaluate(async () => {
+    LX_ASCENSION_LOCKED = false;   // v0.30.1453 ascension is locked for players; this suite drives the feature itself, so it opens the lock
     player.level = 100; delete game._heirloomIdx; game._prestigeOffered = false;
     document.getElementById('guguma-ascend-go')?.remove();
     try { _lxPauseAct('ascend'); } catch (e) { return { err: String(e).slice(0, 100) }; }

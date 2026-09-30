@@ -126,6 +126,7 @@ const asc = await page.evaluate(async () => {
   const realReload = location.reload;
   let reloadArmed = false;
   try { Object.defineProperty(location, 'reload', { value: () => { reloadArmed = true; }, configurable: true }); } catch (e) {}
+  eval('LX_ASCENSION_LOCKED = false');   // v0.30.1453 ascension is locked for players; this suite drives the feature itself, so it opens the lock
   const PL = eval('PRESTIGE_LEVEL');
   p.level = PL;
   eval('offerPrestige')();

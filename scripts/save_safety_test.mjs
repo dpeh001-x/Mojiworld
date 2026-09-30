@@ -70,6 +70,7 @@ try {
   });
   check(ul.ok === false && ul.slot, 'a save that will not load is filed in Save Backups ("could not load")', J(ul));
   const asc = await p2.evaluate(() => {
+    LX_ASCENSION_LOCKED = false;   // v0.30.1453 ascension is locked for players; this suite drives the feature itself, so it opens the lock
     player.level = 100; game._prestigeOffered = false; game.expedition = { active: true };
     try { offerPrestige(true); } catch (e) {}
     const offered = !!game._prestigeOffered; game.expedition = null; try { closeAllModals(); } catch (e) {}

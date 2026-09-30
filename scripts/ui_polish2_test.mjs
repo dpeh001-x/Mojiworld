@@ -34,6 +34,7 @@ async function boot(opts) {
   await p.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
   await p.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await p.waitForFunction(() => typeof loadMap === 'function' && typeof acceptQuest === 'function' && typeof _renderAffixPin === 'function' && typeof _gugumaAscendPrompt === 'function' && typeof openLevelUpPanel === 'function', null, { timeout: 150000 });
+  await p.evaluate(() => { LX_ASCENSION_LOCKED = false; });   // v0.30.1453 ascension is locked for players; this suite drives the feature itself, so it opens the lock
   await p.evaluate(() => {
     for (const id of ['loading-overlay', 'class-select-modal', 'lo-auth']) { const o = document.getElementById(id); if (o) { o.style.display = 'none'; o.classList.add('fade'); } }
     window._lxBootGateDone = true;

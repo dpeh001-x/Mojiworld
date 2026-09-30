@@ -23,6 +23,7 @@ await page.evaluate(() => new Promise((res) => { let n = 0; const t = () => { wi
 await page.waitForTimeout(1200);
 const g = await page.evaluate(async () => {
   const out = {}; const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  LX_ASCENSION_LOCKED = false;   // v0.30.1453 ascension is locked for players; this suite drives the feature itself, so it opens the lock
   try { loadMap('forest'); } catch (e) {} await wait(400);
   out.cap = PRESTIGE_LEVEL;
   // XP freezes at the cap
