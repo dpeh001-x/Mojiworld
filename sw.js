@@ -282,7 +282,7 @@
 // Cur are redrawn and re-animated under their own names, so a returning browser would otherwise keep the old art.
 // v0.30.1468 - v135 -> v136. Aquarius idle 2..7 are REPLACED under their own names (their missing black outline
 // painted back in), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v137';   // virga-sharp - Virga's 36 idle / walk / fly / attack frames re-sharpened (same names)
+const CACHE = 'mojiworld-assets-v138';   // v0.30.1473 - Aetherion's Shard Lance gets a thin black outline (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
