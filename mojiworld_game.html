@@ -16290,7 +16290,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1517';
+const GAME_VERSION = 'v0.30.1518';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -59214,13 +59214,33 @@ function _coopSendPing() {
 // the heal scopes to the caster's map via `hm` instead.
 function _coopPartyHeal(hpPct, mpPct, label) {
   if (typeof _coopActive !== 'function' || !_coopActive() || !net.ws || net.ws.readyState !== 1) return;
+  // v0.30.1518 skill-desc - same fix as _coopPartyBuff: a heal cast inside the 150 ms guard was dropped, so two heals pressed
+  // together reached partners as one. Held heals now add up into a single frame (each share still capped at 100%).
+  const hp = Math.min(1, Math.max(0, hpPct || 0)), mpp = Math.min(1, Math.max(0, mpPct || 0));
   const now = performance.now();
-  if (now - (net._lastPhealAt || 0) < 150) return;   // flood guard
+  const _wait = 150 - (now - (net._lastPhealAt || 0));
+  if (_wait > 0 || net._phealHeld) {
+    const h = net._phealHeld || (net._phealHeld = { hp: 0, mpp: 0, sl: '' });
+    h.hp = Math.min(1, h.hp + hp); h.mpp = Math.min(1, h.mpp + mpp);
+    const _lb = String(label || 'a blessing');
+    h.sl = !h.sl ? _lb : (h.sl.split(' + ').includes(_lb) ? h.sl : h.sl + ' + ' + _lb);
+    if (!h.t) h.t = setTimeout(_coopPartyHealFlush, Math.max(0, _wait));
+    return;
+  }
   net._lastPhealAt = now;
+  _coopPartyHealSend(hp, mpp, label);
+}
+function _coopPartyHealFlush() {
+  const h = net._phealHeld; net._phealHeld = null;
+  if (!h || !(h.hp > 0 || h.mpp > 0) || typeof _coopActive !== 'function' || !_coopActive() || !net.ws || net.ws.readyState !== 1) return;
+  net._lastPhealAt = performance.now();
+  _coopPartyHealSend(h.hp, h.mpp, h.sl);
+}
+function _coopPartyHealSend(hp, mpp, label) {
   try {
     net.ws.send(JSON.stringify({ t: 'ping', phl: 1, hm: game.currentMap,
-      hp: +Math.min(1, Math.max(0, hpPct || 0)).toFixed(3),
-      mpp: +Math.min(1, Math.max(0, mpPct || 0)).toFixed(3),
+      hp: +hp.toFixed(3),
+      mpp: +mpp.toFixed(3),
       sl: String(label || 'a blessing').slice(0, 24) }));
   } catch (e) {}
 }
@@ -59306,9 +59326,30 @@ function _coopPartyBuff(key, ms, label) {
     if (d > 0) list.push([String(k).slice(0, 24), d]);
   }
   if (!list.length) return;
+  // v0.30.1518 skill-desc - the 150 ms flood guard used to DROP a second party buff cast inside it, so War Cry pressed with
+  // Guardian, Holy Shield or Bloodlust reached partners with only one of the two (per user: "war cry is said to buff partners
+  // for 7 seconds but it does not"). It now holds the frame and folds everything cast inside the guard into it: one frame,
+  // every buff (the receiver takes up to 8 per frame and keeps the longer of two timers).
   const now = performance.now();
-  if (now - (net._lastPbufAt || 0) < 150) return;   // flood guard, mirrors the heal channel
+  const _wait = 150 - (now - (net._lastPbufAt || 0));
+  if (_wait > 0 || net._pbufHeld) {
+    const h = net._pbufHeld || (net._pbufHeld = { bl: new Map(), sl: '' });
+    for (const [k, d] of list) h.bl.set(k, Math.max(h.bl.get(k) || 0, d));
+    const _lb = String(label || 'a blessing');
+    h.sl = !h.sl ? _lb : (h.sl.split(' + ').includes(_lb) ? h.sl : h.sl + ' + ' + _lb);
+    if (!h.t) h.t = setTimeout(_coopPartyBuffFlush, Math.max(0, _wait));
+    return;
+  }
   net._lastPbufAt = now;
+  _coopPartyBuffSend(list, label);
+}
+function _coopPartyBuffFlush() {
+  const h = net._pbufHeld; net._pbufHeld = null;
+  if (!h || !h.bl.size || typeof _coopActive !== 'function' || !_coopActive() || !net.ws || net.ws.readyState !== 1) return;
+  net._lastPbufAt = performance.now();
+  _coopPartyBuffSend([...h.bl.entries()], h.sl);
+}
+function _coopPartyBuffSend(list, label) {
   try {
     net.ws.send(JSON.stringify({ t: 'ping', pbf: 1, hm: game.currentMap,
       bl: list,
@@ -79325,7 +79366,7 @@ function updatePlayer(dt) {
   if (stunned) {
     // v0.30.1134 combat-fixes - "ends early if ... you are staggered": the volley's own stagger test sits below this return and
     // could never fire, so a stagger only paused the channel. End it here.
-    if (player._ballistaChannel) player._ballistaChannel = null;
+    if (player._ballistaChannel) { _lxBallistaFree(player._ballistaChannel); player._ballistaChannel = null; }   // v0.30.1518 skill-desc - and frees the other skills
     _lxTickPlayerTimers(dt);   // v0.30.x — CC does not stop the clock
     _lxTickBlockTimers(dt);   // v0.30.919 nor the block / parry clocks
     _lxSummonWardTick(dt); _lxSummonTurretTick(dt); _lxSummonPetTick(dt);   // v0.30.1213 summon-cc - nor your summons, orbs and auras
@@ -80020,12 +80061,14 @@ function updatePlayer(dt) {
   // v0.25.512 — Arch Bishop "Judgment of the Holy Grail" ascend phase.
   // While player._ascended > 0:
   //   • gravity is suppressed (player floats at start-Y minus 70 px)
-  //   • invulnerable stays high (set on cast, refreshed here)
+  //   • an 0.8 s cast guard, set on cast (no longer refreshed here: v0.30.1518)
   //   • drifting golden-geometry sparkles emit every 4 frames
   //   • on expiry, gravity + collision resume normally next frame
   if ((player._ascended || 0) > 0) {
     player._ascended -= dt;
-    player.invulnerable = Math.max(player.invulnerable, 200);
+    // v0.30.1518 skill-desc - no per-frame invulnerability. v0.30.x cut the G's untargetable window to its 0.8 s cast guard (the
+    // 5 s immortality is the B's) but left this refresh, so the whole 2.5 s ascend stayed untouchable and the text's "0.8s
+    // guard" was wrong. The float and the root stay.
     if (player._ascendStartY != null) {
       player.y = player._ascendStartY - 70;
     }
@@ -80360,6 +80403,7 @@ function updatePlayer(dt) {
         spawnSmoothImpact(player.x + player.w/2 + player.facing * 40, player.y + player.h/2, '#cc5522');
       }
       player._ballistaChannel = null;
+      if (!expired) _lxBallistaFree(ch);   // v0.30.1518 skill-desc - a stream cut short frees the other skills
     } else {
       // MP drain — 1 MP per 10 frames (~6 MP/sec)
       ch.mpDrainAccum++;
@@ -80438,7 +80482,7 @@ function updatePlayer(dt) {
           if (_lxMonHitD2(m, cx, cy) <= AOE_R_SQ) {   // v0.30.x tall-boss — the side clones hover 28 px under the floor and could never reach a boss's middle
             // Slightly toned down per-hit since we now hit a full circle.
             const dmg = Math.floor(getAtk() * 1.1 + 6);
-            _ag12.hit(m, dmg, rollCrit(), 'shadow');
+            _ag12.hit(m, dmg, false, 'shadow');   // v0.30.1518 skill-desc - a plain hit (the crit flag never multiplied it)
             // Push enemies outward from the clone instead of along facing
             const len = Math.sqrt(dx * dx + dy * dy) || 1;
             m.vx += (dx / len) * 3;
@@ -82754,6 +82798,7 @@ function isReady(id) {
   let _mpCost = s.mp;
   if (player.cls === 'mage' && _mpCost > 0) _mpCost = Math.ceil(_mpCost * 0.80);
   if (typeof hasMilestone === 'function' && hasMilestone('overload') && (s.cls === 'mage' || s.job === 'archmage' || s.job === 'warlock')) _mpCost = Math.ceil(_mpCost * 1.5);
+  _mpCost = _lxPressMpCost(id, _mpCost);   // v0.30.1518 skill-desc - a blink / an in-window Deadeye press is judged at its own price
   // v0.30.x — an ARMED Bastion release is a banked cast: arming was free and
   // the meter was paid in hits taken, so the release tap must never bounce on
   // MP. Without this, arming and then dipping under 68 MP left B silently dead
@@ -82874,6 +82919,20 @@ const _LX_DE_WINDOWS = {
   marksman_ult:     { until: '_protocolUntil', ms: LX_PROTOCOL_MS, gate: LX_PROTOCOL_GATE_MS, toast: 'DEADEYE PROTOCOL — OVERCLOCK 8s',
                       onOpen: () => { _LX_DE.meter = 0; _LX_DE.execTally = 0; _LX_DE.protocolTotal = 0; _lxDeSfx('deadeye_lock'); }, onClose: () => _lxProtocolClose() },
 };
+// v0.30.1518 skill-desc - what a press really costs at the MP gate (isReady and castSkill). Two presses are cheaper than their skill and
+// were judged at the full price, then refunded: a Mirror Shadow BLINK (10 MP) needed the summon's whole cost on hand, and a press
+// inside an open Deadeye / Deadeye Protocol window (free) needed 50 / 65 MP. Both texts had the price right; now the gate does.
+function _lxPressMpCost(id, cost) {
+  if (id === 'shadowlord_clones' && player._clones && player._clones.length) return Math.min(cost, LX_MIRROR_BLINK_MP);
+  const _dw = (typeof _LX_DE_WINDOWS !== 'undefined') ? _LX_DE_WINDOWS[id] : null;
+  if (_dw && player[_dw.until] && _lxDeNow() < player[_dw.until]) return 0;
+  return cost;
+}
+// v0.30.1518 skill-desc - a Siege Volley that ends early (a stagger, no MP) frees the other skills: the cast lock was stamped to
+// the stream's planned 8 s end and outlived it. Kept when something else set the lock longer.
+function _lxBallistaFree(ch) {
+  if (ch && (player._castLockUntil | 0) <= ch.endsAt && (player._castLockUntil | 0) > (game.time | 0)) player._castLockUntil = game.time | 0;
+}
 function _lxDeAlive(m) { return !!(m && m.currentHp > 0 && !m._dying && game.monsters && game.monsters.indexOf(m) >= 0); }
 // Lock-on: the nearest live foe in front of the archer, a boss first; behind only when nothing is in front.
 function _lxDeadeyeAcquire() {
@@ -84286,6 +84345,7 @@ function castSkill(id) {
   // v0.30.53 — Apotheosis v3: the first catastrophe pays the 100 MP, the other two
   // are free (same shape as Deadeye's in-window shots, decided at the gate).
   if (id === 'elementalist_ult' && (player._apoCharges | 0) > 0) cost = 0;
+  cost = _lxPressMpCost(id, cost);   // v0.30.1518 skill-desc - same price as isReady judged (_lxPressMpCost)
   if (player.mp < cost) { _failCue(); return; }
   // v0.26.223 — Defense-in-depth reorder. Pre-fix the order was:
   //   1. MP check (L32017)
@@ -89384,14 +89444,14 @@ const SKILL_FNS = {
           color: `rgba(80,20,140,${0.7 - t * 0.4})`,
         });
       }
-      hitMonster(tgt, Math.floor(getAtk() * 1.3), true, 'shadowStrike');  /* v0.25.658: 1.9 → 1.5 (chain Q ~4.5× total, target 4×) */
+      hitMonster(tgt, Math.floor(getAtk() * 1.3), false, 'shadowStrike');  /* v0.30.1518 skill-desc: a plain hit - it was flagged a crit, never dealt crit damage */  /* v0.25.658: 1.9 → 1.5 (chain Q ~4.5× total, target 4×) */
       // v0.25.530 — Level-10 bonus: on the FINAL strike (n === 2, the
       // 3rd target), fire one extra ATK × 1.9 crit ~120 ms later.
       const _ssBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('shadowStrike') : null;
       if (_ssBonus && _ssBonus.finalHits && n === 4) {   // v0.26.425 — final strike is now the 5th (n===4)
         scheduleSkillTimer(() => {
           if (!tgt || tgt.currentHp <= 0 || player.hp <= 0 || game.paused) return;
-          hitMonster(tgt, Math.floor(getAtk() * 1.3), true, 'shadowStrike');  /* v0.25.658: 1.9 → 1.5 (chain Q ~4.5× total, target 4×) */
+          hitMonster(tgt, Math.floor(getAtk() * 1.3), false, 'shadowStrike');  /* v0.30.1518 skill-desc: a plain hit - it was flagged a crit, never dealt crit damage */  /* v0.25.658: 1.9 → 1.5 (chain Q ~4.5× total, target 4×) */
           // v0.26.027 — lvl-10 bonus-hit sprite bumped 130 → 260 (+100%).
           // v0.26.030 — Same trio of changes as the main strike sprite:
           // smaller (260 → 170 — slightly under main's 180 so the bonus
@@ -90958,8 +91018,8 @@ const SKILL_FNS = {
     const recent = player._recentKills || 0;
     const stacks = Math.min(8, recent);
     const _wbMs = _lxRankDurMs('warlord_warcry', 12000);   // v0.30.779 - +1 s per skill rank
-    player.buffs.warCry = _wbMs;
-    player.buffs.bloodlust = _wbMs;
+    player.buffs.warCry = Math.max(player.buffs.warCry || 0, _wbMs);   // v0.30.1518 skill-desc - a banner never cuts a longer War Cry / Bloodlust short
+    player.buffs.bloodlust = Math.max(player.buffs.bloodlust || 0, _wbMs);
     // v0.29.304 — a banner is a party rally by definition: partners on this map
     // get BOTH buffs in one frame (the set form exists precisely for this — as
     // two separate sends the flood guard would drop the second) plus the heal.
@@ -91663,7 +91723,7 @@ const SKILL_FNS = {
           // Object-ref dedup (v0.25.939): knockback moves the mob between
           // steps, so any position-derived key re-hits the same target.
           if (aabb(hitbox, _atkMonBox(m)) && !hitIds.has(m)) {
-            _ag14.hit(m, Math.floor(getAtk() * LX_KAGE_DMG), rollCrit(), 'melee');
+            _ag14.hit(m, Math.floor(getAtk() * LX_KAGE_DMG), false, 'melee');   // v0.30.1518 skill-desc - a plain hit (the crit flag never multiplied it)
             m.vx += dir * 5;
             spawnSmoothImpact(m.x + m.w / 2, m.y + m.h / 2, '#ff4a62');
             hitIds.add(m);
@@ -91937,9 +91997,9 @@ const SKILL_FNS = {
         // (phase i-frames, Mirror shroud/1%-cap, Gemini reject+punish, Taurus block,
         // Cancer/Virgo/Libra DR). The old direct HP write nuked bosses through immune
         // phases. hitMonster owns the DEF curve, crit mult, lifesteal, and killMonster.
-        const crit = rollCrit() || Math.random() < 0.7;       // strong crit bias
+        // v0.30.1518 skill-desc - a plain hit: it rolled a 70%+ crit flag that never multiplied the damage (gold numbers, normal damage)
         delete target._voidBrand;
-        hitMonster(target, Math.floor(getAtk() * 2.6), crit, 'phantom_cut');
+        hitMonster(target, Math.floor(getAtk() * 2.6), false, 'phantom_cut');
         flash(0.22); audio.play('crit');
         // After-image trail — shadow chain connecting the strikes
         for (let k = 0; k < 14; k++) {
@@ -92530,7 +92590,7 @@ const SKILL_FNS = {
         if (target && target.currentHp > 0) {
           // v0.25.557 — pillar damage 2.4×ATK → 1.8×ATK per rebalance spec.
           const dmg = Math.floor(getAtk() * 1.9);
-          hitMonster(target, dmg, rollCrit(), 'archbishop_grail');
+          hitMonster(target, dmg, false, 'archbishop_grail');   // v0.30.1518 skill-desc - a plain hit (the crit flag never multiplied it)
           // MP refund — 6% of max MP per connecting pillar.
           const refund = Math.floor(getMaxMp() * 0.03);   // v0.30.x — halved: 7 pillars were repaying 42% of max MP on a 60 MP cast
           player.mp = Math.min(getMaxMp(), player.mp + refund);
@@ -92691,7 +92751,7 @@ const SKILL_FNS = {
     if (!_active) {
       const _wobDur = _lxRankDurMs('warlord_ult', 10000);   // v0.30.779 - the enrage and its Bloodlust: +1 s per skill rank
       player._warlordEnrageUntil = _now + Math.max(1, Math.round(_msFrames(_wobDur)));
-      player.buffs = player.buffs || {}; player.buffs.bloodlust = _wobDur;
+      player.buffs = player.buffs || {}; player.buffs.bloodlust = Math.max(player.buffs.bloodlust || 0, _wobDur);   // v0.30.1518 skill-desc - never cuts a longer Bloodlust short
       player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.25));
       // v0.29.304 — only the OPENING of the enrage window shares (this handler
       // re-runs on every re-press inside the window; broadcasting each one
@@ -109758,6 +109818,15 @@ function updateProjectiles(dt) {
                 life: _lean ? 20 : 30, fadeOut: 0.55 });
           }
           if (p.doomBrand && typeof _doomBrandAdd === 'function') _doomBrandAdd(m, p.doomBrand);
+          // v0.30.x — hex stacks from the ult's orbs. Ten orbs spread over the
+          // nearest four targets is 2-3 stacks each, which is what turns the
+          // ult into a rupture setup instead of a separate, parallel DOT.
+          if (p.hexStacks && typeof _hexAdd === 'function' && m.currentHp > 0) {
+            if (typeof _applyMobStatus === 'function') _applyMobStatus(m, 'poison', LX_GRANDHEX_STACK_MS, { chance: 100 });
+            _hexAdd(m, p.hexStacks | 0);
+          }
+          // v0.30.1518 skill-desc - the stack lands FIRST, then the super poison: _hexAdd ASSIGNS the pile's DOT (0.35x ATK a stack),
+          // so landing after the poison it overwrote the 0.9x with 0.35x / 0.7x on a foe with one or two stacks.
           // v0.29.693 — SUPER POISON (Pandemic Hex orbs). A hotter tier of the
           // curse DOT: always lands, 0.9x ATK per tick. Math.max so it never
           // downgrades a grand-hex pile that happens to tick harder already.
@@ -109770,13 +109839,6 @@ function updateProjectiles(dt) {
             }
             m.burnDmg = Math.max(m.burnDmg | 0, _spNew);
           }   // v0.29.684
-          // v0.30.x — hex stacks from the ult's orbs. Ten orbs spread over the
-          // nearest four targets is 2-3 stacks each, which is what turns the
-          // ult into a rupture setup instead of a separate, parallel DOT.
-          if (p.hexStacks && typeof _hexAdd === 'function' && m.currentHp > 0) {
-            if (typeof _applyMobStatus === 'function') _applyMobStatus(m, 'poison', LX_GRANDHEX_STACK_MS, { chance: 100 });
-            _hexAdd(m, p.hexStacks | 0);
-          }
           hitIds.add(m);
           // Nightreaper ricochet — bounce to the next nearest foe.
           // v0.25.247 (C3) — also exclude monsters already hit via
