@@ -16288,7 +16288,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1509';
+const GAME_VERSION = 'v0.30.1510';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -23005,6 +23005,61 @@ function _lxBowPulledString(c, H) {
   const dev = X.k * Math.sqrt(Math.abs(X.m.a * X.m.d - X.m.b * X.m.c));
   c.save(); _lxBowStrokes(c, X.S, dev, [A.x, A.y, H.x, H.y, B.x, B.y]); c.restore();
   return true;
+}
+// v0.30.1510 ARMOUR FIT (per user: "improve the aesthetic and shape of how the armour appears on screen on the character"). Body armour
+// is one flat image pinned to the torso, and the user's Gear Align erases trimmed its sleeves, so every outfit stood on bare skin
+// arms and legs. Now the arms, legs and feet are drawn in the armour's own dark cloth (sleeves, leggings, darker boots); the hands
+// stay skin. The colour is read once per image from the art's dark mid-tones (outline and glints left out), cached per image.
+// The armour itself is drawn exactly as before - rigid, one piece, every Gear Align number untouched (a two-half sway was tried
+// and dropped: it bent effects such as the Hurricane Mantle's lightning along with the rigid plate). Off with
+// window._lxNoGarments = true (an A/B switch). A tainted image (no CORS), a tinted piece or a paint-over keeps the skin limbs.
+const _LX_GARMENT = new WeakMap();
+function _lxGarmentOf(img) {
+  if (!img || !img.complete || !img.naturalWidth) return null;
+  if (_LX_GARMENT.has(img)) return _LX_GARMENT.get(img);
+  let out = null;
+  try {
+    const N = 40, cv = document.createElement('canvas'); cv.width = cv.height = N;
+    const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(img, 0, 0, N, N);
+    const d = c.getImageData(0, 0, N, N).data, bins = [];
+    for (let k = 0; k < 13; k++) bins.push({ n: 0, r: 0, g: 0, b: 0 });
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 200) continue;
+      const r = d[i], g = d[i + 1], b = d[i + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b), v = mx / 255, s = mx ? (mx - mn) / mx : 0;
+      if (v < 0.16 || (v > 0.93 && s < 0.2)) continue;   // the outline and the glints are not the cloth
+      let k = 12;
+      if (s >= 0.2) { const dd = mx - mn; let h = mx === r ? ((g - b) / dd) % 6 : mx === g ? (b - r) / dd + 2 : (r - g) / dd + 4; h *= 60; if (h < 0) h += 360; k = Math.floor(h / 30) % 12; }
+      const B = bins[k]; B.n++; B.r += r; B.g += g; B.b += b; (B.px || (B.px = [])).push([v, r, g, b]);
+    }
+    let best = null; for (const B of bins) if (B.n && (!best || B.n > best.n)) best = B;
+    // the undergarment is the outfit's DARK cloth: its dark mid-tones (value 0.18-0.55) in the hue they mostly have; the lit face's
+    // hue only when the piece has too little dark paint
+    { const dk = []; for (const B of bins) for (const p of (B.px || [])) if (p[0] > 0.18 && p[0] < 0.55) dk.push(p);
+      if (dk.length >= 40) { const hb = new Map(); for (const p of dk) { const mx = Math.max(p[1], p[2], p[3]), mn = Math.min(p[1], p[2], p[3]); let k = 12; if (mx && (mx - mn) / mx >= 0.2) { const dd = mx - mn; let h = mx === p[1] ? ((p[2] - p[3]) / dd) % 6 : mx === p[2] ? (p[3] - p[1]) / dd + 2 : (p[1] - p[2]) / dd + 4; h *= 60; if (h < 0) h += 360; k = Math.floor(h / 30) % 12; } (hb.get(k) || hb.set(k, []).get(k)).push(p); }
+        let top = null; for (const v of hb.values()) if (!top || v.length > top.length) top = v; best = { n: top.length, px: top.map((p) => p).concat(top) }; } }
+    if (best && best.n >= 12) {
+      // the cloth under the armour takes the armour's own SHADE of that colour (the darker half of its pixels), not a darkened
+      // copy of its lit face: a darkened gold went olive, gold's own shadows are bronze
+      best.px.sort((x, y) => x[0] - y[0]); const half = best.px.slice(0, Math.max(6, best.px.length >> 1));
+      let R = 0, G = 0, Bl = 0; for (const p of half) { R += p[1]; G += p[2]; Bl += p[3]; } R /= half.length; G /= half.length; Bl /= half.length;
+      const hex = (k) => '#' + [R, G, Bl].map((v) => Math.max(0, Math.min(255, Math.round(v * k))).toString(16).padStart(2, '0')).join('');
+      out = { base: hex(1), mid: hex(0.78), deep: hex(0.58), boot: hex(0.5) };
+    }
+  } catch (e) { out = null; }
+  _LX_GARMENT.set(img, out);
+  return out;
+}
+// the hero's armour art, resolved exactly like _drawEquipmentLayer's body_top slot
+function _lxHeroArmourImg() {
+  const eq = _LX_EQ_PREVIEW_OVERRIDE || (typeof player !== 'undefined' && player.equipped);
+  if (!eq) return null;
+  let item = eq.body_top; if (!(item && item.spriteId)) item = eq.armor || item;
+  if (!item || item.tint) return null;
+  if (typeof _lxPaintLayerReplacesBase === 'function' && _lxPaintLayerReplacesBase('body_top')) return null;
+  const sid = item.spriteId || _lxAutoEquipSpriteId('body_top', item);
+  if (!sid || sid.indexOf('arm:') !== 0) return null;
+  const img = _lxEqErasedImg(sid) || _lxEquipSprite('armors', sid.slice(4));
+  return (img && img.complete && img.naturalWidth) ? img : null;
 }
 function _drawEquipmentLayer(layer, targetCtx, opts) {
   opts = opts || {};
@@ -141562,9 +141617,10 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
   const TSHIRT_BASE = '#28282e';
   const TSHIRT_SHD = '#1a1a1f';
   const TSHIRT_DEEP = '#101014';
-  const LIMB_BASE = SKIN.base;
-  const LIMB_SHD = SKIN.mid;
-  const LIMB_DEEP = SKIN.deep;
+  const _GAR = (!window._lxNoGarments && typeof _lxGarmentOf === 'function') ? _lxGarmentOf(_lxHeroArmourImg()) : null;   // v0.30.1510 armour fit - sleeves, leggings, boots
+  const LIMB_BASE = _GAR ? _GAR.base : SKIN.base;
+  const LIMB_SHD = _GAR ? _GAR.mid : SKIN.mid;
+  const LIMB_DEEP = _GAR ? _GAR.deep : SKIN.deep;
   // v0.25.900 — Foot ellipse moved up 1 px in leg-local space (was 14).
   // Lands at y=13 so it sits 2 px above the leg tip (at 15) instead of
   // 1 px below, giving a slightly tighter foot-to-leg silhouette.
@@ -142155,7 +142211,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // v0.25.438 — boot-cuff fillRect removed; the rounded foot ellipse below
     // is enough to read as a foot, and the dark horizontal stripe was reading
     // as a stray pixel band on each leg.
-    ctx.fillStyle = LIMB_BASE;
+    ctx.fillStyle = _GAR ? _GAR.boot : LIMB_BASE;   // v0.30.1510 armour fit - boots
     ctx.lineWidth = BODY_STROKE_W;
     // v0.26.098 — Apply foot posture (dx, dy, angle) around the ankle
     // pivot BEFORE drawing the foot ellipse. Wrapped in save/restore
@@ -142189,7 +142245,7 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
     // Generate Code button.
     _drawShadedBody(HERO_VEC_PARTS.limb, LIMB_BASE, LIMB_SHD, LIMB_DEEP, ..._celOff('limb', 4, -3, 'concave'));
     // v0.25.438 — boot-cuff fillRect removed (matches legL).
-    ctx.fillStyle = LIMB_BASE;
+    ctx.fillStyle = _GAR ? _GAR.boot : LIMB_BASE;   // v0.30.1510 armour fit - boots
     ctx.lineWidth = BODY_STROKE_W;
     // v0.26.098 — foot posture wrap (see legL block for explanation)
     ctx.save();
