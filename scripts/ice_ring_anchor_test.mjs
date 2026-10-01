@@ -43,7 +43,7 @@ const out = await page.evaluate(async () => {
   // draw's own centre point, so any enclosing translate is included.
   g.drawImage = function (...a) {
     try {
-      if (a[0] && LX_FX && a[0] === LX_FX.ice_spike_ring && a.length === 5) {
+      if (a[0] && LX_FX && (a[0] === LX_FX.ice_spike_ring || ((typeof FX_ANIM_FRAMES !== 'undefined' && FX_ANIM_FRAMES.ice_spike_ring) || []).includes(a[0])) && a.length === 5) {   // v0.30.1520: or one of its frames
         const m = g.getTransform();
         const cx = a[1] + a[3] / 2, cy = a[2] + a[4] / 2;
         seen.ring = { x: m.a * cx + m.c * cy + m.e, y: m.b * cx + m.d * cy + m.f };
