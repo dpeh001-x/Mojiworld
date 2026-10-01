@@ -14,7 +14,7 @@
 <title>Mojiworld — The Everdawn Cycle</title>
 <meta name="copyright" content="© 2026 Moji-studios &amp; DADPEH. All rights reserved.">
 <!-- Full-screen viewport on mobile: device-width, locked zoom, notch-safe -->
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-visual">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1426,6 +1426,8 @@
     transform: translateX(-50%); width: min(560px, 92vw); box-sizing: border-box;
     font-size: 16px; padding: 10px 14px; border-radius: 12px; z-index: 240;
   }
+  /* v0.30.1511 mobile-chat-os - typing needs text selection on: iOS Safari will not edit a field under user-select: none */
+  #mp-chat-input { -webkit-user-select: text !important; user-select: text !important; -webkit-touch-callout: default; }
   /* Hide the desktop-keyboard help strip (#controls) on mobile.
      Its contents — Enter / N / B / R / T / M — are all keyboard
      keys that don't exist on touch devices, so it's pure noise. */
@@ -16288,7 +16290,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1510';
+const GAME_VERSION = 'v0.30.1511';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -60678,6 +60680,7 @@ function _mpCloseChat(sendText) {
   inp.style.display = 'none';
   inp.blur();
   net.chatOpen = false;
+  if (inp.classList.contains('mc-chat-float')) { inp.style.top = ''; try { if (window.scrollY || window.scrollX) window.scrollTo(0, 0); } catch (e) {} }   // v0.30.1511 mobile-chat-os
 }
 // v0.26.x — Mobile: the TALK button opens the multiplayer chat bar (and raises
 // the on-screen keyboard) when there is nothing nearby to interact with. NPC /
@@ -60695,21 +60698,55 @@ function _wireMobileTalkChat() {
   btn._talkChatWired = true;
   const openChat = (ev) => {
     if (ev && ev.cancelable) ev.preventDefault();   // on touchend: no synthetic click after it
-    if (typeof net !== 'undefined' && net.chatOpen) return;
     const inp = document.getElementById('mp-chat-input');
+    // v0.30.1511 mobile-chat-os - already open: Android's Back key hides the keyboard but leaves the field focused, so a second
+    // tap re-raises it (blur + focus inside the tap; the blur's close check sees the focus come back) instead of doing nothing
+    if (typeof net !== 'undefined' && net.chatOpen) { if (inp && inp.classList.contains('mc-chat-float')) { inp.blur(); inp.focus(); } return; }
     if (!inp || typeof _mpOpenChat !== 'function') return;
     if (!inp._lxFloat) {
       inp._lxFloat = true;
-      document.body.appendChild(inp);
+      // v0.30.1511 mobile-chat-os - inside a FORM: the keyboard's Send / Go key submits it on iOS and Android alike, even when its
+      // key event is unusable (Android reports keyCode 229 while predictive text is composing a word). The keydown Enter path
+      // usually sends first and closes the bar, so the submit only sends while the bar is still open - never twice.
+      const _form = document.createElement('form');
+      _form.id = 'mp-chat-form'; _form.noValidate = true; _form.setAttribute('autocomplete', 'off'); _form.style.margin = '0';
+      _form.addEventListener('submit', (e) => { e.preventDefault(); if (typeof net !== 'undefined' && net.chatOpen) _mpCloseChat(true); });
+      _form.appendChild(inp);
+      document.body.appendChild(_form);
       inp.classList.add('mc-chat-float');
+      _lxChatKeyboardWatch(inp);
       inp.addEventListener('blur', () => {
         setTimeout(() => { if (typeof net !== 'undefined' && net.chatOpen && document.activeElement !== inp) _mpCloseChat(false); }, 150);
       });
     }
     _mpOpenChat();
+    if (inp._lxKbReset) inp._lxKbReset();   // v0.30.1511 mobile-chat-os - this open's keyboard watch starts from the screen as it is now
   };
   btn.addEventListener('touchend', openChat, { passive: false });
   btn.addEventListener('click', openChat);
+}
+// v0.30.1511 mobile-chat-os - THE CHAT BAR AND THE PHONE KEYBOARD (per user: "ensure it works well with IOS apple device as well as
+// android"). iOS Safari and Android Chrome both show the keyboard OVER the page and shrink only the VISUAL viewport (the meta tag
+// asks the same of every Android browser). Two things then went wrong: iOS may scroll that visual viewport down toward the
+// field, carrying a top-fixed bar out of sight; and Android's Back key hides the keyboard without blurring the field, which
+// left the bar open with no keyboard (iOS blurs, and the blur listener closes the bar). While the bar is open this keeps it at
+// the top of the VISIBLE area and closes it once a keyboard that was up goes away - on Android exactly what tapping away does
+// on iOS. The baseline is the visual height when the bar opened (before the keyboard), so it works whether a browser shrinks
+// the visual viewport only or the whole page.
+function _lxChatKeyboardWatch(inp) {
+  const vv = (typeof window !== 'undefined') ? window.visualViewport : null;
+  if (!vv || inp._lxKbWired) return;
+  inp._lxKbWired = true;
+  let base = vv.height, kbUp = false;
+  inp._lxKbReset = () => { base = vv.height; kbUp = false; inp.style.top = ''; };
+  const fit = () => {
+    if (typeof net === 'undefined' || !net.chatOpen) return;
+    if (vv.height < base * 0.8) kbUp = true;
+    else if (kbUp && vv.height >= base * 0.92) { kbUp = false; _mpCloseChat(false); return; }
+    inp.style.top = (vv.offsetTop > 0) ? 'calc(' + Math.round(vv.offsetTop + 10) + 'px + env(safe-area-inset-top))' : '';
+  };
+  vv.addEventListener('resize', fit);
+  vv.addEventListener('scroll', fit);
 }
 try { _wireMobileTalkChat(); } catch (_) {}
 if (typeof document !== 'undefined') {
