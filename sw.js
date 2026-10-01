@@ -282,7 +282,9 @@
 // Cur are redrawn and re-animated under their own names, so a returning browser would otherwise keep the old art.
 // v0.30.1468 - v135 -> v136. Aquarius idle 2..7 are REPLACED under their own names (their missing black outline
 // painted back in), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v139';   // v0.30.1477 - Gemini redrawn (idle/walk/attack + turn + colour twins)
+// v0.30.1482 - v139 -> v140. parry_riposte (+ its 9 frames), bloom_burst, skin_ward, overflow_arc and rampage_aura
+// are REPLACED under their own names (boon FX regenerated and animated), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v140';   // v0.30.1482 - boon FX regenerated (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
