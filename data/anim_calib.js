@@ -3652,10 +3652,3 @@ window.LX_ATK_HITBOX = {
     }
   }
 };
-/* landed-fix marker v0.30.1058, re-pointed in v0.30.1524 - its old literal, kept until origin carries the new entry:
-"aetherion2": {
-    "idle": {
-      "s": 0.87,
-      "dx": -0.015,
-      "dy": 0.0092
-*/
