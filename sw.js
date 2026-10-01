@@ -282,7 +282,7 @@
 // Cur are redrawn and re-animated under their own names, so a returning browser would otherwise keep the old art.
 // v0.30.1468 - v135 -> v136. Aquarius idle 2..7 are REPLACED under their own names (their missing black outline
 // painted back in), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v138';   // v0.30.1473 - Aetherion's Shard Lance gets a thin black outline (same names)
+const CACHE = 'mojiworld-assets-v139';   // v0.30.1477 - Gemini redrawn (idle/walk/attack + turn + colour twins)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

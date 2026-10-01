@@ -20,7 +20,7 @@ const STATES = ['idle', 'walk', 'attack'];
 // Sprites/bosses/zodiac/{charge,fly,pounce}/. Scanning for a state whose
 // directory does not exist is a no-op, so each group can simply ask for more.
 const BOSS_EXTRA = ['duck', 'weave'];
-const ZODIAC_EXTRA = ['charge', 'fly', 'pounce'];
+const ZODIAC_EXTRA = ['charge', 'fly', 'pounce', 'turn'];   // v0.30.1477 - Gemini's turn
 
 // Alpha bbox-bottom fraction of a sprite (mirrors the game's foot anchor).
 // v0.29.x — EXACT mirror of the game's _detectSpriteBboxBottom: alpha > 64

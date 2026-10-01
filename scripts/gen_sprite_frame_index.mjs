@@ -42,6 +42,9 @@ const FRAME_DIRS = [
   'bosses/zodiac/pounce',
   // v0.30.x - Virga's flight set.
   'bosses/zodiac/fly',
+  // v0.30.1477 - Gemini's turn set (front view <-> flying view) and the wing-colour twins it draws when facing left.
+  'bosses/zodiac/turn',
+  'bosses/zodiac/twin/idle', 'bosses/zodiac/twin/walk', 'bosses/zodiac/twin/attack', 'bosses/zodiac/twin/turn',
   'monsters/idle', 'monsters/walk', 'monsters/attack',
   'npc/idle', 'npc/walk',
   'fx/anim', 'vfx/anim', 'projectiles/anim', 'summons/anim',

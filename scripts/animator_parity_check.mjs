@@ -142,9 +142,10 @@ await new Promise((r) => setTimeout(r, 2200));
   pairs.push(['PRE_CLAMP_PX', gamePre, mapOf(animSrc, /const PRE_CLAMP_PX = \{([^}]*)\}/)]);
   pairs.push(['POST_CLAMP_PX', gamePost, mapOf(animSrc, /const POST_CLAMP_PX = \{([^}]*)\}/)]);
   const ms = (name) => { const m = gameSrc.match(new RegExp('const _BOSS_' + name + '_FRAME_MS = (\\d+)')); return m ? +m[1] : null; };
-  const gameMs = { idle: ms('IDLE'), walk: ms('WALK'), attack: ms('ATK'), duck: ms('DUCK'), weave: ms('WEAVE') };
+  const _zt = gameSrc.match(/const _Z_TURN_FRAME_MS = (\d+)/);   // v0.30.1477 - the zodiac turn set's clock
+  const gameMs = { idle: ms('IDLE'), walk: ms('WALK'), attack: ms('ATK'), duck: ms('DUCK'), weave: ms('WEAVE'), turn: _zt ? +_zt[1] : null };
   const animMsAll = mapOf(animSrc, /const GAME_FRAME_MS = \{([^}]*)\}/) || {};
-  const animMs = { idle: animMsAll.idle, walk: animMsAll.walk, attack: animMsAll.attack, duck: animMsAll.duck, weave: animMsAll.weave };
+  const animMs = { idle: animMsAll.idle, walk: animMsAll.walk, attack: animMsAll.attack, duck: animMsAll.duck, weave: animMsAll.weave, turn: animMsAll.turn };
   pairs.push(['FRAME_MS', gameMs, animMs]);
   const bad = pairs.filter(([, a, b]) => a == null || b == null || !same(a, b)).map(([n, a, b]) => n + ' game=' + JSON.stringify(a) + ' animator=' + JSON.stringify(b));
   ok('the animator\'s mirrored draw constants equal the game\'s', bad.length === 0, bad.join(' | ') || null);

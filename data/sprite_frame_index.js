@@ -135,6 +135,21 @@ window.LX_SPRITE_FRAME_INDEX = {
   "bosses/zodiac/fly": {
    "virgo": 9
   },
+  "bosses/zodiac/turn": {
+   "gemini": 9
+  },
+  "bosses/zodiac/twin/idle": {
+   "gemini": 9
+  },
+  "bosses/zodiac/twin/walk": {
+   "gemini": 9
+  },
+  "bosses/zodiac/twin/attack": {
+   "gemini": 9
+  },
+  "bosses/zodiac/twin/turn": {
+   "gemini": 9
+  },
   "monsters/idle": {
    "anglerfish": 9,
    "archon": 9,

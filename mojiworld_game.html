@@ -16190,7 +16190,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1476';
+const GAME_VERSION = 'v0.30.1477';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -146830,6 +146830,7 @@ function _lxBossArtSets(type) {
       typeof BOSS_DUCK_FRAMES !== 'undefined' ? BOSS_DUCK_FRAMES : null]) { if (map) for (const k in map) if (mine(k) && map[k] && map[k].length) out.push(map[k]); }
     const sign = /^zodiac[_-]/.test(type) ? type.replace(/^zodiac[_-]/, '') : null;
     if (sign) for (const map of [ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES, ZODIAC_CHARGE_FRAMES, ZODIAC_POUNCE_FRAMES, ZODIAC_FLY_FRAMES]) if (map && map[sign] && map[sign].length) out.push(map[sign]);
+    if (sign) for (const map of [ZODIAC_TURN_FRAMES, ZODIAC_TWIN.idle, ZODIAC_TWIN.walk, ZODIAC_TWIN.attack, ZODIAC_TWIN.turn]) if (map && map[sign] && map[sign].length) out.push(map[sign]);   // v0.30.1477 gemini-turn / gemini-twin
   } catch (e) {}
   return out;
 }
@@ -148510,6 +148511,35 @@ _loadBossFrames(ZODIAC_CHARGE_FRAMES, 'zodiac/charge', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_ATTACK_FRAMES, 'zodiac/attack', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_IDLE_FRAMES, 'zodiac/idle', ZODIAC_SPRITE_TYPES);
 _loadBossFrames(ZODIAC_WALK_FRAMES, 'zodiac/walk', ZODIAC_SPRITE_TYPES);
+// v0.30.1477 gemini-turn - a SEVENTH zodiac state, per user: "use all the different views to make animation sequence that
+// flows nicely from idle to moving to attack". Gemini idles FACING the camera and flies in a three-quarter view, so every
+// walk cut between two cameras through the 140 ms crossfade. A sign with a TURN set (its front view turning into its
+// flying view, 9 frames) plays it forward into a walk and backward out of one (_zodiacTurn); a sign without frames is
+// untouched.
+const ZODIAC_TURN_FRAMES = Object.create(null);
+_loadBossFrames(ZODIAC_TURN_FRAMES, 'zodiac/turn', ZODIAC_SPRITE_TYPES);
+const _Z_TURN_FRAME_MS = 45;
+// v0.30.1477 gemini-twin - per user: "the wing colour appears to change please ensure it does not get swapped". A left-facing
+// boss is drawn mirrored, which moved Gemini's pink wings to the right and its cyan wings to the left every time it turned
+// round. A sign listed here ships a TWIN of each set with the two wing colours exchanged (Sprites/bosses/zodiac/twin/...);
+// facing left, the twin's frame is drawn in its place and mirrored as usual. A front view then keeps pink on the left and
+// cyan on the right whichever way it faces, and a flight shows the side the butterfly is actually turned to (pink flying
+// right, cyan flying left). Until a twin frame decodes the plain frame draws.
+const LX_ZODIAC_TWIN_SIGNS = ['gemini'];
+const ZODIAC_TWIN = Object.create(null);
+for (const _zst of ['idle', 'walk', 'attack', 'turn']) { ZODIAC_TWIN[_zst] = Object.create(null); _loadBossFrames(ZODIAC_TWIN[_zst], 'zodiac/twin/' + _zst, LX_ZODIAC_TWIN_SIGNS); }
+ZODIAC_TWIN.static = Object.create(null);
+for (const _zsg of LX_ZODIAC_TWIN_SIGNS) { const _zim = new Image(); _zim.decoding = 'async'; _zim.src = 'Sprites/bosses/zodiac/twin/' + _zsg + '.webp'; ZODIAC_TWIN.static[_zsg] = _zim; }
+function _zodiacTwin(m, img) {
+  if (!img || !m || !((m.facing | 0) < 0) || LX_ZODIAC_TWIN_SIGNS.indexOf(m.zodiacSign) < 0) return img;
+  const sg = m.zodiacSign;
+  if (img === ZODIAC_SPRITES[sg]) { const s = ZODIAC_TWIN.static[sg]; return (s && s.complete && s.naturalWidth > 0) ? s : img; }
+  const src = img._lxSrc || img, st = String(src._lxSt || '').replace(/^zodiac\//, ''), set = ZODIAC_TWIN[st] && ZODIAC_TWIN[st][sg], i = src._lxFi;
+  if (!set || !(i >= 0) || i >= set.length) return img;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(set, 720);
+  const tw = set[i];
+  return (tw && (tw.naturalWidth || tw.width) > 0 && tw.complete !== false) ? tw : img;
+}
 // state: 'attack' | 'walk' | 'idle'
 function _zodiacFrame(sign, state) {
   if (state === 'fly')    return _bossLoopFrame(ZODIAC_FLY_FRAMES[sign], _BOSS_WALK_FRAME_MS);
@@ -148584,6 +148614,8 @@ function _zodiacStateImg(sign, state, elapsedMs, m) {
       : state === 'walk' ? ZODIAC_WALK_FRAMES : ZODIAC_IDLE_FRAMES;
     const _zset = _zs && _zs[sign];
     if (_zset && _zset.length) _lxShrinkFrames(_zset, 720);   // 720: the base every boss set shrinks to
+    const _ztset = (state === 'walk' || state === 'idle') ? ZODIAC_TURN_FRAMES[sign] : null;   // v0.30.1477 gemini-turn
+    if (_ztset && _ztset.length) _lxShrinkFrames(_ztset, 720);
   }
   if (state === 'fly')    return _zodiacRelFrame(ZODIAC_FLY_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
   if (state === 'pounce') return _lxPounceArcFrame(ZODIAC_POUNCE_FRAMES[sign], m);
@@ -148628,8 +148660,29 @@ function _zodiacStateImg(sign, state, elapsedMs, m) {
     }
     return _zodiacRelFrame(_zf, _BOSS_ATK_FRAME_MS, elapsedMs, false);
   }
+  const _zt = (state === 'walk' || state === 'idle') ? _zodiacTurn(sign, state, elapsedMs, m) : null;   // v0.30.1477 gemini-turn
+  if (_zt) { if (_zt.img) return _zt.img; elapsedMs = _zt.after; }
   if (state === 'walk')   return _zodiacRelFrame(ZODIAC_WALK_FRAMES[sign], _BOSS_WALK_FRAME_MS, elapsedMs, false);
   return _zodiacRelFrame(ZODIAC_IDLE_FRAMES[sign], _BOSS_IDLE_FRAME_MS, elapsedMs, true);
+}
+// v0.30.1477 gemini-turn - the turn between a front-facing state and the walk. A walk entered from any other state (idle, or an
+// attack, which ends facing front) plays the turn set forward; an idle entered from a walk plays it backward. Returns null
+// when no turn applies, {img} while it plays, or {after} = the ms into the loop once it has played, so the loop picks up
+// on its first frame rather than mid-cycle. The crossfade's draw of the OUTGOING state never matches: that is a.prev, and
+// the checks below ask for the state being entered. All nine frames or none - a half-decoded turn would stop halfway.
+function _zodiacTurn(sign, state, elapsedMs, m) {
+  const fr = ZODIAC_TURN_FRAMES[sign], a = m && m._zAnim;
+  if (!fr || !fr.length || !a || !a.prev || a.state !== state) return null;
+  const back = state === 'idle' && a.prev === 'walk';
+  if (!back && !(state === 'walk' && a.prev !== 'walk')) return null;
+  let n = fr._readyN || 0;
+  while (n < fr.length && fr[n] && fr[n].complete && fr[n].naturalWidth > 0) n++;
+  fr._readyN = n;
+  if (n < fr.length) return null;
+  const dur = n * _Z_TURN_FRAME_MS;
+  if (elapsedMs >= dur) return { img: null, after: elapsedMs - dur };
+  const i = Math.min(n - 1, Math.floor(Math.max(0, elapsedMs) / _Z_TURN_FRAME_MS));
+  return { img: fr[back ? n - 1 - i : i], after: 0 };
 }
 function _zodiacAnimTick(m, now) {
   const atk = (m.patternState && m.patternState !== 'idle') || (m.atkAnimUntil && now < m.atkAnimUntil);
@@ -152318,11 +152371,11 @@ function drawMonster(m) {
     // over the incoming animation instead of a hard swap. _nowAtk is the
     // performance.now() computed above for the attack-window check.
     const _za = _zodiacAnimTick(m, _nowAtk);
-    const _zCur = _zodiacStateImg(m.zodiacSign, _za.state, _nowAtk - _za.since, m) || ZODIAC_SPRITES[m.zodiacSign];
+    const _zCur = _zodiacTwin(m, _zodiacStateImg(m.zodiacSign, _za.state, _nowAtk - _za.since, m) || ZODIAC_SPRITES[m.zodiacSign]);   // v0.30.1477 gemini-twin
     _drawBossSprite(_zCur, m, sx, sy, _za.state === 'attack', true);
     const _zT = (_nowAtk - _za.transAt) / _Z_XFADE_MS;
     if (_za.prev && _zT >= 0 && _zT < 1) {
-      const _zPrev = _zodiacStateImg(m.zodiacSign, _za.prev, _za.prevElapsed, m);
+      const _zPrev = _zodiacTwin(m, _zodiacStateImg(m.zodiacSign, _za.prev, _za.prevElapsed, m));   // v0.30.1477 gemini-twin
       if (_zPrev && _zPrev !== _zCur) {
         const _kvW = m._visW, _kvH = m._visH;   // keep the CURRENT frame's visual box authoritative for hit-region math
         ctx.save();
