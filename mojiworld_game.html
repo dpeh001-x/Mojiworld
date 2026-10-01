@@ -16271,7 +16271,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1498';
+const GAME_VERSION = 'v0.30.1499';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -21675,6 +21675,20 @@ const LX_EQUIP_FILES = {
 // Object.keys array. Map keeps insertion order -> LRU semantics identical.
 const _LX_EQUIP_CACHE = { weapons: new Map(), armors: new Map() };
 const _LX_EQUIP_CACHE_MAX = 160;   // v0.29.469 — comfortably above the real catalog
+// v0.30.1499 GEAR CORS. The web build (deploy-pages.yml) rewrites every Sprites/ path to jsDelivr, so equipment art there is
+// cross-origin, and it was loaded without CORS: any canvas it is drawn to is tainted and getImageData throws. The gear light
+// (v0.30.1488) reads each piece's pixels to find where it glows, so on the website it silently skipped every animated piece
+// with no Gear Align erase (an erase is a data URL, always clean). jsDelivr answers CORS, so a cross-origin piece now asks for
+// it - the world map plate's pattern (v0.30.x): only when really cross-origin (the local server, the Steam build and a file://
+// zip keep the plain load) and with one plain retry if the CORS load fails. scripts/gear_cors_test.mjs pins it.
+function _lxEqCors(img, url) {
+  try {
+    const u = new URL(url, document.baseURI);
+    if (!/^https?:$/.test(u.protocol) || u.origin === location.origin) return;
+    img.crossOrigin = 'anonymous';
+    img.onerror = () => { try { if (img.crossOrigin && !img._lxCorsRetry) { img._lxCorsRetry = true; img.removeAttribute('crossorigin'); img.src = url; } } catch (e) {} };
+  } catch (e) {}
+}
 function _lxEquipSprite(cat, name) {
   const c = _LX_EQUIP_CACHE[cat];
   if (!c || !name) return null;
@@ -21692,7 +21706,9 @@ function _lxEquipSprite(cat, name) {
     // below re-inserts, so anything drawn recently is young.
     if (c.size >= _LX_EQUIP_CACHE_MAX) c.delete(c.keys().next().value);
     const img = new Image(); img.decoding = 'async'; img.onerror = () => {};
-    img.src = 'Sprites/equipment/' + cat + '/' + name + '.webp';
+    const _url = 'Sprites/equipment/' + cat + '/' + name + '.webp';
+    _lxEqCors(img, _url);   // v0.30.1499 gear cors - the web build streams this from jsDelivr: ask for CORS so canvases that read it stay clean
+    img.src = _url;
     c.set(name, img);
   }
   else {
