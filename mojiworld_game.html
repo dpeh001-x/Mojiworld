@@ -16190,7 +16190,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1473';
+const GAME_VERSION = 'v0.30.1474';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -32237,12 +32237,12 @@ const MONSTER_SKILL_FNS = {
         if (player._aegis) final = Math.max(1, Math.floor(final * 0.5));
         // Route through _diffDmg like every other direct monster hit, else this
         // pulse skipped the level-gap punish + difficulty multiplier.
-        player.hp -= (player._god ? 0 : (typeof _diffDmg === 'function' ? _diffDmg(final, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0) : final));
+        player.hp -= (player._god ? _lxLost(0, final) : _lxLost((typeof _diffDmg === 'function' ? _diffDmg(final, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0) : final)));
         player.lastHitTime = (typeof game !== "undefined") ? game.time : 0;
         player.invulnerable = Math.max(player.invulnerable, 250);
         player._lastDamageSource = m.name + "'s lantern flare";
         if (game.damageNumbers) {
-          game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + final, life: 38, color: '#ffcc44', big: true });
+          game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 38, color: '#ffcc44', big: true });
         }
       }
     }
@@ -49347,6 +49347,11 @@ function _lxBossHpFloor(type, dmg) {
   const floor = Math.max(1, Math.floor(mh * f * ((player.blockTimer > 0) ? 0.3 : 1)));
   return dmg < floor ? floor : dmg;
 }
+// v0.30.1474 taken-num - the number a hit on the player shows is the HP it took (per user). A site subtracts _lxLost(its final
+// loss) and its number shows _lxShownLost(); in god mode it records the raw value instead (_lxLost(0, raw)), as contact does.
+let _lxLastLost = 0;
+function _lxLost(v, shown) { _lxLastLost = Math.max(0, +((shown != null) ? shown : v) || 0); return v; }
+function _lxShownLost() { return Math.round(_lxLastLost); }
 function _diffDmg(d, srcLv, capPct) { /* v0.29.672 — a PAUSED player cannot be
   harmed. In co-op the world deliberately keeps running while a player sits in
   a menu (_lxCoopWorldStep: monsters move, the host keeps broadcasting, the
@@ -57897,11 +57902,11 @@ function _coopApplyHazHit(msg) {
   // v0.30.816 grav-meteor-cap — the guest takes the same ceiling. The flag is the host's; the label is the fallback for a
   // relay that forwards only the fields it knows.
   if ((msg.gb || /Gravity Crush column|Crush Tendril|Decay Pillar/.test(String(msg.sl || ''))) && _hzLost > LX_GRAV_METEOR_CAP) _hzLost = LX_GRAV_METEOR_CAP;
-  player.hp -= _hzLost;
+  player.hp -= _lxLost(_hzLost);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
   player._lastDamageSource = msg.sl || 'a meteor strike';
-  if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ffaa33', big: true });
+  if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 40, color: msg.c || '#ffaa33', big: true });
 }
 // HOST→ALL: a boss "direct hit" — an attack that writes player.hp INSIDE the boss AI
 // tick (proximity nukes, ground quakes, cone bites, sustained fields), bypassing the
@@ -57967,12 +57972,12 @@ function _coopApplyBossHit(msg) {
   // v0.29.x — %-fraction nukes (isFrac) get the 99.9%-maxHp ceiling so a
   // percentage attack can't one-shot the follower; raw atk-based co-op hits
   // stay uncapped (an absolute overkill still kills).
-  player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg;
+  player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
   player._lastDamageSource = msg.sl || 'a boss attack';
   if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
-  if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: msg.c || '#ff5555', big: true });
+  if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 40, color: msg.c || '#ff5555', big: true });
 }
 // v0.30.x coop-exec — BOSS EXECUTES REACH EVERY PLAYER (per user: "the One shots need to hit guests"). These moves wrote
 // `player` inside the boss AI and nothing else: a guest never took HEAVENSPLIT, King Krook's Earthquake / Stomp, Soul
@@ -58289,12 +58294,12 @@ function _coopSelfBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color) {
   if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
   if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
   // v0.29.x — %-fraction nukes get the 99.9%-maxHp ceiling (see _coopApplyBossHit).
-  player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg;
+  player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
   player._lastDamageSource = label || 'a boss attack';
   if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
-  if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + dmg, life: 40, color: color || '#ff5555', big: true });
+  if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 40, color: color || '#ff5555', big: true });
 }
 // =========================================================================
 // v0.27.9 — CO-OP DOWNED / REVIVE (the AAA co-op signature: It Takes Two /
@@ -94818,12 +94823,12 @@ function updateMonsters(dt) {
             if (player.blockTimer > 0) { _g = Math.max(1, Math.floor(_g * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
             if (player.cls === 'warrior' && typeof _warriorDr === 'function') _g = Math.max(1, Math.floor(_g * _warriorDr()));
             if (player._aegis) _g = Math.max(1, Math.floor(_g * 0.5));
-            player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(_g, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _g;   // v0.30.x — real level, not the untrustworthy levelReq fallback (x2.5 punish measured)
+            player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_g, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _g);   // v0.30.x — real level, not the untrustworthy levelReq fallback (x2.5 punish measured)
             player.lastHitTime = game.time;
             player.invulnerable = 900;
             player._lastDamageSource = bd.gore.label || 'a goring charge';
             player.vx = m._bdDir * 22; player.vy = -9;          // launched, not nudged
-            if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _g, life: 46, color: bd.gore.color || '#ffcc66', big: true });
+            if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 46, color: bd.gore.color || '#ffcc66', big: true });
             if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'fx_taurus_gore', { size: 260, life: 46 });
             if (typeof addShake === 'function') addShake(22);
             if (typeof addHitStop === 'function') addHitStop(130);
@@ -97400,7 +97405,7 @@ function mirrorSelfAI(m, dt, distToPlayer) {
       const _jmax = (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100);
       let _jd = Math.floor(_jmax * 0.70 * ((typeof _defAbsorbMul === 'function') ? _defAbsorbMul() : 1));
       _jd = Math.min(_jd, Math.max(0, (player.hp | 0) - 1));   // OHKO clamp
-      if (_jd > 0 && !player._god) player.hp -= Math.min((typeof _diffDmg === 'function') ? _diffDmg(_jd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0) : _jd, Math.max(0, (player.hp | 0) - 1));
+      _lxLost(0, _jd); if (_jd > 0 && !player._god) player.hp -= _lxLost(Math.min((typeof _diffDmg === 'function') ? _diffDmg(_jd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0) : _jd, Math.max(0, (player.hp | 0) - 1)));
       if (!player._god) player.mp = 0;
       player.invulnerable = 700;
       player.hitStun = 400;
@@ -97409,7 +97414,7 @@ function mirrorSelfAI(m, dt, distToPlayer) {
       player._lastDamageSource = 'Mirror Judgement';
       game.damageNumbers.push({
         taken: true, x: player.x + 14, y: player.y - 8, vy: -3,
-        text: '-' + _jd + ' ⚖🪞', life: 52, color: '#cc88ff', size: 19,
+        text: '-' + _lxShownLost() + ' ⚖🪞', life: 52, color: '#cc88ff', size: 19,
       });
       if (typeof showToast === 'function') showToast('⚖ JUDGEMENT — your strength and every drop of MP, taken.', 'legendary');
       if (typeof flash === 'function') flash(0.4);
@@ -97487,7 +97492,7 @@ function mirrorSelfAI(m, dt, distToPlayer) {
         if (_bd > 0) {
           // v0.29.x — level-gap punish + re-assert the never-kill clamp AFTER
           // the multiplier (it used to multiply straight past the OHKO clamp).
-          if (!player._god) player.hp -= Math.min(_diffDmg(_bd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.max(0, (player.hp | 0) - 1));
+          _lxLost(0, _bd); if (!player._god) player.hp -= _lxLost(Math.min(_diffDmg(_bd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.max(0, (player.hp | 0) - 1)));
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 160, 0, 0.25, (m._mirrorClass === 'warrior') ? 'Mirror Cleave' : 'Mirror Smoke', '#ff66cc');
           player.invulnerable = 700;
           player.hitStun = 400;
@@ -97496,7 +97501,7 @@ function mirrorSelfAI(m, dt, distToPlayer) {
           player._lastDamageSource = (m._mirrorClass === 'warrior') ? 'Mirror Cleave' : 'Mirror Smoke';
           game.damageNumbers.push({
             taken: true, x: player.x + 14, y: player.y - 8, vy: -3,
-            text: '-' + _bd + ' 🪞', life: 48, color: '#ff66cc', size: 18,
+            text: '-' + _lxShownLost() + ' 🪞', life: 48, color: '#ff66cc', size: 18,
           });
           if (typeof flash === 'function') flash(0.32);
           if (typeof addShake === 'function') addShake(10);
@@ -97625,14 +97630,14 @@ function mirrorSelfAI(m, dt, distToPlayer) {
         // A reflection has no level gap on you by definition, so srcLv = your
         // level, punish = the 1.3 floor, and the 40% coefficient is finally the
         // number that reaches the player.
-        if (!player._god) player.hp -= Math.min(_diffDmg(strikeDmg, Math.max(1, player.level | 0)), Math.max(0, (player.hp | 0) - 1));
+        _lxLost(0, strikeDmg); if (!player._god) player.hp -= _lxLost(Math.min(_diffDmg(strikeDmg, Math.max(1, player.level | 0)), Math.max(0, (player.hp | 0) - 1)));
         if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 200, 0, 0.40, 'Mirror Strike', '#ff44aa');   // v0.29.621 — frac tracks the 0.80 -> 0.40 cut above; partners resolve this on their own client
         player.invulnerable = 900;
         player.hitStun     = 700;
         player._lastDamageSource = 'Mirror Strike';
         game.damageNumbers.push({
           taken: true, x: player.x + 14, y: player.y - 14, vy: -3,
-          text: '-' + strikeDmg + ' 🪞', life: 60, color: '#ff44aa', size: 20,
+          text: '-' + _lxShownLost() + ' 🪞', life: 60, color: '#ff44aa', size: 20,
         });
         if (typeof flash    === 'function') flash(0.5);
         if (typeof addShake === 'function') addShake(16);
@@ -99802,7 +99807,7 @@ function bossAI(m, dt, distToPlayer) {
           const dmg = Math.max(1, Math.floor(_maxHpNow * 0.50 * ((typeof _defAbsorbMul === 'function') ? _defAbsorbMul() : 1)));   // v0.29.132 — DEF lessens %-hits too
           // v0.29.x — %-maxHp nuke is already player-relative; the punish used
           // to multiply it to 250%+ maxHp. Level-aware punish + 90% final cap.
-          player.hp -= (player._god ? 0 : Math.min(_diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.floor(_maxHpNow * 0.90)));
+          player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(Math.min(_diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.floor(_maxHpNow * 0.90))));
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.50, "King Gloopaloo's earthquake", '#ff8844');
           player.lastHitTime = game.time;
           player._lastDamageSource = "King Gloopaloo's earthquake";
@@ -99814,7 +99819,7 @@ function bossAI(m, dt, distToPlayer) {
           if (game.damageNumbers) {
             game.damageNumbers.push({
               taken: true, x: player.x + 14, y: player.y, vy: -2,
-              text: '-' + dmg + ' QUAKE', life: 70, color: '#ff8844', size: 22, big: true,
+              text: '-' + _lxShownLost() + ' QUAKE', life: 70, color: '#ff8844', size: 22, big: true,
             });
           }
         }
@@ -102185,7 +102190,7 @@ function bossAI(m, dt, distToPlayer) {
           const dmg = Math.max(1, Math.floor(_maxHpNow * 0.50 * ((typeof _defAbsorbMul === 'function') ? _defAbsorbMul() : 1)));   // v0.29.132 — DEF lessens %-hits too
           // v0.29.x — %-maxHp nuke: level-aware punish + 90% final cap (see
           // the Gloopaloo earthquake note).
-          player.hp -= (player._god ? 0 : Math.min(_diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.floor(_maxHpNow * 0.90)));
+          player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(Math.min(_diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.floor(_maxHpNow * 0.90))));
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 0, 0, 0.50, "Mooma's earthquake", '#ff8844');
           player.lastHitTime = game.time;
           player._lastDamageSource = "Mooma's earthquake";
@@ -102197,7 +102202,7 @@ function bossAI(m, dt, distToPlayer) {
           if (game.damageNumbers) {
             game.damageNumbers.push({
               taken: true, x: player.x + 14, y: player.y, vy: -2,
-              text: '-' + dmg + ' QUAKE', life: 70, color: '#ff8844', size: 22, big: true,
+              text: '-' + _lxShownLost() + ' QUAKE', life: 70, color: '#ff8844', size: 22, big: true,
             });
           }
         }
@@ -102276,7 +102281,7 @@ function bossAI(m, dt, distToPlayer) {
           if (player.onGround && inRange) {
             const dmg = Math.max(1, Math.floor(_maxHpNow * 0.75 * ((typeof _defAbsorbMul === 'function') ? _defAbsorbMul() : 1)));   // v0.29.132 — DEF lessens %-hits too
             // v0.29.x — %-maxHp nuke: level-aware punish + 90% final cap.
-            player.hp -= (player._god ? 0 : Math.min(_diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.floor(_maxHpNow * 0.90)));
+            player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(Math.min(_diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.floor(_maxHpNow * 0.90))));
             if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 220, 0, 0.75, "Mooma's ground-shake", '#ff5522');
             player.lastHitTime = game.time;
             player._lastDamageSource = "Mooma's ground-shake";
@@ -102288,7 +102293,7 @@ function bossAI(m, dt, distToPlayer) {
             if (game.damageNumbers) {
               game.damageNumbers.push({
                 taken: true, x: player.x + 14, y: player.y, vy: -2,
-                text: '-' + dmg + ' GROUND SHAKE', life: 80, color: '#ff5522', size: 24, big: true,
+                text: '-' + _lxShownLost() + ' GROUND SHAKE', life: 80, color: '#ff5522', size: 24, big: true,
               });
             }
           } else if (inRange) {
@@ -109592,6 +109597,7 @@ function updateProjectiles(dt) {
           if (typeof showToast === 'function') showToast(p._radiance.toast || 'RADIANCE — do not stand under the pillars!', 'danger');   // v0.30.467 — per-payload wording
         }
         player.hp -= _projLost;
+        const _lxRadShown = !!player._radianceHit;   // taken-num - a radiance hit already showed its own number
         player.lastHitTime = game.time;
         // v0.25.243 (X1) — projectile origin label (or skill name fallback).
         player._lastDamageSource = player._radianceHit || p.sourceLabel || p.skill || 'a stray bolt';
@@ -109664,9 +109670,9 @@ function updateProjectiles(dt) {
         player.vx = dir * 1 * kbMul;
         player.vy = -1.2 * kbMul;
         }
-        game.damageNumbers.push({
+        if (!_lxRadShown) game.damageNumbers.push({
           taken: true, x: player.x + 14, y: player.y, vy: -2,
-          text: dmg, life: 40, color: (LX_ORB_BURST[p.skill] && LX_ORB_BURST[p.skill].num) || '#ff4444', size: 16
+          text: player._god ? dmg : Math.round(_projLost), life: 40, color: (LX_ORB_BURST[p.skill] && LX_ORB_BURST[p.skill].num) || '#ff4444', size: 16   // taken-num
         });
         addShake(5);
         flash(0.18);
@@ -109862,7 +109868,7 @@ function updateProjectiles(dt) {
         player._lastDamageSource = h._sourceLabel;
         const _kd = Math.sign((player.x + player.w / 2) - h.cx) || 1;
         player.vx = _kd * (player.cls === 'warrior' ? 0.9 : 2.2); player.vy = Math.min(player.vy, -2);
-        game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: dmg, life: 40, color: h.num || h.color, size: 16 });
+        game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: player._god ? dmg : Math.round(_lost), life: 40, color: h.num || h.color, size: 16 });   // taken-num
         game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y - 24, vy: -1.4, text: 'SPLASH', life: 36, color: h.glow || '#e3b8ff', size: 12 });
         flash(0.12);
       }
@@ -109904,12 +109910,12 @@ function updateProjectiles(dt) {
             }
             if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
             if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
-            player.hp -= (player._god ? 0 : ((typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg));
+            player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(((typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg)));
             player.lastHitTime = game.time;
             player._lastDamageSource = "Scorpio's Venom Deluge";
             if (game.damageNumbers) {
               game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2,
-                text: '-' + dmg, life: 26, color: '#ff66cc', size: 11 });
+                text: '-' + _lxShownLost(), life: 26, color: '#ff66cc', size: 11 });
             }
             h._chipTick = 26;
           } else { h._chipTick -= 1; }
@@ -109944,9 +109950,9 @@ function updateProjectiles(dt) {
         } else if (player && player.hp > 0 && player.invulnerable <= 0 && typeof aabb === 'function' && aabb({ x: h.x, y: h.y, w: h.w, h: h.h }, player)) {
           let _d = Math.max(1, Math.floor((h.damage || 16) - (typeof getDef === 'function' ? getDef() : 0) * 0.4));
           _d = _applyHazardDR(_d);
-          player.hp -= (player._god ? 0 : _diffDmg(_d));
+          player.hp -= (player._god ? _lxLost(0, _d) : _lxLost(_diffDmg(_d)));
           player.invulnerable = 600; player.lastHitTime = game.time; player._lastDamageSource = h._sourceLabel || 'falling lava';
-          game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _d, life: 26, color: '#ff7733', size: 12 });
+          game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 26, color: '#ff7733', size: 12 });
           h._landed = true; h.life = Math.min(h.life, 55);
         }
       } else {
@@ -109954,9 +109960,9 @@ function updateProjectiles(dt) {
           if ((h._chipTick == null) || h._chipTick <= 0) {
             let _d = Math.max(1, Math.floor((h.damage || 16) * 0.5 - (typeof getDef === 'function' ? getDef() : 0) * 0.4));
             _d = _applyHazardDR(_d);
-            player.hp -= (player._god ? 0 : _diffDmg(_d));
+            player.hp -= (player._god ? _lxLost(0, _d) : _lxLost(_diffDmg(_d)));
             player.lastHitTime = game.time; player._lastDamageSource = 'molten lava';
-            game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _d, life: 24, color: '#ff7733', size: 11 });
+            game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 24, color: '#ff7733', size: 11 });
             h._chipTick = 18;
           } else h._chipTick -= 1;
         }
@@ -109987,13 +109993,13 @@ function updateProjectiles(dt) {
             }
             if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
             if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
-            player.hp -= (player._god ? 0 : _diffDmg(dmg));
+            player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_diffDmg(dmg)));
             player.lastHitTime = game.time;
             player._lastDamageSource = "King Gloopaloo's leaking brim";
             if (game.damageNumbers) {
               game.damageNumbers.push({
                 taken: true, x: player.x + 14, y: player.y, vy: -2,
-                text: '-' + dmg, life: 26, color: '#88c8ff', size: 11,
+                text: '-' + _lxShownLost(), life: 26, color: '#88c8ff', size: 11,
               });
             }
             h._chipTick = 30;   // re-cool the chip tick
@@ -110031,7 +110037,7 @@ function updateProjectiles(dt) {
       if (inHzn && onFloor && player.hp > 0 && player.invulnerable <= 0) {
         let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
         dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
-        player.hp -= (player._god ? 0 : _diffDmg(dmg));
+        player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_diffDmg(dmg)));
         player.invulnerable = 500;
         player.hitStun = Math.max(player.hitStun || 0, h.stun);
         player.vy = Math.min(player.vy, -3.5);
@@ -110041,7 +110047,7 @@ function updateProjectiles(dt) {
         // flash harder so the hit is unmistakable.
         game.damageNumbers.push({
           taken: true, x: player.x + 14, y: player.y, vy: -2,
-          text: dmg, life: 52, color: '#ff7a2a', size: 22
+          text: _lxShownLost(), life: 52, color: '#ff7a2a', size: 22
         });
         game.damageNumbers.push({
           taken: true, x: player.x + 14, y: player.y - 26, vy: -1.4,
@@ -110116,12 +110122,12 @@ function updateProjectiles(dt) {
         let dmg = Math.max(1, Math.floor(h.damage * 2 * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
         dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
         if (player.invulnerable <= 0) {
-          player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_diffDmg(dmg)));
           player.invulnerable = 220;
           player._lastDamageSource = h._sourceLabel || 'a poison cloud';
           game.damageNumbers.push({
             taken: true, x: player.x + 12, y: player.y, vy: -1.5,
-            text: dmg, life: 32, color: '#88ff44', size: 12
+            text: _lxShownLost(), life: 32, color: '#88ff44', size: 12
           });
         }
         // Apply short poison DoT (re-uses player._poisonTimer system)
@@ -110155,12 +110161,12 @@ function updateProjectiles(dt) {
       if (!h.hitOnce && d <= r && d >= prevR - 6 && player.hp > 0 && player.invulnerable <= 0) {
         let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
         dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
-        player.hp -= (player._god ? 0 : _diffDmg(dmg));
+        player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_diffDmg(dmg)));
         player.invulnerable = 400;
         player._lastDamageSource = h._sourceLabel || 'a shockwave';
         game.damageNumbers.push({
           taken: true, x: player.x + 14, y: player.y, vy: -2,
-          text: dmg, life: 40, color: h.color || '#ff8844', size: 14
+          text: _lxShownLost(), life: 40, color: h.color || '#ff8844', size: 14
         });
         h.hitOnce = true;
         flash(0.12);
@@ -110186,13 +110192,13 @@ function updateProjectiles(dt) {
         if (inCol && player.hp > 0 && player.invulnerable <= 0) {
           let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
           dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
-          player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_diffDmg(dmg)));
           player.invulnerable = 600;
           player.hitStun = Math.max(player.hitStun || 0, h.stun || 400);
           player._lastDamageSource = h._sourceLabel || 'a lightning strike';
           game.damageNumbers.push({
             taken: true, x: player.x + 14, y: player.y, vy: -2,
-            text: dmg, life: 40, color: '#ffee44', size: 16
+            text: _lxShownLost(), life: 40, color: '#ffee44', size: 16
           });
           flash(0.30);
         }
@@ -110223,13 +110229,13 @@ function updateProjectiles(dt) {
         if (!h.struck && inX && inY && player.hp > 0 && player.invulnerable <= 0) {
           let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
           dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
-          player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_diffDmg(dmg)));
           player.invulnerable = 380;
           player._slowTimer = Math.max(player._slowTimer || 0, h.slow);
           player._lastDamageSource = h._sourceLabel || 'a frost beam';
           game.damageNumbers.push({
             taken: true, x: player.x + 14, y: player.y, vy: -2,
-            text: dmg, life: 40, color: '#88ddff', size: 14
+            text: _lxShownLost(), life: 40, color: '#88ddff', size: 14
           });
           flash(0.14);
           h.struck = true;
@@ -110271,12 +110277,12 @@ function updateProjectiles(dt) {
           h._rainTickCD = 30;
           let dmg = Math.max(1, Math.floor(h.damage * _defAbsorbMul()));   /* v0.29.566 — % curve, not flat */
           dmg = _applyHazardDR(dmg);   // v0.25.649 — block/warrior/Aegis
-          player.hp -= (player._god ? 0 : _diffDmg(dmg));
+          player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_diffDmg(dmg)));
           player.invulnerable = 200;
           player._lastDamageSource = h._sourceLabel || 'a cloudburst';
           game.damageNumbers.push({
             taken: true, x: player.x + 12, y: player.y, vy: -1.5,
-            text: dmg, life: 30, color: '#bfe4ff', size: 12
+            text: _lxShownLost(), life: 30, color: '#bfe4ff', size: 12
           });
         }
       }
@@ -110483,7 +110489,7 @@ function updateProjectiles(dt) {
             }
             if (player.cls === 'warrior') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));  /* v0.25.856 Lv-scaled DR; curve reversed in v0.29.275 - see _warriorDr */
             if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
-            player.hp -= (player._god ? 0 : _diffDmg(dmg));
+            player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_diffDmg(dmg)));
             player.lastHitTime = game.time;
             player.invulnerable = Math.max(player.invulnerable, 400);
             // v0.30.281 — RIFT SURGE (per user: 'randomised to occasionally
@@ -110512,7 +110518,7 @@ function updateProjectiles(dt) {
             if (game.damageNumbers) {
               game.damageNumbers.push({
                 taken: true, x: player.x + 14, y: player.y, vy: -2,
-                text: '-' + dmg, life: 40, color: '#ff66ff', size: 14,
+                text: '-' + _lxShownLost(), life: 40, color: '#ff66ff', size: 14,
               });
             }
             h._tickCD = 15;   // ~4 ticks/sec while standing in it
@@ -157095,12 +157101,12 @@ const ZODIAC_AI = {
             if (player.blockTimer > 0) { _d = Math.max(1, Math.floor(_d * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
             if (player.cls === 'warrior' && typeof _warriorDr === 'function') _d = Math.max(1, Math.floor(_d * _warriorDr()));
             if (player._aegis) _d = Math.max(1, Math.floor(_d * 0.5));
-            player.hp -= (typeof _diffDmg === 'function') ? _diffDmg(_d, 0, true) : _d;
+            player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_d, 0, true) : _d);
             player.lastHitTime = game.time;
             player.invulnerable = 800;
             player._lastDamageSource = 'the Sun Pounce';
             player.vx = (_pdx >= 0 ? 1 : -1) * 13; player.vy = -8;
-            if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _d + ' POUNCE', life: 52, color: '#ffdd66', size: 18, big: true });
+            if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost() + ' POUNCE', life: 52, color: '#ffdd66', size: 18, big: true });
             if (typeof showToast === 'function') showToast('SUN POUNCE - caught standing still!', 'danger');
           }
         }
@@ -158246,7 +158252,7 @@ const ZODIAC_AI = {
           const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
           const dmg = Math.floor(_max * 0.45);
           // v0.29.x — %-maxHp nuke: level-aware punish + 90% final cap.
-          player.hp -= (player._god ? 0 : Math.min(_diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.floor(_max * 0.90)));
+          player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(Math.min(_diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0), Math.floor(_max * 0.90))));
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, 0, 280, 0, 0.45, "Capricorn's hoofquake", '#bba078');
           player.lastHitTime = game.time;
           player._lastDamageSource = "Capricorn's hoofquake";
@@ -158256,7 +158262,7 @@ const ZODIAC_AI = {
           if (game.damageNumbers) {
             game.damageNumbers.push({
               taken: true, x: player.x + 14, y: player.y, vy: -2,
-              text: '-' + dmg + ' HOOFQUAKE', life: 60, color: '#bba078', size: 20, big: true,
+              text: '-' + _lxShownLost() + ' HOOFQUAKE', life: 60, color: '#bba078', size: 20, big: true,
             });
           }
         }
