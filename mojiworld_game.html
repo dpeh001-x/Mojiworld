@@ -16290,7 +16290,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1519';
+const GAME_VERSION = 'v0.30.1520';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -19559,7 +19559,21 @@ function _lxTintedFx(img, color) {
 // the burst's own progress t→frame so the animation plays once across the burst
 // lifetime; falls back to the static LX_FX sprite until frames decode.
 const FX_ANIM_FRAMES = Object.create(null);
+// v0.30.1520 skill-anim - the 25 skills that drew one still frame play animated effects (per user, reviewed over five rounds):
+// their 30 effects play 16-frame one-shots (multi_shot a 9-frame loop) built up from an orb, a kunai, an icicle, a puff ...
+const _LX_SKILL_ANIM = new Set(['archmage_elemental', 'arrow_rain', 'backstab', 'blink', 'celestial_aurora', 'charged_shot', 'death_blossom', 'death_blossom1', 'eagle_eye', 'elemental_arrows', 'elemental_link', 'evade_burst', 'fireball_ring', 'flurry', 'hexmaster_darkpulse', 'holy_light', 'ice_spike', 'ice_spike_ring', 'multi_shot', 'phantom_cut', 'railshot', 'railshot_charge', 'rush', 'shadow_strike', 'shin_shuriken', 'shin_shuriken2', 'smoke_dash', 'smoke_puff', 'throw_dagger', 'wild_bond']);
+// each set sits shrunk on its still's canvas so its build-up clears the edge; its frames draw this much larger, so the
+// settled effect is the still's own size (the still, shown while frames decode, draws at 1)
+const _LX_FX_SIZE_MUL = { archmage_elemental: 1.686, arrow_rain: 1.259, backstab: 1.266, blink: 1.1, celestial_aurora: 1.05, charged_shot: 1.195, death_blossom: 1.205, death_blossom1: 1.085, elemental_arrows: 1.25, evade_burst: 1.018, hexmaster_darkpulse: 1.949, holy_light: 1.321, ice_spike: 1.33, ice_spike_ring: 1.122, multi_shot: 1.075, phantom_cut: 1.689, railshot: 1.351, railshot_charge: 1.377, rush: 1.205, shadow_strike: 1.453, shin_shuriken: 1.176, shin_shuriken2: 1.439, smoke_dash: 1.048, smoke_puff: 1.172, throw_dagger: 1.284 };
+// sets whose frames carry the turn themselves (flurry's smooth half turn): the burst's own spin is not added on top, and a
+// counter-turn plays the frames mirrored
+const _LX_FX_OWN_SPIN = new Set(['flurry']);
+// the bake ceiling (logical px) for a set that never draws large: its largest draw (spawn size x the 1.1 grow x its size
+// multiplier) plus a margin, floor 256 - a 170 px Blink keeps 256 px frames, not 640 (the fx base, sized for a boss's
+// black hole). Sets that draw big or vary (Convergence, Dark Pulse, Railshot, the smoke explosion) keep 640.
+const _LX_FX_ANIM_BASE = { arrow_rain: 560, backstab: 600, blink: 256, celestial_aurora: 400, charged_shot: 256, death_blossom: 480, death_blossom1: 320, eagle_eye: 256, elemental_arrows: 440, elemental_link: 256, evade_burst: 500, fireball_ring: 256, flurry: 256, holy_light: 620, ice_spike: 256, ice_spike_ring: 256, multi_shot: 480, phantom_cut: 500, rush: 400, shadow_strike: 330, shin_shuriken: 430, shin_shuriken2: 520, smoke_dash: 420, throw_dagger: 256, wild_bond: 450 };
 const _FX_ANIM_KEYS = new Set([
+  ..._LX_SKILL_ANIM,   // skill-anim
   'swing_echoKnight', 'swing_smithgolem', 'swing_willeo', 'swing_thornmaw', 'swing_zodiac_aries', 'swing_scorpion', 'swing_goblinMauler', 'swing_graveReaver', 'swing_blockHupo', 'swing_legosaurus', 'swing_mummy', 'swing_nougatBear', 'swing_shardlich', 'swing_ossuaryTyrant', 'swing_pqConductor', 'swing_blockRhirhi', 'swing_blockGary', 'swing_blockPopo', 'swing_deranged_kuro', 'swing_young_confused_barnaby', 'swing_fatDragon', 'swing_sundered_smith', 'swing_towerWarden', 'swing_zodiac_capricorn', 'swing_towerArbiter', 'swing_towerSovereign',   // v0.30.1460 swing-anim - orb -> strike -> trail (fx/anim/swing_<type>_0..n, ludo.ai)
   'deadeye_hit', 'deadeye_execute',   // v0.30.x — Deadeye line impact / Execute Round impact (fx/anim/*, ludo.ai via scripts/gen_deadeye_art.mjs)
   'grav_impact',   // v0.30.x — the Gravitos meteor landing (fx/anim/grav_impact_0..8, ludo.ai via scripts/gen_grav_impact_fx.mjs)
@@ -19655,6 +19669,11 @@ function _fxWeightedFrame(key, t, n) {
   for (let i = 0; i < w.length; i++) { if (x < w[i]) return i; x -= w[i]; }
   return n - 1;
 }
+// v0.30.1520 skill-anim - an fx/anim frame by progress (0..1, the last frame held); null until that frame decodes, so the
+// caller keeps its still
+function _lxFxAnimAt(key, t) { const fr = _fxAnimFrames(key); if (!fr || !fr.length) return null; const f = fr[Math.min(fr.length - 1, Math.max(0, Math.floor(t * fr.length)))]; return (f && _lxFxReady(f)) ? f : null; }
+// a burst's frame progress: its life (t), or a fixed point (animT), or game time since animFrom over animSpan ticks
+function _lxFxAnimProgress(fx, t) { if (fx.animT != null) return Math.min(1, Math.max(0, fx.animT)); if (fx.animFrom != null) return Math.min(1, Math.max(0, ((game.time | 0) - fx.animFrom) / (fx.animSpan || 30))); return t; }
 function _fxAnimFrames(key) {
   if (!_FX_ANIM_KEYS.has(key)) return null;
   let arr = FX_ANIM_FRAMES[key];
@@ -19663,6 +19682,7 @@ function _fxAnimFrames(key) {
     arr = new Array(_n).fill(null);
     for (let i = 0; i < _n; i++) { const img = new Image(); img.decoding = 'async'; try { img.fetchPriority = 'high'; } catch (e) {} img.onerror = () => {}; img.src = 'Sprites/fx/anim/' + key + '_' + i + '.webp'; if (img.decode) img.decode().catch(() => {}); arr[i] = img; }   // v0.29.945 — fetchPriority: these gate a live combat effect; the ~4000 world sprites behind them do not
     FX_ANIM_FRAMES[key] = arr;
+    if (_LX_FX_ANIM_BASE[key]) arr._lxBaseMax = _LX_FX_ANIM_BASE[key];   // skill-anim: a set that never draws large bakes small
   }
   // v0.29.284 — fx frames are authored ~952×952 (347 MP across the pack).
   // Base 640 logical = the largest fx draw measured in a boss fight
@@ -20987,7 +21007,8 @@ function _lxShrinkSlot(holder, key, baseLogical) {
 }
 function _lxShrinkFrames(frames, baseLogical, pinCap) {   // v0.30.624 - pinCap: sync pins per call (default 4); the prewarm asks for 2
   if (!frames) return frames;
-  if (frames._lxBaseMin > baseLogical) baseLogical = frames._lxBaseMin;   // v0.30.x — a set drawn bigger than its caller's base (_lxBossBakeBaseFor)
+  if (frames._lxBaseMin > baseLogical) baseLogical = frames._lxBaseMin;
+  if (frames._lxBaseMax && baseLogical > frames._lxBaseMax) baseLogical = frames._lxBaseMax;   // skill-anim - and smaller than it (_LX_FX_ANIM_BASE)   // v0.30.x — a set drawn bigger than its caller's base (_lxBossBakeBaseFor)
   frames._lxBase = baseLogical;   // v0.30.256 — audit hook: which cap family governs this set
   const maxLong = _lxShrinkCap(baseLogical);
   // v0.29.707 — LAG FIX: the "shrunk"/"noShrink" marks are now versioned by
@@ -83525,6 +83546,7 @@ function _tickClassIdentity(dt) {
       const _rcGap = _rcThin ? 14 : (_rcP >= 0.999 ? 5 : 9);
       const _rcW = (player.facing || 1) * (0.8 + 1.2 * _rcP) / 14;   // rad a frame: the old per-ring spin, spread evenly
       _rcC._whirl = ((_rcC._whirl || 0) + _rcW) % (Math.PI * 2);
+      if (_rcC._rcT0 == null) _rcC._rcT0 = game.time | 0;   // skill-anim: the build-up runs from the hold's first tick
       if (_rcC._ringAt == null || (game.time | 0) - _rcC._ringAt >= _rcGap) {
         _rcC._ringAt = game.time | 0;
         const _rcF = player.facing || 1;
@@ -83536,6 +83558,7 @@ function _tickClassIdentity(dt) {
           spin: _rcW * _rcLife,
           opacity: 0.42 + 0.42 * _rcP,
           sticky: true,
+          animFrom: _rcC._rcT0, animSpan: 36,   // skill-anim
         });
       }
     }
@@ -87171,7 +87194,9 @@ function spawnSpriteBurst(x, y, spriteKey, opts) {
     clampView: !!opts.clampView,
     // v0.30.1448 parry-shield - fadeTail: the share of the life the tail-fade takes (0 / absent -> 0.6, as always). A burst whose
     // peak sits late in its frames passes a shorter tail so the peak draws at full strength (the parry shield: 0.3).
-    fadeTail: opts.fadeTail || 0,
+    fadeTail: opts.fadeTail || ((typeof _LX_SKILL_ANIM !== 'undefined' && _LX_SKILL_ANIM.has(spriteKey)) ? 0.3 : 0),   // skill-anim: a late-settling build-up keeps full strength
+    // v0.30.1520 skill-anim - frame progress overrides (see _lxFxAnimProgress): a fixed point, or game time since animFrom
+    animT: (opts.animT == null) ? null : opts.animT, animFrom: (opts.animFrom == null) ? null : opts.animFrom, animSpan: opts.animSpan || 0,
     // v0.25.996 — Per-axis scale transitions. When all four start/end
     // values are provided, the draw branch overrides the uniform
     // 0.5×→1.1× `grow` curve with independent X/Y scales interpolated
@@ -87624,8 +87649,11 @@ function drawSmoothFx(_behindPass) {
                              : _bucket === 'warrior' ? LX_FX.dust_ring
                              : _bucket === 'rogue'   ? LX_FX.smoke_puff
                              : null;
+      const _exKey = fx.sprite || (_bucket === 'rogue' ? 'smoke_puff' : null);   // v0.30.1520 skill-anim
+      const _exAnim = (_exKey && _LX_SKILL_ANIM.has(_exKey)) ? _lxFxAnimAt(_exKey, 1 - (fx.life || 0) / Math.max(1, fx.maxLife || 1)) : null;
+      const _exMul = _exAnim ? (_LX_FX_SIZE_MUL[_exKey] || 1) : 1;
       if (_explosionSprite && _lxFxReady(_explosionSprite)) {
-        const sz = r * 2.2;
+        const sz = r * 2.2 * _exMul;   // skill-anim
         ctx.globalAlpha = alpha;
         if (fx.spin) {
           // a rune circle that never turns reads as a decal. Rotation is by
@@ -87635,10 +87663,10 @@ function drawSmoothFx(_behindPass) {
           ctx.save();
           ctx.translate(sx, fx.y);
           ctx.rotate(_age * fx.spin);
-          ctx.drawImage(_lxProjScaled(_explosionSprite, Math.round(sz), true), -sz / 2, -sz / 2, sz, sz);   // v0.30.294 perf
+          ctx.drawImage(_lxProjScaled(_exAnim || _explosionSprite, Math.round(sz), true), -sz / 2, -sz / 2, sz, sz);   // v0.30.294 perf
           ctx.restore();
         } else {
-          ctx.drawImage(_lxProjScaled(_explosionSprite, Math.round(sz), true), sx - sz / 2, fx.y - sz / 2, sz, sz);   // v0.30.294 perf
+          ctx.drawImage(_lxProjScaled(_exAnim || _explosionSprite, Math.round(sz), true), sx - sz / 2, fx.y - sz / 2, sz, sz);   // v0.30.294 perf
         }
         ctx.globalAlpha = 1;
         continue;
@@ -87758,13 +87786,15 @@ function drawSmoothFx(_behindPass) {
         else {
           // v0.30.x — weighted hold where a set needs it; otherwise the original
           // uniform stretch, unchanged.
-          _fi = _fxWeightedFrame(fx.spriteKey, t, _fn);
-          if (_fi < 0) _fi = Math.min(_fn - 1, Math.max(0, Math.floor(t * _fn)));
+          const _lxAt = _lxFxAnimProgress(fx, t);   // skill-anim
+          _fi = _fxWeightedFrame(fx.spriteKey, _lxAt, _fn);
+          if (_fi < 0) _fi = Math.min(_fn - 1, Math.max(0, Math.floor(_lxAt * _fn)));
         }
         const _fr = _fxFrames[_fi];
         if (_lxFxReady(_fr)) sprite = _fr;
       }
       if (!sprite || !_lxFxReady(sprite)) continue;
+      const _lxSkFrame = !!_fxFrames && sprite !== (LX_FX && LX_FX[fx.spriteKey]);   // skill-anim: a frame, not the still
       const grow = 0.5 + t * 0.6;
       const sxMul = (fx.scaleStartX != null && fx.scaleEndX != null)
         ? fx.scaleStartX + t * (fx.scaleEndX - fx.scaleStartX)
@@ -87782,6 +87812,7 @@ function drawSmoothFx(_behindPass) {
         hpx = fx.size * syMul;
         wpx = hpx * (_nw / _nh);
       }
+      if (_lxSkFrame && _LX_FX_SIZE_MUL[fx.spriteKey]) { wpx *= _LX_FX_SIZE_MUL[fx.spriteKey]; hpx *= _LX_FX_SIZE_MUL[fx.spriteKey]; }   // skill-anim
       ctx.save();
       // v0.26.x — optional extra lifetime fade (fadeOut): dims the sprite
       // steadily from spawn→death on top of the base tail-fade. Default
@@ -87803,9 +87834,11 @@ function drawSmoothFx(_behindPass) {
         _cvy = Math.min(Math.max(_cvy, _vt + hpx * _cpy), _vt + H - hpx * (1 - _cpy));
       }
       ctx.translate(_cvx, _cvy);
-      const rot = (fx.angle || 0) + (fx.spin || 0) * t;
+      const _lxOwnSpin = _lxSkFrame && _LX_FX_OWN_SPIN.has(fx.spriteKey);   // skill-anim: the frames carry the turn
+      const rot = (fx.angle || 0) + (_lxOwnSpin ? 0 : (fx.spin || 0)) * t;
       if (rot) ctx.rotate(rot);
-      if (fx.flipX || fx.flipY) ctx.scale(fx.flipX ? -1 : 1, fx.flipY ? -1 : 1);
+      const _lxMir = _lxOwnSpin && (fx.spin || 0) < 0;   // a counter-turn plays the frames mirrored
+      if (fx.flipX || fx.flipY || _lxMir) ctx.scale((fx.flipX ? -1 : 1) * (_lxMir ? -1 : 1), fx.flipY ? -1 : 1);
       // v0.26.064 — Anchor offset. Default = centre at translate origin;
       // `anchorBottom` = bottom edge at origin (`-hpx`). The latter lets a
       // sprite scaled along Y "sprout" upward instead of expanding equally
@@ -90798,9 +90831,9 @@ const SKILL_FNS = {
       // load. It evicts the oldest first - the rail sprite, then these rings - so in a busy fight the whirl was gone
       // the frame after it appeared.
       spawnSpriteBurst(sx + dir * 40, sy, 'railshot_charge',
-        { size: _rsSize, life: 24 + Math.round(16 * _rsChg), spin: 0.9 + 1.4 * _rsChg, sticky: true });
+        { size: _rsSize, life: 24 + Math.round(16 * _rsChg), spin: 0.9 + 1.4 * _rsChg, animT: 1, sticky: true });   // skill-anim: the finished circle
       spawnSpriteBurst(sx + dir * 40, sy, 'railshot_charge',
-        { size: _rsSize * 0.58, life: 20 + Math.round(12 * _rsChg), spin: -(1.6 + 2.0 * _rsChg), opacity: 0.78, sticky: true });
+        { size: _rsSize * 0.58, life: 20 + Math.round(12 * _rsChg), spin: -(1.6 + 2.0 * _rsChg), animT: 1, opacity: 0.78, sticky: true });
       spawnSmoothExplosion(sx + dir * 40, sy, 40 + 90 * _rsChg, '#ffffff', '#aaddff88',
         { life: 16 + Math.round(8 * _rsChg) });
     }
@@ -152106,59 +152139,59 @@ function _lxPrewarmFxDrain(force) {
 // still asks at its first cast (castSkill), and a sprite at its first draw (the ready checks).
 const _LX_FX_SKILL = {
   arcaneBurst: 'fa:arcane_burst fa:arcane_shockwave fx:arcane_burst fx:arcane_shockwave',
-  archbishop_grail: 'fa:archbishop_grail fx:archbishop_grail fx:celestial_aurora',
+  archbishop_grail: 'fa:archbishop_grail fx:archbishop_grail fx:celestial_aurora fa:celestial_aurora',
   archbishop_ult: 'fa:archbishop_ult fx:archbishop_ult fx:holy_ring',
-  arrowRain: 'fx:arrow_rain pp:arrow',
+  arrowRain: 'fx:arrow_rain pp:arrow fa:arrow_rain',
   arrowShot: 'pp:arrow',
-  backstab: 'fx:backstab',
+  backstab: 'fx:backstab fa:backstab',
   ballista_ult: 'bp:bult_ballista fa:ballista_ult fx:ballista_ult sm:ballista_turret',
   ballista_volley: 'fa:ballista_volley fx:ballista_volley pp:arrow',
   beastmaster_pack: 'fa:beastmaster_pack fx:beastmaster_pack',
   beastmaster_ult: 'fa:beastmaster_ult fx:beastmaster_ult sa:werewolf sm:werewolf',
-  blink: 'fx:blink',
+  blink: 'fx:blink fa:blink',
   bloodlust: 'fx:bloodlust bp:bloodlust_wave pa:bloodlust_wave',
-  celestialAurora: 'fx:celestial_aurora',
-  chargedShot: 'fx:charged_shot pp:arrow',
+  celestialAurora: 'fx:celestial_aurora fa:celestial_aurora',
+  chargedShot: 'fx:charged_shot pp:arrow fa:charged_shot',
   crusader_aegis: 'bp:bult_holyorb fa:crusader_aegis fx:crusader_aegis',
   crusader_ult: 'fa:bastion_aura fa:bastion_pillar fa:crusader_ult fx:bastion_aura fx:bastion_pillar fx:crusader_ult',
-  darkPulse: 'fx:hexmaster_darkpulse fx:smoke_puff sa:skeleton sa:zombie sm:skeleton sm:zombie',
-  deathBlossom: 'fx:death_blossom fx:death_blossom1',
+  darkPulse: 'fx:hexmaster_darkpulse fx:smoke_puff sa:skeleton sa:zombie sm:skeleton sm:zombie fa:hexmaster_darkpulse fa:smoke_puff',
+  deathBlossom: 'fx:death_blossom fx:death_blossom1 fa:death_blossom fa:death_blossom1',
   doombringer_apoc: 'fa:doombringer_apoc fx:doombringer_apoc fx:dust_ring sm:sword',
   doombringer_ult: 'bp:bult_doomfire fa:doombringer_ult fx:doombringer_ult pa:p_doom_fireball',
   dragoon_skylance: 'fa:dragoon_skylance fx:dragoon_impact fx:dragoon_skylance',
   dragoon_ult: 'bp:bult_dragoon fa:dragoon_ult fx:dragoon_ult',
-  eagleEye: 'fx:eagle_eye',
-  elemental: 'fx:archmage_elemental fx:elemental_link',
-  elementalArrows: 'fx:elemental_arrows pp:arrow sa:wolf sa:wolf_alpha sa:wolf_sky',
+  eagleEye: 'fx:eagle_eye fa:eagle_eye',
+  elemental: 'fx:archmage_elemental fx:elemental_link fa:archmage_elemental fa:elemental_link',
+  elementalArrows: 'fx:elemental_arrows pp:arrow sa:wolf sa:wolf_alpha sa:wolf_sky fa:elemental_arrows',
   elementalist_cascade: 'fa:cascade_fire fa:cascade_ice fa:cascade_lightning fa:cascade_void fa:elementalist_cascade fx:cascade_fire fx:cascade_ice fx:cascade_lightning fx:cascade_void fx:elementalist_cascade fx:fireball',
   elementalist_ult: 'bp:apo_fire bp:apo_ice bp:apo_lightning bp:apo_void bp:bult_elementalist fa:elementalist_ult fx:apo_ring fx:elementalist_ult pa:p_apo_fire pa:p_apo_ice pa:p_apo_lightning pa:p_apo_void',
-  evadeRoll: 'fx:evade_burst pp:arrow',
-  fireball: 'fx:fireball_ring pp:fireball',
-  flurry: 'fx:flurry',
+  evadeRoll: 'fx:evade_burst pp:arrow fa:evade_burst',
+  fireball: 'fx:fireball_ring pp:fireball fa:fireball_ring',
+  flurry: 'fx:flurry fa:flurry',
   groundSlam: 'fa:ground_slam fx:dust_ring fx:ground_slam',
   guardian: 'fa:knight_guardian fx:knight_guardian',
   hexmaster_grandhex: 'bp:hexmaster_hexorb fa:hexmaster_grandhex fx:hexmaster_grandhex pa:p_hexmaster_hexorb',
   hexmaster_ult: 'bp:bult_hexorb fa:hexmaster_ult fx:hexmaster_ult',
-  holyLight: 'fx:holy_light',
+  holyLight: 'fx:holy_light fa:holy_light',
   holyShield: 'fa:holy_shield fa:holy_wave fx:holy_shield fx:holy_wave',
-  iceSpike: 'fx:ice_spike fx:ice_spike_ring pp:icespike',
+  iceSpike: 'fx:ice_spike fx:ice_spike_ring pp:icespike fa:ice_spike fa:ice_spike_ring',
   magicBolt: 'fx:magic_bolt pa:bolt pp:mage_orb',
   marksman_oneshot: 'fa:deadeye_hit fa:marksman_oneshot fx:deadeye_reticle fx:marksman_oneshot',
   marksman_ult: 'bp:bult_deadeye_exec bp:bult_marksman fa:deadeye_execute fa:deadeye_hit fa:marksman_ult fx:deadeye_execute fx:deadeye_reticle fx:marksman_ult',
   meteor: 'fx:meteor pa:meteor pp:meteor',
-  multiShot: 'fx:multi_shot pp:arrow',
+  multiShot: 'fx:multi_shot pp:arrow fa:multi_shot',
   necromancer_harvest: 'fa:soul_vortex fx:soul_vortex fx:soul_vortex1 pa:p_necromancer_soulorb',
   necromancer_ult: 'bp:bult_holyorb fa:necro_maelstrom fa:necromancer_ult fx:necro_maelstrom fx:necromancer_ult pa:p_necromancer_soulorb',
-  nightreaper_mark: 'fa:nightreaper_eclipse fx:nightreaper_eclipse fx:smoke_puff',
+  nightreaper_mark: 'fa:nightreaper_eclipse fx:nightreaper_eclipse fx:smoke_puff fa:smoke_puff',
   nightreaper_ult: 'bp:bult_nightreaper fa:nightreaper_ult fx:nightreaper_ult',
-  phantom_cut: 'fx:phantom_cut fx:smoke_puff',
+  phantom_cut: 'fx:phantom_cut fx:smoke_puff fa:phantom_cut fa:smoke_puff',
   phantom_ult: 'bp:bult_phantom fa:phantom_ult fx:phantom_ult',
   powerStrike: 'fx:power_strike pa:warrior_shockwave pp:warrior_shockwave',
   rampage: 'fa:warcry fx:rampage fx:rampage_pulse fx:warcry',
-  rush: 'fx:rush',
+  rush: 'fx:rush fa:rush',
   sage_meteorshower: 'fa:sage_meteorshower fx:fireball fx:sage_meteorshower',
   sage_ult: 'bp:bult_sage fa:sage_meteor_impact fa:sage_ult fx:sage_meteor_impact fx:sage_ult',
-  shadowStrike: 'fx:shadow_strike',
+  shadowStrike: 'fx:shadow_strike fa:shadow_strike',
   shadowlord_clones: 'fa:clone_strike fa:shadowlord_clones fx:clone_sigil fx:clone_strike fx:shadowlord_clones sa:clone_center sa:clone_left sa:clone_right sm:clone_center sm:clone_left sm:clone_right',
   shadowlord_ult: 'fa:shadowlord_ult fx:shadowlord_ult',
   shinobi_seal: 'fa:shinobi_seal fx:shinobi_seal',
@@ -152166,17 +152199,18 @@ const _LX_FX_SKILL = {
   skyhunter_gale: 'bp:gale_skyhunter fa:skyhunter_gale fx:skyhunter_gale sa:wolf_sky',
   skyhunter_ult: 'bp:bult_skyhunter fa:skyhunter_ult fx:skyhunter_ult sa:eagle sm:eagle',
   sleight: 'fa:phantom_voidrift fx:phantom_voidrift fx:phantom_voidrift2',
-  smokeBomb: 'fx:shin_shuriken fx:shin_shuriken2 pp:kunai pp:shuriken',
-  smokeDash: 'fx:smoke_dash',
+  smokeBomb: 'fx:shin_shuriken fx:shin_shuriken2 pp:kunai pp:shuriken fa:shin_shuriken fa:shin_shuriken2',
+  smokeDash: 'fx:smoke_dash fa:smoke_dash',
   // v0.30.1295 - railshot_charge is Railshot's HOLD ring (_tickClassIdentity): a tap cast - what this table measured - never draws it
   snipe_railgun: 'fx:railshot fx:railshot_charge',
   soulSiphon: 'fx:hexmaster_summon pa:p_necromancer_soulorb sa:skeleton sa:zombie sm:skeleton sm:zombie',
-  throwDagger: 'fx:throw_dagger',
+  throwDagger: 'fx:throw_dagger fa:throw_dagger',
   warCry: 'fa:warcry fx:fx_warcry_mark fx:warcry',
   warlord_ult: 'bp:bult_warlord fa:warlord_ult fx:warlord_ult pa:p_ult_warlord',
   warlord_warcry: 'fa:warlord_banner fx:warlord_banner fx:warlord_banner_planted pa:shockwave pp:shockwave',
-  wildBond: 'fx:wild_bond sa:werewolf sa:wolf sm:wolf',
+  wildBond: 'fx:wild_bond sa:werewolf sa:wolf sm:wolf fa:wild_bond',
 };
+_LX_FX_SKILL.snipe_railgun += ' fa:railshot fa:railshot_charge';   // v0.30.1520 skill-anim - its frames too (the row above is a gate marker, kept whole)
 // v0.30.1234 lazy-fx - a boss's own shots and effects: measured (600 frames in his arena) plus the fire sites a sample does not
 // reach; the rest of any monster's art comes by rule (_lxFxMobTags)
 const _LX_FX_BOSS = {
@@ -164558,7 +164592,8 @@ function drawFlameTrail() {
     ctx.globalAlpha = _irA;
     ctx.translate(_irx, _iry);
     ctx.rotate((game.time % 3600) * 0.02);
-    ctx.drawImage(LX_FX.ice_spike_ring, -_irR, -_irR, _irR * 2, _irR * 2);
+    { const _irF = _lxFxAnimAt('ice_spike_ring', (48 - _irLeft) / 34), _irM = _irF ? (_LX_FX_SIZE_MUL.ice_spike_ring || 1) : 1;   // skill-anim: ice cube -> the sign, once
+      ctx.drawImage(_irF || LX_FX.ice_spike_ring, -_irR * _irM, -_irR * _irM, _irR * 2 * _irM, _irR * 2 * _irM); }
     ctx.restore();
   }
   // v0.30.314 — FIREBALL INCANTATION RING (per user): the fire counterpart of the
@@ -164579,7 +164614,8 @@ function drawFlameTrail() {
     ctx.globalAlpha = _frA;
     ctx.translate(_frx, _fry);
     ctx.rotate(-((game.time % 3600) * 0.028));
-    ctx.drawImage(LX_FX.fireball_ring, -_frR, -_frR, _frR * 2, _frR * 2);
+    { const _frF = _lxFxAnimAt('fireball_ring', (48 - _frLeft) / 34), _frM = _frF ? (_LX_FX_SIZE_MUL.fireball_ring || 1) : 1;   // skill-anim: fireball -> the sign, once
+      ctx.drawImage(_frF || LX_FX.fireball_ring, -_frR * _frM, -_frR * _frM, _frR * 2 * _frM, _frR * 2 * _frM); }
     ctx.restore();
   }
   // v0.29.372 — SYNERGY: Phantom Waltz. The decoy's own slow field gets the
