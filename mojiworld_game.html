@@ -13612,7 +13612,7 @@ The sleeping world is listening.</div>
       </div>
       <div style="margin-top:10px; padding:8px 10px; background:rgba(30,15,55,0.4); border-radius:4px; font-size:11px; color:#c8b0e0; line-height:1.5;">
         <b>Play with friends.</b> Pick a <b>Party Code</b> (or hit <b>🎲 New code</b>) and share it — anyone who enters the same code + connects lands in your party. On the same map you now <b>fight the same monsters together</b>: shared HP, shared kills, shared XP &amp; coins. <b>Co-op bonus:</b> fight side by side and every kill pays <span class="gold">double EXP</span> &mdash; more with a bigger party.<br>
-        <b>In-world chat:</b> in a co-op room, press <kbd>Enter</kbd> to type, <kbd>Esc</kbd> to cancel. Max <b>60 characters</b> per bubble; it floats above your character for everyone in the room.
+        <b>In-world chat:</b> in a co-op room, press <kbd>Enter</kbd> to type, <kbd>Esc</kbd> to cancel. Max <b>60 characters</b> per bubble; it floats above your character for <b>6 seconds</b>, for everyone in the room.
       </div>
     </div>
   </div>
@@ -16196,7 +16196,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1478';
+const GAME_VERSION = 'v0.30.1479';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -59661,13 +59661,13 @@ function _mpHandle(msg) {
         _mpPushLog(`✨ <b style="color:#ffd76a">${escapeHtml(name)}</b> ${escapeHtml(_msg)}`, 'loot');
         if (typeof showToast === 'function') showToast(`✨ ${name} ${_msg}`, 'legendary');
         try { if (typeof _playUiSfx === 'function') _playUiSfx('pickup_item'); } catch (e) {}
-        if (p) { p.chat = { text: _ctext, life: 4000 }; p.emote = { kind: '✨', life: 1800 }; }
+        if (p) { p.chat = _lxChatBubble(_ctext); p.emote = { kind: '✨', life: 1800 }; }
         break;
       }
       const line = `<b>${escapeHtml(name)}:</b> ${escapeHtml(_ctext)}`;
       _mpPushLog(line);
-      // Float a bubble above the sender for 4 s
-      if (p) p.chat = { text: _ctext, life: 4000 };
+      // Float a bubble above the sender for 6 s (LX_CHAT_BUBBLE_MS)
+      if (p) p.chat = _lxChatBubble(_ctext);
       break;
     }
     case 'emote': {
@@ -60055,7 +60055,7 @@ function _mpTick() {
   // Decay peer chat / emote lifetimes
   for (const id in net.peers) {
     const p = net.peers[id];
-    if (p.chat)  { p.chat.life  -= MP_TICK_MS; if (p.chat.life  <= 0) p.chat  = null; }
+    if (p.chat)  { p.chat.life = _lxChatLeft(p.chat); if (p.chat.life <= 0) p.chat = null; }   // v0.30.1479 chat-6s - the wall clock (was -= MP_TICK_MS)
     if (p.emote) { p.emote.life -= MP_TICK_MS; if (p.emote.life <= 0) p.emote = null; }
     // v0.29.x — honest missing-avatar hint (once per peer). If a partner has
     // been streaming state for >12 s but their `look` never arrived — via
@@ -60083,14 +60083,21 @@ function _mpTick() {
   // badge/list keep showing the higher count until the next join/left/welcome.
   if (_pruned) { if (typeof _coopRecomputeHost === 'function') _coopRecomputeHost(); _mpRenderPlayerList(); }   // v0.27.0 — a pruned (silently-dropped) host must trigger re-election
 }
+// v0.30.1479 chat-6s - a chat bubble stays up 6 s (per user: "the chat bubble that displays should last 6 seconds"; it was 4 s),
+// timed on the wall clock (`until`). The old counts drifted: your own bubble lost 16 a draw step, so a slow frame rate
+// stretched it, and a partner's lost 70 a net tick while every jump's airborne flip fires an extra tick. LX_CHAT_WRAP: the
+// widest line of text in px - a long message wraps into a small bubble instead of one line across the screen.
+const LX_CHAT_BUBBLE_MS = 6000, LX_CHAT_WRAP = 126;
+function _lxChatBubble(text) { return { text, life: LX_CHAT_BUBBLE_MS, maxLife: LX_CHAT_BUBBLE_MS, until: performance.now() + LX_CHAT_BUBBLE_MS }; }
+function _lxChatLeft(c) { return (c && c.until != null) ? c.until - performance.now() : ((c && c.life) || 0); }
 function _mpSendChat(text) {
   // v0.24.3 — 60-char hard cap per bubble. Always surfaces a local
   // bubble above the player (even offline); only relays to the server
   // when the socket is connected.
   const clean = (text || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60);
   if (!clean) return;
-  // Local bubble on the player (4 s)
-  player._chat = { text: clean, life: 4000, maxLife: 4000 };
+  // Local bubble on the player (6 s, LX_CHAT_BUBBLE_MS)
+  player._chat = _lxChatBubble(clean);
   // Echo into the chat log as a "me" line (even solo — nice history)
   if (typeof _mpPushLog === 'function') {
     const name = (typeof _mpLocalName === 'function') ? _mpLocalName() : ((player.look && player.look.name) || 'Hero');
@@ -60563,9 +60570,13 @@ function _mpDrawPeers() {
     }
     // Chat bubble — anchored above the relocated overhead HP bar (bar top at
     // sy-60) so the two don't overlap. Bubble bottom now sits at sy-66.
-    if (p.chat && p.chat.life > 0) {
-      const fade = p.chat.life < 500 ? p.chat.life / 500 : 1;
-      if (typeof _drawBubble === 'function') _drawBubble(sx + 14, sy - 66, p.chat.text, { fade });
+    // v0.30.1479 chat-6s - time left read off the clock at draw time; the text wraps (LX_CHAT_WRAP); _pcLift = how much taller than
+    // one line the bubble grew, so the emote above it moves up with it
+    const _pcl = p.chat ? _lxChatLeft(p.chat) : 0; let _pcLift = 0;
+    if (p.chat && _pcl > 0) {
+      const fade = _pcl < 500 ? _pcl / 500 : 1;
+      if (typeof _drawBubble === 'function') _drawBubble(sx + 14, sy - 66, p.chat.text, { fade, wrap: LX_CHAT_WRAP });
+      try { const _pcv = _lxBubbleBake(p.chat.text, { wrap: LX_CHAT_WRAP }); if (_pcv) _pcLift = Math.max(0, _pcv._lxBh - 18); } catch (e) {}
     }
     // Emote bubble — floats above the chat bubble so they don't stack onto each other
     if (p.emote && p.emote.life > 0) {
@@ -60574,7 +60585,7 @@ function _mpDrawPeers() {
       ctx.globalAlpha = 0.9 * fade;
       ctx.font = '18px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(p.emote.kind, sx + 14, sy - 84);
+      ctx.fillText(p.emote.kind, sx + 14, sy - 84 - _pcLift);
       ctx.restore();
     }
   }
@@ -83104,19 +83115,19 @@ function drawClassIdentityHUD() {
   const cx = (player.x + player.w/2) - game.camera.x;
   const cy = (player.y + player.h/2);
 
-  // Local player chat bubble (v0.24.3) — shows above your head for 4s
+  // Local player chat bubble (v0.24.3) — shows above your head for 6 s (LX_CHAT_BUBBLE_MS)
   // after you send a message (Enter to type, Esc to cancel). Shared
   // _drawBubble renderer gives a consistent pill + tail look.
   // v0.25.3 — lifted the anchor another ~30 px so the bubble clears the
   // head with room to spare. Previous -4 had the tail kissing the hair.
   if (player._chat) {
     const c = player._chat;
-    if (!_lxRenderOnly) c.life -= 16;  // approx dt — close enough for a 4s bubble (hz-smooth: once a step)
+    c.life = _lxChatLeft(c);   // v0.30.1479 chat-6s - the wall clock (was 16 a draw step, so a slow frame rate stretched the bubble)
     if (c.life <= 0) { player._chat = null; }
     else {
       const fade = c.life < 500 ? c.life / 500 : 1;
       const topY = player.y - 34;
-      if (typeof _drawBubble === 'function') _drawBubble(cx, topY, c.text, { fade });
+      if (typeof _drawBubble === 'function') _drawBubble(cx, topY, c.text, { fade, wrap: LX_CHAT_WRAP });
     }
   }
 
@@ -145425,6 +145436,22 @@ function _mobChatTick(m, dt) {
 // same geometry the direct draw used, exposed on the canvas for the test.
 const _LX_BUBBLE_BAKES = new Map();
 const LX_BUBBLE_BAKE_CAP = 128;
+// v0.30.1479 chat-6s - greedy word wrap for a bubble: words fill a line up to maxW px; a word wider than a line breaks by letters.
+function _lxWrapBubble(g, text, maxW) {
+  const out = []; let cur = '';
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    let w = word;
+    while (w.length > 1 && g.measureText(w).width > maxW) {
+      let n = w.length - 1; while (n > 1 && g.measureText(w.slice(0, n)).width > maxW) n--;
+      if (cur) { out.push(cur); cur = ''; }
+      out.push(w.slice(0, n)); w = w.slice(n);
+    }
+    const t = cur ? cur + ' ' + w : w;
+    if (cur && g.measureText(t).width > maxW) { out.push(cur); cur = w; } else cur = t;
+  }
+  if (cur) out.push(cur);
+  return out.length ? out : [String(text)];
+}
 function _lxBubbleBake(text, opts) {
   opts = opts || {};
   const font = opts.font || 'bold 10px sans-serif';
@@ -145432,7 +145459,7 @@ function _lxBubbleBake(text, opts) {
   const stroke = opts.stroke || 'rgba(60,40,80,0.8)';
   const color = opts.color || '#1a0820';
   const dpr = (typeof _lxBakeDpr === 'function') ? _lxBakeDpr() : 1;
-  const key = text + '|' + font + '|' + fill + '|' + stroke + '|' + color + '|' + dpr;
+  const key = text + '|' + font + '|' + fill + '|' + stroke + '|' + color + '|' + dpr + '|' + (opts.wrap || 0);
   let cv = _LX_BUBBLE_BAKES.get(key);
   if (cv !== undefined) return cv;
   if (_LX_BUBBLE_BAKES.size >= LX_BUBBLE_BAKE_CAP) _LX_BUBBLE_BAKES.delete(_LX_BUBBLE_BAKES.keys().next().value);
@@ -145442,8 +145469,10 @@ function _lxBubbleBake(text, opts) {
     cv = document.createElement('canvas');
     let g = cv.getContext('2d');
     g.font = font;
-    const tw = g.measureText(text).width;
-    const bw = tw + padX * 2, bh = 14 + padY;
+    // v0.30.1479 chat-6s - opts.wrap (px): the text breaks into lines no wider than that, 12 px apart; one line bakes as before
+    const lines = opts.wrap ? _lxWrapBubble(g, text, opts.wrap) : [text];
+    let tw = 0; for (const l of lines) tw = Math.max(tw, g.measureText(l).width);
+    const bw = tw + padX * 2, bh = 14 + padY + (lines.length - 1) * 12;
     const lw = bw + M * 2, lh = bh + TAIL + M * 2;   // logical
     cv.width = Math.max(1, Math.ceil(lw * dpr)); cv.height = Math.max(1, Math.ceil(lh * dpr));
     g = cv.getContext('2d');                          // the resize reset the state
@@ -145458,7 +145487,7 @@ function _lxBubbleBake(text, opts) {
     g.moveTo(cx - 3, by + bh); g.lineTo(cx, by + bh + TAIL); g.lineTo(cx + 3, by + bh);
     g.closePath(); g.fill(); g.stroke();
     g.fillStyle = color;
-    g.fillText(text, cx, by + bh / 2 + 1);
+    for (let li = 0; li < lines.length; li++) g.fillText(lines[li], cx, by + padY / 2 + 8 + li * 12);   // one line: by + bh / 2 + 1, as before
     cv._lxBw = bw; cv._lxBh = bh; cv._lxM = M; cv._lxLw = lw; cv._lxLh = lh; cv._lxDpr = dpr;
   } catch (e) { cv = null; }
   _LX_BUBBLE_BAKES.set(key, cv);
