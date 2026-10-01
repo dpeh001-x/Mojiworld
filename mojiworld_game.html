@@ -16190,7 +16190,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1475';
+const GAME_VERSION = 'v0.30.1476';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -132127,6 +132127,12 @@ function _lxGravBackdropDraw() {
     const m = _lxGfBoss();
     const phase = _lxGfPhase(m), desperate = _lxGfDesperate(m);
     const veryLow = (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx());
+    // v0.30.1476 boss-lag (per user: "alot of lag in certain boss fights such as barnaby and gravitos") - the glow-only layers
+    // follow the quality governor. lowTier = the governor has seen THIS machine miss frames (LX_PERF.lowFx, set by _perfTick)
+    // or very-low is on; it is NOT _perfLowFx(), which is on in every boss fight on every machine. Measured in a live kit-bot
+    // Gravitos fight: this backdrop is 1.8 screens of blending a frame (1.4 of it additive), the frame's biggest group.
+    // window._lxNoLowSheds = true restores the old tiers (an in-page A/B switch for probes).
+    const shed = !window._lxNoLowSheds, lowTier = veryLow || (shed && !!(LX_PERF && LX_PERF.lowFx));
     const t = game.time;
     const shift = Math.floor(((game.camera.x || 0) * 0.12) % W);
     const bx = _LX_GF_DISC.fx * W - shift, by = _LX_GF_DISC.fy * H, r = _LX_GF_DISC.fr * W;
@@ -132134,16 +132140,19 @@ function _lxGravBackdropDraw() {
     const beat = 0.5 + 0.5 * Math.sin(t * (desperate ? 0.16 : 0.05));
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    // 1. lens halo behind the sphere
-    ctx.globalAlpha = (phase === 3 ? 0.56 : phase === 2 ? 0.46 : 0.36) + beat * 0.14;
-    const hs = r * 9.0;
-    ctx.drawImage(_lxGfBake('gf_halo' + phase, 256, _lxGfPaintHalo(phase)), bx - hs / 2, by - hs / 2, hs, hs);
+    // 1. lens halo behind the sphere - v0.30.1476 boss-lag: very-low drops it. It is a 9r additive square (~0.9 screens a
+    //    frame at fit scale); the disc art's own lens glow (~55% of its canvas) still rings the hole.
+    if (!(veryLow && shed)) {
+      ctx.globalAlpha = (phase === 3 ? 0.56 : phase === 2 ? 0.46 : 0.36) + beat * 0.14;
+      const hs = r * 9.0;
+      ctx.drawImage(_lxGfBake('gf_halo' + phase, 256, _lxGfPaintHalo(phase)), bx - hs / 2, by - hs / 2, hs, hs);
+    }
     // 1c. the light pooling on the floor beneath the hole
     // v0.30.784 perf — skipped under veryLowFx. At fit scale this backdrop is four additive/alpha blits of
     // 690-1270 device px each, every frame; removing the whole backdrop bought +41% fps on a weak CPU and
     // +74% on a software rasteriser (scripts/perf_gravitos_ablate.mjs). The floor pool and the disc's bloom copy
     // are the two that only add glow; the halo, the disc itself and the motes stay.
-    if (!veryLow) {
+    if (!lowTier) {   // v0.30.1476 boss-lag - and at the governor's low tier
       ctx.globalAlpha = 0.22 + beat * 0.08;
       ctx.drawImage(_lxGfBake('gf_halo' + phase, 256, _lxGfPaintHalo(phase)), bx - r * 4.5, 470 - r * 1.1, r * 9, r * 2.2);
     }
@@ -132159,7 +132168,7 @@ function _lxGravBackdropDraw() {
       ctx.drawImage(tinted, -ds / 2, -ds / 2, ds, ds);
       // bloom: the same art once more, additive, a little larger and faint, so its light bleeds into
       // the stone and the sky instead of stopping at the sprite's edge
-      if (!veryLow) {   // v0.30.784 perf — the bloom copy is glow only; see the floor pool above
+      if (!lowTier) {   // v0.30.784 perf — the bloom copy is glow only; see the floor pool above
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = (phase === 3 ? 0.30 : 0.22) + beat * 0.08;
         const bs = ds * 1.16;
@@ -141924,6 +141933,10 @@ function _drawPlayerControlBanner(sx, sy, c) {
 function _drawControlVignette() {
   const c = _playerControlState();
   if (!c || !c.hard) return;
+  // v0.30.1476 boss-lag - a full-screen gradient fill on every frame of a stun or freeze; Barnaby's fight keeps the player
+  // controlled often enough that it averaged ~0.4 screens of blending a frame. Very-low drops it: the affliction sticker over
+  // the head (STUNNED, the seconds, the fuse) still carries the read. window._lxNoLowSheds keeps it (A/B).
+  if (!window._lxNoLowSheds && typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) return;
   if (typeof W !== 'number' || typeof H !== 'number') return;
   ctx.save();
   _lxUndoWorldShift();   // v0.30.1455 - centred on the screen on tall maps too (it rode camera.y off the top)
@@ -147536,6 +147549,10 @@ function _lxGravRiftDraw(front) {
     if (typeof game === 'undefined' || !game || !game.monsters) return;
     const camX = (game.camera && game.camera.x) || 0, now = performance.now();
     let img = null, got = false;
+    // v0.30.1476 boss-lag - the governor's low tier (see _lxGravBackdropDraw) and very-low drop the two gradient glow squares below:
+    // an additive 2.8R square behind him and a 1.2ds one at the landing spot, ~0.4 screens a frame while he warns. The tear art,
+    // the folding rings and the destination's rift + ring still say where he goes. window._lxNoLowSheds keeps them (A/B).
+    const _lowG = !window._lxNoLowSheds && !!((LX_PERF && LX_PERF.lowFx) || (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()));
     for (let i = 0; i < game.monsters.length; i++) {
       const m = game.monsters[i];
       if (!m || m.type !== 'gravitos' || !m._tpWarn || m.currentHp <= 0) continue;
@@ -147544,10 +147561,12 @@ function _lxGravRiftDraw(front) {
       const cx = m.x + m.w / 2 - camX, cy = m.y + m.h / 2, R = Math.max(m.w, m.h) * 0.62;
       ctx.save();
       if (!front) {
-        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.25 + 0.4 * p;
-        const g = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, R * 1.35);
-        g.addColorStop(0, _pal.a); g.addColorStop(0.6, _pal.b); g.addColorStop(1, _pal.c);
-        ctx.fillStyle = g; ctx.fillRect(cx - R * 1.4, cy - R * 1.4, R * 2.8, R * 2.8);
+        if (!_lowG) {
+          ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.25 + 0.4 * p;
+          const g = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, R * 1.35);
+          g.addColorStop(0, _pal.a); g.addColorStop(0.6, _pal.b); g.addColorStop(1, _pal.c);
+          ctx.fillStyle = g; ctx.fillRect(cx - R * 1.4, cy - R * 1.4, R * 2.8, R * 2.8);
+        }
         ctx.globalCompositeOperation = 'source-over';
         _lxGravRiftAt(img, cx, cy, m.h * (1.3 + 0.7 * p), 0.45 + 0.5 * p, 0, false, _pal.rim);
       } else {
@@ -147565,10 +147584,12 @@ function _lxGravRiftDraw(front) {
         // the destination: a rift opening where he will appear
         if (w.x || w.y) {
           const dx = w.x - camX, dy = w.y, ds = m.h * (0.45 + 0.85 * p);
-          ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.25 + 0.45 * p;
-          const g2 = ctx.createRadialGradient(dx, dy, 4, dx, dy, ds * 0.6);
-          g2.addColorStop(0, _pal.d); g2.addColorStop(1, _pal.e);
-          ctx.fillStyle = g2; ctx.fillRect(dx - ds * 0.6, dy - ds * 0.6, ds * 1.2, ds * 1.2);
+          if (!_lowG) {
+            ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.25 + 0.45 * p;
+            const g2 = ctx.createRadialGradient(dx, dy, 4, dx, dy, ds * 0.6);
+            g2.addColorStop(0, _pal.d); g2.addColorStop(1, _pal.e);
+            ctx.fillStyle = g2; ctx.fillRect(dx - ds * 0.6, dy - ds * 0.6, ds * 1.2, ds * 1.2);
+          }
           ctx.globalCompositeOperation = 'source-over';
           _lxGravRiftAt(img, dx, dy, ds, 0.35 + 0.65 * p, p > 0.5 ? (p - 0.5) / 0.5 : 0, false, _pal.rim);
           const rr = ds * 0.58 * _pal.rs * (1.12 - 0.08 * Math.sin(el / 110));   // the halo framing it, breathing (was a stroked oval); rift-forms: x the form's ring scale
