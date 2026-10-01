@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // v0.30.1506 - THE PARRY STRIKES BACK FROM DEF (per user: "Parry skill should deal damage based on a player's DEF, try to scale it
 // such that it does about 3-10x the DEF appropriately to deal sufficient amount that does not OHKO monsters").
-//   MULTIPLE  - 3x through Lv 30, rising evenly to 10x at Lv 50 and above, never falling
+// v0.30.1509 (per user: "raise the cap so parries stay big late game"): the multiple climbs on past 10x
+//   MULTIPLE  - 3x through Lv 30, 6.5x at 40, 18x at 50, 40x at 60, 60x at 70, 120x from Lv 80 (straight lines between),
+//               never falling
 //   NEUTRAL   - the counter is reactive force, like thorns: the foe's weakness / resistance does not touch it
 //   COUNTER   - every class's parry hits its attacker for exactly multiple x DEF (an armourless dummy, combo x1), tagged 'parry'
 //   ROGUE     - the rogue's ATK counter-strike still lands on top of it
@@ -50,7 +52,7 @@ try {
     const parry = (m, combo) => { player.invulnerable = 9e9; player.blockTimer = 0; player.parryWindow = 0; game.combo = 0; game.comboMult = combo || 1; game.critStreak = 0; const h = m.currentHp; triggerParry(m); return h - m.currentHp; };
     const as = (cls, lv) => { applyClass(cls); player.level = lv; player.buffs = {}; player.invulnerable = 9e9; };
     // MULTIPLE
-    out.mul = [1, 20, 30, 35, 40, 45, 50, 70, 99].map((l) => +_lxParryMul(l).toFixed(3));
+    out.mul = [1, 20, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 99].map((l) => +_lxParryMul(l).toFixed(3));
     out.mono = true; for (let l = 2; l <= 120; l++) if (_lxParryMul(l) < _lxParryMul(l - 1)) out.mono = false;
     // COUNTER, every class at Lv 40 (6.5x) and the warrior at Lv 10 and 60
     out.cls = {};
@@ -81,12 +83,12 @@ try {
     { const host = document.createElement('div'); try { renderSkillsReference(host); } catch (e) { out.kerr = String(e).slice(0, 120); } out.k = host.textContent.replace(/\s+/g, ' '); out.kNum = _lxParryDmg().toLocaleString('en-US'); }
     return out;
   });
-  ok('MULTIPLE: 3x through Lv 30, rising evenly to 10x at Lv 50, never falling', JSON.stringify(R.mul) === JSON.stringify([3, 3, 3, 4.75, 6.5, 8.25, 10, 10, 10]) && R.mono, JSON.stringify(R.mul));
+  ok('MULTIPLE: 3x through Lv 30, then 6.5x / 18x / 40x / 60x at Lv 40 / 50 / 60 / 70 and 120x from Lv 80, never falling', JSON.stringify(R.mul) === JSON.stringify([3, 3, 3, 4.75, 6.5, 12.25, 18, 29, 40, 50, 60, 90, 120, 120]) && R.mono, JSON.stringify(R.mul));
   ok('NEUTRAL: the counter takes no weakness or resistance, where a melee hit on the same foe does', !!R.weak.weak && !!R.weak.melee && R.weak.parry === null, JSON.stringify(R.weak));
   for (const k of ['warrior40', 'mage40', 'archer40']) { const c = R.cls[k];
     ok(`COUNTER: a ${k.replace(/\d+/, '')} parry at Lv 40 strikes for exactly 6.5x DEF, tagged 'parry'`, c.gap === 0 && c.got === c.want && c.got > 0 && c.tag === 'parry', JSON.stringify(c)); }
   { const a = R.cls.warrior10, b = R.cls.warrior60;
-    ok('COUNTER: the multiple follows the level (3x at Lv 10, 10x at Lv 60)', a.got === a.want && b.got === b.want && a.got / a.def === 3 && b.got / b.def >= 9.99, JSON.stringify({ lv10: a.got / a.def, lv60: +(b.got / b.def).toFixed(3) })); }
+    ok('COUNTER: the multiple follows the level (3x at Lv 10, 40x at Lv 60)', a.got === a.want && b.got === b.want && a.got / a.def === 3 && Math.abs(b.got / b.def - 40) < 0.01, JSON.stringify({ lv10: a.got / a.def, lv60: +(b.got / b.def).toFixed(3) })); }
   ok('COUNTER: DEF decides it - the warrior out-hits the other classes', R.cls.warrior40.got > R.cls.archer40.got && R.cls.warrior40.got > R.cls.mage40.got && R.cls.warrior40.got > R.cls.rogue40.want, JSON.stringify([R.cls.warrior40.got, R.cls.archer40.got, R.cls.mage40.got, R.cls.rogue40.want]));
   { const c = R.cls.rogue40;
     ok('ROGUE: the DEF counter, plus its ATK counter-strike when that lands', c.got === c.want || c.got === c.want + c.atk, JSON.stringify(c)); }
@@ -95,7 +97,7 @@ try {
   for (const c of ['warrior', 'rogue', 'mage', 'archer']) { const o = R.ohko[c];
     ok(`NO OHKO: a ${c}'s parry never kills a full-health foe (combo x5, War Cry), leaving at least half`, o.kills === 0 && o.minHp >= 50 && o.raw >= 100, JSON.stringify(o)); }
   ok('FINISH: a foe already under half its health can be finished', R.finish <= 0, R.finish);
-  ok('TEXT: the skill-bar tooltip quotes the counter', /struck back for 3× your DEF, rising to 10× by Lv 50 \(never more than half its health\)/.test(R.title), R.title.slice(-140));
+  ok('TEXT: the skill-bar tooltip quotes the counter', /struck back for 3× your DEF up to Lv 30, rising to 120× at Lv 80 \(never more than half its health\)/.test(R.title), R.title.slice(-140));
   ok('TEXT: the K panel gives the multiple and the number for this character', !R.kerr && R.k.includes('strikes it back for 6.5× your DEF, ' + R.kNum + ' now'), R.kerr || R.k.slice(R.k.indexOf('PARRIED'), R.k.indexOf('PARRIED') + 170));
   ok('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 } catch (e) { ok('harness ran', false, String(e).slice(0, 200)); }
