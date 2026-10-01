@@ -16290,7 +16290,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1528';
+const GAME_VERSION = 'v0.30.1529';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -46526,7 +46526,7 @@ function _lxMobileFullscreen() {
   const root = document.documentElement;
   let p = null;
   try {
-    if (root.requestFullscreen)            p = root.requestFullscreen();
+    if (root.requestFullscreen)            p = root.requestFullscreen({ navigationUI: 'hide' });   // mobile-fullscreen: Android's navigation bar hides too
     else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
   } catch (e) {}
   Promise.resolve(p).catch(() => {}).then(() => {
@@ -46539,6 +46539,31 @@ function _lxMobileFullscreen() {
     setTimeout(_fitGameToViewport, 240);
     setTimeout(_fitGameToViewport, 800);
   });
+}
+// v0.30.x mobile-fullscreen (per user: "ensure the fullscreen mode really is full screen for the mobile devices"): on a
+// touch device the corner button is real fullscreen that KEEPS the touch deck - it used to run the desktop toggle, which also
+// switched the saved desktop layout on and hid the deck (boot restored it, so one tap left a phone without controls). In:
+// fullscreen with the navigation bar hidden and landscape locked; a phone the old tap left in the desktop layout gets its
+// touch layout back. Out: exit and unlock. No fullscreen in the browser (Safari on iPhone): a toast says how to get it.
+function _lxIsTouchDevice() { try { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; } }
+function _lxMobileFullscreenToggle() {
+  const inFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  if (inFs) {
+    try { if (document.exitFullscreen) document.exitFullscreen().catch(() => {}); else if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } catch (e) {}
+    try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {}
+    try { _fitGameToViewport(); setTimeout(_fitGameToViewport, 240); } catch (e) {}
+    return;
+  }
+  const root = document.documentElement;
+  if (!root.requestFullscreen && !root.webkitRequestFullscreen) {
+    try { if (typeof showToast === 'function') showToast('Full screen on iPhone: tap Share, then Add to Home Screen, and open Mojiworld from there', 'common'); } catch (e) {}
+    return;
+  }
+  if (document.body.classList.contains('force-desktop')) {   // the old tap's desktop layout: the touch deck comes back
+    document.body.classList.remove('force-desktop');
+    try { localStorage.removeItem('_lx_forceDesktop'); if (typeof _lxGetSettings === 'function' && typeof _lxSaveSettings === 'function') { const _st = _lxGetSettings(); _st.fdesk = false; _lxSaveSettings(_st); } } catch (e) {}
+  }
+  _lxMobileFullscreen();
 }
 // v0.26.949 — Desktop touch-controls mode. The deck's layout CSS lives
 // inside '(pointer: coarse), (max-width: 900px)' media blocks that a
@@ -46590,6 +46615,7 @@ function _lxToggleMobileMode() {
   try { if (typeof showToast === 'function') showToast(on ? 'Touch controls ON' : 'Touch controls OFF', 'common'); } catch (e) {}
 }
 function toggleFullscreenDesktop() {
+  if (_lxIsTouchDevice()) { _lxMobileFullscreenToggle(); return; }   // mobile-fullscreen: fullscreen that keeps the touch deck
   const inFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
   // Always flip the force-desktop flag on click; persisting means the
   // user can hit the button once and have desktop layout from then on.
