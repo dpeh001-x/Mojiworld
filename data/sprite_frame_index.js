@@ -7,6 +7,7 @@
 window.LX_SPRITE_FRAME_INDEX = {
  "frames": {
   "bosses/attack": {
+   "aetherion2astral": 9,
    "aetherion2": 9,
    "aetherionastral": 9,
    "aetherion": 9,
@@ -220,6 +221,9 @@ window.LX_SPRITE_FRAME_INDEX = {
    "pufferfish": 9,
    "razorgale": 9,
    "sandhusk": 9,
+   "scaleLanternA": 9,
+   "scaleLanternB": 9,
+   "scaleStormcaller": 9,
    "scorpion": 9,
    "seahorse": 9,
    "seasponge": 9,
@@ -333,6 +337,9 @@ window.LX_SPRITE_FRAME_INDEX = {
    "pufferfish": 9,
    "razorgale": 9,
    "sandhusk": 9,
+   "scaleLanternA": 9,
+   "scaleLanternB": 9,
+   "scaleStormcaller": 9,
    "scorpion": 9,
    "seahorse": 9,
    "seasponge": 9,
@@ -445,6 +452,9 @@ window.LX_SPRITE_FRAME_INDEX = {
    "pufferfish": 9,
    "razorgale": 9,
    "sandhusk": 9,
+   "scaleLanternA": 9,
+   "scaleLanternB": 9,
+   "scaleStormcaller": 9,
    "scorpion": 9,
    "seahorse": 9,
    "seasponge": 9,
