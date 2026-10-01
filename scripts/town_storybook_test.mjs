@@ -11,7 +11,9 @@
 //      sun), the three portals where they were; Guguma's beam and the sign are reachable from the street
 //   5. the street's things (lamp posts, planters, a mailbox, a bench, a cart, a notice board, and the speakers and taxi sign on
 //      their owners' balconies) stand on the street or a ledge; the new town costs about what the old one did; no page errors
-// The build before fails 1-3.   node scripts/town_storybook_test.mjs      PORT / MOJI_GAME_FILE override
+//   6. the east gatehouse (per user: "add the east gatehouse around the forest portal") stands around that portal - the portal
+//      in its open arch, stone on either side - whole inside the world; its roof is a ledge, and Bravo's veranda beside it
+// The build before fails 1-3 (and 6, and the counts in 1-4, before the gatehouse).   node scripts/town_storybook_test.mjs      PORT / MOJI_GAME_FILE override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync } = require('node:fs');
@@ -37,7 +39,7 @@ try {
     applyClass('warrior'); player.level = 40; player._tutorialSeen = true; player._storyBeatsSeen = { tutorial_intro: true, everdawn_welcome: true };
     try { window._perfTick = function () {}; LX_PERF.lowFx = false; LX_PERF.veryLowFx = false; } catch (e) {}
     loadMap('town', 300); await sleep(1500);
-    for (const x of [0, 700, 1400, 1840]) { player.x = x + 480; await sleep(800); }
+    for (const x of [0, 700, 1400, 1900]) { player.x = x + 480; await sleep(800); }
     const md = game.mapData, sb = md.storybook || null, d = _LX_DPR, gy = 480; out.cfg = !!sb;
     out.asked = typeof _lxArt2MapKeys === 'function' ? (sb ? sb.landmarks.every((L) => _lxArt2MapKeys('town').includes('prop:' + L.key)) : false) : null;
     out.decoded = sb ? sb.landmarks.map((L) => { const im = LX_OBJECTS[L.key]; return !!im && im.naturalWidth > 0; }) : [];
@@ -52,7 +54,7 @@ try {
       const a = shot(5000, rect), b = shot(5900, rect); out.rays = diff(a, b); LX_PERF.lowFx = true; try { out.raysLow = diff(shot(5000, rect), shot(5900, rect)); } finally { LX_PERF.lowFx = false; } } }
     // 2. kinds; no stone slab
     const kinds = {}; let slabs = 0; const oC = window._drawCutePlatform; window._drawCutePlatform = function () { slabs++; return oC.apply(this, arguments); };
-    try { for (const cx of [0, 700, 1400, 1840]) { game.camera.x = cx; player.x = cx + 480; shot(6000, [0, 0, 1, 1]); } } finally { window._drawCutePlatform = oC; }
+    try { for (const cx of [0, 700, 1400, 1900]) { game.camera.x = cx; player.x = cx + 480; shot(6000, [0, 0, 1, 1]); } } finally { window._drawCutePlatform = oC; }
     const owned = (p) => (sb && typeof _lxTownOwned === 'function') ? _lxTownOwned(sb, p) : null;
     for (const p of md.platforms) { const k = p.type === 'ground' ? 'ground' : owned(p) ? 'landmark' : ((sb && sb.swings) || []).some((w) => Math.abs(w.x - p.x) <= 2) ? 'swing' : p.h <= 6 ? 'rope' : (p.y >= 395 && p.w <= 100) ? 'awning' : 'deck'; kinds[k] = (kinds[k] || 0) + 1; }
     out.kinds = kinds; out.slabs = slabs; out.street = Object.keys(_lxMallBakes).some((k) => k.indexOf('tstreet') === 0);
@@ -71,28 +73,35 @@ try {
     for (const p of fl) if (gy - p.y <= 90) { R0.add(p); q.push(p); }
     while (q.length) { const s = q.pop(); for (const t of fl) { if (R0.has(t)) continue; const rise = s.y - t.y, gap = Math.max(t.x - (s.x + s.w), s.x - (t.x + t.w), 0); if (rise <= 90 && gap <= 120 + Math.max(0, -rise) * 0.8) { R0.add(t); q.push(t); } } }
     out.reach = sb ? [].concat(...sb.landmarks.map((L) => (L.owns || []).map((ox) => R0.has(at(ox))))) : [];
+    // 6. the east gatehouse around the forest portal
+    { const L = sb && sb.landmarks.find((m) => m.key === 'town_east_gate'), po = (md.portals || []).find((p) => p.dest === 'forest'), bv = game.npcs.find((n) => n.name === 'Bravo'), ver = md.platforms.find((p) => Math.abs(p.x - 2430) <= 2);
+      if (L && po) { const im = LX_OBJECTS[L.key], h = L.w * im.naturalHeight / im.naturalWidth, top = gy + (L.sink || 0) - h * L.foot, cv = _lxMallBakes['tland' + L.key + L.w + '|' + d];
+        const a = (x, y) => cv ? cv.getContext('2d').getImageData(Math.round((x - (L.x - L.w / 2)) * d), Math.round((y - top) * d), 1, 1).data[3] : null;
+        out.east = { gate: [L.x - L.w / 2, L.x + L.w / 2], portal: po.x, ww: md.worldWidth, arch: a(po.x, 430), jambs: [a(po.x - 45, 430), a(po.x + 45, 430)], bravoFeet: bv && Math.round(bv.y + (bv.h || 46)), veranda: ver && ver.y }; } }
     // 5. props, cost
     out.props = (MAP_PROPS.town || []).filter((p) => /^town_/.test(p.key)).map((p) => { const im = LX_OBJECTS[p.key], meta = LX_OBJECTS_META[p.key]; return { key: p.key, x: p.x, y: p.y, ok: !!im && im.naturalWidth > 0 && !!meta && meta.bboxBottomY != null, onLedge: p.y === gy || md.platforms.some((q) => p.x >= q.x && p.x <= q.x + q.w && Math.abs(q.y - p.y) <= 1) }; });
     const oB = window._lxTownBack, oP = window._lxTownPlatDraw, setOld = (old) => { window._lxTownBack = old ? function () {} : oB; window._lxTownPlatDraw = old ? function () { return false; } : oP; };
     const frame = () => { game.time++; const t0 = performance.now(); _lxRenderOnly = true; try { ctx.setTransform(d, 0, 0, d, 0, 0); _lxDrawFrame(performance.now()); } finally { _lxRenderOnly = false; } ctx.getImageData(0, 0, 1, 1); return performance.now() - t0; };
     const med = (a) => a.slice().sort((x, y) => x - y)[a.length >> 1], ratios = [];
-    try { for (let r = 0; r < 8; r++) for (const cx of [0, 700, 1400, 1840]) { game.camera.x = cx; player.x = cx + 480; const m = {};
+    try { for (let r = 0; r < 8; r++) for (const cx of [0, 700, 1400, 1900]) { game.camera.x = cx; player.x = cx + 480; const m = {};
       for (const old of (r % 2 ? [true, false] : [false, true])) { setOld(old); const a = []; for (let i = 0; i < 8; i++) a.push(frame()); m[old] = med(a.slice(2)); } ratios.push(m[false] / m[true]); } } finally { setOld(false); }
     out.cost = +med(ratios).toFixed(3);
     game.paused = false;
     return out;
   });
-  ok('1. the town has its storybook layout, and each landmark\'s art is asked for with the map and decoded', R.cfg && R.asked === true && R.decoded.length === 2 && R.decoded.every(Boolean), { asked: R.asked, decoded: R.decoded });
-  ok('1. the Dawn Gate and the Megamall\'s storefront are drawn', R.drawn.length === 2 && R.drawn.every((v) => v > 6), R.drawn);
+  ok('1. the town has its storybook layout, and each landmark\'s art is asked for with the map and decoded', R.cfg && R.asked === true && R.decoded.length === 3 && R.decoded.every(Boolean), { asked: R.asked, decoded: R.decoded });
+  ok('1. the Dawn Gate, the Megamall\'s storefront and the east gatehouse are drawn', R.drawn.length === 3 && R.drawn.every((v) => v > 6), R.drawn);
   ok('1. the gate\'s sun throws slowly turning rays (the sky over the gate changes far more than without them), none at low FX', R.rays > 1 && R.raysLow < R.rays / 4, { rays: R.rays, low: R.raysLow });
-  ok('2. every ledge is drawn as part of the town (awnings, balconies, the rope bridge, the swing, the landmarks\' own ledges)', R.kinds.awning >= 9 && R.kinds.deck >= 8 && R.kinds.rope === 1 && R.kinds.swing === 1 && R.kinds.landmark === 3, R.kinds);
+  ok('2. every ledge is drawn as part of the town (awnings, balconies, the rope bridge, the swing, the landmarks\' own ledges)', R.kinds.awning >= 9 && R.kinds.deck >= 8 && R.kinds.rope === 1 && R.kinds.swing === 1 && R.kinds.landmark === 4, R.kinds);
   ok('2. the old stone slab is never drawn in town, and the street is the cobble bake', R.slabs === 0 && R.street, { slabs: R.slabs, street: R.street });
-  ok('3. the ledges a landmark draws sit on its art (opaque where you stand) and the spacing pass leaves them, and the swing, alone', R.ledges.length === 3 && R.ledges.every((l) => !l.moved && l.ink > 128) && R.swing.every((w) => !w.moved), { ledges: R.ledges, swing: R.swing });
+  ok('3. the ledges a landmark draws sit on its art (opaque where you stand) and the spacing pass leaves them, and the swing, alone', R.ledges.length === 4 && R.ledges.every((l) => !l.moved && l.ink > 128) && R.swing.every((w) => !w.moved), { ledges: R.ledges, swing: R.swing });
   ok('4. every NPC stands on a ledge or the street, Guguma on the gate\'s beam', R.npcs.length >= 9 && R.npcs.every((n) => n.on) && R.gugOnBeam, R.npcs.filter((n) => !n.on).concat([{ gug: R.gugOnBeam }]));
   ok('4. the three portals are where they were', JSON.stringify(R.portals) === JSON.stringify(['cadetsStrand@153', 'everdawn_megamall@1479', 'forest@2735']), R.portals);
-  ok('4. Guguma\'s beam, the dais and the Megamall\'s sign are reachable from the street', R.reach.length === 3 && R.reach.every(Boolean), R.reach);
+  ok('4. Guguma\'s beam, the dais, the Megamall\'s sign and the gatehouse\'s roof are reachable from the street', R.reach.length === 4 && R.reach.every(Boolean), R.reach);
   ok('5. the street\'s things (lamp posts, planters, a mailbox, a bench, a flower cart, a notice board; speakers and a taxi sign on their owners\' balconies) stand on the street or a ledge', R.props.length >= 12 && R.props.every((p) => p.ok && p.onLedge), R.props.filter((p) => !p.ok || !p.onLedge));
   ok('5. the new town costs about what the old one did (whole frames, paired; < 15% more)', R.cost < 1.15, R.cost);
+  { const E = R.east; ok('6. the east gatehouse stands around the forest portal (the portal in its open arch, stone either side), whole inside the world, and Bravo stands on the veranda beside it',
+      !!E && Math.abs((E.gate[0] + E.gate[1]) / 2 - E.portal) <= 8 && E.gate[1] <= E.ww && E.arch < 40 && E.jambs.every((v) => v > 200) && Math.abs(E.bravoFeet - E.veranda) <= 4, E); }
   ok('5. no page errors', errs.length === 0, errs.slice(0, 3));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 200), false); }
 await browser.close(); server.kill();
