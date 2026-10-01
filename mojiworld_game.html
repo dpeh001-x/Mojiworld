@@ -16290,7 +16290,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1512';
+const GAME_VERSION = 'v0.30.1513';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -73579,7 +73579,7 @@ Object.assign(monsterTypes, {
   // chip-trade fight. Swing range stays at 200 so the player can still
   // disengage cleanly; cdMs > telegraphMs means he can never instantly
   // chain into a second swing.
-  towerArbiter:  { name:'The Arbiter',   w:140, h:160, color:'#ffd870', shell:'#aa6622', hp:58000,atk:395, def:300, evasion:110, exp:9200, mojicoins:0, speed:1.7, jump:0, boss:true,                       signature:'Mid-tower judge. Never leaves the ground — but his reach is immense.',         traits:{ activeBoss:true, miniElite:true, revivesOnce:{ hpPct:0.25 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:360, swingW:440, swingH:190, cdMs:2400, telegraphMs:450, radiance:{ frac:0.35, chance:0.25, flat:true, tag:'VERDICT', label:'the Arbiter\u2019s verdict', color:'#ffd870', toast:'\u2696 VERDICT \u2014 the Arbiter\u2019s full swing takes a third of your health' } }, wardLen:225, columnStrike:{ dmgMul:2.0, width:120, range:600, cdMs:5500, telegraphMs:650, color:'#ffd870', sprite:'fx_col_arbiter' }, hourglassCharge:2400 } },
+  towerArbiter:  { name:'The Arbiter',   w:140, h:160, color:'#ffd870', shell:'#aa6622', hp:58000,atk:395, def:300, evasion:110, exp:9200, mojicoins:0, speed:1.7, jump:0, boss:true,                       signature:'Mid-tower judge. Never leaves the ground — but his reach is immense.',         traits:{ activeBoss:true, miniElite:true, revivesOnce:{ hpPct:0.25 }, bigMelee:{ kind:'swing', dmgMul:2.2, range:360, swingW:440, swingH:190, cdMs:2400, telegraphMs:450, radiance:{ frac:0.35, chance:0.25, flat:true, tag:'VERDICT', label:'the Arbiter\u2019s verdict', color:'#ffd870', toast:'\u2696 VERDICT \u2014 the Arbiter\u2019s full swing takes a third of your health' } }, wardLen:225, columnStrike:{ dmgMul:2.0, width:120, range:600, cdMs:5500, telegraphMs:650, color:'#ffd870', sprite:'fx_col_arbiter' }, hourglassCharge:2400, hourglassDashMs:700, hourglassDistance:360, hourglassEase:true, hourglassDashPose:0 /* v0.30.1513 arbiter - per user: the lunge slid like a glitch (460 px in 320 ms, the sword swing playing under a 24 px/frame glide) */ } },
   // B6 — vertical climb harasser. Soul-flame projectiles + hover.
   towerSeer:     { name:'Aether Seer',   w:54,  h:58,  color:'#88c8ff', shell:'#2a4488', hp:2025, atk:200, def:54, evasion:160, exp:1700, mojicoins:0, speed:0.9, jump:0, flies:true, level:20, shoot:'mlantern',  shootCd:1700, signature:'Levitates. Drains MP on hit.',                  traits:{ sorrowDrain:true } },
   // B7 — crystalline volley. Ice shards in cone burst.
@@ -148788,6 +148788,12 @@ function _barnabyPunchFrame(m, key) {
   else return null;
   return fr[i] || null;
 }
+// v0.30.1513 arbiter - one attack frame held for an hourglass lunge (Path's Bane's v0.30.1361 pose, on the boss path): the walk cycle is
+// authored for ~1.7 px a frame and the attack loop is a sword swing, so either one under a fast lunge read as the body skating.
+function _lxHgDashPose(key, i) {
+  const fr = BOSS_ATTACK_FRAMES[key], f = fr && fr[i | 0];
+  return (f && f.complete !== false && (f.naturalWidth || f.width) > 0) ? f : null;
+}
 function _bossAttackFrame(key, m) {
   const _fr = BOSS_ATTACK_FRAMES[key];
   const _ft = _fr ? _lxCalibFt(key, 'attack') : null;   // v0.30.315 — animator frame timing
@@ -150524,12 +150530,13 @@ const _BOSS_SPRITE_PUSH_DOWN = {
 // sprite path now records the rectangle it really blits — read off the canvas
 // transform at blit time, relative to the transform the caller handed it — and the
 // shield centres on that. The box remains the fallback for procedurally drawn bosses.
-function _lxRecordBossRect(m, tr0, x0, y0, w, h) {
+function _lxRecordBossRect(m, tr0, x0, y0, w, h, img) {
   if (!m || !tr0 || typeof ctx.getTransform !== 'function') return;
   try {
     const rel = tr0.inverse().multiply(ctx.getTransform());
     const p1 = rel.transformPoint(new DOMPoint(x0, y0)), p2 = rel.transformPoint(new DOMPoint(x0 + w, y0 + h));
-    m._lxDrawRect = { x: Math.min(p1.x, p2.x), y: Math.min(p1.y, p2.y), w: Math.abs(p2.x - p1.x), h: Math.abs(p2.y - p1.y), t: game.time | 0 };
+    m._lxDrawRect = { x: Math.min(p1.x, p2.x), y: Math.min(p1.y, p2.y), w: Math.abs(p2.x - p1.x), h: Math.abs(p2.y - p1.y), t: game.time | 0,
+      img: img || null, flip: rel.a < 0 };   // v0.30.1513 arbiter - the image and its mirroring, so the ward shield can find the body inside the canvas
   } catch (e) {}
 }
 // v0.30.1413 - how much of its canvas height a sprite's figure fills, from the baked bbox table ("top,bottom,W,H"; 0 when
@@ -150867,10 +150874,10 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
     softBottom: (typeof _LX_FEATHER_BOTTOM !== 'undefined' && _LX_FEATHER_BOTTOM.has(_feKey)) };
   if (m._lxCalXs > 1) _softOpts.xs = m._lxCalXs;   // v0.30.x — every boss drawn above x1, not only Aetherion (see _lxDrawSoft)
   if (_cachedBossSprite) {
-    _lxRecordBossRect(m, _lxTr0, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.30.390
+    _lxRecordBossRect(m, _lxTr0, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH, _cachedBossSprite);   // v0.30.390 · v0.30.1513 arbiter
     _lxDrawSoft(ctx, _cachedBossSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), undefined, undefined, _softOpts);   // v0.29.x — edge feather (clipped-art softening)
   } else {
-    _lxRecordBossRect(m, _lxTr0, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.30.390
+    _lxRecordBossRect(m, _lxTr0, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH, sprite);   // v0.30.390 · v0.30.1513 arbiter
     _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH, _softOpts);   // v0.29.x — edge feather
     if (sprite && sprite.tagName === 'CANVAS') m._lxStandInCv = sprite;   // v0.30.790 grav-smooth — see _lxBossStandIn
   }
@@ -153174,6 +153181,40 @@ function _drawTell(x, y, kind, k, alphaMul) {   // v0.30.402 — alphaMul: the p
   ctx.drawImage(_lxTellGlyph(red), x - 8, y - 8, 16, 16);   // v0.30.1223 baked glyph, see _lxTellGlyph
   ctx.restore();
 }
+// v0.30.1513 arbiter - WARD SHIELD FITS THE BODY (per user: "too big for the arbiter's actual sprite body size"). The shield was sized to
+// 1.15x the drawn CANVAS and centred on it; the Arbiter's frames are 1500x1300 canvases with the knight in a 660x758 patch near
+// the bottom, so the dome came out about twice his size and high above him. It now fits the opaque body inside the canvas: the
+// drawn image is probed once at 64 px (alpha > 24, cached per image) and its bounds mapped into the drawn rect, mirrored with the
+// sprite. Bosses whose art fills its canvas are all but unchanged; the collision box stays the fallback.
+const _LX_BODY_FRAC = new WeakMap();
+function _lxSpriteBodyFrac(img) {
+  if (!img) return null;
+  const key = (img._lxSrc && typeof img._lxSrc === 'object') ? img._lxSrc : img;   // a bake answers through its source (_lxSrc is a URL string on some images)
+  if (_LX_BODY_FRAC.has(key)) return _LX_BODY_FRAC.get(key);
+  let out = null;
+  try {
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    if (iw > 0 && ih > 0) {
+      const N = 64, cv = document.createElement('canvas'); cv.width = N; cv.height = N;
+      const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, N, N);
+      const d = g.getImageData(0, 0, N, N).data; let l = N, t = N, r = -1, b = -1;
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (d[(y * N + x) * 4 + 3] > 24) { if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > b) b = y; }
+      if (r >= 0) out = { l: l / N, t: t / N, r: (r + 1) / N, b: (b + 1) / N };
+    }
+  } catch (e) { out = null; }
+  if (out || (img.complete !== false && (img.naturalWidth || img.width) > 0)) _LX_BODY_FRAC.set(key, out);
+  return out;
+}
+function _lxWardBox(m, sx, sy) {
+  const t = game.time | 0, _r = (m._lxDrawRect && m._lxDrawRect.t === t) ? m._lxDrawRect : null;
+  const f = _r && _r.img ? _lxSpriteBodyFrac(_r.img) : null;
+  if (_r && f) {
+    const bw = (f.r - f.l) * _r.w, bh = (f.b - f.t) * _r.h, mx = (f.l + f.r) / 2;
+    return { cx: _r.x + (_r.flip ? 1 - mx : mx) * _r.w, cy: _r.y + ((f.t + f.b) / 2) * _r.h, size: Math.min(560, Math.max(72, Math.max(bw, bh) * 1.15)) };
+  }
+  const _bw = _r ? _r.w : (m.w || 0), _bh = _r ? _r.h : (m.h || 0);
+  return { cx: _r ? (_r.x + _r.w / 2) : (sx + (m.w || 0) / 2), cy: _r ? (_r.y + _r.h / 2) : (sy + (m.h || 0) / 2), size: Math.min(560, Math.max(72, Math.max(_bw, _bh) * 1.15)) };
+}
 function _drawBossWardShield(m, sx, sy) {
   const img = (typeof LX_FX !== 'undefined' && LX_FX) ? LX_FX.boss_shield : null;
   if (!img || !img.complete || !img.naturalWidth) return;
@@ -153185,10 +153226,8 @@ function _drawBossWardShield(m, sx, sy) {
   if (fade <= 0) return;
   const pulse = 1 + 0.05 * Math.sin(t * 0.22);
   // v0.30.390 — centre and size on the sprite actually drawn this frame when the sprite path recorded it; the box otherwise
-  const _r = (m._lxDrawRect && m._lxDrawRect.t === t) ? m._lxDrawRect : null;
-  const _bw = _r ? _r.w : (m.w || 0), _bh = _r ? _r.h : (m.h || 0);
-  const size = Math.min(560, Math.max(72, Math.max(_bw, _bh) * 1.15)) * pulse;
-  const cx = _r ? (_r.x + _r.w / 2) : (sx + (m.w || 0) / 2), cy = _r ? (_r.y + _r.h / 2) : (sy + (m.h || 0) / 2);
+  const _wb = _lxWardBox(m, sx, sy);   // v0.30.1513 arbiter - the body, not the canvas
+  const size = _wb.size * pulse, cx = _wb.cx, cy = _wb.cy;
   ctx.save();
   ctx.globalAlpha = 0.55 * fade;
   ctx.drawImage(_lxPinned(img), cx - size / 2, cy - size / 2, size, size);   // v0.30.405 — pinned
@@ -153204,10 +153243,7 @@ function _drawBossWardShield(m, sx, sy) {
 // v0.30.395 — after the shatter: four quarters of the shield fly apart over 26 steps, and a pink ring pulses at the boss's feet for the whole open window
 function _drawBossWardBreak(m, sx, sy) {
   const t = game.time | 0, age = t - (m._wardBreakAt | 0);
-  const _r = (m._lxDrawRect && m._lxDrawRect.t === t) ? m._lxDrawRect : null;
-  const _w = _r ? _r.w : (m.w || 0), _h = _r ? _r.h : (m.h || 0);
-  const cx = _r ? (_r.x + _r.w / 2) : (sx + (m.w || 0) / 2), cy = _r ? (_r.y + _r.h / 2) : (sy + (m.h || 0) / 2);
-  const size = Math.min(560, Math.max(72, Math.max(_w, _h) * 1.15));
+  const _wb = _lxWardBox(m, sx, sy), cx = _wb.cx, cy = _wb.cy, size = _wb.size;   // v0.30.1513 arbiter - the shatter flies from the shield it was
   const img = (typeof LX_FX !== 'undefined' && LX_FX) ? LX_FX.boss_shield : null;
   ctx.save();
   if (img && img.complete && img.naturalWidth && age >= 0 && age < 26) {
@@ -153609,7 +153645,9 @@ function drawMonster(m) {
   // (stickMul) and the Master Conductor keeps stepping, so the planted gate below drew their WALK frames on the strike.
   // Only a swing that fired counts (firing, or its cooldown started); one cancelled mid-windup drops the art at once.
   const _lxHeavyAtk = _nowAtk < (m._lxHeavyAtkUntil || 0) && (m._bigMeleeFiring || m._bigMeleeCd > 0);
-  const _bossAttacking = _sovAtkLive || _lxHeavyAtk || (((m.patternState && m.patternState !== 'idle'
+  // v0.30.1513 arbiter - a boss lunging with traits.hourglassDashPose draws that one attack frame for the whole dash (see _lxHgDashPose)
+  const _lxHgPoseDash = !!(m._hgCharging && m._hgPhase === 'dash' && m.traits && m.traits.hourglassDashPose != null);
+  const _bossAttacking = _sovAtkLive || _lxHeavyAtk || _lxHgPoseDash || (((m.patternState && m.patternState !== 'idle'
                           && !_BOSS_MOVE_DRAW_STATES.has(m.patternState))
                        || (m.atkAnimUntil && _nowAtk < m.atkAnimUntil))
                        && (_lxPlanted || m._braceDashing || _LX_ATK_WHILE_MOVING.has(m.type)));   // v0.30.699 barnaby-frames
@@ -153706,7 +153744,8 @@ function drawMonster(m) {
     // Suffix tests, not equality: the key may now be gravitos2punch /
     // gravitos3laser / … as well as the form-1 names. 'gravitos2star' ends in
     // 'star' and is unaffected.
-    ? ((/punch$/.test(_spriteKey) && _gravitosPunchFrame(m))
+    ? ((_lxHgPoseDash && _lxHgDashPose(_spriteKey, m.traits.hourglassDashPose))   // v0.30.1513 arbiter
+       || (/punch$/.test(_spriteKey) && _gravitosPunchFrame(m))
        || (/laser$/.test(_spriteKey) && _gravitosLaserFrame(m))
        || (/soul$/.test(_spriteKey) && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
        || (/astral$/.test(_spriteKey) && _aetherionAstralFrame(m))   // v0.30.x - burst timed to the resolve

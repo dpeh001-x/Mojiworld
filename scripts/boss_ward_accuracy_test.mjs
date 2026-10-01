@@ -2,6 +2,8 @@
 // ward gates hits to 1 - from the ward's first frame to its last, never outside - and
 // it centres on the sprite the boss actually blitted (recorded by the sprite path),
 // not on the collision box; co-op guests receive the ward in the monster sync.
+// The arbiter fix: it centres on, and is sized to, the BODY inside that sprite (the drawn image's opaque bounds), not the
+// sprite's canvas - the Arbiter's 1500x1300 canvases put a dome twice his size above him.
 //   MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override the served tree.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -46,7 +48,9 @@ try {
       while (performance.now() - t0 < 12000) { b._wardUntil = (game.time | 0) + 90; capture(b); if (b._lxDrawRect && b._lxDrawRect.t === (game.time | 0) && b._lxDrawRect.w > 4) { rec = b._lxDrawRect; break; } await new Promise((r) => setTimeout(r, 100)); }
       if (!rec) { game.monsters.splice(game.monsters.indexOf(b), 1); continue; }
       const d = capture(b)[0]; const sx = b.x - game.camera.x, sy = b.y;
-      o.spriteBoss = { type, rect: { w: Math.round(rec.w), h: Math.round(rec.h), cx: +(rec.x + rec.w / 2).toFixed(1), cy: +(rec.y + rec.h / 2).toFixed(1) }, box: { w: b.w, h: b.h, cx: sx + b.w / 2, cy: sy + b.h / 2 }, shield: d ? { cx: +(d.x + d.w / 2).toFixed(1), cy: +(d.y + d.h / 2).toFixed(1), h: Math.round(d.h) } : null };
+      const _bodyOf = (rect) => { if (!rect || !rect.img) return null; const N = 256, cv = document.createElement('canvas'); cv.width = N; cv.height = N; const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(rect.img, 0, 0, N, N); const px = g.getImageData(0, 0, N, N).data; let l = N, t = N, r = -1, bt = -1; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (px[(y * N + x) * 4 + 3] > 24) { if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > bt) bt = y; } if (r < 0) return null; const x0 = rect.flip ? 1 - (r + 1) / N : l / N, x1 = rect.flip ? 1 - l / N : (r + 1) / N; return { w: Math.round((x1 - x0) * rect.w), h: Math.round(((bt + 1 - t) / N) * rect.h), cx: +(rect.x + ((x0 + x1) / 2) * rect.w).toFixed(1), cy: +(rect.y + ((t + bt + 1) / 2 / N) * rect.h).toFixed(1) }; };
+      const body = _bodyOf(rec);
+      o.spriteBoss = { type, rect: { w: Math.round(rec.w), h: Math.round(rec.h), cx: +(rec.x + rec.w / 2).toFixed(1), cy: +(rec.y + rec.h / 2).toFixed(1) }, box: { w: b.w, h: b.h, cx: sx + b.w / 2, cy: sy + b.h / 2 }, body, shield: d ? { cx: +(d.x + d.w / 2).toFixed(1), cy: +(d.y + d.h / 2).toFixed(1), h: Math.round(d.h) } : null };
       game.monsters.splice(game.monsters.indexOf(b), 1); break;
     } } catch (e) { o.spriteErr = String(e && e.message); }
     // 3. co-op: the ward rides the monster sync (static: both sides in the shipped source)
@@ -59,9 +63,11 @@ try {
   ok('gate parity: the shield is drawn on exactly the frames a hit deals 1 (12 offsets around both edges)', r.mismatches === 0, JSON.stringify(r.parity.map((p) => p.left + ':' + (p.shown ? 'S' : '-') + (p.gated ? 'G' : '-'))));
   ok('the first warded frame already shows the shield (~20%) and the last frame is still visible', r.alphaAt180 > 0.08 && r.alphaAt1 > 0.05, JSON.stringify([r.alphaAt180, r.alphaAt1]));
   ok('with seven or more frames left the shield is at full strength (~55%)', r.alphaAt7 > 0.5 && r.alphaAt7 < 0.62, String(r.alphaAt7));
-  ok('a sprite boss: the shield centres on the blitted sprite, not the collision box', !!r.spriteBoss && !!r.spriteBoss.shield && Math.abs(r.spriteBoss.shield.cx - r.spriteBoss.rect.cx) < 2 && Math.abs(r.spriteBoss.shield.cy - r.spriteBoss.rect.cy) < 2, JSON.stringify(r.spriteBoss));
+  { const sb = r.spriteBoss, tol = sb ? Math.max(3, Math.max(sb.rect.w, sb.rect.h) / 40) : 0;
+  ok('a sprite boss: the shield centres on the BODY inside the blitted sprite (not its canvas, not the collision box)', !!sb && !!sb.shield && !!sb.body && Math.abs(sb.shield.cx - sb.body.cx) < tol && Math.abs(sb.shield.cy - sb.body.cy) < tol, JSON.stringify(sb)); }
   ok('the blitted rectangle differs from the box (the distinction matters)', !!r.spriteBoss && (Math.abs(r.spriteBoss.rect.cy - r.spriteBoss.box.cy) > 2 || Math.abs(r.spriteBoss.rect.h - r.spriteBoss.box.h) > 4), r.spriteBoss ? `rect h ${r.spriteBoss.rect.h} cy ${r.spriteBoss.rect.cy} vs box h ${r.spriteBoss.box.h} cy ${r.spriteBoss.box.cy}` : 'no sprite boss decoded');
-  ok('the shield is sized to the sprite (1.15x its larger side, within the cap)', !!r.spriteBoss && !!r.spriteBoss.shield && Math.abs(r.spriteBoss.shield.h - Math.min(560, Math.max(72, Math.max(r.spriteBoss.rect.w, r.spriteBoss.rect.h) * 1.15))) < Math.max(r.spriteBoss.rect.w, r.spriteBoss.rect.h) * 0.07, r.spriteBoss && r.spriteBoss.shield ? String(r.spriteBoss.shield.h) : '');
+  { const sb = r.spriteBoss, bm = sb && sb.body ? Math.max(sb.body.w, sb.body.h) : 0;
+  ok('the shield is sized to the body (1.15x its larger side, within the cap) - not the canvas', !!sb && !!sb.shield && !!sb.body && Math.abs(sb.shield.h - Math.min(560, Math.max(72, bm * 1.15))) < Math.max(8, bm * 0.08), sb && sb.shield ? `shield ${sb.shield.h}, body ${bm}, canvas ${Math.max(sb.rect.w, sb.rect.h)}` : ''); }
   ok('co-op: the host sends the ward and a guest mirrors or clears it', r.coop && r.coop.send && r.coop.recv && r.coop.clear, JSON.stringify(r.coop));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
