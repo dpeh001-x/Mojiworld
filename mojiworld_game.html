@@ -16271,7 +16271,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1502';
+const GAME_VERSION = 'v0.30.1503';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16463,7 +16463,7 @@ function _lxArt2Drawable(im) { return (im && typeof HTMLImageElement !== 'undefi
 // v0.30.1205 lazy-art2 - the boot loader's DEFERRED list names the tile, NPC and prop files too: a parked one is left to its map
 function _lxArt2LazyPath(p) { const im = _LX_ART2.path.get(p); return !!(im && !im._lxWanted); }
 // v0.30.1205 lazy-art2 - types pushed straight into game.monsters (not through spawnMonster) by the type that brings them
-const _LX_ART2_ADDS = { octobaby: ['octoLegPoison', 'octoLegFreeze', 'octoLegSkillLock', 'octoLegStun'] };
+const _LX_ART2_ADDS = { octobaby: ['octoLegPoison', 'octoLegFreeze', 'octoLegSkillLock', 'octoLegStun'], zodiac_libra: ['scaleLanternA', 'scaleLanternB', 'scaleStormcaller'] };   // v0.30.1503 libra-adds - her adds' art comes with her
 function _lxArt2WantMon(type, hi) { if (!type) return 0; let n = _lxArt2Want('mon:' + type, hi); for (const a of (_LX_ART2_ADDS[type] || [])) n += _lxArt2Want('mon:' + a, hi); return n; }
 // v0.30.1205 lazy-art2 - _pickFloorTheme reads the CURRENT map's id; ask it about this one (a portal neighbour)
 function _lxArt2FloorTheme(id) {
@@ -147045,6 +147045,8 @@ const MONSTER_SPRITE_TYPES = [
   // v0.26.x — Bloom Reaches plant chain (Verdant Hollow → Thornspire
   // Thicket). Sprites at Sprites/monsters/<key>.png.
   'thornmaw', 'elderbark', 'pinechad', 'meloncholy',
+  // v0.30.1503 libra-adds - art keys (drawn for Libra's adds through _lxMobArtKey; never spawned as their own type)
+  'scaleLanternA', 'scaleLanternB', 'scaleStormcaller',
 ];
 // v0.25.498 — Loader accepts both `.webp` and `.png` for monster sprites.
 // The drop-in convention is `.webp`, but ludo.ai often exports `.png` and
@@ -152186,7 +152188,7 @@ function _mobFrameBase(m) {
 // sprite. Attack while m.atkAnimUntil is live OR the mob is in the player's
 // face (melee engage); walk while moving; else idle.
 function _monsterStateFrame(m) {
-  const set = _monsterFramesFor(m.type);
+  const set = _monsterFramesFor(_lxMobArtKey(m));   // v0.30.1503 libra-adds
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   // v0.29.419 — a real attack always wins: a cast (which the physics plant has
   // also rooted, so the swing cannot slide) or the authored attack-animation
@@ -152440,9 +152442,22 @@ function _mobAttackReady(type) {
 // listed here plants every frame on frame 0, the rest pose, whose lowest pixels are the feet (its frames keep the feet
 // on one row - checked when the set is added). Per user: "Pathbane seems to be pushed vertically down too much".
 const _ATK_PLANT_ON_REST = new Set(['pathsBane']);
+// v0.30.1503 libra-adds - an ART KEY: a monster that keeps its behaviour type but wears other art (per user: Libra's Scale Lanterns and Scale
+// Stormcallers had no art of their own and wore a Lantern Wisp's and a Stormcaller's body). Only the drawing reads it - frames,
+// still, sprite meta, calibration, scaled-sprite cache. Size, hitbox, plant, facing and every combat rule stay on m.type, so a
+// Scale Lantern is still a lanternWisp to the game. Until the art has decoded, the base type's art is drawn.
+function _lxMobArtKey(m) {
+  const k = m && m._artKey;
+  if (!k) return m.type;
+  const s = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[k] : null;
+  if (s && s.complete && s.naturalWidth > 0) return k;
+  if (!m._artAsked) { m._artAsked = true; try { _lxArt2WantMon(k, true); _monsterFramesFor(k); } catch (e) {} }
+  return m.type;
+}
 function _drawMonsterSprite(m, sx, sy) {
-  const anim = MONSTER_ANIMS[m.type];
-  const sprite = MONSTER_SPRITES[m.type];
+  const _art = _lxMobArtKey(m);   // v0.30.1503 libra-adds - the art worn (m.type unless an art key has decoded)
+  const anim = MONSTER_ANIMS[_art];
+  const sprite = MONSTER_SPRITES[_art];
   if (!anim && !sprite) return;
   // v0.25.93 — aspect-aware scale + bbox-bottom anchor: the character's
   // ACTUAL feet (lowest opaque pixel) land at the monster's foot line for
@@ -152520,7 +152535,7 @@ function _drawMonsterSprite(m, sx, sy) {
   // Applied here so every draw branch below inherits it; no-op when {s:1,dx:0,dy:0}.
   if (typeof _lxAnimCalib === 'function') {
     const _cst = m._frameIsAttack ? 'attack' : (_mobWalking(m) ? 'walk' : 'idle');   // v0.29.273 — displacement-aware
-    const _ac = _lxAnimCalib(m.type, _cst);
+    const _ac = _lxAnimCalib(_art, _cst);
     if (_ac.s !== 1 || _ac.dx || _ac.dy) { ctx.translate(_ac.dx * targetH, _ac.dy * targetH); ctx.scale(_ac.s, _ac.s); }
   }
   _lxUseEntityImageQuality(ctx);
@@ -152536,7 +152551,7 @@ function _drawMonsterSprite(m, sx, sy) {
   if (m.isShiny) ctx.filter = _shinyFilterFor(m.type);
   // Compute Y so the character's bbox-bottom lands on the foot line, with a
   // tiny ground bleed for ground mobs and a 18% lift for floating ones.
-  const meta = MONSTER_SPRITE_META[m.type];
+  const meta = MONSTER_SPRITE_META[_art];
   // v0.26.132 — Fallback srcH × 0.92 instead of srcH − 1 when bbox
   // detection returns null. Mirrors the boss-renderer fallback above.
   // See the boss-side comment for the full rationale (assumes ~8 %
@@ -152617,6 +152632,7 @@ function _drawMonsterSprite(m, sx, sy) {
   }
   // v0.30.x art polish (audit R2) — a tentacle's own colour (see _LX_OCTO_LEG_TINT); a status or hit flash still wins
   if (!_lxMobTintFilter && typeof _LX_OCTO_LEG_TINT !== 'undefined' && _LX_OCTO_LEG_TINT[m.type]) { _lxMobTintFilter = _LX_OCTO_LEG_TINT[m.type]; _stBakedTint = true; }
+  if (!_lxMobTintFilter && m._libraOrb && m._artKey && m._libraOrbActive === false) { _lxMobTintFilter = 'brightness(0.55) saturate(0.5)'; _stBakedTint = true; }   // v0.30.1503 libra-adds - the unlit scale pan reads as unlit (it takes 25% damage)
   // v0.30.x — _stateImg is resolved above, before the calib block that reads m._frameIsAttack.
   if (_stateImg) {
     // v0.26.351 — Weapon-swing attack frames. A few big melee mobs author their
@@ -152654,7 +152670,7 @@ function _drawMonsterSprite(m, sx, sy) {
     // folds into the attack scale, and the foot-line anchoring below keeps the
     // feet planted where idle and walk plant them.
     if (m._frameIsAttack && _stateImg._lxFi != null && typeof _lxAnimCalib === 'function') {
-      const _acA = _lxAnimCalib(m.type, 'attack');
+      const _acA = _lxAnimCalib(_art, 'attack');
       if (_acA && _acA.fs && _acA.fs[_stateImg._lxFi] > 0) _atkScale *= _acA.fs[_stateImg._lxFi];
     }
     if (_atkScale !== 1) {
@@ -152675,7 +152691,7 @@ function _drawMonsterSprite(m, sx, sy) {
       // canvas under file:// blocks the readback) — degraded, never broken.
       let _plantImg = _stateImg;
       if (_ATK_PLANT_ON_REST.has(m.type) && typeof _monsterFramesFor === 'function') {   // v0.30.1409 - see _ATK_PLANT_ON_REST
-        const _rest = (_monsterFramesFor(m.type).attack || [])[0];
+        const _rest = (_monsterFramesFor(_art).attack || [])[0];
         if (_rest && (_rest.naturalHeight || _rest.height) === (_stateImg.naturalHeight || _stateImg.height)) _plantImg = _rest;
       }
       const _fBox = (typeof _spriteContentBox === 'function') ? _spriteContentBox(_plantImg) : null;
@@ -152690,13 +152706,13 @@ function _drawMonsterSprite(m, sx, sy) {
   } else {
     const _sFit = (typeof _lxMobStillFit === 'function') ? _lxMobStillFit(m, sprite, targetH, dyOffset) : null;   // v0.30.1416 - see _lxMobStillFit
     if (_sFit) {
-      const _fitSrc = _getCachedScaledSprite(m.type, sprite, srcW, srcH, targetW, targetH) || sprite;
+      const _fitSrc = _getCachedScaledSprite(_art, sprite, srcW, srcH, targetW, targetH) || sprite;
       _lxDrawSoft(ctx, _fitSrc, _lxWholePx(-_sFit.w / 2), _lxWholePx(_sFit.y), _sFit.w, _sFit.h);
       if (_stBakedTint) _lxMobTintFilter = _stPrevTint;
       ctx.restore();
       return;
     }
-    const _cachedSprite = _getCachedScaledSprite(m.type, sprite, srcW, srcH, targetW, targetH);
+    const _cachedSprite = _getCachedScaledSprite(_art, sprite, srcW, srcH, targetW, targetH);
     if (_cachedSprite) {
       _lxDrawSoft(ctx, _cachedSprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH);   // v0.29.x — edge feather · v0.30.1413 explicit size: a tint bake carries no logical size
     } else {
@@ -158879,8 +158895,8 @@ const ZODIAC_AI = {
         const _orbL = game.monsters[game.monsters.length - 1];
         spawnMonster(_lcx + 200 - (monsterTypes[_ORB_TYPE].w || 30), m.y + 20, _ORB_TYPE, false);
         const _orbR = game.monsters[game.monsters.length - 1];
-        if (_orbL) { _orbL._libraOrb = true; _orbL.name = 'Scale Stormcaller (Left)'; _orbL.maxHp = 1550; _orbL.currentHp = 1550; m._scaleOrbs.push(_orbL); }
-        if (_orbR) { _orbR._libraOrb = true; _orbR.name = 'Scale Stormcaller (Right)'; _orbR.maxHp = 1550; _orbR.currentHp = 1550; m._scaleOrbs.push(_orbR); }
+        if (_orbL) { _orbL._libraOrb = true; _orbL._artKey = 'scaleStormcaller'; _orbL.name = 'Scale Stormcaller (Left)'; _orbL.maxHp = 1550; _orbL.currentHp = 1550; m._scaleOrbs.push(_orbL); }
+        if (_orbR) { _orbR._libraOrb = true; _orbR._artKey = 'scaleStormcaller'; _orbR.name = 'Scale Stormcaller (Right)'; _orbR.maxHp = 1550; _orbR.currentHp = 1550; m._scaleOrbs.push(_orbR); }
         if (typeof showToast === 'function') {
           showToast('⚖ Libra summons two Scale Stormcallers — break BOTH to drop her defense!', 'epic');
         }
@@ -158921,7 +158937,7 @@ const ZODIAC_AI = {
         // which read as "either side" only while her box was narrow; since v0.30.420 grew it to the art (and
         // Pan B used m.x + 60 the same way) both pans spawned on her left.
         a.x = m.x - 20 - a.w / 2;
-        a._libraOrb = 'A'; a.color = z.colors.hi;
+        a._libraOrb = 'A'; a._artKey = 'scaleLanternA'; a.color = z.colors.hi;   // v0.30.1503 libra-adds - the blue scale pan
         a.name = 'Scale Lantern (Left)';
         // v0.30.x - sized to the fight instead of a flat 900. At the Lv 70 gate a
         // 900-HP plate evaporated to a single hit, so the whole balance mechanic -
@@ -158940,7 +158956,7 @@ const ZODIAC_AI = {
       const b = (game.monsters.length > _n0b) ? game.monsters[game.monsters.length - 1] : null;
       if (b) {
         b.x = m.x + m.w + 20 - b.w / 2;   // v0.30.x - off HER right edge (see Pan A)
-        b._libraOrb = 'B'; b.color = z.colors.aura;
+        b._libraOrb = 'B'; b._artKey = 'scaleLanternB'; b.color = z.colors.aura;   // v0.30.1503 libra-adds - the orange scale pan
         b.name = 'Scale Lantern (Right)';
         b.currentHp = b.maxHp = Math.max(900, Math.floor((m.maxHp || 0) * 0.05));
         b._libraOrbActive = false;       // start: B is the inactive plate
