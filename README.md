@@ -174,3 +174,10 @@ characters, names, maps, and marketing assets) are the property of
 file. Playing the game through its official distributions is permitted; all
 other rights are reserved. No part may be copied, redistributed, sold, or used
 to create derivative works without prior written permission.
+
+**Private servers and royalties.** Hosting the game, or any part of it, on a private or unofficial
+server needs written permission from Moji-studios and DADPEH. A private server that makes money from
+the game in any way (fees, subscriptions, item or currency sales, donation rewards, advertising or
+sponsorship) also needs a written licence, and royalties are payable to Moji-studios and DADPEH as the
+owner and creator of the game. The full terms are in the [LICENSE](LICENSE) file and in the game
+(the title screen's *Terms & License* link, and the *Terms & License* button at the top of Settings). Licensing enquiries: https://moji-studios.com
