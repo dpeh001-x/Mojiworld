@@ -29,7 +29,7 @@ const KNOWN = [
   ['beastmaster_ult', "_petSlot === 'ultPet' ?"], ['skyhunter_gale', 'i >= 15 ? 0.5 : 1'],
   ['sage_meteorshower', '_sageDmgMul:'], ['elementalist_ult', 'mul:'], ['hexmaster_ult', 'performAround(540,'], ['hexmaster_ult', 'LX_PANDEMIC_FINALE_CAP'],
   ['hexmaster_grandhex', 'LX_HEXORB_DMG_MUL'], ['necromancer_harvest', 'atk: getAtk() *'],
-  ['shinobi_seal', 'LX_KAGE_DMG'], ['nightreaper_mark', 'isCrit ? getCritDmg()'], ['phantom_cut', "crit, 'phantom_cut')"],
+  ['shinobi_seal', 'LX_KAGE_DMG'], ['nightreaper_mark', 'isCrit ? getCritDmg()'], ['phantom_cut', "false, 'phantom_cut')"],
   ['doombringer_ult', 'performMelee(440,'], ['doombringer_ult', '_heatMul +'], ['crusader_ult', 'baseMul:'], ['crusader_ult', 'timeMul:'],
   ['warlord_ult', 'life: 36, damage: getAtk() *'], ['crusader_aegis', 'const dmg = Math.floor(getAtk() *'], ['dragoon_ult', 'performAround(460,'],
   // damage that lives outside the body: a helper, a hazard resolver, an update loop, a timer

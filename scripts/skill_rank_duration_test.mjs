@@ -26,7 +26,7 @@ const BASE = {
   warlord_warcry: { warCry: 12000, bloodlust: 12000, reach: 12000, banner: 12000 }, crusader_aegis: { orbs: 9000 },
   shadowlord_clones: { clones: 11000 }, hexmaster_grandhex: { orbs: 7000 }, beastmaster_pack: { wolves: 100000 },
   warlord_ult: { enrage: 10000, bloodlust: 10000 }, shadowlord_ult: { shade: 20000 },
-  ballista_ult: { turret: 45000 }, beastmaster_ult: { werewolf: 51000, bloodlust: 12000 }, skyhunter_ult: { eagle: 42000 },
+  ballista_ult: { turret: 30000 }, beastmaster_ult: { werewolf: 51000, bloodlust: 12000 }, skyhunter_ult: { eagle: 42000 },
 };
 // v0.30.1525 op-pass - the same at rank 0, 3 and 10
 const FLAT = { holyShield: { buff: 5000 }, crusader_aegis: { aegis: 9000 }, archbishop_ult: { invulnerable: 5000 } };
