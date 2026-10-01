@@ -286,7 +286,7 @@
 // are REPLACED under their own names (boon FX regenerated and animated), so a returning browser would keep drawing the old art for a session.
 // v0.30.1486 - v140 -> v141. nova_ring, echo_slash, time_ripple, crescendo_hit, execute_mark, coin_burst, doppel_flash and frost_bloom
 // are REPLACED under their own names (the remaining boon FX regenerated and animated), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v141';   // v0.30.1486 - the remaining boon FX regenerated (same names)
+const CACHE = 'mojiworld-assets-v142';   // v0.30.1505 - the Hooded Cloak redrawn with an outline (same name)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

@@ -16271,7 +16271,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1504';
+const GAME_VERSION = 'v0.30.1505';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -20222,6 +20222,11 @@ const LX_HAIR = (() => {
     ruffian:      'ruffian.webp',
     suave:        'suave.webp',
     wuxia:        'wuxia.webp',
+    // v0.30.1505 cosmetics - the four cosmetic unlock styles (restyles of spiky / flowy / flow / maiden on the same head-aligned canvas)
+    flameTips:    'flame_tips.webp',
+    mintFrost:    'mint_frost.webp',
+    twilight:     'twilight.webp',
+    royalGold:    'royal_gold.webp',
   };
   for (const [k, f] of Object.entries(files)) {
     const img = new Image();
@@ -21178,8 +21183,13 @@ const LX_BODY_BOTTOM = _lxEqRegistry('body_bottom', {
   // plate_legs:  'plate_legs.webp', // v0.26.x — art never landed (dir holds only README); silenced boot 404    // tint-friendly grey articulated greaves
 });
 const LX_CAPE = _lxEqRegistry('cape', {
-  short_cape:   'short_cape.webp',   // tint-friendly cream shoulder cape
+  // v0.30.1505 cosmetics - short_cape removed (per user: "Remove short cape entirely"; the file is deleted, a save wearing it drops it)
   hooded_cloak: 'hooded_cloak.webp', // tint-friendly grey full-length hooded cloak
+  // v0.30.1505 cosmetics - the four cosmetic unlock capes (restyles of the Hooded Cloak, same canvas and placement; thin black outline)
+  cape_shadow:  'cape_shadow.webp',
+  cape_ember:   'cape_ember.webp',
+  cape_frost:   'cape_frost.webp',
+  cape_astral:  'cape_astral.webp',
 });
 const LX_GLOVES = _lxEqRegistry('gloves', {
   cloth_gloves:   'cloth_gloves.webp',   // tint-friendly cream fingerless gloves
@@ -21258,6 +21268,12 @@ const _LX_EQ_ATTACH_BASE = {
   staff:  { scale: 1, dx: 0, dy: 0, rot: 0 },
   dagger: { scale: 1, dx: 0, dy: 0, rot: 0 },
   bow:    { scale: 1, dx: 0, dy: 0, rot: 0 },
+  // v0.30.1505 cosmetics - every cape sits 3 px toward the weapon arm (handL rests at x -14 in this mirrored body space) (per user)
+  hooded_cloak: { scale: 1, dx: -3, dy: 0, rot: 0 },
+  cape_shadow: { scale: 1, dx: -3, dy: 0, rot: 0 },
+  cape_ember: { scale: 1, dx: -3, dy: 0, rot: 0 },
+  cape_frost: { scale: 1, dx: -3, dy: 0, rot: 0 },
+  cape_astral: { scale: 1, dx: -3, dy: 0, rot: 0 },
   light_tunic: { scale: 1, dx: 0, dy: 0, rot: 0 },
   plate_chest: { scale: 1, dx: 0, dy: 0, rot: 0 },
   // v0.26.665 — BAKED gear calibration (per user "ensure this stays in hardcode").
@@ -22733,6 +22749,7 @@ function _lxHeroHasEquipWeaponArt() {
              (typeof player !== 'undefined' && player.equipped);
   const it = eq && eq.weapon;
   if (!it) return false;
+  if (typeof _lxWeaponSkinFor === 'function' && _lxWeaponSkinFor(it)) return true;   // v0.30.1505 cosmetics - a worn skin is the weapon art
   const sid = it.spriteId || _lxAutoEquipSpriteId('weapon', it);
   if (!sid || sid.indexOf('wpn:') !== 0) return false;
   if (typeof _lxEqErasedImg === 'function' && _lxEqErasedImg(sid)) return true;
@@ -22991,6 +23008,7 @@ function _drawEquipmentLayer(layer, targetCtx, opts) {
     // v0.26.x — also count auto-derived equipment art: a stat weapon/armor with
     // no explicit spriteId still renders if its catalog key maps to wpn:/arm: art.
     if (!anyEquipped && (_lxAutoEquipSpriteId('weapon', equipped.weapon) || _lxAutoEquipSpriteId('body_top', equipped.armor))) anyEquipped = true;
+    if (!anyEquipped && equipped.weapon && typeof _lxWeaponSkinFor === 'function' && _lxWeaponSkinFor(equipped.weapon)) anyEquipped = true;   // v0.30.1505 cosmetics
     if (!anyEquipped) return;
   }
   const slots = LX_EQ_SLOT_ORDER[layer];
@@ -23010,21 +23028,23 @@ function _drawEquipmentLayer(layer, targetCtx, opts) {
     // equipment art via its catalog key (_itemKey → wpn:/arm:<name>). Then:
     // 'wpn:'/'arm:' pull from Sprites/equipment/{weapons,armors}/; anything else
     // is a legacy character/<slot> registry id.
-    const _sid = item.spriteId || _lxAutoEquipSpriteId(slot, item);
+    const _wsk = (slot === 'weapon' && typeof _lxWeaponSkinFor === 'function') ? _lxWeaponSkinFor(item) : null;   // v0.30.1505 cosmetics - a worn weapon skin
+    const _sid = _wsk ? _wsk.attachSid : (item.spriteId || _lxAutoEquipSpriteId(slot, item));
     if (!_sid) continue;
     let img;
-    if (_sid.indexOf('wpn:') === 0)      img = _lxEquipSprite('weapons', _sid.slice(4));
+    if (_wsk)                            img = _wsk.img;
+    else if (_sid.indexOf('wpn:') === 0) img = _lxEquipSprite('weapons', _sid.slice(4));
     else if (_sid.indexOf('arm:') === 0) img = _lxEquipSprite('armors',  _sid.slice(4));
     else { const reg = LX_EQ_REGISTRIES[slot]; img = reg && reg[_sid]; }
     if (!img || !img.complete || !img.naturalWidth) continue;
     // v0.26.x — pixel-erase override: swap in the cleaned bitmap when one exists
     // (and has decoded); otherwise keep the original art.
-    const _erased = _lxEqErasedImg(_sid);
+    const _erased = _wsk ? null : _lxEqErasedImg(_sid);   // v0.30.1505 cosmetics - a skin is its own art
     if (_erased) img = _erased;
     // v0.25.306 — Tint variant. When item.tint is set (e.g. '#cc4444'),
     // resolve to the multiply-blend baked variant. One sprite × N
     // tints = N visually distinct equipment items.
-    if (item.tint) img = _lxGetTintedEqSprite(img, item.tint);
+    if (item.tint && !_wsk) img = _lxGetTintedEqSprite(img, item.tint);
     const c = targetCtx || ctx;
     c.save();
     _lxUseEntityImageQuality(c);
@@ -55660,6 +55680,7 @@ function loadState() {
     for (const _slot of ['body_top','body_bottom','cape','gloves','boots','helmet']) {
       if (!(_slot in player.equipped)) player.equipped[_slot] = null;
     }
+    if (player.equipped.cape && player.equipped.cape.spriteId === 'short_cape') player.equipped.cape = null;   // v0.30.1505 cosmetics - the Short Cape is retired (per user)
     // v0.25.316 — Seed the empty-equipment fast-path flag at load
     // time so the renderer's bail kicks in from frame 1.
     if (typeof _refreshEqEmptyFlag === 'function') _refreshEqEmptyFlag();
@@ -60173,6 +60194,7 @@ function _mpAvatarWire() {
     // JSON.stringify) when at defaults, so the common-case frame stays small.
     hh: (player.lookCustom.hairHue | 0) || undefined,
     x: player.lookCustom.msxId || undefined,
+    wk: (function () { try { return (_LX_WSKIN_OVERRIDE === undefined && _lxWeaponSkinNow()) || undefined; } catch (e) { return undefined; } })(),   // v0.30.1505 cosmetics - the worn weapon skin
     p: (function () {
       const po = player.lookCustom.posture;
       if (!po || typeof po !== 'object') return undefined;
@@ -60767,6 +60789,7 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
       }
     }
     _LX_EQ_PREVIEW_OVERRIDE = _ov;
+    _LX_WSKIN_OVERRIDE = (typeof lk.wk === 'string' && _LX_WSKIN_IDS.has(lk.wk)) ? lk.wk : null;   // v0.30.1505 cosmetics - the partner's own skin
     ctx.save(); _ctxSaves++;
     ctx.globalAlpha = 0.95;   // hair's-breadth ghosting so YOUR character stays the visual anchor
     if (typeof _chibiApply === 'function') { _chibiApply(sx, sy); _ctxSaves++; }   // _chibiApply pushes exactly one ctx.save
@@ -60814,6 +60837,7 @@ function _mpDrawPeerAvatar(p, sx, sy, face) {
     // while posing the peer (see _savedAnchors note above).
     for (const k in _savedAnchors) player[k] = _savedAnchors[k];
     _LX_EQ_PREVIEW_OVERRIDE = _savedOverride;
+    _LX_WSKIN_OVERRIDE = undefined;   // v0.30.1505 cosmetics
   }
 }
 // v0.29.x (per user "occasionally the coordinates for my teammate does not
@@ -118345,6 +118369,51 @@ const COSMETICS = {
   ],
 };
 
+// v0.30.1505 cosmetics - THE COSMETIC UNLOCKS, WORN (per user: they "have no art, and nothing draws them yet, so this needs a renderer too").
+// Each unlock names the art it wears: a hairstyle in LX_HAIR, a cape in LX_CAPE, or a weapon skin drawn in place of the equipped
+// weapon's art - in the shape of that weapon's class, on the calibration of the weapon it was painted over. The Fashionista's
+// pickers show the locked ones and how to earn them. The skin is saved in player.look.weaponSkin and reaches co-op partners as
+// look.wk (each player can only wear what they have unlocked).
+var LX_COSMETIC_ART = {   // var, not const: the draw and co-op paths may ask before this line has run
+  hair:   { flame: 'flameTips', mint: 'mintFrost', twilight: 'twilight', royal: 'royalGold' },
+  cape:   { shadow: 'cape_shadow', ember: 'cape_ember', frost: 'cape_frost', astral: 'cape_astral' },
+  weapon: { crystal: 'crystal', void: 'void', sunfire: 'sunfire', heirloom: 'heirloom' },
+};
+function _lxCosmeticUnlocked(cat, id) { return !!(typeof player !== 'undefined' && player && player.cosmetics && player.cosmetics[cat] && player.cosmetics[cat][id]); }
+function _lxCosmeticByArt(cat, artId) {   // the COSMETICS entry that wears artId (null for ordinary wardrobe art)
+  const m = LX_COSMETIC_ART[cat]; if (!m) return null;
+  for (const k in m) if (m[k] === artId) return (COSMETICS[cat] || []).find((c) => c.id === k) || null;
+  return null;
+}
+var _LX_WSKIN_IDS = new Set(Object.keys(LX_COSMETIC_ART.weapon));
+var _LX_WSKIN_REF = { sword: 'iron_sword', dagger: 'assassins_edge', staff: 'nebula_staff', bow: 'hurricane_bow' };   // each skin was painted over this weapon and wears its calibration
+var _LX_WSKIN_IMG = Object.create(null);
+var _LX_WSKIN_OVERRIDE;   // while a co-op partner is drawn: their skin (or null); undefined the rest of the time
+function _lxWeaponSkinNow() {
+  if (_LX_WSKIN_OVERRIDE !== undefined) return _LX_WSKIN_OVERRIDE;
+  try { if (_LX_EQ_PREVIEW_OVERRIDE && _LX_EQ_PREVIEW_OVERRIDE === CHAR_STUDIO.equip) return CHAR_STUDIO.weaponSkin || null; } catch (e) {}   // the wardrobe preview
+  const id = (typeof player !== 'undefined' && player && player.look && player.look.weaponSkin) || null;
+  return (id && _LX_WSKIN_IDS.has(id) && _lxCosmeticUnlocked('weapon', id)) ? id : null;
+}
+function _lxWeaponShapeOf(item) {   // sword / dagger / staff / bow, from the weapon's class (an 'any' weapon takes the wearer's)
+  let c = item && item.cls;
+  if ((!c || c === 'any') && item && typeof ITEM_POOL !== 'undefined' && typeof _itemKey === 'function') {
+    const k = _itemKey(item), d = k && (ITEM_POOL.weapons || []).find((w) => _itemKey(w) === k);
+    if (d && d.cls && d.cls !== 'any') c = d.cls;
+  }
+  if (!c || c === 'any') c = (typeof player !== 'undefined' && player && player.cls) || 'warrior';
+  return c === 'rogue' ? 'dagger' : c === 'mage' ? 'staff' : c === 'archer' ? 'bow' : 'sword';
+}
+function _lxWeaponSkinFor(item) {   // {img, attachSid} when a skin is worn and its art has decoded, else null
+  const skin = item ? _lxWeaponSkinNow() : null;
+  if (!skin) return null;
+  const shape = _lxWeaponShapeOf(item), key = skin + '_' + shape;
+  let img = _LX_WSKIN_IMG[key];
+  if (!img) { img = new Image(); img.decoding = 'async'; img.src = 'Sprites/equipment/skins/' + key + '.webp'; _LX_WSKIN_IMG[key] = img; }   // fetched the first time it is worn
+  if (!(img.complete && img.naturalWidth > 0)) return null;
+  return { img, attachSid: 'wpn:' + _LX_WSKIN_REF[shape] };
+}
+
 // Track pickup/kill events for cosmetic-unlock progress.
 // `source` is one of: 'kill' | 'item' | 'chest' | 'boss' | 'tower'.
 // `info` carries the extra context (monster type, chest tier, boss id, etc.).
@@ -118400,7 +118469,7 @@ function checkCosmeticUnlocks() {
       if (player.cosmetics[cat][c.id]) continue;
       if (_cosmeticReqMet(c.req)) {
         player.cosmetics[cat][c.id] = true;
-        showToast(`🎁 Unlocked ${cat}: ${c.name}!`, 'epic');
+        showToast(`🎁 Unlocked ${cat}: ${c.name}! Wear it at the Fashionista's wardrobe in the Everdawn Megamall.`, 'epic');   // v0.30.1505 cosmetics
         audio.play('levelup');
         any = true;
       }
@@ -138874,6 +138943,11 @@ const HERO_VEC_HAIR_OPTIONS = [
   // (chaotic) as the "scrappy attitude" middle ground.
   { id:'ruffian',      name:'Ruffian 🗡️'      },
   { id:'wild',         name:'Wild 🌪️'         },
+  // v0.30.1505 cosmetics - cosmetic unlocks: listed for everyone, wearable once earned (buildCharStudioHairStyles locks them)
+  { id:'flameTips',    name:'Flame Tips', cos:'flame' },
+  { id:'mintFrost',    name:'Mint Frost', cos:'mint' },
+  { id:'twilight',     name:'Twilight',   cos:'twilight' },
+  { id:'royalGold',    name:'Royal Gold', cos:'royal' },
 ];
 
 // Legacy hairId migration — every retired style folds into 'flow'.
@@ -138938,6 +139012,7 @@ function _migrateHairId(id) {
       || id === 'chopsticks' || id === 'maiden' || id === 'mystic'
       || id === 'qipao' || id === 'ruffian' || id === 'suave'
       || id === 'wuxia'
+      || id === 'flameTips' || id === 'mintFrost' || id === 'twilight' || id === 'royalGold'   // v0.30.1505 cosmetics
   ) return id;
   return 'flow';
 }
@@ -171293,7 +171368,6 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     // template with neutral cream / grey palettes for runtime tinting.
     'Sprites/character/body_top/light_tunic.webp',
     'Sprites/character/body_top/plate_chest.webp',
-    'Sprites/character/cape/short_cape.webp',
     'Sprites/character/cape/hooded_cloak.webp',
     'Sprites/character/gloves/cloth_gloves.webp',
     'Sprites/character/gloves/iron_gauntlets.webp',
@@ -181546,7 +181620,7 @@ function startBgm() {
       <div id="msx-styles"><button type="button" class="face-style-btn active" title="Vector hero (skin + hair pickers above apply)">Vector</button><button type="button" class="face-style-btn" title="Sprite: default">Adventurer</button><button type="button" class="face-style-btn" title="Sprite: warrior">Warrior</button><button type="button" class="face-style-btn" title="Sprite: mage">Mage</button></div>
       <div id="eq-body_top"><button type="button" class="face-style-btn active" title="unequip">None</button><button type="button" class="face-style-btn" title="light_tunic">Light Tunic</button><button type="button" class="face-style-btn" title="plate_chest">Plate Chest</button></div>
       <div id="eq-body_bottom"><button type="button" class="face-style-btn active" title="unequip">None</button><button type="button" class="face-style-btn" title="cloth_pants">Cloth Pants</button><button type="button" class="face-style-btn" title="plate_legs">Plate Legs</button></div>
-      <div id="eq-cape"><button type="button" class="face-style-btn active" title="unequip">None</button><button type="button" class="face-style-btn" title="short_cape">Short Cape</button><button type="button" class="face-style-btn" title="hooded_cloak">Hooded Cloak</button></div>
+      <div id="eq-cape"><button type="button" class="face-style-btn active" title="unequip">None</button><button type="button" class="face-style-btn" title="hooded_cloak">Hooded Cloak</button></div>
       <div id="eq-weapon"></div>
       <div id="eq-helmet"><button type="button" class="face-style-btn active" title="unequip">None</button><button type="button" class="face-style-btn" title="wizard_hat">Wizard Hat</button><button type="button" class="face-style-btn" title="knight_helm">Knight Helm</button><button type="button" class="face-style-btn" title="hood">Hood</button></div>
       <div id="paint-styles" data-paint-layer="paint"><div class="paint-toolbox"><div class="paint-stage"><canvas class="char-paint-guide" data-paint-layer="paint" width="192" height="256"></canvas><canvas class="char-paint-canvas" width="192" height="256" data-paint-layer="paint" style="cursor: crosshair;"></canvas></div><div class="paint-row"><button type="button" class="paint-swatch active" title="#111111" style="background: rgb(17, 17, 17);"></button><button type="button" class="paint-swatch" title="#ffffff" style="background: rgb(255, 255, 255);"></button><button type="button" class="paint-swatch" title="#e94b6a" style="background: rgb(233, 75, 106);"></button><button type="button" class="paint-swatch" title="#ffd166" style="background: rgb(255, 209, 102);"></button><button type="button" class="paint-swatch" title="#66dd88" style="background: rgb(102, 221, 136);"></button><button type="button" class="paint-swatch" title="#66aaff" style="background: rgb(102, 170, 255);"></button></div><div class="paint-row"><input type="range" class="paint-size" min="2" max="28" step="1" title="Brush size"><button type="button" class="face-style-btn">Erase</button><button type="button" class="face-style-btn">Move</button><button type="button" class="face-style-btn" disabled="">Fit</button><button type="button" class="face-style-btn">Upload</button><button type="button" class="face-style-btn">Clear</button><input type="file" class="paint-file" accept="image/png,image/jpeg,image/webp"></div><div class="paint-transform-row"><label class="paint-transform-control"><span>Size</span><input type="range" class="paint-image-scale" min="10" max="300" step="1" title="Image size" disabled=""></label><label class="paint-transform-control"><span>Wide</span><input type="range" class="paint-image-axis" min="10" max="300" step="1" title="Image width" disabled=""></label><label class="paint-transform-control"><span>Tall</span><input type="range" class="paint-image-axis" min="10" max="300" step="1" title="Image height" disabled=""></label><label class="paint-transform-control"><span>Turn</span><input type="range" class="paint-image-rotate" min="-180" max="180" step="1" title="Image rotation" disabled=""></label></div></div></div>
@@ -181862,6 +181936,11 @@ function buildCharStudioHairStyles(host) {
   cont.dataset.built = '1';
   cont.innerHTML = '';
   HERO_VEC_HAIR_OPTIONS.forEach((hs) => {
+    const _cos = hs.cos ? (COSMETICS.hair || []).find((c) => c.id === hs.cos) : null;   // v0.30.1505 cosmetics - a locked unlock shows how to earn it
+    if (_cos && !_lxCosmeticUnlocked('hair', _cos.id) && hs.id !== CHAR_STUDIO.hairId) {
+      const lk = document.createElement('button'); lk.type = 'button'; lk.className = 'face-style-btn is-locked'; lk.disabled = true;
+      lk.textContent = hs.name; lk.title = hs.id; lk.dataset.lock = 'Locked: ' + _cos.desc; cont.appendChild(lk); return;   // title stays the id: the style card draws the hair from it
+    }
     const el = document.createElement('button');
     el.type = 'button';
     el.className = 'face-style-btn' + (hs.id === CHAR_STUDIO.hairId ? ' active' : '');
@@ -182680,9 +182759,13 @@ function buildCharStudioEquipPicker(slot) {
   const ids = reg ? Object.keys(reg) : [];
   // Compose options: "None" first, then every spriteId in the registry.
   const options = [{ id: null, name: 'None' }]
-    .concat(ids.map(id => ({ id, name: _csTitleCase(id) })));
+    .concat(ids.map(id => { const c = _lxCosmeticByArt(slot, id); return { id, name: c ? c.name : _csTitleCase(id), cos: c }; }));   // v0.30.1505 cosmetics
   const current = CHAR_STUDIO.equip[slot] && CHAR_STUDIO.equip[slot].spriteId;
   options.forEach((opt) => {
+    if (opt.cos && !_lxCosmeticUnlocked(slot, opt.cos.id) && (opt.id || null) !== (current || null)) {   // v0.30.1505 cosmetics - locked cosmetic
+      const lk = document.createElement('button'); lk.type = 'button'; lk.className = 'face-style-btn is-locked'; lk.disabled = true;
+      lk.textContent = opt.name; lk.title = opt.id; lk.dataset.lock = 'Locked: ' + opt.cos.desc; cont.appendChild(lk); return;
+    }
     const el = document.createElement('button');
     el.type = 'button';
     const isActive = (opt.id || null) === (current || null);
@@ -182694,11 +182777,31 @@ function buildCharStudioEquipPicker(slot) {
       // future tint picker UI keeps the choice across re-picks.
       const prevTint = (CHAR_STUDIO.equip[slot] && CHAR_STUDIO.equip[slot].tint) || null;
       CHAR_STUDIO.equip[slot] = opt.id ? { spriteId: opt.id, tint: prevTint } : null;
-      cont.querySelectorAll('.face-style-btn').forEach((b) => b.classList.remove('active'));
+      cont.querySelectorAll(':scope > .face-style-btn').forEach((b) => b.classList.remove('active'));   // v0.30.1505 cosmetics - leave the skin row's own pick alone
       el.classList.add('active');
     };
     cont.appendChild(el);
   });
+  if (slot === 'weapon') {   // v0.30.1505 cosmetics - weapon skins (cosmetic unlocks), worn over whatever weapon is equipped
+    const row = document.createElement('div');
+    row.className = 'cs-skin-row';
+    row.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;width:100%;margin-top:6px;align-items:center;';
+    const lab = document.createElement('span');
+    lab.textContent = 'Skin:'; lab.style.cssText = 'font-size:11px;opacity:.8;margin-right:2px;';
+    row.appendChild(lab);
+    [{ id: null, name: 'No skin', cos: null }].concat((COSMETICS.weapon || []).map((c) => ({ id: c.id, name: c.name, cos: c }))).forEach((o) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const locked = !!(o.id && !_lxCosmeticUnlocked('weapon', o.id));
+      b.className = 'face-style-btn cs-skin-btn' + ((CHAR_STUDIO.weaponSkin || null) === o.id ? ' active' : '') + (locked ? ' is-locked' : '');
+      b.textContent = o.name;
+      b.title = locked ? ('Locked: ' + o.cos.desc) : (o.id ? o.name + ' (weapon skin)' : 'no skin');
+      if (locked) b.disabled = true;
+      else b.onclick = () => { CHAR_STUDIO.weaponSkin = o.id; row.querySelectorAll('.cs-skin-btn').forEach((x) => x.classList.remove('active')); b.classList.add('active'); };
+      row.appendChild(b);
+    });
+    cont.appendChild(row);
+  }
 }
 
 const CHAR_PAINT_W = 192;
@@ -184349,6 +184452,7 @@ function openCharStudio() {
         : (player.lookCustom.posture || {});
     }
   } catch (e) { console.error('[wardrobe seed:lookCustom]', e); }
+  try { CHAR_STUDIO.weaponSkin = (player.look && player.look.weaponSkin) || null; } catch (e) {}   // v0.30.1505 cosmetics
   // v0.26.x — Hair-dye hue slider: writes live to player.lookCustom.hairHue
   // (recolours the on-screen character immediately, since the hero renders
   // live every frame) and CHAR_STUDIO.hairHue (so the studio preview matches).
@@ -184639,7 +184743,8 @@ function applyCharStudioToPlayer() {
       (CHAR_STUDIO._origPostureJSON != null && JSON.stringify(_np(CHAR_STUDIO)) !== CHAR_STUDIO._origPostureJSON) ||
       // equipment vs the open-time baseline — an equip-only change was free before.
       (CHAR_STUDIO._origEquipJSON != null && JSON.stringify(CHAR_STUDIO.equip || {}) !== CHAR_STUDIO._origEquipJSON) ||
-      _paintSig(CHAR_STUDIO.customPaint, CHAR_STUDIO.customPaintLayers) !== _paintSig(player.customPaint, player.customPaintLayers);
+      _paintSig(CHAR_STUDIO.customPaint, CHAR_STUDIO.customPaintLayers) !== _paintSig(player.customPaint, player.customPaintLayers) ||
+      ((CHAR_STUDIO.weaponSkin || null) !== ((player.look && player.look.weaponSkin) || null));   // v0.30.1505 cosmetics - a skin change
     // APPLY ALWAYS FINALISES. This is a standing rule, restored in v0.29.377
     // after v0.29.375 briefly broke it: making the fee binding HERE meant a
     // player under the fee lost their whole makeover on Apply — the weapon
@@ -184678,6 +184783,8 @@ function applyCharStudioToPlayer() {
       ? _normalizePosture(CHAR_STUDIO.posture)
       : (CHAR_STUDIO.posture || {}),
   };
+  if (!player.look) player.look = {};
+  player.look.weaponSkin = (CHAR_STUDIO.weaponSkin && _lxCosmeticUnlocked('weapon', CHAR_STUDIO.weaponSkin)) ? CHAR_STUDIO.weaponSkin : null;   // v0.30.1505 cosmetics
   player.customPaint = CHAR_STUDIO.customPaint || null;
   _csScrubLegacyHeadCircleFromStudioLayers();
   player.customPaintLayers = _lxCleanPaintLayers(CHAR_STUDIO.customPaintLayers);
@@ -185854,6 +185961,12 @@ window.addEventListener('keydown', (e) => {
   #char-studio-overlay#char-studio-overlay .lx-sc-dot { flex: none; width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--aa-ink); box-shadow: inset -1.5px -2px 0 rgba(0,0,0,0.18); }
   #char-studio-overlay#char-studio-overlay .lx-style-card.active { transform: translateY(-2px); box-shadow: 0 0 0 3px var(--aa-butter), 4px 6px 0 3px var(--aa-hot) !important; }
   #char-studio-overlay#char-studio-overlay .lx-style-card.active .lx-sc-name { background: var(--aa-hot); color: #fff; }
+  /* v0.30.1505 cosmetics - a cosmetic unlock not yet earned: the art dimmed, the way to earn it on the card */
+  #char-studio-overlay#char-studio-overlay .lx-style-card.is-locked { opacity: 1; cursor: not-allowed; box-shadow: 2px 3px 0 #b9a7c4 !important; }
+  #char-studio-overlay#char-studio-overlay .lx-style-card.is-locked:hover { transform: none; }
+  #char-studio-overlay#char-studio-overlay .lx-style-card.is-locked .lx-sc-art { filter: grayscale(0.8) brightness(0.8); opacity: 0.55; }
+  #char-studio-overlay#char-studio-overlay .lx-style-card.is-locked::after { content: attr(data-lock); position: absolute; left: 4px; right: 4px; top: 4px; z-index: 2; pointer-events: none;
+    padding: 3px 5px; border-radius: 7px; background: rgba(43, 26, 58, 0.86); color: #fff; font: 800 9px/1.2 'Nunito', system-ui, sans-serif; text-align: center; }
   #char-studio-overlay#char-studio-overlay .lx-style-card.active::after { content: ''; position: absolute; top: 5px; right: 5px; width: 20px; height: 20px; z-index: 2; pointer-events: none;
     background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1.8l3 7 7.6.7-5.8 5 1.8 7.4L12 18l-6.6 3.9 1.8-7.4-5.8-5 7.6-.7z' fill='%23ffe07a' stroke='%230d0a14' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
     filter: drop-shadow(0 0 3px rgba(255,224,122,0.8)); }
