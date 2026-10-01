@@ -43,7 +43,10 @@ try {
     _mojimonQuickSummon(); await __ticks(20);
     const before = game.minions.some((x) => x.mojimon);
     player.cls = 'mage'; player.job = 'warlock';
-    for (const id of ['darkPulse', 'darkPulse', 'soulSiphon', 'darkPulse']) { player.mp = 99999; player.skillCooldowns = player.skillCooldowns || {}; player.skillCooldowns[id] = 0; game._lastCastAt = 0; try { castSkill(id); } catch (e) {} await __ticks(3); }
+    // v0.30.1530 op-pass - undead stop at 5 now, so casting can no longer fill the 10-minion cap: raise one Dark Pulse and clone
+    // its undead past the cap (a clone skips raiseMinion's undead cap; the per-frame minion trim is what this checks)
+    player.mp = 99999; player.skillCooldowns = player.skillCooldowns || {}; player.skillCooldowns.darkPulse = 0; game._lastCastAt = 0; try { castSkill('darkPulse'); } catch (e) {} await __ticks(3);
+    { const u = game.minions.find((x) => !x.mojimon); if (u) for (let i = 0; i < 9; i++) game.minions.push(Object.assign({}, u, { x: u.x + 12 * (i + 1) })); }
     await __ticks(5);
     return { before, minions: game.minions.length, cap: (typeof MAX_MINIONS !== 'undefined' ? MAX_MINIONS : null), fielded: !!(player.mojimon && player.mojimon.out) && game.minions.some((x) => x.mojimon) };
   });

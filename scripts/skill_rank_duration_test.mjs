@@ -21,14 +21,17 @@ let pass = 0, fail = 0;
 const check = (ok, msg, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (detail ? '  [' + detail + ']' : '')); ok ? pass++ : fail++; };
 // base duration in ms at rank 0 - the numbers before this change
 const BASE = {
-  warCry: { buff: 7000 }, bloodlust: { buff: 20000 }, guardian: { buff: 30000 }, holyShield: { reflect: 5000 }, eagleEye: { buff: 30000 },
+  guardian: { buff: 30000 }, holyShield: { reflect: 5000 }, eagleEye: { buff: 30000 },
   celestialAurora: { field: 10000 }, soulSiphon: { thrall: 16000, ward: 12000 }, darkPulse: { undead: 30000 }, wildBond: { wolf: 60000 },
-  warlord_warcry: { warCry: 12000, bloodlust: 12000, reach: 12000, banner: 12000 }, crusader_aegis: { orbs: 9000 },
+  crusader_aegis: { orbs: 9000 },
   shadowlord_clones: { clones: 11000 }, hexmaster_grandhex: { orbs: 7000 }, beastmaster_pack: { wolves: 100000 },
   warlord_ult: { enrage: 10000, bloodlust: 10000 }, shadowlord_ult: { shade: 20000 },
   ballista_ult: { turret: 30000 }, beastmaster_ult: { werewolf: 51000, bloodlust: 12000 }, skyhunter_ult: { eagle: 42000 },
 };
 // v0.30.1525 op-pass - the same at rank 0, 3 and 10
+// v0.30.1530 op-pass - [base, cap]: rank adds +1 s until the buff reaches the cap below its cooldown
+const CAPPED = { warCry: { buff: [7000, 10000] }, bloodlust: { buff: [20000, 25000] },
+  warlord_warcry: { warCry: [12000, 14000], bloodlust: [12000, 14000], reach: [12000, 14000], banner: [12000, 14000] } };
 const FLAT = { holyShield: { buff: 5000 }, crusader_aegis: { aegis: 9000 }, archbishop_ult: { invulnerable: 5000 } };
 await new Promise((r) => setTimeout(r, 1800));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
@@ -88,9 +91,9 @@ try {
     for (const id of ids) res[id] = { r0: castAt(id, 0, false), r3: castAt(id, 3, false), r10: castAt(id, 10, false), r10perks: castAt(id, 10, true), lv10: lv10(id) };
     player.skillRanks = {};
     return { res, listed: [...LX_RANK_DUR_IDS], ver: GAME_VERSION };
-  }, [...new Set(Object.keys(BASE).concat(Object.keys(FLAT)))]);
+  }, [...new Set(Object.keys(BASE).concat(Object.keys(FLAT), Object.keys(CAPPED)))]);
   console.log('build ' + r.ver);
-  check(r.listed.length === 19 && Object.keys(BASE).every((id) => r.listed.includes(id)), 'the rank-duration list names exactly the 19 summon / buff skills (Apotheosis left it in v0.30.1525)', r.listed.join(' '));
+  check(r.listed.length === 19 && Object.keys(BASE).concat(Object.keys(CAPPED)).every((id) => r.listed.includes(id)), 'the rank-duration list names exactly the 19 summon / buff skills (Apotheosis left it in v0.30.1525)', r.listed.join(' '));
   for (const [id, base] of Object.entries(BASE)) {
     const x = r.res[id], errs2 = [x.r0.err, x.r3.err, x.r10.err].filter(Boolean);
     const tol = id === 'warlord_ult' ? 150 : 17;   // enrage is read off performance.now(); frames round to 17 ms
@@ -103,6 +106,12 @@ try {
     }
     check(!errs2.length && !bad.length, `${id}: rank 0 unchanged, rank 3 +3 s, rank 10 +10 s`, errs2.concat(bad).join('; ') || Object.entries(x.r10.out).map(([k, v]) => `${k} ${v0s(x.r0.out[k])}->${v0s(v)}`).join(', '));
   }
+  for (const [id, base] of Object.entries(CAPPED)) {   // v0.30.1530 op-pass
+    const x = r.res[id], bad = [];
+    for (const [k, [ms, cap]] of Object.entries(base)) for (const [rk, add] of [['r0', 0], ['r3', 3000], ['r10', 10000]]) {
+      const want = Math.min(cap, ms + add), tol = 17; if (!(Math.abs(x[rk].out[k] - want) <= tol)) bad.push(`${k} ${rk} = ${x[rk].out[k]}, want ${want}`); }
+    check(!x.r0.err && !bad.length, `${id}: rank adds +1 s until the ${Object.values(base)[0][1] / 1000} s cap`, x.r0.err || bad.join('; '));
+  }
   for (const [id, base] of Object.entries(FLAT)) {   // v0.30.1525 op-pass
     const x = r.res[id], bad = [];
     for (const [k, ms] of Object.entries(base)) for (const rk of ['r0', 'r3', 'r10']) if (!(Math.abs(x[rk].out[k] - ms) <= 17)) bad.push(`${k} ${rk} = ${x[rk].out[k]}`);
@@ -110,7 +119,7 @@ try {
   }
   // with the rank perks on, the rank bonus adds on top of them
   const wc = r.res.warCry, ae = r.res.crusader_aegis;
-  check(wc.r10perks.out.buff === 7000 + ((wc.lv10 && wc.lv10.buffMs) || 0) + 10000, 'War Cry at rank 10 keeps its perk time and adds 10 s', `${wc.r10perks.out.buff} ms, perk ${JSON.stringify(wc.lv10)}`);
+  check(wc.r10perks.out.buff === 10000, 'War Cry at rank 10 with its perk stops at the 10 s cap (v0.30.1530)', `${wc.r10perks.out.buff} ms, perk ${JSON.stringify(wc.lv10)}`);
   check(ae.r10perks.out.orbs === Math.floor(9000 * ((ae.lv10 && ae.lv10.orbDurMul) || 1)) + 10000 && ae.r10perks.out.aegis === 9000, 'Divine Aegis at rank 10 keeps its x1.2 orb time and adds 10 s; the half damage stays 9 s', `orbs ${ae.r10perks.out.orbs} ms, half damage ${ae.r10perks.out.aegis} ms`);
   check(!errs.length, 'no page errors', errs.slice(0, 3).join(' | '));
 } finally { await browser.close(); server.kill(); }
