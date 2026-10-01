@@ -1,6 +1,7 @@
 // Mobile controls, round two (mobile-deck2). Emulates the user's phone (Android Chrome, ~842x325 landscape), taps the real
 // buttons, and checks: the layout from the edited screenshot; N really talks to an NPC and the dialog STAYS open (the ghost
-// click); CHAT opens a keyboard bar at the top of the screen and sends; F shows what a tap will do; a painted icon on every
+// click); CHAT opens a keyboard bar at the top of the screen and sends; F shows what a tap will do; a painted icon on every (the
+// D-pad arrows and the jump chevron are inline-SVG pop glyphs since the pop deck, per user "can change the icons for better effect")
 // button; nothing overlaps; portrait and the desktop touch mode.
 //   PORT=10311 node scripts/mobile_deck2_test.mjs [candidate.html]      (MOJI_GAME_FILE also honoured)
 import { chromium } from 'playwright-core';
@@ -75,7 +76,7 @@ try {
   check(/mc-landscape/.test(R.body), 'the phone runs the landscape deck', R.body);
   check(R.block && R.block.vis && R.block.l <= 30 && R.block.t <= 50 && R.block.w === 54 && inView(R.block), 'BLOCK is visible in the top-left corner, 54 px, on screen', R.block);
   check(R.dpad && R.dpad.w === 184 && R.arrow === 56 && R.arrowLeft >= 0 && inView(R.dpad), 'the D-PAD is bigger: a 184 px pad with 56 px arrows, fully on screen (was 168 / 50)', { pad: R.dpad && R.dpad.w, arrow: R.arrow, arrowLeft: R.arrowLeft });
-  check(R.jump && Math.abs((R.vw - R.jump.r) - 272) <= 1 && Math.abs((R.vh - R.jump.b) - 12) <= 1, 'JUMP sits 14 px lower and 4 px further left (was 268 / 26 from the right / bottom edges)', { right: R.jump && Math.round(R.vw - R.jump.r), bottom: R.jump && Math.round(R.vh - R.jump.b) });
+  check(R.jump && Math.abs((R.vw - R.jump.r) - 228) <= 1 && Math.abs((R.vh - R.jump.b) - 12) <= 1, 'JUMP sits 14 px lower than its first spot and, since the pop deck, 44 px right of the deck2 spot - clear of the skill bar (per user: "shifted to the right slightly"; was 272 / 12 from the right / bottom edges)', { right: R.jump && Math.round(R.vw - R.jump.r), bottom: R.jump && Math.round(R.vh - R.jump.b) });
   check(R.talk && inView(R.talk) && R.talk.l >= R.hp.r + 6 && (R.talk.t + R.talk.b) / 2 > (R.hp.t + R.hp.b) / 2 && (R.talk.t + R.talk.b) / 2 < (R.mp.t + R.mp.b) / 2, 'N (TALK) sits beside the potion dock, between HP and MP', { talk: R.talk, hp: R.hp, mp: R.mp });
   const top = await P.page.evaluate(() => ({ nButtons: document.querySelectorAll('.mc-btn[data-mkey="n"]').length, nInDeck: document.querySelectorAll('#mobile-deck .mc-btn[data-mkey="n"]').length, chatLabel: (document.querySelector('#mc-chat-btn .mc-lbl') || {}).textContent, chatKey: (document.getElementById('mc-chat-btn') || { dataset: {} }).dataset.mkey || null, talkLabels: [...document.querySelectorAll('#mobile-ctrl .mc-lbl')].map((e) => e.textContent).filter((t) => /talk/i.test(t)).length }));
   check(top.nButtons === 1 && top.nInDeck === 1 && top.talkLabels === 0 && top.chatLabel === 'CHAT' && !top.chatKey, 'the duplicate TALK at the top right is gone: that button is CHAT, and N is the one talk button', top);
@@ -106,7 +107,7 @@ try {
   const missing = Object.entries(ico.pick).filter(([, v]) => !v).map(([k]) => k);
   check(missing.length === 0 && ico.glyphs.length === 0, 'every button carries a painted icon, and no plain glyph (▲▼◀▶ ♥ ◆ ⛶ ✕ ⚙ 📱) is left as a label', { missing, glyphs: ico.glyphs });
   check(Object.values(ico.status).every((s) => s === 200), 'every icon those buttons use loads (200)', ico.status);
-  check(/jump_cloud.webp/.test(ico.pick.jump || ''), 'the Jump button wears the regenerated art (hud/jump_cloud.webp)', ico.pick.jump);
+  check(/data:image\/svg\+xml/.test(ico.pick.jump || '') && /data:image\/svg\+xml/.test(ico.pick.up || ''), 'the Jump button and the D-pad wear their pop glyphs (inline SVG, per user; were hud/jump_cloud.webp and hud/dpad_arrow.webp)', { jump: String(ico.pick.jump).slice(0, 60), up: String(ico.pick.up).slice(0, 60) });
   // ---- F shows what a tap will do ----
   const fs = await P.page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); const f = document.querySelector('#mobile-deck [data-dynamic="f-block"]');
