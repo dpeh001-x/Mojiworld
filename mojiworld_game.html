@@ -13273,6 +13273,12 @@ html body .skill-mp { font-size: 9px; }
      size styles; the DPR block + _fitGameToViewport re-derive the rest. -->
 <div class="game-wrapper" style="--game-scale: 1.2500; --game-scale-x: 1.2500; --game-scale-y: 1.2500;">
   <canvas id="game" width="960" height="560" style="position: relative; z-index: 2;"></canvas>
+  <script>/* wide-view (per user: remove the phone side bars, "always on touch devices"): a touch device gets a view as wide as its
+     screen's landscape shape - W = 560 x aspect, 960..1280 - set here, before `const W = canvas.width` reads it. Desktop: 960. */
+  (function () { try { if (!(window.matchMedia && matchMedia('(pointer: coarse)').matches)) return; var sw = screen.width || 0, sh = screen.height || 0; if (!(sw > 0 && sh > 0)) return;
+    var w = Math.round(Math.min(1280, Math.max(960, 560 * Math.max(sw, sh) / Math.min(sw, sh))) / 2) * 2; if (w <= 960) return;
+    document.getElementById('game').width = w; var r = document.documentElement; r.classList.add('lx-wide');
+    r.style.setProperty('--lx-game-w', w + 'px'); r.style.setProperty('--lx-game-half', (-w / 2) + 'px'); } catch (e) {} })();</script>
 
   <!-- v0.25.806 — Removed the v0.25.15 + v0.25.17 Phaser canvas host divs
        (phaser-canvas + phaser-ui-canvas). The Phaser migration scaffold
@@ -16290,7 +16296,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1531';
+const GAME_VERSION = 'v0.30.1532';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16663,6 +16669,23 @@ if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'high';
 // otherwise occur if the function shadowed `ctx` with `const ctx = ...`.
 const _MAIN_CTX = ctx;
 const W = canvas.width, H = canvas.height;
+// wide-view GAMEPLAY PARITY (per user: phones see more, never reach further): gameplay reads a 960-wide PLAY window that moves
+// exactly like a desktop camera (same follow, look-ahead, clamps - _lxPlayCamStep); the render camera, W wide on a wide phone,
+// only decides what is drawn. On a desktop W is 960 and the play window IS the camera.
+const W_PLAY = 960;
+function _lxPlayCamX() { const c = (game && game.camera && game.camera.x) || 0; if (W === W_PLAY) return c; return (game.playCamX == null) ? c + (W - W_PLAY) / 2 : game.playCamX; }
+function _lxPlayCamStep(ww) {
+  if (ww <= W_PLAY) { game.playCamX = (ww - W_PLAY) / 2; return; }
+  const cur = (game.playCamX == null) ? Math.max(0, Math.min(ww - W_PLAY, game.camera.x + (W - W_PLAY) / 2)) : game.playCamX;
+  const la = Math.max(-120, Math.min(120, player.vx * 18));
+  let tx = player.x + player.w / 2 - W_PLAY / 2 + la;
+  if (window._prologueActive && game.currentMap === 'gravitosArena') {   // the prologue memory frame, at the play width
+    const fg = (game.monsters || []).find((q) => q && q.type === 'gravitos' && q.currentHp > 0);
+    if (fg) { const pc = player.x + player.w / 2, bc = fg.x + fg.w / 2; tx = Math.abs(bc - pc) <= W_PLAY - 270 ? (pc + bc) / 2 - W_PLAY / 2 : pc - W_PLAY / 2 + Math.sign(bc - pc) * (W_PLAY / 2 - 160); }
+  }
+  const dx = tx - cur, ease = 0.08 + Math.min(0.08, Math.abs(dx) / 600);
+  game.playCamX = Math.max(0, Math.min(ww - W_PLAY, cur + dx * ease));
+}
 const LX_ENTITY_IMAGE_QUALITY = 'high';
 function _lxUseEntityImageQuality(targetCtx) {
   if (!targetCtx) return;
@@ -46357,7 +46380,7 @@ setTimeout(() => {
 // FULLSCREEN FIT — scale the fixed 960x560 game-wrapper to the device
 // viewport so mobile screens fill edge-to-edge with no scroll / pinch.
 // =========================================================================
-const GAME_W = 960, GAME_H = 560;
+const GAME_W = W, GAME_H = 560;   // wide-view: the view's own width (960 on every desktop)
 function _fitGameToViewport() {
   const wrap = document.querySelector('.game-wrapper');
   if (!wrap) return;
@@ -61476,8 +61499,8 @@ function _lxEclipseTick(dt) {
   // object as _eclipseRain while live; nulling it frees input, jump, dash,
   // the pose and both position pins in one go. The waves keep falling.
   if (player._eclipseHold && h.elapsed >= LX_ECLIPSE_HOLD_MS) player._eclipseHold = null;
-  const reachL = h.moonX - (W / 2 + LX_ECLIPSE_REACH);
-  const reachR = h.moonX + (W / 2 + LX_ECLIPSE_REACH);
+  const reachL = h.moonX - (W_PLAY / 2 + LX_ECLIPSE_REACH);   // wide-view: the desktop reach
+  const reachR = h.moonX + (W_PLAY / 2 + LX_ECLIPSE_REACH);
   const under = () => game.monsters.filter(m => m.currentHp > 0 && (m.x + m.w) > reachL && m.x < reachR);
   // Dagger waves - one per BATCH_DELAY, catching up if a long frame skipped
   // one. Targets re-evaluated per wave so kills drop out and arrivals get hit.
@@ -76776,6 +76799,7 @@ function loadMap(id, entryX, entryY) {
   // "Icy Tower-style centred column" rule used by updateCamera each
   // frame, so initial paint also lands centred instead of pinned-left.
   if (game.camera && game.mapData) {
+    game.playCamX = null;   // wide-view: the play window re-derives from the snapped camera
     const _ww = game.mapData.worldWidth || W;   // mirror updateCamera's guard — a map missing worldWidth was NaN-ing camera.x and blanking the scene for a frame
     if (_ww <= W) {
       game.camera.x = (_ww - W) / 2;
@@ -88370,9 +88394,9 @@ function getArcherAim() {
 const SKYLANCE_APEX_ABOVE = 225;
 const LX_SLAM_GRAV_MIN = 1.6;   // v0.30.39 — see _playerGravityStep
 function _lxSkyLanceApex() {
-  const camX = (game.camera && game.camera.x) || 0;
+  const camX = _lxPlayCamX();   // wide-view: targets inside the play window
   const camY = (game.camera && game.camera.y) || 0;
-  const vw = (typeof W === 'number') ? W : 960;
+  const vw = W_PLAY;
   const vh = (typeof H === 'number') ? H : 560;
   const visTop = camY + 12;                     // never above the visible edge
   const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;
@@ -90025,7 +90049,7 @@ const SKILL_FNS = {
     // Charges replenish on the FIRST cast after the full cooldown ends
     // — see the cast-pipeline gate at line ~13911 for the cooldown
     // logic. This function only handles the zip + damage + visuals.
-    const HALF_W = (typeof W === 'number' ? W : 1100) * 0.5;       // ~half visible field
+    const HALF_W = W_PLAY * 0.5;   // wide-view: the desktop zip on every screen       // ~half visible field
     const dir = player.facing;
     const startX = player.x;
     const startY = player.y;
@@ -91757,8 +91781,8 @@ const SKILL_FNS = {
       const _pcy = player.y + player.h / 2;
       for (const m of game.monsters) {
         if (!m || m.currentHp <= 0) continue;
-        const _sx = m.x - _camX;
-        if (_sx + m.w < 0 || _sx > W) continue;
+        const _sx = m.x - _lxPlayCamX();   // wide-view: the play window
+        if (_sx + m.w < 0 || _sx > W_PLAY) continue;
         if (m.y + m.h < _camY - 30 || m.y > _camY + H + 30) continue;
         const dx = (m.x + m.w/2) - _pcx, dy = (m.y + m.h/2) - _pcy;
         const sq = dx*dx + dy*dy;
@@ -91975,7 +91999,7 @@ const SKILL_FNS = {
     // the old single cast did on most maps.
     const startX = player.x;
     const wMax = game.mapData.worldWidth;
-    const _vw = (typeof W === 'number' && W > 0) ? W : 960;
+    const _vw = W_PLAY;   // wide-view: the desktop reach on every screen
     const reach = Math.round(_vw * LX_KAGE_REACH_FRAC);
     const destX = Math.max(40, Math.min(wMax - player.w - 40, startX + player.facing * reach));
     player.vy = 0;
@@ -92100,9 +92124,9 @@ const SKILL_FNS = {
     const ww = game.mapData.worldWidth || W;
     // v0.30.38 — the centre of the VISIBLE screen. Narrow maps (ww <= W) keep a
     // negative camera.x that centres the world, so this lands on ww/2 there.
-    const moonX = (game.camera ? game.camera.x : 0) + W / 2;
-    const reachL = moonX - (W / 2 + LX_ECLIPSE_REACH);
-    const reachR = moonX + (W / 2 + LX_ECLIPSE_REACH);
+    const moonX = _lxPlayCamX() + W_PLAY / 2;   // wide-view: the play window's centre and reach
+    const reachL = moonX - (W_PLAY / 2 + LX_ECLIPSE_REACH);
+    const reachR = moonX + (W_PLAY / 2 + LX_ECLIPSE_REACH);
     const initialTargets = game.monsters
       .filter(m => m.currentHp > 0)
       .filter(m => (m.x + m.w) > reachL && m.x < reachR);
@@ -95010,9 +95034,9 @@ function updateMonsters(dt) {
     // v0.30.1041 - Octobaby's arms are exempt, here and in the cheap tier below: they are parts of the boss,
     // positioned by their own tick, and must run wherever the camera is (see the note on the cheap tier).
     if (!m.isBoss && !m.isMiniBoss && !m._octoParent) {
-      const _vfDx = (m.x + m.w/2) - (camX + W/2);
+      const _vfDx = (m.x + m.w/2) - (_lxPlayCamX() + W_PLAY/2);   // wide-view: bands around the play window
       const _vfDy = (m.y + m.h/2) - (camY + H/2);
-      if (Math.abs(_vfDx) > W/2 + VERY_FAR_PAD ||
+      if (Math.abs(_vfDx) > W_PLAY/2 + VERY_FAR_PAD ||
           Math.abs(_vfDy) > H/2 + VERY_FAR_PAD) {
         // v0.29.x — co-op: a mob far from ME but near a PARTNER stays live
         // (see _vfPeers above); otherwise total-skip as before.
@@ -95020,7 +95044,7 @@ function updateMonsters(dt) {
         if (_vfPeers) {
           const _mcx = m.x + m.w/2, _mcy = m.y + m.h/2;
           for (const _q of _vfPeers) {
-            if (Math.abs(_mcx - _q.x) < W/2 + VERY_FAR_PAD && Math.abs(_mcy - _q.y) < H/2 + VERY_FAR_PAD) { _nearPeer = true; break; }
+            if (Math.abs(_mcx - _q.x) < W_PLAY/2 + VERY_FAR_PAD && Math.abs(_mcy - _q.y) < H/2 + VERY_FAR_PAD) { _nearPeer = true; break; }
           }
         }
         if (!_nearPeer) continue;
@@ -95125,9 +95149,9 @@ function updateMonsters(dt) {
       if (Math.abs(m.scaleX - 1) < 0.01) { m.scaleX = 1; m.scaleY = 1; }
     }
     // Skip expensive AI for faraway non-bosses
-    const dx = (m.x + m.w/2) - (camX + W/2);
+    const dx = (m.x + m.w/2) - (_lxPlayCamX() + W_PLAY/2);   // wide-view
     const dy = (m.y + m.h/2) - (camY + H/2);
-    let far = (Math.abs(dx) > W/2 + ACTIVE_PAD) ||
+    let far = (Math.abs(dx) > W_PLAY/2 + ACTIVE_PAD) ||
               (Math.abs(dy) > H/2 + ACTIVE_PAD);
     // v0.29.x — co-op: "far" is measured from MY camera, but as host I run
     // the AI for everyone — a mob near a PARTNER gets the full tick (same
@@ -95136,7 +95160,7 @@ function updateMonsters(dt) {
     if (far && _aggroPeers) {
       const _mcx3 = m.x + m.w/2, _mcy3 = m.y + m.h/2;
       for (const _q of _aggroPeers) {
-        if (Math.abs(_mcx3 - (_q.x + 14)) <= W/2 + ACTIVE_PAD && Math.abs(_mcy3 - (_q.y + 22)) <= H/2 + ACTIVE_PAD) { far = false; break; }
+        if (Math.abs(_mcx3 - (_q.x + 14)) <= W_PLAY/2 + ACTIVE_PAD && Math.abs(_mcy3 - (_q.y + 22)) <= H/2 + ACTIVE_PAD) { far = false; break; }
       }
     }
     // v0.30.1041 - ...and Octobaby's arms never take this tier. It applies gravity and then skips the rest of
@@ -95209,8 +95233,8 @@ function updateMonsters(dt) {
       // viewport math as the contact-damage gate for consistency.
       let _shootOnScreen = true;
       {
-        const _scx = game.camera.x, _scy = (game.camera && game.camera.y) || 0;
-        if (m.x + m.w < _scx || m.x > _scx + W ||
+        const _scx = _lxPlayCamX(), _scy = (game.camera && game.camera.y) || 0;   // wide-view: the play window
+        if (m.x + m.w < _scx || m.x > _scx + W_PLAY ||
             m.y + m.h < _scy || m.y > _scy + H) {
           _shootOnScreen = false;
         }
@@ -95484,8 +95508,8 @@ function updateMonsters(dt) {
       // On-screen guard so off-camera mobs don't burn cooldowns invisibly.
       let _bmOnScreen = true;
       {
-        const _bcx = game.camera.x, _bcy = (game.camera && game.camera.y) || 0;
-        if (m.x + m.w < _bcx || m.x > _bcx + W || m.y + m.h < _bcy || m.y > _bcy + H) _bmOnScreen = false;
+        const _bcx = _lxPlayCamX(), _bcy = (game.camera && game.camera.y) || 0;   // wide-view
+        if (m.x + m.w < _bcx || m.x > _bcx + W_PLAY || m.y + m.h < _bcy || m.y > _bcy + H) _bmOnScreen = false;
       }
       // PHASE 1 — start telegraph when cd is up + in range + on screen.
       if (!m._bigMeleeFiring && !m._columnFiring && m._bigMeleeCd <= 0 && !_lxMidSwing(m) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _bmInRange && _bmOnScreen) {   // v0.30.371 — not while spent   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
@@ -95693,8 +95717,8 @@ function updateMonsters(dt) {
       const _hgDx = _playerCx - (m.x + m.w / 2);
       let _hgOnScreen = true;
       {
-        const _cx = game.camera.x, _cy = (game.camera && game.camera.y) || 0;
-        if (m.x + m.w < _cx || m.x > _cx + W || m.y + m.h < _cy || m.y > _cy + H) _hgOnScreen = false;
+        const _cx = _lxPlayCamX(), _cy = (game.camera && game.camera.y) || 0;   // wide-view
+        if (m.x + m.w < _cx || m.x > _cx + W_PLAY || m.y + m.h < _cy || m.y > _cy + H) _hgOnScreen = false;
       }
       // Never open a lunge mid-heavy: two committed attacks at once is
       // unreadable, and bigMelee is the one these mobs already telegraph.
@@ -95780,8 +95804,8 @@ function updateMonsters(dt) {
       const _bdDx = _playerCx - (m.x + m.w/2);
       let _bdOnScreen = true;
       {
-        const _cx = game.camera.x, _cy = (game.camera && game.camera.y) || 0;
-        if (m.x + m.w < _cx || m.x > _cx + W || m.y + m.h < _cy || m.y > _cy + H) _bdOnScreen = false;
+        const _cx = _lxPlayCamX(), _cy = (game.camera && game.camera.y) || 0;   // wide-view
+        if (m.x + m.w < _cx || m.x > _cx + W_PLAY || m.y + m.h < _cy || m.y > _cy + H) _bdOnScreen = false;
       }
       if (!m._braceDashing && m._bdCd <= 0 && Math.abs(_bdDx) < (bd.range || 700)
           && Math.abs(_bdDx) > (bd.minRange || 120) && _bdOnScreen) {
@@ -95907,8 +95931,8 @@ function updateMonsters(dt) {
       const _csInRange = _csDxAbs < cs.range;
       let _csOnScreen = true;
       {
-        const _ccx = game.camera.x, _ccy = (game.camera && game.camera.y) || 0;
-        if (m.x + m.w < _ccx || m.x > _ccx + W || m.y + m.h < _ccy || m.y > _ccy + H) _csOnScreen = false;
+        const _ccx = _lxPlayCamX(), _ccy = (game.camera && game.camera.y) || 0;   // wide-view
+        if (m.x + m.w < _ccx || m.x > _ccx + W_PLAY || m.y + m.h < _ccy || m.y > _ccy + H) _csOnScreen = false;
       }
       // PHASE 1 — start telegraph
       if (!m._columnFiring && !m._bigMeleeFiring && m._columnCd <= 0 && !_lxMidSwing(m) && !(m._shootWindup > 0) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && _csInRange && _csOnScreen) {   // v0.29.263 — winded bosses hold column strikes · v0.29.x — nor a retreating one
@@ -96039,8 +96063,8 @@ function updateMonsters(dt) {
       const _ldInRange = _ldDxAbs < (ld.range || 320);
       let _ldOnScreen = true;
       {
-        const _cx = game.camera.x, _cy = (game.camera && game.camera.y) || 0;
-        if (m.x + m.w < _cx || m.x > _cx + W || m.y + m.h < _cy || m.y > _cy + H) _ldOnScreen = false;
+        const _cx = _lxPlayCamX(), _cy = (game.camera && game.camera.y) || 0;   // wide-view
+        if (m.x + m.w < _cx || m.x > _cx + W_PLAY || m.y + m.h < _cy || m.y > _cy + H) _ldOnScreen = false;
       }
       // PHASE 1 — start dash sequence
       if (!m._dashing && m._dashCd <= 0 && _ldInRange && _ldOnScreen) {
@@ -97600,8 +97624,8 @@ function updateMonsters(dt) {
     // isn't on-screen, it can't touch you.
     let _onScreen = true;
     if (!m.isBoss && !m.isMiniBoss) {
-      const _cx = game.camera.x, _cy = game.camera.y;
-      if (m.x + m.w < _cx || m.x > _cx + W ||
+      const _cx = _lxPlayCamX(), _cy = game.camera.y;   // wide-view: contact damage inside the play window
+      if (m.x + m.w < _cx || m.x > _cx + W_PLAY ||
           m.y + m.h < _cy || m.y > _cy + H) {
         _onScreen = false;
       }
@@ -102180,16 +102204,16 @@ function bossAI(m, dt, distToPlayer) {
         const _pcx = player.x + player.w / 2;
         const _spd = (typeof getSpeed === 'function') ? Math.max(1, getSpeed()) : 3.5;
         const _reach = Math.max(110, Math.min(360, _spd * (SAFE_LIFE - 18) * 0.85));
-        const _camL = (game.camera && game.camera.x) || 0;
+        const _camL = _lxPlayCamX();   // wide-view: the shelters sit in the play window
         let _lo = Math.max(40 + safeW / 2, _camL + 16 + safeW / 2, _pcx - _reach);
-        let _hi = Math.min(ww - 40 - safeW / 2, _camL + W - 16 - safeW / 2, _pcx + _reach);
+        let _hi = Math.min(ww - 40 - safeW / 2, _camL + W_PLAY - 16 - safeW / 2, _pcx + _reach);
         // v0.30.796 sz-all — NOT UNDER THE HUD. Measured at 1630x944: the minimap panel sits over screen x 736-944 of
         // the floor and the hotkey hint over 821-944 of the floor band's top, so a box rolled in the right fifth of
         // the screen was drawn behind a panel - the invisible shelter in the report. The band's covered spans are
         // read off the live DOM once per box and the roll is kept clear of them.
         { const _cov = _lxSzHudCoveredSpans(groundY - safeH, groundY); for (const _sp of _cov) { const _a = _camL + _sp[0] - safeW / 2, _b = _camL + _sp[1] + safeW / 2; if (_b <= _lo || _a >= _hi) continue; if (_pcx < (_a + _b) / 2) _hi = Math.min(_hi, _a); else _lo = Math.max(_lo, _b); } }
         if (_hi < _lo) {   // v0.30.796 sz-all — no visible floor within reach: the nearest visible spot if it is near enough, else the player's own feet (the panels over them fade while the box lives)
-          const _cands = [_hi, _lo].filter((v) => v >= 40 + safeW / 2 && v <= ww - 40 - safeW / 2 && v >= _camL + 16 + safeW / 2 && v <= _camL + W - 16 - safeW / 2).sort((p, q) => Math.abs(p - _pcx) - Math.abs(q - _pcx));
+          const _cands = [_hi, _lo].filter((v) => v >= 40 + safeW / 2 && v <= ww - 40 - safeW / 2 && v >= _camL + 16 + safeW / 2 && v <= _camL + W_PLAY - 16 - safeW / 2).sort((p, q) => Math.abs(p - _pcx) - Math.abs(q - _pcx));
           if (_cands.length && Math.abs(_cands[0] - _pcx) <= _reach * 1.15) _lo = _hi = _cands[0];
           else _lo = _hi = Math.max(40 + safeW / 2, Math.min(ww - 40 - safeW / 2, _pcx));
         }
@@ -103907,8 +103931,8 @@ function bossAI(m, dt, distToPlayer) {
           if (!m[key] && t >= b && t < b + 50) {
             m[key] = true;
             const ww = game.mapData.worldWidth || 1400;
-            const camLeft = game.camera.x - 100;
-            const camRight = game.camera.x + W + 100;
+            const camLeft = _lxPlayCamX() - 100;   // wide-view: the rain falls on the play window
+            const camRight = _lxPlayCamX() + W_PLAY + 100;
             // Fall from above the camera viewport, diagonal velocity.
             const startX = camLeft + Math.random() * (camRight - camLeft);
             const startY = -40;
@@ -103986,7 +104010,7 @@ function bossAI(m, dt, distToPlayer) {
         if (typeof addHitStop === 'function') addHitStop(100);
         // Hitbox ≈ canvas width / 3. Defensive fallback if W is
         // somehow undefined at fire time.
-        const _screenW = (typeof W === 'number' && W > 100) ? W : 1024;
+        const _screenW = W_PLAY;   // wide-view: the desktop fireball on every screen
         const _ballSize = Math.floor(_screenW / 3);
         const _sx = m.x + (m.facing > 0 ? m.w : -_ballSize);
         const _sy = m.y + m.h * 0.3 - _ballSize / 2;
@@ -110411,9 +110435,9 @@ function updateProjectiles(dt) {
       // viewport rect to do damage. If a projectile becomes visible
       // again later (re-enters the viewport) it can still hit; only
       // the off-screen halo damage is dropped.
-      const _camX522 = game.camera.x, _camY522 = (game.camera && game.camera.y) || 0;
+      const _camX522 = _lxPlayCamX(), _camY522 = (game.camera && game.camera.y) || 0;   // wide-view
       const _pcx = p.x + (p.w || 0) / 2, _pcy = p.y + (p.h || 0) / 2;
-      const _projOffScreen = (_pcx < _camX522 || _pcx > _camX522 + W ||
+      const _projOffScreen = (_pcx < _camX522 || _pcx > _camX522 + W_PLAY ||
                               _pcy < _camY522 || _pcy > _camY522 + H);
       // v0.30.1368 - a bursting shot (LX_ORB_BURST) bursts on a floor or platform top it drops onto
       if (LX_ORB_BURST[p.skill] && !p._burst) { const _flY = _lxOrbFloorHit(p); if (_flY != null) { _lxOrbBurst(p, _pcx, _flY, false); hit = true; } }
@@ -110901,8 +110925,8 @@ function updateProjectiles(dt) {
     if (h.type && h.type.indexOf('mob_') === 0) {
       const _hcx = (h.cx != null) ? h.cx : (h.x + (h.w || 0) / 2);
       const _hcy = (h.cy != null) ? h.cy : (h.y + (h.h || 0) / 2);
-      const _camX = game.camera.x, _camY = (game.camera && game.camera.y) || 0;
-      if (_hcx < _camX - 100 || _hcx > _camX + W + 100 ||
+      const _camX = _lxPlayCamX(), _camY = (game.camera && game.camera.y) || 0;   // wide-view
+      if (_hcx < _camX - 100 || _hcx > _camX + W_PLAY + 100 ||
           _hcy < _camY - 100 || _hcy > _camY + H + 100) {
         if (h.life <= 0) game.hazards.splice(i, 1);
         continue;     // skip damage application for off-screen mob hazards
@@ -112090,8 +112114,8 @@ function updateProjectiles(dt) {
       // pool near a screen edge reached ~430px into off-screen territory;
       // measured 335px of drag on an off-screen mob before this gate.
       // 40px margin keeps a half-visible mob at the edge pulling.
-      const _vxViewL = (game.camera.x || 0) - 40;
-      const _vxViewR = (game.camera.x || 0) + W + 40;
+      const _vxViewL = _lxPlayCamX() - 40;   // wide-view: pulls inside the play window
+      const _vxViewR = _lxPlayCamX() + W_PLAY + 40;
       const _vxViewT = ((game.camera && game.camera.y) || 0) - 40;
       const _vxViewB = ((game.camera && game.camera.y) || 0) + H + 40;
       const _vsc = game._vortexScratch || (game._vortexScratch = []);
@@ -127170,6 +127194,7 @@ function updateCamera() {
     game.camera.x += dx * ease;
     game.camera.x = Math.max(0, Math.min(ww - W, game.camera.x));
   }
+  if (W !== W_PLAY) _lxPlayCamStep(ww);   // wide-view: the 960 play window, moved as a desktop camera would be
   // v0.25.470 — Vertical follow for tall maps (isVerticalTower: true,
   // worldHeight set). Default maps stay at camera.y = 0 so the
   // canvas-tall maps they were always designed for render unchanged.
@@ -127885,6 +127910,9 @@ function _lxBgTinted(src, tint) {
 // Weight-Bearer's Stair. Both now size it here. Returns a shared object (drawBackground calls this every frame): read, not kept.
 const LX_BG_PARALLAX = 0.12;
 const _LX_NM_SIZE = { w: 0, h: 0, travel: 0 };
+// wide-view: on a view wider than 960 a mirrored plate covers it at its own aspect, anchored to the ground (sky overscan
+// cropped) - never stretched past its shape; at 960 (every desktop) this returns null and the old stretch stands.
+function _lxWideCover(asp, w, h) { if (W <= 960 || !(asp > 0)) return null; const ch = Math.max(h, Math.round(w / asp)); return { w: Math.max(w, Math.round(ch * asp)), h: ch }; }
 function _lxNoMirrorSize(worldWidth, srcAsp) {
   const S = _LX_NM_SIZE, travel = Math.max(0, ((worldWidth || W) - W)) * LX_BG_PARALLAX, k = Math.max(1, (W + travel) / (H * srcAsp));
   S.h = Math.round(H * k); S.w = Math.ceil(S.h * srcAsp); S.travel = travel;
@@ -128100,6 +128128,8 @@ function drawBackground() {
       const _climb = Math.min(1, Math.max(0, (game.camera.y || 0) / (_md.worldHeight - H)));
       _bgY = -_over * _climb;
     }
+    if (!(_md && _md.bgNoMirror)) { const _wa = _bgVid ? ((_bgVid.videoWidth || 0) / (_bgVid.videoHeight || 1)) : ((bgPick && bgPick.naturalWidth > 0) ? bgPick.naturalWidth / bgPick.naturalHeight : 0);
+      const _wc = _lxWideCover(_wa, _bgW, _bgH); if (_wc) { _bgY += _bgH - _wc.h; _bgW = _wc.w; _bgH = _wc.h; } }   // wide-view: cover, not stretch
     // v0.30.593 everdawn-bg - a map flagged bgNoMirror paints ONE copy at its source's own aspect,
     // scaled so its width covers the whole parallax travel (W + (worldWidth - W) * parallax) and
     // anchored to the ground line, overscan cropped from the sky; the mirrored seam copy below is
@@ -131021,7 +131051,7 @@ const SANCTUM_STARS = (() => {
   for (const L of layers) {
     for (let i = 0; i < L.count; i++) {
       stars.push({
-        xSeed: (idx * 137.508 * 23) % 960,
+        xSeed: (idx * 137.508 * 23) % W,   // wide-view: across the whole view
         y: (idx * 41) % 500,
         size: L.size, alpha: L.alpha, hue: L.hue, speed: L.speed,
         tw: i * 0.37,
@@ -131037,7 +131067,7 @@ function drawSanctumCosmos() {
   // Starfield — cached positions, twinkle only
   let lastHue = null, lastAlpha = -1;
   for (const s of SANCTUM_STARS) {
-    const sx = (s.xSeed + 960 - game.camera.x * s.speed) % 960;
+    const sx = (s.xSeed + W - game.camera.x * s.speed) % W;   // wide-view
     const tw = 0.6 + 0.4 * Math.sin(t * 2 + s.tw);
     const a = s.alpha * tw;
     if (a !== lastAlpha) { ctx.globalAlpha = a; lastAlpha = a; }
@@ -131207,7 +131237,7 @@ function drawCandyCanyonDecor() {
   ];
   for (let lx = 120; lx < ww; lx += 320) {
     const sxw = lx - camX;
-    if (sxw < -120 || sxw > 1080) continue;
+    if (sxw < -120 || sxw > W + 120) continue;
     const pal = palette[(lx / 320) % palette.length | 0];
     const groundY = 480;
     const stickH = 130 + ((lx >> 5) % 30);     // 130..159
@@ -131253,7 +131283,7 @@ function drawCandyCanyonDecor() {
   // hash so a given x always renders the same boulder.
   for (let bx = 240; bx < ww; bx += 220) {
     const sxw = bx - camX;
-    if (sxw < -120 || sxw > 1080) continue;
+    if (sxw < -120 || sxw > W + 120) continue;
     const w = 64 + ((bx >> 4) % 24);
     const h = 36 + ((bx >> 6) % 14);
     const groundTop = 480;
@@ -131350,7 +131380,7 @@ function drawBubblegumSwampDecor() {
   //          glowing teal leaves cascading down in tendrils.
   for (let lx = 100; lx < ww; lx += 360) {
     const sxw = lx - camX;
-    if (sxw < -160 || sxw > 1140) continue;
+    if (sxw < -160 || sxw > W + 180) continue;
     const groundY = 480;
     const trunkH = 200 + ((lx >> 6) % 30);
     const trunkTopY = groundY - trunkH;
@@ -131418,7 +131448,7 @@ function drawBubblegumSwampDecor() {
   ];
   for (let mx = 220; mx < ww; mx += 180) {
     const sxw = mx - camX;
-    if (sxw < -80 || sxw > 1080) continue;
+    if (sxw < -80 || sxw > W + 120) continue;
     const pal = macPal[(mx / 180) % macPal.length | 0];
     const macW = 28 + ((mx >> 5) % 8);
     const macH = 8;
@@ -131447,7 +131477,7 @@ function drawBubblegumSwampDecor() {
   // ----- 4. Cattails on the ground — clusters every 280 px -----
   for (let cx = 160; cx < ww; cx += 280) {
     const sxw = cx - camX;
-    if (sxw < -40 || sxw > 1040) continue;
+    if (sxw < -40 || sxw > W + 80) continue;
     const groundY = 480;
     // Small mud puddle below the cattails
     ctx.fillStyle = '#4a2a1a';
@@ -131987,7 +132017,7 @@ function drawPearlBathhouseDecor() {
   // round bubbles per loop, drifting upward.
   for (let px2 = 250; px2 < ww; px2 += 420) {
     const sxw = px2 - camX;
-    if (sxw < -60 || sxw > 1060) continue;
+    if (sxw < -60 || sxw > W + 100) continue;
     const groundY = 480;
     const pipeH = 38;
     // Pipe stem (3-tone brass)
@@ -132029,7 +132059,7 @@ function drawPearlBathhouseDecor() {
   // Two-shell silhouette with a luminescent pearl pulsing inside.
   for (let mx2 = 460; mx2 < ww; mx2 += 360) {
     const sxw = mx2 - camX;
-    if (sxw < -80 || sxw > 1080) continue;
+    if (sxw < -80 || sxw > W + 120) continue;
     const groundY = 480;
     const w2 = 50, h2 = 22;
     // Shell shadow on ground
@@ -132091,7 +132121,7 @@ function drawPearlBathhouseDecor() {
   ];
   for (let cx3 = 100; cx3 < ww; cx3 += 140) {
     const sxw = cx3 - camX;
-    if (sxw < -40 || sxw > 1040) continue;
+    if (sxw < -40 || sxw > W + 80) continue;
     // Skip if overlapping a pipe / oyster column (every 360 / 420)
     const groundY = 480;
     const pal = coralPal[(cx3 / 140) % coralPal.length | 0];
@@ -132171,7 +132201,7 @@ function drawStardustAtriumDecor() {
   // Tall translucent columns with a glowing constellation rune at top.
   for (let lx = 140; lx < ww; lx += 320) {
     const sxw = lx - camX;
-    if (sxw < -80 || sxw > 1080) continue;
+    if (sxw < -80 || sxw > W + 120) continue;
     const groundY = 480;
     const colTop = 220;
     // Pillar body — pastel violet w/ light gradient
@@ -132197,7 +132227,7 @@ function drawStardustAtriumDecor() {
   // ----- 4. Drifting cosmic eggs — large floating orbs with spirals -----
   for (let mx2 = 280; mx2 < ww; mx2 += 360) {
     const sxw = mx2 - camX;
-    if (sxw < -120 || sxw > 1120) continue;
+    if (sxw < -120 || sxw > W + 160) continue;
     const baseY = 120 + Math.sin(game.time * 0.04 + mx2 * 0.01) * 14;
     const r = 22 + ((mx2 >> 5) % 8);
     // Soft outer glow
@@ -132228,7 +132258,7 @@ function drawStardustAtriumDecor() {
   // Connected stars drawn with thin gold lines + dot stars at vertices.
   for (let cx2 = 240; cx2 < ww; cx2 += 400) {
     const sxw = cx2 - camX;
-    if (sxw < -80 || sxw > 1080) continue;
+    if (sxw < -80 || sxw > W + 120) continue;
     const cy2 = 510;
     const points = [
       [sxw - 30, cy2 - 5],
@@ -132305,7 +132335,7 @@ function drawHoneycombHollowDecor() {
   // ----- 2. Dripping honey waterfalls — every 360 px -----
   for (let lx = 160; lx < ww; lx += 360) {
     const sxw = lx - camX;
-    if (sxw < -40 || sxw > 1040) continue;
+    if (sxw < -40 || sxw > W + 80) continue;
     const fallTop = 250;
     const fallBot = 460;
     // Honey stream
@@ -132335,7 +132365,7 @@ function drawHoneycombHollowDecor() {
   // ----- 3. Glowing amber lanterns hanging from the canopy -----
   for (let mx2 = 220; mx2 < ww; mx2 += 280) {
     const sxw = mx2 - camX;
-    if (sxw < -40 || sxw > 1040) continue;
+    if (sxw < -40 || sxw > W + 80) continue;
     const lampTop = 90;
     const lampY = lampTop + Math.sin(game.time * 0.04 + mx2 * 0.01) * 2;
     // Hang chain
@@ -132365,7 +132395,7 @@ function drawHoneycombHollowDecor() {
   // ----- 4. Fuzzy bee-flower clusters along the ground -----
   for (let cx2 = 160; cx2 < ww; cx2 += 220) {
     const sxw = cx2 - camX;
-    if (sxw < -40 || sxw > 1040) continue;
+    if (sxw < -40 || sxw > W + 80) continue;
     const groundY = 480;
     // Stem
     ctx.strokeStyle = '#5a8a2a'; ctx.lineWidth = 2;
@@ -149720,8 +149750,8 @@ function _gravCastKey(m, base) {
 // blink, zip) landed off camera ~12 s of its 30 s. While the memory runs they land inside the player's view instead.
 function _lxMemoryView(m) {
   if (!window._prologueActive || typeof game === 'undefined' || !game || !game.camera) return null;
-  const w2 = (game.mapData && game.mapData.worldWidth) || 2400, cx = game.camera.x || 0;
-  const L = Math.max(40, cx + 40), R = Math.min(w2 - m.w - 40, cx + W - m.w - 40);
+  const w2 = (game.mapData && game.mapData.worldWidth) || 2400, cx = _lxPlayCamX();   // wide-view
+  const L = Math.max(40, cx + 40), R = Math.min(w2 - m.w - 40, cx + W_PLAY - m.w - 40);
   return R > L ? { L, R } : null;
 }
 function _gravPostPunchBlink(m) {
@@ -159776,8 +159806,8 @@ const ZODIAC_AI = {
       m.vx = 0; m.vy = 0;
       m._zFlying = true;            // airborne: the flight loop is the honest art
       const _sbEase = (t) => t * t * (3 - 2 * t);
-      const _sbCamX = (game.camera ? game.camera.x : 0), _sbCamY = (game.camera && game.camera.y) || 0;
-      const _sbTx = _sbCamX + W / 2 - m.w / 2;
+      const _sbCamX = _lxPlayCamX(), _sbCamY = (game.camera && game.camera.y) || 0;   // wide-view
+      const _sbTx = _sbCamX + W_PLAY / 2 - m.w / 2;
       const _sbTy = _sbCamY + H * 0.38 - m.h / 2;
       const _sbCx = m.x + m.w / 2, _sbCy = m.y + m.h / 2;
       // Her pillars stand down for the duration - the starburst has to be
@@ -175729,7 +175759,7 @@ function _lxPrimeBackdrop(id) {
         asp = v.videoWidth / v.videoHeight;
       }
       const s = _lxNoMirrorSize(md.worldWidth, asp); bgW = s.w; bgH = s.h;
-    }
+    } else { const wc = _lxWideCover(img.naturalWidth / img.naturalHeight, bgW, bgH); if (wc) { bgW = wc.w; bgH = wc.h; } }   // wide-view: the size the draw uses
     _lxBgScaled(img, bgW, bgH);
     return true;
   } catch (e) { return false; }
@@ -187253,5 +187283,11 @@ window.addEventListener('keydown', (e) => {
   #mobile-deck#mobile-deck .mc-btn.mc-jump::after { content: 'JUMP'; position: absolute; left: 0; right: 0; bottom: 13%; text-align: center; pointer-events: none;
     font: 1000 9px/1 'Nunito', system-ui, sans-serif; letter-spacing: 1px; color: #ffe07a; -webkit-text-stroke: 2px #0b0a0e; paint-order: stroke fill; }
   body.mc-landscape #mobile-deck#mobile-deck .mc-jump { translate: 44px 0; }
+</style>
+<style id="lx-wide-view">
+  /* wide-view: the game box is as wide as the view on a wide touch screen; in the touch landscape layout the top-left HUD
+     starts clear of the touch-mode and hide-controls corner buttons (a side bar used to keep them apart) */
+  html.lx-wide .game-wrapper { width: var(--lx-game-w, 960px); margin-left: var(--lx-game-half, -480px); }
+  html.lx-wide body.mc-landscape #top-ui { left: calc(10px + 76px / var(--game-scale, 1)) !important; }
 </style>
 </body></html>
