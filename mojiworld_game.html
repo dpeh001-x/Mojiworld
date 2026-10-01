@@ -16196,7 +16196,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1487';
+const GAME_VERSION = 'v0.30.1488';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -22598,6 +22598,192 @@ function _lxHeroHasEquipWeaponArt() {
   const img = _lxEquipSprite('weapons', sid.slice(4));
   return !!(img && img.complete && img.naturalWidth);
 }
+// v0.30.1488 GEAR LIGHT (per user: "for some weapons and armors that have flames/ glows they can be animated, but I want you to
+// strictly keep the positions of the equipment throughout"). The flames, storms, violet wisps, orbs and starlight painted on
+// 51 of the 86 pieces move. It is a layer of light drawn by _drawEquipmentLayer right after the piece, in the SAME transform and the
+// SAME dest rect, built from the piece's own art (the baked Gear Align erase when there is one) and only where that art
+// already glows: it never moves, resizes or reshapes a piece, Gear Align's numbers and erases are read, never written, and
+// its alpha never exceeds the art's own, so the silhouette and the bold outline stay exactly as baked.
+//   fire    - licks of light rising through the flames (the tongues standing off the body, and see-through painted fire;
+//             inside the body only white-hot seams and a faint heat shimmer, since gold metal shares the flames' colours)
+//   storm   - a low crackle on the bolts, and a flash now and then
+//   wisp    - the violet shadow-flames drift up, slower, breathing
+//   orb / glow - the orb (or the codex's rune ring, the mace's crystal) breathes
+//   twinkle - the stars on the cosmic robes twinkle, each on its own clock
+//   sheen   - a light sweep across the holy-gold pieces every 4.2 s (the Conqueror's Crest's idiom)
+// Frames are baked a step per idle slice (never inside a draw); until a piece's frames are in, it draws exactly as before.
+// Off under reduced motion, under very-low FX, on tinted pieces, and with window._lxNoGearLight = true (an A/B switch).
+// window._lxEqAnimClock (ms) pins the animation clock for tests. scripts/gear_light_test.mjs pins all of it.
+const _LX_EQ_ANIM = {
+  'wpn:apocalypse_reaver': 'fire', 'wpn:bloodforged_greatblade': 'fire', 'wpn:cataclysm_maul': 'fire', 'wpn:doomforged_greatsword': 'fire',
+  'wpn:ragnarok_cleaver': 'fire', 'wpn:worldbreaker_maul': 'fire', 'arm:apocalypse_wargear': 'fire', 'arm:bloodforged_plate': 'fire',
+  'arm:cataclysm_carapace': 'fire', 'arm:doomforged_plate': 'fire', 'arm:ragnarok_bulwark': 'fire', 'arm:worldbreaker_bulwark': 'fire',
+  'wpn:hurricane_bow': 'storm', 'wpn:stormcaller_bow': 'storm', 'wpn:tempest_longbow': 'storm', 'wpn:thunderbow': 'storm',
+  'arm:hurricane_mantle': 'storm', 'arm:stormcaller_cloak': 'storm', 'arm:tempest_hauberk': 'storm', 'arm:thunderbow_mantle': 'storm',
+  'wpn:eclipse_daggers': 'wisp', 'wpn:phantom_talons': 'wisp', 'wpn:shadowweave_dagger': 'wisp', 'wpn:spectre_fangs': 'wisp',
+  'wpn:wraith_fangs': 'wisp', 'wpn:oblivion_whisper': 'wisp', 'wpn:nightshade_kunai': 'wisp', 'arm:eclipse_shroud': 'wisp',
+  'arm:oblivion_veil': 'wisp', 'arm:phantom_cloak': 'wisp', 'arm:shadowweave_cloak': 'wisp', 'arm:spectre_mantle': 'wisp', 'arm:wraith_shroud': 'wisp',
+  'wpn:apex_predator': 'orb', 'wpn:eternity_codex': 'glow', 'wpn:singularity_staff': 'orb', 'wpn:stardust_sceptre': 'orb',
+  'wpn:voidcaller_staff': 'orb', 'wpn:nebula_staff': 'orb', 'wpn:sorcerers_focus': 'orb', 'wpn:crystal_scepter': 'orb', 'wpn:crusader_mace': 'glow',
+  'arm:singularity_robes': 'twinkle', 'arm:stardust_vestments': 'twinkle', 'arm:eternity_regalia': 'twinkle', 'arm:nebula_mantle': 'twinkle',
+  'arm:cosmic_vestments': 'twinkle', 'arm:voidcaller_robe': 'twinkle',
+  'wpn:dawnshard_blade': 'sheen', 'wpn:skyhunter_longbow': 'sheen', 'arm:dawnshard_aegis': 'sheen',
+};
+// per effect: frames in the loop, loop length (s), the hue band its glow lives in (deg; null = any), light colours low -> high
+const _LX_EQ_FX = {
+  fire:    { n: 10, loop: 1.25, hue: [-25, 58], lo: [255, 120, 30], hi: [255, 240, 170], gain: 0.9 },
+  storm:   { n: 8,  loop: 0.7,  hue: [165, 240], lo: [120, 220, 255], hi: [235, 252, 255], gain: 1 },
+  wisp:    { n: 12, loop: 2.4,  hue: [250, 330], lo: [170, 80, 255], hi: [255, 205, 255], gain: 0.75 },
+  orb:     { n: 1,  loop: 2.2,  hue: null,       lo: [255, 255, 255], hi: [255, 255, 255], gain: 0.6 },
+  glow:    { n: 1,  loop: 2.6,  hue: null,       lo: [255, 255, 255], hi: [255, 255, 255], gain: 0.5 },
+  twinkle: { n: 12, loop: 2.4,  hue: null,       lo: [255, 255, 255], hi: [255, 255, 255], gain: 0.9 },
+  sheen:   { n: 14, loop: 4.2,  hue: null,       lo: [255, 250, 230], hi: [255, 250, 230], gain: 0.5 },
+};
+const _LX_EQ_ANIM_SIZE = 256;   // = _lxBakedDownscale's 256 bake of the 768 art the piece itself is drawn from
+const _LX_EQ_ANIM_CACHE = new Map();   // sid -> { src, fx, frames, ready }; LRU, at most _LX_EQ_ANIM_KEEP pieces (~3.6 MB each at most)
+const _LX_EQ_ANIM_KEEP = 8;
+const _LX_EQ_FIRE_R = 6;   // texels at 256: a flame tongue is anything thinner than ~12 texels standing off the body
+function _lxEqAnimHash(i) { i = (i ^ 61) ^ (i >>> 16); i = (i + (i << 3)) | 0; i ^= i >>> 4; i = Math.imul(i, 0x27d4eb2d); i ^= i >>> 15; return (i >>> 0) / 4294967296; }
+// tileable value noise: a px x py lattice, smooth-stepped
+function _lxEqAnimNoise(x, y, px, py, seed) {
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const g = (a, b) => _lxEqAnimHash(((((a % px) + px) % px) * 7919 + (((b % py) + py) % py) * 104729 + seed * 1299709) | 0);
+  const a = g(xi, yi), b = g(xi + 1, yi), c = g(xi, yi + 1), d = g(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function _lxEqAnimHsv(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let h = 0;
+  if (d) { if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; h *= 60; if (h < 0) h += 360; }
+  return [h, mx ? d / mx : 0, mx / 255];
+}
+function _lxEqSm(x, a, b) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+function _lxEqAnimInBand(h, band) { if (!band) return true; const lo = band[0], hi = band[1]; return lo < 0 ? (h >= 360 + lo || h <= hi) : (h >= lo && h <= hi); }
+// chamfer (3-4) distance, in texels, from every texel to the nearest texel whose mask value is `want` (off the art = background)
+function _lxEqChamfer(mk, N, want) {
+  const INF = 1e9, D = new Float32Array(N * N), off = want === 0 ? 0 : INF;
+  for (let i = 0; i < N * N; i++) D[i] = mk[i] === want ? 0 : INF;
+  const at = (x, y) => (x < 0 || y < 0 || x >= N || y >= N) ? off : D[y * N + x];
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const i = y * N + x; if (!D[i]) continue;
+    D[i] = Math.min(D[i], at(x - 1, y) + 3, at(x, y - 1) + 3, at(x - 1, y - 1) + 4, at(x + 1, y - 1) + 4); }
+  for (let y = N - 1; y >= 0; y--) for (let x = N - 1; x >= 0; x--) { const i = y * N + x; if (!D[i]) continue;
+    D[i] = Math.min(D[i], at(x + 1, y) + 3, at(x, y + 1) + 3, at(x + 1, y + 1) + 4, at(x - 1, y + 1) + 4); }
+  for (let i = 0; i < N * N; i++) D[i] /= 3;
+  return D;
+}
+// the glow mask: how strongly each texel already glows in this effect's colours (never more than the texel's own alpha)
+function _lxEqAnimMask(fx, d, N) {
+  const F = _LX_EQ_FX[fx], m = new Float32Array(N * N), core = new Uint8Array(N * N);
+  let band = F.hue;
+  if (fx === 'orb' || fx === 'glow') {   // the orb's own hue: the commonest among its hot texels (gold trim excluded)
+    const hist = new Float32Array(12);
+    for (let i = 0; i < N * N; i++) { if (d[i * 4 + 3] < 128) continue; const q = _lxEqAnimHsv(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]); if (q[2] > 0.7 && q[1] > 0.35 && !(q[0] > 25 && q[0] < 70)) hist[Math.floor(q[0] / 30) % 12] += q[2] * q[1]; }
+    let best = 0; for (let k = 1; k < 12; k++) if (hist[k] > hist[best]) best = k; band = [best * 30 - 30, best * 30 + 60];
+  }
+  for (let i = 0; i < N * N; i++) {
+    const a = d[i * 4 + 3] / 255; if (a < 0.08) continue;
+    const q = _lxEqAnimHsv(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]), h = q[0], s = q[1], v = q[2];
+    let w = 0;
+    if (fx === 'sheen') w = a > 0.85 && v > 0.32 ? 1 : 0;   // the whole lit body, never the outline
+    else if (fx === 'twinkle') w = _lxEqSm(v, 0.72, 0.95) * (s < 0.6 || v > 0.9 ? 1 : 0.5);
+    else { if (_lxEqAnimInBand(h, band)) w = _lxEqSm(v, fx === 'wisp' ? 0.35 : 0.45, 0.92) * _lxEqSm(s, 0.25, 0.6); if (v > 0.88 && s < 0.35) core[i] = 1; }
+    m[i] = w * a;
+  }
+  if (fx !== 'sheen' && fx !== 'twinkle') {   // white-hot cores count where they sit inside the glow (within 2 texels of it)
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const i = y * N + x; if (!core[i] || m[i] > 0.3) continue;
+      let near = 0; for (let oy = -2; oy <= 2 && !near; oy++) for (let ox = -2; ox <= 2; ox++) { const xx = x + ox, yy = y + oy; if (xx >= 0 && yy >= 0 && xx < N && yy < N && m[yy * N + xx] > 0.35) { near = 1; break; } }
+      if (near) m[i] = Math.max(m[i], 0.85 * d[i * 4 + 3] / 255); }
+  }
+  if (fx === 'fire') {   // flames are what stands OFF the solid body (what an opening of the silhouette removes) or what is painted
+    // see-through; inside the body white-hot seams keep 60% and the rest a 30% heat shimmer (gold metal shares the flames' colours)
+    const solid = new Uint8Array(N * N); for (let i = 0; i < N * N; i++) solid[i] = d[i * 4 + 3] >= 128 ? 1 : 0;
+    const bg = _lxEqChamfer(solid, N, 0), body = new Uint8Array(N * N); for (let i = 0; i < N * N; i++) body[i] = bg[i] > _LX_EQ_FIRE_R ? 1 : 0;
+    const toBody = _lxEqChamfer(body, N, 1);
+    for (let i = 0; i < N * N; i++) { if (m[i] <= 0 || toBody[i] > _LX_EQ_FIRE_R + 0.5 || d[i * 4 + 3] < 217) continue;
+      const q = _lxEqAnimHsv(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]); m[i] *= (q[2] > 0.92 && q[1] > 0.45) ? 0.6 : 0.3; }
+  }
+  if (fx === 'orb') {   // the light lives at the orb: centre = the densest glow (a 17-texel box sum), fading past ~22% of the art
+    const B = 8, sat = new Float64Array((N + 1) * (N + 1));
+    for (let y = 0; y < N; y++) { let row = 0; for (let x = 0; x < N; x++) { row += m[y * N + x]; sat[(y + 1) * (N + 1) + x + 1] = sat[y * (N + 1) + x + 1] + row; } }
+    let best = -1, cx = N / 2, cy = N / 2;
+    for (let y = B; y < N - B; y++) for (let x = B; x < N - B; x++) { const s = sat[(y + B + 1) * (N + 1) + x + B + 1] - sat[(y - B) * (N + 1) + x + B + 1] - sat[(y + B + 1) * (N + 1) + x - B] + sat[(y - B) * (N + 1) + x - B]; if (s > best) { best = s; cx = x; cy = y; } }
+    const R = 0.22 * N;
+    for (let i = 0; i < N * N; i++) if (m[i] > 0) m[i] *= 1 - _lxEqSm(Math.hypot((i % N) - cx, ((i / N) | 0) - cy), 0.6 * R, R);
+  }
+  return m;
+}
+// frame k of the loop, RGBA on a 256 canvas, drawn 'lighter' over the piece
+function _lxEqAnimFrame(fx, m, N, k, seed) {
+  const F = _LX_EQ_FX[fx], cv = document.createElement('canvas'); cv.width = cv.height = N;
+  const c = cv.getContext('2d'), id = c.createImageData(N, N), o = id.data, ph = k / F.n;
+  let bx0 = N, by0 = N, bx1 = 0, by1 = 0;
+  if (fx === 'sheen') for (let i = 0; i < N * N; i++) if (m[i] > 0) { const x = i % N, y = (i / N) | 0; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+  for (let i = 0; i < N * N; i++) {
+    const w = m[i]; if (w <= 0.01) continue; const x = i % N, y = (i / N) | 0; let u = 1;
+    if (fx === 'fire' || fx === 'wisp') {   // licks rising through the glow: the lattice scrolls one whole period up per loop
+      const sx = fx === 'fire' ? 13 : 24, sy = fx === 'fire' ? 26 : 34, py = Math.round(N / sy), px = Math.round(N / sx);
+      const yy = y / sy + ph * py, xx = x / sx + 0.35 * Math.sin((y / N + ph) * 6.283);
+      u = _lxEqSm(0.65 * _lxEqAnimNoise(xx, yy, px, py, seed) + 0.35 * _lxEqAnimNoise(xx * 2, yy * 2, px * 2, py * 2, seed + 7), 0.35, 0.85);
+    } else if (fx === 'storm') u = _lxEqAnimHash((((x >> 3) * 73 + (y >> 3) * 151) ^ (k * 977 + seed)) | 0) > 0.55 ? 1 : 0.12;
+    else if (fx === 'twinkle') u = Math.pow(Math.max(0, Math.sin((ph + _lxEqAnimHash(((x >> 2) * 131 + (y >> 2) * 337 + seed) | 0)) * 6.283)), 4);
+    else if (fx === 'sheen') { const t = ((x - bx0) / Math.max(1, bx1 - bx0) + (1 - (y - by0) / Math.max(1, by1 - by0))) / 2; u = Math.exp(-Math.pow((t - (-0.15 + 1.3 * ph)) / 0.07, 2)); }
+    const a = w * (fx === 'fire' || fx === 'wisp' ? u * u : u);   // no floor: between licks the art shows exactly as painted
+    if (a <= 0.004) continue;
+    o[i * 4] = F.lo[0] + (F.hi[0] - F.lo[0]) * u; o[i * 4 + 1] = F.lo[1] + (F.hi[1] - F.lo[1]) * u; o[i * 4 + 2] = F.lo[2] + (F.hi[2] - F.lo[2]) * u;
+    o[i * 4 + 3] = Math.round(255 * Math.min(1, a));
+  }
+  c.putImageData(id, 0, 0);
+  return cv;
+}
+// the frames for one piece, baked a step per idle slice from the very 256 bake the piece is drawn from (so the light lines up
+// texel for texel); null until every frame is in
+function _lxEqAnimGet(sid, img) {
+  const fx = _LX_EQ_ANIM[sid]; if (!fx || !img) return null;
+  let A = _LX_EQ_ANIM_CACHE.get(sid);
+  if (A && A.src === img) { _LX_EQ_ANIM_CACHE.delete(sid); _LX_EQ_ANIM_CACHE.set(sid, A); return A.ready ? A : null; }   // LRU touch
+  A = { src: img, fx, frames: [], ready: false, mask: null }; _LX_EQ_ANIM_CACHE.delete(sid); _LX_EQ_ANIM_CACHE.set(sid, A);
+  while (_LX_EQ_ANIM_CACHE.size > _LX_EQ_ANIM_KEEP) _LX_EQ_ANIM_CACHE.delete(_LX_EQ_ANIM_CACHE.keys().next().value);
+  const N = _LX_EQ_ANIM_SIZE, seed = (sid.length * 131 + sid.charCodeAt(4) * 7) | 0;
+  const later = (f) => { if (typeof requestIdleCallback === 'function') requestIdleCallback(f, { timeout: 150 }); else setTimeout(f, 30); };
+  const step = () => {
+    if (_LX_EQ_ANIM_CACHE.get(sid) !== A) return;   // evicted, or the art changed under it
+    try {
+      if (!A.mask) {
+        const bmp = (typeof _lxBakedDownscale === 'function') ? _lxBakedDownscale(img, N) : null;
+        if (!bmp) { if ((A.waits = (A.waits | 0) + 1) > 200) { A.failed = true; return; } later(step); return; }
+        const cv = document.createElement('canvas'); cv.width = cv.height = N; const c = cv.getContext('2d', { willReadFrequently: true });
+        c.drawImage(bmp, 0, 0); A.mask = _lxEqAnimMask(fx, c.getImageData(0, 0, N, N).data, N);
+      } else A.frames.push(_lxEqAnimFrame(fx, A.mask, N, A.frames.length, seed));
+    } catch (e) { A.failed = true; return; }
+    if (A.frames.length >= _LX_EQ_FX[fx].n) { A.ready = true; A.mask = null; return; }
+    later(step);
+  };
+  later(step);
+  return null;
+}
+// _drawEquipmentLayer calls this right after the piece: same context, same transform, same dest rect
+function _lxEqAnimDraw(c, sid, img, dx, dy, w, h, item) {
+  if (!_LX_EQ_ANIM[sid] || (item && item.tint) || window._lxNoGearLight) return;
+  if (typeof game !== 'undefined' && game && game._reduceMotion) return;
+  if (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) return;
+  const A = _lxEqAnimGet(sid, img); if (!A) return;
+  const F = _LX_EQ_FX[A.fx], t = (window._lxEqAnimClock != null ? window._lxEqAnimClock : performance.now()) / 1000;
+  const op = c.globalCompositeOperation, ga = c.globalAlpha;
+  c.globalCompositeOperation = 'lighter';
+  const blit = (k, a) => { if (a > 0.01) { c.globalAlpha = ga * Math.min(1, a); c.drawImage(A.frames[k], dx, dy, w, h); } };
+  if (A.fx === 'orb' || A.fx === 'glow') { const s = 0.5 + 0.5 * Math.sin(t * 6.283 / F.loop); blit(0, F.gain * (0.12 + 0.88 * s * s)); }
+  else if (A.fx === 'sheen') { const p = (t % F.loop) / 0.9; if (p < 1) blit(Math.min(F.n - 1, Math.floor(p * F.n)), F.gain); }
+  else if (A.fx === 'storm') {   // a low crackle all the time, and a flash in about one 0.11 s slot in four, gone within it
+    const slot = Math.floor(t / 0.11), r = _lxEqAnimHash((slot * 2654435761) | 0), k = Math.floor(_lxEqAnimHash((slot * 40503) | 0) * F.n);
+    blit(Math.floor(t * 14) % F.n, 0.28);
+    if (r < 0.24) blit(k, F.gain * (1 - (t / 0.11 - slot)));
+  } else {   // fire / wisp / twinkle: a crossfaded loop; fire flickers, wisps breathe
+    const q = (t / F.loop) * F.n, k0 = Math.floor(q) % F.n, f = q - Math.floor(q);
+    const g = F.gain * (A.fx === 'fire' ? 0.7 + 0.3 * _lxEqAnimNoise(t * 9, 0.5, 1e6, 1, 3) : A.fx === 'wisp' ? 0.8 + 0.2 * Math.sin(t * 2.4) : 1);
+    blit(k0, g * (1 - f)); blit((k0 + 1) % F.n, g * f);
+  }
+  c.globalCompositeOperation = op; c.globalAlpha = ga;
+}
 function _drawEquipmentLayer(layer, targetCtx, opts) {
   opts = opts || {};
   // Resolve the equipped map: studio override wins, then live
@@ -22693,6 +22879,8 @@ function _drawEquipmentLayer(layer, targetCtx, opts) {
       if (_eb) _ebSrc = _eb;
     }
     c.drawImage(_ebSrc, dx, dy, w, h);
+    // v0.30.1488 gear light - the piece's flames / storm / wisps / orb / stars, drawn in this same transform and rect (see _LX_EQ_ANIM)
+    if (typeof _lxEqAnimDraw === 'function') _lxEqAnimDraw(c, _sid, img, dx, dy, w, h, item);
     c.restore();
   }
 }
