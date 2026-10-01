@@ -83,9 +83,21 @@ const gained = (a, b) => b.lvl > a.lvl || (b.lvl === a.lvl && b.exp > a.exp);
 const killAll = (p) => p.evaluate(async () => { for (let r = 0; r < 60; r++) { const live = game.monsters.filter((m) => m && m.currentHp > 0 && !m.ally && !m.isSummon); if (!live.length) break;
   for (const m of live) { m.evasion = 0; m.traits = null; player._lxSureHit = true; try { hitMonster(m, (m.maxHp || m.currentHp) * 3, false, 'both'); } catch (e) {} player._lxSureHit = false; }
   await new Promise((r2) => setTimeout(r2, 60)); } });
+// a Ticket Rush mech can wear a ticket shield with two players on the map (a hit lands for 1): punch it through as a pair, in turn
+const bookState = (p, u) => p.evaluate((u) => { const m = (game.monsters || []).find((x) => x && x.uid === u); return m ? (m._pqBooked | 0) : 0; }, u);
+let partySettled = false;   // the host books mechs on its next party tick (<= 700 ms) AFTER it first sees the partner
+const settleParty = async (host) => { if (partySettled) return; const t0 = Date.now(); for (;;) { const n = await host.evaluate(() => (typeof _lxPqParty === 'function' ? _lxPqParty().n : 2)); if (n >= 2 || Date.now() - t0 > 6000) break; await sleep(150); } await sleep(900); partySettled = true; };
+const punchThrough = async (host, killer, partner, u) => {
+  await settleParty(host);
+  if ((await bookState(host, u)) !== 1) return;
+  for (const p of [killer, partner, killer]) { await hitUid(p, u, 0.001); await sleep(250); }
+  await until(async () => (await bookState(host, u)) !== 1, 3000);
+};
 // kill one monster both screens show; say where it went and whether it stayed gone
 const turn = async (killer, P, Q) => {
   const u = (await common(P, Q))[0]; if (u == null) return { u: null };
+  const host = (await P.evaluate(() => net.isHost)) ? P : Q;
+  await punchThrough(host, killer, killer === P ? Q : P, u);
   await hitUid(killer, u, 3);
   const g = await until(async () => (await gone(P, u)) && (await gone(Q, u)));
   let stayed = !!g; for (let i = 0; i < 10 && stayed; i++) { await sleep(200); stayed = (await gone(P, u)) && (await gone(Q, u)); }

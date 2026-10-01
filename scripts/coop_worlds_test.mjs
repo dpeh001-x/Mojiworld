@@ -57,6 +57,14 @@ try {
   ok('1. two players in the PQ lobby while the room host is in town share ONE world', b.mons.length > 0 && uids(b) === uids(c) && b.host !== c.host
     && (b.host ? c : b).mons.every((m) => m[1]), { B: { host: b.host, n: b.mons.length }, C: { host: c.host, n: c.mons.length }, same: uids(b) === uids(c) });
   const tgt = c.mons.find((m) => m[2] > 1);
+  // a booked mech (a ticket shield, with two players on the map) is punched through as a pair, in turn, before the kill
+  if (tgt) {
+    const bh = b.host ? B : C;   // the host books mechs on its next party tick (<= 700 ms) AFTER it first sees the partner: wait for that
+    for (const t0 = Date.now();;) { const n = await bh.evaluate(() => (typeof _lxPqParty === 'function' ? _lxPqParty().n : 2)); if (n >= 2 || Date.now() - t0 > 6000) break; await sleep(150); }
+    await sleep(900);
+    const bk = await bh.evaluate((u) => { const m = game.monsters.find((x) => x && x.uid === u); return m ? (m._pqBooked | 0) : 0; }, tgt[0]);
+    if (bk === 1) for (const p of [C, B, C]) { await p.evaluate((u) => { const m = game.monsters.find((x) => x && x.uid === u); if (m) { m.evasion = 0; player._lxSureHit = true; try { hitMonster(m, 1, false, 'probe'); } finally { player._lxSureHit = false; } } }, tgt[0]); await sleep(250); }
+  }
   if (tgt) await C.evaluate((u) => { const m = game.monsters.find((x) => x && x.uid === u); for (let i = 0; i < 20 && m && m.currentHp > 0; i++) hitMonster(m, (m.maxHp || m.currentHp) * 3, false, 'probe'); }, tgt[0]);
   await sleep(1200);
   b = await view(B); c = await view(C);
