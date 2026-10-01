@@ -60,33 +60,36 @@ const res = await page.evaluate(async () => {
   ok('blob save still verifies', _lxLocalSaveVerdict(JSON.parse(localStorage.getItem(SAVE_KEY))) === 'ok');
   player.look = _lookBak; _flushSaveStateNow();
   localStorage.setItem(SAVE_KEY, raw);
-  // ---- 2. edited save -> bad -> currencies reset, progress kept ----
+  // ---- 2. edited save -> rolled back to the verified copy in the marker (anticheat; was: currencies reset, edits kept) ----
   const edited = JSON.parse(raw); edited.player.setshards = 999999; edited.player.mojicoins = 5e9;
   ok('edited save fails verification', _lxLocalSaveVerdict(edited) === 'bad', _lxLocalSaveVerdict(edited));
   localStorage.setItem(SAVE_KEY, JSON.stringify(edited));
   player.setshards = -1; player.mojicoins = -1; player.level = 1;
   const l1 = loadState();
-  ok('edited save still loads (progress kept)', l1 === true && player.level === 60, `loaded=${l1} lv=${player.level}`);
-  ok('edited save: money reset to 0', player.setshards === 0 && player.mojicoins === 0 && (player.bankBalance || 0) === 0, `${player.setshards}/${player.mojicoins}/${player.bankBalance}`);
-  ok('verdict recorded', game._saveVerdict === 'bad', game._saveVerdict);
+  ok('edited save still loads, rolled back to the verified copy', l1 === true && player.level === 60, `loaded=${l1} lv=${player.level}`);
+  ok('edited save: the money is the last verified, not the edit (a login bonus may land on top)', player.setshards === 1234 && player.mojicoins >= 55555 && player.mojicoins < 60000 && (player.bankBalance || 0) === 777, `${player.setshards}/${player.mojicoins}/${player.bankBalance}`);
+  ok('verdict recorded', game._saveVerdict === 'restored', game._saveVerdict);
 
-  // ---- 3. unsigned save with marker -> capped at last verified ----
+  // ---- 3. stripped signature -> rolled back to the verified copy (anticheat; was: money capped at the last verified) ----
   const stripped = JSON.parse(raw); delete stripped.sig; stripped.player.setshards = 50000; stripped.player.mojicoins = 90000;
   localStorage.setItem(SAVE_KEY, JSON.stringify(stripped));
   loadState();
-  ok('stripped signature: shards capped at last verified 1234', player.setshards === 1234, player.setshards);
-  ok('stripped signature: coins capped at last verified 55555', player.mojicoins === 55555, player.mojicoins);
-  ok('stripped signature: legit lower values pass through', (() => {
+  ok('stripped signature: shards back to the last verified 1234', player.setshards === 1234 && game._saveVerdict === 'restored', player.setshards + ' ' + game._saveVerdict);
+  ok('stripped signature: coins back to the last verified 55555', player.mojicoins >= 55555 && player.mojicoins < 60000, player.mojicoins);
+  ok('stripped signature: a lowered value is rolled back too (a stripped save is an edited save)', (() => {
     const low = JSON.parse(raw); delete low.sig; low.player.setshards = 100;
-    localStorage.setItem(SAVE_KEY, JSON.stringify(low)); loadState(); return player.setshards === 100;
+    localStorage.setItem(SAVE_KEY, JSON.stringify(low)); loadState(); return player.setshards === 1234;
   })(), player.setshards);
 
-  // ---- 4. unsigned, no marker -> grandfathered ----
+  // ---- 4. unsigned, no marker: a save older than signing is grandfathered; a modern one (it has _cdCarry) is not loaded ----
   localStorage.removeItem(SAVE_KEY + '_verified');
-  const legacy = JSON.parse(raw); delete legacy.sig; legacy.player.setshards = 4321;
+  const legacy = JSON.parse(raw); delete legacy.sig; delete legacy.player._cdCarry; legacy.player.setshards = 4321;
   localStorage.setItem(SAVE_KEY, JSON.stringify(legacy));
   loadState();
-  ok('legacy unsigned save (no marker) is accepted as-is', player.setshards === 4321 && game._saveVerdict === 'unsigned', `${player.setshards} ${game._saveVerdict}`);
+  ok('legacy unsigned save (no marker, older than signing) is accepted as-is', player.setshards === 4321 && game._saveVerdict === 'unsigned', `${player.setshards} ${game._saveVerdict}`);
+  const modern = JSON.parse(raw); delete modern.sig; modern.player.setshards = 4321; localStorage.removeItem(SAVE_KEY + '_verified');
+  localStorage.setItem(SAVE_KEY, JSON.stringify(modern));
+  ok('a stripped MODERN save with the marker deleted is not loaded (anticheat)', loadState() === false, 'loaded');
 
   // ---- 5. good save round-trips through the secure export payload ----
   localStorage.setItem(SAVE_KEY, raw);

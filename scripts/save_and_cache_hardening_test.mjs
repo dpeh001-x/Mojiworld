@@ -83,8 +83,10 @@ const restored = await page2.evaluate(() => {
 // blank character pass.
 ok('the Lv 47 character LOADS from a save with equipped:null',
    restored.liveLevel === HERO_LV, restored);
-ok('and the tamper guard is what emptied the wallet (equipped is a signed field)',
-   restored.verdict === 'bad' && restored.liveCoins < HERO_COINS, { verdict: restored.verdict, coins: restored.liveCoins });
+// anticheat: equipped is a signed field, so the edit is now ROLLED BACK from the verified copy the flush left in the marker
+// (it used to load with the wallet zeroed): the character keeps its coins and gets its equipped slots back.
+ok('and the tamper guard repaired the edited field from the verified copy, wallet intact (equipped is a signed field)',
+   restored.verdict === 'restored' && restored.liveCoins >= HERO_COINS && restored.equippedShape === 'object', { verdict: restored.verdict, coins: restored.liveCoins, equipped: restored.equippedShape });
 ok('the stored save still holds the character (not overwritten)',
    restored.storedLevel === HERO_LV, { storedLevel: restored.storedLevel });
 ok('no recovery copy was needed — the load simply succeeded', restored.recoveryPresent === false);

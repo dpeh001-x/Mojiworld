@@ -213,7 +213,7 @@ try {
   // a Steam Cloud pull of a whole save with paint: split on arrival; the auto backup of the local save keeps its paint
   const sp = await p.evaluate(async () => {
     __flush(); const pt = __mkPaint(41); const sv = JSON.parse(typeof _lxSaveWithPaint === 'function' ? _lxSaveWithPaint(localStorage.getItem('levelx_save_v1')) : localStorage.getItem('levelx_save_v1'));
-    sv.player.customPaint = pt.full; sv.player.customPaintLayers = pt.layers; delete sv.player._lxPaintRef; sv.player.level = (sv.player.level || 1) + 5; sv.t = Date.now() + 1000;
+    sv.player.customPaint = pt.full; sv.player.customPaintLayers = pt.layers; delete sv.player._lxPaintRef; sv.player.level = (sv.player.level || 1) + 5; sv.t = Date.now() + 1000; sv.sig = _lxLocalSaveSig(sv);   // a cloud save is one a game flush signed (anticheat refuses a forged one)
     const cloudRaw = JSON.stringify(sv); localStorage.removeItem('lx_cloud_local_wins');
     window.SteamAPI = { available: true, cloud: { read: async () => cloudRaw, write: () => Promise.resolve() } };
     let r = null; try { r = await _lxSteamCloudSync(); } finally { delete window.SteamAPI; }
@@ -223,7 +223,7 @@ try {
   check(sp.r === 'reloading' && sp.st.hash === sp.want && sp.st.via === 'record' && sp.st.main < 200000 && sp.backup === sp.local, 'a Steam Cloud pull stores the cloud paint under its key; the auto backup keeps the local paint', sp);
   // ---------- boot 6: an account cloud pull (sign-in) of a whole save with paint ----------
   const pull = await p.evaluate(() => { const sv = JSON.parse(typeof _lxSaveWithPaint === 'function' ? _lxSaveWithPaint(localStorage.getItem('levelx_save_v1')) : localStorage.getItem('levelx_save_v1')); const pt = __mkPaint(51, 40);
-    sv.player.customPaint = pt.full; sv.player.customPaintLayers = pt.layers; delete sv.player._lxPaintRef; sv.player.level = (sv.player.level || 1) + 5; sv.t = Date.now() + 2000; return { sv, want: __hashOf(pt.full, pt.layers) }; });
+    sv.player.customPaint = pt.full; sv.player.customPaintLayers = pt.layers; delete sv.player._lxPaintRef; sv.player.level = (sv.player.level || 1) + 5; sv.t = Date.now() + 2000; sv.sig = _lxLocalSaveSig(sv); return { sv, want: __hashOf(pt.full, pt.layers) }; });
   cloudPull = pull.sv;
   await reload(() => { _lxCloudSyncOnLogin({ kind: 'cloud', token: 'test', name: 'tester' }); });
   cloudPull = null;

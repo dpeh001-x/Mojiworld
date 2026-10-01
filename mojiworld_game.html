@@ -16196,7 +16196,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1479';
+const GAME_VERSION = 'v0.30.1480';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -54449,10 +54449,45 @@ function _lxPickSaveFields(o, keys) {   // v0.30.917
   for (const k of keys) if (Object.prototype.hasOwnProperty.call(o, k)) out[k] = o[k];
   return out;
 }
+// anticheat (per user: "Ensure that there are anticheat measures the prevent the save file from being edited or corrupted").
+// THE VERIFIED COPY. v0.30.414 signed the save, but a save that failed the check (or lost its signature) still LOADED its
+// edited progress - level, EXP, gear, items, quests, points, boss kills - and only lost its money. The verified marker now
+// also carries the exact signed fields of the last save the game wrote, with that save's own signature over them (the same
+// bodies _lxLocalSaveSigBody signs). It lives in the marker key on purpose: every path that replaces the whole save (import,
+// backup restore, cloud pull, Steam Cloud, a new game) already removes the marker, so the copy can never belong to another
+// character. On load, an edited or stripped save gets every signed field back from it (_lxLedgerRestore): the edit is undone,
+// not kept. Honest limit, as before: the key ships in the client, so someone with the source open can still re-sign.
+function _lxLocalSaveSigParts(s) {
+  const pick = (o, keys) => { const out = {}; if (!o) return out; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
+  return [JSON.stringify(pick(s.player, _LX_SIGNED_PLAYER_KEYS)), JSON.stringify(pick(s.game, _LX_SIGNED_GAME_KEYS3))];
+}
+// true when the verified copy was rolled into `s` (its signed fields, stamp and signature: `s` verifies again afterwards)
+function _lxLedgerRestore(s) {
+  try {
+    const m = _lxSaveMarkRead();
+    if (!m || typeof m !== 'object' || typeof m.sig !== 'string' || typeof m.p !== 'string' || typeof m.g !== 'string') return false;
+    if (m.v !== s.v) return false;
+    if (!_lxSigEqual(_lxHmacSaveHex('ls3\n' + String(m.v) + '\n' + String(m.t) + '\n' + m.p + '\n' + m.g), m.sig)) return false;
+    const P = _lxSafeJsonParse(m.p), G = _lxSafeJsonParse(m.g);
+    if (!P || !G || typeof P !== 'object' || typeof G !== 'object' || !P.cls) return false;
+    if (!s.player || typeof s.player !== 'object') s.player = {};
+    if (!s.game || typeof s.game !== 'object') s.game = {};
+    const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+    for (const k of _LX_SIGNED_PLAYER_KEYS) { if (own(P, k)) s.player[k] = P[k]; else delete s.player[k]; }
+    for (const k of _LX_SIGNED_GAME_KEYS3) { if (own(G, k)) s.game[k] = G[k]; else delete s.game[k]; }
+    s.t = m.t; s.sig = m.sig;
+    return true;
+  } catch (e) { return false; }
+}
+// Every save since v0.30.1167 carries _cdCarry, and every save since v0.30.414 is signed: an unsigned save that has it was
+// signed once and had the signature stripped. Only a save older than both is a genuine legacy save.
+function _lxSaveLooksSigned(s) { return !!(s && s.player && typeof s.player === 'object' && s.player._cdCarry !== undefined); }
 function _lxSaveMarkWrite(s) {
   try {
     const p = s && s.player || {};
-    localStorage.setItem(_LX_SAVE_MARK_KEY, JSON.stringify({ t: s.t, setshards: p.setshards | 0, mojicoins: Math.floor(p.mojicoins || 0), bankBalance: Math.floor(p.bankBalance || 0) }));
+    const m = { t: s.t, setshards: p.setshards | 0, mojicoins: Math.floor(p.mojicoins || 0), bankBalance: Math.floor(p.bankBalance || 0) };
+    if (s.sig) { const pg = _lxLocalSaveSigParts(s); m.v = s.v; m.p = pg[0]; m.g = pg[1]; m.sig = s.sig; }   // anticheat - the verified copy (_lxLedgerRestore)
+    localStorage.setItem(_LX_SAVE_MARK_KEY, JSON.stringify(m));
   } catch (e) {}
 }
 const _LX_DEV_PW_SHA = '210f5332291229ecc876d35a904a25c1495a42229d822369af74e8fa37cbda6a';   // v0.30.917
@@ -54506,6 +54541,12 @@ function exportSaveSecure() {
     if (typeof showToast === 'function') showToast('🔒 Secure save exported — signed & tamper-checked.', 'legendary');
   } catch (e) { if (typeof showToast === 'function') showToast('Secure export failed.', 'danger'); }
 }
+// anticheat - an import that cannot go ahead says why in the confirm dialog, which lifts above the title screen and Save
+// Backups (_lxConfirmLift); a toast there sat under the title overlay and expired unseen.
+function _lxImportRefused(title, body) {
+  try { if (typeof uiConfirm === 'function') { uiConfirm({ title: title, body: body, yesLabel: 'OK', single: true }); return; } } catch (e) {}
+  try { if (typeof showToast === 'function') showToast(title + ' \u2014 ' + body, 'danger'); } catch (e) {}
+}
 function importSave(input) {
   try {
     var file = input && input.files && input.files[0];
@@ -54536,11 +54577,11 @@ function importSave(input) {
         // reload. Surface the specific reason instead.
         var inner = _lxSafeJsonParse(save);   // v0.29.560 — proto-safe: untrusted file
         if (!inner || typeof inner !== 'object' || !inner.player || !inner.player.cls) {
-          if (typeof showToast === 'function') showToast('Import failed — not a Mojiworld save file.', 'danger');
+          _lxImportRefused('Import failed', 'This is not a Mojiworld save file.');
           input.value = ''; return;
         }
         if (inner.v !== SAVE_VERSION) {
-          if (typeof showToast === 'function') showToast('Import failed — save version v' + inner.v + ' doesn’t match game v' + SAVE_VERSION + '.', 'danger');
+          _lxImportRefused('Import failed', 'This save is format v' + inner.v + '; the game reads v' + SAVE_VERSION + '.');
           input.value = ''; return;
         }
         // Tamper-evidence: a secure save whose signature doesn't verify was
@@ -54553,6 +54594,13 @@ function importSave(input) {
           if (_iv === 'bad') _innerNote = '\n\n\u26a0 The save data inside has been EDITED: Setshards, Mojicoins and bank will reset to 0 when it loads.';
           else if (_iv === 'unsigned') _innerNote = '\n\nUnsigned save: Setshards, Mojicoins and bank reset to 0 when it loads, and it will not unlock Steam achievements.';   // v0.30.917
         } catch (_) {}
+        // anticheat - an edited file, or one with no signature to check, is refused outright (it used to import "anyway",
+        // keeping its edited progress). An older secure export - outer signature good, inner save older than signing - is fine.
+        var _refuse = null;
+        if (_secVerdict === 'bad' || _iv === 'bad') _refuse = 'This save file was changed after the game wrote it, so it cannot be imported. Saves are signed; an edited or damaged one fails the check.';
+        else if (_iv === 'unsigned' && (_secVerdict !== 'ok' || (typeof _lxSaveLooksSigned === 'function' && _lxSaveLooksSigned(inner)))) _refuse = 'This save file has no signature, so it cannot be checked or imported. Use \uD83D\uDD12 Secure Save in the game to export one that can.';
+        if (_refuse) { input.value = ''; _lxImportRefused('Save file refused', _refuse); return; }
+        if (_iv === 'unsigned') _innerNote = '';   // anticheat - only an older secure export gets here, and its outer signature verified
         var _importBody = (_secVerdict === 'bad')
           ? '⚠ This secure save FAILED its integrity check — it was edited or corrupted after it was exported. Importing it may be a modified/cheated save or could break your game. Continue only if you trust this file.'
           : ((_secVerdict === 'ok' ? '🔒 Signature verified. ' : '') + ((typeof hasSave === 'function' && !hasSave()) ? 'This loads the save and reloads the game.' : 'This will OVERWRITE your current progress and reload the game. Export a backup first if unsure.'));   // menu-import
@@ -54566,7 +54614,7 @@ function importSave(input) {
           // every stored achievement). An imported save's own achievements are recorded as a baseline and never pushed; a
           // save that did not verify loses its currencies and is marked 'unverified' (signed, so it cannot be dropped later).
           try {
-            var _okImp = (_secVerdict !== 'bad') && (_iv === 'ok' || _iv === 'legacy');
+            var _okImp = (_secVerdict !== 'bad') && (_iv === 'ok' || _iv === 'legacy' || (_iv === 'unsigned' && _secVerdict === 'ok'));   // anticheat - an older secure export verified by its outer signature
             inner.game = (inner.game && typeof inner.game === 'object') ? inner.game : {};
             var _ach = (inner.game.achievements && typeof inner.game.achievements === 'object') ? inner.game.achievements : {};
             inner.game._steamAchBaseline = Object.keys(_ach).filter(function (k) { return !!_ach[k]; });
@@ -54588,7 +54636,7 @@ function importSave(input) {
           if (typeof showToast === 'function') showToast('⬆ Save imported — reloading…', 'legendary');
           setTimeout(function () { location.reload(); }, 700);
         });
-      } catch (e2) { if (typeof showToast === 'function') showToast('Import failed — invalid save file.', 'danger'); input.value = ''; }
+      } catch (e2) { _lxImportRefused('Import failed', 'The save file could not be read.'); input.value = ''; }
     };
     reader.readAsText(file);
   } catch (e) { if (typeof showToast === 'function') showToast('Import failed.', 'danger'); }
@@ -54738,7 +54786,7 @@ function loadState() {
     const s = _lxSafeJsonParse(raw);
     // v0.30.414 — verify BEFORE any migration or clamp touches the objects
     // (the signature covers them as stored). Applied after the assigns below.
-    const _sigVerdict = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(s) : 'unsigned';
+    let _sigVerdict = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(s) : 'unsigned';
     // v0.25.773 — Surface save-version mismatch instead of silently wiping.
     // Previously any future SAVE_VERSION bump would just `return false`,
     // discarding the save with no feedback. Now: log a console warning AND
@@ -54769,6 +54817,16 @@ function loadState() {
       return false;
     }
     if (!s || !s.player || !s.player.cls) return false;
+    // anticheat - an edited save, or one whose signature was stripped, gets every signed field back from the last verified
+    // copy (the edit is undone, the save verifies again); with no copy, a stripped save from a signing client counts as edited
+    if (_sigVerdict === 'bad' || _sigVerdict === 'unsigned') {
+      if (typeof _lxLedgerRestore === 'function' && _lxLedgerRestore(s)) _sigVerdict = 'restored';
+      // ...and with no copy AND no marker at all, a save from a signing client was tampered with on purpose (the marker only
+      // goes when the whole save is replaced, and every such save is signed): it is not loaded. The could-not-load path keeps
+      // it in Save Backups, labelled, and says so in the title menu.
+      else if (typeof _lxSaveLooksSigned === 'function' && _lxSaveLooksSigned(s) && !_lxSaveMarkRead()) {
+        const _er = new Error('save edited: signature missing or broken, no verified copy'); _er._lxEdited = true; throw _er; }
+    }
     try { window._lxLoadedSaveT = (+s.t > 0) ? +s.t : 0; } catch (e) {}   // v0.30.1186 save-notices - the stamp of the save being continued
     // v0.25.452 — sanitize critical numeric fields BEFORE Object.assign
     // so any NaN / Infinity / out-of-range value on the persisted save
@@ -54901,13 +54959,15 @@ function loadState() {
       game._saveVerdict = _sigVerdict;
       // v0.30.917 a save that did not verify as ls3 re-signs cleanly on its next save, and the boot after that would push
       // whatever achievements it carried. Count them as already earned: an ls2 signature never covered them.
-      if (_sigVerdict !== 'ok') {
+      if (_sigVerdict !== 'ok' && _sigVerdict !== 'restored') {   // anticheat - a rolled-back save's achievements are the verified ones
         const _a = (game.achievements && typeof game.achievements === 'object') ? game.achievements : {};
         const _b = new Set(Array.isArray(game._steamAchBaseline) ? game._steamAchBaseline : []);
         for (const k in _a) if (_a[k]) _b.add(k);
         game._steamAchBaseline = [..._b];
       }
-      if (_sigVerdict === 'bad') {
+      if (_sigVerdict === 'restored') {   // anticheat - said where it can be seen (in the title menu while it is up)
+        setTimeout(() => { try { _lxSaveNotice('\u26A0 Your save was changed outside the game. The changes were undone: it is back to your last verified save.', 'danger'); } catch (_) {} }, window._lxTitleFirst ? 0 : 1800);
+      } else if (_sigVerdict === 'bad') {
         player.setshards = 0; player.mojicoins = 0; player.bankBalance = 0;
         setTimeout(() => { if (typeof showToast === 'function') showToast('⚠ Save integrity check FAILED — the save was edited or corrupted. Progress kept; Setshards, Mojicoins and bank reset.', 'danger'); }, 1800);
       } else if (_sigVerdict === 'unsigned') {
@@ -55427,12 +55487,14 @@ function loadState() {
       const _lxHero = !!_raw && _lxSaveMayHoldHero(_raw);   // v0.30.1186 save-notices - `{}` holds no hero: nothing to keep
       if (_raw) {
         if (_lxHero && !localStorage.getItem(SAVE_KEY + '_recover')) localStorage.setItem(SAVE_KEY + '_recover', _raw);
-        _lxKeepUnloadableSave(_raw, 'auto · could not load');   // v0.30.890
+        const _lxEd = !!(e && e._lxEdited);   // anticheat - an edited save with nothing verified to roll back to
+        _lxKeepUnloadableSave(_raw, _lxEd ? 'auto · edited, not verified' : 'auto · could not load');   // v0.30.890
         if (typeof game !== 'undefined' && game) game._saveLoadFailed = true;
         try { console.error('[mojiworld] save failed to load; original preserved at "' + SAVE_KEY + '_recover"', e); } catch (_) {}
         setTimeout(() => {
           // v0.30.1186 save-notices - shown in the title menu (a toast here sat under the title overlay and expired unseen)
-          try { _lxSaveNotice(_lxHero ? '\u26A0 Your save could not be read. It is kept in Save Backups as "could not load" - restore it from there.'
+          try { _lxSaveNotice(_lxEd ? '\u26A0 Your save was edited outside the game and could not be verified, so it was not loaded. It is kept in Save Backups as "edited, not verified".'
+            : _lxHero ? '\u26A0 Your save could not be read. It is kept in Save Backups as "could not load" - restore it from there.'
             : '\u26A0 Your save could not be read: it was empty, with no hero to restore. Starting a new adventure.', 'danger'); } catch (_) {}
         }, window._lxTitleFirst ? 0 : 3000);   // v0.30.1254 title-first - in the menu before it shows (it is up ~1 s after the boot now)
       }
@@ -124716,6 +124778,7 @@ function uiConfirm(opts) {
     if (opts.bodyHtml) body.innerHTML = opts.bodyHtml; else body.textContent = opts.body || '';   // v0.30.1060 — bodyHtml: caller-built markup (the Reset dialog)
     yes.textContent   = opts.yesLabel || 'Confirm';
     no.textContent    = opts.noLabel  || 'Cancel';
+    no.style.display = opts.single ? 'none' : '';   // anticheat - a one-button notice (an import refused)
     // v0.30.364 — optional painted skin (e.g. 'reforge' -> #confirm-modal.skin-reforge
     // stacks a Persona-5 plate over the dark base). Scoped to THIS dialog:
     // cleanup strips it so the next plain confirm never inherits a plate.
@@ -124735,6 +124798,7 @@ function uiConfirm(opts) {
       _lxConfirmLand(modal);   // menu-import - back into the game frame
       modal.className = modal.className.replace(/\bskin-[\w-]+/g, '').trim();   // v0.30.364 — skin is per-dialog
       yes.onclick = null;
+      no.style.display = '';
       no.onclick = null;
       window.removeEventListener('keydown', escHandler, true);
       game._uiConfirmCleanup = null;

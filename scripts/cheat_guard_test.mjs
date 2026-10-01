@@ -48,10 +48,19 @@ try {
       god: !!player._god, coins: player.mojicoins | 0, verdict: game._saveVerdict || null, imp: game._importVerdict || null, base: game._steamAchBaseline || null }));
   };
   const ALL = ['lv100', 'prestige1', 'zodiacSlayer', 'gravitosDown'];
+  // anticheat: an edited or unsigned file is REFUSED now (it used to import with its money zeroed) - no reload, nothing stored
+  const refusedImport = async (text) => {
+    await page.evaluate((text) => { localStorage.removeItem('stub_unlocks'); window.__lxStay = 1; window.__lxBefore = localStorage.getItem(SAVE_KEY); window.__lxRefusals = [];
+      window.uiConfirm = (o) => { window.__lxRefusals.push(o && o.title); return Promise.resolve(true); };
+      importSave({ files: [new File([text], 'save.json')], value: '' }); }, text);
+    await page.waitForTimeout(1500);
+    return page.evaluate(() => ({ stay: window.__lxStay === 1, refused: window.__lxRefusals.includes('Save file refused'), kept: localStorage.getItem(SAVE_KEY) === window.__lxBefore,
+      unlocks: JSON.parse(localStorage.getItem('stub_unlocks') || '[]'), god: !!player._god }));
+  };
   // 1. the exploit: the player's own signed save with achievements typed in
   const edited = JSON.parse(own); edited.game.achievements = Object.assign({}, edited.game.achievements); for (const a of ALL) edited.game.achievements[a] = 1;
-  const r1 = await doImport(JSON.stringify(edited));
-  check(!r1.unlocks.some((u) => ALL.includes(u)), 'achievements typed into a signed save never reach Steam', J(r1));
+  const r1 = await refusedImport(JSON.stringify(edited));
+  check(r1.refused && r1.stay && r1.kept && !r1.unlocks.some((u) => ALL.includes(u)), 'a signed save with achievements typed in is refused: nothing stored, nothing reaches Steam', J(r1));
   // 1b. the laundering path: an older (ls2) signature never covered achievements. Typed into the stored save, they load
   // as 'legacy', the next save re-signs them, and the boot after that used to push them all.
   const ls2 = await page.evaluate((own) => { if (typeof _lxLocalSaveSigBody2 !== 'function') return null;
@@ -70,9 +79,9 @@ try {
     'achievements typed into an ls2-signed save are not pushed once it re-signs', J(r1b));
   // 2. an unsigned save with god mode and a fortune
   const plain = JSON.parse(own); delete plain.sig; plain.player._god = true; plain.player.mojicoins = 99999999; plain.game.achievements = { lv100: 1 };
-  const r2 = await doImport(JSON.stringify(plain));
+  const r2 = await refusedImport(JSON.stringify(plain));
   check(!r2.god, 'a save cannot switch god mode on ("_god" is not a saved field)', J({ god: r2.god }));
-  check(r2.coins < 1000 && r2.imp === 'unverified' && r2.unlocks.length === 0 && r2.stats.length === 0, 'an unsigned import loses its currencies (the login bonus aside) and never talks to Steam', J(r2));
+  check(r2.refused && r2.stay && r2.kept && r2.unlocks.length === 0, 'an unsigned import is refused: nothing stored, no reload, Steam untouched', J(r2));
   // 3. the honest save: loads clean, its own achievements are not re-pushed, a newly earned one is
   const r3 = await doImport(own);
   const live = await page.evaluate(async () => { localStorage.removeItem('stub_unlocks'); _lxSteamUnlock('exterminator'); await new Promise((r) => setTimeout(r, 200)); return JSON.parse(localStorage.getItem('stub_unlocks') || '[]'); });
