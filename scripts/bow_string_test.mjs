@@ -9,7 +9,10 @@
 //   [4] at full draw the straight string is not drawn; the pulled one runs from both nocks to the hand, well off the straight line
 //   [5] placement: every bow's Gear Align numbers are the file's, and the bow's blit is the same with the string code stubbed
 //   [6] no page errors
-// The build before fails [1]-[4].   node scripts/bow_string_test.mjs [page.html] [port]
+//   [7] the Skyhunter Longbow and Stormcaller Bow are redesigned in the Hunter's Shortbow's shape (per user): their art's silhouette
+//       overlaps the Hunter's by 85%+, they are placed with the Hunter's Gear Align numbers, and they draw the string at rest
+//       and pulled at full draw like the seven
+// v0.30.1492 fails [1]-[4]; v0.30.1493, before the redesigns, fails [3], [4] and [7].   node scripts/bow_string_test.mjs [page.html] [port]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import vm from 'node:vm';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core'); const { existsSync, readFileSync } = require('node:fs');
@@ -27,6 +30,7 @@ const OLD = {
   hurricane_bow: { s: [[465, 142], [251, 318], [313, 614]], head: [195, 288] },
   apex_predator: { s: [[541, 153], [300, 375], [284, 600]], head: [186, 349] },
 };
+const REDESIGNED = ['skyhunter_longbow', 'stormcaller_bow'];
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT });
 await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));
@@ -38,10 +42,10 @@ try {
   await page.goto(`http://localhost:${PORT}/${PAGE_URL}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof _drawVectorHero === 'function' && typeof LX_EQUIP_FILES === 'object', null, { timeout: 180000 });
   await page.waitForTimeout(2000);
-  const R = await page.evaluate(async ({ OLD, CALIB }) => {
+  const R = await page.evaluate(async ({ OLD, CALIB, REDESIGNED }) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms)), out = { art: {}, rest: {}, drawn: {}, place: [] }, N = 768;
-    const bows = Object.keys(OLD), file = (n) => _lxEquipSprite('weapons', n), eff = (n) => _lxEqErasedImg('wpn:' + n) || file(n);
-    for (let i = 0; i < 200; i++) { if (bows.every((n) => { const f = file(n), e = eff(n); return f.complete && f.naturalWidth && e && e.complete && e.naturalWidth && _lxBakedDownscale(e, 256); })) break; await sleep(100); }
+    const bows = Object.keys(OLD), all = bows.concat(REDESIGNED), file = (n) => _lxEquipSprite('weapons', n), eff = (n) => _lxEqErasedImg('wpn:' + n) || file(n);
+    for (let i = 0; i < 200; i++) { if (all.concat(['hunters_shortbow']).every((n) => { const f = file(n), e = eff(n); return f.complete && f.naturalWidth && e && e.complete && e.naturalWidth && _lxBakedDownscale(e, 256); })) break; await sleep(100); }
     await sleep(300);
     const px = (img) => { const c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, N, N); return g.getImageData(0, 0, N, N).data; };
     for (const n of bows) { const o = px(file(n)), q = px(eff(n)), P = OLD[n].s;
@@ -69,7 +73,7 @@ try {
       const X = (typeof _lxBowXf !== 'undefined') ? _lxBowXf : null;
       return { ev, pulled, X: X ? { ax: X.ax, ay: X.ay, bx: X.bx, by: X.by } : null }; };
     const table = (typeof _LX_BOW_STRING === 'object') ? _LX_BOW_STRING : {};
-    for (const n of bows) { const S = table['wpn:' + n];
+    for (const n of all) { const S = table['wpn:' + n];
       const r = hold(n, 'idle', 0, false), strings = r.ev.filter((e) => e.t === 'string'), blit = r.ev.find((e) => e.t === 'blit');
       const iS = r.ev.findIndex((e) => e.t === 'string'), iB = r.ev.findIndex((e) => e.t === 'blit');
       let nockOk = false;
@@ -83,19 +87,25 @@ try {
       const st = hold(n, 'idle', 0, true), b1 = blit, b2 = st.ev.find((e) => e.t === 'blit');
       const att = _lxEqAttach('wpn:' + n), cal = CALIB['wpn:' + n], calOk = !!cal && Object.keys(cal).every((k) => att[k] === cal[k]);
       if (!calOk || !b1 || !b2 || JSON.stringify(b1.a) !== JSON.stringify(b2.a) || JSON.stringify(b1.m) !== JSON.stringify(b2.m)) out.place.push(n); }
+    // [7] the redesigns: silhouette overlap with the Hunter's art, and the Hunter's placement
+    const hu = px(eff('hunters_shortbow')); out.rd = {};
+    for (const n of REDESIGNED) { const q = px(eff(n)); let I = 0, U = 0; for (let i = 3; i < q.length; i += 4) { const a = hu[i] > 128, b = q[i] > 128; if (a || b) U++; if (a && b) I++; }
+      const A1 = _lxEqAttach('wpn:' + n), A2 = _lxEqAttach('wpn:hunters_shortbow');
+      out.rd[n] = { iou: +(I / Math.max(1, U)).toFixed(3), erase: !!_lxEqErasedImg('wpn:' + n), samePlace: ['scale', 'dx', 'dy', 'rot', 'flipX', 'flipY'].every((k) => A1[k] === A2[k]) }; }
     return out;
-  }, { OLD, CALIB });
+  }, { OLD, CALIB, REDESIGNED });
   const A = R.art, bows = Object.keys(OLD);
   ok('[1] the painted string is gone: along its middle 70%, at most 20% of the old string pixels survive unchanged (all of them before)',
     bows.every((n) => A[n].erase && A[n].size === '768x768' && A[n].kept <= 0.2), Object.fromEntries(bows.map((n) => [n, A[n].kept + (A[n].erase ? '' : ' (no erase entry)')])));
   ok('[2] the arrows are gone: each arrowhead disk is transparent (it was solid)',
     bows.filter((n) => OLD[n].head).every((n) => A[n].head[0] > 0.5 && A[n].head[1] < 0.1), Object.fromEntries(bows.filter((n) => OLD[n].head).map((n) => [n, A[n].head])));
   ok('[3] at rest: one straight string from nock to nock, behind the limbs, the nocks mapped into the rect the bow is blitted in',
-    bows.every((n) => R.rest[n].strings === 1 && R.rest[n].behind && R.rest[n].nockOk), R.rest);
+    bows.concat(REDESIGNED).every((n) => R.rest[n].strings === 1 && R.rest[n].behind && R.rest[n].nockOk), R.rest);
   ok('[4] at full draw: no straight string; the pulled one runs nock - hand - nock, well off the straight line',
-    bows.every((n) => R.drawn[n].pulled === true && R.drawn[n].strings === 1 && R.drawn[n].pts === 6 && R.drawn[n].offPx > 3), R.drawn);
+    bows.concat(REDESIGNED).every((n) => R.drawn[n].pulled === true && R.drawn[n].strings === 1 && R.drawn[n].pts === 6 && R.drawn[n].offPx > 3), R.drawn);
   ok('[5] placement: Gear Align numbers are the file\'s, and each bow blits the same with the string code stubbed', R.place.length === 0, R.place);
   ok('[6] no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  ok('[7] the Skyhunter and Stormcaller are redesigned in the Hunter\'s shape: 85%+ silhouette overlap, its Gear Align numbers', REDESIGNED.every((n) => R.rd[n].erase && R.rd[n].iou >= 0.85 && R.rd[n].samePlace), R.rd);
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 300), false); }
 await browser.close(); server.kill();
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'}(${fail}) - ${pass} passed, ${fail} failed`);
