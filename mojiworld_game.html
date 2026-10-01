@@ -13176,7 +13176,7 @@ html body .skill-mp { font-size: 9px; }
             <img class="mi-art" alt="" src="Sprites/ui/menu/menu_pop_backups.webp" onerror="this.style.display='none'">
             <span class="mi-col">
               <span class="mi-label">Save Backups</span>
-              <span class="mi-sub" id="menu-backups-sub">Snapshot · restore · export to file</span>
+              <span class="mi-sub" id="menu-backups-sub">Snapshot · restore · import · export</span>
             </span>
           </button>
         </div>
@@ -15439,6 +15439,8 @@ The sleeping world is listening.</div>
   #backup-modal .bk-btn.armed { background: #a83232; color: #fff; border-color: #ff8888; }
   #backup-modal .bk-empty { padding: 18px 12px; text-align: center; font-size: 12px; color: #9a8ac0; }
   #backup-modal .bk-actions { display: flex; gap: 8px; margin-top: 14px; }
+  #backup-modal .bk-import { display: flex; margin-top: 12px; }   /* menu-import */
+  #backup-modal .bk-import .bk-now { flex: 1; }
   #backup-modal .bk-now {
     flex: 1; padding: 10px 14px; border-radius: 7px; cursor: pointer;
     background: linear-gradient(180deg, #ffd166 0%, #ffa040 100%);
@@ -15454,8 +15456,12 @@ The sleeping world is listening.</div>
 <div id="backup-modal-bg" onclick="if(event.target===this) closeBackupModal()">
   <div id="backup-modal">
     <h2>🗂 SAVE BACKUPS</h2>
-    <p class="bk-lede">Snapshot your progress into a slot before risky runs, restore an older state, or download a slot as a signed <code>.mojisave</code> file (tamper-checked on import). Up to 5 slots — oldest is dropped when full. Restoring reloads the game. Use <b>🔒 Secure Save</b> for a signed hard backup of your <em>current</em> progress.</p>
+    <p class="bk-lede">Snapshot your progress into a slot before risky runs, restore an older state, or download a slot as a signed <code>.mojisave</code> file (tamper-checked on import). Up to 5 slots — oldest is dropped when full. Restoring reloads the game. Use <b>🔒 Secure Save</b> for a signed hard backup of your <em>current</em> progress, and <b>⬆ Load a save file</b> to bring one in from this device.</p>
     <div id="backup-slots"></div>
+    <div class="bk-import">   <!-- menu-import: load a save file from this device (the title menu's only way in on a new device) -->
+      <button class="bk-now" id="backup-import-btn" onclick="document.getElementById('backup-import-file').click()" type="button" title="Pick a .mojisave or .json save file from this device. Signed saves are integrity-checked; the game reloads with it.">⬆ Load a save file…</button>
+      <input type="file" id="backup-import-file" accept="application/json,.json,.mojisave" style="display:none;" onchange="importSave(this)">
+    </div>
     <div class="bk-actions">
       <button class="bk-now" id="backup-secure-btn" onclick="exportSaveSecure()" type="button" title="Download your current progress as a signed, tamper-evident .mojisave file." style="background:linear-gradient(180deg,#c86ac8 0%,#8a3a9a 100%);border-color:#e0a0e0;color:#fff;">🔒 Secure Save</button>
       <button class="bk-now" id="backup-now-btn" onclick="_lxCreateBackup('')" type="button">＋ Backup current save</button>
@@ -16190,7 +16196,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1477';
+const GAME_VERSION = 'v0.30.1478';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -54549,7 +54555,7 @@ function importSave(input) {
         } catch (_) {}
         var _importBody = (_secVerdict === 'bad')
           ? '⚠ This secure save FAILED its integrity check — it was edited or corrupted after it was exported. Importing it may be a modified/cheated save or could break your game. Continue only if you trust this file.'
-          : ((_secVerdict === 'ok' ? '🔒 Signature verified. ' : '') + 'This will OVERWRITE your current progress and reload the game. Export a backup first if unsure.');
+          : ((_secVerdict === 'ok' ? '🔒 Signature verified. ' : '') + ((typeof hasSave === 'function' && !hasSave()) ? 'This loads the save and reloads the game.' : 'This will OVERWRITE your current progress and reload the game. Export a backup first if unsure.'));   // menu-import
         _importBody += _innerNote;   // v0.30.414
         var ask = (typeof uiConfirm === 'function')
           ? uiConfirm({ title: (_secVerdict === 'bad' ? 'Tampered save — import anyway?' : 'Import this save?'), body: _importBody, yesLabel: (_secVerdict === 'bad' ? 'Import anyway' : 'Import & reload'), noLabel: 'Cancel', danger: true })
@@ -55658,7 +55664,7 @@ function _renderBackupSlots() {
   if (!arr.length) {
     const e = document.createElement('div');
     e.className = 'bk-empty';
-    e.textContent = 'No backups yet — hit "＋ Backup current save" to snapshot your progress.';
+    e.textContent = (typeof hasSave === 'function' && !hasSave()) ? 'No backups yet — use "⬆ Load a save file" to bring in a save from this device.' : 'No backups yet — hit "＋ Backup current save" to snapshot your progress.';   // menu-import
     host.appendChild(e);
     return;
   }
@@ -124660,6 +124666,28 @@ function _lxToastShow(txt, rarity) {
 // returned Promise with `true` on Confirm, `false` on Cancel / Esc / X.
 // Use site:  if (!await uiConfirm({ title, body })) return;
 // Or callback site: uiConfirm({ title, body }).then(ok => { if (ok) ... });
+// menu-import - a confirm covered by a page-level layer (the title screen, Save Backups, Settings: the dialog lives in the
+// scaled .game-wrapper, a stacking context of its own, so its z 100050 only counts inside the frame) is lifted to <body>
+// above them for as long as it is open, then put back where it was. In play nothing covers it and it never moves.
+function _lxConfirmLift(modal, probe) {
+  try {
+    if (modal._lxHome) return;
+    const r = probe.getBoundingClientRect(); if (!r.width || !r.height) return;
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (!hit || modal.contains(hit)) return;
+    modal._lxHome = [modal.parentNode, modal.nextSibling];
+    document.body.appendChild(modal);
+    modal.style.setProperty('position', 'fixed');
+    modal.style.setProperty('z-index', '2147483000', 'important');
+  } catch (e) {}
+}
+function _lxConfirmLand(modal) {
+  try {
+    const h = modal._lxHome; if (!h) return; modal._lxHome = null;
+    modal.style.removeProperty('position'); modal.style.removeProperty('z-index');
+    if (h[0]) h[0].insertBefore(modal, (h[1] && h[1].parentNode === h[0]) ? h[1] : null);
+  } catch (e) {}
+}
 function uiConfirm(opts) {
   opts = opts || {};
   return new Promise((resolve) => {
@@ -124693,6 +124721,7 @@ function uiConfirm(opts) {
     }
     const cleanup = (val) => {
       modal.style.display = 'none';
+      _lxConfirmLand(modal);   // menu-import - back into the game frame
       modal.className = modal.className.replace(/\bskin-[\w-]+/g, '').trim();   // v0.30.364 — skin is per-dialog
       yes.onclick = null;
       no.onclick = null;
@@ -124718,6 +124747,7 @@ function uiConfirm(opts) {
     yes.onclick = () => cleanup(true);
     no.onclick  = () => cleanup(false);
     modal.style.display = 'flex';
+    _lxConfirmLift(modal, yes);   // menu-import - above the title screen / Save Backups / Settings when they cover it
     game._uiConfirmPrevPaused = !!game.paused;
     game.paused = true;
     // Auto-focus Confirm so Enter accepts - except on a dangerous prompt, where Enter must not be the way to
@@ -171113,7 +171143,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       const sub = document.getElementById('menu-backups-sub');
       if (!sub) return;
       const n = (typeof _lxGetBackups === 'function') ? _lxGetBackups().length : 0;
-      sub.textContent = (n ? n + ' snapshot' + (n === 1 ? '' : 's') : 'Snapshot') + ' · restore · export to file';
+      sub.textContent = (n ? n + ' snapshot' + (n === 1 ? '' : 's') : 'Snapshot') + ' · restore · import · export';   // menu-import
     } catch (e) {}
   };
   const _MENU_CLS = { warrior: 'Warrior', mage: 'Mage', rogue: 'Rogue', archer: 'Archer' };
@@ -179304,6 +179334,7 @@ function startBgm() {
   #backup-modal#backup-modal :is(.bk-now, .bk-close) { font: 1000 12.5px 'Nunito', system-ui, sans-serif; letter-spacing: 0.8px; border: 2px solid #0d0a14; border-radius: 10px; }
   #backup-modal#backup-modal #backup-now-btn { background: #ffe07a; color: #0d0a14; box-shadow: 3px 3px 0 #d9467f; }
   #backup-modal#backup-modal #backup-secure-btn { background: #d9467f !important; color: #fff7fb !important; box-shadow: 3px 3px 0 #4a1331 !important; text-shadow: 0 1px 0 rgba(13,10,20,0.45) !important; }
+  #backup-modal#backup-modal #backup-import-btn { background: #6aa86a; color: #0d0a14; box-shadow: 3px 3px 0 #234a28; }   /* menu-import: the Settings Import green */
   #backup-modal#backup-modal .bk-close { background: #1a1424; color: #f4f1ea; box-shadow: inset 0 0 0 1px rgba(244,241,234,0.16), 3px 3px 0 #4a1331; }
   /* Controls & Keybinds: the P5 plate stays; the U panel's frame, title and tabs */
   #keybind-modal#keybind-modal > div { border: 3px solid #0d0a14 !important; border-radius: 16px !important; box-shadow: 8px 8px 0 #7d2352, 0 26px 70px rgba(0,0,0,0.72) !important;
