@@ -16196,7 +16196,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1486';
+const GAME_VERSION = 'v0.30.1487';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -132899,15 +132899,31 @@ function _lxMallRideTry() {
   const z = _lxMallRideZone(); if (!z || !player.onGround) return false;
   const gy = _lxMallCfg().floorY || 480, e = z.e;
   const lo = { x: e.bx, y: gy }, hi = { x: e.tx, y: e.top };
-  player._lxRide = { from: z.up ? lo : hi, to: z.up ? hi : lo, at: performance.now(), dur: LX_MALL_RIDE_MS };
+  // escalator-feet - the feet ride the surface the escalator draws (per user: "the feet should not go below the escalator"):
+  // across the bottom landing plate, up the step noses, across the top plate - _lxMallEscGeom's own a and b, in world space.
+  // One straight line from landing to landing was shallower than the steps: it floated over the lower ones and sank ~20 px
+  // into the upper ones.
+  const G = _lxMallEscGeom(e, gy), cx = game.camera.x, path = [lo, { x: G.a.x + cx, y: G.a.y }, { x: G.b.x + cx, y: G.b.y }, hi];
+  player._lxRide = { from: z.up ? lo : hi, to: z.up ? hi : lo, path: z.up ? path : path.slice().reverse(), at: performance.now(), dur: LX_MALL_RIDE_MS };
   try { if (typeof audio !== 'undefined' && audio && audio.play) audio.play('chirp'); } catch (err) {}
   return true;
+}
+function _lxMallRidePoint(path, u) {   // escalator-feet - the point u (0..1) of the way along a polyline, by length
+  let L = 0; for (let i = 1; i < path.length; i++) L += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+  let d = Math.max(0, Math.min(1, u)) * L;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1], b = path[i], l = Math.hypot(b.x - a.x, b.y - a.y);
+    if (d <= l || i === path.length - 1) { const k = l > 0 ? Math.min(1, d / l) : 1; return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }; }
+    d -= l;
+  }
+  return path[path.length - 1];
 }
 function _lxMallRideStep() {   // updatePlayer's first question: while riding, this places the hero and the rest of the update waits
   const r = player._lxRide; if (!r) return false;
   if (!_lxMallCfg() || player.hp <= 0) { player._lxRide = null; return false; }   // a warp or a fall mid-ride: let go
   let k = (performance.now() - r.at) / r.dur; if (!(k < 1)) k = 1;
-  const e = k * k * (3 - 2 * k), x = r.from.x + (r.to.x - r.from.x) * e, y = r.from.y + (r.to.y - r.from.y) * e;
+  const e = k * k * (3 - 2 * k), P = r.path ? _lxMallRidePoint(r.path, e) : null;   // escalator-feet - along the drawn surface
+  const x = P ? P.x : r.from.x + (r.to.x - r.from.x) * e, y = P ? P.y : r.from.y + (r.to.y - r.from.y) * e;
   player.x = x - player.w / 2; player.y = y - player.h; player.vx = 0; player.vy = 0; player.onGround = true;
   player.facing = (r.to.x >= r.from.x) ? 1 : -1;
   if (k >= 1) player._lxRide = null;
