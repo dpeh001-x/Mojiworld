@@ -31,7 +31,7 @@ try {
   // town-storybook (the revamp, per user): the street's own dressing - planters and lamp posts - joins the hardbaked signpost
   const sign = r.town.filter((p) => p.key === 'signpost_wood'), dress = r.town.filter((p) => p.key !== 'signpost_wood');
   ok('Everdawn Central keeps the hardbaked signpost at x 2409 on the ground line, scale 1', sign.length === 1 && sign[0].x === 2409 && sign[0].y === 480 && sign[0].scale === 1, JSON.stringify(sign));
-  ok('every other prop is the storybook town\'s own (town_*: planters, lamp posts, its things), standing on the ground line or a balcony', dress.length > 0 && dress.every((p) => /^town_[a-z_]+$/.test(p.key) && (p.y === 480 || p.y === 325)), JSON.stringify(dress));
+  ok('every other prop is the storybook town\'s own (town_*: planters, lamp posts, its things), standing on the ground line, a balcony or the west gatehouse\'s roof', dress.length > 0 && dress.every((p) => /^town_[a-z_]+$/.test(p.key) && (p.y === 480 || p.y === 325 || p.y === 260)), JSON.stringify(dress));
   ok('the pillars are gone', !r.town.some((p) => p.key === 'column_pillar'));
   ok('the signpost art exists and decodes', r.hasImg && r.decoded === true);
   // height = 80 x scale x a per-art fit factor clamped to 0.7..1.4, so 56..112 px at scale 1
