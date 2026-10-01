@@ -79,6 +79,9 @@ const MAP = {
   bestiary60:   { p: 'bestiary', n: '60', sub: '\u{1F4D6}' },
   boonAttuned:  { p: 'boon',     g: '\u{1F52E}' },
   boonHunter:   { p: 'boon',     n: '10', sub: '\u{1F52E}' },
+  duoTrial:     { p: 'zodiac',   n: '2',  sub: '\u2605' },   // Twin Star - two players, one star
+  boonCodex:    { p: 'boon',     g: '\u{1F4D6}' },   // Boon Collector - the codex
+  questMaster:  { p: 'cls',      n: '175', sub: '\u{1F4DC}' },   // Quest Master - 175 quests
 };
 
 const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
