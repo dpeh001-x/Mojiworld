@@ -78,19 +78,36 @@ const r = await ev(async () => {
   player.stunTimer = 1200;
   try { _drawPlayerStatusIcons(100, 100); } catch (e) {}
   CanvasRenderingContext2D.prototype.fillText = _ft;
-  // 5. the vignette: a full-screen fill while hard-controlled, none otherwise
+  // 5. the vignette: a full-screen fill while hard-controlled, none otherwise - at the high FX tier, pinned (v0.30.1476: very-low
+  //    drops it, see 5b; a slow run could have tripped the governor into it)
+  const _tier = { lo: LX_PERF.lowFx, vlo: LX_PERF.veryLowFx }; LX_PERF.lowFx = false; LX_PERF.veryLowFx = false; game._lowFxCache = null;
+  const autoVlo = _perfVeryLowFx();
   let rects = 0; const _fr = CanvasRenderingContext2D.prototype.fillRect;
   CanvasRenderingContext2D.prototype.fillRect = function (x, y, w, h) { if (w >= (typeof W === 'number' ? W : 9999) - 1) rects++; return _fr.call(this, x, y, w, h); };
   try { if (typeof _drawControlVignette === 'function') _drawControlVignette(); } catch (e) {}
   const rectsStunned = rects; rects = 0; player.stunTimer = 0;
   try { if (typeof _drawControlVignette === 'function') _drawControlVignette(); } catch (e) {}
   const rectsCalm = rects; CanvasRenderingContext2D.prototype.fillRect = _fr;
+  // 5b. v0.30.1476 boss-lag (per user: Barnaby's fight lags) - the FX tiers: the governor's low tier keeps the vignette; very-low
+  //     drops the full-screen fill while the STUNNED sticker over the head stays; window._lxNoLowSheds brings the fill back
+  const vig = () => { let n = 0; const f = CanvasRenderingContext2D.prototype.fillRect;
+    CanvasRenderingContext2D.prototype.fillRect = function (x, y, w, h) { if (w >= (typeof W === 'number' ? W : 9999) - 1) n++; return f.call(this, x, y, w, h); };
+    try { _drawControlVignette(); } catch (e) {} CanvasRenderingContext2D.prototype.fillRect = f; return n; };
+  player.stunTimer = 1200;
+  LX_PERF.lowFx = true; LX_PERF.veryLowFx = false; game._lowFxCache = null; const vigLow = vig();
+  LX_PERF.veryLowFx = true; game._lowFxCache = null; const vigVeryLow = vig();
+  const texts2 = []; CanvasRenderingContext2D.prototype.fillText = function (t, x, y, mw) { texts2.push(String(t)); return _ft.call(this, t, x, y, mw); };
+  try { _drawPlayerStatusIcons(100, 100); } catch (e) {}
+  CanvasRenderingContext2D.prototype.fillText = _ft;
+  const bannerVeryLow = texts2.find((t) => /STUNNED/.test(t)) || null;
+  window._lxNoLowSheds = true; const vigOptOut = vig(); window._lxNoLowSheds = false;
+  LX_PERF.lowFx = _tier.lo; LX_PERF.veryLowFx = _tier.vlo; game._lowFxCache = null; player.stunTimer = 0;
   // 6. one toast at onset, not one per frame
   const toasts = []; const _st = window.showToast; window.showToast = (t) => { toasts.push(String(t)); };
   player._ctrlKind = null; player.stunTimer = 1000;
   try { _playerControlWatch(); _playerControlWatch(); _playerControlWatch(); } catch (e) {}
   window.showToast = _st; player.stunTimer = 0; player._ctrlKind = null;
-  return { afterTick, movedStunned, movedAfter, has, cStun, cBubble, cFrozen, cBastion, banner: (() => { const i = texts.findIndex((t) => /STUNNED/.test(t)); return i < 0 ? null : texts.slice(i, i + 2).join(' '); })(), rectsStunned, rectsCalm, toasts: toasts.filter((t) => /STUNNED/.test(t)).length };
+  return { afterTick, movedStunned, movedAfter, has, cStun, cBubble, cFrozen, cBastion, banner: (() => { const i = texts.findIndex((t) => /STUNNED/.test(t)); return i < 0 ? null : texts.slice(i, i + 2).join(' '); })(), rectsStunned, rectsCalm, autoVlo, vigLow, vigVeryLow, bannerVeryLow, vigOptOut, toasts: toasts.filter((t) => /STUNNED/.test(t)).length };
 });
 ok('the stun counts down (1.5s stun is gone after 2s of ticks) — it used to be permanent', !r.err && r.afterTick <= 0, r.err || `stunTimer after 120 ticks: ${r.afterTick}`);
 ok('a stunned player cannot move; movement returns when it ends', !r.err && r.movedStunned < 2 && r.movedAfter > 8, r.err || `moved while stunned ${r.movedStunned}px, after ${r.movedAfter}px`);
@@ -99,6 +116,7 @@ ok("a Bubble Prison reads as BUBBLED with the strikes still needed (Cancer's tra
 ok('a freeze reads as FROZEN; an armed Bastion reads as a soft, informational state', !r.err && r.cFrozen && r.cFrozen.kind === 'frozen' && r.cFrozen.hard && r.cBastion && r.cBastion.kind === 'bastion' && !r.cBastion.hard, r.err || JSON.stringify({ f: r.cFrozen, b: r.cBastion }));
 ok('the banner above the head says STUNNED with the seconds left', !r.err && /STUNNED/.test(r.banner || '') && /1\.2s/.test(r.banner || ''), r.err || String(r.banner));
 ok('the screen-edge vignette paints while stunned and not otherwise', !r.err && r.rectsStunned >= 1 && r.rectsCalm === 0, r.err || `fills stunned ${r.rectsStunned}, calm ${r.rectsCalm}`);
+ok('the FX tiers (v0.30.1476 boss-lag): the low tier keeps the vignette, very-low drops the fill while the STUNNED sticker stays, window._lxNoLowSheds brings it back', !r.err && r.autoVlo === false && r.vigLow >= 1 && r.vigVeryLow === 0 && /STUNNED/.test(r.bannerVeryLow || '') && r.vigOptOut >= 1, r.err || JSON.stringify({ autoVlo: r.autoVlo, low: r.vigLow, veryLow: r.vigVeryLow, banner: r.bannerVeryLow, optOut: r.vigOptOut }));
 ok('onset is announced once (one toast for three watch ticks)', !r.err && r.toasts === 1, r.err || `toasts ${r.toasts}`);
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 
