@@ -48,7 +48,7 @@ try {
       claim('crusader_ult', `after-waves of ${fmt(lo * 0.15)}× ATK each (up to ${fmt(hi * 0.15)}×)`); }
     // literals in the skill functions; hits tagged with a slot-x skill's own id are doubled by hitMonster (_isGSkill)
     out.gx2 = { phantom_cut: _isGSkill('phantom_cut'), archbishop_grail: _isGSkill('archbishop_grail') };
-    claim('phantom_cut', `(${fmt(2 * lit('phantom_cut', /getAtk\(\) \* ([\d.]+)\), crit, 'phantom_cut'/))}× ATK each)`);
+    claim('phantom_cut', `(${fmt(2 * lit('phantom_cut', /getAtk\(\) \* ([\d.]+)\), (?:crit|false), 'phantom_cut'/))}× ATK each)`);
     claim('phantom_cut', `shadow nova (${fmt(lit('phantom_cut', /const dmg = Math\.floor\(getAtk\(\) \* ([\d.]+) \+ 6\)/))}× ATK`);
     claim('archbishop_grail', `(${fmt(2 * lit('archbishop_grail', /const dmg = Math\.floor\(getAtk\(\) \* ([\d.]+)\);/))}× ATK each)`);
     { const c = lit('doombringer_ult', /performMelee\(440, ([\d.]+) \* _heatMul/), f = lit('doombringer_ult', /getAtk\(\) \* ([\d.]+) \* _heatMul \+/);
