@@ -16271,7 +16271,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1496';
+const GAME_VERSION = 'v0.30.1497';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -19703,6 +19703,25 @@ function _itemKey(it) {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
 }
+// v0.30.1497 SET ICONS = THE WORN ART (per user, after the gear audit found the five legendary sets' icons were "completely
+// different drawings": "change only the 10 set icons"). Their entries below named an older, unrelated set of drawings in
+// Sprites/items/ - a green sword for the gold Dawnshard Blade, a skull chestplate for the Doomforged Plate. Each of the ten now
+// shows exactly what the hero wears: its baked Gear Align erase (data/gear_erase.js) as a blob URL, else its equipment art.
+// gear_erase.js is a DEFERRED script, so the ten start on their equipment art and take the erase once it has run
+// (_lxSetIconsUpgrade, at DOMContentLoaded). Every other piece's icon already is its equipment file. scripts/set_icon_worn_test.mjs
+const _LX_SET_ICON_WORN = { dawnshard_blade: 'wpn', doomforged_greatsword: 'wpn', shadowweave_dagger: 'wpn', skyhunter_longbow: 'wpn', voidcaller_staff: 'wpn',
+  dawnshard_aegis: 'arm', doomforged_plate: 'arm', shadowweave_cloak: 'arm', skyhunter_vest: 'arm', voidcaller_robe: 'arm' };
+function _lxSetIconPath(k) { const pre = _LX_SET_ICON_WORN[k]; return pre ? 'Sprites/equipment/' + (pre === 'wpn' ? 'weapons' : 'armors') + '/' + k + '.webp' : null; }
+function _lxSetIconWorn(k) {
+  const pre = _LX_SET_ICON_WORN[k]; if (!pre) return null;
+  const E = (typeof window !== 'undefined' && window.LX_EQ_ERASE_DATA) || null, d = E && E[pre + ':' + k];
+  const at = (typeof d === 'string') ? d.indexOf(';base64,') : -1;
+  if (at > 5 && typeof URL !== 'undefined' && URL.createObjectURL && typeof Blob !== 'undefined') {
+    try { const b = atob(d.slice(at + 8)), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+      return URL.createObjectURL(new Blob([u], { type: d.slice(5, at) })); } catch (e) {}
+  }
+  return null;
+}
 const LX_ITEMS = (() => {
   const out = {};
   const files = {
@@ -19856,8 +19875,9 @@ const LX_ITEMS = (() => {
     // Sprites/items/ dir) OR a full repo-relative path (e.g. the equipment
     // pack under Sprites/equipment/<slot>/). Mirrors the LX_MOB_CAST verbatim
     // -path convention so both styles coexist in one registry.
-    _lxFxMark(img, f.includes('/') ? f : ('Sprites/items/' + f));   // v0.30.1234 lazy-fx - parked until worn or shown in a panel
-    img.src = f.includes('/') ? f : ('Sprites/items/' + f);
+    const _src = _lxSetIconPath(k) || (f.includes('/') ? f : ('Sprites/items/' + f));   // v0.30.1497 set icons - the art the hero wears
+    _lxFxMark(img, _src);   // v0.30.1234 lazy-fx - parked until worn or shown in a panel
+    img.src = _src;
     out[k] = null;  // placeholder — render code checks _itemReady()
     // Stash the in-flight image so onload sets it later. By keying on k
     // we let the consumer use `LX_ITEMS[key]` once decode finishes.
@@ -19865,6 +19885,11 @@ const LX_ITEMS = (() => {
   }
   return out;
 })();
+// v0.30.1497 set icons - the deferred gear_erase.js has run: the set pieces with a baked erase take it (one blob each)
+function _lxSetIconsUpgrade() {
+  for (const k in _LX_SET_ICON_WORN) { const img = LX_ITEMS['_pending_' + k], u = _lxSetIconWorn(k); if (!img || !u) continue; LX_ITEMS[k] = null; img.src = u; }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _lxSetIconsUpgrade, { once: true }); else _lxSetIconsUpgrade();
 function _itemReady(img) {
   if (img && img._lxLazy === true && !img._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(img, true);   // v0.30.1234 lazy-fx - shown while parked: ask
   return img && img.complete && img.naturalWidth > 0;
