@@ -161,7 +161,12 @@ Every combat map spawns a **mini-boss** (an Elder variant of the strongest local
 
 ## 🛠️ Contributing
 
-Branches, forks, and pull requests welcome. Every edit to `mojiworld_game.html` is live-previewed just by opening the file — no build step. `mojiworld_game.html` is a single ~6 MB file edited by parallel sessions, so keep changes small, atomic, and committed frequently.
+Contributions are by invitation only. Branches and pull requests are accepted only from collaborators with written
+permission from Moji-studios and DADPEH. The repository is public, so GitHub's Terms of Service let any GitHub user view
+it and fork it on GitHub. A fork carries no other permission: it gives no right to use, copy, modify, run, host (on a
+private server or anywhere else) or redistribute the game outside GitHub. See the [LICENSE](LICENSE).
+
+For collaborators: every edit to `mojiworld_game.html` is live-previewed just by opening the file — no build step. `mojiworld_game.html` is a single ~6 MB file edited by parallel sessions, so keep changes small, atomic, and committed frequently.
 
 ## 📝 License & Copyright
 
