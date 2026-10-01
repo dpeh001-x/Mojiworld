@@ -4,8 +4,8 @@
 // boss's touch is clamped into a band of YOUR max HP, so it read a few hundred against bosses with millions. Every blow now also
 // carries a retaliation scaled by your ATK. Real fight, no mocks: a Lv-50 knight (ATK pinned 400, god mode - the blow is still
 // computed and shown) stands in a boss's touch.
-//   - GUARDIAN: every reflected blow deals at least 5x ATK, and a steady stream lands
-//   - HOLY SHIELD: its blows reflect at least 12x ATK - including while its invulnerability stops them
+//   - GUARDIAN: every reflected blow's ATK retaliation is 5x ATK through the boss's armour (v0.30.1525 op-pass: it skipped armour), in a steady stream
+//   - HOLY SHIELD: its retaliation is 12x ATK through the armour - including while its invulnerability stops the blows
 //   - SEPARATE WINDOWS: a Holy Shield cast during Guardian no longer cuts Guardian's reflect off when its own 5 s end
 //   - BOTH MASTERS: a dragoon's Guardian reflects the same as a crusader's (the reflect belongs to the Knight job)
 //   - WARDS: a warded boss takes 1 from the retaliation and its break gauge fills, as from any blow (the boss ward is held off in
@@ -17,6 +17,10 @@ const SERVE = process.env.SERVE_ROOT || ROOT, PORT = process.env.PORT || '11694'
 const require = createRequire(path.join(ROOT, 'x.js')); const { chromium } = require('playwright-core');
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x ? '  [' + x + ']' : '')); };
 const G_ATK = 5, H_ATK = 12;
+// v0.30.1525 op-pass - a reflected blow is two hits on one step: the share (thorns) and the ATK retaliation (retaliate)
+const blows = (r) => { const by = new Map(); for (const [t, d, inv, sk] of r.refl) { const b = by.get(t) || { t, total: 0, ret: 0, inv }; b.total += d; if (sk === 'retaliate') b.ret += d; by.set(t, b); } return [...by.values()]; };
+// each retaliation over ATK x the armour share x what the boss's state added to that hit (crit streak, punish window - thorns get them too)
+const rets = (r, keep = () => true) => r.refl.filter((x) => x[3] === 'retaliate' && keep(x)).map((x) => x[1] / (r.atk * r.share * x[4]));
 const server = spawn(process.execPath, [path.join(SERVE, 'serve.js'), PORT], { stdio: 'ignore', cwd: SERVE, env: { ...process.env, MOJI_GAME_FILE: '' } });
 await new Promise((r) => setTimeout(r, 1500));
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--mute-audio'] });
@@ -46,8 +50,13 @@ const fight = async (master, plan) => {
     let wardFed = 0, wardBroke = 0;
     const refl = [];   // [sim step, damage, player invulnerable at the time]
     const orig = window.hitMonster;
-    window.hitMonster = function (mm, dmg, c, sk) { const b = mm && mm.currentHp; const res = orig.apply(this, arguments);
-      if (sk === 'thorns' && mm === m && typeof b === 'number') refl.push([game.time | 0, Math.max(0, b - mm.currentHp), player.invulnerable > 0 ? 1 : 0]); return res; };
+    // v0.30.1525 op-pass - the share of a 'retaliate' hit this boss's armour lets through
+    let share = 1; { const h0 = m.currentHp; orig(m, 1000000, false, 'retaliate'); share = (h0 - m.currentHp) / 1000000; m.currentHp = h0; }
+    window.hitMonster = function (mm, dmg, c, sk) { const b = mm && mm.currentHp;
+      // v0.30.1525 op-pass - what any hit on this boss gains this step: the crit streak (+3% each, cap 15%) and a punish window
+      const f = (1 + Math.min(0.15, (game.critStreak | 0) * 0.03)) * (mm && mm._stagger > 0 ? BOSS_STAGGER_BONUS : (mm && mm._dirOpenT > 0 ? BOSS_OPENING_BONUS : 1));
+      const res = orig.apply(this, arguments);
+      if ((sk === 'thorns' || sk === 'retaliate') && mm === m && typeof b === 'number') refl.push([game.time | 0, Math.max(0, b - mm.currentHp), player.invulnerable > 0 ? 1 : 0, sk, f]); return res; };
     const t0 = game.time | 0, marks = {};
     for (const step of plan) {   // [at sim step, action]
       const until = t0 + step[0];
@@ -58,7 +67,7 @@ const fight = async (master, plan) => {
       else castSkill(step[1]);
     }
     window.hitMonster = orig;
-    return { atk: getAtk(), refl: refl.map(([t, d, inv]) => [t - t0, d, inv]), marks, wardFed, wardBroke, hsUntil: (player._holyReflectUntil | 0) - t0, gUntil: (player._guardianReflect | 0) - t0 };
+    return { atk: getAtk(), refl: refl.map(([t, d, inv, sk, f]) => [t - t0, d, inv, sk, f]), share, marks, wardFed, wardBroke, hsUntil: (player._holyReflectUntil | 0) - t0, gUntil: (player._guardianReflect | 0) - t0 };
   }, { master, plan });
   r.errs = errs.slice(0, 2); await page.close(); return r;
 };
@@ -66,22 +75,22 @@ try {
   // 1. Guardian alone, 16 s in the King's touch (a crusader, then a dragoon)
   for (const master of ['crusader', 'dragoon']) {
     const r = await fight(master, [[1, 'guardian'], [16 * 60, 'mark', 'end']]);
-    const per = r.refl.map(([, d]) => d / r.atk), n = per.length, lo = n ? Math.min(...per) : 0, mean = n ? per.reduce((a, b) => a + b, 0) / n : 0;
-    ok(`${master}: Guardian reflects at least ${G_ATK}x ATK a blow, in a steady stream`, !r.err && n >= 6 && lo >= G_ATK - 0.05,
-      r.err || `${n} blows in 16 s, ${lo.toFixed(2)}-${Math.max(...per).toFixed(2)}x ATK (mean ${mean.toFixed(2)}x)`);
+    const per = rets(r), n = per.length, lo = n ? Math.min(...per) : 0, hi = n ? Math.max(...per) : 0;
+    ok(`${master}: Guardian's retaliation is ${G_ATK}x ATK through the boss's armour, in a steady stream`, !r.err && n >= 6 && lo >= G_ATK * 0.9 && hi <= G_ATK * 1.1,
+      r.err || `${n} blows in 16 s, ${lo.toFixed(2)}-${hi.toFixed(2)}x ATK after armour share ${r.share.toFixed(3)} and punish windows`);
   }
   // 2. Holy Shield: its reflect, through the invulnerability too
   const h = await fight('crusader', [[1, 'holyShield'], [5 * 60 + 20, 'mark', 'end']]);
-  const hIn = h.refl.filter(([t, , inv]) => t <= 300 && inv), hAll = h.refl.filter(([t]) => t <= 300).map(([, d]) => d / h.atk);
-  ok(`Holy Shield reflects at least ${H_ATK}x ATK a blow`, !h.err && hAll.length >= 3 && Math.min(...hAll) >= H_ATK - 0.05, h.err || `${hAll.length} blows, ${hAll.map((v) => v.toFixed(1)).join(' ')}x ATK`);
+  const hB = blows(h).filter((b) => b.t <= 300), hIn = hB.filter((b) => b.inv), hAll = rets(h, (x) => x[0] <= 300);
+  ok(`Holy Shield's retaliation is ${H_ATK}x ATK through the boss's armour`, !h.err && hAll.length >= 3 && Math.min(...hAll) >= H_ATK * 0.9 && Math.max(...hAll) <= H_ATK * 1.1, h.err || `${hAll.length} blows, ${hAll.map((v) => v.toFixed(1)).join(' ')}x ATK after armour share ${h.share.toFixed(3)} and punish windows`);
   ok('Holy Shield reflects while its invulnerability stops the blows', hIn.length >= 1, `${hIn.length} bounced while invulnerable`);
   // 3. Guardian, then Holy Shield 3 s in: Guardian's reflect must carry on after Holy Shield's 5 s
   const g = await fight('crusader', [[1, 'guardian'], [180, 'holyShield'], [180 + 300 + 120, 'mark', 'hsOver'], [180 + 300 + 120 + 8 * 60, 'mark', 'end']]);
-  const after = g.refl.filter(([t]) => t > g.marks.hsOver);
+  const after = blows(g).filter((b) => b.t > g.marks.hsOver);
   ok('a Holy Shield cast no longer cuts Guardian\'s reflect short', !g.err && after.length >= 3, g.err || `${after.length} Guardian reflects in the 8 s after Holy Shield ended`);
   // 4. a warded boss: the retaliation lands for 1 and fills the ward's break gauge (like any blow), it does not slip past the ward
   const w = await fight('crusader', [[1, 'guardian'], [60, 'ward', 6 * 60], [60 + 5 * 60, 'mark', 'end']]);
-  const inWard = w.refl.filter(([t]) => t > 60 && t < 60 + 5 * 60).map(([, d]) => d / w.atk);
+  const inWard = blows(w).filter((b) => b.t > 60 && b.t < 60 + 5 * 60).map((b) => b.total / w.atk);
   ok('against a warded boss the retaliation lands for 1 and fills the break gauge', !w.err && inWard.length >= 2 && Math.max(...inWard) < 1 && (w.wardFed > 0 || w.wardBroke),
     w.err || `${inWard.length} blows in the ward, largest ${Math.max(...inWard).toFixed(2)}x ATK, gauge ${w.wardFed.toFixed(2)}${w.wardBroke ? ', shattered' : ''}`);
   for (const r of [h, g, w]) if (r.errs && r.errs.length) console.log('page errors: ' + r.errs.join(' | '));

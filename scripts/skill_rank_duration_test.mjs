@@ -1,9 +1,11 @@
 // Summons and buffs last 1 s longer per skill rank (v0.30.779; rank 10 = +10 s).
 //
-// Casts each of the 20 listed skills at rank 0, 3 and 10 and reads the timer the skill really set:
+// Casts each of the 19 listed skills at rank 0, 3 and 10 and reads the timer the skill really set:
 // buffs.*, the summon's life, the ward's life, the field's life (frames), the enrage deadline. The
 // rank-5 / rank-10 perks are switched off for the rank comparison so the difference is the rank bonus
 // alone; a second pass leaves them on and checks the two add up.
+// v0.30.1525 op-pass: three immunity timers are flat at every rank (FLAT below) - Holy Shield's buff (its +9999 DEF), Divine
+// Aegis' half damage and Apotheosis' invulnerability. Rank still lengthens Holy Shield's reflect window and the Aegis orbs.
 //
 //   [SERVE_ROOT=<dir with serve.js + the game's data/>] node scripts/skill_rank_duration_test.mjs [candidate.html]
 import { createRequire } from 'node:module'; import path from 'node:path';
@@ -19,13 +21,15 @@ let pass = 0, fail = 0;
 const check = (ok, msg, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (detail ? '  [' + detail + ']' : '')); ok ? pass++ : fail++; };
 // base duration in ms at rank 0 - the numbers before this change
 const BASE = {
-  warCry: { buff: 7000 }, bloodlust: { buff: 20000 }, guardian: { buff: 30000 }, holyShield: { buff: 5000 }, eagleEye: { buff: 30000 },
+  warCry: { buff: 7000 }, bloodlust: { buff: 20000 }, guardian: { buff: 30000 }, holyShield: { reflect: 5000 }, eagleEye: { buff: 30000 },
   celestialAurora: { field: 10000 }, soulSiphon: { thrall: 16000, ward: 12000 }, darkPulse: { undead: 30000 }, wildBond: { wolf: 60000 },
-  warlord_warcry: { warCry: 12000, bloodlust: 12000, reach: 12000, banner: 12000 }, crusader_aegis: { aegis: 9000 },
+  warlord_warcry: { warCry: 12000, bloodlust: 12000, reach: 12000, banner: 12000 }, crusader_aegis: { orbs: 9000 },
   shadowlord_clones: { clones: 11000 }, hexmaster_grandhex: { orbs: 7000 }, beastmaster_pack: { wolves: 100000 },
-  warlord_ult: { enrage: 10000, bloodlust: 10000 }, shadowlord_ult: { shade: 20000 }, archbishop_ult: { invulnerable: 5000 },
+  warlord_ult: { enrage: 10000, bloodlust: 10000 }, shadowlord_ult: { shade: 20000 },
   ballista_ult: { turret: 45000 }, beastmaster_ult: { werewolf: 51000, bloodlust: 12000 }, skyhunter_ult: { eagle: 42000 },
 };
+// v0.30.1525 op-pass - the same at rank 0, 3 and 10
+const FLAT = { holyShield: { buff: 5000 }, crusader_aegis: { aegis: 9000 }, archbishop_ult: { invulnerable: 5000 } };
 await new Promise((r) => setTimeout(r, 1800));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
@@ -45,14 +49,14 @@ try {
     const minion = () => (game.minions || []).reduce((a, m) => Math.max(a, m.life || 0), 0) || null;
     const READ = {
       warCry: () => ({ buff: player.buffs.warCry }), bloodlust: () => ({ buff: player.buffs.bloodlust }),
-      guardian: () => ({ buff: player.buffs.guardian }), holyShield: () => ({ buff: player.buffs.holyShield }),
+      guardian: () => ({ buff: player.buffs.guardian }), holyShield: () => ({ buff: player.buffs.holyShield, reflect: fr(player._holyReflectUntil - game.time) }),
       eagleEye: () => ({ buff: player.buffs.eagleEye }),
       celestialAurora: () => ({ field: fr((game.hazards.find((h) => h.type === 'aurora_field') || {}).life) }),
       soulSiphon: () => ({ thrall: minion(), ward: player._necromancerOrbs && player._necromancerOrbs.life }),
       darkPulse: () => ({ undead: minion() }), wildBond: () => ({ wolf: player.pet && player.pet.life }),
       warlord_warcry: () => ({ warCry: player.buffs.warCry, bloodlust: player.buffs.bloodlust, reach: fr(player._warlordBanner - game.time),
         banner: fr((game.hazards.find((h) => h.type === 'warlord_banner') || {}).life) }),
-      crusader_aegis: () => ({ aegis: player._aegis && player._aegis.life }),
+      crusader_aegis: () => ({ aegis: player._aegis && player._aegis.life, orbs: player._aegis && player._aegis.orbLife }),
       shadowlord_clones: () => ({ clones: player._clones && player._clones[0] && player._clones[0].life }),
       hexmaster_grandhex: () => ({ orbs: player._hexOrbs && player._hexOrbs.life }),
       beastmaster_pack: () => ({ wolves: player.pack && player.pack[0] && player.pack[0].life }),
@@ -84,9 +88,9 @@ try {
     for (const id of ids) res[id] = { r0: castAt(id, 0, false), r3: castAt(id, 3, false), r10: castAt(id, 10, false), r10perks: castAt(id, 10, true), lv10: lv10(id) };
     player.skillRanks = {};
     return { res, listed: [...LX_RANK_DUR_IDS], ver: GAME_VERSION };
-  }, Object.keys(BASE));
+  }, [...new Set(Object.keys(BASE).concat(Object.keys(FLAT)))]);
   console.log('build ' + r.ver);
-  check(r.listed.length === 20 && Object.keys(BASE).every((id) => r.listed.includes(id)), 'the rank-duration list names exactly the 20 summon / buff skills', r.listed.join(' '));
+  check(r.listed.length === 19 && Object.keys(BASE).every((id) => r.listed.includes(id)), 'the rank-duration list names exactly the 19 summon / buff skills (Apotheosis left it in v0.30.1525)', r.listed.join(' '));
   for (const [id, base] of Object.entries(BASE)) {
     const x = r.res[id], errs2 = [x.r0.err, x.r3.err, x.r10.err].filter(Boolean);
     const tol = id === 'warlord_ult' ? 150 : 17;   // enrage is read off performance.now(); frames round to 17 ms
@@ -99,10 +103,15 @@ try {
     }
     check(!errs2.length && !bad.length, `${id}: rank 0 unchanged, rank 3 +3 s, rank 10 +10 s`, errs2.concat(bad).join('; ') || Object.entries(x.r10.out).map(([k, v]) => `${k} ${v0s(x.r0.out[k])}->${v0s(v)}`).join(', '));
   }
+  for (const [id, base] of Object.entries(FLAT)) {   // v0.30.1525 op-pass
+    const x = r.res[id], bad = [];
+    for (const [k, ms] of Object.entries(base)) for (const rk of ['r0', 'r3', 'r10']) if (!(Math.abs(x[rk].out[k] - ms) <= 17)) bad.push(`${k} ${rk} = ${x[rk].out[k]}`);
+    check(!x.r0.err && !bad.length, `${id}: ${Object.keys(base).join(', ')} stays ${Object.values(base).map((v) => v / 1000 + ' s').join(', ')} at every rank`, x.r0.err || bad.join('; '));
+  }
   // with the rank perks on, the rank bonus adds on top of them
   const wc = r.res.warCry, ae = r.res.crusader_aegis;
   check(wc.r10perks.out.buff === 7000 + ((wc.lv10 && wc.lv10.buffMs) || 0) + 10000, 'War Cry at rank 10 keeps its perk time and adds 10 s', `${wc.r10perks.out.buff} ms, perk ${JSON.stringify(wc.lv10)}`);
-  check(ae.r10perks.out.aegis === Math.floor(9000 * ((ae.lv10 && ae.lv10.orbDurMul) || 1)) + 10000, 'Divine Aegis at rank 10 keeps its x1.2 orb time and adds 10 s', `${ae.r10perks.out.aegis} ms`);
+  check(ae.r10perks.out.orbs === Math.floor(9000 * ((ae.lv10 && ae.lv10.orbDurMul) || 1)) + 10000 && ae.r10perks.out.aegis === 9000, 'Divine Aegis at rank 10 keeps its x1.2 orb time and adds 10 s; the half damage stays 9 s', `orbs ${ae.r10perks.out.orbs} ms, half damage ${ae.r10perks.out.aegis} ms`);
   check(!errs.length, 'no page errors', errs.slice(0, 3).join(' | '));
 } finally { await browser.close(); server.kill(); }
 function v0s(v) { return v == null ? '-' : (v / 1000) + 's'; }

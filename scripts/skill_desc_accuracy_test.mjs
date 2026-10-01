@@ -104,7 +104,7 @@ try {
   check(/for 2\.5 s after casting/.test(r.stab5 || ''), 'a 2.5 s milestone window reads 2.5 s, not 3 s', r.stab5);
   check(/second full meteor/.test(r.meteor10 || '') && !/finisher attack/.test(r.meteor10 || ''), 'Meteor rank 10 says it drops a second meteor', r.meteor10);
   check(/flame-burst reach/.test(r.rush10 || '') && !/dash reach/.test(r.rush10 || ''), "Rush's reach perk names the flame bursts it widens", r.rush10);
-  check(/half damage taken last ×1\.20/.test(r.aegis10 || ''), 'Divine Aegis rank 10 says it lengthens the half-damage window too', r.aegis10);
+  check(/holy orbs last ×1\.20 \(half damage stays 9 s\)/.test(r.aegis10 || ''), 'Divine Aegis rank 10 says it lengthens the orbs, and the half damage stays 9 s (v0.30.1525)', r.aegis10);
   check(/rank 9 × 1\.30/.test(r.deadeye10 || ''), 'Deadeye rank 10 says what its ×1.30 multiplies', r.deadeye10);
   check(r.aurora0 && r.aurora10 && r.aurora0.ticksDealt === 10 && r.aurora10.ticksDealt === 11 && r.aurora10.life === 1200,
     'Celestial Aurora at rank 10 keeps ticking past 10 s (rank 0 still stops at 10 ticks)', JSON.stringify([r.aurora0, r.aurora10]));
