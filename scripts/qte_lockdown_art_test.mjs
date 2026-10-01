@@ -87,8 +87,9 @@ ok('the nine frames share one canvas (no mid-cycle rescale)',
   anim.every((e) => e.p.w === anim[0].p.w && e.p.h === anim[0].p.h), { canvas: anim[0].p.w });
 const steps = []; for (let i = 1; i < anim.length; i++) steps.push(+step(anim[i - 1].p, anim[i].p).toFixed(2));
 ok('the loop never stalls (every step moves at least 0.35%)', steps.every((s) => s >= 0.35), { steps: steps.join(' / ') + ' %' });
-const lums = anim.map((e) => lumOf(e.p)); const flash = Math.max(...lums) / Math.max(1, Math.min(...lums));
-ok('the lock SNAPS: the brightest frame is at least 1.30x the dimmest', flash >= 1.30, { ratio: flash.toFixed(2) + 'x' });
+// v0.30.1512 - the lock-snap flash check (brightest frame >= 1.30x the dimmest) is retired: the Judgement Seal was redrawn
+// with the other five QTE seals (per user) and its loop is a glow travelling round the ring, not a flash. The loop's
+// shape, size and motion are pinned by qte_seals_art_test.
 
 // ---- in game ---------------------------------------------------------------
 const free = (p) => new Promise((res) => { const s = net.createServer();
