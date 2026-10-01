@@ -6,8 +6,7 @@
 // Two gates have to hold together:
 //   FORM    _aetherionAstralKey returns 'aetherion2astral' once _aetherionEvolved
 //           is set (at 50% HP, which also swaps _phaseSprite to 'aetherion2').
-//           No such art ships, so the frame picker must come back null and the
-//           boss must fall through to his form-2 attack pose.
+//           v0.30.1501 form-2 astral: that set ships now, so form 2 plays ITS OWN set - never form 1's.
 //   PATTERN the key is only stamped while patternState === 'astral'. Aetherion
 //           rolls astral against volley / tear / rain / beam / teleport /
 //           deathOrbs, so every one of those must leave the set alone.
@@ -67,12 +66,11 @@ const R = await page.evaluate(async () => {
   const boss = spawnMonster(player.x + 300, player.y - 60, 'aetherion', true);
   if (!boss) return out;
   boss.atk = 0;
-  // let the set decode so the picker is not just reporting "not ready yet"
+  // let the sets decode so the picker is not just reporting "not ready yet" - BOTH forms' (v0.30.1501 form-2 astral)
   const t0 = performance.now();
-  while (performance.now() - t0 < 6000) {
-    const f = BOSS_ATTACK_FRAMES.aetherionastral;
-    let n = 0; while (f && n < f.length && f[n] && f[n].complete && f[n].naturalWidth > 0) n++;
-    if (f && n === f.length && f.length) break;
+  const _set = (f) => { let n = 0; while (f && n < f.length && f[n] && f[n].complete && f[n].naturalWidth > 0) n++; return !!(f && f.length && n === f.length); };
+  while (performance.now() - t0 < 12000) {
+    if (_set(BOSS_ATTACK_FRAMES.aetherionastral) && _set(BOSS_ATTACK_FRAMES.aetherion2astral)) break;
     keep(); await frame();
   }
   out.decoded = (() => {
@@ -92,12 +90,15 @@ const R = await page.evaluate(async () => {
     // that form 1's probe had left behind.) Poison the field before each frame
     // and discard any sample where the draw did not overwrite it, so every
     // reading provably comes from the frame it is attributed to.
+    if (!window.__lxProbeMoving) { window.__lxProbeMoving = window._bossMoving; window._bossMoving = (mm) => (mm === boss ? false : window.__lxProbeMoving(mm)); }   // v0.30.1501 form-2 astral - planted
     const SENTINEL = '__not_drawn__';
     let seen = new Set(), drawn = 0;
     const t = performance.now();
     while (performance.now() - t < 900) {
       boss.patternState = pattern;
       boss.patternTimer = 300;                       // inside the telegraph
+      if (boss._ae) { boss._ae.st = (pattern === 'astral') ? 'astral' : 'idle'; boss._ae.t = 300; }   // v0.30.1501 form-2 astral - his state machine mirrors this into patternState
+      boss._stagger = 0; boss._dirOpenT = 0;   // v0.30.1501 form-2 astral - the probe's HP drop can stagger him, and a stagger holds him idle (caught: a whole form-2 probe)
       boss.atkAnimUntil = performance.now() + 400;   // _bossAttacking true
       boss._aeAstralKey = SENTINEL;
       keep();
@@ -144,8 +145,8 @@ ok('the astral set exists and decodes', R.astralArt > 0 && R.decoded === R.astra
 ok('FORM 1 + Astral Judgement plays the astral set',
    /(^|,)aetherionastral(,|$)/.test(R.f1_astral.keys) && R.f1_astral.drawn > 5,
    `keys seen: ${R.f1_astral.keys} over ${R.f1_astral.drawn} drawn frames`);
-ok('FORM 2 does NOT play it', R.f2_astral.keys === 'null' && R.f2_astral.drawn > 5,
-   `key in form 2: ${R.f2_astral.keys} over ${R.f2_astral.drawn} drawn frames (aetherion2astral has ${R.form2Art} frames, so it must fall back)`);
+ok('FORM 2 plays its OWN set, never form 1\'s', /(^|,)aetherion2astral(,|$)/.test(R.f2_astral.keys) && !/(^|,)aetherionastral(,|$)/.test(R.f2_astral.keys) && R.f2_astral.drawn > 5,
+   `keys in form 2: ${R.f2_astral.keys} over ${R.f2_astral.drawn} drawn frames (aetherion2astral has ${R.form2Art} frames)`);   // v0.30.1501 form-2 astral
 const others = Object.entries(R.f1_others || {});
 const leaked = others.filter(([, v]) => v.keys !== 'null').map(([k]) => k);
 ok('no OTHER form-1 pattern plays it', leaked.length === 0,

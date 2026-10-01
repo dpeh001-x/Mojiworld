@@ -1207,6 +1207,24 @@ window.LX_ANIM_CALIB = {
       "ftAuto": true
     }
   },
+  "aetherion2astral": {
+    "attack": {
+      "s": 0.87,
+      "dx": -0.015,
+      "dy": 0.0092,
+      "ft": [
+        110,
+        110,
+        120,
+        140,
+        170,
+        170,
+        140,
+        120,
+        110
+      ]
+    }
+  },
   "aetherionastral": {
     "attack": {
       "s": 1.24,
