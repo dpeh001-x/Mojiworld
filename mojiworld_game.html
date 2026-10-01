@@ -16190,7 +16190,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1474';
+const GAME_VERSION = 'v0.30.1475';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -122841,7 +122841,6 @@ function _setBonusFmt(bonus) {
 // burns can stop wasting their Smalls on chip damage.
 const POTION_BIND_AUTO = { hp_auto: true, mp_auto: true };
 function _useBoundPotion(physKey) {
-  if (typeof _tutPing === 'function') _tutPing('potion');
   if (!player.potionBinds) player.potionBinds = { pageup: 'hp_auto', pagedown: 'mp_auto' };
   const bindId = player.potionBinds[physKey];
   if (!bindId) {   // v0.30.614 - a bind table without this slot (an older or damaged save) is repaired, not obeyed silently
@@ -123346,6 +123345,7 @@ function useConsumable(id, opts) {
   if (p.type === 'hp' || p.type === 'mp') _setPotionCd(p.type);
   else if (p.type === 'full') { _setPotionCd('hp'); _setPotionCd('mp'); }
   showToast(`Used ${p.name}`);
+  if ((p.type === 'hp' || p.type === 'mp' || p.type === 'full') && typeof _tutPing === 'function') _tutPing('potion');   // v0.30.1475 - ticks on a real drink only (was on the key press, refused or not)
 }
 
 // Shared 3-second cooldown for quick-use potions (separate tracks per type
@@ -123365,9 +123365,19 @@ function _lxCureNeeded() {
        || (P._skillLockTimer | 0) > 0 || (P.burnTimer | 0) > 0 || (P.hitStun | 0) > 0 || (P.stunTimer | 0) > 0
        || (P._electrocuteTimer | 0) > 0 || (P._iceFloor | 0) > 0 || (P._virgoSin | 0) > 0);
 }
+// v0.30.1475 - true while the docked tour is showing its (not yet ticked) potion step.
+function _lxTutPotionStepLive() {
+  try {
+    const m = document.getElementById('tutorial-modal');
+    if (!m || m.style.display === 'none' || !m.classList.contains('tut-dock')) return false;
+    const st = TUTORIAL_STEPS[_tutStep];
+    return !!(st && st.detect === 'potion' && !st._done);
+  } catch (e) { return false; }
+}
 function _lxDrinkUseless(type, purifies) {
   try {
     if (!type) return false;
+    if (_lxTutPotionStepLive()) return false;   // v0.30.1475 (per user) - the tour's potion step must be doable at a full bar
     if (purifies && typeof hasMilestone === 'function' && hasMilestone('purifyingPulse')
         && ((player.hitStun | 0) > 0 || (player.burnTimer | 0) > 0 || (player.freezeTimer | 0) > 0 || (player.stunTimer | 0) > 0)) return false;
     if (type === 'hp')   return player.hp >= getMaxHp();
@@ -123422,7 +123432,6 @@ function useQuickPotion(which, preferElixir) {
     if (typeof audio !== 'undefined' && audio && audio.play) audio.play('hit');
     return;
   }
-  if (typeof _tutPing === 'function') _tutPing('potion');
   // v0.26.x — ELIXIR PRIORITY. The bound-potion keys (PgUp / PgDn, and any key
   // the player pins to hp_auto / mp_auto) prefer a full Elixir — which restores
   // BOTH HP and MP in one drink — over any single-stat potion, per user request.
@@ -123538,6 +123547,7 @@ function useQuickPotion(which, preferElixir) {
   }
   _applyPurify();
   _setPotionCd(which);
+  if (typeof _tutPing === 'function') _tutPing('potion');   // v0.30.1475 - the auto-buy drink counts too
 }
 
 // =========================================================================
@@ -125234,16 +125244,17 @@ function _ensureTutChrome() {
   } catch (e) {}
   // v0.29.785 — re-stamp the hint every render so it tracks the live input
     const _h = document.getElementById('tut-live-hint');
-    if (_h) _h.textContent = (typeof _lxPadActive === 'function' && _lxPadActive(30000))
-      ? '🎮 RT next · LT skip'
-      : '◀ ▶ to page';
+    if (_h) {   // v0.30.1475 (per user) - the keyboard hint '◀ ▶ to page' was not clickable and did nothing: gone; the pad line stays
+      const _pt = (typeof _lxPadActive === 'function' && _lxPadActive(30000)) ? '🎮 RT next · LT skip' : '';
+      _h.textContent = _pt;
+      if (_pt) _h.style.removeProperty('display'); else _h.style.setProperty('display', 'none', 'important');
+    }
   }
   if (!document.getElementById('tut-live-hint')) {
     const hint = document.createElement('div');
     hint.id = 'tut-live-hint';
-    hint.textContent = (typeof _lxPadActive === 'function' && _lxPadActive(30000))
-      ? '🎮 RT next · LT skip'
-      : '◀ ▶ to page';
+    hint.textContent = (typeof _lxPadActive === 'function' && _lxPadActive(30000)) ? '🎮 RT next · LT skip' : '';
+    if (!hint.textContent) hint.style.setProperty('display', 'none', 'important');   // v0.30.1475
     const progress = document.getElementById('tut-progress');
     const row = progress ? progress.parentElement : null; // the flex nav row
     if (row) {
@@ -125351,7 +125362,7 @@ function _tutPing(tag) {
     // waits 15 s, counting down on the Next button; Next still skips the wait.
     if (_tutStep < TUTORIAL_STEPS.length - 1) {
       const _at = _tutStep;
-      let _left = 15;
+      let _left = 3;   // v0.30.1475 (per user) - 3 s read, was 15; Enter skips it
       const _nbLabel = () => { if (_nb) _nb.textContent = 'Next \u25B6 ' + _left + 's'; };
       _nbLabel();
       clearInterval(window._tutAdvCountdown);
@@ -125819,6 +125830,30 @@ function _wireTutorialButtons() {
     skip._wired = true;
     skip.onclick = (e) => { if (e && e.currentTarget) e.currentTarget.blur(); _closeTutorial(true); _grantTutorialStarterWeapon(); };
   }
+}
+
+// v0.30.1475 (per user: "press enter to skip to next slide") - Enter is Next while the docked tour is open. Capture
+// phase so it beats the chat key; it stands down under an open panel / ghosted card, a collapsed dock, a text field
+// or a focused button (Enter there is that button's own click).
+if (!window._lxTutEnterWired) {
+  window._lxTutEnterWired = true;
+  window.addEventListener('keydown', (e) => {
+    try {
+      if (e.key !== 'Enter' || e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+      const t = e.target, tn = t && t.tagName;
+      if (tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT' || tn === 'BUTTON' || (t && t.isContentEditable)) return;
+      const m = document.getElementById('tutorial-modal');
+      if (!m || m.style.display === 'none' || !m.classList.contains('tut-dock')
+          || m.classList.contains('tut-collapsed') || m.classList.contains('tut-ghost')) return;
+      if (typeof net !== 'undefined' && net && net.chatOpen) return;
+      if (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen()) return;
+      if (document.body.classList.contains('sb-active')) return;
+      const nb = document.getElementById('tut-next');
+      if (!nb) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      nb.click();
+    } catch (err) {}
+  }, true);
 }
 
 // v0.25.243 — One-shot tip toasts for first-session moments (hotkey hint

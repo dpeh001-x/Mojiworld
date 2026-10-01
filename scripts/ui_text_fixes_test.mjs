@@ -97,7 +97,7 @@ async function suite(p, tag, touch) {
   check(!tut.err && tut.u.back && tut.q.back, `${tag}: the tour card comes back when the panel closes`, tut.err || { u: tut.u.back, q: tut.q.back });
   check(!tut.err && tut.clipped.length === 0, `${tag}: every tour step name fits (no "...", at most 2 lines, clear of Guguma's name and line)`, tut.err || tut.clipped);
 
-  if (!touch) {   // 1b) a step ticked under the panel keeps its 15 s read (v0.30.1188) for when the card is back
+  if (!touch) {   // 1b) a step ticked under the panel keeps its read (15 s v0.30.1188, 3 s v0.30.1475) for when the card is back
     const cd = await p.evaluate(async () => {
       __close(); for (const k in _TUT_SEEN_TAGS) delete _TUT_SEEN_TAGS[k];
       startTutorial(); await __settle(400); const modal = document.getElementById('tutorial-modal');
@@ -105,7 +105,7 @@ async function suite(p, tag, touch) {
       openLevelUpPanel(); const t0 = performance.now(); while (!(modal.classList.contains('tut-ghost') && TUTORIAL_STEPS[6]._done) && performance.now() - t0 < 4000) await __settle(60);
       const ticked = !!TUTORIAL_STEPS[6]._done; await __settle(17000);
       const stepHidden = _tutStep;
-      __close(); const t1 = performance.now(); while (modal.classList.contains('tut-ghost') && performance.now() - t1 < 4000) await __settle(60); await __settle(2500);
+      __close(); const t1 = performance.now(); while (modal.classList.contains('tut-ghost') && performance.now() - t1 < 4000) await __settle(60); await __settle(900);
       const r = { ticked, stepHidden, stepBack: _tutStep, next: (document.getElementById('tut-next') || {}).textContent };
       try { clearInterval(window._tutAdvCountdown); modal.style.display = 'none'; modal.classList.remove('tut-dock', 'tut-ghost'); _stopTutGhostWatch(); } catch (e) {}
       return r;
