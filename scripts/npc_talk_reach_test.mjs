@@ -1,5 +1,6 @@
 // NPC TALK REACH (v0.30.1113, the 2026-09-26 NPC audit). One shared talk target for every input, height-aware:
-//   - LEVEL: on the street between Bravo (a step up) and the Amnesiac (a ledge up), the talk key picks Bravo
+//   - LEVEL: on the street between Postal Wisp (a step up) and Auntie Innie (a ledge up), the talk key picks Postal Wisp
+//     (the town revamp moved Bravo to the east gate; the same two heights stand side by side at the mailbox now)
 //   - LIMITS: an NPC more than a step below you, or more than a storey above, is out of reach; a ledge above is not
 //   - PROMPT: with two NPCs in reach across, only the one the key would open shows [N] Talk
 //   - N: opens that NPC; with a shop open it opens nothing under the shop
@@ -43,15 +44,15 @@ try {
     const W8 = window.__W8, out = {};
     loadMap('town', 300); await W8(1200); try { closeAllModals(); } catch (e) {} game.paused = false;
     const npc = (n) => game.npcs.find((x) => x.name === n), dlg = document.getElementById('dialog');
-    const bravo = npc('Bravo'), amn = npc('The Amnesiac');
+    const step = npc('Postal Wisp'), ledge = npc('Auntie Innie'), amn = npc('The Amnesiac');
     const street = (x) => { player.x = x - player.w / 2; player.y = 480 - player.h; player.vx = 0; player.vy = 0; };
     // LEVEL + PROMPT (live frames)
-    street((bravo.x + amn.x) / 2); await W8(700); street((bravo.x + amn.x) / 2);
+    street((step.x + ledge.x) / 2); await W8(700); street((step.x + ledge.x) / 2);
     // an off-screen NPC is not drawn, so its prompt fade is never updated: start every fade at 0 here, read on-screen NPCs only
     for (const n of game.npcs) n._talkA = 0;
     await W8(600);
     const tgt = _lxTalkTarget();
-    out.level = { at: Math.round(player.x + player.w / 2), bravoDx: Math.round(Math.abs(player.x + player.w / 2 - bravo.x)), amnDx: Math.round(Math.abs(player.x + player.w / 2 - amn.x)), target: tgt && tgt.name };
+    out.level = { at: Math.round(player.x + player.w / 2), stepDx: Math.round(Math.abs(player.x + player.w / 2 - step.x)), ledgeDx: Math.round(Math.abs(player.x + player.w / 2 - ledge.x)), target: tgt && tgt.name };
     const camX = (game.camera && game.camera.x) || 0;
     out.prompt = game.npcs.filter((n) => n.x > camX - 40 && n.x < camX + W + 40 && (n._talkA || 0) > 0.3).map((n) => n.name);
     // LIMITS (pure reads, paused)
@@ -60,7 +61,7 @@ try {
     out.limits = { ledge250: at(amn, 250), storey300: at(amn, 300), below100: at(amn, -100), step40: at(amn, -40) };
     game.paused = false;
     // N: talks to the target; nothing under a shop
-    street((bravo.x + amn.x) / 2); await W8(250);
+    street((step.x + ledge.x) / 2); await W8(250);
     const pressN = async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', bubbles: true })); await W8(60); window.dispatchEvent(new KeyboardEvent('keyup', { key: 'n', code: 'KeyN', bubbles: true })); await W8(200); };
     await pressN(); out.n = { open: dlg.style.display === 'block', name: document.getElementById('dialog-name').textContent }; closeDialog();
     openShop('potion'); await W8(200); await pressN();
@@ -80,10 +81,10 @@ try {
     await W8(200); out.click = { drawnH: Math.round(_lxNpcDrawnH(amn)), open: dlg.style.display === 'block', name: document.getElementById('dialog-name').textContent }; closeDialog();
     return out;
   });
-  check(r.level.target === 'Bravo' && r.level.amnDx < r.level.bravoDx + 30, 'LEVEL: between Bravo (a step up) and the Amnesiac (a ledge up), the talk key picks Bravo', J(r.level));
+  check(r.level.target === 'Postal Wisp' && r.level.ledgeDx < r.level.stepDx + 30, 'LEVEL: between Postal Wisp (a step up) and Auntie Innie (a ledge up), the talk key picks Postal Wisp', J(r.level));
   check(r.limits.ledge250 === 'The Amnesiac' && r.limits.storey300 !== 'The Amnesiac' && r.limits.below100 !== 'The Amnesiac' && r.limits.step40 === 'The Amnesiac', 'LIMITS: a ledge 250 px up and a step 40 px down are in reach; 300 px up or 100 px down are not', J(r.limits));
-  check(r.prompt.length === 1 && r.prompt[0] === 'Bravo', 'PROMPT: only the NPC the key would open shows [N] Talk', J(r.prompt));
-  check(r.n.open && r.n.name === 'Bravo' && !r.nUnderShop.dialog && r.nUnderShop.shop === 'flex', 'N: opens Bravo; with the shop open it opens nothing under it', J([r.n, r.nUnderShop]));
+  check(r.prompt.length === 1 && r.prompt[0] === 'Postal Wisp', 'PROMPT: only the NPC the key would open shows [N] Talk', J(r.prompt));
+  check(r.n.open && r.n.name === 'Postal Wisp' && !r.nUnderShop.dialog && r.nUnderShop.shop === 'flex', 'N: opens Postal Wisp; with the shop open it opens nothing under it', J([r.n, r.nUnderShop]));
   check(!r.pUnderAdv && r.pOpens === 'Postal Wisp' && r.pTalks.length === 0, 'P: no courier card under the advancement card, and the hotkey courier counts for no daily talk', J({ under: r.pUnderAdv, opens: r.pOpens, talks: r.pTalks }));
   check(r.click.open && r.click.name === 'The Amnesiac' && r.click.drawnH > 80, 'CLICK: a click 10 px under the top of the Amnesiac\'s drawn head opens him', J(r.click));
   await ctx.close();

@@ -53,6 +53,7 @@ try {
         for (const n of (md.npcs || [])) if (NPC_SPRITE_FILES[n.name]) add('Sprites/npc/' + NPC_SPRITE_FILES[n.name]);
         for (const sp of (md.spawns || [])) if (sp && sp.type) mons.add(sp.type);
         for (const pr of (MAP_PROPS[id] || [])) add('Sprites/objects/' + pr.key + '.webp');
+        for (const L of ((md.storybook && md.storybook.landmarks) || [])) add('Sprites/objects/' + L.key + '.webp');   // a town's own landmarks (town-storybook), asked for with the map
       }
       for (const k in LX_OBJECTS_FILES_EXPLICIT) add('Sprites/objects/' + LX_OBJECTS_FILES_EXPLICIT[k]);
       for (const f of ['Sprites/objects/column_pillar.webp', 'backgrounds/tiles/floor_grass_v5.webp', 'backgrounds/tiles/platform_grass_v4.webp', 'Sprites/floors/everdawn_central.webp']) add(f);

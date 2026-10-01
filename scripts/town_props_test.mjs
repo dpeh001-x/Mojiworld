@@ -28,13 +28,17 @@ try {
     return o;
   });
   console.log('build ' + r.ver + '  town ' + JSON.stringify(r.town) + '  atGate ' + JSON.stringify(r.atGate));
-  ok('Everdawn Central carries exactly one prop: the signpost at x 2409 on the ground line, scale 1', r.town.length === 1 && r.town[0].key === 'signpost_wood' && r.town[0].x === 2409 && r.town[0].y === 480 && r.town[0].scale === 1, JSON.stringify(r.town));
+  // town-storybook (the revamp, per user): the street's own dressing - planters and lamp posts - joins the hardbaked signpost
+  const sign = r.town.filter((p) => p.key === 'signpost_wood'), dress = r.town.filter((p) => p.key !== 'signpost_wood');
+  ok('Everdawn Central keeps the hardbaked signpost at x 2409 on the ground line, scale 1', sign.length === 1 && sign[0].x === 2409 && sign[0].y === 480 && sign[0].scale === 1, JSON.stringify(sign));
+  ok('every other prop is the storybook town\'s own (town_*: planters, lamp posts, its things), standing on the ground line or a balcony', dress.length > 0 && dress.every((p) => /^town_[a-z_]+$/.test(p.key) && (p.y === 480 || p.y === 325)), JSON.stringify(dress));
   ok('the pillars are gone', !r.town.some((p) => p.key === 'column_pillar'));
   ok('the signpost art exists and decodes', r.hasImg && r.decoded === true);
   // height = 80 x scale x a per-art fit factor clamped to 0.7..1.4, so 56..112 px at scale 1
   const landed = (calls, camX) => calls.filter((d) => !d.err && d.onScreen && d.h >= 55 && d.h <= 113 && Math.abs((d.x + d.w / 2) - (2409 - camX)) < 2 && Math.abs(d.y + d.h - 480) < 3);
   ok('with the gate on screen the signpost lands once on the game canvas, bottom-centred on its anchor, 56..112 px tall', r.map === 'town' && !r.atGate.some((d) => d.err) && landed(r.atGate, r.camGate).length === 1, JSON.stringify([r.atGate, r.camGate]));
-  ok('with the plaza on screen nothing lands (the plaza is bare, the gate is off screen)', !r.atPlaza.some((d) => d.onScreen), JSON.stringify(r.atPlaza));
+  const onPlaza = r.town.filter((p) => p.key !== 'signpost_wood' && p.x < 960 + 40).length;   // the dressing that stands in the plaza's view (the canvas is 960 wide)
+  ok('with the plaza on screen only the street\'s dressing lands there (the signpost stays at the gate, off screen)', r.atPlaza.filter((d) => d.onScreen).length === onPlaza, JSON.stringify(r.atPlaza));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();

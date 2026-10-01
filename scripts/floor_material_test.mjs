@@ -76,6 +76,11 @@ try {
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     for (const id of ['everdawn_megamall', 'town', 'hiddenPagoda']) {
       loadMap(id, 300); await sleep(1300); game.paused = false;
+      if (MAPS[id] && MAPS[id].storybook) {   // town-storybook - the street is its own bake, in the town's sampled colours (per user: "in its own backdrop's colours")
+        const k = Object.keys(_lxMallBakes).find((b) => b.indexOf('tstreet' + id) === 0), cv = k && _lxMallBakes[k], want = _MAP_FLOOR_PAL[id] && _MAP_FLOOR_PAL[id].top;
+        let avg = null; if (cv) { const dp = _LX_DPR, im = cv.getContext('2d').getImageData(0, Math.round(16 * dp), cv.width, Math.round(44 * dp)).data; let r = 0, g = 0, b = 0, n = 0; for (let i = 0; i < im.length; i += 16) { r += im[i]; g += im[i + 1]; b += im[i + 2]; n++; } avg = [r / n, g / n, b / n].map(Math.round); }
+        res[id] = { street: !!cv, avg, want, mat: _MAP_FLOOR_MATERIAL[id] }; continue;
+      }
       const od = window._drawCutePlatform; let seen = null;
       window._drawCutePlatform = function (sx, y, w, h, tint, ground, theme) { if (!seen) seen = { top: tint && tint.top, exact: !!(tint && tint.exact), theme }; return od.apply(this, arguments); };
       await sleep(350); window._drawCutePlatform = od;
@@ -83,7 +88,13 @@ try {
     }
     return res;
   });
-  for (const [id, d] of Object.entries(drawn)) ok(`${id}: drawPlatforms paints it in ${d.mat} with its sampled palette`, !!d.seen && d.seen.exact && d.seen.top === d.want && d.seen.theme === d.mat, d);
+  for (const [id, d] of Object.entries(drawn)) {
+    if (d.street !== undefined) {   // a storybook town draws its own street (town-storybook): its stones average out near the sampled top colour
+      const w = d.want ? [1, 3, 5].map((i) => parseInt(d.want.slice(i, i + 2), 16)) : null, dist = w && d.avg ? (Math.abs(w[0] - d.avg[0]) + Math.abs(w[1] - d.avg[1]) + Math.abs(w[2] - d.avg[2])) / 3 : 999;
+      ok(`${id}: its storybook street is drawn in its sampled palette (the stones average within 30 of it)`, d.street && dist < 30, Object.assign({ dist: Math.round(dist) }, d)); continue;
+    }
+    ok(`${id}: drawPlatforms paints it in ${d.mat} with its sampled palette`, !!d.seen && d.seen.exact && d.seen.top === d.want && d.seen.theme === d.mat, d);
+  }
   ok('no page errors', errs.length === 0, errs.join(' | '));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'}(${fail}) - ${pass} passed, ${fail} failed`);
