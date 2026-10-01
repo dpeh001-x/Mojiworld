@@ -139,12 +139,12 @@ const r = await page.evaluate(async () => {
     frames(29 - (h.tick % 30) + 29);   // run up to just before a drain tick
     player.hp = Math.floor(getMaxHp() * 0.10);
     const before = player.hp;
+    const _hp0 = new Map(game.monsters.map((m) => [m, m.currentHp]));   // v0.30.1527 op-pass - each held mob before the tick
     frames(2);                          // cross exactly one drain boundary
     const gained = player.hp - before;
-    // subtract the 30%-of-drain return (shared pool rule, scales with mobs by
-    // design) to isolate the FLAT rider
-    const drainPerMob = Math.max(1, Math.floor(storm().atk * (30 / 60)));
-    const flat = gained - Math.floor(drainPerMob * 0.3) * mobN;
+    // subtract the drain return (v0.30.1527 op-pass: 7% of the damage each drain dealt - the lifesteal cap - where it was 30% of the
+    // raw drain) to isolate the FLAT rider
+    const flat = gained - [..._hp0].reduce((a, [m, h0]) => a + Math.floor(Math.max(0, h0 - Math.max(0, m.currentHp)) * 0.07), 0);
     game.hazards.length = 0; game.monsters.length = 0;
     return { gained, flat, maxHp: getMaxHp() };
   };
