@@ -13649,7 +13649,7 @@ The sleeping world is listening.</div>
     <kbd data-lx-bindlabel="characterK">K</kbd>Hotkeys &amp; Skills
   </div>
 
-  <div id="skill-bar"><div class="skill-slot defense ready" title="Block / Parry — press to block for 70% less damage (a fixed stance per class, then a cooldown); a hit in its first 300 ms is parried and stuns the attacker.">
+  <div id="skill-bar"><div class="skill-slot defense ready" title="Block / Parry — press to block for 70% less damage (a fixed stance per class, then a cooldown); a hit in its first 300 ms is parried: the attacker is stunned and struck back for 3× your DEF, rising to 10× by Lv 50 (never more than half its health).">
     <div class="skill-key">A</div>
     <!-- v0.29.254 — ludo.ai shield icon (Sprites/ui/block_shield.webp); the 🛡 emoji swaps back in via onerror if the file is missing -->
     <div class="skill-icon"><img data-lx-block-icon src="Sprites/ui/block_shield.webp" alt="" style="width:24px;height:24px;object-fit:contain;display:block" onerror="if(this.parentNode)this.parentNode.textContent='🛡'"></div>
@@ -16271,7 +16271,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1505';
+const GAME_VERSION = 'v0.30.1506';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -70929,6 +70929,39 @@ function startBlock() {
   if (typeof audio !== 'undefined' && audio.play) audio.play('block');
 }
 
+// v0.30.1506 parry-def - THE PARRY STRIKES BACK, FROM DEF (per user: "Parry skill should deal damage based on a player's DEF, try to
+// scale it such that it does about 3-10x the DEF appropriately to deal sufficient amount that does not OHKO monsters"). Measured
+// first: every master path geared at its level, and every combat map's monsters at their _mobLevel. A geared warrior's DEF grows
+// about 1.5x per 10 levels while a same-level monster's health through its armour grows 3-10x, so one flat multiple would be a
+// one-shot early and a scratch late. The multiple rises with level instead: 3x through Lv 30, then evenly to 10x at Lv 50. A
+// Knight's counter is then about a third of a same-level monster's health up to Lv 40 and ~17% at Lv 50 (a few % in the Lv 70s,
+// where even 10x DEF is small against those health pools); the other classes carry ~40% of a warrior's DEF and hit about a third
+// as hard. It never misses (sureHit), and it never one-shots: a parry's hits on its attacker share one budget, half the
+// attacker's max HP, enforced after every multiplier (_lxParryGuard, in _hitMonsterCore), so a foe at full health always
+// survives a parry and one already under half can be finished.
+let _lxParryGuard = null;
+function _lxParryMul(lv) { return lv <= 30 ? 3 : lv >= 50 ? 10 : 3 + (lv - 30) * 0.35; }
+// DEF as armour: Holy Shield's +9999 is its 2.5 s of invulnerability, not armour, and a parry under it would strike for ~100,000.
+function _lxParryDef() {
+  const _hs = player.buffs ? player.buffs.holyShield : 0;
+  if (_hs > 2500) player.buffs.holyShield = 2500;
+  try { return getDef(); } finally { if (_hs > 2500) player.buffs.holyShield = _hs; }
+}
+function _lxParryDmg() { return Math.max(1, Math.floor(_lxParryDef() * _lxParryMul(player.level || 1))); }
+function _lxParryCounter(source) {
+  if (!source || source.currentHp === undefined || !(source.currentHp > 0)) return;
+  const _hp0 = source.currentHp;
+  _lxParryGuard = { m: source, hp0: _hp0, cap: Math.max(1, Math.floor((source.maxHp || _hp0) * 0.5)) };
+  try {
+    player._lxSureHit = true;
+    try { hitMonster(source, _lxParryDmg(), false, 'parry'); } finally { player._lxSureHit = false; }
+    // The rogue's counter-strike, its class reward since before this: ATK-based, on top, inside the same budget. 'melee' is NOT
+    // in MISS_EXEMPT_SKILLS, so it can still whiff (v0.30.704).
+    if (player.cls === 'rogue' && source.currentHp > 0 && _hp0 - source.currentHp < _lxParryGuard.cap) hitMonster(source, Math.floor(getAtk() * 3.23), true, 'melee');
+  } finally { _lxParryGuard = null; }
+  // v0.30.704 parry-fx / v0.30.1448 parry-shield - the class's shield flashes on what the parry hurt, and only if it did
+  if (source.currentHp < _hp0) _lxParryFx(source.x + source.w / 2, source.y + source.h / 2, 110, 20);
+}
 function triggerParry(source) {
   const P = player._blockProfile || { color:'#ffdd44', accent:'#ffdd44' };
   _riposteProc();   // v0.29.366 — perfect parries detonate the Riposte Nova too
@@ -70980,18 +71013,11 @@ function triggerParry(source) {
     source.vx = -((source.x + source.w/2) - (player.x + player.w/2)) * 0.05;
     source.vx = Math.max(-5, Math.min(5, source.vx));   // v0.30.1450 parry-aim - a parried shooter across the room is shoved like a melee foe
   }
+  // v0.30.1506 parry-def - every class's parry strikes its attacker back from DEF, and the rogue's counter-strike rides inside the
+  // same one-shot budget (_lxParryCounter, above)
+  _lxParryCounter(source);
   // Class-specific parry reward
-  if (player.cls === 'rogue' && source && source.currentHp !== undefined) {
-    // v0.30.704 parry-fx — the other place a parry damages a monster, and the one that
-    // had no effect of its own: the counter landed as a plain melee hit. Bigger and a
-    // little longer than the nova's per-monster flash, because this IS the whole move.
-    // Gated on damage: 'melee' is NOT in MISS_EXEMPT_SKILLS, so this counter can whiff,
-    // and a whiffed counter dishes nothing — the request is "when the parry does dish
-    // damage to monsters", so a miss keeps its MISS marker and gets no flash.
-    const _pfHpR = source.currentHp;
-    hitMonster(source, Math.floor(getAtk() * 3.23), true, 'melee');
-    if (source.currentHp < _pfHpR) _lxParryFx(source.x + source.w / 2, source.y + source.h / 2, 110, 20);   // v0.30.1448 parry-shield - 92 -> 110 for the shield art
-  } else if (player.cls === 'archer') {
+  if (player.cls === 'archer') {
     player._nextShotBonus = 3000;       // next shot gets massive crit
     showToast('PARRY — next shot empowered!', 'legendary');
     return;
@@ -104678,7 +104704,7 @@ const _LX_DMG_CLASS_TAG = {
   railshot: 'phys', backstab: 'phys', dagger: 'phys', flurry: 'phys', smokeDash: 'phys', shadowStrike: 'phys', rush: 'phys', flamedash: 'phys', phantom_cut: 'phys',
   deathBlossom: 'phys', sleight: 'phys', afterimage: 'phys', blink: 'phys', evade_blast: 'phys', nightreaper_ult: 'phys', warCry: 'phys',
 };
-const _LX_DMG_NEUTRAL = { thorns: 1, pet: 1, minion: 1, mojimon: 1, pack: 1, __coop: 1, bonus: 1, overflow: 1, siphon: 1, aegis: 1 };
+const _LX_DMG_NEUTRAL = { thorns: 1, pet: 1, minion: 1, mojimon: 1, pack: 1, __coop: 1, bonus: 1, overflow: 1, siphon: 1, aegis: 1, parry: 1 };   // v0.30.1506 parry-def - the parry's counter is reactive force, like thorns: no weakness or resistance
 function _lxDmgClass(skill) {
   if (!skill || _LX_DMG_NEUTRAL[skill]) return null;
   const def = (typeof SKILLS === 'object' && SKILLS[skill]) || null;
@@ -105694,6 +105720,9 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   const _lxAff = _lxWeakAffinity(m, skill);
   if (_lxAff === 'weak') finalDmg = Math.max(1, Math.floor(finalDmg * LX_WEAK_MUL));
   else if (_lxAff === 'resist') finalDmg = Math.max(1, Math.floor(finalDmg * LX_RESIST_MUL));
+  // v0.30.1506 parry-def - a parry never one-shots: its hits on the attacker share half the attacker's max HP (_lxParryCounter).
+  // Here, after every multiplier (combo, buffs, weakness) and before a co-op guest forwards the hit, so the budget holds everywhere.
+  if (_lxParryGuard && _lxParryGuard.m === m) finalDmg = Math.max(1, Math.min(finalDmg, _lxParryGuard.cap - (_lxParryGuard.hp0 - m.currentHp)));
   const _preWardDmg = finalDmg;   // v0.30.x — what a guest forwards; the host applies the ward itself
   if (m.isBoss && (m._wardUntil | 0) > (game.time | 0) && skill !== 'thorns') {
     _lxWardFeed(m, finalDmg);   // v0.30.395 — the warded hit lands for 1 but feeds the break gauge by what it would have done
@@ -119197,7 +119226,8 @@ function renderSkillsReference(host) {
   const _bp = (typeof getBlockProfile === 'function') ? getBlockProfile() : { block: 500, parry: 300, cd: 2000 };
   const _blockKey = (typeof _lxKeyLabel === 'function') ? _lxKeyLabel('block') : 'A';   // v0.30.1328 keyboard remap
   const _blockDesc = 'Press to block for ' + (_bp.block / 1000) + 's: ' + (player.cls === 'mage' ? 'you vanish and take no damage' : '70% less damage')
-    + '. A hit in its first ' + _bp.parry + ' ms is PARRIED and stuns the attacker for 0.9s. ' + (_bp.cd / 1000) + 's cooldown.';
+    + '. A hit in its first ' + _bp.parry + ' ms is PARRIED: it stuns the attacker for 0.9s and strikes it back for ' + (+_lxParryMul(player.level || 1).toFixed(2)) + '× your DEF, '
+    + _lxParryDmg().toLocaleString('en-US') + ' now (3× up to Lv 30, rising to 10× at Lv 50; never more than half its health). ' + (_bp.cd / 1000) + 's cooldown.';   // v0.30.1506 parry-def
   const rows = [
     { key:_blockKey, label:'Block / Parry',   desc:_blockDesc, kind:'defense' },
     { key:'Z',     label:'Basic Attack',      desc:null, slot:'d', kind:'skill' },
@@ -165542,7 +165572,7 @@ function _sbBuild() {
   bar.innerHTML = '';
   Object.keys(_sbSlots).forEach(k => delete _sbSlots[k]);
   // Defense slot (Block/Parry on A)
-  const blockTitle = 'Block / Parry — press to block for 70% less damage (a fixed stance per class, then a cooldown); a hit in its first 300 ms is parried and stuns the attacker.';
+  const blockTitle = 'Block / Parry — press to block for 70% less damage (a fixed stance per class, then a cooldown); a hit in its first 300 ms is parried: the attacker is stunned and struck back for 3× your DEF, rising to 10× by Lv 50 (never more than half its health).';
   const bs = _sbMakeSlot('skill-slot defense', _lxKeyLabel('block'), _SB_SHIELD_ICON, blockTitle);   // v0.30.1163 keybinds - was always 'A'
   bar.appendChild(bs);
   _sbSlots.block = {
