@@ -31,7 +31,8 @@ const EXTRA_MAPS = ['cadetsStrand'], EXTRA_KEYS = new Set(['beach_sandcastle']);
 // the props this pass placed (the new art + eight existing props reused); older placements on these maps (Emerald Thicket's signpost,
 // a Prop Editor hardbake) are the user's and are only counted, not checked
 const DECOR_KEYS = new Set([...NEW_ART, 'coral_brain', 'pearl_clamshell_bench', 'tidepool_starfish_pile', 'lava_crystal_cluster', 'forge_anvil_iron', 'glasswind_weather_vane', 'crypt_skull_pillar', 'town_stone_planter',
-  'celestial_arcane_glyph_stone']);   // bland-maps reuses the glyph stone in the Stardust Atrium
+  'celestial_arcane_glyph_stone', 'crypt_sarcophagus_cracked', 'well_stone', 'crate_stack']);   // bland-maps reuses the glyph stone in the Stardust
+  // Atrium; bland-maps 2 the sarcophagus, the well and the crates (and its short pieces under the ledges are held to the same rules)
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x ? '  [' + x + ']' : '')); };
 // ART, from the files
 { const bad = [];
