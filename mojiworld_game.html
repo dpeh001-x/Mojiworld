@@ -16296,7 +16296,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1543';
+const GAME_VERSION = 'v0.30.1544';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -99041,6 +99041,20 @@ function _aeLance(m, ang, speed, dmgMul, floorPct) {
 function _aeMark(m, text, color) {
   try { if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2, y: m.y - 8, vy: -1.2, text, life: 60, color: color || '#c8a8ff', big: true }); } catch (e) {}
 }
+// v0.30.1544 echostep - where an Echo Step lands: the flank across from where he stands, 90 px off you as before, but inside the play
+// window (W_PLAY, the desktop camera on every screen) so he never lands half off screen - and never on top of you to get there.
+// With no room across (you at a wall), the near flank.
+function _aeEchoDest(m, pcx, bcx, ww) {
+  const cx = (typeof _lxPlayCamX === 'function') ? _lxPlayCamX() : ((game.camera && game.camera.x) || 0);
+  const vw = (typeof W_PLAY === 'number') ? W_PLAY : 960;
+  const lo = Math.max(40, cx + 16), hi = Math.min(ww - m.w - 40, cx + vw - m.w - 16);
+  const right = Math.min(hi, player.x + player.w + 90), left = Math.max(lo, player.x - m.w - 90);
+  const rOk = right >= player.x + player.w + 24, lOk = left + m.w <= player.x - 24;
+  let side = pcx >= bcx ? 1 : -1;                     // he was on your left -> he lands on your right
+  if (side > 0 && !rOk && lOk) side = -1; else if (side < 0 && !lOk && rOk) side = 1;
+  const x = side > 0 ? Math.max(right, player.x + player.w + 24) : Math.min(left, player.x - m.w - 24);
+  return Math.max(40, Math.min(ww - m.w - 40, x));
+}
 function _aetherionTick(m, dt) {
   if (!m || m.currentHp <= 0 || !player || player.hp <= 0 || !game.projectiles) return;
   if (window._prologueActive || (typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix)) return;   // his own intro is not a turn
@@ -99159,11 +99173,19 @@ function _aetherionTick(m, dt) {
     fire(); finish(); return;
   }
   if (st === 'echoWind') {
-    if (t < 480) { m.invulnerable = Math.max(m.invulnerable | 0, 30); if ((now & 3) === 0 && typeof _budgetedParticlePush === 'function') _budgetedParticlePush({ x: m.x + m.w * Math.random(), y: m.y + m.h * Math.random(), vx: 0, vy: -1.5, life: 18, color: '#c8a8ff', size: 3 }); return; }
+    // v0.30.1544 echostep - per user ("aetherion seems to randomly teleport to different coordinates of the map"): the step was a bare
+    // ~600 px snap with nothing marking where he would land, sometimes half off screen or (at a wall) on top of you. The windup
+    // now shows the landing: m._aeEcho is drawn by drawMonster (he fades, his echo fades in on a floor
+    // ring there); the spot comes from _aeEchoDest every tick, so the echo follows you as the landing always did.
     const ww = (game.mapData && game.mapData.worldWidth) || 2000;
-    const toRight = pcx >= bcx;                         // he was on your left -> he lands on your right
-    m.x = Math.max(40, Math.min(ww - m.w - 40, toRight ? player.x + player.w + 90 : player.x - m.w - 90));
-    m.y = gY - m.h; m.vy = 0; face();
+    const dest = _aeEchoDest(m, pcx, bcx, ww), dFace = (dest + m.w / 2) < pcx ? 1 : -1, wind = A.log[A.log.length - 1];
+    if (!m._aeEcho || m._aeEcho.wind !== wind) m._aeEcho = { x: dest, face: dFace, wind, dx: null, t0: (typeof _lxFrameNow === 'function') ? _lxFrameNow() : performance.now() };
+    else { m._aeEcho.x = dest; m._aeEcho.face = dFace; }
+    if (t < 480) { m.invulnerable = Math.max(m.invulnerable | 0, 30); if ((now & 3) === 0 && typeof _budgetedParticlePush === 'function') _budgetedParticlePush({ x: m.x + m.w * Math.random(), y: m.y + m.h * Math.random(), vx: 0, vy: -1.5, life: 18, color: '#c8a8ff', size: 3 }); return; }
+    const x0 = m.x;
+    m.x = dest; m._aeEcho = null;
+    m.y = gY - m.h; m.vy = 0; m.facing = dFace;
+    if (typeof _budgetedParticlePush === 'function') for (let i = 0; i <= 12; i++) _budgetedParticlePush({ x: x0 + m.w / 2 + (m.x - x0) * (i / 12), y: m.y + m.h * (0.3 + Math.random() * 0.45), vx: 0, vy: -0.5, life: 14 + i * 2, color: '#c8a8ff', size: 4 });   // the streak: where he was -> where he is
     const cx = m.x + m.w / 2, cy = m.y + m.h - 4;
     game.hazards.push({ type: 'mob_shockwave', cx, cy, x: cx - 60, y: cy - 30, w: 120, h: 60, life: 50, maxLife: 50,
       damage: Math.max(5, Math.floor((m.atk || 460) * 0.8)), maxRadius: m.w / 2 + 120 /* v0.30.1432 big-reach: 120 px past his body - 170 from his centre (154 px inside him) never reached the player he lands 90 px from */, color: '#c8a8ff', _sourceLabel: "Aetherion's Echo Step" });
@@ -154505,7 +154527,8 @@ function drawMonster(m) {
   // all. Over-drawing slightly at the edge is cheap; culling a visible boss is not.
   const _cvW = m._visW || (m.w * 3.4), _cvH = m._visH || (m.h * 3.4);
   const _cCx = sx + m.w / 2, _cFootY = sy + m.h;
-  if (_cCx + _cvW / 2 < 0 || _cCx - _cvW / 2 > W) return;
+  const _aeCullDx = (m._aeEcho && m.type === 'aetherion') ? (m._aeEcho.x - m.x) : 0;   // v0.30.1544 echostep - his Echo Step echo draws at the landing spot
+  if (Math.max(_cCx, _cCx + _aeCullDx) + _cvW / 2 < 0 || Math.min(_cCx, _cCx + _aeCullDx) - _cvW / 2 > W) return;
   if (_cFootY < _camY - 30 || _cFootY - _cvH > _camY + H + 30) return;
   // v0.29.x — ground shadow under every monster (see _lxDrawBlobShadow above).
   // After the cull so off-screen mobs pay nothing; before the body so it
@@ -155003,6 +155026,10 @@ function drawMonster(m) {
   // procedural fallbacks) so all of them fade the same way.
   const _dpPrevA = ctx.globalAlpha;
   if (m._dreamPhase) ctx.globalAlpha = _dpPrevA * 0.35;
+  // v0.30.1544 echostep - Echo Step's windup: he fades where he stands while his echo fades in where he will land (see _aeEchoDest)
+  const _aeEcho = (m._aeEcho && m.type === 'aetherion' && m.currentHp > 0 && m._ae && m._ae.st === 'echoWind') ? m._aeEcho : null;
+  const _aeEchoK = _aeEcho ? Math.max(0, Math.min(1, (((typeof _lxFrameNow === 'function') ? _lxFrameNow() : performance.now()) - _aeEcho.t0) / 480)) : 0;
+  if (_aeEcho) ctx.globalAlpha = ctx.globalAlpha * (1 - 0.6 * _aeEchoK);
   // v0.30.x — SUB-FRAME MOTION replaces the frame crossfade (per user: the
   // overlapping sprites read as a shadow). One sprite per frame now; the pair
   // functions are still used, but only for their {i, f} phase, which drives a
@@ -155100,6 +155127,20 @@ function drawMonster(m) {
   // procedural blob forever (co-op "monsters loaded without sprites" report).
   else if (FISH_MOB_TYPES.has(m.type)) { _lxNudgeMonsterSprite(m.type); drawFishMob(m, sx, sy); }
   else { _lxNudgeMonsterSprite(m.type); drawCuteMob(m, sx, sy); }
+  if (_aeEcho) {   // v0.30.1544 echostep - the echo at the landing spot (it eases after the spot, which follows you)
+    _aeEcho.dx = (_aeEcho.dx == null) ? (_aeEcho.x - m.x) : _aeEcho.dx + ((_aeEcho.x - m.x) - _aeEcho.dx) * 0.3;
+    const _eImg = _bossAttackImg || _bossDuckImg || _bossWeaveImg || _bossWalkImg || _bossIdleImg || BOSS_SPRITES[_spriteKey];
+    const _ex = sx + _aeEcho.dx, _ef = m.facing, _er = m._lxDrawRect, _evW = m._visW, _evH = m._visH;
+    ctx.save();
+    ctx.globalAlpha = _dpPrevA * 0.85 * _aeEchoK; ctx.strokeStyle = '#c8a8ff'; ctx.lineWidth = 4; ctx.fillStyle = 'rgba(200,168,255,0.3)';
+    ctx.beginPath(); ctx.ellipse(_ex + m.w / 2, sy + m.h - 2, m.w * (0.3 + 0.25 * _aeEchoK), 12 + 8 * _aeEchoK, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (_eImg) {
+      ctx.globalAlpha = _dpPrevA * 0.5 * _aeEchoK; m.facing = _aeEcho.face;
+      try { _drawBossSprite(_eImg, m, _ex, sy, !!_bossAttackImg, true); } catch (e) {}
+      m.facing = _ef; m._lxDrawRect = _er; m._visW = _evW; m._visH = _evH;   // the echo never moves his ward or hit box
+    }
+    ctx.restore();
+  }
   ctx.globalAlpha = _dpPrevA;   // v0.29.367 — close the _dreamPhase dim
 
   // v0.26.x — PUNISH WINDOW overlay: golden additive glow + pulsing "!" so the
