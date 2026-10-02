@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1562';
+const GAME_VERSION = 'v0.30.1563';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -99571,7 +99571,7 @@ function _aetherionTick(m, dt) {
   const face = () => { m.facing = pcx > bcx ? 1 : -1; };
   // v0.30.x — a windup plays the attack animation for its own length and the release (atkAnimUntil is on the frame clock).
   const _AE_WIND_MS = { lanceWind: A.fast ? 300 : (phase === 3 ? 500 : 650), fractureWind: 500, shardfallWind: 450, skybreakWind: 1200 };
-  const start = (s, why) => { A.st = s; A.t = 0; face(); m._dirFleeT = 0; if (_AE_WIND_MS[s] && typeof _lxFrameNow === 'function') m.atkAnimUntil = _lxFrameNow() + _AE_WIND_MS[s] + 260; A.recent.push(s); if (A.recent.length > 3) A.recent.shift(); A.log.push({ s, at: now, why: why || '' }); if (A.log.length > 40) A.log.shift(); };
+  const start = (s, why) => { A.st = s; A.t = 0; A.windMs = _AE_WIND_MS[s] || 0; A.fired0 = A.fired; face(); m._dirFleeT = 0; if (_AE_WIND_MS[s] && typeof _lxFrameNow === 'function') m.atkAnimUntil = _lxFrameNow() + _AE_WIND_MS[s] + ((m._aetherionEvolved && _AE_MOVE_SET[s]) ? _AE_MOVE_TAIL_BY[_AE_MOVE_SET[s]] : 260); A.recent.push(s); if (A.recent.length > 3) A.recent.shift(); A.log.push({ s, at: now, why: why || '' }); if (A.log.length > 40) A.log.shift(); };
   const finish = () => { A.st = 'idle'; A.t = 0; };
   const gY = (() => { const g = (game.mapData && game.mapData.platforms || []).find((p) => p && p.type === 'ground'); return g ? g.y : (m.y + m.h); })();
   if (st === 'idle') {
@@ -149781,6 +149781,7 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   // `_drawBossSprite(BOSS_SPRITES[m.type], …)`.
   'aetherion2',
   'aetherion2astral',   // v0.30.1501 form-2 astral - form 2's own Astral Judgement (frames-only; picked by _aetherionAstralKey)
+  'aetherion2lance', 'aetherion2fracture',   // v0.30.1563 aetherion-moves - form 2's Shard Lance + Fracture (frames-only; picked by _aetherionMoveKey)
   'gravitos2',
   'gravitos3',   // v0.30.1427 - still redrawn with a menacing pop finish (per user), same pose, body scale and feet · v0.30.1449 every set re-animated from it
   // v0.26.x — Gravitos phase-2/3 "supernova" OHKO sprites (gravitos2star/3star).
@@ -149897,6 +149898,7 @@ const BOSS_FRAMES_ONLY = new Set(['legosaurusdash',
   'towerSovereignswing', 'towerSovereigncolumn', 'towerSovereigncollapse',
   'towerSovereignvolley', 'towerSovereigndrain',
   'towerArbiterverdict', 'towerArbitercolumn',   // v0.30.478
+  'aetherion2lance', 'aetherion2fracture',   // v0.30.1563 aetherion-moves
   'aetherionastral', 'aetherion2astral']);   // v0.30.1501 form-2 astral
 (function _loadBossSprites() {
   // v0.25.498 — `.webp`/`.png` fallback via the shared _loadEntitySprite helper above.
@@ -151065,6 +151067,46 @@ function _aetherionAstralFrame(m) {
     i = Math.min(n - 1, burst + 1 + Math.floor(((pt - _AE_ASTRAL_TELE) / _AE_ASTRAL_TAIL) * (n - burst - 1)));
   }
   return frames[Math.max(0, Math.min(n - 1, i))];
+}
+// v0.30.1563 aetherion-moves - form 2's Shard Lance and Fracture play their own sets (per user: "should aetherion2 have another attacking sprite
+// animation ... for his other attacks?" -> "Generate them and ensure that it fits and calibrate well with the current sprites, ensure
+// no cut offs"). Both were animated FROM his form-2 idle and end on it, like his Astral, so frame 0 is the idle and the sets share
+// the idle's size. The windup frames (0 .. release-1) are walked by HIS OWN countdown (A.t against the windup that move started
+// with: 300 / 500 / 650 ms for the lance, 500 for the fracture), so the release frame is on screen the step the lance leaves his
+// claw / the columns erupt, whatever the step clock did meanwhile. The follow-through plays over the time his attack window runs
+// past the release (atkAnimUntil: 260 ms for the lance, 520 for the fracture's burst - both inside the 650-950 ms before his next
+// move; the follow-through on the frame clock, like the window, since his countdown can stand still after he fires
+// move), on the same countdown, then he is back on his idle. A windup broken off by a stagger never
+// fired (A.fired == A.fired0): no follow-through. An undecoded set returns null and the generic attack pose stays.
+const _AE_MOVE_SET = { lanceWind: 'aetherion2lance', fractureWind: 'aetherion2fracture' };
+const _AE_MOVE_RELEASE = { aetherion2lance: 9, aetherion2fracture: 6 };
+const _AE_MOVE_TAIL_BY = { aetherion2lance: 260, aetherion2fracture: 520 };   // the fracture's ten burst frames need the longer follow-through to read
+function _aetherionMoveKey(m) {
+  const A = m && m._aetherionEvolved ? m._ae : null; if (!A) return null;
+  if (_AE_MOVE_SET[A.st]) return _AE_MOVE_SET[A.st];
+  const last = A.recent && A.recent[A.recent.length - 1], k = _AE_MOVE_SET[last];
+  if (A.st !== 'idle' || !k) return null;
+  // after the windup the set keeps the sprite for as long as his attack window is open (the frame clock): past the end of the
+  // follow-through the picker holds his idle pose, so the shared attack set never plays a stray swing in what is left of the
+  // window (seen in a 30 fps recording) - nor after a windup a stagger broke off
+  return (m.atkAnimUntil && _lxFrameNow() < m.atkAnimUntil) ? k : null;
+}
+function _aetherionMoveFrame(m) {
+  const key = _aetherionMoveKey(m), frames = (key && typeof BOSS_ATTACK_FRAMES !== 'undefined') ? BOSS_ATTACK_FRAMES[key] : null;
+  if (!frames || !frames.length) return null;
+  if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);
+  let n = frames._readyN || 0;
+  while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
+  frames._readyN = n;
+  if (n < frames.length) return null;   // all or nothing: a half-decoded set would stall on its last ready frame
+  const A = m._ae, rel = Math.min(n - 1, _AE_MOVE_RELEASE[key]);
+  if (A.st !== 'idle') { m._aeMoveFire = null; return frames[Math.max(0, Math.min(rel - 1, Math.floor(((A.t || 0) / Math.max(1, A.windMs || 500)) * rel)))]; }
+  if (!((A.fired | 0) > (A.fired0 | 0))) return frames[0];   // broken off before it fired: his idle pose (frame 0 IS his idle)
+  // the follow-through runs on the FRAME clock from the draw after he fired: his countdown stands still while his fight logic
+  // holds him (a stagger, the opening it gives you after a big move), which froze the burst on its release frame
+  const now = _lxFrameNow(), F = m._aeMoveFire;
+  if (!F || F.key !== key || F.n !== A.fired) m._aeMoveFire = { key, n: A.fired, at: now };
+  return frames[Math.min(n - 1, rel + Math.floor(((now - m._aeMoveFire.at) / _AE_MOVE_TAIL_BY[key]) * (n - rel)))];
 }
 function _gravitosPunchFrame(m) {
   const p = _gravitosPunchPair(m);
@@ -155563,6 +155605,9 @@ function drawMonster(m) {
   if (m.type === 'aetherion' && m.patternState === 'astral' && _aetherionAstralFrame(m)) {
     m._aeAstralKey = _aetherionAstralKey(m);
   }
+  // v0.30.1563 aetherion-moves - his Shard Lance / Fracture own the sprite for their windup + follow-through. Same key slot as the Astral, so
+  // the art-key chain, the cast-key-body reset below and the animator's ART_OWNER treat them alike.
+  if (m.type === 'aetherion' && !m._aeAstralKey && _aetherionMoveFrame(m)) m._aeAstralKey = _aetherionMoveKey(m);
   // v0.29.570 — form-1 LASER SWEEP set.
   if (m.type === 'gravitos' && !m._gravStarKey &&
       m.patternState === 'laser' && _gravitosLaserFrame(m)) {
@@ -155609,6 +155654,7 @@ function drawMonster(m) {
        || (/laser$/.test(_spriteKey) && _gravitosLaserFrame(m))
        || (/soul$/.test(_spriteKey) && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds
        || (/astral$/.test(_spriteKey) && _aetherionAstralFrame(m))   // v0.30.x - burst timed to the resolve
+       || ((_spriteKey === 'aetherion2lance' || _spriteKey === 'aetherion2fracture') && _aetherionMoveFrame(m))   // v0.30.1563 aetherion-moves - release on the fire step
        || (/stomp$/.test(_spriteKey) && _krookStompFrame(m))   // v0.30.236 — once-through, lands on the slam
        || (m.type === 'young_confused_barnaby' && _barnabyPunchFrame(m, _spriteKey))   // v0.30.1463 barnaby-punch - the haymaker plays once, on his boxer clock
        || (m.type === 'gravitos' && m.patternState && m.patternState !== 'idle' && _gravitosOnceFrame(m, _spriteKey))   // v0.30.309 — no looping sets on Gravitos

@@ -20,7 +20,9 @@ async function info(f) {
     if (!isFx(data[k], data[k + 1], data[k + 2])) { if (y < t) t = y; if (y > b) b = y; if (x < x0) x0 = x; if (x > x1) x1 = x; } }
   const lo = b - Math.round((b - t) * 0.07); let sx = 0, c = 0;
   for (let y = lo; y <= b; y++) for (let x = 0; x < W; x++) { const k = (y * W + x) * 4; if (data[k + 3] > 128 && !isFx(data[k], data[k + 1], data[k + 2])) { sx += x; c++; } }
-  return { W, H, solid, feet: sx / c, w: x1 - x0 + 1 };
+  const cut = t + Math.round((b - t) * 0.45); let u0 = W, u1 = -1;   // the upper body (above his waist): where wings sprout, clear of the tail
+  for (let y = t; y <= cut; y++) for (let x = 0; x < W; x++) { const k = (y * W + x) * 4; if (data[k + 3] > 128 && !isFx(data[k], data[k + 1], data[k + 2])) { if (x < u0) u0 = x; if (x > u1) u1 = x; } }
+  return { W, H, solid, feet: sx / c, w: x1 - x0 + 1, uw: u1 - u0 + 1 };
 }
 const iou = (a, b) => { let i = 0, u = 0; for (let k = 0; k < a.length; k++) { if (a[k] || b[k]) u++; if (a[k] && b[k]) i++; } return u ? i / u : 0; };
 const ct = fs.readFileSync(path.join(ROOT, 'data/anim_calib.js'), 'utf8'), ca = ct.indexOf('window.LX_ANIM_CALIB = ') + 23;
@@ -35,8 +37,10 @@ const steps = []; for (let i = 1; i < nA; i++) { let d = 0; for (let k = 0; k < 
 const off = steps.map((v, i) => [i + 1, v]).filter(([i, v]) => (i < 13 || i > 18) && v > 4);
 ok('...no off-model frame: outside the burst (frames 13-18) every step changes < 4% of the canvas', off.length === 0, off.length ? JSON.stringify(off) : 'max ' + Math.max(...steps.filter((_, i) => i + 1 < 13 || i + 1 > 18)).toFixed(1) + '%');
 const walk = []; for (let i = 0; i < count('walk', 'aetherion2'); i++) walk.push(await info(B('walk', 'aetherion2', i)));
-const iw = idle.reduce((s, q) => s + q.w, 0) / idle.length, wide = walk.map((q) => q.w / iw);
-ok('the walk has no wings: every frame within 15% of the idle figure\'s width', wide.every((r) => r > 0.85 && r < 1.15), wide.map((r) => r.toFixed(2)).join(' '));
+// v0.30.1526: measured on the UPPER body - the new stride swings his tail out behind him (whole-figure width up to 1.24x), while the
+// old winged walk spread 1.28-1.43x above the waist on 4 of 9 frames (this check still fails it)
+const iw = idle.reduce((s, q) => s + q.uw, 0) / idle.length, wide = walk.map((q) => q.uw / iw);
+ok('the walk has no wings: every frame\'s upper body within 25% of the idle\'s width', wide.every((r) => r > 0.75 && r < 1.25), wide.map((r) => r.toFixed(2)).join(' '));
 // screen x of the feet in facing space: dx * targetH + (feet - canvas centre) * px-per-source-px * s  (targetH 658.3 for him)
 const TH = 658.3, K = 787.5 / 1656 / 0.87, cal = (k, st) => (CAL[k] && CAL[k][st]) || { s: 1, dx: 0 };
 const scr = (k, st, f) => (cal(k, st).dx || 0) * TH + (f.feet - f.W / 2) * K * cal(k, st).s;
