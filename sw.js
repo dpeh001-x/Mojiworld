@@ -288,7 +288,9 @@
 // are REPLACED under their own names (the remaining boon FX regenerated and animated), so a returning browser would keep drawing the old art for a session.
 // v0.30.1538 - v146 -> v147. 47 NPC stills + their nine idle frames each (470 files) are REPLACED under their own names
 // (outline evened to 1.42 game px; Guguma untouched), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v147';   // v0.30.1538 - NPC outlines evened (same names)
+// v0.30.1559 - v147 -> v148. 1,259 monster files (outlines sized to the monster, Lantern Wisp's halo removed) are REPLACED under their own names
+// so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v148';   // v0.30.1559 - monster outlines (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
