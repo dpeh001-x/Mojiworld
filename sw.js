@@ -286,7 +286,9 @@
 // are REPLACED under their own names (boon FX regenerated and animated), so a returning browser would keep drawing the old art for a session.
 // v0.30.1486 - v140 -> v141. nova_ring, echo_slash, time_ripple, crescendo_hit, execute_mark, coin_burst, doppel_flash and frost_bloom
 // are REPLACED under their own names (the remaining boon FX regenerated and animated), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v146';   // v0.30.1537 - Celestial Aurora burst + field redrawn (same names)
+// v0.30.1538 - v146 -> v147. 47 NPC stills + their nine idle frames each (470 files) are REPLACED under their own names
+// (outline evened to 1.42 game px; Guguma untouched), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v147';   // v0.30.1538 - NPC outlines evened (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
