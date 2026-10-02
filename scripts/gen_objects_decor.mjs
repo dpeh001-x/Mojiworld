@@ -52,6 +52,11 @@ const DESC = {
   // three earlier wordings drew the castle on a beach slab or a dune running off the canvas; this one asks for the object alone
   beach_sandcastle: ['a small compact sandcastle game prop: three round pale golden sand towers with crenellated tops, a tiny red pennant flag on the tallest, a few small white and pink seashells pressed into its walls and a small blue toy spade leaning on one tower; the towers rest directly on a flat bottom edge with only a thin lip of sand at their feet, no wider than the castle itself - an isolated object, NOT a beach scene, no sand ground, no dune, no mound spreading to the sides', 0.55],
   catacomb_bone_urn: ['a large cracked stone funeral urn of grey-violet stone with carved bands around its belly, overflowing with old ivory bones and two small skulls, and three melted white candles on its rim with small orange flames', 0.7],
+  // bland-maps 3 - the Distorted Portal maps, drawn with DECOR_WORDS=ink (their dark inked look; 'Pixel Art' is not an art_style - HTTP 400)
+  rift_cracked_mirror: ['a tall standing mirror in a dark lacquered wooden frame on two short feet, seen straight from the side-front: the black-and-deep-red lacquer frame has small gold corner caps, the glass is shattered into jagged shards that reflect a crimson sky with a faint violet glow along the cracks, and two loose glass shards lie at its feet', 0.95],
+  rift_stone_lantern: ['a weathered Japanese stone lantern (toro) of dark slate-blue stone: a square base, a slim post, a firebox with a window glowing a dim crimson-orange, a wide curved pointed roof cap; thin cracks run through the stone with a faint violet light leaking from them, and a little dark moss on the base', 0.9],
+  // picked with DECOR_MARGIN=48: at 24 its needles touched the side margin the edge-feather probe watches
+  rift_withered_pine: ['a small withered black pine tree in the Japanese style: a twisted dark charcoal trunk bending to one side, three flat sparse clumps of dark navy-teal needles, a few crimson leaves still clinging, growing from a low mound of dark slate rocks', 0.9],
 };
 const CAMERA = 'CRITICAL CAMERA: a flat, straight-on side view for a 2D side-scrolling platformer game - the camera looks at the object '
   + 'exactly from the side at eye level, like a theatre flat. NO 3/4 view, NO isometric, no vanishing point, no top surface showing '
@@ -67,7 +72,7 @@ const STYLE = 'The object\'s own natural colours (no neon, no rainbow). A single
   + 'background, no ground, no floor, no cast shadow, no text. An inanimate object: no face, no eyes, no mouth.';   // a face reads as a monster (the unused giant mushroom)
 const argv = process.argv.slice(2);
 if (argv[0] === 'pick') {
-  const CW = 768, M = 24, BOTTOM = 766;
+  const CW = 768, M = Number(process.env.DECOR_MARGIN || 24), BOTTOM = 766;
   for (const p of argv.slice(1)) {
     const [key, file] = p.split('='); if (!DESC[key] || !file || !fs.existsSync(file)) { console.error('bad pick ' + p); process.exit(1); }
     // a ground shadow the prompt did not ask for (the anchor: a 560 px ellipse in the bottom 9 rows under a 96 px crown) - a band in
@@ -131,6 +136,9 @@ async function generate(body) {
 }
 const RAW = path.join(OUT, 'raw'); fs.mkdirSync(RAW, { recursive: true });
 const WORDS = (process.env.DECOR_WORDS || 'bold,thick').split(',');
+// ink (bland-maps 3): the Distorted Portal's look - a thin dark ink line, flat posterized shading in a dark palette
+const INK = 'Dark moody 2D game-prop illustration: a THIN dark navy ink line around the silhouette and the main parts, flat posterized shading in a limited dark palette of deep navy, slate blue, charcoal and crimson, like a silhouette lit by a red sunset; no bold black sticker outline, no white border, no painterly brushwork, no grain.';
+const STYLE_INK = 'A single object, centred, full object visible, transparent background, no ground, no floor, no cast shadow, no text. An inanimate object: no face, no eyes, no mouth.';
 // four workers over the (key, wording) queue, in argument order; a 402 (credits out, costs nothing) stops new requests and
 // exits 2 once the in-flight ones settle (a hard exit mid-fetch tripped a libuv assertion)
 const keys = argv.slice(1).filter((k) => DESC[k] || (console.log('skip unknown', k), false));
@@ -142,8 +150,8 @@ const worker = async () => {
     const have = fs.readdirSync(RAW).filter((f) => f.startsWith(`${k}_${wd}_`)).length;
     if (argv[0] === 'fill' && have) continue;
     try {
-      const bufs = await generate({ image_type: 'sprite', art_style: 'Cel-Shaded', perspective: 'Side-Scroll', aspect_ratio: 'ar_1_1',
-        n: 1, augment_prompt: false, prompt: `${DESC[k][0]}. ${CAMERA} ${wd === 'thick' ? THICK : BOLD} ${STYLE}` });
+      const bufs = await generate({ image_type: 'sprite', art_style: wd === 'ink' ? 'Illustration' : 'Cel-Shaded', perspective: 'Side-Scroll', aspect_ratio: 'ar_1_1',
+        n: 1, augment_prompt: false, prompt: wd === 'ink' ? `${DESC[k][0]}. ${CAMERA} ${INK} ${STYLE_INK}` : `${DESC[k][0]}. ${CAMERA} ${wd === 'thick' ? THICK : BOLD} ${STYLE}` });
       bufs.forEach((b, i) => fs.writeFileSync(path.join(RAW, `${k}_${wd}_${have + i + 1}.png`), b));   // raw first, untouched
       console.log(k, wd, bufs.length);
     } catch (e) { console.log(k, wd, 'FAILED', e.message); if (/402/.test(e.message)) stop = true; }

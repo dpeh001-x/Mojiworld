@@ -21,13 +21,16 @@ const DECOR_MAPS = ['ancient', 'forest', 'cryptHollow', 'wildflowerPlains', 'mus
   'magmaFoundry', 'magmaFoundry2', 'sauroSlope', 'frostbiteHollow', 'glasswindSteppe', 'glasswindSteppe2', 'boneGraveyard', 'boneGraveyard2',
   'boneGraveyard3', 'hollowSepulchre', 'hollowSepulchre2', 'ossuarySprawl', 'candyCanyon', 'bubblegumSwamp', 'skyGarden', 'thunderPlateau',
   'stormCrest', 'graniteBluffs', 'stardustAtrium', 'duneSands', 'wayfarersLantern', 'wayfarersLantern1', 'wayfarersLantern2',
-  'tidepoolShoals'];   // bland-maps 5
+  'tidepoolShoals',   // bland-maps 5
+  'fracturedReflection', 'distortedThreshold'];   // bland-maps 3: the Distorted Portal
 const NEW_ART = ['forest_mossy_stump', 'forest_hollow_log', 'fungal_glowcap_cluster', 'jungle_glowbloom', 'jungle_vine_ruin', 'reef_amphora', 'wreck_anchor',
   'wreck_ship_wheel', 'foundry_ore_cart', 'sauro_egg_nest', 'ice_crystal_cluster', 'ice_frozen_sled', 'grave_tombstone', 'grave_iron_lantern',
   'candy_lollipop', 'candy_gumdrop_pile', 'storm_lightning_rod', 'atrium_marble_urn', 'bluff_stone_cairn', 'desert_cactus', 'temple_stone_lantern',
   // bland-maps
   'bluff_windswept_pine', 'bluff_pickaxe_boulder', 'glasswind_chime_post', 'steppe_snowy_pine', 'atrium_armillary', 'atrium_star_brazier',
-  'grave_candle_altar', 'beach_sandcastle', 'catacomb_bone_urn'];
+  'grave_candle_altar', 'beach_sandcastle', 'catacomb_bone_urn',
+  // bland-maps 3
+  'rift_cracked_mirror', 'rift_stone_lantern', 'rift_withered_pine'];
 const EXTRA_MAPS = ['cadetsStrand'], EXTRA_KEYS = new Set(['beach_sandcastle']);
 // the props this pass placed (the new art + eight existing props reused); older placements on these maps (Emerald Thicket's signpost,
 // a Prop Editor hardbake) are the user's and are only counted, not checked
