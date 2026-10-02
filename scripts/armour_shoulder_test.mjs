@@ -4,6 +4,8 @@
 // outline) overlaps it, so that arm comes out from under its own pad - and the cover slides back into the shoulder as the arm lifts.
 // The Dawnshard Aegis's worn art had kept a chunk of its sunburst halo (a ring and one big ray) on each pad; both are cut back to
 // the pad's rim and outlined.
+// Since the pauldron hinge (pauldron_hinge_test) plated armour turns its near pad with the arm instead, and the cover stands down for
+// it; the cover checks below use pieces that keep it - a robe, a mantle and Arcane Vestments (whose "pad" is a collar fold).
 //   [1] with armour on, idle and the whole walk draw the armour twice (the torso, then the front shoulder); one with the cover off
 //   [2] the cover slides off a lifted arm: the mage's cast and the archer's draw (arm lifted ~1.4 / ~1.9 rad) draw the armour once
 //   [3] the torso's own armour draw is identical with the cover on and off (placement untouched), and no armour draws nothing
@@ -30,7 +32,7 @@ try {
   await page.waitForTimeout(1500);
   const R = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); window._lxNoGearLight = true;
-    const NAMES = ['plate_armor', 'dawnshard_aegis', 'sorcerers_robes'];
+    const NAMES = ['arcane_vestments', 'hurricane_mantle', 'sorcerers_robes'];   // pieces that keep the cover (no hinged pad)
     const eff = (n) => _lxEqErasedImg('arm:' + n) || _lxEquipSprite('armors', n);
     for (const n of NAMES) { const im = _lxEquipSprite('armors', n); if (im && typeof _lxWantImg === 'function') _lxWantImg(im, true); }
     for (let i = 0; i < 300 && !NAMES.every((n) => eff(n) && eff(n).complete && eff(n).naturalWidth && _lxBakedDownscale(eff(n), 256)); i++) await sleep(100);
@@ -56,7 +58,7 @@ try {
     const at = (x, y) => [Math.round(100 + 2 * S * x), Math.round(225 + 2 * S * y)];
     const avg = (cv, p) => { const d = cv.getContext('2d').getImageData(p[0] - 1, p[1] - 1, 3, 3).data; const s = [0, 0, 0]; for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) s[k] += d[i + k] / 9; return s.map(Math.round); };
     const top = at(SP.x + J.x, SP.y + J.y + 1.5), hand = at(SP.x + J.x - 2, SP.y + J.y + 12);
-    const on = draw(ov('plate_armor'), 'idle', 0).cv, off = draw(ov('plate_armor'), 'idle', 0, null, true).cv;
+    const on = draw(ov('arcane_vestments'), 'idle', 0).cv, off = draw(ov('arcane_vestments'), 'idle', 0, null, true).cv;
     const diff = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
     out.px = { top: [avg(on, top), avg(off, top)], hand: [avg(on, hand), avg(off, hand)] };
     out.px.dTop = diff(out.px.top[0], out.px.top[1]); out.px.dHand = diff(out.px.hand[0], out.px.hand[1]);
