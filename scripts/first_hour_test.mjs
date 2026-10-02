@@ -69,7 +69,7 @@ try {
   // 700 ms hold without a frame, so hold again (still the real key) until the step ticks.
   const moveTick = async () => { for (let j = 0; j < 6; j++) { await key('ArrowRight', 700); const s = await st(); if (s.step !== 0 || /\d+s?$/.test(s.next || '')) break; } };
   const ACT = [['move', moveTick], ['attack', () => key('z')], ['panel', () => key('u')], ['tab_items', () => tab('items')],
-    ['potion', async () => { await esc(); await key('PageUp'); }], ['combo', hitSnail], ['panel (already met)', null], ['tab_items (already met)', null],
+    ['potion', async () => { await esc(); await key('PageUp'); }], ['combo', hitSnail], ['tab_lp (fresh)', () => tab('lp')], ['tab_items (already met)', null],
     ['tab_boons', () => tab('boons')], ['worldmap', async () => { await esc(); await key('w'); }], ['quest', async () => { await esc(); await key('q'); }],
     ['tab_mojimon', async () => { await esc(); await tab('mojimon'); }], ['codex (Y)', async () => { await esc(); await key('y'); }], ['tab_skills (last)', async () => { await esc(); await tab('skills'); }]];
   const rows = [];
@@ -91,7 +91,7 @@ try {
   check(moved === ACT.length, 'every one of the 14 tour steps ticks from the real key / tab and moves on by itself', moved + '/' + ACT.length + ' ' + J(rows.filter((r) => !r.moved)));
   const met = rows.filter((r) => /already met/.test(r.tag));
   // both must move on by themselves; the countdown label is sampled every 100 ms, which a loaded machine can miss on one
-  check(met.length === 2 && met.every((r) => r.moved) && met.some((r) => /\d$/.test(r.count || '')), 'a step the player already met counts down on Next and moves on by itself', J(met));
+  check(met.length === 1 && met.every((r) => r.moved) && met.some((r) => /\d$/.test(r.count || '')), 'a step the player already met counts down on Next and moves on by itself', J(met));
   const y = rows.find((r) => /codex/.test(r.tag)); check(!!(y && y.moved), 'pressing Y (the MojiDex, as the step asks) ticks the "Systems to Explore" step', J(y));
   const last = rows[ACT.length - 1]; check(!!(last && last.moved && /Got it/.test(last.count || '')), 'finishing the last step counts down "Got it" and closes the tour', J(last));
   await esc(); await page.waitForTimeout(3200);
@@ -105,11 +105,11 @@ try {
     const txt = (i) => { _tutStep = i; _renderTutorialStep(); return (document.getElementById('tutorial-modal').textContent || '').replace(/\s+/g, ' '); };
     _showTutorialModal(); await sleep(300);
     out.fight = txt(1).includes('dashes you clear') && /blocks — raise it just as a hit lands to parry/.test(txt(1));
-    const lv = TUTORIAL_STEPS.findIndex((s) => /Level Up/.test(s.title)); const lt = txt(lv);
+    const lv = TUTORIAL_STEPS.findIndex((s) => /Level Up/.test(s.title)); const lt = txt(lv); const mn = TUTORIAL_STEPS.findIndex((s) => /Your Menus/.test(s.title));
     out.reset = /refunds every point for 20% of your Mojicoins and [\d,]+ Setshards/.test(lt) && !/Brok charges/.test(lt);
     _TUT_SEEN_TAGS.panel = true; TUTORIAL_STEPS.forEach((s) => { s._done = false; s._preDone = false; });
-    _tutStep = lv + 1; _renderTutorialStep(); await sleep(200); document.getElementById('tut-prev').click(); await sleep(4000);
-    out.back = { step: _tutStep, want: lv };
+    _tutStep = mn + 1; _renderTutorialStep(); await sleep(200); document.getElementById('tut-prev').click(); await sleep(4000);
+    out.back = { step: _tutStep, want: mn };
     _closeTutorial(true); await sleep(1500);
     player._tutorialSeen = true; player.quests.unlocked = {}; player.quests.active = {}; loadMap('town', 400); await sleep(2600);
     out.returning = !!(player.quests.unlocked || {}).q_act1_waking;
