@@ -71,7 +71,7 @@ try {
   const subAccepts = sub.filter((l) => /Accept:|Turn in:|\(\d+\/\d+\)/.test(l));
   check(opened && subAccepts.length === n && /Back/.test(sub[sub.length - 2] || '') && sub[sub.length - 1] === 'Leave' && sub.length === n + 2, 'the sub-page: the N quest rows, Back, Leave - nothing else', J(sub));
   const subText = await page.evaluate(() => { const d = document.getElementById('dialog'); if (d._twSkip) d._twSkip(); return (document.getElementById('dialog-text').textContent || '').replace(/\s+/g, ' ').trim(); });   // flush the reveal before reading
-  check(new RegExp(setup.giver + ' lays the jobs out').test(subText) && new RegExp(n + ' matters').test(subText), 'the sub-page has its own short line', subText.slice(0, 80));
+  check(new RegExp(setup.giver + ' lays the jobs out').test(subText) && new RegExp(n + ' jobs\\. Which one').test(subText), 'the sub-page has its own short line', subText.slice(0, 80));
   await click('^\\u25c0 Back');   // anchored: a quest called "Sing Back the Depths" also contains the word
   const back = await labels();
   check(back.filter((l) => /Quests \(\d+\)/.test(l)).length === 1 && back.length === card.length, 'Back returns to the full card', J(back));

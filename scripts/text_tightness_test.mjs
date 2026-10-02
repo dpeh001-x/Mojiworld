@@ -44,7 +44,7 @@ const PROBES = [
  "I watched. The big archers at the Reach let m",
  "s said it in twelve ages. Hop in, champ.",
  "alley smoke and rumour. The empire will breat",
- "A new name for the ledger. Tell me what you d",
+ "A new name for the ledger. Tell me what you h",
  "Moji is older than its name. The Bastion rose",
  "The old Academia ran on a single ley-line, an",
  "peaceably. I am Yun, sentinel under Lady Hong",

@@ -127,8 +127,8 @@ const r = await page.evaluate(async () => {
     const said = body ? (body.textContent || '').replace(/\s+/g, ' ') : '';
     const want = liveTarget('q_pq_carriage');
     out.miloOffer = { onOfferBranch: /Carriage of Ascension/.test(said),
-                      quotes: said.includes(want + ' last stowaway'),
-                      staleEight: /eight last stowaway/.test(said),
+                      quotes: said.includes('the last ' + want + ' stowaway'),
+                      staleEight: /eight last stowaway|last eight stowaway/.test(said),
                       said: said.slice(-110) };
     try { closeDialog(); } catch (e) {}
   }

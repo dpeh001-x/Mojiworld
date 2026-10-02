@@ -47,7 +47,7 @@ try {
       oneThing: src.includes('the one thing I can\\\'t remember'), knows: src.includes('…I know what you are now.'), placing: src.includes('placing your face'),
       brought: src.includes('You brought a shard back.'), took: src.includes('You took a shard back.'), pause: src.includes('We call the stillness the Pause'),
       home: src.includes('Go and bring the dreaming home.'), takeBack: src.includes('Go take the dream back'), gateTrial: src.includes('the gate-trial'),
-      swing: src.includes('if it had been let finish its swing'), aselm: /\bAselm\b/.test(src), brave: src.includes('brave enough to swing'), milo: src.includes('for STAGE 1 — The Ticket Rush Lobby.') };
+      swing: src.includes('if it had been allowed to finish its swing'), aselm: /\bAselm\b/.test(src), brave: src.includes('brave enough to swing'), milo: src.includes('for STAGE 1 — The Ticket Rush Lobby.') };
     const host = document.getElementById('lore-body') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'lore-body' }));
     _renderLoreTab('world'); out.faces = (host.textContent.match(/borrows your memories[^.]*\./) || [''])[0].replace(/\s+/g, ' ');
     // 2-5. real dialogue
