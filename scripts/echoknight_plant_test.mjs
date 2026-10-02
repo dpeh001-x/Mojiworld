@@ -34,11 +34,11 @@ const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof spawnMonster === 'function' && typeof drawMonster === 'function'
   && typeof _lxMobPlantDy === 'function' && typeof MONSTER_SPRITE_META === 'object', null, { timeout: 120000 });
-await page.evaluate(() => { if (typeof _lxArt2WantMon === 'function') for (const t of ['echoKnight', 'boneGolem', 'grumpsquid', 'seastar', 'future_lyra', 'slime']) _lxArt2WantMon(t, true); });   // v0.30.x lazy-art2 - a monster sheet loads when wanted: ask for the six measured below
+await page.evaluate(() => { if (typeof _lxArt2WantMon === 'function') for (const t of ['echoKnight', 'boneGolem', 'grumpsquid', 'seastar', 'slime']) _lxArt2WantMon(t, true); });   // v0.30.x lazy-art2 - a monster sheet loads when wanted: ask for the five measured below
 await page.waitForFunction(() => MONSTER_SPRITE_META.echoKnight && MONSTER_SPRITE_META.echoKnight.bboxBottomY != null, null, { timeout: 60000 });
 // v0.30.x lazy-art2 - and the boot image hold has let go (the menu is up): the old wait for the boot burst implied it, and
 // until then the attack frames the spawn below builds are queued behind the title
-await page.waitForFunction(() => ['echoKnight', 'boneGolem', 'grumpsquid', 'seastar', 'future_lyra', 'slime'].every((t) => MONSTER_SPRITES[t] && MONSTER_SPRITES[t].naturalWidth > 0 && MONSTER_SPRITE_META[t])
+await page.waitForFunction(() => ['echoKnight', 'boneGolem', 'grumpsquid', 'seastar', 'slime'].every((t) => MONSTER_SPRITES[t] && MONSTER_SPRITES[t].naturalWidth > 0 && MONSTER_SPRITE_META[t])
   && (!window._lxBootHold || window._lxBootHold.stats().open), null, { timeout: 90000 });
 
 const r = await page.evaluate(async () => {
@@ -56,7 +56,7 @@ const r = await page.evaluate(async () => {
     return Math.round((dy + ((meta.bboxBottomY + 1) / srcH) * targetH) * 100) / 100;   // opaque bottom vs foot line, +down
   };
   out.ladder = {};
-  for (const t of ['echoKnight', 'boneGolem', 'grumpsquid', 'seastar', 'future_lyra', 'slime']) out.ladder[t] = plant(t);
+  for (const t of ['echoKnight', 'boneGolem', 'grumpsquid', 'seastar', 'slime']) out.ladder[t] = plant(t);
 
   // ---- the real draw: spy the blit, alpha-scan what was drawn ----
   game.monsters = [];
@@ -138,12 +138,12 @@ ok('the REAL draw agrees: opaque bottom of the static sprite within 6 px of the 
 ok('an ATTACK frame plants the same way (frames anchor through the same ladder)',
   r.attackDraw && (/monsters\/attack/.test(r.attackDraw.src) || r.attackDraw.differentObject)
   && r.attackDraw.sinkPx >= -3 && r.attackDraw.sinkPx <= 8, r.attackDraw);
-ok('golden: the other post-clamp types are untouched (boneGolem 2.99, grumpsquid 9.4, seastar 6.93, future_lyra 2.24, slime 3)',
+ok('golden: the other post-clamp types are untouched (boneGolem 2.99, grumpsquid 9.4, seastar 6.93, slime 3)',
   r.ladder && Math.abs(r.ladder.boneGolem - 2.99) < 0.3 && Math.abs(r.ladder.grumpsquid - 9.4) < 0.3
-  && Math.abs(r.ladder.seastar - 6.93) < 0.3 && Math.abs(r.ladder.future_lyra - 2.24) < 0.3 && Math.abs(r.ladder.slime - 3) < 0.3,
+  && Math.abs(r.ladder.seastar - 6.93) < 0.3 && Math.abs(r.ladder.slime - 3) < 0.3,
   r.ladder);
-ok('the animator mirror dropped echoKnight and kept the other four (parity)',
-  pc && !/echoKnight/.test(pc) && /boneGolem: 10/.test(pc) && /grumpsquid: 4/.test(pc) && /future_lyra: 9/.test(pc) && /seastar: 6/.test(pc),
+ok('the animator mirror dropped echoKnight (and the +9 of the old mirror Lyra art with it) and kept the other three (parity)',
+  pc && !/echoKnight/.test(pc) && /boneGolem: 10/.test(pc) && /grumpsquid: 4/.test(pc) && !/future_lyra/.test(pc) && /seastar: 6/.test(pc),
   { POST_CLAMP_PX: pc.trim() });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));

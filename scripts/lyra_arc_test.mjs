@@ -84,7 +84,7 @@ const r = await page.evaluate(() => {
   // the chain must be a LINE, not three quests that happen to exist
   out.chain = ids.map((i) => ((QUESTS[i] || {}).prereq) || null);
   // the target's maps must be enterable at the quest's own level gate
-  out.targetMapLevels = spawnMaps('future_lyra').map((m) => ({ map: m, levelReq: MAPS[m].levelReq }));
+  out.targetMapLevels = spawnMaps('harea').map((m) => ({ map: m, levelReq: MAPS[m].levelReq }));
   out.totalQuests = Object.keys(QUESTS).length;
   return out;
 });

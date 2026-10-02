@@ -69,10 +69,13 @@ try {
       const set = _monsterFramesFor(t); return (st === 'walk' && set.walk && set.walk.length) ? set.walk : set.idle; };
     // decoded AND right-sized: _lxShrinkFrames swaps slots for bakes (one sync bake per game.time tick) and marks the set _lxShrunk when done
     const decoded = (arr) => !!arr && arr.length > 0 && arr.every((f) => f && f.complete && f.naturalWidth > 0) && (arr._lxBase === undefined || !!arr._lxShrunk);
+    // v0.30.1549: a still-only monster (the frame index lists no idle set for it) draws its static - that IS its whole set
+    const stillOnly = (m) => { const fi = window.LX_SPRITE_FRAME_INDEX && window.LX_SPRITE_FRAME_INDEX.frames; return !!fi && !/^zodiac_/.test(m.type) && !(BOSS_IDLE_FRAMES[m.type] && BOSS_IDLE_FRAMES[m.type].length) && !((fi['monsters/idle'] || {})[m.type] > 0); };
+    const decodedOf = (m, st) => (stillOnly(m) ? !!(MONSTER_SPRITES[m.type] && MONSTER_SPRITES[m.type].naturalWidth > 0) : decoded(arrOf(m, st)));
     const settle = async (m, st) => { try { _lxWarmBossFrames(m.type); } catch (e) {} const t0 = _pn(), gW = game.time; let k = 0;   // the world is paused: tick game.time so the bakes run HERE, not mid-sweep
-      while (_pn() - t0 < 30000 && !decoded(arrOf(m, st))) { game.time = gW + (++k); hold(m, st); ctx.setTransform(1, 0, 0, 1, 0, 0); try { oDraw(m); } catch (e) {} await sleep(200); }
+      while (_pn() - t0 < 30000 && !decodedOf(m, st)) { game.time = gW + (++k); hold(m, st); ctx.setTransform(1, 0, 0, 1, 0, 0); try { oDraw(m); } catch (e) {} await sleep(200); }
       game.time = gW; let prev = null, frames = null; for (let i = 0; i < 25; i++) { frames = distinct(sweep(m, st)); const sig = JSON.stringify(frames.map((f) => [+f.h.toFixed(1), +f.w.toFixed(1)])) + '|' + (+(m._visH || 0)).toFixed(1); if (i >= 1 && sig === prev) break; prev = sig; await sleep(250); }
-      return { frames, decoded: decoded(arrOf(m, st)) }; };
+      return { frames, decoded: decodedOf(m, st) }; };
     const med = (a) => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[s.length >> 1] : null; };
     const calS = (t, st) => { try { const c = _lxAnimCalib(t, /^zodiac_/.test(t) ? 'zodiac/' + st : st); return (c && c.s > 0) ? c.s : 1; } catch (e) { return 1; } };
     for (const type of list) {

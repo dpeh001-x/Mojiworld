@@ -3,7 +3,7 @@
 // "use ludo.ai to make pop punk styled projectiles that fit the character", "make cute animation for it".
 // Held: each mob's live shot carries its own key; the shot flies exactly like the orb it replaced (speed, size, arc, magic
 // damage) so difficulty is unchanged; its still, nine-frame loop and cast aura load; the blit draws the loop; the other
-// mdark users (Spook, Bone Wraith, Future Lyra, Mirror Self, the Conductor) still fire mdark.
+// mdark users (Spook, Bone Wraith, Harea, Mirror Self, the Conductor) still fire mdark.
 //   node scripts/own_shots_test.mjs [page.html] [port]    (MOJI_GAME_FILE / this repo's game by default)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -44,7 +44,7 @@ const r = await page.evaluate(async (OWN) => {
     const was = (() => { const t = monsterTypes[type], keep = t.shoot; t.shoot = 'mdark'; const x = fire(type); t.shoot = keep; return x; })();   // the same mob on the orb, for a like-for-like flight check
     out.mobs[type] = { own, was };
   }
-  for (const t of ['wraith', 'boneWraith', 'future_lyra']) out.others[t] = monsterTypes[t] && monsterTypes[t].shoot;
+  for (const t of ['wraith', 'boneWraith', 'harea']) out.others[t] = monsterTypes[t] && monsterTypes[t].shoot;
   // art: still, loop, cast aura
   const keys = Object.values(OWN);
   for (const k of keys) { _projAnimFrame(k); _lxMobProjReady(LX_MOB_PROJ[k]); }

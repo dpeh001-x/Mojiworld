@@ -19,7 +19,7 @@ const require = createRequire(path.join(ROOT, 'package.json')); const { chromium
 const PORT = process.env.PORT || '13923'; let pass = 0, fail = 0;
 const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d !== undefined ? '  ' + JSON.stringify(d).slice(0, 600) : '')); ok ? pass++ : fail++; };
 const KEPT = ['pathsBane', 'zodiac_pisces'], REDRAWN = ['scorpion', 'mummy', 'nougatBear', 'thornmaw', 'smithgolem', 'shardlich', 'ossuaryTyrant', 'echoKnight',
-  'pqConductor', 'blockPopo', 'blockHupo', 'blockRhirhi', 'blockGary', 'legosaurus', 'deranged_kuro', 'willeo', 'young_confused_barnaby', 'fatDragon',
+  'pqConductor', 'blockPopo', 'blockHupo', 'blockRhirhi', 'blockGary', 'legosaurus', 'taiger', 'willeo', 'young_confused_barnaby', 'fatDragon',
   'sundered_smith', 'goblinMauler', 'graveReaver', 'zodiac_aries', 'zodiac_capricorn', 'towerArbiter', 'towerSovereign'];
 // FILES
 const bad = [];

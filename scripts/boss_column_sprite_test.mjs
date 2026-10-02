@@ -101,7 +101,7 @@ const checks = [
     ['towerArbiter', 'towerSovereign'].every((t) => { const x = r.rows.find((y) => y.type === t); return x && x.tg.decoded; })],
   // v0.30.486 — a boss may not draw another entity's beam. Ownership is a
   // name test: fx_col_<something-that-is-this-caster>. Mobs may still share a
-  // family beam (towerHexer/future_lyra both use fx_col_tombhexer by design).
+  // family beam (towerHexer/harea both use fx_col_tombhexer by design).
   ['every BOSS draws its own beam, not a borrowed one', (() => {
     const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
     borrowers = r.rows.filter((x) => {

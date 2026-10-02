@@ -128,7 +128,7 @@ try {
     { const cm = mapOf((n) => n.role === 'cedric'); if (cm) { await go(cm); out.cedric = await talk((n) => n.role === 'cedric'); await close(); } }
     out.epitaph = (typeof _bossEpitaph === 'function') ? (_bossEpitaph('legosaurus', null) || '') : '';
     out.hg = ((STORY_BEATS.hourglass_verdict || {}).stanzas || []).slice(0, 2).map((s) => (typeof s.text === 'function' ? s.text({}) : s.text) || '');
-    out.sigs = ['future_lyra', 'deranged_kuro', 'potato_uncle', 'young_bloodthirsty_vermillion', 'pathsBane', 'echoKnight', 'towerSovereign'].map((k) => (monsterTypes[k] || {}).signature || '');
+    out.sigs = ['harea', 'taiger', 'lady_honk', 'young_bloodthirsty_vermillion', 'pathsBane', 'echoKnight', 'towerSovereign'].map((k) => (monsterTypes[k] || {}).signature || '');
     // ---- 9. caps ------------------------------------------------------------------------------------------------------------------------
     const wc = (t) => String(t || '').replace(/<[^>]*>/g, ' ').trim().split(/\s+/).filter(Boolean).length, KEY = /\b(press|key|click|tap)\b|\[[A-Z]\]/i;
     out.stanzaWords = ((STORY_BEATS.siblings_reunion || {}).stanzas || []).map((s) => wc(s.text));
