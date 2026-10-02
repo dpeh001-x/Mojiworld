@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1572';
+const GAME_VERSION = 'v0.30.1573';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -152493,6 +152493,7 @@ function _lxSpriteKeyOf(im) {
 }
 function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   sprite = _lxBossStandIn(sprite, m);   // v0.30.775 — never a raw over-cap frame on the main thread while its set bakes
+  if (sprite && typeof sprite === 'object') { const _ba = window._lxBodyAsked || (window._lxBodyAsked = new WeakSet()); if (!_ba.has(sprite)) { _ba.add(sprite); _lxSpriteBodyFrac(sprite); } }   // v0.30.1573 bosslag - measured off-thread on its first draw, ready before any ward
   const _lxTr0 = (typeof ctx.getTransform === 'function' && ((m._wardUntil | 0) > (game.time | 0) || (typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)))) ? ctx.getTransform() : null;   // v0.30.390 — the caller's space · v0.30.405 — only while the ward or its break window needs the rect (five Web API objects a boss draw otherwise)
   // v0.29.136 — King Krook "ROYAL CHARGE" (was the turtle SHELL CYCLONE).
   // King Krook is a crocodile king, not a turtle, so his phase-2 dash no longer
@@ -155111,28 +155112,47 @@ function _drawTell(x, y, kind, k, alphaMul) {   // v0.30.402 — alphaMul: the p
 // the bottom, so the dome came out about twice his size and high above him. It now fits the opaque body inside the canvas: the
 // drawn image is probed once at 64 px (alpha > 24, cached per image) and its bounds mapped into the drawn rect, mirrored with the
 // sprite. Bosses whose art fills its canvas are all but unchanged; the collision box stays the fallback.
-const _LX_BODY_FRAC = new WeakMap();
+// v0.30.1573 bosslag - the probe above stalled the fight: the frame it measured is a GPU-baked canvas, and getImageData on it is a GPU
+// READBACK that waits for every queued draw - 28-341 ms per frame image at CPU x4, 23 times in six seconds of Gravitos form 3
+// (each new frame he showed while warded). Now the bounds come from the source FILE, decoded at 64 px off the main thread
+// (_lxBlobFor + createImageBitmap, the bake path's blob decode) and read on a CPU canvas: no readback, ~0.1 ms on the main thread.
+// Cached by file, so a bake, a pin or a re-bake of the same frame never probes again. Asynchronous: the first ask returns
+// null and _lxWardBox keeps the boss's last body box until the answer lands (a frame or two).
+const _LX_BODY_FRAC = new Map();   // file url -> {l,t,r,b} | null (no body found / undecodable) | undefined while in flight
+let _lxBodyCv = null;
+function _lxBodyFracUrl(img) {
+  const s = img && img._lxSrc, u = (s && typeof s === 'object') ? s.src : (typeof s === 'string' ? s : (img && img.src));
+  return (typeof u === 'string' && /^(https?|file):/i.test(u)) ? u : null;
+}
 function _lxSpriteBodyFrac(img) {
-  if (!img) return null;
-  const key = (img._lxSrc && typeof img._lxSrc === 'object') ? img._lxSrc : img;   // a bake answers through its source (_lxSrc is a URL string on some images)
-  if (_LX_BODY_FRAC.has(key)) return _LX_BODY_FRAC.get(key);
-  let out = null;
+  const url = img ? _lxBodyFracUrl(img) : null;
+  if (!url) return null;   // nothing to decode off-thread: the drawn rect stands in (never a readback)
+  if (_LX_BODY_FRAC.has(url)) return _LX_BODY_FRAC.get(url) || null;
+  _LX_BODY_FRAC.set(url, undefined);
+  const N = 64, done = (v) => _LX_BODY_FRAC.set(url, v);
   try {
-    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
-    if (iw > 0 && ih > 0) {
-      const N = 64, cv = document.createElement('canvas'); cv.width = N; cv.height = N;
-      const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, N, N);
-      const d = g.getImageData(0, 0, N, N).data; let l = N, t = N, r = -1, b = -1;
-      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (d[(y * N + x) * 4 + 3] > 24) { if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > b) b = y; }
-      if (r >= 0) out = { l: l / N, t: t / N, r: (r + 1) / N, b: (b + 1) / N };
-    }
-  } catch (e) { out = null; }
-  if (out || (img.complete !== false && (img.naturalWidth || img.width) > 0)) _LX_BODY_FRAC.set(key, out);
-  return out;
+    // resizeQuality 'low' (bilinear, as the old canvas probe sampled): 'high' smears alpha past the edges on one sprite and
+    // averages thin parts (a tail, crown spikes) under the threshold on another - bodies came out 7% too big or too small
+    _lxBlobFor(url).then((blob) => createImageBitmap(blob, { resizeWidth: N, resizeHeight: N, resizeQuality: 'low' })).then((bmp) => {
+      let out = null;
+      try {
+        if (!_lxBodyCv) { _lxBodyCv = document.createElement('canvas'); _lxBodyCv.width = N; _lxBodyCv.height = N; }
+        const g = _lxBodyCv.getContext('2d', { willReadFrequently: true });
+        g.clearRect(0, 0, N, N); g.drawImage(bmp, 0, 0, N, N);
+        const d = g.getImageData(0, 0, N, N).data; let l = N, t = N, r = -1, b = -1;
+        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (d[(y * N + x) * 4 + 3] > 24) { if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > b) b = y; }
+        if (r >= 0) out = { l: l / N, t: t / N, r: (r + 1) / N, b: (b + 1) / N };
+      } catch (e) { out = null; }
+      try { bmp.close && bmp.close(); } catch (e) {}
+      done(out);
+    }, () => done(null));
+  } catch (e) { done(null); }
+  return null;
 }
 function _lxWardBox(m, sx, sy) {
   const t = game.time | 0, _r = (m._lxDrawRect && m._lxDrawRect.t === t) ? m._lxDrawRect : null;
-  const f = _r && _r.img ? _lxSpriteBodyFrac(_r.img) : null;
+  let f = _r && _r.img ? _lxSpriteBodyFrac(_r.img) : null;
+  if (f) m._lxBodyFracLast = f; else if (_r && _r.img) f = m._lxBodyFracLast || null;   // v0.30.1573 bosslag - a frame still being measured borrows the last one's body
   if (_r && f) {
     const bw = (f.r - f.l) * _r.w, bh = (f.b - f.t) * _r.h, mx = (f.l + f.r) / 2;
     return { cx: _r.x + (_r.flip ? 1 - mx : mx) * _r.w, cy: _r.y + ((f.t + f.b) / 2) * _r.h, size: Math.min(560, Math.max(72, Math.max(bw, bh) * 1.15)) };

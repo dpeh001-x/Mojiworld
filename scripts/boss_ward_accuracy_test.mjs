@@ -44,6 +44,8 @@ try {
     o.spriteBoss = null;
     try { for (const type of ['legosaurus', 'mooma', 'barnaby', 'aetherion', 'zodiac_leo']) {
       const b = spawnBoss(type); if (!b) continue;
+      const _warmBody = async (bb) => { const t0 = performance.now(); while (performance.now() - t0 < 4000) { bb._wardUntil = (game.time | 0) + 90; try { drawMonster(bb); } catch (e) {} await new Promise((r) => setTimeout(r, 40)); const r2 = bb._lxDrawRect; if (typeof _lxSpriteBodyFrac !== 'function') return true; if (r2 && r2.img && _lxSpriteBodyFrac(r2.img)) return true; } return false; };   // bosslag: the body probe answers off-thread, a frame or two after a frame is first drawn (drawn here: the tests run paused)
+      await _warmBody(b);
       const t0 = performance.now(); let rec = null;
       while (performance.now() - t0 < 12000) { b._wardUntil = (game.time | 0) + 90; capture(b); if (b._lxDrawRect && b._lxDrawRect.t === (game.time | 0) && b._lxDrawRect.w > 4) { rec = b._lxDrawRect; break; } await new Promise((r) => setTimeout(r, 100)); }
       if (!rec) { game.monsters.splice(game.monsters.indexOf(b), 1); continue; }
