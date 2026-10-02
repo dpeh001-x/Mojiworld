@@ -16329,7 +16329,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1551';
+const GAME_VERSION = 'v0.30.1552';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -21216,6 +21216,28 @@ const _LX_BAKED_BMP = new WeakMap();    // src → { [size]: ImageBitmap }
 const _LX_BAKING    = new WeakMap();    // src → Set<size> (in-flight bakes)
 const _LX_BAKE_HEAD_PX = 96;            // ~2× the in-game head render (48 logical)
 const _LX_BAKE_FACE_PX = 200;           // ~1.85× the in-game face render (108 logical)
+// v0.30.1552 WEAPON OUTLINES (per user: "make the outline of the weapons slightly thinner"). The weapons' bold black outline runs from
+// ~7 to 33 px on the 768 art (the heavy ones from the Gear Align erase edits). Every weapon image's 256 bake - the bitmap the hero's
+// weapon is drawn from - has its outer outline thinned by about 30%, never below ~7 art px: the outermost dark texels (the outline is
+// measured as the run of dark texels in from the clear outside) are taken off, softly, and the art inside the outline is untouched,
+// as are flames, glows and anything bright at the edge. Off with window._lxThickInk = true (read when a weapon is first baked).
+const _LX_WPN_ART = new WeakSet();   // the weapon art images: equipment files, their Gear Align erases, weapon skins
+function _lxThinInk(src, N) {   // a canvas copy of src (N x N) with its outer outline thinned, or null (nothing to thin, or a tainted image)
+  if (window._lxThickInk || typeof _lxEqChamfer !== 'function') return null;
+  const cv = document.createElement('canvas'); cv.width = cv.height = N; const c = cv.getContext('2d', { willReadFrequently: true });
+  c.drawImage(src, 0, 0, N, N); let id; try { id = c.getImageData(0, 0, N, N); } catch (e) { return null; }   // a tainted image keeps its outline
+  const d = id.data, dark = (i) => d[i * 4 + 3] >= 128 && Math.max(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) < 70, runs = [];
+  for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) { const i = y * N + x; if (!dark(i)) continue; let ex = null;
+    for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const j = (y + ay) * N + x + ax; if (d[j * 4 + 3] < 40) { ex = [ax, ay]; break; } } if (!ex) continue;
+    let r = 0, xx = x, yy = y; while (r < 40 && xx >= 0 && yy >= 0 && xx < N && yy < N && dark(yy * N + xx)) { r++; xx -= ex[0]; yy -= ex[1]; } runs.push(r); }
+  if (runs.length < 20) return null;
+  runs.sort((a, b) => a - b); const W = runs[runs.length >> 1], cut = W - Math.max(Math.min(W, 7 * N / 768), 0.7 * W); if (cut < 0.3) return null;
+  const clear = new Uint8Array(N * N); for (let i = 0; i < N * N; i++) clear[i] = d[i * 4 + 3] < 40 ? 1 : 0;
+  const D = _lxEqChamfer(clear, N, 1);   // distance (texels) to the clear outside
+  for (let i = 0; i < N * N; i++) { if (!d[i * 4 + 3] || Math.max(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]) >= 110) continue;   // the ink and its dark soft edge only
+    const k = Math.max(0, Math.min(1, D[i] - cut)); if (k < 1) d[i * 4 + 3] = Math.round(d[i * 4 + 3] * k); }
+  c.putImageData(id, 0, 0); return cv;
+}
 function _lxBakedDownscale(src, size) {
   if (!src || typeof createImageBitmap !== 'function') return null;
   // Source readiness check. Image must be decoded; canvas always ready.
@@ -21236,7 +21258,7 @@ function _lxBakedDownscale(src, size) {
   })).then((bmp) => {
     let c = _LX_BAKED_BMP.get(src);
     if (!c) { c = {}; _LX_BAKED_BMP.set(src, c); }
-    c[size] = bmp;
+    c[size] = (size === 256 && _LX_WPN_ART.has(src)) ? (_lxThinInk(bmp, 256) || bmp) : bmp;   // v0.30.1552 weapon outlines
     baking.delete(size);
   }).catch(() => { baking.delete(size); });
   return null;
@@ -21537,7 +21559,7 @@ function _lxEqErasedImg(spriteId) {
   const data = _lxEqEraseData(spriteId);
   if (!data) return null;
   let c = _LX_EQ_ERASE_CACHE[spriteId];
-  if (!c || c._src !== data) { c = new Image(); c._src = data; c.src = data; _LX_EQ_ERASE_CACHE[spriteId] = c; }
+  if (!c || c._src !== data) { c = new Image(); c._src = data; c.src = data; _LX_EQ_ERASE_CACHE[spriteId] = c; if (spriteId.indexOf('wpn:') === 0) _LX_WPN_ART.add(c); }
   return (c.complete && c.naturalWidth) ? c : null;
 }
 function _lxEqSetErase(spriteId, dataURL) {
@@ -21848,6 +21870,7 @@ function _lxEquipSprite(cat, name) {
     const _url = 'Sprites/equipment/' + cat + '/' + name + '.webp';
     _lxEqCors(img, _url);   // v0.30.1499 gear cors - the web build streams this from jsDelivr: ask for CORS so canvases that read it stay clean
     img.src = _url;
+    if (cat === 'weapons') _LX_WPN_ART.add(img);   // v0.30.1552 weapon outlines
     c.set(name, img);
   }
   else {
@@ -23445,6 +23468,16 @@ function _drawEquipmentLayer(layer, targetCtx, opts) {
     }
     // Weapon rotation pivots around the hand bone (origin here) = the grip.
     if (att.rot) c.rotate(att.rot);
+    // v0.30.1552 WEAPON SHAPE (per user: "some of the weapons appear to be diagonally stretched such as hammer"). Weapon art is square and
+    // drawn on its upper-right diagonal, but it was drawn into the hero's 60x80 box - stretched a third along the art's y axis, which shears
+    // a diagonal weapon (a hammer's square head became a slanted parallelogram). The weapon frame is now scaled square about the grip (the
+    // hand), sized so both art diagonals keep their lengths (the handle's reach and the head's width) and turned so the handle points exactly
+    // where it did: the calibrated grip, angle and size stay, only the skew goes. Off with window._lxNoWeaponUnskew = true (an A/B switch).
+    if (slot === 'weapon' && !window._lxNoWeaponUnskew && w > 0 && h > 0) {
+      const _ufx = att.flipX ? -1 : 1, _ufy = att.flipY ? -1 : 1, _uS = Math.sqrt((w * w + h * h) / 2);
+      c.rotate(Math.atan2(-_ufy * h, _ufx * w) - Math.atan2(-_ufy, _ufx));
+      c.scale(_uS / w, _uS / h);
+    }
     // Mirror around the sprite's own centre (Flip buttons).
     if (att.flipX || att.flipY) {
       const fcx = dx + w / 2, fcy = dy + h / 2;
@@ -119448,7 +119481,7 @@ function _lxWeaponSkinFor(item) {   // {img, attachSid} when a skin is worn and 
   if (!skin) return null;
   const shape = _lxWeaponShapeOf(item), key = skin + '_' + shape;
   let img = _LX_WSKIN_IMG[key];
-  if (!img) { img = new Image(); img.decoding = 'async'; img.src = 'Sprites/equipment/skins/' + key + '.webp'; _LX_WSKIN_IMG[key] = img; }   // fetched the first time it is worn
+  if (!img) { img = new Image(); img.decoding = 'async'; img.src = 'Sprites/equipment/skins/' + key + '.webp'; _LX_WSKIN_IMG[key] = img; _LX_WPN_ART.add(img); }   // fetched the first time it is worn
   if (!(img.complete && img.naturalWidth > 0)) return null;
   return { img, attachSid: 'wpn:' + _LX_WSKIN_REF[shape] };
 }
