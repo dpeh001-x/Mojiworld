@@ -1903,25 +1903,6 @@ window.LX_ANIM_CALIB = {
       "ftAuto": true
     }
   },
-  "deranged_kuro": {
-    "attack": {
-      "s": 1,
-      "dx": 0,
-      "dy": 0.1,
-      "ft": [
-        86,
-        72,
-        72,
-        108,
-        149,
-        108,
-        72,
-        72,
-        115
-      ],
-      "ftAuto": true
-    }
-  },
   "drownedCur": {
     "attack": {
       "ft": [
@@ -2073,22 +2054,6 @@ window.LX_ANIM_CALIB = {
         108,
         72,
         72,
-        72,
-        115
-      ],
-      "ftAuto": true
-    }
-  },
-  "future_lyra": {
-    "attack": {
-      "ft": [
-        86,
-        72,
-        72,
-        72,
-        108,
-        146,
-        108,
         72,
         115
       ],
@@ -2402,22 +2367,6 @@ window.LX_ANIM_CALIB = {
         72,
         72,
         72,
-        115
-      ],
-      "ftAuto": true
-    }
-  },
-  "potato_uncle": {
-    "attack": {
-      "ft": [
-        86,
-        72,
-        72,
-        72,
-        72,
-        108,
-        130,
-        108,
         115
       ],
       "ftAuto": true

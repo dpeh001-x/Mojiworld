@@ -24,6 +24,9 @@
 // origin. A live localStorage edit still wins (an explicit 0 px / 1.0× there
 // un-bakes a type), so the dev tool keeps working. Missing file = game runs fine.
 window.LX_MOB_OFFSET_DATA = {
+  "harea": 3,
+  "lady_honk": 3,
+  "taiger": 3,
   "archon": 3,
   "blightElder": 30,
   "blockTigreal": 2,
@@ -35,7 +38,6 @@ window.LX_MOB_OFFSET_DATA = {
   "conductorMech": 5,
   "cookie": 2,
   "cosmicMochi": 6,
-  "deranged_kuro": 2,
   "drownedCur": 3,
   "elderbark": 1,
   "emberling": 1,
@@ -95,7 +97,7 @@ window.LX_MOB_SCALE_DATA = {
   "clownfish": 0.874,
   "conductorMech": 1.22,
   "cosmicMochi": 0.978,
-  "deranged_kuro": 0.715,
+  "taiger": 0.749,   // v0.30.1549 distorted-mirror: canvas drawn 112.3 px for a 100 px figure
   "echoKnight": 0.633,
   "emberling": 0.861,
   "expressTicketMech": 0.956,
@@ -143,7 +145,7 @@ window.LX_MOB_SCALE_DATA = {
   "forgewight": 0.695,   // v0.30.420 - box grown to the art; draw compensated
   "goblinMauler": 0.761,   // v0.30.420 - box grown to the art; draw compensated
   "fatDragon": 0.629,   // v0.30.420 - box grown to the art; draw compensated
-  "future_lyra": 0.83,   // v0.30.420 - box grown to the art; draw compensated
+  "harea": 0.743,   // v0.30.1549 distorted-mirror: canvas drawn 118.2 px for a 106 px figure
   "vigil_vermillion": 0.741,   // v0.30.420 - box grown to the art; draw compensated
   "young_bloodthirsty_vermillion": 0.74,   // v0.30.420 - box grown to the art; draw compensated
   "seahorse": 0.773,   // v0.30.420 - box grown to the art; draw compensated
@@ -153,7 +155,7 @@ window.LX_MOB_SCALE_DATA = {
   "jellyfish": 0.733,   // v0.30.420 - box grown to the art; draw compensated
   "blockRhirhi": 0.841,
   "boneGolem": 0.905,
-  "potato_uncle": 0.714,   // v0.30.420 - box grown to the art; draw compensated
+  "lady_honk": 0.741,   // v0.30.1549 distorted-mirror: canvas drawn 97.8 px for a 88 px figure
   "mummy": 0.878,   // v0.30.420 - box grown to the art; draw compensated
   "gummy": 0.944,   // v0.30.420 - box grown to the art; draw compensated
   "lanternWisp": 0.886,   // v0.30.420 - box grown to the art; draw compensated
