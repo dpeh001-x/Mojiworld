@@ -82,7 +82,7 @@ Use these exact ids in the filename (`mob_<id>_die.mp3`):
 
 **Bosses / named:** king, mushmom, aetherion, gravitos, octobaby, kingKrook, mirrorSelf, fatLizard, fatDragon, sundered_smith, goblinScout, goblinMauler, mayo
 
-**Story / inner-dimension:** deranged_kuro, future_lyra, potato_uncle, willeo, young_bloodthirsty_vermillion, vigil_vermillion, young_confused_barnaby
+**Story / inner-dimension:** taiger, harea, willeo (lady_honk uses the family clip), young_bloodthirsty_vermillion, vigil_vermillion, young_confused_barnaby
 
 **Tower of the Spire (endless tower):** towerWisp, towerWarden, towerHexer, towerStalker, towerArbiter, towerSeer, towerShardling, towerOssifer, towerStormcaller, towerSovereign
 
