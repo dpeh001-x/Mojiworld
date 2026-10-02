@@ -15957,6 +15957,8 @@ The sleeping world is listening.</div>
      can't carry an erase from localhost to file:///raw.githack). Live localStorage
      edits still override these. Missing file = game runs fine (no baked erases). -->
 <script src="data/gear_erase.js" defer></script>
+<!-- v0.30.1553 flames that burn: per fire piece, which pixels of its art are flame and the body under them (read by _lxFlameGet). -->
+<script src="data/gear_flames.js" defer></script>
 <!-- Baked monster sprite Y-offsets (floor/platform plant). Same cross-origin
      rationale as gear_erase.js: the R-key "Monster Plant" editor saves to
      per-origin localStorage; baking into this committed file makes the plant
@@ -16329,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1552';
+const GAME_VERSION = 'v0.30.1553';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -23023,6 +23025,7 @@ function _lxEqAnimFrame(fx, m, N, k, seed) {
 // texel for texel); null until every frame is in
 function _lxEqAnimGet(sid, img) {
   const fx = _LX_EQ_ANIM[sid]; if (!fx || !img) return null;
+  if (fx === 'fire' && typeof _lxFlameData === 'function' && _lxFlameData(sid)) return _lxFlameGet(sid, img);   // v0.30.1553 flames that burn
   let A = _LX_EQ_ANIM_CACHE.get(sid);
   if (A && A.src === img) { _LX_EQ_ANIM_CACHE.delete(sid); _LX_EQ_ANIM_CACHE.set(sid, A); return A.ready ? A : null; }   // LRU touch
   A = { src: img, fx, frames: [], ready: false, mask: null }; _LX_EQ_ANIM_CACHE.delete(sid); _LX_EQ_ANIM_CACHE.set(sid, A);
@@ -23045,12 +23048,186 @@ function _lxEqAnimGet(sid, img) {
   later(step);
   return null;
 }
+// v0.30.1553 FLAMES THAT BURN (per user: "some of the weapons and armors have flames, improve the animations of the flames", then "Can add
+// more realistic flame animations", "The outlines should not be of the flames"). The 12 fire pieces' flames were a still painting with
+// light drifting over it. Each piece's flames are
+// now cut from its body (data/gear_flames.js: a mask of which pixels are flame, and the body ludo repainted where the flames covered its
+// edge) and drawn moving: the flame texture streams up without ever snapping back (a flow map - two advected copies half a cycle apart,
+// crossfaded), a sideways turbulence rides up with it, the far part of each tongue tears into bits that rise and fade, hot spots stream
+// through, tongues stretch and shrink, tips fade, the whole fire flickers and now and then flares, and embers rise off the tips. The
+// flames carry no outline - their painted ink is taken off. The motion grows from nothing at the flame's root on the body, so the flames stay attached; the
+// body is drawn exactly where it was, and body + flames is the art again. Frames are baked a step per idle slice like the gear light;
+// until they are in - and under reduced motion, very-low FX, a tint, a weapon skin, or window._lxNoGearLight - the art draws as painted.
+const _LX_FLAME_K = { N: 256, NF: 30, LOOP: 1.25, RISE: 16, TURB: 7, R: 3, TP: 3, ROOT0: 1, ROOT1: 11, BREAK0: 6, BREAK: 0.55, EDGE: 9, HEAT: 0.18, CALM: 0.5, BASE: 10,
+  STRETCH: 0.22, TIPFADE: 0.2, FLICK: 0.14, FLARE: 0.5, EMB: 16 };
+function _lxFlameNoise(x, y, t, TP, seed) {   // value noise in x, y with a time axis periodic over TP steps
+  const xi = Math.floor(x), yi = Math.floor(y), ti = Math.floor(t), fx = x - xi, fy = y - yi, ft = t - ti;
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), w = ft * ft * (3 - 2 * ft);
+  const g = (a, b, c) => _lxEqAnimHash((a * 73856093) ^ (b * 19349663) ^ ((((c % TP) + TP) % TP) * 83492791) ^ (seed * 2654435761));
+  const l = (c) => { const a = g(xi, yi, c), b = g(xi + 1, yi, c), cc = g(xi, yi + 1, c), d = g(xi + 1, yi + 1, c); return a + (b - a) * u + (cc - a) * v + (a - b - cc + d) * u * v; };
+  const z0 = l(ti), z1 = l(ti + 1); return z0 + (z1 - z0) * w;
+}
+function _lxFlameDist(on, N, cap) {   // distance (texels) to the nearest texel where on[i], capped: the gear light's two-pass chamfer
+  const D = _lxEqChamfer(on, N, 1); for (let i = 0; i < N * N; i++) if (D[i] > cap) D[i] = cap; return D;
+}
+function _lxFlamePrep(FL, bodyA, N, K) {   // distance from the body (roots) and from the flame's exterior (tongues); the region frames cover
+  const solid = new Uint8Array(N * N), ext = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++) { solid[i] = bodyA[i] >= 128 ? 1 : 0; ext[i] = (FL[i * 4 + 3] < 48 && bodyA[i] < 128) ? 1 : 0; }
+  const dB = _lxFlameDist(solid, N, 64), dO = _lxFlameDist(ext, N, 48);
+  const below = new Float32Array(N * N);   // how much flame (or body) lies straight below each texel: a flame's base holds still
+  for (let x = 0; x < N; x++) { let run = 0; for (let y = N - 1; y >= 0; y--) { const i = y * N + x; run = (FL[i * 4 + 3] >= 48 || solid[i]) ? run + 1 : 0; below[i] = run; } }
+  let x0 = N, y0 = N, x1 = -1, y1 = -1; for (let i = 0; i < N * N; i++) if (FL[i * 4 + 3]) { const x = i % N, y = (i / N) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const m = Math.ceil(K.TURB) + 2; x0 = Math.max(0, x0 - m); x1 = Math.min(N - 1, x1 + m); y0 = Math.max(0, y0 - Math.ceil(K.RISE) - 2); y1 = Math.min(N - 1, y1 + 2);
+  const tips = []; for (let i = 0; i < N * N; i++) if (FL[i * 4 + 3] > 150 && dB[i] > 9 && dB[i] < 64) tips.push(i);
+  // no outline on the flames (per user): their painted ink becomes fire - every dark texel takes the colour of the flame round it, the
+  // outer band a deeper orange and a little see-through like a flame's cooler edge - so the flames keep their size and shape
+  const dark = (i) => FL[i * 4 + 3] >= 64 && Math.max(FL[i * 4], FL[i * 4 + 1], FL[i * 4 + 2]) < 90, runs = [];
+  for (let y = 2; y < N - 2; y++) for (let x = 2; x < N - 2; x++) { const i = y * N + x; if (!dark(i)) continue; let ex = null;
+    for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const j = (y + ay) * N + x + ax; if (FL[j * 4 + 3] < 64 && bodyA[j] < 128) { ex = [ax, ay]; break; } } if (!ex) continue;
+    let r = 0, xx = x, yy = y; while (r < 10 && xx >= 0 && yy >= 0 && xx < N && yy < N && dark(yy * N + xx)) { r++; xx -= ex[0]; yy -= ex[1]; } runs.push(r); }
+  runs.sort((a, b) => a - b); const W = runs.length ? runs[runs.length >> 1] : 0, fill = new Uint8ClampedArray(FL), inner = [], ink = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++) if (FL[i * 4 + 3] && Math.max(FL[i * 4], FL[i * 4 + 1], FL[i * 4 + 2]) < 110) { inner.push(i); ink[i] = 1; }   // the ink and its dark soft edge
+  if (inner.length) {   // diffuse the flame's colours in, from the bright texels round the ink
+    for (let it = 0; it < 30; it++) for (const i of inner) { const x = i % N, y = (i / N) | 0; let r = 0, g = 0, b = 0, n = 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < N - 1 ? i + 1 : -1, y > 0 ? i - N : -1, y < N - 1 ? i + N : -1]) { if (j < 0 || !fill[j * 4 + 3] || ink[j] === 1) continue; r += fill[j * 4]; g += fill[j * 4 + 1]; b += fill[j * 4 + 2]; n++; }
+      if (n) { fill[i * 4] = r / n; fill[i * 4 + 1] = g / n; fill[i * 4 + 2] = b / n; ink[i] = 2; } }   // 2 = coloured: it now feeds its neighbours
+    for (const i of inner) { if (ink[i] === 1) { fill[i * 4] = 230; fill[i * 4 + 1] = 90; fill[i * 4 + 2] = 20; }   // too deep to reach: a deep orange
+      const edge = 1 - Math.min(1, Math.max(0, (dO[i] - 1) / (W + 2)));   // the outer band: deeper, a little see-through
+      fill[i * 4 + 1] *= 1 - 0.3 * edge; fill[i * 4 + 2] *= 1 - 0.5 * edge; fill[i * 4 + 3] = Math.round(fill[i * 4 + 3] * (1 - 0.25 * edge)); } }
+  return { dB, dO, below, bodyA, fill, box: x1 < 0 ? null : [x0, y0, x1, y1], tips };
+}
+function _lxFlameSamp(FL, N, x, y, o) {   // bilinear, alpha-weighted
+  o[0] = o[1] = o[2] = o[3] = 0; if (x < 0 || y < 0 || x > N - 1 || y > N - 1) return;
+  const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(N - 1, x0 + 1), y1 = Math.min(N - 1, y0 + 1), fx = x - x0, fy = y - y0;
+  const add = (xx, yy, w) => { const i = (yy * N + xx) * 4, a = FL[i + 3] * w; o[0] += FL[i] * a; o[1] += FL[i + 1] * a; o[2] += FL[i + 2] * a; o[3] += a; };
+  add(x0, y0, (1 - fx) * (1 - fy)); add(x1, y0, fx * (1 - fy)); add(x0, y1, (1 - fx) * fy); add(x1, y1, fx * fy);
+}
+function _lxFlameFrame(FL0, N, P, K, k, seed) {   // frame k of the loop, as a canvas cropped to the frames' region
+  const FL = P.fill || FL0;   // the flames without their ink
+  const [bx0, by0, bx1, by1] = P.box, W = bx1 - bx0 + 1, H = by1 - by0 + 1, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d'), id = c.createImageData(W, H), out = id.data, ph = k / K.NF, T = ph * K.TP;
+  const t1 = (ph * K.R) % 1, t2 = (ph * K.R + 0.5) % 1, w1 = 1 - Math.abs(2 * t1 - 1), w2 = 1 - w1, s1 = [0, 0, 0, 0], s2 = [0, 0, 0, 0];
+  const sm = (x, a, b) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) { const i = y * N + x, d = P.dB[i], e = P.dO[i], o = ((y - by0) * W + (x - bx0)) * 4;
+    const amp = sm(d, K.ROOT0, K.ROOT1) * (1 - K.CALM * sm(e, 6, 18)) * sm(P.below[i], 1, K.BASE);   // roots and bases hold still; a big flame's middle moves less than its edge
+    if (amp < 0.01) { const j = i * 4; if (FL[j + 3]) { out[o] = FL[j]; out[o + 1] = FL[j + 1]; out[o + 2] = FL[j + 2]; out[o + 3] = FL[j + 3]; } continue; }
+    const layer = (t, s, sd) => { const rise = t * K.RISE * amp;   // content rises: sample from below, by how far this copy has streamed
+      const tu = (_lxFlameNoise(x / 15, (y + rise) / 17, T, K.TP, seed + sd) * 0.55 + _lxFlameNoise(x / 7, (y + rise) / 8, T, K.TP, seed + sd + 1) * 0.3
+        + _lxFlameNoise(x / 4.5, (y + rise) / 5, T * 2, K.TP * 2, seed + sd + 2) * 0.15 - 0.5) * 2 * K.TURB * amp;
+      const st = K.STRETCH * (2 * _lxFlameNoise(x / 20, 0.5, T * 2, K.TP * 2, seed + sd + 61) - 1) * Math.min(d, 40) * amp;   // each tongue stretches and shrinks
+      _lxFlameSamp(FL, N, x + tu, y + rise + st, s); };
+    layer(t1, s1, 11); layer(t2, s2, 23);
+    let a = s1[3] * w1 + s2[3] * w2; if (a < 0.5) continue;
+    const r = (s1[0] * w1 + s2[0] * w2) / a, g = (s1[1] * w1 + s2[1] * w2) / a, b = (s1[2] * w1 + s2[2] * w2) / a;
+    const tip = sm(d, K.BREAK0, K.BREAK0 + 14) * (1 - sm(e, 3, K.EDGE));   // break-up: the far part of each tongue, near its outer edge, tears into rising bits
+    if (tip > 0) { const yy = y + ph * K.R * 28, nb = _lxFlameNoise(x / 9, yy / 9, T, K.TP, seed + 41) * 0.6 + _lxFlameNoise(x / 4.5, yy / 4.5, T, K.TP, seed + 42) * 0.4; a *= 1 - K.BREAK * tip * (1 - sm(nb, 0.38, 0.62)); }
+    a *= 1 - K.TIPFADE * sm(d, K.BREAK0 + 8, K.BREAK0 + 34) * (1 - sm(e, 2, 8));   // the tips thin out
+    const nh = _lxFlameNoise(x / 12, (y + ph * K.R * 22) / 12, T, K.TP, seed + 51), hb = K.HEAT * (2 * nh - 1) * sm(d, 0, 10);   // heat: warm spots streaming up
+    const warm = (v, k1, k2) => Math.max(0, Math.min(255, hb > 0 ? v + hb * (255 - v) * k1 : v * (1 + hb * k2)));   // hotter = more yellow, cooler = redder; never white
+    out[o] = warm(r, 0.9, 0.3); out[o + 1] = warm(g, 0.7, 0.9); out[o + 2] = warm(b, 0.15, 1); out[o + 3] = Math.min(255, Math.round(a)); }
+  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) { const o = ((y - by0) * W + (x - bx0)) * 4; if (!out[o + 3]) continue;   // soft edges
+    const clear = (xx, yy) => xx < bx0 || yy < by0 || xx > bx1 || yy > by1 || out[((yy - by0) * W + (xx - bx0)) * 4 + 3] < 40;
+    if (clear(x - 1, y) || clear(x + 1, y) || clear(x, y - 1) || clear(x, y + 1)) out[o + 3] = Math.round(out[o + 3] * 0.65); }
+  c.putImageData(id, 0, 0); return { cv, x: bx0, y: by0 };
+}
+function _lxFlameEmbers(F, K, ph) {   // embers born on the tips, rising with a wobble, twinkling and fading (texel positions at loop phase ph)
+  const out = [], T = F.tips, N = K.N; if (!T.length) return out;
+  for (let k = 0; k < K.EMB; k++) { const r = (s) => _lxEqAnimHash((k * 7919 + s * 104729 + F.seed * 31 + 17) | 0);
+    const life = 0.45 + 0.6 * r(3), age = ((ph - r(2)) % 1 + 1) % 1 * K.LOOP; if (age > life) continue;
+    const q = age / life, p = T[Math.floor(r(1) * T.length)], x0 = p % N, y0 = (p / N) | 0, vy = 26 + 34 * r(4), vx = (r(5) - 0.5) * 18;
+    out.push({ x: x0 + vx * age + 2.2 * Math.sin(age * (7 + 5 * r(6)) + r(7) * 6.28), y: y0 - vy * age - 6 * age * age,
+      a: Math.min(1, q * 7) * (1 - q) * (0.65 + 0.35 * Math.sin(age * (28 + 20 * r(8)))), s: 0.7 + 0.9 * r(9) * (1 - 0.5 * q) }); }
+  return out;
+}
+let _lxEmberSprite = null;
+function _lxEmberSpr() {   // one soft ember: a white-gold core in an orange glow
+  if (_lxEmberSprite) return _lxEmberSprite; const cv = document.createElement('canvas'); cv.width = cv.height = 32; const c = cv.getContext('2d');
+  const g = c.createRadialGradient(16, 16, 0, 16, 16, 16); g.addColorStop(0, 'rgba(255,246,200,1)'); g.addColorStop(0.35, 'rgba(255,194,74,0.9)'); g.addColorStop(1, 'rgba(255,90,16,0)');
+  c.fillStyle = g; c.fillRect(0, 0, 32, 32); return (_lxEmberSprite = cv);
+}
+function _lxFlameData(sid) { return (window.LX_EQ_FLAMES && window.LX_EQ_FLAMES[sid]) || null; }
+function _lxFlameOn(item) {
+  if ((item && item.tint) || window._lxNoGearLight) return false;
+  if (typeof game !== 'undefined' && game && game._reduceMotion) return false;
+  return !(typeof _perfVeryLowFx === 'function' && _perfVeryLowFx());
+}
+// the flames for one piece, baked a step per idle slice from the very image the piece is drawn from; the entry when every frame is in
+function _lxFlameGet(sid, img) {
+  const D = _lxFlameData(sid); if (!D || !img) return null;
+  const own = _lxEqErasedImg(sid) || _lxEquipSprite(sid.indexOf('wpn:') === 0 ? 'weapons' : 'armors', sid.slice(4)); if (img !== own) return null;   // a skin or a tinted copy: not this art
+  let A = _LX_EQ_ANIM_CACHE.get(sid);
+  if (A && A.src === img && A.fl) { _LX_EQ_ANIM_CACHE.delete(sid); _LX_EQ_ANIM_CACHE.set(sid, A); return A.ready ? A : null; }   // LRU touch
+  A = { src: img, fx: 'fire', frames: [], ready: false, fl: { frames: [], seed: (sid.length * 131 + sid.charCodeAt(4) * 7) | 0 } };
+  _LX_EQ_ANIM_CACHE.delete(sid); _LX_EQ_ANIM_CACHE.set(sid, A);
+  while (_LX_EQ_ANIM_CACHE.size > _LX_EQ_ANIM_KEEP) _LX_EQ_ANIM_CACHE.delete(_LX_EQ_ANIM_CACHE.keys().next().value);
+  const F = A.fl, K = _LX_FLAME_K, N = K.N;
+  const later = (f) => { if (typeof requestIdleCallback === 'function') requestIdleCallback(f, { timeout: 150 }); else setTimeout(f, 30); };
+  const load = (url) => { const im = new Image(); im.decoding = 'async'; im.src = url; return im; };
+  F.mask = load(D.m); F.rep = D.r ? load(D.r[4]) : null;
+  const step = () => {
+    if (_LX_EQ_ANIM_CACHE.get(sid) !== A) return;   // evicted, or the art changed under it
+    try {
+      if (!F.full) {
+        const ok = (im) => !im || (im.complete && im.naturalWidth);
+        if (!ok(F.mask) || !ok(F.rep) || !img.complete || !img.naturalWidth) { if ((F.waits = (F.waits | 0) + 1) > 300) { A.failed = true; return; } later(step); return; }
+        const full = document.createElement('canvas'); full.width = full.height = 768; const fc = full.getContext('2d');   // the body: the art minus the flames, plus the repair
+        fc.drawImage(img, 0, 0, 768, 768); fc.globalCompositeOperation = 'destination-out'; fc.drawImage(F.mask, 0, 0, 768, 768); fc.globalCompositeOperation = 'source-over';
+        if (F.rep) fc.drawImage(F.rep, D.r[0], D.r[1], D.r[2], D.r[3]);
+        const small = document.createElement('canvas'); small.width = small.height = N; const sc = small.getContext('2d', { willReadFrequently: true });
+        sc.imageSmoothingQuality = 'high'; sc.drawImage(full, 0, 0, N, N); F.full = full; F.small = small;
+        if (sid.indexOf('wpn:') === 0 && typeof _lxThinInk === 'function') { const th = _lxThinInk(small, N); if (th) F.small = th; }   // the weapons' thinner outline
+      } else if (!F.P) {
+        const fl = document.createElement('canvas'); fl.width = fl.height = N; const c = fl.getContext('2d', { willReadFrequently: true });   // the flames: the art inside the mask
+        c.imageSmoothingQuality = 'high'; c.drawImage(img, 0, 0, N, N); c.globalCompositeOperation = 'destination-in'; c.drawImage(F.mask, 0, 0, N, N);
+        F.FL = c.getImageData(0, 0, N, N).data; const bd = F.small.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, N, N).data;
+        const bodyA = new Uint8Array(N * N); for (let i = 0; i < N * N; i++) bodyA[i] = bd[i * 4 + 3];
+        F.P = _lxFlamePrep(F.FL, bodyA, N, K); F.tips = F.P.tips; if (!F.P.box) { A.failed = true; return; }
+      } else if (!F.lm) {   // the body's own glow (lava seams, runes) keeps the gear light's heat shimmer, under the moving flames
+        const bake = (typeof _lxBakedDownscale === 'function') ? _lxBakedDownscale(img, N) : null; if (!bake) { if ((F.waits = (F.waits | 0) + 1) > 300) { A.failed = true; return; } later(step); return; }
+        const ac = document.createElement('canvas'); ac.width = ac.height = N; const g = ac.getContext('2d', { willReadFrequently: true }); g.drawImage(bake, 0, 0);
+        const AD = g.getImageData(0, 0, N, N).data, lm = _lxEqAnimMask('fire', F.small.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, N, N).data, N);
+        for (let i = 0; i < N * N; i++) { const aa = AD[i * 4 + 3] / 255; if (aa > 0.9 && Math.max(AD[i * 4], AD[i * 4 + 1], AD[i * 4 + 2]) < 51) lm[i] = 0; else if (lm[i] > aa) lm[i] = aa; }   // never on the art's ink, never above its alpha
+        F.lm = lm;
+      } else if (F.frames.length < K.NF) F.frames.push(_lxFlameFrame(F.FL, N, F.P, K, F.frames.length, F.seed));
+      else A.frames.push(_lxEqAnimFrame('fire', F.lm, N, A.frames.length, F.seed));
+    } catch (e) { A.failed = true; return; }
+    if (F.frames.length >= K.NF && A.frames.length >= _LX_EQ_FX.fire.n) { A.ready = true; F.ready = true; F.FL = null; F.P = null; F.lm = null; return; }   // keep the frames, the bodies and the tips
+    later(step);
+  };
+  later(step);
+  return null;
+}
+// the body to draw in the art's place while the flames are drawn moving (null: draw the art)
+function _lxFlameBody(sid, img, item, skin) {
+  if (skin || _LX_EQ_ANIM[sid] !== 'fire' || !_lxFlameData(sid) || !_lxFlameOn(item)) return null;
+  const A = _lxFlameGet(sid, img); return A && A.fl && A.fl.ready ? A.fl : null;
+}
+function _lxFlameFlicker(t) {   // the fire's own flicker: a fast unsteady dimming, and now and then a flare (seconds -> { a, flare })
+  const K = _LX_FLAME_K, n1 = _lxEqAnimNoise(t * 11, 0.5, 1e6, 1, 5), n2 = _lxEqAnimNoise(t * 4.3, 1.5, 1e6, 1, 9);
+  return { a: 1 - K.FLICK * n1, flare: K.FLARE * Math.max(0, n2 - 0.6) / 0.4 };
+}
+function _lxFlameDraw(c, A, dx, dy, w, h) {
+  const F = A.fl, K = _LX_FLAME_K, t = (window._lxEqAnimClock != null ? window._lxEqAnimClock : performance.now()) / 1000, ph = ((t / K.LOOP) % 1 + 1) % 1;
+  const fr = F.frames[Math.floor(ph * K.NF) % K.NF], sx = w / K.N, sy = h / K.N, LF = _LX_EQ_FX.fire;
+  if (A.frames.length === LF.n) {   // the body's heat shimmer: the gear light's crossfaded loop, in the piece's own rect
+    const q = (t / LF.loop) * LF.n, k0 = ((Math.floor(q) % LF.n) + LF.n) % LF.n, f = q - Math.floor(q), g = LF.gain * (0.7 + 0.3 * _lxEqAnimNoise(t * 9, 0.5, 1e6, 1, 3));
+    const op0 = c.globalCompositeOperation, ga0 = c.globalAlpha; c.globalCompositeOperation = 'lighter';
+    if (g * (1 - f) > 0.01) { c.globalAlpha = ga0 * Math.min(1, g * (1 - f)); c.drawImage(A.frames[k0], dx, dy, w, h); }
+    if (g * f > 0.01) { c.globalAlpha = ga0 * Math.min(1, g * f); c.drawImage(A.frames[(k0 + 1) % LF.n], dx, dy, w, h); }
+    c.globalCompositeOperation = op0; c.globalAlpha = ga0; }
+  const op = c.globalCompositeOperation, ga = c.globalAlpha, spr = _lxEmberSpr(), fk = _lxFlameFlicker(t), fx = dx + fr.x * sx, fy = dy + fr.y * sy, fw = fr.cv.width * sx, fh = fr.cv.height * sy;
+  c.globalAlpha = ga * fk.a; c.drawImage(fr.cv, fx, fy, fw, fh);
+  c.globalCompositeOperation = 'lighter'; if (fk.flare > 0.01) { c.globalAlpha = ga * Math.min(1, fk.flare); c.drawImage(fr.cv, fx, fy, fw, fh); }   // a flare: the flames burn brighter for a moment
+  for (const e of _lxFlameEmbers(F, K, ph)) { if (e.a <= 0.02) continue; const r = e.s * 2.6; c.globalAlpha = ga * Math.min(1, e.a); c.drawImage(spr, dx + (e.x - r) * sx, dy + (e.y - r) * sy, 2 * r * sx, 2 * r * sy); }
+  c.globalCompositeOperation = op; c.globalAlpha = ga;
+}
 // _drawEquipmentLayer calls this right after the piece: same context, same transform, same dest rect
 function _lxEqAnimDraw(c, sid, img, dx, dy, w, h, item) {
   if (!_LX_EQ_ANIM[sid] || (item && item.tint) || window._lxNoGearLight) return;
   if (typeof game !== 'undefined' && game && game._reduceMotion) return;
   if (typeof _perfVeryLowFx === 'function' && _perfVeryLowFx()) return;
   const A = _lxEqAnimGet(sid, img); if (!A) return;
+  if (A.fl) { _lxFlameDraw(c, A, dx, dy, w, h); return; }   // v0.30.1553 flames that burn
   const F = _LX_EQ_FX[A.fx], t = (window._lxEqAnimClock != null ? window._lxEqAnimClock : performance.now()) / 1000;
   const op = c.globalCompositeOperation, ga = c.globalAlpha;
   c.globalCompositeOperation = 'lighter';
@@ -23496,12 +23673,14 @@ function _drawEquipmentLayer(layer, targetCtx, opts) {
       const _eb = (typeof _lxBakedDownscale === 'function') ? _lxBakedDownscale(img, 256) : null;
       if (_eb) _ebSrc = _eb;
     }
+    const _flb = (typeof _lxFlameBody === 'function') ? _lxFlameBody(_sid, img, item, _wsk) : null;   // v0.30.1553 flames that burn: the body still, its flames drawn moving
+    if (_flb) _ebSrc = _ebSrc === img ? _flb.full : _flb.small;
     if (slot === 'weapon' && typeof _lxBowStringDraw === 'function') _lxBowStringDraw(c, _sid, dx, dy, w, h);   // v0.30.1493 bow strings - behind the limbs
     const _pdh = (slot === 'body_top' && opts.pinBone === 'spine' && _lxPadCut === _sid) ? _lxPadPaths(_sid) : null;   // v0.30.1536 pauldron hinge
     if (opts.padOnly && !(_pdh && _pdh.has)) { c.restore(); continue; }
     if (_pdh) { const _pM = c.getTransform();
       if (opts.padOnly) { c.translate(dx, dy); c.scale(w / 768, h / 768); c.lineJoin = 'round'; c.lineWidth = 2 * _pdh.w; c.strokeStyle = _LX_PAD_INK; c.stroke(_pdh.P); c.clip(_pdh.PA); }
-      else { const _tb = _lxPadTorso(img, _pdh, (item.tint && !_wsk) ? item.tint : null); if (_tb) _ebSrc = _tb; c.translate(dx, dy); c.scale(w / 768, h / 768); if (!(_tb && _pdh.fill)) c.clip(_pdh.notE, 'evenodd'); }   // v0.30.1548 a filled bake is drawn whole
+      else { const _tb = _lxPadTorso(_flb ? _flb.full : img, _pdh, (item.tint && !_wsk) ? item.tint : null); if (_tb) _ebSrc = _tb; c.translate(dx, dy); c.scale(w / 768, h / 768); if (!(_tb && _pdh.fill)) c.clip(_pdh.notE, 'evenodd'); }   // v0.30.1548 a filled bake is drawn whole
       c.setTransform(_pM); }
     c.drawImage(_ebSrc, dx, dy, w, h);
     // v0.30.1488 gear light - the piece's flames / storm / wisps / orb / stars, drawn in this same transform and rect (see _LX_EQ_ANIM)
