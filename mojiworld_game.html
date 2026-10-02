@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1571';
+const GAME_VERSION = 'v0.30.1572';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -176908,6 +176908,22 @@ function _lxPrewarmNpcBakes(id) {
       const arr = (base && typeof NPC_IDLE_FRAMES !== 'undefined') ? NPC_IDLE_FRAMES[base] : null;
       if (Array.isArray(arr) && arr.length) { for (let i = 0; i < arr.length; i++) _LX_PREWARM_Q.push({ type: 'npc:' + n.name, arr, i, h: 0, tw, th, tries: 0 }); }
       else _LX_PREWARM_Q.push({ type: 'npc:' + n.name, arr: NPC_SPRITES, i: n.name, h: 0, tw, th, tries: 0 });   // no idle set: the static sprite is what draws
+      // v0.30.1572 npc-walk-prewarm - the WALK set draws at the same size as the idle set (_drawNpcSprite sizes both from the static sprite) but was never
+      // queued: the first time Guguma wandered, each of his nine 841x971 frames pinned and plain-baked inside the frame that drew it (18 canvases and a
+      // 67 ms frame, measured after the veil lifted). Frames already in are queued now; the rest queue when they land, so a set still downloading never
+      // sits in the gate's queue (an undecoded job requeues itself, and the gate drains until the queue is empty or its cap).
+      try {
+        if (typeof _npcWalkFrame === 'function') {
+          _npcWalkFrame(n.name);   // registers the set: no walk art on disk is an empty array (the frame index answers, no 404s)
+          const wk = (typeof NPC_WALK_FRAMES !== 'undefined' && base) ? NPC_WALK_FRAMES[base] : null;
+          if (Array.isArray(wk)) for (let i = 0; i < wk.length; i++) {
+            const im = wk[i], job = { type: 'npc:' + n.name, arr: wk, i, h: 0, tw, th, tries: 0 };
+            if (!im) continue;
+            if (im.complete && im.naturalWidth > 0) _LX_PREWARM_Q.push(job);
+            else if (im.addEventListener) im.addEventListener('load', () => { _LX_PREWARM_Q.push(job); }, { once: true });
+          }
+        }
+      } catch (e) {}
     }
   } catch (e) {}
 }
