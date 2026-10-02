@@ -3,14 +3,15 @@
 // torso is finished: "fill up the empty patches of brown", then a slim breastplate because the round plate made "the shape of the
 // character look weird"). Plated armour leaves its near pad out of the torso draw and draws it again after the front arm, turned
 // with the arm; robes and cloaks keep the v0.30.1521 shoulder cover.
-//   [1] the hinge table: 24 plated pieces, none for the robes / cloaks (Arcane Vestments keeps the cover), gloves only on Worldbreaker
+//   [1] the hinge table: 22 plated pieces, none for the robes / cloaks (Arcane Vestments keeps the cover; Thunderbow Mantle and
+//       Stormcaller Cloak left it when they became armless mantles), gloves only on Worldbreaker
 //   [2] Tempest Hauberk: the torso comes from the cut bake and the pad is drawn once more from the piece; the cover stands down;
 //       with window._lxNoPadHinge the old path returns (whole art + cover, no cut)
 //   [3] the pad turns with the arm: its angle against the torso differs between rest and mid-swing
 //   [4] Worldbreaker's gloves are drawn in the arm bones' frames: the front glove turns as the arm lifts (mage cast)
 //   [5] Worldbreaker's worn art is armless: fire where the near forearm was, the far gauntlet gone, the breastplate kept
 //   [6] Worldbreaker covers the hero's torso: with the garment painted pure green, rest and walk show almost none of it
-//   [7] the Stormcaller / Worldbreaker refit rows are in the Gear Align data
+//   [7] the Stormcaller / Worldbreaker refit rows are in the Gear Align data (both widened since: the shoulders and waist fit)
 //   [8] no page errors
 // The build before fails [1]-[7].   node scripts/pauldron_hinge_test.mjs [page.html] [port]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -33,7 +34,7 @@ try {
   const R = await page.evaluate(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); window._lxNoGearLight = true; const out = {};
     const H = typeof _LX_PAD_HINGE === 'object' ? _LX_PAD_HINGE : {}, keys = Object.keys(H);
-    out.table = { n: keys.length, arcane: !!H['arm:arcane_vestments'], robes: ['sorcerers_robes', 'hurricane_mantle', 'phantom_cloak'].filter((n) => H['arm:' + n]),
+    out.table = { n: keys.length, arcane: !!H['arm:arcane_vestments'], robes: ['sorcerers_robes', 'hurricane_mantle', 'phantom_cloak', 'thunderbow_mantle', 'stormcaller_cloak'].filter((n) => H['arm:' + n]),
       gloves: keys.filter((k) => (H[k][8] || []).length).map((k) => k + ':' + H[k][8].map((g) => g[0]).join('+')), short: keys.filter((k) => (H[k][3].length && H[k][3].length < 16) || !H[k][4].length) };   // an empty P = a pad removed (per user)
     const NAMES = ['tempest_hauberk', 'worldbreaker_bulwark'], eff = (n) => _lxEqErasedImg('arm:' + n) || _lxEquipSprite('armors', n);
     for (let i = 0; i < 300 && !NAMES.every((n) => eff(n) && eff(n).complete && eff(n).naturalWidth && _lxBakedDownscale(eff(n), 256)); i++) await sleep(100);
@@ -68,8 +69,8 @@ try {
     const C = window.LX_EQ_ATTACH_DATA || {}; out.cal = [C['arm:stormcaller_cloak'], C['arm:worldbreaker_bulwark']].map((v) => v && [v.scaleX, v.scaleY, v.dy]);
     return out; });
   const T = R.table;
-  ok('[1] the hinge table: 24 plated pieces, no robes or cloaks (Arcane Vestments keeps the cover), gloves only on Worldbreaker',
-    T.n === 24 && !T.arcane && !T.robes.length && T.gloves.length === 1 && T.gloves[0] === 'arm:worldbreaker_bulwark:armL+armR' && !T.short.length, T);
+  ok('[1] the hinge table: 22 plated pieces, no robes or cloaks (Arcane Vestments keeps the cover), gloves only on Worldbreaker',
+    T.n === 22 && !T.arcane && !T.robes.length && T.gloves.length === 1 && T.gloves[0] === 'arm:worldbreaker_bulwark:armL+armR' && !T.short.length, T);
   ok('[2] Tempest Hauberk: torso from the cut bake + the pad once from the piece (cover down); _lxNoPadHinge = whole art + cover, no cut',
     R.tempest.on.own === 1 && R.tempest.on.cut === 1 && R.tempest.off.own === 2 && R.tempest.off.cut === 0, R.tempest);
   ok('[3] the pad turns with the arm: its angle against the torso differs between rest and mid-swing / cast',
@@ -80,7 +81,7 @@ try {
   ok('[5] Worldbreaker worn art is armless: fire where the near forearm was, the far gauntlet gone (clear or fire), the breastplate kept',
     fire(R.art.forearm) && (R.art.gauntlet[3] < 40 || fire(R.art.gauntlet)) && R.art.breast[3] > 200, R.art);
   ok('[6] Worldbreaker covers the hero`s torso: rest and walk show under 400 px of the garment round the chest at 6 px a unit'.split('`').join("'"), R.cloth.rest < 400 && R.cloth.walk < 400, R.cloth);
-  ok('[7] the Stormcaller / Worldbreaker refit rows are in the Gear Align data', JSON.stringify(R.cal) === JSON.stringify([[0.789, 0.645, 11.5], [1.028, 0.809, 10.5]]), R.cal);
+  ok('[7] the Stormcaller / Worldbreaker refit rows are in the Gear Align data', JSON.stringify(R.cal) === JSON.stringify([[1.026, 0.645, 11.5], [1.182, 0.809, 10.5]]), R.cal);
   ok('[8] no page errors', !errs.length, errs.slice(0, 3).join(' | '));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 300), false); }
 await browser.close(); server.kill();
