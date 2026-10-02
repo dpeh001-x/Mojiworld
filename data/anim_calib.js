@@ -3157,6 +3157,54 @@ window.LX_ANIM_CALIB = {
         110
       ]
     }
+  },
+  "scaleLanternA": {
+    "attack": {
+      "ft": [
+        86,
+        72,
+        108,
+        151,
+        108,
+        72,
+        72,
+        72,
+        115
+      ],
+      "ftAuto": true
+    }
+  },
+  "scaleLanternB": {
+    "attack": {
+      "ft": [
+        86,
+        72,
+        108,
+        152,
+        108,
+        72,
+        72,
+        72,
+        115
+      ],
+      "ftAuto": true
+    }
+  },
+  "scaleStormcaller": {
+    "attack": {
+      "ft": [
+        86,
+        72,
+        72,
+        108,
+        130,
+        108,
+        72,
+        72,
+        115
+      ],
+      "ftAuto": true
+    }
   }
 };
 window.LX_ATK_HITBOX = {

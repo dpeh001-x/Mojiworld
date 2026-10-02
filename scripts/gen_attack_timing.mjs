@@ -161,6 +161,11 @@ export const LX_MOB_STRIKE_BY_TYPE = {
   towerStalker: 4, towerStormcaller: 6, towerWarden: 4, towerWisp: 4, vigil_vermillion: 6, voltipup: 3, willeo: 5,
   wraith: 5, young_bloodthirsty_vermillion: 4, zombie: 4,
 };
+// v0.30.1551 strike-pick - Libra's Scale Lanterns and Scale Stormcallers (their art landed with v0.30.1503) came in without a pick,
+// so their attacks fell back to the flat default pace and gen_attack_timing --check failed. From the art: the blue lantern's
+// flame flares inside its ring of light on f3, the gold lantern's starburst is f3, and the Stormcaller's lightning leaves
+// the fist on f4 (f3 is the fist still charging).
+Object.assign(LX_MOB_STRIKE_BY_TYPE, { scaleLanternA: 3, scaleLanternB: 3, scaleStormcaller: 4 });
 export const LX_MOB_HOLD = { strikeMin: 1.8, strikeSlope: 2.5, strikeMax: 2.8, side: 1.5, first: 1.2, last: 1.6, pulse: 1.8, clearApex: 0.03 };
 export function defaultMobAttackFt(n, cb, frameH, base, strikeAt) {
   if (!(n > 1)) return null;
