@@ -72,7 +72,7 @@ const milo = async (clickRe) => {
 const state = () => page.evaluate(() => {
   const Q = player.quests || {};
   const pick = (o) => Object.keys(o || {});
-  return { map: game.currentMap, active: pick(Q.active), completed: pick(Q.completed), unlocked: pick(Q.unlocked),
+  return { map: game.currentMap, active: pick(Q.active), activeNonCrit: pick(Q.active).filter((k) => !(QUESTS[k] && QUESTS[k].critical)), completed: pick(Q.completed), unlocked: pick(Q.unlocked),
     pieces: Object.keys(player._pqSpirePieces || {}).length, lv: player.level };
 });
 
@@ -198,7 +198,7 @@ ok('the Master Conductor spawns on arrival and his death completes Stage 4',
 
 ok('the whole chain is completed — all four stages, nothing left active',
   ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage', 'q_pq_finale'].every((q) => afterBoss.completed.includes(q))
-    && afterBoss.active.length === 0, afterBoss);
+    && afterBoss.activeNonCrit.length === 0, afterBoss);   // v0.30.1561: critical quests are not the chain's
 
 // ---------------- the states a clean run never reaches ----------------------
 // mid-stage: leave to town, talk to Milo, get sent back (not stranded)

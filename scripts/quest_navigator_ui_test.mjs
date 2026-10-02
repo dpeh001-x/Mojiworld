@@ -41,6 +41,8 @@ await page.evaluate(() => { window._lxBootGateDone = true; });   // the loop bai
 await page.waitForTimeout(600);
 await page.keyboard.press('q');
 await page.waitForTimeout(700);
+await page.evaluate(() => { const t = document.querySelector('#quest-modal [data-qtab="available"]'); if (t) t.click(); });   // v0.30.1561: critical quests start themselves, so the board opens on Active - look at Open
+await page.waitForTimeout(400);
 
 const r1 = await page.evaluate(() => {
   const list = document.getElementById('quest-list');

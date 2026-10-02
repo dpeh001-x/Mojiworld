@@ -35,7 +35,7 @@ try {
     player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { tutorial_intro: true, everdawn_welcome: true }); player._tutorialSeen = true;
     const fresh = (cls, lv) => { applyClass(cls); player.level = lv; player.job = null; player.quests = { active: {}, completed: {}, unlocked: {} }; try { _ensureQuests(); tickQuestUnlocks(); } catch (e) {} };
     // the Journal's cards, by quest id: every class shares the ladder titles, so a title match would find the player's own
-    const journalIds = async () => { try { closeAllModals(); } catch (e) {} toggleQuestJournal(); await W8(250); const tabs = [...document.querySelectorAll('#quest-modal [data-qtab], #quest-modal .qj-tab')]; const av = tabs.find((t) => /avail/i.test(t.textContent || t.dataset.qtab || '')); if (av) { av.click(); await W8(200); } const ids = [...document.querySelectorAll('#quest-modal [data-qaccept]')].map((b) => b.dataset.qaccept); try { closeAllModals(); } catch (e) {} return ids; };
+    const journalIds = async () => { try { closeAllModals(); } catch (e) {} toggleQuestJournal(); await W8(250); const tabs = [...document.querySelectorAll('#quest-modal [data-qtab], #quest-modal .qj-tab')]; const av = tabs.find((t) => t.dataset.qtab === 'available' || /avail/i.test(t.textContent || '')); /* v0.30.1561: by its key - the label reads Open */ if (av) { av.click(); await W8(200); } const ids = [...document.querySelectorAll('#quest-modal [data-qaccept]')].map((b) => b.dataset.qaccept); try { closeAllModals(); } catch (e) {} return ids; };
     const out = {};
     // LEFTOVERS
     fresh('rogue', 30); loadMap('town', 300); await W8(900); try { closeAllModals(); } catch (e) {}

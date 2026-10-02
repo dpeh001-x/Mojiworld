@@ -113,7 +113,7 @@ const bar = await page.evaluate(() => {
 // chrome this suite was written against), and no control may hang past the panel edge.
 check('the status tabs and the category chips share ONE toolbar of at most two rows', bar.bars === 1 && bar.rowCount <= 2, bar);
 check('...and every tab and chip sits inside the toolbar (nothing runs off the panel)', bar.inside, bar);
-check('three status tabs and four category chips', bar.tabs === 3 && bar.chips === 4, bar);
+check('three status tabs and five category chips (All, ★ Critical since v0.30.1561, Story, Class, Bounties)', bar.tabs === 3 && bar.chips === 5, bar);
 check('the category counts partition the visible tab (they used to contradict it)',
   bar.tabCount !== null && bar.parts === bar.tabCount, { parts: bar.parts, tab: bar.tabCount, byKey: bar.byKey });
 

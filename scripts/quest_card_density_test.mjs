@@ -55,6 +55,8 @@ await page.evaluate(() => { const o = document.getElementById('story-beat-overla
   try { game.paused = false; window._lxBootGateDone = true; player.level = 80; } catch (e) {} });
 await page.waitForTimeout(1400);
 await page.keyboard.press('q');
+await page.waitForTimeout(500);
+await page.evaluate(() => { const t = document.querySelector('#quest-modal [data-qtab="available"]'); if (t) t.click(); });   // v0.30.1561: critical quests start themselves, so the board opens on Active - look at Open
 await waitFor('the board', () => page.evaluate(() => {
   const m = document.getElementById('quest-modal');
   return !!m && getComputedStyle(m).display !== 'none' && m.querySelectorAll('.qj-card').length > 3;
