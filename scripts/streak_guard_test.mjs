@@ -50,7 +50,7 @@ try {
   await boot(true);
 
   // 2) a Zodiac Sigil with a full Etc tab stays within the tab's cap
-  const sigil = async (map, fill) => p.evaluate(async ([map, fill]) => {
+  const sigil = async (map, fill, box) => p.evaluate(async ([map, fill, box]) => {
     __unblock(); loadMap(map); const w0 = performance.now(); let m = null;
     while (!(m = game.monsters.find((x) => x && x.zodiacSign && x.isBoss)) && performance.now() - w0 < 40000) { await __frames(5); __unblock(); }
     if (!m) return { err: 'no zodiac boss on ' + map };
@@ -58,13 +58,16 @@ try {
     const tab = (x) => _itemTab(x); const cap = player.invCap.etc;
     player.inventory = (player.inventory || []).filter((x) => x && tab(x) !== 'etc');
     if (fill) for (let i = 0; i < cap; i++) player.inventory.push({ name: 'Test Pebble ' + i, type: 'etc', icon: 'o', rarity: 'common' });
+    player.postbox = box ? Array.from({ length: 30 }, (_, i) => ({ it: { name: 'Held ' + i, rarity: 'epic', tier: 3, slot: 'weapon' }, at: Date.now() })) : [];   // the Postal Wisp's satchel: empty, or full (30)
     const before = player.inventory.filter((x) => tab(x) === 'etc').length;
     const t0 = __toasts.length; m.currentHp = 0; killMonster(m); await __frames(3); __unblock();
     const etc = player.inventory.filter((x) => tab(x) === 'etc');
-    return { cap, before, after: etc.length, bagged: etc.some((x) => x.zodiacSigil), dropped: (game.drops || []).some((d) => d && d.item && d.item.zodiacSigil), fillerTab: tab({ type: 'etc' }), told: __toasts.slice(t0).some((t) => /Sigil obtained!.*dropped at your feet/.test(t)) };
-  }, [map, fill]);
+    return { cap, before, after: etc.length, bagged: etc.some((x) => x.zodiacSigil), dropped: (game.drops || []).some((d) => d && d.item && d.item.zodiacSigil), held: (player.postbox || []).some((q) => q && q.it && q.it.zodiacSigil), toldWisp: __toasts.slice(t0).some((t) => /Wisp took the .*Sigil/.test(t)), fillerTab: tab({ type: 'etc' }), told: __toasts.slice(t0).some((t) => /Sigil obtained!.*dropped at your feet/.test(t)) };
+  }, [map, fill, box]);
   const sf = await sigil('zod_aries', true);
-  check(sf.fillerTab === 'etc' && sf.before === sf.cap && sf.after <= sf.cap && !sf.bagged && sf.dropped && sf.told, 'a Zodiac Sigil won with a full Etc tab drops at your feet (and the toast says so) instead of going past the last slot', sf);
+  check(sf.fillerTab === 'etc' && sf.before === sf.cap && sf.after <= sf.cap && !sf.bagged && !sf.dropped && sf.held && sf.toldWisp, 'a Zodiac Sigil won with a full Etc tab is held by the Postal Wisp (not on the ground, not past the last slot) and she says so', sf);
+  const sb = await sigil('zod_gemini', true, true);
+  check(sb.before === sb.cap && sb.after <= sb.cap && !sb.bagged && sb.dropped && !sb.held && sb.told, 'with her satchel full (30 parcels) the sigil drops at your feet as before, and the toast says so', sb);
   const sr = await sigil('zod_taurus', false);
   check(sr.bagged && !sr.dropped && sr.after === sr.before + 1, 'with room in the Etc tab the sigil still goes straight into the bag', sr);
   await p.evaluate(() => { player.inventory = player.inventory.filter((x) => !(x && /^Test Pebble/.test(x.name))); __unblock(); loadMap('mushroom'); });

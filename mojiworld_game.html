@@ -16296,7 +16296,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1541';
+const GAME_VERSION = 'v0.30.1542';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -51344,6 +51344,7 @@ const PLAYER_SAVE_FIELDS = [
   // tab by 4 (clamped at 48). _freeFaceUsed / _freeHairUsed flip true
   // after the first cosmetic visit so subsequent ones consume tickets.
   'invCap','_freeFaceUsed','_freeHairUsed',
+  'postbox',   // held parcels: [{ it, at }], at most 30, 7 real days (see _lxPostboxHold)
   // v0.26.257 — Mojibank Manager Felina. Balance held in the bank
   // separate from player.mojicoins so it earns daily interest.
   // bankLastTick stamps the last interest computation (ms epoch) —
@@ -55616,6 +55617,7 @@ function loadState() {
     // that used to live here was relocated so the sanitizer can't zero the
     // wallet before the migration copies it across.
     try { _lxPaintLoad(s.player); } catch (e) {}   // v0.30.1181 paint-save - the Wardrobe paint, from its own key
+    player.postbox = [];   // a save that carries none must not inherit the last character's parcels
     Object.assign(player, _lxPickSaveFields(s.player, PLAYER_SAVE_FIELDS));   // v0.30.917 only what a save writes
     // v0.30.x — RAW EXP re-derived every level cost (they are ~2.7x smaller now that the award carries no knobs), so a
     // save written before it holds EXP on the old scale: 400,000 banked EXP against a 9,720 rung would vault a
@@ -56029,6 +56031,7 @@ function loadState() {
       for (const _it of player.inventory) if (_lxRepairSavedItem(_it)) _fx++;
       if (player.equipped && typeof player.equipped === 'object') for (const _sl in player.equipped) if (_lxRepairSavedItem(player.equipped[_sl])) _fx++;
       if (_fx) { player._equipBonusCache = null; console.warn('[save] repaired ' + _fx + ' item(s) with an unknown rarity or bad fields'); } }
+    try { _lxPostboxSanitize(); } catch (e) {}   // held parcels: repaired like the bag, the expired and the excess dropped
     // v0.25.945 — Slot-string migration. Pre-v0.25.945 every accessory
     // drop landed with slot:'accessorie' (a slice(0,-1) bug on
     // 'accessories'). Sweep every item in inventory + equipped slots and
@@ -61981,8 +61984,11 @@ function _lxGrantGodWeapon() {
       if (((typeof _itemTab === 'function') ? _itemTab(_i) : 'equip') === _tab) _used++;
     }
     const _roomy = _used < _cap;
+    let _held = false;
     if (_roomy) {
       player.inventory.push(it);
+    } else if (typeof _lxPostboxHold === 'function' && (_held = _lxPostboxHold(it, true, true))) {
+      // the Postal Wisp holds it (held parcels)
     } else {
       game.drops.push({
         x: (player.x || 0) + (player.w || 28) / 2,
@@ -61994,7 +62000,7 @@ function _lxGrantGodWeapon() {
       try { emitRarityBurst(player.x + player.w / 2, player.y + player.h / 2, 'god'); } catch (e) {}
     }
     if (typeof showToast === 'function') {
-      showToast('👑 GOD TIER — ' + it.name + (_roomy ? ' is yours. ' : ' dropped at your feet (bag full) — pick it up! ')
+      showToast('👑 GOD TIER — ' + it.name + (_roomy ? ' is yours. ' : _held ? ' is held by the Postal Wisp (bag full) - press P to collect it. ' : ' dropped at your feet (bag full) — pick it up! ')
         + LX_GOD_QUEST_TARGET + ' quests answered.', 'legendary');
     }
     if (typeof saveState === 'function') { try { saveState(); } catch (e) {} }
@@ -77772,8 +77778,9 @@ function openChest(c) {
     let _used = 0;
     for (const _it of player.inventory) { if (_it && (((typeof _itemTab === 'function') ? _itemTab(_it) : 'etc') === _tab)) _used++; }
     if (_used >= _cap) {
-      game.drops.push({ x: c.x + (c.w || 24) / 2, y: c.y, vy: -5, type: 'item', item: it, life: 90000 });
-      showToast(`Chest: ${mojicoins} Mojicoins + ${it.name} (bag full — dropped on the ground)`, it.rarity);
+      const _held = (typeof _lxPostboxHold === 'function') && _lxPostboxHold(it, true);   // the Postal Wisp takes it (held parcels)
+      if (!_held) game.drops.push({ x: c.x + (c.w || 24) / 2, y: c.y, vy: -5, type: 'item', item: it, life: 90000 });
+      showToast(`Chest: ${mojicoins} Mojicoins + ${it.name} (bag full — ${_held ? 'held by the Postal Wisp' : 'dropped on the ground'})`, it.rarity);
     } else {
       player.inventory.push(it);
       showToast(`Chest: ${mojicoins} Mojicoins + ${it.name}`, it.rarity);
@@ -82385,6 +82392,7 @@ function updatePlayer(dt) {
           if (((typeof _itemTab === 'function') ? _itemTab(_it) : 'etc') === _tab) _used++;
         }
         if (_used >= _cap) {
+          if (typeof _lxPostboxHold === 'function' && _lxPostboxHold(d.item, false, !!d._questReward)) { game.drops.splice(i, 1); continue; }   // the Postal Wisp takes it (held parcels)
           // Inventory full for this tab — toast once per ~2 s, keep drop on ground.
           if (!game._invFullToastT || (game.time | 0) - game._invFullToastT > 120) {
             showToast(`⚠ Inventory full (${_tab.toUpperCase()}) — make space!`, 'rare');
@@ -115929,10 +115937,12 @@ So… do you need a lift?`;
     // v0.25.809 — Postal Wisp, the town courier. Pure flavour for
     // now; hooks reserved for a future mailbox / pen-pal system.
     text = '*The Wisp hovers, satchel bigger than its body.*\n\nDelivery! — oh. You\'re not on my route.\n\nWisp, town courier. Two services: mail-order potions to wherever you stand, small fee; and a daily care-parcel the watcher above tucks in my satchel — there by the dawn song\'s last note.\n\nPress P anywhere to call me.';
+    text += _lxPostboxBlurb();
     opts.push({ t:'✉ Mail-order potions (+15% delivery)', cb:() => { closeDialog(); if (typeof openShop === 'function') openShop('potion', { surcharge: 1.15 }); } });
     opts.push({ t:'🎁 Collect today\'s parcel', cb:() => { if (typeof _claimDailyParcel === 'function') _claimDailyParcel(); } });
+    opts.push({ t:'📦 Held parcels (' + _lxPostboxSanitize().length + '/' + LX_POSTBOX_CAP + ')', cb:() => { _lxPostboxVisit(); } });
     opts.push({ t:'Who do you deliver for?', cb:() => { document.getElementById('dialog-text').textContent = 'Everyone with coin and most without — postage is on a sliding scale. The Academia sends scrolls weekly, the foundry invoices daily, and Auntie Innie a love letter to no-one every Wednesday. We do not ask. We deliver.'; } });
-    opts.push({ t:'Anything for me?', cb:() => { document.getElementById('dialog-text').textContent = 'Hmm — checking — no, sorry. Your mailbox is empty save for one flyer about discount potions. Would you like me to lose it on the way to the bin? I lose things very professionally.'; } });
+    opts.push({ t:'Anything for me?', cb:() => { { const _pa = _lxPostboxAsk(); if (_pa) { _lxPostSay(_pa); return; } } document.getElementById('dialog-text').textContent = 'Hmm — checking — no, sorry. Your mailbox is empty save for one flyer about discount potions. Would you like me to lose it on the way to the bin? I lose things very professionally.'; } });
   } else if (npc.role === 'alchemist') {
     // v0.25.809 — Tincture Aunt runs an alchemy stall at Azure
     // Academia. Routes to potion shop; foreshadows recipe-scroll
@@ -118736,6 +118746,96 @@ const CRAFT_DISASSEMBLE_REWARD = 4;
 // tradeable for 1000 setshards"). One sigil, one trade, one price — replacing
 // the scroll chain (boss drop -> 3 distinct sigils -> Use tab -> set piece).
 // =========================================================================
+// =========================================================================
+// POSTE RESTANTE - HELD PARCELS (per user: "think of a better utility function for the postal mail NPC"). Loot that cannot fit a full
+// bag used to lie on the ground for 90-150 s and was gone the moment you left the map. Now the Postal Wisp scoops it up: 30 parcels,
+// 7 real days, saved with the character, collected from her (P from anywhere) once there is room. Only overflow loot goes in - there is
+// no way to put an item in - so it is a safety net, not a stash. She skips common-grade monster gear (it would fill the 30 slots in
+// minutes, ahead of anything worth keeping; quest rewards, sigils and the god weapon always go in), and like the daily parcel she
+// cannot reach the tower. Nothing travels the network: a co-op pickup is a local pickup.
+// =========================================================================
+const _LXN = String.fromCharCode(10);
+const LX_POSTBOX_CAP = 30;
+const LX_POSTBOX_DAYS = 7;
+function _lxPostboxList() { if (!Array.isArray(player.postbox)) player.postbox = []; return player.postbox; }
+// a save can say anything: keep parcels that are objects with a name, repair them like the bag's items, drop the expired, cap at 30
+function _lxPostboxSanitize() {
+  const raw = Array.isArray(player.postbox) ? player.postbox : [], out = [], now = Date.now(), ttl = LX_POSTBOX_DAYS * 86400000;
+  for (const p of raw) {
+    if (!p || typeof p !== 'object' || !p.it || typeof p.it !== 'object' || typeof p.it.name !== 'string') continue;
+    let at = +p.at; if (!Number.isFinite(at) || at > now) at = now;
+    if (now - at >= ttl) continue;
+    try { _lxRepairSavedItem(p.it); } catch (e) {}
+    out.push({ it: p.it, at });
+    if (out.length >= LX_POSTBOX_CAP) break;
+  }
+  player.postbox = out;
+  return out;
+}
+function _lxPostboxDaysLeft(p) { return Math.max(1, Math.ceil((LX_POSTBOX_DAYS * 86400000 - (Date.now() - p.at)) / 86400000)); }
+// true when the Wisp took the item. quiet = the caller says it in its own toast; force = she takes common grade too
+function _lxPostboxHold(it, quiet, force) {
+  try {
+    if (!it || typeof it !== 'object' || typeof it.name !== 'string' || !it.name) return false;
+    if (game.expedition && game.expedition.active) return false;   // she cannot reach the tower
+    if (!force && it.rarity === 'common') return false;             // not worth the postage
+    const box = _lxPostboxSanitize();
+    if (box.length >= LX_POSTBOX_CAP) {
+      if (!game._postFullToastT || (game.time | 0) - game._postFullToastT > 600) {
+        game._postFullToastT = game.time | 0;
+        if (typeof showToast === 'function') showToast('✉ The post office is full (' + LX_POSTBOX_CAP + '/' + LX_POSTBOX_CAP + ') - press P to collect your parcels', 'rare');
+      }
+      return false;
+    }
+    box.push({ it, at: Date.now() });
+    if (!quiet && typeof showToast === 'function') showToast('✉ The Wisp took the ' + it.name + ' — held at the post office (' + box.length + '/' + LX_POSTBOX_CAP + '). Press P to collect.', it.rarity);
+    if (typeof _playUiSfx === 'function') _playUiSfx('pickup_item');
+    return true;
+  } catch (e) { return false; }
+}
+// free: whatever now fits, oldest first
+function _lxPostboxCollect() {
+  const box = _lxPostboxSanitize(), got = [];
+  if (!Array.isArray(player.inventory)) player.inventory = [];
+  const tabOf = (x) => (typeof _itemTab === 'function') ? _itemTab(x) : 'etc', used = {};
+  for (const x of player.inventory) if (x) { const t = tabOf(x); used[t] = (used[t] | 0) + 1; }
+  for (let i = 0; i < box.length;) {
+    const it = box[i].it, t = tabOf(it), cap = (player.invCap && typeof player.invCap[t] === 'number') ? player.invCap[t] : 24;
+    if ((used[t] | 0) < cap) { player.inventory.push(it); used[t] = (used[t] | 0) + 1; box.splice(i, 1); got.push(it); try { if (typeof trackPickup === 'function') trackPickup('item', it); } catch (e) {} }
+    else i++;
+  }
+  return { got, left: box.length };
+}
+const _lxPostLine = (p) => '• ' + p.it.name + ' (' + (p.it.rarity || 'item') + (p.it.tier ? ' T' + (p.it.tier | 0) : '') + ', ' + _lxPostboxDaysLeft(p) + 'd left)';
+// an answer in the dialog: finish the greeting's typewriter first (an option click does not, and a reveal still running writes over the answer)
+function _lxPostSay(t) {
+  const dlg = document.getElementById('dialog'), el = document.getElementById('dialog-text'); if (!el) return;
+  try { if (dlg && typeof dlg._twSkip === 'function') dlg._twSkip(); } catch (e) {}
+  el.textContent = t;
+}
+// the "Held parcels" option: collect what fits, then say what came and what still waits
+function _lxPostboxVisit() {
+  if (!document.getElementById('dialog-text')) return;
+  const el = { set textContent(t) { _lxPostSay(t); } };   // every answer below goes through _lxPostSay
+  if (game.expedition && game.expedition.active) { el.textContent = '*The Wisp shakes her head.*' + _LXN + _LXN + 'Not up the tower - I cannot reach you there. Ask me again after the run.'; return; }
+  if (!_lxPostboxSanitize().length) { el.textContent = '*The satchel is flat.*' + _LXN + _LXN + 'Nothing held for you. When your bag overflows I will scoop what I can and keep it a week.'; return; }
+  const r = _lxPostboxCollect(), rest = _lxPostboxList();
+  const parts = [];
+  if (r.got.length) parts.push('*She tips her satchel out.*' + _LXN + _LXN + 'Collected ' + r.got.length + ':' + _LXN + r.got.slice(0, 5).map((it) => '• ' + it.name).join(_LXN) + (r.got.length > 5 ? _LXN + '...and ' + (r.got.length - 5) + ' more' : ''));
+  else parts.push('*She pats the satchel.*' + _LXN + _LXN + 'Your bag has no room for any of it yet - free a slot and ask again.');
+  if (rest.length) parts.push('Still held (' + rest.length + '/' + LX_POSTBOX_CAP + '):' + _LXN + rest.slice(0, 4).map(_lxPostLine).join(_LXN) + (rest.length > 4 ? _LXN + '...and ' + (rest.length - 4) + ' more' : ''));
+  el.textContent = parts.join(_LXN + _LXN);
+  if (r.got.length) { if (typeof showToast === 'function') showToast('📦 Collected ' + r.got.length + ' parcel' + (r.got.length === 1 ? '' : 's') + ' from the Wisp', 'rare'); if (typeof saveState === 'function') { try { saveState(); } catch (e) {} } }
+}
+// a line for the Wisp's greeting, and the answer to "Anything for me?" (empty = the old joke)
+function _lxPostboxBlurb() {
+  const box = _lxPostboxSanitize(); if (!box.length) return '';
+  return _LXN + _LXN + '📦 ' + box.length + ' parcel' + (box.length === 1 ? ' is' : 's are') + ' held for you - the oldest leaves in ' + _lxPostboxDaysLeft(box[0]) + ' day' + (_lxPostboxDaysLeft(box[0]) === 1 ? '' : 's') + '.';
+}
+function _lxPostboxAsk() {
+  const box = _lxPostboxSanitize(); if (!box.length) return '';
+  return '*Rummages.*' + _LXN + _LXN + 'Yes! ' + box.length + ' parcel' + (box.length === 1 ? '' : 's') + ' of yours, caught when your bag was full - the oldest leaves in ' + _lxPostboxDaysLeft(box[0]) + ' day' + (_lxPostboxDaysLeft(box[0]) === 1 ? '' : 's') + '. Pick "Held parcels" and I will hand over whatever fits.';
+}
 const SIGIL_TRADE_SHARDS = 200;   // v0.29.7xx — 1000 -> 200 (per user)
 // v0.30.1176 streak-guard - A ZODIAC SIGIL RESPECTS THE ETC TAB'S CAP like every other grant (quest reward, chest, pickup, craft):
 // it was pushed into the bag unconditionally, past the last visible slot when the tab was full. A full tab drops it at the
@@ -118747,6 +118847,7 @@ function _lxGiveSigil(it) {
   let used = 0;
   for (const x of player.inventory) if (x && tabOf(x) === tab) used++;
   if (used < cap) { player.inventory.push(it); return true; }
+  if (typeof _lxPostboxHold === 'function' && _lxPostboxHold(it, false, true)) return true;   // the Postal Wisp holds it (held parcels)
   if (!Array.isArray(game.drops)) game.drops = [];
   game.drops.push({ x: (player.x || 0) + (player.w || 28) / 2, y: (player.y || 0) + (player.h || 44) / 2, vy: -6, type: 'item', item: it, life: 150000, _questReward: true });
   return false;
