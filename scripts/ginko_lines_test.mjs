@@ -43,8 +43,8 @@ try {
   check(!r.missing, 'Ginko stands in Emerald Village');
   check(r.role === 'ginko', 'Ginko has his own role (was info, from the baked map)', J(r.role));
   check(/I'm Ginko/.test(r.intro || '') && /small boy/.test(r.intro || '') && !/Arlen/.test(r.intro || ''), 'his intro is a small boy, not Old Arlen', J((r.intro || '').slice(0, 80)));
-  check(J(r.opts) === J(['Can I see one?', 'Who taught you?', 'Any tips for an adventurer?', 'Anything strange around here?', 'Leave']), 'he has four questions of his own, then Leave', J(r.opts));
-  check((r.answers || []).length === 4 && r.answers.every((t) => t && t.length > 80 && !/Arlen|young one/.test(t)) && new Set(r.answers).size === 4, 'each question gets its own answer in his voice', J((r.answers || []).map((t) => (t || '').slice(0, 30))));
+  check(J(r.opts) === J(['Can I see one?', 'Who taught you?', 'Any tips for an adventurer?', 'Anything strange around here?', 'How do arrows work?', 'Leave']), 'he has five questions of his own, then Leave', J(r.opts));
+  check((r.answers || []).length === 5 && r.answers.every((t) => t && t.length > 80 && !/Arlen|young one/.test(t)) && new Set(r.answers).size === 5, 'each question gets its own answer in his voice', J((r.answers || []).map((t) => (t || '').slice(0, 30))));
   check(r.sub === 'Little Fletcher', 'his nameplate title is "Little Fletcher"', J(r.sub));
   check(Array.isArray(r.barks) && r.barks.length >= 3 && !r.barks.some((t) => /young one|my day/i.test(t)), 'he has his own idle lines', J(r.barks));
   check(/Arlen/.test(r.arlen || ''), 'Old Arlen still speaks his own script', J((r.arlen || '').slice(0, 60)));
