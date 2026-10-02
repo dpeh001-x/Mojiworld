@@ -43,7 +43,7 @@ for (const k of NEW) { const { data: d, info } = await sharp(path.join(ROOT, `Sp
 ok('each still\'s outer outline draws 1.5 px in game (solid-ink median 1.3-1.7)', NEW.every((k) => widths[k] >= 1.3 && widths[k] <= 1.7), widths);
 const q = (id) => { const i = game.indexOf('\n  ' + id + ': {'); return game.slice(i, game.indexOf('\n  },', i)); };
 ok('Lyra\'s chapters I-II hunt Harea; chapter IV hunts Taiger and Lady Honk (with Willeo)', /target: 'harea', count: 12/.test(q('q_lyra_loan')) && /target: 'harea', count: 18/.test(q('q_lyra_tear')) && /target: 'taiger',/.test(q('q_lyra_kin')) && /\{ target: 'lady_honk', +count: 8 \}/.test(q('q_lyra_kin')));
-ok('and their prose names the new keeper and the new copies', /Hera.'s starry robe/.test(q('q_lyra_tear')) && /Taiga, Lady Hong and Will stood too near it/.test(q('q_lyra_kin')) && /teacher.'s reflection holds a door/.test(q('q_kindest_hand')));
+ok('and their prose names the new keeper and the new copies', /Hera.'s starry robe/.test(q('q_lyra_tear')) && /Taiga, Lady Hong and Will stood in its mouth/.test(q('q_lyra_kin')) && /teacher.'s reflection holds a door/.test(q('q_kindest_hand')));
 // ---- in game
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT }); await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
