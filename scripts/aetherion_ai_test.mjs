@@ -73,7 +73,13 @@ const scenario = await page.evaluate(() => {
     window._prologueActive = false;
     game.paused = false; game.monsters = []; game.projectiles.length = 0; game.hazards.length = 0;
     player.level = 70; player._god = true; player.hp = getMaxHp(); player.mp = 9e9; player.x = 900; player.y = 480 - player.h;
-    spawnMonster(1300, 480 - 160, 'aetherion', true);
+    // the clock's PHASE is pinned too: AI cadences key on absolute game.time ('now & 3', 'time % N'), so a scenario that
+    // started on step 2005 instead of 2014 fought a different fight. Round up to a multiple of 28800 (2^7 x 3^2 x 5^2);
+    // only forward, so every deadline left by the last scenario simply expires
+    game.time = Math.ceil(((game.time | 0) + 1) / 28800) * 28800;
+    { const r0 = Math.random; let a = ((opts.seed || 20261002) ^ 0x2545f491) >>> 0;   // the spawn's own rolls, seeded too
+      Math.random = () => { a = (Math.imul(a, 1664525) + 1013904223) >>> 0; return a / 4294967296; };
+      try { spawnMonster(1300, 480 - 160, 'aetherion', true); } finally { Math.random = r0; } }
     const m = game.monsters[game.monsters.length - 1];
     if (!m || m.type !== 'aetherion') return { err: 'no aetherion' };
     if (opts.hpFrac != null) { m.currentHp = Math.floor(m.maxHp * opts.hpFrac); }
@@ -84,27 +90,48 @@ const scenario = await page.evaluate(() => {
     // at 120-170Hz while the sim is time-banked at 60 steps/s, so 1800 frames
     // measured as only 513 steps of fight. Scripted events key on sim time too.
     const steps = opts.frames || 1500;
-    // v0.30.x — a seeded draw where the check is a SHARE: 12 free picks at p~0.45 fall to 4 (33%) about a third of
-    // the time, so the air check failed on luck, not on the director. Seeded, it measures what the weights produce.
-    const _rnd0 = Math.random;
-    if (opts.seed) { let a = opts.seed >>> 0; Math.random = () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-    const gt0 = game.time | 0;
-    let i = 0, guard = 0;
-    while (((game.time | 0) - gt0) < steps && guard++ < steps * 6) {
-      await new Promise((r) => requestAnimationFrame(r));
-      i = (game.time | 0) - gt0;
-      if (window._prologueActive || (typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix)) cineFrames++;
+    // DETERMINISTIC (2026-10-02). On an unchanged build this file failed 0-3 of 13 checks per run, a different set each
+    // time (variety, kiting lances, air Shardfall, heal answer, Sky-Break gap). Causes - three here, and the clock phase,
+    // the pinned hero and the exact-step report, each explained where it is handled:
+    //  1. His chooser (_aeChoose) drew from the page-wide Math.random, which the renderer also draws from a load-dependent
+    //     number of times per frame - so even the old seeded air run (a global Math.random swap) picked differently.
+    //  2. The scripted player ran once per rAF while headless runs several fixed sim steps per rAF under load: the
+    //     'i % 12' hits, the heal window and the dodge script landed on different steps (and some hits never happened).
+    //  3. The monster-side rolls (director openings and stances, hit rolls) shared that page-wide stream too.
+    // Now the chooser draws from its own seeded stream, and the script, the monster update and the observer run per sim
+    // step inside an updateMonsters wrapper on a second seeded stream, with the frame-time low-FX flags pinned (they gate
+    // particle rolls inside the AI). The rAF loop only waits out the step budget.
+    const _mk = (s) => { let a = s >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+    const seed = (opts.seed || 20261002) >>> 0, rngPick = _mk(seed), rngSim = _mk(seed ^ 0x5bd1e995);
+    const _choose0 = window._aeChoose, _um0 = window.updateMonsters, _lf0 = LX_PERF.lowFx, _vlf0 = LX_PERF.veryLowFx;
+    window._aeChoose = function () { const r0 = Math.random; Math.random = rngPick; try { return _choose0.apply(this, arguments); } finally { Math.random = r0; } };
+    let healed = false, dodgeX = player.x;
+    const script = (i) => {
       const bcx = m.x + m.w / 2;
-      // scripted player
+      // the hero is PINNED every step (x per mode, and on the floor unless living in the air): knockback from his
+      // contact and columns used to shove an unpinned hero a few px - by boxes that follow the DRAWN frame, so by render
+      // timing - and that drift cascaded through his reads into a different fight each run
+      if (opts.mode !== 'air') { player.y = 480 - player.h; player.vy = 0; player.onGround = true; }
+      if (opts.mode === 'neutral' || opts.mode === 'heal' || opts.mode === 'stagger') { player.x = 900; player.vx = 0; }
       if (opts.mode === 'far') { player.x = bcx > 1000 ? 380 : 1620; player.vx = 0; }
       if (opts.mode === 'hug') { player.x = m.x - player.w - 8; player.vx = 0; if ((i % 12) === 0) { try { hitMonster(m, 1000, false, 'melee'); } catch (e) {} } }
       if (opts.mode === 'air') { player.x = bcx - 260; player.y = 480 - player.h - 140; player.vy = 0; player.onGround = false; }
-      if (opts.mode === 'dodgeR' && game.projectiles.some((p) => p.owner === 'enemy')) { player.vx = 6; player.x += 6; if (player.x > 1900) player.x = 400; }
-      if (opts.mode === 'heal' && i >= 600 && i < 640) { player.hp = Math.floor(getMaxHp() * 0.4); }
-      if (opts.mode === 'heal' && i >= 640) { player.hp = getMaxHp(); }
+      // dodging right while his shots are live: 6 px a step, vx 6 for his dodge read, wrapping back to 400 past 1900
+      if (opts.mode === 'dodgeR') {
+        if (game.projectiles.some((p) => p.owner === 'enemy')) { dodgeX += 6; if (dodgeX > 1900) dodgeX = 400; player.vx = 6; } else player.vx = 0;
+        player.x = dodgeX;
+      }
+      // the heal lands on the first step from 640 on where he is free to answer it: he reads heals only from idle, inside
+      // 40 steps, so a heal under a 72-step Sky-Break windup expired unread and the check failed on timing, not on the read
+      if (opts.mode === 'heal' && i >= 600 && !healed) {
+        const free = i >= 640 && (!m._ae || m._ae.st === 'idle') && !((m._dirOpenT | 0) > 0 || (m._stagger | 0) > 0);
+        if (free) { player.hp = getMaxHp(); healed = true; } else player.hp = Math.floor(getMaxHp() * 0.4);
+      } else if (opts.mode === 'heal' && healed) player.hp = getMaxHp();
       if (opts.mode === 'stagger' && i >= 200 && i < 210) { m._dirOpenT = 3000; }
       player.hp = Math.max(player.hp, 1); m.currentHp = Math.max(m.currentHp, 1);
-      // observe — the machine's own state, which the shared boss code cannot reset
+    };
+    // observe - the machine's own state, which the shared boss code cannot reset
+    const observe = (i) => {
       const st = (m._ae && m._ae.st) || m.patternState || 'idle';
       if (st !== lastState) { stateAt = i; lastState = st; }
       const ep = game.projectiles.filter((p) => p.owner === 'enemy'), eh = game.hazards.filter((h) => h.owner === 'enemy' || h.type === 'mob_shockwave');
@@ -115,17 +142,45 @@ const scenario = await page.evaluate(() => {
         if ((m._dirOpenT | 0) > 0) staggerFires++;
       }
       prevProj = np; prevHz = nh;
-    }
-    Math.random = _rnd0;
-    const log = (m._ae && m._ae.log || []).slice();
-    const picks = {}; for (const l of log) picks[l.s] = (picks[l.s] || 0) + 1;
-    // windups come from the AI's own fire log (ms elapsed in the pattern at the
-    // moment it fired): a pattern fires and returns to idle inside one tick, so
-    // a frame-sampled observer would attribute the spawn to the new idle state
-    const fires = (m._ae && m._ae.fires || []).slice();
-    const out = { picks, n: log.length, spawns: spawns.length, fires: fires.length, staggerFires, cineFrames, simSteps: (game.time | 0) - gt0, speed: m.speed, state: (m._ae && m._ae.st) || 'idle', x: m.x, px: player.x,
-      minWind: fires.length ? Math.min(...fires.map((f) => f.wind)) : -1, why: log.map((l) => l.why).filter(Boolean),
-      gap: m._ae && m._ae.lastGap, dodge: m._ae && +m._ae.dodge.toFixed(2), evolvedNow: !!m._aetherionEvolved, hpFrac: +(m.currentHp / m.maxHp).toFixed(2) };
+      // his walk speed, read 30 steps into an idle stretch (every AI tick has had its chance to restore it by then).
+      // The end-of-run read caught him on the step a windup finished, before his next tick restored it.
+      idleRun = (st === 'idle') ? idleRun + 1 : 0;
+      if (idleRun === 30) idleSpeed = m.speed;
+    };
+    let idleRun = 0, idleSpeed = null;
+    const gt0 = game.time | 0;
+    // the report is taken on EXACTLY the budget's last monster step - the rAF loop below overshoots by however many sim
+    // steps the last frame ran, and a pick in that overshoot changed the counts between runs
+    const report = () => {
+      const log = (m._ae && m._ae.log || []).slice();
+      const picks = {}; for (const l of log) picks[l.s] = (picks[l.s] || 0) + 1;
+      // windups come from the AI's own fire log (ms elapsed in the pattern at the
+      // moment it fired): a pattern fires and returns to idle inside one tick, so
+      // a frame-sampled observer would attribute the spawn to the new idle state
+      const fires = (m._ae && m._ae.fires || []).slice();
+      return { picks, n: log.length, spawns: spawns.length, fires: fires.length, staggerFires, cineFrames, simSteps: (game.time | 0) - gt0, speed: m.speed, idleSpeed, state: (m._ae && m._ae.st) || 'idle', x: m.x, px: player.x,
+        minWind: fires.length ? Math.min(...fires.map((f) => f.wind)) : -1, why: log.map((l) => l.why).filter(Boolean),
+        gap: m._ae && m._ae.lastGap && { ...m._ae.lastGap }, dodge: m._ae && +m._ae.dodge.toFixed(2), evolvedNow: !!m._aetherionEvolved, hpFrac: +(m.currentHp / m.maxHp).toFixed(2) };
+    };
+    // the player's update and the projectile pass (hits on the hero: knockback, evasion rolls) ride the seeded stream too
+    const seeded = (fn) => function () { const r0 = Math.random; Math.random = rngSim; LX_PERF.lowFx = true; LX_PERF.veryLowFx = true; try { return fn.apply(this, arguments); } finally { Math.random = r0; } };
+    const _up0 = window.updatePlayer, _upj0 = window.updateProjectiles;
+    let k = 0, snap = null;
+    window.updatePlayer = seeded(_up0); window.updateProjectiles = seeded(_upj0);
+    window.updateMonsters = function () {
+      const i = k++, r0 = Math.random;
+      Math.random = rngSim; LX_PERF.lowFx = true; LX_PERF.veryLowFx = true;
+      try { if (!snap) script(i); return _um0.apply(this, arguments); }
+      finally { Math.random = r0; if (!snap) { try { observe(i); } catch (e) {} if (k >= steps) snap = report(); } }
+    };
+    let guard = 0;
+    try {
+      while (!snap && guard++ < steps * 6) {
+        await new Promise((r) => requestAnimationFrame(r));
+        if (window._prologueActive || (typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix)) cineFrames++;
+      }
+    } finally { window._aeChoose = _choose0; window.updateMonsters = _um0; window.updatePlayer = _up0; window.updateProjectiles = _upj0; LX_PERF.lowFx = _lf0; LX_PERF.veryLowFx = _vlf0; }
+    const out = snap || report();
     game.monsters = []; game.projectiles.length = 0; game.hazards.length = 0;
     return out;
   };
@@ -139,7 +194,7 @@ ok('the scenario runs at full tempo with no cinematic active (the harness guard)
   neutral.err || `${neutral.cineFrames} cinematic frames, ${neutral.simSteps} sim steps in 1800 frames`);
 ok('in 30s he uses at least four distinct patterns and at least ten in all (was: one every ten seconds)', !neutral.err && Object.keys(neutral.picks).length >= 4 && neutral.n >= 10, neutral.err || `${neutral.n} picks: ${JSON.stringify(neutral.picks)}`);
 ok('every attack he creates comes at least 300ms into a telegraphed windup', !neutral.err && neutral.fires > 0 && neutral.minWind >= 300, neutral.err || `${neutral.fires} attacks, shortest windup ${neutral.minWind}ms`);
-ok('his walk speed is restored between patterns (the windup hold does not stick)', !neutral.err && (neutral.state !== 'idle' || Math.abs(neutral.speed - 0.8) < 0.01), neutral.err || `speed ${neutral.speed} in state ${neutral.state}`);
+ok('his walk speed is restored between patterns (the windup hold does not stick)', !neutral.err && neutral.idleSpeed != null && Math.abs(neutral.idleSpeed - 0.8) < 0.01, neutral.err || `speed ${neutral.idleSpeed} 30 steps into an idle stretch (${neutral.speed} in state ${neutral.state} at the end)`);
 
 // ---- the read changes what he does ------------------------------------------------
 const far = await ev(async () => await window.__ae({ mode: 'far', frames: 1500 }));
