@@ -35,14 +35,19 @@ try {
   // 1. the menu
   await setBag(6);
   let r = await page.evaluate(async () => { openPostalWisp(); await new Promise((r) => setTimeout(r, 300)); await __typed(); const opt = [...document.querySelectorAll('#dialog-options button')].find((b) => /Send to market/.test(b.textContent));
-    return { opt: opt ? opt.textContent.trim() : null, greet: /90% of what Brok pays/.test(document.getElementById('dialog-text').textContent) }; });
-  ok('P opens the Wisp with "Send to market (90% of Brok\'s price)" and her greeting says so', !!r.opt && /90% of Brok's price/.test(r.opt) && r.greet, r);
+    return { opt: opt ? opt.textContent.trim() : null, gold: !!opt && opt.classList.contains('opt-shop') }; });
+  ok('P opens the Wisp with "Send to market (90% of Brok\'s price)" and it is a gold shop chip', !!r.opt && /90% of Brok's price/.test(r.opt) && r.gold, r);
   // 2. her desk prices every piece at exactly 90% of Brok's
   r = await page.evaluate(async () => { const exp = player.inventory.map((it) => Math.floor(_lxGearMarketPrice(it) * GEAR_SELLBACK_PCT * 0.9)), brok = player.inventory.map((it) => Math.floor(_lxGearMarketPrice(it) * GEAR_SELLBACK_PCT));
     [...document.querySelectorAll('#dialog-options button')].find((b) => /Send to market/.test(b.textContent)).click(); await __wait(() => __shopOpen()); await new Promise((r) => setTimeout(r, 200));
     return { open: __shopOpen(), title: document.getElementById('shop-title').textContent, rows: __rows(), exp, brok, dlg: document.getElementById('dialog').style.display }; });
   ok('the desk opens (the dialog closes) and is titled "Send to Market"', r.open && /Send to Market/.test(r.title) && r.dlg !== 'block', r);
   ok('every row is exactly floor(market x 10% x 90%) and none is above what Brok pays', r.rows.join() === r.exp.join() && r.rows.every((v, i) => v <= r.brok[i]) && r.rows.some((v, i) => v < r.brok[i]), r);
+  // 2b. her desk looks like hers: a berry ribbon (Postal Wisp, the cut, where Brok pays full) and a "Brok pays N" line on every card; Brok's desk has neither
+  r = await page.evaluate(() => { const rb = document.querySelector('#shop-list .mkt-ribbon'), inner = document.querySelector('#shop-modal .modal'), brok = [...document.querySelectorAll('#shop-list .sell-row .sell-brok')].map((e) => parseInt(e.textContent.replace(/\D/g, ''), 10));
+    return { ribbon: rb ? rb.textContent.replace(/\s+/g, ' ').trim() : null, cls: inner.classList.contains('market-desk'), brok, exp: player.inventory.map((it) => Math.floor(_lxGearMarketPrice(it) * GEAR_SELLBACK_PCT)) }; });
+  ok('her desk wears the ribbon ("Postal Wisp", the 10% cut, where Brok pays full) and the market-desk class', !!r.ribbon && /Postal Wisp/.test(r.ribbon) && /cut\s*.10%/.test(r.ribbon) && /Brok pays full resale/.test(r.ribbon) && r.cls, r);
+  ok('every card says what Brok would pay for it (exactly the Brok price)', r.brok.length === r.exp.length && r.brok.join() === r.exp.join(), r);
   // 3. a re-render keeps the cut; selling pays exactly what the summary says
   r = await page.evaluate(async () => { openShop('sell'); const kept = /Send to Market/.test(document.getElementById('shop-title').textContent);
     const rows = [...document.querySelectorAll('#shop-list .sell-row')]; rows[0].click(); rows[1].click(); const sel = [...game._sellSelection].map((i) => player.inventory[i]); const total = sel.reduce((t, it) => t + _sellPriceOf(it), 0);
@@ -54,6 +59,8 @@ try {
   // 4. Brok's desk, opened afterwards, pays in full
   r = await page.evaluate(() => { __close(); openShop('sell'); const rows = __rows(), exp = player.inventory.map((it) => Math.floor(_lxGearMarketPrice(it) * GEAR_SELLBACK_PCT)); return { title: document.getElementById('shop-title').textContent, rows, exp, payout: _lxSellPayout() }; });
   ok('Brok\'s desk, opened after hers, pays in full (no inherited cut) under his own title', r.payout === 1 && r.rows.join() === r.exp.join() && /Blacksmith Forge/.test(r.title), r);
+  r = await page.evaluate(() => ({ ribbon: !!document.querySelector('#shop-list .mkt-ribbon'), brokLine: !!document.querySelector('#shop-list .sell-brok'), cls: document.querySelector('#shop-modal .modal').classList.contains('market-desk') }));
+  ok('and it has no ribbon, no "Brok pays" line and no market-desk class', !r.ribbon && !r.brokLine && !r.cls, r);
   // 5. equipped gear is left alone; the tier quick-select totals at her price
   r = await page.evaluate(async () => { __close(); player.inventory = __gear(6); const worn = player.inventory[0]; player.equipped = { weapon: worn }; game._sellSelection = new Set(); openShop('sell', { payout: LX_MARKET_PAYOUT });
     const n = selectSellByTier(9), sel = [...game._sellSelection].map((i) => player.inventory[i]); const total = sel.reduce((t, it) => t + _sellPriceOf(it), 0);

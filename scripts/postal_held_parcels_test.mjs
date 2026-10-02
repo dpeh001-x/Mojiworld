@@ -59,18 +59,32 @@ try {
   r = await page.evaluate(async () => { __clean(); __fill('equip', player.invCap.equip); game.expedition = game.expedition || {}; game.expedition.active = true; __drop(__mk('Tower Blade', 'legendary')); await new Promise((r) => setTimeout(r, 900));
     const stayed = game.drops.length === 1 && _lxPostboxList().length === 0; player.postbox = [{ it: __mk('Old', 'epic'), at: Date.now() }]; document.getElementById('dialog-text') || 0; game.expedition.active = false; return { stayed }; });
   ok('inside an expedition she takes nothing (the tower is out of reach, like the daily parcel)', r.stayed, r);
-  // 5. collecting: the dialog, oldest first, only what fits, free; "Anything for me?" tells the truth
-  r = await page.evaluate(async () => { __clean(); __fill('equip', player.invCap.equip - 2); const now = Date.now();
-    player.postbox = [5, 4, 3, 2, 1].map((d, i) => ({ it: __mk('Parcel ' + i, 'epic'), at: now - d * 3600000 }));
-    openPostalWisp(); await new Promise((r) => setTimeout(r, 400)); const dlg = document.getElementById('dialog'), btn = (re) => [...dlg.querySelectorAll('#dialog-options button')].find((b) => re.test(b.textContent));
-    const hb = btn(/Held parcels \(5\/30\)/); const typed = () => __wait(() => !dlg.classList.contains('typing'), 25000);   // the answer types out (70 chars/s): read it when the reveal is done
-    await typed(); const ask = btn(/Anything for me/); if (ask) ask.click(); await new Promise((r) => setTimeout(r, 200)); await typed(); const askText = document.getElementById('dialog-text').textContent;
-    const bag0 = player.inventory.length; if (hb) hb.click(); await new Promise((r) => setTimeout(r, 300)); await typed();
-    return { hasBtn: !!hb, askText, got: player.inventory.length - bag0, left: _lxPostboxList().map((p) => p.it.name), tail: player.inventory.slice(-2).map((x) => x.name), text: document.getElementById('dialog-text').textContent }; });
-  ok('P opens the Wisp with a "Held parcels (5/30)" option', r.hasBtn, r);
+  // 5. the counter: the Wisp's "Held parcels" chip opens a card per parcel (oldest first, a days-left sticker, a Collect pill); collecting is free - one card, or
+  //    all that fit, oldest first - and only what fits; "Anything for me?" tells the truth
+  r = await page.evaluate(async () => { __clean(); __fill('equip', player.invCap.equip - 2); const now = Date.now(), d = 86400000, sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    player.postbox = [6.2, 4, 3, 1, 0.1].map((days, i) => ({ it: __mk('Parcel ' + i, 'epic'), at: now - days * d }));
+    openPostalWisp(); await sleep(400); const dlg = document.getElementById('dialog'), btn = (re) => [...dlg.querySelectorAll('#dialog-options button')].find((b) => re.test(b.textContent));
+    const hb = btn(/Held parcels \(5\)/); const typed = () => __wait(() => !dlg.classList.contains('typing'), 25000);   // the answer types out (70 chars/s): read it when the reveal is done
+    await typed(); const ask = btn(/Anything for me/); if (ask) ask.click(); await sleep(200); await typed(); const askText = document.getElementById('dialog-text').textContent;
+    const open = () => document.getElementById('shop-modal').style.display === 'flex', cards = () => [...document.querySelectorAll('#shop-list .parcel-row')], inner = document.querySelector('#shop-modal .modal');
+    const names = () => cards().map((c) => c.querySelector('.sell-name b').textContent), foot = () => document.getElementById('parcel-collect-btn'), held = () => _lxPostboxList().map((p) => p.it.name).join(), last = () => player.inventory[player.inventory.length - 1].name;
+    const pills = () => cards().map((c) => c.querySelector('.parcel-go').textContent.trim()), fulls = () => cards().map((c) => c.classList.contains('full'));
+    if (hb) hb.click(); await __wait(() => open()); await sleep(200);
+    const o = { hasBtn: !!hb, askText, open: open(), dlgClosed: dlg.style.display !== 'block', cls: inner.classList.contains('parcel-desk') && inner.classList.contains('sell-desk'), title: document.getElementById('shop-title').textContent, names: names(),
+      days: cards().map((c) => c.querySelector('.parcel-days').textContent.replace(/\s+/g, ' ').trim()), urgent: cards().map((c) => c.querySelector('.parcel-days').classList.contains('urgent')), go: pills(), foot: foot().textContent.trim() };
+    cards()[3].click(); await sleep(300); o.one = { held: held(), tail: last(), cards: names().length, foot: foot().textContent.trim() };   // any card, not only the oldest
+    foot().click(); await sleep(300); o.all = { held: held(), tail: last(), off: foot().disabled, foot: foot().textContent.trim(), go: pills(), full: fulls() };   // the last free slot goes to the oldest
+    __toasts.length = 0; cards()[0].click(); await sleep(200); o.fullClick = { held: _lxPostboxList().length, said: __toasts.some((t) => /tab is full/.test(t)) };
+    player.inventory = player.inventory.filter((x) => !/^Filler [0-3]$/.test(x.name)); openShop('parcels'); o.room = foot().textContent.trim(); foot().click(); await sleep(300); o.empty = { held: _lxPostboxList().length, text: document.getElementById('shop-list').textContent };
+    return o; });
+  ok('P opens the Wisp with a "Held parcels (5)" chip', r.hasBtn, r);
   ok('"Anything for me?" reports the real count instead of the old empty joke', /5 parcels/.test(r.askText), r.askText);
-  ok('collecting hands over exactly what fits (2 of 5), oldest first, and keeps the other 3', r.got === 2 && r.tail.join() === 'Parcel 0,Parcel 1' && r.left.join() === 'Parcel 2,Parcel 3,Parcel 4', r);
-  ok('and the dialog says what came and what still waits', /Collected 2/.test(r.text) && /Still held \(3\/30\)/.test(r.text), r.text);
+  ok('the chip opens the counter (the dialog closes): the sell desk\'s card grid, titled "Held Parcels", one card per parcel, oldest first', r.open && r.dlgClosed && r.cls && /Held Parcels/.test(r.title) && r.names.join() === 'Parcel 0,Parcel 1,Parcel 2,Parcel 3,Parcel 4', r);
+  ok('each card has a days-left sticker (hot pink on the last day) and a Collect pill; with 2 free slots every card can go, and the footer says how many fit (2)', r.days.join() === '⏳ Last day,⏳ 3d left,⏳ 4d left,⏳ 6d left,⏳ 7d left' && r.urgent.join() === 'true,false,false,false,false' && r.go.join() === 'Collect,Collect,Collect,Collect,Collect' && /Collect 2 that fit/.test(r.foot), r);
+  ok('a card click collects that parcel, any card (it joins the bag, the counter redraws with 4, 1 now fits)', r.one.held === 'Parcel 0,Parcel 1,Parcel 2,Parcel 4' && r.one.tail === 'Parcel 3' && r.one.cards === 4 && /Collect 1 that fit/.test(r.one.foot), r.one);
+  ok('the footer takes what fits, oldest first (Parcel 0); the rest go grey ("Equip full") and the footer reads "bag is full" and is off', r.all.held === 'Parcel 1,Parcel 2,Parcel 4' && r.all.tail === 'Parcel 0' && r.all.off && /bag is full/.test(r.all.foot) && r.all.go.join() === 'Equip full,Equip full,Equip full' && r.all.full.join() === 'true,true,true', r.all);
+  ok('a card whose tab is full does nothing but say so', r.fullClick.held === 3 && r.fullClick.said, r.fullClick);
+  ok('with room again the footer takes the rest and the counter shows its empty state', /Collect 3 that fit/.test(r.room) && r.empty.held === 0 && /The satchel is flat/.test(r.empty.text), r);
   // 6. seven real days; repair; save and reload; no network
   r = await page.evaluate(() => { __clean(); const d = 86400000, now = Date.now();
     player.postbox = [{ it: __mk('Expired', 'epic'), at: now - 7 * d - 1000 }, { it: __mk('Fresh', 'epic'), at: now - 6.5 * d }, { it: { name: 'x"y', rarity: 'x" onmouseover=1', tier: 'zz' }, at: now }, 'junk', null, { it: 5, at: now }, { it: { rarity: 'epic' }, at: now }];
