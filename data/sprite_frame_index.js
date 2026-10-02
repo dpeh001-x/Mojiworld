@@ -8,6 +8,8 @@ window.LX_SPRITE_FRAME_INDEX = {
  "frames": {
   "bosses/attack": {
    "aetherion2astral": 24,
+   "aetherion2fracture": 16,
+   "aetherion2lance": 16,
    "aetherion2": 9,
    "aetherionastral": 9,
    "aetherion": 9,
@@ -63,7 +65,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "young_confused_barnaby": 9
   },
   "bosses/walk": {
-   "aetherion2": 9,
+   "aetherion2": 16,
    "aetherion": 9,
    "gravitos2": 9,
    "gravitos3": 9,
