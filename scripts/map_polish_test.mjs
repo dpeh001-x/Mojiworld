@@ -13,7 +13,11 @@ const PORT = Number(process.env.PORT || 10241); const SERVE_ROOT = process.env.M
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x ? '  [' + x + ']' : '')); };
 const AIR = { wayfarersLantern: 'firefly', wayfarersLantern1: 'ember', wayfarersLantern2: 'ember', gloomsporeVerge: 'firefly', bloomhaven: 'petal',
   ossuarySprawl: 'wisp', sauroSlope: 'ember', zodiacHall: 'glint', interdimensionalAscension: 'glint', fracturedReflection: 'ember', distortedThreshold: 'ember',
-  tidalLagoon: 'petal' };
+  tidalLagoon: 'petal', fieryHideout: 'ember', bastionRampart: 'petal' };   // the last two: bland-maps 6
+// bland-maps 6: maps that played no ambient bed take their region's (existing files only)
+const BEDS = { verdantHollow: 'forest', bloomhaven: 'forest', thornspireThicket: 'forest', gloomsporeVerge: 'forest', verdantHaven: 'forest',
+  boneGraveyard: 'cave', boneGraveyard2: 'cave', boneGraveyard3: 'cave', zodiacHall: 'cosmic', distortedThreshold: 'temple',
+  fracturedReflection: 'temple', shadowWovenHood: 'temple' };
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT }); await new Promise((r) => setTimeout(r, 1200));
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--mute-audio'] });
 const errs = [];
@@ -22,7 +26,7 @@ try {
   await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
   await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof MAP_PROPS === 'object' && typeof _lxAutoGlow === 'function', null, { timeout: 180000 }); await page.waitForTimeout(4000);
-  const R = await page.evaluate(async (AIR) => {
+  const R = await page.evaluate(async ([AIR, BEDS]) => {
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const o = document.getElementById(id); if (o) o.style.display = 'none'; }
     window._lxBootGateDone = true; window._prologueActive = false; player._god = true; player.invulnerable = 9e9; player._storyBeatsSeen = new Proxy({}, { get: () => true });
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms)), out = {};
@@ -60,8 +64,15 @@ try {
       out.air[id] = { types, cols };
     }
     game._forcePhase = null; _LX_DAYPH.t = 0;
+    // BEDS: the table names the bed, and the file is served
+    out.beds = {};
+    for (const [id, bed] of Object.entries(BEDS)) {
+      const f = _AMBIENT_FILES[id] || null; let st = 0;
+      if (f) { try { st = (await fetch(f, { method: 'HEAD' })).status; } catch (e) { st = -1; } }
+      out.beds[id] = { f, st, want: 'audio/ambient/' + bed + '.mp3' };
+    }
     return out;
-  }, AIR);
+  }, [AIR, BEDS]);
   const t = R.table;
   ok(`the glow table: all ${t.n} lights glow on a hunting map (${t.hunt}), none in a town (${t.town})`, t.n >= 8 && t.hunt === t.n && t.town === 0);
   ok('glow:false switches a light off, a non-light gets nothing, a placement\'s own glow wins', t.off === null && t.plain === null && t.own && t.own.c === '1,2,3');
@@ -71,6 +82,7 @@ try {
   const gh = R.half.got[0];
   ok('a half-size lantern glows about half as wide', !!gh && !!g && gh.r < g.r * 0.62 && gh.r > g.r * 0.38, gh && g ? `${gh.r.toFixed(1)} vs ${g.r.toFixed(1)}` : '');
   for (const [id, want] of Object.entries(AIR)) { const a = R.air[id]; ok(`${id}: its own air (${want})`, a && a.types.length === 1 && a.types[0] === want && !a.cols.includes('#e8e4da'), JSON.stringify(a)); }
+  for (const [id, b] of Object.entries(R.beds)) ok(`${id}: plays its region's ambient bed (${b.want.split('/').pop()})`, b.f === b.want && b.st === 200, JSON.stringify(b));
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
 await browser.close(); server.kill();
