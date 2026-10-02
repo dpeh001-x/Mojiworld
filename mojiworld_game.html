@@ -16296,7 +16296,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1545';
+const GAME_VERSION = 'v0.30.1546';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -43058,9 +43058,20 @@ function _lxGearMarketPrice(it) {
 // MOJICOIN_GAIN_MULT is not applied a second time (the old helper existed
 // purely to mirror that double-scaling, which overstated rows ~2x).
 const GEAR_SELLBACK_PCT = 0.10;
+// THE POSTAL WISP'S MARKET ("Send to market", per user): the sell desk from anywhere, paying this share of what Brok's desk pays - a
+// courier's 10% cut (so 9% of market price; Brok's resale rule above is untouched and is 1 here). openShop('sell', { payout }) sets it
+// for the desk it opens; any other way into a shop resets it, so Brok's desk can never inherit the courier's cut.
+const LX_MARKET_PAYOUT = 0.9;
+function _lxSellPayout() { const p = +((typeof game === 'object' && game) ? game._sellPayout : 1); return (p > 0 && p < 1) ? p : 1; }
+function _lxOpenMarketDesk() {
+  if (game.expedition && game.expedition.active) { if (typeof showToast === 'function') showToast('✉ The Postal Wisp cannot reach the tower. Send things to market after the run.', 'rare'); return; }
+  if (typeof closeDialog === 'function') closeDialog();
+  if (game._sellSelection && typeof game._sellSelection.clear === 'function') game._sellSelection.clear();   // a selection from Brok's desk is indices into a bag that may have changed
+  openShop('sell', { payout: LX_MARKET_PAYOUT });
+}
 function _sellPriceOf(it) {
   if (!it || typeof it.price !== 'number' || !isFinite(it.price)) return 0;
-  return Math.max(0, Math.floor(_lxGearMarketPrice(it) * GEAR_SELLBACK_PCT));
+  return Math.max(0, Math.floor(_lxGearMarketPrice(it) * GEAR_SELLBACK_PCT * _lxSellPayout()));   // x1 at Brok; the courier's cut at the Wisp's desk
 }
 const _coinGainMult = () => (typeof player !== 'undefined' && player && player.level <= 25 ? 0.6 : MOJICOIN_GAIN_MULT); // v0.26.x — softer mid-game coin famine
 // v0.26.437 — Per user "make loots from monsters much lesser so quests play
@@ -115967,9 +115978,11 @@ So… do you need a lift?`;
     // now; hooks reserved for a future mailbox / pen-pal system.
     text = '*The Wisp hovers, satchel bigger than its body.*\n\nDelivery! — oh. You\'re not on my route.\n\nWisp, town courier. Two services: mail-order potions to wherever you stand, small fee; and a daily care-parcel the watcher above tucks in my satchel — there by the dawn song\'s last note.\n\nPress P anywhere to call me.';
     text += _lxPostboxBlurb();
+    text += _LXN + _LXN + '💰 And gear you do not want to carry: I will take it to market for ' + Math.round(LX_MARKET_PAYOUT * 100) + '% of what Brok pays.';
     opts.push({ t:'✉ Mail-order potions (+15% delivery)', cb:() => { closeDialog(); if (typeof openShop === 'function') openShop('potion', { surcharge: 1.15 }); } });
     opts.push({ t:'🎁 Collect today\'s parcel', cb:() => { if (typeof _claimDailyParcel === 'function') _claimDailyParcel(); } });
     opts.push({ t:'📦 Held parcels (' + _lxPostboxSanitize().length + '/' + LX_POSTBOX_CAP + ')', cb:() => { _lxPostboxVisit(); } });
+    opts.push({ t:"💰 Send to market (" + Math.round(LX_MARKET_PAYOUT * 100) + "% of Brok's price)", cb:() => { _lxOpenMarketDesk(); } });
     opts.push({ t:'Who do you deliver for?', cb:() => { document.getElementById('dialog-text').textContent = 'Everyone with coin and most without — postage is on a sliding scale. The Academia sends scrolls weekly, the foundry invoices daily, and Auntie Innie a love letter to no-one every Wednesday. We do not ask. We deliver.'; } });
     opts.push({ t:'Anything for me?', cb:() => { { const _pa = _lxPostboxAsk(); if (_pa) { _lxPostSay(_pa); return; } } document.getElementById('dialog-text').textContent = 'Hmm — checking — no, sorry. Your mailbox is empty save for one flyer about discount potions. Would you like me to lose it on the way to the bin? I lose things very professionally.'; } });
     opts.push({ t:'Do you ever get lost?', cb:() => { document.getElementById('dialog-text').textContent = 'Never! *The Wisp checks the satchel. Then the other side of the satchel.*\n\nI always know exactly where I am. It\'s the houses that keep moving.\n\nInnie\'s Wednesday letter has been round the plaza six times. No address. I\'m getting very fond of it.'; } });   // v0.30.1545 - goofy pass (per user)
@@ -116859,7 +116872,7 @@ function executeSellSelection() {
   if (typeof refreshGearCache === 'function') refreshGearCache();
   if (typeof audio !== 'undefined' && audio.play) audio.play('mojicoin');
   if (count && typeof showToast === 'function') {
-    showToast(`💰 Sold ${count} item${count === 1 ? '' : 's'} for ${gained} Mojicoins`, 'epic');
+    showToast(`💰 ${_lxSellPayout() < 1 ? 'The Wisp sold' : 'Sold'} ${count} item${count === 1 ? '' : 's'} for ${gained} Mojicoins`, 'epic');
   }
   if (typeof saveState === 'function') saveState();
   if (typeof openShop === 'function') openShop('sell');
@@ -116909,6 +116922,8 @@ function sellByTierNow(maxTier) {
 
 function openShop(type, opts) {
   const _mult = (opts && opts.surcharge) || 1;   // v0.26.448 - Postal Wisp mail-order surcharge
+  { const _m0 = document.getElementById('shop-modal'), _wasOpen = !!(_m0 && _m0.style.display === 'flex');   // Send to market: the courier's cut is set by the Wisp's own opener only (a re-render keeps it; any other way in resets it)
+    if (type === 'sell') { if (opts && opts.payout > 0 && opts.payout < 1) game._sellPayout = opts.payout; else if (!_wasOpen) game._sellPayout = 1; } else game._sellPayout = 1; }
   const modal = document.getElementById('shop-modal');
   const title = document.getElementById('shop-title');
   const list = document.getElementById('shop-list');
@@ -117126,7 +117141,7 @@ function openShop(type, opts) {
       }, it.rarity, undefined, it));
     }
   } else if (type === 'sell') {
-    title.textContent = 'Blacksmith Forge — Selling';   // v0.30.963
+    if (_lxSellPayout() < 1) title.textContent = '📬 Send to Market (Postal Wisp)'; else title.textContent = 'Blacksmith Forge — Selling';   // v0.30.963
     if (!player.inventory.length) {
       // v0.30.268 — per user, with a screenshot of the tutorial prose filling
       // an empty selling panel: 'Should just say "You have no items to sell"'.
