@@ -731,6 +731,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "wild_bond": 16
   },
   "vfx/anim": {
+   "aurora_field": 24,
    "cloudburst": 9,
    "dash_streak": 9,
    "flame_patch": 9,
