@@ -5,6 +5,7 @@
 //   [3] every other piece's icon is untouched - still its equipment file
 //   [4] in a real inventory render each set icon is an <img> that loads (with the inventory's ink outline)
 //   [5] no page errors
+//   [6] the Whittled Stick, Stormcaller Bow and Cosmic Wand icons are the art the hero holds (their erase), not the old drawing in the equipment file
 // The build before fails [1] and [2].   node scripts/set_icon_worn_test.mjs [page.html] [port]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -14,6 +15,7 @@ const PAGE_URL = (path.isAbsolute(PAGE) ? path.relative(ROOT, PAGE) : PAGE).spli
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  [' + (typeof x === 'string' ? x : JSON.stringify(x)).slice(0, 600) + ']' : '')); };
 const SETS = { dawnshard_blade: 'weapons', doomforged_greatsword: 'weapons', shadowweave_dagger: 'weapons', skyhunter_longbow: 'weapons', voidcaller_staff: 'weapons',
   dawnshard_aegis: 'armors', doomforged_plate: 'armors', shadowweave_cloak: 'armors', skyhunter_vest: 'armors', voidcaller_robe: 'armors' };
+const WORN_EXTRA = { whittled_stick: 'weapons', stormcaller_bow: 'weapons', cosmic_wand: 'weapons' };   // worn-art icons that are not set pieces
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT });
 await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));
@@ -25,7 +27,7 @@ try {
   await page.goto(`http://localhost:${PORT}/${PAGE_URL}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof itemIconHtml === 'function' && typeof LX_ITEMS === 'object' && typeof renderInventory === 'function', null, { timeout: 180000 });
   await page.waitForTimeout(2000);
-  const R = await page.evaluate(async (SETS) => {
+  const R = await page.evaluate(async ([SETS, WORN_EXTRA]) => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms)), N = 128;
     const icon = (k) => LX_ITEMS['_pending_' + k];
     const worn = (k, cat) => _lxEqErasedImg((cat === 'weapons' ? 'wpn:' : 'arm:') + k) || _lxEquipSprite(cat, k);
@@ -38,7 +40,7 @@ try {
     for (const k in SETS) { const a = icon(k), b = worn(k, SETS[k]);
       sets[k] = (a && a.naturalWidth && b && b.naturalWidth) ? { worn: diff(px(a), px(b)), old: diff(px(a), px(old[k])), src: a.src.slice(0, 40) } : { err: 'not loaded', src: a && a.src }; }
     // every other piece: still its equipment file
-    const others = []; for (const cat of ['weapons', 'armors']) for (const k of LX_EQUIP_FILES[cat]) { if (SETS[k]) continue; const a = icon(k);
+    const others = []; for (const cat of ['weapons', 'armors']) for (const k of LX_EQUIP_FILES[cat]) { if (SETS[k] || WORN_EXTRA[k]) continue; const a = icon(k);
       const want = 'Sprites/equipment/' + cat + '/' + k + '.webp'; if (!a || decodeURIComponent(new URL(a.src, location.href).pathname).indexOf('/' + want) < 0) others.push(k); }
     // a real inventory render with the ten set pieces
     const pool = [].concat(ITEM_POOL.weapons, ITEM_POOL.armors), items = Object.keys(SETS).map((k) => pool.find((d) => _itemKey(d) === k)).filter(Boolean)
@@ -49,13 +51,19 @@ try {
     const inv = {}; for (const it of items) { const im = [...modal.querySelectorAll('img')].find((q) => q.getAttribute('alt') === it.name);
       inv[_itemKey(it)] = im ? { ok: im.complete && im.naturalWidth > 0, filter: getComputedStyle(im).filter.slice(0, 30), sameAsIcon: im.src === icon(_itemKey(it)).src } : null; }
     modal.style.display = 'none';
-    return { sets, others, inv };
-  }, SETS);
+    // worn() falls back to the equipment file until the erase has decoded, so ask again each tick
+    const extra = {}; for (const k in WORN_EXTRA) { const a = icon(k), f = new Image(); let b = null; f.src = 'Sprites/equipment/' + WORN_EXTRA[k] + '/' + k + '.webp';
+      if (a && a._lxLazy && typeof _lxWantImg === 'function') _lxWantImg(a, true);
+      for (let i = 0; i < 100; i++) { b = _lxEqErasedImg('wpn:' + k); if (a && a.complete && a.naturalWidth && b && b.complete && b.naturalWidth && f.complete && f.naturalWidth) break; await sleep(100); }
+      extra[k] = (a && a.naturalWidth && b && b.naturalWidth && f.naturalWidth) ? { worn: diff(px(a), px(b)), file: diff(px(a), px(f)), blob: /^blob:/.test(a.src) } : { err: 'not loaded' }; }
+    return { sets, others, inv, extra };
+  }, [SETS, WORN_EXTRA]);
   const K = Object.keys(SETS);
   ok('[1] each set icon is the art the hero wears (mean pixel difference under 2)', K.every((k) => R.sets[k] && R.sets[k].worn < 2), R.sets);
   ok('[2] none of them is the old Sprites/items/ drawing any more (mean difference over 10)', K.every((k) => R.sets[k] && R.sets[k].old > 10), Object.fromEntries(K.map((k) => [k, R.sets[k] && R.sets[k].old])));
   ok('[3] every other piece\'s icon is untouched - still its equipment file', R.others.length === 0, R.others);
   ok('[4] in the inventory each set icon is a loaded <img> of that art, with the ink outline', K.every((k) => R.inv[k] && R.inv[k].ok && R.inv[k].sameAsIcon && /url/.test(R.inv[k].filter)), R.inv);
+  ok('[6] the Whittled Stick, Stormcaller Bow and Cosmic Wand icons are the art the hero holds, not the old drawings (worn < 2, file > 10)', Object.keys(WORN_EXTRA).every((k) => R.extra[k] && R.extra[k].worn < 2 && R.extra[k].file > 10 && R.extra[k].blob), R.extra);
   ok('[5] no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 300), false); }
 await browser.close(); server.kill();
