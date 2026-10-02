@@ -9,6 +9,9 @@
 //   [4] it stays off under reduced motion, very-low FX, a tint, and window._lxNoGearLight; on otherwise
 //   [5] every listed piece is real art and bakes; the heaviest bake step is short
 //   [6] no page errors
+// The fire pieces that have flame data (data/gear_flames.js) draw their flame-free body in the art's place - same source rect, dest
+// rect and transform - and their flames over a part of that rect in the same transform; fire_motion_test checks them (their flames
+// may reach past the painted silhouette, so [2] does not apply to them).
 // The build before fails [1] (no light blits), [3] and [4].   node scripts/gear_light_test.mjs [page.html] [port]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import vm from 'node:vm';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -53,9 +56,12 @@ try {
     const eq = (p, q) => !!p && !!q && JSON.stringify(p.a) === JSON.stringify(q.a) && JSON.stringify(p.t) === JSON.stringify(q.t);
     const check = (sid) => { const bmp = _lxBakedDownscale(eff(sid), 256), A = HAS && _LX_EQ_ANIM_CACHE.get(sid);
       const off = wear(sid, false).filter((r) => r.src === bmp), on = wear(sid, true);
-      const base = on.filter((r) => r.src === bmp), light = A ? on.filter((r) => A.frames.includes(r.src)) : [];
+      const F = A && A.fl, body = (r) => r.src === bmp || (F && (r.src === F.small || r.src === F.full));
+      const flameBlit = (r) => !!F && (F.frames.some((f) => f.cv === r.src) || (typeof _lxEmberSprite !== 'undefined' && r.src === _lxEmberSprite));
+      const base = on.filter(body), light = A ? on.filter((r) => A.frames.includes(r.src) || flameBlit(r)) : [];
       const same = off.length >= 1 && off.length === base.length && off.every((r, i) => eq(r, base[i]));
-      const lightOk = light.every((r) => base.some((b) => eq(r, b)));
+      const sameT = (p, q) => JSON.stringify(p.t) === JSON.stringify(q.t);
+      const lightOk = light.every((r) => base.some((b) => flameBlit(r) ? sameT(r, b) : eq(r, b)));   // flames: the piece's transform, over a part of its rect
       const att = _lxEqAttach(sid), cal = CALIB[sid], calOk = !!cal && Object.keys(cal).every((k) => att[k] === cal[k]);
       if (!same || !lightOk || !calOk) pos.push({ sid, off: off.length, base: base.length, same, lightOk, calOk });
       if (!ANIM[sid]) return; if (!light.length) lightless.push(sid);
