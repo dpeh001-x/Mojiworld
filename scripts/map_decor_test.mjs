@@ -1,6 +1,7 @@
 // Hunting-map decor (per user: "sparsely but strategically put the props"). In the running game, after each map's load-time
 // platform relayout, for every map in DECOR_MAPS:
-//   - SPARSE: one to three props, 500+ px apart
+//   - SPARSE: one to five props, 500+ px apart (one to three until the bland-maps pass gave the blandest maps a landmark on each long
+//     empty stretch)
 //   - FLOOR: each stands on a ground platform (its y within 2 px of the ground top, 72+ px inside the segment's ends) and its
 //     visible bottom row draws on that line (the bbox anchor drawWorldProps uses)
 //   - CLEAR: 110+ px from a door, 150+ px from an NPC or a launch pad, 100+ px from a pothole's rim, and its drawn box touches no
@@ -9,6 +10,7 @@
 //     the loads a surprise platform whose underside is never lower than y 391, 89 px above the floor): the spots were chosen clear in
 //     ten sampled loads plus every variant, and the cap keeps any prop under the lowest surprise platform
 //   - ART: every key is registered and its image loads; the new art is a 768 canvas with its floor row at 766 and 24 px of side margin
+//   Cadet's Strand (a bridge map, dressed by an earlier pass) has only the bland-maps sandcastle checked by the per-prop rules.
 //   node scripts/map_decor_test.mjs          (PORT / MOJI_SERVE_ROOT / MOJI_GAME_FILE override the served tree)
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -21,10 +23,15 @@ const DECOR_MAPS = ['ancient', 'forest', 'cryptHollow', 'wildflowerPlains', 'mus
   'stormCrest', 'graniteBluffs', 'stardustAtrium', 'duneSands', 'wayfarersLantern', 'wayfarersLantern1', 'wayfarersLantern2'];
 const NEW_ART = ['forest_mossy_stump', 'forest_hollow_log', 'fungal_glowcap_cluster', 'jungle_glowbloom', 'jungle_vine_ruin', 'reef_amphora', 'wreck_anchor',
   'wreck_ship_wheel', 'foundry_ore_cart', 'sauro_egg_nest', 'ice_crystal_cluster', 'ice_frozen_sled', 'grave_tombstone', 'grave_iron_lantern',
-  'candy_lollipop', 'candy_gumdrop_pile', 'storm_lightning_rod', 'atrium_marble_urn', 'bluff_stone_cairn', 'desert_cactus', 'temple_stone_lantern'];
+  'candy_lollipop', 'candy_gumdrop_pile', 'storm_lightning_rod', 'atrium_marble_urn', 'bluff_stone_cairn', 'desert_cactus', 'temple_stone_lantern',
+  // bland-maps
+  'bluff_windswept_pine', 'bluff_pickaxe_boulder', 'glasswind_chime_post', 'steppe_snowy_pine', 'atrium_armillary', 'atrium_star_brazier',
+  'grave_candle_altar', 'beach_sandcastle', 'catacomb_bone_urn'];
+const EXTRA_MAPS = ['cadetsStrand'], EXTRA_KEYS = new Set(['beach_sandcastle']);
 // the props this pass placed (the new art + eight existing props reused); older placements on these maps (Emerald Thicket's signpost,
 // a Prop Editor hardbake) are the user's and are only counted, not checked
-const DECOR_KEYS = new Set([...NEW_ART, 'coral_brain', 'pearl_clamshell_bench', 'tidepool_starfish_pile', 'lava_crystal_cluster', 'forge_anvil_iron', 'glasswind_weather_vane', 'crypt_skull_pillar', 'town_stone_planter']);
+const DECOR_KEYS = new Set([...NEW_ART, 'coral_brain', 'pearl_clamshell_bench', 'tidepool_starfish_pile', 'lava_crystal_cluster', 'forge_anvil_iron', 'glasswind_weather_vane', 'crypt_skull_pillar', 'town_stone_planter',
+  'celestial_arcane_glyph_stone']);   // bland-maps reuses the glyph stone in the Stardust Atrium
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x ? '  [' + x + ']' : '')); };
 // ART, from the files
 { const bad = [];
@@ -46,7 +53,8 @@ const boot = async () => { if (page) await page.close(); page = await browser.ne
 try {
   const R = {};
   const RL = {};   // map -> [rows per load]
-  for (let i = 0; i < DECOR_MAPS.length; i++) { if (i % 10 === 0) await boot(); for (let L = 0; L < 3; L++) { const one = await page.evaluate(async (maps) => {
+  const ALL = [...DECOR_MAPS, ...EXTRA_MAPS];
+  for (let i = 0; i < ALL.length; i++) { if (i % 10 === 0) await boot(); for (let L = 0; L < 3; L++) { const one = await page.evaluate(async (maps) => {
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const o = document.getElementById(id); if (o) o.style.display = 'none'; }
     window._lxBootGateDone = true; window._prologueActive = false; player._god = true; player.invulnerable = 9e9; player._storyBeatsSeen = new Proxy({}, { get: () => true });
     const load = (im) => new Promise((res) => { if (im.complete && im.naturalWidth) return res(true); const t = setTimeout(() => res(false), 20000); im.addEventListener('load', () => { clearTimeout(t); res(true); }); im.addEventListener('error', () => { clearTimeout(t); res(false); }); });
@@ -70,12 +78,17 @@ try {
       out[id] = rows;
     }
     return out;
-  }, [DECOR_MAPS[i]]); (RL[DECOR_MAPS[i]] = RL[DECOR_MAPS[i]] || []).push(one[DECOR_MAPS[i]]); } R[DECOR_MAPS[i]] = RL[DECOR_MAPS[i]][0]; }
+  }, [ALL[i]]); (RL[ALL[i]] = RL[ALL[i]] || []).push(one[ALL[i]]); } R[ALL[i]] = RL[ALL[i]][0]; }
   for (const id of DECOR_MAPS) {
     const rows = R[id] || [], xs = rows.map((r) => r.x).sort((a, b) => a - b), gaps = xs.slice(1).map((x, i) => x - xs[i]);
-    ok(`${id}: ${rows.length} prop(s), sparse (1-3, 500+ px apart)`, rows.length >= 1 && rows.length <= 3 && gaps.every((g) => g >= 500), xs.join(','));
+    ok(`${id}: ${rows.length} prop(s), sparse (1-5, 500+ px apart)`, rows.length >= 1 && rows.length <= 5 && gaps.every((g) => g >= 500), xs.join(','));
     const bad = (RL[id] || []).flat().filter((r) => DECOR_KEYS.has(r.key) && (!r.loaded || !r.ground || r.hits.length || r.door < 110 || r.npc < 150 || r.pit < 100 || r.ch > 86 || Math.abs(r.drawnBottom) > 2));
     ok(`${id}: every prop loads, stands on the floor, clear of doors, NPCs, pads, pits and platforms in 3 re-rolled layouts, 85 px max`, !bad.length, JSON.stringify(bad).slice(0, 300));
+  }
+  for (const id of EXTRA_MAPS) {
+    const rows = (RL[id] || []).flat().filter((r) => EXTRA_KEYS.has(r.key));
+    const bad = rows.filter((r) => !r.loaded || !r.ground || r.hits.length || r.door < 110 || r.npc < 150 || r.pit < 100 || r.ch > 86 || Math.abs(r.drawnBottom) > 2);
+    ok(`${id}: the bland-maps prop loads, stands on the floor, clear of doors, NPCs, pads, pits and platforms in 3 re-rolled layouts, 85 px max`, rows.length === 3 && !bad.length, JSON.stringify(bad).slice(0, 300));
   }
   ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + (e && e.message)); }
