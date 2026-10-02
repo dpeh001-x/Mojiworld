@@ -104,7 +104,25 @@ const scenario = await page.evaluate(() => {
     const _mk = (s) => { let a = s >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
     const seed = (opts.seed || 20261002) >>> 0, rngPick = _mk(seed), rngSim = _mk(seed ^ 0x5bd1e995);
     const _choose0 = window._aeChoose, _um0 = window.updateMonsters, _lf0 = LX_PERF.lowFx, _vlf0 = LX_PERF.veryLowFx;
-    window._aeChoose = function () { const r0 = Math.random; Math.random = rngPick; try { return _choose0.apply(this, arguments); } finally { Math.random = r0; } };
+    // every option set he picks from, for the weight checks (what his read MEANS, free of the draw's luck)
+    // each one is tagged with the read it was made under ('far', 'pressed', ...) from the log entry its start() writes
+    const choices = [];
+    let lastLog = null;
+    window._aeChoose = function (o) {
+      const rec = snap ? null : { w: (o || []).map((q) => [q.s, q.w]), res: null, why: null };
+      if (rec) choices.push(rec);
+      const r0 = Math.random; Math.random = rngPick;
+      try { const r = _choose0.apply(this, arguments); if (rec) rec.res = r; return r; } finally { Math.random = r0; }
+    };
+    const tagChoices = () => {   // after a step: the newest log entry belongs to the newest untagged pick (start() follows the pick in the same tick)
+      const L = m._ae && m._ae.log, e = L && L[L.length - 1], c = choices[choices.length - 1];
+      if (e && e !== lastLog) { lastLog = e; if (c && c.why == null && c.res === e.s) c.why = e.why || ''; }
+    };
+    // a named pattern's share of his pick weight, over the picks (optionally with one read) where it was allowed
+    const weightShare = (name, why) => {
+      const sh = choices.filter((c) => why == null || c.why === why).map((c) => { const t = c.w.reduce((a, q) => a + (q[1] > 0 ? q[1] : 0), 0), x = c.w.find((q) => q[0] === name); return (x && x[1] > 0 && t > 0) ? x[1] / t : null; }).filter((v) => v != null);
+      return { n: sh.length, mean: sh.length ? +(sh.reduce((a, v) => a + v, 0) / sh.length).toFixed(3) : 0, min: sh.length ? +Math.min(...sh).toFixed(3) : 0 };
+    };
     let healed = false, dodgeX = player.x;
     const script = (i) => {
       const bcx = m.x + m.w / 2;
@@ -142,6 +160,7 @@ const scenario = await page.evaluate(() => {
         if ((m._dirOpenT | 0) > 0) staggerFires++;
       }
       prevProj = np; prevHz = nh;
+      tagChoices();
       // his walk speed, read 30 steps into an idle stretch (every AI tick has had its chance to restore it by then).
       // The end-of-run read caught him on the step a windup finished, before his next tick restored it.
       idleRun = (st === 'idle') ? idleRun + 1 : 0;
@@ -160,6 +179,7 @@ const scenario = await page.evaluate(() => {
       const fires = (m._ae && m._ae.fires || []).slice();
       return { picks, n: log.length, spawns: spawns.length, fires: fires.length, staggerFires, cineFrames, simSteps: (game.time | 0) - gt0, speed: m.speed, idleSpeed, state: (m._ae && m._ae.st) || 'idle', x: m.x, px: player.x,
         minWind: fires.length ? Math.min(...fires.map((f) => f.wind)) : -1, why: log.map((l) => l.why).filter(Boolean),
+        lanceW: weightShare('lanceWind'), echoPressedW: weightShare('echoWind', 'pressed'),
         gap: m._ae && m._ae.lastGap && { ...m._ae.lastGap }, dodge: m._ae && +m._ae.dodge.toFixed(2), evolvedNow: !!m._aetherionEvolved, hpFrac: +(m.currentHp / m.maxHp).toFixed(2) };
     };
     // the player's update and the projectile pass (hits on the hero: knockback, evasion rolls) ride the seeded stream too
@@ -199,10 +219,19 @@ ok('his walk speed is restored between patterns (the windup hold does not stick)
 // ---- the read changes what he does ------------------------------------------------
 const far = await ev(async () => await window.__ae({ mode: 'far', frames: 1500 }));
 const farLance = far.picks ? (far.picks.lanceWind || 0) / Math.max(1, far.n) : 0;
-ok('a kiting player at range is answered with Shard Lances (lance share >= 45%)', !far.err && farLance >= 0.45 && far.why.some((w) => w === 'far'), far.err || `${(farLance * 100).toFixed(0)}% lances of ${far.n} picks; reads: ${[...new Set(far.why)].join(',')}`);
+// The share alone could not tell the range read from no read: 13 picks, and the no-three-in-a-row rule caps lances near 2/3,
+// so a build with the far bias (3 + 5) removed also drew 7 lances of 13 (2026-10-02 mutant). The weights he picks from are
+// exact: with the bias every allowed lance carries 8 of at most 12 (>= 0.667); without it 3 of 4-7 (mean ~0.5).
+ok('a kiting player at range is answered with Shard Lances (lance share >= 45%, and >= 60% of his pick weight whenever a lance is allowed)',
+  !far.err && farLance >= 0.45 && far.lanceW.n > 0 && far.lanceW.mean >= 0.6 && far.why.some((w) => w === 'far'),
+  far.err || `${(farLance * 100).toFixed(0)}% lances of ${far.n} picks; lance weight mean ${far.lanceW.mean} (min ${far.lanceW.min}) over ${far.lanceW.n} allowed picks; reads: ${[...new Set(far.why)].join(',')}`);
 const hug = await ev(async () => await window.__ae({ mode: 'hug', frames: 1500 }));
-ok('a player hugging one flank and hammering him is Echo-Stepped to the other side', !hug.err && (hug.picks.echoWind || 0) >= 1 && hug.why.some((w) => w === 'pressed'),
-  hug.err || `${hug.picks.echoWind || 0} echo steps; reads: ${[...new Set(hug.why)].join(',')}; boss x ${Math.round(hug.x)} vs player x ${Math.round(hug.px)}`);
+// One Echo Step in a fight also happens with no pressure read at all (base weight 1, about one pick in eight): a build
+// without the +7 still stepped once here (2026-10-02 mutant). On the picks he makes while pressed, the weights say it:
+// with the read Echo Step carries 8 of 12-15 (>= 0.53); without it 1 of 5-8 (<= 0.2).
+ok('a player hugging one flank and hammering him is Echo-Stepped to the other side (and Echo Step carries >= 40% of his pick weight on the pressed picks where it is allowed)',
+  !hug.err && (hug.picks.echoWind || 0) >= 1 && hug.why.some((w) => w === 'pressed') && hug.echoPressedW.n > 0 && hug.echoPressedW.mean >= 0.4,
+  hug.err || `${hug.picks.echoWind || 0} echo steps; echo weight mean ${hug.echoPressedW.mean} (min ${hug.echoPressedW.min}) over ${hug.echoPressedW.n} pressed picks; reads: ${[...new Set(hug.why)].join(',')}; boss x ${Math.round(hug.x)} vs player x ${Math.round(hug.px)}`);
 const air = await ev(async () => await window.__ae({ mode: 'air', frames: 3000, seed: 20260925 }));
 const airShard = air.picks ? (air.picks.shardfallWind || 0) / Math.max(1, air.n) : 0;
 ok('a player living in the air draws Shardfall on the landing spot (share >= 35%)', !air.err && airShard >= 0.35 && air.why.some((w) => w === 'air'), air.err || `${(airShard * 100).toFixed(0)}% shardfall of ${air.n}; reads: ${[...new Set(air.why)].join(',')}`);
