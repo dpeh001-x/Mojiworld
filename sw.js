@@ -290,7 +290,9 @@
 // (outline evened to 1.42 game px; Guguma untouched), so a returning browser would keep drawing the old art for a session.
 // v0.30.1559 - v147 -> v148. 1,259 monster files (outlines sized to the monster, Lantern Wisp's halo removed) are REPLACED under their own names
 // so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v149';   // v0.30.1563 - Aetherion form-2 halo restyled (same file names)
+// v0.30.1566 - v149 -> v150. Everdawn's town props (palette pass + the flower cart's second wheel) are REPLACED under their own names
+// so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v150';   // v0.30.1566 - Everdawn props (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
