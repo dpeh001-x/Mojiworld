@@ -20,7 +20,8 @@ const DECOR_MAPS = ['ancient', 'forest', 'cryptHollow', 'wildflowerPlains', 'mus
   'coralReef', 'kelpForest', 'abyssalTrench', 'bubbleGrotto', 'pearlBathhouse', 'witheringTide', 'witheringTide2', 'sunsetBeach', 'lavaCavern',
   'magmaFoundry', 'magmaFoundry2', 'sauroSlope', 'frostbiteHollow', 'glasswindSteppe', 'glasswindSteppe2', 'boneGraveyard', 'boneGraveyard2',
   'boneGraveyard3', 'hollowSepulchre', 'hollowSepulchre2', 'ossuarySprawl', 'candyCanyon', 'bubblegumSwamp', 'skyGarden', 'thunderPlateau',
-  'stormCrest', 'graniteBluffs', 'stardustAtrium', 'duneSands', 'wayfarersLantern', 'wayfarersLantern1', 'wayfarersLantern2'];
+  'stormCrest', 'graniteBluffs', 'stardustAtrium', 'duneSands', 'wayfarersLantern', 'wayfarersLantern1', 'wayfarersLantern2',
+  'tidepoolShoals'];   // bland-maps 5
 const NEW_ART = ['forest_mossy_stump', 'forest_hollow_log', 'fungal_glowcap_cluster', 'jungle_glowbloom', 'jungle_vine_ruin', 'reef_amphora', 'wreck_anchor',
   'wreck_ship_wheel', 'foundry_ore_cart', 'sauro_egg_nest', 'ice_crystal_cluster', 'ice_frozen_sled', 'grave_tombstone', 'grave_iron_lantern',
   'candy_lollipop', 'candy_gumdrop_pile', 'storm_lightning_rod', 'atrium_marble_urn', 'bluff_stone_cairn', 'desert_cactus', 'temple_stone_lantern',
