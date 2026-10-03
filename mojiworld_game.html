@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1606';
+const GAME_VERSION = 'v0.30.1607';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -106690,6 +106690,15 @@ function _lxHitVariant(key) {
   if (typeof player !== 'undefined' && player && player.cls === 'rogue') return ((h % 2) + 2) % 2;   // rogue-shuriken - never the shuriken mark
   return ((h % 3) + 3) % 3;
 }
+// v0.30.1607 - THE PLAYER'S ATK, ONCE A FRAME, for a hit's look (the damage-number tier and the hit-spark size). Both read
+// player.atk, which nothing ever set, so their "multiple of ATK" was the raw damage and every hit of 3.5+ wore the top tier.
+// hitMonster runs per hit - dozens a frame in a crowd - so the frame's first hit asks getAtk() and the rest reuse it.
+let _lxAtkMemoT = -1, _lxAtkMemoV = 1;
+function _lxAtkThisFrame() {
+  const t = (typeof game !== 'undefined' && game) ? (game.time | 0) : 0;
+  if (t !== _lxAtkMemoT) { _lxAtkMemoT = t; _lxAtkMemoV = Math.max(1, (typeof getAtk === 'function') ? (getAtk() || 1) : 1); }
+  return _lxAtkMemoV;
+}
 function hitMonster(m, dmg, isCrit, skill) {
   const _rs = _lxRankSrc; _lxRankSrc = null;
   const _sh = _lxShareCur; _lxShareCur = 1;   // v0.30.1462 - mobbing spread: an area group's share, spent on this hit only
@@ -107951,11 +107960,11 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
       // SIZE FROM DAMAGE. Reuses the same yardstick the damage-tier colours
       // use below — finalDmg as a multiple of player ATK — so the spark and
       // the number escalate together instead of on two unrelated scales.
-      // 0.5x ATK or less -> 44 px, ramping to 68 px at 3.5x and clamped there;
+      // 1x ATK or less -> 44 px, ramping to 68 px at 7x and clamped there (v0.30.1607: 0.5x -> 3.5x before, doubled with every ATK multiplier in v0.30.1604);
       // crits take +20%. Previously a flat 36 (48 on crit) regardless of
       // whether the hit was a chip tick or an execute.
-      const _hATK = Math.max(1, (player && player.atk) || 1);
-      const _hRatio = Math.max(0, Math.min(1, ((finalDmg / _hATK) - 0.5) / 3.0));
+      const _hATK = _lxAtkThisFrame();   // v0.30.1607 - the real ATK (see _lxAtkThisFrame)
+      const _hRatio = Math.max(0, Math.min(1, ((finalDmg / _hATK) - 1) / 6.0));
       const _hSize = (44 + _hRatio * 24) * (isCrit ? 1.2 : 1) * (_isBasicHit ? 0.78 : 1);
       const _hKey = _hVar === 0 ? _hitKey : _hitKey + '_' + (_hVar + 1);
       spawnSpriteBurst(_hx, _hy, _hKey, {
@@ -107979,18 +107988,17 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // tier 4 (executing — >300% player ATK) gets a fifth colour, the
   // biggest pop, and a `!!` suffix on crits so a screen-clearing hit
   // reads visibly different from a fat-but-routine crit.
-  const _pATK = Math.max(1, (typeof player !== 'undefined' && player) ? (player.atk || 1) : 1);
+  const _pATK = _lxAtkThisFrame();   // v0.30.1607 - the real ATK (see _lxAtkThisFrame)
   const _ratio = finalDmg / _pATK;
-  // Tier 0 ≤ 0.5×, 1 ≤ 1.0×, 2 ≤ 2.0×, 3 ≤ 3.5×, 4 above.
+  // Tier 0 < 1x, 1 < 2x, 2 < 4x, 3 < 7x, 4 above (v0.30.1607: doubled with every ATK multiplier in v0.30.1604, so a basic hit, 2.2x ATK
+  // since then, sits in tier 2 as its 1.1x did).
   let tier = 0;
-  if (_ratio >= 3.5)      tier = 4;
-  else if (_ratio >= 2.0) tier = 3;
-  else if (_ratio >= 1.0) tier = 2;
-  else if (_ratio >= 0.5) tier = 1;
-  // Keep a floor on tier for huge raw numbers so tooltip-stat builds at
-  // ATK ~10 still see tier escalation when the actual damage is large.
-  if (finalDmg >= 1500 && tier < 4) tier = 4;
-  else if (finalDmg >= 700 && tier < 3) tier = 3;
+  if (_ratio >= 7)      tier = 4;
+  else if (_ratio >= 4) tier = 3;
+  else if (_ratio >= 2) tier = 2;
+  else if (_ratio >= 1) tier = 1;
+  // (v0.30.1607: the raw-number floors - tier 4 from 1,500 damage, tier 3 from 700 - are gone. Against the real ATK they only ever
+  // acted when ATK is large, and there they put every mid- and late-game hit in tier 3-4, flattening the scale the ratio draws.)
   // Tier colour palettes — non-crit cool→warm gradient, crit warm→white.
   const tierColor = isCrit
     ? ['#ffdd44', '#ffdd44', '#ffcc55', '#ffb347', '#ffffff'][tier]
