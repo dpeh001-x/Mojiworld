@@ -31,8 +31,9 @@ try {
     // the visible content rect of every prop, with drawWorldProps' own geometry
     o.rects = list.map((p) => { const im = LX_OBJECTS[p.key], m = LX_OBJECTS_META[p.key] || {}; if (!(im && im.naturalWidth)) return { key: p.key, decoded: false };
       const f = Math.max(0.7, Math.min(1.4, Math.max(im.naturalWidth, im.naturalHeight) / 512)), h = 80 * (p.scale || 1) * f, w = h * im.naturalWidth / im.naturalHeight, sh = im.naturalHeight, anchor = p.anchor || 'feet';
-      const sy = anchor === 'hang' ? p.y - h * (m.bboxTopY / sh) : p.y - h * ((m.bboxBottomY + 1) / sh) + 1;
-      return { key: p.key, x: p.x, y: p.y, anchor, decoded: true, top: sy + h * (m.bboxTopY / sh), bottom: sy + h * ((m.bboxBottomY + 1) / sh), l: p.x - w / 2, r: p.x + w / 2, h, w, nw: im.naturalWidth, sx: p.x - w / 2, sy }; });
+      const pl = anchor === 'hang' || typeof _lxPropPlant !== 'function' ? 0 : _lxPropPlant(p, h, sh);   // v0.30.1621 floor-line: a standing prop is drawn planted into its line
+      const sy = anchor === 'hang' ? p.y - h * (m.bboxTopY / sh) : p.y - h * ((m.bboxBottomY + 1) / sh) + 1 + pl;
+      return { key: p.key, x: p.x, y: p.y, anchor, decoded: true, top: sy + h * (m.bboxTopY / sh), bottom: sy + h * ((m.bboxBottomY + 1) / sh), l: p.x - w / 2, r: p.x + w / 2, h, w, nw: im.naturalWidth, sx: p.x - w / 2, sy, pl }; });
     // each new piece lands on the canvas: centre it and record drawWorldProps' on-screen destination rects
     o.drawn = {};
     for (const k of NEW) { const p = list.find((q) => q.key === k); if (!p) continue; game.camera.x = Math.max(0, p.x - W / 2); const camX = game.camera.x, rr = o.rects.find((q) => q.key === k);
@@ -46,12 +47,13 @@ try {
   ok('the Hood names all six, once each', NEW.every((k) => r.keys.filter((q) => q === k).length === 1), JSON.stringify(r.keys));
   ok('every Hood piece decodes, and no shadow_* sprite 404s', r.rects.every((q) => q.decoded) && miss.length === 0, JSON.stringify(miss));
   const feet = r.rects.filter((q) => q.anchor === 'feet' && q.y >= 470), hang = r.rects.filter((q) => q.anchor === 'hang');
-  ok('every street piece (new and kept) stands with its visible feet on the street (y 480 +- 3)', feet.length >= 9 && feet.every((q) => Math.abs(q.bottom - 480) <= 3), JSON.stringify(feet.map((q) => [q.key, q.x, Math.round(q.bottom)])));
+  ok('every street piece (new and kept) has its feet row on the street (y 480 +- 3)', feet.length >= 9 && feet.every((q) => Math.abs(q.bottom - q.pl - 480) <= 3), JSON.stringify(feet.map((q) => [q.key, q.x, Math.round(q.bottom)])));
+  ok('every standing street piece is drawn planted 2-5 px into the street line (v0.30.1621, per user: 2 px as NPC feet plus a tapered base gap; the skull banner hangs, 0)', feet.every((q) => (q.key === 'shadow_banner_skull' ? q.pl === 0 : q.pl >= 2 && q.pl <= 5)), JSON.stringify(feet.map((q) => [q.key, q.x, q.pl])));
   const onLedge = (q) => r.ledges.some((L) => Math.abs(L.y - q.y) <= 1 && q.x >= L.x + 4 && q.x <= L.x + L.w - 4);
   const placed = r.rects.filter((q) => NEW.includes(q.key) || (q.key === 'shadow_paper_lantern' && (q.x === 430 || q.x === 1200)));   // new pieces + the two lanterns this pass re-hung
   const placedHang = placed.filter((q) => q.anchor === 'hang');
   ok('the re-hung lanterns and the lantern string hook onto a real ledge top, inside its span', placedHang.length === 3 && placedHang.every(onLedge), JSON.stringify(placedHang.map((q) => [q.key, q.x, q.y])) + ' ledges ' + JSON.stringify(r.ledges));
-  ok('nothing this pass placed stands in mid-air: new standing pieces are on the street, hanging ones on a ledge', placed.length === 8 && placed.every((q) => (q.anchor === 'hang' ? onLedge(q) : Math.abs(q.bottom - 480) <= 3)), JSON.stringify(placed.map((q) => [q.key, q.x, q.y, Math.round(q.bottom)])));
+  ok('nothing this pass placed stands in mid-air: new standing pieces are on the street, hanging ones on a ledge', placed.length === 8 && placed.every((q) => (q.anchor === 'hang' ? onLedge(q) : Math.abs(q.bottom - q.pl - 480) <= 3)), JSON.stringify(placed.map((q) => [q.key, q.x, q.y, Math.round(q.bottom)])));
   const kept = [['shadow_incense_coil', 277, 480, 0.55, 'feet'], ['shadow_banner_skull', 540, 363, 1, 'feet'], ['shadow_paper_lantern', 890, 279, 0.55, 'hang'], ['shadow_banner_skull', 2000, 480, 1.4, 'feet']];
   ok('the user’s own placements stay exactly where they were (incense coil - on the floor line since v0.30.1613 -, both skull banners, the eave lantern)', kept.every(([k, x, y, sc, an]) => r.rows.some((p) => p.key === k && p.x === x && p.y === y && p.scale === sc && (p.anchor || 'feet') === an)), JSON.stringify(r.rows));
   ok('the kept lantern at 890 hangs under the pagoda roof (Taiga’s 860-1140 roof ledge is right over it)', r.ledges.some((L) => L.x <= 890 && L.x + L.w >= 890 && L.y < 279 && 279 - L.y <= 70));

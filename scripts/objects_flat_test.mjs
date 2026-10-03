@@ -16,7 +16,7 @@ const require = createRequire(import.meta.url); const sharp = require('sharp'); 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x ? '  [' + x + ']' : '')); };
 // key: [canvas, old bottom row]
-const PROPS = { bastion_anvil: [768, 767], bastion_throne: [992, 991], bastion_throne_prayer_candle: [425, 424], bastion_throne_scribe_desk: [768, 707],
+const PROPS = { bastion_anvil: [768, 758], bastion_throne: [992, 991], bastion_throne_prayer_candle: [425, 424], bastion_throne_scribe_desk: [768, 707],
   market_stall_1: [768, 766], market_stall_2: [768, 766], shadow_shuriken_rack: [768, 766], shadow_tatami: [768, 766], wagon_empty: [709, 707],
   celestial_arcane_glyph_stone: [768, 667], crate_stack: [567, 566], well_stone: [768, 766],
   azure_large_waterfountain: [1984, 1980], azure_waterfountain: [850, 849],

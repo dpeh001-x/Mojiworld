@@ -35,7 +35,7 @@ try {
   ok('the pillars are gone', !r.town.some((p) => p.key === 'column_pillar'));
   ok('the signpost art exists and decodes', r.hasImg && r.decoded === true);
   // height = 80 x scale x a per-art fit factor clamped to 0.7..1.4, so 56..112 px at scale 1
-  const landed = (calls, camX) => calls.filter((d) => !d.err && d.onScreen && d.h >= 55 && d.h <= 113 && Math.abs((d.x + d.w / 2) - (2409 - camX)) < 2 && Math.abs(d.y + d.h - 480) < 3);
+  const landed = (calls, camX) => calls.filter((d) => !d.err && d.onScreen && d.h >= 55 && d.h <= 113 && Math.abs((d.x + d.w / 2) - (2409 - camX)) < 2 && d.y + d.h > 480 && d.y + d.h < 487);   // v0.30.1621 floor-line: planted 2-5 px into the line (+1 px bury), not on it
   ok('with the gate on screen the signpost lands once on the game canvas, bottom-centred on its anchor, 56..112 px tall', r.map === 'town' && !r.atGate.some((d) => d.err) && landed(r.atGate, r.camGate).length === 1, JSON.stringify([r.atGate, r.camGate]));
   const onPlaza = r.town.filter((p) => p.key !== 'signpost_wood' && p.x < 960 + 40).length;   // the dressing that stands in the plaza's view (the canvas is 960 wide)
   ok('with the plaza on screen only the street\'s dressing lands there (the signpost stays at the gate, off screen)', r.atPlaza.filter((d) => d.onScreen).length === onPlaza, JSON.stringify(r.atPlaza));

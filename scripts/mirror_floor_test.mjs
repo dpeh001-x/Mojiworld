@@ -5,6 +5,8 @@
 // hung 2-4 px above it. A per-prop `sink` (3 px here) shifts the drawing; the placement y stays on the floor, which map_decor_test checks.
 // Measured, not assumed: the scene is rendered with and without the mirror (glow off, paused, same frame) at 3x, and the lowest row each FOOT
 // changed is compared with the floor line.
+// v0.30.1621 (per user: the mirror should "sink further in"): the floor-line plant (2 px, as NPC feet, plus its base gap) adds to the sink,
+// so both feet now sit IN the slab's keyline - the far one at least 1 px in, the near one above the slab's lower face (~8 px).
 //   node scripts/mirror_floor_test.mjs        MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -54,8 +56,8 @@ try {
   ok('it carries a sink of 3 px', g.prop.sink === 3, g.prop.sink);
   ok('the sink moves the drawing by exactly that much and nothing else (bottom ' + g.bottomWithout + ' -> ' + g.bottomWith + ')', g.bottomWith != null && g.bottomWithout != null && Math.abs((g.bottomWith - g.bottomWithout) - g.prop.sink) < 0.05, { with: g.bottomWith, without: g.bottomWithout });
   // the art is angled: the near (left) foot is drawn lower than the far (right) one, so on a flat floor line the high foot is the one that floats; a 3 px sink plants it and the near foot sits a little into the slab's face (which is ~8 px thick)
-  ok('RIGHT (far) foot rests on the floor line - at most 1.5 px above it (base: 3.1): gap ' + m.rightGap + ' px', m.rf > 0 && m.rightGap <= 1.5 && m.rightGap >= -4.5, m);
-  ok('LEFT (near) foot is not buried: at most 4 px into the slab, at most 1.5 px above it: gap ' + m.leftGap + ' px', m.lf > 0 && m.leftGap <= 1.5 && m.leftGap >= -4, m);
+  ok('RIGHT (far) foot sits in the floor line - 1 to 5 px into it (v0.30.1621 plant; before the sink it hung 3.1 above): gap ' + m.rightGap + ' px', m.rf > 0 && m.rightGap <= -1 && m.rightGap >= -5, m);
+  ok('LEFT (near) foot sits in the slab but not through it: 1 to 7.5 px in (the slab is ~8 px thick): gap ' + m.leftGap + ' px', m.lf > 0 && m.leftGap <= -1 && m.leftGap >= -7.5, m);
   ok('no page errors', errs.length === 0, errs.slice(0, 2));
 } catch (e) { fail++; console.log('FAIL harness: ' + String(e.message).slice(0, 300)); }
 await browser.close(); server.kill();

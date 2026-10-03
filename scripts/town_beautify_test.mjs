@@ -4,8 +4,8 @@
 //  [1] both towns paint every floating ledge through their skin (MAPS.azureAcademia.townSkin 'azure', emeraldVillage 'emerald') - the camera
 //      swept across each town - and drawing leaves every platform's box untouched
 //  [2] the two new ludo pieces (azure_crystal_lamp, emerald_lantern_post) are registered, decode, and their placements glow
-//  [3] the props this pass places or moves stand ON the floor's black line (rows 479-480): the lowest art row of each one's actual draw
-//      (its drawImage destination rect + its bbox row) is 479 or 480, and the floor beside it is dark on those rows - the five fountains,
+//  [3] the props this pass places or moves are planted IN the floor's black line (rows 479-480): the lowest art row of each one's actual
+//      draw (its drawImage destination rect + its bbox row) is 481-485 (v0.30.1621: 2 px in, as NPC feet, plus a tapered base's gap), and the floor beside it is dark on those rows - the five fountains,
 //      the lamp, the armillary, the lantern post, the bonsai. (Frame diffs are noisy here: the town backdrops animate off the wall clock.)
 //  [4] (files) the fountains' bases are flat: the lowest solid row varies by <= 4 px across the middle 90% of the base (the rounded art
 //      sagged 25 / 44 px; the straightener's cap leaves the outer corners a little rounding); same canvas, and the bbox rows are unchanged
@@ -74,8 +74,9 @@ try {
         const f = Math.max(0.7, Math.min(1.4, Math.max(img.naturalWidth, img.naturalHeight) / 512)), w = 80 * (q.scale || 1) * f * img.naturalWidth / img.naturalHeight;
         const cx = Math.max(0, Math.min((md.worldWidth || 1600) - cv.width, Math.round(q.x - 480))); hold(cx); await sleep(400);
         const hit = (await record(250)).find((c) => Math.abs(c.x + c.w / 2 - (q.x - c.cam)) < 1.5 && Math.abs(c.w - w) < 1.5);
-        o.props.push({ map, key: q.key, x: q.x, y: q.y, low: hit ? Math.ceil(hit.y + hit.h * (meta.bboxBottomY + 1) / img.naturalHeight) - 1 : 'not drawn',
-          floor: [w / 2 + 6, w / 2 + 16, -w / 2 - 6, -w / 2 - 16].map((d) => Math.round(q.x - cx + d)).filter((sx) => sx >= 0 && sx < cv.width).map((sx) => floorRows(sx).join(',')).find((r) => /479,480/.test(r)) || 'no keyline beside it' });   // four columns beside it: one may be covered
+        const all = MAP_PROPS[map]; MAP_PROPS[map] = [q]; await sleep(250);   // v0.30.1621: read the floor beside it with its neighbours hidden (a planted neighbour's base covers the keyline rows)
+        try { o.props.push({ map, key: q.key, x: q.x, y: q.y, low: hit ? Math.ceil(hit.y + hit.h * (meta.bboxBottomY + 1) / img.naturalHeight) - 1 : 'not drawn',
+          floor: [w / 2 + 6, w / 2 + 16, -w / 2 - 6, -w / 2 - 16].map((d) => Math.round(q.x - cx + d)).filter((sx) => sx >= 0 && sx < cv.width).map((sx) => floorRows(sx).join(',')).find((r) => /479,480/.test(r)) || 'no keyline beside it' }); } finally { MAP_PROPS[map] = all; }   // four columns beside it: one may be covered
       }
       if (map === 'emeraldVillage') for (const p of plats.filter((p) => p.y >= 395)) {   // [5] the low ledges' posts: the lowest solid row of the bake it blits
         const cx = Math.max(0, Math.min((md.worldWidth || 1600) - cv.width, Math.round(p.x - 400))); hold(cx); await sleep(400);
@@ -98,8 +99,8 @@ try {
   const S = R.skin, okSkin = (m, want) => S[m] && S[m].set === want && S[m].ledges > 0 && S[m].skinned === S[m].ledges && S[m].still;
   ok('[1] both towns paint every floating ledge through their skin, and no ledge box moves', okSkin('azureAcademia', 'azure') && okSkin('emeraldVillage', 'emerald'), JSON.stringify(S));
   ok('[2] the lamp and the lantern post are registered, decode, and glow where they are placed', R.reg.every((r) => r.listed && r.dec && r.glow.length && r.glow.every(Boolean)), JSON.stringify(R.reg));
-  const off = R.props.filter((p) => !(p.low === 479 || p.low === 480) || !/479,480/.test(p.floor)), need = ['azure_crystal_lamp', 'atrium_armillary', 'emerald_lantern_post', 'pagoda_bonsai'].filter((k) => !R.props.some((p) => p.key === k));
-  ok('[3] the five fountains and the four new pieces stand on the floor\'s black line (their lowest drawn art row is 479-480, the line\'s rows)', !off.length && !need.length && R.props.filter((p) => /waterfountain/.test(p.key)).length === 5,
+  const off = R.props.filter((p) => !(p.low >= 481 && p.low <= 485) || !/479,480/.test(p.floor)), need = ['azure_crystal_lamp', 'atrium_armillary', 'emerald_lantern_post', 'pagoda_bonsai'].filter((k) => !R.props.some((p) => p.key === k));
+  ok('[3] the five fountains and the four new pieces are planted in the floor\'s black line (rows 479-480): their lowest drawn art row is 481-485 (v0.30.1621: 2 px in, as NPC feet are, plus a tapered base\'s gap)', !off.length && !need.length && R.props.filter((p) => /waterfountain/.test(p.key)).length === 5,
     (need.length ? 'missing ' + need.join(' ') + '; ' : '') + R.props.map((p) => `${p.key}@${p.x} ${p.low} (floor ${p.floor})`).join(', '));
   ok('[5] Emerald\'s three low ledges stand on posts that end on the keyline', R.posts.length === 3 && R.posts.every((p) => p.low === 479 || p.low === 480), JSON.stringify(R.posts));
   const has = (m, re) => Object.entries(R.air[m] || {}).some(([k, n]) => re.test(k) && n > 0);

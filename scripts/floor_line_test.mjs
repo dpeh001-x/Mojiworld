@@ -4,9 +4,13 @@
 // prop.y + sink, so the prop stands on the line when that row is the bottom row of the dark top line of the floor or ledge under it.
 // Each map is drawn by hand with the game paused (render-only, as _lxDrawBetween does) at an exact camera - vertical maps included - with
 // props, NPCs, portals and monsters hidden, and the surface's dark rows are read in the prop's own columns.
+// v0.30.1621 floor-line plant (per user: objects "need to shift down further to properly coincide with the actual floor line"): the row's y is
+// still authored ON the line, and drawWorldProps then plants the art into it - 2 px, as NPC feet are, plus a tapered base's gap (<= 3 px).
+// The drawn depth is read from drawWorldProps' own draw call (its _lxDrawSoft rect and the art's bbox bottom).
 //  [1] every map with props loads and every surface line is found
-//  [2] every prop stands on its line (|y + sink - line bottom| <= 1), except ALLOW below (hung, floating or deliberately sunk pieces)
+//  [2] every prop's row stands on its line (|y + sink - line bottom| <= 1), except ALLOW below (hung, floating or deliberately sunk pieces)
 //  [3] the ALLOW list is not stale: each entry still exists and is still off the line
+//  [4] every standing prop is drawn planted: its lowest drawn art row is 2-5 px below its row's y + sink; hung and floating pieces 0
 //   MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override the served tree. node scripts/floor_line_test.mjs
 import { createRequire } from 'node:module'; import path from 'node:path'; import fs from 'node:fs'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url); const { chromium } = require('playwright-core');
@@ -18,9 +22,9 @@ const ALLOW = {
   'hiddenPagoda|shadow_banner_skull|656': 'a banner hung under the ledge', 'shadowWovenHood|shadow_banner_skull|540': 'a banner hung under the ledge',
   'emeraldVillage|emerald_watchtower_bell|226': 'the bell hangs under the hut eave',
   'emeraldVillage|emerald_cherry_branch|*': 'the user\'s floating sakura flowers (Prop Editor bake)', 'jadeGrove|emerald_cherry_branch|*': 'the user\'s floating sakura flowers',
-  'fracturedReflection|rift_cracked_mirror|960': 'sink 3 on purpose (v0.30.1568: its far foot hung)', 'thunderPlateau|ice_crystal_cluster|420': 'planted in a snow cap that rises above the line',
-  'bastion|bastion_anvil|2250': 'Barnaby\'s anvil, 4 px in: its row is pinned by the v0.30.1461 marker (left for the user)',
+  'fracturedReflection|rift_cracked_mirror|960': 'sink 3 on purpose (v0.30.1568: its far foot hung; per user it sits deeper still, planted on top)', 'thunderPlateau|ice_crystal_cluster|420': 'planted in a snow cap that rises above the line',
 };
+const HUNG = new Set(['bastion_banner', 'shadow_banner_skull', 'emerald_cherry_branch']);   // drawn unplanted (_LX_PROP_NOPLANT), as is a row with plant:0 (the eave bell)
 const allowOf = (r) => ALLOW[`${r.map}|${r.key}|${r.x}`] || ALLOW[`${r.map}|${r.key}|*`];
 const env = { ...process.env }; delete env.MOJI_GAME_FILE;
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT, env }); await new Promise((r) => setTimeout(r, 1200));
@@ -49,7 +53,7 @@ try {
     game.paused = true; game.ambient.length = 0; try { if (Array.isArray(game.monsters)) game.monsters.length = 0; } catch (e) {}
     const md = game.mapData, all = MAP_PROPS[map], props = all.filter((q) => q && q.key && (q.anchor || 'feet') !== 'hang');
     for (const q of props) { const im = LX_OBJECTS[q.key]; for (let i = 0; i < 60 && im && !(im.complete && im.naturalWidth); i++) await sleep(100); }
-    const keep = { npc: window.drawNPCs, por: window.drawPortals, mon: window.drawMonster };
+    const keep = { npc: window.drawNPCs, por: window.drawPortals, mon: window.drawMonster, soft: window._lxDrawSoft };
     MAP_PROPS[map] = []; window.drawNPCs = () => {}; window.drawPortals = () => {}; window.drawMonster = () => {};
     const g = document.getElementById('game').getContext('2d', { willReadFrequently: true }), plats = md.platforms || [], ww = md.worldWidth || 1600, wh = Math.max(560, md.worldHeight || 560);
     try {
@@ -63,17 +67,25 @@ try {
           for (let i = 0; i < n; i++) if (d[i * 4 + 3] > 200 && 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2] < 75) { const y = y0 + i + cy, r = runs[runs.length - 1]; if (r && y === r[1] + 1) r[1] = y; else runs.push([y, y]); }
           const best = runs.sort((a, c) => Math.min(Math.abs(a[0] - ref), Math.abs(a[1] - ref)) - Math.min(Math.abs(c[0] - ref), Math.abs(c[1] - ref)))[0]; if (best) bots.push(best[1]); }
         const lb = bots.length ? bots.sort((a, c) => a - c)[bots.length >> 1] : null;
-        out.push({ map, key: q.key, x: q.x, y: q.y, sink: q.sink || 0, sup: sup ? (sup.type || 'ledge') + '@' + sup.y : null, line: lb, delta: lb != null ? q.y + (q.sink || 0) - lb : null });
+        const rec = []; MAP_PROPS[map] = [q]; window._lxDrawSoft = (c, im, dx, dy, dw, dh) => { if (im && im._lxPropGeom) rec.push({ im, dy, dh }); };
+        try { drawWorldProps(); } finally { window._lxDrawSoft = keep.soft; MAP_PROPS[map] = []; }
+        const meta = LX_OBJECTS_META[q.key], r = rec[0], low = r && meta && meta.bboxBottomY != null ? r.dy + r.dh * (meta.bboxBottomY + 1) / r.im._lxPropGeom.sh - 1 : null;
+        out.push({ map, key: q.key, x: q.x, y: q.y, sink: q.sink || 0, sup: sup ? (sup.type || 'ledge') + '@' + sup.y : null, line: lb, delta: lb != null ? q.y + (q.sink || 0) - lb : null,
+          plant: low != null ? Math.round(low - q.y - (q.sink || 0)) : null, np: q.plant === 0 });
       }
-    } finally { MAP_PROPS[map] = all; window.drawNPCs = keep.npc; window.drawPortals = keep.por; window.drawMonster = keep.mon; game.paused = false; }
+    } finally { MAP_PROPS[map] = all; window._lxDrawSoft = keep.soft; window.drawNPCs = keep.npc; window.drawPortals = keep.por; window.drawMonster = keep.mon; game.paused = false; }
     return out;
   }, map));
   const bad = rows.filter((r) => r.err), plain = rows.filter((r) => !r.err && !allowOf(r)), off = plain.filter((r) => r.delta == null || Math.abs(r.delta) > 1);
   console.log(`${maps.length} maps, ${rows.length} feet-anchored props, ${rows.length - plain.length - bad.length} on the ALLOW list`);
   ok('[1] every map with props loads, and every prop\'s surface line is found', !bad.length && plain.every((r) => r.line != null), bad.map((r) => r.map + ' ' + r.err).concat(plain.filter((r) => r.line == null).map((r) => `${r.map} ${r.key}@${r.x} no line`)).join('; '));
-  ok('[2] every other prop stands on the floor\'s black line (its lowest art row within 1 px of the line\'s bottom row)', !off.length, off.map((r) => `${r.map} ${r.key}@${r.x} y ${r.y} on ${r.sup} line ${r.line} (${r.delta > 0 ? '+' : ''}${r.delta})`).join('; '));
+  ok('[2] every other prop row stands on the floor\'s black line (its y + sink within 1 px of the line\'s bottom row)', !off.length, off.map((r) => `${r.map} ${r.key}@${r.x} y ${r.y} on ${r.sup} line ${r.line} (${r.delta > 0 ? '+' : ''}${r.delta})`).join('; '));
   const stale = Object.keys(ALLOW).filter((k) => { const [m, key, x] = k.split('|'); const hit = rows.filter((r) => r.map === m && r.key === key && (x === '*' || String(r.x) === x)); return !hit.length || hit.every((r) => r.delta != null && Math.abs(r.delta) <= 1); });
   ok('[3] the ALLOW list is not stale (each entry is still there and still off the line)', !stale.length, stale.join('; '));
+  const okr = rows.filter((r) => !r.err), hung = okr.filter((r) => HUNG.has(r.key) || r.np), stood = okr.filter((r) => !HUNG.has(r.key) && !r.np), shallow = stood.filter((r) => r.plant == null || r.plant < 2 || r.plant > 5);
+  console.log('drawn plant depths: ' + JSON.stringify(stood.reduce((a, r) => (a[r.plant] = (a[r.plant] || 0) + 1, a), {})));
+  ok('[4] every standing prop is drawn planted in its line: its lowest art row 2-5 px below its row y + sink (2 px, as NPC feet, plus a tapered base gap)', !shallow.length, shallow.map((r) => r.map + ' ' + r.key + '@' + r.x + ' plant ' + r.plant).join('; '));
+  ok('[4b] hung and floating pieces (banners, the eave bell, the sakura) are drawn unplanted', hung.length >= 5 && hung.every((r) => r.plant === 0), hung.filter((r) => r.plant !== 0).map((r) => r.map + ' ' + r.key + '@' + r.x + ' plant ' + r.plant).join('; ') || hung.length + ' hung');
   ok('no page errors', !errs.length, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + String(e && e.stack || e).slice(0, 400)); }
 await browser.close(); server.kill();
