@@ -57,6 +57,10 @@ const DESC = {
   rift_stone_lantern: ['a weathered Japanese stone lantern (toro) of dark slate-blue stone: a square base, a slim post, a firebox with a window glowing a dim crimson-orange, a wide curved pointed roof cap; thin cracks run through the stone with a faint violet light leaking from them, and a little dark moss on the base', 0.9],
   // picked with DECOR_MARGIN=48: at 24 its needles touched the side margin the edge-feather probe watches
   rift_withered_pine: ['a small withered black pine tree in the Japanese style: a twisted dark charcoal trunk bending to one side, three flat sparse clumps of dark navy-teal needles, a few crimson leaves still clinging, growing from a low mound of dark slate rocks', 0.9],
+  // distorted-dressing - hung under the Distorted Portal maps' ledges (anchor 'hang'): DECOR_WORDS=ink; the banner is take 1, the
+  // string take 2 picked with DECOR_MARGIN=40 (it is wide)
+  rift_banner_hang: ['a long tattered crimson silk banner hanging straight down from a short black lacquered crossbar with small gold end caps: a black circular cracked-mirror sigil in its middle, a thin gold border stitched along its edges, a ragged frayed bottom edge with two small gold tassels; the cloth hangs flat and straight, seen from the front', 0.95],
+  rift_lantern_string: ['a sagging string of five round red paper lanterns hanging from a thin black cord, each lantern glowing warm orange from inside, with black lacquered top and bottom caps and short red tassels; the cord droops in one shallow curve between two small black iron hooks at its two ends', 0.5],
 };
 const CAMERA = 'CRITICAL CAMERA: a flat, straight-on side view for a 2D side-scrolling platformer game - the camera looks at the object '
   + 'exactly from the side at eye level, like a theatre flat. NO 3/4 view, NO isometric, no vanishing point, no top surface showing '

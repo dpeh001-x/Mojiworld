@@ -69,7 +69,7 @@ try {
       const md = game.mapData, pl = md.platforms || [], list = MAP_PROPS[id] || [], rows = [];
       for (const p of list) {
         const im = LX_OBJECTS[p.key]; const loaded = !!im && await load(im);
-        if (!loaded) { rows.push({ key: p.key, x: p.x, loaded: false }); continue; }
+        if (!loaded) { rows.push({ key: p.key, x: p.x, loaded: false, hang: p.anchor === 'hang' }); continue; }
         const f = Math.max(0.7, Math.min(1.4, Math.max(im.naturalWidth, im.naturalHeight) / 512)), h = 80 * (p.scale || 1) * f, w = h * im.naturalWidth / im.naturalHeight;
         const top = _detectSpriteBboxTop(im), bot = _detectSpriteBboxBottom(im), sy = p.y - h * ((bot + 1) / im.naturalHeight) + 1;
         const box = { x0: p.x - w / 2, x1: p.x + w / 2, y0: sy + h * (top / im.naturalHeight), y1: p.y };
@@ -78,6 +78,7 @@ try {
         const door = Math.min(9999, ...(md.portals || []).map((d) => Math.abs(d.x + (d.w || 0) / 2 - p.x)));
         const npc = Math.min(9999, ...(md.npcs || []).map((n) => Math.abs(n.x - p.x)), ...(md.launchPads || []).map((l) => Math.abs(l.x + (l.w || 0) / 2 - p.x)));
         const pit = Math.min(9999, ...(md.potholes || []).map((h) => Math.abs(h.x + (h.w || 0) / 2 - p.x) - (h.w || 0) / 2));
+        if (p.anchor === 'hang') { rows.push({ key: p.key, x: p.x, loaded: true, hang: true }); continue; }   // ledge dressing (distorted_dressing_test)
         rows.push({ key: p.key, x: p.x, loaded: true, ground: g.length > 0, hits, door: Math.round(door), npc: Math.round(npc), pit: Math.round(pit), drawnBottom: Math.round(sy + h * ((bot + 1) / im.naturalHeight) - 1) - p.y, ch: Math.round(h * (bot - top + 1) / im.naturalHeight) });
       }
       out[id] = rows;
@@ -85,7 +86,7 @@ try {
     return out;
   }, [ALL[i]]); (RL[ALL[i]] = RL[ALL[i]] || []).push(one[ALL[i]]); } R[ALL[i]] = RL[ALL[i]][0]; }
   for (const id of DECOR_MAPS) {
-    const rows = R[id] || [], xs = rows.map((r) => r.x).sort((a, b) => a - b), gaps = xs.slice(1).map((x, i) => x - xs[i]);
+    const rows = (R[id] || []).filter((r) => !r.hang), xs = rows.map((r) => r.x).sort((a, b) => a - b), gaps = xs.slice(1).map((x, i) => x - xs[i]);
     ok(`${id}: ${rows.length} prop(s), sparse (1-5, 500+ px apart)`, rows.length >= 1 && rows.length <= 5 && gaps.every((g) => g >= 500), xs.join(','));
     const bad = (RL[id] || []).flat().filter((r) => DECOR_KEYS.has(r.key) && (!r.loaded || !r.ground || r.hits.length || r.door < 110 || r.npc < 150 || r.pit < 100 || r.ch > 86 || Math.abs(r.drawnBottom) > 2));
     ok(`${id}: every prop loads, stands on the floor, clear of doors, NPCs, pads, pits and platforms in 3 re-rolled layouts, 85 px max`, !bad.length, JSON.stringify(bad).slice(0, 300));
