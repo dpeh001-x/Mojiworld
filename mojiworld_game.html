@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1579';
+const GAME_VERSION = 'v0.30.1580';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -75787,7 +75787,19 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
     //     updater retargets to the job crest at runtime; no loader tracked it,
     //     so it sat as a black gradient box until the CDN got around to it.
     //   · the map's themed floor/platform tiles + its authored floor override.
-    try {
+    // v0.30.1580 boot-lag - "all four registries are small" is no longer true (150 hairs, 87 eyes, 75 mouths): a hero who exists draws ONE
+    // of each (drawPlayer: lookCustom.hairId via _migrateHairId, eyeId / mouthId or 'default'), so those are tracked; every part only
+    // while a hero is being created (the studio thumbnails). Heads are few and stay whole.
+    const _lxLook = (typeof player !== 'undefined' && player && player.cls && !window._lxAwaitingCreation && player.lookCustom) ? player.lookCustom : null;
+    if (_lxLook) try {
+      const _mine = [];
+      if (typeof LX_HAIR !== 'undefined' && LX_HAIR) _mine.push(LX_HAIR[(typeof _migrateHairId === 'function') ? _migrateHairId(_lxLook.hairId) : _lxLook.hairId]);
+      if (typeof LX_EYES !== 'undefined' && LX_EYES) _mine.push(LX_EYES[_lxLook.eyeId || 'default'], LX_EYES['default']);
+      if (typeof LX_MOUTH !== 'undefined' && LX_MOUTH) _mine.push(LX_MOUTH[_lxLook.mouthId || 'default'], LX_MOUTH['default']);
+      if (typeof LX_HEAD !== 'undefined' && LX_HEAD) for (const _k in LX_HEAD) _mine.push(LX_HEAD[_k]);
+      for (const _im of _mine) if (_im) track(_im);
+    } catch (e) {}
+    else try {
       for (const _reg of [
         (typeof LX_HAIR  !== 'undefined') ? LX_HAIR  : null,
         (typeof LX_HEAD  !== 'undefined') ? LX_HEAD  : null,
@@ -75923,13 +75935,25 @@ function _lxMapNeighbors(id) {
     return out;
   } catch (e) { return []; }
 }
+// v0.30.1580 boot-lag - true while the world has not opened yet behind a title-first menu (the boot gates still to run or running).
+// Warmers of OTHER maps wait for it: decoding them during the boot ready gate doubled its decode time. 2 min failsafe.
+// Only while the title menu is actually up or a boot gate runs - a path that never shows the menu (or hides it) is not held.
+function _lxBootPending() {
+  if (!window._lxTitleFirst || window._lxReadyGateDone || performance.now() > 120000) return false;
+  if (window._lxSpriteGateHolding || window._lxReadyGateRunning) return true;
+  const o = document.getElementById('loading-overlay'), a = document.getElementById('lo-auth');
+  return !!(o && a && !o.classList.contains('fade') && o.style.display !== 'none' && a.classList.contains('shown') && a.style.display !== 'none');
+}
+function _lxAfterBoot() { return new Promise((r) => { const t = () => _lxBootPending() ? setTimeout(t, 300) : r(); t(); }); }
 function _lxWarmMap(id) {   // dedupe + preload one map's full sprite set
+  if (_lxBootPending()) return _lxAfterBoot().then(() => _lxWarmMap(id));   // v0.30.1580 boot-lag - next door can wait for the door
   window._lxMapPreloaded = window._lxMapPreloaded || {};
   if (!id || window._lxMapPreloaded[id] || typeof MAPS === 'undefined' || !MAPS[id]) return Promise.resolve(0);
   window._lxMapPreloaded[id] = 1;
   try { return Promise.resolve(_lxPreloadMapAssets(id, null, 'low')); } catch (e) { return Promise.resolve(0); }
 }
 function _lxStreamWorld() {
+  if (_lxBootPending()) { _lxAfterBoot().then(() => _lxStreamWorld()); return; }   // v0.30.1580 boot-lag - the world streams once the world is open
   if (window._lxWorldStreamed) return;
   window._lxWorldStreamed = true;
   const coarse = (typeof matchMedia !== 'undefined')
@@ -174690,7 +174714,8 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     // (_lxStreamCalm), and LOADS but does not decode art over
     // _LX_STREAM_DECODE_MAX_PX: a frame that big bakes from a Blob off-thread
     // at first draw (v0.29.749) and a background decodes behind its map fade.
-    const _calm = (includeHeavy && typeof _lxStreamCalm === 'function') ? _lxStreamCalm : () => Promise.resolve();
+    const _calm = (includeHeavy && typeof _lxStreamCalm === 'function') ? _lxStreamCalm
+      : () => new Promise((r) => { const t = () => window._lxReadyGateRunning ? setTimeout(t, 120) : r(); t(); });   // v0.30.1580 boot-lag - the light pass pauses while the boot ready gate decodes
     const _maxPx = (typeof _LX_STREAM_DECODE_MAX_PX === 'number') ? _LX_STREAM_DECODE_MAX_PX : 1.2e6;
     const _decodeOne = (img) => _calm().then(() => new Promise((res) => {
       try {
