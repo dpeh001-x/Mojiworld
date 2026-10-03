@@ -61,6 +61,9 @@ const DESC = {
   // string take 2 picked with DECOR_MARGIN=40 (it is wide)
   rift_banner_hang: ['a long tattered crimson silk banner hanging straight down from a short black lacquered crossbar with small gold end caps: a black circular cracked-mirror sigil in its middle, a thin gold border stitched along its edges, a ragged frayed bottom edge with two small gold tassels; the cloth hangs flat and straight, seen from the front', 0.95],
   rift_lantern_string: ['a sagging string of five round red paper lanterns hanging from a thin black cord, each lantern glowing warm orange from inside, with black lacquered top and bottom caps and short red tassels; the cord droops in one shallow curve between two small black iron hooks at its two ends', 0.5],
+  // town-beautify (per user: "beautify azure and emerald town more"): one new light for each town, the rest reused
+  azure_crystal_lamp: ['a slender academy lamp post: a tall white marble column with gold trim bands on a small square white marble base, topped by an open cradle of curled gold arms holding a big glowing pale-blue faceted crystal with a bright white core', 0.95],
+  emerald_lantern_post: ['a village lantern post in the East Asian style: a dark brown wooden post on a small grey stone footing, a short wooden arm near the top from which hangs a round red paper lantern with gold caps and a short red tassel, glowing warm orange inside, and a small jade-green tiled roof cap on top of the post', 0.95],
 };
 const CAMERA = 'CRITICAL CAMERA: a flat, straight-on side view for a 2D side-scrolling platformer game - the camera looks at the object '
   + 'exactly from the side at eye level, like a theatre flat. NO 3/4 view, NO isometric, no vanishing point, no top surface showing '

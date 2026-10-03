@@ -17,6 +17,9 @@
 // description drowned any outline wording (0.3-0.5%, a third of its edge un-inked). A shorter description with BOLD gives the large
 // fountain 19 px on its 1984 canvas (the old art: 16), THICK gives the small one 13 px on its 850 canvas (the old: 12) - on screen,
 // at 2.85x and 1x, the two draw the same line. An image-edit asked only to add the outline returned the take unchanged.
+// v0.30.1609 (per user: the Azure fountains' base "flat rather than rounded", standing ON the floor's black line): both fountains keep their
+// v0.30.1352 takes with only the base straightened by scripts/flatten_prop_base.mjs (fresh takes asking for a flat base changed the design
+// and still sagged; image-edits of the art came back curved). A regeneration here brings a rounded base back - flatten the pick the same way.
 // Shipped takes (2 per prop, some re-rolled with a sharper description): anvil take 2, every other first take; the glyph stone
 // (a rough boulder at first), well (a box of thatch), tatami (a hairline) and crate stack (two crates) needed a second prompt,
 // and the crate stack kept its first take (three wide crates) over the re-roll (a tower three times too narrow for its spot).
