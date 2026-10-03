@@ -83,7 +83,7 @@ check(r.krook.atk >= 590, 'the v0.30.345 hardening holds - ATK 590 (per user: "e
 console.log('\nNOTHING ELSE MOVED');
 // HP moved later, on purpose: v0.30.246 (per user: "Increase the stats of krook") took it 2,520,000 ->
 // 3,600,000, and v0.30.266 re-landed that after a stale rebuild restored the old number.
-check(r.krook.hp === 3600000, 'HP is the v0.30.246 3,600,000 (per user: "Increase the stats of krook")', r.krook.hp);
+check(r.krook.hp === 2700000, 'HP is 2,700,000: the v0.30.246 3,600,000 (per user: "Increase the stats of krook") less the 25% monster HP cut in v0.30.1617', r.krook.hp);
 check(r.krook.lv === 50, 'still Lv 50', r.krook.lv);
 
 check(errs.length === 0, 'no page errors', errs.slice(0, 3));

@@ -50,8 +50,8 @@ const R = await page.evaluate(() => {
 await browser.close(); server.kill();
 
 // Values as they stood before this change.
-const WAS_HEAD = { hp: 3037500, atk: 324, def: 27, eva: 126, exp: 1500000, coins: 70000, speed: 0.4 };
-const WAS_LEG  = { hp: 600000, atk: 120, def: 160, eva: 90, exp: 4200, coins: 1800, speed: 0 };
+const WAS_HEAD = { hp: 2278125,   /* 3,037,500 less the 25% monster HP cut in v0.30.1617 */ atk: 324, def: 27, eva: 126, exp: 1500000, coins: 70000, speed: 0.4 };
+const WAS_LEG  = { hp: 450000,   /* 600,000 less the 25% cut */ atk: 120, def: 160, eva: 90, exp: 4200, coins: 1800, speed: 0 };
 
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 210) });

@@ -82,12 +82,12 @@ if (BASE) {
 }
 
 // Rule checks that hold on the patched build without a baseline.
-const sample = [['zombie', 4450, 20], ['gummy', 290, 7], ['skeleton', 2585, 20], ['blightElder', 169548, 281]];
+const sample = [['zombie', 3338, 20], ['gummy', 218, 7], ['skeleton', 1939, 20], ['blightElder', 127161, 281]];   // v0.30.1617: HP less 25% (per user)
 const bad = sample.filter(([k, hp, df]) => !out[k] || out[k].hp !== hp || out[k].def !== df);
 ok('spot-checked monsters carry their scaled stats', bad.length === 0,
-   bad.length ? bad.map(([k]) => `${k}=${out[k] && out[k].hp}/${out[k] && out[k].def}`).join(' ') : 'zombie 4450/20, gummy 290/7, skeleton 2585/20, blightElder 169548/281');
+   bad.length ? bad.map(([k]) => `${k}=${out[k] && out[k].hp}/${out[k] && out[k].def}`).join(' ') : 'zombie 3338/20, gummy 218/7, skeleton 1939/20, blightElder 127161/281');
 ok('untouched low-level monsters keep their stats',
-   out.snail && out.snail.hp === 40 && out.snail.def === 1 && out.mushroom && out.mushroom.hp === 154,
+   out.snail && out.snail.hp === 30 && out.snail.def === 1 && out.mushroom && out.mushroom.hp === 116,   // v0.30.1617: HP less 25%
    `snail ${out.snail && out.snail.hp}/${out.snail && out.snail.def}`);
 
 let pass = 0, failed = 0;

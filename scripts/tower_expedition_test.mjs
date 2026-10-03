@@ -91,7 +91,7 @@ try {
     return o;
   });
   console.log(`build ${r.ver}  arbiter def ${r.arbiter.def}  run@70 ${r.exp.at70}  clear bonus ${r.exp.clearBonus}`);
-  ok('the Arbiter carries the authored DEF 300, with HP and ATK unchanged', r.arbiter.def === 300 && r.arbiter.hp === 58000 && r.arbiter.atk === 395,
+  ok('the Arbiter carries the authored DEF 300, with HP and ATK unchanged', r.arbiter.def === 300 && r.arbiter.hp === 43500 && r.arbiter.atk === 395,   // v0.30.1617: HP 58,000 less 25% (per user)
     JSON.stringify(r.arbiter));
   // Per user: Arbiter 300, Sovereign 250. That deliberately puts the mid-boss's DEF ABOVE the
   // apex's, so the old "stays under the Sovereign" rule no longer holds and is not asserted.
