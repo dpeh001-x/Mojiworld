@@ -138,8 +138,10 @@ ok('the REAL draw agrees: opaque bottom of the static sprite within 6 px of the 
 ok('an ATTACK frame plants the same way (frames anchor through the same ladder)',
   r.attackDraw && (/monsters\/attack/.test(r.attackDraw.src) || r.attackDraw.differentObject)
   && r.attackDraw.sinkPx >= -3 && r.attackDraw.sinkPx <= 8, r.attackDraw);
-ok('golden: the other post-clamp types are untouched (boneGolem 2.99, grumpsquid 9.4, seastar 6.93, slime 3)',
-  r.ladder && Math.abs(r.ladder.boneGolem - 2.99) < 0.3 && Math.abs(r.ladder.grumpsquid - 9.4) < 0.3
+// boneGolem 5.14 since v0.30.1421: its redraw was planted 4-6 px into the floor on purpose ("mob_offsets: scale + offset per
+// type (same drawn height, 4-6 px into the floor)"); it read 2.99 at v0.30.1420 and 5.14 at v0.30.1421, nothing since
+ok('golden: the other post-clamp types are untouched (boneGolem 5.14, grumpsquid 9.4, seastar 6.93, slime 3)',
+  r.ladder && Math.abs(r.ladder.boneGolem - 5.14) < 0.3 && Math.abs(r.ladder.grumpsquid - 9.4) < 0.3
   && Math.abs(r.ladder.seastar - 6.93) < 0.3 && Math.abs(r.ladder.slime - 3) < 0.3,
   r.ladder);
 ok('the animator mirror dropped echoKnight (and the +9 of the old mirror Lyra art with it) and kept the other three (parity)',

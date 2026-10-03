@@ -6,7 +6,8 @@
 //     every one facing the throne, standing on its tier with head room; each has a 9-frame loop (LX_OBJECTS_ANIM) on its still's feet
 //   - GOOFY FOUR: Flop, Munch, Daisy and Mope are NPCs (role 'soldier') with their own lines and a 9-frame idle; they stand on the
 //     floor but fail the line - uneven gaps, not all facing the throne; drawn at the ranks' size
-//   - OUTLINES: every soldier still and frame has one silhouette ink weight (13-17 px at 1024) with 93%+ of its edge inked
+//   - OUTLINES: the 30 rank stills and frames share one silhouette ink weight (13-17 px at 1024); the goofy four's 40, being NPCs,
+//     wear the v0.30.1538 NPC line (1.42 game px, per user; 10-13 px by this ruler); 93%+ of every edge inked
 //   - v0.30.1405: NO GROUND SHADOW: no still or frame carries the animator's faint ground shadow (stray faint px away from the figure)
 //   node scripts/bastion_army_test.mjs
 import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { createRequire } from 'node:module';
@@ -71,8 +72,14 @@ const inkOf = async (rel) => { const { data: d, info } = await sharp(path.join(R
   for (let x = 0; x < W; x += 4) { let y = 0; while (y < H && !solid(x, y)) y++; if (y < H) walk(x, y, 0, 1); }
   const inked = runs.filter((n) => n >= 3).sort((a, b) => a - b); return { med: inked[inked.length >> 1] || 0, share: inked.length / Math.max(1, runs.length) }; };
 const all = [...SERIOUS.flatMap((k) => [`objects/${k}.webp`, ...frames('objects/anim', k)]), ...Object.values(SQUAD).flatMap((b) => [`npc/${b}.webp`, ...frames('npc/idle', b)])];
-const inkBad = []; let lo = 99, hi = 0; for (const rel of all) { const r = await inkOf(rel); lo = Math.min(lo, r.med); hi = Math.max(hi, r.med); if (r.med < 13 || r.med > 17 || r.share < 0.93) inkBad.push(`${rel} ${r.med}px ${(r.share * 100).toFixed(0)}%`); }
-ok(`one silhouette ink weight on all ${all.length} soldier stills and frames (13-17 px, 93%+ inked)`, all.length === 70 && !inkBad.length, inkBad.join(', ') || `${lo}-${hi} px`);
+// v0.30.1538 re-lined every NPC to 1.42 game px (per user: "make all of them have 1.42 px black outline"), the goofy four included,
+// so they no longer share the ranks' heavier line (the ranks are props, which that pass left alone): each group keeps one weight
+const RANK = new Set(all.filter((rel) => rel.startsWith('objects/'))), span = { rank: [99, 0], npc: [99, 0] }, inkBad = [];
+for (const rel of all) { const r = await inkOf(rel), g = RANK.has(rel) ? 'rank' : 'npc', [a, b] = g === 'rank' ? [13, 17] : [10, 13];
+  span[g] = [Math.min(span[g][0], r.med), Math.max(span[g][1], r.med)];
+  if (r.med < a || r.med > b || r.share < 0.93) inkBad.push(`${rel} ${r.med}px ${(r.share * 100).toFixed(0)}%`); }
+ok(`one silhouette ink weight per group on all ${all.length} soldier stills and frames (the ranks 13-17 px, the NPC four 10-13 px, 93%+ inked)`,
+  all.length === 70 && RANK.size === 30 && !inkBad.length, inkBad.join(', ') || `ranks ${span.rank.join('-')} px, NPCs ${span.npc.join('-')} px`);
 // v0.30.1405: the sprite animator left a faint ground shadow under Flop's feet (frames 1-6, ~7% opacity) that pulsed with the loop.
 // A stray is a faint pixel (alpha 4-127) more than 3 px from the figure's solid ink; the figures' own anti-aliased edges sit within 1-2 px.
 const strayOf = async (rel) => { const { data: d, info } = await sharp(path.join(ROOT, 'Sprites', rel)).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); const W = info.width, H = info.height, N = W * H;

@@ -48,10 +48,14 @@ const TYPES = ['ossuaryTyrant', 'blightElder', 'echoKnight', 'shardlich', 'tombK
 const r = await page.evaluate(async (TYPES) => {
   const sleep = (ms) => new Promise((s) => setTimeout(s, ms));
   const out = { player: player.h, rows: [] };
+  // since v0.30.1205 a monster's art loads only when something asks for it: ask for all six now, or a type off the current
+  // map is not drawn (so never stamped) within the wait below and the run fails at random ('not stamped')
+  if (typeof _lxArt2WantMon === 'function') for (const t of TYPES) _lxArt2WantMon(t, true);
   for (const t of TYPES) {
     game.monsters.length = 0;
     let m = null; try { m = spawnMonster(700, 400, t); } catch (e) {}
     if (!m) { out.rows.push({ t, err: 'no spawn' }); continue; }
+    for (let i = 0; i < 100 && !m._visH; i++) await sleep(40);   // until the draw stamps it (was a fixed 14 x 40 ms)
     for (let i = 0; i < 14; i++) await sleep(40);
     out.rows.push({ t, box: Math.round(m.h), vis: m._visH ? Math.round(m._visH) : null });
   }
@@ -77,12 +81,15 @@ const BAND = [0.95, 1.25];
 // re-fit (hitbox_coverage_test) their boxes fit the visible art, while the drawn rect keeps the frame's padding, so
 // drawn/box reads ~1.5x with nothing on screen changed. The size the user fixed ("blown up to such huge proportion")
 // is the one pinned: 8.1x / 8.2x the hero at v0.30.765, which is what a re-authored 1800 px sheet would blow past.
-const ELITE_VS_HERO = [7.0, 9.5];
+// v0.30.1421 redrew the Ossuary Tyrant on a tighter canvas: the old idle sheet kept ~100 px of headroom for the bone shards
+// it threw, the new one throws none, so its drawn box went 355 -> 300 px (8.1x -> 6.8x the hero) while the body itself stayed
+// ~211 px crown to feet (4.8x the hero) - measured through drawMonster at v0.30.1420 and v0.30.1421. Its floor moves with it.
+const ELITE_VS_HERO = { ossuaryTyrant: [6.5, 9.5], blightElder: [7.0, 9.5] };
 for (const t of ['ossuaryTyrant', 'blightElder']) {
   const x = by[t]; if (!x) continue;
-  const vh = x.vis / r.player;
-  ok(vh <= ELITE_VS_HERO[1], `${t} is drawn no more than ${ELITE_VS_HERO[1]}x the hero`, vh.toFixed(1) + 'x');
-  ok(vh >= ELITE_VS_HERO[0], `${t} was not over-shrunk below ${ELITE_VS_HERO[0]}x the hero`, vh.toFixed(1) + 'x');
+  const vh = x.vis / r.player, [lo, hi] = ELITE_VS_HERO[t];
+  ok(vh <= hi, `${t} is drawn no more than ${hi}x the hero`, vh.toFixed(1) + 'x');
+  ok(vh >= lo, `${t} was not over-shrunk below ${lo}x the hero`, vh.toFixed(1) + 'x');
 }
 // every other sampled type should already sit in the band - if one drifts out, the same bug is back
 // (shardlich left the band with the same re-fit: its box now fits its visible art)
