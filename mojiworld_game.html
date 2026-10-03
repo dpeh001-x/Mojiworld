@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1589';
+const GAME_VERSION = 'v0.30.1590';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -24556,8 +24556,6 @@ function _lxStairUnderTile(c, k, P) {
   g.restore();
   // 2. the keylines this tile covers: a riser, down to the lower tread beside it, and a flight's open end, down to the underside
   g.lineJoin = 'round'; g.lineCap = 'round'; g.lineWidth = 2; g.strokeStyle = C.OUT; g.beginPath();
-  if (L && L.y > b.y && L.y + 1 > top) { g.moveTo(b.x + 1, top - 1); g.lineTo(b.x + 1, L.y + 1); }
-  if (N && N.y > b.y && N.y + 1 > top) { g.moveTo(b.x + b.w - 1, top - 1); g.lineTo(b.x + b.w - 1, N.y + 1); }
   if (!L) { g.moveTo(b.x, top - 1); g.lineTo(b.x, _lxStairUnderY(c, b.x)); }
   if (!N) { g.moveTo(b.x + b.w, top - 1); g.lineTo(b.x + b.w, _lxStairUnderY(c, b.x + b.w)); }
   g.stroke();
@@ -24581,6 +24579,28 @@ function _lxStairUnderDraw(tint) {
     const t = _lxStairUnderTile(c, k, P);
     ctx.drawImage(t.cv, t.x - cam, t.y, t.w, t.h);
   }
+  _lxStairProfileDraw(chains, P, cam, camY);
+}
+// v0.30.1590 stair-solid (per user: "the blackoutline needs to be neatly lining the stairs"). Each piece used to ink its own tread, its own
+// riser (a line 1 px inside its edge, baked in the cap) and the tile inked it again, so the outline broke and doubled at every step. Now
+// ONE path per flight walks the profile - along a tread top, straight up its riser at the seam, along the next tread - in the floor's
+// own keyline colour, painted over the pieces and their stringer tiles. Only what is on screen is stroked.
+function _lxStairProfileDraw(chains, P, cam, camY) {
+  const OUT = _mixHex(P.body, '#05030a', 0.62), X0 = -6, X1 = W + 6;
+  ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.lineWidth = 2; ctx.strokeStyle = OUT;
+  for (const c of chains) {
+    let open = false, prevY = 0;
+    ctx.beginPath();
+    for (let k = 0; k < c.ps.length; k++) {
+      const b = c.ps[k], xa = b.x - cam, xb = b.x + b.w - cam;
+      if (xb < X0 || xa > X1 || b.y + b.h + 60 < camY - 30 || b.y > camY + H + 30) { if (open) break; continue; }
+      if (!open) { ctx.moveTo(xa, b.y); open = true; }
+      else { ctx.lineTo(xa, prevY); ctx.lineTo(xa, b.y); }   // the riser: straight up (or down) at this piece's left edge
+      ctx.lineTo(xb, b.y); prevY = b.y;
+    }
+    if (open) ctx.stroke();
+  }
+  ctx.restore();
 }
 function _lxDrawRampFlat(r, tint) {   // the fallback when the lower piece has no bake: a plain cap band along the curve
   const cam = game.camera.x;
@@ -25445,6 +25465,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   // proud of a lower neighbour (bits 2-6 / 7-11) only that riser is outlined.
   const jl = ground && (variant & 1) ? 1 : 0, jr = ground && (variant & 2) ? 1 : 0;
   const eL = jl ? (variant >> 2) & 31 : 0, eR = jr ? (variant >> 7) & 31 : 0;
+  const _fl0 = ground && ((variant | 0) & 4096);   // v0.30.1590 stair-solid - a footless (stairUnder) piece: its riser keyline is the flight's profile line (_lxStairProfileDraw), not its own
   const xs = sx, xe = sx + w, ww = w, fx0 = jl ? xs - 1 : xs, fx1 = jr ? xe + 1 : xe;
   const inset = G.island ? 3 : 0, x0 = xs + inset, x1 = xe - inset, yb = y + G.faceH;
   const r = ground ? 4 : built ? 2 : Math.min(6, G.faceH / 2), bi = (built && !ground) ? 2 : 0;   // v0.30.1203 - a built slab is square-cut, its body tucked 2px under the lip
@@ -25484,8 +25505,8 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
     for (const t of tops) ctx.quadraticCurveTo(t[0], y - dip, t[1], y + dip);
     if (jr) ctx.moveTo(xe, y + cap); else { ctx.quadraticCurveTo(xe, y, xe, y + rr); ctx.lineTo(xe, y + cap + wrap); }
     _cuteEdgeDraw(ctx, xs, y + cap, segs, droop);
-    if (eL > 0) { ctx.moveTo(xs + 1, y + dip); ctx.lineTo(xs + 1, y + Math.min(eL, h) + 1); }   // v0.30.1455 - the whole riser (only a noGroundRamps map has one now)
-    if (eR > 0) { ctx.moveTo(xe - 1, y + dip); ctx.lineTo(xe - 1, y + Math.min(eR, h) + 1); }
+    if (eL > 0 && !_fl0) { ctx.moveTo(xs + 1, y + dip); ctx.lineTo(xs + 1, y + Math.min(eL, h) + 1); }   // v0.30.1455 - the whole riser (only a noGroundRamps map has one now)
+    if (eR > 0 && !_fl0) { ctx.moveTo(xe - 1, y + dip); ctx.lineTo(xe - 1, y + Math.min(eR, h) + 1); }
     ctx.stroke();
   };
   const grain = _cuteGrain(ctx), gox = Math.floor(rng() * 96), goy = Math.floor(rng() * 96);
@@ -25539,8 +25560,10 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   ctx.restore();
   ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; capStroke();
   // 4. over the edge, then 5. what stands on the surface (into the bake's top pad)
-  _cuteDroops(ctx, sx, y + cap, w, theme, rng, C, ground);
-  _cuteDecor(ctx, sx, y, w, theme, rng, C, ground);
+  if (!_footless) {   // v0.30.1590 stair-solid - a stair tread carries no studs or crystals: nothing sits on the line the hero walks
+    _cuteDroops(ctx, sx, y + cap, w, theme, rng, C, ground);
+    _cuteDecor(ctx, sx, y, w, theme, rng, C, ground);
+  }
   ctx.globalAlpha = _pa;
 }
 function _drawCutePlatform(sx, y, w, h, tint, ground, theme, variant) {
@@ -39355,6 +39378,7 @@ const MAPS = {
     stairMist: true,   // v0.30.1456 - cloud banks and a mist sea behind the climb, a faint haze in front (_lxStairMistDraw)
     stairUnder: true,   // v0.30.1455 - each flight's underside is one carved stringer, not a sawtooth of flat feet (_lxStairUnder, per user)
     noGroundRamps: true,   // v0.30.1455 - flat treads and square risers, each step eased (per user: "the stairs can be non-sloped")
+    solidRisers: true,   // v0.30.1590 stair-solid - a riser is a wall: the hero stops at its face and jumps onto the tread (checkPlatformCollision), per user: "the stairs should be like actual stairs whereby i will need to jump up"
     fixedLayout: true,
     bridge: true,
     taxiAccessible: true,
@@ -79786,6 +79810,7 @@ function checkPlatformCollision(entity) {
   // player are byte-identical.
   const _ledgeMinW = (entity !== player && !entity.zodiacSign && (entity.isBoss || entity.boss)) ? _lxBossLedgeW(entity) * _LX_BOSS_LEDGE_MIN_FRAC : 0;   // v0.30.1442 krook-ledge - the body
   const _rmp = (entity.vy >= 0 && typeof _lxRampAt === 'function') ? _lxRampAt(entity.x + entity.w / 2) : null;   // v0.30.1272 - a ground ramp under the feet (_lxGroundRamps)
+  const _solidRisers = entity === player && !!(game.mapData && game.mapData.solidRisers);   // v0.30.1590 stair-solid - the hero meets a riser as a wall, not a snap up the next tread
   for (const p of game.mapData.platforms) {
     if (entity.x + entity.w <= p.x || entity.x >= p.x + p.w) continue;
     if (_ledgeMinW && p.type !== 'ground' && p.w < _ledgeMinW) continue;   // v0.30.968 see _ledgeMinW
@@ -79795,6 +79820,12 @@ function checkPlatformCollision(entity) {
         // higher top's level down, so nothing is ever pulled through a floating platform)
         const _ft = entity.y + entity.h;
         if (_ft < p.y + p.h + 20 && (_ft > _rmp.y || (prevOnGround && _ft > _rmp.y - 12 && _ft >= _rmp.r.yHi - 1))) { entity.y = _rmp.y - entity.h; entity.vy = 0; entity.onGround = true; }
+      } else if (_solidRisers && entity.y + entity.h > p.y + 6 && entity.y + entity.h <= p.y + 36 && entity.y + entity.h - entity.vy > p.y + 3) {
+        // v0.30.1590 stair-solid - the feet are below this tread's top by more than a lip (6 px) and no deeper than one step (36 px), and were
+        // already below it a frame ago: a riser walked into (or jumped into from beside it). Stop at its face, on the side the hero's
+        // centre is on. A landing from above (feet were over the top a frame ago), a lip within 6 px and a hero set down inside the stone
+        // (a blink through several steps, a spawn: deeper than one step) keep the old snap onto the tread, so nobody is ever trapped.
+        entity.x = (entity.x + entity.w / 2 < p.x + p.w / 2) ? p.x - entity.w : p.x + p.w;
       } else if (entity.x + entity.w > p.x && entity.x < p.x + p.w &&
           entity.y + entity.h > p.y && entity.y + entity.h < p.y + p.h + 20 &&
           entity.vy >= 0) {
