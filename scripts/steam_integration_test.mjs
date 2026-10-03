@@ -235,6 +235,8 @@ try {
 
   // (E) RICH PRESENCE + JOIN GAME + INVITE + STATS (mock the bridge surface).
   const feat = await page.evaluate(async () => {
+    // bughunt relay-5: a relay other than the shipped default is asked about before a join; this suite joins wss://relay.example, so say yes
+    window.__confirms = []; window.confirm = (m) => { window.__confirms.push(String(m)); return true; };
     const rec = { presence: [], overlay: [], stats: [], connected: [] };
     window.SteamAPI = Object.assign(window.SteamAPI || {}, {
       available: true,
@@ -249,9 +251,14 @@ try {
     _lxSteamPresence(true);
     const solo = rec.presence[rec.presence.length - 1];
     // (E2) presence while connected -> group = party code + a connect string
+    // bughunt relay-5: the connect string names only the relay THIS player typed (or the default), never a relay a link handed them
+    try { localStorage.setItem(MP_URL_KEY, 'wss://relay.example'); } catch (e) {}
     if (net) { net.connected = true; net.baseRoom = 'wxyz9'; net._lastUrl = 'wss://relay.example'; net.peers = { 2: {} }; }
     _lxSteamPresence(true);
     const coop = rec.presence[rec.presence.length - 1];
+    net._lastUrl = 'wss://evil.example'; _lxSteamPresence(true);
+    const coopLinked = rec.presence[rec.presence.length - 1];
+    net._lastUrl = 'wss://relay.example';
     // (E3) invite button opens the overlay to friends
     const invited = _lxSteamInviteFriends();
     // (E4) stats push carries lifetime counters
@@ -261,8 +268,9 @@ try {
     game.bestiary = Object.assign({}, game.bestiary, { _boss_king: 1, _boss_mooma: 1 });
     _lxSteamPushStats();
     const stat = rec.stats[rec.stats.length - 1];
-    return { solo, coop, invited, invOverlay: rec.overlay[0], stat };
+    return { solo, coop, coopLinked, invited, invOverlay: rec.overlay[0], stat };
   });
+  ok('rich presence: the connect string advertises the relay the player typed, not one a link handed them (bughunt relay-5)', /relay\.example/.test(feat.coop.connect) && !/evil/.test(feat.coopLinked.connect) && /mojiworld-mp/.test(decodeURIComponent(feat.coopLinked.connect)), { typed: feat.coop.connect, linked: feat.coopLinked.connect });
   ok('rich presence: solo status, no party group', /Playing/.test(feat.solo.status) && feat.solo.group === '' && feat.solo.connect === '', feat.solo);
   ok('rich presence: co-op status + party GROUP + connect string', /co-op/.test(feat.coop.status) && feat.coop.group === 'WXYZ9' && /--moji-join=.*~WXYZ9/.test(feat.coop.connect), feat.coop);
   ok('Invite Friends opens the Steam overlay', feat.invited === true && feat.invOverlay === 'friends', feat);
@@ -279,6 +287,25 @@ try {
     return { calls };
   });
   ok('Join Game connect string auto-joins the correct party', join.calls.length === 1 && join.calls[0].url === 'wss://relay.example' && join.calls[0].room === 'ABC42', join);
+  // (F2) bughunt relay-5 - NEGATIVE CASES: the relay half of a connect string can be someone else's (argv, steam:// link, a friend's
+  // rich presence, lobby data). Only ws: / wss: are dialled; a host other than the default is asked about first, by name.
+  const joinNeg = await page.evaluate(async () => {
+    const calls = [], asked = []; let answer = true;
+    const orig = window.mpConnect, cf = window.confirm;
+    window.mpConnect = (url, name, room) => { calls.push({ url, room }); };
+    window.confirm = (m) => { asked.push(String(m)); return answer; };
+    const go = (relay, code) => { calls.length = 0; asked.length = 0; _lxSteamJoinDone = false; if (net) net.connected = false;
+      _lxSteamTryAutoJoin('--moji-join=' + encodeURIComponent(relay) + '~' + code); return { calls: calls.slice(), asked: asked.slice() }; };
+    const out = { https: go('https://evil.example', 'NEG01'), js: go('javascript:alert(1)', 'NEG02'), file: go('file:///etc/passwd', 'NEG03') };
+    answer = false; out.declined = go('wss://relay.example', 'NEG04');
+    answer = true; out.accepted = go('wss://relay.example', 'NEG05');
+    const def = (typeof MP_DEFAULT_URL === 'string') ? MP_DEFAULT_URL : ''; out.def = go(def, 'NEG06');
+    window.mpConnect = orig; window.confirm = cf; _lxSteamJoinDone = false;
+    return out;
+  });
+  ok('join refuses https: / javascript: / file: relays outright', [joinNeg.https, joinNeg.js, joinNeg.file].every((r) => r.calls.length === 0 && r.asked.length === 0), joinNeg);
+  ok('join to a custom relay asks first (naming the host); "no" does not connect, "yes" does', joinNeg.declined.calls.length === 0 && joinNeg.declined.asked.length === 1 && /relay\.example/.test(joinNeg.declined.asked[0]) && joinNeg.accepted.calls.length === 1 && joinNeg.accepted.calls[0].url === 'wss://relay.example', joinNeg);
+  ok('join to the default relay does not ask', joinNeg.def.calls.length === 1 && joinNeg.def.asked.length === 0, joinNeg.def);
 
   // (J) STEAM LOBBY — friend invites end to end: the party mirrors into a
   // lobby (code carrier), Invite uses the lobby dialog, and a resolved

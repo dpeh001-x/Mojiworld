@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1610';
+const GAME_VERSION = 'v0.30.1611';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52621,17 +52621,34 @@ try { window._lxSteamUnlock = _lxSteamUnlock; window._lxSteamSyncAchievements = 
 // Steam `connect` key makes "Join Game" appear on your friend entry; Steam then
 // launches the friend's copy with that string in argv, which main.js parses and
 // forwards as window.MOJI_JOIN -> the game auto-joins your party (see below).
+// v0.30.x bughunt relay-5 - WHICH RELAY A FRIEND IS SENT TO. net._lastUrl is wherever this client last dialled, including a relay
+// a friend's link handed it (--moji-join / steam:// / lobby data): re-advertising that spread one hostile relay from friend to
+// friend. A friend is now sent only the shipped default, or the server this player typed into the Multi box themselves.
+function _lxSteamAdvertisedRelay() {
+  try {
+    const cur = (net && net._lastUrl) || '';
+    const typed = (typeof MP_URL_KEY !== 'undefined') ? (localStorage.getItem(MP_URL_KEY) || '') : '';
+    if (cur && typed && cur === typed && /^wss?:\/\//i.test(cur)) return cur;
+  } catch (e) {}
+  return (typeof MP_DEFAULT_URL !== 'undefined' ? MP_DEFAULT_URL : '') || '';
+}
+// v0.30.x bughunt relay-7 - the channel rides the invite ("&ch=N") because the room id is code + "__ch" + N: a friend on another
+// channel is in another room. Channel 1 (the default) is left out of the Steam strings so a friend on an older build, which
+// strips everything but letters and digits from the code, still lands in the right room.
+function _lxSteamChannelPart() { try { const ch = (net && net.channel) | 0; return ch > 1 ? '&ch=' + ch : ''; } catch (e) { return ''; } }
 function _lxSteamConnectString() {
   try {
     if (!net || !net.connected || !net.baseRoom) return '';
-    const relay = net._lastUrl || MP_DEFAULT_URL || '';
-    return '--moji-join=' + encodeURIComponent(relay) + '~' + String(net.baseRoom).toUpperCase();
+    const relay = _lxSteamAdvertisedRelay();
+    // v0.30.x bughunt relay-7 - encoded, '~' too (encodeURIComponent leaves it, and it is the relay / code separator): a code with a space or a hyphen survives argv
+    const _enc = (x) => encodeURIComponent(x).replace(/~/g, '%7E');
+    return '--moji-join=' + _enc(relay) + '~' + _enc(String(net.baseRoom).toUpperCase()) + _lxSteamChannelPart();
   } catch (e) { return ''; }
 }
 let _lxSteamPresenceT = 0;
 let _lxSteamLobbyCode = '';   // party code currently mirrored into a Steam invite lobby
 function _lxSteamPartyRelay() {
-  try { return (net && net._lastUrl) || (typeof MP_DEFAULT_URL !== 'undefined' ? MP_DEFAULT_URL : '') || ''; } catch (e) { return ''; }
+  try { return _lxSteamAdvertisedRelay(); } catch (e) { return ''; }   // v0.30.x bughunt relay-5
 }
 // v0.29.258 — mirror the party into a Steam LOBBY (the friend-invite carrier;
 // lobby data = party_code + relay — play itself still runs on the WebSocket
@@ -52643,10 +52660,15 @@ function _lxSteamLobbySync() {
   try {
     if (!_steamAvailable() || !window.SteamAPI.lobby) return null;
     const L = window.SteamAPI.lobby;
-    const code = (net && net.connected && net.baseRoom) ? String(net.baseRoom).toUpperCase() : '';
+    const code = (net && net.connected && net.baseRoom) ? String(net.baseRoom).toUpperCase() + _lxSteamChannelPart() : '';   // v0.30.x bughunt relay-7 - the lobby carries the channel with the code ("CODE&ch=2"; nothing on channel 1)
     if (code && code !== _lxSteamLobbyCode) {
       _lxSteamLobbyCode = code;
-      return L.host({ code: code, relay: _lxSteamPartyRelay(), size: 8 });
+      // v0.30.x bughunt relay-8 - the code is marked as hosted BEFORE host() answers and host() swallows every failure (it
+      // resolves ''), so one failed createLobby left the code marked for good and the 6 s heartbeat never tried again.
+      let _hp = null;
+      try { _hp = L.host({ code: code, relay: _lxSteamPartyRelay(), size: 8 }); } catch (e) { if (_lxSteamLobbyCode === code) _lxSteamLobbyCode = ''; throw e; }
+      try { Promise.resolve(_hp).then((id) => { if (!id && _lxSteamLobbyCode === code) _lxSteamLobbyCode = ''; }, () => { if (_lxSteamLobbyCode === code) _lxSteamLobbyCode = ''; }); } catch (e) {}
+      return _hp;
     }
     if (!code && _lxSteamLobbyCode) { _lxSteamLobbyCode = ''; L.leave(); }
   } catch (e) {}
@@ -52709,9 +52731,12 @@ function _lxArmPendingJoin(relay, code) {
 function _lxWebTryAutoJoin() {
   try {
     if (_lxSteamJoinDone) return;        // v0.29.432 — a boot join already ran
-    const m = /[?&]join=([A-Za-z0-9]{1,12})/.exec(location.search || '');
+    // v0.30.x bughunt relay-7 - the whole code as the host typed it (the invite encodes it, up to 24 characters), not its first 12
+    // letters and digits: "dragon-party" used to land the friend in the room "dragon". &ch= names the host's channel.
+    const m = /[?&]join=([^&#]{1,200})/.exec(location.search || '');
     if (!m) return;
-    _lxSteamTryAutoJoin('~' + m[1]);
+    const _cm = /[?&]ch=(\d{1,3})/.exec(location.search || '');
+    _lxSteamTryAutoJoin('~' + m[1] + (_cm ? '&ch=' + _cm[1] : ''));
   } catch (e) {}
 }
 function _lxSteamTryAutoJoin(joinStr) {
@@ -52722,8 +52747,29 @@ function _lxSteamTryAutoJoin(joinStr) {
     const bar = s.indexOf('~');
     if (bar < 0) return;
     const relay = decodeURIComponent(s.slice(0, bar)) || MP_DEFAULT_URL;
-    const code = s.slice(bar + 1).replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 12);
+    // v0.30.x bughunt relay-5 - the relay half arrives from argv, a steam:// link, a friend's rich presence or lobby data: any of it
+    // can be someone else's. Only a ws: / wss: server is ever dialled, and any host but the shipped one is asked about first.
+    let _ru = null; try { _ru = new URL(relay); } catch (e) {}
+    if (!_ru || !/^wss?:$/.test(_ru.protocol)) { try { if (typeof showToast === 'function') showToast('That invite names a server the game will not use.'); } catch (e) {} return; }
+    // v0.30.x bughunt relay-7 - the code is rebuilt exactly as the host typed it: decoded, <> stripped, 24 characters (the host's box
+    // takes 24, and the room is kept as typed), NOT cut down to 12 letters and digits (a friend of "dragon-party" joined "dragon").
+    // "&ch=N" is the host's channel; none means the default channel, which is where a host who never switched channel is.
+    let _rest = s.slice(bar + 1), _ch = 1;
+    const _cm = /&ch=(\d{1,3})\s*$/i.exec(_rest);
+    if (_cm) { _ch = (typeof _clampChannel === 'function') ? _clampChannel(+_cm[1]) : (+_cm[1] || 1); _rest = _rest.slice(0, _cm.index); }
+    try { _rest = decodeURIComponent(_rest); } catch (e) {}
+    const code = _rest.replace(/[<>]/g, '').trim().slice(0, 24).toUpperCase();
     if (!code) return;
+    // a custom server only after the player says so, naming the host (it learns their name, class, map and address)
+    if (typeof player !== 'undefined' && player && player.cls) {
+      let _defHost = ''; try { _defHost = new URL(MP_DEFAULT_URL).host; } catch (e) {}
+      if (_ru.host !== _defHost) {
+        let _yes = false;
+        try { _yes = !!confirm('Join a party on a custom server (' + _ru.host + ')?\n\nOnly continue if you trust whoever sent this invite: a custom server sees your name, class and position.'); } catch (e) {}
+        if (!_yes) { _lxSteamJoinDone = true; return; }
+      }
+    }
+    try { if (typeof player !== 'undefined' && player) player.channel = _ch; localStorage.setItem(MP_CHANNEL_KEY, String(_ch)); } catch (e) {}
     // v0.29.258 — PREFILL the party-code UI + saved room BEFORE connecting, so
     // the invite's code survives even when the auto-join can't complete yet
     // (class select still up, relay hiccup): every co-op entry point — the
@@ -57900,12 +57946,13 @@ function _mpInviteText() {
   let link = '';
   try {
     if (location && /^https?:$/.test(location.protocol)) {
-      link = location.origin + location.pathname + '?join=' + encodeURIComponent(code);
+      link = location.origin + location.pathname + '?join=' + encodeURIComponent(code) + '&ch=' + (_clampChannel((net && net.channel) || 1));   // v0.30.x bughunt relay-7 - the channel is part of the room
     }
   } catch (e) {}
+  const _chn = _clampChannel((net && net.channel) || 1);
   return link
-    ? 'Join my Mojiworld party! Code: ' + code + '\n' + link
-    : 'Join my Mojiworld party! Open the game, hit Play Co-op and enter code: ' + code;
+    ? 'Join my Mojiworld party! Code: ' + code + (_chn > 1 ? ' (channel ' + _chn + ')' : '') + '\n' + link
+    : 'Join my Mojiworld party! Open the game, hit Play Co-op and enter code: ' + code + (_chn > 1 ? ' (channel ' + _chn + ', set in Multi > Advanced)' : '');
 }
 function _mpCopyInvite() {
   const txt = _mpInviteText();
@@ -58613,12 +58660,13 @@ const _coopKillRing = [];
 // empowered tier (up to x1.8); a boss gets 18 x (260 / its level), for the boss level floor and the Nightmare echo's lift.
 // Honest kills pay exactly as before.
 const LX_COOP_REWARD_K = 6;
+const LX_COOP_BOSS_REPAY_MS = 30000;   // v0.30.x bughunt coop-6 - the same boss (ladder key) is not paid twice inside this window
 const _lxCoopRewardSeen = new Map();   // uid -> what the guest's own table gives that monster (bounded, oldest out)
 function _lxCoopRewardNote(m) {
   if (!m || m.uid == null) return;
   _lxCoopRewardSeen.delete(m.uid);
   const lv = Math.max(1, (m.level | 0) || ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 1));
-  _lxCoopRewardSeen.set(m.uid, { tp: m.type, e: Math.max(0, +m.exp || 0), c: Math.max(0, +m.mojicoins || 0), boss: !!(m.isBoss || m.boss || m.zodiacBoss), lv });
+  _lxCoopRewardSeen.set(m.uid, { tp: m.type, e: Math.max(0, +m.exp || 0), c: Math.max(0, +m.mojicoins || 0), boss: !!(m.isBoss || m.boss || m.zodiacBoss), lv, zs: (typeof m.zodiacSign === 'string') ? m.zodiacSign.slice(0, 24) : '' });
   if (_lxCoopRewardSeen.size > 1024) _lxCoopRewardSeen.delete(_lxCoopRewardSeen.keys().next().value);
 }
 function _lxCoopRewardInfo(uid, m) {
@@ -58626,15 +58674,35 @@ function _lxCoopRewardInfo(uid, m) {
   if (!r && m && m._coopMirror) { _lxCoopRewardNote(m); r = _lxCoopRewardSeen.get(m.uid); }
   if (!r) return null;
   const k = r.boss ? 18 * Math.max(1, 260 / r.lv) : LX_COOP_REWARD_K;
-  return { tp: r.tp, capE: Math.ceil(Math.max(1, r.e) * k), capC: Math.ceil(Math.max(1, r.c) * k) };
+  return { tp: r.tp, capE: Math.ceil(Math.max(1, r.e) * k), capC: Math.ceil(Math.max(1, r.c) * k), boss: !!r.boss, lv: r.lv | 0, zs: r.zs || '' };   // v0.30.x bughunt coop-6 - boss / level / sign are MY record's, not the frame's
 }
-function _coopKillDup(uid) {                 // true if this kill uid was already applied
+function _coopKillDup(uid, from) {           // true if this kill uid was already applied
   if (uid == null) return false;            // no uid -> can't dedup; let it through (rare)
-  const key = +uid;
+  const key = String(from) + ':' + (+uid);   // v0.30.x bughunt coop-3 - uids are per-host-page counters: key them by WHO sent them too
   if (_coopKillSeen.has(key)) return true;
   _coopKillSeen.add(key); _coopKillRing.push(key);
   if (_coopKillRing.length > 256) _coopKillSeen.delete(_coopKillRing.shift());
   return false;
+}
+// v0.30.x bughunt coop-3 - forget the dedup memory of one sender (it left / joined: its uids start again), or of everyone
+// (a fresh welcome, or a new host). The rings are bounded either way; this only stops an old host's uids shadowing a new one's.
+function _coopDedupReset(from) {
+  try {
+    const pre = (from == null) ? null : String(from) + ':';
+    for (const pair of [[_coopKillSeen, _coopKillRing], [_coopDropSeen, _coopDropRing]]) {
+      const seen = pair[0], ring = pair[1];
+      if (pre === null) { seen.clear(); ring.length = 0; continue; }
+      for (let i = ring.length - 1; i >= 0; i--) if (ring[i].indexOf(pre) === 0) { seen.delete(ring[i]); ring.splice(i, 1); }
+    }
+  } catch (e) {}
+}
+// v0.30.x bughunt coop-1 - a uid on the wire is a finite number and nothing else: a string key ('__proto__') indexes the
+// mirror tables below as Object.prototype. v0.30.x bughunt coop-3 - and the counters that mint my own uids stay ahead of
+// every uid I adopted (a promoted host must not reissue one a partner still holds), within a sane range.
+function _coopUidOk(u) { return typeof u === 'number' && Number.isFinite(u); }
+function _coopUidBump(key, u) {
+  u = +u;
+  if (u > 0 && u < 1e9 && u > (game[key] | 0)) game[key] = u;
 }
 
 function _coopActive() {
@@ -58691,6 +58759,7 @@ function _coopRecomputeHost() {
       lowest = n; hostId = n;
     }
   }
+  if (net.hostId !== hostId) _coopDedupReset();   // v0.30.x bughunt coop-3 - a new host's uids start from its own counter
   net.hostId = hostId;
   const _wasHost = !!net.isHost;
   net.isHost = (hostId === +net.myId);
@@ -58821,6 +58890,7 @@ function _coopRecomputeKeyed() {
     host = first.length ? Math.min(...first) : Math.min(me, ...on);
   } else host = Math.min(me, ...on);                                                 // nobody runs it: the lowest id here
   const was = !!net.isHost;
+  if (net.hostId !== host) _coopDedupReset();   // v0.30.x bughunt coop-3 - a new runner's uids start from its own counter
   net.hostId = host;
   net.isHost = (host === me);
   net._authKey = net.isHost ? key : null;
@@ -58919,7 +58989,7 @@ function _coopDeltaOn() {   // at least one partner on my map, and every one of 
 function _coopMonFromArr(a) {
   const e = { u: a[0], x: a[1], y: a[2], vx: a[3], vy: a[4], f: a[5], h: a[6], _d: 1 };
   const ex = a[7];
-  if (ex && typeof ex === 'object') for (const k in ex) if (_COOP_MON_EX[k]) e[k] = ex[k];
+  if (ex && typeof ex === 'object') for (const k of Object.keys(ex)) if (_COOP_MON_EX[k] === 1) e[k] = ex[k];   // v0.30.x bughunt coop-1 - own keys, and ONLY the table's flags: '__proto__' / 'constructor' are truthy on a plain object
   return e;
 }
 // How long a hit I sent may still be missing from the host's frames: my batch + the trip there + the host's next
@@ -59033,11 +59103,14 @@ function _coopActionFlush(force) {
 //   - an fx that rides the caster (follow === player) rides the caster's avatar on the other screens.
 const COOP_FX_CAP = 24;           // smooth fx per frame
 const COOP_PJ_CAP = 32;           // projectiles per frame
+const COOP_PEER_PJ_PER_SENDER = 160;   // v0.30.x bughunt coop-4 - live partner-projectile copies one sender may hold on my screen
+const COOP_PEER_PJ_LIFE = 360;         // frames; my longest real player shot lives 250
+const COOP_PEER_PJ_SIZE = 260;         // px; my widest real player shot is 220
 const COOP_FX_TYPES = { slash: 1, stab: 1, explosion: 1, beam: 1, bolt: 1, impact: 1, spriteBurst: 1, kanji: 1, rainbowStair: 1 };
 const _COOP_STR_OK = /^[\w #.,()%:+\-\/]{0,40}$/;
 function _coopWireObj(o) {
   const w = {}; let n = 0;
-  for (const k in o) {
+  for (const k of Object.keys(o)) {   // v0.30.x bughunt coop-1 - own keys only: a polluted prototype must not ride out on my own frames
     if (k.charCodeAt(0) === 95) continue;                      // _private: bookkeeping, caches, entity refs
     const v = o[k], t = typeof v;
     if (t === 'number') { if (Number.isFinite(v)) w[k] = Math.round(v * 100) / 100; }
@@ -59050,7 +59123,7 @@ function _coopWireObj(o) {
 function _coopCleanObj(e) {
   if (!e || typeof e !== 'object') return null;
   const c = {}; let n = 0;
-  for (const k in e) {
+  for (const k of Object.keys(e)) {   // v0.30.x bughunt coop-1 - the wire object's own keys only
     if (!/^[A-Za-z][A-Za-z0-9]{0,23}$/.test(k)) continue;
     const v = e[k], t = typeof v;
     if (t === 'number') { if (Number.isFinite(v) && Math.abs(v) < 1e7) c[k] = v; }
@@ -59120,7 +59193,7 @@ function _coopApplyFx(msg) {
     let follow = null;
     for (const e of msg.fx.slice(0, COOP_FX_CAP)) {
       const c = _coopCleanObj(e);
-      if (!c || !COOP_FX_TYPES[c.type]) continue;
+      if (!c || COOP_FX_TYPES[c.type] !== 1) continue;   // v0.30.x bughunt coop-1 - the table's own types only ('__proto__' / 'constructor' are truthy on a plain object)
       c.life = Math.max(1, Math.min(600, +c.life || 1)); c.maxLife = Math.max(c.life, Math.min(600, +c.maxLife || c.life));
       if (c.fw) {   // rides the caster: follow their avatar where I draw it
         follow = follow || { w: 28, h: 44, get x() { return (peer._rx != null) ? peer._rx : (peer.x || 0); }, get y() { return (peer._ry != null) ? peer._ry : (peer.y || 0); } };
@@ -59134,11 +59207,14 @@ function _coopApplyFx(msg) {
     for (const e of msg.pj.slice(0, COOP_PJ_CAP)) {
       const c = _coopCleanObj(e);
       if (!c) continue;
-      c.life = Math.max(1, Math.min(900, +c.life || 1));
-      c.vx = +c.vx || 0; c.vy = +c.vy || 0; c.w = Math.max(2, Math.min(400, +c.w || 12)); c.h = Math.max(2, Math.min(400, +c.h || 12));
-      c.owner = 'peer'; c.damage = 0; c._peerFx = 1; c._fxSeen = 1;
+      c.life = Math.max(1, Math.min(COOP_PEER_PJ_LIFE, +c.life || 1));   // v0.30.x bughunt coop-4 - was 900 / 400: no real shot of mine outlives 250 frames or spans 220 px
+      c.vx = +c.vx || 0; c.vy = +c.vy || 0; c.w = Math.max(2, Math.min(COOP_PEER_PJ_SIZE, +c.w || 12)); c.h = Math.max(2, Math.min(COOP_PEER_PJ_SIZE, +c.h || 12));
+      c.owner = 'peer'; c.damage = 0; c._peerFx = 1; c._fxSeen = 1; c._peerFrom = msg.id;
       game.projectiles.push(c);
     }
+    // v0.30.x bughunt coop-4 - ONE SENDER MAY HOLD ONLY SO MANY OF MY PROJECTILES. 32 a frame x 30 frames a second x a life of 900
+    // was ~14,000 live copies on every screen from any room member; the oldest of this sender's go first (a partner sends <= 120).
+    { let _nPj = 0; for (let i = game.projectiles.length - 1; i >= 0; i--) { const _q = game.projectiles[i]; if (_q && _q._peerFrom === msg.id && ++_nPj > COOP_PEER_PJ_PER_SENDER) game.projectiles.splice(i, 1); } }
   }
 }
 // SKILL POSES. The hero renderer strikes a pose for a skill while a game-time window is open on the player
@@ -59389,13 +59465,13 @@ function _coopApplyProjectiles(msg) {
   if (msg.map !== game.currentMap) return;
   const incoming = (msg.list || []).slice(0, COOP_PROJ_CAP);
   const seen = new Set();
-  const byUid = {};
+  const byUid = Object.create(null);   // v0.30.x bughunt coop-1 - never a plain {}: a wire uid of '__proto__' is Object.prototype there
   for (const p of game.projectiles) if (p && p._coopMirror && p._puid != null) byUid[p._puid] = p;
   for (const e of incoming) {
-    if (!e || e.u == null || !Number.isFinite(+e.x) || !Number.isFinite(+e.y)) continue;
+    if (!e || !_coopUidOk(e.u) || !Number.isFinite(+e.x) || !Number.isFinite(+e.y)) continue;
     seen.add(e.u);
     let p = byUid[e.u];
-    if (!p) { p = { _coopMirror: true, _puid: e.u, owner: 'enemy' }; game.projectiles.push(p); }
+    if (!p) { p = { _coopMirror: true, _puid: e.u, owner: 'enemy' }; game.projectiles.push(p); _coopUidBump('_projUid', e.u); }
     p.x = +e.x; p.y = +e.y; p.vx = +e.vx || 0; p.vy = +e.vy || 0;
     p.w = +e.w || 12; p.h = +e.h || 12; p.life = +e.l || 60;
     p.damage = +e.d || 0; p.skill = e.s || 'mbolt'; p.color = e.c || '#ff6688';
@@ -59513,19 +59589,19 @@ function _coopApplyHazards(msg) {
   if (msg.map !== game.currentMap) return;
   const incoming = (msg.list || []).slice(0, COOP_PROJ_CAP);
   const seen = new Set();
-  const byUid = {};
+  const byUid = Object.create(null);   // v0.30.x bughunt coop-1 - see _coopApplyProjectiles
   for (const h of game.hazards) if (h && h._coopMirror && h._huid != null) byUid[h._huid] = h;
   // v0.30.x coop-ohko — a copy that ran out HERE (resolved, or expired) while the host still lists it must not come back
   // and resolve a second time: remember it for a few seconds.
-  const _gone = net._coopHzGone || (net._coopHzGone = {}), _gnow = performance.now();
+  const _gone = net._coopHzGone || (net._coopHzGone = Object.create(null)), _gnow = performance.now();
   if (net._coopHzPrev) for (const _u in net._coopHzPrev) { const _ph = net._coopHzPrev[_u]; if (!byUid[_u] && _ph && (_ph.life | 0) <= 8) _gone[_u] = _gnow; }
   for (const _u in _gone) if (_gnow - _gone[_u] > 5000) delete _gone[_u];
   for (const e of incoming) {
-    if (!e || e.u == null) continue;
+    if (!e || !_coopUidOk(e.u)) continue;
     seen.add(e.u);
     let h = byUid[e.u];
     if (!h && _gone[e.u]) continue;
-    if (!h) { h = { _coopMirror: true, _huid: e.u, owner: 'enemy' }; h.maxLife = +e.ml || +e.l || 60; game.hazards.push(h); byUid[e.u] = h; }
+    if (!h) { h = { _coopMirror: true, _huid: e.u, owner: 'enemy' }; h.maxLife = +e.ml || +e.l || 60; game.hazards.push(h); byUid[e.u] = h; _coopUidBump('_hazUid', e.u); }
     h.type = e.t; h.x = +e.x || 0; h.y = +e.y || 0;
     if (e.cx !== undefined) h.cx = +e.cx; if (e.cy !== undefined) h.cy = +e.cy;
     h.w = +e.w || 0; h.h = +e.h || 0; h.radius = +e.r || 0; h.life = +e.l;
@@ -59543,7 +59619,7 @@ function _coopApplyHazards(msg) {
     const h = game.hazards[i];
     if (h && h._coopMirror && h._huid != null && !seen.has(h._huid) && !h._coopDet) game.hazards.splice(i, 1);
   }
-  const _prev = net._coopHzPrev = {};
+  const _prev = net._coopHzPrev = Object.create(null);
   for (const h of game.hazards) if (h && h._coopMirror && h._huid != null) _prev[h._huid] = h;
 }
 // NON-HOST: apply an inbound hazard DETONATION (meteor strike zone) to the local
@@ -60539,9 +60615,9 @@ function _coopAddPing(x, y, name, mine) {
 // Drop-frame idempotency (a relay may redeliver a 'drop'); ignore repeats by uid.
 const _coopDropSeen = new Set();
 const _coopDropRing = [];
-function _coopDropDup(uid) {
+function _coopDropDup(uid, from) {
   if (uid == null) return false;
-  const key = +uid;
+  const key = String(from) + ':' + (+uid);   // v0.30.x bughunt coop-3 - keyed by sender too, like the kill ring
   if (_coopDropSeen.has(key)) return true;
   _coopDropSeen.add(key); _coopDropRing.push(key);
   if (_coopDropRing.length > 256) _coopDropSeen.delete(_coopDropRing.shift());
@@ -60555,7 +60631,8 @@ function _coopApplyDrop(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
   if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed
   if (!_coopFollowingHost()) return;
-  if (_coopDropDup(msg.u)) return;
+  if (_coopDropDup(msg.u, msg.id)) return;
+  _coopUidBump('_dropUid', msg.u);   // v0.30.x bughunt coop-3 - a promoted host's first drops must not reuse a uid a partner already holds
   if (msg.k === 'item' && msg.it && typeof msg.it === 'object') {
     if (!game.drops) game.drops = [];
     // v0.27.24 — SECURITY: scrub the host-supplied item's string fields
@@ -60593,7 +60670,7 @@ function _coopApplyMonsters(msg) {
   if (msg.ak && net.myId != null && msg.ak[net.myId] != null) { net._hitAck = +msg.ak[net.myId] || 0; net._ackHost = net.hostId; }   // v0.30.829
   const incoming = (msg.list || []).slice(0, COOP_MON_CAP).map((_e0) => Array.isArray(_e0) ? _coopMonFromArr(_e0) : _e0);   // clamp to the promised bound (payload-flood guard); v0.30.827 - light entries are arrays
   const seen = new Set();
-  const byUid = {};
+  const byUid = Object.create(null);   // v0.30.x bughunt coop-1 - see _coopApplyProjectiles
   // v0.27.0 fix (live 2-client test) — a follower holds ONLY the host's mirrors.
   // If this client spawned its own local monsters (it loaded the map before
   // presence told it the host was here, or it was playing solo then a host
@@ -60605,11 +60682,12 @@ function _coopApplyMonsters(msg) {
   }
   for (const m of game.monsters) if (m && m.uid != null && m._coopMirror) byUid[m.uid] = m;
   for (const e of incoming) {
-    if (!e || e.u == null || !Number.isFinite(+e.x) || !Number.isFinite(+e.y)) continue;
+    if (!e || !_coopUidOk(e.u) || !Number.isFinite(+e.x) || !Number.isFinite(+e.y)) continue;   // v0.30.x bughunt coop-1 - a uid is a number
     seen.add(e.u);
     let m = byUid[e.u];
     if (!m && e._d) continue;   // v0.30.827 - a light entry for a monster I have not met: its keyframe is at most half a second away
     if (!m) {
+      if (typeof e.t === 'string' && (e.t in monsterTypes) && !Object.prototype.hasOwnProperty.call(monsterTypes, e.t)) continue;   // v0.30.x bughunt coop-1 - '__proto__' / 'constructor' name no monster (a type this build merely lacks still mirrors as before)
       net._coopSpawning = true;   // bypass the non-host spawn-suppression for mirror creation
       net._coopForceAffix = (typeof e.ea === 'string' && e.ea) ? e.ea.slice(0, 12) : null;
       net._coopForceElite = (e.b === 3);   // v0.27.2 — b===3 means the host's monster is an Elite; force the mirror to the elite variant (matching name/size/atk/hitbox) instead of re-rolling the 3% chance locally.
@@ -60621,7 +60699,7 @@ function _coopApplyMonsters(msg) {
       // Keep our local uid counter ahead of every adopted uid, so if THIS client
       // is later promoted to host its next spawn can't collide with an inherited
       // mirror uid (host-handoff collision).
-      if (+e.u > (game._monUid | 0)) game._monUid = +e.u;
+      _coopUidBump('_monUid', e.u);   // v0.30.x bughunt coop-3 - the same bump, bounded (a 1e300 uid froze the counter: x + 1 === x)
       // First sight: land exactly on the snapshot (no ease-in from spawn point).
       m.x = +e.x; m.y = +e.y;
     }
@@ -60940,11 +61018,32 @@ function _lxPqDirectTick() {
 function _coopApplyKill(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
   if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed (no peer-forged / id-less kills/XP)
-  if (_coopKillDup(msg.u)) return;   // v0.27.1 — a redelivered kill frame must not re-award XP/coins
+  if (!_mpRateOk(msg.id, 'kill', 60)) return;   // v0.30.x bughunt coop-6 - on MY clock: the relay's own budget is 40 / s, so an honest host never reaches this
+  if (_coopKillDup(msg.u, msg.id)) return;   // v0.27.1 — a redelivered kill frame must not re-award XP/coins
   const m = (msg.u != null) ? _coopFindByUid(msg.u) : null;
   // v0.30.862 coop-trust - a kill of a monster I never mirrored, or of a different type, pays and counts nothing
   const _ri = _lxCoopRewardInfo(msg.u, m);
   if (!_ri || (msg.tp != null && String(msg.tp) !== String(_ri.tp))) return;
+  // v0.30.x bughunt coop-6 - WHAT KIND OF KILL IT WAS is MY record's to say, not the frame's. The frame's boss flag, level,
+  // zodiac sign and Duo Trial claim fed the Setshard payout raw: a host could call any mirrored mob a level-200 boss and pay
+  // 10,000 Setshards a frame under a fresh sign name each time. The frame keeps what it can honestly add (the EXP / coin
+  // numbers, capped above); the rest is rewritten here, so every later read of msg.b / bl / zs / dt sees what I can back.
+  if (msg.b || +msg.dt === 1) {
+    if (!_ri.boss) { msg.b = 0; msg.dt = 0; msg.bl = 0; msg.zs = ''; }
+    else {
+      msg.zs = _ri.zs || '';
+      const _bt = (typeof monsterTypes !== 'undefined' && monsterTypes[_ri.tp]) || null;
+      const _blCap = Math.max(_ri.lv | 0, (_bt && _bt.level) | 0, (m && m.level) | 0, (typeof player !== 'undefined' && player && player.level) | 0);   // the Conductor's level is stamped at runtime: the live mirror's counts
+      if (+msg.bl > _blCap) msg.bl = _blCap;
+      // an honest boss comes back no sooner than minutes: the same boss (key) paying out twice inside 30 s is a hostile host
+      if (msg.b && !msg.il && !+msg.ec && !+msg.ex && !+msg.tw && +msg.bx !== 1) {
+        const _bk = msg.zs ? ('zodiac_' + msg.zs) : (String(_ri.tp).slice(0, 48) + '@' + game.currentMap), _bn = Date.now();
+        const _bp = net._bossPaid || (net._bossPaid = Object.create(null));
+        if (_bn - (_bp[_bk] || 0) < LX_COOP_BOSS_REPAY_MS) { msg.b = 0; msg.dt = 0; }
+        else _bp[_bk] = _bn;
+      }
+    }
+  }
   // XP: scale the host's base exp by THIS peer's own non-party multipliers,
   // including the global xpCurveMul (1.35) the host applies (was omitted -> ~26%
   // short). Combo/prestige stay host-side (those are the host's; not networked).
@@ -61188,6 +61287,7 @@ function _mpRateOk(id, kind, perSec) {
 }
 function _mpHandle(msg) {
   if (!msg || typeof msg !== 'object') return;   // v0.27.0 — a malformed/JSON-null relay frame must not throw on switch(msg.t)
+  if (msg.id != null && typeof msg.id !== 'number' && (String(msg.id) in Object.prototype)) return;   // v0.30.x bughunt coop-1 - the relay stamps a small integer; an id that names an Object.prototype member ('__proto__', 'constructor') would index net.peers as that member
   if (typeof _coopNoteFrame === 'function' && !_coopNoteFrame(msg)) return;   // v0.30.1443 coop-keyed - whose world is this frame from, and who runs which map
   switch (msg.t) {
     case 'mon':   // v0.27.0 host monster state (non-host mirrors); v0.30.823 - its projectiles, hazards and fx ride along
@@ -61298,6 +61398,7 @@ function _mpHandle(msg) {
       net._reconnectTries = 0;   // v0.30.834 - joined for real: the next drop starts its backoff from 1 s again
       net.roomId = String(msg.room || net.roomId || '').replace(/[<>]/g, '').slice(0, 64);   // v0.26.1029 — scrub at ingestion; roomId feeds an innerHTML log sink (XSS from a hostile/MITM relay)
       net.peers = {};
+      _coopDedupReset();   // v0.30.x bughunt coop-3 - a fresh room: nothing I applied before binds what these hosts send
       for (const p of (msg.players || [])) net.peers[p.id] = { ..._mpScrubStrings(p), _last: performance.now() };
       _coopRecomputeHost();   // v0.27.0 — decide host the moment we know the roster
       _mpPushLog(`Joined room "${escapeHtml(net.roomId)}" · ${Object.keys(net.peers).length} other player(s)`, 'sys');   // v0.29.372 — escape at the innerHTML sink
@@ -61329,6 +61430,7 @@ function _mpHandle(msg) {
       if (!net.peers[msg.id] && Object.keys(net.peers).length >= MP_MAX_PEERS) break;   // v0.26.1033 — peer-flood cap
       net.peers[msg.id] = { ..._mpScrubStrings(msg), _last: performance.now() };
       net._lastLookSyncAt = 0;   // v0.30.823 - tell the newcomer what I can read (cap) on the very next tick
+      _coopDedupReset(msg.id);   // v0.30.x bughunt coop-3 - a newcomer's uids start from nothing, whoever held the id before
       _coopRecomputeHost();   // v0.27.0 — a lower-id peer joining can hand off host
       _mpPushLog(`${escapeHtml(msg.name || 'Someone')} joined.`, 'sys');
       _mpRenderPlayerList();
@@ -61336,6 +61438,7 @@ function _mpHandle(msg) {
     case 'left': {
       const p = net.peers[msg.id];
       delete net.peers[msg.id];
+      _coopDedupReset(msg.id);   // v0.30.x bughunt coop-3 - what that sender had applied no longer shadows a later one
       _coopRecomputeHost();   // v0.27.0 — if the host left, the next-lowest id takes over
       if (p) _mpPushLog(`${escapeHtml(p.name || 'Someone')} left.`, 'sys');
       _mpRenderPlayerList();
@@ -80671,8 +80774,9 @@ function updatePlayer(dt) {
       player._warlordEnrageUntil = 0;
       if (player.skillCooldowns && typeof SKILLS !== 'undefined' && SKILLS.warlord_ult) player.skillCooldowns.warlord_ult = player._wobFullCd || _skillRealCd('warlord_ult');   // v0.30.1035 - was the raw table cd
     }
-    if (typeof _LX_DE_WINDOWS !== 'undefined') for (const _dwId in _LX_DE_WINDOWS) {
+    if (typeof _LX_DE_WINDOWS !== 'undefined') for (const _dwId of Object.keys(_LX_DE_WINDOWS)) {   // v0.30.x bughunt runtime-1 - own keys: a polluted Object.prototype can never reach this per-frame loop (a null `_dw` threw 120 frames running)
       const _dw = _LX_DE_WINDOWS[_dwId];
+      if (!_dw) continue;
       if ((player[_dw.until] || 0) > 0 && _lxDeNow() >= player[_dw.until]) {
         player[_dw.until] = 0;
         const _rc = player._deRealCd && player._deRealCd[_dwId];
@@ -113880,6 +113984,7 @@ const LX_BURN_TICK_MAXHP_PCT_BOSS = 0.001;
 // Tighter on mobile because each draw + AABB test compounds; the
 // `mobile` figure assumes a 4 × 16 ms budget for projectile work.
 const MAX_ENEMY_PROJECTILES  = _IS_MOBILE_AT_LOAD ? 40 : 90;
+const MAX_PEER_PROJECTILES   = _IS_MOBILE_AT_LOAD ? 120 : 240;   // v0.30.x bughunt coop-4 - partners' projectile COPIES (pictures, no damage), all senders together
 
 // v0.30.x - COMBAT-GRADUATED (per user: "in boss fights and fights with
 // multiple monsters, cap the particles and reduce lag without affecting
@@ -114496,6 +114601,20 @@ function _trimVisualQueues() {
       const keep = [];
       for (const p of game.projectiles) {
         if (p.owner === 'enemy' && toDrop > 0) { toDrop--; continue; }
+        keep.push(p);
+      }
+      game.projectiles = keep;
+    }
+  }
+  // v0.30.x bughunt coop-4 - the same ceiling for a partner's projectile copies, which no cap above counted (oldest first)
+  if (game.projectiles && game.projectiles.length > MAX_PEER_PROJECTILES) {
+    let cnt = 0;
+    for (const p of game.projectiles) if (p.owner === 'peer') cnt++;
+    if (cnt > MAX_PEER_PROJECTILES) {
+      let toDrop = cnt - MAX_PEER_PROJECTILES;
+      const keep = [];
+      for (const p of game.projectiles) {
+        if (p.owner === 'peer' && toDrop > 0) { toDrop--; continue; }
         keep.push(p);
       }
       game.projectiles = keep;

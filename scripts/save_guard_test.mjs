@@ -110,6 +110,7 @@ const res = await page.evaluate(async () => {
   const mirror = (u, tp) => { if (_coopFindByUid(u)) return; const m = spawnMonster(700, 300, tp, true, false); if (m) { m.uid = u; m._coopMirror = true; } };
   const send = (u, extra) => {
     mirror(u, (extra && extra.tp) || 'kingKrook');
+    net._bossPaid = null;   // bughunt coop-6: the same boss is not paid twice inside 30 s (checked in bughunt_coop_trust_test); these kills come back to back to read the LADDER, so forget the clock
     const before = player.setshards | 0;
     _coopApplyKill(Object.assign({ t: 'kill', id: 1, u, e: 0, c: 0, x: 700, y: 300, map: game.currentMap, tp: 'kingKrook', b: 1, bl: 50 }, extra || {}));
     return (player.setshards | 0) - before;
