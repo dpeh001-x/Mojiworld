@@ -79,7 +79,9 @@ const r = await page.evaluate(() => {
       const m = html.match(new RegExp('>' + label + '<[\\s\\S]{0,400}?\\+([0-9.]+)'));
       return m ? parseFloat(m[1]) : null;
     };
-    out.preview = { atkDelta: grab('ATK'), defDelta: grab('DEF') };
+    // since v0.30.1599 a weapon's ATK has its own tier row (and pays the weapon's 0.85), so each delta is divided by what
+    // scales it; the steps are then the only difference left between the two rows
+    out.preview = { atkDelta: grab('ATK'), defDelta: grab('DEF'), atkScale: _tierStatMul(w, 'atk', 'weapon') * LX_WEAPON_ATK_MUL, defScale: _tierStatMul(w, 'def', 'weapon') };
   } catch (e) { out.previewErr = String(e).slice(0, 120); }
   player.equipped = { weapon: null, armor: null, accessory: null };
   refreshGearCache();
@@ -118,8 +120,8 @@ ok('the SAME stat grows differently by slot - the only variable is the slot',
     def_armor_vs_weapon: [G.armor && G.armor.def, G.weapon && G.weapon.def] });
 ok('the forge shows the player the steeper curve, not the flat one',
   r.preview && r.preview.atkDelta > 0 && r.preview.defDelta > 0
-  && r.preview.atkDelta > r.preview.defDelta * 1.2,
-  { atkDelta: r.preview && r.preview.atkDelta, defDelta: r.preview && r.preview.defDelta, err: r.previewErr });
+  && r.preview.atkDelta / r.preview.atkScale > (r.preview.defDelta / r.preview.defScale) * 1.2,
+  { atkDelta: r.preview && r.preview.atkDelta, defDelta: r.preview && r.preview.defDelta, atkScale: r.preview && r.preview.atkScale, defScale: r.preview && r.preview.defScale, err: r.previewErr });
 // v0.30.430 — per user "increase the cost of enhancement": the -15% ladder (0.85 x OLD_COSTS) went x1.5, so every
 // rung is now 1.275 x the v0.26.447 price and a full run costs 190,930 (was 127,035 after the -15%, 149,400 before it).
 ok('every rung of the cost ladder is 1.5x the -15% ladder (1.275x the v0.26.447 price, rounded)',
