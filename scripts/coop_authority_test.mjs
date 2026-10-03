@@ -78,10 +78,16 @@ const r = await page.evaluate(() => {
     out.unwardedDrop = hp0 - m.currentHp;
 
     // 2) the guest's affix procs arrive in the packet and are applied by the host
-    m.freezeTimer = 0; m.stunTimer = 0;
+    // v0.30.1618 bughunt combat-1: the host judges a guest's freeze / stun under the boss rules - a plain mob takes both whole,
+    // a boss is freeze-immune and its stun becomes a slow (a direct pin used to halt its signature attacks)
+    const _bf = { boss: m.boss, zb: m.zodiacBoss, mb: m.isMiniBoss };
+    m.isBoss = false; m.boss = false; m.zodiacBoss = false; m.isMiniBoss = false; m.freezeTimer = 0; m.stunTimer = 0;
     _coopHostApplyDamage(777, 10, false, 'slash', { fz: 900, st: 400 });
     out.freezeApplied = (m.freezeTimer | 0) >= 900;
     out.stunApplied = (m.stunTimer | 0) >= 400;
+    m.isBoss = true; m.boss = _bf.boss; m.zodiacBoss = _bf.zb; m.isMiniBoss = _bf.mb; m.freezeTimer = 0; m.stunTimer = 0; m._lxSlowT = 0;
+    _coopHostApplyDamage(777, 10, false, 'slash', { fz: 900, st: 400 });
+    out.bossFreezeImmune = (m.freezeTimer | 0) === 0 && (m.stunTimer | 0) === 0 && (m._lxSlowT | 0) >= 400;
     out.procHelper = (typeof _lxOnHitProcs === 'function');
     if (out.procHelper) { m.stunTimer = 0; const pr = _lxOnHitProcs(m, 100, 'power'); out.powerStuns = !!(pr && pr.st >= 400); }
 
@@ -118,6 +124,7 @@ const checks = [
   ['...and the guest\'s hit feeds the break gauge', r.gaugeFed === true],
   ['an unwarded boss still takes the full hit', r.unwardedDrop === 5000, 'dropped ' + r.unwardedDrop],
   ['a guest\'s freeze and stun procs land through the packet', r.freezeApplied === true && r.stunApplied === true],
+  ['...but a boss is freeze-immune and its stun is a slow, the same rule as solo (combat-1)', r.bossFreezeImmune === true],
   ['the lifted proc helper exists and Power Strike stuns', r.procHelper === true && r.powerStuns === true],
   ['a partner downed on ANOTHER map does not fail the Duo Trial', r.failedCrossMap === false],
   ['...but a partner downed on THIS map still does', r.failedSameMap === true],
