@@ -14,7 +14,7 @@ const PORT = Number(process.argv[2] || process.env.PORT || 10447);
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  ' + JSON.stringify(x).slice(0, 400) : '')); };
 const game = readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8');
 ok('[1] the Verge rolls him on every visit, on the ground', /\{ type: 'blightElder', count: 1, spawnChance: 1, ground: true \}/.test(game));
-ok('[1] spawnFromMap honours a ground entry: no perch roll for it', game.includes('ground: !!r.s.ground }') && game.includes('} else if (platList.length && !(opts && opts.ground) && Math.random() < 0.6) {'));
+ok('[1] spawnFromMap honours a ground entry: no perch roll for it', game.includes('ground: !!r.s.ground }') && game.includes('} else if (platList.length && !(opts && opts.ground) && Math.random() < 0.6'));
 ok('[1] the roster cap never seats a gated elite past its count (the split gave two Blight Elders on 2.8% of loads)', game.includes('r.count = r.s.spawnChance != null ? Math.min(r.count, _seat.get(r) || 0) : (_seat.get(r) || 0);'));
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT }); await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
