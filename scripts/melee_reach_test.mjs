@@ -18,7 +18,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 // reach beyond the box edge (range - w/2) at 2da338dc, the last build before the boxes grew
 const GOLDEN = { scorpion: 67, mummy: 81.5, nougatBear: 78, thornmaw: 76, elderbark: 75, forgewight: 75, smithgolem: 72,
   shardlich: 84, blightElder: 85, ossuaryTyrant: 105, tombKeeper: 104, echoKnight: 95, blockPopo: 57.5, blockHupo: 77.5,
-  blockEle: 63, blockGary: 77.5, blockTigreal: 94, taiger: 91, lady_honk: 133, willeo: 141,   // v0.30.1549: the reaches the mirror's copies of Kuro and the Taxi Uncle had
+  blockEle: 63, blockGary: 77.5, blockTigreal: 94, taiger: 91, willeo: 141,   // v0.30.1549: the reaches the mirror's copies of Kuro and the Taxi Uncle had
   young_confused_barnaby: 115, fatDragon: 65, sundered_smith: 100, goblinMauler: 85, boneGolem: 95, graveReaver: 110,
   towerArbiter: 290, towerSovereign: 72.5, legosaurus: 68 };
 
@@ -43,7 +43,7 @@ ok('each swinger reaches exactly as far beyond its box edge as before the boxes 
 // (arcW/2 - w/2) shrank with every box that grew, exactly as the trigger's did - and nothing carried it over (Blight
 // Elder's shock reached 10 px past a 240 px box while he started it from 119). Golden: 2da338dc again.
 const SMASH_GOLDEN = { elderbark: 65, forgewight: 55, blightElder: 65, tombKeeper: 104, blockEle: 48, blockTigreal: 69,
-  lady_honk: 113, boneGolem: 75 };
+  boneGolem: 75 };   // lady_honk left: a bowmaster since v0.30.1582, no smash
 const smashers = Object.keys(found).filter((t) => found[t].kind === 'smash'); const sOff = [];
 for (const t of smashers) { const reach = found[t].arcW / 2 - found[t].w / 2;
   if (!(t in SMASH_GOLDEN) || Math.abs(reach - SMASH_GOLDEN[t]) > 1.01) sOff.push(t + ': shock reaches ' + reach + ' past the edge vs golden ' + SMASH_GOLDEN[t] + ' (w ' + found[t].w + ', arcW ' + found[t].arcW + ')'); }

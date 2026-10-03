@@ -44,7 +44,7 @@ const r = await page.evaluate(async (OWN) => {
     const was = (() => { const t = monsterTypes[type], keep = t.shoot; t.shoot = 'mdark'; const x = fire(type); t.shoot = keep; return x; })();   // the same mob on the orb, for a like-for-like flight check
     out.mobs[type] = { own, was };
   }
-  for (const t of ['wraith', 'boneWraith', 'harea']) out.others[t] = monsterTypes[t] && monsterTypes[t].shoot;
+  for (const t of ['wraith', 'boneWraith']) out.others[t] = monsterTypes[t] && monsterTypes[t].shoot;
   // art: still, loop, cast aura
   const keys = Object.values(OWN);
   for (const k of keys) { _projAnimFrame(k); _lxMobProjReady(LX_MOB_PROJ[k]); }

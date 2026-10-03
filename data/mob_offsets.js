@@ -97,7 +97,7 @@ window.LX_MOB_SCALE_DATA = {
   "clownfish": 0.874,
   "conductorMech": 1.22,
   "cosmicMochi": 0.978,
-  "taiger": 0.749,   // v0.30.1549 distorted-mirror: canvas drawn 112.3 px for a 100 px figure
+  "taiger": 0.797,   // v0.30.1582 redrawn: the new canvas kept at the old 100 px figure
   "echoKnight": 0.633,
   "emberling": 0.861,
   "expressTicketMech": 0.956,
@@ -145,7 +145,7 @@ window.LX_MOB_SCALE_DATA = {
   "forgewight": 0.695,   // v0.30.420 - box grown to the art; draw compensated
   "goblinMauler": 0.761,   // v0.30.420 - box grown to the art; draw compensated
   "fatDragon": 0.629,   // v0.30.420 - box grown to the art; draw compensated
-  "harea": 0.743,   // v0.30.1549 distorted-mirror: canvas drawn 118.2 px for a 106 px figure
+  "harea": 0.812,   // v0.30.1582 redrawn: the new canvas kept at the old 106 px figure
   "vigil_vermillion": 0.741,   // v0.30.420 - box grown to the art; draw compensated
   "young_bloodthirsty_vermillion": 0.74,   // v0.30.420 - box grown to the art; draw compensated
   "seahorse": 0.773,   // v0.30.420 - box grown to the art; draw compensated
@@ -155,7 +155,7 @@ window.LX_MOB_SCALE_DATA = {
   "jellyfish": 0.733,   // v0.30.420 - box grown to the art; draw compensated
   "blockRhirhi": 0.841,
   "boneGolem": 0.905,
-  "lady_honk": 0.741,   // v0.30.1549 distorted-mirror: canvas drawn 97.8 px for a 88 px figure
+  "lady_honk": 0.869,   // v0.30.1582 redrawn: the new canvas kept at the old 88 px figure
   "mummy": 0.878,   // v0.30.420 - box grown to the art; draw compensated
   "gummy": 0.944,   // v0.30.420 - box grown to the art; draw compensated
   "lanternWisp": 0.886,   // v0.30.420 - box grown to the art; draw compensated
