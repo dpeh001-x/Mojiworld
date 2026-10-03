@@ -85,17 +85,23 @@ CREATE INDEX IF NOT EXISTS idx_accounts_created
 
 const SCRYPT_N = 16384, SCRYPT_R = 8, SCRYPT_P = 1, SCRYPT_KEYLEN = 64;
 
-function hashPassword(password, salt) {
+// bughunt 2026-10-02 relay-4: ASYNC scrypt. scryptSync (about 270 ms at N=16384) ran on the one event loop that also carries every WebSocket
+// room, so a handful of logins froze the whole relay; crypto.scrypt runs on the libuv pool and the loop keeps relaying.
+function scryptAsync(password, salt) {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, SCRYPT_KEYLEN, { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P }, (err, key) => (err ? reject(err) : resolve(key)));
+  });
+}
+async function hashPassword(password, salt) {
   if (!salt) salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN,
-    { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P });
+  const hash = await scryptAsync(password, salt);
   return { hash, salt };
 }
 
-function verifyPassword(password, storedHash, storedSalt) {
+async function verifyPassword(password, storedHash, storedSalt) {
   if (!storedHash || !storedSalt) return false;
   try {
-    const { hash } = hashPassword(password, Buffer.from(storedSalt));
+    const { hash } = await hashPassword(password, Buffer.from(storedSalt));
     const stored = Buffer.from(storedHash);
     if (hash.length !== stored.length) return false;
     return crypto.timingSafeEqual(hash, stored);
@@ -162,10 +168,10 @@ function validateEmail(e) {
 
 // --- Account CRUD --------------------------------------------------------
 
-function createAccount({ username, password, email }) {
+async function createAccount({ username, password, email }) {
   const err = validateUsername(username) || validatePassword(password) || validateEmail(email);
   if (err) { const e = new Error(err); e.code = 'VALIDATION'; throw e; }
-  const { hash, salt } = hashPassword(password);
+  const { hash, salt } = await hashPassword(password);
   const now = Date.now();
   try {
     const info = db.prepare(`
@@ -191,14 +197,18 @@ function createAccount({ username, password, email }) {
   }
 }
 
-function authenticate({ username, password }) {
+// relay-4: a login for a name that does not exist used to return before any scrypt (4 ms against 270 ms for a real account: an enumeration
+// oracle). It now spends one scrypt against a fixed dummy hash, so both take the same time.
+const DUMMY = { hash: crypto.randomBytes(SCRYPT_KEYLEN), salt: crypto.randomBytes(16) };
+async function authenticate({ username, password }) {
   if (validateUsername(username) || validatePassword(password)) {
     const e = new Error('Invalid credentials'); e.code = 'AUTH'; throw e;
   }
   const row = db.prepare(`
     SELECT id, password_hash, password_salt FROM accounts WHERE username = ?
   `).get(username);
-  if (!row || !verifyPassword(password, row.password_hash, row.password_salt)) {
+  const good = await verifyPassword(password, row ? row.password_hash : DUMMY.hash, row ? row.password_salt : DUMMY.salt);
+  if (!row || !good) {
     const e = new Error('Invalid credentials'); e.code = 'AUTH'; throw e;
   }
   db.prepare(`UPDATE accounts SET last_login_at = ? WHERE id = ?`).run(Date.now(), row.id);

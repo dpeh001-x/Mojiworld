@@ -58,7 +58,7 @@ MOJI_GAME_URL="http://localhost:8080/mojiworld_game.html" node scripts/steam_int
 **Prefer CI.** Pushing to `main` triggers `steam-build.yml` for any change under
 the payload paths (the game, `Sprites/`, `audio/`, `backgrounds/`, `data/`,
 `steam/`). It syncs the version, bakes the App ID and relay URL from repo
-variables, and builds Windows + Linux. Also triggerable by hand
+variables (an unset STEAM_APP_ID keeps the committed `steam/steam_appid.txt`), and builds Windows + Linux. Also triggerable by hand
 (`workflow_dispatch`) or by pushing a `steam-v*` tag.
 
 Download both artifacts and unzip to exactly:
@@ -97,6 +97,10 @@ node -e "const v=require('./steam/package.json').version; console.log('wrapper',
 Confirm `steam/release/win-unpacked/Mojiworld.exe` exists, its ProductVersion is
 Mojiworld's (not Electron's), and the bundled
 `resources/app/mojiworld_game.html` carries the expected `GAME_VERSION`.
+
+```bash
+node scripts/verify_depot_matches_repo.mjs   # exit 1 if the depot is stale, or its baked App ID is 480 (Spacewar) / not the committed one
+```
 
 **Never build a store upload from a dirty working tree.** Parallel Claude
 sessions edit this repo concurrently; `git status` routinely shows another

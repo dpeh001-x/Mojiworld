@@ -83,6 +83,10 @@ See `.env.example`.
 | `MAX_CHAT_LEN` | `200` | no | Server-side chat trim (clients cap at 60 already). |
 | `MAX_NAME_LEN` | `20` | no | Display-name trim. |
 | `NODE_ENV` | `development` | **set to `production` on deploy** | Missing `SECRET` in prod = hard fail. |
+| `TRUST_PROXY` | `0` | **set to `1` behind one reverse proxy** (Fly, Railway, nginx, Cloudflare) | Proxy hops to trust for the client IP. `0` = the socket address; X-Forwarded-For is client-controlled and is ignored. With `1`, the entry the proxy appended (the right-most) is the IP. Left at `0` behind a proxy, every client shares the proxy's IP: one rate-limit bucket and one connection cap for the whole server. |
+| `MAX_CONN_PER_IP` | `64` | no | Concurrent WebSockets per client IP. |
+| `HELLO_MS` | `10000` | no | A socket that has not sent `hello` by then is closed. |
+| `HB_MS` | `15000` | no | Idle-sweep and ping/pong interval. |
 
 ## Deploy
 

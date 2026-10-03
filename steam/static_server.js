@@ -6,6 +6,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { pipeline } = require('stream');
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
@@ -37,8 +38,14 @@ function parseRange(header, size) {
 // requestHandler(root, entry) -> (req, res) — serves files under `root`,
 // mapping '/' to `entry`, with a path-traversal guard and Range support.
 function requestHandler(root, entry) {
-  return (req, res) => {
-    let p = decodeURIComponent((req.url || '/').split('?')[0]);
+  // bughunt 2026-10-02 (L1 / cisec-2 / bootdata-5): this runs in the Electron MAIN process, where an uncaught throw is the blocking
+  // 'JavaScript error in the main process' dialog. A malformed escape (GET /%) or a NUL byte is a 400, a throw anywhere is a 500, and
+  // the file stream is piped with stream.pipeline so its descriptor is released when the client aborts (video seeks abort every
+  // Range request; .pipe never destroyed the source) and a stream error (file locked / removed after the stat) is not uncaught.
+  const handle = (req, res) => {
+    let p;
+    try { p = decodeURIComponent((req.url || '/').split('?')[0]); } catch (e) { res.writeHead(400); res.end('bad request'); return; }
+    if (p.indexOf(String.fromCharCode(0)) >= 0) { res.writeHead(400); res.end('bad request'); return; }
     if (p === '/') p = entry;
     const abs = path.normalize(path.join(root, p));
     // Prefix guard with a separator: bare startsWith(root) would also admit
@@ -60,12 +67,16 @@ function requestHandler(root, entry) {
           'content-range': 'bytes ' + range.start + '-' + range.end + '/' + st.size,
           'accept-ranges': 'bytes',
         });
-        fs.createReadStream(abs, { start: range.start, end: range.end }).pipe(res);
+        pipeline(fs.createReadStream(abs, { start: range.start, end: range.end }), res, () => {});
       } else {
         res.writeHead(200, { 'content-type': type, 'content-length': st.size, 'accept-ranges': 'bytes' });
-        fs.createReadStream(abs).pipe(res);
+        pipeline(fs.createReadStream(abs), res, () => {});
       }
     });
+  };
+  return (req, res) => {
+    try { handle(req, res); }
+    catch (e) { try { if (!res.headersSent) { res.writeHead(500); res.end('error'); } else res.destroy(); } catch (e2) { /* the socket is gone */ } }
   };
 }
 

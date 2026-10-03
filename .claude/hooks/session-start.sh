@@ -57,7 +57,7 @@ if [ "$BEHIND" = "0" ]; then
 fi
 
 # Dirty tree? Don't rebase — log and bail.
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "‼ Working tree has uncommitted changes — behind origin/main by $BEHIND; run 'git pull' manually"
   exit 0
 fi

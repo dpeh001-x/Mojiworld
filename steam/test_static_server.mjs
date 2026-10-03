@@ -6,6 +6,7 @@ import http from 'node:http';
 const require = createRequire(import.meta.url);
 const srv = require('./static_server.js');
 const path = require('node:path');
+const fs = require('node:fs');
 
 const R = []; const ok = (n, c, x) => R.push({ n, pass: !!c, x });
 const ROOT = path.join(process.cwd(), '..');
@@ -47,6 +48,37 @@ const sib = await get(port, '/../' + path.basename(ROOT) + '-sib/secret.txt');
 ok('sibling-prefix dir blocked by the guard (403)', sib.status === 403, sib.status);
 const missing = await get(port, '/nope.png');
 ok('missing file -> 404', missing.status === 404, missing.status);
+
+// bughunt 2026-10-02 (L1 / cisec-2 / bootdata-5): a hostile request line must not throw inside the Electron main process.
+const alive = async () => (await get(port, '/')).status === 200;
+const bad1 = await get(port, '/%');
+ok('GET /% answers 400 and the server stays up', bad1.status === 400 && await alive(), bad1.status);
+const bad2 = await get(port, '/%E0%A4%A');
+ok('GET /%E0%A4%A (truncated UTF-8 escape) answers 400', bad2.status === 400 && await alive(), bad2.status);
+const bad3 = await get(port, '/a%00b');
+ok('GET /a%00b (NUL byte) answers 400 and the server stays up', bad3.status === 400 && await alive(), bad3.status);
+const uncaught = [];
+const onUncaught = (e) => uncaught.push(String(e && e.message).slice(0, 80));
+process.on('uncaughtException', onUncaught);
+// A client that aborts mid-body (Chromium aborts media Range requests on every seek) must release the file: every stream the
+// server opens is destroyed once its socket is gone (.pipe left the descriptor open), and a stream that errors after the stat is
+// not an uncaught exception.
+const realCreate = fs.createReadStream, opened = [];
+fs.createReadStream = function (...a) { const st = realCreate.apply(this, a); opened.push(st); return st; };
+for (let i = 0; i < 4; i++) {
+  await new Promise((resolve) => {
+    const rq = http.request({ host: '127.0.0.1', port, path: '/steam/higgsfield/cinematics/clip_gravitos_entry.mp4', headers: i % 2 ? { Range: 'bytes=1000-' } : {} }, (res) => { res.pause(); setTimeout(() => { res.destroy(); resolve(); }, 150); });
+    rq.on('error', () => resolve()); rq.end();
+  });
+}
+await new Promise((r) => setTimeout(r, 500));
+ok('a client abort destroys every file stream (no fd leak)', opened.length >= 4 && opened.every((st) => st.destroyed), { opened: opened.length, leaked: opened.filter((st) => !st.destroyed).length });
+fs.createReadStream = function () { const st = realCreate.apply(this, ['Z:/definitely/not/here.bin']); opened.push(st); return st; };   // a file that vanishes between stat and open
+const gone = await get(port, '/steam/higgsfield/cinematics/clip_gravitos_entry.mp4').catch((e) => ({ status: 0, err: e.code }));   // the socket is cut with no response
+fs.createReadStream = realCreate;
+await new Promise((r) => setTimeout(r, 200));
+ok('a stream error after the stat is not an uncaught exception and the server lives', uncaught.length === 0 && await alive(), { uncaught, status: gone.status });
+process.off('uncaughtException', onUncaught);
 
 const port2 = await srv.start(ROOT, '/mojiworld_game.html', 47899);   // taken -> ephemeral fallback
 ok('taken port falls back (not crash)', typeof port2 === 'number' && port2 !== 0, port2);

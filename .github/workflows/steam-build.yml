@@ -4,7 +4,8 @@
 # Download the artifacts, then upload with steamcmd + steam/steam_upload/*.vdf.
 #
 # Repo variables (Settings > Secrets and variables > Actions > Variables):
-#   STEAM_APP_ID   — your real Steam App ID (falls back to 480/Spacewar for QA)
+#   STEAM_APP_ID   — optional override of the Steam App ID (unset: the App ID committed in steam/steam_appid.txt ships;
+#                    set it to 480 only for a QA build against Spacewar)
 #   MOJI_RELAY_URL — wss:// relay baked into the build (omit = co-op off, solo fine)
 name: Build Steam depots (Mojiworld.exe)
 
@@ -27,9 +28,15 @@ on:
       - 'mojiworld_game.html'
       - 'sw.js'
       - 'data/**'
+      - 'assets/**'               # steam/package.json extraResources ships assets/fonts, the three icons ... (bughunt bootdata-8)
+      - 'manifest.webmanifest'
       - 'Sprites/**'
       - 'audio/**'
       - 'backgrounds/**'
+
+# least privilege (bughunt cisec-15): the jobs only check out and upload artifacts
+permissions:
+  contents: read
 
 jobs:
   windows:
@@ -50,13 +57,19 @@ jobs:
         with: { node-version: 22, cache: npm, cache-dependency-path: steam/package-lock.json }
       - name: Install
         run: npm ci --no-audit --no-fund
+      # bughunt 2026-10-02 cisec-4: the committed steam/steam_appid.txt (the real App ID) is only replaced when the repo variable STEAM_APP_ID is
+      # SET. It used to be overwritten with the variable or 480 (Spacewar) - an unset variable shipped a build that talks to Spacewar - and the
+      # variables were pasted into the shell text; they arrive as env now.
       - name: Bake App ID + relay
+        env:
+          SID: ${{ vars.STEAM_APP_ID }}
+          RELAY: ${{ vars.MOJI_RELAY_URL }}
         run: |
-          echo "${{ vars.STEAM_APP_ID || 480 }}" > steam_appid.txt
-          if [ -n "${{ vars.MOJI_RELAY_URL }}" ]; then
-            printf '{"relay":"%s"}' "${{ vars.MOJI_RELAY_URL }}" > relay.config.json
+          if [ -n "$SID" ]; then echo "$SID" > steam_appid.txt; fi
+          if [ -n "$RELAY" ]; then
+            printf '{"relay":"%s"}' "$RELAY" > relay.config.json
           fi
-          cat steam_appid.txt
+          echo "Steam App ID baked: $(cat steam_appid.txt)"
       # Stamp the exe/depot with the GAME's version, not whatever was last
       # hand-typed into steam/package.json. Without this the two silently drift.
       - name: Sync wrapper version to GAME_VERSION
@@ -111,11 +124,17 @@ jobs:
         with: { node-version: 22, cache: npm, cache-dependency-path: steam/package-lock.json }
       - name: Install
         run: npm ci --no-audit --no-fund
+      # bughunt 2026-10-02 cisec-4: the committed steam/steam_appid.txt (the real App ID) is only replaced when the repo variable STEAM_APP_ID is
+      # SET. It used to be overwritten with the variable or 480 (Spacewar) - an unset variable shipped a build that talks to Spacewar - and the
+      # variables were pasted into the shell text; they arrive as env now.
       - name: Bake App ID + relay
+        env:
+          SID: ${{ vars.STEAM_APP_ID }}
+          RELAY: ${{ vars.MOJI_RELAY_URL }}
         run: |
-          echo "${{ vars.STEAM_APP_ID || 480 }}" > steam_appid.txt
-          if [ -n "${{ vars.MOJI_RELAY_URL }}" ]; then
-            printf '{"relay":"%s"}' "${{ vars.MOJI_RELAY_URL }}" > relay.config.json
+          if [ -n "$SID" ]; then echo "$SID" > steam_appid.txt; fi
+          if [ -n "$RELAY" ]; then
+            printf '{"relay":"%s"}' "$RELAY" > relay.config.json
           fi
       - name: Sync wrapper version to GAME_VERSION
         working-directory: ${{ github.workspace }}

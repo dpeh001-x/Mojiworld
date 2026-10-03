@@ -68,6 +68,18 @@ const WS_MAX_PAYLOAD = 64 * 1024;   // reject oversized frames (default ws limit
 const WS_RATE        = 40;          // sustained msgs/sec per socket (client ticks ~14/s)
 const WS_BURST       = 60;          // burst bucket
 const VERSION        = '0.25.0';
+// bughunt 2026-10-02 (relay-1 / relay-3 / relay-4 / relay-6):
+//   TRUST_PROXY    how many reverse-proxy hops to trust for the client IP. 0 (default) = the socket's own address: X-Forwarded-For is
+//                  client-controlled, and keying the rate limiter on its LEFT-most entry let one client mint a fresh bucket per request.
+//                  Behind ONE proxy (Fly, Railway, nginx, Cloudflare) set TRUST_PROXY=1: the IP is then the entry that proxy appended.
+//   MAX_CONN_PER_IP  concurrent WebSockets per IP; HELLO_MS  a socket without a hello is closed after this long.
+const TRUST_PROXY    = Math.max(0, parseInt(process.env.TRUST_PROXY || '0', 10) || 0);
+const MAX_CONN_PER_IP = parseInt(process.env.MAX_CONN_PER_IP || '64', 10);
+const HELLO_MS       = parseInt(process.env.HELLO_MS || '10000', 10);
+const HB_MS          = parseInt(process.env.HB_MS || '15000', 10);
+const WS_BYTE_RATE   = 256 * 1024;  // per-socket bytes/sec sustained (an honest 56 KB paint piece every 300 ms is 187 KB/s)
+const WS_BYTE_BURST  = 640 * 1024;
+const BULK_LOOK      = 1024, BULK_EQ = 8192;   // look / eq: plain objects, JSON size caps (the real ones are about 0.3 KB / 1.5 KB)
 
 // ----- Room registry (identical to v0.24.x, unchanged wire format) --------
 
@@ -85,6 +97,7 @@ function rateLimit(ip, bucket, max, windowMs) {
   const now = Date.now();
   const rec = rateBuckets.get(key);
   if (!rec || rec.resetAt < now) {
+    if (rateBuckets.size >= 50_000) { let n = 0; for (const k of rateBuckets.keys()) { rateBuckets.delete(k); if (++n >= 1000) break; } }   // bounded: oldest first
     rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
     return true;
   }
@@ -99,6 +112,17 @@ setInterval(() => {
 }, 60_000).unref?.();
 
 // ----- Helpers ------------------------------------------------------------
+
+// The client's address for rate limits and connection caps (see TRUST_PROXY above).
+function clientIp(req) {
+  if (TRUST_PROXY > 0) {
+    const xs = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (xs.length >= TRUST_PROXY) return xs[xs.length - TRUST_PROXY].slice(0, 64);
+  }
+  return req.socket.remoteAddress || '0.0.0.0';
+}
+// look / eq: a plain object inside its JSON cap, or nothing
+const okBulk = (v, cap) => !!v && typeof v === 'object' && !Array.isArray(v) && JSON.stringify(v).length <= cap;
 
 function sanitizeString(s, max) {
   if (typeof s !== 'string') return '';
@@ -218,15 +242,16 @@ function requireAuth(req, res) {
   return { payload, user };
 }
 
-const httpServer = http.createServer(async (req, res) => {
+async function handleHttp(req, res) {
   // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(204, CORS_HEADERS); res.end(); return;
   }
 
-  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '0.0.0.0')
-    .toString().split(',')[0].trim();
-  const url = new URL(req.url, 'http://localhost');
+  const ip = clientIp(req);
+  // relay-3: 'GET //' or 'GET http://[::1' made new URL throw, outside any try, before every route: one request line ended the process (every room)
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch (e) { return jsonResponse(res, 400, { error: 'bad url' }); }
 
   // ---- Health / root ----
   if (url.pathname === '/' || url.pathname === '/health') {
@@ -248,7 +273,7 @@ const httpServer = http.createServer(async (req, res) => {
     try { body = await readJsonBody(req); } catch (e) { return jsonResponse(res, 400, { error: e.message || 'Invalid JSON' }); }
     if (!body) return jsonResponse(res, 400, { error: 'Missing body' });
     try {
-      const user = auth.createAccount({ username: body.username, password: body.password, email: body.email });
+      const user = await auth.createAccount({ username: body.username, password: body.password, email: body.email });
       const token = auth.createToken(user.id);
       return jsonResponse(res, 201, { token, user });
     } catch (e) {
@@ -266,7 +291,7 @@ const httpServer = http.createServer(async (req, res) => {
     try { body = await readJsonBody(req); } catch (e) { return jsonResponse(res, 400, { error: 'Invalid JSON' }); }
     if (!body) return jsonResponse(res, 400, { error: 'Missing body' });
     try {
-      const userId = auth.authenticate({ username: body.username, password: body.password });
+      const userId = await auth.authenticate({ username: body.username, password: body.password });
       const token = auth.createToken(userId);
       const user  = auth.getAccount(userId);
       return jsonResponse(res, 200, { token, user });
@@ -329,13 +354,31 @@ const httpServer = http.createServer(async (req, res) => {
   }
 
   return jsonResponse(res, 404, { error: 'Not Found' });
+}
+const httpServer = http.createServer((req, res) => {
+  // nothing a request carries may end the process: an async handler that throws is an unhandled rejection
+  handleHttp(req, res).catch(() => { try { if (!res.headersSent) jsonResponse(res, 500, { error: 'server error' }); else res.destroy(); } catch (e) { /* the socket is gone */ } });
 });
+process.on('unhandledRejection', (e) => { console.error('[levelx-server] unhandled rejection (kept running):', e && e.message); });
 
 // ----- WebSocket handling -------------------------------------------------
 
 const wss = new WebSocketServer({ server: httpServer, maxPayload: WS_MAX_PAYLOAD });
 
+const ipConns = new Map();   // relay-6: concurrent sockets per IP
 wss.on('connection', (ws, req) => {
+  ws._ip = clientIp(req);
+  const held = ipConns.get(ws._ip) || 0;
+  if (held >= MAX_CONN_PER_IP) { try { ws.close(1013, 'too many connections'); } catch (e) {} return; }
+  ipConns.set(ws._ip, held + 1);
+  ws.once('close', () => { const n = (ipConns.get(ws._ip) || 1) - 1; if (n > 0) ipConns.set(ws._ip, n); else ipConns.delete(ws._ip); });
+  ws._openedAt    = Date.now();
+  ws.isAlive      = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  // relay-6: a socket that has not said hello by HELLO_MS is closed (it was in no room, so the idle sweep never saw it)
+  const helloTimer = setTimeout(() => { if (!ws._player) { try { ws.terminate(); } catch (e) {} } }, HELLO_MS);
+  if (helloTimer.unref) helloTimer.unref();
+  ws.once('close', () => clearTimeout(helloTimer));
   ws._lastMsgAt   = Date.now();
   ws._lastStateAt = 0;
   ws._accountId   = null;  // populated by successful `auth` message
@@ -343,9 +386,16 @@ wss.on('connection', (ws, req) => {
   // (only `state` was throttled) and stall the shared event loop for every room.
   ws._tokens = WS_BURST;
   ws._lastRefill = Date.now();
+  ws._btokens = WS_BYTE_BURST;   // relay-1: the byte bucket
+  ws._blast = Date.now();
 
   ws.on('message', (data) => {
     ws._lastMsgAt = Date.now();
+    const _bn = data.length != null ? data.length : data.byteLength, _bnow = Date.now();
+    ws._btokens = Math.min(WS_BYTE_BURST, ws._btokens + (_bnow - ws._blast) / 1000 * WS_BYTE_RATE);
+    ws._blast = _bnow;
+    if (ws._btokens < _bn) return;   // over the byte budget: dropped unread
+    ws._btokens -= _bn;
     // Flood guard — refill then spend one token; drop the frame past the burst.
     const _now = Date.now();
     ws._tokens = Math.min(WS_BURST, ws._tokens + (_now - ws._lastRefill) / 1000 * WS_RATE);
@@ -433,13 +483,18 @@ wss.on('connection', (ws, req) => {
       // objects forwarded opaquely (the client whitelist-sanitizes every
       // field at ingestion before any registry lookup); the relay's frame
       // cap bounds their size, consistent with the verbatim 'mon' frames.
-      if (msg.look && typeof msg.look === 'object') p.look = msg.look;
-      if (msg.eq   && typeof msg.eq   === 'object') p.eq   = msg.eq;
+      // relay-1: capped (look <= 1 KB, eq <= 8 KB, plain objects) and re-sent only in the frame that carried them
+      const gotLook = okBulk(msg.look, BULK_LOOK), gotEq = okBulk(msg.eq, BULK_EQ);
+      if (gotLook) p.look = msg.look;
+      if (gotEq)   p.eq   = msg.eq;
       if (typeof msg.v === 'string') p.v = sanitizeString(msg.v, 16);
       // v0.29.x — worn title. Sent as '' when unequipped (never omitted), so
       // clearing one actually propagates instead of sticking on every peer.
       if (typeof msg.ti === 'string') p.ti = sanitizeString(msg.ti, 64);
-      broadcast(ws._roomId, { t: 'state', ...playerSnap(ws) }, ws);
+      const snap = playerSnap(ws);
+      if (!gotLook) delete snap.look;
+      if (!gotEq) delete snap.eq;
+      broadcast(ws._roomId, { t: 'state', ...snap }, ws);
       return;
     }
 
@@ -473,7 +528,9 @@ wss.on('connection', (ws, req) => {
       const map = sanitizeString(msg.map, 24);
       if (!map) return;
       ws._player.map = map;
-      broadcast(ws._roomId, { t: 'state', ...playerSnap(ws) }, ws);
+      const snap = playerSnap(ws);
+      delete snap.look; delete snap.eq;
+      broadcast(ws._roomId, { t: 'state', ...snap }, ws);
       return;
     }
 
@@ -500,16 +557,18 @@ wss.on('connection', (ws, req) => {
 
 // ----- Idle sweep ---------------------------------------------------------
 
+// relay-6: walks wss.clients, not the rooms - a socket that never said hello is in no room and used to be exempt. Also a ping/pong liveness
+// check (as mp/server.mjs): a half-open peer that never answers is terminated, so its room entry and IP slot are released.
 setInterval(() => {
   const now = Date.now();
-  for (const room of rooms.values()) {
-    for (const ws of room.clients) {
-      if (now - ws._lastMsgAt > IDLE_KICK_MS) {
-        try { ws.close(1001, 'idle'); } catch (e) {}
-      }
-    }
+  for (const ws of wss.clients) {
+    if (!ws._player && now - (ws._openedAt || now) > HELLO_MS) { try { ws.terminate(); } catch (e) {} continue; }
+    if (now - ws._lastMsgAt > IDLE_KICK_MS) { try { ws.close(1001, 'idle'); } catch (e) {} continue; }
+    if (ws.isAlive === false) { try { ws.terminate(); } catch (e) {} continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch (e) {}
   }
-}, 15_000).unref?.();
+}, HB_MS).unref?.();
 
 // ----- Boot --------------------------------------------------------------
 

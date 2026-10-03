@@ -53,6 +53,12 @@ const rv = (/GAME_VERSION = '([^']+)'/.exec(repoGame) || [])[1];
 const appid = fromAsar('steam_appid.txt').trim();
 console.log(`\ndepot GAME_VERSION ${gv}   repo GAME_VERSION ${rv}   ${gv === rv ? '(equal — note this proves NOTHING about freshness)' : '(DIFFERENT)'}`);
 console.log(`depot steam_appid.txt ${JSON.stringify(appid)}`);
+// bughunt 2026-10-02 cisec-4: the App ID baked into the artifact must be the committed one (steam/steam_appid.txt), never Spacewar (480):
+// it used to be only printed, so a depot built with the repo variable unset (CI wrote 480 over the committed id) passed this check.
+const committed = existsSync('steam/steam_appid.txt') ? readFileSync('steam/steam_appid.txt', 'utf8').trim() : '';
+const wrongId = !appid || appid === '480' || (committed !== '' && appid !== committed);
+if (wrongId) console.log(`
+WRONG STEAM APP ID in the packaged build: ${appid ? JSON.stringify(appid) : 'none found in app.asar'} (committed steam/steam_appid.txt: ${JSON.stringify(committed)}${appid === '480' ? '; 480 is Spacewar, not shippable' : ''}). Rebuild with STEAM_APP_ID unset or equal to the committed id.`);
 console.log(`\n${MARKERS.length - stale - skipped}/${MARKERS.length - skipped} checked fixes are present in the packaged build`);
 if (stale) console.log('\nThe depot is STALE. Rebuild before uploading, or players get code you already fixed.');
-process.exit(stale ? 1 : 0);
+process.exit(stale || wrongId ? 1 : 0);

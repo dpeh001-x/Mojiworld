@@ -321,8 +321,9 @@ self.addEventListener('fetch', (e) => {
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const hit = await cache.match(req);
+    let written = null;   // the cache write itself (bughunt cisec-12): waitUntil below waits for IT, and a quota / aborted-body rejection is swallowed
     const refresh = fetch(req).then((res) => {
-      if (res && res.ok) cache.put(req, res.clone());
+      if (res && res.ok) written = cache.put(req, res.clone()).catch(() => {});
       return res;
     }).catch(() => null);
     // v0.29.473 — keep the worker alive until the background refresh has
@@ -330,7 +331,7 @@ self.addEventListener('fetch', (e) => {
     // and the browser is free to terminate it before cache.put lands — so the
     // "refreshes for the next visit" contract silently never happened and a
     // player could sit on stale art indefinitely, not just for one session.
-    e.waitUntil(refresh);
+    e.waitUntil(refresh.then(() => written));   // (the response is still returned as soon as it arrives: only the lifetime waits)
     if (hit) return hit;                       // instant cached copy; refresh continues in bg
     const net = await refresh;
     return net || new Response('', { status: 504, statusText: 'offline asset miss' });
