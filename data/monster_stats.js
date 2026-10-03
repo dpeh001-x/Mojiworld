@@ -129,6 +129,7 @@ window.LX_MONSTER_STATS = {
   blockRhirhi:                    { lv: 35, hp:    8654, atk:  486, def: 98, exp:    173, coin:   650 },
   blockGary:                      { lv: 40, hp:    16559, atk:  782, def: 133, exp:    331, coin:   1242 },
   blockTigreal:                   { lv: 45, hp:    20272, atk:  1085, def:189, exp:    406, coin:   1520 },
+  deranged_kuro:                  { lv: 40, hp:    11798, atk:  800, def: 62, exp:    236, coin:   886 },   // v0.30.1591 distorted-roster
   taiger:                         { lv: 40, hp:    11798, atk:  800, def: 62, exp:    236, coin:   886 },
   harea:                          { lv: 42, hp:    11180, atk:  1056, def: 54, exp:    223, coin:   839 },
   lady_honk:                      { lv: 43, hp:    19155, atk: 1170, def: 117, exp:    383, coin:   1435 },

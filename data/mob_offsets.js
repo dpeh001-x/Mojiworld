@@ -26,6 +26,7 @@
 window.LX_MOB_OFFSET_DATA = {
   "harea": 3,
   "lady_honk": 3,
+  "deranged_kuro": 2,
   "taiger": 3,
   "archon": 3,
   "blightElder": 30,
@@ -97,6 +98,7 @@ window.LX_MOB_SCALE_DATA = {
   "clownfish": 0.874,
   "conductorMech": 1.22,
   "cosmicMochi": 0.978,
+  "deranged_kuro": 0.715,
   "taiger": 0.797,   // v0.30.1582 redrawn: the new canvas kept at the old 100 px figure
   "echoKnight": 0.633,
   "emberling": 0.861,

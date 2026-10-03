@@ -5,6 +5,25 @@
 // offset from the foot line (+down) — all fractions of rendered sprite height.
 // Missing entries keep the game defaults.
 window.LX_ANIM_CALIB = {
+  "deranged_kuro": {
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.1,
+      "ft": [
+        86,
+        72,
+        72,
+        108,
+        149,
+        108,
+        72,
+        72,
+        115
+      ],
+      "ftAuto": true
+    }
+  },
   "goblinMauler": {
     "attack": {
       "s": 1.05,

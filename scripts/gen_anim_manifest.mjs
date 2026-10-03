@@ -54,7 +54,7 @@ const BASE_ALIASES = {
   seasponge: 'reefmaw',
   seastar: 'tankstar',
   grumpsquid: 'sourpus',
-  vigil_vermillion: 'young_bloodthirsty_vermillion',
+  // v0.30.1591 distorted-roster: vigil_vermillion (Elder Arlen) has his own still now - no alias
 };
 
 // Per-frame content boxes, mirroring the game's _spriteContentBox /
