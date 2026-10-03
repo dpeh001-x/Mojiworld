@@ -3,11 +3,12 @@
 // every 30 px riser. Now (map flag solidRisers):
 //   1. only the Stair carries the flag;
 //   2. held Right from the Sanctum landing stops at the first riser's face and stays there (feet 1040, never up on the tread);
-//   3. Right + jump climbs it: the hero is on landing A (feet 890) inside 25 s;
+//   3. Right + jump climbs it: the hero is on landing A (feet 830) inside 25 s;
 //   4. walking left steps DOWN every riser to the Sanctum landing (no wall faces that way);
 //   5. a drop from above still lands on a tread's top;
 //   6. a hero set down inside a riser by one step is stopped at its face; one set down deeper than a step (a blink through several
 //      steps, a spawn) still snaps onto the tread, so nobody is trapped;
+//   9. the steps are steep: every riser 38-50 px (a jump of the weakest class, 71 px, clears it) on treads <= 64 px wide, 30+ degrees;
 //   7. the keyline is ONE line along the profile: dark on every tread top and straight up every riser seam, level (nothing rises above
 //      it - the studs are gone), and no page errors.
 // The build before fails 2-3 and 7.   node scripts/stair_solid_test.mjs     MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
@@ -60,27 +61,27 @@ try {
   // [3] Right + jump climbs
   const t3 = Date.now(); let a3 = await at();
   await page.keyboard.down('ArrowRight');
-  while (Date.now() - t3 < 25000 && !(a3.feet <= 890 && a3.cx >= 1060)) { await page.keyboard.down('Space'); await sleep(70); await page.keyboard.up('Space'); await sleep(330); a3 = await at(); }
+  while (Date.now() - t3 < 25000 && !(a3.feet <= 830 && a3.cx >= 800)) { await page.keyboard.down('Space'); await sleep(70); await page.keyboard.up('Space'); await sleep(330); a3 = await at(); }
   await page.keyboard.up('ArrowRight'); await sleep(300);
-  ok('[3] Right + jump climbs the first flight: on or above landing A (feet <= 890, past x=1060) inside 25 s', a3.feet <= 890 && a3.cx >= 1060, { a3, s: Math.round((Date.now() - t3) / 1000) });
+  ok('[3] Right + jump climbs the first flight: on or above landing A (feet <= 830, past x=800) inside 25 s', a3.feet <= 830 && a3.cx >= 800, { a3, s: Math.round((Date.now() - t3) / 1000) });
 
   // [4] walking left steps down every riser
-  await ev(() => window.__put(840, 950));
+  await ev(() => window.__put(670, 914));
   const a4 = await hold('ArrowLeft', 14000, (a) => a.feet === 1040 && a.cx < 480);
   ok('[4] held Left from step 3 steps down every riser to the Sanctum landing (feet 1040, left of the first riser)', a4.feet === 1040 && a4.cx < 500 && a4.gnd, a4);
 
   // [5] a drop from above lands on the tread's top
-  await ev(() => window.__put(700, 700)); await sleep(1200);
+  await ev(() => window.__put(610, 700)); await sleep(1200);
   const a5 = await at();
-  ok('[5] a drop from above lands on the tread (centre 700: feet 980)', a5.feet === 980 && a5.gnd, a5);
+  ok('[5] a drop from above lands on the tread (centre 610: feet 956)', a5.feet === 956 && a5.gnd, a5);
 
   // [6] set down inside a riser
-  await ev(() => window.__put(540, 1040));   // 30 px into the first tread (top 1010)
+  await ev(() => window.__put(540, 1040));   // 42 px into the first tread (top 998)
   const a6 = await at();
   ok('[6a] set down one step inside the first riser: stopped at its face, on the landing (right edge 520, feet 1040)', a6.r <= 522 && a6.feet === 1040 && a6.gnd, a6);
-  await ev(() => window.__put(580, 1065));   // 55 px into the tread: deeper than a step
+  await ev(() => window.__put(550, 1075));   // 77 px into the tread: deeper than the wall's 60
   const a6b = await at();
-  ok('[6b] set down deeper than a step (55 px): snaps onto the tread (feet 1010), never trapped', a6b.feet === 1010 && a6b.gnd, a6b);
+  ok('[6b] set down deeper than a step (77 px): snaps onto the tread (feet 998), never trapped', a6b.feet === 998 && a6b.gnd, a6b);
 
   // [7] the keyline
   await ev(() => window.__put(300, 1040)); await sleep(800);
@@ -122,6 +123,11 @@ try {
   ok('[7a] the keyline is dark along every tread top on screen', R.treads.n >= 6 && R.treads.dark === R.treads.n, R.treads);
   ok('[7b] nothing sits on a stair tread (no studs or drips painted), while the same piece without the footless bit still gets them', R.decor.footless && R.decor.stair === 0 && R.decor.plain > 0, R.decor);
   ok('[7c] the keyline runs straight up every riser seam on screen', R.risers.n >= 3 && R.risers.dark === R.risers.n, R.risers);
+  // [9] the steps are steep
+  const geo = await ev(() => { const G = game.mapData.platforms.filter((p) => p.type === 'ground').sort((a, b) => a.x - b.x), r = [], t = [];
+    for (let k = 1; k < G.length; k++) { const up = G[k - 1].y - G[k].y; if (up > 0) r.push(up); if (up > 0 && G[k].w <= 100) t.push({ rise: up, run: G[k].w }); }
+    return { risers: r.length, minRise: Math.min(...r), maxRise: Math.max(...r), flight: t.length, minDeg: Math.min(...t.map((q) => Math.atan(q.rise / q.run) * 180 / Math.PI)), maxRun: Math.max(...t.map((q) => q.run)) }; });
+  ok('[9] the steps are steep: 20 risers of 38-50 px, 16 flight treads <= 64 px wide, every one at least 30 degrees', geo.risers === 20 && geo.minRise >= 38 && geo.maxRise <= 50 && geo.flight === 16 && geo.maxRun <= 64 && geo.minDeg >= 30, geo);
   ok('[8] no page errors', errs.length === 0, errs);
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 300), false); }
 await browser.close(); server.kill();

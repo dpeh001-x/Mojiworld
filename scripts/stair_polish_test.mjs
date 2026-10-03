@@ -54,7 +54,7 @@ try {
       P.fillRect = oF; return log; };
     // ---- 1. the tint and the vignette, at the foot, the middle and the top of the climb
     out.fills = [];
-    for (const x of [700, 2000, 3650]) {
+    for (const x of [700, 1500, 2800]) {   // v0.30.1592 - the world is 2960 wide now (the treads are 60 px, not 120)
       await standAt(x);
       game._forcePhase = 23; _LX_DAYPH.t = 0; const night = (_lxDayPhase() || {}).style || '';
       const f1 = await wideFills((f) => f.st.replace(/\s/g, '') === night.replace(/\s/g, '')); const tint = f1.filter((f) => f.st.replace(/\s/g, '') === night.replace(/\s/g, ''));
@@ -75,7 +75,7 @@ try {
     out.notch = { n: 0, good: 0, bad: [] };
     if (U && U.length) {
       const c = U[0];
-      for (const x of [900, 1500, 2500, 3200]) {
+      for (const x of [900, 1400, 2000, 2700]) {
         await standAt(x); await frame(); await frame();
         const camX = game.camera.x, camY = Math.round(game.camera.y || 0);
         const img = main.getImageData(0, 0, cv.width, cv.height).data;
@@ -98,12 +98,12 @@ try {
     // ---- 5. flat treads: no ramps, and every step up is a riser the higher piece carries at its full height
     out.ramps = (_lxGroundRamps(game.mapData) || []).length;
     { const G2 = game.mapData.platforms.filter((p) => p.type === 'ground').sort((a, b) => a.x - b.x); out.risers = [];
-      for (let k = 0; k + 1 < G2.length; k++) { const a = G2[k], b = G2[k + 1]; if (a.y === b.y) continue; const hi = a.y < b.y ? a : b, v = _lxGroundJoin(hi), e = hi === a ? (v >> 7) & 31 : (v >> 2) & 31; out.risers.push(e - Math.abs(a.y - b.y)); } }
+      for (let k = 0; k + 1 < G2.length; k++) { const a = G2[k], b = G2[k + 1]; if (a.y === b.y) continue; const hi = a.y < b.y ? a : b, v = _lxGroundJoin(hi), e = hi === a ? (v >> 7) & 31 : (v >> 2) & 31; out.risers.push(e - Math.min(31, Math.abs(a.y - b.y))); } }   // the join carries a riser up to 31 px (5 bits); the Stair's are 42 now, so it carries 31 (the keyline no longer reads it: _lxStairProfileDraw)
     // ---- 6. one wall: below each riser, the columns either side of the seam vs two columns inside the blocks
     out.cont = { seams: 0, worst: 1, ratio: [] };
     {
       const ps6 = game.mapData.platforms.filter((p) => p.type === 'ground').sort((a, b) => a.x - b.x);   // the map's own pieces: this runs on any build
-      for (const x of [900, 2500]) {
+      for (const x of [900, 2000]) {
         await standAt(x); await frame(); await frame();
         const camX = game.camera.x, camY = Math.round(game.camera.y || 0), img = main.getImageData(0, 0, cv.width, cv.height).data;
         const lum = (wx, wy) => { const px = Math.round((wx - camX) * dpr), py = Math.round((wy - camY) * dpr); if (px < 2 || py < 2 || px >= cv.width - 2 || py >= cv.height - 2) return null; const i = (py * cv.width + px) * 4; return 0.3 * img[i] + 0.59 * img[i + 1] + 0.11 * img[i + 2]; };
@@ -159,10 +159,10 @@ try {
   ok('1b. so does the stun/freeze vignette', fillsOk('vig'), J(R.fills.map((f) => ({ camY: f.camY, vig: f.vig }))));
   ok('2. the Stair\'s 21 ground pieces draw no flat foot; the town\'s still do', R.ground === 21 && R.footless === 21 && R.townFootless === 0, J({ ground: R.ground, footless: R.footless, town: R.townFootless }));
   const u = R.under || {};
-  ok('3. one underside line under the whole climb: never above a foot (8 px below the lowest), at most ~60 px below, smooth',
-    u.chains === 1 && u.pieces === 21 && u.minGap >= 7.99 && u.maxGap <= 60 && u.maxStep <= 3, J(u));
+  ok('3. one underside line under the whole climb: never above a foot (8 px below the lowest), at most ~80 px below (the stringer is a 35 degree diagonal under 42 px risers now), smooth (under 1 px per px)',
+    u.chains === 1 && u.pieces === 21 && u.minGap >= 7.99 && u.maxGap <= 80 && u.maxStep <= 4, J(u));
   ok('4. the notches under the risers show the stone on screen, not the sky', R.notch.n >= 12 && R.notch.good / R.notch.n >= 0.9, J(R.notch));
-  ok('5. flat treads: no seam is ramped and each of the 20 steps up is a riser as tall as the step; no page errors', R.ramps === 0 && R.risers.length === 20 && R.risers.every((d) => d === 0) && errs.length === 0, J({ ramps: R.ramps, risers: R.risers, errs: errs.slice(0, 3) }));
+  ok('5. flat treads: no seam is ramped and each of the 20 steps up is a riser the join carries (to its 31 px limit); no page errors', R.ramps === 0 && R.risers.length === 20 && R.risers.every((d) => d === 0) && errs.length === 0, J({ ramps: R.ramps, risers: R.risers, errs: errs.slice(0, 3) }));
   ok('6. one wall: below every riser on screen the seam\'s rows either side keep their mortar lines in line (correlation >= 0.5)', R.cont.seams >= 6 && R.cont.worst >= 0.5, J(R.cont));
   const M = R.mist || {};
   ok('7a. the weather: a darker sky and four baked strips a frame in <= 10 blits - overcast, banks and sea under the sphere glow and before the platforms, the haze after the entities - with no canvas made per frame',

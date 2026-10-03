@@ -468,7 +468,8 @@ try {
   // [11] THE CLIMB IS JUMPED, ONE FLAT STEP AT A TIME (per user: "the stairs can be non-sloped for here" - flat treads and square risers;
   // then "the stairs should be like actual stairs whereby i will need to jump up"). No seam carries a ramp (the map is noGroundRamps) and
   // each riser is a wall (solidRisers): held Right alone stops at the first one, and Right + a jump on every step carries the hero from
-  // the Sanctum door up all twenty 30 px risers to the Singularity's door. The hero is kept safe (settle) the whole way; the run ends at
+  // the Sanctum door up all twenty risers (42 px on 60 px treads since v0.30.1592) to the Singularity's door, wherever the map puts it
+  // (read from its portal). The hero is kept safe (settle) the whole way; the run ends at
   // the door or after 75 s.
   const st = await safe(async () => {
     __nm.settle(); loadMap('weightbearerStair'); await __nm.frames(15, __nm.settle);
@@ -489,15 +490,15 @@ try {
     for (const w0 = Date.now(); Date.now() - w0 < 75000;) {   // then a jump on every step
       await page.keyboard.down('Space'); await new Promise((r) => setTimeout(r, 70)); await page.keyboard.up('Space'); await new Promise((r) => setTimeout(r, 330));
       pos = await at();
-      if (pos.err || pos.map !== 'weightbearerStair' || pos.cx >= 3780) break;
+      if (pos.err || pos.map !== 'weightbearerStair' || pos.cx >= st.door.x - 40) break;
     }
     await page.keyboard.up('ArrowRight');
     await new Promise((r) => setTimeout(r, 800));
     if (!pos.err && pos.map === 'weightbearerStair') pos = await at();
     await safe(() => { window.__lxEaseStop = true; return 1; }, undefined, 5000);
   }
-  ok('[11] the climb is jumped up flat steps: no seam is ramped, held Right alone stops at the first riser (feet still 1040), and Right + jump carries the hero from the Sanctum door up all 20 square risers to the Singularity\'s door (feet 440)',
-    !st.err && st.ramps === 0 && st.feet === 1040 && !!st.door && !wall.err && wall.feet === 1040 && wall.cx < 520 && !pos.err && pos.map === 'weightbearerStair' && pos.cx >= 3740 && Math.abs(pos.feet - 440) <= 2 && pos.gnd, { st, wall, pos });
+  ok('[11] the climb is jumped up flat steps: no seam is ramped, held Right alone stops at the first riser (feet still 1040), and Right + jump carries the hero from the Sanctum door up all 20 square risers to the Singularity\'s door (feet at the door)',
+    !st.err && st.ramps === 0 && st.feet === 1040 && !!st.door && !wall.err && wall.feet === 1040 && wall.cx < 520 && !pos.err && pos.map === 'weightbearerStair' && pos.cx >= st.door.x - 80 && Math.abs(pos.feet - st.door.y) <= 2 && pos.gnd, { st, wall, pos });
 
   // [12] NOBODY IS STRANDED. The arena's door keeps its Lv 70 gate (so the W map still locks the Stair under 70) but it is a
   // door OUT of an arena, which never blocks; the Stair's door down to the Sanctum carries no gate at all.
