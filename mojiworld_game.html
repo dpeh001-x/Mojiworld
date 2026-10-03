@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1602';
+const GAME_VERSION = 'v0.30.1603';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -38551,6 +38551,7 @@ const MAPS = {
     // _loadBG downloaded both on every boot. The file went in v0.29.615, the
     // registry entry and its 705 KB fetch here.
     bg: 'blocklandLegosaurus',
+    bgNoMirror: true,   // v0.30.1603 artpolish - one copy across the scroll: the mirrored seam copy drew a symmetric tree and a white strip at the right
     sky:['#aa1a14','#660800','#1a0408'],
     worldWidth: 2000,
     worldHeight: 560,                            // v0.26.422 — normal screen-height world (was 760)
@@ -73797,7 +73798,7 @@ function _lxPqRestatMob(m, party, first) {
     if (first) {
       m.mojicoins = Math.max(1, Math.floor(30 + _pLv * 2.5));
       delete m._veteranGap;
-      m.name = 'Express ' + String(m.name || 'Ticket Mech').replace(/^⚔ /, '');
+      m.name = 'Express ' + String(m.name || 'Ticket Mech').replace(/^⚔ /, '').replace(/^Express /, '');   // v0.30.1603 artpolish - the Express type is already named "Express Ticket Mech"
       m.w = Math.floor((m.w || 30) * 1.15); m.h = Math.floor((m.h || 26) * 1.15);
     }
     m._pqMech = 'x';
@@ -134611,7 +134612,7 @@ const MAP_PROPS = {
     {key:'bastion_banner', x:856, y:401, scale:1.6},
     {key:'bastion_banner', x:54, y:280, anchor:'hang', scale:1.4},
     {key:'bastion_banner', x:1569, y:280, anchor:'hang', scale:1.4},
-    {key:'bastion_lion_statue', x:1039, y:380, scale:1.4},
+    {key:'bastion_lion_statue', x:1039, y:380, scale:0.85},   // v0.30.1603 artpolish - was 1.4: its head stood through the y:280 walkway above (the ledge is 100px under it); 0.85 is Bastion's own lions' size
     // v0.30.1408 - sentries along the Rampart (per user: "scatter them throughout the bastion town"): serious guards and sentries, and
     // goofy look-alikes of the throne-room squad, at odd spots and odd spacing - scattered, not drilled like the throne room.
     {key:'bastion_soldier_visor', x:330, y:280, scale:1.41, flip:true},
@@ -149833,6 +149834,10 @@ const _MOB_SPRITE_FOOT_NUDGE = { slime: 0.14 };
 // for them (XOR): when facing right they draw mirrored, when facing left they
 // draw un-mirrored. Hitbox/aim are unaffected — purely the drawn pixels.
 const _MOB_SPRITE_XFLIP = new Set(['mayo', 'towerSeer']);
+// v0.30.1603 artpolish - art with lettering on its face is not mirrored when the mob faces left: the Ticket Mech's "TICKET" plate read
+// "TEKCIT" and the Express mech's "GO" screen "OG". Their attack frames still mirror (the fired ticket leaves from the
+// facing side). _drawMonsterSprite un-mirrors once the frame is resolved; the attack hitbox is untouched.
+const _MOB_SPRITE_NOFLIP = new Set(['ticketMech', 'expressTicketMech']);
 
 // Detect the lowest opaque pixel Y in a loaded sprite — used to anchor the
 // character's actual feet (rather than canvas-bottom) to the monster's foot
@@ -155610,6 +155615,7 @@ function _drawMonsterSprite(m, sx, sy) {
   // touches anything _monsterStateFrame reads (the only monster fields written in that span are
   // m._visW/_visH), and it is still called exactly once per draw.
   const _stateImg = sprite ? _monsterStateFrame(m) : null;
+  if ((m.facing | 0) < 0 && !m._frameIsAttack && _MOB_SPRITE_NOFLIP.has(m.type)) ctx.scale(-1, 1);   // v0.30.1603 artpolish - lettered art reads the right way round (undoes the facing mirror above)
   // v0.26.x — Per-(type, state) animation calibration (monster_animator.html):
   // scale around the planted foot + nudge by a fraction of the rendered height.
   // Applied here so every draw branch below inherits it; no-op when {s:1,dx:0,dy:0}.
@@ -167304,29 +167310,26 @@ function drawTowerSideWalls() {
   if (ww >= W) return;             // wide map — nothing to fill
   const leftSx  = Math.max(0, 0 - game.camera.x);
   const rightSx = Math.min(W, ww - game.camera.x);
-  // Outer margin fill — dark "outside the tower" tint
+  // v0.30.1603 artpolish - the margin darkens over a 56px feather from the world edge (0.02 -> 0.55) instead of a hard 0.55 step with a
+  // 24px ice-blue glow on top: the step read as a cut and the glow as a pale stripe on every narrow map (the subway tower,
+  // the Clockwork Spire, Honeycomb Hollow, the Ascension), not only the ice tower it was drawn for. Gradients stay cached
+  // (fixed origin + translate, the v0.26.469 rule).
+  const _twFE = 56;
   ctx.save();
-  ctx.fillStyle = 'rgba(15, 25, 50, 0.55)';
-  if (leftSx > 0)  ctx.fillRect(0, 0, leftSx, H);
-  if (rightSx < W) ctx.fillRect(rightSx, 0, W - rightSx, H);
-  // Soft ice-blue glow at each tower edge — reads as a frosted wall.
-  // v0.26.469 — cache the two edge gradients (were rebuilt EVERY frame on
-  // every vertical/tower map). Canvas gradients render in the transformed
-  // space, so a fixed-origin gradient + ctx.translate places them at the
-  // live screen edge with zero per-frame allocation.
   if (!_towerWallGradL) {
-    _towerWallGradL = ctx.createLinearGradient(0, 0, 24, 0);
-    _towerWallGradL.addColorStop(0, 'rgba(180, 220, 255, 0.30)');
-    _towerWallGradL.addColorStop(1, 'rgba(180, 220, 255, 0)');
-    _towerWallGradR = ctx.createLinearGradient(0, 0, -24, 0);
-    _towerWallGradR.addColorStop(0, 'rgba(180, 220, 255, 0.30)');
-    _towerWallGradR.addColorStop(1, 'rgba(180, 220, 255, 0)');
+    _towerWallGradL = ctx.createLinearGradient(0, 0, -_twFE, 0);
+    _towerWallGradR = ctx.createLinearGradient(0, 0, _twFE, 0);
+    for (const g of [_towerWallGradL, _towerWallGradR]) { g.addColorStop(0, 'rgba(15, 25, 50, 0.02)'); g.addColorStop(0.35, 'rgba(15, 25, 50, 0.2)'); g.addColorStop(1, 'rgba(15, 25, 50, 0.55)'); }
   }
-  if (leftSx > 0 && leftSx < W) {
-    ctx.save(); ctx.translate(leftSx, 0); ctx.fillStyle = _towerWallGradL; ctx.fillRect(0, 0, 24, H); ctx.restore();
+  if (leftSx > 0) {
+    const fw = Math.min(_twFE, leftSx);
+    ctx.fillStyle = 'rgba(15, 25, 50, 0.55)'; if (leftSx > _twFE) ctx.fillRect(0, 0, leftSx - _twFE, H);
+    ctx.save(); ctx.translate(leftSx, 0); ctx.fillStyle = _towerWallGradL; ctx.fillRect(-fw, 0, fw, H); ctx.restore();
   }
-  if (rightSx > 0 && rightSx < W) {
-    ctx.save(); ctx.translate(rightSx, 0); ctx.fillStyle = _towerWallGradR; ctx.fillRect(-24, 0, 24, H); ctx.restore();
+  if (rightSx < W) {
+    const fw = Math.min(_twFE, W - rightSx);
+    ctx.fillStyle = 'rgba(15, 25, 50, 0.55)'; if (W - rightSx > _twFE) ctx.fillRect(rightSx + _twFE, 0, W - rightSx - _twFE, H);
+    ctx.save(); ctx.translate(rightSx, 0); ctx.fillStyle = _towerWallGradR; ctx.fillRect(0, 0, fw, H); ctx.restore();
   }
   ctx.restore();
 }
