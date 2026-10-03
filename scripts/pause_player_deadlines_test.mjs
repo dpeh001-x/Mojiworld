@@ -24,7 +24,7 @@ await page.waitForFunction(() => typeof loadMap === 'function' && typeof game ==
 await page.waitForTimeout(6000);
 const FIELDS = ['_spawnBoostUntil', '_rampUntil', '_riftSurgeUntil', '_quantumEchoUntil', '_fireRingUntil', '_iceRingUntil',
   '_waltzUntil', '_flowStackExpiry', '_secondWindExpiry', '_secondWindCD', '_classSkillMulExpires', '_gbStackUntil',
-  '_flameTrailUntil', '_levitateUntil', '_mirrorGate', '_heavyStunUntil'];
+  '_flameTrailUntil', '_levitateUntil', '_mirrorGate', '_heavyStunUntil', '_holyReflectUntil', '_sleightNextAt', '_castLockUntil'];
 const r = await page.evaluate(async (FIELDS) => {
   const lo = document.getElementById('loading-overlay'); if (lo) lo.classList.add('fade');
   loadMap('forest', 300); game.paused = false;

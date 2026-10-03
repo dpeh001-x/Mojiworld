@@ -120,6 +120,35 @@ ok('the player takes no further damage in the window (still 1 HP, alive)', !r.er
 ok('he backs away instead of closing in', !r.err && r.moved > 20, r.err || `distance change ${r.moved}px`);
 ok('the window ends on time and he announces the return', !r.err && r.spentAfter === 0 && /pride again/.test(r.recoverToast || ''), r.err || `spent left ${r.spentAfter}; toast ${r.recoverToast}`);
 ok('aggression rebuilds afterwards (an attack within ten seconds)', !r.err && r.resumed, r.err || `resumed ${r.resumed}`);
+// v0.30.x bughunt sibling2A-2 - the same breather for the signs that fight with a TRAIT instead of bigMelee: Taurus's brace charge and
+// the pillar (columnStrike) of Taurus / Virgo. The SPENT gate sat only on bigMelee, so they started inside the 8 s window.
+const r2 = await ev(async () => {
+  loadMap('forest', 300);
+  await new Promise((r) => setTimeout(r, 1500));
+  game.paused = true;
+  player.level = 90; player._god = false; player.maxHp = 500000; player.hp = getMaxHp(); player.invulnerable = 9e9; player.blockTimer = 0; player.stunTimer = 0;
+  const toasts = []; const _st = window.showToast; window.showToast = (t, k) => { toasts.push(String(t)); };
+  const run = (type, prime, spent) => {
+    game.monsters = []; game.hazards.length = 0; game.projectiles.length = 0;
+    spawnMonster(player.x + 300, player.y, type, true);
+    const m = game.monsters[game.monsters.length - 1];
+    m.evasion = 0; m._bossIntroDone = true; m._staggerCd = 1e12; m._dirRollT = 1e12; m._dirStanceT = 1e12;
+    const step = (n, f) => { for (let i = 0; i < n; i++) { game.time++; m._stagger = 0; m._dirOpenT = 0; try { updateMonsters(16); } catch (e) {} if (f) f(); } };
+    step(90); m.currentHp = m.maxHp = 5e8;
+    prime(m); m._zSpentMs = spent ? 1e9 : 0;
+    let starts = 0, pillars = 0;
+    step(70, () => { if (m._braceDashing || m._columnFiring) starts++; pillars = game.projectiles.filter((p) => p && p.owner === 'enemy' && p.skill === 'column').length; });
+    return { starts, pillars };
+  };
+  const taurus = (m) => { m._bdCd = 0; m._columnCd = 1e9; };
+  const virgo = (m) => { m._columnCd = 0; };
+  const out = { tFree: run('zodiac_taurus', taurus, false), tSpent: run('zodiac_taurus', taurus, true), vFree: run('zodiac_virgo', virgo, false), vSpent: run('zodiac_virgo', virgo, true) };
+  window.showToast = _st; game.monsters = []; game.hazards.length = 0; game.projectiles.length = 0; game.paused = false;
+  return out;
+});
+ok('a free Taurus and a free Virgo do start their trait attacks (the rig can see them)', !r2.err && r2.tFree.starts > 0 && r2.vFree.starts > 0 && r2.vFree.pillars > 0, r2.err || JSON.stringify({ tFree: r2.tFree, vFree: r2.vFree }));
+ok('SPENT Taurus starts no brace charge', !r2.err && r2.tSpent.starts === 0, r2.err || JSON.stringify(r2.tSpent));
+ok('SPENT Virgo starts no pillar - none telegraphs, none lands', !r2.err && r2.vSpent.starts === 0 && r2.vSpent.pillars === 0, r2.err || JSON.stringify(r2.vSpent));
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 
 await browser.close(); server.kill();

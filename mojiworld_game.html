@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1613';
+const GAME_VERSION = 'v0.30.1614';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -97273,7 +97273,7 @@ function updateMonsters(dt) {
         const _cx = _lxPlayCamX(), _cy = (game.camera && game.camera.y) || 0;   // wide-view
         if (m.x + m.w < _cx || m.x > _cx + W_PLAY || m.y + m.h < _cy || m.y > _cy + H) _bdOnScreen = false;
       }
-      if (!m._braceDashing && m._bdCd <= 0 && Math.abs(_bdDx) < (bd.range || 700)
+      if (!m._braceDashing && m._bdCd <= 0 && !(m._zSpentMs > 0) && Math.abs(_bdDx) < (bd.range || 700)   // v0.30.x bughunt sibling2A-2 - SPENT starts no attack: the Taurus charge honours it like bigMelee does
           && Math.abs(_bdDx) > (bd.minRange || 120) && _bdOnScreen) {
         m._braceDashing = true;
         m._bdPhase = 'brace';
@@ -97401,7 +97401,7 @@ function updateMonsters(dt) {
         if (m.x + m.w < _ccx || m.x > _ccx + W_PLAY || m.y + m.h < _ccy || m.y > _ccy + H) _csOnScreen = false;
       }
       // PHASE 1 — start telegraph
-      if (!m._columnFiring && !m._bigMeleeFiring && m._columnCd <= 0 && !_lxMidSwing(m) && !(m._shootWindup > 0) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && _csInRange && _csOnScreen) {   // v0.29.263 — winded bosses hold column strikes · v0.29.x — nor a retreating one
+      if (!m._columnFiring && !m._bigMeleeFiring && m._columnCd <= 0 && !_lxMidSwing(m) && !(m._shootWindup > 0) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _csInRange && _csOnScreen) {   // v0.30.x bughunt sibling2A-2 - SPENT starts no pillar either (five zodiac signs carry this trait)   // v0.29.263 — winded bosses hold column strikes · v0.29.x — nor a retreating one
         m._columnFiring = true;
         m._columnT = cs.telegraphMs;
         m._columnTargetX = _playerCx;    // v0.26.218
@@ -98903,9 +98903,11 @@ function updateMonsters(dt) {
              && Math.abs(m.vx || 0) < _lxMobWalkOn(m)) m.vx = 0;
     // v0.29.x — braceDash outranks the cast-plant AND the boss chase AI:
     // dead still through the brace, the full committed vx through the dash.
-    if (m._braceDashing) m.vx = (m._bdPhase === 'dash') ? m._bdVx : 0;
+    // v0.30.x bughunt boss-2 - ...but not through a stun / stagger / opening: the dash handlers are gated by !_ccHalted, so their timers
+    // froze while this override kept the body sliding at lunge speed (13-23 px a step for ~1 s). Halted, vx is left to the stun's own decay.
+    if (m._braceDashing && !_ccHalted) m.vx = (m._bdPhase === 'dash') ? m._bdVx : 0;
     // v0.29.976 — hourglass lunge, same precedence as the brace-dash above.
-    if (m._hgCharging) m.vx = (m._hgPhase === 'dash') ? m._hgVx : 0;
+    if (m._hgCharging && !_ccHalted) m.vx = (m._hgPhase === 'dash') ? m._hgVx : 0;
 
     // Physics (gravity scales with map)
     // v0.25.46 — gate the whole physics block on m._noGravity so bosses
@@ -101524,7 +101526,7 @@ const _LX_BOSS_CYCLE_LATCHES = [
   // v0.30.x — the trait kit's in-flight flags. Without these a stagger FROZE the telegraph
   // (the timer stopped under _ccHalted) and the swing fired the moment the window closed,
   // while the toast said the attack was broken off.
-  '_bigMeleeFiring', '_columnFiring', '_hgCharging',
+  '_bigMeleeFiring', '_columnFiring', '_hgCharging', '_braceDashing',   // v0.30.x bughunt boss-2 - the Taurus / Legosaurus brace-dash joins the cancel (its vx override outlived the stagger)
 ];
 function _lxBossCycleLatchClear(m) {
   for (const f of _LX_BOSS_CYCLE_LATCHES) if (m[f]) m[f] = false;
@@ -101803,7 +101805,8 @@ function bossAI(m, dt, distToPlayer) {
     // v0.30.325 — the cancel now also clears the aborted cycle's latches,
     // roster-wide. Without this, the flags the skipped cleanup owned stayed
     // stranded and disarmed the boss's next cast of the same pattern.
-    if (m.patternState !== 'idle') _lxBossCycleLatchClear(m);
+    if (m.patternState !== 'idle' || m._bigMeleeFiring || m._columnFiring || m._hgCharging || m._braceDashing) _lxBossCycleLatchClear(m);   // v0.30.x bughunt boss-2 - the trait bosses (Legosaurus, Arbiter, Sovereign) never leave 'idle', so their in-flight swing / column / lunge / brace was never cancelled here
+    if (m.zodiacBoss) _lxZodiacCancelScrub(m);   // v0.30.x bughunt boss-1 - this return skips the sign handler, the only code that clears the front block, the ritual, the lie and the burrow
     if (m.patternState !== 'idle' && typeof showToast === 'function') {
       showToast('⚡ ' + (m.name || 'The boss') + "'s attack is broken off!", 'rare');
     }
@@ -105489,6 +105492,9 @@ function bossAI(m, dt, distToPlayer) {
       m.vx = 0;
       if (!m._kAnnounced && t < 100) {
         m._kAnnounced = true;
+        // v0.30.x bughunt boss-4 - the per-beat keys are dynamic (_kFR_<ms>), so the stagger's latch list cannot name them and only the
+        // end of a full rain (t > 3300) deleted them: break Krook mid-rain and the NEXT rain skipped every beat already fired.
+        for (const k of Object.keys(m)) if (k.startsWith('_kFR_')) delete m[k];
         showToast('🔥🔥 INCOMING FIREBALL RAIN! 🔥🔥', 'legendary');
         flash(0.18); audio.play('boss_warn');
       }
@@ -109561,7 +109567,7 @@ function _killMonsterRaw(m) {
   // v0.30.x boss-audit — Cancer's Bubble Prison only counts down inside her own handler, so bursting out with the blow that
   // kills her (or dying bubbled) left BUBBLED, its sphere and its vignette on the player until the next Cancer fight.
   if (m.zodiacSign === 'cancer' && typeof player !== 'undefined' && player) { player._cancerBubble = 0; player._cancerBubbleHits = 0; }
-  if (m.type === 'scorpio' || m.zodiacId === 'scorpio') {
+  if (m.zodiacSign === 'scorpio') {   // v0.30.x bughunt boss-7 - the old test named a type ('scorpio') and a field (zodiacId) that exist nowhere; the real boss is zodiac_scorpio with zodiacSign
     for (let _hi = game.hazards.length - 1; _hi >= 0; _hi--) {
       const _h = game.hazards[_hi];
       if (_h && (_h.type === 'venom_pool' || _h.type === 'venom_burst')) game.hazards.splice(_hi, 1);
@@ -138576,7 +138582,8 @@ function drawWeather() {
 let _LX_DAYPH = { t: 0, phase: 'day', alpha: 0, style: '' };
 function _lxDayPhase() {
   const now = Date.now();
-  if (now - _LX_DAYPH.t < 2000) return _LX_DAYPH;
+  const _ddp = now - _LX_DAYPH.t;   // v0.30.x bughunt timers-9 - a clock set back makes this negative: the tint stayed frozen until the clock caught up
+  if (_ddp >= 0 && _ddp < 2000) return _LX_DAYPH;
   const d = new Date();
   let h = d.getHours() + d.getMinutes() / 60;
   if (typeof game !== 'undefined' && game && game._forcePhase != null) h = game._forcePhase;
@@ -160170,6 +160177,10 @@ function zodiacBossAI(m, dt, distToPlayer) {
     // burrow timer. (The movement half is owned by the patternState machine,
     // whose _noGravity / _burrowGroundY are already cleared on the line above.)
     m._burrowing = false;
+    // v0.30.x bughunt boss-1 - Taurus's front block, the same strand: a phase-cross mid-plant snaps the pattern to 'idle' and the
+    // idle handler never clears it (and _plantAnnounced stayed true, so the next plant was silent). Virgo and Gemini self-heal here.
+    if (m._frontBlocked) m._frontBlocked = false;
+    if (m._plantAnnounced) m._plantAnnounced = false;
     // v0.29.74 — PHASE ESCALATION. The phase change is now mechanical, not
     // just a toast: the boss speeds up (P2 +15%, P3 +30% over its authored
     // base — stored once so re-entering a phase can't compound), and erupts a
@@ -160624,8 +160635,22 @@ function _zodiacGaitTick(m, dt, distToPlayer, phase, z) {
 // big AoE, with no space to recover. The move is shared by every zodiac boss,
 // so the window is too.)
 const ZODIAC_SPENT_MS = 8000;
+// v0.30.x bughunt boss-1 - a cancel that skips the sign handler (SPENT after HEAVENSPLIT, a break-meter stagger or opening) must clear
+// what only the handler clears: Taurus's front block, Virgo's ritual (x0.4 damage taken), Gemini's lie (hits rejected + poison) and
+// Scorpio's burrow (immune, physics off, drawn under the floor). Sign-scoped on purpose: an unconditional _dreamPhase = false would end
+// Pisces's Dream Realm. Cheap and idempotent - the SPENT tick calls it every frame of the window.
+function _lxZodiacCancelScrub(m) {
+  if (m._frontBlocked || m._plantAnnounced) { m._frontBlocked = false; m._plantAnnounced = false; }
+  if (m._virgoChannel > 0 || m._virgoChanneling) { m._virgoChannel = 0; m._virgoChanneling = false; m._virgoChannelHp = null; }
+  if (m._geminiLying) { m._geminiLying = false; m._dreamPhase = false; }
+  if (m.zodiacSign === 'scorpio' && (m._noGravity || m._invulnBurrow || m._burrowing || m._burrowGroundY != null)) {
+    if (m._burrowGroundY != null) m.y = m._burrowGroundY;
+    m._noGravity = false; m._invulnBurrow = false; m._burrowing = false; m._dreamPhase = false; m._burrowGroundY = null;
+  }
+}
 function _zodiacSpentTick(m, dt, z) {
   if (!(m._zSpentMs > 0)) return false;
+  _lxZodiacCancelScrub(m);   // v0.30.x bughunt boss-1 - the sign handler is skipped for the whole window, so nothing else would
   m._zSpentMs -= (m._zRawDt > 0 ? m._zRawDt : dt);   // v0.30.1343 - 8 REAL seconds; the pattern-clock dt ran it out in ~6.15
   if (m.patternState && m.patternState !== 'idle') { m.patternState = 'idle'; m.patternTimer = 0; }
   m.patternTimer = 0;
@@ -160747,6 +160772,8 @@ function _zodiacDesperationFire(m, z) {
     // and could not be struck open. Her desperation move lands the bubble's end with it.
     if (m.zodiacSign === 'cancer' && typeof player !== 'undefined' && player) { player._cancerBubble = 0; player._cancerBubbleHits = 0; }
     if (m._bigMeleeFiring) { m._bigMeleeFiring = false; m._bigMeleeT = 0; }   // a smash already winding up is dropped too
+    if (m._columnFiring) { m._columnFiring = false; m._columnT = 0; }   // v0.30.x bughunt sibling2A-2 - and a pillar already telegraphing, ...
+    if (m._braceDashing) { m._braceDashing = false; m._bdT = 0; m.vx *= 0.15; }   // ... and a Taurus brace / charge (no gore on a 1-HP hero)
     m._bigMeleeCd = Math.max(m._bigMeleeCd | 0, ZODIAC_SPENT_MS);
     if (typeof showToast === 'function') showToast(z.glyph + ' ' + _lxZodiacSign(z) + ' is SPENT — ' + Math.round(ZODIAC_SPENT_MS / 1000) + 's to recover', 'epic');
   }
@@ -170589,7 +170616,10 @@ function _lxDrawFrame(time) {
 // v0.30.x — player game.time deadlines the solo pause carries (see the pause shift in loop()).
 const _LX_PAUSE_PLAYER_FIELDS = ['_spawnBoostUntil', '_rampUntil', '_riftSurgeUntil', '_quantumEchoUntil', '_fireRingUntil',
   '_iceRingUntil', '_flameTrailUntil', '_waltzUntil', '_flowStackExpiry', '_secondWindExpiry', '_secondWindCD',
-  '_classSkillMulExpires', '_gbStackUntil', '_levitateUntil', '_mirrorGate', '_heavyStunUntil', '_aquaShockAt',
+  '_classSkillMulExpires', '_gbStackUntil', '_levitateUntil', '_mirrorGate', '_heavyStunUntil',
+  // v0.30.x bughunt (pause clock): '_aquaShockAt' was written nowhere (the real deadline is on the pool, shifted below). Added: the
+  // cast lock (moves WITH the Siege Volley channel's end, below), Holy Shield's own reflect window and Backstab's 6 s sleight gate.
+  '_castLockUntil', '_holyReflectUntil', '_sleightNextAt',
   '_bigStabUntil', '_blinkPhaseUntil', '_blossomDashUntil', '_chantRaiseUntil', '_dashEvadeUntil', '_impalePoseUntil',
   '_mageBigSwingUntil', '_maneToastAt', '_ninjaCrouchUntil', '_ninjaPoseUntil', '_padFlingUntil', '_rogueDashPoseUntil',
   '_rogueThrowSomersaultUntil', '_warriorBashUntil', '_warriorGroundSmashUntil'];
@@ -170775,6 +170805,16 @@ function loop(time) {
     if ((player._bloodRitualUntil | 0) > _sfT) player._bloodRitualUntil++;
     if (game._mirrorDecoy && (game._mirrorDecoy.until | 0) > _sfT) game._mirrorDecoy.until++;
     if (game._carriage && (game._carriage.lurchAt | 0) > _sfT) game._carriage.lurchAt++;
+    // v0.30.x bughunt (pause clock) - four more game.time clocks no list could name. The Siege Volley channel: its end, its volley stamp
+    // and its sprite stamp all read game.time (the cast lock shifts WITH endsAt, above - _lxBallistaFree compares the two); a menu opened
+    // 0.4 s into the cast let the 8 s channel lapse behind it, so it fired 4 arrows instead of 106. The Mojimon binding QTE's 60 s gate,
+    // the status-grace windows, and Aquarius's electrified pool: its once-per-electrify latch is _aquaShockOf !== _aquaElectrified, so
+    // the two shift TOGETHER or a pool that already shocked would shock a second time on unpause.
+    { const _bc = player._ballistaChannel;
+      if (_bc) { if ((_bc.endsAt | 0) > _sfT) _bc.endsAt++; _bc.lastFireAt++; _bc.lastSpriteAt++; } }
+    if ((game._mojimonQteCdT | 0) > _sfT) game._mojimonQteCdT++;
+    { const _sg = player._statusGraceUntil; if (_sg) for (const _k in _sg) { if ((_sg[_k] | 0) > _sfT) _sg[_k]++; } }
+    if (game.hazards) for (const _ph of game.hazards) { if (_ph && _ph._aquaElectrified > _sfT) { if (_ph._aquaShockOf === _ph._aquaElectrified) _ph._aquaShockOf++; _ph._aquaElectrified++; } }
     const _sfMs = game.monsters;
     // v0.30.x ward-pause — a boss ward, its BREAK window and the gap to the next ward are game.time deadlines too: a menu
     // opened mid-ward waited it out for free, and one opened during a break let the 1.5x window expire behind it.
@@ -174681,7 +174721,8 @@ function _lxCloudPushSave(json, force) {
     const sess = (typeof LXAuth !== 'undefined') ? LXAuth.session() : null;
     if (!sess || sess.kind !== 'cloud' || !sess.token) return;   // only cloud accounts push
     const now = Date.now();
-    if (!force && now - _lxCloudPushAt < 15000) return;          // throttle: <= 1 push / 15s
+    const _dtp = now - _lxCloudPushAt;   // v0.30.x bughunt timers-9 - a clock set back makes this negative, which read as "just pushed" until the clock caught up
+    if (!force && _dtp >= 0 && _dtp < 15000) return;          // throttle: <= 1 push / 15s
     _lxCloudPushAt = now;
     _lxCloudPost(sess.token, json, force);   // v0.30.1185 cloud-paint-cap - whole when it fits the cloud's cap, else without the paint
   } catch (e) {}
