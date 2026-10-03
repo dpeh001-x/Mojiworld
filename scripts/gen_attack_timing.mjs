@@ -166,6 +166,11 @@ export const LX_MOB_STRIKE_BY_TYPE = {
 // flame flares inside its ring of light on f3, the gold lantern's starburst is f3, and the Stormcaller's lightning leaves
 // the fist on f4 (f3 is the fist still charging).
 Object.assign(LX_MOB_STRIKE_BY_TYPE, { scaleLanternA: 3, scaleLanternB: 3, scaleStormcaller: 4 });
+// bughunt bootdata-3 - the two sets that arrived after Libra's (Lady Honk's bow, v0.30.1582, and Elder Arlen's Coronation of Ruin, v0.30.1591)
+// came in without a pick too, so --check failed again. From the art: Lady Honk's arrow is drawn on f3 and LEAVES the bow on f4 (beak open,
+// glowing trail; f5 is the spray after it); the Ruin set's burst builds through f3-f5 and is at its biggest on f6 (the same frame as his
+// ordinary cast, vigil_vermillion 6).
+Object.assign(LX_MOB_STRIKE_BY_TYPE, { lady_honk: 4, vigil_vermillionruin: 6 });
 export const LX_MOB_HOLD = { strikeMin: 1.8, strikeSlope: 2.5, strikeMax: 2.8, side: 1.5, first: 1.2, last: 1.6, pulse: 1.8, clearApex: 0.03 };
 export function defaultMobAttackFt(n, cb, frameH, base, strikeAt) {
   if (!(n > 1)) return null;

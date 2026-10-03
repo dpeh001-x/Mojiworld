@@ -3097,7 +3097,7 @@ window.LX_ANIM_CALIB = {
         72,
         72,
         108,
-        141,
+        137,
         108,
         115
       ],
@@ -3318,6 +3318,23 @@ window.LX_ANIM_CALIB = {
         72,
         115
       ]
+    }
+  },
+  "vigil_vermillionruin": {
+    "attack": {
+      "ft": [
+        86,
+        72,
+        72,
+        72,
+        72,
+        108,
+        144,
+        108,
+        72,
+        115
+      ],
+      "ftAuto": true
     }
   }
 };

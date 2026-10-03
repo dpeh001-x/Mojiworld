@@ -46,7 +46,7 @@ const r = await page.evaluate(async () => {
     const table = (0, eval)(tableName) || [];  // script-scope const, not a window property
     const thumbs = items.map((it) => it.querySelector('.cs-dd-thumb img'));
     lists[id] = {
-      options: table.length, items: items.length,
+      options: (tableName === 'HERO_VEC_HAIR_OPTIONS' ? table.filter((h) => !h.cos || _lxCosmeticUnlocked('hair', h.cos)) : table).length, items: items.length,   // bughunt diff-b-1: locked cosmetic hairs are not offered
       itemsWithThumb: thumbs.filter(Boolean).length,
       thumbsDecoded: thumbs.filter((im) => im && im.naturalWidth > 0).length,
       emojiItems: items.filter((it) => EMOJI.test(it.textContent)).length,

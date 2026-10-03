@@ -399,7 +399,6 @@ game and this table). Unlocks fire live; already-earned achievements sync up on 
 | `lv30` | Veteran | Reach level 30 |
 | `lv70` | Champion | Reach level 70 |
 | `lv100` | Ascended | Reach level 100 |
-| `lv150` | Mythic | Reach level 150 |
 | `kill5000` | Annihilator | Defeat 5,000 enemies |
 | `kill10000` | Worldbreaker | Defeat 10,000 enemies |
 | `boss6` | Boss Slayer | Defeat 6 different bosses |

@@ -57,7 +57,6 @@ const MAP = {
   lv50:         { p: 'level',    n: '50'  },
   lv70:         { p: 'level',    n: '70'  },
   lv100:        { p: 'level',    n: '100' },
-  lv150:        { p: 'level',    n: '150' },
   legendary:    { p: 'forge',    g: '\u{1F48E}' },
   starforged:   { p: 'forge',    n: '5',  sub: '★' },
   star8:        { p: 'forge',    n: '8',  sub: '★' },

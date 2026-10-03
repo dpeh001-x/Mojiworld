@@ -54,6 +54,9 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined 
 const ev = async (fn, arg) => { try { return await page.evaluate(fn, arg); } catch (e) { return { err: String(e).slice(0, 160) }; } };
 
 const r = await ev(async () => {
+  // bughunt engine-9: resuming from the lost-focus veil now keeps the world paused under any pause owner, a story beat included; the forest's first-visit beat
+  // would be open in this harness, so every beat is marked seen first (the usual harness rule)
+  try { player._storyBeatsSeen = new Proxy({}, { get: () => true, set: () => true }); } catch (e) {}
   loadMap('forest', 300); await new Promise((r) => setTimeout(r, 1500));
   // mirror a booted game: the harness drives the sim under the boot menu and with the
   // (unplayable, headless) prologue flagged active — a real session has neither
