@@ -79,6 +79,15 @@ try {
   });
   ok('meteor misses OUTSIDE the zone, hits INSIDE', zone.farDrop === 0 && zone.nearDrop > 0, zone);
 
+  // bughunt parityA-4: the hazhit frame carries the pillar's pc (%-of-max-HP: second DEF pass + 99.9% ceiling) and kb (shove).
+  const pillar = await ev(B, () => {
+    const hostId = net.hostId, m = game.currentMap;
+    const hit = (o, px) => { player._god = false; player.invulnerable = 0; player.hp = player.maxHp = 5000; player.x = px; player.y = 300; player.vx = 0; const b0 = player.hp; _coopApplyHazHit(Object.assign({ map: m, id: hostId, x: 600, r: 120, d: 4000, c: '#f93', sl: 'pillar' }, o)); const lost = b0 - player.hp; const vx = player.vx; player.hp = 5000; return { lost, vx }; };
+    return { plain: hit({}, 590), pct: hit({ pc: 1 }, 590), kbR: hit({ kb: 16 }, 590), kbL: hit({ kb: 16 }, 560) };
+  });
+  ok('a %-of-max-HP pillar (pc) never costs the follower more than the plain strike (second DEF pass + ceiling)', pillar.pct.lost > 0 && pillar.pct.lost <= pillar.plain.lost, pillar);
+  ok('the pillar shoves the follower away from its centre (kb)', pillar.kbR.vx === 16 && pillar.kbL.vx === -16 && pillar.plain.vx === 0, pillar);
+
   ok('no page errors (host)', A._errors.length === 0, A._errors.slice(0, 4));
   ok('no page errors (follower)', B._errors.length === 0, B._errors.slice(0, 4));
 } catch (e) { results.push({ n: 'HARNESS ERROR', pass: false, extra: String(e).slice(0, 300) }); }
