@@ -28564,6 +28564,7 @@ const ITEM_STAT_WEIGHTS = {
   greed: 20, xpBoost: 40, mpRegen: 20, hpRegen: 30,
   dodgeChance: 200, freezeChance: 150, chainChance: 120, voidChance: 200,
   extraJumps: 15, mpRegenPct: 40,
+  defPierce: 150,   // v0.30.1581 stat-sets
 };
 function itemScore(it) {
   if (!it) return 0;
@@ -28618,7 +28619,7 @@ const STAT_LABEL = {
   burn:'Burn', multishot:'Multishot', thorns:'Thorns', greed:'Mojicoin+',
   xpBoost:'XP+', mpRegen:'MP Regen', hpRegen:'HP Regen',
   dodgeChance:'Dodge%', freezeChance:'Freeze%', chainChance:'Chain%',
-  voidChance:'Void%', extraJumps:'Extra Jumps', mpRegenPct:'MP Regen%'
+  voidChance:'Void%', extraJumps:'Extra Jumps', mpRegenPct:'MP Regen%', defPierce:'Armour pierce'
 };
 
 // Compute per-stat deltas between two items (oldItem may be null)
@@ -43397,7 +43398,7 @@ function getEquipBonus(key) {
           // Keys that are neither flat nor pct still pass through at plain star
           // scaling — they are not a magnitude family we want tier touching.
           const _isPct = (typeof _AFFIX_PCT_STATS !== 'undefined' &&
-            (_AFFIX_PCT_STATS.has(k) || k === 'hpPct' || k === 'speed'));
+            (_AFFIX_PCT_STATS.has(k) || k === 'hpPct' || k === 'speed' || k === 'defPierce'));   // v0.30.1581 stat-sets - pierce softens with stars like Crit DMG
           const mul = _starStatMult(it, k);
           const _pctSoft = _isPct ? (1 + (mul - 1) * 0.35) * tPctMul : mul;
           const _effMul = _noScale ? 1 : (_TIER_FLAT_STATS.has(k) ? mul * tMul : _pctSoft);
@@ -43459,6 +43460,35 @@ function getEquipBonus(key) {
     player._equipBonusCache = cache;
   }
   return cache[key] || 0;
+}
+
+// v0.30.1581 stat-sets - THREE-PIECE SIGNATURES of the five stat sets (every one is cls 'any', so no class gate). On while all three
+// pieces of the set are worn. Tailwind (Galecrest): a dodge gives +30% move speed and +25% on your next hit for 2 s. Fault Line
+// (Sunderer): each of your hits on a foe cracks 3% more of its DEF for 4 s, up to 15%. Regrowth (Heartwood): under 30% HP, regen x3
+// for 5 s, once a minute. Shatter (Razorglass): your killing crit hits the nearest foe for 30% of the blow. Immovable (Granitehorn):
+// standing still, hits do not knock you back and each adds +2% DEF for 5 s, up to +10%. game.time counts frames (60 a second).
+function _lxSetSig(id) {
+  if (typeof player === 'undefined' || !player || !player.equipped) return false;
+  let n = 0;
+  for (const sl of ['weapon', 'armor', 'accessory']) { const it = player.equipped[sl]; if (it && it.setId === id) n++; }
+  return n >= 3;
+}
+function _lxOnPlayerDodge() {
+  if (!_lxSetSig('galecrest')) return;
+  const t = ((game && game.time) | 0) + 120;
+  player._tailwindUntil = t; player._tailwindHit = t;
+}
+function _lxGraniteStill() { return _lxSetSig('granitehorn') && !!player.onGround && Math.abs(+player.vx || 0) < 0.6; }
+function _lxGraniteHit() {
+  if (!_lxGraniteStill()) return;
+  const t = (game.time | 0), live = (player._graniteUntil | 0) > t;
+  player._graniteN = Math.min(5, (live ? (player._graniteN | 0) : 0) + 1); player._graniteUntil = t + 300;
+}
+const LX_SET_HOME = { galecrest: ['stormCrest'], sunderer: ['sundered_forge'], heartwood: ['bloomhaven', 'thornspireThicket'],
+  razorglass: ['glasswindSteppe', 'glasswindSteppe2'], granitehorn: ['@zodiac_taurus'] };   // map ids; '@type' = dropped by that monster
+function _lxSetHome(id, srcMob) {
+  const h = LX_SET_HOME[id]; if (!h) return false;
+  return h.some((k) => k.charAt(0) === '@' ? !!(srcMob && srcMob.type === k.slice(1)) : (typeof game !== 'undefined' && game && game.currentMap === k));
 }
 
 // v0.25.248 — Set-bonus engine. Counts equipped pieces per setId and
@@ -44326,6 +44356,7 @@ function getDef()  {
   // v0.26.889 — job talent: DEF%
   { const _tfx = (typeof talentFx === 'function') ? talentFx() : null; if (_tfx && _tfx.defPct) d = Math.floor(d * (1 + _tfx.defPct)); }
   // v0.25.511 — Warrior innate: +20 % DEF over the baseline classes.
+  if ((player._graniteUntil | 0) > (game.time | 0)) d = Math.floor(d * (1 + 0.02 * Math.min(5, player._graniteN | 0)));   // v0.30.1581 stat-sets Immovable
   if (player.cls === 'warrior') d = Math.floor(d * 1.25);
   // v0.30.713 — the MojiMon bond. getMagicDef delegates here, so warding scales with it too.
   d = Math.floor(d * _mojimonAuraMul('def'));
@@ -44544,7 +44575,7 @@ const BASIC_HIT_SKILLS = new Set(['melee','arrow','dagger','bolt']);
 // corpse detonating, so it does not roll either.
 // v0.29.362 — 'overflow' joins: the carried overkill was already EARNED by a
 // hit that connected and killed; the jump to the neighbour does not re-roll.
-const MISS_EXEMPT_SKILLS = new Set(['thorns','burn','flamedash','nova','bloom','overflow','shade']);   // v0.30.x — 'shade': the Sovereign Shade repeats a strike that already connected
+const MISS_EXEMPT_SKILLS = new Set(['thorns','burn','flamedash','nova','bloom','overflow','shade','shatter']);   // v0.30.1581 stat-sets - 'shatter': the killing crit already connected   // v0.30.x — 'shade': the Sovereign Shade repeats a strike that already connected
 function _rollAccuracyHit(attackerAccuracy, targetEvasion, minFloor) {
   const ev = +targetEvasion || 0;
   if (ev <= 0) return true;
@@ -44687,6 +44718,7 @@ function _lxKbTaken() {
   k *= Math.max(0.1, 1 - ((player.tree && player.tree.kbReduce) || 0));
   if (typeof hasMilestone === 'function' && hasMilestone('steadyFeet')) k *= 0.5;
   if ((player.blockTimer || 0) > 0) k *= LX_KB_BLOCK;
+  if (_lxGraniteStill()) k = 0;   // v0.30.1581 stat-sets Immovable (Granitehorn)
   return k;
 }
 // v0.30.1440 kb-leeway - KNOCKBACK WITH LEEWAY, THE SOVEREIGN AND GRAVITOS ONLY (per user: "regulate them so that players dont
@@ -44899,6 +44931,7 @@ function getSpeed(){
   // _slowTimer > 0 (decremented in the main update loop). The timer
   // is set by the mob_frostbeam hazard hit branch.
   if ((player._slowTimer || 0) > 0) s *= 0.5;
+  if ((player._tailwindUntil | 0) > (game.time | 0)) s *= 1.30;   // v0.30.1581 stat-sets Tailwind (the cap below still holds)
   // v0.26.068 — Hard ceiling applied LAST so every contributor (base,
   // mods, equip, class mul, buffs, flow stacks) is bounded uniformly.
   // Slows still trim s below the cap; the cap only kicks in on the
@@ -50678,7 +50711,7 @@ function _lxBossHpFloor(type, dmg) {
 // v0.30.1474 taken-num - the number a hit on the player shows is the HP it took (per user). A site subtracts _lxLost(its final
 // loss) and its number shows _lxShownLost(); in god mode it records the raw value instead (_lxLost(0, raw)), as contact does.
 let _lxLastLost = 0;
-function _lxLost(v, shown) { _lxLastLost = Math.max(0, +((shown != null) ? shown : v) || 0); return v; }
+function _lxLost(v, shown) { _lxLastLost = Math.max(0, +((shown != null) ? shown : v) || 0); if (v > 0) _lxGraniteHit(); return v; }   // v0.30.1581 stat-sets: every hit taken passes here
 function _lxShownLost() { return Math.round(_lxLastLost); }
 function _diffDmg(d, srcLv, capPct) { /* v0.29.672 — a PAUSED player cannot be
   harmed. In co-op the world deliberately keeps running while a player sits in
@@ -60896,6 +60929,7 @@ function _coopFollowerContactTick() {
     const dodgeC = (typeof getEvasion === 'function') ? getEvasion() : 0;
     if (dodgeC > 0 && Math.random() < dodgeC) {
       if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: 'DODGE', life: 40, color: '#88ffcc', size: 14 });
+      _lxOnPlayerDodge();   // v0.30.1581 stat-sets Tailwind
       player.invulnerable = 300; return;
     }
     const _normalMul = (!m.isBoss && !m.isMiniBoss) ? 0.28 : 1.0;
@@ -82530,7 +82564,12 @@ function updatePlayer(dt) {
     }
   }
   // Equipment hpRegen (per second)
-  const hpR = getEquipBonus('hpRegen');
+  // v0.30.1581 stat-sets Regrowth (Heartwood): under 30% HP the regen triples for 5 s, once a minute
+  if (_lxSetSig('heartwood') && player.hp > 0 && player.hp < _maxHpR * 0.30 && (game.time | 0) >= (player._regrowthCd | 0)) {
+    player._regrowthUntil = (game.time | 0) + 300; player._regrowthCd = (game.time | 0) + 3600;
+    if (typeof showToast === 'function') showToast('🌳 Regrowth!', 'rare');
+  }
+  const hpR = getEquipBonus('hpRegen') * (((player._regrowthUntil | 0) > (game.time | 0)) ? 3 : 1);
   if (hpR > 0 && game.time % 60 === 0 && player.hp < _maxHpR) {
     player.hp = Math.min(_maxHpR, player.hp + hpR);
   }
@@ -98580,6 +98619,7 @@ function updateMonsters(dt) {
           taken: true, x: player.x + 14, y: player.y, vy: -2,
           text: 'DODGE', life: 40, color: '#88ffcc', size: 14
         });
+        _lxOnPlayerDodge();   // v0.30.1581 stat-sets Tailwind
         player.invulnerable = 300;
         continue;
       }
@@ -107018,6 +107058,8 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   }
   // Death Mark bonus (Nightreaper)
   if (m.deathMark > 0 && skill !== 'thorns') dmg = Math.floor(dmg * 1.5);
+  // v0.30.1581 stat-sets Tailwind: the hit after a dodge lands for +25% (your own hits only)
+  if (!_LX_KICK_SKIP[skill] && (player._tailwindHit | 0) > (game.time | 0)) { dmg = Math.floor(dmg * 1.25); player._tailwindHit = 0; }
   // Void proc: rare massive damage on this hit
   const voidCh = Math.min(1, getEquipBonus('voidChance'));   // clamp so stacked void gear can't exceed a guaranteed proc
   if (voidCh > 0 && skill !== 'thorns' && Math.random() < voidCh) {
@@ -107077,6 +107119,12 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
     // never be switched off outright.
     // (v0.26.458 note kept: the tag is 'siege' — 'siegeVolley' never matched,
     // so the advertised def-shred was dead long before this.)
+    // v0.30.1581 stat-sets Fault Line (Sunderer): this hit meets the cracks your earlier hits left (3% DEF each, 15% at most, 4 s)
+    if (!_LX_KICK_SKIP[skill] && _lxSetSig('sunderer')) {
+      const _ft = game.time | 0, _fl = (m._faultUntil | 0) > _ft;
+      if (_fl) defVal *= 1 - 0.03 * Math.min(5, m._faultN | 0);
+      m._faultN = Math.min(5, (_fl ? (m._faultN | 0) : 0) + 1); m._faultUntil = _ft + 240;
+    }
     {
       const _DEF_K = 300;
       const _pierce = (typeof _lxDefPierce === 'function') ? _lxDefPierce(skill) : 0;
@@ -107314,6 +107362,14 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // of non-lethal crits doesn't accidentally trip the flag at death.
   if (m.currentHp <= 0) m._killedByCrit = !!isCrit;
   else m._killedByCrit = false;
+  // v0.30.1581 stat-sets Shatter (Razorglass): your killing crit bursts into glass; the nearest foe within 400 px takes 30% of the blow
+  if (m.currentHp <= 0 && isCrit && !_LX_KICK_SKIP[skill] && skill !== 'shatter' && !(game._shatterDepth | 0) && _lxSetSig('razorglass')) {
+    let _sb = null, _sbSq = 400 * 400; const _sx = m.x + m.w / 2, _sy = m.y + m.h / 2;
+    for (const _o of game.monsters) { if (!_o || _o === m || _o.currentHp <= 0) continue;
+      const _dx = (_o.x + _o.w / 2) - _sx, _dy = (_o.y + _o.h / 2) - _sy, _sq = _dx * _dx + _dy * _dy; if (_sq < _sbSq) { _sbSq = _sq; _sb = _o; } }
+    for (let _k = 0; _k < 10 && game.particles; _k++) game.particles.push({ x: _sx, y: _sy, vx: (Math.random() - 0.5) * 9, vy: (Math.random() - 0.7) * 7, life: 20, color: (_k % 3) ? '#bfefff' : '#ffffff', size: 3 });
+    if (_sb) { game._shatterDepth = 1; try { hitMonster(_sb, Math.max(1, Math.floor(finalDmg * 0.30)), false, 'shatter'); } finally { game._shatterDepth = 0; } }
+  }
   // v0.29.296 — milestone `refundOnKill`. Handled here rather than in
   // killMonster because only this scope still knows WHICH skill landed the
   // killing blow (m._killedBySkill is just a boolean).
@@ -110584,6 +110640,7 @@ function rollItemDrop(tier, mobLevel, forceCat, forceTier, capTier, srcMob) {
       else if (_ti >= 9) w = Math.max(1, Math.round(w * 0.22));
       else if (_ti >= 8) w = Math.max(1, Math.round(w * 0.38));
     }
+    if (w > 0 && it.setId && _lxSetHome(it.setId, srcMob)) w *= 3;   // v0.30.1581 stat-sets home zones
     for (let j = 0; j < w; j++) weighted.push(it);
   }
   if (!weighted.length) return null;
@@ -111427,6 +111484,7 @@ function updateProjectiles(dt) {
             taken: true, x: player.x + 14, y: player.y, vy: -2,
             text: 'DODGE', life: 40, color: '#88ffcc', size: 14
           });
+          _lxOnPlayerDodge();   // v0.30.1581 stat-sets Tailwind
           game.projectiles.splice(i, 1); continue;
         }
         // Magic-type projectiles use magic defense
@@ -118176,6 +118234,7 @@ function itemStatString(it, multiline) {
   if (it.chainChance)  parts.push(`⚡ ${Math.round(it.chainChance*_tPctMul*100)}% Chain`);
   if (it.voidChance)   parts.push(`🌑 ${Math.round(it.voidChance*_tPctMul*100)}% Void`);
   if (it.dodgeChance)  parts.push(`💨 ${Math.round(it.dodgeChance*_tPctMul*100)}% Dodge`);
+  if (it.defPierce)    parts.push(`⛏️ ${Math.round(it.defPierce*_tPctMul*100)}% Armour pierce`);   // v0.30.1581 stat-sets
   // v0.26.255 — Status resistance affixes (v0.26.250). Pretty-print the
   // 0..1 fraction as an integer % with a thematic glyph. Order matches
   // the conventional status display: burn → poison → electric → freeze →
@@ -119186,7 +119245,7 @@ function renderEnhancementModal(selectedItem) {
         voidChance:'Void', dodgeChance:'Dodge', freezeChance:'Freeze',
         hpRegen:'HP Regen', multishot:'Multishot', burn:'Burn',
         burnResist:'Burn Res', poisonResist:'Poison Res', electricResist:'Electric Res',
-        freezeResist:'Freeze Res', slowResist:'Slow Res',
+        freezeResist:'Freeze Res', slowResist:'Slow Res', defPierce:'Armour pierce',
       };
       // v0.30.x - resolved per stat inside the loop below: this preview is the
       // one place a player reads what a star is worth to THIS piece, so it has
@@ -125189,6 +125248,7 @@ function attachTooltip(el, it) {
           ${gateNote}
           <div style="color:${active2 ? '#88ff88' : '#777'};">2pc: ${_setBonusFmt(set.bonus2)}</div>
           <div style="color:${active3 ? '#88ff88' : '#777'};">3pc: ${_setBonusFmt(set.bonus3)}</div>
+          ${set.sig ? `<div style="color:${active3 ? '#ffe08a' : '#777'};">3pc signature: ${set.sig}</div>` : ''}
         </div>`;
     }
     tt.innerHTML = `<div class="name rarity-text-${_lxRarityCls(it.rarity)}">${itemIconHtml(it, 24)} ${it.name}</div>
@@ -125259,11 +125319,13 @@ function _setBonusFmt(bonus) {
   const parts = [];
   for (const k in bonus) {
     const v = bonus[k];
-    const pctKeys = { atkPct:'% ATK', critDmg:'% Crit DMG', dodgeChance:'% Dodge' };
+    const pctKeys = { atkPct:'% ATK', critDmg:'% Crit DMG', dodgeChance:'% Dodge', hpPct:'% Max HP', thorns:'% Thorns', defPierce:'% Armour pierce' };   // v0.30.1581 stat-sets - + the keys that printed raw
     if (pctKeys[k]) parts.push(`+${Math.round(v * 100)}${pctKeys[k]}`);
     else if (_RESIST_LABEL[k]) parts.push(`+${Math.round(v * 100)}${_RESIST_LABEL[k]}`);
     else if (k === 'speed' || k === 'jump') parts.push(`+${v.toFixed(1)} ${k === 'speed' ? 'Spd' : 'Jump'}`);
     else if (k === 'multishot') parts.push(`+${v} Shot`);
+    else if (k === 'lifesteal') parts.push(`+${+(v * 100).toFixed(1)}% Lifesteal`);
+    else if (k === 'hpRegen')   parts.push(`+${v} HP/s`);
     else if (k === 'crit')      parts.push(`+${v} Crit`);
     else                         parts.push(`+${v} ${k.toUpperCase()}`);
   }
