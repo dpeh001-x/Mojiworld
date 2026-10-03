@@ -3,6 +3,9 @@
 // equipments ingame (to show categories and section into weapon armor and accessories)"). Driven through its own DOM:
 //   TABS      one tab per ITEM_POOL category - Weapons, Armor, Accessories - each labelled with the pool's own count
 //   SECTIONS  "All classes" shows every piece of a tab under its class heading; a class chip shows that class only
+//   SETS      (v0.30.1583, per user: "include the new updated list of equipments") a fourth tab gives each of the SETS - the five
+//             legendary sets and v0.30.1581's five stat sets - its own section with exactly its pieces; a class chip there
+//             shows what that class wears (Mage + Galecrest = Rod, Featherweave, Plume) and "Whole set" makes all three
 //   CATALOG   a tile click puts the exact catalog piece in the bag (slot, baseName, no affixes, star 0)
 //   ROLLED    rolled + legendary + 5 stars makes a drop: affixes, a prefixed name, the base name kept, the accessory slot
 //   EQUIP     "Equip it on the hero" wears the piece and moves the old one to the bag
@@ -46,7 +49,7 @@ try {
     openDevConsole();
     out.open = !!$('.dg-tabs') && getComputedStyle(document.getElementById('dev-modal')).display !== 'none';
     out.tabs = $$('.dg-tab').map((t) => t.textContent);
-    out.pool = ['weapons', 'armors', 'accessories'].map((c) => ITEM_POOL[c].length);
+    out.pool = ['weapons', 'armors', 'accessories'].map((c) => ITEM_POOL[c].length); out.setCount = Object.keys(SETS).length;
     // every tab, all classes: every piece shown under its class heading; then one class chip
     out.sections = {};
     for (const c of ['weapons', 'armors', 'accessories']) {
@@ -58,6 +61,19 @@ try {
       out.sections[c] = { all: names.length === want.length && want.every((n) => names.includes(n)), heads: heads.join('/'),
         warrior: war.length === wantWar.length && wantWar.every((n) => war.includes(n)) && $$('.dg-group').length === 1 };
     }
+    // SETS: every set in its own section with exactly its pieces; the mage's Galecrest; the whole set into an empty bag
+    tab('sets'); chip('all');
+    const heads = $$('.dg-group[data-set]').map((h) => h.dataset.set), want = Object.keys(SETS).map((k) => SETS[k].name);
+    const piecesOf = (name) => { const h = $$('.dg-group[data-set]').find((x) => x.dataset.set === name); const g = h && h.nextElementSibling && h.nextElementSibling.nextElementSibling;
+      return g ? [...g.querySelectorAll('.dg-tile')].map((t) => t.dataset.name) : []; };
+    const all = ['weapons', 'armors', 'accessories'].flatMap((c) => ITEM_POOL[c]);
+    const exact = Object.keys(SETS).every((k) => { const got = piecesOf(SETS[k].name), w = all.filter((b) => b.setId === k).map((b) => b.name); return got.length === w.length && w.every((n) => got.includes(n)); });
+    const tag = (tile('Galecrest Rod') || { querySelector: () => null }).querySelector('.dg-set');
+    chip('mage'); const mageGale = piecesOf('Galecrest'), noAnyChip = !$('.dg-chip[data-cls="any"]');
+    player.inventory = []; const wholeBtn = [...$$('.dg-group[data-set]').find((x) => x.dataset.set === 'Galecrest').querySelectorAll('button')].pop(); wholeBtn.click();
+    out.sets = { tab: (($('.dg-tab[data-cat="sets"]') || {}).textContent || ''), heads: heads.length === want.length && want.every((n) => heads.includes(n)), exact,
+      stat: ['Galecrest', 'Sunderer', 'Heartwood', 'Razorglass', 'Granitehorn'].every((n) => heads.includes(n)), tag: tag ? tag.textContent : null,
+      mageGale: mageGale.slice().sort().join('/'), noAnyChip, whole: player.inventory.map((i) => i.baseName).sort().join('/') };
     // CATALOG: an empty bag, the starter stick
     player.inventory = []; player.equipped.armor = null; tab('weapons'); chip('all');
     tile('Whittled Stick').click();
@@ -84,13 +100,18 @@ try {
     return out;
   });
   ok('the console opens with the generator in it', R.open === true);
-  ok('TABS: Weapons, Armor and Accessories, each with the pool\'s count', R.tabs.length === 3 && /Weapons · (\d+)/.test(R.tabs[0]) && +R.tabs[0].match(/· (\d+)/)[1] === R.pool[0]
+  ok('TABS: Weapons, Armor and Accessories, each with the pool\'s count, then Sets', R.tabs.length === 4 && /Sets · (\d+)$/.test(R.tabs[3]) && +R.tabs[3].match(/· (\d+)$/)[1] === R.setCount && /Weapons · (\d+)/.test(R.tabs[0]) && +R.tabs[0].match(/· (\d+)/)[1] === R.pool[0]
     && /Armor · /.test(R.tabs[1]) && +R.tabs[1].match(/· (\d+)/)[1] === R.pool[1] && /Accessories · /.test(R.tabs[2]) && +R.tabs[2].match(/· (\d+)/)[1] === R.pool[2], R.tabs.join(' | '));
   for (const c of ['weapons', 'armors', 'accessories']) {
     const s = R.sections[c];
     ok(`SECTIONS: ${c} - every piece under its class heading (any, warrior, rogue, mage, archer), and the warrior chip shows warrior pieces only`,
       s.all && s.heads === 'any class/⚔ warrior/🥷 rogue/🪄 mage/🏹 archer' && s.warrior, JSON.stringify(s));
   }
+  const T = R.sets;
+  ok('SETS: a section for every set - the five legendary and the five stat sets - each with exactly its pieces', T.heads && T.exact && T.stat, JSON.stringify({ heads: T.heads, exact: T.exact, stat: T.stat }));
+  ok('SETS: set pieces name their set on the tile', T.tag === '◆ Galecrest', T.tag);
+  ok('SETS: the Mage chip shows the mage\'s Galecrest (Rod, Featherweave, Plume) and there is no Any-class chip', T.mageGale === 'Galecrest Featherweave/Galecrest Plume/Galecrest Rod' && T.noAnyChip, T.mageGale);
+  ok('SETS: Whole set puts exactly those three in the bag', T.whole === 'Galecrest Featherweave/Galecrest Plume/Galecrest Rod', T.whole);
   const C = R.catalog; ok('CATALOG: the Whittled Stick tile puts the exact catalog piece in the bag', C.n === 1 && C.name === 'Whittled Stick' && C.base === 'Whittled Stick' && C.slot === 'weapon' && C.stars === 0 && C.affixes === 0 && C.rarity === 'common', JSON.stringify(C));
   const D = R.rolled; ok('ROLLED: rolled + legendary + 5 stars makes an affixed Ring of Might drop', D.base === 'Ring of Might' && D.name !== 'Ring of Might' && /Ring of Might/.test(D.name) && D.slot === 'accessory' && D.stars === 5 && D.rarity === 'legendary' && D.affixes >= 3, JSON.stringify(D));
   const E = R.equip; ok('EQUIP: the Cloth Tunic goes on the hero and the Threadbare Rags into the bag', E.worn === 'Cloth Tunic' && E.oldInBag && E.bag === 1, JSON.stringify(E));
