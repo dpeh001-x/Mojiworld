@@ -163,7 +163,7 @@ try {
       _lxProjKbTier({ _bossBand: _bossHitBand({ isBoss: true, superBoss: true, level: 65, type: 'aetherion' }, 'heavy') }), _lxProjKbTier({ _bossBand: _bossHitBand({ isBoss: true, level: 50, type: 'kingKrook' }, 'heavy') }),
       _lxProjKbTier({ _gravBand: _gravHeavyBand(1, 'comet') }), _lxProjKbTier({ _zodiacSign: 'leo' }), _lxProjKbTier({ _srcType: 'kingKrook' }), _lxProjKbTier({ skill: 'swing' }), _lxProjKbTier({}), _lxProjKbTier({ _kbTier: 0, _zodiacSign: 'leo' }), _lxProjKbTier({ _kbTier: 77 })];
     // a guest's touch from the host's mirrored boss
-    T.stand(1400); const gm = T.mob('boss', -1); gm._coopMirror = true; player._god = false; player.hp = getMaxHp(); _coopFollowerContactTick(); o.guest = { vx: +player.vx.toFixed(3), vy: +player.vy.toFixed(3), alive: player.hp > 0 }; player._god = true;
+    T.stand(1400); const gm = T.mob('boss', -1); gm._coopMirror = true; player._god = false; player.hp = getMaxHp(); game.paused = false; try { _coopFollowerContactTick(); } finally { game.paused = true; } /* bughunt guest-taken: a PAUSED guest is a ghost statue, so the tick needs the world un-paused */ o.guest = { vx: +player.vx.toFixed(3), vy: +player.vy.toFixed(3), alive: player.hp > 0 }; player._god = true;
     return o; });
   if (D.missing) check(false, 'D. the robustness checks need the strike-knock rules');
   else {

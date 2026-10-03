@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1615';
+const GAME_VERSION = 'v0.30.1616';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -59811,6 +59811,7 @@ function _coopApplyHazHit(msg) {
   player.hp -= _lxLost(_hzLost);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
+  player._hitIframeAt = game.time;   // bughunt guest-taken (parityA-2): a HIT-granted i-frame, or the draw hides the hero for the first ~60 ms of it
   player._lastDamageSource = msg.sl || 'a meteor strike';
   if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 40, color: msg.c || '#ffaa33', big: true });
 }
@@ -59881,6 +59882,7 @@ function _coopApplyBossHit(msg) {
   player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
+  player._hitIframeAt = game.time;   // bughunt guest-taken (parityA-2): a HIT-granted i-frame (see _coopApplyHazHit)
   player._lastDamageSource = msg.sl || 'a boss attack';
   if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
   if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 40, color: msg.c || '#ff5555', big: true });
@@ -60203,6 +60205,7 @@ function _coopSelfBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color) {
   player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
+  player._hitIframeAt = game.time;   // bughunt guest-taken (parityA-2): the host's own re-applied strike, same i-frame mark
   player._lastDamageSource = label || 'a boss attack';
   if (typeof flash === 'function') { try { flash(0.25); } catch (e) {} }
   if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 40, color: color || '#ff5555', big: true });
@@ -60957,6 +60960,27 @@ function _coopSendDamage(m, dmg, isCrit, skill, procs) {
   }
   try { net.ws.send(JSON.stringify({ t: 'dmg', u: m.uid, d: Math.max(0, Math.round(dmg) || 0), c: isCrit ? 1 : 0, k: String(skill || '').slice(0, 16), fz: (procs && procs.fz > 0) ? Math.min(3000, procs.fz | 0) : 0, st: (procs && procs.st > 0) ? Math.min(1500, procs.st | 0) : 0 })); } catch (e) {}
 }
+// bughunt guest-taken (parityA-3 = parityB-6) - A MIRROR'S BURN / POISON. The follower branch of updateMonsters returns before the
+// host's burn tick, so a DoT this guest put on a mirror (poison crit, Grand Hex, enhancement burn, skills, projectile hits) never
+// decayed, never did damage, and left the burn icon and tint on the mirror until the host killed it. The guest now runs the same
+// timer and the same per-tick number as the host's loop (LX_BURN_*, 0.1% of max HP a tick on a boss) and forwards each tick to the
+// host as a 'burn' hit, which _coopHostApplyDamage applies raw (a DoT is not a punch: no ward, stagger bonus, break feed or booking).
+function _coopMirrorBurnTick(m, dt) {
+  m.burnTimer -= dt;
+  if (m.burnTimer <= 0) { m._dotKind = null; m._poisonGrandHex = false; m.burnDmg = 0; m._burnTickAcc = 0; m._burnStack = 0; return; }
+  m._burnTickAcc = (m._burnTickAcc || 0) + dt;
+  if (m._burnTickAcc < LX_BURN_TICK_MS) return;
+  m._burnTickAcc -= LX_BURN_TICK_MS;
+  if (m.currentHp <= 0 || m.uid == null) return;
+  const _bPct = (m.isBoss || m.boss) ? LX_BURN_TICK_MAXHP_PCT_BOSS : LX_BURN_TICK_MAXHP_PCT;
+  const _bCap = Math.max(1, Math.floor((m.maxHp || 1) * _bPct));
+  const tickDmg = Math.min(_bCap, Math.max(1, Math.floor((m.burnDmg || 1) * LX_BURN_DPS_MUL * (LX_BURN_TICK_MS / 1000))));
+  _coopSendDamage(m, tickDmg, false, 'burn');
+  m._burnStack = (m._burnStack || 0) + 1;
+  const _bStep = (m._burnStack - 1) % 5, _bRamp = Math.min(1, (m._burnStack - 1) / 6);
+  if (game.damageNumbers) game.damageNumbers.push({ x: m.x + m.w / 2 + (_bStep - 2) * 7, y: m.y - 5 - _bStep * 9, vy: -1, text: tickDmg, life: 26 + Math.round(_bRamp * 10),
+    color: (m._dotKind === 'poison' || m._poisonGrandHex) ? (_bRamp > 0.5 ? '#ccff66' : '#88ff44') : (_bRamp > 0.5 ? '#ffaa33' : '#ff6622'), size: 11 + Math.round(_bRamp * 4) });
+}
 // HOST: apply an inbound remote-damage event as FINAL damage (the attacker
 // already rolled crit/mults on their client), keeping the monster-side gates
 // hitMonster would apply. Routes death through killMonster so loot/XP/removal
@@ -60991,9 +61015,10 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk, pid) {
   // v0.30.x — THE WARD IS A HOST GATE. This path had none: the only "ward" in it was the
   // word forward in a comment. Mirror the solo order - a warded hit lands for 1 and feeds
   // the break gauge by what it would have done; the open window after a shatter pays x1.5.
-  if (m.isBoss && skill !== 'thorns' && (m._wardUntil | 0) > (game.time | 0)) { if (typeof _lxWardFeed === 'function') _lxWardFeed(m, d); d = 1; }
-  else if (m.isBoss && skill !== 'thorns' && typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)) d = Math.max(1, Math.floor(d * LX_WARD_BREAK_MUL));
-  if (m._pqBooked && skill !== 'thorns') d = _lxPqBookDmg(m, pid == null ? 'g' : pid, d);   // Group Booking: this hit counts as pid's punch
+  const _dot = (skill === 'burn');   // bughunt guest-taken (parityA-3): a guest's burn / poison TICK - raw, like the host's own burn write; not a punch
+  if (m.isBoss && skill !== 'thorns' && !_dot && (m._wardUntil | 0) > (game.time | 0)) { if (typeof _lxWardFeed === 'function') _lxWardFeed(m, d); d = 1; }
+  else if (m.isBoss && skill !== 'thorns' && !_dot && typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)) d = Math.max(1, Math.floor(d * LX_WARD_BREAK_MUL));
+  if (m._pqBooked && skill !== 'thorns' && !_dot) d = _lxPqBookDmg(m, pid == null ? 'g' : pid, d);   // Group Booking: this hit counts as pid's punch
   // v0.29.867 — remote hits get the SAME window economy as local ones. This
   // path never applied the punish bonus, so a co-op guest hitting a staggered
   // boss was paid x1.0 where solo pays x1.6 -- the guest got nothing for the
@@ -61001,13 +61026,13 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk, pid) {
   // break meter, so a guest could not contribute to a break at all. Both now
   // mirror the solo order in hitMonster: bonus while a window is open, meter
   // fill while it is not.
-  if (m.isBoss && (m._stagger > 0 || m._dirOpenT > 0)) {
+  if (m.isBoss && !_dot && (m._stagger > 0 || m._dirOpenT > 0)) {
     const _rEarned = m._stagger > 0;
     const _rMul = _rEarned
       ? (typeof BOSS_STAGGER_BONUS === 'number' ? BOSS_STAGGER_BONUS : 1.6)
       : (typeof BOSS_OPENING_BONUS === 'number' ? BOSS_OPENING_BONUS : 1.25);
     d = Math.max(1, Math.floor(d * _rMul));
-  } else if (m.isBoss && typeof _bossFillBreak === 'function') {
+  } else if (m.isBoss && !_dot && typeof _bossFillBreak === 'function') {
     _bossFillBreak(m, d);
     if (typeof _bossThreatHit === 'function') _bossThreatHit(m, d);
   }
@@ -61416,9 +61441,10 @@ function _coopApplyKill(msg) {
 }
 // NON-HOST danger: mirrored monsters must still hurt the follower. ALL real
 // monster->player damage lives inside the suppressed updateMonsters, so without
-// this a follower would be invincible. Lightweight contact model (aabb + dodge +
-// normal-mob 0.28x / boss 1.0x + a 1s i-frame), matching the essence of the real
-// contact-damage site. Projectile / telegraphed-special damage from mirrors is
+// this a follower would be invincible. It was a lightweight model (aabb + dodge +
+// normal-mob 0.28x / boss 1.0x + a 1s i-frame); since bughunt guest-taken it runs the
+// host's own contact helpers (_lxContactBase, _lxContactLanding ...), see the tick below.
+// Projectile / telegraphed-special damage from mirrors is
 // not synced in v1 (see COOP_NOTES). Called from the follower branch each frame.
 // v0.30.x — MANA SHIELD PAID BEFORE THE FLOORS. The 2 MP : 1 HP trade ran on the pre-floor
 // damage; the Scorpio 40% / Conductor 30% / _lxBossHpFloor / boss-band floors then raised the
@@ -61442,6 +61468,11 @@ function _lxContactDrStack(m, dmg) {
   if (_hsMul < 1) dmg = Math.max(1, Math.floor(dmg * _hsMul));
   const _pierce = (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1;
   if (typeof _defAbsorbMul === 'function') dmg = Math.max(1, Math.floor(dmg * _defAbsorbMul(_pierce)));
+  return dmg;
+}
+// bughunt guest-taken - Iron Will moved out of _lxContactDrStack: the host applies it AFTER the contact floor (so the floor is
+// reduced too), and the guest tick now runs the floor, so it has to run the synergy in the same place.
+function _lxContactIronWill(dmg) {
   if (player._activeSynergies && player._activeSynergies.ironWill) {
     const _maxHp = (typeof getMaxHp === 'function') ? getMaxHp() : player.maxHp;
     const _dr = Math.min(0.25, Math.floor(_maxHp / 100) * 0.01);
@@ -61449,37 +61480,306 @@ function _lxContactDrStack(m, dmg) {
   }
   return dmg;
 }
+// v0.30.x bughunt guest-taken - THE HOST'S CONTACT ANCHOR, one copy. The co-op guest's contact tick had its own, older formula
+// (m.atk x 0.28, 1.0 for a boss), so a guest took 4-8x less than the host from a trash mob and an uncapped raw ATK from a boss.
+// Everything between "a mob touched you" and "the number before DEF / block / the level punish" is here: the per-type touch
+// multipliers, the level-gap multiplier and the v0.29.270 ATK-driven normal-mob anchor. Pure (no side effects), so both contact
+// paths call it and cannot drift apart again. Moved verbatim from the host contact block in updateMonsters.
+function _lxContactBase(m) {
+  const _isNormalMob = !m.isBoss && !m.isMiniBoss;
+  // v0.26.355 — Per user, normal-mob TOUCH damage reduced a further 20%
+  // (0.35 → 0.28). Bosses/minibosses unchanged (1.0× floor).
+  let _normalMobMul = _isNormalMob ? 0.28 : 1.0;
+  // v0.25.687 — Octobaby tentacles ("legs") hit HARDER than a normal mob
+  // on touch. Each leg is an extension of the boss, so contact damage
+  // gets a 1.4× multiplier (vs 0.6× normal-mob default) — ~2.3× the
+  // previous tentacle touch damage. Players who hug the centre of the
+  // arena now pay a real price. Projectile damage (m.atk * 0.7 in the
+  // leg's fire logic) is unaffected — only contact.
+  if (m._octoParent) _normalMobMul = 1.4;
+  // v0.26.077 — Per user "for king gloopaloo make him ... high touch
+  // damage". Boss-specific touch multiplier bumps King Gloopaloo's
+  // contact damage from 1.0× → 1.8× — pairs with the new teleport
+  // (closes distance unexpectedly) so the player can't safely hug
+  // his hitbox during melee builds. Projectile damage paths
+  // unaffected — only contact.
+  if (m.type === 'king') _normalMobMul = Math.max(_normalMobMul, 1.8);
+  // v0.26.085 — Leo Royal Spotlight DMG-TAKEN bonus. The spotlit
+  // player takes +50% melee contact damage from the marking Leo
+  // during the duel window. Counterpart to the +50% DMG-DEALT
+  // bonus applied at hitMonster entry (above) — together they form
+  // the "challenger trade" mechanic per the user spec.
+  if (player._leoSpotlightFrom === m && (player._leoSpotlight | 0) > 0 &&
+      m.zodiacSign === 'leo') {
+    _normalMobMul = Math.max(_normalMobMul, 1.5);
+  }
+  // v0.26.085 — Libra Equal Weight punishment. When the player has
+  // camped one arena half for 5+ s and Libra is in the 7-s
+  // imbalance window, contact damage from Libra is +60% — the
+  // "buff itself or triggers a punishment" half of the user spec.
+  if (m._libraImbalanced && m.zodiacSign === 'libra') {
+    _normalMobMul = Math.max(_normalMobMul, 1.6);
+  }
+  // v0.26.086 — Virgo Judgment Marks modifier. The player's
+  // current mark scales Virgo's contact damage: Impure +30%,
+  // Blessed −30%, Balanced unchanged. Players who time their
+  // dodges against the cycle take vastly different damage from
+  // identical Virgo swings.
+  if (m.zodiacSign === 'virgo' && player._virgoMarker === m) {
+    if (player._virgoMark === 'impure')      _normalMobMul *= 1.30;
+    else if (player._virgoMark === 'blessed') _normalMobMul *= 0.70;
+  }
+  // v0.26.078 — Per user "make his touch damage higher damage" for
+  // kingKrook. Bumped 1.0× → 2.0× — heavier than the v0.26.077
+  // Gloopaloo 1.8× since King Krook is a body-charging Bowser-
+  // archetype (claw + jump-slam patterns close distance constantly).
+  if (m.type === 'kingKrook') _normalMobMul = Math.max(_normalMobMul, 2.0);
+  // v0.26.357 — Per user "for gravitos increase the raw contact damage
+  // even more". Gravitos's base ATK (1440) drives its atk-scaled SKILLS
+  // (black hole 6×, homing, etc.), so we raise CONTACT only via a 10×
+  // touch multiplier instead of inflating m.atk again. Hugging the
+  // Singularity now one-shots an under-geared player and still chunks a
+  // BiS tank (~20% maxHP) even through the 90% DEF absorb + warrior DR —
+  // a real "don't melee-hug the final boss" deterrent. Skills unchanged.
+  if (m.type === 'gravitos') _normalMobMul = Math.max(_normalMobMul, 10.0);
+  // v0.26.320 — Per user "Make the arbiter deal 25% touch damage
+  // and use his slash skill more frequently". Drop the Arbiter's
+  // contact multiplier to a flat 0.25× so brushing him during a
+  // dive-in chips lightly; the real punishment now lives in the
+  // tightened bigMelee swing (cdMs 4200 → 2400 — see trait edit at
+  // L30409 area). Direct override (not Math.max) so the cap
+  // actually lowers — Math.max would let the 1.0× boss baseline
+  // win out.
+  if (m.type === 'towerArbiter') _normalMobMul = 0.25;
+  // v0.29.451 (per user) — BOSS CONTACT LETHALITY, flat half. Every boss's
+  // touch floors at 2.5× raw (the sign/king/krook/gravitos overrides above
+  // still win where higher via Math.max; the Arbiter's deliberate 0.25 cap
+  // is respected). The band clamp on the FINAL loss below still bounds the
+  // landed number, so this raises the felt hit without opening one-shots.
+  if ((m.isBoss || m.boss || m.zodiacBoss) && m.type !== 'towerArbiter') _normalMobMul = Math.max(_normalMobMul, 2.5);
+  // v0.29.5xx — MIRROR BOSSES touch slightly softer (per user "also reduce
+  // the touch damage slightly"). Trimming the type's atk would NOT have
+  // worked: boss atk is overwritten by _bossAtkForLevel() at spawn, and the
+  // clamped per-mob touch ratio below is gated on !m.isBoss, so bosses
+  // resolve contact purely as atk x this multiplier. Editing atk would have
+  // nerfed its mdark projectiles and left the touch damage where it was.
+  // Contact only; -14%, matching the movement-speed trim.
+  if (m.isMirror || m.type === 'mirrorSelf') _normalMobMul *= 0.86;
+  const _gapMul = (typeof _lvGapDmgMul === 'function') ? _lvGapDmgMul(m) : 1;
+  let _atkBase = (m._selfRageTimer | 0) > 0
+    ? Math.floor(m.atk * 1.5 * _normalMobMul * _gapMul)
+    : Math.floor(m.atk * _normalMobMul * _gapMul);
+  // v0.29.270 — ATK-DRIVEN NORMAL-MOB TOUCH (replaces the v0.29.262 band
+  // clamp; see _MOB_MED_ATK). Contact damage is now LINEAR in the mob's
+  // own ATK: its ratio against the median ATK for its level scales the
+  // level's touch anchor, so a mob with twice its tier's ATK deals twice
+  // the contact damage and each creature finally feels distinct on touch.
+  // The anchor keeps the v0.29.269 difficulty ramp; the level-gap mul
+  // still applies after; DEF / block / class DR mitigate downstream.
+  // Every mob reaching here has _normalMobMul === 0.28 (the boss/Krook/
+  // Gravitos/Arbiter/zodiac overrides above are all boss-only, and
+  // Octobaby legs are excluded), so the 0.28 baseline is folded into the
+  // anchor rather than applied twice.
+  if (!m.isBoss && !m.boss && !m._octoParent && typeof _refHpAtLv === 'function') {
+    const _tlv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+    const _tref = _refHpAtLv(_tlv);
+    const _tb = _dmgBandPct(_tlv);
+    const _tmed = (typeof _medAtkAtLv === 'function') ? _medAtkAtLv(_tlv) : 0;
+    let _hot = (_tmed > 0) ? (m.atk / _tmed) : 1;
+    _hot = Math.max(_TOUCH_ATK_MIN, Math.min(_TOUCH_ATK_MAX, _hot));   // outlier guard only
+    if ((m._selfRageTimer | 0) > 0) _hot *= 1.5;
+    if ((m._packBonus || 1) > 1) _hot *= m._packBonus;   // v0.29.320 — packHunter: coordinated pack hits harder (same idiom as enrageSelf above)
+    _atkBase = Math.max(2, Math.floor(_tref * _tb.tFloor * _hot * _gapMul));
+  }
+  return _atkBase;
+}
+// v0.30.x bughunt guest-taken - Holy Shield bounces the ATK retaliation through its own invulnerability (v0.30.1428), once a second
+// per foe. Shared by the host contact block and the co-op guest tick (the guest never bounced).
+function _lxContactHolyBounce(m) {
+    m._hsBounceAt = (game.time | 0) + 60; const _hsb = _lxKnightRetaliation(m, 24);
+    if (_hsb > 0) { const _hb0 = m.currentHp; hitMonster(m, _hsb, false, 'retaliate');   // v0.30.1525 op-pass - the ATK retaliation meets the foe armour
+      game.damageNumbers.push({ x: m.x + m.w/2 - 12, y: m.y - 6, vy: -2, text: '↩ ' + Math.max(1, Math.round(_hb0 - m.currentHp)), life: 28, color: '#ffdd88', size: 13 }); }
+}
+// v0.30.x bughunt guest-taken - THE LANDING OF A CONTACT HIT, one copy: Guardian / Holy Shield reflect, stagger, i-frames (and the
+// hit-granted mark the draw reads), the cancel of an action in progress, the knock or shove, the number, the contact statuses,
+// hit-stop, the combo reset, and Thorns. The co-op guest tick had only the stagger, the i-frame and the tier knock, so a guest
+// never took burn / poison / slow / electrocute / freeze from a touch, was never interrupted mid-attack or mid-dash, kept its
+// combo, was not shoved by an ordinary mob, and was drawn hidden for ~60 ms after every touch. Moved verbatim from the host contact
+// block; the host passes the same four values it always had in scope.
+function _lxContactLanding(m, dmg, _shownDmg, _lxTookDmg) {
+  // Knight Guardian reflect — bounce the cast's rolled percentage back.
+  // v0.29.671 — was a hardcoded 50%; Holy Shield stamps its own 50 below.
+  // v0.30.1428 (per user: the Knight's reflect "needs major improvement") - a blow bounces back its share of the damage you TOOK
+  // plus a retaliation scaled by YOUR ATK. The share alone could never matter against a boss: a boss touch is clamped into a band
+  // of your own max HP (a few hundred at Lv 50), so 20% of it was ~100 against millions. Holy Shield has its own window and numbers
+  // (50% + 12x ATK) - it used to overwrite Guardian's window, cutting a 30-60 s Guardian reflect off 5 s later.
+  const _hsRefl = (player._holyReflectUntil | 0) > game.time;
+  if ((_hsRefl || (player._guardianReflect && game.time < player._guardianReflect)) && m.currentHp > 0) {
+    // v0.30.1525 op-pass - two hits: the share of the blow you took bounces as thorns (whole, as before); the ATK retaliation is
+    // 'retaliate' and meets the foe armour (it skipped DEF, so a boss you stood in took 5-12x ATK a blow untouched by its armour).
+    // v0.30.1428 summed both into one thorns hit: reflect += _lxKnightRetaliation(m, _hsRefl ? 12 : 5)
+    const _rShare = _hsRefl ? Math.floor(_lxTookDmg * 0.5) : Math.floor(_lxTookDmg * ((player._guardianReflectPct || 50) / 100));
+    const _rAtk = _lxKnightRetaliation(m, _hsRefl ? 24 : (player._guardianReflectAtk != null ? player._guardianReflectAtk : 10));
+    const _rHp0 = m.currentHp;
+    if (_rShare > 0) hitMonster(m, _rShare, false, 'thorns');
+    if (_rAtk > 0 && m.currentHp > 0) hitMonster(m, _rAtk, false, 'retaliate');
+    const reflect = Math.round(_rHp0 - m.currentHp);
+    if (reflect > 0) {
+      game.damageNumbers.push({
+        x: m.x + m.w/2 - 12, y: m.y - 6, vy: -2,
+        text: '↩ ' + reflect, life: 28, color: '#ffdd88', size: 13
+      });
+    }
+  }
+  // Skill tree: Unstoppable — stun immune
+  // Melee contact — very brief stagger so player doesn't get stunlocked
+  // v0.26.x -- stagger 90 -> 140 ms base so getting tagged reads as a
+  // mistake (paired with the contact floor + stronger knockback below).
+  // v0.29.7xx — zodiac bosses + Gravitos stagger 2.5x harder, with a
+  // slight chance of a full 1 s stun (see _lxHeavyStaggerMs). Every other
+  // monster keeps the 140 ms base exactly.
+  // v0.29.x — a brace-dash that connects is the punished end of a drawn
+  // lane (the corridor was on screen for the whole 850 ms brace), so it
+  // carries the same heavy-stagger weight as the zone projectiles.
+  player.hitStun = (_lxIsHeavyStaggerMob(m) || (m._braceDashing && m._bdPhase === 'dash'
+                      && typeof _lxZoneWorthy === 'function' && _lxZoneWorthy(m, 1)))
+    ? _lxHeavyStaggerMs(140)
+    : (player.tree.stunImmune ? 0 : Math.floor(140 * (1 - getStunResist())));
+  // v0.26.069 — Per user "make the invulnerability period after
+  // getting hit by monsters 2x longer". Post-melee-contact iframe
+  // 500 → 1000 ms. Lets the player reposition / heal after eating a
+  // hit instead of getting clipped twice in close succession by a
+  // patrolling pack.
+  player.invulnerable = 1000;
+  player._hitIframeAt = game.time;   // v0.29.283 — mark this invuln as HIT-GRANTED (see singularity resolve)
+  // Cancel voluntary actions
+  player.attacking = false;
+  player.attackTimer = 0;
+  player.rushTimer = 0;
+  player.dodgeTimer = 0;
+  player.quickDashTimer = 0;
+  const dir = player.x < m.x ? -1 : 1;
+  let kbMul = player.cls === 'warrior' ? 0.4 : 1;
+  kbMul *= Math.max(0.1, 1 - (player.tree.kbReduce || 0));
+  if (hasMilestone('steadyFeet')) kbMul *= 0.5;
+  // v0.26.x -- knockback doubled (1.5 -> 3.0 lateral, -1.5 -> -2.4 pop)
+  // so a tag visibly displaces the player out of the crowd. Class /
+  // skill-tree / milestone reducers above still apply unchanged.
+  // v0.29.341 — per-monster contact-knockback multiplier. Lets a boss whose
+  // identity IS its weight (Taur's charge) actually launch the player,
+  // instead of tagging them the same distance a slime does. Class /
+  // skill-tree / milestone reducers above still apply on top, so a warrior
+  // with Steady Feet is still the one who holds ground best.
+  const _mKb = Math.max(0, Math.min(6, +m._playerKbMul || 1));
+  // v0.30.1293 strike-knock - an elite, an Elder or a boss throws by its weight, out through the side it touched
+  // (see _lxBodyKnock). An ordinary monster keeps the shove below, to the number.
+  const _kbTier = _lxKbTier(m);
+  if (_kbTier > 0) _lxBodyKnock(m, _kbTier, _mKb);
+  else {
+  player.vx = dir * 3.0 * kbMul * _mKb;
+  player.vy = -2.4 * kbMul * (_mKb > 1 ? 1 + (_mKb - 1) * 0.45 : 1);
+  }
+  game.damageNumbers.push({
+    taken: true, x: player.x + 14, y: player.y, vy: -2,
+    text: _shownDmg, life: 40, color: '#ff4444', size: 16
+  });
+  // v0.26.249 — Apply contact-damage status effects (burn / poison /
+  // slow / electrocute / freeze) based on the mob's entry in
+  // CONTACT_STATUS_TABLE. The function is defensive: mobs without
+  // an entry fall through with a single lookup miss, so the cost
+  // for the common case (non-status mobs) is negligible. Frame-
+  // guard flags (_burnFxThisFrame etc.) prevent toast spam when
+  // multiple mobs of the same type touch in the same frame.
+  _applyMobContactStatuses(m, dmg);
+  // v0.25.459 — addShake(6) removed; flash + hit-stop carry the impact.
+  // v0.25.691 — Hit-stop trimmed 60→30 ms per user "dealing/taking damage
+  // makes the whole game lag a lot" feedback. Hit-stop freezes the
+  // entire game loop (L53910 `if (frozen) game.hitStop -= dt;` gates
+  // ALL update systems). 60 ms × N hits/minute felt like genuine lag
+  // even when frame rate was stable. 30 ms keeps the impact weight
+  // without the perceived stall.
+  flash(0.2);
+  addHitStop(30);
+  resetCombo();
+  // v0.29.401 — clamp at 100% of the hit taken (the Aegis Heart synergy
+  // below can still double it at low HP, which is its designed reward).
+  const totalThorns = Math.min(1.0, player.mods.thorns + getEquipBonus('thorns'));
+  if (totalThorns > 0) {
+    // v0.26.261 — Synergy: Aegis Heart (thorns + maxhp). Below 50 %
+    // HP, thorns scales linearly up to 2× at 0 % HP. Rewards
+    // dangerous brinkmanship play.
+    let _thornsMul = 1;
+    if (player._activeSynergies && player._activeSynergies.aegisHeart) {
+      const _hpPct = player.hp / Math.max(1, getMaxHp());
+      if (_hpPct < 0.5) _thornsMul = 1 + (1 - _hpPct * 2);   // 0.5→×1.0, 0.0→×2.0
+    }
+    const refl = Math.floor(_lxTookDmg * totalThorns * _thornsMul);   // v0.30.x — was `dmg`; the clamp above says "100% of the hit taken", and this is that number
+    if (refl > 0) hitMonster(m, refl, false, 'thorns');
+    if (refl > 0) _lxBoonFx('thorn_burst', m.x + m.w / 2, m.y + m.h / 2, { size: Math.max(80, Math.min(m.w, m.h) * 1.2), life: 18, fadeTail: 0.3 });   // v0.30.1484 boonfx8 - Thorns shows the reflect on the attacker
+    // v0.26.261 — Synergy: Burning Curse (burn + thorns). Reflected
+    // damage applies a brief burn (2 s) to the attacker. Stacks with
+    // existing burn timer (Math.max) so a chained attacker can't
+    // keep refreshing your DoT to zero.
+    if (refl > 0 && player._activeSynergies && player._activeSynergies.burningCurse) {
+      _applyMobStatus(m, 'burn', 2000, { chance: 35, dmg: Math.max(2, Math.floor(refl * 0.20)) });
+    }
+  }
+}
+// bughunt guest-taken - the guest's touch is the host's touch (sibling-1, parityA-1/2/5, combat-3). It used to be a lightweight model:
+// atk x 0.28 (1.0 for a boss) with no anchor, no floor, no boss band, no statuses, no landing, no parry. Now every number comes from
+// the same helpers the host contact block calls (_lxContactBase, _lxContactDrStack, _lxContactIronWill, _lxContactLanding,
+// _lxContactHolyBounce) and the post-DEF rules below mirror the host's order. One known gap: the zodiac "empowered swing" is armed
+// by the host's own cadence timer (m._heavyArmed), which is not on the wire, so the guest never rolls it.
 function _coopFollowerContactTick() {
   if (typeof player === 'undefined' || !player || player.hp <= 0 || player._god) return;
-  if ((player.invulnerable | 0) > 0) return;
+  // A paused guest is a ghost statue (_lxCoopWorldStep unwinds its hp and statuses, but not its MP, combo or hit-stop, which the
+  // landing, the parry and the Mana Shield now touch), and _coopApplyBossHit already ignores a paused guest the same way.
+  if (typeof game !== 'undefined' && game && game.paused) return;
+  const _inv = (player.invulnerable | 0) > 0;
+  // Holy Shield bounces its retaliation off a touch through its own invulnerability (the host does too); that is all an
+  // invulnerable guest still does here.
+  if (_inv && !((player._holyReflectUntil | 0) > game.time)) return;
   const arr = game.monsters || [];
   for (let i = 0; i < arr.length; i++) {
     const m = arr[i];
     if (!m || !m._coopMirror || m.currentHp <= 0) continue;
     if (typeof aabb === 'function' && !aabb(player, (typeof _mobTouchBox === 'function') ? _mobTouchBox(m) : m)) continue;   // v0.30.1400 touch-sil - the host's touch box
+    if (_inv) { if ((m._hsBounceAt | 0) <= (game.time | 0)) _lxContactHolyBounce(m); continue; }
+    // Parry window - perfect timing completely negates the touch and stuns the attacker (the host's contact block does the same).
+    if (player.parryWindow > 0) { triggerParry(m); return; }
     const dodgeC = (typeof getEvasion === 'function') ? getEvasion() : 0;
     if (dodgeC > 0 && Math.random() < dodgeC) {
       if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: 'DODGE', life: 40, color: '#88ffcc', size: 14 });
       _lxOnPlayerDodge();   // v0.30.1581 stat-sets Tailwind
       player.invulnerable = 300; return;
     }
-    const _normalMul = (!m.isBoss && !m.isMiniBoss) ? 0.28 : 1.0;
-    let dmg = Math.max(1, Math.floor((m.atk || 20) * _normalMul));
-    dmg = _lxContactDrStack(m, dmg);   // v0.30.x — the host's DR stack; this path had none
-    if (typeof _diffDmg === 'function') { try { dmg = _diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0); } catch (e) {} }
-    dmg = _lxManaShieldAbsorb(dmg);
-    player.hp -= dmg;
+    const _isNormalMob = !m.isBoss && !m.isMiniBoss;
+    let _atkBase = _lxContactBase(m);   // the host's anchor (a mirror whose frame carried no ATK falls back to the old model)
+    if (!(_atkBase > 0)) _atkBase = Math.max(1, Math.floor((m.atk || 20) * (_isNormalMob ? 0.28 : 1.0)));
+    let dmg = Math.max(1, _atkBase + Math.floor(Math.random() * 4));
+    dmg = _lxContactDrStack(m, dmg);   // v0.30.x - the host's DR stack; this path had none
+    // The normal-mob contact floor (host: 25% of the anchor, after the DR stack; an active block still goes below it).
+    if (_isNormalMob && player.blockTimer <= 0) {
+      const _gFloor = Math.max(2, Math.floor(_atkBase * 0.25));
+      if (dmg < _gFloor) dmg = _gFloor;
+    }
+    dmg = _lxContactIronWill(dmg);
+    let _gLost = dmg;
+    if (typeof _diffDmg === 'function') { try { _gLost = _diffDmg(dmg, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0); } catch (e) {} }
+    // A boss's touch lands inside its tier band (Gravitos: his phase band), like the host; the empowered-swing branch is the gap above.
+    if ((m.isBoss || m.boss || m.zodiacBoss) && typeof _bossHitBand === 'function' && typeof _gravBandClamp === 'function') {
+      const _gBand = _bossHitBand(m, 'touch');
+      if (_gBand) _gLost = _gravBandClamp(dmg, _gBand);
+    }
+    if (m.zodiacSign === 'scorpio' && _gLost > 0) _gLost = Math.max(_gLost, Math.max(1, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * 0.40)));   // Scorpio: at least 40% of max HP
+    if (m.type === 'pqConductor' && _gLost > 0) _gLost = Math.max(_gLost, Math.max(1, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * 0.30)));   // the Master Conductor: at least 30%
+    if (_gLost > 0 && typeof _lxBossHpFloor === 'function') _gLost = _lxBossHpFloor(m.type, _gLost);   // Krook / Octobaby / tentacles: at least 15% a hit
+    const _gTook = Math.max(0, _gLost);   // what reflects share: the blow, before the Mana Shield pays for part of it
+    _gLost = _lxManaShieldAbsorb(_gLost);
+    player.hp -= _gLost;
     player.lastHitTime = game.time;
     player._lastDamageSource = m.label || m.type || 'an enemy';
-    // v0.29.7xx — same heavy stagger on the co-op mirror path, so a guest
-    // fighting a mirrored zodiac boss / Gravitos feels what the host does.
-    player.hitStun = _lxIsHeavyStaggerMob(m)
-      ? _lxHeavyStaggerMs(140)
-      : ((player.tree && player.tree.stunImmune) ? 0 : Math.floor(140 * (1 - ((typeof getStunResist === 'function') ? getStunResist() : 0))));
-    player.invulnerable = 1000;
-    { const _kbTier = _lxKbTier(m); if (_kbTier > 0) _lxBodyKnock(m, _kbTier, +m._playerKbMul || 1); }   // v0.30.1293 strike-knock - the host's throw, on the mirror
-    if (typeof flash === 'function') { try { flash(0.2); } catch (e) {} }
-    if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 10, y: player.y - 8, vy: -2, text: '' + dmg, life: 40, color: '#ff6666', size: 15 });
+    _lxContactLanding(m, dmg, _gLost, _gTook);   // stagger, i-frames, cancels, knock, number, statuses, hit-stop, combo reset, reflects
     return;   // one hit per tick; the i-frame gates the rest
   }
 }
@@ -96132,6 +96432,10 @@ const MOB_STATUS_RESIST = { boss: 0.70, miniboss: 0.50 };
 function _applyMobStatus(m, kind, ms, opts) {
   opts = opts || {};
   if (!m || m.currentHp <= 0) return false;
+  // bughunt guest-taken (parityA-3 = parityB-6): a mirror nobody ticks must not wear a burn / poison for ever (no damage, a stuck
+  // icon and tint, Sanguine Flame's doubled lifesteal off the stuck timer). While following, the mirror ticks its own DoT and forwards
+  // each tick to the host (_coopMirrorBurnTick); anywhere else the DoT is refused.
+  if ((kind === 'burn' || kind === 'poison') && m._coopMirror && !(typeof _coopFollowingHost === 'function' && _coopFollowingHost())) return false;
   if (opts.chance != null && opts.chance < 100 && Math.random() * 100 >= opts.chance) return false;
   const _isBoss = !!(m.isBoss || m.boss);
   const _isMini = !_isBoss && !!m.isMiniBoss;
@@ -96905,6 +97209,7 @@ function updateMonsters(dt) {
       if (!m) continue;
       if (m.hitFlash > 0) m.hitFlash -= dt;
       m.animTimer = (m.animTimer || 0) + dt;
+      if (m._coopMirror && m.burnTimer > 0) _coopMirrorBurnTick(m, dt);   // bughunt guest-taken (parityA-3): this branch returns before the host's burn tick
       // v0.29.10 — REAL-TIME MIRROR MOTION. Between the host's 10 Hz 'mon'
       // snapshots, dead-reckon the target by the broadcast velocity, then
       // ease the mirror toward it (0.35/frame closes ~92% of the gap within
@@ -99709,9 +100014,7 @@ function updateMonsters(dt) {
     // 2.5 s stopped every blow, so half its reflect window could never reflect anything. A touch there bounces the ATK retaliation
     // (no blow was taken, so no share), once a second per foe.
     if (_touch && player.invulnerable > 0 && (player._holyReflectUntil | 0) > game.time && m.currentHp > 0 && (m._hsBounceAt | 0) <= (game.time | 0)) {
-      m._hsBounceAt = (game.time | 0) + 60; const _hsb = _lxKnightRetaliation(m, 24);
-      if (_hsb > 0) { const _hb0 = m.currentHp; hitMonster(m, _hsb, false, 'retaliate');   // v0.30.1525 op-pass - the ATK retaliation meets the foe armour
-        game.damageNumbers.push({ x: m.x + m.w/2 - 12, y: m.y - 6, vy: -2, text: '↩ ' + Math.max(1, Math.round(_hb0 - m.currentHp)), life: 28, color: '#ffdd88', size: 13 }); }
+      _lxContactHolyBounce(m);   // bughunt guest-taken: shared with the co-op guest tick
     }
     if (_onScreen && (_swReach || _touch) && player.invulnerable <= 0) {   // v0.30.x — fliers hit with the sprite you can see
       if (_swReach) m._swHitDone = true;
@@ -99749,9 +100052,6 @@ function updateMonsters(dt) {
       // hit at the same m.atk — incidental brushing chips, getting hit
       // by a glyph stings. Bosses + minibosses unchanged (1.0× floor).
       const _isNormalMob = !m.isBoss && !m.isMiniBoss;
-      // v0.26.355 — Per user, normal-mob TOUCH damage reduced a further 20%
-      // (0.35 → 0.28). Bosses/minibosses unchanged (1.0× floor).
-      let _normalMobMul = _isNormalMob ? 0.28 : 1.0;
       // v0.25.822 — ZODIAC EMPOWERED STRIKE. Every contact-damage hit from
       // a zodiac boss has a 20 % chance to be amplified into a "heavy
       // hit" worth at least 50 % of the player's max HP. Players who
@@ -99770,107 +100070,9 @@ function updateMonsters(dt) {
       // reschedules the next arm. Same clamp math, zero dice.
       let _zodiacHeavyMelee = false;
       if (m.zodiacBoss && m._heavyArmed) { _zodiacHeavyMelee = true; m._heavyArmed = false; m._heavyReadyAt = (game.time | 0) + (m._heavyCadence | 0 || 360); }
-      // v0.25.687 — Octobaby tentacles ("legs") hit HARDER than a normal mob
-      // on touch. Each leg is an extension of the boss, so contact damage
-      // gets a 1.4× multiplier (vs 0.6× normal-mob default) — ~2.3× the
-      // previous tentacle touch damage. Players who hug the centre of the
-      // arena now pay a real price. Projectile damage (m.atk * 0.7 in the
-      // leg's fire logic) is unaffected — only contact.
-      if (m._octoParent) _normalMobMul = 1.4;
-      // v0.26.077 — Per user "for king gloopaloo make him ... high touch
-      // damage". Boss-specific touch multiplier bumps King Gloopaloo's
-      // contact damage from 1.0× → 1.8× — pairs with the new teleport
-      // (closes distance unexpectedly) so the player can't safely hug
-      // his hitbox during melee builds. Projectile damage paths
-      // unaffected — only contact.
-      if (m.type === 'king') _normalMobMul = Math.max(_normalMobMul, 1.8);
-      // v0.26.085 — Leo Royal Spotlight DMG-TAKEN bonus. The spotlit
-      // player takes +50% melee contact damage from the marking Leo
-      // during the duel window. Counterpart to the +50% DMG-DEALT
-      // bonus applied at hitMonster entry (above) — together they form
-      // the "challenger trade" mechanic per the user spec.
-      if (player._leoSpotlightFrom === m && (player._leoSpotlight | 0) > 0 &&
-          m.zodiacSign === 'leo') {
-        _normalMobMul = Math.max(_normalMobMul, 1.5);
-      }
-      // v0.26.085 — Libra Equal Weight punishment. When the player has
-      // camped one arena half for 5+ s and Libra is in the 7-s
-      // imbalance window, contact damage from Libra is +60% — the
-      // "buff itself or triggers a punishment" half of the user spec.
-      if (m._libraImbalanced && m.zodiacSign === 'libra') {
-        _normalMobMul = Math.max(_normalMobMul, 1.6);
-      }
-      // v0.26.086 — Virgo Judgment Marks modifier. The player's
-      // current mark scales Virgo's contact damage: Impure +30%,
-      // Blessed −30%, Balanced unchanged. Players who time their
-      // dodges against the cycle take vastly different damage from
-      // identical Virgo swings.
-      if (m.zodiacSign === 'virgo' && player._virgoMarker === m) {
-        if (player._virgoMark === 'impure')      _normalMobMul *= 1.30;
-        else if (player._virgoMark === 'blessed') _normalMobMul *= 0.70;
-      }
-      // v0.26.078 — Per user "make his touch damage higher damage" for
-      // kingKrook. Bumped 1.0× → 2.0× — heavier than the v0.26.077
-      // Gloopaloo 1.8× since King Krook is a body-charging Bowser-
-      // archetype (claw + jump-slam patterns close distance constantly).
-      if (m.type === 'kingKrook') _normalMobMul = Math.max(_normalMobMul, 2.0);
-      // v0.26.357 — Per user "for gravitos increase the raw contact damage
-      // even more". Gravitos's base ATK (1440) drives its atk-scaled SKILLS
-      // (black hole 6×, homing, etc.), so we raise CONTACT only via a 10×
-      // touch multiplier instead of inflating m.atk again. Hugging the
-      // Singularity now one-shots an under-geared player and still chunks a
-      // BiS tank (~20% maxHP) even through the 90% DEF absorb + warrior DR —
-      // a real "don't melee-hug the final boss" deterrent. Skills unchanged.
-      if (m.type === 'gravitos') _normalMobMul = Math.max(_normalMobMul, 10.0);
-      // v0.26.320 — Per user "Make the arbiter deal 25% touch damage
-      // and use his slash skill more frequently". Drop the Arbiter's
-      // contact multiplier to a flat 0.25× so brushing him during a
-      // dive-in chips lightly; the real punishment now lives in the
-      // tightened bigMelee swing (cdMs 4200 → 2400 — see trait edit at
-      // L30409 area). Direct override (not Math.max) so the cap
-      // actually lowers — Math.max would let the 1.0× boss baseline
-      // win out.
-      if (m.type === 'towerArbiter') _normalMobMul = 0.25;
-      // v0.29.451 (per user) — BOSS CONTACT LETHALITY, flat half. Every boss's
-      // touch floors at 2.5× raw (the sign/king/krook/gravitos overrides above
-      // still win where higher via Math.max; the Arbiter's deliberate 0.25 cap
-      // is respected). The band clamp on the FINAL loss below still bounds the
-      // landed number, so this raises the felt hit without opening one-shots.
-      if ((m.isBoss || m.boss || m.zodiacBoss) && m.type !== 'towerArbiter') _normalMobMul = Math.max(_normalMobMul, 2.5);
-      // v0.29.5xx — MIRROR BOSSES touch slightly softer (per user "also reduce
-      // the touch damage slightly"). Trimming the type's atk would NOT have
-      // worked: boss atk is overwritten by _bossAtkForLevel() at spawn, and the
-      // clamped per-mob touch ratio below is gated on !m.isBoss, so bosses
-      // resolve contact purely as atk x this multiplier. Editing atk would have
-      // nerfed its mdark projectiles and left the touch damage where it was.
-      // Contact only; -14%, matching the movement-speed trim.
-      if (m.isMirror || m.type === 'mirrorSelf') _normalMobMul *= 0.86;
-      const _gapMul = (typeof _lvGapDmgMul === 'function') ? _lvGapDmgMul(m) : 1;
-      let _atkBase = (m._selfRageTimer | 0) > 0
-        ? Math.floor(m.atk * 1.5 * _normalMobMul * _gapMul)
-        : Math.floor(m.atk * _normalMobMul * _gapMul);
-      // v0.29.270 — ATK-DRIVEN NORMAL-MOB TOUCH (replaces the v0.29.262 band
-      // clamp; see _MOB_MED_ATK). Contact damage is now LINEAR in the mob's
-      // own ATK: its ratio against the median ATK for its level scales the
-      // level's touch anchor, so a mob with twice its tier's ATK deals twice
-      // the contact damage and each creature finally feels distinct on touch.
-      // The anchor keeps the v0.29.269 difficulty ramp; the level-gap mul
-      // still applies after; DEF / block / class DR mitigate downstream.
-      // Every mob reaching here has _normalMobMul === 0.28 (the boss/Krook/
-      // Gravitos/Arbiter/zodiac overrides above are all boss-only, and
-      // Octobaby legs are excluded), so the 0.28 baseline is folded into the
-      // anchor rather than applied twice.
-      if (!m.isBoss && !m.boss && !m._octoParent && typeof _refHpAtLv === 'function') {
-        const _tlv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
-        const _tref = _refHpAtLv(_tlv);
-        const _tb = _dmgBandPct(_tlv);
-        const _tmed = (typeof _medAtkAtLv === 'function') ? _medAtkAtLv(_tlv) : 0;
-        let _hot = (_tmed > 0) ? (m.atk / _tmed) : 1;
-        _hot = Math.max(_TOUCH_ATK_MIN, Math.min(_TOUCH_ATK_MAX, _hot));   // outlier guard only
-        if ((m._selfRageTimer | 0) > 0) _hot *= 1.5;
-        if ((m._packBonus || 1) > 1) _hot *= m._packBonus;   // v0.29.320 — packHunter: coordinated pack hits harder (same idiom as enrageSelf above)
-        _atkBase = Math.max(2, Math.floor(_tref * _tb.tFloor * _hot * _gapMul));
-      }
+      // bughunt guest-taken (sibling-1): the touch anchor - the per-type multipliers, the level gap and the v0.29.270 ATK-driven
+      // normal-mob anchor - moved verbatim into _lxContactBase(m), so the co-op guest's contact tick lands the SAME number.
+      const _atkBase = _lxContactBase(m);
       // v0.26.356 — "Meaningful DEF": flat subtraction halved (was full
       // − getDef()). DEF's weight now lives mostly in the smooth % curve
       // (_defAbsorbMul, cap raised to 80%) so a little DEF no longer cliffs
@@ -100060,123 +100262,9 @@ function updateMonsters(dt) {
       // every other attack path uses, so it self-clears).
       try { m.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + (m.isBoss ? 650 : 760); } catch (_) {}
       if (m.isBoss || m.boss) try { m._lxContactAt = _lxHeldNow(); } catch (_) {}   // v0.30.1363 key-frame - its pose leads into its blow (_lxBossContactLead)
-      // Knight Guardian reflect — bounce the cast's rolled percentage back.
-      // v0.29.671 — was a hardcoded 50%; Holy Shield stamps its own 50 below.
-      // v0.30.1428 (per user: the Knight's reflect "needs major improvement") - a blow bounces back its share of the damage you TOOK
-      // plus a retaliation scaled by YOUR ATK. The share alone could never matter against a boss: a boss touch is clamped into a band
-      // of your own max HP (a few hundred at Lv 50), so 20% of it was ~100 against millions. Holy Shield has its own window and numbers
-      // (50% + 12x ATK) - it used to overwrite Guardian's window, cutting a 30-60 s Guardian reflect off 5 s later.
-      const _hsRefl = (player._holyReflectUntil | 0) > game.time;
-      if ((_hsRefl || (player._guardianReflect && game.time < player._guardianReflect)) && m.currentHp > 0) {
-        // v0.30.1525 op-pass - two hits: the share of the blow you took bounces as thorns (whole, as before); the ATK retaliation is
-        // 'retaliate' and meets the foe armour (it skipped DEF, so a boss you stood in took 5-12x ATK a blow untouched by its armour).
-        // v0.30.1428 summed both into one thorns hit: reflect += _lxKnightRetaliation(m, _hsRefl ? 12 : 5)
-        const _rShare = _hsRefl ? Math.floor(_lxTookDmg * 0.5) : Math.floor(_lxTookDmg * ((player._guardianReflectPct || 50) / 100));
-        const _rAtk = _lxKnightRetaliation(m, _hsRefl ? 24 : (player._guardianReflectAtk != null ? player._guardianReflectAtk : 10));
-        const _rHp0 = m.currentHp;
-        if (_rShare > 0) hitMonster(m, _rShare, false, 'thorns');
-        if (_rAtk > 0 && m.currentHp > 0) hitMonster(m, _rAtk, false, 'retaliate');
-        const reflect = Math.round(_rHp0 - m.currentHp);
-        if (reflect > 0) {
-          game.damageNumbers.push({
-            x: m.x + m.w/2 - 12, y: m.y - 6, vy: -2,
-            text: '↩ ' + reflect, life: 28, color: '#ffdd88', size: 13
-          });
-        }
-      }
-      // Skill tree: Unstoppable — stun immune
-      // Melee contact — very brief stagger so player doesn't get stunlocked
-      // v0.26.x -- stagger 90 -> 140 ms base so getting tagged reads as a
-      // mistake (paired with the contact floor + stronger knockback below).
-      // v0.29.7xx — zodiac bosses + Gravitos stagger 2.5x harder, with a
-      // slight chance of a full 1 s stun (see _lxHeavyStaggerMs). Every other
-      // monster keeps the 140 ms base exactly.
-      // v0.29.x — a brace-dash that connects is the punished end of a drawn
-      // lane (the corridor was on screen for the whole 850 ms brace), so it
-      // carries the same heavy-stagger weight as the zone projectiles.
-      player.hitStun = (_lxIsHeavyStaggerMob(m) || (m._braceDashing && m._bdPhase === 'dash'
-                          && typeof _lxZoneWorthy === 'function' && _lxZoneWorthy(m, 1)))
-        ? _lxHeavyStaggerMs(140)
-        : (player.tree.stunImmune ? 0 : Math.floor(140 * (1 - getStunResist())));
-      // v0.26.069 — Per user "make the invulnerability period after
-      // getting hit by monsters 2x longer". Post-melee-contact iframe
-      // 500 → 1000 ms. Lets the player reposition / heal after eating a
-      // hit instead of getting clipped twice in close succession by a
-      // patrolling pack.
-      player.invulnerable = 1000;
-      player._hitIframeAt = game.time;   // v0.29.283 — mark this invuln as HIT-GRANTED (see singularity resolve)
-      // Cancel voluntary actions
-      player.attacking = false;
-      player.attackTimer = 0;
-      player.rushTimer = 0;
-      player.dodgeTimer = 0;
-      player.quickDashTimer = 0;
-      const dir = player.x < m.x ? -1 : 1;
-      let kbMul = player.cls === 'warrior' ? 0.4 : 1;
-      kbMul *= Math.max(0.1, 1 - (player.tree.kbReduce || 0));
-      if (hasMilestone('steadyFeet')) kbMul *= 0.5;
-      // v0.26.x -- knockback doubled (1.5 -> 3.0 lateral, -1.5 -> -2.4 pop)
-      // so a tag visibly displaces the player out of the crowd. Class /
-      // skill-tree / milestone reducers above still apply unchanged.
-      // v0.29.341 — per-monster contact-knockback multiplier. Lets a boss whose
-      // identity IS its weight (Taur's charge) actually launch the player,
-      // instead of tagging them the same distance a slime does. Class /
-      // skill-tree / milestone reducers above still apply on top, so a warrior
-      // with Steady Feet is still the one who holds ground best.
-      const _mKb = Math.max(0, Math.min(6, +m._playerKbMul || 1));
-      // v0.30.1293 strike-knock - an elite, an Elder or a boss throws by its weight, out through the side it touched
-      // (see _lxBodyKnock). An ordinary monster keeps the shove below, to the number.
-      const _kbTier = _lxKbTier(m);
-      if (_kbTier > 0) _lxBodyKnock(m, _kbTier, _mKb);
-      else {
-      player.vx = dir * 3.0 * kbMul * _mKb;
-      player.vy = -2.4 * kbMul * (_mKb > 1 ? 1 + (_mKb - 1) * 0.45 : 1);
-      }
-      game.damageNumbers.push({
-        taken: true, x: player.x + 14, y: player.y, vy: -2,
-        text: _shownDmg, life: 40, color: '#ff4444', size: 16
-      });
-      // v0.26.249 — Apply contact-damage status effects (burn / poison /
-      // slow / electrocute / freeze) based on the mob's entry in
-      // CONTACT_STATUS_TABLE. The function is defensive: mobs without
-      // an entry fall through with a single lookup miss, so the cost
-      // for the common case (non-status mobs) is negligible. Frame-
-      // guard flags (_burnFxThisFrame etc.) prevent toast spam when
-      // multiple mobs of the same type touch in the same frame.
-      _applyMobContactStatuses(m, dmg);
-      // v0.25.459 — addShake(6) removed; flash + hit-stop carry the impact.
-      // v0.25.691 — Hit-stop trimmed 60→30 ms per user "dealing/taking damage
-      // makes the whole game lag a lot" feedback. Hit-stop freezes the
-      // entire game loop (L53910 `if (frozen) game.hitStop -= dt;` gates
-      // ALL update systems). 60 ms × N hits/minute felt like genuine lag
-      // even when frame rate was stable. 30 ms keeps the impact weight
-      // without the perceived stall.
-      flash(0.2);
-      addHitStop(30);
-      resetCombo();
-      // v0.29.401 — clamp at 100% of the hit taken (the Aegis Heart synergy
-      // below can still double it at low HP, which is its designed reward).
-      const totalThorns = Math.min(1.0, player.mods.thorns + getEquipBonus('thorns'));
-      if (totalThorns > 0) {
-        // v0.26.261 — Synergy: Aegis Heart (thorns + maxhp). Below 50 %
-        // HP, thorns scales linearly up to 2× at 0 % HP. Rewards
-        // dangerous brinkmanship play.
-        let _thornsMul = 1;
-        if (player._activeSynergies && player._activeSynergies.aegisHeart) {
-          const _hpPct = player.hp / Math.max(1, getMaxHp());
-          if (_hpPct < 0.5) _thornsMul = 1 + (1 - _hpPct * 2);   // 0.5→×1.0, 0.0→×2.0
-        }
-        const refl = Math.floor(_lxTookDmg * totalThorns * _thornsMul);   // v0.30.x — was `dmg`; the clamp above says "100% of the hit taken", and this is that number
-        if (refl > 0) hitMonster(m, refl, false, 'thorns');
-        if (refl > 0) _lxBoonFx('thorn_burst', m.x + m.w / 2, m.y + m.h / 2, { size: Math.max(80, Math.min(m.w, m.h) * 1.2), life: 18, fadeTail: 0.3 });   // v0.30.1484 boonfx8 - Thorns shows the reflect on the attacker
-        // v0.26.261 — Synergy: Burning Curse (burn + thorns). Reflected
-        // damage applies a brief burn (2 s) to the attacker. Stacks with
-        // existing burn timer (Math.max) so a chained attacker can't
-        // keep refreshing your DoT to zero.
-        if (refl > 0 && player._activeSynergies && player._activeSynergies.burningCurse) {
-          _applyMobStatus(m, 'burn', 2000, { chance: 35, dmg: Math.max(2, Math.floor(refl * 0.20)) });
-        }
-      }
+      // bughunt guest-taken: the landing (Guardian / Holy Shield reflect, stagger, i-frames, cancels, knock, number, statuses, hit-stop,
+      // combo reset, Thorns) moved verbatim into _lxContactLanding, shared with the co-op guest tick.
+      _lxContactLanding(m, dmg, _shownDmg, _lxTookDmg);
     }
   }
   _lxKillStampSince(_lxKillMob); _lxKillMob = null;   // v0.30.1320 - the last turn's shots / hazards, then no monster's turn
