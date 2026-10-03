@@ -29,7 +29,7 @@ try {
     const frames = (n) => new Promise((r) => { let k = 0; const f = () => (++k >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
     // the headless page runs ~17 game ticks a second: wait on game.time, not on frames or the clock
     const ticks = async (n) => { const t = game.time; const s0 = performance.now(); while (game.time - t < n && performance.now() - s0 < 20000) await frames(1); };
-    const settle = async () => { player.invulnerable = 0; player.maxHp = 1e9; player.hp = 1e9; await ticks(3); };
+    const settle = async () => { const w0 = performance.now(); while (game.paused && performance.now() - w0 < 20000) await frames(1); /* a pause surface holds the player update, so a window granted under it never runs down */ player.invulnerable = 0; player.maxHp = 1e9; player.hp = 1e9; await ticks(3); };
     const out = {};
     // 1. a real hit: the co-op boss hit grants a 600 ms window
     await settle();

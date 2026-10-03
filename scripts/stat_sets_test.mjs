@@ -107,7 +107,7 @@ try {
     out.fault = on.map((v, i) => +(v / offR[i]).toFixed(4));
     // [6] Regrowth: one regen tick under 30% HP, with and without the signature
     player.cls = 'mage'; bare(); wear(kit('heartwood', 'mage')); for (const q of game.monsters) q.currentHp = 0; game.monsters.length = 0;
-    const mh = getMaxHp(), tick = (t) => { player.hp = Math.floor(mh * 0.2); game.time = t; player._hpEqAcc = 990; player._hpBaseAcc = 0; /* v0.30.x bughunt timers-6: the regen is a dt accumulator now - arm it so one update crosses the second */ const b4 = player.hp; updatePlayer(16.67); return player.hp - b4; };
+    const mh = getMaxHp(), tick = (t) => { player.hp = Math.floor(mh * 0.2); game.time = t; player.hitStun = 0; player.frozenTimer = 0; player.stunTimer = 0; player._downed = false; /* the update returns before the regen while any of these is up */ player._hpEqAcc = 990; player._hpBaseAcc = 0; /* v0.30.x bughunt timers-6: the regen is a dt accumulator now - arm it so one update crosses the second */ const b4 = player.hp; updatePlayer(16.67); return player.hp - b4; };
     player._regrowthUntil = 0; player._regrowthCd = 0; const gOn = tick(6000), cd = player._regrowthCd | 0, until = player._regrowthUntil | 0;
     const gCool = tick(6600); const reArm = (player._regrowthCd | 0) !== cd;
     sigOff(); player._regrowthUntil = 0; player._regrowthCd = 0; const gOff = tick(6000); sigOn();
