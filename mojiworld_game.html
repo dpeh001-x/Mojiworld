@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1611';
+const GAME_VERSION = 'v0.30.1612';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -58666,7 +58666,8 @@ function _lxCoopRewardNote(m) {
   if (!m || m.uid == null) return;
   _lxCoopRewardSeen.delete(m.uid);
   const lv = Math.max(1, (m.level | 0) || ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 1));
-  _lxCoopRewardSeen.set(m.uid, { tp: m.type, e: Math.max(0, +m.exp || 0), c: Math.max(0, +m.mojicoins || 0), boss: !!(m.isBoss || m.boss || m.zodiacBoss), lv, zs: (typeof m.zodiacSign === 'string') ? m.zodiacSign.slice(0, 24) : '' });
+  _lxCoopRewardSeen.set(m.uid, { tp: m.type, e: Math.max(0, +m.exp || 0), c: Math.max(0, +m.mojicoins || 0), boss: !!(m.isBoss || m.boss || m.zodiacBoss), lv, zs: (typeof m.zodiacSign === 'string') ? m.zodiacSign.slice(0, 24) : '',
+    ml: Math.max(0, m.level | 0), el: !!m.isElite, mb: !!m.isMiniBoss, nm: String(m.name || m.type || '').slice(0, 48) });   // bughunt guest-dealt (parityB-2/3): the level the HOST's own gap rule reads, the tier and the name, for a mirror that is gone by the time its kill lands
   if (_lxCoopRewardSeen.size > 1024) _lxCoopRewardSeen.delete(_lxCoopRewardSeen.keys().next().value);
 }
 function _lxCoopRewardInfo(uid, m) {
@@ -58674,7 +58675,7 @@ function _lxCoopRewardInfo(uid, m) {
   if (!r && m && m._coopMirror) { _lxCoopRewardNote(m); r = _lxCoopRewardSeen.get(m.uid); }
   if (!r) return null;
   const k = r.boss ? 18 * Math.max(1, 260 / r.lv) : LX_COOP_REWARD_K;
-  return { tp: r.tp, capE: Math.ceil(Math.max(1, r.e) * k), capC: Math.ceil(Math.max(1, r.c) * k), boss: !!r.boss, lv: r.lv | 0, zs: r.zs || '' };   // v0.30.x bughunt coop-6 - boss / level / sign are MY record's, not the frame's
+  return { tp: r.tp, capE: Math.ceil(Math.max(1, r.e) * k), capC: Math.ceil(Math.max(1, r.c) * k), boss: !!r.boss, lv: r.lv | 0, zs: r.zs || '', ml: r.ml | 0, el: !!r.el, mb: !!r.mb, nm: r.nm || '' };   // v0.30.x bughunt coop-6 - boss / level / sign are MY record's, not the frame's
 }
 function _coopKillDup(uid, from) {           // true if this kill uid was already applied
   if (uid == null) return false;            // no uid -> can't dedup; let it through (rare)
@@ -60816,6 +60817,14 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk, pid) {
   if (m._burrowed || m._underground) return;                             // untargetable while burrowed
   if (m._shroudUntil && (game.time || 0) < m._shroudUntil) return;       // mirror-boss shroud window
   let d = Math.max(1, Math.round(dmg) || 1);
+  // bughunt guest-dealt (parityB-1) - OCTOBABY: THE ARMS GATE THE BODY, judged HERE. The rule lives in hitMonster and reads the host-only
+  // _octoInit / _legRefs / _octoBreakT, none of which a guest's mirror has, so a guest's forwarded hit skipped it: with four arms alive a
+  // guest did ~11x the host's damage to the head, and 1x (not 2x) in the exposed window. Same two numbers, same floors, host-side.
+  if (m.type === 'octobaby' && typeof _lxOctoArmsAlive === 'function') {
+    const _oa = _lxOctoArmsAlive(m);
+    if (_oa > 0) d = Math.max(1, Math.floor(d * Math.pow(LX_OCTO_ARM_DR, _oa)));
+    else if ((m._octoBreakT || 0) > 0) d = Math.max(1, Math.floor(d * LX_OCTO_BREAK_MUL));
+  }
   if (m._cancerShellClosed) d = Math.max(1, Math.floor(d * 0.3));         // sealed shell
   if (m._virgoChanneling)   d = Math.max(1, Math.floor(d * 0.4));         // channel DR
   if (m._libraShield)       d = Math.max(1, Math.floor(d * (m._libraShieldFactor || 0.5)));
@@ -60890,6 +60899,7 @@ function _coopBroadcastKill(m, exp, coins) {
     if (m._expeditionBoss) _kf.ex = 1;
     if (m._isTwin || m._isPiscesTwin) _kf.tw = 1;   // a split twin is a mechanic, not a second boss (see killMonster)
   }
+  if (m.isBoss && typeof _lxIsSuperBoss === 'function' && _lxIsSuperBoss(m)) _kf.sb = 1;   // bughunt guest-dealt (parityB-9) - a super boss's death bonuses (+50% EXP, +50% coin rain) reach every guest; an old client ignores the key
   try { net.ws.send(JSON.stringify(_kf)); } catch (e) {}
 }
 // v0.29.5xx — SHARED TRAIN-PQ TICK (per user "ensure coop works well for
@@ -61014,6 +61024,48 @@ function _lxPqDirectTick() {
   if (typeof saveState === 'function') saveState();
   return true;
 }
+// bughunt guest-dealt (parityB-2) - the per-player kill credit a guest was missing (the pieces live beside killMonster: _lxKillTally,
+// _lxKillMastery, _lxKillEarlyCount): the kill counter, the daily 'kills' tick, mastery with its star toast and the dust / elite / elder
+// shard roll, the Trainee Path count, achievements. An illusion (msg.il) counts for nothing, exactly as on the host. Called BEFORE the
+// mirror is spliced, so its tier is read from it; a mirror already gone falls back to what the reward note kept (ri.el / ri.mb / ri.nm).
+function _lxCoopKillCredit(m, msg, ri) {
+  if (msg.il) return;
+  try { _lxKillTally(); } catch (e) {}
+  if (msg.tp && !msg.b) {
+    try { _lxKillMastery(m || { type: String(msg.tp), name: ri.nm || String(msg.tp), x: +msg.x || 0, y: +msg.y || 0, w: 24, h: 24, isMiniBoss: !!ri.mb, isElite: !!ri.el }); } catch (e) {}
+  }
+  try { _lxKillEarlyCount(); } catch (e) {}
+  try { checkAchievements(); } catch (e) {}
+}
+// bughunt guest-dealt (parityB-7 / parityB-9) - what a real boss kill pays the PLAYER beyond EXP, coins and setshards, which a guest never
+// got: the super boss's two death bonuses (+50% EXP, +50% coin rain; host: _triggerSuperBossDeathRaw), the guaranteed Zodiac Sigil and the
+// post-boss boon wheel (per user). The gates are killMonster's own: no illusion, no echo / expedition / split twin, no wheel for the PQ
+// Conductor. The bonus is built from the raw bounded base (exp0 / coins0), never from the already-multiplied EXP and coins.
+function _lxCoopBossRewards(m, msg, ri, exp0, coins0) {
+  if (!msg.b || msg.il || (game.expedition && game.expedition.active)) return;
+  if (+msg.sb) {
+    try {
+      if (exp0 > 0) {
+        const _pXp = (game.prestige && game.prestige.xpMult) || 1;
+        player.exp = (player.exp || 0) + Math.floor(exp0 * 0.5 * _pXp * _lxExpLevelGapMul(m || { level: ri.ml }) * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1));
+        if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
+      }
+      const _rain = (coins0 * 0.5) | 0;
+      const _got = _rain > 0 ? _grantMojicoins(_rain) : 0;
+      if (_got > 0 && typeof showToast === 'function') setTimeout(() => showToast('+' + _got + ' Legendary Mojicoin rain!', 'legendary'), 1800);
+    } catch (e) {}
+  }
+  if (+msg.ec || +msg.ex || +msg.tw) return;   // an echo, an expedition boss or a split twin (Pisces too) pays no sigil and no wheel
+  if (msg.zs && typeof ZODIAC_SIGNS !== 'undefined') {
+    try { const _sign = ZODIAC_SIGNS.find(z => z.id === String(msg.zs).slice(0, 24)); if (_sign) _lxZodiacSigilGrant(_sign); } catch (e) {}
+  }
+  if (String(msg.tp || '') !== 'pqConductor' && typeof _lxDeliverPendingBoon === 'function') {
+    const _nm = (m && m.name) || ri.nm || '';
+    game._pendingBossBoon = { name: _nm, icon: (m && m.icon) || '', maxRoll: String(msg.tp || '') === 'gravitos' };   // showPowerupChoice falls back to the crown icon
+    setTimeout(() => { try { _lxDeliverPendingBoon(0); } catch (e) {} }, 1500);   // the host's own reveal delay; delivery retries until the guest is up and unpaused
+    if (typeof showToast === 'function') showToast((_nm || 'The boss') + ' defeated! Choose a powerup!', 'legendary');
+  }
+}
 // NON-HOST: award XP/coins from a host kill (same map only) + progression + pop.
 function _coopApplyKill(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
@@ -61048,6 +61100,7 @@ function _coopApplyKill(msg) {
   // including the global xpCurveMul (1.35) the host applies (was omitted -> ~26%
   // short). Combo/prestige stay host-side (those are the host's; not networked).
   let exp = Math.min(Math.max(0, +msg.e || 0), _ri.capE);   // v0.30.862 coop-trust - bounded by my own table
+  const _exp0 = exp;   // bughunt guest-dealt (parityB-9) - the bounded base, before this peer's own multipliers (the super-boss bonus reads it)
   if (exp > 0 && typeof player !== 'undefined' && player) {
     const boost = 1 + ((player.mods && player.mods.xpBoost) || 0) + (typeof getEquipBonus === 'function' ? getEquipBonus('xpBoost') : 0);
     // v0.29.5xx — was a hardcoded x3 with a hard cliff at Lv 5: the exact
@@ -61087,16 +61140,21 @@ function _coopApplyKill(msg) {
     const _diffX  = (typeof _diffExpMul  === 'function') ? _diffExpMul()  : 1;
     const _affixX = (typeof _affixExpMul === 'function') ? _affixExpMul() : 1;
     const _ksX    = (typeof _ksXpMul     === 'function') ? _ksXpMul()     : 1;
-    exp = Math.floor(exp * boost * _pqMul * coop
-                     * _prestigeXp * _diffX * _affixX * _ksX);
+    // bughunt guest-dealt (parityB-3) - two more terms the host's own award carries and this line lacked, both properties of the
+    // RECEIVER: the level-gap falloff (a Lv70 guest on a Lv10 mob is x0.15, exactly as solo; the mirror carries the host's level) and
+    // Dawn's Favor (+10% once the story is finished). The host's max(1, ...) floor too. comboXp stays out on purpose (see above).
+    const _gapX  = _lxExpLevelGapMul(m || { level: _ri.ml });
+    const _dawnX = (typeof _lxDawnExpMul === 'function') ? _lxDawnExpMul() : 1;
+    exp = Math.max(1, Math.floor(exp * boost * _pqMul * coop
+                     * _prestigeXp * _diffX * _affixX * _ksX * _gapX * _dawnX));
     player.exp = (player.exp || 0) + exp;
     if (typeof _maybeLevelUp === 'function') { try { _maybeLevelUp(); } catch (e) {} }
   }
   // Coins: apply the level-based coin scaler (read from the mirror before we drop
   // it) so guests aren't over-paid the raw base; _grantMojicoins adds the global scalar.
   let coins = Math.min(Math.max(0, +msg.c || 0), _ri.capC);   // v0.30.862 coop-trust
+  const _coins0 = coins;   // bughunt guest-dealt (parityB-9) - the bounded raw bag, for the super-boss coin rain
   if (coins > 0) {
-    const cm = (m && typeof _monsterCoinMult === 'function') ? _monsterCoinMult(m) : 1;
     // v0.29.5xx — REWARD PARITY (see the EXP note above). The host spawns coins
     // as physical pickups, so its greed bonus is applied at the MAGNETIZE site;
     // a guest is granted coins directly and therefore never passed through it —
@@ -61105,11 +61163,17 @@ function _coopApplyKill(msg) {
     // goldBlood) stays out: both gate on m._killedByCrit, a host-side fact.
     const _greed = 1 + ((player.mods && player.mods.greed) || 0)
                      + ((typeof getEquipBonus === 'function') ? getEquipBonus('greed') : 0);
-    const _diffC  = (typeof _diffCoinMul  === 'function') ? _diffCoinMul()  : 1;
-    const _affixC = (typeof _affixCoinMul === 'function') ? _affixCoinMul() : 1;
-    coins = Math.floor(coins * cm * _greed * _diffC * _affixC);
+    // bughunt guest-dealt (parityB-4) - THE HOST'S OWN PAYOUT RULE. This line paid the raw table bag x2.0 x greed x difficulty x affix,
+    // so none of the per-kill economy ceilings existed for a guest (level cap, the x3.5 gear cap, the boss ceiling, the x0.30 refight):
+    // a Lv60 mirror paid ~730 where the host's kill pays ~300, a refight ~3.3x. _lxKillCoinValue IS what the host's pile carries
+    // (risk = difficulty x affix is inside it; the mirror's own refight history is read); times greed is the pickup's own line, and
+    // _grantMojicoins below adds the global scalar, so it is not multiplied in here. Still bounded by my own table (coop-trust).
+    // A mirror already gone is stood in for by a stub with the host's bag (already curved, hence _coinCurved).
+    const _cv = m || { type: msg.tp, level: _ri.lv, isBoss: !!msg.b, boss: !!msg.b, zodiacSign: (typeof msg.zs === 'string' && msg.zs) ? msg.zs.slice(0, 24) : undefined, mojicoins: Math.max(0, +msg.c || 0), _coinCurved: true, maxHp: 0 };
+    coins = Math.min(_ri.capC, Math.floor(_lxKillCoinValue(_cv, 1, 1) * _greed));
     if (coins > 0 && typeof _grantMojicoins === 'function') { try { _grantMojicoins(coins); } catch (e) {} }
   }
+  _lxCoopKillCredit(m, msg, _ri);   // bughunt guest-dealt (parityB-2) - before the splice: the mirror still knows its tier
   if (m) { const i = game.monsters.indexOf(m); if (i >= 0) game.monsters.splice(i, 1); }
   // Progression parity: route through the SAME hooks the host uses so bestiary,
   // achievements, quest boss-gates and cosmetic unlocks all advance for the guest.
@@ -61182,6 +61246,7 @@ function _coopApplyKill(msg) {
       }
     } catch (e) {}
   }
+  _lxCoopBossRewards(m, msg, _ri, _exp0, _coins0);   // bughunt guest-dealt (parityB-7 / parityB-9) - the sigil, the boon wheel, the super-boss bonuses
   // Small death pop so the kill reads on the peer (host's inline VFX isn't networked).
   if (Number.isFinite(+msg.x) && game.particles) {
     for (let i = 0; i < 8; i++) {
@@ -106914,6 +106979,30 @@ function _lxAtkThisFrame() {
   if (t !== _lxAtkMemoT) { _lxAtkMemoT = t; _lxAtkMemoV = Math.max(1, (typeof getAtk === 'function') ? (getAtk() || 1) : 1); }
   return _lxAtkMemoV;
 }
+// bughunt guest-dealt (parityB-5) - the lifesteal settlement of one landed hit (gear + boon lifesteal, the deferred basic-attack
+// steal, Sanguine Flame). It used to sit inline in _hitMonsterCore AFTER the co-op guest's early return, so a guest never healed from
+// gear or boons. Purely the caller's own HP, so it is authority-safe: a guest calls it with the damage it forwards.
+function _lxHitLifesteal(m, finalDmg, skill) {
+  const rawLS = Math.max(0, player.mods.lifesteal + getEquipBonus('lifesteal'));
+  if ((rawLS > 0 || _lxLsPending > 0) && skill !== 'thorns') {
+    // v0.26.261 — Synergy: Sanguine Flame (burn + lifesteal) doubles the heal
+    // on a burning target.
+    // v0.30.x — the doubling happens INSIDE the shared cap now. It used to be
+    // applied after the clamp, which is what made the real ceiling 1.00 (a
+    // full-damage heal) rather than the 0.50 the old line appeared to set. The
+    // synergy still doubles what this source ASKS for, so it still outbids
+    // weaker sources for the budget, but it can no longer push the hit past 10%.
+    let _lsMul = 1;
+    if (player._activeSynergies && player._activeSynergies.sanguineFlame && m.burnTimer > 0) {
+      _lsMul = 2;
+    }
+    const heal = _lxLsTake(finalDmg, rawLS * _lsMul);
+    if (heal > 0) player.hp = Math.min(getMaxHp(), player.hp + heal);
+    // v0.30.1484 boonfx8 - Lifesteal shows the heal on you, at most every 30 frames (a fast multi-hitter heals on nearly every hit)
+    if (heal > 0 && ((game.time | 0) - (player._lxLsFxAt | 0) >= 30 || (game.time | 0) < (player._lxLsFxAt | 0))
+        && _lxBoonFx('drain_wisp', player.x + player.w / 2, player.y + player.h / 2, { size: 90, life: 22, follow: player, fadeTail: 0.3 })) player._lxLsFxAt = game.time | 0;
+  }
+}
 function hitMonster(m, dmg, isCrit, skill) {
   const _rs = _lxRankSrc; _lxRankSrc = null;
   const _sh = _lxShareCur; _lxShareCur = 1;   // v0.30.1462 - mobbing spread: an area group's share, spent on this hit only
@@ -107839,6 +107928,14 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
       game.damageNumbers.push(_dn);
       _lxGbStack(m, skill);   // v0.30.705 — G / B master skills stack into one column per foe
     }
+    // bughunt guest-dealt (parityB-5) - the post-hit tail a guest used to skip by returning here: combo (so the 50 / 100 / 150
+    // milestones and comboMult engage), the crit streak, and gear / boon lifesteal. All guest-local state; Overflow Valve, aggro
+    // and knockback stay host-only (they need a real HP write on the authoritative monster).
+    if (skill !== 'thorns') {
+      bumpCombo(1);
+      if (isCrit) { game.critStreak++; game.critStreakTimer = 2500; player.lastCritT = game.time; }
+      _lxHitLifesteal(m, finalDmg, skill);
+    }
     return;
   }
   // v0.29.296 — milestone on-hit verbs (execute / lifesteal / chain / mark).
@@ -108264,25 +108361,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // that rate is still paid on a build carrying no gear lifesteal at all. This
   // block always runs for a non-thorns hit, which makes it the guaranteed
   // settlement point for _lxLsPending.
-  const rawLS = Math.max(0, player.mods.lifesteal + getEquipBonus('lifesteal'));
-  if ((rawLS > 0 || _lxLsPending > 0) && skill !== 'thorns') {
-    // v0.26.261 — Synergy: Sanguine Flame (burn + lifesteal) doubles the heal
-    // on a burning target.
-    // v0.30.x — the doubling happens INSIDE the shared cap now. It used to be
-    // applied after the clamp, which is what made the real ceiling 1.00 (a
-    // full-damage heal) rather than the 0.50 the old line appeared to set. The
-    // synergy still doubles what this source ASKS for, so it still outbids
-    // weaker sources for the budget, but it can no longer push the hit past 10%.
-    let _lsMul = 1;
-    if (player._activeSynergies && player._activeSynergies.sanguineFlame && m.burnTimer > 0) {
-      _lsMul = 2;
-    }
-    const heal = _lxLsTake(finalDmg, rawLS * _lsMul);
-    if (heal > 0) player.hp = Math.min(getMaxHp(), player.hp + heal);
-    // v0.30.1484 boonfx8 - Lifesteal shows the heal on you, at most every 30 frames (a fast multi-hitter heals on nearly every hit)
-    if (heal > 0 && ((game.time | 0) - (player._lxLsFxAt | 0) >= 30 || (game.time | 0) < (player._lxLsFxAt | 0))
-        && _lxBoonFx('drain_wisp', player.x + player.w / 2, player.y + player.h / 2, { size: 90, life: 22, follow: player, fadeTail: 0.3 })) player._lxLsFxAt = game.time | 0;
-  }
+  _lxHitLifesteal(m, finalDmg, skill);   // bughunt guest-dealt (parityB-5) - the block moved into a function so a co-op guest settles it too
   // Burn (powerup + equipment)
   const _biWas = m.burnTimer > 0;   // v0.30.1484 boonfx8
   const totalBurn = player.mods.burn + (getEquipBonus('burn') > 0 ? 1 : 0);
@@ -109024,6 +109103,65 @@ function _lxBossAfterlifeScrub(m) {
     }
   } catch (e) {}
 }
+// bughunt guest-dealt (parityB-2) - THE PER-PLAYER KILL CREDIT, lifted out of _killMonsterRaw. A co-op guest never runs that function (the host
+// does), so its kill counter, the 'Defeat N enemies' dailies, the kill achievements, mastery and the Trainee Path count never moved while
+// partying. _coopApplyKill now calls the same three pieces (through _lxCoopKillCredit), so the two sides cannot drift apart again.
+function _lxKillTally() {
+  game.kills++;
+  tickDaily('kills');
+}
+function _lxKillMastery(m) {
+  if (m.type && !m.isBoss) {
+    if (!player.mastery) player.mastery = {};
+    const prev = player.mastery[m.type] || 0;
+    const next = prev + 1;
+    player.mastery[m.type] = next;
+    // Threshold ping
+    const tier = (n) => n >= 1000 ? 3 : n >= 500 ? 2 : n >= 100 ? 1 : 0;
+    const _starUp = tier(next) > tier(prev);
+    if (_starUp) {
+      const t = tier(next);
+      showToast(`⭐ MASTERY — ${m.name || m.type} ${'★'.repeat(t)} (+${t}% dmg vs this foe)`, 'legendary');
+      flash(0.25); audio.play('levelup');
+    }
+    // v0.29.293 — surface the progress the moment it moves.
+    if (typeof _renderMasteryBar === 'function') _renderMasteryBar(m, next, _starUp);
+    // v0.29.293 — DUST TRICKLE (per user: "a very low element of dust
+    // trickle"). Normal kills return gear only ~0.2% of the time, so ~499
+    // of every 500 kills paid out nothing the player could feel. A small
+    // setshard trickle means the bar always moves and the player chooses
+    // what it becomes (craft 3500◈ / reforge 2000◈ / respec 1500◈).
+    // Deliberately thin: 3% of kills for 1◈ is ~1.5◈ per 50 kills, i.e.
+    // roughly a craft per several thousand kills — texture, not an economy
+    // rewrite. Bosses are excluded here (they already pay 5-50◈) and so are
+    // expedition floors, which block coin/shard earning by design.
+    // v0.29.7xx — tier-aware (see the LX_SHARD_* table). Elder outranks Elite
+    // when a mob is somehow both; expedition floors still block earning.
+    if (!(game.expedition && game.expedition.active)) {
+      const _sTier = m.isMiniBoss ? LX_SHARD_ELDER : m.isElite ? LX_SHARD_ELITE : null;
+      let _shardsWon = 0;
+      if (_sTier) {
+        if (Math.random() < _sTier.chance) {
+          _shardsWon = _sTier.min + Math.floor(Math.random() * (_sTier.max - _sTier.min + 1));
+        }
+      } else if (Math.random() < LX_DUST_TRICKLE_CHANCE) {
+        _shardsWon = 1;
+      }
+      if (_shardsWon > 0) {
+        player.setshards = (player.setshards | 0) + _shardsWon;
+        if (typeof _lxDustPing === 'function') _lxDustPing(m, _shardsWon);
+      }
+    }
+  }
+}
+function _lxKillEarlyCount() {
+  try {
+    if (typeof _earlyHooksComplete === 'function' && !_earlyHooksComplete()) {
+      _earlyState().kills++;
+      _checkEarlyHooks();
+    }
+  } catch (e) {}
+}
 function killMonster(m) {
   // v0.30.861 loops - see LX_AFK_MS. The drops wrapper follows triggerSuperBossDeath's pattern: nothing this kill pushes lands.
   if (m && !m._afkKill && (m._lastHitTag === 'mojimon' || m._lastHitTag === 'minion') && typeof _lxPlayerAfk === 'function' && _lxPlayerAfk()) {
@@ -109603,8 +109741,7 @@ function _killMonsterRaw(m) {
   const _lxMate = _lxTwinKill ? null : ((m._twin && m._twin.currentHp > 0 && m._twin) || (m._piscesTwin && m._piscesTwin.currentHp > 0 && m._piscesTwin) || null);
   const _lxDefer = !!_lxMate, _lxLastOfPair = !!(_lxTwinKill && m._lxDeferredTakedown);   // v0.30.x twin-rewards — a split twin pays nothing boss-sized (see the boss daily tick below)
   if (!_isIllusionKill) {
-  game.kills++;
-  tickDaily('kills');
+  _lxKillTally();   // bughunt guest-dealt (parityB-2) - game.kills++ and the daily 'kills' tick, shared with a co-op guest
   _ksOnKill();   // v0.29.352 — Slaughter Ladder: same real-kill gate as kill credit, so mirages can't feed the streak
   // v0.30.511 — an echo is not a kill for progression. The Echo Keeper's own spawner tags the
   // shade "no quest tick, no first-kill cinematic" and its dialog promises "the persistent map
@@ -109674,48 +109811,7 @@ function _killMonsterRaw(m) {
   // Mastery (v0.24.1) — per-mob-type kill counter. Hitting thresholds of
   // 100 / 500 / 1000 kills grants +1% / +2% / +3% damage vs that type.
   // Classic MMO "paragon-lite" grind that rewards long-term farming.
-  if (m.type && !m.isBoss) {
-    if (!player.mastery) player.mastery = {};
-    const prev = player.mastery[m.type] || 0;
-    const next = prev + 1;
-    player.mastery[m.type] = next;
-    // Threshold ping
-    const tier = (n) => n >= 1000 ? 3 : n >= 500 ? 2 : n >= 100 ? 1 : 0;
-    const _starUp = tier(next) > tier(prev);
-    if (_starUp) {
-      const t = tier(next);
-      showToast(`⭐ MASTERY — ${m.name || m.type} ${'★'.repeat(t)} (+${t}% dmg vs this foe)`, 'legendary');
-      flash(0.25); audio.play('levelup');
-    }
-    // v0.29.293 — surface the progress the moment it moves.
-    if (typeof _renderMasteryBar === 'function') _renderMasteryBar(m, next, _starUp);
-    // v0.29.293 — DUST TRICKLE (per user: "a very low element of dust
-    // trickle"). Normal kills return gear only ~0.2% of the time, so ~499
-    // of every 500 kills paid out nothing the player could feel. A small
-    // setshard trickle means the bar always moves and the player chooses
-    // what it becomes (craft 3500◈ / reforge 2000◈ / respec 1500◈).
-    // Deliberately thin: 3% of kills for 1◈ is ~1.5◈ per 50 kills, i.e.
-    // roughly a craft per several thousand kills — texture, not an economy
-    // rewrite. Bosses are excluded here (they already pay 5-50◈) and so are
-    // expedition floors, which block coin/shard earning by design.
-    // v0.29.7xx — tier-aware (see the LX_SHARD_* table). Elder outranks Elite
-    // when a mob is somehow both; expedition floors still block earning.
-    if (!(game.expedition && game.expedition.active)) {
-      const _sTier = m.isMiniBoss ? LX_SHARD_ELDER : m.isElite ? LX_SHARD_ELITE : null;
-      let _shardsWon = 0;
-      if (_sTier) {
-        if (Math.random() < _sTier.chance) {
-          _shardsWon = _sTier.min + Math.floor(Math.random() * (_sTier.max - _sTier.min + 1));
-        }
-      } else if (Math.random() < LX_DUST_TRICKLE_CHANCE) {
-        _shardsWon = 1;
-      }
-      if (_shardsWon > 0) {
-        player.setshards = (player.setshards | 0) + _shardsWon;
-        if (typeof _lxDustPing === 'function') _lxDustPing(m, _shardsWon);
-      }
-    }
-  }
+  _lxKillMastery(m);   // bughunt guest-dealt (parityB-2) - the block moved into a function so a co-op guest earns mastery too
   // Bestiary tracking drives cosmetic unlocks
   if (!_isIllusionKill) trackPickup('kill', { type: m.type });   // v0.30.1150 pet-fixes - mirages and away-summon kills don't feed species mastery either
   if (m.isBoss) {
@@ -109883,12 +109979,7 @@ function _killMonsterRaw(m) {
   player.exp += _xpGain;
   // v0.29.296 — Trainee Path: count the kill, then test the ladder. Skipped
   // entirely once the path is finished so a long-running save pays nothing.
-  try {
-    if (typeof _earlyHooksComplete === 'function' && !_earlyHooksComplete()) {
-      _earlyState().kills++;
-      _checkEarlyHooks();
-    }
-  } catch (e) {}
+  _lxKillEarlyCount();   // bughunt guest-dealt (parityB-2) - Trainee Path kill count, shared with a co-op guest
   // v0.27.0 co-op — when I'm the host, tell peers on my map this monster died so
   // they get their share of XP/coins + a death pop (they suppressed their own
   // kill pipeline). Base exp/coins broadcast; each peer applies its own scaling.
@@ -110012,13 +110103,7 @@ function _killMonsterRaw(m) {
   if ((m.isZodiac || m.zodiacSign) && !m._isTwin && !m._isPiscesTwin && !m._echoBoss && !m._expeditionBoss && typeof ZODIAC_SIGNS !== 'undefined') {   // v0.30.412 — twins: no second sigil
     const _sign = ZODIAC_SIGNS.find(z => z.id === m.zodiacSign);
     if (_sign) {
-      if (!player.inventory) player.inventory = [];
-      const _bagged = _lxGiveSigil({   // v0.30.1176 streak-guard - through the Etc tab's cap (a full tab drops it at your feet)
-        name: `${_lxZodiacSign(_sign)} Sigil`, icon: _sign.glyph || '✨',
-        type: 'etc', zodiacSigil: _sign.id, rarity: 'epic',
-        desc: `Zodiac Sigil (${_sign.glyph || ''} ${_sign.id}). Trade it to Brok in the Everdawn Megamall for ${(typeof SIGIL_TRADE_SHARDS === 'number' ? SIGIL_TRADE_SHARDS : 1000)}\u25c8 Setshards.`,
-      });
-      if (typeof showToast === 'function') showToast(`${_sign.glyph || '✨'} ${_lxZodiacSign(_sign)} Sigil obtained!${_bagged ? '' : ' Etc tab full \u2014 it dropped at your feet, pick it up!'}`, 'legendary');   // v0.30.1176 streak-guard
+      _lxZodiacSigilGrant(_sign);   // bughunt guest-dealt (parityB-7) - the grant lives in a function so a co-op guest pays the same sigil
     }
   }
 
@@ -120356,6 +120441,17 @@ function _lxGiveSigil(it) {
   if (!Array.isArray(game.drops)) game.drops = [];
   game.drops.push({ x: (player.x || 0) + (player.w || 28) / 2, y: (player.y || 0) + (player.h || 44) / 2, vy: -6, type: 'item', item: it, life: 150000, _questReward: true });
   return false;
+}
+// bughunt guest-dealt (parityB-7) - THE ZODIAC SIGIL A REAL ZODIAC KILL PAYS, lifted out of _killMonsterRaw verbatim: the host's kill and a co-op
+// guest's _coopApplyKill both call it (the guest used to get shards only, never the 100% guaranteed sigil).
+function _lxZodiacSigilGrant(_sign) {
+  if (!player.inventory) player.inventory = [];
+  const _bagged = _lxGiveSigil({   // v0.30.1176 streak-guard - through the Etc tab's cap (a full tab drops it at your feet)
+    name: `${_lxZodiacSign(_sign)} Sigil`, icon: _sign.glyph || '✨',
+    type: 'etc', zodiacSigil: _sign.id, rarity: 'epic',
+    desc: `Zodiac Sigil (${_sign.glyph || ''} ${_sign.id}). Trade it to Brok in the Everdawn Megamall for ${(typeof SIGIL_TRADE_SHARDS === 'number' ? SIGIL_TRADE_SHARDS : 1000)}\u25c8 Setshards.`,
+  });
+  if (typeof showToast === 'function') showToast(`${_sign.glyph || '✨'} ${_lxZodiacSign(_sign)} Sigil obtained!${_bagged ? '' : ' Etc tab full \u2014 it dropped at your feet, pick it up!'}`, 'legendary');   // v0.30.1176 streak-guard
 }
 function _lxSigilCount() {
   let n = 0;

@@ -68,7 +68,9 @@ const r = await page.evaluate(() => {
   _pinKs(); game._mapAffix = WORLD_AFFIXES[0];
   // v0.30.862 (a23b19ec, per user): a guest pays a host kill only for a monster it MIRRORED, capped by its own
   // table - an unknown uid pays nothing. Register each uid as a mirrored slime whose table EXP is 100.
-  for (const u of [9001, 9002]) _lxCoopRewardNote({ uid: u, type: 'slime', exp: 100, mojicoins: 0, level: 1 });
+  // bughunt guest-dealt (parityB-3): the mirrored slime is the guest's own level (45) so the level-gap falloff is x1 here and the x2 wedge reads plainly;
+  // the falloff itself is pinned below (Lv70 guest on a Lv10 mirror).
+  for (const u of [9001, 9002]) _lxCoopRewardNote({ uid: u, type: 'slime', exp: 100, mojicoins: 0, level: 45 });
   out.mult = [(game.prestige && game.prestige.xpMult) || 1, typeof _diffExpMul === 'function' ? _diffExpMul() : 1,
     typeof _affixExpMul === 'function' ? _affixExpMul() : 1, typeof _ksXpMul === 'function' ? _ksXpMul() : 1].reduce((a, v) => a * v, 1);
   before = player.exp | 0;
@@ -81,6 +83,18 @@ const r = await page.evaluate(() => {
   before = player.exp | 0;
   _coopApplyKill(mkMsg(9002, Math.round(player.x) + 3000, Math.round(player.y)));   // far, same map
   out.shareFar = (player.exp | 0) - before;
+  // bughunt guest-dealt (parityB-3): a Lv70 guest on a Lv10 mirror gets the host's level-gap falloff (x0.15) - it paid 100% before - and Dawn's Favor (+10%) after the story
+  player.level = 70; player.expToNext = 1e12; player.exp = 0;
+  for (const u of [9101, 9102, 9103]) _lxCoopRewardNote({ uid: u, type: 'slime', exp: 100, mojicoins: 0, level: 10 });
+  out.gapMul = _lxExpLevelGapMul({ level: 10 });
+  before = player.exp | 0; _coopApplyKill(mkMsg(9101, Math.round(player.x), Math.round(player.y)));   // near: x2 wedge, x0.15 falloff
+  out.gapNear = (player.exp | 0) - before;
+  const _sc = window._lxStoryComplete; window._lxStoryComplete = () => true;
+  before = player.exp | 0; _coopApplyKill(mkMsg(9102, Math.round(player.x), Math.round(player.y)));   // the same after the story: x1.1
+  out.gapNearDawn = (player.exp | 0) - before;
+  window._lxStoryComplete = _sc;
+  out.dawnMul = (() => { window._lxStoryComplete = () => true; const v = _lxDawnExpMul(); window._lxStoryComplete = _sc; return v; })();
+  player.level = 45;
   // restore
   net.isHost = true; net.hostId = null; net.connected = false; net.peers = {};
   out.base = base;
@@ -98,6 +112,10 @@ const expFar  = Math.floor(100 * r.mult * 1);
 ok('ally-kill share near = x2 share', r.shareNear === expNear, `${r.shareNear} vs ${expNear}`);
 ok('ally-kill share far (same map) = base share', r.shareFar === expFar, `${r.shareFar} vs ${expFar}`);
 ok('near share is exactly double far share', r.shareNear === r.shareFar * 2);
+// bughunt guest-dealt (parityB-3)
+ok('level-gap falloff for Lv70 vs Lv10 is x0.15', Math.abs(r.gapMul - 0.15) < 1e-9, r.gapMul);
+ok('a Lv70 guest on a Lv10 mirror: near share = floor(100 x 2 x 0.15) (was 200)', r.gapNear === Math.floor(100 * r.mult * 2 * 0.15), `${r.gapNear} vs ${Math.floor(100 * r.mult * 2 * 0.15)}`);
+ok('Dawn\'s Favor (+10%) after the story reaches the guest share', Math.abs(r.dawnMul - 1.1) < 1e-9 && r.gapNearDawn === Math.floor(100 * r.mult * 2 * 0.15 * 1.1), `${r.gapNearDawn} vs ${Math.floor(100 * r.mult * 2 * 0.15 * 1.1)}`);
 ok('no page errors', errs.length === 0, errs.join(' | '));
 await b.close();
 const fails = R.filter(x => !x).length;
