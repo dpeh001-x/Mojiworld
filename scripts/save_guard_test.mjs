@@ -81,12 +81,12 @@ const res = await page.evaluate(async () => {
     localStorage.setItem(SAVE_KEY, JSON.stringify(low)); loadState(); return player.setshards === 1234;
   })(), player.setshards);
 
-  // ---- 4. unsigned, no marker: a save older than signing is grandfathered; a modern one (it has _cdCarry) is not loaded ----
+  // ---- 4. unsigned, no marker: NOT loaded (bughunt D2 closed the legacy allowance: it let delete-sig + delete-marker + delete-_cdCarry pass an edited save) ----
   localStorage.removeItem(SAVE_KEY + '_verified');
   const legacy = JSON.parse(raw); delete legacy.sig; delete legacy.player._cdCarry; legacy.player.setshards = 4321;
   localStorage.setItem(SAVE_KEY, JSON.stringify(legacy));
-  loadState();
-  ok('legacy unsigned save (no marker, older than signing) is accepted as-is', player.setshards === 4321 && game._saveVerdict === 'unsigned', `${player.setshards} ${game._saveVerdict}`);
+  const legacyLoaded = loadState();
+  ok('legacy unsigned save (no marker, older than signing) is refused: it cannot be told from an edited one (bughunt D2)', legacyLoaded === false && player.setshards !== 4321, `${legacyLoaded} ${player.setshards} ${game._saveVerdict}`);
   const modern = JSON.parse(raw); delete modern.sig; modern.player.setshards = 4321; localStorage.removeItem(SAVE_KEY + '_verified');
   localStorage.setItem(SAVE_KEY, JSON.stringify(modern));
   ok('a stripped MODERN save with the marker deleted is not loaded (anticheat)', loadState() === false, 'loaded');

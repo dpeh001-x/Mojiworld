@@ -99,7 +99,8 @@ const rungs = await page.evaluate(() => {
     // which is a different number entirely.
     const cost = (html.match(/🪙\s*([0-9,]+)\s*Mojicoins/i) || [])[1];
     const btn = document.getElementById('do-enhance');
-    rows.push({ s, shownRate: rate ? +rate : null, trueRate: starSuccessRate(s),
+    rows.push({ s, shownRate: rate ? +rate : null, trueRate: Math.min(100, starSuccessRate(s) + Math.min(30, ((it._pity | 0) * 6))),   // bughunt save-10: the odds the roll uses INCLUDE the item's pity (section 2 left this item one failed try in: +6%)
+
       shownCost: cost ? +cost.replace(/,/g, '') : null, trueCost: STAR_COSTS[s],
       btnText: btn ? btn.textContent.trim() : null, btnDisabled: btn ? !!btn.disabled : null });
   }

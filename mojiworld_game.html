@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1621';
+const GAME_VERSION = 'v0.30.1622';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -29836,7 +29836,7 @@ function _detectActiveSynergies() {
     for (const s of BOON_SYNERGIES) {
       if (equippedIds.has(s.pair[0]) && equippedIds.has(s.pair[1])) {
         active[s.key] = true;
-        try { _boonDexMark('syn', s.key); } catch (e) {}   // v0.30.421 - codex: synergy awakened
+        try { if (!(typeof game !== 'undefined' && game.expedition && game.expedition.active)) _boonDexMark('syn', s.key); } catch (e) {}   // v0.30.421 - codex: synergy awakened; bughunt systems-7 - not by a run's tray (a Tower blessing is not held: the lifetime codex ledger must not count it)
       }
     }
   }
@@ -44327,6 +44327,7 @@ function _grantMojicoins(n, opts) {
   // snap back on reload. (Return the amount actually added so toasts match.)
   const _before = player.mojicoins || 0;
   player.mojicoins = Math.min(1e12, _before + granted);
+  try { game._coinsEarned = Math.min(2147483647, Math.max(0, +game._coinsEarned || 0) + (player.mojicoins - _before)); } catch (e) {}   // bughunt systems-8 - what was earned, never what is held (the Steam stat lifetime_coins)
   return player.mojicoins - _before;
 }
 // =========================================================================
@@ -48402,6 +48403,10 @@ function applyClass(clsId) {
     const _ts = player._trainerSpent;
     if (_ts) _spRefund += (_ts.atk | 0) * 1 + (_ts.def | 0) * 2 + (_ts.hp | 0) * 1;
     if (_spRefund > 0) player.skillPoints = (player.skillPoints || 0) + _spRefund;
+    // bughunt systems-1 - ACC is the one lane the base-stat reassignments below do not touch, so its points came back as SP
+    // while the +5 ACC each bought stayed: a free, unlimited swap grew ACC past the 999-rank cap. Take back exactly what the
+    // ledger says was bought (+5 per point, as resetStats reverses it); ACC from other sources (Shardsight) is untouched.
+    if (_lus && _lus.acc) player.baseAcc = Math.max(0, (player.baseAcc || 0) - 5 * (_lus.acc | 0));
     player._levelUpSpent = {};
     player._trainerSpent = { atk: 0, def: 0, hp: 0 };
   }
@@ -52589,7 +52594,8 @@ const GAME_SAVE_FIELDS = [
   // reload left it null and the Elder's 5-minute clock restarted as the 5-second first-visit one: a full-reward
   // mini-boss (no refight ladder) every few seconds. _worldStateByMap is a sticky per-map roll, so a reload was an
   // opt-out from a bad one (72% of maps come back ordinary).
-  '_vermDueAt','_worldStateByMap'
+  '_vermDueAt','_worldStateByMap',
+  '_coinsEarned'   // bughunt systems-8 - Mojicoins earned in play (monotonic): the Steam stat lifetime_coins read the wallet
 ];
 // v0.25.264 — saveState() is called from ~30 sites: every kill, quest tick,
 // boon equip, skill unlock, level-up, etc. Each call serializes the whole
@@ -52949,7 +52955,7 @@ function _lxSteamPushStats(force) {
     window.SteamAPI.stats.set({
       lifetime_kills: _i32((game && game.kills) || 0),
       highest_level: _i32((game && game.prestige && (game.prestige.count || 0) > 0) ? Math.max(PRESTIGE_LEVEL, (player && player.level) || 1) : ((player && player.level) || 1)),   // an ascended hero has been Lv 100
-      lifetime_coins: _i32((player && player.mojicoins) || 0),
+      lifetime_coins: _i32((game && game._coinsEarned) || 0),   // bughunt systems-8 - Mojicoins EARNED (monotonic, saved), not the wallet it used to read
       bosses_defeated: (game && game.bestiary) ? Object.keys(game.bestiary).filter((k) => k.indexOf('_boss_') === 0).length : 0,   // v0.30.x — distinct bosses (was bossDefeated keys: doubled, and shrinking on respawn)
     });
   } catch (e) {}
@@ -56244,13 +56250,31 @@ function _lxLocalSaveSigBody2(s) {   // v0.30.917 the ls2 body, kept only to ver
   const pick = (o, keys) => { const out = {}; if (!o) return out; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
   return 'ls2\n' + String(s.v) + '\n' + String(s.t) + '\n' + JSON.stringify(pick(s.player, _LX_SIGNED_PLAYER_KEYS)) + '\n' + JSON.stringify(pick(s.game, _LX_SIGNED_GAME_KEYS));
 }
-function _lxLocalSaveSig(s) { return _lxHmacSaveHex(_lxLocalSaveSigBody(s)); }
-// 'ok' | 'bad' | 'unsigned'
-function _lxLocalSaveVerdict(s) {
+// bughunt save-1 / save-5 / save-9 - THE ls4 GENERATION. One frozen list + body + tag per generation: the ls3 lists above are
+// never edited again (a signed save carries whatever keys its build wrote, so growing a shipped list fails every honest save
+// that already has the new key). ls4 signs what ls3 left editable: the Tower run (`expedition`, whose snapshot is restored into
+// the wallet, bank, bag and boons), and the ledgers that mint currency, points or quest credit - the SP spent per lane
+// (resetStats / applyClass refund them), mastery + the milestone claims (Marbella), the quest bank, the daily state + its
+// streak ledgers + the clock high-water, the talent tree and bag caps, the cooldown carry and the Sage timer.
+const _LX_SIGNED_PLAYER_KEYS4 = _LX_SIGNED_PLAYER_KEYS.concat(['_levelUpSpent', '_trainerSpent', 'claimedMilestones', 'mastery', '_qBank', '_sageNextAt', 'treeUnlocked', 'tree', 'invCap', '_cdCarry']);   // ls4
+const _LX_SIGNED_GAME_KEYS4 = _LX_SIGNED_GAME_KEYS3.concat(['expedition', 'dailyState', '_dailyMilesPaid', '_dailyBestStreak', '_timeHW']);   // ls4
+// WHICH GENERATION THE GAME WRITES. Release A (this one) verifies ls3 AND ls4 but still writes ls3: an older Steam build or a
+// cloud save read by one would refuse an ls4 save as "edited". Flip to 4 only after the Steam depot has caught up (release B).
+var LX_SAVE_SIG_WRITE = 3;   // var, not let: a flush that ran before this line would hit a TDZ error and write an UNSIGNED save; a hoisted var reads undefined (= ls3)
+function _lxLocalSaveSigBody4(s) {   // ls4
+  const pick = (o, keys) => { const out = {}; if (!o) return out; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
+  return 'ls4\n' + String(s.v) + '\n' + String(s.t) + '\n' + JSON.stringify(pick(s.player, _LX_SIGNED_PLAYER_KEYS4)) + '\n' + JSON.stringify(pick(s.game, _LX_SIGNED_GAME_KEYS4));
+}
+function _lxLocalSaveSig(s) { return _lxHmacSaveHex(LX_SAVE_SIG_WRITE === 4 ? _lxLocalSaveSigBody4(s) : _lxLocalSaveSigBody(s)); }   // the ONE place a save is signed
+// 'ok' | 'bad' | 'unsigned' | 'legacy'. `strict` = this browser's verified copy is tagged ls4: its own saves are ls4 from then on, so an
+// older-generation signature next to it is a replay of an old save, not an old save (it is 'bad', and the copy rolls it back).
+function _lxLocalSaveVerdict(s, strict) {
   try {
     if (!s || typeof s !== 'object') return 'bad';
     if (typeof s.sig !== 'string' || !s.sig) return 'unsigned';
-    if (_lxSigEqual(_lxLocalSaveSig(s), s.sig)) return 'ok';
+    if (_lxSigEqual(_lxHmacSaveHex(_lxLocalSaveSigBody4(s)), s.sig)) return 'ok';   // ls4
+    if (strict) return 'bad';
+    if (_lxSigEqual(_lxHmacSaveHex(_lxLocalSaveSigBody(s)), s.sig)) return 'ok';   // ls3: every save a build before ls4 wrote ('ok', not 'legacy': its achievements WERE signed)
     return _lxSigEqual(_lxHmacSaveHex(_lxLocalSaveSigBody2(s)), s.sig) ? 'legacy' : 'bad';   // v0.30.917 signed before ls3: loads, re-signs on its next save
   } catch (e) { return 'bad'; }
 }
@@ -56269,7 +56293,8 @@ function _lxPickSaveFields(o, keys) {   // v0.30.917
 // not kept. Honest limit, as before: the key ships in the client, so someone with the source open can still re-sign.
 function _lxLocalSaveSigParts(s) {
   const pick = (o, keys) => { const out = {}; if (!o) return out; for (const k of keys) if (o[k] !== undefined) out[k] = o[k]; return out; };
-  return [JSON.stringify(pick(s.player, _LX_SIGNED_PLAYER_KEYS)), JSON.stringify(pick(s.game, _LX_SIGNED_GAME_KEYS3))];
+  const g4 = LX_SAVE_SIG_WRITE === 4;   // the parts of the generation the save was just signed with (_lxLocalSaveSig)
+  return [JSON.stringify(pick(s.player, g4 ? _LX_SIGNED_PLAYER_KEYS4 : _LX_SIGNED_PLAYER_KEYS)), JSON.stringify(pick(s.game, g4 ? _LX_SIGNED_GAME_KEYS4 : _LX_SIGNED_GAME_KEYS3))];
 }
 // true when the verified copy was rolled into `s` (its signed fields, stamp and signature: `s` verifies again afterwards)
 function _lxLedgerRestore(s) {
@@ -56277,14 +56302,15 @@ function _lxLedgerRestore(s) {
     const m = _lxSaveMarkRead();
     if (!m || typeof m !== 'object' || typeof m.sig !== 'string' || typeof m.p !== 'string' || typeof m.g !== 'string') return false;
     if (m.v !== s.v) return false;
-    if (!_lxSigEqual(_lxHmacSaveHex('ls3\n' + String(m.v) + '\n' + String(m.t) + '\n' + m.p + '\n' + m.g), m.sig)) return false;
+    const _g4 = m.tag === 'ls4', _PK = _g4 ? _LX_SIGNED_PLAYER_KEYS4 : _LX_SIGNED_PLAYER_KEYS, _GK = _g4 ? _LX_SIGNED_GAME_KEYS4 : _LX_SIGNED_GAME_KEYS3;   // the copy names its own generation (an untagged one is ls3)
+    if (!_lxSigEqual(_lxHmacSaveHex((_g4 ? 'ls4' : 'ls3') + '\n' + String(m.v) + '\n' + String(m.t) + '\n' + m.p + '\n' + m.g), m.sig)) return false;
     const P = _lxSafeJsonParse(m.p), G = _lxSafeJsonParse(m.g);
     if (!P || !G || typeof P !== 'object' || typeof G !== 'object' || !P.cls) return false;
     if (!s.player || typeof s.player !== 'object') s.player = {};
     if (!s.game || typeof s.game !== 'object') s.game = {};
     const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-    for (const k of _LX_SIGNED_PLAYER_KEYS) { if (own(P, k)) s.player[k] = P[k]; else delete s.player[k]; }
-    for (const k of _LX_SIGNED_GAME_KEYS3) { if (own(G, k)) s.game[k] = G[k]; else delete s.game[k]; }
+    for (const k of _PK) { if (own(P, k)) s.player[k] = P[k]; else delete s.player[k]; }
+    for (const k of _GK) { if (own(G, k)) s.game[k] = G[k]; else delete s.game[k]; }
     s.t = m.t; s.sig = m.sig;
     return true;
   } catch (e) { return false; }
@@ -56296,7 +56322,7 @@ function _lxSaveMarkWrite(s) {
   try {
     const p = s && s.player || {};
     const m = { t: s.t, setshards: p.setshards | 0, mojicoins: Math.floor(p.mojicoins || 0), bankBalance: Math.floor(p.bankBalance || 0) };
-    if (s.sig) { const pg = _lxLocalSaveSigParts(s); m.v = s.v; m.p = pg[0]; m.g = pg[1]; m.sig = s.sig; }   // anticheat - the verified copy (_lxLedgerRestore)
+    if (s.sig) { const pg = _lxLocalSaveSigParts(s); m.v = s.v; m.p = pg[0]; m.g = pg[1]; m.sig = s.sig; if (LX_SAVE_SIG_WRITE === 4) m.tag = 'ls4'; }   // anticheat - the verified copy (_lxLedgerRestore); tagged only for ls4, the ls3 shape stays byte-identical
     localStorage.setItem(_LX_SAVE_MARK_KEY, JSON.stringify(m));
   } catch (e) {}
 }
@@ -56306,6 +56332,38 @@ function _lxDevKeyOk(t) { try { return _lxHex(_lxSha256Bytes(_lxUtf8(String(t ||
 function _lxDevPwOk(t) { try { return _lxHex(_lxSha256Bytes(_lxUtf8(String(t || '')))) === _LX_DEV_PW_SHA; } catch (e) { return false; } }
 function _lxSaveMarkRead() {
   try { const r = localStorage.getItem(_LX_SAVE_MARK_KEY); return r ? _lxSafeJsonParse(r) : null; } catch (e) { return null; }
+}
+// bughunt save-1 - true when this browser's verified copy was written by an ls4 build (`strict` for _lxLocalSaveVerdict)
+function _lxMarkTagged() { const m = _lxSaveMarkRead(); return !!(m && typeof m === 'object' && m.tag === 'ls4'); }
+// bughunt save-1 - the interrupted-run restore in loadState hands a Tower run's snapshot back into the wallet, bank, bag, gear
+// and boons. `game.expedition` is only signed from ls4 (written from release B), so until then the snapshot is whatever the
+// stored JSON says. This runs on it first, never on a live run: (1) the wallet it may hand back is at most the verified one plus
+// what the run spent (the restore charges `_spentInRun` again), the bank at most the verified one (it does not move in a run:
+// interest is stopped, Felina is town-only), the held rewards at most 1,000,000 (every lifetime + daily reward that can be
+// held is ~300k); (2) the bag and gear get the same repair a normal load gives them (rarity / stars / tier / dropLevel,
+// quotes and angle brackets out of the names) plus a finite-number pass, so a 1e999 stat cannot walk in as Infinity; (3) the
+// consumable counts are finite, and the equipped-boon indices point at boons that exist.
+function _lxExpSnapshotClamp(x) {
+  const sn = x && x.snapshot;
+  if (!x || !sn || typeof sn !== 'object') return;
+  const wallet = Math.max(0, +player.mojicoins || 0), bank = Math.max(0, +player.bankBalance || 0);
+  if (typeof sn.mojicoins === 'number') { const cap = wallet + Math.max(0, x._spentInRun | 0); sn.mojicoins = Number.isFinite(sn.mojicoins) ? Math.min(sn.mojicoins, cap) : cap; }
+  if (typeof sn.bankBalance === 'number') sn.bankBalance = Number.isFinite(sn.bankBalance) ? Math.min(sn.bankBalance, bank) : bank;
+  x._heldCoins = Math.max(0, Math.min(+x._heldCoins || 0, 1e6));
+  const fixItem = (it) => {
+    if (!it || typeof it !== 'object') return;
+    _lxRepairSavedItem(it);
+    for (const k of Object.keys(it)) if (typeof it[k] === 'number' && !Number.isFinite(it[k])) it[k] = 0;
+  };
+  if (Array.isArray(sn.inventory)) for (const it of sn.inventory) fixItem(it);
+  if (sn.equipped && typeof sn.equipped === 'object') for (const sl of Object.keys(sn.equipped)) fixItem(sn.equipped[sl]);
+  if (sn.consumables && typeof sn.consumables === 'object') for (const k of Object.keys(sn.consumables)) { const v = sn.consumables[k]; if (typeof v === 'number' && (!Number.isFinite(v) || v < 0)) sn.consumables[k] = 0; }
+  if (Array.isArray(sn.boons)) for (const b of sn.boons) if (b && typeof b === 'object') for (const k of Object.keys(b)) if (typeof b[k] === 'number' && !Number.isFinite(b[k])) b[k] = 0;
+  if (Array.isArray(sn.boonsEquipped)) {
+    const n = Array.isArray(sn.boons) ? sn.boons.length : 0, seen = new Set(), keep = [];
+    for (const i of sn.boonsEquipped) if (Number.isInteger(i) && i >= 0 && i < n && !seen.has(i)) { seen.add(i); keep.push(i); }
+    sn.boonsEquipped = keep;
+  }
 }
 function _lxHex(bytes){ let s=''; for(let i=0;i<bytes.length;i++) s+=bytes[i].toString(16).padStart(2,'0'); return s; }
 function _lxHmacSaveHex(msgStr){
@@ -56433,7 +56491,7 @@ function importSave(input) {
             else if (typeof _lxLocalSaveSig === 'function') inner.sig = _lxLocalSaveSig(inner);   // it verified: re-sign with the baseline in
             save = JSON.stringify(inner);
           } catch (e) {}
-          _lxSaveStoreRaw(save);   // v0.30.1181 paint-save - the paint under its own key
+          try { _lxSaveStoreRaw(save); } catch (eq) { input.value = ''; _lxImportRefused('Import failed', 'Browser storage is full, so the save could not be stored. Delete an old slot in Save Backups and try again.'); return; }   // bughunt save-6 - a full store threw inside this callback: no message, and the file input kept its value
           try { _lxMarkLocalSaveAuthoritative(); } catch (e) {}   // v0.30.890
     // v0.30.509 — and drop the anti-tamper marker with it. v0.30.494 cleared it in clearSave()
     // only, so importing a save installed a DIFFERENT character over the previous one's
@@ -56596,7 +56654,7 @@ function loadState() {
     const s = _lxSafeJsonParse(raw);
     // v0.30.414 — verify BEFORE any migration or clamp touches the objects
     // (the signature covers them as stored). Applied after the assigns below.
-    let _sigVerdict = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(s) : 'unsigned';
+    let _sigVerdict = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(s, _lxMarkTagged()) : 'unsigned';   // bughunt save-1 - strict once this browser's copy is ls4
     // v0.25.773 — Surface save-version mismatch instead of silently wiping.
     // Previously any future SAVE_VERSION bump would just `return false`,
     // discarding the save with no feedback. Now: log a console warning AND
@@ -56631,11 +56689,11 @@ function loadState() {
     // copy (the edit is undone, the save verifies again); with no copy, a stripped save from a signing client counts as edited
     if (_sigVerdict === 'bad' || _sigVerdict === 'unsigned') {
       if (typeof _lxLedgerRestore === 'function' && _lxLedgerRestore(s)) _sigVerdict = 'restored';
-      // ...and with no copy AND no marker at all, a save from a signing client was tampered with on purpose (the marker only
-      // goes when the whole save is replaced, and every such save is signed): it is not loaded. The could-not-load path keeps
-      // it in Save Backups, labelled, and says so in the title menu.
-      else if (typeof _lxSaveLooksSigned === 'function' && _lxSaveLooksSigned(s) && !_lxSaveMarkRead()) {
-        const _er = new Error('save edited: signature missing or broken, no verified copy'); _er._lxEdited = true; throw _er; }
+      // ...and with no usable copy, a bad or unsigned save is not loaded (per user, bughunt D2 / save-4 / diff-b-4: the legacy
+      // allowance is closed - it let `delete sig + marker + _cdCarry`, or a junk `{}` marker, pass an edited save as a "legacy"
+      // one). The could-not-load path keeps it in Save Backups, labelled, and says so in the title menu. A 'legacy' (ls2)
+      // signature is not 'bad' and still loads.
+      else { const _er = new Error('save edited: signature missing or broken, no verified copy'); _er._lxEdited = true; throw _er; }
     }
     try { window._lxLoadedSaveT = (+s.t > 0) ? +s.t : 0; } catch (e) {}   // v0.30.1186 save-notices - the stamp of the save being continued
     // v0.25.452 — sanitize critical numeric fields BEFORE Object.assign
@@ -56765,6 +56823,7 @@ function loadState() {
       }
     } catch (e) {}
     Object.assign(game,   _lxPickSaveFields(s.game || {}, GAME_SAVE_FIELDS));   // v0.30.917
+    try { if (game._coinsEarned == null) game._coinsEarned = Math.min(2147483647, Math.floor(Math.max(0, +player.mojicoins || 0) + Math.max(0, +player.bankBalance || 0))); } catch (e) {}   // bughunt systems-8 - a save from before the counter starts it at what it holds
     // v0.30.414 — LIVE SAVE INTEGRITY verdict (see _lxLocalSaveVerdict).
     try {
       game._saveVerdict = _sigVerdict;
@@ -57229,6 +57288,7 @@ function loadState() {
       // v0.26.1025 — restore the pre-run snapshot on an interrupted-expedition
       // resume; the flip alone let in-run boons/inventory/equipped (mutated in
       // place and mid-run autosaved) leak permanently into the persistent world.
+      try { _lxExpSnapshotClamp(game.expedition); } catch (e) {}   // bughunt save-1 - the run's copy is unsigned until ls4 is written: it may hand back at most what the verified save holds
       try { if (typeof _expeditionRestorePlayer === 'function') _expeditionRestorePlayer(game.expedition.snapshot); } catch (e) {}
       game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null };
       // v0.30.455 — the loaned slots are gone as of the line above (the cap reads expedition.active).
@@ -61445,8 +61505,9 @@ function _coopApplyKill(msg) {
     // Dawn's Favor (+10% once the story is finished). The host's max(1, ...) floor too. comboXp stays out on purpose (see above).
     const _gapX  = _lxExpLevelGapMul(m || { level: _ri.ml });
     const _dawnX = (typeof _lxDawnExpMul === 'function') ? _lxDawnExpMul() : 1;
+    const _edictX = (typeof _edictExpMul === 'function') ? _edictExpMul() : 1;   // bughunt world-6 - the guest's own Edict Weight (+8% EXP each)
     exp = Math.max(1, Math.floor(exp * boost * _pqMul * coop
-                     * _prestigeXp * _diffX * _affixX * _ksX * _gapX * _dawnX));
+                     * _prestigeXp * _diffX * _affixX * _edictX * _ksX * _gapX * _dawnX));
     player.exp = (player.exp || 0) + exp;
     if (typeof _maybeLevelUp === 'function') { try { _maybeLevelUp(); } catch (e) {} }
   }
@@ -65286,6 +65347,7 @@ function _completeQuest(id) {
   const _huntScale = Math.max(1, (_activeSnap && _activeSnap.rewardScale) || 1);
   const _payMul = _qRewMul * _huntScale * _pqRepeatMul;   // v0.30.381 — a repeat Ticket Rush pays 40%
   const _coinsGained = r.mojicoins ? _grantMojicoins(Math.min(_lxQuestCoinCeil(q.levelReq), Math.round(r.mojicoins * _payMul)), { full: true }) : 0;   // v0.30.381 — ceiling holds at turn-in
+  let _paidExp = null;   // bughunt world-5 - what the block below really pays: the toast printed the authored number (the four Ticket Rush stages pay a tenth of it)
   if (r.exp)   {
     // v0.30.x — THE AUTHORED PAYOUT IS THE AUTHORED NUMBER (per user: "there are no levers as it
     // causes alot of confusion"). Three multipliers used to sit here and two of them keyed off the
@@ -65435,6 +65497,7 @@ function _completeQuest(id) {
       }
     } catch (e) {}
     _questExp = Math.max(1, _questExp);   // v0.30.x raw: an early rung costs a handful of EXP, so a share of it cannot floor to nothing
+    _paidExp = _questExp;
     player.exp += _questExp;
     if (typeof _maybeLevelUp === 'function') _maybeLevelUp();
   }
@@ -65542,7 +65605,7 @@ function _completeQuest(id) {
     }
   }
   if (typeof _lxAct1Next === 'function' && _lxChainOf(id)) gearMsg += _lxAct1Next(id);   // v0.30.902 the next chapter rides on this toast
-  showToast(`✅ Quest complete — ${q.icon} ${q.name}  +${_coinsGained} Mojicoins +${r.exp || 0} EXP${potMsg}${gearMsg}`, 'legendary');
+  showToast(`✅ Quest complete — ${q.icon} ${q.name}  +${_coinsGained} Mojicoins +${_paidExp != null ? _paidExp : (r.exp || 0)} EXP${potMsg}${gearMsg}`, 'legendary');
   flash(0.30); audio.play('levelup');
   // v0.26.317 — Distinct triumphant quest-complete SFX from
   // audio/ui/quest_complete.mp3, layered above the levelup synth.
@@ -70855,12 +70918,12 @@ function renderQuestJournal() {
     const _gc = q.rewards.gearChance || 0;
     const _rwParts = [
       q.rewards.mojicoins ? `<b class="c"><span class="coin-ico"></span>${_qn(q.rewards.mojicoins)}</b>` : '',
-      q.rewards.exp   ? `<b class="x">⚡${_qn(q.rewards.exp)}</b>` : '',
+      q.rewards.exp   ? `<b class="x">⚡${_qn(q.rewards.exp)}${(typeof LX_PQ_CAPPED_QUESTS !== 'undefined' && LX_PQ_CAPPED_QUESTS.has(id)) ? '*' : ''}</b>` : '',   // bughunt world-5 - the four Ticket Rush stages pay a share of the listed EXP: marked
       _gc > 0 ? `<b class="g">⚔${_gc >= 1 ? '' : Math.round(_gc * 100) + '%'}</b>` : '',
     ].filter(Boolean).join('');
     const _rwTitle = [
       q.rewards.mojicoins ? q.rewards.mojicoins.toLocaleString() + ' Mojicoins' : '',
-      q.rewards.exp ? q.rewards.exp.toLocaleString() + ' EXP' : '',
+      q.rewards.exp ? q.rewards.exp.toLocaleString() + ' EXP' + ((typeof LX_PQ_CAPPED_QUESTS !== 'undefined' && LX_PQ_CAPPED_QUESTS.has(id)) ? ' (*scaled: this stage pays a share of it, capped per level)' : '') : '',
       _gc > 0 ? (_gc >= 1 ? 'guaranteed gear drop' : Math.round(_gc * 100) + '% gear drop chance') : '',
     ].filter(Boolean).join(' · ');
     const rewardPills = _rwParts
@@ -71605,14 +71668,14 @@ const DAILY_CHALLENGES = [
   { id:'chest3',   desc:'Open 3 chests',               goal:3,  track:'chest',   reward:{ mojicoins:500 },       minLv:6  },
   // Late — enhancement requires items + stones (wool chest / shop)
   { id:'enhance1', desc:'Enhance any item once',       goal:1,  track:'enhance', reward:{ mojicoins:600, sp:1 }, minLv:15 },
-  { id:'reach20',  desc:'Reach character level 20',    goal:20, track:'level',   reward:{ mojicoins:800, sp:1 }, minLv:12 },
+  { id:'reach20',  desc:'Reach character level 20',    goal:20, track:'level',   reward:{ mojicoins:800, sp:1 }, minLv:12, maxLv:19 },   // bughunt systems-6 - maxLv: rolled for Lv 20+ it completed the instant the day rolled (a free 800c + 1 SP)
   // v0.25.256 — Endgame dailies for the Lv 40-50 stretch. Endgame audit
   // flagged "no recurring daily quest at Lv 40+" as a HIGH gap; these
   // three give post-master players a steady stream of objectives that
   // tie back to the new endgame loops (Gravitos farming, Tier-5 grind,
   // boss hunting) without requiring new content.
   { id:'kill200',     desc:'Defeat 200 enemies today',           goal:200, track:'kills',  reward:{ mojicoins:2500, sp:2 }, minLv:30 },
-  { id:'gravitos1',   desc:'Defeat Gravitos at the Singularity', goal:1,   track:'boss',   reward:{ mojicoins:3500, sp:2 }, minLv:35, target:'gravitos' },
+  { id:'gravitos1',   desc:'Defeat Gravitos at the Singularity', goal:1,   track:'boss',   reward:{ mojicoins:3500, sp:2 }, minLv:70, target:'gravitos' },   // bughunt systems-6 - the Singularity needs Lv 70 (was 35: an uncompletable daily for Lv 35-69)
   { id:'enhance10',   desc:'Land 10 successful enhancements',    goal:10,  track:'enhance',reward:{ mojicoins:4000, sp:2 }, minLv:35 },
 ];
 // v0.26.452 — Monotonic clock guard. Defeats clock-ROLLBACK: returns a time
@@ -71639,7 +71702,7 @@ function dailyIndex() { return Math.floor(_monoNow() / 86400000); }
 // so a Lv 1 player never rolls "Enhance any item once" on day one.
 function _pickDailyChallenge(day) {
   const lv = player.level || 1;
-  const pool = DAILY_CHALLENGES.filter(c => (c.minLv || 1) <= lv);
+  const pool = DAILY_CHALLENGES.filter(c => (c.minLv || 1) <= lv && lv <= (c.maxLv || 999));   // bughunt systems-6 - a challenge may also end at a level (reach20)
   if (!pool.length) return DAILY_CHALLENGES[0];
   return pool[day % pool.length];
 }
@@ -72097,7 +72160,7 @@ function resetStats() {
     // v0.30.1060 — shorter, in the comic skin (per user: "This can have shorter more concise description, the
     // style can be more pop comic art"): what you get back, what it costs, one line of fine print, and a
     // warning only when the Setshards are short. The plain body is the text-only fallback.
-    const _fmt = (n) => (typeof _fmtBig === 'function') ? _fmtBig(n) : String(n);
+    const _fmt = (n) => (typeof _FMT_BIG === 'function') ? _FMT_BIG(n) : String(n);   // bughunt L2e - _fmtBig lives inside updateUI only (typeof read undefined here: the cost chips printed 246913, not 246.9K)
     const _sh = player.setshards || 0;
     uiConfirm({
       title: 'Reset your stats?',
@@ -74676,7 +74739,11 @@ function _endExpedition(reason) {
   // v0.30.1150 pet-fixes - the restore just below re-charges game.expedition._spentInRun (potions, fares); resetting the object
   // first zeroed it, so death / Abandon / a clear refunded the whole run. Carry it across.
   const _lxSpentRun = (game.expedition && game.expedition._spentInRun) | 0;
-  game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null, _spentInRun: _lxSpentRun };
+  // bughunt save-2 - ...and the lifetime / daily rewards the run HELD (_grantMojicoins hold): their claims were stamped when they
+  // were earned, and the restore below pays them from this object - reset without them they were never paid, on death,
+  // Abandon and completion alike.
+  const _lxHeldRun = (game.expedition && game.expedition._heldCoins) || 0;
+  game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null, _spentInRun: _lxSpentRun, _heldCoins: _lxHeldRun };
   _expeditionRestorePlayer(_snap);
   // v0.30.455 — the loaned slots are gone as of the line above (the cap reads game.expedition.active).
   // Restore normally returns the pre-run loadout, so this only bites when the snapshot was lost.
@@ -76011,7 +76078,7 @@ function _expeditionSpawnFinalBoss() {
 // Future patch can wire `player.equippedTitle` into nameplate render.
 const EXPEDITION_TITLES = [
   'Echo Walker', 'Twelvefold', 'Zodiac Cracked', 'Floor-Lord',
-  'The Tenth Door', 'Synergist', 'Star-Cutter', 'Echo Tamer',
+  'The Tenth Door', 'Pair-Weaver', 'Star-Cutter', 'Echo Tamer',   // bughunt systems-7 - was a second 'Synergist' (the Boon Codex's title, same player.titles key)
   'Constellation-Slayer', 'The Ascended',
 ];
 
@@ -76523,6 +76590,7 @@ _expeditionRestorePlayer = function (snap) {
     const _held = (game.expedition && game.expedition._heldCoins) || 0;
     if (_held > 0) {
       player.mojicoins = Math.min(1e12, Math.max(0, (player.mojicoins || 0) + _held)); game.expedition._heldCoins = 0;
+      game._coinsEarned = Math.min(2147483647, Math.max(0, +game._coinsEarned || 0) + _held);   // bughunt systems-8 - a held reward is earned when it is paid
       if (typeof showToast === 'function') showToast('\u2726 Rewards held for you through the Tower: +' + _held.toLocaleString() + ' Mojicoins', 'legendary');
     }
   } catch (e) {}
@@ -85239,7 +85307,7 @@ function triggerDeath() {
   if (sub) {
     // v0.30.x (audit F10) - "your journey ends here" / "the end of your journey" read as game over; a death costs only
     // the toll shown below it. In an Expedition the tower's loot does go, and the line says so.
-    sub.textContent = game._diedInExpedition
+    sub.textContent = _diedInExpedition   // bughunt save-7 - the local flag: game._diedInExpedition is cleared well before this line
       ? 'Everything looted in the tower is removed. Your own gear and your level are safe.'
       : 'You keep your level, your gear and your quests.';
   }
@@ -110686,7 +110754,7 @@ function _killMonsterRaw(m) {
   // Mastery (v0.24.1) — per-mob-type kill counter. Hitting thresholds of
   // 100 / 500 / 1000 kills grants +1% / +2% / +3% damage vs that type.
   // Classic MMO "paragon-lite" grind that rewards long-term farming.
-  _lxKillMastery(m);   // bughunt guest-dealt (parityB-2) - the block moved into a function so a co-op guest earns mastery too
+  if (!_isIllusionKill) _lxKillMastery(m);   // bughunt guest-dealt (parityB-2) - the block is a function so a co-op guest earns mastery too; bughunt world-4 - an away summon's / mirage's kill pays no mastery, bounty progress or Setshards either (v0.30.861: it counts for nothing)
   // Bestiary tracking drives cosmetic unlocks
   if (!_isIllusionKill) trackPickup('kill', { type: m.type });   // v0.30.1150 pet-fixes - mirages and away-summon kills don't feed species mastery either
   if (m.isBoss) {
@@ -110850,7 +110918,7 @@ function _killMonsterRaw(m) {
   // continuous ramp (see _lxEarlyExpMul): ×30 at Lv 1 → ×10 at Lv 10 → ×1 by
   // Lv 30. No cliff at Lv 6, and the boost genuinely returns to normal.
   // (the newbie band is retired for kills - see the note above the award)
-  const _xpGain = (m.exp > 0) ? Math.max(1, Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * mpCoopMul * _pqFarmMul * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * _ksXpMul() * _lxExpLevelGapMul(m) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1))) : 0;   // v0.30.x raw - a kill that pays anything pays at least 1 - v0.29.858 level-gap falloff · v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
+  const _xpGain = (m.exp > 0) ? Math.max(1, Math.floor(m.exp * (1 + player.mods.xpBoost + getEquipBonus('xpBoost')) * comboBonus * prestigeXp * comboXpMult * mpCoopMul * _pqFarmMul * (typeof _diffExpMul === 'function' ? _diffExpMul() : 1) * (typeof _affixExpMul === 'function' ? _affixExpMul() : 1) * (typeof _edictExpMul === 'function' ? _edictExpMul() : 1) * _ksXpMul() * _lxExpLevelGapMul(m) * (typeof _lxDawnExpMul === 'function' ? _lxDawnExpMul() : 1))) : 0;   // v0.30.x raw - a kill that pays anything pays at least 1 - v0.29.858 level-gap falloff · v0.29.296 early ramp (absorbs the old ×3 kicker + event ×10) · monster EXP knob · v0.28.7 difficulty risk/reward · v0.29.288 world affix · v0.29.352 Slaughter Ladder EXP boon
   player.exp += _xpGain;
   // v0.29.296 — Trainee Path: count the kill, then test the ladder. Skipped
   // entirely once the path is finished so a long-running save pays nothing.
@@ -119189,8 +119257,20 @@ function _claimDailyParcel() {
           const _slot = (typeof _catToSlot === 'function') ? _catToSlot(_cat) : _cat;
           const _g = { ...(_pool[Math.floor(Math.random() * _pool.length)]), slot: _slot };
           player.inventory = player.inventory || [];
-          player.inventory.push(_g);
-          parts.push('🎁 ' + _g.name);
+          // bughunt save-8 - the bag cap, as a chest honours it: a piece pushed past invCap sat in the array BEYOND the rendered
+          // slots (invisible loot). A full tab sends it to the Wisp's post office (her own parcel), else to the ground at your feet.
+          const _tab = (typeof _itemTab === 'function') ? _itemTab(_g) : 'etc';
+          const _capP = (player.invCap && typeof player.invCap[_tab] === 'number') ? player.invCap[_tab] : 24;
+          let _usedP = 0;
+          for (const _it of player.inventory) { if (_it && (((typeof _itemTab === 'function') ? _itemTab(_it) : 'etc') === _tab)) _usedP++; }
+          if (_usedP >= _capP) {
+            const _heldP = (typeof _lxPostboxHold === 'function') && _lxPostboxHold(_g, true, true);
+            if (!_heldP) game.drops.push({ x: player.x + player.w / 2, y: player.y, vy: -5, type: 'item', item: _g, life: 90000 });
+            parts.push('🎁 ' + _g.name + ' (bag full - ' + (_heldP ? 'held at the post office, press P' : 'at your feet') + ')');
+          } else {
+            player.inventory.push(_g);
+            parts.push('🎁 ' + _g.name);
+          }
         }
       }
     } catch (e) {}
@@ -119435,6 +119515,7 @@ function openShop(type, opts) {
           return;
         }
         player.mojicoins -= total;
+        try { if (game.expedition && game.expedition.active) game.expedition._spentInRun = ((game.expedition._spentInRun | 0) + total); } catch (e) {}   // bughunt save-3 - `P` opens this shop inside a Tower run; without the tally the wallet restore refunded the purchase (free potions)
         player.consumables[p.id] = (player.consumables[p.id] || 0) + qty;
         if (audio && audio.play) audio.play('chaching');
         showToast(`✨ Bought ${qty} × ${p.name}`, 'rare');
@@ -119863,6 +119944,13 @@ function itemStatString(it, multiline) {
 // (attempts from st 4..7, which does not - the ★4→★5 attempt is still coin-only). A reader had no
 // way to tell which, and the panel gave them no way to check. Each rung here is labelled with both
 // ends and its own odds, so the question cannot arise.
+// bughunt save-10 / ui-2 - the odds the NEXT attempt on this item really rolls at: the table rate plus the pity bonus (+6% per
+// failed try on this item, cap +30%; the roll in enhanceItem adds the same). The preview, the star track's next rung and the
+// expected-cost chip used the bare table rate, so a star-9 item with pity read 8% and rolled at up to 38%.
+function _lxEnhRate(it, s) {
+  const base = (typeof starSuccessRate === 'function') ? starSuccessRate(s) : 100;
+  return base + Math.min(30, ((it && it._pity) | 0) * 6);
+}
 function _forgeRungTone(step) {
   // `step` is the attempt FROM star `step` TO star `step+1`.
   const rate = (typeof starSuccessRate === 'function') ? starSuccessRate(step) : 100;
@@ -119880,7 +119968,7 @@ function _forgeStarTrack(it) {
     const earned = i < s;                 // this rung is already behind you
     const next = i === s;                 // the attempt the Forge button would make
     const tone = _forgeRungTone(i);
-    const rate = (typeof starSuccessRate === 'function') ? starSuccessRate(i) : 100;
+    const rate = next ? _lxEnhRate(it, i) : ((typeof starSuccessRate === 'function') ? starSuccessRate(i) : 100);   // bughunt save-10 - only the next rung carries the item's pity
     const cost = (typeof STAR_COSTS !== 'undefined' && STAR_COSTS[i]) || 0;
     const drops = (typeof canDowngradeOnFail === 'function') && canDowngradeOnFail(i);
     const cls = 'ft-rung' + (earned ? ' ft-earned' : '') + (next ? ' ft-next' : '');
@@ -119893,7 +119981,7 @@ function _forgeStarTrack(it) {
   for (let i = 0; i < max; i++) {
     if ((typeof canDowngradeOnFail === 'function') && canDowngradeOnFail(i)) { dropFrom = i; break; }
   }
-  const nextRate = (typeof starSuccessRate === 'function') ? starSuccessRate(s) : 100;
+  const nextRate = _lxEnhRate(it, s);   // bughunt save-10
   const head = s >= max
     ? `<b>★${max}</b> · fully forged`
     : `<b>★${s}</b> <span class="ft-arrow">→</span> <b class="ft-goal">★${s + 1}</b> · <b style="color:${_forgeRungTone(s).col};">${nextRate}%</b>`;
@@ -119908,9 +119996,9 @@ function _forgeStarTrack(it) {
 // What the next star really costs, which is not the sticker price: at p% success you pay for
 // 100/p attempts on average. Shown only where a failure cannot also take a star back - above that
 // the honest answer is not a single number, so the panel says what happens instead of guessing.
-function _forgeExpectedCost(s) {
+function _forgeExpectedCost(s, it) {
   const cost = (typeof STAR_COSTS !== 'undefined' && STAR_COSTS[s]) || 0;
-  const rate = (typeof starSuccessRate === 'function') ? starSuccessRate(s) : 100;
+  const rate = Math.min(100, _lxEnhRate(it, s));   // bughunt save-10 - with the item's pity (the roll can exceed 100: a sure thing reads as 100)
   if (!cost || !rate) return '';
   const drops = (typeof canDowngradeOnFail === 'function') && canDowngradeOnFail(s);
   if (drops) return '';
@@ -120776,7 +120864,7 @@ function renderEnhancementModal(selectedItem) {
         : `<div style="margin-top:8px; padding:8px 10px; border-radius:6px; background:linear-gradient(90deg, rgba(255,120,60,0.12), rgba(190,90,255,0.12)); border:1px solid rgba(255,150,90,0.40);">
             <div style="font-weight:bold; color:#ffb380; letter-spacing:1px; margin-bottom:4px;">🜂 TRANSCENDENCE</div>
             <div style="font-size:11px; color:#e8d8cc; line-height:1.5;">
-              • Resets to ★0 — but keeps <b>50% of its current ★${MAX_STARS} stats as new BASE stats</b> (≈ +${Math.round((_tKeep - 1) * 100)}% over the original base).<br>
+              • Resets to ★0 — but its BASE stats rise to <b>+${Math.round((_tKeep - 1) * 100)}% over the original base</b> (half of a ★${MAX_STARS} on the original flat curve, not half of the live ★${MAX_STARS} totals).<br>
               • Forged back to ★${MAX_STARS}, it peaks at <b style="color:#ffd9a0;">~+${_tPeakSig}%</b> on this slot’s own stat and <b style="color:#ffd9a0;">~+${_tPeakOrd}%</b> on the rest — beyond today’s cap.<br>
               • <b>Once per equipment.</b> Irreversible.
             </div>
@@ -120792,7 +120880,7 @@ function renderEnhancementModal(selectedItem) {
       return;
     }
     const cost = STAR_COSTS[s];
-    const rate = starSuccessRate(s);
+    const rate = Math.min(100, _lxEnhRate(selectedItem, s));   // bughunt save-10 - the roll adds the item's pity; the badge now says so
     const nextBonusPct = starBonusPct(s + 1, selectedItem.tier);
     const curBonusPct  = starBonusPct(s, selectedItem.tier);
     const marginalGain = nextBonusPct - curBonusPct;
@@ -120895,7 +120983,7 @@ function renderEnhancementModal(selectedItem) {
         <span style="display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:12px; background:${_riskBg}; color:${_riskColor}; font-size:11px; font-weight:600;">${_riskLabel} · ${rate}% success</span>
         <span style="display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:12px; background:${canAfford ? 'rgba(255,255,255,0.06)' : 'rgba(180,80,80,0.20)'}; color:${canAfford ? '#cfd4dc' : '#ff8888'}; font-size:11px; font-weight:600;">🪙 ${cost.toLocaleString()} Mojicoins ${canAfford ? '' : `(need ${(cost - player.mojicoins).toLocaleString()} Mojicoins more)`}</span>
         <span style="display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:12px; background:rgba(255,255,255,0.06); color:#aac; font-size:11px;">+${marginalGain}% over current</span>
-        ${_forgeExpectedCost(s)}
+        ${_forgeExpectedCost(s, selectedItem)}
       </div>
       ${risky ? '<div style="font-size:11px; color:#ff9999; margin:4px 0 6px;">⚠ Failure has a 50 % chance to <b>drop ★ by one</b>. Bring a backup.</div>' : '<div style="font-size:11px; color:#88ff88; margin:4px 0 6px;">✓ Failure on this star simply costs the Mojicoins — no ★ loss.</div>'}
       <button class="enhance-btn${canAfford ? ' enhance-btn-go' : ''}" id="do-enhance" ${canAfford ? '' : 'disabled'}>${canAfford ? `Forge ★${s + 1}` : 'Not enough Mojicoins'}</button>
@@ -120961,7 +121049,7 @@ async function transcendItem(it) {
   const _newPeakOrd = Math.round((_keepMul * starMult({ stars: MAX_STARS, tier: it.tier }) - 1) * 100);
   const _body =
     'Transcendence reforges ' + (it.name || 'this item') + ' beyond its limits.\n\n' +
-    '• ★ resets to 0 — but the new BASE stats are 50% of its current ★' + MAX_STARS + ' totals (≈ +' + Math.round((_keepMul - 1) * 100) + '% over the original base).\n' +
+    '• ★ resets to 0 — but the new BASE stats are +' + Math.round((_keepMul - 1) * 100) + '% over the original base (half of a ★' + MAX_STARS + ' on the original flat curve, not half of the live ★' + MAX_STARS + ' totals).\n' +
     '• Forged back to ★' + MAX_STARS + ', it peaks at ~+' + _newPeakSig + '% over original base on this slot\u2019s own stat (+' + _newPeakOrd + '% on the rest) — beyond the old cap.\n' +
     '• ONCE per equipment. Irreversible.\n' +
     '• Cost: ' + TRANSCEND_COST + '◈ Setshards (you have ' + (player.setshards || 0) + '◈)';
@@ -121024,6 +121112,7 @@ const _REFORGE_SLOT_ICON = { weapon: '⚔️', armor: '🛡️', accessory: '�
 function _reforgeWhy(it) {
   if (!it) return 'Nothing equipped in this slot';
   if (it.transcended) return '🜂 Transcended — its reborn stats are permanent';
+  if (it._shardsight || it.godTier) return 'Its signature stats are permanent';   // bughunt systems-3 - a reforge rebuilds from the catalog and would drop the Shardsight accuracy / the Godforged x1.2 base
   if ((it.dropLevel || 0) < 50) return 'Lv 50+ gear only (this piece is Lv ' + (it.dropLevel || 1) + ')';
   if (!it.affixes) return 'No rolled affixes to re-roll';
   return null;
@@ -124275,7 +124364,7 @@ function renderBoonPanel() {
     }
   }
   if (!invHtml.length) {
-    invHtml.push(`<div class="bl-empty">Boons drop from <b>bosses</b>, rarely from monsters once you reach Lv 20, from Bravo's expedition blessings, and from <b>???</b>'s offering (once every 12 hours, 5,000 Mojicoins).</div>`);
+    invHtml.push(`<div class="bl-empty">Boons drop from <b>bosses</b>, rarely from monsters once you reach Lv 20, from Bravo's expedition blessings, and from <b>???</b>'s offering (once every 12 hours, ${SAGE_PRICE.toLocaleString()} Mojicoins).</div>`);   // bughunt ui-3 - the price is the constant's, not a stale 5,000
   }
   const selN = game._boonSel.size;
   const toolbar = `<div class="bl-tools"><button id="boon-bulk-toggle" class="bl-btn${bulk ? ' is-on' : ''}">${bulk ? '✓ Bulk discard on' : '🗑 Bulk discard'}</button>${bulk ? `<button id="boon-sel-all" class="bl-btn">Select all unequipped</button><button id="boon-sel-clear" class="bl-btn is-quiet">Clear</button><button id="boon-sel-discard" class="bl-btn is-on" ${selN ? '' : 'disabled'}>🗑 Discard ${selN} selected</button><span class="bl-hint">Tap unequipped boons to tick them.</span>` : ''}</div>`;

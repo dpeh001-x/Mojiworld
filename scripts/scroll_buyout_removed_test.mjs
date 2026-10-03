@@ -58,6 +58,8 @@ const r = await page.evaluate(async () => {
     game: { currentMap: 'shadowSlums', bossDefeated: { shadowSlums: true } },
   };
   delete stale.player.setshards;   // the defaulter just above the removed block
+  // bughunt D2: an unsigned save is refused now (it cannot be told from an edited one), so the fixture is signed the way the game signs it
+  try { if (typeof _lxLocalSaveSig === 'function') stale.sig = _lxLocalSaveSig(stale); } catch (e) {}
   try { localStorage.setItem(key, JSON.stringify(stale)); } catch (e) {}
   out.loadErr = null;
   try {

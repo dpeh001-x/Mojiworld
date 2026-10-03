@@ -41,7 +41,7 @@ try {
     // 3. stats
     try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
-    applyClass('warrior'); player.level = 1; player.mojicoins = 1e12; game.prestige = Object.assign(game.prestige || {}, { count: 1 });
+    applyClass('warrior'); player.level = 1; player.mojicoins = 1e12; game._coinsEarned = 1e12; game.prestige = Object.assign(game.prestige || {}, { count: 1 });
     try { _lxSteamStatsAt = 0; } catch (e) {}
     window.__stats.length = 0; _lxSteamPushStats(); _lxSteamPushStats(); _lxSteamPushStats();
     out.stats = { pushes: window.__stats.length, first: window.__stats[0] || null };

@@ -6,7 +6,8 @@
 //      saved, the save verifies again, and the player is told;
 //   3. a STRIPPED signature (with the same edits) is rolled back the same way;
 //   4. a stripped modern save whose marker was deleted too is not loaded at all: kept in Save Backups as "edited, not verified";
-//   5. a genuine legacy save (older than signing: no signature, no marker, no _cdCarry) still loads as it is;
+//   5. a legacy save (older than signing: no signature, no marker, no _cdCarry) is NOT loaded any more (bughunt D2 closed the
+//      allowance: it could not be told from an edited save): kept in Save Backups as "edited, not verified";
 //   6. a CORRUPTED signed field (one value flipped) is repaired from the copy; unreadable JSON is kept as "could not load";
 //   7. import: an edited .mojisave and an unsigned .json are REFUSED with a one-button notice, nothing stored, no reload; the
 //      game's own .mojisave and a plain .json of a signed save are offered for import; an older secure export (outer signature
@@ -62,7 +63,7 @@ try {
     reset();
     // 5. a genuine legacy save (older than signing)
     const lg = JSON.parse(raw); delete lg.sig; delete lg.player._cdCarry; lg.player.setshards = 4321;
-    out.legacy = load(lg, 'nomark'); reset();
+    const bk5 = (_lxGetBackups() || []).length; out.legacy = load(lg, 'nomark'); out.legacyBkN = (_lxGetBackups() || []).length - bk5; out.legacyBk = ((_lxGetBackups() || [])[0] || {}).label || ''; reset();
     // 6. corruption: one flipped value in a signed field; unreadable JSON
     const fl = JSON.parse(raw); fl.player.level = 61; out.flip = load(fl); reset();
     out.junk = load(raw.slice(0, Math.floor(raw.length / 2))); out.junkBk = ((_lxGetBackups() || [])[0] || {}).label || ''; reset();
@@ -85,7 +86,7 @@ try {
   ok('[2] an edited save is rolled back: level 60, the money (plus the daily login bonus) and the items as last saved, verdict "restored", and the player is told', R.edited.loaded === true && R.edited.verdict === 'restored' && R.edited.lv === 60 && R.edited.shards === 1234 && R.edited.coins >= 55555 && R.edited.coins < 60000 && R.edited.inv === R.nInv && R.noteEd, Object.assign({ nInv: R.nInv, note: R.noteEd }, R.edited));
   ok('[3] a stripped signature is rolled back the same way', R.stripped.loaded === true && R.stripped.verdict === 'restored' && R.stripped.lv === 60 && R.stripped.shards === 1234 && R.stripped.coins >= 55555 && R.stripped.coins < 60000, R.stripped);
   ok('[4] stripped AND marker deleted: not loaded, kept in Save Backups as "edited, not verified"', R.nomark.loaded === false && /edited, not verified/.test(R.nomarkBk) && R.nomarkBkN >= 1 && R.noteNomark, { r: R.nomark, bk: R.nomarkBk, note: R.noteNomark });
-  ok('[5] a genuine legacy save (no signature, no marker, older than signing) still loads as it is', R.legacy.loaded === true && R.legacy.verdict === 'unsigned' && R.legacy.shards === 4321, R.legacy);
+  ok('[5] a legacy save (no signature, no marker, older than signing) is not loaded: kept in Save Backups as "edited, not verified" (bughunt D2)', R.legacy.loaded === false && R.legacyBkN >= 1 && /edited, not verified/.test(R.legacyBk), { r: R.legacy, n: R.legacyBkN, label: R.legacyBk });
   ok('[6] a corrupted signed field is repaired from the copy; unreadable JSON is kept as "could not load"', R.flip.loaded === true && R.flip.verdict === 'restored' && R.flip.lv === 60 && R.junk.loaded === false && /could not load/.test(R.junkBk), { flip: R.flip, junk: R.junk.loaded, bk: R.junkBk });
   const refused = (d) => d.shown && /Save file refused/.test(d.title) && !d.noShown && d.stored && d.stay;
   ok('[7] an edited .mojisave is refused with a one-button notice; nothing stored, no reload', refused(R.impEdited) && /changed after the game wrote it/.test(R.impEdited.body), R.impEdited);

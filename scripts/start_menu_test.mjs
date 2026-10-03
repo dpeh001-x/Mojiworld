@@ -85,6 +85,7 @@ try {
   await page.evaluate(() => {
     const s = { v: (typeof SAVE_VERSION !== 'undefined' ? SAVE_VERSION : 1), t: Date.now(),
       player: { cls: 'mage', level: 42, look: { name: 'Aurora' } }, game: { currentMap: 'town' } };
+    try { s.sig = _lxLocalSaveSig(s); } catch (e) {}   // bughunt D2: an unsigned save is refused (and kept as an extra backup), so the fixture is signed the way the game signs it
     localStorage.setItem('levelx_save_v1', JSON.stringify(s));
   });
   await page.reload({ waitUntil: 'domcontentloaded' });

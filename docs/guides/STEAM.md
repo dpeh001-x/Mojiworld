@@ -370,7 +370,7 @@ match verbatim or the push is silently dropped:
 | --- | --- | --- |
 | `lifetime_kills` | INT | total enemies defeated |
 | `highest_level` | INT | highest character level reached |
-| `lifetime_coins` | INT | Mojicoins currently held (snapshot) |
+| `lifetime_coins` | INT | Mojicoins earned in play (never decreases; saved as `_coinsEarned`, started at the wallet + bank for older saves) |
 | `bosses_defeated` | INT | distinct bosses defeated |
 
 ### Achievements

@@ -9,7 +9,8 @@ import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || '11370';
 const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
@@ -82,7 +83,11 @@ try {
   // 4) a minimal old save: full HP / MP, and the title shows the save's own day-old stamp
   {
     const t = Date.now() - 86400000 - 120000;
-    const { ctx, p } = await newPage(JSON.stringify({ v: 1, t, player: { cls: 'warrior', level: 7 } }));
+    // bughunt D2: a save with no signature is refused now, so the minimal save is SIGNED the way the game signs it (ls3 body, HMAC-SHA256)
+    const SECRET = /const _LX_SAVE_SECRET = '([^']+)'/.exec(readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8'))[1];
+    const minimal = { v: 1, t, player: { cls: 'warrior', level: 7 } };
+    minimal.sig = createHmac('sha256', SECRET).update(['ls3', minimal.v, minimal.t, JSON.stringify(minimal.player), '{}'].join('\n')).digest('hex');
+    const { ctx, p } = await newPage(JSON.stringify(minimal));
     await p.evaluate(() => { try { _flushSaveStateNow(); } catch (e) {} });   // the boot's own autosave (it lands before the menu on a real boot)
     const hp = await p.evaluate(() => ({ hp: Math.round(player.hp), max: Math.round(getMaxHp()), mp: Math.round(player.mp), maxMp: Math.round(getMaxMp()), lvl: player.level }));
     check(hp.lvl === 7 && hp.max > 100 && hp.hp === hp.max && hp.mp === hp.maxMp, 'a save without hp / mp loads at full pools (was 100 of 643)', hp);

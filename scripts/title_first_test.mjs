@@ -177,7 +177,12 @@ try {
   check(warm.new.ms <= warm.old.ms + 750, `a returning player (warm cache) gets the title no later than before (${warm.new.ms} vs ${warm.old.ms} ms)`, warm);
   // ---- C: Continue with a saved game on a non-town map -----------------------------------------------------------------------
   const MAP = 'mushroom';
-  const save = JSON.stringify({ v: 1, t: Date.now(), player: { cls: 'warrior', level: 12, look: { name: 'Tester' } }, game: { currentMap: MAP } });
+  // bughunt D2: a save with no signature is refused now (Continue would never start), so the fixture is signed the way the game signs it:
+  // HMAC-SHA256 over the ls3 body (only the signed keys count: cls + level; `look` and `currentMap` are not part of it)
+  const SECRET = /const _LX_SAVE_SECRET = '([^']+)'/.exec(readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8'))[1];
+  const saveObj = { v: 1, t: Date.now(), player: { cls: 'warrior', level: 12, look: { name: 'Tester' } }, game: { currentMap: MAP } };
+  saveObj.sig = crypto.createHmac('sha256', SECRET).update(['ls3', saveObj.v, saveObj.t, JSON.stringify({ cls: 'warrior', level: 12 }), '{}'].join('\n')).digest('hex');
+  const save = JSON.stringify(saveObj);
   // every resume lands in town (loadState, v0.26.961), whatever map the save was made on: THAT is the map to prepare
   const cont = {};
   for (const [label, qs] of [['old', '?lxtf=0'], ['new', '']]) {

@@ -12,7 +12,8 @@
 //   3. _lxSpriteHealSweep unit: retries errored, drops healthy + exhausted
 //   node scripts/sprite_gate_retry_test.mjs
 import { chromium } from 'playwright-core';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 // tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 const FILE = process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html';
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -30,8 +31,13 @@ await new Promise(r => setTimeout(r, 2000));
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 
 // v0.30.x title-first - v: 1, or loadState reads the save as an old format and starts a new hero in the Void (not town)
-const SAVE = JSON.stringify({ v: 1, t: Date.now(), player: { cls: 'warrior', level: 5, hp: 100, maxHp: 100, mp: 50, maxMp: 50,
-  exp: 0, expToNext: 100, mojicoins: 0, baseAtk: 5, baseDef: 0, baseAcc: 0 }, game: { currentMap: 'town' } });
+// bughunt D2: an unsigned save is refused now, so the fixture is signed the way the game signs it (HMAC-SHA256 over the ls3 body: the signed
+// keys only, in the game's key order - hp / mp / currentMap are not part of it)
+const SAVE_OBJ = { v: 1, t: Date.now(), player: { cls: 'warrior', level: 5, hp: 100, maxHp: 100, mp: 50, maxMp: 50,
+  exp: 0, expToNext: 100, mojicoins: 0, baseAtk: 5, baseDef: 0, baseAcc: 0 }, game: { currentMap: 'town' } };
+const SECRET = /const _LX_SAVE_SECRET = '([^']+)'/.exec(readFileSync(new URL('../mojiworld_game.html', import.meta.url), 'utf8'))[1];
+SAVE_OBJ.sig = createHmac('sha256', SECRET).update(['ls3', SAVE_OBJ.v, SAVE_OBJ.t, JSON.stringify({ cls: 'warrior', level: 5, exp: 0, expToNext: 100, mojicoins: 0, baseAtk: 5, baseDef: 0, baseAcc: 0, maxHp: 100, maxMp: 50 }), '{}'].join('\n')).digest('hex');
+const SAVE = JSON.stringify(SAVE_OBJ);
 const bootTo = async (ctx, label, errs) => {
   const page = await ctx.newPage();
   page.on('pageerror', e => errs.push(label + ': ' + String(e).slice(0, 120)));

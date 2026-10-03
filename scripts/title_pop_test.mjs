@@ -8,8 +8,10 @@ import { chromium } from 'playwright-core';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SECRET = /const _LX_SAVE_SECRET = '([^']+)'/.exec(readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8'))[1];
 const PORT = process.env.PORT || '10871';
 const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 let bad = 0, total = 0; const check = (ok, what, info) => { total++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${ok ? '' : '   ' + JSON.stringify(info)}`); if (!ok) bad++; };
@@ -25,7 +27,13 @@ const open = async (vp, save) => {
     if (existsSync(path.join(ROOT, rel))) return r.continue();
     try { r.fulfill({ status: 200, contentType: 'font/woff2', body: execFileSync('git', ['show', 'origin/main:' + rel], { cwd: ROOT, maxBuffer: 1 << 24 }) }); } catch (e) { r.continue(); }
   });
-  if (save) await page.addInitScript((cls) => { try { localStorage.setItem('levelx_save_v1', JSON.stringify({ v: 1, t: Date.now(), player: { cls, level: 42, look: { name: 'Dadpeh' } }, game: { currentMap: 'town' } })); } catch (e) {} }, save);
+  if (save) {
+    // bughunt D2: a save with no signature is refused now (and the refusal notice grows the title card), so the fixture is signed the way
+    // the game signs it: HMAC-SHA256 over the ls3 body (cls + level are the only signed keys it has)
+    const o = { v: 1, t: Date.now(), player: { cls: save, level: 42, look: { name: 'Dadpeh' } }, game: { currentMap: 'town' } };
+    o.sig = createHmac('sha256', SECRET).update(['ls3', o.v, o.t, JSON.stringify({ cls: save, level: 42 }), '{}'].join('\n')).digest('hex');
+    await page.addInitScript((s) => { try { localStorage.setItem('levelx_save_v1', s); } catch (e) {} }, JSON.stringify(o));
+  }
   await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => { const o = document.getElementById('loading-overlay'); return o && o.classList.contains('menu-up'); }, null, { timeout: 150000 });
   await page.waitForTimeout(2600);   // the card slam + the menu cascade
