@@ -42,7 +42,8 @@ try {
     W.host = () => { net.isHost = true; net.hostId = null; net.connected = false; net.ws = null; net.peers = {}; };
     W.mirror = (type, uid, level) => { net._coopSpawning = true; let m; try { m = spawnMonster(player.x + 120, player.y, type, false, false); } finally { net._coopSpawning = false; } m.uid = uid; m._coopMirror = true; if (level) m.level = level;
       m.evasion = 0; m.def = 0; m.maxHp = m.currentHp = 1e12; m.aggroRange = 0; m.exp = 100; return m; };
-    W.frame = (o) => Object.assign({ t: 'kill', id: 7, u: 0, e: 100, c: 0, x: Math.round(player.x) + 3000, y: Math.round(player.y), map: game.currentMap, tp: 'slime', b: 0, il: 0 }, o);
+    W.frame = (o) => { try { for (const k in _MP_BUCKETS) delete _MP_BUCKETS[k]; net._bossPaid = Object.create(null); } catch (e) {}   // coop-trust (coop-6): 60 kill frames a second and one pay per boss key per 30 s - these are synthetic back-to-back kills, so every frame starts with both guards clear
+      return Object.assign({ t: 'kill', id: 7, u: 0, e: 100, c: 0, x: Math.round(player.x) + 3000, y: Math.round(player.y), map: game.currentMap, tp: 'slime', b: 0, il: 0 }, o); };
     W.toasts = []; const _st = showToast; W.restoreToast = () => { showToast = _st; }; showToast = function (t) { W.toasts.push(String(t)); };
     W.sigils = () => (player.inventory || []).filter((i) => i && i.zodiacSigil).length;
     W.boons = []; W.realPowerup = showPowerupChoice; showPowerupChoice = function (info) { W.boons.push(info); };
@@ -103,7 +104,7 @@ try {
       player.setshards = 0; _coopApplyKill(W.frame({ u: note('slime', { isMiniBoss: true }) })); out.elder = player.setshards;
       player.mastery.slime = 99; W.toasts.length = 0; _coopApplyKill(W.frame({ u: note('slime') })); out.star = W.toasts.some((t) => /MASTERY/.test(t)); out.m100 = player.mastery.slime;
       // a boss is not a mastery kill, but it is a kill
-      const k0 = game.kills, ms0 = JSON.stringify(player.mastery); _coopApplyKill(W.frame({ u: note('zodiac_aries', { isBoss: true }), tp: 'zodiac_aries', b: 1, zs: 'aries', bl: 70, ec: 1 }));
+      const k0 = game.kills, ms0 = JSON.stringify(player.mastery); _coopApplyKill(W.frame({ u: note('zodiac_aries', { isBoss: true, zodiacSign: 'aries' }), tp: 'zodiac_aries', b: 1, zs: 'aries', bl: 70, ec: 1 }));
       out.bossKill = game.kills - k0; out.bossMastery = JSON.stringify(player.mastery) === ms0;
       // with the mirror still alive its own tier is read BEFORE the splice
       const mm = W.mirror('slime', ++uid); mm.isElite = true; player.setshards = 0; _coopApplyKill(W.frame({ u: mm.uid })); out.mirrorElite = player.setshards; out.mirrorGone = game.monsters.indexOf(mm) < 0;
@@ -163,7 +164,7 @@ try {
     // greed still counts (x2 gear greed, the host's pickup line), under the host's x3.5 gear cap
     player.mods.greed = 1; const mg = W.mirror('slime', ++uid, 60); mg.mojicoins = 973; out.greed = coins(W.frame({ u: mg.uid, e: 100, c: 973 })); player.mods.greed = 0; game.monsters.length = 0;
     // a zodiac boss bag: first kill under the boss ceiling, a refight at x0.30 of the bag - read off THIS guest's own history
-    const bag = (refight) => { game._bossKills = refight ? { zodiac_aries: 1 } : {}; const u = ++uid; _lxCoopRewardNote({ uid: u, type: 'zodiac_aries', exp: 1000, mojicoins: 340000, level: 70, isBoss: true });
+    const bag = (refight) => { game._bossKills = refight ? { zodiac_aries: 1 } : {}; const u = ++uid; _lxCoopRewardNote({ uid: u, type: 'zodiac_aries', exp: 1000, mojicoins: 340000, level: 70, isBoss: true, zodiacSign: 'aries' });
       return coins(W.frame({ u, e: 1000, c: 340000, tp: 'zodiac_aries', b: 1, zs: 'aries', bl: 70, ec: 1 })); };   // ec:1 - no sigil / wheel noise
     out.bossFirst = bag(false); out.bossRefight = bag(true); game._bossKills = {};
     W.host(); return out;
@@ -206,8 +207,8 @@ try {
     const kill = (name, over, noteOver) => {
       game._bossKills = {}; game._pendingBossBoon = null; W.boons.length = 0; W.toasts.length = 0;
       const u = ++uid; const tp = (over && over.tp) || 'zodiac_aries';
-      _lxCoopRewardNote(Object.assign({ uid: u, type: tp, exp: 1000, mojicoins: 1000, level: 70, isBoss: true, name: 'Ariel the Ember Ram' }, noteOver || {}));
-      const s0 = W.sigils(); _coopApplyKill(W.frame(Object.assign({ u, e: 1000, c: 1000, tp, b: 1, zs: 'aries', bl: 70 }, over || {})));
+      _lxCoopRewardNote(Object.assign({ uid: u, type: tp, exp: 1000, mojicoins: 1000, level: 70, isBoss: true, name: 'Ariel the Ember Ram' }, (tp === 'zodiac_aries' ? { zodiacSign: 'aries' } : {}), noteOver || {}));
+      net._bossPaid = Object.create(null); const s0 = W.sigils(); _coopApplyKill(W.frame(Object.assign({ u, e: 1000, c: 1000, tp, b: 1, zs: 'aries', bl: 70 }, over || {})));
       const r = { sigil: W.sigils() - s0, queued: !!game._pendingBossBoon, info: game._pendingBossBoon ? J2(game._pendingBossBoon) : null };
       out.cases[name] = r; game._pendingBossBoon = null; return r;
     };
@@ -215,7 +216,7 @@ try {
     kill('conductor', { tp: 'pqConductor', zs: undefined }); kill('plain', { b: 0 }, { isBoss: false }); kill('gravitos', { tp: 'gravitos', zs: undefined }, { name: 'Gravitos, the Weight-Bearer' });
     // delivery: the queued wheel opens through showPowerupChoice about 1.5 s later, once
     const u = ++uid; _lxCoopRewardNote({ uid: u, type: 'gravitos', exp: 1000, mojicoins: 1000, level: 100, isBoss: true, name: 'Gravitos, the Weight-Bearer' }); game._bossKills = {}; W.boons.length = 0; game._pendingBossBoon = null;
-    _coopApplyKill(W.frame({ u, e: 1000, c: 1000, tp: 'gravitos', b: 1, bl: 100 })); out.before = W.boons.length; await sleep(1900); out.after = W.boons.slice();
+    net._bossPaid = Object.create(null); _coopApplyKill(W.frame({ u, e: 1000, c: 1000, tp: 'gravitos', b: 1, bl: 100 })); out.before = W.boons.length; await sleep(1900); out.after = W.boons.slice();
     W.host(); return out;
   });
   const c7 = t7.cases;
@@ -233,13 +234,13 @@ try {
     player.level = 65; player.mods = player.mods || {}; player.mods.greed = 0; player.mods.xpBoost = 0;
     const run = (sb, tp) => { game._bossKills = {}; game._pendingBossBoon = null; player.exp = 0; player.expToNext = 1e12; const w0 = player.mojicoins || 0; const u = ++uid;
       _lxCoopRewardNote({ uid: u, type: tp, exp: 1000, mojicoins: 20000, level: 65, isBoss: true });
-      _coopApplyKill(W.frame({ u, e: 1000, c: 20000, tp, b: 1, bl: 65, sb })); game._pendingBossBoon = null; return { exp: player.exp, coins: (player.mojicoins || 0) - w0 }; };
+      net._bossPaid = Object.create(null); _coopApplyKill(W.frame({ u, e: 1000, c: 20000, tp, b: 1, bl: 65, sb })); game._pendingBossBoon = null; return { exp: player.exp, coins: (player.mojicoins || 0) - w0 }; };
     for (let i = 0; i < 3; i++) run(0, 'aetherion');   // warm-up: the first boss kills of a save also trip one-time quest / achievement rewards (Boss Hunter pays coins one kill late)
     const base = run(0, 'aetherion'), sup = run(1, 'aetherion');
     out.dExp = sup.exp - base.exp; out.dCoins = sup.coins - base.coins; out.base = base;
     out.mult = [(game.prestige && game.prestige.xpMult) || 1, _diffExpMul(), _edictExpMul(), _lxDawnExpMul()].reduce((a, v) => a * v, 1);
     game._bossKills = {}; player.exp = 0; const ui = ++uid; _lxCoopRewardNote({ uid: ui, type: 'aetherion', exp: 1000, mojicoins: 20000, level: 65, isBoss: true });
-    _coopApplyKill(W.frame({ u: ui, e: 1000, c: 20000, tp: 'aetherion', b: 1, il: 1, sb: 1 })); game._pendingBossBoon = null; out.illusion = player.exp;
+    net._bossPaid = Object.create(null); _coopApplyKill(W.frame({ u: ui, e: 1000, c: 20000, tp: 'aetherion', b: 1, il: 1, sb: 1 })); game._pendingBossBoon = null; out.illusion = player.exp;
     // the HOST side: the kill frame carries sb:1 for a super boss and only for one
     window.__gdKeep = window._coopKeyHasPeers; window._coopKeyHasPeers = () => true;
     net.isHost = true; net.connected = true; net.myId = 1; const sent = []; net.ws = { readyState: 1, send(s) { sent.push(JSON.parse(s)); } };
