@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1595';
+const GAME_VERSION = 'v0.30.1596';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -28537,7 +28537,8 @@ const SUFFIX_IDS = Object.keys(SUFFIXES);
 // STAR ENHANCEMENT SYSTEM
 // =========================================================================
 // Stars: 0 (base) → 10 (max). Since v0.30.1589 each star multiplies a stat by its own step (STAR_STEPS / STAR_SIG_STEPS
-// below), each step bigger than the last: ★10 = x3.61 on ordinary stats, x5.53 on the slot's main stat.
+// below), each step bigger than the last: ★10 = x3.61 on ordinary stats, x5.53 on the slot's main stat - on T8 gear;
+// since v0.30.1596 the piece's tier scales the steps (STAR_TIER_GROWTH), from x2.62 on T1 to x6.55 on T10.
 // v0.25.242 (G1) — flattened the ★4-7 cost shoulder so mid-tier
 // enhancement isn't a wall. Success rate floor raised 5% → 15% so a
 // ★10 attempt always has at least a 1-in-7 chance instead of 1-in-20.
@@ -28648,11 +28649,22 @@ function starSuccessRate(star) {
 // raw ATK and DEF. STAR_GROWTH above keeps one reader only, Transcendence's keep ratio (1.08^10 x 0.5 = +8% over the cap).
 const STAR_STEPS     = [1.08, 1.09, 1.10, 1.11, 1.12, 1.13, 1.14, 1.17, 1.20, 1.24];
 const STAR_SIG_STEPS = [1.12, 1.13, 1.14, 1.15, 1.16, 1.17, 1.19, 1.23, 1.27, 1.32];
+// v0.30.1596 - A HIGHER TIER GROWS MORE FROM ITS STARS (per user: "The potential for growth of stats from stars should be higher
+// the higher the tier"). Each star's step is scaled by the piece's tier: ★N multiplies a stat by the product of
+// (1 + (step - 1) x STAR_TIER_GROWTH[tier]). The steps above are exactly T8's (x1.00); every tier keeps steps that rise with
+// the stars, and the ★10 potential climbs with the tier:
+//               T1    T2    T3    T4    T5    T6    T7    T8    T9    T10
+//   main stat x2.62 x2.90 x3.20 x3.59 x4.02 x4.50 x5.03 x5.53 x5.97 x6.55
+//   ordinary  x2.05 x2.21 x2.38 x2.60 x2.83 x3.09 x3.36 x3.61 x3.83 x4.11
+// Index 0 is T1's, like _tierMul (a 0 / missing tier reads as T1).
+const STAR_TIER_GROWTH = [0.54, 0.54, 0.60, 0.66, 0.73, 0.80, 0.87, 0.94, 1.00, 1.05, 1.11];
+function _starTierG(tier) { const t = (tier | 0) || 1; return STAR_TIER_GROWTH[Math.min(t, STAR_TIER_GROWTH.length - 1)]; }
 // One curve, so every reader of it - the engine, the score, the forge preview,
-// the star-bonus label - cannot drift from each other.
-function _starCurve(steps, stars) {
+// the star-bonus label - cannot drift from each other. Every reader passes the piece's tier.
+function _starCurve(steps, stars, tier) {
+  const g = _starTierG(tier);
   let m = 1;
-  for (let i = 0, n = Math.min(Math.max(0, stars | 0), steps.length); i < n; i++) m *= steps[i];
+  for (let i = 0, n = Math.min(Math.max(0, stars | 0), steps.length); i < n; i++) m *= 1 + (steps[i] - 1) * g;
   return m;
 }
 // The accessory rule is the complement rather than a list: an accessory is the
@@ -28670,16 +28682,16 @@ function _starStatMult(item, k) {
   const st = (item && item.stars) || 0;
   if (!st) return 1;
   return _starSignatureStat(item, k)
-    ? _starCurve(STAR_SIG_STEPS, st)
-    : _starCurve(STAR_STEPS, st);
+    ? _starCurve(STAR_SIG_STEPS, st, item.tier)
+    : _starCurve(STAR_STEPS, st, item.tier);
 }
 // The flat curve, for the places that still need ONE number for a whole item
 // (the star-bonus label, save-compat helpers). Per-stat truth is _starStatMult.
-function starMult(item)        { return _starCurve(STAR_STEPS, (item.stars || 0)); }
-function starSigMult(item)     { return _starCurve(STAR_SIG_STEPS, (item.stars || 0)); }
+function starMult(item)        { return _starCurve(STAR_STEPS, (item.stars || 0), item.tier); }
+function starSigMult(item)     { return _starCurve(STAR_SIG_STEPS, (item.stars || 0), item.tier); }
 // v0.25.826 — Helper used by all UI displays so the per-star bonus
 // percentage stays in sync with starMult() automatically.
-function starBonusPct(stars)   { return Math.round((_starCurve(STAR_STEPS, stars) - 1) * 100); }
+function starBonusPct(stars, tier) { return Math.round((_starCurve(STAR_STEPS, stars, tier) - 1) * 100); }
 
 // Item power score — higher = better. Used for auto-equip comparison.
 const ITEM_STAT_WEIGHTS = {
@@ -43389,15 +43401,24 @@ function invalidateEquipBonusCache() {
 // to 1). Still composes multiplicatively with star enhancement (★10 = 2.16×),
 // so a fully-enhanced T10 now reaches ~10.8× base flat stats.
 // v0.30.1589 - THE TIER CURVE FLATTENED (per user: "The jump between the equipment tier stats are way too steep, make T1-T3
-// gear stronger, T4-T5 slightly stronger, Nerf T9 and T10 down"). Measured on the item pool's median weapon ATK (base x
-// this table x the weapon's 0.85), the steps ran x1.5-x2.7 a tier and T10 paid 130x a T1:
+// gear stronger, T4-T5 slightly stronger, Nerf T9 and T10 down"): T1 x3.4, T2 x3.0, T3 x2.7, T4-T5 x2.3, T9 x3.5, T10 x4.0.
+// v0.30.1596 - THE TIERS CALIBRATED TO WEAPON ATK TARGETS (per user: "T2 needs to start at typical weapon ATK of around 50, T3 at
+// 100, T4-5 around 200-300, T6-8 around 400-600"). The typical (median) weapon ATK a tier pays, base x this x the weapon's 0.85:
 //            T1    T2    T3    T4    T5    T6    T7    T8    T9    T10
-//   was      14    24    41    75    71   196   334   536   952   1828
-//   now      23    36    55    86    82   196   334   536   833   1462
-// T1 +70%, T2 +50%, T3 +35%, T4-T5 +15%, T6-T8 unchanged, T9 -12.5%, T10 -20%. The table dips from T1 to T5 on purpose:
-// base stats climb steepest at the bottom of the pool, so the low tiers carry the bigger multiplier. It reaches every
-// piece already owned (getEquipBonus reads it live); the % stats keep their own marginal curve, _TIER_PCT_MUL, below.
-const _TIER_MUL = [1.00, 3.40, 3.00, 2.70, 2.30, 2.30, 2.50, 3.00, 3.50, 3.50, 4.00];
+//   1588     14    24    41    75    71   196   334   536   952   1828
+//   1589     23    36    55    86    82   196   334   536   833   1462
+//   now      23    50   100   209   228   485   534   604   833   1462
+// The table is a calibration now, not a curve: it peaks at T5 and steps down to T9 because the pool's base stats climb
+// unevenly (T5 is all set pieces, light on ATK and heavy on armour HP). One number per tier scales every slot, so T5 and T6
+// are held where armour DEF and HP still rise at every tier (T5 armour HP 1472 < T6 1497 < T7 1546 < T8 1635). It reaches
+// every piece already owned (getEquipBonus reads it live); the % stats keep their own marginal curve, _TIER_PCT_MUL, below.
+const _TIER_MUL = [1.00, 3.40, 4.20, 4.90, 5.60, 6.40, 6.20, 4.80, 3.95, 3.50, 4.00];
+// Accuracy keeps the row it was balanced on. It comes only from Aetherion's Shardsight (T7-T8) and is weighed against the
+// zodiac signs' evasion: a full Shardsight set lifts the hit chance a long way but leaves the most evasive sign (Sagitta,
+// evasion 701) some evasion (aetherion_shardsight_test). At the calibrated T7 x4.80 a median set reached 785 and never
+// missed, so accuracy reads the table that balance was set on (T7 x3.00, T8 x3.50) - for pieces owned and dropped alike.
+const _TIER_ACC_MUL = [1.00, 3.40, 3.00, 2.70, 2.30, 2.30, 2.50, 3.00, 3.50, 3.50, 4.00];
+function _tierAccMul(tier) { const t = (tier | 0) || 1; return _TIER_ACC_MUL[Math.min(t, _TIER_ACC_MUL.length - 1)] || 1; }
 function _tierMul(tier) {
   const t = (tier | 0) || 1;
   return _TIER_MUL[Math.min(t, _TIER_MUL.length - 1)] || 1;
@@ -43544,7 +43565,7 @@ function getEquipBonus(key) {
             (_AFFIX_PCT_STATS.has(k) || k === 'hpPct' || k === 'speed' || k === 'defPierce'));   // v0.30.1581 stat-sets - pierce softens with stars like Crit DMG
           const mul = _starStatMult(it, k);
           const _pctSoft = _isPct ? (1 + (mul - 1) * 0.35) * tPctMul : mul;
-          const _effMul = _noScale ? 1 : (_TIER_FLAT_STATS.has(k) ? mul * tMul : _pctSoft);
+          const _effMul = _noScale ? 1 : (_TIER_FLAT_STATS.has(k) ? mul * (k === 'accuracy' ? _tierAccMul(it.tier) : tMul) : _pctSoft);
           let _contrib = it[k] * _effMul * (_noScale ? 1 : _clsAff * _lxSlotStatMul(slot, k));   // v0.30.430 — GEAR_ROLE_CAPS slot weight
           // v0.26.287 — Cap any single item's effective crit contribution
           // (base × star × tier) so no one slot dominates the crit budget.
@@ -115226,7 +115247,7 @@ function openNPC(npc) {
       text =
         _wv.improve + '\n\n' +
         'IMPROVE — make what you already own hit harder.\n\n' +
-        '\u2022 ENHANCE — star-upgrade gear \u2605 0\u2192 \u2605 10. Every star adds more than the one before: +8% to +24% to its stats, +12% to +32% to its main stat.\n' +
+        '\u2022 ENHANCE — star-upgrade gear \u2605 0\u2192 \u2605 10. Every star adds more than the one before: +8% to +24% to its stats, +12% to +32% to its main stat. That is T8 gear: lower tiers grow less and higher tiers more, so a ★10 main stat ends about x2.6 on T1 and x6.5 on T10.\n' +
         '\u2022 REFORGE — reroll one equipped item\'s bonus affixes. Costs 2000\u25c8, for Lv 50+ gear.';
       opts.push({ t:'Enhance Gear ✦', cb:() => { game._brokMenu = null; closeDialog(); openEnhancementModal(); } });
       opts.push({ t:'Reforge (' + REFORGE_COST + '◈, Lv 50+) ↻', cb:() => { game._brokMenu = null; closeDialog(); reforgeRandomEquipment(); } });
@@ -115294,7 +115315,7 @@ function openNPC(npc) {
       opts.push({ t:'Sell Items 💰', cb:() => { game._brokMenu = null; closeDialog(); openShop('sell'); } });
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
     } else if (_fm === 'improve') {
-      text = '*Furnax sets his hammer down.*\n\nIMPROVE.\n\n\u2022 ENHANCE — stars \u2605 0\u2192 \u2605 10, every star worth more than the one before: +8% to +24% stats, +12% to +32% main stat.\n\u2022 REFORGE — reroll an item\'s affixes (2000\u25c8, Lv 50+ gear).';
+      text = '*Furnax sets his hammer down.*\n\nIMPROVE.\n\n\u2022 ENHANCE — stars \u2605 0\u2192 \u2605 10, every star worth more than the one before: +8% to +24% stats, +12% to +32% main stat. (T8 gear; lower tiers grow less, higher tiers more.)\n\u2022 REFORGE — reroll an item\'s affixes (2000\u25c8, Lv 50+ gear).';
       opts.push({ t:'Enhance Gear ✦', cb:() => { game._brokMenu = null; closeDialog(); openEnhancementModal(); } });
       opts.push({ t:'Reforge (' + REFORGE_COST + '◈, Lv 50+) ↻', cb:() => { game._brokMenu = null; closeDialog(); reforgeRandomEquipment(); } });
       opts.push({ t:'◀ Back', cb:() => { game._brokMenu = null; openNPC(npc); } });
@@ -118481,7 +118502,7 @@ function itemStatString(it, multiline) {
   // getAccuracy consumes it, but nothing ever printed it, because until now no
   // item carried any. Shipping Shardsight without this line would have put the
   // one stat that beats the zodiac on an item that never mentions it.
-  if (it.accuracy)     parts.push(`\u{1F3AF} +${_fmt(it.accuracy * _tMul)} Accuracy`);
+  if (it.accuracy)     parts.push(`\u{1F3AF} +${_fmt(it.accuracy * _tierAccMul(it.tier))} Accuracy`);
   if (it.critDmg)      parts.push(`+${Math.round(it.critDmg*_tPctMul*100)}% Crit DMG`);
   if (it.speed)        parts.push(`+${(it.speed*_tPctMul).toFixed ? (it.speed*_tPctMul).toFixed(1) : it.speed} Spd`);
   if (it.jump)         parts.push(`+${it.jump.toFixed ? it.jump.toFixed(1) : it.jump} Jump`);
@@ -118611,10 +118632,10 @@ function _forgeEffStat(it, k, starsOverride) {
   if (typeof base !== 'number' || !base) return 0;
   const st = (starsOverride === undefined) ? (it.stars || 0) : starsOverride;
   const sig = (typeof _starSignatureStat === 'function') && _starSignatureStat(it, k);
-  const mul = sig ? _starCurve(STAR_SIG_STEPS, st)
-                  : _starCurve(STAR_STEPS, st);
+  const mul = sig ? _starCurve(STAR_SIG_STEPS, st, it.tier)
+                  : _starCurve(STAR_STEPS, st, it.tier);
   const tierStat = (typeof _TIER_FLAT_STATS !== 'undefined') && _TIER_FLAT_STATS.has(k);
-  const tMul = (tierStat && typeof _tierMul === 'function') ? _tierMul(it.tier) : 1;
+  const tMul = (tierStat && typeof _tierMul === 'function') ? (k === 'accuracy' ? _tierAccMul(it.tier) : _tierMul(it.tier)) : 1;
   const roleMul = (typeof _lxSlotStatMul === 'function') ? _lxSlotStatMul(it.slot, k) : 1;
   let v = base * mul * tMul * roleMul;
   if (k === 'crit') v = Math.min(LX_EQUIP_CRIT_CAP_PER_ITEM, v);
@@ -119452,8 +119473,8 @@ function renderEnhancementModal(selectedItem) {
       // the cap, per the v0.26.836 design note), and that ratio is the same
       // whatever the star curve does, because both sides of it move together.
       const _tKeep = Math.pow(STAR_GROWTH, MAX_STARS) * 0.5;
-      const _tPeakSig = Math.round((_tKeep * starSigMult({ stars: MAX_STARS }) - 1) * 100);
-      const _tPeakOrd = Math.round((_tKeep * starMult({ stars: MAX_STARS }) - 1) * 100);
+      const _tPeakSig = Math.round((_tKeep * starSigMult({ stars: MAX_STARS, tier: selectedItem.tier }) - 1) * 100);
+      const _tPeakOrd = Math.round((_tKeep * starMult({ stars: MAX_STARS, tier: selectedItem.tier }) - 1) * 100);
       const _tBody = selectedItem.transcended
         ? `<div style="text-align:center; margin-top:8px; padding:8px 10px; border-radius:6px; background:linear-gradient(90deg, rgba(255,120,60,0.14), rgba(190,90,255,0.14)); border:1px solid rgba(255,150,90,0.45); color:#ffc9a3; font-weight:bold;">🜂 TRANSCENDED — this equipment has reached its final form.</div>`
         : `<div style="margin-top:8px; padding:8px 10px; border-radius:6px; background:linear-gradient(90deg, rgba(255,120,60,0.12), rgba(190,90,255,0.12)); border:1px solid rgba(255,150,90,0.40);">
@@ -119476,8 +119497,8 @@ function renderEnhancementModal(selectedItem) {
     }
     const cost = STAR_COSTS[s];
     const rate = starSuccessRate(s);
-    const nextBonusPct = starBonusPct(s + 1);
-    const curBonusPct  = starBonusPct(s);
+    const nextBonusPct = starBonusPct(s + 1, selectedItem.tier);
+    const curBonusPct  = starBonusPct(s, selectedItem.tier);
     const marginalGain = nextBonusPct - curBonusPct;
     const canAfford = player.mojicoins >= cost;
     const risky = canDowngradeOnFail(s);
@@ -119520,8 +119541,8 @@ function renderEnhancementModal(selectedItem) {
       // to show the signature curve rather than the flat one.
       const _mulFor = (k, n) =>
         (typeof _starSignatureStat === 'function' && _starSignatureStat(selectedItem, k))
-          ? _starCurve(STAR_SIG_STEPS, n)
-          : _starCurve(STAR_STEPS, n);
+          ? _starCurve(STAR_SIG_STEPS, n, selectedItem.tier)
+          : _starCurve(STAR_STEPS, n, selectedItem.tier);
       // v0.26.273 — Tier multiplier composed multiplicatively with the
       // star multiplier for flat stats only. Percent stats pass through
       // unchanged (they hit caps elsewhere).
@@ -119640,8 +119661,8 @@ async function transcendItem(it) {
   // v0.30.x — quoted off the LIVE curve, not the flat one. Same fix as the
   // panel above: this dialog is the last thing a player reads before an
   // irreversible spend, so its numbers have to be the ones they will get.
-  const _newPeakSig = Math.round((_keepMul * starSigMult({ stars: MAX_STARS }) - 1) * 100);
-  const _newPeakOrd = Math.round((_keepMul * starMult({ stars: MAX_STARS }) - 1) * 100);
+  const _newPeakSig = Math.round((_keepMul * starSigMult({ stars: MAX_STARS, tier: it.tier }) - 1) * 100);
+  const _newPeakOrd = Math.round((_keepMul * starMult({ stars: MAX_STARS, tier: it.tier }) - 1) * 100);
   const _body =
     'Transcendence reforges ' + (it.name || 'this item') + ' beyond its limits.\n\n' +
     '• ★ resets to 0 — but the new BASE stats are 50% of its current ★' + MAX_STARS + ' totals (≈ +' + Math.round((_keepMul - 1) * 100) + '% over the original base).\n' +
@@ -125502,7 +125523,7 @@ function attachTooltip(el, it) {
   el.onmouseenter = e => {
     const tt = document.getElementById('item-tooltip');
     const s = it.stars || 0;
-    const starLine = s > 0 ? `<div style="color:#ffcc44;font-size:11px;letter-spacing:1px;margin-bottom:4px;">${starString(s)} (+${starBonusPct(s)}%)</div>` : '';
+    const starLine = s > 0 ? `<div style="color:#ffcc44;font-size:11px;letter-spacing:1px;margin-bottom:4px;">${starString(s)} (+${starBonusPct(s, it.tier)}%)</div>` : '';
     // v0.25.248 — class affinity badge + set membership status.
     const CLS_LABEL = { warrior:'⚔️ Warrior', rogue:'🥷 Rogue', mage:'🪄 Mage', archer:'🏹 Archer', any:'' };
     // v0.26.x — Per user "show that equipping other-class gear gives lower
@@ -127664,7 +127685,7 @@ const TUTORIAL_STEPS = [
     detect: 'tab_items',
     tryIt: 'Open <kbd>U</kbd> and click the <b>Items</b> tab',
     gugumaLine: 'Tweet-tweet! Grow sharp, little Outsider. Sharper.',
-    body: 'Your bag is the <kbd>U</kbd> panel\'s <b>Items</b> tab; click to equip. <b>Brok the Blacksmith</b> in the Everdawn Megamall will <b>★0 → ★10 enhance</b> your gear (every star adds more than the last: +8% to +24% stats, +12% to +32% main stat). He also crafts set legendaries from <b>Setshards</b>, won by breaking down unwanted set drops.',
+    body: 'Your bag is the <kbd>U</kbd> panel\'s <b>Items</b> tab; click to equip. <b>Brok the Blacksmith</b> in the Everdawn Megamall will <b>★0 → ★10 enhance</b> your gear (every star adds more than the last, and higher tiers grow more: on T8 gear +8% to +24% stats, +12% to +32% main stat). He also crafts set legendaries from <b>Setshards</b>, won by breaking down unwanted set drops.',
   },
   {
     icon: '✨',
