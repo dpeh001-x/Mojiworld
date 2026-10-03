@@ -31,6 +31,8 @@ try {
     const pair = (m, type) => { const w = LX_MOB_WEAK[type]; delete LX_MOB_WEAK[type]; const bMelee = hit(m, 'melee').loss, bMagic = hit(m, 'magic').loss; LX_MOB_WEAK[type] = w; return { weak: w, bMelee, bMagic, melee: hit(m, 'melee'), magic: hit(m, 'magic'), magicCrit: hit(m, 'magic', true), pet: hit(m, 'pet') }; };
     const snail = spawnT('snail'); o.snail = pair(snail, 'snail'); o.snail.thorns = hit(snail, 'thorns');
     const slime = spawnT('slime'); o.slime = pair(slime, 'slime');
+    // v0.30.x bughunt sibling2A-1: performAround tags EVERY class's area hit 'aoe'; it follows the hero's class (a Warrior's Ground Slam on a slime is WEAK, not RESIST)
+    { const w = LX_MOB_WEAK.slime; delete LX_MOB_WEAK.slime; const b = hit(slime, 'aoe').loss; LX_MOB_WEAK.slime = w; o.slimeAoe = { b, loss: hit(slime, 'aoe').loss, cls: _lxDmgClass('aoe') }; player.cls = 'mage'; o.aoeAsMage = _lxDmgClass('aoe'); player.cls = 'warrior'; }
     const krook = spawnT('kingKrook', true); o.boss = { aff: _lxWeakAffinity(krook, 'magic'), melee: hit(krook, 'melee'), magic: hit(krook, 'magic') };
     return o;
   });
@@ -40,6 +42,7 @@ try {
   ok('a snail (weak to magic): a magic hit deals 1.3x its neutral baseline, a melee hit 0.8x of its own', sn.bMagic > 0 && sn.bMelee > 0 && sn.magic.loss === Math.floor(sn.bMagic * 1.3) && sn.melee.loss === Math.floor(sn.bMelee * 0.8), JSON.stringify([sn.bMagic, sn.magic.loss, sn.bMelee, sn.melee.loss]));
   ok('a summon\'s hit carries no tag (neutral)', sn.pet.loss > 0 && !sn.pet.nums.some((d) => /WEAK|RESIST/.test(d.t)), JSON.stringify(sn.pet.nums));
   ok('a slime (weak to physical): melee 1.3x, magic 0.8x, each of its own baseline', sl.melee.loss === Math.floor(sl.bMelee * 1.3) && sl.magic.loss === Math.floor(sl.bMagic * 0.8), JSON.stringify([sl.bMelee, sl.melee.loss, sl.bMagic, sl.magic.loss]));
+  ok('an area (aoe) hit by a Warrior on a slime (weak to physical) is WEAK: 1.3x its own neutral baseline, never RESIST; by a Mage it is magic', r.slimeAoe.cls === 'phys' && r.aoeAsMage === 'magic' && r.slimeAoe.b > 0 && r.slimeAoe.loss === Math.floor(r.slimeAoe.b * 1.3), JSON.stringify([r.slimeAoe, r.aoeAsMage]));
   ok('a boss is exempt: no affinity, no tag on either class', r.boss.aff === null && r.boss.melee.loss > 0 && r.boss.magic.loss > 0 && ![...r.boss.melee.nums, ...r.boss.magic.nums].some((d) => /WEAK|RESIST/.test(d.t)), JSON.stringify([r.boss.aff, r.boss.melee.loss, r.boss.magic.loss]));
   const wk = sn.magic.nums, rs = sn.melee.nums, cr = sn.magicCrit.nums;
   // v0.30.402 (per user) dropped every suffix after the number - no !, !!, the crit star, WEAK or RESIST. Colour and

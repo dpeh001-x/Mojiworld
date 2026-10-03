@@ -25,7 +25,7 @@ check(!badCount.length, 'every line is in the file exactly as often as reported'
 // 2. the lines the v0.30.772 budget pass set, one per class and kind, land under the skill that owns them
 const KNOWN = [
   ['marksman_oneshot', 'LX_DEADEYE_LINE_ATK'], ['marksman_ult', 'LX_PROTOCOL_LINE_ATK'], ['marksman_ult', 'Math.max(getAtk() *'],
-  ['ballista_volley', "skill: 'siege'"], ['ballista_ult', 'Math.floor(getAtk() *'], ['beastmaster_pack', "rollCrit(), 'pack')"],
+  ['ballista_volley', "skill: 'siege'"], ['ballista_ult', 'Math.floor(getAtk() *'], ['beastmaster_pack', "false, 'pack')"],
   ['beastmaster_ult', "_petSlot === 'ultPet' ?"], ['skyhunter_gale', 'i >= 15 ? 0.5 : 1'],
   ['sage_meteorshower', '_sageDmgMul:'], ['elementalist_ult', 'mul:'], ['hexmaster_ult', 'performAround(540,'], ['hexmaster_ult', 'LX_PANDEMIC_FINALE_CAP'],
   ['hexmaster_grandhex', 'LX_HEXORB_DMG_MUL'], ['necromancer_harvest', 'atk: getAtk() *'],
@@ -34,7 +34,7 @@ const KNOWN = [
   ['warlord_ult', 'life: 36, damage: getAtk() *'], ['crusader_aegis', 'const dmg = Math.floor(getAtk() *'], ['dragoon_ult', 'performAround(460,'],
   // damage that lives outside the body: a helper, a hazard resolver, an update loop, a timer
   ['magicBolt', 'damage: (getAtk() *'], ['arcaneBurst', 'performAround(_abAoe,'], ['meteor', ': getAtk() *'],
-  ['dragoon_skylance', "color:'#88ccff', kb:14, bossMul:"], ['skyhunter_ult', 'x: _eCx, y: _eCy'], ['wildBond', "rollCrit(), 'pet')"],
+  ['dragoon_skylance', "color:'#88ccff', kb:14, bossMul:"], ['skyhunter_ult', 'x: _eCx, y: _eCy'], ['wildBond', "false, 'pet')"],
 ];
 const missing = KNOWN.filter(([id, frag]) => { const s = skills.find((x) => x.id === id); return !s || !s.lines.some((l) => l.text.includes(frag)); });
 check(!missing.length, 'the lines the budget pass edited are found under their skills', missing.length ? missing.map((m) => m.join(':')).join(', ') : KNOWN.length + ' known lines');
