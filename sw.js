@@ -294,7 +294,7 @@
 // so a returning browser would keep drawing the old art for a session.
 // v0.30.1578 - v150 -> v151. Gravitos's form-1 and form-2 frames (115 files) are REPLACED under their own names (each sequence's
 // calibration baked into its frames, feet locked to the form's lines) so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v154';   // v0.30.1591 - Elder Arlen art + voice (same file names as Vermillion's)
+const CACHE = 'mojiworld-assets-v155';   // v0.30.1609 - the Azure fountains' bases straightened (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
