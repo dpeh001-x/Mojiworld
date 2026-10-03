@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1591';
+const GAME_VERSION = 'v0.30.1592';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -24219,8 +24219,8 @@ function _lxPlatBakeDpr() {
   const t = (typeof _lxTargetDpr === 'function') ? Math.min(3, _lxTargetDpr()) : 1;
   return Math.max(live, Math.max(1, Math.ceil(t * 8 - 1e-6) / 8));
 }
-function _cutePlatformSprite(w, h, tint, ground, theme, variant) {
-  const key = (tint.exact ? 'x|' : '') + w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '') + '|' + (variant | 0) + '|' + _lxPlatBakeDpr();   // v0.30.609 - the variant too; v0.30.636 - and the bake scale
+function _cutePlatformSprite(w, h, tint, ground, theme, variant, grp) {   // v0.30.1592 floorseam - grp: _lxGroundGroup's window, or none
+  const key = (tint.exact ? 'x|' : '') + w + '|' + h + '|' + tint.body + '|' + tint.top + '|' + (ground ? 1 : 0) + '|' + (theme || '') + '|' + (variant | 0) + '|' + _lxPlatBakeDpr() + (grp ? '|g' + grp.dx + ',' + grp.dy + ',' + grp.w + ',' + grp.h + ',' + grp.mdy + ',' + grp.seed : '');   // v0.30.609 - the variant too; v0.30.636 - and the bake scale; v0.30.1592 floorseam - and the group window
   let cv = _CUTE_PLAT_CACHE.get(key);
   if (cv) return cv;
   if (!(w > 0 && h > 0) || w * h > _CUTE_PLAT_MAX_PX) return null;   // caller falls back
@@ -24242,16 +24242,27 @@ function _cutePlatformSprite(w, h, tint, ground, theme, variant) {
   // (~1.9x at 1080p fullscreen). The paint runs under a scale transform, so its geometry is untouched,
   // and _drawCutePlatform draws it back at its logical box. Memory stays bounded: a floor that would
   // pass twice the logical pixel budget at device scale eases its scale toward 1x instead.
-  const _lw = Math.ceil(w) + PAD * 2, _lh = PAD_TOP + Math.max(Math.ceil(h), G.depth) + PAD + 1;
+  const _lxSeamX = (grp && ground && (variant & 2) && !((variant >> 7) & 31)) ? 6 : 0;   // v0.30.1592 floorseam - see _paintCutePlatform's fxF1
+  const _lw = Math.ceil(w) + PAD * 2 + _lxSeamX, _lh = PAD_TOP + Math.max(Math.ceil(h), G.depth) + PAD + 1;
   const _s = Math.max(1, Math.min(_lxPlatBakeDpr(), Math.sqrt((_CUTE_PLAT_MAX_PX * 2) / (_lw * _lh))));
   cv = document.createElement('canvas');
   cv.width = Math.ceil(_lw * _s); cv.height = Math.ceil(_lh * _s);
   const c = cv.getContext('2d');
   if (_s !== 1) c.scale(_s, _s);
-  _paintCutePlatform(c, PAD, PAD_TOP, w, h, tint, ground, ground ? 1 : 0.94, theme, variant);
+  _paintCutePlatform(c, PAD, PAD_TOP, w, h, tint, ground, ground ? 1 : 0.94, theme, variant, grp);
   cv._lxLW = _lw; cv._lxLH = _lh;
   _CUTE_PLAT_CACHE.set(key, cv);
   return cv;
+}
+// v0.30.1592 floorseam - the slab palette (lifted out of _paintCutePlatform unchanged): the map's colour re-lit, its shades and keyline
+function _cutePalC(tint, theme) {
+  const mix = (typeof _mixHex === 'function') ? _mixHex : ((x) => x);
+  const P = (tint && tint.exact) ? tint : (_cuteMapPalette(tint) || tint);   // v0.30.626 - a sampled floor palette is used as is   // v0.30.606 - the map's colour; the theme only picks the shape
+  const top = P.top, body = P.body;
+  const C = { mix, top, body, topLt: mix(top, '#ffffff', 0.38), topDk: mix(top, body, 0.42), bodyLt: mix(body, top, 0.30), bodyDk: mix(body, '#000000', 0.40), OUT: mix(body, '#05030a', 0.62) };
+  const _cmat = _CUTE_MAT[theme];   // v0.30.626 - snow on paving, moss on planks: the face keeps its own hue
+  if (_cmat && _cmat.split) { C.faceHi = mix(body, '#ffffff', 0.35); C.bodyLt = mix(body, '#ffffff', 0.22); }
+  return C;
 }
 // The original body, lifted verbatim onto an arbitrary context so the bake and
 // the uncached fallback cannot drift apart. `a` is the per-shape alpha.
@@ -24389,6 +24400,34 @@ function _lxGroundJoin(p) {
     }
   }
   return (p._lxJoin | 0) | (md.stairUnder ? _LX_FOOTLESS : 0);   // v0.30.1455 - a stairUnder map's pieces have no flat foot (_lxStairUnder)
+}
+// v0.30.1592 floorseam - a joined run of ground pieces (the _lxGroundJoin rule, chained) paints one continuous face: each piece is a window
+// onto its group's, so bands, tone, grain and mottle run straight across the seams. Null for a lone piece (unchanged).
+let _lxGrpMd = null, _lxGrpPs = null, _lxGrpN = -1;
+function _lxGroundGroup(p) {
+  const md = game.mapData, ps = md && md.platforms;
+  if (!ps || !p || p.type !== 'ground') return null;
+  if (md !== _lxGrpMd || ps !== _lxGrpPs || ps.length !== _lxGrpN) {
+    _lxGrpMd = md; _lxGrpPs = ps; _lxGrpN = ps.length;
+    const g = ps.filter((q) => q && q.type === 'ground'), up = new Map(); for (const a of g) { up.set(a, a); a._lxGrpV = null; }
+    const root = (a) => { while (up.get(a) !== a) a = up.get(a); return a; };
+    for (const a of g) for (const b of g) {
+      if (a === b || Math.abs(b.y - a.y) > 32) continue;
+      const gap = b.x - (a.x + a.w); if (gap < -8 || gap > 2) continue;
+      const ra = root(a), rb = root(b); if (ra !== rb) up.set(rb, ra);
+    }
+    const sets = new Map(); for (const a of g) { const r = root(a); if (!sets.has(r)) sets.set(r, []); sets.get(r).push(a); }
+    for (const m of sets.values()) {
+      if (m.length < 2) continue;
+      let x0 = Infinity, x1 = -Infinity, top = Infinity, bot = -Infinity, sy = 0, sw = 0;
+      for (const a of m) { x0 = Math.min(x0, a.x); x1 = Math.max(x1, a.x + a.w); top = Math.min(top, a.y); bot = Math.max(bot, a.y + a.h); sy += a.y * a.w; sw += a.w; }
+      x0 = Math.round(x0); x1 = Math.round(x1); top = Math.round(top); bot = Math.round(bot);
+      const seed = ((Math.imul(x0 + 7, 2654435761) ^ Math.imul(top + 13, 40503) ^ Math.imul(m.length, 97)) >>> 0);
+      const mdy = Math.max(0, Math.round(sy / Math.max(1, sw)) - top);   // the run's mean lip, below its highest: where the tone starts, so a run keeps its old overall shade
+      for (const a of m) a._lxGrpV = { dx: Math.round(a.x) - x0, dy: Math.round(a.y) - top, w: x1 - x0, h: bot - top, mdy, seed };
+    }
+  }
+  return p._lxGrpV || null;
 }
 const _LX_FOOTLESS = 4096;   // v0.30.1455 - variant bit 12 of a ground piece: no foot shade, no bottom keyline (bits 0-11 are the join)
 // v0.30.1272 - GROUND RAMPS (per user: "some parts with jagged floors there can be a slope or smoothing done"). Four maps build
@@ -24634,12 +24673,13 @@ function _lxDrawRampFlat(r, tint) {   // the fallback when the lower piece has n
 function _lxDrawRamp(r, tint, theme) {
   const cam = game.camera.x;
   if (r.x1 - cam < -6 || r.x0 - cam > W + 6) return;
-  const lo = r.lo, spr = (typeof _cutePlatformSprite === 'function') ? _cutePlatformSprite(lo.w, lo.h, tint, true, theme, _lxGroundJoin(lo)) : null;
+  const lo = r.lo, spr = (typeof _cutePlatformSprite === 'function') ? _cutePlatformSprite(lo.w, lo.h, tint, true, theme, _lxGroundJoin(lo), _lxGroundGroup(lo)) : null;   // v0.30.1592 floorseam - the same bake the piece draws
   if (!spr) { _lxDrawRampFlat(r, tint); return; }
   let b = r._bake;
   if (!b || b.spr !== spr) {
     const PT = _CUTE_PAD_TOP, s = spr.width / (spr._lxLW || spr.width), cap = _cuteGeom(lo.w, lo.h, true).cap, rise = r.yLo - r.yHi;
-    const bx0 = Math.floor(r.up > 0 ? r.x0 : r.x0 - 1), bw = Math.ceil(r.x1 - r.x0) + 2, keep = PT + cap + 10, bh = Math.ceil(rise + keep + 1);
+    const _sg = (typeof _lxGroundGroup === 'function') ? _lxGroundGroup(lo) : null;   // v0.30.1592 floorseam - a joined run: its face is painted behind the slope
+    const bx0 = Math.floor(r.up > 0 ? r.x0 : r.x0 - 1), bw = Math.ceil(r.x1 - r.x0) + 2, keep = PT + cap + (_sg ? 16 : 10), bh = Math.ceil(rise + keep + 1);
     const cv = document.createElement('canvas'); cv.width = Math.ceil(bw * s); cv.height = Math.ceil(bh * s);
     const c = cv.getContext('2d'); c.scale(s, s);
     for (let i = 0; i < bw; i++) {
@@ -24648,7 +24688,31 @@ function _lxDrawRamp(r, tint, theme) {
       const lx = Math.max(0.5, Math.min(lo.w - 1.5, wx - 0.5 - lo.x)) + 2;   // the same x in the lower piece's bake (2px side pad)
       c.drawImage(spr, lx * s, 0, s, (keep + d) * s, i, rise - d, 1, keep + d);
     }
-    const fy = rise + PT + cap + 4, gr = c.createLinearGradient(0, fy, 0, fy + 6);   // fade the carried face into the unmoved one
+    if (_sg && !(_CUTE_MAT[theme] && _CUTE_MAT[theme].pop)) {   // v0.30.1592 floorseam - the run's face behind the slope: the same layers and seeds as a grouped face
+      try {
+        const fc = document.createElement('canvas'); fc.width = cv.width; fc.height = cv.height;
+        const f = fc.getContext('2d'); f.scale(s, s);
+        const C = _cutePalC(tint, theme), g = _sg, gcap = _cuteGeom(g.w, g.h, true).cap;
+        const gx0 = (lo.x - g.dx) - bx0, gy0 = (lo.y - g.dy) - (r.yHi - PT);
+        const gF = f.createLinearGradient(0, gy0 + g.mdy + gcap, 0, gy0 + g.h); gF.addColorStop(0, C.bodyLt); gF.addColorStop(0.3, C.body); gF.addColorStop(1, C.bodyDk);
+        f.fillStyle = gF; f.fillRect(0, 0, bw, bh);
+        _cuteMaterial(f, gx0, gy0 + gcap, g.w, g.h - gcap, theme, _cuteRng(g.seed), C, true);
+        { const gox = gx0 + (g.seed % 96), goy = gy0 + ((g.seed >>> 7) % 96); f.save(); f.globalCompositeOperation = 'overlay'; f.globalAlpha = 0.32; f.translate(gox, goy); f.fillStyle = _cuteGrain(f); f.fillRect(-gox, -goy, bw, bh); f.restore(); }
+        _cuteMottle(f, gx0, gy0 + gcap, g.w, g.h - gcap, _cuteRng((Math.imul(g.seed, 40503) ^ 0x2545f491) >>> 0), 0.2);
+        // kept only below the lifted cap and its lip shade (9px), fading in over 4px: a mask, then one destination-in
+        const mc = document.createElement('canvas'); mc.width = cv.width; mc.height = cv.height;
+        const mk = mc.getContext('2d'); mk.scale(s, s);
+        for (let i = 0; i < bw; i++) {
+          const wx = bx0 + i + 0.5, inZone = wx >= r.x0 && wx <= r.x1, pastSeam = r.up > 0 ? wx > r.x1 : wx < r.x0;
+          const d = inZone ? r.yLo - _lxRampY(r, wx) : pastSeam ? rise : 0, yT = rise - d + PT + cap + 9;
+          const mg = mk.createLinearGradient(0, yT, 0, yT + 4); mg.addColorStop(0, 'rgba(0,0,0,0)'); mg.addColorStop(1, 'rgba(0,0,0,1)');
+          mk.fillStyle = mg; mk.fillRect(i, yT, 1, 4); mk.fillStyle = '#000'; mk.fillRect(i, yT + 4, 1, bh);
+        }
+        f.setTransform(1, 0, 0, 1, 0, 0); f.globalCompositeOperation = 'destination-in'; f.drawImage(mc, 0, 0);
+        c.drawImage(fc, 0, 0, bw, bh);
+      } catch (e) {}
+    }
+    const fy = rise + PT + cap + (_sg ? 10 : 4), gr = c.createLinearGradient(0, fy, 0, fy + 6);   // fade the carried face into the unmoved one; v0.30.1592 floorseam - below the old lip shade
     gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,1)');
     c.globalCompositeOperation = 'destination-out'; c.fillStyle = gr; c.fillRect(0, fy, bw, bh - fy);
     b = r._bake = { spr, cv, bx0, by0: r.yHi - PT, bw, bh };
@@ -25445,14 +25509,10 @@ function _cuteDecor(ctx, sx, y, w, theme, rng, C, ground) {
   }
   ctx.globalAlpha = A0;
 }
-function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
+function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant, grp) {   // v0.30.1592 floorseam - grp: paint the face as a window onto the group's
   const _pa = ctx.globalAlpha;
-  const mix = (typeof _mixHex === 'function') ? _mixHex : ((x) => x);
-  const P = (tint && tint.exact) ? tint : (_cuteMapPalette(tint) || tint);   // v0.30.626 - a sampled floor palette is used as is   // v0.30.606 - the map's colour; the theme only picks the shape
-  const top = P.top, body = P.body;
-  const C = { mix, top, body, topLt: mix(top, '#ffffff', 0.38), topDk: mix(top, body, 0.42), bodyLt: mix(body, top, 0.30), bodyDk: mix(body, '#000000', 0.40), OUT: mix(body, '#05030a', 0.62) };
-  const _cmat = _CUTE_MAT[theme];   // v0.30.626 - snow on paving, moss on planks: the face keeps its own hue
-  if (_cmat && _cmat.split) { C.faceHi = mix(body, '#ffffff', 0.35); C.bodyLt = mix(body, '#ffffff', 0.22); }
+  const C = _cutePalC(tint, theme), mix = C.mix, top = C.top, body = C.body;   // v0.30.1592 floorseam - the palette, shared with the ramps' face (_lxDrawRamp)
+  const _cmat = _CUTE_MAT[theme];
   ctx.globalAlpha = _pa * a;
   if (w < 8 || h < 6) {   // too small for anything - flat fill + outline
     ctx.fillStyle = body; ctx.fillRect(sx, y, w, h);
@@ -25471,6 +25531,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   const eL = jl ? (variant >> 2) & 31 : 0, eR = jr ? (variant >> 7) & 31 : 0;
   const _fl0 = ground && ((variant | 0) & 4096);   // v0.30.1590 stair-solid - a footless (stairUnder) piece: its riser keyline is the flight's profile line (_lxStairProfileDraw), not its own
   const xs = sx, xe = sx + w, ww = w, fx0 = jl ? xs - 1 : xs, fx1 = jr ? xe + 1 : xe;
+  const fxF1 = (grp && jr && !eR) ? xe + 6 : fx1;   // v0.30.1592 floorseam - the face (not the cap) runs on under a joined right neighbour, so its soft edge lies on solid face
   const inset = G.island ? 3 : 0, x0 = xs + inset, x1 = xe - inset, yb = y + G.faceH;
   const r = ground ? 4 : built ? 2 : Math.min(6, G.faceH / 2), bi = (built && !ground) ? 2 : 0;   // v0.30.1203 - a built slab is square-cut, its body tucked 2px under the lip
   const flatTop = built || theme === 'stone' || theme === 'lava' || theme === 'cosmic' || theme === 'basalt';
@@ -25486,8 +25547,8 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
       ctx.lineTo(x0 + 6, yb);
       ctx.quadraticCurveTo(x0 - 1, yb - 2, x0, y + cap * 0.5);
       ctx.closePath();
-    } else if (ctx.roundRect) ctx.roundRect(fx0 + bi, y, fx1 - fx0 - bi * 2, G.faceH, ground ? [jl ? 0 : r, jr ? 0 : r, 0, 0] : built ? [r, r, 2, 2] : [r, r, 3, 3]);
-    else ctx.rect(fx0 + bi, y, fx1 - fx0 - bi * 2, G.faceH);
+    } else if (ctx.roundRect) ctx.roundRect(fx0 + bi, y, fxF1 - fx0 - bi * 2, G.faceH, ground ? [jl ? 0 : r, jr ? 0 : r, 0, 0] : built ? [r, r, 2, 2] : [r, r, 3, 3]);
+    else ctx.rect(fx0 + bi, y, fxF1 - fx0 - bi * 2, G.faceH);
   };
   const rr = ground ? 4 : built ? 2.5 : Math.min(cap, 5);
   const topA = xs + (jl ? 0 : rr), topB = xe - (jr ? 0 : rr);
@@ -25513,7 +25574,9 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
     if (eR > 0 && !_fl0) { ctx.moveTo(xe - 1, y + dip); ctx.lineTo(xe - 1, y + Math.min(eR, h) + 1); }
     ctx.stroke();
   };
-  const grain = _cuteGrain(ctx), gox = Math.floor(rng() * 96), goy = Math.floor(rng() * 96);
+  const grain = _cuteGrain(ctx); let gox = Math.floor(rng() * 96), goy = Math.floor(rng() * 96);
+  const gx0 = grp ? sx - grp.dx : 0, gy0 = grp ? y - grp.dy : 0, gcap = grp ? _cuteGeom(grp.w, grp.h, true).cap : cap;   // v0.30.1592 floorseam - the group's left edge and highest lip, in this paint's coordinates
+  if (grp) { gox = gx0 + (grp.seed % 96); goy = gy0 + ((grp.seed >>> 7) % 96); }   // the grain's origin at one world point for the whole run
   const grainOver = (x, yy, wd, ht, al) => { ctx.save(); ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = _pa * a * al; ctx.translate(gox, goy); ctx.fillStyle = grain; ctx.fillRect(x - gox, yy - goy, wd, ht); ctx.restore(); };
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   // 1. what hangs below goes first, so the face covers where it roots
@@ -25522,22 +25585,25 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   // 2. the face: bounce-lit under the lip, darkening with depth, material, grain, bevelled ends,
   //    occlusion under the lip, and on a ground a fade into the keyline colour at the foot
   face();
-  const gF = ctx.createLinearGradient(0, y + cap, 0, yb + G.keel);
+  const gF = grp ? ctx.createLinearGradient(0, gy0 + grp.mdy + gcap, 0, gy0 + grp.h) : ctx.createLinearGradient(0, y + cap, 0, yb + G.keel);   // v0.30.1592 floorseam - tone by height in the run, not in the piece
   gF.addColorStop(0, C.bodyLt); gF.addColorStop(0.3, body); gF.addColorStop(1, C.bodyDk);
   ctx.fillStyle = gF; ctx.fill();
   ctx.save(); face(); ctx.clip();
-  _cuteMaterial(ctx, xs, y + cap, ww, (yb + G.keel) - (y + cap), theme, rng, C, ground);
+  if (grp) _cuteMaterial(ctx, gx0, gy0 + gcap, grp.w, grp.h - gcap, theme, _cuteRng(grp.seed), C, ground);   // v0.30.1592 floorseam - the run's one material, clipped to this face
+  else _cuteMaterial(ctx, xs, y + cap, ww, (yb + G.keel) - (y + cap), theme, rng, C, ground);
   if (!(_cmat && _cmat.pop)) grainOver(xs, y, ww, G.faceH + G.keel + 2, 0.32);   // v0.30.1264 - a pop floor stays flat: no grain, no mottle
-  if (ground && !(_cmat && _cmat.pop)) _cuteMottle(ctx, xs, y + cap, ww, G.faceH - cap, _cuteRng(((Math.round(w) * 40503) ^ 0x2545f491) >>> 0), 0.2);   // v0.30.1203 - a long floor stops repeating
+  if (grp && !(_cmat && _cmat.pop)) { if (fx0 < xs) grainOver(fx0, y, xs - fx0, G.faceH + G.keel + 2, 0.32); if (fxF1 > xe) grainOver(xe, y, fxF1 - xe, G.faceH + G.keel + 2, 0.32); }   // v0.30.1592 floorseam - the face's columns past the box
+  if (ground && !(_cmat && _cmat.pop)) { if (grp) _cuteMottle(ctx, gx0, gy0 + gcap, grp.w, grp.h - gcap, _cuteRng((Math.imul(grp.seed, 40503) ^ 0x2545f491) >>> 0), 0.2); else _cuteMottle(ctx, xs, y + cap, ww, G.faceH - cap, _cuteRng(((Math.round(w) * 40503) ^ 0x2545f491) >>> 0), 0.2); }   // v0.30.1203 - a long floor stops repeating; v0.30.1592 floorseam - the run's
   if (!ground) {
     const bL = ctx.createLinearGradient(x0, 0, x0 + 4, 0); bL.addColorStop(0, 'rgba(255,255,255,0.22)'); bL.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = bL; ctx.fillRect(x0, y, 4, G.faceH + G.keel);
     const bR = ctx.createLinearGradient(x1 - 4, 0, x1, 0); bR.addColorStop(0, 'rgba(0,0,0,0)'); bR.addColorStop(1, 'rgba(0,0,0,0.26)'); ctx.fillStyle = bR; ctx.fillRect(x1 - 4, y, 4, G.faceH + G.keel);
   }
   const gAO = ctx.createLinearGradient(0, y + cap - 1, 0, y + cap + 8);
   gAO.addColorStop(0, 'rgba(0,0,0,0.36)'); gAO.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = gAO; ctx.fillRect(xs, y + cap - 1, ww, 9 + wrap);
+  ctx.fillStyle = gAO; if (grp) ctx.fillRect(fx0, y + cap - 1, fxF1 - fx0, 9 + wrap); else ctx.fillRect(xs, y + cap - 1, ww, 9 + wrap);   // v0.30.1592 floorseam - across the whole face
   const _footless = ground && ((variant | 0) & 4096);   // v0.30.1455 - _LX_FOOTLESS: the stringer below carries the foot (_lxStairUnder)
-  if (ground && !_footless) { const gB = ctx.createLinearGradient(0, y + h * 0.55, 0, y + h); gB.addColorStop(0, 'rgba(0,0,0,0)'); gB.addColorStop(1, C.OUT); ctx.globalAlpha = _pa * a * 0.55; ctx.fillStyle = gB; ctx.fillRect(xs, y + h * 0.55, ww, h * 0.45); ctx.globalAlpha = _pa * a; }
+  if (ground && !_footless) { const fs0 = grp ? Math.max(y + cap, y + h - (grp.h - grp.mdy) * 0.45) : y + h * 0.55;   // v0.30.1592 floorseam - the run's shade depth, so a shared foot fades alike
+    const gB = ctx.createLinearGradient(0, fs0, 0, y + h); gB.addColorStop(0, 'rgba(0,0,0,0)'); gB.addColorStop(1, C.OUT); ctx.globalAlpha = _pa * a * 0.55; ctx.fillStyle = gB; if (grp) ctx.fillRect(fx0, fs0, fxF1 - fx0, y + h - fs0); else ctx.fillRect(xs, fs0, ww, y + h - fs0); ctx.globalAlpha = _pa * a; }
   ctx.restore();
   ctx.lineWidth = 2; ctx.strokeStyle = C.OUT;
   if (ground && _footless) { ctx.beginPath(); if (!jl) { ctx.moveTo(xs, y + cap * 0.5); ctx.lineTo(xs, y + h); } if (!jr) { ctx.moveTo(xe, y + h); ctx.lineTo(xe, y + cap * 0.5); } ctx.stroke(); }   // v0.30.1455 - the sides only
@@ -25559,7 +25625,7 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   }
   _cuteCapTexture(ctx, xs, y, ww, cap, theme, rng, C);
   if (!(_cmat && _cmat.pop)) grainOver(xs, y - 2, ww, cap + wrap + 4, 0.22);
-  if (ground && !(_cmat && _cmat.pop)) _cuteMottle(ctx, xs, y - 2, ww, cap + 4, _cuteRng(((Math.round(w) * 69069) ^ 0x1b873593) >>> 0), 0.18);   // v0.30.1203
+  if (ground && !(_cmat && _cmat.pop)) { if (grp) _cuteMottle(ctx, gx0, y - 2, grp.w, cap + 4, _cuteRng((Math.imul(grp.seed, 69069) ^ 0x1b873593) >>> 0), 0.18); else _cuteMottle(ctx, xs, y - 2, ww, cap + 4, _cuteRng(((Math.round(w) * 69069) ^ 0x1b873593) >>> 0), 0.18); }   // v0.30.1203; v0.30.1592 floorseam - along the run
   ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.fillRect(topA, y + 2, Math.max(0, topB - topA), 1.4);   // rim light, below the dips
   ctx.restore();
   ctx.lineWidth = 2; ctx.strokeStyle = C.OUT; capStroke();
@@ -25570,10 +25636,10 @@ function _paintCutePlatform(ctx, sx, y, w, h, tint, ground, a, theme, variant) {
   }
   ctx.globalAlpha = _pa;
 }
-function _drawCutePlatform(sx, y, w, h, tint, ground, theme, variant) {
-  const spr = _cutePlatformSprite(w, h, tint, ground, theme, variant);
+function _drawCutePlatform(sx, y, w, h, tint, ground, theme, variant, grp) {
+  const spr = _cutePlatformSprite(w, h, tint, ground, theme, variant, grp);
   if (spr) { ctx.drawImage(spr, sx - 2, y - _CUTE_PAD_TOP, spr._lxLW || spr.width, spr._lxLH || spr.height); return; }   // v0.30.636 - logical box of a device-res bake   // undo the bake pad (2px sides, 12px above)
-  _paintCutePlatform(ctx, sx, y, w, h, tint, ground, ground ? 1 : 0.94, theme, variant);
+  _paintCutePlatform(ctx, sx, y, w, h, tint, ground, ground ? 1 : 0.94, theme, variant, grp);
 }
 // v0.25.461 — Map id → floor-tile key. Wins over the theme lookup
 // when the player is on one of these maps and the matching authored
@@ -137042,7 +137108,7 @@ function drawPlatforms() {
       // cel-shaded slab with a lit "surface" cap (grass/snow/sand/…), a dark
       // earthy body, a gloss line, and a crisp 2px black outline. The old
       // MAP_FLOOR_OVERRIDES data + _pickMapFloorOverride() stay as dead code.
-      _drawCutePlatform(sx, p.y, p.w, p.h, _ptf, true, _th, _lxGroundJoin(p));   // v0.30.613 - joined sides draw no keyline
+      _drawCutePlatform(sx, p.y, p.w, p.h, _ptf, true, _th, _lxGroundJoin(p), _lxGroundGroup(p));   // v0.30.613 - joined sides draw no keyline; v0.30.1592 floorseam - one face per joined run
     } else {
       // v0.29.x — CUTE procedural floating platform. Same cel-shaded, black-
       // outlined slab as the floor but rounded on top for a friendlier read.
