@@ -29,12 +29,13 @@ try {
   const r = await page.evaluate(async () => {
     const wait = (ms) => new Promise((res) => setTimeout(res, ms)), out = {};
     const closeU = () => { const am = document.getElementById('attributes-modal'); if (am && am.style.display === 'flex') { am.style.display = 'none'; game.paused = false; } };
+    const words = (t) => String(t).replace(/<[^>]+>/g, ' ').split(/\s+/).filter((w) => /[A-Za-z]/.test(w)).length;   // text_tightness_test's rule for a tour body
     const idx = (re) => TUTORIAL_STEPS.findIndex((s) => re.test(s.title)), L = idx(/Level Up/), M = idx(/Your Menus/), I = idx(/Inventory/);
     const step = TUTORIAL_STEPS[L], card = () => (document.getElementById('tutorial-modal').textContent || '').replace(/\s+/g, ' ');
     const pill = () => { const p = document.getElementById('tut-try'); return !!(p && p.classList.contains('done')); };
     const clearAll = () => { TUTORIAL_STEPS.forEach((s) => { s._done = false; s._preDone = false; }); for (const k in _TUT_SEEN_TAGS) delete _TUT_SEEN_TAGS[k]; };
     const tabBtn = (t) => [...document.querySelectorAll('#u-tabs .inv-tab')].find((b) => b.dataset.utab === t);
-    out.def = { L, title: step.title, detect: step.detect, fresh: step.fresh === true, tryIt: step.tryIt, line: step.gugumaLine, body: String(step.body), invDetect: TUTORIAL_STEPS[I].detect, menusDetect: TUTORIAL_STEPS[M].detect, n: TUTORIAL_STEPS.length };
+    out.def = { L, title: step.title, detect: step.detect, fresh: step.fresh === true, tryIt: step.tryIt, line: step.gugumaLine, body: String(step.body), bodyWords: words(typeof step.body === 'function' ? step.body() : step.body), invDetect: TUTORIAL_STEPS[I].detect, menusDetect: TUTORIAL_STEPS[M].detect, n: TUTORIAL_STEPS.length };
     startTutorial(); await wait(600); _showTutorialModal(); await wait(400); clearAll(); closeU();   // the card must be DOCKED: _tutPing ignores a hidden tour
     // 1. the player opened U earlier in the tour (step 3): the Level Up tab was shown, its tag recorded - the step must still be waiting on arrival
     game._uTab = 'lp'; openLevelUpPanel(); await wait(500); closeU(); out.recorded = !!_TUT_SEEN_TAGS.tab_lp;
@@ -57,6 +58,7 @@ try {
   ok('the step is "Level Up & Allocate Points" and waits on the Level Up tab (tab_lp), marked fresh', /Level Up & Allocate/.test(r.def.title) && r.def.detect === 'tab_lp' && r.def.fresh === true, r.def);
   ok('the ask names the tab: "Open U and click the Level Up tab"', /Open <kbd>U<\/kbd> and click the <b>Level Up<\/b> tab/.test(r.def.tryIt), r.def.tryIt);
   ok('the Guguma line, visible without opening Details, says stat points go there too', /stat points/.test(r.def.line) && /here/.test(r.def.line), r.def.line);
+  ok('the body stays inside the tour limit of 60 words (it was 69 in v0.30.1567, which text_tightness_test caught on main): ' + r.def.bodyWords, r.def.bodyWords <= 60, r.def.bodyWords);
   ok('the card tells the player stat points are added on that tab', /Level Up<\/b> tab is where you <b>add stat points<\/b>/.test(r.def.body) && /spend a Skill Point/.test(r.def.body), r.def.body.slice(0, 160));
   ok('the other steps keep their gates (Menus: panel, Inventory: tab_items), 14 steps in all', r.def.menusDetect === 'panel' && r.def.invDetect === 'tab_items' && r.def.n === 14, { menus: r.def.menusDetect, inv: r.def.invDetect, n: r.def.n });
   ok('the first U press recorded the Level Up tag (the trap: a plain gate would arrive ticked)', r.recorded === true, r.recorded);
