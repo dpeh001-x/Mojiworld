@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1607';
+const GAME_VERSION = 'v0.30.1608';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -49816,6 +49816,7 @@ function _masterAdvancePending() {
   } catch (e) { return false; }
 }
 function openMasterAdvancement() {
+  if (window._lxBarnabyFallPending && Date.now() - window._lxBarnabyFallPending < 180000) { setTimeout(openMasterAdvancement, 500); return; }   // v0.30.1608 Barnaby's fall plays first
   const job = JOBS[player.job];
   if (!job) return;
   try { if (typeof _sbPreloadClip === 'function') _sbPreloadClip('advancement_2_done'); } catch (e) {}   // v0.30.1426 - warm the film while the mastery is chosen
@@ -53399,7 +53400,7 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   'story-beat-overlay',
   // v0.30.x — seven ids the PAUSE registry treats as blocking were absent here, so a
   // controller could reach none of them; bravo-boon-modal is a MANDATORY expedition choice.
-  'reforge-modal', 'bravo-boon-modal', 'exp-door-modal', 'exp-puzzle-modal', 'exp-seed-modal', 'everdawn-welcome-overlay', 'captains-teaser-overlay', 'game-complete-overlay',
+  'reforge-modal', 'bravo-boon-modal', 'exp-door-modal', 'exp-puzzle-modal', 'exp-seed-modal', 'everdawn-welcome-overlay', 'captains-teaser-overlay', 'barnaby-fall-overlay', 'game-complete-overlay',
   'edicts-modal',   // v0.30.x — was unlisted, so the stick drove the player around behind it
   'lx-pause',       // v0.30.x (audit U4) — the pause card
   // v0.29.7xx — the wardrobe's Character Studio editor (opened from the U
@@ -76021,6 +76022,88 @@ function _lxPlayCaptainsTeaser(_tries) {
     return true;
   } catch (e) { try { game.paused = false; } catch (e2) {} _off(); return false; }
 }
+// v0.30.1608 - BARNABY'S FALL (per user: "when barnaby dies he transforms into the sundered smith by evil incarnation with forces
+// that cause how gravitos warp to gravitos 3", then "First create a scene of the distorted barnaby warping to become the barnaby
+// in this video's first frame" and "ship it to play after defeating young barnaby"). The Confused Vigil cracks like a mirror and
+// the Lost Sentinel ages into Barnaby; in the forge he falls, the crimson rift that made Gravitos Ascendant opens over him, and he
+// rises as the Sundered Smith (Higgsfield Seedance 2.5, 1080p, scored from the game's own audio - clip_barnaby_fall.SPEC.md).
+// Once per save, 1.5 s after the first REAL kill of Young Confused Barnaby (not an Echo Keeper rematch, an expedition boss or a
+// mirage), full screen with sound like the captains' teaser: tap or any key skips, a missing file closes it, the map's music
+// steps aside and comes back after. window._lxBarnabyFallPending holds openMasterAdvancement, so the mastery, its flashback and
+// "The distortion closes behind you" follow the film instead of opening under it.
+const LX_BARNABY_FALL = 'steam/higgsfield/cinematics/clip_barnaby_fall.mp4';
+function _lxBarnabyFallKill(m) {   // from killMonster, beside the Sovereign's fall
+  try {
+    if (!m || m.type !== 'young_confused_barnaby' || m._echoBoss || m._expeditionBoss || m._isMirage || m._bfPlayed) return;
+    if (typeof player === 'undefined' || !player || (player._storyBeatsSeen && player._storyBeatsSeen.barnaby_fall)) return;
+    if (game.expedition && game.expedition.active) return;
+    m._bfPlayed = true;
+    window._lxBarnabyFallPending = Date.now();
+    setTimeout(_lxPlayBarnabyFall, 1500);   // after the takedown's slow-mo
+  } catch (e) { window._lxBarnabyFallPending = 0; }
+}
+function _lxPlayBarnabyFall(_tries) {
+  const _off = () => { try { window._lxBarnabyFallPending = 0; } catch (e) {} };
+  try {
+    if (typeof player === 'undefined' || !player) { _off(); return false; }
+    if (!player._storyBeatsSeen) player._storyBeatsSeen = {};
+    if (player._storyBeatsSeen.barnaby_fall) { _off(); return false; }       // once per save
+    if (document.getElementById('barnaby-fall-overlay')) return false;
+    // a boon pick, a dialog or a story beat may still be up: wait for a clear screen; after 2 min give up unseen (the next real
+    // kill tries again) rather than open over whatever is holding the screen
+    const _sb = document.getElementById('story-beat-overlay');
+    const _busy = (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen()) || (_sb && _sb.classList.contains('on'))
+      || !!document.getElementById('captains-teaser-overlay');
+    if (_busy) { if ((_tries || 0) < 240) setTimeout(() => _lxPlayBarnabyFall((_tries || 0) + 1), 500); else _off(); return true; }
+    player._storyBeatsSeen.barnaby_fall = true;
+    if (typeof saveState === 'function') saveState();
+    const host = document.querySelector('.game-wrapper') || document.body;
+    const ov = document.createElement('div');
+    ov.id = 'barnaby-fall-overlay';
+    ov.style.cssText = 'position:absolute; inset:0; z-index:300; background:#000; display:flex; align-items:center;'
+      + 'justify-content:center; overflow:hidden; opacity:0; transition:opacity 500ms ease; cursor:pointer;';
+    const v = document.createElement('video');
+    v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+    v.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#000;';
+    const vol = (typeof _sbClipSoundVol === 'function') ? _sbClipSoundVol() : 0.6;
+    v.volume = Math.max(0, Math.min(1, vol)); v.muted = !(vol > 0);
+    const skip = document.createElement('div');
+    skip.textContent = 'tap or press any key to skip';
+    skip.style.cssText = 'position:absolute; left:0; right:0; bottom:14px; text-align:center; font-size:11px; letter-spacing:1.5px;'
+      + 'text-transform:uppercase; color:rgba(255,255,255,0.42); pointer-events:none; text-shadow:0 1px 4px #000;';
+    ov.appendChild(v); ov.appendChild(skip);
+    const _wasPaused = !!game.paused;
+    game.paused = true;
+    // the map's music steps aside (a silent score owns the mix) and is handed back on close
+    try { if (typeof _cineScoreStart === 'function') _cineScoreStart('audio/bgm_distorted_portal.mp3', { loop: true, vol: 0 }); } catch (e) {}
+    let _done = false;
+    const _close = () => {
+      if (_done) return; _done = true;
+      try { window.removeEventListener('keydown', _key, true); } catch (e) {}
+      ov.style.opacity = '0';
+      setTimeout(() => {
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+        try { ov.remove(); } catch (e) {}
+        game.paused = _wasPaused;
+        try { if (typeof _cineScoreStop === 'function') _cineScoreStop(600, true); } catch (e) {}
+        _off();
+      }, 500);
+    };
+    const _key = (e) => { if (e && e.key === 'F12') return; if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };
+    ov.addEventListener('click', _close);
+    window.addEventListener('keydown', _key, true);
+    v.addEventListener('ended', _close, { once: true });
+    v.addEventListener('error', _close, { once: true });
+    host.appendChild(ov);
+    v.src = LX_BARNABY_FALL;
+    requestAnimationFrame(() => { ov.style.opacity = '1'; });
+    const p = v.play();
+    if (p && p.catch) p.catch(() => { try { v.muted = true; const q = v.play(); if (q && q.catch) q.catch(_close); } catch (e) { _close(); } });
+    setTimeout(_close, 45000);   // backstop: never hold the game if 'ended' never fires (the film is 25 s)
+    game._lxBarnabyFallEl = v;
+    return true;
+  } catch (e) { try { game.paused = false; } catch (e2) {} _off(); return false; }
+}
 // v0.26.946 — Per-map sprite preloader. Fills the SAME memoized registries
 // the renderer reads (_monsterFramesFor / _npcIdleFrame), then resolves when
 // every frame has loaded + decoded (8s per image, 12s total cap), so callers
@@ -79727,6 +79810,12 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   if (_spawned && _spawned.type === 'towerSovereign' && !window._lxSovCineWarm) {
     window._lxSovCineWarm = true;
     try { fetch('steam/higgsfield/cinematics/clip_sovereign_fall.mp4').then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => {}); } catch (e) {}
+  }
+  // v0.30.1608 - Barnaby's fall (25 s, ~6 MB) plays 1.5 s after the Lost Sentinel's first real fall: primed when he spawns
+  if (_spawned && _spawned.type === 'young_confused_barnaby' && !window._lxBarnabyFallWarm
+      && !(typeof player !== 'undefined' && player && player._storyBeatsSeen && player._storyBeatsSeen.barnaby_fall)) {
+    window._lxBarnabyFallWarm = true;
+    try { fetch(LX_BARNABY_FALL).then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => {}); } catch (e) {}
   }
   if (_spawned && _spawned._n0 === undefined) { _spawned._n0 = _spawned.name; _spawned._w0 = _spawned.w; _spawned._h0 = _spawned.h; }   // the natural name / size: a later change is the host's to send (see _coopTickMonsters)
   return _spawned;
@@ -109427,6 +109516,8 @@ function _killMonsterRaw(m) {
     m._sovFallPlayed = true;
     setTimeout(() => { try { _sovereignFallCutscene(null); } catch (e) {} }, 1500);
   }
+  // v0.30.1608 - Barnaby's fall: the first real kill of Young Confused Barnaby plays the film (once per save, see _lxBarnabyFallKill)
+  try { if (typeof _lxBarnabyFallKill === 'function') _lxBarnabyFallKill(m); } catch (e) {}
   // v0.25.61 — quest progression hook
   // v0.26.277 — Skip quest tick inside an active expedition. The
   // expedition is a sandboxed re-run; kills here shouldn't tick
@@ -176055,7 +176146,7 @@ let _cineMixIdleTicks = 0;
 function _cineAnythingOnScreen() {
   try {
     if (typeof window !== 'undefined' && window._prologueActive) return true;
-    for (const id of ['gravitos-entry-cine', 'prologue-dagger-cine', 'captains-teaser-overlay']) {
+    for (const id of ['gravitos-entry-cine', 'prologue-dagger-cine', 'captains-teaser-overlay', 'barnaby-fall-overlay']) {
       if (document.getElementById(id)) return true;
     }
     const sb = document.getElementById('story-beat-overlay');
@@ -188345,6 +188436,7 @@ const _LX_EXTRA_PAUSE_SURFACES = [
   { id: 'exp-seed-modal',           mode: 'display' },   // _expeditionSeedPrompt - the player is TYPING a seed
   { id: 'everdawn-welcome-overlay', mode: 'display' },   // first arrival in Everdawn
   { id: 'captains-teaser-overlay',  mode: 'display' },   // v0.30.1554 the four captains' teaser
+  { id: 'barnaby-fall-overlay',     mode: 'display' },   // v0.30.1608 Barnaby's fall (after the Lost Sentinel)
   // v0.30.x — openEdictsPanel builds a full-viewport overlay at z-index 520 on the
   // BODY and was in none of the five registries: the sim ticked underneath it, Esc
   // did nothing, no controller could reach its close button, and the death overlay
