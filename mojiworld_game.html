@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1582';
+const GAME_VERSION = 'v0.30.1583';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -123224,6 +123224,10 @@ function devLog(msg) {
 // Dev-only by construction: renderDev is reached only through openDevConsole (a developer surface plus LX_DEV or ?dev=1).
 // A made piece is never a pickup: no trackPickup, no co-op brag, and the console has already marked the save dev-touched.
 // devMakeGear / devGiveGear are callable from the browser console too, e.g. devGiveGear('Wooden Sword', { stars: 5 }).
+// v0.30.1583 - per user ("include the new updated list of equipments"): the list always was the live ITEM_POOL, so v0.30.1581's
+// thirty stat-set pieces were in it from the start; set pieces now name their set, and a fourth tab, Sets, gives each of the
+// SETS (the legendary sets and the stat sets) its own section with its bonuses and a Whole-set button. There a class chip
+// shows what that class can wear: its own pieces plus the any-class ones.
 const _LX_DEV_GEAR = { cat: 'weapons', cls: 'all', mode: 'catalog', rarity: '', stars: 0, lvl: 60, equip: false };
 const _LX_DEV_GEAR_CATS = [['weapons', '⚔ Weapons'], ['armors', '🛡 Armor'], ['accessories', '💍 Accessories']];
 const _LX_DEV_GEAR_CLS = [['any', 'Any class'], ['warrior', '⚔ Warrior'], ['rogue', '🥷 Rogue'], ['mage', '🪄 Mage'], ['archer', '🏹 Archer']];
@@ -123284,13 +123288,15 @@ function _lxDevGearCss() {
     '#dev-gear .dg-opts select, #dev-gear .dg-opts input[type=number] { padding:3px; background:#222; color:#fff; border:1px solid #555; border-radius:3px; font-size:11px; }',
     '#dev-gear .dg-opts input[type=number] { width:52px; }',
     '#dev-gear .dg-status { display:flex; align-items:center; gap:8px; font-size:11px; color:#bbb; margin-bottom:4px; }',
-    '#dev-gear .dg-group { margin:10px 0 4px; color:#ffd27a; font:700 11px Inter, sans-serif; letter-spacing:0.06em; text-transform:uppercase; }',
+    '#dev-gear .dg-group { display:flex; align-items:center; gap:8px; margin:10px 0 4px; color:#ffd27a; font:700 11px Inter, sans-serif; letter-spacing:0.06em; text-transform:uppercase; }',
+    '#dev-gear .dg-group button { text-transform:none; letter-spacing:0; }',
+    '#dev-gear .dg-setinfo { color:#bbb; font-size:10.5px; line-height:1.35; margin:0 0 6px; }',
     '#dev-gear .dg-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:6px; }',
     '#dev-gear .dg-tile { position:relative; display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 4px 5px; background:#1c1a24; border:1px solid #444; border-top:3px solid var(--rc); border-radius:6px; color:#eee; cursor:pointer; font-size:10px; line-height:1.15; text-align:center; }',
     '#dev-gear .dg-tile:hover { background:#2a2636; border-color:var(--rc); }',
     '#dev-gear .dg-name { font-weight:700; font-size:10.5px; min-height:2.3em; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }',
     '#dev-gear .dg-meta { color:var(--rc); font-size:9.5px; }',
-    '#dev-gear .dg-set { position:absolute; top:3px; right:5px; font-size:9px; color:#ffd27a; font-weight:700; }',
+    '#dev-gear .dg-set { color:#ffd27a; font-size:9px; font-weight:700; }',
   ].join('\n');
   document.head.appendChild(st);
 }
@@ -123301,19 +123307,25 @@ function _lxDevGearSection(grid, btn, makeSection) {
   _lxDevGearCss();
   const body = document.createElement('div'); sec.appendChild(body);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const CAT_AT = {}; for (const [c] of _LX_DEV_GEAR_CATS) for (const b of ITEM_POOL[c] || []) CAT_AT[b.name] = c;
+  const CLS_ORDER = ['warrior', 'rogue', 'mage', 'archer', 'any'];
   const draw = () => {
     body.innerHTML = '';
-    const pool = ITEM_POOL[S.cat] || [];
+    const SET = S.cat === 'sets';
+    const pool = SET ? _LX_DEV_GEAR_CATS.flatMap(([c]) => ITEM_POOL[c] || []).filter((b) => b.setId && SETS[b.setId]) : (ITEM_POOL[S.cat] || []);
+    // a class chip: in a slot tab that class's own pieces; in Sets what that class can wear (its own plus the any-class ones)
+    const wears = (b, k) => k === 'all' || (b.cls || 'any') === k || (SET && (b.cls || 'any') === 'any');
     const tabs = el('div', 'dg-tabs');
-    for (const [c, label] of _LX_DEV_GEAR_CATS) {
-      const t = el('button', 'dg-tab' + (S.cat === c ? ' on' : ''), label + ' · ' + (ITEM_POOL[c] || []).length);
-      t.dataset.cat = c; t.onclick = () => { S.cat = c; draw(); }; tabs.appendChild(t);
+    for (const [c, label] of [..._LX_DEV_GEAR_CATS, ['sets', '🧩 Sets']]) {
+      const n = c === 'sets' ? Object.keys(SETS).length : (ITEM_POOL[c] || []).length;
+      const t = el('button', 'dg-tab' + (S.cat === c ? ' on' : ''), label + ' · ' + n);
+      t.dataset.cat = c; t.onclick = () => { S.cat = c; if (c === 'sets' && S.cls === 'any') S.cls = 'all'; draw(); }; tabs.appendChild(t);
     }
     body.appendChild(tabs);
     const chips = el('div', 'dg-chips');
     for (const [k, label] of [['all', 'All classes'], ..._LX_DEV_GEAR_CLS]) {
-      const n = k === 'all' ? pool.length : pool.filter((b) => (b.cls || 'any') === k).length;
-      const ch = el('button', 'dg-chip' + (S.cls === k ? ' on' : ''), label + ' ' + n);
+      if (SET && k === 'any') continue;   // in Sets every class already sees the any-class pieces
+      const ch = el('button', 'dg-chip' + (S.cls === k ? ' on' : ''), label + ' ' + pool.filter((b) => wears(b, k)).length);
       ch.dataset.cls = k; ch.onclick = () => { S.cls = k; draw(); }; chips.appendChild(ch);
     }
     body.appendChild(chips);
@@ -123333,38 +123345,48 @@ function _lxDevGearSection(grid, btn, makeSection) {
     eq.onchange = () => { S.equip = eq.checked; draw(); };
     eqLab.append(eq, ' Equip it on the hero'); opts.append(' ', eqLab);
     body.appendChild(opts);
+    const give = (list, what) => { let made = 0; for (const b of list) { if (!devGiveGear(b, S).ok) break; made++; }
+      devLog('Gear Generator: ' + made + ' of ' + list.length + ' ' + what + (S.equip ? ' worn' : ' into the bag') + (made < list.length ? ' (the Equip tab is full)' : '')); draw(); };
     const room = _lxDevGearRoom(), status = el('div', 'dg-status');
-    const shown = pool.filter((b) => S.cls === 'all' || (b.cls || 'any') === S.cls);
+    const shown = pool.filter((b) => wears(b, S.cls));
     status.append(el('span', null, 'Bag ' + room.used + ' / ' + room.cap + ' · click a piece to ' + (S.equip ? 'equip it' : 'put it in the bag')));
-    if (!S.equip) status.appendChild(btn('＋ All ' + shown.length + ' shown', () => {
-      let made = 0; for (const b of shown) { if (!devGiveGear(b, S).ok) break; made++; }
-      devLog('Gear Generator: ' + made + ' of ' + shown.length + ' pieces into the bag' + (made < shown.length ? ' (the Equip tab is full)' : ''));
-      draw();
-    }, '#5a4a2a'));
+    if (!S.equip) status.appendChild(btn('＋ All ' + shown.length + ' shown', () => give(shown, 'pieces'), '#5a4a2a'));
     body.appendChild(status);
-    for (const [k, label] of _LX_DEV_GEAR_CLS) {
-      if (S.cls !== 'all' && S.cls !== k) continue;
-      const list = pool.filter((b) => (b.cls || 'any') === k).sort((a, b) => ((a.tier | 0) - (b.tier | 0)) || a.name.localeCompare(b.name));
-      if (!list.length) continue;
-      body.appendChild(el('div', 'dg-group', label + ' · ' + list.length));
+    const tileOf = (b) => {
+      const prev = devMakeGear(b, { mode: 'catalog', rarity: S.rarity, stars: S.stars });
+      const r = prev.rarity, tile = el('button', 'dg-tile');
+      tile.dataset.name = b.name; tile.style.setProperty('--rc', _LX_DEV_GEAR_RCOL[r] || '#888');
+      tile.innerHTML = itemIconHtml(prev, 40);
+      tile.appendChild(el('div', 'dg-name', b.name));
+      tile.appendChild(el('div', 'dg-meta', 'T' + (b.tier | 0) + ' · ' + r + (S.stars ? ' · ★' + S.stars : '')));
+      if (b.setId && SETS[b.setId]) tile.appendChild(el('div', 'dg-set', '◆ ' + SETS[b.setId].name));
+      try { tile.title = b.name + '\n' + String(itemStatString(prev, true) || '').replace(/<[^>]*>/g, ''); } catch (e) { tile.title = b.name; }
+      tile.onclick = () => {
+        const res = devGiveGear(b, S);
+        if (res.ok) devLog('Made ' + res.item.name + ' (' + res.item.slot + ', T' + (b.tier | 0) + ', ' + res.item.rarity + (res.item.stars ? ', ★' + res.item.stars : '') + ') ' + (S.equip ? 'and equipped it' : 'into the bag'));
+        else devLog(res.why === 'full' ? 'The Equip tab is full (' + _lxDevGearRoom().cap + ') - free a slot first' : 'Unknown piece: ' + b.name);
+        draw();
+      };
+      return tile;
+    };
+    const byTier = (a, b) => ((a.tier | 0) - (b.tier | 0)) || a.name.localeCompare(b.name);
+    const bySlot = (a, b) => (_LX_DEV_GEAR_CATS.findIndex(([c]) => c === CAT_AT[a.name]) - _LX_DEV_GEAR_CATS.findIndex(([c]) => c === CAT_AT[b.name]))
+      || (CLS_ORDER.indexOf(a.cls || 'any') - CLS_ORDER.indexOf(b.cls || 'any')) || byTier(a, b);
+    const tierOf = (list) => Math.min(...list.map((b) => b.tier | 0));
+    const groups = SET
+      ? Object.keys(SETS).map((id) => ({ set: SETS[id], list: shown.filter((b) => b.setId === id).sort(bySlot) })).filter((x) => x.list.length)
+          .sort((a, b) => (tierOf(a.list) - tierOf(b.list)) || a.set.name.localeCompare(b.set.name))
+      : _LX_DEV_GEAR_CLS.map(([k, label]) => ({ label, list: shown.filter((b) => (b.cls || 'any') === k).sort(byTier) })).filter((x) => x.list.length);
+    for (const gr of groups) {
+      const head = el('div', 'dg-group', gr.set ? (gr.set.icon || '◆') + ' ' + gr.set.name + ' · T' + tierOf(gr.list) + ' · ' + gr.list.length + ' pieces' : gr.label + ' · ' + gr.list.length);
+      if (gr.set) {
+        head.dataset.set = gr.set.name;
+        head.appendChild(btn((S.equip ? '⚔ Wear' : '＋') + ' Whole set', () => give(gr.list, gr.set.name + ' pieces'), '#5a4a2a'));
+        body.appendChild(head);
+        body.appendChild(el('div', 'dg-setinfo', (gr.set.blurb || '') + (gr.set.sig ? ' · ' + gr.set.sig : '')));
+      } else body.appendChild(head);
       const g = el('div', 'dg-grid');
-      for (const b of list) {
-        const prev = devMakeGear(b, { mode: 'catalog', rarity: S.rarity, stars: S.stars });
-        const r = prev.rarity, tile = el('button', 'dg-tile');
-        tile.dataset.name = b.name; tile.style.setProperty('--rc', _LX_DEV_GEAR_RCOL[r] || '#888');
-        tile.innerHTML = itemIconHtml(prev, 40);
-        tile.appendChild(el('div', 'dg-name', b.name));
-        tile.appendChild(el('div', 'dg-meta', 'T' + (b.tier | 0) + ' · ' + r + (S.stars ? ' · ★' + S.stars : '')));
-        if (b.setId) tile.appendChild(el('span', 'dg-set', 'SET'));
-        try { tile.title = b.name + '\n' + String(itemStatString(prev, true) || '').replace(/<[^>]*>/g, ''); } catch (e) { tile.title = b.name; }
-        tile.onclick = () => {
-          const res = devGiveGear(b, S);
-          if (res.ok) devLog('Made ' + res.item.name + ' (' + res.item.slot + ', T' + (b.tier | 0) + ', ' + res.item.rarity + (res.item.stars ? ', ★' + res.item.stars : '') + ') ' + (S.equip ? 'and equipped it' : 'into the bag'));
-          else devLog(res.why === 'full' ? 'The Equip tab is full (' + _lxDevGearRoom().cap + ') - free a slot first' : 'Unknown piece: ' + b.name);
-          draw();
-        };
-        g.appendChild(tile);
-      }
+      for (const b of gr.list) g.appendChild(tileOf(b));
       body.appendChild(g);
     }
   };
