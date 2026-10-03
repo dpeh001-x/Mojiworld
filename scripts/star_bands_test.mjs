@@ -47,7 +47,7 @@ const r = await page.evaluate(() => {
   out.rates = []; for (let s = 0; s < 10; s++) out.rates.push(starSuccessRate(s));
 
   // ---- the stat curve, through the real payout cache ----
-  const mk = (slot, stars) => ({ name: 'probe', slot, tier: 1, stars, atk: 100, def: 100, hp: 100 });
+  const mk = (slot, stars) => ({ name: 'probe', slot, tier: 8, stars, atk: 100, def: 100, hp: 100 });   // v0.30.1596: T8, the tier whose growth is the steps exactly
   const at = (slot, stars, key) => {
     player.equipped = { weapon: null, armor: null, accessory: null };
     player.equipped[slot] = mk(slot, stars);
@@ -64,6 +64,16 @@ const r = await page.evaluate(() => {
       out.sigAt[slot].push(+(at(slot, n, SIGKEY[slot]) / s0).toFixed(4));
       out.otherAt[slot].push(+(at(slot, n, OTHER[slot]) / o0).toFixed(4));
     }
+  }
+  player.equipped = { weapon: null, armor: null, accessory: null };
+  refreshGearCache();
+
+  // v0.30.1596 - the potential by tier: a weapon's ATK at star 10 over star 0, tier by tier, through the same payout cache
+  out.pot = [];
+  for (let t = 1; t <= 10; t++) {
+    const w = (stars) => { player.equipped = { weapon: { name: 'tier probe', slot: 'weapon', tier: t, stars, atk: 100 }, armor: null, accessory: null };
+      refreshGearCache(); return getEquipBonus('atk'); };
+    out.pot.push(+(w(10) / w(0)).toFixed(4));
   }
   player.equipped = { weapon: null, armor: null, accessory: null };
   refreshGearCache();
@@ -140,12 +150,16 @@ ok('each star adds more than the one before - the steps rise, and so do the meas
   && STARS.every(n => n === 1 || step(S.weapon, n) > step(S.weapon, n - 1))
   && STARS.every(n => n === 1 || step(O.weapon, n) > step(O.weapon, n - 1)),
   { steps: r.steps, mainSteps: r.sigSteps, weaponMainGains: STARS.map(n => step(S.weapon, n)) });
-ok('no star is worth less than it was before',
+ok('no star is worth less than it was before (on T8, the reference tier)',
   [0, ...STARS].every(n => S.weapon[n] >= OLD_SIG[n] - 0.002 && O.weapon[n] >= OLD_BASE[n] - 0.002),
   { mainNow: S.weapon, mainBefore: OLD_SIG, ordinaryNow: O.weapon, ordinaryBefore: OLD_BASE });
 ok('a 10-star piece is worth much more than it was',
   S.weapon[10] > 5.4 && O.weapon[10] > 3.5,
   { mainAt10: S.weapon && S.weapon[10], previously: 3.8201, ordinaryAt10: O.weapon && O.weapon[10], ordinaryPreviously: 2.6065 });
+// v0.30.1596 (per user: "The potential for growth of stats from stars should be higher the higher the tier")
+ok('the star 10 potential climbs with the tier - T8 is the reference (the steps exactly), T1 about x2.6, T10 about x6.5',
+  r.pot.length === 10 && r.pot.every((v, i) => i === 0 || v > r.pot[i - 1]) && near(r.pot[7], expSig(10)) && near(r.pot[0], 2.6178, 0.03) && near(r.pot[9], 6.5499, 0.05),
+  { potentialT1toT10: r.pot });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));

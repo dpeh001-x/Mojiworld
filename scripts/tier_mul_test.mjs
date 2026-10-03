@@ -4,7 +4,7 @@
 //   node scripts/tier_mul_test.mjs
 //
 // Two curves now exist and they must not drift into each other:
-//   _TIER_MUL     — FLAT stats (atk/def/hp/mp/crit/accuracy); since v0.30.1589 it dips from T1 to T5 and tops out at 4.00
+//   _TIER_MUL     — FLAT stats (atk/def/hp/mp/crit/accuracy); since v0.30.1596 a calibration to weapon ATK targets (it peaks at T5)
 //   _TIER_PCT_MUL — percentage family, marginal, 1.00 .. 1.25
 // Both tables and both accessors are extracted VERBATIM from
 // mojiworld_game.html (a hand-copied duplicate would certify nothing — that is
@@ -47,19 +47,12 @@ const ok = (n, c, extra) => res.push({ n, pass: !!c, extra });
 // --- flat curve, exactly as specified -------------------------------------
 // v0.30.1589 (per user: "The jump between the equipment tier stats are way too steep, make T1-T3 gear stronger, T4-T5
 // slightly stronger, Nerf T9 and T10 down"): T1 +70%, T2 +50%, T3 +35%, T4-T5 +15%, T6-T8 as they were, T9 -12.5%, T10 -20%.
-const WANT_FLAT = { 1: 3.40, 2: 3.00, 3: 2.70, 4: 2.30, 5: 2.30, 6: 2.50, 7: 3.00, 8: 3.50, 9: 3.50, 10: 4.00 };
+// v0.30.1596 (per user: "T2 needs to start at typical weapon ATK of around 50, T3 at 100, T4-5 around 200-300, T6-8 around 400-600")
+const WANT_FLAT = { 1: 3.40, 2: 4.20, 3: 4.90, 4: 5.60, 5: 6.40, 6: 6.20, 7: 4.80, 8: 3.95, 9: 3.50, 10: 4.00 };
 for (const [t, want] of Object.entries(WANT_FLAT)) {
   const got = api._tierMul(Number(t));
   ok(`flat T${t} = ${want.toFixed(2)}`, Math.abs(got - want) < 1e-9, got);
 }
-// The table dips from T1 to T5 on purpose: base stats climb steepest at the bottom of the pool, so the low tiers carry
-// the bigger multiplier; from T5 up it never decreases.
-ok('the low tiers carry the bigger multiplier (T1 > T2 > T3 > T4 = T5)', api._tierMul(1) > api._tierMul(2)
-  && api._tierMul(2) > api._tierMul(3) && api._tierMul(3) > api._tierMul(4) && api._tierMul(4) === api._tierMul(5));
-ok('from T5 up the flat curve never decreases, and it tops out at 4.00', (() => {
-  for (let t = 6; t <= 10; t++) if (api._tierMul(t) < api._tierMul(t - 1)) return false;
-  return api._tierMul(10) === 4.00;
-})());
 // v0.30.1589 - the complaint itself, measured on the item pool: the median weapon ATK a tier pays (base x _TIER_MUL x the
 // weapon's 0.85). Before: 14 24 41 75 71 196 334 536 952 1828 - steps up to x2.74, 130x from T1 to T10.
 const POOL = (() => {
@@ -79,6 +72,15 @@ const atkAt = (t) => med(POOL.weapons.filter((b) => (b.tier | 0) === t && b.atk)
 const jumps = []; for (let t = 2; t <= 10; t++) jumps.push(+(atkAt(t) / atkAt(t - 1)).toFixed(2));
 ok('no tier-to-tier step in weapon ATK is steeper than x2.5 (it reached x2.74)', Math.max(...jumps) <= 2.5, jumps.join(' '));
 ok('T1 to T10 spans at most 70x (it spanned 130x)', atkAt(10) / atkAt(1) <= 70, (atkAt(10) / atkAt(1)).toFixed(1) + 'x');
+// v0.30.1596 - the user's targets for the typical weapon ATK a tier pays, and every armour stat still rising tier over tier
+// (one multiplier per tier scales every slot, so the calibration has to hold both)
+const inR = (v, lo, hi) => v >= lo && v <= hi;
+ok('typical weapon ATK: T2 ~50, T3 ~100, T4-T5 200-300, T6-T8 400-600, then T9 and T10 above', inR(atkAt(2), 45, 55) && inR(atkAt(3), 90, 110)
+  && inR(atkAt(4), 190, 310) && inR(atkAt(5), 190, 310) && [6, 7, 8].every((t) => inR(atkAt(t), 380, 620)) && atkAt(9) > atkAt(8) && atkAt(10) > atkAt(9),
+  [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((t) => Math.round(atkAt(t))).join(' '));
+const armAt = (t, k) => med(POOL.armors.filter((b) => (b.tier | 0) === t && b[k]).map((b) => b[k] * api._tierMul(t) * 1.15));
+ok('armour DEF and HP still rise at every tier', [2, 3, 4, 5, 6, 7, 8, 9, 10].every((t) => armAt(t, 'def') >= armAt(t - 1, 'def') && armAt(t, 'hp') >= armAt(t - 1, 'hp')),
+  ['def', 'hp'].map((k) => k + ' ' + [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((t) => Math.round(armAt(t, k))).join(' ')).join(' | '));
 
 // --- pct curve: marginal, and strictly gentler than the flat curve ---------
 const WANT_PCT = { 1: 1.00, 5: 1.00, 6: 1.05, 7: 1.10, 8: 1.15, 9: 1.20, 10: 1.25 };

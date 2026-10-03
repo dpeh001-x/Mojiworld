@@ -41,7 +41,8 @@ const r = await page.evaluate(() => {
   // softening), uncapped (unlike crit, which each item clamps at 20), and
   // non-signature on a weapon or armour while signature on an accessory.
   const PROBE = ['atk', 'def', 'hp'];
-  const mk = (slot) => ({ name: 'probe', slot, tier: 1, stars: 0,
+  const mk = (slot) => ({ name: 'probe', slot, tier: 8, stars: 0,   // v0.30.1596: T8 grows by the steps exactly
+   
     atk: 100, def: 100, hp: 100 });
   const read = (slot, stars) => {
     player.equipped = { weapon: null, armor: null, accessory: null };

@@ -40,7 +40,7 @@ try {
       places: { hourglass: /Lava Cavern/.test(h1) && (mob.emberling || []).includes('lavaCavern'), zombie: namesAMap('zombie'), horny: namesAMap('horny'), zombieMaps: names('zombie'), hornyMaps: names('horny') },
       returns: ret.slice(0, 5), returnsN: ret.length,
       barnaby5: { giver: b5.giver, handIn: !!b5.handIn, backToGiver: /bring me word/.test(b5.desc), sendsAway: /then go and see Barnaby/.test(b5.desc) },
-      stars: { steps: STAR_STEPS.slice(), sig: STAR_SIG_STEPS.slice() },
+      stars: { steps: STAR_STEPS.slice(), sig: STAR_SIG_STEPS.slice(), t1: _starCurve(STAR_SIG_STEPS, 10, 1), t10: _starCurve(STAR_SIG_STEPS, 10, 10) },
     };
   });
   check(r.places.hourglass && r.places.zombie && r.places.horny, 'PLACES: Hourglass I and the zombie / horned-mushroom studies name maps those creatures spawn on', J(r.places));
@@ -49,6 +49,8 @@ try {
   const brok = /Every star adds more than the one before: \+(\d+)% to \+(\d+)% to its stats, \+(\d+)% to \+(\d+)% to its main stat/.exec(src);
   const pct = (v) => Math.round((v - 1) * 100), S0 = r.stars.steps, S1 = r.stars.sig;   // v0.30.1589: one step per star
   check(!!brok && +brok[1] === pct(S0[0]) && +brok[2] === pct(S0[S0.length - 1]) && +brok[3] === pct(S1[0]) && +brok[4] === pct(S1[S1.length - 1]), 'FACTS: Brok\'s star numbers are the forge\'s own steps', J({ said: brok && brok.slice(1), code: r.stars }));
+  const tierLine = /a ★10 main stat ends about x(\d+\.\d) on T1 and x(\d+\.\d) on T10/.exec(src);   // v0.30.1596: the tier sentence
+  check(!!tierLine && Math.abs(+tierLine[1] - r.stars.t1) < 0.06 && Math.abs(+tierLine[2] - r.stars.t10) < 0.06, 'FACTS: Brok\'s tier sentence matches the forge\'s tier growth', J({ said: tierLine && tierLine.slice(1), code: [r.stars.t1, r.stars.t10] }));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await browser.close(); server.kill();

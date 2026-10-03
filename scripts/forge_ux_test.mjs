@@ -209,8 +209,8 @@ const trans = await page.evaluate(() => {
   const keep = Math.pow(STAR_GROWTH, MAX_STARS) * 0.5;
   it.stars = 6;
   return { shown: nums,
-    trueSig: Math.round((keep * starSigMult({ stars: MAX_STARS }) - 1) * 100),
-    trueOrd: Math.round((keep * starMult({ stars: MAX_STARS }) - 1) * 100),
+    trueSig: Math.round((keep * starSigMult({ stars: MAX_STARS, tier: it.tier }) - 1) * 100),   // v0.30.1596: the panel quotes this piece's tier
+    trueOrd: Math.round((keep * starMult({ stars: MAX_STARS, tier: it.tier }) - 1) * 100),
     staleFlat: Math.round((keep * Math.pow(STAR_GROWTH, MAX_STARS) - 1) * 100) };
 });
 
