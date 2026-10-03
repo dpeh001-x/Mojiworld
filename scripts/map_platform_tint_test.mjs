@@ -27,5 +27,18 @@ ok('the baked lookup runs before the pixel sampler', iLookup > 0 && iSample > 0 
 ok('a hit is cached as fromBg, so it is resolved once and never recomputed',
   /_MAP_PLATFORM_TINT_CACHE\[id\] = \{ tint: _bt, fromBg: true \}/.test(game));
 ok('the live sampler survives for maps the table does not know', iSample > 0 && /const dom = bg \? _lxDominantColor\(bg, sky\) : null;/.test(game));
+// the generator must SAMPLE, not echo: with the table loaded, _mapPlatformTint answers from it before the sampler runs, so a run
+// that leaves it in place writes the old values back and its --check passes in a loop (a redrawn backdrop kept its old tint)
+{ const gp = path.join(ROOT, 'scripts', 'gen_map_platform_tint.mjs'), gsrc = existsSync(gp) ? readFileSync(gp, 'utf8') : '';
+  const iClear = gsrc.indexOf('window.LX_MAP_PLATFORM_TINT = {};'), iLoop = gsrc.indexOf('for (const id of ids)');
+  ok('the generator empties the baked table and the resolver cache before it samples, and drops each map\'s entry before loading it',
+    iClear > 0 && iLoop > iClear && /for \(const k of Object\.keys\(_MAP_PLATFORM_TINT_CACHE\)\) delete _MAP_PLATFORM_TINT_CACHE\[k\];/.test(gsrc)
+    && /delete _MAP_PLATFORM_TINT_CACHE\[id\];\s*try \{ loadMap\(id\); \}/.test(gsrc), `clear@${iClear} loop@${iLoop}`); }
+// per user ("Keep today's colours"): re-sampling would have dulled two maps' ledges to match their redrawn plates; they keep the
+// colours they had as set (authored) pairs, which beat the table - and the table, re-sampled, records the same pairs
+{ const SET = { stormCrest: ['#b2ddf5', '#3d445a'], ancient: ['#355f4d', '#161c24'] }, miss = [];
+  for (const [k, [t, b]] of Object.entries(SET)) { const i = game.indexOf('\n  ' + k + ': {'), j = i < 0 ? -1 : game.indexOf('\n  },', i);
+    if (i < 0 || !game.slice(i, j).includes(`platTint: { top:'${t}', body:'${b}' }`) || !tbl || !tbl[k] || tbl[k].top !== t || tbl[k].body !== b) miss.push(k); }
+  ok('Storm Crest and Elderwood keep their ledge colours as set pairs, and the table agrees', miss.length === 0, miss.join(', ')); }
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exitCode = fail ? 1 : 0;
