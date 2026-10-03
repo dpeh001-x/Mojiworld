@@ -62,7 +62,7 @@ const BG = {
   wayfarersLantern: 'moor', wayfarersLantern1: 'moor', wayfarersLantern2: 'moor',
   blockland: 'brickland', blockland1: 'brickland', blocklandLegosaurus: 'brickland',
   bastion: 'keep', bastionThrone: 'keep', bastionRampart: 'keep', azureAcademia: 'keep', azureAbode: 'keep',
-  distortedThreshold: 'rift', fracturedReflection: 'rift', confusedVigil: 'rift', gravitosArena: 'rift', zodiacSanctum: 'rift',
+  distortedThreshold: 'rift', fracturedReflection: 'rift', usurpersCourt: 'rift', confusedVigil: 'rift', gravitosArena: 'rift', zodiacSanctum: 'rift',
   galaxy: 'sky', celestialAtrium: 'sky', aetherion: 'sky',
 };
 // which kind of map each signature ground belongs to
