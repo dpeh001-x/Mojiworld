@@ -58,6 +58,7 @@ const r = await page.evaluate(async () => {
     hp: Math.floor(base.hp * 2),
     atk: Math.floor(base.atk * 2),
     def: Math.floor(base.atk * 0.35 * 2),
+    expExact: Math.floor(Math.max(1, Math.floor(base.exp)) * 1.5),   // (bughunt pq, per user) a flat LX_PQ_EXP_MUL x1.5 of the baseline on every PQ mech - the old per-map factor never ran
     expFloor: Math.floor(base.exp * 0.25),   // exp = baseline x per-map factor, clamped [0.25, 8]
     expCeil: Math.floor(base.exp * 8) + 1,
   } : null;
@@ -111,6 +112,8 @@ for (const k of ['clockworkExpress', 'clockworkUnderpassLobby']) {
   check(m.level === r.expected.level, `${label}: the nameplate level matches the stats under it`, m);
   check(m.exp >= r.expected.expFloor && m.exp <= r.expected.expCeil,
         `${label}: EXP pays the at-level baseline, not the authored Lv-31 payout`, m);
+  check(m.exp === r.expected.expExact,
+        `${label}: EXP is exactly 1.5x the at-level baseline (a flat factor on every PQ mech)`, { exp: m.exp, want: r.expected.expExact });
   check(typeof m.name === 'string' && m.name.startsWith('Express '),
         `${label}: named as the Express variant`, m.name);
   check(m.veteranGap === undefined,

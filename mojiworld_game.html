@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1609';
+const GAME_VERSION = 'v0.30.1610';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -30054,7 +30054,7 @@ function _renderPqObjectivePin() {
   } catch (e) {}
   let _teamLine = '';
   try {
-    if (_lxPqMapOn() && !(A.q_pq_spire)) { const _P = _lxPqParty(); if (_P.n > 1) _teamLine = `<span class="pq-progress">🎫 Mechs fight at Lv ${_lxScaledMobLevel(_P.lv)}, x${(1 + LX_PQ_PARTY_HP_STEP * (_P.n - 1)).toFixed(1)} HP. Gold-ringed ones need hits from two players <b>in turn</b>.</span>`; }
+    if (_lxPqMapOn() && !(A.q_pq_spire)) { const _P = _lxPqParty(); if (_P.n > 1) _teamLine = `<span class="pq-progress">🎫 Mechs ${(game.mapData && game.mapData.expressScaling) ? 'fight at Lv ' + _lxScaledMobLevel(_P.lv) + ', ' : 'have '}x${(1 + LX_PQ_PARTY_HP_STEP * (_P.n - 1)).toFixed(1)} HP. Gold-ringed ones need hits from two players <b>in turn</b>.</span>`; }
     else if (A.q_pq_spire && _lxCoopSameMapCount() > 1) _teamLine = '<span class="pq-progress">🧩 A piece anyone finds counts for the whole party.</span>';
   } catch (e) {}
   pin.innerHTML = `<span class="pq-title">📜 ${title}</span><span class="pq-goal">${goal}</span>` +
@@ -57733,6 +57733,9 @@ function _lxPartyExpMul(allies, inPq) {
 // Reuses the same two trust gates — the peer's own map broadcast, and the
 // v0.25.699 stale-peer cutoff, so a crashed partner stops paying into the
 // rate within 15s exactly as they stop earning the party EXP share.
+// a peer shares MY world when it is on my map AND in my instance: an expedition run is a private copy of an ordinary map id (v0.30.1443), so
+// the bare map id matches a friend who cannot see or help me (they paid the co-op EXP bonus, raised spawn pressure, joined the PQ average)
+function _lxCoopPeerHere(p, myMap) { return !!p && p.map === myMap && _coopPeerKey(p) === myMap + '|' + _coopInst(); }
 function _lxCoopSameMapCount() {
   let n = 1;
   try {
@@ -57742,7 +57745,7 @@ function _lxCoopSameMapCount() {
       ? performance.now() : Date.now()) - 15000;
     for (const id in net.peers) {
       const p = net.peers[id];
-      if (!p || p.map !== myMap) continue;
+      if (!_lxCoopPeerHere(p, myMap)) continue;   // same map AND same world: a partner in a private expedition copy of this map is not here
       if (typeof p._last === 'number' && p._last < _cut) continue;
       n++;
     }
@@ -57762,7 +57765,7 @@ function _lxCoopAlliesNear(cx, cy, excludeId) {
   for (const id in net.peers) {
     if (excludeId != null && String(id) === String(excludeId)) continue;
     const p = net.peers[id];
-    if (!p || p.map !== myMap) continue;
+    if (!_lxCoopPeerHere(p, myMap)) continue;   // same map AND same world (see _lxCoopPeerHere)
     if (typeof p._last === 'number' && p._last < _staleCutoff) continue;
     const dx = (p.x || 0) + player.w / 2 - cx;   // v0.26.1023 — peer broadcasts top-left; the point is centered
     const dy = (p.y || 0) + player.h / 2 - cy;
@@ -61234,7 +61237,7 @@ function _mpHandle(msg) {
         const _cq = net.peers[msg.id];
         if (msg.cap != null) _cq.cap = msg.cap | 0;
         if (msg.at != null) _cq.at = Math.max(0, Math.min(1e8, +msg.at || 0));   // the Ticket Rush builds its mechs from the party's ATK
-        if (msg.pqp != null) _lxPqPieceFromPeer(+msg.pqp, msg.id);   // a Spire piece a partner found
+        if (msg.pqp != null && _mpRateOk(msg.id, 'pqp', 2)) _lxPqPieceFromPeer(+msg.pqp, msg.id);   // a Spire piece a partner found (an honest peer sends one per chest it opens: 2 a second is far above that)
         if (msg.aw != null && !!msg.aw !== !!_cq._away) { _cq._away = !!msg.aw; _coopRecomputeHost(); _mpRenderPlayerList(); }
         if (msg.fx || msg.pj || msg.po) _coopApplyFx(msg);
       }
@@ -73770,6 +73773,8 @@ const LX_PQ_BOOK_WINDOW   = 3000;    // ms a punch stays "live" for the next pla
 const LX_PQ_BOOK_WEAR     = 24;      // one player alone: hits to wear a shield away (the AFK-partner way out)
 const LX_PQ_OPEN_MS       = 5000;    // how long a punched mech stands open
 const LX_PQ_OPEN_MUL      = 1.5;     // and what it takes while open
+const LX_PQ_EXP_MUL       = 1.5;     // (per user, 2026-10-03) every Ticket Rush mech pays x1.5 of its own baseline EXP - normal and elite alike, on every PQ map
+const LX_PQ_PEER_CLAMP    = 4;       // a peer's reported ATK / max HP counts for at most this many times my own in the party average (a spoofed number cannot size the mechs)
 function _lxPqMapOn() { const md = game && game.mapData; return !!(md && (md.expressScaling || md.isCarriage) && !md.isBossArena); }
 function _lxPqParty() {
   const _me = { lv: Math.max(1, player.level | 0), atk: (typeof getAtk === 'function') ? Math.max(1, getAtk()) : 0, hp: (typeof getMaxHp === 'function') ? Math.max(1, getMaxHp()) : 0 };
@@ -73778,9 +73783,10 @@ function _lxPqParty() {
     if (typeof net !== 'undefined' && net && net.connected && net.peers) {
       const cut = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - 15000, map = game.currentMap;
       for (const id in net.peers) {
-        const p = net.peers[id]; if (!p || p.map !== map) continue;
+        const p = net.peers[id]; if (!_lxCoopPeerHere(p, map)) continue;   // a partner in a private expedition copy of this map is another world
         if (typeof p._last === 'number' && p._last < cut) continue;
-        all.push({ lv: Math.max(1, Math.min(300, (+p.level | 0) || 1)), atk: (+p.at > 0) ? +p.at : 0, hp: (+p.maxHp > 0) ? +p.maxHp : 0 });
+        // a peer's ATK / max HP are its own report: each counts for at most LX_PQ_PEER_CLAMP x mine, so a spoofed number cannot size every mech
+        all.push({ lv: Math.max(1, Math.min(300, (+p.level | 0) || 1)), atk: (+p.at > 0) ? Math.min(+p.at, Math.max(1, _me.atk) * LX_PQ_PEER_CLAMP) : 0, hp: (+p.maxHp > 0) ? Math.min(+p.maxHp, Math.max(1, _me.hp) * LX_PQ_PEER_CLAMP) : 0 });
       }
     }
   } catch (e) {}
@@ -73788,6 +73794,11 @@ function _lxPqParty() {
   let lvMin = _me.lv; for (const q of all) lvMin = Math.min(lvMin, q.lv);
   const n = all.length, mean = Math.round(avg('lv', _me.lv));
   return { n, lv: n > 1 ? Math.min(mean, lvMin + LX_PQ_LEVEL_SPREAD) : _me.lv, lvAvg: mean, lvMin, atk: avg('atk', _me.atk), hp: avg('hp', _me.hp) };
+}
+// a PQ mech's EXP: its own baseline (kept on the mech, so the builder can run on a living mech any number of times) x LX_PQ_EXP_MUL
+function _lxPqPayExp(m, base) {
+  m._pqExpBase = Math.max(0, Math.floor(+base || 0));
+  m.exp = m._pqExpBase > 0 ? Math.max(1, Math.floor(m._pqExpBase * LX_PQ_EXP_MUL)) : 0;
 }
 // the ONE place a PQ mech is built from the party: first = at spawn (names, size and coins are stamped once), otherwise a re-stat of a
 // living mech, which keeps its health fraction
@@ -73797,8 +73808,8 @@ function _lxPqRestatMob(m, party, first) {
   const frac = (!first && m.maxHp > 0) ? Math.max(0.001, Math.min(1, m.currentHp / m.maxHp)) : 1;
   if (md.expressScaling) {
     const _pLv = _lxScaledMobLevel(party.lv);
-    const _exMapFactor = (typeof expMult === 'number' && expMult > 0) ? Math.max(0.25, Math.min(8, expMult / 0.1)) : 1;
-    _lxStatToLevel(m, _pLv, { stat: 2, exp: _exMapFactor });
+    _lxStatToLevel(m, _pLv, { stat: 2, exp: 1 });   // EXP = the same-level field baseline, re-derived on every call...
+    _lxPqPayExp(m, m.exp);                          // ...and paid x LX_PQ_EXP_MUL on top (the old map factor read an out-of-scope `expMult`, so it was always 1)
     m.maxHp = Math.max(1, Math.floor(m.maxHp * hpMul));
     m.level = _pLv;
     if (first) {
@@ -73816,6 +73827,7 @@ function _lxPqRestatMob(m, party, first) {
     const _perHit = Math.max(1, _pAtk * (1 - LX_CARRIAGE_MITIGATION));
     m.maxHp = Math.max(1, Math.floor(_perHit * LX_CARRIAGE_HITS_TO_KILL * hpMul));
     m.atk = Math.max(1, Math.floor(_pHp * LX_CARRIAGE_HIT_PCT));
+    _lxPqPayExp(m, (m._pqExpBase > 0) ? m._pqExpBase : m.exp);   // the Carriage keeps the type's own EXP (elite tier included): remembered once, so a re-stat never compounds the x1.5
     m._pqMech = 'c';
   } else return false;
   m.currentHp = first ? m.maxHp : Math.max(1, Math.round(m.maxHp * frac));
@@ -73864,6 +73876,7 @@ function _lxPqPartyTick() {
   const arr = game.monsters || [];
   for (let i = 0; i < arr.length; i++) {
     const m = arr[i]; if (!m || !m._pqMech || m.currentHp <= 0) continue;
+    if (m._pqBooked === 2 && (m._pqOpenUntil || 0) < now) { m._pqBooked = 0; m._netHit = true; }   // the open window ran out: nothing else clears it when no partner is on the key (no frames are built, and _lxPqBookSet leaves state 2 alone)
     if (changed) { _lxPqRestatMob(m, P, false); m._netHit = true; }
     else _lxPqBookSet(m, P.n);
   }
@@ -73872,6 +73885,7 @@ function _lxPqPartyTick() {
 // the badge over a booked mech: a gold ticket in a ring, and what it wants
 function _lxDrawPqBook(m, sx, sy) {
   const q = m._pqBooked | 0; if (!q || m.currentHp <= 0) return;
+  if (q === 2 && m._pqOpenUntil && ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) > m._pqOpenUntil) return;   // the host's own window has closed (the state is cleared by the next party tick)
   const _wb = (typeof _lxWardBox === 'function') ? _lxWardBox(m, sx, sy) : { cx: sx + (m.w || 0) / 2, cy: sy + (m.h || 0) / 2, size: 72 };
   const cx = _wb.cx, top = _wb.cy - Math.min(_wb.size, 150) / 2 - 4, t = game.time | 0;
   ctx.save();
@@ -73896,12 +73910,15 @@ function _lxPqPieceFromPeer(idx, id) {
   try {
     if (game.currentMap !== 'clockworkSpire' || !player || !player.quests || !player.quests.active || !player.quests.active.q_pq_spire) return;
     idx = idx | 0; if (idx < 0 || idx > 999) return;
-    const pr = (typeof net !== 'undefined' && net && net.peers) ? net.peers[id] : null; if (!pr || pr.map !== 'clockworkSpire') return;
+    const pr = (typeof net !== 'undefined' && net && net.peers) ? net.peers[id] : null; if (!_lxCoopPeerHere(pr, 'clockworkSpire')) return;   // on MY Spire, in my world (not a private copy of it)
     if (!player._pqSpirePieces) player._pqSpirePieces = {};
     if (player._pqSpirePieces[idx]) return;
     const ch = (game.chests || []).find((c) => c && c._pqPuzzlePiece && c._pqPieceIndex === idx && !c.opened);
     if (!ch) return;   // only a piece that is really one of my Spire chests (its index is a floor number, not 0-3)
-    ch.opened = true;   // spent here too: nobody climbs for a piece the party already holds
+    // spent here too: nobody climbs for a piece the party already holds. Nothing is forfeited by this - a Spire piece chest pays the piece and
+    // NOTHING else (openChest returns before the coin / potion / item roll: v0.26.332, per user "no rewards except tickets only"), and it must
+    // NOT stay openable, because with the piece already held openChest would fall through to the full wood / silver / gold loot roll
+    ch.opened = true;
     player._pqSpirePieces[idx] = true;
     const have = Object.keys(player._pqSpirePieces).length;
     if (typeof tickQuestVisit === 'function') tickQuestVisit('pq_piece');
@@ -79793,6 +79810,8 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
   // claim the mob is under-leveled, which stops being true the moment this
   // line re-bases it to the player's level, so they are cleared rather than
   // resurrected into the old accidental veteran-×-express double-scale.
+  // EXP, in the end (per user, 2026-10-03): the map factor above never ran (_lxPqRestatMob cannot see this function's
+  // `expMult`), and the user chose a flat x1.5 of the baseline for every PQ mech - see LX_PQ_EXP_MUL.
   if (!isBoss && !isMiniBoss && _spawned && game.mapData && game.mapData.expressScaling) {
     _lxPqRestatMob(_spawned, _lxPqParty(), true);   // the lobby and the finale arena do too
   }
