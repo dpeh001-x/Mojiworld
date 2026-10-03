@@ -40,14 +40,15 @@ try {
       places: { hourglass: /Lava Cavern/.test(h1) && (mob.emberling || []).includes('lavaCavern'), zombie: namesAMap('zombie'), horny: namesAMap('horny'), zombieMaps: names('zombie'), hornyMaps: names('horny') },
       returns: ret.slice(0, 5), returnsN: ret.length,
       barnaby5: { giver: b5.giver, handIn: !!b5.handIn, backToGiver: /bring me word/.test(b5.desc), sendsAway: /then go and see Barnaby/.test(b5.desc) },
-      stars: { late: STAR_LATE_GROWTH, sigLate: STAR_SIG_LATE_GROWTH },
+      stars: { steps: STAR_STEPS.slice(), sig: STAR_SIG_STEPS.slice() },
     };
   });
   check(r.places.hourglass && r.places.zombie && r.places.horny, 'PLACES: Hourglass I and the zombie / horned-mushroom studies name maps those creatures spawn on', J(r.places));
   check(r.returnsN === 0, 'RETURNS: no giverless quest (ladder, Codex study) says come back or bring me N', J(r.returns));
   check(r.barnaby5.giver === 'Brok' && r.barnaby5.handIn && r.barnaby5.backToGiver && !r.barnaby5.sendsAway, 'RETURNS: Brok\'s first Barnaby chapter sends you back to Brok, its hand-in', J(r.barnaby5));
-  const brok = /Stars 1-7 add \+8% to its stats and \+12% to its main stat; stars 8-10 add \+(\d+)% and \+(\d+)%/.exec(src);
-  check(!!brok && +brok[1] === Math.round((r.stars.late - 1) * 100) && +brok[2] === Math.round((r.stars.sigLate - 1) * 100), 'FACTS: Brok\'s star numbers are the forge\'s own constants', J({ said: brok && brok.slice(1), code: r.stars }));
+  const brok = /Every star adds more than the one before: \+(\d+)% to \+(\d+)% to its stats, \+(\d+)% to \+(\d+)% to its main stat/.exec(src);
+  const pct = (v) => Math.round((v - 1) * 100), S0 = r.stars.steps, S1 = r.stars.sig;   // v0.30.1589: one step per star
+  check(!!brok && +brok[1] === pct(S0[0]) && +brok[2] === pct(S0[S0.length - 1]) && +brok[3] === pct(S1[0]) && +brok[4] === pct(S1[S1.length - 1]), 'FACTS: Brok\'s star numbers are the forge\'s own steps', J({ said: brok && brok.slice(1), code: r.stars }));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await browser.close(); server.kill();

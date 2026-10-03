@@ -1,12 +1,12 @@
-// Live test: THE ANVIL BITES HARDER PAST SIX AND PAYS BETTER PAST SEVEN.
+// Live test: THE ANVIL BITES HARDER PAST SIX, AND EVERY STAR PAYS MORE THAN THE ONE BEFORE.
 //
-// Per user: "the fail rate should be higher after level 6 of enhancement, but
-// after level 7 enhancement adds more increased value to stat".
-//
-// Two thresholds, deliberately one apart, so both halves have to be checked
-// separately AND the gap between them has to be checked too - it is the design,
-// not an off-by-one: risk rises at six, reward rises at seven, so the star 6 to
-// 7 rung is the one you pay for with nothing extra in hand.
+// Odds, per user: "the fail rate should be higher after level 6 of enhancement" - the odds bands, unchanged.
+// Reward, per user (v0.30.1589): "Make enhancement increase stats to a greater extent with higher increments at higher
+// stars". The two reward bands this file used to pin (x1.08 / x1.12 a star to 7, then x1.15 / x1.20) are one step per
+// star now, STAR_STEPS and STAR_SIG_STEPS, each step bigger than the last - so the old 'reward rises at seven' band,
+// and the deliberate 6 -> 7 gap with it, are gone. What is pinned instead: every star pays its own step in every slot,
+// each star's gain is bigger than the one before, no star is worth less than it was, and a 10-star piece is worth
+// much more.
 //
 // The odds are checked both as declared (starSuccessRate, the function the code
 // calls) and as OBSERVED - 800 real attemptEnhance calls with the real RNG, so
@@ -39,12 +39,11 @@ const page = await (await b.newContext({ viewport: { width: 1280, height: 800 } 
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 await page.goto(`http://localhost:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
 await page.waitForFunction(() => typeof starSuccessRate === 'function' && typeof getEquipBonus === 'function'
-  && typeof STAR_LATE_FROM !== 'undefined' && typeof attemptEnhance === 'function', null, { timeout: 120000 });
+  && typeof STAR_STEPS !== 'undefined' && typeof attemptEnhance === 'function', null, { timeout: 120000 });
 await page.waitForTimeout(1500);
 
 const r = await page.evaluate(() => {
-  const out = { riskFrom: STAR_RISK_FROM, lateFrom: STAR_LATE_FROM,
-    sig: STAR_SIG_GROWTH, base: STAR_GROWTH, sigLate: STAR_SIG_LATE_GROWTH, baseLate: STAR_LATE_GROWTH };
+  const out = { riskFrom: STAR_RISK_FROM, steps: STAR_STEPS.slice(), sigSteps: STAR_SIG_STEPS.slice() };
   out.rates = []; for (let s = 0; s < 10; s++) out.rates.push(starSuccessRate(s));
 
   // ---- the stat curve, through the real payout cache ----
@@ -93,9 +92,12 @@ const r = await page.evaluate(() => {
 
 // The expectation is restated here from the thresholds rather than read back
 // out of the page, so this is a check and not an echo.
-const curve = (g, gl, n) => { const e = Math.min(n, r.lateFrom); return Math.pow(g, e) * Math.pow(gl, n - e); };
-const expSig  = (n) => +curve(r.sig, r.sigLate, n).toFixed(4);
-const expBase = (n) => +curve(r.base, r.baseLate, n).toFixed(4);
+const prod = (steps, n) => steps.slice(0, n).reduce((a, b) => a * b, 1);
+const expSig  = (n) => +prod(r.sigSteps, n).toFixed(4);
+const expBase = (n) => +prod(r.steps, n).toFixed(4);
+// the curve before v0.30.1589 (x1.12 / x1.08 a star to 7, then x1.20 / x1.15), pinned so no star can come out worse
+const OLD_SIG  = [1, 1.12, 1.2544, 1.4049, 1.5735, 1.7623, 1.9738, 2.2107, 2.6528, 3.1834, 3.8201];
+const OLD_BASE = [1, 1.08, 1.1664, 1.2597, 1.3605, 1.4693, 1.5869, 1.7138, 1.9709, 2.2665, 2.6065];
 const OLD_RATES = [95, 87, 79, 71, 63, 55, 47, 39, 31, 23];
 // v0.30.x (per user: "reduce chance of success of enhancement from 8 to 10 stars") added a
 // THIRD band from the star-7 attempt, dropping 15 a star instead of 10, and lowered the floor
@@ -106,8 +108,8 @@ const near = (a, b, t) => a != null && Math.abs(a - b) <= (t || 0.02);
 const S = r.sigAt || {}, O = r.otherAt || {};
 const step = (arr, n) => +(arr[n] - arr[n - 1]).toFixed(4);
 
-ok('the two thresholds are one apart, which is the design and not an off-by-one',
-  r.riskFrom === 6 && r.lateFrom === 7, { riskRisesAtStar: r.riskFrom, rewardRisesAboveStar: r.lateFrom });
+ok('risk still rises at six: the odds bands are untouched by the reward curve',
+  r.riskFrom === 6, { riskRisesAtStar: r.riskFrom });
 ok('nothing at or below \u26055 moved by a single point',
   r.rates.slice(0, 6).every((v, i) => v === OLD_RATES[i]),
   { rates0to5: r.rates.slice(0, 6), previously: OLD_RATES.slice(0, 6) });
@@ -128,31 +130,22 @@ ok('...and the odds the code DECLARES are the odds it actually rolls',
   { observedAt5: (r.observed.s5 * 100).toFixed(1) + '%', declared5: r.rates[5] + '%',
     observedAt8: (r.observed.s8 * 100).toFixed(1) + '%', declared8: r.rates[8] + '%', trialsEach: 800 });
 
-ok('every stat up to \u26057 is exactly where it was before this change',
-  ['weapon', 'armor', 'accessory'].every(sl =>
-    S[sl].slice(0, 8).every((v, n) => near(v, +Math.pow(r.sig, n).toFixed(4)))
-    && O[sl].slice(0, 8).every((v, n) => near(v, +Math.pow(r.base, n).toFixed(4)))),
-  { weaponSig0to7: S.weapon && S.weapon.slice(0, 8) });
-ok('\u26058 and above grow on the steeper curve, in every slot',
-  ['weapon', 'armor', 'accessory'].every(sl =>
-    near(S[sl][8], expSig(8)) && near(S[sl][9], expSig(9)) && near(S[sl][10], expSig(10))),
-  { at8: expSig(8), at9: expSig(9), at10: expSig(10),
-    measured: { weapon: S.weapon && S.weapon.slice(8), armor: S.armor && S.armor.slice(8), accessory: S.accessory && S.accessory.slice(8) } });
-ok('...the ordinary stats on the same piece follow their own steeper curve too',
-  ['weapon', 'armor', 'accessory'].every(sl => near(O[sl][10], expBase(10))),
-  { at10: expBase(10), measured: ['weapon', 'armor', 'accessory'].map(sl => O[sl] && O[sl][10]) });
-ok('the \u26057\u2192\u26058 step is a bigger jump than the \u26056\u2192\u26057 step',
-  step(S.weapon, 8) > step(S.weapon, 7) * 1.5 && step(S.armor, 8) > step(S.armor, 7) * 1.5
-  && step(S.accessory, 8) > step(S.accessory, 7) * 1.5,
-  { weapon: { step6to7: step(S.weapon, 7), step7to8: step(S.weapon, 8) },
-    armor: { step6to7: step(S.armor, 7), step7to8: step(S.armor, 8) } });
-ok('THE GAP IS REAL: \u26056\u2192\u26057 buys worse odds and no extra stat',
-  r.rates[6] < OLD_RATES[6] && near(step(S.weapon, 7), step(S.weapon, 7)) && step(S.weapon, 7) < step(S.weapon, 8),
-  { oddsAt6: r.rates[6] + '% (was ' + OLD_RATES[6] + '%)', statStep6to7: step(S.weapon, 7), statStep7to8: step(S.weapon, 8) });
-ok('a \u260510 piece is worth meaningfully more than it was',
-  S.weapon[10] > 3.7 && O.weapon[10] > 2.5,
-  { signatureAt10: S.weapon && S.weapon[10], previously: 3.1058,
-    ordinaryAt10: O.weapon && O.weapon[10], ordinaryPreviously: 2.1589 });
+// v0.30.1589: one step per star replaces the two bands - measured through getEquipBonus in every slot.
+const STARS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+ok('every star multiplies by its own step, in every slot',
+  ['weapon', 'armor', 'accessory'].every(sl => S[sl].every((v, n) => near(v, expSig(n))) && O[sl].every((v, n) => near(v, expBase(n)))),
+  { weaponMain: S.weapon, weaponOrdinary: O.weapon, expectMainAt10: expSig(10), expectOrdinaryAt10: expBase(10) });
+ok('each star adds more than the one before - the steps rise, and so do the measured gains',
+  r.steps.every((v, i) => i === 0 || v > r.steps[i - 1]) && r.sigSteps.every((v, i) => i === 0 || v > r.sigSteps[i - 1])
+  && STARS.every(n => n === 1 || step(S.weapon, n) > step(S.weapon, n - 1))
+  && STARS.every(n => n === 1 || step(O.weapon, n) > step(O.weapon, n - 1)),
+  { steps: r.steps, mainSteps: r.sigSteps, weaponMainGains: STARS.map(n => step(S.weapon, n)) });
+ok('no star is worth less than it was before',
+  [0, ...STARS].every(n => S.weapon[n] >= OLD_SIG[n] - 0.002 && O.weapon[n] >= OLD_BASE[n] - 0.002),
+  { mainNow: S.weapon, mainBefore: OLD_SIG, ordinaryNow: O.weapon, ordinaryBefore: OLD_BASE });
+ok('a 10-star piece is worth much more than it was',
+  S.weapon[10] > 5.4 && O.weapon[10] > 3.5,
+  { mainAt10: S.weapon && S.weapon[10], previously: 3.8201, ordinaryAt10: O.weapon && O.weapon[10], ordinaryPreviously: 2.6065 });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));
 
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));

@@ -74,7 +74,7 @@ const R = await page.evaluate(() => {
   // to the hilt lands UNDER the cap and the clamp must leave it alone. A base
   // twice that — reachable through Transcendence, or through a future item —
   // is what the ceiling is actually for.
-  out.forgedUnderCap = equip(mk(0.015, { stars: 10, tier: 10 }));
+  out.forgedUnderCap = equip(mk(0.012, { stars: 10, tier: 10 }));   // v0.30.1589: 1.2% - the steeper star steps carry a synthetic 1.5% T10 roll to the cap
   out.forgedOverCap  = equip(mk(0.030, { stars: 10, tier: 10 }));
   // Class-mismatched gear (x0.75) still pays the floor, not a fraction of it.
   const _cls = player.cls;
@@ -137,8 +137,8 @@ ok('star x tier scaling cannot carry a piece past the cap',
   Math.abs(R.forgedOverCap - CAP) < 1e-9,
   `a 3% base at star 10 / tier 10 pays ${pc(R.forgedOverCap)}`);
 ok('...and a piece that scales to UNDER the cap is left alone — a ceiling, not a target',
-  R.forgedUnderCap < CAP - 1e-9 && R.forgedUnderCap > 0.015,
-  `the richest authored roll (1.5%) forged to star 10 / tier 10 pays ${pc(R.forgedUnderCap)}, untouched`);
+  R.forgedUnderCap < CAP - 1e-9 && R.forgedUnderCap > 0.012,
+  `a 1.2% roll forged to star 10 / tier 10 pays ${pc(R.forgedUnderCap)}, untouched`);
 ok('class-mismatched gear (x0.75) still pays the floor',
   Math.abs(R.mismatchFloored - MIN) < 1e-9, 'rogue item on a warrior pays ' + pc(R.mismatchFloored));
 ok('the band is PER PIECE, so three lifesteal slots pay 3x the cap',

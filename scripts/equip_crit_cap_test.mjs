@@ -67,7 +67,7 @@ const R = await page.evaluate(() => {
   // rather than modelling it here: at tier 1 it is already x2, which means the
   // item that first reaches the 20 cap only PRINTS about 10.
   out.mult = starMult({}) * _tierMul(undefined);
-  out.underCapPassesThrough = equip(mk(5));                       // 5 x mult (tier 1 = x2 -> 10), still under the 12 cap
+  out.underCapPassesThrough = equip(mk(3));                       // 3 x mult (tier 1 = x3.4 since v0.30.1589 -> 10.2), still under the 12 cap
   // Literal, not out.cap: on a build without the constant, mk(null) rolls a
   // null crit and the failure message reads "clamped to 0", which describes the
   // fixture rather than the build under test.
@@ -77,7 +77,7 @@ const R = await page.evaluate(() => {
   // Three slots each clamped independently: the cap is PER ITEM, not a total.
   out.threeSlots = equip(mk(999), mk(999, { slot: 'armor' }), mk(999, { slot: 'accessory' }));
   // ...and a mixed set still sums the small one in full.
-  out.mixed = equip(mk(999), mk(4, { slot: 'armor' }), null);
+  out.mixed = equip(mk(999), mk(3, { slot: 'armor' }), null);   // v0.30.1589: 3, not 4 - at tier 1's x3.4 a 4 would reach the cap itself
 
   // What the player actually ends up with, through the real getCrit().
   player.equipped = { weapon: mk(999), armor: mk(999, { slot: 'armor' }), accessory: mk(999, { slot: 'accessory' }) };
@@ -100,8 +100,8 @@ const CAP = 12;   // LX_EQUIP_CRIT_CAP_PER_ITEM; 20 -> 25 -> 20, then 12 in v0.3
 
 ok('the cap is a named constant set to 12', R.cap === CAP, 'LX_EQUIP_CRIT_CAP_PER_ITEM = ' + R.cap);
 ok('a roll under the cap is scaled but not clamped',
-   Math.abs(R.underCapPassesThrough - 5 * R.mult) < 0.001 && R.underCapPassesThrough < CAP,
-   `an item printing 5 gives ${R.underCapPassesThrough} (x${R.mult} star/tier), still under the ${CAP} cap`);
+   Math.abs(R.underCapPassesThrough - 3 * R.mult) < 0.001 && R.underCapPassesThrough < CAP,
+   `an item printing 3 gives ${R.underCapPassesThrough} (x${R.mult} star/tier), still under the ${CAP} cap`);
 ok('the cap is on the EFFECTIVE contribution, not the printed roll',
    Math.abs(R.atCap - CAP) < 0.001,
    `an item printing ${CAP} is clamped to ${R.atCap}; the roll that first reaches the cap only prints ~${(CAP / R.mult).toFixed(1)}`);
@@ -113,8 +113,8 @@ ok('star/tier scaling cannot carry an item past the cap',
 ok('the cap is PER ITEM, so three slots give 3x it', Math.abs(R.threeSlots - CAP * 3) < 0.001,
    'three capped slots give ' + R.threeSlots + ' (expected ' + CAP * 3 + ')');
 ok('a small roll still contributes in full alongside a capped one',
-   Math.abs(R.mixed - (CAP + 4 * R.mult)) < 0.001,
-   `capped ${CAP} + (4 printed x ${R.mult}) gives ${R.mixed}`);
+   Math.abs(R.mixed - (CAP + 3 * R.mult)) < 0.001,
+   `capped ${CAP} + (3 printed x ${R.mult}) gives ${R.mixed}`);
 // The consequence, stated as a number rather than left implicit.
 ok('full crit gear lands where the cap implies', Math.abs(R.critWarrior - (CAP * 3 + R.baseCrit)) < 1.5,
    `warrior ${R.critWarrior}% (= 3x${CAP} gear + ${R.baseCrit} base), rogue ${R.critRogue}% (x1.2)`);
