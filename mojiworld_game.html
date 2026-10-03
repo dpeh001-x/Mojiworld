@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1600';
+const GAME_VERSION = 'v0.30.1601';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -173417,6 +173417,167 @@ function _bossRushOnBossDown(m) {
   }
   _bossRushSpawnNext(3000);
 }
+// v0.30.1584 - THE RUSH PAYS (per user: "the setshard rewards needs to be way more like at least 500", "should also have exp
+// gains about 10% for the current level"; the card "needs to be way better designed"). Still ONE payout per day and only for a
+// run that laid at least one echo to rest, so a failed spawn can never hand out the floor for nothing.
+const LX_RUSH_SHARD_FLOOR = 500;                 // the least a claimed Rush pays, whatever the grade
+const LX_RUSH_SHARD_PER_ECHO = 75;               // on top, for every echo laid to rest
+const LX_RUSH_SHARD_GRADE = { S: 500, A: 300, B: 150, C: 0 };
+const LX_RUSH_EXP_FRAC = 0.10;                   // of the CURRENT level's EXP bar (nothing at the level cap)
+function _bossRushResultsCss() {
+  if (document.getElementById('lx-rush-pop')) return;
+  const st = document.createElement('style');
+  st.id = 'lx-rush-pop';
+  st.textContent = `
+  /* the Rush results card - pop punk, in the game box (per user). Offsets are drop-shadow filters (html.lx-nobackdrop strips box-shadow). */
+  #boss-rush-results.brr { position: absolute; inset: 0; z-index: 980; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 14px;
+    pointer-events: none; font-family: 'Nunito', system-ui, sans-serif; color: #f4ecff;
+    background: radial-gradient(ellipse at 50% 46%, rgba(20, 7, 40, 0.30) 0%, rgba(6, 2, 16, 0.74) 100%); animation: brrFade 260ms ease-out both; }
+  #boss-rush-results .brr-card { pointer-events: auto; position: relative; isolation: isolate; box-sizing: border-box; width: 440px; max-width: 100%; padding: 38px 24px 20px;
+    border: 4px solid #0b0a0e; border-radius: 18px; background: linear-gradient(180deg, #2b1252 0%, #1a0a36 100%);
+    filter: drop-shadow(8px 8px 0 #d9467f); transform: rotate(-0.8deg); animation: brrPop 420ms cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+  #boss-rush-results .brr-card::before { content: ''; position: absolute; top: 0; right: 0; width: 46%; height: 42%; z-index: -1; border-radius: 0 14px 0 0; pointer-events: none;
+    background: radial-gradient(circle, rgba(217, 70, 127, 0.34) 1.5px, transparent 2px) 0 0 / 9px 9px; -webkit-mask: linear-gradient(225deg, #000 0%, transparent 72%); mask: linear-gradient(225deg, #000 0%, transparent 72%); }
+  #boss-rush-results .brr-card::after { content: ''; position: absolute; inset: 6px; z-index: -1; border: 2px solid rgba(185, 160, 255, 0.40); border-radius: 12px; pointer-events: none; }
+  #boss-rush-results .brr-banner { position: absolute; left: 50%; top: -27px; transform: translateX(-50%) rotate(-2.5deg) skewX(-6deg); padding: 8px 24px 7px; white-space: nowrap;
+    background: #ffe07a; border: 4px solid #0b0a0e; color: #0b0a0e; font: italic 1000 25px/1 'Nunito', system-ui, sans-serif; letter-spacing: 0.5px; filter: drop-shadow(4px 4px 0 #0b0a0e); }
+  #boss-rush-results .brr-sub { text-align: center; margin: 2px 0 14px; font: 900 11px/1 'Nunito', system-ui, sans-serif; letter-spacing: 3.2px; color: #c9b2ff; }
+  #boss-rush-results .brr-top { display: flex; align-items: center; gap: 18px; margin: 0 4px 20px; }
+  #boss-rush-results .brr-stamp { position: relative; flex: none; width: 108px; height: 108px; display: grid; place-items: center; border-radius: 50%; border: 4px solid #0b0a0e;
+    background: radial-gradient(circle at 34% 28%, var(--g1) 0%, var(--g2) 100%); filter: drop-shadow(4px 4px 0 #0b0a0e); transform: rotate(-8deg);
+    animation: brrStamp 520ms cubic-bezier(0.2, 1.6, 0.4, 1) 240ms both; }
+  #boss-rush-results .brr-stamp b { font: 1000 78px/1 'Nunito', system-ui, sans-serif; color: var(--gl); -webkit-text-stroke: 7px #0b0a0e; paint-order: stroke fill; margin-top: -4px; }
+  #boss-rush-results .brr-stamp i { position: absolute; left: 50%; bottom: -11px; transform: translateX(-50%); padding: 4px 9px 3px; border-radius: 999px; background: #0b0a0e; color: #ffe07a;
+    font: 1000 10px/1 'Nunito', system-ui, sans-serif; font-style: normal; letter-spacing: 2px; }
+  #boss-rush-results .g-S { --g1: #ffe07a; --g2: #ff9f3d; --gl: #fff3b0; }
+  #boss-rush-results .g-A { --g1: #ff86b6; --g2: #d9467f; --gl: #ffe3ef; }
+  #boss-rush-results .g-B { --g1: #b9a0ff; --g2: #6f4fd0; --gl: #ece5ff; }
+  #boss-rush-results .g-C { --g1: #b3bdd4; --g2: #66728f; --gl: #e8edf7; }
+  #boss-rush-results .brr-stats { flex: 1; min-width: 0; }
+  #boss-rush-results .brr-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  #boss-rush-results .brr-chip { padding: 8px 4px 7px; text-align: center; background: #fff6e0; color: #0b0a0e; border: 3px solid #0b0a0e; border-radius: 10px; filter: drop-shadow(3px 3px 0 #0b0a0e); }
+  #boss-rush-results .brr-chip:nth-child(odd) { transform: rotate(-1.6deg); }
+  #boss-rush-results .brr-chip:nth-child(even) { transform: rotate(1.4deg); }
+  #boss-rush-results .brr-chip em { display: block; font: 1000 9px/1 'Nunito', system-ui, sans-serif; font-style: normal; letter-spacing: 1.3px; color: #7d2352; }
+  #boss-rush-results .brr-chip b { display: block; margin-top: 5px; font: 1000 24px/1 'Nunito', system-ui, sans-serif; }
+  #boss-rush-results .brr-prev { margin-top: 10px; font: 800 11px/1.2 'Nunito', system-ui, sans-serif; color: #b9a0e6; text-align: center; }
+  #boss-rush-results .brr-best { display: table; margin: 12px auto 0; padding: 5px 18px 4px; border: 3px solid #0b0a0e; border-radius: 999px; transform: rotate(-2deg);
+    background: linear-gradient(180deg, #ff86b6 0%, #d9467f 100%); color: #fff; font: italic 1000 13px/1 'Nunito', system-ui, sans-serif; letter-spacing: 1.6px;
+    -webkit-text-stroke: 3px #0b0a0e; paint-order: stroke fill; filter: drop-shadow(3px 3px 0 #0b0a0e); animation: brrBurst 520ms cubic-bezier(0.2, 1.7, 0.4, 1) 900ms both; }
+  #boss-rush-results .brr-rewards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0 2px; }
+  #boss-rush-results .brr-tkt { position: relative; display: flex; align-items: center; gap: 10px; padding: 12px 10px 11px; background: #fff6e0; color: #0b0a0e; border: 3px solid #0b0a0e; border-radius: 12px;
+    filter: drop-shadow(4px 4px 0 #0b0a0e); transform: rotate(-1.2deg); animation: brrTicket 440ms cubic-bezier(0.2, 1.5, 0.4, 1) var(--d, 700ms) both; }
+  #boss-rush-results .brr-tkt + .brr-tkt { transform: rotate(1.2deg); --d: 860ms; }
+  #boss-rush-results .brr-tkt .ui-ico { flex: none; width: 44px; height: 44px; }
+  #boss-rush-results .brr-tkt .brr-txt { min-width: 0; flex: 1; }
+  #boss-rush-results .brr-tkt em { display: block; font: 1000 10px/1 'Nunito', system-ui, sans-serif; font-style: normal; letter-spacing: 1.6px; color: #7d2352; }
+  #boss-rush-results .brr-tkt b { display: block; margin: 4px 0 2px; font: 1000 30px/1 'Nunito', system-ui, sans-serif; color: #d9467f; -webkit-text-stroke: 2.5px #0b0a0e; paint-order: stroke fill; letter-spacing: -0.3px; white-space: nowrap; }
+  #boss-rush-results .brr-tkt small { display: block; font: 800 10.5px/1.25 'Nunito', system-ui, sans-serif; color: #4a3a63; }
+  #boss-rush-results .brr-bar { position: relative; height: 12px; margin: 4px 0 4px; border: 2.5px solid #0b0a0e; border-radius: 7px; background: #e6d8bd; overflow: hidden; }
+  #boss-rush-results .brr-bar i { position: absolute; top: 0; bottom: 0; }
+  #boss-rush-results .brr-bar .was { left: 0; background: #d9467f; }
+  #boss-rush-results .brr-bar .gain { background: repeating-linear-gradient(135deg, #ffe07a 0 6px, #ffc85c 6px 12px); transform-origin: left center; animation: brrGrow 700ms ease-out 1100ms both; }
+  #boss-rush-results .brr-lvup { position: absolute; right: -8px; top: -16px; padding: 4px 9px 3px; background: #ffe07a; color: #0b0a0e; border: 3px solid #0b0a0e; border-radius: 8px;
+    font: italic 1000 12px/1 'Nunito', system-ui, sans-serif; letter-spacing: 0.6px; transform: rotate(6deg); filter: drop-shadow(2px 2px 0 #0b0a0e); animation: brrBurst 480ms cubic-bezier(0.2, 1.7, 0.4, 1) 1500ms both; }
+  #boss-rush-results .brr-tkt.is-off .brr-txt, #boss-rush-results .brr-tkt.is-off .ui-ico { opacity: 0.55; filter: grayscale(0.9); }
+  #boss-rush-results .brr-tkt .brr-claimed { position: absolute; right: -8px; top: -15px; padding: 3px 9px 2px; transform: rotate(7deg); border: 3px solid #0b0a0e; border-radius: 7px; background: #ff86b6; color: #0b0a0e;
+    font: 1000 12px/1 'Nunito', system-ui, sans-serif; letter-spacing: 1.4px; filter: drop-shadow(2px 2px 0 #0b0a0e); }
+  #boss-rush-results .brr-foot { margin: 16px 0 14px; text-align: center; font: 800 12px/1.35 'Nunito', system-ui, sans-serif; color: #cdb8ff; }
+  #boss-rush-results .brr-foot b { color: #ffe07a; font-weight: 1000; }
+  #boss-rush-results .brr-btn { display: block; margin: 0 auto; padding: 10px 36px 9px; border: 3.5px solid #0b0a0e; border-radius: 12px; background: #ffe07a; color: #0b0a0e; cursor: pointer;
+    font: italic 1000 17px/1 'Nunito', system-ui, sans-serif; letter-spacing: 0.6px; text-transform: uppercase; filter: drop-shadow(4px 4px 0 #d9467f); transition: transform 120ms ease-out, filter 120ms ease-out; }
+  #boss-rush-results .brr-btn:hover { transform: translate(-1px, -2px) rotate(-1deg); }
+  #boss-rush-results .brr-btn:active { transform: translate(2px, 2px); filter: drop-shadow(1px 1px 0 #d9467f); }
+  @keyframes brrFade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes brrPop { 0% { opacity: 0; transform: rotate(-4deg) scale(0.82); } 100% { opacity: 1; transform: rotate(-0.8deg) scale(1); } }
+  @keyframes brrStamp { 0% { opacity: 0; transform: rotate(-30deg) scale(2.7); } 62% { opacity: 1; transform: rotate(-4deg) scale(0.94); } 100% { opacity: 1; transform: rotate(-8deg) scale(1); } }
+  @keyframes brrTicket { 0% { opacity: 0; translate: 0 14px; scale: 0.8; } 100% { opacity: 1; translate: 0 0; scale: 1; } }
+  @keyframes brrBurst { 0% { opacity: 0; scale: 0.2; } 100% { opacity: 1; scale: 1; } }
+  @keyframes brrGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  @media (prefers-reduced-motion: reduce) { #boss-rush-results, #boss-rush-results * { animation: none !important; } }
+  `;
+  document.head.appendChild(st);
+}
+// the card's markup - every value is a number or a fixed word, nothing the player typed
+function _bossRushResultsHtml(m) {
+  const n = (v) => Math.round(v).toLocaleString();
+  const g = (m.grade === 'S' || m.grade === 'A' || m.grade === 'B') ? m.grade : 'C';
+  const off = m.claimed ? '' : ' is-off';
+  let h = '<div class="brr-card">'
+    + '<div class="brr-banner">RUSH COMPLETE</div>'
+    + '<div class="brr-sub">HALL OF ECHOES</div>'
+    + '<div class="brr-top">'
+    +   '<div class="brr-stamp g-' + g + '"><b>' + g + '</b><i>GRADE</i></div>'
+    +   '<div class="brr-stats"><div class="brr-chips">'
+    +     '<div class="brr-chip"><em>ECHOES</em><b>' + m.downs + '</b></div>'
+    +     '<div class="brr-chip"><em>TIME</em><b>' + m.timeStr + '</b></div>'
+    +     '<div class="brr-chip"><em>PER ECHO</em><b>' + m.avgStr + '</b></div>'
+    +   '</div>'
+    +   (m.isBest ? '<div class="brr-best">NEW BEST</div>' : (m.prev ? '<div class="brr-prev">Best: ' + m.prev.downs + ' echoes in ' + m.prevStr + '</div>' : ''))
+    +   '</div>'
+    + '</div>';
+  if (m.noEcho) {
+    h += '<div class="brr-foot">No echo fell this time, so there is nothing to claim.</div>';
+  } else {
+    h += '<div class="brr-rewards">'
+      + '<div class="brr-tkt' + off + '"><span class="ui-ico ico-setshards"></span><div class="brr-txt"><em>SETSHARDS</em>'
+      +   '<b data-count="' + m.worth + '">+' + n(m.worth) + '</b>'
+      +   '<small>' + LX_RUSH_SHARD_FLOOR + ' base + ' + m.downs + ' x ' + LX_RUSH_SHARD_PER_ECHO + (m.gradeBonus ? ' + ' + m.gradeBonus + ' for grade ' + g : '') + '</small></div>'
+      +   (m.claimed ? '' : '<span class="brr-claimed">CLAIMED</span>') + '</div>';
+    if (m.atCap) {
+      h += '<div class="brr-tkt' + off + '"><span class="ui-ico ico-lvup"></span><div class="brr-txt"><em>EXP</em><b>MAX</b><small>Max level - nothing left to gain</small></div>'
+        + (m.claimed ? '' : '<span class="brr-claimed">CLAIMED</span>') + '</div>';
+    } else {
+      h += '<div class="brr-tkt' + off + '"><span class="ui-ico ico-lvup"></span><div class="brr-txt"><em>EXP</em><b>+10%</b>'
+        +   '<div class="brr-bar"><i class="was" style="width:' + (m.barWas * 100).toFixed(1) + '%"></i><i class="gain" style="left:' + (m.barWas * 100).toFixed(1) + '%;width:' + (m.barGain * 100).toFixed(1) + '%"></i></div>'
+        +   '<small>' + (m.leveled ? 'Lv ' + m.lvWas + ' to Lv ' + m.lvNow + '!' : 'of your Lv ' + m.lvWas + ' bar (' + n(m.expWorth) + ' EXP)') + '</small></div>'
+        +   (m.claimed && m.leveled ? '<span class="brr-lvup">LEVEL UP!</span>' : '')
+        +   (m.claimed ? '' : '<span class="brr-claimed">CLAIMED</span>') + '</div>';
+    }
+    h += '</div>'
+      + '<div class="brr-foot">' + (m.claimed ? 'Daily reward claimed.' : 'Already claimed today.') + ' The Hall pays again in <b>' + m.leftStr + '</b>.</div>';
+  }
+  h += '<button id="boss-rush-results-close" class="brr-btn" type="button">Walk away</button></div>';
+  return h;
+}
+function _bossRushShowResults(m) {
+  try { _bossRushResultsCss(); } catch (e) {}
+  let res = document.getElementById('boss-rush-results');
+  if (res) res.remove();
+  res = document.createElement('div');
+  res.id = 'boss-rush-results';
+  res.className = 'brr';
+  res.setAttribute('role', 'dialog');
+  res.setAttribute('aria-label', 'Rush complete');
+  res.innerHTML = _bossRushResultsHtml(m);
+  (document.querySelector('.game-wrapper') || document.body).appendChild(res);
+  // Enter / Escape walk away (the card does not pause the game; Esc must not also open the pause card)
+  const onKey = (ev) => {
+    if (!document.getElementById('boss-rush-results')) { window.removeEventListener('keydown', onKey, true); return; }
+    if (ev.key !== 'Enter' && ev.key !== 'Escape') return;
+    ev.preventDefault(); ev.stopPropagation();
+    window.removeEventListener('keydown', onKey, true);
+    res.remove();
+  };
+  window.addEventListener('keydown', onKey, true);
+  const btn = document.getElementById('boss-rush-results-close');
+  if (btn) btn.onclick = () => { window.removeEventListener('keydown', onKey, true); res.remove(); };
+  // the Setshards count up once the grade has landed; the final number is in the markup from the start and is restored by a timer
+  const num = res.querySelector('[data-count]');
+  if (num && m.claimed && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+    const to = +num.getAttribute('data-count') || 0, t0 = performance.now() + 760, dur = 900;
+    const step = (now) => {
+      if (!num.isConnected) return;
+      const k = Math.max(0, Math.min(1, (now - t0) / dur));
+      num.textContent = '+' + Math.round(to * (1 - Math.pow(1 - k, 3))).toLocaleString();
+      if (k < 1) requestAnimationFrame(step);
+    };
+    num.textContent = '+0';
+    requestAnimationFrame(step);
+    setTimeout(() => { if (num.isConnected) num.textContent = '+' + to.toLocaleString(); }, 2200);
+  }
+  return res;
+}
 function _bossRushComplete() {
   const br = game.bossRush;
   if (!br || !br.active) return;
@@ -173430,40 +173591,41 @@ function _bossRushComplete() {
   const prev = game.bossRushBest;
   const isBest = !prev || br.downs > prev.downs || (br.downs === prev.downs && totalMs < prev.timeMs);
   if (isBest) game.bossRushBest = { timeMs: totalMs, downs: br.downs, grade, when: Date.now() };
-  // Once-per-day payout (anti-farm): 2 shards per echo + grade bonus.
-  // Use the monotonic UTC day index (like the other dailies) instead of a local
-  // date string, so the reward can't be re-claimed by rolling the system clock.
+  // Once-per-day payout (anti-farm): LX_RUSH_SHARD_FLOOR + LX_RUSH_SHARD_PER_ECHO per echo + a grade bonus in Setshards, and
+  // LX_RUSH_EXP_FRAC of the current level's EXP bar (v0.30.1584, per user). Use the monotonic UTC day index (like the other
+  // dailies) instead of a local date string, so the reward can't be re-claimed by rolling the system clock. A run that laid no
+  // echo to rest claims nothing and keeps the day.
   const today = (typeof dailyIndex === 'function') ? dailyIndex() : new Date().toDateString();
-  let payoutTxt = 'Daily reward already claimed — run logged for glory.';
   const _brLast = game._bossRushRewardDay;   // v0.30.861 loops - once per LATER day: a clock set back cannot re-pay it
-  if ((typeof _brLast === 'number' && typeof today === 'number') ? today > _brLast : _brLast !== today) {
+  const _dayOpen = (typeof _brLast === 'number' && typeof today === 'number') ? today > _brLast : _brLast !== today;
+  const _cap = (typeof PRESTIGE_LEVEL === 'number') ? PRESTIGE_LEVEL : 100;
+  const _lvWas = player.level | 0, _expWas = player.exp || 0, _needWas = Math.max(1, player.expToNext || 1);
+  const gradeBonus = LX_RUSH_SHARD_GRADE[grade] || 0;
+  const worth = LX_RUSH_SHARD_FLOOR + br.downs * LX_RUSH_SHARD_PER_ECHO + gradeBonus;
+  const atCap = _lvWas >= _cap;
+  const expWorth = atCap ? 0 : Math.max(1, Math.floor(_needWas * LX_RUSH_EXP_FRAC));
+  let claimed = false;
+  if (br.downs > 0 && _dayOpen) {
     game._bossRushRewardDay = today;
-    const bonus = grade === 'S' ? 20 : grade === 'A' ? 12 : grade === 'B' ? 6 : 2;
-    const shards = br.downs * 2 + bonus;
-    player.setshards = (player.setshards || 0) + shards;
-    payoutTxt = '◈ ' + shards + ' Setshards claimed (daily reward).';
+    player.setshards = (player.setshards || 0) + worth;
+    if (expWorth > 0) { player.exp = _expWas + expWorth; try { _maybeLevelUp(); } catch (e) {} }
+    claimed = true;
   }
+  const _lvNow = player.level | 0, leveled = claimed && _lvNow > _lvWas;
+  const _wasPct = Math.max(0, Math.min(1, _expWas / _needWas));
+  const barWas = leveled ? 0 : _wasPct;
+  const barGain = leveled ? Math.max(0, Math.min(1, (player.exp || 0) / Math.max(1, player.expToNext || 1)))
+    : Math.max(0, Math.min(1 - _wasPct, expWorth / _needWas));
+  const _fmt = (sec) => { const t = Math.round(sec); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+  const _tm = Math.max(1, Math.ceil((86400000 - (((typeof _monoNow === 'function') ? _monoNow() : Date.now()) % 86400000)) / 60000));
+  const leftStr = (_tm >= 60 ? Math.floor(_tm / 60) + 'h ' : '') + (_tm % 60) + 'm';
   game.bossRush = br;   // keep inactive state for the results card
   if (window._brHudTimer) { clearInterval(window._brHudTimer); window._brHudTimer = null; }
   const hudEl = document.getElementById('boss-rush-hud'); if (hudEl) hudEl.remove();
   if (typeof saveState === 'function') saveState();
-  // Results card — lightweight DOM overlay, dismiss with the button.
-  let res = document.getElementById('boss-rush-results');
-  if (res) res.remove();
-  res = document.createElement('div');
-  res.id = 'boss-rush-results';
-  res.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:980;'
-    + 'background:rgba(12,5,28,0.96);border:2px solid #8a5df0;border-radius:14px;padding:22px 30px;'
-    + 'font:700 15px monospace;color:#efe6ff;text-align:center;box-shadow:0 0 40px rgba(120,70,255,0.45);';
-  res.innerHTML = '<div style="font-size:26px;margin-bottom:6px;">⚔ RUSH COMPLETE</div>'
-    + '<div style="font-size:52px;color:' + (grade === 'S' ? '#ffd966' : grade === 'A' ? '#9dffb0' : '#bdaaff') + ';margin:4px 0;">' + grade + '</div>'
-    + '<div>' + br.downs + ' echoes · ' + timeStr + (isBest ? ' · ★ NEW BEST' : '') + '</div>'
-    + '<div style="margin-top:8px;color:#cdb8ff;">' + payoutTxt + '</div>'
-    + '<button id="boss-rush-results-close" style="margin-top:14px;padding:7px 22px;border-radius:9px;'
-    + 'border:1px solid #8a5df0;background:#241047;color:#fff;font:700 14px monospace;cursor:pointer;">Walk away</button>';
-  document.body.appendChild(res);
-  const btn = document.getElementById('boss-rush-results-close');
-  if (btn) btn.onclick = () => { res.remove(); };
+  // Results card - a pop-punk DOM overlay inside the game box, dismissed with the button, Enter or Escape.
+  _bossRushShowResults({ grade, downs: br.downs, timeStr, avgStr: _fmt(avg), isBest, prev, prevStr: prev ? _fmt(prev.timeMs / 1000) : '',
+    claimed, noEcho: br.downs < 1, worth, gradeBonus, expWorth, atCap, leveled, lvWas: _lvWas, lvNow: _lvNow, barWas, barGain, leftStr });
   if (typeof showToast === 'function') showToast('🏆 Boss Rush complete — grade ' + grade + ' in ' + timeStr + '!', 'legendary');
   if (typeof flash === 'function') flash(0.5);
 }
