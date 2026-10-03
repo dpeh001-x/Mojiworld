@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1578';
+const GAME_VERSION = 'v0.30.1579';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -122900,6 +122900,163 @@ function devLog(msg) {
   if (el) el.textContent = '> ' + msg;
 }
 
+// v0.30.1579 - THE GEAR GENERATOR (per user: "in developer mode, create a function to generate equipments ingame (to show
+// categories and section into weapon armor and accessories)"). A dev-console section with one tab per ITEM_POOL
+// category - Weapons, Armor, Accessories - and the pool's own class categories (any class, warrior, rogue, mage,
+// archer) as filter chips and group headings, every piece a tile sorted by tier. A click makes the piece and puts it in
+// the bag, or on the hero with "Equip it". "Make as" chooses the exact catalog piece (what Guguma's gift and the shops
+// hand out) or a rolled drop (rollAffixedItem: prefixes and suffixes scaled to a level); rarity and stars are options.
+// Dev-only by construction: renderDev is reached only through openDevConsole (a developer surface plus LX_DEV or ?dev=1).
+// A made piece is never a pickup: no trackPickup, no co-op brag, and the console has already marked the save dev-touched.
+// devMakeGear / devGiveGear are callable from the browser console too, e.g. devGiveGear('Wooden Sword', { stars: 5 }).
+const _LX_DEV_GEAR = { cat: 'weapons', cls: 'all', mode: 'catalog', rarity: '', stars: 0, lvl: 60, equip: false };
+const _LX_DEV_GEAR_CATS = [['weapons', '⚔ Weapons'], ['armors', '🛡 Armor'], ['accessories', '💍 Accessories']];
+const _LX_DEV_GEAR_CLS = [['any', 'Any class'], ['warrior', '⚔ Warrior'], ['rogue', '🥷 Rogue'], ['mage', '🪄 Mage'], ['archer', '🏹 Archer']];
+const _LX_DEV_GEAR_RCOL = { common: '#c4c4c4', rare: '#6aa6ff', epic: '#c68aff', legendary: '#ffb866' };
+function _lxDevGearFind(name) {
+  for (const [c] of _LX_DEV_GEAR_CATS) { const b = (ITEM_POOL[c] || []).find((x) => x.name === name); if (b) return { base: b, cat: c }; }
+  return null;
+}
+// One piece from its catalog entry (a name or the entry itself). opts: mode 'catalog' | 'rolled', rarity ('' = the
+// catalog's), stars 0..MAX_STARS, lvl (the level a rolled drop's affixes scale to).
+function devMakeGear(base, opts) {
+  const o = Object.assign({}, _LX_DEV_GEAR, opts || {});
+  const f = _lxDevGearFind(typeof base === 'string' ? base : base && base.name);
+  if (!f) return null;
+  const slot = _catToSlot(f.cat), rarity = o.rarity || f.base.rarity;
+  const it = (o.mode === 'rolled')
+    ? rollAffixedItem({ ...f.base, slot }, rarity, Math.max(1, (o.lvl | 0) || 1))
+    : { ...f.base, baseName: f.base.name, slot, rarity };
+  it.stars = Math.max(0, Math.min(MAX_STARS, o.stars | 0));
+  return it;
+}
+function _lxDevGearRoom() {
+  const cap = (player.invCap && typeof player.invCap.equip === 'number') ? player.invCap.equip : 24;
+  let used = 0; for (const i of player.inventory || []) if (i && _itemTab(i) === 'equip') used++;
+  return { used, cap, free: Math.max(0, cap - used) };
+}
+// Make a piece and give it: into the bag, or onto the hero with opts.equip (the piece it replaces goes to the bag).
+// Honours the Equip tab's cap like every other grant. Returns { ok, item } or { ok: false, why: 'unknown' | 'full' }.
+function devGiveGear(base, opts) {
+  const o = Object.assign({}, _LX_DEV_GEAR, opts || {});
+  const it = devMakeGear(base, o);
+  if (!it) return { ok: false, why: 'unknown' };
+  if (!Array.isArray(player.inventory)) player.inventory = [];
+  const cur = o.equip ? player.equipped[it.slot] : null;
+  if ((!o.equip || cur) && !_lxDevGearRoom().free) return { ok: false, why: 'full' };
+  if (o.equip) {
+    if (cur) player.inventory.push(cur);
+    player.equipped[it.slot] = it;
+    invalidateEquipBonusCache();
+    if (player.hp > getMaxHp()) player.hp = getMaxHp(); if (player.mp > getMaxMp()) player.mp = getMaxMp();
+    if (typeof _refreshEqEmptyFlag === 'function') _refreshEqEmptyFlag();
+    if (typeof _checkSetComplete === 'function') _checkSetComplete();
+  } else player.inventory.push(it);
+  if (typeof saveState === 'function') saveState();
+  if (typeof updateUI === 'function') updateUI();
+  return { ok: true, item: it };
+}
+function _lxDevGearCss() {
+  if (document.getElementById('lx-dev-gear-css')) return;
+  const st = document.createElement('style'); st.id = 'lx-dev-gear-css';
+  st.textContent = [
+    '#dev-gear .dg-tabs { display:flex; gap:6px; margin-bottom:8px; }',
+    '#dev-gear .dg-tab { flex:1; padding:8px 10px; border-radius:6px; border:1px solid #6a5a3a; background:#2a2418; color:#e8dcc0; font:700 13px Inter, sans-serif; cursor:pointer; }',
+    '#dev-gear .dg-tab.on { background:#7a5a1e; border-color:#ffd27a; color:#fff; }',
+    '#dev-gear .dg-chips, #dev-gear .dg-opts { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; font-size:11px; color:#ccc; }',
+    '#dev-gear .dg-chip { padding:3px 10px; border-radius:12px; border:1px solid #555; background:#222; color:#ccc; font-size:11px; cursor:pointer; }',
+    '#dev-gear .dg-chip.on { background:#4a6a8a; border-color:#8ac; color:#fff; }',
+    '#dev-gear .dg-opts select, #dev-gear .dg-opts input[type=number] { padding:3px; background:#222; color:#fff; border:1px solid #555; border-radius:3px; font-size:11px; }',
+    '#dev-gear .dg-opts input[type=number] { width:52px; }',
+    '#dev-gear .dg-status { display:flex; align-items:center; gap:8px; font-size:11px; color:#bbb; margin-bottom:4px; }',
+    '#dev-gear .dg-group { margin:10px 0 4px; color:#ffd27a; font:700 11px Inter, sans-serif; letter-spacing:0.06em; text-transform:uppercase; }',
+    '#dev-gear .dg-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:6px; }',
+    '#dev-gear .dg-tile { position:relative; display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px 4px 5px; background:#1c1a24; border:1px solid #444; border-top:3px solid var(--rc); border-radius:6px; color:#eee; cursor:pointer; font-size:10px; line-height:1.15; text-align:center; }',
+    '#dev-gear .dg-tile:hover { background:#2a2636; border-color:var(--rc); }',
+    '#dev-gear .dg-name { font-weight:700; font-size:10.5px; min-height:2.3em; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }',
+    '#dev-gear .dg-meta { color:var(--rc); font-size:9.5px; }',
+    '#dev-gear .dg-set { position:absolute; top:3px; right:5px; font-size:9px; color:#ffd27a; font-weight:700; }',
+  ].join('\n');
+  document.head.appendChild(st);
+}
+function _lxDevGearSection(grid, btn, makeSection) {
+  const S = _LX_DEV_GEAR;
+  const sec = makeSection('🎒 Gear Generator · every weapon, armour and accessory in the game', '#ffd27a');
+  sec.id = 'dev-gear'; sec.style.gridColumn = '1 / -1';
+  _lxDevGearCss();
+  const body = document.createElement('div'); sec.appendChild(body);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const draw = () => {
+    body.innerHTML = '';
+    const pool = ITEM_POOL[S.cat] || [];
+    const tabs = el('div', 'dg-tabs');
+    for (const [c, label] of _LX_DEV_GEAR_CATS) {
+      const t = el('button', 'dg-tab' + (S.cat === c ? ' on' : ''), label + ' · ' + (ITEM_POOL[c] || []).length);
+      t.dataset.cat = c; t.onclick = () => { S.cat = c; draw(); }; tabs.appendChild(t);
+    }
+    body.appendChild(tabs);
+    const chips = el('div', 'dg-chips');
+    for (const [k, label] of [['all', 'All classes'], ..._LX_DEV_GEAR_CLS]) {
+      const n = k === 'all' ? pool.length : pool.filter((b) => (b.cls || 'any') === k).length;
+      const ch = el('button', 'dg-chip' + (S.cls === k ? ' on' : ''), label + ' ' + n);
+      ch.dataset.cls = k; ch.onclick = () => { S.cls = k; draw(); }; chips.appendChild(ch);
+    }
+    body.appendChild(chips);
+    const opts = el('div', 'dg-opts');
+    const sel = (key, pairs, title) => { const s = el('select'); s.title = title; s.dataset.opt = key;
+      for (const [v, t] of pairs) { const op = el('option', null, t); op.value = v; s.appendChild(op); }
+      s.value = String(S[key]); s.onchange = () => { S[key] = (key === 'stars') ? (+s.value | 0) : s.value; draw(); }; return s; };
+    opts.append('Make as ', sel('mode', [['catalog', 'Catalog piece (exact stats)'], ['rolled', 'Rolled drop (affixes)']], 'catalog = the shop / gift piece; rolled = a monster drop with prefixes and suffixes'));
+    opts.append(' Rarity ', sel('rarity', [['', 'as catalog'], ['common', 'Common'], ['rare', 'Rare'], ['epic', 'Epic'], ['legendary', 'Legendary']], 'rarity of the made piece'));
+    opts.append(' Stars ', sel('stars', Array.from({ length: MAX_STARS + 1 }, (_, i) => [String(i), '★' + i]), 'enhancement stars'));
+    if (S.mode === 'rolled') {
+      const lv = el('input'); lv.type = 'number'; lv.min = 1; lv.max = 99; lv.value = S.lvl; lv.title = 'the drop level its affixes scale to'; lv.dataset.opt = 'lvl';
+      lv.onchange = () => { S.lvl = Math.max(1, Math.min(99, +lv.value | 0)); };
+      opts.append(' Drop Lv ', lv);
+    }
+    const eqLab = el('label'); const eq = el('input'); eq.type = 'checkbox'; eq.checked = !!S.equip; eq.dataset.opt = 'equip';
+    eq.onchange = () => { S.equip = eq.checked; draw(); };
+    eqLab.append(eq, ' Equip it on the hero'); opts.append(' ', eqLab);
+    body.appendChild(opts);
+    const room = _lxDevGearRoom(), status = el('div', 'dg-status');
+    const shown = pool.filter((b) => S.cls === 'all' || (b.cls || 'any') === S.cls);
+    status.append(el('span', null, 'Bag ' + room.used + ' / ' + room.cap + ' · click a piece to ' + (S.equip ? 'equip it' : 'put it in the bag')));
+    if (!S.equip) status.appendChild(btn('＋ All ' + shown.length + ' shown', () => {
+      let made = 0; for (const b of shown) { if (!devGiveGear(b, S).ok) break; made++; }
+      devLog('Gear Generator: ' + made + ' of ' + shown.length + ' pieces into the bag' + (made < shown.length ? ' (the Equip tab is full)' : ''));
+      draw();
+    }, '#5a4a2a'));
+    body.appendChild(status);
+    for (const [k, label] of _LX_DEV_GEAR_CLS) {
+      if (S.cls !== 'all' && S.cls !== k) continue;
+      const list = pool.filter((b) => (b.cls || 'any') === k).sort((a, b) => ((a.tier | 0) - (b.tier | 0)) || a.name.localeCompare(b.name));
+      if (!list.length) continue;
+      body.appendChild(el('div', 'dg-group', label + ' · ' + list.length));
+      const g = el('div', 'dg-grid');
+      for (const b of list) {
+        const prev = devMakeGear(b, { mode: 'catalog', rarity: S.rarity, stars: S.stars });
+        const r = prev.rarity, tile = el('button', 'dg-tile');
+        tile.dataset.name = b.name; tile.style.setProperty('--rc', _LX_DEV_GEAR_RCOL[r] || '#888');
+        tile.innerHTML = itemIconHtml(prev, 40);
+        tile.appendChild(el('div', 'dg-name', b.name));
+        tile.appendChild(el('div', 'dg-meta', 'T' + (b.tier | 0) + ' · ' + r + (S.stars ? ' · ★' + S.stars : '')));
+        if (b.setId) tile.appendChild(el('span', 'dg-set', 'SET'));
+        try { tile.title = b.name + '\n' + String(itemStatString(prev, true) || '').replace(/<[^>]*>/g, ''); } catch (e) { tile.title = b.name; }
+        tile.onclick = () => {
+          const res = devGiveGear(b, S);
+          if (res.ok) devLog('Made ' + res.item.name + ' (' + res.item.slot + ', T' + (b.tier | 0) + ', ' + res.item.rarity + (res.item.stars ? ', ★' + res.item.stars : '') + ') ' + (S.equip ? 'and equipped it' : 'into the bag'));
+          else devLog(res.why === 'full' ? 'The Equip tab is full (' + _lxDevGearRoom().cap + ') - free a slot first' : 'Unknown piece: ' + b.name);
+          draw();
+        };
+        g.appendChild(tile);
+      }
+      body.appendChild(g);
+    }
+  };
+  draw();
+  grid.appendChild(sec);
+}
+
 function renderDev() {
   const grid = document.getElementById('dev-grid');
   const btn = (label, cb, color) => {
@@ -123031,6 +123188,9 @@ function renderDev() {
   // ~85 px — unreadable button stacks. Now class section is 100% wide.
   clsSec.style.gridColumn = '1 / -1';
   grid.appendChild(clsSec);
+
+  // ===== Gear Generator (v0.30.1579) - weapons, armour and accessories, by class =====
+  _lxDevGearSection(grid, btn, makeSection);
 
   // ===== Combat =====
   const combSec = makeSection('💥 Combat', '#ff6666');
