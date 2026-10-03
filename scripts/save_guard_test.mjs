@@ -115,6 +115,8 @@ const res = await page.evaluate(async () => {
     _coopApplyKill(Object.assign({ t: 'kill', id: 1, u, e: 0, c: 0, x: 700, y: 300, map: game.currentMap, tp: 'kingKrook', b: 1, bl: 50 }, extra || {}));
     return (player.setshards | 0) - before;
   };
+  // v0.30.1612 a guest kill now counts toward the early milestones (_lxCoopKillCredit); this Lv 50 test hero has never been checked, so settle them first or the first kill pays all of their Setshards at once
+  if (typeof _checkEarlyHooks === 'function') _checkEarlyHooks();
   const g1 = send(9001), g2 = send(9002), g3 = send(9002), g4 = send(9003, { bx: 1 }), g5 = send(9004, { il: 1 }), g6 = send(9005, { id: 7 }), g7 = send(9006, { map: 'town' });
   ok('guest: first boss kill pays level-squared', g1 === 2500, g1);
   ok('guest: second kill pays the 40% ladder step', g2 === 1000, g2);
