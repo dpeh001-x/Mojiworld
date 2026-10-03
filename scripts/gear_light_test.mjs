@@ -1,7 +1,7 @@
 // GEAR LIGHT (per user: "for some weapons and armors that have flames/ glows they can be animated, but I want you to strictly keep
 // the positions of the equipment throughout"). 51 pieces get a layer of light drawn right after the piece, in the same transform
 // and rect, built from the piece's own art. One page, every piece worn by the hero:
-//   [1] POSITIONS: for all 86 pieces the piece's own blit (source, dest rect, transform) is identical with the light on and off,
+//   [1] POSITIONS: for all 111 pieces the piece's own blit (source, dest rect, transform) is identical with the light on and off,
 //       every light blit uses exactly that rect and transform, and every Gear Align number is the one data/gear_calibration.js holds
 //   [2] CONTAINMENT: in every baked frame of every animated piece, the light's alpha never exceeds the drawn bake's own alpha
 //       (nothing lands outside the silhouette), and it is zero on the dark outline
@@ -104,7 +104,7 @@ try {
   }, CALIB).catch((e) => ({ err: String(e.message || e).slice(0, 300) }));
   if (R.err) throw new Error(R.err);
   ok(`[1] positions: all ${R.n} pieces blit identically with the light on and off, every light blit shares the piece's rect and transform, and every Gear Align number is the file's`,
-    R.n === 86 && R.pos.length === 0 && R.lightless.length === 0 && R.animated === 51, { animated: R.animated, moved: R.pos.slice(0, 5), noLight: R.lightless.slice(0, 8) });
+    R.n === 111 && R.pos.length === 0 && R.lightless.length === 0 && R.animated === 51, { animated: R.animated, moved: R.pos.slice(0, 5), noLight: R.lightless.slice(0, 8) });
   ok('[2] containment: in every frame the light is never more opaque than the drawn bake, and never on the dark outline', R.contain.length === 0, R.contain.slice(0, 6));
   ok('[3] it moves (two clock values differ) and repeats exactly (the same clock value, the same pixels), for all seven effects',
     !!R.moves && Object.keys(R.moves).length === 7 && Object.values(R.moves).every((m) => m && m.moved > 0.05 && m.repeat === 0), R.moves || 'no light in this build');

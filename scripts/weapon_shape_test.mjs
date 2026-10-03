@@ -78,7 +78,7 @@ try {
       out.ink.push({ n, plain: ow(pd, 256), drawn: ow(bd, 256) }); out.inside.push({ n, share: +(same / Math.max(1, n2)).toFixed(3) }); }
     if (typeof _lxThinInk === 'function') { window._lxThickInk = true; out.offSwitch = _lxThinInk(_lxBakedDownscale(eff('wooden_sword'), 256), 256) === null; window._lxThickInk = false; } else out.offSwitch = false;
     out.n = NAMES.length; return out; });
-  ok('[1] every weapon`s art is drawn square, at rest and mid-swing'.split('`').join("'"), R.n === 43 && !R.notSquare.length && !R.missing.length, { n: R.n, notSquare: R.notSquare.slice(0, 6), missing: R.missing.slice(0, 6) });
+  ok('[1] every weapon`s art is drawn square, at rest and mid-swing'.split('`').join("'"), R.n === 63 && !R.notSquare.length && !R.missing.length, { n: R.n, notSquare: R.notSquare.slice(0, 6), missing: R.missing.slice(0, 6) });
   ok('[2] each weapon keeps its reach and its angle (both diagonals, the handle direction)', !R.reach.length && !R.missing.length, R.reach.slice(0, 6));
   ok('[3] the grip stays in the hand', !R.grip.length && !R.missing.length, R.grip.slice(0, 6));
   ok('[4] only the weapon slot changes: a body armour draws exactly as before', R.armourSame === true, R.armourSame);
