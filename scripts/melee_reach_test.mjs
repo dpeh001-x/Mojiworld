@@ -19,6 +19,7 @@ const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const GOLDEN = { scorpion: 67, mummy: 81.5, nougatBear: 78, thornmaw: 76, elderbark: 75, forgewight: 75, smithgolem: 72,
   shardlich: 84, blightElder: 85, ossuaryTyrant: 105, tombKeeper: 104, echoKnight: 95, blockPopo: 57.5, blockHupo: 77.5,
   blockEle: 63, blockGary: 77.5, blockTigreal: 94, taiger: 91, willeo: 141,   // v0.30.1549: the reaches the mirror's copies of Kuro and the Taxi Uncle had
+  deranged_kuro: 91,   // v0.30.1591 distorted-roster: Kuro is back in the mirror, at the reach he had before v0.30.1549
   young_confused_barnaby: 115, fatDragon: 65, sundered_smith: 100, goblinMauler: 85, boneGolem: 95, graveReaver: 110,
   towerArbiter: 290, towerSovereign: 72.5, legosaurus: 68 };
 

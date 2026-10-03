@@ -1,4 +1,6 @@
-// THE DISTORTED MIRROR'S NEW COPIES (v0.30.1549). Per user: Hera, Lady Hong and Taiga as caricatures in Willeo's style replace
+// THE DISTORTED MIRROR'S NEW COPIES (v0.30.1549). v0.30.1591 distorted-roster (per user): Deranged Kuro is back - he and Young Vermillion
+// hold the Threshold; the Reflection holds the four captains' copies, Kuro and Vermillion; its Elder is Elder Arlen with his own art.
+// Per user: Hera, Lady Hong and Taiga as caricatures in Willeo's style replace
 // Future Lyra and the Potato Uncle, Taiger takes Deranged Kuro's place, all three in the mirror, "remove all instance of future
 // lyra and potato uncle", and "the black outline thickness consistent at 1.5px".
 //   static: the old three are gone from the game, the data tables and the files; the new three have stills, hitbox rows,
@@ -15,10 +17,10 @@ const sharp = require('sharp'); const { chromium } = require('playwright-core');
 const PORT = Number(process.argv[2] || process.env.PORT || 10431);
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  ' + JSON.stringify(x).slice(0, 400) : '')); };
 const rd = (p) => readFileSync(path.join(ROOT, p), 'utf8'); const game = rd('mojiworld_game.html');
-const OLD = ['deranged_kuro', 'future_lyra', 'potato_uncle'], NEW = ['taiger', 'harea', 'lady_honk'];
+const OLD = ['future_lyra', 'potato_uncle'], NEW = ['taiger', 'harea', 'lady_honk'];
 const DATA = ['data/monster_stats.js', 'data/mob_offsets.js', 'data/monster_hitboxes.js', 'data/anim_calib.js', 'data/anim_calib_manifest.js', 'data/sprite_bbox.js', 'data/sprite_edges.js', 'data/sprite_frame_index.js', 'data/assets_manifest.json', 'data/sfx_manifest.js', 'monster_animator.html'];
-const leftovers = []; for (const f of ['mojiworld_game.html', ...DATA]) { const t = rd(f); for (const o of [...OLD, 'Future Lyra', 'Potato Uncle', 'Deranged Kuro']) if (t.includes(o)) leftovers.push(f + ':' + o); }
-ok('the old three are named nowhere in the game, its data tables or the animator', !leftovers.length, leftovers);
+const leftovers = []; for (const f of ['mojiworld_game.html', ...DATA]) { const t = rd(f); for (const o of [...OLD, 'Future Lyra', 'Potato Uncle']) if (t.includes(o)) leftovers.push(f + ':' + o); }
+ok('the old two are named nowhere in the game, its data tables or the animator', !leftovers.length, leftovers);
 const files = []; for (const d of ['Sprites/monsters', 'Sprites/monsters/idle', 'Sprites/monsters/walk', 'Sprites/monsters/attack', 'Sprites/fx', 'Sprites/fx/anim', 'audio/monster']) for (const f of readdirSync(path.join(ROOT, d))) if (OLD.some((o) => f.includes(o))) files.push(d + '/' + f);
 ok('and none of their files are left (stills, frame sets, swing art, sounds)', !files.length, files.slice(0, 5));
 ok('the new three have stills and nine-frame idle, walk and attack sets (v0.30.1582)', NEW.every((k) => existsSync(path.join(ROOT, `Sprites/monsters/${k}.webp`)) && ['idle', 'walk', 'attack'].every((s) => existsSync(path.join(ROOT, `Sprites/monsters/${s}/${k}_8.webp`)))));
@@ -26,6 +28,10 @@ const hb = rd('data/monster_hitboxes.js'), mo = rd('data/mob_offsets.js');
 ok('each has a hitbox row and a size row (the animator and the draw read them)', NEW.every((k) => new RegExp(k + ':\\{w:\\d+,h:\\d+,mul:[0-9.]+\\}').test(hb) && new RegExp('"' + k + '": 0\\.[0-9]+,').test(mo)));
 ok('Taiger and Harea carry the old sounds; Lady Honk uses her family clip without a 404 probe',
   ['taiger', 'harea'].every((k) => ['hit', 'die'].every((s) => existsSync(path.join(ROOT, `audio/monster/mob_${k}_${s}.mp3`)))) && game.includes("_MONSTER_NO_CUSTOM_SFX.add('lady_honk');"));
+ok('Kuro is back with his still, three frame sets, swing art, sounds, hitbox and size rows', existsSync(path.join(ROOT, 'Sprites/monsters/deranged_kuro.webp')) &&
+  ['idle', 'walk', 'attack'].every((s) => existsSync(path.join(ROOT, `Sprites/monsters/${s}/deranged_kuro_0.webp`))) && existsSync(path.join(ROOT, 'Sprites/fx/swing_deranged_kuro.webp')) &&
+  ['hit', 'die'].every((s) => existsSync(path.join(ROOT, `audio/monster/mob_deranged_kuro_${s}.mp3`))) && /deranged_kuro:\{w:\d+,h:\d+,mul:[0-9.]+\}/.test(hb) && /"deranged_kuro": 0\.[0-9]+,/.test(mo));
+ok('the Elder is Arlen, drawn from his own still (no alias to Vermillion)', game.includes("  vigil_vermillion: { name:'Elder Arlen',") && !game.includes("  vigil_vermillion: 'young_bloodthirsty_vermillion',") && existsSync(path.join(ROOT, 'Sprites/monsters/vigil_vermillion.webp')) && game.includes('Elder Arlen walks the Reflection!'));
 ok('Taiger swings his own violet lightning slash (swing art + its frame set + its path)', existsSync(path.join(ROOT, 'Sprites/fx/swing_taiger.webp')) && existsSync(path.join(ROOT, 'Sprites/fx/anim/swing_taiger_8.webp')) && game.includes('  taiger: ["PATH",'));
 // the outline: the dark band at the silhouette edge, median width, scaled to the drawn size
 const def = (k) => { const m = game.match(new RegExp('^  ' + k + ': +\\{ name:\'([^\']+)\', +w:(\\d+), h:(\\d+)', 'm')); return m && { name: m[1], w: +m[2], h: +m[3] }; };
@@ -61,8 +67,10 @@ try {
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     try { player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; } catch (e) {}
     try { window._perfTick = () => {}; } catch (e) {} player.level = 45; player._god = true; game.paused = false;
-    const out = { maps: {}, draw: {}, old: ['deranged_kuro', 'future_lyra', 'potato_uncle'].filter((k) => monsterTypes[k]) };
+    const out = { maps: {}, draw: {}, old: ['future_lyra', 'potato_uncle'].filter((k) => monsterTypes[k]) };
     for (const id of ['distortedThreshold', 'fracturedReflection']) { loadMap(id); await sleep(2500); const c = {}; for (const m of game.monsters) c[m.type] = (c[m.type] || 0) + 1; out.maps[id] = c; }
+    { const e = spawnMonster(player.x + 300, player.y - 10, 'vigil_vermillion', false, true); out.elder = e ? e.name : null; if (e) { e.speed = 0; e.atk = 0; }
+      out.track = (typeof _lxQuestLocateLine === 'function') ? _lxQuestLocateLine('q_lyra_cut') : ''; }   // the Elder's name in the fight and in the tracker
     // each new type drawn: the still, at its box's size (m._visH = h * 1.5 * scale)
     for (const k of ['taiger', 'harea', 'lady_honk']) { const m = spawnMonster(player.x + 160, player.y - 10, k, false); if (m) { m.speed = 0; m.frozen = 99999; }   // beside the hero, so it is drawn
       const t0 = performance.now(); while (!(MONSTER_SPRITES[k] && MONSTER_SPRITES[k].naturalWidth) && performance.now() - t0 < 15000) await sleep(200); await sleep(600);
@@ -72,7 +80,9 @@ try {
   });
   console.log('rosters:', JSON.stringify(R.maps), ' draws:', JSON.stringify(R.draw));
   ok('the old types are gone from the running game', !R.old.length, R.old);
-  ok('the Threshold spawns Taiger and Harea; the Fractured Reflection spawns Harea, Lady Honk, Willeo and Taiger', R.maps.distortedThreshold.taiger > 0 && R.maps.distortedThreshold.harea > 0 && ['harea', 'lady_honk', 'willeo', 'taiger'].every((k) => R.maps.fracturedReflection[k] > 0), R.maps);
+  ok('the Threshold spawns only Kuro and Young Vermillion; the Fractured Reflection spawns the four captains\' copies, Kuro and Vermillion', Object.keys(R.maps.distortedThreshold).sort().join() === 'deranged_kuro,young_bloodthirsty_vermillion' &&
+    ['harea', 'lady_honk', 'willeo', 'taiger', 'deranged_kuro', 'young_bloodthirsty_vermillion'].every((k) => R.maps.fracturedReflection[k] > 0), R.maps);
+  ok('the Elder spawns as Elder Arlen (never Elder Elder) and the quest tracker names him', /(^|\s)Elder Arlen$/.test(R.elder || '') && !/Elder Elder/.test(R.elder) && R.track.includes('Elder Arlen'), { elder: R.elder, track: R.track });
   ok('each new monster draws its still by the game\'s size rule, the figure as tall as its box', Object.values(R.draw).every((d) => d.still && d.visH > 0 && Math.abs(d.visH - d.want) <= 1 && Math.abs(d.fig - d.h) <= 3), R.draw);
   ok('no request for a missing frame, still or sound of the new or old three', !bad.length, bad.slice(0, 5));
   ok('no page errors', errs.length === 0, errs.slice(0, 3));
