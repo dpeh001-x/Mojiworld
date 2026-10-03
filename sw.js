@@ -292,7 +292,9 @@
 // so a returning browser would keep drawing the old art for a session.
 // v0.30.1566 - v149 -> v150. Everdawn's town props (palette pass + the flower cart's second wheel) are REPLACED under their own names
 // so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v150';   // v0.30.1566 - Everdawn props (same names)
+// v0.30.1578 - v150 -> v151. Gravitos's form-1 and form-2 frames (115 files) are REPLACED under their own names (each sequence's
+// calibration baked into its frames, feet locked to the form's lines) so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v151';   // v0.30.1578 - Gravitos form lock (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

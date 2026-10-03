@@ -3,7 +3,8 @@
 //   ART  - nine 1656x1445 frames; zero edge pixels; >= 48px clear on every side;
 //          TORSO height (10th-90th percentile alpha-mass rows) within 6% of the median
 //          (the outstretched arm does not count); feet centre within 6% of centre;
-//          every ink bottom within 2px of one row
+//          every ink bottom within 2px of one row; BODY PARITY in the art: the torso within 4% of idle's
+//          (v0.30.1578 form lock - form 2 takes ONE calibration, s 1.04, so the punch's old s 1.181 is baked into its frames)
 //   GAME - BOSS_ATTACK_FRAMES.gravitos2punch decodes all nine; the punch pair
 //          picker walks forward through the window (indices non-decreasing)
 //   node scripts/gravitos2punch_art_test.mjs
@@ -25,11 +26,17 @@ async function measure(p) {
   return { w, h, edge, l, r, t, b, torsoH: p90 - p10 + 1, feetCx: fm ? fx / fm : (l + r) / 2, margin: Math.min(l, w - 1 - r, t) };
 }
 const F = []; for (let i = 0; i < 9; i++) F.push(await measure(`Sprites/bosses/attack/gravitos2punch_${i}.webp`));
+const I = []; for (let i = 0; i < 9; i++) I.push(await measure(`Sprites/bosses/idle/gravitos2_${i}.webp`));
 const med = F.map((m) => m.torsoH).sort((a, b) => a - b)[4];
 ok('nine frames at 1656x1445', F.every((m) => m.w === W && m.h === H), { dims: F.map((m) => m.w + 'x' + m.h)[0] });
 ok('NO CUTOFF: zero edge pixels and >= 48px clear on every side, every frame', F.every((m) => m.edge === 0 && m.margin >= MARGIN), { edge: F.map((m) => m.edge), minMargin: Math.min(...F.map((m) => m.margin)) });
 ok('NO PULSE: torso height within 6% of the median on every frame', F.every((m) => Math.abs(m.torsoH / med - 1) <= 0.06), { pct: F.map((m) => (100 * m.torsoH / med).toFixed(0) + '%') });
 ok('feet stay planted: feet centre within 6% of the canvas centre', F.every((m) => Math.abs(m.feetCx - W / 2) <= W * 0.06), { drift: F.map((m) => Math.round(m.feetCx - W / 2)) });
+// v0.30.1578 form lock: the frames were drawn 1.181x smaller than idle's body (idle core 137 vs punch core 116) and the
+// calibration scaled them back up; form 2 now has ONE calibration (s 1.04 for every set), so the frames carry 1.181 / 1.04 themselves
+// and idle's carry 1 / 1.04 (torso medians 634 -> 720, idle 732 -> 703).
+const imed = I.map((m) => m.torsoH).sort((a, b) => a - b)[4];
+ok('BODY PARITY IN THE ART: the punch torso is within 4% of the idle torso (median)', Math.abs(med / imed - 1) <= 0.04, { punch: med, idle: imed, ratio: +(med / imed).toFixed(3) });
 ok('one foot row: ink bottoms within 2px', Math.max(...F.map((m) => m.b)) - Math.min(...F.map((m) => m.b)) <= 2, { bottoms: F.map((m) => m.b) });
 
 const free = (p) => new Promise((r) => { const s = net.createServer(); s.once('error', () => r(false)); s.once('listening', () => s.close(() => r(true))); s.listen(p, '127.0.0.1'); });
@@ -84,7 +91,7 @@ const ib = g.idleBlit && g.idleBlit.h, pbs = (g.punchBlits || []).map((c) => c &
 const bgood = ib > 30 && pbs.every((h) => h > 30);
 console.log('drawn heights: idle ' + ib + '  punch across the window: ' + pbs.join(' / ') + '  ratio ' + (bgood ? (pbs[0] / ib).toFixed(3) : '?'));
 ok('DRAWN: the punch is one height across the whole window (no pulse, within 1.5%)', bgood && (Math.max(...pbs) - Math.min(...pbs)) / Math.max(...pbs) <= 0.015, { punch: pbs, errs: (g.punchBlits || []).filter((c) => c && c.err) });
-ok('DRAWN: punch height / idle height = 1.181 within 3% (body parity: idle core 137 vs punch core 116)', bgood && Math.abs(pbs[0] / ib / 1.181 - 1) <= 0.03, { idle: ib, punch: pbs[0], ratio: bgood ? +(pbs[0] / ib).toFixed(3) : null });
+ok('DRAWN: punch height / idle height = 1 within 1% (form 2 has one calibration; the body parity is in the frames)', bgood && Math.abs(pbs[0] / ib - 1) <= 0.01, { idle: ib, punch: pbs[0], ratio: bgood ? +(pbs[0] / ib).toFixed(3) : null });
 ok('DRAWN: the feet stay on one line across the window (bottoms within 3px)', bgood && Math.max(...pbot) - Math.min(...pbot) <= 3, { bottoms: pbot });
 ok('no page errors', errs.length === 0, { errs: errs.slice(0, 3) });
 await b.close(); srv.kill();
