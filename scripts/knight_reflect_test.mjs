@@ -16,7 +16,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SERVE = process.env.SERVE_ROOT || ROOT, PORT = process.env.PORT || '11694';
 const require = createRequire(path.join(ROOT, 'x.js')); const { chromium } = require('playwright-core');
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x ? '  [' + x + ']' : '')); };
-const G_ATK = 5, H_ATK = 12;
+const G_ATK = 10, H_ATK = 24;   // v0.30.1604: doubled with every ATK multiplier (5 / 12 before)
 // v0.30.1525 op-pass - a reflected blow is two hits on one step: the share (thorns) and the ATK retaliation (retaliate)
 const blows = (r) => { const by = new Map(); for (const [t, d, inv, sk] of r.refl) { const b = by.get(t) || { t, total: 0, ret: 0, inv }; b.total += d; if (sk === 'retaliate') b.ret += d; by.set(t, b); } return [...by.values()]; };
 // each retaliation over ATK x the armour share x what the boss's state added to that hit (crit streak, punish window - thorns get them too)

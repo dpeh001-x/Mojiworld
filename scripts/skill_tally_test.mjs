@@ -73,7 +73,7 @@ try {
     { const m = game.monsters.find((x) => x && x.currentHp > 0 && !x.isBoss && !x.boss);
       Object.assign(m, { maxHp: 1e9, currentHp: 1e9, burnDmg: 0, _hexStacks: 0, evasion: 0, traits: null, x: player.x + 80, y: player.y, speed: 0 });
       // the orb exactly as hexmaster_ult builds it (homing, no gravity, splash), started just short of the foe
-      game.projectiles.push({ x: m.x - 30, y: m.y + (m.h || 40) / 2 - 14, vx: 6, vy: 0, w: 28, h: 28, life: 120, damage: getAtk() * LX_PANDEMIC_ORB_MUL + 10,
+      game.projectiles.push({ x: m.x - 30, y: m.y + (m.h || 40) / 2 - 14, vx: 6, vy: 0, w: 28, h: 28, life: 120, damage: getAtk() * LX_PANDEMIC_ORB_MUL + 20,
         hexStacks: 1, owner: 'player', skill: 'hexorb', homing: m, aoeOnHit: LX_PANDEMIC_ORB_AOE, noGravity: true, _msHandled: true, superPoison: 1, color: '#aa33ff' });
       game.paused = false; for (let i = 0; i < 60 && !(m._hexStacks > 0); i++) await frames(1); game.paused = true;
       out.hex = { burn: m.burnDmg | 0, stacks: m._hexStacks | 0, want: Math.floor(getAtk() * LX_SUPER_POISON_MUL) }; }
@@ -117,7 +117,7 @@ try {
   ok('SIEGE: a staggered stream frees the other skills at once', !R.siege.channel && R.siege.lockLeft <= 0, JSON.stringify(R.siege));
   ok('GRAIL: 1.2 s into the ascend the 0.8 s guard is over (still floating)', R.grail.ascended > 0 && R.grail.invuln <= 0 && !R.grailErr, JSON.stringify(R.grail) + (R.grailErr || ''));
   ok('CRITS: Shadow Strike and the Grail\'s pillars land plain even when every crit roll succeeds', R.crits.ss > 0 && R.crits.ssCrit === 0 && R.crits.gr > 0 && R.crits.grCrit === 0, JSON.stringify(R.crits) + (R.ssErr || ''));
-  ok('CRITS: Voidrift Execution, Kage Rush and the clones pass no crit flag either (source)', /hitMonster\(target, Math\.floor\(getAtk\(\) \* 2\.6\), false, 'phantom_cut'\)/.test(src) && /_ag14\.hit\(m, Math\.floor\(getAtk\(\) \* LX_KAGE_DMG\), false, 'melee'\)/.test(src) && /_ag12\.hit\(m, dmg, false, 'shadow'\)/.test(src));
+  ok('CRITS: Voidrift Execution, Kage Rush and the clones pass no crit flag either (source)', /hitMonster\(target, Math\.floor\(getAtk\(\) \* 5\.2\), false, 'phantom_cut'\)/.test(src) && /_ag14\.hit\(m, Math\.floor\(getAtk\(\) \* LX_KAGE_DMG\), false, 'melee'\)/.test(src) && /_ag12\.hit\(m, dmg, false, 'shadow'\)/.test(src));
   ok('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 } catch (e) { ok('harness ran', false, String(e).slice(0, 200)); }
 console.log(`\n${pass} passed, ${fail} failed`);

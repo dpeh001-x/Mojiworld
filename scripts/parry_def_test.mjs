@@ -59,7 +59,7 @@ try {
     for (const [cls, lv] of [['warrior', 40], ['mage', 40], ['archer', 40], ['rogue', 40], ['warrior', 10], ['warrior', 60]]) {
       as(cls, lv); const m = dummy(1e7, 1e7); const gap = _lvGapDefAdd(m);
       const _af = _lxWeakAffinity(m, 'melee'), _am = _af === 'weak' ? LX_WEAK_MUL : _af === 'resist' ? LX_RESIST_MUL : 1;
-      const want = Math.floor(getDef() * _lxParryMul(lv)), atk = Math.max(1, Math.floor(Math.floor(getAtk() * 3.23) * _am));   // the rogue's 'melee' strike does take affinity
+      const want = Math.floor(getDef() * _lxParryMul(lv)), atk = Math.max(1, Math.floor(Math.floor(getAtk() * 6.46) * _am));   // the rogue's 'melee' strike does take affinity
       const got = parry(m);
       out.cls[cls + lv] = { def: getDef(), want, got, gap, tag: m._lastHitTag, atk };
     }

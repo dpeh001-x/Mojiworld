@@ -58,7 +58,7 @@ try {
       delete net.peers[77]; clear();
     } finally { window._coopActive = _ca; net.ws = _ws; }
     // VORTEX - a necromancer's pool and one slime in it, two drain ticks; then the same with a 50% lifesteal
-    const vortex = (ls) => { clear(); hero('warlock', 'necromancer'); player.mp = player.maxMp = 99999; player.mods.lifesteal = ls; player.invulnerable = 999999; player.baseAtk = 1000;   // a drain worth measuring, 7% of it well under max HP
+    const vortex = (ls) => { clear(); hero('warlock', 'necromancer'); player.mp = player.maxMp = 99999; player.mods.lifesteal = ls; player.invulnerable = 999999; player.baseAtk = 500;   // a drain worth measuring, 7% of it well under max HP (500: every ATK multiplier doubled in v0.30.1604)
       castSkill('necromancer_harvest'); const pool = game.hazards.find((h) => h && h.type === 'soul_vortex'); if (!pool) return { err: 'no pool' };
       const m = spawnMonster(player.x + 90, player.y - 10, 'slime', false); Object.assign(m, { maxHp: 1e9, currentHp: 1e9, atk: 0, speed: 0, evasion: 0, traits: null });
       player.hp = 1; const mh0 = m.currentHp; step(61); const r = { healed: player.hp - 1, dealt: mh0 - m.currentHp, maxHp: getMaxHp() }; player.mods.lifesteal = 0; clear(); return r; };

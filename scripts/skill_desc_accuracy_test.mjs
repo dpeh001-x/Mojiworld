@@ -49,7 +49,7 @@ try {
     // literals in the skill functions; hits tagged with a slot-x skill's own id are doubled by hitMonster (_isGSkill)
     out.gx2 = { phantom_cut: _isGSkill('phantom_cut'), archbishop_grail: _isGSkill('archbishop_grail') };
     claim('phantom_cut', `(${fmt(2 * lit('phantom_cut', /getAtk\(\) \* ([\d.]+)\), (?:crit|false), 'phantom_cut'/))}× ATK each)`);
-    claim('phantom_cut', `shadow nova (${fmt(lit('phantom_cut', /const dmg = Math\.floor\(getAtk\(\) \* ([\d.]+) \+ 6\)/))}× ATK`);
+    claim('phantom_cut', `shadow nova (${fmt(lit('phantom_cut', /const dmg = Math\.floor\(getAtk\(\) \* ([\d.]+) \+ 12\)/))}× ATK`);
     claim('archbishop_grail', `(${fmt(2 * lit('archbishop_grail', /const dmg = Math\.floor\(getAtk\(\) \* ([\d.]+)\);/))}× ATK each)`);
     { const c = lit('doombringer_ult', /performMelee\(440, ([\d.]+) \* _heatMul/), f = lit('doombringer_ult', /getAtk\(\) \* ([\d.]+) \* _heatMul \+/);
       claim('doombringer_ult', `a ${fmt(c)}× ATK melee cleave`); claim('doombringer_ult', `doom-fires (${fmt(f)}× ATK each)`);
@@ -60,7 +60,7 @@ try {
     { const [a, b] = lit2('elemental', /getAtk\(\) \* ([\d.]+) \* jumpMul \+ (\d+)/); claim('elemental', `(${fmt(a)}× ATK + ${b}, −8% per hop)`); }
     claim('archbishop_ult', `five holy pulses (${fmt(lit('archbishop_ult', /performAround\(\d+, ([\d.]+), \{ color: '#fff1a0'/))}× ATK`);
     claim('phantom_ult', `shards (${fmt(lit('phantom_ult', /damage: getAtk\(\) \* ([\d.]+) \+/))}× ATK each)`);
-    claim('nightreaper_ult', `shuriken (${fmt(lit('nightreaper_ult', /damage: getAtk\(\) \* ([\d.]+) \+ 5/))}× ATK each)`);
+    claim('nightreaper_ult', `shuriken (${fmt(lit('nightreaper_ult', /damage: getAtk\(\) \* ([\d.]+) \+ 10/))}× ATK each)`);
     claim('arcaneBurst', `(${fmt(lit('arcaneBurst', /performAround\(_abAoe, ([\d.]+),/))}× ATK, heavy knockback)`);
     claim('holyLight', `holy AoE (${fmt(lit('holyLight', /const _aoeDmg = Math\.max\(1, Math\.floor\(getAtk\(\) \* ([\d.]+)\)\)/))}× ATK`);
     claim('darkPulse', `(220px, ${fmt(lit('darkPulse', /performAround\(220, ([\d.]+),/))}× ATK)`);

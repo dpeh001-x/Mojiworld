@@ -106,7 +106,8 @@ try {
   // ring 1.16 (v0.30.768's -25% read 0.4125 / 2.025 / 0.9); v0.30.778 cut the spin to 2 ticks. Spin and landing share a
   // value, so classify by ORDER.
   // v0.30.x balance (per user: "make them not stand out too much against others"): every line -25%, 1.5 / 1.5 / 1.16 -> 1.1 / 1.1 / 0.87.
-  const SPIN = 1.1, LAND = 1.1, RING = 0.87;
+  // v0.30.1604 (per user: every ATK multiplier doubled): 1.1 / 1.1 / 0.87 -> 2.2 / 2.2 / 1.74.
+  const SPIN = 2.2, LAND = 2.2, RING = 1.74;
   const near = (v, x) => Math.abs(v - x) < 0.0005;
   const spin = R.lines.slice(0, 2), land = R.lines.slice(2, 3), ring = R.lines.slice(3);
   const stray = [...spin.filter((v) => !near(v, SPIN)), ...land.filter((v) => !near(v, LAND)), ...ring.filter((v) => !near(v, RING))];
@@ -118,12 +119,12 @@ try {
   ok('EVERY LINE LANDED: 2 somersault ticks (v0.30.778), 1 landing, 3+ ring pulses, nothing unaccounted for',
     spin.length === 2 && land.length === 1 && ring.length >= 3 && ring.length <= 4 && stray.length === 0,   // stray = a line off its slot's literal
     `somersault ${spin.length}, landing ${land.length}, rings ${ring.length}, unrecognised ${JSON.stringify(stray)}`);
-  ok('EACH LINE IS ITS LIVE LITERAL: somersault 1.1, landing 1.1, ring 0.87',
+  ok('EACH LINE IS ITS LIVE LITERAL: somersault 2.2, landing 2.2, ring 1.74',
     spin.every((v) => near(v, SPIN)) && land.every((v) => near(v, LAND)) && ring.every((v) => near(v, RING)) && spin.length && land.length && ring.length,
     `somersault ${spin[0]}, landing ${land[0]}, ring ${ring[0]}`);
   ok('THE CAST TOTAL IS THE SUM OF ITS LINES (nothing scales the cast on top)',
     oldTotal > 0 && Math.abs(total / oldTotal - 1) < 0.001,
-    `${total.toFixed(4)} ATK against ${oldTotal.toFixed(4)} for 2 x 1.1 + 1.1 + ${ring.length} x 0.87 (x${(total / oldTotal).toFixed(4)})`);
+    `${total.toFixed(4)} ATK against ${oldTotal.toFixed(4)} for 2 x 2.2 + 2.2 + ${ring.length} x 1.74 (x${(total / oldTotal).toFixed(4)})`);
   ok('CONTROL — performAround itself is untouched: x1.0 in, x1.0 out',
     R.control.length === 1 && near(R.control[0], 1.0),
     `direct performAround(200, 1.0) dealt ${JSON.stringify(R.control)} x ATK`);

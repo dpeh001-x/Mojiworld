@@ -75,11 +75,11 @@ const band = await page.evaluate(() => {
 });
 // v0.30.814 (075d3b43) — the user's Skill Editor patch took the band down
 // again: 5.0-9.5x (this change) -> 3.5-6x -> 2.0-4.5x, 0.5x per average stack.
-ok('the finale band comes down: 10.0-16.0x ATK -> 2.0-4.5x (v0.30.814)',
-  band.base === 2 && band.cap === 4.5,
+ok('the finale band comes down: 10.0-16.0x ATK -> 2.0-4.5x (v0.30.814), doubled to 4.0-9.0x with every ATK multiplier in v0.30.1604',
+  band.base === 4 && band.cap === 9,
   `base ${band.base}, per-stack ${band.per}, cap ${band.cap}`);
-ok('a fully cursed field erupts for 4.0x (v0.30.814)',
-  Math.min(band.cap, band.base + band.per * (band.at - 1)) === 4.0,
+ok('a fully cursed field erupts for 8.0x (4.0x in v0.30.814, doubled in v0.30.1604)',
+  Math.min(band.cap, band.base + band.per * (band.at - 1)) === 8.0,
   `${band.base} + ${band.per} x ${band.at - 1} stacks = ${Math.min(band.cap, band.base + band.per * (band.at - 1))}x`);
 ok('REGRESSION GUARD: the v0.30.330 rupture breaker is present',
   band.icd === 180, `LX_GRANDHEX_RUPTURE_ICD = ${band.icd} frames`);
@@ -122,8 +122,8 @@ ok('...at every curse depth, not just a full one',
 ok('CURSE DEPTH is what raises it — the thing the kit is actually about',
   shape.byDepth[4] > shape.byDepth[0] && [1, 2, 3, 4].every((d) => shape.byDepth[d] > shape.byDepth[d - 1]),
   Object.entries(shape.byDepth).map(([d, v]) => `${d} stacks ${v}x`).join('  '));
-ok('an uncursed field erupts for the 2.0x floor (v0.30.814), not 10.0x',
-  shape.byDepth[0] === 2.0, `${shape.byDepth[0]}x`);
+ok('an uncursed field erupts for the 4.0x floor (2.0x in v0.30.814, doubled in v0.30.1604), not 10.0x',
+  shape.byDepth[0] === 4.0, `${shape.byDepth[0]}x`);
 
 // ---- what it is worth: the same measurement the audit used ------------------
 const dps = await page.evaluate(async () => {
@@ -170,8 +170,8 @@ const dps = await page.evaluate(async () => {
   return { crowd };
 });
 // The pre-change reading on this same harness and this same build.
-ok('crowd DPS falls materially from the 37,804 measured before the change',
-  dps.crowd.dps < 34000, `${dps.crowd.dps.toLocaleString()} DPS on 8 pinned dummies (was 37,804)`);
+ok('crowd DPS falls materially from the 37,804 measured before the change (75,608 in the numbers doubled in v0.30.1604)',
+  dps.crowd.dps < 68000, `${dps.crowd.dps.toLocaleString()} DPS on 8 pinned dummies (was 37,804; 75,608 doubled)`);
 ok('the rupture cascade stays dead — the 23-per-frame runaway does not return',
   dps.crowd.ruptures < 40 && dps.crowd.maxStacks <= 4,
   `${dps.crowd.ruptures} rupture hits in 600 frames, stacks clamped at ${dps.crowd.maxStacks}`);

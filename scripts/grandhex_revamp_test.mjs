@@ -82,7 +82,7 @@ const r = await page.evaluate(() => {
   out.after3 = tgt._hexStacks | 0;
   out.dotAt3 = tgt.burnDmg | 0;
   // v0.30.778 (f5a5f960, the user's own Skill Editor numbers): LX_GRANDHEX_DOT_PER_STACK 0.22 -> 0.35 (0.30 at the revamp)
-  out.dotExpected3 = Math.floor(getAtk() * 0.35 * 3);
+  out.dotExpected3 = Math.floor(getAtk() * 0.7 * 3);   // v0.30.1604: 0.35 -> 0.7 with every ATK multiplier
   cast();                                // 4
   const hpBefore = tgt.currentHp;
   cast();                                // 5 -> rupture
@@ -135,7 +135,7 @@ check(r.outsideStacks === 0 && !r.outsideHurt, 'a foe OUTSIDE the ring is untouc
 check(r.packHexed === 20, 'no dice: all 20 in the ring are hexed (the old 75% roll passes this 0.3% of the time)', r.packHexed);
 check(r.dyingDied && r.nextStillHexed, 'a mid-cast kill no longer makes the next monster skip its hex', { died: r.dyingDied, nextHexed: r.nextStillHexed });
 check(r.after3 === 3, 'stacks accumulate across casts', r.after3);
-check(Math.abs(r.dotAt3 - r.dotExpected3) <= 1, 'the DOT scales with the pile (0.35x ATK per tick per stack)', { got: r.dotAt3, want: r.dotExpected3 });
+check(Math.abs(r.dotAt3 - r.dotExpected3) <= 1, 'the DOT scales with the pile (0.7x ATK per tick per stack)', { got: r.dotAt3, want: r.dotExpected3 });
 check(r.afterRupture === 0 && r.ruptureLabel, 'the 5th stack RUPTURES: stacks consumed and the hit is labelled', { stacks: r.afterRupture, label: r.ruptureLabel });
 check(r.ruptureBite, 'the rupture bites (5th cast dealt more than 3x ATK beyond the burst)', r.ruptureBite);
 check(r.heirStacks === 3 && r.heirDot, 'a hexed foe\'s stacks jump to its nearest neighbour on death', { stacks: r.heirStacks, dot: r.heirDot });

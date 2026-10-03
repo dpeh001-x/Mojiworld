@@ -86,10 +86,10 @@ try {
   check(r.weave.ultCut <= 200, 'Spellweaver never cuts a B ultimate', JSON.stringify(r.weave));
   check(Math.abs(r.wob.cd - r.wob.shown) <= 1500 && r.wob.shown <= 46000, 'War of Banners waits what the panel says (45 s, not the raw 60 s)', JSON.stringify(r.wob));
   check(Math.abs(r.bastion.cd - r.bastion.shown) <= 1500 && r.bastion.shown <= 46000, 'Bastion of Dawn waits what the panel says (45 s, not the raw 60 s)', JSON.stringify(r.bastion));
-  check(r.wobPress >= 1.5 && r.wobPress <= 3.5, 'War of Banners: one press is the retuned sweep + wave (2.3x ATK; was 10.9x)', r.wobPress + 'x ATK');
+  check(r.wobPress >= 3 && r.wobPress <= 7, 'War of Banners: one press is the retuned sweep + wave (4.6x ATK since v0.30.1604 doubled every ATK multiplier; 2.3x before; was 10.9x)', r.wobPress + 'x ATK');
   // v0.30.1204 (1fa6bbcd, per user: Doombringer 'brought back into the pack'): cleaves 1.44 -> 1.0, slam 2.16 -> 1.5 and
   // LX_DOOM_HEAT_DMG 0.01 -> 0.005, so one cast is ~9.7x ATK (was 14.6x after v0.30.1036, 20.3x before)
-  check(r.apoc >= 8 && r.apoc <= 12, 'Blade of Calamity: one cast is the retuned cleaves + slam (~9.7x ATK since v0.30.1204; 14.6x at v0.30.1036, was 20.3x)', r.apoc + 'x ATK');
+  check(r.apoc >= 16 && r.apoc <= 24, 'Blade of Calamity: one cast is the retuned cleaves + slam (~19.4x ATK since v0.30.1604 doubled every ATK multiplier; ~9.7x since v0.30.1204; 14.6x at v0.30.1036, was 20.3x)', r.apoc + 'x ATK');
   check(r.buffs && r.buffs.all >= 0.78 && r.buffs.all <= 0.82, 'War Cry + Bloodlust + Rampage together add +80% ATK, not +165%', JSON.stringify(r.buffs));
   check(!errs.length, 'no page errors', errs.slice(0, 3).join(' | '));
 } catch (e) {

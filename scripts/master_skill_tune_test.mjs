@@ -96,24 +96,24 @@ const src = await page.evaluate(async () => {
   const has = (x) => s.split(x).length - 1;
   return {
     // v0.30.x - the live literals (v0.30.785 / v0.30.814: the user's Skill Editor patches).
-    nrShard: has('damage: getAtk() * 1 + 5, owner: \'player\', skill: \'shard\', bspr: \'bult_nightreape'),
+    nrShard: has('damage: getAtk() * 2 + 10, owner: \'player\', skill: \'shard\', bspr: \'bult_nightreape'),
     nrShardOld: has('damage: getAtk() * 1.4 + 8'),
-    nrNova: has("performAround(380, 3.8, { color: '#ff2244'"),
-    nrDagger: has('getAtk() * 0.9 * (isCrit ? getCritDmg() : 1)'),
-    nrSnap: has('getAtk() * 1.24 + 25'),
-    drSlam: has("performAround(180, 16, { color:'#88ccff'"),   // v0.30.x balance (per user: "make them not stand out too much against others"): 340 -> 180 px   // v0.30.1050 (per user) - 8 -> 16
+    nrNova: has("performAround(380, 7.6, { color: '#ff2244'"),
+    nrDagger: has('getAtk() * 1.8 * (isCrit ? getCritDmg() : 1)'),
+    nrSnap: has('getAtk() * 2.48 + 50'),
+    drSlam: has("performAround(180, 32, { color:'#88ccff'"),   // v0.30.x balance (per user: "make them not stand out too much against others"): 340 -> 180 px   // v0.30.1050 (per user) - 8 -> 16
     drExtra: has('dragoon_skylance:  { extraHit: 2.34 }'),
-    baTurretUntouched: has('damage: Math.floor(getAtk() * 2.1) + 25,'),   // v0.30.814 - 0.9x + 6 -> 2.1x + 25
+    baTurretUntouched: has('damage: Math.floor(getAtk() * 4.2) + 50,'),   // v0.30.814 - 0.9x + 6 -> 2.1x + 25
   };
 });
-ok('Bloodmoon shuriken 1x + 5 (v0.30.785; v0.30.356 set 0.76x), and the 1.4x original is gone',
+ok('Bloodmoon shuriken 2x + 10 (v0.30.1604, doubled; 1x + 5 in v0.30.785; v0.30.356 set 0.76x), and the 1.4x original is gone',
   src.nrShard === 1 && src.nrShardOld === 0, JSON.stringify({ new: src.nrShard, old: src.nrShardOld }));
-ok('Bloodmoon nova 3.8x (v0.30.814; v0.30.356 set 2.2x)', src.nrNova === 1);
-ok('Eclipse dagger 0.9x (v0.30.814; v0.30.356 set 0.62x)', src.nrDagger === 1);
-ok('Eclipse snap 2.0x -> 1.24x ATK', src.nrSnap === 1);
-ok('Sky Lance slam 16x on 180 px (16x: v0.30.1050, per user; the circle: v0.30.x balance (per user: "make them not stand out too much against others"))', src.drSlam === 1);
+ok('Bloodmoon nova 7.6x (v0.30.1604, doubled; 3.8x in v0.30.814; v0.30.356 set 2.2x)', src.nrNova === 1);
+ok('Eclipse dagger 1.8x (v0.30.1604, doubled; 0.9x in v0.30.814; v0.30.356 set 0.62x)', src.nrDagger === 1);
+ok('Eclipse snap 2.0x -> 1.24x ATK, doubled to 2.48x in v0.30.1604', src.nrSnap === 1);
+ok('Sky Lance slam 32x on 180 px (32x: v0.30.1604, doubled; 16x: v0.30.1050, per user; the circle: v0.30.x balance (per user: "make them not stand out too much against others"))', src.drSlam === 1);
 ok('Sky Lance extra hit 1.5x -> 2.34x, scaled with the slam', src.drExtra === 1);
-ok('Ballista War Machine turret 2.1x + 25 (v0.30.814; v0.30.356 left it at 0.9x — it was never an anomaly)',
+ok('Ballista War Machine turret 4.2x + 50 (v0.30.1604, doubled; 2.1x + 25 in v0.30.814; v0.30.356 left it at 0.9x — it was never an anomaly)',
   src.baTurretUntouched === 1, 'the 346.6 xATK reading was the volley bleeding into its window');
 
 // ---- what actually lands ----------------------------------------------------
@@ -164,15 +164,15 @@ await boot();
 const mDrX = await measure('dragoon', 'warrior', 'knight', 'dragoon_skylance');
 
 // v0.30.x - v0.30.785 / v0.30.814 (the user's Skill Editor) raised the shuriken and the nova, so the v0.30.356 ~96 moved.
-ok('Bloodmoon Domain lands in its band (105-180 xATK; v0.30.356 aimed ~96)',
-  mNrB >= 105 && mNrB <= 180, `${mNrB} xATK/cast`);
+ok('Bloodmoon Domain lands in its band (210-360 xATK since v0.30.1604 doubled every ATK multiplier; 105-180 before; v0.30.356 aimed ~96)',
+  mNrB >= 210 && mNrB <= 360, `${mNrB} xATK/cast`);
 // v0.30.x - the bands follow the live numbers (v0.30.814 dagger 0.9x; v0.30.1050 slam 16x). v0.30.356 asked 100 / 80.
-ok('Eclipse Massacre lands in its band (100-160 xATK; v0.30.356 asked ~100)',
-  mNrX >= 100 && mNrX <= 160, `${mNrX} xATK/cast`);
-ok('Sky Lance lands in its band (65-125 xATK; v0.30.356 asked ~80)',
-  mDrX >= 65 && mDrX <= 125, `${mDrX} xATK/cast`);
-ok('Sky Lance per second of cooldown stays under 5 xATK/s (v0.30.356 aimed ~3.3)',
-  (mDrX / 25) < 5, `${(mDrX / 25).toFixed(2)} xATK/s`);
+ok('Eclipse Massacre lands in its band (200-320 xATK since v0.30.1604; 100-160 before; v0.30.356 asked ~100)',
+  mNrX >= 200 && mNrX <= 320, `${mNrX} xATK/cast`);
+ok('Sky Lance lands in its band (130-250 xATK since v0.30.1604; 65-125 before; v0.30.356 asked ~80)',
+  mDrX >= 130 && mDrX <= 250, `${mDrX} xATK/cast`);
+ok('Sky Lance per second of cooldown stays under 10 xATK/s (5 before v0.30.1604; v0.30.356 aimed ~3.3)',
+  (mDrX / 25) < 10, `${(mDrX / 25).toFixed(2)} xATK/s`);
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 
 await browser.close(); server.kill();

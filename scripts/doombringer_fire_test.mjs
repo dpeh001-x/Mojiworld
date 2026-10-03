@@ -107,8 +107,8 @@ const r = await page.evaluate(async () => {
 
 // v0.30.814 (the user's Skill Editor patch): each fire is ATK x 3 + 5 (was 4.6x + 24, then 3.7x + 24 at v0.30.330);
 // v0.30.778 set LX_DOOM_HEAT_DMG to 0.01, so 100 heat is x2 (was x1.7).
-const expectCold = Math.round(r.atk * 3 + 5);
-const expectHot = Math.round(r.atk * 3 * 1.5 + 5);   // v0.30.x balance (per user: "make them not stand out too much against others"): LX_DOOM_HEAT_DMG 0.01 -> 0.005
+const expectCold = Math.round(r.atk * 6 + 10);   // v0.30.1604: 3x + 5 -> 6x + 10 with every ATK multiplier
+const expectHot = Math.round(r.atk * 6 * 1.5 + 10);   // v0.30.x balance (per user: "make them not stand out too much against others"): LX_DOOM_HEAT_DMG 0.01 -> 0.005
 ok('the doom-fire sprite is registered, decoded and animated',
   r.art.registered && r.art.ready && /p_doom_fireball/.test(r.art.src)
   && r.art.animKey === 'p_doom_fireball' && r.art.inAnimSet, r.art);

@@ -27,8 +27,8 @@ const src = readFileSync(path.join(ROOT, FILE), 'utf8');
 // v0.30.772 (ec980644, every G and B skill budgeted against the basic attack) re-tuned both hazards to 1.2x;
 // balance pins follow the shipped literal (the user's design call), matched with its own comment so a
 // sibling 1.2x elsewhere cannot satisfy it.
-ok('Soul Vortex hazard ticks at 1.2x (v0.30.772; was 1.40x, 2.20x before v0.30.283)', src.includes('atk: getAtk() * 1.2,   // v0.30.284 nerf per user \u2014 was 2.20'), 'inline in the harvest cast');
-ok('Necrotic Ascendance drains at 1.2x (v0.30.772; was 2.0x, 3.0x before v0.30.283)', src.includes('atk: getAtk() * 1.2,   // v0.30.284 nerf per user \u2014 was 3.0'), 'inline in the ult cast');
+ok('Soul Vortex hazard ticks at 2.4x (v0.30.1604, doubled; 1.2x in v0.30.772; was 1.40x, 2.20x before v0.30.283)', src.includes('atk: getAtk() * 2.4,   // v0.30.284 nerf per user \u2014 was 2.20'), 'inline in the harvest cast');
+ok('Necrotic Ascendance drains at 2.4x (v0.30.1604, doubled; 1.2x in v0.30.772; was 2.0x, 3.0x before v0.30.283)', src.includes('atk: getAtk() * 2.4,   // v0.30.284 nerf per user \u2014 was 3.0'), 'inline in the ult cast');
 ok('Pandemic chains 0.35 / 0.25 (was 0.50 / 0.35)',
    src.includes('chain: { n: 4, frac: 0.35 }') && src.includes('chain: { n: 2, frac: 0.25 }'));
 
@@ -60,8 +60,8 @@ console.log(`  grandhex: rupture ${R.rupture} burst ${R.burst} splash ${R.splash
 console.log(`  summon: minion atk ${R.minionAtk} vs player atk ${R.playerAtk} = ${ratio.toFixed(2)}x`);
 // The user's own Skill Editor numbers since: splash 0.5 (v0.30.778 f5a5f960), burst 2.5 (v0.30.785 3c51eff1),
 // rupture 2 (v0.30.814 075d3b43). Was 3.5/1.0/0.40 at v0.30.283.
-ok('Grand Hex knobs: rupture 2, burst 2.5, splash 0.5 (Skill Editor, v0.30.778-814)',
-   R.rupture === 2 && R.burst === 2.5 && R.splash === 0.5,
+ok('Grand Hex knobs: rupture 4, burst 5, splash 0.5 (Skill Editor v0.30.778-814: 2 / 2.5; doubled in v0.30.1604; the splash is a share)',
+   R.rupture === 4 && R.burst === 5 && R.splash === 0.5,
    `${R.rupture}/${R.burst}/${R.splash} (v0.30.283: 3.5/1.0/0.40; pre-nerf: 5.5/1.5/0.55)`);
 // The floor(atk*0.55) plus the max(14, ...) floor for very low atk: assert the
 // ratio band rather than an exact integer (low-level player atk floors bite).

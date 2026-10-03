@@ -112,9 +112,9 @@ console.log(`  cooldown ${r.cd}ms, mp ${r.mp}`);
 
 check(r.daggerN >= 300, 'enough dagger hits sampled for the mean to be tight', r.daggerN);
 // Pre-nerf measured 1.486 xATK; the nerfed rain measures ~1.18.
-check(r.daggerMean < 1.30, 'the dagger rain is nerfed below its old per-hit damage', r.daggerMean);
+check(r.daggerMean < 2.60, 'the dagger rain is nerfed below its old per-hit damage (1.30x, 2.60x since every ATK multiplier doubled in v0.30.1604)', r.daggerMean);
 // ...but it is a trim, not a gutting. The user asked for "a little".
-check(r.daggerMean > 0.85, 'and NOT gutted — it is still a heavy per-hit multiplier', r.daggerMean);
+check(r.daggerMean > 1.70, 'and NOT gutted (0.85x before v0.30.1604) — it is still a heavy per-hit multiplier', r.daggerMean);
 // The snap is the payoff moment and was deliberately left alone.
 // Sample count varies with how many dummies survive to the snap (32-40 seen),
 // so the assertion is on the per-hit MEAN, which is the quantity left alone.

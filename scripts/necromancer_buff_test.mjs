@@ -118,8 +118,8 @@ ok('declared cd is the user-tuned 40 s (v0.30.174)',
    R.cds.necromancer_harvest === 40000, `necromancer=${R.cds.necromancer_harvest / 1000}s longestPeer=${maxXPeer / 1000}s`);
 ok('an early recast relocates the pool (one live pool)', R.poolsAfterRecast === 1, `${R.poolsAfterRecast} pool(s)`);
 // v0.30.284 nerf per user, v0.30.785 user patch: 1.2x
-ok('Soul Vortex drains at the user-tuned 1.2x ATK/sec',
-   Math.abs(R.ratio - 1.2) < 0.01, `measured ${R.ratio}x ATK/sec off the live hazard`);
+ok('Soul Vortex drains at 2.4x ATK/sec (the user-tuned 1.2x, doubled in v0.30.1604)',
+   Math.abs(R.ratio - 2.4) < 0.01, `measured ${R.ratio}x ATK/sec off the live hazard`);
 ok('tooltip states the rate the code actually applies',
    R.harvestDesc.includes(`${+R.ratio.toFixed(2)}×`), R.harvestDesc.slice(0, 100));
 ok('Necrotic Ascendance is not the longest ult in the mage set',

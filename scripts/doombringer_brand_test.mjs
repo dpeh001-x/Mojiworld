@@ -113,7 +113,7 @@ const r = await page.evaluate(async () => {
   out.waveDamage = wave ? Math.round(wave.damage) : null;
   // v0.30.117 replaced the blade-waves with seven homing doom-fires; v0.30.814 (the user's Skill Editor patch) set each
   // fire to ATK x 3 + 5, and v0.30.778 set LX_DOOM_HEAT_DMG to 0.01, so 100 heat doubles it.
-  out.waveExpected = Math.round(atk * 3 * 1.5 + 5);   // v0.30.x balance (per user: "make them not stand out too much against others"): full heat +100% -> +50%
+  out.waveExpected = Math.round(atk * 6 * 1.5 + 10);   // v0.30.1604: 3x + 5 -> 6x + 10 with every ATK multiplier   // v0.30.x balance (per user: "make them not stand out too much against others"): full heat +100% -> +50%
 
   // 5. table poison check: a fresh window with nothing banked must be 0.22
   player._msWin = null; player._doomWinBonus = null;

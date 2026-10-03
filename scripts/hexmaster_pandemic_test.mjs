@@ -175,8 +175,8 @@ ok('the eruption scales with hex stacks on the field',
 // impact to 1x ATK (the 1.7 this rework pinned had drifted to 1.8 by then).
 // Pin the shipped literals; the cap still has to hold.
 ok('...and is capped so a swarm cannot run away with it',
-   R.finale.has && R.finale.stacked <= 4.5001, `${R.finale.stacked}x vs cap 4.5x`);
-ok('orb impact damage is the v0.30.814 1x ATK', R.orbMul === 1, `LX_PANDEMIC_ORB_MUL ${R.orbMul}`);
+   R.finale.has && R.finale.stacked <= 9.0001, `${R.finale.stacked}x vs cap 9x (4.5x before v0.30.1604)`);
+ok('orb impact damage is 2x ATK (1x in v0.30.814; doubled in v0.30.1604)', R.orbMul === 2, `LX_PANDEMIC_ORB_MUL ${R.orbMul}`);
 
 let bad = 0;
 for (const r of res) { if (!r.pass) bad++; console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.n}${r.extra ? '   [' + r.extra + ']' : ''}`); }

@@ -66,10 +66,10 @@ ok('town portals match the Ctrl-editor bake exactly',
     { x: 2735, y: 480, dest: 'forest', name: '◀ Emerald Thicket' },
   ]), JSON.stringify(tables.portals));
 // v0.30.814 (075d3b43) - the user's Skill Editor patch retuned all four catastrophes (was 7.8 / 9.1 / 10.4 / 9.75, flat 78).
-ok('Apotheosis: 7.5 / 7 / 7.2 / 8, flat 38 / 38 / 48 / 159',
-  tables.apo && tables.apo.fire.mul === 7.5 && tables.apo.ice.mul === 7
-  && tables.apo.lightning.mul === 7.2 && tables.apo.void.mul === 8
-  && tables.apo.fire.flat === 38 && tables.apo.ice.flat === 38 && tables.apo.lightning.flat === 48 && tables.apo.void.flat === 159, JSON.stringify(tables.apo));
+ok('Apotheosis: 15 / 14 / 14.4 / 16, flat 76 / 76 / 96 / 318 (doubled in v0.30.1604)',
+  tables.apo && tables.apo.fire.mul === 15 && tables.apo.ice.mul === 14
+  && tables.apo.lightning.mul === 14.4 && tables.apo.void.mul === 16
+  && tables.apo.fire.flat === 76 && tables.apo.ice.flat === 76 && tables.apo.lightning.flat === 96 && tables.apo.void.flat === 318, JSON.stringify(tables.apo));
 // v0.30.351 (a8177142) - "seven boss DEF values set by hand off the audit": Krook DEF 375 -> 120. The ATK half stands.
 ok('Krook is deadlier: ATK 455 -> 590, DEF hand-set to 120',
   tables.krook.def === 120 && tables.krook.atk === 590, JSON.stringify(tables.krook));
@@ -185,9 +185,9 @@ const mage = await page.evaluate(async () => {
   return { sageMul, cascMul };
 });
 // v0.30.785 (3c51eff1) - the user's Skill Editor patch: Pyre Columns lane 3.9 -> 6.
-ok('Pyre Columns lane multiplier is 6', mage.sageMul === 6, `got ${mage.sageMul}${mage.err ? ' · ' + mage.err : ''}`);
+ok('Pyre Columns lane multiplier is 12 (doubled in v0.30.1604)', mage.sageMul === 12, `got ${mage.sageMul}${mage.err ? ' · ' + mage.err : ''}`);
 // v0.30.814 (075d3b43) - the user's Skill Editor patch: Prismatic Cascade pyre leg 2.9 -> 3.5.
-ok('Prismatic Cascade pyre leg is 3.5', mage.cascMul === 3.5, `got ${mage.cascMul}${mage.err ? ' · ' + mage.err : ''}`);
+ok('Prismatic Cascade pyre leg is 7 (doubled in v0.30.1604)', mage.cascMul === 7, `got ${mage.cascMul}${mage.err ? ' · ' + mage.err : ''}`);
 ok('no page errors', errs.length === 0, errs.slice(0, 3).join(' · '));
 
 await browser.close(); server.kill();

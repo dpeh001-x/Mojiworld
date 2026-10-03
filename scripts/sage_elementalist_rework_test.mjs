@@ -12,8 +12,8 @@ const src = readFileSync(GAME, 'utf8').replace(/\r\n/g, '\n');
 // ---- source ---------------------------------------------------------------
 // v0.30.345 (3c0de75b, "sage X +30%", per user) and v0.30.391 ("+25% burst", per user) retuned the
 // pyre multiplier 3.0 -> 3.9 -> 6; the 6 landed with v0.30.785 (3c51eff1, the user's Skill Editor patch).
-ok('Sage G is Pyre Columns: 16-frame telegraph, 110ms stagger, 95px lane at 6x',
-  src.includes("name:'Pyre Columns'") && src.includes('_sageDmgMul: 6, _fireColumn: true,') &&
+ok('Sage G is Pyre Columns: 16-frame telegraph, 110ms stagger, 95px lane at 12x (doubled in v0.30.1604)',
+  src.includes("name:'Pyre Columns'") && src.includes('_sageDmgMul: 12, _fireColumn: true,') &&
   src.includes('life: 16, maxLife: 16, fireAt: 16, cx: ox') && src.includes('}, i * 110);'), '');
 ok('pyre lanes launch foes skyward and erupt a pillar (no rock-fall)',
   src.includes('m.vy = h._fireColumn ? -9 : -4;') && src.includes("if (h._fireColumn) {\n        // v0.30.x - PYRE telegraph"), '');
