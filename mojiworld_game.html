@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1585';
+const GAME_VERSION = 'v0.30.1586';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -134824,7 +134824,7 @@ function _lxPropFrame(prop) {
 //                     number on every 25th floor, plus a rune circle round the summit portal.
 // Nothing here touches the sim; everything is skipped on the lowest effects tier.
 // =========================================================================
-const _LX_SP = { gate: {}, ice: {}, motes: null, err: null };
+const _LX_SP = { gate: {}, ice: {}, motes: null, err: null, lo: false };   // lo (v0.30.1586): low FX is on for this pass - skip the light, keep the architecture
 // the code-drawn art each map asks for (lazy-art2 loads a prop image only when its map wants it; _lxArt2MapKeys reads this)
 var _LX_SP_ART = { zodiacHall: ['zod_hanging_astrolabe', 'zod_crest_ascend', 'zod_crest_stair', 'zod_statue_aries', 'zod_statue_taurus', 'zod_statue_gemini', 'zod_statue_cancer', 'zod_statue_leo', 'zod_statue_virgo', 'zod_statue_libra', 'zod_statue_scorpio', 'zod_statue_sagittarius', 'zod_statue_capricorn', 'zod_statue_aquarius', 'zod_statue_pisces'] };
 function _lxSpScale() { try { return Math.max(1, Math.min(2, ctx.getTransform().a || 1)); } catch (e) { return 1; } }
@@ -134836,7 +134836,7 @@ function _lxGlowSprite(rgb) {   // one soft radial per colour, drawn scaled: no 
   g.addColorStop(0, 'rgba(' + rgb + ',1)'); g.addColorStop(0.45, 'rgba(' + rgb + ',0.35)'); g.addColorStop(1, 'rgba(' + rgb + ',0)'); x.fillStyle = g; x.fillRect(0, 0, 128, 128);
   return (_LX_GLOW[rgb] = c);
 }
-function _lxSpGlow(x, y, r, rgb, a) { const pa = ctx.globalAlpha; ctx.globalAlpha = pa * Math.max(0, Math.min(1, a)); ctx.drawImage(_lxGlowSprite(rgb), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = pa; }
+function _lxSpGlow(x, y, r, rgb, a) { if (_LX_SP.lo) return; const pa = ctx.globalAlpha; ctx.globalAlpha = pa * Math.max(0, Math.min(1, a)); ctx.drawImage(_lxGlowSprite(rgb), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = pa; }
 function _lxSpRGB(hex) { const h = (hex || '#ffffff').replace('#', ''), n = parseInt(h.length === 3 ? h.replace(/./g, '$&$&') : h, 16); return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255); }
 // ---- Zodiac Sanctum: a grand gate for every portal. Pillars, a gilded arch, braziers, the sign's glyph on the keystone, its
 // constellation in the dome above, a pillar of light, and a gold guardian statue of the sign (ludo.ai art) crowning the arch. ----
@@ -134948,9 +134948,9 @@ function _lxZodHubDraw(camX) {
     const gt = _lxZodGateFor(p); if (!gt) continue;
     const rgb = _lxSpRGB(gt.g.aura), hiRGB = _lxSpRGB(gt.g.hi), pulse = 0.85 + 0.15 * Math.sin(t * 0.035 + i * 1.3);
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.16 * pulse; ctx.drawImage(_lxBeamSprite(rgb), sx - 22, 0, 44, gy + 64);               // a pillar of the sign's light up into the dome
+    if (!_LX_SP.lo) { ctx.globalAlpha = 0.16 * pulse; ctx.drawImage(_lxBeamSprite(rgb), sx - 22, 0, 44, gy + 64); }               // a pillar of the sign's light up into the dome
     ctx.globalAlpha = 1;
-    if (gt.cons) { ctx.globalAlpha = 0.55 + 0.3 * Math.sin(t * 0.05 + i * 2.1); ctx.drawImage(gt.cons, sx - 75, 8, 150, 100); ctx.globalAlpha = 1; }   // its constellation, twinkling
+    if (gt.cons && !_LX_SP.lo) { ctx.globalAlpha = 0.55 + 0.3 * Math.sin(t * 0.05 + i * 2.1); ctx.drawImage(gt.cons, sx - 75, 8, 150, 100); ctx.globalAlpha = 1; }   // its constellation, twinkling
     _lxSpGlow(sx, 480 - GH * 0.5, 96, rgb, 0.2 * pulse);                                                    // the gate's light on the hall
     ctx.save(); ctx.translate(sx, 480); ctx.scale(1, 0.12); _lxSpGlow(0, 0, 80, rgb, 0.6 * pulse); ctx.restore();   // a pool of it on the floor
     ctx.globalCompositeOperation = 'source-over';
@@ -135112,12 +135112,16 @@ function _lxSetPieces() {
   const id = game.currentMap;
   if (id !== 'zodiacHall' && id !== 'frozenPeak' && id !== 'interdimensionalAscension') return;
   try {
-    if (typeof _perfLowFx === 'function' && _perfLowFx()) return;
+    // v0.30.1586 - low FX eases the LIGHT here (glows, light shafts, constellations, motes) and keeps the architecture. It used
+    // to return, so four slow frames while walking (one sprite decode is enough) blanked every Sanctum gate, its statue and
+    // the astrolabe - and the Frozen Peak / Ascension floor markers - for 6 s and more, then they flickered back (per user).
+    const lo = _LX_SP.lo = (typeof _perfLowFx === 'function' && _perfLowFx());
     const camX = game.camera.x, camY = (game.camera && game.camera.y) || 0;
-    if (id === 'zodiacHall') { _lxZodHubDraw(camX); _lxHallMotes(camY); }
+    if (id === 'zodiacHall') { _lxZodHubDraw(camX); if (!lo) _lxHallMotes(camY); }
     else if (id === 'frozenPeak') _lxFrozenDecor(camX, camY);
-    else { _lxAscendDecor(camX, camY); _lxAscendMotes(camY); }
+    else { _lxAscendDecor(camX, camY); if (!lo) _lxAscendMotes(camY); }
   } catch (e) { _LX_SP.err = e; /* a decorative pass must never break the frame (the last error is kept for a debugger) */ }
+  finally { _LX_SP.lo = false; }
 }
 // bland-maps 4 (per user: "Work on further polishes") - a prop that IS a light glows on the hunting maps. Lanterns, glowing
 // mushrooms and blooms, lava and void crystals, glyph stones and the lightning rod's sparks only lit the air where a placement
