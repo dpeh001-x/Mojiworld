@@ -83,6 +83,7 @@ try {
   await pair('town', 'forest');
   await pair('forest', 'town');
   await pair('zodiacHall', 'interdimensionalAscension');
+  await pair('boss_rush', 'interdimensionalAscension');   // v0.30.1602 - leaving the Hall of Echoes lands beside the Hall's door in the Ascension (was: The Void)
   check(errs.length === 0, 'no page errors', errs.slice(0, 3));
   await ctx.close();
 } finally { await browser.close().catch(() => {}); srv.kill(); }
