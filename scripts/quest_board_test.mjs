@@ -72,7 +72,7 @@ try {
       // its own ~1%-a-stage taper) and so is the Lv 1 opener, whose whole rung costs one point of EXP.
       if (!q.scalesToPlayer && qL > 1) {
         const share = paid / _lxLevelCost(qL);
-        if (share > 0.61) out.offBand.push(id + '@Lv' + qL + '=' + share.toFixed(3));
+        if (share > Math.max(0.61, (q.capShare > 0 ? q.capShare : 0) + 0.005, qL <= 10 ? 0.755 : 0)) out.offBand.push(id + '@Lv' + qL + '=' + share.toFixed(3));   // v0.30.1615: three fifths, except up to Lv 10 where the early ceiling is 75% (per user) and a quest that carries its own (capShare)
         // a class line is four copies of one quest; one player does one of them
         if (!/^q_(rogue|archer|mage)_lv[0-9]+$/.test(id)) {
           const bd = Math.min(9, Math.floor((qL - 1) / 10));
@@ -95,7 +95,7 @@ try {
   check(r.badPotion.length === 0, 'every potion reward names a potion that exists', J(r.badPotion.slice(0, 5)));
   check(r.overCeiling.length === 0, 'no quest pays more than 80% of its own level', J(r.overCeiling.slice(0, 5)));
   check(r.paysNothing.length === 0, 'no quest with an EXP reward pays zero', J(r.paysNothing.slice(0, 5)));
-  check(r.offBand.length === 0, 'no quest pays more than three fifths of a level', r.offBand.length + ' off: ' + J(r.offBand.slice(0, 6)));
+  check(r.offBand.length === 0, 'no quest pays more than three fifths of a level (three quarters up to Lv 10, or its own capShare)', r.offBand.length + ' off: ' + J(r.offBand.slice(0, 6)));
   {
     // Lv 1-10 is out: the whole chapter costs 2,531 kills, less than one Lv 20 level, and the
     // 0.60 cap clips its quests - a "40% of the band" reading there means nothing.

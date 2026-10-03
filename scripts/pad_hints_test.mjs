@@ -103,7 +103,8 @@ try {
     player.level = 3; await wait(2500); toasts.length = 0;   // the tour's close queues its own Act I pointer 1.4 s out
     player.quests.active.q_act1_waking.readyToHandIn = true;
     _completeQuest('q_act1_waking'); await wait(3200);
-    const chap = (list) => list.filter((t) => /Quest complete|Quest started|STORY|hand it in|Next|opens at Lv|new story quests/.test(t));
+    const roadNames = Object.keys(QUESTS).filter((k) => /^q_road_/.test(k)).map((k) => QUESTS[k].name);   // v0.30.1615: the road to the four opens at Lv 4 beside the chapter and announces itself - a different quest
+    const chap = (list) => list.filter((t) => /Quest complete|Quest started|STORY|hand it in|Next|opens at Lv|new story quests/.test(t) && !roadNames.some((n) => t.indexOf(n) >= 0));
     out.turnIn = chap(toasts); out.sleepers = !!player.quests.active.q_act1_sleepers; out.fresh = !!((player.quests.fresh || {}).q_act1_sleepers);
     // a chapter the player is not levelled for: still one toast, and the level-up that opens it later still announces it
     for (const q of ['q_act1_sleepers', 'q_act1_quiet']) { delete player.quests.active[q]; player.quests.completed[q] = Date.now(); }
