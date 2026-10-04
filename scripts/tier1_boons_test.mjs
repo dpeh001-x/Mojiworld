@@ -139,7 +139,7 @@ check('no uniform POWERUPS draws remain', !/Math\.random\(\) \* POWERUPS\.length
 const w = src.match(/BOON_TIER_WEIGHT = \{ common: (\d+), rare: (\d+), epic: (\d+) \}/);
 check('weights exist and are ordered common > rare > epic',
   !!w && Number(w[1]) > Number(w[2]) && Number(w[2]) > Number(w[3]));
-check('Bravo bag draws weighted', /_weightedBoonPick\(_bag\)/.test(src));
+check('Bravo bag draws weighted', /_weightedBoonPick\(_bag(, _expRand)?\)/.test(src));   // systems-5: Bravo's offer is dealt through the run's seeded stream
 check('Sage gacha draws weighted', /_weightedBoonPick\(POWERUPS\);\s*\/\/[^\n]*Sage/.test(src));
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} — ${pass}/${pass + fail} checks\n`);

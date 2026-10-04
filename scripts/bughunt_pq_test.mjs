@@ -100,6 +100,20 @@ try {
 
   ok('Carriage: a First-Class stowaway keeps 1.8x HP and 1.45x ATK through the party re-stat, without compounding', car.fc.fcHp === Math.floor(car.fc.plainHp * 1.8) && car.fc.fcAtk === Math.floor(car.fc.plainAtk * 1.45) && car.fc.thrice[0] === car.fc.fcHp && car.fc.thrice[1] === car.fc.fcAtk && car.fc.hpFrac === 1, car.fc);
 
+  // ---- diff-c-7: thorns skip Group Booking on the host (like the boss ward), so a guest must not predict them down to 1 ----
+  const dc7 = await ev(S, () => {
+    const out = {}, f0 = window._coopFollowingHost, s0 = window._coopSendDamage;
+    const R = Math.random; Math.random = () => 0.5; let m; try { m = spawnMonster(300, 200, 'ticketMech'); } finally { Math.random = R; }
+    try {
+      window._coopFollowingHost = () => true; window._coopSendDamage = () => {};
+      m.uid = 424242; m.def = 0; m._pqBooked = 1; m.maxHp = 1e9; m.currentHp = 1e9; m.invulnerable = 0; m.isBoss = false; m.isMiniBoss = false;
+      const drop = (skill) => { m.currentHp = 1e9; hitMonster(m, 5000, false, skill); return 1e9 - m.currentHp; };
+      out.plain = drop('slash'); out.thorns = drop('thorns');
+    } finally { window._coopFollowingHost = f0; window._coopSendDamage = s0; }
+    return out;
+  });
+  ok('diff-c-7: a guest predicts a booked mech taking 1 from a normal hit, but a thorns hit in full (the host exempts thorns from the booking)', dc7.plain === 1 && dc7.thorns > 100, dc7);
+
   // ---- coop-8 / coop-10 on the Carriage (a PQ map) ----
   const key = await ev(S, () => {
     const out = {}, net0 = { c: net.connected, p: net.peers, x: game.expedition, id: net.myId };
