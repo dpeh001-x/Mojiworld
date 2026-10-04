@@ -68,6 +68,8 @@ try {
     quest: async () => { await press('q'); await page.waitForTimeout(400); await page.keyboard.press('Escape'); },
     codex: async () => { await press('y'); await page.waitForTimeout(400); await page.keyboard.press('Escape'); },
     combo: async () => { await page.evaluate(() => { try { const m = (game.monsters || [])[0]; if (m) { player.x = m.x - 36; player.y = m.y; } } catch (e) {} }); await press('z', 10, 170); },
+    block: async () => press('a'),   // v0.30.1630 the Block & Parry card
+    tab_lp: () => tab('lp'),   // v0.30.1630 the Level Up card has waited on its tab since v0.30.1567; this table had no action for it
     tab_items: () => tab('items'), tab_boons: () => tab('boons'), tab_skills: () => tab('skills'), tab_mojimon: () => tab('mojimon'),
   };
 

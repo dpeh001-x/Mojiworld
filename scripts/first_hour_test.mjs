@@ -69,7 +69,7 @@ try {
   // 700 ms hold without a frame, so hold again (still the real key) until the step ticks.
   const moveTick = async () => { for (let j = 0; j < 6; j++) { await key('ArrowRight', 700); const s = await st(); if (s.step !== 0 || /\d+s?$/.test(s.next || '')) break; } };
   const ACT = [['move', moveTick], ['attack', () => key('z')], ['panel', () => key('u')], ['tab_items', () => tab('items')],
-    ['potion', async () => { await esc(); await key('PageUp'); }], ['combo', hitSnail], ['tab_lp (fresh)', () => tab('lp')], ['tab_items (already met)', null],
+    ['potion', async () => { await esc(); await key('PageUp'); }], ['combo', hitSnail], ['block (fresh)', () => key('a')], ['tab_lp (fresh)', () => tab('lp')], ['tab_items (already met)', null],
     ['tab_boons', () => tab('boons')], ['worldmap', async () => { await esc(); await key('w'); }], ['quest', async () => { await esc(); await key('q'); }],
     ['tab_mojimon', async () => { await esc(); await tab('mojimon'); }], ['codex (Y)', async () => { await esc(); await key('y'); }], ['tab_skills (last)', async () => { await esc(); await tab('skills'); }]];
   const rows = [];
@@ -88,7 +88,7 @@ try {
     await page.waitForTimeout(150);
   }
   const moved = rows.filter((r) => r.moved).length;
-  check(moved === ACT.length, 'every one of the 14 tour steps ticks from the real key / tab and moves on by itself', moved + '/' + ACT.length + ' ' + J(rows.filter((r) => !r.moved)));
+  check(moved === ACT.length, 'every one of the 15 tour steps ticks from the real key / tab and moves on by itself', moved + '/' + ACT.length + ' ' + J(rows.filter((r) => !r.moved)));
   const met = rows.filter((r) => /already met/.test(r.tag));
   // both must move on by themselves; the countdown label is sampled every 100 ms, which a loaded machine can miss on one
   check(met.length === 1 && met.every((r) => r.moved) && met.some((r) => /\d$/.test(r.count || '')), 'a step the player already met counts down on Next and moves on by itself', J(met));

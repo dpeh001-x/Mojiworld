@@ -77,7 +77,7 @@ async function suite(p, tag, touch) {
       titles.push({ i, sw: st.scrollWidth, cw: st.clientWidth, sh: st.scrollHeight, ch: st.clientHeight, h: Math.round(rs.h), onName: !!(nm && __vis(nm) && __hit(rs, __R(nm))), onLine: !!(ln && __vis(ln) && __hit(rs, __R(ln))) });
     }
     const clipped = titles.filter((x) => x.sw > x.cw + 1 || x.sh > x.ch + 1 || x.h > 30 || x.onName || x.onLine);
-    _tutStep = 6; _renderTutorialStep(); await __settle(200);
+    _tutStep = TUTORIAL_STEPS.findIndex((s) => /Level Up/.test(s.title)); _renderTutorialStep(); await __settle(200);   // v0.30.1630 by title
     const out = { clipped, lvTitle: document.getElementById('tut-step-title').textContent };
     const parts = () => [document.querySelector('#tutorial-modal .modal'), document.getElementById('tut-nav-row'), document.getElementById('tut-collapse'), document.getElementById('tut-try'),
       document.getElementById('tut-step-title'), document.querySelector('#tutorial-modal .guguma-sprite'), ...document.querySelectorAll('#tutorial-modal .modal kbd')].filter(Boolean);
@@ -101,16 +101,17 @@ async function suite(p, tag, touch) {
     const cd = await p.evaluate(async () => {
       __close(); for (const k in _TUT_SEEN_TAGS) delete _TUT_SEEN_TAGS[k];
       startTutorial(); await __settle(400); const modal = document.getElementById('tutorial-modal');
-      _tutStep = 6; _renderTutorialStep(); await __settle(200);
-      openLevelUpPanel(); const t0 = performance.now(); while (!(modal.classList.contains('tut-ghost') && TUTORIAL_STEPS[6]._done) && performance.now() - t0 < 4000) await __settle(60);
-      const ticked = !!TUTORIAL_STEPS[6]._done; await __settle(17000);
+      const __LV = TUTORIAL_STEPS.findIndex((s) => /Level Up/.test(s.title));   // v0.30.1630 by title (Block & Parry took index 6)
+      _tutStep = __LV; _renderTutorialStep(); await __settle(200);
+      openLevelUpPanel(); const t0 = performance.now(); while (!(modal.classList.contains('tut-ghost') && TUTORIAL_STEPS[__LV]._done) && performance.now() - t0 < 4000) await __settle(60);
+      const ticked = !!TUTORIAL_STEPS[__LV]._done; await __settle(17000);
       const stepHidden = _tutStep;
       __close(); const t1 = performance.now(); while (modal.classList.contains('tut-ghost') && performance.now() - t1 < 4000) await __settle(60); await __settle(900);
-      const r = { ticked, stepHidden, stepBack: _tutStep, next: (document.getElementById('tut-next') || {}).textContent };
+      const r = { ticked, lv: __LV, stepHidden, stepBack: _tutStep, next: (document.getElementById('tut-next') || {}).textContent };
       try { clearInterval(window._tutAdvCountdown); modal.style.display = 'none'; modal.classList.remove('tut-dock', 'tut-ghost'); _stopTutGhostWatch(); } catch (e) {}
       return r;
     });
-    check(cd.ticked && cd.stepHidden === 6 && cd.stepBack === 6 && /\d+\s*s\b/.test(cd.next || ''), `${tag}: a step ticked under the U panel waits there (17 s) and counts down once the card is back`, cd);
+    check(cd.ticked && cd.stepHidden === cd.lv && cd.stepBack === cd.lv && /\d+\s*s\b/.test(cd.next || ''), `${tag}: a step ticked under the U panel waits there (17 s) and counts down once the card is back`, cd);
   }
   // ---- 3) the close hints and the chat bar ----
   const hints = await p.evaluate(async () => {

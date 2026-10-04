@@ -60,7 +60,7 @@ try {
   ok('the Guguma line, visible without opening Details, says stat points go there too', /stat points/.test(r.def.line) && /here/.test(r.def.line), r.def.line);
   ok('the body stays inside the tour limit of 60 words (it was 69 in v0.30.1567, which text_tightness_test caught on main): ' + r.def.bodyWords, r.def.bodyWords <= 60, r.def.bodyWords);
   ok('the card tells the player stat points are added on that tab', /Level Up<\/b> tab is where you <b>add stat points<\/b>/.test(r.def.body) && /spend a Skill Point/.test(r.def.body), r.def.body.slice(0, 160));
-  ok('the other steps keep their gates (Menus: panel, Inventory: tab_items), 14 steps in all', r.def.menusDetect === 'panel' && r.def.invDetect === 'tab_items' && r.def.n === 14, { menus: r.def.menusDetect, inv: r.def.invDetect, n: r.def.n });
+  ok('the other steps keep their gates (Menus: panel, Inventory: tab_items), 15 steps in all (v0.30.1630: Block & Parry)', r.def.menusDetect === 'panel' && r.def.invDetect === 'tab_items' && r.def.n === 15, { menus: r.def.menusDetect, inv: r.def.invDetect, n: r.def.n });
   ok('the first U press recorded the Level Up tag (the trap: a plain gate would arrive ticked)', r.recorded === true, r.recorded);
   ok('so the step arrives NOT ticked: no check, no "Already done", the ask is on screen', r.arrive.done === false && r.arrive.pre === false && r.arrive.pill === false && r.arrive.already === false && r.arrive.ask === true, r.arrive);
   ok('opening U on another tab does not tick it', r.openItems.done === false, r.openItems);

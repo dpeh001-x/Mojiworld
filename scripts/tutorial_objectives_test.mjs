@@ -136,7 +136,7 @@ ok('...without ripping past the step the player has not read', early.stepStayed 
 
 // ── every step's detect tag has a real ping source ─────────────────────────
 const tags = await page.evaluate(() => TUTORIAL_STEPS.map(s => s.detect).filter(Boolean));
-ok('every tutorial step carries an objective tag', tags.length === 14, tags.length + ' tagged steps');
+ok('every tutorial step carries an objective tag', tags.length === 15, tags.length + ' tagged steps');   // v0.30.1630 Block & Parry joined
 
 let pass = 0, failed = 0;
 for (const r of res) { if (r.pass) { pass++; console.log(`  PASS  ${r.n}` + (r.extra ? `  (${r.extra})` : '')); }

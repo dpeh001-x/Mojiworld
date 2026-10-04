@@ -30,7 +30,7 @@ await page.evaluate(async () => {
   if (typeof _wireTutorialButtons === 'function') _wireTutorialButtons();
   startTutorial();
   await new Promise(r => setTimeout(r, 600));
-  _tutStep = 9; _renderTutorialStep();   // the step in the report (10/14)
+  _tutStep = TUTORIAL_STEPS.findIndex((st) => /World Map/.test(st.title)); _renderTutorialStep();   // the step in the report (10/14 then; found by title since v0.30.1630 added Block & Parry)
 });
 await page.waitForTimeout(500);
 
