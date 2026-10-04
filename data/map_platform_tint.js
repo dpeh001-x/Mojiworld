@@ -29,7 +29,7 @@ window.LX_MAP_PLATFORM_TINT = {
   "cadetsStrand": { "top": "#cdb9a4", "body": "#8a7258" },
   "candyCanyon": { "top": "#ed8896", "body": "#50293c" },
   "celestialSpire": { "top": "#60696d", "body": "#231f2f" },
-  "cinnabarCaves": { "top": "#ce4b5a", "body": "#4b2844" },
+  "cinnabarCaves": { "top": "#c9a676", "body": "#495e40" },
   "clockworkExpress": { "top": "#8a4c37", "body": "#31161d" },
   "clockworkSpire": { "top": "#31444c", "body": "#141324" },
   "clockworkUnderpassLobby": { "top": "#6c5140", "body": "#271720" },

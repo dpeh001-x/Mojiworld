@@ -298,7 +298,9 @@
 // walk frames 9-15 are new), so a returning browser would keep drawing the old art for a session.
 // v0.30.1633 - v158 -> v159. Gravitos's form 1 punch frames 0-8 and its still are REPLACED under their own names (frames 9-15 retired),
 // so a returning browser would keep drawing the old punch for a session.
-const CACHE = 'mojiworld-assets-v159';   // v0.30.1633 - Gravitos form 1 punch remake (same names)
+// v0.30.1634 - v159 -> v160. the Cinnabar Gates' world-map emblem (Sprites/world/regions/cinnabarCaves.webp, the torii for the crystal) is REPLACED under their own names
+// so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v160';   // v0.30.1634 - Cinnabar Gates emblem (same name)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
