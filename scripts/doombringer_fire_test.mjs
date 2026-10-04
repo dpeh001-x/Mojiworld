@@ -45,6 +45,7 @@ const r = await page.evaluate(async () => {
 
   // ---- set up: a boss and two chaff, all in range ----
   game.paused = true;
+  window._lxSkillTimerHoldNow = () => false;   // v0.30.1618 combat-10: a paused game now HOLDS skill timers (a solo menu is open); this suite pauses the world on purpose to freeze the monsters and still wants the wall-clock volley
   player.x = 400; player.y = 400; player.hp = 9999; player.level = 60;
   player.facing = 1; player.mp = 999; player._calamityHeat = 0;
   const mk = (x, hp, boss, name) => ({ type: 'slime', name, x, y: 400, w: 60, h: 60, vx: 0, vy: 0,
