@@ -22,11 +22,11 @@ console.log(`HEAD ${git(['rev-parse', '--short', 'HEAD']).trim()}  ${git(['log',
 // forms 2/3 play their own gravitos2punch / gravitos3laser / ... sets (form 1
 // falls back to gravitos<base>), and the frame pick now tests the key by
 // SUFFIX (/punch$/ ...). v0.30.341 (162e7c5e) grew the punch set to 16 frames
-// (the shipped 9 plus 7 in-betweens).
+// (the shipped 9 plus 7 in-betweens). v0.30.1633 remade it like form 3's punch, with a power orb at the fist: 9 frames again.
 ck('cast-key resolver defined', cnt('function _gravCastKey(m, base) {') === 1 && cnt("const k = 'gravitos' + suf + base;") === 1);
 console.log('');
 for (const [key, fn, states, base, nFrames] of [
-  ['gravitospunch', '_gravitosPunchFrame', 'crush / slam / zip', 'punch', 16],
+  ['gravitospunch', '_gravitosPunchFrame', 'crush / slam / zip', 'punch', 9],   // v0.30.1633 the remake
   ['gravitossoul', '_gravitosSoulFrame', 'soulDrain + form-1 singularity/collapseRain', 'soul', 9],
   ['gravitoslaser', '_gravitosLaserFrame', 'laser', 'laser', 9],
 ]) {
@@ -48,7 +48,7 @@ ck('ring flag reset on pattern exit', cnt('m._laserFired = false; m._laserRingUp
 console.log('');
 console.log('--- frame index ---');
 const idx = git(['show', 'HEAD:data/sprite_frame_index.js']);
-for (const [k, n] of [['gravitospunch', 16], ['gravitossoul', 9], ['gravitoslaser', 9]])
+for (const [k, n] of [['gravitospunch', 9], ['gravitossoul', 9], ['gravitoslaser', 9]])
   ck(`${k} indexed as ${n}`, idx.includes(`"${k}": ${n}`));
 
 console.log(bad ? `\n${bad} problem(s) — NOT fully wired` : '\nAll Gravitos cast sets are wired in HEAD.');

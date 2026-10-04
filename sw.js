@@ -296,7 +296,9 @@
 // calibration baked into its frames, feet locked to the form's lines) so a returning browser would keep drawing the old art for a session.
 // v0.30.1624 - v156 -> v157. Gravitos's walk frames 0-8 (all three forms) and ten attack frames are REPLACED under their own names (and
 // walk frames 9-15 are new), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v158';   // v0.30.1627 - the Last Step: her art, arena and voice
+// v0.30.1633 - v158 -> v159. Gravitos's form 1 punch frames 0-8 and its still are REPLACED under their own names (frames 9-15 retired),
+// so a returning browser would keep drawing the old punch for a session.
+const CACHE = 'mojiworld-assets-v159';   // v0.30.1633 - Gravitos form 1 punch remake (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

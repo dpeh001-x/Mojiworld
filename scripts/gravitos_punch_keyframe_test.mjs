@@ -55,10 +55,11 @@ try {
         for (let s = 0; s < 240 && m.patternState === 'slam'; s++) { const was = !!m._slamHit; step(); const i = at(m); if (!was && m._slamHit) { fire = i; break; } prev = i; }
         o.S = { atHit: fire, before: prev }; }
       { const m = boss(1); start(m, 'zip'); let prev = -1, launch = -1, mid = -1, after = -1, seen = new Set(), stL = -1;   // Z. zip
+        const _kd = ((_lxCalibFt(_gravCastKey(m, 'punch'), 'attack') || [])[LX_BOSS_KEY_FRAME.gravitospunch] || 48) * (_gravTeleMs(m, 1) || 1);   // v0.30.1633 the key frame's own authored length, played after the hold
         for (let s = 0; s < 260 && m.patternState === 'zip'; s++) { step(); const zt = m.patternTimer - (m._tpWindMs || 0), i = at(m); seen.add(i);
           if (launch < 0 && zt >= 260) { launch = i; stL = s; } else if (launch < 0) prev = i;
           if (stL >= 0 && mid < 0 && zt >= 260 + 360) mid = i;
-          if (stL >= 0 && after < 0 && zt >= 260 + 720 + 60) after = i; }
+          if (stL >= 0 && after < 0 && zt >= 260 + 720 + _kd + 30) after = i; }
         o.Z = { atLaunch: launch, before: prev, midCharge: mid, afterCharge: after, seen: [...seen].sort((a, b) => a - b).join(',') }; }
     } finally { P.now = oNow; clearInterval(window.__pkHold); game.monsters.length = 0; }
     return o;

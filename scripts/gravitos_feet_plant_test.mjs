@@ -27,9 +27,9 @@
 //      move); the head rises and falls through the stride by 6-30 px (the hips)
 //   8. THE BACK HEEL DOWN (v0.30.1624, per user: "make sure the heel of the backleg touches the floor line as well", then
 //      "Apply this to the other animation sequence of gravitos"): in every frame of every set but the walks, the far (back)
-//      foot is on the floor - never more than 1 px above it. Four attack sets floated it 3-8 px in ten frames. The punch's
-//      lunge (frames 3-7: the back leg pushes off and swings through) is exempt, and frames with both feet off the floor
-//      (the star burst over form 3's feet) are airborne, not floating - at most four of them in a set
+//      foot is on the floor - never more than 1 px above it. Four attack sets floated it 3-8 px in ten frames. Frames with both
+//      feet off the floor (the star burst over form 3's feet) are airborne, not floating - at most four of them in a set. Dust
+//      kicked up round the feet (form 1's punch, v0.30.1633) is not read as a foot
 // Run: node scripts/gravitos_feet_plant_test.mjs   (PORT=..., MOJI_GAME_FILE=... for another build)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -81,7 +81,9 @@ try {
         c2.save(); c2.setTransform(1, 0, 0, 1, 0, 0); c2.fillStyle = '#00ff00'; c2.fillRect(0, 0, W, H);
         orig(fr[i], m, sx, sy, st === 'attack', true);
         c2.restore();
-        const d = c2.getImageData(0, 0, W, H).data, ink = (x, y) => { const q = (y * W + x) * 4; return d[q] + Math.abs(d[q + 1] - 255) + d[q + 2] > 90; };
+        const d = c2.getImageData(0, 0, W, H).data, ink = (x, y) => { const q = (y * W + x) * 4, r = d[q], g = d[q + 1], b = d[q + 2];
+          if (r > 20 && b >= 0.5 * r && b <= 0.9 * r && g >= 0.8 * r) return false;   // v0.30.1633 punch-dust - tan dust (also half-blended into the green) is not a foot
+          return r + Math.abs(g - 255) + b > 90; };
         const sole = (x0, x1) => { for (let y = H - 1; y >= 0; y--) { let run = 0; for (let x = x0; x < x1; x++) { if (ink(x, y)) { if (++run >= 8) { let e = x; while (e + 1 < x1 && ink(e + 1, y)) e++; return { y: y - lineY + 1, x: Math.round((x - run + 1 + e) / 2 - mid) }; } } else run = 0; } } return null; };
         L.push(sole(Math.max(0, Math.round(mid - 260)), Math.round(mid))); Rr.push(sole(Math.round(mid), Math.min(W, Math.round(mid + 260))));
         let top = null; for (let y = 0; y < H && top == null; y++) for (let x = Math.round(mid - 120); x < mid + 120; x += 2) if (ink(x, y)) { top = y - lineY; break; }   // the head (a centre band: wings and arms aside)
@@ -149,7 +151,7 @@ try {
     seen7.push(`${key}: feet travel ${rngL}/${rngR}, bob ${bob}, lines ${N}/${F}`);
   }
   ok('7. THE WALK: 15-16 frames a form, both legs travel, the head bobs, and the lowest foot always sits between the form\'s lines', bad7.length === 0, bad7.join('; ') || seen7.join(' | '));
-  const bad8 = [], air8 = [], DASH = { 'gravitospunch/attack': [3, 4, 5, 6, 7] };   // the punch's lunge: the back leg pushes off and swings through
+  const bad8 = [], air8 = [], DASH = {};   // v0.30.1633 punch remake: the old dash punch's lunge exemption (frames 3-7) went with its art
   for (const [k, v] of Object.entries(R.out)) {
     if (/\/walk$/.test(k)) continue;
     let air = 0;
