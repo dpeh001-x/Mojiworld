@@ -4,7 +4,8 @@
 //     the dreaming was lifted); Guguma no longer says "stolen dream"
 //   - MIRA: at the gate she stands on the step she could not cross; her copy at the foot of the Ascension says so
 //   - TOWER: the Expedition goes down - no "at the top", B10 is not an apex
-//   - PLACES: Will says the Bastion's blades are older than its walls (the woman at the gate left them) and Barnaby keeps her forge (barnaby-bastion: he
+//   - PLACES: Will says the Bastion's blades are older than its walls (the woman at the gate left them) and Brok keeps it (smithswap,
+//     per user: Brok and Barnaby swapped places; before that barnaby-bastion: he
 //     is back in the Courtyard, per user - no line sends him to the Frosted Mansion); Vermillion's breathing mountain is
 //     the Sauro Slope; Wynn's hamlet is the Frosted Mansion
 //   - PLATES: Ren is a thief, Milo an usher (the gate belongs to Mira)
@@ -19,7 +20,7 @@ const PAGE = path.resolve(SERVE_ROOT, cand || 'mojiworld_game.html');
 let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d ? '  [' + d + ']' : '')); ok ? pass++ : fail++; };
 const J = (o) => JSON.stringify(o);
 const src = readFileSync(PAGE, 'utf8');
-check(!/stolen dream/.test(src) && !/meet you at the top|found out at the top|climbed this far|Apex Sanctum/.test(src) && !/Barnaby keeps our steel|east of the mansion|Barnaby took his hammer to the Frosted Mansion|forge in the Frosted Mansion/.test(src) && /Barnaby keeps her forge now\./.test(src), 'static: no "stolen dream", no tower "top", Barnaby keeps Mara\'s forge in the Bastion (not the mansion), no mansion east of the Reach');
+check(!/stolen dream/.test(src) && !/meet you at the top|found out at the top|climbed this far|Apex Sanctum/.test(src) && !/Barnaby keeps our steel|east of the mansion|Barnaby took his hammer to the Frosted Mansion|forge in the Frosted Mansion/.test(src) && /none has broken\. Brok keeps it now\./.test(src) && !/Barnaby keeps her forge now/.test(src), 'static: no "stolen dream", no tower "top", Brok keeps the Bastion forge since the smiths swapped (not Barnaby, not the mansion), no mansion east of the Reach');
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env, MOJI_GAME_FILE: PAGE } });
 await new Promise((r) => setTimeout(r, 1800));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));

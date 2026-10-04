@@ -4,6 +4,8 @@
 // with a giver, against the maps as the game builds them (the Stage Editor bake included). Plus the prologue's card.
 // barnaby-bastion (per user): Barnaby keeps the Bastion's forge now, in the Lv 6 Courtyard, so his quests open at their
 // authored levels again - II-IV and Lyra V at 45, the Kindest Hand at 50 - and Brok's Barnaby I points at the Bastion.
+// smithswap (per user: "Swap the location of brok and barnaby"): Barnaby stands in the Everdawn Megamall now (a town), so
+// the levels hold, and Barnaby I points at the Megamall.
 //   [SERVE_ROOT=<dir with serve.js, data/, art>] node scripts/quest_giver_gate_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import { existsSync } from 'node:fs';
@@ -45,11 +47,11 @@ try {
     }
     const src = document.documentElement.outerHTML;
     return { bad, barn, barnabyAt: where.Barnaby || [], eons: src.includes('EONS FROM NOW'), realm: src.includes('IN A DIFFERENT REALM — AT THE FAR END OF THE DREAM'),
-      pointer: /His forge is in the Bastion Courtyard/.test((QUESTS.q_barnaby_five || {}).desc || ''), five: (QUESTS.q_barnaby_five || {}).levelReq };
+      pointer: /His stall is in the Everdawn Megamall/.test((QUESTS.q_barnaby_five || {}).desc || ''), five: (QUESTS.q_barnaby_five || {}).levelReq };
   });
   check(r.bad.length === 0, 'no quest unlocks well below the level of the map its giver stands on', J(r.bad));
-  check(J(r.barnabyAt) === J(['bastion']) && Object.entries(r.barn).every(([id, lv]) => lv === (id === 'q_kindest_hand' ? 50 : 45)), "Barnaby stands in the Bastion Courtyard and his quests open at 45 again (the Kindest Hand after them at 50)", J({ at: r.barnabyAt, lv: r.barn }));
-  check(r.five === 45 && r.pointer, "Brok's Barnaby I stays Lv 45 and says where Barnaby's forge is", J({ lv: r.five, pointer: r.pointer }));
+  check(J(r.barnabyAt) === J(['everdawn_megamall']) && Object.entries(r.barn).every(([id, lv]) => lv === (id === 'q_kindest_hand' ? 50 : 45)), "Barnaby stands in the Everdawn Megamall and his quests open at 45 again (the Kindest Hand after them at 50)", J({ at: r.barnabyAt, lv: r.barn }));
+  check(r.five === 45 && r.pointer, "Brok's Barnaby I stays Lv 45 and says where Barnaby's stall is", J({ lv: r.five, pointer: r.pointer }));
   check(!r.eons && r.realm, 'the prologue opens IN A DIFFERENT REALM', J({ eons: r.eons, realm: r.realm }));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 3)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 300)); }
