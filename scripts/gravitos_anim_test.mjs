@@ -160,6 +160,7 @@ const r = await page.evaluate(() => {
     for (let t = 0; t <= 2600; t += 16) {
       simNow += 16;
       m.vx = 2.2; m._animXV = 2; m._walkLatch = true;
+      m.x += m.vx; game.time = (game.time | 0) + 1;   // v0.30.1624 gravitos-stride - his walk follows the distance walked: the probe walks him
       const _tt = tickT(m, arr);
       const drawn = _tt.drawn.filter(d => d.i != null);
       if (_tt.moved) { moveTicks++; maxOff = Math.max(maxOff, _tt.maxAbs); }

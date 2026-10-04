@@ -16,7 +16,7 @@
 // CRLF-agnostic: the game file is LF in git and CRLF in a Windows working copy, and every
 // multi-line anchor below (/...\n  },\n/) stops matching on CRLF. Normalised on read.
 import sharp from 'sharp';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
@@ -112,7 +112,13 @@ async function strideOf(key) {
 {
   const s = await strideOf('gravitos');
   ok('Gravitos actually walks — his feet leave the ground', s.foot >= 9 && s.gap >= 9, s);
-  ok('...and is therefore re-timed', !!table.gravitos, { retimed: !!table.gravitos });
+  // v0.30.1624 walk-redo: his 16-frame walks (per user: "smooth like a normal human gait") are evenly spaced, so the generator
+  // leaves them on uniform timing ("already even", its 0.35 bar) - re-timed OR even, never the old lurch
+  const _n = readdirSync(DIR).filter((f) => /^gravitos_\d+\.webp$/.test(f)).length, _raw = [];
+  for (let i = 0; i < _n; i++) _raw.push(await sharp(readFileSync(join(DIR, `gravitos_${i}.webp`))).resize(96, 96, { fit: 'fill' }).ensureAlpha().raw().toBuffer());
+  const _st = _raw.map((a, i) => { const b = _raw[(i + 1) % _raw.length]; let s = 0; for (let q = 0; q < a.length; q += 4) s += Math.abs(a[q] - b[q]) + Math.abs(a[q + 3] - b[q + 3]); return s / 1000; });
+  const _mn = _st.reduce((x, y) => x + y, 0) / _st.length, _cv = Math.sqrt(_st.reduce((x, y) => x + (y - _mn) ** 2, 0) / _st.length) / _mn;
+  ok('...and is re-timed, or already evenly spaced', !!table.gravitos || _cv <= 0.35, { retimed: !!table.gravitos, frames: _n, cv: +_cv.toFixed(2) });
 }
 
 // The smoothing is REAL: recompute apparent-velocity variance both ways.

@@ -42,7 +42,8 @@ for (const dir of ['bosses/idle', 'bosses/walk']) {
     ok(`${dir} no longer indexes ${k}`, !(idx.frames[dir] || {})[k], { got: (idx.frames[dir] || {})[k] });
   }
   for (const k of ['gravitos2', 'gravitos3']) {
-    ok(`${dir} still indexes the base form ${k}`, (idx.frames[dir] || {})[k] === 9, { got: (idx.frames[dir] || {})[k] });
+    const _want = dir === 'bosses/walk' ? ({ gravitos: 15, gravitos2: 16, gravitos3: 15 })[k] : 9;   // v0.30.1624 walk-redo: the base forms walk 15 / 16 / 15 frames
+    ok(`${dir} still indexes the base form ${k} (${_want} frames)`, (idx.frames[dir] || {})[k] === _want, { got: (idx.frames[dir] || {})[k] });
   }
 }
 for (const k of ['gravitos2star', 'gravitos3star']) {
@@ -104,8 +105,8 @@ await b.close(); try { srv.kill(); } catch (e) {}
 ok('NOTHING requests a deleted star idle/walk frame', asked.length === 0, asked.slice(0, 4));
 ok('base form-2 idle still animates (9 frames)', r.idle2 === 9, { decoded: r.idle2 });
 ok('base form-3 idle still animates (9 frames)', r.idle3 === 9, { decoded: r.idle3 });
-ok('base form-2 walk still animates (9 frames)', r.walk2 === 9, { decoded: r.walk2 });
-ok('base form-3 walk still animates (9 frames)', r.walk3 === 9, { decoded: r.walk3 });
+ok('base form-2 walk still animates (16 frames, v0.30.1624)', r.walk2 === 16, { decoded: r.walk2 });
+ok('base form-3 walk still animates (15 frames, v0.30.1624)', r.walk3 === 15, { decoded: r.walk3 });
 ok('no star idle set is even allocated now', !r.starIdle2 && !r.starWalk3, { idle2: r.starIdle2, walk3: r.starWalk3 });
 ok('star ATTACK set still decodes for form 2 (the OHKO swap survives)', r.starAtk2 === 9, { decoded: r.starAtk2 });
 ok('star ATTACK set still decodes for form 3', r.starAtk3 === 9, { decoded: r.starAtk3 });

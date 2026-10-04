@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1623';
+const GAME_VERSION = 'v0.30.1624';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -153391,6 +153391,7 @@ const _BOSS_MOVE_DRAW_STATES = new Set(['chase', 'reposition', 'dashIn',
 // motion blur and turns the 9-frame set fluid). _gravitosPunchFrame keeps its
 // single-frame contract for every existing caller.
 function _gravitosPunchPair(m) {
+  if (m && m._phaseSprite && _GRAV_FORM_CASTS[m.patternState]) return null;   // v0.30.1624 form-casts - a borrowed punch set plays on its move's clock (_gravFormCastFrame)
   const frames = BOSS_ATTACK_FRAMES[_gravCastKey(m, 'punch')];
   if (!frames) return null;
   if (typeof _lxShrinkFrames === 'function') _lxShrinkFrames(frames, 720);   // v0.29.284 — same base as the other boss sets
@@ -153630,6 +153631,19 @@ function _gravitosLaserFrame(m) {
 const _GRAV_ONCE_DUR = { singularity: 3500, collapseRain: 4000, wave: 900,
   pull: 1000, chaseComets: 1500, orbitalRing: 1500, blackhole: 1500,
   crushTendrils: 1500, decayFloor: 1500, quake: 1500, groundShake: 1500, summon: 1500 };
+// v0.30.1624 form-casts - FORMS 2 AND 3 PLAY MORE OF THEIR OWN CASTS (per user: "Gravitos 2 and 3 should play more of their other
+// attack animations as well if not it looks rather bland"). Six of form 2's ten regular moves and seven of form 3's drew the
+// one generic attack set (a chest blast) while their punch, soul and laser sets played only for laser / zip / crush / slam /
+// Soul Drain. Each of these moves now plays the form's own cast that fits it - the Decay Floor's slam a punch, the Black
+// Hole, Gravity Well and Crush Tendrils a channelled soul cast, the Void Ring the laser's arms-wide burst - once, through
+// _gravitosOnceFrame, its key frame on the move's own moment (_gravOnceHitMs). Chase Comets and the Weight Wave keep the
+// chest blast, so it still plays. Form 1 (no _phaseSprite) is unchanged.
+const _GRAV_FORM_CASTS = { decayFloor: 'punch', blackhole: 'soul', pull: 'soul', crushTendrils: 'soul', orbitalRing: 'laser' };
+function _gravFormCastFrame(m, key) {   // the frame, when THIS draw is one of those moves on its form's own cast set
+  if (m.type !== 'gravitos' || !m._phaseSprite) return null;
+  const c = _GRAV_FORM_CASTS[m.patternState];
+  return (c && key === _gravCastKey(m, c)) ? _gravitosOnceFrame(m, key) : null;
+}
 function _gravitosOnceFrame(m, key) {
   const frames = BOSS_ATTACK_FRAMES[key];
   if (!frames) return null;
@@ -153792,7 +153806,7 @@ const _LX_MOB_WALK_FRAME_MS = 55;
 // hero crossed to his other side) while the direction his snout was DRAWN changed 112 times. Both frames are
 // mirrored on disk (sharp flop, 0.3/255 mean error, same rows so the floor anchor is untouched) and these weights
 // re-baked by gen_boss_walk_timing.mjs; only kingKrook's row moved.
-const _BOSS_WALK_WEIGHTS = {"gravitos":[0.439,1.113,1.421,0.709,1.82,1.269,0.427,1.374,0.427],"kingKrook":[0.409,0.628,1.097,0.409,1.998,0.876,1.829,1.346,0.409],"legosaurus":[1.119,0.622,1.662,0.438,1.572,0.438,1.535,1.175,0.438],"octobaby":[1.269,1.22,0.432,1.353,1.306,1.325,1.232,0.432,0.432],"sundered_smith":[1.192,1.308,0.664,1.291,1.018,1.255,0.417,1.438,0.417],"towerArbiter":[1.495,0.424,1.557,1.848,0.424,1.141,1.095,0.591,0.424],"towerSovereign":[0.427,1.438,1.441,0.427,1.729,0.427,1.694,0.992,0.427]};
+const _BOSS_WALK_WEIGHTS = {"kingKrook":[0.409,0.628,1.097,0.409,1.998,0.876,1.829,1.346,0.409],"legosaurus":[1.119,0.622,1.662,0.438,1.572,0.438,1.535,1.175,0.438],"octobaby":[1.269,1.22,0.432,1.353,1.306,1.325,1.232,0.432,0.432],"sundered_smith":[1.192,1.308,0.664,1.291,1.018,1.255,0.417,1.438,0.417],"towerArbiter":[1.495,0.424,1.557,1.848,0.424,1.141,1.095,0.591,0.424],"towerSovereign":[0.427,1.438,1.441,0.427,1.729,0.427,1.694,0.992,0.427]};
 // v0.30.1038 krook-walk — King Krook's walk frames on ONE registration (per user: "King krook still moves in a slip and
 // sliding manner. He needs to move more normally"). The frames place his body at a different x each - the belly
 // wanders 14% of the frame, ~45 px on screen, against 0.2% in his idle set - so a steady walk drew a body lurching
@@ -153809,6 +153823,7 @@ const _KROOK_WALK_TRIM = 0;
 const _BOSS_WALK_WSUM = Object.create(null);
 function _bossWalkFrame(key, m) {
   const _fr = BOSS_WALK_FRAMES[key];
+  if (m && m.type === 'gravitos' && _fr && _fr.length > 1 && (_fr._readyN | 0) >= _fr.length) { const _gp = _gravWalkPos(key, m, _fr.length); if (_gp != null) return _fr[Math.floor(_gp) % _fr.length]; }   // v0.30.1624 gravitos-stride
   const _ms = _bossWalkMsFor(m);
   const _w = _BOSS_WALK_WEIGHTS[key];
   const _phase = _bossAnimPhase(_fr, m, 'walk', true);
@@ -153944,6 +153959,7 @@ function _bossWalkPair(key, m) {
   while (n < frames.length && frames[n] && frames[n].complete && frames[n].naturalWidth > 0) n++;
   frames._readyN = n;
   if (n < 2) return null;
+  if (m && m.type === 'gravitos') { const _gp = _gravWalkPos(key, m, n); if (_gp != null) { const _gi = Math.floor(_gp) % n; return { a: frames[_gi], b: frames[(_gi + 1) % n], f: _gp - Math.floor(_gp), i: _gi, n }; } }   // v0.30.1624 gravitos-stride
   const frameMs = _bossWalkMsFor(m);
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const tAbs = Math.max(0, now + (m ? _mobAnimPhase(m, 'walk', true) : 0)) / frameMs;
@@ -154470,6 +154486,21 @@ function _zodiacTurn(sign, state, elapsedMs, m) {
   if (elapsedMs >= dur) return { img: null, after: elapsedMs - dur };
   const i = Math.min(n - 1, Math.floor(Math.max(0, elapsedMs) / _Z_TURN_FRAME_MS));
   return { img: fr[back ? n - 1 - i : i], after: 0 };
+}
+// v0.30.1624 gravitos-stride - HIS FEET DO NOT SLIDE (per user: "Feet slide / pace"). The walk played at a fixed 50 ms a frame whatever his speed,
+// so a stride that carries the feet ~150-200 px a cycle ran under a body moving 84 px a second. His walk frame now follows the distance he
+// has actually walked: one cycle per _GRAV_WALK_STRIDE[key] game px (each set's measured stride), so the planted foot stays put at any
+// speed - slow drift included. A walk begun after a pause starts on its first frame. Fractional position for the walk pair's sub-frame
+// motion; null for a key with no stride (the old timing).
+const _GRAV_WALK_STRIDE = {"gravitos":110,"gravitos2":145,"gravitos3":145};
+function _gravWalkPos(key, m, n) {
+  const st = _GRAV_WALK_STRIDE[key];
+  if (!st || !m || !(n > 1)) return null;
+  const t = game.time | 0;
+  if (m._gwT == null || t - m._gwT > 8 || t < m._gwT) { m._gwD = 0; m._gwX = m.x; m._gwT = t; }
+  else if (m._gwT !== t) { const dx = Math.abs(m.x - m._gwX); m._gwD += (dx < 40 ? dx : 0); m._gwX = m.x; m._gwT = t; }
+  const p = (m._gwD / st) * n;
+  return p - Math.floor(p / n) * n;
 }
 function _zodiacAnimTick(m, now) {
   const atk = (m.patternState && m.patternState !== 'idle') || (m.atkAnimUntil && now < m.atkAnimUntil);
@@ -158086,6 +158117,11 @@ function drawMonster(m) {
   // ~150-250 ms of a cast begun on the move - is sized as the body it is. Under the cast key it took that set's size
   // calibration: King Krook's stomp set calibrates only its attack, so his idle fell back to s 1 against his own 1.6 and
   // shrank to 62% for a moment at the start of the stomp (per user); Aetherion's Astral grew his body 1.8x the same way.
+  // v0.30.1624 form-casts - forms 2/3: the moves above with no art of their own play the form's fitting cast (see _GRAV_FORM_CASTS)
+  if (m.type === 'gravitos' && !m._gravStarKey && m._phaseSprite && _GRAV_FORM_CASTS[m.patternState]) {
+    const _fck = _gravCastKey(m, _GRAV_FORM_CASTS[m.patternState]);
+    if (_fck && _gravFormCastFrame(m, _fck)) m._gravStarKey = _fck;
+  }
   if (!_bossAttacking) { m._gravStarKey = null; m._aeAstralKey = null; }   // cast-key-body
   // v0.29.x — Legosaurus's brace-dash owns a dedicated attack set; while the
   // move runs (atkAnimUntil is stamped by the phase machine, so
@@ -158118,6 +158154,7 @@ function drawMonster(m) {
     // gravitos3laser / … as well as the form-1 names. 'gravitos2star' ends in
     // 'star' and is unaffected.
     ? ((_lxHgPoseDash && _lxHgDashPose(_spriteKey, m.traits.hourglassDashPose))   // v0.30.1513 arbiter
+       || _gravFormCastFrame(m, _spriteKey)   // v0.30.1624 form-casts - once-through on the move's own clock
        || (/punch$/.test(_spriteKey) && _gravitosPunchFrame(m))
        || (/laser$/.test(_spriteKey) && _gravitosLaserFrame(m))
        || (/soul$/.test(_spriteKey) && _gravitosSoulFrame(m))   // v0.29.560 — once-through, then holds

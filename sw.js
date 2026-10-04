@@ -294,7 +294,9 @@
 // so a returning browser would keep drawing the old art for a session.
 // v0.30.1578 - v150 -> v151. Gravitos's form-1 and form-2 frames (115 files) are REPLACED under their own names (each sequence's
 // calibration baked into its frames, feet locked to the form's lines) so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v156';   // v0.30.1621 - four props redrawn under the same names (flat bases, back legs erased)
+// v0.30.1624 - v156 -> v157. Gravitos's walk frames 0-8 (all three forms) and ten attack frames are REPLACED under their own names (and
+// walk frames 9-15 are new), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v157';   // v0.30.1624 - Gravitos walks + back-foot fixes (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

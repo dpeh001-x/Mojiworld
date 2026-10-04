@@ -13,11 +13,23 @@
 //   1. ALL SEQUENCES: 20 sets, every frame drawn as itself (no stand-in frame)
 //   2. ONE CALIBRATION PER FORM: every body set of a form (idle / walk / attack, punch / soul / laser, the star cast's
 //      idle / walk) has the same s / dx / dy; only the star cast's attack keeps its own
-//   3. BOTH FEET DOWN: in every set the far (higher) foot, at its median over the set's frames, rests 1-5 px into the floor
+//   3. BOTH FEET DOWN: in every set but the walks the far (higher) foot, at its median over the set's frames, rests 1-5 px
+//      into the floor (a walk lifts one foot in half its frames - see 7)
 //   4. SHALLOW: no set's near (lower) foot sinks past 18 px at its median - it was 20-26 px in eight sets
 //   5. ON THE FORM'S LINES (forms 1, 2): the lines are idle's near / far foot. In every frame he stands in (not the
 //      punch leap), the foot nearest its line is within 2 px of it and neither foot is more than 2 px below its line
 //   6. no page errors
+//   7. THE WALK (v0.30.1624, per user: "the walk should be smooth like a normal human gait, both legs need to move and should
+//      have some hip movement", then "make the walking look similar to gravitos2 style without the turn"): every form walks
+//      front-on, 15-16 frames drawn from its idle. A walking foot travels in depth between the form's two lines, so in every
+//      frame the lowest foot sits between them: never more than 2 px below the near line (sinking), never more than 3 px
+//      above the far one (both feet in the air); each foot travels at least 8 px up and down over the cycle (both legs
+//      move); the head rises and falls through the stride by 6-30 px (the hips)
+//   8. THE BACK HEEL DOWN (v0.30.1624, per user: "make sure the heel of the backleg touches the floor line as well", then
+//      "Apply this to the other animation sequence of gravitos"): in every frame of every set but the walks, the far (back)
+//      foot is on the floor - never more than 1 px above it. Four attack sets floated it 3-8 px in ten frames. The punch's
+//      lunge (frames 3-7: the back leg pushes off and swings through) is exempt, and frames with both feet off the floor
+//      (the star burst over form 3's feet) are airborne, not floating - at most four of them in a set
 // Run: node scripts/gravitos_feet_plant_test.mjs   (PORT=..., MOJI_GAME_FILE=... for another build)
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -63,7 +75,7 @@ try {
       const f = /^gravitos3/.test(k) ? 3 : /^gravitos2/.test(k) ? 2 : 1, cast = !(k === 'gravitos' || k === 'gravitos2' || k === 'gravitos3');
       m._gravitosPhase = f; m._phaseSprite = f === 1 ? null : 'gravitos' + f; m._gravStarKey = cast ? k : null;
       fr._lxStandInOff = true;   // draw each frame as itself
-      const L = [], Rr = [], sigs = new Set();
+      const L = [], Rr = [], T = [], sigs = new Set();
       for (let i = 0; i < fr.length; i++) {
         m._lxCalE = null; m.facing = 1;
         c2.save(); c2.setTransform(1, 0, 0, 1, 0, 0); c2.fillStyle = '#00ff00'; c2.fillRect(0, 0, W, H);
@@ -72,10 +84,12 @@ try {
         const d = c2.getImageData(0, 0, W, H).data, ink = (x, y) => { const q = (y * W + x) * 4; return d[q] + Math.abs(d[q + 1] - 255) + d[q + 2] > 90; };
         const sole = (x0, x1) => { for (let y = H - 1; y >= 0; y--) { let run = 0; for (let x = x0; x < x1; x++) { if (ink(x, y)) { if (++run >= 8) { let e = x; while (e + 1 < x1 && ink(e + 1, y)) e++; return { y: y - lineY + 1, x: Math.round((x - run + 1 + e) / 2 - mid) }; } } else run = 0; } } return null; };
         L.push(sole(Math.max(0, Math.round(mid - 260)), Math.round(mid))); Rr.push(sole(Math.round(mid), Math.min(W, Math.round(mid + 260))));
+        let top = null; for (let y = 0; y < H && top == null; y++) for (let x = Math.round(mid - 120); x < mid + 120; x += 2) if (ink(x, y)) { top = y - lineY; break; }   // the head (a centre band: wings and arms aside)
+        T.push(top);
         let sig = 0; for (let y = lineY - 300; y < lineY + 40; y += 7) for (let x = Math.round(mid - 250); x < mid + 250; x += 7) if (ink(x, y)) sig = (sig * 31 + x * 7 + y) | 0; sigs.add(sig);
       }
       if (fr.length > 2 && sigs.size < 2) distinct = false;
-      out[k + '/' + st] = { form: f, L, R: Rr };
+      out[k + '/' + st] = { form: f, L, R: Rr, T };
     }
     const cal = {};
     for (const k in window.LX_ANIM_CALIB) if (/^gravitos[23]?(star|punch|soul|laser)?$/.test(k)) for (const st in window.LX_ANIM_CALIB[k]) { const c = _lxAnimCalib(k, st); cal[k + '/' + st] = [c.s, c.dx, c.dy]; }
@@ -91,15 +105,15 @@ try {
     for (const [k, v] of Object.entries(R.cal)) if (formOf(k) === f && !/star\/attack$/.test(k) && JSON.stringify(v) !== ref) bad2.push(`${k} ${JSON.stringify(v)} vs ${ref}`);
   }
   ok('2. ONE CALIBRATION PER FORM: every body set of a form shares idle\'s s / dx / dy (the star cast\'s attack keeps its own)', bad2.length === 0 && Object.keys(R.cal).length >= 24, bad2.join('; ') || Object.keys(R.cal).length + ' entries');
-  const badFar = rows.filter((r) => !(r.far >= 1 && r.far <= 5));
-  ok('3. BOTH FEET DOWN: every set\'s far foot rests 1-5 px into the floor (median over its frames)', badFar.length === 0, (badFar.length ? 'off: ' : '') + (badFar.length ? badFar : rows).map((r) => `${r.k} ${r.far}`).join(', '));
+  const badFar = rows.filter((r) => !/\/walk$/.test(r.k) && !(r.far >= 1 && r.far <= 5));
+  ok('3. BOTH FEET DOWN: every set\'s far foot (walks aside) rests 1-5 px into the floor (median over its frames)', badFar.length === 0, (badFar.length ? 'off: ' : '') + (badFar.length ? badFar : rows).map((r) => `${r.k} ${r.far}`).join(', '));
   const deep = rows.filter((r) => !(r.near <= 18));
   ok('4. SHALLOW: no set\'s near foot sinks past 18 px (median)', deep.length === 0, (deep.length ? deep : rows).map((r) => `${r.k} ${r.near}`).join(', '));
   const bad5 = [], seen5 = [];
   for (const f of [1, 2]) {
     const idle = R.out[(f === 1 ? 'gravitos' : 'gravitos2') + '/idle'], N = med(idle.L.map((p) => p && p.y)), F = med(idle.R.map((p) => p && p.y));
     for (const [k, v] of Object.entries(R.out)) {
-      if (v.form !== f || /star\//.test(k)) continue;
+      if (v.form !== f || /star\//.test(k) || /\/walk$/.test(k)) continue;   // the walk: see 7
       const mxL = med(v.L.map((p) => p && p.x)), mxR = med(v.R.map((p) => p && p.x)); let air = 0;
       v.L.forEach((l, i) => {
         const r = v.R[i], c = [];
@@ -117,6 +131,37 @@ try {
   }
   ok('5. ON THE FORM\'S LINES (forms 1-2): every standing frame has a foot within 2 px of its line and none more than 2 px below it', bad5.length === 0, bad5.join(', ') || seen5.join(' '));
   ok('6. no page errors', errs.length === 0, JSON.stringify(errs));
+  const bad7 = [], seen7 = [];
+  for (const f of [1, 2, 3]) {
+    const key = f === 1 ? 'gravitos' : 'gravitos' + f, idle = R.out[key + '/idle'], w = R.out[key + '/walk'];
+    const N = med(idle.L.map((p) => p && p.y)), F = med(idle.R.map((p) => p && p.y));
+    if (!w || w.L.length < 15 || w.L.length > 16) { bad7.push(`${key}/walk has ${w ? w.L.length : 0} frames (want 15-16)`); continue; }
+    const ys = (a) => a.filter((p) => p).map((p) => p.y), rngL = Math.max(...ys(w.L)) - Math.min(...ys(w.L)), rngR = Math.max(...ys(w.R)) - Math.min(...ys(w.R));
+    w.L.forEach((l, i) => {
+      const r = w.R[i]; if (!l || !r) { bad7.push(`${key}/walk#${i} a foot unread`); return; }
+      const low = Math.max(l.y, r.y);
+      if (low > N + 2) bad7.push(`${key}/walk#${i} foot ${low - N} px below the near line`);
+      else if (low < F - 3) bad7.push(`${key}/walk#${i} both feet ${F - low} px above the far line`);
+    });
+    if (rngL < 8 || rngR < 8) bad7.push(`${key}/walk feet travel L ${rngL} / R ${rngR} px (want >= 8 each)`);
+    const tops = w.T.filter((t) => t != null), bob = Math.max(...tops) - Math.min(...tops);
+    if (!(bob >= 6 && bob <= 30)) bad7.push(`${key}/walk head bob ${bob} px (want 6-30)`);
+    seen7.push(`${key}: feet travel ${rngL}/${rngR}, bob ${bob}, lines ${N}/${F}`);
+  }
+  ok('7. THE WALK: 15-16 frames a form, both legs travel, the head bobs, and the lowest foot always sits between the form\'s lines', bad7.length === 0, bad7.join('; ') || seen7.join(' | '));
+  const bad8 = [], air8 = [], DASH = { 'gravitospunch/attack': [3, 4, 5, 6, 7] };   // the punch's lunge: the back leg pushes off and swings through
+  for (const [k, v] of Object.entries(R.out)) {
+    if (/\/walk$/.test(k)) continue;
+    let air = 0;
+    v.L.forEach((l, i) => {
+      const r = v.R[i]; if (!l || !r || (DASH[k] || []).includes(i)) return;
+      const hi = Math.min(l.y, r.y), lo = Math.max(l.y, r.y);
+      if (lo < -4) { air++; air8.push(`${k}#${i}`); return; }   // both feet off the floor: airborne
+      if (hi < -1) bad8.push(`${k}#${i} back foot ${-hi} px above the floor`);
+    });
+    if (air > 4) bad8.push(`${k} ${air} airborne frames`);
+  }
+  ok('8. THE BACK HEEL DOWN: in every standing frame of every set (walks aside) the back foot is on the floor', bad8.length === 0, bad8.join(', ') || ('airborne: ' + (air8.join(' ') || 'none')));
 } finally { await browser.close(); server.kill(); }
 const fail = res.filter((r) => !r.pass).length;
 console.log(`\n${res.length - fail}/${res.length} passed`);

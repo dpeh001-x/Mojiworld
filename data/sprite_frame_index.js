@@ -67,9 +67,9 @@ window.LX_SPRITE_FRAME_INDEX = {
   "bosses/walk": {
    "aetherion2": 16,
    "aetherion": 9,
-   "gravitos2": 9,
-   "gravitos3": 9,
-   "gravitos": 9,
+   "gravitos2": 16,
+   "gravitos3": 15,
+   "gravitos": 15,
    "kingKrook": 9,
    "king": 9,
    "legosaurus": 9,
