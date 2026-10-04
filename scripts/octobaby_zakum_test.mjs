@@ -272,7 +272,7 @@ ok('each generation is weaker, so the loop converges', R.armHpGen1 != null && R.
 // was reporting the gate re-armed when nothing had.
 ok('...and the gate re-arms once they are back', R.regrownCount === 4 && (R.dmgAfterRegrow / rNeutral) < 0.2,
    `${(R.dmgAfterRegrow / rNeutral).toFixed(3)}x with ${R.regrownCount} new arms up`);
-ok('the tentacles are way tankier', R.armHp0 >= 600000,
+ok('the tentacles are way tankier', R.armHp0 >= 450000,   // 720,000 before v0.30.1617 cut every monster's HP by 25% (-> 540,000); still 9x the old 50,000
    `${R.armHp0} HP each — they were 50,000, a speed bump next to a 3.04M head`);
 ok('every 4th shot from an arm is a MOOD LANCE', R.lancePattern === '00010001',
    `pattern over 8 shots: ${R.lancePattern} (1 = lance), LX_OCTO_LANCE_EVERY = ${R.lanceEvery}`);

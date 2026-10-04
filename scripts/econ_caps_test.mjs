@@ -44,12 +44,14 @@ try {
   ok('inside the tower _grantMojicoins pays nothing', r.towerGrant === 0 && r.towerDelta === 0, r.towerGrant + ' ' + r.towerDelta);
   // v0.30.758's 25% gold cut brought the per-level line down with it: 3,750 x level, not 5,000
   ok('Lv 80 turning in q_warrior_lv49 is paid the 183,750 ceiling, not x3', r.w49paid === 3750 * 49, r.w49table + ' -> ' + r.w49paid);
-  ok('a quest under the line keeps its late-game x3 (q_boss_aetherion 39,930 after the gold cut)', r.aethPaid === 39930, String(r.aethPaid));
+  // 39,930 -> 40,212 at v0.30.1615: _lxTrimQuestPay pins the MEDIAN quest coin at 26,250 with one uniform factor, and the Road to the Four's seven low-level quests moved that median, so every quest moved by the same +0.7%
+  ok('a quest under the line keeps its late-game x3 (q_boss_aetherion 40,212 after the gold cut)', r.aethPaid === 40212, String(r.aethPaid));
   ok('Ticket Rush stage 2, first run pays its dynamic reward in full', r.pqFirst > 0, String(r.pqFirst));
   // v0.30.833 states the repeat discount as 25% coins / 50% EXP / 25% gear chance; 40% was the v0.30.381 figure
   ok('Ticket Rush stage 2, repeat run pays 25% of that', r.pqFirst > 0 && Math.abs(r.pqRepeat - Math.round(r.pqFirst * 0.25)) <= 1, r.pqFirst + ' -> ' + r.pqRepeat);
   ok('_pqChainRuns is saved with the player', r.pqSaved === true);
-  ok('a gold chest pays 520-975 into the wallet (1,040-1,950 x0.5)', r.chestCoins >= 520 && r.chestCoins <= 975, String(r.chestCoins) + (r.chestErr ? ' ' + r.chestErr : ''));
+  // MOJICOIN_GAIN_MULT is 0.375 (it was 0.5 when this range was written), so the 1,040-1,950 roll lands 390-731: with the old 520 floor the check passed only on a roll of 1,387 or more (~43% of runs)
+  ok('a gold chest pays 390-731 into the wallet (1,040-1,950 x0.375)', r.chestCoins >= 390 && r.chestCoins <= 731, String(r.chestCoins) + (r.chestErr ? ' ' + r.chestErr : ''));
   ok('a gold chest drops 4 HP + 3 MP potions on the ground, none straight into the bag', r.hpDrops === 4 && r.mpDrops === 3 && r.bagAfterOpen[0] === 0 && r.bagAfterOpen[1] === 0, r.hpDrops + ' ' + r.mpDrops + ' bag ' + JSON.stringify(r.bagAfterOpen));
   // pickup: walk the player over the potions
   const pk = await page.evaluate(() => {

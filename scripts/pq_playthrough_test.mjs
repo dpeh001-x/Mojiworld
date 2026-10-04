@@ -74,6 +74,8 @@ const r = await page.evaluate(async () => {
     return game.currentMap === id;
   };
   const settle = async (n) => { for (let i = 0; i < (n || 30); i++) await new Promise((res) => requestAnimationFrame(res)); };
+  // the Spire's piece chests are placed a beat after the map loads (the entry veil), so a fixed frame count can look at an empty room: wait for them
+  const waitPieces = async () => { const t0 = performance.now(); while (!(game.chests || []).some((x) => x && x._pqPuzzlePiece) && performance.now() - t0 < 8000) await new Promise((res) => setTimeout(res, 100)); };
 
   // Milo: find him on whatever map we are on, open his dialog, click a button.
   const milo = () => (game.npcs || []).find((n) => n && n.name === 'Milo');
@@ -209,14 +211,14 @@ const r = await page.evaluate(async () => {
   clear(); player.quests.completed.q_clockwork_underpass = true;
   if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
   acceptQuest('q_pq_spire');
-  await goTo('clockworkSpire'); await settle();
+  await goTo('clockworkSpire'); await settle(); await waitPieces();
   let pc = (game.chests || []).filter((x) => x && x._pqPuzzlePiece);
   try { openChest(pc[0]); openChest(pc[1]); } catch (e) { out.edgeErr = String(e).slice(0, 80); }
   if (typeof abandonQuest === 'function') { try { abandonQuest('q_pq_spire'); } catch (e) {} }
   else { delete player.quests.active.q_pq_spire; }
   acceptQuest('q_pq_spire');
   const _keptPieces = Object.keys(player._pqSpirePieces || {}).length;
-  await goTo('clockworkSpire'); await settle();
+  await goTo('clockworkSpire'); await settle(); await waitPieces();
   pc = (game.chests || []).filter((x) => x && x._pqPuzzlePiece);
   for (const ch of pc) { try { openChest(ch); } catch (e) { out.edgeErr = String(e).slice(0, 80); break; } }
   out.abandonReaccept = step('abandonReaccept', {
