@@ -5,6 +5,37 @@
 // offset from the foot line (+down) — all fractions of rendered sprite height.
 // Missing entries keep the game defaults.
 window.LX_ANIM_CALIB = {
+  "miraFallen": {
+    "idle": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.2
+    },
+    "walk": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.2
+    },
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.2
+    }
+  },
+  "miraFallencast": {
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.2
+    }
+  },
+  "miraFallencollapse": {
+    "attack": {
+      "s": 1,
+      "dx": 0,
+      "dy": 0.2
+    }
+  },
   "deranged_kuro": {
     "attack": {
       "s": 1,
@@ -3184,6 +3215,13 @@ window.LX_ANIM_CALIB = {
     }
   },
   "sovCrownShard": {
+    "idle": {
+      "s": 2,
+      "dx": 0,
+      "dy": 0
+    }
+  },
+  "miraEchoShard": {
     "idle": {
       "s": 2,
       "dx": 0,

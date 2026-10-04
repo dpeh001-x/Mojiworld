@@ -89,5 +89,7 @@ elderbark:{w:159,h:238,mul:1.343},
 meloncholy:{w:132,h:127,mul:1.672},
 pinechad:{w:171,h:204,mul:1.41},
 thornmaw:{w:106,h:119,mul:1.72},
+miraFallen:{w:120,h:170,mul:2},
+miraEchoShard:{w:34,h:34,mul:1.5},
 // --- end live-extracted ---
 };

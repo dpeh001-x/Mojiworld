@@ -70,6 +70,7 @@
     // Likewise King Krook's stomp and the Arbiter's verdict / column, which
     // gen_boss_resize_manifest.mjs sizes from the same boss in baseType().
     if (key.startsWith('kingKrook')) return 'kingKrook';
+    if (key.startsWith('miraFallen')) return 'miraFallen';   // v0.30.1627 mira-fallen: her cast + Gate sets
     if (key.startsWith('towerArbiter')) return 'towerArbiter';
     return key;
   }

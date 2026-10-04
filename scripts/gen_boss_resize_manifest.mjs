@@ -59,6 +59,7 @@ const BOX_H = {
   mooma: 151, octobaby: 160, pqConductor: 140, sundered_smith: 140,
   towerArbiter: 160, towerSovereign: 300, young_confused_barnaby: 140,
 };
+BOX_H.miraFallen = 170;   // v0.30.1627 mira-fallen: the Woman Who Turned Back
 const ZODIAC_ORDER = ['aries', 'taurus', 'gemini', 'cancer', 'leo', 'virgo',
   'libra', 'scorpio', 'sagittarius', 'capricorn', 'aquarius', 'pisces'];
 const ZODIAC_SIZE_MUL = { scorpio: 1.20, capricorn: 1.30 };
@@ -85,6 +86,7 @@ function baseType(key) {
   // Arbiter's verdict / column (_LX_BOSS_ATK_SETS): they came with no game box.
   if (key.startsWith('kingKrook')) return 'kingKrook';
   if (key.startsWith('towerArbiter')) return 'towerArbiter';
+  if (key.startsWith('miraFallen')) return 'miraFallen';   // v0.30.1627 mira-fallen: her cast + Gate sets
   return key;
 }
 // The on-screen box a frame of this set is drawn into, before calibration.
