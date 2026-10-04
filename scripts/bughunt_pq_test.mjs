@@ -87,11 +87,18 @@ try {
     const net0 = { c: net.connected, p: net.peers };
     net.connected = true; net.peers = { 9: { id: 9, map: game.currentMap, xi: '', x: player.x, y: player.y, _last: performance.now(), level: 30, at: getAtk(), maxHp: getMaxHp() } };
     try { _lxPqRestatMob(m, _lxPqParty(), false); _lxPqRestatMob(e, _lxPqParty(), false); out.duo = [m.exp, e.exp, m._pqN]; } finally { net.connected = net0.c; net.peers = net0.p; }
+    // a First-Class stowaway (every third mech): 1.8x HP and 1.45x ATK on top of the party formula, and the re-stat must not erase it
+    const f1 = mk(false), f2 = mk(false); f2._firstClass = true;
+    _lxPqRestatMob(f1, _lxPqParty(), false); _lxPqRestatMob(f2, _lxPqParty(), false);
+    const once1 = [f2.maxHp, f2.atk]; _lxPqRestatMob(f2, _lxPqParty(), false); _lxPqRestatMob(f2, _lxPqParty(), false);
+    out.fc = { plainHp: f1.maxHp, fcHp: once1[0], plainAtk: f1.atk, fcAtk: once1[1], thrice: [f2.maxHp, f2.atk], hpFrac: +(f2.currentHp / f2.maxHp).toFixed(3) };
     return out;
   });
   ok('Carriage: a normal mech pays exactly 1.5x its own baseline EXP', car.normal.mech === 'c' && !car.normal.elite && car.normal.exp === car.normal.want && car.normal.pq === car.normal.base, car.normal);
   ok('Carriage: an ELITE mech pays 1.5x its (elite-tier) baseline', car.elite.mech === 'c' && car.elite.elite && car.elite.exp === car.elite.want && car.elite.pq === car.elite.base, car.elite);
   ok('Carriage: three re-stats (and a duo re-stat) never grow the EXP', car.runs.every((r) => r[0] === car.normal.want && r[1] === car.elite.want) && car.duo[0] === car.normal.want && car.duo[1] === car.elite.want && car.duo[2] === 2, { runs: car.runs, duo: car.duo });
+
+  ok('Carriage: a First-Class stowaway keeps 1.8x HP and 1.45x ATK through the party re-stat, without compounding', car.fc.fcHp === Math.floor(car.fc.plainHp * 1.8) && car.fc.fcAtk === Math.floor(car.fc.plainAtk * 1.45) && car.fc.thrice[0] === car.fc.fcHp && car.fc.thrice[1] === car.fc.fcAtk && car.fc.hpFrac === 1, car.fc);
 
   // ---- coop-8 / coop-10 on the Carriage (a PQ map) ----
   const key = await ev(S, () => {
