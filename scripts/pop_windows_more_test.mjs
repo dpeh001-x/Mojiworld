@@ -4,7 +4,7 @@
 //     (Nunito 1000, ink stroke under the fill, berry slab), Nunito text; the Keybinds P5 plate stays;
 //   - the open Keybinds tab is the butter one and follows a tab switch (the kbm-on class); idle tabs are not butter;
 //   - Backups: Backup current save is butter, Secure Save berry, Done ink;
-//   - Edicts keeps its glossy glass (per user, v0.30.491) and only its face changes to Nunito;
+//   - Edicts is the pop punk frame (edicts-pop, per user): Nunito, the blurred overlay, a paper keyline (scripts/amnesiac_ease_test.mjs holds the rest);
 //   - the item tooltip is an ink body in a 2px ink edge on a berry slab, Nunito, and now carries data-rarity, so its
 //     rarity stripe (designed in v0.25.879, dead until now) shows in the rarity colour;
 //   - SCOPE: a key chip keeps its own face and background (v0.30.1163).
@@ -73,7 +73,7 @@ const on0 = R.keys.tabs0.filter((t) => t.on), on1 = R.keys.tabs1.filter((t) => t
 ok('the open Keybinds tab is the butter one, idle tabs are not, and it follows a tab switch', on0.length === 1 && on0[0].bg === 'rgb(255, 224, 122)' && R.keys.tabs0.filter((t) => !t.on).every((t) => t.bg !== 'rgb(255, 224, 122)')
   && on1.length === 1 && on1[0].tab === 'potions' && on1[0].bg === 'rgb(255, 224, 122)' && R.keys.tabs0.every((t) => t.face === 'Nunito'), { before: R.keys.tabs0, after: R.keys.tabs1.map((t) => t.tab + ':' + t.on) });
 ok('SCOPE: a key chip keeps its own look (v0.30.1163)', !R.keys.chip || R.keys.chip.bg !== 'rgb(255, 224, 122)', R.keys.chip);
-ok('Edicts keeps its glass (per user, v0.30.491) and only its face changes to Nunito', R.edicts.h2 === 'Nunito' && R.edicts.row === 'Nunito' && /blur/.test(R.edicts.glass || '') && !/13, 10, 20/.test(R.edicts.card), R.edicts);
+ok('Edicts is the pop punk frame: Nunito, the blurred overlay, a paper keyline (edicts-pop; was the v0.30.491 glass)', R.edicts.h2 === 'Nunito' && R.edicts.row === 'Nunito' && /blur/.test(R.edicts.glass || '') && R.edicts.card === 'rgb(247, 245, 239)', R.edicts);
 ok('the item tooltip is an ink body in a 2px ink edge on a berry slab, set in Nunito', R.tip.shown && R.tip.top === '2px rgb(13, 10, 20)' && /rgb\(125, 35, 82\) 4px 4px 0px/.test(R.tip.shadow) && R.tip.face === 'Nunito' && !/40, 24, 64/.test(R.tip.bg), R.tip);
 ok('the tooltip carries its rarity and shows it as a stripe in the rarity colour (the v0.25.879 stripe, never switched on before)', R.tip.rarity === 'legendary' && R.tip.left === '4px rgb(255, 184, 102)', { rarity: R.tip.rarity, left: R.tip.left });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));

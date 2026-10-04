@@ -93,7 +93,7 @@ try {
     await go('town'); out.gug = await talk(GUG);
     await click(/Who was the last Outsider\?/); await settle(); out.gugLast = text(); await click(/And the next\?/); await settle(); out.gugNext = text(); await close();
     player.dawnFragments = Object.keys(DAWN_FRAGMENTS); await talk(AM);
-    if (!(await click(/almost-morning/))) { await click(/Talk/); await settle(); await click(/almost-morning/); }
+    if (!(await click(/What is the Everdawn\?/))) { await click(/Talk/); await settle(); await click(/What is the Everdawn\?/); }   // amnesiac-ease: was 'Why is it always almost-morning?'
     await settle(); out.amSaga = text(); await close();
     // ---- 5. the town's bubbles, live ---------------------------------------------------------------------------------------------
     out.poolsDawn = Object.keys(DAWN).length >= 8 && Object.keys(DAWN).every((r) => pool(r) === DAWN[r]);
