@@ -39,7 +39,7 @@ const BOSSES = ['king', 'mooma', 'aetherion', 'gravitos', 'octobaby', 'pqConduct
   'young_confused_barnaby', 'kingKrook', 'sundered_smith',
   'zodiac_aries', 'zodiac_taurus', 'zodiac_gemini', 'zodiac_cancer', 'zodiac_leo', 'zodiac_virgo',
   'zodiac_libra', 'zodiac_scorpio', 'zodiac_sagittarius', 'zodiac_capricorn', 'zodiac_aquarius', 'zodiac_pisces'];
-const EXEMPT = ['mirrorSelf', 'towerArbiter', 'towerSovereign'];
+const EXEMPT = ['mirrorSelf', 'towerArbiter', 'towerSovereign', 'miraFallen'];   // v0.30.1627: the Woman Who Turned Back, a super boss tuned on her own (not a band monster)
 const bossSet = new Set([...BOSSES, ...EXEMPT]);
 const mobs = rows.filter((r) => !bossSet.has(r.t));
 const band = (lv) => {

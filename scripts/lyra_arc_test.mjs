@@ -24,7 +24,7 @@ await page.goto(URL + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof QUESTS !== 'undefined' && typeof MAPS !== 'undefined' && typeof _qnavDest === 'function', { timeout: 60000 });
 
 const r = await page.evaluate(() => {
-  const ids = ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge'];
+  const ids = ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge', 'q_lyra_last'];   // v0.30.1627 mira-fallen: VI closes the Distorted Portal
   const out = { chapters: [] };
   const npcNames = new Set();
   for (const id in MAPS) for (const n of (MAPS[id].npcs || [])) if (n && n.name) npcNames.add(n.name);
@@ -59,7 +59,7 @@ const r = await page.evaluate(() => {
       rewardCoins: (q.rewards || {}).mojicoins,
     });
   }
-  out.prereqExists = ['q_lyra_tear','q_lyra_cut','q_lyra_kin','q_lyra_forge'].every((k) => !!QUESTS[(QUESTS[k] || {}).prereq]);
+  out.prereqExists = ['q_lyra_tear','q_lyra_cut','q_lyra_kin','q_lyra_forge','q_lyra_last'].every((k) => !!QUESTS[(QUESTS[k] || {}).prereq]);
   // the subtle Sovereign hint must still be present for chapter IV to pay off
   const _src = [...document.querySelectorAll('script')].map((x) => x.textContent).join('');
   out.sovereignHint = /sapphire signet/i.test(_src);
@@ -108,7 +108,7 @@ for (const c of r.chapters) {
   check((c.rewardCoins | 0) > 0, `${c.qid} pays out`, c.rewardCoins);
 }
 check(r.prereqExists, 'chapter II\'s prereq points at a real quest', r.chapters[1] && r.chapters[1].prereq);
-check(JSON.stringify(r.chain) === JSON.stringify([null, 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin']), 'the six chapters form one ordered chain 0 -> I -> II -> III -> IV -> V', r.chain);
+check(JSON.stringify(r.chain) === JSON.stringify([null, 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge']), 'the seven chapters form one ordered chain 0 -> I -> II -> III -> IV -> V -> VI', r.chain);
 // the prelude must be reachable BEFORE the Lv 40 chapters, or it is not a prelude
 const pre = r.chapters[0], first = r.chapters[1];
 check(pre && first && pre.levelReq < first.levelReq, 'the prelude gates lower than chapter I (it is genuinely a prelude)', { prelude: pre && pre.levelReq, chapterI: first && first.levelReq });

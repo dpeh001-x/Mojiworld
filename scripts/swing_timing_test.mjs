@@ -88,7 +88,7 @@ const R = await page.evaluate(async () => {
   return out;
 });
 const A = Object.entries(R.all), miss = A.filter(([, r]) => !r.hit).map(([t]) => t);
-check(A.length === 26 && miss.length === 0, 'every animated swing lands on a hero standing in its box', { n: A.length, miss });
+check(A.length === 27 && miss.length === 0, 'every animated swing lands on a hero standing in its box', { n: A.length, miss });   // 27 since v0.30.1591: Deranged Kuro's swing came back with him (v0.30.1627)
 const offPeak = A.filter(([, r]) => r.hit && r.eff !== r.k).map(([t, r]) => ({ t, eff: r.eff, k: r.k }));
 check(miss.length === 0 && offPeak.length === 0, 'PEAK: the hit lands on the render showing the effect\'s 5th frame (its strike)', offPeak);
 const offStep = A.filter(([, r]) => r.hit && !(r.mon && r.mon.set !== 'other' && r.mon.i === r.monKey)).map(([t, r]) => ({ t, mon: r.mon, key: r.monKey }));

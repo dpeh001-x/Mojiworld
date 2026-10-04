@@ -87,7 +87,7 @@ ok(r.scalar === 0.375, 'the kill/chest/rebate coin scalar is 0.5 -> 0.375', r.sc
 ok(r.grantOf10k === 3750, 'so a 10,000 grant actually pays 3,750', r.grantOf10k);
 ok(near(r.meanChancePct, 10.22, 0.2), 'the mean quest gear chance is 13.62% -> ~10.22%', r.meanChancePct);
 ok(near(r.maxChancePct, 40.5, 0.2), 'and the highest is 54% -> 40.5%', r.maxChancePct);
-ok(r.guaranteed === 38, 'the 38 authored one-time guarantees are still guarantees', r.guaranteed);   // 36 + q_road_6 / q_road_7, the Road to the Four's two capstones (v0.30.1615)
+ok(r.guaranteed === 39, 'the 39 authored one-time guarantees are still guarantees', r.guaranteed);   // + q_lyra_last, Lyra VI's tier-5 piece (v0.30.1627)   // 36 + q_road_6 / q_road_7, the Road to the Four's two capstones (v0.30.1615)
 
 // --- the lever that actually moves mob kills ------------------------------------------------------
 // v0.30.756 cut MOJICOIN_GAIN_MULT and called mob kills done. They were not: the scalar cancels for

@@ -18,7 +18,7 @@ const ROOT = process.env.SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(i
 const require = createRequire(path.join(ROOT, 'package.json')); const { chromium } = require('playwright-core'); const sharp = require('sharp'); sharp.cache(false);
 const PORT = process.env.PORT || '13923'; let pass = 0, fail = 0;
 const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d !== undefined ? '  ' + JSON.stringify(d).slice(0, 600) : '')); ok ? pass++ : fail++; };
-const KEPT = ['pathsBane', 'zodiac_pisces'], REDRAWN = ['scorpion', 'mummy', 'nougatBear', 'thornmaw', 'smithgolem', 'shardlich', 'ossuaryTyrant', 'echoKnight',
+const KEPT = ['pathsBane', 'zodiac_pisces', 'miraFallen' /* v0.30.1627: her Twin Verdict X-slash is drawn in her own attack set */], REDRAWN = ['scorpion', 'mummy', 'nougatBear', 'thornmaw', 'smithgolem', 'shardlich', 'ossuaryTyrant', 'echoKnight',
   'pqConductor', 'blockPopo', 'blockHupo', 'blockRhirhi', 'blockGary', 'legosaurus', 'taiger', 'willeo', 'young_confused_barnaby', 'fatDragon',
   'sundered_smith', 'goblinMauler', 'graveReaver', 'zodiac_aries', 'zodiac_capricorn', 'towerArbiter', 'towerSovereign'];
 // FILES
