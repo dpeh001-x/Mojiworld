@@ -39,9 +39,10 @@ try {
     // 2. Lv 19 -> 20
     player.quests = { active: {}, completed: {}, unlocked: {} }; _ensureQuests();
     for (const k of ['q_act1_waking', 'q_act1_sleepers', 'q_act1_quiet', 'q_act1_recipe', 'q_act1_name', 'q_act1_firstword']) player.quests.completed[k] = 1;
-    player.level = 19; tickQuestUnlocks(); toasts.length = 0;
-    player.level = 20; tickQuestUnlocks(); await sleep(300);
-    out.at20 = { active: CRIT.filter((k) => player.quests.active[k]), trialOffered: !!player.quests.unlocked.q_inner_dim_trial, crit: toasts.filter((t) => /CRITICAL/.test(t)), story: toasts.filter((t) => /STORY/.test(t) && /Four Captains/.test(t)) };
+    player.level = 9; tickQuestUnlocks(); out.at9 = !!player.quests.active.q_four_captains; toasts.length = 0;   // v0.30.1630 (per user) The Four Captains opens at Lv 10
+    player.level = 10; tickQuestUnlocks(); await sleep(300);
+    out.at20 = { active: CRIT.filter((k) => player.quests.active[k]), trialOffered: false, crit: toasts.filter((t) => /CRITICAL/.test(t)), story: toasts.filter((t) => /STORY/.test(t) && /Four Captains/.test(t)) };
+    player.level = 20; tickQuestUnlocks(); await sleep(200); out.at20.trialOffered = !!player.quests.unlocked.q_inner_dim_trial; out.at20.activeAt20 = CRIT.filter((k) => player.quests.active[k]);
     // 3. talk: another captain does not count, yours does
     _questTalkTo('Will'); const afterWill = !!player.quests.completed.q_four_captains;
     out.talkTo = QUESTS.q_four_captains.talkTo;
@@ -74,7 +75,7 @@ try {
     window.showToast = _ts; return out;
   }, CRIT);
   ok('1. exactly the eight are critical', JSON.stringify(R.flagged) === JSON.stringify([...CRIT].sort()), R.flagged);
-  ok('2. Lv 20 starts The Four Captains by itself; the Mirror Self Trial waits to be taken from your captain', R.at20.active.includes('q_four_captains') && !R.at20.active.includes('q_inner_dim_trial') && R.at20.trialOffered, R.at20);
+  ok('2. Lv 10 starts The Four Captains by itself (not at Lv 9); the Mirror Self Trial is offered at Lv 20 and waits to be taken from your captain', !R.at9 && R.at20.active.includes('q_four_captains') && !R.at20.active.includes('q_inner_dim_trial') && R.at20.trialOffered && R.at20.activeAt20.includes('q_four_captains') && !R.at20.activeAt20.includes('q_inner_dim_trial'), R.at20);
   ok('2. ...with a ★ CRITICAL toast and no duplicate STORY toast for it', R.at20.crit.some((t) => /Four Captains/.test(t)) && R.at20.story.length === 0, R.at20);
   ok('3. The Four Captains names your captain (archer: Lady Hong); Will does not count, Lady Hong completes it', JSON.stringify(R.talkTo) === '["Lady Hong"]' && !R.talk.afterWill && R.talk.afterHong, { talkTo: R.talkTo, ...R.talk });
   ok('4. a critical quest cannot be abandoned, even forced', R.abandon.ret === false && R.abandon.still, R.abandon);
