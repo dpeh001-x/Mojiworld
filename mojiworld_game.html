@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1634';
+const GAME_VERSION = 'v0.30.1635';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53651,7 +53651,7 @@ const _LX_PAD_MODAL_IDS = ['lo-auth', 'death-overlay', 'dialog', 'settings-modal
   'story-beat-overlay',
   // v0.30.x — seven ids the PAUSE registry treats as blocking were absent here, so a
   // controller could reach none of them; bravo-boon-modal is a MANDATORY expedition choice.
-  'reforge-modal', 'bravo-boon-modal', 'exp-door-modal', 'exp-puzzle-modal', 'exp-seed-modal', 'everdawn-welcome-overlay', 'captains-teaser-overlay', 'barnaby-fall-overlay', 'game-complete-overlay',
+  'reforge-modal', 'bravo-boon-modal', 'exp-door-modal', 'exp-puzzle-modal', 'exp-seed-modal', 'everdawn-welcome-overlay', 'captains-teaser-overlay', 'barnaby-fall-overlay', 'kill-film-overlay', 'game-complete-overlay',
   'edicts-modal',   // v0.30.x — was unlisted, so the stick drove the player around behind it
   'lx-pause',       // v0.30.x (audit U4) — the pause card
   // v0.29.7xx — the wardrobe's Character Studio editor (opened from the U
@@ -77938,6 +77938,101 @@ function _lxPlayBarnabyFall(_tries) {
     return true;
   } catch (e) { try { game.paused = false; } catch (e2) {} _off(); return false; }
 }
+// v0.30.1635 - KILL FILMS: a once-per-save full-screen film after a boss's first REAL kill (not an Echo Keeper rematch, an
+// expedition boss or a mirage) - the Barnaby's-fall pattern as a table, so the next film is one row. Tap or any key skips it,
+// a missing file closes it, the map's music steps aside and comes back after; the shared overlay id 'kill-film-overlay' is a
+// registered pause surface, pad modal and cinematic-on-screen. Warmed into the HTTP cache when its boss spawns.
+// THE SMITH'S ASHES (per user: "When the sundered forge dies, itll dissolve into ashes and get absorb by the boss distorted
+// mira's hands in her specialised map and then she will summon her shards and face directly at the camera straight on before
+// facing you off in an epic death duel", then "Make the characters more anime partial 3d styled, shorten the film to 10s ...
+// in the style of the gravitos ending videos", "USE ZODIAC_BOSS instead, and soften the other SFX" and "ship it after
+// defeating the sundered smith"): the Sundered Smith crumbles to ash in his forge; on the Last Step the Woman Who Turned Back
+// draws the ash into her hands, raises her shards, stares down the lens and faces the hero (Higgsfield Seedance 2.5, scored
+// with the zodiac boss theme - clip_mira_ashes.SPEC.md).
+const LX_KILL_FILMS = {
+  sundered_smith: { key: 'mira_ashes', src: 'steam/higgsfield/cinematics/clip_mira_ashes.mp4', track: 'audio/bgm_zodiac_boss.mp3' },
+};
+function _lxKillFilmWarm(m) {   // from the spawn path: fetch + drain, once a session, while the film is still unseen
+  try {
+    const f = m && LX_KILL_FILMS[m.type]; if (!f || window['_lxKFWarm_' + f.key]) return;
+    if (typeof player !== 'undefined' && player && player._storyBeatsSeen && player._storyBeatsSeen[f.key]) return;
+    window['_lxKFWarm_' + f.key] = true;
+    fetch(f.src).then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => {});
+  } catch (e) {}
+}
+function _lxKillFilmKill(m) {   // from killMonster, beside the Sovereign's and Barnaby's falls
+  try {
+    const f = m && LX_KILL_FILMS[m.type];
+    if (!f || m._echoBoss || m._expeditionBoss || m._isMirage || m._kfPlayed) return;
+    if (typeof player === 'undefined' || !player || (player._storyBeatsSeen && player._storyBeatsSeen[f.key])) return;
+    if (game.expedition && game.expedition.active) return;
+    m._kfPlayed = true;
+    window._lxKillFilmPending = Date.now();
+    setTimeout(() => _lxPlayKillFilm(f), 1500);   // after the takedown's slow-mo
+  } catch (e) { window._lxKillFilmPending = 0; }
+}
+function _lxPlayKillFilm(f, _tries) {
+  const _off = () => { try { window._lxKillFilmPending = 0; } catch (e) {} };
+  try {
+    if (!f || typeof player === 'undefined' || !player) { _off(); return false; }
+    if (!player._storyBeatsSeen) player._storyBeatsSeen = {};
+    if (player._storyBeatsSeen[f.key]) { _off(); return false; }       // once per save
+    if (document.getElementById('kill-film-overlay')) return false;
+    // a boon pick, a dialog, a story beat or another film may still be up: wait for a clear screen; after 2 min give up unseen
+    // (the next real kill tries again) rather than open over whatever is holding the screen
+    const _sb = document.getElementById('story-beat-overlay');
+    const _busy = (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen()) || (_sb && _sb.classList.contains('on'))
+      || !!document.getElementById('captains-teaser-overlay') || !!document.getElementById('barnaby-fall-overlay');
+    if (_busy) { if ((_tries || 0) < 240) setTimeout(() => _lxPlayKillFilm(f, (_tries || 0) + 1), 500); else _off(); return true; }
+    player._storyBeatsSeen[f.key] = true;
+    if (typeof saveState === 'function') saveState();
+    const host = document.querySelector('.game-wrapper') || document.body;
+    const ov = document.createElement('div');
+    ov.id = 'kill-film-overlay'; ov.dataset.film = f.key;
+    ov.style.cssText = 'position:absolute; inset:0; z-index:300; background:#000; display:flex; align-items:center;'
+      + 'justify-content:center; overflow:hidden; opacity:0; transition:opacity 500ms ease; cursor:pointer;';
+    const v = document.createElement('video');
+    v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+    v.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#000;';
+    const vol = (typeof _sbClipSoundVol === 'function') ? _sbClipSoundVol() : 0.6;
+    v.volume = Math.max(0, Math.min(1, vol)); v.muted = !(vol > 0);
+    const skip = document.createElement('div');
+    skip.textContent = 'tap or press any key to skip';
+    skip.style.cssText = 'position:absolute; left:0; right:0; bottom:14px; text-align:center; font-size:11px; letter-spacing:1.5px;'
+      + 'text-transform:uppercase; color:rgba(255,255,255,0.42); pointer-events:none; text-shadow:0 1px 4px #000;';
+    ov.appendChild(v); ov.appendChild(skip);
+    const _wasPaused = !!game.paused;
+    game.paused = true;
+    // the map's music steps aside (a silent score owns the mix) and is handed back on close
+    try { if (typeof _cineScoreStart === 'function') _cineScoreStart(f.track || 'audio/bgm_boss.mp3', { loop: true, vol: 0 }); } catch (e) {}
+    let _done = false;
+    const _close = () => {
+      if (_done) return; _done = true;
+      try { window.removeEventListener('keydown', _key, true); } catch (e) {}
+      ov.style.opacity = '0';
+      setTimeout(() => {
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+        try { ov.remove(); } catch (e) {}
+        game.paused = _wasPaused;
+        try { if (typeof _cineScoreStop === 'function') _cineScoreStop(600, true); } catch (e) {}
+        _off();
+      }, 500);
+    };
+    const _key = (e) => { if (e && e.key === 'F12') return; if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };
+    ov.addEventListener('click', _close);
+    window.addEventListener('keydown', _key, true);
+    v.addEventListener('ended', _close, { once: true });
+    v.addEventListener('error', _close, { once: true });
+    host.appendChild(ov);
+    v.src = f.src;
+    requestAnimationFrame(() => { ov.style.opacity = '1'; });
+    const p = v.play();
+    if (p && p.catch) p.catch(() => { try { v.muted = true; const q = v.play(); if (q && q.catch) q.catch(_close); } catch (e) { _close(); } });
+    setTimeout(_close, 40000);   // backstop: never hold the game if 'ended' never fires
+    game._lxKillFilmEl = v;
+    return true;
+  } catch (e) { try { game.paused = false; } catch (e2) {} _off(); return false; }
+}
 // v0.26.946 — Per-map sprite preloader. Fills the SAME memoized registries
 // the renderer reads (_monsterFramesFor / _npcIdleFrame), then resolves when
 // every frame has loaded + decoded (8s per image, 12s total cap), so callers
@@ -81681,6 +81776,7 @@ function spawnMonster(x, y, type, isBoss, isMiniBoss) {
     window._lxBarnabyFallWarm = true;
     try { fetch(LX_BARNABY_FALL).then((r) => (r && r.ok) ? r.blob() : null).then(() => {}).catch(() => {}); } catch (e) {}
   }
+  if (_spawned && typeof _lxKillFilmWarm === 'function') _lxKillFilmWarm(_spawned);   // v0.30.1635 kill films are primed when their boss spawns
   if (_spawned && _spawned._n0 === undefined) { _spawned._n0 = _spawned.name; _spawned._w0 = _spawned.w; _spawned._h0 = _spawned.h; }   // the natural name / size: a later change is the host's to send (see _coopTickMonsters)
   return _spawned;
 }
@@ -111423,6 +111519,7 @@ function _killMonsterRaw(m) {
   }
   // v0.30.1608 - Barnaby's fall: the first real kill of Young Confused Barnaby plays the film (once per save, see _lxBarnabyFallKill)
   try { if (typeof _lxBarnabyFallKill === 'function') _lxBarnabyFallKill(m); } catch (e) {}
+  try { if (typeof _lxKillFilmKill === 'function') _lxKillFilmKill(m); } catch (e) {}   // v0.30.1635 kill films (LX_KILL_FILMS): the Smith's ashes
   // v0.25.61 — quest progression hook
   // v0.26.277 — Skip quest tick inside an active expedition. The
   // expedition is a sandboxed re-run; kills here shouldn't tick
@@ -178456,7 +178553,7 @@ let _cineMixIdleTicks = 0;
 function _cineAnythingOnScreen() {
   try {
     if (typeof window !== 'undefined' && window._prologueActive) return true;
-    for (const id of ['gravitos-entry-cine', 'prologue-dagger-cine', 'captains-teaser-overlay', 'barnaby-fall-overlay']) {
+    for (const id of ['gravitos-entry-cine', 'prologue-dagger-cine', 'captains-teaser-overlay', 'barnaby-fall-overlay', 'kill-film-overlay']) {
       if (document.getElementById(id)) return true;
     }
     const sb = document.getElementById('story-beat-overlay');
@@ -180101,7 +180198,7 @@ const _BGM_MAP_FILES = {
 };
 // v0.30.1627 mira-fallen: the Last Step in every per-map table (separate lines, so no other map's line changes)
 _MAP_FLOOR_MATERIAL.lastStep = 'rock'; _MAP_FLOOR_PAL.lastStep = { top: '#6e4a7a', body: '#3e2448' }; _WM_BIOME_ICON.lastStep = '✦'; MAP_ICONS.lastStep = '✦';
-BG_IMAGES.lastStep = _loadBG('backgrounds/bg_v3_lastStep.webp'); _AMBIENT_FILES.lastStep = 'audio/ambient/temple.mp3'; _BGM_MAP_FILES.lastStep = 'audio/bgm_distorted_portal.mp3';
+BG_IMAGES.lastStep = _loadBG('backgrounds/bg_v3_lastStep.webp'); _AMBIENT_FILES.lastStep = 'audio/ambient/temple.mp3'; _BGM_MAP_FILES.lastStep = 'audio/bgm_zodiac_boss.mp3';   /* v0.30.1635 per user: her fight plays the zodiac boss theme, the film's own score */
 const _bgmMapEls = Object.create(null);
 // v0.25.440 — track whether the player has produced a user gesture that
 // unlocks autoplay. Lazy-created audio elements made AFTER unlock get an
@@ -190757,6 +190854,7 @@ const _LX_EXTRA_PAUSE_SURFACES = [
   { id: 'everdawn-welcome-overlay', mode: 'display' },   // first arrival in Everdawn
   { id: 'captains-teaser-overlay',  mode: 'display' },   // v0.30.1554 the four captains' teaser
   { id: 'barnaby-fall-overlay',     mode: 'display' },   // v0.30.1608 Barnaby's fall (after the Lost Sentinel)
+  { id: 'kill-film-overlay',        mode: 'display' },   // v0.30.1635 kill films (LX_KILL_FILMS)
   // v0.30.x — openEdictsPanel builds a full-viewport overlay at z-index 520 on the
   // BODY and was in none of the five registries: the sim ticked underneath it, Esc
   // did nothing, no controller could reach its close button, and the death overlay
