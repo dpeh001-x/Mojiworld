@@ -300,7 +300,9 @@
 // so a returning browser would keep drawing the old punch for a session.
 // v0.30.1634 - v159 -> v160. the Cinnabar Gates' world-map emblem (Sprites/world/regions/cinnabarCaves.webp, the torii for the crystal) is REPLACED under their own names
 // so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v160';   // v0.30.1634 - Cinnabar Gates emblem (same name)
+// v0.30.1638 - v160 -> v161. Gravitos's form 1 chest blast frames 0-8 and its attack still are REPLACED under their own names, so a
+// returning browser would keep drawing the old pose for a session.
+const CACHE = 'mojiworld-assets-v161';   // v0.30.1638 - Gravitos form 1 chest blast remake (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
