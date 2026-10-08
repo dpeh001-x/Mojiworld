@@ -108,7 +108,7 @@ try {
   });
   if (r.err) throw new Error(r.err);
   console.log(`build ${r.ver}  sovereign exp ${r.sov.exp} jump ${r.sov.jump}  mob x${r.mobMul}`);
-  ok('the Sovereign pays 2.5x — 28,000 -> 70,000 EXP', r.sov.exp === 70000, `${r.sov.exp}`);
+  ok('the Sovereign pays 2.5x — 28,000 -> 70,000 EXP, and x1.467 with his HP in v0.30.1646 (per user): 102,667', r.sov.exp === 102667, `${r.sov.exp}`);
   ok('the Sovereign cannot jump at all (jump: 0 on the type AND on the spawned boss)', r.sov.jump === 0 && r.spawned.jump === 0,
     `type ${r.sov.jump}, spawned ${r.spawned.jump}`);
   ok('...and watched live for 20s it never leaves the ground', r.watch.yRange <= 2 && !r.watch.everNegVy,

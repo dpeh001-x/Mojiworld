@@ -50,8 +50,8 @@ const R = await page.evaluate(() => {
 await browser.close(); server.kill();
 
 // Values as they stood before this change.
-const WAS_HEAD = { hp: 2278125,   /* 3,037,500 less the 25% monster HP cut in v0.30.1617 */ atk: 324, def: 27, eva: 126, exp: 1500000, coins: 70000, speed: 0.4 };
-const WAS_LEG  = { hp: 450000,   /* 600,000 less the 25% cut */ atk: 120, def: 160, eva: 90, exp: 4200, coins: 1800, speed: 0 };
+const WAS_HEAD = { hp: 3341250,   /* 3,037,500 + 10% (v0.30.1646: HP back to the pre-cut value +10% and DEF -15% (per user); EXP follows HP) */ atk: 324, def: 27, eva: 126, exp: 2200000, coins: 70000, speed: 0.4 };
+const WAS_LEG  = { hp: 660000,   /* 600,000 + 10% */ atk: 120, def: 136, eva: 90, exp: 6160, coins: 1800, speed: 0 };
 
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 210) });
@@ -72,7 +72,7 @@ ok('CONTROL: all four tentacles still share one stat line',
 // The head takes all four as +20% derivations.
 // DEF is no longer a +20% derivation: v0.30.351 set it outright (per user, from the DEF audit: "Octobaby
 // 100", up from the derived 32 - a Lv-50 boss had been taking more per hit than the Lv-50 field).
-ok('Octobaby DEF is the authored 100', H.def === 100, `def ${H.def} (was 32, a +20% derivation; set outright in v0.30.351)`);
+ok('Octobaby DEF is the authored 100 less 15% (v0.30.1646, per user): 85', H.def === 85, `def ${H.def} (was 32, a +20% derivation; set outright in v0.30.351)`);
 for (const [k, label] of [['hp', 'HP'], ['atk', 'ATK'], ['eva', 'evasion']]) {
   ok(`Octobaby ${label} is +20%`, near(H[k], WAS_HEAD[k] * 1.2),
      `${WAS_HEAD[k]} -> ${H[k]} (x${(H[k] / WAS_HEAD[k]).toFixed(3)})`);

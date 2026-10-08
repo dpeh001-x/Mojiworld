@@ -91,13 +91,13 @@ try {
     return o;
   });
   console.log(`build ${r.ver}  arbiter def ${r.arbiter.def}  run@70 ${r.exp.at70}  clear bonus ${r.exp.clearBonus}`);
-  ok('the Arbiter carries the authored DEF 300, with HP and ATK unchanged', r.arbiter.def === 300 && r.arbiter.hp === 43500 && r.arbiter.atk === 395,   // v0.30.1617: HP 58,000 less 25% (per user)
+  ok('the Arbiter carries the authored DEF 300 less 15% (255), with HP and ATK unchanged', r.arbiter.def === 255 && r.arbiter.hp === 63800 && r.arbiter.atk === 395,   // v0.30.1617: HP 58,000 less 25% (per user); v0.30.1646: HP back to the pre-cut value +10% and DEF -15% (per user)
     JSON.stringify(r.arbiter));
   // Per user: Arbiter 300, Sovereign 250. That deliberately puts the mid-boss's DEF ABOVE the
   // apex's, so the old "stays under the Sovereign" rule no longer holds and is not asserted.
   // What IS asserted is the invariant that actually bit: the declaration and the authoritative
   // table must agree, or the source is describing a fight nobody has.
-  ok('the Arbiter and Sovereign are on their authored DEF', r.arbiter.def === 300 && r.sovereign.def === 250,
+  ok('the Arbiter and Sovereign are on their authored DEF (300 / 250, less 15% in v0.30.1646: 255 / 213)', r.arbiter.def === 255 && r.sovereign.def === 213,
     `arbiter ${r.arbiter.def} vs sovereign ${r.sovereign.def}`);
   ok('that DEF really eats damage in the live pipeline (>=15% less per hit than at 90)', r.dmg.reduction !== null && r.dmg.reduction >= 0.15,
     `${r.dmg.atOldDef90} -> ${r.dmg.atShippedDef} per hit, ${Math.round((r.dmg.reduction || 0) * 100)}% less`);

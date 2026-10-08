@@ -82,8 +82,8 @@ const stats = await page.evaluate(() => {
   return o;
 });
 // v0.30.351 replaced the v0.30.344 profile cut (0.80 -> 0.64 of the ramp) with an absolute DEF of 80 (_Z_DEF_ABS).
-ok('Gemini DEF is the pinned 80 (v0.30.351), still under the 0.64x cut it replaced',
-  stats.gemDef === 80 && stats.impliedProfile < 0.64,
+ok('Gemini DEF is the pinned 80 (v0.30.351) less 15% = 68 (v0.30.1646, per user), still under the 0.64x cut it replaced',
+  stats.gemDef === 68 && stats.impliedProfile < 0.64,
   `def ${stats.gemDef} vs ramp ${stats.baseAtGem} = ${stats.impliedProfile.toFixed(3)}x`);
 
 // ---- the chase, measured on a live boss ------------------------------------

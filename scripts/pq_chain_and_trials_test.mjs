@@ -137,8 +137,8 @@ const r3 = await page.evaluate(async () => {
 });
 // v0.30.262, per user on playtest: the Mirror settles at 250,000 HP (was 288,000 here at v0.30.260; pre-buff
 // 213,116) and speed 2.9 (was 3.5) - "a trial rather than a wall". Evasion stays 190. Spawn variance on top.
-ok('Mirror Self hp comes from the stats table at ~187500 (250000 in v0.30.262, less the 25% HP cut in v0.30.1617; spawn variance on top)',
-  r3.hp >= 176000 && r3.hp <= 199000, { hp: r3.hp, was: 213116 });
+ok('Mirror Self hp comes from the stats table at ~275000 (250000 in v0.30.262, cut 25% in v0.30.1617, back +10% in v0.30.1646 per user; spawn variance on top)',
+  r3.hp >= 258000 && r3.hp <= 292000, { hp: r3.hp, was: 213116 });
 ok('...evasion 190 and speed 2.9 from the literal (v0.30.262)',
   r3.evasion === 190 && Math.abs(r3.speed - 2.9) < 0.01, { evasion: r3.evasion, speed: r3.speed });
 ok('MIRROR JUDGEMENT telegraphs, then takes ~70% max HP and ALL the MP',

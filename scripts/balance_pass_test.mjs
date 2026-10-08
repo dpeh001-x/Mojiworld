@@ -71,8 +71,8 @@ ok('Apotheosis: 15 / 14 / 14.4 / 16, flat 76 / 76 / 96 / 318 (doubled in v0.30.1
   && tables.apo.lightning.mul === 14.4 && tables.apo.void.mul === 16
   && tables.apo.fire.flat === 76 && tables.apo.ice.flat === 76 && tables.apo.lightning.flat === 96 && tables.apo.void.flat === 318, JSON.stringify(tables.apo));
 // v0.30.351 (a8177142) - "seven boss DEF values set by hand off the audit": Krook DEF 375 -> 120. The ATK half stands.
-ok('Krook is deadlier: ATK 455 -> 590, DEF hand-set to 120',
-  tables.krook.def === 120 && tables.krook.atk === 590, JSON.stringify(tables.krook));
+ok('Krook is deadlier: ATK 455 -> 590, DEF hand-set to 120 (102 after the -15% DEF in v0.30.1646, per user)',
+  tables.krook.def === 102 && tables.krook.atk === 590, JSON.stringify(tables.krook));
 
 // ---- Deadeye Protocol: a lone target takes the volley ---------------------------
 // v0.30.610 (99afedd3, per user) revamped Deadeye Protocol: the homing 'gale' rounds with 3 rebounds are gone, and a

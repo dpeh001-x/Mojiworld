@@ -111,7 +111,7 @@ ok('damage through the hit path lands and is booked as "taken since her last rit
 const HEAL_FRAC = 0.30, HEAL_CAP = 0.015;
 ok('a ritual left alone heals 30% of what she lost, not a flat share of max HP', !r.err && r.healed > 0 && Math.abs(r.healed - Math.floor((r.hp0 - r.afterHit) * HEAL_FRAC)) <= 2 && r.healed < r.maxHp * HEAL_CAP,
   r.err || `healed ${r.healed} of ${r.hp0 - r.afterHit} lost (cap 1.5% = ${Math.floor(r.maxHp * HEAL_CAP)})`);
-ok('her DEF is halved: the stats row reads 720 (was 1441) and the spawned boss carries it', !r.err && r.defRow === 720 && r.defSpawn > 0 && Math.abs(r.defSpawn / r.defBump - 720) <= 720 * (r.jitter || 0) + 1,
+ok('her DEF is halved: the stats row reads 612 (720 of 1441, both -15% in v0.30.1646, per user) and the spawned boss carries it', !r.err && r.defRow === 612 && r.defSpawn > 0 && Math.abs(r.defSpawn / r.defBump - 612) <= 612 * (r.jitter || 0) + 1,
   r.err || `row ${r.defRow}; spawned ${r.defSpawn} (level bump ${r.defBump && r.defBump.toFixed(3)}, jitter ${r.jitter})`);
 ok('so her HP visibly stays DOWN after the ritual (bar no longer pinned at 100%)', !r.err && r.afterHit + r.healed < r.hp0, r.err || `hp0 ${r.hp0} -> ${r.afterHit + r.healed}`);
 ok('three hits inside the 1.1s window BREAK the ritual', !r.err && r.brokeAt === 0 && !r.chan2 && r.brokenFlag >= 1, r.err || `channel ${r.brokeAt} channeling ${r.chan2} broken ${r.brokenFlag}`);

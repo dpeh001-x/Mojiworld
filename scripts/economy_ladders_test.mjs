@@ -70,7 +70,7 @@ const checks = [
   ['a tower death waives the coin haircut the snapshot restore was meant to wipe', haircut === true],
   // v0.30.x — corrected: v0.30.369 halved Virgo's DEF ON PURPOSE (1441 -> 720, 'Virgo heal rate lower still, DEF halved';
   // scripts/virgo_ritual_test.mjs pins it). v0.30.524 read that as a data slip and undid it. It stays halved.
-  ["Virgo keeps the halved DEF v0.30.369 gave her", r.virgoDef === 720 && r.leoDef === 1441, `virgo ${r.virgoDef} leo ${r.leoDef}`],
+  ["Virgo keeps the halved DEF v0.30.369 gave her (720 of 1441; both -15% in v0.30.1646, per user)", r.virgoDef === 612 && r.leoDef === 1225, `virgo ${r.virgoDef} leo ${r.leoDef}`],
   ['the Duo Trial diminishes on a repeat kill', r.duoFirst > 0 && r.duoSecond < r.duoFirst, `${r.duoFirst} -> ${r.duoSecond}`],
   ['no page errors', errs.length === 0, errs.join(' | ')],
 ];

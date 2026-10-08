@@ -121,7 +121,7 @@ for (const k of ['clockworkExpress', 'clockworkUnderpassLobby']) {
 }
 check(!!r.offMap && !String(r.offMap.name || '').startsWith('Express ') && r.offMap.hp < r.expected.hp / 10,
       'the same mob off the express maps is NOT express-scaled (gate holds)', r.offMap);
-check(!!r.bossBase && r.bossBase.hp <= 80000,
+check(!!r.bossBase && r.bossBase.hp <= 120000,   // v0.30.1646: HP back to the pre-cut value +10% and DEF -15% (per user) - his authored base is ~81k now
       "the Conductor's spawn base stays authored — the loadMap hook still owns his scale", r.bossBase);
 check(errs.length === 0, 'no page errors', [...new Set(errs)].slice(0, 3));
 console.log(bad ? `\n${bad} FAILED` : '\nall green');

@@ -62,7 +62,7 @@ const c = await ev(() => {
   const noElite = (fn) => { Math.random = () => 0.999999; try { return fn(); } finally { Math.random = _rnd; } };
   const sp = (t, boss) => noElite(() => { game.monsters = []; spawnMonster(player.x + 200, player.y, t, !!boss); const m = game.monsters[game.monsters.length - 1]; return { coin: m.mojicoins, hp: m.maxHp, flag: !!m._coinCurved, table: T[t] ? T[t].coin : null }; });
   loadMap('forest', 300);
-  const out = { has, curve: { elderbark: _lxCoinCurve(5785, 57846, false), sandhusk: _lxCoinCurve(284, 2838, false), scorpion: _lxCoinCurve(174, 1730, false), boss: _lxCoinCurve(329664, 14544000, true)   /* v0.30.1617: the table HPs after the 25% cut */ } };
+  const out = { has, curve: { elderbark: _lxCoinCurve(5785, 84841, false), sandhusk: _lxCoinCurve(284, 4162, false), scorpion: _lxCoinCurve(174, 2537, false), boss: _lxCoinCurve(329664, 21331200, true)   /* v0.30.1617: the table HPs after the 25% cut; v0.30.1646: x1.467 back up (per user) - the knee moved with them */ } };
   out.elderbark = sp('elderbark'); out.sandhusk = sp('sandhusk'); out.scorpion = sp('scorpion'); out.virgo = sp('zodiac_virgo', true);
   noElite(() => { game.monsters = []; spawnMonster(player.x + 200, player.y, 'elderbark', false, true); });
   const eld = game.monsters[game.monsters.length - 1]; out.elder = { coin: eld.mojicoins, hp: eld.maxHp, flag: !!eld._coinCurved, mini: !!eld.isMiniBoss };
@@ -90,7 +90,7 @@ const c = await ev(() => {
   return out;
 });
 ok('the coin curve and the drop-time reader exist', !c.err && c.has, c.err || '');
-ok('curve: 2,250-HP knee (3,000 before the 25% HP cut in v0.30.1617), HP^0.45 above it — elderbark 5,785 -> ~970, sandhusk 284 -> ~251, scorpion (1,730 HP) untouched, bosses untouched', !c.err && c.curve && near(c.curve.elderbark, 970, 0.02) && near(c.curve.sandhusk, 251, 0.02) && c.curve.scorpion === 174 && c.curve.boss === 329664, c.err || JSON.stringify(c.curve));
+ok('curve: 3,300-HP knee (3,000 before the 25% HP cut in v0.30.1617, 2,250 after, 3,300 since HP went back +10% in v0.30.1646), HP^0.45 above it — elderbark 5,785 -> ~970, sandhusk 284 -> ~251, scorpion (2,537 HP) untouched, bosses untouched', !c.err && c.curve && near(c.curve.elderbark, 970, 0.02) && near(c.curve.sandhusk, 251, 0.02) && c.curve.scorpion === 174 && c.curve.boss === 329664, c.err || JSON.stringify(c.curve));
 ok('a spawned elderbark carries the curved coins and the flag (table 5,785 -> ~970 ±jitter)', !c.err && c.elderbark && c.elderbark.flag && near(c.elderbark.coin, 970, 0.12), c.err || JSON.stringify(c.elderbark));
 ok('a spawned sub-knee scorpion is unchanged (~174), a spawned Virgo keeps her boss payout (~318k-330k)', !c.err && c.scorpion && near(c.scorpion.coin, 174, 0.12) && c.virgo && near(c.virgo.coin, 329664, 0.12) && c.virgo.flag, c.err || JSON.stringify({ s: c.scorpion, v: c.virgo }));
 ok('an ELDER (mini-boss, 5x HP) is curved too — every spawn is', !c.err && c.elder && c.elder.mini && c.elder.flag && c.elder.coin < 5785 * 3, c.err || JSON.stringify(c.elder));

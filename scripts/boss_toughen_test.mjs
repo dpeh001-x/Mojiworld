@@ -63,10 +63,10 @@ const stats = await page.evaluate(() => ({
 // DEF values follow the later explicit DEF pass (per user: "Barnaby DEF to
 // 100 / Sundered smith to 120"), which superseded the 190/210 this file first
 // asserted; the HP/ATK toughening stands.
-ok('Barnaby is tougher: HP 1.65M (2.2M before the 25% monster HP cut in v0.30.1617), ATK 290, DEF 100 (was 1.6M/225/76)',
-  stats.barn.hp === 1650000 && stats.barn.atk === 290 && stats.barn.def === 100, JSON.stringify(stats.barn));
-ok('the Smith is tougher: HP 1.95M (2.6M before the 25% monster HP cut in v0.30.1617), ATK 350, DEF 120 (was 1.8M/275/63)',
-  stats.smith.hp === 1950000 && stats.smith.atk === 350 && stats.smith.def === 120, JSON.stringify(stats.smith));
+ok('Barnaby is tougher: HP 2.42M (2.2M before the 25% cut in v0.30.1617, 1.65M after; v0.30.1646: HP back to the pre-cut value +10% and DEF -15% (per user)), ATK 290, DEF 85 (100 before the DEF cut; was 1.6M/225/76)',
+  stats.barn.hp === 2420000 && stats.barn.atk === 290 && stats.barn.def === 85, JSON.stringify(stats.barn));
+ok('the Smith is tougher: HP 2.86M (2.6M before the 25% cut in v0.30.1617, 1.95M after; v0.30.1646: HP back to the pre-cut value +10% and DEF -15% (per user)), ATK 350, DEF 102 (120 before the DEF cut; was 1.8M/275/63)',
+  stats.smith.hp === 2860000 && stats.smith.atk === 350 && stats.smith.def === 102, JSON.stringify(stats.smith));
 
 // ---- deterministic wave inspection ------------------------------------------
 const waves = await page.evaluate(async () => {

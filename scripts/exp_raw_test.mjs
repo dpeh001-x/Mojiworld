@@ -74,7 +74,9 @@ try {
       const b4 = player.exp, carried = m.exp; try { killMonster(m); } catch (e) {} out.boosted = { carried, boosted: player.exp - b4 }; }
     return out;
   });
-  const T = { 1: 1, 2: 10, 3: 40, 4: 100, 5: 250, 6: 280, 7: 300, 8: 350, 9: 400, 10: 800, 19: 1500, 24: 3000 };
+  // v0.30.1646 (per user): monster HP x1.467 and EXP with it - "same time per level" - so a level costs ~1/1.467 of the kills it did. The
+  // rungs below are what the unchanged level costs now buy (were 10, 40, 100, 250, 280, 300, 350, 400, 800, 1,500, 3,000).
+  const T = { 1: 1, 2: 7, 3: 29, 4: 67, 5: 167, 6: 187, 7: 203, 8: 237, 9: 274, 10: 547, 19: 1017, 24: 2047 };
   // the spawned monster carries the table number +/- the deliberate reward jitter; what the kill PAYS must be that
   // number itself, with no knob on top
   // raw + only what the player earned: no hidden knob may sit between the monster's number and the award
@@ -86,8 +88,8 @@ try {
   const off = Object.entries(T).filter(([L, want]) => Math.abs(r.rungs[L] - want) > Math.max(1, want * 0.06));
   check(off.length === 0, 'every rung costs the kills it is meant to', 'want ' + J(T) + ' got ' + J(r.rungs));
   check(r.firstRung === 1, 'the first rung is one kill', 'cost ' + r.firstRung);
-  check(Math.abs(r.band[85] / 30000 - 1) <= 0.08 && Math.abs(r.band[99] / 100000 - 1) <= 0.08,
-    'the endgame band is the one asked for: 30,000 kills at Lv 85 rising to 100,000 for 99->100',
+  check(Math.abs(r.band[85] / 20454 - 1) <= 0.08 && Math.abs(r.band[99] / 68182 - 1) <= 0.08,   // v0.30.1646: 30,000 / 100,000 before EXP per kill went x1.467 (per user)
+    'the endgame band is the one asked for, in kills of today’s richer monsters: ~20,450 at Lv 85 rising to ~68,200 for 99->100 (30,000 / 100,000 before)',
     '85:' + r.band[85] + ' 99:' + r.band[99]);
   // The cost of a level never goes down. The mob pool is uneven (Lv 68 monsters pay 2,081 where Lv 67 pay 2,952),
   // so the bake reads a non-decreasing EXP reference; without it a level can ask for less EXP than the one before.
