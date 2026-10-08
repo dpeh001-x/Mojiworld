@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1636';
+const GAME_VERSION = 'v0.30.1637';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -70369,7 +70369,7 @@ function _lxQMarkUse(m) {
   { const f = game._lxFight; if (f && f.def && f.def.trial && f.def.trial.kind === 'aim') { _lxAimPress(f); return; } }   // before the key-repeat guard: a timing game wants every press
   const now = performance.now(); if (game._lxQMarkT && now - game._lxQMarkT < 450) return; game._lxQMarkT = now;   // key repeat touches once
   const S = m.S, st = S.st, mk = m.mk, a = S.a;
-  if (game._lxFight && !game._lxFight.free) { if (typeof showToast === 'function') showToast('Not now: finish the fight first.', 'rare'); return; }   // a penalty fight is free: the puzzle is already reset and can be started again at once
+  if (game._lxFight && !game._lxFight.free) { if (typeof showToast === 'function') showToast('Not now: finish the fight first (' + ((game._lxFight.mobs || []).filter((q) => !q._lxDead && game.monsters.indexOf(q) >= 0).length + (game._lxFight.pending || []).reduce((n, w) => n + (w.n | 0), 0)) + ' left).', 'rare'); return; }   // a penalty fight is free: the puzzle is already reset and can be started again at once
   a.used = a.used || {};
   if (st.order === 'recall') { _lxRecallUse(S, m); return; }
   if (st.order === 'path' && st.marks[a.seq | 0] && st.marks[a.seq | 0].id !== mk.id) { if (typeof showToast === 'function') showToast(st.skip || 'Not that one yet. Follow the ring.', 'rare'); return; }   // a path is walked in order; an early touch just waits
@@ -70526,17 +70526,20 @@ function _lxFightHud() {
   let txt = '';
   const f = game._lxFight;
   if (f) {
-    const left = f.mobs.filter((m) => !m._lxDead && game.monsters.indexOf(m) >= 0).length + f.pending.reduce((n, w) => n + (w.n | 0), 0);
+    let pend = 0;
+    const left = f.mobs.filter((m) => !m._lxDead && game.monsters.indexOf(m) >= 0).length + (pend = f.pending.reduce((n, w) => n + (w.n | 0), 0));
     const _bp = f.boss && !f.boss._lxDead ? Math.max(0, Math.round(100 * f.boss.currentHp / Math.max(1, f.boss.maxHp))) : null;
     // bughunt stones - instructions, not just a count: a fight names what to do (def.hud, {n} = what is left), a boss fight names the boss and its health, an ambush says to clear it
     if (f.hud) txt = f.hud;
     else if (f.def && f.def.hud) txt = '⚔ ' + String(f.def.hud).split('{n}').join(left);
+    else if (f.def && f.def.trial) txt = '';   // a door's trial writes its own pill on its first tick: never the ambush text in between
     else if (_bp != null) txt = '⚔ Defeat ' + (f.boss.name || 'the boss') + ' - ' + _bp + '%' + (left > 1 ? ' (+' + (left - 1) + ' more)' : '');
-    else txt = '⚔ Clear the ambush - ' + left + ' left';
+    else txt = '⚔ Clear the ambush - ' + left + ' left' + (pend ? ' (' + pend + ' still coming)' : '');
   } else {
     const act = player && player.quests && player.quests.active || {};
-    for (const id in act) { const a = act[id]; if (a && a.timerMs > 0) { txt = '⏳ ' + Math.ceil(a.timerMs / 1000) + 's'; break; } }
+    for (const id in act) { const a = act[id]; if (a && a.timerMs > 0) { txt = '⏳ ' + Math.ceil(a.timerMs / 1000) + 's' + (() => { const S = _lxQStageOf(id); return S ? ' - ' + (S.st.hint || 'go') + ' ' + Object.keys(a.used || {}).length + '/' + S.st.marks.length : ''; })(); break; } }
   }
+  if (!txt && game._lxMercy && !game._lxMercy.done) txt = 'He is holding his breath. Touch the lantern at your feet to show him morning, or strike to finish him.';
   el.textContent = txt; el.style.display = txt ? 'block' : 'none';
 }
 function _lxSetPieceTick(dt) {
@@ -70971,7 +70974,7 @@ function _lxTrialTick(f, dt) {
   const t = f.def.trial, T = f.tr, hx = player.x + player.w / 2, ww = game.mapData.worldWidth || 2000, X = (x) => Math.max(60, Math.min(ww - 60, x)), gy = player.y + player.h;
   if (t.kind === 'hold') {
     const inside = Math.abs(hx - f.cx) < t.radius; T.hold = Math.max(0, Math.min(t.ms, T.hold + (inside ? dt : -dt * 1.5)));
-    f.hud = (inside ? '✋ Hold ' : '⚠ Back in the ring! ') + Math.ceil((t.ms - T.hold) / 1000) + 's';
+    f.hud = (inside ? '✋ Hold the ring and dodge inside it: ' : '⚠ Back in the ring! ') + Math.ceil((t.ms - T.hold) / 1000) + 's';
     if (f.t >= T.nextAt && T.n < (t.volleys || 9)) {   // a volley: one or two columns inside the ring, never enough to fill it
       T.nextAt += (t.every || 2100); T.n++; const R = t.radius, cols = T.n % 3 === 0 ? 2 : 1, xs = [];
       for (let i = 0; i < cols; i++) { let x = f.cx - R + 30 + Math.random() * (2 * R - 60); if (i === 0 && Math.random() < 0.55) x = hx + (Math.random() - 0.5) * 50; if (xs.every((q) => Math.abs(q - x) > 120)) xs.push(x); }
@@ -70988,12 +70991,12 @@ function _lxTrialTick(f, dt) {
       else if (e.k === 'fan') { for (const d of [-1, 0, 1]) _lxFightColumn(Object.assign({ cx: X(hx + d * e.gap) }, o, { warnMs: e.warn + (d + 1) * 120 })); }
       else if (e.k === 'sweep') { for (let i = 0; i < e.n; i++) { const idx = e.dir > 0 ? i : e.n - 1 - i; _lxFightColumn(Object.assign({ cx: X(hx + (i - (e.n - 1) / 2) * e.step + 60 * e.dir) }, o, { warnMs: e.warn + idx * e.lag })); } }
     }
-    f.hud = '✂ ' + T.fired + '/' + T.plan.length;
+    f.hud = '✂ ' + 'Find the gap between the lines of light: ' + T.fired + '/' + T.plan.length;
     const last = T.plan[T.plan.length - 1]; if (last.done && f.t > last.at + last.warn + 1500) _lxFightEnd(f, true);
   } else if (t.kind === 'aim') {
     const A = T.aim, m = f.aimTarget; A.ang += (2.6 + 0.5 * A.hits) * dt / 1000; A.flash = Math.max(0, A.flash - dt);
     if (Math.abs(hx - m.x) > 320) { _lxFightEnd(f, false, 'You stepped away from the mark. Her arrow waits.'); return; }
-    f.hud = '🎯 ' + A.hits + '/' + (t.need || 3) + (A.miss ? '  🚫 ' + A.miss + '/' + (t.misses || 3) : '');
+    f.hud = '🎯 ' + 'Press ' + _lxKeyLabel('talkNpc') + ' when the needle is in the gold: ' + A.hits + '/' + (t.need || 3) + (A.miss ? '  🚫 ' + A.miss + '/' + (t.misses || 3) : '');
   }
 }
 function _lxAngDiff(a, b) { let d = (a - b) % 6.2832; if (d > 3.1416) d -= 6.2832; if (d < -3.1416) d += 6.2832; return d; }
