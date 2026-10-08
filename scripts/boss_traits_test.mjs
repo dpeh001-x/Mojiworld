@@ -1,5 +1,5 @@
-// NO TOMORROW (per user: "every boss should signify a bold persona/trait"; Codex and quests especially): the Pause took tomorrow, a trait only eases with time, so every boss
-// is one bold trait stuck on full. Pins: the persona is the arena card's title, the boss's own voice line and epitaph carry it, the Codex dossier shows it as a pip (and the voice
+// NO TOMORROW (per user: "every boss should signify a bold persona/trait"; Codex and quests especially; then "something more universal such as The Greedy", "remove the part about
+// the easing, give a short description of the character in 1 line"): the Pause took tomorrow, so every boss is one bold trait stuck on full, named by a plain adjective. Pins: the persona is the arena card's title, the boss's own voice line and epitaph carry it, the Codex dossier shows it as a pip (and the voice
 // line beats a descriptive signature), the Codex World page lists it only once the boss is met, the quests and the bestiary name it, the woman at the gate is never named, and the
 // Well-Drinker, the Cap-Warden and the Brinekraken are NOT bosses (per user) so they are left out.
 //   [SERVE_ROOT=<dir with serve.js, data, art>] [PORT=n] node scripts/boss_traits_test.mjs [page.html]
@@ -24,9 +24,9 @@ try {
   await page.waitForTimeout(1500);
   const R = await page.evaluate(() => {
     const out = {}; const T = LX_BOSS_TRAITS, wc = (t) => String(t).trim().split(/\s+/).length;
-    out.n = T.length; out.keys = T.map((e) => e.k); out.traitNames = T.map((e) => e.trait); out.missingType = T.filter((e) => !monsterTypes[e.k]).map((e) => e.k);
+    out.n = T.length; out.keys = T.map((e) => e.k); out.traitNames = T.map((e) => e.trait); out.lines = T.map((e) => e.line); out.missingType = T.filter((e) => !monsterTypes[e.k]).map((e) => e.k);
     out.intro = T.filter((e) => BOSS_INTROS[e.k]).map((e) => [e.k, BOSS_INTROS[e.k].title, e.trait]); out.noIntro = T.filter((e) => !BOSS_INTROS[e.k]).map((e) => e.k);
-    const OLD = ['The Slime Sovereign', 'Cradle-Veiled', 'Eight-Mood Meltdown', 'The Spiked Throne', 'The Lost Sentinel', 'The Broken Anvil', 'Prisoner of the Inner Dimension', 'The Warped Tyrant', 'Keeper of the Endless Express', 'Judge of the Spire', 'The Last Excuse', 'The First Expedition', 'The Weight-Bearer'];
+    const OLD = ['The Slime Sovereign', 'Cradle-Veiled', 'Eight-Mood Meltdown', 'The Spiked Throne', 'The Lost Sentinel', 'The Broken Anvil', 'Prisoner of the Inner Dimension', 'The Warped Tyrant', 'Keeper of the Endless Express', 'Judge of the Spire', 'The Last Excuse', 'The First Expedition', 'The Weight-Bearer', 'The Hoarder', 'The Smotherer', 'The Self-Critic', 'The Sulker', 'The Mourner', 'The Tantrum', 'The Judge', 'The Idler', 'The Controller'];
     out.oldTitles = Object.entries(BOSS_INTROS).filter(([k, v]) => OLD.indexOf(v.title) >= 0).map(([k]) => k);
     out.voice = LX_BOSS_VOICE; out.epi = { king: EVERDAWN_EPITAPHS.king, conductor: EVERDAWN_EPITAPHS.pqConductor, mira: EVERDAWN_EPITAPHS.miraFallen };
     out.sig = ['taiger', 'harea', 'lady_honk', 'willeo'].map((k) => monsterTypes[k].signature);
@@ -44,26 +44,30 @@ try {
     game.bestiary = JSON.parse(save);
     return out;
   });
-  const names = ['The Hoarder', 'The Smotherer', 'The Self-Critic', 'The Dutiful', 'The Reckless', 'The Know-It-All', 'The Vain', 'The Stubborn', 'The Undecided', 'The Proud', 'The Sulker', 'The Mourner', 'The Hesitant', 'The Tearborn', 'The Tantrum', 'The Judge', 'The Idler', 'The Controller'];
+  const names = ['The Greedy', 'The Overprotective', 'The Unforgiving', 'The Dutiful', 'The Reckless', 'The Smug', 'The Vain', 'The Stubborn', 'The Undecided', 'The Proud', 'The Moody', 'The Grieving', 'The Hesitant', 'The Regretful', 'The Resentful', 'The Judgmental', 'The Complacent', 'The Controlling'];
   check(R.n === 18 && J(R.missingType) === '[]' && !R.keys.some((k) => /brinekraken|wellDrinker|capWarden/i.test(k)), 'eighteen bosses carry a persona (none of the Well-Drinker, Cap-Warden, Brinekraken)', J(R.keys.length) + ' ' + J(R.missingType));
-  check(J(R.traitNames) === J(names), 'the personas are the bold traits in level order', J(R.traitNames));
-  check(R.intro.length === 14 && R.intro.every(([k, title, trait]) => title === trait) && R.noIntro.join() === 'taiger,harea,lady_honk,willeo', 'every boss with an arena card shows its persona as the card title', J(R.intro.filter(([k, a, b]) => a !== b)));
+  check(J(R.traitNames) === J(names), 'the personas are plain adjectives (The Greedy, The Proud...) in level order', J(R.traitNames));
+  check(R.intro.length === 14 && R.intro.every(([k, title, trait]) => title === trait || (k === 'aetherion' && title === 'The Tearborn')) && R.noIntro.join() === 'taiger,harea,lady_honk,willeo', 'every boss with an arena card shows its persona as the card title (Aetherion keeps her own epithet, The Tearborn)', J(R.intro.filter(([k, a, b]) => a !== b)));
   check(R.oldTitles.length === 0, 'none of the old card titles is left', J(R.oldTitles));
   const V = R.voice; const want = ['king', 'mooma', 'kingKrook', 'octobaby', 'miraFallen', 'aetherion', 'pqConductor', 'mirrorSelf', 'young_confused_barnaby', 'sundered_smith', 'legosaurus', 'towerArbiter', 'towerSovereign', 'gravitos'];
   check(want.every((k) => V[k] && V[k].length > 8) && !V.brinekraken, 'fourteen bosses speak in their own voice (the new eight added)', J(want.filter((k) => !V[k])));
   check(V.pqConductor === 'Next stop is always next.' && V.sundered_smith === 'Let me finish the shift.' && V.gravitos === 'Sleep is the only kindness I have left to carry.', 'the new voice lines read as the trait', '');
   check(/his court slips out/.test(R.epi.king) && /Someone steps off/.test(R.epi.conductor) && /this time she does not turn back/.test(R.epi.mira), 'the epitaphs ease the trait: the Hoarder opens, the train stops, she does not turn back', J(R.epi).slice(0, 200));
-  check(R.sig[0].indexOf('The Reckless. ') === 0 && R.sig[1].indexOf('The Know-It-All. ') === 0 && R.sig[2].indexOf('The Vain. ') === 0 && R.sig[3].indexOf('The Stubborn. ') === 0, 'the four distorted captains lead with their trait', J(R.sig.map((s) => s.slice(0, 22))));
+  check(R.sig[0].indexOf('The Reckless. ') === 0 && R.sig[1].indexOf('The Smug. ') === 0 && R.sig[2].indexOf('The Vain. ') === 0 && R.sig[3].indexOf('The Stubborn. ') === 0, 'the four distorted captains lead with their trait', J(R.sig.map((s) => s.slice(0, 22))));
   const Q = R.q;
-  check(/the Hoarder/.test(Q.king) && /whole court/.test(Q.king) && /the Smotherer/.test(Q.mooma) && /the Self-Critic/.test(Q.inner) && /the Dutiful/.test(Q.pq) && /the Undecided/.test(Q.portal), 'the early quests name the trait (Hoarder, Smotherer, Self-Critic, Dutiful, Undecided)', '');
-  check(/the Tantrum/.test(Q.dawn) && /the Proud/.test(Q.dawn) && /the Sulker/.test(Q.dawn) && /the Mourner/.test(Q.smith) && /He is Control/.test(Q.grav) && /She is Regret/.test(Q.aeth) && /the Hesitant/.test(Q.lyra), 'the later quests do too (Tantrum, Proud, Sulker, Mourner, Control, Regret, Hesitant)', '');
+  check(/He is the Greedy\./.test(Q.king) && /whole court/.test(Q.king) && /the Overprotective/.test(Q.mooma) && /the Unforgiving/.test(Q.inner) && /the Dutiful/.test(Q.pq) && /the Undecided/.test(Q.portal), 'the early quests name the trait (Greedy, Overprotective, Unforgiving, Dutiful, Undecided)', '');
+  check(/the Resentful/.test(Q.dawn) && /the Proud/.test(Q.dawn) && /the Moody/.test(Q.dawn) && /the Grieving/.test(Q.smith) && /He is the Controlling/.test(Q.grav) && /She is the Regretful/.test(Q.aeth) && /the Hesitant/.test(Q.lyra), 'the later quests do too (Resentful, Proud, Moody, Grieving, Controlling, Regretful, Hesitant)', '');
   check(Object.entries(R.words).every(([k, n]) => n <= (k === 'lyra' ? 170 : 120)), 'every touched quest still fits its word cap (120, Lyra 170)', J(R.words));
-  check(/^The Hoarder\./.test(R.best.king) && /^The Smotherer\./.test(R.best.mooma) && /^The Sulker\./.test(R.best.octo) && /^The Proud\./.test(R.best.krook), 'the bestiary lines (the b_ quests) lead with the trait', '');
-  check(/No Tomorrow/.test(R.pageNone) && !/The Hoarder/.test(R.pageNone) && /18 more are waiting to be met/.test(R.pageNone), 'the Codex World page shows No Tomorrow with nothing met: no persona is spoiled', R.pageNone.slice(-120));
-  check(/The Hoarder<\/b> · King Gloopaloo\./.test(R.pageOne) && !/The Smotherer/.test(R.pageOne) && /17 more are waiting/.test(R.pageOne), 'meeting King Gloopaloo adds only his line', R.pageOne.slice(-200));
+  check(/^The Greedy\./.test(R.best.king) && /^The Overprotective\./.test(R.best.mooma) && /^The Moody\./.test(R.best.octo) && /^The Proud\./.test(R.best.krook), 'the bestiary lines (the b_ quests) lead with the trait', '');
+  check(/No Tomorrow/.test(R.pageNone) && !/The Greedy/.test(R.pageNone) && /18 more are waiting to be met/.test(R.pageNone), 'the Codex World page shows No Tomorrow with nothing met: no persona is spoiled', R.pageNone.slice(-120));
+  check(/The Greedy<\/b> · King Gloopaloo\. Took his whole court inside himself to keep them dry, and will not let one back out\./.test(R.pageOne) && !/The Overprotective/.test(R.pageOne) && /17 more are waiting/.test(R.pageOne), 'meeting King Gloopaloo adds only his line', R.pageOne.slice(-200));
   check(names.every((n) => R.pageAll.indexOf(n) > 0) && !/waiting to be met/.test(R.pageAll) && !/Well-Drinker|Cap-Warden|Brinekraken/.test(R.pageAll), 'with all met the page lists every persona and none of the three non-bosses', '');
-  check(/ldd-pip">The Hoarder</.test(R.dexKing) && /ldd-pip">The Mourner</.test(R.dexSmith) && !R.dexErr, 'the Codex dossier carries the persona as a pip', R.dexErr || '');
+  check(/ldd-pip">The Greedy</.test(R.dexKing) && /ldd-pip">The Grieving</.test(R.dexSmith) && !R.dexErr, 'the Codex dossier carries the persona as a pip', R.dexErr || '');
   check(/Let me finish the shift\./.test(R.dexSmith) && !/Half-melted forge-ghost/.test(R.dexSmith), 'the dossier speaks the boss\'s voice line, not a descriptive signature', '');
+  check(!/[Ee]ases|[Ee]asing|with no tomorrow/.test(R.pageAll) && !R.lines.some((l) => /[Ee]ase|no tomorrow/.test(l)), 'the Codex page no longer talks about easing: the section intro and every line are free of it', (R.pageAll.match(/.{0,40}[Ee]ase.{0,30}/) || [''])[0]);
+  const wcl = (t) => t.trim().split(/\s+/).length;
+  check(R.lines.length === 18 && R.lines.every((l) => /\.$/.test(l) && (l.match(/[.!?]/g) || []).length === 1 && wcl(l) >= 6 && wcl(l) <= 20), 'each character gets ONE short line (a single sentence of 6 to 20 words)', J(R.lines.filter((l) => !(/\.$/.test(l) && (l.match(/[.!?]/g) || []).length === 1 && wcl(l) >= 6 && wcl(l) <= 20))));
+  check(R.lines.every((l) => R.pageAll.indexOf(l) > 0), 'with every boss met the page prints each one-line description', J(R.lines.filter((l) => R.pageAll.indexOf(l) < 0)));
   const texts = [JSON.stringify(R.voice), JSON.stringify(R.epi), R.pageAll, JSON.stringify(R.q), JSON.stringify(R.best), JSON.stringify(R.sig), JSON.stringify(R.intro)];
   check(!texts.some((t) => /\bMira\b/.test(t)), 'the woman at the gate is never named in any of it', '');
   check(errs.length === 0, 'no page errors', errs.slice(0, 3).join(' | '));

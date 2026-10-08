@@ -93,7 +93,7 @@ try {
   const noCard = bi.arena.filter((a) => !a.ok);
   check(bi.arena.length >= 9 && !noCard.length, 'every boss a boss arena spawns has an intro card', noCard.map((a) => a.map + ':' + a.type).join(', ') || bi.arena.length + ' arenas');
   check(bi.named.every((n) => n.ok && n.known), 'the eight named bosses that only had a spawn banner now have a full card (name, title, lore, glyph, colour)', bi.named.filter((n) => !n.ok || !n.known).map((n) => n.t).join(', '));
-  check(bi.shown.on && /LEGOSAURUS/.test(bi.shown.name || '') && /Tantrum/.test(bi.shown.title || '') && !bi.shown.loreShown, 'the card renders: LEGOSAURUS, The Tantrum on its tape, and no lore paragraph (v0.30.1068, per user: "less wordy")', JSON.stringify(bi.shown).slice(0, 160));
+  check(bi.shown.on && /LEGOSAURUS/.test(bi.shown.name || '') && /Resentful/.test(bi.shown.title || '') && !bi.shown.loreShown, 'the card renders: LEGOSAURUS, The Resentful on its tape, and no lore paragraph (v0.30.1068, per user: "less wordy")', JSON.stringify(bi.shown).slice(0, 160));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exit(fail ? 1 : 0);
