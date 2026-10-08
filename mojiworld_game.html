@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1649';
+const GAME_VERSION = 'v0.30.1650';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -145320,6 +145320,15 @@ function _hvAttackBase(preview) {
   return _hvPoseOf(g, _heroVecTimeNorm(g));
 }
 // -> null for anything but a basic swing; else { rot, def, bob } channel sets for this draw and w, the swing's weight
+// v0.30.1650 bosslag2 - the warrior chop crescent's past arm poses, cached on a fixed 0.016 grid (see _lxWarriorChop in _drawVectorHero):
+// key = anim | class | the hero's base linear frame | posture angles -> Map(grid index -> locked chain matrix, zero translation)
+const _lxChopMemo = new Map();
+function _lxChopPoses(key) {
+  let e = _lxChopMemo.get(key);
+  if (!e) { if (_lxChopMemo.size >= 8) _lxChopMemo.clear(); e = new Map(); _lxChopMemo.set(key, e); }
+  return e;
+}
+function _lxPoseSig(p) { if (!p) return ''; let s = ''; for (const k in p) { const e = p[k]; const a = e && typeof e === 'object' ? +e.angle || 0 : 0; if (a) s += k + ':' + a + ';'; } return s; }   // the posture map is rebuilt each draw: key on its angles
 function _hvAttackFlow(animName, t, opts) {
   if (!HV_ATK_FLOW[animName]) return null;
   const preview = !!(opts && opts.animName);   // a studio / harness render: no live player state
@@ -146957,17 +146966,35 @@ function _drawVectorHero(sx, sy, _ctx, opts) {
         // as a crescent that is widest at the blade and tapers to nothing at the start of the swing - no hard edge line.
         // It replaced a fixed arc around the shoulder that swept the floor on the far side of the body from the sword.
         if (t > 0.22 && t < 0.84) {
+          // v0.30.1650 bosslag2 - the live blade is walked every frame; the past poses (back to the top of the windup) come from a fixed
+          // 0.016 grid cached per anim / class / base linear frame / posture angles (_lxChopPoses), so a frame walks one new pose at most
+          // (it walked up to 25: the hero draw went 0.1 ms -> 1.1-1.4 ms mid-chop). Each cached matrix is the locked chain at the
+          // base's linear part with zero translation (_lxWeaponFrameLock rebuilds only the linear part); the live translation is
+          // added and this frame's carry rotation is applied to the two sample points, as the full walk did.
+          const _cb = ctx.getTransform();
+          const _cm = _lxChopPoses(animName + '|' + cls + '|' + _cb.a + ',' + _cb.b + ',' + _cb.c + ',' + _cb.d + '|' + _lxPoseSig(_pose));
+          const _cr = weaponCarryRotation || 0, _cS = Math.sin(_cr), _cC = Math.cos(_cr);
+          const _pA = { x: 34 * _cS, y: -34 * _cC }, _pB = { x: 12 * _cS, y: -12 * _cC };   // (0,-34) and (0,-12) after the carry rotation
           const mats = [];
-          for (let k = 0; k <= 24; k++) {
-            const tk = t - k * 0.016; if (tk < 0.19) break;   // back to the top of the windup
-            ctx.save();
-            applyChain('handL', { deform: false, weaponLock: true, pose: k ? _hvAttackFlow(animName, tk, { animName }) : null });
-            applyWeaponCarryRotation();
-            mats.push(ctx.getTransform()); ctx.restore();
+          ctx.save();
+          applyChain('handL', { deform: false, weaponLock: true, pose: null });
+          applyWeaponCarryRotation();
+          mats.push(ctx.getTransform()); ctx.restore();
+          for (let q = Math.ceil(t / 0.016 - 1e-9) - 1, k = 1; k <= 24; q--, k++) {
+            const tk = q * 0.016; if (tk < 0.19) break;   // back to the top of the windup
+            if (t - tk < 0.004) { k--; continue; }   // on top of the live pose
+            let m = _cm.get(q);
+            if (!m) {
+              ctx.save(); ctx.setTransform(_cb.a, _cb.b, _cb.c, _cb.d, 0, 0);
+              applyChain('handL', { deform: false, weaponLock: true, pose: _hvAttackFlow(animName, tk, { animName }) });
+              m = ctx.getTransform(); ctx.restore(); _cm.set(q, m);
+            }
+            mats.push({ _lxPast: m });
           }
+          const _ptOf = (m, p) => (m._lxPast ? { x: m._lxPast.a * p.x + m._lxPast.c * p.y + m._lxPast.e + _cb.e, y: m._lxPast.b * p.x + m._lxPast.d * p.y + m._lxPast.f + _cb.f } : m.transformPoint(new DOMPoint(0, p === _pA ? -34 : -12)));
           const tip = [], inn = [], n = mats.length;
           mats.forEach((m, i) => {
-            const a = m.transformPoint(new DOMPoint(0, -34)), b2 = m.transformPoint(new DOMPoint(0, -12));   // reaching past the blade tip, so the sweep shows around the big chibi head
+            const a = _ptOf(m, _pA), b2 = _ptOf(m, _pB);   // reaching past the blade tip, so the sweep shows around the big chibi head
             const w = 1 - 0.92 * Math.pow(i / Math.max(1, n - 1), 0.8);   // widest at the blade, tapering to a point at the start
             tip.push(a); inn.push({ x: a.x + (b2.x - a.x) * w, y: a.y + (b2.y - a.y) * w });
           });
@@ -171381,8 +171408,8 @@ function renderSkillBar() {
       // about half a pixel at the wipe's edge, and it updates 20 times a second instead of 60.
       const pctQ = Math.round(frac * 200);
       const cdQ = Math.round(player.blockCD / 100);
-      if (bs._cdPctQ !== pctQ) {
-        bs._cdPctQ = pctQ;
+      if (bs._cdPctQ !== pctQ && (bs._cdPctQ == null || performance.now() - (bs._cdPctT || 0) >= 50)) {   // v0.30.1650 bosslag2 - <= 20 writes a second
+        bs._cdPctQ = pctQ; bs._cdPctT = performance.now();
         // v0.30.937 on the overlay, not the slot root: only .skill-cd reads --cd-pct, and writing it on the root
         // invalidated the icon, the key chip and the MP chip alongside it (1188 subtree invalidations in 8 s).
         bs.cdEl.style.setProperty('--cd-pct', (pctQ / 2).toFixed(1));
@@ -171452,8 +171479,8 @@ function renderSkillBar() {
       // v0.25.35 — conic-gradient pie-wipe via --cd-pct (was height fill)
       const pctQ = Math.round(frac * 200);   // v0.30.937 0.5% steps - see the block slot above
       const cdQ = Math.round(cd / 100);
-      if (s._cdPctQ !== pctQ) {
-        s._cdPctQ = pctQ;
+      if (s._cdPctQ !== pctQ && (s._cdPctQ == null || performance.now() - (s._cdPctT || 0) >= 50)) {   // v0.30.1650 bosslag2 - <= 20 writes a second
+        s._cdPctQ = pctQ; s._cdPctT = performance.now();
         s.cdEl.style.setProperty('--cd-pct', (pctQ / 2).toFixed(1));   // v0.30.937 on the overlay that reads it
       }
       if (s._cdTxtQ !== cdQ) {
