@@ -53,121 +53,121 @@ window.LX_MONSTER_STATS = {
 // trend by scripts/smooth_mob_hp_curve.mjs: the band crept 6k -> 12k HP across Lv 40-51, jumped to
 // 77k-152k at Lv 56-62, and sagged again at Lv 77-80. ATK / DEF, elites and heavies untouched.
   // ---- Regular monsters ----
-  snail:                          { lv:  1, hp:      38, atk:    1, def:  2, exp:      1, coin:     5 },
-  slime:                          { lv:  4, hp:      75, atk:    5, def:  0, exp:      2, coin:     8 },
-  mushroom:                       { lv:  9, hp:     398, atk:   24, def:  1, exp:     11, coin:    40 },
-  horny:                          { lv: 26, hp:    2670, atk:  168, def:  11, exp:     71, coin:   267 },
-  orange:                         { lv: 26, hp:    3890, atk:  120, def: 13, exp:     103, coin:   389 },
-  stump:                          { lv: 32, hp:    5533, atk:  205, def: 26, exp:    147, coin:   553 },
-  zombie:                         { lv: 46, hp:    14972, atk:  495, def: 39, exp:    398, coin:   1498 },
-  scorpion:                       { lv: 15, hp:    1730, atk:   85, def:  10, exp:     47, coin:   174 },
-  mummy:                          { lv: 27, hp:    6758, atk:  169, def: 21, exp:    180, coin:   676 },
-  skeleton:                       { lv: 33, hp:    3129, atk:  299, def: 53, exp:     84, coin:   313 },
-  wraith:                         { lv: 44, hp:    4205, atk:  464, def: 35, exp:     112, coin:   421 },
-  gummy:                          { lv: 14, hp:     942, atk:   44, def:  3, exp:     25, coin:    94 },
-  cookie:                         { lv: 18, hp:    1550, atk:   72, def:  7, exp:     42, coin:   155 },
-  frog:                           { lv: 20, hp:    1190, atk:   75, def:  7, exp:     31, coin:   120 },
-  axolotl:                        { lv: 28, hp:    2186, atk:  163, def: 15, exp:     58, coin:   219 },
-  coralImp:                       { lv: 23, hp:      758, atk:  105, def:  10, exp:     21, coin:    76 },
-  pearlSprite:                    { lv: 28, hp:     933, atk:   101, def:  11, exp:     25, coin:    93 },
-  nimbusFox:                      { lv: 47, hp:    10834, atk:  595, def: 47, exp:    290, coin:   1083 },
-  cosmicMochi:                    { lv: 47, hp:    10408, atk:  503, def: 66, exp:    276, coin:   1040 },
-  honeyBuzz:                      { lv: 20, hp:    1070, atk:   68, def:  10, exp:     29, coin:    107 },
-  nougatBear:                     { lv: 21, hp:    1882, atk:  150, def: 18, exp:     50, coin:   188 },
-  sproutle:                       { lv: 11, hp:     668, atk:   18, def:  0, exp:     18, coin:    67 },
-  tideling:                       { lv: 14, hp:     738, atk:   46, def:  3, exp:     20, coin:    74 },
-  stoneling:                      { lv: 21, hp:    2725, atk:  111, def: 20, exp:     72, coin:   273 },
-  voltipup:                       { lv: 25, hp:    2498, atk:  153, def: 13, exp:     67, coin:   250 },
-  frostkin:                       { lv: 22, hp:    2018, atk:  107, def:  7, exp:     54, coin:   202 },
-  emberling:                      { lv: 25, hp:    2362, atk:  183, def: 16, exp:     63, coin:   236 },
-  skywisp:                        { lv: 20, hp:    1298, atk:   68, def:  5, exp:     35, coin:   130 },
-  sandhusk:                       { lv: 25, hp:    2838, atk:  157, def: 21, exp:     75, coin:   284 },
-  cherub:                         { lv: 49, hp:    14024, atk:  1023, def: 122, exp:    375, coin:   1402 },
-  seraph:                         { lv: 51, hp:    21899, atk: 1598, def: 169, exp:    584, coin:   2193 },
-  archon:                         { lv: 53, hp:   33164, atk: 2021, def:227, exp:    883, coin:   3318 },
-  thornmaw:                       { lv: 51, hp:   28318, atk: 2770, def:257, exp:    755, coin:  2833 },
-  elderbark:                      { lv: 56, hp:   51916, atk: 3528, def:353, exp:    1384, coin:  5192 },
-  pinechad:                       { lv: 63, hp:    73196, atk: 4541, def:364, exp:   1952, coin:  7320 },
-  meloncholy:                     { lv: 62, hp:    61224, atk: 4257, def:349, exp:   1633, coin:  6124 },
-  forgewight:                     { lv: 60, hp:    58362, atk: 4178, def:350, exp:   1556, coin:   5836 },
-  cinderling:                     { lv: 62, hp:   37907, atk: 2945, def: 198, exp:    1011, coin:  3791 },
-  bellowsbat:                     { lv: 66, hp:   67173, atk: 3073, def:277, exp:    1792, coin:  6718 },
-  smithgolem:                     { lv: 65, hp:  208741, atk: 3750, def:387, exp:   5567, coin:  20874 },
-  bonebosn:                       { lv: 43, hp:   53005, atk:  678, def: 64, exp:    1413, coin:  5301 },
-  drownedCur:                     { lv: 42, hp:   38360, atk:  618, def: 55, exp:    1022, coin:  3837 },
-  spectreCannoneer:               { lv: 44, hp:   38580, atk:  780, def: 76, exp:    1029, coin:  3858 },
-  brinekraken:                    { lv: 45, hp:   54999, atk:  1027, def: 113, exp:   1467, coin:  5500 },
-  razorgale:                      { lv: 67, hp:   63621, atk: 4007, def:302, exp:    1698, coin:  6363 },
-  glasswindHare:                  { lv: 69, hp:   103193, atk: 3726, def:293, exp:   2752, coin:  10319 },
-  mirageStalker:                  { lv: 71, hp:   149687, atk: 4079, def:336, exp:   3990, coin:  14971 },
-  shardlich:                      { lv: 72, hp:   201443, atk: 4294, def:347, exp:   5371, coin:  20144 },
-  lichkin:                        { lv: 73, hp:   200738, atk: 4989, def:378, exp:   5353, coin:  20074 },
-  boneWraith:                     { lv: 79, hp:   330632, atk: 6185, def:340, exp:   8816, coin:  33064 },
-  sepulchreHound:                 { lv: 75, hp:   138247, atk: 5089, def:340, exp:   3687, coin:  13824 },
-  blightElder:                    { lv: 71, hp:  742637, atk: 5554, def: 514, exp:   19804, coin: 74462 },
-  ossuaryTyrant:                  { lv: 79, hp:  1199565, atk: 7771, def: 686, exp:   31988, coin: 119957 },
-  tombKeeper:                     { lv: 77, hp:  378365, atk: 6090, def: 508, exp:   10090, coin:  37837 },
-  mournshade:                     { lv: 76, hp:   337727, atk: 6090, def:372, exp:   9006, coin:  33774 },
-  lanternWisp:                    { lv: 77, hp:   148949, atk: 4960, def: 300, exp:    3973, coin:  14895 },
-  echoKnight:                     { lv: 78, hp:   906178, atk: 7979, def: 520, exp:   24164, coin: 90618 },
-  pathsBane:                      { lv: 80, hp:  1773662, atk: 8777, def: 568, exp:  47297, coin: 177366 },
-  clownfish:                      { lv: 33, hp:    3044, atk:  365, def: 28, exp:     81, coin:   304 },
-  pufferfish:                     { lv: 37, hp:    4970, atk:  461, def: 57, exp:     133, coin:   498 },
-  jellyfish:                      { lv: 37, hp:    3006, atk:  434, def: 25, exp:     80, coin:   301 },
-  anglerfish:                     { lv: 43, hp:    4385, atk:  656, def: 72, exp:     117, coin:   439 },
-  seahorse:                       { lv: 37, hp:    3681, atk:  439, def: 45, exp:     98, coin:   368 },
-  seasponge:                      { lv: 40, hp:    3105, atk:  479, def: 45, exp:     83, coin:   311 },
-  seastar:                        { lv: 41, hp:    4781, atk:  528, def: 75, exp:     128, coin:   479 },
-  grumpsquid:                     { lv: 42, hp:    4241, atk:  645, def: 54, exp:     114, coin:   423 },
-  mayo:                           { lv: 30, hp:    2775, atk:  211, def: 108, exp:     74, coin:   278 },
-  ticketMech:                     { lv: 31, hp:    3035, atk:   98, def:  13, exp:     81, coin:   304 },
-  conductorMech:                  { lv: 36, hp:    5444, atk:  195, def: 27, exp:     144, coin:   545 },
-  expressTicketMech:              { lv: 31, hp:    4062, atk:   96, def:  13, exp:     108, coin:   406 },
-  blockPopo:                      { lv: 20, hp:    3459, atk:  115, def: 19, exp:     93, coin:   346 },
-  blockHupo:                      { lv: 25, hp:    4226, atk:  217, def: 39, exp:     113, coin:   423 },
-  blockEle:                       { lv: 30, hp:    5087, atk:  350, def: 66, exp:    136, coin:   509 },
-  blockRhirhi:                    { lv: 35, hp:    6491, atk:  486, def: 98, exp:    173, coin:   650 },
-  blockGary:                      { lv: 40, hp:    12419, atk:  782, def: 133, exp:    331, coin:   1242 },
-  blockTigreal:                   { lv: 45, hp:    15204, atk:  1085, def:189, exp:    406, coin:   1520 },
-  deranged_kuro:                  { lv: 40, hp:     8849, atk:  800, def: 62, exp:    236, coin:   886 },   // v0.30.1591 distorted-roster
-  taiger:                         { lv: 40, hp:     8849, atk:  800, def: 62, exp:    236, coin:   886 },
-  harea:                          { lv: 42, hp:     8385, atk:  1056, def: 54, exp:    223, coin:   839 },
-  lady_honk:                      { lv: 43, hp:    14366, atk: 1170, def: 117, exp:    383, coin:   1435 },
-  willeo:                         { lv: 44, hp:   21051, atk: 1400, def: 158, exp:    561, coin:   2105 },
-  young_bloodthirsty_vermillion:  { lv: 45, hp:   22000, atk: 1687, def: 171, exp:    587, coin:  2200 },
-  vigil_vermillion:               { lv: 47, hp:   53322, atk: 2279, def:224, exp:    1423, coin:  5333 },
-  octoLegPoison:                  { lv: 50, hp:   100367, atk:   77, def:  14, exp:   2676, coin:  10037 },
-  octoLegFreeze:                  { lv: 50, hp:   100534, atk:   74, def:  14, exp:   2681, coin:  10054 },
-  octoLegSkillLock:               { lv: 50, hp:   109037, atk:   77, def:  14, exp:   2907, coin:  10904 },
-  octoLegStun:                    { lv: 50, hp:    97814, atk:   78, def:  14, exp:   2608, coin:  9782 },
-  fatLizard:                      { lv: 29, hp:    2703, atk:  295, def: 33, exp:     72, coin:   270 },
-  fatDragon:                      { lv: 35, hp:    4844, atk:  455, def: 48, exp:    129, coin:   484 },
-  petalfly:                       { lv:  3, hp:      56, atk:    7, def:  0, exp:      2, coin:     6 },
-  mushpup:                        { lv:  6, hp:     150, atk:   16, def:  1, exp:      4, coin:    15 },
-  tidefish:                       { lv:  9, hp:     375, atk:   25, def:  1, exp:     10, coin:    38 },
-  sparkling:                      { lv: 14, hp:     872, atk:   47, def:  4, exp:     23, coin:    87 },
-  cloudbun:                       { lv: 19, hp:    1226, atk:   64, def:  5, exp:     33, coin:   123 },
-  goblinScout:                    { lv: 43, hp:    7277, atk:  733, def: 71, exp:     195, coin:   727 },
-  goblinMauler:                   { lv: 47, hp:    11528, atk: 1508, def: 128, exp:    309, coin:   1152 },
-  boneGolem:                      { lv: 45, hp:   19292, atk: 1244, def:218, exp:    515, coin:   1928 },
-  tombWraith:                     { lv: 50, hp:    20774, atk: 1306, def: 104, exp:    554, coin:   2077 },
-  graveReaver:                    { lv: 55, hp:   13133, atk: 2456, def:255, exp:    350, coin:   1314 },
-  stormKitty:                     { lv: 29, hp:    3665, atk:  227, def: 22, exp:     98, coin:   367 },
-  tidepoolTurtle:                 { lv: 32, hp:    4712, atk:  218, def: 82, exp:    126, coin:   471 },
-  sparkSprite:                    { lv: 33, hp:    3234, atk:  319, def: 18, exp:     86, coin:   323 },
-  thunderMole:                    { lv: 34, hp:    4224, atk:  347, def: 59, exp:     113, coin:   422 },
-  towerWisp:                      { lv: 20, hp:    3350, atk:  249, def: 12, exp:     89, coin:     0 },
-  towerWarden:                    { lv: 20, hp:    4187, atk:  366, def: 72, exp:    112, coin:     0 },
-  towerHexer:                     { lv: 20, hp:    3350, atk:  319, def: 47, exp:     89, coin:     0 },
-  towerStalker:                   { lv: 20, hp:    2764, atk:  409, def: 50, exp:     74, coin:     0 },
-  towerSeer:                      { lv: 20, hp:    2177, atk:  399, def: 36, exp:     58, coin:     0 },
-  towerShardling:                 { lv: 20, hp:    1675, atk:  350, def: 56, exp:     45, coin:     0 },
-  towerOssifer:                   { lv: 20, hp:    5863, atk:  419, def: 72, exp:    156, coin:     0 },
-  towerStormcaller:               { lv: 20, hp:    3769, atk:  498, def: 53, exp:     101, coin:     0 },
+  snail:                          { lv:  1, hp:      55, atk:    1, def:  2, exp:      1, coin:     5 },
+  slime:                          { lv:  4, hp:      110, atk:    5, def:  0, exp:      3, coin:     8 },
+  mushroom:                       { lv:  9, hp:     583, atk:   24, def:  1, exp:     16, coin:    40 },
+  horny:                          { lv: 26, hp:    3916, atk:  168, def:   9, exp:     104, coin:   267 },
+  orange:                         { lv: 26, hp:    5705, atk:  120, def: 11, exp:     151, coin:   389 },
+  stump:                          { lv: 32, hp:    8115, atk:  205, def: 22, exp:    216, coin:   553 },
+  zombie:                         { lv: 46, hp:    21958, atk:  495, def: 33, exp:    584, coin:   1498 },
+  scorpion:                       { lv: 15, hp:    2538, atk:   85, def:   9, exp:     69, coin:   174 },
+  mummy:                          { lv: 27, hp:    9912, atk:  169, def: 18, exp:    264, coin:   676 },
+  skeleton:                       { lv: 33, hp:    4589, atk:  299, def: 45, exp:     123, coin:   313 },
+  wraith:                         { lv: 44, hp:    6168, atk:  464, def: 30, exp:     164, coin:   421 },
+  gummy:                          { lv: 14, hp:     1382, atk:   44, def:  3, exp:     37, coin:    94 },
+  cookie:                         { lv: 18, hp:    2273, atk:   72, def:  6, exp:     62, coin:   155 },
+  frog:                           { lv: 20, hp:    1745, atk:   75, def:  6, exp:     45, coin:   120 },
+  axolotl:                        { lv: 28, hp:    3207, atk:  163, def: 13, exp:     85, coin:   219 },
+  coralImp:                       { lv: 23, hp:      1112, atk:  105, def:   9, exp:     31, coin:    76 },
+  pearlSprite:                    { lv: 28, hp:     1368, atk:   101, def:   9, exp:     37, coin:    93 },
+  nimbusFox:                      { lv: 47, hp:    15890, atk:  595, def: 40, exp:    425, coin:   1083 },
+  cosmicMochi:                    { lv: 47, hp:    15265, atk:  503, def: 56, exp:    405, coin:   1040 },
+  honeyBuzz:                      { lv: 20, hp:    1570, atk:   68, def:   9, exp:     43, coin:    107 },
+  nougatBear:                     { lv: 21, hp:    2760, atk:  150, def: 15, exp:     73, coin:   188 },
+  sproutle:                       { lv: 11, hp:     979, atk:   18, def:  0, exp:     26, coin:    67 },
+  tideling:                       { lv: 14, hp:     1082, atk:   46, def:  3, exp:     29, coin:    74 },
+  stoneling:                      { lv: 21, hp:    3996, atk:  111, def: 17, exp:     106, coin:   273 },
+  voltipup:                       { lv: 25, hp:    3664, atk:  153, def: 11, exp:     98, coin:   250 },
+  frostkin:                       { lv: 22, hp:    2959, atk:  107, def:  6, exp:     79, coin:   202 },
+  emberling:                      { lv: 25, hp:    3464, atk:  183, def: 14, exp:     92, coin:   236 },
+  skywisp:                        { lv: 20, hp:    1904, atk:   68, def:  4, exp:     51, coin:   130 },
+  sandhusk:                       { lv: 25, hp:    4162, atk:  157, def: 18, exp:     110, coin:   284 },
+  cherub:                         { lv: 49, hp:    20568, atk:  1023, def: 104, exp:    550, coin:   1402 },
+  seraph:                         { lv: 51, hp:    32118, atk: 1598, def: 144, exp:    857, coin:   2193 },
+  archon:                         { lv: 53, hp:   48641, atk: 2021, def:193, exp:    1295, coin:   3318 },
+  thornmaw:                       { lv: 51, hp:   41533, atk: 2770, def:218, exp:    1107, coin:  2833 },
+  elderbark:                      { lv: 56, hp:   76143, atk: 3528, def:300, exp:    2030, coin:  5192 },
+  pinechad:                       { lv: 63, hp:    107355, atk: 4541, def:309, exp:   2863, coin:  7320 },
+  meloncholy:                     { lv: 62, hp:    89795, atk: 4257, def:297, exp:   2395, coin:  6124 },
+  forgewight:                     { lv: 60, hp:    85598, atk: 4178, def:298, exp:   2282, coin:   5836 },
+  cinderling:                     { lv: 62, hp:   55596, atk: 2945, def: 168, exp:    1483, coin:  3791 },
+  bellowsbat:                     { lv: 66, hp:   98520, atk: 3073, def:235, exp:    2628, coin:  6718 },
+  smithgolem:                     { lv: 65, hp:  306153, atk: 3750, def:329, exp:   8165, coin:  20874 },
+  bonebosn:                       { lv: 43, hp:   77740, atk:  678, def: 54, exp:    2072, coin:  5301 },
+  drownedCur:                     { lv: 42, hp:   56261, atk:  618, def: 47, exp:    1499, coin:  3837 },
+  spectreCannoneer:               { lv: 44, hp:   56584, atk:  780, def: 65, exp:    1509, coin:  3858 },
+  brinekraken:                    { lv: 45, hp:   80665, atk:  1027, def:  96, exp:   2152, coin:  5500 },
+  razorgale:                      { lv: 67, hp:   93311, atk: 4007, def:257, exp:    2490, coin:  6363 },
+  glasswindHare:                  { lv: 69, hp:   151349, atk: 3726, def:249, exp:   4036, coin:  10319 },
+  mirageStalker:                  { lv: 71, hp:   219541, atk: 4079, def:286, exp:   5852, coin:  14971 },
+  shardlich:                      { lv: 72, hp:   295450, atk: 4294, def:295, exp:   7877, coin:  20144 },
+  lichkin:                        { lv: 73, hp:   294416, atk: 4989, def:321, exp:   7851, coin:  20074 },
+  boneWraith:                     { lv: 79, hp:   484926, atk: 6185, def:289, exp:   12930, coin:  33064 },
+  sepulchreHound:                 { lv: 75, hp:   202762, atk: 5089, def:289, exp:   5408, coin:  13824 },
+  blightElder:                    { lv: 71, hp:  1089200, atk: 5554, def: 437, exp:   29046, coin: 74462 },
+  ossuaryTyrant:                  { lv: 79, hp:  1759362, atk: 7771, def: 583, exp:   46916, coin: 119957 },
+  tombKeeper:                     { lv: 77, hp:  554936, atk: 6090, def: 432, exp:   14799, coin:  37837 },
+  mournshade:                     { lv: 76, hp:   495333, atk: 6090, def:316, exp:   13209, coin:  33774 },
+  lanternWisp:                    { lv: 77, hp:   218458, atk: 4960, def: 255, exp:    5827, coin:  14895 },
+  echoKnight:                     { lv: 78, hp:   1329061, atk: 7979, def: 442, exp:   35441, coin: 90618 },
+  pathsBane:                      { lv: 80, hp:  2601370, atk: 8777, def: 483, exp:  69369, coin: 177366 },
+  clownfish:                      { lv: 33, hp:    4465, atk:  365, def: 24, exp:     119, coin:   304 },
+  pufferfish:                     { lv: 37, hp:    7289, atk:  461, def: 48, exp:     195, coin:   498 },
+  jellyfish:                      { lv: 37, hp:    4409, atk:  434, def: 21, exp:     117, coin:   301 },
+  anglerfish:                     { lv: 43, hp:    6432, atk:  656, def: 61, exp:     172, coin:   439 },
+  seahorse:                       { lv: 37, hp:    5399, atk:  439, def: 38, exp:     144, coin:   368 },
+  seasponge:                      { lv: 40, hp:    4554, atk:  479, def: 38, exp:     122, coin:   311 },
+  seastar:                        { lv: 41, hp:    7011, atk:  528, def: 64, exp:     188, coin:   479 },
+  grumpsquid:                     { lv: 42, hp:    6219, atk:  645, def: 46, exp:     167, coin:   423 },
+  mayo:                           { lv: 30, hp:    4070, atk:  211, def:  92, exp:     109, coin:   278 },
+  ticketMech:                     { lv: 31, hp:    4451, atk:   98, def:  11, exp:     119, coin:   304 },
+  conductorMech:                  { lv: 36, hp:    7984, atk:  195, def: 23, exp:     211, coin:   545 },
+  expressTicketMech:              { lv: 31, hp:    5958, atk:   96, def:  11, exp:     158, coin:   406 },
+  blockPopo:                      { lv: 20, hp:    5073, atk:  115, def: 16, exp:     136, coin:   346 },
+  blockHupo:                      { lv: 25, hp:    6197, atk:  217, def: 33, exp:     166, coin:   423 },
+  blockEle:                       { lv: 30, hp:    7461, atk:  350, def: 56, exp:    199, coin:   509 },
+  blockRhirhi:                    { lv: 35, hp:    9519, atk:  486, def: 83, exp:    254, coin:   650 },
+  blockGary:                      { lv: 40, hp:    18215, atk:  782, def: 113, exp:    485, coin:   1242 },
+  blockTigreal:                   { lv: 45, hp:    22299, atk:  1085, def:161, exp:    595, coin:   1520 },
+  deranged_kuro:                  { lv: 40, hp:     12978, atk:  800, def: 53, exp:    346, coin:   886 },   // v0.30.1591 distorted-roster
+  taiger:                         { lv: 40, hp:     12978, atk:  800, def: 53, exp:    346, coin:   886 },
+  harea:                          { lv: 42, hp:     12298, atk:  1056, def: 46, exp:    327, coin:   839 },
+  lady_honk:                      { lv: 43, hp:    21071, atk: 1170, def:  99, exp:    562, coin:   1435 },
+  willeo:                         { lv: 44, hp:   30875, atk: 1400, def: 134, exp:    823, coin:   2105 },
+  young_bloodthirsty_vermillion:  { lv: 45, hp:   32266, atk: 1687, def: 145, exp:    861, coin:  2200 },
+  vigil_vermillion:               { lv: 47, hp:   78206, atk: 2279, def:190, exp:    2087, coin:  5333 },
+  octoLegPoison:                  { lv: 50, hp:   147205, atk:   77, def:  12, exp:   3925, coin:  10037 },
+  octoLegFreeze:                  { lv: 50, hp:   147450, atk:   74, def:  12, exp:   3932, coin:  10054 },
+  octoLegSkillLock:               { lv: 50, hp:   159920, atk:   77, def:  12, exp:   4264, coin:  10904 },
+  octoLegStun:                    { lv: 50, hp:    143461, atk:   78, def:  12, exp:   3825, coin:  9782 },
+  fatLizard:                      { lv: 29, hp:    3964, atk:  295, def: 28, exp:     106, coin:   270 },
+  fatDragon:                      { lv: 35, hp:    7104, atk:  455, def: 41, exp:    189, coin:   484 },
+  petalfly:                       { lv:  3, hp:      83, atk:    7, def:  0, exp:      3, coin:     6 },
+  mushpup:                        { lv:  6, hp:     220, atk:   16, def:  1, exp:      6, coin:    15 },
+  tidefish:                       { lv:  9, hp:     550, atk:   25, def:  1, exp:     15, coin:    38 },
+  sparkling:                      { lv: 14, hp:     1278, atk:   47, def:  3, exp:     34, coin:    87 },
+  cloudbun:                       { lv: 19, hp:    1799, atk:   64, def:  4, exp:     48, coin:   123 },
+  goblinScout:                    { lv: 43, hp:    10673, atk:  733, def: 60, exp:     286, coin:   727 },
+  goblinMauler:                   { lv: 47, hp:    16907, atk: 1508, def: 109, exp:    453, coin:   1152 },
+  boneGolem:                      { lv: 45, hp:   28294, atk: 1244, def:185, exp:    755, coin:   1928 },
+  tombWraith:                     { lv: 50, hp:    30469, atk: 1306, def:  88, exp:    813, coin:   2077 },
+  graveReaver:                    { lv: 55, hp:   19261, atk: 2456, def:217, exp:    513, coin:   1314 },
+  stormKitty:                     { lv: 29, hp:    5376, atk:  227, def: 19, exp:     144, coin:   367 },
+  tidepoolTurtle:                 { lv: 32, hp:    6911, atk:  218, def: 70, exp:    185, coin:   471 },
+  sparkSprite:                    { lv: 33, hp:    4743, atk:  319, def: 15, exp:     126, coin:   323 },
+  thunderMole:                    { lv: 34, hp:    6195, atk:  347, def: 50, exp:     166, coin:   422 },
+  towerWisp:                      { lv: 20, hp:    4914, atk:  249, def: 10, exp:     131, coin:     0 },
+  towerWarden:                    { lv: 20, hp:    6141, atk:  366, def: 61, exp:    164, coin:     0 },
+  towerHexer:                     { lv: 20, hp:    4914, atk:  319, def: 40, exp:     131, coin:     0 },
+  towerStalker:                   { lv: 20, hp:    4054, atk:  409, def: 43, exp:     109, coin:     0 },
+  towerSeer:                      { lv: 20, hp:    3193, atk:  399, def: 31, exp:     85, coin:     0 },
+  towerShardling:                 { lv: 20, hp:    2456, atk:  350, def: 48, exp:     66, coin:     0 },
+  towerOssifer:                   { lv: 20, hp:    8599, atk:  419, def: 61, exp:    229, coin:     0 },
+  towerStormcaller:               { lv: 20, hp:    5528, atk:  498, def: 45, exp:     148, coin:     0 },
 
   // ---- Bosses ----
-  king:                           { lv: 10, hp:    7500, atk:   85, def:  5, exp:    550, coin:   170 },
-  mooma:                          { lv: 16, hp:   28916, atk:  872, def:  126, exp:   2121, coin:   656 },
+  king:                           { lv: 10, hp:    11000, atk:   85, def:  4, exp:    807, coin:   170 },
+  mooma:                          { lv: 16, hp:   42411, atk:  872, def:  107, exp:   3111, coin:   656 },
   // v0.30.x — per user "increase difficulty... deadlier... he needs to be tanky".
   // DEF 27 was the defect: a Lv-65 superBoss with LESS armour than kingKrook
   // (Lv 50, def 31) and under a quarter of legosaurus (Lv 59, def 120). Now 180 per user ("at least 180"),
@@ -176,30 +176,30 @@ window.LX_MONSTER_STATS = {
   // aries (2,621,718) and below taurus (4,593,750) — a superBoss gate should be a
   // wall. ATK x1.73 stays under aries's 4,339. exp/coin recomputed from this
   // file's own boss rule (hp x0.055 / hp x0.017).
-  aetherion:                      { lv: 65, hp: 4342730, atk: 10706, def:  777, exp: 318467, coin:  98436 },
-  gravitos:                       { lv:100, hp: 15765751, atk:49971, def: 1540, exp: 1156202, coin: 357406 },   // v0.30.280 — def stays above the five zodiacs now at 1,441: the apex keeps the best armour
-  octobaby:                       { lv: 50, hp:  894075, atk:  5820, def: 562, exp:  65566, coin:  20266 },   // v0.30.280 floors: hp 8.2x, atk 2.1x thornmaw 2,770 (was 1.91x)
-  pqConductor:                    { lv: 30, hp:   55425, atk:  1615, def: 233, exp:   4065, coin:  1256 },   // v0.30.280 floors: hp 8.2x band max (mummy 9,011; was 1.38x)
-  legosaurus:                     { lv: 59, hp:  936750, atk:  8780, def: 745, exp:  68695, coin:  21233 },   // v0.30.280 floors: hp 8.2x forgewight, atk 2.1x, def 2.1x elderbark
-  young_confused_barnaby:         { lv: 40, hp:  314550, atk:  2508, def: 362, exp:  23067, coin:  7130 },   // v0.30.280 floors: hp 8.2x band max (drownedCurator 51,146)
-  kingKrook:                      { lv: 50, hp:  894075, atk:  5820, def: 587, exp:  65566, coin:  20266 },   // v0.30.280 floors: hp 8.2x; = octobaby, so the Lv-50 bulk band holds
-  mirrorSelf:                     { lv: 20, hp:  187500, atk:   21, def:  4, exp:  11725, coin:  3622 },   // v0.30.x — hp 213116 -> 288000 (+35%) per user, then -> 250000 per user on playtest; evasion/speed live in the game literal
-  sundered_smith:                 { lv: 48, hp:  894075, atk:  4848, def: 515, exp:  65566, coin:  20266 },   // v0.30.280 floors: hp 8.2x band max (octoLegSkillLock 145,382)
-  zodiac_aries:                   { lv: 70, hp: 6089625, atk: 13342, def: 1080, exp: 446573, coin: 138032 },   // v0.30.280 floors: hp 8.2x blightElder 990,182 (was 2.44x), def 2.1x
-  zodiac_taurus:                  { lv: 72, hp: 6089625, atk: 14570, def: 1080, exp: 446573, coin: 138032 },   // v0.30.280 floors
-  zodiac_gemini:                  { lv: 74, hp: 6089625, atk: 15911, def: 1085, exp: 446573, coin: 138032 },   // v0.30.280 floors: hp was 2.78x band
-  zodiac_cancer:                  { lv: 76, hp: 7430625, atk: 17375, def:1200, exp: 544913, coin: 168428 },   // v0.30.280 floors: hp 8.2x echoKnight 1,208,237
-  zodiac_leo:                     { lv: 78, hp: 14544000, atk: 18974, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors: hp 8.2x pathsBane 2,364,882 (was 2.40x), def 2.1x ossuaryTyrant
+  aetherion:                      { lv: 65, hp: 6369337, atk: 10706, def:  660, exp: 467085, coin:  98436 },
+  gravitos:                       { lv:100, hp: 23123101, atk:49971, def: 1309, exp: 1695763, coin: 357406 },   // v0.30.280 — def stays above the five zodiacs now at 1,441: the apex keeps the best armour
+  octobaby:                       { lv: 50, hp:  1311310, atk:  5820, def: 478, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x, atk 2.1x thornmaw 2,770 (was 1.91x)
+  pqConductor:                    { lv: 30, hp:   81290, atk:  1615, def: 198, exp:   5962, coin:  1256 },   // v0.30.280 floors: hp 8.2x band max (mummy 9,011; was 1.38x)
+  legosaurus:                     { lv: 59, hp:  1373900, atk:  8780, def: 633, exp:  100753, coin:  21233 },   // v0.30.280 floors: hp 8.2x forgewight, atk 2.1x, def 2.1x elderbark
+  young_confused_barnaby:         { lv: 40, hp:  461340, atk:  2508, def: 308, exp:  33832, coin:  7130 },   // v0.30.280 floors: hp 8.2x band max (drownedCurator 51,146)
+  kingKrook:                      { lv: 50, hp:  1311310, atk:  5820, def: 499, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x; = octobaby, so the Lv-50 bulk band holds
+  mirrorSelf:                     { lv: 20, hp:  275000, atk:   21, def:  3, exp:  17197, coin:  3622 },   // v0.30.x — hp 213116 -> 288000 (+35%) per user, then -> 250000 per user on playtest; evasion/speed live in the game literal
+  sundered_smith:                 { lv: 48, hp:  1311310, atk:  4848, def: 438, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x band max (octoLegSkillLock 145,382)
+  zodiac_aries:                   { lv: 70, hp: 8931450, atk: 13342, def:  918, exp: 654974, coin: 138032 },   // v0.30.280 floors: hp 8.2x blightElder 990,182 (was 2.44x), def 2.1x
+  zodiac_taurus:                  { lv: 72, hp: 8931450, atk: 14570, def:  918, exp: 654974, coin: 138032 },   // v0.30.280 floors
+  zodiac_gemini:                  { lv: 74, hp: 8931450, atk: 15911, def:  922, exp: 654974, coin: 138032 },   // v0.30.280 floors: hp was 2.78x band
+  zodiac_cancer:                  { lv: 76, hp: 10898250, atk: 17375, def:1020, exp: 799206, coin: 168428 },   // v0.30.280 floors: hp 8.2x echoKnight 1,208,237
+  zodiac_leo:                     { lv: 78, hp: 21331200, atk: 18974, def: 1225, exp: 1564288, coin: 329664 },   // v0.30.280 floors: hp 8.2x pathsBane 2,364,882 (was 2.40x), def 2.1x ossuaryTyrant
   // v0.30.369 — Virgo DEF 1441 -> 720 (-50%, per user), heal cut alongside (see _vHeal)
-  zodiac_virgo:                   { lv: 80, hp: 14544000, atk: 20720, def: 720, exp: 1066560, coin: 329664 },   // v0.30.280 floors: hp was 1.84x band — the worst zodiac
-  zodiac_libra:                   { lv: 82, hp: 14544000, atk: 22627, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
-  zodiac_scorpio:                 { lv: 84, hp: 14544000, atk: 24709, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
-  zodiac_sagittarius:             { lv: 86, hp: 14544000, atk: 26983, def: 1441, exp: 1066560, coin: 329664 },   // v0.30.280 floors
-  zodiac_capricorn:               { lv: 88, hp: 14544000, atk:29466, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors (hp was 8.19x — a hair under)
-  zodiac_aquarius:                { lv: 90, hp: 14544000, atk:32178, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors
-  zodiac_pisces:                  { lv: 92, hp: 14544000, atk:70278, def:1200, exp: 1066560, coin: 329664 },   // v0.30.280 floors
-  towerArbiter:                   { lv:  1, hp:   12899, atk:   69, def: 300, exp:    946, coin:     0 },
-  towerSovereign:                 { lv:  1, hp:   67568, atk:   69, def: 250, exp:   4955, coin:     0 },
+  zodiac_virgo:                   { lv: 80, hp: 21331200, atk: 20720, def: 612, exp: 1564288, coin: 329664 },   // v0.30.280 floors: hp was 1.84x band — the worst zodiac
+  zodiac_libra:                   { lv: 82, hp: 21331200, atk: 22627, def: 1225, exp: 1564288, coin: 329664 },   // v0.30.280 floors
+  zodiac_scorpio:                 { lv: 84, hp: 21331200, atk: 24709, def: 1225, exp: 1564288, coin: 329664 },   // v0.30.280 floors
+  zodiac_sagittarius:             { lv: 86, hp: 21331200, atk: 26983, def: 1225, exp: 1564288, coin: 329664 },   // v0.30.280 floors
+  zodiac_capricorn:               { lv: 88, hp: 21331200, atk:29466, def:1020, exp: 1564288, coin: 329664 },   // v0.30.280 floors (hp was 8.19x — a hair under)
+  zodiac_aquarius:                { lv: 90, hp: 21331200, atk:32178, def:1020, exp: 1564288, coin: 329664 },   // v0.30.280 floors
+  zodiac_pisces:                  { lv: 92, hp: 21331200, atk:70278, def:1020, exp: 1564288, coin: 329664 },   // v0.30.280 floors
+  towerArbiter:                   { lv:  1, hp:   18919, atk:   69, def: 255, exp:    1388, coin:     0 },
+  towerSovereign:                 { lv:  1, hp:   99099, atk:   69, def: 213, exp:   7267, coin:     0 },
   miraFallen:                     { lv: 55, hp: 2400000, atk:  7400, def: 660, exp: 150000, coin:  46000 },   // v0.30.1627 mira-fallen: between the Lv 48-50 bosses and Aetherion (Lv 65)
 };
 
