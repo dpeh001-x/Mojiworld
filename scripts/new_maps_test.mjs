@@ -442,13 +442,13 @@ try {
 
   // [4] reachability: walking from Everdawn Central reaches the five and everything it reached before
   const reach = new Set(data.reachable);
-  const lost = [...BASELINE_REACHABLE, ...NEW].filter((id) => !reach.has(id));
+  const lost = [...BASELINE_REACHABLE, ...NEW].filter((id) => !reach.has(id) && id !== 'sanctum');   // v0.30.1647: the Sanctum opens from the Last Step only once she falls (per user); a boss arena, so the distance curve never applies there
   ok(`[4] walking from Everdawn Central reaches all ${NEW.length} new maps and all ${BASELINE_REACHABLE.length} maps it reached before`, lost.length === 0, { unreachable: lost });
   // [5] no monster buff from the rewire: every old map is as many hops from town as before (stepping OUT of a bridge
   // costs nothing), and a death there respawns the hero in the same town
-  const moved = Object.keys(BASELINE_DIST).filter((id) => data.dist[id] !== BASELINE_DIST[id]).map((id) => `${id} ${BASELINE_DIST[id]}->${data.dist[id]}`);
+  const moved = Object.keys(BASELINE_DIST).filter((id) => id !== 'sanctum' && data.dist[id] !== BASELINE_DIST[id]).map((id) => `${id} ${BASELINE_DIST[id]}->${data.dist[id]}`);
   ok('[5] every old map keeps its _townDistance (the new maps are 0-hop bridges: no monster buff)', moved.length === 0, moved);
-  const rehomed = Object.keys(BASELINE_NEAREST_TOWN).filter((id) => data.near[id] !== BASELINE_NEAREST_TOWN[id]).map((id) => `${id} ${BASELINE_NEAREST_TOWN[id]}->${data.near[id]}`);
+  const rehomed = Object.keys(BASELINE_NEAREST_TOWN).filter((id) => id !== 'sanctum' && data.near[id] !== BASELINE_NEAREST_TOWN[id]).map((id) => `${id} ${BASELINE_NEAREST_TOWN[id]}->${data.near[id]}`);
   ok('[5] every old map keeps its _nearestTownId (the town a death respawns you in)', rehomed.length === 0, rehomed);
 
   // [6] the world map (W). Lanes are keyed by their two map ids sorted with JS '<' (data-a < data-b).

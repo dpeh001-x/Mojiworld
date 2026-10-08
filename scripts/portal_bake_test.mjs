@@ -136,8 +136,8 @@ ok('the four edited maps are all still reachable from town',
    EDITED.every(i => !r.graph.unreachable.includes(i)),
    { unreachable: r.graph.unreachable.slice(0, 8) });
 ok('the edit strands no ADDITIONAL map (pre-existing off-graph count unchanged)',
-   r.graph.unreachable.length <= PRE_UNREACHABLE,
-   { now: r.graph.unreachable.length, preExisting: PRE_UNREACHABLE });
+   r.graph.unreachable.filter((id) => id !== 'sanctum').length <= PRE_UNREACHABLE,   // v0.30.1647: the Sanctum opens from the Last Step only once she falls (per user); a boss arena, so the distance curve never applies there
+   { now: r.graph.unreachable.filter((id) => id !== 'sanctum').length, preExisting: PRE_UNREACHABLE });
 ok('every link out of an edited map has a return portal (no one-way traps)',
    r.graph.oneWay.length === 0, r.graph.oneWay);
 ok('no page errors', errs.length === 0, errs.slice(0, 3));

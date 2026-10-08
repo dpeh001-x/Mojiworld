@@ -163,7 +163,7 @@ const LEDGE = String.raw`
       dist: back ? Math.round(Math.abs(player.x + player.w / 2 - back.x)) : null };
   };
   out.walks = {};
-  for (const [src, dest] of [['celestialSpire', 'stardustAtrium'], ['sanctum', 'celestialSpire'], ['azureAbode', 'azureAcademia'], ['town', 'forest']]) out.walks[dest] = await walk(src, dest);
+  for (const [src, dest] of [['celestialSpire', 'stardustAtrium'], ['azureAbode', 'azureAcademia'], ['town', 'forest']])   /* v0.30.1647: the Spire has no Sanctum door now (per user) */ out.walks[dest] = await walk(src, dest);
   // the generic rule, over the authored layout of every door that stands on a ledge: only the arrivals that stood in mid-air move
   out.sweep = (typeof _lxLedgeArrivalX === 'function') ? (() => {
     const keep = { mapData: game.mapData, portals: game.portals }; const moved = []; let n = 0;
@@ -187,12 +187,12 @@ await group('world-7', async () => {
   const r = await run(page, LEDGE);
   const w = r.walks;
   const ok = (x, name) => x && x.map === name && x.feet != null && Math.abs(x.feet - x.doorY) <= 45;
-  check(ok(w.stardustAtrium, 'stardustAtrium') && ok(w.celestialSpire, 'celestialSpire') && ok(w.azureAcademia, 'azureAcademia'),
-    'world-7: arriving at Stardust Atrium (from the Spire), the Celestial Spire (from the Sanctum) and Azure Academia (from the Abode) puts the hero on the back door\'s own ledge, not on the floor below it', J(w));
-  check(['stardustAtrium', 'celestialSpire', 'azureAcademia'].every((k) => w[k] && w[k].dist >= 50), 'world-7: ...and outside that door\'s 50 px trigger, so a stray Up does not walk straight back', J(['stardustAtrium', 'celestialSpire', 'azureAcademia'].map((k) => w[k] && w[k].dist)));
+  check(ok(w.stardustAtrium, 'stardustAtrium') && ok(w.azureAcademia, 'azureAcademia'),
+    'world-7: arriving at Stardust Atrium (from the Spire) and Azure Academia (from the Abode) puts the hero on the back door\'s own ledge, not on the floor below it', J(w));
+  check(['stardustAtrium', 'azureAcademia'].every((k) => w[k] && w[k].dist >= 50), 'world-7: ...and outside that door\'s 50 px trigger, so a stray Up does not walk straight back', J(['stardustAtrium', 'azureAcademia'].map((k) => w[k] && w[k].dist)));
   check(w.forest && w.forest.map === 'forest' && w.forest.onGround && w.forest.dist >= 50, 'world-7: an ordinary door pair still lands beside its door (Everdawn -> Forest)', J(w.forest));
   const mv = r.sweep === 'absent' ? null : r.sweep.moved.map((s) => s.split(' ')[0]).sort();
-  check(!!mv && J(mv) === J(['azureAcademia<-azureAbode', 'celestialSpire<-sanctum']), 'world-7: over every door that stands on a ledge, exactly the two arrivals that stood in mid-air move (Stardust\'s ledge was widened instead)', J(r.sweep));
+  check(!!mv && J(mv) === J(['azureAcademia<-azureAbode']), 'world-7: over every door that stands on a ledge, exactly the one arrival that stood in mid-air moves (the Sanctum -> Spire one went with its door) (Stardust\'s ledge was widened instead)', J(r.sweep));
 });
 const SYS = String.raw`
   const out = {};

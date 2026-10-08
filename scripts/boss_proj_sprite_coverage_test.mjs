@@ -73,6 +73,9 @@ const R = await page.evaluate(async (list) => {
   const dedicated = new Set();
   for (const m of drawProjectiles.toString().matchAll(/p\.skill\s*===\s*'([^']+)'/g)) dedicated.add(m[1]);
 
+  // v0.30.1647: Elder Arlen's Coronation strike (arlen_ruin, v0.30.1591) is never a shot on screen - drawProjectiles skips it by p._arlenStrike and
+  // its eruption burst (fx_arlen_ruin) draws the hit; it was the one cast this list could not see
+  dedicated.add('arlen_ruin');
   const unsprited = list.filter(sk => !(projK.has(sk) && blitK.has(sk)) && !dedicated.has(sk));
 
   // The 8 wired in this pass — each must actually PAINT.
