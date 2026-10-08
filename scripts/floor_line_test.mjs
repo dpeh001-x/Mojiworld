@@ -22,9 +22,9 @@ const ALLOW = {
   'hiddenPagoda|shadow_banner_skull|656': 'a banner hung under the ledge', 'shadowWovenHood|shadow_banner_skull|540': 'a banner hung under the ledge',
   'emeraldVillage|emerald_watchtower_bell|226': 'the bell hangs under the hut eave',
   'emeraldVillage|emerald_cherry_branch|*': 'the user\'s floating sakura flowers (Prop Editor bake)', 'jadeGrove|emerald_cherry_branch|*': 'the user\'s floating sakura flowers',
-  'fracturedReflection|rift_cracked_mirror|960': 'sink 3 on purpose (v0.30.1568: its far foot hung; per user it sits deeper still, planted on top)', 'thunderPlateau|ice_crystal_cluster|420': 'planted in a snow cap that rises above the line',
+  'fracturedReflection|rift_cracked_mirror|960': 'sink 3 on purpose (v0.30.1568: its far foot hung; per user it sits deeper still, planted on top)',
 };
-const HUNG = new Set(['bastion_banner', 'shadow_banner_skull', 'emerald_cherry_branch']);   // drawn unplanted (_LX_PROP_NOPLANT), as is a row with plant:0 (the eave bell)
+const HUNG = new Set(['bastion_banner', 'shadow_banner_skull', 'emerald_cherry_branch']);   // drawn unplanted (_LX_PROP_NOPLANT), as is a row with plant:0 (the eave bell; the koi tub, which per user sits ON its line - v0.30.1641)
 const allowOf = (r) => ALLOW[`${r.map}|${r.key}|${r.x}`] || ALLOW[`${r.map}|${r.key}|*`];
 const env = { ...process.env }; delete env.MOJI_GAME_FILE;
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT, env }); await new Promise((r) => setTimeout(r, 1200));
@@ -85,7 +85,7 @@ try {
   const okr = rows.filter((r) => !r.err), hung = okr.filter((r) => HUNG.has(r.key) || r.np), stood = okr.filter((r) => !HUNG.has(r.key) && !r.np), shallow = stood.filter((r) => r.plant == null || r.plant < 2 || r.plant > 5);
   console.log('drawn plant depths: ' + JSON.stringify(stood.reduce((a, r) => (a[r.plant] = (a[r.plant] || 0) + 1, a), {})));
   ok('[4] every standing prop is drawn planted in its line: its lowest art row 2-5 px below its row y + sink (2 px, as NPC feet, plus a tapered base gap)', !shallow.length, shallow.map((r) => r.map + ' ' + r.key + '@' + r.x + ' plant ' + r.plant).join('; '));
-  ok('[4b] hung and floating pieces (banners, the eave bell, the sakura) are drawn unplanted', hung.length >= 5 && hung.every((r) => r.plant === 0), hung.filter((r) => r.plant !== 0).map((r) => r.map + ' ' + r.key + '@' + r.x + ' plant ' + r.plant).join('; ') || hung.length + ' hung');
+  ok('[4b] hung and floating pieces (banners, the eave bell, the sakura) and the koi tub on its line (plant:0) are drawn unplanted', hung.length >= 5 && hung.every((r) => r.plant === 0), hung.filter((r) => r.plant !== 0).map((r) => r.map + ' ' + r.key + '@' + r.x + ' plant ' + r.plant).join('; ') || hung.length + ' hung');
   ok('no page errors', !errs.length, errs.slice(0, 3).join(' | '));
 } catch (e) { fail++; console.log('FAIL harness: ' + String(e && e.stack || e).slice(0, 400)); }
 await browser.close(); server.kill();
