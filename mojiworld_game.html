@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1635';
+const GAME_VERSION = 'v0.30.1636';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -31440,7 +31440,7 @@ const QUESTS = {
     story: true, noScale: true, capShare: 0.75, fadesAt: 14,
     name: "A Note That Won't End", icon: "🎧", levelReq: 6, giver: "DJ Vinyl", handIn: true,
     kind: "event", target: "the humming stones", count: 3,
-    stages: [{ map: "glimmerwood", hint: "Touch the stones, quietest to loudest", order: "puzzle", wrong: { say: "A shriek: off-key! The wood answers. Quietest first.", fight: { waves: [{ at: 0, n: 3, types: ["mushpup", "petalfly"] }] } }, marks: [{ id: "quiet", x: 1740, glyph: "stone", rank: 1, tint: "#7fb6ff", label: "Touch the stone", say: "A low note, pure as glass." }, { id: "mid", x: 2440, glyph: "stone", rank: 2, tint: "#b49bff", label: "Touch the stone", say: "A higher note, and it leans on the first." }, { id: "loud", x: 975, glyph: "stone", rank: 3, tint: "#ff8ad8", label: "Touch the stone", say: "The third note. The wood goes still." }] }],
+    stages: [{ map: "glimmerwood", hint: "Touch the stones, quietest to loudest", order: "puzzle", wrong: { say: "A shriek: off-key! The wood answers. Quietest first.", reset: "The stones have reset: start again whenever you like.", hud: "Off-key! The stones have reset. Defeat the {n} it woke, or touch them again right away, quietest first.", fight: { waves: [{ at: 0, n: 3, types: ["mushpup", "petalfly"] }] } }, marks: [{ id: "quiet", x: 1740, glyph: "stone", rank: 1, tint: "#7fb6ff", label: "Touch the stone", say: "A low note, pure as glass." }, { id: "mid", x: 2440, glyph: "stone", rank: 2, tint: "#b49bff", label: "Touch the stone", say: "A higher note, and it leans on the first." }, { id: "loud", x: 975, glyph: "stone", rank: 3, tint: "#ff8ad8", label: "Touch the stone", say: "The third note. The wood goes still." }] }],
     prereq: "q_road_2",
     beatOnGoal: "road_mark_hera",
     tease: "Cheep. Every cap in the Hollow just turned around. Ooh. Follow me?",
@@ -70332,6 +70332,7 @@ function _lxQStageOf(id) {
 function _lxQSync(S) {
   let n = 0; for (let k = 0; k < S.i; k++) n += S.q.stages[k].marks.length;
   S.a.progress = (S.q && S.q.progressBy === 'stage') ? Math.min(S.i | 0, S.q.stages.length) : n + Object.keys(S.a.used || {}).length;   // the four doors count doors, not steps
+  try { if (typeof renderQuestTracker === 'function') renderQuestTracker(); } catch (e) {}   // bughunt stones - the tracker kept the old count (a reset puzzle still read 2/3) until a map change rebuilt it
 }
 // where a mark stands: its own x, and the top of whatever ground or ledge is under it (or the y it names)
 function _lxQMarkPos(mk) {
@@ -70368,16 +70369,16 @@ function _lxQMarkUse(m) {
   { const f = game._lxFight; if (f && f.def && f.def.trial && f.def.trial.kind === 'aim') { _lxAimPress(f); return; } }   // before the key-repeat guard: a timing game wants every press
   const now = performance.now(); if (game._lxQMarkT && now - game._lxQMarkT < 450) return; game._lxQMarkT = now;   // key repeat touches once
   const S = m.S, st = S.st, mk = m.mk, a = S.a;
-  if (game._lxFight) { if (typeof showToast === 'function') showToast('Not now: finish the fight first.', 'rare'); return; }
+  if (game._lxFight && !game._lxFight.free) { if (typeof showToast === 'function') showToast('Not now: finish the fight first.', 'rare'); return; }   // a penalty fight is free: the puzzle is already reset and can be started again at once
   a.used = a.used || {};
   if (st.order === 'recall') { _lxRecallUse(S, m); return; }
   if (st.order === 'path' && st.marks[a.seq | 0] && st.marks[a.seq | 0].id !== mk.id) { if (typeof showToast === 'function') showToast(st.skip || 'Not that one yet. Follow the ring.', 'rare'); return; }   // a path is walked in order; an early touch just waits
   if (st.order === 'puzzle' && (!st.marks[a.seq | 0] || st.marks[a.seq | 0].id !== mk.id)) {   // a puzzle, and the wrong one
-    if (typeof showToast === 'function') showToast(st.wrong && st.wrong.say ? st.wrong.say : 'Wrong. Start again.', 'epic');
+    if (typeof showToast === 'function') showToast((st.wrong && st.wrong.say ? st.wrong.say : 'Wrong.') + ' ' + (st.wrong && st.wrong.reset ? st.wrong.reset : 'Everything has reset: start again from the first.'), 'epic');
     a.used = {}; a.seq = 0; a.timerMs = 0; a.wrong = (a.wrong | 0) + 1; _lxQSync(S);
     if (typeof _lxGuSay === 'function') _lxGuSay(_lxGuPick('wrong'), { pri: true });
     if (typeof flash === 'function') flash(0.25); if (typeof addShake === 'function') addShake(6);
-    if (st.wrong && st.wrong.fight) _lxFightStart(st.wrong.fight, m, null);
+    if (st.wrong && st.wrong.fight) _lxFightStart(st.wrong.hud ? Object.assign({ hud: st.wrong.hud }, st.wrong.fight) : st.wrong.fight, m, null);   // bughunt stones - the penalty carries the pill text the stage wrote for it
     return;
   }
   if (st.timer && !(a.timerMs > 0) && !Object.keys(a.used).length) { a.timerMs = st.timer * 1000; if (typeof showToast === 'function') showToast('The clock is running: ' + st.timer + ' seconds.', 'epic'); }
@@ -70451,12 +70452,12 @@ function _lxFightWave(f, w, cx0) {
 }
 // the arena goes quiet: whatever else wanders within 760 px of the mark leaves quietly, at the start and again as anything respawns, so the fight is the fight
 function _lxFightClear(f) {
-  for (let i = game.monsters.length - 1; i >= 0; i--) { const m = game.monsters[i]; if (!m || m._lxFight || !(typeof _lxIsWildHostile === 'function' ? _lxIsWildHostile(m) : !m.isBoss) || Math.abs(m.x - f.cx) > 760) continue; m.currentHp = 0; m._lxGone = true; game.monsters.splice(i, 1); }
+  for (let i = game.monsters.length - 1; i >= 0; i--) { const m = game.monsters[i]; if (!m || m._lxFight || !(typeof _lxIsWildHostile === 'function' ? _lxIsWildHostile(m) : !m.isBoss) || Math.abs(m.x - f.cx) > 760) continue; m.currentHp = 0; m._lxGone = true; try { _beginMonsterFade(m); } catch (e) {} game.monsters.splice(i, 1); }   // bughunt stones - they dissolve (0.8 s) instead of popping out
 }
 function _lxFightStart(def, m, onWin) {
   if (game._lxFight) return;
   if (typeof _coopFollowingHost === 'function' && _coopFollowingHost()) { if (onWin) onWin(); return; }
-  const f = { id: 'f' + ((game._lxFightN = (game._lxFightN | 0) + 1)), def, map: game.currentMap, t: 0, cx: m.x, mobs: [], boss: null, pending: (def.waves || []).map((w) => Object.assign({}, w)), phases: (def.phases || []).map((p) => Object.assign({}, p)), hazT: (def.hazard && def.hazard.start != null) ? def.hazard.start : 2500, onWin, over: false, qid: onWin ? m.qid : null, markId: onWin ? m.mk.id : null };   // a fight remembers its mark (it shows lit while held); a penalty fight has none
+  const f = { id: 'f' + ((game._lxFightN = (game._lxFightN | 0) + 1)), def, map: game.currentMap, t: 0, cx: m.x, mobs: [], boss: null, pending: (def.waves || []).map((w) => Object.assign({}, w)), phases: (def.phases || []).map((p) => Object.assign({}, p)), hazT: (def.hazard && def.hazard.start != null) ? def.hazard.start : 2500, onWin, free: !onWin, over: false, qid: onWin ? m.qid : null, markId: onWin ? m.mk.id : null };   // a fight remembers its mark (it shows lit while held); a penalty fight has none
   game._lxFight = f; if (def.boss) _lxFightClear(f);   // a named boss's arena goes quiet once, at the start; an ambush leaves the natives alone (they never vanish under the hero's sword)
   if (def.trial) _lxTrialInit(f, m);   // a door's trial (hold, aim, cuts): no monsters, its own tick
   if (def.guide && typeof _lxGuSay === 'function') _lxGuSay(def.guide, { pri: true });   // Guguma's word as it starts
@@ -70468,7 +70469,8 @@ function _lxFightStart(def, m, onWin) {
 }
 function _lxFightEnd(f, won, why) {
   if (f.over) return; f.over = true; game._lxFight = null; try { _lxTrialEnd(f); _lxFightTally(f, !!won); } catch (e) {}
-  for (const m of f.mobs) { if (!m._lxDead && m.currentHp > 0) { m.currentHp = 0; m._lxDead = true; m._lxGone = true; const i = game.monsters.indexOf(m); if (i >= 0) game.monsters.splice(i, 1); } }   // what is left of a lost fight leaves quietly
+  if (f.free) { for (const m of f.mobs) delete m._lxFight; }   // bughunt stones - a penalty ambush's monsters stay until they are killed (they never vanish under the hero)
+  else for (const m of f.mobs) { if (!m._lxDead && m.currentHp > 0) { m.currentHp = 0; m._lxDead = true; m._lxGone = true; const i = game.monsters.indexOf(m); if (i >= 0) { try { _beginMonsterFade(m); } catch (e) {} game.monsters.splice(i, 1); } } }   // what is left of a lost fight fades away (it used to pop out)
   if (won) { if (typeof flash === 'function') flash(0.35); if (f.def.won && typeof showToast === 'function') showToast(f.def.won, 'legendary'); if (f.onWin) f.onWin(); }
   else if (typeof showToast === 'function') showToast(why || 'The fight is lost. It will be waiting.', 'epic');
   _lxFightHud();
@@ -70518,15 +70520,19 @@ function _lxFightHud() {
   if (!el) {
     const host = document.getElementById('boss-intro'); if (!host || !host.parentNode) return;
     el = document.createElement('div'); el.id = 'lx-sp-hud';
-    el.style.cssText = 'position:absolute;top:92px;left:50%;transform:translateX(-50%);padding:5px 16px;border-radius:999px;background:rgba(18,8,31,0.82);border:2px solid #ffd54a;color:#ffe9a0;font:700 13px/1.2 var(--moji-font-display,Inter,system-ui,sans-serif);letter-spacing:0.4px;z-index:30;pointer-events:none;display:none;white-space:nowrap;text-shadow:0 1px 2px #000';
+    el.style.cssText = 'position:absolute;top:92px;left:50%;transform:translateX(-50%);padding:5px 16px;border-radius:999px;background:rgba(18,8,31,0.82);border:2px solid #ffd54a;color:#ffe9a0;font:700 13px/1.2 var(--moji-font-display,Inter,system-ui,sans-serif);letter-spacing:0.4px;z-index:30;pointer-events:none;display:none;white-space:normal;max-width:74%;text-align:center;text-shadow:0 1px 2px #000';
     host.parentNode.appendChild(el);
   }
   let txt = '';
   const f = game._lxFight;
   if (f) {
     const left = f.mobs.filter((m) => !m._lxDead && game.monsters.indexOf(m) >= 0).length + f.pending.reduce((n, w) => n + (w.n | 0), 0);
-    const b = f.boss && !f.boss._lxDead ? ' · ' + (f.boss.name || 'Boss') + ' ' + Math.max(0, Math.round(100 * f.boss.currentHp / Math.max(1, f.boss.maxHp))) + '%' : '';
-    txt = f.hud ? f.hud : '⚔ ' + left + ' left' + b;
+    const _bp = f.boss && !f.boss._lxDead ? Math.max(0, Math.round(100 * f.boss.currentHp / Math.max(1, f.boss.maxHp))) : null;
+    // bughunt stones - instructions, not just a count: a fight names what to do (def.hud, {n} = what is left), a boss fight names the boss and its health, an ambush says to clear it
+    if (f.hud) txt = f.hud;
+    else if (f.def && f.def.hud) txt = '⚔ ' + String(f.def.hud).split('{n}').join(left);
+    else if (_bp != null) txt = '⚔ Defeat ' + (f.boss.name || 'the boss') + ' - ' + _bp + '%' + (left > 1 ? ' (+' + (left - 1) + ' more)' : '');
+    else txt = '⚔ Clear the ambush - ' + left + ' left';
   } else {
     const act = player && player.quests && player.quests.active || {};
     for (const id in act) { const a = act[id]; if (a && a.timerMs > 0) { txt = '⏳ ' + Math.ceil(a.timerMs / 1000) + 's'; break; } }
@@ -70987,7 +70993,7 @@ function _lxTrialTick(f, dt) {
   } else if (t.kind === 'aim') {
     const A = T.aim, m = f.aimTarget; A.ang += (2.6 + 0.5 * A.hits) * dt / 1000; A.flash = Math.max(0, A.flash - dt);
     if (Math.abs(hx - m.x) > 320) { _lxFightEnd(f, false, 'You stepped away from the mark. Her arrow waits.'); return; }
-    f.hud = '🎯 ' + A.hits + '/' + (t.need || 3) + (A.miss ? '  ✖ ' + A.miss + '/' + (t.misses || 3) : '');
+    f.hud = '🎯 ' + A.hits + '/' + (t.need || 3) + (A.miss ? '  🚫 ' + A.miss + '/' + (t.misses || 3) : '');
   }
 }
 function _lxAngDiff(a, b) { let d = (a - b) % 6.2832; if (d > 3.1416) d -= 6.2832; if (d < -3.1416) d += 6.2832; return d; }
