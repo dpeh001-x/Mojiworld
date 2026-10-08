@@ -18,7 +18,7 @@ const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), Strin
 await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
-const errs = [], PLATE = 'backgrounds/worldmap_bg_v7.webp', CDN = `http://127.0.0.1:${PORT}/cdn/`;
+const errs = [], PLATE = 'backgrounds/worldmap_bg_v8.webp', CDN = `http://127.0.0.1:${PORT}/cdn/`;
 const plateBytes = readFileSync(path.join(SERVE_ROOT, PLATE));
 // boot a page; mode: 'plain' | 'cdn' (the plate path rewritten to a CORS-answering second origin) | 'blocked' (the plate unreachable)
 const boot = async (mode) => {

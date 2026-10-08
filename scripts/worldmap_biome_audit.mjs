@@ -70,9 +70,13 @@ const SIG = { snow: (k) => k === 'ice' || k === 'sky', fire: (k) => k === 'fire'
               brick: (k) => k === 'brickland', rift: (k) => k === 'rift', sea: (k) => k === 'sea' };
 
 // ---------------------------------------------------------------- the painting
-const W = 1529, H = 889, RBOX = 13;
-const PLATE = path.join(ROOT, 'backgrounds', 'worldmap_bg_v7.webp');
-const { data } = await sharp(PLATE).removeAlpha().resize(W, H, { fit: 'fill' }).raw().toBuffer({ resolveWithObject: true });
+// v0.30.1658 - the board as the game draws it: 1828.8 x 1085.6 (the frame + _WM_SIDE 150 a side + _WM_SKY 120), and worldmap_bg_v8.webp registered
+// so its v7 part (3072 x 1792 at 200, 380) lands where the old cover-fit put v7, 150 units right and 120 down. It was a fill-stretch of the
+// plate over a 1529 x 889 canvas the board stopped being long ago.
+const W = 1829, H = 1086, RBOX = 13, PSC = Math.max(1528.8 / 3072, 965.6 / 1792);
+const PLATE = path.join(ROOT, 'backgrounds', 'worldmap_bg_v8.webp');
+const { data } = await sharp(await sharp(PLATE).removeAlpha().resize(Math.round(3472 * PSC), Math.round(2332 * PSC), { fit: 'fill' }).toBuffer())
+  .extract({ left: Math.round(200 * PSC - (1528.8 - 3072 * PSC) / 2 - 150), top: Math.round(380 * PSC - 120), width: W, height: H }).raw().toBuffer({ resolveWithObject: true });
 const CLS = ['rock', 'snow', 'rift', 'lava', 'water', 'grass', 'sand', 'stone', 'other', 'brick'];
 function classify(r, g, b) {
   const mx = Math.max(r, g, b) / 255, mn = Math.min(r, g, b) / 255, d = mx - mn;

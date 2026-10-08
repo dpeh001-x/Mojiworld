@@ -81,15 +81,17 @@ const R = await page.evaluate(async () => {
   // VARIANCE and had it backwards: the old procedural sky, with hard-edged
   // random stars and a bright core flare, scores HIGHER variance than a soft
   // painting. Variance measures sharpness, not provenance.)
-  const plate = new Image(); plate.src = 'backgrounds/worldmap_bg_v6.webp';   // v0.30.656 - the painting the user supplied, unglazed
+  // v0.30.1658 - v8 (v7 at 200, 380 in a wider painting), drawn the way _wmBgRasterURL registers it: the sky band on top and the side bands, v7 cover-fit inside them
+  const plate = new Image(); plate.src = 'backgrounds/worldmap_bg_v8.webp';
   await new Promise(r => { plate.onload = r; plate.onerror = r; });
   let corr = null;
   if (plate.naturalWidth) {
     const pc = document.createElement('canvas'); pc.width = cv.width; pc.height = cv.height;
     const pg = pc.getContext('2d');
-    const sc = Math.max(cv.width / plate.naturalWidth, cv.height / plate.naturalHeight);
+    const sky = (typeof _WM_SKY === 'number' ? _WM_SKY : 0) * cv.width / W, side = (typeof _WM_SIDE === 'number' ? _WM_SIDE : 0) * cv.width / W;
+    const sc = Math.max((cv.width - 2 * side) / 3072, (cv.height - sky) / 1792);
     const dw = plate.naturalWidth * sc, dh = plate.naturalHeight * sc;
-    pg.drawImage(plate, (cv.width - dw) / 2, (cv.height - dh) / 2, dw, dh);
+    pg.drawImage(plate, (cv.width - 3072 * sc) / 2 - 200 * sc, sky + (cv.height - sky - 1792 * sc) / 2 - 380 * sc, dw, dh);
     const pd = pg.getImageData(0, 0, pc.width, pc.height).data;
     const A = [], B = [];
     for (let y = 8; y < cv.height - 8; y += 12) for (let x = 8; x < cv.width - 8; x += 12) {
@@ -180,7 +182,7 @@ ok('the diagram backdrop raster is built and attached', R.rasterAttached && R.ra
 ok('and it is built at the DISPLAY resolution, not the layout one', R.rasterW >= R.vbox.split(',')[0] * Math.min(2, R.dpr) * 0.95, `raster ${R.rasterW}px across a ${R.vbox.split(',')[0]}px node space at dpr ${R.dpr} (capped at 2)`);
 ok('the painted plate decoded and was used', R.plateReady === true, `plateReady=${R.plateReady}`);
 ok('the raster IS the painted plate (luminance correlates with the file)', R.corr != null && R.corr >= 0.7,
-   `correlation with backgrounds/worldmap_bg_v6.webp = ${R.corr} (procedural sky measures ~0)`);
+   `correlation with backgrounds/worldmap_bg_v8.webp = ${R.corr} (procedural sky measures ~0)`);
 ok('it stays dark enough for node labels to read', R.meanLum < 95, `mean luminance ${R.meanLum}/255`);
 // Not "the mean is above N" -- darkening the reading area legitimately pulls the
 // mean down. The property is that the plate still has lit nebula in it somewhere.
