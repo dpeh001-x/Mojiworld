@@ -51,8 +51,8 @@ try {
   check(R.oldTitles.length === 0, 'none of the old card titles is left', J(R.oldTitles));
   const V = R.voice; const want = ['king', 'mooma', 'kingKrook', 'octobaby', 'miraFallen', 'aetherion', 'pqConductor', 'mirrorSelf', 'young_confused_barnaby', 'sundered_smith', 'legosaurus', 'towerArbiter', 'towerSovereign', 'gravitos'];
   check(want.every((k) => V[k] && V[k].length > 8) && !V.brinekraken, 'fourteen bosses speak in their own voice (the new eight added)', J(want.filter((k) => !V[k])));
-  check(V.pqConductor === 'Next stop is always next.' && V.sundered_smith === 'Let me finish the shift.' && V.gravitos === 'Sleep is the only kindness I have left to carry.', 'the new voice lines read as the trait', '');
-  check(/His court walks out/.test(R.epi.king) && /someone steps off/.test(R.epi.conductor) && /this time she does not turn back/.test(R.epi.mira), 'the defeat lines: the court walks out, the train stops, she does not turn back', J(R.epi).slice(0, 200));
+  check(V.pqConductor === 'Next stop is always next.' && /^Let me finish the shift\./.test(V.sundered_smith) && V.gravitos === 'Sleep is the only kindness I have left to carry.', 'the new voice lines read as the trait', '');
+  check(/finally moves/.test(R.epi.king) && /nobody melts/.test(R.epi.king) && /someone steps off/.test(R.epi.conductor) && /this time she does not turn back/.test(R.epi.mira), 'the defeat lines: Gloopaloo finally moves and nobody melts, the train stops, she does not turn back', J(R.epi).slice(0, 200));
   check(R.sig[0].indexOf('The Reckless. ') === 0 && R.sig[1].indexOf('The Smug. ') === 0 && R.sig[2].indexOf('The Vain. ') === 0 && R.sig[3].indexOf('The Stubborn. ') === 0, 'the four distorted captains lead with their trait', J(R.sig.map((s) => s.slice(0, 22))));
   const Q = R.q;
   check(/He is the Greedy\./.test(Q.king) && /whole court/.test(Q.king) && /the Overprotective/.test(Q.mooma) && /the Unforgiving/.test(Q.inner) && /the Dutiful/.test(Q.pq) && /the Undecided/.test(Q.portal), 'the early quests name the trait (Greedy, Overprotective, Unforgiving, Dutiful, Undecided)', '');
@@ -69,6 +69,13 @@ try {
   check(ewc.length === 11 && ewc.every(([k, n]) => n <= 33), 'the epitaphs are trimmed: every boss defeat line is 33 words or fewer (Brinekraken is not a boss and is left alone)', J(ewc.filter(([k, n]) => n > 33)) + ' ' + J(ewc));
   check(/Cedric asked/.test(R.epiAll.legosaurus) && /straight up/.test(R.epiAll.aetherion) && /does not turn back/.test(R.epiAll.miraFallen) && /Glasswind/.test(R.epiAll.sundered_smith), 'the trimmed epitaphs keep the lines the story hangs on (Cedric, the look up, the turn, Glasswind)', '');
   check(R.lines[0] === 'Took his whole court inside himself to keep them dry, and will not let one back out.' && /mirror copy/.test(R.lines[4] + R.lines[5] + R.lines[6] + R.lines[7]) && /the Twelve/.test(R.lines[11]) && /the tear/.test(R.lines[13]), 'the one-liners are tied to each story: the court, the tear\'s mirror copies, the Twelve\'s smith, the woman\'s tear', J(R.lines.slice(4, 8)));
+  // Young Barnaby and the Sundered Smith are the same man a century apart: their lines rhyme without saying so
+  const BV = R.voice.young_confused_barnaby, SV = R.voice.sundered_smith, BE = R.epiAll.young_confused_barnaby, SE = R.epiAll.sundered_smith, BL = R.lines[8], SL = R.lines[11];
+  check(/wall/.test(BV) && /shift/.test(BV) && /wall/.test(SV) && /shift/.test(SV), 'Barnaby and the Smith speak of the same two things, the wall and the shift', J({ BV, SV }));
+  check(/finally understands the question/.test(BE) && /finally understands the question/.test(SE) && /stops guarding/.test(BE) && /stops guarding/.test(SE), 'their epitaphs share a shape: each finally understands the question and stops guarding', J({ BE: BE.slice(0, 60), SE: SE.slice(0, 60) }));
+  check(/still at his post/.test(BL) && /still at his post/.test(SL) && /Twelve/.test(SL) && /the tear/.test(BL), 'their Codex lines both end on the post they will not leave', J({ BL, SL }));
+  check(!/\bBarnaby\b.*\b(smith|Smith)\b.*same (man|person)|same man|same person|a century on/i.test(BV + SV + BE + SE + BL + SL), 'it stays vague: no line says outright that they are one man (the film does that)', '');
+  check(/lowers its weapon/.test(R.epiAll.mirrorSelf) && !/blade/.test(R.epiAll.mirrorSelf), 'Mirror Self lowers its weapon (not its blade)', R.epiAll.mirrorSelf);
   const wcl = (t) => t.trim().split(/\s+/).length;
   check(R.lines.length === 18 && R.lines.every((l) => /\.$/.test(l) && (l.match(/[.!?]/g) || []).length === 1 && wcl(l) >= 6 && wcl(l) <= 20), 'each character gets ONE short line (a single sentence of 6 to 20 words)', J(R.lines.filter((l) => !(/\.$/.test(l) && (l.match(/[.!?]/g) || []).length === 1 && wcl(l) >= 6 && wcl(l) <= 20))));
   check(R.lines.every((l) => R.pageAll.indexOf(l) > 0), 'with every boss met the page prints each one-line description', J(R.lines.filter((l) => R.pageAll.indexOf(l) < 0)));
