@@ -302,7 +302,9 @@
 // so a returning browser would keep drawing the old art for a session.
 // v0.30.1638 - v160 -> v161. Gravitos's form 1 chest blast frames 0-8 and its attack still are REPLACED under their own names, so a
 // returning browser would keep drawing the old pose for a session.
-const CACHE = 'mojiworld-assets-v164';   // v0.30.1649 - the Coronation stills keep their names
+// v0.30.1654 - v164 -> v165. Gravitos's form 2 soul cast frames 0-8 and its still are REPLACED under their own names, so a
+// returning browser would keep drawing the old cast for a session.
+const CACHE = 'mojiworld-assets-v165';   // v0.30.1654 - Gravitos form 2 soul cast remake (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

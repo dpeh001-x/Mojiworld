@@ -1075,17 +1075,16 @@ window.LX_ANIM_CALIB = {
       "dx": 0,
       "dy": 0.0216,
       "ft": [
+        80,
         72,
-        60,
-        60,
+        72,
+        72,
         90,
-        132,
-        90,
-        60,
-        60,
+        110,
+        140,
+        96,
         96
-      ],
-      "ftAuto": true
+      ]
     }
   },
   "towerSovereignswing": {
