@@ -31,8 +31,8 @@ await page.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'do
 await page.waitForFunction(() => typeof MAPS === 'object' && typeof loadMap === 'function' && typeof _mapPlatformTint === 'function', null, { timeout: 180000 });
 await page.evaluate(() => new Promise((res) => { let n = 0; const t = () => { window._lxBootGateDone = true; try { _prologueActive = false; } catch (e) {} for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const o = document.getElementById(id); if (o) o.style.display = 'none'; } const c = document.querySelector('.cls-card'); if (c) c.click(); if (++n > 150) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); }));
 await page.waitForTimeout(1500);
-const baked = await page.evaluate(async () => {
-  const out = {}; const ids = Object.keys(MAPS);
+const sampled = await page.evaluate(async () => {
+  const out = {}, skip = {}; const ids = Object.keys(MAPS);
   // sample, do not echo: _mapPlatformTint answers from the baked table before it samples, so with the table loaded every run
   // wrote the old values back and --check passed in a loop (the Bone Graveyard kept the blue of a backdrop it no longer has)
   window.LX_MAP_PLATFORM_TINT = {}; for (const k of Object.keys(_MAP_PLATFORM_TINT_CACHE)) delete _MAP_PLATFORM_TINT_CACHE[k];
@@ -44,19 +44,63 @@ const baked = await page.evaluate(async () => {
   const settle = (n) => new Promise((res) => { let i = 0; const t = () => { game.paused = false; if (++i >= n) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   for (const id of ids) {
     delete _MAP_PLATFORM_TINT_CACHE[id];
-    try { loadMap(id); } catch (e) { continue; }
+    try { loadMap(id); } catch (e) { skip[id] = { why: 'load-threw', err: String((e && e.message) || e).slice(0, 80) }; continue; }
     try { game.monsters.length = 0; player.hp = player.maxHp; } catch (e) {}
     // ask for the map's own plate and wait for it, rather than hoping it decodes inside the settle loop's ~2 s
-    { const bg = (MAPS[id] && MAPS[id].bg && typeof BG_IMAGES !== 'undefined') ? BG_IMAGES[MAPS[id].bg] : null;
-      if (bg && !bg._loaded) { try { _lxWantImg(bg, true); } catch (e) {} for (let w = 0; w < 120 && !bg._loaded; w++) await new Promise((r) => setTimeout(r, 250)); } }
+    const _bgKey = (MAPS[id] && MAPS[id].bg) || null;
+    const _bg = (_bgKey && typeof BG_IMAGES !== 'undefined') ? BG_IMAGES[_bgKey] : null;
+    if (_bg && !_bg._loaded) { try { _lxWantImg(_bg, true); } catch (e) {} for (let w = 0; w < 120 && !_bg._loaded; w++) await new Promise((r) => setTimeout(r, 250)); }
     // let the backdrop decode and the sampler run on a real drawn frame, then read the cache
     for (let tries = 0; tries < 40; tries++) { await settle(3); let hit = _MAP_PLATFORM_TINT_CACHE[id]; if (!(hit && hit.fromBg) && game.currentMap === id && game.mapData && !game.mapData.isVoid) { try { _mapPlatformTint(game.mapData); } catch (e) {} hit = _MAP_PLATFORM_TINT_CACHE[id]; } if (hit && hit.fromBg && hit.tint) { out[id] = { top: String(hit.tint.top), body: String(hit.tint.body) }; break; } }
+    if (!out[id]) skip[id] = {
+      why: !_bgKey ? 'no-bg-declared'
+        : (game.currentMap !== id ? 'map-redirected'
+        : (!_bg ? 'bg-key-unknown' : (!_bg._loaded ? 'plate-never-decoded' : 'sampler-gave-nothing'))),
+      bg: _bgKey, file: _bg ? String(_bg.src || '').split('/').pop() : null,
+      isVoid: !!(game.mapData && game.mapData.isVoid),
+      to: game.currentMap !== id ? game.currentMap : null };
   }
-  return out;
+  return { out, skip };
 });
 await b.close(); srv.kill();
+const baked = sampled.out, skipped = sampled.skip;
 const ids = Object.keys(baked).sort();
 console.log(`sampled ${ids.length} maps`);
+// SAY WHAT WAS DROPPED. The v0.30.448 bake silently lost zod_gemini - its plate had not decoded
+// inside the old fixed frame budget - and "sampled 106 maps" was the whole output, so nobody could
+// tell. A map that falls out of this table pays the 39-67 ms first-frame readback again, and
+// --check said only "differs". Every skipped map is now named with the reason, and a run that loses
+// a map with a declared backdrop refuses to write (--allow-drops overrides).
+//
+// A map with no 'bg' of its own is NOT a drop: the sanctum / zodiac / carriage arenas paint their
+// own art, and _mapPlatformTint takes their sky stops by design.
+// A void map is not a drop either: the Void and the Hall of Echoes draw no ground at all
+// (v0.30.553 removed the Void floor band), and the sampler loop above deliberately refuses to
+// resolve a tint for an isVoid map. These two are named so the report says so out loud; a bg key
+// that is not in BG_IMAGES on a NON-void map still fails, because that is a real typo class.
+const EXPECTED_SKIP = {
+  void: 'draws no ground (isVoid), and its bg key voidBlack is not in BG_IMAGES',
+  boss_rush: 'draws no ground (isVoid)',
+};
+const drops = Object.entries(skipped).sort((x, y) => (x[0] < y[0] ? -1 : 1));
+if (drops.length) {
+  const by = {};
+  for (const [id, s] of drops) (by[s.why] ||= []).push(id
+    + (s.bg ? ' (bg ' + s.bg + (s.file ? ' ' + s.file : '') + ')' : '')
+    + (s.to ? ' -> ' + s.to : '') + (s.isVoid ? ' [void]' : '')
+    + (EXPECTED_SKIP[id] ? ' - expected: ' + EXPECTED_SKIP[id] : ''));
+  console.log('skipped ' + drops.length + ' maps:');
+  for (const why of Object.keys(by).sort()) console.log('  ' + why + ' (' + by[why].length + '): ' + by[why].join(', '));
+}
+const lost = drops.filter(([id, s]) => s.why !== 'no-bg-declared' && !s.isVoid && !EXPECTED_SKIP[id]);
+if (lost.length && !process.argv.includes('--allow-drops')) {
+  console.error('');
+  console.error('FAIL: ' + lost.length + ' map(s) with a declared backdrop fell out of the bake:');
+  for (const [id, s] of lost) console.error('  ' + id + ': ' + s.why + (s.bg ? ' (bg ' + s.bg + ')' : ''));
+  console.error('Each pays the 39-67 ms readback on its first drawn frame. Fix the cause, or list it');
+  console.error('in EXPECTED_SKIP with the reason. --allow-drops bakes anyway.');
+  process.exit(3);
+}
 if (!ids.length) { console.error('nothing sampled - the cache never resolved'); process.exit(2); }
 const body = '{\n' + ids.map((k) => `  ${JSON.stringify(k)}: { "top": ${JSON.stringify(baked[k].top)}, "body": ${JSON.stringify(baked[k].body)} }`).join(',\n') + '\n}';
 const text = `// GENERATED by scripts/gen_map_platform_tint.mjs - do not hand-edit.\n`
@@ -67,9 +111,29 @@ const text = `// GENERATED by scripts/gen_map_platform_tint.mjs - do not hand-ed
   + `// (the run empties this table first, so it re-samples every map rather than reading these values back).\n`
   + `window.LX_MAP_PLATFORM_TINT = ${body};\n`;
 if (CHECK) {
-  const cur = existsSync(OUT) ? readFileSync(OUT, 'utf8') : '';
-  if (cur.trim() !== text.trim()) { console.error(`STALE: ${OUT} differs - re-run without --check`); process.exit(1); }
-  console.log(`${OUT} is up to date.`); process.exit(0);
+  // The committed table is LF, but a checkout on this machine is CRLF (core.autocrlf), so a raw
+  // compare reported STALE on an up-to-date table every time. Compare content, not line endings.
+  const CR = String.fromCharCode(13);
+  const cur = (existsSync(OUT) ? readFileSync(OUT, 'utf8') : '').split(CR).join('');
+  if (cur.trim() === text.trim()) { console.log(`${OUT} is up to date.`); process.exit(0); }
+  // "differs" alone sent the reader to a 114-line diff to find the one line that moved. Name the keys.
+  const parse = (t) => { try { return JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1)); } catch (e) { return null; } };
+  const was = parse(cur) || {}, now = parse(text) || {};
+  const added = [], gone = [], moved = [];
+  for (const k of [...new Set([...Object.keys(was), ...Object.keys(now)])].sort()) {
+    const x = was[k], y = now[k];
+    if (!x && y) added.push(k + ' = ' + y.top + ' / ' + y.body);
+    else if (x && !y) gone.push(k + ' (was ' + x.top + ' / ' + x.body + ')');
+    else if (x && y && (x.top !== y.top || x.body !== y.body)) moved.push(k + ': ' + x.top + ' / ' + x.body + ' -> ' + y.top + ' / ' + y.body);
+  }
+  console.error(`STALE: ${OUT} differs - re-run without --check`);
+  for (const [label, list] of [['added', added], ['removed', gone], ['changed', moved]]) {
+    if (!list.length) continue;
+    console.error('  ' + list.length + ' ' + label + ':');
+    for (const line of list) console.error('    ' + line);
+  }
+  if (!added.length && !gone.length && !moved.length) console.error('  same keys and values - only the header or formatting differs');
+  process.exit(1);
 }
 writeFileSync(OUT + '.tmp', text); renameSync(OUT + '.tmp', OUT);
 console.log(`wrote ${OUT} (${ids.length} maps)`);
