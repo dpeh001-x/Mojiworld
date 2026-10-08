@@ -77,10 +77,10 @@ try {
     check(s5.surface && s5.lock === '🔓' && s5.devClass, 'the tester\'s browser stays unlocked on the next visit', s5);
     check(s6.console, '...and the backtick opens the dev console there, as on a developer machine', s6);
     await ctx.close(); }
-  // ---- v0.30.1180 launch-meta - the public web without ?devlock=1: no lock at all
+  // ---- v0.30.1653 dev-lock-web (per user) - the public web shows the lock to every player again, still locked (was hidden without ?devlock=1 since v0.30.1180)
   { const { ctx, page } = await open(PUBLIC, '?dev=1');
     const s = await state(page);
-    check(s.lock === null && !s.surface && !s.console, 'without ?devlock=1 the public web shows no lock (v0.30.1180 launch-meta)', s);
+    check(s.lock === '🔒' && !s.surface && !s.console, 'the public web shows the lock to every player, still locked - ?dev=1 alone opens nothing (v0.30.1653 dev-lock-web, per user)', s);
     await ctx.close(); }
   // ---- the Steam app: never, even with the flag
   { const { ctx, page } = await open(PUBLIC, '?dev=1', () => { window.MOJI_PACKAGED = true; try { localStorage.setItem('LX_DEV', '1'); } catch (e) {} });

@@ -89,7 +89,7 @@ try {
 
   // ---- 2) the dev lock on the public web -------------------------------------------------------------------------
   { const { ctx, p } = await openPage(PUBLIC, '?dev=1'); await waitLockReady(p); const s = await lockState(p);
-    check(s.lock === null && s.surface === false, 'on the public web there is no dev lock icon (?dev=1 does not bring it back)', s); await ctx.close(); }
+    check(s.lock === '🔒' && s.surface === false, 'on the public web every player sees the dev lock again, still locked - ?dev=1 alone does not open it (v0.30.1653 dev-lock-web, per user)', s); await ctx.close(); }
   { const { ctx, p } = await openPage(PUBLIC, '?devlock=1'); await waitLockReady(p); const s = await lockState(p);
     check(s.lock === '🔒' && s.surface === false, 'with ?devlock=1 the public web shows the lock (the tester\'s way in), still locked', s); await ctx.close(); }
   { const { ctx, p } = await openPage(PUBLIC, '?devlock=1', () => { window.MOJI_PACKAGED = true; }); await waitLockReady(p); const s = await lockState(p);
