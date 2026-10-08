@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1638';
+const GAME_VERSION = 'v0.30.1639';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -21091,6 +21091,7 @@ function _lxAsyncBake(frames, idx, im, maxLong, prev) {   // v0.30.x — prev: a
     // frame arrays (counted 2-3 bakes per source on the Singularity entry),
     // and each array used to re-run the whole decode+resize for it.
     if (cv) im._lxBakedCv = cv;
+    if (cv) _lxCvTrack(cv, (c) => { if (frames[idx] === c) { frames[idx] = im; frames._readyN = 0; } if (im._lxBakedCv === c) im._lxBakedCv = null; });   // v0.30.1639 cvbudget
     if (cv && (frames[idx] === im || (prev && frames[idx] === prev))) { frames[idx] = cv; frames._readyN = 0; }
   };
   try {
@@ -21229,6 +21230,7 @@ function _lxShrinkFrames(frames, baseLogical, pinCap) {   // v0.30.624 - pinCap:
       if (_lxPinsThisCall >= (pinCap > 0 ? pinCap : 4)) { pending = true; continue; }
       im._lxNoShrink = true; im._lxNoShrinkCap = maxLong;
       const _pv = _lxPinned(im); if (_pv !== im) { frames[i] = _pv; frames._readyN = 0; _lxPinsThisCall++; }
+      if (_pv !== im) (_pv._lxHomes || (_pv._lxHomes = [])).push(frames, i);   // v0.30.1639 cvbudget - so a released pin can hand its slot back
       continue;
     }
     // v0.29.742 — another array already paid for this source's bake; reuse it
@@ -78317,6 +78319,7 @@ function _lxPreloadMapAssets(id, onProgress, prio) {
   // entries finish, so this never grows unbounded.
   try {
     window._lxSpriteWatch = (window._lxSpriteWatch || []).concat(_imgs);
+    if (window._lxSpriteGateDone) window._lxSpriteWatch = window._lxSpriteWatch.filter((im) => im && im.tagName === 'IMG');   // v0.30.1639 cvbudget - copies (pins / bakes) leave the list: it watches downloads
     if (window._lxSpriteGateDone && typeof _lxSpriteHealStart === 'function') _lxSpriteHealStart();
   } catch (e) {}
   const all = _lxAsyncPool(prio === 'low' ? 1 : 6, _imgs, _loadOne);   // v0.30.438 — the streamer walks one image at a time (see _lxStreamCalm)
@@ -131870,7 +131873,7 @@ function _lxBgScaled(img, w, h) {
   const _dw = Math.round(w * _bDpr), _dh = Math.round(h * _bDpr);
   const _key = _dw + 'x' + _dh;
   const _c = img._lxBgS;
-  if (_c && _c._lxKey === _key) return _c;
+  if (_c && _c._lxKey === _key) { if (_c._lxLruT !== undefined) _lxCvTouch(_c); return _c; }   // v0.30.1639 cvbudget - a hit marks it in use
   // Never worth it when the plate is already at (or below) the drawn size.
   const _nw = img.naturalWidth || img.width || 0, _nh = img.naturalHeight || img.height || 0;
   // v0.30.x art polish (audit R1) — COVER, never stretch. Eleven 4:3 plates (Withering Tide, Magma Foundry, Glasswind
@@ -131893,6 +131896,7 @@ function _lxBgScaled(img, w, h) {
     } else g.drawImage(img, 0, 0, _dw, _dh);
     cv._lxKey = _key;
     img._lxBgS = cv;
+    _lxCvTrack(cv, (c) => { if (img._lxBgS === c) img._lxBgS = null; });   // v0.30.1639 cvbudget
     return cv;
   } catch (e) { return img; }   // tainted canvas under file:// — draw unscaled
 }
@@ -157267,6 +157271,41 @@ function _lxPlainOf(img, pw, ph) {
   }
   return _pc;
 }
+// v0.30.1639 cvbudget - ONE BUDGET FOR THE CACHED COPIES (per user: a tester's monsters blinked and his backdrops never drew).
+// The decode pins below, the shrink bakes that replace a frame (_lxAsyncBake) and the backdrop bakes (_lxBgScaled) were
+// never released: measured at DPR 2, 290 MB of canvas after the town, 1.8 GB after nine maps, 2.5 GB after the Gravitos
+// arena. WebKit refuses new canvases past its canvas-memory cap (RAM/4 on iPad / iPhone, ~2.1 GB+ on a Mac) and Chrome
+// drops canvases under GPU memory pressure; from then on each new bake drew nothing - the backdrop baked at map entry, a
+// monster's next frame. Tracked copies now share a budget. Past it, copies not drawn in the last 15 s go first, the maps you left before this one's (whose rarer frames - deaths, hurts - were made at warm-up): each
+// leaves its cache and its slot gets the source image back (pinned / baked again when it is next drawn). A released copy
+// is never cleared, so anything still holding it draws it as before; its memory goes when the last holder lets go.
+const _LX_CV_BUDGET_PX = (function () { try { const n = navigator; return (/iP(hone|ad|od)/.test(n.userAgent || '') || (n.platform === 'MacIntel' && n.maxTouchPoints > 1)) ? 40e6 : 160e6; } catch (e) { return 160e6; } })();   // ~160 / ~640 MB of RGBA (recent copies are never released, so it is a soft line)
+const _lxCvLru = new Map();   // canvas -> { px, evict }, least recently drawn first
+let _lxCvLruPx = 0, _lxCvEvicted = 0;
+function _lxCvTrack(cv, evict) {
+  if (!cv || _lxCvLru.has(cv)) return cv;
+  const px = (cv.width | 0) * (cv.height | 0); if (!px) return cv;
+  cv._lxLruT = performance.now(); cv._lxMapT = _lxCvMapNow();
+  _lxCvLru.set(cv, { px, evict }); _lxCvLruPx += px;
+  if (_lxCvLruPx > _LX_CV_BUDGET_PX) _lxCvTrim();
+  return cv;
+}
+function _lxCvTouch(cv) {   // every drawImage of a tracked copy; reorders it at most twice a second
+  const t = performance.now(); if (t - cv._lxLruT < 500) return;
+  cv._lxLruT = t; cv._lxMapT = _lxCvMapNow();
+  const e = _lxCvLru.get(cv); if (!e) return;
+  _lxCvLru.delete(cv); _lxCvLru.set(cv, e);
+}
+function _lxCvMapNow() { try { return (typeof game !== 'undefined' && game && game.currentMap) || ''; } catch (e) { return ''; } }
+function _lxCvTrim() {
+  const target = _LX_CV_BUDGET_PX * 0.8, now = performance.now(), map = _lxCvMapNow();
+  for (const [cv, e] of _lxCvLru) {
+    if (_lxCvLruPx <= target || now - cv._lxLruT < 15000) break;   // the rest were drawn more recently
+    if (cv._lxMapT === map && now - cv._lxLruT < 120000) continue;   // this map's copies (its monsters' rarer frames, made at warm-up) stay
+    _lxCvLru.delete(cv); _lxCvLruPx -= e.px; _lxCvEvicted++; cv._lxLruT = undefined;
+    try { if (e.evict) e.evict(cv); } catch (err) {}
+  }
+}
 // v0.30.405 — DECODE PINNING (per user: "reducing lag of the game"; a Chrome trace
 // of the combat scene). drawImage from an HTMLImageElement goes through Chrome's
 // decoded-image cache, and that cache keeps no promise: on a dense fight — dozens
@@ -157284,7 +157323,7 @@ const _LX_PIN_MAX_PX = 2200000;   // leave the rare huge sheets to the cache
 let _lxPinCount = 0, _lxPinPx = 0;   // diagnostics: how many pins exist and how many pixels they hold
 function _lxPinned(img) {
   if (!img || img.tagName !== 'IMG' || !img.complete || !(img.naturalWidth > 0)) return img;
-  let cv = _lxPinCache.get(img); if (cv) return cv;
+  let cv = _lxPinCache.get(img); if (cv) { if (cv._lxLruT !== undefined) _lxCvTouch(cv); return cv; }   // v0.30.1639 cvbudget - a hit marks it in use
   const w = img.naturalWidth, h = img.naturalHeight;
   if (w * h > _LX_PIN_MAX_PX) return img;
   // v0.30.790 grav-smooth — a boss frame over its cap is on its way to an off-thread bake that will replace it;
@@ -157298,6 +157337,8 @@ function _lxPinned(img) {
   cv.complete = true; cv.naturalWidth = w; cv.naturalHeight = h; cv.src = img.src; cv._lxSrc = img;
   for (const k of ['_lxIsFlash', '_lxDrawW', '_lxDrawH', '_lxNW', '_lxNH', '_lxFi', '_lxNoShrink', '_lxNoShrinkCap']) if (img[k] !== undefined) cv[k] = img[k];
   _lxPinCache.set(img, cv);
+  _lxCvTrack(cv, (c) => { if (_lxPinCache.get(img) === c) { _lxPinCache.delete(img); _lxPinCount--; _lxPinPx -= w * h; }
+    const H = c._lxHomes; c._lxHomes = null; if (H) for (let k = 0; k < H.length; k += 2) if (H[k][H[k + 1]] === c) { H[k][H[k + 1]] = img; H[k]._readyN = 0; } });   // v0.30.1639 cvbudget
   return cv;
 }
 // The single choke point every draw site shares: a drawImage of a decoded <img>
@@ -157313,12 +157354,14 @@ function _lxPinned(img) {
     // offscreen blits skip the DOM getters; arguments passes the 3-, 5- and 9-argument forms unchanged.
     const w = function (im) {
       if (typeof ctx !== 'undefined' && this === ctx && im && im.tagName === 'IMG' && im.complete && im.naturalWidth > 0) { const p = _lxPinned(im); if (p !== im) { arguments[0] = p; window._lxPinStats.pinned++; } else window._lxPinStats.raw++; }
+      { const _a0 = arguments[0]; if (_a0 && _a0._lxLruT !== undefined) _lxCvTouch(_a0); }   // v0.30.1639 cvbudget
       return o.apply(this, arguments);
     };
     w._lxPinWrap = true; P.drawImage = w;
   } catch (e) {}
 })();
 function _lxDrawSoft(c, img, dx, dy, dw, dh, opts) {
+  if (img && img._lxLruT !== undefined) _lxCvTouch(img);   // v0.30.1639 cvbudget - the sprite in use, whichever derived copy ends up drawn
   // v0.30.65 perf — COMBAT LAG. The tint bake mints a NEW canvas per
   // (sprite frame x filter) and the probe below ran on that copy, so every one
   // of the 8 tint variants (freeze / burn / poison / stun / flash / flash+freeze
