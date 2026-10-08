@@ -28,7 +28,7 @@ try {
     out.intro = T.filter((e) => BOSS_INTROS[e.k]).map((e) => [e.k, BOSS_INTROS[e.k].title, e.trait]); out.noIntro = T.filter((e) => !BOSS_INTROS[e.k]).map((e) => e.k);
     const OLD = ['The Slime Sovereign', 'Cradle-Veiled', 'Eight-Mood Meltdown', 'The Spiked Throne', 'The Lost Sentinel', 'The Broken Anvil', 'Prisoner of the Inner Dimension', 'The Warped Tyrant', 'Keeper of the Endless Express', 'Judge of the Spire', 'The Last Excuse', 'The First Expedition', 'The Weight-Bearer', 'The Hoarder', 'The Smotherer', 'The Self-Critic', 'The Sulker', 'The Mourner', 'The Tantrum', 'The Judge', 'The Idler', 'The Controller'];
     out.oldTitles = Object.entries(BOSS_INTROS).filter(([k, v]) => OLD.indexOf(v.title) >= 0).map(([k]) => k);
-    out.voice = LX_BOSS_VOICE; out.epi = { king: EVERDAWN_EPITAPHS.king, conductor: EVERDAWN_EPITAPHS.pqConductor, mira: EVERDAWN_EPITAPHS.miraFallen };
+    out.epiAll = Object.assign({}, EVERDAWN_EPITAPHS); out.voice = LX_BOSS_VOICE; out.epi = { king: EVERDAWN_EPITAPHS.king, conductor: EVERDAWN_EPITAPHS.pqConductor, mira: EVERDAWN_EPITAPHS.miraFallen };
     out.sig = ['taiger', 'harea', 'lady_honk', 'willeo'].map((k) => monsterTypes[k].signature);
     const Q = (id) => QUESTS[id].desc; out.q = { king: Q('q_boss_king'), mooma: Q('q_boss_mooma'), inner: Q('q_inner_dim_trial'), pq: Q('q_pq_finale'), portal: Q('q_distorted_portal'), dawn: Q('q_long_dawn_1'), smith: Q('q_boss_sundered_smith'), grav: Q('q_boss_gravitos'), aeth: Q('q_boss_aetherion'), lyra: Q('q_lyra_last') };
     out.words = Object.fromEntries(Object.entries(out.q).map(([k, v]) => [k, wc(v)]));
@@ -52,7 +52,7 @@ try {
   const V = R.voice; const want = ['king', 'mooma', 'kingKrook', 'octobaby', 'miraFallen', 'aetherion', 'pqConductor', 'mirrorSelf', 'young_confused_barnaby', 'sundered_smith', 'legosaurus', 'towerArbiter', 'towerSovereign', 'gravitos'];
   check(want.every((k) => V[k] && V[k].length > 8) && !V.brinekraken, 'fourteen bosses speak in their own voice (the new eight added)', J(want.filter((k) => !V[k])));
   check(V.pqConductor === 'Next stop is always next.' && V.sundered_smith === 'Let me finish the shift.' && V.gravitos === 'Sleep is the only kindness I have left to carry.', 'the new voice lines read as the trait', '');
-  check(/his court slips out/.test(R.epi.king) && /Someone steps off/.test(R.epi.conductor) && /this time she does not turn back/.test(R.epi.mira), 'the epitaphs ease the trait: the Hoarder opens, the train stops, she does not turn back', J(R.epi).slice(0, 200));
+  check(/His court walks out/.test(R.epi.king) && /someone steps off/.test(R.epi.conductor) && /this time she does not turn back/.test(R.epi.mira), 'the defeat lines: the court walks out, the train stops, she does not turn back', J(R.epi).slice(0, 200));
   check(R.sig[0].indexOf('The Reckless. ') === 0 && R.sig[1].indexOf('The Smug. ') === 0 && R.sig[2].indexOf('The Vain. ') === 0 && R.sig[3].indexOf('The Stubborn. ') === 0, 'the four distorted captains lead with their trait', J(R.sig.map((s) => s.slice(0, 22))));
   const Q = R.q;
   check(/He is the Greedy\./.test(Q.king) && /whole court/.test(Q.king) && /the Overprotective/.test(Q.mooma) && /the Unforgiving/.test(Q.inner) && /the Dutiful/.test(Q.pq) && /the Undecided/.test(Q.portal), 'the early quests name the trait (Greedy, Overprotective, Unforgiving, Dutiful, Undecided)', '');
@@ -65,6 +65,10 @@ try {
   check(/ldd-pip">The Greedy</.test(R.dexKing) && /ldd-pip">The Grieving</.test(R.dexSmith) && !R.dexErr, 'the Codex dossier carries the persona as a pip', R.dexErr || '');
   check(/Let me finish the shift\./.test(R.dexSmith) && !/Half-melted forge-ghost/.test(R.dexSmith), 'the dossier speaks the boss\'s voice line, not a descriptive signature', '');
   check(!/[Ee]ases|[Ee]asing|with no tomorrow/.test(R.pageAll) && !R.lines.some((l) => /[Ee]ase|no tomorrow/.test(l)), 'the Codex page no longer talks about easing: the section intro and every line are free of it', (R.pageAll.match(/.{0,40}[Ee]ase.{0,30}/) || [''])[0]);
+  const ewc = Object.entries(R.epiAll).filter(([k]) => k !== 'brinekraken').map(([k, t]) => [k, t.trim().split(/\s+/).length]);
+  check(ewc.length === 11 && ewc.every(([k, n]) => n <= 33), 'the epitaphs are trimmed: every boss defeat line is 33 words or fewer (Brinekraken is not a boss and is left alone)', J(ewc.filter(([k, n]) => n > 33)) + ' ' + J(ewc));
+  check(/Cedric asked/.test(R.epiAll.legosaurus) && /straight up/.test(R.epiAll.aetherion) && /does not turn back/.test(R.epiAll.miraFallen) && /Glasswind/.test(R.epiAll.sundered_smith), 'the trimmed epitaphs keep the lines the story hangs on (Cedric, the look up, the turn, Glasswind)', '');
+  check(R.lines[0] === 'Took his whole court inside himself to keep them dry, and will not let one back out.' && /mirror copy/.test(R.lines[4] + R.lines[5] + R.lines[6] + R.lines[7]) && /the Twelve/.test(R.lines[11]) && /the tear/.test(R.lines[13]), 'the one-liners are tied to each story: the court, the tear\'s mirror copies, the Twelve\'s smith, the woman\'s tear', J(R.lines.slice(4, 8)));
   const wcl = (t) => t.trim().split(/\s+/).length;
   check(R.lines.length === 18 && R.lines.every((l) => /\.$/.test(l) && (l.match(/[.!?]/g) || []).length === 1 && wcl(l) >= 6 && wcl(l) <= 20), 'each character gets ONE short line (a single sentence of 6 to 20 words)', J(R.lines.filter((l) => !(/\.$/.test(l) && (l.match(/[.!?]/g) || []).length === 1 && wcl(l) >= 6 && wcl(l) <= 20))));
   check(R.lines.every((l) => R.pageAll.indexOf(l) > 0), 'with every boss met the page prints each one-line description', J(R.lines.filter((l) => R.pageAll.indexOf(l) < 0)));
