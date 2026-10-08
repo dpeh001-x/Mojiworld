@@ -3,7 +3,7 @@
 // the W world map as well"). Pins, in the running game (after the Stage Editor bake, which replaces both maps' doors):
 //   the Celestial Spire has no door to the Sanctum; the Sanctum's way back leads to the Last Step;
 //   before she falls the Last Step has no Sanctum door and the Sanctum's lane stays off the W map (_retreat);
-//   her kill opens '▶ Aetherion's Sanctum' (levelGate 50) with its toast, and the lane shows; a save with her fall gets the door on
+//   her kill opens '▶ Aetherion's Sanctum' (levelGate 50) with its toast once her film hands the screen back, and the lane shows; a save with her fall gets the door on
 //   the next loadMap; walking through it lands in the Sanctum; the Sanctum's pin sits beside the Last Step (569, 723).
 //   node scripts/sanctum_door_test.mjs            (MOJI_SERVE_ROOT / PORT override)
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -37,9 +37,15 @@ try {
   const step = async (n) => { for (let i = 0; i < n; i++) { await page.clock.runFor(16); await page.evaluate(() => { player.hp = getMaxHp(); player.invulnerable = 0; }); } };
   // her fall
   await page.evaluate(() => { window.__toasts = []; const o = window.showToast; window.showToast = function (t) { window.__toasts.push(String(t || '')); return o.apply(this, arguments); };
+    if (player._storyBeatsSeen) delete player._storyBeatsSeen.mira_aetherion;   // her film (v0.30.1642) plays on this fall
     const m = (game.monsters || []).find((q) => q.type === 'miraFallen'); m.traits = Object.assign({}, m.traits, { revivesOnce: null }); m._revived = true; m.currentHp = 0;
     (typeof killMonster === 'function' ? killMonster : _killMonsterRaw)(m); });
-  await step(200);   // the kill, then the 2.2 s the door waits
+  await step(200);   // the kill, the film's 1.5 s, the door's 2.2 s
+  const FM = await page.evaluate(() => ({ film: !!document.getElementById('kill-film-overlay'), door: (MAPS.lastStep.portals || []).filter((p) => p.dest === 'sanctum').length,
+    toast: (window.__toasts || []).some((t) => /Sanctum is open/.test(t)) }));
+  ok('her film plays first, and the door waits for it (no door, no toast while it holds the screen)', FM.film && FM.door === 0 && !FM.toast, FM);
+  await page.evaluate(() => { const o = document.getElementById('kill-film-overlay'); if (o) o.click(); });   // skip it, as a player can
+  await step(120);
   const B = await page.evaluate(() => { const d = (MAPS.lastStep.portals || []).filter((p) => p.dest === 'sanctum'); return { n: d.length, gate: d[0] && d[0].levelGate, x: d[0] && d[0].x, name: d[0] && d[0].name,
     beaten: !!(game.bossDefeated && game.bossDefeated.lastStep), toast: (window.__toasts || []).some((t) => /Sanctum is open/.test(t)), ret: (MAPS.sanctum.portals || []).filter((p) => p.dest === 'lastStep').map((p) => !!p._retreat) }; });
   ok("her fall opens one '▶ Aetherion's Sanctum' door on the Last Step, levelGate 50, with its toast", B.n === 1 && B.gate === 50 && /Aetherion/.test(B.name || '') && B.beaten && B.toast, B);
