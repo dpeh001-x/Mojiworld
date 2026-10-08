@@ -62,6 +62,7 @@ window.LX_MAP_PLATFORM_TINT = {
   "jadeGrove": { "top": "#95beb2", "body": "#343a44" },
   "kelpForest": { "top": "#425b6a", "body": "#1a1b2e" },
   "krookThrone": { "top": "#fb6e40", "body": "#542020" },
+  "lastStep": { "top": "#cfafde", "body": "#473553" },
   "lavaCavern": { "top": "#fe5951", "body": "#561a26" },
   "magmaFoundry": { "top": "#874244", "body": "#301221" },
   "magmaFoundry2": { "top": "#343e52", "body": "#151126" },
