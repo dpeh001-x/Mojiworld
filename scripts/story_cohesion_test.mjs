@@ -59,7 +59,7 @@ try {
   check(!/time starts walking/.test(Q.hg5) && /one stilled hour moves again/.test(Q.hg5) && /what remains of her/.test(Q.hg5) && !/second time/.test(Q.hg5), 'Hourglass V does not end the Pause, and faces what remains of her after her soul went free', Q.hg5.slice(0, 140));
   check(/Vigil road/.test(Q.dawn2) && !/Wayfarer/.test(Q.dawn2) && /Vigil road/.test(R.acts), 'one name for the road: the Vigil road, in the quest and the Act blurbs', '');
   check(/hear the world tear/.test(Q.mooma) && /hear the world tear/.test(I.mooma.lore) && /world tearing/.test(R.traitLines[1]) && /Her veil hides/.test(I.mooma.lore), "Mooma sang so they would not hear the WORLD tear (the Everdawn tear opened this spring), and her veil is explained", I.mooma.lore.slice(0, 120));
-  check(/inside himself/.test(I.king.lore) && /inside himself/.test(Q.king), "Gloopaloo took his court inside HIMSELF, in his card and his quest", '');
+  check(/into his jelly body/.test(I.king.lore) && /into his jelly body/.test(Q.king) && /to shield them/.test(Q.king), "Gloopaloo drew his court into his JELLY BODY to shield them (said plainly, in his card and his quest)", '');
   check(/Hera.s starry robe/.test(Q.tear) && /^Harea wears/.test(Q.tear), 'the Lv 40 mirror quest opens by naming Harea, not an unnamed "She"', Q.tear.slice(0, 60));
   check(/hum will not last|it will not last/.test(Q.road5) && !/the hum is fading/.test(Q.road5), 'the lantern quest no longer says the hum is already fading before you touch one', '');
   check(/The small ones turn up as Dawn Fragments/.test(Q.cut) && /stay on the map/.test(Q.cut), 'a Lv 40 player is not told they already carry Dawn Fragments', '');
