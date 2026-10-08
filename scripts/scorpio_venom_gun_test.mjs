@@ -76,6 +76,9 @@ try {
     // ONE HIT: mortal, standing still in the burst's path; count the hits by the invulnerability they open
     player._god = false; player.invulnerable = 0; player.hp = player.maxHp = 1e9;
     m.currentHp = m.maxHp * 0.2; await frames(3); park(1);
+    // v0.30.1661: start clean - a shard still flying from the eruption run above could land during the wait and open its ~1.2 s
+    // of invulnerability, which then swallowed the whole burst (0 hits, about one run in three)
+    game.projectiles.length = 0; player._poisonTimer = 0; player.invulnerable = 0;
     let hits = 0, prevInv = player.invulnerable; m.patternState = 'sting'; m.patternTimer = 0; m._stung = false; shots.length = 0;
     for (let i = 0; i < 90; i++) { park(1); await frames(1); if (prevInv <= 0 && player.invulnerable > 0) hits++; prevInv = player.invulnerable; if (m.patternState !== 'sting') break; }
     // let the last shards land, with her held in idle so no second volley starts

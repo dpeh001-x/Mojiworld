@@ -115,7 +115,8 @@ try {
   }
   ok('the control proves the sweep is real — a PLAIN shot is crushed by the same armour', S[0].plain > S[S.length - 1].plain * 3,
     `plain ${S.map((x) => x.plain).join(' -> ')} across def ${S.map((x) => x.def).join(' -> ')}`);
-  ok('every sign hits in the band at zero DEF, not just the one swept', Object.values(r.bySign).every((v) => Math.min(...v) >= 3000 && Math.max(...v) <= 5000),
+  // v0.30.1661: Scorpio rolls her own 2,100-3,500 (her damage cut ~30%, per user); the other signs keep 3,000-5,000
+  ok('every sign hits in its band at zero DEF (Scorpio 2,100-3,500, the rest 3,000-5,000)', Object.entries(r.bySign).every(([k, v]) => k === 'scorpio' ? (Math.min(...v) >= 2100 && Math.max(...v) <= 3500) : (Math.min(...v) >= 3000 && Math.max(...v) <= 5000)),
     Object.entries(r.bySign).map(([k, v]) => `${k} ${Math.min(...v)}-${Math.max(...v)}`).join(', '));
   // Blocking is sampled at DEF 0, so it must be compared against the DEF-0 range - comparing it
   // against the whole sweep let an armoured 1,050 sit below a blocked 1,486 and read as a failure.

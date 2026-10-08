@@ -4,7 +4,7 @@
 // player's HP loss is measured, because every one of these rules sits AFTER a
 // band clamp that could otherwise swallow it.
 //
-//   scorpio    contact >= 40% of the player's max HP
+//   scorpio    contact >= 28% of the player's max HP (was 40% until v0.30.1661)
 //   capricorn  projectile >= 32% of max HP
 //   aquarius   projectile seals potions for 15s (900 sim frames) - was 45 s, capped at 15 s per user in v0.30.621
 //   pisces     atk doubled in the live stat table
@@ -153,7 +153,7 @@ ok('capricorn projectiles deal at least 32% of max HP', R.capri.pct >= 32,
    `${R.capri.pct}% (base damage was 5)`);
 ok('CONTROL: an untouched sign is NOT floored', R.libraProj.pct < 32,
    `libra ${R.libraProj.pct}% — a floor firing for every sign would be a balance disaster`);
-ok('scorpio contact deals at least 40% of max HP', R.scorp.pct >= 40, `${R.scorp.pct}%`);
+ok('scorpio contact deals at least 28% of max HP', R.scorp.pct >= 28, `${R.scorp.pct}%`);
 ok('CONTROL: an untouched sign\'s contact is NOT floored', R.libraTouch.pct >= 0 && R.libraTouch.pct < 40,
    `libra contact ${R.libraTouch.pct}%`);
 ok('CONTROL: no potion seal before an aquarius hit (nor from capricorn)',
