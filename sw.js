@@ -304,7 +304,9 @@
 // returning browser would keep drawing the old pose for a session.
 // v0.30.1654 - v164 -> v165. Gravitos's form 2 soul cast frames 0-8 and its still are REPLACED under their own names, so a
 // returning browser would keep drawing the old cast for a session.
-const CACHE = 'mojiworld-assets-v165';   // v0.30.1654 - Gravitos form 2 soul cast remake (same names)
+// v0.30.1657 - v165 -> v166. Scorpio's venom shot (p_venom.webp + anim/venom_0..8) is REPLACED under its own names, so a
+// returning browser would keep drawing the old green glob for a session.
+const CACHE = 'mojiworld-assets-v166';   // v0.30.1657 - Scorpio venom shard remake (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

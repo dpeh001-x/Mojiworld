@@ -16331,7 +16331,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1656';
+const GAME_VERSION = 'v0.30.1657';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -162564,6 +162564,34 @@ const LEO_POUNCE_FRAC = 0.45;   // v0.30.388 — was 0.6 (zodiac damage −25%) 
 //   ~114 px against her ~108 px half-width, so stepping off the marker steps off it.
 const SCORPIO_DRIFT_MAX = 1.2;
 const SCORPIO_BURROW_TRACK = 0.035;
+// v0.30.1657 scorpio-venom-gun - her venom shards, AIMED (per user: "the projectile should be aimed like a rapid gun aimed at the player").
+// Both volleys used to throw a fixed fan - vx from the shot's index, vy -7 to -9 - and venom takes no fall, so every shard
+// flew up and off the top of the arena in a straight line and almost never met a standing player. Now each shard leaves the
+// glow between her claws aimed at the player's centre AT THAT MOMENT, straight, with a hair of spread, one at a time: a
+// player who stands still eats the burst, one who keeps moving stays ahead of it. A burst is over in 0.2-0.7 s, inside the
+// ~1.2 s a projectile hit leaves the player invulnerable, so it still lands ONE hit at most, as the fan did; the shards
+// behind that hit pass through.
+//   sting:  5 / 7 / 9 shards (phase 1 / 2 / 3) after the 350 ms telegraph, one every 6 / 6 / 5 sim steps (100 / 100 / 83 ms)
+//   burrow: 3 / 4 / 5 shards from the eruption (850 ms), one every 6 / 6 / 5 steps; the settle holds until the last is out
+// The gaps are counted in SIM STEPS (game.time), not on the pattern clock: bossAI runs patternTimer at ~1.3-2x real time,
+// which squeezed a "110 ms" gap to 3-4 steps and packed the shards 26-44 px apart - one long segmented drill again. The
+// gap times the speed puts 65-72 px between shards, more than the ~59 px a shard draws, so a burst reads as bullets.
+// _lxScorpVenomDue: is the next shard of a burst due? `latch` names the counter the caller keeps (_stung / _erupted - the
+// cycle-latch clear already zeroes both); m._venomShotT is the step the last one left on. ONE shard per call at most.
+// _lxScorpVenomAim: where the shard starts and its velocity, 14 px box centred on the glow between her claws.
+const SCORPIO_VENOM_SPEED = [11, 12, 13];         // px per step, by phase
+const SCORPIO_VENOM_SPREAD = [0.04, 0.06, 0.08];  // rad either side of the aim, by phase
+function _lxScorpVenomDue(m, latch, t0, shots, gap) {
+  const n = m[latch] | 0;
+  if (m.patternTimer < t0 || n >= shots || (n > 0 && game.time - (m._venomShotT || 0) < gap)) return false;
+  m[latch] = n + 1; m._venomShotT = game.time;
+  return true;
+}
+function _lxScorpVenomAim(m, phase) {
+  const sx = m.x + m.w / 2, sy = m.y + m.h * 0.3, i = Math.max(0, Math.min(2, (phase | 0) - 1));
+  const a = Math.atan2((player.y + player.h / 2) - sy, (player.x + player.w / 2) - sx) + (Math.random() - 0.5) * 2 * SCORPIO_VENOM_SPREAD[i];
+  return { x: sx - 7, y: sy - 7, vx: Math.cos(a) * SCORPIO_VENOM_SPEED[i], vy: Math.sin(a) * SCORPIO_VENOM_SPEED[i] };
+}
 const _ZODIAC_GAIT = {
   // Ariel — WEAVE. The user's brief: in and out, fast. Rushes to knife range,
   // recoils, rushes again. Never sits still, never commits.
@@ -165039,23 +165067,18 @@ const ZODIAC_AI = {
     } else if (m.patternState === 'sting') {
       // v0.25.46 — phase 2/3 fire 5 venom shots in a wide cone (was 3).
       // v0.29.830 — telegraph floor 350ms (was 280). See the pass note.
-      if (m.patternTimer > 350 && !m._stung) {
-        m._stung = true;
-        const shots = phase === 1 ? 3 : 5;
-        const half = (shots - 1) / 2;
-        for (let i = 0; i < shots; i++) {
-          const offset = i - half;
-          game.projectiles.push({
-            x: m.x + m.w/2, y: m.y,
-            vx: offset * 2.4 + dir * 4, vy: -7 - Math.abs(offset) * 0.3,
-            w: 14, h: 14, life: 130,
-            damage: m.atk * (phase === 3 ? 1.15 : 1.0),
-            owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'venom', color: '#ff44aa',
-            poison: phase === 3 ? 4500 : 3000,
-          });
-        }
+      // v0.30.1657 scorpio-venom-gun - the cone is gone: a rapid burst of shards, each aimed at the player (see _lxScorpVenomDue).
+      const shots = phase === 1 ? 5 : phase === 2 ? 7 : 9, gap = phase === 3 ? 5 : 6;
+      if (_lxScorpVenomDue(m, '_stung', 350, shots, gap)) {
+        const v = _lxScorpVenomAim(m, phase);
+        game.projectiles.push({
+          x: v.x, y: v.y, vx: v.vx, vy: v.vy, w: 14, h: 14, life: 130,
+          damage: m.atk * (phase === 3 ? 1.15 : 1.0),
+          owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'venom', color: '#ff44aa',
+          poison: phase === 3 ? 4500 : 3000,
+        });
       }
-      if (m.patternTimer > 850) { m.patternState = 'idle'; m.patternTimer = 0; m._stung = false; }
+      if (((m._stung | 0) >= shots && game.time - m._venomShotT > 27) || m.patternTimer > 6000) { m.patternState = 'idle'; m.patternTimer = 0; m._stung = false; }
     } else if (m.patternState === 'burrow') {
       // 4-phase state machine, all using absolute y-targets.
       //   0   – 250 ms : SINK     (slide down into ground, become invuln)
@@ -165069,6 +165092,17 @@ const ZODIAC_AI = {
       m._invulnBurrow = m.patternTimer >= 200 && m.patternTimer < 950;
 
       const groundY = m._burrowGroundY;
+      const _venomShots = phase === 3 ? 5 : phase === 2 ? 4 : 3;   // v0.30.1657 scorpio-venom-gun - the eruption's aimed burst (see _lxScorpVenomDue)
+      const _venomBurst = () => {
+        if (!_lxScorpVenomDue(m, '_erupted', 850, _venomShots, phase === 3 ? 5 : 6)) return;
+        const v = _lxScorpVenomAim(m, phase);
+        game.projectiles.push({
+          x: v.x, y: v.y, vx: v.vx, vy: v.vy, w: 14, h: 14, life: 130,
+          damage: m.atk * (phase === 3 ? 1.2 : 1.0),
+          owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'venom', color: '#ff44aa',
+          poison: phase === 3 ? 5000 : 3500,
+        });
+      };
       if (m.patternTimer < 250) {
         // Sink — slide downward, particles spit upward.
         const t = m.patternTimer / 250;
@@ -165097,24 +165131,11 @@ const ZODIAC_AI = {
         // Erupt — snap upward, fire a venom geyser.
         const t = (m.patternTimer - 800) / 200;
         m.y = groundY + 70 - 70 * t;
-        if (m.patternTimer >= 850 && !m._erupted) {
-          m._erupted = true;
-          addShake(10);
-          const shots = phase === 3 ? 7 : phase === 2 ? 5 : 3;
-          const half = (shots - 1) / 2;
-          for (let i = 0; i < shots; i++) {
-            const offset = i - half;
-            game.projectiles.push({
-              x: m.x + m.w/2, y: m.y,
-              vx: offset * 1.8, vy: -9 - Math.abs(offset) * 0.5,
-              w: 14, h: 14, life: 140,
-              damage: m.atk * (phase === 3 ? 1.2 : 1.0),
-              owner: 'enemy', _zodiacSign: m.zodiacSign || null, _zodiacAttacker: true, skill: 'venom', color: '#ff44aa',
-              poison: phase === 3 ? 5000 : 3500,
-            });
-          }
-        }
-      } else if (m.patternTimer < 1300) {
+        // v0.30.1657 scorpio-venom-gun - she comes up firing a burst aimed at the player, not a fixed fan straight up
+        if (m.patternTimer >= 850 && !m._erupted) addShake(10);
+        _venomBurst();
+      } else if (m.patternTimer < 1300 || ((m._erupted | 0) < _venomShots && m.patternTimer < 3000)) {   // the settle holds until the burst is out
+        _venomBurst();
         // Settle — back to ground level, drop invuln.
         m.y = groundY;
       } else {
@@ -166548,7 +166569,7 @@ const _LX_ZOD_PROJ_SIZE = {
   roar: [1.9, 1.35],            // Leo's roar - 38 -> ~72
   radiantLance: [6.5, 1],       // Virgo's starburst lances - 9 x 4 -> ~62 x 23 (their 26 px hitbox already covers the shaft)
   scale: [1.35, 1.15],          // Libra's sigil - 89 x 34 -> ~120 x 46
-  venom: [2.6, 1.4],            // Scorpio's stinger - 18 x 22 -> ~47 x 57
+  venom: [2.6, 1.4],            // Scorpio's venom shard - v0.30.1657: the crystal shard draws ~59 x 24 (plus its baked glow) on its 20 px box
   arrow: [2.6, 1.3],            // Sagittarius's arrows - 29 x 7 -> ~72 x 18
   arrowRain: [3.2, 1.3],        // 16 x 3 -> ~50 x 11
   starbeam: [1.9, 1.3],         // 46 x 12 -> ~87 x 23
@@ -166572,7 +166593,7 @@ const _LX_ZOD_PROJ_SIZE = {
 // (bolt, boulder, roar, lances, star beam, marked shot, spire, vortex) were already even and play as they were.
 const _LX_ZOD_ANIM_SEQ = {
   gemini_shard: [6, 7, 8, 0, 8, 7],
-  venom: [7, 8, 0, 1, 2, 3, 2, 1, 0, 8],
+  // v0.30.1657 scorpio-venom-gun - venom's row is gone: the redrawn shard's loop is even all the way round and plays straight through
   cancerBubble: [8, 0, 1, 2, 3, 4, 3, 2, 1, 0],
   ice: [6, 7, 8, 0, 1, 2, 1, 0, 8, 7],
   quake: [0, 1, 2, 3, 4, 5, 6],
