@@ -3,7 +3,7 @@
 // =============================================================================
 // Frame by frame (clock stubbed, so it is exact):
 //   1. each re-ordered loop plays its _LX_ZOD_ANIM_SEQ order and never shows a frame it leaves out - Gemini's shard never
-//      the near-invisible outlines (1-5), the venom never its dart morph (4-6), the bubble never its dark frames (5-7)
+//      the near-invisible outlines (1-5), the bubble never its dark frames (5-7), the ice shard never its cloud (3-5)
 //   2. the same key thrown by an ordinary monster still plays its plain loop (the orders are zodiac-only)
 //   3. two shots of one volley do not flash in lockstep
 //   4. a zodiac shot's spin is by the clock: the same turn per second at 60 and 144 Hz, and never past 0.2 rad per 60 Hz frame
@@ -47,9 +47,9 @@ try {
         for (let i = 0; i < seq.length * 2; i++) { seen.push(arr.indexOf(_lxZodAnimFrame(p))); T += _PROJ_ANIM_FRAME_MS; }
         out.seqs[k] = { seq, seen, ready: ready(k) };
       }
-      // an ordinary monster's venom: every frame of the plain loop
-      const pv = shot('venom', false), seenPlain = new Set(); T = 2e6;
-      for (let i = 0; i < 18; i++) { const f = _projAnimFrame('venom'); seenPlain.add(PROJ_ANIM_FRAMES.venom.indexOf(f)); T += _PROJ_ANIM_FRAME_MS; }
+      // an ordinary (non-zodiac) ice shard: every frame of the plain loop. v0.30.1657: was venom, whose zodiac order is gone
+      const pv = shot('ice', false), seenPlain = new Set(); T = 2e6;
+      for (let i = 0; i < 18; i++) { const f = _projAnimFrame('ice'); seenPlain.add(PROJ_ANIM_FRAMES.ice.indexOf(f)); T += _PROJ_ANIM_FRAME_MS; }
       out.plain = [...seenPlain].sort((a, b) => a - b);
       // two shots of one volley
       const a1 = shot('gemini_shard', true), a2 = shot('gemini_shard', true); let same = 0; T = 3e6;
@@ -69,7 +69,7 @@ try {
       ok(`${k}: plays its order [${v.seq}]`, v.ready && start >= 0, v);
       ok(`${k}: never shows a frame it leaves out`, v.seen.every((f) => v.seq.includes(f)), v);
     }
-    ok("an ordinary monster's venom still plays its whole loop (the orders are zodiac-only)", r.plain && r.plain.length === 9, r.plain);
+    ok("an ordinary monster's ice shard still plays its whole loop (the orders are zodiac-only)", r.plain && r.plain.length === 9, r.plain);
     ok('two shots of one volley are not in lockstep', r.lock && r.lock.same < 12, r.lock);
     const rate = r.spin && r.spin.hz60;
     ok('a zodiac spin turns the same per second at 144 Hz as at 60 Hz (by the clock)', r.spin && Math.abs(r.spin.hz144 - r.spin.hz60) <= 0.05 * Math.abs(r.spin.hz60), r.spin);
