@@ -156,7 +156,7 @@ try {
   ok('10. the supporting cast: Cedric feels Legosaurus set down, the epitaph answers him, the Hourglass speaks for itself, the Codex quotes are flavour',
     !!R.cedric && /You set him down gently/.test(R.cedric.text) && /the way Cedric asked/.test(R.epitaph) && /^Four things I spilled/.test(R.hg[0]) && /^I turn toward you/.test(R.hg[1] || '')
     && R.sigs.every((s) => s && !/pattern|from range|thrower\.|mini-elite|Channels|0\.5 s|Final apex/.test(s)), J({ c: ((R.cedric || {}).text || '').slice(0, 80), e: R.epitaph, h: R.hg.map((t) => t.slice(0, 30)), s: R.sigs.map((t) => t.slice(0, 24)) }));
-  ok('8. Aetherion\'s first fall: his card holds the floor, then the farewell; the second fall, neither', !R.aeErr && R.card && /I am only the wound now\. Close it gently\./.test(R.cardText) && R.cardHeld && R.farewell && !R.aeErr2 && !R.card2 && !R.beat2,
+  ok('8. Aetherion\'s first fall: his card holds the floor, then the farewell; the second fall, neither', !R.aeErr && R.card && /I was only a tear\. She is free\. Close it gently\./.test(R.cardText) && R.cardHeld && R.farewell && !R.aeErr2 && !R.card2 && !R.beat2,
     J({ e: R.aeErr, c: R.card, t: R.cardText, h: R.cardHeld, f: R.farewell, e2: R.aeErr2, c2: R.card2, b2: R.beat2 }));
   ok('9. caps: stanzas and new pages within 60 words, new bubbles within 6 and naming no key', R.stanzaWords.length === 3 && R.stanzaWords.every((w) => w <= 60) && R.pageWords.every((w) => w <= 60) && R.bubblesOk, J({ s: R.stanzaWords, p: R.pageWords }));
   await ctx.close();

@@ -133,7 +133,7 @@ Every existing map plays a piece. Here is the unified framework:
 | **Mooma, the Cradle-Veiled** (Queen's Hollow) | A mother who would rather hold every child in suspension forever than risk one growing up. Wraps her brood in the veil that never opens. |
 | **King Krook, the Ember Tyrant** (Krook Throne) | A tyrant who would rather rule a frozen kingdom than fall in a moving one. |
 | **Octobaby, the Eight-Mood Tyrant** (Octopus Grotto) | The deep that cannot decide. Eight moods, eight refusals, all simultaneous. |
-| **Aetherion, the Shardfather** (Sanctum) | Keeper of the Shards — fragments of unfinished time. He guards what nobody finished. |
+| **Aetherion, the Tearborn** (Sanctum) | Keeper of the Shards — fragments of unfinished time. She guards what nobody finished. A creature of her own, born of the heartfelt tear the woman at the gate wept when she turned back, wearing that woman's face and holding her soul; when she yields, the soul goes free. Not the Cap-Warden, who is another story. |
 
 ### Frozen Peak — *the climb upward through the pause*
 The tower IS the unfinished sunrise visualised. Each floor is a layer of

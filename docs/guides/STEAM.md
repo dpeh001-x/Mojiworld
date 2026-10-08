@@ -403,7 +403,7 @@ game and this table). Unlocks fire live; already-earned achievements sync up on 
 | `kill10000` | Worldbreaker | Defeat 10,000 enemies |
 | `boss6` | Boss Slayer | Defeat 6 different bosses |
 | `boss12` | Boss Conqueror | Defeat 12 different bosses |
-| `aetherionDown` | Warden Undone | Vanquish Aetherion |
+| `aetherionDown` | Let Her Go | Vanquish Aetherion |
 | `gravitosDown` | The Weight Lifted | Defeat Gravitos at the Singularity |
 | `zodiac1` | Star-Toucher | Defeat your first Zodiac |
 | `zodiacAll` | The Twelve Houses | Defeat all 12 Zodiac signs |

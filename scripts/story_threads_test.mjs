@@ -55,7 +55,7 @@ try {
     const d = (id) => (QUESTS[id] || {}).desc || '';
     out.q = { named: /the Weight-Bearer, Gravitos/.test(d('q_act1_firstword')), pause: /calls that day the Pause/.test(d('q_act1_quiet')),
       hg1: /It only stopped being allowed to/.test(d('q_hourglass_1')), hg5: /It only stopped being allowed to/.test(d('q_hourglass_5')) };
-    out.codex = { aetherion: /<b>Aetherion<\/b>, the Shardfather/.test(LORE_WORLD_HTML), tyrants: /three tyrants will pull their nightmares tighter/.test(LORE_WORLD_HTML) };
+    out.codex = { aetherion: /<b>Aetherion<\/b>, the Tearborn/.test(LORE_WORLD_HTML), tyrants: /three tyrants will pull their nightmares tighter/.test(LORE_WORLD_HTML) };
     out.epitaph = (typeof _bossEpitaph === 'function') ? String(_bossEpitaph('aetherion', { type: 'aetherion' }) || '') : '';
     out.conductor = /who wrote the timetable/.test((BOSS_INTROS.pqConductor || {}).lore || '');
     return out;
@@ -66,7 +66,7 @@ try {
   check(/It is still there, it is only being carried/.test(r.joyce.text || ''), "Nurse Joyce reads you the sleepers' ledger", J(r.joyce).slice(0, 160));
   check(/Eleven\. I buried nine/.test(r.shen.text || '') && /Be the third/.test(r.shen.text || ''), 'Master Shen says his eleven and nine aloud', J(r.shen).slice(0, 160));
   check(r.q.named && r.q.pause && !r.q.hg1 && r.q.hg5, 'Act I names the Weight-Bearer and the Pause; the Petition keeps its argument until the Hourglass pays it off', J(r.q));
-  check(r.codex.aetherion && r.codex.tyrants && /straight up/.test(r.epitaph) && r.conductor, 'the Codex names the Warden and the tyrants; the Warden looks up; the Conductor never saw who wrote the timetable', J({ ...r.codex, ep: r.epitaph.slice(-30), c: r.conductor }));
+  check(r.codex.aetherion && r.codex.tyrants && /straight up/.test(r.epitaph) && r.conductor, 'the Codex names Aetherion and the tyrants; she looks up; the Conductor never saw who wrote the timetable', J({ ...r.codex, ep: r.epitaph.slice(-30), c: r.conductor }));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 3)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 300)); }
 await browser.close(); server.kill();

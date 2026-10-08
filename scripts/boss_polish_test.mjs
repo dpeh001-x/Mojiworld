@@ -67,7 +67,7 @@ try {
   const L = r.lines;
   check(Array.isArray(L.gravitos) && L.gravitos.some((x) => /WEIGHT-BEARER FALLS/.test(x)) && !L.gravitos.some((x) => /SHARDFATHER/.test(x)), 'Gravitos falls in his own words, not "THE SHARDFATHER FALLS!"', J(L.gravitos));
   check(Array.isArray(L.octobaby) && L.octobaby.some((x) => /OCTOBABY IS DETHRONED/.test(x)) && !L.octobaby.some((x) => /SHARDFATHER/.test(x)), 'Octobaby falls in her own words', J(L.octobaby));
-  check(Array.isArray(L.aetherion) && L.aetherion.some((x) => /SHARDFATHER FALLS/.test(x)), 'Aetherion keeps "THE SHARDFATHER FALLS!"', J(L.aetherion));
+  check(Array.isArray(L.aetherion) && L.aetherion.some((x) => /TEARBORN FALLS/.test(x)), 'Aetherion keeps her own banner: "THE TEARBORN FALLS!"', J(L.aetherion));
   check(r.tidal.armedT >= 960 && r.tidal.resolvedAfterMs + 16 >= 950 && r.tidal.hit, 'Tidal Crush lands a full second after it is called (was ~60 ms), on a player who stayed', J({ armedT: r.tidal.armedT, ms: r.tidal.resolvedAfterMs, hit: r.tidal.hit }));
   const z = r.tidal.zone;
   check(!!z && z.w >= 226 && z.h >= 226, 'the crush spot is drawn, covering the whole box it hits', J(z && { w: z.w, h: z.h, tg: z.tg }));

@@ -95,7 +95,7 @@ try {
     return { questLong, storyTotal, npcLong, bub, tour, cdx, missing: PROBES.filter((p) => !src.includes(p)), outOfOrder, preLate };
   }, PROBES);
   check(r.questLong.length === 0, 'quest descriptions: Barnaby / Lyra chapters at most 170 words, every other quest at most 120', J(r.questLong));
-  check(r.storyTotal < 4700, 'story-quest prose under 4,700 words (the 46 story quests; 7,433 before the pass; 3,900 until v0.30.1554, when the captains joined the quests per user; 4,100 until v0.30.1615, when the road to the four joined them per user; 4,600 until v0.30.1627, when Lyra VI closed the Distorted Portal per user)', r.storyTotal);
+  check(r.storyTotal < 4800, 'story-quest prose under 4,800 words (the 46 story quests; 4,700 until Aetherion became the Tearborn, the creature of a heartfelt tear, per user; 7,433 before the pass; 3,900 until v0.30.1554, when the captains joined the quests per user; 4,100 until v0.30.1615, when the road to the four joined them per user; 4,600 until v0.30.1627, when Lyra VI closed the Distorted Portal per user)', r.storyTotal);
   check(r.npcLong.length === 0, 'no NPC line runs past 60 words (the Tower loot warnings excepted)', J(r.npcLong));
   check(r.bub.length === 0, 'idle bubbles: at most 6 words, and never a keyboard key', J(r.bub));
   check(r.tour.length === 0, 'the tour: bodies at most 60 words, Guguma at most 25', J(r.tour));

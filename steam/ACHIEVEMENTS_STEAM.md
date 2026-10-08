@@ -29,7 +29,7 @@ icon per achievement (Steam requires both; 256×256 PNG).
 | 19 | `kill10000` | Worldbreaker | Defeat 10,000 enemies |
 | 20 | `boss6` | Boss Slayer | Defeat 6 different bosses |
 | 21 | `boss12` | Boss Conqueror | Defeat 12 different bosses |
-| 22 | `aetherionDown` | Warden Undone | Vanquish Aetherion |
+| 22 | `aetherionDown` | Let Her Go | Vanquish Aetherion |
 | 23 | `gravitosDown` | The Weight Lifted | Defeat Gravitos at the Singularity |
 | 24 | `zodiac1` | Star-Toucher | Defeat your first Zodiac |
 | 25 | `zodiacAll` | The Twelve Houses | Defeat all 12 Zodiac signs |
