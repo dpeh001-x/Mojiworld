@@ -62,6 +62,11 @@ try {
     player.quests.completed.q_visit_lavaCavern = 1; out.hand.lv40errand = _lxAct1Next('q_distorted_portal');
     // 5. text
     out.text = { smith: Q.q_boss_sundered_smith.desc, epi: EVERDAWN_EPITAPHS.sundered_smith, lyraV: Q.q_lyra_forge.desc, hint: Q.q_boss_sundered_smith.desc.indexOf('Past it, a hammer is still ringing.') >= 0 };
+    // 6. the arc has a name of its own: The Tear (per user, 2026-10-09: she is no longer a main character in it)
+    const LY = ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge', 'q_lyra_last'];
+    out.arc = { names: LY.map((id) => Q[id].name), prereqs: LY.map((id) => [].concat(Q[id].prereq || [])), levels: LY.map((id) => Q[id].levelReq) };
+    fresh(); player.level = 50; for (const k of ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear']) player.quests.completed[k] = 1; tickQuestUnlocks(); acceptQuest('q_lyra_cut');
+    toggleQuestJournal(); await sleep(400); const qm = document.getElementById('quest-modal'); out.arc.journal = qm ? qm.innerText.replace(/s+/g, ' ') : ''; try { toggleQuestJournal(); } catch (e) {}
     return out;
   });
   check(R.pre.lyraVI.indexOf('q_lyra_forge') >= 0 && R.pre.lyraVI.indexOf('q_boss_sundered_smith') >= 0, 'Lyra VI needs Lyra V and the Smith', J(R.pre.lyraVI));
@@ -75,6 +80,10 @@ try {
   check(/waits on I .{1,3}Five Stories About a Smith \(Lv 45\)/.test(R.hand.lv40errand), 'with the errand done it names Barnaby I and says it opens at Lv 45', R.hand.lv40errand);
   check(/The loan was closed, and the Forge has handed him back/.test(R.text.smith) && !/Barnaby/.test(R.text.smith) && R.text.hint, "The Forge That Broke says the Forge handed him back (and keeps the portal's closing line)", R.text.smith.slice(0, 80));
   check(/the Megamall smith/.test(R.text.epi) && !/Glasswind/.test(R.text.epi), "the Smith's epitaph points at the Megamall smith (where Barnaby stands now), not at Glasswind", R.text.epi.slice(-60));
+  check(R.arc.names.length === 7 && R.arc.names.every((n, i) => n.indexOf('The Tear ' + ['0', 'I', 'II', 'III', 'IV', 'V', 'VI'][i] + ' — ') === 0), 'the seven chapters (the Lv 20 prelude and I-VI) carry the arc name: The Tear 0, I, II, III, IV, V, VI', J(R.arc.names));
+  check(!R.arc.names.some((n) => /Lyra|Girl/.test(n)) && R.arc.names[1] === 'The Tear I — The Loan', 'no chapter title names her, and Chapter I (once about "the girl") is The Loan', J(R.arc.names));
+  check(J(R.arc.prereqs) === J([[], ['q_lyra_aperture'], ['q_lyra_loan'], ['q_lyra_tear'], ['q_lyra_cut'], ['q_lyra_kin'], ['q_lyra_forge', 'q_boss_sundered_smith']]) && J(R.arc.levels) === J([20, 40, 40, 40, 40, 45, 50]), 'the chain, its prerequisites and its levels are untouched (ids and saves keep working)', J(R.arc.prereqs));
+  check(/The Tear III — What the Weight Left Behind/.test(R.arc.journal) && !/Lyra/.test(R.arc.journal.slice(0, 4000)), 'the Journal shows the arc name on the chapter card', R.arc.journal.slice(0, 120));
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
