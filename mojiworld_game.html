@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1690';
+const GAME_VERSION = 'v0.30.1691';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -73003,8 +73003,15 @@ const DAILY_CHALLENGES = [
 // developer's machine, and in the Steam app (its page is served by the app itself) nothing changes.
 const _lxServerTime = (function () {
   let off = null, ended = 0, pending = null;
+  // v0.30.1691 srv-time - the Steam app's page comes from the app itself, so its own server only knows the PC's clock: there the time
+  // comes from the co-op relay's /api/time (window.MOJI_RELAY_URL). No relay configured, or no answer: the old rules, as before.
+  const packaged = () => { try { return window.MOJI_PACKAGED === true || location.port === '47821'; } catch (e) { return false; } };
+  function relayTimeUrl() {
+    try { const r = String(window.MOJI_RELAY_URL || ''); if (!r) return ''; const u = new URL(r.replace(/^ws(s?):/i, 'http$1:')); u.pathname = '/api/time'; u.search = ''; u.hash = ''; return u.href; }
+    catch (e) { return ''; }
+  }
   function usable() {
-    try { return !!(_lxAc && _lxAc.on) && window.MOJI_PACKAGED !== true && location.port !== '47821' && /^https?:$/.test(location.protocol); }
+    try { return !!(_lxAc && _lxAc.on) && (packaged() ? !!relayTimeUrl() : /^https?:$/.test(location.protocol)); }
     catch (e) { return false; }
   }
   function ask() {
@@ -73014,6 +73021,13 @@ const _lxServerTime = (function () {
       const finish = (v) => { if (done) return; done = true; pending = null; ended = Date.now(); if (v != null) off = v; res(); };
       setTimeout(() => finish(null), 4000);
       try {
+        if (packaged()) {
+          fetch(relayTimeUrl(), { cache: 'no-store' }).then((r) => r.json()).then((j) => {
+            const n = j && j.ok && Number(j.now);
+            finish(Number.isFinite(n) && n > 0 ? n - (t0 + Date.now()) / 2 : null);
+          }, () => finish(null));
+          return;
+        }
         fetch(location.pathname + '?lxt=' + t0, { method: 'HEAD', cache: 'no-store' }).then((r) => {
           const d = Date.parse(r.headers.get('date') || ''), age = parseInt(r.headers.get('age') || '0', 10) || 0;
           if (!isFinite(d)) { finish(null); return; }

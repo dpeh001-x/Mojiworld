@@ -158,6 +158,12 @@ function eqHash(a, b) {   // length-safe constant-time-ish compare of two hex ha
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // v0.30.1691 srv-time - the server's clock, for the game's daily rewards in the Steam app (its page is served by the app itself,
+    // so the page's own server only knows the PC's clock). Answered here, without waking a Durable Object.
+    if (url.pathname === '/api/time') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+      return new Response(JSON.stringify({ ok: true, now: Date.now() }), { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS } });
+    }
     // The WebSocket relay AND the HTTP account/cloud-save API are both served by
     // the one global Durable Object (shared storage). Route both to it.
     if (request.headers.get('Upgrade') === 'websocket' || url.pathname.startsWith('/api/')) {
