@@ -81,6 +81,15 @@ function parseRange(header, size) {
 }
 const plain = (res, code, msg) => { res.writeHead(code, { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff' }); res.end(msg); };
 
+// v0.30.1670 srv-abort - THE CLIENT MAY ALREADY BE GONE. The file is piped from inside the fs.stat callback, which runs after the
+// request handler's try/catch has returned. If the browser hung up in between (a page closed mid-load, a video seek aborting
+// its Range request), pipeline() throws ERR_STREAM_UNABLE_TO_PIPE synchronously and nothing catches it: serve.js died (every
+// later request refused), and in the Steam app's main process it is the blocking "JavaScript error" dialog.
+const sendFile = (res, fp, opts) => {
+  if (res.destroyed || res.writableEnded) return;
+  const rs = fs.createReadStream(fp, opts);
+  try { pipeline(rs, res, () => {}); } catch (e) { rs.destroy(); try { res.destroy(); } catch (e2) { /* gone */ } }
+};
 function handle(req, res) {
   if (!hostOk(req.headers.host)) return plain(res, 421, 'misdirected');
   let p;
@@ -94,7 +103,8 @@ function handle(req, res) {
   // Only the game document is aliased; every asset still resolves normally, so
   // a candidate build loads against the same Sprites/, data/ and audio/ trees.
   if (gameAlias && fp === path.join(root, 'mojiworld_game.html')) fp = gameAlias;
-  fs.stat(fp, (err, st) => {
+  fs.stat(fp, (err, st) => { try {
+    if (res.destroyed) return;   // v0.30.1670 srv-abort - nobody left to answer
     if (err || !st.isFile()) return plain(res, 404, 'not found: ' + p);
     const rg = parseRange(req.headers.range, st.size);
     if (rg && rg.invalid) { res.writeHead(416, { 'Content-Range': 'bytes */' + st.size }); return res.end(); }
@@ -106,8 +116,8 @@ function handle(req, res) {
     if (rg) { h['Content-Range'] = 'bytes ' + rg.start + '-' + rg.end + '/' + st.size; h['Content-Length'] = rg.end - rg.start + 1; res.writeHead(206, h); }
     else { h['Content-Length'] = st.size; res.writeHead(200, h); }
     if (req.method === 'HEAD') return res.end();
-    pipeline(fs.createReadStream(fp, rg ? { start: rg.start, end: rg.end } : undefined), res, () => {});   // the callback swallows ECONNRESET / EBUSY; pipeline destroys both ends
-  });
+    sendFile(res, fp, rg ? { start: rg.start, end: rg.end } : undefined);   // the callback swallows ECONNRESET / EBUSY; pipeline destroys both ends
+  } catch (e) { try { res.destroy(); } catch (e2) { /* gone */ } } });   // v0.30.1670 srv-abort - nothing in the stat callback may end the process either
 }
 
 http.createServer((req, res) => {

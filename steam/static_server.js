@@ -37,6 +37,15 @@ function parseRange(header, size) {
 
 // requestHandler(root, entry) -> (req, res) — serves files under `root`,
 // mapping '/' to `entry`, with a path-traversal guard and Range support.
+// v0.30.1670 srv-abort - THE CLIENT MAY ALREADY BE GONE. The file is piped from inside the fs.stat callback, which runs after the
+// request handler's try/catch has returned. If the browser hung up in between (a page closed mid-load, a video seek aborting
+// its Range request), pipeline() throws ERR_STREAM_UNABLE_TO_PIPE synchronously and nothing catches it: serve.js died (every
+// later request refused), and in the Steam app's main process it is the blocking "JavaScript error" dialog.
+const sendFile = (res, fp, opts) => {
+  if (res.destroyed || res.writableEnded) return;
+  const rs = fs.createReadStream(fp, opts);
+  try { pipeline(rs, res, () => {}); } catch (e) { rs.destroy(); try { res.destroy(); } catch (e2) { /* gone */ } }
+};
 function requestHandler(root, entry) {
   // bughunt 2026-10-02 (L1 / cisec-2 / bootdata-5): this runs in the Electron MAIN process, where an uncaught throw is the blocking
   // 'JavaScript error in the main process' dialog. A malformed escape (GET /%) or a NUL byte is a 400, a throw anywhere is a 500, and
@@ -52,7 +61,8 @@ function requestHandler(root, entry) {
     // SIBLING directories that share the prefix (root "…\Mojiworld" matching
     // "…\Mojiworld2\secret") via a crafted ../ path.
     if (abs !== root && !abs.startsWith(root.endsWith(path.sep) ? root : root + path.sep)) { res.writeHead(403); res.end('forbidden'); return; }
-    fs.stat(abs, (err, st) => {
+    fs.stat(abs, (err, st) => { try {
+      if (res.destroyed) return;   // v0.30.1670 srv-abort - nobody left to answer
       if (err || !st.isFile()) { res.writeHead(404); res.end('not found'); return; }
       const type = MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream';
       const range = parseRange(req.headers.range, st.size);
@@ -67,12 +77,12 @@ function requestHandler(root, entry) {
           'content-range': 'bytes ' + range.start + '-' + range.end + '/' + st.size,
           'accept-ranges': 'bytes',
         });
-        pipeline(fs.createReadStream(abs, { start: range.start, end: range.end }), res, () => {});
+        sendFile(res, abs, { start: range.start, end: range.end });
       } else {
         res.writeHead(200, { 'content-type': type, 'content-length': st.size, 'accept-ranges': 'bytes' });
-        pipeline(fs.createReadStream(abs), res, () => {});
+        sendFile(res, abs);
       }
-    });
+    } catch (e) { try { res.destroy(); } catch (e2) { /* gone */ } } });   // v0.30.1670 srv-abort - a throw here would be the main-process error dialog
   };
   return (req, res) => {
     try { handle(req, res); }
