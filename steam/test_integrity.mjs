@@ -7,7 +7,7 @@
 //   [8] main.js wires it: the Steam calls check the verdict and the stats go through the filter
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { createRequire } from 'node:module'; import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url)); const require = createRequire(import.meta.url);
-const I = require('./integrity.js'); const hook = require('./after_pack.js').default;
+const I = require('./integrity.js'); const hook = async (c) => require('./after_pack.js').writeIntegrity(c);   // the fuse half needs a real Electron binary: steam/test_fuses.mjs
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  [' + JSON.stringify(x) + ']' : '')); };
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lxint-'));
 const out = path.join(tmp, 'win-unpacked'), res = path.join(out, 'resources'), app = path.join(res, 'app');
