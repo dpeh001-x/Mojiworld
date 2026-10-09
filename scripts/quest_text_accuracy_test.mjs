@@ -124,6 +124,10 @@ const CHECK = `(() => {
   window._lxAcceptAll = function () {
     player.level = 90;
     let n = 0;
+    // a quest that waits on another (story order: Hourglass I behind the Sundered Smith since v0.30.1688) carries text like any
+    // other, so the audit takes it too - prereqs are waived for this loop only (_lxPrereqMet is the gate acceptQuest asks)
+    const _pm = window._lxPrereqMet; window._lxPrereqMet = () => true;
+    try {
     for (const id in QUESTS) {
       const q = QUESTS[id];
       if (!q || q.kind !== 'kill' || q.bossFight) continue;
@@ -131,6 +135,7 @@ const CHECK = `(() => {
       try { acceptQuest(id); } catch (e) {}
       if (player.quests && player.quests.active && player.quests.active[id]) n++;
     }
+    } finally { window._lxPrereqMet = _pm; }
     return n;
   };
 })()`;
