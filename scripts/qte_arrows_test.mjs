@@ -1,4 +1,4 @@
-// QTE ARROWS (v0.30.1695, per user: "The skill celestial lock does not show the directions for players to click").
+// QTE ARROWS (v0.30.1706, per user: "The skill celestial lock does not show the directions for players to click").
 // The shackle chips held the arrows as text; LEFT and RIGHT are emoji (Extended_Pictographic), so the page's emoji pass
 // swapped them for atlas tiles - and where a tile did not paint, the player saw blank chips. Pinned here:
 //   1. every chip holds exactly one SVG arrow and no emoji tile, for all four directions
@@ -39,7 +39,7 @@ try {
     await sleep(700);   // past the emoji MutationObserver
     const chips = [...document.querySelectorAll('#lx-qte .lxq-chip')];
     const read = (c) => { const s = c.querySelectorAll('svg.lxq-arw'), p = s[0] && s[0].querySelector('path'), r = s[0] ? s[0].getBoundingClientRect() : null, cs = getComputedStyle(c);
-      return { dir: c.dataset.direction, svgs: s.length, emo: c.querySelectorAll('.lx-emo').length, rot: s[0] ? s[0].style.transform : '', w: r ? Math.round(r.width) : 0, h: r ? Math.round(r.height) : 0,
+      return { dir: c.dataset.direction, svgs: s.length, emo: c.querySelectorAll('.lx-emo').length, rot: s[0] ? s[0].style.transform : '', w: s[0] ? Math.round(parseFloat(getComputedStyle(s[0]).width)) : 0, h: s[0] ? Math.round(parseFloat(getComputedStyle(s[0]).height)) : 0,   // layout size: the card's pop-in scale must not count
         fill: p ? getComputedStyle(p).fill : '', stops: s[0] ? [...s[0].querySelectorAll('stop')].map((q) => getComputedStyle(q).stopColor) : [],
         gradOwn: !!(s[0] && p && s[0].querySelector('linearGradient') && getComputedStyle(p).fill.includes('#' + s[0].querySelector('linearGradient').id)), color: cs.color, cur: c.classList.contains('cur'), cls: c.className, border: cs.borderTopColor, anim: cs.animationName, bg: cs.backgroundImage }; };
     out.seq = _QTE.seq.slice();
@@ -51,7 +51,7 @@ try {
         ornColor: orns.map((o) => getComputedStyle(o).color), border: hex(th.border), plate: getComputedStyle(_QTE.card, '::before').backgroundImage.includes('qte_holy_bg'),
         emo: document.querySelectorAll('#lx-qte .lx-emo').length }; });
     { const cs = getComputedStyle(_QTE.card), pl = getComputedStyle(_QTE.card, '::before');
-      out.glass = { cardBg: cs.backgroundImage, blur: cs.backdropFilter || cs.webkitBackdropFilter || '', plateOpacity: +pl.opacity, plateZ: pl.zIndex, iso: cs.isolation }; }
+      out.glass = { nb: document.documentElement.classList.contains('lx-nobackdrop'), cardBg: cs.backgroundImage, blur: cs.backdropFilter || cs.webkitBackdropFilter || '', plateOpacity: +pl.opacity, plateZ: pl.zIndex, iso: cs.isolation }; }
     out.rim = getComputedStyle(chips[1]).backgroundImage;   // an upcoming key: its rim is the last (border-box) layer
     { const sub = getComputedStyle(document.querySelector('#lx-qte .lxq-sub')); out.hint = { font: sub.fontFamily, style: sub.fontStyle }; }
     _qteApplyTheme(_QTE.theme);
@@ -76,7 +76,7 @@ try {
   ok('3. upcoming arrows are brighter than the old near-invisible #6f6394', up.every((c) => c.color !== 'rgb(111, 99, 148)'), up.map((c) => c.color));
   ok('3. every key is a gilded keycap (a metallic gold rim)', /rgb\(214, 174, 85\)/.test(R.rim) && /rgb\(125, 91, 31\)/.test(R.rim), R.rim.slice(-140));
   ok('3. a finished key turns emerald, rim kept', /rgb\(88, 196, 130\)/.test(R.done.bg) && /rgb\(214, 174, 85\)/.test(R.done.bg) && R.done.cls === 'lxq-chip ok', [R.done.cls, R.done.anim]);
-  ok('4. the backdrop is translucent over a frosted blur (per user "the backdrop a little more translucent")', R.glass.cardBg === 'none' && /blur/.test(R.glass.blur) && R.glass.plateOpacity > 0.5 && R.glass.plateOpacity < 0.9 && R.glass.plateZ === '-1' && R.glass.iso === 'isolate', R.glass);
+  ok('4. the backdrop is translucent over a frosted blur (per user "the backdrop a little more translucent"; when the game has dropped to no-backdrop mode on a slow frame rate, nearly opaque instead)', R.glass.cardBg === 'none' && R.glass.plateZ === '-1' && R.glass.iso === 'isolate' && (R.glass.nb ? (R.glass.blur === 'none' && R.glass.plateOpacity >= 0.9) : (/blur/.test(R.glass.blur) && R.glass.plateOpacity > 0.5 && R.glass.plateOpacity < 0.9)), R.glass);
   const T = R.themes;
   ok('4. every theme titles the painted plate with its own label, in the original card font (per user: "The previous font looks better")', T.length >= 6 && T.every((x) => x.label === x.want && /Trebuchet/.test(x.font) && x.plate), T.map((x) => [x.t, x.label, x.font.split(',')[0], x.plate]));
   ok('4. ...between two SVG ornaments in the theme colour', T.every((x) => x.orns === 2 && x.ornSvg && x.ornColor.every((c) => c === x.border)), T.map((x) => [x.t, x.orns, x.ornColor[0], x.border]));
@@ -84,6 +84,51 @@ try {
   ok('4. no emoji tile anywhere in the card, in any theme', T.every((x) => x.emo === 0), T.map((x) => [x.t, x.emo]));
   ok('5. a wrong key resets to the first chip', R.reset.idx === 0 && R.reset.cur0 && !R.reset.ok0, R.reset);
   ok('5. the sequence in order marks each chip done and breaks the lock', R.okSeen.slice(0, 3).every(Boolean) && R.broke, { ok: R.okSeen, broke: R.broke });
+  // 6. the MojiMon binding ritual reuses the card (a long monster name forced): the real _mojimonQteTry path
+  const B = await page.evaluate(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 0; i < 30 && _QTE.active; i++) await sleep(100);
+    loadMap('forest', 300); await sleep(1500); game.paused = false; try { closeAllModals(); } catch (e) {}
+    let m = null; for (let i = 0; i < 40 && !m; i++) { m = game.monsters.find((q) => q.currentHp > 0 && !q._dying && !q.isBoss && !q.boss && !q.isMiniBoss && !q.isElite && !q.superBoss); if (!m) await sleep(250); }
+    if (!m) return { none: true };
+    const mt = monsterTypes[m.type], name0 = mt.name; mt.name = 'Spotted Mushroom Sovereign of the Verge';
+    game.bestiary = game.bestiary || {}; game.bestiary[m.type] = 10000; const mm = _mojimonEnsure(); delete mm.roster[m.type];
+    game._mojimonQteCdT = 0; player.invulnerable = 0; player.hp = player.maxHp;
+    player.x = m.x + m.w / 2 - player.w / 2; player.y = m.y + m.h - player.h;
+    _mojimonQteTry(m, 16); player.invulnerable = 1e9;
+    await sleep(600);
+    const card = document.querySelector('#lx-qte .lxq-card'), ttl = document.querySelector('#lx-qte .lxq-head .lxq-ttl'), sub = document.querySelector('#lx-qte .lxq-head .lxq-hsub');
+    const r = (e) => { const b = e.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), b: Math.round(b.bottom) }; };
+    const out = { active: _QTE.active, binding: _QTE.mojimon === m, title: ttl ? ttl.textContent : null, orns: document.querySelectorAll('#lx-qte .lxq-head .lxq-orn').length,
+      ttl: ttl ? r(ttl) : null, sub: sub ? r(sub) : null, subText: sub ? sub.textContent : null, card: r(card), vw: innerWidth, emo: document.querySelectorAll('#lx-qte .lx-emo').length, font: ttl ? getComputedStyle(ttl).fontFamily : '' };
+    mt.name = name0; _qteEnd(false);
+    return out;
+  });
+  ok('6. the MojiMon binding title uses the card\'s own structure (ornaments, title font, no emoji tile)', B.active && B.binding && /^BIND THE SPOTTED MUSHROOM SOVEREIGN/.test(B.title || '') && B.orns === 2 && /Trebuchet/.test(B.font) && B.emo === 0, B);
+  ok('6. ...its "complete the sequence" line sits on a row of its own under the title, and a long name wraps inside the card', B.sub && B.subText === 'complete the sequence to capture it' && B.sub.t >= B.ttl.b - 1 && B.ttl.l >= B.card.l && B.ttl.r <= B.card.r && B.card.r - B.card.l <= 600 && B.sub.l >= B.card.l && B.sub.r <= B.card.r, B);
+  // 7. no-backdrop mode (low-end machines) drops the blur, so the plate itself turns nearly opaque
+  const NB = await page.evaluate(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const had = document.documentElement.classList.contains('lx-nobackdrop');   // the game may have turned it on itself (slow frames)
+    document.documentElement.classList.add('lx-nobackdrop');
+    player.stunTimer = 0; _qteShackleStart({ type: 'zodiac_scorpio', zodiacSign: 'scorpio', boss: true }); await sleep(300);
+    const cs = getComputedStyle(_QTE.card), pl = getComputedStyle(_QTE.card, '::before');
+    const out = { plate: +pl.opacity, blur: cs.backdropFilter };
+    _qteEnd(false); document.documentElement.classList.remove('lx-nobackdrop');   // measure the normal mode, then put back what the game had
+    const pl2 = getComputedStyle(_QTE.card, '::before'); out.normal = +pl2.opacity; if (had) document.documentElement.classList.add('lx-nobackdrop');
+    return out;
+  });
+  ok('7. with no backdrop blur the plate is nearly opaque (and translucent again otherwise)', NB.plate >= 0.9 && NB.blur === 'none' && NB.normal < 0.8, NB);
+  // 8. a small phone screen in landscape: the card stays on screen
+  await page.setViewportSize({ width: 667, height: 375 });
+  const SM = await page.evaluate(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    player.stunTimer = 0; _qteShackleStart({ type: 'zodiac_scorpio', zodiacSign: 'scorpio', boss: true }); _qteApplyTheme(_QTE_THEMES.holy); await sleep(500);
+    const b = _QTE.card.getBoundingClientRect(); const out = { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), b: Math.round(b.bottom), vw: innerWidth, vh: innerHeight };
+    _qteEnd(false); return out;
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  ok('8. on a 667x375 phone screen the card stays fully on screen', SM.l >= 0 && SM.r <= SM.vw && SM.t >= 0 && SM.b <= SM.vh, SM);
   ok('5. no page errors', errs.length === 0, errs);
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
