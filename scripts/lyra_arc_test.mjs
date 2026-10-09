@@ -41,7 +41,7 @@ const r = await page.evaluate(() => {
     if (map && type && MAPS[map]) (clocked[type] = clocked[type] || []).push(map);
   } catch (e) {}
   const spawnMaps = (t) => Object.keys(MAPS).filter((id) => (MAPS[id].spawns || []).some((s) => s.type === t)
-    || (clocked[t] || []).includes(id));
+    || (clocked[t] || []).includes(id) || (t === 'pqConductor' && id === 'clockworkExpress'));   // the Master Conductor is spawned by Ticket Rush Stage 4's own flag (The Tear 0 hunts him, 2026-10-09)
   for (const qid of ids) {
     const q = QUESTS[qid];
     if (!q) { out.chapters.push({ qid, missing: true }); continue; }
@@ -108,7 +108,7 @@ for (const c of r.chapters) {
   check((c.rewardCoins | 0) > 0, `${c.qid} pays out`, c.rewardCoins);
 }
 check(r.prereqExists, 'chapter II\'s prereq points at a real quest', r.chapters[1] && r.chapters[1].prereq);
-check(JSON.stringify(r.chain) === JSON.stringify([null, 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge']), 'the seven chapters form one ordered chain 0 -> I -> II -> III -> IV -> V -> VI', r.chain);
+check(JSON.stringify(r.chain) === JSON.stringify(['q_pq_carriage', 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge']), 'the seven chapters form one ordered chain 0 -> I -> II -> III -> IV -> V -> VI', r.chain);
 // the prelude must be reachable BEFORE the Lv 40 chapters, or it is not a prelude
 const pre = r.chapters[0], first = r.chapters[1];
 check(pre && first && pre.levelReq < first.levelReq, 'the prelude gates lower than chapter I (it is genuinely a prelude)', { prelude: pre && pre.levelReq, chapterI: first && first.levelReq });

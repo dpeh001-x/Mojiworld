@@ -4,7 +4,7 @@
 // quest log" - "0 · The Small Aperture" stuck ACTIVE at 0/1 on "Hunt Mirror
 // Self — The Inner Dimension · no walking route", on a Lv-29 Archer.
 //
-// Two quests want the same one-time boss (q_inner_dim_trial, q_lyra_aperture)
+// Two quests want the same one-time boss (q_inner_dim_trial, __mirror2)
 // but the only door to him - the class instructor's "Prove yourself in the
 // Inner Dimension" option - was gated on !completed.q_inner_dim_trial. Finish
 // the trial and the room seals; Auron still hands out the Aperture quest
@@ -42,13 +42,15 @@ await page.evaluate(() => new Promise((res) => { let n = 0;
     const m = document.getElementById('class-select-modal'); if (m) m.style.display = 'none';
     if (++n > 150) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); }));
 await page.waitForTimeout(1200);
+// The Tear 0 stopped hunting the Mirror Self (2026-10-09), so a synthetic second Mirror quest stands in for it: _lxNeedsMirrorSelf and the repair are generic over `target: 'mirrorSelf'`
+await page.evaluate(() => { QUESTS.__mirror2 = { name: 'A second Mirror quest', icon: 'x', levelReq: 20, giver: 'Auron', handIn: true, kind: 'kill', target: 'mirrorSelf', count: 1, story: true, noScale: true, rewards: { mojicoins: 1, exp: 1 } }; });
 
 // the screenshot's save: trial long completed, Aperture accepted later, 0/1
 const setStuck = (cls) => page.evaluate((c) => {
   if (typeof _ensureQuests === 'function') _ensureQuests();
   player.cls = c; player.level = 29; player._god = true;
   player.quests.completed = { q_inner_dim_trial: Date.now() };
-  player.quests.active = { q_lyra_aperture: { progress: 0 } };
+  player.quests.active = { __mirror2: { progress: 0 } };
   player.quests.unlocked = {};
   return true;
 }, cls);
@@ -81,15 +83,15 @@ ok('with an unsatisfied Mirror quest, every instructor still opens the Inner Dim
 await setStuck('archer');
 const repaired = await page.evaluate(() => {
   if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
-  const a = (player.quests.active || {}).q_lyra_aperture;
-  const before = { progress: a ? a.progress : null, completed: !!(player.quests.completed || {}).q_lyra_aperture,
+  const a = (player.quests.active || {}).__mirror2;
+  const before = { progress: a ? a.progress : null, completed: !!(player.quests.completed || {}).__mirror2,
     doorOpen: typeof _lxNeedsMirrorSelf === 'function' && _lxNeedsMirrorSelf() };
   if (typeof tickQuestKill === 'function') tickQuestKill('mirrorSelf', true);
-  const a2 = (player.quests.active || {}).q_lyra_aperture;
-  const done = !!(player.quests.completed || {}).q_lyra_aperture;
+  const a2 = (player.quests.active || {}).__mirror2;
+  const done = !!(player.quests.completed || {}).__mirror2;
   return { before, stillActive: !!a2, progress: a2 ? a2.progress : null, ready: a2 ? !!a2.readyToHandIn : null,
-    completed: done, need: QUESTS.q_lyra_aperture.count, handIn: !!QUESTS.q_lyra_aperture.handIn,
-    giver: QUESTS.q_lyra_aperture.giver };
+    completed: done, need: QUESTS.__mirror2.count, handIn: !!QUESTS.__mirror2.handIn,
+    giver: QUESTS.__mirror2.giver };
 });
 ok('a stuck save is not handed a kill it has not made (v0.30.521), and its door is open',
   repaired.before.progress === 0 && !repaired.before.completed && repaired.before.doorOpen, repaired);
@@ -101,12 +103,12 @@ const untouched = await page.evaluate(() => {
   if (typeof _ensureQuests === 'function') _ensureQuests();
   player.cls = 'archer'; player.level = 29;
   player.quests.completed = {};                       // no trial: no proof of a kill
-  player.quests.active = { q_lyra_aperture: { progress: 0 } };
+  player.quests.active = { __mirror2: { progress: 0 } };
   player.quests.unlocked = {};
   if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks();
-  const a = (player.quests.active || {}).q_lyra_aperture;
+  const a = (player.quests.active || {}).__mirror2;
   return { progress: a ? a.progress : null, ready: a ? !!a.readyToHandIn : null,
-    completed: !!(player.quests.completed || {}).q_lyra_aperture };
+    completed: !!(player.quests.completed || {}).__mirror2 };
 });
 ok('a player who has NOT beaten the Mirror is never handed the credit',
   untouched.progress === 0 && untouched.ready === false && untouched.completed === false, untouched);
@@ -116,7 +118,7 @@ const refight = await page.evaluate(async () => {
   if (typeof _ensureQuests === 'function') _ensureQuests();
   player.cls = 'archer'; player.level = 29; player._god = true;
   player.quests.completed = { q_inner_dim_trial: Date.now() };
-  player.quests.active = { q_lyra_aperture: { progress: 0 } };
+  player.quests.active = { __mirror2: { progress: 0 } };
   try { loadMap('innerDimension', 100); } catch (e) {}
   await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (++n > 90) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
   return { map: game.currentMap, mirrorPresent: game.monsters.some((m) => m && m.type === 'mirrorSelf') };

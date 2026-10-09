@@ -76,6 +76,20 @@ try {
     go('q_lyra_tear', 40, ['q_lyra_aperture', 'q_lyra_loan']); for (let i = 0; i < 199; i++) tickQuestKill('harea', false); out.run.tear199 = ready('q_lyra_tear'); tickQuestKill('harea', false); out.run.tear200 = ready('q_lyra_tear');
     go('q_lyra_kin', 40, ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut']); for (let i = 0; i < 100; i++) { tickQuestKill('taiger', false); tickQuestKill('lady_honk', false); } for (let i = 0; i < 99; i++) tickQuestKill('willeo', false);
     out.run.kin99 = ready('q_lyra_kin'); tickQuestKill('willeo', false); out.run.kin100 = ready('q_lyra_kin');
+    // 8. The Tear 0 is the Train to an Alternate Dimension (the Master Conductor) and The Tear V ends on the Sundered Smith (per user, 2026-10-09)
+    const T0 = Q.q_lyra_aperture, TV = Q.q_lyra_forge;
+    out.t0 = { name: T0.name, lv: T0.levelReq, prereq: [].concat(T0.prereq || []), kind: T0.kind, target: T0.target, boss: !!T0.bossFight, desc: T0.desc };
+    out.v = { target: TV.target, prereq: [].concat(TV.prereq || []), desc: TV.desc };
+    const PQ = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage'];
+    out.open2 = { t0_noRush: open('q_lyra_aperture', 30, []), t0_29: open('q_lyra_aperture', 29, PQ), t0_30: open('q_lyra_aperture', 30, PQ), v_noIV: open('q_lyra_forge', 46, ['q_lyra_kin']), v_IV: open('q_lyra_forge', 46, ['q_lyra_kin', 'q_barnaby_finish']) };
+    fresh(); for (const k of PQ) player.quests.completed[k] = true; player.level = 31; tickQuestUnlocks(); acceptQuest('q_pq_finale'); acceptQuest('q_lyra_aperture'); tickQuestKill('pqConductor', true);
+    out.duel = { finale: ready('q_pq_finale'), tear0: ready('q_lyra_aperture') };
+    fresh(); for (const k of ['q_distorted_portal', 'q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish', 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin']) player.quests.completed[k] = true; player.level = 46; tickQuestUnlocks(); acceptQuest('q_boss_sundered_smith'); acceptQuest('q_lyra_forge'); tickQuestKill('sundered_smith', true);
+    out.smith = { main: ready('q_boss_sundered_smith'), v: ready('q_lyra_forge') };
+    const milo = Object.values(MAPS).flatMap((m) => m.npcs || []).find((n) => n && n.name === 'Milo');
+    const miloOpts = () => { try { openNPC(milo); } catch (e) {} const o = Array.from(document.querySelectorAll('#dialog-options button')).map((x) => x.textContent.trim()); try { closeDialog(); } catch (e) {} return o; };
+    fresh(); for (const k of PQ.concat(['q_pq_finale'])) player.quests.completed[k] = true; player.level = 40; player.quests.active.q_lyra_aperture = { progress: 0 }; out.milo = { found: !!milo, withT0: miloOpts() };
+    delete player.quests.active.q_lyra_aperture; out.milo.without = miloOpts();
     return out;
   });
   check(R.pre.lyraVI.indexOf('q_lyra_forge') >= 0 && R.pre.lyraVI.indexOf('q_boss_sundered_smith') >= 0, 'Lyra VI needs Lyra V and the Smith', J(R.pre.lyraVI));
@@ -91,10 +105,17 @@ try {
   check(/the Megamall smith/.test(R.text.epi) && !/Glasswind/.test(R.text.epi), "the Smith's epitaph points at the Megamall smith (where Barnaby stands now), not at Glasswind", R.text.epi.slice(-60));
   check(R.arc.names.length === 7 && R.arc.names.every((n, i) => n.indexOf('The Tear ' + ['0', 'I', 'II', 'III', 'IV', 'V', 'VI'][i] + ' — ') === 0), 'the seven chapters (the Lv 20 prelude and I-VI) carry the arc name: The Tear 0, I, II, III, IV, V, VI', J(R.arc.names));
   check(!R.arc.names.some((n) => /Lyra|Girl/.test(n)) && R.arc.names[1] === 'The Tear I — The Loan', 'no chapter title names her, and Chapter I (once about "the girl") is The Loan', J(R.arc.names));
-  check(J(R.arc.prereqs) === J([[], ['q_lyra_aperture'], ['q_lyra_loan'], ['q_lyra_tear'], ['q_lyra_cut'], ['q_lyra_kin'], ['q_lyra_forge', 'q_boss_sundered_smith']]) && J(R.arc.levels) === J([20, 40, 40, 40, 40, 45, 50]), 'the chain, its prerequisites and its levels are untouched (ids and saves keep working)', J(R.arc.prereqs));
+  check(J(R.arc.prereqs) === J([['q_pq_carriage'], ['q_lyra_aperture'], ['q_lyra_loan'], ['q_lyra_tear'], ['q_lyra_cut'], ['q_lyra_kin', 'q_barnaby_finish'], ['q_lyra_forge', 'q_boss_sundered_smith']]) && J(R.arc.levels) === J([30, 40, 40, 40, 40, 45, 50]), 'the chain keeps its ids and order (the prelude hangs off Ticket Rush Stage 3 at Lv 30; V waits for Barnaby IV)', J(R.arc.prereqs));
   check(/The Tear III — What the Weight Left Behind/.test(R.arc.journal) && !/Lyra/.test(R.arc.journal.slice(0, 4000)), 'the Journal shows the arc name on the chapter card', R.arc.journal.slice(0, 120));
   check(R.counts.loan === 100 && R.counts.tear === 200 && R.counts.cut === 5 && R.counts.kin === 'taiger:100,lady_honk:100,willeo:100', 'The Tear I-IV ask for Harea x100, Harea x200, Elder Arlen x5 and Taiger / Lady Honk / Willeo x100 each', J(R.counts));
   check(R.run.loan99 === false && R.run.loan100 === true && R.run.tear199 === false && R.run.tear200 === true && R.run.kin99 === false && R.run.kin100 === true, 'the game really counts them: ready to hand in on the 100th / 200th kill, and only when all three captains are done', J(R.run));
+  check(R.t0.name === 'The Tear 0 \u2014 The Train to an Alternate Dimension' && R.t0.lv === 30 && J(R.t0.prereq) === J(['q_pq_carriage']) && R.t0.kind === 'boss' && R.t0.target === 'pqConductor' && R.t0.boss, 'The Tear 0 is "The Train to an Alternate Dimension": a Lv 30 boss fight against the Master Conductor, after Ticket Rush Stage 3', J([R.t0.name, R.t0.lv, R.t0.prereq, R.t0.target]));
+  check(/Distorted Portal/.test(R.t0.desc) && /Endless Express/.test(R.t0.desc) && /Lyra, an apprentice, copies every reading/.test(R.t0.desc) && !/Mirror Self/.test(R.t0.desc), "its story is the prologue of the Distorted Portal on the Express, keeps Lyra's readings line, and no longer talks of the Mirror Self", R.t0.desc.slice(0, 80));
+  check(R.open2.t0_noRush === false && R.open2.t0_29 === false && R.open2.t0_30 === true, 'The Tear 0 opens at Lv 30 once Ticket Rush Stage 3 is done, not before', J(R.open2));
+  check(R.duel.finale === true && R.duel.tear0 === true, 'one Master Conductor duel completes Ticket Rush Stage 4 and The Tear 0 together', J(R.duel));
+  check(R.milo.found && R.milo.withT0.some((t) => /Face the Master Conductor again/.test(t)) && !R.milo.without.some((t) => /Face the Master Conductor again/.test(t)), "a hero who already finished the Rush gets Milo's 'Face the Master Conductor again' while The Tear 0 is open, and only then", J([R.milo.withT0, R.milo.without]));
+  check(R.v.target === 'sundered_smith' && R.v.prereq.indexOf('q_lyra_kin') >= 0 && R.v.prereq.indexOf('q_barnaby_finish') >= 0 && !/Confused Vigil|the boy/.test(R.v.desc), 'The Tear V ends on the Sundered Smith (not the boy) and waits for Barnaby IV', J([R.v.target, R.v.prereq]));
+  check(R.open2.v_noIV === false && R.open2.v_IV === true && R.smith.main === true && R.smith.v === true, 'The Tear V stays shut until Barnaby IV, and one Smith kill completes it together with The Forge That Broke', J([R.open2, R.smith]));
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
