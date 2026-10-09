@@ -27,6 +27,14 @@ let steam = require('./steam_integration').STUB;
 try { steam = require('./steam_integration').init(); } catch (e) { console.warn('[steam] bridge load failed:', e && e.message); }
 // Enable the Steam overlay (Shift+Tab) BEFORE any window is created.
 if (steam.available) { try { steam.enableOverlay(); } catch (e) {} }
+// v0.30.1678 ac-steam - anti-cheat layer 4 (see integrity.js): Steam achievements and stats only from an install the app can vouch
+// for. A packaged app started with an inspector / remote-debugging switch is not; a modified install is not (checked once the
+// game folder is known, below). Unknown (no integrity.json) stays trusted - a packaging slip must not silence everyone.
+const integrity = require('./integrity');
+let _lxInstall = 'unknown';
+const _lxDebugLaunch = app.isPackaged && integrity.debugLaunch(process.argv, process.execArgv, process.env);
+const _lxSteamOk = () => !_lxDebugLaunch && _lxInstall !== 'modified';
+const _lxStatsFilter = integrity.statsFilter();
 
 // Steam Deck detection. SteamOS's gamescope session sets SteamDeck=1 in the
 // environment; the Steamworks utils call is the authoritative check when the
@@ -74,10 +82,10 @@ ipcMain.handle('steam:cloud-write',  (_e, name, content) => { try { return steam
 let _lxAchIds = null;
 try { _lxAchIds = new Set(JSON.parse(fs.readFileSync(path.join(__dirname, 'achievements_manifest.json'), 'utf8')).achievements.map((a) => a.apiname)); } catch (e) { console.warn('[steam] no achievement manifest - unlocks are not allowlisted'); }
 const _LX_STAT_KEYS = new Set(['lifetime_kills', 'highest_level', 'lifetime_coins', 'bosses_defeated']);
-ipcMain.handle('steam:ach-unlock',   (_e, name) => { try { if (_lxAchIds && !_lxAchIds.has(String(name))) return false; return steam.achievement.unlock(name); } catch (e) { return false; } });
+ipcMain.handle('steam:ach-unlock',   (_e, name) => { try { if (!_lxSteamOk()) return false; if (_lxAchIds && !_lxAchIds.has(String(name))) return false; return steam.achievement.unlock(name); } catch (e) { return false; } });   // v0.30.1678 ac-steam
 ipcMain.handle('steam:presence-set', (_e, p) => { try { return steam.presence.set(p); } catch (e) { return false; } });
 ipcMain.handle('steam:overlay-open', (_e, dialog) => { try { return steam.overlay.open(dialog); } catch (e) { return false; } });
-ipcMain.handle('steam:stats-set',    (_e, obj) => { try { const o = {}; for (const k in (obj || {})) if (_LX_STAT_KEYS.has(k)) o[k] = obj[k]; return steam.stats.set(o); } catch (e) { return false; } });
+ipcMain.handle('steam:stats-set',    (_e, obj) => { try { if (!_lxSteamOk()) return false; const o = {}; for (const k in (obj || {})) if (_LX_STAT_KEYS.has(k)) o[k] = obj[k]; const f = _lxStatsFilter(o); if (!Object.keys(f).length) return false; return steam.stats.set(f); } catch (e) { return false; } });   // v0.30.1678 ac-steam - whole numbers in range, never down
 ipcMain.on('steam:input-snapshot',   (e) => { try { e.returnValue = steam.input.snapshot(); } catch (err) { e.returnValue = null; } });
 // SYNCHRONOUS cloud write — the beforeunload final mirror only. The async
 // invoke path can be torn down with the renderer mid-flight; sendSync blocks
@@ -131,6 +139,12 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // Dev: serve the repo root (../). Packaged: electron-builder copies the game
 // into resources/app (see extraResources in package.json).
 const ROOT = app.isPackaged ? path.join(process.resourcesPath, 'app') : path.join(__dirname, '..');
+// v0.30.1678 ac-steam - fingerprint the game's code against the list after_pack.js wrote at build time (async: never delays launch)
+if (app.isPackaged) {
+  integrity.verify(ROOT, integrity.readManifest(path.join(process.resourcesPath, 'integrity.json')))
+    .then((v) => { _lxInstall = v; if (v === 'modified') console.warn('[steam] the game files differ from this build - achievements and stats stay off'); })
+    .catch(() => {});
+}
 const ENTRY = '/mojiworld_game.html';
 
 // Relay URL resolution — NEVER throws (a throw here crashes the whole app on
