@@ -1,8 +1,8 @@
-// BASIC-ATTACK RANKS — 2% each, +20% at rank 10, for warrior/rogue/archer.
+// BASIC-ATTACK RANKS — 2% each, +20% at rank 10, for warrior/rogue/archer/mage.
 // ============================================================================
 // Per user: "for warriors, rogue and archers ... each level up to the basic
 // attack should only +2% of damage, max level 10", clarified to "RP only at
-// 2%/rank for basic attacks, reaching +20% at rank 10", mage left alone.
+// 2%/rank for basic attacks, reaching +20% at rank 10", mage left alone -- until 2026-10-09: "mage basic attack at 10 points is +70% change it to 20% at 10 points and each point only adds +2%".
 //
 // Measuring this turned up a second thing, which is why the test checks the
 // warrior and rogue cases through the tag their hits ACTUALLY carry rather than
@@ -84,7 +84,13 @@ const R = await page.evaluate(() => {
     slash: SKILL_RANK_BLACKLIST.has('slash'),
     stab: SKILL_RANK_BLACKLIST.has('stab'),
     arrowShot: SKILL_RANK_BLACKLIST.has('arrowShot'),
+    magicBolt: SKILL_RANK_BLACKLIST.has('magicBolt'),
   };
+  // the Skills panel tile for the mage's Magic Bolt, read the way the player reads it
+  try { player.cls = 'mage'; const host = document.createElement('div'); document.body.appendChild(host); o.panel = {};
+    const tile = (id) => { const b = host.querySelector('[data-rankid="' + id + '"]'); const blk = b && b.closest('.skl-rank'); const pc = blk && blk.querySelector('.skl-rank-pct'); return pc ? pc.textContent.trim() : null; };
+    for (const [k, r] of [['mage1', 1], ['mage5', 5], ['mage10', 10]]) { player.skillRanks.magicBolt = r; player.skillRankPoints = 5; host.innerHTML = ''; renderSkillsReference(host); o.panel[k] = tile('magicBolt'); }
+    player.skillRanks.magicBolt = 0; host.remove(); player.cls = origCls; } catch (e) { o.panel = { err: String(e.message).slice(0, 120) }; player.cls = origCls; }
   o.cap = SKILL_RANK_CAP;
   o.per = (typeof LX_BASIC_ATK_RANK_PER !== 'undefined') ? LX_BASIC_ATK_RANK_PER : null;
   return o;
@@ -103,20 +109,17 @@ for (const k of ['warrior', 'rogue', 'archer', 'mage']) {
 }
 
 ok('the basic-attack rank is 2% a point', R.per === 0.02, 'LX_BASIC_ATK_RANK_PER = ' + R.per);
-for (const k of ['warrior', 'rogue', 'archer']) {
+for (const k of ['warrior', 'rogue', 'archer', 'mage']) {
   ok(`${k}: rank 10 basic attack is exactly +20%`, near(R[k].r10, 1.20),
-     `${pct(R[k].r10)} (was ${k === 'archer' ? '+70%' : '+0% — the rank did nothing'})`);
+     `${pct(R[k].r10)} (was ${(k === 'archer' || k === 'mage') ? '+70%' : '+0% — the rank did nothing'})`);
   ok(`${k}: it scales 2% a rank on the way up`, near(R[k].r1, 1.02) && near(R[k].r5, 1.10),
      `rank 1 ${pct(R[k].r1)}, rank 5 ${pct(R[k].r5)}`);
 }
-ok('the mage basic attack is untouched at +70%', near(R.mage.r10, 1.70),
-   `magicBolt rank 10 ${pct(R.mage.r10)}`);
-ok('the mage still gets the old 5%-a-rank curve', near(R.mage.r1, 1.05) && near(R.mage.r5, 1.25),
-   `rank 1 ${pct(R.mage.r1)}, rank 5 ${pct(R.mage.r5)}`);
+ok('the Skills panel tile for the mage\'s Magic Bolt reads +2% at rank 1, +10% at rank 5 and +20% MAX at rank 10', R.panel && R.panel.mage1 === '+2%' && R.panel.mage5 === '+10%' && R.panel.mage10 === '+20% MAX', JSON.stringify(R.panel));
 ok('nothing is paid past the rank cap', near(R.warriorOverCap, 1.20),
    `rank 99 still ${pct(R.warriorOverCap)} (cap ${R.cap})`);
 ok('RP can still be spent on the basic attack',
-   !R.rpBlocked.slash && !R.rpBlocked.stab && !R.rpBlocked.arrowShot,
+   !R.rpBlocked.slash && !R.rpBlocked.stab && !R.rpBlocked.arrowShot && !R.rpBlocked.magicBolt,
    'per the clarification, the investment stays and only its value changed');
 
 let bad = 0;
