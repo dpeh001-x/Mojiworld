@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1686';
+const GAME_VERSION = 'v0.30.1687';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -61899,6 +61899,21 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk, pid) {
   const _capBar = Math.max(1, Math.floor(m.maxHp || m.currentHp));
   const _isBoss = !!(m.isBoss || m.boss || m.isMiniBoss || m.zodiacBoss);
   d = Math.min(d, _isBoss ? Math.max(1, Math.floor(_capBar * 0.5)) : _capBar);
+  // v0.30.1687 ac-coop - ANTI-CHEAT, LAYER 6 (per user: "yes continue"): A GUEST'S SHARE OF A BOSS PER SECOND. The per-hit cap above
+  // still let a tampered guest client finish a boss in a couple of packets. Each guest now has a budget against each true boss:
+  // a quarter of its bar at once, refilling a fifth of the bar every second - several times what an honest build at the boss's
+  // level deals, so a boss lasts at least about four seconds against one guest going flat out. Every guest gets the same budget
+  // (a guest's level is its own report, so it buys no exemption); mini-bosses and ordinary monsters keep the caps above; the
+  // host's own damage is untouched. Damage over the budget is simply not applied.
+  if (m.isBoss || m.boss || m.zodiacBoss) {
+    const _now = performance.now(), _bk = pid == null ? 'g' : String(pid), _B = m._acBudget || (m._acBudget = {});
+    const _bCap = Math.max(1, Math.floor(_capBar * 0.25)), _bRate = _capBar * 0.20 / 1000;
+    const _b = _B[_bk] || (_B[_bk] = { tok: _bCap, at: _now });
+    _b.tok = Math.min(_bCap, _b.tok + Math.max(0, _now - _b.at) * _bRate); _b.at = _now;
+    if (_b.tok < 1) return;
+    if (d > _b.tok) d = Math.max(1, Math.floor(_b.tok));
+    _b.tok -= d;
+  }
   m.currentHp -= d;
   if (m.zodiacSign === 'virgo') _virgoTook(m, d);   // v0.30.366 — ritual book-keeping (peer packets too)
   // v0.29.x — was 6 (ms): with dt≈16.7/step the white hit-flash lasted ONE
