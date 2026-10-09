@@ -39,7 +39,7 @@ try {
     // stub every opener a key reaches, counting calls
     const C = window._kbC = {};
     const stub = (name, holder) => { (holder || window)[name] = function () { C[name] = (C[name] || 0) + 1; }; };
-    for (const n of ['toggleWorldMap', 'toggleQuestJournal', 'toggleLoreMap', '_qnavCycle', '_useCurePotion', '_useBoundPotion', 'openPostalWisp',
+    for (const n of ['toggleWorldMap', 'toggleQuestJournal', 'toggleLoreMap', 'openMojidex', '_qnavCycle', '_useCurePotion', '_useBoundPotion', 'openPostalWisp',
       '_mojimonQuickSummon', 'togglePhotoMode', '_mpOpenChat', '_coopSendPing', 'quickDash', 'startBlock', 'toggleSharedModal', '_wardrobeHotkey', 'openNPC', 'openChest']) stub(n);
     window.tryInteract = function (m) { C['tryInteract:' + m] = (C['tryInteract:' + m] || 0) + 1; };
     audio.toggleMute = function () { C.mute = (C.mute || 0) + 1; };
@@ -70,9 +70,10 @@ try {
   check(!reg.defReserved.length && !reg.lost.length && !reg.offDefault.length, 'the defaults hold no duplicate and no reserved key', { reserved: reg.defReserved, lost: reg.lost, off: reg.offDefault });
 
   // 2. the shipped keys: each fires its function and nothing else
+  // L is the Compendium (openMojidex) since the release4 UI pass, per user - Y keeps the MojiDex book
   const DEF = [['w', { toggleWorldMap: 1 }], ['q', { toggleQuestJournal: 1 }], ['j', {}], ['e', { _qnavCycle: 1 }], ['r', { _useCurePotion: 1 }],
     ['Shift', { quickDash: 1 }], ['p', { openPostalWisp: 1 }], ['h', { _mojimonQuickSummon: 1 }], ['o', { togglePhotoMode: 1 }], ['Enter', {}],
-    ['y', { toggleLoreMap: 1 }], ['l', { toggleLoreMap: 1 }], ['m', { mute: 1 }], ['a', { startBlock: 1 }], ['u', { toggleSharedModal: 1 }], ['i', {}]];
+    ['y', { toggleLoreMap: 1 }], ['l', { openMojidex: 1 }], ['m', { mute: 1 }], ['a', { startBlock: 1 }], ['u', { toggleSharedModal: 1 }], ['i', {}]];
   const defBad = [];
   for (const [k, want] of DEF) { const got = await press(k); if (!same(got, want)) defBad.push({ k, want, got }); }
   check(!defBad.length, 'every shipped key fires exactly its own function - Shift is Dash only (Cure is R), J (the old journal alias) and I do nothing, and Enter (Chat) does nothing out of co-op', defBad);

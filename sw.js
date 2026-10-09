@@ -306,7 +306,9 @@
 // returning browser would keep drawing the old cast for a session.
 // v0.30.1657 - v165 -> v166. Scorpio's venom shot (p_venom.webp + anim/venom_0..8) is REPLACED under its own names, so a
 // returning browser would keep drawing the old green glob for a session.
-const CACHE = 'mojiworld-assets-v166';   // v0.30.1657 - Scorpio venom shard remake (same names)
+// v0.30.1707 - v166 -> v167. Lady Honk's column beam (fx_col_lady_honk.webp) is REPLACED under its own name with the softened edges,
+// so a returning browser would keep drawing the hard-edged beam for a session.
+const CACHE = 'mojiworld-assets-v167';   // v0.30.1707 - Lady Honk's beam softened (same name)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
