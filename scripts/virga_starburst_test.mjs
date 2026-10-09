@@ -53,7 +53,9 @@ ok('a starburst state exists', /m\._sbPhase = 1;/.test(V));
 // "the centre of the screen" is a promise about what the player can see, so it
 // is the CAMERA's centre, not the arena's midpoint.
 ok('the target is the camera centre, not the arena centre',
-  /_sbTx = _sbCamX \+ W \/ 2 - m\.w \/ 2/.test(V) && /_sbCamX = \(game\.camera \? game\.camera\.x : 0\)/.test(V));
+  // f105df76e v0.30.1532 wide phone view: the play width is W_PLAY and the play camera's x is _lxPlayCamX() (both equal
+  // W / game.camera.x on a desktop) - still the camera centre
+  /_sbTx = _sbCamX \+ W(_PLAY)? \/ 2 - m\.w \/ 2/.test(V) && /_sbCamX = (?:\(game\.camera \? game\.camera\.x : 0\)|_lxPlayCamX\(\))/.test(V));
 ok('she climbs to it rather than teleporting', /_sbT < _SB_CLIMB/.test(V) && /_sbEase/.test(V));
 ok('there is a telegraph before anything fires', /_sbT < _sbFireAt/.test(V) && /_SB_AIM = \d+/.test(V));
 ok('the telegraph draws all eight rays', /for \(let _si = 0; _si < 8; _si\+\+\)[\s\S]{0,200}?_budgetedParticlePush/.test(V));

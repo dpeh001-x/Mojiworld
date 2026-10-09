@@ -7,7 +7,21 @@
 //   node serve.js 8777 && node scripts/scaled_mode_correlation_audit.mjs 8777
 import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
-const PORT = process.argv[2] || '8777';
+// PORT from the command line or the environment; with none given (or nothing listening there) this script starts the
+// checkout's own serve.js on it - it used to need a hand-started server on a fixed port and failed without one.
+let PORT = String(process.argv[2] || process.env.PORT || '');
+{
+  const { spawn: _sSpawn } = await import('node:child_process'); const _sNet = await import('node:net');
+  const _sPath = await import('node:path'); const { fileURLToPath: _sF2P } = await import('node:url');
+  const _sRoot = _sPath.resolve(_sPath.dirname(_sF2P(import.meta.url)), '..');
+  const _sFree = (p) => new Promise((r) => { const sv = _sNet.createServer(); sv.once('error', () => r(false)); sv.once('listening', () => sv.close(() => r(true))); sv.listen(p, '127.0.0.1'); });
+  if (!PORT) for (let p = 8767; p <= 8999 && !PORT; p++) if (await _sFree(p)) PORT = String(p);
+  if (await _sFree(Number(PORT))) {
+    const _srv = _sSpawn(process.execPath, [_sPath.join(_sRoot, 'serve.js'), PORT], { stdio: 'ignore', cwd: _sRoot });
+    _srv.unref(); process.on('exit', () => { try { _srv.kill(); } catch (e) {} });
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(existsSync);
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });

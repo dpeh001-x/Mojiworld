@@ -21,7 +21,8 @@ const PAGE = path.resolve(SERVE_ROOT, cand || 'mojiworld_game.html');
 let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d ? '  [' + d + ']' : '')); ok ? pass++ : fail++; };
 const J = (o) => JSON.stringify(o);
 const src = readFileSync(PAGE, 'utf8');
-check(/classList\.toggle\('sell-desk', type === 'sell'\)/.test(src) && src.includes('THE SELL DESK, THE SAME GRID OF CARDS'), 'static: the sell tab marks .sell-desk and the block is in the sheet');
+// f54ff5079 v0.30.1550: the Postal Wisp's parcels tab shares the sell desk (`type === 'sell' || type === 'parcels'`)
+check(/classList\.toggle\('sell-desk', type === 'sell'(?: \|\| type === 'parcels')?\)/.test(src) && src.includes('THE SELL DESK, THE SAME GRID OF CARDS'), 'static: the sell tab marks .sell-desk and the block is in the sheet');
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env, MOJI_GAME_FILE: PAGE } });
 await new Promise((r) => setTimeout(r, 1800));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));

@@ -19,10 +19,14 @@ const { flatten } = await import(pathToFileURL(path.join(ROOT, 'scripts', 'flatt
 const FX = path.join(ROOT, 'Sprites', 'fx');
 const files = fs.readdirSync(FX).filter((n) => /^tg_col_.*\.webp$/.test(n)).sort();
 const ringed = [], bandless = [];
+// v0.30.1627 mira-fallen: tg_col_miraFallen's base is a SWORD EMBLEM, not a 3/4 rune ring - the flattener reads its blade as
+// a ring's front half and would cut the sword off. The game also draws its animated frames (Sprites/fx/anim/
+// tg_col_miraFallen_N, an _FX_ANIM_KEYS set), never this still in play. Exempt from the ring check only.
+const RING_EXEMPT = new Set(['tg_col_miraFallen.webp']);
 for (const n of files) {
   const buf = fs.readFileSync(path.join(FX, n));
   const r = await flatten(buf);
-  if (!r.skipped) ringed.push(`${n} (front half ${r.yB - r.yC} px)`);
+  if (!r.skipped && !RING_EXEMPT.has(n)) ringed.push(`${n} (front half ${r.yB - r.yC} px)`);
   const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const W = info.width, H = info.height; let yB = H - 1, wide = 0;
   const drawn = (y) => { let n2 = 0; for (let x = 0; x < W; x++) if (data[(y * W + x) * 4 + 3] > 40) n2++; return n2; };

@@ -38,6 +38,9 @@ await page.waitForFunction(() => typeof loadMap === 'function' && typeof killMon
 
 const out = await page.evaluate(async () => {
   window._lxBootGateDone = true;
+  // file:// boot: the boot image hold is never released by a menu click here, and while held the render loop does not
+  // draw - release it like the newer suites do, or the render-path tint check reads a loop that never ran
+  try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}
   try { const bo = document.getElementById('loading-overlay'); if (bo) bo.remove(); } catch (e) {}
   try { await Promise.race([window._lxNpcSpritesReady || Promise.resolve(), new Promise((r) => setTimeout(r, 20000))]); } catch (e) {}
 

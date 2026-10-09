@@ -60,6 +60,8 @@ const r = await page.evaluate(async () => {
     let r = 0, g = 0, b = 0, n = 0;
     for (let i = 0; i < d.length; i += 4) {
       if (d[i + 3] < 30) continue;                 // skip transparent
+      // 6c0aab9ea made the game canvas opaque: the cleared backdrop reads as near-black, not transparent - skip it too
+      if (d[i] + d[i + 1] + d[i + 2] < 15) continue;
       r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
     }
     if (!n) return { n: 0 };

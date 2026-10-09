@@ -12,7 +12,8 @@ let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS 
 const J = (o) => JSON.stringify(o);
 // ---- the source, comments stripped: the old words are gone from everything a player can read
 const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');
-const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).map((l) => l.replace(/\s\/\/ .*$/, '')).join('\n');
+// split on CRLF too: the worktree copy is CRLF, and a trailing \r stops `.*$` from reaching a line-end comment
+const code = src.split(/\r?\n/).filter((l) => !/^\s*\/\//.test(l)).map((l) => l.replace(/\s\/\/ .*$/, '')).join('\n');
 const noOtherWardens = code.replace(/Cap-Warden|CAP-WARDEN|Hall Wardens?|Warden(\\)?'s Court/g, '');
 check(!/shardfather/i.test(code), 'no "Shardfather" anywhere in the game text', (code.match(/.{0,40}shardfather.{0,40}/i) || [''])[0]);
 check(!/\bWarden\b/.test(noOtherWardens), 'no bare "the Warden" any more (the Cap-Warden and the Hall Wardens are other people and keep their names)', (noOtherWardens.match(/.{0,50}\bWarden\b.{0,40}/) || [''])[0]);

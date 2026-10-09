@@ -48,6 +48,11 @@ try {
     const frame = () => new Promise((res) => requestAnimationFrame(res));
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+    // dc2cea4ed v0.30.1554: at Lv 90 the Lv-20 captains teaser film (and any other story beat) would play and
+    // pause the world mid-measurement - mark every beat seen before acting
+    player._storyBeatsSeen = player._storyBeatsSeen || {};
+    try { for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true; } catch (e) {}
+    player._storyBeatsSeen.captains_teaser = true;
     loadMap('forest', 300); await sleep(2000);
     for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
     game.paused = false;

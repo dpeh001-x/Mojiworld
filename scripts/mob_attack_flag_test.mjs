@@ -52,9 +52,15 @@ const ok = (name, cond, detail = '') => {
 };
 
 // ---- the flag ---------------------------------------------------------------
-const assigns = s.match(/m\._frameIsAttack\s*=\s*[^;]+;/g) || [];
-ok('the flag is assigned in exactly one place', assigns.length === 1,
-  `${assigns.length} assignments — two writers could disagree`);
+// Two deliberate extra writers return their OWN attack frame on the spot (Path's Bane c9b7a6920 v0.30.1361,
+// Elder Arlen's ruin frame a7717d5f7 v0.30.1591): `m._frameIsAttack = true; return <frame>;` - the flag and the
+// frame it describes are set together, so they cannot disagree. Every other writer must be the one gated line.
+const allAssigns = s.match(/m\._frameIsAttack\s*=\s*[^;]+;/g) || [];
+const frameWriters = s.match(/m\._frameIsAttack\s*=\s*true;\s*return\s+[\w$]+;/g) || [];
+const assigns = allAssigns.filter((a) => !/=\s*true;$/.test(a));
+ok('the flag is assigned in exactly one gated place (plus `= true; return <frame>` writers)',
+  assigns.length === 1 && allAssigns.length === assigns.length + frameWriters.length,
+  `${assigns.length} gated assignments, ${frameWriters.length} frame-returning writers, ${allAssigns.length} in all — two writers could disagree`);
 const assign = assigns[0] || '';
 ok('the flag is gated on NOT walking', /_mobWalking\(m\)/.test(assign),
   `assignment reads: ${assign.trim().slice(0, 90)}`);

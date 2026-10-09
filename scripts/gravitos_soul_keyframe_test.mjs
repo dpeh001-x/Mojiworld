@@ -34,7 +34,8 @@ try {
     const SETS = ['gravitossoul', 'gravitos2soul', 'gravitos3soul'];
     for (let i = 0; i < 900 && !SETS.every((k) => { const s = BOSS_ATTACK_FRAMES[k]; return s && s.length > 1 && s.every((f) => f && f.complete); }); i++) await sleep(100);
     o.decoded = Object.fromEntries(SETS.map((k) => [k, (BOSS_ATTACK_FRAMES[k] || []).filter((f) => f && f.naturalWidth > 0).length]));
-    const KEY = { gravitossoul: 5, gravitos2soul: 4, gravitos3soul: 5 };   // the blows, picked from the art
+    // bdfff6aee v0.30.1654 (per user) form 2's soul cast was remade: the chest-star burst is frame 6 now (was 4)
+    const KEY = { gravitossoul: 5, gravitos2soul: 6, gravitos3soul: 5 };   // the blows, picked from the art
     o.keys = KEY;
     const hold = () => { game.paused = true; game.hitStop = 1e9; }; hold(); window.__skHold = setInterval(hold, 1);
     window._lxMobAnimHold = function () {};

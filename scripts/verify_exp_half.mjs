@@ -22,12 +22,17 @@ const page = await (await b.newContext({ viewport: { width: 1280, height: 800 } 
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 150)));
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForSelector('#lo-menu', { state: 'visible', timeout: 90000 });
-await page.evaluate(() => localStorage.setItem('levelx_save_v1', JSON.stringify({ v: 1, t: Date.now(),
-  player: { cls: 'mage', level: 45, look: { name: 'X' }, _storyBeatsSeen: { tutorial_intro: 1 } }, game: { currentMap: 'town' } })));
-await page.reload({ waitUntil: 'domcontentloaded' });
-await page.waitForSelector('#menu-continue', { state: 'visible', timeout: 90000 });
-await page.click('#menu-continue');
-await page.waitForSelector('#loading-overlay', { state: 'detached', timeout: 30000 });
+// fb8a6edb1 v0.30.1480 save anti-cheat: an unsigned hand-made save is refused (rolled back), so Continue no longer loads
+// a clean mage Lv 45. Start a fresh session in page and set the same character directly instead.
+await page.evaluate(async () => {
+  try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
+  try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}
+  for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+  player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { tutorial_intro: true, everdawn_welcome: true }); player._tutorialSeen = true;
+  applyClass('mage'); player.level = 45; player.exp = 0; if (typeof _lxLevelCost === 'function') player.expToNext = _lxLevelCost(45); player.look = Object.assign(player.look || {}, { name: 'X' });
+  loadMap('town'); await new Promise((r) => setTimeout(r, 1500));
+  try { closeAllModals(); } catch (e) {} game.paused = false;
+});
 await page.waitForTimeout(800);
 
 const r = await page.evaluate(() => {

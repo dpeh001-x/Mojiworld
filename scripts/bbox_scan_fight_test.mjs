@@ -120,12 +120,17 @@ const fight = await page.evaluate(async () => {
   for (const m of game.monsters) { m.maxHp = m.currentHp = 9e12; m._px = m.x; m._py = m.y; }
   await new Promise((r) => setTimeout(r, 2500));   // settle: boot/idle-time work done
 
-  let scans = 0, scanMs = 0;
+  let scans = 0, scanMs = 0, small = 0;
   const proto = CanvasRenderingContext2D.prototype;
   const orig = proto.getImageData;
   proto.getImageData = function (...a) {
     const t0 = performance.now();
     const r = orig.apply(this, a);
+    // v0.30.1573 (3ff8fa550) _lxSpriteBodyFrac reads its 64x64 CPU canvas (willReadFrequently, off a
+    // createImageBitmap decode) on purpose: ~0.1 ms, no GPU readback. The stall this pins was the raw scan of
+    // full-size shrink-baked frames, so only readbacks on canvases larger than 64 px count.
+    const cv = this.canvas;
+    if (cv && cv.width <= 64 && cv.height <= 64) { small++; return r; }
     scans++; scanMs += performance.now() - t0;
     return r;
   };
@@ -146,13 +151,13 @@ const fight = await page.evaluate(async () => {
   proto.getImageData = orig;
   const fps = +(frames / (performance.now() - t0) * 1000).toFixed(1);
   game.monsters = [];
-  return { scans, scanMs: +scanMs.toFixed(1), fps, worst: +worst.toFixed(0) };
+  return { scans, scanMs: +scanMs.toFixed(1), small, fps, worst: +worst.toFixed(0) };
 });
 // The boss cycles idle/walk/attack/stomp states across 10s of being hit, so
 // every shrink-baked frame gets its first draw inside this window — the exact
 // scenario that used to fire 16 scans totalling ~4.4s.
 ok('ZERO getImageData readbacks during 10s of boss combat (was 16 totalling 4,400ms)',
-  fight.scans === 0, `${fight.scans} scans, ${fight.scanMs}ms inside readbacks; worst frame ${fight.worst}ms`
+  fight.scans === 0, `${fight.scans} scans, ${fight.scanMs}ms inside readbacks (${fight.small} 64px body probes ignored); worst frame ${fight.worst}ms`
     + ' (frame time itself is not asserted: headless-unaccelerated raster/decode noise'
     + ' produces occasional long frames with 0ms of readback in them — the contract'
     + ' of THIS fix is that none of a frame\'s time is a pixel readback)');

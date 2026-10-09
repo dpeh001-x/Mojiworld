@@ -106,7 +106,9 @@ async function perfWindow(p, cdp, secs) {   // thread-clock ms per main frame (C
 // origin's backing stores, from its render-scale rule min(phone ? 1 : 2, max(1, devicePixelRatio x fit)):
 //   844x390 DPR 3 touch -> 1 -> 960x560;  1280x720 DPR 2 -> min(2, 2 x 1.2857) = 2 -> 1920x1120
 const CASES = [
-  { tag: '844x390 DPR3 touch', opts: { viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 }, origin: [960, 560], touch: true },
+  // f105df76e v0.30.1532 wide phone view: a phone fills its screen, so the play width follows the aspect
+  // (560 x 844/390 = 1212) instead of the fixed 960 - still 1 backing px per CSS px with the switch off
+  { tag: '844x390 DPR3 touch', opts: { viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 }, origin: [1212, 560], touch: true },
   { tag: '1280x720 DPR2', opts: { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 }, origin: [1920, 1120], touch: false },
 ];
 const perfOut = [];

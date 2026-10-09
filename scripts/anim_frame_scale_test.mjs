@@ -35,6 +35,10 @@ for (const [t, states] of Object.entries(calib))
 // Each authored entry is listed with its provenance; anything else still fails, which is what this check is for.
 const AUTHORED_FS = {
   'gravitos3soul.attack': '88f57026 - user animator patch, 2026-09-08; confirmed intended by the user 2026-09-26',
+  // Virga's wingbeat redraws keep her size and hit region through per-frame fs (authored with the art)
+  'zodiac_virgo.zodiac/idle': '9043285be v0.30.1399 - Virga idle redrawn, a full wingbeat (the user\'s pick)',
+  'zodiac_virgo.zodiac/walk': 'a91ae4d58 v0.30.1382 - Virga walk redrawn with full wingbeats, same size and hit region',
+  'zodiac_virgo.zodiac/fly': 'a91ae4d58 v0.30.1382 - Virga flight redrawn with full wingbeats, same size and hit region',
 };
 const unexpected = baked.filter((k) => !AUTHORED_FS[k]);
 ok('policy: no per-frame fs baked except the user-authored ones (bosses render at raw art proportions)', unexpected.length === 0, unexpected.length ? unexpected : baked);

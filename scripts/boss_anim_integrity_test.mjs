@@ -13,6 +13,10 @@ import { existsSync } from 'node:fs';
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 const SETS = ['gravitos', 'gravitospunch', 'gravitossoul', 'gravitoslaser'];
 const DIR = 'Sprites/bosses/attack';
+// v0.30.1633 (44b7d4cec) the form 1 punch was remade like form 3's (whose set sits on its own 2004x1214
+// canvas): its 9 frames share a WIDER 1960x1505 canvas on purpose, room for the power orb at his fist.
+// Same height as the base, so the foot line is unchanged; every frame must still match this canvas exactly.
+const CANVAS = { gravitospunch: { W: 1960, H: 1505 } };
 
 async function armour(p) {
   const { data, info } = await sharp(p).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -89,8 +93,9 @@ for (const key of SETS) {
 
   // --- 4. canvas exact ------------------------------------------------------
   let dims = true;
-  for (const p of files) { const m = await sharp(p).metadata(); if (m.width !== base.W || m.height !== base.H) dims = false; }
-  ok(`${key}: every frame on the base canvas (${base.W}x${base.H})`, dims, {});
+  const cv = CANVAS[key] || base;
+  for (const p of files) { const m = await sharp(p).metadata(); if (m.width !== cv.W || m.height !== cv.H) dims = false; }
+  ok(`${key}: every frame on the ${CANVAS[key] ? 'set\'s own' : 'base'} canvas (${cv.W}x${cv.H})`, dims, {});
 }
 
 let pass = 0, fail = 0;

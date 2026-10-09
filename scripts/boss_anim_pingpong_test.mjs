@@ -13,7 +13,9 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+import { fileURLToPath } from 'node:url';
+// the repo this script lives in (was a hard-coded C:/Users/dpeh0/Mojiworld, which tested the main checkout from any worktree)
+const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/\\/g, '/').replace(/\/$/, '');
 const results = []; const ok = (n, c, x) => results.push({ n, pass: !!c, x });
 
 // Sets still awaiting art. Six ludo.ai rolls for the punch came back filling the

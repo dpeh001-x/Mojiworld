@@ -58,6 +58,9 @@ try {
       await standAt(x);
       game._forcePhase = 23; _LX_DAYPH.t = 0; const night = (_lxDayPhase() || {}).style || '';
       const f1 = await wideFills((f) => f.st.replace(/\s/g, '') === night.replace(/\s/g, '')); const tint = f1.filter((f) => f.st.replace(/\s/g, '') === night.replace(/\s/g, ''));
+      // the perf governor sheds the full-screen stun/freeze fill on the low FX tiers under headless load: pin the tiers off
+      // (and _lxNoLowSheds, the game's own A/B switch) so this measures where the fill lands, not whether the box was slow
+      window._lxNoLowSheds = true; LX_PERF.lowFx = false; LX_PERF.veryLowFx = false; LX_PERF.veryLowFxUntil = Infinity; game._lowFxCache = null;
       player.frozenTimer = 4000; const f2 = await wideFills((f) => f.st === 'gradient'); player.frozenTimer = 0;
       const vig = f2.filter((f) => f.st === 'gradient');
       out.fills.push({ x, camY: Math.round(game.camera.y), night, tint: tint.map((f) => f.y), vig: vig.map((f) => f.y) });

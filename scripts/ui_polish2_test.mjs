@@ -58,6 +58,8 @@ const enterWorld = (p) => p.evaluate(async () => {
 // three toasts, raised on a clear stack (the start-up notices and anything waiting are cleared first)
 const threeToasts = (p) => p.evaluate(async () => {
   try { closeAllModals(); } catch (e) {} game.paused = false;
+  // the perf governor sheds layers on the low FX tiers under headless load: pin them off so the layout is the normal one
+  try { window._lxNoLowSheds = true; LX_PERF.lowFx = false; LX_PERF.veryLowFx = false; LX_PERF.veryLowFxUntil = Infinity; game._lowFxCache = null; } catch (e) {}
   for (const t of document.querySelectorAll('#toast-container .toast')) t.remove();
   try { _lxToastWait.length = 0; _lxToastQueue = []; } catch (e) {}
   const T = ['Picked up a Rusty Sword of the Endless Night', 'Quest updated: talk to Nurse Joyce in Everdawn', 'New skill learnt: Ground Slam'];

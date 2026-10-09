@@ -12,7 +12,8 @@ let pass = 0, fail = 0; const ok = (name, cond, note) => { if (cond) pass++; els
 // ---- data ----
 const CALIB = process.env.MOJI_CALIB_FILE || path.join(ROOT, 'data', 'anim_calib.js');
 const MANIFEST = process.env.MOJI_MANIFEST_FILE || path.join(ROOT, 'data', 'anim_calib_manifest.js');
-const cs = readFileSync(CALIB, 'utf8'); const calib = JSON.parse(cs.match(/window\.LX_ANIM_CALIB = ([\s\S]*?);\nwindow\.LX_ATK_HITBOX/)[1]);
+// \r?\n: a checkout with CRLF line endings (Windows worktrees) carries data/anim_calib.js as CRLF
+const cs = readFileSync(CALIB, 'utf8'); const calib = JSON.parse(cs.match(/window\.LX_ANIM_CALIB = ([\s\S]*?);\r?\nwindow\.LX_ATK_HITBOX/)[1]);
 const ms = readFileSync(MANIFEST, 'utf8'); const M = JSON.parse(ms.slice(ms.indexOf('{'), ms.lastIndexOf('}') + 1));
 const mobs = Object.keys(M).filter((k) => M[k].group === 'monster' && M[k].states && M[k].states.attack && (M[k].states.attack.count | 0) > 1).sort();
 const ftOf = (k) => (calib[k] && calib[k].attack && Array.isArray(calib[k].attack.ft)) ? calib[k].attack.ft : null;

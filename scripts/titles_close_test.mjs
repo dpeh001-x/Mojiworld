@@ -48,10 +48,13 @@ try {
   check(a0.titles && !a1.titles && a1.lp && a1.lpOnTop, 'with Titles open, U brings the Level Up panel up on top (Titles closes)', [a0, a1]);
   await reset();
 
+  // v0.30.1328 (138d17366) keyboard remap: the J alias is gone, one key per function - press the Journal's BOUND key
+  // (default 'q'), read from the live bind table
+  const jKey = await p.evaluate(() => { try { return _lxBindTable().keyOf.questJournal || 'q'; } catch (e) { return 'q'; } });
   await openTitles();
-  await p.keyboard.press('j'); await p.waitForTimeout(600);
+  await p.keyboard.press(jKey); await p.waitForTimeout(600);
   const b1 = await st();
-  check(!b1.titles && b1.journal && b1.journalOnTop, 'with Titles open, J brings the Journal up on top', b1);
+  check(!b1.titles && b1.journal && b1.journalOnTop, `with Titles open, the Journal key (${jKey}) brings the Journal up on top`, b1);
   await p.keyboard.press('Escape'); await p.waitForTimeout(500);
   const b2 = await st();
   check(!b2.journal && !b2.titles, 'one Esc then closes the Journal - no leftover Titles listener eats it', b2);
@@ -60,7 +63,7 @@ try {
   await openTitles(); await openTitles();   // reopening must not stack a second Escape listener
   await p.keyboard.press('Escape'); await p.waitForTimeout(400);
   const c1 = await st();
-  await p.keyboard.press('j'); await p.waitForTimeout(600);
+  await p.keyboard.press(jKey); await p.waitForTimeout(600);
   await p.keyboard.press('Escape'); await p.waitForTimeout(400);
   const c2 = await st();
   check(!c1.titles && !c2.journal, 'Titles reopened twice: one Esc closes it, and the next panel still closes on one Esc', [c1, c2]);

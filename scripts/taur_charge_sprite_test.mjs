@@ -26,8 +26,23 @@ import { chromium } from 'playwright-core';
 import { existsSync } from 'node:fs';
 // tests-ports: PORT / MOJI_GAME_FILE from the environment (scripts/apply_tests_ports.mjs); unset = the old defaults
 
-const PAGE = process.argv[2] || '_taur_probe.html';
-const PORT = process.argv[3] || process.env.PORT || '8766';
+// the page defaults to the game itself (it was a hand-staged _taur_probe.html copy that no longer exists)
+const PAGE = process.argv[2] || (process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html');
+// PORT from the command line or the environment; with none given (or nothing listening there) this script starts the
+// checkout's own serve.js on it - it used to need a hand-started server on a fixed port and failed without one.
+let PORT = String(process.argv[3] || process.env.PORT || '');
+{
+  const { spawn: _sSpawn } = await import('node:child_process'); const _sNet = await import('node:net');
+  const _sPath = await import('node:path'); const { fileURLToPath: _sF2P } = await import('node:url');
+  const _sRoot = _sPath.resolve(_sPath.dirname(_sF2P(import.meta.url)), '..');
+  const _sFree = (p) => new Promise((r) => { const sv = _sNet.createServer(); sv.once('error', () => r(false)); sv.once('listening', () => sv.close(() => r(true))); sv.listen(p, '127.0.0.1'); });
+  if (!PORT) for (let p = 8767; p <= 8999 && !PORT; p++) if (await _sFree(p)) PORT = String(p);
+  if (await _sFree(Number(PORT))) {
+    const _srv = _sSpawn(process.execPath, [_sPath.join(_sRoot, 'serve.js'), PORT], { stdio: 'ignore', cwd: _sRoot });
+    _srv.unref(); process.on('exit', () => { try { _srv.kill(); } catch (e) {} });
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe'].find(existsSync);
 if (!EXE) { console.error('Chrome not found'); process.exit(1); }
@@ -39,6 +54,7 @@ await page.waitForFunction(() => typeof game === 'object' && typeof player === '
 await page.waitForTimeout(7000);
 await page.evaluate(() => {
   window._lxBootGateDone = true; window._prologueActive = false;
+  try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}   // the real game holds its art at the title
   for (const id of ['loading-overlay', 'class-select-modal', 'advancement-modal', 'boot-gate', 'intro-overlay'])
     { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
   game.paused = false; player.level = 90;

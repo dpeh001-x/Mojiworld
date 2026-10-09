@@ -64,6 +64,8 @@ try {
     await sleep(400);
     const btn = document.getElementById('lp-reset-btn');
     o.btn = btn ? { label: (btn.textContent || '').replace(/\s+/g, ' ').trim(), title: btn.getAttribute('title') || '' } : null;
+    // bc61a3312 v0.30.1622: the cost chips print through the game's own _FMT_BIG (246913 -> "246.9K")
+    o.coinChip = (typeof _FMT_BIG === 'function') ? _FMT_BIG(o.paid.expectCoins) : String(o.paid.expectCoins);
     return o;
   });
   console.log(`build ${r.ver}  LX_RESET_STATS_SHARDS ${r.shardConst}`);
@@ -75,7 +77,7 @@ try {
   // v0.30.1060 (3253128f, per user: "shorter more concise description ... more pop comic art") the body is
   // two cost chips - "<coins> [coin icon]" + "1000 ◈" - over one line of fine print naming the Mojicoins.
   // The word "Setshards" moved to the text-only fallback; the ◈ chip is the shard price.
-  const _coinChip = new RegExp('Cost\\s*' + r.paid.expectCoins + '\\s*\\+');
+  const _coinChip = new RegExp('Cost\\s*' + String(r.coinChip).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\+');
   ok('the confirm quotes BOTH prices before you agree to it', /Mojicoins/.test(r.body) && _coinChip.test(r.body) && /1,?000\s*◈/.test(r.body), r.body.slice(-120));
   ok('short on shards: the reset is refused and the coins are NOT taken', r.short.coinsCharged === 0 && r.short.shardsCharged === 0,
     `coins charged ${r.short.coinsCharged}, shards charged ${r.short.shardsCharged}`);

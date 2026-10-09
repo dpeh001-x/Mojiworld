@@ -11,8 +11,10 @@
 import sharp from 'sharp';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 sharp.cache(false);
-const ROOT = 'C:/Users/dpeh0/Mojiworld';
+// the repo this script lives in (was a hard-coded C:/Users/dpeh0/Mojiworld, which tested the main checkout from any worktree)
+const ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/\\/g, '/').replace(/\/$/, '');
 sharp.cache(false);
 const res = [];
 const ok = (n, c, extra) => res.push({ n, pass: !!c, extra: extra === undefined ? '' : String(extra).slice(0, 200) });

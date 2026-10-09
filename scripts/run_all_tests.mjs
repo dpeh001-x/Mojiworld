@@ -30,7 +30,8 @@ const WITH_NET = argv.includes('--net');
 const ONLY = (() => { const i = argv.indexOf('--only'); return i >= 0 ? argv[i + 1] : null; })();
 const TIMEOUT_S = (() => { const i = argv.indexOf('--timeout'); return i >= 0 ? +argv[i + 1] : 120; })();
 
-const NET = /^(coop_|_mp_|_relay_)|_live_|loadtest/;
+// pq_party: two real clients on the local relay (mp/server.mjs) - it needs the network like the coop_ suites
+const NET = /^(coop_|_mp_|_relay_|pq_party)|_live_|loadtest/;
 // run_all_tests itself matches the `_test` selector — without this it spawns a
 // nested full run (and a second set of servers on the same ports), which both
 // times out and corrupts the outer run's results through contention.

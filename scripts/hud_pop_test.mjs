@@ -50,6 +50,7 @@ try {
       icons, ink: { card: scs.outlineStyle + ' ' + scs.outlineColor, bar: getComputedStyle(st.querySelector('.bar')).outlineStyle, row: getComputedStyle(st.querySelector('.stats-footer-row')).outlineStyle },
       lvBg: lv.backgroundColor, sp: { live: sp.classList.contains('sp-live'), bg: spcs.backgroundColor },
       barIcons: { hp: bi('hp-text'), mp: bi('mp-text'), exp: bi('exp-text') },
+      barContent: { hp: getComputedStyle(document.getElementById('hp-text'), '::before').content, mp: getComputedStyle(document.getElementById('mp-text'), '::before').content },
       cardW: Math.round(st.getBoundingClientRect().width),
     };
   });
@@ -57,7 +58,9 @@ try {
   check(r.icons.length === 7 && r.icons.every((w) => w > 6 && w === r.icons[0]), 'COMPACT: every stat icon keeps its width with six-digit stats (they were squeezed to nothing)', J(r.icons));
   check(/solid rgb\(13, 10, 20\)/.test(r.ink.card) && r.ink.bar === 'solid' && r.ink.row === 'solid', 'INK: the card, the bars and the stat wells carry an ink outline', J(r.ink));
   check(r.lvBg === 'rgb(255, 224, 122)' && r.sp.live && r.sp.bg === 'rgb(255, 224, 122)', 'STICKERS: the level badge and the live SP pill are butter stickers', J({ lv: r.lvBg, sp: r.sp }));
-  check(/hud\/hp\.webp/.test(r.barIcons.hp) && /hud\/mp\.webp/.test(r.barIcons.mp) && /hud\/lvup\.webp/.test(r.barIcons.exp), 'ICONS: HP / MP / EXP carry the heart, the drop and the level-up arrow', J(r.barIcons));
+  // d8ba43a4e v0.30.1276 (per user): no heart / droplet before the HP and MP figures - their ::before is content: none;
+  // EXP keeps its level-up arrow
+  check(r.barContent.hp === 'none' && r.barContent.mp === 'none' && !/hud\/(hp|mp)\.webp/.test(r.barIcons.hp + r.barIcons.mp) && /hud\/lvup\.webp/.test(r.barIcons.exp), 'ICONS: HP / MP carry no icon (v0.30.1276), EXP keeps the level-up arrow', J({ icons: r.barIcons, content: r.barContent }));
   check(r.cardW <= 370, 'COMPACT: the card stays as narrow as before (<= 370 px on screen with these numbers)', r.cardW);
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }

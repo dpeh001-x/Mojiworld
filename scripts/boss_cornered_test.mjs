@@ -122,7 +122,8 @@ const r = await page.evaluate(() => {
       player.tree = player.tree || {}; player.tree.stunImmune = false;
       game.damageNumbers.length = 0; game.monsters.length = 0;
       game.projectiles.length = 0;
-      game.projectiles.push(Object.assign({}, proto, { x: player.x - 4, y: player.y - 4, w: 60, h: 60, life: 6, vx: 0, vy: 0 }));
+      // v0.30.1465 (313c80d07) a swing hurts only on its peak ticks (_sgL0 - life < 4): replay it at its full life span
+      game.projectiles.push(Object.assign({}, proto, { x: player.x - 4, y: player.y - 4, w: 60, h: 60, life: proto._sgL0 || 6, vx: 0, vy: 0 }));
       try { updateProjectiles(16); } catch (e) {}
       if (player.hp >= getMaxHp()) continue;
       if (game.damageNumbers.some(d => String(d.text || '').includes('STUNNED'))) {

@@ -52,7 +52,8 @@ const game = readFileSync(isAbsolute(TARGET) ? TARGET : join(ROOT, TARGET), 'utf
   while (existsSync(join(DIR, `doombringer_ult_${n}.webp`))) n++;
   ok('the table matches the frames on disk', n === w.length, { weights: w.length, onDisk: n });
   ok('a set with no entry falls through to the original uniform timing',
-     /_fi < 0\) _fi = Math\.min\(_fn - 1, Math\.max\(0, Math\.floor\(t \* _fn\)\)\)/.test(game), '');
+     // 86ae0c177 v0.30.1520 renamed the clock t -> _lxAt (skill anim effects); same uniform fall-through
+     /_fi < 0\) _fi = Math\.min\(_fn - 1, Math\.max\(0, Math\.floor\(_lxAt \* _fn\)\)\)/.test(game), '');
   ok('a frameGap set is untouched',
      /if \(fx\.frameGap\) _fi = Math\.floor\(\(fx\.maxLife - fx\.life\) \/ fx\.frameGap\) % _fn;/.test(game), '');
 }

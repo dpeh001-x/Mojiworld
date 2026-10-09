@@ -90,7 +90,9 @@ const r = await page.evaluate(() => {
     resetPlayer();
     if (immune) player.tree.stunImmune = true;   // AFTER the reset, which clears it
     const clone = Object.assign({}, proto, {
-      x: player.x - 4, y: player.y - 4, w: 60, h: 60, life: 6, vx: 0, vy: 0,
+      // v0.30.1465 (313c80d07) a swing hurts only on its first LX_SWING_PEAK_TICKS ticks (_sgL0 - life < 4):
+      // replay it fresh, at its own full life span, or the clone is already past its peak and harmless
+      x: player.x - 4, y: player.y - 4, w: 60, h: 60, life: proto._sgL0 || 6, vx: 0, vy: 0,
     });
     if (strip) delete clone._zoneAttack;
     game.monsters.length = 0;                 // no contact noise during the replay

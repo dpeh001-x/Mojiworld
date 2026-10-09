@@ -69,14 +69,15 @@ try {
   ok('movement gate disarmed after the tick', afterMove.wantsMove === false, afterMove);
 
   // v0.30.1186 — the tick no longer jumps after 1.1 s: it holds the step for
-  // a 15 s countdown shown on Next. Check it holds, counts, then auto-advances.
+  // a countdown shown on Next. Check it holds, counts, then auto-advances.
+  // 2f3e2c646 v0.30.1475 (per user): the tour moves on after 3 s (was 15 s).
   await sleep(1400);
   const hold = await page.evaluate(() => ({ step: _tutStep, next: document.getElementById('tut-next').textContent }));
   ok('ticked step HOLDS past 1.4 s (no instant jump)', hold.step === 0, hold);
-  ok('Next shows the countdown', /\b1[0-4]s\b/.test(hold.next), hold);
-  await page.waitForFunction(() => _tutStep === 1, null, { timeout: 18000 }).catch(() => {});
+  ok('Next shows the countdown', /\b[1-3]s\b/.test(hold.next), hold);
+  await page.waitForFunction(() => _tutStep === 1, null, { timeout: 6000 }).catch(() => {});   // ~3 s hold + slack
   const s2 = await page.evaluate(() => ({ step: _tutStep, next: document.getElementById('tut-next').textContent, pill: (document.getElementById('tut-try') || {}).textContent || '' }));
-  ok('auto-advanced to step 2 (Move & Fight) after 15 s', s2.step === 1, s2);
+  ok('auto-advanced to step 2 (Move & Fight) after 3 s', s2.step === 1, s2);
   ok('Next label reset on the new step', !/\ds$/.test(s2.next.trim()), s2);
   // Fire the attack ping like the combat code does.
   await page.evaluate(() => _tutPing('attack'));

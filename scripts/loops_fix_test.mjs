@@ -23,6 +23,8 @@ try {
     try { _lxBootGateDone = true; _prologueActive = false; _playStoryBeat = function () { return false; }; _playBossIntro = function () {}; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     player.cls = 'warrior'; player.level = 40; player._god = true; player.hp = player.maxHp = 99999; player._tutorialSeen = true;
+    // dc2cea4ed v0.30.1554: past Lv 20 the captains teaser film plays once per save and holds input/pauses - mark it seen
+    player._storyBeatsSeen = player._storyBeatsSeen || {}; player._storyBeatsSeen.captains_teaser = true;
     loadMap('glasswindSteppe', 900); await sleep(1500); game.paused = false; return true; });
   await boot();
   const closeAll = () => page.evaluate(() => { try { closeAllModals && closeAllModals(); } catch (e) {} game.paused = false; });

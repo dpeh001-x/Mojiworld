@@ -12,18 +12,39 @@ const EXE = [process.env.PW_EXE,
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
 ].find((p) => p && existsSync(p));
-const URL = 'http://localhost:8765/mojiworld_game.html';
+// PORT from the command line or the environment; with none given (or nothing listening there) this script starts the
+// checkout's own serve.js on it - it used to need a hand-started server on a fixed port and failed without one.
+let PORT = String('' || process.env.PORT || '');
+{
+  const { spawn: _sSpawn } = await import('node:child_process'); const _sNet = await import('node:net');
+  const _sPath = await import('node:path'); const { fileURLToPath: _sF2P } = await import('node:url');
+  const _sRoot = _sPath.resolve(_sPath.dirname(_sF2P(import.meta.url)), '..');
+  const _sFree = (p) => new Promise((r) => { const sv = _sNet.createServer(); sv.once('error', () => r(false)); sv.once('listening', () => sv.close(() => r(true))); sv.listen(p, '127.0.0.1'); });
+  if (!PORT) for (let p = 8767; p <= 8999 && !PORT; p++) if (await _sFree(p)) PORT = String(p);
+  if (await _sFree(Number(PORT))) {
+    const _srv = _sSpawn(process.execPath, [_sPath.join(_sRoot, 'serve.js'), PORT], { stdio: 'ignore', cwd: _sRoot });
+    _srv.unref(); process.on('exit', () => { try { _srv.kill(); } catch (e) {} });
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+const URL = `http://localhost:${PORT}/${process.env.MOJI_GAME_FILE ? process.env.MOJI_GAME_FILE.split(/[\\/]/).pop() : 'mojiworld_game.html'}`;
 const R = []; const ok = (n, c, x) => { R.push(!!c); console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? ' — ' + x : '')); };
 const b = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--disable-gpu', '--mute-audio'] });
 const page = await (await b.newContext({ viewport: { width: 1280, height: 800 } })).newPage();
 const errs = []; page.on('pageerror', e => errs.push(String(e).slice(0, 160)));
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForSelector('#lo-menu', { state: 'visible', timeout: 90000 });
-await page.evaluate(() => localStorage.setItem('levelx_save_v1', JSON.stringify({ v: 1, t: Date.now(), player: { cls: 'rogue', level: 30, look: { name: 'Test' } }, game: { currentMap: 'town' } })));
-await page.reload({ waitUntil: 'domcontentloaded' });
-await page.waitForSelector('#menu-continue', { state: 'visible', timeout: 90000 });
-await page.click('#menu-continue');
-await page.waitForSelector('#loading-overlay', { state: 'detached', timeout: 30000 });
+// fb8a6edb1 v0.30.1480 save anti-cheat: an unsigned hand-made save is refused (rolled back), so Continue no longer loads
+// a rogue Lv 30. Start a fresh session in page and set the same character directly instead.
+await page.evaluate(async () => {
+  try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
+  try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}
+  for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+  player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { tutorial_intro: true, everdawn_welcome: true }); player._tutorialSeen = true;
+  applyClass('rogue'); player.level = 30; player.look = Object.assign(player.look || {}, { name: 'Test' });
+  loadMap('town'); await new Promise((r) => setTimeout(r, 1500));
+  try { closeAllModals(); } catch (e) {} game.paused = false;
+});
 await page.waitForTimeout(800);
 
 // --- Fix 1: sim runs at ~60 Hz (not halted / not doubled) at the headless 60Hz ---

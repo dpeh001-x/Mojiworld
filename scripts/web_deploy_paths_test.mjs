@@ -36,7 +36,7 @@ const probe = async (page, cdn) => page.evaluate(async (cdn) => {
   return {
     atlas: { src: A && A.src, ok: !!(A && A.complete && A.naturalWidth > 0) },
     edges: { key: ek, loaded: !!ei, hit: ei ? _lxEdgesFromTable(ei) !== undefined : null },
-    crop: { key: ck, loaded: !!ci, hit: ci ? _lxTileCropFromTable(ci, 'auto') !== undefined : null },
+    crop: { key: ck, loaded: !!ci, hit: ci ? _lxTileCropFromTable(ci, 'auto') !== undefined : null, tableSize: Object.keys(window.LX_TILE_CROPS || {}).length },
     mobile: mob ? (mob.getAttribute('style') || '').slice(0, 160) : null,
   };
 }, cdn);
@@ -61,7 +61,11 @@ try {
   const w = await probe(page, CDN);
   check(w.atlas.ok && String(w.atlas.src).startsWith(CDN), 'web: the emoji atlas loads from the art CDN (it 404ed on the game\u2019s own site)', J(w.atlas));
   check(w.edges.loaded && w.edges.hit === true, 'web: the sprite-edge table answers for a CDN sprite', J(w.edges));
-  check(w.crop.loaded && w.crop.hit === true, 'web: the tile-crop table answers for a CDN floor', J(w.crop));
+  // 625867945 v0.30.1481 emptied data/tile_crops.js (the runtime detects live): with no rows there is nothing to answer,
+  // so the crop half only runs while the table has entries
+  const cropsEmpty = w.crop.tableSize === 0;
+  if (cropsEmpty) console.log('SKIP web/local tile-crop checks: data/tile_crops.js is empty since v0.30.1481');
+  else check(w.crop.loaded && w.crop.hit === true, 'web: the tile-crop table answers for a CDN floor', J(w.crop));
   check(String(w.mobile).includes(CDN), 'web: the mobile skill buttons point at the CDN', J(w.mobile));
   check(errs.length === 0, 'web: no page errors', J(errs.slice(0, 3)));
   await ctx.close();
@@ -71,7 +75,7 @@ try {
   await p2.goto(`http://localhost:${PORT}/mojiworld_game.html`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await p2.waitForFunction(() => typeof _lxEdgesFromTable === 'function', null, { timeout: 180000 }); await p2.waitForTimeout(2500);
   const l = await probe(p2, null);
-  check(l.atlas.ok && l.edges.hit === true && l.crop.hit === true, 'local: the atlas, edge and crop tables still work unrewritten', J({ atlas: l.atlas.ok, edges: l.edges.hit, crop: l.crop.hit }));
+  check(l.atlas.ok && l.edges.hit === true && (cropsEmpty || l.crop.hit === true), 'local: the atlas, edge and crop tables still work unrewritten', J({ atlas: l.atlas.ok, edges: l.edges.hit, crop: l.crop.hit, cropsEmpty }));
   await ctx2.close();
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 300)); }
 await browser.close(); server.kill();

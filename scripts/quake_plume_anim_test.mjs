@@ -57,8 +57,10 @@ const touching = boxes.map((b2, i) => ({ i, b: b2 }))
 ok('no frame is CUT OFF — every plume clears the top and side edges',
    touching.length === 0,
    { offenders: touching.map(t => `f${t.i} top=${t.b.y0} x=${t.b.x0}..${t.b.x1}`) });
+// c2481960d v0.30.1263 pop redraw + 09b13c2a9 v0.30.1312 evened outline: the base now sits 8-11 px above the
+// 768 px canvas edge (bottoms 757-760) - still on the edge at the renderer's scale, so the margin is 12 px
 ok('the plume is bottom-anchored — its base sits on the art\'s bottom edge (the renderer anchors there)',
-   boxes.every(b2 => b2 && b2.y1 >= b2.h - 6), { bottoms: boxes.map(b2 => b2 && b2.y1) });
+   boxes.every(b2 => b2 && b2.y1 >= b2.h - 12), { bottoms: boxes.map(b2 => b2 && b2.y1) });
 // A real eruption gets bigger; nine copies of one drawing would not.
 const heights = boxes.map(b2 => b2 ? b2.y1 - b2.y0 : 0);
 ok('the plume actually GROWS across the set (it is an eruption, not nine copies)',
@@ -85,8 +87,10 @@ for (let i = 0; i < frames.length; i++) {
                  body: meanRows(b2.y0 + Math.round(h2 * 0.55), b2.y0 + Math.round(h2 * 0.70)) });
 }
 const ratios = feather.map(f => f && f.body ? +(f.crown / f.body).toFixed(2) : null);
-ok('the crown is FEATHERED — mean alpha near the top is well under half the body',
-   feather.every(f => f && f.body > 0 && f.crown < f.body * 0.5), { ratios });
+// RETIRED: c2481960d v0.30.1263 redrew the plume as pop-style impact smoke with a bold outlined crown, and
+// 09b13c2a9 v0.30.1312 evened that outline - the soft feathered crown this pinned was replaced on purpose
+// (crown/body alpha ~1.0 now). Reported only.
+console.log('info  crown/body alpha ratios (feather check retired, v0.30.1263 pop redraw):', JSON.stringify(ratios));
 ok('...and the fade is a gradient, not a hard clip (the crown still carries some ink)',
    feather.every(f => f && f.crown > 3), { crowns: feather.map(f => f && f.crown) });
 

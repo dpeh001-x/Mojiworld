@@ -17,7 +17,8 @@ let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS 
 const J = (o) => JSON.stringify(o);
 // every deferred-fire site asks _zHold before the old guard
 const src = readFileSync(PAGE, 'utf8');
-const guards = (src.match(/if \(!(?:game\.hazards \|\| !)?_zSafeFire\(m, _mapAt/g) || []).length;
+// Mira's _miraFeather (v0.30.1627) guards `if (!game.projectiles || !_zSafeFire(...` - same guard, its own list
+const guards = (src.match(/if \(!(?:game\.(?:hazards|projectiles) \|\| !)?_zSafeFire\(m, _mapAt/g) || []).length;
 const holds = (src.match(/if \(_zHold\(m, _mapAt/g) || []).length;
 check(guards > 0 && holds === guards, 'every staggered boss shot asks _zHold first', J({ guards, holds }));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));

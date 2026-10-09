@@ -41,7 +41,14 @@ const PORT = Number(process.argv[2] || 9571);
 // pins about their own bounding box and stretches the painting across the result, so these two —
 // which hold the left and right edges — set the scale for all eighty. Moving either rescales
 // everything. See the v0.30.678 note in mojiworld_game.html.
-const HOLDOUTS = new Set(['stormCrest', 'gloomsporeVerge']);
+//
+// 4126c7c0a v0.30.1664 (per user, laid out by hand in the World Map editor on the wider v7 painting): these eight
+// pins sit where the user placed them - the Singularity and Zodiac Sanctum on the new rift peak's sky over the sea,
+// the sky maps over the water, the Lantern pair beside the forge, Thunder Plateau on the brick road. Placement is
+// the user's call, so they are documented holdouts too; re-audit if the painting or those pins change again.
+const HOLDOUTS = new Set(['stormCrest', 'gloomsporeVerge',
+  'stardustAtrium', 'verdantHollow', 'wayfarersLantern', 'wayfarersLantern1', 'celestialSpire',
+  'thunderPlateau', 'zodiacHall', 'gravitosArena']);
 
 // each map's backdrop id -> what that map is made of
 const BG = {

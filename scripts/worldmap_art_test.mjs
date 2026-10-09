@@ -37,7 +37,9 @@ for (let i = 0; i < 12; i++) {
 }
 await page.evaluate(() => { for (const el of document.querySelectorAll('#tutorial-modal')) el.style.display = 'none'; });
 await page.evaluate(() => { game.visitedMaps = game.visitedMaps || {}; for (const id of ['town', 'forest', 'mushroom', 'candyCanyon']) game.visitedMaps[id] = 1; });
-await page.evaluate(() => toggleWorldMap());
+// the globe's dome and rings are skipped on the lowest FX tier (LX_PERF.veryLowFx), which the perf governor engages
+// under headless boot load; it is read once while the map renders, so pin the tier off in the same task as the open
+await page.evaluate(() => { try { LX_PERF.veryLowFx = false; LX_PERF.veryLowFxUntil = Infinity; LX_PERF.lowFx = false; } catch (e) {} toggleWorldMap(); });
 await page.waitForTimeout(2600);
 const a = await page.evaluate(() => {
   const svg = document.querySelector('#worldmap-modal svg') || document.querySelector('svg');

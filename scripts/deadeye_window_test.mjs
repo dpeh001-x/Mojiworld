@@ -81,6 +81,8 @@ const R = await page.evaluate(async () => {
   out.msPerPress = Math.round((wLast - wFirst) / Math.max(1, presses - 2)); out.pressDeltas = deltas.join(','); out.pressLocks = locks.join(','); out.pressCds = cds.join(',');
   out.presses = presses; out.mpFollow = mpFollow; out.framesPerPress = +((game.time - f0) / Math.max(1, presses - 1)).toFixed(1);   // headless runs under 60 fps: measure cadence in game frames
   out.rampAtEnd = player._deadeyeRamp | 0;
+  // the window closes on GAME time (_lxDeNow): under a slow headless frame rate 5.6 s of wall clock is less than its 6 s
+  { const tw = Date.now(); while ((player._deadeyeUntil || 0) > _lxDeNow() && Date.now() - tw < 20000) await sleep(50); }
   await sleep(700);
   out.cdAfter = Math.round(player.skillCooldowns.marksman_oneshot || 0);
   let late = 0; const t1 = Date.now(); while (Date.now() - t1 < 1200) { if (isReady('marksman_oneshot')) { castSkill('marksman_oneshot'); late++; } await sleep(20); }
@@ -101,13 +103,15 @@ const R = await page.evaluate(async () => {
   for (let i = 0; i < 40 && !execSeen; i++) { await sleep(25); if (game.projectiles.some((p) => p._deExec)) execSeen = true; }
   out.volleys = volleys; out.msPerVolley = Math.round((vLast - vFirst) / Math.max(1, volleys - 2)); out.framesPerVolley = +((game.time - f2) / Math.max(1, volleys - 1)).toFixed(1); out.execSeenAny = execSeen;
   out.dHurt = D.currentHp < D.maxHp; out.eUntouched = E.currentHp === E.maxHp;
-  while ((player._protocolUntil || 0) > performance.now()) await sleep(100);   // let the 8 s window run out
+  // the Deadeye windows run on GAME time (_lxDeNow = game.time x 1000/60), not performance.now(): a wall-clock wait
+  // compared two different clocks and either returned at once or never
+  { const tw = Date.now(); while ((player._protocolUntil || 0) > _lxDeNow() && Date.now() - tw < 20000) await sleep(100); }   // let the 8 s window run out
   await sleep(400); out.ultCdAfter = Math.round(player.skillCooldowns.marksman_ult || 0);
   // ---- 4. combo: a Deadeye-marked foe takes 7-round volleys ------------------------------------
   reset(); dummy(240); castSkill('marksman_oneshot'); await sleep(300); game.projectiles.length = 0; castSkill('marksman_ult'); await sleep(260);
   out.markedVolley = game.projectiles.filter((p) => p.onlyTarget).length;
   // ---- 5. repair + art ---------------------------------------------------------------------
-  reset(); player.skillCooldowns.marksman_ult = 250; player._protocolUntil = performance.now() + 5000; _lxRestoreUltCd(); out.ultRepaired = (player.skillCooldowns.marksman_ult || 0) > 10000;
+  reset(); player.skillCooldowns.marksman_ult = 250; player._protocolUntil = _lxDeNow() + 5000; _lxRestoreUltCd(); out.ultRepaired = (player.skillCooldowns.marksman_ult || 0) > 10000;
   reset();
   out.fx = { tracer: !!(LX_FX.deadeye_tracer && LX_FX.deadeye_tracer.naturalWidth), reticle: !!(LX_FX.deadeye_reticle && LX_FX.deadeye_reticle.naturalWidth),
     keyed: _FX_ANIM_KEYS.has('deadeye_hit') && _FX_ANIM_KEYS.has('deadeye_execute'), hitFrames: _lxFrameCount('fx/anim', 'deadeye_hit', 9), execFrames: _lxFrameCount('fx/anim', 'deadeye_execute', 9),

@@ -36,7 +36,9 @@ try {
     player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { tutorial_intro: true, everdawn_welcome: true }); player._tutorialSeen = true;
     applyClass('warrior'); player.level = 60; player.talents = { warrior: 'x' }; player._tutorialSeen = true;
     try { closeAllModals(); } catch (e) {}
-    loadMap('town', 300); await new Promise((r) => setTimeout(r, 1500)); try { closeAllModals(); } catch (e) {} game.paused = false;
+    // 9ccab97f6 v0.30.1516 put a ledge at {x:275, y:340} over the old drop spot: drop at a clear column instead -
+    // x 1560 has no ledge above the floor (ledges end at 1519 and start at 1630, measured from game.mapData.platforms)
+    loadMap('town', 1560); await new Promise((r) => setTimeout(r, 1500)); try { closeAllModals(); } catch (e) {} game.paused = false;
     // let the hero settle on the floor, remember it, then lift the body 220 px and down it there
     // wait for the hero to actually stand (the arrival can take a moment on a slow frame; a fixed 600 ms read him mid-air once on v0.30.1036)
     for (let i = 0; i < 80 && !player.onGround; i++) await new Promise((r) => setTimeout(r, 50));

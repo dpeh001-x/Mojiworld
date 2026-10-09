@@ -88,9 +88,11 @@ ok('H quick-summon path keeps exactly ONE', r.afterHotkey === 1, { count: r.afte
 ok('BALANCE: HP is the shared summon pool, not a number of its own',
    r.summonHp != null && Math.abs(r.monHp / r.summonHp - 1) < 0.02,
    { monHp: r.monHp, summonHp: r.summonHp, xPlayer: r.hpMult });
-ok('BALANCE: ATK is half the player (was 100%)', Math.abs(r.atkMult - 0.5) < 0.02, { atkMult: r.atkMult });
-ok('BALANCE: even 40 hand-edited ATK points cannot push the mon past the player',
-   r.capAtk < 1.0 && Math.abs(r.capAtk - 0.5 * (1 + Math.min(15, r.trimmedAtkPts) * 0.05)) < 0.02,
+// e2ffbb914 v0.30.1604 MOJIMON_ATK_MULT 0.5 -> 1: every ATK->damage multiplier was doubled (per user), so the
+// mon's share of getAtk() doubled with it - it still deals half of what its owner's doubled hits deal.
+ok('BALANCE: ATK multiplier is 1.0x getAtk() (v0.30.1604; was 0.5)', Math.abs(r.atkMult - 1.0) < 0.02, { atkMult: r.atkMult });
+ok('BALANCE: 40 hand-edited ATK points stop at the 15-point cap (1.75x), never 2x',
+   r.capAtk < 2.0 && Math.abs(r.capAtk - 1.0 * (1 + Math.min(15, r.trimmedAtkPts) * 0.05)) < 0.02,
    { capAtk: r.capAtk, trimmedPts: r.trimmedAtkPts, cap: r.CAP });
 ok('BALANCE: DR from 40 def points stays at/under the ceiling',
    r.capDef <= r.defCap && r.capDef === Math.min(r.defCap, Math.min(15, 20) * 0.03),

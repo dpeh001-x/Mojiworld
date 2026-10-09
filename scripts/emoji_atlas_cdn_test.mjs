@@ -21,7 +21,9 @@ const gitShow = (rel) => new Promise((res) => execFile('git', ['show', 'origin/m
 // ---- 1. the deploy's rewrite, read from the workflow ----
 let WF; try { WF = execFileSync('git', ['show', 'origin/main:.github/workflows/deploy-pages.yml'], { cwd: ROOT, encoding: 'utf8' }); }
 catch (e) { WF = readFileSync(path.join(ROOT, '.github/workflows/deploy-pages.yml'), 'utf8'); }
-const dirsM = /for d in ([A-Za-z_ ]+); do/.exec(WF), sedM = /sed -i -E "s#(.+?)#(.+?)#g" "\$f"/.exec(WF);
+// 44aaf0c32 v0.30.1180 added an earlier `sed -i -E` (the data/*.js ?v= stamp): take the art-folder rule, the one on ${d}/
+const dirsM = /for d in ([A-Za-z_ ]+); do/.exec(WF),
+  sedM = [...WF.matchAll(/sed -i -E "s#(.+?)#(.+?)#g" "\$f"/g)].find((m) => m[1].includes('${d}/')) || null;
 const rootM = /CDN_ROOT="https:\/\/cdn\.jsdelivr\.net\/gh\/\$\{GITHUB_REPOSITORY\}"/.exec(WF);
 const EXCL = new Set([...WF.matchAll(/--exclude '([A-Za-z_][\w.-]*)'/g)].map((m) => m[1]));
 const CDN_ROOT = `http://127.0.0.1:${CDN_PORT}/gh/dpeh001-x/Mojiworld`;

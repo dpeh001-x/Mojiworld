@@ -49,7 +49,8 @@ try {
   });
   await p.waitForTimeout(500);
   console.log('in game', JSON.stringify({ r, got, size }));
-  check(!r.err && r.key === 'mystery_sage' && got.some((g) => g.s === 200 && g.n === size), 'talking to ??? loads exactly this clip', { r, got, size });
+  // 76be52094 v0.30.1623 serve.js answers Range requests: a media load may arrive as a 206 carrying the whole file
+  check(!r.err && r.key === 'mystery_sage' && got.some((g) => (g.s === 200 || g.s === 206) && g.n === size), 'talking to ??? loads exactly this clip', { r, got, size });
   check(errs.length === 0, 'no page errors', errs.slice(0, 3));
   await ctx.close();
 } finally { await browser.close().catch(() => {}); srv.kill(); }

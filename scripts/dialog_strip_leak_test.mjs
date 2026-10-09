@@ -48,7 +48,7 @@ try {
   ok('1. Leave takes Bravo\'s weight strip with the card', !s1.open && !s1.on && s1.tabs === 0, s1);
   // ---- 2 ----
   await p.evaluate(async () => { loadMap('weightbearerStair'); await new Promise((r) => setTimeout(r, 3000));
-    const po = game.portals.find((q) => q.dest === 'gravitosArena'); player.x = po.x - player.w / 2 + 20; player.y = 380; player.vx = player.vy = 0; await new Promise((r) => setTimeout(r, 600)); });
+    const po = game.portals.find((q) => q.dest === 'gravitosArena'); player.x = po.x - player.w / 2 + 20; player.y = (typeof po.y === 'number' ? po.y - player.h : 380); player.vx = player.vy = 0;   /* b2ad02e55 v0.30.1594 stair-steep: the Singularity door moved up to (2860, y 200) - feet on the portal's own y, the line tryPortal measures */ await new Promise((r) => setTimeout(r, 600)); });
   await p.keyboard.press('ArrowUp'); await p.waitForTimeout(900);
   const s2 = await strip();
   ok('2. the Stair\'s Boss Arena card shows no weight strip', s2.open && /Boss Arena/.test(s2.name) && !s2.on && s2.tabs === 0 && !s2.shown, s2);

@@ -126,8 +126,17 @@ const live = await page.evaluate(async () => {
            fps: +(ticks / (dt / 1000)).toFixed(1), cards: all.length, onScreen };
 });
 const steps = live.steps || [];
-ok('the live walk card paints 0..8, 0..8 through the real draw path',
-  JSON.stringify(live.driven) === JSON.stringify(fwd), { got: (live.driven || []).join('') });
+// v0.30.1624 (Gravitos walk redo) his walk has 15 frames, not 9: expect 0..N-1 looping, with N read from the
+// generated data/sprite_frame_index.js (what the game and tool load), never from the card under test.
+const walkN = (() => {
+  const src = readFileSync('data/sprite_frame_index.js', 'utf8');
+  const w = {}; new Function('window', src)(w);
+  return ((w.LX_SPRITE_FRAME_INDEX.frames || {})['bosses/walk'] || {})[live.key || 'gravitos'] || 9;
+})();
+const fwdN = Array.from({ length: 18 }, (_, s) => s % walkN);
+ok(`the live walk card paints 0..${walkN - 1} looping through the real draw path`,
+  live.n === walkN && JSON.stringify(live.driven) === JSON.stringify(fwdN),
+  { got: (live.driven || []).join(','), n: live.n, indexN: walkN, key: live.key });
 ok('the live walk card runs at the game cadence', live.ms === 50, { ms: live.ms, picked });
 ok('...and its frames actually reach the screen, not just the counter',
   new Set(steps).size >= live.n - 2, { distinct: new Set(steps).size, of: live.n, fps: live.fps });

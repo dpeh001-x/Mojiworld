@@ -91,10 +91,11 @@ const have = (k) => T[k] || {};
 check(r.roster.length >= 4, 'the four foundry types are on the map', r.roster);
 
 // Came DOWN — authored values, which is what the patch actually controls.
-check(have('smithgolem').authored === 90, 'Smithgolem DEF is 90 (182 -> 120 in v0.29.844, then 90 per user)', have('smithgolem').authored);
-check(have('forgewight').authored === 100, 'Forgewight DEF is 100 (160 -> 110 in v0.29.844, then 100 per user)', have('forgewight').authored);
-check(have('bellowsbat').authored === 47, 'Bellowsbat DEF reduced (was 68)', have('bellowsbat').authored);
-check(have('cinderling').authored === 40, 'Cinderling DEF reduced (was 58)', have('cinderling').authored);
+// 8fc9baf82 v0.30.1646 monster DEF x0.85 across the stat table (per user): 90->77, 100->85, 47->40, 40->34 (measured in game)
+check(have('smithgolem').authored === 77, 'Smithgolem DEF is 77 (182 -> 120 in v0.29.844, 90 per user, x0.85 in v0.30.1646)', have('smithgolem').authored);
+check(have('forgewight').authored === 85, 'Forgewight DEF is 85 (160 -> 110 in v0.29.844, 100 per user, x0.85 in v0.30.1646)', have('forgewight').authored);
+check(have('bellowsbat').authored === 40, 'Bellowsbat DEF reduced (was 68; 47 x0.85 in v0.30.1646)', have('bellowsbat').authored);
+check(have('cinderling').authored === 34, 'Cinderling DEF reduced (was 58; 40 x0.85 in v0.30.1646)', have('cinderling').authored);
 
 // Still HIGH — the other half of the request. Measured as damage actually blocked.
 check(have('smithgolem').blockedPct >= 55 && have('smithgolem').blockedPct <= 66,

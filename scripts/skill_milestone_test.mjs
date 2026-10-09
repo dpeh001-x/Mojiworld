@@ -97,8 +97,9 @@ ok('no rank-5 window announces (that is a rank-10 beat)',
 ok('window opens from the cast hook', /_applyLv10Cd[\s\S]{0,400}_msOpenWindow\(id\)/.test(src));
 // the amplifier now returns the adjusted damage (`finalDmg = _msApplyOnHit(...)`) and the
 // shade queue + overflow-valve bookkeeping sit between it and the write - still before it
+// (173b0971b v0.30.1618 added the _lxParryGuard clamp line in between too: window widened 400 -> 800)
 ok('on-hit verbs applied before the authoritative HP write',
-   /finalDmg = _msApplyOnHit\(m, finalDmg, isCrit, skill\);[\s\S]{0,400}?m\.currentHp -= finalDmg;/.test(src));
+   /finalDmg = _msApplyOnHit\(m, finalDmg, isCrit, skill\);[\s\S]{0,800}?m\.currentHp -= finalDmg;/.test(src));
 ok('mark amplifier sits with the global multipliers', /_msMarkMul\(m\)/.test(src));
 ok('kill refund is wired', /_msRefundOnKill\(skill\)/.test(src));
 ok('chain has a re-entrancy guard', /_msChaining/.test(src));
