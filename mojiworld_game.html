@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1673';
+const GAME_VERSION = 'v0.30.1674';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -18940,7 +18940,7 @@ const _MINION_LIFT = 13;
 // UNDER the floor; this puts them 1 px under.) The undead minions need none: both feet are within 1-2 px of each other
 // and drawMinions already plants them 3 px deep.
 const _LX_SUMMON_FAR_FOOT = { wolf: 0.026, wolf_alpha: 0.018, wolf_sky: 0.036, werewolf: 0.035 };   // v0.30.1278 per user "werewolf is slightly deep down": 17/484 - its dark middle paw is lifted mid-stride, so 36/484 sank it ~7 px too far
-function _summonAnimFrame(key, state) {
+function _summonAnimFrame(key, state, epochMs) {   // v0.30.1674 summon-plant: epochMs - the loop starts on frame 0 at that wall-clock ms (a bite)
   if (!key || !state) return null;
   const tag = key + '_' + state;
   let arr = SUMMON_ANIM_FRAMES[tag];
@@ -18951,7 +18951,7 @@ function _summonAnimFrame(key, state) {
     SUMMON_ANIM_FRAMES[tag] = arr;
   }
   const ms = _SUMMON_ANIM_MS_OVERRIDE[key] || _SUMMON_ANIM_FRAME_MS;
-  const fr = (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, ms, 256) : null;   // v0.29.284 — base 256 logical: summons draw ~80-140 px
+  const fr = (typeof _bossLoopFrame === 'function') ? _bossLoopFrame(arr, ms, 256, epochMs ? -epochMs : 0) : null;   // v0.29.284 — base 256 logical: summons draw ~80-140 px
   return _lxSummonReady(fr) ? fr : null;
 }
 // v0.26.x — content-bottom fraction of a (padded) summon anim frame, cached.
@@ -85588,14 +85588,21 @@ function updatePlayer(dt) {
         // distance rather than the offset approach point.
         if (pet._offX == null) pet._offX = (Math.random() * 2 - 1) * 46;
         const dx = (tgt.x + tgt.w/2 + pet._offX) - _pcx;
-        // Smooth steering: target speed ramps with distance, current vx
-        // eases toward it so the wolf decelerates as it closes.
-        const targetVx = Math.sign(dx) * Math.min(4.5, Math.abs(dx) / 24);
-        pet.vx += (targetVx - pet.vx) * 0.25;
-        pet.facing = Math.sign(dx) || pet.facing || 1;
         if (pet.cdAtk > 0) pet.cdAtk -= dt;
         const _biteR = 60 * _scP;
-        if ((_lxBossy(tgt) ? _lxMonHitD2(tgt, _pcx, _pcy) : bestSq) < _biteR * _biteR && pet.cdAtk <= 0) {   // v0.30.1432 big-reach: bite a boss's body, as the undead do (_lxUndeadInReach) - no wolf reached Gravitos's middle
+        const _inReach = (_lxBossy(tgt) ? _lxMonHitD2(tgt, _pcx, _pcy) : bestSq) < _biteR * _biteR;   // v0.30.1432 big-reach: bite a boss's body, as the undead do (_lxUndeadInReach) - no wolf reached Gravitos's middle
+        const _atkHold = _lxSummonAttacking(pet);   // v0.30.1674 summon-plant: biting - stand still, keep facing
+        if (_atkHold) pet.vx = 0;
+        else if (_inReach && pet.cdAtk <= 0 && Math.abs(pet.vx) > 0.9) pet.vx *= 0.5;   // v0.30.1674 summon-plant: in reach with the bite ready - stop first, then bite
+        else {
+          // Smooth steering: target speed ramps with distance, current vx
+          // eases toward it so the wolf decelerates as it closes.
+          const targetVx = Math.sign(dx) * Math.min(4.5, Math.abs(dx) / 24);
+          pet.vx += (targetVx - pet.vx) * 0.25;
+          pet.facing = Math.sign(dx) || pet.facing || 1;
+        }
+        if (_inReach && pet.cdAtk <= 0 && !_atkHold && Math.abs(pet.vx) <= 0.9) {
+          _lxSummonBite(pet);
           hitMonster(tgt, Math.floor(getAtk() * 1.12), false, 'pack');   // v0.30.x bughunt sibling-5 - a bite is not a crit: it showed a gold number and ate a guaranteed-crit charge for base damage
           // v0.25.530 — Level-10 bonus: chained bite ~150 ms later.
           const _bpBonus = (typeof getSkillLv10 === 'function') ? getSkillLv10('beastmaster_pack') : null;
@@ -85812,12 +85819,19 @@ function updatePlayer(dt) {
       let _petFollow = null;   // v0.30.1278 pet-follow
       if (tgt && (_fbTgt || bestSq < 900 * 900)) {
         const dx = (tgt.x + tgt.w/2) - _pcx;
-        const targetVx = Math.sign(dx) * Math.min(4.0, Math.abs(dx) / 26);
-        pet.vx += (targetVx - pet.vx) * 0.25;
-        pet.facing = Math.sign(dx) || pet.facing || 1;
         if (pet.cdAtk > 0) pet.cdAtk -= dt;
         const _biteR = 60 * _scP;
-        if ((_lxBossy(tgt) ? _lxMonHitD2(tgt, _pcx, _pcy) : bestSq) < _biteR * _biteR && pet.cdAtk <= 0) {   // v0.30.1432 big-reach: bite a boss's body, as the undead do (_lxUndeadInReach) - no wolf reached Gravitos's middle
+        const _inReach = (_lxBossy(tgt) ? _lxMonHitD2(tgt, _pcx, _pcy) : bestSq) < _biteR * _biteR;   // v0.30.1432 big-reach: bite a boss's body, as the undead do (_lxUndeadInReach) - no wolf reached Gravitos's middle
+        const _atkHold = _lxSummonAttacking(pet);   // v0.30.1674 summon-plant: biting - stand still, keep facing
+        if (_atkHold) pet.vx = 0;
+        else if (_inReach && pet.cdAtk <= 0 && Math.abs(pet.vx) > 0.9) pet.vx *= 0.5;   // v0.30.1674 summon-plant: in reach with the bite ready - stop first, then bite
+        else {
+          const targetVx = Math.sign(dx) * Math.min(4.0, Math.abs(dx) / 26);
+          pet.vx += (targetVx - pet.vx) * 0.25;
+          pet.facing = Math.sign(dx) || pet.facing || 1;
+        }
+        if (_inReach && pet.cdAtk <= 0 && !_atkHold && Math.abs(pet.vx) <= 0.9) {
+          _lxSummonBite(pet);
           // v0.25.557 — lone Wild Bond wolf 1.4×ATK → 1.1×ATK, rate 600ms → 1500ms.
           hitMonster(tgt, Math.floor(getAtk() * (_petSlot === 'ultPet' ? 4.4 : 1.6)), false, 'pet');   // v0.30.x bughunt sibling-5 - no fake crit number, no burnt guaranteed-crit charge
           pet.cdAtk = 1500;
@@ -90514,8 +90528,12 @@ function updateMinions(dt) {
       // minion's + 10 px, so against something small every flanker still stands in reach.
       const _offCap = (tgt.w || 0) / 2 + mn.w / 2 + 10;
       const dx = (tcx + (mn.mojimon ? mn._offX : Math.max(-_offCap, Math.min(_offCap, mn._offX)))) - _mnCx;
-      mn.facing = Math.sign(tcx - _mnCx) || 1;
-      if (Math.abs(dx) > 4) mn.vx += Math.sign(dx) * 0.25; else mn.vx *= 0.85;
+      const _mnHold = _lxSummonAttacking(mn);   // v0.30.1674 summon-plant: striking - stand still
+      const _mnReady = !mn.mojimon && (mn.cd || 0) <= 0 && _lxUndeadInReach(mn, tgt);
+      if (!_mnHold) mn.facing = Math.sign(tcx - _mnCx) || 1;
+      if (_mnHold) mn.vx = 0;
+      else if (_mnReady && Math.abs(mn.vx) > 0.9) mn.vx *= 0.5;   // v0.30.1674 summon-plant: in reach with the strike ready - stop first
+      else if (Math.abs(dx) > 4) mn.vx += Math.sign(dx) * 0.25; else mn.vx *= 0.85;
       // v0.29.888 — PERSONAL SPACE. Nothing repelled one minion from another,
       // so a pack sharing a target settled into the same pixel column and
       // vibrated against it, which is the "jump around" in the report. A soft
@@ -90609,7 +90627,7 @@ function updateMinions(dt) {
       const _mr = mn.mojimon ? Math.max(30, (mn.w + tgt.w) * 0.45) : 30;
       // v0.30.623 summon-ai - the undead strike by reach against the body (see _lxUndeadInReach);
       // the MojiMon keeps its size-aware centre radius.
-      if (mn.mojimon ? (_ddx*_ddx + _ddy*_ddy < _mr * _mr) : _lxUndeadInReach(mn, tgt)) {
+      if (mn.mojimon ? (_ddx*_ddx + _ddy*_ddy < _mr * _mr) : (_lxUndeadInReach(mn, tgt) && !_lxSummonAttacking(mn) && Math.abs(mn.vx) <= 0.9)) {   // v0.30.1674 summon-plant: the undead strike from a standstill
         // v0.29.435 — a MojiMon's melee carries its own skill tag so the
         // hitMonster retaliation exemption applies to BOTH its attack
         // channels; tagging only the ranged shot left every melee tick
@@ -90621,6 +90639,7 @@ function updateMinions(dt) {
         // monster's contact hit does (520ms ≈ one 9-frame loop at 48ms/frame).
         if (mn.mojimon) mn.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 520;
         mn.cd = 400;
+        if (!mn.mojimon) _lxSummonBite(mn);   // v0.30.1674 summon-plant
         if (mn.mojimon) spawnSmoothImpact(_tcx, _tcy, '#9944cc');
         else spawnSmoothImpact(Math.max(tgt.x, Math.min(tgt.x + tgt.w, mn.x + mn.w / 2)), Math.max(tgt.y, Math.min(tgt.y + tgt.h, mn.y + mn.h / 2)), '#9944cc');   // v0.30.623 summon-ai - where the blow lands
       }
@@ -90748,10 +90767,26 @@ function updateMinions(dt) {
 // foes. Mutates a per-entity timer; returns true while the pose window is live.
 // No-op (returns false) when no monster is near; if the type lacks attack frames
 // the caller's _summonAnimFrame() just falls back to the static sprite.
+// v0.30.1674 summon-plant (per user: "when they are attacking they should not be moving / sliding around"). A summon that is biting, or holding its
+// near-foe flourish, stands still: its tick skips the steering and zeroes vx, its draw plays the attack set from the bite's own
+// frame 0. One loop of the nine 90 ms frames = 810 ms = 49 game frames (_LX_SUMMON_ATK_FRAMES).
+const _LX_SUMMON_ATK_FRAMES = 49;
+function _lxSummonAttacking(ent) {
+  if (!ent) return false;
+  const t = (typeof game !== 'undefined' && game.time) ? game.time : 0;
+  return t < (ent._atkAnimUntil || 0) || t < (ent._poseAtkUntil || 0);
+}
+function _lxSummonBite(ent) {   // stamp a bite: plant, open the attack window, restart the attack loop
+  if (!ent) return;
+  const t = (typeof game !== 'undefined' && game.time) ? game.time : 0;
+  ent.vx = 0; ent._atkAnimUntil = t + _LX_SUMMON_ATK_FRAMES;
+  ent._atkAnimAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+}
 function _summonAtkPosePulse(ent) {
   if (!ent) return false;
   const t = (typeof game !== 'undefined' && game.time) ? game.time : 0;
   if (t < (ent._poseAtkUntil || 0)) return true;                 // pose window active
+  if (Math.abs(ent.vx || 0) > 0.4 || t < (ent._atkAnimUntil || 0)) return false;   // v0.30.1674 summon-plant: the flourish starts on a still summon only, never over a bite
   if (!ent._poseNextAt) ent._poseNextAt = t + 90 + Math.floor(Math.random() * 150);
   if (t < ent._poseNextAt) return false;                         // not time to re-check yet
   const cx = ent.x + (ent.w || 40) / 2, cy = ent.y + (ent.h || 36) / 2;
@@ -90812,8 +90847,8 @@ function drawMinions() {
     // v0.26.x — walk/attack animation frame when moving / striking (mn.cd resets
     // to 400 on a melee hit → >120 ≈ the strike window; |vx|>0.4 = walking).
     // Falls back to the static raise sprite for idle / before frames decode.
-    const _rState = ((mn.cd || 0) > 120 || _summonAtkPosePulse(mn)) ? 'attack' : (Math.abs(mn.vx || 0) > 0.4) ? 'walk' : null;
-    const _sprite = (_rState && _summonAnimFrame(mn.type, _rState)) || _rBase;
+    const _rState = (_lxSummonAttacking(mn) || _summonAtkPosePulse(mn)) ? 'attack' : (Math.abs(mn.vx || 0) > 0.4) ? 'walk' : null;   // v0.30.1674 summon-plant
+    const _sprite = (_rState && _summonAnimFrame(mn.type, _rState, _rState === 'attack' ? mn._atkAnimAt : 0)) || _rBase;
     if (_lxSummonReady(_sprite)) {
       const _srcW = _sprite.naturalWidth  || _sprite.width  || 1;
       const _srcH = _sprite.naturalHeight || _sprite.height || 1;
@@ -101241,6 +101276,7 @@ function updateMonsters(dt) {
     // and any authored vertical leap are untouched, and a mob shoved
     // mid-cast still slides from the hit (that impact should read).
     if (typeof _mobCasting === 'function' && _mobCasting(m)) m.vx = 0;
+    else if (_lxBossAttackPlanted(m)) { m.vx = 0; m._walkLatch = false; }   // v0.30.1674 boss-plant: a boss stands through its attack art - the latch drops at once, so its attack frames open on the beat (a held latch opened the Arbiter's telegraph ~160 ms late)
     // v0.30.x — the other half of "only move horizontally when the walking
     // sprite plays". If the mob is not walking, any locomotion left below the
     // walk latch's own ON threshold is drift, and it is what slid the mob
@@ -155539,6 +155575,23 @@ function _lxFlierFloorY(x) {
   for (let i = 0; i < slabs.length; i++) { const g = slabs[i]; if (x >= g.x && x <= g.x + g.w && (f == null || g.y > f)) f = g.y; }
   return (f != null) ? f : ((md.worldHeight || 560) - 24);
 }
+// v0.30.1674 boss-plant (per user: "no movement while attacking ... a temporary stationary position"). A boss is rooted while its attack art plays:
+// while an attack pattern runs (anything but idle and the move states - the draw shows attack art for it once the body is still),
+// and while the last draw showed a live attack pose (the Sovereign's / Mira's / the Arbiter's poses, a heavy blow) or, for a zodiac, the
+// bite after its lunge. Not the contact-hit window: that art shows only on a still body and drops the moment the body walks. Its own moving attacks keep
+// their motion: the brace-dash, the hourglass lunge, the zodiac lunge, flight, and the patterns below.
+const _LX_BOSS_MOVE_PATTERNS = new Set(['zip', 'claw', 'shellSpin', 'jumpSlam', 'leap', 'latch', 'teleport', 'slam', 'charge', 'chargeWindup',
+  'chargeBurst', 'headbutt', 'headbuttWindup', 'diveCross', 'pounceWindup', 'pounceLeap', 'burrow']);
+function _lxBossAttackPlanted(m) {
+  if (!m || !(m.isBoss || m.boss || m.zodiacBoss || m.superBoss || m._rushBoss)) return false;
+  if (m._coopMirror || m._braceDashing || m._hgCharging || m._dashing || m._dashT > 0 || m._zFlying || m._zLungeMs > 0) return false;
+  const ps = m.patternState;
+  if (ps && ps !== 'idle' && (_BOSS_MOVE_DRAW_STATES.has(ps) || _LX_BOSS_MOVE_PATTERNS.has(ps))) return false;
+  if (ps && ps !== 'idle') return true;
+  // never the contact-hit window (atkAnimUntil alone): a boss standing by the hero would plant on every brush and never walk off
+  const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  return m.zodiacBoss ? _now < (m._zLungeBiteUntil || 0) : !!m._lxBossAtkDrawn;
+}
 function _lxMobPlanted(m) {
   if (!m || m.isBoss || m.boss || m.zodiacBoss || m.superBoss || m._rushBoss) return false;
   if (m._coopMirror || m.ally || m.isSummon || m._playerOwned) return false;
@@ -155972,8 +156025,11 @@ function _gravWalkPos(key, m, n) {
   return p - Math.floor(p / n) * n;
 }
 function _zodiacAnimTick(m, now) {
-  const atk = (m.patternState && m.patternState !== 'idle') || (m.atkAnimUntil && now < m.atkAnimUntil);
   const vx = Math.abs(m.vx || 0);
+  if (vx > 0.85 || (m._animXV || 0) > 0.25) m._lxLastMoveAt = now;   // v0.30.1674 boss-plant: as the other bosses (159422), a contact hit's attack art waits for a body still 140 ms
+  const _stillHit = (now < (m._zLungeBiteUntil || 0)) || (now - (m._lxLastMoveAt || 0)) > 140;   // the bite after a lunge opens at once
+  const _movePat = !!(m.patternState && m.patternState !== 'idle' && (_LX_BOSS_MOVE_PATTERNS.has(m.patternState) || _BOSS_MOVE_DRAW_STATES.has(m.patternState)));   // a ram, a dive, a burrow: the body moves, so it walks (or charges / pounces where the sign has the frames)
+  const atk = !_movePat && ((m.patternState && m.patternState !== 'idle') || (m.atkAnimUntil && now < m.atkAnimUntil && _stillHit));
   let a = m._zAnim;
   const wasWalk = !!(a && a.state === 'walk');
   // v0.29.273 — displacement signal joins the hysteresis: a zodiac that
@@ -159645,6 +159701,7 @@ function drawMonster(m) {
     const _fck = _gravCastKey(m, _GRAV_FORM_CASTS[m.patternState]);
     if (_fck && _gravFormCastFrame(m, _fck)) m._gravStarKey = _fck;
   }
+  m._lxBossAtkDrawn = !!(_sovAtkLive || _lxHeavyAtk);   // v0.30.1674 boss-plant: the AI roots the body while a live attack pose shows
   if (!_bossAttacking) { m._gravStarKey = null; m._aeAstralKey = null; }   // cast-key-body
   // v0.29.x — Legosaurus's brace-dash owns a dedicated attack set; while the
   // move runs (atkAnimUntil is stamped by the phase machine, so
@@ -162888,7 +162945,7 @@ function zodiacBossAI(m, dt, distToPlayer) {
         life: 20, color: z.colors.aura, size: 3 + Math.random() * 2,
       });
     }
-    if (m._zLungeMs <= 0) m.vx *= 0.35;   // ease out of the dash, no hard stop
+    if (m._zLungeMs <= 0) { m.vx *= 0.35; const _zn = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()); m.atkAnimUntil = _zn + 600; m._zLungeBiteUntil = _zn + 600; }   // v0.30.1674 boss-plant: the dash ran on the walk frames; now it stops and bites (the plant zeroes the ease-out)
   } else {
     if (m._zLungeCd == null) m._zLungeCd = 4200 + Math.random() * 2000;
     m._zLungeCd -= dt;
@@ -167853,7 +167910,7 @@ function drawWolf(pet, tintColor) {
   const _wolfKey = (_isSkyhunter && _lxSummonReady(LX_SUMMON.wolf_sky)) ? 'wolf_sky'
     : (_isBeastmaster && _lxSummonReady(LX_SUMMON.wolf_alpha)) ? 'wolf_alpha' : 'wolf';
   const _poseAtk = _summonAtkPosePulse(pet);   // v0.26.x — occasional attack-pose flourish when near monsters
-  const _wolfState = (pet && ((pet.cdAtk || 0) > 600 || _poseAtk)) ? 'attack'
+  const _wolfState = (pet && (_lxSummonAttacking(pet) || _poseAtk)) ? 'attack'   // v0.30.1674 summon-plant: the bite's own window, not the cooldown
     : (pet && Math.abs(pet.vx || 0) > 0.4) ? 'walk' : null;
   // v0.26.x — Lv-50 ultimate summons override the base wolf art with their own
   // sprite (Beastmaster werewolf / Skyhunter eagle) when it has decoded.
@@ -167876,10 +167933,10 @@ function drawWolf(pet, tintColor) {
   if (pet && pet.flying && (pet.fireCd || 0) > 250) pet._atkHoldF = game.time + 42;
   const _petState = !_petKey ? null
     : (pet && pet.flying) ? (((pet._atkHoldF || 0) > game.time) ? 'attack' : 'walk')
-    : (((pet.fireCd || 0) > 250 || (pet.cdAtk || 0) > 600 || _poseAtk) ? 'attack' : 'walk');
-  const _petAnim = _petState ? _summonAnimFrame(_petKey, _petState) : null;
+    : (((pet.fireCd || 0) > 250 || _lxSummonAttacking(pet) || _poseAtk) ? 'attack' : (Math.abs(pet.vx || 0) > 0.4) ? 'walk' : null);   // v0.30.1674 summon-plant: a standing werewolf shows its still sprite, not a walk loop in place
+  const _petAnim = _petState ? _summonAnimFrame(_petKey, _petState, _petState === 'attack' ? pet._atkAnimAt : 0) : null;
   const _petSpr = (_petKey && _lxSummonReady(LX_SUMMON[_petKey])) ? LX_SUMMON[_petKey] : null;
-  const _wolfDraw = _petAnim || _petSpr || (_wolfState && _summonAnimFrame(_wolfKey, _wolfState)) || _wolfSprite;
+  const _wolfDraw = _petAnim || _petSpr || (_wolfState && _summonAnimFrame(_wolfKey, _wolfState, _wolfState === 'attack' ? pet._atkAnimAt : 0)) || _wolfSprite;
   const _wolfShow = _petSpr || _wolfSprite;
   if (_lxSummonReady(_wolfShow)) {
     // v0.25.514 — honor `pet.scale` (default 1.0). Per the wildBond +
