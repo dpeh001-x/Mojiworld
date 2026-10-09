@@ -79,7 +79,8 @@ try {
     // 8. The Tear 0 is the Train to an Alternate Dimension (the Master Conductor) and The Tear V ends on the Sundered Smith (per user, 2026-10-09)
     const T0 = Q.q_lyra_aperture, TV = Q.q_lyra_forge;
     out.t0 = { name: T0.name, lv: T0.levelReq, prereq: [].concat(T0.prereq || []), kind: T0.kind, target: T0.target, boss: !!T0.bossFight, desc: T0.desc };
-    out.v = { target: TV.target, prereq: [].concat(TV.prereq || []), desc: TV.desc };
+    out.gate = { v: TV.desc, iii: Q.q_barnaby_hands.desc, ans: (typeof _lxBarnabyWall === 'function' ? _lxBarnabyWall() : ''), bub: (typeof NPC_CHAT_LINES_OWN === 'object' && NPC_CHAT_LINES_OWN.Barnaby) ? JSON.stringify(NPC_CHAT_LINES_OWN.Barnaby) : '' };
+    out.v = { name: TV.name, target: TV.target, prereq: [].concat(TV.prereq || []), desc: TV.desc };
     const PQ = ['q_clockwork_underpass', 'q_pq_spire', 'q_pq_carriage'];
     out.open2 = { t0_noRush: open('q_lyra_aperture', 30, []), t0_29: open('q_lyra_aperture', 29, PQ), t0_30: open('q_lyra_aperture', 30, PQ), v_noIV: open('q_lyra_forge', 46, ['q_lyra_kin']), v_IV: open('q_lyra_forge', 46, ['q_lyra_kin', 'q_barnaby_finish']) };
     fresh(); for (const k of PQ) player.quests.completed[k] = true; player.level = 31; tickQuestUnlocks(); acceptQuest('q_pq_finale'); acceptQuest('q_lyra_aperture'); tickQuestKill('pqConductor', true);
@@ -116,6 +117,8 @@ try {
   check(R.milo.found && R.milo.withT0.some((t) => /Face the Master Conductor again/.test(t)) && !R.milo.without.some((t) => /Face the Master Conductor again/.test(t)), "a hero who already finished the Rush gets Milo's 'Face the Master Conductor again' while The Tear 0 is open, and only then", J([R.milo.withT0, R.milo.without]));
   check(R.v.target === 'sundered_smith' && R.v.prereq.indexOf('q_lyra_kin') >= 0 && R.v.prereq.indexOf('q_barnaby_finish') >= 0 && !/Confused Vigil|the boy/.test(R.v.desc), 'The Tear V ends on the Sundered Smith (not the boy) and waits for Barnaby IV', J([R.v.target, R.v.prereq]));
   check(R.open2.v_noIV === false && R.open2.v_IV === true && R.smith.main === true && R.smith.v === true, 'The Tear V stays shut until Barnaby IV, and one Smith kill completes it together with The Forge That Broke', J([R.open2, R.smith]));
+  check(R.v.name === 'The Tear V \u2014 The Gate, or the Forge' && /what happened to the gate\.$/.test(R.v.desc) && !/what happened to the wall/.test(R.v.desc), 'The Tear V is "The Gate, or the Forge" and tells the Smith what happened to the gate (not the wall)', J([R.v.name, R.v.desc.slice(-60)]));
+  check(!/right wall/i.test(R.gate.v + R.gate.iii + R.gate.ans + R.gate.bub) && /He always says the gate\./.test(R.gate.v) && /chose the gate: a breach question/.test(R.gate.iii) && /The gate, I always say\./.test(R.gate.ans) && /The gate\. Probably\./.test(R.gate.bub), 'Barnaby\'s "right wall" lines are "the gate" (no "right gate"): The Tear V, Barnaby III, his own answer and his bubble', J([R.gate.ans.slice(0, 120), R.gate.bub.slice(0, 120)]));
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
