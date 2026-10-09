@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1685';
+const GAME_VERSION = 'v0.30.1686';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -72974,6 +72974,40 @@ const DAILY_CHALLENGES = [
 // persisted as game._timeHW). Forward jumps still advance (a player genuinely
 // returning days later is legit); pure forward-roll is a localStorage self-cheat
 // no client-side check can fully stop without a server.
+// v0.30.1686 ac-day - ANTI-CHEAT, LAYER 5 (per user: "Layer 5 narrower form"): DAILY REWARDS FOLLOW THE SERVER'S DATE.
+// Daily grants already refuse a day that goes backwards (v0.30.861), but a PC clock set forward opened the next day's grants
+// early. On the public site the game now reads the time from its own web server (the Date header of a HEAD request for this
+// page) and counts the day from that. A NEW day is granted only on a reading under a minute old; otherwise checkDaily asks
+// again and runs once the answer is in (or after 4 s without one, when the PC clock is used as before). Offline, on a
+// developer's machine, and in the Steam app (its page is served by the app itself) nothing changes.
+const _lxServerTime = (function () {
+  let off = null, ended = 0, pending = null;
+  function usable() {
+    try { return !!(_lxAc && _lxAc.on) && window.MOJI_PACKAGED !== true && location.port !== '47821' && /^https?:$/.test(location.protocol); }
+    catch (e) { return false; }
+  }
+  function ask() {
+    if (pending) return pending;
+    pending = new Promise((res) => {
+      const t0 = Date.now(); let done = false;
+      const finish = (v) => { if (done) return; done = true; pending = null; ended = Date.now(); if (v != null) off = v; res(); };
+      setTimeout(() => finish(null), 4000);
+      try {
+        fetch(location.pathname + '?lxt=' + t0, { method: 'HEAD', cache: 'no-store' }).then((r) => {
+          const d = Date.parse(r.headers.get('date') || ''), age = parseInt(r.headers.get('age') || '0', 10) || 0;
+          if (!isFinite(d)) { finish(null); return; }
+          finish(d + age * 1000 + 500 - (t0 + Date.now()) / 2);   // the header has whole seconds: +500 ms centres it
+        }, () => finish(null));
+      } catch (e) { finish(null); }
+    });
+    return pending;
+  }
+  // settled: a reading (or a failed try) ended under a minute ago by the PC clock, which has not run backwards since
+  function settled() { const n = Date.now(); return ended > 0 && n >= ended && n - ended < 60000; }
+  function now() { return off == null ? null : Date.now() + (Math.abs(off) < 120000 ? 0 : off); }
+  try { if (usable()) setTimeout(ask, 0); } catch (e) {}
+  return { usable, ask, settled, now };
+})();
 function _monoNow() {
   const n = Date.now();
   if (typeof game === 'undefined' || !game) return n;
@@ -72988,7 +73022,7 @@ function _monoNow() {
   if (typeof game._timeHW !== 'number' || n > game._timeHW) { game._timeHW = n; return n; }
   return game._timeHW;
 }
-function dailyIndex() { return Math.floor(_monoNow() / 86400000); }
+function dailyIndex() { const m = _monoNow(); let sv = null; try { sv = _lxServerTime.now(); } catch (e) {} return Math.floor((sv == null ? m : sv) / 86400000); }   // v0.30.1686 ac-day - the server's date when it is known
 // Pick a challenge deterministically per day, but filtered by level bracket
 // so a Lv 1 player never rolls "Enhance any item once" on day one.
 function _pickDailyChallenge(day) {
@@ -73016,6 +73050,11 @@ function _lxStreakMilestone(streak, table, prev, day) {
 function checkDaily() {
   if (!player.cls) return;
   const day = dailyIndex();
+  // v0.30.1686 ac-day - a NEW day is opened only on a fresh server reading (see _lxServerTime); until it is in, nothing is granted
+  try {
+    const _ds = game.dailyState, _newDay = !_ds || typeof _ds.day !== 'number' || day > _ds.day;
+    if (_newDay && _lxServerTime.usable() && !_lxServerTime.settled()) { _lxServerTime.ask().then(() => { try { if (_lxServerTime.settled()) checkDaily(); } catch (e) {} }); return; }
+  } catch (e) {}
   // v0.30.861 loops - A DAY THAT GOES BACKWARDS GRANTS NOTHING (per user: "dailies can be re-rolled by changing the clock;
   // fix this"). This compared day !== stored day, so a clock set forward (tomorrow's grant) and then back more than six
   // hours (_monoNow gives the real time back then) granted TODAY again - login bonus, a fresh challenge and parcel, and a
