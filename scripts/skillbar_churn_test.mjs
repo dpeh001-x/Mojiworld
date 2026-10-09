@@ -37,7 +37,7 @@ try {
   const node = await page.evaluate(async () => {
     const slot = Object.keys(_sbSlots).map((k) => _sbSlots[k]).find((x) => x && x.skillId && SKILLS[x.skillId] && SKILLS[x.skillId].cd > 0);
     if (!slot) return { err: 'no skill slot with a cooldown' };
-    player.skillCooldowns[slot.skillId] = SKILLS[slot.skillId].cd;
+    player.skillCooldowns[slot.skillId] = 4000;   // under 5 s: tenths, so a 260 ms tick changes the text (whole seconds above 5 s since v0.30.1704)
     renderSkillBar();
     const first = slot.cdEl.firstChild, firstTxt = slot.cdEl.textContent;
     player.skillCooldowns[slot.skillId] -= 260;              // a later tick of the same cooldown
@@ -76,6 +76,17 @@ try {
     return { n, cd };
   });
   check(writes.n <= 210, 'one cooldown writes the pie ~200 times, not once per frame', J(writes));
+  // 4. v0.30.1704 bosslag4: whole seconds above 5 s, tenths for the last 5 - a 15 s cooldown rewrites its text ~60 times, not 150
+  const fmt = await page.evaluate(() => {
+    const slot = Object.keys(_sbSlots).map((k) => _sbSlots[k]).find((x) => x && x.skillId && SKILLS[x.skillId] && SKILLS[x.skillId].cd > 0);
+    const at = (ms) => { player.skillCooldowns[slot.skillId] = ms; renderSkillBar(); return slot.cdEl.textContent; };
+    const o = { a: at(12300), b: at(5001), c: at(5000), d: at(4300) };
+    let n = 0, last = null; for (let ms = 15000; ms > 0; ms -= 1000 / 60) { const t = at(ms); if (t !== last) { last = t; n++; } }
+    player.skillCooldowns[slot.skillId] = 0; renderSkillBar();
+    return Object.assign(o, { textWrites15s: n });
+  });
+  check(fmt.a === '13' && fmt.b === '6' && fmt.c === '5.0' && fmt.d === '4.3' && fmt.textWrites15s <= 62,
+    'cooldown digits: whole seconds above 5 s, tenths for the last 5', J(fmt));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 3)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await browser.close(); server.kill();

@@ -70,7 +70,7 @@ const r = await page.evaluate(async () => {
     if (_sbSlots[k] && _sbSlots[k].skillId) { slot = _sbSlots[k]; break; }
   }
   if (slot) {
-    player.skillCooldowns[slot.skillId] = 5300;
+    player.skillCooldowns[slot.skillId] = 3300;   // under 5 s: tenths (whole seconds above 5 s since v0.30.1704)
     await new Promise((res) => { let n = 0; const t = () => { game.paused = false; if (++n > 10) return res(); requestAnimationFrame(t); }; requestAnimationFrame(t); });
     const txt = slot.cdEl.textContent;
     // v0.30.937 (9463fcab) writes --cd-pct on the .skill-cd overlay (the only reader), not the slot root

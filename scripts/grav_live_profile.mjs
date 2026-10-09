@@ -31,6 +31,7 @@ try {
   // boot into the arena with a kit; clear every intro / skip overlay until nothing is left; wait for the sprite stream
   const setup = await page.evaluate(async ({ FORM, STUB, CSSX }) => { const sleep = (ms) => new Promise((r2) => setTimeout(r2, ms));
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
+    { const ov = document.getElementById('loading-overlay'); if (ov) ov.classList.add('fade'); }   // perf round 17: the title sky loop (48 fps, 1920x624) tears down on 'fade', as on Continue - display:none alone left it decoding behind every profile since v0.30.1426
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     const master = Object.keys(typeof MASTERS !== 'undefined' ? MASTERS : {}).find((k) => (MASTERS[k].job === 'berserker') || (MASTERS[k].cls === 'warrior')) || null;
     player.cls = 'warrior'; player.job = 'berserker'; player.master = master; player.masteries = master ? { [master]: true } : {}; player.level = 200; player.baseAtk = 3000;
