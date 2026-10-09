@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1676';
+const GAME_VERSION = 'v0.30.1677';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -43802,6 +43802,116 @@ const _lxAc = (function () {
     } catch (e) {}
     return hit;
   }
+  // v0.30.1677 ac-save - ANTI-CHEAT, LAYER 3: THE SAVE ITSELF (per user: "go ahead"). Two things the signed-subset save could not
+  // tell apart from an honest one:
+  //   - AN OLD SAVE PUT BACK. Copying yesterday's save (and its verified copy) back into storage loaded cleanly - a way to
+  //     spend or lose something and undo it. Every save now carries a sequence number (sq) and a copy of the newest save is
+  //     kept in IndexedDB, apart from the save itself. A save that is the same age as that copy but not the same bytes (edited)
+  //     or older than it (put back) loads the copy instead. A save NEWER than the copy is kept: an older build of the game
+  //     still cached in the browser writes no sq but an honest, newer timestamp, and must never be undone.
+  //   - THE OTHER HALF OF THE SAVE. ls3 signs the fields cheats go for first; sig5 is a second signature over the whole save
+  //     (bar the wardrobe paint, which is cosmetic and can be megabytes): a fast 53-bit hash of it, signed. Older builds
+  //     ignore the extra field. A save with a broken sig5, or without one where this browser's verified copy says it wrote
+  //     one, is 'bad' and goes down the existing roll-back path.
+  // The game's own replacements (import, a backup restore, a cloud or Steam Cloud save, a new game) leave a token tied to the
+  // save they installed, so the next load takes it as it is. Like the vault: quiet, and off on developer surfaces.
+  const IDB = (() => {
+    let dbp = null;
+    const open = () => dbp || (dbp = new Promise((res) => {
+      try { const r = indexedDB.open('lx_ac', 1); r.onupgradeneeded = () => { try { r.result.createObjectStore('kv'); } catch (e) {} }; r.onsuccess = () => res(r.result); r.onerror = () => res(null); }
+      catch (e) { res(null); }
+    }));
+    const tx = (mode, fn) => open().then((db) => new Promise((res) => {
+      if (!db) return res(null);
+      try { const t = db.transaction('kv', mode), st = t.objectStore('kv'); const q = fn(st); t.oncomplete = () => res(q && q.result); t.onerror = () => res(null); }
+      catch (e) { res(null); }
+    }));
+    return { get: (k) => tx('readonly', (st) => st.get(k)), put: (k, v) => tx('readwrite', (st) => st.put(v, k)), del: (k) => tx('readwrite', (st) => st.delete(k)) };
+  })();
+  let D = null, adoptedNow = false;
+  const SQ_KEY = 'lx_save_sq', ADOPT_KEY = 'lx_rb_adopt';
+  function sig5Hash(s) {
+    const p = Object.assign({}, s.player || {}); delete p.customPaint; delete p.customPaintLayers; delete p._lxPaintRef;
+    const str = JSON.stringify(p) + '\n' + JSON.stringify(s.game || {});
+    let h1 = 0xdeadbeef ^ str.length, h2 = 0x41c6ce57 ^ str.length;
+    for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (h2 >>> 0).toString(16) + '.' + (h1 >>> 0).toString(16) + '.' + str.length;
+  }
+  const sig5Of = (s) => _lxHmacSaveHex('ls5\n' + String(s.v) + '\n' + String(s.t) + '\n' + String(s.sq | 0) + '\n' + sig5Hash(s));
+  const sig5Ok = (s) => { try { return typeof s.sig5 === 'string' && _lxSigEqual(s.sig5, sig5Of(s)); } catch (e) { return false; } };
+  function seqStamp(s) {
+    let n = 0; try { n = parseInt(localStorage.getItem(SQ_KEY), 10) || 0; } catch (e) {}
+    if (D && typeof D.sq === 'number' && D.sq > n) n = D.sq;
+    s.sq = n + 1;
+    try { localStorage.setItem(SQ_KEY, String(s.sq)); } catch (e) {}
+  }
+  function sig5Stamp(s) { try { s.sig5 = sig5Of(s); } catch (e) {} }
+  function rbKeep(s, json) {
+    if (typeof json !== 'string') return;
+    D = { json, sq: typeof s.sq === 'number' ? s.sq : null, t: s.t };
+    IDB.put('save', D);
+  }
+  const adoptToken = (t) => _lxHmacSaveHex('lx-adopt\n' + String(t));
+  function rbAdopt() {
+    if (foreign()) { note('save', 'adopt', null, null); return; }   // only the game's own replacement paths may vouch for a save
+    let raw = null; try { raw = localStorage.getItem(SAVE_KEY); } catch (e) {}
+    let t = null; try { t = raw ? JSON.parse(raw).t : null; } catch (e) {}
+    try { if (raw) sessionStorage.setItem(ADOPT_KEY, adoptToken(t)); else sessionStorage.removeItem(ADOPT_KEY); } catch (e) {}
+    if (raw) { let sq = null; try { sq = JSON.parse(raw).sq; } catch (e) {} D = { json: raw, sq: typeof sq === 'number' ? sq : null, t }; IDB.put('save', D); }
+    else { D = null; IDB.del('save'); }
+  }
+  // the copy wins when the stored save is the same age (and not the same bytes: edited) or older (put back), and the copy
+  // itself is a genuine signed save; returns the reason, or '' to keep the stored save
+  function copyWins(raw, copy) {
+    if (!copy || typeof copy.json !== 'string' || raw === copy.json) return '';
+    let L = null, C = null; try { L = JSON.parse(raw); C = JSON.parse(copy.json); } catch (e) { return ''; }
+    if (!L || !C) return '';
+    const lq = typeof L.sq === 'number' ? L.sq : null, cq = typeof C.sq === 'number' ? C.sq : null;
+    const notNewer = (lq != null && cq != null) ? lq <= cq : (Number(L.t) || 0) <= (Number(C.t) || 0);
+    if (!notNewer) return '';
+    let genuine = false;
+    try { const v = _lxLocalSaveVerdict(C, false); genuine = (v === 'ok' || v === 'legacy') && (!C.sig5 || sig5Ok(C)); } catch (e) {}
+    if (!genuine) return '';
+    return ((lq != null && lq === cq) || Number(L.t) === Number(C.t)) ? 'edited' : 'rolled back';
+  }
+  // the boot load runs synchronously, before IndexedDB can answer: here only the replacement token is read (and the copy, if
+  // it is already in memory); the copy that arrives later is compared in rbPrefetch
+  function rbPick(raw) {
+    adoptedNow = false;
+    let L = null; try { L = JSON.parse(raw); } catch (e) { return raw; }   // unreadable: the could-not-load path judges it
+    let tok = null; try { tok = sessionStorage.getItem(ADOPT_KEY); sessionStorage.removeItem(ADOPT_KEY); } catch (e) {}
+    if (tok && L && tok === adoptToken(L.t)) { adoptedNow = true; rbKeep(L, raw); return raw; }
+    const why = copyWins(raw, D);
+    if (!why) return raw;
+    note('save', why, L && L.t, null);
+    try { localStorage.setItem(SAVE_KEY, D.json); } catch (e) {}
+    return D.json;
+  }
+  function sig5Verdict(s, v) {
+    if (adoptedNow || (v !== 'ok' && v !== 'legacy')) return v;
+    if (s.sig5) { if (sig5Ok(s)) return v; note('save', 'whole-save signature', s.t, null); return 'bad'; }
+    let mk = null; try { mk = _lxSaveMarkRead(); } catch (e) {}
+    if (mk && mk.s5) { note('save', 'whole-save signature missing', s.t, null); return 'bad'; }
+    return v;
+  }
+  // the copy arrives after the boot load (the player is on the title menu): if the save that was loaded is an old one put back
+  // or an edited one, the newest save goes back into storage and the title menu reloads once onto it. _resetting stops the
+  // unload flush from writing the old state over it, as the import and backup paths do.
+  function rbPrefetch() {
+    try { const k = sessionStorage.getItem('lx_ac_rb'); if (k) { sessionStorage.removeItem('lx_ac_rb'); note('save', k, null, null); } } catch (e) {}
+    IDB.get('save').then((d) => {
+      if (!d || typeof d.json !== 'string' || D || adoptedNow) return;
+      D = d;
+      let raw = null; try { raw = localStorage.getItem(SAVE_KEY); } catch (e) {}
+      const why = raw ? copyWins(raw, d) : '';
+      if (!why) return;
+      try { localStorage.setItem(SAVE_KEY, d.json); sessionStorage.setItem('lx_ac_rb', why); } catch (e) { return; }
+      try { game._resetting = true; } catch (e) {}
+      location.reload();
+    });
+  }
   const P_KEYS = ['mojicoins', 'setshards', 'bankBalance', 'level', 'exp', 'expToNext', 'skillPoints', 'skillRankPoints',
     'baseAtk', 'baseDef', 'baseAcc', 'baseCrit', 'baseSpeed', 'baseJump', 'maxHp', 'maxMp'];
   function install() {
@@ -43816,6 +43926,7 @@ const _lxAc = (function () {
       for (const k of ['consumables', 'skillRanks', 'talents', 'treeUnlocked', 'tree', 'mastery']) guardBox(player, k, 'player.' + k);
       for (const k of ['achievements', 'bossDefeated', '_bossKills']) guardBox(game, k, 'game.' + k);
       setInterval(() => { if (checkAll()) { try { refreshGearCache(); } catch (e) {} } }, 3000);
+      rbPrefetch();   // v0.30.1677 ac-save
       sweepT = setInterval(() => { for (const r of recs) if (!pairOk(r)) { const was = r.v; r.v = -r.e; note('memory', r.label, was, r.v); } }, 3000);
     } catch (e) { on = false; }
     return on;
@@ -43824,7 +43935,9 @@ const _lxAc = (function () {
     install,
     get on() { return on; },
     report() { return log.map((x) => Object.assign({}, x)); },
-    items() { return checkAll(); },   // v0.30.1673 ac-boxes - clamps only; nothing to gain by calling it
+    items() { return checkAll(); },
+    seqStamp, sig5Stamp, rbKeep, rbPick, sig5Verdict,   // v0.30.1677 ac-save
+    adopt() { rbAdopt(); },   // v0.30.1673 ac-boxes - clamps only; nothing to gain by calling it
   };
 })();
 _lxAc.install();
@@ -53202,7 +53315,7 @@ async function _lxSteamCloudSync() {
     // only, so adopting a Steam Cloud save installed a DIFFERENT character over the previous one's
     // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
     // incoming character's currency down to a balance that was never theirs.
-    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
+    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {} try { if (_lxAc.on) _lxAc.adopt(); } catch (e) {}   // v0.30.1677 ac-save - a replacement made on purpose
     return 'reloading';
   }
   if (localRaw) _lxSteamCloudPush(localRaw, true);                               // local is ahead -> push it up
@@ -55139,9 +55252,12 @@ function _flushSaveStateNow() {
       player: pick(player, PLAYER_SAVE_FIELDS),
       game:   pick(game,   GAME_SAVE_FIELDS),
     };
+    try { if (_lxAc.on) _lxAc.seqStamp(s); } catch (e) {}   // v0.30.1677 ac-save
     try { if (typeof _lxLocalSaveSig === 'function') s.sig = _lxLocalSaveSig(s); } catch (e) {}   // v0.30.414 — see _lxLocalSaveVerdict
+    try { if (_lxAc.on) _lxAc.sig5Stamp(s); } catch (e) {}   // v0.30.1677 ac-save
     // v0.30.1181 paint-save - the Wardrobe paint goes under its own key, and only when it changed (see _lxPaintWrite)
     const _json = _lxPaintWrite(s);
+    try { if (_lxAc.on) _lxAc.rbKeep(s, _json); } catch (e) {}   // v0.30.1677 ac-save
     try { if (s.sig && typeof _lxSaveMarkWrite === 'function') _lxSaveMarkWrite(s); } catch (e) {}
     // Server-sided MMO-lite: also push the save to the cloud account (throttled,
     // best-effort, cloud sessions only — no-op for Guest / local / offline).
@@ -56837,6 +56953,7 @@ function _lxSaveMarkWrite(s) {
     const p = s && s.player || {};
     const m = { t: s.t, setshards: p.setshards | 0, mojicoins: Math.floor(p.mojicoins || 0), bankBalance: Math.floor(p.bankBalance || 0) };
     if (s.sig) { const pg = _lxLocalSaveSigParts(s); m.v = s.v; m.p = pg[0]; m.g = pg[1]; m.sig = s.sig; if (LX_SAVE_SIG_WRITE === 4) m.tag = 'ls4'; }   // anticheat - the verified copy (_lxLedgerRestore); tagged only for ls4, the ls3 shape stays byte-identical
+    if (s.sig5) m.s5 = 1;   // v0.30.1677 ac-save
     localStorage.setItem(_LX_SAVE_MARK_KEY, JSON.stringify(m));
   } catch (e) {}
 }
@@ -57011,7 +57128,7 @@ function importSave(input) {
     // only, so importing a save installed a DIFFERENT character over the previous one's
     // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
     // incoming character's currency down to a balance that was never theirs.
-    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
+    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {} try { if (_lxAc.on) _lxAc.adopt(); } catch (e) {}   // v0.30.1677 ac-save - a replacement made on purpose
 
           game._resetting = true;   /* block the beforeunload save-flush from clobbering the import */
           if (game._saveTimer) { try { clearTimeout(game._saveTimer); } catch (_) {} game._saveTimer = null; }
@@ -57161,14 +57278,16 @@ function _sanitizePlayerSaveNumerics(p) {
 
 function loadState() {
   try {
-    const raw = localStorage.getItem(SAVE_KEY); if (!raw) return false;
+    let raw = localStorage.getItem(SAVE_KEY); if (!raw) return false;
+    try { if (_lxAc.on) raw = _lxAc.rbPick(raw); } catch (e) {}   // v0.30.1677 ac-save - an old save put back loads the newest copy
     // v0.29.560 — SECURITY: proto-safe parse. This is THE sink — `s.player`
     // and `s.game` go straight into Object.assign below, which is what turns
     // an own `__proto__` key into a real prototype swap. See _lxSafeJsonParse.
     const s = _lxSafeJsonParse(raw);
     // v0.30.414 — verify BEFORE any migration or clamp touches the objects
     // (the signature covers them as stored). Applied after the assigns below.
-    let _sigVerdict = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(s, _lxMarkTagged()) : 'unsigned';   // bughunt save-1 - strict once this browser's copy is ls4
+    let _sigVerdict = (typeof _lxLocalSaveVerdict === 'function') ? _lxLocalSaveVerdict(s, _lxMarkTagged()) : 'unsigned';
+    try { if (_lxAc.on) _sigVerdict = _lxAc.sig5Verdict(s, _sigVerdict); } catch (e) {}   // v0.30.1677 ac-save - the whole-save signature   // bughunt save-1 - strict once this browser's copy is ls4
     // v0.25.773 — Surface save-version mismatch instead of silently wiping.
     // Previously any future SAVE_VERSION bump would just `return false`,
     // discarding the save with no feedback. Now: log a console warning AND
@@ -57975,7 +58094,7 @@ function clearSave() {
   // load the clamp then either did nothing (the dead character was richer, so the
   // guard silently failed open) or filed the new character's currency down to a
   // stranger's balance. Clearing the save clears its marker.
-  try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
+  try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {} try { if (_lxAc.on) _lxAc.adopt(); } catch (e) {}   // v0.30.1677 ac-save - a replacement made on purpose
   // v0.25.774 — Also wipe the first-time-tip flags + tutorial-seen marker
   // so a save-wiped player re-experiences the Lv-5 world-map tip, the
   // canvas-tap hotkey hint, and the tutorial modal. Previously only the
@@ -58064,7 +58183,7 @@ function _lxRestoreBackup(id) {
     // only, so restoring a backup slot installed a DIFFERENT character over the previous one's
     // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
     // incoming character's currency down to a balance that was never theirs.
-    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
+    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {} try { if (_lxAc.on) _lxAc.adopt(); } catch (e) {}   // v0.30.1677 ac-save - a replacement made on purpose
 
     // Block the beforeunload save-flush from clobbering the restored blob
     // with the still-live session state (same guard as importSave).
@@ -177560,7 +177679,7 @@ async function _lxCloudSyncOnLogin(session) {
     // only, so adopting a web cloud save installed a DIFFERENT character over the previous one's
     // {setshards, mojicoins, bankBalance} fingerprint; an unsigned load then clamped the
     // incoming character's currency down to a balance that was never theirs.
-    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {}
+    try { if (typeof _LX_SAVE_MARK_KEY !== 'undefined') localStorage.removeItem(_LX_SAVE_MARK_KEY); } catch (e) {} try { if (_lxAc.on) _lxAc.adopt(); } catch (e) {}   // v0.30.1677 ac-save - a replacement made on purpose
 
     try { sessionStorage.setItem('lx_resume', JSON.stringify(session)); } catch (e) {}
     location.reload();
