@@ -11,7 +11,7 @@
 //      had two jobs); nobody says her name (the epilogue: she hears it aloud first from her brother), the Codex names her only
 //      once she has told you; every knight on the roll swore "We stand until", the Smith armed the Twelve with the Bastion's
 //      own Taur among them, and the officer's theory is the epilogue's receipt ("put somewhere small");
-//   6. MOVES WITH THE STORY: 'Which gate did you hold?' answers with the oath, then "until someone pushes" once the Bull's
+//   6. MOVES WITH THE STORY: 'Which gate was yours to hold?' answers with the oath, then "until someone pushes" once the Bull's
 //      House is dark (the anvil gets the words too); after the ending his gloves stay off and he chooses the forge; his idle
 //      bubbles come from his own pool in each state, drawn by the real bubble tick;
 //   7. CAPS: chapters <= 170 words, his lines <= 60, bubbles <= 6 naming no key; 8. no page errors.
@@ -56,7 +56,7 @@ try {
     const barn = () => (game.npcs || []).find((n) => n.name === 'Barnaby');
     const brok = () => (game.npcs || []).find((n) => n.name === 'Brok');
     const talk = async () => { if (!barn()) return { text: '', opts: [] }; game._brokMenu = null; openNPC(barn()); await sleep(300); await settle(); return { text: text(), opts: opts() }; };
-    const wall = async () => { await talk(); const had = await click(/Which gate did you hold\?/); await settle(); const t = text(); await close(); return had ? t : null; };
+    const wall = async () => { await talk(); const had = await click(/Which gate was yours to hold\?/); await settle(); const t = text(); await close(); return had ? t : null; };
     const bubble = async () => { const b = barn(); if (!b) return null; b._chat = null; b._chatNext = 0; const r0 = Math.random; Math.random = () => 0;
       for (let i = 0; i < 30 && !b._chat; i++) { game.paused = false; await sleep(100); } Math.random = r0; return b._chat ? b._chat.text : null; };
     // ---- 1. placed
