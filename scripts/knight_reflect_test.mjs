@@ -5,7 +5,8 @@
 // carries a retaliation scaled by your ATK. Real fight, no mocks: a Lv-50 knight (ATK pinned 400, god mode - the blow is still
 // computed and shown) stands in a boss's touch.
 //   - GUARDIAN: every reflected blow's ATK retaliation is 5x ATK through the boss's armour (v0.30.1525 op-pass: it skipped armour), in a steady stream
-//   - HOLY SHIELD: its retaliation is 12x ATK through the armour - including while its invulnerability stops the blows
+//   - HOLY SHIELD: its retaliation is 1x ATK + 15x DEF through the armour (per user; it was 12x, then 24x ATK) - including while its
+//     invulnerability stops the blows; DEF is read without the +9999 of the first 2.5 s (the invulnerability itself)
 //   - SEPARATE WINDOWS: a Holy Shield cast during Guardian no longer cuts Guardian's reflect off when its own 5 s end
 //   - BOTH MASTERS: a dragoon's Guardian reflects the same as a crusader's (the reflect belongs to the Knight job)
 //   - WARDS: a warded boss takes 1 from the retaliation and its break gauge fills, as from any blow (the boss ward is held off in
@@ -16,7 +17,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SERVE = process.env.SERVE_ROOT || ROOT, PORT = process.env.PORT || '11694';
 const require = createRequire(path.join(ROOT, 'x.js')); const { chromium } = require('playwright-core');
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x ? '  [' + x + ']' : '')); };
-const G_ATK = 10, H_ATK = 24;   // v0.30.1604: doubled with every ATK multiplier (5 / 12 before)
+const G_ATK = 10;   // v0.30.1604: doubled with every ATK multiplier (5 before)
+const H_RET = (r) => 1 + 15 * r.def / r.atk;   // Holy Shield: 1x ATK + 15x DEF, over ATK (per user)
 // v0.30.1525 op-pass - a reflected blow is two hits on one step: the share (thorns) and the ATK retaliation (retaliate)
 const blows = (r) => { const by = new Map(); for (const [t, d, inv, sk] of r.refl) { const b = by.get(t) || { t, total: 0, ret: 0, inv }; b.total += d; if (sk === 'retaliate') b.ret += d; by.set(t, b); } return [...by.values()]; };
 // each retaliation over ATK x the armour share x what the boss's state added to that hit (crit streak, punish window - thorns get them too)
@@ -67,7 +69,7 @@ const fight = async (master, plan) => {
       else castSkill(step[1]);
     }
     window.hitMonster = orig;
-    return { atk: getAtk(), refl: refl.map(([t, d, inv, sk, f]) => [t - t0, d, inv, sk, f]), share, marks, wardFed, wardBroke, hsUntil: (player._holyReflectUntil | 0) - t0, gUntil: (player._guardianReflect | 0) - t0 };
+    return { atk: getAtk(), def: _lxParryDef(), refl: refl.map(([t, d, inv, sk, f]) => [t - t0, d, inv, sk, f]), share, marks, wardFed, wardBroke, hsUntil: (player._holyReflectUntil | 0) - t0, gUntil: (player._guardianReflect | 0) - t0 };
   }, { master, plan });
   r.errs = errs.slice(0, 2); await page.close(); return r;
 };
@@ -82,7 +84,7 @@ try {
   // 2. Holy Shield: its reflect, through the invulnerability too
   const h = await fight('crusader', [[1, 'holyShield'], [5 * 60 + 20, 'mark', 'end']]);
   const hB = blows(h).filter((b) => b.t <= 300), hIn = hB.filter((b) => b.inv), hAll = rets(h, (x) => x[0] <= 300);
-  ok(`Holy Shield's retaliation is ${H_ATK}x ATK through the boss's armour`, !h.err && hAll.length >= 3 && Math.min(...hAll) >= H_ATK * 0.9 && Math.max(...hAll) <= H_ATK * 1.1, h.err || `${hAll.length} blows, ${hAll.map((v) => v.toFixed(1)).join(' ')}x ATK after armour share ${h.share.toFixed(3)} and punish windows`);
+  ok(`Holy Shield's retaliation is 1x ATK + 15x DEF through the boss's armour (${H_RET(h).toFixed(2)}x ATK at DEF ${h.def}, ATK ${h.atk})`, !h.err && hAll.length >= 3 && Math.min(...hAll) >= H_RET(h) * 0.9 && Math.max(...hAll) <= H_RET(h) * 1.1, h.err || `${hAll.length} blows, ${hAll.map((v) => v.toFixed(1)).join(' ')}x ATK after armour share ${h.share.toFixed(3)} and punish windows`);
   ok('Holy Shield reflects while its invulnerability stops the blows', hIn.length >= 1, `${hIn.length} bounced while invulnerable`);
   // 3. Guardian, then Holy Shield 3 s in: Guardian's reflect must carry on after Holy Shield's 5 s
   const g = await fight('crusader', [[1, 'guardian'], [180, 'holyShield'], [180 + 300 + 120, 'mark', 'hsOver'], [180 + 300 + 120 + 8 * 60, 'mark', 'end']]);
