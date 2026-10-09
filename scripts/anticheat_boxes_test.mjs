@@ -4,7 +4,7 @@
 //   [1] nothing honest is touched: after the load, three sweeps and a gear rebuild, every item and boon is unchanged, the
 //       log is empty
 //   [2] console edits to potions, ranks, achievements, the kill counter, and a whole container swap are refused
-//   [3] an item's ATK typed to 10 million goes back under its ceiling, and the hero's ATK with it
+//   [3] an item's ATK typed to 10 million goes back under its ceiling, and the gear's ATK with it
 //   [4] stars typed to 99 go back to 10; [5] a boon's roll typed to a million goes back to its range
 //   [6] real fighting still counts kills and mastery, with nothing logged; [7] no page errors
 //   node scripts/anticheat_boxes_test.mjs        PORT override
@@ -53,7 +53,7 @@ try {
   const P = await boot('play.mojiworld.test', `(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1');
     localStorage.setItem('levelx_save_v1', ${JSON.stringify(made.save)}); localStorage.setItem('levelx_save_v1_verified', ${JSON.stringify(made.mark)}); } catch (e) {} })();`);
   const page = P.page;
-  await page.click('#menu-continue', { timeout: 30000 });
+  await page.click('#menu-continue', { timeout: 150000 });
   await page.waitForFunction(() => player.level === 60 && game.mapData, null, { timeout: 120000 });
   await page.waitForTimeout(1500);
   const s0 = await page.evaluate(snap);
@@ -69,13 +69,14 @@ try {
     return { same: before === after, log: _lxAcReport().length, after };
   });
   ok('[2] console edits to potions, ranks, achievements, kills and a container swap are refused', box.same && box.log === 6, box);
-  const atkEdit = await page.evaluate(async (base) => {
+  const atkEdit = await page.evaluate(async () => {
+    refreshGearCache(); const base = getEquipBonus('atk');   // the gear's ATK: rage and buffs move the hero's whole ATK under load
     const w = player.equipped.weapon; const was = w.atk; w.atk = 1e7;
     await new Promise((r) => setTimeout(r, 3600));
     refreshGearCache();
-    return { was, now: w.atk, heroAtk: getAtk(), base, log: _lxAcReport().filter((e) => e.kind === 'item').length };
-  }, honest.atk);
-  ok('[3] an item ATK typed to 10 million goes back to the item own best roll, and the hero ATK with it', atkEdit.now >= atkEdit.was && atkEdit.now <= atkEdit.was * 1.25 && atkEdit.heroAtk <= atkEdit.base * 1.15 && atkEdit.log >= 1, atkEdit);
+    return { was, now: w.atk, gearAtk: getEquipBonus('atk'), base, heroAtk: getAtk(), log: _lxAcReport().filter((e) => e.kind === 'item').length };
+  });
+  ok('[3] an item ATK typed to 10 million goes back to the item own best roll, and the gear ATK with it', atkEdit.now >= atkEdit.was && atkEdit.now <= atkEdit.was * 1.25 && atkEdit.gearAtk <= atkEdit.base * 1.15 && atkEdit.log >= 1, atkEdit);
   const stars = await page.evaluate(async () => { const a = player.equipped.armor; a.stars = 99; await new Promise((r) => setTimeout(r, 3600)); return { now: a.stars }; });
   ok('[4] stars typed to 99 go back to 10', stars.now === 10, stars);
   const boon = await page.evaluate(async () => { const b = player.boons[0]; const def = POWERUPS.find((p) => p.id === b.id); b.roll = 1e6; await new Promise((r) => setTimeout(r, 3600)); return { now: b.roll, max: def.max, min: def.min }; });

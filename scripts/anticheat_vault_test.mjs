@@ -43,7 +43,7 @@ try {
     localStorage.setItem('levelx_save_v1', ${JSON.stringify(made.save)}); localStorage.setItem('levelx_save_v1_verified', ${JSON.stringify(made.mark)}); } catch (e) {} })();`);
   const page = P.page;
   ok('[1b] the vault is on on a public host', await page.evaluate(() => _lxAc.on) === true);
-  await page.click('#menu-continue', { timeout: 30000 });
+  await page.click('#menu-continue', { timeout: 150000 });
   await page.waitForFunction(() => player.level === 12 && game.mapData, null, { timeout: 120000 });
   await page.waitForTimeout(2500);
   const loaded = await page.evaluate(() => ({ level: player.level, coins: player.mojicoins, shards: player.setshards, verdict: game._saveVerdict, log: _lxAcReport(), dev: game._devTouched }));

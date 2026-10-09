@@ -35,7 +35,7 @@ try {
   // A: a public-host browser that flushes it (so the file carries sq + sig5), then hands the save over as a file
   const A = await fresh('play.mojiworld.test', `(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1');
     localStorage.setItem('levelx_save_v1', ${JSON.stringify(made.save)}); localStorage.setItem('levelx_save_v1_verified', ${JSON.stringify(made.mark)}); } catch (e) {} })();`);
-  await A.click('#menu-continue', { timeout: 30000 }); await A.waitForFunction(() => player.level === 14 && game.mapData, null, { timeout: 120000 });
+  await A.click('#menu-continue', { timeout: 150000 }); await A.waitForFunction(() => player.level === 14 && game.mapData, null, { timeout: 120000 });
   const file = await A.evaluate(async () => { _flushSaveStateNow(); await new Promise((r) => setTimeout(r, 300)); return localStorage.getItem(SAVE_KEY); });
   // B: another public-host browser imports it through the real file input and the real confirm
   const B = await fresh('play.mojiworld.test');

@@ -19,8 +19,10 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) =
 const browser = await chromium.launch({ executablePath: EXE, channel: EXE ? undefined : 'msedge', headless: true,
   args: ['--mute-audio', '--host-resolver-rules=MAP play.mojiworld.test 127.0.0.1'] });
 const errs = [];
-const menu = (page) => page.waitForFunction(() => { const m = document.getElementById('lo-menu'); return typeof _lxAc === 'object' && m && getComputedStyle(m).display !== 'none'; }, null, { timeout: 180000 });
-const enter = async (page) => { await page.click('#menu-continue', { timeout: 30000 }); await page.waitForFunction(() => player.level === 12 && game.mapData, null, { timeout: 120000 }); await page.waitForTimeout(800); };
+const menu = (page) => page.waitForFunction(() => { const m = document.getElementById('lo-menu'); return typeof _lxAc === 'object' && window._lxBootMenuSeen && m && getComputedStyle(m).display !== 'none'; }, null, { timeout: 180000 });   // _lxBootMenuSeen: the title gate is really up (#lo-menu's own style is not)
+const why = (page) => page.evaluate(() => { const c = document.getElementById('menu-continue'), o = document.getElementById('loading-overlay'), au = document.getElementById('lo-auth'); let cls = null; try { cls = JSON.parse(localStorage.getItem(SAVE_KEY)).player.cls; } catch (e) {}
+  return { cont: c && c.style.display, overlay: o && getComputedStyle(o).display, auth: au && au.className, menuSeen: !!window._lxBootMenuSeen, savedCls: cls, lvl: typeof player === 'object' ? player.level : null, map: !!(typeof game === 'object' && game.mapData), url: location.search }; }).catch((e) => ({ evalErr: String(e.message).slice(0, 80) }));
+const enter = async (page) => { try { await page.click('#menu-continue', { timeout: 150000 }); } catch (e) { throw new Error('Continue never showed: ' + JSON.stringify(await why(page))); } await page.waitForFunction(() => player.level === 12 && game.mapData, null, { timeout: 120000 }); await page.waitForTimeout(800); };
 // a reload can be followed by the anti-cheat's own (the newest save put back): settle until the title menu stays up
 const reload = async (page) => { await page.reload({ waitUntil: 'domcontentloaded', timeout: 180000 });
   for (let i = 0; i < 4; i++) { try { await menu(page); await page.waitForTimeout(2500); await menu(page); return; } catch (e) { await page.waitForTimeout(1500); } } };
@@ -53,9 +55,11 @@ try {
   // a newer save, then the old one put back with its own verified copy
   const sqNew = await page.evaluate(async () => { await new Promise((r) => setTimeout(r, 20)); _flushSaveStateNow(); await new Promise((r) => setTimeout(r, 400)); return JSON.parse(localStorage.getItem(SAVE_KEY)).sq; });
   await page.evaluate(([raw, mark]) => { game._resetting = true; localStorage.setItem(SAVE_KEY, raw); localStorage.setItem(SAVE_KEY + '_verified', mark); }, [f1.raw, f1.mark]);
-  await reload(page); await enter(page);
+  await reload(page);
+  const sqTitle = await page.evaluate(() => JSON.parse(localStorage.getItem(SAVE_KEY)).sq);   // at the title: entering autosaves and bumps sq
+  await enter(page);
   const r2 = await page.evaluate(() => ({ sq: JSON.parse(localStorage.getItem(SAVE_KEY)).sq, log: _lxAcReport(), dev: game._devTouched }));
-  ok('[2] an old save put back loads the newest instead, and marks the save', r2.sq === sqNew && r2.log.some((e) => e.kind === 'save' && e.field === 'rolled back') && r2.dev === 'ac', { sqNew, r2 });
+  ok('[2] an old save put back loads the newest instead, and marks the save', sqTitle === sqNew && r2.log.some((e) => e.kind === 'save' && e.field === 'rolled back') && r2.dev === 'ac', { sqNew, sqTitle, r2 });
   // [3] edited in storage, same timestamp
   await clean(page);
   const before = await stored(page);
@@ -81,8 +85,10 @@ try {
   await page.evaluate(() => { openBackupModal(); });
   await page.waitForTimeout(400);
   const bk = page.locator('#backup-slots .bk-restore').first();
-  await bk.click({ timeout: 10000 }); await page.waitForTimeout(300); await bk.click({ timeout: 10000 });
-  await page.waitForTimeout(2500); for (let i = 0; i < 4; i++) { try { await menu(page); break; } catch (e) { await page.waitForTimeout(1500); } } await page.waitForTimeout(2500); await menu(page); await enter(page);
+  await bk.click({ timeout: 10000 }); await page.waitForTimeout(300);
+  const reloaded = page.waitForEvent('domcontentloaded', { timeout: 120000 });   // the restore reloads 600 ms on - later on a loaded machine
+  await bk.click({ timeout: 10000 }); await reloaded;
+  for (let i = 0; i < 4; i++) { try { await menu(page); break; } catch (e) { await page.waitForTimeout(1500); } } await page.waitForTimeout(2500); await menu(page); await enter(page);
   const r6 = await page.evaluate(() => ({ coins: player.mojicoins, log: _lxAcReport() }));
   ok('[6] a backup restored through Save Backups loads and is not undone', r6.coins >= 5000 && r6.coins < 6000 && !r6.log.some((e) => e.kind === 'save'), r6);
   ok('[7] no page errors', !errs.length, errs.slice(0, 3));

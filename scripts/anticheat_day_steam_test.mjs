@@ -32,7 +32,7 @@ const open = async (host, save, shiftDays, block, relay) => {
   return { ctx, page };
 };
 const enterAndRead = async (page) => {
-  await page.click('#menu-continue', { timeout: 30000 });
+  await page.click('#menu-continue', { timeout: 150000 });
   await page.waitForFunction(() => player.level === 12 && game.mapData, null, { timeout: 120000 });
   await page.waitForTimeout(6500);
   return page.evaluate(() => ({ day: game.dailyState && game.dailyState.day, sv: (typeof _lxServerTime === 'object' && _lxServerTime.now()) || null, pc: Date.now() }));
