@@ -62,8 +62,8 @@ const stats = await page.evaluate(() => {
   const defVal = A.def * _mobArmorClass({ type: 'aetherion' }) * 2.2;
   return { def: A.def, atk: A.atk, hp: A.hp, taken: +(300 / (defVal + 300) * 100).toFixed(1) };
 });
-ok('Aetherion is harder: DEF 72 -> 165, ATK 576 -> 662',
-  stats.def === 165 && stats.atk === 662,
+ok('Aetherion is harder: DEF 72 -> 165 (140 after the -15% DEF in v0.30.1646, per user), ATK 576 -> 662',
+  stats.def === 140 && stats.atk === 662,
   `def ${stats.def}, atk ${stats.atk}, now takes ${stats.taken}% per hit (was 65.5%)`);
 
 // ---- a REAL kill, and what it drops ----------------------------------------
