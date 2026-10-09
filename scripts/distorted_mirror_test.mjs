@@ -51,7 +51,7 @@ const _sz = [...hb.matchAll(/(\w+):\{w:(\d+),h:(\d+),mul:/g)].map((r) => Math.sq
 const olWant = {}; for (const k of NEW) { const dv = def(k); olWant[k] = +Math.min(2.34, Math.max(1, 1.62 * Math.sqrt(Math.sqrt(dv.w * dv.h) / _med))).toFixed(2); }
 ok('each still\'s outer outline draws its size-aware weight in game (solid-ink median within 20%)', NEW.every((k) => Math.abs(widths[k] / olWant[k] - 1) <= 0.2), { widths, olWant });
 const q = (id) => { const i = game.indexOf('\n  ' + id + ': {'); return game.slice(i, game.indexOf('\n  },', i)); };
-ok('Lyra\'s chapters I-II hunt Harea; chapter IV hunts Taiger and Lady Honk (with Willeo)', /target: 'harea', count: 12/.test(q('q_lyra_loan')) && /target: 'harea', count: 18/.test(q('q_lyra_tear')) && /target: 'taiger',/.test(q('q_lyra_kin')) && /\{ target: 'lady_honk', +count: 8 \}/.test(q('q_lyra_kin')));
+ok('Lyra\'s chapters I-II hunt Harea; chapter IV hunts Taiger and Lady Honk (with Willeo)', /target: 'harea', count: 100/.test(q('q_lyra_loan')) && /target: 'harea', count: 200/.test(q('q_lyra_tear')) && /target: 'taiger',/.test(q('q_lyra_kin')) && /\{ target: 'lady_honk', +count: 100 \}/.test(q('q_lyra_kin')));
 ok('and their prose names the new keeper and the new copies', /Hera.'s starry robe/.test(q('q_lyra_tear')) && /Taiga, Lady Hong and Will stood in its mouth/.test(q('q_lyra_kin')) && /teacher.'s reflection holds a door/.test(q('q_kindest_hand')));
 // ---- in game
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT }); await new Promise((r) => setTimeout(r, 1500));

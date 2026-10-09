@@ -67,6 +67,15 @@ try {
     out.arc = { names: LY.map((id) => Q[id].name), prereqs: LY.map((id) => [].concat(Q[id].prereq || [])), levels: LY.map((id) => Q[id].levelReq) };
     fresh(); player.level = 50; for (const k of ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear']) player.quests.completed[k] = 1; tickQuestUnlocks(); acceptQuest('q_lyra_cut');
     toggleQuestJournal(); await sleep(400); const qm = document.getElementById('quest-modal'); out.arc.journal = qm ? qm.innerText.replace(/s+/g, ' ') : ''; try { toggleQuestJournal(); } catch (e) {}
+    // 7. kill counts of The Tear I-IV (per user, 2026-10-09): Harea 100 and 200, Elder Arlen 5, Taiger / Lady Honk / Willeo 100 each - and the game really asks for them
+    out.counts = { loan: Q.q_lyra_loan.count, tear: Q.q_lyra_tear.count, cut: Q.q_lyra_cut.count, kin: (Q.q_lyra_kin.objectives || []).map((o) => o.target + ':' + o.count).join(',') };
+    const ready = (id) => !!(player.quests.active[id] && player.quests.active[id].readyToHandIn) || !!player.quests.completed[id];
+    const go = (id, lv, pre) => { fresh(); for (const k of pre) player.quests.completed[k] = true; player.level = lv; tickQuestUnlocks(); acceptQuest(id); return player.quests.active[id]; };
+    const a = go('q_lyra_loan', 40, ['q_lyra_aperture']); out.run = { loanTarget: a && a.targetCount };
+    for (let i = 0; i < 99; i++) tickQuestKill('harea', false); out.run.loan99 = ready('q_lyra_loan'); tickQuestKill('harea', false); out.run.loan100 = ready('q_lyra_loan');
+    go('q_lyra_tear', 40, ['q_lyra_aperture', 'q_lyra_loan']); for (let i = 0; i < 199; i++) tickQuestKill('harea', false); out.run.tear199 = ready('q_lyra_tear'); tickQuestKill('harea', false); out.run.tear200 = ready('q_lyra_tear');
+    go('q_lyra_kin', 40, ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut']); for (let i = 0; i < 100; i++) { tickQuestKill('taiger', false); tickQuestKill('lady_honk', false); } for (let i = 0; i < 99; i++) tickQuestKill('willeo', false);
+    out.run.kin99 = ready('q_lyra_kin'); tickQuestKill('willeo', false); out.run.kin100 = ready('q_lyra_kin');
     return out;
   });
   check(R.pre.lyraVI.indexOf('q_lyra_forge') >= 0 && R.pre.lyraVI.indexOf('q_boss_sundered_smith') >= 0, 'Lyra VI needs Lyra V and the Smith', J(R.pre.lyraVI));
@@ -84,6 +93,8 @@ try {
   check(!R.arc.names.some((n) => /Lyra|Girl/.test(n)) && R.arc.names[1] === 'The Tear I — The Loan', 'no chapter title names her, and Chapter I (once about "the girl") is The Loan', J(R.arc.names));
   check(J(R.arc.prereqs) === J([[], ['q_lyra_aperture'], ['q_lyra_loan'], ['q_lyra_tear'], ['q_lyra_cut'], ['q_lyra_kin'], ['q_lyra_forge', 'q_boss_sundered_smith']]) && J(R.arc.levels) === J([20, 40, 40, 40, 40, 45, 50]), 'the chain, its prerequisites and its levels are untouched (ids and saves keep working)', J(R.arc.prereqs));
   check(/The Tear III — What the Weight Left Behind/.test(R.arc.journal) && !/Lyra/.test(R.arc.journal.slice(0, 4000)), 'the Journal shows the arc name on the chapter card', R.arc.journal.slice(0, 120));
+  check(R.counts.loan === 100 && R.counts.tear === 200 && R.counts.cut === 5 && R.counts.kin === 'taiger:100,lady_honk:100,willeo:100', 'The Tear I-IV ask for Harea x100, Harea x200, Elder Arlen x5 and Taiger / Lady Honk / Willeo x100 each', J(R.counts));
+  check(R.run.loan99 === false && R.run.loan100 === true && R.run.tear199 === false && R.run.tear200 === true && R.run.kin99 === false && R.run.kin100 === true, 'the game really counts them: ready to hand in on the 100th / 200th kill, and only when all three captains are done', J(R.run));
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

@@ -59,7 +59,7 @@ const r = await page.evaluate(() => {
       rewardCoins: (q.rewards || {}).mojicoins,
     });
   }
-  out.prereqExists = ['q_lyra_tear','q_lyra_cut','q_lyra_kin','q_lyra_forge','q_lyra_last'].every((k) => !!QUESTS[(QUESTS[k] || {}).prereq]);
+  out.prereqExists = ['q_lyra_tear','q_lyra_cut','q_lyra_kin','q_lyra_forge','q_lyra_last'].every((k) => [].concat((QUESTS[k] || {}).prereq || []).every((x) => !!QUESTS[x]));   // chapter VI also needs the Smith (2026-10-09): a list
   // the subtle Sovereign hint must still be present for chapter IV to pay off
   const _src = [...document.querySelectorAll('script')].map((x) => x.textContent).join('');
   out.sovereignHint = /sapphire signet/i.test(_src);
@@ -82,7 +82,7 @@ const r = await page.evaluate(() => {
   // attach to and the Lv 20 -> Lv 40 arc stops being one idea
   out.trialNamesAperture = /APERTURE/.test((QUESTS.q_inner_dim_trial || {}).desc || '');
   // the chain must be a LINE, not three quests that happen to exist
-  out.chain = ids.map((i) => ((QUESTS[i] || {}).prereq) || null);
+  out.chain = ids.map((i) => { const p = (QUESTS[i] || {}).prereq; return Array.isArray(p) ? p[0] : (p || null); });   // the first prerequisite is still the previous chapter (VI also needs the Smith)
   // the target's maps must be enterable at the quest's own level gate
   out.targetMapLevels = spawnMaps('harea').map((m) => ({ map: m, levelReq: MAPS[m].levelReq }));
   out.totalQuests = Object.keys(QUESTS).length;
