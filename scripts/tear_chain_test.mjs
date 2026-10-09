@@ -43,6 +43,7 @@ try {
     const fresh = () => { player.quests = { active: {}, completed: {}, unlocked: {} }; _ensureQuests(); };
     fresh();
     for (const k of _QUEST_STORY_CHAIN) { if (k === 'q_distorted_portal') break; player.quests.completed[k] = 1; }
+    for (const k of ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish']) player.quests.completed[k] = 1;   // the Smith also waits for Barnaby IV (per user 2026-10-09; scripts/smith_gate_test.mjs pins the gate)
     player.job = 'knight'; player.master = null; player.level = 40; tickQuestUnlocks(); clear();
     acceptQuest('q_distorted_portal');
     toasts.length = 0; _completeQuest('q_distorted_portal'); await sleep(300);
@@ -75,7 +76,7 @@ try {
     return out;
   });
   const [P, S, L, A] = R.def;
-  ok('1. the line: the Smith opens on the portal, the Last Step on the Smith, the Sanctum on the Last Step', S.prereq === 'q_distorted_portal' && L.prereq === 'q_boss_sundered_smith' && A.prereq === 'q_last_step', R.def.map((d) => d.id + '<-' + d.prereq));
+  ok('1. the line: the Smith opens on the portal and Barnaby IV, the Last Step on the Smith, the Sanctum on the Last Step', JSON.stringify(S.prereq) === JSON.stringify(['q_distorted_portal', 'q_barnaby_finish']) && L.prereq === 'q_boss_sundered_smith' && A.prereq === 'q_last_step', R.def.map((d) => d.id + '<-' + d.prereq));
   ok('1. the three after the advancement are critical story quests nobody hands out (they start themselves)', [S, L, A].every((d) => d.critical && d.story && !d.giver), R.def.map((d) => [d.id, d.critical, d.story, d.giver]));
   ok('1. the Last Step hunts the copy on the Last Step at Lv 50, between the Smith (45) and the Sanctum (60)', L.kind === 'boss' && L.target === 'miraFallen' && L.lv === 50 && S.lv === 45 && A.lv === 60, L);
   ok('2. each card picks up the last film: the Vigil breaks, the ashes drift down, the tear lands', /Past him, the tear runs on\./.test(P.desc) && /^The Vigil broke like a mirror/.test(S.desc) && /^The Smith set his hammer down, and his ashes did not fall/.test(L.desc) && /^The copy fell\. Her one tear landed/.test(A.desc), [P.desc.slice(-40), S.desc.slice(0, 40), L.desc.slice(0, 40), A.desc.slice(0, 40)]);

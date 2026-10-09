@@ -31,6 +31,7 @@ const r = await page.evaluate(() => {
   const npcNames = new Set();
   for (const id in MAPS) for (const n of (MAPS[id].npcs || [])) if (n && n.name) npcNames.add(n.name);
   const spawnMaps = (t) => Object.keys(MAPS).filter((id) => (MAPS[id].spawns || []).some((s) => s.type === t));
+  const whereOf = (q) => (q.kind === 'visit' ? (MAPS[q.target] ? [q.target] : []) : spawnMaps(q.target));   // a visit quest's target is a MAP (Roll Call walks to the Forge since 2026-10-09)
   for (const qid of ids) {
     const q = QUESTS[qid];
     if (!q) { out.chapters.push({ qid, missing: true }); continue; }
@@ -39,8 +40,8 @@ const r = await page.evaluate(() => {
       qid, name: q.name, giver: q.giver, story: !!q.story, noScale: !!q.noScale,
       handIn: !!q.handIn, levelReq: q.levelReq, target: q.target, prereq: q.prereq || null,
       giverPlaced: npcNames.has(q.giver),
-      targetMaps: spawnMaps(q.target),
-      targetMapGate: Math.max(0, ...spawnMaps(q.target).map((m) => MAPS[m].levelReq || 1)),
+      targetMaps: whereOf(q),
+      targetMapGate: Math.max(0, ...whereOf(q).map((m) => MAPS[m].levelReq || 1)),
       navResolves: !!d, navKind: d && d.kind, navWho: d && d.who,
       descChars: (q.desc || '').length,
       objectives: (q.objectives || []).map((o) => ({ target: o.target, spawns: spawnMaps(o.target).length })),
@@ -83,7 +84,7 @@ const r = await page.evaluate(() => {
   out.jargonHits = JARGON.filter((w) => new RegExp(w, 'i').test(descs));
   // It must sit INSIDE the Sundered Smith arc, not beside it.
   out.smithArcLink = ((QUESTS.q_barnaby_five || {}).prereq === 'q_visit_lavaCavern')
-    && (QUESTS.q_barnaby_roll || {}).target === 'sundered_smith';
+    && (QUESTS.q_barnaby_finish || {}).target === 'sundered_smith' && [].concat((QUESTS.q_boss_sundered_smith || {}).prereq || []).indexOf('q_barnaby_finish') >= 0;
   out.totalQuests = Object.keys(QUESTS).length;
   return out;
 });
@@ -111,7 +112,7 @@ for (const c of r.chapters) {
 check(r.prereqsReal, 'every prereq points at a real quest', r.chain);
 check(JSON.stringify(r.chain) === JSON.stringify(['q_visit_lavaCavern', 'q_barnaby_five', 'q_barnaby_roll']),
   'the three chapters form one ordered chain hanging off Brok\'s errand', r.chain);
-check(r.smithArcLink, 'it runs INSIDE the Sundered Smith arc (Brok\'s errand in, the Smith as chapter II\'s target)', r.smithArcLink);
+check(r.smithArcLink, 'it runs INSIDE the Sundered Smith arc (Brok\'s errand in, the Smith as chapter IV\'s target and the Forge\'s quest waiting on it)', r.smithArcLink);
 check(r.theoryLabels.length === 4 && r.unsignedFifth, 'chapter I still carries four named theories plus the unsigned fifth', { labelled: r.theoryLabels, fifth: r.unsignedFifth });
 console.log(`  plain-language: ${r.sentenceCount} sentences, avg ${r.avgWords.toFixed(1)} words, longest ${r.longest}`);
 check(r.avgWords <= 20, 'the prose averages under 20 words per sentence (plain, not clipped)', r.avgWords);

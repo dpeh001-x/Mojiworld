@@ -71,7 +71,7 @@ try {
   check(!/Accept from/.test(r.giverless.row) && /Hunt/.test(r.giverless.row) && !r.giverless.locate.includes(r.giverless.target) && !/turn in to/i.test(r.giverless.locate), 'GIVERLESS: a Codex study points at its hunt, and Locate names the creature (not its id) with no turn-in', J(r.giverless));
   check(/(Accept from|From) Taiga/.test(r.mirror.before) && /Warp with Taiga/.test(r.mirror.after) && !/no walking route/.test(r.mirror.after) && r.mirror.trackerHasWarp, 'MIRROR: Accept from Taiga, then Warp with Taiga (row and tracker), never "no walking route"', J(r.mirror));
   check(!/pq_piece/.test(r.spire.tracker) && !/pq_piece/.test(r.spire.locate), 'SPIRE: neither the tracker nor Locate prints the raw id for Ticket Rush Stage 2', J(r.spire));
-  check(r.next.beat === 'q_boss_sundered_smith' && /Next: The Forge That Broke/.test(r.next.row) && /Lv 45/.test(r.next.row) && !r.next.row.includes(r.next.errand), 'NEXT: with the portal done below Lv 45, the tracker names the Forge and its level (no errand in the way)', J(r.next));
+  check(r.next.beat === 'q_barnaby_five' && /Next: I . Five Stories About a Smith/.test(r.next.row) && /Lv 45/.test(r.next.row) && !r.next.row.includes(r.next.errand), 'NEXT: with the portal done below Lv 45, the tracker names Barnaby I (the Smith waits on Barnaby IV) and its level (no errand in the way)', J(r.next));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await ctx.close(); await browser.close(); server.kill();
