@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1672';
+const GAME_VERSION = 'v0.30.1673';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -43678,6 +43678,115 @@ const _lxAc = (function () {
     recs.push(r);
     return r;
   }
+  // v0.30.1673 ac-boxes - ANTI-CHEAT, LAYER 2. Accessors only see a field being replaced, so the containers a cheat edits IN
+  // PLACE (potions, skill ranks, talents, the skill tree, mastery, achievements, boss records) are held behind a Proxy whose
+  // writes and deletes pass the same who-wrote-it test. The field itself is an accessor that wraps whatever object the game
+  // assigns (loads, resets and the prologue replace these wholesale). Reads are untouched: the Proxy has no get trap.
+  const boxed = new WeakSet(), boxOf = new WeakMap();
+  function box(o, label) {
+    if (!o || typeof o !== 'object' || boxed.has(o)) return o;
+    const had = boxOf.get(o); if (had) return had;
+    const p = new Proxy(o, {
+      set(t, k, v) { if (t[k] === v) return true; if (foreign()) { note('write', label + '.' + String(k), t[k], v); return true; } t[k] = v; return true; },
+      deleteProperty(t, k) { if (!(k in t)) return true; if (foreign()) { note('delete', label + '.' + String(k), t[k], undefined); return true; } return delete t[k]; },
+      defineProperty(t, k, d) { if (foreign()) { note('define', label + '.' + String(k), t[k], d && d.value); return true; } return Reflect.defineProperty(t, k, d); },
+    });
+    boxed.add(p); boxOf.set(o, p);
+    return p;
+  }
+  function guardBox(obj, key, label) {
+    let cur = box(obj[key], label);
+    dp(obj, key, {
+      enumerable: true, configurable: false,
+      get() { return cur; },
+      set(nv) { if (nv === cur) return; if (foreign()) { note('write', label, cur, nv); return; } cur = box(nv, label); },
+    });
+  }
+  // ITEMS AND BOONS. An item is a plain object the game edits in many places, so it is not boxed; instead its numbers are held
+  // under a CEILING: for every stat, the best the catalog and the affix tables can give (the top catalog value x the god
+  // weapon's 1.2 x transcendence, plus four affixes rolled at their maximum at Lv 200 on the full level curve - which also
+  // covers items rolled before v0.29.401, when percentages took that curve), times 3. An honest item cannot come near it, an
+  // item from an older build with wider ranges cannot either; a number typed into the console usually lands far past it. A
+  // stat over its ceiling goes back to that item's own best roll (honestMax), stars to MAX_STARS, a tier two or more past its catalog entry's
+  // to that tier, a boon's roll past twice its definition's range to the top of it. Checked whenever the gear totals are
+  // rebuilt, before each save, and every 3 s.
+  const NOT_STATS = new Set(['price', 'tier', 'rarity', 'stars', 'dropLevel', '_pity', 'godTier']);
+  let CEIL = null, TOPTIER = 10, BYNAME = null, AFFBYID = null, NOSCALE = null;
+  function ceilings() {
+    if (CEIL) return CEIL;
+    const cat = {}, aff = {}; BYNAME = new Map(); AFFBYID = Object.create(null);
+    const take = (into, o) => { for (const k in o) { const v = o[k]; if (typeof v === 'number' && isFinite(v) && !NOT_STATS.has(k)) { const a = Math.abs(v); if (!(a <= into[k])) into[k] = a; } } };
+    try { for (const c in ITEM_POOL) for (const it of (ITEM_POOL[c] || [])) { take(cat, it); if (it && it.name) BYNAME.set(it.name, it); if (it && it.tier > TOPTIER) TOPTIER = it.tier; } } catch (e) {}
+    const R = Math.random;
+    try {
+      for (const T of [PREFIXES, SUFFIXES]) for (const id in T) {
+        const a = T[id]; if (!a || typeof a.roll !== 'function') continue;
+        const own = AFFBYID[id] = {};
+        for (const r of [0, 0.999999]) { Math.random = () => r; try { const o = a.roll(); take(aff, o); take(own, o); } catch (e) {} }   // every roll is monotonic in random()
+      }
+    } catch (e) {} finally { Math.random = R; }
+    const LV = 1 + 199 * 0.04;
+    let noScale = null; try { noScale = _AFFIX_NO_SCALE; } catch (e) {}
+    NOSCALE = noScale;
+    CEIL = {};
+    for (const k of new Set(Object.keys(cat).concat(Object.keys(aff)))) {
+      const max = (cat[k] || 0) * 1.2 * 1.08 + 4 * (aff[k] || 0) * (noScale && noScale.has(k) ? 1 : LV);
+      CEIL[k] = { max, ceil: max * 3 + (max < 2 ? 0.1 : 5) };
+    }
+    return CEIL;
+  }
+  // where an item over its ceiling goes back to: its OWN best roll - its catalog base (x1.2 for a god roll), plus the top of
+  // each affix it carries at its own drop level (full curve), x1.08 if transcended - never more than the general maximum
+  function honestMax(it, k, c) {
+    const base = it.baseName && BYNAME ? BYNAME.get(it.baseName) : null;
+    if (!base || !Array.isArray(it.affixes)) return c.max;
+    const d = Math.max(1, Math.min(200, Number(it.dropLevel) || 1)), lv = 1 + (d - 1) * 0.04;
+    let m = (typeof base[k] === 'number' ? Math.abs(base[k]) : 0) * (it.rarity === 'god' || it.godTier ? 1.2 : 1);
+    for (const id of it.affixes) { const a = AFFBYID[id]; if (a && a[k]) m += a[k] * (NOSCALE && NOSCALE.has(k) ? 1 : lv); }
+    if (it.transcended) m *= 1.08;
+    if (typeof base[k] === 'number' && Number.isInteger(base[k])) m = Math.ceil(m);
+    return Math.min(c.max, m);
+  }
+  function checkItem(it, where) {
+    if (!it || typeof it !== 'object') return false;
+    const C = ceilings(); let hit = false;
+    let top = 10; try { top = MAX_STARS; } catch (e) {}
+    if (typeof it.stars === 'number' && !(it.stars >= 0 && it.stars <= top)) { note('item', where + '.stars', it.stars, top); it.stars = it.stars > top ? top : 0; hit = true; }
+    const base = it.baseName && BYNAME ? BYNAME.get(it.baseName) : null;
+    if (base && typeof it.tier === 'number' && typeof base.tier === 'number' && it.tier >= base.tier + 2) { note('item', where + '.tier', it.tier, base.tier); it.tier = base.tier; hit = true; }
+    else if (typeof it.tier === 'number' && it.tier > TOPTIER) { note('item', where + '.tier', it.tier, TOPTIER); it.tier = TOPTIER; hit = true; }
+    for (const k in it) {
+      const c = C[k], v = it[k];
+      if (!c || typeof v !== 'number') continue;
+      if (v !== v || Math.abs(v) > c.ceil) { const m = honestMax(it, k, c); note('item', where + '.' + k, v, m); it[k] = v !== v ? 0 : (v < 0 ? -m : m); hit = true; }
+    }
+    return hit;
+  }
+  function checkBoons() {
+    let hit = false;
+    try {
+      const list = player.boons; if (!Array.isArray(list)) return false;
+      for (let i = 0; i < list.length; i++) {
+        const b = list[i]; if (!b || typeof b.roll !== 'number') continue;
+        const def = POWERUPS.find((p) => p.id === b.id); if (!def || typeof def.max !== 'number') continue;
+        const hi = Math.max(def.min || 0, def.max), span = Math.max(Math.abs(def.min || 0), Math.abs(def.max));
+        if (b.roll !== b.roll || Math.abs(b.roll) > span * 2 + 1) { note('boon', 'player.boons[' + i + '].roll', b.roll, hi); b.roll = hi; hit = true; }
+      }
+    } catch (e) {}
+    return hit;
+  }
+  function checkAll() {
+    if (!on) return false;
+    let hit = false;
+    try {
+      const eq = player.equipped;
+      if (eq && typeof eq === 'object') for (const s in eq) if (checkItem(eq[s], 'equipped.' + s)) hit = true;
+      const inv = player.inventory;
+      if (Array.isArray(inv)) for (let i = 0; i < inv.length; i++) if (checkItem(inv[i], 'inventory[' + i + ']')) hit = true;
+      if (checkBoons()) hit = true;
+    } catch (e) {}
+    return hit;
+  }
   const P_KEYS = ['mojicoins', 'setshards', 'bankBalance', 'level', 'exp', 'expToNext', 'skillPoints', 'skillRankPoints',
     'baseAtk', 'baseDef', 'baseAcc', 'baseCrit', 'baseSpeed', 'baseJump', 'maxHp', 'maxMp'];
   function install() {
@@ -43688,6 +43797,10 @@ const _lxAc = (function () {
     try {
       for (const k of P_KEYS) guard(player, k, 'player.' + k);
       devRec = guard(game, '_devTouched', 'game._devTouched');
+      guard(game, 'kills', 'game.kills'); guard(game, '_coinsEarned', 'game._coinsEarned');   // v0.30.1673 ac-boxes
+      for (const k of ['consumables', 'skillRanks', 'talents', 'treeUnlocked', 'tree', 'mastery']) guardBox(player, k, 'player.' + k);
+      for (const k of ['achievements', 'bossDefeated', '_bossKills']) guardBox(game, k, 'game.' + k);
+      setInterval(() => { if (checkAll()) { try { refreshGearCache(); } catch (e) {} } }, 3000);
       sweepT = setInterval(() => { for (const r of recs) if (!pairOk(r)) { const was = r.v; r.v = -r.e; note('memory', r.label, was, r.v); } }, 3000);
     } catch (e) { on = false; }
     return on;
@@ -43696,6 +43809,7 @@ const _lxAc = (function () {
     install,
     get on() { return on; },
     report() { return log.map((x) => Object.assign({}, x)); },
+    items() { return checkAll(); },   // v0.30.1673 ac-boxes - clamps only; nothing to gain by calling it
   };
 })();
 _lxAc.install();
@@ -43978,6 +44092,7 @@ function getEquipBonus(key) {
   let cache = player._equipBonusCache;
   if (!cache) {
     cache = {};
+    try { if (_lxAc.on) _lxAc.items(); } catch (e) {}   // v0.30.1673 ac-boxes - an item over its ceiling is put back before its stats count
     // v0.29.469 — player.equipped can be null here. loadState calls getMaxHp()
     // 23 lines BEFORE its own `if (!player.equipped)` defaulter, so a save
     // carrying "equipped": null threw right through the load. _equipBonusCache
@@ -54966,6 +55081,7 @@ function _lxStartGamepad() {
 try { window._lxSteamCloudPush = _lxSteamCloudPush; window._lxSteamCloudSync = _lxSteamCloudSync; window._lxStartGamepad = _lxStartGamepad; window._lxPadPoll = _lxPadPoll; } catch (e) {}
 
 function _flushSaveStateNow() {
+  try { if (_lxAc.on) _lxAc.items(); } catch (e) {}   // v0.30.1673 ac-boxes - and before it is signed into the save
   // v0.26.x — Prologue: the flash-forward plays at Lv.100 on a fresh save;
   // a flush here would persist the apex state. Hard-gated until restore.
   if (window._prologueActive || window._prologuePending) return;
@@ -176265,6 +176381,7 @@ function _prologueFinish(skipped) {
     const fp = JSON.parse(_snapP || 'null');
     if (fp) {
       for (const k of Object.keys(player)) delete player[k];
+      for (const k of Object.keys(player)) if (!(k in fp)) player[k] = undefined;   // v0.30.1673 ac-boxes - a guarded key survives the delete: give it what the delete did
       Object.assign(player, fp);
       _restored = true;
     }
@@ -176277,7 +176394,7 @@ function _prologueFinish(skipped) {
       // v0.30.x — restore-or-remove, so a ladder that did not exist before the intro
       // does not come back as a fully grandfathered one.
       if (fg.early) game.early = fg.early; else delete game.early;
-      if (fg.achievements) game.achievements = fg.achievements; else delete game.achievements;
+      if (fg.achievements) game.achievements = fg.achievements; else game.achievements = undefined;   // v0.30.1673 ac-boxes - the guarded field cannot be deleted
       if ('comboRecord' in fg) game.comboRecord = fg.comboRecord || 0;   // v0.30.898
       if ('dailyState' in fg) { if (fg.dailyState) game.dailyState = fg.dailyState; else delete game.dailyState; }
     }
