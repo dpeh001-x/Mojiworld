@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1680';
+const GAME_VERSION = 'v0.30.1681';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -18958,6 +18958,39 @@ function _summonAnimFrame(key, state, epochMs) {   // v0.30.1674 summon-plant: e
 // The anim frames carry ~16% transparent padding for no-cutoff; foot-anchored
 // draws must plant the CONTENT bottom (not the frame bottom) on the foot line or
 // the summon floats. Returns 1 for the unpadded static sprite (no change).
+// v0.30.1681 summon-feet (per user: "the 2 legs of non flying summons ... touching or below the floor line"). The two lowest FOOT TIPS of a frame: local
+// lows of its bottom profile (per column the lowest row with alpha >= 128; a tip is a column no neighbour within W/36 px undercuts (a paw, not a toe),
+// within the bottom 30% of the body; tips within that span are one foot). gap = (lowest row - the second tip's row) / H: how far the
+// higher near foot sits above the lower one, as a fraction of the frame. Scanned once per image (the still, each walk / attack frame).
+const _LX_SUMMON_FOOT_CAP = 8;   // px: the most the lower foot sinks for the higher one (a rearing bite keeps its lift)
+const _summonFeet = new WeakMap();
+function _summonFeetFrac(img) {
+  if (!img || !(img.naturalWidth || img.width)) return { gap: 0 };
+  if (_summonFeet.has(img)) return _summonFeet.get(img);
+  let out = { gap: 0 };
+  try {
+    const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(img, 0, 0);
+    const d = c.getImageData(0, 0, W, H).data, low = new Int32Array(W).fill(-1);
+    let top = -1, bottom = -1;
+    for (let x = 0; x < W; x++) for (let y = H - 1; y >= 0; y--) if (d[(y * W + x) * 4 + 3] >= 128) { low[x] = y; if (y > bottom) bottom = y; break; }
+    for (let y = 0; y < H && top < 0; y++) for (let x = 0; x < W; x++) if (d[(y * W + x) * 4 + 3] >= 128) { top = y; break; }
+    if (bottom >= 0 && top >= 0) {
+      const band = bottom - (bottom - top) * 0.3, win = Math.max(8, Math.round(W / 36)), tips = [];   // ~28 px on a 1014 canvas: a paw, not a toe
+      for (let x = 0; x < W; x++) {
+        if (low[x] < band) continue;
+        let tip = true;
+        for (let k = Math.max(0, x - win); k <= Math.min(W - 1, x + win); k++) if (low[k] > low[x]) { tip = false; break; }
+        if (tip) { const f = tips[tips.length - 1]; if (f && x - f.r <= win + 2) { f.r = x; if (low[x] > f.low) f.low = low[x]; } else tips.push({ l: x, r: x, low: low[x] }); }
+      }
+      tips.sort((p, q) => q.low - p.low);
+      if (tips.length >= 2) out = { gap: Math.max(0, (bottom - tips[1].low) / H) };
+    }
+  } catch (_) {}
+  _summonFeet.set(img, out);
+  return out;
+}
 const _summonCBot = new WeakMap();
 function _summonContentBottomFrac(img) {
   // v0.29.487 — canvas-aware (see _lxBoxSourceOf): baked frames have width,
@@ -91039,7 +91072,7 @@ function drawMinions() {
       // (_lxWholePx discipline): unrounded coords made summons the one
       // entity class that could land on sub-pixels and shimmer.
       const _drawX = Math.round(sx + mn.w / 2 - _targetW / 2);
-      const _drawY = Math.round(yOff + mn.h - _targetH * _botFrac + 6 + _SUMMON_PUSH_DOWN);   // content bottom on the foot line (+6px floor nudge, +global push-down; the -13px minion lift is folded into yOff above)
+      const _drawY = Math.round(yOff + mn.h - _targetH * _botFrac + 6 + _SUMMON_PUSH_DOWN + Math.min(_LX_SUMMON_FOOT_CAP, _summonFeetFrac(_sprite).gap * _targetH) + 1);   // v0.30.1681 summon-feet: the higher foot meets the line too   // content bottom on the foot line (+6px floor nudge, +global push-down; the -13px minion lift is folded into yOff above)
       // v0.26.x — Per user: flip the sprite to face the move/walk direction
       // (undead summons are authored facing right; mirror when heading left).
       // v0.30.288 perf — blit through the non-mutating downscale cache: the
@@ -168148,13 +168181,11 @@ function drawWolf(pet, tintColor) {
     // under the floor and +_wereDrop put the werewolf 22px under. _SUMMON_PUSH_DOWN itself is
     // untouched: it is shared with drawMinions, the sword summon and the shadow clones.
     // v0.30.1273 summon-plant - far paws on the floor (see _LX_SUMMON_FAR_FOOT). The flying eagle is not planted.
-    const _farF = (pet && pet.flying) ? 0 : (_LX_SUMMON_FAR_FOOT[_petKey || _wolfKey] || 0);
+    // v0.30.1681 summon-feet: the HIGHER of the two near feet lands 2 px into the line on EVERY frame, read from the frame itself (_summonFeetFrac) - the
+    // still's constant (_LX_SUMMON_FAR_FOOT, kept above for the record) left wolf_alpha's second paw 6 px above the line, the
+    // werewolf's 2, the sky wolf's 4 on the frames whose feet sit further apart. The flying eagle is not planted.
     let _plant = 0;
-    if (_farF > 0) {
-      const _rb = (typeof _spriteContentBox === 'function') ? _spriteContentBox(_refSpr) : null;
-      const _cPx = (_rb && _rb.bottom > _rb.top) ? (_rb.bottom - _rb.top + 1) / _refAh * _dH : _dH * 0.62;
-      _plant = Math.round(_farF * _cPx) + 1;
-    }
+    if (!(pet && pet.flying)) { const _ff = _summonFeetFrac(_wolfDraw); _plant = Math.round(Math.min(_LX_SUMMON_FOOT_CAP, _ff.gap * _dH)) + 2; }
     const _top = sy + H - _dH * _cbf + _plant;
     const _left = sx + W / 2 - _dW / 2;            // center the aspect-correct sprite over the hitbox
     ctx.save();
