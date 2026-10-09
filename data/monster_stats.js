@@ -200,7 +200,7 @@ window.LX_MONSTER_STATS = {
   zodiac_pisces:                  { lv: 92, hp: 21331200, atk:70278, def:1020, exp: 1564288, coin: 329664 },   // v0.30.280 floors
   towerArbiter:                   { lv:  1, hp:   18919, atk:   69, def: 255, exp:    1388, coin:     0 },
   towerSovereign:                 { lv:  1, hp:   99099, atk:   69, def: 213, exp:   7267, coin:     0 },
-  miraFallen:                     { lv: 55, hp: 2400000, atk:  7400, def: 660, exp: 150000, coin:  46000 },   // v0.30.1627 mira-fallen: between the Lv 48-50 bosses and Aetherion (Lv 65)
+  miraFallen:                     { lv: 55, hp: 3520000, atk:  7400, def: 561, exp: 220000, coin:  46000 },   // v0.30.1627 mira-fallen: between the Lv 48-50 bosses and Aetherion (Lv 65); v0.30.1668: HP x1.467, EXP with it, DEF -15% (the v0.30.1646 rework, per user)
 };
 
 // Elite / Elder spawn multipliers. Set to 1 to flatten that variant.
