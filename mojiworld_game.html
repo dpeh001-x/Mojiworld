@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1666';
+const GAME_VERSION = 'v0.30.1667';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -43599,6 +43599,105 @@ const player = {
 
 // Starting potions
 player.consumables = { hp_s: 10, mp_s: 10 };
+// v0.30.1667 ac-vault - ANTI-CHEAT, LAYER 1: THE VALUE VAULT (per user: "an anticheat system that does not trigger system warnings,
+// it is to prevent users from cheating or changing values and hacking"). The values a cheat goes for first - money, level, EXP,
+// points, base stats - live in a closure the console cannot reach, behind accessors on `player`:
+//   - WHO WROTE IT. A write is accepted only when every frame of the call stack is the game's own code (this page or one of
+//     its own <script src> files). A write typed in the console, run from a snippet or an injected script, or made by a game
+//     function the console called, is refused: the value simply stays what it was.
+//   - TWO COPIES. Each value is also kept negated. A memory editor (Cheat Engine and the like) that finds and changes the
+//     number breaks the pair, and the next read - or the 3 s sweep - puts the value back.
+// Quiet by design (per user: no system warnings): no dialog, no console line, nothing native, nothing a scanner could flag.
+// A refusal goes to an in-memory log (_lxAcReport(), for the dev console) and marks the save Steam-ineligible through the
+// signed _devTouched mark, set to 'ac' (the signed field lists are frozen per generation, so no new field is added).
+// Off on developer surfaces by HOST (file://, localhost, LAN - every test harness), never by the LX_DEV flag a web player can
+// set; ?lxac=1 turns it on anywhere (it can only turn it on). The packaged Steam app is always on.
+const _lxAc = (function () {
+  'use strict';
+  const NE = Error, dp = Object.defineProperty;
+  const FRAME_URL = /([a-z][\w+.-]*:\/\/[^\s()]+?)(?=:\d+:\d+)/i;
+  const FOREIGN = /eval at |debugger eval code|<anonymous>:\d+:\d+|__puppeteer_evaluation_script__/;
+  const strip = (u) => String(u).replace(/[?#].*$/, '');
+  const log = [], recs = [];
+  let on = false, installed = false, sweepT = null, devRec = null;
+  let self = '';
+  try { const m = FRAME_URL.exec(String(new NE().stack || '')); self = m ? strip(m[1]) : ''; } catch (e) {}
+  function activeHere() {
+    try {
+      if (/[?&]lxac=1(?:&|$)/.test(location.search)) return true;
+      if (window.MOJI_PACKAGED === true || location.port === '47821') return true;
+      if (location.protocol === 'file:') return false;
+      const h = location.hostname;
+      return !(/^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h));
+    } catch (e) { return false; }
+  }
+  function ownUrl(u) {
+    if (u === self) return true;
+    try { const sc = document.scripts; for (let i = 0; i < sc.length; i++) if (sc[i].src && strip(sc[i].src) === u) return true; } catch (e) {}
+    return false;
+  }
+  // true when a frame on the current stack is not the game's own code
+  function foreign() {
+    if (!self) return false;                                   // stacks unreadable in this engine: never refuse
+    let st = '';
+    const lim = NE.stackTraceLimit, pst = NE.prepareStackTrace;
+    try {
+      NE.stackTraceLimit = 100; NE.prepareStackTrace = undefined;
+      if (NE.prepareStackTrace !== undefined) return true;     // a stack formatter someone pinned in place
+      st = String(new NE().stack || '');
+    } catch (e) { return true; }
+    finally { try { NE.stackTraceLimit = lim; NE.prepareStackTrace = pst; } catch (e) {} }
+    const lines = st.split('\n');
+    for (let i = 1; i < lines.length; i++) {
+      const ln = lines[i];
+      if (FOREIGN.test(ln)) return true;
+      const m = FRAME_URL.exec(ln);
+      if (m && !ownUrl(strip(m[1]))) return true;
+    }
+    return false;
+  }
+  function note(kind, field, from, to) {
+    if (log.length < 60) log.push({ t: Date.now(), kind, field, from, to });
+    if (devRec && devRec.v !== 'ac' && devRec.v !== true) { devRec.v = 'ac'; devRec.e = null; }   // Steam-ineligible (signed)
+  }
+  const pairOk = (r) => typeof r.v !== 'number' || r.v !== r.v || r.e === -r.v;
+  function guard(obj, key, label) {
+    const r = { v: obj[key], e: null, label };
+    r.e = typeof r.v === 'number' ? -r.v : null;
+    dp(obj, key, {
+      enumerable: true, configurable: false,
+      get() { if (!pairOk(r)) { const was = r.v; r.v = -r.e; note('memory', label, was, r.v); } return r.v; },
+      set(nv) {
+        if (nv === r.v) return;
+        if (foreign()) { note('write', label, r.v, nv); return; }
+        r.v = nv; r.e = typeof nv === 'number' ? -nv : null;
+      },
+    });
+    recs.push(r);
+    return r;
+  }
+  const P_KEYS = ['mojicoins', 'setshards', 'bankBalance', 'level', 'exp', 'expToNext', 'skillPoints', 'skillRankPoints',
+    'baseAtk', 'baseDef', 'baseAcc', 'baseCrit', 'baseSpeed', 'baseJump', 'maxHp', 'maxMp'];
+  function install() {
+    if (installed) return on;
+    installed = true;
+    on = activeHere();
+    if (!on) return false;
+    try {
+      for (const k of P_KEYS) guard(player, k, 'player.' + k);
+      devRec = guard(game, '_devTouched', 'game._devTouched');
+      sweepT = setInterval(() => { for (const r of recs) if (!pairOk(r)) { const was = r.v; r.v = -r.e; note('memory', r.label, was, r.v); } }, 3000);
+    } catch (e) { on = false; }
+    return on;
+  }
+  return {
+    install,
+    get on() { return on; },
+    report() { return log.map((x) => Object.assign({}, x)); },
+  };
+})();
+_lxAc.install();
+function _lxAcReport() { return _lxAc.report(); }   // v0.30.1667 ac-vault - what the vault refused this session (dev console)
 // v0.30.1320 - WHO FELLED YOU (per user: "when killed do not say felled by msplinter or the projectile it should always be the
 // monster or boss name"). The death screen printed player._lastDamageSource as written - a shot's sprite key (msplinter),
 // a monster's type id, an attack's label. That label stays as it is (the pothole icon reads it); beside it
@@ -52988,7 +53087,7 @@ function _lxSteamTrusted() {
   try {
     const v = game && game._saveVerdict;
     if (v === 'bad' || v === 'unsigned') return false;
-    if (game && (game._importVerdict === 'unverified' || game._devTouched)) return false;
+    if (game && (game._importVerdict === 'unverified' || game._devTouched)) return false;   // v0.30.1667 ac-vault: 'ac' = the anti-cheat refused a write (see _lxAc)
     return true;
   } catch (e) { return false; }
 }
