@@ -35,7 +35,8 @@ try {
     // unlocking: a hero one level short does not see it, a hero at the level does
     const fresh = () => { player.quests = { active: {}, completed: {}, unlocked: {}, progress: {} }; _ensureQuests(); };
     const open = (id, lv, done) => { fresh(); for (const d of done || []) player.quests.completed[d] = true; player.level = lv; tickQuestUnlocks(); return !!(player.quests.unlocked[id] || player.quests.active[id]); };
-    out.unlock = { h1_49: open('q_hourglass_1', 49), h1_50: open('q_hourglass_1', 50), h2_55: open('q_hourglass_2', 55, ['q_hourglass_1']), h2_56: open('q_hourglass_2', 56, ['q_hourglass_1']) };
+    const SM = ['q_boss_sundered_smith'];   // Hourglass I follows the Smith (questline order pass, 2026-10-09)
+    out.unlock = { h1_49: open('q_hourglass_1', 49, SM), h1_50: open('q_hourglass_1', 50, SM), h1_noSmith: open('q_hourglass_1', 50), h2_55: open('q_hourglass_2', 55, ['q_hourglass_1'].concat(SM)), h2_56: open('q_hourglass_2', 56, ['q_hourglass_1'].concat(SM)) };
     // what a hand-in really pays, at the quest's own level
     const hand = (id) => { const q = Q[id]; fresh(); player.level = q.levelReq; player.exp = 0; player.expToNext = _lxLevelCost(q.levelReq); player.quests.active[id] = { targetCount: q.count || 1, rewardScale: 1 };
       player._pqStagePaid = {}; player._pqChainRuns = 0; const lvUp = window._maybeLevelUp; window._maybeLevelUp = function () {}; try { _completeQuest(id); } catch (e) {} finally { window._maybeLevelUp = lvUp; } return player.exp; };
@@ -53,7 +54,7 @@ try {
   const E = R.exp;
   check(E.q_hourglass_1[1] >= 0.15 && E.q_hourglass_1[1] <= 0.16 && E.q_hourglass_2[1] >= 0.15 && E.q_hourglass_2[1] <= 0.16, 'Hourglass I and II still pay about 15.5% of their own level (not a pay cut)', J(E));
   check(E.q_hourglass_1[0] < E.q_hourglass_2[0] && E.q_hourglass_2[0] < E.q_hourglass_3[0], 'the arc still pays more as it climbs (I < II < III)', J(E));
-  check(R.unlock.h1_49 === false && R.unlock.h1_50 === true, 'Hourglass I opens at Lv 50, not at 49', J(R.unlock));
+  check(R.unlock.h1_49 === false && R.unlock.h1_50 === true && R.unlock.h1_noSmith === false, 'Hourglass I opens at Lv 50 once the Smith is done, not at 49 and not before him', J(R.unlock));
   check(R.unlock.h2_55 === false && R.unlock.h2_56 === true, 'Hourglass II opens at Lv 56, not at 55 (with I done)', J(R.unlock));
   check(R.paid.h1 === 966198 && R.paid.h2 === 1696446, 'a hand-in pays the written EXP (966198 and 1696446)', J(R.paid));
   check(errs.length === 0, 'no page errors', errs.join(' | '));

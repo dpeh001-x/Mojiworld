@@ -48,8 +48,8 @@ const r = await page.evaluate(() => {
       rewardCoins: (q.rewards || {}).mojicoins,
     });
   }
-  out.chain = ids.map((i) => ((QUESTS[i] || {}).prereq) || null);
-  out.prereqsReal = ids.every((i) => { const p = (QUESTS[i] || {}).prereq; return !p || !!QUESTS[p]; });
+  out.chain = ids.map((i) => { const p = (QUESTS[i] || {}).prereq; return Array.isArray(p) ? p[0] : (p || null); });   // chapter I also needs the portal (2026-10-09): its first prerequisite is still the errand
+  out.prereqsReal = ids.every((i) => { const p = (QUESTS[i] || {}).prereq; return !p || [].concat(p).every((x) => !!QUESTS[x]); });
 
   const _src = [...document.querySelectorAll('script')].map((x) => x.textContent).join('');
   // The linchpin: chapter III's whole reveal is that BOTH men have forge soot
@@ -83,7 +83,7 @@ const r = await page.evaluate(() => {
                   'apprenticeship', 'counterpart page', 'gauntlets', 'recognises as his own'];
   out.jargonHits = JARGON.filter((w) => new RegExp(w, 'i').test(descs));
   // It must sit INSIDE the Sundered Smith arc, not beside it.
-  out.smithArcLink = ((QUESTS.q_barnaby_five || {}).prereq === 'q_visit_lavaCavern')
+  out.smithArcLink = ([].concat((QUESTS.q_barnaby_five || {}).prereq || []).indexOf('q_visit_lavaCavern') >= 0)
     && (QUESTS.q_barnaby_finish || {}).target === 'sundered_smith' && [].concat((QUESTS.q_boss_sundered_smith || {}).prereq || []).indexOf('q_barnaby_finish') >= 0;
   out.totalQuests = Object.keys(QUESTS).length;
   return out;

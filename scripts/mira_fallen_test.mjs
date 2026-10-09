@@ -42,7 +42,7 @@ try {
   ok('the Last Step is a Lv 50 boss arena that spawns her, behind the Sundered Forge (a door each way)', R.arena.lv === 50 && R.arena.boss && R.arena.spawns === 'miraFallen' && /sundered_forge/.test(R.arena.back) && R.arena.forgeDoor, R.arena);
   ok('she spawns alone, Lv 55, a super boss but not hyper, her name unsaid', R.me && R.me.n === 1 && R.me.others === 0 && R.me.lv === 55 && R.me.sup && !R.me.hyper && R.me.name === 'The Woman Who Turned Back', R.me);
   ok('her five sets decode (idle 9, walk 9, Twin Verdict 16, cast 16, Gate 16) and her shot, column, warning, sand and shard art are registered', R.sets.idle === 9 && R.sets.walk === 9 && R.sets.attack === 16 && R.sets.cast === 16 && R.sets.collapse === 16 && Object.values(R.art).every(Boolean), { sets: R.sets, art: R.art });
-  ok('Lyra VI (after V, given by Hera, Lv 50) is hunted here', R.quest.target === 'miraFallen' && R.quest.prereq === 'q_lyra_forge' && R.quest.giver === 'Hera' && R.quest.lv === 50 && R.quest.story, R.quest);
+  ok('Lyra VI (after V, given by Hera, Lv 50) is hunted here', R.quest.target === 'miraFallen' && [].concat(R.quest.prereq).indexOf('q_lyra_forge') >= 0 && R.quest.giver === 'Hera' && R.quest.lv === 50 && R.quest.story, R.quest);
   const now0 = await page.evaluate(() => Date.now()); await page.clock.pauseAt(now0 + 1000);
   const step = async (n, fn) => { for (let i = 0; i < n; i++) { await page.clock.runFor(16); if (fn) await page.evaluate(fn); } };
   const keep = () => { player.hp = getMaxHp(); player.invulnerable = 0; };
