@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1705';
+const GAME_VERSION = 'v0.30.1706';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -90029,9 +90029,10 @@ function _mojimonQteTry(m, dt) {
   _qteShackleStart(m);
   if (_QTE.active) {
     _QTE.mojimon = m;
-    if (_QTE.headEl) _QTE.headEl.innerHTML =
-      '⛓ BIND THE ' + (((monsterTypes[m.type] || {}).name) || m.type).toUpperCase() +
-      '<span style="display:block; font-size:11px; opacity:0.8; font-weight:600;">complete the sequence to capture it</span>';
+    // v0.30.1706 the card's own title structure (v0.30.1695): ornaments either side, the sub-line on its own row (.lxq-hsub)
+    if (_QTE.headEl) { const _o = (typeof _qteOrn === 'function') ? _qteOrn : () => '';
+      _QTE.headEl.innerHTML = '<span class="lxq-hrow">' + _o('l') + '<span class="lxq-ttl lxq-bind">BIND THE ' + (((monsterTypes[m.type] || {}).name) || m.type).toUpperCase() + '</span>' + _o('r') + '</span>'
+        + '<span class="lxq-hsub">complete the sequence to capture it</span>'; }
   }
 }
 // Companion renderer — the species' own dex sprite on the minion chassis,
@@ -128968,6 +128969,19 @@ function _qteDom() {
 #lx-qte .lxq-fill::after{content:'';position:absolute;right:-4px;top:50%;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;background:radial-gradient(circle,#ffffff 0 35%,var(--qBar3,#fff4b8) 62%,rgba(255,255,255,0) 74%);box-shadow:0 0 10px 2px var(--qBarGlow,rgba(255,216,74,.7));}
 #lx-qte .lxq-sub{margin-top:10px;font-family:inherit;font-style:normal;font-weight:600;font-size:12px;letter-spacing:1px;color:#dcd2fb;text-shadow:0 1px 2px rgba(0,0,0,.9),0 0 8px rgba(0,0,0,.6);}
 #lx-qte kbd{font-family:'Consolas','JetBrains Mono',monospace;font-style:normal;font-weight:700;font-size:11px;letter-spacing:.5px;vertical-align:0;padding:0 7px;margin:0 2px;border-radius:5px;color:#fff3d2;background:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,.04));border:1px solid color-mix(in srgb,var(--qB,#8a5cff) 70%,#ffffff);box-shadow:0 1px 0 rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.18);}
+/* v0.30.1706 a wrong key: the timer bar flashes red as the lock gains time */
+#lx-qte .lxq-card.err .lxq-fill{animation:lxqPenalty .55s ease-out;}
+@keyframes lxqPenalty{0%,30%{filter:hue-rotate(-50deg) saturate(2.4) brightness(1.15);box-shadow:inset 0 1px 0 rgba(255,255,255,.45),0 0 14px 3px rgba(255,70,70,.85)}100%{filter:none}}
+/* v0.30.1706 the binding ritual's title: a row of its own (ornaments + a long name that wraps), its sub-line under it; a column
+   head sizes the card to the wider row, where a wrapping row sized it as if both sat on one line */
+#lx-qte .lxq-head:has(> .lxq-hsub){flex-direction:column;gap:3px;}
+#lx-qte .lxq-hrow{display:flex;align-items:center;justify-content:center;gap:10px;}
+#lx-qte .lxq-ttl.lxq-bind{font-size:18px;letter-spacing:2.5px;line-height:1.25;white-space:normal;max-width:340px;}
+#lx-qte .lxq-hsub{font-size:11px;font-weight:600;letter-spacing:.8px;color:#dcd2fb;text-shadow:0 1px 2px rgba(0,0,0,.85);}
+/* v0.30.1706 no-backdrop mode strips the blur behind the translucent plate: make the plate itself carry the contrast */
+html.lx-nobackdrop #lx-qte .lxq-card::before{opacity:.92;}
+/* v0.30.1706 the lit key's arrow keeps a fine dark edge on a pale lock colour (the Judgement Seal's cream) */
+#lx-qte .lxq-chip.cur .lxq-arw{filter:drop-shadow(0 0 1px rgba(10,6,24,.95)) drop-shadow(0 1px 1px rgba(10,6,24,.85)) drop-shadow(0 0 6px var(--qCur,#ffd84a));}
 `;
   document.head.appendChild(st);
   const root = document.createElement('div');
@@ -129046,6 +129060,7 @@ function _qteShackleStart(m) {
   for (let i = 0; i < len; i++) _QTE.seq.push(_QTE_KEYS[(Math.random() * 4) | 0]);
   _QTE.idx = 0;
   _QTE.total = _QTE.remain = th.dur || 3000;
+  _QTE.extra = 0;   // v0.30.1706 time wrong keys have added to this lock (see _qtePress)
   // Treat all arrows as already-held for the first frame so a key the player
   // was walking with doesn't instantly count as the first QTE press.
   _QTE.prev = { arrowleft: true, arrowup: true, arrowdown: true, arrowright: true };
@@ -129135,6 +129150,10 @@ function _qteEnd(success, cured) {
   }
 }
 function _qtePress(key) {
+  // v0.30.1706 per user ("check that ... even fast pressing of the correct directions does not glitch"): the last correct key can
+  // break the lock from the keydown queue, and the poll in the same _qteFrame then passed a still-held arrow here - a 'wrong'
+  // press on a finished lock: the fail sound, the finished keys reset, the card shaken, a mistake counted, over the break.
+  if (!_QTE.active) return;
   if (key === _QTE.seq[_QTE.idx]) {
     const chip = _QTE.chips[_QTE.idx];
     if (chip) { chip.classList.remove('cur'); chip.classList.add('ok'); }
@@ -129148,7 +129167,15 @@ function _qtePress(key) {
     // Wrong key — progress resets, 300 ms penalty, card shakes.
     _QTE.idx = 0;
     _QTE.mistakes = (_QTE.mistakes || 0) + 1;
-    _QTE.remain = Math.max(220, _QTE.remain - 300);
+    // v0.30.1706 per user ("for those players that get it wrong, stun them for a little longer time"): a wrong key used to take
+    // 0.3 s OFF the lock, so mashing wrong keys freed you sooner. It now adds 0.4 s, and at most 1.5 s in all over the whole lock -
+    // a cap on what was ADDED, not on what is left, or a player mashing at random could top it up and stay held indefinitely.
+    // The bar's full width grows with it so it never reads over full, and the stun follows the lock.
+    const _add = Math.min(400, Math.max(0, 1500 - (_QTE.extra || 0)));
+    _QTE.extra = (_QTE.extra || 0) + _add;
+    _QTE.remain += _add;
+    _QTE.total = Math.max(_QTE.total, _QTE.remain);
+    player.stunTimer = _QTE.remain;
     audio.play('fail');
     if (typeof _playUiSfx === 'function') _playUiSfx('qte_wrong');
     for (let i = 0; i < _QTE.chips.length; i++) {
