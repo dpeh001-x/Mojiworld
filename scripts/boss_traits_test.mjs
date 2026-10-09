@@ -71,7 +71,7 @@ try {
   check(R.lines[0] === 'Drew his whole court into his jelly body to shield them from the flood, and has never let them out.' && /mirror copy/.test(R.lines[4] + R.lines[5] + R.lines[6] + R.lines[7]) && /the Twelve/.test(R.lines[11]) && /the tear/.test(R.lines[13]), 'the one-liners are tied to each story: the court, the tear\'s mirror copies, the Twelve\'s smith, the woman\'s tear', J(R.lines.slice(4, 8)));
   // Young Barnaby and the Sundered Smith are the same man a century apart: their lines rhyme without saying so
   const BV = R.voice.young_confused_barnaby, SV = R.voice.sundered_smith, BE = R.epiAll.young_confused_barnaby, SE = R.epiAll.sundered_smith, BL = R.lines[8], SL = R.lines[11];
-  check(/wall/.test(BV) && /shift/.test(BV) && /wall/.test(SV) && /shift/.test(SV), 'Barnaby and the Smith speak of the same two things, the wall and the shift', J({ BV, SV }));
+  check(/gate/.test(BV) && /shift/.test(BV) && /gate/.test(SV) && /shift/.test(SV), 'Barnaby and the Smith speak of the same two things, the gate and the shift', J({ BV, SV }));
   check(/finally understands the question/.test(BE) && /finally understands the question/.test(SE) && /stops guarding/.test(BE) && /stops guarding/.test(SE), 'their epitaphs share a shape: each finally understands the question and stops guarding', J({ BE: BE.slice(0, 60), SE: SE.slice(0, 60) }));
   check(/still at his post/.test(BL) && /still at his post/.test(SL) && /Twelve/.test(SL) && /the tear/.test(BL), 'their Codex lines both end on the post they will not leave', J({ BL, SL }));
   check(!/\bBarnaby\b.*\b(smith|Smith)\b.*same (man|person)|same man|same person|a century on/i.test(BV + SV + BE + SE + BL + SL), 'it stays vague: no line says outright that they are one man (the film does that)', '');

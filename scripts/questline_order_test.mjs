@@ -6,7 +6,7 @@
 //   - the portal's hand-off names what the Smith waits on (with its level) instead of 'opens at Lv 45' with nobody to see
 //   - three lines of text: the Smith's card says the Forge handed him back; his epitaph's soot is Barnaby's hands (not a Glasswind smith)
 //   [SERVE_ROOT=<dir with serve.js, data, art>] [PORT=n] node scripts/questline_order_test.mjs [page.html]
-import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import { existsSync, readFileSync } from 'node:fs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
 const SERVE_ROOT = process.env.SERVE_ROOT || ROOT, PORT = process.env.PORT || '12151';
@@ -119,6 +119,11 @@ try {
   check(R.open2.v_noIV === false && R.open2.v_IV === true && R.smith.main === true && R.smith.v === true, 'The Tear V stays shut until Barnaby IV, and one Smith kill completes it together with The Forge That Broke', J([R.open2, R.smith]));
   check(R.v.name === 'The Tear V \u2014 The Gate, or the Forge' && /what happened to the gate\.$/.test(R.v.desc) && !/what happened to the wall/.test(R.v.desc), 'The Tear V is "The Gate, or the Forge" and tells the Smith what happened to the gate (not the wall)', J([R.v.name, R.v.desc.slice(-60)]));
   check(!/right wall/i.test(R.gate.v + R.gate.iii + R.gate.ans + R.gate.bub) && /He always says the gate\./.test(R.gate.v) && /chose the gate: a breach question/.test(R.gate.iii) && /The gate, I always say\./.test(R.gate.ans) && /The gate\. Probably\./.test(R.gate.bub), 'Barnaby\'s "right wall" lines are "the gate" (no "right gate"): The Tear V, Barnaby III, his own answer and his bubble', J([R.gate.ans.slice(0, 120), R.gate.bub.slice(0, 120)]));
+  { const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');   // the wall motif of Barnaby, the boy, the Smith and Willeo is the gate (per user, 2026-10-09)
+    const gone = ['which wall to defend', 'which wall to hold', 'which wall was mine', 'Which wall did you hold', 'never picked a wall', 'checks a wall', 'every wall because', 'remembers the wall', 'I remember the wall', 'holding a wall nobody', 'which wall is his', 'checking which wall'];
+    const here = ['which gate to defend', 'which gate to hold', 'which gate was mine', 'Which gate did you hold', 'never picked a gate', 'checks a gate', 'every gate because', 'remembers the gate', 'I remember the gate', 'holding a gate nobody', 'which gate is his', 'checking which gate'];
+    check(gone.every((p) => src.indexOf(p) < 0) && here.every((p) => src.indexOf(p) >= 0), 'the wall motif of Barnaby, the boy, the Smith and Willeo now reads gate everywhere (quests, boss cards and voices, Codex, Barnaby, the toasts); the Bastion\'s own wall is untouched', J(gone.filter((p) => src.indexOf(p) >= 0)));
+    check(/keeps a wall that has not aged/.test(src) && /Raised on this wall/.test(src) && /the wall did not fall/.test(src), "Will's and the Bastion's own wall (keeps a wall, raised on this wall, the wall did not fall) is left alone", ''); }
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
