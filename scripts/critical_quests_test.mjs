@@ -1,11 +1,12 @@
 // CRITICAL QUESTS (v0.30.1561, per user: "put this as a critical storyline quest, there should be a few critical quests to complete
 // such as certain key storyline quests and class advancement quests"; picked: mark + prioritise, nothing new blocked).
-//   1. exactly eight are critical: The Four Captains, the two class advancements, the five Dawn Fragment quests
+//   1. exactly nine are critical: The Four Captains, the two class advancements, the five Dawn Fragment quests, and The Last Step
+//      (the line past the second advancement: Smith -> the copy on the Last Step -> the Sanctum, per user)
 //   2. Lv 20 starts The Four Captains by itself (a ★ CRITICAL toast); the two class advancements are NOT auto-started - your
 //      captain offers them under the gold marker - and a Dawn Fragment quest with no giver starts itself once it unlocks (Aetherion at Lv 60; the Forge waits for Brok's errands)
 //   3. The Four Captains is met by talking to YOUR captain (another captain does not count)
 //   4. a critical quest cannot be abandoned (abandonQuest refuses; its card has no ✕)
-//   5. the journal: ★ CRITICAL pill, critical cards first, the Critical chip shows only them, the ★ n/8 meter counts them
+//   5. the journal: ★ CRITICAL pill, critical cards first, the Critical chip shows only them, the ★ n/9 meter counts them
 //   6. the tracker leads with the earliest active critical quest, marked ★, and shows only that one critical row
 //   7. a save that already passed the trial has The Four Captains done (quietly, no reward); no page errors
 //   node scripts/critical_quests_test.mjs        MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
@@ -15,7 +16,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); c
 const { chromium } = require('playwright-core');
 const PORT = Number(process.env.PORT || 11881), SERVE_ROOT = process.env.MOJI_SERVE_ROOT || ROOT, FILE = process.env.MOJI_GAME_FILE || 'mojiworld_game.html';
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  [' + (typeof x === 'string' ? x : JSON.stringify(x)) + ']' : '')); };
-const CRIT = ['q_four_captains', 'q_inner_dim_trial', 'q_distorted_portal', 'q_boss_sundered_smith', 'q_boss_aetherion', 'q_hourglass_5', 'q_boss_aries', 'q_long_dawn_2'];
+const CRIT = ['q_four_captains', 'q_inner_dim_trial', 'q_distorted_portal', 'q_boss_sundered_smith', 'q_last_step', 'q_boss_aetherion', 'q_hourglass_5', 'q_boss_aries', 'q_long_dawn_2'];
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env } });
 await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
@@ -53,6 +54,7 @@ try {
     out.abandon = { ret: abandonQuest('q_inner_dim_trial', true), still: !!player.quests.active.q_inner_dim_trial };
     // the portal waits for the job
     player.job = 'sharpshooter'; player.level = 40; tickQuestUnlocks(); out.portal = { active: !!player.quests.active.q_distorted_portal, unlocked: !!player.quests.unlocked.q_distorted_portal };
+    player.quests.completed.q_boss_sundered_smith = 1; player.quests.completed.q_last_step = 1;   // the Sanctum opens after the Last Step
     player.level = 60; player.quests.active.q_kill_gummy = { progress: 0 }; tickQuestUnlocks(); out.smith = !!player.quests.active.q_boss_aetherion;
     // 5. the journal
     toggleQuestJournal(); await sleep(400);
@@ -74,16 +76,16 @@ try {
     tickQuestUnlocks(); out.migrate = { done: player.quests.completed.q_four_captains === 123, active: !!player.quests.active.q_four_captains, coins: player.mojicoins === coins0 };
     window.showToast = _ts; return out;
   }, CRIT);
-  ok('1. exactly the eight are critical', JSON.stringify(R.flagged) === JSON.stringify([...CRIT].sort()), R.flagged);
+  ok('1. exactly the nine are critical', JSON.stringify(R.flagged) === JSON.stringify([...CRIT].sort()), R.flagged);
   ok('2. Lv 10 starts The Four Captains by itself (not at Lv 9); the Mirror Self Trial is offered at Lv 20 and waits to be taken from your captain', !R.at9 && R.at20.active.includes('q_four_captains') && !R.at20.active.includes('q_inner_dim_trial') && R.at20.trialOffered && R.at20.activeAt20.includes('q_four_captains') && !R.at20.activeAt20.includes('q_inner_dim_trial'), R.at20);
   ok('2. ...with a ★ CRITICAL toast and no duplicate STORY toast for it', R.at20.crit.some((t) => /Four Captains/.test(t)) && R.at20.story.length === 0, R.at20);
   ok('3. The Four Captains names your captain (archer: Lady Hong); Will does not count, Lady Hong completes it', JSON.stringify(R.talkTo) === '["Lady Hong"]' && !R.talk.afterWill && R.talk.afterHong, { talkTo: R.talkTo, ...R.talk });
   ok('4. a critical quest cannot be abandoned, even forced', R.abandon.ret === false && R.abandon.still, R.abandon);
-  ok('2. the Distorted Portal is offered by the captain (unlocked, not auto-started); the Aetherion quest (no giver, no prereq) starts itself at Lv 60', !R.portal.active && R.portal.unlocked && R.smith, { portal: R.portal, smith: R.smith });
+  ok('2. the Distorted Portal is offered by the captain (unlocked, not auto-started); the Aetherion quest (no giver; after the Last Step) starts itself at Lv 60', !R.portal.active && R.portal.unlocked && R.smith, { portal: R.portal, smith: R.smith });
   const J = R.journal;
   ok('5. critical cards lead the journal and carry the ★ CRITICAL pill', J.critCards.length >= 2 && J.first.every((id, i) => i >= J.critCards.length || J.critCards.includes(id)), J);
   ok('4. ...no critical card has the abandon ✕ (other cards keep theirs)', J.critWithX === 0 && J.nonCritX >= 1, J);
-  ok('5. the ★ meter counts the critical path out of eight', /★\s*\d+\/8/.test(J.meter), J.meter);
+  ok('5. the ★ meter counts the critical path out of nine', /★\s*\d+\/9/.test(J.meter), J.meter);
   ok('5. the Critical chip shows only critical quests', R.chip.exists && R.chip.allCrit, R.chip);
   ok('6. the tracker leads with the earliest critical quest, marked ★, ahead of a pinned bounty - and only one ★ row', R.tracker.length >= 2 && /^★ /.test(R.tracker[0]) && R.tracker.filter((t) => /^★ /.test(t)).length === 1, R.tracker);
   ok('7. a save already past the trial has The Four Captains done, quietly', R.migrate.done && !R.migrate.active && R.migrate.coins, R.migrate);

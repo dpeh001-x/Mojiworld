@@ -45,7 +45,8 @@ try {
   // v0.30.758's 25% gold cut brought the per-level line down with it: 3,750 x level, not 5,000
   ok('Lv 80 turning in q_warrior_lv49 is paid the 183,750 ceiling, not x3', r.w49paid === 3750 * 49, r.w49table + ' -> ' + r.w49paid);
   // 39,930 -> 40,212 at v0.30.1615: _lxTrimQuestPay pins the MEDIAN quest coin at 26,250 with one uniform factor, and the Road to the Four's seven low-level quests moved that median, so every quest moved by the same +0.7%
-  ok('a quest under the line keeps its late-game x3 (q_boss_aetherion 40,212 after the gold cut)', r.aethPaid === 40212, String(r.aethPaid));
+  // 40,212 -> 41,088 with the Last Step (the line past the second advancement, per user): one more coin quest moved the median the same way
+  ok('a quest under the line keeps its late-game x3 (q_boss_aetherion 41,088 after the gold cut)', r.aethPaid === 41088, String(r.aethPaid));
   ok('Ticket Rush stage 2, first run pays its dynamic reward in full', r.pqFirst > 0, String(r.pqFirst));
   // v0.30.833 states the repeat discount as 25% coins / 50% EXP / 25% gear chance; 40% was the v0.30.381 figure
   ok('Ticket Rush stage 2, repeat run pays 25% of that', r.pqFirst > 0 && Math.abs(r.pqRepeat - Math.round(r.pqFirst * 0.25)) <= 1, r.pqFirst + ' -> ' + r.pqRepeat);

@@ -4,7 +4,8 @@
 //   - GIVERLESS: a quest with no giver (a Codex study) points at its hunt, not "Accept from" an NPC who never offers it
 //   - MIRROR: the Mirror Self Trial reads Accept from / Warp with your class instructor, never "no walking route"
 //   - LOCATE: live progress and real names; the tracker prints no raw id for Ticket Rush Stage 2
-//   - NEXT: with the Forge held back by Brok's errands, the tracker's Next line names the errand and Brok
+//   - NEXT: with the portal done below Lv 45, the tracker's Next line names the Forge and the level it opens at (the Forge opens
+//     on the portal since the line past the advancement, per user; it waited on Brok's errands before)
 //   [SERVE_ROOT=<dir with serve.js, data/, art>] node scripts/quest_nav_route_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -58,7 +59,7 @@ try {
     fresh('warrior', 40); take('q_pq_spire'); renderQuestTracker(); await W8(80);
     out.spire = { tracker: document.getElementById('quest-tracker').textContent.replace(/\s+/g, ' ').slice(0, 200), locate: _lxQuestLocateLine('q_pq_spire') };
     // NEXT
-    fresh('warrior', 50);
+    fresh('warrior', 44);
     for (const id of ['q_act1_waking', 'q_act1_sleepers', 'q_act1_quiet', 'q_act1_recipe', 'q_act1_name', 'q_act1_firstword', 'q_inner_dim_trial', 'q_distorted_portal', 'q_hourglass_1', 'q_hourglass_2']) player.quests.completed[id] = true;
     try { tickQuestUnlocks(); } catch (e) {}
     renderQuestTracker(); await W8(80);
@@ -70,7 +71,7 @@ try {
   check(!/Accept from/.test(r.giverless.row) && /Hunt/.test(r.giverless.row) && !r.giverless.locate.includes(r.giverless.target) && !/turn in to/i.test(r.giverless.locate), 'GIVERLESS: a Codex study points at its hunt, and Locate names the creature (not its id) with no turn-in', J(r.giverless));
   check(/(Accept from|From) Taiga/.test(r.mirror.before) && /Warp with Taiga/.test(r.mirror.after) && !/no walking route/.test(r.mirror.after) && r.mirror.trackerHasWarp, 'MIRROR: Accept from Taiga, then Warp with Taiga (row and tracker), never "no walking route"', J(r.mirror));
   check(!/pq_piece/.test(r.spire.tracker) && !/pq_piece/.test(r.spire.locate), 'SPIRE: neither the tracker nor Locate prints the raw id for Ticket Rush Stage 2', J(r.spire));
-  check(r.next.beat === 'q_boss_sundered_smith' && r.next.row.includes(r.next.errand) && /see Brok/.test(r.next.row), 'NEXT: with the Forge waiting on Brok\'s errands, the tracker names the errand and Brok', J(r.next));
+  check(r.next.beat === 'q_boss_sundered_smith' && /Next: The Forge That Broke/.test(r.next.row) && /Lv 45/.test(r.next.row) && !r.next.row.includes(r.next.errand), 'NEXT: with the portal done below Lv 45, the tracker names the Forge and its level (no errand in the way)', J(r.next));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await ctx.close(); await browser.close(); server.kill();
