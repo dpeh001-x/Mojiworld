@@ -177,7 +177,7 @@ window.LX_MONSTER_STATS = {
   // wall. ATK x1.73 stays under aries's 4,339. exp/coin recomputed from this
   // file's own boss rule (hp x0.055 / hp x0.017).
   aetherion:                      { lv: 65, hp: 6369337, atk: 10706, def:  660, exp: 467085, coin:  98436 },
-  gravitos:                       { lv:100, hp: 23123101, atk:49971, def: 1309, exp: 1695763, coin: 357406 },   // v0.30.280 — def stays above the five zodiacs now at 1,441: the apex keeps the best armour
+  gravitos:                       { lv:100, hp: 23123101, atk:49971, def:  982, exp: 1695763, coin: 357406 },   // v0.30.1672: def 1309 -> 982 (-25%, per user; forms 2 and 3 take it x1.25 / x2.0, so 982 / 1227 / 1964). Below the 1,225 zodiacs now
   octobaby:                       { lv: 50, hp:  1311310, atk:  5820, def: 478, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x, atk 2.1x thornmaw 2,770 (was 1.91x)
   pqConductor:                    { lv: 30, hp:   81290, atk:  1615, def: 198, exp:   5962, coin:  1256 },   // v0.30.280 floors: hp 8.2x band max (mummy 9,011; was 1.38x)
   legosaurus:                     { lv: 59, hp:  1373900, atk:  8780, def: 633, exp:  100753, coin:  21233 },   // v0.30.280 floors: hp 8.2x forgewight, atk 2.1x, def 2.1x elderbark

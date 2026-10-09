@@ -75,9 +75,11 @@ ok('every boss holds the floors: HP>=8x, ATK>=2x, DEF>=2x its band max',
 const grav = rows.find((r) => r.t === 'gravitos');
 const zMaxDef = Math.max(...BOSSES.filter((t) => t.startsWith('zodiac_')).map((t) => rows.find((r) => r.t === t).def));
 const zMaxHp = Math.max(...BOSSES.filter((t) => t.startsWith('zodiac_')).map((t) => rows.find((r) => r.t === t).hp));
-ok('the apex holds: gravitos out-armours and out-bulks every zodiac',
-   grav.def > zMaxDef && grav.hp > zMaxHp,
-   `gravitos ${grav.hp}hp/${grav.def}def vs zodiac peak ${zMaxHp}hp/${zMaxDef}def`);
+// gravdef (per user): his raw DEF came down 25% (1309 -> 982), below the 1,225 zodiacs - so the armour half of the apex check is
+// his FINAL form, which takes the row x2.0 at the form change (1,964).
+ok('the apex holds: gravitos out-bulks every zodiac, and his final form (DEF x2) out-armours them',
+   grav.def * 2 > zMaxDef && grav.hp > zMaxHp,
+   `gravitos ${grav.hp}hp/${grav.def}def (final form ${grav.def * 2}) vs zodiac peak ${zMaxHp}hp/${zMaxDef}def`);
 const ko = rows.find((r) => r.t === 'kingKrook'), ob = rows.find((r) => r.t === 'octobaby');
 ok('the Lv-50 bulk band holds (krook vs octobaby within 1.5x)',
    Math.max(ko.hp, ob.hp) / Math.min(ko.hp, ob.hp) <= 1.5, `${ko.hp} vs ${ob.hp}`);
