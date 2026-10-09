@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1696';
+const GAME_VERSION = 'v0.30.1697';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -64861,6 +64861,7 @@ function tickQuestUnlocks() {
   }
   _lxRepairMirrorQuests();   // v0.30.x — unstick Mirror quests stranded behind the sealed Inner Dimension
   _lxRepairDynamicTargets(); // v0.30.276 — clamp curve-inflated Express targets (500 -> the authored 99 ceiling)
+  _lxMoveClassLadder();      // v0.30.1697 class-swap - a ladder row of another class (an old swap) moves to the hero's class
   for (const id in QUESTS) {
     const q = QUESTS[id];
     if (player.quests.unlocked[id] || player.quests.completed[id]) continue;
@@ -65137,6 +65138,41 @@ function _lxRepairDynamicTargets() {
       if (b && b.targetCount != null && b.targetCount > hi) b.targetCount = hi;
     }
   } catch (e) {}
+}
+// v0.30.1697 class-swap - THE CLASS LADDER FOLLOWS THE HERO. _CLASS_QUESTLINE is one route copied four times, keyed q_<cls>_lv<N>,
+// and tickQuestKill skips a row whose cls is not the hero's. The pre-advancement swap (_openPreAdvanceClassSwap) changed
+// the class and left the old copy in the journal: a Rogue turned Mage kept three Rogue rows in the tracker ("Shallows Watch
+// 0/360", ninja icons) that no kill could move - reported 2026-10-09 with two videos, surviving restarts and level-ups.
+// Every ladder row the hero holds (active, done, unlocked, fresh, banked, pinned) moves to the same row of the class they
+// are now, with its progress, target and hand-in state. Runs on the swap and in tickQuestUnlocks (every map load), so a
+// save already stranded is repaired on its next load. Returns how many active rows moved.
+function _lxMoveClassLadder() {
+  try {
+    const to = player && player.cls;
+    if (!to || typeof _CLASS_MASTERS_DATA !== 'object' || !_CLASS_MASTERS_DATA[to] || !player.quests || typeof QUESTS !== 'object') return 0;
+    const RX = /^q_(warrior|rogue|mage|archer)_lv(\d+)$/;
+    const dest = (id) => { const m = RX.exec(id); if (!m || m[1] === to) return null; const n = 'q_' + to + '_lv' + m[2]; return QUESTS[n] ? n : null; };
+    const Q = player.quests; let act = 0;
+    for (const key of Object.keys(Q)) {
+      const map = Q[key];
+      if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
+      for (const id of Object.keys(map)) {
+        const n = dest(id); if (!n) continue;
+        if (!(n in map)) map[n] = map[id];
+        else if (key === 'active' && map[id] && map[n] && (map[id].progress | 0) > (map[n].progress | 0)) map[n] = map[id];
+        delete map[id];
+        if (key === 'active') act++;
+      }
+    }
+    if (player._qBank && typeof player._qBank === 'object') for (const id of Object.keys(player._qBank)) { const n = dest(id); if (!n) continue; if (!player._qBank[n]) player._qBank[n] = player._qBank[id]; delete player._qBank[id]; }
+    if (Q.active && Q.completed) for (const id of Object.keys(Q.active)) if (Q.completed[id] && RX.test(id)) { delete Q.active[id]; act = Math.max(0, act - 1); }
+    if (typeof game === 'object' && game) {
+      if (Array.isArray(game.qnavPins)) game.qnavPins = game.qnavPins.map((id) => dest(id) || id).filter((id, i, a) => a.indexOf(id) === i);
+      if (typeof game.qnav === 'string') game.qnav = dest(game.qnav) || game.qnav;
+    }
+    if (act && typeof showToast === 'function') showToast(_CLASS_MASTERS_DATA[to].icon + ' Your class trials now follow the ' + ((typeof CLASSES === 'object' && CLASSES[to] && CLASSES[to].name) || to) + ' path - progress kept', 'rare');
+    return act;
+  } catch (e) { return 0; }
 }
 function _lxRepairMirrorQuests() {
   try {
@@ -73290,6 +73326,7 @@ function _openPreAdvanceClassSwap() {
         // here handed every skill back ready. Skill ids are per class: the new kit starts clean either way, the old one
         // keeps ticking, and a swap back finds it where it was.
         if (_cdKeep && typeof _cdKeep === 'object') player.skillCooldowns = _cdKeep;
+        try { if (typeof tickQuestUnlocks === 'function') tickQuestUnlocks(); if (typeof renderQuestTracker === 'function') renderQuestTracker(); } catch (e) {}   // v0.30.1697 class-swap - the class ladder moves with the hero (_lxMoveClassLadder)
         // v0.30.1133 swap-growth - applyClass hands the new class its LEVEL-1 HP/MP/ATK/DEF, but the level stays: give back
         // (level - 1) levels of the NEW class's growth (a Lv-19 swap was a Lv-19 Rogue on Lv-1 stats), then refill
         try { const _g = _devLevelGains(player.cls), _n = Math.max(0, (player.level | 0) - 1);
