@@ -119,7 +119,7 @@ try {
   ok('[5] I: the Bastion\'s old smith, the officer\'s "put somewhere small" (the epilogue\'s receipt), his stall in the Everdawn Megamall',
     /Barnaby, the Bastion's old smith/.test(five) && /put somewhere small/.test(five) && /His stall is in the Everdawn Megamall\./.test(five) && R.epilogue, five.slice(0, 120));
   ok('[5] II: the forge\'s old bench, and every knight on the roll swore "We stand until"', /the forge's old bench/.test(roll) && /swore "We stand until\."/.test(roll), roll.slice(150, 330));
-  ok('[5] IV: the Smith armed the Twelve, the Bastion\'s own Taur among them', /armed the Twelve, the Bastion's own Taur among them/.test(fin), fin.slice(-330, -150));
+  ok('[5] IV: the Smith armed the heroes who climbed, the Bastion\'s own among them (the Twelve are named only after Aetherion falls)', /armed the heroes who climbed, the Bastion's own among them/.test(fin) && !/the Twelve/.test(fin), fin.slice(-330, -150));
   ok('[5] V: a blade older than the Bastion; the night the sky fell its forge had stood cold since the woman at the gate walked up the road',
     /a Bastion blade older than the Bastion/.test(forge) && /Bastion had no smith: its forge had stood cold since the woman at the gate walked up the road/.test(forge) && /^Barnaby starts with someone else/.test(forge), forge.slice(0, 160));
   ok('[5] his card and Will: he kept the forge four years, the woman at the gate left it and its blades, it has a new smith, he built his own forge (his card names no other shopkeeper); "Brok keeps it now."; no forge now."; nobody names her',

@@ -40,7 +40,7 @@ try {
     const UNDER = ['first_zodiac_kill', 'zodiac_twelve_done', ...ZODIAC_SIGNS.map((z) => 'zodiac_words_' + z.id)];
     player._storyBeatsSeen = {}; for (const k of Object.keys(STORY_BEATS)) if (!UNDER.includes(k)) player._storyBeatsSeen[k] = true;
     player._storyBeatsSeen.mira_twelve_reveal = true;   // her scene is mira_brother_test's; keep this chain to the Twelve's own
-    if (!game.bestiary) game.bestiary = {}; for (const z of ZODIAC_SIGNS) delete game.bestiary['_boss_zodiac_' + z.id];
+    if (!game.bestiary) game.bestiary = {}; game.bestiary.aetherion = 1;   // she has fallen: the Codex has opened its Twelve pages (the Twelve gate, per user) for (const z of ZODIAC_SIGNS) delete game.bestiary['_boss_zodiac_' + z.id];
     // ---- static: the words, the banner, the Houses, the Codex text, the quests, the beats
     out.words = ZODIAC_SIGNS.map((z) => { const b = STORY_BEATS['zodiac_words_' + z.id]; const st = b && b.stanzas && b.stanzas[0]; return { id: z.id, ok: !!st, speaker: st ? st.speaker : null, name: z.name, text: st ? txt(st) : '' }; });
     out.banner = ZODIAC_SIGNS.map((z) => (typeof _lxZodiacBanner === 'function') ? _lxZodiacBanner(z) : '');

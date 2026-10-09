@@ -39,7 +39,7 @@ try {
     player._tutorialSeen = true; player._gravitosCineSeen = true;
     player._storyBeatsSeen = {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true;
     delete player._storyBeatsSeen.epilogue_gravitos;   // a save that saw every beat has FINISHED the story - keep it mid-story
-    if (!game.bestiary) game.bestiary = {}; const SIGNS = ['aries', 'taurus', 'virgo', 'sagittarius'];
+    if (!game.bestiary) game.bestiary = {}; game.bestiary.aetherion = 1; const SIGNS = ['aries', 'taurus', 'virgo', 'sagittarius'];
     const dark = (list) => { for (const z of ZODIAC_SIGNS) delete game.bestiary['_boss_zodiac_' + z.id]; for (const z of list) game.bestiary['_boss_zodiac_' + z] = 1; };
     dark([]);
     await sleep(2500); const vi = document.getElementById('void-intro-overlay'); if (vi) vi.classList.remove('show');

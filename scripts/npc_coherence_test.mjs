@@ -90,9 +90,9 @@ try {
   const SETS = ['aetherionastral', 'gravitospunch', 'kingKrookstomp', 'towerSovereignswing', 'legosaurusdash', 'gravitos3laser'];
   ok('[6] Marbella lists no attack animation as a boss, and says "cleared them all" once the real ones are down', !SETS.some((k) => R.marb0.includes(k) || R.marb1.includes(k)) && /cleared them all/.test(R.marb1), { before: (R.marb0.match(/walking the world:[^.]*/) || [''])[0].slice(0, 120), after: (R.marb1.match(/walking the world:[^.]*/) || [''])[0] });
   const P = R.pools;
-  ok('[7] bubbles: the vault pays death last, loot stays below win or fall, share your code, the Houses as they are', P.banker.includes('The vault pays death last') && !P.banker.includes('Banked coins survive a fall')
+  ok('[7] bubbles: the vault pays death last, loot stays below win or fall, share your code, the base bubbles do not name the Houses (per user: the Twelve wait for the fall of Aetherion)', P.banker.includes('The vault pays death last') && !P.banker.includes('Banked coins survive a fall')
     && P.expedition.includes('Win or fall, loot stays below') && P.expedition.includes('Bring potions. Share your code.') && P.bravo.includes('Loot stays below. Always.') && !P.bravo.includes('Quit now, lose the loot')
-    && P.archmage.includes('Twelve Houses. One sky.') && !P.archmage.includes('The Houses still burn up there'), P);
+    && P.archmage.includes('One sky. Many questions.') && !/Houses/.test(P.archmage.join(' ')) && !P.archmage.includes('The Houses still burn up there'), P);
   ok('[7] after the ending six more roles have their own morning (and not before); every bubble <= 6 words, no key names', R.dawnBefore.every(Boolean) && R.dawnAfter.every((p) => p && p.length) && R.long.length === 0, { after: R.dawnAfter.map((p) => (p || '').slice(0, 40)), long: R.long });
   ok('[8] no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 200), false); }
