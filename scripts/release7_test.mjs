@@ -56,7 +56,7 @@ try {
     out.v2 = scripts.includes("(typeof _lxSaveNotice === 'function' ? _lxSaveNotice : showToast)('⛑ You were down when the game closed.");
     out.v3 = scripts.includes("'🗼 Your Expedition ended when the game closed'");
     out.n2 = scripts.split("game.paused = _wasPaused || (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen());").length - 1;
-    out.n2b = scripts.includes("if (document.getElementById('lx-pause') || document.getElementById('kill-film-overlay')) {");
+    out.n2b = scripts.includes("document.getElementById('lx-pause') || document.getElementById('kill-film-overlay')) {");
     return out;
   });
   // T2 - the rotate screen pauses play and hands it back; T3 - text fields are selectable; T4 - Continue busies the menu (source)

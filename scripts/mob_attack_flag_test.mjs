@@ -55,7 +55,12 @@ const ok = (name, cond, detail = '') => {
 // Two deliberate extra writers return their OWN attack frame on the spot (Path's Bane c9b7a6920 v0.30.1361,
 // Elder Arlen's ruin frame a7717d5f7 v0.30.1591): `m._frameIsAttack = true; return <frame>;` - the flag and the
 // frame it describes are set together, so they cannot disagree. Every other writer must be the one gated line.
-const allAssigns = s.match(/m\._frameIsAttack\s*=\s*[^;]+;/g) || [];
+// Bug hunt round 4: drawMonster's two off-screen culls reset the flag together with Gravitos's star key. No frame is drawn there,
+// so "not an attack frame" is the frame's own answer; the hit / touch boxes read the flag, and a mob culled mid-swing kept its
+// attack box until it was drawn again. They are counted on their own (exactly two), not as rival writers.
+const CULL_RESET = /m\._frameIsAttack\s*=\s*false;\s*m\._gravStarKey\s*=\s*null;/g;
+ok('the two off-screen culls reset it, with the star key', (s.match(CULL_RESET) || []).length === 2, `${(s.match(CULL_RESET) || []).length} cull resets`);
+const allAssigns = s.replace(CULL_RESET, '').match(/m\._frameIsAttack\s*=\s*[^;]+;/g) || [];
 const frameWriters = s.match(/m\._frameIsAttack\s*=\s*true;\s*return\s+[\w$]+;/g) || [];
 const assigns = allAssigns.filter((a) => !/=\s*true;$/.test(a));
 ok('the flag is assigned in exactly one gated place (plus `= true; return <frame>` writers)',

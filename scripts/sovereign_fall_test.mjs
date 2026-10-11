@@ -177,7 +177,7 @@ const real = await page3.evaluate(async () => {
   const m = spawnMonster(400, 300, 'towerSovereign', true, false);
   out.spawned = !!m && m.type === 'towerSovereign';
   if (!m) return out;
-  m._echoBoss = true; m._rushBoss = true;              // the rush's tags: a sandboxed re-fight
+  // no Rush / Echo Keeper tags: since v0.30.1726 an echo plays no film (bughunt_round4_test [9] pins that side)
   out.noExpedition = !(game.expedition && game.expedition.active);
   // His first fall is not a death — revivesOnce brings him back at 30%.
   m.currentHp = 0;
