@@ -126,13 +126,13 @@ try {
     check(/keeps a wall that has not aged/.test(src) && /Raised on this wall/.test(src) && /the wall did not fall/.test(src), "Will's and the Bastion's own wall (keeps a wall, raised on this wall, the wall did not fall) is left alone", ''); }
   { const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');   // why the boy guards the door (per user, 2026-10-11)
     const legend = "He was posted at the Forge\\'s door to hold it until the climbers came home. None did, and nobody said until when.";
-    const iii = 'Barnaby thinks young Barnaby holds a door for a return that never came.', toast = 'still holding a door for climbers who never came home';
+    const iii = 'Barnaby thinks the younger one holds a door for a return that never came.', toast = 'still holding a door for climbers who never came home';
     const parts = [legend, iii, toast];
     check(parts.every((p) => src.indexOf(p) >= 0), "young Barnaby's reason is told where players read about him: his boss-card legend (posted at the Forge's door until the climbers came home), Barnaby III (Barnaby's guess) and Will's warning", J(parts.filter((p) => src.indexOf(p) < 0)));
     check(!/Twelve|Zodiac|Houses?\b|champion/.test(parts.join(' ')), 'the reason names nobody: no Twelve, Zodiac, House or champion before Aetherion falls', ''); }
   { const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');   // young Barnaby is named, never 'the boy' (per user, 2026-10-11)
-    const gone = ['The boy in the Confused Vigil', 'Barnaby thinks the boy', 'borrowed a boy who', 'stands a boy who', 'the boy you set free', 'Take the boy'];
-    const here = ['Young Barnaby in the Confused Vigil keeps his gloves on too', 'Barnaby thinks young Barnaby holds a door', 'borrowed a young Barnaby who never picked a post', 'stands a young Barnaby who never chose where to stand', 'the Lost Sentinel you set free did not walk out of it'];
+    const gone = ['The boy in the Confused Vigil', 'Barnaby thinks the boy', 'thinks young Barnaby', 'borrowed a boy who', 'stands a boy who', 'the boy you set free', 'Take the boy'];
+    const here = ['The younger Barnaby in the Confused Vigil keeps his gloves on too', 'Barnaby thinks the younger one holds a door', 'borrowed a young Barnaby who never picked a post', 'stands a young Barnaby who never chose where to stand', 'the Lost Sentinel you set free did not walk out of it'];
     check(gone.every((p) => src.indexOf(p) < 0) && here.every((p) => src.indexOf(p) >= 0), "the Lv 40 sentinel is called young Barnaby where players read about him (Barnaby III, Taiga's and Will's warnings) and the Smith's card says the Lost Sentinel, since it never names Barnaby, never 'the boy'", J(gone.filter((p) => src.indexOf(p) >= 0).concat(here.filter((p) => src.indexOf(p) < 0)))); }
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
