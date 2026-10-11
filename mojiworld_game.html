@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1713';
+const GAME_VERSION = 'v0.30.1714';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -158294,6 +158294,52 @@ function _lxFxItemImgHtml(it, sz) {
     return '<img src="' + esc(u) + '" width="' + sz + '" height="' + sz + '" style="display:inline-block;vertical-align:middle;image-rendering:auto;" alt="' + esc((it && it.name) || '') + '" data-fb="' + esc(fb) + '" onerror="this.outerHTML=this.dataset.fb">';
   } catch (e) { return null; }
 }
+// v0.30.1714 bosslag5 - THE HERO'S OWN SKILL ART, WARM BEFORE A BOSS FIGHT (per user: "lowering the lag even more during boss fights
+// without affecting graphics"). Measured in a REAL session (the kit set in town and every prewarm queue drained first, then
+// the Gravitos arena, CPU x4): the first cast of each skill still froze the frame - War Cry's mark 85-405 ms, Power Strike,
+// Rampage, Bloodlust, the dust ring, Ground Slam and Rush 30-65 ms each, hit sparks 13-25 ms, the shockwave's 320/370 px
+// projectile copies 52-60 ms a frame. Three causes: the class prewarm queued only animated sets, never the single images a
+// skill draws; the budget (_lxCvTrim) counts copies made in town as another map's, so the boss art landing in the arena evicted
+// them; and an evicted copy hands its slot back raw while its set keeps _lxShrunk (and a pinned image _lxNoShrink), so nothing
+// ever baked it again. Eviction itself is left alone - reopening every evicted set there made a 45-mob horde re-bake what the
+// full budget evicts next. Here, behind the veil of a map with a boss, only this kit is handled: copies still alive are adopted
+// (re-stamped this map's and just used, so the trim protects them like the boss art), a set holding a raw frame is reopened,
+// and anything not warm is queued - single images as pin jobs, sets for their shrink. Exactly what the first cast would have
+// made, made before the fight. Returns the number of jobs queued.
+function _lxWarmKitFx(mapId) {
+  try {
+    if (typeof player === 'undefined' || !player || !player.cls || typeof _lxFxClassTags !== 'function') return 0;
+    const md = (typeof MAPS !== 'undefined' && MAPS[mapId]) || null;
+    // a boss ARENA only: a hunting map that can spawn a field boss has its own monster bakes to finish under the same veil
+    const boss = !!(md && md.isBossArena);
+    if (!boss) return 0;
+    const adopt = (cv) => { try { if (cv && cv.tagName === 'CANVAS' && cv._lxLruT !== undefined && typeof _lxCvTouch === 'function') { cv._lxLruT = 0; _lxCvTouch(cv); } } catch (e) {} };
+    let n = 0;
+    for (const t of _lxFxClassTags()) {
+      const kind = t.slice(0, 2), k = t.slice(3);
+      try {
+        if (typeof _lxFxWant === 'function') _lxFxWant(t, true);   // loading, at high priority
+        if (kind === 'fx' || kind === 'pp' || kind === 'bp') {
+          const im = (typeof _lxFxImg === 'function') ? _lxFxImg(t) : null;
+          const pin = (im && im.tagName === 'IMG' && typeof _lxPinCache !== 'undefined') ? _lxPinCache.get(im) : null;
+          if (pin) adopt(pin); else if (im && im.tagName === 'IMG') { _LX_PREWARM_FXQ.push({ pin: im, tries: 0 }); n++; }
+        } else if (kind === 'fa' || kind === 'pa') {
+          const arr = kind === 'fa' ? _fxAnimFrames(k) : ((typeof _projAnimFrame === 'function' && _projAnimFrame(k), (typeof PROJ_ANIM_FRAMES !== 'undefined') ? PROJ_ANIM_FRAMES[k] : null));
+          if (!arr || !arr.length) continue;
+          let raw = false;
+          for (const f of arr) {
+            if (!f) continue;
+            if (f.tagName === 'CANVAS') adopt(f);
+            else if (f.complete && f.naturalWidth > 0 && f.naturalWidth * f.naturalHeight <= _LX_PIN_MAX_PX) { raw = true; f._lxNoShrink = false; }   // an evicted copy's slot
+          }
+          if (raw) arr._lxShrunk = false;
+          if (!arr._lxShrunk) { arr._lxFxWarmQ = false; _lxQueueFxSet(arr, kind === 'fa' ? 640 : (k === 'meteor' ? 360 : 320)); n += arr.length; }
+        }
+      } catch (e) {}
+    }
+    return n;
+  } catch (e) { return 0; }
+}
 let _lxFxWarmCls = null, _lxFxWarmJob = null, _lxFxWarmMaster = null;
 function _lxPrewarmClassFx() {
   if (typeof player === 'undefined' || !player || !player.cls) return;
@@ -181807,6 +181853,18 @@ function _lxReadyGate(mapId, opts) {
       }
     } catch (e) {}
     rec.bakeMs = Date.now() - t; t = Date.now();
+    // v0.30.1714 bosslag5 - a map with a boss: the hero's skill art lands behind the veil (_lxWarmKitFx), in the same 12 ms slices.
+    // Queued even when the gate has already hit its cap and lifted the veil (a loaded machine): then it drains in play, on the
+    // normal per-frame budget, which still beats the first cast doing it all inside one frame.
+    try {
+      const _kq = (typeof _lxWarmKitFx === 'function') ? _lxWarmKitFx(id) : 0;
+      if (_kq > 0 && !rec.ms) {
+        paint(72, 'Readying your skills…');
+        const t2 = Date.now();
+        while (typeof _LX_PREWARM_FXQ !== 'undefined' && _LX_PREWARM_FXQ.length && Date.now() - t2 < CAP * 0.1 && !rec.ms) { _lxPrewarmFxDrain(true); await raf(); }
+        rec.kitMs = Date.now() - t2; window._lxKitWarmRec = { ms: rec.kitMs, left: _LX_PREWARM_FXQ.length };
+      } else if (_kq > 0) window._lxKitWarmRec = { ms: 0, left: _LX_PREWARM_FXQ.length, capped: true };
+    } catch (e) {}
     paint(74, 'Painting the backdrop…');
     try { if (_lzBg) await capped(_lzBg, CAP * 0.35); } catch (e) {}   // v0.30.1196 lazy-art - no blank sky on entry
     rec.backdrop = _lxPrimeBackdrop(id);
