@@ -176,7 +176,7 @@ window.LX_MONSTER_STATS = {
   // aries (2,621,718) and below taurus (4,593,750) — a superBoss gate should be a
   // wall. ATK x1.73 stays under aries's 4,339. exp/coin recomputed from this
   // file's own boss rule (hp x0.055 / hp x0.017).
-  aetherion:                      { lv: 65, hp: 6369337, atk: 10706, def:  660, exp: 467085, coin:  98436 },
+  aetherion:                      { lv: 65, hp: 9554006, atk: 13918, def:  858, exp: 700628, coin:  98436 },   // v0.30.1721 aetherion-boost (per user): hp +50%, atk +30%, def +30%, exp with hp (was 6369337 / 10706 / 660 / 467085); coins kept
   gravitos:                       { lv:100, hp: 23123101, atk:49971, def:  982, exp: 1695763, coin: 357406 },   // v0.30.1672: def 1309 -> 982 (-25%, per user; forms 2 and 3 take it x1.25 / x2.0, so 982 / 1227 / 1964). Below the 1,225 zodiacs now
   octobaby:                       { lv: 50, hp:  1311310, atk:  5820, def: 478, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x, atk 2.1x thornmaw 2,770 (was 1.91x)
   pqConductor:                    { lv: 30, hp:   81290, atk:  1615, def: 198, exp:   5962, coin:  1256 },   // v0.30.280 floors: hp 8.2x band max (mummy 9,011; was 1.38x)
