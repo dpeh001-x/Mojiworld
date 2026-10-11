@@ -50,7 +50,7 @@ try {
     if (!m._ae) return { err: 'his AI never ticked (no m._ae)' };
     const setForm = (evolved, hp) => { m._aetherionEvolved = evolved; if (evolved) m._phaseSprite = 'aetherion2'; m.currentHp = m.maxHp * hp; };
     // force one move and collect his shots as they are pushed
-    const force = async (move, n, dx) => {
+    const force1 = async (move, n, dx) => {
       game.projectiles.length = 0; game.hazards.length = 0; hold(dx || 380); await frames(2);
       const A = m._ae; A.st = move; A.t = 0; A.vol = 0; A.gate = false; A.gateUntil = 0; m._bigMeleeCd = 1e9;
       const shots = []; const _push = game.projectiles.push;
@@ -58,6 +58,8 @@ try {
       try { for (let i = 0; i < n; i++) { hold(dx || 380); if (m._ae.st !== move) break; await frames(1); } } finally { game.projectiles.push = _push; }
       return shots;
     };
+    // v0.30.1727: a move broken off before it fired (a punish window the test's own phase jumps can open) is forced again, up to 3 tries
+    const force = async (move, n, dx) => { let s = []; for (let k = 0; k < 3; k++) { s = await force1(move, n, dx); if (s.length || move === 'gateWind') break; } return s; };
     // 2. the chooser
     const lists = []; const _ch = window._aeChoose;
     window._aeChoose = function (opts) { lists.push({ ev: !!m._aetherionEvolved, w: Object.fromEntries(opts.map((o) => [o.s, o.w])) }); return _ch(opts); };
@@ -84,7 +86,8 @@ try {
     // 3. feathers, spiral
     setForm(false, 0.9); let s = await force('featherWind', 90);
     out.feather = { n: s.length, kinds: [...new Set(s.map((x) => x.p.skill))], beats: new Set(s.map((x) => x.t)).size, homing: s.every((x) => x.p.homing), fan: s.length ? Math.max(...s.map((x) => x.a)) - Math.min(...s.map((x) => x.a)) : 0 };
-    setForm(true, 0.2); s = await force('featherWind', 90); out.feather3 = s.length;
+    // v0.30.1727: let the drop under 25% settle first - crossing it can open a punish window that breaks off a move forced at once
+    setForm(true, 0.2); for (let i = 0; i < 40; i++) { hold(380); m._ae.st = 'idle'; m._ae.t = 0; await frames(1); } s = await force('featherWind', 90); out.feather3 = s.length;
     setForm(false, 0.9); s = await force('spiralWind', 140);
     out.spiral = { n: s.length, kinds: [...new Set(s.map((x) => x.p.skill))], beats: new Set(s.map((x) => x.t)).size };
     // 4. halo discs: out, then home
@@ -104,6 +107,33 @@ try {
     try { m._bigMeleeCd = 0; for (let i = 0; i < 360 && sw.filter((x) => x.echo).length === 0; i++) { hold(m.facing >= 0 ? 170 : -170); player.y = gY - player.h; player.vy = 0; m._ae.st = 'idle'; m._ae.t = 0; await frames(1); } } finally { game.projectiles.push = _p2; }
     out.swing = { swings: sw.filter((x) => !x.echo).length, echoes: sw.filter((x) => x.echo).length };
     game.projectiles.length = 0; game.hazards.length = 0;
+    // v0.30.1727 aetherion-feet: form 2's feet on the floor. Capture the form-2 rest sprites he draws, redraw each ALONE through
+    // _drawBossSprite on a flat green canvas, and read every foot's lowest row against the foot line: the bottom profile within 40 px
+    // of it, split into runs >= 8 px wide (a foot each). worst = the highest foot (+ = over the line). The old build read 0 here for the
+    // back foot while it hovered ~3 px in the real draw, so a foot must reach 2 px INTO the floor.
+    {
+      setForm(true, 0.4); m._phaseSprite = 'aetherion2'; game.projectiles.length = 0; game.hazards.length = 0;
+      const caps = new Map(), orig = window._drawBossSprite;
+      window._drawBossSprite = function (sprite, mm, sx, sy, isAtk, anim) { if (mm === m && sprite && !isAtk) { const k = sprite.src || sprite; if (!caps.has(k)) caps.set(k, { sprite, anim }); } return orig.apply(this, arguments); };
+      try { for (let i = 0; i < 150; i++) { hold(380); m._ae.st = 'idle'; m._ae.t = 0; m.vx = 0; m.speed = 0; await frames(1); } } finally { window._drawBossSprite = orig; }
+      const cv = document.querySelector('canvas'), c2 = cv.getContext('2d'), W = cv.width, H = cv.height;
+      game.paused = true; await sleep(50);
+      const sx = Math.round(W / 2 - m.w / 2), sy = Math.round(H - 160 - m.h), lineY = sy + m.h; let worst = -1e9, n = 0; const per = [];
+      for (const [, c] of caps) {
+        c2.save(); c2.setTransform(1, 0, 0, 1, 0, 0); c2.fillStyle = '#00ff00'; c2.fillRect(0, 0, W, H);
+        try { orig(c.sprite, m, sx, sy, false, c.anim); } catch (e) { c2.restore(); continue; }
+        c2.restore();
+        const d = c2.getImageData(0, 0, W, H).data, prof = [];
+        for (let x = 0; x < W; x++) { let b = -1; for (let y = Math.min(H - 1, lineY + 30); y >= lineY - 40; y--) { const k = (y * W + x) * 4; if (d[k] + Math.abs(d[k + 1] - 255) + d[k + 2] > 90) { b = y; break; } } prof.push(b); }
+        const runs = []; let cur = null, gap = 0;
+        for (let x = 0; x < W; x++) { if (prof[x] >= 0) { if (!cur) cur = { x0: x, x1: x, low: prof[x] }; else { cur.x1 = x; cur.low = Math.max(cur.low, prof[x]); } gap = 0; } else if (cur && ++gap >= 6) { runs.push(cur); cur = null; gap = 0; } }
+        if (cur) runs.push(cur);
+        const feet = runs.filter((r) => r.x1 - r.x0 >= 8); if (!feet.length) continue;
+        const f = Math.max(...feet.map((r) => lineY - 1 - r.low)); per.push(f); worst = Math.max(worst, f); n++;
+      }
+      game.paused = false;
+      out.feet = { n, worst, per: per.slice(0, 12) };
+    }
     // last: the Gate (nothing after it can be hit by its collapse)
     // 5. the Gate: stand in its first safe spot, mortal
     setForm(true, 0.4); m._ae.cd.gate = game.time + 1e9; await force('gateWind', 50);   // one Gate: a second one cast after it would land in a later check
@@ -134,6 +164,7 @@ try {
     ok('his columns land for at least 20% of max HP even when armour absorbs 99%', R.column.lost >= R.column.floor && R.column.floor > 0 && /Shardfall/.test(R.column.src), R.column);
     ok('the Twin Verdict swing fires, then its echo', R.swing.swings >= 1 && R.swing.echoes >= 1, R.swing);
   }
+  if (!R.err) ok('form 2 stands on the floor: in every rest pose BOTH feet reach at least 2 px into the floor (the back foot used to hover over it)', !!R.feet && R.feet.n > 0 && R.feet.worst <= -2, R.feet);
   ok('no page errors', errs.length === 0, errs);
 } finally { await browser.close(); server.kill(); }
 let pass = 0;
