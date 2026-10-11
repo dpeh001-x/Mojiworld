@@ -32,7 +32,9 @@ checks.push(['the old tourniquet and "mine to hold" lines are gone', !/tournique
 checks.push(['nothing names who holds him (subtle, per user)', !/Sovereign|Watcher|Amnesiac|Interference/i.test(gate)]);
 checks.push(['the opener the look test pins is kept', /Singularity does not echo/.test(gate)]);
 const GROUND = 'backgrounds/bg_v3_gravitosArena.webp';
-checks.push(['all three Gravitos beats name the arena as their ground', ['gravitos_gate', 'gravitos_awakened', 'gravitos_ascendant'].every((id) => new RegExp(id + ": \\{\\s*mode: 'dialog',\\s*ground: '" + GROUND.replace(/[./]/g, '\\$&') + "'").test(html))]);
+const _grd = (id, g) => new RegExp(id + ": \\{\\s*mode: 'dialog',\\s*ground: '" + g.replace(/[./]/g, '\\$&') + "'").test(html);
+checks.push(['his gate beat names the arena as its ground; the awakened and ascendant speeches name their films\' final images (v0.30.1719)', _grd('gravitos_gate', GROUND) && _grd('gravitos_awakened', 'backgrounds/bg_v4_gravitos_awakened.webp') && _grd('gravitos_ascendant', 'backgrounds/bg_v4_gravitos_ascendant.webp')]);
+checks.push(['the two film stills ship', ['bg_v4_gravitos_awakened', 'bg_v4_gravitos_ascendant'].every((b) => existsSync(path.join(ROOT, 'backgrounds/' + b + '.webp')))]);
 checks.push(['the arena painting ships', existsSync(path.join(ROOT, GROUND))]);
 
 // ---- in a running game ----------------------------------------------------------
