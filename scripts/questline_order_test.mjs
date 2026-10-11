@@ -115,7 +115,7 @@ try {
   check(R.open2.t0_noRush === false && R.open2.t0_29 === false && R.open2.t0_30 === true, 'The Tear 0 opens at Lv 30 once Ticket Rush Stage 3 is done, not before', J(R.open2));
   check(R.duel.finale === true && R.duel.tear0 === true, 'one Master Conductor duel completes Ticket Rush Stage 4 and The Tear 0 together', J(R.duel));
   check(R.milo.found && R.milo.withT0.some((t) => /Face the Master Conductor again/.test(t)) && !R.milo.without.some((t) => /Face the Master Conductor again/.test(t)), "a hero who already finished the Rush gets Milo's 'Face the Master Conductor again' while The Tear 0 is open, and only then", J([R.milo.withT0, R.milo.without]));
-  check(R.v.target === 'sundered_smith' && R.v.prereq.indexOf('q_lyra_kin') >= 0 && R.v.prereq.indexOf('q_barnaby_finish') >= 0 && !/Confused Vigil|the boy/.test(R.v.desc), 'The Tear V ends on the Sundered Smith (not the boy) and waits for Barnaby IV', J([R.v.target, R.v.prereq]));
+  check(R.v.target === 'sundered_smith' && R.v.prereq.indexOf('q_lyra_kin') >= 0 && R.v.prereq.indexOf('q_barnaby_finish') >= 0 && !/Confused Vigil|young Barnaby/.test(R.v.desc), 'The Tear V ends on the Sundered Smith (not young Barnaby) and waits for Barnaby IV', J([R.v.target, R.v.prereq]));
   check(R.open2.v_noIV === false && R.open2.v_IV === true && R.smith.main === true && R.smith.v === true, 'The Tear V stays shut until Barnaby IV, and one Smith kill completes it together with The Forge That Broke', J([R.open2, R.smith]));
   check(R.v.name === 'The Tear V \u2014 The Gate, or the Forge' && /what happened to the gate\.$/.test(R.v.desc) && !/what happened to the wall/.test(R.v.desc), 'The Tear V is "The Gate, or the Forge" and tells the Smith what happened to the gate (not the wall)', J([R.v.name, R.v.desc.slice(-60)]));
   check(!/right wall/i.test(R.gate.v + R.gate.iii + R.gate.ans + R.gate.bub) && /He always says the gate\./.test(R.gate.v) && /chose the right place: a breach question/.test(R.gate.iii) && /The gate, I always say\./.test(R.gate.ans) && /The gate\. Probably\./.test(R.gate.bub), 'Barnaby\'s "right wall" lines are "the gate" (no "right gate"): The Tear V, Barnaby III, his own answer and his bubble', J([R.gate.ans.slice(0, 120), R.gate.bub.slice(0, 120)]));
@@ -126,10 +126,14 @@ try {
     check(/keeps a wall that has not aged/.test(src) && /Raised on this wall/.test(src) && /the wall did not fall/.test(src), "Will's and the Bastion's own wall (keeps a wall, raised on this wall, the wall did not fall) is left alone", ''); }
   { const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');   // why the boy guards the door (per user, 2026-10-11)
     const legend = "He was posted at the Forge\\'s door to hold it until the climbers came home. None did, and nobody said until when.";
-    const iii = 'Barnaby thinks the boy holds a door for a return that never came.', toast = 'still holding a door for climbers who never came home';
+    const iii = 'Barnaby thinks young Barnaby holds a door for a return that never came.', toast = 'still holding a door for climbers who never came home';
     const parts = [legend, iii, toast];
-    check(parts.every((p) => src.indexOf(p) >= 0), "the boy's reason is told where players read about him: his boss-card legend (posted at the Forge's door until the climbers came home), Barnaby III (Barnaby's guess) and Will's warning", J(parts.filter((p) => src.indexOf(p) < 0)));
+    check(parts.every((p) => src.indexOf(p) >= 0), "young Barnaby's reason is told where players read about him: his boss-card legend (posted at the Forge's door until the climbers came home), Barnaby III (Barnaby's guess) and Will's warning", J(parts.filter((p) => src.indexOf(p) < 0)));
     check(!/Twelve|Zodiac|Houses?\b|champion/.test(parts.join(' ')), 'the reason names nobody: no Twelve, Zodiac, House or champion before Aetherion falls', ''); }
+  { const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');   // young Barnaby is named, never 'the boy' (per user, 2026-10-11)
+    const gone = ['The boy in the Confused Vigil', 'Barnaby thinks the boy', 'borrowed a boy who', 'stands a boy who', 'the boy you set free', 'Take the boy'];
+    const here = ['Young Barnaby in the Confused Vigil keeps his gloves on too', 'Barnaby thinks young Barnaby holds a door', 'borrowed a young Barnaby who never picked a post', 'stands a young Barnaby who never chose where to stand', 'the Lost Sentinel you set free did not walk out of it'];
+    check(gone.every((p) => src.indexOf(p) < 0) && here.every((p) => src.indexOf(p) >= 0), "the Lv 40 sentinel is called young Barnaby where players read about him (Barnaby III, Taiga's and Will's warnings) and the Smith's card says the Lost Sentinel, since it never names Barnaby, never 'the boy'", J(gone.filter((p) => src.indexOf(p) >= 0).concat(here.filter((p) => src.indexOf(p) < 0)))); }
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

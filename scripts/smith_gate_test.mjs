@@ -61,7 +61,7 @@ try {
   const D = R.def, X = R.idx;
   check(Array.isArray(D.smith) && D.smith.indexOf('q_distorted_portal') >= 0 && D.smith.indexOf('q_barnaby_finish') >= 0, 'The Forge That Broke needs the portal AND Barnaby IV', J(D.smith));
   check(D.roll.kind === 'visit' && D.roll.target === 'sundered_forge' && D.roll.count === 1 && !D.roll.boss && D.roll.mapReal && D.roll.mapLv <= D.lv[1], 'Barnaby II (The Roll Call) is a visit to the Sundered Forge, not a Smith kill', J(D.roll));
-  check(D.finish.kind === 'boss' && D.finish.target === 'sundered_smith' && D.hands.target === 'young_confused_barnaby', 'Barnaby III still faces the boy and Barnaby IV still ends the Smith', J([D.finish, D.hands]));
+  check(D.finish.kind === 'boss' && D.finish.target === 'sundered_smith' && D.hands.target === 'young_confused_barnaby', 'Barnaby III still faces young Barnaby and Barnaby IV still ends the Smith', J([D.finish, D.hands]));
   check(X.q_distorted_portal < X.q_barnaby_five && X.q_barnaby_five < X.q_barnaby_roll && X.q_barnaby_roll < X.q_barnaby_hands && X.q_barnaby_hands < X.q_barnaby_finish && X.q_barnaby_finish < X.q_boss_sundered_smith && X.q_boss_sundered_smith < X.q_last_step,
     'the Journal lists the portal, Barnaby I-IV, the Smith, then the Last Step', J(X));
   check(D.lv.every((v, i, a) => i === 0 || v >= a[i - 1]), "Barnaby's chapters and the Smith stay in non-decreasing level order", J(D.lv));
