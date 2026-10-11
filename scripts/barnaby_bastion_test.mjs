@@ -96,8 +96,8 @@ try {
     { const t0 = await talk(); out.pre = { card: t0.text, opts: t0.opts, bub: null }; } await close(); out.pre.bub = await bubble();
     game.bestiary._boss_zodiac_taurus = 1;
     { const t1 = await talk(); out.taur = { card: t1.text, opts: t1.opts, bub: null }; } await close(); out.taur.bub = await bubble();
-    player.quests = player.quests || { active: {}, completed: {} }; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_barnaby_hands = true;
-    { await talk(); const had = await click(/What did you make\?/); await settle(); out.made = had ? text() : null; await close(); } delete player.quests.completed.q_barnaby_hands;
+    player.quests = player.quests || { active: {}, completed: {} }; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_barnaby_finish = true;
+    { await talk(); const had = await click(/What did you make\?/); await settle(); out.made = had ? text() : null; await close(); } delete player.quests.completed.q_barnaby_finish;
     player._storyBeatsSeen.epilogue_gravitos = true;
     out.dawn = { card: (await talk()).text, bub: null }; await close(); out.dawn.bub = await bubble();
     // ---- 7. caps
@@ -123,7 +123,7 @@ try {
   ok('[5] II: the forge\'s old bench, the blade for the woman at the gate that never closed, and Will\'s white blade', /the forge's old bench/.test(roll) && /a blade for the woman at the gate/.test(roll) && /Will's white blade/.test(roll), roll.slice(60, 260));
   ok('[5] IV: the Smith armed the heroes who climbed, the Bastion\'s own among them (the Twelve are named only after Aetherion falls)', /armed the heroes who climbed, the Bastion's own among them/.test(fin) && !/the Twelve/.test(fin), fin.slice(-330, -150));
   ok('[5] V: a blade older than the Bastion; the night the sky fell its forge had stood cold since the woman at the gate walked up the road',
-    /a Bastion blade older than the Bastion/.test(forge) && /Bastion had no smith: its forge had stood cold since the woman at the gate walked up the road/.test(forge) && /^Barnaby starts with someone else/.test(forge), forge.slice(0, 160));
+    /a Bastion blade older than the Bastion/.test(forge) && /Bastion's forge stood cold and its smith was gone/.test(forge) && /The woman at the gate came to his bench with one order/.test(forge) && /^Barnaby starts with someone else/.test(forge), forge.slice(0, 160));
   ok('[5] his card and Will: he kept the forge four years, the woman at the gate left it and its blades, it has a new smith, he built his own forge (his card names no other shopkeeper); "Brok keeps it now."; no forge now."; nobody names her',
     /I kept the Bastion's forge four years\./.test(R.voice) && /the woman at the gate left it cold, every rack full/.test(R.voice) && /It has a new smith\./.test(R.voice) && /I built my own forge down here\./.test(R.voice) && !/Brok|\bher\b|\bhers\b/.test(R.voice)
     && /the woman at the gate left them racked in her forge, and none has broken\. Brok keeps it now\./.test(R.will)
@@ -132,9 +132,9 @@ try {
     /Bastion blades made by the woman at the gate, older than the Bastion itself/.test(R.cdx.before) && /Bastion blades made by Mira, older than the Bastion itself/.test(R.cdx.after) && !/Mira/.test(R.cdx.before) && !R.mara,
     { before: (R.cdx.before.match(/finest ever made.{0,90}/) || [''])[0], after: (R.cdx.after.match(/finest ever made.{0,60}/) || [''])[0], mara: R.mara });
   ok('[6] his card carries no oath: no "Where did you stand" option, no breach, no gate; his bubble comes from his own pool', !R.pre.opts.some((o) => /Where did you stand/.test(o)) && !/We stand until|breach|SOMEONE PUSHES|The gate/.test(R.pre.card + R.taur.card + R.made) && R.pre.bub === 'Gloves stay on.' && R.taur.bub === 'Gloves stay on.', { opts: R.pre.opts, bub: R.pre.bub });
-  ok('[6] after Barnaby III "What did you make?" is his confession: a blade for the woman who walked up the road, something he could not name, the stay-with-the-iron regret', /A blade, for the woman who walked up the road/.test(R.made || '') && /something I could not name/.test(R.made || '') && /I should have stayed with the iron/.test(R.made || '') && !/Smith|Sundered|Twelve|Zodiac|Mira/.test(R.made || ''), (R.made || '').slice(0, 140));
+  ok('[6] after Barnaby III "What did you make?" is his confession: a blade for the woman who walked up the road, something he could not name, the stay-with-the-iron regret', /A blade, for the woman who walked up the road/.test(R.made || '') && /something I could not name/.test(R.made || '') && /Iron would have told me no/.test(R.made || '') && !/Smith|Sundered|Twelve|Zodiac|Mira/.test(R.made || ''), (R.made || '').slice(0, 140));
   ok('[6] after the ending: his gloves stay off, the tear is shut, plain iron he can name', /gloves lie on the bench/.test(R.dawn.card) && /nothing I cannot name/.test(R.dawn.card) && R.dawn.bub === 'Gloves off. First morning.', { card: R.dawn.card.slice(0, 120), bub: R.dawn.bub });
-  ok('[7] chapters <= 170 words, his lines <= 60, bubbles <= 6 and naming no key', R.caps.chapters.every((w) => w <= 170) && R.caps.lines.every((w) => w > 0 && w <= 60) && R.caps.bubbles.length === 0 && R.bubbles.length >= 10, R.caps);
+  ok('[7] chapters <= 190 words (170 until the line was given room, per user), his lines <= 60, bubbles <= 6 and naming no key', R.caps.chapters.every((w) => w <= 190) && R.caps.lines.every((w) => w > 0 && w <= 60) && R.caps.bubbles.length === 0 && R.bubbles.length >= 10, R.caps);
   ok('[8] no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 200), false); }
 await browser.close(); server.kill();

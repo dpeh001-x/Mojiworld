@@ -71,9 +71,9 @@ try {
   check(R.lines[0] === 'Drew his whole court into his jelly body to shield them from the flood, and has never let them out.' && /mirror copy/.test(R.lines[4] + R.lines[5] + R.lines[6] + R.lines[7]) && /the Twelve/.test(R.lines[11]) && /the tear/.test(R.lines[13]), 'the one-liners are tied to each story: the court, the tear\'s mirror copies, the Twelve\'s smith, the woman\'s tear', J(R.lines.slice(4, 8)));
   // Young Barnaby and the Sundered Smith are the same man a century apart: their lines rhyme without saying so
   const BV = R.voice.young_confused_barnaby, SV = R.voice.sundered_smith, BE = R.epiAll.young_confused_barnaby, SE = R.epiAll.sundered_smith, BL = R.lines[8], SL = R.lines[11];
-  check(/made/.test(BV) && /unknown/.test(SV) && /shift/.test(SV), 'Barnaby and the Smith speak of the same things: what he made, the unknown he should have left alone, and the shift', J({ BV, SV }));
+  check(/shines/.test(BV) && /unknown/.test(SV) && /shift/.test(SV), 'Barnaby is proud and the Smith is sorry: the young one says how it shines, the Smith asks to finish the shift and says he should have left the unknown alone', J({ BV, SV }));
   check(/finally understands what he made/.test(BE) && /finally understands what he made/.test(SE), 'their epitaphs share a shape: each finally understands what he made', J({ BE: BE.slice(0, 60), SE: SE.slice(0, 60) }));
-  check(/talented smith/.test(BL) && /the tear/.test(BL) && /Twelve/.test(SL) && /broke his anvil/.test(SL), 'their Codex lines: the talented smith the tear borrowed, and the smith who armed the Twelve and broke his anvil', J({ BL, SL }));
+  check(/talented smith/.test(BL) && /too perfect/.test(BL) && /Twelve/.test(SL) && /broke his anvil/.test(SL), 'their Codex lines: the talented smith the tear borrowed, and the smith who armed the Twelve and broke his anvil', J({ BL, SL }));
   check(!/\bBarnaby\b.*\b(smith|Smith)\b.*same (man|person)|same man|same person|a century on/i.test(BV + SV + BE + SE + BL + SL), 'it stays vague: no line says outright that they are one man (the film does that)', '');
   check(/lowers its weapon/.test(R.epiAll.mirrorSelf) && !/blade/.test(R.epiAll.mirrorSelf), 'Mirror Self lowers its weapon (not its blade)', R.epiAll.mirrorSelf);
   const wcl = (t) => t.trim().split(/\s+/).length;

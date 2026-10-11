@@ -48,8 +48,9 @@ try {
     fresh(38, { q_distorted_portal: true }); out.done38 = (await talk('Barnaby')).text; await close();
     fresh(60, { q_distorted_portal: true }); out.lv60 = (await talk('Barnaby')).text; await close();
     fresh(60, { q_distorted_portal: true }); out.before3 = (await talk('Barnaby')).opts; await close();
-    fresh(60, { q_distorted_portal: true, q_barnaby_hands: true }); out.after3opts = (await talk('Barnaby')).opts; await close();
+    fresh(60, { q_distorted_portal: true, q_barnaby_finish: true }); out.after3opts = (await talk('Barnaby')).opts; await close();
     out.made = await ask('Barnaby', /What did you make\?/);
+    fresh(60, { q_distorted_portal: true, q_barnaby_finish: true, q_last_step: true }); out.lastAns = await ask('Barnaby', /I found her at the bottom of the stair\./); out.lastOpts = (await talk('Barnaby')).opts; await close();
     fresh(14); out.joyce14 = (await talk('Nurse Joyce')).opts; await close();
     fresh(15); out.joyce15 = await ask('Nurse Joyce', /Do you know Barnaby the smith\?/);
     await go('town', 400); await sleep(400);
@@ -58,17 +59,18 @@ try {
     out.arlenThere = !!npcN('Old Arlen');
     const line = (t) => String(t).split('Barnaby looks up')[0];   // the line above his shop voice, not the whole card
     out.l20 = line(out.lv20a); out.l38 = line(out.lv38a);
-    out.w = { made: words(out.made), joyce: words(out.joyce15), arlen: words(out.arlen25), lv20: words(line(out.lv20a)), lv38: words(line(out.lv38a)) };
+    out.w = { last: words(out.lastAns), made: words(out.made), joyce: words(out.joyce15), arlen: words(out.arlen25), lv20: words(line(out.lv20a)), lv38: words(line(out.lv38a)) };
     return out;
   });
-  const lv20 = R.lv20a || '', lv38 = R.lv38a || '', all = [R.l20, R.l38, R.made, R.joyce15, R.arlen25].join(' ');
+  const lv20 = R.lv20a || '', lv38 = R.lv38a || '', all = [R.l20, R.l38, R.made, R.lastAns, R.joyce15, R.arlen25].join(' ');
   ok('[0] the Megamall holds Barnaby and Nurse Joyce, the town holds Old Arlen', R.there && R.arlenThere, [R.there, R.arlenThere]);
   ok('[1] Lv 20: gloves stay on - a smith never works in a material he cannot name, and he broke the rule once - shown once', /Gloves stay on\./.test(lv20) && /never work in a material you cannot name/.test(lv20) && /I broke it once/.test(lv20) && !/Gloves stay on/.test(R.lv20b || ''), lv20.slice(0, 140));
   ok('[1] below Lv 10 the card has neither line', !/Gloves stay on|young smith/.test(R.lv5 || ''), (R.lv5 || '').slice(0, 80));
   ok('[2] Lv 38: look at the young smith\'s face; a thing he made once and should not have - shown once', /If the tear shows you a young smith, look at his face/.test(lv38) && /a thing I made once that I should not have/.test(lv38) && !/young smith/.test(R.lv38b || ''), lv38.slice(0, 170));
   ok('[2] it is gone once the Distorted Portal is done', !/young smith|Gloves stay on/.test((R.done38 || '') + (R.lv60 || '')), [(R.done38 || '').slice(0, 60), (R.lv60 || '').slice(0, 60)]);
-  ok('[3] "What did you make?" appears only after Barnaby III', !R.before3.some((o) => /What did you make/.test(o)) && R.after3opts.some((o) => /What did you make/.test(o)), [R.before3, R.after3opts]);
-  ok('[3] the answer: a blade for the woman who walked up the road, something he could not name, a mouth in the town, and he should have stayed with the iron', /A blade, for the woman who walked up the road/.test(R.made || '') && /something I could not name/.test(R.made || '') && /it has a mouth in the town/.test(R.made || '') && /I should have stayed with the iron/.test(R.made || ''), (R.made || '').slice(0, 160));
+  ok('[3] "What did you make?" appears only after Barnaby IV (the quest tells it first, the shop answers quietly after)', !R.before3.some((o) => /What did you make/.test(o)) && R.after3opts.some((o) => /What did you make/.test(o)), [R.before3, R.after3opts]);
+  ok('[3] the answer: a blade for the woman who walked up the road, something he could not name, a mouth in the town, and he should have stayed with the iron', /A blade, for the woman who walked up the road/.test(R.made || '') && /something I could not name/.test(R.made || '') && /a mouth in the town/.test(R.made || '') && /Iron would have told me no/.test(R.made || '') && /She asked for honest\. I gave her perfect/.test(R.made || ''), (R.made || '').slice(0, 160));
+  ok('[3] "I found her at the bottom of the stair." appears only after the Last Step, and ends on the crossed-out word', !R.before3.some((o) => /bottom of the stair/.test(o)) && R.lastOpts.some((o) => /bottom of the stair/.test(o)) && /She wrote "no hurry" on the ticket\. I finished it that night\./.test(R.lastAns || '') && /crosses out one word, and writes it again in his own poor hand/.test(R.lastAns || ''), (R.lastAns || '').slice(0, 160));
   ok('[4] Nurse Joyce: no option at Lv 14, the burns that moved by Thursday at Lv 15', !R.joyce14.some((o) => /Barnaby/.test(o)) && /By Thursday the scars had moved/.test(R.joyce15 || ''), [R.joyce14, (R.joyce15 || '').slice(0, 80)]);
   ok('[4] Old Arlen: no option at Lv 24, a work too finished for a man with no named master at Lv 25', !R.arlen24.some((o) => /Barnaby/.test(o)) && /too finished for a man with no named master/.test(R.arlen25 || ''), [R.arlen24, (R.arlen25 || '').slice(0, 80)]);
   ok('[5] none of it stands an oath, guards, holds a door or calls him a sentinel', !/\bstood\b|\bstand|guard|\bdoor|breach|\boath|sentinel|\bgate\b|\bpost\b/i.test(all), all.match(/\bstood\b|\bstand\w*|guard\w*|\bdoor\w*|breach|\boath|sentinel|\bgate\b|\bpost\b/gi));

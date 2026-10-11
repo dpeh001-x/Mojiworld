@@ -22,14 +22,14 @@ const BEATS = [
   ['q_distorted_portal', 'The four argued for a season over who should go in, and settled it the usual way: nobody.'],
   ['q_distorted_portal', 'The only one who ever came this close walked up the road alone, and has not been seen on it since.'],
   ['q_boss_sundered_smith', 'He remembers the blade better than the woman who carried it, and never learned whether it cut.'],
-  ['q_boss_sundered_smith', 'He is sorry, and has had nobody to say it to.'],
-  ['q_last_step', 'She went up the road to break the curse on this world and struck it once. What struck back took her name and most of what she knew.'],
-  ['q_last_step', 'The other was forged for her by a hand that is sorry, and she cannot remember why she still holds it.'],
+  ['q_boss_sundered_smith', 'He turns every finished blade over once, looking for the flaw.'],
+  ['q_last_step', 'She had gone up the road to break the curse on this world, and she struck it once. What struck back took her name and most of what she knew.'],
+  ['q_last_step', 'The other is so well made it hurts to look at, and she cannot remember who made it, or why she will not put it down.'],
   ['q_boss_aetherion', 'The curse the woman came to cut has no edge; the tear was the only thing it ever gave back.'],
   ['q_lyra_cut', 'Only one thing leaves an edge like that: a blade made to cut what cannot be cut.'],
   ['q_lyra_last', 'Beneath it, in her own hand, is one line she did not finish: "It was never meant to'],
   ['q_long_dawn_2', 'for the first time since the Pause, the four orders sit in one room.'],
-  ['q_kindest_hand', 'Ask him whose blade he is sorry for; he will not answer, and he will not lie.'],
+  ['q_kindest_hand', 'Ask him what he made; he will tell you, and it will cost him.'],
 ];
 try {
   const ctx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1280, height: 720 } });
@@ -51,7 +51,7 @@ try {
   ok('[2] every touched quest fits its new cap (Tear chapters 190, the rest of the line 170)', over.length === 0, R.words);
   ok('[2] the story prose is above its old 5,000 and under the new 5,600', R.total > 5000 && R.total < 5600, R.total);
   const D = R.desc;
-  ok('[3] the lines the user pasted are intact: the Portal ends "Past him, the tear runs on.", the Forge opens on the young smith you set free, the Last Step opens on the ashes', /Past him, the tear runs on\.$/.test(D.q_distorted_portal) && /^The Vigil broke like a mirror, and the young smith you set free did not walk out of it\. Past it, a hammer is still ringing\./.test(D.q_boss_sundered_smith) && /^The Smith set his hammer down, and his ashes did not fall\. They drifted down the tear, as if someone below had called for them\./.test(D.q_last_step), [D.q_distorted_portal.slice(-40), D.q_last_step.slice(0, 60)]);
+  ok('[3] the lines the user pasted are intact: the Portal ends "Past him, the tear runs on.", the Forge opens on the young smith you set free, the Last Step opens on the ashes', /Past him, the tear runs on\.$/.test(D.q_distorted_portal) && /^The Eleventh Hour broke like a mirror, and the young smith you set free did not walk out of it\. Past it, a hammer is still ringing\./.test(D.q_boss_sundered_smith) && /^The Smith set his hammer down, and his ashes did not fall\. They drifted down the tear, as if someone below had called for them\./.test(D.q_last_step), [D.q_distorted_portal.slice(-40), D.q_last_step.slice(0, 60)]);
   ok('[3] the Smith\'s card still never names Barnaby, and The Forge That Broke still says the Forge handed him back', !/Barnaby/.test(D.q_boss_sundered_smith) && /The loan was closed, and the Forge has handed him back\./.test(D.q_boss_sundered_smith), '');
   const added = BEATS.map(([, s]) => s).join(' ');
   ok('[4] none of the added passages names Mira, the Twelve, a House, a champion or the maker', !/\bMira\b|Twelve|Zodiac|Houses?\b|champion|Guguma|creator|maker|playground|entertain|extraterrestrial|\bgame\b/i.test(added), added.match(/\bMira\b|Twelve|Zodiac|House|champion|Guguma|creator|maker|playground|entertain/gi));

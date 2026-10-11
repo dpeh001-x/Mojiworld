@@ -56,16 +56,16 @@ const r = await page.evaluate(() => {
   // they never wash off. Anchored to the entity key so a comment quoting the
   // line cannot satisfy it - the Smith guard in lyra_arc_test passed on exactly
   // that mistake before it was tightened.
-  out.sootIntact = /young_confused_barnaby: 'A talented smith who reached[^']*old soot under the gauntlets/.test(_src);
+  out.sootIntact = /young_confused_barnaby: 'A talented smith who took the finish[^']*old soot under the gauntlets/.test(_src);
   // The five theories are the point of chapter I. Count the labelled ones, so a
   // later trim that guts the prose fails loudly instead of leaving a chapter
   // called "Five Stories" with three.
   const five = (QUESTS.q_barnaby_five || {}).desc || '';
-  out.theoryLabels = ['HE DIED THAT NIGHT', 'HE NEVER TRAINED HERE', 'SOMEONE IS WATCHING HIM',
+  out.theoryLabels = ['HE DIED THAT NIGHT', 'HE NEVER TRAINED HERE', 'HE WAS HIDDEN',
                       'THERE WERE ALWAYS TWO'].filter((t) => five.includes(t));
-  out.unsignedFifth = /put their name to/i.test(five);
+  out.unsignedFifth = /nobody will sign/i.test(five);
   // Chapter II's evidence and chapter III's contradiction must both survive.
-  out.rollDouble = /a blade for the woman at the gate/.test((QUESTS.q_barnaby_roll || {}).desc || '') && /six pounds of steel signed that night/.test((QUESTS.q_barnaby_roll || {}).desc || '');
+  out.rollDouble = /a blade for the woman at the gate/.test((QUESTS.q_barnaby_roll || {}).desc || '') && /Make it honest\./.test((QUESTS.q_barnaby_roll || {}).desc || '') && /one word\. Done\./.test((QUESTS.q_barnaby_roll || {}).desc || '');
   out.copiedOut = /only pulls people in/i.test((QUESTS.q_barnaby_hands || {}).desc || '') && /what it was made of/i.test((QUESTS.q_barnaby_hands || {}).desc || '');
 
   // --- plain language, measured ------------------------------------------
@@ -118,7 +118,7 @@ console.log(`  plain-language: ${r.sentenceCount} sentences, avg ${r.avgWords.to
 check(r.avgWords <= 20, 'the prose averages under 20 words per sentence (plain, not clipped)', r.avgWords);
 check(r.longest <= 55, 'no runaway sentence', r.longest);
 check(r.jargonHits.length === 0, 'no jargon the plain-language pass removed has crept back', r.jargonHits);
-check(r.rollDouble, 'chapter II still sets up the two signatures (the woman at the gate\'s blade in his order book, the foundry\'s page in a better hand)', r.rollDouble);
+check(r.rollDouble, 'chapter II still sets up the two signatures (the woman at the gate\'s blade in his order book, the one word "Done" in a hand better than his)', r.rollDouble);
 check(r.copiedOut, 'chapter III still turns the realm\'s assumption around (the tear does not only pull people in: it was made of something he called)', r.copiedOut);
 check(r.sootIntact, 'the Vigil double still carries the forge soot the whole reveal rests on', r.sootIntact);
 check(errs.length === 0, 'no page errors', errs);
