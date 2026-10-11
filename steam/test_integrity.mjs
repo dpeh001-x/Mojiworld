@@ -37,8 +37,10 @@ try {
   try { await hook({ electronPlatformName: 'linux', appOutDir: empty, packager: { appInfo: { productFilename: 'Mojiworld' } } }); } catch (e) { threw = true; }
   ok('[5] a build with no game file fails the hook', threw);
   const dbg = [I.debugLaunch(['app.exe', '--inspect=9229'], [], {}), I.debugLaunch(['app.exe', '--remote-debugging-port=9222'], [], {}), I.debugLaunch(['app.exe'], ['--inspect-brk'], {}),
-    I.debugLaunch(['app.exe'], [], { ELECTRON_RUN_AS_NODE: '1' }), I.debugLaunch(['app.exe'], [], { NODE_OPTIONS: '--require ./x.js' })];
-  const plain = [I.debugLaunch(['app.exe', '--moji-relay=wss://x', '--moji-packaged=1'], [], {}), I.debugLaunch(['app.exe'], [], { NODE_OPTIONS: '--max-old-space-size=4096' })];
+    I.debugLaunch(['app.exe', '--js-flags=--allow-natives-syntax'], [], {})];
+  // v0.30.1724 bughunt3 - ordinary: a memory flag in Steam launch options, and the env switches the packaged fuses disarm
+  const plain = [I.debugLaunch(['app.exe', '--moji-relay=wss://x', '--moji-packaged=1'], [], {}), I.debugLaunch(['app.exe'], [], { NODE_OPTIONS: '--max-old-space-size=4096' }),
+    I.debugLaunch(['app.exe', '--js-flags=--max-old-space-size=4096'], [], {}), I.debugLaunch(['app.exe'], [], { ELECTRON_RUN_AS_NODE: '1' }), I.debugLaunch(['app.exe'], [], { NODE_OPTIONS: '--require ./x.js' })];
   ok('[6] debug launch switches and env are recognised, ordinary ones are not', dbg.every(Boolean) && !plain.some(Boolean), { dbg, plain });
   const f = I.statsFilter();
   const s1 = f({ lifetime_kills: 10, highest_level: 5, lifetime_coins: 100.5, bosses_defeated: -1, made_up: 3 });

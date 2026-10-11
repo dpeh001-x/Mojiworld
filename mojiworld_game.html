@@ -16341,7 +16341,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1723';
+const GAME_VERSION = 'v0.30.1724';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -42914,7 +42914,7 @@ if (MAPS.sundered_forge && MAPS.lastStep) MAPS.sundered_forge.portals.push({ x: 
 const _LX_SANCTUM_DOOR = { x: 1540, dest: 'sanctum', name: '▶ Aetherion\'s Sanctum', levelGate: 50 };
 function _lxMiraBeaten() { try { return !!((game.bossDefeated && game.bossDefeated.lastStep) || (game.bestiary && game.bestiary._boss_miraFallen)); } catch (e) { return false; } }
 // per user (2026-10-09, questline order): the Forge's far door to the Last Step shows once The Forge That Broke is done - or the copy has already fallen / The Last Step or Lyra VI is done (a save past it)
-function _lxLastStepDoorOpen() { try { const C = (player && player.quests && player.quests.completed) || {}; return !!(C.q_boss_sundered_smith || C.q_last_step || C.q_lyra_last || C.q_boss_aetherion || _lxMiraBeaten()); } catch (e) { return false; } }
+function _lxLastStepDoorOpen() { try { const C = (player && player.quests && player.quests.completed) || {}; const A = (player && player.quests && player.quests.active) || {}; /* v0.30.1724 bughunt3 - or either quest is in hand (taken before v0.30.1676 moved Lyra VI behind the Smith: the door vanished under it) */ return !!(C.q_boss_sundered_smith || C.q_last_step || C.q_lyra_last || C.q_boss_aetherion || A.q_lyra_last || A.q_last_step || _lxMiraBeaten()); } catch (e) { return false; } }
 function _lxSyncSanctumDoor() {
   const L = MAPS.lastStep, S = MAPS.sanctum; if (!L || !Array.isArray(L.portals)) return false;
   const on = _lxMiraBeaten(), i = L.portals.findIndex((p) => p && p.dest === 'sanctum');
@@ -43717,10 +43717,12 @@ const _lxAc = (function () {
   const FRAME_URL = /([a-z][\w+.-]*:\/\/[^\s()]+?)(?=:\d+:\d+)/i;
   const FOREIGN = /eval at |debugger eval code|<anonymous>:\d+:\d+|__puppeteer_evaluation_script__/;
   const strip = (u) => String(u).replace(/[?#].*$/, '');
+  const EXT_URL = /^(?:chrome|moz|safari-web|ms-browser|edge)-extension:\/\//i;   // v0.30.1724 bughunt3 - browser-extension script URLs
   const log = [], recs = [];
   let on = false, installed = false, sweepT = null, devRec = null;
-  let self = '';
-  try { const m = FRAME_URL.exec(String(new NE().stack || '')); self = m ? strip(m[1]) : ''; } catch (e) {}
+  let self = '', selfL0 = 0, selfL1 = 0;   // v0.30.1724 bughunt3 - selfL0..selfL1: this closure's own lines in the page (see foreign)
+  const lineOf = (ln, m) => { const x = /:(\d+):\d+/.exec(String(ln).slice(m.index + m[1].length)); return x ? +x[1] : 0; };
+  try { const st = String(new NE().stack || ''); const m = FRAME_URL.exec(st); self = m ? strip(m[1]) : ''; if (m) selfL0 = lineOf(st, m); } catch (e) {}
   function activeHere() {
     try {
       if (/[?&]lxac=1(?:&|$)/.test(location.search)) return true;
@@ -43747,16 +43749,28 @@ const _lxAc = (function () {
     } catch (e) { return true; }
     finally { try { NE.stackTraceLimit = lim; NE.prepareStackTrace = pst; } catch (e) {} }
     const lines = st.split('\n');
+    // v0.30.1724 bughunt3 - AN EXTENSION THAT ONLY CALLS THE GAME IS NOT A CHEAT. An extension or userscript that wraps requestAnimationFrame,
+    // timers or listeners in the page's own world (FPS counters, background-tab keepers, userscript managers) sits UNDER every
+    // game callback, so 'any foreign frame anywhere' refused every honest write - EXP, coins and levels froze and the save was
+    // flagged. An extension frame now passes when game code outside this closure sits between it and the write: the game made
+    // the write, the extension only called the game. A write the extension makes itself (no game frame above it) is still
+    // refused, and console / eval frames are refused wherever they are, as before.
+    let vouched = false;
     for (let i = 1; i < lines.length; i++) {
       const ln = lines[i];
       if (FOREIGN.test(ln)) return true;
       const m = FRAME_URL.exec(ln);
-      if (m && !ownUrl(strip(m[1]))) return true;
+      if (!m) continue;
+      const u = strip(m[1]);
+      if (ownUrl(u)) { if (!vouched) { const l = (u === self) ? lineOf(ln, m) : 0; if (!(selfL1 && l >= selfL0 && l <= selfL1)) vouched = true; } continue; }
+      if (vouched && EXT_URL.test(u)) continue;
+      return true;
     }
     return false;
   }
-  function note(kind, field, from, to) {
+  function note(kind, field, from, to, soft) {   // v0.30.1724 bughunt3 - soft: logged, never flagged (see 'rolled back')
     if (log.length < 60) log.push({ t: Date.now(), kind, field, from, to });
+    if (soft) return;
     if (devRec && devRec.v !== 'ac' && devRec.v !== true) { devRec.v = 'ac'; devRec.e = null; }   // Steam-ineligible (signed)
   }
   const pairOk = (r) => typeof r.v !== 'number' || r.v !== r.v || r.e === -r.v;
@@ -43967,7 +43981,7 @@ const _lxAc = (function () {
     if (tok && L && tok === adoptToken(L.t)) { adoptedNow = true; rbKeep(L, raw); return raw; }
     const why = copyWins(raw, D);
     if (!why) return raw;
-    note('save', why, L && L.t, null);
+    note('save', why, L && L.t, null, why === 'rolled back');   // v0.30.1724 bughunt3 - a killed browser leaves the stored save older than the copy (localStorage commits lag): restore it, flag only an edit
     try { localStorage.setItem(SAVE_KEY, D.json); } catch (e) {}
     return D.json;
   }
@@ -43982,7 +43996,7 @@ const _lxAc = (function () {
   // or an edited one, the newest save goes back into storage and the title menu reloads once onto it. _resetting stops the
   // unload flush from writing the old state over it, as the import and backup paths do.
   function rbPrefetch() {
-    try { const k = sessionStorage.getItem('lx_ac_rb'); if (k) { sessionStorage.removeItem('lx_ac_rb'); note('save', k, null, null); } } catch (e) {}
+    try { const k = sessionStorage.getItem('lx_ac_rb'); if (k) { sessionStorage.removeItem('lx_ac_rb'); note('save', k, null, null, k === 'rolled back'); } } catch (e) {}
     IDB.get('save').then((d) => {
       if (!d || typeof d.json !== 'string' || D || adoptedNow) return;
       D = d;
@@ -44013,6 +44027,7 @@ const _lxAc = (function () {
     } catch (e) { on = false; }
     return on;
   }
+  try { const st = String(new NE().stack || ''); const m = FRAME_URL.exec(st); if (m && strip(m[1]) === self) selfL1 = lineOf(st, m); } catch (e) {}   // v0.30.1724 bughunt3 - the end of this closure (see selfL0)
   return {
     install,
     get on() { return on; },
@@ -46030,7 +46045,9 @@ window.addEventListener('keydown', e => {
   // v0.29.610 — queue arrow edges for the shackle QTE. See _qteFrame: polling
   // game.keys once per sim step loses any press that starts and ends between
   // two steps, which is exactly what fast tapping produces.
-  if (!repeat && typeof _QTE !== 'undefined' && _QTE.active && typeof _QTE_KEYS !== 'undefined' && _QTE_KEYS.indexOf(k) >= 0) {
+  // v0.30.1724 bughunt3 - not while paused: _qteFrame does not run behind a menu, so arrows typed there were replayed on resume (the shown
+  // sequence typed in the pause card broke the lock as a PERFECT; stray arrows counted as wrong keys, +0.4 s each)
+  if (!repeat && typeof _QTE !== 'undefined' && _QTE.active && !game.paused && !game._photoMode && typeof _QTE_KEYS !== 'undefined' && _QTE_KEYS.indexOf(k) >= 0) {
     if (!_QTE.queue) _QTE.queue = [];
     _QTE.queue.push(k);
     if (_QTE.queue.length > 12) _QTE.queue.shift();   // a stuck queue must not grow without bound
@@ -62329,7 +62346,7 @@ function _coopApplyKill(msg) {
   // hunt quests in v0.29.321, but this guest-side mirror kept advancing them
   // off broadcast frames. Same rule both sides now: illusions count nothing.
   if (msg.tp && !msg.il && typeof trackPickup === 'function') {
-    try { trackPickup('kill', { type: msg.tp }); if (msg.b && !+msg.ec && !+msg.ex && !+msg.tw) trackPickup('boss', { id: msg.tp }); } catch (e) {}
+    try { if (!+msg.tw) trackPickup('kill', { type: msg.tp }); if (msg.b && !+msg.ec && !+msg.ex && !+msg.tw) trackPickup('boss', { id: msg.tp }); } catch (e) {}   // v0.30.1724 bughunt3 - a split twin is no kill (the host skips it: _lxTwinKill)
     if (msg.b && msg.zs && !+msg.ec && !+msg.ex && !+msg.tw && typeof _lxZodiacTwelveReconcile === 'function') _lxZodiacTwelveReconcile(false);   // v0.30.x zodiac-twelve   // v0.30.x coop-audit — as the host: an echo, expedition or split-twin kill is not a real boss kill (zodiac badge, boss-gated cosmetics)
   }
   // v0.29.5xx — GUEST KILL-QUEST PROGRESS (per user "ensure all these rewards
@@ -62341,7 +62358,7 @@ function _coopApplyKill(msg) {
   // objective at 0/10 while bestiary credit counted all of them. Guards mirror
   // the host's line: skip mirages (msg.il), skip expedition runs, and respect
   // the party-quest direct-tick flag when we hold the mirror.
-  if (msg.tp && !msg.il && !(game.expedition && game.expedition.active)) {
+  if (msg.tp && !msg.il && !+msg.tw && !(game.expedition && game.expedition.active)) {   // v0.30.1724 bughunt3 - nor a quest tick for a split twin
     // v0.29.5xx — TRAIN-PQ CORRECTNESS. The ticket family must NOT go through
     // tickQuestKill: all three Clockwork quests share target 'ticketMech' and
     // that function has no map gate, so one kill credited every active one
@@ -72497,11 +72514,16 @@ function renderQuestJournal() {
       const next = (() => {
         const nb = _nextStoryBeat();
         if (!nb || s.done) return '';
-        const nq = QUESTS[nb];
-        const st = (player.quests.active && player.quests.active[nb]) ? 'underway'
-                 : (player.quests.unlocked && player.quests.unlocked[nb]) ? 'ready'
+        let nq = QUESTS[nb], nid = nb;
+        // v0.30.1724 bughunt3 - held back by a prerequisite, not a level (Barnaby I waits on Brok's Forge-Key errand): name it, as the tracker does
+        if (!(player.quests.active && player.quests.active[nb]) && !(player.quests.unlocked && player.quests.unlocked[nb]) && (player.level || 1) >= (nq.levelReq || 1) && nq.prereq) {
+          const _miss = [].concat(nq.prereq).find((p) => QUESTS[p] && !(player.quests.completed && player.quests.completed[p]));
+          if (_miss) { nid = _miss; nq = QUESTS[_miss]; }
+        }
+        const st = (player.quests.active && player.quests.active[nid]) ? 'underway'
+                 : (player.quests.unlocked && player.quests.unlocked[nid]) ? 'ready'
                  : 'needs Lv ' + (nq.levelReq || 1);
-        return `<button type="button" class="qj-saga-next" data-qnext="${nb}" title="Show it in the list · Lv ${nq.levelReq || 1}+ · ${st}">Next ▶ ${nq.name}${/^needs/.test(st) ? ` <span class="qj-saga-lock">Lv ${nq.levelReq || 1}</span>` : ''}</button>`;
+        return `<button type="button" class="qj-saga-next" data-qnext="${nid}" title="Show it in the list · Lv ${nq.levelReq || 1}+ · ${st}">Next ▶ ${nq.name}${/^needs/.test(st) ? ` <span class="qj-saga-lock">Lv ${nq.levelReq || 1}</span>` : ''}</button>`;
       })();
       return `<div class="qj-saga" title="${blurb}">
         <span class="qj-saga-act">Act ${s.act} · ${s.actInfo.name}</span>
@@ -91112,7 +91134,7 @@ function updateMinions(dt) {
       const _mr = mn.mojimon ? Math.max(30, (mn.w + tgt.w) * 0.45) : 30;
       // v0.30.623 summon-ai - the undead strike by reach against the body (see _lxUndeadInReach);
       // the MojiMon keeps its size-aware centre radius.
-      if (mn.mojimon ? (_ddx*_ddx + _ddy*_ddy < _mr * _mr) : (_lxUndeadInReach(mn, tgt) && !_lxSummonAttacking(mn) && Math.abs(mn.vx) <= 0.9)) {   // v0.30.1674 summon-plant: the undead strike from a standstill
+      if (mn.mojimon ? (_ddx*_ddx + _ddy*_ddy < _mr * _mr) : (_lxUndeadInReach(mn, tgt) && Math.abs(mn.vx) <= 0.9)) {   // v0.30.1674 summon-plant: the undead strike from a standstill
         // v0.29.435 — a MojiMon's melee carries its own skill tag so the
         // hitMonster retaliation exemption applies to BOTH its attack
         // channels; tagging only the ranged shot left every melee tick
@@ -91264,8 +91286,11 @@ function _lxSummonAttacking(ent) {
 function _lxSummonBite(ent) {   // stamp a bite: plant, open the attack window, restart the attack loop
   if (!ent) return;
   const t = (typeof game !== 'undefined' && game.time) ? game.time : 0;
+  // v0.30.1724 bughunt3 - a bite inside a running loop extends it instead of restarting it: the undead bite every 400 ms (mn.cd) and the
+  // window is 49 frames, so the strike gate on it (v0.30.1674) had cut them to one bite per ~816 ms (half their damage)
+  const _live = t < (ent._atkAnimUntil || 0);
   ent.vx = 0; ent._atkAnimUntil = t + _LX_SUMMON_ATK_FRAMES;
-  ent._atkAnimAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  if (!_live || !ent._atkAnimAt) ent._atkAnimAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 }
 function _summonAtkPosePulse(ent) {
   if (!ent) return false;
@@ -112798,7 +112823,7 @@ function _killMonsterRaw(m) {
   // STANDARD TICK PATH — skipped for ticket-family kills (already direct-
   // ticked above) to prevent double-counting. All other mob types
   // (non-ticket world mobs) still go through the regular pipeline.
-  if (m.type && !_inExp && !m._pqDirectTicked && !_isIllusionKill && !_lxTwinKill) tickQuestKill(m.type, !!m.isBoss);   // v0.30.1698 (per user: a boss quest taken after the boss died sat at 0/1 - only the echo was left for 10 minutes) an echo of a quest's boss ticks its quest, whatever kind (kill, critical, story-beat, q_road_6). It still pays no daily (tickDaily above), no EXP or coins, and stamps no map; v0.30.511 had stopped every quest tick   // v0.29.321 — mirages don't advance hunt quests
+  if (m.type && !_inExp && !m._pqDirectTicked && !_isIllusionKill && !_lxTwinKill && !m._rushBoss) tickQuestKill(m.type, !!m.isBoss);   // v0.30.1724 bughunt3 - not a Boss Rush kill: those are echoes too, and Gravitos falls there in ONE form (the finale quest finished in the Rush)   // v0.30.1698 (per user: a boss quest taken after the boss died sat at 0/1 - only the echo was left for 10 minutes) an echo of a quest's boss ticks its quest, whatever kind (kill, critical, story-beat, q_road_6). It still pays no daily (tickDaily above), no EXP or coins, and stamps no map; v0.30.511 had stopped every quest tick   // v0.29.321 — mirages don't advance hunt quests
   // Mastery (v0.24.1) — per-mob-type kill counter. Hitting thresholds of
   // 100 / 500 / 1000 kills grants +1% / +2% / +3% damage vs that type.
   // Classic MMO "paragon-lite" grind that rewards long-term farming.
@@ -156335,7 +156360,8 @@ function _lxFlierFloorY(x) {
 // bite after its lunge. Not the contact-hit window: that art shows only on a still body and drops the moment the body walks. Its own moving attacks keep
 // their motion: the brace-dash, the hourglass lunge, the zodiac lunge, flight, and the patterns below.
 const _LX_BOSS_MOVE_PATTERNS = new Set(['zip', 'claw', 'shellSpin', 'jumpSlam', 'leap', 'latch', 'teleport', 'slam', 'charge', 'chargeWindup',
-  'chargeBurst', 'headbutt', 'headbuttWindup', 'diveCross', 'pounceWindup', 'pounceLeap', 'burrow']);
+  'chargeBurst', 'headbutt', 'headbuttWindup', 'diveCross', 'pounceWindup', 'pounceLeap', 'burrow',
+  'sweep']);   // v0.30.1724 bughunt3 - Cancer's phase-3 Pincer Sweep charges along the ground (vx 6.5); it was rooted in place
 function _lxBossAttackPlanted(m) {
   if (!m || !(m.isBoss || m.boss || m.zodiacBoss || m.superBoss || m._rushBoss)) return false;
   if (m._coopMirror || m._braceDashing || m._hgCharging || m._dashing || m._dashT > 0 || m._zFlying || m._zLungeMs > 0) return false;
@@ -160081,8 +160107,10 @@ function drawMonster(m) {
   const _cvW = m._visW || (m.w * 3.4), _cvH = m._visH || (m.h * 3.4);
   const _cCx = sx + m.w / 2, _cFootY = sy + m.h;
   const _aeCullDx = (m._aeEcho && m.type === 'aetherion') ? (m._aeEcho.x - m.x) : 0;   // v0.30.1544 echostep - his Echo Step echo draws at the landing spot
-  if (Math.max(_cCx, _cCx + _aeCullDx) + _cvW / 2 < 0 || Math.min(_cCx, _cCx + _aeCullDx) - _cvW / 2 > W) return;
-  if (_cFootY < _camY - 30 || _cFootY - _cvH > _camY + H + 30) return;
+  // v0.30.1724 bughunt3 - _lxBossAttackPlanted reads _lxBossAtkDrawn, written only by a draw past these culls: a boss that left the screen
+  // mid-attack kept it true and stood rooted off-screen until the hero walked back to it
+  if (Math.max(_cCx, _cCx + _aeCullDx) + _cvW / 2 < 0 || Math.min(_cCx, _cCx + _aeCullDx) - _cvW / 2 > W) { if (m._lxBossAtkDrawn) m._lxBossAtkDrawn = false; return; }
+  if (_cFootY < _camY - 30 || _cFootY - _cvH > _camY + H + 30) { if (m._lxBossAtkDrawn) m._lxBossAtkDrawn = false; return; }
   // v0.29.x — ground shadow under every monster (see _lxDrawBlobShadow above).
   // After the cull so off-screen mobs pay nothing; before the body so it
   // renders underneath.
@@ -174183,6 +174211,11 @@ const _LX_PAUSE_MON_FIELDS = ['_piscesDreamUntil', '_geminiLyingUntil', '_libraI
   // the Sundered Smith came back from one firing his hammer AND his pillars at once. Barnaby's pillars, the Smith's
   // hammer / heat cycle / pillars / toll, the Sovereign's step, Vermillion's spray.
   '_barnPillarsAt', '_smithHammerAt', '_smithHeatAt', '_smithPillarsAt', '_smithTollAt', '_sovStepAt', '_vermSprayAt'];
+// v0.30.1724 bughunt3 - the Woman Who Turned Back: her kit is the Sovereign's and none of her clocks were in the list above, so a menu let THE
+// ELEVEN run out (shards gone, shield down, not one broken), ate her EXPOSED / SPENT windows, and brought every special due at once
+// on unpause. Added here, not in the literal above (a landed-fix marker pins that line).
+_LX_PAUSE_MON_FIELDS.push('_miraGateAt', '_miraFeatherAt', '_miraSandAt', '_miraElevenAt', '_miraStepAt', '_miraElevenEnds', '_miraExposedUntil',
+  '_miraSpentUntil', '_miraGateUntil', '_miraShotAt');
 // v0.30.x pause-clock, round 4 (full audit). "LAST USED AT" stamps, read as game.time - X > N: the lists above only
 // push FUTURE values, so a menu aged these - King Krook, Mooma, King Gloopaloo and Taur came out of any long menu with
 // their specials off cooldown and the shared special clock (_bossSpecialDue) forcing one, and Capricorn's Altitude

@@ -1,7 +1,10 @@
 // ANTI-CHEAT LAYER 3 - the save itself (_lxAc: sq + the IndexedDB copy, sig5). On a PUBLIC host (the anti-cheat is off on
 // localhost), with a signed save loaded by a real click on Continue:
 //   [1] a flush writes sq + sig5, the verified copy notes s5, and the newest save is kept in IndexedDB
-//   [2] an OLD save put back (with its own verified copy) loads the newest instead, and marks the save
+//   [2] an OLD save put back (with its own verified copy) loads the newest instead and notes it - without flagging the save (a
+//       killed browser leaves localStorage older than the IndexedDB copy honestly: its commits lag; bughunt round 3). The
+//       counter at the title can be one past the newest (a save of the restored state may land first): the 'rolled back'
+//       note is what proves the newest copy was put in.
 //   [3] the save EDITED in storage (coins changed, same timestamp) loads the untouched copy instead
 //   [4] with the IndexedDB copy gone, an edit outside the ls3 fields is caught by sig5 ('bad' -> restored, marked)
 //   [5] a save written by an OLDER build (no sq, no sig5, newer timestamp) is kept as it is, nothing logged
@@ -59,7 +62,7 @@ try {
   const sqTitle = await page.evaluate(() => JSON.parse(localStorage.getItem(SAVE_KEY)).sq);   // at the title: entering autosaves and bumps sq
   await enter(page);
   const r2 = await page.evaluate(() => ({ sq: JSON.parse(localStorage.getItem(SAVE_KEY)).sq, log: _lxAcReport(), dev: game._devTouched }));
-  ok('[2] an old save put back loads the newest instead, and marks the save', sqTitle === sqNew && r2.log.some((e) => e.kind === 'save' && e.field === 'rolled back') && r2.dev === 'ac', { sqNew, sqTitle, r2 });
+  ok('[2] an old save put back loads the newest instead and notes it, without flagging the save', sqTitle >= sqNew && r2.log.some((e) => e.kind === 'save' && e.field === 'rolled back') && r2.dev !== 'ac', { sqNew, sqTitle, r2 });
   // [3] edited in storage, same timestamp
   await clean(page);
   const before = await stored(page);

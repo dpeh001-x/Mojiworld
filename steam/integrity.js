@@ -39,14 +39,15 @@ async function verify(root, manifest) {
   return 'ok';
 }
 function readManifest(file) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return null; } }
-const DEBUG_SWITCH = /^--(inspect|inspect-brk|inspect-port|remote-debugging-port|remote-debugging-pipe|remote-allow-origins|js-flags)(=|$)/;
+// v0.30.1724 bughunt3 - not --js-flags (players add memory flags to Steam launch options: --js-flags=--max-old-space-size=...) unless it
+// asks for V8 natives; and not NODE_OPTIONS / ELECTRON_RUN_AS_NODE: the packaged binary's fuses (after_pack.js) ignore both, so
+// their presence proved nothing and only switched an honest player's achievements off for the launch.
+const DEBUG_SWITCH = /^--(inspect|inspect-brk|inspect-port|remote-debugging-port|remote-debugging-pipe|remote-allow-origins)(=|$)/;
+const DEBUG_JS_FLAGS = /^--js-flags=.*(allow-natives-syntax|inspect)/;
 function debugLaunch(argv, execArgv, env) {
   const args = [].concat(argv || [], execArgv || []);
-  if (args.some((a) => DEBUG_SWITCH.test(String(a)))) return true;
-  const e = env || {};
-  if (e.ELECTRON_RUN_AS_NODE) return true;
-  if (e.NODE_OPTIONS && /--inspect|--require|(^|\s)-r\s/.test(String(e.NODE_OPTIONS))) return true;
-  return false;
+  if (args.some((a) => DEBUG_SWITCH.test(String(a)) || DEBUG_JS_FLAGS.test(String(a)))) return true;
+  return false;   // env is not read: the fuses disarm NODE_OPTIONS and ELECTRON_RUN_AS_NODE in the packaged app
 }
 const STAT_CAP = { lifetime_kills: 1e9, highest_level: 200, lifetime_coins: 2147483647, bosses_defeated: 1e6 };
 function statsFilter() {
