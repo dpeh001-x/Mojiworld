@@ -53,11 +53,11 @@ try {
       const out = { block: !!document.getElementById('lx-wardrobe-aaa') };
       out.hair = await __cardTab(/^\s*hair/i, 'hair', HERO_VEC_HAIR_OPTIONS.length);
       // pick a card: state, one active card, the tile follows
-      const pick = __cards().find((c) => !c.classList.contains('active') && c.title === 'bob') || __cards()[3];
+      const pick = __cards().find((c) => !c.classList.contains('active') && (c.dataset.styleId || c.title) === 'bob') || __cards()[3];
       pick.click(); await __w(150);
       const tileImg = [...document.querySelectorAll('.wardrobe-slot')].find((s) => /hair/i.test(s.textContent)).querySelector('img');
-      out.pick = { want: pick.title, got: CHAR_STUDIO.hairId, active: __cards().filter((c) => c.classList.contains('active')).map((c) => c.title),
-        tile: !!(tileImg && LX_HAIR[_migrateHairId(pick.title)] && tileImg.src === LX_HAIR[_migrateHairId(pick.title)].src) };
+      out.pick = { want: (pick.dataset.styleId || pick.title), got: CHAR_STUDIO.hairId, active: __cards().filter((c) => c.classList.contains('active')).map((c) => c.dataset.styleId || c.title),
+        tile: !!(tileImg && LX_HAIR[_migrateHairId((pick.dataset.styleId || pick.title))] && tileImg.src === LX_HAIR[_migrateHairId((pick.dataset.styleId || pick.title))].src) };
       // the dye: a hue change re-draws the hair cards in the new colour
       const cv0 = __cards()[0].querySelector('canvas'), s0 = __sig(cv0), dye = document.querySelector('#wardrobe-picker .lx-dye input[type=range]');
       if (dye) { dye.value = '180'; dye.dispatchEvent(new Event('input', { bubbles: true })); dye.dispatchEvent(new Event('change', { bubbles: true })); }
@@ -65,7 +65,7 @@ try {
       if (dye) { dye.value = '0'; dye.dispatchEvent(new Event('input', { bubbles: true })); }
       out.eye = await __cardTab(/^\s*eyes/i, 'eye', HERO_VEC_EYE_OPTIONS.length);
       out.eyeFace = __cards().every((c) => c.classList.contains('lx-sc-face'));
-      const ec = __cards()[2]; ec.click(); await __w(100); out.eyePick = CHAR_STUDIO.eyeId === ec.title;
+      const ec = __cards()[2]; ec.click(); await __w(100); out.eyePick = CHAR_STUDIO.eyeId === (ec.dataset.styleId || ec.title);
       out.mouth = await __cardTab(/^\s*mouth/i, 'mouth', HERO_VEC_MOUTH_OPTIONS.length);
       out.skin = await __cardTab(/^\s*skin/i, 'skin', HERO_VEC_SKIN.length);
       const sc = __cards()[5]; sc.click(); await __w(100);

@@ -21,7 +21,7 @@ ok('Sage B window runs on SIM time with an updatePlayer watcher',
   src.includes('player._sageUntilFr = game.time + 480;') && src.includes('game.time >= player._sageUntilFr) _sageSigilClose();') &&
   !src.includes('player._sageUntil = _now + 8000'), '');
 ok('Sage B tooltip is honest (tap x10, ahead, refund)',
-  /desc:'Open an 8s sigil: tap B up to 10 times[^']*AHEAD of you/.test(src), '');
+  /desc:'Open an 8s sigil: tap (?:B|it) up to 10 times[^']*AHEAD of you/.test(src), '');
 ok('Cascade: the glacier wall is gone, four beats remain',
   !src.includes('const ICE_BLOCKS = [') && src.includes("showToast('FROST - ' + n + ' frozen', 'rare');") &&
   src.includes("showToast('STORM - ' + hops + ' chained', 'rare');") && src.includes("showToast('CONVERGENCE x' + amp.toFixed(2)"), '');

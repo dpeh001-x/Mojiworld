@@ -26,7 +26,7 @@ for (const id of ['elemental', 'hexmaster_grandhex', 'hexmaster_ult'])
 const own = (id) => new RegExp("(?:_ag\\d+\\.hit|hitMonster)\\([^;\\n]*'" + id + "'\\)").test(src) || new RegExp("skill: '" + id + "'").test(src);
 const cls = (name) => (src.match(new RegExp("identity: \\{ name:'" + name + "', desc:'([^']*)'")) || [])[1] || '';
 ok('CLASS: Charge & Release names Rush and Holy Shield, whose hits carry their own id', own('rush') && own('holyShield') && /Rush \(its dash\) or Holy Shield \(its waves\)/.test(cls('Charge & Release')), cls('Charge & Release').slice(0, 90));
-ok('CLASS: Chain Cast names Blink, Meteor, Holy Light and the Holy Grail, whose hits carry their own id', ['blink', 'meteor', 'holyLight', 'archbishop_grail'].every(own) && /Blink, Meteor, Holy Light or Judgment of the Holy Grail/.test(cls('Chain Cast')));
+ok('CLASS: Chain Cast names Blink, Meteor, Holy Light and the Holy Grail, whose hits carry their own id', ['blink', 'meteor', 'holyLight', 'archbishop_grail'].every(own) && /(?:Blink|Dimensional Warp), Meteor, Holy Light or Judgment of the Holy Grail/.test(cls('Chain Cast')));
 ok('CLASS: Hold to Draw names Deadeye Protocol, whose rounds carry its own id', own('marksman_ult') && /\+50 % damage to Deadeye Protocol rounds/.test(cls('Hold to Draw')));
 // JOBS
 const enh = (job) => { const m = src.match(new RegExp('^ {2}' + job + ":\\s*\\{ basicDmg: ([\\d.]+)[^\\n]*?label: '([^']*)'", 'm')); return m ? { mul: +m[1], label: m[2] } : null; };
