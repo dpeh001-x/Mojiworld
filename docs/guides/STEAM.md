@@ -386,8 +386,8 @@ game and this table). Unlocks fire live; already-earned achievements sync up on 
 | `slayer100` | Slayer | Defeat 100 enemies |
 | `exterminator` | Exterminator | Defeat 1000 enemies |
 | `bossHunter` | Boss Hunter | Defeat 3 different bosses |
-| `lv10` | Adept | Reach level 10 |
-| `lv20` | Apprentice | Reach level 20 |
+| `lv10` | Apprentice | Reach level 10 |
+| `lv20` | Adept | Reach level 20 |
 | `lv50` | Master | Reach level 50 |
 | `legendary` | Legendary Find | Possess a legendary item |
 | `combo50` | Combo Striker | Reach a 50-hit combo |

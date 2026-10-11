@@ -321,17 +321,114 @@ self.addEventListener('activate', (e) => {
   })());
 });
 
+// v0.30.1728 release10 OFFLINE START (per user: "Make it work offline"). The game can be installed as an app, but it would not open without a
+// connection: only same-origin art was ever stored. Three more kinds of request are kept now, so after one visit an installed
+// game opens and plays offline:
+//   - the page and its own scripts and tables (a navigation, .html, .js, .json, .webmanifest on this origin): network FIRST, so an
+//     update still arrives at once online; the last good copy answers when the network is gone. Kept in SHELL, which survives the
+//     art generations below (activate only drops 'mojiworld-assets-*').
+//   - art from the web build's CDN (another origin, pinned per commit, so a URL never changes meaning): cache first. It is fetched
+//     as CORS so the copy can be stored; an opaque copy costs ~7 MB of quota each and is never stored. A CDN that refuses CORS
+//     falls back to the page's own request, unstored, as before.
+//   - music: a ranged request still goes to the network first. A whole-file answer (a 200, or a 206 covering every byte) is also
+//     stored whole; a cross-origin track is fetched once more as CORS to be stored. Offline, the stored file answers the range
+//     with a proper 206 slice (v0.29.473's pitfall was answering a range with a 200). Films (.mp4) stay network-only - too big.
+const SHELL = 'mojiworld-shell-v1';
+const SHELL_RE = /(\.html?|\.js|\.json|\.webmanifest|\/)$/i;
+const AUDIO_RE = /\.(mp3|ogg|wav|m4a)$/i;
+
+async function _lxShellFirst(e, req) {
+  const cache = await caches.open(SHELL);
+  try {
+    const net = await fetch(req);
+    if (net && net.ok && net.type === 'basic') e.waitUntil(cache.put(req, net.clone()).catch(() => {}));
+    return net;
+  } catch (err) {
+    const hit = (await cache.match(req)) || (await cache.match(req, { ignoreSearch: true }));
+    if (hit) return hit;
+    return new Response('', { status: 504, statusText: 'offline: not stored yet' });
+  }
+}
+
+async function _lxCdnAsset(e, req, url) {
+  const cache = await caches.open(CACHE);
+  const hit = await cache.match(url.href);
+  if (hit) return hit;
+  try {
+    const net = await fetch(url.href, { mode: 'cors', credentials: 'omit' });
+    if (net && net.ok) e.waitUntil(cache.put(url.href, net.clone()).catch(() => {}));
+    return net;
+  } catch (err) {
+    try { return await fetch(req); } catch (err2) { return new Response('', { status: 504, statusText: 'offline asset miss' }); }
+  }
+}
+
+async function _lxStoreWholeAudio(cache, key, res) {
+  try {
+    if (await cache.match(key)) return;
+    if (res.type === 'opaque') {   // a cross-origin track: fetch it once more, whole, as CORS so it can be kept
+      const c = await fetch(key, { mode: 'cors', credentials: 'omit' });
+      if (c && c.status === 200) await cache.put(key, c);
+      return;
+    }
+    let total = 0;
+    if (res.status === 206) {
+      const m = /bytes\s+(\d+)-(\d+)\/(\d+)/i.exec(res.headers.get('content-range') || '');
+      if (!m || +m[1] !== 0 || +m[2] !== +m[3] - 1) return;   // only an answer that holds every byte
+      total = +m[3];
+    } else if (res.status !== 200) return;
+    const blob = await res.blob();
+    if (total && blob.size !== total) return;
+    await cache.put(key, new Response(blob, { status: 200, headers: { 'Content-Type': res.headers.get('content-type') || 'audio/mpeg', 'Content-Length': String(blob.size) } }));
+  } catch (err) {}
+}
+
+async function _lxSliceRange(full, range) {
+  const blob = await full.blob(); const size = blob.size;
+  const m = /bytes=(\d*)-(\d*)/i.exec(range || '');
+  let s = 0, en = size - 1;
+  if (m) {
+    if (m[1] !== '') { s = +m[1]; if (m[2] !== '') en = Math.min(+m[2], size - 1); }
+    else if (m[2] !== '') s = Math.max(0, size - (+m[2]));
+  }
+  if (!size || s >= size || s > en) return new Response('', { status: 416, headers: { 'Content-Range': 'bytes */' + size } });
+  return new Response(blob.slice(s, en + 1), { status: 206, headers: {
+    'Content-Type': full.headers.get('content-type') || 'audio/mpeg', 'Content-Range': 'bytes ' + s + '-' + en + '/' + size,
+    'Content-Length': String(en - s + 1), 'Accept-Ranges': 'bytes' } });
+}
+
+async function _lxAudioRange(e, req, url, range) {
+  const cache = await caches.open(CACHE);
+  try {
+    const net = await fetch(req);
+    if (net) e.waitUntil(_lxStoreWholeAudio(cache, url.href, net.clone()));
+    return net;
+  } catch (err) {
+    const full = await cache.match(url.href);
+    if (!full) return new Response('', { status: 504, statusText: 'offline audio miss' });
+    return _lxSliceRange(full, range);
+  }
+}
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  // v0.29.473 — never serve a ranged media request from the cache. cache.match
-  // ignores the Range header, so a byte-range request was being answered with a
-  // full 200; that is the classic service-worker/media pitfall and it can stall
-  // or fail to restart audio elements. Let the network handle these.
-  if (req.headers && req.headers.get('range')) return;
   let url;
   try { url = new URL(req.url); } catch (err) { return; }
-  if (url.origin !== self.location.origin || !ASSET_RE.test(url.pathname)) return;
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+  const same = url.origin === self.location.origin;
+  // v0.29.473 — never answer a ranged media request with a cached 200 (it can stall or fail to restart audio). Music now gets a
+  // network-first pass that also stores the whole track, and offline a real 206 slice; every other ranged request (films) is the
+  // network's, as before.
+  const range = req.headers && req.headers.get('range');
+  if (range) {
+    if (!AUDIO_RE.test(url.pathname)) return;
+    e.respondWith(_lxAudioRange(e, req, url, range));
+    return;
+  }
+  if (same && (req.mode === 'navigate' || SHELL_RE.test(url.pathname))) { e.respondWith(_lxShellFirst(e, req)); return; }
+  if (!ASSET_RE.test(url.pathname)) return;
+  if (!same) { e.respondWith(_lxCdnAsset(e, req, url)); return; }
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const hit = await cache.match(req);

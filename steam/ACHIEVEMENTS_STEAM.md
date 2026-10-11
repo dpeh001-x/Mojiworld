@@ -12,8 +12,8 @@ icon per achievement (Steam requires both; 256×256 PNG).
 | 2 | `slayer100` | Slayer | Defeat 100 enemies |
 | 3 | `exterminator` | Exterminator | Defeat 1000 enemies |
 | 4 | `bossHunter` | Boss Hunter | Defeat 3 different bosses |
-| 5 | `lv10` | Adept | Reach level 10 |
-| 6 | `lv20` | Apprentice | Reach level 20 |
+| 5 | `lv10` | Apprentice | Reach level 10 |
+| 6 | `lv20` | Adept | Reach level 20 |
 | 7 | `lv50` | Master | Reach level 50 |
 | 8 | `legendary` | Legendary Find | Possess a legendary item |
 | 9 | `combo50` | Combo Striker | Reach a 50-hit combo |
