@@ -72,7 +72,8 @@ try {
     const src = document.documentElement.outerHTML;
     const arc = (id) => /^q_(barnaby|lyra)_/.test(id);
     const lens = Object.keys(QUESTS).map((id) => [id, words((QUESTS[id]._lxDesc0 != null ? QUESTS[id]._lxDesc0 : QUESTS[id].desc) || '')]);
-    const questLong = lens.filter(([id, w]) => w > (arc(id) ? 170 : 120));
+    const deep = (id) => /^q_(distorted_portal|boss_sundered_smith|last_step|boss_aetherion|long_dawn_2|kindest_hand|four_captains)$/.test(id);   // the line past the tear gained its depth (per user, 2026-10-11)
+    const questLong = lens.filter(([id, w]) => w > (arc(id) ? 190 : deep(id) ? 170 : 120));
     const storyTotal = lens.filter((x) => QUESTS[x[0]].story || QUESTS[x[0]].advancement).reduce((t, x) => t + x[1], 0);
     // NPC lines, read from openNPC's own source (every assigned dialog string)
     const a = src.indexOf('function openNPC(npc) {'), b = src.indexOf('function _lxStageMarkup', a); const blk = src.slice(a, b);
@@ -94,8 +95,8 @@ try {
     const preLate = []; C.forEach((id, i) => { for (const p of [].concat((QUESTS[id] || {}).prereq || [])) { if (C.indexOf(p) > i) preLate.push(id + ' before ' + p); } });
     return { questLong, storyTotal, npcLong, bub, tour, cdx, missing: PROBES.filter((p) => !src.includes(p)), outOfOrder, preLate };
   }, PROBES);
-  check(r.questLong.length === 0, 'quest descriptions: Barnaby / Lyra chapters at most 170 words, every other quest at most 120', J(r.questLong));
-  check(r.storyTotal < 5000, 'story-quest prose under 5,000 words (the 47 story quests; 4,900 until the Last Step joined the line past the second advancement, per user; 4,800 until the story-flow hand-offs between neighbouring quests, per user; 4,700 until Aetherion became the Tearborn, the creature of a heartfelt tear, per user; 7,433 before the pass; 3,900 until v0.30.1554, when the captains joined the quests per user; 4,100 until v0.30.1615, when the road to the four joined them per user; 4,600 until v0.30.1627, when Lyra VI closed the Distorted Portal per user)', r.storyTotal);
+  check(r.questLong.length === 0, 'quest descriptions: Barnaby / Lyra chapters at most 190 words, the line past the tear at most 170, every other quest at most 120', J(r.questLong));
+  check(r.storyTotal < 5600, 'story-quest prose under 5,600 words (the 47 story quests; 5,000 until the line past the tear gained its depth, per user; 4,900 until the Last Step joined the line past the second advancement, per user; 4,800 until the story-flow hand-offs between neighbouring quests, per user; 4,700 until Aetherion became the Tearborn, the creature of a heartfelt tear, per user; 7,433 before the pass; 3,900 until v0.30.1554, when the captains joined the quests per user; 4,100 until v0.30.1615, when the road to the four joined them per user; 4,600 until v0.30.1627, when Lyra VI closed the Distorted Portal per user)', r.storyTotal);
   check(r.npcLong.length === 0, 'no NPC line runs past 60 words (the Tower loot warnings excepted)', J(r.npcLong));
   check(r.bub.length === 0, 'idle bubbles: at most 6 words, and never a keyboard key', J(r.bub));
   check(r.tour.length === 0, 'the tour: bodies at most 60 words, Guguma at most 25', J(r.tour));

@@ -3,7 +3,7 @@
 // barnaby, to defeat the sundered smith, then distorted mira, then aetherion, ensure the storyline flows beautifully").
 //   1. the line: Distorted Portal -> The Forge That Broke -> The Last Step (new) -> The Sanctum's Refusal; each opens on the one
 //      before it, the three after the portal are critical story quests, the Last Step hunts the copy (miraFallen)
-//   2. each card opens where the previous boss's film ends, stays under 120 words, and keeps the canon pins
+//   2. each card opens where the previous boss's film ends, stays under 170 words (120 until the line past the tear was deepened), and keeps the canon pins
 //   3. the Journal's story order has the Last Step between the Smith and the Sanctum
 //   4. played: the portal turn-in names the Smith (or the level it opens at) and the advancement waits on nothing else; real
 //      kills of the Smith and the copy (each revives once) roll the line on, and the Sanctum starts itself at its level
@@ -80,7 +80,7 @@ try {
   ok('1. the three after the advancement are critical story quests nobody hands out (they start themselves)', [S, L, A].every((d) => d.critical && d.story && !d.giver), R.def.map((d) => [d.id, d.critical, d.story, d.giver]));
   ok('1. the Last Step hunts the copy on the Last Step at Lv 50, between the Smith (45) and the Sanctum (60)', L.kind === 'boss' && L.target === 'miraFallen' && L.lv === 50 && S.lv === 45 && A.lv === 60, L);
   ok('2. each card picks up the last film: the Vigil breaks, the ashes drift down, the tear lands', /Past him, the tear runs on\./.test(P.desc) && /^The Vigil broke like a mirror/.test(S.desc) && /^The Smith set his hammer down, and his ashes did not fall/.test(L.desc) && /^The copy fell\. Her one tear landed/.test(A.desc), [P.desc.slice(-40), S.desc.slice(0, 40), L.desc.slice(0, 40), A.desc.slice(0, 40)]);
-  ok('2. ...each under 120 words, nobody named, the canon pins kept', R.def.every((d) => d.words <= 120) && !/Mira|Barnaby|Twelve/.test(S.desc + L.desc + A.desc) && /the soul she held goes free/.test(A.desc) && /wearing that woman's face and holding her soul/.test(A.desc) && /Forge-Ember Shard/.test(S.desc) && /distorted copy of the first who turned back/.test(L.desc), R.def.map((d) => d.id + ' ' + d.words));
+  ok('2. ...each under 170 words (the line past the tear was given room, per user, 2026-10-11), nobody named, the canon pins kept', R.def.every((d) => d.words <= 170) && !/Mira|Barnaby|Twelve/.test(S.desc + L.desc + A.desc) && /the soul she held goes free/.test(A.desc) && /wearing that woman's face and holding her soul/.test(A.desc) && /Forge-Ember Shard/.test(S.desc) && /distorted copy of the first who turned back/.test(L.desc), R.def.map((d) => d.id + ' ' + d.words));
   const ix = (id) => R.chain.indexOf(id);
   ok('3. the Journal story order: portal, Smith, Last Step, Sanctum', ix('q_distorted_portal') < ix('q_boss_sundered_smith') && ix('q_boss_sundered_smith') + 1 === ix('q_last_step') && ix('q_last_step') < ix('q_boss_aetherion'), R.chain.slice(ix('q_distorted_portal'), ix('q_boss_aetherion') + 1));
   ok('4. the portal turn-in names the Smith and when he opens; the master advancement waits on nothing else', /Next: The Forge That Broke opens at Lv 45/.test(R.portal.toast) && !R.portal.smithActive && R.portal.adv === true, R.portal);

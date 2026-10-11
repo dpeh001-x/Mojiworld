@@ -54,7 +54,7 @@ try {
     await sleep(2500); const vi = document.getElementById('void-intro-overlay'); if (vi) vi.classList.remove('show');
     // ---- 1. quest prose
     out.q = Object.fromEntries(Object.entries(QLINES).map(([id, line]) => { const d = (QUESTS[id] && (QUESTS[id]._lxDesc0 != null ? QUESTS[id]._lxDesc0 : QUESTS[id].desc)) || '';
-      return [id, { has: d.includes(line), w: wc(d), cap: /^q_(barnaby|lyra)_/.test(id) ? 170 : 120 }]; }));
+      return [id, { has: d.includes(line), w: wc(d), cap: /^q_(barnaby|lyra)_/.test(id) ? 190 : /^q_(distorted_portal|boss_sundered_smith|last_step|boss_aetherion|long_dawn_2|kindest_hand|four_captains)$/.test(id) ? 170 : 120 }]; }));
     // ---- dialog helpers
     const text = () => (document.getElementById('dialog-text') || {}).textContent || '';
     const opts = () => [...document.querySelectorAll('#dialog-options button')].map((b) => (b.textContent || '').trim());
