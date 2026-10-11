@@ -44,7 +44,7 @@ try {
         const P = CanvasRenderingContext2D.prototype; const oI = P.drawImage; const samples = { idle: [], attack: [] }; let cur = null;
         const oDraw = window.drawMonster; window.drawMonster = function (mm) { cur = (mm === m) ? { st: mm._frameIsAttack ? 'attack' : 'idle', best: null } : null; const r = oDraw.apply(this, arguments); if (cur && cur.best) samples[cur.st].push(cur.best); cur = null; return r; };
         P.drawImage = function (im, ...a) { if (cur && this === ctx) { const d = a.length >= 8 ? { w: a[6], h: a[7] } : { w: a[2], h: a[3] }; const t = this.getTransform(); const bh = d.h * t.d; const src = String(im.src || (im._lxSrc && im._lxSrc.src) || ''); if (bh > 10 && (!cur.best || bh > cur.best.h)) cur.best = { h: bh, src, fi: (im._lxFi != null) ? im._lxFi : (im._lxSrc && im._lxSrc._lxFi != null ? im._lxSrc._lxFi : 0) }; } return oI.apply(this, [im, ...a]); };
-        game.paused = false; const t1 = performance.now(); while (performance.now() - t1 < 9000) { player.x = m.x - 70; player.vx = 0; await sleep(40); if (samples.attack.length > 40 && samples.idle.length > 20) break; }
+        game.paused = false; const t1 = performance.now(); while (performance.now() - t1 < 25000) { player.x = m.x - 70; player.vx = 0; await sleep(40); if (samples.attack.length > 40 && samples.idle.length > 20) break; }
         game.paused = true; P.drawImage = oI; window.drawMonster = oDraw;
         // the wind-up draws idle art while the attack flag is already set; the attack frames blit at one height
         // (the box times the padding multiplier times the calib), so keep the samples in that tallest cluster

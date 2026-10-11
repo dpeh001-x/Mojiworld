@@ -26,7 +26,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
 await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
-await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'load', timeout: 60000 });
+await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'load', timeout: 180000 });   // 60 s timed out under a loaded sweep
 await page.waitForTimeout(10000);
 await page.evaluate(() => { const lo = document.getElementById('loading-overlay'); if (lo) lo.classList.add('fade'); });
 await page.fill('#hero-name-input', 'Qst');
@@ -61,8 +61,11 @@ const r = await page.evaluate(() => {
   try { if (typeof closeDialog === 'function') closeDialog(); } catch (e) {}
 
   // ---- 2. the Mirror repair must not complete a live, fightable mirror quest
-  const mid = Object.keys(QUESTS).find((id) => QUESTS[id] && QUESTS[id].target === 'mirrorSelf' && id !== 'q_inner_dim_trial') || null;
-  out.mirrorQuest = mid;
+  let mid = Object.keys(QUESTS).find((id) => QUESTS[id] && QUESTS[id].target === 'mirrorSelf' && id !== 'q_inner_dim_trial') || null;
+  // v0.30.1696 retargeted The Tear 0 (q_lyra_aperture) to the Master Conductor: the Lv 20 trial is the only Mirror quest left in the
+  // content. The repair's rule still guards any quest that asks for the Mirror, so it is tested on a stand-in of that shape.
+  const stand = !mid; if (stand) { mid = '__qrm_mirror'; QUESTS[mid] = { name: 'Mirror stand-in', kind: 'kill', target: 'mirrorSelf', count: 1, levelReq: 1, rewards: { mojicoins: 1 } }; }
+  out.mirrorQuest = mid; out.mirrorStandIn = stand;
   if (mid) {
     player.quests.completed.q_inner_dim_trial = player.quests.completed.q_inner_dim_trial || Date.now();
     delete player.quests.completed[mid];
@@ -72,6 +75,7 @@ const r = await page.evaluate(() => {
     out.progressAfterRepair = player.quests.active[mid] ? (player.quests.active[mid].progress | 0) : -1;
     out.completedByRepair = !!player.quests.completed[mid];
     delete player.quests.active[mid]; delete player.quests.completed[mid];
+    if (stand) delete QUESTS[mid];
   }
   return out;
 });
