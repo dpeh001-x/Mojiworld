@@ -16335,7 +16335,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1714';
+const GAME_VERSION = 'v0.30.1715';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -177500,6 +177500,119 @@ renderSkillBar();
   });
 })();
 
+// v0.30.1715 - A NEW VERSION FOR A TAB LEFT OPEN (per user). The web deploy goes live on every push to main, but a tab that
+// stays open keeps running the build it loaded: a tester re-reported a boss-quest bug the day after it was fixed, because the
+// game in front of them predated the fix. Co-op partners were already told about version skew (_mpNoteVersion); a solo
+// player was told nothing. The Pages deploy now writes version.json beside the game (deploy-pages.yml, from the same HTML),
+// and on the public site the game reads it now and then: 30 s after boot, every 10 minutes while the tab is visible, and
+// when the tab comes back after 2 minutes away. When it names a NEWER build, a small notice offers a refresh at a calm
+// moment - never in a boss fight, a boss lock, a film or cinematic, a story beat, an expedition or a Boss Rush (it tucks
+// itself away if one starts while it shows). "Later" quiets it for that version; a newer one asks again. Refresh flushes the
+// save first. Public web only: the Steam app, file://, localhost and the LAN never ask (?lxver=1 forces it on any web host,
+// for tests), and a host with no version.json (a raw preview link) answers 404 once and is never asked again.
+(function _lxVersionWatch() {
+  try {
+    if (window.MOJI_PACKAGED === true || location.port === '47821') return;   // the Steam app (and its loopback server)
+    if (!/^https?:$/.test(location.protocol)) return;
+    const h = location.hostname, force = /[?&]lxver=1(&|$)/.test(location.search);
+    if (!force && (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h))) return;
+  } catch (e) { return; }
+  const FIRST = +window.LX_VER_FIRST_MS || 30000, EVERY = +window.LX_VER_EVERY_MS || 600000;
+  const AGAIN = +window.LX_VER_AGAIN_MS || 120000, CALM = +window.LX_VER_CALM_MS || 4000, LATER_KEY = 'lx_ver_later';
+  const parse = (v) => { const m = /^v(\d+)\.(\d+)\.(\d+)$/.exec(String(v || '')); return m ? [+m[1], +m[2], +m[3]] : null; };
+  const newer = (a, b) => { const x = parse(a), y = parse(b); if (!x || !y) return false; for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false; };
+  const W = window._lxVerWatch = { last: 0, checks: 0, latest: '', stop: false, el: null, calmT: 0, why: '' };
+  const later = () => { try { return localStorage.getItem(LATER_KEY) || ''; } catch (e) { return ''; } };
+  async function check() {
+    if (W.stop || document.hidden) return;
+    W.last = Date.now(); W.checks++;
+    let r = null; try { r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); } catch (e) { return; }
+    if (!r) return;
+    if (r.status === 404) { W.stop = true; return; }   // no version.json on this host: never ask it again
+    if (!r.ok) return;
+    let j = null; try { j = await r.json(); } catch (e) { return; }
+    const v = j && j.v;
+    if (!newer(v, GAME_VERSION) || (W.latest && !newer(v, W.latest))) return;   // an older answer (a CDN copy) never nags
+    W.latest = v; tick();
+  }
+  // why now is not the moment ('' = calm)
+  function busy() {
+    try {
+      if (document.hidden) return 'hidden';
+      if (window._prologueActive) return 'prologue';
+      if (typeof _lxCineHoldActive === 'function' && _lxCineHoldActive()) return 'cinematic';
+      if (window._lxKillFilmPending && Date.now() - window._lxKillFilmPending < 60000) return 'film';
+      if (typeof _QTE !== 'undefined' && _QTE && _QTE.active) return 'lock';
+      if (typeof game !== 'undefined' && game) {
+        if (game.expedition && game.expedition.active) return 'expedition';
+        if (game.bossRush && game.bossRush.active) return 'boss rush';
+        if ((game.monsters || []).some((m) => m && m.currentHp > 0 && !m.ally && !m.isSummon && !m._playerOwned && (m.isBoss || m.boss || m.zodiacBoss))) return 'boss';
+      }
+      for (const el of document.querySelectorAll('[id$="-cine"], #kill-film-overlay, #story-beat-overlay, #boss-intro-overlay, #void-intro-overlay')) {
+        const cs = getComputedStyle(el);
+        if (cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) > 0.05 && el.getClientRects().length) return 'scene';
+      }
+    } catch (e) {}
+    return '';
+  }
+  function tick() {
+    clearTimeout(W.calmT);
+    if (!W.latest || later() === W.latest) { hide(); return; }
+    W.why = busy();
+    if (W.why) hide(); else show();
+    W.calmT = setTimeout(tick, CALM);   // keep watching: a fight that starts while it shows tucks it away
+  }
+  function build() {
+    const st = document.createElement('style'); st.id = 'lx-ver-style';
+    st.textContent = `
+#lx-ver{position:fixed;left:0;right:0;margin:0 auto;width:max-content;top:10px;z-index:100040;display:flex;align-items:center;gap:11px;box-sizing:border-box;max-width:calc(100vw - 32px);padding:7px 8px 7px 13px;border-radius:12px;font-family:inherit;color:#fff4dc;opacity:0;pointer-events:none;transform:translateY(-130%);transition:transform .34s cubic-bezier(.2,.9,.25,1.12),opacity .26s ease;
+  background:radial-gradient(ellipse at 50% 40%,rgba(0,0,0,0) 60%,rgba(8,3,22,.32) 100%),linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,0) 44%),linear-gradient(160deg,rgba(24,12,44,.84),rgba(34,17,60,.80));
+  border:1px solid rgba(255,214,140,.55);box-shadow:0 8px 22px rgba(0,0,0,.45),0 0 18px rgba(150,100,255,.24),inset 0 1px 0 rgba(255,255,255,.12),inset 0 0 0 1px rgba(10,4,26,.4);
+  -webkit-backdrop-filter:blur(8px) saturate(1.15);backdrop-filter:blur(8px) saturate(1.15);}
+#lx-ver.on{opacity:1;pointer-events:auto;transform:translateY(0);}
+#lx-ver::after{content:'';position:absolute;left:16%;right:16%;top:-1px;height:1px;background:linear-gradient(90deg,rgba(255,230,168,0),#ffe6a8,rgba(255,230,168,0));pointer-events:none;}
+#lx-ver .lxv-gem{flex:none;width:9px;height:9px;border-radius:2px;transform:rotate(45deg);background:linear-gradient(135deg,#fff6cf,#ffc94a 48%,#b46410);box-shadow:0 0 8px rgba(255,200,90,.9),0 0 0 1px rgba(60,30,4,.6);}
+#lx-ver .lxv-txt{display:flex;flex-direction:column;gap:2px;min-width:0;}
+#lx-ver .lxv-ttl{font-size:11.5px;font-weight:800;letter-spacing:1.6px;color:#ffe2a0;text-shadow:0 1px 2px rgba(0,0,0,.85);white-space:nowrap;}
+#lx-ver .lxv-num{color:#fff;letter-spacing:.5px;margin-left:5px;}
+#lx-ver .lxv-sub{font-size:10.5px;font-weight:600;letter-spacing:.2px;color:#ece3ff;text-shadow:0 1px 2px rgba(0,0,0,.85);}
+#lx-ver .lxv-btns{flex:none;display:flex;gap:6px;margin-left:3px;}
+#lx-ver button{font-family:inherit;font-size:11px;font-weight:800;letter-spacing:.7px;line-height:1;min-height:28px;padding:6px 11px;border-radius:8px;cursor:pointer;}
+#lx-ver .lxv-later{background:rgba(255,255,255,.06);color:#e9ddff;border:1px solid rgba(200,160,255,.45);}
+#lx-ver .lxv-later:hover{background:rgba(255,255,255,.13);}
+#lx-ver .lxv-go{background:linear-gradient(180deg,#ffe78f,#ffc23d 56%,#e5951a);color:#2a1606;border:1px solid #fff0b8;box-shadow:0 2px 0 #8a4f08,0 0 10px rgba(255,190,70,.42);text-shadow:0 1px 0 rgba(255,255,255,.4);}
+#lx-ver .lxv-go:hover{filter:brightness(1.07);}
+#lx-ver .lxv-go:active{transform:translateY(1px);box-shadow:0 1px 0 #8a4f08;}
+html.lx-nobackdrop #lx-ver{-webkit-backdrop-filter:none;backdrop-filter:none;background:linear-gradient(160deg,rgba(24,12,44,.96),rgba(34,17,60,.94));}
+@media (max-width:760px),(max-height:480px){#lx-ver{top:6px;gap:8px;padding:5px 6px 5px 10px;}#lx-ver .lxv-ttl{font-size:10px;letter-spacing:1.1px;}#lx-ver .lxv-sub{font-size:9.5px;}#lx-ver button{font-size:10px;min-height:30px;padding:5px 9px;}}
+@media (prefers-reduced-motion:reduce){#lx-ver{transition:opacity .2s ease;}}
+`;
+    document.head.appendChild(st);
+    const el = document.createElement('div'); el.id = 'lx-ver'; el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+    el.innerHTML = '<span class="lxv-gem"></span><span class="lxv-txt"><span class="lxv-ttl">A NEW VERSION IS OUT<span class="lxv-num"></span></span><span class="lxv-sub"></span></span>'
+      + '<span class="lxv-btns"><button type="button" class="lxv-later">Later</button><button type="button" class="lxv-go">Refresh</button></span>';
+    for (const t of ['pointerdown', 'mousedown', 'touchstart', 'click']) el.addEventListener(t, (e) => e.stopPropagation());   // not a click on the game
+    el.querySelector('.lxv-later').addEventListener('click', () => { try { localStorage.setItem(LATER_KEY, W.latest); } catch (e) {} tick(); });
+    el.querySelector('.lxv-go').addEventListener('click', () => {
+      try { if (typeof player !== 'undefined' && player.cls && !(typeof game !== 'undefined' && game && game._resetting) && typeof _flushSaveStateNow === 'function') _flushSaveStateNow(); } catch (e) {}
+      try { location.reload(); } catch (e) {}
+    });
+    document.body.appendChild(el);
+    return el;
+  }
+  function show() {
+    const el = W.el || (W.el = build());
+    let coop = false; try { coop = typeof _coopActive === 'function' && !!_coopActive(); } catch (e) {}
+    el.querySelector('.lxv-num').textContent = W.latest;
+    el.querySelector('.lxv-sub').textContent = 'You are on ' + GAME_VERSION + '. Refresh to update — your progress is saved first' + (coop ? ', and you will leave this co-op session.' : '.');
+    el.classList.add('on');
+  }
+  function hide() { if (W.el) W.el.classList.remove('on'); }
+  W.check = check; W.busy = busy;
+  setTimeout(check, FIRST);
+  setInterval(check, EVERY);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - W.last >= AGAIN) check(); });
+})();
 // Safety net: save when the tab is hidden or closed
 // v0.25.264 — these two paths must flush the pending debounced save
 // IMMEDIATELY: backgrounding tabs and unloading windows can fire before
