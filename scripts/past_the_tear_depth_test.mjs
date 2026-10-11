@@ -41,6 +41,7 @@ try {
     const d = (id) => String((QUESTS[id]._lxDesc0 != null ? QUESTS[id]._lxDesc0 : QUESTS[id].desc) || '');
     const ids = ['q_four_captains', 'q_distorted_portal', 'q_boss_sundered_smith', 'q_last_step', 'q_boss_aetherion', 'q_lyra_cut', 'q_lyra_last', 'q_long_dawn_2', 'q_kindest_hand'];
     const out = { desc: {}, words: {} }; for (const id of ids) { out.desc[id] = d(id); out.words[id] = w(d(id)); }
+    out.maps = { name: (MAPS.confusedVigil || {}).name, portals: Object.keys(MAPS).flatMap((id) => (MAPS[id].portals || []).map((p) => id + ': ' + p.name)).filter((s) => /Confused Vigil/.test(s)) };
     out.total = Object.keys(QUESTS).filter((id) => QUESTS[id].story || QUESTS[id].advancement).reduce((t, id) => t + w(d(id)), 0);
     return out;
   });
@@ -55,7 +56,8 @@ try {
   ok('[3] the Smith\'s card still never names Barnaby, and The Forge That Broke still says the Forge handed him back', !/Barnaby/.test(D.q_boss_sundered_smith) && /The loan was closed, and the Forge has handed him back\./.test(D.q_boss_sundered_smith), '');
   const added = BEATS.map(([, s]) => s).join(' ');
   ok('[4] none of the added passages names Mira, the Twelve, a House, a champion or the maker', !/\bMira\b|Twelve|Zodiac|Houses?\b|champion|Guguma|creator|maker|playground|entertain|extraterrestrial|\bgame\b/i.test(added), added.match(/\bMira\b|Twelve|Zodiac|House|champion|Guguma|creator|maker|playground|entertain/gi));
-  ok('[5] no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  ok('[5] the map is The Eleventh Hour everywhere the player reads it: its own name and every portal label (the Stage Editor bake overrides portals at boot)', /The Eleventh Hour$/.test(R.maps.name || '') && R.maps.portals.length === 0, R.maps);
+  ok('[6] no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 200), false); }
 await browser.close(); server.kill();
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'}(${fail}) - ${pass} passed, ${fail} failed`);
