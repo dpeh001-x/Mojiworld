@@ -119,8 +119,9 @@ const scenario = await page.evaluate(() => {
       if (e && e !== lastLog) { lastLog = e; if (c && c.why == null && c.res === e.s) c.why = e.why || ''; }
     };
     // a named pattern's share of his pick weight, over the picks (optionally with one read) where it was allowed
-    const weightShare = (name, why) => {
-      const sh = choices.filter((c) => why == null || c.why === why).map((c) => { const t = c.w.reduce((a, q) => a + (q[1] > 0 ? q[1] : 0), 0), x = c.w.find((q) => q[0] === name); return (x && x[1] > 0 && t > 0) ? x[1] / t : null; }).filter((v) => v != null);
+    const weightShare = (name, why) => {   // name: one move, or a family of them (their weights summed) - v0.30.1721 aetherion-boost
+      const names = [].concat(name);
+      const sh = choices.filter((c) => why == null || c.why === why).map((c) => { const t = c.w.reduce((a, q) => a + (q[1] > 0 ? q[1] : 0), 0), x = c.w.filter((q) => names.includes(q[0]) && q[1] > 0).reduce((a, q) => a + q[1], 0); return (x > 0 && t > 0) ? x / t : null; }).filter((v) => v != null);
       return { n: sh.length, mean: sh.length ? +(sh.reduce((a, v) => a + v, 0) / sh.length).toFixed(3) : 0, min: sh.length ? +Math.min(...sh).toFixed(3) : 0 };
     };
     let healed = false, dodgeX = player.x;
@@ -179,7 +180,7 @@ const scenario = await page.evaluate(() => {
       const fires = (m._ae && m._ae.fires || []).slice();
       return { picks, n: log.length, spawns: spawns.length, fires: fires.length, staggerFires, cineFrames, simSteps: (game.time | 0) - gt0, speed: m.speed, idleSpeed, state: (m._ae && m._ae.st) || 'idle', x: m.x, px: player.x,
         minWind: fires.length ? Math.min(...fires.map((f) => f.wind)) : -1, why: log.map((l) => l.why).filter(Boolean),
-        lanceW: weightShare('lanceWind'), echoPressedW: weightShare('echoWind', 'pressed'),
+        lanceW: weightShare('lanceWind'), rangedW: weightShare(['lanceWind', 'featherWind', 'spiralWind']), echoPressedW: weightShare('echoWind', 'pressed'),
         gap: m._ae && m._ae.lastGap && { ...m._ae.lastGap }, dodge: m._ae && +m._ae.dodge.toFixed(2), evolvedNow: !!m._aetherionEvolved, hpFrac: +(m.currentHp / m.maxHp).toFixed(2) };
     };
     // the player's update and the projectile pass (hits on the hero: knockback, evasion rolls) ride the seeded stream too
@@ -214,17 +215,20 @@ ok('the scenario runs at full tempo with no cinematic active (the harness guard)
   neutral.err || `${neutral.cineFrames} cinematic frames, ${neutral.simSteps} sim steps in 1800 frames`);
 ok('in 30s he uses at least four distinct patterns and at least ten in all (was: one every ten seconds)', !neutral.err && Object.keys(neutral.picks).length >= 4 && neutral.n >= 10, neutral.err || `${neutral.n} picks: ${JSON.stringify(neutral.picks)}`);
 ok('every attack he creates comes at least 300ms into a telegraphed windup', !neutral.err && neutral.fires > 0 && neutral.minWind >= 300, neutral.err || `${neutral.fires} attacks, shortest windup ${neutral.minWind}ms`);
-ok('his walk speed is restored between patterns (the windup hold does not stick)', !neutral.err && neutral.idleSpeed != null && Math.abs(neutral.idleSpeed - 0.8) < 0.01, neutral.err || `speed ${neutral.idleSpeed} 30 steps into an idle stretch (${neutral.speed} in state ${neutral.state} at the end)`);
+ok('his walk speed is restored between patterns (the windup hold does not stick)', !neutral.err && neutral.idleSpeed != null && Math.abs(neutral.idleSpeed - 1.2) < 0.01, neutral.err || `speed ${neutral.idleSpeed} 30 steps into an idle stretch (${neutral.speed} in state ${neutral.state} at the end)`);
 
 // ---- the read changes what he does ------------------------------------------------
 const far = await ev(async () => await window.__ae({ mode: 'far', frames: 1500 }));
-const farLance = far.picks ? (far.picks.lanceWind || 0) / Math.max(1, far.n) : 0;
+const farRanged = far.picks ? ((far.picks.lanceWind || 0) + (far.picks.featherWind || 0) + (far.picks.spiralWind || 0)) / Math.max(1, far.n) : 0;
 // The share alone could not tell the range read from no read: 13 picks, and the no-three-in-a-row rule caps lances near 2/3,
 // so a build with the far bias (3 + 5) removed also drew 7 lances of 13 (2026-10-02 mutant). The weights he picks from are
 // exact: with the bias every allowed lance carries 8 of at most 12 (>= 0.667); without it 3 of 4-7 (mean ~0.5).
-ok('a kiting player at range is answered with Shard Lances (lance share >= 45%, and >= 60% of his pick weight whenever a lance is allowed)',
-  !far.err && farLance >= 0.45 && far.lanceW.n > 0 && far.lanceW.mean >= 0.6 && far.why.some((w) => w === 'far'),
-  far.err || `${(farLance * 100).toFixed(0)}% lances of ${far.n} picks; lance weight mean ${far.lanceW.mean} (min ${far.lanceW.min}) over ${far.lanceW.n} allowed picks; reads: ${[...new Set(far.why)].join(',')}`);
+// v0.30.1721 aetherion-boost: the answer to range is his RANGED family now - the Shard Lance, the homing Fallen Feathers (both biased
+// up at range) and the Scale Spiral (its darts carry ~700 px). With the far bias the family carries 10-14 of at most 18 (>= 0.55,
+// mean ~0.7); without it 3-6 of 10-14.
+ok('a kiting player at range is answered with ranged attacks - Shard Lance, Fallen Feathers, Scale Spiral (share >= 45%, and >= 60% of his pick weight whenever one is allowed)',
+  !far.err && farRanged >= 0.45 && far.rangedW.n > 0 && far.rangedW.mean >= 0.6 && far.why.some((w) => w === 'far'),
+  far.err || `${(farRanged * 100).toFixed(0)}% ranged of ${far.n} picks (${JSON.stringify(far.picks)}); ranged weight mean ${far.rangedW.mean} (min ${far.rangedW.min}) over ${far.rangedW.n} allowed picks; reads: ${[...new Set(far.why)].join(',')}`);
 const hug = await ev(async () => await window.__ae({ mode: 'hug', frames: 1500 }));
 // One Echo Step in a fight also happens with no pressure read at all (base weight 1, about one pick in eight): a build
 // without the +7 still stepped once here (2026-10-02 mutant). On the picks he makes while pressed, the weights say it:
@@ -241,7 +245,9 @@ const stag = await ev(async () => await window.__ae({ mode: 'stagger', frames: 6
 ok('he creates nothing while staggered — that window stays the player\'s', !stag.err && stag.staggerFires === 0, stag.err || `${stag.staggerFires} attacks landed inside stagger`);
 
 // ---- phases ------------------------------------------------------------------------
-const evolved = await ev(async () => await window.__ae({ mode: 'dodgeR', frames: 1800, hpFrac: 0.4, evolved: true }));
+// v0.30.1721 aetherion-boost: 60 s (was 30). The evolved form opens with a Sky-Break placed before any dodge read exists, and the check
+// judges his LAST one; with Halo Discs, the Gate and the feathers now sharing his picks, 30 s could hold only that opener.
+const evolved = await ev(async () => await window.__ae({ mode: 'dodgeR', frames: 3600, hpFrac: 0.4, evolved: true }));
 // the gap is judged against where the player WAS when it fired (the AI records
 // it) - the dodge-right script keeps them moving afterwards
 const gapC = evolved.gap ? (evolved.gap.x0 + evolved.gap.x1) / 2 : null;
