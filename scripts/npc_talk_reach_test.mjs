@@ -1,6 +1,7 @@
 // NPC TALK REACH (v0.30.1113, the 2026-09-26 NPC audit). One shared talk target for every input, height-aware:
 //   - LEVEL: on the street between Postal Wisp (a step up) and Auntie Innie (a ledge up), the talk key picks Postal Wisp
-//     (the town revamp moved Bravo to the east gate; the same two heights stand side by side at the mailbox now)
+//     (the storybook town, v0.30.1496, stands them ~1,100 px apart and no two townsfolk share one reach any more: the test sets
+//     Auntie Innie, at her own ledge height, 50 px past the Wisp's step for these checks and puts her back)
 //   - LIMITS: an NPC more than a step below you, or more than a storey above, is out of reach; a ledge above is not
 //   - PROMPT: with two NPCs in reach across, only the one the key would open shows [N] Talk
 //   - N: opens that NPC; with a shop open it opens nothing under the shop
@@ -45,12 +46,13 @@ try {
     loadMap('town', 300); await W8(1200); try { closeAllModals(); } catch (e) {} game.paused = false;
     const npc = (n) => game.npcs.find((x) => x.name === n), dlg = document.getElementById('dialog');
     const step = npc('Postal Wisp'), ledge = npc('Auntie Innie'), amn = npc('The Amnesiac');
+    const ledgeX0 = ledge.x; ledge.x = step.x + 50;   // side by side for LEVEL / PROMPT / N (see the header); put back below
     const street = (x) => { player.x = x - player.w / 2; player.y = 480 - player.h; player.vx = 0; player.vy = 0; };
     // LEVEL + PROMPT (live frames)
     street((step.x + ledge.x) / 2); await W8(700); street((step.x + ledge.x) / 2);
     // an off-screen NPC is not drawn, so its prompt fade is never updated: start every fade at 0 here, read on-screen NPCs only
     for (const n of game.npcs) n._talkA = 0;
-    await W8(600);
+    await W8(600); for (let i = 0; i < 34 && !game.npcs.some((n) => (n._talkA || 0) > 0.9); i++) await W8(100);   // the fade is per drawn frame: wait for it, not a fixed time
     const tgt = _lxTalkTarget();
     out.level = { at: Math.round(player.x + player.w / 2), stepDx: Math.round(Math.abs(player.x + player.w / 2 - step.x)), ledgeDx: Math.round(Math.abs(player.x + player.w / 2 - ledge.x)), target: tgt && tgt.name };
     const camX = (game.camera && game.camera.x) || 0;
@@ -66,6 +68,7 @@ try {
     await pressN(); out.n = { open: dlg.style.display === 'block', name: document.getElementById('dialog-name').textContent }; closeDialog();
     openShop('potion'); await W8(200); await pressN();
     out.nUnderShop = { dialog: dlg.style.display === 'block', shop: document.getElementById('shop-modal').style.display }; closeAllModals(); game.paused = false;
+    ledge.x = ledgeX0;
     // P: under the advancement card; daily tally
     const talks = []; const _td = window.tickDaily; window.tickDaily = function (k, v) { if (k === 'talk') talks.push(v); return _td.apply(this, arguments); };
     const adv = document.getElementById('advancement-modal'); adv.style.display = 'flex';

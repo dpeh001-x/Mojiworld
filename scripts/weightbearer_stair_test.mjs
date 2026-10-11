@@ -110,6 +110,13 @@ const BASELINE_NEAREST_TOWN = {
   zod_sagittarius: 'void', zod_scorpio: 'void', zod_taurus: 'void', zod_virgo: 'void', zodiacHall: 'void',
 };
 
+// v0.30.1602 (per user: "when exiting the boss rush should go back to interdimensional portal") moved the Hall of Echoes' exit
+// from the Void to the Interdimensional Ascension - the only door INTO the Void. The Void (the prologue / resume room) is reached by
+// story and respawn now, not on foot, and the maps that counted it as their nearest town count Glasswind Hamlet instead.
+{ const i = BASELINE_REACHABLE.indexOf('void'); if (i >= 0) BASELINE_REACHABLE.splice(i, 1); }
+BASELINE_DIST.void = 6;   // 6 = unreachable (see the table's note)
+for (const k of Object.keys(BASELINE_NEAREST_TOWN)) if (k !== 'void' && BASELINE_NEAREST_TOWN[k] === 'void') BASELINE_NEAREST_TOWN[k] = 'glasswindHamlet';
+
 // ---- harness ----------------------------------------------------------------------------------------------------------
 let fails = 0; const ok = (n, c, x) => { if (!c) fails++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}  ${c ? '' : JSON.stringify(x).slice(0, 260)}`); };
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: ['ignore', 'ignore', 'pipe'], cwd: ROOT });
@@ -500,8 +507,8 @@ try {
   ok('[11] the climb is jumped up flat steps: no seam is ramped, held Right alone stops at the first riser (feet still 1040), and Right + jump carries the hero from the Sanctum door up all 20 square risers to the Singularity\'s door (feet at the door)',
     !st.err && st.ramps === 0 && st.feet === 1040 && !!st.door && !wall.err && wall.feet === 1040 && wall.cx < 520 && !pos.err && pos.map === 'weightbearerStair' && pos.cx >= st.door.x - 80 && Math.abs(pos.feet - st.door.y) <= 2 && pos.gnd, { st, wall, pos });
 
-  // [12] NOBODY IS STRANDED. The arena's door keeps its Lv 70 gate (so the W map still locks the Stair under 70) but it is a
-  // door OUT of an arena, which never blocks; the Stair's door down to the Sanctum carries no gate at all.
+  // [12] NOBODY IS STRANDED. A door OUT of an arena never blocks, and the Stair's door down to the Sanctum carries no gate at all.
+  // v0.30.1709 (per user) took the arena door's Lv 70 off too - never enforced, it only locked the Stair on the W map.
   const lv = await safe(async () => {
     const was = player.level; player.level = 50;
     const a = await __nm.walk('gravitosArena', 'weightbearerStair', 0);
@@ -511,8 +518,8 @@ try {
     const down = ((MAPS.weightbearerStair.portals || []).find((q) => q && q.dest === 'zodiacHall') || {}).levelGate || 0;
     return { a: a.map, b: b.map, gate, down, wmGate: (typeof _wmMaxLevelGate === 'function') ? _wmMaxLevelGate('weightbearerStair') : null };
   }, undefined, 240000);
-  ok('[12] a Lv 50 hero walks out of the Singularity onto the Stair and down to the Sanctum; the Stair keeps the Lv 70 W-map gate',
-    !lv.err && lv.a === 'weightbearerStair' && lv.b === 'zodiacHall' && lv.gate === 70 && lv.down === 0 && lv.wmGate === 70, lv);
+  ok('[12] a Lv 50 hero walks out of the Singularity onto the Stair and down to the Sanctum; no Lv 70 on the arena door or the W map (v0.30.1709)',
+    !lv.err && lv.a === 'weightbearerStair' && lv.b === 'zodiacHall' && !lv.gate && lv.down === 0 && !lv.wmGate, lv);
 
   // [13] ITS OWN BACKDROP AND THEME. The plate decodes as one 16:9 copy (bgNoMirror); the map's music is its own file, served as
   // audio; the jukebox lists that file under the Stair with its own pad icon.

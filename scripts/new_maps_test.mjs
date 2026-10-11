@@ -117,6 +117,13 @@ const BASELINE_NEAREST_TOWN = {
   zod_virgo: 'void', zodiacHall: 'void',
 };
 
+// v0.30.1602 (per user: "when exiting the boss rush should go back to interdimensional portal") moved the Hall of Echoes' exit
+// from the Void to the Interdimensional Ascension - the only door INTO the Void. The Void (the prologue / resume room) is reached by
+// story and respawn now, not on foot, and the maps that counted it as their nearest town count Glasswind Hamlet instead.
+{ const i = BASELINE_REACHABLE.indexOf('void'); if (i >= 0) BASELINE_REACHABLE.splice(i, 1); }
+BASELINE_DIST.void = 6;   // 6 = unreachable (see the table's note)
+for (const k of Object.keys(BASELINE_NEAREST_TOWN)) if (k !== 'void' && BASELINE_NEAREST_TOWN[k] === 'void') BASELINE_NEAREST_TOWN[k] = 'glasswindHamlet';
+
 // ---- harness ----------------------------------------------------------------------------------------------------------
 let fails = 0; const ok = (n, c, x) => { if (!c) fails++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}  ${c ? '' : JSON.stringify(x).slice(0, 260)}`); };
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: ['ignore', 'ignore', 'pipe'], cwd: ROOT });

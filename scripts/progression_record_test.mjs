@@ -5,6 +5,8 @@
 //      Houses" — with its achievements and the Gravitos prerequisite — without ever entering
 //      a zodiac arena.
 //   2. Echo kills ticked quest progress and the boss daily, against the tag's own comment.
+//      Since v0.30.1698 (per user) an Echo Keeper echo ticks its QUEST on purpose - a boss quest taken after the boss died sat at
+//      0/1 while only the echo was up; the boss daily still skips echoes. A Boss Rush echo ticks neither (v0.30.1724).
 //   3. Abandoning a quest that was ready to hand in lost that state permanently.
 //   4. Swapping class before advancement kept the old class's skill tree, applying invisibly.
 //
@@ -72,6 +74,7 @@ try {
       return { questTicks, dailyTicks };
     };
     o.tickEcho = tickProbe({ _echoBoss: true });
+    o.tickRush = tickProbe({ _echoBoss: true, _rushBoss: true });   // the Boss Rush's tags
     o.tickReal = tickProbe({});
     delete game.bestiary['_boss_zodiac_aries'];
 
@@ -120,7 +123,8 @@ try {
   ok('an EXPEDITION zodiac kill does not', r.recExpedition.stamped === false, JSON.stringify(r.recExpedition));
   ok('an ECHO zodiac kill does not', r.recEcho.stamped === false, JSON.stringify(r.recEcho));
   ok('a real kill ticks quests and the boss daily', r.tickReal.questTicks >= 1 && r.tickReal.dailyTicks >= 1, JSON.stringify(r.tickReal));
-  ok('an echo kill ticks neither', r.tickEcho.questTicks === 0 && r.tickEcho.dailyTicks === 0, JSON.stringify(r.tickEcho));
+  ok('an Echo Keeper echo ticks its quest but not the boss daily (v0.30.1698, per user)', r.tickEcho.questTicks >= 1 && r.tickEcho.dailyTicks === 0, JSON.stringify(r.tickEcho));
+  ok('a Boss Rush echo ticks neither (v0.30.1724)', r.tickRush.questTicks === 0 && r.tickRush.dailyTicks === 0, JSON.stringify(r.tickRush));
   ok('the hand-in state is banked on abandon', bankReady === true && r.quest && r.quest.banked === true, JSON.stringify(r.quest));
   ok('...and restored on re-accept', restoreReady === true && r.quest && r.quest.restored === true, JSON.stringify(r.quest));
   ok('the class swap refunds and clears the old tree', swapClears === true);
