@@ -294,7 +294,7 @@ await group('ui', async () => {
   check(r.escaped === '&lt;b&amp; "c', 'ui-8: a search that contains HTML entities (&lt; &amp;) survives a full re-render untouched (the value attribute decoded them)', J(r.escaped));
   check(r.nagToast === true, 'ui-9: the rotate nag\'s Fullscreen button says how to get full screen on an iPhone (it did nothing)', String(r.nagToast));
   check(r.afterFs === null && r.afterPortrait === '1', 'ui-9: only "Play in portrait anyway" persists the nag dismissal', J({ afterFs: r.afterFs, afterPortrait: r.afterPortrait }));
-  check(!!r.hint && r.hint.def[0] === 'press U' && r.hint.def[1] === 'Press W' && r.hint.rebound[0] === 'press O' && r.hint.rebound[1] === 'Press J' && r.hint.touch[0] === 'tap BAG' && r.hint.touch[1] === 'Tap MAP' && /^Press /.test(r.hint.touch[2]) && r.hint.back[0] === 'press U',
+  check(!!r.hint && r.hint.def[0] === 'press U' && r.hint.def[1] === 'Press W' && r.hint.rebound[0] === 'press O' && r.hint.rebound[1] === 'Press J' && r.hint.touch[0] === 'tap BAG' && r.hint.touch[1] === 'Tap MAP' && /^Ask the Postal Wisp/.test(r.hint.touch[2]) && r.hint.back[0] === 'press U',
     'ui-10: the key hints name the LIVE key after a rebind, and "tap BAG / MAP" on a phone', J(r.hint));
   check(!/press U\)`/.test(SRC) && !/press U to equip/.test(SRC) && !/Press W to view the world map/.test(SRC) && !/Press P anywhere to call me/.test(SRC) && !/press P to collect/.test(SRC), 'ui-10: no typed "press U / W / P" is left in a toast, a footnote or the Wisp\'s line');
   check(r.focusedBefore === true && r.focusedAfter === false, 'ui-11 (unverified on Firefox): the Settings corner button lets go of keyboard focus after a click', J({ before: r.focusedBefore, after: r.focusedAfter }));

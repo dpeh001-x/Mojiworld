@@ -63,6 +63,7 @@ const R = await page.evaluate(async () => {
 
   // --- CONTROL: unshackled, the map opens normally -------------------------
   _QTE.active = false;
+  player.stunTimer = 0; player.frozenTimer = 0; player.hitStun = 0;   // the release's stun: the map waits for a held hero (bug hunt round 5)
   toggleWorldMap(); await frame();
   out.openUnshackled = isOpen();
   await close();
@@ -95,6 +96,7 @@ const R = await page.evaluate(async () => {
   // --- CONTROL: closing is never blocked -----------------------------------
   // Force it open behind the guard's back, then confirm the guard lets it shut.
   _QTE.active = false;
+  player.stunTimer = 0; player.frozenTimer = 0; player.hitStun = 0;   // as above: free AND standing, so the forced open is not refused
   toggleWorldMap(); await frame();
   const wasOpen = isOpen();
   if (typeof _qteShackleStart === 'function') _qteShackleStart({ superBoss: false });

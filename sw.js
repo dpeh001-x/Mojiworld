@@ -317,6 +317,16 @@ self.addEventListener('activate', (e) => {
     // Drop old cache generations on version bumps.
     const keys = await caches.keys();
     await Promise.all(keys.filter((k) => k.startsWith('mojiworld-assets-') && k !== CACHE).map((k) => caches.delete(k)));
+    // v0.30.1733 bughunt5 - the shell kept one copy per full URL (the deploy's ?v= on every table, a ?join= page per invite, the 10-minute
+    // version.json?t= check), so it grew by megabytes a release and answered offline with the OLDEST copy. Keys are the path now:
+    // fold each path's newest old copy into its new key (so an upgrade made online still opens offline), then drop the rest.
+    try {
+      const sh = await caches.open(SHELL), olds = (await sh.keys()).filter((r) => new URL(r.url).search);
+      const newest = new Map();
+      for (const r of olds) { const u = new URL(r.url); if (!/\/version\.json$/.test(u.pathname)) newest.set(_lxShellKey(u), r); }
+      for (const [key, r] of newest) { if (!(await sh.match(key))) { const res = await sh.match(r); if (res) await sh.put(key, res); } }
+      for (const r of olds) await sh.delete(r);
+    } catch (err) {}
     await self.clients.claim();
   })());
 });
@@ -337,26 +347,67 @@ const SHELL = 'mojiworld-shell-v1';
 const SHELL_RE = /(\.html?|\.js|\.json|\.webmanifest|\/)$/i;
 const AUDIO_RE = /\.(mp3|ogg|wav|m4a)$/i;
 
+// v0.30.1733 bughunt5 - a shell copy is keyed by its PATH: the query never changes what this origin serves (?v= busts the HTTP cache, ?join= /
+// ?dev= are read by the page), so the newest copy of each file is the one kept and the one answered.
+function _lxShellKey(url) { return url.origin + url.pathname; }
+const OFFLINE_PAGE = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mojiworld - offline</title>'
+  + '<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#14101f;color:#f3ecff;font:16px/1.5 system-ui,sans-serif;text-align:center">'
+  + '<div style="max-width:420px;padding:24px"><h1 style="font-size:22px;margin:0 0 8px">You are offline</h1><p style="margin:0 0 16px;opacity:.85">Mojiworld needs one visit with a connection before it can open offline. Connect, then try again.</p>'
+  + '<button onclick="location.reload()" style="font:inherit;padding:8px 18px;border-radius:8px;border:0;background:#8b5cf6;color:#fff;cursor:pointer">Try again</button></div>';
 async function _lxShellFirst(e, req) {
-  const cache = await caches.open(SHELL);
+  const key = _lxShellKey(new URL(req.url));
   try {
     const net = await fetch(req);
-    if (net && net.ok && net.type === 'basic') e.waitUntil(cache.put(req, net.clone()).catch(() => {}));
+    if (net && net.ok && net.type === 'basic') { const copy = net.clone(); e.waitUntil(caches.open(SHELL).then((c) => c.put(key, copy)).catch(() => {})); }   // opened after the network: a broken store never fails a page that loads
     return net;
   } catch (err) {
-    const hit = (await cache.match(req)) || (await cache.match(req, { ignoreSearch: true }));
+    let hit = null;
+    try { hit = await (await caches.open(SHELL)).match(key); } catch (err2) {}
     if (hit) return hit;
+    if (req.mode === 'navigate') return new Response(OFFLINE_PAGE, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } });   // v0.30.1733 bughunt5: was an empty 504 (a blank page)
     return new Response('', { status: 504, statusText: 'offline: not stored yet' });
   }
 }
+// v0.30.1733 bughunt5 - OFFLINE AFTER ONE VISIT. This worker registers at the end of the page, after the page and its tables have loaded without
+// it, so a first visit stored none of them. The page sends their URLs once a worker is active; any not held yet is fetched and kept.
+self.addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.type !== 'lx-shell-warm' || !Array.isArray(d.urls)) return;
+  e.waitUntil((async () => {
+    const cache = await caches.open(SHELL);
+    for (const u of d.urls.slice(0, 64)) {
+      try {
+        const url = new URL(String(u), self.location.href);
+        if (url.origin !== self.location.origin) continue;
+        const key = _lxShellKey(url);
+        if (await cache.match(key)) continue;
+        const net = await fetch(url.href, { credentials: 'same-origin' });
+        if (net && net.ok && net.type === 'basic') await cache.put(key, net);
+      } catch (err) {}
+    }
+  })());
+});
 
+// v0.30.1733 bughunt5 - the CDN's art and music live in their OWN cache. They were kept in the art generation (CACHE), and every bump - there
+// for same-origin files replaced under their own names - deleted them all, though a pinned CDN URL never changes meaning: one
+// online launch after a bump and an offline start drew most sprites invisible and played no music. Trimmed by count (oldest
+// first) instead; a copy still in an older generation answers until the new cache has it.
+const CDN = 'mojiworld-cdn-v1', CDN_MAX = 9000;
+async function _lxCdnTrim(cache) {
+  if (Math.random() > 0.02) return;   // about one store in fifty pays for the count
+  try { const keys = await cache.keys(); for (let i = 0; i < keys.length - CDN_MAX; i++) await cache.delete(keys[i]); } catch (err) {}
+}
+async function _lxCdnMatch(href) {
+  try { const hit = await (await caches.open(CDN)).match(href); if (hit) return hit; } catch (err) {}
+  try { return (await (await caches.open(CACHE)).match(href)) || null; } catch (err) { return null; }
+}
 async function _lxCdnAsset(e, req, url) {
-  const cache = await caches.open(CACHE);
-  const hit = await cache.match(url.href);
+  const cache = await caches.open(CDN);
+  const hit = await _lxCdnMatch(url.href);
   if (hit) return hit;
   try {
     const net = await fetch(url.href, { mode: 'cors', credentials: 'omit' });
-    if (net && net.ok) e.waitUntil(cache.put(url.href, net.clone()).catch(() => {}));
+    if (net && net.ok) e.waitUntil(cache.put(url.href, net.clone()).then(() => _lxCdnTrim(cache)).catch(() => {}));
     return net;
   } catch (err) {
     try { return await fetch(req); } catch (err2) { return new Response('', { status: 504, statusText: 'offline asset miss' }); }
@@ -398,13 +449,13 @@ async function _lxSliceRange(full, range) {
 }
 
 async function _lxAudioRange(e, req, url, range) {
-  const cache = await caches.open(CACHE);
+  const cache = await caches.open(url.origin === self.location.origin ? CACHE : CDN);   // v0.30.1733 bughunt5: a CDN track outlives an art bump
   try {
     const net = await fetch(req);
     if (net) e.waitUntil(_lxStoreWholeAudio(cache, url.href, net.clone()));
     return net;
   } catch (err) {
-    const full = await cache.match(url.href);
+    const full = (await cache.match(url.href)) || (url.origin === self.location.origin ? null : await _lxCdnMatch(url.href));
     if (!full) return new Response('', { status: 504, statusText: 'offline audio miss' });
     return _lxSliceRange(full, range);
   }
@@ -417,6 +468,7 @@ self.addEventListener('fetch', (e) => {
   try { url = new URL(req.url); } catch (err) { return; }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   const same = url.origin === self.location.origin;
+  if (req.cache === 'no-store' || (same && /\/version\.json$/.test(url.pathname))) return;   // v0.30.1733 bughunt5: the 10-minute version check was stored per ?t=
   // v0.29.473 — never answer a ranged media request with a cached 200 (it can stall or fail to restart audio). Music now gets a
   // network-first pass that also stores the whole track, and offline a real 206 slice; every other ranged request (films) is the
   // network's, as before.
