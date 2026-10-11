@@ -44,7 +44,7 @@ try {
     game.bestiary = JSON.parse(save);
     return out;
   });
-  const names = ['The Greedy', 'The Overprotective', 'The Unforgiving', 'The Dutiful', 'The Reckless', 'The Smug', 'The Vain', 'The Stubborn', 'The Undecided', 'The Proud', 'The Moody', 'The Grieving', 'The Hesitant', 'The Regretful', 'The Resentful', 'The Judgmental', 'The Complacent', 'The Controlling'];
+  const names = ['The Greedy', 'The Overprotective', 'The Unforgiving', 'The Dutiful', 'The Reckless', 'The Smug', 'The Vain', 'The Stubborn', 'The Talented', 'The Proud', 'The Moody', 'The Grieving', 'The Hesitant', 'The Regretful', 'The Resentful', 'The Judgmental', 'The Complacent', 'The Controlling'];
   check(R.n === 18 && J(R.missingType) === '[]' && !R.keys.some((k) => /brinekraken|wellDrinker|capWarden/i.test(k)), 'eighteen bosses carry a persona (none of the Well-Drinker, Cap-Warden, Brinekraken)', J(R.keys.length) + ' ' + J(R.missingType));
   check(J(R.traitNames) === J(names), 'the personas are plain adjectives (The Greedy, The Proud...) in level order', J(R.traitNames));
   check(R.intro.length === 14 && R.intro.every(([k, title, trait]) => title === trait || (k === 'aetherion' && title === 'The Tearborn')) && R.noIntro.join() === 'taiger,harea,lady_honk,willeo', 'every boss with an arena card shows its persona as the card title (Aetherion keeps her own epithet, The Tearborn)', J(R.intro.filter(([k, a, b]) => a !== b)));
@@ -55,7 +55,7 @@ try {
   check(/finally moves/.test(R.epi.king) && /nobody melts/.test(R.epi.king) && /someone steps off/.test(R.epi.conductor) && /this time she does not turn back/.test(R.epi.mira), 'the defeat lines: Gloopaloo finally moves and nobody melts, the train stops, she does not turn back', J(R.epi).slice(0, 200));
   check(R.sig[0].indexOf('The Reckless. ') === 0 && R.sig[1].indexOf('The Smug. ') === 0 && R.sig[2].indexOf('The Vain. ') === 0 && R.sig[3].indexOf('The Stubborn. ') === 0, 'the four distorted captains lead with their trait', J(R.sig.map((s) => s.slice(0, 22))));
   const Q = R.q;
-  check(/He is the Greedy\./.test(Q.king) && /whole court/.test(Q.king) && /the Overprotective/.test(Q.mooma) && /the Unforgiving/.test(Q.inner) && /the Dutiful/.test(Q.pq) && /the Undecided/.test(Q.portal), 'the early quests name the trait (Greedy, Overprotective, Unforgiving, Dutiful, Undecided)', '');
+  check(/He is the Greedy\./.test(Q.king) && /whole court/.test(Q.king) && /the Overprotective/.test(Q.mooma) && /the Unforgiving/.test(Q.inner) && /the Dutiful/.test(Q.pq) && /the Talented/.test(Q.portal), 'the early quests name the trait (Greedy, Overprotective, Unforgiving, Dutiful, Talented)', '');
   check(/the Resentful/.test(Q.dawn) && /the Proud/.test(Q.dawn) && /the Moody/.test(Q.dawn) && /the Grieving/.test(Q.smith) && /He is the Controlling/.test(Q.grav) && /She is the Regretful/.test(Q.aeth) && /the Hesitant/.test(Q.lyra), 'the later quests do too (Resentful, Proud, Moody, Grieving, Controlling, Regretful, Hesitant)', '');
   check(Object.entries(R.words).every(([k, n]) => n <= (k === 'lyra' ? 170 : 120)), 'every touched quest still fits its word cap (120, Lyra 170)', J(R.words));
   check(/^The Greedy\./.test(R.best.king) && /^The Overprotective\./.test(R.best.mooma) && /^The Moody\./.test(R.best.octo) && /^The Proud\./.test(R.best.krook), 'the bestiary lines (the b_ quests) lead with the trait', '');
@@ -71,9 +71,9 @@ try {
   check(R.lines[0] === 'Drew his whole court into his jelly body to shield them from the flood, and has never let them out.' && /mirror copy/.test(R.lines[4] + R.lines[5] + R.lines[6] + R.lines[7]) && /the Twelve/.test(R.lines[11]) && /the tear/.test(R.lines[13]), 'the one-liners are tied to each story: the court, the tear\'s mirror copies, the Twelve\'s smith, the woman\'s tear', J(R.lines.slice(4, 8)));
   // Young Barnaby and the Sundered Smith are the same man a century apart: their lines rhyme without saying so
   const BV = R.voice.young_confused_barnaby, SV = R.voice.sundered_smith, BE = R.epiAll.young_confused_barnaby, SE = R.epiAll.sundered_smith, BL = R.lines[8], SL = R.lines[11];
-  check(/stand/.test(BV) && /shift/.test(BV) && /stand/.test(SV) && /shift/.test(SV), 'Barnaby and the Smith speak of the same two things, where to stand and the shift', J({ BV, SV }));
-  check(/finally understands the question/.test(BE) && /finally understands the question/.test(SE) && /stops guarding/.test(BE) && /stops guarding/.test(SE), 'their epitaphs share a shape: each finally understands the question and stops guarding', J({ BE: BE.slice(0, 60), SE: SE.slice(0, 60) }));
-  check(/still at his post/.test(BL) && /still at his post/.test(SL) && /Twelve/.test(SL) && /the tear/.test(BL), 'their Codex lines both end on the post they will not leave', J({ BL, SL }));
+  check(/made/.test(BV) && /unknown/.test(SV) && /shift/.test(SV), 'Barnaby and the Smith speak of the same things: what he made, the unknown he should have left alone, and the shift', J({ BV, SV }));
+  check(/finally understands what he made/.test(BE) && /finally understands what he made/.test(SE), 'their epitaphs share a shape: each finally understands what he made', J({ BE: BE.slice(0, 60), SE: SE.slice(0, 60) }));
+  check(/talented smith/.test(BL) && /the tear/.test(BL) && /Twelve/.test(SL) && /broke his anvil/.test(SL), 'their Codex lines: the talented smith the tear borrowed, and the smith who armed the Twelve and broke his anvil', J({ BL, SL }));
   check(!/\bBarnaby\b.*\b(smith|Smith)\b.*same (man|person)|same man|same person|a century on/i.test(BV + SV + BE + SE + BL + SL), 'it stays vague: no line says outright that they are one man (the film does that)', '');
   check(/lowers its weapon/.test(R.epiAll.mirrorSelf) && !/blade/.test(R.epiAll.mirrorSelf), 'Mirror Self lowers its weapon (not its blade)', R.epiAll.mirrorSelf);
   const wcl = (t) => t.trim().split(/\s+/).length;

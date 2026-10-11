@@ -71,7 +71,7 @@ try {
     const PAGE = { Taiga: 'Who do you fight?', Will: 'Who fights beside you?', Hera: 'What was the Academia?', 'Lady Hong': 'What guards the grove?' };
     const CAP = [['shadowWovenHood', 'Taiga', 'A tiger wore your hood.', 'q_lyra_kin'], ['bastionThrone', 'Will', 'I met a lion with your sword.', 'q_lyra_kin'],
       ['azureAbode', 'Hera', 'I met the hare at the tear.', 'q_lyra_tear'], ['emeraldVillage', 'Lady Hong', 'A goose carried your bow.', 'q_lyra_kin'],
-      ['bastionThrone', 'Will', 'Barnaby is on your roll twice.', 'q_barnaby_roll']];
+      ['bastionThrone', 'Will', "Barnaby's work?", 'q_barnaby_roll']];
     out.cap = [];
     for (const [map, name, label, q] of CAP) {
       setDone([]); const before = await talk(map, name, null, PAGE[name]);
@@ -125,7 +125,7 @@ try {
   const B = R.bub; const has = (role, line) => (B[role] || []).includes(line);
   ok('5. bubbles: Elena, Auron, Lyra, Yun and Ren each say a captain\'s name', has('scribe', "Will's name fills three volumes") && has('scholar', "Hera's ring has never slipped") && has('apprentice', 'Hera believed me first!') && has('sentinel', 'Lady Hong never misses. Ever.') && has('ren', 'Taiga took his hood back.'), B);
   ok('5. the four captains\' own pools still end on their order line', B.lastOrder.length === 4 && B.lastOrder.every(Boolean), B.lastOrder);
-  const REACT = ['A tiger wore your hood.', 'I met a lion with your sword.', 'Barnaby is on your roll twice.', 'I met the hare at the tear.', 'A goose carried your bow.'];
+  const REACT = ['A tiger wore your hood.', 'I met a lion with your sword.', "Barnaby's work?", 'I met the hare at the tear.', 'A goose carried your bow.'];
   for (const [name, f] of Object.entries(R.fit)) {
     ok(`6. ${name}'s main card is no longer than before: none of the reactions sit on it`, f.main.length > 0 && !f.main.some((l) => REACT.includes(l)), f.main);
     ok(`6. ${name}'s order page with every reaction showing (${f.n} options) stays inside the frame, its quest rows left on the main card`, f.n >= 3 && f.menu.some((l) => REACT.includes(l)) && !f.menu.some((l) => /^(📜|❗|✅)/.test(l)) && f.top >= 0 && f.bottom >= 0 && f.lastBtn >= 0, f);

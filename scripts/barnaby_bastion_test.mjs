@@ -93,15 +93,17 @@ try {
     openNPC(will); await sleep(300); await settle(); await click(/Who fights beside you\?/); await settle(); out.will = text(); await close();
     // ---- 6. the story moves: before / the Bull's House dark / after the ending
     await go('everdawn_megamall', 300); player.x = 300; await sleep(600);
-    out.pre = { card: (await talk()).text, wall: null, bub: null }; await close(); out.pre.wall = await wall(); out.pre.bub = await bubble();
+    { const t0 = await talk(); out.pre = { card: t0.text, opts: t0.opts, bub: null }; } await close(); out.pre.bub = await bubble();
     game.bestiary._boss_zodiac_taurus = 1;
-    out.taur = { card: (await talk()).text, wall: null, bub: null }; await close(); out.taur.wall = await wall(); out.taur.bub = await bubble();
+    { const t1 = await talk(); out.taur = { card: t1.text, opts: t1.opts, bub: null }; } await close(); out.taur.bub = await bubble();
+    player.quests = player.quests || { active: {}, completed: {} }; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_barnaby_hands = true;
+    { await talk(); const had = await click(/What did you make\?/); await settle(); out.made = had ? text() : null; await close(); } delete player.quests.completed.q_barnaby_hands;
     player._storyBeatsSeen.epilogue_gravitos = true;
     out.dawn = { card: (await talk()).text, bub: null }; await close(); out.dawn.bub = await bubble();
     // ---- 7. caps
     const OWN = (typeof NPC_CHAT_LINES_OWN === 'object' && NPC_CHAT_LINES_OWN.Barnaby) || {};
-    out.bubbles = [].concat(OWN.base || [], OWN.taur || [], OWN.dawn || []);
-    out.caps = { chapters: out.descs.slice(0, 5).map(words), lines: [out.pre.wall, out.taur.wall, (typeof _lxBarnabyLine === 'function') ? _lxBarnabyLine() : '', LX_SHOP_VOICE.Barnaby.intro].map(words),
+    out.bubbles = [].concat(OWN.base || [], OWN.dawn || []);
+    out.caps = { chapters: out.descs.slice(0, 5).map(words), lines: [out.made, (typeof _lxBarnabyLine === 'function') ? _lxBarnabyLine() : '', LX_SHOP_VOICE.Barnaby.intro].map(words),
       bubbles: out.bubbles.filter((l) => words(l) > 6 || /\bPress [A-Z0-9]\b/.test(l)) };
     return out;
   });
@@ -113,12 +115,12 @@ try {
   ok('[2] standing beside him on the courtyard floor the talk key picks Brok; in the Megamall Barnaby\'s card names him', R.reach.target === 'Brok' && /Barnaby/.test(R.card.text), { reach: R.reach, card: R.card.text.slice(0, 90) });
   ok('[3] Barnaby I-IV and Lyra V open at 45, the Kindest Hand at 50', JSON.stringify(R.lv) === '[45,45,45,45,45,50]', R.lv);
   ok('[3] the Journal routes his quests to the Megamall', R.nav.every((m) => m === 'everdawn_megamall'), R.nav);
-  const all = R.descs.join(' ') + ' ' + R.voice + ' ' + R.will + ' ' + [R.pre.card, R.pre.wall, R.taur.card, R.taur.wall, R.dawn.card].join(' ');
+  const all = R.descs.join(' ') + ' ' + R.voice + ' ' + R.will + ' ' + [R.pre.card, R.taur.card, R.made, R.dawn.card].join(' ');
   ok('[4] nothing sends you to the Frosted Mansion for him or calls him "of Glasswind"; the smith has no frost', !/Frosted Mansion|Glasswind|frost|too cold to touch/i.test(all), (all.match(/.{0,40}(Frosted Mansion|Glasswind|frost|too cold).{0,30}/i) || [''])[0]);
   const [five, roll, , fin, forge] = R.descs;
   ok('[5] I: the Bastion\'s old smith, the officer\'s "put somewhere small" (the epilogue\'s receipt), his stall in the Everdawn Megamall',
     /Barnaby, the Bastion's old smith/.test(five) && /put somewhere small/.test(five) && /His stall is in the Everdawn Megamall\./.test(five) && R.epilogue, five.slice(0, 120));
-  ok('[5] II: the forge\'s old bench, and every knight on the roll swore "We stand until"', /the forge's old bench/.test(roll) && /swore "We stand until\."/.test(roll), roll.slice(150, 330));
+  ok('[5] II: the forge\'s old bench, the blade for the woman at the gate that never closed, and Will\'s white blade', /the forge's old bench/.test(roll) && /a blade for the woman at the gate/.test(roll) && /Will's white blade/.test(roll), roll.slice(60, 260));
   ok('[5] IV: the Smith armed the heroes who climbed, the Bastion\'s own among them (the Twelve are named only after Aetherion falls)', /armed the heroes who climbed, the Bastion's own among them/.test(fin) && !/the Twelve/.test(fin), fin.slice(-330, -150));
   ok('[5] V: a blade older than the Bastion; the night the sky fell its forge had stood cold since the woman at the gate walked up the road',
     /a Bastion blade older than the Bastion/.test(forge) && /Bastion had no smith: its forge had stood cold since the woman at the gate walked up the road/.test(forge) && /^Barnaby starts with someone else/.test(forge), forge.slice(0, 160));
@@ -129,9 +131,9 @@ try {
   ok('[5] the Codex: the Doomed carried Bastion blades made by the woman at the gate - by Mira once she has told you; no "Mara" left',
     /Bastion blades made by the woman at the gate, older than the Bastion itself/.test(R.cdx.before) && /Bastion blades made by Mira, older than the Bastion itself/.test(R.cdx.after) && !/Mira/.test(R.cdx.before) && !R.mara,
     { before: (R.cdx.before.match(/finest ever made.{0,90}/) || [''])[0], after: (R.cdx.after.match(/finest ever made.{0,60}/) || [''])[0], mara: R.mara });
-  ok('[6] before the Bull\'s House is dark: the oath, the western breach, "the gate", his own bubble', /We stand until\./.test(R.pre.wall || '') && /western breach/.test(R.pre.wall || '') && !/SOMEONE PUSHES|gloves lie/.test(R.pre.card) && R.pre.bub === 'We stand until. Until what?', { wall: R.pre.wall, bub: R.pre.bub });
-  ok('[6] once it is dark: his anvil and the answer carry "until someone pushes"', /SOMEONE PUSHES/.test(R.taur.card) && /until someone pushes/.test(R.taur.wall || '') && R.taur.bub === 'We stand until someone pushes.', { card: R.taur.card.slice(0, 80), wall: R.taur.wall, bub: R.taur.bub });
-  ok('[6] after the ending: his gloves stay off and he chooses the forge', /gloves lie on the bench/.test(R.dawn.card) && /I would choose it again/.test(R.dawn.card) && R.dawn.bub === 'Gloves off. First morning.', { card: R.dawn.card.slice(0, 120), bub: R.dawn.bub });
+  ok('[6] his card carries no oath: no "Where did you stand" option, no breach, no gate; his bubble comes from his own pool', !R.pre.opts.some((o) => /Where did you stand/.test(o)) && !/We stand until|breach|SOMEONE PUSHES|The gate/.test(R.pre.card + R.taur.card + R.made) && R.pre.bub === 'Gloves stay on.' && R.taur.bub === 'Gloves stay on.', { opts: R.pre.opts, bub: R.pre.bub });
+  ok('[6] after Barnaby III "What did you make?" is his confession: a blade for the woman who walked up the road, something he could not name, the stay-with-the-iron regret', /A blade, for the woman who walked up the road/.test(R.made || '') && /something I could not name/.test(R.made || '') && /I should have stayed with the iron/.test(R.made || '') && !/Smith|Sundered|Twelve|Zodiac|Mira/.test(R.made || ''), (R.made || '').slice(0, 140));
+  ok('[6] after the ending: his gloves stay off, the tear is shut, plain iron he can name', /gloves lie on the bench/.test(R.dawn.card) && /nothing I cannot name/.test(R.dawn.card) && R.dawn.bub === 'Gloves off. First morning.', { card: R.dawn.card.slice(0, 120), bub: R.dawn.bub });
   ok('[7] chapters <= 170 words, his lines <= 60, bubbles <= 6 and naming no key', R.caps.chapters.every((w) => w <= 170) && R.caps.lines.every((w) => w > 0 && w <= 60) && R.caps.bubbles.length === 0 && R.bubbles.length >= 10, R.caps);
   ok('[8] no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 200), false); }
