@@ -39,6 +39,8 @@ try {
   const r1 = { local: await lvOf(page, 'local'), cloud: await lvOf(page, 'cloud'), live: await page.evaluate(() => player.level) };
   check(before.local === 35 && r1.local === 30 && r1.live === 30 && r1.cloud === 30, 'Steam: a restored backup stays restored (the cloud copy used to win the next boot)', J({ before, after: r1 }));
   await page.evaluate((id) => _lxRestoreBackup(id), bid); await page.waitForTimeout(1200); await settle(page);
+  await page.click('#menu-continue').catch(() => {});   // release11a: Continue first - a title tab writes nothing
+  await page.waitForFunction(() => { const o = document.getElementById('loading-overlay'); return !o || o.classList.contains('fade'); }, null, { timeout: 180000 }).catch(() => {}); await page.waitForTimeout(3000);
   await page.evaluate(() => { player.level = 44; saveState(); }); await page.waitForTimeout(2600);
   const r2 = { resetting: await page.evaluate(() => !!game._resetting), local: await lvOf(page, 'local') };
   check(!r2.resetting && r2.local === 44, 'Steam: after a second restore in one window, saving still works', J(r2));

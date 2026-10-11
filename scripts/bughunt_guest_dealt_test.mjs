@@ -129,7 +129,9 @@ try {
     const mult = [(game.prestige && game.prestige.xpMult) || 1, _diffExpMul(), _affixExpMul(), _ksXpMul()].reduce((a, v) => a * v, 1); out.mult = mult;
     player.level = 70; out.gap70v10 = _lxExpLevelGapMul({ level: 10 });
     out.far70v10 = exp(W.frame({ u: note(10), e: 100 }));              // far kill: no co-op wedge (x1)
+    net.peers[7].x = player.x; net.peers[7].y = player.y;   // v0.30.1732 release11: the runner counts as an ally only within 400 px of the kill
     out.near70v10 = exp(W.frame({ u: note(10), e: 100, x: Math.round(player.x), y: Math.round(player.y) }));
+    net.peers[7].x = 0; net.peers[7].y = 0;
     const mm = W.mirror('slime', ++uid, 10); out.mirror70v10 = exp(W.frame({ u: mm.uid, e: 100 }));   // with the live mirror carrying the host's level
     player.level = 12; out.far12v10 = exp(W.frame({ u: note(10), e: 100 }));   // within 5 levels: x1
     player.level = 70; const sc = window._lxStoryComplete; window._lxStoryComplete = () => true;

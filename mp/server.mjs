@@ -54,6 +54,34 @@ const BULK = { look: 1024, eq: 8192 };
 const NUM = { x: 1, y: 1, vx: 1, vy: 1, level: 1, hp: 1, maxHp: 1, mp: 1, maxMp: 1, facing: 1 };
 const BYTE_RATE = 256 * 1024, BYTE_BURST = 640 * 1024;
 const HELLO_MS = +process.env.HELLO_MS || 10000;
+// v0.30.1732 release11 - the room cap the deployed worker enforces (mp-cf/src/index.js): a party code holds ROOM_CAP players, a public lobby channel
+// (lobby / lobby__chN) LOBBY_CAP, counted per player token (a socket without one counts alone; cap * 2 sockets is the hard bound), so
+// the same player re-joining past a half-dead socket of theirs is never locked out. A refused hello gets the worker's own frame,
+// error{code:'room_full'}, then a 4001 close. Env-configurable (bounded as on the worker) so the client's room_full path is testable here.
+const capEnv = (k, d, lo, hi) => { const n = Number(process.env[k]); return (process.env[k] != null && process.env[k] !== '' && n >= lo && n <= hi) ? Math.floor(n) : d; };
+const ROOM_CAP = capEnv('ROOM_CAP', 5, 2, 64), LOBBY_CAP = capEnv('LOBBY_CAP', 50, 2, 500);
+const PUBLIC_ROOM = /^lobby(__ch\d+)?$/;
+const capFor = (roomId) => (PUBLIC_ROOM.test(roomId) ? LOBBY_CAP : ROOM_CAP);
+function roomFull(roomId, token) {
+  const m = rooms.get(roomId);
+  if (!m) return false;
+  const cap = capFor(roomId);
+  if (m.size >= cap * 2) return true;
+  const who = new Set();
+  for (const [id, c] of m) {
+    const k = c.tok ? 't:' + c.tok : '#' + id;
+    if (token && k === 't:' + token) return false;
+    who.add(k);
+  }
+  return who.size >= cap;
+}
+function refuseFull(ws, roomId) {
+  const ch = /^(.*)__ch(\d+)$/.exec(roomId);
+  const label = (ch ? ch[1].toUpperCase() + ' (Ch ' + ch[2] + ')' : roomId.toUpperCase()).replace(CTRL, '');
+  const message = (PUBLIC_ROOM.test(roomId) ? 'Lobby' + (ch ? ' channel ' + ch[2] : '') : 'Party ' + label) + ' is full (' + capFor(roomId) + ' players).';
+  try { ws.send(JSON.stringify({ t: 'error', code: 'room_full', message })); } catch (_) {}
+  try { ws.close(4001, 'room_full'); } catch (_) {}
+}
 
 // rooms: roomId -> Map<id, { ws, st }>   (st = latest presence object incl. id)
 const rooms = new Map();
@@ -146,10 +174,12 @@ wss.on('connection', (ws) => {
     try {
       if (msg.t === 'hello') {
         if (id !== null) return;                     // one identity per socket -> no orphaned-ghost re-hello
-        roomId = String(msg.room || 'lobby').slice(0, 64);
+        const rid = String(msg.room || 'lobby').slice(0, 64), tok = msg.token ? String(msg.token).slice(0, 64) : null;
+        if (roomFull(rid, tok)) { refuseFull(ws, rid); return; }   // v0.30.1732 release11: the worker's room cap
+        roomId = rid;
         id = nextId++;
         const st = pick(msg, { id });
-        room(roomId).set(id, { ws, st });
+        room(roomId).set(id, { ws, st, tok });
         const others = [];
         for (const [oid, c] of rooms.get(roomId)) if (oid !== id) others.push(c.st);
         sendTo(ws, { t: 'welcome', id, room: roomId, players: others });

@@ -65,6 +65,8 @@ const r = await page.evaluate(() => {
   // (2) ally-kill share: become a NON-HOST peer and feed a kill broadcast.
   net.isHost = false; net.hostId = 1; net.myId = 7;
   net.peers = {};   // peer 7 above was the ally; now I AM 7 - left in, it would count me as my own party member
+  // v0.30.1732 release11: the runner (id 1) counts as an ally only within 400 px of the kill, like any peer - it stands beside me here
+  net.peers[1] = { id: 1, name: 'Host', map: game.currentMap, x: player.x, y: player.y, _last: performance.now() };
   _pinKs(); game._mapAffix = WORLD_AFFIXES[0];
   // v0.30.862 (a23b19ec, per user): a guest pays a host kill only for a monster it MIRRORED, capped by its own
   // table - an unknown uid pays nothing. Register each uid as a mirrored slime whose table EXP is 100.

@@ -16341,7 +16341,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1731';
+const GAME_VERSION = 'v0.30.1732';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16792,6 +16792,16 @@ const _LX_RSCALE = (() => {
 // events the debounced re-fit listener below already watches. The pinch-zoom
 // scale!==1 branch is inside the recompute, and visualViewport fires
 // 'resize' on pinch, so zoom states invalidate like everything else.
+// v0.30.1732 release11 - a window narrower than 900 CSS px (or 150% zoom) at boot made _LX_IS_MOBILE true for good, so a desktop stayed at
+// DPR 1 - blurry - after the window was widened. On a non-touch device the phone cap now follows the window (cached, re-read on
+// resize / zoom / fullscreen with the fit scale below). Touch devices keep the boot decision exactly as before.
+const _LX_DPR_NO_TOUCH = (() => { try { return !!(window.matchMedia && window.matchMedia('(pointer: fine)').matches) && !(navigator.maxTouchPoints > 0); } catch (e) { return false; } })();
+let _lxDprNarrow = -1;   // -1 = stale
+function _lxDprPhoneCap() {
+  if (!_LX_DPR_NO_TOUCH) return _LX_IS_MOBILE;
+  if (_lxDprNarrow < 0) { try { _lxDprNarrow = window.matchMedia('(max-width: 900px)').matches ? 1 : 0; } catch (e) { _lxDprNarrow = _LX_IS_MOBILE ? 1 : 0; } }
+  return _lxDprNarrow === 1;
+}
 let _lxFitScaleCached = 0;   // 0 = stale, recompute on next read
 function _lxFitScaleRecalc() {
   try {
@@ -16808,7 +16818,7 @@ function _lxFitScale() {
 }
 (() => {
   if (typeof window === 'undefined' || !window.addEventListener) return;
-  const stale = () => { _lxFitScaleCached = 0; };
+  const stale = () => { _lxFitScaleCached = 0; _lxDprNarrow = -1; };   // v0.30.1732 release11: the phone cap is re-read too
   window.addEventListener('resize', stale, { passive: true });
   document.addEventListener('fullscreenchange', stale);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', stale, { passive: true });
@@ -16848,7 +16858,7 @@ function _lxSharpApply(s) {   // v0.30.1227 phone-sharp - from _applySettings: b
 function _lxTargetDpr() {
   if (_LX_RSCALE != null) return _LX_RSCALE;
   const dev = Math.max(1, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
-  const _capped = Math.min(_LX_IS_MOBILE ? 1 : 2, Math.max(1, dev * _lxFitScale()));
+  const _capped = Math.min(_lxDprPhoneCap() ? 1 : 2, Math.max(1, dev * _lxFitScale()));   // v0.30.1732 release11: was _LX_IS_MOBILE (boot-only)
   return _LX_SHARP ? Math.max(_capped, _lxSharpDpr(dev)) : _capped;   // v0.30.1227 phone-sharp
 }
 let _LX_DPR = _lxTargetDpr();
@@ -32226,6 +32236,7 @@ const QUESTS = {
   },
   q_boss_aries: {
     critical: true,   // v0.30.1561 critical (per user): the First-Born Sunmote
+    twelveGate: true,   // v0.30.1732 release11: the Twelve stay secret until Aetherion falls (_lxTwelveKnown)
     // v0.25.580 — quest gate raised to Lv 70 to match the zodiac tier promotion.
     // Rewards scaled up so the post-Singularity boss kill feels appropriately
     // valuable next to the Aetherion / Gravitos quests.
@@ -32276,6 +32287,7 @@ const QUESTS = {
   // v0.25.809 — Sundered Smith mid-tier boss quest (Lv 45).
   q_zodiac_twelve: {
     name: 'The Twelve Houses', icon: '✴', levelReq: 70,
+    twelveGate: true,   // v0.30.1732 release11: the Twelve stay secret until Aetherion falls (_lxTwelveKnown)
     story: true,
     kind: 'special', target: 'zodiacAll', count: 12,
     bossFight: true,                              // v0.29.90 — ⚔ BOSS FIGHT flag (all twelve zodiac bosses)
@@ -50063,6 +50075,7 @@ function openClassSelect() {
       audio.init();
       applyClass(id);
       window._lxAwaitingCreation = false;   // v0.30.789 — the player has created a hero: saving may begin
+      window._lxInWorld = true;   // v0.30.1732 release11: and the hero is in the world
       document.getElementById('class-select-modal').style.display = 'none';
       game.paused = false;
       showToast(`You are ${/^[AEIOU]/i.test(c.name) ? 'an' : 'a'} ${c.name}!`, 'epic');
@@ -57338,7 +57351,7 @@ function saveState() {
   if (game._saveTimer) return;   // already scheduled
   game._saveTimer = setTimeout(() => {
     game._saveTimer = null;
-    if (game._saveDirty && !game._resetting) _flushSaveStateNow();
+    if (game._saveDirty && !game._resetting && (typeof _lxHeroInWorld !== 'function' || _lxHeroInWorld())) _flushSaveStateNow();   // v0.30.1732 release11: on the title it stays dirty; entering the world flushes it
   }, _SAVE_DEBOUNCE_MS);
 }
 function hasSave() {
@@ -58935,6 +58948,7 @@ function _coopXpMul(monster) {
   // why a five-player room paid a duo's rate. _lxCoopAlliesNear applies the same
   // map / stale / 400px rules the loop here used to.
   void mx; void my; void RANGE; void _staleCutoff;   // the rules moved into the shared counter
+  { const _sx = player.x + player.w / 2 - mx, _sy = player.y + player.h / 2 - my; if (_sx * _sx + _sy * _sy > RANGE) return 1; }   // v0.30.1732 release11: far from the kill myself, no party bonus (as on a guest)
   const _allies = _lxCoopAlliesNear(
     (monster && monster.x) ? monster.x + monster.w / 2 : (player.x + player.w / 2),
     (monster && monster.y) ? monster.y + monster.h / 2 : (player.y + player.h / 2), null);
@@ -59547,7 +59561,7 @@ function mpConnect(url, name, room) {
     ws = new WebSocket(_mpDialUrl(url, net.roomId));   // v0.30.1225 mp-room-route - ?room=: this room's own relay DO (net._lastUrl stays bare)
     net.ws = ws;
     _lxMpBudgetWrap(ws);   // v0.30.823 - my copy of the relay's 40 / s bucket
-    net._away = false; net._hitQ = []; net._fxQ = []; net._pjQ = [];
+    net._away = false; net._pzSent = false; net._hitQ = []; net._fxQ = []; net._pjQ = [];
   } catch (e) {
     _mpStatus('Bad URL: ' + e.message, '#ff8888');
     return;
@@ -61489,6 +61503,7 @@ function _coopApplyUp(msg) {
 // A partner finished channeling beside MY body.
 function _coopApplyRevive(msg) {
   if (!player || !player._downed || !msg || msg.id == null) return;
+  if (msg.to != null && +msg.to !== +net.myId) return;   // v0.30.1732 release11: a channel on another body (no 'to': an older build, the old rule)
   // v0.29.16 — ONCE PER MAP / 10-min cooldown (authoritative gate, on the revived
   // player's side). If this map's revive is spent, refuse: the player stays down
   // and bleeds out into a real death. Hard stop against any infinite revive loop
@@ -61523,7 +61538,7 @@ function _coopReviveTick(dt) {
       if (p._reviveMs >= COOP_REVIVE_MS) {
         p._reviveMs = 0;
         p._downed = false;   // optimistic; their 'up' broadcast confirms
-        try { net.ws.send(JSON.stringify({ t: 'revive', map: game.currentMap })); } catch (e) {}
+        try { net.ws.send(JSON.stringify({ t: 'revive', map: game.currentMap, to: +id })); } catch (e) {}   // v0.30.1732 release11: this body only (it revived every downed partner in range)
       }
     } else if (p._reviveMs) {
       p._reviveMs = Math.max(0, p._reviveMs - dt * 2);
@@ -62090,7 +62105,7 @@ function _coopBroadcastKill(m, exp, coins) {
   // zodiac sign (ladder key), and bx=1 when THIS kill pays nothing even on the
   // host (echo / expedition / split twin). Never the amount: each player's
   // refight history is its own.
-  const _kf = { t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0, il: m._isMirage ? 1 : 0 };
+  const _kf = { t: 'kill', u: m.uid, e: Math.round(exp) || 0, c: Math.round(coins) || 0, x: Math.round(m.x), y: Math.round(m.y), kx: Math.round(m.x + (m.w || 0) / 2), ky: Math.round(m.y + (m.h || 0) / 2), map: game.currentMap, tp: m.type, b: m.isBoss ? 1 : 0, il: m._isMirage ? 1 : 0 };   // v0.30.1732 release11: kx/ky the centre the host's bonus measures from
   if (m.isBoss) {
     _kf.bl = (m.level && m.level > 0) ? (m.level | 0) : ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 0);
     /* v0.30.x — a standing partner, HERE, at kill time */ if (m._duoTrial && !m._duoTrialFailed && !m._duoPaidHost && (m._duoPartnerSeen || typeof _coopPeerAliveOnMyMap !== 'function' || _coopPeerAliveOnMyMap())) { m._duoPaidHost = true; try { _duoTrialReward(_kf.bl || ((typeof monsterTypes !== 'undefined' && monsterTypes[m.type] && monsterTypes[m.type].level) | 0), m.type); } catch (e) {} }   // v0.30.423
@@ -62328,10 +62343,13 @@ function _coopApplyKill(msg) {
     // ally, and the killer is excluded from the peer sweep so they are not
     // counted twice).
     let coop = 1;
-    if (typeof _coopNearKill === 'function' && _coopNearKill(msg.x, msg.y)) {
-      const _others = (typeof _lxCoopAlliesNear === 'function') ? _lxCoopAlliesNear(+msg.x, +msg.y, msg.id) : 0;
+    // v0.30.1732 release11: the runner counted as an ally even far from the kill (the host paid no such bonus): now every peer, the runner too,
+    // counts only inside the 400 px around the kill, measured from the point the host measures (kx/ky; x/y from an older host)
+    const _kx = Number.isFinite(+msg.kx) ? +msg.kx : +msg.x, _ky = Number.isFinite(+msg.ky) ? +msg.ky : +msg.y;
+    if (typeof _coopNearKill === 'function' && _coopNearKill(_kx, _ky)) {
+      const _allies = (typeof _lxCoopAlliesNear === 'function') ? _lxCoopAlliesNear(_kx, _ky, null) : 1;
       coop = (typeof _lxPartyExpMul === 'function')
-        ? _lxPartyExpMul(1 + _others, (typeof _lxIsPqMap === 'function') && _lxIsPqMap(game.currentMap)) : 2;
+        ? _lxPartyExpMul(_allies, (typeof _lxIsPqMap === 'function') && _lxIsPqMap(game.currentMap)) : (_allies > 0 ? 2 : 1);
     }
     // v0.29.5xx — REWARD PARITY (per user "make sure coop grants the right exp
     // and rewards and mojicoins"). These four were in the host's own kill
@@ -62884,6 +62902,7 @@ function _mpHandle(msg) {
         if (msg.at != null) _cq.at = Math.max(0, Math.min(1e8, +msg.at || 0));   // the Ticket Rush builds its mechs from the party's ATK
         if (msg.pqp != null && _mpRateOk(msg.id, 'pqp', 2)) _lxPqPieceFromPeer(+msg.pqp, msg.id);   // a Spire piece a partner found (an honest peer sends one per chest it opens: 2 a second is far above that)
         if (msg.aw != null && !!msg.aw !== !!_cq._away) { _cq._away = !!msg.aw; _coopRecomputeHost(); _mpRenderPlayerList(); }
+        if (msg.pz != null) _cq._pz = !!msg.pz;   // v0.30.1732 release11: paused in a menu (see _aggroPeers in updateMonsters)
         if (msg.fx || msg.pj || msg.po) _coopApplyFx(msg);
       }
       // v0.29.x — RTT probe (latency visibility). A carrier ping carrying `rt`
@@ -63349,6 +63368,8 @@ function _mpTick() {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
   const now = performance.now();
   _coopAwayTick(); _coopFxCollect(); _coopActionFlush(false);   // v0.30.823 - every frame; each paces itself (v0.30.824: fx are collected every frame)
+  // v0.30.1732 release11: paused in a menu, said at once (the host leaves a paused partner out of the aggro list - it cannot be hurt); 'aw' waits 20 s
+  if (!!game.paused !== !!net._pzSent) { net._pzSent = !!game.paused; try { net.ws.send(JSON.stringify({ t: 'ping', pz: net._pzSent ? 1 : 0 })); } catch (e) {} }
   if (typeof _coopKeyTick === 'function') _coopKeyTick(now);   // v0.30.1443 coop-keyed - re-elect four times a second; announce a new world at once
   // v0.29.x (peer-coordinate accuracy) — AIRBORNE-FLIP FLUSH. Send an immediate
   // state frame the moment we leave the ground or land (the two instants where
@@ -63391,7 +63412,7 @@ function _mpTick() {
   if (now - (net._lastLookSyncAt || 0) > 2500) {
     net._lastLookSyncAt = now;
     try {
-      net.ws.send(JSON.stringify({ t: 'ping', lk: _av.look, eq: _av.eq, ti: _ttlWire, cap: LX_COOP_CAP, aw: net._away ? 1 : 0, at: (typeof getAtk === 'function') ? Math.round(getAtk()) : 0,
+      net.ws.send(JSON.stringify({ t: 'ping', lk: _av.look, eq: _av.eq, ti: _ttlWire, cap: LX_COOP_CAP, aw: net._away ? 1 : 0, pz: game.paused ? 1 : 0, at: (typeof getAtk === 'function') ? Math.round(getAtk()) : 0,
         rt: Math.round(performance.now()),
         v: (typeof GAME_VERSION !== 'undefined') ? GAME_VERSION : undefined }));
     } catch (e) { /* ignore */ }
@@ -64987,6 +65008,13 @@ function tickQuestUnlocks() {
           && ![].concat(_q.prereq).every(p => player.quests.completed && player.quests.completed[p])) {
         delete player.quests.unlocked[_id];
       }
+      // v0.30.1732 release11 - a bare unlock of a Twelve quest made before Aetherion fell re-locks (taken or done ones are kept)
+      if (_q && _q.twelveGate && player.quests.unlocked[_id]
+          && !(player.quests.active && player.quests.active[_id])
+          && !(player.quests.completed && player.quests.completed[_id])
+          && typeof _lxTwelveKnown === 'function' && !_lxTwelveKnown()) {
+        delete player.quests.unlocked[_id];
+      }
     }
   }
   _lxPurgeRetiredQuests();   // v0.30.x — drop removed quests (the Endless Express run) from saves that still carry them
@@ -65018,7 +65046,8 @@ function tickQuestUnlocks() {
     // is called on every level-up and on session boot, so the Express
     // unlock fires the moment the player turns in the Ticket Rush.
     if (q.prereq && !(player.quests.completed && [].concat(q.prereq).every(p => player.quests.completed[p]))) continue;   // v0.26.831+ — prereq may be a string or an array (all required)
-    if (q.fadesAt && (player.level || 1) > q.fadesAt) continue;   // v0.30.1615 fadesAt: early-game content is not handed to a veteran
+    if (q.fadesAt && (player.level || 1) > q.fadesAt) continue;
+    if (q.twelveGate && typeof _lxTwelveKnown === 'function' && !_lxTwelveKnown()) continue;   // v0.30.1732 release11   // v0.30.1615 fadesAt: early-game content is not handed to a veteran
     if ((player.level || 1) >= (q.levelReq || 1)) {
       player.quests.unlocked[id] = true;
       // Toast for newly-unlocked quest so the player knows the journal
@@ -66884,6 +66913,7 @@ function acceptQuest(id, _lxQuiet) {   // v0.30.902 _lxQuiet: the caller announc
   // to accept PQ Stage 3 with Stage 2 unfinished and land mid-chain. Measured
   // before this line existed: planting unlocked.q_pq_carriage accepted it.
   if (!_lxPrereqMet(q)) return false;
+  if (q.twelveGate && typeof _lxTwelveKnown === 'function' && !_lxTwelveKnown()) return false;   // v0.30.1732 release11: the Twelve wait for Aetherion
   // v0.25.916 — Clear any stale multi-visit progress counter before
   // (re-)accepting the quest so a previously-abandoned multi-visit
   // doesn't resume from old count. Pairs with the cleanup in
@@ -67884,7 +67914,8 @@ function _kbInjectStyle() {
 #keybind-modal .kbm-key { --u: 36px; box-sizing: border-box; width: calc(var(--u) * var(--w) + 4px * (var(--w) - 1)); height: 40px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; background: var(--gc, #2a2238); color: #0d0a14; border: 2px solid #0d0a14; border-radius: 7px; box-shadow: inset 0 -3px 0 rgba(13,10,20,0.35); cursor: pointer; user-select: none; overflow: hidden; transition: transform 80ms ease; }
 @supports (width: 1cqw) { #keybind-modal .kbm-key { --u: calc((100cqw - 56px) / 15); } }
 #keybind-modal .kbm-key b { font: 1000 11px/1 'Nunito', system-ui, sans-serif; }
-#keybind-modal .kbm-key i { max-width: 100%; box-sizing: border-box; padding: 0 2px; font: 800 8.5px/1.05 'Nunito', system-ui, sans-serif; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.86; }
+#keybind-modal .kbm-key i { max-width: 100%; box-sizing: border-box; padding: 0; letter-spacing: -0.35px; font: 800 10px/1.05 'Nunito', system-ui, sans-serif; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.86; }
+/* v0.30.1732 release11: key captions 8.5 -> 10 px (the panel is on <body>, unscaled, so 8.5 was what you read); the key boxes are unchanged */
 #keybind-modal .kbm-key.is-free { color: #8d84a3; background: #221a30; }
 #keybind-modal .kbm-key.is-res { color: #6c6480; background: repeating-linear-gradient(135deg, #1a1424 0 5px, #120e19 5px 10px); cursor: not-allowed; }
 #keybind-modal .kbm-key:hover { transform: translateY(-2px); }
@@ -99433,16 +99464,21 @@ function updateMonsters(dt) {
   // partners are excluded — a boss won't camp a corpse.
   let _aggroPeers = null;
   if (typeof _coopActive === 'function' && _coopActive() && net.isHost && net.peers) {
+    let _aggroIdle = null;   // v0.30.1732 release11: partners paused in a menu (pz) or away
     for (const _pid in net.peers) {
       const _pp = net.peers[_pid];
       if (_pp && _pp.map === game.currentMap && Number.isFinite(+_pp.x) && (typeof _coopInst !== 'function' || (_pp.xi || '') === _coopInst())) {   // v0.30.1443 coop-keyed - monsters chase partners in their own world only
         (_vfPeers = _vfPeers || []).push({ x: +_pp.x, y: +_pp.y || 0 });
         const _ppAlive = !_pp._downed && !(_pp.maxHp && (+_pp.hp || 0) <= 0);
         if (_ppAlive) {
-          (_aggroPeers = _aggroPeers || []).push({ id: +_pid, x: +_pp.x, y: +_pp.y || 0, vx: +_pp.vx || 0, vy: +_pp.vy || 0 });
+          const _ae = { id: +_pid, x: +_pp.x, y: +_pp.y || 0, vx: +_pp.vx || 0, vy: +_pp.vy || 0 };
+          if (_pp._pz || _pp._away) (_aggroIdle = _aggroIdle || []).push(_ae); else (_aggroPeers = _aggroPeers || []).push(_ae);
         }
       }
     }
+    // v0.30.1732 release11: a paused (or away) partner takes no hits, so it holds no aggro while someone else can be fought - the host (alive, unpaused,
+    // up) or another partner; one player in a menu used to soak the boss for the party. Nobody else to fight: the old rule, all are targets.
+    if (_aggroIdle && !(_aggroPeers && _aggroPeers.length) && !(!game.paused && player && player.hp > 0 && !player._downed)) _aggroPeers = _aggroIdle;
   }
   const _hostIdle = !!(game.paused && _aggroPeers && _aggroPeers.length);   // v0.30.823 - paused in a menu, partners still fighting
   // v0.25.653 — manual mob-index counter for the mob-mob soft-spread
@@ -111532,7 +111568,8 @@ function _promptClassAdvancement(tier) {
         setTimeout(() => showToast('🪞 Speak to ' + ins.npc + ' at ' + ins.where + ' to start the Mirror Self Trial, then choose your job.', 'story'), 1500);
       } else {
         showToast('⚜️ LEVEL 40 — Master Advancement is ready!', 'legendary');
-        setTimeout(() => showToast('🌀 Take the “Distorted Portal — Find the Talented Smith” quest (Everdawn Central, west awning) to master your class.', 'story'), 1500);
+        const ins2 = _ADV_INSTRUCTORS[player.cls] || { npc: 'your class instructor', where: 'your home town' };   // v0.30.1732 release11: the captain gives it; the portal is in the Hidden Pagoda
+        setTimeout(() => showToast('🌀 Speak to ' + ins2.npc + ' at ' + ins2.where + ' for “The Distorted Portal — Find the Talented Smith”. Its mouth stands in the Hidden Pagoda, off the Shadow-Woven Hood.', 'story'), 1500);
       }
       if (typeof audio !== 'undefined' && audio && audio.play) audio.play('levelup');
       // Make it actionable, not just transient: re-tick unlocks so the now-
@@ -131693,6 +131730,24 @@ function _lxTutFit() {
     const roomPx = Math.max(160 * k, (vh - 16 * k - lift) - ceiling);       // client px the card may occupy
     m.style.setProperty('--tut-lift', (lift / (k || 1)).toFixed(1) + 'px');
     if (card) card.style.setProperty('--tut-maxh', (roomPx / (k || 1)).toFixed(1) + 'px');
+    // v0.30.1732 release11 - touch / narrow layout: the card sits top-centre (CSS) and this puts its top under the menu row, the map label
+    // and the boss plate, and under the stats card too if the centred card would still reach over it. Never off screen.
+    if (window.matchMedia && window.matchMedia('(pointer: coarse), (max-width: 900px)').matches) {
+      let below = 0;
+      const mid = vh * 0.5, take = (r) => { if (r && r.height > 0 && r.bottom < mid) below = Math.max(below, r.bottom); };
+      take(seen('map-label'));
+      for (const mm of document.querySelectorAll('.mc-menu')) if (mm.getClientRects().length) take(mm.getBoundingClientRect());
+      const gcv = document.getElementById('game');
+      if (gcv && typeof game !== 'undefined' && game && game._bbLabelVeiled && game._lxBossPlateBox) {
+        const gr = gcv.getBoundingClientRect(); if (gr.height > 0) take({ height: 1, bottom: gr.top + game._lxBossPlateBox[2] * gr.height / H });
+      }
+      const mr = m.getBoundingClientRect(), curTop = parseFloat(getComputedStyle(m).top) || 0, origin = mr.top - curTop * k;
+      const st = seen('stats'), cw = card.getBoundingClientRect().width, cl = mr.left + (mr.width - cw) / 2;
+      if (st && cl < st.right && cl + cw > st.left) below = Math.max(below, st.bottom);
+      const topC = Math.max(6, below + 6);
+      m.style.setProperty('--tut-top', Math.max(0, (topC - origin) / (k || 1)).toFixed(1) + 'px');
+      card.style.setProperty('--tut-maxh', (Math.max(120 * k, vh - topC - 6) / (k || 1)).toFixed(1) + 'px');
+    } else if (m.style.getPropertyValue('--tut-top')) m.style.removeProperty('--tut-top');
     _lxTutSmooth(card);   // v0.30.951 carry the height change instead of snapping it
   } catch (e) {}
 }
@@ -175199,6 +175254,38 @@ function _lxBossBarDrop() {
   } catch (e) {}
   return (_LX_BB_DROP.v = v);
 }
+// v0.30.1732 release11 - the stats card's right edge in canvas px where it overlaps the plate's band (0 = no overlap). The bar starts after it.
+// Two rect reads at most every 3 s (a resize resets the clock), as _lxBossTitleClearX does.
+const _LX_BB_CLR = { t: 0, x: 0, k: '' };
+function _lxBossBarClearL(bandTop, bandBot) {
+  const now = performance.now(), key = Math.round(bandTop) + '|' + Math.round(bandBot);
+  if (!_LX_BB_CLR.rs) { _LX_BB_CLR.rs = 1; try { window.addEventListener('resize', () => { _LX_BB_CLR.t = 0; }); } catch (e) {} }
+  if (key === _LX_BB_CLR.k && now - _LX_BB_CLR.t < 3000) return _LX_BB_CLR.x;
+  _LX_BB_CLR.t = now; _LX_BB_CLR.k = key;
+  let clr = 0;
+  try {
+    const st = document.getElementById('stats'), gc = document.getElementById('game');
+    if (st && gc && st.offsetParent !== null && getComputedStyle(st).visibility !== 'hidden') {
+      const sr = st.getBoundingClientRect(), cr = gc.getBoundingClientRect();
+      if (cr.width > 0 && cr.height > 0 && sr.width > 0) {
+        const top = (sr.top - cr.top) * (H / cr.height), bot = (sr.bottom - cr.top) * (H / cr.height);
+        if (bot > bandTop && top < bandBot) clr = Math.max(0, (sr.right - cr.left) * (W / cr.width));
+      }
+    }
+  } catch (e) {}
+  return (_LX_BB_CLR.x = clr);
+}
+// v0.30.1732 release11 - the stats card sat over the bar's left ~16% at every desktop size, so a boss under ~16% HP showed an empty bar. The
+// plate (trough + the frame's left cap) starts 8 px after the card and keeps its right end; never narrower than 260. Same
+// geometry as drawSuperBossBar (width, height, frame rail, release8 drop).
+function _lxBossBarCut(uiK) {
+  const w0 = Math.min(660 * uiK, W - 120), h = Math.round(22 * uiK), g = _BB_GEOM;
+  const tall = (typeof LX_FX !== 'undefined' && _lxFxReady(LX_FX.ui_bossbar_frame)) ? g.hy0 * h / (g.hy1 - g.hy0) : 0;
+  const y = Math.max(34, Math.round(24 + 12 + tall)) + _lxBossBarDrop();
+  const clr = _lxBossBarClearL(y - tall, y + h + 4); if (!(clr > 0)) return 0;
+  const x0 = Math.round((W - w0) / 2), capL = tall > 0 ? Math.ceil(g.hx0 * h / (g.hy1 - g.hy0)) : 0;
+  return Math.max(0, Math.min(w0 - 260, Math.round(clr + 8 + capL) - x0));
+}
 function _lxBossTitleClearX(bandTop, bandBot) {
   const now = performance.now();
   // v0.30.790 grav-smooth — getBoundingClientRect forces a layout, and the HUD writes the DOM every frame, so
@@ -175356,20 +175443,21 @@ function drawSuperBossBar() {
     if (sb) game._superBossRef = sb;
   }
   if (!sb) {
-    if (game._bbLabelVeiled) { game._bbLabelVeiled = false; try { const _ml = document.getElementById('map-label'); if (_ml) _ml.classList.remove('boss-veiled'); } catch (e) {} }
+    if (game._bbLabelVeiled) { setTimeout(() => { try { if (typeof _lxTutFit === 'function') _lxTutFit(); } catch (e) {} }, 80);   /* v0.30.1732 release11 */ game._bbLabelVeiled = false; try { const _ml = document.getElementById('map-label'); if (_ml) _ml.classList.remove('boss-veiled'); } catch (e) {} }
     return;
   }
-  if (!game._bbLabelVeiled) { game._bbLabelVeiled = true; try { const _ml = document.getElementById('map-label'); if (_ml) _ml.classList.add('boss-veiled'); } catch (e) {} }
+  if (!game._bbLabelVeiled) { setTimeout(() => { try { if (typeof _lxTutFit === 'function') _lxTutFit(); } catch (e) {} }, 80);   /* v0.30.1732 release11 */ game._bbLabelVeiled = true; try { const _ml = document.getElementById('map-label'); if (_ml) _ml.classList.add('boss-veiled'); } catch (e) {} }
   // v0.30.462 — centred and narrower (was the full width less 40px a side). A strip
   // that spans the whole screen reads as a debug gauge; a composed plate with margin
   // reads as furniture, and it leaves the arena its own silhouette. 22px of trough is
   // what lets the filigree be drawn at its natural aspect (see the frame slice below).
   const _uiK = (game._uiScale > 0) ? game._uiScale : 1;   // v0.30.x — HUD size applies to the plate too
-  const barW = Math.min(660 * _uiK, W - 120), barH = Math.round(22 * _uiK);
+  const _bbCut = _lxBossBarCut(_uiK);   // v0.30.1732 release11: how far the plate's left end moves to clear the stats card
+  const barW = Math.min(660 * _uiK, W - 120) - _bbCut, barH = Math.round(22 * _uiK);
   // v0.30.576 — the bar sits low enough that the name above it stays on screen: the name's
   //    baseline is pinned at 24px and the bar drops to suit the measured top rail (hy0).
   const _bbTall = (typeof LX_FX !== 'undefined' && _lxFxReady(LX_FX.ui_bossbar_frame)) ? _BB_GEOM.hy0 * barH / (_BB_GEOM.hy1 - _BB_GEOM.hy0) : 0;
-  const x = Math.round((W - barW) / 2), y = Math.max(34, Math.round(24 + 12 + _bbTall)) + _lxBossBarDrop();   // v0.30.1722 release8: below the phone menu row
+  const x = Math.round((W - barW - _bbCut) / 2) + _bbCut, y = Math.max(34, Math.round(24 + 12 + _bbTall)) + _lxBossBarDrop();   // v0.30.1722 release8: below the phone menu row; v0.30.1732 release11: after the stats card
   // v0.30.1191 hud-clear - the plate's box for _lxTopBands: the bar, plus the frame's bottom rail when the art is in
   game._lxBossPlateBox = [x, x + barW, y + barH + (_bbTall > 0 ? (_BB_GEOM.H - _BB_GEOM.hy1) * barH / (_BB_GEOM.hy1 - _BB_GEOM.hy0) : 0) + 4];
   const hpPct = Math.max(0, sb.currentHp / sb.maxHp);
@@ -177523,11 +177611,19 @@ function _bossRushHud(show) {
   window._brHudTimer = setInterval(_bossRushUpdateHud, 250);
   _bossRushUpdateHud();
 }
+// v0.30.1732 release11 - THE RUSH RUNS ON THE PLAY CLOCK (game._playMs: a pause or a hidden tab adds nothing, and the PC clock cannot move it).
+// Date.now() let a clock set back mid-run finish in negative time - grade S and the S Setshards. A run object with no tp (built
+// by older code or a test) still reads the wall clock, clamped.
+function _bossRushElapsed(br) {
+  if (!br) return 0;
+  const v = (typeof br.tp === 'number') ? (game._playMs || 0) - br.tp : Date.now() - (br.t0 || 0);
+  return Math.max(0, v || 0);
+}
 function _bossRushUpdateHud() {
   const el = document.getElementById('boss-rush-hud');
   const br = game.bossRush;
   if (!el || !br || !br.active) return;
-  const ms = Date.now() - br.t0;
+  const ms = _bossRushElapsed(br);   // v0.30.1732 release11
   const mm = Math.floor(ms / 60000), ss = Math.floor((ms % 60000) / 1000);
   el.textContent = '⚔ HALL OF ECHOES — ' + br.downs + '/' + br.queue.length
     + ' · ' + mm + ':' + String(ss).padStart(2, '0');
@@ -177542,7 +177638,7 @@ function _bossRushAutoStart() {
     }
     return;
   }
-  game.bossRush = { active: true, queue, idx: 0, downs: 0, t0: Date.now(), splits: [] };
+  game.bossRush = { active: true, queue, idx: 0, downs: 0, t0: Date.now(), tp: (game._playMs || 0), splits: [] };   // v0.30.1732 release11: tp - the play clock
   _bossRushHud(true);
   if (typeof showToast === 'function') {
     showToast('⚔ BOSS RUSH — ' + queue.length + (queue.length === 1 ? ' echo answers the call!' : ' echoes answer the call!'), 'legendary');
@@ -177592,7 +177688,7 @@ function _bossRushOnBossDown(m) {
   if (!br || !br.active) return;
   br.downs++;
   br.idx++;
-  br.splits.push(Date.now() - br.t0);
+  br.splits.push(_bossRushElapsed(br));   // v0.30.1732 release11
   if (br.idx >= br.queue.length) { _bossRushComplete(); return; }
   // Breather heal between echoes (the rush has no shops or benches).
   player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.20));
@@ -177767,7 +177863,7 @@ function _bossRushComplete() {
   const br = game.bossRush;
   if (!br || !br.active) return;
   br.active = false;
-  const totalMs = Date.now() - br.t0;
+  const totalMs = _bossRushElapsed(br);   // v0.30.1732 release11
   const avg = totalMs / Math.max(1, br.downs) / 1000;
   const grade = avg <= 45 ? 'S' : avg <= 75 ? 'A' : avg <= 110 ? 'B' : 'C';
   const mm = Math.floor(totalMs / 60000), ss = Math.floor((totalMs % 60000) / 1000);
@@ -178042,7 +178138,7 @@ html.lx-nobackdrop #lx-ver{-webkit-backdrop-filter:none;backdrop-filter:none;bac
     for (const t of ['pointerdown', 'mousedown', 'touchstart', 'click']) el.addEventListener(t, (e) => e.stopPropagation());   // not a click on the game
     el.querySelector('.lxv-later').addEventListener('click', () => { try { localStorage.setItem(LATER_KEY, W.latest); } catch (e) {} tick(); });
     el.querySelector('.lxv-go').addEventListener('click', () => {
-      try { if (typeof player !== 'undefined' && player.cls && !(typeof game !== 'undefined' && game && game._resetting) && typeof _flushSaveStateNow === 'function') _flushSaveStateNow(); } catch (e) {}
+      try { if (typeof player !== 'undefined' && player.cls && !(typeof game !== 'undefined' && game && game._resetting) && (typeof _lxHeroInWorld !== 'function' || _lxHeroInWorld()) && typeof _flushSaveStateNow === 'function') _flushSaveStateNow(); } catch (e) {}   // v0.30.1732 release11: not from the title
       try { location.reload(); } catch (e) {}
     });
     document.body.appendChild(el);
@@ -178061,13 +178157,21 @@ html.lx-nobackdrop #lx-ver{-webkit-backdrop-filter:none;backdrop-filter:none;bac
   setInterval(check, EVERY);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - W.last >= AGAIN) check(); });
 })();
+// v0.30.1732 release11 - A TAB ON THE TITLE SCREEN WRITES NOTHING. The boot load gives the hero player.cls, and every flush below was gated on
+// player.cls alone, so a second tab left on the menu wrote its boot-time state over what another tab had saved since. A save is
+// written once the hero has entered the world: _finishHide (Continue / co-op / resume) or the class pick set _lxInWorld; a page
+// with no title overlay up (gone, faded or hidden) counts as in the world too.
+function _lxHeroInWorld() {
+  if (window._lxInWorld) return true;
+  try { const o = document.getElementById('loading-overlay'); return !o || !o.isConnected || o.classList.contains('fade') || getComputedStyle(o).display === 'none'; } catch (e) { return true; }
+}
 // Safety net: save when the tab is hidden or closed
 // v0.25.264 — these two paths must flush the pending debounced save
 // IMMEDIATELY: backgrounding tabs and unloading windows can fire before
 // the 1.5 s debounce window elapses and silently drop the latest changes.
-window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls && !game._resetting) _flushSaveStateNow(); });
+window.addEventListener('visibilitychange', () => { if (document.hidden && player.cls && !game._resetting && _lxHeroInWorld()) _flushSaveStateNow(); });   // v0.30.1732 release11: not from the title
 window.addEventListener('beforeunload',     () => {
-  if (player.cls && !game._resetting) _flushSaveStateNow();
+  if (player.cls && !game._resetting && _lxHeroInWorld()) _flushSaveStateNow();   // v0.30.1732 release11: not from the title
   try { if (!game._resetting && typeof _lxSteamPushStats === 'function') _lxSteamPushStats(true); } catch (e) {}   // v0.30.920 past the once-a-minute throttle
   // v0.29.269 — FINAL Steam Cloud mirror, SYNCHRONOUS. The flush above mirrors
   // via async IPC, which renderer teardown can drop — and its 4s throttle can
@@ -178091,6 +178195,13 @@ window.addEventListener('beforeunload',     () => {
 // won't false-trigger for the importing tab.
 window.addEventListener('storage', (e) => {
   try {
+    // v0.30.1732 release11 - this tab is still on the title: another tab's save is the newer one. The Continue card shows it, and Continue
+    // (or co-op) reloads onto it (_lxTitleStaleReload) instead of entering with the copy this tab loaded at boot.
+    if (e && e.key === SAVE_KEY && !game._resetting && !_lxHeroInWorld()) {
+      window._lxTitleSaveStale = true;
+      try { if (typeof window._lxMenuRefresh === 'function') window._lxMenuRefresh(); } catch (_e2) {}
+      return;
+    }
     if (e && e.key === SAVE_KEY && e.newValue && !game._resetting && player && player.cls && !game._multiTabWarned) {
       game._multiTabWarned = true;
       if (typeof showToast === 'function') showToast('⚠ Mojiworld is open in another tab — saves can overwrite each other. Please play in ONE tab to avoid losing progress.', 'danger');
@@ -178105,8 +178216,14 @@ window.addEventListener('storage', (e) => {
 // known or forgotten. Cost: one ~10-40 KB stringify every 30 s — noise.
 // Exposed on game._autosaveHeartbeat so tests/devtools can invoke it.
 game._autosaveHeartbeat = function () {
+  // v0.30.1732 release11 - the day turns over mid-session too: checkDaily() ran only at load, at the class pick and on a parcel claim
   try {
-    if (player && player.cls && !game._resetting && !game.dying) _flushSaveStateNow();
+    if (player && player.cls && !game._resetting && !window._prologueActive && !window._prologuePending && _lxHeroInWorld()
+        && game.dailyState && typeof game.dailyState.day === 'number' && typeof dailyIndex === 'function' && typeof checkDaily === 'function'
+        && dailyIndex() > game.dailyState.day) checkDaily();
+  } catch (_) {}
+  try {
+    if (player && player.cls && !game._resetting && !game.dying && _lxHeroInWorld()) _flushSaveStateNow();   // v0.30.1732 release11: not from the title
   } catch (_) {}
 };
 setInterval(game._autosaveHeartbeat, 30000);
@@ -179639,6 +179756,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     // v0.30.x — the held path re-enters _finishHide after release, so this
     // single line arms the post-boot self-heal for every way through the door
     try { if (typeof _lxSpriteHealStart === 'function') _lxSpriteHealStart(); } catch (e) {}
+    try { window._lxInWorld = true; if (game._saveDirty && !game._saveTimer && typeof saveState === 'function') saveState(); } catch (e) {}   // v0.30.1732 release11: the hero is in the world - saving may begin (a write held on the title lands now)
     // v0.26.x — perceived-responsiveness: start dissolving the overlay on the
     // very first line, BEFORE the session/toast bookkeeping below — measured
     // ~290 ms from click to fade start when the fade waited its turn.
@@ -179885,7 +180003,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     // Seamless resume right after a cloud-save pull reload — we already authenticated
     // this tab session, so skip the form and reveal the (now cloud-loaded) world.
     // bughunt clobber-1: reads the parse-time claim above, NOT sessionStorage - a key left by an interrupted reload must not skip a later refresh's menu
-    if (_lxPendingResume) { _finishHide(_lxPendingResume); return; }
+    if (_lxPendingResume) { try { if (_lxPendingResume.coop && !window._lxCoopPending) window._lxCoopPending = _lxPendingResume.coop; } catch (e) {} _finishHide(_lxPendingResume); return; }   // v0.30.1732 release11: a stale-title reload keeps its party code
     const stack = overlay.querySelector('.lo-stack');
     const auth  = document.getElementById('lo-auth');
     if (!stack || !auth) { _finishHide(); return; }
@@ -179992,6 +180110,20 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     window._lxMenuBackupCount();
     return meta;
   }
+  try { window._lxMenuRefresh = _lxMenuRefresh; } catch (e) {}   // v0.30.1732 release11: the storage listener refreshes the Continue card
+  // v0.30.1732 release11 - another tab saved while this one sat on the title: reload and come straight back on the NEWER save (the lx_resume
+  // hand-off the cloud pull uses) rather than enter with the boot-time copy and save it over the other tab's progress.
+  function _lxTitleStaleReload(sess) {
+    if (!window._lxTitleSaveStale || window._lxInWorld) return false;
+    try { game._resetting = true; if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; } game._saveDirty = false; } catch (e) {}
+    try {
+      const _r = { name: (sess && sess.name) || 'Hero', kind: (sess && sess.kind) || 'character' };
+      if (window._lxCoopPending) _r.coop = window._lxCoopPending;
+      sessionStorage.setItem('lx_resume', JSON.stringify(_r));
+    } catch (e) {}
+    try { location.reload(); } catch (e) {}
+    return true;
+  }
   function _lxMenuSession(name) {
     // Persist the chosen hero name as the local session + co-op display
     // name (LXAuth.character writes MP_NAME_KEY); never blocks the menu.
@@ -180024,7 +180156,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
       try { const _la = document.getElementById('lo-auth'); if (_la) { _la.classList.add('lx-menu-busy'); setTimeout(() => _la.classList.remove('lx-menu-busy'), 20000); } } catch (e) {}   // v0.30.1718 release7: no second tap while it loads
       const m = _lxMenuRefresh();
       const name = (m && m.name) || localStorage.getItem(MP_NAME_KEY) || 'Hero';
-      _finishHide(_lxMenuSession(name));
+      { const _ss = _lxMenuSession(name); if (!_lxTitleStaleReload(_ss)) _finishHide(_ss); }   // v0.30.1732 release11
     };
     // NEW GAME — opens the name panel; warns + arms the auto-backup wipe
     // path (handled in enter()) when a hero already exists.
@@ -180071,7 +180203,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
         const url = localStorage.getItem(MP_URL_KEY) || (typeof MP_DEFAULT_URL !== 'undefined' ? MP_DEFAULT_URL : '');
         window._lxCoopPending = { url, name, room };
       } catch (e) {}
-      _finishHide(_lxMenuSession(name));
+      { const _ss = _lxMenuSession(name); if (!_lxTitleStaleReload(_ss)) _finishHide(_ss); }   // v0.30.1732 release11
     };
     // SETTINGS — the in-game modal, hoisted above the overlay (z 9999).
     const st = $('menu-settings');
@@ -186536,11 +186668,14 @@ function startBgm() {
      controls the tour tells the player to use. (Was inset bottom-left, a
      direct overlap with .mc-dpad.) */
   @media (pointer: coarse), (max-width: 900px) {
+    /* v0.30.1732 release11 - top-left sat over the HP/MP stats card (and in a boss fight the boss name): top-centre instead, under the
+       menu row, the map label and the boss plate. --tut-top is measured by _lxTutFit. */
     #tutorial-modal.tut-dock {
-      inset: 0 auto auto 0 !important;
-      top: 0 !important; bottom: auto !important;
-      padding: calc(6px + env(safe-area-inset-top)) 0 0 8px !important;
+      inset: 0 0 auto 0 !important;
+      top: var(--tut-top, calc(6px + env(safe-area-inset-top))) !important; bottom: auto !important;
+      padding: 0 !important;
     }
+    #tutorial-modal.tut-dock .modal { margin: 0 auto !important; }
     #tutorial-modal.tut-dock .modal { width: min(420px, 96vw) !important; }
     #tutorial-modal.tut-dock #tut-body { max-height: 26vh !important; }
   }
@@ -193790,6 +193925,12 @@ window.addEventListener('keydown', (e) => {
     transform: translate(2px, 2px) scale(0.96) !important; box-shadow: 0 0 0 2px #0b0a0e, 1px 1px 0 1px rgba(11, 10, 14, 0.85) !important; }
   #mobile-deck#mobile-deck .mc-lbl, #mobile-ctrl#mobile-ctrl .mc-lbl { font-family: 'Nunito', system-ui, sans-serif !important; font-weight: 1000 !important; color: #ffffff !important;
     opacity: 1 !important; letter-spacing: 0.5px; -webkit-text-stroke: 2px #0b0a0e; paint-order: stroke fill; }
+  /* v0.30.1732 release11 - on a tablet the labels were 7-8 px: 9 px at >= 768 px wide (and >= 560 px tall, so a landscape phone keeps its
+     deck exactly as it was). The menu labels tighten their tracking so MOJIDEX still fits its 44-46 px button. */
+  @media (min-width: 768px) and (min-height: 560px) {
+    #mobile-deck#mobile-deck .mc-btn > span.mc-lbl, #mobile-ctrl#mobile-ctrl .mc-btn > span.mc-lbl { font-size: 9px !important; }
+    #mobile-ctrl#mobile-ctrl .mc-menu > span.mc-lbl { letter-spacing: -0.3px !important; }
+  }
   #mobile-ctrl-toggle#mobile-ctrl-toggle { background-color: rgba(16, 11, 26, 0.72) !important; border: 2px solid rgba(244, 241, 234, 0.92) !important;
     box-shadow: 0 0 0 2px #0b0a0e, 2px 2px 0 1px rgba(255, 45, 149, 0.85) !important; }
   /* dimmed (per user: "dim the buttons (by make more transluscent) so as to not block the main screen"): every control rests at
