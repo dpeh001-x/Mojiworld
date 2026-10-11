@@ -12619,6 +12619,7 @@ html body .skill-mp { font-size: 9px; }
   #loading-overlay h1.lo-title { line-height: 0; filter: none; text-shadow: none; }
   #loading-overlay #lo-logo {
     display: block; width: 380px; max-width: 78vw; height: auto;
+    aspect-ratio: 1254 / 248;   /* v0.30.1722 release8: the logo keeps its box before it loads - the menu used to jump ~50 px under a finger */
     filter: drop-shadow(0 3px 12px rgba(0, 0, 0, 0.55));
   }
   #loading-overlay .lo-stack.compact #lo-logo { width: 340px; }
@@ -16340,7 +16341,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1721';
+const GAME_VERSION = 'v0.30.1722';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16687,6 +16688,7 @@ canvas.addEventListener('click', function _wmCanvasClickTalk(ev) {
     const _dOpen = document.getElementById('dialog');
     if (_dOpen && _dOpen.style.display === 'block') {
       if (_dOpen._lxConfirm || game._activeNpc === bestNpc) return;
+      if (typeof _lxIsTouchDevice === 'function' && _lxIsTouchDevice()) return;   // v0.30.1722 release8: a stray tap (where the D-pad was) does not switch the conversation
       closeDialog();
     }
     openNPC(bestNpc);
@@ -50552,6 +50554,13 @@ function openAdvancement() {
   // master gilding in case the picker was dismissed without going through its
   // own close path (Esc, closeAllModals).
   document.getElementById('advancement-modal').classList.remove('tp-master');
+  if (game._advFromNpc) {   // v0.30.1722 release8: opened from a captain, it can wait (per user) - the level-up gate stays mandatory
+    game._advFromNpc = false;
+    const _ny = document.createElement('button'); _ny.type = 'button'; _ny.className = 'adv-not-yet'; _ny.textContent = 'Not yet';
+    _ny.style.cssText = 'display:block;margin:10px auto 0;padding:6px 22px;border-radius:999px;border:2px solid rgba(255,255,255,0.35);background:rgba(20,14,40,0.85);color:#e8ddff;font:800 13px/1.3 Nunito,system-ui,sans-serif;cursor:pointer;';
+    _ny.onclick = () => { const _am = document.getElementById('advancement-modal'); if (_am) _am.style.display = 'none'; if (!(typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen())) game.paused = false; };
+    try { document.getElementById('advancement-options').appendChild(_ny); } catch (e) {}
+  }
   document.getElementById('advancement-modal').style.display = 'flex';
   requestAnimationFrame(_advOverflowHint);   // v0.30.413 adv-fit
   game.paused = true;
@@ -50748,6 +50757,13 @@ function openMasterAdvancement() {
   // master gilding in case the picker was dismissed without going through its
   // own close path (Esc, closeAllModals).
   document.getElementById('advancement-modal').classList.remove('tp-master');
+  if (game._advFromNpc) {   // v0.30.1722 release8: opened from a captain, it can wait (per user) - the level-up gate stays mandatory
+    game._advFromNpc = false;
+    const _ny = document.createElement('button'); _ny.type = 'button'; _ny.className = 'adv-not-yet'; _ny.textContent = 'Not yet';
+    _ny.style.cssText = 'display:block;margin:10px auto 0;padding:6px 22px;border-radius:999px;border:2px solid rgba(255,255,255,0.35);background:rgba(20,14,40,0.85);color:#e8ddff;font:800 13px/1.3 Nunito,system-ui,sans-serif;cursor:pointer;';
+    _ny.onclick = () => { const _am = document.getElementById('advancement-modal'); if (_am) _am.style.display = 'none'; if (!(typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen())) game.paused = false; };
+    try { document.getElementById('advancement-options').appendChild(_ny); } catch (e) {}
+  }
   document.getElementById('advancement-modal').style.display = 'flex';
   requestAnimationFrame(_advOverflowHint);   // v0.30.413 adv-fit
   game.paused = true;
@@ -53141,6 +53157,7 @@ const PLAYER_SAVE_FIELDS = [
   // (a reload paid full again), the per-map co-op revive clock (wall time) and the ice tower's best floor
   '_qBank', '_zodiacEchoKills', '_coopReviveMapAt', '_iceFloorBest',
   '_downPending',   // v0.30.918 a down the save caught (see loadState)
+  '_lxBeatOpen', '_lxFilmOpen',   // v0.30.1722 release8: the scene or film a reload cut short (see loadState)
   '_cdCarry'   // v0.30.x cooldown integrity - what was still cooling down (see _lxCdSnapshot)
 ];
 // =========================================================================
@@ -56590,6 +56607,7 @@ function _playStoryBeat(beatId, onClose) {
     beat = STORY_BEATS[beatId];
     if (!beat || !beat.stanzas || !beat.stanzas.length) return false;
     player._storyBeatsSeen[beatId] = true;
+    player._lxBeatOpen = beatId;   // v0.30.1722 release8: cleared when it closes; a close cut short by quitting replays it on the next load
     if (typeof saveState === 'function') saveState();
   }
   if (!beat || !beat.stanzas || !beat.stanzas.length) return false;
@@ -56757,6 +56775,7 @@ function _playStoryBeat(beatId, onClose) {
     renderStanza();
   };
   const closeBeat = () => {
+    try { if (player && player._lxBeatOpen) delete player._lxBeatOpen; } catch (e) {}   // v0.30.1722 release8
     _clearChoiceUi();   // v0.29.60 — kill any live countdown + buttons
     _sbStoryVoiceStop(true);   // v0.30.608 — stop the read, hand the music back
     els.overlay.classList.remove('on');
@@ -57861,6 +57880,21 @@ function loadState() {
     if (_lxNoHp) player.hp = _safeMaxHp; if (_lxNoMp) player.mp = _safeMaxMp;   // v0.30.1186 save-notices - an old / minimal save starts at full, not at 100 of 643
     // v0.30.918 DOWNED ACROSS A RELOAD. A solo down is a death on a 30 s delay (v0.27.10), but the save held only hp 1, so
     // closing the game on the ground loaded the hero standing with the toll unpaid. Take the toll triggerDeath takes.
+    // v0.30.1722 release8: a story scene or kill film cut off by closing the game plays again once you are back in the world
+    try {
+      const _ob = player._lxBeatOpen, _of = player._lxFilmOpen; delete player._lxBeatOpen; delete player._lxFilmOpen;
+      if ((_ob || _of) && player._storyBeatsSeen) {
+        if (_ob) delete player._storyBeatsSeen[_ob]; if (_of) delete player._storyBeatsSeen[_of];
+        const _go = (n) => {
+          const _ov = document.getElementById('loading-overlay');
+          const _up = !!_ov && !_ov.classList.contains('fade') && getComputedStyle(_ov).display !== 'none';
+          if (_up || window._prologueActive || (typeof game !== 'undefined' && game && game.paused)) { if (n < 1200) setTimeout(() => _go(n + 1), 500); return; }
+          if (_ob && !player._storyBeatsSeen[_ob] && typeof _playStoryBeat === 'function') _playStoryBeat(_ob);
+          if (_of && !player._storyBeatsSeen[_of] && typeof LX_KILL_FILMS !== 'undefined' && typeof _lxPlayKillFilm === 'function') { for (const _k in LX_KILL_FILMS) { const _r = LX_KILL_FILMS[_k]; if (_r && _r.key === _of) { _lxPlayKillFilm(_r); break; } } }
+        };
+        setTimeout(() => _go(0), 1500);
+      }
+    } catch (e) {}
     if (player._downPending) {
       delete player._downPending;
       try {
@@ -78745,6 +78779,7 @@ function _lxPlayCaptainsTeaser(_tries) {
       setTimeout(() => {
         try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
         try { ov.remove(); } catch (e) {}
+        try { if (player && player._lxFilmOpen) delete player._lxFilmOpen; } catch (e) {}
         game.paused = _wasPaused || (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen());   // v0.30.1718 release7: a beat or panel opened under the film keeps its pause
         try { if (typeof _cineScoreStop === 'function') _cineScoreStop(600, true); } catch (e) {}
         _off();
@@ -78827,6 +78862,7 @@ function _lxPlayBarnabyFall(_tries) {
       setTimeout(() => {
         try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
         try { ov.remove(); } catch (e) {}
+        try { if (player && player._lxFilmOpen) delete player._lxFilmOpen; } catch (e) {}
         game.paused = _wasPaused || (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen());   // v0.30.1718 release7: a beat or panel opened under the film keeps its pause
         try { if (typeof _cineScoreStop === 'function') _cineScoreStop(600, true); } catch (e) {}
         _off();
@@ -78926,7 +78962,7 @@ function _lxPlayKillFilm(f, _tries) {
     const _busy = (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen()) || (_sb && _sb.classList.contains('on'))
       || !!document.getElementById('captains-teaser-overlay') || !!document.getElementById('barnaby-fall-overlay');
     if (_busy) { if ((_tries || 0) < 240) setTimeout(() => _lxPlayKillFilm(f, (_tries || 0) + 1), 500); else _off(); return true; }
-    player._storyBeatsSeen[f.key] = true;
+    player._storyBeatsSeen[f.key] = true; player._lxFilmOpen = f.key;   // v0.30.1722 release8: cleared when it closes
     if (typeof saveState === 'function') saveState();
     const host = document.querySelector('.game-wrapper') || document.body;
     const ov = document.createElement('div');
@@ -79009,6 +79045,7 @@ function _lxPlayKillFilm(f, _tries) {
         try { clearInterval(_voTick); if (_voEl) { _voEl.pause(); _voEl.removeAttribute('src'); _voEl.load(); } } catch (e) {}   // v0.30.1719 his voice stops with a skip
         try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
         try { ov.remove(); } catch (e) {}
+        try { if (player && player._lxFilmOpen) delete player._lxFilmOpen; } catch (e) {}
         game.paused = _wasPaused || (typeof _anyOtherModalOpen === 'function' && _anyOtherModalOpen());   // v0.30.1718 release7: a beat or panel opened under the film keeps its pause
         try { if (typeof _cineScoreStop === 'function') _cineScoreStop(600, true); } catch (e) {}
         _off();
@@ -119166,7 +119203,7 @@ So… do you need a lift?`;
         (player.level | 0) >= JOB_ADVANCE_LEVEL &&   // v0.30.934 prestige keeps the completion and sets you back to Lv 1: this opener had no gate
         !player.job) {
       opts.push({ t:'Advance my class ✦',
-        cb:() => { closeDialog(); if (typeof openAdvancement === 'function') openAdvancement(); } });
+        cb:() => { closeDialog(); game._advFromNpc = true; if (typeof openAdvancement === 'function') openAdvancement(); } });
     }
     // v0.25.959 — Distorted Portal (2nd advancement) quest-start hook.
     // Per user "start 2nd class advancement quest by speaking to class
@@ -119262,7 +119299,7 @@ So… do you need a lift?`;
         (player.level | 0) >= JOB_ADVANCE_LEVEL &&   // v0.30.934 prestige keeps the completion and sets you back to Lv 1: this opener had no gate
         !player.job) {
       opts.push({ t:'Advance my class ✦',
-        cb:() => { closeDialog(); if (typeof openAdvancement === 'function') openAdvancement(); } });
+        cb:() => { closeDialog(); game._advFromNpc = true; if (typeof openAdvancement === 'function') openAdvancement(); } });
     }
     // v0.25.959 — Distorted Portal (2nd advancement) hook.
     if (player.cls === 'warrior' && player.job && (player.level || 0) >= 40 &&
@@ -119335,7 +119372,7 @@ So… do you need a lift?`;
         (player.level | 0) >= JOB_ADVANCE_LEVEL &&   // v0.30.934 prestige keeps the completion and sets you back to Lv 1: this opener had no gate
         !player.job) {
       opts.push({ t:'Advance my class ✦',
-        cb:() => { closeDialog(); if (typeof openAdvancement === 'function') openAdvancement(); } });
+        cb:() => { closeDialog(); game._advFromNpc = true; if (typeof openAdvancement === 'function') openAdvancement(); } });
     }
     // v0.25.959 — Distorted Portal (2nd advancement) hook.
     if (player.cls === 'mage' && player.job && (player.level || 0) >= 40 &&
@@ -119418,7 +119455,7 @@ So… do you need a lift?`;
         (player.level | 0) >= JOB_ADVANCE_LEVEL &&   // v0.30.934 prestige keeps the completion and sets you back to Lv 1: this opener had no gate
         !player.job) {
       opts.push({ t:'Advance my class ✦',
-        cb:() => { closeDialog(); if (typeof openAdvancement === 'function') openAdvancement(); } });
+        cb:() => { closeDialog(); game._advFromNpc = true; if (typeof openAdvancement === 'function') openAdvancement(); } });
     }
     // v0.25.959 — Distorted Portal (2nd advancement) hook.
     if (player.cls === 'archer' && player.job && (player.level || 0) >= 40 &&
@@ -129358,7 +129395,7 @@ function _qteShackleStart(m) {
   player.vx = 0;
   const root = _qteDom();
   _qteApplyTheme(th);
-  try { const _qs = root.querySelector('.lxq-sub'); if (_qs) _qs.innerHTML = 'Hit the <kbd>' + ((_lxInputDevice === 'pad') ? 'D-pad' : 'arrow keys') + '</kbd> in order to break free!'; } catch (e) {}   // v0.30.902
+  try { const _qs = root.querySelector('.lxq-sub'); if (_qs) _qs.innerHTML = 'Hit the <kbd>' + ((_lxInputDevice === 'pad' || (typeof _lxIsTouchDevice === 'function' && _lxIsTouchDevice())) ? 'D-pad' : 'arrow keys') + '</kbd> in order to break free!'; } catch (e) {}   // v0.30.902
   _QTE.card.classList.remove('out', 'err');
   _QTE.chipsEl.innerHTML = '';
   _QTE.chips = _QTE.seq.map((k, i) => {
@@ -131180,6 +131217,7 @@ const TUTORIAL_STEPS = [
     detect: 'panel',
     tryIt: 'Open your character panel — press <kbd>U</kbd>',
     gugumaLine: 'Tweet! U is your build, Y the MojiDex, Q is your quests.',
+    gugumaLineTouch: 'Tweet! LV UP is your build, MOJIDEX the creatures, QUEST your quests.',   // v0.30.1722 release8: the phone's own buttons
     gugumaLinePad: 'Tweet! Build, MojiDex, quests — all behind Back.',   // v0.30.902
     body: 'Tap to open, tap again to close:' +
           '<ul style="margin:8px 0 0; padding-left:20px; line-height:1.7;">' +
@@ -131242,6 +131280,7 @@ const TUTORIAL_STEPS = [
     fresh: true,
     tryIt: 'Raise your guard — press <kbd>A</kbd>',
     gugumaLine: 'Tweet! Tap A right before it hits. Perfect timing hits back!',
+    gugumaLineTouch: 'Tweet! Tap Block right before it hits. Perfect timing hits back!',   // v0.30.1722 release8: a phone has no A key
     body: 'A quick, timed guard, not one you hold:' +
           '<ul style="margin:8px 0 0; padding-left:20px; line-height:1.7;">' +
           '<li><kbd>A</kbd> raises it for a moment: hits take <b>70% less</b> damage.</li>' +
@@ -132004,7 +132043,7 @@ function _renderTutorialStep() {
         db.id = 'tut-details-btn';
         db.type = 'button';
         db.textContent = 'Details \u25be';
-        pill.insertAdjacentElement('afterend', db);
+        (document.body.classList.contains('mc-landscape') && $('tut-body') ? $('tut-body') : pill).insertAdjacentElement('afterend', db);   // v0.30.1722 release8: on a phone, clear of the deck's Block
         db.onclick = () => {
           const open = _tm.classList.toggle('details-open');
           db.textContent = open ? 'Details \u25b4' : 'Details \u25be';
@@ -132061,7 +132100,7 @@ function _renderTutorialStep() {
   // Falls back to the default chip line if the step has no gugumaLine.
   const gline = $('tut-guguma-line');
   if (gline) {
-    gline.textContent = _lxPadKeys((_lxInputDevice === 'pad' && step.gugumaLinePad) || step.gugumaLine || 'Cheep! Listen close.');   // v0.30.902
+    gline.textContent = _lxPadKeys((_lxInputDevice === 'pad' && step.gugumaLinePad) || (_lxInputDevice !== 'pad' && typeof _lxIsTouchDevice === 'function' && _lxIsTouchDevice() && step.gugumaLineTouch) || step.gugumaLine || 'Cheep! Listen close.');   /* v0.30.1722 release8: touch lines */   // v0.30.902
     gline.classList.remove('flash');
     void gline.offsetWidth; // force reflow so re-add restarts the keyframes
     gline.classList.add('flash');
@@ -175015,6 +175054,22 @@ function _lxBossTitleBake(kind, rawName, hyper) {
 // canvas, but both live in the same scaled wrapper, so the ratio of their client rects converts one
 // to the other exactly; two rect reads, re-measured at most twice a second.
 const _LX_BT_CLR = { t: 0, x: 0 };
+// v0.30.1722 release8 - on the phone deck the menu-button row sits over the top band: the boss plate (bar + name) drops below it (per user)
+const _LX_BB_DROP = { t: 0, v: 0 };
+function _lxBossBarDrop() {
+  const now = performance.now(); if (now - _LX_BB_DROP.t < 3000) return _LX_BB_DROP.v; _LX_BB_DROP.t = now; let v = 0;
+  try {
+    if (document.body.classList.contains('mc-landscape')) {
+      const gc = document.getElementById('game'); let bot = 0;
+      for (const mm of document.querySelectorAll('.mc-menu')) { if (!mm.getClientRects().length) continue; const r = mm.getBoundingClientRect(); if (r.height && r.bottom > bot) bot = r.bottom; }
+      if (gc && bot) {
+        const c = gc.getBoundingClientRect(), k = c.height / Math.max(1, (typeof H !== 'undefined' ? H : 560));
+        if (k > 0 && bot > c.top) v = Math.max(0, Math.round((bot - c.top) / k + 4 - 6));
+      }
+    }
+  } catch (e) {}
+  return (_LX_BB_DROP.v = v);
+}
 function _lxBossTitleClearX(bandTop, bandBot) {
   const now = performance.now();
   // v0.30.790 grav-smooth — getBoundingClientRect forces a layout, and the HUD writes the DOM every frame, so
@@ -175185,7 +175240,7 @@ function drawSuperBossBar() {
   // v0.30.576 — the bar sits low enough that the name above it stays on screen: the name's
   //    baseline is pinned at 24px and the bar drops to suit the measured top rail (hy0).
   const _bbTall = (typeof LX_FX !== 'undefined' && _lxFxReady(LX_FX.ui_bossbar_frame)) ? _BB_GEOM.hy0 * barH / (_BB_GEOM.hy1 - _BB_GEOM.hy0) : 0;
-  const x = Math.round((W - barW) / 2), y = Math.max(34, Math.round(24 + 12 + _bbTall));
+  const x = Math.round((W - barW) / 2), y = Math.max(34, Math.round(24 + 12 + _bbTall)) + _lxBossBarDrop();   // v0.30.1722 release8: below the phone menu row
   // v0.30.1191 hud-clear - the plate's box for _lxTopBands: the bar, plus the frame's bottom rail when the art is in
   game._lxBossPlateBox = [x, x + barW, y + barH + (_bbTall > 0 ? (_BB_GEOM.H - _BB_GEOM.hy1) * barH / (_BB_GEOM.hy1 - _BB_GEOM.hy0) : 0) + 4];
   const hpPct = Math.max(0, sb.currentHp / sb.maxHp);
@@ -176218,9 +176273,12 @@ function _prologueCoach(html) {
   clearTimeout(window._prologueCoachFade);
   window._prologueCoachFade = setTimeout(() => { const e = document.getElementById('prologue-coach'); if (e) e.style.opacity = '0'; }, 6000);
 }
+// v0.30.1722 release8: on a touch screen she names the buttons, not the keys
+const _LX_PROLOGUE_COACH_TOUCH = { 400: 'Cheep! Do not just STAND there \u2014 tap every skill button you have!', 7000: 'Tweet! Again! The attack button swings, the jump button hops. Nothing can touch you yet \u2014 spend it.', 15000: 'Peep! Keep tapping. The buttons do not tire, and neither do I.' };
 function _prologueCoachStart() {
   try { (window._prologueCoachTimers || []).forEach(clearTimeout); } catch (e) {}
-  window._prologueCoachTimers = _LX_PROLOGUE_COACH.map(([at, line]) => setTimeout(() => _prologueCoach(line), at));
+  const _tc = typeof _lxIsTouchDevice === 'function' && _lxIsTouchDevice() && _lxInputDevice !== 'pad';
+  window._prologueCoachTimers = _LX_PROLOGUE_COACH.map(([at, line]) => setTimeout(() => _prologueCoach((_tc && _LX_PROLOGUE_COACH_TOUCH[at]) || line), at));
 }
 function _prologueCoachStop() {
   try { (window._prologueCoachTimers || []).forEach(clearTimeout); } catch (e) {}
@@ -176283,7 +176341,8 @@ function _prologueTick() {
         + '<div class="plg-hud-god" hidden></div>'
         + '<div class="plg-hud-will"><b class="plg-hud-wl">WILL</b><div class="plg-hud-bar"><i></i></div></div>'
         + '<div class="plg-hud-name"><b>GRAVITOS</b>, THE WEIGHT-BEARER</div>'
-        + '<div class="plg-hud-keys"><kbd>Z</kbd> attack <i>·</i> <kbd>X</kbd><kbd>S</kbd><kbd>C</kbd><kbd>D</kbd><kbd>F</kbd><kbd>V</kbd><kbd>G</kbd> skills <i>·</i> <kbd>SPACE</kbd> jump</div>';
+        + ((typeof _lxIsTouchDevice === 'function' && _lxIsTouchDevice() && _lxInputDevice !== 'pad') ? '<div class="plg-hud-keys">tap <b>attack</b> <i>·</i> the <b>skill</b> buttons <i>·</i> <b>jump</b></div>'   /* v0.30.1722 release8 */
+          : '<div class="plg-hud-keys"><kbd>Z</kbd> attack <i>·</i> <kbd>X</kbd><kbd>S</kbd><kbd>C</kbd><kbd>D</kbd><kbd>F</kbd><kbd>V</kbd><kbd>G</kbd> skills <i>·</i> <kbd>SPACE</kbd> jump</div>');
     }
     const _ck = el.querySelector('.plg-hud-clock span'), _gd = el.querySelector('.plg-hud-god'), _br = el.querySelector('.plg-hud-bar');
     const _ct = '0:' + String(s).padStart(2, '0'), _gt = _god ? '★ INVULNERABLE · ' + Math.ceil(_godLeftMs / 1000) + 's ★' : '';
@@ -179718,6 +179777,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     // flash, frame settle, title reveal, menu cascade, embers) + version tag.
     try {
       overlay.classList.add('menu-up');
+      try { const _lm = document.getElementById('lo-menu'); if (_lm) { _lm.style.pointerEvents = 'none'; setTimeout(() => { _lm.style.pointerEvents = ''; }, 900); } } catch (e) {}   // v0.30.1722 release8: no taps while the menu flies in
       try { if (typeof _lxTitleLoopArm === 'function') _lxTitleLoopArm(overlay); } catch (e) {}   // v0.30.1426 - the title's sky comes alive
       const _vt = document.getElementById('lo-version');
       if (_vt) _vt.textContent = (typeof GAME_VERSION !== 'undefined' ? GAME_VERSION : '');   // v0.29.736 — bare version; it lives on the menu card now, the game's name is the logo above it
