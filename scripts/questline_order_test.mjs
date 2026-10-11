@@ -124,6 +124,12 @@ try {
     const here = ['which gate to defend', 'Where did you stand that night', 'then once more', 'remembers the breach', 'I remember the breach', 'holding a gate nobody', 'Somebody did, high above us. So I have stopped checking.', 'Where was I meant to stand?', 'where I was meant to stand', 'chose the right place: a breach', 'never picked a post', 'where he stands', 'never chose where to stand'];
     check(gone.every((p) => src.indexOf(p) < 0) && here.every((p) => src.indexOf(p) >= 0), 'the wall motif of Barnaby, the boy, the Smith and Willeo now reads gate everywhere (quests, boss cards and voices, Codex, Barnaby, the toasts), and Barnaby\'s, the boy\'s and the Smith\'s lines keep only a little of it (the gate stays as a clue in the Portal quest and the boy\'s legend); the Bastion\'s own wall is untouched', J(gone.filter((p) => src.indexOf(p) >= 0)));
     check(/keeps a wall that has not aged/.test(src) && /Raised on this wall/.test(src) && /the wall did not fall/.test(src), "Will's and the Bastion's own wall (keeps a wall, raised on this wall, the wall did not fall) is left alone", ''); }
+  { const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');   // why the boy guards the door (per user, 2026-10-11)
+    const legend = "He was posted at the Forge\\'s door to hold it until the climbers came home. None did, and nobody said until when.";
+    const iii = 'Barnaby thinks the boy holds a door for a return that never came.', toast = 'still holding a door for climbers who never came home';
+    const parts = [legend, iii, toast];
+    check(parts.every((p) => src.indexOf(p) >= 0), "the boy's reason is told where players read about him: his boss-card legend (posted at the Forge's door until the climbers came home), Barnaby III (Barnaby's guess) and Will's warning", J(parts.filter((p) => src.indexOf(p) < 0)));
+    check(!/Twelve|Zodiac|Houses?\b|champion/.test(parts.join(' ')), 'the reason names nobody: no Twelve, Zodiac, House or champion before Aetherion falls', ''); }
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
