@@ -180,7 +180,7 @@ window.LX_MONSTER_STATS = {
   gravitos:                       { lv:100, hp: 23123101, atk:49971, def:  982, exp: 1695763, coin: 357406 },   // v0.30.1672: def 1309 -> 982 (-25%, per user; forms 2 and 3 take it x1.25 / x2.0, so 982 / 1227 / 1964). Below the 1,225 zodiacs now
   octobaby:                       { lv: 50, hp:  1311310, atk:  5820, def: 478, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x, atk 2.1x thornmaw 2,770 (was 1.91x)
   pqConductor:                    { lv: 30, hp:   81290, atk:  1615, def: 198, exp:   5962, coin:  1256 },   // v0.30.280 floors: hp 8.2x band max (mummy 9,011; was 1.38x)
-  legosaurus:                     { lv: 59, hp:  1373900, atk:  8780, def: 633, exp:  100753, coin:  21233 },   // v0.30.280 floors: hp 8.2x forgewight, atk 2.1x, def 2.1x elderbark
+  legosaurus:                     { lv: 59, hp:  8931450, atk: 13342, def: 918, exp:  654974, coin:  21233 },   // v0.30.1738 legosaurus-buff (per user: "a tougher level 70 boss", level kept): zodiac_aries's Lv-70 HP / ATK / DEF; exp with hp, coins kept (was 1373900 / 8780 / 633 / 100753)
   young_confused_barnaby:         { lv: 40, hp:  461340, atk:  2508, def: 308, exp:  33832, coin:  7130 },   // v0.30.280 floors: hp 8.2x band max (drownedCurator 51,146)
   kingKrook:                      { lv: 50, hp:  1311310, atk:  5820, def: 499, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x; = octobaby, so the Lv-50 bulk band holds
   mirrorSelf:                     { lv: 20, hp:  275000, atk:   21, def:  3, exp:  17197, coin:  3622 },   // v0.30.x — hp 213116 -> 288000 (+35%) per user, then -> 250000 per user on playtest; evasion/speed live in the game literal
