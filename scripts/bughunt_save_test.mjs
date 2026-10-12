@@ -355,7 +355,7 @@ try {
   ok('[F3] ...and the four Ticket Rush stages really do pay less than the authored number (so the old toast was wrong)', W.quest.filter((q) => /pq|clockwork_underpass/.test(q.id)).every((q) => q.paid < q.authored), W.quest);
   // static source checks for the text and dead-guard fixes
   const src = readFileSync(path.join(SERVE_ROOT, process.env.MOJI_GAME_FILE || 'mojiworld_game.html'), 'utf8').replace(/\r\n/g, '\n');
-  ok('[F4] ui-3: the Boons tab quotes the Sage\'s price from SAGE_PRICE, not "5,000"', /from <b>\?\?\?<\/b>'s offering \(once every 12 hours, \$\{SAGE_PRICE\.toLocaleString\(\)\} Mojicoins\)/.test(src) && !/once every 12 hours, 5,000 Mojicoins/.test(src), 'source');
+  ok('[F4] ui-3: the Boons tab quotes the Sage\'s price from SAGE_PRICE, not "5,000"', /from <b>\$\{_lxSageName\(\)\}<\/b>'s offering \(once every 12 hours, \$\{SAGE_PRICE\.toLocaleString\(\)\} Mojicoins\)/.test(src) && !/once every 12 hours, 5,000 Mojicoins/.test(src), 'source');
   ok('[F5] L2e: the reset-stats cost chips format through the top-level _FMT_BIG (the old typeof read an inner-scope name and fell back to raw digits)', /const _fmt = \(n\) => \(typeof _FMT_BIG === 'function'\) \? _FMT_BIG\(n\) : String\(n\);/.test(src) && !/typeof _fmtBig === 'function'\) \? _fmtBig\(n\) : String\(n\)/.test(src), 'source');
   ok('[F6] systems-8: the Transcend text no longer claims "50% of its current ★10 totals" (the bake keeps half of the ORIGINAL flat curve: +8%)', !/50% of its current ★/.test(src) && !/keeps <b>50% of its current/.test(src) && /half of a ★/.test(src), 'source');
 

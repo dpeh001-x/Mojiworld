@@ -20,7 +20,7 @@ await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const errs = [];
-const PREREQ = ['q_boss_aetherion', 'q_boss_aries', 'q_zodiac_twelve', 'q_boss_sundered_smith', 'q_hourglass_5', 'q_long_dawn_2'];
+const PREREQ = ['q_boss_aetherion', 'q_boss_aries', 'q_zodiac_twelve', 'q_boss_sundered_smith', 'q_hourglass_5', 'q_long_dawn_2', 'q_long_dawn_3'];
 try {
   const ctx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1600, height: 900 } });
   await ctx.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });

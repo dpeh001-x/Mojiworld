@@ -105,8 +105,8 @@ try {
     out.postWarden = stanza0(); out.postWorld = await codex('world'); out.postFac = await codex('factions');
     // ---- 4. a save that beat the Twelve before this build ------------------------------------------------------------------
     player._storyBeatsSeen.mira_twelve_reveal = false; player._storyBeatsSeen.amnesiac_twelve_dream = false; player._miraNamed = false;
-    openNPC(sage()); out.legacySage = { beat: await waitFor(() => beatOn() && spk() === 'Mira', 3000) };
-    await through('Mira'); out.legacySage.dialogAfter = await waitFor(dlgOpen, 3000); out.legacySage.tag = (document.getElementById('dialog-name') || {}).textContent || ''; await close();
+    openNPC(sage()); out.legacySage = { beat: await waitFor(() => beatOn() && spk() === 'The woman at the gate', 3000) };   // per user (2026-10-12): a save that never heard her name hears the scene from "The woman at the gate"
+    await through('The woman at the gate'); out.legacySage.dialogAfter = await waitFor(dlgOpen, 3000); out.legacySage.tag = (document.getElementById('dialog-name') || {}).textContent || ''; await close();
     player._storyBeatsSeen.mira_twelve_reveal = false;
     loadMap('town', 400); await sleep(1500); game.paused = false;
     const order = []; openNPC(am());
