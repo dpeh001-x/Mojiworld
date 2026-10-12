@@ -16377,7 +16377,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1734';
+const GAME_VERSION = 'v0.30.1735';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -103673,16 +103673,27 @@ function _aeGateZones(m, phase) {
   const sw = phase === 3 ? 96 : 112, sh = 75;
   const gr = plats.find((p) => p && p.type === 'ground'), gy = gr ? gr.y : (m.y + m.h);
   const pcx = player.x + player.w / 2, clampX = (x) => Math.max(40, Math.min(ww - 40 - sw, x));
-  // a floor spot is never under him: one that lands on his body (+60 px) moves out past him, on his far side from you
-  const clear = (x) => (x < m.x + m.w + 60 && x + sw > m.x - 60) ? clampX(pcx < m.x + m.w / 2 ? m.x + m.w + 60 : m.x - 60 - sw) : x;
-  const zones = [
-    { x: clear(clampX(pcx - 220 - Math.random() * 160 - sw)), y: gy - sh, w: sw, h: sh },
-    { x: clear(clampX(pcx + 220 + Math.random() * 160)), y: gy - sh, w: sw, h: sh },
-  ];
-  const ledges = plats.filter((p) => p && p.type !== 'ground' && p.w >= sw && p.y >= gy - 170 && p.y < gy - 40);
-  if (ledges.length) {
-    const L = ledges.reduce((a, b) => (Math.abs(b.x + b.w / 2 - pcx) < Math.abs(a.x + a.w / 2 - pcx) ? b : a));
-    zones.push({ x: L.x + (L.w - sw) / 2, y: L.y - sh, w: sw, h: sh });
+  // a spot is never on him (+60 px), and the three are ones you can SEE where the view allows. v0.30.1735 boss-polish: a floor spot
+  // that landed on his body used to move past him to his far side - often off screen, a spot the player could not see. Now it is
+  // dropped, and the stand-ins come in this order: a low ledge in view, a floor spot in view (about 300 px out from you, clear of
+  // him, a spot-width from the other floor spots), and only then a ledge or floor spot off screen.
+  const under = (x) => x < m.x + m.w + 60 && x + sw > m.x - 60;
+  const cam = (game.camera && game.camera.x) || 0, vw = (typeof W_PLAY === 'number') ? W_PLAY : 960;
+  const inView = (x) => x >= cam && x + sw <= cam + vw, floor = (x) => ({ x, y: gy - sh, w: sw, h: sh });
+  const zones = [clampX(pcx - 220 - Math.random() * 160 - sw), clampX(pcx + 220 + Math.random() * 160)].filter((x) => !under(x)).map(floor);
+  const apart = (x) => zones.every((z) => z.y !== gy - sh || Math.abs(z.x - x) > sw + 40);
+  const ledges = plats.filter((p) => p && p.type !== 'ground' && p.w >= sw && p.y >= gy - 170 && p.y < gy - 40 && !under(p.x + (p.w - sw) / 2))
+    .map((p) => ({ x: p.x + (p.w - sw) / 2, y: p.y - sh, w: sw, h: sh })).sort((p, q) => Math.abs(p.x - pcx) - Math.abs(q.x - pcx));
+  const floorIn = [];
+  for (let x = Math.max(40, cam); x <= Math.min(ww - 40 - sw, cam + vw - sw); x += 24) if (!under(x)) floorIn.push(x);
+  floorIn.sort((p, q) => Math.abs(Math.abs(p + sw / 2 - pcx) - 300) - Math.abs(Math.abs(q + sw / 2 - pcx) - 300));
+  for (const z of ledges) if (zones.length < 3 && inView(z.x)) zones.push(z);
+  for (const x of floorIn) if (zones.length < 3 && apart(x)) zones.push(floor(x));
+  for (const z of ledges) if (zones.length < 3 && !zones.includes(z)) zones.push(z);
+  for (const off of [420, -420, 560, -560, 700, -700]) {
+    if (zones.length >= 3) break;
+    const x = clampX(off > 0 ? pcx + off : pcx + off - sw);
+    if (!under(x) && apart(x)) zones.push(floor(x));
   }
   return zones;
 }
@@ -117923,7 +117934,7 @@ function _lxSzBeam(z, camX) {
 function _lxSzRing(cx, cy, rr, alpha, spin, late) {
   const img = (typeof LX_FX !== 'undefined') ? LX_FX.safezone_ring : null;
   ctx.save();
-  if (img && img.complete && img.naturalWidth > 0) {
+  if (_lxFxReady(img)) {   // v0.30.1735 boss-polish - asks for the art if it is still parked (it read .complete, so a parked ring never came)
     ctx.translate(cx, cy); ctx.rotate(spin);
     ctx.globalAlpha = alpha; ctx.drawImage(img, -rr, -rr, rr * 2, rr * 2);
     if (late) { ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = alpha * (0.45 + 0.35 * Math.abs(Math.sin(game.time * 0.3))); ctx.drawImage(img, -rr, -rr, rr * 2, rr * 2); }
@@ -117980,7 +117991,7 @@ function _lxSafeZoneBeacons() {
       ctx.beginPath(); ctx.moveTo(29, 0); ctx.arc(0, 0, 17, 0.6, Math.PI * 2 - 0.6); ctx.closePath();
       ctx.fillStyle = 'rgba(24,14,40,0.9)'; ctx.fill(); ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.strokeStyle = '#ffd36b'; ctx.stroke();
       ctx.scale(dir, 1);   // the shield reads the right way round on either edge
-      if (shield && shield.complete && shield.naturalWidth > 0) { ctx.globalAlpha = 1; ctx.drawImage(shield, -12, -12, 24, 24); }
+      if (_lxFxReady(shield)) { ctx.globalAlpha = 1; ctx.drawImage(shield, -12, -12, 24, 24); }   // v0.30.1735 boss-polish - asks for it if parked
       else { ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(8, -6); ctx.quadraticCurveTo(8, 6, 0, 11); ctx.quadraticCurveTo(-8, 6, -8, -6); ctx.closePath(); ctx.fill(); }
       ctx.restore();
     }
@@ -157007,17 +157018,23 @@ function _warmMapArt(id, opts) {
     // exists specifically to keep getImageData scans out of the fight — never
     // ran at all.
     if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= _cap) { swap(im._lxBakedCv); return; }
+    // v0.30.1735 boss-polish: a bake ALREADY IN FLIGHT for this source (the draw path's _lxAsyncBake) is waited for and reused, not
+    // decoded a second time - gravitos_pace_test caught one Gravitos punch frame decoded twice in his entrance (the 6.6 MP decode the
+    // v0.29.742 reuse above exists to save). The pump's own decode raises the same _lxBaking flag below, which closes the reverse race.
+    if (im._lxBaking) { const _t0 = performance.now(); const _wait = () => { if (im._lxBaking && performance.now() - _t0 < 5000) return void setTimeout(_wait, 60); if (im._lxBakedCv && Math.max(im._lxBakedCv.width, im._lxBakedCv.height) <= _cap) swap(im._lxBakedCv); else res(); }; _wait(); return; }
     if (typeof createImageBitmap !== 'function') return fallback();
     try {
+      im._lxBaking = true;   // v0.30.1735 boss-polish: the draw path's bake sees this decode in flight and waits for it
       _lxBitmapOffThread(im, bw, bh)   // v0.29.749 — blob-fed: decode leaves the main thread
         .then((bmp) => {
+          im._lxBaking = false;
           let cv = null;
           try { cv = _lxBitmapToCanvas(bmp, im); } catch (e) {}
           try { bmp.close && bmp.close(); } catch (e) {}
           if (cv) { im._lxBakedCv = cv; swap(cv); if (typeof _lxCvTrack === 'function') _lxCvTrack(cv, (c) => { for (const [h, k] of (c._lxHolders || [])) if (h && h[k] === c) { h[k] = im; h._readyN = 0; } c._lxHolders = null; if (im._lxBakedCv === c) im._lxBakedCv = null; }); } else fallback();   // v0.30.1718 release7: the warm bake counts against the canvas budget; an eviction hands every slot back its source // v0.29.742 — memo for the other pipeline
         })
-        .catch(fallback);
-    } catch (e) { fallback(); }
+        .catch(() => { im._lxBaking = false; fallback(); });
+    } catch (e) { im._lxBaking = false; fallback(); }
   });
   return settle.then(() => new Promise((done) => {
     let next = 0, active = 0;
@@ -157567,7 +157584,10 @@ function _deriveBossRefHeight(key, sign) {
 // v0.30.1192 boss-bake - ONE draw for both boxes. _spriteContentBox (alpha > 64) and _spriteBodyBox (alpha > 235) each drew
 // the same capped source into a canvas of their own and read it back, so a boss form paid every decode and readback
 // twice. Same source, same size, same thresholds, same per-image caches: the same answers, bit for bit.
-function _lxBossBoxesOnce(img, wantBody) {
+// v0.30.1735 boss-polish - the URLs the pre-derive below fetched to measure off the main thread (a measure, not a bake: gravitos_pace_test
+// leaves them off its bake count, as it does the v0.30.1573 body probe).
+const _LX_BOX_FETCHED = new Set();
+function _lxBossBoxesOnce(img, wantBody, pre) {   // v0.30.1735 boss-polish - pre: the source already decoded off-thread (an ImageBitmap at its full size)
   if (!img) return;
   const needC = img._lxCBox === undefined, needB = !!wantBody && img._lxBBox === undefined;
   if (!needC && !needB) return;
@@ -157575,7 +157595,7 @@ function _lxBossBoxesOnce(img, wantBody) {
   const W = _s.W, H = _s.H;
   if (!W || !H) return;                        // v0.30.1192 boss-bake - not decoded yet: left uncached, as the two scanners do
   let c = null;
-  try { const cv = document.createElement('canvas'); cv.width = W; cv.height = H; c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(_s.img, 0, 0, W, H); } catch (_) { c = null; }
+  try { const cv = document.createElement('canvas'); cv.width = W; cv.height = H; c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage((pre && pre.width === _s.img.naturalWidth && pre.height === _s.img.naturalHeight) ? pre : _s.img, 0, 0, W, H); } catch (_) { c = null; }
   const box = (aMin) => {
     if (!c) return null;
     try {
@@ -157620,9 +157640,18 @@ function _lxBossRefDerive(mapId, types) {
               const src = (im._lxSrc && im._lxSrc.naturalWidth > 0) ? im._lxSrc : im;
               if (!((src.naturalWidth || src.width) > 0)) continue;   // v0.30.1192 boss-bake - not loaded: nothing to measure (the scanners skip it too)
               let went = false;
-              const scan = () => { if (went) return; went = true; setTimeout(() => { try { if (here()) _lxBossBoxesOnce(im, jb.body); } catch (e) {} step(); }, 0); };
-              try { if (typeof src.decode === 'function') { src.decode().then(scan, scan); setTimeout(scan, 3000); return; } } catch (e) {}
-              scan(); return;
+              const scan = (bmp) => { if (went) { try { if (bmp && bmp.close) bmp.close(); } catch (e) {} return; } went = true; setTimeout(() => { try { if (here()) _lxBossBoxesOnce(im, jb.body, bmp); } catch (e) {} try { if (bmp && bmp.close) bmp.close(); } catch (e) {} step(); }, 0); };
+              // v0.30.1735 boss-polish - decode() did not keep this decode off the main thread: the measure canvas is willReadFrequently (a CPU
+              // canvas), which does not draw from decode()'s cache, so every frame decoded AGAIN, in full, inside the draw - 27 decodes of
+              // 50-140 ms a few seconds into the Gravitos fight (boss_decode_stall_test). The frame is now decoded from its blob, off the
+              // main thread, at its full size, and that bitmap is drawn through the same scaled draw: the same boxes, without the stall.
+              const _u = String(src.src || '');
+              if (/^(https?|file):/i.test(_u) && typeof createImageBitmap === 'function' && typeof _lxBlobFor === 'function') {
+                _LX_BOX_FETCHED.add(_u);
+                _lxBlobFor(_u).then((b) => createImageBitmap(b)).then((bmp) => scan(bmp), () => scan(null)); setTimeout(() => scan(null), 5000); return;
+              }
+              try { if (typeof src.decode === 'function') { src.decode().then(() => scan(null), () => scan(null)); setTimeout(() => scan(null), 3000); return; } } catch (e) {}
+              scan(null); return;
             }
             continue;
           }
@@ -159203,8 +159232,14 @@ const _LX_MOB_SKILL_ART = {
   freezeBeam: { vfx: ['frostBeam'] }, cloudburst: { vfx: ['cloudburst'] },
   mortarLob: { img: ['meteor_marker'] },   // the landing-zone marker (a marker-only meteor_warn)
 };
+// v0.30.1735 boss-polish - THE SAFE-ZONE ART for every boss whose collapse uses Gravitos's safe zones (per user: "ensure the SAFE spots
+// sprite are loaded"): the portal orb and its nine frames, the shield in its eye, the gold ring. Only Gravitos's row named it, so
+// in the Sanctum (Aetherion's Gate), the Last Step (her Gate's Question) and the Sovereign's floor (his Singularity Collapse) it
+// was never asked for, and each zone drew its stand-ins instead - a gold box and the word SAFE.
+const _LX_SZ_ART = { img: ['gravitos_singularity_zone', 'safezone_shield', 'safezone_ring'], fx: ['gravitos_singularity_zone'] };
 const _LX_MOB_TYPE_ART = {
-  miraFallen: { fx: ['fx_col_miraFallen', 'tg_col_miraFallen'], vfx: ['miraSandPillar'], proj: ['mfallenfeather'] },   // v0.30.1627 mira-fallen
+  miraFallen: { fx: ['fx_col_miraFallen', 'tg_col_miraFallen', 'gravitos_singularity_zone'], vfx: ['miraSandPillar'], proj: ['mfallenfeather'], img: _LX_SZ_ART.img },   // v0.30.1627 mira-fallen (+ v0.30.1735 her Gate's safe zones)
+  aetherion: _LX_SZ_ART, towerSovereign: _LX_SZ_ART,   // v0.30.1735 boss-polish - his Gate, his Singularity Collapse
   vigil_vermillion: { fx: ['fx_arlen_ruin'], proj: ['mruinskull'] },   // v0.30.1591 elder-arlen-ruin: his Coronation of Ruin's eruption + skulls
   mournshade: { fx: ['mourn_burst'] },   // v0.30.1368 his power ball's burst (LX_ORB_BURST)
   lanternWisp: { fx: ['wisp_burst'] },   // v0.30.1379 its wisp-light's burst (LX_ORB_BURST)
@@ -171066,7 +171101,7 @@ function drawHazards(_behindPass) {
         // translucent SAFE word stands in so the zone is never unmarked.
         const _shield = (typeof LX_FX !== 'undefined') ? LX_FX.safezone_shield : null;
         const _cx = _zx + z.w / 2, _cy = z.y + z.h / 2;
-        if (_shield && _shield.complete && _shield.naturalWidth > 0) {
+        if (_lxFxReady(_shield)) {   // v0.30.1735 boss-polish - asks for the shield if it is still parked (see _LX_SZ_ART)
           const _sz = Math.min(24, Math.floor(z.h * 0.42)), _bob = Math.sin(tt * 1.1) * 2;
           ctx.save();
           ctx.globalAlpha = 0.92;
