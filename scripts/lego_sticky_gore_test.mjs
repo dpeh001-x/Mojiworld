@@ -107,6 +107,7 @@ const out = await page.evaluate(async () => {
   // ---- GORE = ~50% MAX HP --------------------------------------------------
   lg._bigMeleeCd = 99999;                               // isolate the charge
   lg._bdCd = 0; lg._braceDashing = false;
+  if (lg.traits.braceDash.crush) lg.traits.braceDash.crush.chance = 0;   // v0.30.1738 legosaurus-buff: the ORDINARY gore is measured here - the crushing charge has its own suite (legosaurus_buff_test)
   player.invulnerable = 0; player.blockTimer = 0; player._aegis = false;
   player.hp = getMaxHp();
   const hp0 = player.hp, mh = getMaxHp();
