@@ -51,7 +51,7 @@ try {
     closeU();
     // 4. the other steps keep the on-arrival tick: panel (Your Menus) and tab_items (Inventory) are still satisfied by an earlier visit
     clearAll(); _TUT_SEEN_TAGS.panel = true; _tutStep = M; _renderTutorialStep(); await wait(300); out.menusPre = !!TUTORIAL_STEPS[M]._done;
-    _TUT_SEEN_TAGS.tab_items = true; _tutStep = I; _renderTutorialStep(); await wait(300); out.invPre = !!TUTORIAL_STEPS[I]._done;
+    _TUT_SEEN_TAGS.tab_items = true; _tutStep = I; _renderTutorialStep(); await wait(300); out.invPre = !!TUTORIAL_STEPS[I]._done; out.invFresh = TUTORIAL_STEPS[I].fresh === true;   // release13e: Inventory is fresh
     return out;
   });
   console.log(JSON.stringify(r));
@@ -66,7 +66,7 @@ try {
   ok('opening U on another tab does not tick it', r.openItems.done === false, r.openItems);
   ok('clicking the Level Up tab ticks it (pill done, title checked)', r.found && r.clicked.done === true && r.clicked.pill === true && r.clicked.title === true, r.clicked);
   ok('with U already on Level Up when the card arrives, it waits - and clicking the tab again ticks it', r.already.arrive === false && r.again.done === true, { arrive: r.already.arrive, again: r.again.done });
-  ok('Your Menus and Inventory still tick on arrival when their tag was seen earlier (the pre-seen path is untouched)', r.menusPre === true && r.invPre === true, { menus: r.menusPre, inv: r.invPre });
+  ok('Your Menus still ticks on arrival when its tag was seen earlier; Inventory (fresh since release13e) waits for its own visit', r.menusPre === true && r.invPre === false && r.invFresh === true, { menus: r.menusPre, inv: r.invPre, fresh: r.invFresh });
   ok('no page errors', errs.length === 0, errs.slice(0, 2));
 } catch (e) { fail++; console.log('FAIL harness: ' + String(e.message).slice(0, 300)); }
 await browser.close(); server.kill();

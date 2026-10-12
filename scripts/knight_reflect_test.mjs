@@ -86,10 +86,10 @@ try {
   const hB = blows(h).filter((b) => b.t <= 300), hIn = hB.filter((b) => b.inv), hAll = rets(h, (x) => x[0] <= 300);
   ok(`Holy Shield's retaliation is 1x ATK + 15x DEF through the boss's armour (${H_RET(h).toFixed(2)}x ATK at DEF ${h.def}, ATK ${h.atk})`, !h.err && hAll.length >= 3 && Math.min(...hAll) >= H_RET(h) * 0.9 && Math.max(...hAll) <= H_RET(h) * 1.1, h.err || `${hAll.length} blows, ${hAll.map((v) => v.toFixed(1)).join(' ')}x ATK after armour share ${h.share.toFixed(3)} and punish windows`);
   ok('Holy Shield reflects while its invulnerability stops the blows', hIn.length >= 1, `${hIn.length} bounced while invulnerable`);
-  // 3. Guardian, then Holy Shield 3 s in: Guardian's reflect must carry on after Holy Shield's 5 s
-  const g = await fight('crusader', [[1, 'guardian'], [180, 'holyShield'], [180 + 300 + 120, 'mark', 'hsOver'], [180 + 300 + 120 + 8 * 60, 'mark', 'end']]);
+  // 3. Guardian, then Holy Shield 1 s in (release13d - Guardian is 12 s now): Guardian's reflect must carry on after Holy Shield's 5 s
+  const g = await fight('crusader', [[1, 'guardian'], [60, 'holyShield'], [60 + 300 + 60, 'mark', 'hsOver'], [60 + 300 + 60 + 5 * 60, 'mark', 'end']]);   // release13d: inside Guardian's capped 12 s
   const after = blows(g).filter((b) => b.t > g.marks.hsOver);
-  ok('a Holy Shield cast no longer cuts Guardian\'s reflect short', !g.err && after.length >= 3, g.err || `${after.length} Guardian reflects in the 8 s after Holy Shield ended`);
+  ok('a Holy Shield cast no longer cuts Guardian\'s reflect short', !g.err && after.length >= 3, g.err || `${after.length} Guardian reflects in the 5 s after Holy Shield ended`);
   // 4. a warded boss: the retaliation lands for 1 and fills the ward's break gauge (like any blow), it does not slip past the ward
   const w = await fight('crusader', [[1, 'guardian'], [60, 'ward', 6 * 60], [60 + 5 * 60, 'mark', 'end']]);
   const inWard = blows(w).filter((b) => b.t > 60 && b.t < 60 + 5 * 60).map((b) => b.total / w.atk);

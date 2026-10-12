@@ -50,7 +50,7 @@ try {
     out.boss = { had, arlen: dlg.classList.contains('boss-arena'), shade: dlg.style.getPropertyValue('--boss-shade'), activeAfterEsc: activeAfterEsc ? activeAfterEsc.name : null };
     closeDialog();
     // put Bravo and the Amnesiac on screen
-    player.x = 1690; player.y = 300; game.paused = false; await W8(900);
+    npc('Bravo').x = npc('The Amnesiac').x + 60; player.x = npc('The Amnesiac').x + 30 - player.w / 2; player.y = 300; game.paused = false; await W8(900);   // release13b: both in the talk key's reach (a far click opens nothing)
     const clickNpc = (n) => { const c = document.getElementById('game') || document.querySelector('canvas'); const b = c.getBoundingClientRect();
       const sx = (n.x - (game.camera.x || 0)) * b.width / W, sy = (n.y + 22 - (game.camera.y || 0)) * b.height / H;
       c.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: b.left + sx, clientY: b.top + sy })); };

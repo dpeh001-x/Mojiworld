@@ -69,7 +69,7 @@ if (r.none.length) console.log('unresolved: ' + r.none.join(', '));
 // NEW unresolvable quest still fails here. q_zodiac_twelve is kind:'special'
 // with target 'zodiacAll' — it spans all twelve zodiac houses at once, so it
 // has no single destination to point at. Everything else must resolve.
-const KNOWN_UNRESOLVED = ['q_zodiac_twelve'];
+const KNOWN_UNRESOLVED = [];   // release13b: q_zodiac_twelve resolves to the Zodiac Sanctum, where the twelve doors stand
 const unexpected = r.none.filter((id) => !KNOWN_UNRESOLVED.includes(id));
 const missingExpected = KNOWN_UNRESOLVED.filter((id) => !r.none.includes(id));
 check('no unexpected unresolved quest', unexpected.length === 0, unexpected);

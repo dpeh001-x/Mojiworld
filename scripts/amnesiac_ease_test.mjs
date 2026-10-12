@@ -25,7 +25,7 @@ try {
     const W8 = (ms) => new Promise((res) => setTimeout(res, ms));
     try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
-    player._storyBeatsSeen = new Proxy({}, { get: () => true }); player._tutorialSeen = true; window._perfTick = () => {};
+    player._storyBeatsSeen = new Proxy({}, { get: (t, k) => k !== 'siblings_reunion' });   // release13: the before-reunion pages player._tutorialSeen = true; window._perfTick = () => {};
     applyClass('warrior'); player.level = 60; player.quests = { active: {}, completed: {}, unlocked: {} }; try { _ensureQuests(); tickQuestUnlocks(); } catch (e) {}
     try { closeAllModals(); } catch (e) {}
     loadMap('town', 300); await W8(1200); try { closeAllModals(); } catch (e) {} game.paused = false;

@@ -31,7 +31,7 @@ try {
     const steps = async (n) => { const t0 = game.time; for (let i = 0; i < 600 && game.time - t0 < n; i++) await sleep(20); };
     try { _lxBootGateDone = true; _prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
-    loadMap('forest', 300); await sleep(1200); game.paused = false;
+    game._worldStateByMap = Object.assign(game._worldStateByMap || {}, { forest: null }); loadMap('forest', 300); await sleep(1200); game.paused = false;   // release13: no random world state (Glass Hour x1.35)
     for (let i = 0; i < 30 && !player.onGround; i++) await sleep(100);
     const x0 = player.x, y0 = player.y;
     window.getCritDmg = () => 1; const _roll = window.rollCrit; window.rollCrit = () => false; Math.random = () => 0.95;

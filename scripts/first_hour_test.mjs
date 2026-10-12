@@ -69,7 +69,7 @@ try {
   // 700 ms hold without a frame, so hold again (still the real key) until the step ticks.
   const moveTick = async () => { for (let j = 0; j < 6; j++) { await key('ArrowRight', 700); const s = await st(); if (s.step !== 0 || /\d+s?$/.test(s.next || '')) break; } };
   const ACT = [['move', moveTick], ['attack', () => key('z')], ['panel', () => key('u')], ['tab_items', () => tab('items')],
-    ['potion', async () => { await esc(); await key('PageUp'); }], ['combo', hitSnail], ['block (fresh)', () => key('a')], ['tab_lp (fresh)', () => tab('lp')], ['tab_items (already met)', null],
+    ['potion', async () => { await esc(); await key('PageUp'); }], ['combo', hitSnail], ['block (fresh)', () => key('a')], ['tab_lp (fresh)', () => tab('lp')], ['tab_items (fresh)', () => tab('items')],   // release13e: fresh - its own Items visit ticks it
     ['tab_boons', () => tab('boons')], ['worldmap', async () => { await esc(); await key('w'); }], ['quest', async () => { await esc(); await key('q'); }],
     ['tab_mojimon', async () => { await esc(); await tab('mojimon'); }], ['codex (Y)', async () => { await esc(); await key('y'); }], ['tab_skills (last)', async () => { await esc(); await tab('skills'); }]];
   const rows = [];
@@ -89,9 +89,8 @@ try {
   }
   const moved = rows.filter((r) => r.moved).length;
   check(moved === ACT.length, 'every one of the 15 tour steps ticks from the real key / tab and moves on by itself', moved + '/' + ACT.length + ' ' + J(rows.filter((r) => !r.moved)));
-  const met = rows.filter((r) => /already met/.test(r.tag));
-  // both must move on by themselves; the countdown label is sampled every 100 ms, which a loaded machine can miss on one
-  check(met.length === 1 && met.every((r) => r.moved) && met.some((r) => /\d$/.test(r.count || '')), 'a step the player already met counts down on Next and moves on by itself', J(met));
+  const met = rows.filter((r) => /tab_items \(fresh\)/.test(r.tag));   // release13e: the Inventory step is fresh (it used to arrive ticked)
+  check(met.length === 1 && met.every((r) => r.moved) && met.some((r) => /\d+s?$/.test(r.count || '')), 'the Inventory step waits for its own Items visit, then counts down on Next and moves on by itself', J(met));
   const y = rows.find((r) => /codex/.test(r.tag)); check(!!(y && y.moved), 'pressing Y (the MojiDex, as the step asks) ticks the "Systems to Explore" step', J(y));
   const last = rows[ACT.length - 1]; check(!!(last && last.moved && /Got it/.test(last.count || '')), 'finishing the last step counts down "Got it" and closes the tour', J(last));
   await esc(); await page.waitForTimeout(3200);

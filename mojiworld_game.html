@@ -7125,6 +7125,8 @@
   }
   #shop-modal .modal.gear-forge .shop-item:hover button, #shop-modal .modal.gear-forge .shop-item:focus-within button { opacity: 1; transform: none; pointer-events: auto; }
   #shop-modal .modal.gear-forge .shop-item:hover .price, #shop-modal .modal.gear-forge .shop-item:focus-within .price { opacity: 0; }
+  /* v0.30.1739 release13 - the price row is as tall as the Buy that rises over it, so Buy never covers a second stats line ("+344 HP") */
+  #shop-modal .modal.gear-forge .shop-item .price { min-height: 34px; line-height: 34px; margin-bottom: -4px; }
   #shop-modal .modal.gear-forge .shop-item button:hover:not(:disabled) { background: #ffffff; transform: translateY(-1px); box-shadow: 4px 4px 0 #0c0b10; }
   #shop-modal .modal.gear-forge .shop-item button:active:not(:disabled) { transform: translateY(1px); box-shadow: 1px 1px 0 #0c0b10; }
   #shop-modal .modal.gear-forge .shop-item button:disabled {
@@ -16377,7 +16379,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1738';
+const GAME_VERSION = 'v0.30.1739';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16725,7 +16727,11 @@ canvas.addEventListener('click', function _wmCanvasClickTalk(ev) {
     if (_dOpen && _dOpen.style.display === 'block') {
       if (_dOpen._lxConfirm || game._activeNpc === bestNpc) return;
       if (typeof _lxIsTouchDevice === 'function' && _lxIsTouchDevice()) return;   // v0.30.1722 release8: a stray tap (where the D-pad was) does not switch the conversation
-      closeDialog();
+      if (typeof _lxNpcInTalkReach !== 'function' || _lxNpcInTalkReach(bestNpc)) closeDialog();   // v0.30.1739 release13: a far NPC leaves this conversation open
+    }
+    if (typeof _lxNpcInTalkReach === 'function' && !_lxNpcInTalkReach(bestNpc)) {   // v0.30.1739 release13: out of the talk key's reach - say so, open nothing
+      try { if (typeof showToast === 'function') showToast('Walk closer to talk to ' + (bestNpc.name || 'them') + '.', 'common'); } catch (e) {}
+      return;
     }
     openNPC(bestNpc);
   }
@@ -17326,7 +17332,7 @@ function _lxDrsEmergencyTick(time) {
     LX_DRS.emerg = true; LX_DRS.emergMap = map; LX_DRS.lastChange = time; LX_DRS.emergSince = 0;
     if (!LX_DRS._emergAnnounced && typeof showToast === 'function') {
       LX_DRS._emergAnnounced = true;
-      showToast('⚡ Resolution eased for this area to keep the fight playable — full HD returns on the next map', 'common');
+      showToast('⚡ Resolution eased for this area to keep play smooth — full HD returns on the next map', 'common');
     }
   } catch (e) {}
 }
@@ -22636,11 +22642,17 @@ function _qnavDrawKey() {
     // read as "you are here" while standing maps away from the target.
     glyph = '⌖'; tone = 'far';
     sub = (d.map === game.currentMap) ? 'somewhere on this map' : 'no route — try the taxi';
+    // v0.30.1739 release13 - a hunt whose targets stand around the hero: say so (the pin still never rides a monster, v0.29.899)
+    if (d.map === game.currentMap && d.kind !== 'npc' && d.who && Array.isArray(game.monsters)) {
+      const _hx = player.x + player.w / 2;
+      if (game.monsters.some((m) => m && m.type === d.who && m.currentHp > 0 && !m._lxGone && Math.abs(m.x + m.w / 2 - _hx) < 640)) { glyph = '◆'; tone = 'ok'; sub = 'right here'; }
+    }
   } else {
     const dx = h.x - (player.x || 0);
     const dy = h.y - (player.y || 0);
     const dist = Math.hypot(dx, dy);
-    if (dist < 70) { glyph = '◆'; tone = 'ok'; sub = 'arrived'; }
+    if (dist < 70 && d.map !== game.currentMap) { glyph = '▲'; tone = 'go'; sub = 'this door'; }   // v0.30.1739 release13: the heading is the next door, not the target ("arrived · 2 maps"); ▲ = Up, and it fits the 196 px key
+    else if (dist < 70) { glyph = '◆'; tone = 'ok'; sub = 'arrived'; }
     else {
       tone = 'go';
       // Straight up or down: `dx > 0 ? '▶' : '◀'` sent you sideways at dx≈0,
@@ -26074,6 +26086,7 @@ const game = {
   mojidexSeen: {},   // v0.26.378 — Mojidex: { monsterType: true } once encountered (spawned)
   // Tower mode persistent best floor
   towerBestFloor: 0,
+  expeditionBestFloor: 0, expeditionClears: 0,   // v0.30.1739 release13: lifetime Expedition progress (deepest floor reached, full B10 clears) - the cosmetics read these
   // Tower runtime state (not persisted)
   tower: null,
 };
@@ -26097,7 +26110,7 @@ const SKILLS = {
   bloodlust:    { name:'Bloodlust',      icon:'🩸', cls:'warrior', job:'berserker', slot:'q', mp:22, cd:45000, desc:'20 s rage (+30% ATK, +speed; rank stretches it to 25 s at most) — shared with co-op partners on your map for 20 s. Casting also restores 20% of your max HP and MP. While active, basic attacks launch forward piercing shockwaves (0.9× ATK; a co-op partner gets them only as a warrior). Shares one +80% ATK cap with War Cry and Rampage.' },
   rampage:      { name:'Rampage',        icon:'🌪️', cls:'warrior', job:'berserker', slot:'c', mp:45, cd:10000,  desc:'Ultimate: 3.5s spinning AoE (8 radial pulses, 1.32× ATK, 220px) with +55% ATK (sharing one +80% ATK cap with War Cry and Bloodlust) and a 1.32× ATK close pulse every second.' },
   // Knight
-  guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:30000,  desc:'+20% DEF for 30s, and every blow that lands on you in contact (touches and close swings; not projectiles, telegraphed smashes or hazards) bounces back 20% of it plus 10× your ATK (that part meets the foe armour). Per rank: +2% DEF, +2% reflect and +0.4× ATK. Rank 5: +10s and +2% DEF; rank 10: +30s and +5% DEF instead. Co-op partners on your map get the base +20% DEF.' },
+  guardian:     { name:'Guardian',       icon:'🛡️', cls:'warrior', job:'knight',    slot:'q', mp:18, cd:30000,  desc:'+20% DEF for 12s (+1 s per rank, 16 s at most), and every blow that lands on you in contact (touches and close swings; not projectiles, telegraphed smashes or hazards) bounces back 20% of it plus 10× your ATK (that part meets the foe armour). Per rank: +2% DEF, +2% reflect and +0.4× ATK. Rank 5: +2% DEF; rank 10: +5% DEF instead. Co-op partners on your map get the base +20% DEF.' },
   holyShield:   { name:'Holy Shield',    icon:'✨', cls:'warrior', job:'knight',    slot:'c', mp:45, cd:25000, desc:'Ultimate: 2.5s invulnerability + 5s reflect: every blow that lands in contact (touches and close swings; not projectiles, telegraphed smashes or hazards) bounces back 50% of it plus 1× ATK + 15× DEF (that part meets the foe armour), even the touches the invulnerability stops (once a second per foe) + three holy waves (28× ATK each). Shares the 2.5s shield with co-op partners on your map.' },
 
   // ============ ROGUE ============
@@ -26815,6 +26828,7 @@ const LX_RANK_DUR_MAX = {
   warCry: 10000,
   bloodlust: 25000,
   warlord_warcry: 14000,
+  guardian: 16000,   // v0.30.1739 release13 (per user) - 12 s base on a 22.5 s cooldown; it lasted 30 s at rank 0 and 70 s at rank 10
 };
 function _lxRankDurNote(id) { const c = LX_RANK_DUR_MAX[id]; return c ? ' (stops at ' + (c / 1000) + ' s)' : ''; }
 function _lxRankDurMs(id, ms) {           // a duration counted in milliseconds
@@ -29602,7 +29616,13 @@ function _lxBoonPotency() {
 function _applyEquippedBoons() {
   // v0.30.421 - codex: every boon in the bag counts as held (covers every
   // acquisition path and legacy bags on load); runs before the stat re-derive.
-  try { if (player && Array.isArray(player.boons)) for (const b of player.boons) if (b && b.id) _boonDexMark('held', b.id); } catch (e) {}
+  // v0.30.1739 release13 - not a boon picked up inside an Expedition: it goes back when the run ends (synergies skip runs too). Inside a run
+  // the boons the hero walked in with (the run's snapshot) are the held ones.
+  try {
+    const _xr = (typeof game !== 'undefined' && game && game.expedition && game.expedition.active);
+    const _hb = _xr ? ((game.expedition.snapshot && Array.isArray(game.expedition.snapshot.boons)) ? game.expedition.snapshot.boons : []) : (player && player.boons);
+    if (Array.isArray(_hb)) for (const b of _hb) if (b && b.id) _boonDexMark('held', b.id);
+  } catch (e) {}
   if (!player.mods) return;
   const M = player.mods;
   // v0.29.344 — BACKFILL NEW BOON STATS ONTO OLD SAVES. player.mods is restored
@@ -46113,6 +46133,11 @@ window.addEventListener('keydown', e => {
   const k = resolved;
   const repeat = e.repeat;
   game.keys[k] = true;
+  // v0.30.1739 release13 - LATCH THE PRESS: the skill poll (updatePlayer) reads game.keys once a step, so a tap that went down and up between two
+  // frames (a quick tap at 20-30 fps) cast nothing - only the Warrior / Archer basic fires here on keydown. The next player step
+  // takes this latch and the poll counts the key as pressed once (_lxTaps). Canonical key, so a rebound key and the touch deck's
+  // synthetic keydown land here the same way.
+  if (!repeat && KEY_TO_SLOT && KEY_TO_SLOT[k] && !game.paused && player && player.hp > 0) (window._lxKeyTaps || (window._lxKeyTaps = {}))[k] = performance.now();
   if (e.code) (window._lxDownResByCode = window._lxDownResByCode || {})[e.code] = k;   // v0.30.1163 keybinds - keyup clears exactly this (a rebind mid-hold left the hero walking)
   // v0.29.610 — queue arrow edges for the shackle QTE. See _qteFrame: polling
   // game.keys once per sim step loses any press that starts and ends between
@@ -46172,7 +46197,7 @@ window.addEventListener('keydown', e => {
     // v0.30.367 — an armed Bastion whose release tap is blocked explains itself
     if (KEY_TO_SLOT[k] === 'b' && player.master === 'crusader' && (player._bastionArmedUntil | 0) > game.time && !player._warCharge
         && (game.time | 0) - (player._bastionBlockToastAt | 0) > 45) {
-      const _why = ((player.frozenTimer | 0) > 0) ? 'frozen' : ((player._cancerBubble | 0) > 0) ? 'bubbled' : ((player.hitStun | 0) > 0) ? 'staggered'
+      const _why = ((player.frozenTimer | 0) > 0) ? 'frozen' : ((player._cancerBubble | 0) > 0) ? 'bubbled' : ((player.hitStun | 0) > 0) ? 'staggered' : ((player.stunTimer | 0) > 0) ? 'stunned'
         : (typeof _QTE !== 'undefined' && _QTE && _QTE.active) ? 'shackled' : game.paused ? 'paused' : (typeof isReady === 'function' && !isReady('crusader_ult')) ? 'not ready' : null;
       if (_why && typeof showToast === 'function') { player._bastionBlockToastAt = game.time | 0; showToast('⚖ Bastion is armed — release blocked: ' + _why, 'rare'); }
     }
@@ -46186,6 +46211,7 @@ window.addEventListener('keydown', e => {
   // press = one swing rather than auto-repeating while Z is held.
   if (KEY_TO_SLOT[k] === 'd' && (player.cls === 'archer' || player.cls === 'warrior')
       && !game.paused && player.hp > 0 && player.hitStun <= 0
+      && !((player.stunTimer | 0) > 0 && !player._god)   // v0.30.1739 release13: not while stunned either (the stagger was the only check)
       && !(((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god)) {   // v0.26.x — rebound Basic-Attack key; also gate freeze / shackle-QTE (these paths bypass the poll-loop CC gate)
     const found = skillBySlot('d');
     if (found && player.attackCooldown <= 0 && (typeof isReady !== 'function' || isReady(found.id))) {
@@ -53480,6 +53506,7 @@ const GAME_SAVE_FIELDS = [
   'taxiCombatRecent',
   'dailyState','prestige','comboRecord','muted',
   'bestiary','towerBestFloor','mojidexSeen',
+  'expeditionBestFloor','expeditionClears',   // v0.30.1739 release13: lifetime Expedition progress (Frost Cape, Sunfire, Astral Cape)
   // v0.29.422 — shiny sightings, keyed by monster type. Separate from
   // mojidexSeen so the Mojidex can show "seen / seen shiny" as two distinct
   // states. A shiny is a bragging right; losing the record on reload would
@@ -57034,6 +57061,7 @@ function _playStoryBeat(beatId, onClose, _lxBeatMap) {
     try { if (typeof _cineScoreStop === 'function') _cineScoreStop(900, true); } catch (e) {}   // v0.29.50 — fade the cinematic score, restore map BGM
     els.overlay.removeEventListener('click', advance);
     document.removeEventListener('keydown', onKey, true);
+    game._lxBeatClosingUntil = Date.now() + 1500;   // v0.30.1739 release13: the pause is still this beat's for the 500 ms below (StuckPauseWatchdog) - bounded
     setTimeout(() => {
       // v0.25.952 — ROOT CAUSE FIX for the "stuck after boss kill" bug.
       // Pre-v0.25.952 this line always ran: `game.paused = false`. But
@@ -65185,14 +65213,17 @@ function _checkEarlyHooks() {
       if (h.opensStory) { st.questBase = st.quests | 0; setTimeout(() => { try { _openStoryChapter(); } catch (e) {} }, 2600); }
       // Announce the NEXT rung a beat later so the reward toast lands first.
       // Re-read the active chapter: claiming the last combat rung switches it.
-      const next = _activeHooks().find(n => !st.done[n.id]);
-      if (next && !h.opensStory && typeof showToast === 'function') {
+      // v0.30.1739 release13 - read the next rung WHEN the toast fires, not now: one pass can claim several rungs, and each used to announce a
+      // rung claimed later in the same loop. Only the last claim of a pass announces (a token), so there is one Next toast.
+      const _nxTok = (window._lxEarlyNextTok = (window._lxEarlyNextTok | 0) + 1), _nxOpens = !!h.opensStory;
+      if (typeof showToast === 'function') {
         setTimeout(() => {
-          try { showToast(`▶ Next: ${_earlyHookLabel(next)} → ${next.name}`, 'epic'); } catch (e) {}
-        }, 1500);
-      } else if (!next && typeof showToast === 'function') {
-        setTimeout(() => {
-          try { showToast('📖 Every chapter claimed — the Everdawn is yours to finish.', 'legendary'); } catch (e) {}
+          try {
+            if (window._lxEarlyNextTok !== _nxTok) return;
+            const _st = _earlyState(), next = _activeHooks().find(n => !_st.done[n.id]);
+            if (next && !_nxOpens) showToast(`▶ Next: ${_earlyHookLabel(next)} → ${next.name}`, 'epic');
+            else if (!next) showToast('📖 Every chapter claimed — the Everdawn is yours to finish.', 'legendary');
+          } catch (e) {}
         }, 1500);
       }
     }
@@ -65810,6 +65841,9 @@ function tickQuestKill(monsterType, isBoss) {
 let _qtMobMap = null, _qtNpcMap = null;
 function _qtBuildWorldIndex() {
   _qtMobMap = {}; _qtNpcMap = {};
+  // v0.30.1739 release13 - the monster half reads the navigator's index first (_qnavBuild: spawn lists, then arena bosses and Elder Arlen's
+  // clock map), so the tracker names the same place the pin does; built from spawn lists alone, Lyra's cut was a blank line
+  try { if (typeof _qnavBuild === 'function') { _qnavBuild(); for (const t in _LX_QNAV.mob) { const ms = _LX_QNAV.mob[t]; if (ms && ms.length) _qtMobMap[t] = ms[0]; } } } catch (e) {}
   try {
     for (const mid in MAPS) {
       const m = MAPS[mid];
@@ -65866,7 +65900,8 @@ function _questGuidance(id, q, a) {
         if (mid && mid !== game.currentMap) return { icon: '→', text: _what + ' \u00b7 ' + _qtMapName(mid) };
       }
       // none up on a map that does spawn them: say so, instead of a blank line (clearing the map brings the next ones in)
-      if ([...wanted].some((t) => ((MAPS[game.currentMap] && MAPS[game.currentMap].spawns) || []).some((sp) => sp && sp.type === t))) return { icon: '\ud83d\udccd', text: _what + ' \u00b7 none up, more soon' };   // (the tracker line is one row, ellipsized: short enough for a phone)
+      // v0.30.1739 release13: ...or the navigator's index puts them here (an arena boss, Elder Arlen's clock)
+      if ([...wanted].some((t) => ((MAPS[game.currentMap] && MAPS[game.currentMap].spawns) || []).some((sp) => sp && sp.type === t) || (typeof _LX_QNAV !== 'undefined' && _LX_QNAV.mob && (_LX_QNAV.mob[t] || []).indexOf(game.currentMap) >= 0))) return { icon: '\ud83d\udccd', text: _what + ' \u00b7 none up, more soon' };   // (the tracker line is one row, ellipsized: short enough for a phone)
     }
     return null;
   }
@@ -65879,6 +65914,13 @@ function _questGuidance(id, q, a) {
     if (here) return { icon: _qtDirGlyph(here.x), text: 'Speak to ' + next };
     const mid = _qtNpcMap && _qtNpcMap[next];
     return { icon: '→', text: next + (mid ? ' · ' + _qtMapName(mid) : '') };
+  }
+  // v0.30.1739 release13 - The Twelve Houses (kind 'special'): every House's door stands in the Zodiac Sanctum; the line was blank
+  if (q.kind === 'special' && q.target === 'zodiacAll' && MAPS.zodiacHall) {
+    const left = (typeof ZODIAC_SIGNS !== 'undefined' && typeof zodiacDefeated === 'function') ? ZODIAC_SIGNS.filter((z) => !zodiacDefeated(z.id)).length : 12;
+    const what = left + ' House' + (left === 1 ? '' : 's') + ' left';
+    if (game.currentMap === 'zodiacHall') return { icon: '✴', text: what + ' · choose a door' };
+    return { icon: '→', text: what + ' · ' + _qtMapName('zodiacHall') };
   }
   // 3a. an event quest: the next mark here, or the map it is on
   if (q.kind === 'event' && q.stages && typeof _lxQGuide === 'function') return _lxQGuide(id);   // v0.30.1615
@@ -66012,6 +66054,8 @@ function _qnavDest(qid) {
     if (q.kind === 'visit' && typeof MAPS !== 'undefined' && MAPS[q.target]) { const hit = pick([q.target], (m) => m); if (hit) return { kind: 'hunt', qid, who: q.target, map: hit.c, x: null, y: null, hops: hopsOf(hit.d), verb: 'Go to' }; }
     { const _stg = _lxQuestMapOf(qid);   // v0.30.1152 pq-fixes - the stage's own map, reachable or not
       if (_stg) { const hit = pick([_stg], (m) => m); if (hit) return { kind: 'hunt', qid, who: q.target, map: hit.c, x: null, y: null, hops: hopsOf(hit.d), verb: 'Hunt' }; } }
+    // v0.30.1739 release13 - The Twelve Houses names no monster: its place is the Zodiac Sanctum, where the twelve doors stand
+    if (q.kind === 'special' && q.target === 'zodiacAll' && MAPS.zodiacHall) { const hit = pick(['zodiacHall'], (m) => m); if (hit) return { kind: 'hunt', qid, who: q.name, map: 'zodiacHall', x: null, y: null, hops: hopsOf(hit.d), verb: 'Enter' }; }
     const _qa = (player.quests && player.quests.active && player.quests.active[qid]) || null, _op = (_qa && _qa.objProgress) || {};   // v0.30.1700 release3: an objective already done is not where you go
     const _left = (q.objectives || []).filter((o) => o && o.target && (_op[o.target] || 0) < (o.count | 0)).map((o) => o.target);
     const cands = _left.length ? [..._left, q.target] : [q.target, ...((q.objectives || []).map((o) => o && o.target))];
@@ -66055,6 +66099,7 @@ function _lxWarpVia(q) {
   // v0.30.1736 bughunt7 - the Master Conductor is fought only through Milo (The Tear 0 since v0.30.1696): the compass pointed at Auron. The Ticket
   // Rush's own stages keep their stage maps (huntDest), and on the duel's map there is no one to warp with.
   try { if (wants.indexOf('pqConductor') >= 0 && !Object.keys(LX_PQ_CHAIN_IDS).some((k) => QUESTS[k] === q) && !(game.monsters || []).some((mm) => mm && mm.type === 'pqConductor' && mm.currentHp > 0)) return 'Milo'; } catch (e) {}
+  if (wants.indexOf('pqConductor') >= 0) return (game.currentMap === 'clockworkExpress') ? null : 'Milo';   // v0.30.1739 release13: the Express duel is reached only through Milo
   if (wants.indexOf('mirrorSelf') < 0 || game.currentMap === 'innerDimension') return null;
   const t = QUESTS.q_inner_dim_trial;
   return (t && t.giverByClass && t.giverByClass[player.cls]) || null;
@@ -66267,6 +66312,8 @@ const EVERDAWN_ACTS = [
   { act: 3, name: 'Reckoning',  range: 'Lv 60–76',  blurb: 'Twelve champions were raised to ask for the dreaming back. All twelve are still up there, stuck mid-question, each one having failed by loving this world the wrong way. Put every House to rest, walk the Hourglass to its last turn, and — if she still stands — talk her down off the sky she broke. Three fragments answer to this act: the Stilled Hour, the First-Born Sunmote, and the Keystone. When the last sign falls, three tyrants pull their nightmares tighter; end their refusals, and clear the Vigil road of what twelve ages of refusal leave behind.' },
   { act: 4, name: 'Apotheosis', range: 'Lv 76–100', blurb: 'The tyrants have let go, the Vigil road is quiet, and the sky has finished opening. Carry every fragment to the Singularity. Gravitos will not fight your body first — he will fight your reasons. The world never stopped dreaming. It only stopped being allowed to.' },
 ];
+// v0.30.1739 release13 - Act 3's summary once all twelve signs are down (_sagaState swaps it in): it said "All twelve are still up there".
+const _LX_ACT3_TWELVE_DOWN = 'Twelve champions were raised to ask for the dreaming back, and each failed by loving this world the wrong way. All twelve Houses are dark now: every question answered, every champion at rest. Walk the Hourglass to its last turn, and — if she still stands — talk her down off the sky she broke. Three fragments answer to this act: the Stilled Hour, the First-Born Sunmote, and the Keystone. Three tyrants pulled their nightmares tighter as the sky opened; end their refusals if they still hold, and clear the Vigil road of what twelve ages of refusal leave behind.';
 const DAWN_FRAGMENTS = {
   frag_smith:     { name: 'Forge-Ember Shard',     act: 2, from: 'The Sundered Smith' },
   frag_hourglass: { name: 'The Stilled Hour',       act: 3, from: 'The Hourglass Expedition' },   // v0.26.831+ — the 5-chapter arc finally pays into the saga
@@ -66292,6 +66339,7 @@ function _sagaState() {
   if (held.indexOf('frag_hourglass') !== -1 || held.indexOf('frag_aries') !== -1 || held.indexOf('frag_aetherion') !== -1) act = 3;
   if (held.indexOf('frag_vigil') !== -1 || held.indexOf('frag_dawn') !== -1) act = 4;
   const done = held.indexOf('frag_dawn') !== -1;   // saga complete = the dawn is brought
+  if (act === 3 && typeof _lxTwelveDown === 'function' && _lxTwelveDown()) return { held, total, count: held.length, act, actInfo: Object.assign({}, EVERDAWN_ACTS[2], { blurb: _LX_ACT3_TWELVE_DOWN }), done };   // v0.30.1739 release13
   return { held, total, count: held.length, act, actInfo: EVERDAWN_ACTS[act - 1], done };
 }
 // Award a Dawn Fragment (idempotent). Returns the fragment def if newly
@@ -71756,6 +71804,23 @@ function _lxFightSpawn(f, type, cx0, side, opts) {
     if (opts.atk && opts.atk !== 1) m.atk = Math.max(1, Math.floor(m.atk * opts.atk));
     if (opts.size && opts.size !== 1) { const nw = Math.floor(m.w * opts.size), nh = Math.floor(m.h * opts.size); m.y -= (nh - m.h); m.x -= (nw - m.w) / 2; m.w = nw; m.h = nh; }   // a boss reads as one: bigger than what it leads
     if (opts.mute) { m.shoot = null; m.shootCd = 1e9; }   // no shots of its own: its threat is the fight's hazard
+    // v0.30.1739 release13 - IN SIGHT: 240-500 px out it stood under the right HUD column (quest tracker, hotkeys, minimap - the right 230 px of
+    // the 960 px view), nameplate and all. Keep it inside the clear part of the view, and off the hero (it flips sides if it must).
+    try {
+      if (game.camera && typeof W === 'number') {
+        const L = game.camera.x + 40, Rt = game.camera.x + W - 250, hx = player.x + player.w / 2, gap = m.w / 2 + 110;
+        if (Rt - L > m.w + 2 * gap) {
+          let cx = Math.max(L + m.w / 2, Math.min(Rt - m.w / 2, m.x + m.w / 2));
+          if (Math.abs(cx - hx) < gap) {
+            const right = hx + gap, left = hx - gap, okR = right + m.w / 2 <= Rt, okL = left - m.w / 2 >= L;
+            if (okR && (cx >= hx || !okL)) cx = right; else if (okL) cx = left;
+          }
+          const ww = game.mapData.worldWidth || 2000;
+          m.x = Math.max(60, Math.min(ww - 60 - m.w, Math.round(cx - m.w / 2)));
+          if (!t.flies) m.y = _lxFightGroundY(m.x + m.w / 2, m.h);
+        }
+      }
+    } catch (e) {}
     f.boss = m;
   }
   return m;
@@ -71842,12 +71907,18 @@ function _lxFightHud() {
   if (f) {
     let pend = 0;
     const left = f.mobs.filter((m) => !m._lxDead && game.monsters.indexOf(m) >= 0).length + (pend = f.pending.reduce((n, w) => n + (w.n | 0), 0));
-    const _bp = f.boss && !f.boss._lxDead ? Math.max(0, Math.round(100 * f.boss.currentHp / Math.max(1, f.boss.maxHp))) : null;
+    // v0.30.1739 release13 - a boss killed in the fight is not _lxDead (that waits for the fight's end): "Defeat The Well-Drinker - 0% (+2 more)"
+    // over three Jelly. Only a living boss is named; what is left is named by kind.
+    const _bossUp = !!(f.boss && !f.boss._lxDead && f.boss.currentHp > 0 && game.monsters.indexOf(f.boss) >= 0);
+    const _rest = f.mobs.filter((m) => m !== f.boss && !m._lxDead && m.currentHp > 0 && game.monsters.indexOf(m) >= 0);
+    const _restTxt = (() => { const c = {}, o = []; for (const m of _rest) { const n = (monsterTypes[m.type] && monsterTypes[m.type].name) || m.name || m.type; if (!c[n]) o.push(n); c[n] = (c[n] | 0) + 1; } return o.map((n) => c[n] + ' ' + n).join(', '); })();
+    const _bp = _bossUp ? Math.max(0, Math.round(100 * f.boss.currentHp / Math.max(1, f.boss.maxHp))) : null;
     // bughunt stones - instructions, not just a count: a fight names what to do (def.hud, {n} = what is left), a boss fight names the boss and its health, an ambush says to clear it
     if (f.hud) txt = f.hud;
     else if (f.def && f.def.hud) txt = '⚔ ' + String(f.def.hud).split('{n}').join(left);
     else if (f.def && f.def.trial) txt = '';   // a door's trial writes its own pill on its first tick: never the ambush text in between
-    else if (_bp != null) txt = '⚔ Defeat ' + (f.boss.name || 'the boss') + ' - ' + _bp + '%' + (left > 1 ? ' (+' + (left - 1) + ' more)' : '');
+    else if (_bp != null) txt = '⚔ Defeat ' + (f.boss.name || 'the boss') + ' - ' + _bp + '%' + (_restTxt ? ' (+' + _restTxt + ')' : '') + (pend ? ' (' + pend + ' still coming)' : '');   // v0.30.1739 release13: names them
+    else if (f.boss && (_restTxt || pend)) txt = '⚔ Finish them: ' + (_restTxt || '') + (pend ? (_restTxt ? ' ' : '') + '(' + pend + ' still coming)' : '');   // v0.30.1739 release13: the boss is down - what it left
     else txt = '⚔ Clear the ambush - ' + left + ' left' + (pend ? ' (' + pend + ' still coming)' : '');
   } else {
     const act = player && player.quests && player.quests.active || {};
@@ -76643,6 +76714,7 @@ function _startExpedition() {
   if (typeof addShake === 'function') addShake(8);
   // Pick + load the first floor map.
   const _mapId = _expeditionPickMap(1, player.level || 1);
+  if (player.buffs) for (const _bk in player.buffs) player.buffs[_bk] = 0;   // v0.30.1739 release13: the run starts bare (a map change no longer clears buffs)
   if (typeof loadMap === 'function') loadMap(_mapId);
   if (typeof saveState === 'function') saveState();
   return true;
@@ -76692,6 +76764,7 @@ function _endExpedition(reason) {
   const _lxHeldRun = (game.expedition && game.expedition._heldCoins) || 0;
   game.expedition = { active: false, floor: 0, bravoReady: false, currentQuest: null, _spentInRun: _lxSpentRun, _heldCoins: _lxHeldRun };
   _expeditionRestorePlayer(_snap);
+  if (player.buffs) for (const _bk in player.buffs) player.buffs[_bk] = 0;   // v0.30.1739 release13: nothing the run buffed walks out of it
   // v0.30.455 — the loaned slots are gone as of the line above (the cap reads game.expedition.active).
   // Restore normally returns the pre-run loadout, so this only bites when the snapshot was lost.
   if (typeof _lxClampBoonSlots === 'function') _lxClampBoonSlots();
@@ -77844,6 +77917,7 @@ function _expeditionAdvanceFloor(door) {
   if (!game.expedition || !game.expedition.active) return;
   game.expedition.floor = (game.expedition.floor || 0) + 1;
   game.expedition.lastDoor = door;
+  if (typeof _lxExpNoteProgress === 'function') _lxExpNoteProgress(game.expedition.floor);   // v0.30.1739 release13: deepest floor reached (Frost Cape)
   // F10 = zodiac boss arena.
   if (game.expedition.floor >= EXPEDITION_FLOOR_COUNT) {
     _expeditionSpawnFinalBoss();
@@ -77918,6 +77992,7 @@ function _expeditionShowPuzzle() {
         if (_passed) {
           // Bump floor counter again (skip).
           game.expedition.floor = (game.expedition.floor || 0) + 1;
+          if (typeof _lxExpNoteProgress === 'function') _lxExpNoteProgress(game.expedition.floor);   // v0.30.1739 release13: a skipped floor is passed too
           if (typeof showToast === 'function') showToast('🧩 Floor skipped!', 'legendary');
           if (game.expedition.floor >= EXPEDITION_FLOOR_COUNT) {
             _expeditionSpawnFinalBoss();
@@ -78099,10 +78174,11 @@ function _completeExpedition() {
     if (!player.titles || typeof player.titles !== 'object') player.titles = {};
     const _xpPool = EXPEDITION_TITLES.filter((t) => (typeof _lxTwelveKnown === 'function' && _lxTwelveKnown()) || !['Twelvefold', 'Zodiac Cracked', 'Constellation-Slayer'].includes(t));   // v0.30.1726 release9: the Twelve's titles wait for the reveal
     const _avail = _xpPool.filter(t => !player.titles[t]);
-    const _title = _avail.length ? _avail[Math.floor(Math.random() * _avail.length)]
-                                  : _xpPool[Math.floor(Math.random() * _xpPool.length)];
-    player.titles[_title] = true;
-    _extras.push(`👑 Title earned: "${_title}"`);
+    if (_avail.length) {   // v0.30.1739 release13: every eligible title owned - no roll (it "earned" a held one again, toast and all)
+      const _title = _avail[Math.floor(Math.random() * _avail.length)];
+      player.titles[_title] = true;
+      _extras.push(`👑 Title earned: "${_title}"`);
+    }
   }
   if (typeof showToast === 'function') {
     showToast(`✦ EXPEDITION VICTORY ✦ +${_coinReward.toLocaleString()} Mojicoins bonus!`, 'legendary');
@@ -78114,6 +78190,7 @@ function _completeExpedition() {
   if (typeof flash === 'function') flash(0.7);
   if (typeof addShake === 'function') addShake(14);
   _endExpedition('complete');
+  if (typeof _lxExpNoteProgress === 'function') _lxExpNoteProgress(EXPEDITION_FLOOR_COUNT, true);   // v0.30.1739 release13: a full B10 clear (Sunfire, Astral Cape) - after the restore, which cannot touch it
   // v0.26.293 — Grant the coin reward AFTER _endExpedition's restore so
   // it survives the mojicoin wipe. Setshards / titles were already
   // applied above and don't get snapshotted, so they survive natively.
@@ -81114,6 +81191,7 @@ function loadMap(id, entryX, entryY, _ledgeArrival) {
     player._hexOrbs = null;           // v0.30.x — ...and so do the Grand Hex ward orbs
     player._clones = null;
     player._shade = null;
+    player._warlordBanner = 0;   // v0.30.1739 release13: the +50% reach stood with the banner prop, which this map change removes
     player._ballistaTurrets = null;
     player._ballistaChannel = null;
     player._eclipseHold = null; player._eclipseRain = null;   // v0.30.34 - Eclipse hold resets with the channel; v0.30.38 - and its rain clock
@@ -81139,7 +81217,12 @@ function loadMap(id, entryX, entryY, _ledgeArrival) {
     // game.monsters every frame, so nothing holds a dead monster reference.
     player._lxCarrySummons = !!(player.pet || player.ultPet || (player.pack && player.pack.length));
     if (!Array.isArray(player.pack)) player.pack = [];
-    if (player.buffs) { for (const _bk in player.buffs) player.buffs[_bk] = 0; }
+    // v0.30.1739 release13 - TIMED SELF-BUFFS SURVIVE A MAP CHANGE (per user: "keep buffs across maps"), as summons do since v0.29.306. The
+    // v0.25.648 reason (Smoke Bomb crit / Rage riding through a portal) predates Smoke Dash's 0.4 s window and the caps that keep
+    // every party buff short of its cooldown (v0.30.1530, and this release's Guardian cap). Timers keep ticking
+    // once a frame (_lxTickPlayerTimers). Two still end here: Holy Shield (its first 2.5 s are +9999 DEF - no near-invulnerability
+    // through a boss door) and Hallowed Field (an aura flag for foes near you on the OLD map). Death, a load and an Expedition still clear all.
+    if (player.buffs) { player.buffs.holyShield = 0; player.buffs.hallowedField = 0; }
     // v0.26.x audit FIX — also clear DOT timers on map-change. The buff wipe
     // above missed burn/poison/electrocute, so portaling out while burning
     // carried the DOT onto the (often safe) next map, chipping HP there.
@@ -82191,7 +82274,7 @@ function openChest(c) {
   // BEFORE granting any of the standard chest rewards (mojicoins +
   // potions + item) — the piece itself is the only reward.
   if (_pqJustGrantedPiece) {
-    showToast(`🧩 Ticket Piece ${_pqHavePieces}/4 — keep climbing!`, 'legendary');
+    if (_pqHavePieces < 4) showToast(`🧩 Ticket Piece ${_pqHavePieces}/4 — keep climbing!`, 'legendary');   // v0.30.1739 release13: the fourth piece's toast is the summit portal's ("All 4 pieces!")
     audio.play('chest_open');
     audio.play('levelup');
     return;
@@ -84064,6 +84147,7 @@ function _lxDawnAuraDraw() {
   ctx.restore();
 }
 function updatePlayer(dt) {
+  const _lxTaps = window._lxKeyTaps || null; window._lxKeyTaps = null;   // v0.30.1739 release13: the skill taps since the last step - a step that returns before the poll (CC, a ride) drops them
   if (player._lxRide && typeof _lxMallRideStep === 'function' && _lxMallRideStep()) return;   // v0.30.1471 megamall-aaa - on an escalator the ride holds the hero
   // v0.29.x — JUDGEMENT + DAWN SHIELD tick (Bastion of Dawn remake, per
   // user: "stacking buff per hit taken up to 5 then draws enemies near into
@@ -85628,13 +85712,15 @@ function updatePlayer(dt) {
 
   // Skills — keyboard keys map to internal slot ids via KEY_TO_SLOT
   if (!game.paused) {
+    const _lxTapAt = _lxTaps ? performance.now() : 0;
     for (const key in KEY_TO_SLOT) {
-      if (!k[key]) continue;
+      if (!k[key] && !(_lxTaps && _lxTaps[key] && _lxTapAt - _lxTaps[key] < 400)) continue;   // v0.30.1739 release13: held now, or tapped since the last step
       const slot = KEY_TO_SLOT[key];
       // Warrior charge owns the skill slots after job advancement — the
       // auto-cast poll must not fire while the key is held. Cast happens
       // on keyup via tryReleaseWarriorCharge().
       if (slot !== 'd' && _warriorChargeOwnsSlot(slot)) continue;
+      if (slot !== 'd' && player._lxCcEaten && player._lxCcEaten[key]) continue;   // v0.30.1739 release13: a press a stun refused does not fire when the stun ends
       const found = skillBySlot(slot);
       if (!found) continue;
       const id = found.id;
@@ -88756,6 +88842,7 @@ const _LX_NO_CHARGE_SKILLS = new Set([
   'marksman_oneshot',  // archer — Deadeye window, taps not draws
 ]);
 function tryStartClassCharge(slotKey) {
+  if (player._lxCcEaten && player._lxCcEaten[slotKey]) delete player._lxCcEaten[slotKey];   // v0.30.1739 release13: every fresh press starts clean
   if (!_classIdentityActive()) return false;
   const slot = KEY_TO_SLOT[slotKey];
   if (!slot || slot === 'd') return false;  // basic attack untouched
@@ -88773,7 +88860,11 @@ function tryStartClassCharge(slotKey) {
   if (!found || !isReady(found.id)) return false;
   if (_LX_NO_CHARGE_SKILLS.has(found.id)) return false;   // v0.29.5xx — casts instantly instead
   if (player.hp <= 0 || game.paused || game.dying > 0) return false;
+  if (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god) (player._lxCcEaten || (player._lxCcEaten = {}))[slotKey] = true;   // v0.30.1739 release13: a frozen / shackled press is spent too
   if (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god) return false;  // frozen / shackle-QTE: no voluntary action (poll-loop gate doesn't cover charge)
+  // v0.30.1739 release13 - nor stunned or staggered: those were never asked, so a Warrior / Archer cast through both. The refused press is spent
+  // (_lxCcEaten): the poll does not cast it the moment the stun ends - release the key and press again.
+  if (((player.hitStun | 0) > 0 || (player.stunTimer | 0) > 0) && !player._god) { (player._lxCcEaten || (player._lxCcEaten = {}))[slotKey] = true; return false; }
   if (player._warCharge) {
     if (player._warCharge.slotKey === slotKey) return true;  // already charging THIS key
     player._warCharge = null;   // v0.30.367 — a stale charge on another key cannot hold this press hostage
@@ -88785,6 +88876,7 @@ function tryStartClassCharge(slotKey) {
 
 // Charge release — call on keyup. Fires the skill with the accumulated charge.
 function tryReleaseClassCharge(slotKey) {
+  if (player._lxCcEaten && player._lxCcEaten[slotKey]) delete player._lxCcEaten[slotKey];   // v0.30.1739 release13: the key came up - the next press is a new one
   const c = player._warCharge;
   if (!c || c.slotKey !== slotKey) return false;
   // v0.25.277 — death-state guard. _tickClassIdentity clears _warCharge
@@ -88793,7 +88885,8 @@ function tryReleaseClassCharge(slotKey) {
   // guard the cast then deducts MP and sets a cooldown on a corpse,
   // observable in some job death animations. Bail cleanly.
   if (player.hp <= 0 || (game.dying | 0) > 0 || game._photoMode || game.paused
-      || (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god)) {
+      || (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god)
+      || (((player.hitStun | 0) > 0 || (player.stunTimer | 0) > 0) && !player._god)) {   // v0.30.1739 release13: a release while stunned / staggered drops the charge too
     // v0.26.1033 — game.paused added: releasing a held charge key while a menu is
     // open (tryStartClassCharge already gates on game.paused, as do basic attack /
     // dodge / block / the poll loop) no longer casts behind the paused overlay,
@@ -91031,7 +91124,8 @@ function renderMojiMonPanel() {
         '<kbd title="H - the quick-summon key">H</kbd></div><div class="mmc-cdtx">' +
         '<div class="mmc-lbl">Summon</div>' +
         '<div id="mojimon-cd" data-until="' + mm.cdUntil + '">' + (cdLeft > 0 ? fmtCd(cdLeft) : 'READY') + '</div>' +
-        '<div class="mmc-sub">' + (cdLeft > 0 ? '💤 resting until the next summon' : (_nm ? esc(_nm) + ' is ready to play!' : 'ready when you are')) + '</div></div></div>';
+        '<div class="mmc-sub">' + ((mm.out && mm.out.type) ? '⚔ ' + esc((monsterTypes[mm.out.type] || {}).name || mm.out.type) + ' is fighting beside you'   // v0.30.1739 release13: out already - not "ready to play"
+          : cdLeft > 0 ? '💤 resting until the next summon' : (_nm ? esc(_nm) + ' is ready to play!' : 'ready when you are')) + '</div></div></div>';
     })() +
     '<div class="mmc-div"></div>' +
     '<div class="mmc-pts"><div class="mmc-star"><b>' + pts + '</b></div><div><div class="mmc-ptl">Upgrade points</div><div class="mmc-sub">1 per 5 levels · per mon · free respec</div></div></div>' +
@@ -93868,7 +93962,7 @@ const SKILL_FNS = {
     const _gr = (typeof getSkillRank === 'function') ? getSkillRank('guardian') : 0;
     const _g10 = (typeof getSkillLv10 === 'function') ? getSkillLv10('guardian') : null;
     // v0.30.444 - getSkillLv10 hands back the rank-5 row at ranks 5-9 (generic shave has no buffMs); the >= 10 gate silently dropped it
-    const _gDur = _lxRankDurMs('guardian', 30000 + ((_g10 && _g10.buffMs) ? _g10.buffMs : 0));   // v0.30.779 - +1 s per skill rank
+    const _gDur = Math.min(LX_RANK_DUR_MAX.guardian, _lxRankDurMs('guardian', 12000 + ((_g10 && _g10.buffMs) ? _g10.buffMs : 0)));   // v0.30.779 - +1 s per skill rank; v0.30.1739 release13 - 12 s base (was 30 s), stops at 16 s like the v0.30.1530 caps
     const _gDef = 20 + 2 * _gr + ((_g10 && _g10.defBonusPct) ? _g10.defBonusPct : 0);
     const _gRef = 20 + 2 * _gr;
     player.buffs.guardian = Math.max(player.buffs.guardian || 0, _gDur);   // v0.30.x bughunt diff-c-3 - a longer partner Guardian is never cut short
@@ -110560,7 +110654,11 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // canonical player→monster damage sink so every attack path is covered.
   if (typeof player !== 'undefined' && player) {
     const _tfx = (typeof talentFx === 'function') ? talentFx() : null;
-    const _basicSkill = (skill === 'bolt' || skill === 'slash' || skill === 'arrow' || skill === 'dagger' || skill === 'basic' || skill === 'melee');
+    // v0.30.1739 release13 - by the CAST, not only the tag: Shuriken, Shin-Shuriken, Eclipse Massacre, Multi Shot, Evade Burst and Kage Rush hit
+    // with 'dagger' / 'arrow' / 'melee' tags, so "+X% skill damage" skipped them and "basic attacks heal" healed off them. A hit cast
+    // by a skill outside the basic slot ('d') is a skill hit; hits with no cast (summons, DoTs, echoes, chained hits) keep the tag test.
+    const _basicSkill = (skill === 'bolt' || skill === 'slash' || skill === 'arrow' || skill === 'dagger' || skill === 'basic' || skill === 'melee')
+      && !(_rankSrc && typeof SKILLS !== 'undefined' && SKILLS[_rankSrc] && SKILLS[_rankSrc].slot !== 'd');
     if (_tfx) {
       if (_tfx.skillDmg && !_basicSkill) dmg = Math.floor(dmg * (1 + _tfx.skillDmg));
       // v0.26.x perf — frame-cached max stats (hitMonster can fire 12+/frame on AOE builds)
@@ -114051,7 +114149,7 @@ function _killMonsterRaw(m) {
         if (typeof _edictOn === 'function' && _edictOn('ascIronFoe')) SHARDS = Math.ceil(SHARDS * 1.25);   // v0.30.422 - Iron Foe
         player.setshards = (player.setshards || 0) + SHARDS;
         game.bossDefeated[_shardMapKey] = true;
-        const _firstWord = (m.name || 'The boss').split(/[\s,—]/)[0];
+        const _firstWord = String(m.name || 'The boss').split(',')[0].trim() || 'The boss';   // v0.30.1739 release13: the boon wheel's short name ("King Krook", "The Master Conductor") - was the first word ("The dropped ...")
         setTimeout(() => {
           showToast(`◈ ${_firstWord} dropped ${SHARDS} Setshard${SHARDS === 1 ? '' : 's'}!${_isRefight ? ' (refight)' : ''}`, _isRefight ? 'epic' : 'legendary');
         }, 800);
@@ -118736,6 +118834,15 @@ function _lxTalkTarget() {
   }
   return best;
 }
+// v0.30.1739 release13 - is this NPC in the talk key's reach (the same box as _lxTalkTarget)? A world click on an NPC farther away no longer
+// opens the dialog - the dialog pauses the game, so a click from across the map (mid-fight too) was a free pause.
+function _lxNpcInTalkReach(npc) {
+  if (!npc || typeof npc.x !== 'number' || typeof player === 'undefined' || !player) return false;
+  const px = player.x + player.w / 2, pf = player.y + player.h;
+  if (Math.abs(px - npc.x) >= LX_TALK_DX) return false;
+  const up = pf - ((npc.y || 0) + 44);
+  return up <= LX_TALK_UP && up >= -LX_TALK_DOWN;
+}
 // v0.30.1113 - the height an NPC is DRAWN at (sprite height x its per-NPC scale), for the click / tap hit tests.
 function _lxNpcDrawnH(npc) {
   try { const n = npc && npc.name; const h = _npcSpriteTargetHeight(n) * ((typeof _lxNpcScale === 'function') ? _lxNpcScale(n) : 1); return (h > 0) ? h : 64; } catch (e) { return 64; }
@@ -118881,7 +118988,7 @@ const LX_SHOP_VOICE = {
            'What do you need?',
     shop:    '*He nods at his racks. Every blade on them is his own make.*',
     improve: '*He turns your gear over twice, then once more, the way he checks everything.*',
-    craft:   '*He sweeps his bench clear with one gloved hand.*',
+    get craft() { return (typeof _lxBarnabyDawn === 'function' && _lxBarnabyDawn()) ? '*He sweeps his bench clear with one bare hand.*' : '*He sweeps his bench clear with one gloved hand.*'; },   // v0.30.1739 release13: after the ending his gloves stay off
   },
   Oakhart: {
     intro: '*Oakhart sets his hammer across the anvil and lets the ringing die out before he speaks.*\n\n' +
@@ -119239,7 +119346,8 @@ function openNPC(npc) {
       opts.push({ t:'🛒 Shop — buy & sell', cb:() => { game._brokMenu = 'shop'; openNPC(npc); } });
       opts.push({ t:'✦ Improve — enhance · reforge', cb:() => { game._brokMenu = 'improve'; openNPC(npc); } });
       opts.push({ t:`🔧 Craft — set pieces (${player.setshards || 0}◈)`, cb:() => { game._brokMenu = 'craft'; openNPC(npc); } });
-      if (npc.name === 'Barnaby' && player.quests && player.quests.completed && player.quests.completed.q_barnaby_finish) opts.push({ t:'What did you make?', cb:() => { document.getElementById('dialog-text').textContent = '*His gloved hands go still.*\n\nA blade, for the woman who walked up the road. She asked for honest. I gave her perfect: I reached for something I could not name, and it came before I struck.\n\nIt leaked, and grew into a mouth in the town. *He tugs one glove tighter.* Iron would have told me no.'; } });   // build-up (per user, 2026-10-11): why he became distorted
+      // v0.30.1739 release13 - after the ending his gloves lie on the bench (_lxBarnabyLine): bare hands in this page's stage directions too
+      if (npc.name === 'Barnaby' && player.quests && player.quests.completed && player.quests.completed.q_barnaby_finish) opts.push({ t:'What did you make?', cb:() => { document.getElementById('dialog-text').textContent = ((typeof _lxBarnabyDawn === 'function' && _lxBarnabyDawn()) ? '*His bare hands go still.*' : '*His gloved hands go still.*') + '\n\nA blade, for the woman who walked up the road. She asked for honest. I gave her perfect: I reached for something I could not name, and it came before I struck.\n\nIt leaked, and grew into a mouth in the town. ' + ((typeof _lxBarnabyDawn === 'function' && _lxBarnabyDawn()) ? '*He turns one bare hand over and studies the palm.*' : '*He tugs one glove tighter.*') + ' Iron would have told me no.'; } });   // build-up (per user, 2026-10-11): why he became distorted
       if (npc.name === 'Barnaby' && player.quests && player.quests.completed && player.quests.completed.q_last_step) opts.push({ t:'I found her at the bottom of the stair.', cb:() => { document.getElementById('dialog-text').textContent = '*He stops what he is doing.*\n\nDid she still carry it?\n\nThen it did one honest thing. It showed her the price. She wrote "no hurry" on the ticket. I finished it that night.\n\n*He opens the order book, crosses out one word, and writes it again in his own poor hand.*'; } });   // the blade's payoff (per user, 2026-10-11)
     }
   } else if (npc.role === 'emberAlchemist') {
@@ -119300,7 +119408,9 @@ function openNPC(npc) {
         '…Oh. <em>You</em>.\n\n' +
         'You walk wrong. I mean that kindly — like someone still learning how heavy gravity is meant to be. And your shadow has the wrong number of edges.\n\n' +
         'You\'re not from here. Something above the sky reached down and put you here. I don\'t know its name. Nobody down here agrees what to call it.\n\n' +
-        '*His thumb turns a ring that is not on it.*\n\n' + ((typeof _lxSiblingsReunited === 'function' && _lxSiblingsReunited())   // v0.30.1734 release12: after the reunion he knows which
+        ((typeof _lxSiblingsReunited === 'function' && _lxSiblingsReunited())   // v0.30.1739 release13: after the reunion his hands are still (per user)
+          ? '*His hands are still. For once, his thumb does not go looking for the ring.*\n\n'
+          : '*His thumb turns a ring that is not on it.*\n\n') + ((typeof _lxSiblingsReunited === 'function' && _lxSiblingsReunited())   // v0.30.1734 release12: after the reunion he knows which
           ? 'I gave a dream away once, at a gate. I know which one now, and I would not take it back.'
           : 'I gave a dream away once, at a gate. I\'d tell you which, but I can\'t remember that either.'),
         opts: (() => {
@@ -119425,7 +119535,9 @@ function openNPC(npc) {
       // Stage 6 - the deep one, only if asked: why the watcher sent the player (it was the tail of the old Who are you? page)
       { text:
         'You\'re different. The nightmare can\'t drink a dream it didn\'t author, and yours came from another plane. It has never tasted one. That is why the watcher sent you.\n\n' +
-        ((typeof _lxTwelveKnown === 'function' && _lxTwelveKnown()) ? 'Twelve champions were raised to ask for the dreaming back. Each loved this world the wrong way, and each is still up there, stuck mid-question.\n\n' : '') +
+        ((typeof _lxTwelveKnown === 'function' && _lxTwelveKnown()) ? 'Twelve champions were raised to ask for the dreaming back. ' + ((typeof _lxTwelveDown === 'function' && _lxTwelveDown())   // v0.30.1739 release13: past tense once all twelve are down
+          ? 'Each loved this world the wrong way. You have put all twelve to rest, and the sky is quieter for it.\n\n'
+          : 'Each loved this world the wrong way, and each is still up there, stuck mid-question.\n\n') : '') +
         'You didn\'t come here for me, though. Walk on when you\'re ready.',
         opts: [
           { t:'◀ Back',                 cb: () => { game._amnesiacStage = 5; openNPC(npc); } },
@@ -119464,7 +119576,9 @@ function openNPC(npc) {
           'Gravitos was never your enemy. The Weight-Bearer has held this world still for twelve ages, waiting — politely, exhausted — for someone to give him a reason to set it down. So go to the Singularity. You will have to fight him, but the fight is not what ends it. *Give him a reason.* That is the only blow that will ever land.';
       } else if (s.act === 3) {
         _saga =
-          'The Zodiac. I told you of them once: twelve champions, still up there, stuck mid-question. They never held the dream — only the asking.\n\n' +
+          ((typeof _lxTwelveDown === 'function' && _lxTwelveDown())   // v0.30.1739 release13: all twelve are down, and he knows it
+            ? 'The Zodiac. I told you of them once: twelve champions, stuck mid-question. You answered every one of them, and they are at rest now. They never held the dream — only the asking.\n\n'
+            : 'The Zodiac. I told you of them once: twelve champions, still up there, stuck mid-question. They never held the dream — only the asking.\n\n') +
           '*He studies the dream you already carry.* You hold more of it than any of them ever managed. Doesn\'t that frighten you? It should. A dream is <em>heavy</em> — heavier than any blade. That is the secret no dream-bringer survives learning. Carry it anyway. You are nearly to the part of the story even I have forgotten.';
       } else if (s.act === 2) {
         _saga =
@@ -120621,7 +120735,9 @@ So… do you need a lift?`;
     // Build the un-defeated bosses list.
     // Exclude phantom phase/attack sprite keys — they're never a real m.type and
     // never get a _boss_ flag, so they kept the list from ever emptying.
-    const _phantomBoss = /^(aetherion2|gravitos2|gravitos3|gravitos2star|gravitos3star)$/;
+    // v0.30.1739 release13 - The Arbiter and The Sovereign of the Spire exist only in the Expedition tower, whose kills are never recorded
+    // (_realKill), so they kept her list from ever emptying
+    const _phantomBoss = /^(aetherion2|gravitos2|gravitos3|gravitos2star|gravitos3star|towerArbiter|towerSovereign)$/;
     const _bossList = (typeof BOSS_SPRITE_TYPES !== 'undefined' && Array.isArray(BOSS_SPRITE_TYPES)) ? BOSS_SPRITE_TYPES.filter(b => !_phantomBoss.test(b) && typeof monsterTypes !== 'undefined' && !!monsterTypes[b]) : [];   // npc-coherence - attack sets (gravitospunch, aetherionastral...) are not bosses
     const _undef = _bossList.filter(b => !(game.bestiary && game.bestiary['_boss_' + b]));   // v0.26.x audit FIX — was reading game.bossDefeated[bossType], which is keyed by MAP not type, so it was NEVER set for a type and the list ALWAYS showed every boss as undefeated even after a full clear. Read the bestiary _boss_<type> flag the kill actually writes.
     const _undefShort = _undef.slice(0, 4).map((b) => (typeof monsterTypes !== 'undefined' && monsterTypes[b] && monsterTypes[b].name) || b).join(', ') + (_undef.length > 4 ? ` and ${_undef.length - 4} more` : '');
@@ -124485,13 +124601,13 @@ const COSMETICS = {
   cape: [
     { id:'shadow',  name:'Shadow Cape',  desc:'Kill 25 horned mushrooms', req:{ bestiary:{ horny:25 } },     swatch:'#2a1a3a', accent:'#6a4a8a' },
     { id:'ember',   name:'Ember Cape',   desc:'Kill 10 scorpions',        req:{ bestiary:{ scorpion:10 } },  swatch:'#cc3322', accent:'#ff8844' },
-    { id:'frost',   name:'Frost Cape',   desc:'Reach tower floor 10',     req:{ tower:10 },                  swatch:'#4488cc', accent:'#aaddff' },
-    { id:'astral',  name:'Astral Cape',  desc:'Reach tower floor 25',     req:{ tower:25 },                  swatch:'#332266', accent:'#aa88ff' },
+    { id:'frost',   name:'Frost Cape',   desc:'Reach Expedition floor B5', req:{ expFloor:5, legacyTower:10 }, swatch:'#4488cc', accent:'#aaddff' },   // v0.30.1739 release13: was Tower floor 10 (retired)
+    { id:'astral',  name:'Astral Cape',  desc:'Clear Expedition floor B10 five times', req:{ expClears:5, legacyTower:25 }, swatch:'#332266', accent:'#aa88ff' },   // v0.30.1739 release13: was Tower floor 25 (retired)
   ],
   weapon: [
     { id:'crystal', name:'Crystal Blade',desc:'Defeat Aetherion',         req:{ boss:'aetherion' },          swatch:'#aaddff' },
     { id:'void',    name:'Void Edge',    desc:'Defeat Gravitos',          req:{ boss:'gravitos' },           swatch:'#8844cc' },
-    { id:'sunfire', name:'Sunfire',      desc:'Reach tower floor 15',     req:{ tower:15 },                  swatch:'#ffaa22' },
+    { id:'sunfire', name:'Sunfire',      desc:'Clear Expedition floor B10', req:{ expClears:1, legacyTower:15 }, swatch:'#ffaa22' },   // v0.30.1739 release13: was Tower floor 15 (retired)
     { id:'heirloom',name:'Heirloom',     desc:'Open 10 silver chests',    req:{ chests:{ silver:10 } },      swatch:'#ddccaa' },
   ],
 };
@@ -124506,6 +124622,15 @@ for (const _cat of ['hair', 'cape']) for (const _c of COSMETICS[_cat]) {
     const _mt = (typeof monsterTypes !== 'undefined') ? monsterTypes[_bk] : null, _nm = _mt && _mt.name;
     if (!_nm) return _fallback;
     return 'Kill ' + _need + ' ' + (/[^aeiou]y$/i.test(_nm) ? _nm.slice(0, -1) + 'ies' : /(s|x|z|ch|sh)$/i.test(_nm) ? _nm + 'es' : _nm + 's');
+  } });
+}
+
+// v0.30.1739 release13 - the Astral Cape's hint counts the clears so far ("Clear Expedition floor B10 five times (2/5)").
+for (const _c of COSMETICS.cape) if (_c.req && _c.req.expClears > 1) {
+  const _base = _c.desc, _need = _c.req.expClears;
+  Object.defineProperty(_c, 'desc', { configurable: true, enumerable: true, get() {
+    const _n = (typeof game !== 'undefined' && game) ? (game.expeditionClears | 0) : 0;
+    return (_n > 0 && _n < _need) ? _base + ' (' + _n + '/' + _need + ')' : _base;
   } });
 }
 
@@ -124584,6 +124709,21 @@ function trackPickup(source, info) {
   checkCosmeticUnlocks();
 }
 
+// v0.30.1739 release13 - EXPEDITION PROGRESS (per user: "Frost Cape: reach floor B5. Sunfire skin: clear B10. Astral Cape: clear B10 five times").
+// Lifetime fields on game, not on the run: _endExpedition replaces game.expedition and the snapshot restore puts back the hero's
+// boons / bag / potions only, so neither can take these away.
+function _lxExpNoteProgress(floor, cleared) {
+  try {
+    if (typeof game === 'undefined' || !game) return;
+    const _f = Math.max(0, Math.min(EXPEDITION_FLOOR_COUNT, floor | 0));
+    if (_f > (game.expeditionBestFloor | 0)) game.expeditionBestFloor = _f;
+    if (cleared) game.expeditionClears = (game.expeditionClears | 0) + 1;
+    if (typeof player !== 'undefined' && player && player.cls) {
+      if (!player.cosmetics) player.cosmetics = { hair:{}, cape:{}, weapon:{} };
+      checkCosmeticUnlocks();
+    }
+  } catch (e) {}
+}
 function _cosmeticReqMet(req) {
   if (!req) return false;
   if (req.bestiary) {
@@ -124597,7 +124737,11 @@ function _cosmeticReqMet(req) {
     }
   }
   if (req.boss && !game.bestiary['_boss_' + req.boss]) return false;
-  if (req.tower && (game.towerBestFloor || 0) < req.tower) return false;
+  // v0.30.1739 release13 - the Expedition reqs; a save whose retired-Tower best met the old number (legacyTower) keeps the unlock
+  if (req.expFloor || req.expClears) {
+    const _legacy = req.legacyTower && (game.towerBestFloor || 0) >= req.legacyTower;
+    if (!_legacy && ((game.expeditionBestFloor | 0) < (req.expFloor | 0) || (game.expeditionClears | 0) < (req.expClears | 0))) return false;
+  } else if (req.tower && (game.towerBestFloor || 0) < req.tower) return false;
   return true;
 }
 
@@ -131918,6 +132062,7 @@ const TUTORIAL_STEPS = [
     icon: '🎒',
     title: 'Inventory & Enhancement',
     detect: 'tab_items',
+    fresh: true,   // v0.30.1739 release13 - the weapon step (U -> Items) is the same visit, so it arrived ticked: only a visit while this card shows counts
     tryIt: 'Open <kbd>U</kbd> and click the <b>Items</b> tab',
     gugumaLine: 'Tweet-tweet! Grow sharp, little Outsider. Sharper.',
     body: 'Your bag is the <kbd>U</kbd> panel\'s <b>Items</b> tab; click to equip. <b>Barnaby the smith</b> in the Everdawn Megamall will <b>★0 → ★10 enhance</b> your gear (every star adds more than the last, and higher tiers grow more: on T8 gear +8% to +24% stats, +12% to +32% main stat). He also crafts set legendaries from <b>Setshards</b>, won by breaking down unwanted set drops.',
@@ -175277,6 +175422,7 @@ function loop(time) {
         // the overlay it's trying to recover.
         _watchOv.style.cssText = '';
         _watchOv.classList.add('on');
+        game._stuckDyingReshown = true;   // v0.30.1739 release13: triggerDeath shows it at once - having to put it back is the stuck case
       }
     } catch (_) {}
     if (game._stuckDyingAccum == null) game._stuckDyingAccum = 0;
@@ -175285,7 +175431,10 @@ function loop(time) {
     if (!game.paused) game._stuckDyingAccum += dt;
     if (game._stuckDyingAccum > 6000 && !game._stuckDyingWarned) {
       game._stuckDyingWarned = true;
-      try { console.warn('[death-watchdog] player stuck at 0 HP >6s, forcing respawn'); } catch (_) {}
+      try {   // v0.30.1739 release13: the overlay up and nobody clicked is the normal 6 s auto-respawn (info); a death screen that is not showing is stuck (warn)
+        const _dov = document.getElementById('death-overlay'), _dUp = !!(_dov && _dov.classList.contains('on') && _dov.getClientRects().length);
+        if (_dUp && !game._stuckDyingReshown) console.info('[death-watchdog] no respawn click in 6 s - auto-respawning'); else console.warn('[death-watchdog] player stuck at 0 HP >6s, forcing respawn');
+      } catch (_) {}
       try {
         if (typeof showToast === 'function') showToast('Respawning…', 'rare');
         game.dying = 0;
@@ -175295,6 +175444,7 @@ function loop(time) {
   } else {
     game._stuckDyingAccum = 0;
     game._stuckDyingWarned = false;
+    game._stuckDyingReshown = false;   // v0.30.1739 release13
   }
   // v0.25.590 — Death sequence. Respawn is now driven by an explicit
   // click on the "Respawn in The Void" button (or a mobile tap on the
@@ -175498,6 +175648,7 @@ function loop(time) {
       // (see _lxCineHoldActive). It is deadline-bounded, so this can delay recovery by
       // at most that deadline and never prevent it.
       if (!_anyVisible && typeof _lxCineHoldActive === 'function' && _lxCineHoldActive()) _anyVisible = true;
+      if (!_anyVisible && (game._lxBeatClosingUntil || 0) > Date.now()) _anyVisible = true;   // v0.30.1739 release13: a story beat is closing (it hands the pause on, or lets it go, within 500 ms)
       if (!_anyVisible) {
         try { console.warn('[StuckPauseWatchdog] paused >3s with no visible modal — force-unpausing'); } catch(_) {}
         game.paused = false;
@@ -178075,7 +178226,7 @@ function _prologueFinish(skipped) {
   window._prologueStripping = false;   // v0.29.71 — clear the once-per-run strip guard
   try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {}   // once-ever (see boot gate)
   if (typeof refreshGearCache === 'function') { try { refreshGearCache(); } catch (e) {} }
-  loadMap('void', 260);   // beside the portal, not ON it — keep the walk-out beat
+  loadMap('void', 520);   /* v0.30.1739 release13: right of the star - at 260 the desktop tour card (bottom-left) hid the hero step 1 asks to move */   // beside the portal, not ON it — keep the walk-out beat
   if (typeof renderSkillBar === 'function') { try { renderSkillBar(); } catch (e) {} }
   if (typeof updateUI === 'function') { try { updateUI(); } catch (e) {} }
   if (!skipped && typeof showToast === 'function') {
@@ -178513,11 +178664,11 @@ if (!loadState()) {
     // post-creation lets the flash-forward use the player's chosen design.
     // applyClass (the real player pick) starts the cinematic once the
     // arena's sprites are preloaded; _prologuePending is no longer armed.
-    loadMap('void', 260);
+    loadMap('void', 520);   /* v0.30.1739 release13: right of the star - at 260 the desktop tour card (bottom-left) hid the hero step 1 asks to move */
     window._prologueAfterCreation = true;
     openClassSelect();
   } else {
-    loadMap('void', 260);
+    loadMap('void', 520);   /* v0.30.1739 release13: right of the star - at 260 the desktop tour card (bottom-left) hid the hero step 1 asks to move */
     openClassSelect();
   }
 } else {
@@ -189815,6 +189966,10 @@ function startBgm() {
   @container (max-width: 940px) { #mojidex-modal .mjx-head .mjx-count { position: static; display: block; width: fit-content; max-width: 100%; margin: 9px 0 0 6px; text-align: left; } }
   /* v0.30.1193 ui-text-fixes - 5) a short screen: the banner starts below Guguma's bubble (the bubble sits 12 px below its slot) */
   @media (max-height: 500px) { #class-select-modal#class-select-modal .modal.cs-epic > h2.cs-title { margin-top: 14px !important; } }
+  /* v0.30.1739 release13 - and on a tall screen too: at 1280x720 the slanted banner's top edge sat on the bubble's bottom. Nudged, not re-flowed
+     (a taller header pushed the class page past the box and it scrolled): the bubble rides 3 px below its slot (was 12) and the banner moves 6 px into the gap above the preamble */
+  @media (min-height: 501px) { #class-select-modal#class-select-modal .modal.cs-epic > h2.cs-title { top: 6px !important; }
+    #class-select-modal#class-select-modal .guguma-chip.guguma-cs-corner { top: 3px !important; } }   /* the bubble rode 12 px below its slot */
   /* v0.30.1193 ui-text-fixes - 6) a word longer than the toast (a 16-letter name) wraps inside it instead of running out of the stack */
   #toast-container .toast { overflow-wrap: anywhere; }
 </style>

@@ -77,7 +77,7 @@ try {
     openPostalWisp(); await W8(150); out.pOpens = dlg.style.display === 'block' && document.getElementById('dialog-name').textContent; closeDialog();
     out.pTalks = talks.slice(); window.tickDaily = _td;
     // CLICK the Amnesiac's head
-    street(amn.x - 90); game.paused = false; await W8(700);
+    street(amn.x - 40); game.paused = false; await W8(700);   // release13b: a click needs the talk key's reach (70 px)
     const c = document.getElementById('game') || document.querySelector('canvas'), b = c.getBoundingClientRect();
     const top = amn.y + 44 - _lxNpcDrawnH(amn), wy = top + 10;
     c.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: b.left + (amn.x - (game.camera.x || 0)) * b.width / W, clientY: b.top + (wy - (game.camera.y || 0)) * b.height / H }));

@@ -21,7 +21,7 @@ let pass = 0, fail = 0;
 const check = (ok, msg, detail) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (detail ? '  [' + detail + ']' : '')); ok ? pass++ : fail++; };
 // base duration in ms at rank 0 - the numbers before this change
 const BASE = {
-  guardian: { buff: 30000 }, holyShield: { reflect: 5000 }, eagleEye: { buff: 30000 },
+  holyShield: { reflect: 5000 }, eagleEye: { buff: 30000 },   // release13d: guardian moved to CAPPED
   celestialAurora: { field: 10000 }, soulSiphon: { thrall: 16000, ward: 12000 }, darkPulse: { undead: 30000 }, wildBond: { wolf: 60000 },
   crusader_aegis: { orbs: 9000 },
   shadowlord_clones: { clones: 11000 }, hexmaster_grandhex: { orbs: 7000 }, beastmaster_pack: { wolves: 100000 },
@@ -30,7 +30,7 @@ const BASE = {
 };
 // v0.30.1525 op-pass - the same at rank 0, 3 and 10
 // v0.30.1530 op-pass - [base, cap]: rank adds +1 s until the buff reaches the cap below its cooldown
-const CAPPED = { warCry: { buff: [7000, 10000] }, bloodlust: { buff: [20000, 25000] },
+const CAPPED = { warCry: { buff: [7000, 10000] }, bloodlust: { buff: [20000, 25000] }, guardian: { buff: [12000, 16000] },   // release13d (per user): Guardian 12 s, stops at 16 s
   warlord_warcry: { warCry: [12000, 14000], bloodlust: [12000, 14000], reach: [12000, 14000], banner: [12000, 14000] } };
 const FLAT = { holyShield: { buff: 5000 }, crusader_aegis: { aegis: 9000 }, archbishop_ult: { invulnerable: 5000 } };
 await new Promise((r) => setTimeout(r, 1800));

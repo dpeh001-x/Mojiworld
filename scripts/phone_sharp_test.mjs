@@ -137,8 +137,10 @@ try {
 
     // a click / tap on an NPC in town, switch ON
     await enterWorld(p, 'town');
+    // release13b: a click / tap opens an NPC only in the talk key's reach - stand beside one first
+    await p.evaluate(async () => { const n = game.npcs.find((x) => x && typeof x.x === 'number'); if (n) { player.x = n.x - 20 - player.w / 2; player.y = n.y + 44 - player.h; player.vx = 0; player.vy = 0; } await new Promise((s) => setTimeout(s, 900)); });
     const npcPt = await p.evaluate(() => { const cv = document.getElementById('game'), R = cv.getBoundingClientRect(), k = R.width / W;
-      for (const n of game.npcs) { const feet = n.y + 44, top = feet - _lxNpcDrawnH(n); const x = R.left + (n.x - game.camera.x) * k, y = R.top + ((top + feet) / 2 - game.camera.y) * k;
+      for (const n of game.npcs) { if (typeof _lxNpcInTalkReach === 'function' && !_lxNpcInTalkReach(n)) continue; const feet = n.y + 44, top = feet - _lxNpcDrawnH(n); const x = R.left + (n.x - game.camera.x) * k, y = R.top + ((top + feet) / 2 - game.camera.y) * k;
         if (x < R.left + 20 || x > R.right - 20 || y < R.top + 20 || y > R.bottom - 20) continue; if (document.elementFromPoint(x, y) !== cv) continue; return { x, y, name: n.name }; } return null; });
     if (npcPt) { if (C.touch) await p.touchscreen.tap(npcPt.x, npcPt.y); else await p.mouse.click(npcPt.x, npcPt.y); await p.waitForTimeout(700); }
     const talk = await p.evaluate(() => { const d = document.getElementById('dialog'); const open = !!(d && d.style.display === 'block'); const who = game._activeNpc && game._activeNpc.name; try { closeDialog(); } catch (e) {} try { closeAllModals(); } catch (e) {} game.paused = false; return { open, who }; });
