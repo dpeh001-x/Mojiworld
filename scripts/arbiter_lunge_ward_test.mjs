@@ -67,7 +67,8 @@ try {
   ok('the hourglass lunge happened', L.steps > 5, JSON.stringify(L));
   ok('the lunge covers ~360 px over 36+ game steps (was 460 over ~20)', Math.abs(L.dist - 360) <= 20 && L.steps >= 36, `${L.dist} px over ${L.steps} steps`);
   ok('the lunge eases: first and last steps under 5 px, none over 20 px (was a flat ~24)', L.first < 5 && L.last < 5 && L.peak <= 20, `first ${L.first}, last ${L.last}, peak ${L.peak}`);
-  ok('the whole dash draws one pose: attack frame 0', L.frames.length === 1 && L.frames[0] === 'attack:0', JSON.stringify(L.frames));
+  // arbiter-dash (per user: "if there is a dash he needs a specific sprite for that"): the lunge used to hold one frozen attack frame; it plays its own set now (scripts/arbiter_dash_test.mjs holds the rest)
+  ok('the dash plays its own charge frames (dash set 5-7, two or more of them), not one frozen pose', L.frames.length >= 2 && L.frames.every((f) => /^attackdash:[567]$/.test(f)), JSON.stringify(L.frames));
   const W = R.ward;
   ok('the ward shield is drawn', !!W, JSON.stringify(W));
   if (W) {

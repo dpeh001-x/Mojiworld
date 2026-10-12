@@ -308,7 +308,9 @@
 // returning browser would keep drawing the old green glob for a session.
 // v0.30.1707 - v166 -> v167. Lady Honk's column beam (fx_col_lady_honk.webp) is REPLACED under its own name with the softened edges,
 // so a returning browser would keep drawing the hard-edged beam for a session.
-const CACHE = 'mojiworld-assets-v167';   // v0.30.1707 - Lady Honk's beam softened (same name)
+// v0.30.1741 - v167 -> v168. The Arbiter's walk frames 0-8, his column / verdict bursts (column 5-7, verdict 5) and the Sovereign's collapse frames 0-8 are REPLACED under
+// their own names (the dash sets are new), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v168';   // v0.30.1741 - Arbiter walk + Sovereign collapse redrawn (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
