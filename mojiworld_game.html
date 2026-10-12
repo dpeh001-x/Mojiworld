@@ -16379,7 +16379,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1745';
+const GAME_VERSION = 'v0.30.1746';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -22301,6 +22301,10 @@ function _qnavWhy(id) {
     return ' — not started';
   } catch (_e) { return ''; }
 }
+// v0.30.1746 release16 - a critical quest or a story-chain chapter (the Journal's Next line)
+function _qnavStoryOffer(id) { try { const q = QUESTS[id]; if (!q) return false; if (q.critical) return true; return _QUEST_STORY_CHAIN.indexOf(id) >= 0; } catch (e) { return false; } }
+// v0.30.1746 release16 - the player chose this target: a Journal pin, or the guide key
+function _qnavByHand(id) { try { return !!id && ((Array.isArray(game.qnavPins) && game.qnavPins.indexOf(id) >= 0) || game._qnavByHand === id); } catch (e) { return false; } }
 function _qnavGuideList() {
   const out = [];
   try {
@@ -22332,7 +22336,7 @@ function _qnavGuideList() {
     for (const id of Object.keys(unl)) {
       if (!QUESTS[id] || seen[id] || (player.quests.completed && player.quests.completed[id])) continue;
       if (!_lxQuestOfferable(id)) continue;   // v0.30.1115 never guide toward a quest acceptQuest would refuse
-      seen[id] = 1; out.push({ id, rank: 3, frac: 0 });   // v0.29.897 — 1 -> 3; ranks 0-2 are now the active bands
+      seen[id] = 1; out.push({ id, rank: _qnavStoryOffer(id) ? 3 : 4, frac: 0 });   /* v0.30.1746 release16: a critical or story-chain offer ranks above a plain one */   // v0.29.897 — 1 -> 3; ranks 0-2 are now the active bands
     }
     for (const e of out) {
       const d = _qnavDest(e.id);
@@ -22366,6 +22370,12 @@ function _qnavAutoTrack() {
       const _qs = (typeof player !== 'undefined' && player && player.quests) || null;
       const _done = !!(_qs && _qs.completed && _qs.completed[_cur]);
       const _live = !!(_qs && ((_qs.active && _qs.active[_cur]) || (_qs.unlocked && _qs.unlocked[_cur])));
+      if (!_done && _live && !(_qs.active && _qs.active[_cur]) && !_qnavByHand(_cur) && !game._qnavOptOut) {   // v0.30.1746 release16: an auto-picked OFFER gives way to an active or critical quest (a hand pick never)
+        const _n = performance.now();
+        if (!(_n - (_qnavAutoTrack._t || -1e9) < 2000)) { _qnavAutoTrack._t = _n; const _top = _qnavGuideList()[0];
+          if (_top && _top !== _cur && ((_qs.active && _qs.active[_top]) || (QUESTS[_top] && QUESTS[_top].critical && !_qnavStoryOffer(_cur)))) game.qnav = _top; }
+        return;
+      }
       if (!_done && _live) return;         // still worth guiding to — leave it alone
       game.qnav = null;                    // finished or dropped — fall through and re-pick
     }
@@ -22387,7 +22397,7 @@ function _qnavCycle() {
       game.qnav = null; game._qnavOptOut = true;
       if (typeof showToast === 'function') showToast('🧭 Guide off — press ' + _lxFnPrompt('questGuide') + ' to bring it back', 'common');
     } else {
-      game.qnav = list[i + 1] || list[0];
+      game.qnav = list[i + 1] || list[0]; game._qnavByHand = game.qnav;   // v0.30.1746 release16: chosen by hand
       game._qnavOptOut = false;
       const d = _qnavDest(game.qnav);
       // v0.29.897 — state the REASON alongside the place. "Fungal Hollow" alone
@@ -32330,7 +32340,7 @@ const QUESTS = {
     // for a single-fight quest). Now sits at 15000/7500 — still the
     // best-paying single quest in the game, but no longer blows past
     // an entire chapter's worth of mob grinding.
-    name: "The Sanctum's Refusal", icon: '✦', levelReq: 60,
+    name: "The Sanctum's Refusal", icon: '✦', levelReq: 50,   // v0.30.1746 release16 (per user): 60 -> 50, with the Sanctum door (levelGate 50)
     prereq: 'q_last_step',   // v0.30.1676 tearchain - after the copy falls (her fall opens the Sanctum door, v0.30.1647)
     story: true,                                   // v0.26.477 — Everdawn Cycle arc (Dawn Fragment)
     kind: 'boss', target: 'aetherion', count: 1,
@@ -43012,6 +43022,17 @@ if (MAPS.sundered_forge && MAPS.lastStep) MAPS.sundered_forge.portals.push({ x: 
 // (saved with the game) or her bestiary kill. The Sanctum's way back leads here; until she falls its W-map lane stays hidden (_retreat).
 // Synced at boot and on every loadMap (a loaded save, a new run); opened with a burst when she dies (her kill hook).
 const _LX_SANCTUM_DOOR = { x: 1540, dest: 'sanctum', name: '▶ Aetherion\'s Sanctum', levelGate: 50 };
+// v0.30.1746 release16 - the copy on the Last Step has fallen (The Last Step done, or her kill recorded): The Tear VI's descent is behind the hero
+function _lxCopyFallen() { try { const C = (player && player.quests && player.quests.completed) || {}; return !!(C.q_last_step || _lxMiraBeaten() || ((game.bestiary && game.bestiary.miraFallen) | 0) > 0); } catch (e) { return false; } }
+function _lxTearSixSettle(announce) {
+  try { const a = player.quests && player.quests.active && player.quests.active.q_lyra_last; if (!a || a.readyToHandIn || !_lxCopyFallen()) return false;
+    a.progress = Math.max(a.progress | 0, 1); a.readyToHandIn = true;
+    if (announce && typeof showToast === 'function') showToast('✅ The Last Step is behind you — tell Hera what the roll says.', 'legendary');
+    return true; } catch (e) { return false; }
+}
+const LX_TEAR6_AFTER = "Vesper's last page ends at a stair that should not exist. Lyra has copied that page twice and gone no further, because his note says to read what is written at the bottom before you climb.\n\nYou have already been to the bottom. The Hesitant, a distorted copy of the first to turn back from the gate, has fallen. Its one tear landed, and the glass parted on the Sanctum.\n\nWhat is written there is a roll of twelve expeditions, one name each. Eleven are struck through. The first is hers. Beneath it, in her own hand, is one line she did not finish: \"It was never meant to—\"\n\nThere is nothing left to fight. Go to Hera and tell her what the roll says, so Lyra hears it from someone who was there.";
+(function () { const q = QUESTS.q_lyra_last; if (!q) return; let d0 = q.desc;   // the card a hero who already went down reads
+  Object.defineProperty(q, 'desc', { configurable: true, enumerable: true, get() { return _lxCopyFallen() ? LX_TEAR6_AFTER : d0; }, set(v) { d0 = v; } }); })();
 function _lxMiraBeaten() { try { return !!((game.bossDefeated && game.bossDefeated.lastStep) || (game.bestiary && game.bestiary._boss_miraFallen)); } catch (e) { return false; } }
 // per user (2026-10-09, questline order): the Forge's far door to the Last Step shows once The Forge That Broke is done - or the copy has already fallen / The Last Step or Lyra VI is done (a save past it)
 function _lxLastStepDoorOpen() { try { const C = (player && player.quests && player.quests.completed) || {}; const A = (player && player.quests && player.quests.active) || {}; /* v0.30.1724 bughunt3 - or either quest is in hand (taken before v0.30.1676 moved Lyra VI behind the Smith: the door vanished under it) */ return !!(C.q_boss_sundered_smith || C.q_last_step || C.q_lyra_last || C.q_boss_aetherion || A.q_lyra_last || A.q_last_step || _lxMiraBeaten()); } catch (e) { return false; } }
@@ -43868,7 +43889,7 @@ const _lxAc = (function () {
   const FRAME_URL = /([a-z][\w+.-]*:\/\/[^\s()]+?)(?=:\d+:\d+)/i;
   const FOREIGN = /eval at |debugger eval code|<anonymous>:\d+:\d+|__puppeteer_evaluation_script__/;
   const strip = (u) => String(u).replace(/[?#].*$/, '');
-  const EXT_URL = /^(?:chrome|moz|safari-web|ms-browser|edge)-extension:\/\//i;   // v0.30.1724 bughunt3 - browser-extension script URLs
+  const EXT_URL = /^(?:(?:chrome|moz|safari-web|safari|ms-browser|edge)-extension|webkit-masked-url):\/\//i;   // v0.30.1746 release16: + safari-extension:// and Safari 17's webkit-masked-url://   // v0.30.1724 bughunt3 - browser-extension script URLs
   const log = [], recs = [];
   let on = false, installed = false, sweepT = null, devRec = null;
   let self = '', selfL0 = 0, selfL1 = 0;   // v0.30.1724 bughunt3 - selfL0..selfL1: this closure's own lines in the page (see foreign)
@@ -44037,7 +44058,7 @@ const _lxAc = (function () {
         const b = list[i]; if (!b || typeof b.roll !== 'number') continue;
         const def = POWERUPS.find((p) => p.id === b.id); if (!def || typeof def.max !== 'number') continue;
         const hi = Math.max(def.min || 0, def.max), span = Math.max(Math.abs(def.min || 0), Math.abs(def.max));
-        if (b.roll !== b.roll || b.roll > hi || Math.abs(b.roll) > span * 2 + 1) {   /* v0.30.1744 release15: past the top of its definition (the highest any roll, a Gravitos max-roll included, can land - was twice the span) */ note('boon', 'player.boons[' + i + '].roll', b.roll, hi); b.roll = hi; hit = true; }
+        if (b.roll !== b.roll || b.roll > hi || Math.abs(b.roll) > span * 2 + 1) {   /* v0.30.1744 release15: past the top of its definition (the highest any roll, a Gravitos max-roll included, can land - was twice the span) */ note('boon', 'player.boons[' + i + '].roll', b.roll, hi, (b.roll === b.roll && b.roll >= 0 && b.roll <= hi * 2.5)); b.roll = hi; hit = true; }   /* v0.30.1746 release16: a roll an older, wider range produced (Iron Muscles was 10-25 before v0.30.427) is clamped softly - never marks the save */
       }
     } catch (e) {}
     return hit;
@@ -53584,6 +53605,7 @@ const GAME_SAVE_FIELDS = [
   'qnav',   // v0.29.583 — quest compass target; an allowlist, so tracking resets on reload without it
   'qnavPins',   // v0.29.875 — quests pinned to the HUD tracker; same reason as qnav above
   '_qnavKeyPos',   // v0.29.596 — where the player dragged the guide widget (stored as viewport fractions)
+  '_qnavByHand',   // v0.30.1746 release16 - a guide target the player stepped to with the guide key (auto-tracking never overrides it)
   '_qnavOptOut',   // v0.29.591 — player pressed E past the end to dismiss the guide; must outlive a reload
   // v0.26.451 - per-map chest restock cooldown (anti re-entry farm); persisted so reload can't reset it.
   '_chestCooldown',
@@ -56479,10 +56501,10 @@ const STORY_BEATS = {
       } },
       { speaker: "???", text: (c) => {
         const a = c && c.gate_answer;
-        if (a === 'wake') return "*something in her shoulders lets go — twelve ages of it*\n\nThen you are the first who answered for THEM and not for yourself. Hold that. The road will try to take it from you first.\n\nGo on, foreigner. The lanterns burned for you. The Houses are waiting.";
-        if (a === 'home') return "*she almost smiles*\n\nHonest. The twelfth said the same — but they meant it like a door closing. You mean it like a door opening. That difference is everything.\n\nGo on, foreigner. The lanterns burned for you. The Houses are waiting.";
-        if (a === 'unsure') return "*she nods slowly, as if you had passed a test the others failed*\n\nGood. The ones who arrive certain arrive brittle. Let the road finish the sentence — just don't let it write a different one.\n\nGo on, foreigner. The lanterns burned for you. The Houses are waiting.";
-        return "*the silence stretches. She turns back to the pillars*\n\nYou said nothing. That is also an answer — the road heard it, and so did I. Come back through this gate alive, and tell me then.\n\nGo on, foreigner. The lanterns burned for you. The Houses are waiting.";
+        if (a === 'wake') return "*something in her shoulders lets go — twelve ages of it*\n\nThen you are the first who answered for THEM and not for yourself. Hold that. The road will try to take it from you first.\n\nGo on, foreigner. The lanterns burned for you. The stars are waiting.";
+        if (a === 'home') return "*she almost smiles*\n\nHonest. The twelfth said the same — but they meant it like a door closing. You mean it like a door opening. That difference is everything.\n\nGo on, foreigner. The lanterns burned for you. The stars are waiting.";
+        if (a === 'unsure') return "*she nods slowly, as if you had passed a test the others failed*\n\nGood. The ones who arrive certain arrive brittle. Let the road finish the sentence — just don't let it write a different one.\n\nGo on, foreigner. The lanterns burned for you. The stars are waiting.";
+        return "*the silence stretches. She turns back to the pillars*\n\nYou said nothing. That is also an answer — the road heard it, and so did I. Come back through this gate alive, and tell me then.\n\nGo on, foreigner. The lanterns burned for you. The stars are waiting.";
       } }
     ],
   },
@@ -56624,7 +56646,7 @@ const STORY_BEATS = {
     mode: 'epilogue',
     stanzas: [
       { text: "\u2014 THE SIXTH CROSSING \u2014\nTHE SKY BEYOND" },
-      { text: "The pillars are behind you.\n\nTwelve houses burn in twelve stuck dreams \u2014\nchampions who rose to wake the world\nand became the reasons it stayed asleep." },
+      { text: "The pillars are behind you.\n\nThe twelve fallen stars burn in twelve stuck dreams \u2014\nthey rose to wake the world\nand became the reasons it stayed asleep." },
       { text: "There is no road now.\nOnly the reason you carried to the gate.\n\nThe sky was never the limit, foreigner.\nIt was the errand." }
     ],
   },
@@ -65850,7 +65872,7 @@ function _checkEarlyHooks() {
             if (window._lxEarlyNextTok !== _nxTok) return;
             const _st = _earlyState(), next = _activeHooks().find(n => !_st.done[n.id]);
             if (next && !_nxOpens) showToast(`▶ Next: ${_earlyHookLabel(next)} → ${next.name}`, 'epic');
-            else if (!next) showToast('📖 Every chapter claimed — the Everdawn is yours to finish.', 'legendary');
+            else if (!next) showToast('📖 Every milestone claimed — the story goes on in your Journal.', 'legendary');
           } catch (e) {}
         }, 1500);
       }
@@ -65966,6 +65988,7 @@ function tickQuestUnlocks() {
     player.quests.completed.q_last_step = 1;
     delete player.quests.active.q_last_step; if (player.quests.unlocked) delete player.quests.unlocked.q_last_step;
   }
+  _lxTearSixSettle(false);   // v0.30.1746 release16: The Tear VI in hand after the copy fell is ready to hand in
   _lxRepairMirrorQuests();   // v0.30.x — unstick Mirror quests stranded behind the sealed Inner Dimension
   _lxRepairDynamicTargets(); // v0.30.276 — clamp curve-inflated Express targets (500 -> the authored 99 ceiling)
   _lxMoveClassLadder();      // v0.30.1697 class-swap - a ladder row of another class (an old swap) moves to the hero's class
@@ -66001,6 +66024,12 @@ function tickQuestUnlocks() {
       }
       any = true;
     }
+  }
+  // v0.30.1746 release16 - Aetherion's fall already recorded (a save from before the quest moved to Lv 50, or a fight taken before it opened): The Sanctum's
+  // Refusal is done, with its reward (the Keystone), instead of asking for a second kill. A kill made with the quest in hand completes it first.
+  if (QUESTS.q_boss_aetherion && player.cls && !player.quests.completed.q_boss_aetherion && (player.quests.unlocked.q_boss_aetherion || player.quests.active.q_boss_aetherion)
+      && typeof game !== 'undefined' && game.bestiary && ((game.bestiary.aetherion | 0) > 0 || game.bestiary._boss_aetherion)) {
+    try { _completeQuest('q_boss_aetherion'); } catch (e) {}
   }
   // v0.30.1561 CRITICAL QUESTS start themselves when nobody hands them out (The Four Captains - autoStart - and the five Dawn
   // Fragment quests). The two class advancements are still taken from your captain under the gold marker: that offer is the
@@ -66714,7 +66743,7 @@ function _qnavDest(qid) {
     }
     const via = _lxWarpVia(q);
     if (via) { const vd = npcDestFor(via, 'Warp with'); if (vd) return vd; }
-    return huntDest() || npcDest();
+    return huntDest() || npcDestFor(who, 'Talk to');   // v0.30.1746 release16: accepted - 'Accept from' was wrong (the Spire stage)
   }
   if (ready || giverWho) return npcDest() || huntDest();
   return huntDest() || npcDestFor(who, 'Find');
@@ -67891,6 +67920,7 @@ function _lxAct1Next(doneId) {
     const _ch = _lxChainOf(doneId) || _LX_ACT1_CHAIN, i = _ch.indexOf(doneId);
     if (i < 0 || i >= _ch.length - 1) return '';
     const nid = _ch[i + 1], q = (typeof QUESTS === 'object') ? QUESTS[nid] : null;
+    if (q && q.critical && player.quests && !player.quests.completed[nid] && player.quests.active[nid]) return ' · 📖 Next: ' + q.name;   // v0.30.1746 release16: the Last Step's EXP levels the hero and the Sanctum (Lv 50) starts before this toast - name it anyway
     if (!q || !player.quests || player.quests.completed[nid] || player.quests.active[nid]) return '';
     if (typeof _lxPrereqMet === 'function' && !_lxPrereqMet(q)) { const _fo = (id, d) => { const p = [].concat((QUESTS[id] || {}).prereq || []).find((x) => QUESTS[x] && !player.quests.completed[x]); return (p && d < 8) ? _fo(p, d + 1) : id; }; const _o = QUESTS[_fo(nid, 0)]; if (_o && _o !== q) return ' · 📖 Next: ' + q.name + ' waits on ' + _o.name + ((_o.levelReq || 1) > (player.level || 1) ? ' (Lv ' + _o.levelReq + ')' : '') + (_o.giver ? ' — see ' + _o.giver : ''); }   // per user (2026-10-09): a locked next quest names what it waits on
     if ((player.level || 1) < (q.levelReq || 1)) return ' · 📖 Next: ' + q.name + ' opens at Lv ' + q.levelReq + (q.giver ? ' — then see ' + q.giver : '');
@@ -67961,7 +67991,8 @@ function acceptQuest(id, _lxQuiet) {   // v0.30.902 _lxQuiet: the caller announc
         : 'Progress restored — ' + (_a.progress | 0) + ' already counted', 'rare');
     }
   } catch (e) {}
-  if (typeof _playUiSfx === 'function') _playUiSfx('quest_accept');   // v0.26.x — SFX-review gap fill
+  if (typeof _playUiSfx === 'function') _playUiSfx('quest_accept');
+  if (id === 'q_lyra_last') _lxTearSixSettle(!_lxQuiet);   // v0.30.1746 release16: taken after the copy fell - only Hera is left   // v0.26.x — SFX-review gap fill
   // v0.26.433 — Init per-target progress map for multi-objective quests.
   if (Array.isArray(q.objectives) && q.objectives.length) {
     player.quests.active[id].objProgress = {};
@@ -72306,6 +72337,7 @@ const _QUEST_STORY_CHAIN = [   // intended play order (levelReq ascending)
   at('q_road_1', 'q_act1_quiet'); at('q_road_2', 'q_road_1'); at('q_road_3', 'q_act1_recipe'); at('q_road_4', 'q_road_3'); at('q_road_5', 'q_act1_name'); at('q_road_6', 'q_act1_firstword'); at('q_road_7', 'q_road_6'); })();
 (function () { const c = _QUEST_STORY_CHAIN; for (const id of ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish']) if (c.indexOf(id) < 0) c.splice(c.indexOf('q_boss_sundered_smith'), 0, id); })();   // per user (2026-10-09): the Smith waits for Barnaby IV
 (function () { const c = _QUEST_STORY_CHAIN; if (c.indexOf('q_last_step') < 0) c.splice(c.indexOf('q_boss_sundered_smith') + 1, 0, 'q_last_step'); })();
+(function () { const c = _QUEST_STORY_CHAIN, i = c.indexOf('q_boss_aetherion'), j = c.indexOf('q_last_step'); if (i >= 0 && j >= 0 && i > j + 1) { c.splice(i, 1); c.splice(c.indexOf('q_last_step') + 1, 0, 'q_boss_aetherion'); } })();   // v0.30.1746 release16: the Sanctum (Lv 50) follows the Last Step, ahead of Hourglass I
 (function () { const c = _QUEST_STORY_CHAIN; if (c.indexOf('q_long_dawn_3') < 0) c.splice(c.indexOf('q_long_dawn_2') + 1, 0, 'q_long_dawn_3'); })();   // per user (2026-10-12) the dreams beat, before the Petition   // v0.30.1676 tearchain
 // SET-PIECES, part 1: the quest's marks and stages (v0.30.1629 - per user: "ensure that these quests are exciting and not just lame quests").
 // A quest with `stages` (kind 'event') is played IN the world: each stage names a map and the marks to touch there (a well, road-lamps,
@@ -112738,7 +112770,8 @@ function _promptClassAdvancement(tier) {
       } else {
         showToast('⚜️ LEVEL 40 — Master Advancement is ready!', 'legendary');
         const ins2 = _ADV_INSTRUCTORS[player.cls] || { npc: 'your class instructor', where: 'your home town' };   // v0.30.1732 release11: the captain gives it; the portal is in the Hidden Pagoda
-        setTimeout(() => showToast('🌀 Speak to ' + ins2.npc + ' at ' + ins2.where + ' for “The Distorted Portal — Find the Talented Smith”. Its mouth stands in the Hidden Pagoda, off the Shadow-Woven Hood.', 'story'), 1500);
+        if (player.quests && player.quests.completed && player.quests.completed.q_distorted_portal) setTimeout(() => showToast('✦ The Distorted Portal is done — choose your master path to finish the advancement.', 'story'), 1500);   // v0.30.1746 release16: only the pick is left
+        else setTimeout(() => showToast('🌀 Speak to ' + ins2.npc + ' at ' + ins2.where + ' for “The Distorted Portal — Find the Talented Smith”. Its mouth stands in the Hidden Pagoda, off the Shadow-Woven Hood.', 'story'), 1500);
       }
       if (typeof audio !== 'undefined' && audio && audio.play) audio.play('levelup');
       // Make it actionable, not just transient: re-tick unlocks so the now-
@@ -120791,6 +120824,7 @@ So… do you need a lift?`;
     // blue spiky hair, conjuring a small ball of blue mana. Acts as
     // a low-level quest hint NPC.
     text = 'There! Did you see it? A whole sphere, no smoke this time. Mostly.\n\nI\'m Lyra, apprentice in the Academia. Hera says I\'ll have the Form by autumn, Auron says next century. Want to see another one?';
+    { const _ld = (player.quests && player.quests.completed) || {}; if (_ld.q_lyra_last) text = "Hera told me what is written at the bottom. All of it.\n\n*She holds a sphere and does not let it pop.* Father's page ends at that stair. I used to read that as the end of him. Now it is only where he stopped writing.\n\nStill Lyra. Still copying the ring readings."; else if (_ld.q_lyra_kin) text = "You put the copies down. All three. I wrote the day into Auron's ledger, twice, to be sure.\n\nStill Lyra, still an apprentice. Hera lets me copy her ring readings now. No smoke all week. Want to see a sphere?"; }   // v0.30.1746 release16: her greeting follows the Tear
     opts.push({ t:'Show me a spell.',      cb:() => { document.getElementById('dialog-text').textContent = '*A sphere of blue mana flares between her hands and pops.*\n\nOkay. That was MOSTLY supposed to happen.'; } });
     opts.push({ t:'Any tips for newbies?', cb:() => { document.getElementById('dialog-text').textContent = 'Yes! 1) Never lick the blue cauldrons in the Academia, even on a dare. 2) Auntie Innie in the plaza will let you rest to full, no questions. 3) Auron pretends to nap. He is NOT napping. He is listening.'; } });
     opts.push({ t:'What are you working on?', cb:() => {   // v0.30.1554 captains' pass (per user): Lyra's work follows her arc
