@@ -76,6 +76,7 @@ const r = await page.evaluate(() => {
   for (const fn of ['_gravitosDefeatCutscene', '_gugumaToyboxCutscene', '_gugumaRebirthCutscene', '_playStoryBeat', '_showGameComplete', '_sbPreloadClip']) {
     if (typeof window[fn] === 'function') { _saved[fn] = window[fn]; window[fn] = function (a, cb) { if (typeof a === 'function') a(); else if (typeof cb === 'function') cb(); }; }
   }
+  _ensureQuests(); player.quests.active.q_boss_gravitos = player.quests.active.q_boss_gravitos || { progress: 0 };   // release14a: the petition is taken
   const grav = { type: 'gravitos', name: 'Gravitos', x: 500, y: 400, w: 120, h: 160,
                  currentHp: 0, maxHp: 1000, isBoss: true, boss: true, superBoss: true, level: 90 };
   try { triggerSuperBossDeath(grav); out.killThrew = null; } catch (e) { out.killThrew = String(e).slice(0, 140); }

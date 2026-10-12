@@ -107,6 +107,7 @@ try {
   ok('menu backup count updated', (await page.textContent('#menu-backups-sub')).includes('1 snapshot'));
   await page.click('#backup-modal .bk-del');
   ok('destructive action arms first', (await page.textContent('#backup-modal .bk-del')) === 'Sure?');
+  await page.waitForTimeout(600);   // release14d: a second click inside 500 ms of the arm is a double-click and is ignored
   await page.click('#backup-modal .bk-del');
   await page.waitForTimeout(200);
   ok('delete lands on second click', (await page.textContent('#backup-slots')).includes('No backups yet'));

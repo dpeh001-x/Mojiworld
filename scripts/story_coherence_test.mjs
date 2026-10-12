@@ -47,7 +47,7 @@ try {
     applyClass('warrior'); player.level = 80; player._tutorialSeen = true; player._storyBeatsSeen = new Proxy({}, { get: () => true });
     // the Journal's act at each fragment milestone describes what is still ahead
     const at = (frags) => { player.dawnFragments = frags.slice(); const s = _sagaState(); return { act: s.act, range: s.actInfo.range, blurb: s.actInfo.blurb }; };
-    out.acts = [at([]), at(['frag_smith']), at(['frag_smith', 'frag_aetherion']), at(['frag_smith', 'frag_aetherion', 'frag_aries', 'frag_vigil'])];
+    out.acts = [at([]), at(['frag_smith']), at(['frag_smith', 'frag_aetherion']), (game.bestiary = game.bestiary || {}, ZODIAC_SIGNS.forEach((z) => { game.bestiary['_boss_zodiac_' + z.id] = 1; }), at(['frag_smith', 'frag_aetherion', 'frag_aries', 'frag_hourglass', 'frag_vigil']))]   // release14a: Act 4 = the Unrefused Hour + every House dark + the Stilled Hour;
     // Gravitos speaks for himself: no narrator lead-in on any of his stanzas, for any gate answer
     const grav = [];
     for (const k in STORY_BEATS) for (const st of (STORY_BEATS[k].stanzas || [])) {
@@ -57,7 +57,7 @@ try {
     out.grav = [...new Set(grav)];
     // the Amnesiac's saga once the dream has edges again (act 4)
     let last = ''; const _rt = window._runDialogTypewriter; window._runDialogTypewriter = function (t) { last = String(t); return _rt.apply(this, arguments); };
-    player.dawnFragments = ['frag_smith', 'frag_aetherion', 'frag_vigil'];
+    player.dawnFragments = ['frag_smith', 'frag_aetherion', 'frag_hourglass', 'frag_vigil'];   // release14a: Act 4 (every House is dark from the milestone above)
     const am = (game.npcs || []).find((n) => n.role === 'amnesiac') || { name: 'The Amnesiac', role: 'amnesiac', x: 400, y: 400 };
     game._amnesiacSagaView = true; try { openNPC(am); } catch (e) { last = 'ERR ' + e.message; } out.saga4 = last;
     game._amnesiacSagaView = false; try { closeDialog(); } catch (e) {}

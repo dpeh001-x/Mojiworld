@@ -47,6 +47,7 @@ await page.waitForFunction(() => typeof _showGameComplete === 'function', null, 
 await page.waitForTimeout(2000);
 
 const R = await page.evaluate(() => {
+  _ensureQuests(); player.quests.active.q_boss_gravitos = player.quests.active.q_boss_gravitos || { progress: 0 };   // release14a: the petition is taken
   try { _showGameComplete(); } catch (e) { return { err: String(e.message).slice(0, 120) }; }
   const ov = document.getElementById('game-complete-overlay');
   if (!ov) return { err: 'overlay not created' };

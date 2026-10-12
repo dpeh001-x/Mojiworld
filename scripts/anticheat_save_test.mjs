@@ -88,7 +88,7 @@ try {
   await page.evaluate(() => { openBackupModal(); });
   await page.waitForTimeout(400);
   const bk = page.locator('#backup-slots .bk-restore').first();
-  await bk.click({ timeout: 10000 }); await page.waitForTimeout(300);
+  await bk.click({ timeout: 10000 }); await page.waitForTimeout(700);   // release14d: a second click inside 500 ms of the arm ("Sure?") is ignored
   const reloaded = page.waitForEvent('domcontentloaded', { timeout: 120000 });   // the restore reloads 600 ms on - later on a loaded machine
   await bk.click({ timeout: 10000 }); await reloaded;
   for (let i = 0; i < 4; i++) { try { await menu(page); break; } catch (e) { await page.waitForTimeout(1500); } } await page.waitForTimeout(2500); await menu(page); await enter(page);

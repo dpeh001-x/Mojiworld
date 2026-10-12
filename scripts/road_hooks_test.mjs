@@ -181,14 +181,14 @@ try {
     const nf = net.isHost, nh = net.hostId, was = window._coopFollowingHost; net.isHost = false; net.hostId = 7; window._coopFollowingHost = () => true; game.hazards.length = 0;
     try { _coopApplyHazards({ id: 7, map: game.currentMap, list }); } catch (err) { out.err = String(err.message).slice(0, 80); }
     const m = game.hazards.find((x) => x._coopMirror); out.mirror = m && { spore: !!m._spore, skin: m._skin }; net.isHost = nf; net.hostId = nh; window._coopFollowingHost = was; game.hazards.length = 0;
-    // a guest runs no trial: its touch counts
+    // release14b: a guest runs the door trial itself (no monsters in it): the touch starts it and the stage waits for it
     player.quests = { active: {}, completed: {}, unlocked: {}, fresh: {} }; _ensureQuests(); player.level = 10; for (const k of Object.keys(QUESTS)) if (/^q_road_[1-6]$/.test(k)) player.quests.completed[k] = true; player.quests.unlocked.q_road_7 = true; loadMap('shadowWovenHood', 300); await new Promise((r) => setTimeout(r, 1600)); game.paused = false;
     acceptQuest('q_road_7', true); const a = player.quests.active.q_road_7; a.stage = 3; a.used = {}; const mk = _lxQMarks().find((x) => x.mk.id === 'taiga'); player.x = mk.x - player.w / 2; player.y = mk.y - player.h - 2; await new Promise((r) => setTimeout(r, 500));
-    const wasF = window._coopFollowingHost; window._coopFollowingHost = () => true; game._lxQMarkT = 0; const t = _lxQMarkTarget(); if (t) _lxQMarkUse(t); window._coopFollowingHost = wasF; out.guest = { fight: !!game._lxFight, stage: a.stage, ready: !!a.readyToHandIn };
+    const wasF = window._coopFollowingHost; window._coopFollowingHost = () => true; game._lxQMarkT = 0; const t = _lxQMarkTarget(); if (t) _lxQMarkUse(t); window._coopFollowingHost = wasF; out.guest = { fight: !!game._lxFight, trial: !!(game._lxFight && game._lxFight.def && game._lxFight.def.trial), stage: a.stage, ready: !!a.readyToHandIn }; if (game._lxFight) _lxFightEnd(game._lxFight, false, 'test');
     player._god = wasG; return out;
   });
   ok('the column skin: a trial column is the spore burst\'s own hazard (ground-eruption, enemy-owned, not marker-only) in a "cut" skin with a shove, tagged to its fight', C.h.type === 'meteor_warn' && C.h.spore && C.h.col && C.h.skin === 'cut' && C.h.owner === 'enemy' && C.h.r === 28 && C.h.kb === 8 && C.h.fid === 'fx1' && C.h.notMarker, C.h);
-  ok('co-op: the skin rides the wire (sk) and the guest draws the same line; a guest runs no trial of its own - its touch counts', C.wire && C.wire.mk === 2 && C.wire.sk === 'cut' && C.mirror && C.mirror.spore && C.mirror.skin === 'cut' && !C.err && C.guest.fight === false && C.guest.stage === 4 && C.guest.ready, { wire: C.wire, mirror: C.mirror, err: C.err, guest: C.guest });
+  ok('co-op: the skin rides the wire (sk) and the guest draws the same line; a guest runs the trial itself (release14b: was won on touch)', C.wire && C.wire.mk === 2 && C.wire.sk === 'cut' && C.mirror && C.mirror.spore && C.mirror.skin === 'cut' && !C.err && C.guest.fight === true && C.guest.trial && C.guest.stage === 3 && !C.guest.ready, { wire: C.wire, mirror: C.mirror, err: C.err, guest: C.guest });
   ok('no page errors', errs.length === 0, errs.slice(0, 2));
 } catch (e) { fail++; console.log('FAIL harness: ' + String(e.message).slice(0, 400)); }
 await browser.close(); server.kill();

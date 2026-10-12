@@ -34,6 +34,7 @@ try {
     // seventeen endings
     const E = (typeof _LX_MASTER_ENDINGS === 'object') ? _LX_MASTER_ENDINGS : {};
     out.endings = { masters: Object.keys(MASTERS).sort().join(','), lines: Object.keys(E).sort().join(','), distinct: new Set(Object.values(E)).size };
+    _ensureQuests(); player.quests.active.q_boss_gravitos = player.quests.active.q_boss_gravitos || { progress: 0 };   // release14a: the credits belong to the petition
     const credits = (master) => { const o = document.getElementById('game-complete-overlay'); if (o) o.remove(); player.master = master; _showGameComplete();
       const ov = document.getElementById('game-complete-overlay'); const t = { mine: ((ov && ov.querySelector('.lx-master-ending')) || {}).textContent || '', all: (ov && ov.textContent) || '' };
       if (ov) ov.remove(); if (typeof game !== 'undefined') game.paused = false; return t; };

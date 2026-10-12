@@ -54,6 +54,7 @@ try {
   ok('[2] the import confirm is on top of the title screen, signature verified, and it loads (nothing to overwrite)', c1.top && /Signature verified/.test(c1.body) && /This loads the save/.test(c1.body) && !/OVERWRITE/.test(c1.body), c1);
   // 3. confirm: the page reloads into the imported hero
   await page.evaluate(() => { window.__lxBefore = 1; });
+  await page.waitForTimeout(500);   // release14d: Confirm within 400 ms of the dialog opening is the opener's double-click and is ignored
   await page.click('#confirm-yes');
   await page.waitForFunction(() => !window.__lxBefore && document.readyState !== 'loading', null, { timeout: 30000 }).catch(() => {});
   await title();

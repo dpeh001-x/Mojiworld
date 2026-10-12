@@ -177,9 +177,9 @@ try {
     player.hp = getMaxHp(); player._god = true; player.invulnerable = 9e9; game.dying = 0;
     // a left map ends it too
     await use('well'); f = game._lxFight; const had = !!f; loadMap('town', 300); await wait(400); _lxFightTick(16); out.left = { had, over: !game._lxFight, stage: a.stage | 0 };
-    // a co-op guest runs no fight of its own: its touch counts
+    // release14b: a co-op guest cannot start a monster set-piece on its partner's map - refused with a toast, never won on touch (door trials run on the guest)
     await setup('q_road_1'); a = player.quests.active.q_road_1; const was = window._coopFollowingHost; window._coopFollowingHost = () => true; await use('well'); window._coopFollowingHost = was;
-    out.guest = { fight: !!game._lxFight, stage: a.stage, ready: !!a.readyToHandIn };
+    out.guest = { fight: !!game._lxFight, stage: a.stage, ready: !!a.readyToHandIn, refused: __toasts.some((t) => /yours alone/.test(t)) };
     // key repeat: one touch counts once; a quiet mark says its line once
     a = await setup('q_road_5'); const m = stand('a'); await wait(100); game._lxQMarkT = 0; _lxQMarkUse(_lxQMarks().find((x) => x.mk.id === 'a')); _lxQMarkUse(_lxQMarks().find((x) => x.mk.id === 'a'));
     out.repeat = { used: Object.keys(a.used || {}).length, says: __toasts.filter((t) => /stroke did not end/.test(t)).length };
@@ -196,7 +196,7 @@ try {
     return out;
   });
   ok('safety: a lost fight sends the foe away quietly and the mark waits (nothing counted); leaving the map ends it too', Z.lost.mob >= 1 && Z.lost.over && Z.lost.gone === 0 && Z.lost.toast && Z.lost.stage === 0 && Z.lost.lit === false && Z.left.had && Z.left.over && Z.left.stage === 0, { lost: Z.lost, left: Z.left });
-  ok('safety: a co-op guest runs no fight of its own - its touch counts - and a repeated key press touches a mark once', Z.guest.fight === false && Z.guest.stage === 1 && Z.guest.ready && Z.repeat.used === 1 && Z.repeat.says === 1, { guest: Z.guest, repeat: Z.repeat });
+  ok('safety: a co-op guest starts no monster fight on its partner\'s map and does not win it on touch (release14b: refused with a toast) - and a repeated key press touches a mark once', Z.guest.fight === false && !Z.guest.ready && Z.guest.refused && Z.repeat.used === 1 && Z.repeat.says === 1, { guest: Z.guest, repeat: Z.repeat });
   ok('abandoning and re-accepting a staged quest brings back its marks used, its order and its count', Z.resume.gone && Z.resume.before.used === 'l1' && Z.resume.after.used === 'l1' && Z.resume.after.seq === 1 && Z.resume.after.progress === 1 && Z.resume.after.stage === 0, Z.resume);
   ok('all ' + Z.glyphs + ' mark glyphs draw, lit and unlit, without an error', Z.glyphs >= 6 && Z.art.length === 0, Z.art);
   ok('the tracker lists a staged quest with its count and the next mark; away from the map it names the map; the navigator reads the stage\'s map', Z.track.row && Z.track.prog && Z.track.hint && /Dream-Well/.test(Z.track.g) && /Emerald Thicket/.test(Z.track.gTown) && Z.track.map === 'forest', Z.track);

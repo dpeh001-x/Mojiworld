@@ -35,7 +35,8 @@ await page.evaluate(() => {
 });
 await page.click('#cs-nav-next').catch(() => {});
 await page.waitForTimeout(2500);
-await page.evaluate(() => { window._prologueActive = false; _showGameComplete(); });
+await page.evaluate(() => { window._prologueActive = false; _ensureQuests(); player.quests.active.q_boss_gravitos = player.quests.active.q_boss_gravitos || { progress: 0 };   // release14a: the petition is taken
+  _showGameComplete(); });
 await page.waitForTimeout(4500);   // past the 3.4 s fade-in
 const r = await page.evaluate(() => {
   const ov = document.getElementById('game-complete-overlay');

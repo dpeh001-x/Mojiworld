@@ -297,9 +297,9 @@ try {
     const rit = (x) => Object.assign({ id: 'r', name: 'Piece', slot: 'weapon', rarity: 'epic', dropLevel: 60, affixes: [{ k: 'atk' }], stars: 1, tier: 4 }, x || {});
     out.reforge = { plain: _reforgeWhy(rit()), shard: _reforgeWhy(rit({ _shardsight: true })), god: _reforgeWhy(rit({ godTier: true })), trans: _reforgeWhy(rit({ transcended: true })), low: _reforgeWhy(rit({ dropLevel: 10 })) };
     // systems-6: the dailies roll only what can be done
-    const lv0 = player.level; const seen = {};
+    const lv0 = player.level; const seen = {}; _ensureQuests(); const _r14pet = player.quests.active.q_boss_gravitos; player.quests.active.q_boss_gravitos = { progress: 0 };   // release14a: gravitos1 needs the Singularity open
     for (const lv of [1, 6, 12, 15, 19, 20, 25, 30, 35, 40, 69, 70, 99]) { player.level = lv; const ids = new Set(); for (let d = 0; d < 400; d++) ids.add(_pickDailyChallenge(d).id); seen[lv] = [...ids].join(','); }
-    player.level = lv0; out.daily = seen;
+    player.level = lv0; out.daily = seen; if (_r14pet) player.quests.active.q_boss_gravitos = _r14pet; else delete player.quests.active.q_boss_gravitos;   // release14a
     const ch = (id) => DAILY_CHALLENGES.find((c) => c.id === id); out.dailyRows = { reach20: ch('reach20'), gravitos1: ch('gravitos1') };
     // systems-7: a run's tray does not write the lifetime codex ledger; the two titles differ
     game.boonDex = undefined; player.boons = []; player.boonsEquipped = []; player.level = 75;
