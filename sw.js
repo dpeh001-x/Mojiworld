@@ -403,8 +403,12 @@ async function _lxCdnMatch(href) {
 }
 async function _lxCdnAsset(e, req, url) {
   const cache = await caches.open(CDN);
+  const own = await cache.match(url.href);
+  if (own) return own;
+  // v0.30.1737 bughunt6 - a copy still in the art generation (stored before the CDN cache existed) is MOVED into it as it answers: the comment
+  // promised a hand-over that never happened, so the next CACHE bump would still have deleted every such sprite and track
   const hit = await _lxCdnMatch(url.href);
-  if (hit) return hit;
+  if (hit) { e.waitUntil(cache.put(url.href, hit.clone()).catch(() => {})); return hit; }
   try {
     const net = await fetch(url.href, { mode: 'cors', credentials: 'omit' });
     if (net && net.ok) e.waitUntil(cache.put(url.href, net.clone()).then(() => _lxCdnTrim(cache)).catch(() => {}));

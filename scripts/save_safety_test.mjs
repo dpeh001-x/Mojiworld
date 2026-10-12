@@ -67,6 +67,8 @@ try {
   check(bk.before >= 3 && bk.after === bk.before && bk.ret === false && /FAILED/.test(bk.toast || ''), 'a backup under a full storage says it failed and keeps the slots already stored (it deleted them all)', J(bk));
   const ul = await p2.evaluate(() => {
     const raw = localStorage.getItem(SAVE_KEY); const k = window.applyKeybinds; window.applyKeybinds = () => { throw new Error('probe'); };
+    // bughunt6 a backup made on the title takes the save on disk: the slots above may hold this exact save, and a save already kept is not filed twice
+    try { _lxStoreBackups(_lxGetBackups().filter((b) => !(b && b.data === raw))); } catch (e) {}
     let ok; try { ok = loadState(); } catch (e) { ok = 'threw'; } window.applyKeybinds = k;
     return { ok, slot: _lxGetBackups().some((b) => b && b.label === 'auto · could not load' && b.data === raw) };
   });

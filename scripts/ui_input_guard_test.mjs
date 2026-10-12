@@ -65,6 +65,8 @@ const r = await page.evaluate(() => {
 
   // ---- 3. Cure / Pickup onto Move Left's key: the key moves over, Move Left SWAPS (no key does two jobs, and the save
   //      never holds one key twice) - through the K panel's own capture, which only listens while the panel is open
+  // bughunt6 Keybinds do not open over a story beat - this harness boots with one live (see section 1)
+  for (const el of document.querySelectorAll('#story-beat-overlay, #boss-intro-overlay')) el.classList.remove('on');
   _lxBindReset(); toggleKeybindModal();
   const one = () => { const t = _lxBindTable(), seen = {}; for (const id in t.keyOf) { const k = t.keyOf[id]; if (k && seen[k]) return false; if (k) seen[k] = 1; } return true; };
   _kbCapture = 'cure'; document.dispatchEvent(key('ArrowLeft'));

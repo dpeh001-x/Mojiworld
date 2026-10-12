@@ -66,6 +66,8 @@ try {
     // the host is ensured first. Without this the chip query returned zero and both bind checks
     // "passed" against nothing.
     // v0.30.1328 keyboard remap - the chips live in the panel's Keyboard tab and a key is only taken while the panel is open
+    // bughunt6 Keybinds do not open over a story beat - forest's first-visit scene is up on a fresh save
+    for (const el of document.querySelectorAll('#story-beat-overlay, #boss-intro-overlay')) el.classList.remove('on');
     try { if (typeof toggleKeybindModal === 'function') toggleKeybindModal(); } catch (e) { o.renderErr = String(e.message).slice(0, 90); }
     await sleep(300);
     const chipFor = (action) => document.querySelector('#keybind-modal .kbm-action-chip[data-action="' + action + '"]');

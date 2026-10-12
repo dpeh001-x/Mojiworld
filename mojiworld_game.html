@@ -16377,7 +16377,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1736';
+const GAME_VERSION = 'v0.30.1737';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -16646,7 +16646,7 @@ const canvas = document.getElementById('game');
 try {
   canvas.addEventListener('contextlost', (ev) => {
     try { ev.preventDefault(); } catch (e) {}
-    try { if (typeof _flushSaveStateNow === 'function') _flushSaveStateNow(); } catch (e) {}
+    try { if (typeof _flushSaveStateNow === 'function' && !(typeof game !== 'undefined' && game && game._resetting) && (typeof _lxHeroInWorld !== 'function' || _lxHeroInWorld())) _flushSaveStateNow(); } catch (e) {}   // v0.30.1737 bughunt6: not mid-reset, not from the title
     let last = 0; try { last = Number(sessionStorage.getItem('lx_ctxlost_reload') || 0); } catch (e) {}
     if (Date.now() - last < 60000) { try { if (typeof showToast === 'function') showToast('⚠ The graphics context was lost again — please reload the page.', 'danger'); } catch (e) {} return; }
     try { sessionStorage.setItem('lx_ctxlost_reload', String(Date.now())); } catch (e) {}
@@ -46160,6 +46160,10 @@ window.addEventListener('keydown', e => {
   }
 
   if (repeat) return; // Fresh presses only below
+  // v0.30.1737 bughunt6 - PHOTO MODE IS A PAUSE FOR INPUT. It freezes the sim through `frozen`, not game.paused, and every gate below asks only
+  // game.paused: Up (pan) walked through a door, G (grade) cast the master signature, Z / Shift / A / N / PgUp acted. A key in photo mode
+  // is the photo bar's (arrows, G, Enter, Esc) or O (below); nothing else runs.
+  if (game._photoMode && !_isAction(rawKey, 'photo')) { if (typeof _lxPhotoKey === 'function') _lxPhotoKey(k); e.preventDefault(); return; }
 
   // Warrior charge — start holding on the first press of a skill key.
   // Must run before castSkill-style handlers so the poll loop sees the lock.
@@ -51792,6 +51796,7 @@ function _lxRolledProjLoss(lo, hi) {
   if (player.blockTimer > 0) v *= 0.3;
   if (player.cls === 'warrior' && typeof _warriorDr === 'function') v *= _warriorDr();
   if (player._aegis) v *= 0.5;
+  { const _hs = (typeof _holyShieldDrMul === 'function') ? _holyShieldDrMul() : 1; if (_hs < 1) v *= _hs; }   // v0.30.1737 bughunt6: Holy Shield's +25% DR (it was left on the discarded figure)
   return Math.max(1, Math.floor(v));
 }
 // ── AETHERION'S ASCENSION ─────────────────────────────────────────────────────────────────────
@@ -52554,6 +52559,17 @@ function _bossHitBand(m, kind) {
   const b = T[kind] || T.heavy;
   const lv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
   return { floor: b.floor, cap: b.cap, ref: _refLoAtLv(lv) };
+}
+// v0.30.1737 bughunt6 - the defences every other Gravitos hit takes before its band (its contract: "input is the fully-MITIGATED damage"): his charge
+// and slam skipped block, warrior DR, Aegis and Holy Shield - a raised block or a 9 s Divine Aegis changed nothing against them.
+function _lxGravStrikeMitig(d) {
+  try {
+    if (player.blockTimer > 0) { d = Math.max(1, Math.floor(d * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+    if (player.cls === 'warrior' && typeof _warriorDr === 'function') d = Math.max(1, Math.floor(d * _warriorDr()));
+    if (player._aegis) d = Math.max(1, Math.floor(d * 0.5));
+    const _hs = (typeof _holyShieldDrMul === 'function') ? _holyShieldDrMul() : 1; if (_hs < 1) d = Math.max(1, Math.floor(d * _hs));
+  } catch (e) {}
+  return d;
 }
 function _gravBandClamp(mitigated, band) {
   // v0.29.362 — Second Skin honoured through the band override. Banded boss
@@ -53333,6 +53349,7 @@ const PLAYER_SAVE_FIELDS = [
   '_qBank', '_zodiacEchoKills', '_coopReviveMapAt', '_iceFloorBest',
   '_downPending',   // v0.30.918 a down the save caught (see loadState)
   '_lxBeatOpen', '_lxFilmOpen',   // v0.30.1722 release8: the scene or film a reload cut short (see loadState)
+  '_hourglassDue',   // v0.30.1737 bughunt6: the Hourglass verdict owed by a turn-in whose scene never opened (see loadState)
   '_cdCarry'   // v0.30.x cooldown integrity - what was still cooling down (see _lxCdSnapshot)
 ];
 // =========================================================================
@@ -56001,7 +56018,7 @@ function _playBossIntro(bossType) {
       const _els = game._bossIntroEls;
       if (!_els || !_els.overlay || !_els.overlay.classList.contains('on')) return;   // not showing → let input through
       const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      if (_now - (game._bossIntroShownAt || 0) < 450) return;                           // grace window
+      if (_now - (game._bossIntroShownAt || 0) < 450) return; if (e && e.repeat) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); return; }   // v0.30.1737 bughunt6: a held key is not a skip                           // grace window
       if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); }         // consume the skip input only
       _dismissBossIntro();
     };
@@ -57052,6 +57069,8 @@ function _playStoryBeat(beatId, onClose, _lxBeatMap) {
     idx = beat.stanzas.length; closeBeat();
   };
   const onKey = (ev) => {
+    // v0.30.1737 bughunt6 - a held key's auto-repeat turns no page and skips no scene (it flipped a beat through unseen); the keys are still swallowed
+    if (ev.repeat) { if (ev.key === 'Escape' || ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); } return; }
     // Enter / Space advance a page; Escape skips the scene. Block bubble so combat keys don't fire underneath.
     // v0.30.897 the pad's B is Escape too, and a thumb rests on B: the pad skips on a second press within 2 s (the line after
     // this one - the keyboard's Esc - still skips at once)
@@ -57092,7 +57111,7 @@ function exportSave() {
     // Flush the debounced save first — otherwise the exported file can be
     // up to _SAVE_DEBOUNCE_MS stale (or worse if no save event fired since
     // the last change). Makes "Export" always mean "export NOW".
-    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) {
+    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting && (typeof _lxHeroInWorld !== 'function' || _lxHeroInWorld())) {
       try { _flushSaveStateNow(); } catch (_) {}
     }
     var data = _lxSaveWithPaint(localStorage.getItem(SAVE_KEY));   // v0.30.1181 paint-save - the file carries the paint
@@ -57112,7 +57131,7 @@ function exportSave() {
 // Kept, unreferenced, for a cleanup pass.
 function copySaveToClipboard() {
   try {
-    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) {
+    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting && (typeof _lxHeroInWorld !== 'function' || _lxHeroInWorld())) {
       try { _flushSaveStateNow(); } catch (_) {}
     }
     var data = _lxSaveWithPaint(localStorage.getItem(SAVE_KEY));   // v0.30.1181 paint-save - the file carries the paint
@@ -57389,7 +57408,7 @@ function _lxDownloadFile(text, filename, mime) {
 }
 function exportSaveSecure() {
   try {
-    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) { try { _flushSaveStateNow(); } catch (_) {} }
+    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting && (typeof _lxHeroInWorld !== 'function' || _lxHeroInWorld())) { try { _flushSaveStateNow(); } catch (_) {} }
     var data = _lxSaveWithPaint(localStorage.getItem(SAVE_KEY));   // v0.30.1181 paint-save - the file carries the paint
     if (!data) { if (typeof showToast === 'function') showToast('No save to export yet.', 'common'); return; }
     var lvl = (typeof player !== 'undefined' && player && player.level) ? player.level : 0;
@@ -58124,6 +58143,19 @@ function loadState() {
     if (_lxNoHp) player.hp = _safeMaxHp; if (_lxNoMp) player.mp = _safeMaxMp;   // v0.30.1186 save-notices - an old / minimal save starts at full, not at 100 of 643
     // v0.30.918 DOWNED ACROSS A RELOAD. A solo down is a death on a 30 s delay (v0.27.10), but the save held only hp 1, so
     // closing the game on the ground loaded the hero standing with the toll unpaid. Take the toll triggerDeath takes.
+    // v0.30.1737 bughunt6 - THE HOURGLASS VERDICT A CLOSED GAME NEVER OPENED. The turn-in plays it 1.6 s later and release12 pays it on its close (or the
+    // reload replay below), but a game closed inside those 1.6 s saved the turn-in with no scene open: nothing replayed, nothing paid.
+    // player._hourglassDue rides the turn-in's save; the scene plays once the hero is in the world. hourglass_paid keeps the pay once-only.
+    try { if (player._hourglassDue) {
+      const _hgPaid = () => !!(player._storyChoices && player._storyChoices.hourglass_paid);
+      if (_hgPaid() || !(player.quests && player.quests.completed && player.quests.completed.q_hourglass_5)) delete player._hourglassDue;
+      else if (player._lxBeatOpen !== 'hourglass_verdict' && typeof _LX_BEAT_CLOSE !== 'undefined') { const _hgGo = (n) => {
+        const _ov = document.getElementById('loading-overlay'), _up = !!_ov && !_ov.classList.contains('fade') && getComputedStyle(_ov).display !== 'none';
+        if (_up || window._prologueActive || (typeof game !== 'undefined' && game && game.paused)) { if (n < 1200) setTimeout(() => _hgGo(n + 1), 500); return; }
+        if (!player._hourglassDue || _hgPaid()) return;
+        if (player._storyBeatsSeen && player._storyBeatsSeen.hourglass_verdict) _LX_BEAT_CLOSE.hourglass_verdict();   // seen, never paid: pay
+        else if (typeof _playStoryBeat === 'function') _playStoryBeat('hourglass_verdict', _LX_BEAT_CLOSE.hourglass_verdict); };
+        setTimeout(() => _hgGo(0), 1800); } } } catch (e) {}
     // v0.30.1722 release8: a story scene or kill film cut off by closing the game plays again once you are back in the world
     try {
       const _ob = player._lxBeatOpen, _of = player._lxFilmOpen; delete player._lxBeatOpen; delete player._lxFilmOpen;
@@ -58553,7 +58585,7 @@ function _lxSaveMetaFrom(data) {
 function _lxCreateBackup(label) {
   try {
     // Flush the debounced save first so the snapshot is NOW, not ~1.5s stale.
-    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting) {
+    if (typeof _flushSaveStateNow === 'function' && typeof game !== 'undefined' && !game._resetting && (typeof _lxHeroInWorld !== 'function' || _lxHeroInWorld())) {
       try { _flushSaveStateNow(); } catch (_) {}
     }
     const data = _lxSaveWithPaint(localStorage.getItem(SAVE_KEY));   // v0.30.1181 paint-save - the slot keeps the paint
@@ -61021,7 +61053,7 @@ function _coopApplyHazHit(msg) {
 //                  so each guest takes the same % the host modeled, not the host's raw)
 // bughunt boss-5 - grounded / yMin: the two position rules a radius cannot say. grounded = the strike only lands on a player standing on
 // the ground (the quakes, the slam); yMin = it only lands below that world y (Capricorn's Altitude Pressure: the lowest 30% of the arena).
-function _coopBroadcastBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color, grounded, yMin) {
+function _coopBroadcastBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color, grounded, yMin, band) {   // v0.30.1737 bughunt6: band - a Gravitos phase band the guest clamps to (gbd), as hazhit
   // v0.29.x — co-op boss aggro tap: while bossAI runs a PARTNER-targeted tick
   // (player fields swapped), direct-hit writes to `player` get discarded on
   // restore — this hook captures the strike so the dispatcher can re-apply it
@@ -61034,7 +61066,8 @@ function _coopBroadcastBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color, gr
       d: dmgRaw ? Math.max(0, Math.round(dmgRaw)) : 0,
       fr: dmgFrac ? +Math.min(1, Math.max(0, +dmgFrac)).toFixed(3) : 0,
       sl: String(label || 'a boss attack').slice(0, 24), c: String(color || '#ff5555').slice(0, 9),
-      g: grounded ? 1 : 0, lo: yMin ? Math.round(yMin) : 0 }));
+      g: grounded ? 1 : 0, lo: yMin ? Math.round(yMin) : 0,
+      gbd: (band && +band.cap > 0) ? [+band.floor || 0, +band.cap || 0, +band.mul || 1, Math.round(+band.ref || 0)] : undefined }));
   } catch (e) {}
 }
 function _coopApplyBossHit(msg) {
@@ -61079,7 +61112,13 @@ function _coopApplyBossHit(msg) {
   // v0.29.x — %-fraction nukes (isFrac) get the 99.9%-maxHp ceiling so a
   // percentage attack can't one-shot the follower; raw atk-based co-op hits
   // stay uncapped (an absolute overkill still kills).
-  player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg);
+  let _bhLost = (typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg;
+  // v0.30.1737 bughunt6 - Gravitos's charge / slam carry his phase band (gbd), as hazhit does: a guest took the strike unbanded, ~22x the host's ceiling
+  if (_bhLost > 0 && Array.isArray(msg.gbd) && typeof _gravBandClamp === 'function') {
+    const _bf = +msg.gbd[0], _bc = +msg.gbd[1], _bm = +msg.gbd[2], _br = +msg.gbd[3];
+    if (Number.isFinite(_bf) && Number.isFinite(_bc) && Number.isFinite(_bm) && Number.isFinite(_br) && _bc > 0 && _bc <= 2 && _bf >= 0 && _bf <= _bc && _bm > 0 && _bm <= 100 && _br >= 0 && _br <= 1e7) _bhLost = _gravBandClamp(dmg, { floor: _bf, cap: _bc, mul: _bm, ref: _br });
+  }
+  player.hp -= _lxLost(_bhLost);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
   player._hitIframeAt = game.time;   // bughunt guest-taken (parityA-2): a HIT-granted i-frame (see _coopApplyHazHit)
@@ -62662,7 +62701,7 @@ function _coopApplyKill(msg) {
   // the fight; without this, lying next to a farming host kept the ladder
   // climbing while incapacitated.
   if (!msg.il && !player._downed && typeof _ksOnKill === 'function' &&
-      typeof _coopNearKill === 'function' && _coopNearKill(msg.x, msg.y)) {
+      typeof _coopNearKill === 'function' && _coopNearKill(Number.isFinite(+msg.kx) ? +msg.kx : +msg.x, Number.isFinite(+msg.ky) ? +msg.ky : +msg.y)) {   // v0.30.1737 bughunt6: the kill's centre (kx/ky), as the EXP share
     try { _ksOnKill(); } catch (e) {}
   }
   if (msg.b && !+msg.ec && !+msg.ex && !+msg.tw) { try { if (game.bossDefeated) game.bossDefeated[game.currentMap] = true; } catch (e) {} }   // v0.30.x coop-audit — as the host
@@ -62873,6 +62912,9 @@ function _lxContactHolyBounce(m) {
 // combo, was not shoved by an ordinary mob, and was drawn hidden for ~60 ms after every touch. Moved verbatim from the host contact
 // block; the host passes the same four values it always had in scope.
 function _lxContactLanding(m, dmg, _shownDmg, _lxTookDmg) {
+  // v0.30.1737 bughunt6 - Granitehorn's Immovable counts a monster's touch (host and co-op guest land here): it hooked _lxLost, "every hit taken",
+  // but contact and enemy shots subtract HP directly, so its DEF stacks almost never built. Read before the shove below moves the hero.
+  if (_lxTookDmg > 0 && !player._god && typeof _lxGraniteHit === 'function') _lxGraniteHit();
   // Knight Guardian reflect — bounce the cast's rolled percentage back.
   // v0.29.671 — was a hardcoded 50%; Holy Shield stamps its own 50 below.
   // v0.30.1428 (per user: the Knight's reflect "needs major improvement") - a blow bounces back its share of the damage you TOOK
@@ -62941,7 +62983,7 @@ function _lxContactLanding(m, dmg, _shownDmg, _lxTookDmg) {
   // (see _lxBodyKnock). An ordinary monster keeps the shove below, to the number.
   const _kbTier = _lxKbTier(m);
   if (_kbTier > 0) _lxBodyKnock(m, _kbTier, _mKb);
-  else {
+  else if (!(typeof _lxGraniteStill === 'function' && _lxGraniteStill())) {   // v0.30.1737 bughunt6: Immovable - "hits do not knock you back" (only the strong throws knew)
   player.vx = dir * 3.0 * kbMul * _mKb;
   player.vy = -2.4 * kbMul * (_mKb > 1 ? 1 + (_mKb - 1) * 0.45 : 1);
   }
@@ -66484,7 +66526,7 @@ function _lxQuestCoinPreview(id, q) {
     let hs = 1;
     if (a) hs = a.rewardScale || 1;
     else if (q.kind === 'kill' && !q.bestiary && !q.noScale && !Array.isArray(q.dynamicCountRange) && (q.count | 0) > 1 && typeof _lxQuestKillTarget === 'function') hs = _lxHuntRewardScale(q, _lxQuestKillTarget(q));
-    return Math.min(_lxQuestCoinCeil(q.levelReq), Math.round(base * _lxQuestRewardMul(player.level || 1) * Math.max(1, hs || 1)));
+    return Math.min(_lxQuestCoinCeil(q.levelReq), Math.round(base * _lxQuestRewardMul(player.level || 1) * Math.max(1, hs || 1) * ((typeof _lxPqRepeatMul === 'function') ? _lxPqRepeatMul(id) : 1)));   // v0.30.1737 bughunt6: a repeat Ticket Rush stage pays 25%
   } catch (e) { return (q && q.rewards && q.rewards.mojicoins) || 0; }
 }
 function _lxQuestCoinCeil(lv) { return LX_QUEST_COIN_PER_LEVEL * Math.max(1, (lv | 0) || 1); }
@@ -66914,6 +66956,7 @@ function _completeQuest(id) {
   // per user (2026-10-09): The Forge That Broke waits for Barnaby IV and both end on the Smith, so he stands in his arena again the moment IV is handed in (not after the 10-minute boss respawn)
   if (id === 'q_barnaby_finish') { try { if (game.bossDefeated) delete game.bossDefeated.sundered_forge; if (game._bossDefeatedAt) delete game._bossDefeatedAt.sundered_forge; } catch (e) {} }
   if (id === 'q_hourglass_5' && typeof _playStoryBeat === 'function') {
+    player._hourglassDue = 1;   // v0.30.1737 bughunt6: saved with the turn-in - a game closed before the scene below opens plays it at the next load
     setTimeout(() => {
       _playStoryBeat('hourglass_verdict', _LX_BEAT_CLOSE.hourglass_verdict);   // v0.30.1734 release12: the same close action the reload replay uses
     }, 1600);
@@ -67759,6 +67802,11 @@ function toggleKeybindModal() {
     _kbCapture = null; _kbHover = null;
     return;
   }
+  // v0.30.1737 bughunt6 - not over a surface that owns the keys: under the boss boon wheel, 1/2/3 pressed to bind claimed a card blind and Esc
+  // closed both (the boon gone); over a story beat Esc skipped it unseen. Closing K (above) is never blocked.
+  { let _own = false; try { const _pm = document.getElementById('powerup-modal'); _own = !!(_pm && _pm.style.display === 'flex')
+      || !!document.querySelector('#story-beat-overlay.on, #boss-intro-overlay.on, #kill-film-overlay, #captains-teaser-overlay, #barnaby-fall-overlay'); } catch (e) {}
+    if (_own) { if (typeof showToast === 'function') showToast('\u2328 Finish this first - then K opens Keybinds', 'common'); return; } }
   const modal = existing || _buildKeybindModal();
   _kbCapture = null; _kbHover = null;
   if (typeof applyKeybinds === 'function') applyKeybinds();   // an older save's duplicates are settled before they are shown
@@ -79080,7 +79128,7 @@ function _playEverdawnWelcome() {
         game.paused = _wasPaused;
       }, 420);
     };
-    const _key = (e) => { if (e && e.key === 'F12') return; if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };   // v0.30.x full audit - the skip key stops here: J skipped the clip AND opened the journal, then the restore unpaused under it
+    const _key = (e) => { if (e && e.key === 'F12') return; if (e && e.repeat) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); return; } if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };   // v0.30.x full audit - the skip key stops here: J skipped the clip AND opened the journal, then the restore unpaused under it
     ov.addEventListener('click', _close);
     window.addEventListener('keydown', _key, true);
     v.addEventListener('ended', _close, { once: true });
@@ -79182,7 +79230,7 @@ function _lxPlayCaptainsTeaser(_tries) {
         _off();
       }, 500);
     };
-    const _key = (e) => { if (e && e.key === 'F12') return; if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };
+    const _key = (e) => { if (e && e.key === 'F12') return; if (e && e.repeat) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); return; } if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };
     ov.addEventListener('click', _close);
     window.addEventListener('keydown', _key, true);
     v.addEventListener('ended', _close, { once: true });
@@ -79265,7 +79313,7 @@ function _lxPlayBarnabyFall(_tries) {
         _off();
       }, 500);
     };
-    const _key = (e) => { if (e && e.key === 'F12') return; if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };
+    const _key = (e) => { if (e && e.key === 'F12') return; if (e && e.repeat) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); return; } if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };
     ov.addEventListener('click', _close);
     window.addEventListener('keydown', _key, true);
     v.addEventListener('ended', _close, { once: true });
@@ -79463,7 +79511,7 @@ function _lxPlayKillFilm(f, _tries) {
         _off();
       }, 500);
     };
-    const _key = (e) => { if (e && e.key === 'F12') return; if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };
+    const _key = (e) => { if (e && e.key === 'F12') return; if (e && e.repeat) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); return; } if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };
     ov.addEventListener('click', _close);
     window.addEventListener('keydown', _key, true);
     v.addEventListener('ended', _filmEnded, { once: true });   // v0.30.1719 (was _close) holds the last frame while he is still speaking
@@ -88738,7 +88786,7 @@ function tryReleaseClassCharge(slotKey) {
   // past it on the same frame the player drops to 0 HP. Without this
   // guard the cast then deducts MP and sets a cooldown on a corpse,
   // observable in some job death animations. Bail cleanly.
-  if (player.hp <= 0 || (game.dying | 0) > 0 || game.paused
+  if (player.hp <= 0 || (game.dying | 0) > 0 || game._photoMode || game.paused
       || (((player.frozenTimer | 0) > 0 || (typeof _QTE !== 'undefined' && _QTE.active)) && !player._god)) {
     // v0.26.1033 — game.paused added: releasing a held charge key while a menu is
     // open (tryStartClassCharge already gates on game.paused, as do basic attack /
@@ -107351,9 +107399,9 @@ function bossAI(m, dt, distToPlayer) {
           // eating the ×6 punish (which made the dive an unavoidable OHKO).
           const _zipPierce = (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1;   // v0.29.265
           const dmg = Math.max(1, Math.floor(Math.max(1, m.atk * 1.3) * _defAbsorbMul(_zipPierce)));
-          const _zipLost = player._god ? 0 : _gravBandClamp(dmg, _gravHeavyBand(phase, 'skill'));
+          const _zipLost = player._god ? 0 : _gravBandClamp(_lxGravStrikeMitig(dmg), _gravHeavyBand(phase, 'skill'));   // v0.30.1737 bughunt6: the defences first
           player.hp -= _zipLost;
-          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, m.w/2 + 40, dmg, 0, (m.name || m.type || 'a boss') + "'s charge", '#ff4466');
+          if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, m.w/2 + 40, Math.max(1, Math.floor(m.atk * 1.3)), 0, (m.name || m.type || 'a boss') + "'s charge", '#ff4466', false, 0, _gravHeavyBand(phase, 'skill'));   // v0.30.1737 bughunt6: the raw strike + his band (the guest applies its own DEF)
           player.hitStun = 800;
           // v0.26.069 — Post-boss-charge iframe 900 → 1800 ms.
           player.invulnerable = 1800;
@@ -107480,9 +107528,9 @@ function bossAI(m, dt, distToPlayer) {
             // (was flat-def then ×6 punish → unavoidable OHKO at Lv 80+).
             const _slamPierce = (typeof _defPierceMul === 'function') ? _defPierceMul(m) : 1;   // v0.29.265
             const dmg = Math.max(1, Math.floor(Math.max(1, m.atk * 2.2) * _defAbsorbMul(_slamPierce)));  // v0.25.716 — was 1.3 (+69 %)
-            const _slamLost = player._god ? 0 : _gravBandClamp(dmg, _gravHeavyBand(phase, 'skill'));
+            const _slamLost = player._god ? 0 : _gravBandClamp(_lxGravStrikeMitig(dmg), _gravHeavyBand(phase, 'skill'));   // v0.30.1737 bughunt6: the defences first
             player.hp -= _slamLost;
-            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(cx, 0, 180, dmg, 0, (m.name || m.type || 'a boss') + "'s slam", '#ff4444');
+            if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(cx, 0, 180, Math.max(1, Math.floor(m.atk * 2.2)), 0, (m.name || m.type || 'a boss') + "'s slam", '#ff4444', false, 0, _gravHeavyBand(phase, 'skill'));   // v0.30.1737 bughunt6: the raw strike + his band
             player.hitStun = 900;                        // long stun — easy to stun
             // v0.26.069 — Post-boss-slam iframe 900 → 1800 ms.
             player.invulnerable = 1800;
@@ -111334,7 +111382,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
               { size: Math.max(80, Math.sqrt(_bestSq)), life: 16, keepAspect: true,
                 angle: Math.atan2(_ty - _cy, _tx - _cx), flipX: _tx < _cx }); } catch (e) {}
           }
-          hitMonster(_best, _ovk, false, 'overflow');
+          { const _ls = [_lxLsSpentHp, _lxLsDealt, _lxLsPending]; try { hitMonster(_best, _ovk, false, 'overflow'); } finally { [_lxLsSpentHp, _lxLsDealt, _lxLsPending] = _ls; } }   // v0.30.1737 bughunt6: the nested hit opens its own ledger; the killing blow's comes back after it (the 7% cap paid twice)
         } finally { game._ovfDepth = 0; }
       }
     }
@@ -111370,7 +111418,7 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
     for (const _o of game.monsters) { if (!_o || _o === m || _o.currentHp <= 0) continue;
       const _dx = (_o.x + _o.w / 2) - _sx, _dy = (_o.y + _o.h / 2) - _sy, _sq = _dx * _dx + _dy * _dy; if (_sq < _sbSq) { _sbSq = _sq; _sb = _o; } }
     for (let _k = 0; _k < 10 && game.particles; _k++) game.particles.push({ x: _sx, y: _sy, vx: (Math.random() - 0.5) * 9, vy: (Math.random() - 0.7) * 7, life: 20, color: (_k % 3) ? '#bfefff' : '#ffffff', size: 3 });
-    if (_sb) { game._shatterDepth = 1; try { hitMonster(_sb, Math.max(1, Math.floor(finalDmg * 0.30)), false, 'shatter'); } finally { game._shatterDepth = 0; } }
+    if (_sb) { game._shatterDepth = 1; const _ls = [_lxLsSpentHp, _lxLsDealt, _lxLsPending]; try { hitMonster(_sb, Math.max(1, Math.floor(finalDmg * 0.30)), false, 'shatter'); } finally { game._shatterDepth = 0; [_lxLsSpentHp, _lxLsDealt, _lxLsPending] = _ls; } }   // v0.30.1737 bughunt6: the ledger survives the nested hit
   }
   // v0.29.296 — milestone `refundOnKill`. Handled here rather than in
   // killMonster because only this scope still knows WHICH skill landed the
@@ -112466,6 +112514,10 @@ function _lxDeliverPendingBoon(tries) {
   const ok = player && player.hp > 0 && !player._downed && !(game.dying > 0) && !game.paused && !(game.expedition && game.expedition.active) && typeof showPowerupChoice === 'function'
     && !(player.boons && typeof BOON_INVENTORY_CAP === 'number' && player.boons.length >= BOON_INVENTORY_CAP);   // v0.30.1733 bughunt5: and room in the bag
   if (ok) { game._pendingBossBoon = null; try { showPowerupChoice(info); } catch (e) {} return; }
+  // v0.30.1737 bughunt6 - a QUEUED offer (a co-op guest's boss kill, one left behind in the reveal, one carried over a reload) with a full bag waits
+  // like a clicked one, and says so: only the wheel's card set _bagFull and said it, so these waited without a word (v0.30.1733 dropped them after 40 s)
+  if (!info._bagFull && player && player.boons && typeof BOON_INVENTORY_CAP === 'number' && player.boons.length >= BOON_INVENTORY_CAP) {
+    info._bagFull = true; try { if (typeof showToast === 'function') showToast("\u25C8 The boss's boons wait - make room in your boon bag and they come back", 'rare'); } catch (e) {} }
   setTimeout(() => _lxDeliverPendingBoon((tries | 0) + 1), ((tries | 0) < (info._bagFull ? 900 : 40)) ? 1000 : 5000);   // v0.30.1734 release12: never let go - a saved, owed boon waits (each second for the first 40 tries, 15 min for a full bag; then every 5 s) until it can be offered   // v0.30.1733 bughunt5: a full bag waits 15 min
 }
 // v0.30.x final-polish (boss-afterlife) - see the call in killMonster.
@@ -115761,6 +115813,7 @@ function updateProjectiles(dt) {
           if (typeof showToast === 'function') showToast(p._radiance.toast || 'RADIANCE — do not stand under the pillars!', 'danger');   // v0.30.467 — per-payload wording
         }
         player.hp -= _projLost;
+        if (_projLost > 0 && typeof _lxGraniteHit === 'function') _lxGraniteHit();   // v0.30.1737 bughunt6: and a shot (before its nudge below)
         const _lxRadShown = !!player._radianceHit;   // taken-num - a radiance hit already showed its own number
         player.lastHitTime = game.time;
         // v0.25.243 (X1) — projectile origin label (or skill name fallback).
@@ -115830,7 +115883,7 @@ function updateProjectiles(dt) {
         const _kbTier = _lxProjKbTier(p);
         if (_lxAuthoredKnock(p)) { /* v0.30.1300 spire-knock - the shot's own authored throw (see _lxAuthoredKnock) */ }
         else if (_kbTier > 0) _lxShotKnock(p, _kbTier);
-        else {
+        else if (!(typeof _lxGraniteStill === 'function' && _lxGraniteStill())) {   // v0.30.1737 bughunt6: Immovable holds an ordinary shot's nudge too
         player.vx = dir * 1 * kbMul;
         player.vy = -1.2 * kbMul;
         }
@@ -118400,6 +118453,7 @@ function _lxConfirmLeaveFight() {
   } catch (e) { return Promise.resolve(true); }
 }
 function tryPortal() {
+  if (game._photoMode) return false;   // v0.30.1737 bughunt6: Up pans in photo mode
   if (_lxPlayerHeld()) return false;   // v0.30.919 Up is also a shackle key: a held hero used to walk out mid-sequence
   if (window._prologueActive) return false;   // v0.30.834 - the memory has no doors: Up is a movement key there, and the hero stands ON the Void portal
   if (typeof _lxMallRideTry === 'function' && _lxMallRideTry()) return true;   // v0.30.1471 megamall-aaa - Up at an escalator landing rides it
@@ -130739,6 +130793,7 @@ window.addEventListener('keydown', (e) => {
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
   const modal = document.getElementById('powerup-modal');
   if (!modal || modal.style.display !== 'flex') return;
+  { const _kb = document.getElementById('keybind-modal'); if (_kb && _kb.style.display === 'flex') return; }   // v0.30.1737 bughunt6: a key typed into Keybinds is not a card
   e.preventDefault(); e.stopImmediatePropagation();
   if (e.repeat || performance.now() - (modal._lxOpenAt || 0) < 450) return;
   const card = modal.querySelectorAll('#powerup-options .powerup-card')[+e.key - 1];
@@ -130936,6 +130991,8 @@ function _lxPauseOpen() {
   ov.addEventListener('click', (e) => { if (e.target === ov) _lxPauseClose(); });   // a click outside the card resumes
   ov.querySelectorAll('.lxp-btn').forEach((b) => { b.onclick = () => _lxPauseAct(b.dataset.a); });
   ov.addEventListener('keydown', (e) => {   // arrows walk the list; Enter / Space press the focused button natively
+    // v0.30.1737 bughunt6 - Space: the game's keydown cancels Space (jump) before a button can arm on it, so the card presses its focused button itself
+    if (e.key === ' ' && document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('lxp-btn')) { e.preventDefault(); e.stopPropagation(); document.activeElement.click(); return; }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     const bs = Array.from(ov.querySelectorAll('.lxp-btn')), i = bs.indexOf(document.activeElement);
     const nx = bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1) + bs.length) % bs.length] || bs[0];
@@ -131678,6 +131735,7 @@ function uiConfirm(opts) {
         e.preventDefault(); e.stopPropagation();   // v0.30.891 it closed the dialog; it must not also open the pause card
         cleanup(false);
       }
+      else if (e.key === ' ' && (document.activeElement === yes || document.activeElement === no)) { e.preventDefault(); e.stopPropagation(); document.activeElement.click(); }   // v0.30.1737 bughunt6: Space presses the focused button
     };
     window.addEventListener('keydown', escHandler, true);
     // Stash a pointer so closeAllModals can resolve gracefully too.
@@ -175288,7 +175346,7 @@ function loop(time) {
     // Dropping the guard lets FX keep animating while dead (queues are still
     // capped, so no leak).
     updateCamera();
-    if (!game.paused) updateMinions(dt);   // v0.26.1027 — don't drain minion lifetime / deal damage while a modal has the game paused (still ticks while dead/frozen)
+    if (!game.paused && !game._photoMode) updateMinions(dt);   /* v0.30.1737 bughunt6: summons do not fight the frozen world behind a photo */   // v0.26.1027 — don't drain minion lifetime / deal damage while a modal has the game paused (still ticks while dead/frozen)
     updateParticles(dt);
     updateFxInstances(dt);
     updateSmoothFx(dt);
