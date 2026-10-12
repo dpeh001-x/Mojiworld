@@ -56,7 +56,7 @@ const r = await page.evaluate(() => {
   // they never wash off. Anchored to the entity key so a comment quoting the
   // line cannot satisfy it - the Smith guard in lyra_arc_test passed on exactly
   // that mistake before it was tightened.
-  out.sootIntact = /young_confused_barnaby: 'A talented smith who reached for something[^']*old soot under the gauntlets/.test(_src);
+  out.sootIntact = /young_confused_barnaby: 'A talented smith who (?:reached for something|tried to fuse magic)[^']*old soot under the gauntlets/.test(_src);
   // The five theories are the point of chapter I. Count the labelled ones, so a
   // later trim that guts the prose fails loudly instead of leaving a chapter
   // called "Five Stories" with three.

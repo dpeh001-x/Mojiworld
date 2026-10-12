@@ -69,7 +69,7 @@ try {
   check(/since none of them came home/.test(Q.lava) && /drag the key deeper for salt/.test(Q.lava) && /give Wynn the rest/.test(Q.hg3), 'the lava cavern and the courier quests read plainly (no single "year" for the Twelve)', '');
   check(/the world that is remembering you/.test(R.world) && /Then meet two who cannot stop working/.test(R.acts) && /keep leaking what they dream/.test(R.acts) && /sleepers.? ledger/.test(R.acts), "the Codex and the Act blurbs are true: not 'the first two' who cannot stop working, leaks that already began, and 'world' not 'dimension'", '');
   check(/The Tearborn\. She broke the sky and guards the shards no one finished/.test(R.kaze) && !/Hourglass/.test(R.kaze), "Aetherion is not the Hourglass's keeper: she broke the sky and guards the shards no one finished", R.kaze);
-  check(/she looks relieved, and then, once, straight up\. On the last step, that soul goes free\./.test(E.aetherion), "Aetherion's epitaph reads as two plain sentences again", E.aetherion);
+  check(/she looks relieved, and then, once, straight up\. At the gate, that soul goes free\./.test(E.aetherion), "Aetherion's epitaph reads as two plain sentences again", E.aetherion);
   check(/hit as on the first/.test(src) && !/hundredth swing/.test(src), 'the shared Lv 30-39 class line says "hit" (archers shoot and mages cast)', '');
   check(!/\bMira\b/.test(JSON.stringify([E, V, I, Q, R.world, R.acts, R.kaze, R.sig])), 'the woman at the gate is never named in any of it', '');
   check(errs.length === 0, 'no page errors', errs.slice(0, 3).join(' | '));

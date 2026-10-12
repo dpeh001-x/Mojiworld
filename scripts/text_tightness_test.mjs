@@ -42,7 +42,7 @@ const PROBES = [
  "A stack of clicking bricks with a sword for o",
  "feathers go on the back so the arrow flies st",
  "I watched. The big archers at the Reach let m",
- "s said it in twelve ages. Hop in, champ.",
+ "s said it in ages beyond measure. Hop in, champ.",
  "alley smoke and rumour. The empire will breat",
  "A new name for the ledger. Tell me what you h",
  "Moji is older than its name. The Bastion rose",
@@ -91,7 +91,7 @@ try {
       for (const p of host.querySelectorAll('p, .dsc')) { const w = words(p.textContent); if (w > 60) cdx.push(tab + ' ' + w + ': ' + p.textContent.trim().slice(0, 40)); } }
     const C = (typeof _QUEST_STORY_CHAIN !== 'undefined') ? _QUEST_STORY_CHAIN : [];
     const lv = C.map((id) => (QUESTS[id] || {}).levelReq || 1);
-    const outOfOrder = C.filter((id, i) => i > 0 && lv[i] < lv[i - 1]);
+    const outOfOrder = C.filter((id, i) => i > 0 && lv[i] < lv[i - 1] && id !== 'q_zodiac_twelve');   // per user (2026-10-12): the Twelve Stars sit after the Long Dawn, so "Next" walks the chain; their Lv 70 is a gate, not a place in line
     const preLate = []; C.forEach((id, i) => { for (const p of [].concat((QUESTS[id] || {}).prereq || [])) { if (C.indexOf(p) > i) preLate.push(id + ' before ' + p); } });
     return { questLong, storyTotal, npcLong, bub, tour, cdx, missing: PROBES.filter((p) => !src.includes(p)), outOfOrder, preLate };
   }, PROBES);

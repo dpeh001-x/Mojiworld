@@ -24,8 +24,8 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Progra
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const errs = [], J = (x) => JSON.stringify(x).slice(0, 300);
 const QLINES = {
-  q_act1_firstword: 'Four have held it up since the Pause: Will, Hera, Lady Hong and Taiga.',
-  q_inner_dim_trial: 'Each has kept an order standing since the Pause.',
+  q_act1_firstword: 'Four hold it up now: Will, Hera, Lady Hong and Taiga.',
+  q_inner_dim_trial: 'Each has kept an order standing for ages.',
   q_distorted_portal: "Taiga's Hood has not let it out of sight since.",
   q_lyra_cut: 'Hers is the one signature the circle never checks.',
   q_lyra_kin: 'Taiga, Lady Hong and Will stood in its mouth so it could take no one else',
@@ -33,8 +33,8 @@ const QLINES = {
   q_canary_quiet: 'Lyra copied every reading into her own book.',
   q_kill_nimbusFox: 'Lyra keeps the tally, mostly correctly.',
   q_visit_glasswind: 'Lyra saw it first, and Hera believed her.',
-  q_zodiac_twelve: 'Will, Hera, Lady Hong and Taiga still watch the four their orders raised.',
-  q_boss_aries: "Taiga's Hood raised him and sent him up in fury.",
+  q_zodiac_twelve: "Will, Hera, Lady Hong and Taiga, who hold the clans now, still watch the four stars their clans' champions answered.",
+  q_boss_aries: "Ariel, the Hood's champion of that age, went up in fury to answer it",
   q_long_dawn_1: 'The four orders hold the town behind you',
 };
 try {

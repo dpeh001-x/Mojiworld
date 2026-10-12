@@ -60,10 +60,10 @@ try {
     const settle = async () => { const d = document.getElementById('dialog'); for (let i = 0; i < 200 && d.classList.contains('typing'); i++) await sleep(50); await sleep(100); };
     const click = async (lab) => { const b = [...document.querySelectorAll('#dialog-options button')].find((x) => (x.textContent || '').trim() === lab); if (b) { b.click(); await sleep(250); await settle(); } return b ? text() : null; };
     // each leader's existing lore question opens the order's page: its old answer, then the order's two questions and Back
-    const LEAD = { warrior: ['bastionThrone', 'champion', 'Who fights beside you?', 'What does the Bastion swear?', 'Who went up with the oath?', 'The Bull\'s House is dark.'],
-      mage: ['azureAbode', 'archmage', 'What was the Academia?', 'What is the Academia for?', 'Why is nothing ever finished here?', 'Virga\'s House is dark.'],
-      archer: ['emeraldVillage', 'archer', 'What guards the grove?', 'What does the Grove keep?', 'Why is the Jade Grove empty?', 'Sagitta\'s House is dark.'],
-      rogue: ['shadowWovenHood', 'taiga', 'Who do you fight?', 'What was the Imperial Shadow?', 'Why patience, not fury?', 'Ariel\'s House is dark.'] };
+    const LEAD = { warrior: ['bastionThrone', 'champion', 'Who fights beside you?', 'What does the Bastion swear?', 'Who went up with the oath?', 'The Bull\'s Star is dark.'],
+      mage: ['azureAbode', 'archmage', 'What was the Academia?', 'What is the Academia for?', 'Why is nothing ever finished here?', 'Virga\'s Star is dark.'],
+      archer: ['emeraldVillage', 'archer', 'What guards the grove?', 'What does the Grove keep?', 'Why is the Jade Grove empty?', 'Sagitta\'s Star is dark.'],
+      rogue: ['shadowWovenHood', 'taiga', 'Who do you fight?', 'What was the Imperial Shadow?', 'Why patience, not fury?', 'Ariel\'s Star is dark.'] };
     out.talk = {};
     for (const [cls, [map, role, entry, lore, before, after]] of Object.entries(LEAD)) {
       const r = {}; loadMap(map, 300); await sleep(1200); game.paused = false;
@@ -103,10 +103,10 @@ try {
     !!R.table && Object.keys(MAP).every((k) => T[k] && T[k].sign === MAP[k] && T[k].creed && T[k].w.every((w) => w > 10 && w <= 60)) && Object.keys(T).length === 4, J(T));
   const f0 = R.fac0, f1 = R.fac1, f4 = R.fac4;
   ok('2. the Standings tab: one dossier per order (creed, Rose / Its House / Of you), then the Lantern and the Sixth Standing',
-    J(f0.orders.map((o) => o.k)) === J(['warrior', 'mage', 'archer', 'rogue']) && f0.orders.every((o) => o.creed.length > 4 && J(o.secs.map((s) => s.toUpperCase())) === J(['ROSE', 'ITS HOUSE', 'OF YOU'])) && f0.long.length === 0
-      && f0.sib === 1 && /Their oldest, the silver-haired woman at the gate, who kept her name/.test(f0.text) && !/Mira/.test(f0.text) && /The Sixth Standing/i.test(f0.text) && /Four of the Twelve came from these halls/.test(f0.text), J({ orders: f0.orders, long: f0.long, sib: f0.sib }));
+    J(f0.orders.map((o) => o.k)) === J(['warrior', 'mage', 'archer', 'rogue']) && f0.orders.every((o) => o.creed.length > 4 && J(o.secs.map((s) => s.toUpperCase())) === J(['ROSE', 'ITS STAR', 'OF YOU'])) && f0.long.length === 0
+      && f0.sib === 1 && /Their oldest, the silver-haired woman at the gate, who kept her name/.test(f0.text) && !/Mira/.test(f0.text) && /The Sixth Standing/i.test(f0.text) && /Four of the Twelve took a child of these halls/.test(f0.text), J({ orders: f0.orders, long: f0.long, sib: f0.sib }));
   ok('3. an order\'s story moves on once its House is dark - a fourth row on its dossier, and only its own',
-    f0.orders.every((o) => !o.since) && f1.orders.filter((o) => o.since).length === 1 && /bull's house is dark/i.test(f1.orders[0].since) && /stand until someone pushes/.test(f1.orders[0].since)
+    f0.orders.every((o) => !o.since) && f1.orders.filter((o) => o.since).length === 1 && /bull's star is dark/i.test(f1.orders[0].since) && /stand until someone pushes/.test(f1.orders[0].since)
       && f4.orders.every((o) => o.since) && /treatise 1,185/.test(f4.orders[1].since) && /only to hear it land/.test(f4.orders[2].since) && /asking whose it is/.test(f4.orders[3].since), J(f1.orders.map((o) => o.since.slice(0, 60))));
   ok('4. the Paths tab names each path\'s order and its creed, and says the Pause (never "first pause")',
     /Taught by The Bastion/.test(R.paths.text) && /Taught by The Azure Academia/.test(R.paths.text) && /Taught by The Jade Grove/.test(R.paths.text) && /Taught by The Shadow-Woven Hood/.test(R.paths.text)
@@ -119,13 +119,13 @@ try {
       && reLore.test(b.lore || '') && reBefore.test(b.house || '') && reAfter.test(a.house || '') && (r.back || []).includes(entry) && !(r.back || []).includes(lore)
       && [b.lore, b.house, a.house].every((s) => wc(s) <= 60); };
   ok('5a. Will: "Who fights beside you?" opens the Bastion\'s page - the oath that stops at "until"; once the Bull falls, "we stand until someone pushes"',
-    talkOk('warrior', 'Who fights beside you?', /Elena keeps our records/, 'What does the Bastion swear?', /second age[\s\S]*We stand until/, 'Who went up with the oath?', /Taur[\s\S]*word after until/, 'The Bull\'s House is dark.', /We stand until someone pushes/), J(t.warrior));
+    talkOk('warrior', 'Who fights beside you?', /Elena keeps our records/, 'What does the Bastion swear?', /second age[\s\S]*We stand until/, 'Who went up with the oath?', /Taur[\s\S]*word after until/, 'The Bull\'s Star is dark.', /We stand until someone pushes/), J(t.warrior));
   ok('5b. Hera: "What was the Academia?" opens its page - 1,184 treatises; Virga never asked; once the Maiden falls, treatise 1,185 is a question',
-    talkOk('mage', 'What was the Academia?', /A school, once\. A library, twice/, 'What is the Academia for?', /Name it truly[\s\S]*1,184 treatises/, 'Why is nothing ever finished here?', /Virga[\s\S]*never asked/, 'Virga\'s House is dark.', /Treatise 1,185/), J(t.mage));
+    talkOk('mage', 'What was the Academia?', /A school, once\. A library, twice/, 'What is the Academia for?', /Name it truly[\s\S]*1,184 treatises/, 'Why is nothing ever finished here?', /Virga[\s\S]*never asked/, 'Virga\'s Star is dark.', /Treatise 1,185/), J(t.mage));
   ok('5c. Lady Hong: "What guards the grove?" opens its page - the seasons, aim through; Sagitta\'s question still falling; then the range reopens',
-    talkOk('archer', 'What guards the grove?', /Yun walks the borders/, 'What does the Grove keep?', /rehearse a dream[\s\S]*Aim through, not at/, 'Why is the Jade Grove empty?', /Sagitta[\s\S]*still falling/, 'Sagitta\'s House is dark.', /range can have its arrows back/), J(t.archer));
+    talkOk('archer', 'What guards the grove?', /Yun walks the borders/, 'What does the Grove keep?', /rehearse a dream[\s\S]*Aim through, not at/, 'Why is the Jade Grove empty?', /Sagitta[\s\S]*still falling/, 'Sagitta\'s Star is dark.', /range can have its arrows back/), J(t.archer));
   ok('5d. Taiga: "Who do you fight?" opens the Hood\'s page - the Imperial Shadow; Ariel burned for fury; once the Ram falls he starts asking',
-    talkOk('rogue', 'Who do you fight?', /The same hand that toppled the capital/, 'What was the Imperial Shadow?', /capital[\s\S]*left the conversation/, 'Why patience, not fury?', /Ariel[\s\S]*caught fire/, 'Ariel\'s House is dark.', /Perhaps it is time I asked/), J(t.rogue));
+    talkOk('rogue', 'Who do you fight?', /The hand behind the one who lifted the dreaming/, 'What was the Imperial Shadow?', /capital[\s\S]*left the conversation/, 'Why patience, not fury?', /Ariel[\s\S]*caught fire/, 'Ariel\'s Star is dark.', /Perhaps it is time I asked/), J(t.rogue));
   ok('7. the crowded card (class-matched Lv 20, trial pending, two quests on offer) stays inside the frame for all four leaders',
     Object.keys(R.fit || {}).length === 4 && Object.values(R.fit).every((f) => f.top >= 0), J(R.fit));
   ok('6. one new idle bubble each (at most 6 words); nothing says the Twelve were sent or the dreaming stolen or taken; no page errors',

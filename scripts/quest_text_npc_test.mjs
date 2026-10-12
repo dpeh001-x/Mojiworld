@@ -39,7 +39,7 @@ try {
     return {
       places: { hourglass: /Lava Cavern/.test(h1) && (mob.emberling || []).includes('lavaCavern'), zombie: namesAMap('zombie'), horny: namesAMap('horny'), zombieMaps: names('zombie'), hornyMaps: names('horny') },
       returns: ret.slice(0, 5), returnsN: ret.length,
-      barnaby5: { giver: b5.giver, handIn: !!b5.handIn, backToGiver: /bring me word/.test(b5.desc), sendsAway: /then go and see Barnaby/.test(b5.desc) },
+      barnaby5: { giver: b5.giver, handIn: !!b5.handIn, backToGiver: /bring (?:me|him) word/.test(b5.desc), sendsAway: /then go and see Barnaby/.test(b5.desc) },
       stars: { steps: STAR_STEPS.slice(), sig: STAR_SIG_STEPS.slice(), t1: _starCurve(STAR_SIG_STEPS, 10, 1), t10: _starCurve(STAR_SIG_STEPS, 10, 10) },
     };
   });

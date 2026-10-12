@@ -118,7 +118,7 @@ try {
       currentHp: 0, maxHp: 1, hp: 0, atk: 1, def: 1, vx: 0, vy: 0, dead: false, isBoss: true };
       game.monsters.push(m); let e = null; try { killMonster(m); } catch (x) { e = String(x.message).slice(0, 100); } const i = game.monsters.indexOf(m); if (i >= 0) game.monsters.splice(i, 1); return e; };
     const card = () => document.querySelector('.lx-ending-card');
-    out.aeErr = fell(); out.card = await waitFor(() => !!card() && /I WAS THE ANSWER ONCE/.test(card().textContent), 9000);
+    out.aeErr = fell(); out.card = await waitFor(() => !!card() && /I WAS THE CUT ONCE/.test(card().textContent), 9000);
     out.cardText = (card() || {}).textContent || ''; out.cardHeld = game.paused === true; if (card()) card().click();
     out.farewell = await waitFor(() => beatOn() && spk() === 'The Amnesiac', 5000);
     await through('The Amnesiac'); try { closeAllModals(); } catch (e) {} await sleep(300); game.paused = false;
@@ -137,9 +137,9 @@ try {
     return out;
   });
   const J = (x) => JSON.stringify(x).slice(0, 300);
-  ok('1. before the ending: no reunion, her old greeting, no last-Outsider questions, "Be the third.", the old pools', R.twelveDown && !R.completeBefore && !R.pre.beat && /opens her eyes without lifting her head/.test(R.pre.text) && !/standing, not sitting/.test(R.pre.text)
+  ok('1. before the ending: no reunion, her old greeting, no last-Outsider questions, "Be the third.", the old pools', R.twelveDown && !R.completeBefore && !R.pre.beat && /on her feet now/.test(R.pre.text) && !/standing, not sitting/.test(R.pre.text)
     && !R.preGug.opts.includes('Who was the last Outsider?') && /Be the third/.test(R.preShen.text) && R.prePools.every(Boolean), J({ pre: R.pre.text.slice(0, 80), gug: R.preGug.opts, shen: R.preShen.text.slice(-60), p: R.prePools }));
-  ok('2. after the ending, before his half: no reunion yet; the town has its morning, the siblings wait', R.completeAfter && !R.noHalf.beat && /opens her eyes/.test(R.noHalf.text) && R.midPools.potion && R.midPools.sage && R.midPools.am, J({ b: R.noHalf.beat, p: R.midPools }));
+  ok('2. after the ending, before his half: no reunion yet; the town has its morning, the siblings wait', R.completeAfter && !R.noHalf.beat && /on her feet now|opens her eyes/.test(R.noHalf.text) && R.midPools.potion && R.midPools.sage && R.midPools.am, J({ b: R.noHalf.beat, p: R.midPools }));
   ok('3. the first talk after both halves plays the reunion: he says her name first, she says his (never shown), once', R.reunionOn && R.pages.length === 3 && R.pages.map((p) => p.s).join(',') === 'Mira,The Amnesiac,Mira'
     && /You took your time, brother/.test(R.pages[0].t) && /whole way up\.\s*Mira\./.test(R.pages[1].t) && /She says his name/.test(R.pages[2].t) && /ordinary mornings to waste/.test(R.pages[2].t) && R.seenReunion && !R.dHome.beat, J(R.pages.map((p) => p.s + ': ' + p.t.slice(0, 50))));
   ok('3. then her dialogue opens on the new greeting: it quotes the gate answer, and the boon stays', R.afterReunion && /standing, not sitting/.test(R.dawnWake.text) && /The bell is swinging/.test(R.dawnWake.text) && R.dawnWake.opts.some((o) => /Receive boon/.test(o))
@@ -156,7 +156,7 @@ try {
   ok('10. the supporting cast: Cedric feels Legosaurus set down, the epitaph answers him, the Hourglass speaks for itself, the Codex quotes are flavour',
     !!R.cedric && /You set him down gently/.test(R.cedric.text) && /the way Cedric asked/.test(R.epitaph) && /^Four things I spilled/.test(R.hg[0]) && /^I turn toward you/.test(R.hg[1] || '')
     && R.sigs.every((s) => s && !/pattern|from range|thrower\.|mini-elite|Channels|0\.5 s|Final apex/.test(s)), J({ c: ((R.cedric || {}).text || '').slice(0, 80), e: R.epitaph, h: R.hg.map((t) => t.slice(0, 30)), s: R.sigs.map((t) => t.slice(0, 24)) }));
-  ok('8. Aetherion\'s first fall: his card holds the floor, then the farewell; the second fall, neither', !R.aeErr && R.card && /I was only a tear\. She is free\. Close it gently\./.test(R.cardText) && R.cardHeld && R.farewell && !R.aeErr2 && !R.card2 && !R.beat2,
+  ok('8. Aetherion\'s first fall: his card holds the floor, then the farewell; the second fall, neither', !R.aeErr && R.card && /I was only what the seal made of her\. She is free\. Close it gently\./.test(R.cardText) && R.cardHeld && R.farewell && !R.aeErr2 && !R.card2 && !R.beat2,
     J({ e: R.aeErr, c: R.card, t: R.cardText, h: R.cardHeld, f: R.farewell, e2: R.aeErr2, c2: R.card2, b2: R.beat2 }));
   ok('9. caps: stanzas and new pages within 60 words, new bubbles within 6 and naming no key', R.stanzaWords.length === 3 && R.stanzaWords.every((w) => w <= 60) && R.pageWords.every((w) => w <= 60) && R.bubblesOk, J({ s: R.stanzaWords, p: R.pageWords }));
   await ctx.close();

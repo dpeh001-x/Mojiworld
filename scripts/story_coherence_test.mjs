@@ -80,7 +80,7 @@ try {
   check(r.grav.length === 0, 'Gravitos speaks for himself - no narrator lead-ins', J(r.grav));
   check(/somewhere else/.test(r.saga4) && !/The Everdawn is your grief/.test(r.saga4) && /Give him a reason/.test(r.saga4), 'the Amnesiac no longer tells the Outsider the Everdawn is their grief', r.saga4.slice(0, 120));
   check(/zodiac shade pays its full EXP/.test(r.echoZ) && /no boons, no EXP, no coins/.test(r.echoK) && !/zodiac shade/.test(r.echoK), 'the Echo Keeper says what a zodiac shade pays, and that other echoes pay nothing', J([r.echoZ.slice(-120), r.echoK.slice(-80)]));
-  check(r.chain.twelve >= 0 && r.chain.d1 > r.chain.twelve && r.chain.d2 > r.chain.d1 && r.chain.grav > r.chain.d2, 'the story chain runs the Twelve, the Long Dawn, then Gravitos', J(r.chain));
+  check(r.chain.d1 >= 0 && r.chain.d2 > r.chain.d1 && r.chain.twelve > r.chain.d2 && r.chain.grav > r.chain.twelve, 'the story chain runs the Long Dawn, the Twelve Stars, then Gravitos (per user 2026-10-12: Next walks Aries -> the tyrants -> the Dreams -> the Stars)', J(r.chain));
   check(r.sentence === 'true,true,true', "the Amnesiac's one sentence is worded the same everywhere", r.sentence);
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 3)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 300)); }

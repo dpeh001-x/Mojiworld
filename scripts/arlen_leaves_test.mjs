@@ -48,8 +48,8 @@ try {
   ok('Old Arlen stands in Everdawn Central', R.found);
   ok('his card offers "Why are there no green leaves on the trees?"', R.before.text !== null, R.before.labels);
   ok('his other questions are still there', ['Opinions about the mushrooms?', 'That canary on the top perch?', 'What do people say about the Amnesiac?'].every((t) => R.before.labels.some((l) => l.includes(t))), R.before.labels);
-  ok('before the ending: the Pause - cherries flower before they leaf, and one morning is not long enough', /bloom first and leaf after/.test(R.before.text || '') && /since the Pause/.test(R.before.text || '') && /not long enough for leaves/.test(R.before.text || ''), R.before.text);
-  ok('after the ending: he has seen the first green', /There! Green!/.test(R.after.text || '') && /morning has moved on/.test(R.after.text || ''), R.after.text);
+  ok('before the ending: the Pause - cherries flower before they leaf, and one morning is not long enough', /bloom first and leaf after/.test(R.before.text || '') && /dream-cherries/.test(R.before.text || '') && /the seasons go round them/.test(R.before.text || ''), R.before.text);
+  ok('after the ending: he has seen the first green', /There! Green!/.test(R.after.text || '') && /morning that had not come/.test(R.after.text || ''), R.after.text);
   ok('no page errors', errs.length === 0, [...new Set(errs)].slice(0, 3));
 } finally { await browser.close().catch(() => {}); server.kill(); }
 console.log(`\n${pass}/${pass + fail} passed`);

@@ -31,9 +31,9 @@ const setup = `try { localStorage.setItem('mojiworld_prologue_seen', '1'); _lxBo
 const OLD = { greet: "I'd tell you which, but I can't remember that either.", fam: "I can't find a single face.", gate: 'Her name is still on the tip of my tongue.', bro: 'He does not remember my name. I have never told him.', tell: 'I can wait a little longer.' };
 const NEW = { greet: 'I gave a dream away once, at a gate. I know which one now, and I would not take it back.',
   fam: 'My family. I found one face, at the top of a stair. That is a start. The noise in my head has gone quiet. Some mornings I almost miss it.',
-  gate: 'I climbed every step and said her name before I knew I knew it. She said mine back. Twelve ages, and the first thing I remember is that I was not the only one waiting.',
+  gate: 'I climbed every step and said her name before I knew I knew it. She said mine back. Ages, and the first thing I remember is that I was not the only one waiting.',
   gateDir: 'His thumb is still. He does not reach for the ring.',
-  bro: 'He said my name first. He climbed every step to say it, then stood there as if he had forgotten what came next. He had not. We have twelve ages of things to say, and no hurry now.',
+  bro: 'He said my name first. He climbed every step to say it, then stood there as if he had forgotten what came next. He had not. We have ages of things to say, and no hurry now.',
   tell: 'Tell him? He found it himself. That was the only way it could count.' };
 try {
   const ctx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1280, height: 720 } });
@@ -112,8 +112,8 @@ try {
   ok('2. ...and finishing it opens Long Dawn II at Lv 76', R2.ld2, R2);
   ok('2. without the First-Born it stays shut (Lv 92)', R2.noAries === false, R2);
   ok('2. a save that already took / finished it keeps it', R2.keptActive && R2.keptDone, R2);
-  ok('2. the twelfth sign\'s last stanza: tyrants still ahead before Long Dawn I, already let go after it', /But three old tyrants hold their nightmares tighter first\./.test(R2.beatBefore) && /The three old tyrants have already let go\./.test(R2.beatAfter), [R2.beatBefore, R2.beatAfter]);
-  ok('2. the Codex prophecy puts the tyrants after the first of the Twelve', src.includes('When the first of the Twelve is at rest, three tyrants') && !src.includes('When the Twelve are at rest'));
+  ok('2. the twelfth sign\'s last stanza: tyrants still ahead before Long Dawn I, already let go after it', /But three old tyrants still hold their nightmares\./.test(R2.beatBefore) && /The three old tyrants have already let go\./.test(R2.beatAfter), [R2.beatBefore, R2.beatAfter]);
+  ok('2. the Codex prophecy puts the tyrants after the first of the Twelve', src.includes('When the Ram falls, three tyrants') && !src.includes('When the Twelve are at rest'));
   ok('2. the finale is unchanged: Petition the Weight-Bearer, Lv 90, needs all Twelve + Aries + Long Dawn II', R2.grav.lv === 90 && ['q_zodiac_twelve', 'q_boss_aries', 'q_long_dawn_2', 'q_boss_aetherion', 'q_boss_sundered_smith', 'q_hourglass_5'].every((k) => R2.grav.prereq.includes(k)), R2.grav);
   // the saved hero comes back
   await bootIn(page);

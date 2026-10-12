@@ -44,7 +44,7 @@ try {
     const src = document.documentElement.outerHTML;
     // 1. source lines inside state machines (the Amnesiac's saga pages, Guguma's replies, Mira's greeting, the Codex)
     out.src = { bell: /bell-keepers/.test(src), agrees: src.includes('Nobody down here agrees what to call it.'), either: src.includes('I can\\\'t remember that either.'),
-      oneThing: src.includes('the one thing I can\\\'t remember'), knows: src.includes('…I know what you are now.'), placing: src.includes('placing your face'),
+      oneThing: src.includes('the one thing I can\\\'t remember'), knows: src.includes('I told you once we were the same shard'), placing: src.includes('placing your face'),
       brought: src.includes('You brought a shard back.'), took: src.includes('You took a shard back.'), pause: src.includes('We call the stillness the Pause'),
       home: src.includes('Go and bring the dreaming home.'), takeBack: src.includes('Go take the dream back'), gateTrial: src.includes('the gate-trial'),
       swing: src.includes('if it had been allowed to finish its swing'), aselm: /\bAselm\b/.test(src), brave: src.includes('brave enough to swing'), milo: src.includes('for STAGE 1 — The Ticket Rush Lobby.') };

@@ -45,8 +45,10 @@ try {
     const out = {};
     // [1] the two beats
     const last = STORY_BEATS.first_gate_visit.stanzas[STORY_BEATS.first_gate_visit.stanzas.length - 1].text;
+    const _tk = window._lxTwelveKnown; window._lxTwelveKnown = () => true;   // per user (2026-10-12): the stars are named only once Aetherion has fallen - the beats read both ways
     out.gate = ['wake', 'home', 'unsure', undefined].map((a) => last({ gate_answer: a }));
     out.sky = STORY_BEATS.arrival_sky_beyond.stanzas.map((x) => (typeof x.text === 'function' ? x.text({}) : x.text)).join(' | ');
+    window._lxTwelveKnown = () => false; out.gateNo = ['wake', undefined].map((a) => last({ gate_answer: a })); out.skyNo = STORY_BEATS.arrival_sky_beyond.stanzas.map((x) => (typeof x.text === 'function' ? x.text({}) : x.text)).join(' | '); window._lxTwelveKnown = _tk;
     // [2] The Sanctum's Refusal
     const PAST = ['q_distorted_portal', 'q_barnaby_finish', 'q_boss_sundered_smith', 'q_last_step'];
     out.lv = QUESTS.q_boss_aetherion.levelReq;
@@ -96,7 +98,7 @@ try {
     window.showToast = _st; clear();
     return out;
   });
-  ok('[1] the Gate\'s four endings close "The stars are waiting." and name no Houses', R.gate.every((t) => /The stars are waiting\.$/.test(t) && !/Houses/i.test(t)), R.gate.map((t) => t.slice(-40)));
+  ok('[1] the Gate\'s four endings close "The stars are waiting." and name no Houses', R.gate.every((t) => /The stars are waiting\.$/.test(t) && !/Houses/i.test(t)) && R.gateNo.every((t) => /The road is waiting\.$/.test(t) && !/stars|Houses/i.test(t)), R.gate.map((t) => t.slice(-40)));
   ok('[1] the Sixth Crossing card speaks of the twelve fallen stars, with no houses or champions', /twelve fallen stars/.test(R.sky) && !/house|champion/i.test(R.sky), R.sky);
   ok('[2] The Sanctum\'s Refusal opens at Lv 50, after the Last Step and before Hourglass I in the Journal', R.lv === 50 && R.chain[0] >= 0 && R.chain[0] < R.chain[1] && R.chain[1] < R.chain[2], { lv: R.lv, chain: R.chain });
   ok('[2] at Lv 50 with the Last Step done it starts itself', R.at50.active && !R.at50.done, R.at50);
