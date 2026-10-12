@@ -16379,7 +16379,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1739';
+const GAME_VERSION = 'v0.30.1740';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -60360,6 +60360,7 @@ const LX_MP_QUICK = 30;           // send-budget tokens above which a hit leaves
 const _COOP_MON_CORE = { u: 1, x: 1, y: 1, vx: 1, vy: 1, f: 1, h: 1, m: 1, t: 1, b: 1, a: 1, lv: 1, df: 1, ea: 1, nm: 1, sw: 1, sh: 1 };   // lv / df: a PQ mech's level and def; ea: an elite's affix (statics: keyframes only)
 _COOP_MON_CORE.ar = 1; _COOP_MON_CORE.sn = 1;   // bughunt coop-mirror - ar: the art key a monster wears (Libra's lanterns), sn: a real shiny - both static, keyframes only (a line of their own: the marker above pins the table's closing literal)
 const _COOP_MON_EX = { iv: 1, aa: 1, fz: 1, st: 1, wd: 1, wg: 1, wb: 1, ps: 1, sp: 1, dp: 1, p: 1, sg: 1, op: 1, bk: 1, cs: 1, sf: 1, tw: 1, qb: 1, ib: 1, gh: 1, lo: 1, fb: 1, pm: 1 };   // bughunt coop-mirror: ib burrow, gh ghost step, lo libra pan, fb Taurus planted, pm host-only damage-taken product (ar / sn ride _COOP_MON_CORE)   // v0.30.x grav-tp: tw; qb: a Ticket Rush mech's booking (the landed-fix marker pins the OPENING literal, so new keys go on the end)
+_COOP_MON_EX.tg = 1;   // v0.30.1740 coop-guest (bughunt H17-1): a boss's windup, so a guest draws its warning (see _lxCoopTgOf; a line of its own, the table's literal is left alone)
 function _coopDeltaOn() {   // at least one partner on my map, and every one of them reads light frames
   if (!_coopActive()) return false;
   let n = 0;
@@ -60685,6 +60686,66 @@ try {
   document.addEventListener('resume', () => { try { _coopAwayTick(); } catch (e) {} });
 } catch (e) {}
 // HOST: broadcast the authoritative monster list (throttled). Called each frame.
+// v0.30.1740 coop-guest (bughunt H17-1) - A BOSS'S WARNING REACHES A GUEST. Every committed-attack zone (_lxAttackZones, _lxSlamWindup, the swing
+// ghost, the Meltdown ring, the hourglass sand) is drawn from host-only monster state, so a guest saw the attack's art and then the
+// hit - and still took the stagger a drawn zone buys (_zoneAttack rides the shot). tg carries that state while a windup runs; the
+// guest writes it onto the mirror (cleared when it stops) and the same draw code runs there:
+//   bm swing / smash windup ms · co [ms, lane x...] columns · hg [ms, dir] hourglass brace · bd [ms, dir] brace-dash brace
+//   lp [x, y, patternTimer] Leo's pounce · td [ms, x, y] Pisces' Tidal Crush · sl the slam band's progress (see _lxSlamWindup)
+//   kj Krook's jump-slam ms · ru [steps, dir] Arlen's Coronation · om ms left of Octobaby's Meltdown · sk [ms, id] a boss lock
+//   aimed at a partner (its chains converge on them: see _lxShackleTryPeer)
+function _lxCoopTgOf(m) {
+  let o = null;
+  const r = (v) => Math.round(+v || 0);
+  if (m._bigMeleeFiring && m._bigMeleeT > 0) (o = o || {}).bm = r(m._bigMeleeT);
+  if (m._columnFiring && m._columnT > 0) {
+    const ln = (m._columnLanes && m._columnLanes.length) ? m._columnLanes : [m._columnTargetX];
+    (o = o || {}).co = [r(m._columnT)].concat(ln.slice(0, 8).map(r));
+  }
+  if (m._hgCharging && m._hgPhase === 'brace') (o = o || {}).hg = [r(m._hgT), m._hgDir > 0 ? 1 : -1];
+  if (m._braceDashing && m._bdPhase === 'brace') (o = o || {}).bd = [r(m._bdT), m._bdDir > 0 ? 1 : -1];
+  if (m._leoMarking && m._leoPounceX != null && (m.patternState === 'pounceWindup' || m.patternState === 'pounceLeap')) (o = o || {}).lp = [r(m._leoPounceX), r(m._leoPounceY), r(m.patternTimer)];
+  if (m._tidalArmed && m._tidalT > 0 && m._tidalX != null) (o = o || {}).td = [r(m._tidalT), r(m._tidalX), r(m._tidalY)];
+  { const sl = (typeof _lxSlamWindup === 'function') ? _lxSlamWindup(m) : -1; if (sl >= 0) (o = o || {}).sl = Math.round(Math.min(1, sl) * 1000) / 1000; }
+  if (m.type === 'kingKrook' && m.patternState === 'jumpSlam' && m._kJumped && !m._kFired) (o = o || {}).kj = r(m._kJumpMs);
+  if (m._ruin && m.type === 'vigil_vermillion' && typeof m._ruin.t0 === 'number') (o = o || {}).ru = [Math.max(0, (game.time | 0) - m._ruin.t0), m._ruin.dir > 0 ? 1 : -1];
+  if (m.type === 'octobaby' && m._crazyActive && m._crazyPhase === 'telegraph') (o = o || {}).om = r(m._crazyTime);
+  if (m._shackleTele > 0 && m._shackleTgt != null) (o = o || {}).sk = [r(m._shackleTele), +m._shackleTgt];
+  return o;
+}
+function _lxCoopTgApply(m, tg) {
+  const t = (tg && typeof tg === 'object' && !Array.isArray(tg)) ? tg : null;
+  if (!t && !m._lxTgOn) return;   // no windup now, none last frame: the common case costs one check
+  m._lxTgOn = !!t;
+  const o = t || {};
+  const num = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : lo; };
+  const arr = (v, len) => (Array.isArray(v) && v.length >= len) ? v : null;
+  m._bigMeleeFiring = o.bm != null; m._bigMeleeT = m._bigMeleeFiring ? num(o.bm, 1, 9000) : 0;
+  { const a = arr(o.co, 2); m._columnFiring = !!a; m._columnT = a ? num(a[0], 1, 9000) : 0;
+    if (a) { m._columnLanes = a.slice(1, 9).map((x) => num(x, -1e6, 1e6)); m._columnTargetX = m._columnLanes[0]; } }
+  { const a = arr(o.hg, 2); m._hgCharging = !!a; m._hgPhase = a ? 'brace' : null; if (a) { m._hgT = num(a[0], 0, 9000); m._hgDir = +a[1] < 0 ? -1 : 1; } }
+  { const a = arr(o.bd, 2); m._braceDashing = !!a; m._bdPhase = a ? 'brace' : null; if (a) { m._bdT = num(a[0], 0, 9000); m._bdDir = +a[1] < 0 ? -1 : 1; } }
+  { const a = arr(o.lp, 3); m._leoMarking = !!a; if (a) { m._leoPounceX = num(a[0], -1e6, 1e6); m._leoPounceY = num(a[1], -1e6, 1e6); m.patternTimer = num(a[2], 0, 1e6); } }
+  { const a = arr(o.td, 3); m._tidalArmed = !!a; m._tidalT = a ? num(a[0], 1, 9000) : 0; if (a) { m._tidalX = num(a[1], -1e6, 1e6); m._tidalY = num(a[2], -1e6, 1e6); } }
+  m._lxTgSlam = (o.sl != null) ? num(o.sl, 0, 1) : -1;
+  m._kJumped = o.kj != null; m._kFired = false; m._kJumpMs = m._kJumped ? num(o.kj, 0, 9000) : 0;
+  { const a = arr(o.ru, 2); m._ruin = a ? { t0: (game.time | 0) - num(a[0], 0, 1e5), dir: +a[1] < 0 ? -1 : 1 } : null; }
+  m._crazyActive = o.om != null; m._crazyPhase = m._crazyActive ? 'telegraph' : null; m._crazyTime = m._crazyActive ? num(o.om, 0, 9000) : 0;
+  // a boss lock aimed at ME: its tell (the burst over the boss, the sound) once, then the chains converge on me - my "get away now"
+  const sk = arr(o.sk, 2), mine = !!(sk && typeof net !== 'undefined' && net && net.myId != null && +sk[1] === +net.myId);
+  if (mine && typeof player !== 'undefined' && player) {
+    const th = (typeof _qteThemeFor === 'function') ? _qteThemeFor(m) : null;
+    if (!m._lxSkSeen && th) {
+      if (typeof audio !== 'undefined' && audio && audio.play) audio.play('block');
+      if (th.fx && typeof spawnSpriteBurst === 'function') spawnSpriteBurst(m.x + m.w / 2, m.y - 26, th.fx, { size: th.fxTele || 120, life: 50, frameGap: 6 });
+    }
+    if (th && game.particles) for (let i = 0; i < 2; i++) {
+      const a = Math.random() * Math.PI * 2, rr = 64 + Math.random() * 22, px = player.x + player.w / 2, py = player.y + player.h / 2;
+      game.particles.push({ x: px + Math.cos(a) * rr, y: py + Math.sin(a) * rr, vx: -Math.cos(a) * 2.4, vy: -Math.sin(a) * 2.4, life: 16, color: th.pc[(Math.random() * 3) | 0], size: 3 });
+    }
+  }
+  m._lxSkSeen = mine;
+}
 function _coopTickMonsters() {
   if (!_coopActive() || !net.isHost) return;
   if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;   // v0.30.1443 coop-keyed - nobody shares my map: nothing to send
@@ -60756,6 +60817,7 @@ function _coopTickMonsters() {
     if (m._break > 0 && m._breakMax > 0) _e.bk = Math.max(0, Math.min(100, Math.round((m._break / m._breakMax) * 100)));
     if (m._cancerShellClosed) { _e.cs = 1; if (m._shellFace) _e.sf = m._shellFace === -1 ? -1 : 1; }
     if (m._tpWarn) _e.tw = [Math.round(m._tpWarn.el || 0), Math.round(m._tpWarn.ms || 1), Math.round(m._tpWarn.x || 0), Math.round(m._tpWarn.y || 0)];   // v0.30.x grav-tp
+    { const _tg = _lxCoopTgOf(m); if (_tg) _e.tg = _tg; }   // v0.30.1740 coop-guest (bughunt H17-1) - the windup a guest draws
     // bughunt coop-mirror - host state a mirror cannot derive: ib - Scorpio burrowed (_invulnBurrow: a guest's hit is refused, and the
     // untargetable checks agree); gh - Ghost Step (_dirGhostT: the guest's evasion roll matches); lo - a Libra scale pan, 2 = the unlit
     // one (its tint; the x0.25 stays the host's); ar - the art a monster wears (_artKey, keyframes only); sn - a real shiny (keyframes only)
@@ -61175,6 +61237,111 @@ function _lxCoopPeerBelow(frac) {
   } catch (e) {}
   return false;
 }
+// v0.30.1740 coop-guest (bughunt H17-2) - A BOSS'S KIT AIMS AT WHOEVER IT IS FIGHTING. bossAI turns on the partner it picked (the aggro swap in
+// updateMonsters), but the trait attacks that start before it - the heavy swing, the hourglass lunge, the brace-dash, the columns -
+// measured range, side, lanes and "on screen" from the HOST, and _bossSpecialAttacks (Mira's and Aetherion's kits, Arlen's Coronation,
+// the Sovereign) read the host's player outright. With the host kiting at range and a partner in melee, the swing never started and
+// the columns fell on the host's lane. The aim is a boss's own pick (m._coopAggroId, made in its swap last tick) or, for anything
+// else, the nearer player - the one its chase follows. null = the host (solo, nobody else here, or the host is the pick).
+function _lxCoopAimOf(m, peers, hostIdle) {
+  if (!m || !peers || !peers.length || typeof player === 'undefined' || !player) return null;
+  const pw = player.w || 28, ph = player.h || 44;
+  let q = null;
+  if (m.isBoss) {
+    if (m._coopAggroId == null) return null;
+    for (const p of peers) if (p && p.id === m._coopAggroId) { q = p; break; }
+  } else {
+    const mx = m.x + m.w / 2, my = m.y + m.h / 2;
+    let best = (hostIdle || !(player.hp > 0) || player._downed) ? Infinity : Math.hypot(player.x + pw / 2 - mx, player.y + ph / 2 - my);
+    for (const p of peers) { if (!p) continue; const d = Math.hypot(p.x + pw / 2 - mx, p.y + ph / 2 - my); if (d < best) { best = d; q = p; } }
+  }
+  if (!q) return null;
+  return { id: q.id, x: q.x, y: q.y, vx: q.vx || 0, vy: q.vy || 0, cx: q.x + pw / 2, cy: q.y + ph / 2, feet: q.y + ph };
+}
+function _lxAimSees(a, m) {   // the monster is on the aimed partner's screen (the same play window, about them)
+  const vw = (typeof W_PLAY === 'number') ? W_PLAY : 960, vh = (typeof H === 'number') ? H : 560;
+  return Math.abs((m.x + m.w / 2) - a.cx) < (vw + m.w) / 2 && Math.abs((m.y + m.h / 2) - a.cy) < (vh + m.h) / 2;
+}
+// fn() with the player's POSITION on the aimed partner, put back after. Positions only: _bossSpecialAttacks and its helpers write no
+// player state (they strike through projectiles and hazards), so there is nothing else for a restore to undo.
+function _lxWithAim(a, fn) {
+  const sx = player.x, sy = player.y, svx = player.vx, svy = player.vy;
+  player.x = a.x; player.y = a.y; player.vx = a.vx; player.vy = a.vy;
+  try { return fn(); } finally { player.x = sx; player.y = sy; player.vx = svx; player.vy = svy; }
+}
+// v0.30.1740 coop-guest (bughunt H17-3) - THE BOSS LOCK CAN CATCH A PARTNER. _qteShackleTry measured engage range, the cooldown and the landing against
+// the host alone: a guest hugging the boss was never locked, and with the host 460 px off the cooldown never even ran. When the boss
+// fights a partner the telegraph is theirs (locked to them at its start, as the host's is), the chains converge on their avatar here
+// and on their own screen (tg.sk), and at its end a qteLock execute addressed to them (p.to) runs _qteShackleStart against the guest's
+// own player - its own i-frames and its own distance to the boss (340, as solo; this side only pre-filters at 400). True when this
+// tick was the partner's.
+function _lxShackleTryPeer(m, dt, aim) {
+  const peers = (typeof net !== 'undefined' && net && net.peers) || {};
+  if (m._shackleTele != null) {
+    if (m._shackleTgt == null) return false;   // a telegraph on the host runs as before
+    const q = peers[m._shackleTgt], qx = q ? +q.x : NaN, qy = q ? (+q.y || 0) : 0;
+    m._shackleTele -= dt;
+    if (Number.isFinite(qx) && (game.time | 0) % 3 === 0) {
+      const a = Math.random() * Math.PI * 2, r = 64 + Math.random() * 22;
+      game.particles.push({ x: qx + 14 + Math.cos(a) * r, y: qy + 22 + Math.sin(a) * r, vx: -Math.cos(a) * 2.4, vy: -Math.sin(a) * 2.4, life: 16,
+        color: (m._shackleTh || _QTE_THEMES.chains).pc[(Math.random() * 3) | 0], size: 3 });
+    }
+    if (m._shackleTele <= 0) {
+      const to = +m._shackleTgt;
+      m._shackleTele = null; m._shackleTgt = null;
+      m._shackleCd = 12000 + Math.random() * 6000;
+      if (q && q.map === game.currentMap && !q._downed && !(q.maxHp && (+q.hp || 0) <= 0) && Number.isFinite(qx)) {
+        const dx = (m.x + m.w / 2) - (qx + 14), dy = (m.y + m.h / 2) - (qy + 22);
+        if (dx * dx + dy * dy <= 400 * 400 && typeof _lxBossExec === 'function') _lxBossExec('qteLock', { to, u: m.uid });
+      }
+    }
+    return true;
+  }
+  if (!aim || aim.id == null) return false;
+  const dx = (m.x + m.w / 2) - aim.cx, dy = (m.y + m.h / 2) - aim.cy;
+  if (dx >= 460 || dx <= -460 || dx * dx + dy * dy > 460 * 460) return true;   // out of the partner's engage range: hold the cooldown
+  m._shackleCd -= dt;
+  if (m._shackleCd > 0) return true;
+  m._shackleTele = 850; m._shackleTgt = aim.id;
+  m._shackleTh = _qteThemeFor(m);
+  if (typeof audio !== 'undefined' && audio && audio.play) audio.play('block');
+  if (m._shackleTh.fx && typeof spawnSpriteBurst === 'function') spawnSpriteBurst(m.x + m.w / 2, m.y - 26, m._shackleTh.fx, { size: m._shackleTh.fxTele || 120, life: 50, frameGap: 6 });
+  game.particles.push({ x: m.x + m.w / 2, y: m.y - 14, vx: 0, vy: -1.2, life: 40, color: m._shackleTh.pc[1], size: 4, text: m._shackleTh.icon });
+  return true;
+}
+// v0.30.1740 coop-guest (bughunt H17-4) - VIRGO AND LEO HOLD A GUEST TOO. Virgo's sins, marks and Judgment and Leo's challenger mark are a player's own
+// state, and virgo() / leo() kept them on the host's player alone: a guest touched by Virgo never gained a sin or wore a mark (so
+// _lxContactBase's Impure / Blessed scaling never applied to it) and could never be judged. A guest keeps its own now - the Virgo
+// mirror is its marker, the mark turns every 360 steps as on the host, a touch adds a sin (_coopFollowerContactTick), five sins call
+// the same 1.8 s Judgment (vgJudge) - and a challenger mark Leo gave it (lrSpot) runs out here, since no Leo AI runs on a guest.
+function _lxZodiacGuestTick(dt) {
+  if (typeof player === 'undefined' || !player) return;
+  if ((player._leoSpotlight | 0) > 0 && player._leoSpotlightFrom && player._leoSpotlightFrom._coopMirror) {
+    player._leoSpotlight -= dt;
+    if (player._leoSpotlight <= 0) { player._leoSpotlight = 0; player._leoSpotlightFrom = null; }
+  }
+  let v = null;
+  for (const m of (game.monsters || [])) if (m && m._coopMirror && m.zodiacSign === 'virgo' && m.currentHp > 0) { v = m; break; }
+  if (!v) { if (player._virgoMarker && player._virgoMarker._coopMirror) player._virgoMarker = null; return; }
+  if (player._virgoMarker !== v) { player._virgoMarker = v; if (player._virgoSin == null) player._virgoSin = 0; }
+  const now = game.time | 0;
+  if (v._lxVgMarkAt == null) { v._lxVgMarkAt = now + 360; player._virgoMark = 'balanced'; }
+  if (now >= v._lxVgMarkAt) {
+    v._lxVgMarkAt = now + 360;
+    const _cycle = ['impure', 'balanced', 'blessed'];
+    player._virgoMark = _cycle[(_cycle.indexOf(player._virgoMark || 'balanced') + 1) % 3];
+    const _glyph = player._virgoMark === 'impure' ? '⊘ Impure (+30% dmg taken)' : player._virgoMark === 'blessed' ? '✦ Blessed (−30% dmg taken)' : '◯ Balanced';
+    if (typeof showToast === 'function') showToast('⚖ Virgo Mark — ' + _glyph, 'rare');
+  }
+  if (v._lxVgJudgeT > 0) {
+    v._lxVgJudgeT -= dt;
+    if (v._lxVgJudgeT <= 0) { v._lxVgJudgeT = 0; _lxBossExecLocal('vgJudge', { n: 1 }); }
+  } else if ((player._virgoSin | 0) >= 5 && player.hp > 0) {
+    v._lxVgJudgeT = 1800;   // virgo()'s telegraph
+    if (typeof showToast === 'function') showToast('⚖ VIRGO — JUDGMENT! Reach 5 sins. Cleanse to survive!', 'legendary');
+    if (typeof flash === 'function') flash(0.45);
+  }
+}
 function _lxBossExec(kind, p) {
   let landed = true;
   if (typeof game !== 'undefined' && game && game._bossHitTap) { try { game._bossHitTap(p.x, p.y, 0, 0, 0, '', '', kind, p); } catch (e) {} }
@@ -61446,6 +61613,48 @@ function _lxBossExecLocal(kind, p) {
     } else if (typeof showToast === 'function') {
       showToast('🦂 Stinger evaded!', 'epic');
     }
+    return true;
+  }
+  case 'qteLock': {   // v0.30.1740 coop-guest (bughunt H17-3) - a boss lock addressed to ONE player (p.to): see _lxShackleTryPeer
+    if (typeof net === 'undefined' || !net || net.myId == null || +p.to !== +net.myId) return false;
+    if (typeof _QTE === 'undefined' || _QTE.active || player._god || typeof _qteShackleStart !== 'function') return false;
+    let src = null;
+    for (const mm of (game.monsters || [])) if (mm && mm.uid === +p.u && mm.currentHp > 0) { src = mm; break; }
+    if (!src) return false;
+    const dx = (src.x + src.w / 2) - (player.x + player.w / 2), dy = (src.y + src.h / 2) - (player.y + player.h / 2);
+    if ((player.invulnerable | 0) > 0 || dx * dx + dy * dy > 340 * 340) {   // dodged on my own screen: the fizzle the host shows
+      for (let i = 0; i < 6; i++) game.particles.push({ x: player.x + player.w / 2 + (Math.random() - 0.5) * 40, y: player.y + player.h / 2 + (Math.random() - 0.5) * 30,
+        vx: (Math.random() - 0.5) * 1.5, vy: -0.6 - Math.random(), life: 14, color: '#6f6394', size: 2 });
+      return false;
+    }
+    _qteShackleStart(src);
+    return !!_QTE.active;
+  }
+  case 'vgJudge': {   // v0.30.1740 coop-guest (bughunt H17-4) - Virgo's Judgment on whoever holds the sins: the receiver's own count, i-frames and HP (virgo()'s numbers)
+    if ((player._virgoSin | 0) >= 5 && player.invulnerable <= 0) {
+      const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
+      const dmg = Math.floor(_max * 0.75 * LX_ZODIAC_DMG_MUL);
+      const _vjShown = player._god ? dmg : Math.min(dmg, Math.max(0, player.hp - 1));
+      player.hp = Math.max(1, player.hp - (player._god ? 0 : dmg));
+      player.invulnerable = 1500;
+      player.hitStun = 700;
+      player._lastDamageSource = 'Virgo Judgment Execute';
+      player._virgoSin = 0;
+      if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _vjShown + ' JUDGMENT', life: 70, color: '#ffe89a', size: 22, big: true });
+      return true;
+    }
+    if ((player._virgoSin | 0) < 5 && typeof showToast === 'function') showToast('⚖ Judgment averted — sin below threshold.', 'epic');
+    return false;
+  }
+  case 'lrSpot': {   // v0.30.1740 coop-guest (bughunt H17-4) - Leo's challenger mark on the partner he fights (p.to), from his mirror
+    if (typeof net === 'undefined' || !net || net.myId == null || +p.to !== +net.myId) return false;
+    let src = null;
+    for (const mm of (game.monsters || [])) if (mm && mm.uid === +p.u && mm.currentHp > 0) { src = mm; break; }
+    if (!src) return false;
+    player._leoSpotlight = 4500; player._leoSpotlightFrom = src;   // _lxContactBase and my own hits read it against the mirror
+    if (typeof showToast === 'function') showToast('🦁 LEO — YOU are the challenger! +50% dmg dealt + taken', 'legendary');
+    if (typeof flash === 'function') flash(0.3);
+    if (typeof addShake === 'function') addShake(8);
     return true;
   }
   }
@@ -62233,6 +62442,7 @@ function _coopApplyMonsters(msg) {
     m._shellFace = e.sf === -1 ? -1 : (e.sf === 1 ? 1 : 0);
     // v0.30.x grav-tp — Gravitos's teleport warning (the draw runs it on from the frame's elapsed time)
     m._tpWarn = (Array.isArray(e.tw) && e.tw.length >= 4) ? { el: +e.tw[0] || 0, ms: Math.max(1, +e.tw[1] || 1), x: +e.tw[2] || 0, y: +e.tw[3] || 0, at: performance.now() } : null;
+    _lxCoopTgApply(m, e.tg);   // v0.30.1740 coop-guest (bughunt H17-1) - the host's windup, onto the mirror (cleared when it stops)
   }
   // Drop mirrors the host no longer reports (killed / despawned upstream).
   for (let i = game.monsters.length - 1; i >= 0; i--) {
@@ -63121,6 +63331,7 @@ function _coopFollowerContactTick() {
     player.hp -= _gLost;
     player.lastHitTime = game.time;
     player._lastDamageSource = m.label || m.type || 'an enemy';
+    if (m.zodiacSign === 'virgo' && player._virgoMarker === m) { player._virgoSin = (player._virgoSin | 0) + 1; if (typeof showToast === 'function') showToast('⚖ Sin ' + player._virgoSin + '/5', 'rare'); }   // v0.30.1740 coop-guest (bughunt H17-4) - a guest's sin, as the host's contact block counts one
     _lxContactLanding(m, dmg, _gLost, _gTook);   // stagger, i-frames, cancels, knock, number, statuses, hit-stop, combo reset, reflects
     return;   // one hit per tick; the i-frame gates the rest
   }
@@ -99822,6 +100033,7 @@ function updateMonsters(dt) {
         }
       }
     }
+    if (typeof _lxZodiacGuestTick === 'function') _lxZodiacGuestTick(dt);   // v0.30.1740 coop-guest (bughunt H17-4) - Virgo's sins / marks / Judgment and Leo's mark, on a guest (before the touch below, so its first touch already counts)
     _coopFollowerContactTick();   // mirrored monsters still deal contact damage (else follower is invincible)
     // v0.30.509 — drain on THIS exit too. v0.30.505 put the _pendingSweeps drain after the main
     // loop only, so a guest who becomes a follower on the frame after an orphan was queued
@@ -100434,6 +100646,9 @@ function updateMonsters(dt) {
         }
       }
     } else if (m.currentHp <= 0) { m._echoT = 0; m._echoShot = null; }
+    // v0.30.1740 coop-guest (bughunt H17-2) - the player this monster is fighting (see _lxCoopAimOf); null = the host, as solo
+    const _lxAim = (_aggroPeers && _aggroPeers.length) ? _lxCoopAimOf(m, _aggroPeers, _hostIdle) : null;
+    const _aimCx = _lxAim ? _lxAim.cx : _playerCx, _aimFeet = _lxAim ? _lxAim.feet : (player.y + player.h);
     if (m.traits && m.traits.bigMelee && (!m.isBoss || m.traits.activeBoss) && m.currentHp > 0 && !_ccHalted) {
       const bm = m.traits.bigMelee;
       if (m._bigMeleeCd === undefined) m._bigMeleeCd = bm.cdMs * 0.5 + Math.random() * bm.cdMs * 0.5;
@@ -100443,17 +100658,18 @@ function updateMonsters(dt) {
       // (v0.30.420) every swinger's reach beyond its edge shrinks by half the growth.
       // The defs carry per-type compensation (range +/- half the box delta, see
       // melee_reach_test.mjs); change the box, change the range.
-      const _bmDxAbs = Math.abs(_playerCx - (m.x + m.w/2));
+      const _bmDxAbs = Math.abs(_aimCx - (m.x + m.w/2));
       // v0.30.424 - the vertical gate is FEET-to-feet (was centre-to-centre, so it grew with m.h:
       // after v0.30.420 blightElder / ossuaryTyrant / echoKnight / legosaurus could not swing at
       // a grounded player at all). 'Within swingH of my floor line' is what it always meant.
-      const _bmInRange = _bmDxAbs < bm.range && Math.abs((player.y + player.h) - (m.y + m.h)) < (bm.swingH || 100);
+      const _bmInRange = _bmDxAbs < bm.range && Math.abs(_aimFeet - (m.y + m.h)) < (bm.swingH || 100);
       // On-screen guard so off-camera mobs don't burn cooldowns invisibly.
       let _bmOnScreen = true;
       {
         const _bcx = _lxPlayCamX(), _bcy = (game.camera && game.camera.y) || 0;   // wide-view
         if (m.x + m.w < _bcx || m.x > _bcx + W_PLAY || m.y + m.h < _bcy || m.y > _bcy + H) _bmOnScreen = false;
       }
+      if (!_bmOnScreen && _lxAim && _lxAimSees(_lxAim, m)) _bmOnScreen = true;   // v0.30.1740 coop-guest - on the screen of the partner it fights
       // PHASE 1 — start telegraph when cd is up + in range + on screen.
       if (!m._bigMeleeFiring && !m._columnFiring && m._bigMeleeCd <= 0 && !_lxMidSwing(m) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _bmInRange && _bmOnScreen) {   // v0.30.371 — not while spent   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
         m._bigMeleeFiring = true;
@@ -100492,7 +100708,7 @@ function updateMonsters(dt) {
         // frame it is exactly what the vx integration would have produced.
         m.vx = 0;
         if (bm.stickMul > 0) {
-          const _stDx = _playerCx - (m.x + m.w / 2);
+          const _stDx = _aimCx - (m.x + m.w / 2);
           const _stGap = Math.abs(_stDx) - (m.w + player.w) / 2;
           if (_stGap > 40) {
             const _stDir = _stDx > 0 ? 1 : -1;
@@ -100658,12 +100874,13 @@ function updateMonsters(dt) {
       const _hgDist = m.traits.hourglassDistance || 460;
       if (m._hgCd === undefined) m._hgCd = 3000 + Math.random() * 3000;   // staggered first cast
       m._hgCd -= dt;
-      const _hgDx = _playerCx - (m.x + m.w / 2);
+      const _hgDx = _aimCx - (m.x + m.w / 2);
       let _hgOnScreen = true;
       {
         const _cx = _lxPlayCamX(), _cy = (game.camera && game.camera.y) || 0;   // wide-view
         if (m.x + m.w < _cx || m.x > _cx + W_PLAY || m.y + m.h < _cy || m.y > _cy + H) _hgOnScreen = false;
       }
+      if (!_hgOnScreen && _lxAim && _lxAimSees(_lxAim, m)) _hgOnScreen = true;   // v0.30.1740 coop-guest
       // Never open a lunge mid-heavy: two committed attacks at once is
       // unreadable, and bigMelee is the one these mobs already telegraph.
       if (!m._hgCharging && !m._bigMeleeFiring && m._hgCd <= 0 && _hgOnScreen
@@ -100745,12 +100962,13 @@ function updateMonsters(dt) {
       const bd = m.traits.braceDash;
       if (m._bdCd === undefined) m._bdCd = bd.cdMs * 0.5;
       m._bdCd -= dt;
-      const _bdDx = _playerCx - (m.x + m.w/2);
+      const _bdDx = _aimCx - (m.x + m.w/2);
       let _bdOnScreen = true;
       {
         const _cx = _lxPlayCamX(), _cy = (game.camera && game.camera.y) || 0;   // wide-view
         if (m.x + m.w < _cx || m.x > _cx + W_PLAY || m.y + m.h < _cy || m.y > _cy + H) _bdOnScreen = false;
       }
+      if (!_bdOnScreen && _lxAim && _lxAimSees(_lxAim, m)) _bdOnScreen = true;   // v0.30.1740 coop-guest
       if (!m._braceDashing && m._bdCd <= 0 && !(m._zSpentMs > 0) && Math.abs(_bdDx) < (bd.range || 700)   // v0.30.x bughunt sibling2A-2 - SPENT starts no attack: the Taurus charge honours it like bigMelee does
           && Math.abs(_bdDx) > (bd.minRange || 120) && _bdOnScreen) {
         m._braceDashing = true;
@@ -100882,7 +101100,7 @@ function updateMonsters(dt) {
       const cs = m.traits.columnStrike;
       if (m._columnCd === undefined) m._columnCd = cs.cdMs * 0.5 + Math.random() * cs.cdMs * 0.5;
       m._columnCd -= dt;
-      const _csDxAbs = Math.abs(_playerCx - (m.x + m.w/2));    // v0.26.218
+      const _csDxAbs = Math.abs(_aimCx - (m.x + m.w/2));    // v0.26.218
       const _csInRange = _csDxAbs < cs.range;
       let _csOnScreen = true;
       {
@@ -100890,14 +101108,15 @@ function updateMonsters(dt) {
         if (m.x + m.w < _ccx || m.x > _ccx + W_PLAY || m.y + m.h < _ccy || m.y > _ccy + H) _csOnScreen = false;
       }
       // PHASE 1 — start telegraph
+      if (!_csOnScreen && _lxAim && _lxAimSees(_lxAim, m)) _csOnScreen = true;   // v0.30.1740 coop-guest
       if (!m._columnFiring && !m._bigMeleeFiring && m._columnCd <= 0 && !_lxMidSwing(m) && !(m._shootWindup > 0) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _csInRange && _csOnScreen) {   // v0.30.x bughunt sibling2A-2 - SPENT starts no pillar either (five zodiac signs carry this trait)   // v0.29.263 — winded bosses hold column strikes · v0.29.x — nor a retreating one
         m._columnFiring = true;
         m._columnT = cs.telegraphMs;
-        m._columnTargetX = _playerCx;    // v0.26.218
+        m._columnTargetX = _aimCx;    // v0.26.218
         // v0.30.x — a volley rains SEVERAL pillars at once. Locked at
         // telegraph start, same as the single-column target, so the drawn
         // zones and the strike can never disagree.
-        m._columnLanes = _columnLanesFor(cs, _playerCx);
+        m._columnLanes = _columnLanesFor(cs, _aimCx);
         if (typeof _lxSovAtkPose === 'function') _lxSovAtkPose(m, 'column', 66);   // v0.30.89
         // v0.30.1322 swing-lead - THE PILLAR IS CAST, NOT WALKED INTO. A column strike stamped no attack window, so a monster
         // calling one (the Archon's Pillar of Light, measured) kept its walk loop playing while the light came down on the
@@ -101643,7 +101862,7 @@ function updateMonsters(dt) {
     }
     m.animTimer += dt;
     // v0.26.x — Boss Shackle QTE cast (telegraphed chain-stun on the player).
-    if ((m.boss || m.isBoss || m.superBoss) && typeof _qteShackleTry === 'function') _qteShackleTry(m, dt);
+    if ((m.boss || m.isBoss || m.superBoss) && typeof _qteShackleTry === 'function') _qteShackleTry(m, dt, _lxAim);
       else if (typeof _mojimonQteTry === 'function') _mojimonQteTry(m, dt);   // v0.29.434 — MojiMon binding ritual (non-boss)
 
     // v0.26.x — Octobaby tentacle AI (anchor + status attacks). The octoLeg*
@@ -101831,7 +102050,7 @@ function updateMonsters(dt) {
     // dispatch — their fire-pillar specials don't slot cleanly into
     // a pattern-state machine). Runs once per frame regardless of
     // boss/regular AI dispatch so the timers tick on every mob update.
-    if (typeof _bossSpecialAttacks === 'function') _bossSpecialAttacks(m, dt);
+    if (typeof _bossSpecialAttacks === 'function') { if (_lxAim) _lxWithAim(_lxAim, () => _bossSpecialAttacks(m, dt)); else _bossSpecialAttacks(m, dt); }   // v0.30.1740 coop-guest (bughunt H17-2): aimed at the partner it fights
 
     if (m.isBoss) {
       m._preAiVy = m.vy;   // v0.26.x — snapshot for the "no upward hit-knockback" clamp in physics
@@ -130265,6 +130484,7 @@ function _qtePress(key) {
 // other effect's clock.
 function _qteFrame(dt, timerOnly) {
   if (player.hp <= 0) { _qteEnd(false); return; }
+  if (_QTE.src && _QTE.src._coopMirror && !_QTE.mojimon && (!(_QTE.src.currentHp > 0) || !game.monsters || game.monsters.indexOf(_QTE.src) < 0)) { _qteEnd(false); if (typeof _qteHide === 'function') _qteHide(0); return; }   // v0.30.1740 coop-guest (bughunt H17-3) - a guest's lock ends with its caster, as killMonster ends the host's
   if ((player.stunTimer | 0) <= 0) { _qteEnd(false, true); return; }   // cure remedy broke it
   _QTE.remain -= dt;
   if (_QTE.remain <= 0) { _qteEnd(false); return; }
@@ -130296,9 +130516,10 @@ function _qteFrame(dt, timerOnly) {
 // is TELEGRAPHED: ~0.85 s of purple chains converging on the player before it
 // lands, and it only lands if the player is still within 340 px — so creating
 // distance during the wind-up dodges it. Per-boss cooldown keeps it occasional.
-function _qteShackleTry(m, dt) {
+function _qteShackleTry(m, dt, aim) {
   if (m.currentHp <= 0) return;
   if (typeof m._shackleCd !== 'number') m._shackleCd = 8000 + Math.random() * 5000;  // grace window at fight start
+  if ((aim || m._shackleTgt != null) && _lxShackleTryPeer(m, dt, aim)) return;   // v0.30.1740 coop-guest (bughunt H17-3) - a lock aimed at the partner the boss fights
   if (m._shackleTele == null) {
     if (_QTE.active || player.hp <= 0 || player._god) return;
     const dx = (m.x + m.w / 2) - (player.x + player.w / 2);
@@ -166247,6 +166468,9 @@ const ZODIAC_AI = {
     // (the trade-off). HitMonster and damage-application paths read
     // these flags from the player.
     if (m._leoMarkAt == null) m._leoMarkAt = (game.time | 0) + 300;
+    // v0.30.1740 coop-guest (bughunt H17-4) - in a tick aimed at a partner the challenger is that partner: the mark landed on the host's own fields,
+    // which the swap does not carry back. It is addressed to them (lrSpot) and to nobody else.
+    if (game._bossHitTap && m._coopAggroId != null && !(m.aggroTarget && m.aggroTarget.mojimon) && (game.time | 0) >= m._leoMarkAt) { m._leoMarkAt = (game.time | 0) + 600; if (typeof _lxBossExec === 'function') _lxBossExec('lrSpot', { to: +m._coopAggroId, u: m.uid }); } else
     if ((game.time | 0) >= m._leoMarkAt && player && player.hp > 0) {
       m._leoMarkAt = (game.time | 0) + 600;
       player._leoSpotlight = 4500;   // 4.5 s duel window
@@ -166586,6 +166810,10 @@ const ZODIAC_AI = {
       m._virgoExecuteT -= dt;
       if (m._virgoExecuteT <= 0) {
         m._virgoExecuteFiring = false;
+        // v0.30.1740 coop-guest (bughunt H17-4) - a tick aimed at a partner swaps the player's fields and puts them back after, so the execute below was
+        // undone for the host (HP, i-frames, stun) while the sin reset stuck - a free cleanse by stepping back. It goes through the swap's
+        // tap instead and lands after the restore, on the host's real state (a guest's own sins are judged on its screen: _lxZodiacGuestTick)
+        if (game._bossHitTap && m._coopAggroId != null && !(m.aggroTarget && m.aggroTarget.mojimon)) game._bossHitTap(player.x, player.y, 0, 0, 0, '', '', 'vgJudge', { n: 1 }); else
         if ((player._virgoSin | 0) >= 5 && player.hp > 0 && player.invulnerable <= 0) {
           const _max = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
           const dmg = Math.floor(_max * 0.75 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25% (0.5625 of the bar)   // v0.30.332 tune per user — was 0.95: five sins still costs 3/4 of the bar, but no longer strands the player at ~zero under falling pillars
@@ -170006,6 +170234,7 @@ function _lxSwingBandY(m, sh) {
 // boss's own state every frame, like Leo's pounce circle, so it can never outlive the attack or run ahead of it - the
 // pattern clock these run on is 1.3-1.9x real time, which a frame-counted band could not follow.
 function _lxSlamWindup(m) {
+  if (m && m._coopMirror) return (m._lxTgSlam >= 0) ? m._lxTgSlam : -1;   // v0.30.1740 coop-guest (bughunt H17-1) - a guest's mirror runs no AI: the host's own progress (Mooma's band sat at 0 for her whole quake state)
   const st = m.patternState, t = m.patternTimer || 0;
   if (m.type === 'mooma' && st === 'quake' && t < 1200 && !m._quakeFired) return t / 1200;
   if (m.type === 'kingKrook' && st === 'earthquake' && t < 1200 && !m._kFired) return t / 1200;

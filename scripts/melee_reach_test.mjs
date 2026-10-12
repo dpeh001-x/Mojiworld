@@ -64,9 +64,11 @@ ok('the zodiac swing signs carry their reach onto the new absolute box',
   /const _zSwingRange = 175 \+ Math\.round\(\(_zNewW - _zOldW\) \/ 2\);/.test(src) && /range:_zSwingRange/.test(src),
   null);
 ok('the horizontal trigger is still centre-to-centre (if this changes, the golden table changes meaning)',
-  /_bmDxAbs = Math\.abs\(_playerCx - \(m\.x \+ m\.w\/2\)\);[\s\S]{0,600}?const _bmInRange = _bmDxAbs < bm\.range/.test(src), null);
+  /_bmDxAbs = Math\.abs\(_aimCx - \(m\.x \+ m\.w\/2\)\);[\s\S]{0,600}?const _bmInRange = _bmDxAbs < bm\.range/.test(src)
+  && /const _aimCx = _lxAim \? _lxAim\.cx : _playerCx, _aimFeet = _lxAim \? _lxAim\.feet : \(player\.y \+ player\.h\);/.test(src)   // the aim: the host's centre, or the partner's (co-op guest pass)
+  && /cx: q\.x \+ pw \/ 2, cy: q\.y \+ ph \/ 2, feet: q\.y \+ ph/.test(src), null);
 ok('the vertical gate is feet-to-feet, independent of box height (grounded targets always in range)',
-  /const _bmInRange = _bmDxAbs < bm\.range && Math\.abs\(\(player\.y \+ player\.h\) - \(m\.y \+ m\.h\)\) < \(bm\.swingH \|\| 100\);/.test(src), null);
+  /const _bmInRange = _bmDxAbs < bm\.range && Math\.abs\(_aimFeet - \(m\.y \+ m\.h\)\) < \(bm\.swingH \|\| 100\);/.test(src), null);
 
 for (const q of results) console.log((q.pass ? 'PASS ' : 'FAIL ') + ' ' + q.n + '  ' + JSON.stringify(q.x ?? ''));
 console.log(`${results.filter(q => q.pass).length}/${results.length} checks passed`);
