@@ -85,7 +85,17 @@ try {
   const n0 = await page.evaluate(() => { loadMap('forest', 200); return _lxAcReport().length; });   // release15a: the beats come marked in the save
   await page.waitForTimeout(2500);
   const k0 = await page.evaluate(() => ({ kills: game.kills || 0, mast: JSON.stringify(player.mastery || {}) }));
-  for (let i = 0; i < 14; i++) { await page.keyboard.down(i % 2 ? 'ArrowLeft' : 'ArrowRight'); for (let k = 0; k < 8; k++) { await page.keyboard.press('z'); await page.waitForTimeout(110); } await page.keyboard.up(i % 2 ? 'ArrowLeft' : 'ArrowRight'); }
+  // release17: walk toward the nearest live monster (positions are only read) and keep swinging until a kill lands
+  for (let i = 0; i < 60; i++) {
+    const st = await page.evaluate((k0k) => { const px = player.x + (player.w || 0) / 2; let best = null, bd = 1e9;
+      for (const m of (game.monsters || [])) { if (!m || !(m.currentHp > 0) || m.isBoss || m.boss) continue; const d = (m.x + (m.w || 0) / 2) - px; if (Math.abs(d) < Math.abs(bd)) { bd = d; best = m; } }
+      return { done: (game.kills || 0) > k0k, dx: best ? bd : 0 }; }, k0.kills);
+    if (st.done) break;
+    const dir = st.dx < 0 ? 'ArrowLeft' : 'ArrowRight', walk = Math.abs(st.dx) > 60;
+    if (walk) await page.keyboard.down(dir);
+    for (let k = 0; k < 6; k++) { await page.keyboard.press('z'); await page.waitForTimeout(110); }
+    if (walk) await page.keyboard.up(dir);
+  }
   await page.waitForTimeout(1500);
   const k1 = await page.evaluate(() => ({ kills: game.kills || 0, mast: JSON.stringify(player.mastery || {}), log: _lxAcReport().length }));
   ok('[6] real fighting still counts kills and mastery, with nothing logged', k1.kills > k0.kills && k1.mast !== k0.mast && k1.log === n0, { k0, k1, n0 });

@@ -16379,7 +16379,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1747';
+const GAME_VERSION = 'v0.30.1748';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -22305,6 +22305,12 @@ function _qnavWhy(id) {
 function _qnavStoryOffer(id) { try { const q = QUESTS[id]; if (!q) return false; if (q.critical) return true; return _QUEST_STORY_CHAIN.indexOf(id) >= 0; } catch (e) { return false; } }
 // v0.30.1746 release16 - the player chose this target: a Journal pin, or the guide key
 function _qnavByHand(id) { try { return !!id && ((Array.isArray(game.qnavPins) && game.qnavPins.indexOf(id) >= 0) || game._qnavByHand === id); } catch (e) { return false; } }
+// v0.30.1748 release17 - a bounty offer nobody accepted is never auto-guided to (the chip named "Pincer", a bounty never taken); a pin or the guide key still can
+function _qnavAutoBounty(id) { try { const q = player.quests || {}; return !!id && !(q.active && q.active[id]) && typeof _questCatOf === 'function' && _questCatOf(id) === 'bounty' && !_qnavByHand(id); } catch (e) { return false; } }
+// v0.30.1748 release17 - a panel, dialog or card is up (taxi, boss intro, advancement): the chip steps aside. Read at most every 250 ms.
+function _qnavModalUp() { const n = performance.now(); if (n - (_qnavModalUp._t || -1e9) < 250) return !!_qnavModalUp._v; _qnavModalUp._t = n; let v = false; try { v = typeof _anyOtherModalOpen === 'function' && !!_anyOtherModalOpen(); } catch (e) {} return (_qnavModalUp._v = v); }
+// the frame that draws the chip does not run while a panel pauses the game, so the chip kept its last state over the panel: a watch hides it
+setInterval(() => { try { const el = _LX_QK.el; if (!el || el.style.display === 'none') return; if ((typeof game !== 'undefined' && game && game.paused) || _qnavModalUp()) { el.style.display = 'none'; _LX_QK._dispEl = el; _LX_QK._disp = 'none'; } } catch (e) {} }, 100);
 function _qnavGuideList() {
   const out = [];
   try {
@@ -22336,7 +22342,7 @@ function _qnavGuideList() {
     for (const id of Object.keys(unl)) {
       if (!QUESTS[id] || seen[id] || (player.quests.completed && player.quests.completed[id])) continue;
       if (!_lxQuestOfferable(id)) continue;   // v0.30.1115 never guide toward a quest acceptQuest would refuse
-      seen[id] = 1; out.push({ id, rank: _qnavStoryOffer(id) ? 3 : 4, frac: 0 });   /* v0.30.1746 release16: a critical or story-chain offer ranks above a plain one */   // v0.29.897 — 1 -> 3; ranks 0-2 are now the active bands
+      seen[id] = 1; out.push({ id, rank: (QUESTS[id] && QUESTS[id].critical) ? 3 : _qnavStoryOffer(id) ? 3.5 : 4, frac: 0 });   /* v0.30.1748 release17: a critical offer ranks above a story chapter */   /* v0.30.1746 release16: a critical or story-chain offer ranks above a plain one */   // v0.29.897 — 1 -> 3; ranks 0-2 are now the active bands
     }
     for (const e of out) {
       const d = _qnavDest(e.id);
@@ -22366,6 +22372,7 @@ function _qnavAutoTrack() {
     // using the same three conditions _qnavGuideList applies. Kept O(1): this
     // runs from the quest tick, which fires on every kill.
     const _cur = game.qnav;
+    if (_cur && QUESTS[_cur] && !game._qnavOptOut && _qnavAutoBounty(_cur)) { game.qnav = null; }   // v0.30.1748 release17: re-picked below / next tick
     if (_cur && QUESTS[_cur]) {
       const _qs = (typeof player !== 'undefined' && player && player.quests) || null;
       const _done = !!(_qs && _qs.completed && _qs.completed[_cur]);
@@ -22373,7 +22380,7 @@ function _qnavAutoTrack() {
       if (!_done && _live && !(_qs.active && _qs.active[_cur]) && !_qnavByHand(_cur) && !game._qnavOptOut) {   // v0.30.1746 release16: an auto-picked OFFER gives way to an active or critical quest (a hand pick never)
         const _n = performance.now();
         if (!(_n - (_qnavAutoTrack._t || -1e9) < 2000)) { _qnavAutoTrack._t = _n; const _top = _qnavGuideList()[0];
-          if (_top && _top !== _cur && ((_qs.active && _qs.active[_top]) || (QUESTS[_top] && QUESTS[_top].critical && !_qnavStoryOffer(_cur)))) game.qnav = _top; }
+          if (_top && _top !== _cur && ((_qs.active && _qs.active[_top]) || (QUESTS[_top] && QUESTS[_top].critical && !(QUESTS[_cur] && QUESTS[_cur].critical)))) game.qnav = _top; }
         return;
       }
       if (!_done && _live) return;         // still worth guiding to — leave it alone
@@ -22381,7 +22388,7 @@ function _qnavAutoTrack() {
     }
     if (game._qnavOptOut) return;          // the player turned the guide off; respect it
     const list = _qnavGuideList();
-    if (list.length) game.qnav = list[0];
+    { const _pk = list.find((id) => !_qnavAutoBounty(id)); if (_pk) game.qnav = _pk; }   // v0.30.1748 release17: a bounty offer only by hand
   } catch (_e) {}
 }
 
@@ -22537,6 +22544,8 @@ function _qnavKeyStyles() {
 @media (max-width:760px){#qnav-key{max-width:158px;padding:3px 7px 3px 5px;}
   #qnav-key .qk-t b{font-size:10px;} #qnav-key .qk-k{display:none;}}
 @media (prefers-reduced-motion:reduce){#qnav-key,#qnav-key .qk-a{transition:none;}}
+/* v0.30.1748 release17: the chip never sits over a panel, a forced modal or a cinematic (it took taps meant for the Journal, the World Map, the shops, LV UP) */
+body.lx-panel-up #qnav-key, body.forced-modal #qnav-key, body.cinematic #qnav-key { display: none !important; }
 `;
   document.head.appendChild(s);
 }
@@ -22633,6 +22642,7 @@ function _qnavDrawKey() {
   };
   const on = (typeof game !== 'undefined') && !!game.qnav && !game.paused;   // v0.30.1700 release3: not over an open panel or dialog (it took their clicks)
   if (!on) { _qkHide(); return; }
+  if (_qnavModalUp()) { _qkHide(); return; }   // v0.30.1748 release17: it floated over the taxi map, the boss card and the job card
   const d = _qnavLiveDest();
   if (!d) { _qkHide(); return; }
 
@@ -29181,7 +29191,7 @@ function rollAffixedItem(base, forcedRarity, mobLevel) {
     for (const k in rolled) item[k] = (item[k] || 0) + rolled[k];
     suffixNames.push(af.name);
   }
-  item.name = (prefixNames.join(' ') + (prefixNames.length ? ' ' : '')) + base.name + (suffixNames.length ? ' ' + suffixNames[0] : '');
+  item.name = (prefixNames.join(' ') + (prefixNames.length ? ' ' : '')) + base.name + ((suffixNames.length && !/\sof\s/i.test(' ' + base.name + ' ')) ? ' ' + suffixNames[0] : '');   // v0.30.1748 release17: no second "of" (Boots of Swiftness of Resilience) - the stats still roll
   item.affixes = [...prefixes, ...suffixes];
   // v0.26.301 — Preserve the canonical catalog name so itemIconHtml() /
   // _itemKey() can resolve the equipment sprite for affixed drops (the
@@ -31666,7 +31676,7 @@ const QUESTS = {
     story: true, noScale: true, capShare: 0.75, fadesAt: 14, noExpFloor: true,
     name: "Four Doors", icon: "🚪", levelReq: 10, giver: "Old Arlen", handIn: true,
     kind: "event", target: "the four doors", count: 4,
-    stages: [{ map: "bastionThrone", hint: "Knock on Will's door", beat: "road_meet_will", marks: [{ id: "will", x: 730, glyph: "lightstar", tint: "#bfe6ff", label: "Knock on Will's door", say: "The door is not locked. It is waiting.", fight: { title: "HOLD THE LINE", sub: "stay in the ring while the light comes down", won: "The light closes. He nods, once.", guide: "Cheep! Stay in the ring, yo. Dodge INSIDE it.", trial: { kind: "hold", ms: 20000, radius: 130, volleys: 9, every: 2100, warn: 950, dmg: 0.09, color: "#bfe6ff" } } }] }, { map: "azureAbode", hint: "Knock on Hera's door", beat: "road_meet_hera", order: "recall", marks: [{ id: "s1", x: 290, y: 300, glyph: "star", tint: "#8fb6ff", label: "Touch the star" }, { id: "s2", x: 500, y: 225, glyph: "star", tint: "#8fb6ff", label: "Touch the star" }, { id: "s3", x: 740, y: 205, glyph: "star", tint: "#8fb6ff", label: "Touch the star" }, { id: "s4", x: 930, y: 290, glyph: "star", tint: "#8fb6ff", label: "Touch the star" }] }, { map: "emeraldVillage", hint: "Knock on Lady Hong's door", beat: "road_meet_hong", marks: [{ id: "hong", x: 900, glyph: "arrow", tint: "#ff8a8a", label: "Knock on Lady Hong's door", say: "She is behind the paper screen. She is not in a hurry.", fight: { title: "PATIENT AIM", sub: "loose when the needle is in the gold", won: "The arrow finds the gold. She is not smiling, exactly.", guide: "Cheep! Slow breath. Press when it is gold, yo.", trial: { kind: "aim", need: 3, misses: 3 } } }] }, { map: "shadowWovenHood", hint: "Knock on Taiga's door", marks: [{ id: "taiga", x: 1037, glyph: "lantern", tint: "#c9a6ff", label: "Knock on Taiga's door", say: "The lantern hums once. Then the street goes thin.", fight: { title: "FIRST STEP", sub: "the cuts come in a line: find the gap", won: "The last cut lands behind you. The Hood exhales.", guide: "Cheep! Find the gap between the lines, yo!", trial: { kind: "cuts", dmg: 0.1, color: "#c9a6ff" } } }] }],
+    stages: [{ map: "bastionThrone", hint: "Knock on Will's door", beat: "road_meet_will", marks: [{ id: "will", x: 730, glyph: "lightstar", tint: "#bfe6ff", label: "Knock on Will's door", say: "The door is not locked. It is waiting.", fight: { title: "HOLD THE LINE", sub: "stay in the ring while the light comes down", won: "The light closes. He nods, once.", guide: "Cheep! Stay in the ring, yo. Dodge INSIDE it.", trial: { kind: "hold", ms: 20000, radius: 130, volleys: 9, every: 2100, warn: 950, dmg: 0.09, color: "#bfe6ff" } } }] }, { map: "azureAbode", hint: "Knock on Hera's door", beat: "road_meet_hera", order: "recall", marks: [{ id: "s1", x: 290, y: 315, glyph: "star", tint: "#8fb6ff", label: "Touch the star" }, { id: "s2", x: 500, y: 225, glyph: "star", tint: "#8fb6ff", label: "Touch the star" }, { id: "s3", x: 740, y: 205, glyph: "star", tint: "#8fb6ff", label: "Touch the star" }, { id: "s4", x: 930, y: 320, glyph: "star", tint: "#8fb6ff", label: "Touch the star" }] }, { map: "emeraldVillage", hint: "Knock on Lady Hong's door", beat: "road_meet_hong", marks: [{ id: "hong", x: 900, glyph: "arrow", tint: "#ff8a8a", label: "Knock on Lady Hong's door", say: "She is behind the paper screen. She is not in a hurry.", fight: { title: "PATIENT AIM", sub: "loose when the needle is in the gold", won: "The arrow finds the gold. She is not smiling, exactly.", guide: "Cheep! Slow breath. Press when it is gold, yo.", trial: { kind: "aim", need: 3, misses: 3 } } }] }, { map: "shadowWovenHood", hint: "Knock on Taiga's door", marks: [{ id: "taiga", x: 1037, glyph: "lantern", tint: "#c9a6ff", label: "Knock on Taiga's door", say: "The lantern hums once. Then the street goes thin.", fight: { title: "FIRST STEP", sub: "the cuts come in a line: find the gap", won: "The last cut lands behind you. The Hood exhales.", guide: "Cheep! Find the gap between the lines, yo!", trial: { kind: "cuts", dmg: 0.1, color: "#c9a6ff" } } }] }],
     prereq: "q_road_6",
     beatOnGoal: "road_meet_taiga",
     beatOnComplete: "road_four_doors_done",
@@ -49639,7 +49649,7 @@ function _talentIconHtml(id, glyph, px) {
 const JOB_TALENTS = {
   berserker: [
     { id:'bloodrush',  name:'Bloodrush',  icon:'🩸', desc:'Basic attacks heal 2.5% of damage dealt.', fx:{ basicLifesteal:0.025 } },
-    { id:'rampage',    name:'Rampage',    icon:'💢', desc:'+5% ATK, always.',                      fx:{ atkPct:0.05 } },
+    { id:'rampage',    name:'Red Mist',   icon:'💢', desc:'+5% ATK, always.',                      fx:{ atkPct:0.05 } },
     { id:'warbreaker', name:'Warbreaker', icon:'⚔️', desc:'+7.5% skill damage.',                     fx:{ skillDmg:0.075 } },
   ],
   knight: [
@@ -49879,6 +49889,7 @@ function openTalentPick(tierId) {
   const h2 = modal.querySelector('h2');
   if (h2 && !h2.dataset.orig) h2.dataset.orig = h2.textContent;
   if (h2) h2.textContent = '✦ Choose Your Talent ✦';
+  { const _sub = modal.querySelector('.adv-sub'); if (_sub) { if (_sub.textContent !== "One talent for this path. A Setshard respec can change it later.") _sub.dataset.prev = _sub.textContent; _sub.textContent = "One talent for this path. A Setshard respec can change it later."; } }   // v0.30.1748 release17: its own subtitle (it kept the job page's)
   opts.innerHTML = '';
   for (const p of picks) {
     const card = document.createElement('div');
@@ -49888,15 +49899,16 @@ function openTalentPick(tierId) {
     card.innerHTML = '<div style="font-size:36px; line-height:1;">' + _talentIconHtml(p.id, p.icon, 52) + '</div>' +
       '<div class="tp-name" style="font-weight:800; margin:7px 0 4px; color:#ffe089;">' + p.name + '</div>' +
       '<div class="tp-desc" style="font-size:11.5px; color:#cfd4dc; line-height:1.45;">' + p.desc + '</div>' +
-      '<div class="tp-warn" style="margin-top:9px; font-size:10px; color:#ffb86b; font-weight:700;">⚠ PERMANENT — choose ONE of these three</div>';
+      '<div class="tp-warn" style="margin-top:9px; font-size:10px; color:#ffb86b; font-weight:700;">Choose ONE of these three · a Setshard respec can change it later</div>';
     card.onclick = async () => {
       // v0.26.x — permanence confirm (per user) before the pick commits.
       const ok = (typeof uiConfirm === 'function')
-        ? await uiConfirm({ title: '✦ Learn ' + p.icon + ' ' + p.name + '?', body: p.desc + '\n\n⚠ This choice is PERMANENT for this character.\nYou get ONE talent — the other two cards are alternative options, not slots.\n(Changing it later costs a ' + (typeof _lxRespecCost === 'function' ? _lxRespecCost() : 1500) + '◈ Setshard respec.)', yesLabel: 'Learn it (permanent)', noLabel: 'Not yet' })
+        ? await uiConfirm({ title: '✦ Learn ' + p.icon + ' ' + p.name + '?', body: p.desc + '\n\nYou get ONE talent — the other two cards are alternative options, not slots.\n(You can change it later with a ' + (typeof _lxRespecCost === 'function' ? _lxRespecCost() : 1500) + '◈ Setshard respec.)', yesLabel: 'Learn it', noLabel: 'Not yet' })
         : true;
       if (!ok) return;
       chooseTalent(jobId, p.id);
       if (h2 && h2.dataset.orig) h2.textContent = h2.dataset.orig;
+      { const _sub = modal.querySelector('.adv-sub'); if (_sub && _sub.dataset.prev != null) _sub.textContent = _sub.dataset.prev; }   // v0.30.1748 release17
       modal.classList.remove('tp-master');
       modal.style.display = 'none';
       game.paused = false;
@@ -49943,7 +49955,7 @@ document.addEventListener('click', (e) => {
   (async () => {
     const _pk = ((typeof _lxTalentTable === 'function' ? _lxTalentTable(_own) : null) || []).find(t => t.id === c.dataset.talent);
     const ok = (typeof uiConfirm === 'function' && _pk)
-      ? await uiConfirm({ title: '✦ Learn ' + _pk.icon + ' ' + _pk.name + '?', body: _pk.desc + '\n\n⚠ This choice is PERMANENT for this character.\nThe other two options are options, not extra slots — you get ONE talent.\n(Changing it later costs a ' + (typeof _lxRespecCost === 'function' ? _lxRespecCost() : 1500) + '◈ Setshard respec.)', yesLabel: 'Learn it (permanent)', noLabel: 'Not yet', skin: 'mono' })
+      ? await uiConfirm({ title: '✦ Learn ' + _pk.icon + ' ' + _pk.name + '?', body: _pk.desc + '\n\nThe other two options are options, not extra slots — you get ONE talent.\n(You can change it later with a ' + (typeof _lxRespecCost === 'function' ? _lxRespecCost() : 1500) + '◈ Setshard respec.)', yesLabel: 'Learn it', noLabel: 'Not yet', skin: 'mono' })
       : true;
     if (!ok) return;
     // v0.30.425 — commit to the tier the card belongs to. This passed player.job for every card, so a MASTER talent
@@ -49994,7 +50006,7 @@ function _talentCardHtml(owner, label) {
       return '<div class="lt-card lt-chosen">' + _head(_name, '<span class="lt-perm lt-perm-ok">&#10004; Learned</span>')
         + '<div class="lt-learned lt-equipped" style="--c:' + _eqCol + ';"><span class="lt-ico">' + _talentIconHtml(cp.id, cp.icon, 30) + '</span>'
         + '<div class="lt-learned-txt"><b>' + cp.name + ' &#10003;</b><span>' + cp.desc + '</span></div></div>'
-        + '<div class="lt-foot"><span>Permanent &mdash; only a Setshard respec can change it.</span>' + _respec + '</div></div>';
+        + '<div class="lt-foot"><span>Yours until a Setshard respec changes it.</span>' + _respec + '</div></div>';
     }
   }
   const cards = picks.map((p, i) => {
@@ -50856,6 +50868,7 @@ function openAdvancement() {
   // master gilding in case the picker was dismissed without going through its
   // own close path (Esc, closeAllModals).
   document.getElementById('advancement-modal').classList.remove('tp-master');
+  { const _sub = document.querySelector('#advancement-modal .adv-sub'); if (_sub && _sub.textContent === "One talent for this path. A Setshard respec can change it later." && _sub.dataset.prev != null) _sub.textContent = _sub.dataset.prev; }   // v0.30.1748 release17: a talent page dismissed another way
   if (game._advFromNpc) {   // v0.30.1722 release8: opened from a captain, it can wait (per user) - the level-up gate stays mandatory
     game._advFromNpc = false;
     const _ny = document.createElement('button'); _ny.type = 'button'; _ny.className = 'adv-not-yet'; _ny.textContent = 'Not yet';
@@ -50925,6 +50938,7 @@ function _advCommitJob(jobId) {
   } else if (typeof showToast === 'function') {
     const _need = (typeof MASTER_ADVANCE_LEVEL !== 'undefined' ? MASTER_ADVANCE_LEVEL : 40);
     setTimeout(() => {
+      if (window._lxMasterNextAt && Date.now() - window._lxMasterNextAt < 20000) return; window._lxMasterNextAt = Date.now();   // v0.30.1748 release17: toasted twice
       showToast('Next: your MASTER path unlocks at Lv ' + _need + '. Keep levelling — your new skills are on the U panel.', 'epic');
     }, 1400);
   }
@@ -51060,6 +51074,7 @@ function openMasterAdvancement() {
   // master gilding in case the picker was dismissed without going through its
   // own close path (Esc, closeAllModals).
   document.getElementById('advancement-modal').classList.remove('tp-master');
+  { const _sub = document.querySelector('#advancement-modal .adv-sub'); if (_sub && _sub.textContent === "One talent for this path. A Setshard respec can change it later." && _sub.dataset.prev != null) _sub.textContent = _sub.dataset.prev; }   // v0.30.1748 release17: a talent page dismissed another way
   if (game._advFromNpc) {   // v0.30.1722 release8: opened from a captain, it can wait (per user) - the level-up gate stays mandatory
     game._advFromNpc = false;
     const _ny = document.createElement('button'); _ny.type = 'button'; _ny.className = 'adv-not-yet'; _ny.textContent = 'Not yet';
@@ -67089,6 +67104,8 @@ const EVERDAWN_EPITAPHS = {
   young_confused_barnaby: 'Barnaby finally understands what he made. He sets the hammer down, and lets the dark go.',
   brinekraken: 'The Brinekraken unclenches. It had been holding the tide still for so long it forgot the tide was supposed to come in.',
 };
+// v0.30.1748 release17 - a boss's epitaph toasts once: a second kill call inside 20 s (the road quest and the boss quest closing together) stays quiet
+function _lxEpitaphOnce(type) { try { const n = performance.now(), E = (game._lxEpiAt = game._lxEpiAt || {}); if (n - (E[type] || -1e9) < 20000) return false; E[type] = n; return true; } catch (e) { return true; } }
 function _bossEpitaph(type, m) {
   if (EVERDAWN_EPITAPHS[type]) return EVERDAWN_EPITAPHS[type];
   // Zodiac signs: a champion this world raised, stuck mid-question in its House (v0.30.1124: it said each hid a shard of a
@@ -72340,6 +72357,8 @@ const _QUEST_STORY_CHAIN = [   // intended play order (levelReq ascending)
 (function () { const c = _QUEST_STORY_CHAIN; for (const id of ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish']) if (c.indexOf(id) < 0) c.splice(c.indexOf('q_boss_sundered_smith'), 0, id); })();   // per user (2026-10-09): the Smith waits for Barnaby IV
 (function () { const c = _QUEST_STORY_CHAIN; if (c.indexOf('q_last_step') < 0) c.splice(c.indexOf('q_boss_sundered_smith') + 1, 0, 'q_last_step'); })();
 (function () { const c = _QUEST_STORY_CHAIN, i = c.indexOf('q_boss_aetherion'), j = c.indexOf('q_last_step'); if (i >= 0 && j >= 0 && i > j + 1) { c.splice(i, 1); c.splice(c.indexOf('q_last_step') + 1, 0, 'q_boss_aetherion'); } })();   // v0.30.1746 release16: the Sanctum (Lv 50) follows the Last Step, ahead of Hourglass I
+(function () { const c = _QUEST_STORY_CHAIN, at = (id, after) => { if (c.indexOf(id) < 0 && c.indexOf(after) >= 0) c.splice(c.indexOf(after) + 1, 0, id); };   // v0.30.1748 release17: the Carried Things (Lv 12 / 22 / 38) in level order - Next skipped them
+  at('q_carried_1', 'q_four_captains'); at('q_carried_2', 'q_inner_dim_trial'); at('q_carried_3', 'q_carried_2'); })();
 (function () { const c = _QUEST_STORY_CHAIN; if (c.indexOf('q_long_dawn_3') < 0) c.splice(c.indexOf('q_long_dawn_2') + 1, 0, 'q_long_dawn_3'); })();   // per user (2026-10-12) the dreams beat, before the Petition   // v0.30.1676 tearchain
 (function () { const c = _QUEST_STORY_CHAIN, i = c.indexOf('q_zodiac_twelve'); if (i >= 0) c.splice(i, 1); c.splice(c.indexOf('q_long_dawn_3') + 1, 0, 'q_zodiac_twelve'); })();   // per user (2026-10-12): the Twelve Stars after the Long Dawn, so the pointer reads Aries -> the tyrants -> the Dreams -> the Stars -> the Petition
 // SET-PIECES, part 1: the quest's marks and stages (v0.30.1629 - per user: "ensure that these quests are exciting and not just lame quests").
@@ -73690,7 +73709,7 @@ function renderQuestJournal() {
       })();
       return `<div class="qj-saga" title="${blurb}">
         <span class="qj-saga-act">Act ${s.act} · ${s.actInfo.name}</span>
-        <span class="qj-saga-frag">${pips} ${s.count}/${s.total}</span>
+        <span class="qj-saga-frag" title="Dawn Fragments held: ${s.count} of ${s.total}">${pips} ${s.count}/${s.total} fragments</span>
         ${(() => { const _cr = Object.keys(QUESTS).filter((k) => QUESTS[k].critical), _cd = _cr.filter((k) => player.quests.completed && player.quests.completed[k]).length; return `<span class="qj-saga-crit" title="Critical quests done: the main road - the four captains, both class advancements and the five Dawn Fragments" style="color:#ffb3c2; font-weight:800; white-space:nowrap; text-shadow:0 0 6px rgba(255,79,112,0.6);">★ ${_cd}/${_cr.length}</span>`; })()}   <!-- v0.30.1561 the critical path -->
         ${next}
       </div>`;
@@ -103678,6 +103697,20 @@ function _bossSeekPlatform(m, dt) {
 // 2 %-per-frame coin flip when grounded. The projectile spam uses the same
 // fireMonsterProjectile path the regular shoot system uses, since boss-AI
 // mobs bypass the m.shoot gate (`!m.isBoss`) at L27516.
+// v0.30.1748 release17 - a boss AI that builds its chase from rest (+0.04 .. +0.28 a tick) never got past updateMonsters' walk-latch drift kill,
+// which zeroes any vx under the walk threshold every tick: the boss stood until a knockback over the threshold shoved it (Mirror Self
+// froze for minutes against a mage). The stride starts AT the threshold (the v0.30.383 regular-AI start, the v0.30.1333 Gravitos glide)
+// and the AI builds from there to its own cap. Never through a stun, a stagger or an opening; a planted attack still roots it afterwards.
+function _lxBossStrideStart(m, dir, cap) {
+  try {
+    if (!m || m.flies || !dir || m.stunTimer > 0 || m._stagger > 0 || m._dirOpenT > 0 || typeof _lxMobWalkOn !== 'function') return;
+    const on = _lxMobWalkOn(m) * 1.05;
+    if (Math.abs(m.vx || 0) >= on) return;
+    const v = (cap > 0) ? Math.min(on, cap) : on;
+    m.vx = (dir > 0 ? 1 : -1) * v;
+    if (v < on) m._walkLatch = true;   // a cap under the threshold: hold the walk latch so the drift kill leaves it
+  } catch (e) {}
+}
 function mirrorSelfAI(m, dt, distToPlayer) {
   const pcx = player.x + player.w / 2;
   const pcy = player.y + player.h / 2;
@@ -103711,6 +103744,7 @@ function mirrorSelfAI(m, dt, distToPlayer) {
   const _vxCap = (m.speed || 3.5) * 1.7 * _lull;
   if (m.vx >  _vxCap) m.vx =  _vxCap;
   if (m.vx < -_vxCap) m.vx = -_vxCap;
+  if (Math.abs(dx) > Math.max(24, m.w * 0.4)) _lxBossStrideStart(m, m.facing, _vxCap);   // v0.30.1748 release17: the chase starts at the walk threshold (it froze for minutes once a stun or freeze stopped it)
   // Jump if grounded AND (player is above OR random restless jump)
   if (m.onGround && m.jump > 0) {
     if (dy < -40 || Math.random() < 0.025) m.vy = -_mobJumpV(m);
@@ -106220,6 +106254,7 @@ function bossAI(m, dt, distToPlayer) {
       const _chaseCap = (m.speed || 1.4) * 1.5;
       if (m.vx >  _chaseCap) m.vx =  _chaseCap;
       if (m.vx < -_chaseCap) m.vx = -_chaseCap;
+      { const _kdx = (player.x + player.w / 2) - (m.x + m.w / 2); if (Math.abs(_kdx) > Math.max(40, m.w * 0.4)) _lxBossStrideStart(m, m.facing, _chaseCap); }   // v0.30.1748 release17: the idle chase starts at the walk threshold
       // v0.29.5xx — peek at the next slot: a leap only needs _GLOOP_LEAP_GAP,
       // everything else still waits the full _GLOOP_GAP.
       const _peekCyc = _gloopCycle(m);
@@ -108777,6 +108812,7 @@ function bossAI(m, dt, distToPlayer) {
     if (m.patternState === 'idle') {
       m.vx += m.facing * 0.04;
       if (Math.abs(m.vx) > 1) m.vx = m.facing;
+      { const _mdx = (player.x + player.w / 2) - (m.x + m.w / 2); if (Math.abs(_mdx) > Math.max(40, m.w * 0.4)) _lxBossStrideStart(m, m.facing, 1); }   // v0.30.1748 release17: her idle walk starts at the walk threshold
       if (m.patternTimer > 2500) {
         const choice = Math.random();
         const _now = game.time | 0;
@@ -110409,6 +110445,7 @@ function bossAI(m, dt, distToPlayer) {
     const _vxCapA = (m.speed || 2) * 1.6;
     if (m.vx >  _vxCapA) m.vx =  _vxCapA;
     if (m.vx < -_vxCapA) m.vx = -_vxCapA;
+    if (Math.abs(dxA) > _dbA || !_coEl) _lxBossStrideStart(m, m.facing, _vxCapA);   // v0.30.1748 release17: Smith / Legosaurus / Arbiter / Sovereign / Mira walk from rest again
     // Jump if grounded AND (player is above OR a small random hop —
     // 4% per frame for active-boss-trait mobs vs the 2% non-trait
     // default seen in the regular AI at L35770).
@@ -114892,7 +114929,7 @@ function _killMonsterRaw(m) {
       const _epitaph = (typeof _bossEpitaph === 'function') ? _bossEpitaph(m.type, m) : null;
       if (_epitaph) {
         setTimeout(() => {
-          if (typeof showToast === 'function') showToast('🌅 ' + _epitaph, 'legendary');
+          if (typeof showToast === 'function' && _lxEpitaphOnce(m.type)) showToast('🌅 ' + _epitaph, 'legendary');   // v0.30.1748 release17
         }, 2600);
       }
     }
@@ -119535,7 +119572,8 @@ function tryPortal() {
       }
       if (destMap.isBossArena && !game.dying && typeof _openConfirmDialog === 'function') {
         const _bossMapName = destMap.name || po.dest;
-        const _lvLine = destMap.levelReq ? `\n\nRecommended level: ${destMap.levelReq}+.` : '';
+        const _recLv = (typeof _lxArenaRecLevel === 'function') ? _lxArenaRecLevel(destMap) : destMap.levelReq;   // v0.30.1748 release17
+        const _lvLine = _recLv ? `\n\nRecommended level: ${_recLv}+.` : '';
         // v0.29.380 — pass the destination's boss sprite so the dialog can
         // paint it as a silhouette behind the text (see .boss-arena CSS).
         const _bossShade = (typeof _arenaBossSpriteUrl === 'function') ? _arenaBossSpriteUrl(destMap) : null;
@@ -119562,7 +119600,26 @@ function tryPortal() {
 // within 70 px across; an NPC may stand a step below you (never through the floor you are on) and up to one storey
 // above - every town shop stands on a ledge over the street, and talking up to it is how the town is played.
 const LX_TALK_DX = 70, LX_TALK_UP = 270, LX_TALK_DOWN = 60;
+// v0.30.1748 release17 - the people an active talk quest still asks you to speak to ("Speak to Will": on the ground under his balcony the
+// talk key opened Munch, who stood nearer). Inside the same reach box, such an NPC wins over a nearer one.
+function _lxQuestTalkWanted() {
+  const out = Object.create(null);
+  try {
+    const A = (player && player.quests && player.quests.active) || {};
+    for (const id in A) {
+      const q = QUESTS[id], a = A[id]; if (!q || q.kind !== 'talk' || !a || a.readyToHandIn) continue;
+      let tt = null; try { tt = q.talkTo; } catch (e) { continue; }
+      const tp = a.talkProgress || {};
+      for (const n of [].concat(tt || [])) if (n && !tp[n]) out[n] = 1;
+    }
+  } catch (e) {}
+  return out;
+}
+// v0.30.1748 release17 - the boss door's "Recommended level" agrees with the boss's own quests: the lowest of the arena's level and the level a
+// boss quest for its boss opens at (Gelwater Grotto said 10+ while The Brimming Tyrant opens at Lv 8 and the road sends you at 9)
+function _lxArenaRecLevel(M) { let lv = (M && M.levelReq) | 0; try { const bt = M && M.bossType; if (bt) for (const id in QUESTS) { const q = QUESTS[id]; if (q && q.kind === 'boss' && q.target === bt && (q.levelReq | 0) > 0 && (!lv || (q.levelReq | 0) < lv)) lv = q.levelReq | 0; } } catch (e) {} return lv; }
 function _lxTalkTarget() {
+  const _tw = (typeof _lxQuestTalkWanted === 'function') ? _lxQuestTalkWanted() : {};   // v0.30.1748 release17
   if (typeof game === 'undefined' || !game || !Array.isArray(game.npcs) || typeof player === 'undefined' || !player) return null;
   const px = player.x + player.w / 2, pf = player.y + player.h;
   let best = null, bestD = Infinity;
@@ -119571,7 +119628,7 @@ function _lxTalkTarget() {
     const dx = Math.abs(px - npc.x); if (dx >= LX_TALK_DX) continue;
     const up = pf - ((npc.y || 0) + 44);   // > 0: the NPC's feet are above the player's
     if (up > LX_TALK_UP || up < -LX_TALK_DOWN) continue;
-    const d = dx * dx + up * up;
+    const d = dx * dx + up * up - (_tw[npc.name] ? 1e9 : 0);   // v0.30.1748 release17: the quest names this one
     if (d < bestD) { bestD = d; best = npc; }
   }
   return best;
@@ -131643,6 +131700,7 @@ function showPowerupChoice(bossInfo) {
       Boon bag: <b>${(player.boons || []).length}/${BOON_INVENTORY_CAP}</b>
       <span class="pr-foot-orn">·</span>
       Equipped: <b>${(player.boonsEquipped || []).length}/${(typeof _boonCap === 'function') ? _boonCap() : BOON_EQUIP_CAP}</b>
+      ${(((typeof _boonCap === 'function') ? _boonCap() : BOON_EQUIP_CAP) === 0 && typeof _boonNextSlotLevel === 'function' && _boonNextSlotLevel()) ? '<span class="pr-first-slot" style="opacity:0.8;">(first slot at Lv ' + _boonNextSlotLevel() + ')</span>' : ''}
       <span class="pr-foot-orn pr-foot-keys">·</span>
       <span class="pr-foot-keys">Press <b>1</b><b>2</b><b>3</b> to claim</span>
       <span class="pr-foot-orn">❖</span>
@@ -165789,7 +165847,7 @@ const _ZODIAC_GAIT = {
       m._gCd = (phase >= 3 ? 2000 : 2800) + Math.random() * 900;
       m._gPassMs = 520 + phase * 40;
       m._gPassVx = dir * (5.4 + phase * 0.8);
-    } else { m.vx += dir * 0.06; if (Math.abs(m.vx) > 2.0) m.vx = Math.sign(m.vx) * 2.0; }
+    } else { m.vx += dir * 0.06; if (Math.abs(m.vx) > 2.0) m.vx = Math.sign(m.vx) * 2.0; if (dist > 90) _lxBossStrideStart(m, dir, 2.0); }   // v0.30.1748 release17: beyond the pass range the drift starts at the walk threshold
   } },
 };
 // v0.29.340 — heavy-mob knockback resist. Set by a gait (Caprikor's ANCHOR) or

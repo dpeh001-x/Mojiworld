@@ -60,7 +60,7 @@ try {
     out.spire = { tracker: document.getElementById('quest-tracker').textContent.replace(/\s+/g, ' ').slice(0, 200), locate: _lxQuestLocateLine('q_pq_spire') };
     // NEXT
     fresh('warrior', 44);
-    for (const id of ['q_act1_waking', 'q_act1_sleepers', 'q_act1_quiet', 'q_act1_recipe', 'q_act1_name', 'q_act1_firstword', 'q_inner_dim_trial', 'q_distorted_portal', 'q_hourglass_1', 'q_hourglass_2']) player.quests.completed[id] = true;
+    for (const id of ['q_act1_waking', 'q_act1_sleepers', 'q_act1_quiet', 'q_act1_recipe', 'q_act1_name', 'q_act1_firstword', 'q_inner_dim_trial', 'q_distorted_portal', 'q_hourglass_1', 'q_hourglass_2', 'q_carried_1', 'q_carried_2', 'q_carried_3']) player.quests.completed[id] = true;   // release17: the Carried Things joined the chain
     try { tickQuestUnlocks(); } catch (e) {}
     renderQuestTracker(); await W8(80);
     const ntrk = document.getElementById('quest-tracker').textContent.replace(/\s+/g, ' ');
