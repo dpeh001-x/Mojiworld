@@ -62,7 +62,7 @@ try {
   check(/into his jelly body/.test(I.king.lore) && /into his jelly body/.test(Q.king) && /to shield them/.test(Q.king), "Gloopaloo drew his court into his JELLY BODY to shield them (said plainly, in his card and his quest)", '');
   check(/Hera.s starry robe/.test(Q.tear) && /^Harea wears/.test(Q.tear), 'the Lv 40 mirror quest opens by naming Harea, not an unnamed "She"', Q.tear.slice(0, 60));
   check(/hum will not last|it will not last/.test(Q.road5) && !/the hum is fading/.test(Q.road5), 'the lantern quest no longer says the hum is already fading before you touch one', '');
-  check(/The small ones turn up as Dawn Fragments/.test(Q.cut) && /stay on the map/.test(Q.cut), 'a Lv 40 player is not told they already carry Dawn Fragments', '');
+  check(/stay on the map/.test(Q.cut) && !/already carry|you carry/i.test(Q.cut), 'a Lv 40 player is not told they already carry Dawn Fragments (Tear III no longer mentions them at all: the cut is the work of a blade, not a shed piece of the lift)', '');
   check(/What the captains will not say/.test(Q.inner) && !/certificate/.test(Q.inner), 'the Mirror Self trial points at the captains, not a certificate that does not exist', '');
   check(/never arrives/.test(Q.under) && /scaled to your level/.test(Q.under) && !/apex-tier/.test(Q.under) && !/dialog/.test(Q.under), 'the Underpass quest: the train never arrives (the Conductor runs it), plain words for the boss and the warps', '');
   check(/than they can be folded/.test(Q.fox) && /lovely to look at/.test(Q.fox) && /carrying on, bad at moving on/.test(Q.bath) && /who watch the lights above\. One night, one flickered/.test(Q.glass), 'four clear rewrites: the carpet, the closing line, the bathhouse and the lights above (no Houses before Aetherion falls)', '');

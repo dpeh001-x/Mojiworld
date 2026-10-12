@@ -37,11 +37,11 @@ try {
       game._brokMenu = null; game._lxOrderPage = null; openNPC(n); await sleep(300); await settle(); if (pageRe) { await click(pageRe); await settle(); }
       const menu = opts(); const had = await click(optRe); await settle(); const t = text(); await close(); return { menu, had, t }; };
     const done = { q_lyra_kin: true }; player.quests = player.quests || { active: {}, completed: {} }; player.quests.completed = Object.assign({}, done);
-    const T = /Did the four ever stand together\?/;
-    out.will = await ask('bastionThrone', 'Will', /Who fights beside you\?/, T);
-    out.hera = await ask('azureAbode', 'Hera', /What was the Academia\?/, T);
-    out.hong = await ask('emeraldVillage', 'Lady Hong', /What guards the grove\?/, T);
-    out.taiga = await ask('shadowWovenHood', 'Taiga', /Who do you fight\?/, T);
+    const TW = /Did the four ever stand together\?/, TH = /Did the four ever work as one\?/, TG = /Did you four ever pull together\?/, TT = /Did you ever hunt with the others\?/;   // one button text per captain (npc_unique_options_test)
+    out.will = await ask('bastionThrone', 'Will', /Who fights beside you\?/, TW);
+    out.hera = await ask('azureAbode', 'Hera', /What was the Academia\?/, TH);
+    out.hong = await ask('emeraldVillage', 'Lady Hong', /What guards the grove\?/, TG);
+    out.taiga = await ask('shadowWovenHood', 'Taiga', /Who do you fight\?/, TT);
     player.quests.completed = {}; player.quests.active = Object.assign({}, player.quests.active || {}, { q_barnaby_roll: { progress: 0, targetCount: 1 } });
     out.work = await ask('bastionThrone', 'Will', /Who fights beside you\?/, /Barnaby's work\?/);
     delete player.quests.active.q_barnaby_roll;
@@ -52,9 +52,9 @@ try {
   const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');
   const dex = (src.match(/miraFallen: +'She reached the gate first[^']*'/) || [''])[0];
   const all = [R.will.t, R.hera.t, R.hong.t, R.taiga.t, R.work.t, R.lore, dex].join(' ');
-  ok('[1] every captain answers "Did the four ever stand together?" on their order page', [R.will, R.hera, R.hong, R.taiga].every((x) => x.had && x.t), [R.will.had, R.hera.had, R.hong.had, R.taiga.had]);
+  ok('[1] every captain answers "did the four ever stand together?" on their order page, each under their own words', [R.will, R.hera, R.hong, R.taiga].every((x) => x.had && x.t), [R.will.had, R.hera.had, R.hong.had, R.taiga.had]);
   ok('[1] in their own voices: Will wanted a line held, Hera ranked the culprits, Hong kept the grove, Taiga went ahead', /wanted a line held/.test(R.will.t) && /ranked the rumoured culprits/.test(R.hera.t) && /I kept the grove/.test(R.hong.t) && /I went ahead/.test(R.taiga.t), [R.will.t.slice(0, 60), R.hera.t.slice(0, 60)]);
-  ok('[1] the woman at the gate went up the road alone, and none of the four went with her', /The woman at the gate went up it alone, and none of us went with her/.test(R.will.t) && /The one who went alone should not have had to/.test(R.hong.t), [R.will.t.slice(-90), R.hong.t.slice(-60)]);
+  ok('[1] the woman at the gate led her own company up the road, and none of the four went with her', /The woman at the gate led her own company up it, and none of us went with her/.test(R.will.t) && /Those who went up without us should not have had to/.test(R.hong.t), [R.will.t.slice(-90), R.hong.t.slice(-60)]);
   ok('[2] Will\'s "Barnaby\'s work?": her blades never break, and she asked him for the one that would - not that the Bastion\'s blades are his', R.work.had && /Her blades never break/.test(R.work.t) && /She asked me for the one that would/.test(R.work.t) && !/Every blade my knights carry is his/.test(R.work.t), R.work.t.slice(0, 160));
   ok('[3] her boss card: the blade a smith forged to cut the curse on this world, and she cannot remember what it was for', /forged to cut the curse on this world/.test(R.lore) && /cannot remember what it was for/.test(R.lore), R.lore.slice(-120));
   ok('[3] her dossier: she remembers the gate and almost nothing else', /She remembers the gate, and almost nothing else\./.test(dex), dex.slice(-80));

@@ -104,7 +104,7 @@ try {
   const f0 = R.fac0, f1 = R.fac1, f4 = R.fac4;
   ok('2. the Standings tab: one dossier per order (creed, Rose / Its House / Of you), then the Lantern and the Sixth Standing',
     J(f0.orders.map((o) => o.k)) === J(['warrior', 'mage', 'archer', 'rogue']) && f0.orders.every((o) => o.creed.length > 4 && J(o.secs.map((s) => s.toUpperCase())) === J(['ROSE', 'ITS HOUSE', 'OF YOU'])) && f0.long.length === 0
-      && f0.sib === 1 && /Their oldest, the silver-haired Sage Mira, who kept her name/.test(f0.text) && /The Sixth Standing/i.test(f0.text) && /Four of the Twelve came from these halls/.test(f0.text), J({ orders: f0.orders, long: f0.long, sib: f0.sib }));
+      && f0.sib === 1 && /Their oldest, the silver-haired woman at the gate, who kept her name/.test(f0.text) && !/Mira/.test(f0.text) && /The Sixth Standing/i.test(f0.text) && /Four of the Twelve came from these halls/.test(f0.text), J({ orders: f0.orders, long: f0.long, sib: f0.sib }));
   ok('3. an order\'s story moves on once its House is dark - a fourth row on its dossier, and only its own',
     f0.orders.every((o) => !o.since) && f1.orders.filter((o) => o.since).length === 1 && /bull's house is dark/i.test(f1.orders[0].since) && /stand until someone pushes/.test(f1.orders[0].since)
       && f4.orders.every((o) => o.since) && /treatise 1,185/.test(f4.orders[1].since) && /only to hear it land/.test(f4.orders[2].since) && /asking whose it is/.test(f4.orders[3].since), J(f1.orders.map((o) => o.since.slice(0, 60))));

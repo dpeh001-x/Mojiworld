@@ -56,12 +56,12 @@ const r = await page.evaluate(() => {
   // they never wash off. Anchored to the entity key so a comment quoting the
   // line cannot satisfy it - the Smith guard in lyra_arc_test passed on exactly
   // that mistake before it was tightened.
-  out.sootIntact = /young_confused_barnaby: 'A talented smith who took the finish[^']*old soot under the gauntlets/.test(_src);
+  out.sootIntact = /young_confused_barnaby: 'A talented smith who reached for something[^']*old soot under the gauntlets/.test(_src);
   // The five theories are the point of chapter I. Count the labelled ones, so a
   // later trim that guts the prose fails loudly instead of leaving a chapter
   // called "Five Stories" with three.
   const five = (QUESTS.q_barnaby_five || {}).desc || '';
-  out.theoryLabels = ['HE DIED THAT NIGHT', 'HE NEVER TRAINED HERE', 'HE WAS HIDDEN',
+  out.theoryLabels = ['HE DIED THE NIGHT BEFORE THE SKY CAME DOWN', 'HE NEVER TRAINED HERE', 'HE WAS HIDDEN',
                       'THERE WERE ALWAYS TWO'].filter((t) => five.includes(t));
   out.unsignedFifth = /nobody will sign/i.test(five);
   // Chapter II's evidence and chapter III's contradiction must both survive.
