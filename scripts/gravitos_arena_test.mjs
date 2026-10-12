@@ -38,6 +38,10 @@ await page.waitForFunction(() => typeof loadMap === 'function' && typeof killMon
 
 const out = await page.evaluate(async () => {
   window._lxBootGateDone = true;
+  // v0.30.1735 boss-polish: both form-change films and his two form-change speeches seen. Since v0.30.1719 each form change plays a once-per-save
+  // film, then his speech, and the game pauses under both, so the tint check after form 3 read a backdrop that was not being drawn
+  // (eased null).
+  player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { gravitos_awaken: true, gravitos_ascend: true, gravitos_awakened: true, gravitos_ascendant: true });
   // file:// boot: the boot image hold is never released by a menu click here, and while held the render loop does not
   // draw - release it like the newer suites do, or the render-path tint check reads a loop that never ran
   try { if (window._lxBootHold) window._lxBootHold.release('menu'); } catch (e) {}
@@ -112,7 +116,10 @@ const out = await page.evaluate(async () => {
 
   // The eased tint must actually converge in the DRAW path. Nothing here calls
   // it directly — if the render hook is missing, _lxGravTintCur never moves.
-  await new Promise((r) => setTimeout(r, 1600));
+  // v0.30.1735 boss-polish: wait for the draw, not a fixed 1.6 s. Map entry holds the backdrop behind its veil for 1.1-2.9 s depending on load
+  // (_lxReadyGate) and the boss's intro card pauses the game, so under load the old wait read the tint before any draw (null).
+  // Polled until it converges; a missing render hook still never moves it, and fails after 12 s.
+  { const tq = performance.now(); while (performance.now() - tq < 12000) { const c = tintCur(); if (c != null && Math.abs(c - t3) < 0.05) break; try { const bi = document.getElementById('boss-intro-overlay'); if (bi && bi.classList.contains('on') && typeof _dismissBossIntro === 'function') _dismissBossIntro(); } catch (e) {} game.paused = false; await new Promise((r) => setTimeout(r, 200)); } }
   const cur = tintCur();
   ok('the tint is actually applied by the render path', cur != null && Math.abs(cur - t3) < 0.05,
      `eased ${cur == null ? 'null' : (+cur).toFixed(3)} toward target ${t3}`);

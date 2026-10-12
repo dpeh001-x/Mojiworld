@@ -122,6 +122,9 @@ const R = await page.evaluate(async () => {
   // destroying the thing it was about to measure.
   boss.x = player.x + 6000;
   const stand = async (x, y, ms) => {
+    // v0.30.1735 boss-polish: a real HP pool. The bare Lv 99 test hero has ~117 max HP and one ~2,000 venom chip downed him on the first frame -
+    // and going down clears poison and slow, so "standing in it poisons" read 0 whenever the sample came after the down.
+    player.maxHp = Math.max(player.maxHp || 0, 200000); player._downed = false;
     player._god = false; player.blockTimer = 0;
     player._poisonTimer = 0; player._slowTimer = 0;
     player._lastDamageSource = null;

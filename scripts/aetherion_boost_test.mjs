@@ -136,10 +136,13 @@ try {
     }
     // last: the Gate (nothing after it can be hit by its collapse)
     // 5. the Gate: stand in its first safe spot, mortal
-    setForm(true, 0.4); m._ae.cd.gate = game.time + 1e9; await force('gateWind', 50);   // one Gate: a second one cast after it would land in a later check
+    setForm(true, 0.4); m._ae.cd.gate = game.time + 1e9;   // one Gate: a second one cast after it would land in a later check
+    // v0.30.1735 boss-polish: 90% -> 40% crosses his 50% form change, whose own windows can break off a Gate forced at once (no hazard at all, one run in four): let it settle, and force again if it was broken off
+    for (let i = 0; i < 60; i++) { hold(380); m._ae.st = 'idle'; m._ae.t = 0; await frames(1); }
+    for (let k = 0; k < 3 && !game.hazards.some((h) => h && h.type === 'gravitos_singularity'); k++) await force('gateWind', 50);
     const gate = game.hazards.find((h) => h && h.type === 'gravitos_singularity');
     const plats = (game.mapData.platforms || []).map((p) => p.y);
-    out.gate = gate ? { label: gate._sourceLabel, life: gate.life, zones: gate.safeZones.length, onSurface: gate.safeZones.every((z) => plats.includes(z.y + z.h)), inWorld: gate.safeZones.every((z) => z.x >= 0 && z.x + z.w <= game.mapData.worldWidth) } : null;
+    out.gate = gate ? { label: gate._sourceLabel, life: gate.life, zones: gate.safeZones.length, onSurface: gate.safeZones.every((z) => plats.includes(z.y + z.h)), inWorld: gate.safeZones.every((z) => z.x >= 0 && z.x + z.w <= game.mapData.worldWidth), clearOfHim: gate.safeZones.every((z) => !(z.x < m.x + m.w + 60 && z.x + z.w > m.x - 60)) } : null;   // v0.30.1735 boss-polish
     if (gate) {
       const z = gate.safeZones[0]; player._god = false; player.hp = getMaxHp(); player.invulnerable = 0; let busy = 0; const drops = []; let lastHp = player.hp;
       for (let i = 0; i < 420 && gate.life > 0; i++) { player.x = z.x + z.w / 2 - player.w / 2; player.y = z.y + z.h - player.h; player.vx = 0; player.vy = 0; if (m._ae.st !== 'idle' && m._ae.st !== 'gateWind') busy++; await frames(1); if (player.hp !== lastHp) { drops.push([i, lastHp - player.hp, player._lastDamageSource]); lastHp = player.hp; } }
@@ -159,7 +162,7 @@ try {
     ok('...seven under 25%', R.feather3 === 7, R.feather3);
     ok('Scale Spiral: 36 darts on 3 arms over twelve beats', R.spiral.n === 36 && R.spiral.kinds.join() === 'maescale' && R.spiral.beats >= 10, R.spiral);
     ok('Halo Discs: three ring-blades go out past 200 px, turn back, and are caught at him', R.halo.n === 3 && R.halo.kind === 'maehalo' && R.halo.far.every((d) => d > 200) && R.halo.back.every(Boolean) && R.halo.caught, R.halo);
-    ok("the Gate's Question: three safe spots, on real surfaces, inside the Sanctum", !!R.gate && R.gate.label === "Aetherion's Gate" && R.gate.zones === 3 && R.gate.onSurface && R.gate.inWorld, R.gate);
+    ok("the Gate's Question: three safe spots, on real surfaces, inside the Sanctum", !!R.gate && R.gate.label === "Aetherion's Gate" && R.gate.zones === 3 && R.gate.onSurface && R.gate.inWorld && R.gate.clearOfHim, R.gate);
     ok('...a mortal player standing in a safe spot lives through it, and he starts nothing else while it is asked', !!R.gate && R.gate.survived && R.gate.otherMoves === 0, R.gate);
     ok('his columns land for at least 20% of max HP even when armour absorbs 99%', R.column.lost >= R.column.floor && R.column.floor > 0 && /Shardfall/.test(R.column.src), R.column);
     ok('the Twin Verdict swing fires, then its echo', R.swing.swings >= 1 && R.swing.echoes >= 1, R.swing);

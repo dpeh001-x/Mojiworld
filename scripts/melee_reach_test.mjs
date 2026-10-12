@@ -21,7 +21,9 @@ const GOLDEN = { scorpion: 67, mummy: 81.5, nougatBear: 78, thornmaw: 76, elderb
   blockEle: 63, blockGary: 77.5, blockTigreal: 94, taiger: 91, willeo: 141,   // v0.30.1549: the reaches the mirror's copies of Kuro and the Taxi Uncle had
   deranged_kuro: 91,   // v0.30.1591 distorted-roster: Kuro is back in the mirror, at the reach he had before v0.30.1549
   young_confused_barnaby: 115, fatDragon: 65, sundered_smith: 100, goblinMauler: 85, boneGolem: 95, graveReaver: 110,
-  towerArbiter: 290, towerSovereign: 72.5, legosaurus: 68 };
+  towerArbiter: 290, towerSovereign: 72.5, legosaurus: 68,
+  miraFallen: 150,   // v0.30.1735 boss-polish: her Twin Verdict (v0.30.1627) - 210 - 120 / 2, never pinned
+  aetherion: 150.5 };   // the Twin Verdict he took from her (v0.30.1721): 305 - 309 / 2, the same 150 px past his edge
 
 // single-line defs
 const found = {};
@@ -33,6 +35,10 @@ for (const m of src.matchAll(/^  ([a-zA-Z_][a-zA-Z0-9_]*): *\{ name:'[^']*', *w:
 { const lw = /legosaurus:    \{ name:'Legosaurus, the Warped Tyrant', w:(\d+), h:/.exec(src);
   const lr = /bigMelee:\{ kind:'swing', dmgMul:2\.2, range:(\d+)/.exec(src);
   if (lw && lr) found.legosaurus = { w: +lw[1], range: +lr[1] }; }
+// aetherion: two-line def (his traits sit on the line under his row) - v0.30.1735 boss-polish
+{ const aw = /aetherion:\{ name:'Aetherion, the Tearborn', w:(\d+), h:/.exec(src);
+  const ar = /traits:\{ activeBoss:true, bigMelee:\{ kind:'swing', dmgMul:2\.8, range:(\d+)/.exec(src);
+  if (aw && ar) found.aetherion = { w: +aw[1], range: +ar[1] }; }
 
 const missing = Object.keys(GOLDEN).filter((t) => !found[t]);
 ok('every golden swinger is still a bigMelee swinger in the defs', missing.length === 0, missing);

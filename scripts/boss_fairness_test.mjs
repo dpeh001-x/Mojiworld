@@ -79,7 +79,10 @@ const r = await page.evaluate(async () => {
   // bosses' own AIs (ZODIAC_AI: Leo's flames, Scorpio's sting) have always lived outside bossAI.
   const src = String(bossAI) + (typeof ZODIAC_AI === 'object' && ZODIAC_AI ? Object.values(ZODIAC_AI).map(String).join('\n') : '');
   const fires = [...src.matchAll(/patternTimer > (?:(\d+)|_gravTeleMs\(m, (\d+)\)) && !m\._(\w+)/g)]
-    .map((m) => ({ ms: +(m[1] || m[2]), flag: m[3], realTime: !!m[2] }));
+    .map((m) => ({ ms: +(m[1] || m[2]), flag: m[3], realTime: !!m[2] }))
+    // v0.30.1735 boss-polish: Scorpio's sting and eruption gate through _lxScorpVenomDue(m, '_latch', ms, ...) since v0.30.1657 (an aimed burst) -
+    // the same patternTimer floor, in a helper; read it too (the survey dropped 12 -> 11 on a change that kept every telegraph)
+    .concat([...src.matchAll(/_lxScorpVenomDue\(m, '_(\w+)', (\d+)/g)].map((m) => ({ ms: +m[2], flag: m[1], realTime: false })));
   out.fires = fires.sort((a, b) => a.ms - b.ms).slice(0, 6);
   out.minFire = fires.length ? Math.min(...fires.map((f) => f.ms)) : null;
   out.fireCount = fires.length;

@@ -36,7 +36,7 @@ ok('the content fills ~62% of the canvas width (the size the blit is tuned for)'
 ok('the frames animate (not nine identical images) yet do not drift (bbox within 10px across the set)', good.length === 9 && new Set(good.map((f) => f.hash)).size >= 5 && Math.max(...good.map((f) => f.cw)) - Math.min(...good.map((f) => f.cw)) <= 30 && Math.max(...good.map((f) => f.cy)) - Math.min(...good.map((f) => f.cy)) <= 10,
   `distinct ${new Set(good.map((f) => f.hash)).size}; width spread ${Math.max(...good.map((f) => f.cw)) - Math.min(...good.map((f) => f.cw))}`);
 const game = existsSync(GAME) ? readFileSync(GAME, 'utf8') : '';
-const blit = game.match(/scale:\s*\{[^}]*\}/);
+const blit = game.match(/\bscale:\s*\{[^}]*\}/);   // v0.30.1735 boss-polish: a word start - Aetherion's maescale row (v0.30.1721) matched the bare pattern first
 ok("the blit no longer spins the scale and draws it at 1.6× the hitbox width", !!blit && /mode:\s*'spin'/.test(blit[0]) && /spinRate:\s*0\b/.test(blit[0]) && /size:\s*1\.6/.test(blit[0]), blit ? blit[0] : 'no blit entry');
 let fail = 0;
 for (const x of res) { if (!x.pass) fail++; console.log((x.pass ? 'PASS  ' : 'FAIL  ') + x.n + (x.extra ? '  — ' + x.extra : '')); }

@@ -72,7 +72,7 @@ const R = await page.evaluate(async () => {
   // the only thing writing m.vx is the drift under test. Player far to the right so the
   // drift always pushes the same way and gets a clean run at its own cap.
   const pin = () => {
-    m.patternState = 'sting'; m.patternTimer = 10; m._stung = true;
+    m.patternState = 'move'; m.patternTimer = 10;   // v0.30.1735 boss-polish: a MOVE state - since v0.30.1674 a boss in an attack state (sting) is rooted while it attacks, so the drift read 0
     m._zSpentMs = 0; m._zLungeMs = 0; m._zLungeCd = 99999; m._noGravity = false;
     player.x = m.x + 700; player.vx = 0;
   };

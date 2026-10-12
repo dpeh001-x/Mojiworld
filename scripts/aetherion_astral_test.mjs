@@ -110,7 +110,7 @@ const r = await page.evaluate(() => {
   // patternTimer 1500, so that is the sample that matters most.
   const at = (pt) => { m.patternState = 'astral'; m.patternTimer = pt;
     const im = _aetherionAstralFrame(m);
-    return im ? +(im.src.match(/aetherionastral_(\d)\.webp/) || [])[1] : null; };
+    return im ? +(String(im.src || (im._lxSrc && im._lxSrc.src) || '').match(/aetherionastral_(\d)\.webp/) || [])[1] : null; };   // v0.30.1735 boss-polish: a frame already baked to a canvas has no src of its own (it threw on .match)
   out.timeline = [0, 250, 500, 750, 1000, 1250, 1500, 1700, 1920].map(pt => ({ pt, f: at(pt) }));
   out.atResolve = at(1500);
   out.atStart = at(0);
