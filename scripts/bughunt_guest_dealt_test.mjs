@@ -233,6 +233,8 @@ try {
   // ---- parityB-9: a super boss's death bonuses reach a guest -----------------------------------------------------------------------
   const t9 = await E(() => {
     const W = window.__gd; W.pin(); W.guest(); const out = {}; let uid = 960000;
+    // parityB-7's Gravitos kill made this guest a Conqueror (bug hunt round 7): Dawn's Favor (+10%) would scale every number below
+    if (player.titles && typeof LX_TITLE_CONQUEROR !== 'undefined') delete player.titles[LX_TITLE_CONQUEROR];
     player.level = 65; player.mods = player.mods || {}; player.mods.greed = 0; player.mods.xpBoost = 0;
     const run = (sb, tp) => { game._bossKills = {}; game._pendingBossBoon = null; player.exp = 0; player.expToNext = 1e12; const w0 = player.mojicoins || 0; const u = ++uid;
       _lxCoopRewardNote({ uid: u, type: tp, exp: 1000, mojicoins: 20000, level: 65, isBoss: true });
