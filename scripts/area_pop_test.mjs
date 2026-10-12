@@ -36,7 +36,7 @@ const r = await page.evaluate(async () => {
   show('town'); const town = read();
   const two = Object.keys(MAPS).find((k) => MAPS[k].name && / · /.test(MAPS[k].name) && !MAPS[k].isVoid && !MAPS[k].isBossArena);
   show(two); const split = read(); split.id = two; split.full = MAPS[two].name;
-  const lvMap = Object.keys(MAPS).find((k) => MAPS[k].name && (+MAPS[k].levelReq || 0) > 1 && !MAPS[k].isVoid && !MAPS[k].isBossArena);
+  const lvMap = Object.keys(MAPS).find((k) => MAPS[k].name && (+MAPS[k].levelReq || 0) > 1 && MAPS[k].levelLabel !== false && !MAPS[k].isVoid && !MAPS[k].isBossArena);   // release12a: Sunset Coast shows no level
   show(lvMap); const lv = read();
   document.documentElement.classList.add('lx-nobackdrop'); show('town'); const nb = read(); document.documentElement.classList.remove('lx-nobackdrop');
   return { town, split, lv, nb };

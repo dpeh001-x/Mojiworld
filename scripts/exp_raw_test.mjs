@@ -60,7 +60,20 @@ try {
     out.rungs = {}; for (const L of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 19, 24]) out.rungs[L] = Math.round(_lxLevelCost(L) / adjRaw(L));
     // the whole curve, per user "make sure the bumps are more linear": each rung in kills of a same-level
     // monster, and the raw cost beside it
-    out.band = {}; out.costs = {}; for (let L = 1; L <= 99; L++) { out.band[L] = Math.round(_lxLevelCost(L) / adjRaw(L)); out.costs[L] = _lxLevelCost(L); }
+    // v0.30.1734 release12: Lv 41-100 are baked on the ORDINARY pool - no once-per-map elite (every roster entry gated by spawnChance, or in
+    // no roster: Blight Elder, Ossuary Tyrant, Path's Bane, Elder Arlen), one of which per map lifted the old mean (Lv 69 cost x2.66 Lv 68).
+    // The band reads those levels against that pool (past Lv 80: Lv 78-80 monsters, as the level-gap falloff measures a hero past 80);
+    // Lv 1-40 read against the pool they were baked on.
+    const RARE = new Set(['blightElder', 'ossuaryTyrant', 'pathsBane', 'vigil_vermillion']);
+    const mobsOrd = Object.entries(LX_MONSTER_STATS).filter(([t, v]) => v && v.exp > 0 && v.lv > 0 && !RARE.has(t)
+      && !(monsterTypes[t] && (monsterTypes[t].boss || monsterTypes[t].isBoss || monsterTypes[t].zodiacSign))
+      && !/^(tower|express|ticket|conductor|mirror|octoLeg)/i.test(t) && !(monsterTypes[t] && monsterTypes[t].miniElite)
+      && (v.exp / Math.max(1, v.hp)) <= 0.04).map(([t, v]) => ({ lv: v.lv, exp: v.exp }));
+    const adjOrd = (L0) => { const L = Math.min(L0, 80); let p = mobsOrd.filter((m) => Math.abs(m.lv - L) <= 2);
+      if (!p.length) p = mobsOrd.slice().sort((a, b) => Math.abs(a.lv - L) - Math.abs(b.lv - L)).slice(0, 3);
+      return p.reduce((s, m) => s + m.exp, 0) / p.length; };
+    const adjBand = (L) => (L >= 41) ? adjOrd(L) : adjRaw(L);
+    out.band = {}; out.costs = {}; for (let L = 1; L <= 99; L++) { out.band[L] = Math.round(_lxLevelCost(L) / adjBand(L)); out.costs[L] = _lxLevelCost(L); }
     out.firstRung = _lxLevelCost(1);
     // 3. one kill takes a fresh hero to Lv 2
     clean(1); game.monsters.length = 0;

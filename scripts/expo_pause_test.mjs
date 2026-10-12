@@ -65,7 +65,8 @@ try {
     const pm = document.getElementById('powerup-modal'), sb = document.getElementById('story-beat-overlay');
     out.underCard = { wheel: !!(pm && getComputedStyle(pm).display !== 'none'), beat: !!(sb && sb.classList.contains('on')) };
     _lxPauseClose(); await wait(1400);
-    out.afterCard = { beat: !!(sb && sb.classList.contains('on')) };
+    out.afterCard = { beat: !!(sb && sb.classList.contains('on')), wheel: !!(pm && getComputedStyle(pm).display !== 'none') };   // release12f: the wheel opens first, the beat waits behind it
+    if (out.afterCard.wheel) { try { closeAllModals(); } catch (e) {} game.paused = false; await wait(1200); out.afterCard.beatAfterWheel = !!(sb && sb.classList.contains('on')); }
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await wait(300);
     try { closeAllModals(); } catch (e) {} game.paused = false; await wait(300);
     // 5. an Esc that closes the confirm dialog stops there
@@ -98,7 +99,7 @@ try {
   check(!r.parcel.after, 'the daily parcel cannot be claimed inside the tower (it paid into the blocked wallet and was lost)', J(r.parcel));
   check(r.window.map && r.window.coinsKept === 0 && !r.window.bladeKept, 'after the run ends, loot and coins on the tower floor are not collected', J(r.window));
   check(r.back.town && r.back.lockClear && r.back.townPays, 'back in town the lock is gone and pickups pay again', J(r.back));
-  check(!r.underCard.wheel && !r.underCard.beat && r.afterCard.beat, 'a boss wheel or story beat waits for the pause card to close', J({ under: r.underCard, after: r.afterCard }));
+  check(!r.underCard.wheel && !r.underCard.beat && (r.afterCard.beat || (r.afterCard.wheel && r.afterCard.beatAfterWheel)), 'a boss wheel or story beat waits for the pause card to close', J({ under: r.underCard, after: r.afterCard }));
   check(!r.escConfirm.pauseOpened, 'Esc on the confirm dialog closes it without opening the pause card', J(r.escConfirm));
   check(r.tour.before && r.tour.after, 'closing the tour keeps an open panel paused', J(r.tour));
   check(r.first.stings === 0 && !r.first.wheel && r.first.toasts.some((t) => /twin falls/i.test(t)) && !r.first.toasts.some((t) => /defeated/i.test(t)), 'Gemini: the original falling first is "One twin falls!" - no sting, no wheel', J(r.first));

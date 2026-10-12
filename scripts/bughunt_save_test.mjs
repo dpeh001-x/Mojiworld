@@ -174,7 +174,7 @@ try {
     return out;
   }, { raw3: A.raw3, mark3: A.mark3 });
   ok('[B1] a stripped + edited save with a verified copy is still rolled back (unchanged)', B.stripped.loaded === true && B.stripped.verdict === 'restored' && B.stripped.lv === 60, B.stripped);
-  ok('[B2] D2: a legacy save (no signature, no marker, no _cdCarry) is no longer grandfathered: refused, kept in Save Backups as "edited, not verified", and the player is told', B.legacy.loaded === false && /edited, not verified/.test(B.legacyLabel) && B.legacyBk >= 1 && B.noteRefused, { r: B.legacy, label: B.legacyLabel, bk: B.legacyBk, note: B.noteRefused });
+  ok('[B2] D2: a legacy save (no signature, no marker, no _cdCarry) on a browser that has signed saves is refused, kept in Save Backups as "older version, not verified", and the player is told (release12d)', B.legacy.loaded === false && /older version, not verified/.test(B.legacyLabel) && B.legacyBk >= 1 && B.noteRefused, { r: B.legacy, label: B.legacyLabel, bk: B.legacyBk, note: B.noteRefused });
   ok('[B3] D2 / diff-b-4: a junk marker ({}) next to an edited unsigned or edited signed save repairs nothing: both are refused', B.junkUnsigned.loaded === false && B.junkBad.loaded === false, { u: B.junkUnsigned, b: B.junkBad });
   ok('[B3] the old 4-field marker (no verified copy) is no different', B.old4Unsigned.loaded === false && B.old4Bad.loaded === false, { u: B.old4Unsigned, b: B.old4Bad });
   ok('[B4] a stripped modern save with no marker stays refused, and an ls2 signature next to a junk marker still loads ("legacy")', B.strippedNoMark.loaded === false && B.legacySig.loaded === true && B.legacySig.verdict === 'legacy', { s: B.strippedNoMark, l: B.legacySig });

@@ -80,7 +80,7 @@ try {
       currentHp: 0, maxHp: 1, hp: 0, atk: 1, def: 1, vx: 0, vy: 0, dead: false, zodiacBoss: true, isBoss: true };
     game.monsters.push(m); try { killMonster(m); } catch (e) { out.killErr = String(e.message).slice(0, 100); }
     { const i = game.monsters.indexOf(m); if (i >= 0) game.monsters.splice(i, 1); }
-    out.twelveOn = await waitFor(() => beatOn() && /twelfth sign exhales/.test(btxt()), 9000);
+    out.twelveOn = await waitFor(() => { { const _pm = document.getElementById('powerup-modal'); if (_pm && _pm.style.display === 'flex') { const _c = _pm.querySelector('#powerup-options .powerup-card'); if (_c) _c.click(); } } return beatOn() && /twelfth sign exhales/.test(btxt()); }, 9000);   // release12f: the beats wait for the boss boon wheel - answer it
     out.twelveClosed = await through('');
     out.revealOn = await waitFor(() => beatOn() && spk() === 'Mira', 4000);
     out.reveal = { speaker: spk(), text: btxt().slice(0, 140), clip: await clip(), named: player._miraNamed === true };

@@ -75,7 +75,8 @@ try {
     const spk = () => (document.getElementById('story-beat-speaker') || {}).textContent || '', btxt = () => (document.getElementById('story-beat-text') || {}).textContent || '';
     const film = {};   // hold: the page to stop on until the scene's film decodes (then it is read into film.clip)
     const watch = async (ms, hold) => { const seq = []; const t0 = Date.now(); let quiet = 0, held = false;
-      while (Date.now() - t0 < ms) { if (beatOn()) { const s = spk() + ' | ' + btxt().slice(0, 60); if (s !== seq[seq.length - 1]) seq.push(s);
+      while (Date.now() - t0 < ms) { { const _pm = document.getElementById('powerup-modal'); if (_pm && _pm.style.display === 'flex') { const _c = _pm.querySelector('#powerup-options .powerup-card'); if (_c) _c.click(); } }   // release12f: a beat waits for the boss boon wheel - answer it
+        if (beatOn()) { const s = spk() + ' | ' + btxt().slice(0, 60); if (s !== seq[seq.length - 1]) seq.push(s);
           if (hold && !held && hold.test(btxt())) { held = true; for (let i = 0; i < 150; i++) { const v = document.getElementById('story-beat-clip'); if (v && v.readyState >= 2) break; await sleep(100); }
             const v = document.getElementById('story-beat-clip'); film.clip = v ? { src: (v.currentSrc || v.src || '').split('/').pop(), ready: v.readyState, w: v.videoWidth, dur: Math.round(v.duration || 0) } : null;
             if (v) { await sleep(1500);   // its soundtrack: playing, audible, the score silent under it; then the score's hand-back
