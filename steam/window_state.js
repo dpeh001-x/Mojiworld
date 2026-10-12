@@ -56,4 +56,21 @@ function isFullscreenKey(input) {
   return input.key === 'Enter' && !!input.alt && !input.control && !input.meta;
 }
 
-module.exports = { DEFAULT, MIN, loadState, onScreen, snapshot, saveState, isFullscreenKey };
+// v0.30.1744 release15 - fractional display scaling (125 / 150 / 175 %) makes Electron's DIP <-> pixel round trip lossy: a window opened at
+// 1000x600 @100,50 reads back 1005x605 @99,49 (setBounds and useContentSize round the same way), and saving that read-back grew
+// the window ~5 px and slid it up-left on EVERY launch. A read-back within DRIFT px of what the window was opened with is that
+// rounding, not the player, so the opened values are kept. Size and position are judged apart: a real move still saves while
+// the size stays put, and the other way round. asked: { width, height, x?, y? } as passed to the BrowserWindow (null = nothing
+// restored, the read-back stands).
+const DRIFT = 8;
+function settle(asked, snap, tol) {
+  if (!asked || !snap) return snap;
+  const t = Number.isFinite(tol) ? tol : DRIFT;
+  const near = (a, b) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= t;
+  const out = Object.assign({}, snap);
+  if (near(asked.width, snap.width) && near(asked.height, snap.height)) { out.width = asked.width; out.height = asked.height; }
+  if (near(asked.x, snap.x) && near(asked.y, snap.y)) { out.x = asked.x; out.y = asked.y; }
+  return out;
+}
+
+module.exports = { DEFAULT, MIN, DRIFT, loadState, onScreen, snapshot, settle, saveState, isFullscreenKey };

@@ -45,7 +45,7 @@ try {
   await page.keyboard.type(DEV_PW, { delay: 40 });
   await page.waitForTimeout(300);
 
-  ok('LX_DEV set after passphrase', await page.evaluate(() => localStorage.getItem('LX_DEV') === '1'));
+  ok('LX_DEV set after passphrase (a password-derived token since release15a)', await page.evaluate(() => /^k1\./.test(localStorage.getItem('LX_DEV') || '')));
   ok('🛠 dev button now visible (unhidden)', await page.isVisible('#mobile-dev-btn'));
 
   // --- the unhidden 🛠 dev button now opens the dev console (openDevConsole is

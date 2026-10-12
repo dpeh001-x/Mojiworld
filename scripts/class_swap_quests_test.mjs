@@ -67,7 +67,7 @@ try {
   await L.evaluate(() => _openPreAdvanceClassSwap());
   await L.waitForSelector('#confirm-no', { state: 'visible', timeout: 10000 }); await L.click('#confirm-no');
   await L.waitForFunction(() => /Mage/.test(document.getElementById('confirm-title').textContent) && getComputedStyle(document.getElementById('confirm-modal')).display !== 'none', null, { timeout: 10000 });
-  await L.click('#confirm-yes'); await L.waitForTimeout(800);
+  await L.waitForTimeout(600); await L.click('#confirm-yes'); await L.waitForTimeout(800);   // release15: the confirm ignores a click in its first 400 ms
   const r2 = await ladder(L);
   ok('[2] after the swap the rows are the Mage\'s, same progress and targets, and the done row stays done',
     r2.cls === 'mage' && JSON.stringify(r2.act) === JSON.stringify(rename(r1.act, 'rogue', 'mage')) && JSON.stringify(r2.done) === '["q_mage_lv12"]', { r1: r1.act, r2: r2.act, done: r2.done });

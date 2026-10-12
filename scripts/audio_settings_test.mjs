@@ -48,6 +48,7 @@ try {
   await page.evaluate(async () => {
     try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
+    player._storyBeatsSeen = player._storyBeatsSeen || {}; player._storyBeatsSeen.everdawn_welcome = true;   // release15c: from the Void, town opens the welcome film, which now owns the mix while it plays
     applyClass('warrior'); loadMap('town', 300); await new Promise((r) => setTimeout(r, 1800)); game.paused = false;
   });
   const probe = await at();

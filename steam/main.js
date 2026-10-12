@@ -12,13 +12,16 @@
 // player's entire character save. We bind a FIXED port + hold a single-instance
 // lock so two copies never fight over it.
 'use strict';
-const { app, BrowserWindow, shell, powerSaveBlocker, ipcMain, dialog, Menu, screen } = require('electron');
+const { app, BrowserWindow, shell, powerSaveBlocker, ipcMain, dialog, Menu, screen, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const staticServer = require('./static_server');
 const winState = require('./window_state');   // v0.30.x final polish (audit U1) — see the file
 
-const FIXED_PORT = 47821;   // stable loopback port -> stable origin -> saves persist
+const FIXED_PORT = (!app.isPackaged && Number(process.env.MOJI_PORT) > 0) ? Number(process.env.MOJI_PORT) : 47821;   // stable loopback port -> stable origin -> saves persist (v0.30.1744 release15: MOJI_PORT, dev runs only - tests bring their own port)
+// v0.30.1744 release15 - the only page permissions the game uses: clipboard writes (copy save / party code) and fullscreen. Gamepads and audio need none.
+const _LX_PERMS = new Set(['clipboard-sanitized-write', 'fullscreen']);
+const _lxGameOrigin = (u) => { try { const x = new URL(String(u || '')); return x.protocol === 'http:' && x.hostname === '127.0.0.1'; } catch (e) { return false; } };
 
 // v0.28.0 — Steamworks bridge (cloud saves + controller/Steam Input). Fully
 // defensive: init() returns a stub with available=false if Steam isn't running
@@ -168,7 +171,11 @@ const RELAY_URL = resolveRelayUrl();
 // so it stays testable in plain Node — see that file for the details.
 
 async function createWindow() {
-  const port = await staticServer.start(ROOT, ENTRY, FIXED_PORT);
+  // v0.30.1744 release15 - a busy port no longer hides the save in silence: the fixed port is retried for ~3 s, and a fallback (a new origin,
+  // so an empty localStorage) is passed to the page, whose preload shows the player a notice naming the port.
+  const _srv = await staticServer.listen(ROOT, ENTRY, FIXED_PORT, { retries: 6, retryMs: 500 });
+  const port = _srv.port;
+  if (_srv.fallback) console.warn('[mojiworld] port ' + FIXED_PORT + ' is taken (' + _srv.code + ') - serving on ' + port + '; the local save is not reachable this session');
   // powerSaveBlocker is NOT started here anymore — it's host-conditional (see
   // the 'moji-host-state' IPC above) so a solo Deck player can let it sleep.
   // v0.30.x final polish (audit U1) — reopen the way the player left it: size, position (while that display is still
@@ -186,7 +193,7 @@ async function createWindow() {
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0'), '--moji-deck=' + (ON_DECK ? '1' : '0'), '--moji-launch-join=' + LAUNCH_JOIN, '--moji-packaged=' + (app.isPackaged ? '1' : '0')],   // v0.30.797 - the page hides dev tools in the packaged app
+      additionalArguments: ['--moji-relay=' + RELAY_URL, '--moji-steam=' + (steam.available ? '1' : '0'), '--moji-deck=' + (ON_DECK ? '1' : '0'), '--moji-launch-join=' + LAUNCH_JOIN, '--moji-packaged=' + (app.isPackaged ? '1' : '0'), '--moji-port-note=' + (_srv.fallback ? FIXED_PORT : '')],   // v0.30.797 - the page hides dev tools in the packaged app
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
@@ -211,7 +218,22 @@ async function createWindow() {
   win.webContents.on('before-input-event', (e, input) => {
     if (!ON_DECK && winState.isFullscreenKey(input)) { e.preventDefault(); win.setFullScreen(!win.isFullScreen()); }
   });
-  if (!ON_DECK) win.on('close', () => { try { winState.saveState(_stFile, winState.snapshot(win)); } catch (e) {} });
+  // v0.30.1744 release15 - the state is a live snapshot, re-taken on every change and written 400 ms later (a crash keeps it too), then once more
+  // on 'close' and on 'closed'. "Quit to Desktop" closes from the page (window.close()), which in Electron 31 never fires 'close' -
+  // the only place this used to save - so an in-game quit forgot every resize, move and fullscreen. Read-backs are settled against
+  // what the window opened with (window_state.js settle()): fractional-DPI rounding no longer grows the window each launch.
+  if (!ON_DECK) {
+    const _stAsked = _st ? Object.assign({ width: _st.width, height: _st.height }, _pos) : null;
+    let _stSnap = null, _stTimer = null;
+    const _stTake = () => { try { if (!win.isDestroyed() && !win.isMinimized()) _stSnap = winState.settle(_stAsked, winState.snapshot(win)); } catch (e) {} };
+    const _stWrite = () => { if (_stTimer) { clearTimeout(_stTimer); _stTimer = null; } if (_stSnap) { try { winState.saveState(_stFile, _stSnap); } catch (e) {} } };
+    const _stTouch = () => { _stTake(); if (_stTimer) clearTimeout(_stTimer); _stTimer = setTimeout(_stWrite, 400); };
+    for (const ev of ['resize', 'move', 'maximize', 'unmaximize', 'restore', 'enter-full-screen', 'leave-full-screen']) win.on(ev, _stTouch);
+    _stTake();
+    win.webContents.once('did-finish-load', _stTake);
+    win.on('close', () => { _stTake(); _stWrite(); });
+    win.on('closed', _stWrite);
+  }
   // v0.30.791 - LAUNCH POLISH: a renderer crash or hang used to leave a blank or frozen window with no way back
   // but the task manager. Crash: reload (the game autosaves every 30 s and on hide). Hang: ask, never guess.
   // v0.30.898 launch audit: a renderer that keeps crashing (e.g. out of memory) was reloaded every 500 ms forever. Three
@@ -264,6 +286,12 @@ if (!app.requestSingleInstanceLock()) {
     // v0.30.x final polish (audit U1) — the shipped game has no application menu. Electron's default one was live:
     // Alt showed File / Edit / View, Ctrl+R reloaded the game and Ctrl+W closed it. A dev run keeps it.
     if (app.isPackaged) { try { Menu.setApplicationMenu(null); } catch (e) {} }
+    // v0.30.1744 release15 - Electron grants every page permission request by default (notifications, camera / microphone, geolocation, MIDI,
+    // ...). Only the two the game uses are allowed, and only to its own loopback origin; every other request and check is refused.
+    try {
+      session.defaultSession.setPermissionRequestHandler((_wc, perm, cb, details) => { let ok = false; try { ok = _LX_PERMS.has(perm) && _lxGameOrigin(details && (details.requestingUrl || details.securityOrigin)); } catch (e) {} cb(ok); });
+      session.defaultSession.setPermissionCheckHandler((_wc, perm, origin) => { try { return _LX_PERMS.has(perm) && _lxGameOrigin(origin); } catch (e) { return false; } });
+    } catch (e) { console.warn('[mojiworld] permission handlers not set: ' + (e && e.message)); }
     const w = await createWindow();
     // Cold-start friend invite: resolve the lobby once the window exists (the
     // 'moji-join' send inside waits for did-finish-load, so nothing is lost).

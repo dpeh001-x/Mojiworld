@@ -16354,7 +16354,7 @@ function _lxDevSurface() {
   try {
     if (window.MOJI_PACKAGED === true) return false;
     if (location.port === '47821') return false;   // v0.30.917 the Steam app's loopback server, opened in an ordinary browser
-    try { if (localStorage.getItem('LX_DEV') === '1') return true; } catch (e) {}   // v0.30.894 dev-lock-web - unlocked with the lock's password
+    try { if (localStorage.getItem('LX_DEV') && _lxDevFlag()) return true; } catch (e) {}   // v0.30.894 dev-lock-web - unlocked with the lock's password; v0.30.1744 release15: a password-derived token, not the plain '1' a console can write (see _lxDevFlag)
     if (location.protocol === 'file:') return true;
     const h = location.hostname;
     return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
@@ -16379,7 +16379,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1743';
+const GAME_VERSION = 'v0.30.1744';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -22747,7 +22747,7 @@ function _lxMobStrayCheck() {
       } catch (_e) {}
       // Dev builds get it on screen, so a tester notices without a console.
       try {
-        if ((() => { try { return _lxDevSurface() && (localStorage.getItem('LX_DEV') === '1' || /[?&]dev=1/.test(location.search)); } catch (e) { return false; } })() && typeof showToast === 'function') {   // bughunt L2f: LX_DEV_TOOLS lives inside the key handler's closure, so `typeof` here was always 'undefined'
+        if ((() => { try { return _lxDevSurface() && (_lxDevFlag() || /[?&]dev=1/.test(location.search)); } catch (e) { return false; } })() && typeof showToast === 'function') {   // bughunt L2f: LX_DEV_TOOLS lives inside the key handler's closure, so `typeof` here was always 'undefined'
           showToast('⚠ stray ' + ((monsterTypes[rec.type] || {}).name || rec.type) + ' Lv' + rec.level
             + ' in ' + rec.map, 'rare');
         }
@@ -43905,7 +43905,10 @@ const _lxAc = (function () {
       if (vouched && EXT_URL.test(u)) continue;
       return true;
     }
-    return false;
+    return !vouched;   // v0.30.1744 release15: no game frame outside this closure on the stack = no game code made the write. setTimeout(Reflect.set, 0, player, 'mojicoins', N)
+    // and setTimeout(Object.assign, 0, player, {...}) leave only native frames ('at Reflect.set (<anonymous>)'), which this loop skips, so they
+    // passed as the game's own writes (and cleared the 'ac' mark). Every game write path has its caller's frame here (a click, a timer or
+    // a frame callback runs a game function first).
   }
   function note(kind, field, from, to, soft) {   // v0.30.1724 bughunt3 - soft: logged, never flagged (see 'rolled back')
     if (log.length < 60) log.push({ t: Date.now(), kind, field, from, to });
@@ -43922,6 +43925,7 @@ const _lxAc = (function () {
       set(nv) {
         if (nv === r.v) return;
         if (foreign()) { note('write', label, r.v, nv); return; }
+        if (r === devRec && r.v && !nv) { note('write', label, r.v, nv); return; }   // v0.30.1744 release15: the Steam-ineligible mark is one-way while the vault is on (nothing in the game clears it; a new page loads it from the save)
         r.v = nv; r.e = typeof nv === 'number' ? -nv : null;
       },
     });
@@ -43933,11 +43937,12 @@ const _lxAc = (function () {
   // writes and deletes pass the same who-wrote-it test. The field itself is an accessor that wraps whatever object the game
   // assigns (loads, resets and the prologue replace these wholesale). Reads are untouched: the Proxy has no get trap.
   const boxed = new WeakSet(), boxOf = new WeakMap();
-  function box(o, label) {
+  function box(o, label, deep) {   // v0.30.1744 release15: deep - the object's own child objects are boxed too (cosmetics.cape, quests.completed)
+    if (deep && o && typeof o === 'object' && !boxed.has(o) && !boxOf.get(o)) for (const k of Object.keys(o)) { const c = o[k]; if (c && typeof c === 'object') o[k] = box(c, label + '.' + k); }
     if (!o || typeof o !== 'object' || boxed.has(o)) return o;
     const had = boxOf.get(o); if (had) return had;
     const p = new Proxy(o, {
-      set(t, k, v) { if (t[k] === v) return true; if (foreign()) { note('write', label + '.' + String(k), t[k], v); return true; } t[k] = v; return true; },
+      set(t, k, v) { if (t[k] === v) return true; if (foreign()) { note('write', label + '.' + String(k), t[k], v); return true; } t[k] = deep ? box(v, label + '.' + String(k)) : v; return true; },
       deleteProperty(t, k) { if (!(k in t)) return true; if (foreign()) { note('delete', label + '.' + String(k), t[k], undefined); return true; } return delete t[k]; },
       defineProperty(t, k, d) { if (foreign()) { note('define', label + '.' + String(k), t[k], d && d.value); return true; } return Reflect.defineProperty(t, k, d); },
     });
@@ -43945,11 +43950,11 @@ const _lxAc = (function () {
     return p;
   }
   function guardBox(obj, key, label) {
-    let cur = box(obj[key], label);
+    const deep = arguments[3] === true; let cur = box(obj[key], label, deep);   // v0.30.1744 release15: a 4th argument boxes one level deep (the signature line is a landed-fix marker)
     dp(obj, key, {
       enumerable: true, configurable: false,
       get() { return cur; },
-      set(nv) { if (nv === cur) return; if (foreign()) { note('write', label, cur, nv); return; } cur = box(nv, label); },
+      set(nv) { if (nv === cur) return; if (foreign()) { note('write', label, cur, nv); return; } cur = box(nv, label, deep); },
     });
   }
   // ITEMS AND BOONS. An item is a plain object the game edits in many places, so it is not boxed; instead its numbers are held
@@ -44020,7 +44025,7 @@ const _lxAc = (function () {
         const b = list[i]; if (!b || typeof b.roll !== 'number') continue;
         const def = POWERUPS.find((p) => p.id === b.id); if (!def || typeof def.max !== 'number') continue;
         const hi = Math.max(def.min || 0, def.max), span = Math.max(Math.abs(def.min || 0), Math.abs(def.max));
-        if (b.roll !== b.roll || Math.abs(b.roll) > span * 2 + 1) { note('boon', 'player.boons[' + i + '].roll', b.roll, hi); b.roll = hi; hit = true; }
+        if (b.roll !== b.roll || b.roll > hi || Math.abs(b.roll) > span * 2 + 1) {   /* v0.30.1744 release15: past the top of its definition (the highest any roll, a Gravitos max-roll included, can land - was twice the span) */ note('boon', 'player.boons[' + i + '].roll', b.roll, hi); b.roll = hi; hit = true; }
       }
     } catch (e) {}
     return hit;
@@ -44160,6 +44165,14 @@ const _lxAc = (function () {
       guard(game, 'kills', 'game.kills'); guard(game, '_coinsEarned', 'game._coinsEarned');   // v0.30.1673 ac-boxes
       for (const k of ['consumables', 'skillRanks', 'talents', 'treeUnlocked', 'tree', 'mastery']) guardBox(player, k, 'player.' + k);
       for (const k of ['achievements', 'bossDefeated', '_bossKills']) guardBox(game, k, 'game.' + k);
+      // v0.30.1744 release15 - PROGRESSION THAT LIVED OUTSIDE THE VAULT. Plain console writes to these survived a save and a reload with the save verifying
+      // 'ok': the Expedition records (three cosmetics), a cape, a title, a story beat, twenty god weapons pushed into the bag (sold for coins),
+      // a boon at twice its top roll, an owed max-roll boss wheel (repeatable). Containers are boxed (cosmetics and quests one level deep),
+      // records are guarded; the bag and the bestiary take one stack check per push / kill.
+      for (const k of ['inventory', 'boons', 'titles', '_storyBeatsSeen']) guardBox(player, k, 'player.' + k);
+      for (const k of ['cosmetics', 'quests']) guardBox(player, k, 'player.' + k, true);
+      guardBox(game, 'bestiary', 'game.bestiary');
+      for (const k of ['expeditionBestFloor', 'expeditionClears', 'towerBestFloor', '_lxBoonOwed']) guard(game, k, 'game.' + k);
       setInterval(() => { if (checkAll()) { try { refreshGearCache(); } catch (e) {} } }, 3000);
       rbPrefetch();   // v0.30.1677 ac-save
       sweepT = setInterval(() => { for (const r of recs) if (!pairOk(r)) { const was = r.v; r.v = -r.e; note('memory', r.label, was, r.v); } }, 3000);
@@ -44167,9 +44180,27 @@ const _lxAc = (function () {
     return on;
   }
   try { const st = String(new NE().stack || ''); const m = FRAME_URL.exec(st); if (m && strip(m[1]) === self) selfL1 = lineOf(st, m); } catch (e) {}   // v0.30.1724 bughunt3 - the end of this closure (see selfL0)
+  // v0.30.1744 release15 - a legacy save's items at their own best roll, quietly (re-signing an old save is not a cheat: no 'ac' mark)
+  function legacyItem(it) {
+    if (!it || typeof it !== 'object') return;
+    const C = ceilings(); let top = 10; try { top = MAX_STARS; } catch (e) {}
+    if (typeof it.stars === 'number' && !(it.stars >= 0 && it.stars <= top)) it.stars = it.stars > top ? top : 0;
+    const base = it.baseName && BYNAME ? BYNAME.get(it.baseName) : null;
+    if (base && typeof it.tier === 'number' && typeof base.tier === 'number' && it.tier > base.tier + 1) it.tier = base.tier;
+    else if (typeof it.tier === 'number' && it.tier > TOPTIER) it.tier = TOPTIER;
+    for (const k in it) { const c = C[k], v = it[k]; if (!c || typeof v !== 'number') continue; if (v !== v) { it[k] = 0; continue; } const m = honestMax(it, k, c); if (Math.abs(v) > m) it[k] = v < 0 ? -m : m; }
+  }
+  function boonHi(b) { try { const def = POWERUPS.find((p) => p.id === b.id); return (def && typeof def.max === 'number') ? Math.max(def.min || 0, def.max) : null; } catch (e) { return null; } }
+  // v0.30.1744 release15 - the co-op socket the game itself dialled (mpConnect), read through the prototype's own readyState: a console object
+  // ({ readyState: 1 }) is not a room. Marking refuses a foreign caller like any guarded write.
+  const wsSet = new WeakSet();
+  const wsRS = (() => { try { return Object.getOwnPropertyDescriptor(WebSocket.prototype, 'readyState').get; } catch (e) { return null; } })();
+  function wsMark(ws) { if (!ws || typeof ws !== 'object') return; if (on && foreign()) { note('write', 'net.ws', null, null); return; } wsSet.add(ws); }
+  function wsOk(ws) { if (!on) return true; try { return !!ws && wsSet.has(ws) && (wsRS ? wsRS.call(ws) : ws.readyState) === 1; } catch (e) { return false; } }
   return {
     install,
     get on() { return on; },
+    legacyItem, boonHi, wsMark, wsOk,   // v0.30.1744 release15
     report() { return log.map((x) => Object.assign({}, x)); },
     items() { return checkAll(); },
     seqStamp, sig5Stamp, rbKeep, rbPick, sig5Verdict,   // v0.30.1677 ac-save
@@ -46188,7 +46219,7 @@ window.addEventListener('keydown', e => {
   // frames (a quick tap at 20-30 fps) cast nothing - only the Warrior / Archer basic fires here on keydown. The next player step
   // takes this latch and the poll counts the key as pressed once (_lxTaps). Canonical key, so a rebound key and the touch deck's
   // synthetic keydown land here the same way.
-  if (!repeat && KEY_TO_SLOT && KEY_TO_SLOT[k] && !game.paused && player && player.hp > 0) (window._lxKeyTaps || (window._lxKeyTaps = {}))[k] = performance.now();
+  if (!repeat && KEY_TO_SLOT && KEY_TO_SLOT[k] && !game.paused && !game._photoMode && player && player.hp > 0) (window._lxKeyTaps || (window._lxKeyTaps = {}))[k] = performance.now();   // v0.30.1744 release15: not in photo mode
   if (e.code) (window._lxDownResByCode = window._lxDownResByCode || {})[e.code] = k;   // v0.30.1163 keybinds - keyup clears exactly this (a rebind mid-hold left the hero walking)
   // v0.29.610 — queue arrow edges for the shackle QTE. See _qteFrame: polling
   // game.keys once per sim step loses any press that starts and ends between
@@ -46361,7 +46392,7 @@ window.addEventListener('keydown', e => {
   // v0.30.925 the key is a digest now (_LX_DEV_KEY_SHA, beside _LX_DEV_PW_SHA): the word was readable in
   // view-source, and this prompt unlocks the same LX_DEV flag. Rotate both with scripts/set_dev_pw.mjs.
   const LX_DEV_TOOLS = (() => {
-    try { return _lxDevSurface() && (localStorage.getItem('LX_DEV') === '1' || /[?&]dev=1/.test(location.search)); }   // v0.30.797
+    try { return _lxDevSurface() && (_lxDevFlag() || /[?&]dev=1/.test(location.search)); }   // v0.30.797
     catch (e) { return false; }
   })();
   // v0.27.17 — Per user: dev tools are OFF the keyboard entirely. Keys 1–0
@@ -46384,7 +46415,7 @@ window.addEventListener('keydown', e => {
       if (!_lxDevSurface()) return;   // v0.30.797 - no dev prompt on a public deploy or in the Steam build
       try { _entry = prompt('🔒 Dev access — enter dev key:'); } catch (_) {}
       if (_lxDevKeyOk(_entry)) {   // v0.30.925
-        try { localStorage.setItem('LX_DEV', '1'); document.body.classList.add('lx-dev'); } catch (_) {}
+        try { localStorage.setItem('LX_DEV', _lxDevTokenOf(_entry));   /* v0.30.1744 release15 */ document.body.classList.add('lx-dev'); } catch (_) {}
         if (typeof showToast === 'function') showToast('🔓 Dev mode unlocked — press ` again for the console', 'epic');
       } else if (_entry != null && _entry !== '') {
         if (typeof showToast === 'function') showToast('🔒 Incorrect dev key', 'danger');
@@ -56731,7 +56762,7 @@ function _sbAttachClip(beatId) {
   // of the motion each cycle and fought the text; a single settle reads as
   // a painting coming to rest.
   const _snd = !!STORY_BEAT_CLIP_SOUND[beatId];   // v0.30.1415 - see STORY_BEAT_CLIP_SOUND
-  v.muted = !(_snd && _sbClipSoundVol() > 0); if (_snd) v.volume = _sbClipSoundVol(); v.loop = false; v.playsInline = true;
+  v.muted = !(_snd && _sbClipSoundVol() > 0) || _lxBgMutedNow(); if (_snd) v.volume = _sbClipSoundVol();   /* v0.30.1744 release15: opened in the background, it starts muted */ v.loop = false; v.playsInline = true;
   v.setAttribute('playsinline', '');
   v.preload = 'auto';
   // First child of the overlay = painted behind #story-beat-stage
@@ -56764,7 +56795,7 @@ function _sbAttachClip(beatId) {
   if (_snd) {   // v0.30.1415 - the score rises when the soundtrack is done (or never came); the slider and mute are followed live
     const _rise = () => { try { if (_cineBgm._on && typeof _bgmFade === 'function') _bgmFade(_cineBgm, _cineVol() * 0.85, 2200); } catch (e) {} };
     v.addEventListener('ended', _rise, { once: true }); v.addEventListener('error', _rise, { once: true });
-    game._storyBeatClipVolTimer = setInterval(() => { try { if (!v.isConnected) return; const vol = _sbClipSoundVol(); v.volume = vol; if (!v._lxForcedMute) v.muted = !(vol > 0); } catch (e) {} }, 400);
+    game._storyBeatClipVolTimer = setInterval(() => { try { if (!v.isConnected) return; const vol = _sbClipSoundVol(); v.volume = vol; if (!v._lxForcedMute) v.muted = !(vol > 0) || _lxBgMutedNow(); } catch (e) {} }, 400);   // v0.30.1744 release15: it undid Mute in Background every 400 ms
   }
   // Slow-pipe fallback: if we at least reached HAVE_FUTURE_DATA but never
   // HAVE_ENOUGH, start rather than stay black behind the text.
@@ -57407,8 +57438,62 @@ function _lxLegacyUnsignedOk(s) {
   try {
     if (!s || typeof s !== 'object' || !s.player || typeof s.player !== 'object' || _lxSaveLooksSigned(s)) return false;
     if (s.sig5 != null || s.sq != null) return false;
+    if (_lxAc.on && _lxLegacyModernShape(s)) return false;   // v0.30.1744 release15: a field only a signing build writes - a modern save with its signatures cut
     return localStorage.getItem(_LX_SAVE_MARK_KEY) == null && localStorage.getItem('lx_save_sq') == null && localStorage.getItem('lx_save_signed') == null;
   } catch (e) { return false; }
+}
+// v0.30.1744 release15 - WHAT A PRE-v0.30.414 SAVE CAN CARRY. A legacy save was judged by its shape alone, and _SAVE_NUMERIC_GUARDS allows
+// Lv 200, 1e12 coins and 1e6 base ATK: on a clean profile a modern save with three fields deleted loaded as 'legacy' at Lv 200
+// with 1e12 coins and thirty god weapons, then signed itself. s.v is SAVE_VERSION (1 since v0.25) and no game version is
+// saved, so the rule is the shape plus clamps:
+//   - on the public host (the vault on) a save carrying a field only builds since v0.30.414 write (fields a fresh v0.30.1742
+//     save writes that v0.30.413's source never names, and the signed Steam-gate fields) is not legacy;
+//   - a legacy save is held to what an old character could hold. The level cap was 200 then too (v0.30.413: level < 200), so
+//     level stays; base ATK / DEF / HP / MP <= class base + the richest job and master + that level's gains + what the SP it
+//     could have earned (<= 20 per level + 500) bought; points to that budget; coins + bank <= 1M + 5,000 x level^2; Setshards
+//     <= 2,000 + 50 x level; every item at its own best roll and at most two god pieces; boons at their top; no owed wheel or
+//     Expedition records (fields from v0.30.1734 / 1739). Per user a re-signed old save may stay Steam-trusted: nothing is marked.
+function _lxLegacyModernShape(s) {
+  const p = s.player || {}, g = s.game || {};
+  if (p._cdCarry != null) return true;
+  for (const k of ['expeditionBestFloor', 'expeditionClears', '_lxBoonOwed', '_steamAchBaseline', '_importVerdict', '_devTouched']) if (Object.prototype.hasOwnProperty.call(g, k)) return true;
+  return false;
+}
+function _lxLegacyClamp(s) {
+  const p = s && s.player; if (!p || typeof p !== 'object') return;
+  const num = (v) => (typeof v === 'number' && isFinite(v)) ? v : 0;
+  const lv = Math.max(1, Math.min(200, Math.floor(num(p.level)) || 1)); p.level = lv;
+  const topOf = (tab, k) => { let m = 0; try { for (const id in tab) { const st = tab[id] && tab[id].stats; if (st && num(st[k]) > m) m = num(st[k]); } } catch (e) {} return m; };
+  const cs = (typeof CLASSES !== 'undefined' && CLASSES[p.cls] && CLASSES[p.cls].stats) || null;
+  const base = (k) => (cs ? num(cs[k]) : topOf(CLASSES, k)) + topOf(JOBS, k) + topOf(MASTERS, k);
+  const g = _devLevelGains(p.cls);
+  // the SP it could have earned, and the lanes it spent them on (a lane bought with SP it never had is cut back)
+  let budget = 20 * lv + 500;
+  const lus = (p._levelUpSpent && typeof p._levelUpSpent === 'object') ? p._levelUpSpent : {};
+  const costOf = {}; try { for (const o of LEVELUP_OPTIONS) costOf[o.id] = o.cost || 1; } catch (e) {}
+  for (const k of Object.keys(lus)) { let n = Math.max(0, Math.floor(num(lus[k]))); const c = costOf[k] || 1; n = Math.min(n, 999, Math.floor(budget / c)); lus[k] = n; budget -= n * c; }
+  const tr = (p._trainerSpent && typeof p._trainerSpent === 'object') ? p._trainerSpent : {};
+  for (const [k, c] of [['atk', 1], ['def', 2], ['hp', 1]]) { let n = Math.max(0, Math.floor(num(tr[k]))); n = Math.min(n, Math.floor(budget / c)); tr[k] = n; budget -= n * c; }
+  const L = (k) => Math.max(0, Math.floor(num(lus[k]))), Tn = (k) => Math.max(0, Math.floor(num(tr[k])));
+  const cap = (k, max) => { if (typeof p[k] === 'number' && p[k] > max) p[k] = Math.floor(max); };
+  cap('baseAtk', base('atk') + lv * g.atk + 10 * L('atk') + Tn('atk') + 50);
+  cap('baseDef', base('def') + lv * g.def + 10 * L('def') + 2 * Tn('def') + 50);
+  cap('maxHp', base('hp') + lv * g.hp + 50 * L('hp') + 10 * Tn('hp') + 500);
+  cap('maxMp', base('mp') + lv * g.mp + 25 * L('mp') + 500);
+  cap('baseAcc', 5 * L('acc') + 2000);
+  cap('skillPoints', Math.max(0, budget)); cap('skillRankPoints', 2 * lv + 200);
+  const coinCap = 1e6 + 5000 * lv * lv;
+  cap('mojicoins', coinCap); cap('bankBalance', Math.max(0, coinCap - num(p.mojicoins)));
+  cap('setshards', 2000 + 50 * lv);
+  if (typeof p.exp === 'number' && typeof p.expToNext === 'number' && p.exp > p.expToNext) p.exp = p.expToNext;
+  let gods = 0;
+  const isGod = (it) => !!(it && (it.rarity === 'god' || it.godTier));
+  try { if (p.equipped && typeof p.equipped === 'object') for (const sl in p.equipped) { const it = p.equipped[sl]; _lxAc.legacyItem(it); if (isGod(it)) gods++; } } catch (e) {}
+  try {
+    if (Array.isArray(p.inventory)) p.inventory = p.inventory.filter((it) => { _lxAc.legacyItem(it); if (!isGod(it)) return true; return ++gods <= 2; });
+  } catch (e) {}
+  try { if (Array.isArray(p.boons)) for (const b of p.boons) { const hi = b && _lxAc.boonHi(b); if (hi != null && typeof b.roll === 'number' && (b.roll !== b.roll || b.roll > hi)) b.roll = hi; } } catch (e) {}
+  if (s.game && typeof s.game === 'object') for (const k of ['_lxBoonOwed', 'expeditionBestFloor', 'expeditionClears']) delete s.game[k];
 }
 function _lxSaveMarkWrite(s) {
   try { localStorage.setItem('lx_save_signed', '1'); } catch (e) {}   // v0.30.1734 release12: this browser signs its saves (see _lxLegacyUnsignedOk)
@@ -57423,6 +57508,49 @@ function _lxSaveMarkWrite(s) {
 const _LX_DEV_PW_SHA = '210f5332291229ecc876d35a904a25c1495a42229d822369af74e8fa37cbda6a';   // v0.30.917
 const _LX_DEV_KEY_SHA = '70ee7ae9a44c31dfc7af3187fbdd78e86f639435b73ebc449cf28b539e2bc5ae';   // v0.30.925 the ` prompt's key, hashed for the same reason as the passphrase above
 function _lxDevKeyOk(t) { try { return _lxHex(_lxSha256Bytes(_lxUtf8(String(t || '')))) === _LX_DEV_KEY_SHA; } catch (e) { return false; } }
+// v0.30.1744 release15 - THE DEV UNLOCK IS A TOKEN MADE FROM THE PASSWORD. The lock, the backtick key and the typed passphrase stored the
+// plain string '1' after a correct password, and every check read that string - so localStorage.setItem('LX_DEV', '1') and a
+// reload opened the dev console on the public web without any password. The unlock now stores 'k1.' + the word's bytes under
+// a fixed SHA-256 keystream; a stored flag counts only when it decodes to a word whose SHA-256 is one of the two digests above.
+// No new secret ships (the token cannot be made from the digests), and rotating the password retires old tokens by itself.
+// The plain '1' still counts where the HOST is a developer surface (file://, localhost, LAN), which needs no unlock anyway.
+function _lxDevTokXor(b) {
+  const out = new Uint8Array(b.length); let pad = null;
+  for (let i = 0; i < b.length; i++) { if (!(i & 31)) pad = _lxSha256Bytes(_lxUtf8('lxdev-tok\n' + (i >> 5))); out[i] = b[i] ^ pad[i & 31]; }
+  return out;
+}
+function _lxDevTokenOf(word) { return 'k1.' + _lxHex(_lxDevTokXor(_lxUtf8(String(word == null ? '' : word)))); }
+const _lxDevTokOk = (() => {
+  let memoK = null, memoV = false;   // the last flag judged (a closure: the console cannot pre-seed it)
+  return function (v) {
+    if (v === memoK) return memoV;
+    let ok = false;
+    try {
+      if (typeof v === 'string' && /^k1\.(?:[0-9a-f]{2}){6,512}$/.test(v)) {
+        const hx = v.slice(3), b = new Uint8Array(hx.length >> 1);
+        for (let i = 0; i < b.length; i++) b[i] = parseInt(hx.substr(i * 2, 2), 16);
+        const d = _lxHex(_lxSha256Bytes(_lxDevTokXor(b)));
+        ok = d === _LX_DEV_PW_SHA || d === _LX_DEV_KEY_SHA;
+      }
+    } catch (e) { ok = false; }
+    memoK = v; memoV = ok; return ok;
+  };
+})();
+// the host alone, as _lxDevSurface judged it before any unlock (never the Steam app or its loopback port)
+function _lxDevHostSurface() {
+  try {
+    if (window.MOJI_PACKAGED === true || location.port === '47821') return false;
+    if (location.protocol === 'file:') return true;
+    const h = location.hostname;
+    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(h) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+  } catch (e) { return false; }
+}
+function _lxDevFlag() {
+  let v = null; try { v = localStorage.getItem('LX_DEV'); } catch (e) { return false; }
+  if (!v) return false;
+  if (v === '1') return _lxDevHostSurface();   // the old plain flag: only where the host is a developer surface anyway
+  try { return _lxDevTokOk(v); } catch (e) { return false; }   // before this line has run (boot's quiet-console check) nothing is unlocked yet
+}
 function _lxDevPwOk(t) { try { return _lxHex(_lxSha256Bytes(_lxUtf8(String(t || '')))) === _LX_DEV_PW_SHA; } catch (e) { return false; } }
 function _lxSaveMarkRead() {
   try { const r = localStorage.getItem(_LX_SAVE_MARK_KEY); return r ? _lxSafeJsonParse(r) : null; } catch (e) { return null; }
@@ -57850,6 +57978,7 @@ function loadState() {
     } catch (e) {}
     var _lxNoHp = !(typeof s.player.hp === 'number' && isFinite(s.player.hp)), _lxNoMp = !(typeof s.player.mp === 'number' && isFinite(s.player.mp));   // v0.30.1186 save-notices
     _sanitizePlayerSaveNumerics(s.player);
+    if (_sigVerdict === 'legacy' && typeof s.sig !== 'string') { try { _lxLegacyClamp(s); } catch (e) {} }   // v0.30.1744 release15: what an old character could hold (the unsigned allowance; an ls2-signed save is an honest old signature)
     // v0.26.x audit -- nested numerics the top-level sanitizer missed: a
     // corrupted import propagates NaN through quest-progress math and buff
     // countdowns. Zero any non-finite leaf.
@@ -58285,6 +58414,7 @@ function loadState() {
     } catch (e) {}
     // v0.30.1734 release12 - a boss boon wheel the reload cut off comes back once the hero is in the world (unpaused, no title, no prologue)
     try {
+      try { if (_lxAc.on && game._lxBoonOwed) game._lxBoonOwed = _lxBoonOwedSane(game._lxBoonOwed); } catch (e) {}   // v0.30.1744 release15
       if (game._lxBoonOwed && typeof game._lxBoonOwed === 'object' && !window._lxBoonOwedArmed) {
         window._lxBoonOwedArmed = true;
         const _gb = (n) => {
@@ -59911,7 +60041,7 @@ function mpConnect(url, name, room) {
   let ws;
   try {
     ws = new WebSocket(_mpDialUrl(url, net.roomId));   // v0.30.1225 mp-room-route - ?room=: this room's own relay DO (net._lastUrl stays bare)
-    net.ws = ws;
+    net.ws = ws; try { _lxAc.wsMark(ws); } catch (e) {}   // v0.30.1744 release15
     _lxMpBudgetWrap(ws);   // v0.30.823 - my copy of the relay's 40 / s bucket
     net._away = false; net._pzSent = false; net._hitQ = []; net._fxQ = []; net._pjQ = [];
   } catch (e) {
@@ -60120,11 +60250,28 @@ const _coopKillRing = [];
 const LX_COOP_REWARD_K = 6;
 const LX_COOP_BOSS_REPAY_MS = 30000;   // v0.30.x bughunt coop-6 - the same boss (ladder key) is not paid twice inside this window
 const _lxCoopRewardSeen = new Map();   // uid -> what the guest's own table gives that monster (bounded, oldest out)
+// v0.30.1744 release15 - what a mirror can pay is bounded by MY table for its type, not by the mirror object: game.monsters is a plain array,
+// so a console-pushed 'mirror' carrying exp 1e9 raised its own cap. A level-stamped monster (PQ, scaled fields) may pay up to the
+// field baseline at its level (never past mine + 15). x6 covers an elite and an affix. Public hosts only (the vault on).
+function _lxCoopTableCap(m, lv, k) {
+  const v = Math.max(0, +m[k] || 0);
+  try {
+    if (!_lxAc.on) return v;
+    const T = (typeof monsterTypes !== 'undefined' && Object.prototype.hasOwnProperty.call(monsterTypes, m.type)) ? monsterTypes[m.type] : null;
+    if (!T) return 0;
+    let top = Math.max(1, +T[k] || 0);
+    if (k === 'exp' && typeof _lxFieldBaseline === 'function') {
+      const L = Math.min(lv | 0, Math.max(+T.level || 0, (player && player.level) | 0) + 15, 200);
+      top = Math.max(top, +((_lxFieldBaseline(L) || {}).exp) || 0);
+    }
+    return Math.min(v, top * 6);
+  } catch (e) { return v; }
+}
 function _lxCoopRewardNote(m) {
   if (!m || m.uid == null) return;
   _lxCoopRewardSeen.delete(m.uid);
   const lv = Math.max(1, (m.level | 0) || ((typeof _mobLevel === 'function') ? (_mobLevel(m) | 0) : 1));
-  _lxCoopRewardSeen.set(m.uid, { tp: m.type, e: Math.max(0, +m.exp || 0), c: Math.max(0, +m.mojicoins || 0), boss: !!(m.isBoss || m.boss || m.zodiacBoss), lv, zs: (typeof m.zodiacSign === 'string') ? m.zodiacSign.slice(0, 24) : '',
+  _lxCoopRewardSeen.set(m.uid, { tp: m.type, e: _lxCoopTableCap(m, lv, 'exp'), c: _lxCoopTableCap(m, lv, 'mojicoins'),   /* v0.30.1744 release15 */ boss: !!(m.isBoss || m.boss || m.zodiacBoss), lv, zs: (typeof m.zodiacSign === 'string') ? m.zodiacSign.slice(0, 24) : '',
     ml: Math.max(0, m.level | 0), el: !!m.isElite, mb: !!m.isMiniBoss, nm: String(m.name || m.type || '').slice(0, 48) });   // bughunt guest-dealt (parityB-2/3): the level the HOST's own gap rule reads, the tier and the name, for a mirror that is gone by the time its kill lands
   if (_lxCoopRewardSeen.size > 1024) _lxCoopRewardSeen.delete(_lxCoopRewardSeen.keys().next().value);
 }
@@ -62364,6 +62511,7 @@ function _coopApplyDrop(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
   if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed
   if (!_coopFollowingHost()) return;
+  if (_lxAc.on && !_lxAc.wsOk(net.ws)) return;   // v0.30.1744 release15: a socket the game dialled (see _coopApplyKill)
   if (_coopDropDup(msg.u, msg.id)) return;
   _coopUidBump('_dropUid', msg.u);   // v0.30.x bughunt coop-3 - a promoted host's first drops must not reuse a uid a partner already holds
   if (msg.k === 'item' && msg.it && typeof msg.it === 'object') {
@@ -62932,7 +63080,7 @@ function _lxCoopBossRewards(m, msg, ri, exp0, coins0) {
   // the guest is told about Dawn's Favor once by the usual notice (the host learns it from the credits).
   if (String(msg.tp || '') === 'gravitos' && typeof LX_TITLE_CONQUEROR !== 'undefined') { try {
     if (!player.titles || typeof player.titles !== 'object') player.titles = {};
-    if (!player.titles[LX_TITLE_CONQUEROR]) { player.titles[LX_TITLE_CONQUEROR] = true; player.equippedTitle = LX_TITLE_CONQUEROR;
+    if (!player.titles[LX_TITLE_CONQUEROR] && (typeof _lxGravitosEarned !== 'function' || _lxGravitosEarned())) { player.titles[LX_TITLE_CONQUEROR] = true; player.equippedTitle = LX_TITLE_CONQUEROR;   // v0.30.1744 release15: the host's rule
       if (typeof showToast === 'function') setTimeout(() => showToast('\u2756 TITLE EARNED \u2014 ' + LX_TITLE_CONQUEROR.toUpperCase() + ' \u2756', 'legendary'), 2600);
       if (typeof saveState === 'function') saveState(); } } catch (e) {} }
   if (msg.zs && typeof ZODIAC_SIGNS !== 'undefined') {
@@ -62991,7 +63139,7 @@ function _lxCoopKillScenes(m, msg, ri, wasNew) {
   }
   if (tp === 'gravitos') {
     const Q = player.quests || {};
-    if ((Q.active && Q.active.q_boss_gravitos) || (Q.completed && Q.completed.q_boss_gravitos)) _lxCoopGravEnding(stub);
+    if ((typeof _lxGravitosEarned === 'function') ? _lxGravitosEarned() : ((Q.active && Q.active.q_boss_gravitos) || (Q.completed && Q.completed.q_boss_gravitos))) _lxCoopGravEnding(stub);   // v0.30.1744 release15: the host's rule
   }
 }
 // Gravitos's ending chain for a guest (the host's runs inside _triggerSuperBossDeathRaw, left as it is): the defeat film, the shadow
@@ -63025,6 +63173,9 @@ function _lxCoopGravEnding(stub) {
 function _coopApplyKill(msg) {
   if (net.isHost || !msg || msg.map !== game.currentMap) return;
   if (net.hostId == null || +msg.id !== +net.hostId) return;   // host-only, fail-closed (no peer-forged / id-less kills/XP)
+  // v0.30.1744 release15 - net.isHost / hostId / peers are plain fields: offline, a console set them, pushed a mirror and fed this frame through a
+  // timer (Lv 12 -> 20). On the public host a kill pays only in a room the game itself dialled, following its host on this map.
+  if (_lxAc.on && !(_coopFollowingHost() && _lxAc.wsOk(net.ws))) return;
   if (!_mpRateOk(msg.id, 'kill', 60)) return;   // v0.30.x bughunt coop-6 - on MY clock: the relay's own budget is 40 / s, so an honest host never reaches this
   if (_coopKillDup(msg.u, msg.id)) return;   // v0.27.1 — a redelivered kill frame must not re-award XP/coins
   const m = (msg.u != null) ? _coopFindByUid(msg.u) : null;
@@ -79651,9 +79802,12 @@ function _playEverdawnWelcome() {
       + 'font-size:12px; letter-spacing:1.5px; text-transform:uppercase;'
       + 'color:rgba(255,255,255,0.55); pointer-events:none; text-shadow:0 1px 4px #000;';
     ov.appendChild(v); ov.appendChild(skip);
+    _lxFilmSound(v, (typeof _sbClipSoundVol === 'function') ? _sbClipSoundVol() : 0.6);   // v0.30.1744 release15: Mute and the Music slider (it ignored both)
 
     const _wasPaused = !!game.paused;
     game.paused = true;
+    // v0.30.1744 release15: the town music steps aside (a silent score owns the mix) and is handed back on close - it played under his line
+    try { if (typeof _cineScoreStart === 'function') _cineScoreStart('audio/bgm_mojiworld.mp3', { loop: true, vol: 0 }); } catch (e) {}
     let _done = false;
     const _close = () => {
       if (_done) return; _done = true;
@@ -79663,6 +79817,7 @@ function _playEverdawnWelcome() {
         try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
         try { ov.remove(); } catch (e) {}
         game.paused = _wasPaused;
+        try { if (typeof _cineScoreStop === 'function') _cineScoreStop(600, true); } catch (e) {}   // v0.30.1744 release15
       }, 420);
     };
     const _key = (e) => { if (e && e.key === 'F12') return; if (e && e.repeat) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); return; } if (e) { e.stopPropagation(); if (e.preventDefault) e.preventDefault(); } _close(); };   // v0.30.x full audit - the skip key stops here: J skipped the clip AND opened the journal, then the restore unpaused under it
@@ -79671,6 +79826,7 @@ function _playEverdawnWelcome() {
     v.addEventListener('ended', _close, { once: true });
     // A missing or undecodable file must not leave the player staring at a
     // black rectangle with the game paused behind it.
+    v.addEventListener('error', () => { if (!_done) _lxFilmUnspend('everdawn_welcome'); }, { once: true });   // v0.30.1744 release15: a film that failed to load plays next time
     v.addEventListener('error', _close, { once: true });
 
     host.appendChild(ov);
@@ -79687,7 +79843,7 @@ function _playEverdawnWelcome() {
       p.catch(() => { try { v.muted = true; const q = v.play(); if (q && q.catch) q.catch(_close); } catch (e) { _close(); } });
     }
     // Hard backstop: never hold the game hostage if 'ended' never fires.
-    setTimeout(_close, 20000);
+    _lxFilmBackstop(() => { if (!_done && !(v.currentTime > 0.2)) _lxFilmUnspend('everdawn_welcome'); _close(); }, 20000);   // v0.30.1744 release15: foreground time only (it pauses in the background); never played = not spent
     return true;
   } catch (e) { try { game.paused = false; } catch (e2) {} return false; }
 }
@@ -79743,7 +79899,7 @@ function _lxPlayCaptainsTeaser(_tries) {
     v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
     v.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#000;';
     const vol = (typeof _sbClipSoundVol === 'function') ? _sbClipSoundVol() : 0.6;
-    v.volume = Math.max(0, Math.min(1, vol)); v.muted = !(vol > 0);
+    _lxFilmSound(v, vol);   // v0.30.1744 release15: and muted when it opens in the background
     const skip = document.createElement('div');
     skip.textContent = 'tap or press any key to skip';
     skip.style.cssText = 'position:absolute; left:0; right:0; bottom:14px; text-align:center; font-size:11px; letter-spacing:1.5px;'
@@ -79771,13 +79927,14 @@ function _lxPlayCaptainsTeaser(_tries) {
     ov.addEventListener('click', _close);
     window.addEventListener('keydown', _key, true);
     v.addEventListener('ended', _close, { once: true });
+    v.addEventListener('error', () => { if (!_done) _lxFilmUnspend('captains_teaser'); }, { once: true });   // v0.30.1744 release15: a film that failed to load plays next time
     v.addEventListener('error', _close, { once: true });
     host.appendChild(ov);
     v.src = LX_CAPTAINS_TEASER;
     requestAnimationFrame(() => { ov.style.opacity = '1'; });
     const p = v.play();
     if (p && p.catch) p.catch(() => { try { v.muted = true; const q = v.play(); if (q && q.catch) q.catch(_close); } catch (e) { _close(); } });
-    setTimeout(_close, 60000);   // backstop: never hold the game if 'ended' never fires (the film is 45 s)
+    _lxFilmBackstop(() => { if (!_done && !(v.currentTime > 0.2)) _lxFilmUnspend('captains_teaser'); _close(); }, 60000);   // v0.30.1744 release15: foreground time; never played = not spent   // backstop: never hold the game if 'ended' never fires (the film is 45 s)
     game._lxCaptainsTeaserEl = v;
     return true;
   } catch (e) { try { game.paused = false; } catch (e2) {} _off(); return false; }
@@ -79826,7 +79983,7 @@ function _lxPlayBarnabyFall(_tries) {
     v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
     v.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#000;';
     const vol = (typeof _sbClipSoundVol === 'function') ? _sbClipSoundVol() : 0.6;
-    v.volume = Math.max(0, Math.min(1, vol)); v.muted = !(vol > 0);
+    _lxFilmSound(v, vol);   // v0.30.1744 release15: and muted when it opens in the background
     const skip = document.createElement('div');
     skip.textContent = 'tap or press any key to skip';
     skip.style.cssText = 'position:absolute; left:0; right:0; bottom:14px; text-align:center; font-size:11px; letter-spacing:1.5px;'
@@ -79854,13 +80011,14 @@ function _lxPlayBarnabyFall(_tries) {
     ov.addEventListener('click', _close);
     window.addEventListener('keydown', _key, true);
     v.addEventListener('ended', _close, { once: true });
+    v.addEventListener('error', () => { if (!_done) _lxFilmUnspend('barnaby_fall'); }, { once: true });   // v0.30.1744 release15: a film that failed to load plays next time
     v.addEventListener('error', _close, { once: true });
     host.appendChild(ov);
     v.src = LX_BARNABY_FALL;
     requestAnimationFrame(() => { ov.style.opacity = '1'; });
     const p = v.play();
     if (p && p.catch) p.catch(() => { try { v.muted = true; const q = v.play(); if (q && q.catch) q.catch(_close); } catch (e) { _close(); } });
-    setTimeout(_close, 45000);   // backstop: never hold the game if 'ended' never fires (the film is 25 s)
+    _lxFilmBackstop(() => { if (!_done && !(v.currentTime > 0.2)) _lxFilmUnspend('barnaby_fall'); _close(); }, 45000);   // v0.30.1744 release15: foreground time; never played = not spent   // backstop: never hold the game if 'ended' never fires (the film is 25 s)
     game._lxBarnabyFallEl = v;
     return true;
   } catch (e) { try { game.paused = false; } catch (e2) {} _off(); return false; }
@@ -79970,7 +80128,7 @@ function _lxPlayKillFilm(f, _tries) {
     v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
     v.style.cssText = 'width:100%; height:100%; object-fit:contain; background:#000;';
     const vol = (typeof _sbClipSoundVol === 'function') ? _sbClipSoundVol() : 0.6;
-    v.volume = Math.max(0, Math.min(1, vol)); v.muted = !(vol > 0);
+    _lxFilmSound(v, vol);   // v0.30.1744 release15: and muted when it opens in the background
     const skip = document.createElement('div');
     skip.textContent = 'tap or press any key to skip';
     skip.style.cssText = 'position:absolute; left:0; right:0; bottom:14px; text-align:center; font-size:11px; letter-spacing:1.5px;'
@@ -79992,7 +80150,7 @@ function _lxPlayKillFilm(f, _tries) {
       ov.appendChild(_sub);
       _voDone = false;
       _voEl = new Audio(); _voEl.preload = 'auto'; _voEl.src = _vo.src;
-      _voEl.volume = v.volume; _voEl.muted = v.muted;
+      _lxFilmSound(_voEl, vol);   // v0.30.1744 release15
       game._lxKillFilmVo = _voEl;   // beside game._lxKillFilmEl, for tests
       _voEl.addEventListener('playing', () => {
         try { if (f.beat) { if (!player._storyBeatsSeen) player._storyBeatsSeen = {}; player._storyBeatsSeen[f.beat] = true; } } catch (e) {}
@@ -80052,6 +80210,7 @@ function _lxPlayKillFilm(f, _tries) {
     ov.addEventListener('click', _close);
     window.addEventListener('keydown', _key, true);
     v.addEventListener('ended', _filmEnded, { once: true });   // v0.30.1719 (was _close) holds the last frame while he is still speaking
+    v.addEventListener('error', () => { if (!_done) _lxFilmUnspend(f.key); }, { once: true });   // v0.30.1744 release15: a film that failed to load plays next time
     v.addEventListener('error', _close, { once: true });
     host.appendChild(ov);
     v.src = f.src;
@@ -80059,7 +80218,7 @@ function _lxPlayKillFilm(f, _tries) {
     const p = v.play();
     // v0.30.1719 his voice starts on the film's 'playing' (see the voice block above); nothing to start here
     if (p && p.catch) p.catch(() => { try { v.muted = true; const q = v.play(); if (q && q.catch) q.catch(_close); } catch (e) { _close(); } });
-    setTimeout(_close, _voEl ? 240000 : 40000);   // v0.30.1719 a voiced film may hold its last frame for a long speech   // backstop: never hold the game if 'ended' never fires
+    _lxFilmBackstop(() => { if (!_done && !(v.currentTime > 0.2)) _lxFilmUnspend(f.key); _close(); }, _voEl ? 240000 : 40000);   /* v0.30.1744 release15: foreground time; never played = not spent */   // v0.30.1719 a voiced film may hold its last frame for a long speech   // backstop: never hold the game if 'ended' never fires
     game._lxKillFilmEl = v;
     return true;
   } catch (e) { try { game.paused = false; } catch (e2) {} _off(); return false; }
@@ -80094,7 +80253,7 @@ function _lxSpritePillTick() {
   // half-minute of play. It never gated anything - the ready gates hold the veil for what a map needs - so for a
   // player it only read as an unfinished game. It shows where dev tools are unlocked (the same test as the dev panel).
   if (window._lxPillDev === undefined) {
-    try { window._lxPillDev = !!(_lxDevSurface() && (localStorage.getItem('LX_DEV') === '1' || /[?&]dev=1/.test(location.search))); }
+    try { window._lxPillDev = !!(_lxDevSurface() && (_lxDevFlag() || /[?&]dev=1/.test(location.search))); }
     catch (e) { window._lxPillDev = false; }
   }
   if (!window._lxPillDev) { const _pp = document.getElementById('sprite-load-pill'); if (_pp) _pp.style.display = 'none'; return; }
@@ -81677,6 +81836,7 @@ function loadMap(id, entryX, entryY, _ledgeArrival) {
     // once a frame (_lxTickPlayerTimers). Two still end here: Holy Shield (its first 2.5 s are +9999 DEF - no near-invulnerability
     // through a boss door) and Hallowed Field (an aura flag for foes near you on the OLD map). Death, a load and an Expedition still clear all.
     if (player.buffs) { player.buffs.holyShield = 0; player.buffs.hallowedField = 0; }
+    if (player.buffs) { player.buffs.maelstromGuard = 0; player.buffs.necromancer = 0; }   // v0.30.1744 release15: the Storm's Eye channel and the Soul Vortex pool end at a door, so do their buffs
     // v0.26.x audit FIX — also clear DOT timers on map-change. The buff wipe
     // above missed burn/poison/electrocute, so portaling out while burning
     // carried the DOT onto the (often safe) next map, chipping HP there.
@@ -82189,7 +82349,7 @@ function loadMap(id, entryX, entryY, _ledgeArrival) {
   for (const r of _resolved) {
     // v0.30.1742 release14 - a spawnChance entry is a rare elite, already the map's mid-boss: the 15% Elder roll (x5 HP) made an Ossuary Tyrant
     // 8.83M HP and a Path's Bane 13.3M. spawnMonster skips the roll while this is set; ordinary miniElite entries keep it.
-    game._lxRareSpawn = !r.s.boss && r.s.spawnChance != null;
+    game._lxRareSpawn = !r.s.boss && r.s.spawnChance != null && (r.s.count | 0) <= 1;   // v0.30.1744 release15: a rare elite is one spawn; Expedition floors (spawnChance 1.0, count 20-30) keep their Elder roll
     for (let i = 0; i < r.count; i++) {
       // v0.25.543 — pass `platformLocked` through so sentry mobs spawn
       // anchored to a platform and can't walk/fall off it.
@@ -113094,6 +113254,17 @@ function _lxStormPactOnAck(msg) {
 // the wheel lived only in memory (game._pendingBossBoon, the open #powerup-modal): a reload lost the boon. game._lxBoonOwed (saved)
 // holds the boss and the three boons it offered from the moment the wheel is due until a pick, or until the player closes it;
 // loadState re-offers it once the hero is in the world. Cleared before the pick is saved, so it can never pay twice.
+// v0.30.1744 release15 - an owed wheel a reload brings back is only owed by a boss this save has killed, and it rolls at the top (maxRoll)
+// only after Gravitos, the one boss that sets it. A wheel written in by hand (with maxRoll, repeatable by reloading) is dropped.
+function _lxBoonOwedSane(o) {
+  if (!o || typeof o !== 'object') return null;
+  const bk = Object.keys((game && game._bossKills) || {}), bs = Object.keys((game && game.bestiary) || {}).filter((k) => k.indexOf('_boss_') === 0);
+  const killedAny = bk.length > 0 || bs.length > 0 || Object.keys((game && game.bossDefeated) || {}).length > 0;
+  if (!killedAny) return null;
+  let grav = bs.indexOf('_boss_gravitos') >= 0 || bk.some((k) => /^gravitos/.test(k));
+  try { if (!grav && typeof LX_TITLE_CONQUEROR !== 'undefined' && player.titles && player.titles[LX_TITLE_CONQUEROR]) grav = true; } catch (e) {}   // a co-op guest's Gravitos
+  return o.maxRoll && !grav ? Object.assign({}, o, { maxRoll: false }) : o;
+}
 function _lxBoonOweOf(info) {
   const o = { name: String((info && info.name) || ''), icon: String((info && info.icon) || ''), maxRoll: !!(info && info.maxRoll) };
   if (info && info._bagFull) o._bagFull = true;
@@ -128231,7 +128402,12 @@ function _lxDevGearFind(name) {
 }
 // One piece from its catalog entry (a name or the entry itself). opts: mode 'catalog' | 'rolled', rarity ('' = the
 // catalog's), stars 0..MAX_STARS, lvl (the level a rolled drop's affixes scale to).
+// v0.30.1744 release15 - THE dev* HELPERS ARE DEV TOOLS. devGiveGear & co. are plain globals: off a developer surface they now do nothing
+// (the bag is guarded, but a game function the console reaches through a timer still runs as the game). The prologue's
+// flash-forward builds its apex hero with devSetMasterChain / devSetLevel and restores the real one after, so it keeps them.
+function _lxDevCallOk() { try { return _lxDevSurface() || !!(window._prologueActive && window._prologueSnapP); } catch (e) { return false; } }
 function devMakeGear(base, opts) {
+  if (!_lxDevSurface()) return null;   // v0.30.1744 release15
   const o = Object.assign({}, _LX_DEV_GEAR, opts || {});
   const f = _lxDevGearFind(typeof base === 'string' ? base : base && base.name);
   if (!f) return null;
@@ -128250,6 +128426,7 @@ function _lxDevGearRoom() {
 // Make a piece and give it: into the bag, or onto the hero with opts.equip (the piece it replaces goes to the bag).
 // Honours the Equip tab's cap like every other grant. Returns { ok, item } or { ok: false, why: 'unknown' | 'full' }.
 function devGiveGear(base, opts) {
+  if (!_lxDevSurface()) return { ok: false, why: 'Dev tools only' };   // v0.30.1744 release15
   const o = Object.assign({}, _LX_DEV_GEAR, opts || {});
   const it = devMakeGear(base, o);
   if (!it) return { ok: false, why: 'unknown' };
@@ -128725,6 +128902,7 @@ function _devLevelGains(cls) {
 }
 
 function devSetLevel(n) {
+  if (!_lxDevCallOk()) return;   // v0.30.1744 release15
   n = Math.max(1, Math.min(99, n));
   const diff = n - player.level;
   const _g = _devLevelGains(player.cls);
@@ -128826,6 +129004,7 @@ function devSetLevel(n) {
 // follow the same path so clicking any chart button from any starting
 // state produces a clean apply.
 function devSetClass(id) {
+  if (!_lxDevCallOk()) return;   // v0.30.1744 release15
   // Un-apply existing job+master stats so they don't carry over.
   if (typeof resetJobAndMaster === 'function') resetJobAndMaster();
   applyClass(id);
@@ -128836,6 +129015,7 @@ function devSetClass(id) {
 }
 
 function devSetJob(id) {
+  if (!_lxDevCallOk()) return;   // v0.30.1744 release15
   if (!player.cls) { devLog('Pick a class first'); return; }
   if (JOBS[id].cls !== player.cls) { devLog('Job does not match class'); return; }
   // Un-apply CURRENT job+master before applying new job.
@@ -128852,6 +129032,7 @@ function devSetJob(id) {
 // v0.26.017 — Reset is now explicit at the chain entry so accumulated
 // stats from a prior class/job don't carry forward.
 function devSetJobChain(clsId, jobId) {
+  if (!_lxDevCallOk()) return;   // v0.30.1744 release15
   if (player.cls !== clsId) {
     if (typeof resetJobAndMaster === 'function') resetJobAndMaster();
     if (typeof applyClass === 'function') applyClass(clsId);
@@ -128860,6 +129041,7 @@ function devSetJobChain(clsId, jobId) {
   devSetJob(jobId);
 }
 function devSetMasterChain(clsId, jobId, masterId) {
+  if (!_lxDevCallOk()) return;   // v0.30.1744 release15
   if (player.cls !== clsId) {
     if (typeof resetJobAndMaster === 'function') resetJobAndMaster();
     if (typeof applyClass === 'function') applyClass(clsId);
@@ -128874,6 +129056,7 @@ function devSetMasterChain(clsId, jobId, masterId) {
 }
 
 function devSetMaster(id) {
+  if (!_lxDevCallOk()) return;   // v0.30.1744 release15
   if (!player.job) { devLog('Pick a job first'); return; }
   // v0.26.028 — Same MASTERS field-name fix: `.from` (job this master
   // advances FROM), not `.job` (field doesn't exist on MASTERS entries).
@@ -128909,6 +129092,7 @@ function devSetMaster(id) {
 }
 
 function devTeleport(mapId) {
+  if (!_lxDevSurface()) return;   // v0.30.1744 release15
   if (!MAPS[mapId]) return;
   const _lxTx = (typeof _lxClearArrivalX === 'function') ? _lxClearArrivalX(MAPS[mapId], 200) : 200;   // bughunt world-2: x 200 is inside a door's trigger on 14 maps
   loadMap(mapId, _lxTx);
@@ -128930,7 +129114,7 @@ function devTeleport(mapId) {
 // tools when the password is entered (complements backtick + dev-key). It sets the
 // same localStorage LX_DEV=1 flag that openDevConsole / LX_DEV_TOOLS check.
 (function _lxDevLockIcon() {
-  function _unlocked() { try { return _lxDevSurface() && (localStorage.getItem('LX_DEV') === '1' || /[?&]dev=1/.test(location.search)); } catch (e) { return false; } }
+  function _unlocked() { try { return _lxDevSurface() && (_lxDevFlag() || /[?&]dev=1/.test(location.search)); } catch (e) { return false; } }
   function install() {
     if (window.MOJI_PACKAGED === true) return;   // v0.30.894 dev-lock-web - the lock is back on the public web for a tester (its password is the gate); never in the Steam app
     // v0.30.1180 launch-meta hid it from the public web (launch audit: every player saw it); v0.30.1653 dev-lock-web (per user: "Bring dev mode back
@@ -128955,7 +129139,7 @@ function devTeleport(mapId) {
       var pw = null;
       try { pw = prompt('🔒 Enter dev password:'); } catch (e) {}
       if (_lxDevPwOk(pw)) {   // v0.30.917 compared as a SHA-256 digest (the word itself was readable in view-source)
-        try { localStorage.setItem('LX_DEV', '1'); document.body.classList.add('lx-dev'); } catch (e) {}
+        try { localStorage.setItem('LX_DEV', _lxDevTokenOf(pw));   /* v0.30.1744 release15 */ document.body.classList.add('lx-dev'); } catch (e) {}
         render();
         if (typeof showToast === 'function') showToast('🔓 Dev tools unlocked', 'epic');
         if (typeof openDevConsole === 'function') openDevConsole();
@@ -129036,7 +129220,7 @@ function openDevConsole() {
   // the version-tag long-press reached this ungated (one tap = MAX-STATS /
   // teleport / unlock console for any player). Require the dev flag the
   // keyboard openers already check: localStorage LX_DEV=1 or ?dev=1.
-  try { if (!(_lxDevSurface() && (localStorage.getItem('LX_DEV') === '1' || /[?&]dev=1/.test(location.search)))) return; } catch (e) { return; }   // v0.30.797
+  try { if (!(_lxDevSurface() && (_lxDevFlag() || /[?&]dev=1/.test(location.search)))) return; } catch (e) { return; }   // v0.30.797
   renderDev();
   document.getElementById('dev-modal').style.display = 'flex';
   game.paused = true;
@@ -129161,16 +129345,16 @@ function openDevConsole() {
   if (!_lxDevSurface()) return;   // v0.30.797 - no passphrase unlock on a public deploy or in the Steam build
   const SEQ_LEN = 11;   // v0.30.917 the passphrase is checked as a digest of the last 11 letters
   let buf = '', last = 0;
-  const isUnlocked = () => { try { return localStorage.getItem('LX_DEV') === '1'; } catch (e) { return false; } };
+  const isUnlocked = () => { try { return _lxDevFlag(); } catch (e) { return false; } };
   function revealDevButton() {
     try {
       const btn = document.getElementById('mobile-dev-btn');
       if (btn) { btn.style.display = 'flex'; btn.style.opacity = '0.85'; }
     } catch (e) {}
   }
-  function unlock() {
+  function unlock(word) {
     const already = isUnlocked();
-    try { localStorage.setItem('LX_DEV', '1'); document.body.classList.add('lx-dev'); } catch (e) {}
+    try { localStorage.setItem('LX_DEV', _lxDevTokenOf(word));   /* v0.30.1744 release15 */ document.body.classList.add('lx-dev'); } catch (e) {}
     revealDevButton();
     if (typeof showToast === 'function') {
       showToast(already
@@ -129194,7 +129378,7 @@ function openDevConsole() {
       last = now;
       const ch = key.toLowerCase();
       buf = (buf + ch).slice(-SEQ_LEN);
-      if (buf.length === SEQ_LEN && _lxDevPwOk(buf)) { buf = ''; unlock(); }
+      if (buf.length === SEQ_LEN && _lxDevPwOk(buf)) { const w = buf; buf = ''; unlock(w); }   // v0.30.1744 release15: the token is made from the word
     } catch (_) {}
   }, true);
 })();
@@ -129204,6 +129388,7 @@ function openDevConsole() {
 // refill. Idempotent: safe to call repeatedly. Used by the Mobile Unlock
 // button that the dev console renders for touch users.
 function devMobileUnlock() {
+  if (!_lxDevSurface()) return;   // v0.30.1744 release15
   // Pick a class if none chosen yet — default warrior so the unlock
   // works even on a fresh save before character creation.
   if (!player.cls) {
@@ -177448,7 +177633,7 @@ function _prologueDaggerCutscene(onDone) {
   if (vid) {
     vid.onended = finish;
     vid.onerror = finish;
-    vid.volume = 0.9;
+    _lxFilmSound(vid, _sbClipSoundVol());   // v0.30.1744 release15: was 0.9 whatever the Music slider, Mute or a background tab said
     try {
       const pp = vid.play();
       if (pp && pp.catch) pp.catch(() => {
@@ -177962,7 +178147,7 @@ function _prologuePunchCutscene(onDone) {
   if (vid) {
     vid.onended = finish;
     vid.onerror = finish;
-    vid.volume = 0.9;
+    _lxFilmSound(vid, _sbClipSoundVol());   // v0.30.1744 release15: was 0.9 whatever the Music slider, Mute or a background tab said
     try {
       const pp = vid.play();
       if (pp && pp.catch) pp.catch(() => {
@@ -178046,7 +178231,7 @@ function _gravitosEntryCutscene(onDone) {
   if (vid) {
     vid.onended = finish;
     vid.onerror = finish;
-    vid.volume = 0.9;
+    _lxFilmSound(vid, _sbClipSoundVol());   // v0.30.1744 release15: was 0.9 whatever the Music slider, Mute or a background tab said
     try {
       const pp = vid.play();
       if (pp && pp.catch) pp.catch(() => {
@@ -178126,7 +178311,7 @@ function _gugumaRebirthCutscene(onDone) {
     if (done || playing) return;
     playing = true;
     if (guard) { clearTimeout(guard); guard = 0; }
-    vid.style.opacity = '1'; vid.volume = 0.9;
+    vid.style.opacity = '1'; _lxFilmSound(vid, _sbClipSoundVol());   /* v0.30.1744 release15: was 0.9 - see _lxFilmSound */
     _duck();
     const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
     titleT = setTimeout(() => { if (titleEl) titleEl.style.opacity = '1'; }, 5200);
@@ -178208,7 +178393,7 @@ function _gugumaToyboxCutscene(onClip, onFallback) {
     if (done || playing) return;
     playing = true;
     if (guard) { clearTimeout(guard); guard = 0; }
-    vid.style.opacity = '1'; vid.volume = 0.9;
+    vid.style.opacity = '1'; _lxFilmSound(vid, _sbClipSoundVol());   /* v0.30.1744 release15: was 0.9 - see _lxFilmSound */
     _duck();
     const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(() => finish(false)); });
     titleT = setTimeout(() => { if (titleEl) titleEl.style.opacity = '1'; }, 5200);
@@ -178349,7 +178534,7 @@ function _sovereignFallCutscene(onDone) {
     if (done || playing) return;
     playing = true;
     if (guard) { clearTimeout(guard); guard = 0; }
-    vid.style.opacity = '1'; vid.volume = 0.9;
+    vid.style.opacity = '1'; _lxFilmSound(vid, _sbClipSoundVol());   /* v0.30.1744 release15: was 0.9 - see _lxFilmSound */
     _duck();
     const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
     // The card lands on the reveal, once the ash has cleared off the kneeling figure.
@@ -178410,7 +178595,7 @@ function _amnesiacItsHimCutscene(onDone) {
     if (done || playing) return;
     playing = true;
     if (guard) { clearTimeout(guard); guard = 0; }
-    vid.style.opacity = '1'; vid.volume = 0.9;
+    vid.style.opacity = '1'; _lxFilmSound(vid, _sbClipSoundVol());   /* v0.30.1744 release15: was 0.9 - see _lxFilmSound */
     _duck();
     const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
     titleT = setTimeout(() => { if (titleEl) titleEl.style.opacity = '1'; }, 5600);
@@ -178470,7 +178655,7 @@ function _gravitosShadowRevealCutscene(onDone) {
     if (done || playing) return;
     playing = true;
     if (guard) { clearTimeout(guard); guard = 0; }
-    vid.style.opacity = '1'; vid.volume = 0.9;
+    vid.style.opacity = '1'; _lxFilmSound(vid, _sbClipSoundVol());   /* v0.30.1744 release15: was 0.9 - see _lxFilmSound */
     _duck();
     const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
     titleT = setTimeout(() => { if (titleEl) titleEl.style.opacity = '1'; }, 5200);
@@ -178542,7 +178727,7 @@ function _gravitosDefeatCutscene(onDone) {
       if (done || usingVideo) return;
       usingVideo = true;
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
-      vid.style.opacity = '1'; vid.volume = 0.9;
+      vid.style.opacity = '1'; _lxFilmSound(vid, _sbClipSoundVol());   /* v0.30.1744 release15: was 0.9 - see _lxFilmSound */
       _duck();   // v0.29.242 — real clip took over: duck the beds under its mix
       const pp = vid.play(); if (pp && pp.catch) pp.catch(() => { vid.muted = true; _unduck(); const p2 = vid.play(); if (p2 && p2.catch) p2.catch(finish); });
       if (timer) clearTimeout(timer); timer = setTimeout(finish, 12000);
@@ -181319,7 +181504,7 @@ try { window.LXAuth = LXAuth; } catch (e) {}
     // v0.26.946 — decode boss/zodiac sets while the player reads the form.
     try { setTimeout(() => { try { _warmDecodeRegistries(true); } catch (e) {} }, 1200); } catch (e) {}
     // v0.26.946 — start buffering the main theme now that sprites are done.
-    try { setTimeout(() => { try { _bgmEl.load(); } catch (e) {} }, 2500); } catch (e) {}
+    try { setTimeout(() => { try { if (_bgmEl.paused && !window._lxMenuBgmStopped) _bgmEl.load(); } catch (e) {} }, 2500); } catch (e) {}   // v0.30.1744 release15: Continue inside 2.5 s - load() reset the playing town theme to silence
     stack.classList.add('compact');
     auth.classList.add('shown');
     auth.removeAttribute('hidden');
@@ -181804,7 +181989,7 @@ let _cineMixIdleTicks = 0;
 function _cineAnythingOnScreen() {
   try {
     if (typeof window !== 'undefined' && window._prologueActive) return true;
-    for (const id of ['gravitos-entry-cine', 'prologue-dagger-cine', 'captains-teaser-overlay', 'barnaby-fall-overlay', 'kill-film-overlay']) {
+    for (const id of ['gravitos-entry-cine', 'prologue-dagger-cine', 'captains-teaser-overlay', 'barnaby-fall-overlay', 'kill-film-overlay', 'everdawn-welcome-overlay']) {
       if (document.getElementById(id)) return true;
     }
     const sb = document.getElementById('story-beat-overlay');
@@ -181916,6 +182101,7 @@ function _setSfxMasterVolume(v) {
       // 'probing' | null; the `el && el._sfxBase != null` guard below skips
       // the non-element sentinels safely.
       (typeof _NPC_TALK_SFX !== 'undefined') ? _NPC_TALK_SFX : null,
+      (() => { try { return _monsterCustomSfx; } catch (e) { return null; } })(),   // v0.30.1744 release15: per-monster hit / death clips (audio/monster/) kept their load-time level
       (typeof _storyVoiceEls !== 'undefined') ? _storyVoiceEls : null,   // v0.30.608 — story voice-over
     ];
     for (const cache of caches) {
@@ -182485,6 +182671,61 @@ function _lxApplyMediaMuted(m) {
   try { if (typeof _bgmBossEl !== 'undefined' && _bgmBossEl) _bgmBossEl.muted = !!m; } catch (e) {}
   try { if (typeof _bgmMapEls !== 'undefined' && _bgmMapEls) for (const k of Object.keys(_bgmMapEls)) { const e = _bgmMapEls[k]; if (e) e.muted = !!m; } } catch (e) {}
   try { _lxSyncSfxMuted(m); } catch (e) {}
+  try { _lxFilmMediaMuted(m); } catch (e) {}   // v0.30.1744 release15: and the films
+}
+// v0.30.1744 release15 - FILMS IN THE BACKGROUND. The set above never reached a film: on a hidden tab the kill film, Gravitos's voice, the
+// captains' teaser, story-beat clips and the welcome film played on, audible. Every live <video> with sound (and a kill film's
+// voice) is muted with the rest, and on return gets its sound back - only what this muted: a clip silent by its own settings
+// stays silent. The four skippable full-screen films also PAUSE while the window is away and resume on return, so the player
+// does not miss them; their backstops count foreground time only. The short prologue / story cutscenes play on, muted: their
+// 9-13 s safety timers are part of the prologue's own stall design.
+function _lxBgMutedNow() { try { return !!_lxBgMuted; } catch (e) { return false; } }
+function _lxFilmSound(el, vol) {   // a film's level: the Music slider (0 on Mute), and muted while the window is in the background
+  try {
+    const v = Math.max(0, Math.min(1, Number(vol) || 0)), own = !(v > 0), bg = _lxBgMutedNow();
+    el.volume = v; el.muted = own || bg; el._lxBgMuteForced = !own && bg;
+  } catch (e) {}
+}
+function _lxFilmVoice() { try { const vo = (typeof game !== 'undefined' && game) ? game._lxKillFilmVo : null; return (vo && vo.getAttribute && vo.getAttribute('src')) ? vo : null; } catch (e) { return null; } }
+function _lxFilmMediaMuted(m) {
+  const els = []; try { for (const v of document.querySelectorAll('video')) els.push(v); } catch (e) {}
+  const vo = _lxFilmVoice(); if (vo) els.push(vo);
+  for (const el of els) {
+    try {
+      if (m) { if (!el.muted) { el.muted = true; el._lxBgMuteForced = true; } }
+      else if (el._lxBgMuteForced) { el._lxBgMuteForced = false; el.muted = false; }
+    } catch (e) {}
+  }
+}
+let _lxFilmHeldSince = 0, _lxFilmHeldMs = 0;
+const _LX_FILM_HOLD_IDS = ['everdawn-welcome-overlay', 'captains-teaser-overlay', 'barnaby-fall-overlay', 'kill-film-overlay'];
+function _lxFilmClock() { const now = performance.now(); return now - _lxFilmHeldMs - (_lxFilmHeldSince ? now - _lxFilmHeldSince : 0); }
+function _lxFilmBackstop(fn, ms) {   // setTimeout(fn, ms) in foreground time: the minutes a film sat paused in the background do not count
+  const end = _lxFilmClock() + ms;
+  const tick = () => { const left = end - _lxFilmClock(); if (left <= 0) { try { fn(); } catch (e) {} } else setTimeout(tick, Math.min(left + 20, 5000)); };
+  setTimeout(tick, ms);
+}
+function _lxFilmBgHold(on) {
+  const now = performance.now();
+  if (on && !_lxFilmHeldSince) _lxFilmHeldSince = now;
+  else if (!on && _lxFilmHeldSince) { _lxFilmHeldMs += now - _lxFilmHeldSince; _lxFilmHeldSince = 0; }
+  const els = [];
+  for (const id of _LX_FILM_HOLD_IDS) { const ov = document.getElementById(id); if (ov) for (const v of ov.querySelectorAll('video')) els.push(v); }
+  const vo = _lxFilmVoice(); if (vo) els.push(vo);
+  for (const el of els) {
+    try {
+      if (on) { if (!el.paused && !el.ended) { el._lxBgHeld = true; el.pause(); } }
+      else if (el._lxBgHeld) { el._lxBgHeld = false; const p = el.play(); if (p && p.catch) p.catch(() => {}); }
+    } catch (e) {}
+  }
+}
+function _lxFilmUnspend(key) {   // v0.30.1744 release15: a film that never played is not spent - it plays at its next trigger
+  try {
+    if (!key || typeof player === 'undefined' || !player || !player._storyBeatsSeen) return;
+    delete player._storyBeatsSeen[key];
+    if (player._lxFilmOpen === key) delete player._lxFilmOpen;
+    if (typeof saveState === 'function') saveState();
+  } catch (e) {}
 }
 function _lxBackgroundMute(on) {
   try {
@@ -182494,6 +182735,7 @@ function _lxBackgroundMute(on) {
     _lxBgMuted = !!on;
     const own = !!(typeof audio !== 'undefined' && audio && audio.muted);
     _lxApplyMediaMuted(_lxBgMuted || own);
+    try { _lxFilmBgHold(_lxBgMuted); } catch (e) {}   // v0.30.1744 release15: the skippable films wait for the player
     if (typeof audio !== 'undefined' && audio && audio.ctx) { try { if (_lxBgMuted) audio.ctx.suspend(); else audio.ctx.resume(); } catch (e) {} }
   } catch (e) {}
 }
@@ -183175,6 +183417,7 @@ function _playMonsterSfx(m, kind) {
         _probeMonsterCustomSfx(_type, kind);
       } else if (slot && slot !== 'probing') {
         try { slot.currentTime = 0; } catch (_) {}
+        try { if (slot._sfxBase != null) slot.volume = slot._sfxBase * _SFX_MASTER_VOL; } catch (_) {}   // v0.30.1744 release15: one still loading during a slider move kept the old level
         const cp = slot.play();
         if (cp && cp.catch) cp.catch(() => {});
         return;   // custom clip handled this kill — skip the family clip

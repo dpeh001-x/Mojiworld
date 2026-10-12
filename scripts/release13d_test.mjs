@@ -107,7 +107,7 @@ try {
   });
   ok('[3] the Warlord\'s Banner reach ends with the map change', t3.banner === 0, { banner: t3.banner });
   const a = t3.after;
-  ok('[4] Guardian, Eagle Eye, War Cry, Bloodlust, Maelstrom Guard survive a map change', a.guardian > 9000 && a.eagleEye > 9000 && a.warCry > 5000 && a.bloodlust > 8000 && a.maelstromGuard > 4000, a);
+  ok('[4] Guardian, Eagle Eye, War Cry, Bloodlust survive a map change; the Storm Eye guard ends with its channel (release15)', a.guardian > 9000 && a.eagleEye > 9000 && a.warCry > 5000 && a.bloodlust > 8000 && (a.maelstromGuard | 0) === 0, a);
   ok('[4] ...and keep counting down; Holy Shield and Hallowed Field still end', t3.later < a.guardian - 500 && t3.later > 0 && a.holyShield === 0 && a.hallowedField === 0, { later: t3.later, holy: a.holyShield, field: a.hallowedField });
   const t4 = await ev(async () => {
     __hero('warrior', 'knight'); player.level = 120; Object.assign(player.buffs, { guardian: 10000, warCry: 6000 });

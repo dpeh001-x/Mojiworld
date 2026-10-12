@@ -46,6 +46,7 @@ try {
     player.boons = POWERUPS.slice(0, 3).map((p) => rollBoonInstance(p.id)).filter(Boolean);
     player.consumables = { hp_s: 10, mp_s: 5 };
     game.achievements = Object.assign({}, game.achievements || {}, { firstKill: Date.now() });
+    player._storyBeatsSeen = {}; for (const k of Object.keys(STORY_BEATS || {})) player._storyBeatsSeen[k] = true;   // release15a: story beats are in the vault on the public host - marked here, before signing
     refreshGearCache();
     _flushSaveStateNow();
     return { save: localStorage.getItem(SAVE_KEY), mark: localStorage.getItem(SAVE_KEY + '_verified'), atk: getAtk(), wAtk: w.atk };
@@ -81,7 +82,7 @@ try {
   ok('[4] stars typed to 99 go back to 10', stars.now === 10, stars);
   const boon = await page.evaluate(async () => { const b = player.boons[0]; const def = POWERUPS.find((p) => p.id === b.id); b.roll = 1e6; await new Promise((r) => setTimeout(r, 3600)); return { now: b.roll, max: def.max, min: def.min }; });
   ok('[5] a boon roll typed to a million goes back to its range', boon.now === Math.max(boon.min || 0, boon.max), boon);
-  const n0 = await page.evaluate(() => { player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const k of Object.keys(STORY_BEATS || {})) player._storyBeatsSeen[k] = true; loadMap('forest', 200); return _lxAcReport().length; });
+  const n0 = await page.evaluate(() => { loadMap('forest', 200); return _lxAcReport().length; });   // release15a: the beats come marked in the save
   await page.waitForTimeout(2500);
   const k0 = await page.evaluate(() => ({ kills: game.kills || 0, mast: JSON.stringify(player.mastery || {}) }));
   for (let i = 0; i < 14; i++) { await page.keyboard.down(i % 2 ? 'ArrowLeft' : 'ArrowRight'); for (let k = 0; k < 8; k++) { await page.keyboard.press('z'); await page.waitForTimeout(110); } await page.keyboard.up(i % 2 ? 'ArrowLeft' : 'ArrowRight'); }

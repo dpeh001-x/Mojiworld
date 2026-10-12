@@ -71,7 +71,7 @@ try {
   check(pub.pre.icon === true, 'with ?devlock=1 (v0.30.1180 launch-meta) the lock icon IS on the public link for testers (v0.30.894) — it is the gate, not the absence of one', JSON.stringify({ icon: pub.pre.icon }));
   check(pub.typed.surface === false && pub.typed.stored !== '1',
     'typing the passphrase on a public host does nothing — the typed sequence is a developer-surface convenience', JSON.stringify({ surface: pub.typed.surface, stored: pub.typed.stored }));
-  check(pub.surface === true && pub.stored === '1' && pub.consoleOpens,
+  check(pub.surface === true && /^k1\./.test(pub.stored || '') && pub.consoleOpens,   // release15a: a password-derived token, not '1'
     'the lock icon plus the right password opens it there, and only then (v0.30.894 / v0.30.925)', JSON.stringify({ surface: pub.surface, stored: pub.stored, console: pub.consoleOpens }));
   check(steam.pre.surface === false && !steam.pre.icon && !steam.pre.consoleOpens && steam.surface === false && !steam.icon && !steam.consoleOpens && steam.stored !== '1' && steam.prompts === 0, 'the packaged Steam app (127.0.0.1 + MOJI_PACKAGED) has no dev tools either, passphrase or not', JSON.stringify({ surface: steam.surface, icon: steam.icon, console: steam.consoleOpens, stored: steam.stored }));
   check(!dev.errs.length && !pub.errs.length && !steam.errs.length, 'no page errors on any surface', dev.errs.concat(pub.errs, steam.errs).slice(0, 2).join(' | '));

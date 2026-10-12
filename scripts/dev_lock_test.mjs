@@ -64,7 +64,7 @@ try {
     page._answer = DEV_PW; await clickLock(page); await page.waitForTimeout(500);
     const s4 = await state(page);
     console.log('after the password:', JSON.stringify(s4));
-    check(s4.flag === '1' && s4.lock === '🔓' && s4.console && s4.devClass && s4.surface, 'the lock\'s password unlocks it: 🔓, the dev console opens, the dev settings show', s4);
+    check(/^k1\./.test(s4.flag || '') && s4.lock === '🔓' && s4.console && s4.devClass && s4.surface, 'the lock\'s password unlocks it: 🔓, the dev console opens, the dev settings show', s4);
     // the same browser, next visit (no ?dev=1)
     await page.goto(`http://${PUBLIC}:${PORT}/${FILE}`, { waitUntil: 'domcontentloaded', timeout: 180000 });
     await page.waitForFunction(() => typeof openDevConsole === 'function' && typeof _lxDevSurface === 'function', null, { timeout: 120000 });

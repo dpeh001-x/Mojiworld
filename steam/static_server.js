@@ -90,20 +90,33 @@ function requestHandler(root, entry) {
   };
 }
 
-// start(root, entry, fixedPort) -> Promise<port>. Binds the fixed loopback port
-// (stable origin → saves persist); falls back to an ephemeral port rather than
-// crashing if it is taken (launching beats crashing — see main.js notes).
-function start(root, entry, fixedPort) {
+// listen(root, entry, fixedPort, { retries, retryMs }) -> Promise<{ port, fallback, code, server }>. Binds the fixed loopback port
+// (stable origin → saves persist); falls back to an ephemeral port rather than crashing if it is taken (launching beats crashing —
+// see main.js notes).
+// v0.30.1744 release15 - ...but the fallback port is a different ORIGIN, so localStorage - the save - starts empty there, and that used to
+// happen in silence. The fixed port is now tried 1 + retries times, retryMs apart (a copy that is still shutting down lets go of it
+// in that time), and a fallback is reported (fallback: true, code: the bind error) so the caller can tell the player.
+function listen(root, entry, fixedPort, opts) {
+  const o = opts || {};
+  const retries = Math.max(0, Math.floor(Number(o.retries) || 0)), retryMs = Math.max(0, Number.isFinite(o.retryMs) ? o.retryMs : 500);
   return new Promise((resolve) => {
     const handler = requestHandler(root, entry);
     const server = http.createServer(handler);
-    server.on('error', () => {
+    let tries = 0;
+    const fallBack = (err) => {
+      const code = (err && err.code) || 'error';
       const fb = http.createServer(handler);
-      fb.on('error', () => resolve(fixedPort));
-      fb.listen(0, '127.0.0.1', () => resolve(fb.address().port));
+      fb.on('error', () => resolve({ port: fixedPort, fallback: true, code, server: null }));
+      fb.listen(0, '127.0.0.1', () => resolve({ port: fb.address().port, fallback: true, code, server: fb }));
+    };
+    server.on('error', (err) => {
+      if (tries++ < retries) { setTimeout(() => { try { server.listen(fixedPort, '127.0.0.1'); } catch (e) { fallBack(e); } }, retryMs); return; }
+      fallBack(err);
     });
-    server.listen(fixedPort, '127.0.0.1', () => resolve(fixedPort));
+    server.listen(fixedPort, '127.0.0.1', () => resolve({ port: fixedPort, fallback: false, code: '', server }));   // a retry that binds lands here too
   });
 }
+// start(root, entry, fixedPort) -> Promise<port> - the old contract: no retries, the port number only.
+function start(root, entry, fixedPort) { return listen(root, entry, fixedPort).then((r) => r.port); }
 
-module.exports = { MIME, parseRange, requestHandler, start };
+module.exports = { MIME, parseRange, requestHandler, listen, start };

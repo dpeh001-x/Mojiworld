@@ -13,7 +13,8 @@ const relay = getArg('--moji-relay=');
 const steamAvailable = getArg('--moji-steam=') === '1';
 const onDeck = getArg('--moji-deck=') === '1';
 const launchJoin = getArg('--moji-launch-join=');
-const packaged = getArg('--moji-packaged=') === '1';   // v0.30.797 - the packaged app serves from 127.0.0.1; the game must not mistake it for a developer's localhost
+const packaged = getArg('--moji-packaged=') === '1';
+const portNote = getArg('--moji-port-note=');   // v0.30.1744 release15 - the fixed port this session could not bind (empty = it did)   // v0.30.797 - the packaged app serves from 127.0.0.1; the game must not mistake it for a developer's localhost
 
 // Second-instance "Join Game" callbacks (registered by the game via onJoin).
 // A lobby resolve can land BEFORE the game's inline script registers its
@@ -98,6 +99,30 @@ try {
 } catch (e) {
   // Fallback for older Electron / disabled isolation.
   try { window.MOJI_RELAY_URL = relay; if (launchJoin) window.MOJI_JOIN = launchJoin; if (steamAvailable) window.SteamAPI = SteamAPI; } catch (_) {}
+}
+
+// v0.30.1744 release15 - another program held the game's local port, so this session is served from a different origin and the local save
+// (localStorage is per origin, port included) is not reachable. That used to happen in silence - the player saw a fresh start, or
+// the Steam Cloud copy, and any progress made now split off from their real save. Say so, over the game, until dismissed.
+if (/^[0-9]{1,5}$/.test(portNote)) {
+  const showPortNote = () => {
+    try {
+      if (document.getElementById('moji-port-note')) return;
+      const box = document.createElement('div');
+      box.id = 'moji-port-note'; box.setAttribute('role', 'alert');
+      box.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:2147483647;width:min(620px,92vw);box-sizing:border-box;padding:14px 18px;background:#2a0f16;color:#fbe9d0;border:2px solid #e0324f;border-radius:10px;font:14px/1.45 system-ui,Segoe UI,sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.65);text-align:left';
+      const h = document.createElement('div'); h.style.cssText = 'font-weight:700;font-size:15px;margin-bottom:6px';
+      h.textContent = 'Your saved game could not be opened';
+      const p = document.createElement('div');
+      p.textContent = 'Another program is using port ' + portNote + ', which Mojiworld needs to reach the save on this PC, so this session started without it. Progress made now is kept apart from your usual save. To get your save back: quit, close the other program (or restart the PC), then start Mojiworld again.';
+      const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;margin-top:10px';
+      const mk = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.style.cssText = 'font:inherit;font-weight:700;padding:6px 14px;border-radius:6px;border:1px solid #e0324f;background:#541c26;color:#fbe9d0;cursor:pointer'; b.addEventListener('click', fn); return b; };
+      row.append(mk('Quit now', () => { try { window.close(); } catch (e) {} }), mk('Play anyway', () => { try { box.remove(); } catch (e) {} }));
+      box.append(h, p, row);
+      (document.body || document.documentElement).appendChild(box);
+    } catch (e) {}
+  };
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', showPortNote, { once: true }); else showPortNote();
 }
 
 // Auto-pop Steam's floating gamepad keyboard whenever a typeable field takes
