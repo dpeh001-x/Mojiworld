@@ -125,12 +125,12 @@ try {
   const g = await page.evaluate(async () => {
     for (const k of ['q_boss_sundered_smith', 'q_last_step', 'q_lyra_last', 'q_boss_aetherion']) { delete player.quests.completed[k]; delete player.quests.active[k]; }
     if (game.bossDefeated) { delete game.bossDefeated.lastStep; } if (game.bestiary) delete game.bestiary._boss_miraFallen;
-    loadMap('sundered_forge'); game.paused = false; await __steps(5); const closed = (game.portals || []).filter((p) => p && p.dest === 'lastStep').length;
+    loadMap('sundered_forge'); game.paused = false; await __steps(5); const closed = (game.portals || []).filter((p) => p && p.dest === 'lastStep').length, shut = !_lxLastStepDoorOpen();   // release21: the door stands, shut
     player.quests.active.q_lyra_last = { progress: 0 };
-    loadMap('sundered_forge'); game.paused = false; await __steps(5); const withQuest = (game.portals || []).filter((p) => p && p.dest === 'lastStep').length;
-    delete player.quests.active.q_lyra_last; return { closed, withQuest };
+    loadMap('sundered_forge'); game.paused = false; await __steps(5); const withQuest = (game.portals || []).filter((p) => p && p.dest === 'lastStep').length, openQ = _lxLastStepDoorOpen();
+    delete player.quests.active.q_lyra_last; return { closed, shut, withQuest, openQ };
   });
-  ok('[7] a hero with The Tear VI in hand keeps the Forge\'s door to the Last Step (and it stays shut without it)', g.closed === 0 && g.withQuest >= 1, g);
+  ok('[7] a hero with The Tear VI in hand keeps the Forge\'s door to the Last Step (and it stays shut without it)', g.closed === 1 && g.shut && g.withQuest >= 1 && g.openQ, g);   // release21: it stands but is shut without it
   // [8]
   const h = await page.evaluate(async () => {
     loadMap('zod_gemini'); game.paused = false; await __steps(5);

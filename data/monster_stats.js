@@ -67,7 +67,7 @@ window.LX_MONSTER_STATS = {
   gummy:                          { lv: 14, hp:     1382, atk:   44, def:  3, exp:     37, coin:    94 },
   cookie:                         { lv: 18, hp:    2273, atk:   72, def:  6, exp:     62, coin:   155 },
   frog:                           { lv: 20, hp:    1745, atk:   75, def:  6, exp:     45, coin:   120 },
-  axolotl:                        { lv: 28, hp:    3207, atk:  163, def: 13, exp:     85, coin:   219 },
+  axolotl:                        { lv: 20, hp:    1850, atk:   78, def: 10, exp:     49, coin:   127 },   // v0.30.1759 release21: was lv 28 / 3207 / 163 / 13 / 85 / 219 - the Bubblegum Swamp's Lv 20 band (per user: "lower that one axolotl"); exp / coin on the regular rates
   coralImp:                       { lv: 23, hp:      1112, atk:  105, def:   9, exp:     31, coin:    76 },
   pearlSprite:                    { lv: 28, hp:     1368, atk:   101, def:   9, exp:     37, coin:    93 },
   nimbusFox:                      { lv: 47, hp:    15890, atk:  595, def: 40, exp:    425, coin:   1083 },

@@ -42,11 +42,11 @@ try {
     const doors = () => (game.portals || []).filter((p) => p && p.dest === 'lastStep').length;
     fresh(); player.level = 50; game.bossDefeated = game.bossDefeated || {}; game.bestiary = game.bestiary || {}; delete game.bossDefeated.lastStep; game.bestiary._boss_miraFallen = 0;
     loadMap('sundered_forge', 300); await sleep(800);
-    out.door = { before: doors(), staticDoor: !!(MAPS.sundered_forge.portals || []).find((p) => p.dest === 'lastStep') };
+    out.door = { before: doors(), shut: !_lxLastStepDoorOpen(), staticDoor: !!(MAPS.sundered_forge.portals || []).find((p) => p.dest === 'lastStep') };   // release21: the door stands, shut
     const lvUp = window._maybeLevelUp; window._maybeLevelUp = function () {};
     player.quests.active.q_boss_sundered_smith = { targetCount: 1, rewardScale: 1 }; player._pqStagePaid = {}; player._pqChainRuns = 0;
     try { _completeQuest('q_boss_sundered_smith'); } catch (e) { out.door.err = String(e.message).slice(0, 100); } finally { window._maybeLevelUp = lvUp; }
-    out.door.liveAfterCompletion = doors();
+    out.door.liveAfterCompletion = doors(); out.door.openAfter = _lxLastStepDoorOpen();
     loadMap('lastStep', 300); await sleep(500); loadMap('sundered_forge', 300); await sleep(800);
     out.door.afterReload = doors();
     // an old save past the copy keeps the door without the Smith quest
@@ -96,8 +96,8 @@ try {
   check(R.pre.lyraVI.indexOf('q_lyra_forge') >= 0 && R.pre.lyraVI.indexOf('q_boss_sundered_smith') >= 0, 'Lyra VI needs Lyra V and the Smith', J(R.pre.lyraVI));
   check(R.open.lyraVI_noSmith === false && R.open.lyraVI_smith === true, 'Lyra VI stays shut until The Forge That Broke is done, then opens', J(R.open));
   check(R.pre.barnabyI.indexOf('q_visit_lavaCavern') >= 0 && R.pre.barnabyI.indexOf('q_distorted_portal') >= 0 && R.open.barnabyI_noPortal === false && R.open.barnabyI_portal === true, 'Barnaby I needs the portal as well as the errand, and opens once both are done', J([R.pre.barnabyI, R.open]));
-  check(R.door.staticDoor === true && R.door.before === 0, "the Forge's far door to the Last Step is not in the live map until the Smith is done (it is still in the map data)", J(R.door));
-  check(R.door.liveAfterCompletion === 1 && R.door.afterReload === 1, 'finishing The Forge That Broke in the Forge opens the door at once, and it is there on the next visit', J(R.door));
+  check(R.door.staticDoor === true && R.door.before === 1 && R.door.shut === true, "the Forge's far door to the Last Step stands but is shut until the Smith is done (release21, per user: it was hidden)", J(R.door));
+  check(R.door.liveAfterCompletion === 1 && R.door.openAfter === true && R.door.afterReload === 1, 'finishing The Forge That Broke in the Forge opens the door at once, and it is there on the next visit', J(R.door));
   check(R.door.oldSave === 1, 'a save already past the Last Step keeps the door', J(R.door));
   check(R.film.ivOnly === false && R.film.ivAndMain === true && R.film.mainOnly === true && R.film.none === true, "the Smith's ashes film is held back on Barnaby IV's kill and plays on The Forge That Broke's (or any kill with no Barnaby IV pending)", J(R.film));
   check(/waits on Recover the Forge-Key/.test(R.hand.lv40) && /Brok/.test(R.hand.lv40) && !/opens at Lv/.test(R.hand.lv40), "the portal's hand-off at Lv 40 names what the Smith waits on (no 'opens at Lv 45' with nobody to see)", R.hand.lv40);

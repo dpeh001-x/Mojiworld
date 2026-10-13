@@ -96,7 +96,7 @@ try {
   const Q = await page.evaluate(() => {
     const { fresh } = window._r17; const C = _QUEST_STORY_CHAIN, out = {};
     const ACT1 = ['q_act1_waking', 'q_act1_sleepers', 'q_act1_quiet', 'q_act1_recipe', 'q_act1_name', 'q_act1_firstword'], ROAD = [1, 2, 3, 4, 5, 6, 7].map((n) => 'q_road_' + n);
-    out.idx = ['q_four_captains', 'q_carried_1', 'q_inner_dim_trial', 'q_carried_2', 'q_carried_3', 'q_distorted_portal'].map((id) => C.indexOf(id));
+    out.idx = ['q_four_captains', 'q_carried_1', 'q_inner_dim_trial', 'q_carried_2', 'q_distorted_portal', 'q_carried_3'].map((id) => C.indexOf(id));   // release21: III is Lv 49, after the Smith
     const lv = C.map((id) => (QUESTS[id] || {}).levelReq || 1); const lo = out.idx[0], hi = out.idx[out.idx.length - 1];
     out.outOfOrder = C.filter((id, i) => i > lo && i <= hi && lv[i] < lv[i - 1]);   // only the stretch this release orders (later acts have their own rules)
     fresh(15); for (const id of ACT1.concat(ROAD, ['q_four_captains'])) player.quests.completed[id] = 1; out.next15 = _nextStoryBeat();
@@ -110,7 +110,7 @@ try {
     game.qnav = null; game.qnavPins = [];
     return out;
   });
-  ok('[2a] the story chain holds the Carried Things in level order: Four Captains, I, the trial, II, III, the Distorted Portal', Q.idx.every((v, i) => v >= 0 && (i === 0 || v > Q.idx[i - 1])) && Q.outOfOrder.length === 0, Q);
+  ok('[2a] the story chain holds the Carried Things in level order: Four Captains, I, the trial, II, the Distorted Portal, III (Lv 49 since release21)', Q.idx.every((v, i) => v >= 0 && (i === 0 || v > Q.idx[i - 1])) && Q.outOfOrder.length === 0, Q);
   ok('[2b] Next after the Four Captains (Lv 15) is "I · What the Town Carries", not the Lv 20 trial; II follows the trial', Q.next15 === 'q_carried_1' && Q.next24 === 'q_carried_2', { next15: Q.next15, next24: Q.next24 });
   ok('[2c] the critical Four Captains still leads Next when it is open', Q.next15noCap === 'q_four_captains', Q.next15noCap);
   ok('[2d] the compass ranks the critical trial above the chapter, takes over from an auto-picked chapter, keeps a pinned one', Q.nav.trial >= 0 && Q.nav.carried > Q.nav.trial && Q.nav.auto === 'q_inner_dim_trial' && Q.nav.pinned === 'q_carried_1', Q.nav);
@@ -212,7 +212,7 @@ try {
   await page.evaluate(async () => { const { fresh, go, sleep } = window._r17; fresh(9); await go('tidalLagoon', 1250); player.x = 1307 - player.w / 2; player.y = 480 - player.h - 1; player.vx = 0; await sleep(500); });
   await press(page, 'ArrowUp'); await page.waitForFunction(() => { const d = document.getElementById('dialog'); return d && d.style.display === 'block' && !d.classList.contains('typing'); }, null, { timeout: 15000 }).catch(() => {}); await page.waitForTimeout(300);
   const DR = await page.evaluate(() => { const t = ((document.getElementById('dialog') || {}).textContent || '').replace(/\s+/g, ' '); window._r17.clear(); return { t: t.slice(0, 240), map: game.currentMap }; });
-  ok('[10d] the Gelwater Grotto door recommends Lv 8+ (The Brimming Tyrant opens at 8; it said 10+)', /Recommended level: 8\+/.test(DR.t), DR);
+  ok('[10d] the Gelwater Grotto door recommends Lv 9+ (the road\'s King fight opens at 9, The Brimming Tyrant at 12 since release21; it said 10+)', /Recommended level: 9\+/.test(DR.t), DR);
   // ---- [10c] the job pick (real clicks: arm, then confirm) toasts "MASTER path unlocks" once
   await page.evaluate(async () => { const { fresh, go } = window._r17; fresh(20); await go('forest', 300); player.cls = 'warrior'; player.job = null; player.talents = {};
     window._r17.mt = 0; const _st1 = window.showToast; window.showToast = function (t) { if (/MASTER path unlocks/.test(String(t))) window._r17.mt++; return _st1.apply(this, arguments); }; openAdvancement(); });
