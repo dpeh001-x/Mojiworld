@@ -185,7 +185,8 @@ try {
     out.repeat = { used: Object.keys(a.used || {}).length, says: __toasts.filter((t) => /stroke did not end/.test(t)).length };
     // abandon and resume: the stage, the marks used and the order are banked and come back
     a = await setup('q_road_2'); await use('l1'); for (let r = 0; r < 8 && game._lxFight; r++) { _lxFightTick(20000); for (const mm of game._lxFight ? game._lxFight.mobs.slice() : []) if (game.monsters.indexOf(mm) >= 0) { mm.currentHp = 0; try { killMonster(mm); } catch (e) {} } await wait(80); }
-    const before = { used: Object.keys(a.used || {}).join(), seq: a.seq, progress: a.progress }; abandonQuest('q_road_2', true); const gone = !player.quests.active.q_road_2; acceptQuest('q_road_2', true); const b = player.quests.active.q_road_2;
+    const before = { used: Object.keys(a.used || {}).join(), seq: a.seq, progress: a.progress }; const _wasCrit = QUESTS.q_road_2.critical; QUESTS.q_road_2.critical = false; abandonQuest('q_road_2', true); QUESTS.q_road_2.critical = _wasCrit;   // the Road is critical now (per user 2026-10-13): it cannot be abandoned, so the bank is tested with the flag lifted
+    const gone = !player.quests.active.q_road_2; acceptQuest('q_road_2', true); const b = player.quests.active.q_road_2;
     out.resume = { before, gone, after: b && { used: Object.keys(b.used || {}).join(), seq: b.seq, progress: b.progress, stage: b.stage | 0 } };
     // the art: every glyph draws, lit and unlit, without throwing
     const cv = document.createElement('canvas'); cv.width = 300; cv.height = 300; const c2 = cv.getContext('2d'); out.art = []; for (const g of Object.keys(_LX_QM_ART)) for (const lit of [false, true]) { try { c2.save(); c2.translate(150, 250); _LX_QM_ART[g](c2, 1.3, { x: 100, rank: 2 }, lit, '#c9a6ff'); c2.restore(); } catch (e) { out.art.push(g + ':' + e.message.slice(0, 40)); } }

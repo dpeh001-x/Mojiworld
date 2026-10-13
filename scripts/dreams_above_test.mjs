@@ -45,7 +45,7 @@ try {
     out.gravPre = [].concat(G.prereq);
     const others = ['q_boss_aetherion', 'q_boss_aries', 'q_zodiac_twelve', 'q_boss_sundered_smith', 'q_hourglass_5', 'q_long_dawn_2'];
     done(...others); out.gateWithout = _lxPrereqMet(G); done(...others, 'q_long_dawn_3'); out.gateWith = _lxPrereqMet(G);
-    done('q_long_dawn_2'); player.level = 79; out.at79 = acceptQuest('q_long_dawn_3', true); player.level = 80; out.at80 = acceptQuest('q_long_dawn_3', true);
+    done('q_long_dawn_2', 'q_zodiac_twelve'); player.level = 79; out.at79 = acceptQuest('q_long_dawn_3', true); player.level = 80; out.at80 = acceptQuest('q_long_dawn_3', true);
     _questTalkTo('Hera'); out.afterTalk = { ready: !!(player.quests.active.q_long_dawn_3 || {}).readyToHandIn, prog: (player.quests.active.q_long_dawn_3 || {}).progress };
     out.chartBeat = await readBeat();
     _completeQuest('q_long_dawn_3'); out.ledgerBeat = await readBeat(); out.completed = !!player.quests.completed.q_long_dawn_3;
@@ -86,7 +86,7 @@ try {
   const src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8');
   const BAD = /Guguma|playground|entertain|extraterrestrial|outsider|alien|creator|\bgame\b/i;
   const ledger = R.ledgerBeat.map((b) => b.t).join('\n'), chart = R.chartBeat.map((b) => b.t).join('\n'), told = chart + '\n' + ledger + '\n' + R.endUp + '\n' + R.endDown;
-  ok('[9] The Long Dawn III: Lv 80, after Long Dawn II, Old Arlen gives it, Hera is the one door; it sits between Long Dawn II and the Petition in the chain', R.q.lv === 80 && R.q.pre === 'q_long_dawn_2' && R.q.giver === 'Old Arlen' && R.q.kind === 'talk' && R.q.story && R.q.talk.join() === 'Hera' && R.chain[0] >= 0 && R.chain[1] === R.chain[0] + 1 && R.chain[2] > R.chain[1], [R.q.lv, R.chain]);
+  ok('[9] The Long Dawn III: Lv 80, after Long Dawn II, Old Arlen gives it, Hera is the one door; it sits between Long Dawn II and the Petition in the chain', R.q.lv === 80 && [].concat(R.q.pre).join() === 'q_long_dawn_2,q_zodiac_twelve' && R.q.giver === 'Old Arlen' && R.q.kind === 'talk' && R.q.story && R.q.talk.join() === 'Hera' && R.chain[0] >= 0 && R.chain[1] === R.chain[0] + 2 && R.chain[2] > R.chain[1], [R.q.lv, R.chain]);   // Long Dawn II, the Twelve Stars (per user 2026-10-13), then the Dreams
   ok('[9] the Petition waits for it: it is in the Weight-Bearer\'s prerequisites and the finale stays shut without it', R.gravPre.includes('q_long_dawn_3') && R.gateWithout === false && R.gateWith === true, [R.gravPre.length, R.gateWithout, R.gateWith]);
   ok('[9] it opens at Lv 80 and not before; Hera\'s word completes the goal (hand it in to Arlen)', R.at79 === false && R.at80 === true && R.afterTalk.ready === true, [R.at79, R.at80, R.afterTalk]);
   ok('[9] Hera shows the first chart: twelve small lights, no shapes, "dreams, rising" in the margin, in her own hand', R.chartBeat.length === 2 && R.chartBeat.every((b) => b.who === 'Hera') && /Stars do not choose their shape/.test(chart) && /dreams, rising/.test(chart) && /Twelve small lights and no shapes/.test(chart), R.chartBeat.map((b) => b.who));

@@ -26,7 +26,7 @@ checks.push(['he is what every heart fears most and turns from', /What every hea
 checks.push(['the weight was placed on him; he carries it', /The weight was placed\. I carry it\./.test(gate)]);
 checks.push(['he hears the word spoken above him, and says so himself', /Be still\.\.\. Did you hear that\? No\. You would not\. Something has spoken, far above the Singularity\.\.\. and I am always the last to hear it\./.test(gate)]);
 checks.push(['the gate beat is all his own voice: no narrator line, nothing in the third person (per user)', !gate.includes('*') && !/\bHe (goes|pauses|laughs|tilts|nods|looks)\b/.test(gate)]);
-checks.push(['the Nyx cadence: it matters not who you are', /It matters not who you are\./.test(gate)]);
+checks.push(['the Nyx cadence: I have never stopped anyone (the last page, rewritten 2026-10-13)', /I have never stopped anyone, foreigner\./.test(gate) && /That is where it begins\./.test(gate)]);
 checks.push(['he closes on the user\'s own line', /The void awaits all\.\.\. The void awaits you\.\.\./.test(gate)]);
 checks.push(['the old tourniquet and "mine to hold" lines are gone', !/tourniquet|mine to hold/.test(gate)]);
 checks.push(['nothing names who holds him (subtle, per user)', !/Sovereign|Watcher|Amnesiac|Interference/i.test(gate)]);

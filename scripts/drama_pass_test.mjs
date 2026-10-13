@@ -49,9 +49,9 @@ try {
   });
   ok('gravitos_reason is three pages, each within the 60-word line cap', R.reasonPages === 3 && R.reasonWords.every((n) => n <= 60) && R.variantWords.every((n) => n <= 60), [R.reasonWords, R.variantWords]);
   ok('the opener answers the gate: wake = vanity', /vanity/.test(R.wake) && /To wake them/.test(R.wake));
-  ok('the opener answers the gate: home = held is not home', /Held is not home/.test(R.home));
-  ok('the opener answers the gate: unsure = a step before the knowing', /step taken before the knowing/.test(R.unsure));
-  ok('the opener answers the gate: silence (and no answer) = your hands answered', /your hands answered/.test(R.silence) && /your hands answered/.test(R.none));
+  ok('the opener answers the gate: home = longing, how every sleeper woke and broke', /longing/.test(R.home) && /thief/.test(R.home));
+  ok('the opener answers the gate: unsure = an older answer, no better', /older and no better/.test(R.unsure) && /I would do it again/.test(R.unsure));
+  ok('the opener answers the gate: silence (and no answer) = your hands answered', /Your hands answered/.test(R.silence) && /Your hands answered/.test(R.none));
   ok('a late answer given to Mira wins over the gate answer', /vanity/.test(R.late));
   ok('he names what the player carried (the Hourglass four) and the three notes; the world was not allowed to dream', /tongs, the chart, the letter, the sermon/.test(R.last) && /Three notes/.test(R.last) && /It was not allowed to\./.test(R.mid) && !/\b(years|decades)\b/.test(R.mid + R.last), [R.mid, R.last].join(' | ').slice(0, 120));
   ok('the beat plays, runs its continuation once on close, and a repeat answers false', R.played && R.first === true && R.called === 1 && R.again === false && R.calledAfter === 1, { played: R.played, first: R.first, called: R.called, again: R.again });

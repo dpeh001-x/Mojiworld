@@ -15,9 +15,9 @@ const PAGE = process.argv[2] || FILE;
 const PORT = Number(process.argv[3] || process.env.PORT || 11267);
 const checks = [];
 const html = readFileSync(path.join(ROOT, PAGE), 'utf8');
-const CLIPS = [1, 2, 3].map((n) => `audio/story/gravitos_gate_${n}.mp3`);
+const CLIPS = [1, 2].map((n) => `audio/story/gravitos_gate_${n}.mp3`);
 const sizes = CLIPS.map((c) => (existsSync(path.join(ROOT, c)) ? statSync(path.join(ROOT, c)).size : 0));
-checks.push(['the three reads ship', sizes.every((b) => b > 150000 && b < 1200000), sizes.map((b) => Math.round(b / 1024) + ' KB').join(' / ')]);
+checks.push(['the two reads ship (stanza 3 waits for a new one)', sizes.every((b) => b > 150000 && b < 1200000), sizes.map((b) => Math.round(b / 1024) + ' KB').join(' / ')]);
 let durs = null;
 try { durs = CLIPS.map((c) => Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path.join(ROOT, c)]).toString().trim())); } catch (e) { durs = null; }
 checks.push(['each is a whole stanza read (25-50 s)', durs === null || durs.every((d) => d >= 25 && d <= 50), durs ? durs.map((d) => d.toFixed(1) + ' s').join(' / ') : 'ffprobe unavailable, skipped']);
@@ -50,7 +50,7 @@ const r = await page.evaluate(async () => {
   player._storyBeatsSeen = {};
   const duck0 = ev('_vidDuckDepth');
   _playStoryBeat('gravitos_gate'); await wait(1500);
-  out.prewarmed = [1, 2, 3].every((n) => !!el(n));
+  out.prewarmed = [1, 2].every((n) => !!el(n));
   out.s1 = live(1); out.s1src = el(1) ? el(1).src : '';
   out.master = ev('_SFX_MASTER_VOL'); out.base = el(1) ? el(1)._sfxBase : -1; out.vol = el(1) ? el(1).volume : -1;
   out.duckedDuring = ev('_vidDuckDepth') > duck0;
@@ -59,24 +59,24 @@ const r = await page.evaluate(async () => {
   _setSfxMasterVolume(0.3); out.volAfterSlider = el(2).volume; _setSfxMasterVolume(out.master);
   _lxSyncSfxMuted(true); out.mutedAfterToggle = el(2).muted; _lxSyncSfxMuted(false); out.unmutedAfterToggle = !el(2).muted;
   ov.click(); await wait(1500);
-  out.s2stopped = el(2).paused; out.s3 = live(3);
+  out.s2stopped = el(2).paused; out.s3 = !!el(3) && live(3);
   ov.click(); await wait(800);
-  out.closed = !ov.classList.contains('on'); out.s3stopped = el(3).paused; out.duckReleased = ev('_vidDuckDepth') === duck0;
+  out.closed = !ov.classList.contains('on'); out.s3stopped = !el(3) || el(3).paused; out.duckReleased = ev('_vidDuckDepth') === duck0;
   _playStoryBeat({ mode: 'dialog', stanzas: [{ speaker: 'Nobody', text: 'A beat with no voice of its own.' }] }); await wait(700);
-  out.silentBeat = [1, 2, 3].every((n) => el(n).paused) && ev('_vidDuckDepth') === duck0;
+  out.silentBeat = [1, 2].every((n) => el(n).paused) && ev('_vidDuckDepth') === duck0;
   for (let i = 0; i < 3 && ov.classList.contains('on'); i++) { ov.click(); await wait(300); }
   return out;
 });
 await browser.close(); server.kill();
 
-checks.push(['opening the beat buffers all three reads up front', r.prewarmed]);
+checks.push(['opening the beat buffers both reads up front', r.prewarmed]);
 checks.push(['stanza 1 is read aloud as it opens', r.s1 && /gravitos_gate_1\.mp3$/.test(r.s1src), r.s1src.slice(-40)]);
 checks.push(['the read sits on the SFX volume (its base times the master)', r.base >= 0.8 && Math.abs(r.vol - r.base * r.master) < 0.01, `${r.vol.toFixed(3)} = ${r.base} x ${r.master}`]);
 checks.push(['the music ducks under the read', r.duckedDuring]);
 checks.push(['advancing stops stanza 1 and reads stanza 2', r.s1stopped && r.s2]);
 checks.push(['the SFX slider reaches a read that is already playing', Math.abs(r.volAfterSlider - r.base * 0.3) < 0.01, r.volAfterSlider.toFixed(3)]);
 checks.push(['the mute toggle reaches it too, both ways', r.mutedAfterToggle && r.unmutedAfterToggle]);
-checks.push(['advancing again stops stanza 2 and reads stanza 3', r.s2stopped && r.s3]);
+checks.push(['advancing again stops stanza 2; stanza 3 is text only until it is re-recorded', r.s2stopped && !r.s3]);
 checks.push(['closing the beat stops the read and hands the music back', r.closed && r.s3stopped && r.duckReleased]);
 checks.push(['a beat with no voice stays silent and leaves the music alone', r.silentBeat]);
 checks.push(['no failed request for a read', bad.length === 0, bad.slice(0, 2).join(' | ')]);
