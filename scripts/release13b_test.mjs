@@ -111,7 +111,7 @@ try {
   ok('4. after the ending his hands are bare on both pages, the rest of the page unchanged', R.dawn && has(b1.craft, 'with one bare hand') && !/glove/i.test(b1.craft.split('\n')[0]) && b1.madeOpt && has(b1.made, 'His bare hands go still.') && has(b1.made, 'He turns one bare hand over and studies the palm.') && !/glove/i.test(b1.made) && has(b1.made, 'Iron would have told me no.'), b1);
   const Q = R.q;
   ok('5. The Twelve Houses has a navigator destination: the Zodiac Sanctum', Q.twelveD && Q.twelveD.map === 'zodiacHall' && Q.twelveD.verb === 'Enter', Q.twelveD);
-  ok('5. ...and a tracker line (9 Houses left, Zodiac Sanctum)', has(Q.twelveG, '9 Stars left') && has(Q.twelveG, Q.zh), Q.twelveG);
+  ok('5. ...and a tracker line (9 left, the next star, the Sanctum: the HUD row is narrow, v0.30.1750)', has(Q.twelveG, '9 left') && has(Q.twelveG, 'next Cancer') && has(Q.twelveG, 'Sanctum'), Q.twelveG);
   ok('5. Lyra\'s cut: the tracker names Elder Arlen and his map', has(Q.cutG, Q.arlen) && has(Q.cutG, Q.frMap), { g: Q.cutG, arlen: Q.arlen, map: Q.frMap });
   ok('5. the Master Conductor\'s quests: the tracker says "Warp with Milo"', Q.apG === 'Warp with Milo' && Q.finG === 'Warp with Milo', [Q.apG, Q.finG]);
   ok('5. ...and the navigator pins Milo (Warp with)', Q.finD && Q.finD.who === 'Milo' && Q.finD.verb === 'Warp with' && Q.apD && Q.apD.who === 'Milo', [Q.finD, Q.apD]);

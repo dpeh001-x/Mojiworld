@@ -42,7 +42,7 @@ const PROBES = [
  "A stack of clicking bricks with a sword for o",
  "feathers go on the back so the arrow flies st",
  "I watched. The big archers at the Reach let m",
- "s said it in ages beyond measure. Hop in, champ.",
+ "s said it since the bell stopped. Hop in, champ.",
  "alley smoke and rumour. The empire will breat",
  "A new name for the ledger. Tell me what you h",
  "Moji is older than its name. The Bastion rose",
