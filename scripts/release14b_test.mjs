@@ -123,9 +123,9 @@ try {
   await ev(B, ({ G, AE }) => { const byUid = (u) => game.monsters.find((q) => q && q.uid === u); const g = byUid(G); g.currentHp = 0; killMonster(g); }, { G, AE });
   await sleep(600);
   await ev(B, (AE) => { const ae = game.monsters.find((q) => q && q.uid === AE); ae.currentHp = 0; killMonster(ae); }, AE);
-  const end = await until(A, (t) => { const v = window.__rec.filter((r) => r[2] >= t && (r[0] === 'ending' || r[0] === 'film' || r[0] === 'card')).map((r) => r[1]); return { ok: v.includes('gravitos_defeat') && v.includes('aetherion_release') && v.includes('I WAS THE ANSWER ONCE.'), v }; }, t2, 9000);
+  const end = await until(A, (t) => { const v = window.__rec.filter((r) => r[2] >= t && (r[0] === 'ending' || r[0] === 'film' || r[0] === 'card')).map((r) => r[1]); return { ok: v.includes('gravitos_defeat') && v.includes('aetherion_release') && v.includes('I WAS THE CUT ONCE.'), v }; }, t2, 9000);
   ok('Ann (holding q_boss_gravitos) gets Gravitos\'s ending chain on Bob\'s kill (was: nothing)', end.includes('gravitos_defeat'), end);
-  ok('Ann gets Aetherion\'s release film and his last words card (was: nothing)', end.includes('aetherion_release') && end.includes('I WAS THE ANSWER ONCE.'), end);
+  ok('Ann gets Aetherion\'s release film and his last words card (was: nothing)', end.includes('aetherion_release') && end.includes('I WAS THE CUT ONCE.'), end);
 
   // ---------------- SCENES: a zodiac and the Smith, killed by Bob with Ann beside him ----------------
   const ZT = await ev(B, () => Object.keys(monsterTypes).find((k) => monsterTypes[k] && monsterTypes[k].zodiacBoss && /aries/.test(k)) || Object.keys(monsterTypes).find((k) => monsterTypes[k] && monsterTypes[k].zodiacBoss));

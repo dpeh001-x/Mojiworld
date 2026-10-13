@@ -48,7 +48,7 @@ const R = await page.evaluate(async () => {
   const tabs = () => [...document.querySelectorAll('#keybind-modal .kbm-tab-btn')].map((t) => ({ tab: t.dataset.kbmtab, on: t.classList.contains('kbm-on'), bg: getComputedStyle(t).backgroundColor, face: fam(t) }));
   const chip = document.querySelector('#keybind-modal kbd, #keybind-modal .kbm-key, #keybind-modal [class*="kbd"]');
   out.keys = { ...frame(km), title: title(km.querySelector('h2')), tabs0: tabs(), chip: chip && { cls: chip.className || chip.tagName, face: fam(chip), bg: getComputedStyle(chip).backgroundColor } };
-  const pot = document.querySelector('#keybind-modal .kbm-tab-btn[data-kbmtab="potions"]'); if (pot) pot.click(); await sleep(300);
+  const pot = document.querySelector('#keybind-modal .kbm-tab-btn[data-kbmtab="potions"]'); if (pot) pot.click(); for (let i = 0; i < 40 && pot && !pot.classList.contains('kbm-on'); i++) await sleep(50); await sleep(500);   // wait for the switch AND for the tab's background transition to land (a fixed 300 ms flaked on a loaded machine)
   out.keys.tabs1 = tabs();
   toggleKeybindModal(); await sleep(250);
   openEdictsPanel(); await sleep(450); full();

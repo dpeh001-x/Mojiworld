@@ -40,7 +40,7 @@ try {
     // LEFTOVERS
     fresh('rogue', 30); loadMap('town', 300); await W8(900); try { closeAllModals(); } catch (e) {}
     const wrongCls = Object.entries(QUESTS).find(([id, q]) => q.cls === 'warrior' && (q.levelReq || 1) <= 30 && !q.prereq);
-    const overLv = Object.entries(QUESTS).find(([id, q]) => !q.cls && !q.prereq && q.kind !== 'boss' && (q.levelReq || 1) >= 60 && q.name);
+    const overLv = Object.entries(QUESTS).find(([id, q]) => !q.cls && !q.prereq && !q.twelveGate && q.kind !== 'boss' && (q.levelReq || 1) >= 60 && q.name);   // not a twelveGate quest: those stay out of the Journal until Aetherion falls
     player.quests.unlocked[wrongCls[0]] = true; player.quests.unlocked[overLv[0]] = true;
     const jt = await journalIds(); const guide = _qnavGuideList();
     toggleQuestJournal(); await W8(250); { const tb = [...document.querySelectorAll('#quest-modal [data-qtab]')].find((t) => t.dataset.qtab === 'available'); if (tb) { tb.click(); await W8(200); } }

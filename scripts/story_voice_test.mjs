@@ -34,7 +34,7 @@ const browser = await chromium.launch({ channel: 'msedge', headless: true, args:
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errs = []; const bad = [];
 page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 120)));
-page.on('requestfailed', (q) => { if (/audio\/story\//.test(q.url())) bad.push('failed ' + q.url()); });
+page.on('requestfailed', (q) => { if (/audio\/story\//.test(q.url()) && !/ERR_ABORTED/.test((q.failure() || {}).errorText || '')) bad.push('failed ' + q.url() + ' ' + ((q.failure() || {}).errorText || ''));   /* a read the player's click cuts short is aborted, not failed */ });
 page.on('response', (q) => { if (/audio\/story\//.test(q.url()) && q.status() >= 400) bad.push(q.status() + ' ' + q.url()); });
 await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
 await page.goto(`http://localhost:${PORT}/${PAGE}`, { waitUntil: 'load', timeout: 60000 });

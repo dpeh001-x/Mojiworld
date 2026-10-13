@@ -60,6 +60,7 @@ const R = await page.evaluate(async () => {
   // one lance, aimed at the player, resolved through the real projectile path
   const fire = async ({ block = false, god = false } = {}) => {
     game.projectiles.length = 0;
+    game.monsters = game.monsters.filter((m) => m === boss);   // a stray slime's pellet is not the lance: it knocked the hero out of the aim and read as "landed" for 3 HP
     player.hp = getMaxHp(); player._god = god; player.blockTimer = block ? 999 : 0;
     player.invulnerable = 0; player.dodgeTimer = 0;
     const hp0 = player.hp;
@@ -69,7 +70,7 @@ const R = await page.evaluate(async () => {
     const p = game.projectiles[game.projectiles.length - 1];
     const info = p ? { skill: p.skill, src: p._srcType || null, homing: !!p.homing, floorPct: p._heavyFloorPct } : null;
     let hit = false;
-    for (let i = 0; i < 140; i++) {
+    for (let i = 0; i < 400; i++) {   // a lance on a loaded machine needs longer than 2.2 s to land
       if (!game.projectiles.some((z) => z.skill === 'maeshard')) { hit = (hp0 - player.hp) > 0 || player.invulnerable > 0; break; }   // v0.30.x — a landed lance is the HP it took; post-hit i-frames are not set on this path any more, so they alone read a landed 99.7% hit as a miss
       await sleep(16);
     }

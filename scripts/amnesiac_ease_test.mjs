@@ -25,7 +25,7 @@ try {
     const W8 = (ms) => new Promise((res) => setTimeout(res, ms));
     try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
-    player._storyBeatsSeen = new Proxy({}, { get: (t, k) => k !== 'siblings_reunion' });   // release13: the before-reunion pages player._tutorialSeen = true; window._perfTick = () => {};
+    player._storyBeatsSeen = new Proxy({}, { get: (t, k) => k !== 'siblings_reunion' }); player._tutorialSeen = true; window._perfTick = () => {};   // release13: the before-reunion pages
     applyClass('warrior'); player.level = 60; player.quests = { active: {}, completed: {}, unlocked: {} }; try { _ensureQuests(); tickQuestUnlocks(); } catch (e) {}
     try { closeAllModals(); } catch (e) {}
     loadMap('town', 300); await W8(1200); try { closeAllModals(); } catch (e) {} game.paused = false;
@@ -40,6 +40,7 @@ try {
     out.top = labels(); await click(/Talk/); out.talk = labels();
     await click(/Who are you\?/); out.who1 = page();
     await click(/Go on/); out.who2 = page();
+    game.bestiary = game.bestiary || {}; game.bestiary.aetherion = 1;   // the Twelve are told only once Aetherion has fallen (_lxTwelveKnown)
     await click(/Why was I sent here\?/); out.who3 = page();
     await click(/Back/); out.backTo2 = page();
     await click(/A door\? To what\?/); out.reset = page();
@@ -72,7 +73,7 @@ try {
   ok('Who are you? opens on one short page: the lost name and the gate, none of the deep lore', R.who1.words <= 45 && /I had a name once/.test(R.who1.text) && /at a gate/.test(R.who1.text) && !/interference|nightmare|door|Twelve|watcher|champions|dream/i.test(R.who1.text), R.who1);
   ok('"Go on." steps one layer down: the door that opens only inward, a page of its own, with the offer to unmake', R.who2.words <= 60 && /opens only inward/.test(R.who2.text) && /start again/.test(R.who2.text) && !/Twelve|watcher|champions/.test(R.who2.text)
     && ['A door? To what?', 'Why was I sent here?', 'Back away slowly'].every((l) => R.who2.labels.includes(l)), R.who2);
-  ok('only on asking does he say why the watcher sent you and who the Twelve are, and Back returns to the door', /watcher/.test(R.who3.text) && /Twelve champions/.test(R.who3.text) && /stuck mid-question/.test(R.who3.text) && /opens only inward/.test(R.backTo2.text), { who3: R.who3.words, back: R.backTo2.text.slice(0, 50) });
+  ok('only on asking does he say why the watcher sent you and who the Twelve are, and Back returns to the door', /watcher/.test(R.who3.text) && /Twelve stars fell from the sky/.test(R.who3.text) && /stuck mid-question/.test(R.who3.text) && /opens only inward/.test(R.backTo2.text), { who3: R.who3.words, back: R.backTo2.text.slice(0, 50) });
   ok('the unmake offer is still two taps from Who are you? ("A door? To what?" -> the reset page with Unmake me)', /To the beginning/.test(R.reset.text) && R.unmakeRow, R.reset.labels);
   ok('Back from the first page returns to the Talk menu', (R.whoBack || []).some((l) => /What are you struggling to remember\?/.test(l)), R.whoBack);
   ok('"What are you struggling to remember?" answers: his family, and a noise he cannot make out - no sister, no song named', /My family/.test(R.strug.text) && /noise/.test(R.strug.text) && /make it out|slips/.test(R.strug.text) && !/sister|brother|song/i.test(R.strug.text) && R.strug.words <= 55, R.strug);

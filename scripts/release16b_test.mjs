@@ -52,15 +52,16 @@ try {
     // [2] The Sanctum's Refusal
     const PAST = ['q_distorted_portal', 'q_barnaby_finish', 'q_boss_sundered_smith', 'q_last_step'];
     out.lv = QUESTS.q_boss_aetherion.levelReq;
-    out.chain = ['q_last_step', 'q_boss_aetherion', 'q_hourglass_1'].map((id) => _QUEST_STORY_CHAIN.indexOf(id));
+    out.chain = ['q_last_step', 'q_hourglass_1', 'q_boss_aetherion'].map((id) => _QUEST_STORY_CHAIN.indexOf(id));
     reset(50, PAST); tickQuestUnlocks(); out.at50 = { active: !!player.quests.active.q_boss_aetherion, done: !!player.quests.completed.q_boss_aetherion };
+    reset(60, PAST); tickQuestUnlocks(); out.at60 = { active: !!player.quests.active.q_boss_aetherion, done: !!player.quests.completed.q_boss_aetherion };
     const coins = () => player.mojicoins | 0;
-    reset(55, PAST); player.quests.active.q_boss_aetherion = { progress: 0 }; game.bestiary.aetherion = 1; game.bestiary._boss_aetherion = 1;   // the hunter's save: killed at 53, auto-started at 60
+    reset(60, PAST); player.quests.active.q_boss_aetherion = { progress: 0 }; game.bestiary.aetherion = 1; game.bestiary._boss_aetherion = 1;   // the hunter's save: killed at 53, auto-started at 60
     let c0 = coins(); tickQuestUnlocks(); const d1 = coins() - c0; c0 = coins(); tickQuestUnlocks(); tickQuestUnlocks();
     out.oldSave = { done: !!player.quests.completed.q_boss_aetherion, keystone: player.dawnFragments.filter((f) => f === 'frag_aetherion').length, paid: d1, again: coins() - c0 };
-    reset(55, PAST); game.bestiary.aetherion = 1;   // killed before the quest opened: it would unlock now
+    reset(60, PAST); game.bestiary.aetherion = 1;   // killed at the door (Lv 50+) before the quest opened at Lv 60: it unlocks now
     tickQuestUnlocks(); out.unlockedFall = { done: !!player.quests.completed.q_boss_aetherion, active: !!player.quests.active.q_boss_aetherion };
-    reset(55, PAST); tickQuestUnlocks(); c0 = coins();   // the normal road: quest in hand, then the kill
+    reset(60, PAST); tickQuestUnlocks(); c0 = coins();   // the normal road: quest in hand, then the kill
     tickQuestKill('aetherion', true); game.bestiary.aetherion = 1; game.bestiary._boss_aetherion = 1; tickQuestUnlocks(); tickQuestUnlocks();
     out.kill = { done: !!player.quests.completed.q_boss_aetherion, keystone: player.dawnFragments.filter((f) => f === 'frag_aetherion').length, paid: coins() - c0 };
     // [3] the compass
@@ -100,8 +101,8 @@ try {
   });
   ok('[1] the Gate\'s four endings close "The stars are waiting." and name no Houses', R.gate.every((t) => /The stars are waiting\.$/.test(t) && !/Houses/i.test(t)) && R.gateNo.every((t) => /The road is waiting\.$/.test(t) && !/stars|Houses/i.test(t)), R.gate.map((t) => t.slice(-40)));
   ok('[1] the Sixth Crossing card speaks of the twelve fallen stars, with no houses or champions', /twelve fallen stars/.test(R.sky) && !/house|champion/i.test(R.sky), R.sky);
-  ok('[2] The Sanctum\'s Refusal opens at Lv 50, after the Last Step and before Hourglass I in the Journal', R.lv === 50 && R.chain[0] >= 0 && R.chain[0] < R.chain[1] && R.chain[1] < R.chain[2], { lv: R.lv, chain: R.chain });
-  ok('[2] at Lv 50 with the Last Step done it starts itself', R.at50.active && !R.at50.done, R.at50);
+  ok('[2] The Sanctum\'s Refusal opens at Lv 60 (per user, 2026-10-12), after the Last Step and Hourglass I in the Journal', R.lv === 60 && R.chain[0] >= 0 && R.chain[0] < R.chain[1] && R.chain[1] < R.chain[2], { lv: R.lv, chain: R.chain });
+  ok('[2] at Lv 50 with the Last Step done it stays shut; at Lv 60 it starts itself', !R.at50.active && !R.at50.done && R.at60.active && !R.at60.done, [R.at50, R.at60]);
   ok('[2] an old save whose fall is recorded (quest in hand) completes it once, with one Keystone', R.oldSave.done && R.oldSave.keystone === 1 && R.oldSave.paid > 0 && R.oldSave.again === 0, R.oldSave);
   ok('[2] a fall made before the quest opened completes it when it unlocks (no second kill asked)', R.unlockedFall.done && !R.unlockedFall.active, R.unlockedFall);
   ok('[2] a kill made with the quest in hand pays once (same payout, one Keystone)', R.kill.done && R.kill.keystone === 1 && R.kill.paid === R.oldSave.paid, R.kill);

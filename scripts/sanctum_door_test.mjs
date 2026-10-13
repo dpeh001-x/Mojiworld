@@ -4,7 +4,7 @@
 //   the Celestial Spire has no door to the Sanctum; the Sanctum's way back leads to the Last Step;
 //   before she falls the Last Step has no Sanctum door and the Sanctum's lane stays off the W map (_retreat);
 //   her kill opens '▶ Aetherion's Sanctum' (levelGate 50) with its toast once her film hands the screen back, and the lane shows; a save with her fall gets the door on
-//   the next loadMap; walking through it lands in the Sanctum; the Sanctum's pin sits beside the Last Step (569, 723).
+//   the next loadMap; walking through it lands in the Sanctum; the Sanctum's pin sits beside the Last Step (634, 666).
 //   node scripts/sanctum_door_test.mjs            (MOJI_SERVE_ROOT / PORT override)
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = process.env.MOJI_SERVE_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,8 +32,8 @@ try {
   ok('the Celestial Spire has no door to the Sanctum', !A.spire.some((d) => d.dest === 'sanctum'), A.spire);
   ok("the Sanctum's way back leads to the Last Step (none to the Spire)", A.sanctum.some((d) => d.dest === 'lastStep') && !A.sanctum.some((d) => d.dest === 'celestialSpire'), A.sanctum);
   ok('before she falls the Last Step has no Sanctum door, and the Sanctum lane stays off the W map', !A.last.some((d) => d.dest === 'sanctum') && A.sanctum.filter((d) => d.dest === 'lastStep').every((d) => d.ret), { last: A.last, sanctum: A.sanctum });
-  ok("the Sanctum's pin sits beside the Last Step (569, 723)", A.pin[0] === 569 && A.pin[1] === 723 && Math.hypot(A.pin[0] - A.lastPin[0], A.pin[1] - A.lastPin[1]) <= 100, { pin: A.pin, last: A.lastPin });
-  const now0 = await page.evaluate(() => Date.now()); await page.clock.pauseAt(now0 + 1000);
+  ok("the Sanctum's pin sits beside the Last Step (634, 666)", A.pin[0] === 634 && A.pin[1] === 666 && Math.hypot(A.pin[0] - A.lastPin[0], A.pin[1] - A.lastPin[1]) <= 100, { pin: A.pin, last: A.lastPin });
+  for (const off of [1000, 5000, 20000]) { try { const now0 = await page.evaluate(() => Date.now()); await page.clock.pauseAt(now0 + off); break; } catch (e) { /* a loaded machine moved the page clock past the target between the two calls: aim further out */ } }
   const step = async (n) => { for (let i = 0; i < n; i++) { await page.clock.runFor(16); await page.evaluate(() => { player.hp = getMaxHp(); player.invulnerable = 0; }); } };
   // her fall
   await page.evaluate(() => { window.__toasts = []; const o = window.showToast; window.showToast = function (t) { window.__toasts.push(String(t || '')); return o.apply(this, arguments); };

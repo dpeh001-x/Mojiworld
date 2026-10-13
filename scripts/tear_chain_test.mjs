@@ -78,7 +78,7 @@ try {
   const [P, S, L, A] = R.def;
   ok('1. the line: the Smith opens on the portal and Barnaby IV, the Last Step on the Smith, the Sanctum on the Last Step', JSON.stringify(S.prereq) === JSON.stringify(['q_distorted_portal', 'q_barnaby_finish']) && L.prereq === 'q_boss_sundered_smith' && A.prereq === 'q_last_step', R.def.map((d) => d.id + '<-' + d.prereq));
   ok('1. the three after the advancement are critical story quests nobody hands out (they start themselves)', [S, L, A].every((d) => d.critical && d.story && !d.giver), R.def.map((d) => [d.id, d.critical, d.story, d.giver]));
-  ok('1. the Last Step hunts the copy on the Last Step at Lv 50, after the Smith (45), with the Sanctum (50 since release16, per user)', L.kind === 'boss' && L.target === 'miraFallen' && L.lv === 50 && S.lv === 45 && A.lv === 50, L);
+  ok('1. the Last Step hunts the copy on the Last Step at Lv 50, between the Smith (45) and the Sanctum (60)', L.kind === 'boss' && L.target === 'miraFallen' && L.lv === 50 && S.lv === 45 && A.lv === 60, L);
   ok('2. each card picks up the last film: the Eleventh Hour breaks, the ashes drift down, the tear lands', /Past him, the tear runs on\./.test(P.desc) && /^The Eleventh Hour, that one night held open, broke like a mirror/.test(S.desc) && /^The Smith set his hammer down, and his ashes did not fall/.test(L.desc) && /^The copy fell, and the glass stair shattered/.test(A.desc), [P.desc.slice(-40), S.desc.slice(0, 40), L.desc.slice(0, 40), A.desc.slice(0, 40)]);
   ok('2. ...each under 170 words (the line past the tear was given room, per user, 2026-10-11), nobody named, the canon pins kept', R.def.every((d) => d.words <= 170) && !/Mira|Barnaby|Twelve/.test(S.desc + L.desc + A.desc) && /the woman inside her goes free/.test(A.desc) && /distorted into this form when the seal on her dark-magic blade broke/.test(A.desc) && /Forge-Ember Shard/.test(S.desc) && /distorted copy of the first who turned back/.test(L.desc), R.def.map((d) => d.id + ' ' + d.words));
   const ix = (id) => R.chain.indexOf(id);
@@ -88,7 +88,7 @@ try {
   ok('4. his real death (after his revive) completes it and names the Last Step', R.smithKill.found && R.smithKill.kills >= 2 && R.afterSmith.done && /Last Step/.test(R.smithKill.toast), { ...R.smithKill, ...R.afterSmith });
   ok('4. the Last Step is running by Lv 50', R.at50.lastActive, R.at50);
   ok('4. the copy\'s real death completes it and names the Sanctum', R.miraKill.found && R.miraKill.kills >= 2 && R.afterMira.done && /Sanctum's Refusal/.test(R.miraKill.toast), { ...R.miraKill, ...R.afterMira });
-  ok('4. the Sanctum (Lv 50 since release16) is running as soon as the copy falls', R.afterMira.aeActive && R.at60.aeActive, { ...R.afterMira, ...R.at60 });
+  ok('4. at Lv 60 the Sanctum starts itself (★ CRITICAL)', R.at60.aeActive && R.at60.crit.some((t) => /Sanctum/.test(t)), R.at60);
   ok('5. an old save that already beat the copy has the Last Step done quietly, and the Sanctum opens', R.old.lastDone && R.old.coins === 0 && R.old.aeActive, R.old);
   ok('no page errors', errs.length === 0, errs);
 } finally { await browser.close(); server.kill(); }

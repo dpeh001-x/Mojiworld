@@ -45,9 +45,9 @@ try {
   });
   const L = R.lv, X = R.idx;
   check(L.q_hourglass_1 === 50 && L.q_hourglass_2 === 56 && L.q_hourglass_3 === 69, 'Hourglass I is Lv 50, II is Lv 56, III stays Lv 69', J(L));
-  check(L.q_boss_sundered_smith < L.q_hourglass_1 && L.q_boss_aetherion === 50 && L.q_boss_aetherion <= L.q_hourglass_1, 'the Smith comes before Hourglass I; the Sanctum opens at Lv 50 with its door, no later than Hourglass I (release16, per user)', J(L));
-  check(X.q_distorted_portal < X.q_boss_sundered_smith && X.q_boss_sundered_smith < X.q_hourglass_1 && X.q_boss_sundered_smith < X.q_boss_aetherion && X.q_boss_aetherion < X.q_hourglass_1 && X.q_hourglass_1 < X.q_hourglass_2 && X.q_hourglass_2 < X.q_hourglass_3,
-    "the Journal lists them in order: portal, Smith, the Sanctum (Lv 50 since release16), Hourglass I, II, III", J(X));
+  check(L.q_boss_sundered_smith < L.q_hourglass_1 && L.q_hourglass_2 < L.q_boss_aetherion, 'the Smith comes before Hourglass I and the Sanctum after Hourglass II (by level)', J(L));
+  check(X.q_distorted_portal < X.q_boss_sundered_smith && X.q_boss_sundered_smith < X.q_hourglass_1 && X.q_hourglass_1 < X.q_hourglass_2 && X.q_hourglass_2 < X.q_boss_aetherion && X.q_boss_aetherion < X.q_hourglass_3,
+    "the Journal lists them in order: portal, Smith, Hourglass I, II, the Sanctum, III", J(X));
   check(X.q_last_step < 0 || (X.q_boss_sundered_smith < X.q_last_step && X.q_last_step < X.q_hourglass_1), 'the Last Step (when the build has it) sits between the Smith and Hourglass I', J(X));
   const asc = R.line.every((e, i) => i === 0 || e[1] >= R.line[i - 1][1]);
   check(asc, 'every quest of the line, portal to Hourglass III, is in non-decreasing level order', J(R.line));

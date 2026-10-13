@@ -113,13 +113,14 @@ try {
     openLoreMap('bestiary'); await sleep(200); _loreDexSelect('kingKrook'); await sleep(200);
     out.dex = (document.getElementById('lore-body') || {}).innerText || ''; out.dexLore = ((BOSS_INTROS || {}).kingKrook || {}).lore || ''; try { closeLoreMap(); } catch (e) {} await sleep(100);
     // ---- 8. Aetherion ---------------------------------------------------------------------------------------------------------------
-    await go('town'); player._storyBeatsSeen.warden_falls = false;
+    await go('town'); player._storyBeatsSeen.warden_falls = false; player.hp = player.maxHp || 100; player._downed = false; game.dying = false;   // a hero who is down or dying holds every beat (_lxBeatHeld, release12)
     const fell = () => { const m = { type: 'aetherion', name: 'Aetherion', x: player.x + 80, y: player.y - 120, w: 120, h: 160, level: 60, exp: 0, mojicoins: 0,
       currentHp: 0, maxHp: 1, hp: 0, atk: 1, def: 1, vx: 0, vy: 0, dead: false, isBoss: true };
       game.monsters.push(m); let e = null; try { killMonster(m); } catch (x) { e = String(x.message).slice(0, 100); } const i = game.monsters.indexOf(m); if (i >= 0) game.monsters.splice(i, 1); return e; };
     const card = () => document.querySelector('.lx-ending-card');
     out.aeErr = fell(); out.card = await waitFor(() => !!card() && /I WAS THE CUT ONCE/.test(card().textContent), 9000);
     out.cardText = (card() || {}).textContent || ''; out.cardHeld = game.paused === true; if (card()) card().click();
+    await sleep(700); { const pm = document.getElementById('powerup-modal'); if (pm && pm.style.display === 'flex') { window.dispatchEvent(new KeyboardEvent('keydown', { key: '1' })); await sleep(400); } }   // the boss's boon wheel holds every beat until a boon is claimed (_lxBeatHeld, release12)
     out.farewell = await waitFor(() => beatOn() && spk() === 'The Amnesiac', 5000);
     await through('The Amnesiac'); try { closeAllModals(); } catch (e) {} await sleep(300); game.paused = false;
     out.aeErr2 = fell(); out.card2 = await waitFor(() => !!card(), 5000); out.beat2 = beatOn();
