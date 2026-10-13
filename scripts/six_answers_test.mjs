@@ -14,6 +14,7 @@ await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });
 const errs = [], src = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8'); const has = (t) => src.includes(t);
+const SOV_HOOK = src.indexOf('function _sovereignFallCutscene(onDone)'); const sovHook = SOV_HOOK > 0 && src.slice(SOV_HOOK, SOV_HOOK + 6000).includes('_lxSovereignLastWords()');
 const ENDING = ['q_road_1', 'q_road_2', 'q_road_3', 'q_road_4', 'q_road_5', 'q_road_6', 'q_road_7', 'q_canary_quiet', 'q_kindest_hand', 'q_dream_closer', 'q_dream_fares', 'q_dream_ledger', 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut'];
 try {
   const ctx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1280, height: 720 } });
@@ -44,7 +45,7 @@ try {
     out.tearOpt = ['q_lyra_kin', 'q_lyra_forge', 'q_lyra_last'].map((k) => !!QUESTS[k].critical);
     out.autoStarts = ENDING.filter((k) => QUESTS[k].autoStart || (!QUESTS[k].giver && !QUESTS[k].giverByClass));   // none starts itself: each has a giver
     // ---- 4. Gravitos stays unreconciled ----
-    const gr = STORY_BEATS.gravitos_reason.stanzas; out.s2 = gr[1].text; out.s3 = gr[2].text; out.grWords = gr.map((x) => words(typeof x.text === 'function' ? x.text({ gate_answer: 'home' }) : x.text));
+    const gr = STORY_BEATS.gravitos_reason.stanzas; out.s2 = gr[1].text; out.s3 = gr[2].text; out.s4 = gr[3].text; out.odd = { ledger: STORY_BEATS.dreams_ledger.stanzas[3].text, lore: BOSS_INTROS.gravitos.lore, ledgerWords: words(STORY_BEATS.dreams_ledger.stanzas[3].text) }; out.grWords = gr.map((x) => words(typeof x.text === 'function' ? x.text({ gate_answer: 'home' }) : x.text));
     out.epi = STORY_BEATS.epilogue_gravitos.stanzas[0].text;
     // ---- 5. the gate speech ----
     const gg = STORY_BEATS.gravitos_gate.stanzas; out.gate3 = gg[2].text; out.gateVoices = gg.map((x) => x.voice || null); out.gate3words = words(gg[2].text);
@@ -56,6 +57,8 @@ try {
       game._amnesiacStage = 0; game._amnesiacSagaView = false; game._amnesiacMenu = 'talk'; try { closeAllModals(); } catch (e) {} openNPC(am()); await sleep(300); await settle(); await click(/Talk/); await settle();   // the top menu first: Talk / Train / Edicts
       const menu = opts(); const had = await click(/^The tower\?/); await settle(); const t = text(); await close(); game._amnesiacMenu = null; game._amnesiacStage = 0; return { menu, had, t }; };
     out.towerBefore = await tower(false); out.towerAfter = await tower(true);
+    const sb = STORY_BEATS.sovereign_last_words; out.sov = { pages: sb ? sb.stanzas.length : 0, words: sb ? sb.stanzas.map((x) => words(x.text)) : [], last: sb ? sb.stanzas[sb.stanzas.length - 1].text : '', set: typeof _lxSovereignLastWords === 'function' };
+    player._storyBeatsSeen.sovereign_last_words = true; const aft = await tower(true); delete player._storyBeatsSeen.sovereign_last_words; out.sov.after = aft.t; out.sov.before = out.towerAfter.t;
     return out;
   }, ENDING);
   ok('2. the Dreams need the Twelve Stars (and the second Long Dawn)', R.ld3pre.includes('q_zodiac_twelve') && R.ld3pre.includes('q_long_dawn_2') && R.metWithout === false && R.metWith === true, R.ld3pre);
@@ -65,12 +68,14 @@ try {
   ok('1. Pisces is not sealed: no star\'s door waits on the others (nothing gates a sign on a count)', !has('stars at rest before') && !has('the last door will not open'));
   ok('3. all sixteen quests the ending leans on are critical (the Road x7, canary, kindest hand, Dreams x3, the Tear\'s first four): 27 in all', R.endingCrit && R.crit.length === 27, R.crit.length);
   ok('3. the Tear\'s last three stay optional, and none of the sixteen starts itself (each has a giver)', R.tearOpt.every((b) => b === false) && R.autoStarts.length === 0, [R.tearOpt, R.autoStarts]);
-  ok('4. Gravitos does not take the reason: he cannot answer the world, will not agree, will not call it a mistake', /I cannot answer it\. I will not agree with it\./.test(R.s2) && /I will not call it a mistake\./.test(R.s3) && /not learn it from you/.test(R.s3) && R.grWords.every((n) => n <= 60), R.grWords);
+  ok('4. Gravitos does not take the reason: he cannot answer the world, will not agree, will not call it a mistake', /I cannot answer it\. I will not agree with it\./.test(R.s2) && /I will not call it a mistake\./.test(R.s3) && /not learn it from you/.test(R.s4) && R.grWords.every((n) => n <= 60), R.grWords);
+  ok('4. Gravitos is the odd one: a thirteenth line in Arlen\'s ledger, his own reason says it, his Codex card says it; twelve asked for a dream, he asked to be still', /thirteenth line in the ledger, in a heavier hand\. The odd one\. Not a dream: a wish to be still\./.test(R.odd.ledger) && R.odd.ledgerWords <= 70 && /I am the odd one\./.test(R.s3) && /I asked to be still/.test(R.s3) && /odd one among the stars/.test(R.odd.lore), R.odd.ledgerWords);
   ok('4. the ending\'s own text says never in peace, and no longer says relief', /never in peace/.test(R.epi) && /He would not take it\./.test(src.slice(src.indexOf('never in peace'), src.indexOf('never in peace') + 400)) && !/in relief/.test(R.epi), R.epi.slice(0, 60));
   ok('5. the gate speech\'s last page is rewritten (the boilerplate is gone) and has no read; the first two keep theirs', /I have never stopped anyone, foreigner\./.test(R.gate3) && !/It matters not who you are/.test(R.gate3) && JSON.stringify(R.gateVoices) === JSON.stringify(['audio/story/gravitos_gate_1.mp3', 'audio/story/gravitos_gate_2.mp3', null]) && R.gate3words <= 75, [R.gateVoices, R.gate3words]);
   ok('6. before the reunion the Amnesiac offers no "The tower?"', !R.towerBefore.menu.some((o) => /^The tower\?/.test(o)) && !R.towerBefore.had, R.towerBefore.menu);
   ok('6. after it he does: the cold kept the moment he sat down and crowned it; the ring was his promise; the identity is never said outright', R.towerAfter.had && /crowned it/.test(R.towerAfter.t) && /The ring was my promise to climb back up\./.test(R.towerAfter.t) && !/Amnesiac is the Sovereign/i.test(R.towerAfter.t) && R.towerAfter.t.split(/\s+/).length <= 70, JSON.stringify({ m: R.towerAfter.menu, t: R.towerAfter.t.slice(0, 90) }));
   ok('6. Arlen, Innie and Bravo each have the after-line (hands still / a third line / the smile back), and the fall card lays the ring down', has('This morning I wrote a third line') && has('then wasn') && has('not the hands. Not any more.') && has('sits that way now.') && has('AND THE RING IS LAID DOWN') && has('AND THE AMNESIAC IS LEFT KNEELING'));
+  ok('6. the Sovereign speaks once, after the reunion: a beat of three pages inside the 60-word cap, hooked into its fall, ending with the ring set down; the Amnesiac answers it', R.sov.pages === 3 && R.sov.words.every((n) => n <= 60) && R.sov.set && sovHook && /It sets the ring down\./.test(R.sov.last) && /I came back/.test(R.sov.after) && /thumb stays still/.test(R.sov.after) && /The ring was my promise/.test(R.sov.before) && !/Amnesiac is the Sovereign/i.test(R.sov.last + R.sov.after + R.sov.before), R.sov.words);
   ok('no page errors', errs.length === 0, errs.slice(0, 3));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

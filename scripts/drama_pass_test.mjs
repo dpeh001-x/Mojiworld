@@ -28,7 +28,7 @@ try {
     const B = STORY_BEATS.gravitos_reason, st = B.stanzas, t0 = st[0].text;
     const open = (c) => t0(c); out.reasonPages = st.length; out.reasonWords = st.map((x) => words(typeof x.text === 'function' ? x.text({}) : x.text));
     out.wake = open({ gate_answer: 'wake' }); out.home = open({ gate_answer: 'home' }); out.unsure = open({ gate_answer: 'unsure' }); out.silence = open({ gate_answer: 'silence' }); out.none = open({});
-    out.late = open({ gate_answer: 'home', gate_answer_late: 'wake' }); out.mid = st[1].text; out.last = st[2].text;
+    out.late = open({ gate_answer: 'home', gate_answer_late: 'wake' }); out.mid = st[1].text; out.last = st[3].text;
     out.variantWords = [out.wake, out.home, out.unsure, out.silence].map(words);
     // the beat plays and then runs its continuation (the defeat film); a repeat answers false so the chain falls straight through
     player._storyBeatsSeen = {}; player._storyChoices = { gate_answer: 'wake' };
@@ -47,7 +47,7 @@ try {
     out.ledger = STORY_BEATS.dreams_ledger.stanzas[1].text;
     return out;
   });
-  ok('gravitos_reason is three pages, each within the 60-word line cap', R.reasonPages === 3 && R.reasonWords.every((n) => n <= 60) && R.variantWords.every((n) => n <= 60), [R.reasonWords, R.variantWords]);
+  ok('gravitos_reason is four pages (the third names the odd one), each within the 60-word line cap', R.reasonPages === 4 && R.reasonWords.every((n) => n <= 60) && R.variantWords.every((n) => n <= 60), [R.reasonWords, R.variantWords]);
   ok('the opener answers the gate: wake = vanity', /vanity/.test(R.wake) && /To wake them/.test(R.wake));
   ok('the opener answers the gate: home = longing, how every sleeper woke and broke', /longing/.test(R.home) && /thief/.test(R.home));
   ok('the opener answers the gate: unsure = an older answer, no better', /older and no better/.test(R.unsure) && /I would do it again/.test(R.unsure));
