@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1757';
+const GAME_VERSION = 'v0.30.1758';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -104442,6 +104442,7 @@ function _lxBossWardTick(m) {
 // the evolved form gets Sky-Break (a wall with one gap) and, under 25%, the
 // Astral Echo - the existing astral art, finally wired to a five-lance salvo.
 const _AE_GAP_MS = [0, 600, 520, 360];   // v0.30.1751 release18 (per user: he stands and casts more often) - was 980 / 710 / 490 (v0.30.1721), 1300 / 950 / 650 before
+_AE_GAP_MS[2] = 360;   // v0.30.1758 release20 (per user): the evolved form's gap 520 -> 360 ms (710 before v0.30.1751) - the Twin Verdict claims its own slot now (see the idle branch), so the gap no longer has to outlast its 500 ms hold
 function _aeBaseSpeed(m) {
   const t = (typeof monsterTypes !== 'undefined' && monsterTypes.aetherion) ? monsterTypes.aetherion.speed : 0.8;
   return (t || 0.8) * (m._bossPhase2 ? 1.10 : 1) * (m._enraged ? 1.20 : 1);   // exact even if a phase multiplier hit a held 0
@@ -104558,6 +104559,15 @@ function _aetherionTick(m, dt) {
     // the heal, answered
     if (now - A.healAt < 40 && !(A.cd.heal > now)) { A.cd.heal = now + 300; A.fast = true; start('lanceWind', 'heal'); return; }
     if (A.t < _AE_GAP_MS[phase]) return;
+    // v0.30.1758 release20 (per user): the evolved gap is shorter than the Twin Verdict's 500 ms hold (start() and the in-move hold, both kept), so a swing that would
+    // come off its cooldown by 520 ms of idle - where it opened at the 520 gap - claims this slot: the move waits for it instead of re-arming the hold,
+    // at most to 640 ms of idle. The hold runs out first, so the swing still opens >= 500 ms after a release; under 25% (360) it never swung and still does not.
+    if (phase === 2 && m.traits && m.traits.bigMelee && m._bigMeleeCd <= 520 - A.t && A.t < 640 && !(m._dirFleeT > 0) && Math.abs(pcx - bcx) < m.traits.bigMelee.range && Math.abs((player.y + player.h) - (m.y + m.h)) < (m.traits.bigMelee.swingH || 100)) return;
+    // v0.30.1758 release20: nor does a move start while one of his columns still has more than 30 steps (500 ms) of telegraph left - the shortest windup (450 ms)
+    // then lands after it, so two telegraphs are never read at once (a hit-stop freezes the columns but not this clock; at 520 the gap covered that)
+    if (phase === 2 && game.hazards && game.hazards.some((h) => h && h.type === 'meteor_warn' && h.life > 30 && /^Aetherion/.test(h._sourceLabel || ''))) return;
+    // v0.30.1758 release20: and a move's own follow-through (the Fracture's ten burst frames, 520 ms) plays out before the next move, as it did at the 520 gap
+    if (phase === 2 && A.recent.length && A.t < (_AE_MOVE_TAIL_BY[_AE_MOVE_SET[A.recent[A.recent.length - 1]]] || 0)) return;
     const side = Math.max(A.hitsL, A.hitsR), tot = A.hitsL + A.hitsR;
     const pressed = side >= 4 && side / Math.max(1, tot) >= 0.75;
     const last2 = A.recent.length >= 2 && A.recent[A.recent.length - 1] === A.recent[A.recent.length - 2] ? A.recent[A.recent.length - 1] : null;

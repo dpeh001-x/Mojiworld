@@ -154,7 +154,7 @@ try {
   else {
     const S = R.stats;
     ok('stats: HP 9,554,006 and ATK 13,918 off his table row, spawned as such', S.tHp === 9554006 && S.tAtk === 13918 && S.tDef === 858 && S.hp === 9554006 && S.atk === 13918, S);
-    ok('he walks at 1.2 (was 0.8) and pauses less between patterns (release18: 600 / 520 / 360 ms, were 980 / 710 / 490)', S.speed === 1.2 && S.gap.join() === '0,600,520,360', S);
+    ok('he walks at 1.2 (was 0.8) and pauses less between patterns (release18: 600 / 520 / 360 ms, were 980 / 710 / 490; release20: the evolved 360)', S.speed === 1.2 && S.gap.join() === '0,600,360,360', S);
     ok("Distorted Mira's Twin Verdict is on his row: a heavy swing and its echo", S.bm === 'swing' && S.echo === 480, S);
     const C = R.chooser;
     ok('the chooser: Scale Spiral in form 1 only; Halo Discs and the Gate only once evolved; feathers in both', C.n1 > 0 && C.n2 > 0 && C.spiral1 && !C.spiral2 && !C.halo1 && !C.gate1 && C.halo2 && C.gate2 && C.feather, C);

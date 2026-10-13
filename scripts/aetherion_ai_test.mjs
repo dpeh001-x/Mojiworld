@@ -252,7 +252,7 @@ const evolved = await ev(async () => await window.__ae({ mode: 'dodgeR', frames:
 // it) - the dodge-right script keeps them moving afterwards
 const gapC = evolved.gap ? (evolved.gap.x0 + evolved.gap.x1) / 2 : null;
 ok('evolved (<50%): Sky-Break appears, and its gap centres against a right-dodger — LEFT of the player, and still reachable',
-  !evolved.err && (evolved.picks.skybreakWind || 0) >= 1 && gapC != null && gapC < evolved.gap.px - 100 && evolved.gap.px - gapC <= 320,
+  !evolved.err && (evolved.picks.skybreakWind || 0) >= 1 && gapC != null && gapC < evolved.gap.px - 55 && evolved.gap.px - gapC <= 320,   // release20: 170 px aim less half a 230 px slot (was 100)
   evolved.err || `${evolved.picks.skybreakWind || 0} sky-breaks; dodge bias ${evolved.dodge}; gap [${evolved.gap ? Math.round(evolved.gap.x0) + '..' + Math.round(evolved.gap.x1) : '-'}] centre ${gapC != null ? Math.round(gapC) : '-'} vs player x at fire ${evolved.gap ? Math.round(evolved.gap.px) : '-'}`);
 const astral = await ev(async () => await window.__ae({ mode: 'neutral', frames: 1500, hpFrac: 0.2, evolved: true }));
 ok('under 25%: the Astral Echo fires — the existing astral art, wired to a five-lance salvo', !astral.err && (astral.picks.astral || 0) >= 1, astral.err || JSON.stringify(astral.picks));
