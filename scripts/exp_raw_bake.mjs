@@ -11,8 +11,8 @@
 //             past it is measured as Lv 80 by the level-gap falloff, so Lv 81-100 are kills of Lv 78-80 monsters at full rate.
 //             The 1.467: the line counts kills of the monsters as they were before v0.30.1646 raised HP and EXP together
 //             x1.467 ("same time per level"), the scale the unchanged Lv 1-40 costs were baked on.
-//   ORDINARY  no boss, no tower / Express / Ticket / Conductor / mirror / octopus-leg / zodiac type, exp/hp <= 0.04 (the
-//             regular-monster rate), and NOT A RARE ELITE: a type whose every map roster entry is gated (spawnChance:
+//   ORDINARY  no boss, no tower / Express / Ticket / Conductor / mirror / octopus-leg / zodiac type, exp/hp <= 0.06 (the
+//             regular-monster rate 0.0267, and the Withering Tide four whose hp was halved with exp kept, 0.053 - v0.30.1756 release20), and NOT A RARE ELITE: a type whose every map roster entry is gated (spawnChance:
 //             rolled once per map load, never in the respawn drip - Blight Elder, Ossuary Tyrant, Path's Bane) or that is
 //             in no roster at all (spawned by script once per visit - Elder Arlen). One of those per map pays 5-10x its
 //             neighbours: in the +/-2 mean the Lv 71 Blight Elder alone made Lv 69 cost x2.66 Lv 68, and Path's Bane /
@@ -51,7 +51,7 @@ for (const m of html.matchAll(/^\s{2}([A-Za-z_0-9]+):\s*\{[^\n]*\bboss\s*:\s*tru
 const roster = {};
 for (const m of html.matchAll(/\{\s*type\s*:\s*'([A-Za-z_0-9]+)'\s*,\s*count\s*:\s*\d+([^}]*)\}/g)) (roster[m[1]] = roster[m[1]] || []).push(/spawnChance/.test(m[2]));
 const regular = Object.keys(S).filter((t) => { const v = S[t]; return v && v.exp > 0 && v.lv > 0 && !bosses.has(t)
-  && !/^(tower|express|ticket|conductor|mirror|octoLeg|zodiac_)/i.test(t) && v.exp / Math.max(1, v.hp) <= 0.04; });
+  && !/^(tower|express|ticket|conductor|mirror|octoLeg|zodiac_)/i.test(t) && v.exp / Math.max(1, v.hp) <= 0.06; });   // v0.30.1756 release20: 0.06 (was 0.04) - the halved Withering Tide four pay 0.053 with their exp kept; no other non-boss row lies in 0.04-0.06
 const rare = regular.filter((t) => !roster[t] || roster[t].every(Boolean));
 const pool = regular.filter((t) => !rare.includes(t));
 const adj = (L) => { const p = pool.filter((t) => Math.abs(S[t].lv - L) <= 2); if (!p.length) throw new Error('no ordinary monster within 2 levels of Lv ' + L); return p.reduce((s, t) => s + S[t].exp, 0) / p.length; };

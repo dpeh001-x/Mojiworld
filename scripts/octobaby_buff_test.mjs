@@ -79,7 +79,7 @@ for (const [k, label] of [['hp', 'HP'], ['atk', 'ATK'], ['eva', 'evasion']]) {
 }
 // Tentacle HP and DEF are still the +20% derivation...
 for (const [k, label] of [['hp', 'HP'], ['def', 'DEF']]) {
-  ok(`tentacle ${label} is +20%`, near(L[0][k], WAS_LEG[k] * 1.2),
+  ok(`tentacle ${label} is +20%${k === 'hp' ? ', then x1.5 with his body (release20, per user)' : ''}`, near(L[0][k], WAS_LEG[k] * (k === 'hp' ? 1.8 : 1.2)),
      `${WAS_LEG[k]} -> ${L[0][k]} (x${(L[0][k] / WAS_LEG[k]).toFixed(3)})`);
 }
 // ...but ATK and evasion are AUTHORED. The user set them outright after the

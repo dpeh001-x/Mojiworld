@@ -72,7 +72,7 @@ try {
     const rare = new Set(['blightElder', 'ossuaryTyrant', 'pathsBane', 'vigil_vermillion']);
     const pool = Object.entries(LX_MONSTER_STATS).filter(([t, v]) => v && v.exp > 0 && v.lv > 0 && !rare.has(t)
       && !(monsterTypes[t] && (monsterTypes[t].boss || monsterTypes[t].zodiacSign)) && !/^(tower|express|ticket|conductor|mirror|octoLeg|zodiac_)/i.test(t)
-      && (v.exp / Math.max(1, v.hp)) <= 0.04).map(([, v]) => v);
+      && (v.exp / Math.max(1, v.hp)) <= 0.06).map(([, v]) => v);   // release20: 0.06 with the bake (the halved Withering Tide four sit at 0.053)
     out.adj = {}; let run = 0;
     for (let L = 41; L <= 100; L++) { const p = pool.filter((v) => Math.abs(v.lv - Math.min(L, 80)) <= 2); run = Math.max(run, p.reduce((s, v) => s + v.exp, 0) / p.length); out.adj[L] = run; }
     return out;

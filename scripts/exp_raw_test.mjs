@@ -52,7 +52,7 @@ try {
     const mobs = Object.entries(LX_MONSTER_STATS).filter(([t, v]) => v && v.exp > 0 && v.lv > 0
       && !(monsterTypes[t] && (monsterTypes[t].boss || monsterTypes[t].isBoss || monsterTypes[t].zodiacSign))
       && !/^(tower|express|ticket|conductor|mirror|octoLeg)/i.test(t) && !(monsterTypes[t] && monsterTypes[t].miniElite)
-      && (v.exp / Math.max(1, v.hp)) <= 0.04).map(([t, v]) => ({ lv: v.lv, exp: v.exp }));
+      && (v.exp / Math.max(1, v.hp)) <= 0.06).map(([t, v]) => ({ lv: v.lv, exp: v.exp }));   // release20: 0.06 with the bake (the halved Withering Tide four sit at 0.053)
     const topMobLv = mobs.reduce((a, m) => Math.max(a, m.lv), 1);
     const adjRaw = (L0) => { const L = Math.min(L0, topMobLv); let p = mobs.filter((m) => Math.abs(m.lv - L) <= 2);
       if (!p.length) p = mobs.slice().sort((a, b) => Math.abs(a.lv - L) - Math.abs(b.lv - L)).slice(0, 3);
@@ -68,7 +68,7 @@ try {
     const mobsOrd = Object.entries(LX_MONSTER_STATS).filter(([t, v]) => v && v.exp > 0 && v.lv > 0 && !RARE.has(t)
       && !(monsterTypes[t] && (monsterTypes[t].boss || monsterTypes[t].isBoss || monsterTypes[t].zodiacSign))
       && !/^(tower|express|ticket|conductor|mirror|octoLeg)/i.test(t) && !(monsterTypes[t] && monsterTypes[t].miniElite)
-      && (v.exp / Math.max(1, v.hp)) <= 0.04).map(([t, v]) => ({ lv: v.lv, exp: v.exp }));
+      && (v.exp / Math.max(1, v.hp)) <= 0.06).map(([t, v]) => ({ lv: v.lv, exp: v.exp }));   // release20: 0.06 with the bake (the halved Withering Tide four sit at 0.053)
     const adjOrd = (L0) => { const L = Math.min(L0, 80); let p = mobsOrd.filter((m) => Math.abs(m.lv - L) <= 2);
       if (!p.length) p = mobsOrd.slice().sort((a, b) => Math.abs(a.lv - L) - Math.abs(b.lv - L)).slice(0, 3);
       return p.reduce((s, m) => s + m.exp, 0) / p.length; };

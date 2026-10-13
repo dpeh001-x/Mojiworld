@@ -93,23 +93,23 @@ window.LX_MONSTER_STATS = {
   cinderling:                     { lv: 62, hp:   55596, atk: 2945, def: 168, exp:    1483, coin:  3791 },
   bellowsbat:                     { lv: 66, hp:   98520, atk: 3073, def:235, exp:    2628, coin:  6718 },
   smithgolem:                     { lv: 65, hp:  306153, atk: 3750, def:329, exp:   8165, coin:  20874 },
-  bonebosn:                       { lv: 43, hp:   77740, atk:  678, def: 54, exp:    2072, coin:  5301 },
-  drownedCur:                     { lv: 42, hp:   56261, atk:  618, def: 47, exp:    1499, coin:  3837 },
-  spectreCannoneer:               { lv: 44, hp:   56584, atk:  780, def: 65, exp:    1509, coin:  3858 },
-  brinekraken:                    { lv: 45, hp:   80665, atk:  1027, def:  96, exp:   2152, coin:  5500 },
+  bonebosn:                       { lv: 43, hp:   38870, atk:  678, def: 54, exp:    2072, coin:  3621 },   // v0.30.1756 release20: hp x0.5 (per user: the Withering Tide / Drowned Hold four), was 77740; coin was 5301 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  drownedCur:                     { lv: 42, hp:   28131, atk:  618, def: 47, exp:    1499, coin:  2621 },   // v0.30.1756 release20: hp x0.5 (per user: the Withering Tide / Drowned Hold four), was 56261; coin was 3837 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  spectreCannoneer:               { lv: 44, hp:   28292, atk:  780, def: 65, exp:    1509, coin:  2635 },   // v0.30.1756 release20: hp x0.5 (per user: the Withering Tide / Drowned Hold four), was 56584; coin was 3858 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  brinekraken:                    { lv: 45, hp:   40333, atk:  1027, def:  96, exp:   2152, coin:  3757 },   // v0.30.1756 release20: hp x0.5 (per user: the Withering Tide / Drowned Hold four), was 80665; coin was 5500 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
   razorgale:                      { lv: 67, hp:   93311, atk: 4007, def:257, exp:    2490, coin:  6363 },
   glasswindHare:                  { lv: 69, hp:   151349, atk: 3726, def:249, exp:   4036, coin:  10319 },
-  mirageStalker:                  { lv: 71, hp:   219541, atk: 4079, def:286, exp:   5852, coin:  14971 },
-  shardlich:                      { lv: 72, hp:   295450, atk: 4294, def:295, exp:   7877, coin:  20144 },
-  lichkin:                        { lv: 73, hp:   294416, atk: 4989, def:321, exp:   7851, coin:  20074 },
-  boneWraith:                     { lv: 79, hp:   484926, atk: 6185, def:289, exp:   12930, coin:  33064 },
-  sepulchreHound:                 { lv: 75, hp:   202762, atk: 5089, def:289, exp:   5408, coin:  13824 },
+  mirageStalker:                  { lv: 71, hp:   158070, atk: 4079, def:286, exp:   5852, coin:  12496 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 219541; coin was 14971 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  shardlich:                      { lv: 72, hp:   212724, atk: 4294, def:295, exp:   7877, coin:  16814 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 295450; coin was 20144 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  lichkin:                        { lv: 73, hp:   211980, atk: 4989, def:321, exp:   7851, coin:  16756 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 294416; coin was 20074 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  boneWraith:                     { lv: 79, hp:   349147, atk: 6185, def:289, exp:   12930, coin:  27599 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 484926; coin was 33064 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  sepulchreHound:                 { lv: 75, hp:   145989, atk: 5089, def:289, exp:   5408, coin:  11539 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 202762; coin was 13824 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
   blightElder:                    { lv: 71, hp:  1089200, atk: 5554, def: 437, exp:   29046, coin: 74462 },
   ossuaryTyrant:                  { lv: 79, hp:  1759362, atk: 7771, def: 583, exp:   46916, coin: 119957 },
-  tombKeeper:                     { lv: 77, hp:  554936, atk: 6090, def: 432, exp:   14799, coin:  37837 },
-  mournshade:                     { lv: 76, hp:   495333, atk: 6090, def:316, exp:   13209, coin:  33774 },
-  lanternWisp:                    { lv: 77, hp:   218458, atk: 4960, def: 255, exp:    5827, coin:  14895 },
-  echoKnight:                     { lv: 78, hp:   1329061, atk: 7979, def: 442, exp:   35441, coin: 90618 },
+  tombKeeper:                     { lv: 77, hp:  399554, atk: 6090, def: 432, exp:   14799, coin:  31583 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 554936; coin was 37837 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  mournshade:                     { lv: 76, hp:   356640, atk: 6090, def:316, exp:   13209, coin:  28191 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 495333; coin was 33774 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  lanternWisp:                    { lv: 77, hp:   157290, atk: 4960, def: 255, exp:    5827, coin:  12433 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 218458; coin was 14895 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
+  echoKnight:                     { lv: 78, hp:    956924, atk: 7979, def: 442, exp:   35441, coin: 75639 },   // v0.30.1756 release20: hp -28% (per user: Lv 70+ ordinary monsters -25-30%), was 1329061; coin was 90618 - x(hp ratio)^0.55 so a kill pays what it did through the coin curve; exp kept
   pathsBane:                      { lv: 80, hp:  2601370, atk: 8777, def: 483, exp:  69369, coin: 177366 },
   clownfish:                      { lv: 33, hp:    4465, atk:  365, def: 24, exp:     119, coin:   304 },
   pufferfish:                     { lv: 37, hp:    7289, atk:  461, def: 48, exp:     195, coin:   498 },
@@ -178,13 +178,13 @@ window.LX_MONSTER_STATS = {
   // file's own boss rule (hp x0.055 / hp x0.017).
   aetherion:                      { lv: 65, hp: 9554006, atk: 13918, def:  858, exp: 700628, coin:  98436 },   // v0.30.1721 aetherion-boost (per user): hp +50%, atk +30%, def +30%, exp with hp (was 6369337 / 10706 / 660 / 467085); coins kept
   gravitos:                       { lv:100, hp: 23123101, atk:49971, def:  982, exp: 1695763, coin: 357406 },   // v0.30.1672: def 1309 -> 982 (-25%, per user; forms 2 and 3 take it x1.25 / x2.0, so 982 / 1227 / 1964). Below the 1,225 zodiacs now
-  octobaby:                       { lv: 50, hp:  1311310, atk:  5820, def: 478, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x, atk 2.1x thornmaw 2,770 (was 1.91x)
-  pqConductor:                    { lv: 30, hp:   81290, atk:  1615, def: 198, exp:   5962, coin:  1256 },   // v0.30.280 floors: hp 8.2x band max (mummy 9,011; was 1.38x)
+  octobaby:                       { lv: 50, hp:  1966965, atk:  5820, def: 478, exp:  96163, coin:  20266 },   // v0.30.1756 release20: hp x1.5 (per user: Octobaby x1.5, not the Lv 20-50 x2; his arms x1.5 in the game file), was 1311310 · v0.30.280 floors: hp 8.2x, atk 2.1x thornmaw 2,770 (was 1.91x)
+  pqConductor:                    { lv: 30, hp:  162580, atk:  1615, def: 198, exp:   5962, coin:  1256 },   // v0.30.1756 release20: hp x2 (per user: Lv 20-50 bosses), was 81290 · v0.30.280 floors: hp 8.2x band max (mummy 9,011; was 1.38x)
   legosaurus:                     { lv: 59, hp:  8931450, atk: 13342, def: 918, exp:  654974, coin:  21233 },   // v0.30.1738 legosaurus-buff (per user: "a tougher level 70 boss", level kept): zodiac_aries's Lv-70 HP / ATK / DEF; exp with hp, coins kept (was 1373900 / 8780 / 633 / 100753)
-  young_confused_barnaby:         { lv: 40, hp:  461340, atk:  2508, def: 308, exp:  33832, coin:  7130 },   // v0.30.280 floors: hp 8.2x band max (drownedCurator 51,146)
-  kingKrook:                      { lv: 50, hp:  1311310, atk:  5820, def: 499, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x; = octobaby, so the Lv-50 bulk band holds
+  young_confused_barnaby:         { lv: 40, hp: 1845360, atk:  2508, def: 308, exp:  33832, coin:  7130 },   // v0.30.1756 release20: hp x4 (per user: Lv 20-50 bosses x2, and "barnaby should be given 2x more HP on top"), was 461340 · v0.30.280 floors: hp 8.2x band max (drownedCurator 51,146)
+  kingKrook:                      { lv: 50, hp:  2622620, atk:  5820, def: 499, exp:  96163, coin:  20266 },   // v0.30.1756 release20: hp x2 (per user: Lv 20-50 bosses), was 1311310 · v0.30.280 floors: hp 8.2x; = octobaby, so the Lv-50 bulk band holds
   mirrorSelf:                     { lv: 20, hp:  275000, atk:   21, def:  3, exp:  17197, coin:  3622 },   // v0.30.x — hp 213116 -> 288000 (+35%) per user, then -> 250000 per user on playtest; evasion/speed live in the game literal
-  sundered_smith:                 { lv: 48, hp:  1311310, atk:  4848, def: 438, exp:  96163, coin:  20266 },   // v0.30.280 floors: hp 8.2x band max (octoLegSkillLock 145,382)
+  sundered_smith:                 { lv: 48, hp:  2622620, atk:  4848, def: 438, exp:  96163, coin:  20266 },   // v0.30.1756 release20: hp x2 (per user: Lv 20-50 bosses), was 1311310 · v0.30.280 floors: hp 8.2x band max (octoLegSkillLock 145,382)
   zodiac_aries:                   { lv: 70, hp: 8931450, atk: 13342, def:  918, exp: 654974, coin: 138032 },   // v0.30.280 floors: hp 8.2x blightElder 990,182 (was 2.44x), def 2.1x
   zodiac_taurus:                  { lv: 72, hp: 8931450, atk: 14570, def:  918, exp: 654974, coin: 138032 },   // v0.30.280 floors
   zodiac_gemini:                  { lv: 74, hp: 8931450, atk: 15911, def:  922, exp: 654974, coin: 138032 },   // v0.30.280 floors: hp was 2.78x band

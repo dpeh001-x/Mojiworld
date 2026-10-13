@@ -33,6 +33,7 @@ const open = async (vw, vh, opts = {}) => {
     for (const id of ['loading-overlay', 'class-select-modal', 'lo-auth']) { const o = document.getElementById(id); if (o) { o.style.display = 'none'; o.classList.add('fade'); } }
     window._lxBootGateDone = true; window._prologueActive = false;
     player.cls = 'rogue'; player.level = 6; player.hp = player.maxHp = 378; player._god = true;
+    player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { everdawn_welcome: true });   // release20: the deck steps aside while the welcome film plays
     loadMap('town'); game.paused = false;
     await new Promise((r) => setTimeout(r, 2500));
     for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
