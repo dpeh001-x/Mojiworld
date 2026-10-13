@@ -37,7 +37,7 @@ try {
     for (const [label, hx, bSide] of [['open floor, from the left', 1000, -1], ['open floor, from the right', 1000, 1], ['hero at the right wall', ww - 110, -1], ['hero at the left wall', 60, 1]]) {
       m.currentHp = Math.floor(m.maxHp * 0.7);
       for (let i = 0; i < 400 && m._ae && m._ae.st !== 'idle'; i++) await frame();
-      for (let i = 0; i < 40; i++) { player.x = hx; player.vx = 0; m.x = bSide < 0 ? hx - m.w - 260 : hx + player.w + 260; m.x = Math.max(40, Math.min(ww - m.w - 40, m.x)); m.vx = 0; await frame(); }
+      for (let i = 0; i < 40; i++) { player.x = hx; player.vx = 0; m.x = bSide < 0 ? hx - m.w - 260 : hx + player.w + 260; m.x = Math.max(40, Math.min(ww - m.w - 40, m.x)); m.vx = 0; if (m._ae && m._ae.st === 'idle') m._ae.t = 0; await frame(); }   // release18: no other move opens while he is parked
       const A = m._ae || {}; A.cd = A.cd || {}; A.cd.echo = 0; m._dirFleeT = 900;   // cornered -> Echo Step
       let wind = false, lastEcho = null, minBody = 1, maxEcho = 0, x0 = m.x; const T = performance.now();
       while (performance.now() - T < 4000) {

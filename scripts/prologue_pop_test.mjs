@@ -108,7 +108,7 @@ try {
       `${name}: dark blue + dark purple lead the title card, pink kept to the kicker letters; the stanzas after it pale lavender`, { pal: T.pal, color1: S.color1 });
     check(T.barZ === '1', `${name}: the letterbox bars sit above the rays`, { barZ: T.barZ });
     check(!S.title1 && !S.banner1 && S.strip && !S.strip.title && S.strip.kids === 0 && S.strip.before === 'none', `${name}: other stanzas are inked text off the banner - the post-Void strip's first stanza too`, { t1: S.title1, b1: S.banner1, strip: S.strip });
-    check(S.skip && /plg-skip-pop/.test(S.skip.cls) && /Skip prologue/.test(S.skip.txt) && /^"?Nunito/.test(S.skip.font) && S.hintKeys === 2, `${name}: a pop Skip button and keycap hints`, { skip: S.skip, keys: S.hintKeys });
+    check(S.skip && /plg-skip-pop/.test(S.skip.cls) && /Skip prologue/.test(S.skip.txt) && /^"?Nunito/.test(S.skip.font) && S.hintKeys === (/phone/.test(name) ? 1 : 2), `${name}: a pop Skip button and keycap hints (release18: one TAP keycap on a phone)`, { skip: S.skip, keys: S.hintKeys });
     const h = S.hud;
     check(/plg-hud/.test(h.cls) && /^"?Nunito/.test(h.font) && h.title === 'MEMORY OF WHAT YOU BECOME' && h.clock === '0:26' && h.god && /INVULNERABLE/.test(h.godTxt) && h.titleStroke >= 3 && h.chips === 3,
       `${name}: the memory panel - a ransom-note title, the clock, the invulnerable tape`, h);
