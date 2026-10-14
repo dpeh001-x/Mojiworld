@@ -60,7 +60,7 @@ const r = await page.evaluate(async () => {
       if (poseKey) _lxBossAtkPose(m, poseKey, 240); else { m._bossAtkKey = null; m._bossAtkUntil = 0; }
       m._frameIsAttack = true; m.patternState = 'attack';
       await new Promise((res) => setTimeout(res, 60));
-      if (m._visW > 0 && m._visH > 0 && (m._bossAtkKey || m.type) === want) break;
+      if (m._visW > 0 && m._visH > 0 && (m._bossAtkKey || m.type) === want && !m._lxSIcv) break;   // v0.30.1761 sov-standin - not while the held pose stands in for a set that is still baking (it keeps ITS own calibration)
     }
     return { key: m._bossAtkKey || m.type, w: Math.round(m._visW || 0), h: Math.round(m._visH || 0) };
   };
