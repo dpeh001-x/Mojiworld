@@ -58,7 +58,7 @@ const checks = [
   ['bg layer points at the plate', /bg_ending_dawn\.webp/.test(r.bgImage || ''), r.bgImage],
   ['bg faded in (opacity 1)', r.bgOpacity === 1, r.bgOpacity],
   ['fade + drift animations attached', /gcBgIn/.test(r.anim || '') && /gcBgDrift/.test(r.anim || ''), r.anim],
-  ['layer order bg < veil < stars < title', r.order.indexOf('gc-bg') === 0 && r.order.indexOf('gc-veil') === 1 && r.order.indexOf('gc-stars') === 2 && r.order.indexOf('gc-title') === 3, r.order.join(',')],
+  ['layer order bg < veil < stars < title', r.order.indexOf('gc-bg') === 0 && r.order.indexOf('gc-veil') === 1 && r.order.indexOf('gc-stars') === 2 && (r.order.indexOf('gc-title') === 3 || r.order.indexOf('gc-head') === 3), r.order.join(',')],   // release24: gc-head holds the title and subtitle
   ['title still present', /THE WORLD DREAMS AGAIN/.test(r.titleText || ''), r.titleText],
 ];
 let fails = 0;

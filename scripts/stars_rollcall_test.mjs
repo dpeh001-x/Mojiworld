@@ -69,7 +69,7 @@ try {
   ok('the guidance line names the next star', /^9 left/.test(R.guide3 || '') && /next Cancer/.test(R.guide3 || ''), R.guide3);
   ok('the quest counts its beaten stars (3)', R.prog3 === 3, R.prog3);
   ok('the Journal lists "Put to rest \u00b7 3/12" and "Still burning \u00b7 9/12"', /Put to rest \u00b7 3\/12/.test(R.j3 || '') && /Still burning \u00b7 9\/12/.test(R.j3 || ''), (R.j3 || '').slice(0, 200));
-  ok('the Journal names a star at rest and a star still burning', /Ariel the Ember Ram/.test(R.j3 || '') && /Pisces the Twin Current \u00b7 Lv 90/.test(R.j3 || ''));
+  ok('the Journal names a star at rest and a star still burning', /Ariel the Ember Ram/.test(R.j3 || '') && /Pisces the Twin Current \u00b7 Lv 92/.test(R.j3 || ''));   // release24: the level Pisces spawns at (data/monster_stats.js), was levelReq 90
   ok('with all twelve down the list says 12/12 and no "Still burning" row', R.rc12 === 12 && /Put to rest \u00b7 12\/12/.test(R.html12) && !/Still burning/.test(R.html12));
   ok('two stars at rest: no milestone', R.ms2 === 0, R.ms2);
   ok('three at rest: the sky toast, once', R.ms3.length === 1 && /Three stars at rest/.test(R.ms3[0]), R.ms3);

@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1763';
+const GAME_VERSION = 'v0.30.1764';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -53559,6 +53559,7 @@ const PLAYER_SAVE_FIELDS = [
   '_downPending',   // v0.30.918 a down the save caught (see loadState)
   '_lxBeatOpen', '_lxFilmOpen',   // v0.30.1722 release8: the scene or film a reload cut short (see loadState)
   '_lxEndingDue', '_lxTwelveLegacy',   // v0.30.1742 release14: the ending a closed game cut short; a save that beat a House before Aetherion (see loadState)
+  '_lxBeatsOwed',   // v0.30.1764 release24: the star scenes a kill still owes (see _lxOweStarBeats / loadState)
   '_hourglassDue',   // v0.30.1737 bughunt6: the Hourglass verdict owed by a turn-in whose scene never opened (see loadState)
   '_cdCarry'   // v0.30.x cooldown integrity - what was still cooling down (see _lxCdSnapshot)
 ];
@@ -57132,6 +57133,7 @@ function _playStoryBeat(beatId, onClose, _lxBeatMap) {
     beat = STORY_BEATS[beatId];
     if (!beat || !beat.stanzas || !beat.stanzas.length) return false;
     player._storyBeatsSeen[beatId] = true;
+    try { if (Array.isArray(player._lxBeatsOwed)) { const _oi = player._lxBeatsOwed.indexOf(beatId); if (_oi >= 0) player._lxBeatsOwed.splice(_oi, 1); if (!player._lxBeatsOwed.length) delete player._lxBeatsOwed; } } catch (e) {}   // v0.30.1764 release24: an owed star scene is paid as it opens
     player._lxBeatOpen = beatId;   // v0.30.1722 release8: cleared when it closes; a close cut short by quitting replays it on the next load
     if (typeof saveState === 'function') saveState();
   }
@@ -58582,6 +58584,12 @@ function loadState() {
         setTimeout(() => _go(0), 1500);
       }
     } catch (e) {}
+    // v0.30.1764 release24 - the star scenes a quit cut off (only what this save carries), and a Petition the ending went without
+    try {
+      if (!(s.player && Array.isArray(s.player._lxBeatsOwed))) delete player._lxBeatsOwed;
+      if (!window._lxOwedBeatsArmed && typeof _lxOwedBeatsReplay === 'function') window._lxOwedBeatsArmed = _lxOwedBeatsReplay();
+    } catch (e) {}
+    try { if (typeof _lxPetitionSettleQuiet === 'function') _lxPetitionSettleQuiet(); } catch (e) {}
     // v0.30.1734 release12 - a boss boon wheel the reload cut off comes back once the hero is in the world (unpaused, no title, no prologue)
     try {
       try { if (_lxAc.on && game._lxBoonOwed) game._lxBoonOwed = _lxBoonOwedSane(game._lxBoonOwed); } catch (e) {}   // v0.30.1744 release15
@@ -68270,7 +68278,8 @@ function acceptQuest(id, _lxQuiet) {   // v0.30.902 _lxQuiet: the caller announc
   // the hunt-curve branch above is gated four ways and the story quests this
   // exists for never enter it.
   try { _lxStampObjective(id); } catch (e) {}
-  const _npcLine = q.npc ? ` — talk to ${q.npc}` : '';
+  let _lxTalkNext = null; try { const _tl = q.talkTo, _tp = ((player.quests.active[id] || {}).talkProgress) || {}; if (Array.isArray(_tl)) _lxTalkNext = _tl.find((n) => !_tp[n]) || null; } catch (e) {}   // v0.30.1764 release24: the first one still to talk to (was the hand-in NPC)
+  const _npcLine = (_lxTalkNext || q.npc) ? ` — talk to ${_lxTalkNext || q.npc}` : '';
   if (!_lxQuiet) showToast(`📜 Quest started — ${q.icon} ${q.name}${_npcLine}`, 'rare');
   saveState();
   // v0.25.595 — refresh HUD tracker on accept (membership change).
@@ -114440,6 +114449,7 @@ function _killMonsterRaw(m) {
   // STANDARD TICK PATH — skipped for ticket-family kills (already direct-
   // ticked above) to prevent double-counting. All other mob types
   // (non-ticket world mobs) still go through the regular pipeline.
+  if (m.type === 'gravitos' && !_inExp && !_isIllusionKill && !_lxTwinKill && !m._rushBoss && typeof _lxPetitionAccept === 'function') _lxPetitionAccept();   // v0.30.1764 release24: the kill that ends the story takes the Petition first; the tick below completes it as usual
   if (m.type && !_inExp && !m._pqDirectTicked && !_isIllusionKill && !_lxTwinKill && !m._rushBoss) tickQuestKill(m.type, !!m.isBoss);   // v0.30.1724 bughunt3 - not a Boss Rush kill: those are echoes too, and Gravitos falls there in ONE form (the finale quest finished in the Rush)   // v0.30.1698 (per user: a boss quest taken after the boss died sat at 0/1 - only the echo was left for 10 minutes) an echo of a quest's boss ticks its quest, whatever kind (kill, critical, story-beat, q_road_6). It still pays no daily (tickDaily above), no EXP or coins, and stamps no map; v0.30.511 had stopped every quest tick   // v0.29.321 — mirages don't advance hunt quests
   // Mastery (v0.24.1) — per-mob-type kill counter. Hitting thresholds of
   // 100 / 500 / 1000 kills grants +1% / +2% / +3% damage vs that type.
@@ -114480,6 +114490,7 @@ function _killMonsterRaw(m) {
       audio.play('levelup');
       // v0.30.1402 - its last words (LX_ZODIAC_LAST_WORDS), once per save. first_zodiac_kill (1800 ms) and zodiac_twelve_done
       // (2600 ms) queue behind them: the champion speaks first, then the world answers.
+      try { if (typeof _lxOweStarBeats === 'function') _lxOweStarBeats(m.zodiacSign, typeof ZODIAC_SIGNS !== 'undefined' && ZODIAC_SIGNS.every((zz) => zz.id === m.zodiacSign || zodiacDefeated(zz.id))); } catch (e) {}   // v0.30.1764 release24: saved before the timers below, so a quit inside them still plays the scenes at the next load
       if (typeof _playStoryBeat === 'function' && STORY_BEATS['zodiac_words_' + m.zodiacSign]) setTimeout(() => { _playStoryBeat('zodiac_words_' + m.zodiacSign); }, 1700);
       // v0.25.941 — first_zodiac_kill story beat. Fires the FIRST time
       // the player downs any Zodiac (regardless of which sign). The
@@ -119919,7 +119930,7 @@ function _lxQuestTalkWanted() {
 }
 // v0.30.1748 release17 - the boss door's "Recommended level" agrees with the boss's own quests: the lowest of the arena's level and the level a
 // boss quest for its boss opens at (Gelwater Grotto said 10+ while The Brimming Tyrant opens at Lv 8 and the road sends you at 9)
-function _lxArenaRecLevel(M) { let lv = (M && M.levelReq) | 0; try { const bt = M && M.bossType; if (bt) for (const id in QUESTS) { const q = QUESTS[id]; if (q && q.kind === 'boss' && q.target === bt && (q.levelReq | 0) > 0 && (!lv || (q.levelReq | 0) < lv)) lv = q.levelReq | 0; } } catch (e) {} return lv; }
+function _lxArenaRecLevel(M) { let lv = (M && M.levelReq) | 0; try { const bt = M && M.bossType; if (bt) for (const id in QUESTS) { const q = QUESTS[id]; if (q && q.kind === 'boss' && q.target === bt && (q.levelReq | 0) > 0 && (!lv || (q.levelReq | 0) < lv)) lv = q.levelReq | 0; } } catch (e) {} try { if (M && M.isZodiac && M.zodiacSign && typeof _lxStarBossLv === 'function') { const _zl = _lxStarBossLv(M.zodiacSign); if (_zl > 0) lv = _zl; } } catch (e) {} return lv; }   // v0.30.1764 release24: a star arena names its own boss's level (every star door said 70+)
 function _lxTalkTarget() {
   const _tw = (typeof _lxQuestTalkWanted === 'function') ? _lxQuestTalkWanted() : {};   // v0.30.1748 release17
   if (typeof game === 'undefined' || !game || !Array.isArray(game.npcs) || typeof player === 'undefined' || !player) return null;
@@ -133378,6 +133389,14 @@ function _showGameComplete() {
       #gc-roll .small { font-size:12px; color:#7a7290; margin-top:48px; }
       #gc-close { position:absolute; bottom:5%; left:50%; transform:translateX(-50%); padding:11px 30px; background:linear-gradient(180deg,#5a3a8a,#3a1a5e); color:#fff; border:1px solid #aa77cc; border-radius:8px; font:700 14px Georgia,serif; letter-spacing:1px; cursor:pointer; opacity:0; animation:gcFadeIn 1.6s ease 4s both; box-shadow:0 6px 22px rgba(120,70,200,0.4); }
       #gc-close:hover { filter:brightness(1.15); }
+      /* v0.30.1764 release24 - the button fades in on its own keyframes, keeping translateX(-50%) (gcFadeIn's transform dropped it); the title scales to the
+         screen and the subtitle flows under it (#gc-head) instead of drawing over a wrapped title */
+      #gc-close { animation-name:gcFadeInX; }
+      @keyframes gcFadeInX { from { opacity:0; transform:translateX(-50%) translateY(8px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+      #gc-head { position:absolute; top:8%; left:0; right:0; padding:0 16px; text-align:center; }
+      #gc-head #gc-title, #gc-head #gc-sub { position:static; }
+      #gc-head #gc-title { font-size:clamp(20px, min(4.4vw, 8.2vh), 44px); letter-spacing:clamp(2px, 0.6vw, 6px); line-height:1.15; }
+      #gc-head #gc-sub { margin-top:clamp(6px, 2.4vh, 16px); font-size:clamp(11px, 1.5vw, 14px); }
       @keyframes gcFadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
       @keyframes gcRoll { from { transform:translateY(0); } to { transform:translateY(calc(-100% - 60vh)); } }
       @keyframes gcTwinkle { 0%,100% { opacity:0.25; } 50% { opacity:0.9; } }
@@ -133396,8 +133415,8 @@ function _showGameComplete() {
   ov.innerHTML =
     '<div id="gc-bg"></div><div id="gc-veil"></div>' +   // v0.30.417 — painted backdrop + veil, under the stars
     '<div id="gc-stars">' + stars + '</div>' +
-    '<div id="gc-title">✦ THE WORLD DREAMS AGAIN ✦</div>' +
-    '<div id="gc-sub">The Everdawn Cycle is complete.</div>' +
+    '<div id="gc-head"><div id="gc-title">✦ THE WORLD DREAMS AGAIN ✦</div>' +
+    '<div id="gc-sub">The Everdawn Cycle is complete.</div></div>' +   // v0.30.1764 release24: title + subtitle in one block
     '<div id="gc-roll-wrap"><div id="gc-roll">' +
       '<div class="h">MOJIWORLD</div>' +
       '<div class="line">The world that forgot how to dream<br>remembers &mdash; because you walked it.</div>' +
@@ -133430,6 +133449,23 @@ function _showGameComplete() {
     try { setTimeout(function () { if (typeof openTitlesPanel === 'function' && typeof _lxStoryComplete === 'function' && _lxStoryComplete()) openTitlesPanel({ fresh: true }); }, 1400); } catch (e) {}
     setTimeout(function () { if (ov && ov.parentNode) ov.parentNode.removeChild(ov); }, 400);
   };
+  // v0.30.1764 release24 - Enter / Escape / Space close the credits (after a 1.5 s grace: the key that skipped the last ending card is not a second
+  // answer; repeats ignored), the button takes focus, and the close runs once. The pad already reaches it (_LX_PAD_MODAL_IDS).
+  if (close) {
+    var _gcOnce = close.onclick, _gcDone = false;
+    close.onclick = function () { if (_gcDone) return; _gcDone = true; return _gcOnce.apply(this, arguments); };
+    var _gcT0 = Date.now();
+    var _gcKey = function (e) {
+      if (!ov.isConnected || !ov.classList.contains('on')) { document.removeEventListener('keydown', _gcKey, true); return; }
+      if (e.key !== 'Enter' && e.key !== 'Escape' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      e.preventDefault(); e.stopPropagation(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      if (e.repeat || Date.now() - _gcT0 < 1500) return;
+      document.removeEventListener('keydown', _gcKey, true);
+      close.onclick();
+    };
+    document.addEventListener('keydown', _gcKey, true);
+    setTimeout(function () { try { close.focus({ preventScroll: true }); } catch (e) {} }, 60);
+  }
   void ov.offsetWidth;
   ov.classList.add('on');
 }
@@ -137902,14 +137938,56 @@ const LX_STAR_EPITAPH = {
   aquarius: 'Poured and poured. Let the question run.',
   pisces: 'Last to fall. Asked: who is counting us?',
 };
+// v0.30.1764 release24 - STAR SCENES A CLOSED GAME CUT SHORT. A star kill's scenes wait behind the boon wheel in timers that were never saved, so quitting
+// there lost them for good. The kill records what it owes (player._lxBeatsOwed, saved); a scene leaves the list as it opens (one cut short
+// while open is release8's _lxBeatOpen replay). loadState plays what is left, in story order, after the boon wheel the reload re-offers.
+// v0.30.1764 release24 - the level a star's boss spawns at (data/monster_stats.js), levelReq as the fallback. Display only: levelReq still decides reach.
+function _lxStarBossLv(sign) { try { const t = (typeof LX_MONSTER_STATS !== 'undefined' && LX_MONSTER_STATS) ? LX_MONSTER_STATS['zodiac_' + sign] : null; if (t && (t.lv | 0) > 0) return t.lv | 0; } catch (e) {} try { const z = ZODIAC_SIGNS.find((x) => x.id === sign); return z ? (z.levelReq | 0) : 0; } catch (e) { return 0; } }
+function _lxOweStarBeats(sign, all) {
+  try {
+    const seen = player._storyBeatsSeen || {}, ow = Array.isArray(player._lxBeatsOwed) ? player._lxBeatsOwed : [];
+    const add = (k) => { if (k && STORY_BEATS[k] && !seen[k] && ow.indexOf(k) < 0) ow.push(k); };
+    add('zodiac_words_' + sign); add('first_zodiac_kill'); if (all) add('zodiac_twelve_done');
+    if (ow.length) { player._lxBeatsOwed = ow; if (typeof saveState === 'function') saveState(); }
+  } catch (e) {}
+}
+function _lxOwedBeatRank(k) { return /^zodiac_words_/.test(k) ? 0 : k === 'first_zodiac_kill' ? 1 : k === 'zodiac_twelve_done' ? 2 : 3; }
+function _lxOwedBeatsReplay() {
+  try {
+    const seen = () => player._storyBeatsSeen || {};
+    const list = (Array.isArray(player._lxBeatsOwed) ? player._lxBeatsOwed.slice() : []).filter((k) => typeof k === 'string' && STORY_BEATS[k] && !seen()[k]);
+    if (_lxTwelveDown() && !seen().zodiac_twelve_done && list.indexOf('zodiac_twelve_done') < 0) list.push('zodiac_twelve_done');   // all twelve at rest, the scene never seen
+    list.sort((a, b) => _lxOwedBeatRank(a) - _lxOwedBeatRank(b));
+    if (!list.length) { delete player._lxBeatsOwed; return false; }
+    const busy = (n) => {
+      const _ov = document.getElementById('loading-overlay'), _up = !!_ov && !_ov.classList.contains('fade') && getComputedStyle(_ov).display !== 'none';
+      if (_up || window._prologueActive || (typeof game !== 'undefined' && game && game.paused)) return true;
+      if (n < 60 && (game._lxBoonOwed || game._pendingBossBoon)) return true;   // the boon wheel the reload re-offers goes first (30 s at most)
+      if (typeof _lxBeatHeld === 'function' && _lxBeatHeld()) return true;
+      const _sb = document.getElementById('story-beat-overlay'); if (_sb && _sb.classList.contains('on')) return true;
+      return !!(document.getElementById('kill-film-overlay') || document.getElementById('lx-pause') || (typeof _QTE !== 'undefined' && _QTE && _QTE.active));
+    };
+    let i = 0;
+    const done = () => { try { if (list.indexOf('zodiac_twelve_done') >= 0 && typeof _lxSiblingReveal === 'function') _lxSiblingReveal(); } catch (e) {} };   // then Mira's reveal, as after the kill
+    const step = (n) => {
+      if (busy(n)) { if (n < 1200) setTimeout(() => step(n + 1), 500); return; }
+      if (i >= list.length) { done(); return; }
+      const k = list[i++], next = () => setTimeout(() => step(0), 350);
+      let ok = false; try { ok = !seen()[k] && typeof _playStoryBeat === 'function' && _playStoryBeat(k, next) === true; } catch (e) {}
+      if (!ok) next();
+    };
+    setTimeout(() => step(0), 2600);
+    return true;
+  } catch (e) { return false; }
+}
 function _lxStarsRollCall() {
-  const out = [];
+  const out = [];   // v0.30.1764 release24: lv is the boss's spawn level (_lxStarBossLv), reach still levelReq
   try {
     if (typeof ZODIAC_SIGNS === 'undefined') return out;
     const lv = (typeof player !== 'undefined' && player && player.level) || 1;
     for (const z of ZODIAC_SIGNS) {
       const ep = (String(z.desc || '').match(/<i>([^<]*)<\/i>/) || [])[1] || '';   // the failing: why it burned
-      out.push({ id: z.id, name: z.name, short: String(z.name).split(' the ')[0], glyph: z.glyph, lv: z.levelReq || 1, ep: ep, epi: (typeof LX_STAR_EPITAPH !== 'undefined' && LX_STAR_EPITAPH[z.id]) || '', house: (typeof LX_ZODIAC_HOUSE !== 'undefined' && LX_ZODIAC_HOUSE[z.id]) || '', down: zodiacDefeated(z.id), reach: lv >= (z.levelReq || 1) });
+      out.push({ id: z.id, name: z.name, short: String(z.name).split(' the ')[0], glyph: z.glyph, lv: (typeof _lxStarBossLv === 'function' && _lxStarBossLv(z.id)) || z.levelReq || 1, ep: ep, epi: (typeof LX_STAR_EPITAPH !== 'undefined' && LX_STAR_EPITAPH[z.id]) || '', house: (typeof LX_ZODIAC_HOUSE !== 'undefined' && LX_ZODIAC_HOUSE[z.id]) || '', down: zodiacDefeated(z.id), reach: lv >= (z.levelReq || 1) });
     }
   } catch (e) {}
   return out;
@@ -146301,6 +146379,38 @@ function _lxGravitosEarned() {
     if ((Q.active && Q.active.q_boss_gravitos) || (Q.completed && Q.completed.q_boss_gravitos)) return true;
     return !!(typeof QUESTS !== 'undefined' && QUESTS.q_boss_gravitos && typeof _lxPrereqMet === 'function' && _lxPrereqMet(QUESTS.q_boss_gravitos));
   } catch (e) { return true; }
+}
+// v0.30.1764 release24 - THE PETITION GOES WITH THE ENDING. _lxGravitosEarned() counts its prereqs as earned, so the kill that ends the story could land
+// with the Petition never taken: ending, credits and title, but no frag_dawn and the Journal still asking for the five. The final kill takes
+// it first (the active entry set directly: acceptQuest refuses below Lv 90) and the kill's own tickQuestKill completes it as usual.
+function _lxPetitionAccept() {
+  try {
+    if (typeof QUESTS === 'undefined' || !QUESTS.q_boss_gravitos || !_lxGravitosEarned()) return false;
+    _ensureQuests(); const Q = player.quests;
+    if (Q.completed.q_boss_gravitos || Q.active.q_boss_gravitos) return false;
+    Q.active.q_boss_gravitos = { progress: 0 };   // not acceptQuest: no accept sound, no arena re-arm, no level gate in the middle of the kill
+    return !!Q.active.q_boss_gravitos;
+  } catch (e) { return false; }
+}
+// v0.30.1764 release24 - a save that finished the story without it is settled quietly at load: completed, frag_dawn, and the EXP _completeQuest pays
+// (the authored number capped at LX_QUEST_SHARE_HI of the current level). No toast; a level it crosses is taken once the hero is in the world.
+function _lxPetitionSettleQuiet() {
+  try {
+    if (!_lxStoryComplete() || typeof QUESTS === 'undefined' || !QUESTS.q_boss_gravitos) return false;
+    _ensureQuests(); const Q = player.quests;
+    if (Q.completed.q_boss_gravitos) return false;
+    delete Q.active.q_boss_gravitos; Q.completed.q_boss_gravitos = Date.now();
+    const r = QUESTS.q_boss_gravitos.rewards || {};
+    if (r.dawnFragment) _grantDawnFragment(r.dawnFragment);
+    if (r.exp > 0 && typeof _lxLevelCost === 'function') player.exp = (player.exp || 0) + Math.max(1, Math.min(Math.floor(r.exp), Math.floor(_lxLevelCost(player.level || 1) * LX_QUEST_SHARE_HI)));
+    const _lu = (n) => {
+      const _ov = document.getElementById('loading-overlay'), _up = !!_ov && !_ov.classList.contains('fade') && getComputedStyle(_ov).display !== 'none';
+      if (_up || window._prologueActive || (typeof game !== 'undefined' && game && game.paused)) { if (n < 1200) setTimeout(() => _lu(n + 1), 500); return; }
+      if (player.exp >= player.expToNext && typeof _maybeLevelUp === 'function') _maybeLevelUp();
+    };
+    if (player.exp >= player.expToNext) setTimeout(() => _lu(0), 3000);
+    return true;
+  } catch (e) { return false; }
 }
 function _lxDawnExpMul()  { return _lxStoryComplete() ? 1 + LX_DAWN_FAVOR_EXP : 1; }
 function _lxDawnCoinMul() { return _lxStoryComplete() ? 1 + LX_DAWN_FAVOR_COINS : 1; }
