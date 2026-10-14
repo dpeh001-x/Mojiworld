@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1759';
+const GAME_VERSION = 'v0.30.1760';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -109696,13 +109696,14 @@ function bossAI(m, dt, distToPlayer) {
         m._kAnnounced = false;
         m._kFired = false;
         m._kJumped = false; m._kJumpAir = false;   // v0.30.1006 a fresh jump slam starts from its wind-up
+        m.vx = 0;   // v0.30.1759 krook-plant - the tick a pattern is picked still integrated the idle shuffle's last step, 2 px under the new pattern's art
       }
     } else if (m.patternState === 'claw') {
-      m.vx = t < 300 ? m.facing * 4 * (1 - t / 300) : 0;     // v0.30.1038 krook-walk — a step into the swipe, then planted (was 4 for all 700 ms: the swipe pose skated ~170 px)
+      m.vx = 0;   // v0.30.1759 krook-plant - he swipes from where he stands (v0.30.1038's 20-31 px step-in drew WALK frames and skated him; its reach moved into the box below)
       if (t > 350 && !m._kFired) {
         m._kFired = true;
         // Big arc-swipe hitbox in front of the boss (one-frame projectile).
-        const sx = m.x + (m.facing > 0 ? m.w : -50);
+        const sx = m.x + (m.facing > 0 ? m.w + _KROOK_CLAW_STEP : -50 - _KROOK_CLAW_STEP);   // v0.30.1759 krook-plant - the swipe lands where it did when he stepped in
         game.projectiles.push({
           x: sx, y: m.y + m.h * 0.3,
           vx: m.facing * 2, vy: 0,
@@ -109905,7 +109906,7 @@ function bossAI(m, dt, distToPlayer) {
         if (t >= 300 && m.onGround) {
           m._kJumped = true; m._kJumpAir = false; m._kJumpMs = 0;
           m.vy = -14;
-          m.vx = m.facing * 5;
+          m.vx = 0;   // v0.30.1759 krook-plant - up and down on the spot (was facing * 5: a 167 px glide through the air drawn on WALK frames); his flank waves still reach 450 px each way
         }
       } else if (!m._kFired) {
         m._kJumpMs = (m._kJumpMs || 0) + _rawDt;
@@ -158156,6 +158157,7 @@ function _bossWalkFrame(key, m) {
   const _fr = BOSS_WALK_FRAMES[key];
   if (m && m.type === 'gravitos' && _fr && _fr.length > 1 && (_fr._readyN | 0) >= _fr.length) { const _gp = _gravWalkPos(key, m, _fr.length); if (_gp != null) return _fr[Math.floor(_gp) % _fr.length]; }   // v0.30.1624 gravitos-stride
   if (m && m.type === 'towerArbiter' && _fr && _fr.length > 1 && (_fr._readyN | 0) >= _fr.length) { const _ap = _arbWalkPos(m, _fr.length); if (_ap != null) return _fr[Math.floor(_ap) % _fr.length]; }   // arbiter-dash - paced by the distance he walks
+  if (m && m.type === 'kingKrook' && _fr && _fr.length > 1 && (_fr._readyN | 0) >= _fr.length) { const _kp = _krookWalkPos(m, _fr.length); if (_kp != null) return _fr[Math.floor(_kp) % _fr.length]; }   // v0.30.1759 krook-plant - paced by the distance he walks
   const _ms = _bossWalkMsFor(m);
   const _w = _BOSS_WALK_WEIGHTS[key];
   const _phase = _bossAnimPhase(_fr, m, 'walk', true);
@@ -158293,6 +158295,7 @@ function _bossWalkPair(key, m) {
   if (n < 2) return null;
   if (m && m.type === 'gravitos') { const _gp = _gravWalkPos(key, m, n); if (_gp != null) { const _gi = Math.floor(_gp) % n; return { a: frames[_gi], b: frames[(_gi + 1) % n], f: _gp - Math.floor(_gp), i: _gi, n }; } }   // v0.30.1624 gravitos-stride
   if (m && m.type === 'towerArbiter') { const _ap = _arbWalkPos(m, n); if (_ap != null) { const _ai = Math.floor(_ap) % n; return { a: frames[_ai], b: frames[(_ai + 1) % n], f: _ap - Math.floor(_ap), i: _ai, n }; } }   // arbiter-dash
+  if (m && m.type === 'kingKrook' && n >= frames.length) { const _kp = _krookWalkPos(m, n); if (_kp != null) { const _ki = Math.floor(_kp) % n; return { a: frames[_ki], b: frames[(_ki + 1) % n], f: _kp - Math.floor(_kp), i: _ki, n }; } }   // v0.30.1759 krook-plant
   const frameMs = _bossWalkMsFor(m);
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const tAbs = Math.max(0, now + (m ? _mobAnimPhase(m, 'walk', true) : 0)) / frameMs;
@@ -158411,11 +158414,18 @@ function _lxFlierFloorY(x) {
 const _LX_BOSS_MOVE_PATTERNS = new Set(['zip', 'claw', 'shellSpin', 'jumpSlam', 'leap', 'latch', 'teleport', 'slam', 'charge', 'chargeWindup',
   'chargeBurst', 'headbutt', 'headbuttWindup', 'diveCross', 'pounceWindup', 'pounceLeap', 'burrow',
   'sweep']);   // v0.30.1724 bughunt3 - Cancer's phase-3 Pincer Sweep charges along the ground (vx 6.5); it was rooted in place
+// v0.30.1759 krook-plant (per user: "the issue is him sliding around when he is playing the attacking sprites, ensure attacking sprites are played and boss is kept in the
+// same spot without sliding"). King Krook's claw and jump slam were 'moving attacks' (a step-in, a 167 px leap) and his shell spin's wind-up shared the shell spin's exemption, so
+// the body travelled under the walk art, or waited 140 ms in front of it. Now all three stand: the claw and the slam from their first frame, the shell spin until the charge
+// itself starts (m._shellDir is set by the charge, so a guest, which never runs his AI, falls through to the old rule). The charge is the one thing that still moves him, and it
+// draws his walk (see _krookWalkPos).
+const _KROOK_CLAW_STEP = 26;   // px the claw's old step-in carried the body (measured 20-31); the swipe box starts this much further out instead
+function _lxKrookStands(m, ps) { return m.type === 'kingKrook' && (ps === 'claw' || ps === 'jumpSlam' || (ps === 'shellSpin' && !m._shellDir)); }
 function _lxBossAttackPlanted(m) {
   if (!m || !(m.isBoss || m.boss || m.zodiacBoss || m.superBoss || m._rushBoss)) return false;
   if (m._coopMirror || m._braceDashing || m._hgCharging || m._dashing || m._dashT > 0 || m._zFlying || m._zLungeMs > 0) return false;
   const ps = m.patternState;
-  if (ps && ps !== 'idle' && (_BOSS_MOVE_DRAW_STATES.has(ps) || _LX_BOSS_MOVE_PATTERNS.has(ps))) return false;
+  if (ps && ps !== 'idle' && (_BOSS_MOVE_DRAW_STATES.has(ps) || _LX_BOSS_MOVE_PATTERNS.has(ps)) && !_lxKrookStands(m, ps)) return false;
   if (ps && ps !== 'idle') return true;
   // never the contact-hit window (atkAnimUntil alone): a boss standing by the hero would plant on every brush and never walk off
   const _now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -158850,6 +158860,26 @@ function _zodiacTurn(sign, state, elapsedMs, m) {
 // speed - slow drift included. A walk begun after a pause starts on its first frame. Fractional position for the walk pair's sub-frame
 // motion; null for a key with no stride (the old timing).
 const _GRAV_WALK_STRIDE = {"gravitos":110,"gravitos2":145,"gravitos3":145};
+// v0.30.1759 krook-plant - KING KROOK'S FEET FOLLOW THE FLOOR (per user: "essentially the same slip and sliding issues that the previous bosses such as tower arbiter faced").
+// His walk ran on the wall clock - 450 ms a cycle whatever his speed - so it matched the ground only at his top shuffle (2 px a step = 54 px a cycle) and skated at every
+// slower one, in every ease-in and ease-out, and at a flat 13 px a step through the shell charge. It now follows the distance he has walked, one cycle per _KROOK_WALK_STRIDE px with
+// the authored holds (_BOSS_WALK_WEIGHTS) kept. A step counts for at most _KROOK_WALK_STEP_CAP px, so the shell charge scuttles at a fast-walk cadence instead of strobing
+// nine frames over 13 px. A walk begun after a pause starts on its first frame. Fractional frame position for the walk pair; null while the set or its weights are not ready.
+const _KROOK_WALK_STRIDE = 54;
+const _KROOK_WALK_STEP_CAP = 2.4;
+function _krookWalkPos(m, n) {
+  const w = _BOSS_WALK_WEIGHTS.kingKrook;
+  if (!m || !w || !(n > 1) || w.length !== n) return null;
+  const t = game.time | 0;
+  if (m._kwT == null || t - m._kwT > 8 || t < m._kwT) { m._kwD = 0; m._kwX = m.x; m._kwT = t; }
+  else if (m._kwT !== t) { const k = t - m._kwT, dx = Math.abs(m.x - m._kwX); m._kwD += (dx < 40 * k ? Math.min(dx, _KROOK_WALK_STEP_CAP * k) : 0); m._kwX = m.x; m._kwT = t; }
+  const ph = m._kwD / _KROOK_WALK_STRIDE;
+  let sum = _BOSS_WALK_WSUM.kingKrook;
+  if (sum === undefined) { sum = 0; for (let i = 0; i < w.length; i++) sum += w[i]; _BOSS_WALK_WSUM.kingKrook = sum; }
+  let q = (ph - Math.floor(ph)) * sum;
+  for (let i = 0; i < w.length; i++) { if (q < w[i]) return i + q / w[i]; q -= w[i]; }
+  return n - 1;
+}
 const _ARB_WALK_STRIDE = 120;   // arbiter-dash - game px walked per nine-frame cycle (a 60 px step)
 function _arbWalkPos(m, n) {
   if (!m || !(n > 1)) return null;
@@ -162590,7 +162620,11 @@ function drawMonster(m) {
   const _lxHeavyAtk = _nowAtk < (m._lxHeavyAtkUntil || 0) && (m._bigMeleeFiring || m._bigMeleeCd > 0);
   // v0.30.1513 arbiter - a boss lunging with traits.hourglassDashPose draws that one attack frame for the whole dash (see _lxHgDashPose)
   const _lxHgPoseDash = !!(m._hgCharging && m._hgPhase === 'dash' && m.traits && m.traits.hourglassDashPose != null);
-  const _bossAttacking = _sovAtkLive || _lxHeavyAtk || _lxHgPoseDash || (((m.patternState && m.patternState !== 'idle'
+  // v0.30.1759 krook-plant - every King Krook pattern is a stand-still attack now (the claw, the slam and the shell spin's wind-up included), so its art opens on the first frame of the
+  // pattern instead of after the 140 ms the planted gate waits (3-7 frames of idle / walk art in front of the firebomb, stomp, mega fireball and claw; 38 in front of the slam's
+  // leap). The one exception is the shell charge: a body that moves draws his walk, strictly.
+  const _lxKrookAtk = m.type === 'kingKrook' && !!m.patternState && m.patternState !== 'idle' && !_BOSS_MOVE_DRAW_STATES.has(m.patternState) && !(m.patternState === 'shellSpin' && (m._shellDir || (m._coopMirror && _bossMoving(m))));
+  const _bossAttacking = _sovAtkLive || _lxHeavyAtk || _lxHgPoseDash || _lxKrookAtk || (((m.patternState && m.patternState !== 'idle'
                           && !_BOSS_MOVE_DRAW_STATES.has(m.patternState))
                        || (m.atkAnimUntil && _nowAtk < m.atkAnimUntil))
                        && (_lxPlanted || m._braceDashing || _LX_ATK_WHILE_MOVING.has(m.type)));   // v0.30.699 barnaby-frames
