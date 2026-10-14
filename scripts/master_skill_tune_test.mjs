@@ -84,7 +84,7 @@ const cds = await page.evaluate(() => ({
   drX: SKILLS.dragoon_skylance.cd, baB: SKILLS.ballista_ult.cd,
 }));
 // v0.30.x - v0.30.778 (the user's Skill Editor numbers) moved Bloodmoon Domain 45 s -> 40 s.
-ok('Nightreaper B cooldown 40s (v0.30.356 asked 45s; v0.30.778, the user\'s Skill Editor)', cds.nrB === 40000, `${cds.nrB} ms`);
+ok('Nightreaper B cooldown 30s (release22 class balance; 40 s since v0.30.778, the user\'s Skill Editor; v0.30.356 asked 45s)', cds.nrB === 30000, `${cds.nrB} ms`);
 ok('Nightreaper X cooldown 22s -> 25s', cds.nrX === 25000, `${cds.nrX} ms`);
 ok('Dragoon X cooldown 11s -> 25s', cds.drX === 25000, `${cds.drX} ms`);
 ok('Ballista B cooldown untouched at 60s', cds.baB === 60000, `${cds.baB} ms`);
@@ -96,7 +96,7 @@ const src = await page.evaluate(async () => {
   const has = (x) => s.split(x).length - 1;
   return {
     // v0.30.x - the live literals (v0.30.785 / v0.30.814: the user's Skill Editor patches).
-    nrShard: has('damage: getAtk() * 2 + 10, owner: \'player\', skill: \'shard\', bspr: \'bult_nightreape'),
+    nrShard: has('damage: getAtk() * 9.5 + 10, owner: \'player\', skill: \'shard\', bspr: \'bult_nightreape'),   // release22 (was 2x + 10)
     nrShardOld: has('damage: getAtk() * 1.4 + 8'),
     nrNova: has("performAround(380, 7.6, { color: '#ff2244'"),
     nrDagger: has('getAtk() * 1.8 * (isCrit ? getCritDmg() : 1)'),
@@ -106,7 +106,7 @@ const src = await page.evaluate(async () => {
     baTurretUntouched: has('damage: Math.floor(getAtk() * 4.2) + 50,'),   // v0.30.814 - 0.9x + 6 -> 2.1x + 25
   };
 });
-ok('Bloodmoon shuriken 2x + 10 (v0.30.1604, doubled; 1x + 5 in v0.30.785; v0.30.356 set 0.76x), and the 1.4x original is gone',
+ok('Bloodmoon shuriken 9.5x + 10 (release22 class balance; 2x + 10 since v0.30.1604; 1x + 5 in v0.30.785), and the 1.4x original is gone',
   src.nrShard === 1 && src.nrShardOld === 0, JSON.stringify({ new: src.nrShard, old: src.nrShardOld }));
 ok('Bloodmoon nova 7.6x (v0.30.1604, doubled; 3.8x in v0.30.814; v0.30.356 set 2.2x)', src.nrNova === 1);
 ok('Eclipse dagger 1.8x (v0.30.1604, doubled; 0.9x in v0.30.814; v0.30.356 set 0.62x)', src.nrDagger === 1);
@@ -164,8 +164,8 @@ await boot();
 const mDrX = await measure('dragoon', 'warrior', 'knight', 'dragoon_skylance');
 
 // v0.30.x - v0.30.785 / v0.30.814 (the user's Skill Editor) raised the shuriken and the nova, so the v0.30.356 ~96 moved.
-ok('Bloodmoon Domain lands in its band (210-360 xATK since v0.30.1604 doubled every ATK multiplier; 105-180 before; v0.30.356 aimed ~96)',
-  mNrB >= 210 && mNrB <= 360, `${mNrB} xATK/cast`);
+ok('Bloodmoon Domain lands in its band (800-2400 xATK since release22 - 9.5x shuriken / 7.6x nova; 210-360 since v0.30.1604; v0.30.356 aimed ~96)',
+  mNrB >= 800 && mNrB <= 2400, `${mNrB} xATK/cast`);
 // v0.30.x - the bands follow the live numbers (v0.30.814 dagger 0.9x; v0.30.1050 slam 16x). v0.30.356 asked 100 / 80.
 ok('Eclipse Massacre lands in its band (200-320 xATK since v0.30.1604; 100-160 before; v0.30.356 asked ~100)',
   mNrX >= 200 && mNrX <= 320, `${mNrX} xATK/cast`);
