@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1764';
+const GAME_VERSION = 'v0.30.1765';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -63290,6 +63290,7 @@ function _lxCoopBossRewards(m, msg, ri, exp0, coins0) {
   if (String(msg.tp || '') !== 'pqConductor' && typeof _lxDeliverPendingBoon === 'function') {
     const _nm = (m && m.name) || ri.nm || '';
     game._pendingBossBoon = { name: _nm, icon: (m && m.icon) || '', maxRoll: String(msg.tp || '') === 'gravitos' };   // showPowerupChoice falls back to the crown icon
+    try { if (typeof _lxBoonOweNow === 'function') _lxBoonOweNow(game._pendingBossBoon); } catch (e) {}   // v0.30.1765 release24b: a guest's wheel is owed from the kill frame too
     setTimeout(() => { try { _lxDeliverPendingBoon(0); } catch (e) {} }, 1500);   // the host's own reveal delay; delivery retries until the guest is up and unpaused
     if (typeof showToast === 'function') showToast((_nm || 'The boss') + ' defeated! Choose a powerup!', 'legendary');
   }
@@ -63513,6 +63514,7 @@ function _coopApplyKill(msg) {
   // objective at 0/10 while bestiary credit counted all of them. Guards mirror
   // the host's line: skip mirages (msg.il), skip expedition runs, and respect
   // the party-quest direct-tick flag when we hold the mirror.
+  if (String(msg.tp || '') === 'gravitos' && msg.b && !msg.il && !+msg.tw && !+msg.rb && !(game.expedition && game.expedition.active) && typeof _lxPetitionAccept === 'function') { try { _lxPetitionAccept(); } catch (e) {} }   // v0.30.1765 release24b: as the host's kill - the Petition goes with the ending; the tick below completes it
   if (msg.tp && !msg.il && !+msg.tw && !+msg.rb && !(game.expedition && game.expedition.active)) {   // v0.30.1724 bughunt3 - nor a quest tick for a split twin; v0.30.1733 bughunt5 - nor a Boss Rush echo (the host's v0.30.1724 rule)
     // v0.29.5xx — TRAIN-PQ CORRECTNESS. The ticket family must NOT go through
     // tickQuestKill: all three Clockwork quests share target 'ticketMech' and
@@ -113668,6 +113670,16 @@ function _lxBoonOweOf(info) {
   if (info && Array.isArray(info._offer)) o._offer = info._offer.slice(0, 3).map((x) => ({ id: String((x && x.id) || ''), roll: +(x && x.roll) }));
   return o;
 }
+// v0.30.1765 release24b - THE WHEEL IS OWED FROM THE KILL. The kill is saved at once, the wheel 1.5 s later: a quit inside that gap kept the kill and lost the
+// wheel. A kill that pays one records it here at once (saved); the reveal re-records it with its three boons. One owed wheel at a time.
+function _lxBoonOweNow(info) {
+  try {
+    if (!info || typeof info !== 'object' || typeof game === 'undefined' || !game || game._lxBoonOwed) return false;   // an owed wheel already recorded is kept
+    game._lxBoonOwed = _lxBoonOweOf(info);
+    if (typeof saveState === 'function') saveState();
+    return true;
+  } catch (e) { return false; }
+}
 function _lxDeliverPendingBoon(tries) {
   const info = game._pendingBossBoon; if (!info) return;
   try { if (!game._lxBoonOwed) game._lxBoonOwed = _lxBoonOweOf(info); } catch (e) {}   // v0.30.1734 release12: a queued wheel is owed too
@@ -115087,6 +115099,7 @@ function _killMonsterRaw(m) {
     // Skip the modal entirely in that case; the player can re-pull the
     // boon next time they kill the boss (the bonus drops on the ground
     // are already there for the taking).
+    try { const _d0 = m._lxDeferredTakedown; if (!(_lxDefer || (_d0 && (_d0.echo || _d0.exp)) || m._expeditionBoss || m._echoBoss || ((m._isTwin || m._isPiscesTwin) && !_d0) || m.type === 'pqConductor') && typeof _lxBoonOweNow === 'function') _lxBoonOweNow(_bossInfo); } catch (e) {}   // v0.30.1765 release24b: owed (and saved) now, under the timer's own rules below - a quit before the reveal brings it back at the next load
     setTimeout(() => {
       // v0.30.1151 boss-fixes - does this kill pay the wheel at all? (the same exclusions as below: a deferred twin, an echo /
       // expedition boss, the Conductor) - if so, leaving or falling in this 1.5 s window queues it instead of losing it
