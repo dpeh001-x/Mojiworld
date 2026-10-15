@@ -73,7 +73,7 @@ try {
   const S = await page.evaluate(() => { const p = game.hazards.filter((h) => h.type === 'sovereign_drain_pillar'); return { n: p.length, art: p.every((h) => h._vfx === 'miraSandPillar') }; });
   ok('Sand Run Out: three falling-sand pillars wearing her sand art', S.n === 3 && S.art, S);
   // Turn Back
-  const T = await page.evaluate(async () => { const m = window.__m; m._miraSandAt = 1e12; player.x = m.x > 800 ? 120 : 1400; const x0 = m.x; m._miraStepAt = game.time | 0; return { x0, px: player.x }; });
+  const T = await page.evaluate(async () => { const m = window.__m; m._miraSandAt = 1e12; m._bossAtkUntil = 0; player.x = m.x > 800 ? 120 : 1400;   /* v0.30.1784: the blink waits out a live cast pose (the sand pose outlasts the 70 steps above), so it is ended first */ const x0 = m.x; m._miraStepAt = game.time | 0; return { x0, px: player.x }; });
   await step(4, () => { player.x = window.__tbx || player.x; });
   const T2 = await page.evaluate(() => ({ x: window.__m.x, px: player.x }));
   ok('Turn Back steps her toward a far hero', Math.abs((T2.x + 60) - T2.px) < Math.abs((T.x0 + 60) - T.px) - 100, { from: Math.round(T.x0), to: Math.round(T2.x), hero: T.px });

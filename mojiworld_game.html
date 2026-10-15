@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1783';
+const GAME_VERSION = 'v0.30.1784';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -101535,7 +101535,10 @@ function updateMonsters(dt) {
       }
       if (!_bmOnScreen && _lxAim && _lxAimSees(_lxAim, m)) _bmOnScreen = true;   // v0.30.1740 coop-guest - on the screen of the partner it fights
       // PHASE 1 — start telegraph when cd is up + in range + on screen.
-      if (!m._bigMeleeFiring && !m._columnFiring && m._bigMeleeCd <= 0 && !_lxMidSwing(m) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _bmInRange && _bmOnScreen) {   // v0.30.371 — not while spent   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
+      // v0.30.1784 swing-not-mid-lunge - and never mid-lunge (per user, Distorted Mira "kept still without sliding around"): a swing opened during an hourglass
+      // dash drew its pose while the dash carried the body ~48 px a step (its vx = 0 is overwritten every dash tick). The lunge already
+      // refuses to open mid-heavy and the column strike mid-lunge; the swing now waits too, and opens planted the step the dash ends.
+      if (!m._bigMeleeFiring && !m._columnFiring && m._bigMeleeCd <= 0 && !_lxMidSwing(m) && !(m._dirOpenT > 0) && !(m._dirFleeT > 0) && !(m._zSpentMs > 0) && _bmInRange && _bmOnScreen && !m._hgCharging) {   // v0.30.371 — not while spent   // v0.29.263 — winded bosses can't start a heavy · v0.29.x — nor a retreating one
         m._bigMeleeFiring = true;
         m._bigMeleeT = bm.telegraphMs;
         m.vx = 0;   // root during windup (stickMul bosses start creeping next tick)
@@ -101748,6 +101751,7 @@ function updateMonsters(dt) {
       // Never open a lunge mid-heavy: two committed attacks at once is
       // unreadable, and bigMelee is the one these mobs already telegraph.
       if (!m._hgCharging && !m._bigMeleeFiring && !m._columnFiring && m._hgCd <= 0 && _hgOnScreen
+          && !(m.type === 'miraFallen' && m._bossAtkKey && (game.time | 0) < (m._bossAtkUntil | 0))   // v0.30.1784 swing-not-mid-lunge - Distorted Mira never lunges out of a cast pose
           && Math.abs(_hgDx) < 640 && Math.abs(_hgDx) > 130) {
         m._hgCharging = true;
         m._hgPhase = 'brace';
@@ -105582,7 +105586,10 @@ function _bossSpecialAttacks(m, dt) {
     if (m._miraExposedUntil && _now >= m._miraExposedUntil) m._miraExposedUntil = 0;
     if (m._miraSpentUntil && _now >= m._miraSpentUntil) m._miraSpentUntil = 0;
     // ---- TURN BACK: she steps back through the moment to stand at your side ----
-    if (_now >= m._miraStepAt) {
+    // v0.30.1784 swing-not-mid-lunge - never mid-attack (per user: "when she attacks she is kept still"): the blink fired in the middle of her casts and the
+    // pose popped 300-380 px; it waits for the pose, the lunge, the swing and the column to end, then steps the moment they do
+    const _miraHeld = !!((m._bossAtkKey && _now < (m._bossAtkUntil | 0)) || m._hgCharging || m._bigMeleeFiring || m._columnFiring);
+    if (_now >= m._miraStepAt && !_miraHeld) {
       m._miraStepAt = _now + (_ph === 1 ? 150 : _ph === 2 ? 120 : 95);
       const _pcx = player.x + player.w / 2, _gap = _pcx - (m.x + m.w / 2);
       if (!m._miraShielded && Math.abs(_gap) > 260) {
@@ -105593,7 +105600,7 @@ function _bossSpecialAttacks(m, dt) {
     }
     m._dmgTakenMul = m._miraShielded ? (_ph === 1 ? 0.12 : _ph === 2 ? 0.10 : 0.08) : m._miraExposedUntil ? 1.75 : m._miraSpentUntil ? 1.5 : 1;
     // ---- THE GATE'S QUESTION: what dream will you give a world that has only nightmares? Only three steps can answer ----
-    if (_now >= m._miraGateAt && !m._miraShielded && !m._miraExposedUntil) {
+    if (_now >= m._miraGateAt && !m._miraShielded && !m._miraExposedUntil && !m._hgCharging) {   // v0.30.1784 swing-not-mid-lunge - no cast opens mid-lunge (its pose skated with the dash)
       m._miraGateAt = _now + (_ph === 1 ? 1440 : _ph === 2 ? 1080 : 810);
       m._miraSpentUntil = _now + 450; m._miraGateUntil = _now + 420;
       m._miraFeatherAt = Math.max(m._miraFeatherAt | 0, _now + 450); m._miraSandAt = Math.max(m._miraSandAt | 0, _now + 450);
@@ -105609,7 +105616,7 @@ function _bossSpecialAttacks(m, dt) {
       }
     }
     // ---- FALLEN FEATHERS: five homing black feathers ----
-    if (_now >= m._miraFeatherAt && !m._miraShielded && !m._miraExposedUntil && !m._miraSpentUntil && !((m._miraGateUntil | 0) > _now)) {
+    if (_now >= m._miraFeatherAt && !m._miraShielded && !m._miraExposedUntil && !m._miraSpentUntil && !((m._miraGateUntil | 0) > _now) && !m._hgCharging) {   // v0.30.1784 swing-not-mid-lunge
       m._miraFeatherAt = _now + (_ph === 1 ? 132 : _ph === 2 ? 102 : 78);
       _lxSovAtkPose(m, 'volley', 44);
       if (player && player.hp > 0 && game.projectiles) {
@@ -105623,7 +105630,7 @@ function _bossSpecialAttacks(m, dt) {
       }
     }
     // ---- SAND RUN OUT: three columns of the Hourglass's sand; under one, HP and MP run out to 1 ----
-    if (_now >= m._miraSandAt && !m._miraShielded && !m._miraExposedUntil && !((m._miraGateUntil | 0) > _now)) {
+    if (_now >= m._miraSandAt && !m._miraShielded && !m._miraExposedUntil && !((m._miraGateUntil | 0) > _now) && !m._hgCharging) {   // v0.30.1784 swing-not-mid-lunge
       m._miraSandAt = _now + (_ph === 1 ? 840 : _ph === 2 ? 660 : 540);
       _lxSovAtkPose(m, 'drain', 96);
       _beat({ flash: 0.28, shake: 7, ring: 210, motes: 10, toast: '⌛ SAND RUN OUT. Leave the falling sand!', tier: 'epic' });
