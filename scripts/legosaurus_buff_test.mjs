@@ -77,7 +77,7 @@ try {
         }
       } finally { window.showToast = _st; window._lxContactLanding = _cl; }
       const body = hits.filter((h) => h.src === 'touch'), rest = hits.filter((h) => h.src !== 'touch');
-      return { hits, touchMax: body.reduce((a, h) => Math.max(a, h.pct), 0), max: rest.reduce((a, h) => Math.max(a, h.pct), 0), toasts, zone: zone ? zone.color : null, crush: !!m._bdCrush, swings: swings.size, swingLabel: [...swings].map((p) => p._sourceLabel)[0] || null };
+      return { hits, touchMax: body.reduce((a, h) => Math.max(a, h.pct), 0), max: rest.reduce((a, h) => Math.max(a, h.pct), 0), toasts, zone: zone ? [zone.color, zone.hot ? 'hot' : 'cold', zone.tg].join('|') : null, crush: !!m._bdCrush,   /* v0.30.1771 krook-march: the colour never drew - hot + art do */ swings: swings.size, swingLabel: [...swings].map((p) => p._sourceLabel)[0] || null };
     };
     // just clear of what TOUCHES (his authored box + silhouette, _mobTouchBox - wider than m.w), and inside his 262 px swing reach
     m.x = game.mapData.worldWidth / 2 - m.w / 2;
@@ -113,12 +113,14 @@ try {
       ok(`his ${k} lands at least a quarter of max HP on a geared Lv 59 hero (it landed 2-4%)`, R[k].max >= 24.9, R[k]);
     ok('the brick-crusher: a column that rolls it lands 80% of max HP', R.crusher.hits.some((h) => /brick-crusher/i.test(h.src) && Math.abs(h.pct - 80) < 0.6), R.crusher);
     ok('the trait odds: one column in five may crush, about one charge in three is a crushing charge', R.cfg.rad && R.cfg.rad.chance === 0.2 && R.cfg.rad.flat === true && R.cfg.crush && R.cfg.crush.chance === 0.35 && R.cfg.crush.leave === 0.05, R.cfg);
-    ok('a crushing charge is told: a warning at the brace and a red lane', R.crush.toasts.some((t) => /CRUSHING CHARGE/.test(t)) && R.crush.zone === '#ff3322', { toasts: R.crush.toasts, zone: R.crush.zone });
+    // v0.30.1771 krook-march: zones paint only their art, so the v0.30.1738 "red lane" never showed - a crushing charge's lane now BLAZES (hot), on his own lane art
+    ok('a crushing charge is told: a warning at the brace and a blazing lane on his own lane art', R.crush.toasts.some((t) => /CRUSHING CHARGE/.test(t)) && R.crush.zone === '#ff3322|hot|tg_dash_legosaurus', { toasts: R.crush.toasts, zone: R.crush.zone });
     const cr = R.crush.hits.find((h) => /crushing/i.test(h.src));
     ok('a crushing charge from full HP leaves exactly 5% - near fatal, not fatal', !!cr && Math.abs(cr.left - 5) < 0.2, R.crush);
     const low = R.crushLow.hits.find((h) => /crushing/i.test(h.src));
     ok('...and from under 5% it leaves 1 HP, never a kill by itself', !!low && Math.abs(low.left - 100 / HP) < 0.01, R.crushLow);
     ok('an ordinary charge still gores (the old 50% path, no crush)', !R.gore.crush && R.gore.hits.some((h) => /goring/i.test(h.src)) && R.gore.toasts.every((t) => !/CRUSH/.test(t)), R.gore);
+    ok('an ordinary charge draws his lane art without the blaze (per user: "redesign some of the other boss charge")', !!R.gore.zone && /\|cold\|tg_dash_legosaurus$/.test(R.gore.zone), { zone: R.gore.zone });
   }
   ok('no page errors', errs.length === 0, errs);
 } finally { await browser.close(); server.kill(); }

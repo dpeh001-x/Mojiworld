@@ -53,7 +53,8 @@ try {
   const now = await page.evaluate(() => Date.now()); await page.clock.pauseAt(now + 1500);
   const snap = () => page.evaluate(() => { const m = window.__m, d = window.__drawn;
     const sl = game.projectiles.filter((p) => p && p._krookSlam).length, cl = game.projectiles.find((p) => p && p.skill === 'claw');
-    return { x: +m.x.toFixed(2), w: m.w, vx: +(m.vx || 0).toFixed(2), ps: m.patternState || '', og: !!m.onGround, y: +m.y.toFixed(1), d: d ? d.st : null, dx0: d ? +d.x.toFixed(2) : null, sh: m._shellDir || 0, waves: sl, clawX: cl ? +cl.x.toFixed(2) : null, face: m.facing }; });
+    return { x: +m.x.toFixed(2), w: m.w, vx: +(m.vx || 0).toFixed(2), ps: m.patternState || '', og: !!m.onGround, y: +m.y.toFixed(1), d: d ? d.st : null, dx0: d ? +d.x.toFixed(2) : null, sh: m._shellDir || 0, waves: sl, clawX: cl ? +cl.x.toFixed(2) : null, face: m.facing,
+      zone: (m.patternState === 'shellSpin' && typeof _lxAttackZones === 'function') ? ((_lxAttackZones() || []).filter((z) => z && z.kind === 'dash').map((z) => z.dir + ':' + z.tg)[0] || null) : null }; });   // v0.30.1771 krook-march: the Royal March's lane, read only during it (a zone read every step upset the claw's measurement)
   const step = async () => { await page.evaluate(() => { window.__keep(); window.__drawn = null; }); await page.clock.runFor(33); return snap(); };
   const runs = {};
   for (const name of NAMES) {
@@ -64,13 +65,16 @@ try {
     const F = [];
     for (let i = 0; i < 400; i++) { const s = await step(); if (i > 0 && s.ps === 'idle' && s.og) break; F.push(s); }
     let lead = null, lastX = null; const by = {}; let slidNonWalk = 0, chargeNonWalk = 0, chargeMoved = 0, minY = before.y, waves = 0, clawGap = null, maxXdev = 0;
+    let chargeVx = 0, marchN = 0, laneWind = 0, laneMarch = 0, laneBadDir = 0, laneTg = null;   // v0.30.1771 krook-march
     for (let i = 0; i < F.length; i++) { const f = F[i]; if (lead == null && (f.d === 'attack' || f.d === 'stomp')) lead = i; minY = Math.min(minY, f.y); waves = Math.max(waves, f.waves);
       if (f.clawX != null && clawGap == null) clawGap = f.face > 0 ? f.clawX - (f.x + f.w) : (f.x - 50) - f.clawX;
       maxXdev = Math.max(maxXdev, Math.abs(f.x - before.x));
+      if (name === 'shellSpin' && f.ps === 'shellSpin') { if (f.zone) laneTg = f.zone.split(':')[1];
+        if (f.sh) { marchN++; chargeVx = Math.max(chargeVx, Math.abs(f.vx)); if (f.zone) { laneMarch++; if ((f.zone.indexOf('right') === 0) !== (f.sh > 0)) laneBadDir++; } } else if (f.zone) laneWind++; }
       if (f.d) { const dx = lastX == null ? 0 : Math.abs(f.dx0 - lastX); lastX = f.dx0; const r = by[f.d] || (by[f.d] = { n: 0, px: 0 }); r.n++; r.px += dx;
         if (dx > 0.3 && f.d !== 'walk') slidNonWalk += dx;
         if (name === 'shellSpin' && f.sh) { chargeMoved += dx > 0.3 ? 1 : 0; if (f.d !== 'walk') chargeNonWalk++; } } }
-    runs[name] = { frames: F.length, lead, by, slidNonWalk: +slidNonWalk.toFixed(2), chargeNonWalk, chargeMoved, rose: +(before.y - minY).toFixed(0), waves, clawGap, maxXdev: +maxXdev.toFixed(1) };
+    runs[name] = { frames: F.length, lead, by, slidNonWalk: +slidNonWalk.toFixed(2), chargeNonWalk, chargeMoved, rose: +(before.y - minY).toFixed(0), waves, clawGap, maxXdev: +maxXdev.toFixed(1), chargeVx, marchN, laneWind, laneMarch, laneBadDir, laneTg };
   }
   R = { runs, unit: await page.evaluate(() => {
     if (typeof _krookWalkPos !== 'function') return { missing: true };
@@ -78,7 +82,7 @@ try {
     const walkAt = (v, steps) => { const m = { type: 'kingKrook', x: 100 }; game.time = 100000; _krookWalkPos(m, 9); let pos = null; for (let i = 1; i <= steps; i++) { game.time = 100000 + i; m.x += v; pos = _krookWalkPos(m, 9); } return pos; };
     out.a = walkAt(1, 54); out.b = walkAt(2, 27); out.c = walkAt(1.5, 36);   // 54 px: a full cycle at three speeds
     out.h1 = walkAt(1, 27); out.h2 = walkAt(1.5, 18); out.h3 = walkAt(0.5, 54);   // ~27 px: half a cycle at three speeds
-    out.charge = walkAt(13, 10); out.capped = walkAt(2.4, 10);   // the shell charge covers the same cadence as a 2.4 px a step walk
+    out.marchVx = (typeof LX_KROOK_MARCH_VX === 'number') ? LX_KROOK_MARCH_VX : null; out.march = walkAt(out.marchVx || 4, 9); out.slow = walkAt(1, 9 * (out.marchVx || 4));   // v0.30.1771 krook-march: 36 px marched vs 36 px walked
     const m2 = { type: 'kingKrook', x: 0 }; game.time = 200000; _krookWalkPos(m2, 9); game.time = 200001; m2.x += 2; _krookWalkPos(m2, 9); game.time = 200100; m2.x += 30; out.afterPause = _krookWalkPos(m2, 9);   // a gap over 8 steps restarts the walk
     // the frame the draw hands over really is the one the position names
     const fr = BOSS_WALK_FRAMES.kingKrook; for (let i = 0; i < 6; i++) _bossWalkFrame('kingKrook', { type: 'kingKrook', x: 0, h: 344 });
@@ -98,12 +102,15 @@ check(r.jumpSlam.rose >= 100 && r.jumpSlam.waves === 2, 'jump slam: he still lea
 check(r.claw.clawGap != null && r.claw.clawGap >= 25 && r.claw.clawGap < 36, 'claw: the swipe box starts 26 px further out (it has flown 0-4 px by the first look) - the reach the step-in used to give it', { gap: r.claw.clawGap });
 check(r.shellSpin.chargeMoved >= 20 && r.shellSpin.chargeNonWalk === 0, 'shell spin: the charge moves him and every frame of it is his WALK art, strictly', { moved: r.shellSpin.chargeMoved, nonWalk: r.shellSpin.chargeNonWalk });
 check(r.shellSpin.by.attack && r.shellSpin.by.attack.n >= 10 && r.shellSpin.by.attack.px === 0, 'shell spin: the 700 ms wind-up is attack art, rooted', r.shellSpin.by);
+check(r.shellSpin.chargeVx >= 3.5 && r.shellSpin.chargeVx <= 4.01 && r.shellSpin.marchN >= 20, 'the Royal March walks at 4 px a step (vx is read after the drag of each step) and crosses the arena (it slid at 13 px, twice)', { vx: r.shellSpin.chargeVx, steps: r.shellSpin.marchN });
+check(r.shellSpin.laneWind >= 6 && r.shellSpin.laneMarch === r.shellSpin.marchN && r.shellSpin.laneBadDir === 0 && r.shellSpin.laneTg === 'tg_dash_kingKrook', 'the Royal March is marked: his own lane through the whole wind-up and march, pointing the way he goes (per user: "a sign / warning for the royal charge")', { wind: r.shellSpin.laneWind, march: r.shellSpin.laneMarch, of: r.shellSpin.marchN, badDir: r.shellSpin.laneBadDir, tg: r.shellSpin.laneTg });
 const u = R.unit;
 check(!u.missing, 'the build paces his walk by distance (_krookWalkPos)', u);
 if (!u.missing) {
 check(Math.abs(u.a - u.b) < 0.05 && Math.abs(u.b - u.c) < 0.05 && (u.a < 0.2 || u.a > 8.8), 'walk cadence follows distance: 54 px is one full cycle at 1, 2 and 1.5 px a step', { a: u.a, b: u.b, c: u.c });
 check(Math.abs(u.h1 - u.h2) < 0.1 && Math.abs(u.h1 - u.h3) < 0.1 && u.h1 > 3 && u.h1 < 6, '...and 27 px is the same half-cycle frame at 1, 2 and 0.5 px a step (the wall-clock walk differed by whole frames)', { h1: u.h1, h2: u.h2, h3: u.h3 });
-check(Math.abs(u.charge - u.capped) < 0.01, 'the shell charge (13 px a step) cycles his legs at the 2.4 px a step cadence instead of strobing nine frames over 13 px', { charge: u.charge, capped: u.capped });
+// v0.30.1771 krook-march (per user: "starts sliding through the map ... make him walk normally"): the Royal March is a walk his legs carry
+check(u.marchVx === 4 && Math.abs(u.march - u.slow) < 0.05, 'the Royal March (4 px a step) cycles his legs at its own pace: 36 px marched lands on the frame 36 px walked does (the 13 px charge skated over a 2.4 px cadence)', { march: u.march, slow: u.slow, vx: u.marchVx });
 check(u.afterPause === 0 || u.afterPause < 0.01, 'a walk begun after a pause starts on its first frame', { afterPause: u.afterPause });
 check(u.frameMatches === true && u.ready === u.n, 'the frame _bossWalkFrame draws is the one that position names', { match: u.frameMatches, ready: u.ready, n: u.n });
 }
