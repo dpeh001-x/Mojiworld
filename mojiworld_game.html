@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1772';
+const GAME_VERSION = 'v0.30.1773';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -19543,6 +19543,8 @@ const LX_FX = (() => {
     tgsw_ossuaryTyrant:  'tgsw_ossuaryTyrant.webp',  // v0.30.1769 boss-prewarn: Ossuary Tyrant - five glowing bone crowns
     tgsw_pqConductor:    'tgsw_pqConductor.webp',    // v0.30.1769 boss-prewarn: The Master Conductor - five red-lit pocket watches
     tg_smash:                       'tg_smash.webp',                       // isolated molten ground-crack band
+    tg_smash_mooma:                 'tg_smash_mooma.webp',                 // v0.30.1773 mooma-quake (per user: the line of fire "is kinda misleading" for her) - Mooma's own quake band: a magenta crack sprouting her caps
+    tg_jump_mooma:                  'tg_jump_mooma.webp',                  // v0.30.1773 mooma-quake - the up-arrow over it: her quake only lands on a hero standing on something
     tg_dash:                        'tg_dash.webp',                        // charge-lane chevrons (point right; draw mirrors)
     // v0.30.x - Taur's own charge lane. Kind-level tg_dash stays the fallback
     // for every other charger; the bull earns a per-sign warning for the same
@@ -161090,7 +161092,7 @@ const _LX_MOB_TYPE_ART = {
   legosaurus: { vfx: ['quakePlume'], fx: ['quakeRing'] },   // his 6 s arena stomp is a mob_quake of his own
   zodiac_pisces: { img: ['gravitos_riftring'], fx: ['gravitos_riftring'] },   // v0.30.x boss polish (audit B2) — her Tidal Crush zone
   // v0.30.x boss polish (audit B5) — the floor band their arena-wide slams draw (see _lxSlamWindup)
-  mooma: { img: ['tg_smash'] }, kingKrook: { img: ['tg_smash'] }, sundered_smith: { img: ['tg_smash'] }, zodiac_capricorn: { img: ['tg_smash'] },
+  mooma: { img: ['tg_smash', 'tg_smash_mooma', 'tg_jump_mooma'] }, kingKrook: { img: ['tg_smash'] }, sundered_smith: { img: ['tg_smash'] }, zodiac_capricorn: { img: ['tg_smash'] },
   // v0.30.790 grav-smooth — the five rings his patterns cast: each was decoded and pinned on the frame of its
   // first cast (laser 22 ms, soul 36 ms, slam 22 ms, measured).
   gravitos: { img: ['gravitos_blackhole', 'gravitos_laserring', 'gravitos_soulring', 'gravitos_slamzone', 'gravitos_slamring', 'gravitos_singularity_zone', 'safezone_shield', 'safezone_ring', 'gravitos1_voidrift', 'gravitos1_riftring'], fx: ['gravitos_singularity_zone', 'gravitos1_voidrift', 'gravitos1_riftring'] },   // v0.30.796 sz-all — the rift and its shield never arrive cold
@@ -171663,7 +171665,38 @@ function _lxSlamWindup(m) {
   if (m.zodiacSign === 'capricorn' && m._capQuakeFiring && m._capQuakeT > 0) return 1 - m._capQuakeT / 800;
   return -1;
 }
+// v0.30.1773 mooma-quake - MOOMA'S QUAKE LIES ON WHAT YOU STAND ON (per user: "the quake sprite has to be on the floor / platforms strictly"). Her quake lands on
+// a hero standing on ANY surface (player.onGround), so her warning runs along the top of every ground piece and platform in view: the glowing
+// crack on the surface's edge, her caps sprouting above it, and it stops where the surface stops (a short piece shows the left part of the
+// art - zone.cropF - never a squashed whole). Not decoded yet: false, and the old band draws. The art is cut 3 px under the crack.
+const LX_MOOMA_BAND = { seg: 400, h: 41, sink: 5 };   // one 512 px tile is laid 400 px wide and 41 tall; its crack line sits on the surface top
+function _lxPushSurfaceBand(out, m, prog) {
+  const img = (typeof LX_FX !== 'undefined') ? LX_FX.tg_smash_mooma : null;
+  if (!img || !_lxFxReady(img)) return false;
+  const B = LX_MOOMA_BAND, camX = (game.camera && game.camera.x) || 0, camY = (game.camera && game.camera.y) || 0;
+  const vw = (typeof W === 'number') ? W : 1280, vh = (typeof H === 'number') ? H : 720, p01 = Math.max(0, Math.min(1, prog));
+  for (const p of ((game.mapData && game.mapData.platforms) || [])) {
+    if (!p || !(p.w > 0) || p.x > camX + vw + 40 || p.x + p.w < camX - 40 || p.y < camY - 60 || p.y > camY + vh + 60) continue;
+    for (let x = p.x; x < p.x + p.w - 0.5; x += B.seg) {
+      const w = Math.min(B.seg, p.x + p.w - x);
+      out.push({ kind: 'smash', x, y: p.y + B.sink - B.h, w, h: B.h, prog: p01, color: '#ff4fa8', dir: 'center', tg: 'tg_smash_mooma', cropF: w / B.seg,
+        jump: w >= 120 ? 'tg_jump_mooma' : null, jb: [m.x, m.x + m.w] });
+    }
+  }
+  return true;
+}
+// v0.30.1773 mooma-quake - JUMP! An up-arrow over each stretch of a band whose slam only lands on a grounded hero (z.jump; not the stretch the boss stands
+// in), bobbing upward and fading in with the band (it rides the zone's alpha). Art only: not decoded yet, nothing.
+function _lxDrawJumpCue(z, sx, sy) {
+  const a = (typeof LX_FX !== 'undefined') ? LX_FX[z.jump] : null;
+  if (!a || !_lxFxReady(a)) return;
+  if (z.jb && z.x + z.w / 2 > z.jb[0] - 40 && z.x + z.w / 2 < z.jb[1] + 40) return;   // never on the boss's own body
+  const h = 58, w = h * ((a.naturalWidth || a.width || 1) / (a.naturalHeight || a.height || 1));
+  const bob = Math.abs(Math.sin((game.time | 0) * 0.11)) * 16;   // a hop, about 0.95 s each
+  ctx.drawImage(a, sx + z.w / 2 - w / 2, sy - h + 10 - bob, w, h);   // its foot just inside the band's caps
+}
 function _lxPushFloorBand(out, m, prog) {
+  if (m && m.type === 'mooma' && _lxPushSurfaceBand(out, m, prog)) return;   // v0.30.1773 mooma-quake - hers lies on the surfaces themselves
   const W0 = (typeof W === 'number') ? W : 1280, camX = (game.camera && game.camera.x) || 0;
   const SEG = 300, y = m.y + m.h - 42, h = 70;   // the crack line sits on the floor the boss stands on
   const ww = (game.mapData && game.mapData.worldWidth) || (camX + W0);
@@ -171918,8 +171951,10 @@ function _drawAttackZones() {
     } else {
       // v0.30.1387 - a column warning's flat base stands on the floor under its lane, not on the screen's bottom edge
       const _zh = (z.kind === 'column' && z.floorY != null) ? Math.max(z.h * 0.35, Math.min(z.h, z.floorY + 4 - z.y)) : z.h;
-      ctx.drawImage(_img, sx, sy, z.w, _zh);
+      if (z.cropF > 0 && z.cropF < 0.999) ctx.drawImage(_img, 0, 0, Math.max(1, (_img.naturalWidth || _img.width) * z.cropF), _img.naturalHeight || _img.height, sx, sy, z.w, _zh);   // v0.30.1773 mooma-quake - a short surface shows part of the tile
+      else ctx.drawImage(_img, sx, sy, z.w, _zh);
     }
+    if (z.jump) _lxDrawJumpCue(z, sx, sy);   // v0.30.1773 mooma-quake
     // v0.30.1771 krook-march - a HOT lane (Legosaurus's crushing charge) blazes: the same art again, added on top and pulsing - one extra lane draw,
     // only for the ~850 ms of that brace. It is the visible difference from an ordinary charge.
     if (z.hot) {

@@ -30,8 +30,13 @@ try {
     loadMap('forest', 300); await sleep(2000); try { closeAllModals(); } catch (e) {} game.paused = true;
     const one = (type) => { game.monsters.length = 0; spawnMonster(player.x + 200, player.y - 40, type, true, false); const m = game.monsters[game.monsters.length - 1]; m.patternState = 'idle'; m.patternTimer = 0; return m; };
     const bands = (m) => { const z = _lxAttackZones().filter((q) => q.tg === 'tg_smash' && q.kind === 'smash' && q.w >= 280); return { n: z.length, prog: z.length ? +z[0].prog.toFixed(2) : null, y: z.length ? Math.round(z[0].y) : null, feet: Math.round(m.y + m.h) }; };
-    let m = one('mooma'); m.patternState = 'quake'; m.patternTimer = 600; m._quakeFired = false; out.mooma = bands(m);
-    m.patternTimer = 1250; out.moomaAfter = bands(m).n;
+    let m = one('mooma');
+    // v0.30.1773 mooma-quake: her own band, laid on the surfaces themselves (where exactly: mooma_quake_band_test), once her art has decoded
+    for (let i = 0; i < 60 && !(LX_FX.tg_smash_mooma && _lxFxReady(LX_FX.tg_smash_mooma)); i++) await sleep(100);
+    m.patternState = 'quake'; m.patternTimer = 600; m._quakeFired = false;
+    { const z = _lxAttackZones().filter((q) => q.kind === 'smash'); out.mooma = { n: z.length, tg: [...new Set(z.map((q) => q.tg))].join(), prog: z.length ? +z[0].prog.toFixed(2) : null,
+      onSurf: z.length > 0 && z.every((q) => (game.mapData.platforms || []).some((p) => Math.abs(q.y + q.h - 5 - p.y) <= 1 && q.x >= p.x - 0.5 && q.x + q.w <= p.x + p.w + 0.5)) }; }
+    m.patternTimer = 1250; out.moomaAfter = _lxAttackZones().filter((q) => q.kind === 'smash').length;
     m = one('kingKrook'); m.patternState = 'earthquake'; m.patternTimer = 300; m._kFired = false; out.krookQuake = bands(m);
     m.patternState = 'stomp'; m.patternTimer = 550; out.krookStomp = bands(m);
     m._kFired = true; out.krookFired = bands(m).n;
@@ -44,7 +49,7 @@ try {
     return out;
   });
   const band = (b) => b && b.n >= 4 && Math.abs(b.y - (b.feet - 42)) <= 2;
-  check(band(r.mooma) && Math.abs(r.mooma.prog - 0.5) < 0.05, 'Mooma\'s quake lays a band across the floor she stands on, filling with the windup', J(r.mooma));
+  check(r.mooma.n >= 1 && r.mooma.tg === 'tg_smash_mooma' && r.mooma.onSurf && Math.abs(r.mooma.prog - 0.5) < 0.05, 'Mooma\'s quake lays her own band on the surfaces themselves (floor and ledges), filling with the windup (v0.30.1773)', J(r.mooma));
   check(r.moomaAfter === 0, '...and it is gone once the quake lands', J(r.moomaAfter));
   check(band(r.krookQuake) && band(r.krookStomp), 'King Krook\'s earthquake and stomp both draw it', J({ q: r.krookQuake, s: r.krookStomp }));
   check(r.krookFired === 0 && r.krookOther === 0, '...not after the slam fires, and not for his other attacks', J({ fired: r.krookFired, other: r.krookOther }));
