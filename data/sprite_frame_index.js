@@ -38,6 +38,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "mooma": 9,
    "octobaby": 9,
    "pqConductor": 9,
+   "sundered_smithcast": 9,
    "sundered_smith": 9,
    "towerArbitercolumn": 9,
    "towerArbiterdash": 9,
@@ -83,7 +84,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "mooma": 9,
    "octobaby": 9,
    "pqConductor": 9,
-   "sundered_smith": 9,
+   "sundered_smith": 16,
    "towerArbiter": 9,
    "towerSovereign": 9,
    "young_confused_barnaby": 9

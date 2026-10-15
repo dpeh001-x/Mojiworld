@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1774';
+const GAME_VERSION = 'v0.30.1775';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -110776,18 +110776,19 @@ function bossAI(m, dt, distToPlayer) {
     // vx keeps driving so he walks off ledges back toward the fight.
     const _dbA = Math.max(48, (m.w || 32) * 0.6);
     const _coEl = Math.abs(dyA) < 90;
-    if (Math.abs(dxA) > _dbA || !_coEl) m.vx += m.facing * 0.22;
+    if (m.type === 'sundered_smith' && _smithCastTick(m, dt)) m.vx = 0;   // smith-cast - a cast stands him still
+    else if (Math.abs(dxA) > _dbA || !_coEl) m.vx += m.facing * 0.22;
     else m.vx *= 0.85;
     const _vxCapA = (m.speed || 2) * 1.6;
     if (m.vx >  _vxCapA) m.vx =  _vxCapA;
     if (m.vx < -_vxCapA) m.vx = -_vxCapA;
-    if (Math.abs(dxA) > _dbA || !_coEl) _lxBossStrideStart(m, m.facing, _vxCapA);   // v0.30.1748 release17: Smith / Legosaurus / Arbiter / Sovereign / Mira walk from rest again
+    if (!m._smCast && (Math.abs(dxA) > _dbA || !_coEl)) _lxBossStrideStart(m, m.facing, _vxCapA);   // v0.30.1748 release17: Smith / Legosaurus / Arbiter / Sovereign / Mira walk from rest again
     // Jump if grounded AND (player is above OR a small random hop —
     // 4% per frame for active-boss-trait mobs vs the 2% non-trait
     // default seen in the regular AI at L35770).
     const _jcdA = (m.jumpCdMs | 0);
     if (_jcdA > 0) m._jumpCdT = Math.max(0, (m._jumpCdT || 0) - dt);
-    if (m.onGround && (m.jump | 0) > 0 && !(_jcdA > 0 && m._jumpCdT > 0)) {
+    if (m.onGround && !m._smCast && (m.jump | 0) > 0 && !(_jcdA > 0 && m._jumpCdT > 0)) {
       // v0.29.x — the 4%/frame hop roll ignored jumpCdMs, so the knob only
       // gated a roll bosses in this branch never used. Types without a
       // jumpCdMs are byte-identical.
@@ -110802,7 +110803,8 @@ function bossAI(m, dt, distToPlayer) {
     const _distToPlayerA = Math.abs(dxA);
     if (m._activeBossShootCd <= 0 && _distToPlayerA < 720 && player.hp > 0 && m.shoot) {
       m._activeBossShootCd = _baseCd * (0.85 + Math.random() * 0.30);
-      if (typeof fireMonsterProjectile === 'function') {
+      if (m.type === 'sundered_smith') _smithCastStart(m);   // smith-cast - the shot leaves on the cast's release frame, not now
+      else if (typeof fireMonsterProjectile === 'function') {
         // `volleyShot` trait fans the shot — preserves the v0.25.991
         // 3-arrow spread behaviour Vermillion + Spectre Cannoneer rely
         // on (Vermillion isn't `boss: true` so he doesn't land here,
@@ -156908,6 +156910,7 @@ const BOSS_SPRITE_TYPES = ['king', 'mooma', 'aetherion', 'gravitos',
   'towerSovereignswing', 'towerSovereigncolumn', 'towerSovereigncollapse',
   'towerSovereignvolley', 'towerSovereigndrain',
   'towerSovereigndash',   // sov-dash: his lunge's own nine frames (frames-only, below)
+  'sundered_smithcast',   // smith-cast: the Smith's fireball cast (frames-only, below)
   // v0.30.478 — ARBITER PER-ATTACK SETS (Sprites/bosses/attack/towerArbiter<x>_0..8).
   // Same shape as the Sovereign's above and animated the same way, from the
   // Arbiter's own attack frame so the knight is identical and only the sword
@@ -156948,6 +156951,7 @@ const BOSS_FRAMES_ONLY = new Set(['legosaurusdash',
   'towerSovereignswing', 'towerSovereigncolumn', 'towerSovereigncollapse',
   'towerSovereignvolley', 'towerSovereigndrain',
   'towerSovereigndash',   // sov-dash
+  'sundered_smithcast',   // smith-cast
   'towerArbiterverdict', 'towerArbitercolumn',   // v0.30.478
   'towerArbiterdash',   // arbiter-dash
   'aetherion2lance', 'aetherion2fracture',   // v0.30.1563 aetherion-moves
@@ -157062,6 +157066,7 @@ const _LX_BOSS_ATK_SETS = {
   // his own purple sword set (raise, swirl, the slam on f6 as the hit lands) - the gold verdict set did not match his
   // purple strike. The verdict is rolled when the swing lands, so the windup cannot know which to show.
   towerArbiter: (k) => (k === 'swing' ? 'towerArbiter' : k === 'column' ? 'towerArbitercolumn' : k === 'dash' ? 'towerArbiterdash' : null),   // arbiter-dash
+  sundered_smith: (k) => (k === 'cast' ? 'sundered_smithcast' : null),   // smith-cast: only his fireball has a set of its own; every other key keeps his one attack set
 };
 function _lxBossAtkPose(m, key, frames) {
   if (!m) return;
@@ -157712,6 +157717,41 @@ function _arbiterDashFrame(m) {
   else if (m._hgCharging && m._hgPhase === 'dash') { const p = Math.min(1, (m._hgEl || 0) / (tr.hourglassDashMs || 320)); i = p < 0.3 ? 5 : p < 0.78 ? 6 : 7; }
   else i = now < ((m._hgRecoverUntil || 0) - 85) ? 7 : 8;
   return fr[i] || null;
+}
+// smith-cast - THE FIREBALL IS A CAST (per user: "sundered smith when walking looks very odd, and shooting fireballs at the same time"). The generic active-boss branch fired his
+// mforgespark the instant its cooldown ran out, mid-stride, with whatever frame was on screen (walk or idle: nothing to say a throw was coming). Now the cooldown BEGINS a cast: he
+// stops (vx 0, no hop, no stride start), the set's nine frames play - ready, the orb gathers in his off hand (frames 2-4), the throw (5, the ball leaves HERE), follow-through, recover - and
+// the projectile is fired on the release step. A hammer swing, a stun or a leap cancels it with no shot. The set's own thrown ball is erased from the art: the game's projectile is the ball.
+const _SMITH_CAST_AT = [0, 45, 90, 170, 250, 340, 400, 460, 520], _SMITH_CAST_REL = 340, _SMITH_CAST_END = 560;   // ms into the cast each frame starts; the ball's release; the end
+function _smithCastFrame(m) {
+  const c = m._smCast, fr = BOSS_ATTACK_FRAMES.sundered_smithcast;
+  if (!c || !fr || typeof _lxFtReadyN !== 'function' || _lxFtReadyN(fr) < 9) return null;
+  let i = 0; while (i < 8 && c.el >= _SMITH_CAST_AT[i + 1]) i++;
+  return fr[i] || null;
+}
+function _smithCastEnd(m) { m._smCast = null; if (m._bossAtkKey === 'sundered_smithcast') { m._bossAtkKey = null; m._bossAtkUntil = 0; } }
+function _smithCastStart(m) {
+  if (m._smCast) return;
+  const busy = m._bigMeleeFiring || m._columnFiring || (m.patternState && m.patternState !== 'idle') || m.onGround === false || (m.stunTimer | 0) > 0 || (m.freezeTimer | 0) > 0;
+  if (busy) { m._activeBossShootCd = 240; return; }   // not now: ask again in a moment rather than throw from the middle of something else
+  m._smCast = { el: 0, fired: false }; m.vx = 0;
+  if (typeof _lxBossAtkPose === 'function') _lxBossAtkPose(m, 'cast', 30);   // the cast art is on screen from this very step, not the next
+}
+function _smithCastTick(m, dt) {
+  const c = m._smCast; if (!c) return false;
+  if (m.currentHp <= 0 || m._bigMeleeFiring || (m.stunTimer | 0) > 0 || (m.freezeTimer | 0) > 0 || m.onGround === false) { _smithCastEnd(m); return false; }
+  c.el += dt;
+  if (!c.fired && c.el >= _SMITH_CAST_REL) {
+    c.fired = true;
+    if (typeof fireMonsterProjectile === 'function') {
+      const _ox = (m.facing || 1) * 105;   // the ball leaves his outstretched hand (105 px ahead of his hem centre in the throw frame), not his belly
+      m.x += _ox; try { fireMonsterProjectile(m); } finally { m.x -= _ox; }
+      m._castFlashT = -1e9; m._castFlashSkill = null;   // the generic cast aura (a white burst over the body) would wash out the hand-drawn throw
+    }
+  }
+  if (c.el >= _SMITH_CAST_END) { _smithCastEnd(m); return false; }
+  if (typeof _lxBossAtkPose === 'function') _lxBossAtkPose(m, 'cast', 30);   // a stamp that outlives a stalled AI step (the cast's end clears it): no idle frame in the middle of a throw
+  return true;
 }
 function _lxHgDashPose(key, i) {
   const fr = BOSS_ATTACK_FRAMES[key], f = fr && fr[i | 0];
@@ -158458,6 +158498,7 @@ function _bossWalkFrame(key, m) {
   const _fr = BOSS_WALK_FRAMES[key];
   if (m && m.type === 'gravitos' && _fr && _fr.length > 1 && (_fr._readyN | 0) >= _fr.length) { const _gp = _gravWalkPos(key, m, _fr.length); if (_gp != null) return _fr[Math.floor(_gp) % _fr.length]; }   // v0.30.1624 gravitos-stride
   if (m && m.type === 'towerArbiter' && _fr && _fr.length > 1 && (_fr._readyN | 0) >= _fr.length) { const _ap = _arbWalkPos(m, _fr.length); if (_ap != null) return _fr[Math.floor(_ap) % _fr.length]; }   // arbiter-dash - paced by the distance he walks
+  if (m && m.type === 'sundered_smith' && _fr && _fr.length > 1 && (_fr._readyN | 0) >= _fr.length) { const _sp = _smithWalkPos(m, _fr.length); if (_sp != null) return _fr[Math.floor(_sp) % _fr.length]; }   // smith-walk - paced by the distance he walks
   if (m && m.type === 'kingKrook' && _fr && _fr.length > 1 && (_fr._readyN | 0) >= _fr.length) { const _kp = _krookWalkPos(m, _fr.length); if (_kp != null) return _fr[Math.floor(_kp) % _fr.length]; }   // v0.30.1759 krook-plant - paced by the distance he walks
   const _ms = _bossWalkMsFor(m);
   const _w = _BOSS_WALK_WEIGHTS[key];
@@ -158596,6 +158637,7 @@ function _bossWalkPair(key, m) {
   if (n < 2) return null;
   if (m && m.type === 'gravitos') { const _gp = _gravWalkPos(key, m, n); if (_gp != null) { const _gi = Math.floor(_gp) % n; return { a: frames[_gi], b: frames[(_gi + 1) % n], f: _gp - Math.floor(_gp), i: _gi, n }; } }   // v0.30.1624 gravitos-stride
   if (m && m.type === 'towerArbiter') { const _ap = _arbWalkPos(m, n); if (_ap != null) { const _ai = Math.floor(_ap) % n; return { a: frames[_ai], b: frames[(_ai + 1) % n], f: _ap - Math.floor(_ap), i: _ai, n }; } }   // arbiter-dash
+  if (m && m.type === 'sundered_smith') { const _sp = _smithWalkPos(m, n); if (_sp != null) { const _si = Math.floor(_sp) % n; return { a: frames[_si], b: frames[(_si + 1) % n], f: _sp - Math.floor(_sp), i: _si, n }; } }   // smith-walk
   if (m && m.type === 'kingKrook' && n >= frames.length) { const _kp = _krookWalkPos(m, n); if (_kp != null) { const _ki = Math.floor(_kp) % n; return { a: frames[_ki], b: frames[(_ki + 1) % n], f: _kp - Math.floor(_kp), i: _ki, n }; } }   // v0.30.1759 krook-plant
   const frameMs = _bossWalkMsFor(m);
   const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
@@ -159181,6 +159223,15 @@ function _krookWalkPos(m, n) {
   let q = (ph - Math.floor(ph)) * sum;
   for (let i = 0; i < w.length; i++) { if (q < w[i]) return i + q / w[i]; q -= w[i]; }
   return n - 1;
+}
+const _SMITH_WALK_STRIDE = 190;   // smith-walk - game px walked per sixteen-frame loop: two gait cycles of four steps ~47 px each (the boot's swing in the art, 143 art px at 0.33 game px each), so a planted foot stays put
+function _smithWalkPos(m, n) {
+  if (!m || !(n > 1)) return null;
+  const t = game.time | 0;
+  if (m._swT == null || t - m._swT > 8 || t < m._swT) { m._swD = 0; m._swX = m.x; m._swT = t; }
+  else if (m._swT !== t) { const dx = Math.abs(m.x - m._swX); m._swD += (dx < 40 ? dx : 0); m._swX = m.x; m._swT = t; }
+  const p = (m._swD / _SMITH_WALK_STRIDE) * n;
+  return p - Math.floor(p / n) * n;
 }
 const _ARB_WALK_STRIDE = 120;   // arbiter-dash - game px walked per nine-frame cycle (a 60 px step)
 function _arbWalkPos(m, n) {
@@ -163064,6 +163115,7 @@ function drawMonster(m) {
     // gravitos3laser / … as well as the form-1 names. 'gravitos2star' ends in
     // 'star' and is unaffected.
     ? (((m.type === 'towerArbiter' || m.type === 'towerSovereign') && _spriteKey === m.type + 'dash' && _arbiterDashFrame(m))   // arbiter-dash / sov-dash - his lunge's own frames
+       || (_spriteKey === 'sundered_smithcast' && _smithCastFrame(m))   // smith-cast - wind-up, throw, follow-through on the cast's own clock
        || (_lxHgPoseDash && _lxHgDashPose(_spriteKey, m.traits.hourglassDashPose))   // v0.30.1513 arbiter
        || _gravFormCastFrame(m, _spriteKey)   // v0.30.1624 form-casts - once-through on the move's own clock
        || (/punch$/.test(_spriteKey) && _gravitosPunchFrame(m))
