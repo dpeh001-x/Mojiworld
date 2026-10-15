@@ -739,6 +739,8 @@ window.LX_SPRITE_FRAME_INDEX = {
    "swing_zodiac_aries": 9,
    "swing_zodiac_capricorn": 9,
    "tg_col_miraFallen": 9,
+   "tg_dash_kingKrook": 9,
+   "tg_dash_legosaurus": 9,
    "tg_dash_zodiac_taurus": 9,
    "thorn_burst": 9,
    "throw_dagger": 16,

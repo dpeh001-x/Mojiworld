@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1770';
+const GAME_VERSION = 'v0.30.1771';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -19549,6 +19549,8 @@ const LX_FX = (() => {
     // reason the four column signs did (v0.30.91) - the lane is the read that
     // saves you, so it should look like the thing about to run you over.
     tg_dash_zodiac_taurus:          'tg_dash_zodiac_taurus.webp',           // granite kerbs + amber chevrons
+    tg_dash_kingKrook:              'tg_dash_kingKrook.webp',               // v0.30.1771 krook-march - the Royal March lane: molten lava, claw marks, gold chevrons (ludo.ai, per user)
+    tg_dash_legosaurus:             'tg_dash_legosaurus.webp',              // v0.30.1771 krook-march - his charge lane: cracked stone, molten chevrons, dinosaur footprints (ludo.ai, per user)
     fx_taurus_gore:                 'fx_taurus_gore.webp',                  // the impact when the charge connects
     boss_shield:                    'boss_shield.webp',                     // v0.30.389 — the ward shield drawn over a boss while hits deal 1 (ludo.ai, scripts/gen_boss_shield_ludo.mjs)
     fx_leo_slam:                    'fx_leo_slam.webp',                     // v0.30.310 — Regulus's Sun Pounce landing (own burst; it borrowed the gore)
@@ -19848,6 +19850,7 @@ const _FX_ANIM_KEYS = new Set([
   'arcane_shockwave',   // v0.29.951 — the AoE ring animates too: runes pulse around the band, arcs snap across it
   'quakeRing',          // v0.29.967 — boss quake ground ring; v0.30.1263 an impact smoke that plays ONCE over the burst's life (no frameGap)
   'tg_dash_zodiac_taurus',   // v0.30.451 — Taur's charge lane is the first ANIMATED zone telegraph (see _lxAttackZones' draw)
+  'tg_dash_kingKrook', 'tg_dash_legosaurus',   // v0.30.1771 krook-march - the Royal March and Legosaurus lanes pulse (nine frames each)
   'warlord_banner', 'doombringer_apoc', 'crusader_aegis', 'dragoon_skylance',
   'shadowlord_clones', 'shinobi_seal', 'nightreaper_eclipse', 'phantom_voidrift',
   'clone_strike',   // v0.30.x mirror-shadow-rings — the nova a Mirror Shadow clone fires on every strike
@@ -109657,6 +109660,7 @@ function bossAI(m, dt, distToPlayer) {
             m.patternState = 'shellSpin';
             m._shellDir = 0;
             m._shellPasses = 0;
+            m._kChargeDir = 0; m._kMarchPx = 0;   // v0.30.1771 krook-march
           }
           else if (_pick === 'megaFireball') { m._lastMegaAt = _now; m.patternState = 'megaFireball'; }
           else if (_pick === 'firebomb') { m._lastFirebombAt = _now; m.patternState = 'firebomb'; }
@@ -109674,6 +109678,7 @@ function bossAI(m, dt, distToPlayer) {
           m.patternState = 'shellSpin';
           m._shellDir = 0;
           m._shellPasses = 0;
+          m._kChargeDir = 0; m._kMarchPx = 0;   // v0.30.1771 krook-march
         }
         else if (_megaReady && r < 0.48) {
           m._lastMegaAt = _now;
@@ -109776,8 +109781,11 @@ function bossAI(m, dt, distToPlayer) {
         showToast('👑 ROYAL CHARGE — JUMP the charge, punish the dizzy!', 'legendary');
         if (typeof audio !== 'undefined' && audio.play) audio.play('boss_warn');
       }
+      // v0.30.1771 krook-march - the march's direction is LOCKED as the warning starts, so the lane drawn through the wind-up is the path he takes
+      if (!m._kChargeDir) m._kChargeDir = m.facing || 1;
       if (t < 700) {
         m.vx = 0;
+        m.facing = m._kChargeDir;
         // Spin-up dust telegraph
         if ((game.time & 3) === 0 && typeof _budgetedParticlePush === 'function') {
           for (let i = 0; i < 2; i++) {
@@ -109790,8 +109798,11 @@ function bossAI(m, dt, distToPlayer) {
           }
         }
       } else {
-        if (!m._shellDir) m._shellDir = m.facing || 1;
-        m.vx = m._shellDir * 13;
+        // v0.30.1771 krook-march - a ROYAL MARCH, not a 13 px slide (per user: "starts sliding through the map ... make him walk normally"). At 13 px a step
+        // no walk cadence could carry him - his legs cycled at a 2.4 px pace and the body skated five times faster. At LX_KROOK_MARCH_VX
+        // his walk is counted in full (_KROOK_WALK_STEP_CAP), so every step lands on the floor; one crossing, then dizzy.
+        if (!m._shellDir) m._shellDir = m._kChargeDir || m.facing || 1;
+        m.vx = m._shellDir * LX_KROOK_MARCH_VX; m.facing = m._shellDir;
         // Spin trail
         if ((game.time & 1) === 0 && typeof _budgetedParticlePush === 'function') {
           _budgetedParticlePush({
@@ -109808,8 +109819,12 @@ function bossAI(m, dt, distToPlayer) {
           if (typeof addShake === 'function') addShake(7);
         }
         // Two passes done (or 9 s hard timeout) → dizzy punish window.
-        if ((m._shellPasses || 0) >= 2 || t > 9000) {
-          m._shellDir = 0;
+        // v0.30.1771 krook-march - ONE CROSSING at march pace (two passes at 13 px): he turns at a wall and marches on until he has covered 60% of the
+        // arena, so a march begun facing a near wall is still a real crossing; two walls at most; the timeout covers the longest march
+        // (a short leg plus a full one) on the pattern clock, which runs fast
+        m._kMarchPx = (m._kMarchPx || 0) + Math.abs(m.vx || 0);
+        if (((m._shellPasses || 0) >= 1 && m._kMarchPx >= _ww * 0.6) || (m._shellPasses || 0) >= 2 || t > 24000) {
+          m._shellDir = 0; m._kChargeDir = 0; m._kMarchPx = 0;
           m.vx = 0;
           m._stagger = 1500;   // freeze + existing "STAGGERED — punish it!" flow
           m._staggerCd = 6000;
@@ -159092,7 +159107,8 @@ const _GRAV_WALK_STRIDE = {"gravitos":110,"gravitos2":145,"gravitos3":145};
 // the authored holds (_BOSS_WALK_WEIGHTS) kept. A step counts for at most _KROOK_WALK_STEP_CAP px, so the shell charge scuttles at a fast-walk cadence instead of strobing
 // nine frames over 13 px. A walk begun after a pause starts on its first frame. Fractional frame position for the walk pair; null while the set or its weights are not ready.
 const _KROOK_WALK_STRIDE = 54;
-const _KROOK_WALK_STEP_CAP = 2.4;
+const _KROOK_WALK_STEP_CAP = 4.5;   // v0.30.1771 krook-march - was 2.4, which held the 13 px shell charge to a walk cadence (and so skated); the 4 px march counts in full
+const LX_KROOK_MARCH_VX = 4;   // v0.30.1771 krook-march - the Royal March, px a step: about 2.6x his 1.55 walk, a stomping hurry his walk art carries
 function _krookWalkPos(m, n) {
   const w = _BOSS_WALK_WEIGHTS.kingKrook;
   if (!m || !w || !(n > 1) || w.length !== n) return null;
@@ -171741,11 +171757,23 @@ function _lxAttackZones() {
         x: _d > 0 ? m.x : m.x - _dist,
         y: m.y, w: m.w + _dist, h: m.h,
         prog: Math.max(0, Math.min(1, 1 - m._bdT / (bd.telegraphMs || 1))),
-        color: (m._bdCrush && bd.crush && bd.crush.color) || m.color || '#ffb26b', dir: _d > 0 ? 'right' : 'left',   // v0.30.1738 legosaurus-buff - a crushing charge draws its lane red
+        color: (m._bdCrush && bd.crush && bd.crush.color) || m.color || '#ffb26b', dir: _d > 0 ? 'right' : 'left',
+        hot: !!(m._bdCrush && bd.crush),   // v0.30.1771 krook-march - a crushing charge's lane BLAZES (zones paint only their art: the v0.30.1738 colour never showed)
         // v0.30.x - per-boss lane art where it exists; an unregistered or
         // undecoded key falls through to the shared chevrons and then to the
         // procedural fill, so this can never blank the warning.
         tg: (typeof LX_FX !== 'undefined' && LX_FX['tg_dash_' + m.type]) ? 'tg_dash_' + m.type : 'tg_dash' });
+    }
+    // v0.30.1771 krook-march - THE ROYAL MARCH'S LANE (per user: "There needs to be a sign / warning for the royal charge"). From the warning to the
+    // end of the march: his body to the wall he marches to, on the direction locked at the warning. It fills in across the 700 ms
+    // wind-up (prog) and holds full while he marches; the art is his own molten claw-marked lane (tg_dash_kingKrook, nine frames).
+    if (m.type === 'kingKrook' && m.patternState === 'shellSpin' && (m._kChargeDir || m._shellDir)) {
+      const _kd = (m._shellDir || m._kChargeDir) > 0 ? 1 : -1, _kww = (game.mapData && game.mapData.worldWidth) || 2400;
+      const _kx0 = _kd > 0 ? m.x : 30, _kx1 = _kd > 0 ? _kww - 30 : m.x + m.w;
+      if (_kx1 - _kx0 > m.w * 0.5) out.push({ kind: 'dash', x: _kx0, y: m.y, w: _kx1 - _kx0, h: m.h,
+        prog: m._shellDir ? 1 : Math.max(0, Math.min(1, (m.patternTimer || 0) / 700)),
+        color: '#ff5a1f', dir: _kd > 0 ? 'right' : 'left',
+        tg: (typeof LX_FX !== 'undefined' && LX_FX.tg_dash_kingKrook) ? 'tg_dash_kingKrook' : 'tg_dash' });
     }
     // v0.30.x - Regulus's Sun Pounce circle. Published the instant the windup
     // starts and held through the flight, because the whole attack is a promise
@@ -171885,6 +171913,13 @@ function _drawAttackZones() {
       // v0.30.1387 - a column warning's flat base stands on the floor under its lane, not on the screen's bottom edge
       const _zh = (z.kind === 'column' && z.floorY != null) ? Math.max(z.h * 0.35, Math.min(z.h, z.floorY + 4 - z.y)) : z.h;
       ctx.drawImage(_img, sx, sy, z.w, _zh);
+    }
+    // v0.30.1771 krook-march - a HOT lane (Legosaurus's crushing charge) blazes: the same art again, added on top and pulsing - one extra lane draw,
+    // only for the ~850 ms of that brace. It is the visible difference from an ordinary charge.
+    if (z.hot) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.45 + 0.4 * Math.abs(Math.sin((game.time | 0) * 0.22));
+      if (z.dir === 'left') { ctx.translate(sx + z.w, sy); ctx.scale(-1, 1); ctx.drawImage(_img, 0, 0, z.w, z.h); } else ctx.drawImage(_img, sx, sy, z.w, z.h);
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
   }
