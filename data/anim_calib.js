@@ -654,9 +654,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0
     },
     "walk": {
-      "s": 0.7376,
-      "dx": 0.1297,
-      "dy": 0.0026
+      "s": 0.8702,
+      "dx": 0.17,
+      "dy": 0
     },
     "attack": {
       "s": 1.09,
@@ -674,24 +674,6 @@ window.LX_ANIM_CALIB = {
         96
       ],
       "ftAuto": true
-    }
-  },
-  "sundered_smithcast": {
-    "attack": {
-      "s": 0.7942,
-      "dx": 0.1355,
-      "dy": -0.0001,
-      "ft": [
-        50,
-        50,
-        90,
-        90,
-        100,
-        70,
-        70,
-        60,
-        60
-      ]
     }
   },
   "towerSovereign": {
@@ -3297,9 +3279,9 @@ window.LX_ANIM_CALIB = {
   },
   "towerArbiterverdict": {
     "attack": {
-      "s": 2.18,
-      "dx": 0.155,
-      "dy": 0,
+      "s": 1.9895,
+      "dx": 0.0975,
+      "dy": 0.0024,
       "ft": [
         80,
         90,
@@ -3315,9 +3297,9 @@ window.LX_ANIM_CALIB = {
   },
   "towerArbitercolumn": {
     "attack": {
-      "s": 1.9709,
-      "dx": 0.1828,
-      "dy": 0.001,
+      "s": 2.1176,
+      "dx": 0.146,
+      "dy": 0.0023,
       "ft": [
         100,
         110,
@@ -3748,24 +3730,16 @@ window.LX_ATK_HITBOX = {
       "oy": -0.0182
     },
     "walk": {
-      "w": 0.4909,
-      "h": 0.5818,
-      "ox": -0.1636,
-      "oy": -0.0182
+      "w": 0.4818,
+      "h": 0.6,
+      "ox": -0.1409,
+      "oy": 0
     },
     "attack": {
       "w": 0.6091,
       "h": 0.6591,
       "ox": -0.25,
       "oy": -0.0091
-    }
-  },
-  "sundered_smithcast": {
-    "attack": {
-      "w": 0.4909,
-      "h": 0.5818,
-      "ox": -0.1636,
-      "oy": -0.0182
     }
   },
   "towerArbiter": {

@@ -10,8 +10,8 @@ sharp.cache(false);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (d !== undefined ? '  [' + JSON.stringify(d) + ']' : '')); ok ? pass++ : fail++; };
 const SETS = {
-  towerArbiterverdict:  { canvas: [1500, 1300], h: 550, bottom: 1300, cx: 651, region: { x: 153, y: 337, s: 996 }, minMotion: 2.5 },
-  towerArbitercolumn:   { canvas: [1500, 1300], h: 358, bottom: 1298, cx: 674, region: { x: 347, y: 665, s: 654 }, minMotion: 6 },
+  towerArbiterverdict:  { canvas: [1500, 1300], h: 384, bottom: 1300, cx: 676, region: { x: 153, y: 337, s: 996 }, minMotion: 1 },   // arbiter-regen: per user the sword is held inverted, point down, and the flame does the moving (1.17)
+  towerArbitercolumn:   { canvas: [1500, 1300], h: 358, bottom: 1298, cx: 674, region: { x: 347, y: 665, s: 654 }, minMotion: 5 },   // arbiter-regen: no ray burst (5.93; the near-static set was 3.58)
   towerSovereignvolley: { canvas: [1656, 1314], h: 426, bottom: 1299, cx: 916, region: { x: 514, y: 522, s: 803 }, minMotion: 5 },
 };
 for (const [set, S] of Object.entries(SETS)) {
