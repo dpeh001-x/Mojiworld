@@ -64,7 +64,7 @@ try {
   ok('[2] every piece lies on a surface (the crack on its top edge) and stays within its ends', R.n > 0 && R.onAll, { n: R.n, off: R.offs });
   ok('[3] every ground piece and platform in view carries it (the ledges too)', R.plats >= 3 && R.coveredAll, { plats: R.plats });
   ok('[4] jump arrows over the surfaces, none over her body; a short surface shows a cropped tile', R.arrows >= 2 && R.onBody === 0 && (R.short === 0 || R.cropped >= 1), { arrows: R.arrows, onBody: R.onBody, short: R.short, cropped: R.cropped });
-  ok('[5] King Krook\'s earthquake keeps the shared crack across the floor', R.krook && R.krook.n >= 4 && R.krook.tg.join() === 'tg_smash' && Math.abs(R.krook.y - R.krook.feet) <= 2, R.krook);
+  ok('[5] King Krook\'s earthquake never wears her band (his own since v0.30.1778: quake_bands_test)', R.krook && R.krook.n >= 1 && !R.krook.tg.includes('tg_smash_mooma'), R.krook);
   ok('no page errors', errs.length === 0, errs.slice(0, 3));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass}/${pass + fail} checks passed`); process.exit(fail ? 1 : 0);
