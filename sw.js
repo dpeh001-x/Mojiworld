@@ -316,7 +316,9 @@
 // their own names (the art a straight line had cut off, repaired), so a returning install would keep drawing the old frames for a session.
 // v0.30.1782 - v171 -> v172. Pisces's bullet-hell shot (p_whirl.webp and anim/whirl_0-8.webp) is REPLACED under
 // their own names (the cyan wave ring becomes a twin-koi disc), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v172';   // v0.30.1782 - Pisces whirl shot redrawn (same names)
+// v0.30.1785 - v172 -> v173. Pisces's swing strike (fx/swing_zodiac_pisces.webp) is REPLACED under
+// their own names (the purple wave becomes a pearl comet), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v173';   // v0.30.1785 - Pisces swing strike redrawn (same name) and animated
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
