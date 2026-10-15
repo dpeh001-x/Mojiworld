@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1765';
+const GAME_VERSION = 'v0.30.1766';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -44254,6 +44254,7 @@ const _lxAc = (function () {
       for (const k of ['cosmetics', 'quests']) guardBox(player, k, 'player.' + k, true);
       guardBox(game, 'bestiary', 'game.bestiary');
       for (const k of ['expeditionBestFloor', 'expeditionClears', 'towerBestFloor', '_lxBoonOwed']) guard(game, k, 'game.' + k);
+      guard(game, '_lxBoonOwedQ', 'game._lxBoonOwedQ');   // v0.30.1766 release24c: the owed wheel queue (frozen arrays: only a replacement can change it)
       setInterval(() => { if (checkAll()) { try { refreshGearCache(); } catch (e) {} } }, 3000);
       rbPrefetch();   // v0.30.1677 ac-save
       sweepT = setInterval(() => { for (const r of recs) if (!pairOk(r)) { const was = r.v; r.v = -r.e; note('memory', r.label, was, r.v); } }, 3000);
@@ -53699,6 +53700,7 @@ const GAME_SAVE_FIELDS = [
   // map of `{ mapId: true }` so save-size impact is < 1 KB even for a
   // 100% completion run.
   'visitedMaps',
+  '_lxBoonOwedQ',   // v0.30.1766 release24c: the owed boss wheels behind the one in hand (oldest first)
   '_lxBoonOwed',   // v0.30.1734 release12: a boss boon wheel owed (due, open or waiting for bag room) - re-offered after a reload, the same three boons
   // v0.26.263 — Expedition state machine. Persists across reload so a
   // player who closes the tab mid-expedition (floor 4, say) can resume
@@ -57666,6 +57668,7 @@ function _lxLegacyClamp(s) {
   } catch (e) {}
   try { if (Array.isArray(p.boons)) for (const b of p.boons) { const hi = b && _lxAc.boonHi(b); if (hi != null && typeof b.roll === 'number' && (b.roll !== b.roll || b.roll > hi)) b.roll = hi; } } catch (e) {}
   if (s.game && typeof s.game === 'object') for (const k of ['_lxBoonOwed', 'expeditionBestFloor', 'expeditionClears']) delete s.game[k];
+  if (s.game && typeof s.game === 'object') delete s.game._lxBoonOwedQ;   // v0.30.1766 release24c
 }
 function _lxSaveMarkWrite(s) {
   try { localStorage.setItem('lx_save_signed', '1'); } catch (e) {}   // v0.30.1734 release12: this browser signs its saves (see _lxLegacyUnsignedOk)
@@ -58593,6 +58596,13 @@ function loadState() {
     // v0.30.1734 release12 - a boss boon wheel the reload cut off comes back once the hero is in the world (unpaused, no title, no prologue)
     try {
       try { if (_lxAc.on && game._lxBoonOwed) game._lxBoonOwed = _lxBoonOwedSane(game._lxBoonOwed); } catch (e) {}   // v0.30.1744 release15
+      try {   // v0.30.1766 release24c: an old single-slot wheel gets an id; the queue is read, capped, sanitised like the slot and pumped
+        if (game._lxBoonOwed && typeof game._lxBoonOwed === 'object' && !game._lxBoonOwed._oid) game._lxBoonOwed = Object.assign({}, game._lxBoonOwed, { _oid: _lxBoonOid() });
+        let _q = (s.game && Array.isArray(s.game._lxBoonOwedQ)) ? s.game._lxBoonOwedQ.filter((x) => x && typeof x === 'object').slice(0, 12) : [];
+        if (_lxAc.on) _q = _q.map(_lxBoonOwedSane).filter(Boolean);
+        _lxBoonQSet(_q.map((x) => (x._oid ? x : Object.assign({}, x, { _oid: _lxBoonOid() }))));
+        if (_q.length) _lxBoonQPumpOn();
+      } catch (e) {}
       if (game._lxBoonOwed && typeof game._lxBoonOwed === 'object' && !window._lxBoonOwedArmed) {
         window._lxBoonOwedArmed = true;
         const _gb = (n) => {
@@ -63289,8 +63299,10 @@ function _lxCoopBossRewards(m, msg, ri, exp0, coins0) {
   }
   if (String(msg.tp || '') !== 'pqConductor' && typeof _lxDeliverPendingBoon === 'function') {
     const _nm = (m && m.name) || ri.nm || '';
+    const _lxPrevPend = game._pendingBossBoon;   // v0.30.1766 release24c
     game._pendingBossBoon = { name: _nm, icon: (m && m.icon) || '', maxRoll: String(msg.tp || '') === 'gravitos' };   // showPowerupChoice falls back to the crown icon
     try { if (typeof _lxBoonOweNow === 'function') _lxBoonOweNow(game._pendingBossBoon); } catch (e) {}   // v0.30.1765 release24b: a guest's wheel is owed from the kill frame too
+    try { if (_lxPrevPend && game._lxBoonOwed && game._lxBoonOwed._oid !== game._pendingBossBoon._oid) game._pendingBossBoon = _lxPrevPend; } catch (e) {}   // v0.30.1766 release24c: the wheel waiting in hand stays; this one queued
     setTimeout(() => { try { _lxDeliverPendingBoon(0); } catch (e) {} }, 1500);   // the host's own reveal delay; delivery retries until the guest is up and unpaused
     if (typeof showToast === 'function') showToast((_nm || 'The boss') + ' defeated! Choose a powerup!', 'legendary');
   }
@@ -113668,17 +113680,76 @@ function _lxBoonOweOf(info) {
   const o = { name: String((info && info.name) || ''), icon: String((info && info.icon) || ''), maxRoll: !!(info && info.maxRoll) };
   if (info && info._bagFull) o._bagFull = true;
   if (info && Array.isArray(info._offer)) o._offer = info._offer.slice(0, 3).map((x) => ({ id: String((x && x.id) || ''), roll: +(x && x.roll) }));
+  if (info && info._oid) o._oid = String(info._oid).slice(0, 40);   // v0.30.1766 release24c: which kill it is (the queue)
   return o;
 }
 // v0.30.1765 release24b - THE WHEEL IS OWED FROM THE KILL. The kill is saved at once, the wheel 1.5 s later: a quit inside that gap kept the kill and lost the
 // wheel. A kill that pays one records it here at once (saved); the reveal re-records it with its three boons. One owed wheel at a time.
 function _lxBoonOweNow(info) {
   try {
+    if (info && typeof info === 'object' && !info._oid && typeof _lxBoonOid === 'function') info._oid = _lxBoonOid();   // v0.30.1766 release24c
+    if (info && typeof info === 'object' && typeof game !== 'undefined' && game && (game._lxBoonOwed || _lxBoonQ().length) && !(game._lxBoonOwed && game._lxBoonOwed._oid === info._oid)) { const _qd = _lxBoonQAdd(info); _lxSaveSoon(); return _qd; }   // v0.30.1766 release24c: another wheel is owed - this one queues behind it
     if (!info || typeof info !== 'object' || typeof game === 'undefined' || !game || game._lxBoonOwed) return false;   // an owed wheel already recorded is kept
     game._lxBoonOwed = _lxBoonOweOf(info);
     if (typeof saveState === 'function') saveState();
+    if (typeof _lxSaveSoon === 'function') _lxSaveSoon();   // v0.30.1766 release24c: saved on the next tick, not after the debounce
     return true;
   } catch (e) { return false; }
+}
+// v0.30.1766 release24c - OWED WHEELS QUEUE. game._lxBoonOwed is the wheel in hand (opening, open, waiting for bag room); game._lxBoonOwedQ (saved,
+// oldest first) holds the ones behind it. Each owed wheel carries an id (_oid): a reveal for a wheel that is not the one in hand waits its turn,
+// the pump offers the next once the hand is empty, and a wheel paid this session never opens again. One wheel per kill.
+function _lxBoonOid() { return 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function _lxBoonQ() { return (typeof game !== 'undefined' && game && Array.isArray(game._lxBoonOwedQ)) ? game._lxBoonOwedQ : []; }
+function _lxBoonQSet(a) { game._lxBoonOwedQ = (a && a.length) ? Object.freeze(a.slice(0, 12)) : null; }
+function _lxBoonPaidIds() { return window._lxBoonPaidSet || (window._lxBoonPaidSet = new Set()); }
+function _lxBoonQAdd(info) {
+  try {
+    if (!info || typeof info !== 'object') return false;
+    if (!info._oid) info._oid = _lxBoonOid();
+    const q = _lxBoonQ(), S = game._lxBoonOwed;
+    if ((S && S._oid === info._oid) || q.some((x) => x && x._oid === info._oid) || _lxBoonPaidIds().has(info._oid)) return false;
+    _lxBoonQSet(q.concat([_lxBoonOweOf(info)])); if (typeof saveState === 'function') saveState(); _lxBoonQPumpOn();
+    return true;
+  } catch (e) { return false; }
+}
+// true = do not open this wheel now (paid already, already on screen, or another owed wheel goes first - then it waits in the queue)
+function _lxBoonQHold(info) {
+  if (!info || typeof info !== 'object' || typeof game === 'undefined' || !game) return false;
+  const oid = info._oid ? String(info._oid) : ''; if (!oid) return false;   // a wheel from before the queue opens as it always did
+  if (_lxBoonPaidIds().has(oid)) return true;
+  const pm = document.getElementById('powerup-modal'), bi = (pm && pm.style.display === 'flex') ? pm._lxBossInfo : null;
+  if (bi && bi !== info && String(bi._oid || '') === oid) return true;
+  const S = game._lxBoonOwed, q = _lxBoonQ();
+  if (S && String(S._oid || '') !== oid) { _lxBoonQAdd(info); return true; }
+  if (!S && q.length) { const i = q.findIndex((x) => x && x._oid === oid); if (i === 0) { _lxBoonQSet(q.slice(1)); return false; } _lxBoonQAdd(info); return true; }
+  return false;
+}
+// the hand is empty and a wheel waits: make it the owed wheel and offer it (in the world, unpaused, nothing else on its way)
+function _lxBoonQPump() {
+  try {
+    if (typeof game === 'undefined' || !game) return;
+    const q = _lxBoonQ(); if (!q.length) return;
+    if (game._lxBoonOwed || game._pendingBossBoon || window._lxBoonOwedArmed || game.paused || window._prologueActive) return;
+    const pm = document.getElementById('powerup-modal'); if (pm && pm.style.display === 'flex') return;
+    if (typeof _lxHeroInWorld === 'function' && !_lxHeroInWorld()) return;
+    const nx = q[0]; _lxBoonQSet(q.slice(1)); if (!nx || typeof nx !== 'object') return;
+    const o = Object.assign({}, nx); if (!o._oid) o._oid = _lxBoonOid();
+    game._lxBoonOwed = o; game._pendingBossBoon = Object.assign({}, o); if (typeof saveState === 'function') saveState();
+    if (typeof _lxDeliverPendingBoon === 'function') _lxDeliverPendingBoon(0);
+  } catch (e) {}
+}
+function _lxBoonQPumpOn() { try { if (!window._lxBoonQPumpT) window._lxBoonQPumpT = setInterval(_lxBoonQPump, 1000); } catch (e) {} }
+// v0.30.1766 release24c - THE KILL IS SAVED AT ONCE: one flush on the next tick, after the kill handler has finished (never mid-kill), instead of the 1.5 s
+// debounce. Boss kills that owe a wheel or scenes, and a wheel's pick, only. It also refreshes the anti-cheat's IndexedDB copy of the save.
+function _lxSaveSoon() {
+  try {
+    if (window._lxSaveSoonT) return;
+    window._lxSaveSoonT = setTimeout(() => {
+      window._lxSaveSoonT = 0;
+      try { if (typeof game !== 'undefined' && game && !game._resetting && (typeof _lxHeroInWorld !== 'function' || _lxHeroInWorld()) && typeof _flushSaveStateNow === 'function') _flushSaveStateNow(); } catch (e) {}
+    }, 0);
+  } catch (e) {}
 }
 function _lxDeliverPendingBoon(tries) {
   const info = game._pendingBossBoon; if (!info) return;
@@ -114503,6 +114574,7 @@ function _killMonsterRaw(m) {
       // v0.30.1402 - its last words (LX_ZODIAC_LAST_WORDS), once per save. first_zodiac_kill (1800 ms) and zodiac_twelve_done
       // (2600 ms) queue behind them: the champion speaks first, then the world answers.
       try { if (typeof _lxOweStarBeats === 'function') _lxOweStarBeats(m.zodiacSign, typeof ZODIAC_SIGNS !== 'undefined' && ZODIAC_SIGNS.every((zz) => zz.id === m.zodiacSign || zodiacDefeated(zz.id))); } catch (e) {}   // v0.30.1764 release24: saved before the timers below, so a quit inside them still plays the scenes at the next load
+      try { if (Array.isArray(player._lxBeatsOwed) && player._lxBeatsOwed.length && typeof _lxSaveSoon === 'function') _lxSaveSoon(); } catch (e) {}   // v0.30.1766 release24c: the owed scenes saved on the next tick
       if (typeof _playStoryBeat === 'function' && STORY_BEATS['zodiac_words_' + m.zodiacSign]) setTimeout(() => { _playStoryBeat('zodiac_words_' + m.zodiacSign); }, 1700);
       // v0.25.941 — first_zodiac_kill story beat. Fires the FIRST time
       // the player downs any Zodiac (regardless of which sign). The
@@ -115101,6 +115173,7 @@ function _killMonsterRaw(m) {
     // are already there for the taking).
     try { const _d0 = m._lxDeferredTakedown; if (!(_lxDefer || (_d0 && (_d0.echo || _d0.exp)) || m._expeditionBoss || m._echoBoss || ((m._isTwin || m._isPiscesTwin) && !_d0) || m.type === 'pqConductor') && typeof _lxBoonOweNow === 'function') _lxBoonOweNow(_bossInfo); } catch (e) {}   // v0.30.1765 release24b: owed (and saved) now, under the timer's own rules below - a quit before the reveal brings it back at the next load
     setTimeout(() => {
+      if (_bossInfo._oid && game._lxBoonOwed && game._lxBoonOwed._oid !== _bossInfo._oid && typeof _lxBoonQ === 'function' && _lxBoonQ().some((x) => x && x._oid === _bossInfo._oid)) return;   // v0.30.1766 release24c: queued behind another owed wheel (the pump offers it); a pending one is not overwritten
       // v0.30.1151 boss-fixes - does this kill pay the wheel at all? (the same exclusions as below: a deferred twin, an echo /
       // expedition boss, the Conductor) - if so, leaving or falling in this 1.5 s window queues it instead of losing it
       const _lxBoonDue = () => { const _d = m._lxDeferredTakedown; return !(_lxDefer || (_d && (_d.echo || _d.exp)) || m._expeditionBoss || m._echoBoss || ((m._isTwin || m._isPiscesTwin) && !_d) || m.type === 'pqConductor'); };
@@ -131967,6 +132040,7 @@ const _PC_CORNER = '<svg class="pc-corner" viewBox="0 0 34 34" aria-hidden="true
   + '<circle cx="12.6" cy="12.6" r="1.5" fill="#f4d493" opacity="0.6"/>'
   + '</svg>';
 function showPowerupChoice(bossInfo) {
+  try { if (typeof _lxBoonQHold === 'function' && _lxBoonQHold(bossInfo)) return; } catch (e) {}   // v0.30.1766 release24c: paid, already up, or another owed wheel goes first
   try { if (bossInfo && typeof bossInfo === 'object' && game) game._lxBoonOwed = _lxBoonOweOf(bossInfo); } catch (e) {}   // v0.30.1734 release12: owed from the moment it is due
   // v0.25.952 — DEFER if a story beat is currently visible. The
   // root-cause analysis of the "stuck after boss kill" bug found that
@@ -132113,6 +132187,7 @@ function showPowerupChoice(bossInfo) {
         closeAllModals();
         // v0.30.1733 bughunt5 - the offer WAITS: the wheel closed with the boss's boon gone. It opens again once the bag has room (up to 15 min).
         if (bossInfo) { game._pendingBossBoon = Object.assign({}, bossInfo, { _bagFull: true }); try { game._lxBoonOwed = _lxBoonOweOf(game._pendingBossBoon); saveState(); } catch (e) {}   // v0.30.1734 release12: still owed setTimeout(() => { try { _lxDeliverPendingBoon(0); } catch (e) {} }, 1000);
+          setTimeout(() => { try { _lxDeliverPendingBoon(0); } catch (e) {} }, 1000);   // v0.30.1766 release24c: the retry the line above meant to start (it sat inside its comment, so a full bag's wheel waited for a reload)
           setTimeout(() => { try { showToast('\u25C8 The boss\'s boons wait - make room and they come back', 'rare'); } catch (e) {} }, 900); }
         return;
       }
@@ -132124,6 +132199,7 @@ function showPowerupChoice(bossInfo) {
         _applyEquippedBoons();
       }
       showToast(`${pw.icon} ${pw.name} — ${pw.fmt(inst.roll)}`, tierClass === 'lucky' ? 'legendary' : 'epic');
+      try { if (bossInfo && bossInfo._oid) _lxBoonPaidIds().add(String(bossInfo._oid)); if (typeof _lxSaveSoon === 'function') _lxSaveSoon(); setTimeout(_lxBoonQPump, 500); } catch (e) {}   // v0.30.1766 release24c: paid once; saved at once; the next owed wheel follows
       game._lxBoonOwed = null;   // v0.30.1734 release12: paid - saved in the same snapshot as the boon
       saveState();
       closeAllModals();
@@ -137975,6 +138051,7 @@ function _lxOwedBeatsReplay() {
     const busy = (n) => {
       const _ov = document.getElementById('loading-overlay'), _up = !!_ov && !_ov.classList.contains('fade') && getComputedStyle(_ov).display !== 'none';
       if (_up || window._prologueActive || (typeof game !== 'undefined' && game && game.paused)) return true;
+      if (n < 60 && typeof _lxBoonQ === 'function' && _lxBoonQ().length) return true;   // v0.30.1766 release24c: every queued wheel goes first too
       if (n < 60 && (game._lxBoonOwed || game._pendingBossBoon)) return true;   // the boon wheel the reload re-offers goes first (30 s at most)
       if (typeof _lxBeatHeld === 'function' && _lxBeatHeld()) return true;
       const _sb = document.getElementById('story-beat-overlay'); if (_sb && _sb.classList.contains('on')) return true;
