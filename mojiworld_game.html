@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1767';
+const GAME_VERSION = 'v0.30.1768';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -159573,7 +159573,7 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
   const _sovK = _siCal ? _siCal.sov : _lxSovArtKey(m);
   let _lxCalUsed = null;
   if (sprite && typeof sprite === 'object') { const _ba = window._lxBodyAsked || (window._lxBodyAsked = new WeakSet()); if (!_ba.has(sprite)) { _ba.add(sprite); _lxSpriteBodyFrac(sprite); } }   // v0.30.1573 bosslag - measured off-thread on its first draw, ready before any ward
-  const _lxTr0 = (typeof ctx.getTransform === 'function' && ((m._wardUntil | 0) > (game.time | 0) || (typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)))) ? ctx.getTransform() : null;   // v0.30.390 — the caller's space · v0.30.405 — only while the ward or its break window needs the rect (five Web API objects a boss draw otherwise)
+  const _lxTr0 = (typeof ctx.getTransform === 'function' && ((m._wardUntil | 0) > (game.time | 0) || (typeof _lxWardBreakActive === 'function' && _lxWardBreakActive(m)) || (m.isBoss && !_isAttack && sprite && ((sprite._lxFi | 0) === 0)))) ? ctx.getTransform() : null;   // v0.30.1766 ward-ref - and for his idle frame 0, the dome's reference frame   // v0.30.390 — the caller's space · v0.30.405 — only while the ward or its break window needs the rect (five Web API objects a boss draw otherwise)
   // v0.29.136 — King Krook "ROYAL CHARGE" (was the turtle SHELL CYCLONE).
   // King Krook is a crocodile king, not a turtle, so his phase-2 dash no longer
   // tucks into a shell. The attack now falls through to his own sprite, which
@@ -159886,6 +159886,7 @@ function _drawBossSprite(sprite, m, sx, sy, _isAttack, _animated) {
     _lxDrawSoft(ctx, sprite, _lxWholePx(-targetW / 2), _lxWholePx(dyOffset), targetW, targetH, _softOpts);   // v0.29.x — edge feather
     if (sprite && sprite.tagName === 'CANVAS') { m._lxStandInCv = sprite; m._lxStandInCal = _lxCalUsed ? { sov: _sovK, bk: _lxCalUsed.bk, st: _lxCalUsed.st } : null; }   // v0.30.790 grav-smooth — see _lxBossStandIn
   }
+  if (_lxTr0 && m.isBoss && !_siCal && !_isAttack && _lxCalUsed && /(^|[/])idle$/.test(_lxCalUsed.st) && (((sprite && sprite._lxFi) | 0) === 0)) _lxWardRefUpdate(m, sx, sy);   // v0.30.1766 ward-ref
   ctx.restore();
 }
 
@@ -162394,7 +162395,7 @@ function _lxSpriteBodyFrac(img) {
   } catch (e) { done(null); }
   return null;
 }
-function _lxWardBox(m, sx, sy) {
+function _lxWardBoxLive(m, sx, sy) {
   const t = game.time | 0, _r = (m._lxDrawRect && m._lxDrawRect.t === t) ? m._lxDrawRect : null;
   let f = _r && _r.img ? _lxSpriteBodyFrac(_r.img) : null;
   if (f) m._lxBodyFracLast = f; else if (_r && _r.img) f = m._lxBodyFracLast || null;   // v0.30.1573 bosslag - a frame still being measured borrows the last one's body
@@ -162405,6 +162406,25 @@ function _lxWardBox(m, sx, sy) {
   const _bw = _r ? _r.w : (m.w || 0), _bh = _r ? _r.h : (m.h || 0);
   return { cx: _r ? (_r.x + _r.w / 2) : (sx + (m.w || 0) / 2), cy: _r ? (_r.y + _r.h / 2) : (sy + (m.h || 0) / 2), size: Math.min(560, Math.max(72, Math.max(_bw, _bh) * 1.15)) };
 }
+// v0.30.1766 ward-ref (per user: "For tower arbiter and tower sovereign this shield size keeps changing, make it constant and make sure all boss shield size is made constant to the size of the
+// boss (not the canvas)" / "just make it constant to the 1 frame (idle of the boss)"). _lxWardBoxLive measures the frame drawn this step, so the dome resized with every pose, walk frame and
+// attack set (each carries its own calibration s and its own figure fill of the canvas). The dome is now taken from the boss's IDLE FRAME 0 - the live measure at the moment that frame is
+// drawn - as a size and an offset from his feet, refreshed each time the idle loop comes round (so a boss that really is resized, or changes form, follows) and held through every other frame.
+function _lxBossFlipNow(m) { const z = m.zodiacSign ? _ZODIAC_SPRITE_FX[m.zodiacSign] : null; return ((m.facing | 0) < 0) !== !!(z && z.flipX); }
+function _lxWardRefUpdate(m, sx, sy) {
+  const r = m._lxDrawRect; if (!r || r.t !== (game.time | 0)) return;
+  const u = r.img ? _lxBodyFracUrl(r.img) : null;
+  if (u && _LX_BODY_FRAC.has(u) && _LX_BODY_FRAC.get(u) === undefined) return;   // the body is still being measured off-thread: the next idle frame 0 takes it
+  if (u && !_LX_BODY_FRAC.has(u)) { _lxSpriteBodyFrac(r.img); return; }
+  if (u && !_lxSpriteBodyFrac(r.img)) return;   // measured and found nothing (or the probe failed): not the canvas-box stand-in - the next idle frame 0 tries again
+  const b = _lxWardBoxLive(m, sx, sy), fx = sx + (m.w || 0) / 2, fy = sy + (m.h || 0);
+  m._lxWardRef = { key: m._phaseSprite || m.type, size: b.size, ox: (b.cx - fx) * (r.flip ? -1 : 1), oy: b.cy - fy };
+}
+function _lxWardBox(m, sx, sy) {
+  const R = m._lxWardRef;
+  if (R && R.key === (m._phaseSprite || m.type)) return { cx: sx + (m.w || 0) / 2 + (_lxBossFlipNow(m) ? -R.ox : R.ox), cy: sy + (m.h || 0) + R.oy, size: R.size };
+  return _lxWardBoxLive(m, sx, sy);   // no idle frame drawn yet (or a procedural boss): the live measure, as before
+}
 function _drawBossWardShield(m, sx, sy) {
   const img = (typeof LX_FX !== 'undefined' && LX_FX) ? LX_FX.boss_shield : null;
   if (!img || !img.complete || !img.naturalWidth) return;
@@ -162414,12 +162434,12 @@ function _drawBossWardShield(m, sx, sy) {
   const elapsed = Math.max(0, len - left);
   const fade = Math.min(1, (elapsed + 1) / 5, left / 6);    // v0.30.390 — on from frame one (20%), full by frame five, off only over the last six; every warded frame shows it
   if (fade <= 0) return;
-  const pulse = 1 + 0.05 * Math.sin(t * 0.22);
+  const pulse = 0.94 + 0.06 * Math.sin(t * 0.22);   // v0.30.1766 ward-ref - a shimmer in brightness; the SIZE never changes (was 1 +/- 0.05)
   // v0.30.390 — centre and size on the sprite actually drawn this frame when the sprite path recorded it; the box otherwise
   const _wb = _lxWardBox(m, sx, sy);   // v0.30.1513 arbiter - the body, not the canvas
-  const size = _wb.size * pulse, cx = _wb.cx, cy = _wb.cy;
+  const size = _wb.size, cx = _wb.cx, cy = _wb.cy;
   ctx.save();
-  ctx.globalAlpha = 0.55 * fade;
+  ctx.globalAlpha = 0.55 * fade * pulse;
   ctx.drawImage(_lxPinned(img), cx - size / 2, cy - size / 2, size, size);   // v0.30.405 — pinned
   // v0.30.395 — the break gauge under the shield: violet while filling, pink and labelled from 85%
   const _g = Math.max(0, Math.min(1, m._wardGauge || 0));
