@@ -2,9 +2,9 @@
 // bar) stands 250 px off him, inside the Twin Verdict's reach, answers the Gate from a safe spot and never hits back. Two 60 s (sim)
 // passes per form: his OWN MACHINE (no Twin Verdict, none of the director's random punish windows - those are the player's and swing
 // a 60 s count by +-25%), then the FULL FIGHT (reported, and held to [3]-[5]).
-//   [1] the idle gaps between his patterns are 600 / 360 / 360 ms (were 980 / 710 / 490; the evolved 520 until release20); recast cooldowns Sky-Break 420, Astral 650,
+//   [1] the idle gaps between his patterns are 600 / 510 / 360 ms (were 980 / 710 / 490; the evolved 520 until release20, 360 until v0.30.1770); recast cooldowns Sky-Break 420, Astral 650,
 //       Feathers 180, Spiral 320, Halo 230 (60 Hz steps); the Gate (1500 / 1080) and Echo Step (360) unchanged
-//   [2] his own machine starts >= 22% more patterns a minute in form 1 (old 34.5) and >= 22% more in the evolved form (old 35) - since
+//   [2] his own machine starts >= 22% more patterns a minute in form 1 (old 34.5) and >= 8% more in the evolved form (old 35; ~+15% since v0.30.1770) - since
 //       release20 the Twin Verdict claims its own slot, so the evolved gap no longer stops at 520 (release20c_test); the 6 s Gate is a tenth of it
 //   [3] no windup is shorter than before (start -> release in sim steps; a hit-stop or a skipped tick may add a few), nothing broken off
 //   [4] two telegraphs never open closer than 450 ms apart, and no earlier column has > 250 ms of telegraph left when a move releases
@@ -124,11 +124,11 @@ try {
     const tag = (k) => (k === 'p1' || k === 'f1') ? 'form 1' : 'evolved';
     for (const k of ['p1', 'p2', 'f1', 'f2']) { const r = R[k]; if (!r) continue;
       console.log(`  ${k === 'p1' || k === 'p2' ? 'own machine' : 'full fight '} ${tag(k)}: patterns/min ${r.apm} (+ swings ${r.tvpm}), shortest start-to-start ${r.minGapMs} ms, idle ${Math.round(r.idleShare * 100)}%, damage/min ${r.dpm} (${r.dpmPct}% of a ${r.maxHp} bar), walked ${r.walkPerMin} px/min`); }
-    ok('[1] idle gaps between patterns are 600 / 360 / 360 ms (were 980 / 710 / 490; the evolved 520 until release20)', R.gap.join() === '0,600,360,360', R.gap);
+    ok('[1] idle gaps between patterns are 600 / 510 / 360 ms (were 980 / 710 / 490; the evolved 520 until release20, 360 until v0.30.1770)', R.gap.join() === '0,600,510,360', R.gap);
     const cds = (R.src || []).join(' | ');
     ok('[1] recast cooldowns: Sky-Break 420, Astral 650, Feathers 180, Spiral 320, Halo 230; the Gate (1500 / 1080) and Echo Step (360) kept',
       ['skybreak = now + 420', 'astral = now + 650', 'feather = now + 180', 'spiral = now + 320', 'halo = now + 230', 'gate = now + (phase === 3 ? 1080 : 1500', 'echo = now + 360'].every((x) => cds.includes(x)), cds);
-    for (const [k, old, gain] of [['p1', OLD.p1, 1.22], ['p2', OLD.p2, 1.22]]) {   // release20: the evolved bar 1.08 -> 1.22
+    for (const [k, old, gain] of [['p1', OLD.p1, 1.22], ['p2', OLD.p2, 1.08]]) {   // release20: the evolved bar 1.08 -> 1.22; v0.30.1770 (per user, ~+15% not ~+30%): back to 1.08
       ok(`[2] ${tag(k)}: at least ${Math.round(gain * 100 - 100)}% more patterns a minute than the old cadence (${old} a minute)`, R[k].apm >= old * gain, { now: R[k].apm, old, ratio: +(R[k].apm / old).toFixed(2) });
     }
     const WIND = { lanceWind: [39, 40], fractureWind: [30, 31], shardfallWind: [27, 28], echoWind: [29, 30], skybreakWind: [72, 73], featherWind: [27, 28], spiralWind: [32, 33], haloWind: [36, 37], gateWind: [39, 40] };

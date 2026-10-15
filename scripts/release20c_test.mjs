@@ -4,8 +4,9 @@
 // Now the evolved gap is 360 and a due swing claims its slot (the move waits for it, at most to 640 ms of idle).
 // Same harness as release18c: a Lv 63 warrior 250 px off him (inside the Twin Verdict's reach) answers the Gate from a safe spot and
 // never hits back; 60 s (sim) of his evolved form at 40% HP, first his OWN MACHINE (no swing, no punish windows), then the FULL FIGHT.
-//   [1] the evolved gap is 360 ms (form 1 600, under 25% 360 unchanged); the swing-slot, column-wait and follow-through rules are in his tick; start()'s hold kept
-//   [2] his own machine starts >= 24% more patterns a minute than before v0.30.1751 (35 a minute at the 710 gap; v0.30.1753 measured 40-42, the target ~+30% ~45.5)
+//   v0.30.1770 (per user: "instead of the 30% more often change it to 15%"): the evolved gap is 510 - ~+15-20% (41-42 a minute here); every rule below stays.
+//   [1] the evolved gap is 510 ms (360 until v0.30.1770; form 1 600, under 25% 360 unchanged); the swing-slot, column-wait and follow-through rules are in his tick; start()'s hold kept
+//   [2] his own machine starts ~15% more patterns a minute than before v0.30.1751 (35 a minute at the 710 gap): 8-24% (the 360 gap measured 44-46, ~+30%)
 //   [3] the Twin Verdict is still there in the full fight: >= 6 swings a minute (7-10 at v0.30.1753) and no more than 14
 //   [4] no windup is shorter than before (start -> release in sim steps), nothing broken off in his own machine
 //   [5] two telegraphs never open closer than 450 ms, no earlier column has > 250 ms of telegraph left when a move releases, and a
@@ -116,8 +117,8 @@ try {
     if (process.env.R20C_REPORT) console.log(JSON.stringify(R, null, 1));
     for (const k of ['p2', 'f2']) { const r = R[k];
       console.log(`  ${k === 'p2' ? 'own machine' : 'full fight '} evolved: patterns/min ${r.apm} (+ swings ${r.tvpm}, share ${r.tvShare}), shortest start-to-start ${r.minGapMs} ms, release->swing min ${r.tvAfterMin} ms, damage/min ${r.dpm} (a ${r.maxHp} bar), walked ${r.walkPerMin} px/min`); }
-    ok('[1] the evolved gap is 360 ms (form 1 600, under 25% 360), the swing-slot rule is in his tick, start() still holds the swing 500 ms', R.gap.join() === '0,600,360,360' && R.slot && R.hold, { gap: R.gap, slot: R.slot, hold: R.hold });
-    ok(`[2] evolved, own machine: at least 24% more patterns a minute than before v0.30.1751 (${OLD.p2} a minute)`, R.p2.apm >= OLD.p2 * 1.24, { now: R.p2.apm, old: OLD.p2, ratio: +(R.p2.apm / OLD.p2).toFixed(2) });
+    ok('[1] the evolved gap is 510 ms (form 1 600, under 25% 360), the swing-slot rule is in his tick, start() still holds the swing 500 ms', R.gap.join() === '0,600,510,360' && R.slot && R.hold, { gap: R.gap, slot: R.slot, hold: R.hold });
+    ok(`[2] evolved, own machine: ~15% more patterns a minute than before v0.30.1751 (${OLD.p2} a minute): 8-24%, not the ~30% of the 360 gap`, R.p2.apm >= OLD.p2 * 1.08 && R.p2.apm < OLD.p2 * 1.24, { now: R.p2.apm, old: OLD.p2, ratio: +(R.p2.apm / OLD.p2).toFixed(2) });
     ok('[3] the Twin Verdict still swings in the full fight: 6-14 a minute (7-10 at v0.30.1753)', R.f2.tvpm >= 6 && R.f2.tvpm <= 14, { tvpm: R.f2.tvpm, share: R.f2.tvShare });
     const WIND = { lanceWind: [39, 40], fractureWind: [30, 31], shardfallWind: [27, 28], echoWind: [29, 30], skybreakWind: [72, 73], featherWind: [27, 28], haloWind: [36, 37], gateWind: [39, 40] };
     const wbad = []; for (const k of ['p2', 'f2']) for (const [s, n] of Object.entries(R[k].wind || {})) if (WIND[s] && (n < WIND[s][0] || n > WIND[s][1] + 8)) wbad.push(k + ':' + s + '=' + n);
