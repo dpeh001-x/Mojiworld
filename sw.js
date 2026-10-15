@@ -314,7 +314,9 @@
 // their own names (frames 9-15 and the cast set are new), so a returning browser would keep drawing the old art for a session.
 // boss-frame-repair - v170 -> v171. Libra's attack frames 5-6 and the Tower Arbiter's sliced column / verdict / swing frames are REPLACED under
 // their own names (the art a straight line had cut off, repaired), so a returning install would keep drawing the old frames for a session.
-const CACHE = 'mojiworld-assets-v171';   // boss-frame-repair: sliced boss frames repaired under their own names. v170 was: v0.30.1774 - Sundered Smith walk redrawn (same names)
+// v0.30.1782 - v171 -> v172. Pisces's bullet-hell shot (p_whirl.webp and anim/whirl_0-8.webp) is REPLACED under
+// their own names (the cyan wave ring becomes a twin-koi disc), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v172';   // v0.30.1782 - Pisces whirl shot redrawn (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
