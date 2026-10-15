@@ -18,7 +18,7 @@ const PORT = Number(process.env.PORT || 11881), SERVE_ROOT = process.env.MOJI_SE
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  [' + (typeof x === 'string' ? x : JSON.stringify(x)) + ']' : '')); };
 const CRIT = ['q_four_captains', 'q_inner_dim_trial', 'q_distorted_portal', 'q_boss_sundered_smith', 'q_last_step', 'q_boss_aetherion', 'q_hourglass_5', 'q_boss_aries', 'q_long_dawn_2', 'q_long_dawn_3', 'q_zodiac_twelve'];
 const ENDING = ['q_road_1', 'q_road_2', 'q_road_3', 'q_road_4', 'q_road_5', 'q_road_6', 'q_road_7', 'q_canary_quiet', 'q_kindest_hand', 'q_dream_closer', 'q_dream_fares', 'q_dream_ledger', 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut'];   // per user (2026-10-13): the quests the ending leans on (+ the Tear's first four they need)
-const ALL = [...CRIT, ...ENDING];
+const ALL = [...CRIT, ...ENDING, 'q_visit_lavaCavern'];   // v0.30.1781 per user ("make this quest critical"): Recover the Forge-Key
 const server = spawn(process.execPath, [path.join(SERVE_ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: SERVE_ROOT, env: { ...process.env } });
 await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
@@ -78,7 +78,7 @@ try {
     tickQuestUnlocks(); out.migrate = { done: player.quests.completed.q_four_captains === 123, active: !!player.quests.active.q_four_captains, coins: player.mojicoins === coins0 };
     window.showToast = _ts; return out;
   }, CRIT);
-  ok('1. exactly the twenty-seven are critical (the Dreams Above and the Twelve Stars joined 2026-10-12; the Road, the Tear\'s first four, the canary, the kindest hand and the Dreams joined 2026-10-13)', JSON.stringify(R.flagged) === JSON.stringify([...ALL].sort()), R.flagged);
+  ok('1. exactly the twenty-eight are critical (Recover the Forge-Key joined v0.30.1781; the Dreams Above and the Twelve Stars joined 2026-10-12; the Road, the Tear\'s first four, the canary, the kindest hand and the Dreams joined 2026-10-13)', JSON.stringify(R.flagged) === JSON.stringify([...ALL].sort()), R.flagged);
   ok('2. Lv 10 starts The Four Captains by itself (not at Lv 9); the Mirror Self Trial is offered at Lv 20 and waits to be taken from your captain', !R.at9 && R.at20.active.includes('q_four_captains') && !R.at20.active.includes('q_inner_dim_trial') && R.at20.trialOffered && R.at20.activeAt20.includes('q_four_captains') && !R.at20.activeAt20.includes('q_inner_dim_trial'), R.at20);
   ok('2. ...with a ★ CRITICAL toast and no duplicate STORY toast for it', R.at20.crit.some((t) => /Four Captains/.test(t)) && R.at20.story.length === 0, R.at20);
   ok('3. The Four Captains names your captain (archer: Lady Hong); Will does not count, Lady Hong completes it', JSON.stringify(R.talkTo) === '["Lady Hong"]' && !R.talk.afterWill && R.talk.afterHong, { talkTo: R.talkTo, ...R.talk });
@@ -87,7 +87,7 @@ try {
   const J = R.journal;
   ok('5. critical cards lead the journal and carry the ★ CRITICAL pill', J.critCards.length >= 2 && J.first.every((id, i) => i >= J.critCards.length || J.critCards.includes(id)), J);
   ok('4. ...no critical card has the abandon ✕ (other cards keep theirs)', J.critWithX === 0 && J.nonCritX >= 1, J);
-  ok('5. the ★ meter counts the critical path out of twenty-seven', /★\s*\d+\/27/.test(J.meter), J.meter);
+  ok('5. the ★ meter counts the critical path out of twenty-eight', /★\s*\d+\/28/.test(J.meter), J.meter);
   ok('5. the Critical chip shows only critical quests', R.chip.exists && R.chip.allCrit, R.chip);
   ok('6. the tracker leads with the earliest critical quest, marked ★, ahead of a pinned bounty - and only one ★ row', R.tracker.length >= 2 && /^★ /.test(R.tracker[0]) && R.tracker.filter((t) => /^★ /.test(t)).length === 1, R.tracker);
   ok('7. a save already past the trial has The Four Captains done, quietly', R.migrate.done && !R.migrate.active && R.migrate.coins, R.migrate);

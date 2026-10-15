@@ -11,7 +11,7 @@
 //   [6] the Sundered Forge's far door to the Last Step always stands; a real Up is refused until The Forge That Broke is done, with a
 //       message naming what is left (fresh Lv 50 save: the next step; S1 Barnaby IV ready: take Barnaby his answer; S4 old save with
 //       the Smith beaten: Barnaby I after Brok's errand); once it is done the same door takes the hero down
-//   [7] S4: the tracker's and the Journal's Next name Barnaby I after Recover the Forge-Key, not the errand alone
+//   [7] S4: the tracker's and the Journal's Next name Recover the Forge-Key itself (critical since v0.30.1781: on the main path), see Brok - no passed level
 //   node release21e_test.mjs        PORT / MOJI_GAME_FILE / SERVE_ROOT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -189,10 +189,10 @@ try {
   ok('[6b] S1 (the Smith fell for Barnaby IV): the door stands, refuses, and says to take Barnaby his answer; the tracker shows IV', S1.door && S1d.d && S1d.d.now === 'sundered_forge' && /Take Barnaby his answer/.test(S1d.toast) && S1.rows.some((r) => r.includes('What the Fire Finishes')), { S1, S1d });
   const S4 = await setS('S4'), S4d = await tryDoor();
   ok('[6c] S4 (old save: the Smith beaten, no Barnaby quest): the door stands and refuses, naming Barnaby I after Brok\'s errand', S4.door && S4d.d && S4d.d.now === 'sundered_forge' && /Five Stories About a Smith/.test(S4d.toast) && /Recover the Forge-Key/.test(S4d.toast), { S4, S4d });
-  ok('[7a] S4: the tracker\'s Next names Barnaby I (after Recover the Forge-Key, see Brok), not the errand alone', S4.rows.some((r) => /Next: I . Five Stories About a Smith/.test(r) && /after Recover the Forge-Key/.test(r)), S4.rows);
+  ok('[7a] S4: the tracker\'s Next names Recover the Forge-Key (critical since v0.30.1781), see Brok - not a level already passed', S4.rows.some((r) => /Next: Recover the Forge-Key/.test(r) && /see Brok/.test(r) && !/Lv 35/.test(r)), S4.rows);
   const J4 = await P.evaluate(async () => { window._r21.clear(); let btn = null; for (let i = 0; i < 3 && !btn; i++) { try { toggleQuestJournal(); } catch (e) {} for (let k = 0; k < 20 && !(btn = document.querySelector('.qj-saga-next')); k++) await window._r21.sleep(100); }
     const t = btn ? btn.textContent.replace(/\s+/g, ' ').trim() : 'none: ' + JSON.stringify({ saga: !!document.querySelector('.qj-saga'), modal: !!document.getElementById('quest-modal') }); window._r21.clear(); return t; });
-  ok('[7b] S4: the Journal\'s Next button names Barnaby I after the errand (no false Lv 45)', !!J4 && /Five Stories About a Smith/.test(J4) && /Recover the Forge-Key/.test(J4) && !/Lv 45/.test(J4), J4);
+  ok('[7b] S4: the Journal\'s Next button names Recover the Forge-Key (critical since v0.30.1781; no false Lv 45 / Lv 35)', !!J4 && /Recover the Forge-Key/.test(J4) && !/Lv 45/.test(J4) && !/Lv 35/.test(J4), J4);
   const SD = await setS('DONE'), SDd = await tryDoor();
   ok('[6d] with The Forge That Broke done the same door takes the hero to the Last Step', SD.door && SD.open && SDd.d && SDd.d.now === 'lastStep' && !SDd.toast, { SD, SDd });
   // ---- [2] Barnaby III: Young Barnaby felled on Barnaby II's road
