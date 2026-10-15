@@ -773,6 +773,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "void_tear": 9
   },
   "projectiles/anim": {
+   "arrowRain": 9,
    "bloodlust_wave": 9,
    "bolt": 9,
    "bubble": 9,
