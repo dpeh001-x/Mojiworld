@@ -72,7 +72,9 @@ try {
   // Young Barnaby and the Sundered Smith are the same man a century apart: their lines rhyme without saying so
   const BV = R.voice.young_confused_barnaby, SV = R.voice.sundered_smith, BE = R.epiAll.young_confused_barnaby, SE = R.epiAll.sundered_smith, BL = R.lines[8], SL = R.lines[11];
   check(/shines/.test(BV) && /unknown/.test(SV) && /shift/.test(SV), 'Barnaby is proud and the Smith is sorry: the young one says how it shines, the Smith asks to finish the shift and says he should have left the unknown alone', J({ BV, SV }));
-  check(/finally understands what he made/.test(BE) && /finally understands what he made/.test(SE), 'their epitaphs share a shape: each finally understands what he made', J({ BE: BE.slice(0, 60), SE: SE.slice(0, 60) }));
+  // v0.30.1767 barnaby-epitaph: per user, his defeat line now points past him ("distorted Barnaby perishes, however a new adversary is looming beyond");
+  // the Smith keeps his half of the old rhyme
+  check(BE === 'Distorted Barnaby perishes; however, a new adversary looms beyond.' && /finally understands what he made/.test(SE), 'his epitaph says Distorted Barnaby perishes and a new adversary looms; the Smith still finally understands what he made', J({ BE, SE: SE.slice(0, 60) }));
   check(/talented smith/.test(BL) && /fuse magic/.test(BL) && /heroes who climbed/.test(SL) && /broke his anvil/.test(SL), 'their Codex lines: the talented smith the tear borrowed, and the smith who armed the Twelve and broke his anvil', J({ BL, SL }));
   check(!/\bBarnaby\b.*\b(smith|Smith)\b.*same (man|person)|same man|same person|a century on/i.test(BV + SV + BE + SE + BL + SL), 'it stays vague: no line says outright that they are one man (the film does that)', '');
   check(/lowers its weapon/.test(R.epiAll.mirrorSelf) && !/blade/.test(R.epiAll.mirrorSelf), 'Mirror Self lowers its weapon (not its blade)', R.epiAll.mirrorSelf);
