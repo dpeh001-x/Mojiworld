@@ -823,6 +823,8 @@ window.LX_SPRITE_FRAME_INDEX = {
    "mjellyglob": 9,
    "mkunai": 9,
    "mlantern": 9,
+   "mmirror": 9,
+   "mmolten": 9,
    "mmournorb": 9,
    "morange": 9,
    "mossbaton": 9,
