@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1809';
+const GAME_VERSION = 'v0.30.1810';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -61470,6 +61470,7 @@ const _COOP_PJ_XF = ['_defPierce', '_ignoreDef', '_heavyFloorPct', '_srcType', '
   'sourceLabel', '_zodiacSign', '_radiance', '_impactMs', '_impactShake', 'freeze', 'poison', '_poisonDmg', 'slow', 'skillLock',
   'stunHit', '_kbTier', 'knockback', '_zoneAttack', 'pierce', '_noEvasion', 'noGravity'];   // v0.30.1293 strike-knock - _kbTier: a guest is thrown as far as the host (kept off the list's tail: two suites pin it)   // v0.30.1013 a guest's weight wave rides the floor too   // v0.30.1006 the must-dodge shots stay must-dodge on a guest
 _COOP_PJ_XF.push('_zSz', '_zVis');   // v0.30.1381 zodiac-proj-size - a guest's copy arrives sized, never grown twice
+_COOP_PJ_XF.push('_smithToll', '_pGround', '_pGroundPad');   // v0.30.1810 smith-toll - a guest's copy of the toll wave rides the floor and sits on it too
 _COOP_PJ_XF.push('_arlenStrike', '_colSprite');   // v0.30.1736 bughunt7: Arlen's strike (drew as a red ellipse) and a column's own art on a guest
 _COOP_PJ_XF.push('_sgL0', '_swingType', '_sgM', '_sgF', '_sgBoss', '_lxSrcUid');   // bughunt sibling-4 - a monster's swing keeps its life span (the 4-tick peak), its own art, its path and the maker's uid on a guest's copy (a new line: the marker above pins the literal)
 function _coopPjVal(v) {   // numbers, short strings, booleans, and one level of those (bands, radiance)
@@ -106519,14 +106520,15 @@ function _bossSpecialAttacks(m, dt) {
       }
       if (typeof scheduleSkillTimer === 'function') scheduleSkillTimer(() => {
         if (!m || m.currentHp <= 0) return;
+        const _tollY = _lxTollSurfaceY(m.x + m.w / 2, m.y + m.h, 24);   // the surface under his feet (the ledge he stands on, else the floor below him)
         for (const dir of [-1, 1]) {
           game.projectiles.push({
-            x: m.x + m.w / 2, y: m.y + m.h - 24,
+            x: m.x + m.w / 2, y: (_tollY == null ? m.y + m.h : _tollY) - 26,
             vx: dir * 5.5, vy: 0,
             w: 48, h: 26, life: 110,
             damage: (m.atk || 275) * 2.4,
             owner: 'enemy', _bossBand: (typeof _bossHitBand === 'function') ? _bossHitBand(m, 'ranged') : null, skill: 'quake', color: '#ffaa44',
-            _sourceLabel: 'the Broken Anvil\'s toll',
+            _sourceLabel: 'the Broken Anvil\'s toll', _smithToll: true, noGravity: true, _pGround: true, _pGroundPad: 0.15,
           });
         }
         if (typeof addShake === 'function') addShake(14);
@@ -106833,6 +106835,25 @@ const _KROOK_STRINGS_P2 = [      // phase 2 earns a third beat
 // 40 px, while an 84 px wave at 7.5 px a step overlaps a player for ~15 - so a jump started in a ~210 ms
 // window clears it, and a mistimed one does not. Reach: speed x life = 450 px out from each flank.
 const LX_KROOK_SLAM = { frac: 0.25, speed: 7.5, w: 84, h: 40, life: 60 };
+// v0.30.1810 smith-toll - the top of the surface a ground-riding shot at x may stand on: the highest ground / ledge whose top is at or below `from` less a small step (`maxUp` px above it may be climbed), else null.
+function _lxTollSurfaceY(cx, from, maxUp) {
+  const md = (typeof game !== 'undefined' && game) ? game.mapData : null; if (!md) return null;
+  const plats = md.platforms || []; let best = null;
+  for (let i = 0; i < plats.length; i++) {
+    const g = plats[i]; if (!g || (g.type !== 'ground' && g.type !== 'platform')) continue;
+    if (cx < g.x || cx > g.x + g.w || g.y < from - maxUp) continue;
+    if (best === null || g.y < best) best = g.y;
+  }
+  return best;
+}
+// v0.30.1810 smith-toll - one step of a toll wave: keep its box bottom on the surface under its centre. A step up of 18 px or less is climbed, a ledge above that is passed under, and where the surface ends it falls to the next.
+function _lxTollRide(p) {
+  const bottom = p.y + p.h, top = _lxTollSurfaceY(p.x + p.w / 2, bottom, 18);
+  if (top == null) { p._tvy = (p._tvy || 0) + 0.6; p.y += p._tvy; return; }   // nothing under it: it falls (the world-bounds kill reaps it)
+  if (top < bottom) { p.y = top - p.h; p._tvy = 0; return; }   // a step up: climb it
+  if (top > bottom) { p._tvy = (p._tvy || 0) + 0.6; p.y = Math.min(top - p.h, p.y + p._tvy); if (p.y + p.h >= top) p._tvy = 0; }   // the surface ended: fall to the next
+  else p._tvy = 0;
+}
 function _krookSlamWave(m) {
   const feet = m.y + m.h, S = LX_KROOK_SLAM;
   for (const dir of [-1, 1]) {
@@ -116955,6 +116976,7 @@ function updateProjectiles(dt) {
     }
     if (p._aeHaloOf) _lxAeHaloStep(p);   // v0.30.1721 aetherion-boost - a Halo Disc flies out, then comes back to him
     p.x += p.vx; p.y += p.vy;
+    if (p._smithToll) _lxTollRide(p);   // v0.30.1810 smith-toll - the Broken Anvil's waves ride the floor / ledge under them
     // v0.29.362 — Bullet Waltz slows ENEMY shots inside the field. Applied
     // as a corrective pullback on the step just taken (not a vx rescale), so
     // there is no per-frame compounding and the shot resumes full speed the
@@ -171610,7 +171632,7 @@ function drawProjectiles() {
           const _ar = _sprite.naturalWidth / (_sprite.naturalHeight || _sprite.naturalWidth);
           const _dw = r * 2, _dh = (_ar > 0 ? _dw / _ar : _dw);
           // v0.30.1249 — _lxProjGroundBlit: a 'ground' sprite is bottom-anchored to the hitbox floor, not centred on it
-          ctx.drawImage(_lxProjScaled(_sprite, Math.max(_dw, _dh)), -_dw / 2, _blit.ground ? (p.h || 0) / 2 - _dh * (1 - (_blit.groundPad || 0)) : -_dh / 2, _dw, _dh);   // v0.30.252 perf   // no procedural-circle fallback; skip until decoded
+          ctx.drawImage(_lxProjScaled(_sprite, Math.max(_dw, _dh)), -_dw / 2, (_blit.ground || p._pGround) ? (p.h || 0) / 2 - _dh * (1 - (_blit.groundPad || p._pGroundPad || 0)) : -_dh / 2, _dw, _dh);   // v0.30.252 perf   // no procedural-circle fallback; skip until decoded
         }
         ctx.restore();
       } else if (p.skill === 'smash' && _lxFxReady(LX_FX.fx_groundshock)) {
