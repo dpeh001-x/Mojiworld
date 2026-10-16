@@ -5,6 +5,7 @@
 // that crossed inside a run (the ten tower-only types are in the dex; kills count for the daily) was spent for 0 and
 // could never fire again, under a toast promising the full amount. And a boon reroll inside a run was refunded by the
 // run-end wallet restore, which re-charges only game.expedition._spentInRun.
+// release26a: the restore also rolled the boon back, so a reroll is now refused inside a run - nothing is charged, in or after it.
 //   node scripts/expedition_lifetime_rewards_test.mjs [page] [port]
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -83,7 +84,7 @@ let pass = 0, fail = 0;
 const ok = (c, n, d) => { console.log((c ? 'PASS  ' : 'FAIL  ') + n + (d !== undefined ? '  ' + JSON.stringify(d) : '')); c ? pass++ : fail++; };
 ok(R.dex.stamped && R.dex.delta >= 80000, 'a MojiDex milestone crossed inside a run is PAID when the run ends (80,000 listed)', R.dex);
 ok(R.daily.claimed && R.daily.delta > 0, 'a daily challenge completed inside a run is paid when the run ends', R.daily);
-ok(R.reroll.skipped || (R.reroll.spent > 0 && R.reroll.afterEnd === R.reroll.spent), 'boon rerolls inside a run stay spent after the run-end wallet restore', R.reroll);
+ok(R.reroll.skipped || (R.reroll.spent > 0 && R.reroll.spentInRun === 0 && R.reroll.afterEnd === 0), 'a boon reroll inside a run is refused - nothing charged in the run or after the run-end restore (release26a: the restore undid the roll)', R.reroll);
 ok(R.streak.mileToast != null && R.streak.loginToast != null && R.streak.loginToast + R.streak.mileToast === R.streak.delta, 'the streak-milestone toast shows what the wallet got (login + milestone toasts add up to the payout)', R.streak);
 ok(errs.length === 0, 'no page errors', errs.slice(0, 3));
 console.log(`\n${pass}/${pass + fail} checks passed`);

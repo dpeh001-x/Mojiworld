@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1813';
+const GAME_VERSION = 'v0.30.1814';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -30568,9 +30568,17 @@ function unequipBoon(index) {
   return true;
 }
 // Spend Mojicoins to re-roll the boon's value within its template range.
+// v0.30.1814 release26a: the run's end puts the boon bag back as it was at the door (_expeditionRestorePlayer) and re-charges what the
+// run spent, so a reroll bought inside was paid for and then rolled back, and a discard came back. Refused, as resetStats is.
+function _lxBoonRunLocked(what) {
+  if (!(typeof game !== 'undefined' && game && game.expedition && game.expedition.active)) return false;
+  if (typeof showToast === 'function') showToast('Finish or leave the Expedition before you ' + what + '.', 'rare');
+  return true;
+}
 function rerollBoon(index) {
   const boon = player.boons[index];
   if (!boon) return false;
+  if (_lxBoonRunLocked('reroll boons')) return false;   // v0.30.1814 release26a
   const def = getBoonDef(boon);
   if (!def) return false;
   if (def.min === def.max) {
@@ -30601,6 +30609,7 @@ function rerollBoon(index) {
 }
 function discardBoon(index) {
   if (!player.boons[index]) return false;
+  if (_lxBoonRunLocked('discard boons')) return false;   // v0.30.1814 release26a: the run-end restore would bring it back
   // Remove from equipped list first
   const ei = player.boonsEquipped.indexOf(index);
   if (ei >= 0) player.boonsEquipped.splice(ei, 1);
@@ -44699,28 +44708,13 @@ function _lxEquipLifesteal(v) {
   if (!(v > 0)) return 0;
   return Math.min(LX_EQUIP_LS_CAP_PER_ITEM, Math.max(LX_EQUIP_LS_MIN_PER_ITEM, v));
 }
-function getEquipBonus(key) {
-  let cache = player._equipBonusCache;
-  if (!cache) {
-    cache = {};
-    try { if (_lxAc.on) _lxAc.items(); } catch (e) {}   // v0.30.1673 ac-boxes - an item over its ceiling is put back before its stats count
-    // v0.29.469 — player.equipped can be null here. loadState calls getMaxHp()
-    // 23 lines BEFORE its own `if (!player.equipped)` defaulter, so a save
-    // carrying "equipped": null threw right through the load. _equipBonusCache
-    // is never persisted, so the rebuild below always runs on that first read.
-    // Repaired in place rather than just skipped: every other consumer expects
-    // v0.29.470 — seed the three core slots. Repairing to a bare {} was truthy,
-    // so loadState's own `if (!player.equipped) player.equipped = {weapon:null,
-    // armor:null, accessory:null}` was then guarded away and those three keys
-    // ended up ABSENT rather than null — a different shape from every other
-    // load path, which matters to any `in`/hasOwnProperty check.
-    if (!player.equipped || typeof player.equipped !== 'object') {
-      player.equipped = { weapon: null, armor: null, accessory: null };
-    }
-    // Lazy-build on first read after invalidation.
-    for (const slot of ['weapon','armor','accessory']) {
-      const it = player.equipped[slot];
-      if (!it) continue;
+// v0.30.1814 release26a: ONE ITEM'S PAYOUT, one place. This is getEquipBonus's per-item arithmetic moved here word for word (star curve per
+// stat - the main stat on its own - tier row, class affinity x1.2 / x0.75, slot role, the per-item crit / % ATK caps and the
+// lifesteal band). The compare rows, the star line, the forge preview and getEquipBonus all read it, so what a tooltip
+// promises is what equipping pays. slot defaults to the item's own.
+function _lxItemContrib(it, k, slot) {
+  if (!it || typeof it[k] !== 'number' || k === 'price' || k === 'tier' || k === 'rarity') return 0;
+  if (slot === undefined || slot === null) slot = it.slot;
       // v0.30.x - the star multiplier is resolved PER STAT now (see
       // _starStatMult), because a weapon's ATK and its Greed no longer grow on
       // the same curve. Everything downstream of it - the percent-family
@@ -44735,8 +44729,6 @@ function getEquipBonus(key) {
       // Mirrors the set-bonus class rule below. Skipped for discrete count flags
       // (multishot, extraJumps, …) so they can't become fractional.
       const _clsAff = (it.cls && it.cls !== 'any') ? (it.cls === player.cls ? 1.20 : 0.75) : 1;
-      for (const k in it) {
-        if (typeof it[k] === 'number' && k !== 'price' && k !== 'tier' && k !== 'rarity') {
           // v0.26.441 — Discrete projectile/proc flags (multishot, burn,
           // extraJumps) must NOT be scaled by star or tier — they're counts,
           // not magnitudes. Pre-fix, a ★10 archer's gear multishot (+8) was
@@ -44788,7 +44780,24 @@ function getEquipBonus(key) {
           // pieces still pay three times the cap, and the 10% shared per-hit
           // ledger (LX_LIFESTEAL_CAP) is what governs the combined rate.
           if (k === 'lifesteal') _contrib = _lxEquipLifesteal(_contrib);
-          cache[k] = (cache[k] || 0) + _contrib;
+  return _contrib;
+}
+// v0.30.1814 release26a: the same, at another star count (the forge preview)
+function _lxItemContribAt(it, k, slot, stars) {
+  if (!it) return 0;
+  if (stars === undefined || stars === (it.stars || 0)) return _lxItemContrib(it, k, slot);
+  return _lxItemContrib(Object.assign({}, it, { stars }), k, slot);
+}
+// v0.30.1814 release26a: everything a set of worn pieces pays - getEquipBonus's whole build (items, then set bonuses), for any map of slots
+function _lxEquipTotals(eq) {
+  const cache = {};
+  if (!eq || typeof eq !== 'object') return cache;
+    for (const slot of ['weapon','armor','accessory']) {
+      const it = eq[slot];
+      if (!it) continue;
+      for (const k in it) {
+        if (typeof it[k] === 'number' && k !== 'price' && k !== 'tier' && k !== 'rarity') {
+          cache[k] = (cache[k] || 0) + _lxItemContrib(it, k, slot);
         }
       }
     }
@@ -44796,7 +44805,7 @@ function getEquipBonus(key) {
     // already walked equipped above.
     const counts = {};
     for (const slot of ['weapon','armor','accessory']) {
-      const it = player.equipped[slot];
+      const it = eq[slot];
       if (it && it.setId) counts[it.setId] = (counts[it.setId] || 0) + 1;
     }
     for (const sid in counts) {
@@ -44816,6 +44825,37 @@ function getEquipBonus(key) {
         for (const k in set.bonus3) if (typeof set.bonus3[k] === 'number') _setAdd(k, set.bonus3[k]);
       }
     }
+  return cache;
+}
+// v0.30.1814 release26a: what putting `it` in `slot` changes, stat by stat (set bonuses that start or stop included)
+function _lxEquipDelta(it, slot) {
+  const now = (typeof player !== 'undefined' && player && player.equipped) || {};
+  const sl = slot || (it && it.slot);
+  const eq = Object.assign({}, now); eq[sl] = it;
+  const A = _lxEquipTotals(eq), B = _lxEquipTotals(now), out = {};
+  for (const k in A) out[k] = (A[k] || 0) - (B[k] || 0);
+  for (const k in B) if (!(k in out)) out[k] = -(B[k] || 0);
+  return out;
+}
+function getEquipBonus(key) {
+  let cache = player._equipBonusCache;
+  if (!cache) {
+    cache = {};
+    try { if (_lxAc.on) _lxAc.items(); } catch (e) {}   // v0.30.1673 ac-boxes - an item over its ceiling is put back before its stats count
+    // v0.29.469 — player.equipped can be null here. loadState calls getMaxHp()
+    // 23 lines BEFORE its own `if (!player.equipped)` defaulter, so a save
+    // carrying "equipped": null threw right through the load. _equipBonusCache
+    // is never persisted, so the rebuild below always runs on that first read.
+    // Repaired in place rather than just skipped: every other consumer expects
+    // v0.29.470 — seed the three core slots. Repairing to a bare {} was truthy,
+    // so loadState's own `if (!player.equipped) player.equipped = {weapon:null,
+    // armor:null, accessory:null}` was then guarded away and those three keys
+    // ended up ABSENT rather than null — a different shape from every other
+    // load path, which matters to any `in`/hasOwnProperty check.
+    if (!player.equipped || typeof player.equipped !== 'object') {
+      player.equipped = { weapon: null, armor: null, accessory: null };
+    }
+    cache = _lxEquipTotals(player.equipped);   // v0.30.1814 release26a: the build lives in _lxEquipTotals / _lxItemContrib (moved, unchanged)
     player._equipBonusCache = cache;
   }
   return cache[key] || 0;
@@ -75368,6 +75408,7 @@ function resetStats() {
     // then clamps to zero — the v0.27.24 shard-wipe bug, and the reason every shard site reads this way.
     player.setshards = (player.setshards || 0) - LX_RESET_STATS_SHARDS;
     let refund = 0;
+    const _lxSp0 = player.skillPoints || 0;   // v0.30.1814 release26a: the toast left the trainer's SP out (5 printed, 13 refunded)
     for (const o of LEVELUP_OPTIONS) {
       const sN = spent[o.id] || 0; if (!sN) continue;
       refund += sN * o.cost;
@@ -75417,7 +75458,7 @@ function resetStats() {
     player.hp = Math.min(player.hp || 0, getMaxHp());
     player.mp = Math.min(player.mp || 0, getMaxMp());
     if (typeof invalidateEquipBonusCache === 'function') invalidateEquipBonusCache();
-    if (typeof showToast === 'function') showToast('⟳ Stats reset — ' + refund + ' SP refunded (paid ' + cost + ' Mojicoins + ' + LX_RESET_STATS_SHARDS + '◈).', 'epic');
+    if (typeof showToast === 'function') showToast('⟳ Stats reset — ' + ((player.skillPoints || 0) - _lxSp0) + ' SP refunded (paid ' + cost + ' Mojicoins + ' + LX_RESET_STATS_SHARDS + '◈).', 'epic');
     if (typeof flash === 'function') flash(0.2);
     if (typeof saveState === 'function') saveState();
     if (typeof openLevelUpPanel === 'function') openLevelUpPanel();
@@ -122152,7 +122193,7 @@ So… do you need a lift?`;
       if (typeof saveState === 'function') saveState();
       document.getElementById('dialog-text').textContent = `*Felina counts ${_amt.toLocaleString()} Mojicoins into a velvet pouch and slides it across the counter.*\n\nDo come back. Your money was very fond of us.`;
     } });
-    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands.*\n\nEvery hour you play, your whole balance earns 0.1 % — on the hour, compounding, no cap. The clock runs only while the game does. Withdraw anytime, no fee.\n\nNot a hiding place: death\'s 10 % and the unlearning fee take your purse first, my ledgers second.'; } });
+    opts.push({ t:'How does interest work?', cb:() => { document.getElementById('dialog-text').textContent = '*Felina folds her hands.*\n\nEvery hour you play, your whole balance earns 0.1 % — on the hour, compounding, up to a balance of one trillion. The clock runs only while the game does. Withdraw anytime, no fee.\n\nNot a hiding place: death\'s 10 % and the unlearning fee take your purse first, my ledgers second.'; } });
   } else if (npc.role === 'bravoGuide') {
     // v0.26.289 — Per-floor Bravo. Three states:
     //   1. Player just arrived, quest not yet cleared → flavor flavor,
@@ -124605,6 +124646,16 @@ function _forgeExpectedCost(s, it) {
   return `<span class="forge-chip" title="At ${rate}% you succeed once per ${(100 / rate).toFixed(1)} attempts on average, so ${cost.toLocaleString()} × ${(100 / rate).toFixed(1)} ≈ ${exp.toLocaleString()}">≈ ${exp.toLocaleString()} expected</span>`;
 }
 
+// v0.30.1814 release26a: the stat a star is worth most to - the slot's main stat the piece actually carries
+function _lxForgeMainKey(it) {
+  if (!it) return null;
+  const slot = (it.slot === 'accessorie') ? 'accessory' : it.slot;
+  const has = (k) => typeof it[k] === 'number' && it[k] > 0;
+  if (slot === 'weapon') return has('atk') ? 'atk' : null;
+  if (slot === 'armor') return has('def') ? 'def' : null;
+  for (const k of ['hp', 'mp', 'crit', 'accuracy', 'critDmg', 'atkPct']) if (has(k)) return k;
+  return null;
+}
 function _forgeEffStat(it, k, starsOverride) {
   if (!it) return 0;
   const base = it[k];
@@ -124616,6 +124667,7 @@ function _forgeEffStat(it, k, starsOverride) {
   const tierStat = (typeof _TIER_FLAT_STATS !== 'undefined') && _TIER_FLAT_STATS.has(k);
   const tMul = (tierStat && typeof _tierStatMul === 'function') ? _tierStatMul(it, k, it.slot) : 1;   // v0.30.1599 per stat: a weapon's ATK has its own row
   const roleMul = (typeof _lxSlotStatMul === 'function') ? _lxSlotStatMul(it.slot, k) : 1;
+  if (typeof _lxItemContribAt === 'function') return _lxItemContribAt(it, k, it.slot, st);   // v0.30.1814 release26a: + class affinity, % softening, count flags - the payout itself
   let v = base * mul * tMul * roleMul;
   if (k === 'crit') v = Math.min(LX_EQUIP_CRIT_CAP_PER_ITEM, v);
   if (k === 'atkPct') v = Math.min(LX_EQUIP_ATKPCT_CAP_PER_ITEM, v);
@@ -125482,7 +125534,12 @@ function renderEnhancementModal(selectedItem) {
     const rate = Math.min(100, _lxEnhRate(selectedItem, s));   // bughunt save-10 - the roll adds the item's pity; the badge now says so
     const nextBonusPct = starBonusPct(s + 1, selectedItem.tier);
     const curBonusPct  = starBonusPct(s, selectedItem.tier);
-    const marginalGain = nextBonusPct - curBonusPct;
+    let marginalGain = nextBonusPct - curBonusPct, _mgLbl = '';
+    {   // v0.30.1814 release26a: the step on the piece's main stat, as it pays (was the gap between two points of the flat curve)
+      const _mk = _lxForgeMainKey(selectedItem);
+      const _c0 = _mk ? _forgeEffStat(selectedItem, _mk, s) : 0, _c1 = _mk ? _forgeEffStat(selectedItem, _mk, s + 1) : 0;
+      if (_c0 > 0) { marginalGain = Math.round((_c1 / _c0 - 1) * 100); _mgLbl = ((typeof STAT_LABEL === 'object' && STAT_LABEL[_mk]) || _mk.toUpperCase()) + ' '; }
+    }
     const canAfford = player.mojicoins >= cost;
     const risky = canDowngradeOnFail(s);
     // v0.26.259 — Three-zone risk classification used by the badge below.
@@ -125493,7 +125550,7 @@ function renderEnhancementModal(selectedItem) {
     // they did not move when the odds steepened at ★6: 'dangerous' begins where
     // canDowngradeOnFail does, and that is still ★5. Only the percentages in
     // this comment were stale.
-    const _riskZone = s === 0 ? 'safe' : s < 5 ? 'risky' : 'dangerous';
+    const _riskZone = !canDowngradeOnFail(s) ? 'safe' : 'dangerous';   // v0.30.1814 release26a: "Risky" sat on ★1-★4 under "no ★ loss"; safe = no star can be lost
     const _riskLabel = _riskZone === 'safe' ? '✓ Safe' : _riskZone === 'risky' ? '⚠ Risky' : '⛔ Dangerous';
     const _riskColor = _riskZone === 'safe' ? '#88ff88' : _riskZone === 'risky' ? '#ffcc44' : '#ff8888';
     const _riskBg    = _riskZone === 'safe' ? 'rgba(80,200,80,0.18)' : _riskZone === 'risky' ? 'rgba(220,180,60,0.18)' : 'rgba(220,80,80,0.20)';
@@ -125581,7 +125638,7 @@ function renderEnhancementModal(selectedItem) {
       <div style="display:flex; gap:6px; margin-bottom:6px; flex-wrap:wrap;">
         <span style="display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:12px; background:${_riskBg}; color:${_riskColor}; font-size:11px; font-weight:600;">${_riskLabel} · ${rate}% success</span>
         <span style="display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:12px; background:${canAfford ? 'rgba(255,255,255,0.06)' : 'rgba(180,80,80,0.20)'}; color:${canAfford ? '#cfd4dc' : '#ff8888'}; font-size:11px; font-weight:600;">🪙 ${cost.toLocaleString()} Mojicoins ${canAfford ? '' : `(need ${(cost - player.mojicoins).toLocaleString()} Mojicoins more)`}</span>
-        <span style="display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:12px; background:rgba(255,255,255,0.06); color:#aac; font-size:11px;">+${marginalGain}% over current</span>
+        <span style="display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:12px; background:rgba(255,255,255,0.06); color:#aac; font-size:11px;">+${marginalGain}% ${_mgLbl}over current</span>
         ${_forgeExpectedCost(s, selectedItem)}
       </div>
       ${risky ? '<div style="font-size:11px; color:#ff9999; margin:4px 0 6px;">⚠ Failure has a 50 % chance to <b>drop ★ by one</b>.</div>' : '<div style="font-size:11px; color:#88ff88; margin:4px 0 6px;">✓ Failure on this star simply costs the Mojicoins — no ★ loss.</div>'}
@@ -126149,6 +126206,7 @@ const CRAFT_COST_SHARDS_T8 = 45000;   // v0.30.961 new tier
 const CRAFT_COST_MOJICOINS = 250000;   // T5 · v0.30.961 50,000 -> 250,000 (half the T5 market price)
 
 function openCraftingModal() {
+  game._craftArmed = null; clearTimeout(game._craftArmT);   // v0.30.1814 release26a: a fresh bench never opens armed
   if (typeof renderCraftingModal === 'function') renderCraftingModal();
   const m = document.getElementById('craft-modal');
   if (m) m.style.display = 'flex';
@@ -126296,8 +126354,36 @@ function renderCraftingModal() {
     `;
     const btn = div.querySelector('button');
     if (canAfford) {
+      // v0.30.1814 release26a: a double-click forged twice (the list redraws and the next button lands under the cursor) and one click
+      // spent up to 2,000,000 coins + 45,000 Setshards unasked. Brok's 400 ms guard, and the Reforge Bench's arm-then-confirm
+      // for T7 / T8 and for gear of another class; a cheap own-class craft stays one click.
+      const _ask = ((it.tier | 0) >= LX_CRAFT_CONFIRM_TIER) || !classMatch;
+      const _key = entry.slot + '::' + it.name;
+      if (_ask && game._craftArmed === _key) {
+        btn.innerHTML = '✓ Confirm — ' + _cost.shards.toLocaleString() + '◈ + ' + _cost.coins.toLocaleString() + '🪙';
+        btn.classList.add('craft-armed');
+        const _nt = document.createElement('div'); _nt.className = 'craft-arm-note';
+        _nt.style.cssText = 'font-size:10px;color:#ffcc66;margin-top:2px;';
+        _nt.textContent = 'Click Confirm to forge it' + (classMatch ? '' : ' — ⚠ ' + setCls + '-only: its stats pay −25% for you' + (set ? ', and the set bonuses stay off' : ''));
+        const _inf = div.querySelector('.info'); if (_inf) _inf.appendChild(_nt);
+      }
       btn.onclick = (e) => {
         e.stopPropagation();
+        const _ct = (e && e.timeStamp) || performance.now();
+        if (_ct - (game._lxCraftClickAt || 0) < 400) return;   // v0.30.1814 release26a: the second click of a double-click
+        if (_ask) {
+          if (game._craftArmed !== _key) {
+            game._lxCraftClickAt = _ct;
+            game._craftArmed = _key; game._craftArmedAt = _ct;
+            clearTimeout(game._craftArmT);
+            game._craftArmT = setTimeout(() => { if (game._craftArmed === _key) { game._craftArmed = null; renderCraftingModal(); } }, 4000);
+            renderCraftingModal();
+            return;
+          }
+          if (e && e.isTrusted && _ct - (game._craftArmedAt || 0) < 500) return;   // v0.30.1814 release26a: as the Reforge Bench - a confirm must be seen first
+          game._craftArmed = null; clearTimeout(game._craftArmT);
+        }
+        game._lxCraftClickAt = _ct;
         _craftSetPiece(entry);
       };
     } else {
@@ -126340,6 +126426,8 @@ function _disassembleSetPiece(entry) {
   renderCraftingModal();
 }
 
+// v0.30.1814 release26a: from this tier up a craft asks twice (2-step, like the Reforge Bench); gear of another class always does
+const LX_CRAFT_CONFIRM_TIER = 7;
 function _craftSetPiece(entry) {
   // v0.29.7xx — per-tier pricing (see CRAFT_TIER_COST).
   const _cost = (typeof _craftCostFor === 'function') ? _craftCostFor(entry && entry.item)
@@ -126347,6 +126435,7 @@ function _craftSetPiece(entry) {
   if (!_cost || !(entry && entry.item && (entry.item.tier | 0) <= CRAFT_TIER_MAX)) return;   // v0.30.961 T9/T10 never forge, whatever built the row
   if ((player.setshards || 0) < _cost.shards) return;
   if (player.mojicoins < _cost.coins) return;
+  if (performance.now() - (game._lxCraftAt || 0) < 400) return;   // v0.30.1814 release26a: one forge per 400 ms, so no path can double-spend
   const src = entry.item;
   // v0.25.938 — UI audit caught a silent-resource-loss bug: the original
   // version deducted shards + mojicoins BEFORE checking inventory cap. If
@@ -126380,6 +126469,7 @@ function _craftSetPiece(entry) {
   // nothing to show. Cap-check above guarantees the push will land in
   // a visible slot, so this reorder is also atomic-by-design.
   player.inventory.push(fresh);
+  game._lxCraftAt = performance.now();   // v0.30.1814 release26a
   player.setshards -= _cost.shards;
   player.mojicoins -= _cost.coins;
   if (typeof showToast === 'function') showToast(`✦ Forged ${src.name}!`, 'legendary');
@@ -128993,14 +129083,15 @@ function renderBoonPanel() {
     if (!def) continue;
     const isEquipped = equipped.includes(i);
     const cost = boonRerollCost(boon);
-    const canReroll = player.mojicoins >= cost && def.min < def.max;
+    const _rrRun = !!(game.expedition && game.expedition.active);   // v0.30.1814 release26a: a reroll in a run is undone when it ends
+    const canReroll = player.mojicoins >= cost && def.min < def.max && !_rrRun;
     if (bulk && !isEquipped) {
       const sel = game._boonSel.has(i);
       invHtml.push(`<div data-pick="${i}" class="boon-card boon-unequipped bl-card is-pick${sel ? ' is-sel' : ''}"><span class="bl-tick">${sel ? '☑' : '☐'}</span><span class="bl-ico${_kc(def, boon)}"${_ks(def, boon)}>${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 18) : ('<span style="font-size:14px;">' + def.icon + '</span>')}</span><span class="bl-txt"><b class="bl-name">${def.name}</b><span class="bl-tier tier-${def.tier || 'common'}">${def.tier || ''}</span>${_pips(def, boon)}<span class="bl-sub">${def.fmt(boon.roll)}</span></span></div>`);
     } else if (isEquipped) {
-      invHtml.push(`<div class="boon-card boon-equipped bl-card is-eq${bulk ? ' is-dim' : ''}"><div class="bl-row"><span class="bl-ico${_kc(def, boon)}"${_ks(def, boon)}>${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 22) : ('<span style="font-size:18px;">' + def.icon + '</span>')}</span><b class="bl-name">${def.name}</b><span class="bl-tag">equipped${bulk ? ' · unequip to discard' : ''}</span></div><div class="bl-fx">${def.fmt(boon.roll)}</div>${_grade(def, boon)}${bulk ? '' : `<div class="bl-acts"><button class="bl-btn" data-unequip="${i}">Unequip</button><button class="bl-btn" data-reroll="${i}" ${canReroll ? '' : 'disabled'}>Reroll · ${cost}<span class="coin-ico"></span></button><button class="bl-btn is-quiet" data-discard="${i}">Discard</button></div>`}</div>`);
+      invHtml.push(`<div class="boon-card boon-equipped bl-card is-eq${bulk ? ' is-dim' : ''}"><div class="bl-row"><span class="bl-ico${_kc(def, boon)}"${_ks(def, boon)}>${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 22) : ('<span style="font-size:18px;">' + def.icon + '</span>')}</span><b class="bl-name">${def.name}</b><span class="bl-tag">equipped${bulk ? ' · unequip to discard' : ''}</span></div><div class="bl-fx">${def.fmt(boon.roll)}</div>${_grade(def, boon)}${bulk ? '' : `<div class="bl-acts"><button class="bl-btn" data-unequip="${i}">Unequip</button><button class="bl-btn" data-reroll="${i}" ${canReroll ? '' : 'disabled'}${_rrRun ? ' title="Finish or leave the Expedition before you reroll boons."' : ''}>${_rrRun ? 'Reroll after the run' : 'Reroll · ' + cost + '<span class="coin-ico"></span>'}</button><button class="bl-btn is-quiet" data-discard="${i}">Discard</button></div>`}</div>`);
     } else {
-      invHtml.push(`<div class="boon-card boon-unequipped bl-card"><span class="bl-ico${_kc(def, boon)}"${_ks(def, boon)}>${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 18) : ('<span style="font-size:14px;">' + def.icon + '</span>')}</span><span class="bl-txt"><b class="bl-name">${def.name}</b><span class="bl-tier tier-${def.tier || 'common'}">${def.tier || ''}</span>${_pips(def, boon)}<span class="bl-sub">${def.fmt(boon.roll)}</span></span><button class="bl-btn" data-equip="${i}" ${equipped.length >= _capNow ? 'disabled' : ''}>Equip</button><button class="bl-btn is-quiet" data-reroll="${i}" ${canReroll ? '' : 'disabled'} title="Reroll for ${cost} Mojicoins">🎲 ${cost}<span class="coin-ico"></span></button><button class="bl-btn is-quiet" data-discard="${i}" title="Discard">✕</button></div>`);
+      invHtml.push(`<div class="boon-card boon-unequipped bl-card"><span class="bl-ico${_kc(def, boon)}"${_ks(def, boon)}>${(typeof boonIconHtml === 'function') ? boonIconHtml(def, 18) : ('<span style="font-size:14px;">' + def.icon + '</span>')}</span><span class="bl-txt"><b class="bl-name">${def.name}</b><span class="bl-tier tier-${def.tier || 'common'}">${def.tier || ''}</span>${_pips(def, boon)}<span class="bl-sub">${def.fmt(boon.roll)}</span></span><button class="bl-btn" data-equip="${i}" ${equipped.length >= _capNow ? 'disabled' : ''}>Equip</button><button class="bl-btn is-quiet" data-reroll="${i}" ${canReroll ? '' : 'disabled'} title="${_rrRun ? 'Finish or leave the Expedition before you reroll boons.' : 'Reroll for ' + cost + ' Mojicoins'}">${_rrRun ? '🎲 after the run' : '🎲 ' + cost + '<span class="coin-ico"></span>'}</button><button class="bl-btn is-quiet" data-discard="${i}" title="Discard">✕</button></div>`);
     }
   }
   if (!invHtml.length) {
@@ -129054,6 +129145,7 @@ function renderBoonPanel() {
   host.querySelectorAll('[data-reroll]').forEach(btn => btn.onclick = () => { if (rerollBoon(+btn.dataset.reroll)) refresh(); });
   host.querySelectorAll('[data-discard]').forEach(btn => btn.onclick = () => {
     const i = +btn.dataset.discard; const boon = player.boons[i]; const def = boon && getBoonDef(boon); if (!def) return;
+    if (_lxBoonRunLocked('discard boons')) return;   // v0.30.1814 release26a
     uiConfirm({ title: `Discard ${def.name}?`, body: `This boon (${def.fmt(boon.roll)}) will be permanently destroyed.`, yesLabel: 'Discard', noLabel: 'Keep', danger: true }).then((ok) => { if (ok) { discardBoon(i); refresh(); } });
   });
   const _tg = host.querySelector('#boon-bulk-toggle');
@@ -129064,6 +129156,7 @@ function renderBoonPanel() {
     const _clr = host.querySelector('#boon-sel-clear'); if (_clr) _clr.onclick = () => { game._boonSel.clear(); renderBoonPanel(); };
     const _dis = host.querySelector('#boon-sel-discard'); if (_dis) _dis.onclick = () => {
       const n = game._boonSel.size; if (!n) return;
+      if (_lxBoonRunLocked('discard boons')) return;   // v0.30.1814 release26a
       uiConfirm({ title: `Discard ${n} boon${n === 1 ? '' : 's'}?`, body: `${n} unequipped boon${n === 1 ? '' : 's'} will be permanently destroyed.`, yesLabel: `Discard ${n}`, noLabel: 'Keep', danger: true }).then((ok) => {
         if (!ok) return;
         const idxs = Array.from(game._boonSel).sort((a, b) => b - a);
@@ -131432,7 +131525,9 @@ function renderInventory(prefix) {
      "Discard N selected" trashes them all at once (by object identity). Worn
      gear and stacked potions carry no data-invidx, so they stay safe. */
   if (!game._invDiscardSel || !(game._invDiscardSel instanceof Set)) game._invDiscardSel = new Set();
-  if (game._invDiscardStamp !== player.inventory.length) { game._invDiscardSel.clear(); game._invDiscardStamp = player.inventory.length; }
+  // v0.30.1814 release26a: the ticks were bag POSITIONS, cleared only when the bag's length changed - a sale + a buy moved them onto other
+  // items. They are the item objects now; one that left the bag (sold, equipped, used) drops its tick.
+  { const _bag = new Set(player.inventory); for (const _x of Array.from(game._invDiscardSel)) if (!_x || typeof _x !== 'object' || !_bag.has(_x)) game._invDiscardSel.delete(_x); }
   if (grid && grid.parentNode) {
     let _bar = document.getElementById(prefix + 'inv-bulkbar');
     if (!_bar) { _bar = document.createElement('div'); _bar.id = prefix + 'inv-bulkbar'; _bar.style.cssText = 'display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:2px 0 6px;'; grid.parentNode.insertBefore(_bar, grid); }
@@ -131444,11 +131539,11 @@ function renderInventory(prefix) {
     if (_bulk) {
       const _clr = document.getElementById(prefix + 'inv-bulk-clear'); if (_clr) _clr.onclick = () => { game._invDiscardSel.clear(); renderInventory(prefix); };
       const _go = document.getElementById(prefix + 'inv-bulk-go'); if (_go) _go.onclick = () => {
-        const sel = Array.from(game._invDiscardSel).map(i => player.inventory[i]).filter(Boolean);
+        const sel = player.inventory.filter(it => it && game._invDiscardSel.has(it));   // v0.30.1814 release26a: in bag order
         const n = sel.length; if (!n) return;
         const starred = sel.filter(it => (it.stars | 0) > 0).length;
         const warn = starred ? ('\n\n⚠ ' + starred + ' carry ★ enhancement - those stars will be LOST.') : '';
-        uiConfirm({ title: '🗑 Discard ' + n + ' item' + (n === 1 ? '' : 's') + '?', body: 'Permanently delete ' + n + ' selected item' + (n === 1 ? '' : 's') + '?' + warn + '\n\nThis cannot be undone.', yesLabel: 'Discard ' + n, noLabel: 'Keep', danger: true }).then(ok => {
+        uiConfirm({ title: '🗑 Discard ' + n + ' item' + (n === 1 ? '' : 's') + '?', body: 'Discard ' + n + ': ' + _lxInvNameList(sel, 4) + '?' + warn + '\n\nThis cannot be undone.', yesLabel: 'Discard ' + n, noLabel: 'Keep', danger: true }).then(ok => {
           if (!ok) return;
           for (const it of sel) { const ri = player.inventory.indexOf(it); if (ri >= 0) player.inventory.splice(ri, 1); }
           game._invDiscardSel.clear();
@@ -131461,18 +131556,25 @@ function renderInventory(prefix) {
         if (slot.dataset.invidx === undefined) return;
         const idx = +slot.dataset.invidx;
         const _t = slot.querySelector('.inv-trash'); if (_t) _t.style.display = 'none';
-        const on = game._invDiscardSel.has(idx);
+        const _ref = player.inventory[idx];   // v0.30.1814 release26a
+        const on = !!_ref && game._invDiscardSel.has(_ref);
         slot.style.position = slot.style.position || 'relative';
         slot.style.outline = on ? '3px solid #ee5555' : '2px solid transparent';
         let pick = slot.querySelector('.inv-pick');
         if (!pick) { pick = document.createElement('div'); pick.className = 'inv-pick'; pick.style.cssText = 'position:absolute; top:1px; left:2px; font-size:14px; z-index:6; text-shadow:0 0 3px #000; pointer-events:none;'; slot.appendChild(pick); }
         pick.textContent = on ? '☑' : '☐';
-        slot.onclick = (e) => { e.stopPropagation(); if (game._invDiscardSel.has(idx)) game._invDiscardSel.delete(idx); else game._invDiscardSel.add(idx); renderInventory(prefix); };
+        slot.onclick = (e) => { e.stopPropagation(); if (!_ref) return; if (game._invDiscardSel.has(_ref)) game._invDiscardSel.delete(_ref); else game._invDiscardSel.add(_ref); renderInventory(prefix); };
       });
     }
   }
 }
 
+// v0.30.1814 release26a: "Wooden Sword, Steel Blade ★3" - the first few names, then "+N more"
+function _lxInvNameList(items, max) {
+  const a = (items || []).filter(Boolean), k = Math.max(1, max | 0);
+  const nm = (it) => String(it.name || it.baseName || 'item') + ((it.stars | 0) > 0 ? ' ★' + (it.stars | 0) : '');
+  return a.slice(0, k).map(nm).join(', ') + (a.length > k ? ' +' + (a.length - k) + ' more' : '');
+}
 // Dispatch click on a clickable etc item (P2W consumables).
 // v0.26.239 — Plastic Surgery + Hair Salon dispatchers stripped; their
 // underlying helpers (_useSurgeryTicket, _useHairTicket, _openCosmeticModal)
@@ -131569,17 +131671,18 @@ function _itemCompareHtml(it) {
   const _mul = (x, k) => (typeof _tierStatMul === 'function') ? _tierStatMul(x, k, x.slot) : 1;   // v0.30.1599 per stat: a weapon's ATK has its own row
   const _star = (x) => (typeof starMult === 'function' && x) ? starMult(x) : 1;   // v0.26.1030 — compare ignored star enhancement -> false upgrade arrows
   const nStar = _star(it), oStar = cur ? _star(cur) : 1;
+  const _dl = (typeof _lxEquipDelta === 'function') ? _lxEquipDelta(it, it.slot) : null;   // v0.30.1814 release26a: what equipping it really changes
   const fmtFlat = (v) => Math.abs(v) < 10 ? (Math.round(v * 10) / 10) : Math.round(v);
   const rows = [];
   // Flat (tier-scaled) main stats + damage.
   for (const [k, label] of [['atk','ATK'],['def','DEF'],['hp','HP'],['mp','MP'],['crit','% Crit']]) {
-    const d = (it[k] || 0) * _mul(it, k) * nStar - (cur ? (cur[k] || 0) * _mul(cur, k) * oStar : 0);   // v0.26.1030 — include star
+    const d = _dl ? (_dl[k] || 0) : ((it[k] || 0) * _mul(it, k) * nStar - (cur ? (cur[k] || 0) * _mul(cur, k) * oStar : 0));   // v0.30.1814 release26a: class, main-stat stars, caps, sets (was: catalog x tier x the flat star curve)
     if (Math.abs(d) < 0.05) continue;
     rows.push(_cmpRow(label, d, fmtFlat));
   }
   // Percentage affixes (unscaled).
   for (const [k, label] of [['atkPct','% ATK'],['critDmg','% Crit DMG']]) {
-    const d = Math.round((it[k] || 0) * 100) - (cur ? Math.round((cur[k] || 0) * 100) : 0);
+    const d = _dl ? Math.round((_dl[k] || 0) * 100) : (Math.round((it[k] || 0) * 100) - (cur ? Math.round((cur[k] || 0) * 100) : 0));   // v0.30.1814 release26a
     if (!d) continue;
     rows.push(_cmpRow(label, d, (v) => v));
   }
@@ -131600,12 +131703,26 @@ function _itemCompareHtml(it) {
   return `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #443;">${header}${rows.join('')}${scoreLine}</div>`;
 }
 
+// v0.30.1814 release26a: "(ATK +453% · other flat stats +261%)" - a piece's main stat climbs the steeper curve (STAR_SIG_STEPS), so one
+// figure for the whole item understated it. The main figure is measured through _lxItemContrib where the piece carries it.
+function _lxStarLineTxt(it) {
+  const s = (it && it.stars) | 0; if (!s) return '';
+  const slot = (it.slot === 'accessorie') ? 'accessory' : it.slot;
+  const flat = starBonusPct(s, it.tier);
+  let main = Math.round((_starCurve(STAR_SIG_STEPS, s, it.tier) - 1) * 100);
+  const mk = slot === 'weapon' ? 'atk' : slot === 'armor' ? 'def' : null;
+  if (mk && typeof it[mk] === 'number' && it[mk] > 0) { const z = _lxItemContribAt(it, mk, slot, 0); if (z > 0) main = Math.round((_lxItemContrib(it, mk, slot) / z - 1) * 100); }
+  if (slot === 'weapon') return '(ATK +' + main + '% · other flat stats +' + flat + '%)';
+  if (slot === 'armor') return '(DEF +' + main + '% · other flat stats +' + flat + '%)';
+  if (slot === 'accessory') return '(+' + main + '% · ATK / DEF +' + flat + '%)';
+  return '(+' + flat + '%)';
+}
 function attachTooltip(el, it) {
   el._lxItemTip = true;   // v0.30.x (audit U6) — the pad focus ring opens this tooltip too (see _lxPadItemTip)
   el.onmouseenter = e => {
     const tt = document.getElementById('item-tooltip');
     const s = it.stars || 0;
-    const starLine = s > 0 ? `<div style="color:#ffcc44;font-size:11px;letter-spacing:1px;margin-bottom:4px;">${starString(s)} (+${starBonusPct(s, it.tier)}%)</div>` : '';
+    const starLine = s > 0 ? `<div style="color:#ffcc44;font-size:11px;letter-spacing:1px;margin-bottom:4px;">${starString(s)} ${_lxStarLineTxt(it)}</div>` : '';
     // v0.25.248 — class affinity badge + set membership status.
     const CLS_LABEL = { warrior:'⚔️ Warrior', rogue:'🥷 Rogue', mage:'🪄 Mage', archer:'🏹 Archer', any:'' };
     // v0.26.x — Per user "show that equipping other-class gear gives lower
@@ -133097,6 +133214,7 @@ function closeAllModals() {
   if (game && game._sellSelection && game._sellSelection.clear) {
     try { game._sellSelection.clear(); } catch (_e) {}
   }
+  if (game && game._invDiscardSel && game._invDiscardSel.clear) { try { game._invDiscardSel.clear(); } catch (_e) {} }   // v0.30.1814 release26a: the bag's discard ticks too
   // v0.25.777 — Same pattern for the potion buy-multiple cart. Quantities
   // shouldn't survive a full shop close → reopen cycle.
   if (game && game._potionQty) {
