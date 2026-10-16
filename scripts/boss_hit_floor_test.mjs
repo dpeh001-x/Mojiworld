@@ -38,7 +38,7 @@ try {
     //    shock sprite sank through the floor); it keeps its stamp, so shock is 1 site and smash 1.
     const src = await (await fetch(location.pathname)).text(); const count = (t) => src.split(t).length - 1;
     o.src = { claw: count("skill: 'claw', _srcType: m.type,"), firebomb: count("skill: 'firebomb', _srcType: m.type,"), shock: count("skill: 'shock', _srcType: m.type,"), smash: count("skill: 'smash', _srcType: m.type,"), bubble: count("skill: 'bubble', _srcType: m.type,"), octoHead: count("skill: 'octoHead', _srcType: m.type,"), tidalSweep: count("skill: 'tidalSweep', _srcType: m.type,"), octoLeg: count("skill: 'octoLeg', _srcType: m.type,"), mink: count("skill: 'mink', _srcType: m.type,"),
-      contact: src.indexOf("if (_shownDmg > 0) _shownDmg = _lxBossHpFloor(m.type, _shownDmg);") >= 0, proj: src.indexOf("if (p._srcType && _projLost > 0) _projLost = _lxBossHpFloor(p._srcType, _projLost);") >= 0 };
+      contact: src.indexOf("if (_shownDmg > 0) _shownDmg = _lxBossHpFloor(m.type, _shownDmg);") >= 0, proj: src.indexOf("if (p._srcType && _projLost > 0) _projLost = _lxBossHpFloor(p._srcType, _projLost, p._hitFloor);") >= 0 };
     return o;
   });
   console.log('build ' + r.ver + '  maxHp ' + r.maxHp + '  floor ' + r.floor + '  stamped ' + JSON.stringify(r.stamped) + '  plain ' + JSON.stringify(r.plain));
