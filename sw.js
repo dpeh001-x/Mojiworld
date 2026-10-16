@@ -318,7 +318,9 @@
 // their own names (regenerated without slices), so a returning install would keep drawing the old frames for a session.
 // v0.30.1798 - v172 -> v173. Deadeye Protocol's two rounds (p_ult_marksman.webp, p_deadeye_execute.webp) are REPLACED under
 // their own names (bullets become missile-arrows), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v173';   // v0.30.1798 - Deadeye Protocol rounds redrawn as missile-arrows (same names)
+// v0.30.1815 - v173 -> v174. the Tower Arbiter's idle, walk, attack, dash, column and verdict frames are REPLACED under
+// their own names (re-sharpened), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v174';   // v0.30.1815 - Tower Arbiter frames re-sharpened (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
