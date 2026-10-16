@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1803';
+const GAME_VERSION = 'v0.30.1804';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -19130,6 +19130,55 @@ function _summonFeetFrac(img) {
   return out;
 }
 const _summonCBot = new WeakMap();
+// v0.30.1804 release25b - SUMMON SCAN PREWARM. _summonFeetFrac / _summonContentBottomFrac read a frame's pixels on its first draw (~6 ms a full-size
+// frame; ~50 frames went through in the first second of summoning). Once the hero's class has summon skills, the sets those skills
+// draw are loaded and scanned in idle time instead (requestIdleCallback, setTimeout without it), a frame or so per slice, re-checked
+// every 2 s so a load or a class / job / master change warms the new sets. Retries while frames decode / bake, then stops.
+function _lxSummonWarmKeys() {
+  if (typeof player === 'undefined' || !player) return null;
+  if (player.cls === 'archer' && player.job === 'ranger') {
+    if (player.master === 'beastmaster') return ['wolf_alpha', 'werewolf'];
+    if (player.master === 'skyhunter') return ['wolf_sky', 'eagle'];
+    return ['wolf'];
+  }
+  if (player.cls === 'mage' && player.job === 'warlock') return ['skeleton', 'zombie'];
+  return null;
+}
+let _lxSumWarmSig = '', _lxSumWarmBusy = false;
+function _lxSumWarmQueue(fn, delay) {
+  const go = () => { if (typeof requestIdleCallback === 'function') requestIdleCallback(fn, { timeout: 1200 }); else setTimeout(() => fn(null), 16); };
+  if (delay) setTimeout(go, delay); else go();
+}
+function _lxSummonWarmTick() {
+  const keys = _lxSummonWarmKeys();
+  if (!keys) { _lxSumWarmSig = ''; return; }
+  const sig = keys.join(',');
+  if (sig === _lxSumWarmSig || _lxSumWarmBusy) return;
+  _lxSumWarmBusy = true; let pass = 0, quiet = 0;
+  const step = (dl) => {
+    let left = 0, did = 0;
+    const now = () => ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()), t0 = now();
+    const room = () => did === 0 || (dl && typeof dl.timeRemaining === 'function' ? dl.timeRemaining() > 4 : now() - t0 < 6);
+    try {
+      for (const k of keys) {
+        const st = LX_SUMMON[k]; if (st) _lxSummonReady(st);   // asks a parked (lazy) still to load
+        const sets = [[st], ...['walk', 'attack'].map((a) => { _summonAnimFrame(k, a, 0); return SUMMON_ANIM_FRAMES[k + '_' + a] || []; })];
+        for (const arr of sets) for (const im of arr) {
+          const ok = im && (im.tagName === 'CANVAS' ? im.width > 0 : (im.complete && im.naturalWidth > 0));
+          if (!ok) { if (!(im && im.complete && !im.naturalWidth && im.tagName !== 'CANVAS')) left++; continue; }   // a failed image is not waited on
+          if (_summonFeet.has(im) && _summonCBot.has(im)) continue;
+          if (!room()) { left++; continue; }
+          _summonFeetFrac(im); _summonContentBottomFrac(im); did++;
+        }
+      }
+    } catch (e) { left = 0; }
+    if (did || left) quiet = 0; else quiet++;   // done only after 3 s with nothing new: a bake that lands later installs a canvas to scan
+    if (++pass < 240 && quiet < 6) _lxSumWarmQueue(step, did ? 0 : (left ? 250 : 500));
+    else { _lxSumWarmBusy = false; _lxSumWarmSig = sig; }
+  };
+  _lxSumWarmQueue(step, 0);
+}
+if (typeof setInterval === 'function') setInterval(() => { try { _lxSummonWarmTick(); } catch (e) {} }, 2000);
 function _summonContentBottomFrac(img) {
   // v0.29.487 — canvas-aware (see _lxBoxSourceOf): baked frames have width,
   // not naturalWidth, and were silently anchored at frac 1.
@@ -26272,8 +26321,8 @@ const SKILLS = {
   meteor:       { name:'Meteor',         icon:'☄️', cls:'mage', job:'archmage', slot:'q', mp:35, cd:8000, desc:'Call a meteor down on the nearest foe ahead of you (up to 600px away; 80px ahead when there is none): it strikes every foe it falls through for 15.2× ATK + 304, then bursts about 140px wide where it lands (35% of that hit on foes it did not fall through).' },
   elemental:    { name:'Elemental Convergence', icon:'🌟', cls:'mage', job:'archmage', slot:'c', mp:55, cd:13000, desc:'Ultimate: lightning chains through up to 8 enemies (5× ATK + 160, −8% per hop), stunning each for 1.2s with a 75% chance to burn for 3s (1.474× ATK per second; each 0.8s tick is capped at 0.5% of the foe max HP, 0.1% on bosses).' },
   // Warlock
-  soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:20000, desc:'Drain nearby foes (0.5× ATK) into MP and HP, raise 1 undead thrall (skeleton or zombie, 16s, hits for 75% of your ATK) from the first victim, and call up soul orbs (2 to start, +1 every 1.5s, max 5) that orbit you for 12s and hunt — each homes into a foe within 380px and detonates (2× ATK + 20).' },   // v0.29.671 — per user (Dark Pulse report): the raise was never in the tooltip. It also hid the damage and the self-heal; the description said only "Drain HP from enemies → MP".
-  darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:55, cd:30000,  desc:'Ultimate: void AoE around you (220px, 2× ATK), then summon 3 undead (5 at most - the oldest crumbles) that hunt across the map for 30s — each hitting for 35% of your ATK, and killable by monsters.' },   // v0.29.x — the raise was never in the tooltip (per user: the description did not match what it does)
+  soulSiphon:   { name:'Soul Siphon',    icon:'💀', cls:'mage', job:'warlock',  slot:'q', mp:12, cd:20000, desc:'Drain nearby foes (0.5× ATK) into MP and HP, raise 1 undead thrall (skeleton or zombie, 16s, hits for 150% of your ATK) from the first victim, and call up soul orbs (2 to start, +1 every 1.5s, max 5) that orbit you for 12s and hunt — each homes into a foe within 380px and detonates (2× ATK + 20).' },   // v0.29.671 — per user (Dark Pulse report): the raise was never in the tooltip. It also hid the damage and the self-heal; the description said only "Drain HP from enemies → MP".
+  darkPulse:    { name:'Dark Pulse',     icon:'🖤', cls:'mage', job:'warlock',  slot:'c', mp:55, cd:30000,  desc:'Ultimate: void AoE around you (220px, 2× ATK), then summon 3 undead (5 at most - the oldest crumbles) that hunt across the map for 30s — each hitting for 70% of your ATK, and killable by monsters.' },   // v0.29.x — the raise was never in the tooltip (per user: the description did not match what it does)
   // v0.25.514 — Priest F-slot signature: Holy Light. Self-heal scaling
   // on the player's ATK stat. 25 % maxHP at ATK 0, ramps linearly to
   // 100 % maxHP at ATK ≥ 100. Also tops up MP by half the heal % and
@@ -53786,6 +53835,7 @@ const GAME_SAVE_FIELDS = [
   // 100% completion run.
   'visitedMaps',
   '_lxBoonOwedQ',   // v0.30.1766 release24c: the owed boss wheels behind the one in hand (oldest first)
+  '_lxSummonSave',   // v0.30.1804 release25b: the live summons, one compact record each (see _lxSummonSnapshot)
   '_lxBoonOwed',   // v0.30.1734 release12: a boss boon wheel owed (due, open or waiting for bag room) - re-offered after a reload, the same three boons
   // v0.26.263 — Expedition state machine. Persists across reload so a
   // player who closes the tab mid-expedition (floor 4, say) can resume
@@ -55879,6 +55929,7 @@ function _flushSaveStateNow() {
     // v0.30.918 a save taken while downed says so: the down is a death on a delay, and a reload must not cancel it
     try { if (player._downed && !window._prologueActive) player._downPending = 1; else delete player._downPending; } catch (e) {}
     try { player._cdCarry = _lxCdSnapshot(); } catch (e) { delete player._cdCarry; }   // v0.30.x cooldown integrity
+    try { game._lxSummonSave = _lxSummonSnapshot(); } catch (e) { game._lxSummonSave = null; }   // v0.30.1804 release25b: the live summons ride the save
     const s = {
       v: SAVE_VERSION, t: Date.now(),
       player: pick(player, PLAYER_SAVE_FIELDS),
@@ -57754,6 +57805,7 @@ function _lxLegacyClamp(s) {
   try { if (Array.isArray(p.boons)) for (const b of p.boons) { const hi = b && _lxAc.boonHi(b); if (hi != null && typeof b.roll === 'number' && (b.roll !== b.roll || b.roll > hi)) b.roll = hi; } } catch (e) {}
   if (s.game && typeof s.game === 'object') for (const k of ['_lxBoonOwed', 'expeditionBestFloor', 'expeditionClears']) delete s.game[k];
   if (s.game && typeof s.game === 'object') delete s.game._lxBoonOwedQ;   // v0.30.1766 release24c
+  if (s.game && typeof s.game === 'object') delete s.game._lxSummonSave;   // v0.30.1804 release25b
 }
 function _lxSaveMarkWrite(s) {
   try { localStorage.setItem('lx_save_signed', '1'); } catch (e) {}   // v0.30.1734 release12: this browser signs its saves (see _lxLegacyUnsignedOk)
@@ -58829,6 +58881,7 @@ function loadState() {
     if (typeof _mojimonEnsure === 'function') _mojimonEnsure();   // v0.29.434 — shape-repair the persisted roster
     player.pet = null; player.ultPet = null;   // v0.26.1025 — transient summons aren't restored (match _clones/_ballista/pack); a persisted pet resurfaced on stale coords
     try { if (typeof game !== 'undefined' && game && Array.isArray(game.minions)) game.minions = game.minions.filter((mn) => mn && mn.mojimon); } catch (e) {}   // v0.30.1759 release21: nor the last session's thralls (loadMap carries them now)
+    try { game._lxSummonRestoreQ = Array.isArray(game._lxSummonSave) ? game._lxSummonSave.slice(0, 10) : null; } catch (e) { game._lxSummonRestoreQ = null; } game._lxSummonSave = null;   // v0.30.1804 release25b: rebuilt once, by the next loadMap
     // v0.25.531 — clear transient L10 buff state on load (not persisted in
     // PLAYER_SAVE_FIELDS; resetting these prevents leftover flags from
     // an old session masking the no-buff state).
@@ -81148,6 +81201,43 @@ function _lxRelocateThralls() {
   }
   game._lxLastPX = player.x;
 }
+// v0.30.1804 release25b - THE SURFACE THE HERO ARRIVES ON: the highest platform top at or under his feet across his centre (a door can set him
+// down a little above it). Ground summons are set down ON it, inside its span, so a pack crossing onto a ledge stands on that ledge.
+function _lxSummonLanding() {
+  const L = (game.mapData && game.mapData.platforms) || [], cx = player.x + player.w / 2, feet = player.y + player.h;
+  let best = null;
+  for (const p of L) { if (!p || cx < p.x || cx > p.x + p.w || p.y < feet - 4) continue; if (!best || p.y < best.y) best = p; }
+  return best;
+}
+// v0.30.1804 release25b - A door can set the hero down above his floor, and some maps finish their ledges after the summons are placed, so the
+// ground summons ride his foot line until he lands (2 s at most), then stand on the surface he landed on, inside its span.
+// v0.30.1804 release25b - THE IDLE ROAM STAYS ON A SHARED LEDGE. A roam point is picked up to 220 px (pack) / 140 px (pet) from the hero, so on a
+// ledge narrower than that (Stardust Atrium, the Mushroom Kingdom: ~180 px) a summon walked off the edge, fell, and hopped back ~2.5 s
+// later. While the summon and the hero stand on the same raised platform, its roam point is held inside that platform.
+function _lxSummonRoamOnLedge(pet) {
+  if (!pet || pet._roamTX == null || !pet.onGround || typeof player === 'undefined' || !player.onGround || !game.mapData) return;
+  const ef = pet.y + pet.h; if (Math.abs(player.y + player.h - ef) > 6) return;
+  const cx = pet.x + pet.w / 2; let p = null;
+  for (const q of (game.mapData.platforms || [])) if (q && q.type !== 'ground' && cx >= q.x && cx <= q.x + q.w && Math.abs(q.y - ef) <= 6) { p = q; break; }
+  if (!p) return;
+  const lo = p.x + pet.w / 2 + 14, hi = p.x + p.w - pet.w / 2 - 14;
+  pet._roamTX = hi > lo ? Math.max(lo, Math.min(hi, pet._roamTX)) : p.x + p.w / 2;
+}
+function _lxSummonArriveTick() {
+  if (typeof player === 'undefined' || !player) return;
+  const t = game.time || 0;
+  for (const s of [player.pet, player.ultPet, ...(player.pack || [])]) {
+    if (!s || !(s._lxArriveUntil > 0)) continue;
+    if (t > s._lxArriveUntil || s.flying) { s._lxArriveUntil = 0; continue; }
+    const sh = s.h || 36 * (s.scale || 1), sw = s.w || 40 * (s.scale || 1);
+    s.y = player.y + player.h - sh; s.vy = 0;
+    if (player.onGround) {
+      const ld = _lxSummonLanding();
+      if (ld) s.x = Math.max(ld.x, Math.min(ld.x + ld.w - sw, s.x));
+      s._lxArriveUntil = 0;
+    }
+  }
+}
 function _lxRelocateSummons() {
   if (typeof player === 'undefined' || !player) return;
   const px = player.x, py = player.y, face = player.facing || 1;
@@ -81155,14 +81245,75 @@ function _lxRelocateSummons() {
     if (!s) return;
     const spread = 34 + (i % 3) * 26;
     if (s.flying || s.shooter) { s.x = px - 80 * face; s.y = py - 80; }
-    else { s.x = px - face * spread; s.y = py; }
+    else {   // v0.30.1804 release25b: feet on the surface the hero arrives on, inside its span (y = py put them 42-57 px under his feet, through a ledge)
+      const _ld = _lxSummonLanding(), _sw = s.w || 40 * (s.scale || 1), _sh = s.h || 36 * (s.scale || 1);
+      s.x = px - face * spread;
+      if (_ld) { s.x = Math.max(_ld.x, Math.min(_ld.x + _ld.w - _sw, s.x)); s.y = _ld.y - _sh; } else s.y = py + (player.h || 0) - _sh;
+      s.onGround = false; s._lxArriveUntil = (game.time || 0) + 120;   // until the hero lands (see _lxSummonArriveTick)
+    }
     s.vx = 0; s.vy = 0;
+    s._roamTX = null; s._roamUntil = 0; s._tgtRef = null; s._lxFollowSince = 0; s._lxFaceVote = 0;   // v0.30.1804 release25b: the old map's roam point / foe / follow clock stay behind
     s.dmgCD = 0;                 // don't carry a contact-damage cooldown across the load
     if (s.fireCd != null) s.fireCd = Math.max(s.fireCd, 250);   // small grace so it doesn't insta-fire on arrival
   };
   place(player.pet, 0);
   place(player.ultPet, 1);
   if (Array.isArray(player.pack)) player.pack.forEach((p, i) => place(p, i + 2));
+}
+// v0.30.1804 release25b - SUMMONS COME BACK ON LOAD (per user). A save took the cooldowns but dropped every live summon, so a refresh or a crash cost
+// the whole pack. The save now carries one compact record per live summon (game._lxSummonSave: kind, sprite / type, life left in ms,
+// HP as a fraction, facing; the undead also their raise multiplier) - never an object, target or position. loadState queues them
+// (game._lxSummonRestoreQ, consumed once) and the next loadMap rebuilds them at the hero's feet through the door path
+// (_lxRelocateSummons / _lxRelocateThralls). Rebuilt from the hero's CURRENT kit and stats: a record his class / job / master cannot
+// cast is dropped, max HP is recomputed, life is clamped to the skill's ranked duration, counts to the caps (5 summons, 5 undead).
+// Death, a class change and respawnAtTown clear the live summons, so the next save carries none; nothing is saved while dead / downed.
+// A summon that ran out while the game was open stays gone; closed, the game is paused, so life left carries over as it was.
+function _lxSummonSnapshot() {
+  if (typeof player === 'undefined' || !player || !player.cls || !(player.hp > 0) || (game.dying | 0) > 0 || player._downed) return null;
+  const out = [], f3 = (v) => Math.round(Math.max(0, Math.min(1, v)) * 1000) / 1000;
+  const rec = (k, p) => { if (!p || !(p.life > 0) || !(p.hp > 0) || !(p.maxHp > 0)) return; out.push({ k, s: p.sprite || null, life: Math.round(p.life), ml: Math.round(p.maxLife || p.life), hpf: f3(p.hp / p.maxHp), f: p.facing === -1 ? -1 : 1 }); };
+  rec('pet', player.pet); rec('ult', player.ultPet); for (const w of (player.pack || [])) rec('pack', w);
+  for (const mn of (game.minions || [])) if (mn && !mn.mojimon && (mn.type === 'skeleton' || mn.type === 'zombie') && mn.life > 0 && mn.currentHp > 0 && mn.maxHp > 0)
+    out.push({ k: 'und', t: mn.type, life: Math.round(mn.life), ml: Math.round(mn.maxLife || mn.life), hpf: f3(mn.currentHp / mn.maxHp), am: mn._lxAtkMul || 1.1 });
+  return out.length ? out.slice(0, 10) : null;
+}
+function _lxSummonRestore() {
+  const q = game._lxSummonRestoreQ; game._lxSummonRestoreQ = null;
+  if (!Array.isArray(q) || typeof player === 'undefined' || !player || !player.cls || !(player.hp > 0)) return;
+  const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, (typeof v === 'number' && isFinite(v)) ? v : lo));
+  const bm = player.master === 'beastmaster', sky = player.master === 'skyhunter';
+  const rg = player.cls === 'archer' && player.job === 'ranger', wl = player.cls === 'mage' && player.job === 'warlock';
+  const feet = player.y + player.h, isU = (mn) => mn && !mn.mojimon && (mn.type === 'skeleton' || mn.type === 'zombie') && mn.life > 0;
+  let allies = (player.pet ? 1 : 0) + (player.ultPet ? 1 : 0) + ((player.pack && player.pack.length) || 0), und = (game.minions || []).filter(isU).length;
+  const mk = (r, cap, mult, scale, extra) => {
+    const life = cl(r.life, 0, cap); if (!(life > 0)) return null;
+    const mx = _lxSummonHp() * mult;
+    return Object.assign({ x: player.x, y: feet - 36 * scale, vx: 0, vy: 0, hp: Math.max(1, Math.round(mx * cl(r.hpf, 0.001, 1))), maxHp: mx,
+      life, maxLife: cl(r.ml, life, cap), cdAtk: 0, scale, facing: r.f === -1 ? -1 : 1 }, extra || {});
+  };
+  for (const r of q.slice(0, 10)) {
+    if (!r || typeof r !== 'object') continue;
+    if (r.k === 'und') {
+      if (!wl || und >= 5 || (r.t !== 'skeleton' && r.t !== 'zombie')) continue;
+      const cap = Math.max(_lxRankDurMs('darkPulse', 30000), _lxRankDurMs('soulSiphon', 16000)), life = cl(r.life, 0, cap);
+      if (!(life > 0)) continue;
+      raiseMinion(player.x + player.w / 2, feet - 12, r.t, life, cl(r.am, 0.5, 1.5));
+      const mn = game.minions[game.minions.length - 1];
+      if (mn && mn.type === r.t) { mn.maxLife = cl(r.ml, life, cap); mn.currentHp = Math.max(1, Math.round(mn.maxHp * cl(r.hpf, 0.001, 1))); mn.spawn = 0; }
+      und++; continue;
+    }
+    if (!rg || allies >= 5) continue;
+    let p = null;
+    if (r.k === 'pet' && !player.pet) { p = mk(r, _lxRankDurMs('wildBond', 60000), bm ? 5 : sky ? 3 : 2, 2.4); if (p) player.pet = p; }
+    else if (r.k === 'ult' && !player.ultPet) {
+      if (bm && r.s === 'werewolf') p = mk(r, _lxRankDurMs('beastmaster_ult', 51000), 5, 2.8, { sprite: 'werewolf' });
+      else if (sky && r.s === 'eagle') p = mk(r, _lxRankDurMs('skyhunter_ult', 42000), 3, 2.97, { sprite: 'eagle', flying: true, shooter: true, fireCd: 250, y: player.y - 80 });
+      if (p) player.ultPet = p;
+    } else if (r.k === 'pack' && bm) { p = mk(r, _lxRankDurMs('beastmaster_pack', 100000), 5, 2.4); if (p) { if (!Array.isArray(player.pack)) player.pack = []; player.pack.push(p); } }
+    if (p) allies++;
+  }
+  if (player.pet || player.ultPet || (player.pack && player.pack.length)) player._lxCarrySummons = true;
+  if ((game.minions || []).some(isU)) game._lxThrallsCarried = true;
 }
 function loadMap(id, entryX, entryY, _ledgeArrival) {
   try { _lxSyncSanctumDoor(); } catch (e) {}   // v0.30.1647 sanctum-door: the Last Step's Sanctum door follows her fall (a loaded save, a new run)
@@ -82647,6 +82798,7 @@ function loadMap(id, entryX, entryY, _ledgeArrival) {
   // v0.29.306 — the player's entry position is final by here, so bring any
   // carried summons across to it (see _lxRelocateSummons). Runs before the
   // camera snap so they are already in frame on the first painted frame.
+  if (game._lxSummonRestoreQ) { try { _lxSummonRestore(); } catch (e) { game._lxSummonRestoreQ = null; } }   // v0.30.1804 release25b: a loaded save's summons, at the hero's feet
   if (player && player._lxCarrySummons) {
     _lxRelocateSummons();
     player._lxCarrySummons = false;
@@ -86873,8 +87025,16 @@ function updatePlayer(dt) {
           player.attackCooldown = _basicAttackGateMs();
         }
       } else {
-        if (isReady(id)) castSkill(id);
+        if (isReady(id)) { castSkill(id); if (player._lxSkBuf && player._lxSkBuf.key === key) player._lxSkBuf = null; }   // v0.30.1804 release25b: this key cast - its buffered press is spent
+        else if (_lxTaps && _lxTaps[key] && (player._castLockUntil || 0) > game.time && _lxSkillBufWants(id)) player._lxSkBuf = { key, id, at: _lxTaps[key] };   // v0.30.1804 release25b: pressed during a cast lock - keep the latest press
       }
+    }
+    // v0.30.1804 release25b - the buffered press fires once the lock is over (see _LX_SKILL_BUF_MS); a held key already cast through the loop above
+    const _lxB = player._lxSkBuf;
+    if (_lxB) {
+      const _bf = skillBySlot(KEY_TO_SLOT[_lxB.key]);
+      if (performance.now() - _lxB.at > _LX_SKILL_BUF_MS || !_bf || _bf.id !== _lxB.id || _lxSkillBufBlocked()) player._lxSkBuf = null;
+      else if (!k[_lxB.key] && !(player._lxCcEaten && player._lxCcEaten[_lxB.key]) && isReady(_lxB.id)) { player._lxSkBuf = null; castSkill(_lxB.id); }
     }
   }
 
@@ -87645,6 +87805,7 @@ function updatePlayer(dt) {
   // v0.30.1213 summon-cc - (3 of 3: the Beastmaster pack, the Wild Bond wolf, the Apex Bond werewolf, the Skyhunter eagle)
   // (a function declaration: hoisted, so the CC gates above can call it; the code did not move)
   function _lxSummonPetTick(dt) {
+  try { _lxSummonArriveTick(); } catch (e) {}   // v0.30.1804 release25b: summons crossing a door land where the hero lands
   // Beastmaster pack (up to 2 wolves; v0.25.540)
   // v0.26.092 — Cross-platform rewrite. Per user "Beastmaster and
   // warlocks summon skills can go to multiple platforms, roam freely
@@ -87785,6 +87946,7 @@ function updatePlayer(dt) {
           pet._roamUntil = _tW + 120 + Math.floor(Math.random() * 180);
         }
         _lxSummonHeelRoam(pet, (player.pack && player.pack.indexOf(pet) >= 0) ? 220 : 140);   // v0.30.1794 release25a
+        _lxSummonRoamOnLedge(pet);   // v0.30.1804 release25b: an idle roam point stays on the ledge it shares with the hero
         _petFollow = _lxPetFollowLevel(pet);   // v0.30.1278 pet-follow - you are on another level: head (and jump) for you
         const dx = pet._roamTX - _pcx;
         pet.vx += Math.sign(dx) * 0.18;   // v0.30.1794 release25a: facing follows the motion (_lxSummonFaceTravel)
@@ -88007,6 +88169,7 @@ function updatePlayer(dt) {
           pet._roamUntil = _tW + 120 + Math.floor(Math.random() * 180);
         }
         _lxSummonHeelRoam(pet, (player.pack && player.pack.indexOf(pet) >= 0) ? 220 : 140);   // v0.30.1794 release25a
+        _lxSummonRoamOnLedge(pet);   // v0.30.1804 release25b: an idle roam point stays on the ledge it shares with the hero
         _petFollow = _lxPetFollowLevel(pet);   // v0.30.1278 pet-follow - you are on another level: head (and jump) for you
         const dx = pet._roamTX - _pcx;
         pet.vx += Math.sign(dx) * 0.15;   // v0.30.1794 release25a: facing follows the motion (_lxSummonFaceTravel)
@@ -89965,10 +90128,34 @@ const _LX_NO_CHARGE_SKILLS = new Set([
   'guardian',          // warrior — pure defensive buff
   'wildBond',          // archer — pure summon
   'beastmaster_pack',  // archer — pure summon
+  // v0.30.1804 release25b: the master summons cast on press too. The draw bonus lands only on hits tagged with the cast id, and the werewolf
+  // bites as 'pet', the eagle shoots 'gale', the War Machine turret 'siege' - so a held B only rooted the archer until release.
+  'beastmaster_ult',   // archer — Apex Bond: the werewolf + a self-buff
+  'skyhunter_ult',     // archer — Eye of the Tempest: the eagle
+  'ballista_ult',      // archer — War Machine: deploys the turret
   // v0.30.22 — Marksman G is a 5 s rapid-fire window; charging each rail would
   // defeat the entire point of it.
   'marksman_oneshot',  // archer — Deadeye window, taps not draws
 ]);
+// v0.30.1804 release25b - QUICK CHAINING (per user). A skill pressed while another skill's cast lock held (isReady false: the ~0.42 s base lock,
+// longer for pose skills) was dropped, so "G 0.4 s after F" cast only F. The LATEST such press is kept for _LX_SKILL_BUF_MS and
+// fires as soon as the hero is ready - if its key is not held (a held key casts through the poll as before), it is still the
+// skill on that key, still ready (cooldown, MP, cast lock), and the hero is not paused / in a menu, film, dialog or QTE, stunned,
+// frozen or dead. One press buffered at most; a cast of that key by any path clears it, so it never fires twice. A Warrior /
+// Archer skill that charges on hold is never buffered (its hold logic is unchanged); Z (slot d) keeps its own gate.
+const _LX_SKILL_BUF_MS = 600;
+function _lxSkillBufBlocked() {
+  if (game.paused || game._photoMode || (game.dying | 0) > 0 || !(player.hp > 0)) return true;
+  if ((player.hitStun | 0) > 0 || (player.stunTimer | 0) > 0 || (player.frozenTimer | 0) > 0) return true;
+  if (typeof _QTE !== 'undefined' && _QTE.active) return true;
+  try { const b = document.body; if (b && (b.classList.contains('cinematic') || b.classList.contains('sb-active'))) return true; } catch (e) {}
+  return false;
+}
+function _lxSkillBufWants(id) {
+  const s = SKILLS[id]; if (!s || s.slot === 'd') return false;
+  if ((player.cls === 'warrior' || player.cls === 'archer') && _classIdentityActive() && !_LX_NO_CHARGE_SKILLS.has(id)) return false;   // charges on hold: unchanged
+  return !_lxSkillBufBlocked();
+}
 function tryStartClassCharge(slotKey) {
   if (player._lxCcEaten && player._lxCcEaten[slotKey]) delete player._lxCcEaten[slotKey];   // v0.30.1739 release13: every fresh press starts clean
   if (!_classIdentityActive()) return false;
@@ -92448,6 +92635,7 @@ function raiseMinion(x, y, type, life, atkMul) {
     dmgCD: 0,
     spawn: 18,   // rise-from-ground animation timer
   });
+  game.minions[game.minions.length - 1]._lxAtkMul = (atkMul != null ? atkMul : 1.1);   // v0.30.1804 release25b: saved with the thrall (see _lxSummonSnapshot)
   // Ground rise burst
   for (let i = 0; i < 14; i++) {
     const a = (i / 14) * Math.PI * 2;
@@ -171431,6 +171619,32 @@ function _drawSummonTimer(cx, topY, life, maxLife) {
   ctx.restore();
 }
 
+// v0.30.1804 release25b - SUMMON NAMEPLATES. Short numbers (summon HP runs to six and seven digits since v0.30.1792), and a nameplate block (timer
+// text down to the HP bar) that would overlap one already placed this frame steps up to sit just above it. A summon keeps its lift while
+// that stays clear and drops back only with 16 px to spare (no flicker); the drawn lift eases toward its target.
+function _lxSummonHpTxt(n) {
+  n = Math.max(0, Math.floor(n || 0));
+  if (n < 1e4) return String(n);
+  if (n < 999500) return Math.round(n / 1e3) + 'K';
+  if (n < 9.95e6) return (n / 1e6).toFixed(1).replace(/.0$/, '') + 'M';
+  return Math.round(n / 1e6) + 'M';
+}
+function _lxSummonLabelRows() {
+  if (typeof player === 'undefined' || !player) return;
+  const L = [player.ultPet, player.pet, ...(player.pack || [])].filter((p) => p && p.maxHp && p.hp != null);
+  const placed = [];
+  const blk = (p, off) => { const sc = typeof p.scale === 'number' ? p.scale : 1, cx = p.x + 20 * sc, hw = Math.max(18 * sc, 24) + 3; return { l: cx - hw, r: cx + hw, t: p.y - 36 - off, b: p.y - 3 - off }; };
+  const hit = (a, pad) => placed.some((q) => a.l < q.r + pad && q.l < a.r + pad && a.t < q.b + pad && q.t < a.b + pad);
+  for (const p of L) {
+    const cands = [0, ...placed.map((q) => (p.y - 3) - q.t + 2)].filter((o) => o >= 0).sort((a, b) => a - b);
+    let best = cands[cands.length - 1]; for (const o of cands) if (!hit(blk(p, o), 0)) { best = o; break; }
+    const prev = p._lxLblWant;
+    const want = (prev != null && !hit(blk(p, prev), 0) && !(best < prev - 16 && !hit(blk(p, best), 16))) ? prev : best;
+    p._lxLblWant = want; placed.push(blk(p, want));
+    const off = p._lxLblOff || 0;
+    p._lxLblOff = Math.abs(want - off) < 0.5 ? want : off + (want - off) * 0.3;
+  }
+}
 function drawWolf(pet, tintColor) {
   const sx = pet.x - game.camera.x;
   const sy = pet.y;
@@ -171591,7 +171805,7 @@ function drawWolf(pet, tintColor) {
     const _sc = (pet && typeof pet.scale === 'number') ? pet.scale : 1;
     const _bw = 36 * _sc;                 // bar width matches sprite scale
     const _bx = sx + (40 * _sc - _bw) / 2;
-    const _by = sy - 8;
+    const _by = sy - 8 - (pet._lxLblOff || 0);   // v0.30.1804 release25b: stepped up a row when it would overlap a neighbour
     // v0.25.886 — Guard pet.maxHp:0. The Math.max(0, Math.min(1, NaN))
     // chain looks like it clamps, but NaN propagates through both
     // Math.min and Math.max, ending at NaN. Bar width becomes NaN%, the
@@ -171610,16 +171824,17 @@ function drawWolf(pet, tintColor) {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 8px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText((pet.hp | 0) + '/' + (pet.maxHp | 0), sx + 20 * _sc, _by - 2);
+    ctx.fillText(_lxSummonHpTxt(pet.hp) + '/' + _lxSummonHpTxt(pet.maxHp), sx + 20 * _sc, _by - 2);   // v0.30.1804 release25b: "682K/710K", not "681190/709650"
   }
   // v0.26.x — Always-on duration timer above every summon (was last-5s only).
   // Sits just above the HP nameplate. maxLife falls back to life so the bar
   // reads full on legacy spawns that didn't stamp a maxLife.
   const _scTime = (pet && typeof pet.scale === 'number') ? pet.scale : 1;
-  _drawSummonTimer(sx + 20 * _scTime, sy - 22, pet.life, pet.maxLife != null ? pet.maxLife : pet.life);
+  _drawSummonTimer(sx + 20 * _scTime, sy - 22 - (pet._lxLblOff || 0), pet.life, pet.maxLife != null ? pet.maxLife : pet.life);   // v0.30.1804 release25b
 }
 
 function drawPet() {
+  try { _lxSummonLabelRows(); } catch (e) {}   // v0.30.1804 release25b: nameplate rows before the draws
   // Pack first
   if (player.pack && player.pack.length) {
     for (const pet of player.pack) drawWolf(pet, '#6a8c5a');
