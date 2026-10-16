@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1793';
+const GAME_VERSION = 'v0.30.1794';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -19047,6 +19047,17 @@ const _MINION_LIFT = 13;
 // UNDER the floor; this puts them 1 px under.) The undead minions need none: both feet are within 1-2 px of each other
 // and drawMinions already plants them 3 px deep.
 const _LX_SUMMON_FAR_FOOT = { wolf: 0.026, wolf_alpha: 0.018, wolf_sky: 0.036, werewolf: 0.035 };   // v0.30.1278 per user "werewolf is slightly deep down": 17/484 - its dark middle paw is lifted mid-stride, so 36/484 sank it ~7 px too far
+// v0.30.1794 release25a - SUMMON FRAMES DRAWN FACING LEFT. Every summon set is authored facing right (the draws mirror a left-facing summon), but
+// the pups' walk loops turn round mid-stride: wolf_alpha_walk 2-6 (the Beastmaster pack + Wild Bond wolf; 2 is the turn) and
+// wolf_sky_walk 2-4 face LEFT (tail right, nose left). drawWolf mirrors those frames once more, so a walking pup faces one way on every
+// frame. Their mass centres sit within 3 px of the canvas centre, so the extra mirror does not move the body. werewolf, wolf (brown)
+// and every attack set face right throughout.
+const _LX_SUMMON_LEFT_FRAMES = { wolf_alpha_walk: [2, 3, 4, 5, 6], wolf_sky_walk: [2, 3, 4] };
+function _lxSummonFrameLeft(img) {
+  if (!img || typeof SUMMON_ANIM_FRAMES === 'undefined') return false;
+  for (const tag in _LX_SUMMON_LEFT_FRAMES) { const a = SUMMON_ANIM_FRAMES[tag]; if (!a) continue; const i = a.indexOf(img); if (i >= 0) return _LX_SUMMON_LEFT_FRAMES[tag].indexOf(i) >= 0; }
+  return false;
+}
 function _summonAnimFrame(key, state, epochMs) {   // v0.30.1674 summon-plant: epochMs - the loop starts on frame 0 at that wall-clock ms (a bite)
   if (!key || !state) return null;
   const tag = key + '_' + state;
@@ -87729,9 +87740,10 @@ function updatePlayer(dt) {
           // eases toward it so the wolf decelerates as it closes.
           const targetVx = Math.sign(dx) * Math.min(4.5, Math.abs(dx) / 24);
           pet.vx += (targetVx - pet.vx) * 0.25;
-          pet.facing = Math.sign(dx) || pet.facing || 1;
+          // v0.30.1794 release25a: facing follows the motion (_lxSummonFaceTravel after the move), not the steering point's side
         }
         if (_inReach && pet.cdAtk <= 0 && !_atkHold && Math.abs(pet.vx) <= 0.9) {
+          pet.facing = Math.sign((tgt.x + tgt.w / 2) - _pcx) || pet.facing || 1;   // v0.30.1794 release25a: the bite opens facing its foe
           _lxSummonBite(pet);
           hitMonster(tgt, Math.floor(getAtk() * 1.12), false, 'pack');   // v0.30.x bughunt sibling-5 - a bite is not a crit: it showed a gold number and ate a guaranteed-crit charge for base damage
           // v0.25.530 — Level-10 bonus: chained bite ~150 ms later.
@@ -87758,10 +87770,10 @@ function updatePlayer(dt) {
           pet._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 220;
           pet._roamUntil = _tW + 120 + Math.floor(Math.random() * 180);
         }
+        _lxSummonHeelRoam(pet, (player.pack && player.pack.indexOf(pet) >= 0) ? 220 : 140);   // v0.30.1794 release25a
         _petFollow = _lxPetFollowLevel(pet);   // v0.30.1278 pet-follow - you are on another level: head (and jump) for you
         const dx = pet._roamTX - _pcx;
-        pet.facing = Math.sign(dx) || pet.facing || 1;
-        pet.vx += Math.sign(dx) * 0.18;
+        pet.vx += Math.sign(dx) * 0.18;   // v0.30.1794 release25a: facing follows the motion (_lxSummonFaceTravel)
         if (Math.abs(pet.vx) > 2.0) pet.vx = Math.sign(pet.vx) * 2.0;
         pet.vx *= 0.92;
       }
@@ -87778,6 +87790,7 @@ function updatePlayer(dt) {
       // via _allyPlatformStep so the wolf can stand on any platform.
       const _dyP = player.y - pet.y;
       if (Math.abs(_dyP) > 600) { pet.y = player.y + player.h - (pet.h || 36 * (pet.scale || 1)); pet.vy = 0; pet.onGround = false; }   /* v0.30.1273 summon-plant - foot on the player's foot line */
+      _lxSummonFaceTravel(pet, (tgt && (_fbTgt || bestSq < 900 * 900)) ? (tgt.x + tgt.w / 2) - (pet.x + pet.w / 2) : null);   // v0.30.1794 release25a
       _allyPlatformStep(pet, tgt || _petFollow);   // v0.30.1278 pet-follow - idle: jump toward you
       if (_checkContact && _totalDmg > 0) {
         pet.hp = Math.max(0, pet.hp - _totalDmg);
@@ -87958,9 +87971,10 @@ function updatePlayer(dt) {
         else {
           const targetVx = Math.sign(dx) * Math.min(4.0, Math.abs(dx) / 26);
           pet.vx += (targetVx - pet.vx) * 0.25;
-          pet.facing = Math.sign(dx) || pet.facing || 1;
+          // v0.30.1794 release25a: facing follows the motion (_lxSummonFaceTravel after the move), not the steering point's side
         }
         if (_inReach && pet.cdAtk <= 0 && !_atkHold && Math.abs(pet.vx) <= 0.9) {
+          pet.facing = Math.sign((tgt.x + tgt.w / 2) - _pcx) || pet.facing || 1;   // v0.30.1794 release25a: the bite opens facing its foe
           _lxSummonBite(pet);
           // v0.25.557 — lone Wild Bond wolf 1.4×ATK → 1.1×ATK, rate 600ms → 1500ms.
           hitMonster(tgt, Math.floor(getAtk() * (_petSlot === 'ultPet' ? 4.4 : 1.6)), false, 'pet');   // v0.30.x bughunt sibling-5 - no fake crit number, no burnt guaranteed-crit charge
@@ -87978,10 +87992,10 @@ function updatePlayer(dt) {
           pet._roamTX = (player.x + player.w / 2) + (Math.random() * 2 - 1) * 140;
           pet._roamUntil = _tW + 120 + Math.floor(Math.random() * 180);
         }
+        _lxSummonHeelRoam(pet, (player.pack && player.pack.indexOf(pet) >= 0) ? 220 : 140);   // v0.30.1794 release25a
         _petFollow = _lxPetFollowLevel(pet);   // v0.30.1278 pet-follow - you are on another level: head (and jump) for you
         const dx = pet._roamTX - _pcx;
-        pet.facing = Math.sign(dx) || pet.facing || 1;
-        pet.vx += Math.sign(dx) * 0.15;
+        pet.vx += Math.sign(dx) * 0.15;   // v0.30.1794 release25a: facing follows the motion (_lxSummonFaceTravel)
         if (Math.abs(pet.vx) > 1.8) pet.vx = Math.sign(pet.vx) * 1.8;
         pet.vx *= 0.9;
       }
@@ -87995,6 +88009,7 @@ function updatePlayer(dt) {
       }
       const _dyP = player.y - pet.y;
       if (Math.abs(_dyP) > 600) { pet.y = player.y + player.h - (pet.h || 36 * (pet.scale || 1)); pet.vy = 0; pet.onGround = false; }   /* v0.30.1273 summon-plant - foot on the player's foot line */
+      _lxSummonFaceTravel(pet, (tgt && (_fbTgt || bestSq < 900 * 900)) ? (tgt.x + tgt.w / 2) - (pet.x + pet.w / 2) : null);   // v0.30.1794 release25a
       _allyPlatformStep(pet, tgt || _petFollow);   // v0.30.1278 pet-follow - idle: jump toward you
       if (_checkContact && _totalDmg > 0) {
         pet.hp = Math.max(0, pet.hp - _totalDmg);
@@ -92686,7 +92701,7 @@ function updateMinions(dt) {
       const dx = (tcx + (mn.mojimon ? mn._offX : Math.max(-_offCap, Math.min(_offCap, mn._offX)))) - _mnCx;
       const _mnHold = _lxSummonAttacking(mn);   // v0.30.1674 summon-plant: striking - stand still
       const _mnReady = !mn.mojimon && (mn.cd || 0) <= 0 && _lxUndeadInReach(mn, tgt);
-      if (!_mnHold) mn.facing = Math.sign(tcx - _mnCx) || 1;
+      // v0.30.1794 release25a: facing follows the motion (_lxSummonFaceTravel after the move); standing, it faces the foe there
       if (_mnHold) mn.vx = 0;
       else if (_mnReady && Math.abs(mn.vx) > 0.9) mn.vx *= 0.5;   // v0.30.1674 summon-plant: in reach with the strike ready - stop first
       else if (Math.abs(dx) > 4) mn.vx += Math.sign(dx) * 0.25; else mn.vx *= 0.85;
@@ -92735,7 +92750,7 @@ function updateMinions(dt) {
         mn._roamUntil = _t + 120 + Math.floor(Math.random() * 180);               // hold ~2-5s before repicking
       }
       const rdx = mn._roamTX - _mnCx;
-      mn.facing = Math.sign(rdx) || mn.facing || 1;
+      // v0.30.1794 release25a: facing follows the motion (_lxSummonFaceTravel)
       mn.vx += Math.sign(rdx) * 0.12;
       // v0.30.x — a searching undead moves with purpose; the pet still ambles.
       // 1.4px/frame is 84px/s, so one sweep of a 3200px map would take most of
@@ -92756,6 +92771,7 @@ function updateMinions(dt) {
     // the four lines that were here.
     mn.x += mn.vx;
     _allyPlatformStep(mn, tgt, mn.mojimon ? null : _LX_UNDEAD_STEP);   // v0.30.623 summon-ai
+    _lxSummonFaceTravel(mn, tgt ? (tgt.x + tgt.w / 2) - (mn.x + mn.w / 2) : null);   // v0.30.1794 release25a
     // v0.26.x - apply accumulated monster contact damage; the minion now dies
     // (puff) when its HP runs out, not only on the life timer.
     if (_mnTakeHit && _mnIncoming > 0) {
@@ -92795,6 +92811,7 @@ function updateMinions(dt) {
         // monster's contact hit does (520ms ≈ one 9-frame loop at 48ms/frame).
         if (mn.mojimon) mn.atkAnimUntil = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) + 520;
         mn.cd = 400;
+        if (Math.abs(_ddx) > 2) mn.facing = _ddx > 0 ? 1 : -1;   // v0.30.1794 release25a: the strike opens facing its foe
         if (!mn.mojimon) _lxSummonBite(mn);   // v0.30.1674 summon-plant
         if (mn.mojimon) spawnSmoothImpact(_tcx, _tcy, '#9944cc');
         else spawnSmoothImpact(Math.max(tgt.x, Math.min(tgt.x + tgt.w, mn.x + mn.w / 2)), Math.max(tgt.y, Math.min(tgt.y + tgt.h, mn.y + mn.h / 2)), '#9944cc');   // v0.30.623 summon-ai - where the blow lands
@@ -92927,6 +92944,35 @@ function updateMinions(dt) {
 // near-foe flourish, stands still: its tick skips the steering and zeroes vx, its draw plays the attack set from the bite's own
 // frame 0. One loop of the nine 90 ms frames = 810 ms = 49 game frames (_LX_SUMMON_ATK_FRAMES).
 const _LX_SUMMON_ATK_FRAMES = 49;
+// v0.30.1794 release25a - A WALKING SUMMON FACES THE WAY IT GOES. Called after the move with the foe's centre minus the summon's (null: no foe).
+// Above the draws' walk threshold it faces its vx (a turn needs two frames of agreeing motion, or |vx| > 1: no flicker); standing, it
+// turns to a foe more than 12 px to either side, else keeps its facing; inside a bite / strike window it stays planted and keeps the
+// facing the bite set, turning in place only when its foe is knocked more than 24 px past it.
+const _LX_SUMMON_FACE_VX = 0.4;   // = the walk threshold of drawWolf / drawMinions
+function _lxSummonFaceTravel(ent, tdx) {
+  if (!ent) return;
+  if (_lxSummonAttacking(ent)) { ent._lxFaceVote = 0; if (typeof tdx === 'number' && Math.abs(tdx) > 24) ent.facing = tdx > 0 ? 1 : -1; return; }   // planted: turns in place only if its foe is pushed past it
+  const vx = ent.vx || 0, f = ent.facing || 1;
+  if (Math.abs(vx) > _LX_SUMMON_FACE_VX) {
+    const d = vx > 0 ? 1 : -1;
+    if (d === f) { ent._lxFaceVote = 0; return; }
+    ent._lxFaceVote = (ent._lxFaceVote || 0) + 1;
+    if (ent._lxFaceVote >= 2 || Math.abs(vx) > 1) { ent.facing = d; ent._lxFaceVote = 0; }
+    return;
+  }
+  ent._lxFaceVote = 0;
+  if (typeof tdx === 'number' && Math.abs(tdx) > 12) ent.facing = tdx > 0 ? 1 : -1;
+}
+// v0.30.1794 release25a - HEEL WHILE THE HERO TRAVELS: an idle pet's roam point that lies behind a walking hero is re-picked ahead of him,
+// so the pack goes the way he goes instead of one wolf turning back for a point picked before he moved on. r: the roam radius.
+function _lxSummonHeelRoam(pet, r) {
+  if (!pet || pet._roamTX == null || typeof player === 'undefined') return;
+  const pv = player.vx || 0; if (Math.abs(pv) < 1.2) return;
+  const d = pv > 0 ? 1 : -1, hx = player.x + player.w / 2;
+  if ((pet._roamTX - hx) * d >= 0) return;
+  pet._roamTX = hx + d * (40 + Math.random() * r * 0.8);
+  pet._roamUntil = (game.time || 0) + 90 + Math.floor(Math.random() * 120);
+}
 function _lxSummonAttacking(ent) {
   if (!ent) return false;
   const t = (typeof game !== 'undefined' && game.time) ? game.time : 0;
@@ -171571,7 +171617,8 @@ function drawWolf(pet, tintColor) {
     const _top = sy + H - _dH * _cbf + _plant;
     const _left = sx + W / 2 - _dW / 2;            // center the aspect-correct sprite over the hitbox
     ctx.save();
-    if (f < 0) {
+    const _lxLeftArt = _lxSummonFrameLeft(_wolfDraw);   // v0.30.1794 release25a: a pup walk frame drawn facing left is mirrored once more
+    if ((f < 0) !== _lxLeftArt) {
       // Mirror horizontally for left-facing
       ctx.translate(_left + _dW, _top);
       ctx.scale(-1, 1);
