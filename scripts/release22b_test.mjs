@@ -22,8 +22,8 @@ let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; co
 const src = readFileSync(path.resolve(ROOT, FILE), 'utf8').split('\r\n').join('\n');
 const has = (n, s, k = 1) => { const c = src.split(s).length - 1; ok('[1] ' + n, c === k, c === k ? undefined : { found: c, want: k, s: s.slice(0, 90) }); };
 {
-  has("kept: Kage Rush 8x a lane", "const LX_KAGE_DMG = 8;");
-  has("kept: Kage Rush row (15 s, 8x)", "master:'shinobi',     slot:'x', mp:18, cd:15000,  desc:'4 charges. Each is a short shadow-step slash (~400 px) across a crimson lane, dealing 8× ATK to every foe it crosses");
+  has("Kage Rush 10x a lane (v0.30.1797, per user)", "const LX_KAGE_DMG = 10;");
+  has("Kage Rush row (15 s, 10x)", "master:'shinobi',     slot:'x', mp:18, cd:15000,  desc:'4 charges. Each is a short shadow-step slash (~400 px) across a crimson lane, dealing 10× ATK to every foe it crosses");
   has("Hundred-Hand slashes 26x (was 10)", "performAround(175, 26, {");
   has("Hundred-Hand finale 31x (was 12)", "performAround(330, 31, {");
   has("Hundred-Hand row: cd 30 s", "master:'shinobi',     slot:'b', mp:60,  cd:30000, desc:'Four blink-slashes (26× ATK in 175 px each) that stick to the nearest foe, then a 31× ATK shockwave finale");
