@@ -16397,7 +16397,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1823';
+const GAME_VERSION = 'v0.30.1824';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -21352,6 +21352,12 @@ function _lxBitmapOffThread(im, bw, bh) {
   }
   return createImageBitmap(im, opts);
 }
+// v0.30.1824 release26g: the release callback _lxAsyncBake registers with _lxCvTrack. Built inside that function it shared V8's one
+// context with finish - which also captured `prev`, the canvas the bake superseded - so every replaced copy stayed alive as
+// long as its successor stayed tracked (soak hunter: 44 untracked canvases). Out here it holds frames / idx / im only.
+function _lxAsyncBakeEvict(frames, idx, im) {
+  return (c) => { if (frames[idx] === c) { frames[idx] = im; frames._readyN = 0; } if (im._lxBakedCv === c) im._lxBakedCv = null; };
+}
 function _lxAsyncBake(frames, idx, im, maxLong, prev) {   // v0.30.x — prev: a stale canvas this bake supersedes (it stays in the slot, drawn, until then)
   const w = im.naturalWidth, h = im.naturalHeight;
   const s = maxLong / Math.max(w, h);
@@ -21367,7 +21373,7 @@ function _lxAsyncBake(frames, idx, im, maxLong, prev) {   // v0.30.x — prev: a
     // frame arrays (counted 2-3 bakes per source on the Singularity entry),
     // and each array used to re-run the whole decode+resize for it.
     if (cv) im._lxBakedCv = cv;
-    if (cv) _lxCvTrack(cv, (c) => { if (frames[idx] === c) { frames[idx] = im; frames._readyN = 0; } if (im._lxBakedCv === c) im._lxBakedCv = null; });   // v0.30.1639 cvbudget
+    if (cv) _lxCvTrack(cv, _lxAsyncBakeEvict(frames, idx, im));   // v0.30.1639 cvbudget; v0.30.1824 release26g: built outside, so it does not pin `prev`
     if (cv && (frames[idx] === im || (prev && frames[idx] === prev))) { frames[idx] = cv; frames._readyN = 0; }
   };
   try {
@@ -81722,29 +81728,38 @@ function loadMap(id, entryX, entryY, _ledgeArrival) {
           // still loading rotate to the back of the queue; the per-callback
           // cap keeps each idle slice under a few ms.
           if (typeof _lxTintBake === 'function' && typeof _monsterFramesFor === 'function') {
+            // v0.30.1824 release26g: ONE QUEUE, OF SLOTS, THAT ENDS (soak hunter: untracked canvas memory 1.7 -> 153 MP in a 22-min session
+            // with no reload). It baked only in idle slices with > 4 ms left and re-asked whatever happened, so under load a
+            // queue never emptied, every map change added an endless chain, and each pinned the slot CONTENTS it captured
+            // (shrink bakes the canvas budget had already released). Now the queue holds SLOTS and reads one when it bakes
+            // (what the draw will tint), one queue lives at a time (a new loadMap or leaving the map ends it), it ends when
+            // empty or after 5 min, and a busy main thread is asked again in 500 ms, not at once. It still bakes only in real
+            // idle time - forcing a bake per call put this work inside busy fights.
             const _fq = [];
             for (const _sp of _wmd.spawns) {
               if (!_sp || !_sp.type) continue;
               const _set = _monsterFramesFor(_sp.type) || {};
-              for (const _md of ['idle', 'walk', 'attack']) for (const _im of (_set[_md] || [])) if (_im) _fq.push(_im);
-              const _st2 = (typeof MONSTER_SPRITES !== 'undefined') ? MONSTER_SPRITES[_sp.type] : null;
-              if (_st2) _fq.push(_st2);
+              for (const _md of ['idle', 'walk', 'attack']) { const _a = _set[_md]; if (Array.isArray(_a)) for (let _i = 0; _i < _a.length; _i++) _fq.push([_a, _i]); }
+              if (typeof MONSTER_SPRITES !== 'undefined' && MONSTER_SPRITES[_sp.type]) _fq.push([MONSTER_SPRITES, _sp.type]);
             }
-            let _spins = 0;
+            const _tq = window._lxTintPreQ = { map: id, left: _fq.length, baked: 0, t0: performance.now() };   // v0.30.1824 release26g: the one live queue
+            const _end = () => { _fq.length = 0; _tq.left = 0; if (window._lxTintPreQ === _tq) window._lxTintPreQ = null; };
             const _drain = (ddl) => {
-              let n = 0;
+              if (window._lxTintPreQ !== _tq || typeof game === 'undefined' || !game || game.currentMap !== id || performance.now() - _tq.t0 > 300000) { _end(); return; }
+              let n = 0, done = 0;
               while (_fq.length && n < 4 && (!ddl || !ddl.timeRemaining || ddl.timeRemaining() > 4)) {
-                const _im = _fq.shift(); n++;
-                if (_im && _im.complete === false) {   // still fetching — rotate, bounded
-                  if (++_spins < 4000) _fq.push(_im);
-                  continue;
-                }
+                const _j = _fq.shift(); n++;
+                const _im = _j[0][_j[1]];
+                if (!_im) continue;
+                if (_im.complete === false) { _fq.push(_j); continue; }   // still fetching - to the back (the 5 min life bounds it)
                 try { _lxTintBake(_im, 'brightness(2.5)'); } catch (e) {}
+                done++; _tq.baked++;
               }
-              if (_fq.length) {
-                if (window.requestIdleCallback) requestIdleCallback(_drain, { timeout: 2000 });
-                else setTimeout(_drain, 120);
-              }
+              _tq.left = _fq.length;
+              if (!_fq.length) { _end(); return; }
+              const _next = () => { if (window.requestIdleCallback) requestIdleCallback(_drain, { timeout: 2000 }); else setTimeout(_drain, 120); };
+              if (done || (!n && !(ddl && ddl.didTimeout))) _next();   // progress, or a short slice: the next idle period
+              else setTimeout(_next, n ? 250 : 500);   // only downloads left, or a busy main thread: look again shortly
             };
             if (window.requestIdleCallback) requestIdleCallback(_drain, { timeout: 2000 });
             else setTimeout(_drain, 300);
@@ -186502,6 +186517,7 @@ function _lxReadyGate(mapId, opts) {
     rec.capped = rec.ms >= CAP - 5;
     window._lxMintBypass = false;   // a capped drain finishes on the budget, not unmetered
     window._lxReadyGateLog.push(rec);
+    { const _gl = window._lxReadyGateLog, _k = _gl.length - 51; if (_k >= 0 && _gl[_k] && !_gl[_k].boot) delete _gl[_k]; }   // v0.30.1824 release26g: the boot record + the last 50 (length still counts every gate)
     try { console.log('[boot] ready gate ' + id + ': decode ' + rec.decodeMs + 'ms, shrink ' + rec.shrinkMs + 'ms, baked ' + rec.baked + ' in ' + rec.bakeMs + 'ms, backdrop ' + rec.backdrop + ', bgm readyState ' + rec.bgm + (rec.capped ? ' [CAPPED]' : '') + ' — ' + rec.ms + 'ms'); } catch (e) {}
   });
 }
