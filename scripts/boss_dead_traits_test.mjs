@@ -160,7 +160,7 @@ const r = await page.evaluate(() => {
   // player pool, and the Arbiter's 340 sits under that bar for any realistic
   // pool — correctly unmarked. The Sovereign (atk 760 vs a 540 bar) is the
   // holder whose lunge the rule says SHOULD be drawn.
-  const ar = mk('towerSovereign', 400);
+  const ar = mk('towerSovereign', 100);   // v0.30.x sovereign-lunge-dir - 493 px from the hero: at 400 (187 px) he stands too close to lunge
   // Worthiness is raw atk >= 30% of getMaxHp(), and getMaxHp() is computed
   // from the full stat stack (measured 3510 here regardless of player.level),
   // so no roster boss clears the 1053 bar in this harness. Rather than tune
