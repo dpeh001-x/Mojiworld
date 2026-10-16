@@ -117,6 +117,8 @@ try {
     // a roam point / foe picked on this map, far from the door, as an idle pack carries one
     await page.evaluate(() => { const ww = game.mapData.worldWidth || 2000, far = player.x > ww / 2 ? 120 : ww - 120; window.__oldFoe = { x: far, y: player.y, w: 40, h: 40, currentHp: 1e9, maxHp: 1e9, type: 'slime' }; for (const p of [player.pet, player.ultPet, ...(player.pack || [])]) if (p) { p._roamTX = far; p._roamUntil = game.time + 600; p._tgtRef = window.__oldFoe; }
       window.__pre = [player.pet, player.ultPet, ...(player.pack || [])].filter(Boolean).map((p) => p._roamTX); game.monsters = []; window._r25.calm(); });
+    // release25e: no foe on any sim step while the arrival is measured (cleared once a frame, one spawned between two clears knocked the hero off the ledge)
+    await page.evaluate(() => { const u0 = window.updatePlayer; window.__r25eU0 = u0; window.updatePlayer = function () { game.monsters = []; return u0.apply(this, arguments); }; });
     await press(page, 'ArrowUp', 160);
     let arrived = false; for (let i = 0; i < 40 && !arrived; i++) { await page.waitForTimeout(100); arrived = await page.evaluate((d) => game.currentMap === d, dest); }
     const R = await page.evaluate(async () => { const { clear, calm } = window._r25; const L = [player.pet, player.ultPet, ...(player.pack || [])].filter(Boolean).filter((p) => !p.flying);
@@ -125,6 +127,7 @@ try {
         if (heroLand == null && player.onGround) { heroLand = Math.round(hf); window.__tl = game.time; }
         L.forEach((p, i) => { if (land[i] == null && p.onGround) land[i] = Math.round(p.y + p.h); if (heroLand != null && game.time - window.__tl <= 45) worst = Math.max(worst, Math.abs(p.y + p.h - hf)); stray = Math.max(stray, Math.abs(p.x + p.w / 2 - hx)); }); }
       return { map: game.currentMap, heroLand, land, worst: Math.round(worst), stray: Math.round(stray), roam0: roam0.map((v) => v == null ? null : Math.round(v)), pre: window.__pre.map((v) => Math.round(v)), tgt0 }; });
+    await page.evaluate(() => { if (window.__r25eU0) { window.updatePlayer = window.__r25eU0; window.__r25eU0 = null; } });
     ok('[2] ' + from + ' -> ' + dest + ': every ground summon lands on the hero\'s ledge and stays within 30 px of his feet for 0.75 s after he lands', arrived && R.heroLand != null && R.land.length >= 4 && R.land.every((y) => y != null && Math.abs(y - R.heroLand) <= 6) && R.worst <= 30, R);
     ok('[3] ' + from + ' -> ' + dest + ': no summon keeps the old map\'s roam point or foe, none strays > 300 px', arrived && R.roam0.every((v, i) => v == null || R.pre.indexOf(v) < 0) && R.tgt0 === 0 && R.stray <= 300, { roam0: R.roam0, pre: R.pre, tgt0: R.tgt0, stray: R.stray });
   }

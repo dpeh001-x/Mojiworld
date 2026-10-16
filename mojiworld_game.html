@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1812';
+const GAME_VERSION = 'v0.30.1813';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -81342,7 +81342,8 @@ function _lxRelocateThralls() {
 function _lxSummonLanding() {
   const L = (game.mapData && game.mapData.platforms) || [], cx = player.x + player.w / 2, feet = player.y + player.h;
   let best = null;
-  for (const p of L) { if (!p || cx < p.x || cx > p.x + p.w || p.y < feet - 4) continue; if (!best || p.y < best.y) best = p; }
+  // v0.30.1813 release25e: any platform his BODY overlaps, as collision holds him (his centre can be past the end of the ledge he stands on)
+  for (const p of L) { if (!p || player.x + player.w <= p.x || player.x >= p.x + p.w || p.y < feet - 4) continue; if (!best || p.y < best.y) best = p; }
   return best;
 }
 // v0.30.1804 release25b - A door can set the hero down above his floor, and some maps finish their ledges after the summons are placed, so the
@@ -81359,6 +81360,8 @@ function _lxSummonRoamOnLedge(pet) {
   const lo = p.x + pet.w / 2 + 14, hi = p.x + p.w - pet.w / 2 - 14;
   pet._roamTX = hi > lo ? Math.max(lo, Math.min(hi, pet._roamTX)) : p.x + p.w / 2;
 }
+// v0.30.1813 release25e: ticks the hero must stand on one foot line before summons crossing a door are set down beside him
+const _LX_SUMMON_SETTLE_TICKS = 8;
 function _lxSummonArriveTick() {
   if (typeof player === 'undefined' || !player) return;
   const t = game.time || 0;
@@ -81367,11 +81370,16 @@ function _lxSummonArriveTick() {
     if (t > s._lxArriveUntil || s.flying) { s._lxArriveUntil = 0; continue; }
     const sh = s.h || 36 * (s.scale || 1), sw = s.w || 40 * (s.scale || 1);
     s.y = player.y + player.h - sh; s.vy = 0;
-    if (player.onGround) {
-      const ld = _lxSummonLanding();
-      if (ld) s.x = Math.max(ld.x, Math.min(ld.x + ld.w - sw, s.x));
-      s._lxArriveUntil = 0;
-    }
+    if (player.onGround && t - (s._lxArriveUntil - 120) >= 2) {   // v0.30.1813 release25e: not on the tick that placed them (onGround can still be the old map's)
+      const _lf = player.y + player.h;
+      // v0.30.1813 release25e: SETTLED, not just touched down - a ledge end can tip him off a few frames after he lands (then he falls on and they ride on)
+      if (s._lxArriveFeet != null && Math.abs(s._lxArriveFeet - _lf) <= 1) s._lxArriveN = (s._lxArriveN || 0) + 1; else { s._lxArriveN = 1; s._lxArriveFeet = _lf; }
+      if (s._lxArriveN >= _LX_SUMMON_SETTLE_TICKS) {
+        const ld = _lxSummonLanding();
+        if (ld && Math.abs(ld.y - _lf) <= 4) s.x = Math.max(ld.x, Math.min(ld.x + ld.w - sw, s.x));   // v0.30.1813 release25e: only onto the surface he stands on
+        s._lxArriveUntil = 0; s._lxArriveFeet = null; s._lxArriveN = 0;
+      }
+    } else if (s._lxArriveN) { s._lxArriveN = 0; s._lxArriveFeet = null; }
   }
 }
 function _lxRelocateSummons() {
