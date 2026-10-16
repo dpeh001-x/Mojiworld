@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1789';
+const GAME_VERSION = 'v0.30.1790';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -161419,10 +161419,27 @@ function _lxCvTrim() {
     _lxCvRelease(cv, e);
   }
   if (_lxCvLruPx <= target) return;
+  // v0.30.1790 boss-lag - a boss fight on a desktop-class budget keeps this map's copies drawn in the last 2 min until a ceiling of 1.5x the
+  // budget (see _lxCvBossFight); past it, the pass below runs as before, down to 0.8x the ceiling.
+  const _ceil = (_LX_CV_BUDGET_PX >= 1e8 && _lxCvBossFight()) ? _LX_CV_BUDGET_PX * 1.5 : 0;
+  if (_ceil && _lxCvLruPx <= _ceil) return;
+  const _target2 = _ceil ? _ceil * 0.8 : target;
   for (const [cv, e] of _lxCvLru) {   // still over with every other map's idle copy gone: this map's, least recently drawn first
-    if (_lxCvLruPx <= target || now - cv._lxLruT < _LX_CV_HERE_MS) break;
+    if (_lxCvLruPx <= _target2 || now - cv._lxLruT < _LX_CV_HERE_MS) break;
     _lxCvRelease(cv, e);
   }
+}
+// v0.30.1790 boss-lag (per user: "reduce the boss fight lag") - A BOSS FIGHT KEEPS ITS WORKING SET. The pass above released this map's copies
+// idle for 15 s whenever the budget was over. A Gravitos fight's working set (his full-size frames, ~113M px, and the fight's
+// effects) is ~200-215M px against 160M, so an attack set or a skill effect not drawn for 15 s - his laser, grav impact, War Cry
+// - was released and decoded again INSIDE a frame each time it came round: measured at CPU x4, 129 releases and 47 in-frame
+// re-decodes (1.1 s) in 80 s of his first form, 389 and 77 (3.1 s) in his third. While a boss lives on a desktop-class budget
+// those copies stay up to 1.5x the budget (the size the arena held before v0.30.1742 tightened it); a phone-class budget, a
+// town and a hunting map keep the strict rule. Past the ceiling (a form change leaves the last form's frames behind) the
+// least recently drawn go as before.
+function _lxCvBossFight() {
+  try { for (const m of ((typeof game !== 'undefined' && game && game.monsters) || [])) if (m && m.currentHp > 0 && (m.isBoss || m.boss || m.zodiacBoss || m.superBoss)) return true; } catch (e) {}
+  return false;
 }
 function _lxCvRelease(cv, e) {
   _lxCvLru.delete(cv); _lxCvLruPx -= e.px; _lxCvEvicted++; cv._lxLruT = undefined;
