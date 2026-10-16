@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1808';
+const GAME_VERSION = 'v0.30.1809';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -61049,6 +61049,7 @@ function _coopActionFlush(force) {
       if (hits) { f.l = hits; f.q = net._hitSeq = _coopHitSeqNext(); }   // v0.30.829 - q: the host acknowledges it on its monster frame
       if (fxw) { if (fxw.fx) f.fx = fxw.fx; if (fxw.pj) f.pj = fxw.pj; }
       if (po) f.po = po;
+      { const _sm = _lxCoopSumTake(false); if (_sm) f.sm = _sm; }   // v0.30.1809 release25d: my summons ride the action frame
       net.ws.send(JSON.stringify(f));
     } else if (fxw || po) {
       // an older host would read a list-only 'dmg' frame as a hit on nothing: fx go on the verbatim 'ping' carrier
@@ -61442,6 +61443,7 @@ function _coopTickMonsters() {
     const _fxw = _coopFxDrain(); if (_fxw) { if (_fxw.fx) _frame.fx = _fxw.fx; if (_fxw.pj) _frame.pj = _fxw.pj; }
     const _po = _coopPoseDelta(); if (_po) _frame.po = _po;
   }
+  { const _sm = _lxCoopSumTake(false); if (_sm) _frame.sm = _sm; }   // v0.30.1809 release25d: my summons ride the monster frame
   try { net.ws.send(JSON.stringify(_frame)); } catch (e) {}
 }
 // HOST: broadcast enemy (monster-fired) projectiles so followers take RANGED /
@@ -64117,10 +64119,82 @@ function _mpRateOk(id, kind, perSec) {
   }
   return true;
 }
+// v0.30.1809 release25d - RECEIVE a partner's summon list: ghosts only, from a peer I know, on my map and instance, at a bounded rate.
+function _lxCoopSumApply(msg) {
+  if (msg.id == null || msg.id === net.myId || !Array.isArray(msg.sm)) return;
+  const p = net.peers && net.peers[msg.id]; if (!p) return;
+  if (!_mpRateOk(msg.id, 'sm', 30)) return;
+  const fm = typeof msg.fm === 'string' ? msg.fm : (typeof msg.map === 'string' ? msg.map : '');
+  const xi = typeof msg.xi === 'string' ? msg.xi.slice(0, 32) : '';
+  if (fm !== game.currentMap || xi !== _coopInst()) { p._lxSg = null; return; }
+  const now = performance.now(), gt = game.time | 0, own = Object.prototype.hasOwnProperty;
+  const old = (p._lxSg && p._lxSg.map === fm) ? p._lxSg.by : null;
+  const sg = { map: fm, xi, at: now, by: new Map(), pet: null, ult: null, pack: [], mn: [], tu: [] };
+  const num = (v, lo, hi) => { v = +v; return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : lo; };
+  for (const e of msg.sm.slice(0, 12)) {
+    if (!Array.isArray(e) || e.length < 16) continue;
+    const k = typeof e[1] === 'string' ? e[1] : ''; if (_LX_COOP_SUM_KIND[k] !== 1) continue;
+    const key = k + (num(e[0], 0, 1e4) | 0); if (sg.by.has(key)) continue;
+    let art = (typeof e[12] === 'string' && /^[A-Za-z0-9_]{0,32}$/.test(e[12])) ? e[12] : '';
+    if (k === 'm') art = art === 'zombie' ? 'zombie' : 'skeleton';
+    else if (k === 'j') { if (!art || typeof monsterTypes !== 'object' || !own.call(monsterTypes, art)) continue; }
+    else if (art && !(typeof LX_SUMMON === 'object' && own.call(LX_SUMMON, art))) art = '';
+    const g = (old && old.get(key)) || { _lxGhost: 1, _lxNew: 1 };
+    g._tx = num(e[2], -1e6, 1e6); g._ty = num(e[3], -1e6, 1e6); g._tvx = num(e[4], -400, 400) / 10; g._tvy = num(e[5], -400, 400) / 10;
+    g._rT = gt; g._rAt = now; if (g._lxNew) { g.x = g._tx; g.y = g._ty; g._lxNew = 0; }
+    g.vx = g._tvx; g.vy = g._tvy; g.facing = +e[6] < 0 ? -1 : 1;
+    g._life0 = +e[9] < 0 ? 1e12 : num(e[9], 0, 1e6) * 100; g.life = g._life0; g.maxLife = +e[10] < 0 ? 1e12 : num(e[10], 0, 1e6) * 100;
+    const hp = num(e[7], 0, 1e12), mhp = num(e[8], 0, 1e12), fl = num(e[11], 0, 15) | 0, sc = num(e[13], 10, 1000) / 100, w = num(e[14], 0, 600), h = num(e[15], 0, 600);
+    if (fl & 1) { if (!(g._atkAnimUntil > gt)) g._atkAnimAt = now; g._atkAnimUntil = gt + 14; } else g._atkAnimUntil = 0;
+    if (k === 't') { g.anchorX = g.lastX = g.x; g.anchorY = g.lastY = g.y; g.muzzle = (fl & 4) ? 60 : 0; if (g.bobPhase == null) g.bobPhase = ((num(e[0], 0, 1e4) | 0) % 7) * 1.7; sg.tu.push(g); }
+    else if (k === 'm' || k === 'j') {
+      g.type = art; g.w = w || 24; g.h = h || 32; g.currentHp = hp; g.maxHp = mhp; g.spawn = num(e[16], 0, 60); g.mojimon = k === 'j';
+      if (k === 'j' && (fl & 1)) g.atkAnimUntil = now + 260;
+      sg.mn.push(g);
+    } else {
+      g.hp = hp; g.maxHp = mhp; g.scale = sc; g.sprite = art || undefined; g.flying = !!(fl & 2); g.fireCd = (fl & 4) ? 300 : 0;
+      g.w = w || 40 * sc; g.h = h || 36 * sc;
+      if (k === 'p') sg.pet = g; else if (k === 'u') sg.ult = g; else sg.pack.push(g);
+    }
+    sg.by.set(key, g);
+  }
+  p._lxSg = sg;
+}
+// v0.30.1809 release25d - one ghost toward its last report, extrapolated by its velocity for at most 12 frames (a flyer also by vy); a jump > 240 px snaps
+function _lxCoopSumStep(g, gt, now) {
+  const k = Math.max(0, Math.min(12, gt - (g._rT | 0)));
+  const px = g._tx + g._tvx * k, py = g._ty + (g.flying ? g._tvy * k : 0);
+  if (Math.abs(px - g.x) > 240 || Math.abs(py - g.y) > 240) { g.x = px; g.y = py; } else { g.x += (px - g.x) * 0.35; g.y += (py - g.y) * 0.35; }
+  if (g._life0 < 1e11) g.life = Math.max(0, g._life0 - (now - g._rAt));
+  if (g.anchorX != null) { g.anchorX = g.lastX = g.x; g.anchorY = g.lastY = g.y; if (g.muzzle > 0) g.muzzle = Math.max(0, g.muzzle - 4); }
+}
+// v0.30.1809 release25d - DRAW every partner's ghosts on my map through the solo draw paths, with that partner's set swapped in for the one call
+function _lxCoopSumDraw() {
+  if (!_coopActive() || !net.peers) return;
+  const now = performance.now(), gt = game.time | 0, map = game.currentMap, xi = _coopInst();
+  for (const id in net.peers) {
+    const p = net.peers[id], sg = p && p._lxSg;
+    if (!sg) continue;
+    if (sg.map !== map || sg.xi !== xi || p.map !== map || now - sg.at > LX_COOP_SUM_STALE) { p._lxSg = null; continue; }   // it left my map, or went quiet
+    for (const g of sg.by.values()) _lxCoopSumStep(g, gt, now);
+    const K = [player.pet, player.ultPet, player.pack, player.master, player._ballistaTurrets, game.minions];
+    ctx.save();
+    try {
+      player.pet = sg.pet; player.ultPet = sg.ult; player.pack = sg.pack; player.master = p.master || null; player._ballistaTurrets = sg.tu.length ? sg.tu : null; game.minions = sg.mn;
+      if (sg.mn.length) drawMinions();
+      if (sg.tu.length) drawBallistaTurrets();
+      if (sg.pet || sg.ult || sg.pack.length) drawPet();
+    } catch (e) {} finally {
+      player.pet = K[0]; player.ultPet = K[1]; player.pack = K[2]; player.master = K[3]; player._ballistaTurrets = K[4]; game.minions = K[5];
+      ctx.restore();
+    }
+  }
+}
 function _mpHandle(msg) {
   if (!msg || typeof msg !== 'object') return;   // v0.27.0 — a malformed/JSON-null relay frame must not throw on switch(msg.t)
   if (msg.id != null && typeof msg.id !== 'number' && (String(msg.id) in Object.prototype)) return;   // v0.30.x bughunt coop-1 - the relay stamps a small integer; an id that names an Object.prototype member ('__proto__', 'constructor') would index net.peers as that member
-  if (typeof _coopNoteFrame === 'function' && !_coopNoteFrame(msg)) return;   // v0.30.1443 coop-keyed - whose world is this frame from, and who runs which map
+  if (typeof _coopNoteFrame === 'function' && !_coopNoteFrame(msg)) return;
+  if (msg.sm !== undefined && typeof _lxCoopSumApply === 'function') { try { _lxCoopSumApply(msg); } catch (e) {} }   // v0.30.1809 release25d: a partner's summons (any carrier)   // v0.30.1443 coop-keyed - whose world is this frame from, and who runs which map
   switch (msg.t) {
     case 'mon':   // v0.27.0 host monster state (non-host mirrors); v0.30.823 - its projectiles, hazards and fx ride along
       _coopApplyMonsters(msg);
@@ -64634,13 +64708,60 @@ function _mpStateDue(still, now, avStr) {
   if (due) { net._stSame = same ? (net._stSame | 0) + 1 : 0; net._stSig = sig; net._stAt = now; net._stStill = still; net._stSent = (net._stSent | 0) + 1; }
   return due;
 }
+// v0.30.1809 release25d - PARTNERS SEE EACH OTHER'S SUMMONS (per user). The owner sends a compact list of its live summons (sm) while a partner shares
+// its map: it rides the frame already going (the host's monster frame, a guest's action frame) at most every LX_COOP_SUM_MS, else its
+// own droppable ping. One entry: [id, kind, x, y, vx*10, vy*10, facing, hp, maxHp, life ds, maxLife ds (-1 endless), flags, art, scale*100,
+// w, h, spawn] - kind p pet, u ult pet, k pack, t turret, j MojiMon, m undead; flags 1 attacking, 2 flying, 4 firing. The viewer keeps
+// them as GHOSTS on net.peers[id]._lxSg and draws them through drawPet / drawMinions / drawBallistaTurrets with the partner's set swapped
+// in for that one call: never in game.monsters / player.pack / game.minions / the save, so nothing can hit, target, block or count them.
+const LX_COOP_SUM_MS = 160;       // a summon list at most this often
+const LX_COOP_SUM_MAX = 10;       // summons per list
+const LX_COOP_SUM_STALE = 2000;   // ms with no list from a partner: its summons are gone from my screen
+const _LX_COOP_SUM_KIND = { p: 1, u: 1, k: 1, t: 1, j: 1, m: 1 };
+function _lxCoopSumOn() {   // a partner shares my map: only then is a list worth sending
+  if (!_coopActive() || !net.peers) return false;
+  for (const id in net.peers) { const p = net.peers[id]; if (p && +id !== +net.myId && p.map === game.currentMap) return true; }
+  return false;
+}
+function _lxCoopSumWire() {
+  const out = [], q = (v) => Math.round(+v || 0), now = performance.now();
+  const sid = (o) => o._lxSid || (o._lxSid = (net._lxSidN = ((net._lxSidN | 0) % 999) + 1));
+  const ds = (ms) => (ms == null || !Number.isFinite(+ms) || +ms > 1e9) ? -1 : Math.max(0, Math.round(ms / 100));
+  const put = (o, k, hp, mhp, fl, art, sc, sp) => { if (out.length < LX_COOP_SUM_MAX) out.push([sid(o), k, q(o.x), q(o.y), q((o.vx || 0) * 10), q((o.vy || 0) * 10), (o.facing || 1) < 0 ? -1 : 1, q(hp), q(mhp), ds(o.life), ds(o.maxLife), fl, art, q(sc * 100), q(o.w), q(o.h), q(sp)]); };
+  const pet = (o, k) => { if (!o || !(o.hp == null || o.hp > 0)) return;
+    put(o, k, o.hp, o.maxHp, (_lxSummonAttacking(o) ? 1 : 0) | (o.flying ? 2 : 0) | ((o.fireCd || 0) > 250 ? 4 : 0), typeof o.sprite === 'string' ? o.sprite.slice(0, 32) : '', typeof o.scale === 'number' ? o.scale : 1, 0); };
+  pet(player.ultPet, 'u'); pet(player.pet, 'p');
+  for (const o of (player.pack || [])) pet(o, 'k');
+  for (const tu of (player._ballistaTurrets || [])) if (tu && tu.life > 0 && out.length < LX_COOP_SUM_MAX)
+    out.push([sid(tu), 't', q(tu.lastX != null ? tu.lastX : tu.anchorX), q(tu.lastY != null ? tu.lastY : tu.anchorY), 0, 0, (tu.facing || 1) < 0 ? -1 : 1, 0, 0, ds(tu.life), ds(tu.maxLife), tu.muzzle > 0 ? 4 : 0, '', 100, 0, 0, 0]);
+  const mns = game.minions || [];
+  for (const mn of mns) if (mn && mn.mojimon && mn.currentHp > 0) put(mn, 'j', mn.currentHp, mn.maxHp, (mn.atkAnimUntil && now < mn.atkAnimUntil) ? 1 : 0, String(mn.type || '').slice(0, 32), 1, mn.spawn);
+  for (const mn of mns) if (mn && !mn.mojimon && mn.currentHp > 0 && mn.life > 0) put(mn, 'm', mn.currentHp, mn.maxHp, _lxSummonAttacking(mn) ? 1 : 0, mn.type === 'zombie' ? 'zombie' : 'skeleton', 1, mn.spawn);
+  return out;
+}
+function _lxCoopSumTake(force) {   // the list, if one is due (null: nothing to say)
+  const now = performance.now();
+  if (!force && now - (net._lxSumAt || 0) < LX_COOP_SUM_MS) return null;
+  if (!_lxCoopSumOn()) return null;
+  const w = _lxCoopSumWire();
+  if (!w.length) { if ((net._lxSumClr | 0) <= 0) return null; net._lxSumClr--; }   // the last one gone: an empty list three times (a lost frame must not strand a ghost), then silence
+  else net._lxSumClr = 3;
+  net._lxSumAt = now;
+  return w;
+}
+function _lxCoopSumTick(now) {   // no frame carried a list for a while: it goes on its own (droppable, newest-wins) ping
+  if (!_coopActive() || now - (net._lxSumAt || 0) < LX_COOP_SUM_MS + 40) return;
+  const w = _lxCoopSumTake(true); if (!w) return;
+  try { net.ws.send(JSON.stringify({ t: 'ping', fm: game.currentMap, sm: w })); } catch (e) {}
+}
 function _mpTick() {
   if (!net.connected || !net.ws || net.ws.readyState !== 1) return;
   const now = performance.now();
   _coopAwayTick(); _coopFxCollect(); _coopActionFlush(false);   // v0.30.823 - every frame; each paces itself (v0.30.824: fx are collected every frame)
   // v0.30.1732 release11: paused in a menu, said at once (the host leaves a paused partner out of the aggro list - it cannot be hurt); 'aw' waits 20 s
   if (!!game.paused !== !!net._pzSent) { net._pzSent = !!game.paused; try { net.ws.send(JSON.stringify({ t: 'ping', pz: net._pzSent ? 1 : 0 })); } catch (e) {} }
-  if (typeof _coopKeyTick === 'function') _coopKeyTick(now);   // v0.30.1443 coop-keyed - re-elect four times a second; announce a new world at once
+  if (typeof _coopKeyTick === 'function') _coopKeyTick(now);
+  if (typeof _lxCoopSumTick === 'function') _lxCoopSumTick(now);   // v0.30.1809 release25d: my summons on their own ping when no frame carried them   // v0.30.1443 coop-keyed - re-elect four times a second; announce a new world at once
   // v0.29.x (peer-coordinate accuracy) — AIRBORNE-FLIP FLUSH. Send an immediate
   // state frame the moment we leave the ground or land (the two instants where
   // a partner's linear extrapolation of our old velocity is most wrong), instead
@@ -177218,6 +177339,7 @@ function _lxDrawFrame(time) {
   drawShadowClones();
   drawSovereignShade();   // v0.30.x — the shade sits behind the hero like the clones do
   drawBallistaTurrets();
+  if (typeof _lxCoopSumDraw === 'function') _lxCoopSumDraw();   // v0.30.1809 release25d: partners' summons, under the partners
   if (typeof _mpDrawPeers === 'function') _mpDrawPeers();   // ghost peers underneath
   if (typeof _lxDawnAuraDraw === 'function') _lxDawnAuraDraw();   // v0.30.767 — the armed Bastion: dawn column + rune ward, under the paladin
   { const _se = _lxStepEaseOff(); if (_se) { ctx.save(); ctx.translate(0, _se); drawPlayer(); ctx.restore(); } else drawPlayer(); }   // v0.30.1455 - a flat step's snap, eased
