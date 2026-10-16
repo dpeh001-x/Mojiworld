@@ -38,6 +38,7 @@ try {
     player._tutorialSeen = true; player._gravitosCineSeen = true; player.level = 55; player.invulnerable = 1e9;
     player._storyBeatsSeen = {}; for (const k of Object.keys(STORY_BEATS)) player._storyBeatsSeen[k] = true;
     player._storyBeatsSeen.captains_teaser = true; player._storyBeatsSeen.barnaby_fall = true; delete player._storyBeatsSeen.mira_ashes;
+    _ensureQuests(); player.quests.active.q_boss_sundered_smith = player.quests.active.q_boss_sundered_smith || { progress: 0 };   // release26e: the ashes play on The Forge That Broke's kill
     await sleep(2500); const vi = document.getElementById('void-intro-overlay'); if (vi) vi.classList.remove('show');
     try { const s = _lxGetSettings(); s.bgm = 70; s.mute = false; } catch (e) {}
     const ov = () => document.getElementById('kill-film-overlay');

@@ -47,6 +47,9 @@ try {
     const npc = (n) => game.npcs.find((x) => x.name === n), dlg = document.getElementById('dialog');
     const step = npc('Postal Wisp'), ledge = npc('Auntie Innie'), amn = npc('The Amnesiac');
     const ledgeX0 = ledge.x; ledge.x = step.x + 50;   // side by side for LEVEL / PROMPT / N (see the header); put back below
+    // release26e: a giver with a quest to offer / hand in wins the key inside the reach box (release26e_test pins Will over Munch); this fresh
+    // hero has Auntie Innie's offer, so the height rule is read with quest markers off, and put back below
+    const _qm0 = window._npcQuestMarker; out.innieMark = ((_qm0(ledge) || {}).rank) || 0; window._npcQuestMarker = () => null;
     const street = (x) => { player.x = x - player.w / 2; player.y = 480 - player.h; player.vx = 0; player.vy = 0; };
     // LEVEL + PROMPT (live frames)
     street((step.x + ledge.x) / 2); await W8(700); street((step.x + ledge.x) / 2);
@@ -68,7 +71,7 @@ try {
     await pressN(); out.n = { open: dlg.style.display === 'block', name: document.getElementById('dialog-name').textContent }; closeDialog();
     openShop('potion'); await W8(200); await pressN();
     out.nUnderShop = { dialog: dlg.style.display === 'block', shop: document.getElementById('shop-modal').style.display }; closeAllModals(); game.paused = false;
-    ledge.x = ledgeX0;
+    ledge.x = ledgeX0; window._npcQuestMarker = _qm0;   // release26e
     // P: under the advancement card; daily tally
     const talks = []; const _td = window.tickDaily; window.tickDaily = function (k, v) { if (k === 'talk') talks.push(v); return _td.apply(this, arguments); };
     const adv = document.getElementById('advancement-modal'); adv.style.display = 'flex';

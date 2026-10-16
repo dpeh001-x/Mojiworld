@@ -16397,7 +16397,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1818';
+const GAME_VERSION = 'v0.30.1819';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -29149,6 +29149,7 @@ function notifyIfBetter(newItem) {
   // skip the auto-equip and just notify (preserves v0.25.623 safety
   // for the wrong-class case).
   const _classOk = !newItem.cls || newItem.cls === 'any' || newItem.cls === player.cls;
+  if (!_classOk) return false;   // v0.30.1819 release26e: another class's piece (Mirror Self drops for all four) is "Looted", not "★ Better" + the gold panel
   if (player._autoEquipEnabled && _classOk && newScore > oldScore * 1.05) {
     // Find the newItem's index in inventory — it was already pushed by
     // the loot pipeline before this function ran. Splice it out, equip
@@ -43218,6 +43219,13 @@ if (MAPS.sundered_forge && MAPS.lastStep) MAPS.sundered_forge.portals.push({ x: 
 // Synced at boot and on every loadMap (a loaded save, a new run); opened with a burst when she dies (her kill hook).
 const _LX_SANCTUM_DOOR = { x: 1540, dest: 'sanctum', name: '▶ Aetherion\'s Sanctum', levelGate: 50 };
 // v0.30.1746 release16 - the copy on the Last Step has fallen (The Last Step done, or her kill recorded): The Tear VI's descent is behind the hero
+// v0.30.1819 release26e - THE LAST STEP, EARNED EARLY. Its door only warns below Lv 50, so the copy can fall before the quest can be taken. Such a
+// kill is remembered (an underscore bestiary key, skipped by every bestiary count); the save is then not an "old save past the copy"
+// (tickQuestUnlocks' quiet rule) and is paid when the quest opens. Set from tickQuestKill, so a co-op guest's tick counts too.
+function _lxLastStepEarlyKill() { try { const C = player.quests.completed || {}, A = player.quests.active || {}; if (QUESTS.q_last_step && !C.q_last_step && !A.q_last_step) { if (!game.bestiary) game.bestiary = {}; game.bestiary._lastStepEarly = 1; } } catch (e) {} }
+function _lxLastStepOwed() { try { return !!(QUESTS.q_last_step && game.bestiary && game.bestiary._lastStepEarly && !(player.quests.completed || {}).q_last_step); } catch (e) { return false; } }
+// v0.30.1819 release26e - a CRITICAL prerequisite of q the hero can do right now (its own level met, not taken, not done), or null
+function _lxCritPrereqNow(q) { try { const C = player.quests.completed || {}, A = player.quests.active || {}; return [].concat((q && q.prereq) || []).find((p) => QUESTS[p] && QUESTS[p].critical && !C[p] && !A[p] && (player.level || 1) >= (QUESTS[p].levelReq || 1) && (!QUESTS[p].cls || QUESTS[p].cls === player.cls)) || null; } catch (e) { return null; } }
 function _lxCopyFallen() { try { const C = (player && player.quests && player.quests.completed) || {}; return !!(C.q_last_step || _lxMiraBeaten() || ((game.bestiary && game.bestiary.miraFallen) | 0) > 0); } catch (e) { return false; } }
 function _lxTearSixSettle(announce) {
   try { const a = player.quests && player.quests.active && player.quests.active.q_lyra_last; if (!a || a.readyToHandIn || !_lxCopyFallen()) return false;
@@ -58806,6 +58814,10 @@ function loadState() {
     // v0.30.1722 release8: a story scene or kill film cut off by closing the game plays again once you are back in the world
     try {
       const _ob = player._lxBeatOpen, _of = player._lxFilmOpen; delete player._lxBeatOpen; delete player._lxFilmOpen;
+      // v0.30.1819 release26e: a film a quit cut short holds what it held the first time - Young Barnaby's fall the master pick (the stranded-advancement
+      // recovery opened it 3.7 s after load; the film then ran after the pick, over the talent picker, or never), the captains' teaser the
+      // advancement toasts. Each film's close (or its give-up) clears the hold; a hold set ahead expires on its own after 13 / 12 min.
+      if (_of === 'barnaby_fall') window._lxBarnabyFallPending = Date.now() + 600000; else if (_of === 'captains_teaser') window._lxTeaserPending = Date.now() + 600000;
       if ((_ob || _of) && player._storyBeatsSeen) {
         if (_ob) delete player._storyBeatsSeen[_ob]; if (_of) delete player._storyBeatsSeen[_of];
         const _go = (n) => {
@@ -66525,7 +66537,7 @@ function tickQuestUnlocks() {
   }
   // v0.30.1676 tearchain a save that already beat the copy on the Last Step (her kill, Lyra VI or the Sanctum quest) has the Last Step done, quietly
   if (QUESTS.q_last_step && !player.quests.completed.q_last_step && (player.quests.completed.q_lyra_last || player.quests.completed.q_boss_aetherion
-      || ((typeof game !== 'undefined' && game.bestiary && game.bestiary.miraFallen) | 0) > 0)) {
+      || ((typeof game !== 'undefined' && game.bestiary && game.bestiary.miraFallen) | 0) > 0) && !_lxLastStepOwed()) {   // v0.30.1819 release26e: not a kill made before the quest could be taken - that one is paid below
     player.quests.completed.q_last_step = 1;
     delete player.quests.active.q_last_step; if (player.quests.unlocked) delete player.quests.unlocked.q_last_step;
   }
@@ -66571,6 +66583,11 @@ function tickQuestUnlocks() {
   if (QUESTS.q_boss_aetherion && player.cls && !player.quests.completed.q_boss_aetherion && (player.quests.unlocked.q_boss_aetherion || player.quests.active.q_boss_aetherion)
       && typeof game !== 'undefined' && game.bestiary && ((game.bestiary.aetherion | 0) > 0 || game.bestiary._boss_aetherion)) {
     try { _completeQuest('q_boss_aetherion'); } catch (e) {}
+  }
+  // v0.30.1819 release26e - the copy felled before The Last Step could be taken (the door only warns below Lv 50): once the quest opens (Lv 50, the
+  // Smith done) it completes with its reward and its toast, as the Aetherion block above. It used to be marked done in silence.
+  if (QUESTS.q_last_step && player.cls && _lxLastStepOwed() && (player.quests.unlocked.q_last_step || player.quests.active.q_last_step) && _lxPrereqMet(QUESTS.q_last_step)) {
+    try { _completeQuest('q_last_step'); } catch (e) {}
   }
   // v0.30.1561 CRITICAL QUESTS start themselves when nobody hands them out (The Four Captains - autoStart - and the five Dawn
   // Fragment quests). The two class advancements are still taken from your captain under the gold marker: that offer is the
@@ -66888,6 +66905,7 @@ function _lxQtKillRender() {
 }
 function tickQuestKill(monsterType, isBoss) {
   _ensureQuests();
+  if (monsterType === 'miraFallen') _lxLastStepEarlyKill();   // v0.30.1819 release26e: her fall before The Last Step is in hand is paid at Lv 50 (see _lxLastStepOwed)
   let granted = false;
   let _anyProgress = false;
   // v0.25.586 — snapshot keys before iterating. Was `for (const id in
@@ -67413,6 +67431,9 @@ function renderQuestTracker() {
     // v0.30.1119 - held back by a prerequisite rather than a level (the Forge waits on Brok's two errands): name the
     // errand instead of printing a level the player already has.
     let _after = null;   // v0.30.1736 bughunt7: an errand in progress is named ("after ..."), not the level gate the hero already passed
+    // v0.30.1819 release26e: below the beat's own level a CRITICAL prerequisite the hero can do now is named (Lv 40-44: "Five Stories ... Lv 45" while
+    // Brok's Forge-Key - Lv 35, critical - stood in the way, and the portal toast and the E guide said Brok); see its giver, as v0.30.1781
+    if (locked && nq.prereq && (player.level || 1) < (nq.levelReq || 1)) { const _cm = _lxCritPrereqNow(nq); if (_cm) { nq = QUESTS[_cm]; locked = !(player.quests.unlocked && player.quests.unlocked[_cm]); } }
     if (locked && (player.level || 1) >= (nq.levelReq || 1) && nq.prereq) {
       const _miss = [].concat(nq.prereq).find((p) => QUESTS[p] && !(player.quests.completed && player.quests.completed[p]));
       if (_miss && !(player.quests.active && player.quests.active[_miss]) && _lxSideErrand(_miss)) _after = _lxErrandLabel(_miss);   // v0.30.1759 release21: the beat keeps its name
@@ -67420,6 +67441,11 @@ function renderQuestTracker() {
       else if (_miss) _after = QUESTS[_miss].name;
     }
     if (locked && nq !== QUESTS[_nb] && (player.level || 1) >= (nq.levelReq || 1) && (typeof _lxPrereqMet !== 'function' || _lxPrereqMet(nq))) locked = false;   // v0.30.1781 quest-names - see its giver, not a passed level
+    if (_nb === 'q_last_step' && _lxLastStepOwed()) return `<div class="qt-row" style="border-left:2px solid #ff9e5e; padding-left:5px;">   <!-- v0.30.1819 release26e: her fall is counted; it pays at Lv 50 -->
+      <span class="qt-icon">🌅</span>
+      <span class="qt-name" style="color:#ffd0a0;">${QUESTS.q_last_step.name} ✓ done</span>
+      <span class="qt-prog" style="color:#c9b8d8;">completes at Lv ${QUESTS.q_last_step.levelReq || 50}</span>
+    </div>`;
     const _ng = (nq.giverByClass && nq.giverByClass[player.cls]) || nq.giver;   // v0.30.1119 a class giver resolves
     return `<div class="qt-row" style="border-left:2px solid #ff9e5e; padding-left:5px;">
       <span class="qt-icon">🌅</span>
@@ -68717,7 +68743,7 @@ function acceptQuest(id, _lxQuiet) {   // v0.30.902 _lxQuiet: the caller announc
   try { _lxStampObjective(id); } catch (e) {}
   let _lxTalkNext = null; try { const _tl = q.talkTo, _tp = ((player.quests.active[id] || {}).talkProgress) || {}; if (Array.isArray(_tl)) _lxTalkNext = _tl.find((n) => !_tp[n]) || null; } catch (e) {}   // v0.30.1764 release24: the first one still to talk to (was the hand-in NPC)
   const _npcLine = (_lxTalkNext || q.npc) ? ` — talk to ${_lxTalkNext || q.npc}` : '';
-  if (!_lxQuiet) showToast(`📜 Quest started — ${q.icon} ${q.name}${_npcLine}`, 'rare');
+  if (!_lxQuiet) showToast(`📜 Quest started — ${q.icon} ${q.name}${(typeof game !== 'undefined' && game && game._lxAcceptByTalk && !_lxTalkNext) ? '' : _npcLine}`, 'rare');   // v0.30.1819 release26e: no "talk to your class instructor" right after that talk
   saveState();
   // v0.25.595 — refresh HUD tracker on accept (membership change).
   if (typeof renderQuestTracker === 'function') renderQuestTracker();
@@ -74363,11 +74389,14 @@ function renderQuestJournal() {
         if (!nb || s.done) return '';
         let nq = QUESTS[nb], nid = nb, _jAfter = null;   // v0.30.1759 release21: _jAfter - a side errand the beat waits on
         // v0.30.1724 bughunt3 - held back by a prerequisite, not a level (Barnaby I waits on Brok's Forge-Key errand): name it, as the tracker does
+        if (!(player.quests.active && player.quests.active[nb]) && !(player.quests.unlocked && player.quests.unlocked[nb]) && (player.level || 1) < (nq.levelReq || 1) && nq.prereq) { const _cm = _lxCritPrereqNow(nq); if (_cm) { nid = _cm; nq = QUESTS[_cm]; } }   // v0.30.1819 release26e: as the tracker
         if (!(player.quests.active && player.quests.active[nb]) && !(player.quests.unlocked && player.quests.unlocked[nb]) && (player.level || 1) >= (nq.levelReq || 1) && nq.prereq) {
           const _miss = [].concat(nq.prereq).find((p) => QUESTS[p] && !(player.quests.completed && player.quests.completed[p]));
           if (_miss && _lxSideErrand(_miss)) _jAfter = _lxErrandLabel(_miss);   // v0.30.1759 release21: Barnaby I keeps its name, after Brok's errand
           else if (_miss) { nid = _miss; nq = QUESTS[_miss]; }
         }
+        if (nb === 'q_last_step' && _lxLastStepOwed()) { const _lsLv = QUESTS.q_last_step.levelReq || 50;   // v0.30.1819 release26e: her fall is counted; it pays at Lv 50
+          return `<button type="button" class="qj-saga-next" data-qnext="${nb}" title="Her fall is already counted · the quest completes, with its reward, at Lv ${_lsLv}">Next ▶ ${QUESTS.q_last_step.name} <span class="qj-saga-lock">done · completes at Lv ${_lsLv}</span></button>`; }
         const st = _jAfter ? 'after ' + _jAfter : (player.quests.active && player.quests.active[nid]) ? 'underway'
                  : (player.quests.unlocked && player.quests.unlocked[nid]) ? 'ready'
                  : 'needs Lv ' + (nq.levelReq || 1);
@@ -80911,6 +80940,11 @@ const LX_KILL_FILMS = {
 // v0.30.1730 bughunt4 - Gravitos's two changes are part of his fight: a reload restarts the fight at form 1, so a change cut short by one
 // plays at the next real change instead of over a fresh form 1 (loadState).
 LX_KILL_FILMS._gravitosAwaken.inFight = LX_KILL_FILMS._gravitosAscend.inFight = true;
+// v0.30.1819 release26e - THE SMITH'S ASHES BELONG TO THE FORGE THAT BROKE'S KILL (per user 2026-10-09). The row's own test let every other Smith kill
+// through (Barnaby II's visit to the Forge, a stray fight) and marked the film seen, so the quest's kill - the one the Last Step's text looks
+// back on - had none. It plays with The Forge That Broke in hand; a save that already finished the quest (beaten before the film shipped, or a
+// film that failed to load and was unspent) still gets it once on a later kill. Read before the kill ticks the quest (killMonster order).
+LX_KILL_FILMS.sundered_smith.when = () => { const A = (player.quests && player.quests.active) || {}, C = (player.quests && player.quests.completed) || {}; return !!(A.q_boss_sundered_smith || C.q_boss_sundered_smith); };
 // v0.30.1719 GRAVITOS SPEAKS IN HIS FILMS (per user: the story beats "as sub title to be played as the video plays", "read in a dark deep
 // monstrous voice", "the speech should last as long as the video", "the rest will be storybeat stanza with the appropriate background").
 // A few of his lines, placed inside each film ([start, end, text] in seconds of the film), subtitled; his full speech follows as the
@@ -116365,6 +116399,16 @@ function triggerSuperBossDeath(m) {
   };
   try { return _triggerSuperBossDeathRaw(m); } finally { delete drops.push; }
 }
+// v0.30.1819 release26e - each super boss falls in its own words (audit B1 again: the Woman Who Turned Back fell to "THE TEARBORN FALLS!" and "a soul goes
+// free" - her soul frees only when Aetherion falls). Hers names a title, never her, and speaks in her voice (the gate's question she could
+// not answer). A super boss with no row falls under its own name, not Aetherion's.
+const _LX_SB_DEATH_LINES = {
+  miraFallen: ['THE HESITANT FALLS!', '"You answer it, then. I never could..."'],
+};
+function _lxSbDeathFallback(m) {
+  if (m && (m.type === 'aetherion' || m.type === 'aetherion2')) return ['THE TEARBORN FALLS!', 'The Sanctum trembles, and a soul goes free...'];
+  return [String((m && m.name) || 'The boss').toUpperCase() + ' FALLS!', 'Its long hold on this place breaks...'];
+}
 function _triggerSuperBossDeathRaw(m) {
   // Cinematic — shattering crystal, screen flash, slo-mo feel
   flash(0.8);
@@ -116486,7 +116530,7 @@ function _triggerSuperBossDeathRaw(m) {
   // v0.30.x boss polish (audit B1) — Gravitos and Octobaby are super bosses too, and fell to Aetherion's lines
   const _sbLines = ({ gravitos: ['THE WEIGHT-BEARER FALLS!', 'Ages of weight, set down at last...'],
     octobaby: ['OCTOBABY IS DETHRONED!', 'The grotto\'s eight moods fall quiet...'] })[m.type]
-    || ['THE TEARBORN FALLS!', 'The Sanctum trembles, and a soul goes free...'];
+    || _LX_SB_DEATH_LINES[m.type] || _lxSbDeathFallback(m);   // v0.30.1819 release26e: Aetherion's lines are hers alone now
   showToast(_sbLines[0], 'legendary');
   setTimeout(() => showToast(_sbLines[1], 'epic'), 900);
   // v0.25.775 — Previously this toast promised a +50% mojicoins rain bonus
@@ -120809,7 +120853,8 @@ function _lxTalkTarget() {
     const dx = Math.abs(px - npc.x); if (dx >= LX_TALK_DX) continue;
     const up = pf - ((npc.y || 0) + 44);   // > 0: the NPC's feet are above the player's
     if (up > LX_TALK_UP || up < -LX_TALK_DOWN) continue;
-    const d = dx * dx + up * up - (_tw[npc.name] ? 1e9 : 0);   // v0.30.1748 release17: the quest names this one
+    const _qm = (!_tw[npc.name] && typeof _npcQuestMarker === 'function') ? _npcQuestMarker(npc) : null;   // v0.30.1819 release26e: a gold (offer) or green (hand-in) marker
+    const d = dx * dx + up * up - (_tw[npc.name] ? 1e9 : 0) - (_qm && _qm.rank >= 2 ? 1e8 : 0);   // v0.30.1748 release17: the quest names this one; v0.30.1819 release26e: then a quest to take or hand in (Will on his dais over Munch)
     if (d < bestD) { bestD = d; best = npc; }
   }
   return best;
@@ -121867,7 +121912,7 @@ So… do you need a lift?`;
           // credited the kill and the 1st advancement never triggered unless
           // the player manually hit "Accept" in the journal. acceptQuest()
           // self-guards against re-accepting an active/completed quest.
-          if (typeof acceptQuest === 'function') acceptQuest('q_inner_dim_trial');
+          if (typeof acceptQuest === 'function') { game._lxAcceptByTalk = 1; try { acceptQuest('q_inner_dim_trial'); } finally { game._lxAcceptByTalk = 0; } }   // v0.30.1819 release26e: started by this talk
           if (typeof loadMap === 'function') loadMap('innerDimension', 100);
         } });
     }
@@ -121961,7 +122006,7 @@ So… do you need a lift?`;
           // credited the kill and the 1st advancement never triggered unless
           // the player manually hit "Accept" in the journal. acceptQuest()
           // self-guards against re-accepting an active/completed quest.
-          if (typeof acceptQuest === 'function') acceptQuest('q_inner_dim_trial');
+          if (typeof acceptQuest === 'function') { game._lxAcceptByTalk = 1; try { acceptQuest('q_inner_dim_trial'); } finally { game._lxAcceptByTalk = 0; } }   // v0.30.1819 release26e: started by this talk
           if (typeof loadMap === 'function') loadMap('innerDimension', 100);
         } });
     }
@@ -122038,7 +122083,7 @@ So… do you need a lift?`;
           // credited the kill and the 1st advancement never triggered unless
           // the player manually hit "Accept" in the journal. acceptQuest()
           // self-guards against re-accepting an active/completed quest.
-          if (typeof acceptQuest === 'function') acceptQuest('q_inner_dim_trial');
+          if (typeof acceptQuest === 'function') { game._lxAcceptByTalk = 1; try { acceptQuest('q_inner_dim_trial'); } finally { game._lxAcceptByTalk = 0; } }   // v0.30.1819 release26e: started by this talk
           if (typeof loadMap === 'function') loadMap('innerDimension', 100);
         } });
     }
@@ -122125,7 +122170,7 @@ So… do you need a lift?`;
           // credited the kill and the 1st advancement never triggered unless
           // the player manually hit "Accept" in the journal. acceptQuest()
           // self-guards against re-accepting an active/completed quest.
-          if (typeof acceptQuest === 'function') acceptQuest('q_inner_dim_trial');
+          if (typeof acceptQuest === 'function') { game._lxAcceptByTalk = 1; try { acceptQuest('q_inner_dim_trial'); } finally { game._lxAcceptByTalk = 0; } }   // v0.30.1819 release26e: started by this talk
           if (typeof loadMap === 'function') loadMap('innerDimension', 100);
         } });
     }
@@ -122145,7 +122190,7 @@ So… do you need a lift?`;
         cb:() => {
           if (typeof acceptQuest === 'function') acceptQuest('q_distorted_portal');
           closeDialog();
-          if (typeof showToast === 'function') showToast('Hong: "Beyond the tear lies a grove we never planted, and a young smith still sure of himself. Loose one true arrow, then come back."', 'epic');
+          if (typeof showToast === 'function') showToast('Hong: "Beyond the tear lies a grove we never planted, and a young smith still sure of himself. Loose one true arrow, and choose your path where it lands."', 'epic');
         } });
     }
     opts.push({ t:'What guards the grove?', cb:() => { game._lxOrderPage = 'archer'; openNPC(npc); } });   // v0.30.1458 - opens the Grove's page (below)

@@ -65,13 +65,16 @@ try {
     renderQuestTracker(); await W8(80);
     const ntrk = document.getElementById('quest-tracker').textContent.replace(/\s+/g, ' ');
     out.next = { beat: _nextStoryBeat(), errand: QUESTS.q_visit_lavaCavern.name, row: ntrk.slice(ntrk.indexOf('Next:'), ntrk.indexOf('Next:') + 80) };
+    player.quests.completed.q_visit_lavaCavern = true; delete player.quests.active.q_visit_lavaCavern; try { tickQuestUnlocks(); } catch (e) {} renderQuestTracker(); await W8(80);   // release26e: the Forge-Key done
+    { const t2 = document.getElementById('quest-tracker').textContent.replace(/\s+/g, ' '); out.next2 = { beat: _nextStoryBeat(), row: t2.slice(t2.indexOf('Next:'), t2.indexOf('Next:') + 80) }; }
     return out;
   });
   check(r.talk.count === r.talk.list && !/ready/.test(r.talk.why) && /1\/3/.test(r.talk.tracker) && /^📍 Talk to /.test(r.talk.row) && /Talk to .+\(1\/3\)/.test(r.talk.locate), 'TALK: one conversation of three reads 1/3 (not ready), and the row and Locate say Talk to the next person', J(r.talk));
   check(!/Accept from/.test(r.giverless.row) && /Hunt/.test(r.giverless.row) && !r.giverless.locate.includes(r.giverless.target) && !/turn in to/i.test(r.giverless.locate), 'GIVERLESS: a Codex study points at its hunt, and Locate names the creature (not its id) with no turn-in', J(r.giverless));
   check(/(Accept from|From) Taiga/.test(r.mirror.before) && /Warp with Taiga/.test(r.mirror.after) && !/no walking route/.test(r.mirror.after) && r.mirror.trackerHasWarp, 'MIRROR: Accept from Taiga, then Warp with Taiga (row and tracker), never "no walking route"', J(r.mirror));
   check(!/pq_piece/.test(r.spire.tracker) && !/pq_piece/.test(r.spire.locate), 'SPIRE: neither the tracker nor Locate prints the raw id for Ticket Rush Stage 2', J(r.spire));
-  check(r.next.beat === 'q_barnaby_five' && /Next: I . Five Stories About a Smith/.test(r.next.row) && /Lv 45/.test(r.next.row) && !r.next.row.includes(r.next.errand), 'NEXT: with the portal done below Lv 45, the tracker names Barnaby I (the Smith waits on Barnaby IV) and its level (no errand in the way)', J(r.next));
+  check(r.next.beat === 'q_barnaby_five' && r.next.row.includes('Next: ' + r.next.errand) && /see Brok/.test(r.next.row) && !/Lv 45/.test(r.next.row), 'NEXT: with the portal done below Lv 45 and Brok\'s Forge-Key (critical, Lv 35) not done, the tracker names the Forge-Key (see Brok), not Barnaby I\'s Lv 45 (release26e)', J(r.next));
+  check(r.next2 && r.next2.beat === 'q_barnaby_five' && /Next: I . Five Stories About a Smith/.test(r.next2.row) && /Lv 45/.test(r.next2.row), 'NEXT: ...with the Forge-Key done, it names Barnaby I (the Smith waits on Barnaby IV) and its level', J(r.next2));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 2)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 200)); }
 await ctx.close(); await browser.close(); server.kill();

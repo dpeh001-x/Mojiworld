@@ -134,6 +134,7 @@ try {
   await until(A, (u) => ({ ok: u.every((x) => game.monsters.some((q) => q && q.uid === x)), v: 0 }), [Z, SM], 8000);
   await ev(A, (zs) => { if (game.bestiary) delete game.bestiary['_boss_zodiac_' + zs]; if (game.achievements) delete game.achievements.zodiac1; for (const z of ZODIAC_SIGNS) if (game.bestiary) delete game.bestiary['_boss_zodiac_' + z.id];
     const o = window._coopApplyKill; window._coopApplyKill = function (msg) { const r = o.apply(this, arguments); window.__rec.push(['ach', !!(game.achievements && game.achievements.zodiac1), Date.now()]); return r; }; }, zs);
+  await ev(A, () => { _ensureQuests(); player.quests.active.q_boss_sundered_smith = { progress: 0 }; });   // release26e: Ann holds The Forge That Broke (the ashes play on its kill)
   const t3 = await now(A);
   await ev(B, ({ Z, SM }) => { const byUid = (u) => game.monsters.find((q) => q && q.uid === u); const z = byUid(Z); z.currentHp = 0; killMonster(z); const sm = byUid(SM); sm.currentHp = 0; killMonster(sm); if (sm.currentHp > 0) { sm.currentHp = 0; killMonster(sm); } }, { Z, SM });
   const zr = await until(A, ({ t, zs }) => { const R = window.__rec.filter((r) => r[2] >= t); const v = { toast: R.some((r) => r[0] === 'toast' && /BADGE EARNED/.test(r[1])), beats: R.filter((r) => r[0] === 'beat').map((r) => r[1]), ach: R.filter((r) => r[0] === 'ach').map((r) => r[1]), films: R.filter((r) => r[0] === 'film').map((r) => r[1]) };
