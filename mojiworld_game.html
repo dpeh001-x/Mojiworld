@@ -16382,7 +16382,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1801';
+const GAME_VERSION = 'v0.30.1802';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -19083,6 +19083,18 @@ function _summonAnimFrame(key, state, epochMs) {   // v0.30.1674 summon-plant: e
 // within the bottom 30% of the body; tips within that span are one foot). gap = (lowest row - the second tip's row) / H: how far the
 // higher near foot sits above the lower one, as a fraction of the frame. Scanned once per image (the still, each walk / attack frame).
 const _LX_SUMMON_FOOT_CAP = 16;   // px: the most the lower foot sinks for the higher one - a safety only: lifted legs and slashes sit above the 8% band (v0.30.1683: 8 stopped the 386 px werewolf 5 px short of its hind paw)
+// summon-table - the summon art's measures from the generator (data/sprite_bbox.js, LX_SUMMON_BOX: "top,bottom,W,H,cb,gap" in the original art's pixels), read when the pixel readback
+// throws (a CDN image, or a file:// build: a tainted canvas). Null when the image has no row (a baked canvas carries _lxSrc, so its original's key is found).
+// A sprite with no summon row but a row in the older LX_SPRITE_BBOX (monsters, bosses, objects, NPCs: top,bottom,W,H) answers with that - top / bottom only - so a padded monster attack frame
+// (pathsBane, the Forgewight, ...) is still planted by its own feet when the readback is blocked, not left floating on its padding.
+function _lxSummonRow(img) {
+  const k = (img && typeof _lxSpriteKeyOf === 'function') ? _lxSpriteKeyOf(img) : ''; if (!k || typeof window === 'undefined') return null;
+  const T = window.LX_SUMMON_BOX, r = T && T[k];
+  if (r) { const a = String(r).split(',').map(Number); return (a[3] > 0 && a[1] >= a[0]) ? { top: a[0], bottom: a[1], W: a[2], H: a[3], cb: a[4], gap: a[5] } : null; }
+  const B = window.LX_SPRITE_BBOX, q = B && B[k];
+  if (q) { const a = String(q).split(',').map(Number); return (a[3] > 0 && a[1] >= a[0]) ? { top: a[0], bottom: a[1], W: a[2], H: a[3], cb: -1, gap: 0 } : null; }
+  return null;
+}
 const _summonFeet = new WeakMap();
 function _summonFeetFrac(img) {
   if (!img || !(img.naturalWidth || img.width)) return { gap: 0 };
@@ -19113,7 +19125,7 @@ function _summonFeetFrac(img) {
       const _near = tips.filter((t) => (bottom - t.low) <= H * 0.04);
       if (_near.length >= 2) out = { gap: Math.max(0, (bottom - _near[_near.length - 1].low) / H) };
     }
-  } catch (_) {}
+  } catch (_) { const _r = _lxSummonRow(img); if (_r) out = { gap: Math.max(0, _r.gap) / _r.H }; }   // summon-table - readback blocked
   _summonFeet.set(img, out);
   return out;
 }
@@ -19132,7 +19144,7 @@ function _summonContentBottomFrac(img) {
     let b = -1;
     for (let y = H - 1; y >= 0 && b < 0; y--) for (let x = 0; x < W; x++) { if (d[(y * W + x) * 4 + 3] > 40) { b = y; break; } }
     if (b >= 0) frac = (b + 1) / H;
-  } catch (_) {}
+  } catch (_) { const _r = _lxSummonRow(img); if (_r && _r.cb >= 0) frac = (_r.cb + 1) / _r.H; }   // summon-table - readback blocked: the frame's bottom padding is not the feet
   _summonCBot.set(img, frac);
   return frac;
 }
@@ -159512,6 +159524,7 @@ function _spriteContentBox(img) {
                              : { top: Math.round(top * _s.scale), bottom: Math.round(bottom * _s.scale) };
     }
   } catch (_) { res = null; }
+  if (!res) { const _r = _lxSummonRow(img); if (_r) { const _f = _s.scale * (_s.H / _r.H); res = (_f === 1) ? { top: _r.top, bottom: _r.bottom } : { top: Math.round(_r.top * _f), bottom: Math.round(_r.bottom * _f) }; } }   // summon-table - readback blocked (the table is in the original art's pixels; a capped scan or a baked raster scales it)
   img._lxCBox = res;                          // cache (incl. null) so we scan once
   return res;
 }
@@ -159726,6 +159739,7 @@ const _ZODIAC_SPRITE_FX = {
   sagittarius: { flipX: true },
   capricorn:   { flipX: true, sizeMul: 1.30 },
 };
+_ZODIAC_SPRITE_FX.aquarius = { dyPx: 48 };   // aquarius-feet - see the note above
 // v0.26.x — Per-type (non-zodiac) boss vertical push-down, in px. Same role
 // as _ZODIAC_SPRITE_FX.dyPx but keyed by m.type for bosses without a zodiac
 // sign. Applied AFTER the floor clamp in _drawBossSprite so it isn't undone.
