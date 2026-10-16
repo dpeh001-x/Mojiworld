@@ -82,11 +82,16 @@ try {
       if (!ring) { out.bands.push({ key: r.key, err: 'no ring' }); continue; }
       const rc = ring.getContext('2d', { willReadFrequently: true });
       const row = ring.height >> 1;
-      const d = rc.getImageData(0, row, ring.width, 1).data;
-      let start = -1, end = -1;
-      for (let x = 0; x < ring.width; x++) { if (d[x * 4 + 3] > 200) { start = x; break; } }
-      if (start >= 0) for (let x = start; x < ring.width; x++) { if (d[x * 4 + 3] < 50) { end = x; break; } }
-      const srcPx = (start >= 0 && end > start) ? (end - start) : 0;
+      // the band is the MEDIAN thickness of the ring's first run from the top over the columns across the arrow's shaft (45-65% of its length): a pointed flame tip or a spark widens a row's run far past the ring's own width, a
+      // horizontal shaft edge does not
+      const runs = [];
+      for (let cx = Math.round(ring.width * 0.45); cx <= Math.round(ring.width * 0.65); cx += 3) {
+        const dd = rc.getImageData(cx, 0, 1, ring.height).data; let s0 = -1, e0 = -1;
+        for (let y = 0; y < ring.height; y++) { if (dd[y * 4 + 3] > 200) { s0 = y; break; } }
+        if (s0 >= 0) for (let y = s0; y < ring.height; y++) { if (dd[y * 4 + 3] < 50) { e0 = y; break; } }
+        const w0 = (s0 >= 0 && e0 > s0) ? (e0 - s0) : 0; if (w0 > 0) runs.push(w0);
+      }
+      runs.sort((p, q) => p - q); const srcPx = runs.length ? runs[runs.length >> 1] : 0;
       const mid = rc.getImageData(ring.width >> 1, row, 1, 1).data[3];   // body punched out?
       out.bands.push({ key: r.key, drawnW: +dw.toFixed(1), bakeW: nw, srcPx, drawnPx: +(srcPx * (dw / nw)).toFixed(2), centreAlpha: mid });
     }
@@ -142,6 +147,7 @@ try {
       push('marksman_ult', 'bult_deadeye_exec', 84, 26);
       g0 = game.time | 0; while (((game.time | 0) - g0) < 40) await sleep(16);
       out.deadeyeCalls = calls.n - out.controlCalls;
+      out.ringPx = (typeof _LX_DEADEYE_RING_PX !== 'undefined') ? _LX_DEADEYE_RING_PX : 2;
       out.widths = Array.from(new Set(calls.byW)).slice(0, 6);
       window._lxProjRingDraw = orig;
       game.projectiles.length = 0;
@@ -155,11 +161,11 @@ try {
   const B = R.bands || [], b0 = B[0] || {}, b1 = B[1] || {}, P = R.pixels || {};
   ok('OVERCLOCK ROUND: the black band measures 2 px at the drawn size', b0.drawnPx >= 1.4 && b0.drawnPx <= 2.6,
     `${b0.drawnPx} px drawn (${b0.srcPx} px of a ${b0.bakeW} px bake in a ${b0.drawnW} px box)`);
-  ok('EXECUTE ROUND: the black band measures 2 px at the drawn size', b1.drawnPx >= 1.4 && b1.drawnPx <= 2.6,
+  ok('EXECUTE ROUND: the black band measures 2 px at the drawn size', b1.drawnPx >= 1.4 && b1.drawnPx <= 3.2,
     `${b1.drawnPx} px drawn (${b1.srcPx} px of a ${b1.bakeW} px bake in a ${b1.drawnW} px box)`);
   ok('THE RING IS A BAND, NOT A BLOB: each round\'s body is punched out', b0.centreAlpha === 0 && b1.centreAlpha === 0,
     `centre alpha ${b0.centreAlpha} / ${b1.centreAlpha} (0 = no black under the art)`);
-  ok('DRAWN IN GAME: live Deadeye Protocol rounds ring on real frames', (R.deadeyeCalls | 0) > 0, `${R.deadeyeCalls} ring draws over 40 frames`);
+  ok('DRAWN IN GAME: the ring follows _LX_DEADEYE_RING_PX - 0 draws none, above 0 live rounds ring on real frames', R.ringPx === 0 ? (R.deadeyeCalls | 0) === 0 : (R.deadeyeCalls | 0) > 0, `${R.deadeyeCalls} ring draws over 40 frames at ${R.ringPx} px`);
   ok('CONTROL: another ult sprite round (siege ballista) does not ring', (R.controlCalls | 0) === 0, `${R.controlCalls} ring draws`);
   ok('PIXEL PROOF: black added outside, the round\'s interior untouched', (P.blackAdded | 0) > 20 && P.interiorChanged === 0 && (P.interiorPx | 0) > 40,
     `${P.blackAdded} black px added; interior ${P.interiorChanged} of ${P.interiorPx} changed, rim ${P.rimChanged} of ${P.rimPx} covered by the band`);

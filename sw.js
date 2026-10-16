@@ -316,7 +316,9 @@
 // their own names (the art a straight line had cut off, repaired), so a returning install would keep drawing the old frames for a session.
 // arbiter-regen - v171 -> v172. 45 Tower Arbiter frames (idle, walk, swing, pillar, verdict) are REPLACED under
 // their own names (regenerated without slices), so a returning install would keep drawing the old frames for a session.
-const CACHE = 'mojiworld-assets-v172';   // arbiter-regen: the Arbiter's frames regenerated under their own names. v171 was: boss-frame-repair: sliced boss frames repaired under their own names. v170 was: v0.30.1774 - Sundered Smith walk redrawn (same names)
+// v0.30.1798 - v172 -> v173. Deadeye Protocol's two rounds (p_ult_marksman.webp, p_deadeye_execute.webp) are REPLACED under
+// their own names (bullets become missile-arrows), so a returning browser would keep drawing the old art for a session.
+const CACHE = 'mojiworld-assets-v173';   // v0.30.1798 - Deadeye Protocol rounds redrawn as missile-arrows (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
