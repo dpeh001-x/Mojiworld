@@ -45,6 +45,7 @@ const enter = (page, k) => page.evaluate(async (k) => {
   for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
   try { _lxBootHold.release('menu'); } catch (e) {}
   if (k.cls) { try { applyClass(k.cls); } catch (e) {} player.cls = k.cls; }
+  window._lxAwaitingCreation = false; window._lxInWorld = true;   // as the class card does: the hero exists and is in the world, so saving may begin
   if (k.lv) devSetLevel(k.lv); if (k.job) { try { applyJob(k.job); } catch (e) {} } if (k.master) { try { applyMaster(k.master); } catch (e) {} }
   player._storyBeatsSeen = player._storyBeatsSeen || {}; for (const b in STORY_BEATS) player._storyBeatsSeen[b] = true;
   player._tutorialSeen = true; player._gravitosCineSeen = true; player._god = true;
@@ -134,10 +135,18 @@ try {
     const L0 = await live(page);
     await page.evaluate(() => { const el = document.getElementById('save-import-file'); el.style.display = 'block'; });
     await page.setInputFiles('#save-import-file', { name: 'mojiworld-secure-lv30.mojisave', mimeType: 'application/json', buffer: fileBuf });
+    const shown = () => page.evaluate(() => { const m = document.getElementById('confirm-modal'); return !!m && getComputedStyle(m).display !== 'none'; }).catch(() => false);
+    await page.waitForFunction(() => { const m = document.getElementById('confirm-modal'); return !!m && getComputedStyle(m).display !== 'none'; }, null, { timeout: 20000 });
     const cbody = await page.evaluate(() => { const b = document.getElementById('confirm-body'); return b ? b.textContent.slice(0, 160) : null; });
-    const nav = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
     console.log('  import confirm:', cbody);
-    await page.click('#confirm-yes', { timeout: 15000 }); await nav.catch((e) => console.log('  (no reload after the import: ' + String(e.message).slice(0, 60) + ')'));
+    let navd = false; const nav = page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).then(() => { navd = true; });
+    await page.waitForTimeout(700);   // uiConfirm ignores a Yes within 400 ms of opening (v0.30.1742 double-click guard)
+    for (let i = 0; i < 3 && !navd; i++) {
+      if (i && !(await shown())) break;   // the dialog closed: the import is reloading
+      await page.click('#confirm-yes', { timeout: 15000 }).catch(() => {});
+      for (let w = 0; w < 24 && !navd; w++) await page.waitForTimeout(250);
+    }
+    await nav.catch((e) => console.log('  (no reload after the import: ' + String(e.message).slice(0, 60) + ')'));
     await menu(page); await page.waitForTimeout(1200);
     const L3 = await live(page); console.log('  after the import', JSON.stringify(L3));
     let L3b = null;
