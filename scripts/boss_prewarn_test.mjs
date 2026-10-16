@@ -100,10 +100,12 @@ try {
   });
   const E = (s) => p.evaluate(s);
   const seen = [];   // every zone-pass draw of the six
+  // v0.30.1800 the key's FILE: Aetherion's two warnings were redrawn under new names (per user: "fits aetherion better"); the rest keep key = file
+  const ART = (key) => ({ tgsw_aetherion: 'tgsw_aetherion_talons', tgsw_aetherion2: 'tgsw_aetherion2_horns' })[key] || key;
   const boss = async (what, key, r) => {
     seen.push(...r.art.map((a) => a.src));
-    const over = r.zone && r.art.find((a) => a.src.endsWith('/' + key + '.webp') && Math.abs(a.x0 - r.zone.x0) <= 3 && Math.abs(a.x1 - r.zone.x1) <= 3 && Math.abs(a.y0 - r.zone.y0) <= 3 && Math.abs(a.y1 - r.zone.y1) <= 3);
-    const ok = !!r.zone && r.zone.pw === key && r.art.length > 0 && r.art.every((a) => a.src.endsWith('/' + key + '.webp')) && !!over && over.flip === (r.zone.dir === 'left');
+    const over = r.zone && r.art.find((a) => a.src.endsWith('/' + ART(key) + '.webp') && Math.abs(a.x0 - r.zone.x0) <= 3 && Math.abs(a.x1 - r.zone.x1) <= 3 && Math.abs(a.y0 - r.zone.y0) <= 3 && Math.abs(a.y1 - r.zone.y1) <= 3);
+    const ok = !!r.zone && r.zone.pw === key && r.art.length > 0 && r.art.every((a) => a.src.endsWith('/' + ART(key) + '.webp')) && !!over && over.flip === (r.zone.dir === 'left');
     check(ok, `${what}: the windup draws ${key} over the swing zone${r.zone && r.zone.dir === 'left' ? ' (mirrored, a left swing)' : ''}, and no tg_swing / swing ghost`,
       { pw: r.zone && r.zone.pw, zone: r.zone, art: r.art.slice(0, 3) });
   };
@@ -114,7 +116,7 @@ try {
   const a1 = await E(() => __measure(0.6));
   await boss('Aetherion, form 1', 'tgsw_aetherion', a1);
   const a9 = await E(() => __measure(0.1));
-  const al = (r) => { const w = r.art.filter((a) => a.src.endsWith('/tgsw_aetherion.webp')); return w.length ? w[w.length - 1].alpha : null; };   // the warning's own alpha
+  const al = (r) => { const w = r.art.filter((a) => a.src.endsWith('/' + ART('tgsw_aetherion') + '.webp')); return w.length ? w[w.length - 1].alpha : null; };   // the warning's own alpha
   check(a1.prog != null && a9.prog != null && Math.abs(al(a1) - (0.30 + 0.55 * a1.prog)) <= 0.02 && a9.prog > 0.82 && al(a9) === 0.97 && al(a9) > al(a1),
     'the warning charges like the arc it replaces: 30% + 55% x prog through the windup, 97% for the last beats', { prog: [a1.prog, a9.prog], alpha: [al(a1), al(a9)] });
   await E(() => { __hold.m._phaseSprite = 'aetherion2'; });
