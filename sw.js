@@ -320,7 +320,9 @@
 // their own names (bullets become missile-arrows), so a returning browser would keep drawing the old art for a session.
 // v0.30.1815 - v173 -> v174. the Tower Arbiter's idle, walk, attack, dash, column and verdict frames are REPLACED under
 // their own names (re-sharpened), so a returning browser would keep drawing the old art for a session.
-const CACHE = 'mojiworld-assets-v174';   // v0.30.1815 - Tower Arbiter frames re-sharpened (same names)
+// boss-feet-calib - v174 -> v175. 119 Gravitos frames are REPLACED under their own names (re-baked onto
+// his idle's feet and size), so a returning install would keep drawing the old frames for a session.
+const CACHE = 'mojiworld-assets-v175';   // boss-feet-calib: Gravitos frames re-baked under their own names. v174 was: v0.30.1815 - Tower Arbiter frames re-sharpened (same names)
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

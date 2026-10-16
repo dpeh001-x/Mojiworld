@@ -423,17 +423,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1.04,
       "dx": 0,
-      "dy": 0.0216
+      "dy": 0.0297
     },
     "walk": {
       "s": 1.04,
       "dx": 0,
-      "dy": 0.0216
+      "dy": 0.0297
     },
     "attack": {
       "s": 1.04,
       "dx": 0,
-      "dy": 0.0216,
+      "dy": 0.0297,
       "ft": [
         72,
         60,
@@ -452,17 +452,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1.04,
       "dx": 0,
-      "dy": 0.0216
+      "dy": 0.0297
     },
     "walk": {
       "s": 1.04,
       "dx": 0,
-      "dy": 0.0216
+      "dy": 0.0297
     },
     "attack": {
       "s": 0.965,
-      "dx": 0,
-      "dy": 0.1144,
+      "dx": 0.0469,
+      "dy": 0.1225,
       "ft": [
         110,
         110,
@@ -537,17 +537,17 @@ window.LX_ANIM_CALIB = {
     "idle": {
       "s": 1,
       "dx": 0,
-      "dy": 0.007
+      "dy": 0.0137
     },
     "walk": {
       "s": 1,
       "dx": 0,
-      "dy": 0.007
+      "dy": 0.0137
     },
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.007,
+      "dy": 0.0137,
       "ft": [
         72,
         60,
@@ -702,12 +702,12 @@ window.LX_ANIM_CALIB = {
     },
     "walk": {
       "s": 0.5512,
-      "dx": -0.0331,
+      "dx": -0.0365,
       "dy": 0.0103
     },
     "attack": {
       "s": 0.7086,
-      "dx": -0.0445,
+      "dx": -0.0429,
       "dy": 0.0085,
       "ft": [
         72,
@@ -766,7 +766,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.007,
+      "dy": 0.0137,
       "ft": [
         76,
         66,
@@ -1054,7 +1054,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.04,
       "dx": 0,
-      "dy": 0.0216,
+      "dy": 0.0297,
       "ft": [
         72,
         60,
@@ -1072,7 +1072,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.04,
       "dx": 0,
-      "dy": 0.0216,
+      "dy": 0.0297,
       "ft": [
         72,
         60,
@@ -1091,7 +1091,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1.04,
       "dx": 0,
-      "dy": 0.0216,
+      "dy": 0.0297,
       "ft": [
         80,
         72,
@@ -1127,7 +1127,7 @@ window.LX_ANIM_CALIB = {
   "towerSovereigncolumn": {
     "attack": {
       "s": 0.9135,
-      "dx": -0.0772,
+      "dx": -0.0585,
       "dy": 0.0202,
       "ft": [
         72,
@@ -1146,7 +1146,7 @@ window.LX_ANIM_CALIB = {
   "towerSovereigncollapse": {
     "attack": {
       "s": 0.5909,
-      "dx": -0.0297,
+      "dx": -0.0253,
       "dy": 0.0105,
       "ft": [
         72,
@@ -1184,7 +1184,7 @@ window.LX_ANIM_CALIB = {
   "towerSovereigndrain": {
     "attack": {
       "s": 0.9508,
-      "dx": -0.0599,
+      "dx": -0.0594,
       "dy": 0.0611,
       "ft": [
         72,
@@ -1450,7 +1450,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.007,
+      "dy": 0.0137,
       "ft": [
         110,
         110,
@@ -1468,7 +1468,7 @@ window.LX_ANIM_CALIB = {
     "attack": {
       "s": 1,
       "dx": 0,
-      "dy": 0.007,
+      "dy": 0.0137,
       "ft": [
         110,
         110,
@@ -3463,7 +3463,7 @@ window.LX_ANIM_CALIB = {
   "towerSovereigndash": {
     "attack": {
       "s": 0.5918,
-      "dx": -0.023,
+      "dx": -0.0265,
       "dy": 0.0102,
       "ft": [
         90,
