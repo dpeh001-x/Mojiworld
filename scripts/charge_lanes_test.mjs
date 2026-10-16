@@ -2,7 +2,7 @@
 // hourglass lunge still ran under the shared red chevrons). Each charging boss is spawned on a sturdy hero (a big HP bar, so the old
 // "only when devastating" gate would have hidden the lane), its charge is put into its brace, and the drawn lane must be its own nine-frame
 // art: the Master Conductor, the Arbiter, the Woman Who Turned Back and the Sovereign of the Spire (hourglass lunge), Legosaurus and
-// Taur (brace-dash), King Krook (the Royal March). Every lane file is served (no 404).
+// Taur (brace-dash) (King Krook's Royal March and its lane were removed, per user). Every lane file is served (no 404).
 //   node scripts/charge_lanes_test.mjs [port]
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -23,7 +23,6 @@ const CASES = {   // type -> [how the brace is forced, the lane key it must draw
   towerSovereign: ["m._hgCharging = true; m._hgPhase = 'brace'; m._hgT = 500; m._hgDir = 1;", 'tg_dash_towerSovereign'],
   legosaurus:     ["m._braceDashing = true; m._bdPhase = 'brace'; m._bdT = 300; m._bdDir = 1; m._bdCrush = false;", 'tg_dash_legosaurus'],
   zodiac_taurus:  ["m._braceDashing = true; m._bdPhase = 'brace'; m._bdT = 300; m._bdDir = 1;", 'tg_dash_zodiac_taurus'],
-  kingKrook:      ["m.patternState = 'shellSpin'; m.patternTimer = 300; m._kAnnounced = true; m._shellDir = 0; m._kChargeDir = 1;", 'tg_dash_kingKrook'],
 };
 try {
   const page = await browser.newPage();

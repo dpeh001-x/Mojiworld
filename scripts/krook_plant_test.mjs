@@ -17,7 +17,7 @@ const env = { ...process.env }; delete env.MOJI_GAME_FILE;
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT, env });
 await new Promise((r) => setTimeout(r, 1500));
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--mute-audio'] });
-const NAMES = ['claw', 'jumpSlam', 'shellSpin', 'firebomb', 'stomp', 'megaFireball', 'fireBreath', 'fireballRain', 'earthquake'];
+const NAMES = ['claw', 'jumpSlam', 'firebomb', 'stomp', 'megaFireball', 'fireBreath', 'fireballRain', 'earthquake'];
 let R = null; const errs = [];
 try {
   const ctx = await browser.newContext({ viewport: { width: 960, height: 560 }, serviceWorkers: 'block' });
@@ -44,7 +44,7 @@ try {
       player.x = Math.max(10, m.x - 420);   // off to his left, out of every melee brush
       for (const id of ['story-beat-overlay', 'boss-intro-overlay', 'dialog']) { const el = document.getElementById(id); if (el && el.style.display !== 'none') el.style.display = 'none'; } };
     window.__setup = { claw: "m.patternState='claw'; m.patternTimer=0; m._kFired=false;", jumpSlam: "m.patternState='jumpSlam'; m.patternTimer=0; m._kJumped=false; m._kJumpAir=false; m._kFired=false;",
-      shellSpin: "m.patternState='shellSpin'; m.patternTimer=0; m._kAnnounced=false; m._shellDir=0; m._shellPasses=0;", firebomb: "m.patternState='firebomb'; m.patternTimer=0; m._kFired=false;",
+      firebomb: "m.patternState='firebomb'; m.patternTimer=0; m._kFired=false;",
       stomp: "m.patternState='stomp'; m.patternTimer=0; m._kFired=false; m._kAnnounced=false;", megaFireball: "m.patternState='megaFireball'; m.patternTimer=0; m._kFired=false; m._megaAnnounced=false;",
       fireBreath: "m.patternState='fireBreath'; m.patternTimer=0; m._fireAnnounced=false;", fireballRain: "m.patternState='fireballRain'; m.patternTimer=0; m._kFired=false;", earthquake: "m.patternState='earthquake'; m.patternTimer=0; m._kFired=false; m._kAnnounced=false;" };
     window.__go = (name) => { const m = window.__m; eval(window.__setup[name]); };
@@ -100,17 +100,11 @@ check(r.claw.maxXdev < 0.6 && r.claw.by.walk === undefined, 'claw: he swipes fro
 check(r.jumpSlam.maxXdev < 0.6 && r.jumpSlam.by.walk === undefined, 'jump slam: straight up and down on the spot, attack art the whole way (was an 80-167 px glide on walk frames)', r.jumpSlam);
 check(r.jumpSlam.rose >= 100 && r.jumpSlam.waves === 2, 'jump slam: he still leaves the floor (>= 100 px) and lands two shockwaves', { rose: r.jumpSlam.rose, waves: r.jumpSlam.waves });
 check(r.claw.clawGap != null && r.claw.clawGap >= 25 && r.claw.clawGap < 36, 'claw: the swipe box starts 26 px further out (it has flown 0-4 px by the first look) - the reach the step-in used to give it', { gap: r.claw.clawGap });
-check(r.shellSpin.chargeMoved >= 20 && r.shellSpin.chargeNonWalk === 0, 'shell spin: the charge moves him and every frame of it is his WALK art, strictly', { moved: r.shellSpin.chargeMoved, nonWalk: r.shellSpin.chargeNonWalk });
-check(r.shellSpin.by.attack && r.shellSpin.by.attack.n >= 10 && r.shellSpin.by.attack.px === 0, 'shell spin: the 700 ms wind-up is attack art, rooted', r.shellSpin.by);
-check(r.shellSpin.chargeVx >= 3.5 && r.shellSpin.chargeVx <= 4.01 && r.shellSpin.marchN >= 20, 'the Royal March walks at 4 px a step (vx is read after the drag of each step) and crosses the arena (it slid at 13 px, twice)', { vx: r.shellSpin.chargeVx, steps: r.shellSpin.marchN });
-check(r.shellSpin.laneWind >= 6 && r.shellSpin.laneMarch === r.shellSpin.marchN && r.shellSpin.laneBadDir === 0 && r.shellSpin.laneTg === 'tg_dash_kingKrook', 'the Royal March is marked: his own lane through the whole wind-up and march, pointing the way he goes (per user: "a sign / warning for the royal charge")', { wind: r.shellSpin.laneWind, march: r.shellSpin.laneMarch, of: r.shellSpin.marchN, badDir: r.shellSpin.laneBadDir, tg: r.shellSpin.laneTg });
 const u = R.unit;
 check(!u.missing, 'the build paces his walk by distance (_krookWalkPos)', u);
 if (!u.missing) {
 check(Math.abs(u.a - u.b) < 0.05 && Math.abs(u.b - u.c) < 0.05 && (u.a < 0.2 || u.a > 8.8), 'walk cadence follows distance: 54 px is one full cycle at 1, 2 and 1.5 px a step', { a: u.a, b: u.b, c: u.c });
 check(Math.abs(u.h1 - u.h2) < 0.1 && Math.abs(u.h1 - u.h3) < 0.1 && u.h1 > 3 && u.h1 < 6, '...and 27 px is the same half-cycle frame at 1, 2 and 0.5 px a step (the wall-clock walk differed by whole frames)', { h1: u.h1, h2: u.h2, h3: u.h3 });
-// v0.30.1771 krook-march (per user: "starts sliding through the map ... make him walk normally"): the Royal March is a walk his legs carry
-check(u.marchVx === 4 && Math.abs(u.march - u.slow) < 0.05, 'the Royal March (4 px a step) cycles his legs at its own pace: 36 px marched lands on the frame 36 px walked does (the 13 px charge skated over a 2.4 px cadence)', { march: u.march, slow: u.slow, vx: u.marchVx });
 check(u.afterPause === 0 || u.afterPause < 0.01, 'a walk begun after a pause starts on its first frame', { afterPause: u.afterPause });
 check(u.frameMatches === true && u.ready === u.n, 'the frame _bossWalkFrame draws is the one that position names', { match: u.frameMatches, ready: u.ready, n: u.n });
 }
