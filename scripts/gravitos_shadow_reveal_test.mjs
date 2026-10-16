@@ -62,8 +62,9 @@ const live = await page.evaluate(() => new Promise((resolve) => {
     if (vid && !vid.paused && vid.currentTime > 0.05) {
       clearInterval(poll);
       out.played = true;
-      const sk = ov.querySelector('#grav-shd-skip'); if (sk) sk.click();
-      setTimeout(() => { out.overlayGone = !document.getElementById('gravitos-shadow-cine'); resolve(out); }, 300);
+      // release26b: a film reached from a boss kill ignores input for its first 1.2 s (its Skip button shows after that)
+      setTimeout(() => { const sk = ov.querySelector('#grav-shd-skip'); if (sk) sk.click(); }, 1300);
+      setTimeout(() => { out.overlayGone = !document.getElementById('gravitos-shadow-cine'); resolve(out); }, 1600);
     }
   }, 100);
   setTimeout(() => { clearInterval(poll); out.played = out.played || false; resolve(out); }, 15000);

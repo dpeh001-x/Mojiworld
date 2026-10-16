@@ -16397,7 +16397,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1817';
+const GAME_VERSION = 'v0.30.1818';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -22448,7 +22448,7 @@ function _qnavWhy(id) {
     const pr = a.progress | 0;
     if (tot > 0 && pr >= tot) return ' — ready to turn in';
     if (pr > 0) return ' — ' + pr + '/' + tot;
-    return ' — not started';
+    return ' — ' + pr + '/' + tot;   // v0.30.1818 release26b: an accepted quest with nothing done yet (it said "not started")
   } catch (_e) { return ''; }
 }
 // v0.30.1746 release16 - a critical quest or a story-chain chapter (the Journal's Next line)
@@ -67068,6 +67068,9 @@ function _qtDirGlyph(x) {
   return dx > 0 ? '▶' : '◀';
 }
 // Guidance for one active quest → { icon, text, done? } or null.
+// v0.30.1818 release26b - is this field map at its monster cap? The respawn drip adds one only when a monster falls and skips a full map
+// (the same test as the drip: regular monsters against _lxFieldCap), so a target with none up waits on the player clearing others.
+function _lxQtMapFull() { try { const M = MAPS[game.currentMap]; if (!M || M.isTown || M.isBossArena || M._expeditionMap || typeof _lxFieldCap !== 'function') return false; return (game.monsters || []).filter((x) => x && !x.isBoss && !x.isMiniBoss).length >= _lxFieldCap(M); } catch (e) { return false; } }
 function _questGuidance(id, q, a) {
   if (!_qtMobMap) _qtBuildWorldIndex();
   // 1. Objectives met — walk back to the giver (live pointer if they're here).
@@ -67100,12 +67103,19 @@ function _questGuidance(id, q, a) {
       if (best) return { icon: _qtDirGlyph(best.x), text: _what + ' \u00b7 ' + (nHere > 1 ? nHere + ' nearby' : 'nearby') };
       const _via = _lxWarpVia(q);   // v0.30.1119 the Mirror's room has no door: see your instructor
       if (_via) return { icon: '\u2192', text: 'Warp with ' + _via };
+      // v0.30.1818 release26b: the map the quest navigator picks (nearest by route), which the Journal and the compass name; this read the index's
+      // FIRST map, so the three named different places for one kill quest. On a map that has them, no other map is named.
+      let _ndHere = false;
+      { let _nd = null; try { _nd = (typeof _qnavDest === 'function') ? _qnavDest(id) : null; } catch (e) {}
+        if (_nd && _nd.kind === 'hunt' && _nd.map && wanted.has(_nd.who)) { if (_nd.map !== game.currentMap) return { icon: '→', text: _what + ' · ' + _qtMapName(_nd.map) }; _ndHere = true; } }
       for (const t of wanted) {
-        const mid = _qtMobMap[t];
+        const mid = _ndHere ? null : _qtMobMap[t];
         if (mid && mid !== game.currentMap) return { icon: '→', text: _what + ' \u00b7 ' + _qtMapName(mid) };
       }
       // none up on a map that does spawn them: say so, instead of a blank line (clearing the map brings the next ones in)
       // v0.30.1739 release13: ...or the navigator's index puts them here (an arena boss, Elder Arlen's clock)
+      // v0.30.1818 release26b: none up and the map is full - a new one comes only when another monster falls
+      if (_lxQtMapFull() && [...wanted].some((t) => ((MAPS[game.currentMap] && MAPS[game.currentMap].spawns) || []).some((sp) => sp && sp.type === t))) return { icon: '📍', text: _what + ' · clear the map to bring more' };
       if ([...wanted].some((t) => ((MAPS[game.currentMap] && MAPS[game.currentMap].spawns) || []).some((sp) => sp && sp.type === t) || (typeof _LX_QNAV !== 'undefined' && _LX_QNAV.mob && (_LX_QNAV.mob[t] || []).indexOf(game.currentMap) >= 0))) return { icon: '\ud83d\udccd', text: _what + ' \u00b7 none up, more soon' };   // (the tracker line is one row, ellipsized: short enough for a phone)
     }
     return null;
@@ -67414,7 +67424,7 @@ function renderQuestTracker() {
     return `<div class="qt-row" style="border-left:2px solid #ff9e5e; padding-left:5px;">
       <span class="qt-icon">🌅</span>
       <span class="qt-name" style="color:#ffd0a0;">Next: ${nq.name}</span>
-      <span class="qt-prog" style="color:#c9b8d8;">${_after ? 'after ' + _after : locked ? 'Lv ' + (nq.levelReq || 1) : (_ng && (nq.handIn || nq.giverByClass || nq.giver) ? 'see ' + _ng : 'press ' + _questKeyLabel())}</span>
+      <span class="qt-prog" style="color:#c9b8d8;">${_after ? 'after ' + _after : locked ? 'Lv ' + (nq.levelReq || 1) : (_ng && (nq.handIn || nq.giverByClass || nq.giver) ? 'see ' + _ng : _lxKeyHint('questJournal', 'QUEST'))}</span>
     </div>`;
   })() : '';
   const _freshN = _lxFreshQuestCount();   // v0.30.x ft-quest
@@ -67466,7 +67476,7 @@ function renderQuestTracker() {
       ${guide}
     </div>`;
   }).join('');
-  const _freshChip = _freshN ? `<span class="qt-new">${_freshN} new · ${_questKeyLabel()}</span>` : '';   // v0.30.x ft-quest
+  const _freshChip = _freshN ? `<span class="qt-new">${_freshN} new${(typeof _lxTouchHints === 'function' && _lxTouchHints()) ? '' : ' · ' + _questKeyLabel()}</span>` : '';   // v0.30.x ft-quest
   _lxMorphHtml(el, `<div class="qt-head">📜 Quests${_freshChip}</div>${_nbRow}${rows}`);   // v0.30.1789 kill-lag - was el.innerHTML: same result, but a kill's count change keeps the rows' nodes
   el.classList.add('show');
 }
@@ -73700,7 +73710,7 @@ function _lxTrialTick(f, dt) {
     // v0.30.1753 release19: a dash's distance does not count toward the leash (a rogue's double dash moved 332 px and lost the trial); walking does; 900 px is the outer limit
     { const _d = hx - (T._lhx == null ? hx : T._lhx); T._lhx = hx; if ((player.quickDashTimer | 0) > 0 || (player.dodgeTimer | 0) > 0 || Math.abs(player.vx || 0) > 9 || Math.abs(_d) > 40) T._dashDx = (T._dashDx || 0) + _d; }
     { const _raw = Math.abs(hx - m.x), _walk = Math.abs(hx - (T._dashDx || 0) - m.x); if (Math.min(_raw, _walk) > 320 || _raw > 900) { _lxFightEnd(f, false, 'You stepped away from the mark. Her arrow waits.'); return; } }
-    f.hud = '🎯 ' + 'Press ' + _lxKeyLabel('talkNpc') + ' when the needle is in the gold: ' + A.hits + '/' + (t.need || 3) + (A.miss ? '  🚫 ' + A.miss + '/' + (t.misses || 3) : '');
+    f.hud = '🎯 ' + _lxKeyHint('talkNpc', 'TALK', true) + ' when the needle is in the gold: ' + A.hits + '/' + (t.need || 3) + (A.miss ? '  🚫 ' + A.miss + '/' + (t.misses || 3) : '');
   }
 }
 function _lxAngDiff(a, b) { let d = (a - b) % 6.2832; if (d > 3.1416) d -= 6.2832; if (d < -3.1416) d += 6.2832; return d; }
@@ -89314,6 +89324,7 @@ function triggerDeath() {
       ? 'Everything looted in the tower is removed. Your own gear and your level are safe.'
       : 'You keep your level, your gear and your quests.';
   }
+  { const _dh = ov && ov.querySelector('.death-stage .hint'); if (_dh) _dh.textContent = (typeof _lxTouchHints === 'function' && _lxTouchHints()) ? 'tap the button — or anywhere — to return' : 'click the button — or tap anywhere — to return'; }   // v0.30.1818 release26b: a phone has no mouse
   try {   // v0.30.664 — scatter the ash motes once per death so they never march in step
     const _motes = ov.querySelectorAll('.death-motes i');
     for (let _i = 0; _i < _motes.length; _i++) {
@@ -89798,6 +89809,7 @@ const _LX_DE_WINDOWS = {
 // were judged at the full price, then refunded: a Mirror Shadow BLINK (10 MP) needed the summon's whole cost on hand, and a press
 // inside an open Deadeye / Deadeye Protocol window (free) needed 50 / 65 MP. Both texts had the price right; now the gate does.
 function _lxPressMpCost(id, cost) {
+  if (_lxPlgFightOn()) return 0;   // v0.30.1818 release26b: the memory fight - MP is limitless (per user)
   if (id === 'shadowlord_clones' && player._clones && player._clones.length) return Math.min(cost, LX_MIRROR_BLINK_MP);
   if (id === 'elementalist_ult' && (player._apoCharges | 0) > 0) return 0;   // v0.30.x bughunt diff-c-2 - Apotheosis' follow-up presses are free (castSkill zeroes the price); isReady judged them at the full 80-100 MP and a mage under that could not press catastrophes 2 and 3
   const _dw =(typeof _LX_DE_WINDOWS !== 'undefined') ? _LX_DE_WINDOWS[id] : null;
@@ -120603,7 +120615,7 @@ function tryPortal() {
       // even a slightly-underlevelled entry gets the heads-up. World map (W)
       // still shows the full label.
       if (dest && dest.isBossArena) {
-        const _recLv = Math.max(dest.levelReq || 0, po.levelGate || 0);
+        const _recLv = ((typeof _lxArenaRecLevel === 'function') && _lxArenaRecLevel(dest)) || Math.max(dest.levelReq || 0, po.levelGate || 0);   // v0.30.1818 release26b: the level the door's dialog names (the toast said 10+ beside "Recommended level: 9+")
         if (_recLv && (player.level || 0) < _recLv) {
           game._bossWarned = game._bossWarned || {};
           if (!game._bossWarned[po.dest]) {
@@ -134104,8 +134116,18 @@ function uiConfirm(opts) {
 // falls back to the shipped default, so a rebind shows the player's own key
 // rather than a hardcoded letter. Two toasts previously read player.keybinds,
 // which has never existed, and so always printed the pre-v0.29.387 'E'.
+// v0.30.1818 release26b - the Block step on a phone points at the deck's guard button (it now says BLOCK): the card said "press BLOCK" while the
+// only thing reading "Block" was the skill bar's slot, which ignores taps. Same touch test as _tutTouchify; a pad keeps its L3.
+function _lxBlockAsk() {
+  let touch = false;
+  try { touch = !(typeof _lxPadActive === 'function' && _lxPadActive(30000)) && typeof matchMedia !== 'undefined' && (matchMedia('(pointer: coarse)').matches || matchMedia('(max-width: 900px)').matches); } catch (e) {}
+  if (!touch) return 'Raise your guard — press <kbd>A</kbd>';
+  const port = !!(document.body && document.body.classList.contains('mc-portrait'));
+  return 'Raise your guard — tap the <kbd>🛡 BLOCK</kbd> shield ' + (port ? 'above the pad' : 'at the top left');
+}
 function _questKeyLabel() {
   try {
+    if (typeof _lxTouchHints === 'function' && _lxTouchHints()) return 'QUEST';   // v0.30.1818 release26b: the phone's QUEST button (the new-quest toasts said "· Q")
     return (typeof _lxFnPrompt === 'function') ? _lxFnPrompt('questJournal') : 'Q';   // v0.30.1328 keyboard remap - the live key, or its pad button while a pad is in use
   } catch (e) { return 'Q'; }
 }
@@ -134134,6 +134156,7 @@ const TUTORIAL_STEPS = [
     icon: '🎮',
     title: 'Move & Fight',
     detect: 'attack',
+    fresh: true,   // v0.30.1818 release26b: the prologue fight swung already - only a swing while this card shows ticks it
     get tryIt() { return _lxClsAttackAsk(); },   // v0.30.1753 release19: an archer fires, a mage casts
     gugumaLine: 'Tweet! Mash away — I waited AGES for this!',
     body: () => '<kbd>←</kbd>/<kbd>→</kbd> move, <kbd>Space</kbd> jumps (twice to double-jump), <kbd>Z</kbd> attacks. <kbd>Shift</kbd> dashes you clear and <kbd>A</kbd> blocks — raise it just as a hit lands to parry. Levels unlock <kbd>X</kbd>, <kbd>S</kbd>, <kbd>C</kbd>, <kbd>D</kbd>, <kbd>F</kbd>, <kbd>V</kbd>, <kbd>G</kbd>, then your Lv 50 ultimate on <kbd>B</kbd>. <kbd>K</kbd> rebinds.' + ((typeof player !== 'undefined' && player && player.cls === 'archer') ? '<br><br><b>🏹 Archer tip:</b> hold <kbd>↑</kbd>/<kbd>↓</kbd> while firing <kbd>Z</kbd> to aim.' : ''),
@@ -134192,6 +134215,7 @@ const TUTORIAL_STEPS = [
     icon: '⚔️',
     title: 'Defeat Monsters → Earn XP',
     detect: 'combo',
+    fresh: true,   // v0.30.1818 release26b: ...and landed hits: the practice snail is the point of this card
     // v0.29.779 — the tour runs in town, where nothing hostile exists, so this
     // ask had no target. Showing the step puts one practice snail in front of
     // the player (see _spawnTutorialSnail).
@@ -134208,7 +134232,7 @@ const TUTORIAL_STEPS = [
     title: 'Block & Parry',
     detect: 'block',
     fresh: true,
-    tryIt: 'Raise your guard — press <kbd>A</kbd>',
+    get tryIt() { return _lxBlockAsk(); },   // v0.30.1818 release26b: on a phone, the deck's BLOCK shield
     gugumaLine: 'Tweet! Tap A right before it hits. Perfect timing hits back!',
     gugumaLineTouch: 'Tweet! Tap Block right before it hits. Perfect timing hits back!',   // v0.30.1722 release8: a phone has no A key
     body: 'A quick, timed guard, not one you hold:' +
@@ -134260,7 +134284,7 @@ const TUTORIAL_STEPS = [
   // the Outsider lore send-off.
   {
     icon: '📜',
-    title: 'Quests (Q)',
+    get title() { return (typeof _lxTouchHints === 'function' && _lxTouchHints()) ? 'Quests' : 'Quests (Q)'; },   // v0.30.1818 release26b: a phone has no Q (its button says QUEST)
     detect: 'quest',
     tryIt: 'Open your Quest Journal — press <kbd>Q</kbd>',
     gugumaLine: 'Tweet! Everyone needs something. I can wait.',
@@ -135396,6 +135420,43 @@ function _firstTimeTip(key, txt, rarity) {
 //     self-expires after 2 minutes so it can never linger forever.
 // Once the panel opens, two staged toasts point at the two spends: the
 // SP + buttons on the landing tab, then the Skills tab for the rank point.
+// v0.30.1818 release26b - THE FIRST LEVEL-UP CHIP sat at top 64 px centre: on a phone over the potion stall's first row (its "+" opened LV UP and
+// closed the shop), on a desktop over every dialog's first line and the stats plate. It hides while a panel, a dialog, a forced
+// modal, a story beat or a film is up (CSS on the body flags), and sits in the free band under the top strip (map name, menu row),
+// between the stats plate and the first right-hand HUD element in that band - out of sight while the tour card holds that band.
+// Re-placed every 400 ms while it shows.
+function _lxFluPlace(chip) {
+  try {
+    if (!chip || !chip.isConnected) return false;
+    if (!document.getElementById('lx-flu-style')) { const st = document.createElement('style'); st.id = 'lx-flu-style';
+      st.textContent = 'body.lx-panel-up #first-lvlup-chip, body.forced-modal #first-lvlup-chip, body.cinematic #first-lvlup-chip, body.sb-active #first-lvlup-chip { display: none !important; }'
+        + '@keyframes flu-pulse2{0%,100%{transform:scale(1);box-shadow:0 4px 24px rgba(120,70,220,0.45);}50%{transform:scale(1.04);box-shadow:0 4px 32px rgba(160,110,255,0.7);}}';
+      document.head.appendChild(st); }
+    const vis = (el) => { if (!el || !el.getClientRects().length) return null; const cs = getComputedStyle(el); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return null; const r = el.getBoundingClientRect(); return (r.width > 2 && r.height > 2) ? r : null; };
+    const wr = vis(document.querySelector('.game-wrapper')) || { left: 0, right: innerWidth, top: 0 };
+    const L0 = Math.max(0, wr.left) + 10, R0 = Math.min(innerWidth, wr.right) - 10;
+    let top = Math.max(0, wr.top) + 8;
+    for (const el of [document.getElementById('map-label'), ...document.querySelectorAll('#mobile-ctrl .mc-menu'), document.getElementById('mp-btn')]) { const r = vis(el); if (r && r.bottom < innerHeight * 0.35) top = Math.max(top, r.bottom + 6); }
+    const st = vis(document.getElementById('stats'));
+    const left = (st && st.top < top + 60) ? Math.max(L0, st.right + 10) : L0;
+    let right = R0;
+    for (const el of [document.getElementById('combo-meter'), document.getElementById('quest-tracker'), document.getElementById('qnav-key'), document.getElementById('settings-btn'), document.getElementById('mobile-ctrl-toggle')]) {
+      const r = vis(el); if (!r || r.bottom < top || r.top > top + 70 || r.right < left) continue;
+      if (r.left > left + 140) right = Math.min(right, r.left - 8);
+    }
+    const tut = document.getElementById('tutorial-modal'), tr = tut && !tut.classList.contains('tut-ghost') ? vis(tut) : null;
+    chip.style.visibility = (tr && tr.top < top + 70 && tr.bottom > top && tr.right > left && tr.left < right) ? 'hidden' : '';   // the tour card owns that band while it shows
+    const room = Math.max(170, right - left);
+    chip.style.maxWidth = room + 'px'; chip.style.width = 'max-content'; chip.style.transform = 'none'; chip.style.animation = 'flu-pulse2 1.8s ease-in-out infinite';
+    const w = chip.offsetWidth || room;
+    chip.style.left = Math.round(left + Math.max(0, (room - w) / 2)) + 'px'; chip.style.top = Math.round(top) + 'px';
+    return true;
+  } catch (e) { return false; }
+}
+function _lxFluPlaceStart(chip) {
+  _lxFluPlace(chip);
+  const iv = setInterval(() => { if (!chip.isConnected) { clearInterval(iv); return; } _lxFluPlace(chip); }, 400);
+}
 function _firstLevelUpGuide() {
   if (window._prologueActive) return;
   try {
@@ -135427,6 +135488,7 @@ function _firstLevelUpGuide() {
     }
   };
   document.body.appendChild(chip);
+  _lxFluPlaceStart(chip);   // v0.30.1818 release26b: under panels it hides; elsewhere it takes the free band (see _lxFluPlace)
   window._firstLvlupChipTimer = setTimeout(() => _removeFirstLvlupChip(false), 120000);
 }
 function _removeFirstLvlupChip(openedPanel) {
@@ -146091,6 +146153,8 @@ function _lxHudClearTick() {
       T.push(box(po.x - 56, fy - 142, 112, 142));
       if (Math.abs(pcx - po.x) < 100 && Math.abs(pfy - fy) < 120) { const lw = po._lblW || 150, lh = po._lblH || 46; T.push(box(po.x - lw / 2, _lxPortalLblTop(fy, lh, po.x, lw), lw, lh)); }
     }
+    // v0.30.1818 release26b: an NPC's name plate (under its feet, see drawNPCs) - the quest tracker sat over the Taxi Uncle's and the Megamall townsfolk's
+    for (const n of (game.npcs || [])) { if (!n || typeof n.x !== 'number' || typeof n.y !== 'number') continue; const sx = n.x - cx; if (sx + 90 < 0 || sx - 90 > W) continue; const tw = n._nameTagW3 || 90; T.push(box(n.x - tw / 2, n.y + 50, tw, 17)); }
     const BB = _lxHcBossBoxes(R, k);   // v0.30.1774 hud-boss-clear - every boss's drawn body, screen px
     for (const e of _lxHcRects) {
       const el = e[0], r = e[1], on = el.classList.contains('lx-hud-yield'), m = on ? 10 : 0;
@@ -146552,7 +146616,14 @@ function _lxPromptMetrics(g, key, label) {
   return m;
 }
 // cx,cy is the CENTRE of the pill. o: { tint, ink, alpha, gleam }
+// v0.30.1818 release26b - on a phone the talk / open pills showed the keyboard's N: they show the TALK button's wave instead (re-read once a second)
+function _lxTalkCap(key) {
+  const n = performance.now();
+  if (n - (_lxTalkCap._t || -1e9) > 1000) { _lxTalkCap._t = n; let k = ''; try { k = (typeof _lxTouchHints === 'function' && _lxTouchHints()) ? _lxKeyLabel('talkNpc') : ''; } catch (e) {} _lxTalkCap._k = k; }
+  return (_lxTalkCap._k && key === _lxTalkCap._k) ? '\u{1F44B}' : key;
+}
 function _lxPromptPill(g, cx, cy, key, label, o) {
+  key = _lxTalkCap(key);   // v0.30.1818 release26b
   const opt = o || {};
   const a = Math.max(0, Math.min(1, opt.alpha == null ? 1 : opt.alpha));
   if (a <= 0.01) return;
@@ -146609,6 +146680,25 @@ function _lxPromptPill(g, cx, cy, key, label, o) {
   g.lineJoin = 'round'; g.lineWidth = 3; g.strokeStyle = INK; g.strokeText(label, lx, y0 + h / 2 + 0.5);
   g.fillStyle = ink; g.fillText(label, lx, y0 + h / 2 + 0.5);
   g.restore();
+}
+// v0.30.1818 release26b - NPC NAME PLATES CLEAR THE SKILL BAR. The plate hangs under the feet (v0.30.27); on a low floor (Everdawn, the Megamall)
+// it landed under the skill bar. The bar's box in canvas pixels (re-read every 500 ms); a plate that would end inside it is lifted
+// to sit just above it (40 px at most).
+let _lxNtkAt = -1e9, _lxNtkV = null;
+function _lxNpcTagKeepOut() {
+  const n = performance.now(); if (n - _lxNtkAt < 500) return _lxNtkV; _lxNtkAt = n; _lxNtkV = null;
+  try {
+    const cv = document.getElementById('game'), bar = document.getElementById('skill-bar'); if (!cv || !bar) return null;
+    const R = cv.getBoundingClientRect(), r = bar.getBoundingClientRect(); if (!(R.width > 0 && r.width > 0 && r.height > 0)) return null;
+    const cs = getComputedStyle(bar); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return null;
+    const k = cv.width / R.width; _lxNtkV = [(r.left - R.left) * k, (r.right - R.left) * k, (r.top - R.top) * k];
+  } catch (e) {}
+  return _lxNtkV;
+}
+function _lxNpcTagLift(x, y, w, h) {
+  const b = _lxNpcTagKeepOut(); if (!b) return 0;
+  try { const M = ctx.getTransform(); if (!(M.d > 0)) return 0; const x0 = M.a * x + M.e, x1 = M.a * (x + w) + M.e, y1 = M.d * (y + h + 2) + M.f;
+    if (x1 <= b[0] || x0 >= b[1] || y1 <= b[2]) return 0; return Math.min(40, Math.ceil((y1 - b[2]) / M.d)); } catch (e) { return 0; }
 }
 function _drawTalkPrompt(cx, y, npc, a) {
   // the bob and the breathe stay here - they are this prompt's character, not the pill's
@@ -146926,7 +147016,7 @@ function drawNPCs() {
       const _tagName = _lxNpcDisplayName(npc);   // v0.30.1362 - Mira's plate reads Mira once she has told you
       let w = (npc._nameTagW3Of === _tagName) ? npc._nameTagW3 : 0;
       if (!w) { w = Math.ceil(ctx.measureText(_tagName).width) + 28; if (_lxPopFontReady()) { npc._nameTagW3 = w; npc._nameTagW3Of = _tagName; } }   // measured once Nunito is in
-      const px0 = Math.round(cx - w / 2), py0 = Math.round(feetY + 6), ph = 17;
+      const px0 = Math.round(cx - w / 2), ph = 17, py0 = Math.round(feetY + 6) - _lxNpcTagLift(px0, Math.round(feetY + 6), w, 17);   // v0.30.1818 release26b: clear of the skill bar
       const tint = npc.color || '#886bb8', INK = '#0d0a14';
       const tag = (x, y, tw, th) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, tw, th, th / 2); else ctx.rect(x, y, tw, th); };
       ctx.save(); ctx.beginPath(); ctx.rect(px0 - 4, py0 - 4, w + 12, ph + 12); if (ctx.roundRect) ctx.roundRect(px0, py0, w, ph, ph / 2); else ctx.rect(px0, py0, w, ph); ctx.clip('evenodd');
@@ -178934,6 +179024,7 @@ function _lxBbText(hpTxt, pctTxt, barH) {
   return t;
 }
 function drawSuperBossBar() {
+  if (typeof _lxPlgFightOn === 'function' && _lxPlgFightOn()) return;   // v0.30.1818 release26b: the memory fight's card carries his WILL bar; his own bar peeked round it (the nameplate under his feet stays)
   // v0.25.25 — Phase 5b gate kept as a no-op for back-compat (returns
   // false after v0.25.806 Phaser removal). Decay still happens via
   // game.flashOverlay each frame in the main loop.
@@ -179431,11 +179522,44 @@ function _plgPopCss() {
   const st = document.createElement('style'); st.id = 'plg-pop-css'; st.textContent = _PLG_POP_CSS;
   document.head.appendChild(st);
 }
+// v0.30.1818 release26b - THE INPUT GRACE FOR FILMS AND CARDS THAT OPEN STRAIGHT OUT OF COMBAT (the prologue's knockdown and Void films and its three
+// "The memory frays..." cards, a boss's fall). For _LX_CINE_GRACE_MS after each one appears no input counts (its Skip button shows after
+// that); an auto-repeat or a key already held when it appeared never counts; a film skips only on its Skip button, Enter or Escape -
+// never a tap on its body or Space (a phone tapping skills and a keyboard mashing Z / Space skipped the whole ending in seconds).
+// One window listener, registered at load, so it runs before every film's own key handler; nothing per film to leak.
+const _LX_CINE_GRACE_MS = 1200;
+const _LX_CG_LIVE = new Set();
+const _lxKeyDownAt = Object.create(null);
+function _lxCgEarly(ov) { return performance.now() - (ov._lxCgAt || 0) < _LX_CINE_GRACE_MS; }
+// (re)start the grace: each card of a guarded set gets its own
+function _lxCgArm(ov) { try { ov._lxCgAt = performance.now(); ov.classList.add('lx-cg-early'); clearTimeout(ov._lxCgT); ov._lxCgT = setTimeout(() => { try { ov.classList.remove('lx-cg-early'); } catch (e) {} }, _LX_CINE_GRACE_MS); } catch (e) {} }
+// mode 'film': only the Skip button, Enter or Escape skip it; 'card': a tap or key advances. Call before the overlay adds its own listeners.
+function _lxCineGuard(ov, mode) {
+  try {
+    ov._lxCgMode = mode || 'film'; _LX_CG_LIVE.add(ov); _lxCgArm(ov);
+    if (!document.getElementById('lx-cg-style')) { const st = document.createElement('style'); st.id = 'lx-cg-style'; st.textContent = '.lx-cg-early button[id$="-skip"] { display: none !important; }'; document.head.appendChild(st); }
+    // capture on the overlay: it runs before the overlay's own click (a film's body click used to finish it)
+    ov.addEventListener('click', (e) => { const sk = e.target && e.target.closest ? e.target.closest('button[id$="-skip"]') : null; if (_lxCgEarly(ov) || (ov._lxCgMode === 'film' && !sk)) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+  } catch (e) {}
+  return ov;
+}
+window.addEventListener('keydown', (e) => {
+  let k = ''; try { k = String(e.key || '').toLowerCase(); if (!e.repeat) _lxKeyDownAt[k] = performance.now(); } catch (_e) {}
+  if (!_LX_CG_LIVE.size || e.key === 'F12') return;
+  for (const ov of _LX_CG_LIVE) {
+    if (!ov.isConnected) { if (performance.now() - (ov._lxCgAt || 0) > 5000) _LX_CG_LIVE.delete(ov); continue; }
+    const at = _lxKeyDownAt[k];
+    if (e.repeat || _lxCgEarly(ov) || (at != null && at < ov._lxCgAt) || (ov._lxCgMode === 'film' && e.key === ' ')) { e.stopImmediatePropagation(); if (e.preventDefault) e.preventDefault(); return; }
+  }
+}, true);
+window.addEventListener('keyup', (e) => { try { delete _lxKeyDownAt[String(e.key || '').toLowerCase()]; } catch (_e) {} }, true);
+window.addEventListener('blur', () => { for (const k in _lxKeyDownAt) delete _lxKeyDownAt[k]; });
 function _prologueOverlay(stanzas, onDone, opts) {
   let i = 0;
   const _noPov = !!(opts && opts.noPovVideo);   // suppress the Gravitos-fight POV clip
   const ov = document.createElement('div');
   ov.id = 'prologue-cine';
+  if (opts && opts.grace) _lxCineGuard(ov, 'card');   // v0.30.1818 release26b: the post-fight cards (each card gets its own grace, see show)
   ov.style.cssText = 'position:fixed;inset:0;z-index:1500;background:#02010a;display:flex;'
     + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
   ov.innerHTML =
@@ -179492,6 +179616,7 @@ function _prologueOverlay(stanzas, onDone, opts) {
     txt.style.animation = 'none'; void txt.offsetWidth;
     txt.style.animation = 'plg-in 0.9s ease-out forwards';
     txt.dataset.i = String(i);
+    if (ov._lxCgMode) _lxCgArm(ov);   // v0.30.1818 release26b
     // v0.30.1220 plg-pop2 (per user: "this one can be improved, use dark purple also") - an all-caps "A — B" stanza is the
     // title card: A on a black kicker tag, B the headline banner on a dark purple comic burst with plum rays. Any other
     // stanza is inked text, so the post-Void strip's first stanza no longer lands on the title banner.
@@ -179890,6 +180015,7 @@ function _prologueApexSegment() {
     // plays its cutscene later.
     try { player._gravitosCineSeen = true; } catch (e) {}
     loadMap('gravitosArena', 300);
+    _lxPlgFightHud(true);   // v0.30.1818 release26b: no Lv 100 bars behind the entrance clip or the fight
     // Hold the game paused UNDER the entrance clip so the boss can't chip the
     // player during it (unpaused when the fight arms, in _armPrologueFight).
     game.paused = true;
@@ -180039,8 +180165,19 @@ function _prologueCoachStop() {
   clearTimeout(window._prologueCoachFade);
   const el = document.getElementById('prologue-coach'); if (el) el.remove();
 }
+// v0.30.1818 release26b - THE MEMORY FIGHT SHOWS ONLY THE FIGHT (per user: "remove the HP and MP bar and other unnecessary HUD ... make it
+// scenario whereby MP and HP is limitless"). From the arena load until the strip (or any finish / skip), body.lx-prologue-fight hides
+// the stats plate (HP / MP / EXP / coins), the skill bar (the fight card lists the keys; a phone keeps its deck), the minimap,
+// HOTKEYS & SKILLS, TAXI, combo, buffs, quest tracker + compass, toasts, co-op chips and the phone's menu row / potion dock - see
+// the CSS beside the deck's BLOCK caption. Skills cost no MP there (_lxPressMpCost) and the tick keeps HP / MP full and the hero
+// untouchable for the whole fight; the snapshot restore after the memory puts the real Lv 1 values back.
+function _lxPlgFightOn() { try { return !!(window._prologueActive && document.body && document.body.classList.contains('lx-prologue-fight')); } catch (e) { return false; } }
+function _lxPlgFightHud(on) { try { if (document.body) document.body.classList.toggle('lx-prologue-fight', !!on && !!window._prologueActive); } catch (e) {} }
+// a memory that ended by any path (finish, skip, a throw) never leaves the HUD hidden
+setInterval(() => { try { if (!window._prologueActive && document.body && document.body.classList.contains('lx-prologue-fight')) document.body.classList.remove('lx-prologue-fight'); } catch (e) {} }, 1000);
 function _prologueHud(show) {
   let el = document.getElementById('prologue-hud');
+  _lxPlgFightHud(show);   // v0.30.1818 release26b: the fight HUD set hides with the fight card up, and comes back with it
   if (!show) { if (el) el.remove(); _prologueCoachStop(); return; }   // v0.30.926
   if (!el) {
     el = document.createElement('div');
@@ -180073,6 +180210,7 @@ function _prologueTick() {
   // pinning both keeps every skill available for the whole memory.
   if (_godLeftMs > 0) { player._god = true; try { player.hp = getMaxHp(); player.mp = getMaxMp(); } catch (e) {} }
   else if (window._prologueGodUntil && !window._prologuePrevGod) { player._god = false; }
+  if (_lxPlgFightOn()) { player._god = true; try { const _mh = getMaxHp(), _mm = getMaxMp(); if (player.hp < _mh) player.hp = _mh; if (player.mp < _mm) player.mp = _mm; } catch (e) {} }   // v0.30.1818 release26b: limitless for the whole fight, however long a pause made it
   // v0.29.x — scripted phase escalation + boss "will" bar. The memory runs 30s;
   // advance P1→P2→P3 on a timer (read by the Gravitos AI) so the signature
   // Collapse / Event Horizon mechanics actually show, and render a will bar that
@@ -180139,7 +180277,7 @@ function _prologueStrip() {
     'The memory frays.\n\nThe Void reclaims what you have not yet earned.',
     'Power is never given, foreigner.\n\nIt is re-earned — step by step, plane by plane.',
     'Walk out of the Void.\n\nIt is time to begin.',
-  ], () => _prologueFinish(false), { noPovVideo: true }); }); });
+  ], () => _prologueFinish(false), { noPovVideo: true, grace: true }); }); });   // v0.30.1818 release26b: the cards follow the fight
 }
 // v0.29.57 — THE KNOCKDOWN. Plays right after Gravitos endures and the
 // apex power is stripped (_prologueStrip), BEFORE the Void transcension
@@ -180173,6 +180311,7 @@ function _prologuePunchCutscene(onDone) {
   };
   const ov = document.createElement('div');
   ov.id = 'prologue-punch-cine';
+  _lxCineGuard(ov, 'film');   // v0.30.1818 release26b: opened straight out of combat (or out of the film before it)
   ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#02010a;display:flex;'
     + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
   ov.innerHTML =
@@ -180563,6 +180702,7 @@ function _sovereignFallCutscene(onDone) {
   };
   const ov = document.createElement('div');
   ov.id = 'sovereign-fall-cine';
+  _lxCineGuard(ov, 'film');   // v0.30.1818 release26b: opened straight out of combat (or out of the film before it)
   ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#050208;display:flex;'
     + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
   ov.innerHTML =
@@ -180624,6 +180764,7 @@ function _amnesiacItsHimCutscene(onDone) {
   };
   const ov = document.createElement('div');
   ov.id = 'amnesiac-itshim-cine';
+  _lxCineGuard(ov, 'film');   // v0.30.1818 release26b: opened straight out of combat (or out of the film before it)
   ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#010007;display:flex;'
     + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
   ov.innerHTML =
@@ -180684,6 +180825,7 @@ function _gravitosShadowRevealCutscene(onDone) {
   };
   const ov = document.createElement('div');
   ov.id = 'gravitos-shadow-cine';
+  _lxCineGuard(ov, 'film');   // v0.30.1818 release26b: opened straight out of combat (or out of the film before it)
   ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#010007;display:flex;'
     + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
   ov.innerHTML =
@@ -180752,6 +180894,7 @@ function _gravitosDefeatCutscene(onDone) {
   };
   const ov = document.createElement('div');
   ov.id = 'gravitos-defeat-cine';
+  _lxCineGuard(ov, 'film');   // v0.30.1818 release26b: opened straight out of combat (or out of the film before it)
   ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#010007;display:flex;'
     + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
   ov.innerHTML =
@@ -180972,6 +181115,7 @@ function _prologueVoidCutscene(onDone) {
   };
   const ov = document.createElement('div');
   ov.id = 'prologue-void-cine';
+  _lxCineGuard(ov, 'film');   // v0.30.1818 release26b: opened straight out of combat (or out of the film before it)
   ov.style.cssText = 'position:fixed;inset:0;z-index:1600;background:#02010a;display:flex;'
     + 'align-items:center;justify-content:center;cursor:pointer;overflow:hidden;';
   ov.innerHTML =
@@ -197587,6 +197731,21 @@ window.addEventListener('keydown', (e) => {
   #mobile-deck#mobile-deck .mc-btn.mc-jump::after { content: 'JUMP'; position: absolute; left: 0; right: 0; bottom: 13%; text-align: center; pointer-events: none;
     font: 1000 9px/1 'Nunito', system-ui, sans-serif; letter-spacing: 1px; color: #ffe07a; -webkit-text-stroke: 2px #0b0a0e; paint-order: stroke fill; }
   body.mc-landscape #mobile-deck#mobile-deck .mc-jump { translate: 44px 0; }
+  /* v0.30.1818 release26b: the guard button says what it is, like JUMP (the tour's Block step points at it; the only "Block" was the skill bar's slot) */
+  #mobile-deck#mobile-deck .mc-btn.mc-block > img { width: 62% !important; height: 62% !important; translate: 0 -5px; }
+  #mobile-deck#mobile-deck .mc-btn.mc-block::after { content: 'BLOCK'; position: absolute; left: 0; right: 0; bottom: 9%; text-align: center; pointer-events: none;
+    font: 1000 8px/1 'Nunito', system-ui, sans-serif; letter-spacing: 0.6px; color: #ffe07a; -webkit-text-stroke: 2px #0b0a0e; paint-order: stroke fill; }
+  /* v0.30.1818 release26b: the memory fight (body.lx-prologue-fight, _lxPlgFightHud) shows the fight card, Guguma, the boss, damage numbers and the
+     phone deck (its input) - nothing else. visibility, not display: layout readers (the Block dodge, the toast dodge) keep their boxes */
+  body.lx-prologue-fight :is(#top-ui, #skill-bar, #minimap, #map-label, #taxi-btn, #hotkey-hint, #combo-meter, #buff-row, #coin-toast-zone, #quest-tracker, #qnav-key,
+    #toast-container, #mp-btn, #version-tag, #reset-front-btn, #world-affix-pin, #pq-objective-pin, #party-frames, #lx-coop-ping, #mp-chat-log,
+    #first-lvlup-chip, #mobile-ctrl .mc-pots, #mobile-ctrl-toggle, #mobile-deck .mc-pot-dock) { visibility: hidden !important; pointer-events: none !important; }
+  body.lx-prologue-fight #lx-corner#lx-corner > :is(#mp-btn, #version-tag, .lx-corner-sep) { display: none !important; }   /* the corner pill keeps only touch / fullscreen / settings */
+  /* v0.30.1818 release26b: a phone has no E key - the compass chip drops its key badge there */
+  body.mc-landscape #qnav-key#qnav-key .qk-k, body.mc-portrait #qnav-key#qnav-key .qk-k { display: none !important; }
+  /* v0.30.1818 release26b: the class page's Back / Next row ended 8 px under the card's clipped bottom edge at 960 x 560 */
+  #class-select-modal#class-select-modal .modal.cs-epic > .cs-page-nav { margin-top: 1px !important; padding-top: 4px !important; }
+  #class-select-modal#class-select-modal .cs-page-nav .cs-nav-btn { padding-top: 5px !important; padding-bottom: 5px !important; }
 </style>
 <style id="lx-wide-view">
   /* wide-view: the game box is as wide as the view on a wide touch screen; in the touch landscape layout the top-left HUD

@@ -30,7 +30,7 @@ try {
     for (const qid of A1) {
       player.quests = { active: {}, completed: {}, unlocked: {}, fresh: {} }; _ensureQuests(); for (const k of A1.slice(0, A1.indexOf(qid))) player.quests.completed[k] = true; player.quests.unlocked[qid] = true; __toasts.length = 0;
       const q = QUESTS[qid]; player.level = q.levelReq; const tName = monsterTypes[q.target].name; const row = { qid, tName };
-      loadMap('town', 300); await wait(1200); acceptQuest(qid, true); const a = player.quests.active[qid]; row.town = (_questGuidance(qid, q, a) || {}).text;
+      loadMap('town', 300); await wait(1200); acceptQuest(qid, true); const a = player.quests.active[qid]; row.town = (_questGuidance(qid, q, a) || {}).text; row.navName = mapName(((typeof _qnavDest === 'function' && _qnavDest(qid)) || {}).map);   // release26b: the map the Journal and the compass name
       const spawnMap = Object.keys(MAPS).find((k) => (MAPS[k].spawns || []).some((s) => s.type === q.target)); row.map = spawnMap; row.mapName = mapName(spawnMap);
       loadMap(spawnMap, 300); await wait(3000); game.paused = false; player._god = true; player.invulnerable = 9e9; player.hp = getMaxHp();
       const arr = game.monsters, sp = arr.splice; arr.splice = function (i, n) { try { for (const m of Array.prototype.slice.call(arr, i, i + (n === undefined ? arr.length - i : n))) if (m && !(game._fadingMonsters || []).includes(m) && !m._killed) out.pops.push(qid + ':' + m.type + ':' + Math.round(m.currentHp)); } catch (e) {} return sp.apply(arr, arguments); };
@@ -56,7 +56,7 @@ try {
     return out;
   });
   for (const r of R.rows) {
-    check(r.town === 'Defeat ' + r.tName + ' \u00b7 ' + r.mapName, r.qid + ': away from the hunt the guidance names the monster and the map', J({ town: r.town, want: r.tName + ' / ' + r.mapName }));
+    check(r.town === 'Defeat ' + r.tName + ' \u00b7 ' + r.navName, r.qid + ': away from the hunt the guidance names the monster and the navigator\'s map (release26b)', J({ town: r.town, want: r.tName + ' / ' + r.navName }));
     check(/^Defeat /.test(r.here) && r.here.indexOf(r.tName) > 0 && /nearby/.test(r.here), r.qid + ': on the map it names the monster and how many are near', r.here);
     check(r.finished && r.prog >= 10 && r.toast, r.qid + ': ten kills complete the quest ("Objectives complete")', J({ finished: r.finished, prog: r.prog, toast: r.toast }));
     check(r.trk.slice(0, 11).every((t, i) => i === 10 ? t === '\u2713 Turn in' : t === i + '/10'), r.qid + ': the counter reads 0/10 .. 9/10 then "Turn in", one step per kill', r.trk.join(' '));

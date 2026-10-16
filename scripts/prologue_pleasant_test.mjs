@@ -91,7 +91,7 @@ for (const [label, fn, skipSel] of [
   const r = await page.evaluate(async ({ fn, skipSel }) => {
     window._cbFired = false;
     window[fn](() => { window._cbFired = true; });
-    await new Promise((r2) => setTimeout(r2, 250));
+    await new Promise((r2) => setTimeout(r2, 1350));   // release26b: the knockdown / Void films ignore input for their first 1.2 s
     const hasSkip = !!document.querySelector(skipSel);
     const hasVideo = !!document.querySelector('video[id$="-vid"]');
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

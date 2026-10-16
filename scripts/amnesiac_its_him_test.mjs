@@ -70,8 +70,9 @@ const live = await page.evaluate(() => new Promise((resolve) => {
       // last-resort autoplay fallback, which this flag would expose).
       out.unmuted = vid.muted === false;
       out.volume = vid.volume;
-      const sk = ov.querySelector('#amn-ih-skip'); if (sk) sk.click();
-      setTimeout(() => { out.overlayGone = !document.getElementById('amnesiac-itshim-cine'); resolve(out); }, 300);
+      // release26b: a film reached from a boss kill ignores input for its first 1.2 s (its Skip button shows after that)
+      setTimeout(() => { const sk = ov.querySelector('#amn-ih-skip'); if (sk) sk.click(); }, 1300);
+      setTimeout(() => { out.overlayGone = !document.getElementById('amnesiac-itshim-cine'); resolve(out); }, 1600);
     }
   }, 100);
   setTimeout(() => { clearInterval(poll); out.played = out.played || false; resolve(out); }, 15000);

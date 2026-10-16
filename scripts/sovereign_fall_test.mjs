@@ -101,8 +101,9 @@ const live = await page.evaluate(() => new Promise((resolve) => {
       out.played = true;
       out.unmuted = vid.muted === false;
       out.volume = vid.volume;
-      const sk = ov.querySelector('#sov-fall-skip'); if (sk) sk.click();
-      setTimeout(() => { out.overlayGone = !document.getElementById('sovereign-fall-cine'); resolve(out); }, 300);
+      // release26b: a film reached from a boss kill ignores input for its first 1.2 s (its Skip button shows after that)
+      setTimeout(() => { const sk = ov.querySelector('#sov-fall-skip'); if (sk) sk.click(); }, 1300);
+      setTimeout(() => { out.overlayGone = !document.getElementById('sovereign-fall-cine'); resolve(out); }, 1600);
     }
   }, 100);
   setTimeout(() => { clearInterval(poll); out.played = out.played || false; resolve(out); }, 15000);
@@ -134,7 +135,7 @@ const integ = await page.evaluate(() => new Promise((resolve) => {
     const ov = document.getElementById('sovereign-fall-cine');
     out.sceneOpened = !!ov;
     out.completedDuringScene = completed;        // still 0 — the run ends when the scene does
-    if (ov) ov.click();                          // skip it
+    if (ov) setTimeout(() => { const sk = ov.querySelector('#sov-fall-skip'); if (sk) sk.click(); }, 1300);   // skip it (release26b: its Skip button, after the 1.2 s grace)
     setTimeout(() => {
       out.completedAfterScene = completed;       // now 1
       // the legacy zodiac final boss: plain completion, no scene
@@ -144,7 +145,7 @@ const integ = await page.evaluate(() => new Promise((resolve) => {
       out.zodiacScene = !!document.getElementById('sovereign-fall-cine');
       restore(); game.expedition = null;
       resolve(out);
-    }, 400);
+    }, 1800);
   }, 2200);
   setTimeout(() => { restore(); game.expedition = null; resolve(out); }, 12000);
 }));
@@ -198,7 +199,7 @@ const real = await page3.evaluate(async () => {
   try { killMonster(m); } catch (e) {}
   await sleep(1900);
   out.overlays = document.querySelectorAll('#sovereign-fall-cine').length;
-  const ov = document.getElementById('sovereign-fall-cine'); if (ov) ov.click();
+  const ov = document.getElementById('sovereign-fall-cine'); if (ov) { await sleep(1000); const sk = ov.querySelector('#sov-fall-skip'); if (sk) sk.click(); }   // release26b: its Skip button, after the 1.2 s grace
   await sleep(400);
   out.cleared = !document.getElementById('sovereign-fall-cine');
   out.released = !game.paused;
