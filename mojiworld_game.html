@@ -8897,6 +8897,21 @@
     font-size: 14px; color: #b4a8c8; margin-top: 8px;
   }
   #bravo-boon-modal .bv-foot { font-family: 'Nunito', system-ui, sans-serif; font-size: 13px; font-weight: 800; letter-spacing: 1.1px; color: #b3a6c8; }
+  /* v0.30.1816 release26d - a short window (under 640 px): the choice first. Arches, then Keep, then the tray; the subtitle and the foot rest. */
+  #bravo-boon-modal .bv-short { display: flex; flex-direction: column; }
+  #bravo-boon-modal .bv-short > * { flex: 0 0 auto; }
+  #bravo-boon-modal .bv-short > .bv-eyebrow { order: 0; }
+  #bravo-boon-modal .bv-short > .bv-title { order: 1; font-size: 30px; margin-top: 2px; margin-bottom: 4px; }
+  #bravo-boon-modal .bv-short > .bv-sub { display: none; }
+  #bravo-boon-modal .bv-short > .bv-arches { order: 2; padding-top: 4px; }
+  #bravo-boon-modal .bv-short > .bv-keep-row { order: 3; margin-top: 10px !important; }
+  #bravo-boon-modal .bv-short > .bv-plinth { order: 4; margin-top: 12px; }
+  #bravo-boon-modal .bv-short > .bv-foot-row { display: none; }
+  #bravo-boon-modal .bv-short .bravo-boon-btn { padding: 26px 10px 12px; }
+  #bravo-boon-modal .bv-short .bv-keep-note { margin-top: 4px; font-size: 13px; }
+  #bravo-boon-modal .bv-tiny > .bv-eyebrow { display: none; }
+  #bravo-boon-modal .bv-tiny > .bv-title { font-size: 24px; margin: 0 0 2px; }
+  #bravo-boon-modal .bv-tiny .bravo-boon-btn { padding: 20px 8px 8px; }
   /* Anyone who has asked the OS for less motion gets the shrine without the sheen. */
   @media (prefers-reduced-motion: reduce) {
     #bravo-boon-modal .bv-title { animation: none; }
@@ -16382,7 +16397,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1815';
+const GAME_VERSION = 'v0.30.1816';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -30267,6 +30282,7 @@ function _renderExpeditionQuestPin() {
   // "N enemies remaining" — gives the player a clear, objective number
   // that ticks down as they kill.
   let _progressLine = '';
+  let _lxPinRecheck = false;   // v0.30.1816 release26d: the floor has not filled yet - draw again shortly
   if (game.mapData && Array.isArray(game.monsters)) {
     const _live = game.monsters.filter(m => m && m.currentHp > 0 && !m._dying);
     if (game.mapData.isBossArena) {
@@ -30277,11 +30293,14 @@ function _renderExpeditionQuestPin() {
       } else if (exp.bravoReady) {
         _progressLine = '▸ Floor cleared — speak to Bravo';
       } else {
-        _progressLine = '▸ Boss incoming...';
+        _progressLine = '▸ Boss incoming...'; _lxPinRecheck = true;   // v0.30.1816 release26d
       }
     } else {
-      if (_live.length === 0 || exp.bravoReady) {
+      // v0.30.1816 release26d: the pin is drawn at map load, BEFORE the floor's spawns land - "cleared" was printed over every fresh floor
+      if (exp.bravoReady || (exp._floorClearedFor != null && exp._floorClearedFor === exp.floor)) {
         _progressLine = '▸ Floor cleared — speak to Bravo';
+      } else if (_live.length === 0) {
+        _progressLine = '▸ The floor stirs…'; _lxPinRecheck = true;
       } else {
         _progressLine = `▸ ${_live.length} enem${_live.length === 1 ? 'y' : 'ies'} remaining`;
       }
@@ -30291,6 +30310,8 @@ function _renderExpeditionQuestPin() {
                   (_progressLine ? `<span class="eq-progress">${_progressLine}</span>` : '') +
                   `<span class="eq-progress" style="color:#ff8a8a">⚠ Loot is REMOVED when the run ends</span>`;   // v0.30.884 — loot rule
   pin.style.display = 'block';
+  if (_lxPinRecheck && !game._lxExpPinT) game._lxExpPinT = setTimeout(() => { game._lxExpPinT = 0; try { _renderExpeditionQuestPin(); } catch (e) {} }, 400);   // v0.30.1816 release26d
+  try { if (typeof _lxExpPinPlace === 'function') _lxExpPinPlace(); } catch (e) {}   // v0.30.1816 release26d: clear of the stats plate
 }
 
 // v0.26.301 — PQ objective pin renderer. Per user "For PQ and expedition
@@ -58953,6 +58974,11 @@ function loadState() {
     // town), and a stale `active` flag permanently zeroes ALL mojicoin income
     // (the grant guard checks expedition.active, not the map) and blocks starting
     // a new run. Treat an interrupted expedition as abandoned.
+    // v0.30.1816 release26d: ...unless it was WON. The Sovereign's kill stamps _finalBossDown and the completion waits for his ~8 s fall film;
+    // a game closed in that window abandoned a cleared tower (floor EXP, clear bonus, victory coins, rolls and the clear count lost).
+    if (game.expedition && game.expedition.active && game.expedition._finalBossDown && typeof _lxExpWinOnLoad === 'function') {
+      try { _lxExpWinOnLoad(); } catch (e) {}   // completes the run (active -> false); on a throw the block below abandons it as before
+    }
     if (game.expedition && game.expedition.active) {
       try { const _tl = (typeof _lxExpLootTally === 'function') ? _lxExpLootTally(game.expedition.snapshot) : { items: 0, boons: 0 }, _fl = game.expedition.floor | 0;   // v0.30.1718 release7: the run's end is explained
         (typeof _lxSaveNotice === 'function' ? _lxSaveNotice : showToast)('🗼 Your Expedition ended when the game closed' + (_fl ? ' on Floor ' + _fl : '') + '. Its loot stays in the tower' + ((_tl.items || _tl.boons) ? ' (' + _tl.items + ' items, ' + _tl.boons + ' boons)' : '') + '; your own gear and level are safe.', 'rare'); } catch (e) {}
@@ -77518,6 +77544,8 @@ const LX_EXPEDITION_COIN_CAP = 6000;   // v0.30.404 — halved (was 12000)
 function _lxExpeditionCoinReward(lv) { return Math.min(LX_EXPEDITION_COIN_CAP, Math.floor(1000 * Math.max(1, ((lv | 0) || 1) / 15))); }   // v0.30.404 — halved (was 2000 x Lv/15)
 function _expeditionEndDialogue(reason, floorReached) {
   if (typeof _playStoryBeat !== 'function') return;
+  try { const _ov = document.getElementById('loading-overlay');   // v0.30.1816 release26d: not over the title menu
+    if (_ov && !_ov.classList.contains('fade') && getComputedStyle(_ov).display !== 'none') { setTimeout(() => _expeditionEndDialogue(reason, floorReached), 600); return; } } catch (e) {}
   let pool;
   if (reason === 'complete') pool = _EXPEDITION_END_LINES.complete;
   else if (reason === 'death') pool = (floorReached >= 7 ? _EXPEDITION_END_LINES.deathDeep : _EXPEDITION_END_LINES.death);
@@ -77912,7 +77940,8 @@ function _lxExpLootTally(snap) {
     out.items = Math.max(0, marked, grown);
     out.boons = Math.max(0, (player.boons || []).length - ((snap && Array.isArray(snap.boons)) ? snap.boons.length : 0));
     const sum = (o) => { let n = 0; for (const k in (o || {})) n += (+o[k] || 0); return n; };
-    out.potions = Math.max(0, sum(player.consumables) - sum(snap && snap.consumables));
+    out.potions = 0;   // v0.30.1816 release26d: per potion, what the run added above the door's count (the restore keeps the smaller one)
+    { const _sc = (snap && snap.consumables) || {}; for (const k in (player.consumables || {})) out.potions += Math.max(0, (+player.consumables[k] || 0) - (+_sc[k] || 0)); }
     out.coins = Math.max(0, Math.floor((player.mojicoins || 0) - ((snap && typeof snap.mojicoins === 'number') ? snap.mojicoins : (player.mojicoins || 0))));
   } catch (e) {}
   return out;
@@ -77941,9 +77970,13 @@ function _expeditionRestorePlayer(snap) {
   player.boons         = Array.isArray(snap.boons) ? JSON.parse(JSON.stringify(snap.boons)) : [];  // v0.26.359 — deep-clone on restore (was .slice() shallow) to match the snapshot side + prevent reference aliasing
   player.boonsEquipped = Array.isArray(snap.boonsEquipped) ? snap.boonsEquipped.slice() : [];
   player.inventory     = Array.isArray(snap.inventory) ? JSON.parse(JSON.stringify(snap.inventory)) : [];   // v0.26.360 — deep-clone (was shallow .slice/Object.assign) to match snapshot side
+  const _lxConsNow = JSON.parse(JSON.stringify(player.consumables || {}));   // v0.30.1816 release26d: what the run left you
   player.consumables   = (snap.consumables && typeof snap.consumables === 'object')
                           ? JSON.parse(JSON.stringify(snap.consumables))
                           : {};
+  // v0.30.1816 release26d: a potion drunk from your own stock came back with the snapshot. Per potion, the smaller of the door's count and
+  // the count now: what you drank stays drunk, and what the run added (found, or bought - re-charged via _spentInRun) still leaves.
+  for (const _k in player.consumables) { const _a = player.consumables[_k]; if (typeof _a === 'number') player.consumables[_k] = Math.max(0, Math.min(_a, (typeof _lxConsNow[_k] === 'number') ? _lxConsNow[_k] : 0)); }
   if (typeof _applyEquippedBoons === 'function') _applyEquippedBoons();
 }
 // Called from the portal NPC on confirmation. Wipes consumables, takes
@@ -78103,7 +78136,14 @@ function _endExpedition(reason) {
     //   • Same level → simple "+N EXP retained" line.
     //   • Levelled up → "Lv X → Y · current EXP N" line.
     // Stagger ~600 ms after the main toast so they don't overlap.
-    if (_startExp !== null && _startLevel !== null) {
+    if (_startExp !== null && _startLevel !== null && reason === 'death') {   // v0.30.1816 release26d: triggerDeath takes its 5% after this call - count what is kept
+      setTimeout(() => { try {
+        const _cl = player.level | 0, _ce = player.exp | 0;
+        const _dl = _cl > _startLevel ? `🌟 Lv ${_startLevel} → Lv ${_cl} (+${_cl - _startLevel}) · EXP retained, after the death toll`
+                 : _ce > _startExp ? `🌟 +${(_ce - _startExp).toLocaleString()} EXP retained from the run, after the death toll` : null;
+        if (_dl) showToast(_dl, 'epic');
+      } catch (e) {} }, 600);
+    } else if (_startExp !== null && _startLevel !== null) {
       const _curExp   = player.exp   | 0;
       const _curLevel = player.level | 0;
       let _line = null;
@@ -78131,6 +78171,7 @@ function _endExpedition(reason) {
     if (game._expExitTok !== _expExitTok) return;                 // a newer run (or exit) superseded this
     if (game.currentMap !== _expExitMap) return;                  // they already left some other way
     if (game.expedition && game.expedition.active) return;        // a fresh expedition started meanwhile
+    if (reason === 'death') return;   // v0.30.1816 release26d: the death card is up and respawnAtTown takes the hero to the Void - this warp put the town behind the card
     if (typeof loadMap === 'function') loadMap('town', 600);
   }, _expExitMs);
   if (typeof saveState === 'function') saveState();
@@ -78816,8 +78857,10 @@ function _bravoShowBoonPick() {
   // than by two lists being kept in step.
   const _boonActive = (id) => { try { return (typeof _lxBoonIdActive === 'function') && _lxBoonIdActive(id); } catch (e) { return false; } };
   const _ownedIds = new Set((player.boons || []).map(b => b.id));
-  let _pool = (typeof POWERUPS !== 'undefined') ? POWERUPS.filter(p => !_ownedIds.has(p.id) && !_boonActive(p.id)) : [];
-  if (_pool.length < 3 && typeof POWERUPS !== 'undefined') _pool = POWERUPS.slice();
+  // v0.30.1816 release26d: the DRAW is from the fixed list, so a friend's code deals the same three whatever either of you owns (it was drawn from
+  // what YOU did not own, so two friends got different offers). What you already hold is swapped below.
+  const _lxFresh = (typeof POWERUPS !== 'undefined') ? POWERUPS.filter(p => !_ownedIds.has(p.id) && !_boonActive(p.id)) : [];
+  let _pool = (typeof POWERUPS !== 'undefined') ? POWERUPS.slice() : [];
   // Random sample of 3 without replacement.
   const _picks = [];
   // v0.30.x — the mandatory pick was an unlimited reroll: every open drew a fresh max-roll trio
@@ -78841,6 +78884,23 @@ function _bravoShowBoonPick() {
       : { id: _def.id, roll: _def.max, rerolls: 0 };
     _picks.push({ def: _def, inst: _inst });
     if (_picks.length === 3) game.expedition._bravoOffer = { floor: game.expedition._floorClearedFor != null ? game.expedition._floorClearedFor : game.expedition.floor, picks: _picks.slice() };
+  }
+  // v0.30.1816 release26d: a drawn blessing you already hold (or carry in the tray) is swapped for one you do not, picked from a stream fixed by
+  // the run's seed, the floor and the slot - the run's own stream (_expRand) is not advanced, so both friends stay in step after it.
+  if (!_reuse && _picks.length) {
+    const _x = game.expedition, _f = (_x._floorClearedFor != null) ? _x._floorClearedFor : _x.floor;
+    let _sw = false;
+    for (let i = 0; i < _picks.length; i++) {
+      const _d = _picks[i].def; if (!_d || (!_ownedIds.has(_d.id) && !_boonActive(_d.id))) continue;
+      const _taken = new Set(_picks.map((p) => p.def && p.def.id));
+      const _c = _lxFresh.filter((p) => !_taken.has(p.id));
+      if (!_c.length) continue;   // nothing else left to offer: as before, the full list
+      const _r = (typeof _lxMulberry32 === 'function' && _x.seed >= 0) ? _lxMulberry32(((_x.seed >>> 0) ^ Math.imul((_f | 0) + 1, 0x9E3779B1) ^ Math.imul(i + 1, 0x85EBCA6B)) >>> 0) : Math.random;
+      const _nd = (typeof _weightedBoonPick === 'function') ? _weightedBoonPick(_c, _r) : _c[Math.floor(_r() * _c.length)];
+      _picks[i] = { def: _nd, inst: (typeof rollMaxBoonInstance === 'function') ? rollMaxBoonInstance(_nd.id) : { id: _nd.id, roll: _nd.max, rerolls: 0 } };
+      _sw = true;
+    }
+    if (_sw && _picks.length === 3) _x._bravoOffer = { floor: _f, picks: _picks.slice() };
   }
   // Build modal.
   // v0.30.459 — TOWER SLOTS, rendered into Bravo's own card. _bravoTarget is the slot the blessing
@@ -78961,6 +79021,18 @@ function _bravoShowBoonPick() {
   `;
   modal.appendChild(card);
   document.body.appendChild(modal);
+  // v0.30.1816 release26d: A SHORT WINDOW opened this card on its tray with the three arches below the fold (844x390: a 366 px card over 648 px
+  // of content) and Keep below it (960x560). There the choice comes first - arches, then Keep, then the tray - in tighter furniture,
+  // and the card opens at its top.
+  try {
+    if (innerHeight < 640) {
+      card.classList.add('bv-short'); card.style.padding = innerHeight < 450 ? '10px 18px 10px' : '14px 24px 12px';
+      const _kp = card.querySelector('.bv-keep'); if (_kp && _kp.parentElement && _kp.parentElement !== card) _kp.parentElement.classList.add('bv-keep-row');
+      const _ft = card.querySelector('.bv-foot'); if (_ft && _ft.parentElement && _ft.parentElement !== card) _ft.parentElement.classList.add('bv-foot-row');
+      if (innerHeight < 450) card.classList.add('bv-tiny');
+    }
+    card.scrollTop = 0;
+  } catch (e) {}
   game.paused = true;
   // v0.26.290 (audit HIGH #3) — Cancel path. Pre-fix the modal had no
   // escape hatch: pressing Escape (player reflex from every other modal)
@@ -79119,6 +79191,7 @@ function _expeditionSeedPrompt() {
       <div style="text-align:center; color:#bbb; font-size:12px; line-height:1.55; margin-bottom:16px;">
         Paste a friend&rsquo;s code and the tower builds you <b>their</b> descent &mdash;<br>
         the same floors, and Bravo deals the same blessings from the same shuffle.<br>
+        <span style="color:#cbb8ee;">A blessing you already hold is swapped for another one.</span><br>
         <span style="color:#8f83ad; font-size:11px;">You each run it on your own, at your own difficulty. Compare, or race.</span>
       </div>
       <input id="exp-seed-input" maxlength="24" placeholder="K7M2QF  ·  or any word" value="${_last.replace(/"/g, '')}"
@@ -79400,6 +79473,8 @@ const _LX_TWELVE_TITLES = ['Twelvefold', 'Zodiac Cracked', 'Constellation-Slayer
 // Final completion handler. Grants Mojicoins + bonus rewards + restores snapshot.
 function _completeExpedition() {
   if (!game.expedition || !game.expedition.active) return;
+  game.expedition._lxWinPaid = 1;   // v0.30.1816 release26d: this run's victory is being paid - a save caught from here on is closed at load, never paid twice
+  const _lxWin0 = { lv: player.level | 0, exp: +player.exp || 0 };   // v0.30.1816 release26d: the summary a load-time completion prints
   // v0.30.16 — the F10 boss kill reaches here WITHOUT passing through
   // _expeditionFloorCleared, so the final floor's share is banked here too.
   // The grant is stamped per floor, so whichever path arrives first pays and
@@ -79470,7 +79545,8 @@ function _completeExpedition() {
     }
   }
   if (typeof showToast === 'function') {
-    showToast(`✦ EXPEDITION VICTORY ✦ +${_coinReward.toLocaleString()} Mojicoins bonus!`, 'legendary');
+    const _lxVicShow = Math.floor(_coinReward * ((typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1) * ((typeof _lxDawnCoinMul === 'function') ? _lxDawnCoinMul() : 1));   // v0.30.1816 release26d: what _grantMojicoins will pay
+    showToast(`✦ EXPEDITION VICTORY ✦ +${_lxVicShow.toLocaleString()} Mojicoins bonus!`, 'legendary');
     // Stagger the bonus toasts so each one is readable.
     _extras.forEach((line, i) => {
       setTimeout(() => showToast(line, 'epic'), 900 + i * 700);
@@ -79483,8 +79559,44 @@ function _completeExpedition() {
   // v0.26.293 — Grant the coin reward AFTER _endExpedition's restore so
   // it survives the mojicoin wipe. Setshards / titles were already
   // applied above and don't get snapshotted, so they survive natively.
-  player.mojicoins = Math.min(1e12, (player.mojicoins || 0) + _coinReward);   // v0.26.1019 respect 1e12 clamp; v0.26.1028 — `|| 0` not `| 0` so a >2.147B wallet isn't ToInt32-wrapped
+  // v0.30.1816 release26d: through _grantMojicoins ({ full: true }: no gain scalar, as before) so Dawn's Favor (+10% "from everything that pays")
+  // and the Slaughter Ladder boon count here too. The ended run's floor pays nothing (_expExitMap) - this one payment is the
+  // exception that guard was never meant to catch, so it is lifted for the call.
+  let _lxVicPaid = 0;
+  { const _xm = game._expExitMap; game._expExitMap = null;
+    try { _lxVicPaid = _grantMojicoins(_coinReward, { full: true }); } finally { game._expExitMap = _xm; } }
+  try {   // v0.30.1816 release26d: what this clear paid, for a load-time completion's summary
+    let _gx = 0; const _lv1 = player.level | 0;
+    if (_lv1 > _lxWin0.lv && typeof _lxLevelCost === 'function') { _gx = Math.max(0, _lxLevelCost(_lxWin0.lv) - _lxWin0.exp); for (let _l = _lxWin0.lv + 1; _l < _lv1; _l++) _gx += _lxLevelCost(_l); _gx += +player.exp || 0; }
+    else _gx = Math.max(0, (+player.exp || 0) - _lxWin0.exp);
+    game._lxExpLastWin = { exp: Math.floor(_gx), lv0: _lxWin0.lv, lv1: _lv1, coins: _lxVicPaid, extras: _extras.slice() };
+  } catch (e) {}
   if (typeof saveState === 'function') saveState();
+}
+// v0.30.1816 release26d: A RUN WON AS THE GAME CLOSED. loadState calls this for a save whose final boss is down (the fall film was still
+// playing). The run is completed the way the film's callback would have done it - the same _completeExpedition, so the same
+// EXP, coins, rolls and clear count - and the title says what was kept. A save that was caught after the completion began
+// paying (_lxWinPaid) is left to the abandon path: closed and restored, nothing paid a second time.
+function _lxExpWinOnLoad() {
+  const x = game.expedition;
+  if (!x || !x.active || !x._finalBossDown || x._lxWinPaid) return false;
+  try { _lxExpSnapshotClamp(x); } catch (e) {}   // as the abandon path: the run's copy may hand back at most what the verified save holds
+  game._lxExpLastWin = null;
+  _completeExpedition();
+  if (game.expedition && game.expedition.active) return false;
+  const w = game._lxExpLastWin || {}, p = [];
+  if (w.lv1 > w.lv0) p.push('Lv ' + w.lv0 + ' \u2192 ' + w.lv1); else if (w.exp > 0) p.push('+' + w.exp.toLocaleString() + ' EXP');
+  if (w.coins > 0) p.push('+' + w.coins.toLocaleString() + ' Mojicoins');
+  for (const e of (w.extras || [])) p.push(String(e).replace(/^\S+\s+/, ''));
+  const msg = '\u2726 The Sovereign fell as the game closed \u2014 your Expedition victory is kept' + (p.length ? ': ' + p.join(' \u00b7 ') : '') + '.';
+  game._lxExpWinMsg = msg;
+  try { (typeof _lxSaveNotice === 'function' ? _lxSaveNotice : showToast)(msg, 'legendary'); } catch (e) {}
+  try {   // and once the title is gone, as the victory toast the film would have led to
+    const iv = setInterval(() => { try { const ov = document.getElementById('loading-overlay');
+      if (ov && !ov.classList.contains('fade') && getComputedStyle(ov).display !== 'none') return;
+      clearInterval(iv); setTimeout(() => { try { showToast(msg, 'legendary'); } catch (e) {} }, 900); } catch (e) { clearInterval(iv); } }, 500);
+  } catch (e) {}
+  return true;
 }
 
 // =========================================================================
@@ -120918,6 +121030,12 @@ function _lxProseMore() {
     }
   } catch (e) {}
 }
+// v0.30.1816 release26d: the card's top as the player sees it - the speaker's name plate stands above the box (the one-time loot-rule card fitted its
+// box to the window and left Bravo's plate 9 px off the top at 960x560)
+function _lxDlgTop(r) {
+  try { const n = document.getElementById('dialog-name'); const q = (n && n.getClientRects().length) ? n.getBoundingClientRect() : null;
+    return (q && q.height > 0 && q.top < r.top) ? q.top : r.top; } catch (e) { return r.top; }
+}
 function _lxFitDialog() {
   const dlg = document.getElementById('dialog');
   const txt = document.getElementById('dialog-text');
@@ -120959,7 +121077,7 @@ function _lxFitDialog() {
     // contributor, measure what actually happened and take the difference off.
     for (let pass = 0; pass < 3; pass++) {
       const now = dlg.getBoundingClientRect();
-      const over = 6 - now.top;                    // positive when the card hangs off the top
+      const over = 6 - _lxDlgTop(now);   // v0.30.1816 release26d                    // positive when the card hangs off the top
       if (over <= 0) break;
       const next = Math.max(96, cap - over / (scale || 1));
       if (next >= cap) break;                      // at the floor; the prose has nothing left
@@ -120973,7 +121091,7 @@ function _lxFitDialog() {
     let pad = PAD0;
     for (let pass = 0; pass < 4 && pad > 8; pass++) {
       const now = dlg.getBoundingClientRect();
-      const over = 6 - now.top;
+      const over = 6 - _lxDlgTop(now);   // v0.30.1816 release26d
       if (over <= 0) break;
       pad = Math.max(8, pad - Math.max(4, Math.ceil(over / (scale || 1))));
       dlg.style.paddingTop = pad + 'px';
@@ -120981,7 +121099,7 @@ function _lxFitDialog() {
     }
     // LAST LAST RESORT (per user, 2026-10-12): even with the prose at its floor and the padding given back, a crowded card (eight answers, two quest rows)
     // can still hang off the top. Tighten its buttons (CSS .lx-tight) and fit once more.
-    if (!dlg._lxTightPass && dlg.getBoundingClientRect().top < 6) {
+    if (!dlg._lxTightPass && _lxDlgTop(dlg.getBoundingClientRect()) < 6) {   // v0.30.1816 release26d: with the name plate
       dlg.classList.add('lx-tight'); dlg._lxTightPass = true;
       try { _lxFitDialog(); } finally { dlg._lxTightPass = false; }
       return;
@@ -122597,9 +122715,9 @@ So… do you need a lift?`;
         for (const p of _pending) {
           if (player.claimedMilestones[p.key]) continue;   // live guard — re-clicking the still-open button must not re-pay (was an infinite mojicoin farm)
           const _pay = _BOUNTY[p.milestone] || 0;
-          player.mojicoins = Math.min(1e12, (player.mojicoins || 0) + _pay);   // v0.26.1019 — respect the 1e12 clamp
+          const _got = (typeof _grantMojicoins === 'function') ? _grantMojicoins(_pay, { full: true }) : 0;   // v0.30.1816 release26d: was a raw add - Dawn's Favor ("everything that pays") skipped it; 1e12 clamp inside
           player.claimedMilestones[p.key] = true;
-          _paid += _pay; _count++;
+          _paid += _got; _count++;
         }
         if (typeof saveState === 'function') saveState();
         document.getElementById('dialog-text').textContent = `*Marbella ticks ${_count} ${_count === 1 ? 'entry' : 'entries'} off her ledger and counts Mojicoins into your hand.*\n\n${_paid.toLocaleString()} Mojicoins paid out across ${_count} milestone${_count === 1 ? '' : 's'}. The Mall thanks you for your service to its statistics department.`;
@@ -123264,7 +123382,7 @@ So… do you need a lift?`;
     // The picked option greys out (visited state) so re-reads are obvious;
     // it stays clickable — some options are repeatable actions (Rest, shop
     // pages), so a hard disable would break those flows.
-    b.onclick = () => { b.classList.add('dlg-visited'); if (typeof o.cb === 'function') o.cb(); };
+    b.onclick = () => { b.classList.add('dlg-visited'); const _tw = (typeof _lxTwStopForAnswer === 'function') ? _lxTwStopForAnswer() : null; if (typeof o.cb === 'function') o.cb(); if (_tw) _lxTwAfterAnswer(_tw); };   // v0.30.1816 release26d: stop the greeting's reveal before the answer rewrites the box
     // v0.25.830 — Auto-classify the option button for visual hierarchy.
     // Shop / sell / craft → gold accent. "Leave" → muted grey. Combat /
     // train / fight / quest action → red-tint purple. Everything else
@@ -123280,6 +123398,10 @@ So… do you need a lift?`;
   // pushed off the top of the screen by a long speech. After display:block: a hidden element
   // measures zero.
   _lxFitDialog();
+  // v0.30.1816 release26d: ...and once more when the card has settled. The one-time loot-rule card (opened from an answer) measured before its
+  // layout was final and hung 10 px off a 960x560 window - plate and frame - for its whole reveal (a later fit put it at 37 px).
+  try { const _rf = () => { try { const d = document.getElementById('dialog'); if (d && d.style.display !== 'none' && _lxDlgTop(d.getBoundingClientRect()) < 6) _lxFitDialog(); } catch (e) {} };
+    requestAnimationFrame(() => requestAnimationFrame(_rf)); setTimeout(_rf, 400); } catch (e) {}
   game.paused = true;
 }
 
@@ -123414,9 +123536,12 @@ function _runDialogTypewriter(text) {
   // caret itself stays a direct child of el, so it keeps trailing the text.
   let _twCur = el;
   const _twPut = (node) => {
-    if (_twCur === el) el.insertBefore(node, caret);
-    else _twCur.appendChild(node);
+    // v0.30.1816 release26d: an answer that rewrote #dialog-text took the caret with it, and insertBefore threw NotFoundError mid-reveal
+    if (_twCur === el) { if (caret.parentNode === el) el.insertBefore(node, caret); else _twLost(); }
+    else if (el.contains(_twCur)) _twCur.appendChild(node);
+    else _twLost();
   };
+  const _twLost = () => { if (dlg && dlg._twTimer === _twHandle) { dlg._twTimer = null; dlg.classList.remove('typing'); } };   // v0.30.1816 release26d: the box was rewritten - the reveal is over
   // v0.30.489 — FOLLOW THE REVEAL ONLY IF THE READER IS ALREADY AT THE BOTTOM (scrolling up to re-read must
   // not be yanked back down). The check has to happen BEFORE the new text goes in - afterwards the box is
   // already a line taller. v0.30.x tw-smooth: taken once per FRAME around that frame's batch, not twice per
@@ -123556,6 +123681,7 @@ function _runDialogTypewriter(text) {
   const _twHandle = { tw: _twGen };
   const _twTick = (now) => {
     if (dlg._twTimer !== _twHandle) return;              // skipped, closed, or superseded underneath us
+    if (!caret.isConnected || caret.parentNode !== el) { _twLost(); return; }   // v0.30.1816 release26d: rewritten underneath us (an answer set the text)
     now = now || performance.now();
     if (now - _twDue > 250) _twDue = now - 250;           // after a long stall, catch up in a short burst, not all at once
     if (now >= _twDue) {
@@ -123570,6 +123696,7 @@ function _runDialogTypewriter(text) {
     }
     _twRaf(_twTick);
   };
+  dlg._twText = text;   // v0.30.1816 release26d: _lxTwAfterAnswer completes the greeting when an answer left it in place
   dlg._twTimer = _twHandle;
   _twRaf(_twTick);
   // v0.25.851 — Expose a callable skip so the v0.25.851 global keyboard
@@ -123621,6 +123748,24 @@ window.addEventListener('keydown', (e) => {
     e.stopPropagation();
   }
 }, true);   // capture phase so we run BEFORE the game-input listener
+// v0.30.1816 release26d: AN ANSWER WHILE THE GREETING STILL TYPES. Every answer runs through the option button's onclick; the reveal is
+// stopped there BEFORE the answer runs (the handle nulled - its tick sees that and ends - .typing dropped, the caret taken
+// out), never skipped through (_twSkip would write the rest through a caret the answer is about to remove). An answer that
+// rewrites the box simply replaces it; one that leaves the greeting where it was (a shop, a menu) gets the greeting whole.
+function _lxTwStopForAnswer() {
+  const dlg = document.getElementById('dialog'), el = document.getElementById('dialog-text');
+  if (!dlg || !dlg._twTimer || !el) return null;
+  dlg._twTimer = null; dlg.classList.remove('typing');
+  const car = el.querySelector('.typewriter-caret'); if (car && car.parentNode) car.parentNode.removeChild(car);
+  return { el, html: el.innerHTML, full: dlg._twText };
+}
+function _lxTwAfterAnswer(t) {
+  try {
+    const dlg = document.getElementById('dialog');
+    if (!dlg || dlg.style.display === 'none' || dlg._twTimer) return;   // closed, or the answer started a reveal of its own
+    if (t.el.isConnected && t.el.innerHTML === t.html && typeof t.full === 'string') { t.el.innerHTML = t.full; try { _lxFitDialog(); } catch (e) {} }
+  } catch (e) {}
+}
 function _tokenizeDialogHtml(s) {
   // Split a small subset of HTML (open/close tags only) into render
   // tokens. We don't try to support arbitrary HTML — just enough for the
@@ -197594,6 +197739,9 @@ window.addEventListener('keydown', (e) => {
      note stay on the desktop card (the tracker carries the stage) */
   #pq-objective-pin.pq-phone { max-width: 240px; padding: 4px 9px 5px; }
   #pq-objective-pin.pq-phone .pq-goal, #pq-objective-pin.pq-phone > span:nth-of-type(n+5) { display: none; }
+  /* v0.30.1816 release26d - the tower pin on a phone (placed by _lxExpPinPlace): title, progress and the loot line; the goal stays on the desktop card */
+  #expedition-quest-pin.eq-phone { max-width: 230px; padding: 4px 9px 5px; }
+  #expedition-quest-pin.eq-phone .eq-goal { display: none; }
 </style>
 <script>
   // v0.30.1756 release20 - 3. is a film up? (kill films, the Everdawn welcome, the captains' teaser, Barnaby's fall) - _lxSyncCinematic hides the deck
@@ -197663,6 +197811,29 @@ window.addEventListener('keydown', (e) => {
     if (!best) { pin.style.left = pin.style.top = ''; return; }   // nowhere free: its CSS corner
     pin.style.left = Math.round((best[0] - pr.left) / sc) + 'px'; pin.style.top = Math.round((best[1] - pr.top) / sc) + 'px';
   }
+  // v0.30.1816 release26d: THE TOWER PIN sat at its CSS corner (14, 84) on top of the stats plate - on the desktop too (960x560: pin from y 85, the
+  // plate to y 149) and on a phone (844x390). It takes the free spot nearest that corner, clear of the plate and the rest of the HUD
+  // (the _lxPqPinPlace search, on every screen); a phone gets the compact card. A pin the player dragged keeps the player's spot.
+  function _lxExpPinPlace() {
+    const pin = document.getElementById('expedition-quest-pin'); if (!pin) return;
+    let dragged = false; try { dragged = !!localStorage.getItem('mojiHudPos:expedition-quest-pin'); } catch (e) {}
+    if (dragged || pin.style.display === 'none') { if (!dragged && pin._lxPlaced) { pin.style.left = pin.style.top = ''; pin._lxPlaced = false; pin.classList.remove('eq-phone'); } return; }
+    pin.classList.toggle('eq-phone', _lxR20Phone() && !document.body.classList.contains('hide-mobile-ctrl'));
+    const par = pin.offsetParent || pin.parentElement; if (!par) return;
+    pin.style.left = pin.style.top = '';   // measured at its CSS corner
+    const pr = par.getBoundingClientRect(), sc = (pr.width / (par.offsetWidth || 1)) || 1, w = pin.offsetWidth * sc, h = pin.offsetHeight * sc;
+    const obs = [];
+    for (const q of ['#stats', '#mobile-ctrl .mc-pots', '#mobile-ctrl-toggle', '#lx-coop-ping', '#party-frames', '#quest-tracker', '#mp-chat-log', '#settings-btn', '#fullscreen-btn', '#mp-btn', '#world-affix-pin', '#boss-hp-bar', '#pq-objective-pin', '#mobile-deck .mc-dpad']) { const r = _lxR20Vis(document.querySelector(q)); if (r) obs.push(r); }
+    for (const b of document.querySelectorAll('#mobile-deck .mc-btn, #mobile-ctrl .mc-menu')) { const r = _lxR20Vis(b); if (r) obs.push(r); }
+    const x0 = Math.max(0, pr.left) + 4, y0 = Math.max(0, pr.top) + 4, x1 = Math.min(innerWidth, pr.right) - 4, y1 = Math.min(innerHeight, pr.bottom) * 0.72;
+    const ox = par.scrollLeft || 0, oy = par.scrollTop || 0;   // the wrapper can sit scrolled a few px (a focused control) and its children move with it
+    const tx = pr.left + (14 - ox) * sc, ty = pr.top + (84 - oy) * sc;
+    const free = (x, y) => { for (const r of obs) if (x < r.right + 3 && r.left - 3 < x + w && y < r.bottom + 3 && r.top - 3 < y + h) return false; return true; };
+    let best = null, bd = Infinity;
+    for (let y = y0; y + h <= y1; y += 4) for (let x = x0; x + w <= x1; x += 6) { const d = (x - tx) * (x - tx) + 2 * (y - ty) * (y - ty); if (d < bd && free(x, y)) { bd = d; best = [x, y]; } }
+    if (!best) { pin._lxPlaced = false; return; }   // nowhere free: its CSS corner
+    pin.style.left = Math.round((best[0] - pr.left) / sc + ox) + 'px'; pin.style.top = Math.round((best[1] - pr.top) / sc + oy) + 'px'; pin._lxPlaced = true;
+  }
   // v0.30.1756 release20 - 6. CO-OP PING on a touch screen: T was the only ping and the number row the only emotes. While connected, a PING button
   // sits left of the menu row (under it on a narrow phone / in portrait): a tap pings like T, a hold opens the ten emotes.
   (function () {
@@ -197692,6 +197863,7 @@ window.addEventListener('keydown', (e) => {
       try { const pf = document.getElementById('party-frames'); if (pf && pf._cache) _lxPartyFramesPlace(pf, true); } catch (e) {}   // the plates follow a rotate / resize even while the game is paused
       try { const bn = document.getElementById('mp-banner'); if (bn && bn.style.display !== 'none') _lxMpBannerPlace(bn); } catch (e) {}   // v0.30.1805 release25c: the banner follows the row (and PING) while it is up
       try { _lxPqPinPlace(); } catch (e) {}   // v0.30.1805 release25c: the PQ pin on a phone
+      try { const _ep = document.getElementById('expedition-quest-pin'); if (_ep && (_ep.style.display !== 'none' || _ep._lxPlaced)) _lxExpPinPlace(); } catch (e) {}   // v0.30.1816 release26d: the tower pin
       try {
         const b = document.body;
         const on = !!(typeof net !== 'undefined' && net && net.connected) && _lxR20Phone() && !['hide-mobile-ctrl', 'forced-modal', 'cinematic', 'nag-portrait'].some((c) => b.classList.contains(c));

@@ -108,7 +108,8 @@ try {
   ok('completion itself pays a bonus worth half the run budget', r.exp.clearBonus === 0.5, String(r.exp.clearBonus));
   ok('killing the boss no longer teleports you out instantly — the map holds, then goes home', r.complete.heldOnMap && r.complete.wentHome,
     `${r.complete.startMap} -> ${r.complete.at0} / ${r.complete.at900} / ${r.complete.at4100}`);
-  ok('dying to the boss no longer teleports you out instantly either', r.death.heldOnMap && r.death.wentHome,
+  // release26d: a death's delayed town warp put the town behind the death card (respawnAtTown owns the move - to the Void)
+  ok('dying to the boss no longer teleports you out instantly either - and no town warp behind the death card (Respawn moves the hero)', r.death.heldOnMap && !r.death.wentHome && r.death.at4100 === r.death.startMap,
     `${r.death.startMap} -> ${r.death.at0} / ${r.death.at900} / ${r.death.at4100}`);
   ok('and the delayed exit never yanks a player who already left by another route', r.noYank.stillThere,
     `left to ${r.noYank.leftTo}, ended on ${r.noYank.now}`);
