@@ -88,6 +88,7 @@ const bootSave = async (save, pre) => {
   const vis = await page.evaluate(() => { const b = document.getElementById('menu-continue'); return !!(b && !b.hidden && b.offsetParent); });
   if (vis) await page.locator('#menu-continue').click(); else await page.evaluate(() => { try { document.getElementById('menu-continue').click(); } catch (e) {} });
   await page.waitForFunction(() => game && game.currentMap && game.currentMap !== 'void', null, { timeout: 60000 }).catch(() => {});
+  await page.waitForFunction(() => typeof _lxHeroInWorld === 'function' && _lxHeroInWorld(), null, { timeout: 90000 }).catch(() => {});   // release24f: Continue -> the world takes ~10 s; the owed wheel arms only then
   await install(page); return { ctx, page, vis };
 };
 // claim a boon wheel with "1", page through story scenes with Space; until nothing is up for ~3 s (or the budget runs out)
@@ -180,8 +181,10 @@ try {
     const UD = path.join(process.env.R24C_UD || path.join(ROOT, 'scripts', '_tmp_r24c_profile'));
     rmSync(UD, { recursive: true, force: true });
     const CDP = PORT + 1, ACURL = `http://localhost:${PORT}/${FILE}?lxac=1&lxhold=0`;
-    const launch = async () => { const p = spawn(EXE, ['--headless=new', '--remote-debugging-port=' + CDP, '--user-data-dir=' + UD, '--no-first-run', '--no-default-browser-check', '--mute-audio', 'about:blank'], { stdio: 'ignore' });
-      let b = null; for (let i = 0; i < 75 && !b; i++) { await sleep(200); try { b = await chromium.connectOverCDP('http://127.0.0.1:' + CDP); } catch (e) {} } return { p, b }; };
+    const launch = async (tries = 0) => { const p = spawn(EXE, ['--headless=new', '--remote-debugging-port=' + CDP, '--user-data-dir=' + UD, '--no-first-run', '--no-default-browser-check', '--mute-audio', 'about:blank'], { stdio: 'ignore' });
+      let b = null; for (let i = 0; i < 100 && !b; i++) { await sleep(200); try { b = await chromium.connectOverCDP('http://127.0.0.1:' + CDP); } catch (e) {} }
+      if (!b && tries < 4) { try { execSync('taskkill /PID ' + p.pid + ' /T /F', { stdio: 'ignore' }); } catch (e) {} await sleep(3000); return launch(tries + 1); }   // release24f: a relaunch onto a just-killed profile can come up with no CDP - start it again
+      return { p, b }; };
     const hardKill = (p) => { try { execSync('taskkill /PID ' + p.pid + ' /T /F', { stdio: 'ignore' }); } catch (e) {} };
     // a read-only watcher: on this surface the anti-cheat refuses writes from injected code, so nothing is wrapped
     const watch = () => { if (window.__w) return; window.__w = 1; window.__opened = []; window.__killAt = 0; let was = false;
@@ -199,11 +202,12 @@ try {
     await pg.evaluate(async () => { const sl = (ms) => new Promise((r) => setTimeout(r, ms)); loadMap('krookThrone', 300); for (let i = 0; i < 12; i++) { await sl(250); try { _dismissBossIntro(); } catch (e) {} const sb = document.getElementById('story-beat-overlay'); if (sb) sb.classList.remove('on'); game.paused = false; } });
     const pre = await pg.evaluate(() => ({ ac: !!(typeof _lxAc !== 'undefined' && _lxAc.on), map: game.currentMap, krook: (game.monsters || []).some((m) => m && m.type === 'kingKrook' && m.currentHp > 0), down: !!(game.bossDefeated && game.bossDefeated.krookThrone) }));
     for (let i = 0; i < 40 && !(await pg.evaluate(() => (game.monsters || []).some((m) => m && m.type === 'kingKrook' && m.currentHp > 0))); i++) await pg.waitForTimeout(250);
+    await pg.evaluate(() => { if (game._saveTimer) { clearTimeout(game._saveTimer); game._saveTimer = null; } });   // release24f: no save already on its way
     const how = await finish(pg, KROOK);
     let at = 0; for (let i = 0; i < 60 && !(at = await pg.evaluate(() => window.__killAt)); i++) await pg.waitForTimeout(20);
     const K = await pg.evaluate(() => ({ since: window.__killAt ? Date.now() - window.__killAt : null, lv: player.level, exp: player.exp, sh: player.setshards, opened: window.__opened.length, owed: game._lxBoonOwed ? game._lxBoonOwed.name : null }));
     const wait = Math.max(0, 200 - (K.since || 0)); await sleep(wait);
-    const t0 = Date.now(); hardKill(p); const killedAfter = (K.since || 0) + wait; await sleep(1500);
+    const t0 = Date.now(); hardKill(p); const killedAfter = (K.since || 0) + wait; await sleep(4000);
     ({ p, b } = await launch()); pg = await b.contexts()[0].newPage(); pg.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
     await toWorld(pg);
     for (let i = 0; i < 80 && !(await pg.evaluate(() => window.__opened.length > 0)); i++) await pg.waitForTimeout(250);

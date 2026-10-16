@@ -86,6 +86,7 @@ const bootSave = async (save) => {
   const vis = await page.evaluate(() => { const b = document.getElementById('menu-continue'); return !!(b && !b.hidden && b.offsetParent); });
   if (vis) await page.locator('#menu-continue').click(); else await page.evaluate(() => { try { document.getElementById('menu-continue').click(); } catch (e) {} });
   await page.waitForFunction(() => game && game.currentMap && game.currentMap !== 'void', null, { timeout: 60000 }).catch(() => {});
+  await page.waitForFunction(() => typeof _lxHeroInWorld === 'function' && _lxHeroInWorld(), null, { timeout: 90000 }).catch(() => {});   // release24f: Continue -> the world takes ~10 s; the owed wheel arms only then
   await install(page); return { ctx, page, vis };
 };
 // claim a boon wheel with "1", page through story scenes with Space; until nothing is up for ~3 s (or the budget runs out)
