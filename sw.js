@@ -329,7 +329,9 @@
 // his idle's feet and size), so a returning install would keep drawing the old frames for a session.
 // gravitos3-hq - v175 -> v176. Gravitos's 69 form-3 frames are REPLACED under their own names (re-drawn sharp),
 // so a returning install would keep drawing the old soft frames for a session.
-const CACHE = 'mojiworld-assets-v176';   // gravitos3-hq: Gravitos form-3 frames re-drawn under their own names. v175 was: boss-feet-calib: Gravitos frames re-baked under their own names. v174 was: v0.30.1815 - Tower Arbiter frames re-sharpened (same names)
+// gravitos3-esrgan - v176 -> v177. Gravitos's 69 form-3 frames are REPLACED under their own names (re-made with a steadier upscaler),
+// so a returning install would keep drawing the v0.30.1828 frames for a session.
+const CACHE = 'mojiworld-assets-v177';   // gravitos3-esrgan: Gravitos form-3 frames re-made under their own names. v176 was: gravitos3-hq: Gravitos form-3 frames re-drawn under their own names. v175 was: boss-feet-calib: Gravitos frames re-baked under their own names. v174 was: v0.30.
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
