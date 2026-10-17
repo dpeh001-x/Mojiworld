@@ -7,8 +7,11 @@
 #   LX_MSG     commit message file, with v0.30.x placeholders (required)
 #   LX_TAG     the in-file version tag to retag, e.g. "mooma-slam" (required)
 #   LX_EXTRA   extra repo files to re-sync, guard and ship (optional, space separated)
+#   LX_LOG_DIR where a failed confirming test leaves its full output (optional; default $TMPDIR/lx_ship_logs)
 set -uo pipefail
 cd /c/Users/dpeh0/Mojiworld
+# resync-guard: lx_resync_one / lx_resync_verify - a re-sync that fails, or leaves bytes that are not origin's, stops the chain.
+. scripts/_ship_resync.sh || { echo "ABORT: scripts/_ship_resync.sh is missing"; exit 1; }
 : "${LX_APPLY:?}" "${LX_TEST:?}" "${LX_CL:?}" "${LX_MSG:?}" "${LX_TAG:?}"
 EXTRA="${LX_EXTRA:-}"
 # UNIQUE per run: two chains running at once shared these names once and one pushed the
@@ -35,7 +38,10 @@ round () {
     local a p
     for p in $EXTRA; do
       if git rev-parse -q --verify "$TIP:$p" >/dev/null 2>&1; then
-        for a in 1 2 3; do git checkout "$TIP" -- "$p" 2>/dev/null && break; sleep 2; done
+        # resync-guard: this was `git checkout ... 2>/dev/null && break` three times, then carry on regardless - so a stale
+        # .git/index.lock (2026-10-15) had every chain row-patch and ship STALE tables for two days (v0.30.1786 reverted
+        # the Sundered Smith and the Pisces swing rows). A checkout that still fails after three tries now stops the chain.
+        lx_resync_one "$TIP" "$p" || return 1
       else
         echo "   (new on this branch, not re-synced: $p)"
       fi
@@ -43,6 +49,9 @@ round () {
   fi
   { printf 'mojiworld_game.html %s\nCHANGELOG.html %s\n' "$(git rev-parse "$TIP:mojiworld_game.html")" "$(git rev-parse "$TIP:CHANGELOG.html")"
     local p; for p in $EXTRA; do echo "$p $(git rev-parse -q --verify "$TIP:$p" 2>/dev/null || echo NONE)"; done; } > "$EXP"
+  # resync-guard: prove every re-synced path holds origin's exact bytes BEFORE either apply runs (LX_APPLY2 patches
+  # those files in place). git hash-object applies the CRLF filter, so the autocrlf checkout still compares true.
+  lx_resync_verify "$TIP" $EXTRA || return 1
   echo "   base ${TIP:0:8}"
 
   echo "== 2. apply (guarded, idempotent)"
@@ -87,12 +96,17 @@ NODEEOF
   rm -f scripts/_synsc${ID}_*.js; echo "   syntax clean"
 
   echo "== 6. confirming test on the private build (a failure aborts before the push)"
-  local ok=0 a
+  # resync-guard: the whole run goes to a log (only its last 3 lines are shown here); a failure prints the log's path.
+  local ok=0 a log logdir="${LX_LOG_DIR:-${TMPDIR:-/tmp}/lx_ship_logs}"
+  mkdir -p "$logdir" || return 1
   for a in 1 2; do
-    if PORT=$((12870 + RANDOM % 60)) MOJI_GAME_FILE="$G" node "$LX_TEST" 2>&1 | tail -3 | tee /dev/stderr | grep -q "^all [0-9]* passed"; then ok=1; break; fi
-    echo "   confirming test did not pass (attempt $a) - once more"; sleep 4
+    log="$logdir/${LX_TAG}_${ID}_r${r:-0}_t$a.log"
+    PORT=$((12870 + RANDOM % 60)) MOJI_GAME_FILE="$G" node "$LX_TEST" > "$log" 2>&1
+    tail -3 "$log" >&2
+    if tail -3 "$log" | grep -q "^all [0-9]* passed"; then ok=1; rm -f "$log"; break; fi
+    echo "   confirming test did not pass (attempt $a) - full output: $(cygpath -w "$log" 2>/dev/null || echo "$log")"; sleep 4
   done
-  [ "$ok" = 1 ] || { echo "confirming test failed twice"; return 1; }
+  [ "$ok" = 1 ] || { echo "confirming test failed twice - full output in the logs named above"; return 1; }
 
   echo "== 7. guarded ship"
   sed "s/v0\.30\.x/$LX_VER/g" "$LX_MSG" > "$MSG"

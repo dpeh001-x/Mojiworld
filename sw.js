@@ -314,6 +314,11 @@
 // their own names (frames 9-15 and the cast set are new), so a returning browser would keep drawing the old art for a session.
 // boss-frame-repair - v170 -> v171. Libra's attack frames 5-6 and the Tower Arbiter's sliced column / verdict / swing frames are REPLACED under
 // their own names (the art a straight line had cut off, repaired), so a returning install would keep drawing the old frames for a session.
+// resync-guard - the next two notes were lost to v0.30.1786's stale re-sync (which also re-used v172; v0.30.1798 then re-used v173). Restored for the record.
+// v0.30.1782 - v171 -> v172. Pisces's bullet-hell shot (p_whirl.webp and anim/whirl_0-8.webp) is REPLACED under
+// their own names (the cyan wave ring becomes a twin-koi disc), so a returning browser would keep drawing the old art for a session.
+// v0.30.1785 - v172 -> v173. Pisces's swing strike (fx/swing_zodiac_pisces.webp) is REPLACED under
+// their own names (the purple wave becomes a pearl comet), so a returning browser would keep drawing the old art for a session.
 // arbiter-regen - v171 -> v172. 45 Tower Arbiter frames (idle, walk, swing, pillar, verdict) are REPLACED under
 // their own names (regenerated without slices), so a returning install would keep drawing the old frames for a session.
 // v0.30.1798 - v172 -> v173. Deadeye Protocol's two rounds (p_ult_marksman.webp, p_deadeye_execute.webp) are REPLACED under
