@@ -16400,7 +16400,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1843';
+const GAME_VERSION = 'v0.30.1844';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -21218,6 +21218,7 @@ function _lxBossStandIn(sprite, m) {
   // a boss that has reached a new form (gravitos -> gravitos2) queues that form the first time it draws in it
   const _form = m._phaseSprite;
   if (_form && m._lxBakedForm !== _form) { m._lxBakedForm = _form; _lxBossBakeQueue(_form, null); }
+  if (_form && m._lxBakedWarm !== _form && _LX_CV_BUDGET_PX >= 1e8 && typeof _lxWarmBossFx === 'function') { m._lxBakedWarm = _form; try { _lxWarmBossFx(game.currentMap, _form); } catch (e) {} }   // v0.30.1844 boss-lag-images - and the art named for that form (his rifts), off-thread
   const set = sprite._lxSet;
   if (!set || set._lxStandInOff || !(sprite.naturalWidth > 0)) return sprite;
   const cap = _lxShrinkCap(Math.max(720, set._lxBaseMin || 0)), long = Math.max(sprite.naturalWidth, sprite.naturalHeight);   // v0.30.x — the set's own base (_lxBossBakeBaseFor)
@@ -21252,6 +21253,7 @@ function _lxBakeBudget() {
     if ((game.blackHoldFrames | 0) > 0 || (game.blackFlashOverlay || 0) > 0.4 || game._gravitosCinePlaying) return 0;
     if (game.paused) return 6;
   }
+  if (window._lxMintBypass && typeof _lxDecWOk === 'function' && _lxDecWOk(location.href)) return 6;   // v0.30.1844 boss-lag-images - behind a veil, with the worker pool: the resizes are off the main thread
   return 2;
 }
 let _lxShrinkStamp = -1, _lxShrinkUsed = 0;
@@ -21330,7 +21332,105 @@ function _lxBlobFor(url) {
   }
   return viaXhr();
 }
-function _lxBitmapOffThread(im, bw, bh) {
+// v0.30.1844 boss-lag-images - THE DECODE WORKER (per user: "reducing the lags especially on boss fights while preserving the quality of the
+// sprites and images"). Measured inside the game on v0.30.1842: createImageBitmap(blob, {resize}) on the page decodes off-thread but
+// RESIZES on the main thread - one untraced 11-13 ms task per boss-frame bake at DPR 2 (13 bakes, 13 tasks), ~50 ms at CPU x4,
+// landing as the "js/other" long frames of every form change. The same call inside a Worker runs its resize there; the bitmap is
+// transferred back (zero-copy). Same decoder, same Skia resize, same pixels (measured identical over full frames). The worker also
+// answers the read-back the boss-size pre-derive used to pay for (the row scan - see _lxBoxesOff) on an OffscreenCanvas with the
+// page canvas's own settings. http(s) only: a file:// page (the
+// desktop build), a browser without Worker / createImageBitmap / OffscreenCanvas, a failed or late answer, or a bitmap of another
+// size than asked - each takes the old main-thread path, exactly as before.
+function _lxDecWBody() {   // v0.30.1844 boss-lag-images - runs INSIDE the worker (stringified by _lxDecWorker), never on the page
+  const rows = (d, w, h, aMin) => {   // first / last row with an alpha over aMin: the answer _lxEdgeRows reads in bands
+    let top = -1, bot = -1;
+    for (let y = 0; y < h && top < 0; y++) { const o = y * w * 4; for (let x = 0; x < w; x++) if (d[o + x * 4 + 3] > aMin) { top = y; break; } }
+    if (top < 0) return null;
+    for (let y = h - 1; y >= top && bot < 0; y--) { const o = y * w * 4; for (let x = 0; x < w; x++) if (d[o + x * 4 + 3] > aMin) { bot = y; break; } }
+    return [top, bot < 0 ? top : bot];
+  };
+  self.onmessage = async (e) => {
+    const q = e.data || {};
+    try {
+      const r = await fetch(q.url);
+      if (!r.ok) throw new Error('http ' + r.status);
+      const b = await r.blob();
+      if (q.op === 'bmp') {
+        const bmp = q.rw > 0 ? await createImageBitmap(b, { resizeWidth: q.rw, resizeHeight: q.rh, resizeQuality: 'high' }) : await createImageBitmap(b);
+        self.postMessage({ id: q.id, bmp }, [bmp]); return;
+      }
+      const bmp = await createImageBitmap(b), nw = bmp.width, nh = bmp.height;
+      if (q.op === 'box') {
+        const c = new OffscreenCanvas(q.W, q.H).getContext('2d', { willReadFrequently: true });
+        c.drawImage(bmp, 0, 0, q.W, q.H); bmp.close();
+        const d = c.getImageData(0, 0, q.W, q.H).data;
+        self.postMessage({ id: q.id, nw, nh, c: rows(d, q.W, q.H, 64), b: q.body ? rows(d, q.W, q.H, 235) : null }); return;
+      }
+      bmp.close(); throw new Error('op');
+    } catch (err) { self.postMessage({ id: q.id, err: String((err && err.message) || err) }); }
+  };
+}
+// A small pool: the resize of a request runs on ITS worker's thread (the decode on the browser's pool), so one worker would serialise
+// every boss-frame resize of an arena entry; two or three (by core count) keep them parallel without crowding a phone.
+let _lxDecW = null, _lxDecWDead = false, _lxDecWSeq = 0, _lxDecWLate = 0;   // v0.30.1844 boss-lag-images - _lxDecW: the pool (an array) once made
+const _lxDecWPend = new Map();   // v0.30.1844 boss-lag-images - id -> { res, rej, t, w }
+function _lxDecWOk(url) {   // v0.30.1844 boss-lag-images - may this URL go to the worker?
+  return !_lxDecWDead && /^https?:/i.test(String(url || '')) && typeof Worker === 'function' && typeof createImageBitmap === 'function' && typeof OffscreenCanvas === 'function';
+}
+function _lxDecWDie() {   // v0.30.1844 boss-lag-images - any worker failing retires the pool: every caller takes the old path from here on
+  _lxDecWDead = true;
+  for (const p of _lxDecWPend.values()) { clearTimeout(p.t); p.rej(new Error('worker')); }
+  _lxDecWPend.clear();
+  for (const w of (_lxDecW || [])) { try { w.terminate(); } catch (x) {} }
+  _lxDecW = null;
+}
+function _lxDecWorker() {   // v0.30.1844 boss-lag-images - the least busy worker of the pool (made on first use)
+  if (_lxDecWDead) return null;
+  if (!_lxDecW) {
+    try {
+      const n = Math.max(1, Math.min(3, ((navigator.hardwareConcurrency | 0) >> 1) - 1)), url = URL.createObjectURL(new Blob(['(' + _lxDecWBody.toString() + ')()'], { type: 'text/javascript' }));
+      _lxDecW = [];
+      for (let i = 0; i < n; i++) {
+        const w = new Worker(url); w._lxN = 0;
+        w.onmessage = (e) => {
+          const d = e.data || {}, p = _lxDecWPend.get(d.id);
+          if (!p) { try { if (d.bmp) d.bmp.close(); } catch (x) {} return; }   // answered after its timeout: dropped
+          _lxDecWPend.delete(d.id); clearTimeout(p.t); w._lxN--;
+          if (d.err) p.rej(new Error(d.err)); else p.res(d);
+        };
+        w.onerror = _lxDecWDie;
+        _lxDecW.push(w);
+      }
+    } catch (e) { _lxDecWDie(); return null; }
+  }
+  let best = _lxDecW[0];
+  for (const w of _lxDecW) if (w._lxN < best._lxN) best = w;
+  return best;
+}
+function _lxDecWAsk(q) {   // v0.30.1844 boss-lag-images - one request; rejects on any failure (the caller then does it the old way)
+  const w = _lxDecWOk(q.url) ? _lxDecWorker() : null;
+  if (!w) return Promise.reject(new Error('no worker'));
+  return new Promise((res, rej) => {
+    const id = q.id = ++_lxDecWSeq;
+    const t = setTimeout(() => { if (_lxDecWPend.delete(id)) { w._lxN--; if (++_lxDecWLate >= 3) _lxDecWDie(); rej(new Error('late')); } }, 20000);
+    _lxDecWPend.set(id, { res, rej, t });
+    try { q.url = new URL(q.url, location.href).href; w.postMessage(q); w._lxN++; } catch (e) { _lxDecWPend.delete(id); clearTimeout(t); rej(e); }
+  });
+}
+function _lxDecodeOff(url, rw, rh) {   // v0.30.1844 boss-lag-images - an ImageBitmap of the file, decoded (and resized to rw x rh when given) on the worker
+  return _lxDecWAsk({ op: 'bmp', url, rw: rw | 0, rh: rh | 0 }).then((d) => {
+    const b = d.bmp;
+    if (b && (!(rw > 0) || (b.width === (rw | 0) && b.height === (rh | 0)))) return b;
+    try { if (b) b.close(); } catch (e) {}
+    throw new Error('size');   // a worker that ignored the resize: the main-thread path decides, as before
+  });
+}
+function _lxBitmapOffThread(im, bw, bh) {   // v0.30.1844 boss-lag-images - the worker first; the old path (_lxBitmapOffThreadMain) when it cannot
+  const url = im && im.src;
+  if (url && _lxDecWOk(url)) return _lxDecodeOff(url, bw, bh).catch(() => _lxBitmapOffThreadMain(im, bw, bh));
+  return _lxBitmapOffThreadMain(im, bw, bh);
+}
+function _lxBitmapOffThreadMain(im, bw, bh) {   // v0.30.1844 boss-lag-images - unchanged: the pre-worker path
   const opts = { resizeWidth: bw, resizeHeight: bh, resizeQuality: 'high' };
   const url = im && im.src;
   // v0.30.x — file: added to this gate, and it is the whole point of the change.
@@ -21514,6 +21614,7 @@ function _lxShrinkFrames(frames, baseLogical, pinCap) {   // v0.30.624 - pinCap:
     if (Math.max(im.naturalWidth, im.naturalHeight) <= maxLong) {
       // v0.30.405 — pinned, not raw; a few a call, and a frame that missed this call's budget is NOT marked, so the next call reaches it
       if (_lxPinsThisCall >= (pinCap > 0 ? pinCap : 4)) { pending = true; continue; }
+      if (pinCap > 0 && (_lxPinAsync(im) & 1)) { pending = true; continue; }   // v0.30.1844 boss-lag-images - a warm: decoded off-thread first (2 = landed, pinned below from the cache)
       im._lxNoShrink = true; im._lxNoShrinkCap = maxLong;
       const _pv = _lxPinned(im); if (_pv !== im) { frames[i] = _pv; frames._readyN = 0; _lxPinsThisCall++; }
       if (_pv !== im) (_pv._lxHomes || (_pv._lxHomes = [])).push(frames, i);   // v0.30.1639 cvbudget - so a released pin can hand its slot back
@@ -143199,7 +143300,7 @@ function _lxGfDiscArt() {
 function _lxGfTinted(frame, phase) {
   try {
     const c0 = frame._gfTint;
-    if (c0 && c0.phase === phase) return c0.cv;
+    if (c0 && c0.phase === phase) { if (frame._lxLruT !== undefined) _lxCvTouch(frame); return c0.cv; }   // v0.30.1844 boss-lag-images - the disc frame is drawn every frame through its tint: the budget must see it in use (it went idle, was released, and every phase re-tinted a 768 px raw frame: 8-11 ms decodes x 16)
     const cv = (c0 && c0.cv) || document.createElement('canvas');
     cv.width = cv.height = 512;
     const c = cv.getContext('2d');
@@ -146510,6 +146611,7 @@ function _lxProjScaled(img, boxPx, grow) {
   let m = img._lxProjCache;
   if (!m || !m.get) m = img._lxProjCache = new Map();
   let c = m.get(key);
+  if (img._lxLruT !== undefined) _lxCvTouch(img);   // v0.30.1844 boss-lag-images - the shot frame is in use whichever scaled copy draws (released while idle, its next size re-decoded the raw file)
   if (c === undefined) {
     if (m.size >= 16) m.delete(m.keys().next().value);
     try {
@@ -160633,7 +160735,7 @@ function _warmMapArt(id, opts) {
       // own timers (the boss intro measured 26 s late). It resumes under the
       // boss-intro card, where the game is paused and nothing competes.
       if (typeof _lxBakeBudget === 'function' && _lxBakeBudget() === 0) { setTimeout(pump, 250); return; }
-      while (active < 4 && next < slots.length) {
+      while (active < ((typeof _lxDecWOk === 'function' && _lxDecWOk(location.href)) ? 6 : 4) && next < slots.length) {   // v0.30.1844 boss-lag-images - six with the worker pool: the resizes run in parallel, off the main thread
         const sl = slots[next++];
         active++;
         // v0.29.769 — settle on BOTH outcomes. A rejected bakeOne used to skip the
@@ -161087,6 +161189,8 @@ function _spriteContentBox(img) {
   const W = _s.W, H = _s.H;
   if (!W || !H) return null;                 // not decoded yet — retry next frame
   let res = null;
+  const _rw = _lxScanRowsOf(_s, 'c');   // v0.30.1844 boss-lag-images - the worker scanned this source at this size (_lxBoxesOff): the same rows, no draw, no read-back
+  if (_rw !== undefined) res = _rw; else
   try {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(_s.img, 0, 0, W, H);   // v0.29.391 — explicit dest size: W/H may be the capped scan resolution
@@ -161115,6 +161219,8 @@ function _spriteBodyBox(img) {
   const W = _s.W, H = _s.H;
   if (!W || !H) return null;                 // not decoded yet — retry next frame
   let res = null;
+  const _rw = _lxScanRowsOf(_s, 'b');   // v0.30.1844 boss-lag-images - the worker scanned this source at this size (_lxBoxesOff): the same rows, no draw, no read-back
+  if (_rw !== undefined) res = _rw; else
   try {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     const c = cv.getContext('2d', { willReadFrequently: true }); c.drawImage(_s.img, 0, 0, W, H);   // v0.29.391 — explicit dest size: W/H may be the capped scan resolution
@@ -161215,6 +161321,34 @@ function _deriveBossRefHeight(key, sign) {
 // v0.30.1735 boss-polish - the URLs the pre-derive below fetched to measure off the main thread (a measure, not a bake: gravitos_pace_test
 // leaves them off its bake count, as it does the v0.30.1573 body probe).
 const _LX_BOX_FETCHED = new Set();
+// v0.30.1844 boss-lag-images - THE SIZE SCAN ON THE WORKER. _lxBossBoxesOnce decodes off-thread already, but the scan itself - a draw into a CPU canvas
+// and its getImageData - ran here, one idle frame per task: 0.1-0.4 s a frame on a phone (Mira's 2240x1480 frames: up to 389 ms in
+// one frame of her fight at DPR 3 / CPU x4). The worker draws the same full-size bitmap into an OffscreenCanvas of the same scan size
+// (the page canvas's defaults, a CPU canvas: the same resampling) and returns the first / last inked rows at both thresholds; they
+// are scaled into the frame's pixels exactly as box() does. Resolves when both memos are set; rejects on any failure.
+// The rows are kept on the SOURCE image (_lxScanRows, in scan pixels): a frame whose slot is swapped while the worker is out (its
+// bake landing, an eviction handing the <img> back) answers from them too (_lxScanRowsOf) - the scan the draw-time scanner would
+// have run, on the same source at the same size, so the same box.
+function _lxScanRowsOf(_s, key) {   // v0.30.1844 boss-lag-images - undefined = not scanned at this size; null = nothing inked; else the box in the frame's pixels
+  const R = _s && _s.img && _s.img._lxScanRows;
+  if (!R || R.W !== _s.W || R.H !== _s.H || R[key] === undefined) return undefined;
+  const r = R[key], k = _s.scale;
+  return r ? ((k === 1) ? { top: r[0], bottom: r[1] } : { top: Math.round(r[0] * k), bottom: Math.round(r[1] * k) }) : null;
+}
+function _lxBoxesOff(img, wantBody) {
+  const _s = _lxBoxSourceOf(img), src = _s && _s.img, u = String((src && src.src) || '');
+  if (!_s || !_s.W || !_s.H || !src || !(src.naturalWidth > 0) || !_lxDecWOk(u)) return null;
+  const nw = src.naturalWidth, nh = src.naturalHeight;
+  const fill = () => { if (img._lxCBox === undefined) img._lxCBox = _lxScanRowsOf(_s, 'c'); if (wantBody && img._lxBBox === undefined) img._lxBBox = _lxScanRowsOf(_s, 'b'); };
+  if (_lxScanRowsOf(_s, 'c') !== undefined && (!wantBody || _lxScanRowsOf(_s, 'b') !== undefined)) { fill(); return Promise.resolve(); }
+  try { _LX_BOX_FETCHED.add(u); } catch (e) {}
+  return _lxDecWAsk({ op: 'box', url: u, W: _s.W, H: _s.H, body: !!wantBody }).then((d) => {
+    if (d.nw !== nw || d.nh !== nh || src.src !== u) throw new Error('size');
+    const R = (src._lxScanRows && src._lxScanRows.W === _s.W && src._lxScanRows.H === _s.H) ? src._lxScanRows : (src._lxScanRows = { W: _s.W, H: _s.H });
+    R.c = d.c; if (wantBody) R.b = d.b;
+    fill();
+  });
+}
 function _lxBossBoxesOnce(img, wantBody, pre) {   // v0.30.1735 boss-polish - pre: the source already decoded off-thread (an ImageBitmap at its full size)
   if (!img) return;
   const needC = img._lxCBox === undefined, needB = !!wantBody && img._lxBBox === undefined;
@@ -161273,6 +161407,8 @@ function _lxBossRefDerive(mapId, types) {
               // canvas), which does not draw from decode()'s cache, so every frame decoded AGAIN, in full, inside the draw - 27 decodes of
               // 50-140 ms a few seconds into the Gravitos fight (boss_decode_stall_test). The frame is now decoded from its blob, off the
               // main thread, at its full size, and that bitmap is drawn through the same scaled draw: the same boxes, without the stall.
+              { const _p = (typeof _lxBoxesOff === 'function') ? _lxBoxesOff(im, jb.body) : null;   // v0.30.1844 boss-lag-images - decoded AND measured on the worker; a failure measures here, as before
+                if (_p) { _p.then(() => { if (!went) { went = true; setTimeout(step, 0); } }, () => scan(null)); setTimeout(() => scan(null), 8000); return; } }
               const _u = String(src.src || '');
               if (/^(https?|file):/i.test(_u) && typeof createImageBitmap === 'function' && typeof _lxBlobFor === 'function') {
                 _LX_BOX_FETCHED.add(_u);
@@ -162486,7 +162622,7 @@ function _lxPrewarmDrain(force) {
     if (!im) continue;
     const decoded = !(im.complete === false) && ((im.naturalWidth || im.width) > 0);
     // a size-explicit job (NPC idle frames) is never shrink-swapped, so it is final at once
-    let final = im.tagName === 'CANVAS' || im._lxNoShrink || j.tw > 0 || j.tries > 240 || (force && j.tries > 20);
+    let final = im.tagName === 'CANVAS' || im._lxNoShrink || j.tw > 0 || j.tries > 240 || (force && j.tries > 20 && !im._lxPinAs);   // v0.30.1844 boss-lag-images - a pin still decoding off-thread is waited for, not pinned again here
     // v0.30.624 - START THE SHRINK INSTEAD OF WAITING FOR IT (per user: "improving the lag when fighting
     // multiple monsters"). A frame only counts as final once _lxShrinkFrames has swapped it for its bake
     // or its pin, and only the DRAW path called that - so a pack the player had not reached was never
@@ -162595,6 +162731,9 @@ function _lxPrewarmFxDrain(force) {
     if (!(im.complete && (im.naturalWidth || im.width) > 0)) { if (!im.complete && j.tries++ < 600) _LX_PREWARM_FXQ.push(j); continue; }
     kicked++;
     if (j.pin) {
+      { const _pa = _lxPinAsync(im);   // v0.30.1844 boss-lag-images - decode() did not keep this off the frame (see _lxPinAsync); the bitmap does
+        if (_pa & 1) { kicked -= (_pa === 1) ? 1 : 0.75; if (j.tries++ < 600) _LX_PREWARM_FXQ.push(j); continue; }   // in flight: no kick spent; a start, a quarter of one (it is a post)
+        if (_pa === 2) { try { _lxPinned(im); } catch (e) {} continue; } }
       // v0.30.790 grav-smooth — decode off-thread FIRST, then pin: the pin is a drawImage, and on a webp that
       // has not decoded that is the synchronous full-size decode this queue exists to keep off the frame.
       if (!im._lxPinDecoded && im.decode) { im._lxPinDecoded = 1; im.decode().then(() => { im._lxPinDecoded = 2; }, () => { im._lxPinDecoded = 2; }); }
@@ -162919,7 +163058,7 @@ function _lxWarmKitFx(mapId) {
           const pin = (im && im.tagName === 'IMG' && typeof _lxPinCache !== 'undefined') ? _lxPinCache.get(im) : null;
           if (pin) adopt(pin); else if (im && im.tagName === 'IMG') { _LX_PREWARM_FXQ.push({ pin: im, tries: 0 }); n++; }
         } else if (kind === 'fa' || kind === 'pa') {
-          const arr = kind === 'fa' ? _fxAnimFrames(k) : ((typeof _projAnimFrame === 'function' && _projAnimFrame(k), (typeof PROJ_ANIM_FRAMES !== 'undefined') ? PROJ_ANIM_FRAMES[k] : null));
+          const arr = kind === 'fa' ? ((typeof FX_ANIM_FRAMES !== 'undefined' && FX_ANIM_FRAMES[k] !== undefined) ? FX_ANIM_FRAMES[k] : _fxAnimFrames(k)) : ((typeof _projAnimFrame === 'function' && _projAnimFrame(k), (typeof PROJ_ANIM_FRAMES !== 'undefined') ? PROJ_ANIM_FRAMES[k] : null));   // v0.30.1844 boss-lag-images - an existing set is read, not asked: _fxAnimFrames shrinks it there and then, pinning four frames synchronously
           if (!arr || !arr.length) continue;
           let raw = false;
           for (const f of arr) {
@@ -162934,6 +163073,93 @@ function _lxWarmKitFx(mapId) {
     }
     return n;
   } catch (e) { return 0; }
+}
+// v0.30.1844 boss-lag-images - THE BOSS'S OWN ART, WARM BEFORE THE FIGHT. Profiled on v0.30.1842, the long frames after the veil lifted were mostly
+// first-use pins of the boss's art: his shackle sigil (qte_holy / qte_chains / qte_gravity: 55-98 ms, twice), his rifts and rings
+// (gravitos1-3 voidrift / riftring 37-45 ms per form), his swing (swing_* 39-48 ms), Leo's slam (98 ms), Mira's pillar and swing
+// warning. Every one of them is already NAMED by _lxFxMobTags (the lazy-fx table: measured shots and effects, the swing / column /
+// telegraph art, the shackle sets) and downloaded under the veil, but nothing decoded them. Here each is queued the way the kit
+// is (_lxWarmKitFx): a single image as a pin job, a set for its shrink, at the base its own draw uses (640 an effect set, 320 /
+// 360 a shot loop) - and since v0.30.1844 boss-lag-images those pins decode on the worker. Copies still alive are adopted (stamped
+// this map's, just used). Returns the number of jobs queued.
+function _lxWarmBossFx(mapId, only) {   // only: a form (gravitos2) - just the art named for it, re-queued when the boss reaches it (anything the budget let go meanwhile)
+  let n = 0;
+  try {
+    const adopt = (cv) => { try { if (cv && cv.tagName === 'CANVAS' && cv._lxLruT !== undefined) { cv._lxLruT = 0; _lxCvTouch(cv); } } catch (e) {} };
+    const seen = new Set(), tagged = [];
+    for (const ty of _lxFxMapTypes(mapId)) { const th = (typeof _qteThemeFor === 'function') ? _qteThemeFor({ type: ty }) : null; for (const t of _lxFxMobTags(ty)) {
+      if (seen.has(t)) continue;
+      seen.add(t);
+      const kind = t.slice(0, 2), k = t.slice(3);
+      if (only ? k.indexOf(only + '_') !== 0 : (k === 'qte_chains' && !(th && th.fx === k))) continue;   // the chain sigil only for a chains-theme boss (~9M px a Gravitos never draws); every form's rifts come now - the teleport rift plays AT the change
+      tagged.push(t);
+      try {
+        if (typeof _lxFxWant === 'function') _lxFxWant(t, true);
+        if (kind === 'fx' || kind === 'mp' || kind === 'mc') {
+          const im = _lxFxImg(t);
+          if (!im || im.tagName !== 'IMG') continue;
+          const pin = _lxPinCache.get(im);
+          if (pin) adopt(pin); else { _LX_PREWARM_FXQ.push({ pin: im, tries: 0 }); n++; }
+        } else if (kind === 'fa' || kind === 'pa') {
+          const arr = kind === 'fa' ? ((FX_ANIM_FRAMES[k] !== undefined) ? FX_ANIM_FRAMES[k] : _fxAnimFrames(k)) : ((typeof _projAnimFrame === 'function' && _projAnimFrame(k), PROJ_ANIM_FRAMES[k]));
+          if (!Array.isArray(arr) || !arr.length) continue;
+          let raw = false;
+          for (const f of arr) {
+            if (!f) continue;
+            if (f.tagName === 'CANVAS') adopt(f);
+            else if (f.complete && f.naturalWidth > 0 && f.naturalWidth * f.naturalHeight <= _LX_PIN_MAX_PX && !_lxPinCache.get(f)) { raw = true; f._lxNoShrink = false; }   // an evicted copy's slot
+          }
+          if (raw) arr._lxShrunk = false;
+          if (!arr._lxShrunk) { arr._lxFxWarmQ = false; _lxQueueFxSet(arr, kind === 'fa' ? 640 : ((k === 'meteor' || k === 'meteor_player') ? 360 : 320)); n += arr.length; }
+        }
+      } catch (e) {}
+    } }
+    _lxWarmTag(tagged, mapId);   // the copies the budget keeps for this fight (_lxCvWarmKeep)
+  } catch (e) {}
+  return n;
+}
+// v0.30.1844 boss-lag-images - the arena warm runs from the moment the veil goes up, beside the decode and the boss-frame bakes (its pins decode on
+// the worker, so they overlap), instead of a 600 ms slice after them that every arena used up (sync pins of 10-90 ms each).
+// Once its own steps are done the veil waits (up to CAP * 0.2) for the KIT part only - the hero casts at once, the boss patterns
+// start seconds later (measured: the 16-frame rings of an Archmage were still decoding as the veil lifted). What is left keeps draining after the veil lifts, at
+// the pace of play (three decodes in flight, each landing a canvas blit), not one synchronous pin per idle pass. Ends when the queue is
+// empty, when nothing has moved for half a second (what is left waits on a download and drains in play, as before), when the
+// map changes, at cap, or - after the veil - if the worker is gone (the old per-frame budget takes over).
+function _lxWarmFxRun(mapId, ended, cap) {
+  const md = (typeof MAPS !== 'undefined' && MAPS[mapId]) || null;
+  if (!md || !md.isBossArena || _LX_CV_BUDGET_PX < 1e8) return null;   // an iOS-class budget (40M px) cannot hold the boss art beside his frames (measured: more of his poses re-baked): the kit slice runs as before there
+  const R = window._lxFxWarmRec = { map: mapId, n: 0, ms: 0, left: 0, done: false };
+  const start = () => {   // on the first step: loadMap opens the gate BEFORE it names the new map, and the adopted copies are stamped with it
+    try { R.n = (typeof _lxWarmKitFx === 'function') ? _lxWarmKitFx(mapId) : 0; } catch (e) {}   // the kit FIRST: the boss's art is queued once it is warm (or after 2.5 s) - on a phone the veil hit its cap with the two interleaved and the first casts pinned 48 frames in one frame
+    try { _lxWarmTag(_lxFxClassTags(), mapId); } catch (e) {}   // the kit copies the budget keeps for this fight (_lxCvWarmKeep; the boss art is tagged by _lxWarmBossFx)
+    try { for (const t of _lxFxClassTags()) { const kind = t.slice(0, 2), k = t.slice(3);   // the kit, the part the hero needs on the first cast
+      if (kind === 'fx' || kind === 'pp' || kind === 'bp') { const im = _lxFxImg(t); if (im) kit.push(im); }
+      else if (kind === 'fa' || kind === 'pa') { const a = kind === 'fa' ? FX_ANIM_FRAMES[k] : PROJ_ANIM_FRAMES[k]; if (Array.isArray(a)) for (let i = 0; i < a.length; i++) kit.push([a, i]); } } } catch (e) {}
+  };
+  const kit = [];   // a single image, or [set, index]: warm = a canvas in the slot, a pin, a bake, or nothing to wait for (still loading, or raw by design)
+  const kitWarm = () => { for (const x of kit) { const im = Array.isArray(x) ? x[0][x[1]] : x; if (!im || im.tagName !== 'IMG' || !(im.complete && im.naturalWidth > 0) || im.naturalWidth * im.naturalHeight > _LX_PIN_MAX_PX) continue; if (!_lxPinCache.get(im) && !im._lxBakedCv) return false; } return true; };
+  let kitRes = null; const kitP = new Promise((r) => { kitRes = r; });
+  const P = new Promise((done) => {
+    let t0 = 0, q0 = -1, tq = 0, over = false;
+    const fin = () => { if (over) return; over = true; R.ms = Date.now() - t0; R.left = _LX_PREWARM_FXQ.length; R.done = true; kitRes(R); done(R); };
+    const step = () => {
+      try {
+        if (!t0) { if (typeof game !== 'undefined' && game && game.currentMap !== mapId && Date.now() - (R.t || (R.t = Date.now())) < 3000) { requestAnimationFrame(step); return; } t0 = tq = Date.now(); start(); }
+        const Q = _LX_PREWARM_FXQ;
+        if ((!Q.length && R.boss) || Date.now() - t0 > cap || (typeof game !== 'undefined' && game && game.currentMap !== mapId)) return fin();
+        if (ended() && (_lxDecWDead || !R.veilLeft)) { R.veilLeft = Q.length; if (_lxDecWDead) return fin(); }
+        _lxPrewarmFxDrain(true);
+        if (!R.kitMs && kitWarm()) { R.kitMs = Date.now() - t0; kitRes(R); }
+        if (!R.boss && (R.kitMs || Date.now() - t0 > 2500)) { R.boss = true; try { R.n += _lxWarmBossFx(mapId); } catch (e) {} q0 = -1; }
+        if (Q.length !== q0 || _lxPinAsyncN > 0 || _lxBakeInFlight > 0) { q0 = Q.length; tq = Date.now(); }
+        else if (Date.now() - tq > 500) { if (!R.boss) { R.boss = true; try { R.n += _lxWarmBossFx(mapId); } catch (e) {} q0 = -1; } else return fin(); }
+      } catch (e) { return fin(); }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+  P.kit = kitP;   // the gate waits on this one
+  return P;
 }
 let _lxFxWarmCls = null, _lxFxWarmJob = null, _lxFxWarmMaster = null;
 function _lxPrewarmClassFx() {
@@ -163116,6 +163342,30 @@ function _lxCvUseStamp() {   // v0.30.1825 boss-set-pin - marks every frame of e
 }
 function _lxCvPinnedPx(st) { let n = 0; for (const [cv, e] of _lxCvLru) if (_lxCvInUse(cv, st)) n += e.px; return n; }   // v0.30.1825 boss-set-pin
 function _lxCvInUse(cv, st) { if (cv._lxCvUse === st) return true; const sr = cv._lxSrc; return !!(sr && sr._lxCvUse === st); }   // v0.30.1825 boss-set-pin - a bake / pin carries its <img> as _lxSrc
+// v0.30.1844 boss-lag-images - THE FIGHT'S ART STAYS MADE. Measured on v0.30.1842 + the warm (Gravitos, DPR 2, a kit bot): the pool rode its line
+// (~249M px with his form pinned) and the pass below released this map's copies idle for 15 s, least recently drawn first - which
+// is exactly the warmed art that had not been needed YET: 683 releases (600M px) in two minutes, and 210 of the 212 synchronous pins
+// after the veil were that art coming back (the shackle sigil 25 times, the singularity zone 27, the War Cry 19), each a decode in
+// the frame that drew it. While a boss lives, a copy the arena warm made (its source tagged _lxWarmMap, see _lxWarmTag) and this
+// map's backdrop are skipped by that pass: the cheap-to-remake copies go first (hit-flash tints - a filter over a canvas -, other
+// maps', the boss's other forms). The warm set yields - least recently drawn first, idle 15 s - only once the pool passes 0.9x
+// _LX_CV_PIN_CAP, so the cap's own pass (which takes the boss's frames too) is never brought closer: memory stays bounded by the
+// same cap as before (it sits nearer it in a long fight: ~288M px at DPR 2 against ~249M).
+function _lxCvWarmKeep(cv, map) {   // v0.30.1844 boss-lag-images
+  const s = cv._lxSrc;
+  if (s && s._lxWarmMap === map) return true;
+  if (cv._lxKey !== undefined) { try { const b = game.mapData && game.mapData.bg && BG_IMAGES[game.mapData.bg]; return !!(b && b._lxBgS === cv); } catch (e) {} }
+  return false;
+}
+function _lxWarmTag(tags, map) {   // v0.30.1844 boss-lag-images - marks every image (a single, or each frame of a set) these lazy-fx tags name
+  for (const t of tags) {
+    const kind = t.slice(0, 2), k = t.slice(3);
+    try {
+      if (kind === 'fx' || kind === 'pp' || kind === 'bp' || kind === 'mp' || kind === 'mc') { const im = _lxFxImg(t); if (im && im.tagName === 'IMG') im._lxWarmMap = map; }
+      else if (kind === 'fa' || kind === 'pa') { const a = kind === 'fa' ? FX_ANIM_FRAMES[k] : PROJ_ANIM_FRAMES[k]; if (Array.isArray(a)) for (const f of a) { if (!f) continue; if (f.tagName === 'IMG') f._lxWarmMap = map; else if (f._lxSrc) f._lxSrc._lxWarmMap = map; } }
+    } catch (e) {}
+  }
+}
 function _lxCvTrimOldForms(target, now, st) {   // v0.30.1825 boss-set-pin - boss frames NOT in use (other forms, bosses gone), idle 5 s: first
   for (const [cv, e] of _lxCvLru) {
     if (_lxCvLruPx <= target || now - cv._lxLruT < _LX_CV_AWAY_MS) break;
@@ -163133,10 +163383,12 @@ function _lxCvTrimCap(now) {   // v0.30.1825 boss-set-pin - past the pin cap any
 function _lxCvTrim() {
   const _use = _lxCvUseStamp(), _pf = _use ? Math.min(_lxCvPinnedPx(_use) + _LX_CV_BUDGET_PX * 0.5, _LX_CV_PIN_CAP * 0.9) : 0;   // v0.30.1825 boss-set-pin - 0 when no boss lives: the trim runs exactly as before
   const target = Math.max(_LX_CV_BUDGET_PX * 0.8, _pf), now = performance.now(), map = _lxCvMapNow();   // v0.30.1825 boss-set-pin - the line rides above the pinned form
+  const _wk = _LX_CV_BUDGET_PX >= 1e8 && (_use ? true : _lxCvBossFight());   // v0.30.1844 boss-lag-images - a boss lives on a desktop-class budget: the warm set waits (see _lxCvWarmKeep)
   for (const [cv, e] of _lxCvLru) {
     if (_lxCvLruPx <= target || now - cv._lxLruT < _LX_CV_AWAY_MS) break;   // the rest were drawn more recently
     if (cv._lxMapT === map && now - cv._lxLruT < 120000) continue;   // this map's copies (its monsters' rarer frames, made at warm-up) stay - for now
     if (_use && _lxCvInUse(cv, _use)) continue;   // v0.30.1825 boss-set-pin - a live boss's current form stays
+    if (_wk && _lxCvWarmKeep(cv, map)) continue;   // v0.30.1844 boss-lag-images - and the fight's warmed art (a kit copy made in town included)
     _lxCvRelease(cv, e);
   }
   if (_lxCvLruPx <= target) return;
@@ -163149,6 +163401,12 @@ function _lxCvTrim() {
   for (const [cv, e] of _lxCvLru) {   // still over with every other map's idle copy gone: this map's, least recently drawn first
     if (_lxCvLruPx <= _target2 || now - cv._lxLruT < _LX_CV_HERE_MS) break;
     if (_use && _lxCvInUse(cv, _use)) continue;   // v0.30.1825 boss-set-pin
+    if (_wk && _lxCvWarmKeep(cv, map)) continue;   // v0.30.1844 boss-lag-images
+    _lxCvRelease(cv, e);
+  }
+  if (_wk && _lxCvLruPx > _LX_CV_PIN_CAP * 0.9) for (const [cv, e] of _lxCvLru) {   // v0.30.1844 boss-lag-images - the warm set yields before the cap would take the boss's frames
+    if (_lxCvLruPx <= _LX_CV_PIN_CAP * 0.9 || now - cv._lxLruT < _LX_CV_HERE_MS) break;
+    if (_use && _lxCvInUse(cv, _use)) continue;
     _lxCvRelease(cv, e);
   }
   if (_use && _lxCvLruPx > _LX_CV_PIN_CAP) _lxCvTrimCap(now);   // v0.30.1825 boss-set-pin - the memory line still holds
@@ -163185,6 +163443,41 @@ setInterval(() => { try { if (_lxCvLruPx > _LX_CV_BUDGET_PX) _lxCvTrim(); } catc
 const _lxPinCache = new WeakMap();
 const _LX_PIN_MAX_PX = 2200000;   // leave the rare huge sheets to the cache
 let _lxPinCount = 0, _lxPinPx = 0;   // diagnostics: how many pins exist and how many pixels they hold
+// v0.30.1844 boss-lag-images - THE PIN, DECODED OFF THE MAIN THREAD. A pin is a canvas copy of a decoded <img>; drawing the <img> into it is a
+// synchronous WebP decode when the canvas flushes (qte_holy 1024x1024: 71-98 ms, the swing / rift / kit effect sets 37-64 ms a
+// frame). img.decode() first does not help: it fills the compositor's cache and the canvas decodes again (measured 86 ms after a
+// decode() vs 94 ms without; 3-5 ms from an ImageBitmap). The warm queues now ask for the bitmap from the decode worker and pin
+// from it: the same canvas, the same size, the same carried fields, the same budget entry - drawn from a bitmap of the same file
+// (identical pixels, measured on every channel). Returns 0 = not for this path (the caller pins as before), 1 = in flight or the
+// pipe is full (ask again later), 2 = pinned, 3 = started now. The plain pin's own size line (_LX_PIN_MAX_PX) stands: a bigger
+// frame drawn from a canvas copy instead of raw is NOT the same picture once scaled down (measured: the browser resamples a raw
+// image and a canvas differently), so Arcane Burst's 1536 px ring keeps its own path - baked at the shrink cap off-thread by the
+// warm where the cap is under it (DPR 1-2), drawn raw as before where it is not.
+let _lxPinBmp = null, _lxPinBmpFor = null, _lxPinAsyncN = 0;   // v0.30.1844 boss-lag-images - set only around _lxPinAsync's own _lxPinned call
+function _lxPinAsync(img) {
+  if (!img || img.tagName !== 'IMG' || !img.complete || !(img.naturalWidth > 0)) return 0;
+  if (_lxPinCache.get(img)) return 2;
+  if (img._lxPinAs) return 1;
+  if (img._lxPinAsNo) return 0;
+  const w = img.naturalWidth, h = img.naturalHeight, u = String(img.src || '');
+  if (w * h > _LX_PIN_MAX_PX || !_lxDecWOk(u)) return 0;
+  if (img._lxBaking || (img._lxSet && Math.max(w, h) > _lxShrinkCap(Math.max(720, img._lxSet._lxBaseMin || 0)))) return 0;   // the same refusals as _lxPinned
+  if (_lxPinAsyncN >= (window._lxMintBypass ? 12 : 3)) return 1;   // 12 in flight behind a veil, 3 in play (each landing is a canvas + upload)
+  img._lxPinAs = true; _lxPinAsyncN++;
+  const end = () => { img._lxPinAs = false; _lxPinAsyncN--; };
+  _lxDecodeOff(u, 0, 0).then((bmp) => {
+    end();
+    try {
+      if (bmp.width === w && bmp.height === h && img.src === u && img.naturalWidth === w && img.naturalHeight === h && !_lxPinCache.get(img)) {
+        _lxPinBmp = bmp; _lxPinBmpFor = img; _lxPinned(img);
+      }
+    } catch (e) {}
+    _lxPinBmp = _lxPinBmpFor = null;
+    try { bmp.close(); } catch (e) {}
+    if (!_lxPinCache.get(img)) img._lxPinAsNo = true;   // never again by this path: the old one stands
+  }, () => { end(); img._lxPinAsNo = true; });
+  return 3;
+}
 function _lxPinned(img) {
   if (!img || img.tagName !== 'IMG' || !img.complete || !(img.naturalWidth > 0)) return img;
   let cv = _lxPinCache.get(img); if (cv) { if (cv._lxLruT !== undefined) _lxCvTouch(cv); return cv; }   // v0.30.1639 cvbudget - a hit marks it in use
@@ -163195,7 +163488,7 @@ function _lxPinned(img) {
   if (img._lxBaking || (img._lxSet && Math.max(w, h) > _lxShrinkCap(Math.max(720, img._lxSet._lxBaseMin || 0)))) return img;   // v0.30.x — the set's own base (_lxBossBakeBaseFor)
   try {
     cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-    cv.getContext('2d').drawImage(img, 0, 0);
+    cv.getContext('2d').drawImage((_lxPinBmpFor === img && _lxPinBmp) ? _lxPinBmp : img, 0, 0);   // v0.30.1844 boss-lag-images - from the off-thread decode when _lxPinAsync asks
     _lxPinCount++; _lxPinPx += w * h;
   } catch (e) { return img; }
   cv.complete = true; cv.naturalWidth = w; cv.naturalHeight = h; cv.src = img.src; cv._lxSrc = img;
@@ -187281,6 +187574,8 @@ function _lxReadyGate(mapId, opts) {
     let t = Date.now();
     try { if (st) st._lxPaintAt = 0; } catch (e) {} paint(1, 'Gathering the map…');   // v0.30.1571 boot-progress - the lazy art waits below used to run silent for seconds (the throttle reset: the sprite gate painted a moment ago)
     try { if (typeof _lxLazyWantMap === 'function') _lxLazyWantMap(id, true); } catch (e) {}   // v0.30.1196 lazy-art - started now, awaited below
+    let _lxFxW = null;   // v0.30.1844 boss-lag-images - the arena warm (kit + boss art), started with the veil
+    try { if (!opts.boot && typeof _lxWarmFxRun === 'function') _lxFxW = _lxWarmFxRun(id, () => !!rec.ms, 20000); } catch (e) {}
     const _lzBoss = (typeof _lxBossArtSettled === 'function') ? _lxBossArtSettled(id) : null, _lzBg = (typeof _lxBackdropSettled === 'function') ? _lxBackdropSettled(id) : null;
     const _lzFx = (typeof _lxFxMapSettled === 'function') ? _lxFxMapSettled(id) : null;   // v0.30.1234 lazy-fx - the map's monster shots and effects, loading beside the sheets
     try { if (typeof _lxArt2Settled === 'function') await capped(_lxArt2Settled(id), CAP * 0.4); } catch (e) {}   // v0.30.1205 lazy-art2 - the monster / NPC sheets, tiles and props land before the veil lifts
@@ -187339,7 +187634,8 @@ function _lxReadyGate(mapId, opts) {
     // Queued even when the gate has already hit its cap and lifted the veil (a loaded machine): then it drains in play, on the
     // normal per-frame budget, which still beats the first cast doing it all inside one frame.
     try {
-      const _kq = (typeof _lxWarmKitFx === 'function') ? _lxWarmKitFx(id) : 0;
+      if (_lxFxW && !rec.ms) { paint(72, 'Readying your skills\u2026'); const t2 = Date.now(); const _r = await capped(_lxFxW.kit || _lxFxW, CAP * 0.2); rec.kitMs = Date.now() - t2; window._lxKitWarmRec = { ms: rec.kitMs, left: _LX_PREWARM_FXQ.length, warm: _r || null }; }   // v0.30.1844 boss-lag-images
+      const _kq = _lxFxW ? 0 : ((typeof _lxWarmKitFx === 'function') ? _lxWarmKitFx(id) : 0);   // v0.30.1844 boss-lag-images - a boss arena: queued and draining since the veil went up
       if (_kq > 0 && !rec.ms) {
         paint(72, 'Readying your skills…');
         const t2 = Date.now();
