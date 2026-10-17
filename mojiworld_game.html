@@ -16397,7 +16397,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1824';
+const GAME_VERSION = 'v0.30.1825';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -162413,23 +162413,85 @@ function _lxCvMapNow() { try { return (typeof game !== 'undefined' && game && ga
 // a blank canvas is the worse outcome). Nothing drawn in the last 5 s is ever released, and a released copy is never
 // cleared - its slot gets the source image back - so nothing draws blank (the v0.30.1639 rule).
 const _LX_CV_AWAY_MS = 5000, _LX_CV_HERE_MS = (_LX_CV_BUDGET_PX < 1e8) ? 5000 : 15000;
+// v0.30.1825 boss-set-pin - A LIVE BOSS'S CURRENT FORM STAYS BAKED (per user: boss visuals must never lag a fight). Measured on v0.30.1814 with
+// Gravitos's seven form-3 sets in rotation: at DPR 2 / 3 his form-3 frames alone are ~169M px of canvas and the fight's other copies
+// grow ~1M px a second, so every ~60 s the pool met the 1.5x ceiling and the trim dropped ~45M px - his star / walk / attack frames
+// among them - each coming back as a re-bake with his pose held meanwhile (20 releases, 17 re-bakes, 13 held poses in 150 s). On an
+// iOS-class budget it never stopped (DPR 1: 135 releases, 80 re-bakes, 158 held poses). While a boss lives, every frame of its CURRENT
+// form (m._phaseSprite or m.type, with its cast sets; a zodiac boss's sign) is skipped by the trim and rides ON TOP of the budget:
+// the lines below rise to (pinned px + half the budget), so the rest of the art keeps at least half of it. Over that line the boss's
+// other forms and bosses no longer alive go first (forms only go forward), then the rest as before. Past _LX_CV_PIN_CAP anything
+// idle goes, least recently drawn first, down to 0.9x of it, and the raised line never passes that 0.9x: memory is bounded by the
+// cap - 2x the budget on a desktop-class budget (320M px), 2.5x on an iOS-class one (100M px, ~400 MB). Gravitos form 3 is 60M px
+// at DPR 1 (an iPhone keeps all of it) and 169M at DPR 2+ (a desktop keeps all of it). A form that cannot be kept WHOLE under the
+// cap (an iPad at Sharp Display, DPR ~2.5: 169M px against 100M) is left to the old rule - pinning part of it only moved the
+// churn (held poses 59 -> 165 in the same fight).
+const _LX_CV_PIN_CAP = _LX_CV_BUDGET_PX * (_LX_CV_BUDGET_PX < 1e8 ? 2.5 : 2);   // v0.30.1825 boss-set-pin
+let _lxCvUseSeq = 0, _lxCvUseAt = -1, _lxCvUseNow = 0;   // v0.30.1825 boss-set-pin - the stamp, memoised per game frame
+function _lxCvUseStamp() {   // v0.30.1825 boss-set-pin - marks every frame of each live boss's current form; 0 when no boss lives
+  const t = (typeof game !== 'undefined' && game) ? (game.time | 0) : 0;
+  if (t > 0 && t === _lxCvUseAt) return _lxCvUseNow;
+  _lxCvUseAt = t; _lxCvUseNow = 0;
+  const ms = (typeof game !== 'undefined' && game && game.monsters) || null;
+  if (!ms || !ms.length) return 0;
+  const st = ++_lxCvUseSeq; let any = false, want = 0;
+  const mark = (a) => { if (!Array.isArray(a)) return; const c = _lxShrinkCap(Math.max(720, a._lxBaseMin || 0));
+    for (const x of a) if (x) { x._lxCvUse = st; if (x._lxSrc) x._lxSrc._lxCvUse = st;
+      if (x.tagName === 'CANVAS') want += x.width * x.height;   // v0.30.1825 boss-set-pin - its copy as baked; a raw frame counts at the size it will bake to
+      else { const w = x.naturalWidth | 0, h = x.naturalHeight | 0, k = (w > 0 && h > 0) ? Math.min(1, c / Math.max(w, h)) : 0; want += w * h * k * k; } } };
+  const fam = (k, p) => k === p || (k.length > p.length && k.indexOf(p) === 0 && k.charCodeAt(p.length) >= 97 && k.charCodeAt(p.length) <= 122);
+  try {
+    const B = [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES, BOSS_WEAVE_FRAMES, BOSS_DUCK_FRAMES];
+    const Z = [ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES, ZODIAC_CHARGE_FRAMES, ZODIAC_POUNCE_FRAMES, ZODIAC_FLY_FRAMES, ZODIAC_TURN_FRAMES];
+    for (const m of ms) {
+      if (!m || !(m.currentHp > 0) || !(m.isBoss || m.boss || m.zodiacBoss || m.superBoss)) continue;
+      any = true;
+      if (m.zodiacSign) { for (const S of Z) if (S) mark(S[m.zodiacSign]); continue; }
+      const p = m._phaseSprite || m.type; if (!p) continue;   // v0.30.1825 boss-set-pin - gravitos3 -> gravitos3, gravitos3punch, ... (not gravitos / gravitos2*)
+      for (const S of B) if (S) for (const k in S) if (fam(k, p)) mark(S[k]);
+    }
+  } catch (e) {}
+  if (want + _LX_CV_BUDGET_PX * 0.5 > _LX_CV_PIN_CAP * 0.9) return 0;   // v0.30.1825 boss-set-pin - too big to keep whole: the old rule (see above)
+  return (_lxCvUseNow = any ? st : 0);
+}
+function _lxCvPinnedPx(st) { let n = 0; for (const [cv, e] of _lxCvLru) if (_lxCvInUse(cv, st)) n += e.px; return n; }   // v0.30.1825 boss-set-pin
+function _lxCvInUse(cv, st) { if (cv._lxCvUse === st) return true; const sr = cv._lxSrc; return !!(sr && sr._lxCvUse === st); }   // v0.30.1825 boss-set-pin - a bake / pin carries its <img> as _lxSrc
+function _lxCvTrimOldForms(target, now, st) {   // v0.30.1825 boss-set-pin - boss frames NOT in use (other forms, bosses gone), idle 5 s: first
+  for (const [cv, e] of _lxCvLru) {
+    if (_lxCvLruPx <= target || now - cv._lxLruT < _LX_CV_AWAY_MS) break;
+    const sr = cv._lxSrc;
+    if (sr && sr._lxSet && !_lxCvInUse(cv, st)) _lxCvRelease(cv, e);   // v0.30.1825 boss-set-pin - _lxSet: a boss frame (_loadBossFrames)
+  }
+}
+function _lxCvTrimCap(now) {   // v0.30.1825 boss-set-pin - past the pin cap anything idle goes (the pinned frames too), least recently drawn first
+  const to = _LX_CV_PIN_CAP * 0.9;
+  for (const [cv, e] of _lxCvLru) {
+    if (_lxCvLruPx <= to || now - cv._lxLruT < _LX_CV_HERE_MS) break;
+    _lxCvRelease(cv, e);
+  }
+}
 function _lxCvTrim() {
-  const target = _LX_CV_BUDGET_PX * 0.8, now = performance.now(), map = _lxCvMapNow();
+  const _use = _lxCvUseStamp(), _pf = _use ? Math.min(_lxCvPinnedPx(_use) + _LX_CV_BUDGET_PX * 0.5, _LX_CV_PIN_CAP * 0.9) : 0;   // v0.30.1825 boss-set-pin - 0 when no boss lives: the trim runs exactly as before
+  const target = Math.max(_LX_CV_BUDGET_PX * 0.8, _pf), now = performance.now(), map = _lxCvMapNow();   // v0.30.1825 boss-set-pin - the line rides above the pinned form
   for (const [cv, e] of _lxCvLru) {
     if (_lxCvLruPx <= target || now - cv._lxLruT < _LX_CV_AWAY_MS) break;   // the rest were drawn more recently
     if (cv._lxMapT === map && now - cv._lxLruT < 120000) continue;   // this map's copies (its monsters' rarer frames, made at warm-up) stay - for now
+    if (_use && _lxCvInUse(cv, _use)) continue;   // v0.30.1825 boss-set-pin - a live boss's current form stays
     _lxCvRelease(cv, e);
   }
   if (_lxCvLruPx <= target) return;
+  if (_use) { _lxCvTrimOldForms(target, now, _use); if (_lxCvLruPx <= target) return; }   // v0.30.1825 boss-set-pin - the boss's other forms first
   // v0.30.1790 boss-lag - a boss fight on a desktop-class budget keeps this map's copies drawn in the last 2 min until a ceiling of 1.5x the
   // budget (see _lxCvBossFight); past it, the pass below runs as before, down to 0.8x the ceiling.
   const _ceil = (_LX_CV_BUDGET_PX >= 1e8 && _lxCvBossFight()) ? _LX_CV_BUDGET_PX * 1.5 : 0;
-  if (_ceil && _lxCvLruPx <= _ceil) return;
-  const _target2 = _ceil ? _ceil * 0.8 : target;
+  if (_ceil && _lxCvLruPx <= Math.max(_ceil, _pf)) return;   // v0.30.1825 boss-set-pin - raised with the pinned form
+  const _target2 = _ceil ? Math.max(_ceil * 0.8, _pf) : target;   // v0.30.1825 boss-set-pin
   for (const [cv, e] of _lxCvLru) {   // still over with every other map's idle copy gone: this map's, least recently drawn first
     if (_lxCvLruPx <= _target2 || now - cv._lxLruT < _LX_CV_HERE_MS) break;
+    if (_use && _lxCvInUse(cv, _use)) continue;   // v0.30.1825 boss-set-pin
     _lxCvRelease(cv, e);
   }
+  if (_use && _lxCvLruPx > _LX_CV_PIN_CAP) _lxCvTrimCap(now);   // v0.30.1825 boss-set-pin - the memory line still holds
 }
 // v0.30.1790 boss-lag (per user: "reduce the boss fight lag") - A BOSS FIGHT KEEPS ITS WORKING SET. The pass above released this map's copies
 // idle for 15 s whenever the budget was over. A Gravitos fight's working set (his full-size frames, ~113M px, and the fight's
