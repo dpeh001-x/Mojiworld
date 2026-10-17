@@ -57,7 +57,9 @@ if [ "$BEHIND" = "0" ]; then
 fi
 
 # Dirty tree? Don't rebase — log and bail.
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+# --no-optional-locks: a read-only question must not take .git/index.lock - a git killed while it holds the lock
+# (a hook timeout; the Codex app cancelling its own runs) leaves a stale lock that blocks every later git command.
+if [ -n "$(git --no-optional-locks status --porcelain --untracked-files=no)" ]; then
   echo "‼ Working tree has uncommitted changes — behind origin/main by $BEHIND; run 'git pull' manually"
   exit 0
 fi

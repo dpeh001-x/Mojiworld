@@ -12,6 +12,9 @@ set -uo pipefail
 cd /c/Users/dpeh0/Mojiworld
 # resync-guard: lx_resync_one / lx_resync_verify - a re-sync that fails, or leaves bytes that are not origin's, stops the chain.
 . scripts/_ship_resync.sh || { echo "ABORT: scripts/_ship_resync.sh is missing"; exit 1; }
+# lock-proof-resync: a provably stale .git/index.lock (2+ minutes old, no running git process old enough to own it) is
+# moved aside for the other sessions' sake. Nothing below touches the shared index any more, so it never blocks a ship.
+lx_reap_stale_lock
 : "${LX_APPLY:?}" "${LX_TEST:?}" "${LX_CL:?}" "${LX_MSG:?}" "${LX_TAG:?}"
 EXTRA="${LX_EXTRA:-}"
 # UNIQUE per run: two chains running at once shared these names once and one pushed the
@@ -35,12 +38,15 @@ round () {
     # to hold. That is the exact clobber this pipeline exists to prevent. A path
     # that does not exist on origin yet is normal (new art) and is left alone;
     # the expect file below already records it as NONE and guards it.
+    # lock-proof-resync: every blob the re-sync needs, in one fetch (one lazy fetch per file was 69 for one boss form).
+    lx_resync_prefetch "$TIP" $EXTRA
     local a p
     for p in $EXTRA; do
       if git rev-parse -q --verify "$TIP:$p" >/dev/null 2>&1; then
         # resync-guard: this was `git checkout ... 2>/dev/null && break` three times, then carry on regardless - so a stale
         # .git/index.lock (2026-10-15) had every chain row-patch and ship STALE tables for two days (v0.30.1786 reverted
         # the Sundered Smith and the Pisces swing rows). A checkout that still fails after three tries now stops the chain.
+        # lock-proof-resync: it writes origin's bytes without the shared index now - no checkout, no index.lock to trip on.
         lx_resync_one "$TIP" "$p" || return 1
       else
         echo "   (new on this branch, not re-synced: $p)"

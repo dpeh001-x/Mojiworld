@@ -45,15 +45,16 @@ check(SC.includes('node "$LX_TEST" > "$log" 2>&1') && SC.includes('full output: 
     writeFileSync(path.join(R, 't.txt'), 'row a\nrow B (another session)\n'); g('add', 't.txt'); g('commit', '-qm', 'two');
     writeFileSync(path.join(R, 't.txt'), 'row a\r\nrow b\r\n');           // the stale working copy
     writeFileSync(path.join(R, '.git', 'index.lock'), '');                 // the 0-byte lock a killed git left behind
-    const r1 = sh(R, '. "' + HELPER + '"; LX_RESYNC_SLEEP=0 lx_resync_one HEAD t.txt');
-    check(r1.status !== 0 && /RE-SYNC FAILED/.test(r1.stderr) && /index\.lock exists: 0 bytes/.test(r1.stderr) && /Nothing applied, nothing pushed/.test(r1.stderr),
-      'scratch repo: a checkout blocked by a stale index.lock fails loudly and names the lock', { status: r1.status, err: r1.stderr.slice(0, 300) });
     const r2 = sh(R, '. "' + HELPER + '"; lx_resync_verify HEAD t.txt');
     check(r2.status !== 0 && /VERIFY FAILED: t\.txt/.test(r2.stderr), 'scratch repo: the stale file fails the hash check against origin', { status: r2.status, err: r2.stderr.slice(0, 200) });
+    // lock-proof-resync: the re-sync no longer goes through the index, so a stale lock neither stops it nor is touched by it
+    // (scripts/lock_proof_resync_test.mjs covers the rest: the cause reproduced, checkout-identical bytes, the reaper).
+    const r1 = sh(R, '. "' + HELPER + '"; LX_RESYNC_SLEEP=0 lx_resync_one HEAD t.txt');
+    check(r1.status === 0 && existsSync(path.join(R, '.git', 'index.lock')), 'scratch repo: a stale index.lock no longer blocks the re-sync, and is left where it is', { status: r1.status, err: r1.stderr.slice(0, 300) });
     unlinkSync(path.join(R, '.git', 'index.lock'));
-    const r3 = sh(R, '. "' + HELPER + '"; LX_RESYNC_SLEEP=0 lx_resync_one HEAD t.txt && lx_resync_verify HEAD t.txt brand_new.webp');
+    const r3 = sh(R, '. "' + HELPER + '"; lx_resync_verify HEAD t.txt brand_new.webp');
     const body = readFileSync(path.join(R, 't.txt'), 'utf8');
-    check(r3.status === 0 && body.includes('row B') && body.includes('\r\n'), 'scratch repo: with the lock gone it re-syncs, the CRLF checkout verifies, a new path is skipped', { status: r3.status, err: r3.stderr.slice(0, 200), body });
+    check(r3.status === 0 && body.includes('row B') && body.includes('\r\n'), 'scratch repo: the re-synced CRLF copy verifies, a new path is skipped', { status: r3.status, err: r3.stderr.slice(0, 200), body });
     appendFileSync(path.join(R, 't.txt'), 'row c\r\n');                   // changed after the re-sync (another local session)
     const r4 = sh(R, '. "' + HELPER + '"; lx_resync_verify HEAD t.txt');
     check(r4.status !== 0 && /VERIFY FAILED/.test(r4.stderr), 'scratch repo: a file changed after the re-sync is caught too', { status: r4.status });
