@@ -16400,7 +16400,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1830';
+const GAME_VERSION = 'v0.30.1831';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -46445,6 +46445,7 @@ setInterval(() => { try { const on = _lxChatLive(); if (on !== _lxChatStripLive)
 function _lxRefreshBindLabels() {
   try {
     document.querySelectorAll('[data-lx-bindlabel]').forEach((el) => { const t = _lxKeyLabel(el.getAttribute('data-lx-bindlabel')); if (el.textContent !== t) el.textContent = t; });
+    if (typeof _lxLiveKeyTitles === 'function') _lxLiveKeyTitles();   // v0.30.1831 release27b: the HUD / Settings tooltips that name keys
     if (typeof _lxRefreshCloseHints === 'function') _lxRefreshCloseHints();   // v0.30.1726 release9: the close footers follow a rebind too
     // v0.30.1328 keyboard remap - the desktop HUD strip names the LIVE keys (it printed the defaults forever); _lxRefreshPrompts
     // re-renders it from dataset.kbHtml for the pad, so the markup is kept there
@@ -47887,6 +47888,10 @@ const _LX_CB_RARITY = { common: '#cfd3d8', rare: '#56b4e9', epic: '#cc79a7', leg
 function _lxRarityColor(rarity, standard) {
   return (typeof game !== 'undefined' && game && game._cbRarity && _LX_CB_RARITY[rarity]) || standard;
 }
+// v0.30.1831 release27b: the standard shades of the canvas loot reads (ground drops, boon orbs) - they were inline ternaries that skipped the
+// colourblind palette, and god fell through to grey. God is the gold the bag, tooltips and gear card already use.
+const _LX_DROP_RCOL = { god: '#ffe27a', legendary: '#ffaa44', epic: '#cc88ff', rare: '#66aaff' };
+function _lxDropCol(r, common) { return _lxRarityColor(r, _LX_DROP_RCOL[r] || common); }
 // v0.29.486 (perf-pass) — raw-string memo. Two PER-FRAME callers (grid via
 // loop, _computeChibiWeight via drawPlayer) paid storage read + JSON.parse +
 // discarded objects every frame. Parse reused while raw is unchanged; the
@@ -48033,6 +48038,7 @@ function _lxSettingsToUi(s) {
   document.getElementById('set-reducemotion').classList.toggle('on', !!s.reduceMotion);
   document.getElementById('set-difficulty').value = s.difficulty || 'normal';
   window._lxSettingsUiSynced = true;
+  try { if (typeof _lxToggleA11y === 'function') _lxToggleA11y(); } catch (e) {}   // v0.30.1831 release27b: role / tabindex / aria-checked
 }
 function _lxSettingsUiEnsure() { if (!window._lxSettingsUiSynced) { try { _lxSettingsToUi(_lxGetSettings()); } catch (e) {} } }
 function openSettingsModal() {
@@ -48058,6 +48064,7 @@ function openSettingsModal() {
     }
   }
   document.getElementById('settings-modal-bg').classList.add('on');
+  try { if (typeof _lxSettingsFocusIn === 'function') _lxSettingsFocusIn(); if (typeof _lxLiveKeyTitles === 'function') _lxLiveKeyTitles(); } catch (e) {}   // v0.30.1831 release27b: first control focused; the opener gets it back on close
   // v0.29.255 — desktop wrapper only: reveal the pad-reachable Quit row.
   try { const _q = document.getElementById('set-quit-row'); if (_q && (window.SteamAPI || window.MOJI_RELAY_URL)) _q.style.display = 'flex'; } catch (e) {}
   // v0.26.x audit FIX — pause while the settings overlay is up. It is a
@@ -48116,6 +48123,177 @@ function closeSettingsModal() {
     game.paused = false;
   }
 }
+
+// =========================================================================
+// v0.30.1831 release27b - SETTINGS SWITCHES, PANEL FOCUS, LIVE KEY WORDS (settings hunter, 2026-10-17)
+// =========================================================================
+// The Settings switches are divs: they get tabindex 0, role="switch", an aria-label from the row's label and aria-checked kept
+// in step with their .on class (an observer, so every path that flips one - the onclick, _lxSettingsToUi, a reset - is covered).
+function _lxToggleAria(t) { const v = t.classList.contains('on') ? 'true' : 'false'; if (t.getAttribute('aria-checked') !== v) t.setAttribute('aria-checked', v); }
+function _lxToggleA11y() {
+  for (const t of document.querySelectorAll('.settings-row .toggle')) {
+    if (!t._lxA11y) {
+      t._lxA11y = true; t.tabIndex = 0; t.setAttribute('role', 'switch');
+      const row = t.closest('.settings-row'), lb = row && row.querySelector('label');
+      if (lb && !t.hasAttribute('aria-label')) t.setAttribute('aria-label', (lb.textContent || '').replace(/\s+/g, ' ').trim());
+      try { new MutationObserver(() => _lxToggleAria(t)).observe(t, { attributes: true, attributeFilter: ['class'] }); } catch (e) {}
+    }
+    _lxToggleAria(t);
+  }
+}
+// what Tab may land on inside a surface (shown, enabled, not taken out of the order)
+const _LX_FOCUS_SEL = 'button, [href], input:not([type="hidden"]), select, textarea, [tabindex]';
+function _lxFocusables(root) {
+  const out = [];
+  if (!root || !root.querySelectorAll) return out;
+  for (const el of root.querySelectorAll(_LX_FOCUS_SEL)) {
+    if (el.tabIndex < 0 || el.disabled || !el.getClientRects().length) continue;
+    const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+    out.push(el);
+  }
+  return out;
+}
+// the surface that owns Tab: the topmost open panel by the pad router's own scan (every registered panel, topmost wins, the
+// docked tour excluded); Settings and the pause card by name as a backstop
+function _lxFocusTrapRoot() {
+  let r = null;
+  try { r = (typeof _lxPadModalRootScan === 'function') ? _lxPadModalRootScan() : null; } catch (e) { r = null; }
+  if (!r) { const sb = document.getElementById('settings-modal-bg'); if (sb && sb.classList.contains('on')) r = sb; }
+  if (!r) r = document.getElementById('lx-pause');
+  return r || null;
+}
+// Tab / Shift+Tab walk the open surface and wrap; they never reach the HUD behind it. While a panel is open Tab is navigation,
+// so a function an older save put on Tab does not fire under it. The K panel's own capture refuses Tab while it waits for a key.
+function _lxFocusTrapTab(e) {
+  if (e._lxPad || e._lxDeck) return;
+  if (typeof _kbCapture !== 'undefined' && _kbCapture) return;
+  const root = _lxFocusTrapRoot(); if (!root) return;
+  e.preventDefault(); e.stopPropagation();
+  const fs = _lxFocusables(root); if (!fs.length) return;
+  const i = fs.indexOf(document.activeElement);
+  const n = (i < 0) ? (e.shiftKey ? fs.length - 1 : 0) : (i + (e.shiftKey ? fs.length - 1 : 1)) % fs.length;
+  try { fs[n].focus(); } catch (err) {}
+}
+document.addEventListener('keydown', (e) => {
+  try {
+    if (e._lxPad || e._lxDeck) return;
+    const t = e.target, sp = (e.key === ' ' || e.key === 'Spacebar');
+    if ((sp || e.key === 'Enter') && t && t.classList && t.classList.contains('toggle') && t.getAttribute('role') === 'switch') {
+      e.preventDefault(); e.stopPropagation(); if (!e.repeat) t.click(); return;
+    }
+    // Space presses a focused Settings button (the game's keydown cancels Space for the jump before it can; the pause card
+    // does this itself). Settings only: a dialog answer a mouse click left focused must not take a later Space.
+    if (sp && t && t.tagName === 'BUTTON' && !t.disabled && t.closest && t.closest('#settings-modal-bg')) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) t.click(); return; }
+    if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) _lxFocusTrapTab(e);
+  } catch (err) {}
+}, true);
+// Settings: focus its first control on open; on close (Done, Esc / closeAllModals, a click outside) the opener gets it back
+function _lxSettingsFocusOut(bg) {
+  const op = bg._lxOpener; bg._lxOpener = null;
+  try { if (document.activeElement && bg.contains(document.activeElement)) document.activeElement.blur(); } catch (e) {}
+  try { if (op && op.isConnected && op.getClientRects().length && (!document.activeElement || document.activeElement === document.body)) op.focus({ preventScroll: true }); } catch (e) {}
+}
+function _lxSettingsFocusIn() {
+  const bg = document.getElementById('settings-modal-bg'); if (!bg) return;
+  const a = document.activeElement;
+  if (!bg.contains(a)) {
+    bg._lxOpener = (a && a !== document.body && a !== document.documentElement) ? a : null;
+    const fs = _lxFocusables(bg); if (fs[0]) { try { fs[0].focus({ preventScroll: true }); } catch (e) {} }
+  }
+  if (!bg._lxFocusMo) {
+    try { bg._lxFocusMo = new MutationObserver(() => { if (!bg.classList.contains('on') && (bg._lxOpener !== undefined)) _lxSettingsFocusOut(bg); }); bg._lxFocusMo.observe(bg, { attributes: true, attributeFilter: ['class'] }); } catch (e) {}
+  }
+}
+// A bound Alt: the browser's menu bar (Firefox / Edge open it on the Alt release) stays shut
+function _lxAltGuard(e) { try { if (e.key === 'Alt' && !e.ctrlKey && !e.metaKey && typeof _lxBindTable === 'function' && _lxBindTable().fnOf['alt']) e.preventDefault(); } catch (err) {} }
+window.addEventListener('keydown', _lxAltGuard, true);
+window.addEventListener('keyup', _lxAltGuard, true);
+// LIVE KEY WORDS. Text AUTHORED with the default keys - the HUD / Settings tooltips and the tour's plain-text lines - is said
+// with the key each function is on now. A letter counts only when it is a function's own default (LX_BIND_BY_CANON + def), in
+// a key context: "(Z)", "(X, S, C slots)", "(PgDn)", "U key", "the M hotkey", "press / tap / hold X", and on the tour a clause
+// that opens on the key ("U is your build, Y the MojiDex"). Never run it on text that already holds live keys.
+const _LX_LIVE_WORD = { PgUp: 'pageup', PgDn: 'pagedown' };
+function _lxLiveKeyFn(lab) {
+  const k = _LX_LIVE_WORD[lab] || (/^[A-Z]$/.test(lab) ? lab.toLowerCase() : '');
+  const f = (k && typeof LX_BIND_BY_CANON !== 'undefined') ? LX_BIND_BY_CANON[k] : null;
+  return (f && f.def === k) ? f : null;
+}
+function _lxLiveKeyLab(lab) { const f = _lxLiveKeyFn(lab); if (!f) return lab; const lk = _lxFnKey(f.id); return lk === f.def ? lab : (lk ? _kbDisplay(lk) : '—'); }
+function _lxLiveKeyText(s, tour) {
+  if (typeof s !== 'string' || !s) return s;
+  try {
+    let o = s.replace(/\(((?:[A-Z]|PgUp|PgDn)(?:, (?:[A-Z]|PgUp|PgDn))*)( slots)?\)/g, (m, list, sl) => '(' + list.split(', ').map(_lxLiveKeyLab).join(', ') + (sl || '') + ')');
+    o = o.replace(/\b([A-Z]) key\b/g, (m, l) => _lxLiveKeyLab(l) + ' key');
+    o = o.replace(/\bthe ([A-Z]) hotkey\b/g, (m, l) => { const f = _lxLiveKeyFn(l); if (!f) return m; const lk = _lxFnKey(f.id); return lk ? 'the ' + _kbDisplay(lk) + ' hotkey' : 'the ' + f.short + ' hotkey (no key bound now)'; });
+    o = o.replace(/\b(press|tap|hold|hit|Press|Tap|Hold|Hit)( the)? ([A-Z]|PgUp|PgDn)(?=[\s.,;:!?)\/]|$)/g, (m, v, th, l) => v + (th || '') + ' ' + _lxLiveKeyLab(l));
+    if (tour) o = o.replace(/(^|[!.?,] )([B-HJ-Z])(?= (?:is|the) )/g, (m, p, l) => p + _lxLiveKeyLab(l));
+    return o;
+  } catch (e) { return s; }
+}
+// a function's key in words: the pad's button on a pad, else the live key, else "none" (unbound)
+function _lxSayKey(id, none) {
+  try {
+    if (typeof _lxInputDevice !== 'undefined' && _lxInputDevice === 'pad' && typeof _lxFnPrompt === 'function') return _lxFnPrompt(id);
+    const k = _lxFnKey(id); return k ? _kbDisplay(k) : none;
+  } catch (e) { return none; }
+}
+// the tooltips that name keys; re-read from their authored text each time (someone else rewriting a title makes that the source)
+function _lxLiveKeyTitles() {
+  try {
+    for (const el of document.querySelectorAll('.bar[title], .stat-item[title], .lx-idp-sp[title], #settings-modal label[title]')) {
+      const cur = el.getAttribute('title') || '';
+      if (el._lxTitleOut !== cur) el._lxTitleSrc = cur;
+      const t = _lxLiveKeyText(el._lxTitleSrc, false);
+      el._lxTitleOut = t;
+      if (cur !== t) el.setAttribute('title', t);
+    }
+  } catch (e) {}
+}
+// (a) what a save file carries. Checked in code: the save holds the character (player.difficulty since v0.30.1817, the keyboard
+// keybinds / potion picks on player); LX_SETTINGS (volume, mute, screen, graphics, accessibility) and the controller layout
+// (LX_PAD_STORE) are this browser's localStorage only.
+const _LX_SAVE_CARRIES = 'A save file carries your progress, your difficulty and your keyboard keybinds. Volume, mute, screen, graphics, accessibility and the controller layout stay with this browser.';
+function _lxSaveNote() {
+  try {
+    const lb = document.querySelector('#settings-modal .settings-row.hardsave label');
+    if (lb && !lb._lxSaveNote) { lb._lxSaveNote = true; lb.setAttribute('title', (lb.getAttribute('title') || '') + ' ' + _LX_SAVE_CARRIES); }
+    const ac = document.querySelector('#settings-modal .actions');
+    if (ac && !document.getElementById('set-savenote')) { const n = document.createElement('div'); n.id = 'set-savenote'; n.className = 'set-savenote'; n.textContent = 'Settings stay in this browser · difficulty + keybinds travel with your save'; n.title = _LX_SAVE_CARRIES; ac.insertBefore(n, ac.firstChild); }
+  } catch (e) {}
+}
+// (b) A music bed left PLAYING at volume 0 whose last fade wanted it silent is paused (as _bgmFade does at the end of a
+// fade-out): the Gravitos films' resume left the town track running at 0 beside The Singularity. A later fade-in plays it again.
+setInterval(() => {
+  try {
+    if (typeof _vidDuckBeds !== 'function' || (typeof _cineOwnsMix !== 'undefined' && _cineOwnsMix)) return;
+    for (const el of _vidDuckBeds()) {
+      if (!el || el.paused || el.volume > 0.0001 || !(el._fadeTarget != null && el._fadeTarget <= 0.0001)) continue;
+      try { el.pause(); el.currentTime = 0; } catch (e) {}
+    }
+  } catch (e) {}
+}, 1000);
+// the focus rings, the save note, the DOM flashes on the Screen Flashes slider, the colourblind shop stripes + loot toasts
+(function _lxR27bCss() { try { if (document.getElementById('lx-r27b-css')) return; const st = document.createElement('style'); st.id = 'lx-r27b-css';
+  st.textContent = [
+    '#settings-modal#settings-modal .settings-row .toggle:focus-visible { outline: 3px solid #ffe45c !important; outline-offset: 3px; }',
+    '#settings-modal#settings-modal .settings-row input[type=range]:focus-visible { outline: 2px solid #ffe45c !important; outline-offset: 4px; }',
+    '#settings-modal .actions .set-savenote { flex: 1 1 auto; min-width: 0; align-self: center; margin: 0 10px 0 2px; text-align: left; font: 700 10.5px/1.25 Nunito, system-ui, sans-serif; color: #c9c0dd; letter-spacing: 0.2px; }',
+    '@media (pointer: coarse), (max-width: 900px) { #settings-modal .actions .set-savenote { display: none; } }',
+    '#boss-intro-overlay .bi-flash, #bis-anime-strip .bis-flash, #enhance-celebration::after { filter: opacity(var(--lx-flash-k, 1)); }',
+    'body.cb-rarity #shop-modal .modal.gear-forge .shop-item.rarity-rare, body.cb-rarity #shop-modal .modal.sell-desk .sell-row.rarity-rare { box-shadow: 4px 4px 0 #0c0b10, inset 0 4px 0 #56b4e9; }',
+    'body.cb-rarity #shop-modal .modal.gear-forge .shop-item.rarity-rare:hover, body.cb-rarity #shop-modal .modal.sell-desk .sell-row.rarity-rare:hover { box-shadow: 6px 6px 0 #0c0b10, inset 0 4px 0 #56b4e9; }',
+    'body.cb-rarity #shop-modal .modal.gear-forge .shop-item.rarity-epic, body.cb-rarity #shop-modal .modal.sell-desk .sell-row.rarity-epic { box-shadow: 4px 4px 0 #0c0b10, inset 0 4px 0 #cc79a7; }',
+    'body.cb-rarity #shop-modal .modal.gear-forge .shop-item.rarity-epic:hover, body.cb-rarity #shop-modal .modal.sell-desk .sell-row.rarity-epic:hover { box-shadow: 6px 6px 0 #0c0b10, inset 0 4px 0 #cc79a7; }',
+    'body.cb-rarity #shop-modal .modal.gear-forge .shop-item.rarity-legendary, body.cb-rarity #shop-modal .modal.sell-desk .sell-row.rarity-legendary { box-shadow: 4px 4px 0 #0c0b10, inset 0 4px 0 #f0e442; }',
+    'body.cb-rarity #shop-modal .modal.gear-forge .shop-item.rarity-legendary:hover, body.cb-rarity #shop-modal .modal.sell-desk .sell-row.rarity-legendary:hover { box-shadow: 6px 6px 0 #0c0b10, inset 0 4px 0 #f0e442; }',
+    'body.cb-rarity #shop-modal .modal.gear-forge .shop-item.rarity-god, body.cb-rarity #shop-modal .modal.sell-desk .sell-row.rarity-god { box-shadow: 4px 4px 0 #0c0b10, inset 0 4px 0 #ffffff; }',
+    'body.cb-rarity #shop-modal .modal.gear-forge .shop-item.rarity-god:hover, body.cb-rarity #shop-modal .modal.sell-desk .sell-row.rarity-god:hover { box-shadow: 6px 6px 0 #0c0b10, inset 0 4px 0 #ffffff; }',
+    'body.cb-rarity .toast[data-rarity="rare"] { --tc-accent: #56b4e9; --tc-rim: rgba(86, 180, 233, 0.58); }',
+    'body.cb-rarity .toast[data-rarity="epic"] { --tc-accent: #cc79a7; --tc-rim: rgba(204, 121, 167, 0.58); }',
+    'body.cb-rarity .toast[data-rarity="legendary"] { --tc-accent: #f0e442; --tc-rim: rgba(240, 228, 66, 0.58); }'
+  ].join(' '); (document.head || document.documentElement).appendChild(st); } catch (e) {} })();
+try { _lxToggleA11y(); _lxSaveNote(); } catch (e) {}
+try { document.addEventListener('DOMContentLoaded', () => { try { _lxToggleA11y(); _lxSaveNote(); _lxLiveKeyTitles(); } catch (e) {} }); } catch (e) {}
 
 // =========================================================================
 // v0.25.801 — Jukebox (DJ Vinyl @ Everdawn Central)
@@ -48587,6 +48765,7 @@ function _applySettings(s) {
       game._uiScale = _uk;   // v0.30.x — the canvas readouts (boss plate, damage numbers) read this
     } catch (e) {}
     game._flashMul = Math.max(0, Math.min(1, (Number(s.flashPct != null ? s.flashPct : 100)) / 100));
+    try { document.documentElement.style.setProperty('--lx-flash-k', String(game._flashMul * (s.reduceMotion ? 0.4 : 1))); } catch (e) {}   // v0.30.1831 release27b: the DOM flashes (boss intro, anime strip, enhance) read it
     // v0.29.127 — colorblind rarity palette: JS reads game._cbRarity through
     // _lxRarityColor; the DOM side (tooltips, inventory borders) follows the
     // body.cb-rarity class.
@@ -53121,6 +53300,14 @@ function blackFlash(a) {
 }
 // v0.26.x — pin the screen FULLY black for N render frames (held blackout) before
 // the normal decay resumes. Used for the Gravitos final-boss arena entrance.
+// v0.30.1831 release27b: THE SCREEN FLASHES RULE FOR FULL-SCREEN TINTS DRAWN OUTSIDE flash() - the storm sky blink, the Gravitos supernova.
+// Same as flash(): Reduce Motion caps the alpha (rmCap, 0.2 by default), then the Screen Flashes slider scales it (0% = none).
+function _lxFlashA(a, rmCap) {
+  if (typeof game === 'undefined' || !game) return a;
+  if (game._reduceMotion) a = Math.min(a, rmCap == null ? 0.2 : rmCap);
+  if (game._flashMul != null) a *= game._flashMul;
+  return a;
+}
 function blackHold(f) { game.blackHoldFrames = Math.max(game.blackHoldFrames || 0, f | 0); }
 
 // =========================================================================
@@ -69374,7 +69561,7 @@ function _kbRenderBoard() {
       const cap = (typeof entry === 'string') ? { key: entry.toLowerCase(), label: entry } : entry;
       const K = cap.key, w = cap.w || 1;
       const id = t.fnOf[K], f = id ? LX_BIND_BY_ID[id] : null;
-      const res = !f && _lxKeyReserved(K);
+      const res = !f && (_lxKeyReserved(K) || K === 'tab');   // v0.30.1831 release27b
       const sub = f ? (f.emo || f.short || f.label) : (res ? 'fixed' : '');
       const cls = 'kbm-key' + (f ? ' g-' + f.group : res ? ' is-res' : ' is-free') + (srcKey && K === srcKey ? ' is-src' : '');
       html += `<div class="${cls}" data-kbm-key="${_kbEsc(K)}" style="--w:${w}" title="${_kbEsc(cap.label + (f ? ' - ' + f.label : res ? ' - fixed' : ' - free'))}">`
@@ -69423,6 +69610,7 @@ function _kbAssign(id, k) {
   const f = LX_BIND_BY_ID[id];
   _kbCapture = null;
   if (!f || !k || _lxKeyReserved(k)) { renderKeybindKeyboard(); return; }
+  if (k === 'tab') { renderKeybindKeyboard(); return; }   // v0.30.1831 release27b: Tab is menu navigation (an older save keeps a Tab it already had)
   const t = _lxBindTable();
   const old = t.keyOf[id] || '';
   if (old === k) { renderKeybindKeyboard(); return; }
@@ -69459,6 +69647,7 @@ function _kbUnbind(id) {
     ev.preventDefault(); ev.stopPropagation(); if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
     if (ev.repeat) return;
     if (k === 'escape') { _kbCapture = null; renderKeybindKeyboard(); return; }
+    if (k === 'tab') { if (typeof showToast === 'function') showToast('⚠ Tab moves between menu buttons — pick another key', 'common'); return; }   // v0.30.1831 release27b
     if (_lxKeyReserved(k)) { if (typeof showToast === 'function') showToast('⚠ ' + _kbDisplay(k) + ' belongs to ' + (k === 'escape' ? 'the interface' : 'the browser / system') + ' — pick another key', 'common'); return; }
     _kbAssign(_kbCapture, k);
   }, true);   // capture phase
@@ -69467,6 +69656,7 @@ function _kbUnbind(id) {
 function onKeybindKeyClick(K) {
   const k = String(K || '').toLowerCase();
   if (_kbCapture) {
+    if (k === 'tab') { showToast('⚠ Tab moves between menu buttons — pick another key', 'common'); return; }   // v0.30.1831 release27b
     if (_lxKeyReserved(k)) { showToast('⚠ ' + _kbDisplay(k) + ' is fixed — pick another key', 'common'); return; }
     _kbAssign(_kbCapture, k);
     return;
@@ -69506,9 +69696,9 @@ function _kbRenderInfo() {
   else if (_kbHover) { K = _kbHover; id = t.fnOf[K] || null; }
   if (!_kbHover) { body.innerHTML = '<div class="kbm-i-kick">Hover a key</div><div class="kbm-i-txt">Every key does one job. Click any control above - or its key on the board - then press the key you want.</div>'; return; }
   if (!id) {
-    const res = _lxKeyReserved(K);
+    const res = _lxKeyReserved(K) || K === 'tab';   // v0.30.1831 release27b
     body.innerHTML = `<div class="kbm-i-kick">${_kbEsc(_kbDisplay(K))} · ${res ? 'fixed' : 'free'}</div><div class="kbm-i-txt">${res
-      ? (K === 'escape' ? 'Esc pauses, closes panels and cancels a rebind. It cannot take a control.' : 'The browser or system keeps this key.')
+      ? (K === 'tab' ? 'Tab moves between the buttons of every menu. It cannot take a control.' : K === 'escape' ? 'Esc pauses, closes panels and cancels a rebind. It cannot take a control.' : 'The browser or system keeps this key.')
       : 'Nothing is on this key. Click a control above, then this key.'}</div>`;
     return;
   }
@@ -82483,7 +82673,9 @@ function loadMap(id, entryX, entryY, _ledgeArrival) {
     const _afterEntry = () => {
       game._gravitosCinePlaying = false;
       if (typeof _lxCineHold === 'function') _lxCineHold(0);   // v0.30.500
-      if (_bgmWasOn) { try { const _rp = _bgmEl.play(); if (_rp && _rp.catch) _rp.catch(() => {}); } catch (e) {} }
+      // v0.30.1831 release27b: not a track whose last fade wants it silent - the crossfade to The Singularity had faded the town track out
+      // when the films paused it, and this play() brought it back at volume 0 for the whole fight
+      if (_bgmWasOn && !(_bgmEl._fadeTarget != null && _bgmEl._fadeTarget <= 0.0001)) { try { const _rp = _bgmEl.play(); if (_rp && _rp.catch) _rp.catch(() => {}); } catch (e) {} }
       // v0.29.98 — Gravitos speaks his creed the first time you stand in the
       // Singularity (right after the entry video): the extremist manifesto
       // beat. _playStoryBeat manages its own pause/resume; if it declines
@@ -83633,9 +83825,7 @@ function applyPowerupOrb(o) {
   flash(0.3);
   addShake(3);
   // Burst particles
-  const col = o.rarity === 'legendary' ? '#ffaa44'
-            : o.rarity === 'epic' ? '#cc88ff'
-            : o.rarity === 'rare' ? '#66aaff' : '#cccccc';
+  const col = _lxDropCol(o.rarity, '#cccccc');   // v0.30.1831 release27b: colourblind palette + god
   for (let i = 0; i < 3; i++) {
     const a = (i / 3) * Math.PI * 2;
     game.particles.push({
@@ -83657,9 +83847,7 @@ function drawPowerupOrbs() {
     if (sx + 40 < 0 || sx - 40 > W) continue;
     const by = Math.sin(o.bob) * 4;
     const cy = o.y + by;
-    const col = o.rarity === 'legendary' ? '#ffaa44'
-              : o.rarity === 'epic' ? '#cc88ff'
-              : o.rarity === 'rare' ? '#66aaff' : '#dddddd';
+    const col = _lxDropCol(o.rarity, '#dddddd');   // v0.30.1831 release27b: colourblind palette + god
     // Blink when about to expire
     const blink = o.life < 2500 && Math.floor(o.life / 150) % 2 === 0;
     if (blink) continue;
@@ -100301,7 +100489,7 @@ const SKILL_FNS = {
       player._sageUntilFr = game.time + 480; player._sageShots = 0;
       player._sageFullCd = player.skillCooldowns.sage_ult || SKILLS.sage_ult.cd;
       spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'sage_ult', { size: 295, life: 80 });   // v0.30.1177 - was 240: the regenerated column has headroom (body 0.71x0.81 vs 0.90x0.98), 295 keeps its old on-screen size
-      showToast('METEOR SIGIL - tap B (x10) within 8s', 'legendary'); flash(0.5);
+      showToast('METEOR SIGIL - tap ' + _lxSayKey('skill:b', 'its key') + ' (x10) within 8s', 'legendary');   // v0.30.1831 release27b: the live key flash(0.5);
     }
     player._sageShots = (player._sageShots || 0) + 1;
     const cx = player.x + player.w / 2, cy = player.y + player.h / 2, dir = player.facing || 1;
@@ -131526,9 +131714,8 @@ function renderInventory(prefix) {
     if (it) {
       el.style.borderStyle = 'solid';
       el.className = 'equip-slot rarity-' + it.rarity;
-      el.style.borderColor = it.rarity === 'legendary' ? '#ff9944' :
-                            it.rarity === 'epic' ? '#aa66ff' :
-                            it.rarity === 'rare' ? '#4488ff' : '#aaa';
+      // v0.30.1831 release27b: the inline border overrode the colourblind CSS and turned god grey; it reads the palette now
+      el.style.borderColor = it.rarity === 'common' ? '#aaa' : _lxRarityColor(it.rarity, ({ god: '#ffe27a', legendary: '#ff9944', epic: '#aa66ff', rare: '#4488ff' })[it.rarity] || '#aaa');
       attachTooltip(el, it);
     } else {
       el.style.borderStyle = 'dashed';
@@ -133417,7 +133604,7 @@ function _lxPauseOpen() {
   const ov = document.createElement('div');
   ov.id = 'lx-pause'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Paused');
   ov.innerHTML = '<div id="lx-pause-card"><div class="lxp-title">⏸ Paused</div>'
-    + B('resume', '▶ Resume', 'Esc') + B('settings', '⚙ Settings') + B('keys', '⌨ Hotkeys &amp; Skills', 'K') + B('slots', '🗂 Save slots') + B('mp', '👥 Multiplayer')
+    + B('resume', '▶ Resume', 'Esc') + B('settings', '⚙ Settings') + B('keys', '⌨ Hotkeys &amp; Skills', _lxInputDevice === 'pad' ? 'K' : _lxSayKey('characterK', '')) + B('slots', '🗂 Save slots') + B('mp', '👥 Multiplayer')
     + ((typeof _gugumaAscendEligible === 'function' && _gugumaAscendEligible()) ? B('ascend', LX_ASCENSION_LOCKED ? '\u{1F512} Ascend (locked)' : '✨ Ascend') : '')   // v0.30.897 pad routes to both; v0.30.1453 ascension-locked - the row stays, locked
     + B('title', '🏠 Return to title') + (quit ? B('quit', '🚪 Quit to desktop') : '') + '</div>';
   ov.addEventListener('click', (e) => { if (e.target === ov) _lxPauseClose(); });   // a click outside the card resumes
@@ -134950,6 +135137,9 @@ function _tutLiveKeys(html) {
     });
   } catch (e) { return html; }
 }
+// v0.30.1831 release27b: the tour's plain-text keys ("U is your build, Y the MojiDex", "Tap A right before it hits", "Quests (Q)") said
+// the defaults after a rebind - _tutLiveKeys only reads <kbd>. On a keyboard they say the live key; a pad keeps _lxPadKeys.
+function _tutLiveWords(s) { try { return (typeof _lxInputDevice !== 'undefined' && _lxInputDevice === 'pad') ? s : _lxLiveKeyText(s, true); } catch (e) { return s; } }
 // v0.26.x — On touch devices the tour taught keyboard keys with no on-screen
 // equivalent. _tutTouchify rewrites <kbd>KEY</kbd> hints to the matching mobile
 // button glyph/label so phone players can follow along; K (rebind — keyboard-
@@ -135119,7 +135309,7 @@ function _renderTutorialStep() {
   if ($('tut-icon')) $('tut-icon').textContent = step.icon;
   // v0.26.x — #tut-title is now the fixed gold "Tutorial" banner; the per-step
   // title lives in #tut-step-title below it.
-  if ($('tut-step-title')) $('tut-step-title').textContent = (step._done ? '\u2705 ' : '') + step.title;
+  if ($('tut-step-title')) $('tut-step-title').textContent = (step._done ? '\u2705 ' : '') + _tutLiveWords(step.title);   // v0.30.1831 release27b: "Quests (Q)" says the live key
   if ($('tut-body')) $('tut-body').innerHTML = _tutTouchify((typeof step.body === 'function') ? step.body() : step.body);
   // v0.27.5 \u2014 INTERACTIVE OBJECTIVE PILL. Steps with a `tryIt` ask show a
   // "TRY IT" pill under the step title; the matching gameplay action (via
@@ -135213,7 +135403,7 @@ function _renderTutorialStep() {
   // Falls back to the default chip line if the step has no gugumaLine.
   const gline = $('tut-guguma-line');
   if (gline) {
-    gline.textContent = _lxPadKeys((_lxInputDevice === 'pad' && step.gugumaLinePad) || (_lxInputDevice !== 'pad' && typeof _lxIsTouchDevice === 'function' && _lxIsTouchDevice() && step.gugumaLineTouch) || step.gugumaLine || 'Cheep! Listen close.');   /* v0.30.1722 release8: touch lines */   // v0.30.902
+    gline.textContent = _lxPadKeys(_tutLiveWords((_lxInputDevice === 'pad' && step.gugumaLinePad) || (_lxInputDevice !== 'pad' && typeof _lxIsTouchDevice === 'function' && _lxIsTouchDevice() && step.gugumaLineTouch) || step.gugumaLine || 'Cheep! Listen close.'));   /* v0.30.1831 release27b: the live keys */   /* v0.30.1722 release8: touch lines */   // v0.30.902
     gline.classList.remove('flash');
     void gline.offsetWidth; // force reflow so re-add restarts the keyframes
     gline.classList.add('flash');
@@ -154630,6 +154820,7 @@ function _easeOutBack(t) {
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 function _rarityTrimColor(rarity) {
+  if (rarity === 'legendary' || rarity === 'epic' || rarity === 'rare') return _lxRarityColor(rarity, rarity === 'legendary' ? '#ffd84a' : rarity === 'epic' ? '#c68aff' : '#66aaff');   // v0.30.1831 release27b
   return rarity === 'legendary' ? '#ffd84a'
        : rarity === 'epic'      ? '#c68aff'
        : rarity === 'rare'      ? '#66aaff'
@@ -174891,9 +175082,7 @@ function drawDrops() {
       ctx.fillStyle = '#8888ff'; ctx.fillRect(sx - 4, d.y - 4, 3, 10);
     } else if (d.type === 'item') {
       // Glowing item orb
-      const col = d.item.rarity === 'legendary' ? '#ffaa44' :
-                  d.item.rarity === 'epic' ? '#cc88ff' :
-                  d.item.rarity === 'rare' ? '#66aaff' : '#cccccc';
+      const col = _lxDropCol(d.item.rarity, '#cccccc');   // v0.30.1831 release27b: colourblind palette + god
       const glow = Math.sin(game.time * 0.1) * 2;
       ctx.fillStyle = col + '55';
       ctx.beginPath(); ctx.arc(sx, d.y, 14 + glow, 0, Math.PI * 2); ctx.fill();
@@ -178200,10 +178389,10 @@ function _lxDrawFrame(time) {
   if ((game._lightningFlash || 0) > 0.01) {
     const _lf = game._lightningFlash;
     ctx.save();
-    const _lfq = Math.round(_lf * 550);   // v0.26.x perf — quantized string cache
+    // v0.30.1831 release27b: the sky blink obeys Screen Flashes (0% = none) and Reduce Motion (capped), like flash() - it ignored both
+    const _lfq = Math.round(_lxFlashA(_lf, 0.2) * 550);   // v0.26.x perf — quantized string cache
     if (game._lfFillQ !== _lfq) { game._lfFillQ = _lfq; game._lfFillS = 'rgba(220, 235, 255, ' + (_lfq / 1000).toFixed(3) + ')'; }
-    ctx.fillStyle = game._lfFillS;
-    ctx.fillRect(0, 0, W, H);
+    if (_lfq > 5) { ctx.fillStyle = game._lfFillS; ctx.fillRect(0, 0, W, H); }
     // Zigzag bolt — six segments down the screen. Seed-derived jitter so
     // the same flash holds shape across consecutive render frames.
     const seed = game._lightningBoltSeed || 0.5;
@@ -181366,7 +181555,7 @@ function _gravitosDefeatCutscene(onDone) {
     }
     // Implosion white flash.
     if (p > 0.86) {
-      const fp = (p - 0.86) / 0.14, fa = Math.max(0, fp < 0.55 ? fp / 0.55 : 1 - (fp - 0.55) / 0.45);
+      const fp = (p - 0.86) / 0.14, fa = _lxFlashA(Math.max(0, fp < 0.55 ? fp / 0.55 : 1 - (fp - 0.55) / 0.45), 0.2);   // v0.30.1831 release27b: Screen Flashes + Reduce Motion
       ctx.globalCompositeOperation = 'lighter';
       let fg = ctx.createRadialGradient(coreX, coreY, 0, coreX, coreY, Math.max(W, H) * 0.7 * fp);
       fg.addColorStop(0, 'rgba(255,255,255,' + fa.toFixed(3) + ')');
