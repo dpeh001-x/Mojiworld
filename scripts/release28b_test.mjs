@@ -123,7 +123,7 @@ try {
     const uc = chips.find((c) => c.id === 'usurpersCourt'), gs = chips.find((c) => c.id === 'glasswindSteppe');
     ok('[1] W after the Usurpers\' Court: no request for a region emblem it does not have (no 404 under Sprites/world/regions/)', !nb.some((u) => /regions\//.test(u)), nb);
     ok('[1] ...and no console error beyond the other 404s of that window', nc.length <= nb.filter((u) => !/regions\//.test(u)).length, { nc, nb });
-    ok('[1] the Usurpers\' Court chip shows the W node\'s emoji (no broken image, not iconless); the Last Step (an arena) is not offered', !!uc && !uc.img && uc.emo.length > 0 && !chips.some((c) => c.id === 'lastStep'), chips);
+    ok('[1] the Usurpers\' Court chip shows its painted emblem (v0.30.1840) or the W node\'s emoji (no broken image, not iconless); the Last Step (an arena) is not offered', !!uc && ((uc.img && uc.loaded) || (!uc.img && uc.emo.length > 0)) && !chips.some((c) => c.id === 'lastStep'), chips);
     ok('[1] a painted map (Glasswind Steppe) still shows its emblem', !!gs && gs.img && gs.loaded, gs);
     await page.keyboard.press('Escape'); await sleep(600);
     await page.evaluate(() => { try { if (typeof closeAllModals === 'function') closeAllModals(); } catch (e) {} });

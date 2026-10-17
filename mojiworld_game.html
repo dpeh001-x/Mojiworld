@@ -16400,7 +16400,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1840';
+const GAME_VERSION = 'v0.30.1841';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -78732,6 +78732,11 @@ const LX_EXPEDITION_MIN_MOB_LEVEL = 50;
 function _lxExpeditionMobLevel(playerLevel) {
   return Math.max(LX_EXPEDITION_MIN_MOB_LEVEL, _lxScaledMobLevel(playerLevel));
 }
+// v0.30.1841 release28c - THE TOWER BOSSES' LEVEL, SAID WHERE A RUN STARTS (per user: "Show the boss level at the gate and warn the player it is not going to
+// be easy"). The level is the spawn's own (_bossLv in the tower boss spawn: the tower level + 10), for the hero standing there - Lv 60 for a
+// Lv 30 hero, who used to find that out on B5. Bravo's main card, her first-run loot card and the friend's-code card all show it.
+function _lxExpBossLevel() { try { return _lxExpeditionMobLevel((player && player.level) || 1) + 10; } catch (e) { return 0; } }
+function _lxExpBossLine() { const lv = _lxExpBossLevel(); return lv ? `<span class="lx-exp-bosswarn" style="color:#ffb35c;font-weight:700">The Arbiter and the Sovereign wait for you at Lv ${lv}. They will not go easy on you.</span>` : ''; }
 // v0.29.316 — THE per-level stat curve, factored out of spawnMonster so the
 // scaled modes can reuse the EXACT same math natural monsters get. Must stay
 // in lockstep with _hpAtkLvExp / _hpAtkLinLv / _atkHiLvSoften at the spawn site.
@@ -79692,6 +79697,7 @@ function _expeditionSeedPrompt() {
     const _last = game._lastExpeditionSeedCode || '';
     card.innerHTML = `
       <h2 style="margin:0 0 8px; text-align:center; font-size:22px; color:#e0c8ff;">🤝 Join a Friend&rsquo;s Descent</h2>
+      <div style="text-align:center; font-size:12px; line-height:1.45; margin:0 0 10px;">${_lxExpBossLine()}</div>
       <div style="text-align:center; color:#bbb; font-size:12px; line-height:1.55; margin-bottom:16px;">
         Paste a friend&rsquo;s code and the tower builds you <b>their</b> descent &mdash;<br>
         the same floors, and Bravo deals the same blessings from the same shuffle.<br>
@@ -107207,8 +107213,11 @@ function _bossSpecialAttacks(m, dt) {
       // shove harder — he is eight levels up and swings a forge.
       const _smithRuin = Math.random() < 0.40;
       const _smithDmg = _smithRuin
-        ? Math.max(Math.floor(_maxHpNow * 0.70), Math.floor((m.atk || 200) * 4.2))
-        : Math.max(Math.floor(_maxHpNow * 0.60), Math.floor((m.atk || 200) * 3.5));
+        // v0.30.1841 release28c - HEAVY, NOT LETHAL. His 4,848 ATK made the atk term ~2.5-3x an archer's bar (Lv 45-50, T6 shop gear), so every pillar
+        // took an archer or a mage to 1 HP (the 99.9% _pctCap ceiling). The atk term is capped against the hero's own bar (before DEF, Block
+        // and the level punish): the Forge Pillar at 100% of max HP, the Ruin at 115%. A tank whose bar outweighs his ATK still takes the % floor.
+        ? Math.max(Math.floor(_maxHpNow * 0.70), Math.min(Math.floor((m.atk || 200) * 4.2), Math.floor(_maxHpNow * 1.15)))
+        : Math.max(Math.floor(_maxHpNow * 0.60), Math.min(Math.floor((m.atk || 200) * 3.5), Math.floor(_maxHpNow * 1.0)));
       _spawnFirePillars(7, 54, _smithDmg, _smithRuin ? 'the White-Hot Ruin' : 'a Forge Pillar', _smithRuin ? '#ffdd66' : '#ffaa22', 18);
       if (typeof showToast === 'function') {
         showToast(_smithRuin ? '⚒️ WHITE-HOT RUIN — 70% PILLARS! MOVE!' : '🔥🔥 SUNDERED SMITH — FORGE PILLARS! Dodge between them!', 'legendary');
@@ -112956,8 +112965,12 @@ function _hitMonsterCore(m, dmg, isCrit, skill, _rankSrc) {
   // attack path shares one roll.
   const _lxEffEva = (m._dirGhostT > 0) ? Math.floor((m.evasion || 0) * 2.5) + 60 : (m.evasion || 0);
   // v0.30.1420 bastion-fix - player._lxSureHit: performAround's sureHit option, set only around its own hitMonster call
+  // v0.30.1841 release28c - THE BOSS MISS RULES TAKE THE FULL BOSS IDIOM. They read m.boss only, which a mini-boss / Elder (isMiniBoss) never carries, so
+  // Elder Arlen (evasion 220 -> 308 as an Elder) rolled the level gap and a 0.15 floor: 13-18% of hits landed at his own level. Ordinary
+  // elites and rare spawnChance elites carry none of these flags and keep the old rules.
+  const _lxBossRules = !!(m.isBoss || m.boss || m.zodiacBoss || m.isMiniBoss || m.superBoss || m.hyperBoss);
   const _lxBasicMiss = (!MISS_EXEMPT_SKILLS.has(skill) && typeof player !== 'undefined' && player && !player._oneShot && !player._lxSureHit)
-    ? ((!m.boss && !_rollHitVsLevelGap(_mobLevel(m))) || (_lxEffEva > 0 && !_rollAccuracyHit(getAccuracy(), _lxEffEva, m.boss ? 0.45 : 0.15)))
+    ? ((!_lxBossRules && !_rollHitVsLevelGap(_mobLevel(m))) || (_lxEffEva > 0 && !_rollAccuracyHit(getAccuracy(), _lxEffEva, _lxBossRules ? 0.45 : 0.15)))
     : false;
   // v0.29.298 — SYNERGY: Shatter Point (freeze + critd). A hit on a FROZEN
   // target is always a critical. Resolved here, before the damage stack reads
@@ -121299,7 +121312,7 @@ function tryPortal() {
         const _bossShade = (typeof _arenaBossSpriteUrl === 'function') ? _arenaBossSpriteUrl(destMap) : null;
         _openConfirmDialog(
           '⚠ Boss Arena Ahead',
-          `Step into ${_bossMapName}? A boss awaits — make sure you are prepared.${_lvLine}`,
+          `Step into ${_bossMapName}? A boss awaits — make sure you are prepared.${(typeof _lxArenaCardTail === 'function') ? _lxArenaCardTail(destMap, _recLv, _lvLine) : _lvLine}`,
           'Enter the arena',
           () => { closeDialog(); loadMap(po.dest, entryX, entryY, true); },
           'Not yet',
@@ -121341,7 +121354,40 @@ function _lxQuestTalkWanted() {
 // boss)"), while the dialog and the under-level toast name _lxArenaRecLevel: Krook Throne read 45+, 50 and 40+. Both now name this one.
 function _lxWmRecLv(m) { try { if (m && m.isBossArena && typeof _lxArenaRecLevel === 'function') { const r = _lxArenaRecLevel(m) | 0; if (r > 0) return r; } } catch (e) {} return m ? m.levelReq : 0; }
 function _lxArenaDoorLv(dest) { const c = _lxArenaDoorLv._c || (_lxArenaDoorLv._c = Object.create(null)); if (c[dest] === undefined) { const m = (typeof MAPS !== 'undefined' && MAPS) ? MAPS[dest] : null; c[dest] = (m && m.isBossArena) ? (_lxWmRecLv(m) | 0) : 0; } return c[dest]; }   // memo: drawn per door per frame
-function _lxArenaRecLevel(M) { let lv = (M && M.levelReq) | 0; try { const bt = M && M.bossType; if (bt) for (const id in QUESTS) { const q = QUESTS[id]; if (q && q.kind === 'boss' && q.target === bt && (q.levelReq | 0) > 0 && (!lv || (q.levelReq | 0) < lv)) lv = q.levelReq | 0; } } catch (e) {} try { if (M && M.isZodiac && M.zodiacSign && typeof _lxStarBossLv === 'function') { const _zl = _lxStarBossLv(M.zodiacSign); if (_zl > 0) lv = _zl; } } catch (e) {} return lv; }   // v0.30.1764 release24: a star arena names its own boss's level (every star door said 70+)
+// v0.30.1841 release28c - THE BOSS BEHIND AN ARENA DOOR (per user: "Warn the player it is not going to be easy"). The key is the one the card's silhouette
+// uses (_arenaBossSpriteUrl: bossType, else the boss spawn, a zodiac arena's own sign); the level is the one it spawns at (its type's level,
+// a star boss's _lxStarBossLv, the tower bosses' _lxExpBossLevel). The name stops at its title ("Gravitos, the Weight-Bearer" -> Gravitos).
+function _lxArenaBossInfo(M) {
+  try {
+    if (!M) return null;
+    let key = M.bossType;
+    if (!key && Array.isArray(M.spawns)) { const sp = M.spawns.find((x) => x && x.boss && x.type); if (sp) key = sp.type; }
+    if (key === 'zodiac_' || (key && key.endsWith('_'))) key = M.zodiacSign ? ('zodiac_' + M.zodiacSign) : null;
+    const t = key && monsterTypes[key]; if (!t) return null;
+    let lv = t.level | 0;
+    if (M.isZodiac && M.zodiacSign && typeof _lxStarBossLv === 'function') { const z = _lxStarBossLv(M.zodiacSign); if (z > 0) lv = z; }
+    if (key === 'towerArbiter' || key === 'towerSovereign') lv = _lxExpBossLevel();
+    return lv > 0 ? { key, name: String(t.name || key).split(',')[0].trim(), lv } : null;
+  } catch (e) { return null; }
+}
+// the card's warning line: at or under the recommended level it says so plainly, between that and the boss's level it still warns, and a
+// hero at or over the boss's level just reads the two levels.
+function _lxArenaWarnLine(M, rec) {
+  const b = _lxArenaBossInfo(M); if (!b) return '';
+  const pl = (player && player.level) | 0, r = rec | 0;
+  const tail = ((r > 0 && pl <= r) || (r <= 0 && pl < b.lv)) ? ' - this will not be easy.' : (pl < b.lv) ? ' - still a hard fight.' : '.';
+  return 'Lv ' + b.lv + ' ' + b.name + ' \u00b7 you\'re Lv ' + pl + tail;
+}
+// the card body's tail: with the warning it drops the blank line before "Recommended level", so its three lines fit the card's text box at
+// 844x390 without scrolling (the box does not scroll itself, and the clipped last line was the warning)
+function _lxArenaCardTail(M, rec, lvLine) {
+  const w = _lxArenaWarnLine(M, rec); if (!w) return lvLine || '';
+  const r = String(lvLine || '').trim();
+  return '\n' + (r ? r + '\n' : '') + w;
+}
+// v0.30.1841 release28c - ...but never far below the boss behind the door: when the boss out-levels that by more than 10, the door names the boss's
+// level - 10 (the Singularity said 70+ for a Lv 100 Gravitos whose quest opens at 90; Krook / Gelwater keep their quest levels).
+function _lxArenaRecLevel(M) { let lv = (M && M.levelReq) | 0; try { const bt = M && M.bossType; if (bt) for (const id in QUESTS) { const q = QUESTS[id]; if (q && q.kind === 'boss' && q.target === bt && (q.levelReq | 0) > 0 && (!lv || (q.levelReq | 0) < lv)) lv = q.levelReq | 0; } } catch (e) {} try { const _rbt = M && M.bossType, _rbm = _rbt && monsterTypes[_rbt]; const _rbl = ((_rbm && _rbm.level) | 0) || ((_rbt && typeof MOB_NATURAL_LEVEL !== 'undefined' && MOB_NATURAL_LEVEL[_rbt]) | 0); if (_rbl - 10 > lv) lv = _rbl - 10; } catch (e) {} try { if (M && M.isZodiac && M.zodiacSign && typeof _lxStarBossLv === 'function') { const _zl = _lxStarBossLv(M.zodiacSign); if (_zl > 0) lv = _zl; } } catch (e) {} return lv; }   // v0.30.1764 release24: a star arena names its own boss's level (every star door said 70+)
 function _lxTalkTarget() {
   const _tw = (typeof _lxQuestTalkWanted === 'function') ? _lxQuestTalkWanted() : {};   // v0.30.1748 release17
   if (typeof game === 'undefined' || !game || !Array.isArray(game.npcs) || typeof player === 'undefined' || !player) return null;
@@ -123069,7 +123115,7 @@ So… do you need a lift?`;
         // accepting the loot rule; after that it is repeated in the speech, not re-asked.
         // The rule comes FIRST and the whole card fits the prose box's first lines: the first
         // version opened with two lines of flavour and cut its key sentence at "...WHEN THE".
-        text = `<span style="color:#ff6b6b;font-weight:800;letter-spacing:.2px">\u26a0 EVERYTHING YOU LOOT IN THE TOWER IS REMOVED WHEN THE RUN ENDS.</span>\n\u2715 Gear (even gear you put on) \u00b7 items \u00b7 potions \u00b7 boons \u00b7 Mojicoins\n\u2713 Kept: <b>EXP and levels</b>, and the victory rewards (bonus Mojicoins, Setshards, titles)\n\n*She stops you with two fingers on your wrist.* Win, die or walk out \u2014 the same rule. I would rather you heard it from me than found out at the bottom.`;
+        text = `<span style="color:#ff6b6b;font-weight:800;letter-spacing:.2px">\u26a0 EVERYTHING YOU LOOT IN THE TOWER IS REMOVED WHEN THE RUN ENDS.</span>\n\u2715 Gear (even gear you put on) \u00b7 items \u00b7 potions \u00b7 boons \u00b7 Mojicoins\n\u2713 Kept: <b>EXP and levels</b>, and the victory rewards (bonus Mojicoins, Setshards, titles)\n\n*She stops you with two fingers on your wrist.* Win, die or walk out \u2014 the same rule. I would rather you heard it from me than found out at the bottom.\n\n${_lxExpBossLine()}`;
         opts.push({ t:'\u269c I understand \u2014 loot is removed. Begin', cb:() => {
           player._expLootAck = true;
           if (typeof saveState === 'function') saveState();
@@ -123091,7 +123137,7 @@ So… do you need a lift?`;
         opts.push({ t:'◈ The weight', cb: _say(`<b>The strip above this conversation.</b>\n\n${LX_EXPEDITION_DIFFICULTY_ORDER.map((k) => { const d = LX_EXPEDITION_DIFFICULTY[k]; return `${d.icon} <b>${d.label}</b> — everything down there hits and holds at ${_pc(d.stat)}, and pays ${_pc(d.reward)}.`; }).join('\n')}\n\nThe numbers don't match on purpose. A lost run pays only for the floors you reached, so the safer setting is worth more than its lower pay suggests, and the harder one less than its higher pay.\n\nIt locks when you step through. Choose up here, not on Floor 9.`) });
         opts.push({ t:'◀ Back to the portal', cb:() => { game._expInfo = null; openNPC(npc); } });
       } else {
-      text = `<span style="color:#ff6b6b;font-weight:800;letter-spacing:.2px">\u26a0 Everything you loot in the tower is REMOVED when the run ends.</span> You keep only EXP, levels and the victory rewards.\n\n*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready — and you won't walk it alone.\n\nYou don't climb toward a sunrise here. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and carry the dream back up.\n\nYou go down on purpose. Ten floors. I'll be at every one.`;
+      text = `<span style="color:#ff6b6b;font-weight:800;letter-spacing:.2px">\u26a0 Everything you loot in the tower is REMOVED when the run ends.</span> You keep only EXP, levels and the victory rewards.\n\n*Bravo offers her hand. The portal behind her shimmers in tones of violet and gold.*\n\nGood. You're ready — and you won't walk it alone.\n\nYou don't climb toward a sunrise here. You <b>descend</b> — into the part of yourself that decided the nightmare was safer than waking — and carry the dream back up.\n\nYou go down on purpose. Ten floors. I'll be at every one.\n\n${_lxExpBossLine()}`;
       const _ackThen = (go) => { if (player && player._expLootAck) { go(); return; } game._expAckNext = go; game._expInfo = 'ack'; openNPC(npc); };   // v0.30.884 — loot rule
       opts.push({ t:`⚜ Begin Expedition — ${_dSel.icon} ${_dSel.label} (Lv ${_lv})`, cb:() => _ackThen(() => {   // v0.30.884 — loot rule
         game._expInfo = null;
@@ -124200,9 +124246,11 @@ function _runDialogTypewriter(text) {
   const step = () => {
     if (idx >= tokens.length) {
       clearInterval(dlg._twTimer); dlg._twTimer = null;
+      const _twEndAtBottom = _twAtBottomNow();   // v0.30.1841 release28c: a reader following the reveal stays at the bottom through the re-measure below
       if (caret.parentNode) caret.parentNode.removeChild(caret);
       if (dlg) dlg.classList.remove('typing');
       try { _lxFitDialog(); } catch (e) {}   // per user (2026-10-12): the finished card is measured once more - fonts and the answer buttons have settled by now
+      if (_twEndAtBottom) _twFollow(true);
       return;
     }
     const t = tokens[idx++];
@@ -170871,17 +170919,40 @@ const ZODIAC_AI = {
     // melee player simply camped on top of it. If crowded (<200px), it now
     // back-leaps and looses a point-blank knockback volley (12% maxHP) so the
     // player is forced back out into its ranged kit.
-    if (dist < 200 && ((m._sagKickAt | 0) <= (game.time | 0))) {
+    // v0.30.1841 release28c - THE VOLLEY WINDS UP. It hit on the very tick the hero came within 200 px, every 1.5 s, with no tell, through Block, and
+    // straight off player.hp (no _diffDmg - pause guard, Second Skin - and a number that was not the loss). Now she roots and draws for
+    // 300 ms (18 sim steps, gold sparks, attack pose), then back-leaps and looses it: a hero who steps out (230 px) is not hit, and a hit
+    // takes the Leo-pounce path (Block x0.3, warrior DR, Aegis, _diffDmg at her level, _lxLost / _lxShownLost).
+    if (dist < 200 && !m._sagKickWind && ((m._sagKickAt | 0) <= (game.time | 0))) {
       m._sagKickAt = (game.time | 0) + 90;
-      m.vx = -dir * 6; m.vy = -4;
-      if (player.invulnerable <= 0) {
-        player.vx = dir * 14; player.vy = -6; player.hitStun = 260;
+      m._sagKickWind = (game.time | 0) + 18;
+      m.vx = 0;
+      m.atkAnimUntil = Math.max(m.atkAnimUntil || 0, ((typeof _lxFrameNow === 'function') ? _lxFrameNow() : performance.now()) + 520);
+      if (game.particles) for (let _k = 0; _k < 12; _k++) { const _ka = (_k / 12) * Math.PI * 2; game.particles.push({ x: m.x + m.w / 2 + dir * m.w * 0.3 + Math.cos(_ka) * 30, y: m.y + m.h * 0.45 + Math.sin(_ka) * 30, vx: -Math.cos(_ka) * 1.4, vy: -Math.sin(_ka) * 1.4, life: 20, color: '#ffcc44', size: 3 }); }
+    } else if (m._sagKickWind && (game.time | 0) < m._sagKickWind) {
+      m.vx = 0;
+      if (game.particles && (game.time | 0) % 3 === 0) game.particles.push({ x: m.x + m.w / 2 + dir * m.w * 0.3, y: m.y + m.h * 0.45, vx: dir * 0.6, vy: -0.4, life: 14, color: '#ffe08a', size: 4 });
+    }
+    if (m._sagKickWind && (game.time | 0) >= m._sagKickWind) {
+      const _kLate = ((game.time | 0) - m._sagKickWind) > 30;   // a stun or a menu outlasted the draw: the volley is dropped, not fired late
+      m._sagKickWind = 0;
+      const _kdx = (player.x + player.w / 2) - (m.x + m.w / 2);
+      const _kDir = Math.sign(_kdx) || dir || 1;
+      m.vx = -_kDir * 6; m.vy = -4;
+      // not gated on i-frames (the Sun Pounce's reason): inside 200 px her body is already touching the hero, so a touch during the draw
+      // would hand out the i-frames that silently swallow the volley it telegraphed. It grants its own 400 ms instead.
+      if (!_kLate && player.hp > 0 && dist < 230) {   // dist: the same gap that started the draw, read again now
+        player.vx = _kDir * 14; player.vy = -6; player.hitStun = 260;
         const _km = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-        const _kd = Math.floor(_km * 0.12 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25%
-        player.hp -= (player._god ? 0 : _kd);
+        let _kd = Math.floor(_km * 0.12 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25%
+        if (player.blockTimer > 0) { _kd = Math.max(1, Math.floor(_kd * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }   // v0.30.1841 release28c: Block, DR, Aegis, _diffDmg, _lxLost
+        if (player.cls === 'warrior' && typeof _warriorDr === 'function') _kd = Math.max(1, Math.floor(_kd * _warriorDr()));
+        if (player._aegis) _kd = Math.max(1, Math.floor(_kd * 0.5));
+        player.hp -= (player._god ? _lxLost(0, _kd) : _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_kd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _kd));
+        player.invulnerable = Math.max(player.invulnerable || 0, 400);
         if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 140, 0, 0.12, "Sagittarius's Point-Blank Volley", '#ffcc44');
         player.lastHitTime = game.time; player._lastDamageSource = "Sagittarius's Point-Blank Volley";
-        if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _kd, life: 45, color: '#ffcc44', size: 16 });
+        if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 45, color: '#ffcc44', size: 16 });
       }
       if (typeof showToast === 'function' && (m._sagKickToast | 0) < (game.time | 0)) { m._sagKickToast = (game.time | 0) + 200; showToast('🏹 Sagittarius kicks you back — keep your distance!', 'rare'); }
     }
@@ -170988,11 +171059,14 @@ const ZODIAC_AI = {
         const _pmx = player.x + player.w/2, _pmy = player.y + player.h/2;
         if (player.invulnerable <= 0 && Math.abs(_pmx - m._sagMarkX) < 70 && Math.abs(_pmy - m._sagMarkY) < 70) {
           const _sm = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-          const _sd = Math.floor(_sm * 0.24 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25%
-          player.hp -= (player._god ? 0 : _sd);
+          let _sd = Math.floor(_sm * 0.24 * LX_ZODIAC_DMG_MUL);   // v0.30.388 — zodiac damage −25%
+          if (player.blockTimer > 0) { _sd = Math.max(1, Math.floor(_sd * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }   // v0.30.1841 release28c: Block, DR, Aegis, _diffDmg, _lxLost
+          if (player.cls === 'warrior' && typeof _warriorDr === 'function') _sd = Math.max(1, Math.floor(_sd * _warriorDr()));
+          if (player._aegis) _sd = Math.max(1, Math.floor(_sd * 0.5));
+          player.hp -= (player._god ? _lxLost(0, _sd) : _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_sd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _sd));
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m._sagMarkX, m._sagMarkY, 70, 0, 0.24, "Sagittarius's Marked Shot", '#ffaa44');   /* bughunt boss-5: the marked spot, not the arena */
           player.lastHitTime = game.time; player._lastDamageSource = "Sagittarius's Marked Shot";
-          if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _sd + ' MARKED', life: 60, color: '#ffaa44', size: 20, big: true });
+          if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost() + ' MARKED', life: 60, color: '#ffaa44', size: 20, big: true });
         }
         flash(0.3); addShake(8); audio.play('crit');
       }
@@ -171483,11 +171557,14 @@ const ZODIAC_AI = {
           const _px = player.x + player.w/2, _py = player.y + player.h/2;
           if (player.invulnerable <= 0 && Math.abs(_px - m._tidalX) < 80 && Math.abs(_py - m._tidalY) < 80) {
             const _tm = (typeof getMaxHp === 'function') ? getMaxHp() : 100;
-            const _td = Math.floor(_tm * 0.26);
-            player.hp -= (player._god ? 0 : _td);
+            let _td = Math.floor(_tm * 0.26);
+            if (player.blockTimer > 0) { _td = Math.max(1, Math.floor(_td * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }   // v0.30.1841 release28c: Block, DR, Aegis, _diffDmg, _lxLost
+            if (player.cls === 'warrior' && typeof _warriorDr === 'function') _td = Math.max(1, Math.floor(_td * _warriorDr()));
+            if (player._aegis) _td = Math.max(1, Math.floor(_td * 0.5));
+            player.hp -= (player._god ? _lxLost(0, _td) : _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_td, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _td));
             if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m._tidalX, m._tidalY, 90, 0, 0.26, "Pisces's Tidal Crush", '#aa66ff');   /* bughunt boss-5: 90, the host's +-80 box (was 240) */
             player.lastHitTime = game.time; player._lastDamageSource = "Pisces's Tidal Crush"; player.hitStun = 300;
-            if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _td + ' CRUSH', life: 60, color: '#aa66ff', size: 20, big: true });
+            if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost() + ' CRUSH', life: 60, color: '#aa66ff', size: 20, big: true });
           }
         }
       }
