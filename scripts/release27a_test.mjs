@@ -117,7 +117,13 @@ const memory = async (opts, nm) => {
   }
   const sw = await page.evaluate(() => { const a = player.attackCooldown || 0; return { at: game.time }; });
   const before = await page.evaluate(() => ({ att: !!player.attacking, t: player.attackTimer || 0 }));
-  let swung = false; for (let i = 0; i < 4 && !swung; i++) { await page.keyboard.down('z'); await page.waitForTimeout(110); await page.keyboard.up('z'); await page.waitForTimeout(250); swung = await page.evaluate(() => !!player.attacking || (player.attackTimer || 0) > 0 || (player.attackCooldown || 0) > 0); }
+  // release27d: the swing is counted while it happens (slot-'d' casts + rising edges of the attack pose). One read 250 ms after the key came
+  // up missed it: Magic Bolt's swing and its 270 ms gate were over by then, and the next presses fell inside its 1.2 s cooldown.
+  await page.evaluate(() => { window.__sw = { casts: 0, edge: 0, prev: !!player.attacking || (player.attackTimer || 0) > 0 }; window.__c0 = window.castSkill;
+    window.castSkill = function (id) { const k = SKILLS[id]; if (k && k.slot === 'd') window.__sw.casts++; return window.__c0.apply(this, arguments); };
+    window.__swIv = setInterval(() => { const a = !!player.attacking || (player.attackTimer || 0) > 0; if (a && !window.__sw.prev) window.__sw.edge++; window.__sw.prev = a; }, 10); });
+  let swung = false; for (let i = 0; i < 4 && !swung; i++) { await page.keyboard.down('z'); await page.waitForTimeout(110); await page.keyboard.up('z'); await page.waitForTimeout(250); swung = await page.evaluate(() => window.__sw.casts > 0 && window.__sw.edge > 0); }
+  await page.evaluate(() => { clearInterval(window.__swIv); if (window.__c0) window.castSkill = window.__c0; });
   await page.waitForFunction(() => performance.now() - window.__bi.t0 - window.__bi.arm >= 4000, null, { timeout: 30000 });
   const R = await page.evaluate(() => { clearInterval(window.__biPoll); const B = window.__bi, hud = document.getElementById('prologue-hud'), co = document.getElementById('prologue-coach');
     const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).display !== 'none';

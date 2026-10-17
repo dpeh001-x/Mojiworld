@@ -16400,7 +16400,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1832';
+const GAME_VERSION = 'v0.30.1833';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -60247,6 +60247,29 @@ function _mpPushLog(line, cls) {
 // button beside the screen tabs such as chat and minimap". State persists in
 // localStorage; collapse hides the log / minimap canvas and turns the button
 // into a restore chip.
+// v0.30.1833 release27c - THE CHAT LOG STEPS OUT OF THE BOSS BAR'S WAY (phone). The v0.30.1756 phone rule parks the log at the top centre (top 128),
+// which is where a boss bar's plate hangs: the "Connected to ws://... / Joined room..." lines sat over the boss HP for the whole fight.
+// While a boss bar is up the log sits 6 px under the plate (game._lxBossPlateBox, the box drawSuperBossBar measures each frame), and on a
+// phone it fades 8 s after the last line (4 s when that line is a system line) and comes back with the next one, or while chat is open.
+// The desktop log lives bottom-left, clear of the bar: unchanged.
+function _lxChatPlace() {
+  try {
+    const el = document.getElementById('mp-chat-log'); if (!el || el.style.display === 'none') return;
+    const btn = document.getElementById('mp-chat-min');
+    const phone = document.body.classList.contains('mc-landscape') && !document.body.classList.contains('hide-mobile-ctrl');
+    let top = '';
+    if (phone && typeof game !== 'undefined' && game) {
+      const sb = game._superBossRef, bx = game._lxBossPlateBox;
+      if (sb && sb.currentHp > 0 && Array.isArray(bx) && +bx[2] > 0) { const t = Math.round(+bx[2] + 6); if (t > 128) top = t + 'px'; }
+    }
+    if (el.style.top !== top) { el.style.top = top; if (btn) btn.style.top = top; }
+    const now = Date.now(), last = +net._lxChatAt || 0, hold = net._lxChatSys ? 4000 : 8000;
+    const fade = phone && !net.chatOpen && last > 0 && now - last > hold;
+    if (el.classList.contains('lx-chat-fade') !== fade) { el.classList.toggle('lx-chat-fade', fade); if (btn) btn.classList.toggle('lx-chat-fade', fade); }
+  } catch (e) {}
+}
+try { if (!window._lxChatPlaceT) window._lxChatPlaceT = setInterval(_lxChatPlace, 300); } catch (e) {}
+_mpPushLog = (function (_o) { return function (line, cls) { try { net._lxChatAt = Date.now(); net._lxChatSys = (cls === 'sys'); } catch (e) {} return _o.apply(this, arguments); }; })(_mpPushLog);
 window._hudMin = window._hudMin || { chat: false, minimap: false };
 try {
   window._hudMin.chat    = localStorage.getItem('lx_hud_min_chat') === '1';
@@ -61610,6 +61633,7 @@ function _lxCoopTgOf(m) {
   if (m._ruin && m.type === 'vigil_vermillion' && typeof m._ruin.t0 === 'number') (o = o || {}).ru = [Math.max(0, (game.time | 0) - m._ruin.t0), m._ruin.dir > 0 ? 1 : -1];
   if (m.type === 'octobaby' && m._crazyActive && m._crazyPhase === 'telegraph') (o = o || {}).om = r(m._crazyTime);
   if (m._shackleTele > 0 && m._shackleTgt != null) (o = o || {}).sk = [r(m._shackleTele), +m._shackleTgt];
+  if (m._despState === 'warning' && m.zodiacSign) (o = o || {}).dp = [r(m._despTimer), m._despMove === 'hp1' ? 1 : 0];   // v0.30.1833 release27c: a star's desperation windup (HEAVENSPLIT / MANA REND)
   return o;
 }
 function _lxCoopTgApply(m, tg) {
@@ -61643,8 +61667,91 @@ function _lxCoopTgApply(m, tg) {
       game.particles.push({ x: px + Math.cos(a) * rr, y: py + Math.sin(a) * rr, vx: -Math.cos(a) * 2.4, vy: -Math.sin(a) * 2.4, life: 16, color: th.pc[(Math.random() * 3) | 0], size: 3 });
     }
   }
+  // v0.30.1833 release27c: a star's desperation windup - the host's toast once per windup, then the charging motes over the mirror
+  { const a = arr(o.dp, 2);
+    if (a) { m._despState = 'warning'; m._despMove = +a[1] === 1 ? 'hp1' : 'mp0'; m._despTimer = num(a[0], 0, 9000);
+      if (!m._lxDpSeen && typeof _lxDespWarnLocal === 'function') _lxDespWarnLocal(m);
+      m._lxDpSeen = true;
+      if (game.particles && Math.random() < 0.6) game.particles.push({ x: m.x + m.w / 2 + (Math.random() - 0.5) * m.w * 0.6, y: m.y + m.h / 2 + (Math.random() - 0.5) * m.h * 0.6, vx: (Math.random() - 0.5) * 0.6, vy: -0.8 - Math.random() * 1.2, life: 28, color: m._despMove === 'hp1' ? '#ff4466' : '#66aaff', size: 3 });
+    } else { m._lxDpSeen = false; if (m._despState === 'warning') m._despState = null; } }
   m._lxSkSeen = mine;
 }
+function _lxDespWarnLocal(m) {
+  try {
+    const z = (typeof _zodiacConfig === 'function') ? _zodiacConfig(m) : null; if (!z) return;
+    const label = (m._despMove === 'hp1') ? `${z.glyph} ${_lxZodiacSign(z)} — HEAVENSPLIT incoming!` : `${z.glyph} ${_lxZodiacSign(z)} — MANA REND incoming!`;
+    if (typeof showToast === 'function') showToast(label, 'legendary');
+    if (typeof flash === 'function') flash(0.4); if (typeof addShake === 'function') addShake(8);
+    if (typeof audio !== 'undefined' && audio.play) audio.play('crit');
+  } catch (e) {}
+}
+// v0.30.1833 release27c - A BOSS'S CALLS REACH THE PARTY. Phase, enrage and mechanic toasts ("ENRAGED - final stand!", "Phase 3!", Libra's
+// Stormcallers and her UNBALANCED call, every "JUMP!" / "MOVE!" / "find the gap") are raised inside host-only boss AI, so a guest saw the
+// attack and never the instruction. The host forwards the ones that tell the party what to do (an allowlist over the text with its
+// emoji and dashes stripped; calls about the host's own hero - its sins, its bubble, "you shook him off" - are not on it) on the ping
+// frame to partners on its map while a boss lives there; the guest checks the same list, its map, a live boss and its own recent
+// toasts (no doubles), and shows the same words. The desperation warning rides tg instead (above).
+const _LX_BOSS_SAY = [
+  /^.{1,60} the fight changes!$/, /^.{1,60} ENRAGED final stand!$/, /^.{1,30} Phase \d!$/, /^.{1,30} is SPENT \d{1,2}s to recover$/,
+  /^.{1,30} gathers its pride again!$/, /^.{1,30} astral volley!$/, /^BREAK .{1,60} buckles\. PUNISH!$/, /^.{1,60} is STAGGERED punish it!$/,
+  /^.{1,60}'s attack is broken off!$/, /^Ward shattered 3 s at 1\.5 damage!$/, /^CRUSHING CHARGE - get out of the lane!$/, /^The Keeper calls its hounds!$/,
+  /^Archon enraged!$/, /^ELDER ARLEN (CORONATION OF RUIN|CRIMSON VOLLEY)!$/, /^CROWN REGALIA shatter the shards to break the shield!$/,
+  /^REGALIA SHATTERED the Sovereign is EXPOSED!$/, /^The Regalia holds\. The Sovereign advances\.$/, /^SOVEREIGN (Singularity Collapse incoming|DRAIN PILLARS! Run)!$/,
+  /^The Eleven hold\. She turns back once more\.$/, /^LEGOSAURUS EARTHQUAKE! Jump!$/, /^ABYSSAL INK dodge it!$/, /^MASTER CONDUCTOR TICKET STORM!$/,
+  /^The Conductor calls reinforcements!$/, /^BARNABY'S WRATH 70% PILLARS! MOVE!$/, /^BARNABY FIRE PILLARS! Dodge between them!$/,
+  /^THE SMITH QUENCHES steel hardens\. Wait for the glow\.$/, /^WHITE-HOT strike while the iron is hot!$/, /^SUNDERED SMITH (HAMMER WHEEL|FORGE PILLARS! Dodge between them)!$/,
+  /^WHITE-HOT RUIN 70% PILLARS! MOVE!$/, /^RING OF THE BROKEN ANVIL jump the wave!$/, /^King Gloopaloo .{1,40}!$/, /^GOO BARRAGE JUMP to keep moving!$/,
+  /^King Gloopaloo dissolves\.\.\.$/, /^BIG GLUE BALLS dodge wide!$/, /^KING GLOOPALOO SLAMS THE GROUND JUMP!$/, /^AETHERION UNLEASHED final form!$/,
+  /^Reality tears open!$/, /^The celestial choir answers!$/, /^ASTRAL JUDGEMENT HEAL \+ DODGE!$/, /^DEATH ORBS DODGE!$/, /^GRAVITOS COLLAPSES density rises$/,
+  /^EVENT HORIZON everything falls$/, /^HYPERSPACE WARP$/, /^.{1,40} INCOMING MOVE!$/, /^SOUL DRAIN BREAK LINE OF SIGHT!$/, /^SINGULARITY COLLAPSE find a safe zone!$/,
+  /^EVENT COLLAPSE RAIN 4 boxes incoming!$/, /^LASER SWEEP$/, /^GRAVITOS ZIPS$/, /^GRAVITY CRUSH$/, /^BLACK HOLE( EVENT HORIZON)?$/, /^(5 )?CHASE COMETS$/,
+  /^VOID RING( 24 shards)?$/, /^CRUSH TENDRILS keep moving!$/, /^DECAY FLOOR( find the gap)?$/, /^Mooma summons 4 .{1,40}!$/, /^MOOMA RAISES THE LOAM JUMP!$/,
+  /^MOOMA LEAPS get airborne before she lands!$/, /^SPORE BLOOM slip between the spores!$/, /^FIREBOMB BURST!$/, /^KING KROOK SLAMS THE GROUND!$/,
+  /^COLOSSAL STOMP GET OFF THE GROUND!$/, /^TYRANT S STOMP get off the ground!$/, /^INCOMING FIREBALL RAIN!$/, /^KING KROOK MEGA FIREBALL! DODGE!$/,
+  /^OCTOBABY SUBMERGES kill the tentacles!$/, /^THE TENTACLES BREAK LOOSE$/, /^OCTOBABY SURFACES TIDAL SWEEP unlocked$/, /^TIDAL SWEEP JUMP IT!$/,
+  /^MELTDOWN - get OUT of the ring!$/, /^OCTOBABY EIGHT-MOOD MELTDOWN$/, /^THE MOODS RISE brace$/, /^EVERY ARM SEVERED THE BODY IS EXPOSED!$/,
+  /^The stumps writhe new arms are coming$/, /^OCTOBABY REGROWS ITS ARMS$/, /^MOOD LANCE dodge it$/, /^EIGHT MOODS: .{1,200}$/,
+  /^Taurus BULLDOZES you cannot hold this lane!$/, /^Cancer calls the RIPTIDE swim out!$/, /^TAURUS IMMOVABLE STANCE! Strike from behind!$/,
+  /^Gemini LIES strike the real one!$/, /^Gemini splits!$/, /^Twinstars converge!$/, /^TWINSTARS ALIGN get off the line!$/, /^Cancer (SHELL SEALED|shell opens)!$/,
+  /^CARAPACE CRACKED punish it!$/, /^Leo ROARS!$/, /^Solar Flare!$/, /^VIRGO JUDGMENT! Reach 5 sins\. Cleanse to survive!$/,
+  /^Virgo ascends STARBURST! Find the gap between the rays\.$/, /^Virgo takes wing the sky is hers\.$/, /^Virgo's ritual is BROKEN no heal!$/, /^Virgo channels Banishment!$/,
+  /^Libra UNBALANCED! Cross the center line!$/, /^Libra summons two Scale Stormcallers break BOTH to drop her defense!$/,
+  /^Libra hangs two Scale Lanterns - only the LIT one can be broken\. Break both to unbalance her\.$/, /^A scale BREAKS - Libra reels! Punish her!$/, /^Scales tilt!$/,
+  /^SCORPIO STINGER EXECUTE! Get out of range!$/, /^Scorpio BURROWS step off the ambush!$/, /^Sagittarius read the arc!$/, /^CAPRICORN HOOFQUAKE! Get airborne!$/,
+  /^Aquarius pours a tidal lane flooded ground slows!$/, /^Aquarius Conductive Pool! Leave the water!$/, /^Aquarius summons a tsunami!$/, /^Pisces Tidal Crush! Move!$/,
+  /^PISCES DREAM REALM! Trust your ears, not your eyes\.$/, /^Pisces returns to the waking world\.$/, /^Pisces splits!$/, /^SCORPIO REARS VENOM DELUGE! Find the gap$/,
+];
+function _lxBossSaySkel(t) { return String(t == null ? '' : t).replace(/[^\x20-\x7e]/g, ' ').replace(/\s+/g, ' ').trim(); }
+function _lxBossSayOk(t) { const k = _lxBossSaySkel(t); if (!k || k.length > 200) return false; for (const rx of _LX_BOSS_SAY) if (rx.test(k)) return true; return false; }
+function _lxBossLiveHere() { for (const m of (game.monsters || [])) if (m && (m.isBoss || m.boss || m.zodiacBoss) && !m._isLeg && m.currentHp > 0) return true; return false; }
+function _lxBossSayOut(txt, rarity) {
+  if (window._lxBossSayInNow || typeof net === 'undefined' || !net || !net.isHost || typeof _coopActive !== 'function' || !_coopActive()) return;
+  if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;
+  if (typeof txt !== 'string' || !_lxBossLiveHere() || !_lxBossSayOk(txt)) return;
+  const now = Date.now(), last = net._lxBossSaid || (net._lxBossSaid = new Map());
+  if (now - (last.get(txt) || 0) < 1500) return;
+  if (now - (+net._lxBossSayT || 0) >= 1000) { net._lxBossSayT = now; net._lxBossSayN = 0; }
+  if ((net._lxBossSayN = (net._lxBossSayN | 0) + 1) > 4) return;
+  last.set(txt, now); if (last.size > 40) last.delete(last.keys().next().value);
+  try { net.ws.send(JSON.stringify({ t: 'ping', bsy: txt.slice(0, 160), bsk: String(rarity || 'epic').slice(0, 12), bsm: game.currentMap })); } catch (e) {}
+}
+function _lxBossSayIn(msg) {
+  try {
+    if (!_coopFollowingHost() || net.hostId == null || +msg.id !== +net.hostId) return;
+    if (String(msg.bsm || '') !== game.currentMap || !_mpRateOk(msg.id, 'bsy', 6)) return;
+    const t = String(msg.bsy).slice(0, 160).replace(/[<>]/g, '');
+    if (!_lxBossSayOk(t) || !_lxBossLiveHere()) return;
+    const seen = window._lxToastSeen && window._lxToastSeen.get(t); if (seen && Date.now() - seen < 4000) return;
+    const tier = /^(common|uncommon|rare|epic|legendary|danger|warn|info|success)$/.test(msg.bsk) ? msg.bsk : 'epic';
+    window._lxBossSayInNow = true; try { showToast(t, tier); } finally { window._lxBossSayInNow = false; }
+  } catch (e) {}
+}
+// every toast is remembered for 4 s (a guest does not double a call it raised itself) and offered to the forwarder
+showToast = (function (_o) { return function (txt, rarity) {
+  try { const S = window._lxToastSeen || (window._lxToastSeen = new Map()); S.set(String(txt), Date.now()); if (S.size > 60) S.delete(S.keys().next().value); } catch (e) {}
+  try { _lxBossSayOut(txt, rarity); } catch (e) {}
+  return _o.apply(this, arguments);
+}; })(showToast);
 function _coopTickMonsters() {
   if (!_coopActive() || !net.isHost) return;
   if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;   // v0.30.1443 coop-keyed - nobody shares my map: nothing to send
@@ -62769,8 +62876,50 @@ function _coopDownedGiveUp() {
 // during the PROLOGUE flash-forward the down is sandboxed — revive IN the arena
 // (full HP/MP + brief i-frames) and never call triggerDeath / respawn-to-town, so
 // the Lv.100 memory state can't leak into the fresh save.
+// v0.30.1833 release27c - A WON FIGHT STOPS THE BLEED (per user: "stop the bleed timer"). A member downed when a real boss falls on their map (not an
+// echo, an expedition boss, a split twin or a mirage: the rewards' own test) no longer bleeds out into a death and its toll: they stay
+// down and safe (the down keeps them unhittable) until a partner lifts them (the team revive, unchanged) or they press Respawn - which
+// now stands them up where they lie at 30% HP, as do a 3-minute cap, the map changing under them and no partner left standing on it.
+// No death, no death toll. Downs AFTER the kill bleed as before. Kill credit, the wheel and shards are paid as before.
+const LX_DOWN_SAFE_MS = 180000;
+function _lxDownBleedStop() {
+  if (typeof player === 'undefined' || !player || !player._downed || player._downBleedStopped || player._downedSilent || window._prologueActive) return;
+  if (!(typeof _coopActive === 'function' && _coopActive())) return;   // a party member's down: a solo down keeps its rules
+  player._downBleedStopped = true; player._downStopMap = game.currentMap; player._downStopAt = Date.now(); player._downAloneAt = 0;
+  player._downedUntil = performance.now() + LX_DOWN_SAFE_MS;
+  try { const b = document.getElementById('coop-downed-banner'); if (b) _lxDownWonCard(b); } catch (e) {}
+  if (typeof showToast === 'function') showToast('🏳 The fight is won - your bleed has stopped.', 'rare');
+}
+function _lxDownWonCard(b) {
+  if (!b || b._lxWon) return; b._lxWon = 1;
+  const t = b.querySelector('.cd-title'); if (t) t.innerHTML = 'DOWNED &middot; SAFE<span id="coop-downed-secs" style="display:none"></span>';
+  const sub = b.querySelector('.cd-sub'); if (sub) sub.textContent = player._downRevivable ? 'The fight is won — a partner can lift you, or Respawn' : 'The fight is won — Respawn to get up';
+  const ru = b.querySelector('.cd-rule'); if (ru) ru.remove();
+  const btn = document.getElementById('coop-downed-skip'); if (btn) btn.textContent = '▸ Respawn';
+}
+function _lxDownStandUp(why) {
+  if (typeof player === 'undefined' || !player || !player._downed) return;
+  player._downed = false; player._downBleedStopped = false; player._downedSilent = false;
+  try { clearTimeout(player._downedAutoTimer); clearTimeout(player._downedGiveUpTimer); } catch (e) {}
+  _coopDownedBanner(null);
+  const hp = Math.max(1, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * 0.3));
+  if (typeof _lxHpSetUnlocked === 'function') _lxHpSetUnlocked(hp); else player.hp = hp;
+  player.invulnerable = 2500;
+  if (net && net.connected && net.ws) { try { net.ws.send(JSON.stringify({ t: 'up', map: game.currentMap, ok: 1 })); } catch (e) {} }
+  if (typeof showToast === 'function') showToast('✚ You get back up - the fight was won.', 'success');
+}
+// loop-independent: a paused or stalled update loop cannot strand a safe down (the map changed, nobody left to lift you)
+try { setInterval(() => { try {
+  if (typeof player === 'undefined' || !player || !player._downBleedStopped) return;
+  if (!player._downed) { player._downBleedStopped = false; return; }
+  if (game.currentMap !== player._downStopMap) { _lxDownStandUp('map'); return; }
+  if (Date.now() - (+player._downStopAt || 0) > LX_DOWN_SAFE_MS + 5000) { _lxDownStandUp('cap'); return; }
+  const alive = (typeof _coopPeerAliveOnMyMap === 'function') && _coopPeerAliveOnMyMap();
+  if (alive) player._downAloneAt = 0; else if (!player._downAloneAt) player._downAloneAt = Date.now(); else if (Date.now() - player._downAloneAt > 5000) _lxDownStandUp('alone');
+} catch (e) {} }, 500); } catch (e) {}
 function _coopDownedFinish() {
   if (!(player && player._downed)) return;
+  if (player._downBleedStopped && !window._prologueActive) { _lxDownStandUp('respawn'); return; }   // v0.30.1833 release27c: a safe down ends standing (Respawn, the cap)
   player._downed = false;
   player._downedSilent = false;
   try { clearTimeout(player._downedAutoTimer); } catch (e) {}
@@ -62855,6 +63004,7 @@ function _coopDownedBanner(secs) {
   }
   const s = document.getElementById('coop-downed-secs');
   if (s && s.textContent !== secs + 's') s.textContent = secs + 's';
+  if (player && player._downBleedStopped && typeof _lxDownWonCard === 'function') _lxDownWonCard(b);   // v0.30.1833 release27c
 }
 // v0.29.x — DOWNED-banner watchdog (per user "the downed is still stuck").
 // The banner is normally cleared by _coopDownedTick / respawnAtTown, but both
@@ -63869,6 +64019,7 @@ function _coopApplyKill(msg) {
   // v0.30.862 coop-trust - a kill of a monster I never mirrored, or of a different type, pays and counts nothing
   const _ri = _lxCoopRewardInfo(msg.u, m);
   if (!_ri || (msg.tp != null && String(msg.tp) !== String(_ri.tp))) return;
+  try { if (msg.b && _ri.boss && !msg.il && !+msg.ec && !+msg.ex && !+msg.tw && !+msg.rb && !(game.expedition && game.expedition.active) && typeof _lxDownBleedStop === 'function') _lxDownBleedStop(); } catch (e) {}   // v0.30.1833 release27c: the host's real boss kill stops my bleed
   // v0.30.x bughunt coop-6 - WHAT KIND OF KILL IT WAS is MY record's to say, not the frame's. The frame's boss flag, level,
   // zodiac sign and Duo Trial claim fed the Setshard payout raw: a host could call any mirrored mob a level-200 boss and pay
   // 10,000 Setshards a frame under a fresh sign name each time. The frame keeps what it can honestly add (the EXP / coin
@@ -64560,7 +64711,9 @@ function _mpHandle(msg) {
         if (msg.cap != null) _cq.cap = msg.cap | 0;
         if (msg.at != null) _cq.at = Math.max(0, Math.min(1e8, +msg.at || 0));   // the Ticket Rush builds its mechs from the party's ATK
         if (msg.pqf != null && typeof _lxPqFinaleOwedBy === 'function') _lxPqFinaleOwedBy(msg.id);   // v0.30.1805 release25c: a partner on my Express owes the Conductor duel
-        if (msg.pqp != null && _mpRateOk(msg.id, 'pqp', 2)) _lxPqPieceFromPeer(+msg.pqp, msg.id);   // a Spire piece a partner found (an honest peer sends one per chest it opens: 2 a second is far above that)
+        if (msg.pqp != null && _mpRateOk(msg.id, 'pqp', 2)) _lxPqPieceFromPeer(+msg.pqp, msg.id);
+        if (msg.brs && typeof _lxRushFromPeer === 'function') _lxRushFromPeer(msg);   // v0.30.1833 release27c: the hall's run, from its runner
+        if (msg.bsy != null && typeof _lxBossSayIn === 'function') _lxBossSayIn(msg);   // v0.30.1833 release27c: a boss's call, from the host   // a Spire piece a partner found (an honest peer sends one per chest it opens: 2 a second is far above that)
         if (msg.aw != null && !!msg.aw !== !!_cq._away) { _cq._away = !!msg.aw; _coopRecomputeHost(); _mpRenderPlayerList(); }
         if (msg.pz != null) _cq._pz = !!msg.pz;   // v0.30.1732 release11: paused in a menu (see _aggroPeers in updateMonsters)
         if (msg.fx || msg.pj || msg.po) _coopApplyFx(msg);
@@ -116138,6 +116291,7 @@ function _killMonsterRaw(m) {
   { const _kIdx = game.monsters.indexOf(m); if (_kIdx >= 0) game.monsters.splice(_kIdx, 1); }
 
   if (m.isBoss) {
+    try { if (!m._coopMirror && !m._isMirage && !m._echoBoss && !m._rushBoss && !m._expeditionBoss && !m._isTwin && !m._isPiscesTwin && !m._rushTwin && !(game.expedition && game.expedition.active) && typeof _lxDownBleedStop === 'function') _lxDownBleedStop(); } catch (e) {}   // v0.30.1833 release27c: a real boss kill stops my bleed
     // v0.26.x — Boss Rush: advance the rush before any persistent-world
     // bookkeeping (the _echoBoss tag already skips stamps/boons/shards).
     if (m._rushBoss && !m._rushTwin && game.bossRush && game.bossRush.active && typeof _bossRushOnBossDown === 'function') {   // v0.30.1734 release12: a twin is not an echo of the roster
@@ -133220,6 +133374,36 @@ const _PC_CORNER = '<svg class="pc-corner" viewBox="0 0 34 34" aria-hidden="true
   + ' stroke-width="0.7" stroke-linecap="round" opacity="0.20"/>'
   + '<circle cx="12.6" cy="12.6" r="1.5" fill="#f4d493" opacity="0.6"/>'
   + '</svg>';
+// v0.30.1833 release27c - THE WHEEL WAITS FOR THE ENDING. A wheel that came due while a film was up (a guest still in a form-change film when the
+// host killed form 3, a host busy at the kill) opened under the defeat film; the cards and the credits played over it and "Return to
+// Moji" opened Titles, whose closeAllModals dropped it - the max-roll boon was gone. It now waits while an ending film or card, a kill
+// film or the credits are up, and 2.5 s past the last one seen (the links of the chain hand over through timers). Gravitos's reason
+// beat counts while the ending is owed. A wheel already open is left alone (the ending's beat waits for it, as in solo).
+function _lxBoonEndingHold() {
+  try {
+    const vis = (el) => { if (!el || !el.isConnected || !el.getClientRects().length) return false; const cs = getComputedStyle(el); return cs.display !== 'none' && cs.visibility !== 'hidden'; };
+    let up = false;
+    for (const el of document.querySelectorAll('[id$="-cine"], .lx-ending-card')) if (vis(el)) { up = true; break; }
+    if (!up && document.getElementById('kill-film-overlay')) up = true;
+    if (!up) { const gc = document.getElementById('game-complete-overlay'); if (gc && gc.classList.contains('on')) up = true; }
+    if (!up && typeof player !== 'undefined' && player) { const sb = document.getElementById('story-beat-overlay'); if (sb && sb.classList.contains('on') && (player._lxEndingDue || /^(gravitos_reason|epilogue_gravitos)$/.test(String(player._lxBeatOpen || '')))) up = true; }
+    const now = Date.now();
+    if (up) { window._lxBoonEndAt = now; return true; }
+    return now - (+window._lxBoonEndAt || 0) < 2500;
+  } catch (e) { return false; }
+}
+// v0.30.1833 release27c - OPENING TITLES KEEPS THE WHEEL. Titles opens through closeAllModals, which lets an open wheel go (that is the wheel's own
+// close button too). Titles is a pause owner, so the wheel taken down here is offered again (same boons, same id) once Titles closes.
+function _lxTitlesKeepWheel() {
+  try { const pm = document.getElementById('powerup-modal'); return { owed: (typeof game !== 'undefined' && game) ? game._lxBoonOwed : null, bi: (pm && pm.style.display === 'flex') ? (pm._lxBossInfo || null) : null }; } catch (e) { return null; }
+}
+function _lxTitlesWheelBack(st) {
+  try {
+    if (!st || !(st.owed || st.bi)) return;
+    if (st.owed && !game._lxBoonOwed) { game._lxBoonOwed = st.owed; if (typeof saveState === 'function') saveState(); }
+    if (st.bi) setTimeout(() => { try { if (typeof showPowerupChoice === 'function') showPowerupChoice(st.bi); } catch (e) {} }, 600);
+  } catch (e) {}
+}
 function showPowerupChoice(bossInfo) {
   try { if (typeof _lxBoonQHold === 'function' && _lxBoonQHold(bossInfo)) return; } catch (e) {}   // v0.30.1766 release24c: paid, already up, or another owed wheel goes first
   try { if (bossInfo && typeof bossInfo === 'object' && game) game._lxBoonOwed = _lxBoonOweOf(bossInfo); } catch (e) {}   // v0.30.1734 release12: owed from the moment it is due
@@ -133233,6 +133417,7 @@ function showPowerupChoice(bossInfo) {
   // re-scheduling every 500 ms until the beat closes — typical beats
   // take 4-12 s to click through, so the poll fires 8-24 times before
   // the boon modal can open cleanly.
+  if (typeof _lxBoonEndingHold === 'function' && _lxBoonEndingHold()) { setTimeout(() => showPowerupChoice(bossInfo), 500); return; }   // v0.30.1833 release27c: nor under the ending (films, cards, credits)
   const _beat = document.getElementById('story-beat-overlay');
   if ((_beat && _beat.classList && _beat.classList.contains('on')) || document.getElementById('lx-pause')) {   // v0.30.891 and not under the pause card
     setTimeout(() => showPowerupChoice(bossInfo), 500);
@@ -148063,7 +148248,9 @@ const LX_TITLES_CSS = `
 // opts.fresh: opened by the credits, right after the story ends - carries the "unlocked" banner.
 function openTitlesPanel(opts) {
   if (typeof document === 'undefined' || typeof player === 'undefined' || !player) return;
+  const _lxTtW = (typeof _lxTitlesKeepWheel === 'function') ? _lxTitlesKeepWheel() : null;   // v0.30.1833 release27c: an open or owed wheel survives Titles
   if (typeof closeAllModals === 'function') { try { closeAllModals(); } catch (e) {} }
+  if (_lxTtW && typeof _lxTitlesWheelBack === 'function') _lxTitlesWheelBack(_lxTtW);   // v0.30.1833 release27c
   if (!document.getElementById('lx-titles-css')) {
     const st = document.createElement('style'); st.id = 'lx-titles-css'; st.textContent = LX_TITLES_CSS; document.head.appendChild(st);
   }
@@ -181791,6 +181978,7 @@ function _bossRushUpdateHud() {
 }
 function _bossRushAutoStart() {
   if (game.currentMap !== 'boss_rush') return;
+  if (!(game.bossRush && game.bossRush.active) && typeof _lxRushGuestWait === 'function' && _lxRushGuestWait()) return;   // v0.30.1833 release27c: the runner's run first
   if (game.bossRush && game.bossRush.active) return;   // double-fire guard
   const queue = _bossRushRoster();
   if (!queue.length) {
@@ -181808,6 +181996,7 @@ function _bossRushAutoStart() {
 }
 function _bossRushSpawnNext(delayMs) {
   const _run = game.bossRush;   // v0.30.920
+  try { if (_run) _run._lxSpawnAt = Date.now() + Math.max(60, delayMs | 0); } catch (e) {}   // v0.30.1833 release27c: a call is on its way
   setTimeout(() => {
     const br = game.bossRush;
     if (!br || br !== _run || !br.active || game.currentMap !== 'boss_rush') return;
@@ -181844,12 +182033,110 @@ function _bossRushSpawnNext(delayMs) {
     if (typeof addShake === 'function') addShake(7);
   }, Math.max(60, delayMs | 0));
 }
+// v0.30.1833 release27c - THE HALL OF ECHOES RUNS FOR THE WHOLE PARTY. A rush progressed and paid only where killMonster ran (the runner of the
+// hall): a guest sat at 0/N with no results card and no payout. The runner announces its run on the ping frame (brs: queue, idx, downs,
+// done, elapsed play-ms, run id) on every echo laid to rest, at the end, when a partner arrives and every 2.5 s; a guest following it
+// in the hall adopts the run (its HUD, the breather, the next echo's card through its own stand-in spawn) and, when the run ends, runs
+// its own _bossRushComplete - its own grade card and its own once-per-day payout. A guest who walks in mid-rush joins the run as it
+// stands and shares its result (the payout is once a day either way); one who walks in after it ended gets no run of its own (a stand-in
+// run could never progress). A guest left running the hall (the runner left, or the link dropped) carries the run on: the echo on the
+// floor becomes its own, or the next one is called.
+function _lxRushRunner() { return typeof _coopActive === 'function' && _coopActive() && !_coopFollowingHost(); }
+function _lxRushSay() {
+  try {
+    if (!_lxRushRunner() || game.currentMap !== 'boss_rush') return;
+    if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;
+    const br = game.bossRush; if (!br || !Array.isArray(br.queue) || !br.queue.length) return;
+    if (!br._lxRid) br._lxRid = Math.floor(Math.random() * 2176782336).toString(36);
+    const ms = (!br.active && +br._lxTotal >= 0 && br._lxTotal != null) ? +br._lxTotal : _bossRushElapsed(br);
+    net._lxRushSaidAt = Date.now();
+    net.ws.send(JSON.stringify({ t: 'ping', brs: { m: 'boss_rush', r: br._lxRid, q: br.queue.slice(0, 64), i: br.idx | 0, d: br.downs | 0, dn: br.active ? 0 : 1, ms: Math.round(ms) } }));
+  } catch (e) {}
+}
+function _lxRushFromPeer(msg) {
+  try {
+    const s = msg.brs;
+    if (!s || typeof s !== 'object' || s.m !== 'boss_rush' || game.currentMap !== 'boss_rush') return;
+    if (!_coopFollowingHost() || net.hostId == null || +msg.id !== +net.hostId) return;   // only the runner of my hall speaks for it
+    if (!_mpRateOk(msg.id, 'brs', 4)) return;
+    const raw = Array.isArray(s.q) ? s.q.slice(0, 64) : [];
+    const q = raw.map(String).filter((t) => typeof monsterTypes !== 'undefined' && monsterTypes[t] && monsterTypes[t].boss);
+    if (!q.length || q.length !== raw.length) return;
+    const n = q.length, i = Math.max(0, Math.min(n, s.i | 0)), d = Math.max(0, Math.min(n, s.d | 0)), dn = !!+s.dn;
+    const ms = Math.max(0, Math.min(864e5, +s.ms || 0)), rid = String(s.r || '').slice(0, 16);
+    let br = game.bossRush;
+    if (!br || br._lxRid !== rid) {
+      if (dn) {   // a run that ended before I joined it: no run of mine here (a stand-in one could never progress)
+        game._lxRushHostDone = Date.now();
+        if (br && br.active) { br.active = false; if (typeof _bossRushHud === 'function') _bossRushHud(false); }
+        if (!game._lxRushRestToast) { game._lxRushRestToast = 1; if (typeof showToast === 'function') showToast('🕯 The party\'s rush has ended - the hall rests until it is entered again.', 'rare'); }
+        return;
+      }
+      br = (br && br.active && !br._lxRid) ? br : { splits: [] };   // my own pre-start run is adopted in place (a pending spawn reads it)
+      Object.assign(br, { active: true, queue: q, idx: i, downs: d, _lxRid: rid, _lxFrom: +msg.id, tp: (game._playMs || 0) - ms, t0: Date.now() - ms });
+      if (!Array.isArray(br.splits)) br.splits = [];
+      game.bossRush = br; if (typeof _bossRushHud === 'function') _bossRushHud(true);
+      return;
+    }
+    br._lxFrom = +msg.id; br._lxLeadAt = 0;
+    if (!br.active) return;   // my copy has ended already
+    br.queue = q;
+    if (i > (br.idx | 0) && !dn) {
+      br.idx = i; br.downs = d; br.splits.push(ms); br.tp = (game._playMs || 0) - ms;
+      if (i < n && !player._downed && player.hp > 0) {   // the breather, as the runner had it
+        player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.20));
+        player.mp = Math.min(getMaxMp(), player.mp + Math.floor(getMaxMp() * 0.20));
+        if (typeof showToast === 'function') showToast('✚ The fallen echo’s essence restores you. Next echo in 3…', 'rare');
+      }
+      if (i < n && typeof _bossRushSpawnNext === 'function') _bossRushSpawnNext(3000);   // following: a stand-in (the echo's toast + card); leading by then: the echo itself
+    }
+    if (dn) { br.idx = i; br.downs = d; br.splits.push(ms); br.tp = (game._playMs || 0) - ms; if (typeof _bossRushComplete === 'function') _bossRushComplete(); }
+  } catch (e) {}
+}
+// a guest following the hall waits up to 4 s for the runner's word before it starts a run of its own (an older runner never speaks)
+function _lxRushGuestWait() {
+  try {
+    if (!(typeof _coopActive === 'function' && _coopActive() && _coopFollowingHost())) return false;
+    const now = Date.now();
+    if (now - (+game._lxRushHostDone || 0) < 8000) return true;   // the runner's run is over: no stand-in run
+    if (!(now - (+game._lxRushWait || 0) < 15000)) game._lxRushWait = now;
+    if (now - game._lxRushWait < 4000) { setTimeout(() => { try { _bossRushAutoStart(); } catch (e) {} }, 500); return true; }
+  } catch (e) {}
+  return false;
+}
+// every 500 ms in the hall: the runner's announcements; a guest left running the hall takes the run over
+function _lxRushCoopTick() {
+  try {
+    if (typeof game === 'undefined' || !game || game.currentMap !== 'boss_rush' || typeof net === 'undefined') return;
+    const br = game.bossRush, now = Date.now();
+    // the copies of the runner's echoes are echoes here too (the runner's own carry _rushBoss / _echoBoss): one adopted when the runner
+    // leaves is laid to rest as an echo - counted, and no world boss wheel for it
+    if (br && br.active && br._lxRid) for (const m of (game.monsters || [])) if (m && m._coopMirror && (m.isBoss || m.boss) && !m._isTwin && !m._isPiscesTwin && !m._rushBoss) { m._rushBoss = true; m._echoBoss = true; }
+    if (_lxRushRunner()) {
+      let n = 0; const key = _coopMapKey();
+      for (const id in net.peers) { const p = net.peers[id]; if (p && +id !== +net.myId && _coopPeerKey(p) === key) n++; }
+      if (br && n > 0 && (n !== (net._lxRushPeerN | 0) || now - (+net._lxRushSaidAt || 0) >= 2500)) _lxRushSay();
+      net._lxRushPeerN = n;
+    }
+    if (br && br.active && br._lxFrom != null && +br._lxFrom !== +net.myId && !(typeof _coopActive === 'function' && _coopActive() && _coopFollowingHost())) {
+      if (!br._lxLeadAt) { br._lxLeadAt = now; return; }
+      if (now - br._lxLeadAt < 1200) return;   // not a flicker of the election
+      br._lxFrom = net.myId; br._lxLeadAt = 0;
+      let live = false;
+      for (const m of (game.monsters || [])) if (m && (m.isBoss || m.boss) && !m._isLeg && m.currentHp > 0) { live = true; if (!m._rushBoss) { m._rushBoss = true; m._echoBoss = true; m.exp = 0; m.mojicoins = 0; } }
+      if (!live && !(br._lxSpawnAt && now < br._lxSpawnAt + 1500) && typeof _bossRushSpawnNext === 'function') _bossRushSpawnNext(1500);
+      if (typeof showToast === 'function') showToast('⚔ The hall answers to you now - echo ' + Math.min(br.idx + 1, br.queue.length) + '/' + br.queue.length, 'epic');
+    } else if (br) br._lxLeadAt = 0;
+  } catch (e) {}
+}
+try { if (!window._lxRushCoopT) window._lxRushCoopT = setInterval(_lxRushCoopTick, 500); } catch (e) {}
 function _bossRushOnBossDown(m) {
   const br = game.bossRush;
   if (!br || !br.active) return;
   br.downs++;
   br.idx++;
   br.splits.push(_bossRushElapsed(br));   // v0.30.1732 release11
+  try { _lxRushSay(); } catch (e) {}   // v0.30.1833 release27c: the party hears of it
   if (br.idx >= br.queue.length) { _bossRushComplete(); return; }
   // Breather heal between echoes (the rush has no shops or benches).
   player.hp = Math.min(getMaxHp(), player.hp + Math.floor(getMaxHp() * 0.20));
@@ -182025,6 +182312,7 @@ function _bossRushComplete() {
   if (!br || !br.active) return;
   br.active = false;
   const totalMs = _bossRushElapsed(br);   // v0.30.1732 release11
+  br._lxTotal = totalMs; try { _lxRushSay(); } catch (e) {}   // v0.30.1833 release27c: the party ends its copies with this time
   const avg = totalMs / Math.max(1, br.downs) / 1000;
   const grade = avg <= 45 ? 'S' : avg <= 75 ? 'A' : avg <= 110 ? 'B' : 'C';
   const mm = Math.floor(totalMs / 60000), ss = Math.floor((totalMs % 60000) / 1000);
@@ -198398,6 +198686,9 @@ window.addEventListener('keydown', (e) => {
   /* the chat log (game-box px) leaves the d-pad's corner for the top centre, under the menu row and the map name: four lines */
   body.mc-landscape:not(.hide-mobile-ctrl) #mp-chat-log { left: calc(50% - 215px); top: 128px; bottom: auto; width: 430px; max-height: 84px; }
   body.mc-landscape:not(.hide-mobile-ctrl) #mp-chat-min { left: calc(50% + 219px); top: 128px; bottom: auto; }
+  /* v0.30.1833 release27c - the log fades once the talk has gone quiet (see _lxChatPlace) */
+  #mp-chat-log, #mp-chat-min { transition: opacity 0.8s ease; }
+  #mp-chat-log.lx-chat-fade, #mp-chat-min.lx-chat-fade { opacity: 0; }
   /* 6. the co-op PING button (tap = the T ping, hold = emotes) and its emote strip; shown by the script below while connected */
   #lx-coop-ping { position: fixed; z-index: 10030; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
     padding: 0; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.6); background: rgba(40, 30, 60, 0.72); color: #fff;
