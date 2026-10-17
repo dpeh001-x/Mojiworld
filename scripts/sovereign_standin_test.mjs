@@ -72,7 +72,7 @@ try {
     out.idleScale = window.__rec.length ? window.__rec[window.__rec.length - 1].sc : null;
     const raw = new Image(); raw.decoding = 'sync'; raw.src = 'Sprites/bosses/attack/towerSovereignswing_0.webp'; try { await raw.decode(); } catch (e) {}
     raw._lxSet = [raw]; raw._lxSet._lxBaseMin = 1235; raw._lxFi = 0; raw._lxSt = 'attack';
-    out.rawW = raw.naturalWidth;
+    out.rawW = raw.naturalWidth; out.rawH = raw.naturalHeight;   // v0.30.x esrgan-bosses - the swing is stored at x1.667, cut to its ink: the stand-in cap reads its LONG side
     m._bossAtkKey = 'towerSovereignswing'; m._bossAtkUntil = (game.time | 0) + 200;
     window.__rec.length = 0;
     const stood = _lxBossStandIn(raw, m); out.stoodIn = stood === m._lxStandInCv && stood.tagName === 'CANVAS';
@@ -104,7 +104,7 @@ try {
 } finally { await browser.close(); srv.kill(); }
 if (!R) { check(false, 'the harness produced results', errs.slice(0, 3)); process.exit(1); }
 const U = R.U;
-check(U.idleTag === 'CANVAS' && U.rawW > 1400, 'harness: the idle frame is a baked canvas and the raw swing frame is over the stand-in cap', { idleTag: U.idleTag, rawW: U.rawW });
+check(U.idleTag === 'CANVAS' && Math.max(U.rawW, U.rawH || 0) > 1400, 'harness: the idle frame is a baked canvas and the raw swing frame is over the stand-in cap', { idleTag: U.idleTag, rawW: U.rawW, rawH: U.rawH });
 check(U.stoodIn === true, 'a raw swing frame with nothing baked is stood in for by the last pose drawn (the idle canvas)', U);
 check(U.calSwingIdle === 1 && U.calIdle < 0.7 && U.calSwing > 0.8, 'the trap exists: the swing key has no idle entry (default 1) while the idle is 0.59', { calIdle: U.calIdle, calSwing: U.calSwing, calSwingIdle: U.calSwingIdle });
 check(Math.abs(U.standScale - U.idleScale) < 0.002, 'the held idle pose is drawn at ITS OWN size under a live swing stamp (was 1.0 against 0.59: 69% larger until the bake landed)', { idleScale: U.idleScale, standScale: U.standScale });

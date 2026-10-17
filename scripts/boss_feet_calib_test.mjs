@@ -101,11 +101,14 @@ const feetOf = (im, k, sov) => {
   return { low: feet, a: Math.min(...sc), b: Math.max(...sc) };
 };
 const ARTS = new Map(); const art = async (rel) => { if (!ARTS.has(rel)) { const { data, info } = await sharp(readFileSync(path.join(ROOT, 'Sprites/bosses', rel + '.webp'))).ensureAlpha().raw().toBuffer({ resolveWithObject: true }); ARTS.set(rel, { data, W: info.width, H: info.height }); } return ARTS.get(rel); };
+const ESRB_K = { 'attack/towerArbiter': 1.6, 'attack/towerArbitercolumn': 1.6, 'attack/towerArbiterverdict': 1.6 };   // v0.30.x esrgan-bosses - the Arbiter's KEEP sets are stored at x1.6: his boot soles are read at the scale the 3 px tolerance was tuned on
+const esrbFit = async (rel, im) => { const kk = ESRB_K[rel.replace(/_\d+$/, '')]; if (!kk || Math.abs(im.H / kk - Math.round(im.H / kk)) > 0.01) return im; const W = Math.round(im.W / kk), H = Math.round(im.H / kk);   // read at the origin scale (thresholds are in its px)
+  return { data: await sharp(im.data, { raw: { width: im.W, height: im.H, channels: 4 } }).resize(W, H, { kernel: 'lanczos3', fit: 'fill' }).raw().toBuffer(), W, H }; };
 const footRead = async (c, face, sov) => {   // -> rear / front forward-signed (x * facing) and y, against his foot point; h = drawn height
   // k (screen px per art px) at the ARENA's scale (9/7), not the live one: feetOf sizes its bands / gaps / min widths in screen px, and the camera
   // sits anywhere in 1..9/7 at capture time, so the same art read at zoom 1 picked other runs (the Sovereign's collapse f8 rear 21.6 px off, Gravitos's
   // form-2 front foot ~30 px) - a measurement flake, not the art. Detected at one scale, every read is the same whatever the camera did.
-  const im = await art(c.art), [a, b, cc, d, e, f] = c.t, [dx, dy, dw, dh] = c.r, k = Math.hypot(a, b) * dw / im.W * (c.foot && c.foot.z ? ZREF / c.foot.z : 1), F = feetOf(im, k, sov);
+  const im = await esrbFit(c.art, await art(c.art)), [a, b, cc, d, e, f] = c.t, [dx, dy, dw, dh] = c.r, k = Math.hypot(a, b) * dw / im.W * (c.foot && c.foot.z ? ZREF / c.foot.z : 1), F = feetOf(im, k, sov);
   const mp = (ax, ay) => { const lx = dx + ax * dw / im.W, ly = dy + ay * dh / im.H; return { x: a * lx + cc * ly + e, y: b * lx + d * ly + f }; };
   const fw = (ax) => ax == null ? null : (mp(ax, 0).x - c.foot.x) * face, p = F ? [fw(F.a), fw(F.b)] : [null, null];
   const zn = c.foot && c.foot.z ? ZREF / c.foot.z : 1; if (c.foot && c.foot.z) ZSEEN.push(+c.foot.z.toFixed(4));   // every read in the arena's own scale (9/7): a world scale that differs at capture time does not read as a size or offset change
@@ -116,7 +119,7 @@ const footRead = async (c, face, sov) => {   // -> rear / front forward-signed (
 {
   const parse = (s) => { const a = s.indexOf('window.LX_ANIM_CALIB = '), b = s.indexOf('window.LX_ATK_HITBOX = '); return { c: JSON.parse(s.slice(a + 23, b).trim().replace(/;$/, '')), h: JSON.parse(s.slice(b + 22).trim().replace(/;\s*$/, '')) }; };
   const L = parse(readFileSync(path.join(ROOT, 'data/anim_calib.js'), 'utf8')), O = parse(String(orig('data/anim_calib.js') || '')), diff = [];
-  const A2 = readFileSync(path.join(HERE, 'apply_boss_feet_calib_bake.mjs'), 'utf8');
+  const A2 = readFileSync(path.join(HERE, 'apply_boss_feet_calib_bake.mjs'), 'utf8') + (existsSync(path.join(HERE, 'apply_esrgan_bosses_bake.mjs')) ? readFileSync(path.join(HERE, 'apply_esrgan_bosses_bake.mjs'), 'utf8') : '');   // v0.30.x esrgan-bosses - its solved rows (same form) win
   for (const m of A2.matchAll(/\['(\w+)', '(\w+)', \{ s: ([-\d.]+), dx: ([-\d.]+), dy: ([-\d.]+) \}, \{ s: ([-\d.]+), dx: ([-\d.]+), dy: ([-\d.]+) \}\]/g)) CAL[m[1] + '.' + m[2]] = { s: +m[6], dx: +m[7], dy: +m[8] }, CALOLD[m[1] + '.' + m[2]] = { s: +m[3], dx: +m[4], dy: +m[5] };
   for (const ent of new Set([...Object.keys(L.c), ...Object.keys(O.c)])) for (const st of new Set([...Object.keys(L.c[ent] || {}), ...Object.keys(O.c[ent] || {})])) {
     const l = (L.c[ent] || {})[st], o = (O.c[ent] || {})[st], want = CAL[ent + '.' + st];
@@ -130,7 +133,8 @@ const footRead = async (c, face, sov) => {   // -> rear / front forward-signed (
 {
   const crypto = require('node:crypto'), A2 = readFileSync(path.join(HERE, 'apply_boss_feet_calib_bake.mjs'), 'utf8'), bad = [], dims = [];
   const ROWS = [...A2.matchAll(/\["(Sprites\/bosses\/[^"]+)",\d+,"([0-9a-f]{64})",\d+,"([0-9a-f]{64})"\]/g)];
-  for (const [, rel, , nSha] of ROWS) { let b = null; try { b = readFileSync(path.join(ROOT, rel)); } catch (e) {} if (!b || crypto.createHash('sha256').update(b).digest('hex') !== nSha) bad.push(rel.slice(15)); }
+  const ESRB = new Set([...(existsSync(path.join(HERE, 'apply_esrgan_bosses_bake.mjs')) ? readFileSync(path.join(HERE, 'apply_esrgan_bosses_bake.mjs'), 'utf8') : '').matchAll(/\["(Sprites\/bosses\/[^"]+)",\d+,"([0-9a-f]{64})",\d+,"([0-9a-f]{64})"\]/g)].map((m) => m[1] + ' ' + m[2] + ' ' + m[3]));   // v0.30.x esrgan-bosses - re-drawn sharp from these frames
+  for (const [, rel, , nSha] of ROWS) { let b = null; try { b = readFileSync(path.join(ROOT, rel)); } catch (e) {} const _h = b ? crypto.createHash('sha256').update(b).digest('hex') : ''; if (!b || (_h !== nSha && !ESRB.has(rel + ' ' + nSha + ' ' + _h))) bad.push(rel.slice(15)); }
   check(ROWS.length >= 110 && !bad.length, `the ${ROWS.length} re-baked Gravitos frames are the reviewed ones (sha256)`, { n: ROWS.length, bad: bad.slice(0, 8) });
   for (const [, rel] of ROWS) { const o = orig(rel); if (!o) { dims.push(rel.slice(15) + ' not on origin'); continue; } const [a, b] = await Promise.all([sharp(readFileSync(path.join(ROOT, rel))).metadata(), sharp(o).metadata()]); if (a.width !== b.width || a.height !== b.height) dims.push(`${rel.slice(15)} ${a.width}x${a.height} vs ${b.width}x${b.height}`); }
   check(!dims.length, 'every re-baked frame keeps origin\'s canvas size (his drawn box, hit regions and bake bases are unchanged)', dims.slice(0, 8));

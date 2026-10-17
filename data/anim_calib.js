@@ -403,7 +403,7 @@ window.LX_ANIM_CALIB = {
     },
     "attack": {
       "s": 1.6,
-      "dx": -0.0535,
+      "dx": -0.051236,
       "dy": -0.01,
       "ft": [
         72,
@@ -563,19 +563,19 @@ window.LX_ANIM_CALIB = {
   },
   "legosaurus": {
     "idle": {
-      "s": 1,
-      "dx": 0,
-      "dy": 0.033
+      "s": 0.573491,
+      "dx": -0.000122,
+      "dy": 0.022284
     },
     "walk": {
-      "s": 0.949,
-      "dx": 0,
-      "dy": 0.023
+      "s": 0.572887,
+      "dx": -0.000298,
+      "dy": 0.016846
     },
     "attack": {
-      "s": 1,
-      "dx": 0,
-      "dy": 0.028,
+      "s": 0.573491,
+      "dx": -0.000102,
+      "dy": 0.019416,
       "ft": [
         70,
         70,
@@ -821,9 +821,9 @@ window.LX_ANIM_CALIB = {
       "dy": 0.0149
     },
     "attack": {
-      "s": 1.709,
-      "dx": 0.1316,
-      "dy": 0.0056,
+      "s": 1.565471,
+      "dx": 0.031551,
+      "dy": 0.006812,
       "ft": [
         72,
         81,
@@ -1108,7 +1108,7 @@ window.LX_ANIM_CALIB = {
   "towerSovereignswing": {
     "attack": {
       "s": 0.9463,
-      "dx": -0.0587,
+      "dx": 0.026009,
       "dy": 0.0227,
       "ft": [
         72,
@@ -1127,7 +1127,7 @@ window.LX_ANIM_CALIB = {
   "towerSovereigncolumn": {
     "attack": {
       "s": 0.9135,
-      "dx": -0.0585,
+      "dx": 0.003241,
       "dy": 0.0202,
       "ft": [
         72,
@@ -1165,7 +1165,7 @@ window.LX_ANIM_CALIB = {
   "towerSovereignvolley": {
     "attack": {
       "s": 1.0503,
-      "dx": -0.0645,
+      "dx": 0.008406,
       "dy": 0.0194,
       "ft": [
         72,
@@ -1184,7 +1184,7 @@ window.LX_ANIM_CALIB = {
   "towerSovereigndrain": {
     "attack": {
       "s": 0.9508,
-      "dx": -0.0594,
+      "dx": 0.004862,
       "dy": 0.0611,
       "ft": [
         72,
@@ -3297,9 +3297,9 @@ window.LX_ANIM_CALIB = {
   },
   "towerArbiterverdict": {
     "attack": {
-      "s": 1.9895,
-      "dx": 0.1632,
-      "dy": 0.0024,
+      "s": 1.822413,
+      "dx": 0.065597,
+      "dy": 0.004156,
       "ft": [
         80,
         90,
@@ -3315,9 +3315,9 @@ window.LX_ANIM_CALIB = {
   },
   "towerArbitercolumn": {
     "attack": {
-      "s": 2.1176,
-      "dx": 0.146,
-      "dy": 0.0023,
+      "s": 1.939755,
+      "dx": 0.16564,
+      "dy": 0.004191,
       "ft": [
         100,
         110,

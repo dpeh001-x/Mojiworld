@@ -52,14 +52,15 @@ const footRead = async (c, face) => {
 };
 // ---- tables: only the two listed dx move
 const LISTED = { towerArbiterverdict: 'attack', towerArbiter: 'walk' };
+const ESRB = Object.fromEntries([...(existsSync(path.join(HERE, 'apply_esrgan_bosses_bake.mjs')) ? readFileSync(path.join(HERE, 'apply_esrgan_bosses_bake.mjs'), 'utf8') : '').matchAll(/\['(\w+)', '(\w+)', \{ s: [-\d.]+, dx: [-\d.]+, dy: [-\d.]+ \}, \{ s: ([-\d.]+), dx: ([-\d.]+), dy: ([-\d.]+) \}\]/g)].map((m) => [m[1] + '.' + m[2], { s: +m[3], dx: +m[4], dy: +m[5] }]));   // v0.30.x esrgan-bosses - its solved rows (exact s / dx / dy) are not this package's drift
 {
   const parse = (s) => { const a = s.indexOf('window.LX_ANIM_CALIB = '), b = s.indexOf('window.LX_ATK_HITBOX = '); return { c: JSON.parse(s.slice(a + 23, b).trim().replace(/;$/, '')), h: JSON.parse(s.slice(b + 22).trim().replace(/;\s*$/, '')) }; };
   const L = parse(readFileSync(path.join(ROOT, 'data/anim_calib.js'), 'utf8')), O = parse(String(orig('data/anim_calib.js') || ''));
   const diff = [];
   for (const ent of new Set([...Object.keys(L.c), ...Object.keys(O.c)])) for (const st of new Set([...Object.keys(L.c[ent] || {}), ...Object.keys(O.c[ent] || {})])) {
     const l = (L.c[ent] || {})[st], o = (O.c[ent] || {})[st];
-    if (LISTED[ent] === st) { const strip = (v) => JSON.stringify(Object.assign({}, v || {}, { dx: 0 })); if (strip(l) !== strip(o)) diff.push(ent + '.' + st + ' (beyond dx)'); }
-    else if (JSON.stringify(l) !== JSON.stringify(o)) diff.push(ent + '.' + st);
+    if (LISTED[ent] === st) { const strip = (v) => JSON.stringify(Object.assign({}, v || {}, { dx: 0 })); if (strip(l) !== strip(o) && !(ESRB[ent + '.' + st] && l && l.s === ESRB[ent + '.' + st].s && l.dx === ESRB[ent + '.' + st].dx && l.dy === ESRB[ent + '.' + st].dy)) diff.push(ent + '.' + st + ' (beyond dx)'); }
+    else if (JSON.stringify(l) !== JSON.stringify(o) && !(ESRB[ent + '.' + st] && l && l.s === ESRB[ent + '.' + st].s && l.dx === ESRB[ent + '.' + st].dx && l.dy === ESRB[ent + '.' + st].dy)) diff.push(ent + '.' + st);
   }
   for (const ent of new Set([...Object.keys(L.h), ...Object.keys(O.h)])) if (JSON.stringify(L.h[ent]) !== JSON.stringify(O.h[ent])) diff.push('hitbox ' + ent);
   check(!diff.length, 'tables: only the verdict\'s and the walk\'s dx differ from origin (their s, dy and timings, every other calibration and every hit box are origin\'s)', diff.slice(0, 12));

@@ -16400,7 +16400,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1841';
+const GAME_VERSION = 'v0.30.1842';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -158697,6 +158697,13 @@ function _lxSovAtkPose(m, key, frames) { return _lxBossAtkPose(m, key, frames); 
 // with the free Real-ESRGAN anime upscaler instead of the paid one, which re-invented his mouth / nose lines on every frame (face shimmer).
 // Same canvases, same one-pass reduction and per-set alignment, same outline (alpha) byte for byte; near-black kept off pure black and the
 // dark rim inside the outline lifted. These bases are unchanged. Frames, tables, sw.js: scripts/apply_gravitos3_esrgan_bake.mjs (v0.30.1834 gravitos3-esrgan).
+// v0.30.1842 esrgan-bosses - BOSS ART UPSCALED, FREE (per user: "Yes go ahead"). Sets drawn bigger than their art are stored at 1.6-2x (the Tower
+// Sovereign's volley / drain / swing / pillar x1.667, Aetherion form 1 idle + attack x1.6, Legosaurus x1.75 with his two stills, the
+// Tower Arbiter's swing / pillar / verdict x1.6, Path's Bane's swing x2), each cut to its ink horizontally (never vertically: a hit
+// region is a fraction of the drawn height), with its calibration re-solved so every frame draws where and as big as before at both
+// facings (hit regions unchanged). The bases below already cover those draws at DPR 2+, so the extra pixels are kept. Soft sets are
+// re-drawn sharp on their own canvases (alpha byte for byte): AI-upscaled (Real-ESRGAN, local), reduced once, shadow / halo guarded.
+// Frames, tables and calibration: scripts/apply_esrgan_bosses_bake.mjs (v0.30.1842 esrgan-bosses).
 function _lxBossBakeBaseFor(subdir, type) {
   const T = {
     'idle/aetherion': 1045, 'attack/aetherion': 1045,
@@ -162402,7 +162409,7 @@ function _lxPrewarmMobBakes(type) {
     for (const mode of ['idle', 'walk', 'attack']) {   // v0.30.624 - attack too: a pack's first swings baked their frames mid-fight
       const arr = set[mode];
       if (!Array.isArray(arr)) continue;
-      for (let i = 0; i < arr.length; i++) _LX_PREWARM_Q.push({ type, arr, i, h: t.h, tries: 0, base, atk: mode === 'attack' });
+      for (let i = 0; i < arr.length; i++) _LX_PREWARM_Q.push({ type, arr, i, h: t.h, tries: 0, base, atk: mode === 'attack', st: mode });   // v0.30.1842 esrgan-bosses - st: its calibration state
     }
   } catch (e) {}
 }
@@ -162469,8 +162476,9 @@ function _lxPrewarmDrain(force) {
         _as = (typeof _ATK_FRAME_SCALE !== 'undefined' && _ATK_FRAME_SCALE[j.type]) || 1;
         if (im._lxFi != null && typeof _lxAnimCalib === 'function') { const _ac = _lxAnimCalib(j.type, 'attack'); if (_ac && _ac.fs && _ac.fs[im._lxFi] > 0) _as *= _ac.fs[im._lxFi]; }
       }
-      if (_as !== 1) _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, Math.round(frameW * _as), Math.round(targetH * _as));
-      else _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, frameW, targetH);
+      const _pxc = (typeof _lxAnimCalib === 'function') ? _lxAnimCalib(j.type, j.st || (j.atk ? 'attack' : 'idle')) : null, _pxo = (_pxc && Math.abs(+_pxc.s) > 1) ? { xs: Math.abs(+_pxc.s) } : undefined;   // v0.30.1842 esrgan-bosses
+      if (_as !== 1) _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, Math.round(frameW * _as), Math.round(targetH * _as), _pxo);
+      else _lxDrawSoft(_lxPrewarmScratch, im, 0, 0, frameW, targetH, _pxo);   // v0.30.1842 esrgan-bosses
       drained++;
     } catch (e) {}
   }
@@ -163833,6 +163841,10 @@ function _lxMiraShardDraw(m, sx, sy, targetH) {
   ctx.save(); ctx.translate(_lxWholePx(sx + m.w / 2), _lxWholePx(sy + m.h / 2)); ctx.rotate(m._miraDirA - _LX_MIRA_SHARD_AXIS);
   _lxUseEntityImageQuality(ctx); ctx.drawImage(img, -w / 2, -h / 2, w, h); ctx.restore(); return true;
 }
+// v0.30.1842 esrgan-bosses - a monster's calibration scale (anim_calib s, ctx.scale below) reaches the soft-draw bake the way a boss's does
+// (_softOpts.xs): the bake was sized for the unscaled draw and then stretched by s - the Tomb Keeper drew 0.49 (swing, s 2.05) and
+// 0.66 (idle / walk, s 1.56) art pixels per screen pixel. Above x1 only (a bake is never sized up past its source).
+function _lxMobSoftOpts(m) { const k = m && m._lxMobXs; return (k > 1) ? { xs: k } : undefined; }
 function _drawMonsterSprite(m, sx, sy) {
   const _art = _lxMobArtKey(m);   // v0.30.1503 libra-adds - the art worn (m.type unless an art key has decoded)
   const anim = MONSTER_ANIMS[_art];
@@ -163916,7 +163928,7 @@ function _drawMonsterSprite(m, sx, sy) {
   // Applied here so every draw branch below inherits it; no-op when {s:1,dx:0,dy:0}.
   if (typeof _lxAnimCalib === 'function') {
     const _cst = m._frameIsAttack ? 'attack' : (_mobWalking(m) ? 'walk' : 'idle');   // v0.29.273 — displacement-aware
-    const _ac = _lxAnimCalib(_art, _cst);
+    const _ac = _lxAnimCalib(_art, _cst); m._lxMobXs = Math.abs(+_ac.s) || 1;   // v0.30.1842 esrgan-bosses - for _lxMobSoftOpts
     if (_ac.s !== 1 || _ac.dx || _ac.dy) { ctx.translate(_ac.dx * targetH, _ac.dy * targetH); ctx.scale(_ac.s, _ac.s); }
   }
   _lxUseEntityImageQuality(ctx);
@@ -164073,16 +164085,16 @@ function _drawMonsterSprite(m, sx, sy) {
       let _plantImg = _stateImg;
       if (_ATK_PLANT_ON_REST.has(m.type) && typeof _monsterFramesFor === 'function') {   // v0.30.1409 - see _ATK_PLANT_ON_REST
         const _rest = (_monsterFramesFor(_art).attack || [])[0];
-        if (_rest && (_rest.naturalHeight || _rest.height) === (_stateImg.naturalHeight || _stateImg.height)) _plantImg = _rest;
+        if (_rest && Math.abs((_rest.naturalWidth || _rest.width) / ((_rest.naturalHeight || _rest.height) || 1) - _fsW / (_fsH || 1)) < 0.01) _plantImg = _rest;   // v0.30.1842 esrgan-bosses - a raw and a baked frame plant alike
       }
       const _fBox = (typeof _spriteContentBox === 'function') ? _spriteContentBox(_plantImg) : null;
       if (_fBox && _fBox.bottom > _fBox.top && _fsH) {
         const _footLocal = dyOffset + targetH * ((bboxBottomY + 1) / (srcH || 1));   // where idle/walk plant their feet
-        _bDy = _footLocal - _bH * ((_fBox.bottom + 1) / _fsH);
+        _bDy = _footLocal - _bH * ((_fBox.bottom + 1) / ((_plantImg.naturalHeight || _plantImg.height) || _fsH));   // v0.30.1842 esrgan-bosses
       }
-      _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_bW / 2), _lxWholePx(_bDy), _bW, _bH);   // v0.29.x — edge feather
+      _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_bW / 2), _lxWholePx(_bDy), _bW, _bH, _lxMobSoftOpts(m));   /* v0.30.1842 esrgan-bosses */   // v0.29.x — edge feather
     } else {
-      _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_frameW / 2), _lxWholePx(dyOffset), _frameW, targetH);   // v0.29.x — edge feather
+      _lxDrawSoft(ctx, _stateImg, _lxWholePx(-_frameW / 2), _lxWholePx(dyOffset), _frameW, targetH, _lxMobSoftOpts(m));   /* v0.30.1842 esrgan-bosses */   // v0.29.x — edge feather
     }
   } else {
     const _sFit = (typeof _lxMobStillFit === 'function') ? _lxMobStillFit(m, sprite, targetH, dyOffset) : null;   // v0.30.1416 - see _lxMobStillFit

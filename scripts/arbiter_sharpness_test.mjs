@@ -11,12 +11,12 @@ const detail = async (f) => { const { data, info } = await sharp(f).ensureAlpha(
   const L = (i) => 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]; let s = 0, n = 0;
   for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) { const i = (y * W + x) * 4; if (data[i + 3] >= 250) { s += Math.abs(4 * L(i) - L(i - 4) - L(i + 4) - L(i - W * 4) - L(i + W * 4)); n++; } }
   return { d: s / n, W, H }; };
-const SETS = [['idle', 'towerArbiter', 1500], ['walk', 'towerArbiter', 1500], ['attack', 'towerArbiter', 1500], ['attack', 'towerArbiterdash', 2100], ['attack', 'towerArbitercolumn', 1500], ['attack', 'towerArbiterverdict', 1500]];
+const SETS = [['idle', 'towerArbiter', 1500, 1300], ['walk', 'towerArbiter', 1500, 1300], ['attack', 'towerArbiter', 1365, 2080], ['attack', 'towerArbiterdash', 2100, 1300], ['attack', 'towerArbitercolumn', 910, 2080], ['attack', 'towerArbiterverdict', 650, 2080]];   // v0.30.x esrgan-bosses - his swing / pillar / verdict are stored at x1.6, cut to their ink horizontally
 const miss = [], size = [], soft = [], means = {};
-for (const [dir, key, W] of SETS) { let sum = 0, n = 0;
+for (const [dir, key, W, H] of SETS) { let sum = 0, n = 0;
   for (let i = 0; i < 9; i++) { const f = path.join(ROOT, 'Sprites/bosses', dir, key + '_' + i + '.webp'); if (!existsSync(f)) { miss.push(dir + '/' + key + '_' + i); continue; }
-    const r = await detail(f); sum += r.d; n++; if (r.W !== W || r.H !== 1300) size.push(key + '_' + i + ' ' + r.W + 'x' + r.H); if (r.d < 14) soft.push(dir + '/' + key + '_' + i + ' ' + r.d.toFixed(1)); }
+    const r = await detail(f); sum += r.d; n++; if (r.W !== W || r.H !== H) size.push(key + '_' + i + ' ' + r.W + 'x' + r.H); if (r.d < 14) soft.push(dir + '/' + key + '_' + i + ' ' + r.d.toFixed(1)); }
   means[dir + '/' + key] = n ? +(sum / n).toFixed(1) : 0; }
-ok('[1] all 54 frames are on disk at their canvas (1500 x 1300, the dash 2100 x 1300)', miss.length === 0 && size.length === 0, { miss, size });
+ok('[1] all 54 frames are on disk at their canvas (1500 x 1300; the dash 2100 x 1300; swing / pillar / verdict x1.6, cut: 1365 / 910 / 650 x 2080)', miss.length === 0 && size.length === 0, { miss, size });
 ok('[2] every frame keeps >= 14 fine detail and each set\'s mean is >= 16', soft.length === 0 && Object.values(means).every((m) => m >= 16), { means, soft: soft.slice(0, 6) });
 console.log(`\n${pass}/${pass + fail} checks passed`); process.exit(fail ? 1 : 0);
