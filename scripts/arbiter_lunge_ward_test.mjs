@@ -6,6 +6,11 @@
 //   - WARD: the shield is at most 1.3x his drawn BODY (the opaque art, not the 1500x1300 canvas) and centred on it within 12%
 //     of the body's height (it was ~2x the body and centred on the canvas)
 //   node scripts/arbiter_lunge_ward_test.mjs   (PORT / MOJI_SERVE_ROOT / MOJI_GAME_FILE override the served tree)
+// LOAD-PROOF SAMPLING (2026-10-17): a late frame runs one more game step AFTER its draw (_lxFrame's catch-up), so on a loaded
+// machine a per-rAF sample merged two steps (fewer, longer lunge steps), tagged a brace frame drawn just before the catch-up as a dash frame (4), and
+// found the ward's draw stamp one step behind game.time on every frame ("ward shield is drawn [null]", origin since ~1791 under load; 1790 and 1791+
+// draw the shield the same). Now the lunge is read once per game step (a wrapper on updateMonsters), each frame is tagged with his phase when it was
+// drawn (not at the next rAF), and the ward is captured inside its own draw. The rows, their names and the last line are unchanged.
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
@@ -18,6 +23,8 @@ await page.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_
 try {
   await page.goto(`http://localhost:${PORT}/${process.env.MOJI_GAME_FILE || 'mojiworld_game.html'}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await page.waitForFunction(() => typeof loadMap === 'function' && typeof _drawBossWardShield === 'function', null, { timeout: 180000 }); await page.waitForTimeout(4000);
+  // LX_THROTTLE=<n> slows the page's CPU n-fold (CDP), as a loaded machine does: at 10 the old per-rAF sampling failed on 1790 and origin alike
+  const THR = Number(process.env.LX_THROTTLE || 1); if (THR > 1) { const c = await page.context().newCDPSession(page); await c.send('Emulation.setCPUThrottlingRate', { rate: THR }); }
   const R = await page.evaluate(async () => {
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const o = document.getElementById(id); if (o) { o.style.display = 'none'; o.classList.add('fade'); } }
     window._lxBootGateDone = true; window._prologueActive = false; player._storyBeatsSeen = new Proxy({}, { get: () => true }); player._god = true; player.invulnerable = 9e9; player.hp = player.maxHp = 9e6;
@@ -26,20 +33,22 @@ try {
     if (typeof _lxWarmBossFrames === 'function') try { _lxWarmBossFrames('towerArbiter'); } catch (e) {}
     await new Promise((r) => setTimeout(r, 2500));
     // which Arbiter frame each draw blits
-    const P = CanvasRenderingContext2D.prototype, oI = P.drawImage; let lastFrame = null;
-    P.drawImage = function (im, ...a) { if (im) { const src = String((im._lxSrc && im._lxSrc.src) || im.src || ''); const mm = src.match(/bosses\/(\w+)\/towerArbiter(\w*)_(\d)\.webp/); if (mm) lastFrame = mm[1] + mm[2] + ':' + mm[3]; } return oI.apply(this, [im, ...a]); };
+    const P = CanvasRenderingContext2D.prototype, oI = P.drawImage; let lastFrame = null, lastDash = false;   // + his phase when that frame was drawn
+    P.drawImage = function (im, ...a) { if (im) { const src = String((im._lxSrc && im._lxSrc.src) || im.src || ''); const mm = src.match(/bosses\/(\w+)\/towerArbiter(\w*)_(\d)\.webp/); if (mm) { lastFrame = mm[1] + mm[2] + ':' + mm[3]; lastDash = !!(m._hgCharging && m._hgPhase === 'dash'); } } return oI.apply(this, [im, ...a]); };
+    // his dash set is lazy art: wait until all nine frames are ready, so a stand-in pose is not read as the dash (wall-clock guarded)
+    { const t9 = performance.now(); while (performance.now() - t9 < 30000 && !(typeof _lxFtReadyN === 'function' && BOSS_ATTACK_FRAMES.towerArbiterdash && _lxFtReadyN(BOSS_ATTACK_FRAMES.towerArbiterdash) >= 9)) await new Promise((r) => setTimeout(r, 100)); }
     // LUNGE: the player 420 px to his left, the charge cooldown spent; record each game step of the dash
     m._bigMeleeCd = 9e9; m._columnCd = 9e9; m._colCd = 9e9;
     player.x = m.x - 420; player.y = m.y + m.h - player.h; m._hgCd = 0;
-    const steps = new Map(); const t0 = performance.now(); let seenDash = false;
-    while (performance.now() - t0 < 12000) {
+    const xs = [], oUM = window.updateMonsters; window.updateMonsters = function () { try { return oUM.apply(this, arguments); } finally { if (m._hgCharging && m._hgPhase === 'dash') xs.push(m.x); } };
+    const t0 = performance.now(), frames = [];
+    try { while (performance.now() - t0 < 40000) {
       await new Promise((r) => requestAnimationFrame(r));
       player.x = Math.min(player.x, m.x - 200);
-      if (m._hgCharging && m._hgPhase === 'dash') { seenDash = true; const s = game.time | 0; if (!steps.has(s)) steps.set(s, { x: m.x, f: lastFrame }); else steps.get(s).f = steps.get(s).f || lastFrame; }
-      else if (seenDash) break;
+      if (lastFrame && lastDash) frames.push(lastFrame);   // the last frame blitted since the previous rAF, when he was dashing as it was drawn
       lastFrame = null;
-    }
-    const xs = [...steps.values()].map((v) => v.x), frames = [...steps.values()].map((v) => v.f).filter(Boolean);
+      if (xs.length && !(m._hgCharging && m._hgPhase === 'dash')) break;
+    } } finally { window.updateMonsters = oUM; }
     const sp = xs.slice(1).map((x, i) => Math.abs(x - xs[i]));
     const lunge = { steps: xs.length, dist: xs.length ? Math.round(Math.abs(xs[xs.length - 1] - xs[0])) : 0, first: sp[0], last: sp[sp.length - 1], peak: sp.length ? Math.max(...sp) : 0,
       frames: [...new Set(frames)] };
@@ -49,17 +58,19 @@ try {
     let rec = null, arbImg = null; const oW = window._drawBossWardShield;
     // the Arbiter frame drawn this step (captured here, so the old build - whose rect records no image - is measured the same way)
     P.drawImage = function (im, ...a) { if (im) { const src = String((im._lxSrc && im._lxSrc.src) || im.src || ''); if (/bosses\/\w+\/towerArbiter\w*_\d\.webp/.test(src)) arbImg = im; } return oI.apply(this, [im, ...a]); };
-    const _hookArb = P.drawImage; window._drawBossWardShield = function (mm, sx, sy) { const r = { m: mm, img: arbImg }; P.drawImage = function (im, ...a) { if (this === ctx && r.size == null && a.length >= 4) { r.size = a[2]; r.cx = a[0] + a[2] / 2; r.cy = a[1] + a[3] / 2; } return oI.apply(this, [im, ...a]); }; try { return oW.apply(this, arguments); } finally { P.drawImage = _hookArb; rec = r; } };
-    const t1 = performance.now(); let shot = null;
-    while (performance.now() - t1 < 5000) { await new Promise((r) => requestAnimationFrame(r)); m._wardUntil = (game.time | 0) + 600; m.x = 640; m.vx = 0; m.patternState = 'idle';
-      if (rec && rec.size && m._lxDrawRect && m._lxDrawRect.t === (game.time | 0) && performance.now() - t1 > 1500) { shot = { ...rec, r: { ...m._lxDrawRect } }; break; } }
+    let shot = null, t1 = performance.now();
+    const _hookArb = P.drawImage; window._drawBossWardShield = function (mm, sx, sy) { const r = { m: mm, img: arbImg, f: mm.facing }; P.drawImage = function (im, ...a) { if (this === ctx && r.size == null && a.length >= 4) { r.size = a[2]; r.cx = a[0] + a[2] / 2; r.cy = a[1] + a[3] / 2; } return oI.apply(this, [im, ...a]); }; try { return oW.apply(this, arguments); } finally { P.drawImage = _hookArb; rec = r;
+      if (!shot && r.size && mm._lxDrawRect && mm._lxDrawRect.t === (game.time | 0) && performance.now() - t1 > 1500) shot = { ...r, r: { ...mm._lxDrawRect } }; } };
+    t1 = performance.now();
+    while (!shot && performance.now() - t1 < 20000) { await new Promise((r) => requestAnimationFrame(r)); m._wardUntil = (game.time | 0) + 600; m.x = 640; m.vx = 0; m.patternState = 'idle';
+    }
     window._drawBossWardShield = oW; P.drawImage = oI;
     if (!shot) return { lunge, ward: null };
     // the body: the drawn frame's opaque bounds, measured on a 256 px copy (independent of the game's own 64 px probe)
     const img = shot.img; let body = null;
     if (img) { const N = 256, cv = document.createElement('canvas'); cv.width = N; cv.height = N; const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, N, N);
       const d = g.getImageData(0, 0, N, N).data; let l = N, t = N, r = -1, b = -1; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (d[(y * N + x) * 4 + 3] > 24) { if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > b) b = y; }
-      const fl = (m.facing | 0) < 0, bx0 = fl ? 1 - (r + 1) / N : l / N, bx1 = fl ? 1 - l / N : (r + 1) / N;   // the boss draw mirrors him when he faces left
+      const fl = (shot.f | 0) < 0, bx0 = fl ? 1 - (r + 1) / N : l / N, bx1 = fl ? 1 - l / N : (r + 1) / N;   // the boss draw mirrors him when he faces left
       body = { w: (bx1 - bx0) * shot.r.w, h: ((b + 1 - t) / N) * shot.r.h, cx: shot.r.x + ((bx0 + bx1) / 2) * shot.r.w, cy: shot.r.y + ((t + b + 1) / 2 / N) * shot.r.h }; }
     return { lunge, ward: body && { size: Math.round(shot.size), body: Math.round(Math.max(body.w, body.h)), canvas: Math.round(Math.max(shot.r.w, shot.r.h)), dCx: Math.round(shot.cx - body.cx), dCy: Math.round(shot.cy - body.cy), bodyH: Math.round(body.h) } };
   });
