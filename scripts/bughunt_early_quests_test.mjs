@@ -50,7 +50,11 @@ try {
     out.l.lost = { fight: !!game._lxFight, used: Object.keys(a.used || {}).length, trk: trk(N2) }; await touch('l1'); f = game._lxFight; out.l.retry = !!f;
     for (let r = 0; r < 12 && game._lxFight; r++) { for (const m of game._lxFight.mobs.slice()) { m.currentHp = 0; m._killed = 1; try { killMonster(m); } catch (e) {} } _lxFightTick(20000); await wait(100); } out.l.l1 = { used: Object.keys(a.used || {}).join(), trk: trk(N2) };
     await touch('l2'); f = game._lxFight; for (const m of f.mobs.slice()) { m.currentHp = 0; m._killed = 1; try { killMonster(m); } catch (e) {} } await wait(100); out.l.mid = pill();   // the second lamp: four now, two more after 7 s
-    loadMap('town', 300); await wait(600); out.l.left = { fight: !!game._lxFight, used: Object.keys(a.used || {}).join() };
+    loadMap('town', 300); await wait(600);
+    // release28a re-pin: a first arrival in town plays the Everdawn welcome film, which PAUSES the game, and the fight's map-change cleanup runs
+    // in the update loop - dismiss the film with a click (as a player would) and read once the world runs again
+    for (let i = 0; i < 40 && game.paused; i++) { const ov = document.getElementById('everdawn-welcome-overlay'); if (ov) ov.click(); await wait(500); }
+    await wait(600); out.l.left = { fight: !!game._lxFight, used: Object.keys(a.used || {}).join(), paused: !!game.paused };
     // ---- 3. the lantern race
     a = await setup('q_road_5'); const N5 = QUESTS.q_road_5.name; out.r = {}; await touch('a'); out.r.pill = pill(); out.r.trk1 = trk(N5);
     _lxQTimers(46000); out.r.late = { used: Object.keys(a.used || {}).length, trk: trk(N5), toast: __toasts.slice(-1)[0], clock: a.timerMs | 0 };

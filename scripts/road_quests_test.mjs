@@ -106,7 +106,7 @@ try {
     ok('a Lv 5 turn-in of the first quest starts the second at once and names its giver (Taxi Uncle)', C.rolled.active && /Next chapter/.test(C.rolled.toast) && /Taxi Uncle/.test(C.rolled.toast), C.rolled);
     ok('turned in below the next quest\'s level, it says when it opens and whom to see instead', !C.waits.active && /opens at Lv 5/.test(C.waits.toast) && /Taxi Uncle/.test(C.waits.toast), C.waits);
     ok('at Lv 4 the first quest is on offer at Nurse Joyce, and it is not offered a level earlier', C.offer.some((t) => /Accept: The Slime That Drank the Well/.test(t)) && C.lowLevel === false, { offer: C.offer, low: C.lowLevel });
-    ok('veterans are not nagged: above Lv 14 the road is not handed out and never leads "Next" (a Lv 15 save with Act I done points at the Four Captains); at Lv 14 it is still handed out; a save already on it keeps it', C.fade.unlocked15 === false && C.fade.unlocked14 === true && C.fade.keeps === true && C.fade.next12 === 'q_road_1' && C.fade.next15 === 'q_four_captains', C.fade);
+    ok('veterans are not nagged: the road never leads "Next" above Lv 14 (a Lv 15 save with Act I done points at the Four Captains), but it is critical and never fades from the Journal (release28a: a Lv 15 hero is handed it); at Lv 14 it is handed out; a save already on it keeps it', C.fade.unlocked15 === true && C.fade.unlocked14 === true && C.fade.keeps === true && C.fade.next12 === 'q_road_1' && C.fade.next15 === 'q_four_captains', C.fade);
   }
   // ---- the set-pieces, one quest at a time, in the real maps
   const S = await page.evaluate(async () => {

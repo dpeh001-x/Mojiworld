@@ -72,7 +72,9 @@ try {
     loadMap('town'); await sleep(900); settle();
     out.accepted = acceptQuest('q_boss_king', true);
     const t1 = await echo('slimeCave', /Summon the echo/, true);
-    out.tester = { ...t1, done: !!player.quests.completed.q_boss_king, active: !!player.quests.active.q_boss_king };
+    // release28a re-pin: since v0.30.1759 accepting the quest re-arms the arena (_lxQuestArenaRearm) - the King stands again, no Echo Keeper
+    let rearm = null; if (t1.err === 'no Echo Keeper') { loadMap('slimeCave'); await sleep(1400); settle(); rearm = { king: game.monsters.some((m) => m && m.type === 'king' && !m._echoBoss && m.currentHp > 0) }; rearm.slain = await slay((m) => m.type === 'king' && !m._echoBoss); }
+    out.tester = { ...t1, rearm, done: !!player.quests.completed.q_boss_king, active: !!player.quests.active.q_boss_king };
     // 2. the Nightmare echo
     fresh(12); player.quests.active.q_boss_king = { progress: 0 };
     const t2 = await echo('slimeCave', /NIGHTMARE echo/, false);
@@ -100,8 +102,8 @@ try {
   }, NO_ECHO);
   ok('1a. King Gloopaloo stands in his arena and falls to a live kill, no quest taken', R.liveKing && R.liveSlain, { live: R.liveKing, slain: R.liveSlain });
   ok('1b. the game marks the arena cleared, and the quest can be taken after', R.cleared && R.accepted, { cleared: R.cleared, accepted: R.accepted });
-  ok('1c. back in the arena there is no live King, only the Echo Keeper', !R.tester.err && R.tester.live === 0, R.tester);
-  ok('1d. the echo from the Echo Keeper\'s button completes The Brimming Tyrant (the tester\'s report)', R.tester.slain && R.tester.done && !R.tester.active, R.tester);
+  ok('1c. back in the arena after taking the quest the King stands again (v0.30.1759: accepting re-arms his arena), so there is no Echo Keeper to find', R.tester.err === 'no Echo Keeper' && R.tester.live >= 1 && !!R.tester.rearm && R.tester.rearm.king, R.tester);
+  ok('1d. the re-armed King\'s live kill completes The Brimming Tyrant (the tester\'s report: a quest taken after the kill can still be finished)', !!R.tester.rearm && R.tester.rearm.slain && R.tester.done && !R.tester.active, R.tester);
   ok('2. a NIGHTMARE echo completes it too', !R.nightmare.err && R.nightmare.slain && R.nightmare.done, R.nightmare);
   const rows = R.rows.filter((r) => r.skip === undefined), skipped = R.rows.filter((r) => r.skip !== undefined);
   ok('3a. the sweep found the boss quests (at least 18 quest/boss pairs with an echo arena)', rows.length >= 18, rows.length);
