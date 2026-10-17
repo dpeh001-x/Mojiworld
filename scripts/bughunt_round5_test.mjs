@@ -177,7 +177,7 @@ try {
     // H12-10 the Journal's coin pill for a banked hunt
     { const id = Object.keys(QUESTS).find((k) => { const q = QUESTS[k]; return q && q.kind === 'kill' && q.rewards && q.rewards.mojicoins > 100 && !q.critical && !player.quests.completed[k] && !player.quests.active[k] && (q.levelReq | 0) >= 20 && (q.levelReq | 0) <= 60; });
       const q = QUESTS[id]; player.quests.active[id] = { progress: 0, rewardScale: 10, targetCount: 600 };
-      const want = Math.min(_lxQuestCoinCeil(q.levelReq), Math.round(q.rewards.mojicoins * _lxQuestRewardMul(player.level) * 10));
+      const _w0 = Math.min(_lxQuestCoinCeil(q.levelReq), Math.round(q.rewards.mojicoins * _lxQuestRewardMul(player.level) * 10)), want = (typeof _lxQuestCoinAsPaid === 'function') ? _lxQuestCoinAsPaid(_w0) : _w0;   // release28b: the preview is what lands (Ladder + Dawn's Favor)
       try { _questTab = 'active'; try { _questCat = 'all'; } catch (e) {} renderQuestJournal(); const html = (document.getElementById('quest-list') || {}).innerHTML || '';
         out.journal = { id, table: q.rewards.mojicoins, want, shown: html.includes('Reward — ' + want.toLocaleString() + ' Mojicoins'), shownTable: html.includes('Reward — ' + q.rewards.mojicoins.toLocaleString() + ' Mojicoins') }; }
       finally { delete player.quests.active[id]; } }

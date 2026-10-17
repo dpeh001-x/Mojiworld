@@ -192,7 +192,7 @@ await group('world-7', async () => {
   check(['stardustAtrium', 'azureAcademia'].every((k) => w[k] && w[k].dist >= 50), 'world-7: ...and outside that door\'s 50 px trigger, so a stray Up does not walk straight back', J(['stardustAtrium', 'azureAcademia'].map((k) => w[k] && w[k].dist)));
   check(w.forest && w.forest.map === 'forest' && w.forest.onGround && w.forest.dist >= 50, 'world-7: an ordinary door pair still lands beside its door (Everdawn -> Forest)', J(w.forest));
   const mv = r.sweep === 'absent' ? null : r.sweep.moved.map((s) => s.split(' ')[0]).sort();
-  check(!!mv && J(mv) === J(['azureAcademia<-azureAbode']), 'world-7: over every door that stands on a ledge, exactly the one arrival that stood in mid-air moves (the Sanctum -> Spire one went with its door) (Stardust\'s ledge was widened instead)', J(r.sweep));
+  check(!!mv && J(mv) === J(['azureAcademia<-azureAbode', 'duneSands<-lavaCavern', 'gravitosArena<-weightbearerStair', 'mushroom<-jadeGrove', 'reachOfVermillion<-cinnabarCaves', 'skyGarden<-frostbiteHollow'])   /* release28b: the lip arrivals move onto their ledge too (the Gravitos shelf only on authored data: live, it drifts and keeps the old rule) */, 'world-7: over every door that stands on a ledge, exactly the one arrival that stood in mid-air moves (the Sanctum -> Spire one went with its door) (Stardust\'s ledge was widened instead)', J(r.sweep));
 });
 const SYS = String.raw`
   const out = {};

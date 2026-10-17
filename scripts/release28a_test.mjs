@@ -115,7 +115,7 @@ try {
       hero(86, { hold: ROAD.concat(cur ? [cur] : []) });
       for (const id of ROAD) { delete player.quests.unlocked[id]; delete player.quests.active[id]; delete player.quests.completed[id]; }
       player.quests.unlocked.b_pathsBane = true; const acc = acceptQuest('b_pathsBane', true); if (player.quests.active.b_pathsBane) player.quests.active.b_pathsBane.progress = 37;
-      loadMap('town', 300); const coins = player.mojicoins, prev = _lxQuestCoinPreview('b_pathsBane', QUESTS.b_pathsBane), mul = ((typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1) * ((typeof _lxDawnCoinMul === 'function') ? _lxDawnCoinMul() : 1); saveState(); try { _flushSaveStateNow(); } catch (e) {}
+      loadMap('town', 300); const coins = player.mojicoins, prev = _lxQuestCoinPreview('b_pathsBane', QUESTS.b_pathsBane), mul = (typeof _lxQuestCoinAsPaid === 'function') ? 1 : ((typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1) * ((typeof _lxDawnCoinMul === 'function') ? _lxDawnCoinMul() : 1);   // release28b: the preview already holds the bonuses saveState(); try { _flushSaveStateNow(); } catch (e) {}
       return { cur, curName: cur && QUESTS[cur].name, lv: player.level, acc, coins, prev, mul, road: ROAD.filter((id) => player.quests.unlocked[id] || player.quests.completed[id]).length }; }, ROAD);
     const save = await quitAndGrab(ctx, page); await ctx.close();
     ok('[1-setup] a Lv 86 save, every critical quest done but the seven Road quests (none unlocked) and one current-act beat; Path\'s Bane study I at 37', S0.lv === 86 && S0.road === 0 && !!S0.cur && S0.acc && !!save, S0);

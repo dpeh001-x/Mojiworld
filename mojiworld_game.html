@@ -16400,7 +16400,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1838';
+const GAME_VERSION = 'v0.30.1839';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -37023,7 +37023,7 @@ const MAPS = {
     bg:'bloomhaven',   // v0.30.1502 own-backdrops - its own overgrown village (was verdant; before v0.30.64 fungalHollow)
     sky:['#1c3020','#2c4430','#3c5440'],
     worldWidth:1800,
-    levelReq:50,
+    levelReq:56,   // v0.30.1839 release28b: was 50 - its only monsters are Lv 56 Elderbarks (display only; the sweep keeps it, no door gates it)
     gravityMul:1.0,
     platforms:[
       {x:0, y:480, w:1800, h:60, type:'ground'},
@@ -38594,7 +38594,7 @@ const MAPS = {
     bg:'carriageOfAscension',
     sky:['#08060e','#141022','#2a1e3a'],
     worldWidth: 760,
-    levelReq: 12,
+    levelReq: 29,   // v0.30.1839 release28b: was 12 - its Ticket Mechs are Lv 31 and Stage 3 opens at Lv 29 (display only: the Spire summit door and Milo's warp gate it)
     isTower: true,
     isCarriage: true,
     // v0.26.344 — RUNTIME-PLAYTHROUGH FIX. The carriage's authored
@@ -38698,7 +38698,7 @@ const MAPS = {
     bg: 'endlessExpress',
     sky: ['#050218', '#0d0826', '#1e0f3a'],   // deeper cosmic palette than the regular carriage
     worldWidth: 1200,
-    levelReq: 25,
+    levelReq: 29,   // v0.30.1839 release28b: was 25 - Lv 31-36 mechs, entered from the Lv 29 Ticket Rush (display only)
     isTower: true,
     isCarriage: true,
     taxiAccessible: false,
@@ -43874,12 +43874,19 @@ function _lxPortalLabel(po, name) {
   if (!po) return n;
   const span = _lxMapLvSpan(po.dest);
   if (span) n = n.replace(/\s*\(Lv\s*\d+(?:\s*-\s*\d+)?\+?\)/, '');
+  { const _amd = (typeof MAPS !== 'undefined' && MAPS) ? MAPS[po.dest] : null;   // v0.30.1839 release28b: a door into a boss arena names the arena's recommended level (the dialog's), an authored tag too
+    if (_amd && _amd.isBossArena && _amd.levelLabel !== false && typeof _lxArenaDoorLv === 'function') { const _rl = Math.max(po.levelGate | 0, _lxArenaDoorLv(po.dest) | 0);
+      n = n.replace(/\s*\(Lv\s*\d+[^)]*\)/, ''); return _rl >= 10 ? n + ' (Lv ' + _rl + '+)' : n; } }
   if (/Lv\s*\d/.test(n)) return n;   // an authored tag the rule does not own ("(Lv 50 boss)" into an arena)
   return n + _lxPortalLvTag(po, span);
 }
 // ...and the hand-written tags are rewritten now (after the hardbake, the portal tidy and the Sky Garden gate), so po.name - which
 // the W-map, the tests and any reader of MAPS see - says what the door shows. Only names that carry a tag and lead to an ordinary
 // roster are touched; the draw re-derives every tag either way.
+// v0.30.1839 release28b - and po.name of a door into an arena that carries a hand-written tag (Sauro Slope's "(Lv 50 boss)") says what the door shows.
+// After boot (the quests _lxArenaRecLevel reads are final by then).
+if (typeof setTimeout === 'function') setTimeout(() => { try { for (const _id in MAPS) { const _m = MAPS[_id]; if (!_m || !Array.isArray(_m.portals)) continue;
+  for (const _p of _m.portals) if (_p && /Lv\s*\d/.test(_p.name || '') && MAPS[_p.dest] && MAPS[_p.dest].isBossArena) _p.name = _lxPortalLabel(_p); } } catch (e) {} }, 0);
 (function _lxPortalLvNames() {
   if (typeof MAPS === 'undefined') return;
   for (const _id in MAPS) {
@@ -68275,7 +68282,14 @@ const LX_QUEST_COIN_PER_LEVEL = 3750;
 // v0.30.1733 bughunt5 - THE COINS A TURN-IN PAYS, for the Journal (before personal boosts: the Ladder, Dawn's Favor). It printed the table value,
 // and a hunt pays up to x75 of it: the Lv 30+ weighting x the hunt scale banked at accept (or the one an accept would bank), under
 // the per-level ceiling - the expression _completeQuest pays.
+// v0.30.1839 release28b - THE PREVIEW IS WHAT LANDS IN THE PURSE. _completeQuest hands min(ceiling, round(base x pay)) to _grantMojicoins({ full: true }),
+// which still multiplies by the Slaughter Ladder's coin tier and Dawn's Favor (+10% once the story is done) and floors. The Journal
+// skipped both (Road I: 1,359 shown, 1,494 paid); it now applies them in the same order. The pay trim is already in rewards.mojicoins.
+function _lxQuestCoinAsPaid(n) { try { const ks = (typeof _ksCoinMul === 'function') ? _ksCoinMul() : 1, dw = (typeof _lxDawnCoinMul === 'function') ? _lxDawnCoinMul() : 1; return Math.max(0, Math.floor(n * ks * dw)); } catch (e) { return n; } }
 function _lxQuestCoinPreview(id, q) {
+  return _lxQuestCoinAsPaid(_lxQuestCoinTable(id, q));   // v0.30.1839 release28b
+}
+function _lxQuestCoinTable(id, q) {   // v0.30.1839 release28b: the pre-boost turn-in pay (the whole of _lxQuestCoinPreview before)
   try {
     const base = (q && q.rewards && q.rewards.mojicoins) || 0; if (!base) return 0;
     const a = player.quests && player.quests.active && player.quests.active[id];
@@ -72196,7 +72210,7 @@ function _renderWorldMapDiagram(host, opts) {
     } else {
       const _tLines = [m.name || id];
       if (typeof m.levelReq === 'number' && m.levelReq > 1 && m.levelLabel !== false) {   // v0.30.1734 release12: levelLabel:false shows no level
-        _tLines.push('Lv ' + m.levelReq + '+ recommended');
+        _tLines.push('Lv ' + ((typeof _lxWmRecLv === 'function') ? _lxWmRecLv(m) : m.levelReq) + '+ recommended');   // v0.30.1839 release28b: an arena names the dialog's level
       }
       const _roster = _wmMobRoster(m);
       if (_roster.length === 0) {
@@ -72218,7 +72232,7 @@ function _renderWorldMapDiagram(host, opts) {
       const _cardTitleTxt = _cardKnown ? (m.name || id) : '???';
       const _cardMetaTxt = !_cardKnown ? 'undiscovered'
         : (_isSafeHub ? 'safe hub' : _isBoss ? 'boss arena' : 'wilds')
-          + ((typeof m.levelReq === 'number' && m.levelReq > 1 && m.levelLabel !== false) ? '  ·  Lv ' + m.levelReq + '+' : '');
+          + ((typeof m.levelReq === 'number' && m.levelReq > 1 && m.levelLabel !== false) ? '  ·  Lv ' + ((typeof _lxWmRecLv === 'function') ? _lxWmRecLv(m) : m.levelReq) + '+' : '');   // v0.30.1839 release28b: an arena names the dialog's level
       let _cardRowTxt = [];
       if (!_cardKnown) _cardRowTxt = ['Travel here to reveal this place.'];
       else {
@@ -72932,10 +72946,18 @@ function _wmRenderRecent() {
     b.type = 'button';
     b.setAttribute('data-map-id', id);
     const img = document.createElement('img');
+    // v0.30.1839 release28b - ONLY A PAINTED EMBLEM IS ASKED FOR. usurpersCourt and lastStep have none (not in WM_REGION_ICON_IDS): every visit then W
+    // cost a 404, a console error and an iconless chip. The rest - and a failed load - show the W node's own emoji in the same 24 px disc.
+    const _rcEmo = () => { const e = document.createElement('span'); e.className = 'wm-rc-emo'; e.setAttribute('aria-hidden', 'true');
+      e.textContent = ((typeof _WM_BIOME_ICON !== 'undefined' && _WM_BIOME_ICON[id]) || ((typeof _mapWarpIcon === 'function') ? _mapWarpIcon(id) : ''));
+      e.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;font-size:15px;line-height:1;flex:0 0 auto;';
+      return e; };
+    if (typeof WM_REGION_ICON_IDS !== 'undefined' && WM_REGION_ICON_IDS.has(id)) {
     img.src = 'Sprites/world/regions/' + id + '.webp';
     img.alt = '';
-    img.addEventListener('error', () => { try { img.remove(); } catch (e) {} }, { once: true });
+    img.addEventListener('error', () => { try { img.replaceWith(_rcEmo()); } catch (e) {} }, { once: true });
     b.appendChild(img);
+    } else b.appendChild(_rcEmo());
     b.appendChild(document.createTextNode(m.name || id));
     const fee = document.createElement('span');
     fee.className = 'wm-rc-fee';
@@ -83454,7 +83476,9 @@ function loadMap(id, entryX, entryY, _ledgeArrival) {
     // Spire, the Spire's door to the Sanctum, Azure Academia's to Hera's Abode) used to set the hero down in mid-air beside it.
     // Read off the FINAL layout (jittered, spaced, door y snapped), so it is exact: the other side of the door when only that
     // side is ledge.
+    if (_ledgeArrival && entryY !== undefined && typeof _lxLiveDoorY === 'function') { try { const _ly = _lxLiveDoorY(_lxFromMap, player.x, entryY + 80); if (_ly != null) entryY = _ly - 80; } catch (e) {} }   // v0.30.1839 release28b: the door's LIVE y (the spacing pass can lift a ledge and its door 40-60 px)
     if (_ledgeArrival && entryY !== undefined) { try { const _lx7 = _lxLedgeArrivalX(player.x, entryY + 80); if (_lx7 !== player.x) { player.x = _lx7; entryX = _lx7; } } catch (e) {} }
+    if (_ledgeArrival && typeof _lxArrivalFace === 'function') { try { _lxArrivalFace(_lxFromMap, entryY); } catch (e) {} }   // v0.30.1839 release28b: a door arrival faces into the map
     // v0.25.470 — Spawn y. Default 400 puts the player ~80 px above
     // the canonical y=480 ground line (gravity drops them onto it on
     // the next frame). Vertical-tower maps use a per-map ground
@@ -120944,6 +120968,29 @@ function _lxClearArrivalX(destMap, prefX) {
 // the hero fell to the floor below the door they had just walked through (Stardust Atrium: 280 px). Called from loadMap with the
 // FINAL layout: when the default spot is not over the door's own ledge but the mirror spot (the other side, the same step) is,
 // and it clears every other door that could trigger from there, use it; otherwise keep the default exactly.
+// v0.30.1839 release28b - A DOOR ARRIVAL FACES INTO THE MAP. The hero kept the facing they walked in with: walk left into a Zodiac Sanctum door and
+// you landed facing the wall, the boss behind you. Called by loadMap for a door arrival (tryPortal) once x is final: face away from the
+// nearest door back to the map left (same storey when the door has a y), else from the nearest door; no door near: the map's middle.
+function _lxArrivalFace(fromMap, entryY) {
+  const pw = player.w || 28, cx = player.x + pw / 2, ww = (game.mapData && game.mapData.worldWidth) || 2000;
+  const fy = (entryY !== undefined && entryY !== null) ? entryY + 80 : null;
+  const ys = (po) => (typeof po.y === 'number') ? po.y : ((typeof _defaultPortalY === 'function') ? _defaultPortalY(po.x) : null);
+  const all = (game.portals || []).filter((po) => po && typeof po.x === 'number' && (fy == null || ys(po) == null || Math.abs(ys(po) - fy) <= 100));
+  const back = all.filter((po) => fromMap && po.dest === fromMap);
+  let door = null, best = 1e9;
+  for (const po of (back.length ? back : all)) { const d = Math.abs(cx - po.x); if (d < best) { best = d; door = po; } }
+  player.facing = (door && best <= 240) ? (cx >= door.x ? 1 : -1) : (cx < ww / 2 ? 1 : -1);
+}
+// v0.30.1839 release28b - THE BACK DOOR WHERE IT STANDS NOW. tryPortal passes the door's AUTHORED y; _lxSpaceOutPlatforms can lift a crowded ledge
+// (portals ride it) by 40-60 px, so the hero was seated at the old height and the door search below (24 px) lost the door: Sky Garden's
+// Frostbite door, lifted 337 -> 296, set the hero on the lip and dropped them to the shelf beneath. The live door back to the map left
+// (nearest the arrival, within 120 px across and 80 px up or down) gives the y; none: the authored one stands.
+function _lxLiveDoorY(fromMap, x, y0) {
+  const cx = x + ((player && player.w) || 28) / 2; let best = null;
+  for (const po of (game.portals || [])) { if (!po || typeof po.y !== 'number' || (fromMap && po.dest !== fromMap)) continue;
+    if (Math.abs(po.x - cx) > 120 || Math.abs(po.y - y0) > 80) continue; if (!best || Math.abs(po.x - cx) < Math.abs(best.x - cx)) best = po; }
+  return best ? best.y : null;
+}
 function _lxLedgeArrivalX(x, doorY) {
   const md = game.mapData, pw = (player && player.w) || 28, ww = (md && md.worldWidth) || 2000;
   const cx = x + pw / 2;
@@ -120965,7 +121012,7 @@ function _lxLedgeArrivalX(x, doorY) {
   // nobody falls anywhere that matters) - only an arrival in open air above a real drop moves
   const feet0 = doorY - 80 + ((player && player.h) || 46);   // where the hero's feet start (loadMap seats the hero 80 px above the door's authored y)
   let low = null;
-  for (const p of ((md && md.platforms) || [])) { if (!p || x + pw <= p.x || x >= p.x + p.w || p.y < feet0 - 2) continue; if (!low || p.y < low.y) low = p; }   // a platform whose top is above the feet is a ceiling, not a landing
+  for (const p of ((md && md.platforms) || [])) { if (!p || ((host._driftAx || host._driftAy) ? (x + pw <= p.x || x >= p.x + p.w) : (p === host || cx <= p.x || cx >= p.x + p.w)) || p.y < feet0 - 2) continue; /* v0.30.1839 release28b: the centre over another surface, never a 1 px overlap of the door's own ledge (over() judges that one); a drifting ledge (the Gravitos arena's) has no fixed spot and keeps the old rule */ if (!low || p.y < low.y) low = p; }   // a platform whose top is above the feet is a ceiling, not a landing
   if (over(x) || (low && low.y - door.y <= 40)) return x;
   const off = 50 + pw / 2 + 6;
   for (const x2 of [door.x - off, door.x + off]) {
@@ -121289,6 +121336,10 @@ function _lxQuestTalkWanted() {
 }
 // v0.30.1748 release17 - the boss door's "Recommended level" agrees with the boss's own quests: the lowest of the arena's level and the level a
 // boss quest for its boss opens at (Gelwater Grotto said 10+ while The Brimming Tyrant opens at Lv 8 and the road sends you at 9)
+// v0.30.1839 release28b - ONE NUMBER FOR AN ARENA. The W card / tooltip printed levelReq and the doors the boss's danger level (or an authored "(Lv 50
+// boss)"), while the dialog and the under-level toast name _lxArenaRecLevel: Krook Throne read 45+, 50 and 40+. Both now name this one.
+function _lxWmRecLv(m) { try { if (m && m.isBossArena && typeof _lxArenaRecLevel === 'function') { const r = _lxArenaRecLevel(m) | 0; if (r > 0) return r; } } catch (e) {} return m ? m.levelReq : 0; }
+function _lxArenaDoorLv(dest) { const c = _lxArenaDoorLv._c || (_lxArenaDoorLv._c = Object.create(null)); if (c[dest] === undefined) { const m = (typeof MAPS !== 'undefined' && MAPS) ? MAPS[dest] : null; c[dest] = (m && m.isBossArena) ? (_lxWmRecLv(m) | 0) : 0; } return c[dest]; }   // memo: drawn per door per frame
 function _lxArenaRecLevel(M) { let lv = (M && M.levelReq) | 0; try { const bt = M && M.bossType; if (bt) for (const id in QUESTS) { const q = QUESTS[id]; if (q && q.kind === 'boss' && q.target === bt && (q.levelReq | 0) > 0 && (!lv || (q.levelReq | 0) < lv)) lv = q.levelReq | 0; } } catch (e) {} try { if (M && M.isZodiac && M.zodiacSign && typeof _lxStarBossLv === 'function') { const _zl = _lxStarBossLv(M.zodiacSign); if (_zl > 0) lv = _zl; } } catch (e) {} return lv; }   // v0.30.1764 release24: a star arena names its own boss's level (every star door said 70+)
 function _lxTalkTarget() {
   const _tw = (typeof _lxQuestTalkWanted === 'function') ? _lxQuestTalkWanted() : {};   // v0.30.1748 release17
