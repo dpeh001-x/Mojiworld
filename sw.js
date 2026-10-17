@@ -333,7 +333,9 @@
 // so a returning install would keep drawing the v0.30.1828 frames for a session.
 // art-free-fixes - v177 -> v178. 1097 files (effect frames, map backdrops, the world map, menu plates) are REPLACED under their own
 // names (compression blocks cleaned), so a returning install would keep drawing the old blocky art for a session.
-const CACHE = 'mojiworld-assets-v178';   // art-free-fixes: blocky art re-saved clean under its own names. v177 was: gravitos3-esrgan: Gravitos form-3 frames re-made under their own names. v176 was: gravitos3-hq: Gravitos form-3 frames re-drawn under their own names. v175 was:
+// esrgan-maps - v178 -> v179. 32 art files (18 map backdrops, the Dawn Gate, the Dawn crest, the arcane shockwave) are
+// REPLACED under their own names (AI-upscaled), so a returning install would keep drawing the old soft art for a session.
+const CACHE = 'mojiworld-assets-v179';   // esrgan-maps: 30 art files upscaled under their own names. v178 was: art-free-fixes: blocky art re-saved clean under its own names. v177 was: gravitos3-esrgan: Gravitos form-3 frames re-made under their own names. v176 was: gravi
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());
