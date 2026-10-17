@@ -16397,7 +16397,7 @@ function _lxDevSurface() {
     window._lxConsoleQuiet = true;
   } catch (e) {}
 })();
-const GAME_VERSION = 'v0.30.1826';
+const GAME_VERSION = 'v0.30.1827';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -159352,6 +159352,24 @@ function _gravFormCastFrame(m, key) {   // the frame, when THIS draw is one of t
   const c = _GRAV_FORM_CASTS[m.patternState];
   return (c && key === _gravCastKey(m, c)) ? _gravitosOnceFrame(m, key) : null;
 }
+// v0.30.1827 grav-star-fit - THE SUPERNOVA PLAYS TO ITS LAST FRAME (forms 2 and 3). A Singularity's cast ends on the step its hazard resolves (the AI
+// goes idle as the hazard splices itself), and its set was keyed so the blow STARTED on that resolve - so the blow and all after it were cut: form 2's
+// chest blast (f6) flickered and its fading arcs and calm pose (f7-8) never drew; form 3 cut from the growing sphere (f3) straight to idle.
+// The set now ENDS on the resolve: the blow and the frames after it play their authored lengths (form 2 370 ms, form 3 710 ms) and finish as the
+// hazard resolves, the frames before share the rest of the cast in their authored proportions, and the calm last frame hands over to idle under
+// the resolve's flash. Clocked on the hazard's own countdown (life, one per step - the counter that resolves it), so it lands at every cadence;
+// the pattern clock stands in before the hazard spawns. Draw only: the hazard, its timing, damage, his hitbox, the AI and cooldowns are untouched.
+function _lxGravSingFitIdx(m, key, n) {   // v0.30.1827 grav-star-fit - the frame index, or null (no authored timing: the old even spread, which already ends early)
+  const ft = n > 1 ? _lxCalibFt(key, 'attack') : null;
+  if (!ft) return null;
+  let h = null;
+  for (const q of game.hazards) if (q && q.type === 'gravitos_singularity' && q.life > 0 && q.maxLife > 0 && (!h || q.maxLife > h.maxLife)) h = q;
+  const T = (h ? h.maxLife : 330) * 1000 / 60;   // v0.30.1827 grav-star-fit - the cast: the hazard's whole countdown, ms
+  // v0.30.1827 grav-star-fit - resolved but not yet idle (the resolve's hitstop): hold the last frame; not yet spawned: the pattern clock
+  const e = h ? (h.maxLife - h.life) * 1000 / 60 : m._sgSpawned ? T : (m.patternTimer || 0) / (_gravTeleMs(m, 1) || 1);
+  const k = _lxBossKeyFrame(key, n, ft), post = _lxFtTotal(n, ft) - _lxFtPrefix(n, ft, k);   // v0.30.1827 grav-star-fit - the blow and all after it, authored ms
+  return _lxKeyedIdx(n, ft, k, e, Math.max(0, T - post), T);
+}
 function _gravitosOnceFrame(m, key) {
   const frames = BOSS_ATTACK_FRAMES[key];
   if (!frames) return null;
@@ -159361,6 +159379,7 @@ function _gravitosOnceFrame(m, key) {
   frames._readyN = n;
   if (n === 0) return null;
   const _dur = _GRAV_ONCE_DUR[m.patternState] || 1400;
+  if (m.patternState === 'singularity') { const _sfi = _lxGravSingFitIdx(m, key, n); if (_sfi != null) return frames[_sfi]; }   // v0.30.1827 grav-star-fit - the set ends on the resolve
   // v0.30.1363 key-frame - a pattern with one moment of attack plays its key frame ON it, the frames before sharing the wait in their authored
   // proportions and the rest the window after (was: spread evenly across the window, the blow landing after the release in
   // every pattern, and 3.8 s before a Singularity resolved)
