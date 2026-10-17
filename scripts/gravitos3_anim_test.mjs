@@ -6,9 +6,9 @@
 //   - FILES: 63 frames + 9 statics, 1214 px tall; each set on its own width, trimmed symmetrically (the game draws frames
 //     centred) and never under 1640 px (the boss size factor is long edge / 1024, capped at 1.6); his still matches the
 //     idle canvas (1656); no frame reaches within 13 px of the top or either side
-//   - ONE SIZE: every set shares idle's calibration (s, dx, dy); only the star cast is bigger (s >= 1.2)
+//   - ONE SIZE: every set shares idle's calibration (s, dx, dy); the star cast keeps its own row at idle's drawn size (s 1.0485 on its wider canvas, gravitos3-hq)
 //   - IN GAME: each set's rest pose (frame 0), drawn by _drawBossSprite with the keys a fight uses, puts his chest core
-//     within 6 px of idle's; the star cast puts it >= 15% higher (the enlarged form, scaled about his feet)
+//     within 6 px of idle's - the star cast too since gravitos3-hq (the user-approved alignment draws it at idle's size)
 //   [PORT=13921] node scripts/gravitos3_anim_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import fs from 'node:fs'; import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +39,7 @@ const CAL = JSON.parse(cs.slice(ci + pre.length, cs.indexOf('\n};', ci) + 2)), r
 const states = [['gravitos3', 'walk'], ['gravitos3', 'attack'], ['gravitos3laser', 'attack'], ['gravitos3punch', 'attack'], ['gravitos3soul', 'attack'], ['gravitos3star', 'idle'], ['gravitos3star', 'walk']];
 const off = states.filter(([k, st]) => !same(CAL[k] && CAL[k][st]) || (CAL[k][st].fs && CAL[k][st].fs.some((v) => v !== 1)));
 check(off.length === 0, 'ONE SIZE: every form-3 set shares idle\'s calibration, no per-frame scale', { idle: ref, off: off.map((q) => q.join('.')) });
-check(CAL.gravitos3star.attack.s >= 1.2 && (CAL.gravitos3star.attack.dx || 0) === 0, 'ONE SIZE: only the star cast is enlarged', CAL.gravitos3star.attack);
+check(CAL.gravitos3star.attack.s === 1.0485 && (CAL.gravitos3star.attack.dx || 0) === 0 && CAL.gravitos3star.attack.dy === ref.dy, 'ONE SIZE: the star cast is drawn at idle\'s size (s 1.0485 on its own canvas, idle\'s dy)', CAL.gravitos3star.attack);
 // IN GAME
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), PORT], { stdio: 'ignore', cwd: ROOT, env: { ...process.env, MOJI_GAME_FILE: path.resolve(ROOT, process.argv[2] || process.env.MOJI_GAME_FILE || 'mojiworld_game.html') } });
 await new Promise((r) => setTimeout(r, 1500));
@@ -68,9 +68,9 @@ const R = await page.evaluate(async () => {
     set._lxStandInOff = true; m._gravStarKey = key; m._lxCalE = null;
     c2.save(); c2.setTransform(1, 0, 0, 1, 0, 0); c2.fillStyle = '#00ff00'; c2.fillRect(0, 0, W, H); _drawBossSprite(set[0], m, sx, sy, atk, true); c2.restore();
     // the chest core: the 40 brightest pixels in the torso window (it is the hottest thing on him; its colour varies by set).
-    // Idle and the star search the whole torso; every other set searches +-50 px round idle's core, because a set whose
+    // Idle searches the whole torso; every other set (the star cast too, gravitos3-hq) searches +-50 px round idle's core, because a set whose
     // core glows dim orange (the fire beam's rest pose) would otherwise pick the flame crown over his head.
-    const I0 = out.idle, near = I0 && I0.n && name !== 'star';
+    const I0 = out.idle, near = I0 && I0.n;
     const yA = near ? foot - I0.up - 50 : foot - 900, yB = near ? foot - I0.up + 50 : foot - 120, xA = near ? I0.x - 50 : sx + m.w / 2 - 260, xB = near ? I0.x + 50 : sx + m.w / 2 + 260;
     const d = c2.getImageData(0, 0, W, H).data, px = [];
     for (let y = Math.max(0, yA); y < Math.min(H, yB); y++) for (let x = Math.max(0, xA); x < Math.min(W, xB); x++) {
@@ -81,9 +81,9 @@ const R = await page.evaluate(async () => {
   return out;
 });
 console.log(JSON.stringify(R));
-const I = R.idle, near = ['walk', 'attack', 'laser', 'punch', 'soul'].filter((k) => !(R[k] && R[k].n && I && Math.abs(R[k].x - I.x) <= 6 && Math.abs(R[k].up - I.up) <= 6));
+const I = R.idle, near = ['walk', 'attack', 'laser', 'punch', 'soul', 'star'].filter((k) => !(R[k] && R[k].n && I && Math.abs(R[k].x - I.x) <= 6 && Math.abs(R[k].up - I.up) <= 6));
 check(!!(I && I.n) && near.length === 0, 'IN GAME: every set\'s rest pose puts his chest core within 6 px of idle\'s (one body)', { idle: I, off: near.map((k) => ({ k, ...R[k] })) });
-check(!!(R.star && R.star.n && I && I.n) && R.star.up >= I.up * 1.15, 'IN GAME: the star cast draws him enlarged (core >= 15% higher above his feet)', { idle: I && I.up, star: R.star && R.star.up });
+check(!!(R.star && R.star.n && I && I.n) && Math.abs(R.star.up - I.up) <= 6, 'IN GAME: the star cast draws him at idle\'s size (core height within 6 px of idle\'s, gravitos3-hq)', { idle: I && I.up, star: R.star && R.star.up });
 check(errs.length === 0, 'no page errors', errs.slice(0, 3));
 await browser.close(); server.kill();
 console.log(`\n${pass}/${pass + fail} checks passed`); process.exit(fail ? 1 : 0);

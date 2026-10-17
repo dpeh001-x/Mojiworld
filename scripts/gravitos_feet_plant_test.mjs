@@ -14,9 +14,9 @@
 //   2. ONE CALIBRATION PER FORM: every body set of a form (idle / walk / attack, punch / soul / laser, the star cast's
 //      idle / walk) has the same s / dx / dy; only the star cast's attack keeps its own
 //   3. BOTH FEET DOWN: in every set but the walks the far (higher) foot, at its median over the set's frames, rests 4-10 px
-//      (forms 1-2) / 1-5 px (form 3) into the floor (a walk lifts one foot in half its frames - see 7). boss-feet-calib: per user
+//      (forms 1-2) / 7-14 px (form 3) into the floor (a walk lifts one foot in half its frames - see 7). boss-feet-calib: per user
 //      "push the feet down more ... such that both heels touch the floor" and "Do 6px" forms 1 and 2 stand deeper (+5 / +6 px)
-//   4. SHALLOW: no set's near (lower) foot sinks past 18 / 23 / 18 px (forms 1 / 2 / 3) at its median - the near foot is drawn
+//   4. SHALLOW: no set's near (lower) foot sinks past 18 / 23 / 24 px (forms 1 / 2 / 3) at its median - the near foot is drawn
 //      14-28 art px under the far one (depth), so form 2's goes down with its floor push above
 //   5. ON THE FORM'S LINES (forms 1, 2): the lines are idle's near / far foot. In every frame he stands in (not the
 //      punch leap), the foot nearest its line is within 2 px of it and neither foot is more than 2 px below its line
@@ -109,11 +109,11 @@ try {
     for (const [k, v] of Object.entries(R.cal)) if (formOf(k) === f && !/star\/attack$/.test(k) && JSON.stringify(v) !== ref) bad2.push(`${k} ${JSON.stringify(v)} vs ${ref}`);
   }
   ok('2. ONE CALIBRATION PER FORM: every body set of a form shares idle\'s s / dx / dy (the star cast\'s attack keeps its own)', bad2.length === 0 && Object.keys(R.cal).length >= 24, bad2.join('; ') || Object.keys(R.cal).length + ' entries');
-  const FAR_PIN = { 1: [4, 10], 2: [4, 10], 3: [1, 5] }, NEAR_PIN = { 1: 18, 2: 23, 3: 18 };   // boss-feet-calib: forms 1 / 2 floor push (+5 / +6 px)
+  const FAR_PIN = { 1: [4, 10], 2: [4, 10], 3: [7, 14] }, NEAR_PIN = { 1: 18, 2: 23, 3: 24 };   // boss-feet-calib: forms 1 / 2 floor push (+5 / +6 px); gravitos3-hq: form 3's one calibration 0.013 deeper (measured far 9-12, near 21)
   const badFar = rows.filter((r) => !/\/walk$/.test(r.k) && !(r.far >= FAR_PIN[formOf(r.k)][0] && r.far <= FAR_PIN[formOf(r.k)][1]));
-  ok('3. BOTH FEET DOWN: every set\'s far foot (walks aside) rests 4-10 px (forms 1-2) / 1-5 px (form 3) into the floor (median over its frames)', badFar.length === 0, (badFar.length ? 'off: ' : '') + (badFar.length ? badFar : rows).map((r) => `${r.k} ${r.far}`).join(', '));
+  ok('3. BOTH FEET DOWN: every set\'s far foot (walks aside) rests 4-10 px (forms 1-2) / 7-14 px (form 3) into the floor (median over its frames)', badFar.length === 0, (badFar.length ? 'off: ' : '') + (badFar.length ? badFar : rows).map((r) => `${r.k} ${r.far}`).join(', '));
   const deep = rows.filter((r) => !(r.near <= NEAR_PIN[formOf(r.k)]));
-  ok('4. SHALLOW: no set\'s near foot sinks past 18 / 23 / 18 px (forms 1 / 2 / 3; median)', deep.length === 0, (deep.length ? deep : rows).map((r) => `${r.k} ${r.near}`).join(', '));
+  ok('4. SHALLOW: no set\'s near foot sinks past 18 / 23 / 24 px (forms 1 / 2 / 3; median)', deep.length === 0, (deep.length ? deep : rows).map((r) => `${r.k} ${r.near}`).join(', '));
   const bad5 = [], seen5 = [];
   for (const f of [1, 2]) {
     const idle = R.out[(f === 1 ? 'gravitos' : 'gravitos2') + '/idle'], N = med(idle.L.map((p) => p && p.y)), F = med(idle.R.map((p) => p && p.y));

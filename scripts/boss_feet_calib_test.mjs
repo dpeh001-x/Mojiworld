@@ -33,7 +33,7 @@ const PORT = Number(process.env.PORT || 11620), FILE = process.env.MOJI_GAME_FIL
 let bad = 0, total = 0; const check = (ok, what, info) => { total++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${ok ? '' : '   ' + JSON.stringify(info).slice(0, 700)}`); if (!ok) bad++; };
 const orig = (rel) => { try { return execFileSync('git', ['show', 'origin/main:' + rel], { cwd: process.env.MOJI_REPO || path.resolve(HERE, '..'), maxBuffer: 1 << 26 }); } catch (e) { return null; } };
 const TOL = 3, CENTRE = 1.1, CAL = {}, CALOLD = {}, ZREF = 9 / 7, ZSEEN = [];   // ZREF: tower_b5's world scale
-const FLOOR_EXP = { 1: 4, 2: 4, 3: -2 };   // Gravitos idle far heel under the platform top per form (this build; origin: -1 / -2 / -2 - form 3 is not in this package)
+const FLOOR_EXP = { 1: 4, 2: 4, 3: 7 };   // Gravitos idle far heel under the platform top per form (this build; origin: -1 / -2 / -2; form 3: gravitos3-hq stands it 0.013 deeper, the approved depth)
 const LISTED = { gravitos2star: ['attack'], towerSovereign: ['walk', 'attack'], towerSovereigncolumn: ['attack'], towerSovereigncollapse: ['attack'], towerSovereigndrain: ['attack'], towerSovereigndash: ['attack'] };
 const A9 = [0, 1, 2, 3, 4, 5, 6, 7, 8], rf = (fs) => fs.map((f) => [f, 'rf']), r1 = (fs) => fs.map((f) => [f, 'r']);
 // the rework checks read EVERY frame of these (the walks, form 2's supernova and laser)
