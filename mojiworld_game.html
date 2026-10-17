@@ -16402,7 +16402,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1845';
+const GAME_VERSION = 'v0.30.1846';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -21108,6 +21108,7 @@ function _lxBossBakeBudget() {
     if ((game.blackHoldFrames | 0) > 0 || (game.blackFlashOverlay || 0) > 0.4) return 3;   // the screen is black: nothing to stutter
     if (game.paused) return 6;
   }
+  if (_LX_BAND_ON && window._lxMintBypass) return 3;   // v0.30.1846 boss-lag-ios - behind the veil: his opening sets land before it lifts (off-thread bakes; the veil hides the blits)
   return 1;
 }
 function _lxBossBakeKick(ms) { if (!_lxBossBakeTimer) _lxBossBakeTimer = setTimeout(_lxBossBakePump, ms || 0); }
@@ -21260,6 +21261,7 @@ function _lxBakeBudget() {
 }
 let _lxShrinkStamp = -1, _lxShrinkUsed = 0;
 function _lxBitmapToCanvas(bmp, src) {
+  if (bmp && bmp._lxBandRes) return _lxBandCanvas(bmp, src);   // v0.30.1846 boss-lag-ios
   const cv = document.createElement('canvas');
   cv.width = bmp.width; cv.height = bmp.height;
   const g = cv.getContext('2d');
@@ -21361,6 +21363,34 @@ function _lxDecWBody() {   // v0.30.1844 boss-lag-images - runs INSIDE the worke
         const bmp = q.rw > 0 ? await createImageBitmap(b, { resizeWidth: q.rw, resizeHeight: q.rh, resizeQuality: 'high' }) : await createImageBitmap(b);
         self.postMessage({ id: q.id, bmp }, [bmp]); return;
       }
+      if (q.op === 'band') {   // v0.30.1846 boss-lag-ios - the same decode / resize as 'bmp'; the inked part of each BH-row band, packed in one sheet (see _lxBandOff)
+        const bmp = q.rw > 0 ? await createImageBitmap(b, { resizeWidth: q.rw, resizeHeight: q.rh, resizeQuality: 'high' }) : await createImageBitmap(b);
+        const W = bmp.width, H = bmp.height, BH = q.bh || 64, c = new OffscreenCanvas(W, H).getContext('2d', { willReadFrequently: true });
+        c.drawImage(bmp, 0, 0);
+        const d = c.getImageData(0, 0, W, H).data, u = new Uint32Array(d.buffer, d.byteOffset, W * H), sp = [];   // v0.30.1846 boss-lag-ios - a pixel with alpha 0 reads back all zero (the store is premultiplied)
+        for (let y0 = 0; y0 < H; y0 += BH) {   // v0.30.1846 boss-lag-ios - per band: the first and last column holding any ink - each row scans only the margins outside what the band already has
+          const h = Math.min(BH, H - y0); let l = W, r = -1;
+          for (let y = y0; y < y0 + h; y++) { const o = y * W; let x = 0; while (x < l && !u[o + x]) x++; if (x < l) l = x; else if (l === W) continue; let z = W - 1; while (z > r && !u[o + z]) z--; if (z > r) r = z; }
+          if (r >= l) sp.push([l, y0, r - l + 1, h]);
+        }
+        let best = null;   // v0.30.1846 boss-lag-ios - shelf-pack the bands (all BH tall), widest first, at the row width that gives the smallest sheet
+        if (sp.length) {
+          const ws = sp.map((t) => t[2]), tot = ws.reduce((a, x) => a + x, 0), mx = Math.max(...ws), ord = sp.map((t, i) => i).sort((a, z) => ws[z] - ws[a]);
+          for (let k = 1; k <= sp.length; k++) {
+            const RW = Math.max(mx, Math.ceil(tot / k)); if (RW > 4096) continue;
+            const rows = [], at = []; for (const i of ord) { let j = 0; while (j < rows.length && rows[j] + ws[i] > RW) j++; if (j === rows.length) rows.push(0); at[i] = [rows[j], j * BH]; rows[j] += ws[i]; }
+            const AW = Math.max(...rows), AH = rows.length * BH;
+            if (AH <= 4096 && (!best || AW * AH < best.a)) best = { a: AW * AH, AW, AH, at };
+          }
+        }
+        if (!best || best.a > W * H * 0.8) { self.postMessage({ id: q.id, bmp }, [bmp]); return; }   // v0.30.1846 boss-lag-ios - the bands save too little: the plain bitmap, exactly as 'bmp'
+        const a = new OffscreenCanvas(best.AW, best.AH), g = a.getContext('2d'); g.imageSmoothingEnabled = false;
+        const out = [];
+        for (let i = 0; i < sp.length; i++) { const t = sp[i], p = best.at[i]; g.drawImage(bmp, t[0], t[1], t[2], t[3], p[0], p[1], t[2], t[3]); out.push(t[0], t[1], t[2], t[3], p[0], p[1]); }
+        bmp.close();
+        const ab = a.transferToImageBitmap();
+        self.postMessage({ id: q.id, bmp: ab, W, H, sp: out }, [ab]); return;
+      }
       const bmp = await createImageBitmap(b), nw = bmp.width, nh = bmp.height;
       if (q.op === 'box') {
         const c = new OffscreenCanvas(q.W, q.H).getContext('2d', { willReadFrequently: true });
@@ -21428,6 +21458,7 @@ function _lxDecodeOff(url, rw, rh) {   // v0.30.1844 boss-lag-images - an ImageB
   });
 }
 function _lxBitmapOffThread(im, bw, bh) {   // v0.30.1844 boss-lag-images - the worker first; the old path (_lxBitmapOffThreadMain) when it cannot
+  if (!arguments[3] && _lxBandWants(im)) return _lxBandOff(im, bw, bh);   // v0.30.1846 boss-lag-ios - a boss frame on an iOS-class budget: stored as its inked bands
   const url = im && im.src;
   if (url && _lxDecWOk(url)) return _lxDecodeOff(url, bw, bh).catch(() => _lxBitmapOffThreadMain(im, bw, bh));
   return _lxBitmapOffThreadMain(im, bw, bh);
@@ -77877,7 +77908,7 @@ function _lxPrewarmBossSets(type, zodiacSign) {
       try { zstores.push(ZODIAC_IDLE_FRAMES, ZODIAC_WALK_FRAMES, ZODIAC_ATTACK_FRAMES, ZODIAC_CHARGE_FRAMES); } catch (e) {}
     }
     const arrs = [];
-    for (const st of stores) for (const k in st) if (k.indexOf(type) === 0 && Array.isArray(st[k])) arrs.push(st[k]);
+    for (const st of stores) for (const k in st) if (k.indexOf(type) === 0 && Array.isArray(st[k]) && (!_LX_BAND_ON || k === type || /[a-z]/.test(k.charAt(type.length)))) arrs.push(st[k]);   // v0.30.1846 boss-lag-ios - an iOS-class budget: his current form only
     for (const st of zstores) if (st && Array.isArray(st[zodiacSign])) arrs.push(st[zodiacSign]);
     if (!arrs.length) return;
     const FLASHES = ['brightness(2.5)', 'brightness(2.0) hue-rotate(60deg) saturate(1.15)'];
@@ -77902,6 +77933,7 @@ function _lxPrewarmBossSets(type, zodiacSign) {
           _lxEdgesTouched(cur);
           _detectSpriteBboxTop(cur);
           _detectSpriteBboxBottom(cur);
+          if (_LX_BAND_ON && _lxBandDue(cur, j.a)) continue;   // v0.30.1846 boss-lag-ios - a raw frame about to be baked: its flash is made from the bake when first drawn
           for (const f of FLASHES) _lxTintBake(cur, f);
         } catch (e) {}
       }
@@ -163349,7 +163381,7 @@ const _lxCvLru = new Map();   // canvas -> { px, evict }, least recently drawn f
 let _lxCvLruPx = 0, _lxCvEvicted = 0;
 function _lxCvTrack(cv, evict) {
   if (!cv || _lxCvLru.has(cv)) return cv;
-  const px = (cv.width | 0) * (cv.height | 0); if (!px) return cv;
+  const px = cv._lxBand ? cv._lxBand.px : (cv.width | 0) * (cv.height | 0); if (!px) return cv;   // v0.30.1846 boss-lag-ios - a band-stored frame holds its sheet
   cv._lxLruT = performance.now(); cv._lxMapT = _lxCvMapNow();
   _lxCvLru.set(cv, { px, evict }); _lxCvLruPx += px;
   if (_lxCvLruPx > _LX_CV_BUDGET_PX) _lxCvTrim();
@@ -163394,8 +163426,8 @@ function _lxCvUseStamp() {   // v0.30.1825 boss-set-pin - marks every frame of e
   const st = ++_lxCvUseSeq; let any = false, want = 0;
   const mark = (a) => { if (!Array.isArray(a)) return; const c = _lxShrinkCap(Math.max(720, a._lxBaseMin || 0));
     for (const x of a) if (x) { x._lxCvUse = st; if (x._lxSrc) x._lxSrc._lxCvUse = st;
-      if (x.tagName === 'CANVAS') want += x.width * x.height;   // v0.30.1825 boss-set-pin - its copy as baked; a raw frame counts at the size it will bake to
-      else { const w = x.naturalWidth | 0, h = x.naturalHeight | 0, k = (w > 0 && h > 0) ? Math.min(1, c / Math.max(w, h)) : 0; want += w * h * k * k; } } };
+      if (x.tagName === 'CANVAS') want += x._lxBand ? x._lxBand.px : x.width * x.height;   // v0.30.1846 boss-lag-ios - a band-stored frame: its sheet   // v0.30.1825 boss-set-pin - its copy as baked; a raw frame counts at the size it will bake to
+      else { const w = x.naturalWidth | 0, h = x.naturalHeight | 0, k = (w > 0 && h > 0) ? Math.min(1, c / Math.max(w, h)) : 0; want += w * h * k * k * (_lxBandWants(x) ? _lxBandRatio : 1); } } };   // v0.30.1846 boss-lag-ios - a frame that will bake to bands, at the running ratio
   const fam = (k, p) => k === p || (k.length > p.length && k.indexOf(p) === 0 && k.charCodeAt(p.length) >= 97 && k.charCodeAt(p.length) <= 122);
   try {
     const B = [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES, BOSS_WEAVE_FRAMES, BOSS_DUCK_FRAMES];
@@ -163408,7 +163440,8 @@ function _lxCvUseStamp() {   // v0.30.1825 boss-set-pin - marks every frame of e
       for (const S of B) if (S) for (const k in S) if (fam(k, p)) mark(S[k]);
     }
   } catch (e) {}
-  if (want + _LX_CV_BUDGET_PX * 0.5 > _LX_CV_PIN_CAP * 0.9) return 0;   // v0.30.1825 boss-set-pin - too big to keep whole: the old rule (see above)
+  if (want + _LX_CV_BUDGET_PX * (_LX_BAND_ON ? 0.3 : 0.5) > _LX_CV_PIN_CAP * 0.9) return 0;   // v0.30.1825 boss-set-pin - too big to keep whole: the old rule (see above); v0.30.1846 boss-lag-ios - 0.3x with band-stored frames
+  if (any && _LX_BAND_ON) _lxBandNextForm(st, want, ms);   // v0.30.1846 boss-lag-ios - and his next form, while it fits
   return (_lxCvUseNow = any ? st : 0);
 }
 function _lxCvPinnedPx(st) { let n = 0; for (const [cv, e] of _lxCvLru) if (_lxCvInUse(cv, st)) n += e.px; return n; }   // v0.30.1825 boss-set-pin
@@ -163446,19 +163479,25 @@ function _lxCvTrimOldForms(target, now, st) {   // v0.30.1825 boss-set-pin - bos
 }
 function _lxCvTrimCap(now) {   // v0.30.1825 boss-set-pin - past the pin cap anything idle goes (the pinned frames too), least recently drawn first
   const to = _LX_CV_PIN_CAP * 0.9;
+  if (_LX_BAND_ON) { const st = _lxCvUseStamp(); if (st) {   // v0.30.1846 boss-lag-ios - the rest first, a small hot copy last; the kept form (sized to fit, see _lxCvUseStamp) only once idle 60 s, or if it alone is over the line - a burst of fresh effects may hold the pool over the cap until they idle
+    for (const [cv, e] of _lxCvLru) { if (_lxCvLruPx <= to || now - cv._lxLruT < _LX_CV_HERE_MS) break; if (!_lxCvInUse(cv, st) && !(e.px < 3e5 && now - cv._lxLruT < 30000)) _lxCvRelease(cv, e); }
+    for (const [cv, e] of _lxCvLru) { if (_lxCvLruPx <= to || now - cv._lxLruT < _LX_CV_HERE_MS) break; if (!_lxCvInUse(cv, st) || now - cv._lxLruT >= 60000) _lxCvRelease(cv, e); }
+    if (_lxCvPinnedPx(st) <= to) return;   // v0.30.1846 boss-lag-ios - the kept form is under the line: what is over is fresh copies, which idle out; a kept form over it still yields below (the bound holds)
+  } }
   for (const [cv, e] of _lxCvLru) {
     if (_lxCvLruPx <= to || now - cv._lxLruT < _LX_CV_HERE_MS) break;
     _lxCvRelease(cv, e);
   }
 }
 function _lxCvTrim() {
-  const _use = _lxCvUseStamp(), _pf = _use ? Math.min(_lxCvPinnedPx(_use) + _LX_CV_BUDGET_PX * 0.5, _LX_CV_PIN_CAP * 0.9) : 0;   // v0.30.1825 boss-set-pin - 0 when no boss lives: the trim runs exactly as before
+  const _use = _lxCvUseStamp(), _pf = _use ? Math.min(_lxCvPinnedPx(_use) + (_LX_BAND_ON ? _lxBandSavedPx(_use) : 0) + _LX_CV_BUDGET_PX * 0.5, _LX_CV_PIN_CAP * 0.9) : 0;   // v0.30.1846 boss-lag-ios - with the px the bands saved: the old line for the same form at full size   // v0.30.1825 boss-set-pin - 0 when no boss lives: the trim runs exactly as before
   const target = Math.max(_LX_CV_BUDGET_PX * 0.8, _pf), now = performance.now(), map = _lxCvMapNow();   // v0.30.1825 boss-set-pin - the line rides above the pinned form
   const _wk = _LX_CV_BUDGET_PX >= 1e8 && (_use ? true : _lxCvBossFight());   // v0.30.1844 boss-lag-images - a boss lives on a desktop-class budget: the warm set waits (see _lxCvWarmKeep)
   for (const [cv, e] of _lxCvLru) {
     if (_lxCvLruPx <= target || now - cv._lxLruT < _LX_CV_AWAY_MS) break;   // the rest were drawn more recently
     if (cv._lxMapT === map && now - cv._lxLruT < 120000) continue;   // this map's copies (its monsters' rarer frames, made at warm-up) stay - for now
     if (_use && _lxCvInUse(cv, _use)) continue;   // v0.30.1825 boss-set-pin - a live boss's current form stays
+    if (_use && _LX_BAND_ON && e.px < 3e5 && now - cv._lxLruT < 30000) continue;   // v0.30.1846 boss-lag-ios - a small copy drawn in the last 30 s stays (see _lxBandArena)
     if (_wk && _lxCvWarmKeep(cv, map)) continue;   // v0.30.1844 boss-lag-images - and the fight's warmed art (a kit copy made in town included)
     _lxCvRelease(cv, e);
   }
@@ -163472,6 +163511,7 @@ function _lxCvTrim() {
   for (const [cv, e] of _lxCvLru) {   // still over with every other map's idle copy gone: this map's, least recently drawn first
     if (_lxCvLruPx <= _target2 || now - cv._lxLruT < _LX_CV_HERE_MS) break;
     if (_use && _lxCvInUse(cv, _use)) continue;   // v0.30.1825 boss-set-pin
+    if (_use && _LX_BAND_ON && e.px < 3e5 && now - cv._lxLruT < 30000) continue;   // v0.30.1846 boss-lag-ios
     if (_wk && _lxCvWarmKeep(cv, map)) continue;   // v0.30.1844 boss-lag-images
     _lxCvRelease(cv, e);
   }
@@ -163499,6 +163539,96 @@ function _lxCvRelease(cv, e) {
   try { if (e.evict) e.evict(cv); } catch (err) {}
 }
 setInterval(() => { try { if (_lxCvLruPx > _LX_CV_BUDGET_PX) _lxCvTrim(); } catch (e) {} }, 1000);   // v0.30.1742 release14: a quiet map makes no canvas, so it never trimmed
+// v0.30.1846 boss-lag-ios - BOSS FRAMES STORED AS THEIR INKED BANDS ON AN iOS-CLASS BUDGET (per user: "fix it" - the iPhone item v0.30.1844 left open).
+// A form did not fit the 40M px budget / 100M px pin cap: Gravitos form 3 is 169M px of canvas at DPR 3 (60M at DPR 1), so his
+// poses were released and re-baked mid-fight (the pose held meanwhile) and the fight's effects were released and decoded again in
+// the frame that drew them. Most of a boss frame is transparent: the decode worker returns the same decode (and resize) as before
+// packed as the inked part of each 64-row band (Gravitos form 3: 37% of the pixels, form 1 21%, Mira 25%), and that sheet IS the
+// frame: it reports the full width / height and carries every field a bake carries. Every drawImage goes through the choke point
+// below, which hands the draw a full-size view - one of three pool canvases with the bands copied back 1:1 at their places - so
+// every draw (any argument form, transform, filter, alpha, smoothing, and the plain / feather / tint copies made from it) samples
+// exactly the pixels it sampled before. Nothing is resampled. A desktop-class budget, no worker or any failure: the old path.
+var _LX_BAND_ON = _LX_CV_BUDGET_PX < 1e8;   // v0.30.1846 boss-lag-ios - an iOS-class budget only (a test may flip it; var: read by functions defined above it)
+const _LX_BAND_POOL = [];   // v0.30.1846 boss-lag-ios - the full-size views: { cv, g, on (the frame it holds), t }
+let _lxBandBusy = false, _lxBandRatio = 0.5;   // v0.30.1846 boss-lag-ios - _lxBandBusy: a view being filled (its copies pass the choke point untouched); the running sheet / frame ratio
+const _lxBandStats = { n: 0, px: 0, full: 0, views: 0 };   // v0.30.1846 boss-lag-ios - diagnostics
+function _lxBandWants(im) {   // v0.30.1846 boss-lag-ios - a boss frame (_loadBossFrames tags _lxSet) the worker can decode
+  return _LX_BAND_ON && !!im && im.tagName === 'IMG' && !!im._lxSet && _lxDecWOk(im.src);
+}
+function _lxBandOff(im, bw, bh) {   // v0.30.1846 boss-lag-ios - the worker's band op; anything unexpected takes the old path (_lxBitmapOffThread, bands off)
+  const old = () => _lxBitmapOffThread(im, bw, bh, 1);
+  return _lxDecWAsk({ op: 'band', url: im.src, rw: bw | 0, rh: bh | 0, bh: 64 }).then((d) => {
+    const b = d.bmp;
+    if (b && d.sp && d.W === (bw | 0) && d.H === (bh | 0)) return { _lxBandRes: true, bmp: b, W: d.W, H: d.H, sp: d.sp, close() { try { b.close(); } catch (e) {} } };
+    if (b && !d.sp && b.width === (bw | 0) && b.height === (bh | 0)) return b;   // v0.30.1846 boss-lag-ios - the bands saved too little: the same bitmap 'bmp' returns
+    try { if (b) b.close(); } catch (e) {}
+    return old();
+  }, old);
+}
+function _lxBandCanvas(r, src) {   // v0.30.1846 boss-lag-ios - the sheet as the frame: a bake in every carried field, full-size in width / height
+  const cv = _lxBitmapToCanvas(r.bmp, src); if (!cv) return null;
+  const W = r.W, H = r.H, sp = r.sp, px = cv.width * cv.height;
+  let l = W, t = H, R = 0, B = 0;
+  for (let i = 0; i < sp.length; i += 6) { if (sp[i] < l) l = sp[i]; if (sp[i + 1] < t) t = sp[i + 1]; if (sp[i] + sp[i + 2] > R) R = sp[i] + sp[i + 2]; if (sp[i + 1] + sp[i + 3] > B) B = sp[i + 1] + sp[i + 3]; }
+  cv._lxBand = { W, H, sp, px, l, t, w: R - l, h: B - t, view: null };
+  cv.naturalWidth = W; cv.naturalHeight = H;
+  Object.defineProperty(cv, 'width', { configurable: true, get() { return W; }, set() {} });
+  Object.defineProperty(cv, 'height', { configurable: true, get() { return H; }, set() {} });
+  _lxBandStats.n++; _lxBandStats.px += px; _lxBandStats.full += W * H; _lxBandRatio = _lxBandStats.px / _lxBandStats.full;
+  return cv;
+}
+function _lxBandView(T) {   // v0.30.1846 boss-lag-ios - the full-size picture of a band-stored frame, for one draw (the choke point calls this)
+  const B = T._lxBand, now = performance.now();
+  let e = B.view;
+  if (e && e.on === T) { e.t = now; return e.cv; }
+  e = null;
+  if (_LX_BAND_POOL.length < 3) { e = { cv: document.createElement('canvas'), g: null, on: null, t: 0 }; _LX_BAND_POOL.push(e); }
+  else for (const x of _LX_BAND_POOL) if (!e || x.t < e.t) e = x;   // v0.30.1846 boss-lag-ios - the least recently drawn view
+  const cv = e.cv;
+  if (e.on && e.on._lxBand.view === e) e.on._lxBand.view = null;
+  if (cv.width !== B.W || cv.height !== B.H) { cv.width = B.W; cv.height = B.H; e.g = null; }   // v0.30.1846 boss-lag-ios - a new size starts blank
+  else if (e.on) { const p = e.on._lxBand; e.g.clearRect(p.l, p.t, p.w, p.h); }   // v0.30.1846 boss-lag-ios - the same size: only the last frame's bands were drawn
+  if (!e.g) { e.g = cv.getContext('2d'); e.g.imageSmoothingEnabled = false; }
+  const sp = B.sp; _lxBandBusy = true;
+  try { for (let i = 0; i < sp.length; i += 6) e.g.drawImage(T, sp[i + 4], sp[i + 5], sp[i + 2], sp[i + 3], sp[i], sp[i + 1], sp[i + 2], sp[i + 3]); }
+  finally { _lxBandBusy = false; }
+  e.on = T; e.t = now; B.view = e; _lxBandStats.views++;
+  return cv;
+}
+function _lxBandPoolPx() { let n = 0; for (const e of _LX_BAND_POOL) n += e.cv.width * e.cv.height; return n; }   // v0.30.1846 boss-lag-ios - diagnostics
+setInterval(() => {   // v0.30.1846 boss-lag-ios - a view not drawn for 4 s is given back
+  try { const now = performance.now(); for (let i = _LX_BAND_POOL.length - 1; i >= 0; i--) { const e = _LX_BAND_POOL[i]; if (now - e.t < 4000) continue;
+    if (e.on && e.on._lxBand.view === e) e.on._lxBand.view = null; e.on = null; e.g = null; e.cv.width = e.cv.height = 0; _LX_BAND_POOL.splice(i, 1); } } catch (e) {}
+}, 2000);
+function _lxBandArena() { try { return _lxCvBossFight() || !!(game && MAPS[game.currentMap] && MAPS[game.currentMap].isBossArena); } catch (e) { return false; } }   // v0.30.1846 boss-lag-ios - a boss fight, or its arena before he spawns
+function _lxBandDue(im, a) { return !!(im && im.tagName === 'IMG' && im._lxSet && im.naturalWidth > 0 && (_lxBossBigRaw(im) || Math.max(im.naturalWidth, im.naturalHeight) > _lxShrinkCap(Math.max(720, (a && a._lxBaseMin) || 0)))); }   // v0.30.1846 boss-lag-ios - a boss frame the off-thread bake will replace
+function _lxBandKitEarly(id) {   // v0.30.1846 boss-lag-ios - the arena's kit warm, queued once loadMap has named the map (its copies are stamped with it) and his opening sets are baked
+  const t0 = performance.now(), md = MAPS[id], sp = md && (md.spawns || []).find((q) => q && q.boss), bt = md && (md.bossType || (sp && sp.type));
+  let tn = 0;
+  const opened = () => { if (!bt) return true; for (const S of [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES]) { const a = S[bt]; if (Array.isArray(a)) for (const f of a) if (_lxBandDue(f, a)) return false; } return true; };
+  const go = () => { try {
+    if (game.currentMap !== id) { if (performance.now() - t0 < 3000) requestAnimationFrame(go); return; }
+    if (!tn) tn = performance.now();
+    if (!opened() && performance.now() - tn < 4000) { requestAnimationFrame(go); return; }   // v0.30.1846 boss-lag-ios - his idle / walk / attack first (4 s at most)
+    _lxWarmKitFx(id); } catch (e) {} };
+  requestAnimationFrame(go);
+}
+function _lxBandNextForm(st, want, ms) {   // v0.30.1846 boss-lag-ios - marks the next form's baked frames as in use when they fit beside the current one (see _lxCvUseStamp)
+  const room = _LX_CV_PIN_CAP * 0.9 - _LX_CV_BUDGET_PX * 0.3 - want;
+  if (!(room > 0)) return;
+  const fam = (k, p) => k === p || (k.length > p.length && k.indexOf(p) === 0 && k.charCodeAt(p.length) >= 97 && k.charCodeAt(p.length) <= 122);
+  const B = [BOSS_IDLE_FRAMES, BOSS_WALK_FRAMES, BOSS_ATTACK_FRAMES, BOSS_WEAVE_FRAMES, BOSS_DUCK_FRAMES];
+  for (const m of ms) {
+    if (!m || !(m.currentHp > 0) || !(m.isBoss || m.boss || m.superBoss) || m.zodiacSign) continue;
+    const p = m._phaseSprite || m.type; if (!p) continue;
+    const d = /(\d+)$/.exec(p), nx = d ? p.slice(0, -d[1].length) + (+d[1] + 1) : p + '2';   // v0.30.1846 boss-lag-ios - gravitos -> gravitos2 -> gravitos3, aetherion -> aetherion2
+    const cvs = []; let px = 0;
+    for (const S of B) if (S) for (const k in S) if (fam(k, nx) && Array.isArray(S[k])) for (const x of S[k]) if (x && x.tagName === 'CANVAS') { cvs.push(x); px += x._lxBand ? x._lxBand.px : x.width * x.height; }
+    if (!cvs.length || px > room) continue;
+    for (const x of cvs) { x._lxCvUse = st; if (x._lxSrc) x._lxSrc._lxCvUse = st; }
+  }
+}
+function _lxBandSavedPx(st) { let n = 0; for (const [cv] of _lxCvLru) { const B = cv._lxBand; if (B && _lxCvInUse(cv, st)) n += B.W * B.H - B.px; } return n; }   // v0.30.1846 boss-lag-ios - what the bands save on the kept form
 // v0.30.405 — DECODE PINNING (per user: "reducing lag of the game"; a Chrome trace
 // of the combat scene). drawImage from an HTMLImageElement goes through Chrome's
 // decoded-image cache, and that cache keeps no promise: on a dense fight — dozens
@@ -163582,7 +163712,7 @@ function _lxPinned(img) {
     // offscreen blits skip the DOM getters; arguments passes the 3-, 5- and 9-argument forms unchanged.
     const w = function (im) {
       if (typeof ctx !== 'undefined' && this === ctx && im && im.tagName === 'IMG' && im.complete && im.naturalWidth > 0) { const p = _lxPinned(im); if (p !== im) { arguments[0] = p; window._lxPinStats.pinned++; } else window._lxPinStats.raw++; }
-      { const _a0 = arguments[0]; if (_a0 && _a0._lxLruT !== undefined) _lxCvTouch(_a0); }   // v0.30.1639 cvbudget
+      { const _a0 = arguments[0]; if (_a0 && _a0._lxLruT !== undefined) _lxCvTouch(_a0); if (_a0 && _a0._lxBand && !_lxBandBusy) arguments[0] = _lxBandView(_a0); }   // v0.30.1639 cvbudget - v0.30.1846 boss-lag-ios: a band-stored frame draws its full-size view
       return o.apply(this, arguments);
     };
     w._lxPinWrap = true; P.drawImage = w;
@@ -187647,6 +187777,7 @@ function _lxReadyGate(mapId, opts) {
     try { if (typeof _lxLazyWantMap === 'function') _lxLazyWantMap(id, true); } catch (e) {}   // v0.30.1196 lazy-art - started now, awaited below
     let _lxFxW = null;   // v0.30.1844 boss-lag-images - the arena warm (kit + boss art), started with the veil
     try { if (!opts.boot && typeof _lxWarmFxRun === 'function') _lxFxW = _lxWarmFxRun(id, () => !!rec.ms, 20000); } catch (e) {}
+    try { if (!opts.boot && !_lxFxW && _LX_BAND_ON) _lxBandKitEarly(id); } catch (e) {}   // v0.30.1846 boss-lag-ios - the kit, queued as soon as the arena is named
     const _lzBoss = (typeof _lxBossArtSettled === 'function') ? _lxBossArtSettled(id) : null, _lzBg = (typeof _lxBackdropSettled === 'function') ? _lxBackdropSettled(id) : null;
     const _lzFx = (typeof _lxFxMapSettled === 'function') ? _lxFxMapSettled(id) : null;   // v0.30.1234 lazy-fx - the map's monster shots and effects, loading beside the sheets
     try { if (typeof _lxArt2Settled === 'function') await capped(_lxArt2Settled(id), CAP * 0.4); } catch (e) {}   // v0.30.1205 lazy-art2 - the monster / NPC sheets, tiles and props land before the veil lifts

@@ -124,7 +124,7 @@ try {
     const t0 = performance.now(); while (!g3.every((x) => x.naturalWidth > 0) && performance.now() - t0 < 60000) { try { _lxBossArtWant('gravitos', true); } catch (e) {} await sleep(250); }
     return { dpr: _LX_DPR, loaded: g3.filter((x) => x.naturalWidth > 0).length, n: g3.length }; });
   const r8 = await RUN(P.p, [{ g: 'g3', n: 'all', src: 'g3', px: 60 / 40 / 69, idle: 20000 }, { g: 'misc', n: 30, src: null, px: 1 / 40, idle: 20000 }], 'gravitos3');
-  check(w8.loaded === w8.n && r8.gone.g3 > 0 && r8.after <= 0.8 && r8.after > 0.7, '[8] iPhone at DPR 2.5: his form 3 (169M px) cannot be kept whole under the cap - released down to 0.8x as before', { w8, r8 });
+  { const b8 = await P.p.evaluate(() => ({ bands: typeof _LX_BAND_ON !== 'undefined' && _LX_BAND_ON === true, kept: _lxCvUseStamp() > 0 })); check(w8.loaded === w8.n && b8.bands && b8.kept && !r8.gone.g3 && r8.gone.misc > 0 && r8.after > 1.9 && r8.after <= 2.05, '[8] iPhone at DPR 2.5: his form 3 is kept whole (band-stored frames, boss-lag-ios) - the rest trimmed to the line (2.0x), the pool under the 2.5x pin cap', { w8, r8, b8 }); }
   await P.ctx.close();
   check(errs.length === 0, 'no page errors', errs.slice(0, 3));
 } catch (e) { check(false, 'harness: ' + String(e && e.message).slice(0, 300), null); }
