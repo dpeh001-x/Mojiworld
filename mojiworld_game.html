@@ -16403,7 +16403,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1847';
+const GAME_VERSION = 'v0.30.1848';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -36642,6 +36642,7 @@ const MAPS = {
       worldHeight: IA_WORLD_H,
       levelReq: 70,                                 // matches wayfarersLantern2 + Sanctum tier
       isVerticalTower: true,
+      cosmicFloor: true,   // v0.30.1848 (per user) the ground runs the whole width of the screen and is painted by _lxCosmicFloorDraw
       // v0.25.736 — Icy Tower mechanics restored per user, but half as
       // slippery as Frozen Peak. `isIcy: true` enables the speed-jump +
       // combo + counter-input mechanics that make chained-momentum
@@ -144971,6 +144972,7 @@ function drawPlatforms() {
     if (game.mapData.isZodiac && typeof _lxZodPlatDraw === 'function' && _lxZodPlatDraw(sx, p)) continue;   // v0.30.1306 - zodiac altars + temple floor
     if (game.mapData.mall && typeof _lxMallPlatDraw === 'function' && _lxMallPlatDraw(sx, p)) continue;
     if (game.mapData.storybook && typeof _lxTownPlatDraw === 'function' && _lxTownPlatDraw(sx, p)) continue;   // town-storybook - every town ledge drawn as what it is   // v0.30.1471 megamall-aaa - a deck is a glass-railed balcony
+    if (game.mapData.cosmicFloor && typeof _lxCosmicFloorDraw === 'function' && _lxCosmicFloorDraw(sx, p)) continue;   // v0.30.1848 the Interdimensional Ascension's ground: edge to edge, its own painter
     if (game.mapData.townSkin && typeof _lxSkinPlatDraw === 'function' && _lxSkinPlatDraw(sx, p)) continue;   // v0.30.1609 town-skins - Azure Academia + Emerald Village ledges
     if (p.type === 'ground') {
       // v0.25.503 painted the Void's ground as a near-black band with a thin violet rim.
@@ -145024,6 +145026,109 @@ function _lxChestFloorY(c) {
   }
   c._lxFloorAt = at; c._lxFloorY = best === null ? foot - 6 : best;
   return c._lxFloorY;
+}
+// v0.30.1848 INTERDIMENSIONAL ASCENSION FLOOR (per user: "make the bottom floor stretch out the map end to end, and make the floor nicer"; then "can be better designed, darker").
+// The tower is 800 px wide but the screen shows 960, so its 800-px ground ended in two visible caps with backdrop either side. A map with `cosmicFloor: true` paints its ground
+// with this instead of the generic slab: one bake that runs the whole width of the screen - past both ends of the world, so the floor is edge to edge. It is a slab of
+// OBSIDIAN, much darker than the nebula behind it so it reads as solid ground: a glossy black-violet top face with one bright rim line, carved panels every 96 px with bevelled
+// seams and a glowing rune in each, a few glowing cracks, angular shards hanging from the underside lit along one edge with a glow at each tip, and small dark crystals standing
+// on the rim. Collision is untouched (the ground platform is still x 0..800); the extra floor beyond the walls is paint only. A slow light along the rim and a few sparkles move each
+// frame; the bake is tracked by the canvas budget.
+const _LX_CFLOOR = { x0: -240, w: 1240, h: 158, top: 14, cap: 12, slab: 74 };
+let _lxCFloorCv = null, _lxCFloorDpr = 0;
+function _lxCFloorArt(c, W2, H2, T, CAP, SLAB) {   // drawn once, in logical units; every random choice is seeded, so the floor never changes between visits
+  let s = 0x1a5ce11; const rnd = () => { s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), s | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const OUT = '#07050f', bodyTop = T + CAP, SB = T + SLAB, PW = 96;   // SB: the slab's underside, from which the shards hang
+  const ACC = [['143,246,255', '#8ff6ff'], ['255,140,215', '#ff8cd7'], ['190,160,255', '#bfa4ff']];
+  const teeth = []; for (let x = 20 + rnd() * 14; x < W2 - 14; x += 30 + rnd() * 40) teeth.push({ x, w: 18 + rnd() * 16, h: 12 + rnd() * 36, lean: (rnd() - 0.5) * 9, k: teeth.length % 3 });
+  const outline = (close) => { c.moveTo(0, T); c.lineTo(W2, T); c.lineTo(W2, SB); for (let i = teeth.length - 1; i >= 0; i--) { const t = teeth[i]; c.lineTo(t.x + t.w / 2, SB); c.lineTo(t.x + t.lean, SB + t.h); c.lineTo(t.x - t.w / 2, SB); } c.lineTo(0, SB); if (close) c.closePath(); };
+  c.save(); c.lineJoin = 'round'; c.lineCap = 'round';
+  // 1. the slab: near-black violet, opaque, lighter just under the top face and falling to black at the shards
+  c.save(); c.beginPath(); outline(true); c.clip();
+  let g = c.createLinearGradient(0, T, 0, SB + 46); g.addColorStop(0, '#2b2257'); g.addColorStop(0.14, '#1b1440'); g.addColorStop(0.6, '#0f0a29'); g.addColorStop(1, '#070518');
+  c.fillStyle = g; c.fillRect(0, T, W2, H2 - T);
+  // faint nebula glints inside the stone, never bright
+  const cols = ['150,90,255', '60,200,255', '255,100,190'];
+  for (let i = 0; i < 9; i++) { const x = rnd() * W2, y = bodyTop + 6 + rnd() * (SLAB - CAP), r = 40 + rnd() * 60, col = cols[i % 3]; const rg = c.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, 'rgba(' + col + ',0.13)'); rg.addColorStop(1, 'rgba(' + col + ',0)'); c.fillStyle = rg; c.fillRect(x - r, y - r, r * 2, r * 2); }
+  // 2. carved panels every PW px: a bevelled seam (dark groove + a lit lip), an inset frame, a glowing rune
+  const mid = bodyTop + (SB - bodyTop) / 2 - 1;
+  for (let px = PW / 2, n = 0; px < W2; px += PW, n++) {
+    const x0 = px - PW / 2, ac = ACC[n % 3];
+    c.fillStyle = 'rgba(0,0,0,0.55)'; c.fillRect(x0 - 1.5, bodyTop, 3, SB - bodyTop + 50);   // the groove
+    c.fillStyle = 'rgba(165,140,255,0.16)'; c.fillRect(x0 + 1.5, bodyTop, 1.2, SB - bodyTop + 50);   // its lit lip
+    c.strokeStyle = 'rgba(0,0,0,0.5)'; c.lineWidth = 2; c.strokeRect(x0 + 9, bodyTop + 8, PW - 18, SB - bodyTop - 16);   // the inset frame, dark inside edge
+    c.strokeStyle = 'rgba(175,150,255,0.22)'; c.lineWidth = 1; c.strokeRect(x0 + 10.5, bodyTop + 9.5, PW - 21, SB - bodyTop - 19);
+    // the rune: a ring, a diamond and three ticks, glowing in the panel's accent
+    const gr = c.createRadialGradient(px, mid, 0, px, mid, 24); gr.addColorStop(0, 'rgba(' + ac[0] + ',0.34)'); gr.addColorStop(1, 'rgba(' + ac[0] + ',0)'); c.fillStyle = gr; c.fillRect(px - 24, mid - 24, 48, 48);
+    c.strokeStyle = 'rgba(' + ac[0] + ',0.9)'; c.lineWidth = 1.5; c.beginPath(); c.arc(px, mid, 9, 0, Math.PI * 2); c.stroke();
+    c.beginPath(); c.moveTo(px, mid - 5.5); c.lineTo(px + 4, mid); c.lineTo(px, mid + 5.5); c.lineTo(px - 4, mid); c.closePath(); c.stroke();
+    c.lineWidth = 1.2; c.beginPath(); for (const a of [-1.5708, 0.5236, 2.618]) { c.moveTo(px + Math.cos(a) * 9, mid + Math.sin(a) * 9); c.lineTo(px + Math.cos(a) * 14, mid + Math.sin(a) * 14); } c.stroke();
+    c.fillStyle = '#ffffff'; c.beginPath(); c.arc(px, mid, 1.3, 0, Math.PI * 2); c.fill();
+  }
+  // 3. glowing cracks climbing from the underside (a bright core inside a soft halo)
+  for (let n = 0, x = 40 + rnd() * 60; x < W2 - 30; x += 150 + rnd() * 130, n++) {
+    const ac = ACC[(n + 1) % 3]; let cx = x, cy = SB + 24; const pts = [[cx, cy]]; while (cy > bodyTop + 14) { cx += (rnd() - 0.5) * 11; cy -= 6 + rnd() * 7; pts.push([cx, cy]); }
+    for (const [w, a] of [[4.5, 0.12], [2.4, 0.3], [1, 0.95]]) { c.strokeStyle = 'rgba(' + ac[0] + ',' + a + ')'; c.lineWidth = w; c.beginPath(); pts.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]))); c.stroke(); }
+  }
+  // a few cold stars in the stone
+  for (let i = 0; i < 60; i++) { const x = rnd() * W2, y = bodyTop + 3 + rnd() * (SB + 30 - bodyTop), a = 0.18 + rnd() * 0.5; c.fillStyle = 'rgba(210,225,255,' + a + ')'; c.beginPath(); c.arc(x, y, 0.6 + rnd() * 0.8, 0, Math.PI * 2); c.fill(); }
+  c.restore();
+  // 4. the shards: a keyline round the whole underside, a lit left facet on each, a bright core and a glow at the tip
+  c.strokeStyle = OUT; c.lineWidth = 2.6; c.beginPath(); c.moveTo(W2, T); c.lineTo(W2, SB); for (let i = teeth.length - 1; i >= 0; i--) { const t = teeth[i]; c.lineTo(t.x + t.w / 2, SB); c.lineTo(t.x + t.lean, SB + t.h); c.lineTo(t.x - t.w / 2, SB); } c.lineTo(0, SB); c.lineTo(0, T); c.stroke();
+  for (const t of teeth) {
+    const tx = t.x + t.lean, ty = SB + t.h, ac = ACC[t.k];
+    c.beginPath(); c.moveTo(t.x - t.w / 2, SB); c.lineTo(tx, ty); c.lineTo(t.x, SB); c.closePath(); c.fillStyle = 'rgba(150,125,235,0.22)'; c.fill();   // the lit left facet
+    c.strokeStyle = 'rgba(' + ac[0] + ',0.7)'; c.lineWidth = 1.1; c.beginPath(); c.moveTo(t.x - t.w / 2 + 1.5, SB + 1); c.lineTo(tx - 0.5, ty - 2); c.stroke();
+    const rg = c.createRadialGradient(tx, ty, 0, tx, ty, 17); rg.addColorStop(0, 'rgba(' + ac[0] + ',0.75)'); rg.addColorStop(1, 'rgba(' + ac[0] + ',0)'); c.fillStyle = rg; c.fillRect(tx - 17, ty - 17, 34, 34);
+    c.fillStyle = ac[1]; c.beginPath(); c.arc(tx, ty - 0.8, 1.8, 0, Math.PI * 2); c.fill();
+  }
+  // 5. the top face: a glossy black-violet band, one thin bright rim line, a soft sheen, a dark lip on its underside
+  c.beginPath(); c.rect(0, T, W2, CAP); g = c.createLinearGradient(0, T, 0, bodyTop); g.addColorStop(0, '#3a2f6e'); g.addColorStop(0.35, '#251c52'); g.addColorStop(1, '#130d33'); c.fillStyle = g; c.fill();
+  g = c.createLinearGradient(0, 0, W2, 0); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(210,195,255,0.10)'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = g; c.fillRect(0, T + 1, W2, 4);
+  c.fillStyle = 'rgba(0,0,0,0.5)'; c.fillRect(0, bodyTop - 2, W2, 2);
+  c.strokeStyle = '#b6a2ff'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(0, T + 0.9); c.lineTo(W2, T + 0.9); c.stroke();   // the rim line
+  c.strokeStyle = 'rgba(190,170,255,0.18)'; c.lineWidth = 3; c.beginPath(); c.moveTo(0, T + 3); c.lineTo(W2, T + 3); c.stroke();
+  c.strokeStyle = OUT; c.lineWidth = 3; c.beginPath(); c.moveTo(0, T); c.lineTo(W2, T); c.stroke();   // the top edge's keyline, like every floor in the game
+  c.strokeStyle = OUT; c.lineWidth = 1.6; c.beginPath(); c.moveTo(0, bodyTop); c.lineTo(W2, bodyTop); c.stroke();
+  // 6. dark crystals standing on the rim (never over 8 px, so a hero's feet stay clear), faceted, with a lit edge and a glow at the base
+  for (let x = 24 + rnd() * 30, n = 0; x < W2 - 18; x += 56 + rnd() * 56, n++) {
+    const ac = ACC[n % 3], glow = c.createRadialGradient(x, T, 0, x, T, 16); glow.addColorStop(0, 'rgba(' + ac[0] + ',0.5)'); glow.addColorStop(1, 'rgba(' + ac[0] + ',0)'); c.fillStyle = glow; c.fillRect(x - 16, T - 16, 32, 18);
+    const count = 2 + (n % 2);
+    for (let k = 0; k < count; k++) {
+      const cx = x + (k - (count - 1) / 2) * 6.2 + (rnd() - 0.5) * 2, h = 4 + rnd() * 4, hw = 1.9 + rnd() * 1.3;
+      c.beginPath(); c.moveTo(cx - hw, T + 0.5); c.lineTo(cx - hw * 0.1, T - h); c.lineTo(cx + hw, T + 0.5); c.closePath();
+      const cg = c.createLinearGradient(cx - hw, 0, cx + hw, 0); cg.addColorStop(0, '#2a2158'); cg.addColorStop(0.5, '#15103a'); cg.addColorStop(1, '#0c0828'); c.fillStyle = cg; c.fill(); c.lineWidth = 1.3; c.strokeStyle = OUT; c.stroke();
+      c.strokeStyle = 'rgba(' + ac[0] + ',0.95)'; c.lineWidth = 1; c.beginPath(); c.moveTo(cx - hw + 0.6, T); c.lineTo(cx - hw * 0.1, T - h + 0.8); c.stroke();
+    }
+  }
+  c.restore();
+}
+function _lxCFloorBake() {
+  const d = _lxMallDpr(); if (_lxCFloorCv && _lxCFloorDpr === d) return _lxCFloorCv;
+  const K = _LX_CFLOOR, cv = document.createElement('canvas'); cv.width = Math.ceil(K.w * d); cv.height = Math.ceil(K.h * d);
+  const c = cv.getContext('2d'); if (!c) return null; c.scale(d, d); _lxCFloorArt(c, K.w, K.h, K.top, K.cap, K.slab);
+  _lxCFloorCv = cv; _lxCFloorDpr = d;
+  if (typeof _lxCvTrack === 'function') _lxCvTrack(cv, (x) => { if (_lxCFloorCv === x) _lxCFloorCv = null; });   // released under memory pressure; baked again at the next draw
+  return cv;
+}
+// the ground of a `cosmicFloor` map: true when it painted (the platform loop then skips the generic slab)
+function _lxCosmicFloorDraw(sx, p) {
+  const md = game.mapData; if (!md || !md.cosmicFloor || p.type !== 'ground') return false;
+  const cv = _lxCFloorBake(); if (!cv) return false;
+  const K = _LX_CFLOOR, d = _lxMallDpr(), left = _lxMallSnap(K.x0 - game.camera.x), top = _lxMallSnap(p.y - K.top);
+  if (typeof _lxCvTouch === 'function') _lxCvTouch(cv);
+  ctx.drawImage(cv, left, top, cv.width / d, cv.height / d);
+  // the living part: a slow light along the rim and a few twinkles in the stone (no state kept: a pure function of the clock)
+  const t = (game.time || 0), W2 = (typeof W === 'number') ? W : 960;
+  const lx = ((t * 0.9) % (W2 + 260)) - 130; ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const lg = ctx.createLinearGradient(lx - 80, 0, lx + 80, 0); lg.addColorStop(0, 'rgba(160,140,255,0)'); lg.addColorStop(0.5, 'rgba(200,185,255,0.34)'); lg.addColorStop(1, 'rgba(160,140,255,0)');
+  ctx.fillStyle = lg; ctx.fillRect(lx - 80, p.y - 1, 160, 4);
+  for (let i = 0; i < 14; i++) {
+    const x = (i * 71 + 23) % (W2 + 8), ph = Math.sin(t * 0.045 + i * 1.9), a = ph > 0.3 ? (ph - 0.3) * 1.2 : 0; if (a <= 0.02) continue;
+    const y = p.y + K.cap + 6 + ((i * 37) % 44); ctx.fillStyle = 'rgba(255,255,255,' + Math.min(0.8, a) + ')'; ctx.fillRect(x - 0.6, y - 2.2, 1.2, 4.4); ctx.fillRect(x - 2.2, y - 0.6, 4.4, 1.2);
+  }
+  ctx.restore();
+  return true;
 }
 function drawChests() {
   if (!game.chests || game.chests.length === 0) return;   // v0.25.451: empty-list early-out
