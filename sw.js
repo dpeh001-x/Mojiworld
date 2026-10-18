@@ -337,7 +337,7 @@
 // REPLACED under their own names (AI-upscaled), so a returning install would keep drawing the old soft art for a session.
 // esrgan-bosses - v179 -> v180. 444 boss / monster frames are REPLACED under their own names (re-drawn sharp, some stored larger),
 // so a returning install would keep drawing the old frames (under the new calibration) for a session.
-const CACHE = 'mojiworld-assets-v180';   // esrgan-bosses: boss frames re-drawn under their own names. v179 was: esrgan-maps: 30 art files upscaled under their own names. v178 was: art-free-fixes: blocky art re-saved clean under its own names. v177 was: gravitos3-esrgan: G
+const CACHE = 'mojiworld-assets-v181';   // barnaby-npc: Barnaby's still + 9 idle frames re-drawn under their own names (grounded shoes, free upscale). v180 was: esrgan-bosses: boss frames re-drawn under their own names. v179 was: esrgan-maps: 30 art files upscaled under their own names. v178 was: art-free-fixes: blocky art re-saved clean under its own names. v177 was: gravitos3-esrgan: G
 const ASSET_RE = /\.(png|webp|jpg|jpeg|gif|svg|mp3|ogg|wav|m4a|woff2)$/i;   // v0.30.558 - woff2: the bundled creator faces
 
 self.addEventListener('install', () => self.skipWaiting());

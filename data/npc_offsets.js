@@ -17,6 +17,7 @@ window.LX_NPC_OFFSET_DATA = {
   "Will": 2,
 };
 window.LX_NPC_SCALE_DATA = {
+  "Barnaby": 1.2,
   "Daisy": 0.926,
   "Fashionista": 1.13,
   "Felina": 1.16,
