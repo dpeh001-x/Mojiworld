@@ -1,20 +1,3 @@
-/* gate re-point (temporary - the next commit removes this block): the old marker texts, for origin's manifest
-"legosaurus": {
-    "idle": {
-      "s": 1,
-      "dx": 0,
-      "dy": 0.033
-  "gravitos3laser": {
-    "attack": {
-      "s": 1.04,
-      "dx": 0,
-      "dy": 0.0129,
-"gravitos2punch": {
-    "attack": {
-      "s": 1.04,
-      "dx": 0,
-      "dy": 0.0216,
-*/
 // Baked per-(monster/boss, state) animation calibration + attack hitboxes.
 // Authored with monster_animator.html. Game merges: localStorage > this file > defaults.
 // CALIB: s = size multiplier; dx/dy = nudge as a FRACTION of rendered sprite height (+dy = down).
