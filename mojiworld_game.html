@@ -16483,7 +16483,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1855';
+const GAME_VERSION = 'v0.30.1856';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -26674,7 +26674,7 @@ const SKILLS = {
   warlord_ult:        { name:'War of Banners',          icon:'🚩', cls:'warrior', job:'berserker', master:'warlord',     slot:'b', mp:70,  cd:60000, desc:'Enter a 10s enrage (Bloodlust, shared with co-op partners on your map) that heals 25% of your max HP and refunds its own MP cost; every press is a 1.7× ATK sweep plus a piercing banner wave (1.4× ATK) — press it again for free, rapid banner strikes.' },
   doombringer_ult:    { name:'Calamity Incarnate',      icon:'🗡️', cls:'warrior', job:'berserker', master:'doombringer', slot:'b', mp:72,  cd:50000, desc:'Name one foe — boss first, else the biggest health pool — and drop the verdict on it: a 10× ATK melee cleave, then SEVEN homing doom-fires (6× ATK each) that all converge on that single target (~52x ATK total, ~78x at full heat). The cleave strikes forward (440px), so it lands only when that foe is in front of you; the fires splash a little, can burn (75%) and hit any foe in their path first. Each fire re-brands with DOOM. Collects up to 10 DOOM brands from the map (from rank 5, each adds +1% execute threshold and +0.4s window) and burns all Calamity Heat (+0.5% damage per point).' },
   crusader_ult:       { name:'Bastion of Dawn',         icon:'🛡️', cls:'warrior', job:'knight',    master:'crusader',    slot:'b', mp:68,  cd:60000, desc:'Tap once to ARM (free), tap again to RELEASE — the cooldown starts at release. While armed the Bastion stores DAWN CHARGE: it grows the longer you hold (full at 10s) and with every point of damage you take (full at one max HP). Release DAWNBREAK (1.2s invulnerable): foes are drawn in, then a holy detonation for 11.2× ATK, up to 105× fully charged, in a radius that grows with the charge (300 to 600px), plus two wider after-waves of 2.4× ATK each (up to 22.5×) — and a full party heal with a 15s half-damage shield for everyone. Armed for 15s, then it erupts on its own.' },
-  dragoon_ult:        { name:'Skyfall Dominion',        icon:'🌩️', cls:'warrior', job:'knight',    master:'dragoon',     slot:'b', mp:62,  cd:50000, desc:'Leap skyward and call down 9 piercing dragon-lances (13× ATK each) that fall on foes within 900px (or rain around you if none), then crash down in a 460px shockwave (32× ATK, ×1.3 vs bosses).' },
+  dragoon_ult:        { name:'Skyfall Dominion',        icon:'🌩️', cls:'warrior', job:'knight',    master:'dragoon',     slot:'b', mp:62,  cd:50000, desc:'Leap skyward and call down 9 piercing dragon-lances (13× ATK each) that fall on foes within 900px (or rain around you if none), then crash down in a 460px shockwave (32× ATK, ×1.3 vs bosses). The lances and the shockwave never miss.' },
   shadowlord_ult:     { name:'Shadow Sovereign',        icon:'🌑', cls:'rogue',   job:'ninja',     master:'shadowlord',  slot:'b', mp:75,  cd:60000, desc:'Summon your Sovereign Shade: a shadow of yourself that mirrors your every move — run, jump, strike — a beat behind for 20s, and echoes every hit you land as a second strike at full damage. The cooldown starts when the shade fades.' },
   shinobi_ult:        { name:'Hundred-Hand Shadow Dance', icon:'🥷', cls:'rogue', job:'ninja',     master:'shinobi',     slot:'b', mp:60,  cd:30000, desc:'Four blink-slashes (26× ATK in 175 px each) that stick to the nearest foe, then a 31× ATK shockwave finale (330 px) that returns you to where you started.' },
   nightreaper_ult:    { name:'Bloodmoon Domain',        icon:'🌒', cls:'rogue',   job:'assassin',  master:'nightreaper', slot:'b', mp:62,  cd:37500, desc:'Three waves of 9 homing, piercing shuriken (4.6× ATK each), an execute on non-boss foes under 25% HP, then a 7.6× ATK blood nova (380 px). Your next 60 skill crit rolls are guaranteed (thrown blades and basic attacks roll their own; the stack is lost on death or a map change).' },
@@ -86521,6 +86521,61 @@ function _lxPlayerHeld() {
 }
 // v0.30.919 the block / parry clocks for the CC early-returns (the normal path ticks them further down updatePlayer).
 // They stopped under a stun, so a block pressed just before one held its parry window open until the stun ended.
+// v0.30.1844 dragoon-stun - SKY LANCE LANDS WHEN THE HERO LANDS (a tester: "G works very weird when my character is stunned ... once i recovered from stun the attack continues"). This was the free tail of updatePlayer, which a
+// stun, a stagger or a shackle returns before - gravity still ran in those branches, so a stunned hero fell to the floor and stood there with dragoonSlam set: no impact, and the chained dives (which wait on the flag) paused
+// behind it until the stun ended. Now every branch that lets the hero fall calls this after its platform collision.
+function _lxDragoonSlamLand() {
+  if (player.dragoonSlam && player.onGround) {
+    player.dragoonSlam = 0;
+    // v0.30.356 per user — 5.2 -> 8.15, against cd 11s -> 25s. This was the ONLY
+    // anomaly the audit found on a short cooldown, which is where sustained
+    // damage actually comes from: 5.05 xATK per second of cooldown, 4.7x the
+    // median, on an 11s button. The dive now hits harder and lands less often.
+    // The v0.30.334 bossMul stays untouched - the boss buff was the point.
+    // v0.30.1050 (per user, the skill audit: "fix all") Sky Lance 8 -> 16: 892% of a basic against a 1,750% band; Dragoon was the lowest warrior
+    _lxRankAs('dragoon_skylance', () => performAround(180, 32, { color:'#88ccff', kb:14, bossMul: 2.2 }));   // v0.30.334 buff per user ("dragoon way too little vs bosses"): 4.0 -> 5.2, and x1.6 more against bosses (8.3x effective)   // v0.26.x balance audit: 6.5x/460 -> 4.0x/340
+    // v0.25.228 — epic dragon-lance impact crater sprite at the slam
+    // point. Held visible for the AOE window; cyan-and-gold shockwave.
+    // v0.25.259 — Bumped to read as a much bigger AOE plunge:
+    //   • Outer splash burst at 480 px (was 320) with slight rotation
+    //     so the crystal shards rotate one half-turn over the visible
+    //     window.
+    //   • Inner core re-spawn at 320 px (the original size), staggered
+    //     by 6 frames so the eye sees TWO crater pulses — a big splash
+    //     followed by the focused central plunge.
+    //   • Life 38 → 56 frames so the sprite stays visible across the
+    //     entire AOE damage window + the column-stun follow-up.
+    // v0.26.323 — Sprite burst sizes scale up with the AOE bump
+    // (480 → 720 outer, 320 → 480 inner) so the visual covers the
+    // new 460 px clear footprint instead of looking small inside it.
+    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h - 12, 'dragoon_impact',
+      { size: 380, life: 56, spin: Math.PI * 0.4 });   // v0.30.x balance - sized to the 180 px slam (was 720 for 340)
+    scheduleSkillTimer(() => {
+      spawnSpriteBurst(player.x + player.w / 2, player.y + player.h - 12, 'dragoon_impact',
+        { size: 250, life: 32 });
+    }, 100);
+    // Pierce downward spear line
+    // v0.26.323 — Column stun reach 320 → 500 (matches the AOE +60%
+    // scale) so post-slam stun blanket covers the same footprint as
+    // the damage radius.
+    for (const m of game.monsters) {
+      if (m.currentHp <= 0) continue;
+      if (Math.abs((m.x+m.w/2) - (player.x+player.w/2)) < 500 && m.y > player.y - 20) {
+        _applyMobStatus(m, 'stun', 800);   // v0.30.1526 op-pass - through the boss rules (was a direct write: no boss resist, no re-stun grace)
+      }
+    }
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI;
+      game.particles.push({
+        x: player.x + player.w/2, y: player.y + player.h,
+        vx: Math.cos(a) * 10, vy: -Math.sin(a) * 6,
+        life: 40, color: '#88ccff', size: 3 + Math.random() * 2
+      });
+    }
+    flash(0.5); addHitStop(80);
+    addShake(10); if (typeof _playUiSfx === 'function') _playUiSfx('slam_ult');   // v0.30.x (audit C10) - Sky Lance lands with a sound and a shake
+  }
+}
 function _lxTickBlockTimers(dt) {
   if (player.blockCD > 0) player.blockCD -= dt;
   if (player.parryWindow > 0) player.parryWindow -= dt;
@@ -86993,6 +87048,7 @@ function updatePlayer(dt) {
     if (player.x + player.w > game.mapData.worldWidth) player.x = game.mapData.worldWidth - player.w;
     player.y += player.vy;
     checkPlatformCollision(player);
+    _lxDragoonSlamLand();   // v0.30.1844 dragoon-stun
     _lxHitIframeBonus(); if (player.invulnerable > 0) player.invulnerable -= dt;
     // Still regen slowly + animate
     if (game.time % 30 === 0 && player.mp < getMaxMp()) {
@@ -87041,6 +87097,7 @@ function updatePlayer(dt) {
     if (player.x + player.w > game.mapData.worldWidth) player.x = game.mapData.worldWidth - player.w;
     player.y += player.vy;
     checkPlatformCollision(player);
+    _lxDragoonSlamLand();   // v0.30.1844 dragoon-stun
     _lxHitIframeBonus(); if (player.invulnerable > 0) player.invulnerable -= dt;
     // Keep a concurrent shackle's clock running. This gate returns before the
     // QTE block below, so pre-fix freeze PAUSED the shackle instead of
@@ -87070,6 +87127,7 @@ function updatePlayer(dt) {
       if (player.x + player.w > game.mapData.worldWidth) player.x = game.mapData.worldWidth - player.w;
       player.y += player.vy;
       checkPlatformCollision(player);
+      _lxDragoonSlamLand();   // v0.30.1844 dragoon-stun
       _lxHitIframeBonus(); if (player.invulnerable > 0) player.invulnerable -= dt;
       // Struggle sparks while chained
       if ((game.time | 0) % 7 === 0) {
@@ -88951,56 +89009,7 @@ function updatePlayer(dt) {
   // 320 → 500 (matching the AOE bump) so the post-slam stun blanket
   // covers the same footprint. Particle/sprite burst sizes also
   // scale up so the visual matches the new clear radius.
-  if (player.dragoonSlam && player.onGround) {
-    player.dragoonSlam = 0;
-    // v0.30.356 per user — 5.2 -> 8.15, against cd 11s -> 25s. This was the ONLY
-    // anomaly the audit found on a short cooldown, which is where sustained
-    // damage actually comes from: 5.05 xATK per second of cooldown, 4.7x the
-    // median, on an 11s button. The dive now hits harder and lands less often.
-    // The v0.30.334 bossMul stays untouched - the boss buff was the point.
-    // v0.30.1050 (per user, the skill audit: "fix all") Sky Lance 8 -> 16: 892% of a basic against a 1,750% band; Dragoon was the lowest warrior
-    _lxRankAs('dragoon_skylance', () => performAround(180, 32, { color:'#88ccff', kb:14, bossMul: 2.2 }));   // v0.30.334 buff per user ("dragoon way too little vs bosses"): 4.0 -> 5.2, and x1.6 more against bosses (8.3x effective)   // v0.26.x balance audit: 6.5x/460 -> 4.0x/340
-    // v0.25.228 — epic dragon-lance impact crater sprite at the slam
-    // point. Held visible for the AOE window; cyan-and-gold shockwave.
-    // v0.25.259 — Bumped to read as a much bigger AOE plunge:
-    //   • Outer splash burst at 480 px (was 320) with slight rotation
-    //     so the crystal shards rotate one half-turn over the visible
-    //     window.
-    //   • Inner core re-spawn at 320 px (the original size), staggered
-    //     by 6 frames so the eye sees TWO crater pulses — a big splash
-    //     followed by the focused central plunge.
-    //   • Life 38 → 56 frames so the sprite stays visible across the
-    //     entire AOE damage window + the column-stun follow-up.
-    // v0.26.323 — Sprite burst sizes scale up with the AOE bump
-    // (480 → 720 outer, 320 → 480 inner) so the visual covers the
-    // new 460 px clear footprint instead of looking small inside it.
-    spawnSpriteBurst(player.x + player.w / 2, player.y + player.h - 12, 'dragoon_impact',
-      { size: 380, life: 56, spin: Math.PI * 0.4 });   // v0.30.x balance - sized to the 180 px slam (was 720 for 340)
-    scheduleSkillTimer(() => {
-      spawnSpriteBurst(player.x + player.w / 2, player.y + player.h - 12, 'dragoon_impact',
-        { size: 250, life: 32 });
-    }, 100);
-    // Pierce downward spear line
-    // v0.26.323 — Column stun reach 320 → 500 (matches the AOE +60%
-    // scale) so post-slam stun blanket covers the same footprint as
-    // the damage radius.
-    for (const m of game.monsters) {
-      if (m.currentHp <= 0) continue;
-      if (Math.abs((m.x+m.w/2) - (player.x+player.w/2)) < 500 && m.y > player.y - 20) {
-        _applyMobStatus(m, 'stun', 800);   // v0.30.1526 op-pass - through the boss rules (was a direct write: no boss resist, no re-stun grace)
-      }
-    }
-    for (let i = 0; i < 3; i++) {
-      const a = (i / 3) * Math.PI;
-      game.particles.push({
-        x: player.x + player.w/2, y: player.y + player.h,
-        vx: Math.cos(a) * 10, vy: -Math.sin(a) * 6,
-        life: 40, color: '#88ccff', size: 3 + Math.random() * 2
-      });
-    }
-    flash(0.5); addHitStop(80);
-    addShake(10); if (typeof _playUiSfx === 'function') _playUiSfx('slam_ult');   // v0.30.x (audit C10) - Sky Lance lands with a sound and a shake
-  }
+  _lxDragoonSlamLand();   // v0.30.1844 dragoon-stun - one function, run from every branch that lets the hero fall
   // Rampage: continuous AoE while active
   // v0.25.557 — tick rate 8 frames → 60 frames (1 s) per global spec.
   if (player.buffs.rampage > 0) {
@@ -100848,9 +100857,9 @@ const SKILL_FNS = {
       if (player.hp <= 0) return;
       const t = targets.length ? targets[i % targets.length] : null;
       const tx = t ? (t.x + t.w / 2) : (player.x + player.w / 2 + (Math.random() - 0.5) * 540);
-      game.projectiles.push({ x: tx, y: _camY + 30, vx: 0, vy: 15, w: 22, h: 72, life: 70, damage: getAtk() * 13 + 30, owner: 'player', skill: 'shard', bspr: 'bult_dragoon', bsprRot: -Math.PI / 2, sprScale: 2.0, bsprKeepAspect: true, color: '#66aaff', noGravity: true, pierce: true });   // v0.29.5xx — 323×512 art stretched 2.06× tall in a 66×216 box; keepAspect keeps the lance's reach and restores its width   // v0.26.x — spear sprite flipped 90° CCW + 2× bigger per user
+      game.projectiles.push({ x: tx, y: _camY + 30, vx: 0, vy: 15, w: 22, h: 72, life: 70, damage: getAtk() * 13 + 30, owner: 'player', skill: 'shard', bspr: 'bult_dragoon', bsprRot: -Math.PI / 2, sprScale: 2.0, bsprKeepAspect: true, color: '#66aaff', noGravity: true, pierce: true, sureHit: true });   // v0.30.1844 dragoon-stun: a lance does not roll the boss's evasion   // v0.29.5xx — 323×512 art stretched 2.06× tall in a 66×216 box; keepAspect keeps the lance's reach and restores its width   // v0.26.x — spear sprite flipped 90° CCW + 2× bigger per user
     }, 180 + i * 100);
-    scheduleSkillTimer(() => { if (player.hp <= 0) return; player.vy = 18; performAround(460, 32, { color: '#3388ff', kb: 14, bossMul: 1.3 }); flash(0.7); addShake(12); addHitStop(100); if (typeof _playUiSfx === 'function') _playUiSfx('slam_ult'); }, 180 + 9 * 100 + 200);
+    scheduleSkillTimer(() => { if (player.hp <= 0) return; player.vy = 18; performAround(460, 32, { color: '#3388ff', kb: 14, bossMul: 1.3, sureHit: true }); flash(0.7); addShake(12); addHitStop(100); if (typeof _playUiSfx === 'function') _playUiSfx('slam_ult'); }, 180 + 9 * 100 + 200);
   },
   shadowlord_ult: () => {
     // v0.30.x — SOVEREIGN SHADE (per user: "improve on the shadow sovereign
@@ -118204,7 +118213,8 @@ function updateProjectiles(dt) {
           }
           const _deN0 = (p._deHit && game.damageNumbers) ? game.damageNumbers.length : -1;   // v0.30.x — Deadeye Protocol: the column + tally read the number this hit pushes
           const _lxPHp0 = m.currentHp;   // v0.30.1526 op-pass - did this shot land? (a defBreak stagger needs it)
-          hitMonster(m, dmg, crit, p.skill || 'bolt');
+          if (p.sureHit) player._lxSureHit = true;   // v0.30.1844 dragoon-stun - Skyfall Dominion's lances roll no miss (Dawnbreak's rule, v0.30.1420)
+          try { hitMonster(m, dmg, crit, p.skill || 'bolt'); } finally { player._lxSureHit = false; }
           if (_deN0 >= 0) _lxDeadeyeAfterHit(p, m, _deN0);
           // v0.30.x - MAGIC BOLT ENERGY BURST (per user). The bolt came apart
           // on a generic white impact spark shared with every projectile in the
