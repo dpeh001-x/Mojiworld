@@ -49,7 +49,7 @@ const r = await page.evaluate(() => {
   net.peers = {};
   net._lastTickAt = 0; net._lastLookSyncAt = 0; net._tickN = 0; net._lastAvStr = null;
   try { _mpTick(); } catch (e) { out.tickThrew = String(e).slice(0, 140); }
-  const ping = sent.find(m => m.t === 'ping');
+  const ping = sent.find(m => m.t === 'ping' && 'ti' in m);
   const state = sent.find(m => m.t === 'state');
   out.pingTi = ping ? ping.ti : '(no ping)';
   out.stateTi = state ? state.ti : '(no state)';

@@ -105,7 +105,7 @@ try {
     R.afterMaps.boneGraveyard === true && R.afterMaps.echoArenas === true && !R.err1 && !R.err2,
     JSON.stringify(R.afterMaps) + (R.err1 || R.err2 ? ' ' + (R.err1 || R.err2) : ''));
   ok('THE TWO WITH NO IN-WORLD SOURCE ARE OPEN FROM THE START, in the rendered list too',
-    R.freshAlways.titleTheme && R.freshAlways.zodiacHall && R.freshOpenRows.length === 2 && R.freshOpenRows.includes('titleTheme') && R.freshOpenRows.includes('zodiacHall'),
+    R.freshAlways.titleTheme && !R.freshAlways.zodiacHall && R.freshOpenRows.length === 1 && R.freshOpenRows.includes('titleTheme'),   // v0.30.1682: Zodiac Hall waits for the Twelve
     `open on a fresh save: ${JSON.stringify(R.freshOpenRows)}`);
   ok('THE JUKEBOX PLAYS EVERY TRACK: each row becomes the playing track with its own file',
     R.rows === R.nTracks && R.playFails.length === 0,

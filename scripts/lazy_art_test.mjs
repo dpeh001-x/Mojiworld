@@ -126,7 +126,7 @@ try {
     const bySet = {}; for (const d of post) if (d.frame && d.set) { const b = (bySet[d.set] = bySet[d.set] || {}); b[d.h] = (b[d.h] || 0) + 1; }
     const sizes = {}; for (const k in bySet) sizes[k] = +Object.keys(bySet[k]).sort((a, b) => bySet[k][b] - bySet[k][a])[0];   // each set's most common size
     const idleKey = sign ? ('zodiac/idle/' + sign) : ('idle/' + type);
-    return { map, parkedBefore, veilMs, draws: post.length, firstIsFrame: post.length ? post[0].frame : null, fallbackDraws: post.filter((d) => !d.frame).length, sizes, idle: (sizes[idleKey] != null) ? sizes[idleKey] : null, derived };
+    return { map, parkedBefore, veilMs, draws: post.length, firstIsFrame: post.length ? post[0].frame : null, fallbackDraws: post.filter((d) => !d.frame).length, sizes, idle: (sizes[idleKey] != null) ? sizes[idleKey] : (sizes['walk/' + type] != null ? sizes['walk/' + type] : null), derived };
   }, [map, type, sign, need]);
   const BOSSES = [['slimeCave', 'king', null, [['content', 'king'], ['body', 'king']]],
     ['gravitosArena', 'gravitos', null, [['content', 'gravitos'], ['body', 'gravitos'], ['content', 'gravitos2'], ['body', 'gravitos2'], ['content', 'gravitos3'], ['body', 'gravitos3']]],

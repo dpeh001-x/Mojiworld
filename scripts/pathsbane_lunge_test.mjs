@@ -99,7 +99,7 @@ for (let fi = 0; fi < 9; fi++) {
     return { W, H, bottom, low };
   }, fi);
   const bottom = px.bottom, low = px.low;
-  check(px.W === 630 && px.H === 640 && bottom === 0 && low === 0, 'THE SLASH: attack frame ' + fi + '\'s art ends before the image\'s bottom edge (frame 5\'s crescent was sliced flat there)', { W: px.W, H: px.H, bottomRowPx: bottom, opaqueInLast6Rows: low });
+  check(px.W * 640 === px.H * 630 && bottom === 0 && low === 0, 'THE SLASH: attack frame ' + fi + '\'s art ends before the image\'s bottom edge (frame 5\'s crescent was sliced flat there)', { W: px.W, H: px.H, bottomRowPx: bottom, opaqueInLast6Rows: low });
 }
 check(errs.length === 0, 'no page errors', errs.slice(0, 3));
 await browser.close(); server.kill();

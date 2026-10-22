@@ -38,7 +38,7 @@ async function finish() {
 async function main() {
   // ---- relays: NEW (origin mp-cf + the mp-relay patch) and OLD (before it) --------------------------------------
   for (const v of ['new', 'old']) mkdirSync(T + '/' + v + '/mp-cf/src', { recursive: true });
-  for (const f of ['src/index.js', '_cf_test.mjs', '_api_test.mjs', 'README.md', 'wrangler.toml', 'package.json', 'package-lock.json']) writeFileSync(T + '/new/mp-cf/' + f, git('show', 'origin/main:mp-cf/' + f));
+  for (const f of ['src/index.js', 'src/feedback.js', 'src/feedback_api.js', 'src/feedback_admin.js', 'src/feedback_mail.js', 'src/feedback_smtp.js', '_cf_test.mjs', '_api_test.mjs', 'README.md', 'wrangler.toml', 'package.json', 'package-lock.json']) writeFileSync(T + '/new/mp-cf/' + f, git('show', 'origin/main:mp-cf/' + f));
   const ap = spawnSync(process.execPath, [HERE + '/apply_mp_relay.mjs'], { env: { ...process.env, LX_MP_ROOT: T + '/new' }, encoding: 'utf8' });
   if (ap.status !== 0) throw new Error('apply_mp_relay.mjs: ' + (ap.stderr || ap.stdout));
   writeFileSync(T + '/old/mp-cf/src/index.js', git('show', OLD_RELAY_REV + ':mp-cf/src/index.js'));

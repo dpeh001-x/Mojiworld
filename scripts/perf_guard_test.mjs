@@ -18,7 +18,7 @@ let pass = 0, fail = 0; const check = (ok, msg, d) => { console.log((ok ? 'PASS 
 const J = (o) => JSON.stringify(o);
 // two fixes are one line inside a hot path each; read them from the source rather than timing a reflow here
 const src = readFileSync(PAGE, 'utf8');
-check(/if \(game\._lxBarFlushAt !== \(game\.time \| 0\)\) \{ game\._lxBarFlushAt = \(game\.time \| 0\); void el\.offsetWidth; \}/.test(src), 'the bar snap forces one layout per frame, not one per bar');
+check(/if \(game\._lxBarFlushAt !== \(game\.time \| 0\)\) \{ game\._lxBarFlushAt = \(game\.time \| 0\); el\._lxSnapOwed = /.test(src) && !/_lxBarFlushAt[^\n]*void el\.offsetWidth/.test(src), 'the bar snap no longer forces a layout (one flush stamp per frame; perf rounds 19-20)');
 check(/if \(x1 < 0\) \{ img\._lxInk = FALLBACK;/.test(src) && /catch \(e\) \{ try \{ img\._lxInk = FALLBACK; \}/.test(src), 'a failed drain-pillar ink read is remembered');
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/google-chrome'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] });

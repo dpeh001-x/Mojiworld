@@ -31,7 +31,7 @@ const finish = async () => {
 };
 
 // ---- the relays (real code, Miniflare) --------------------------------------------------------------------------------
-const MPF = ['src/index.js', 'README.md', 'wrangler.toml', 'package.json', 'package-lock.json'];
+const MPF = ['src/index.js', 'src/feedback.js', 'src/feedback_api.js', 'src/feedback_admin.js', 'src/feedback_mail.js', 'src/feedback_smtp.js', 'README.md', 'wrangler.toml', 'package.json', 'package-lock.json'];
 for (const v of ['new', 'old']) {
   mkdirSync(T + '/' + v + '/mp-cf/src', { recursive: true }); mkdirSync(T + '/' + v + '/scripts', { recursive: true });
   for (const f of MPF) writeFileSync(T + '/' + v + '/mp-cf/' + f, git('show', 'origin/main:mp-cf/' + f));

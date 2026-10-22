@@ -27,10 +27,10 @@ for (let i = 0; i < 9; i++) {
   }
   F.push({ i, W, H, h: y1 - y0 + 1, foot: y1, cx: (x0 + x1 + 1) / 2, edge });
 }
-check(F.every((f) => f.W === 630 && f.H === 640), 'FILES: nine frames on the 630x640 canvas', F.map((f) => f.W + 'x' + f.H));
+check(F.every((f) => f.W === 1260 && f.H === 1280), 'FILES: nine frames on the 1260x1280 canvas (2x since v0.30.1842)', F.map((f) => f.W + 'x' + f.H));
 const rest = [F[0], F[8]];
-check(rest.every((f) => Math.abs(f.h - 389) <= 4 && Math.abs(f.foot - 603) <= 1) && Math.abs(F[0].cx - F[8].cx) <= 2,
-  'FILES: the rest poses keep his old size (389 px) and foot row (603), and match each other', rest.map((f) => ({ h: f.h, foot: f.foot, cx: f.cx })));
+check(rest.every((f) => Math.abs(f.h - 778) <= 8 && Math.abs(f.foot - 1206) <= 2) && Math.abs(F[0].cx - F[8].cx) <= 2,
+  'FILES: the rest poses keep his old size (778 px at 2x) and foot row (1206), and match each other', rest.map((f) => ({ h: f.h, foot: f.foot, cx: f.cx })));
 check(F.every((f) => f.edge === 0), 'FILES: no frame\'s art touches an image edge (no cut blade or slash)', F.map((f) => f.edge));
 {
   const { data: d } = await sharp(path.join(ROOT, 'Sprites', 'fx', 'swing_pathsBane.webp')).ensureAlpha().raw().toBuffer({ resolveWithObject: true });

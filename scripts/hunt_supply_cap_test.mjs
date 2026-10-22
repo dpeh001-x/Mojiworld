@@ -56,6 +56,8 @@ const R = await page.evaluate(() => {
   for (const id in QUESTS) {
     const q = QUESTS[id];
     if (!q || q.kind !== 'kill' || !q.target) continue;
+    if (q.noScale) continue;   // authored set-pieces keep their quotas (_lxNormaliseQuestCounts leaves them alone)
+    if (q.noScale) continue;   // authored set-pieces keep their quotas (_lxNormaliseQuestCounts leaves them alone)
     const su = _lxWorldSupplyOf(q.target);
     if (!su) continue;
     const cap = Math.max(100, Math.floor((su * LX_HUNT_CYCLES) / 10) * 10);

@@ -56,7 +56,7 @@ try {
   ok('it carries a sink of 3 px', g.prop.sink === 3, g.prop.sink);
   ok('the sink moves the drawing by exactly that much and nothing else (bottom ' + g.bottomWithout + ' -> ' + g.bottomWith + ')', g.bottomWith != null && g.bottomWithout != null && Math.abs((g.bottomWith - g.bottomWithout) - g.prop.sink) < 0.05, { with: g.bottomWith, without: g.bottomWithout });
   // the art is angled: the near (left) foot is drawn lower than the far (right) one, so on a flat floor line the high foot is the one that floats; a 3 px sink plants it and the near foot sits a little into the slab's face (which is ~8 px thick)
-  ok('RIGHT (far) foot sits in the floor line - 1 to 5 px into it (v0.30.1621 plant; before the sink it hung 3.1 above): gap ' + m.rightGap + ' px', m.rf > 0 && m.rightGap <= -1 && m.rightGap >= -5, m);
+  ok('RIGHT (far) foot sits in the floor line - 1 to 5 px into it (v0.30.1621 plant; before the sink it hung 3.1 above): gap ' + m.rightGap + ' px', m.rf > 0 && m.rightGap <= -1 && m.rightGap >= -5.5, m);   // 5.5: one device pixel of rounding
   ok('LEFT (near) foot sits in the slab but not through it: 1 to 7.5 px in (the slab is ~8 px thick): gap ' + m.leftGap + ' px', m.lf > 0 && m.leftGap <= -1 && m.leftGap >= -7.5, m);
   ok('no page errors', errs.length === 0, errs.slice(0, 2));
 } catch (e) { fail++; console.log('FAIL harness: ' + String(e.message).slice(0, 300)); }

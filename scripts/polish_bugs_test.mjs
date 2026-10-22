@@ -35,7 +35,7 @@ try {
     out.mob = { f45: at(s, 45), f51: at(s, 51) };
     game._fadingMonsters = [];
     // R3 - one enemy arrow, drawn once, with drawImage / ellipse counted
-    for (let i = 0; i < 40 && !(LX_PLAYER_PROJ.arrow && _lxPlayerProjReady(LX_PLAYER_PROJ.arrow)); i++) await sleep(100);
+    for (let i = 0; i < 80 && !(LX_MOB_PROJ.arrowRain && _lxMobProjReady(LX_MOB_PROJ.arrowRain)); i++) await sleep(100);   // v0.30.1779: an enemy arrow draws the mob arrow art
     game.projectiles.length = 0; game.monsters.length = 0;
     game.projectiles.push({ x: player.x + 420, y: player.y - 60, vx: 6, vy: -1, w: 18, h: 8, life: 200, damage: 0, owner: 'enemy', skill: 'arrow', color: '#ffcc44', noGravity: true });
     const di = [], el = []; const _di = ctx.drawImage, _el = ctx.ellipse;

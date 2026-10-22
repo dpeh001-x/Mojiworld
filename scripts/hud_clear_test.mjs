@@ -163,9 +163,9 @@ async function prologue() {
     const fy = (typeof po.y === 'number') ? po.y : _defaultPortalY(po.x);
     window.__lbl = null; window.__bb = null; const w0 = Date.now(), t0 = game.time | 0;
     while ((game.time | 0) - t0 < 30 && Date.now() - w0 < 30000) { player.x = po.x - player.w / 2 - 30; player.y = fy - player.h; player.vx = 0; player.vy = 0; await new Promise((s) => setTimeout(s, 30)); }
-    const L = window.__lbl, B = window.__bb; if (!L || !B) return { err: 'not drawn', lbl: !!L, boss: !!B };
+    const L = window.__lbl, B = window.__bb; if (!L) return { err: 'not drawn', lbl: false };   // v0.30.1818: the memory fight has no boss plate
     const lbl = L.slice(0, 4), card = document.getElementById('prologue-hud'), cr = card ? __rect(card) : null;
-    return { lbl: lbl.map(Math.round), plate: B.map(Math.round), boss: __hit(lbl, B), card: cr ? __hit(__cvs(lbl), cr) : null, cr: cr && cr.map(Math.round) };
+    return { lbl: lbl.map(Math.round), plate: B ? B.map(Math.round) : null, boss: B ? __hit(lbl, B) : false, card: cr ? __hit(__cvs(lbl), cr) : null, cr: cr && cr.map(Math.round) };
   });
   check(!pr.err && pr.boss === false, 'prologue: the "Weight-Bearer\'s Stair" portal plate is clear of the Gravitos boss plate', pr);
   check(!pr.err && pr.card === false, 'prologue: ...and of the memory card under it', pr);

@@ -111,7 +111,7 @@ try {
   check(/cooling/.test(cool.a.cls) && /^\d+:\d\d$/.test(cool.a.cd) && Math.abs(cool.a.p - 0.5) < 0.01 && cool.a.color === 'rgb(255, 194, 223)', 'cooling: light-pink readout in m:ss and the ring half drained at half the cooldown', cool.a);
   check(cool.b.cd !== cool.a.cd && cool.b.p < cool.a.p, 'the ticker counts down and drains the ring as it goes', cool);
   check(cool.dismiss && cool.dismiss.includes('Dismiss ' + cool.name), 'a fielded mon gets a Dismiss button with its name', cool.dismiss);
-  check(cool.want && cool.buddy === cool.want && /resting/.test(cool.sub), 'the ring holds your H-slot MojiMon, resting while the cooldown runs', cool);
+  check(cool.want && cool.buddy === cool.want && /fighting beside you/.test(cool.sub), 'the ring holds your H-slot MojiMon (fighting beside you; v0.30.1739)', cool);
   const back = await page.evaluate(async () => {
     _mojimonEnsure().cdUntil = Date.now() + 900; renderMojiMonPanel();
     await new Promise((r) => setTimeout(r, 2600));

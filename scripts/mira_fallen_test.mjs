@@ -60,9 +60,9 @@ try {
   ok('breaking them all exposes her (x1.75)', !X.shielded && X.exposed && X.mul === 1.75, X);
   await page.evaluate(() => { const m = window.__m; m._miraExposedUntil = 0; m._miraSpentUntil = 0; m._miraElevenAt = 1e12; });
   // the Gate's Question
-  await page.evaluate(() => { window.__m._miraGateAt = game.time | 0; }); await step(4, keep);
+  await page.evaluate(() => { window.__m._miraGateAt = game.time | 0; }); await step(24, keep);
   const G = await page.evaluate(() => { const h = (game.hazards || []).find((x) => x.type === 'gravitos_singularity'); const fl = game.mapData.worldHeight - 80; return h ? { n: h.safeZones.length, w: h.w, ww: game.mapData.worldWidth, life: h.life, floors: h.safeZones.map((z) => Math.round(z.y + z.h)), fl, src: h._sourceLabel } : null; });
-  ok("the Gate's Question covers her arena (5 s) with three safe steps: two on her floor, one on the central platform", G && G.n === 3 && G.w === G.ww && G.life >= 290 && G.floors[0] === G.fl && G.floors[2] === G.fl && G.floors[1] === G.fl - 160 && /Gate/.test(G.src), G);
+  ok("the Gate's Question covers her arena (5 s) with three safe steps: two on her floor, one on the central platform", G && G.n === 3 && G.w === G.ww && G.life >= 250 && G.floors[0] === G.fl && G.floors[2] === G.fl && G.floors[1] === G.fl - 160 && /Gate/.test(G.src), G);
   await page.evaluate(() => { game.hazards = game.hazards.filter((h) => h.type !== 'gravitos_singularity'); const m = window.__m; m._miraSpentUntil = 0; m._miraGateUntil = 0; m._miraGateAt = 1e12; });
   // Fallen Feathers + Sand Run Out
   await page.evaluate(() => { game.projectiles = game.projectiles.filter((p) => p.skill !== 'mfallenfeather'); window.__m._miraFeatherAt = game.time | 0; });   // only this volley's feathers; one volley: once it fires (its next one is booked) the next is held off

@@ -169,6 +169,8 @@ console.log(F.length ? `${F.length} finding(s).` : 'All stated levels agree with
 // (the report above still prints them); the exit code fails only on a NEW one, so a
 // fresh level mismatch is caught instead of drowned. --strict restores exit-on-any.
 const KNOWN = new Set([
+  'B SIGNPOST|ossuarySprawl',   // v0.30.1742: the door tag is the roster span; a stray Lv 45 boneGolem makes it 45-79 (same class as D MAP TIER|ossuarySprawl)
+  'B SIGNPOST|ossuarySprawl',   // v0.30.1742: the door tag is the roster span; a stray Lv 45 boneGolem makes it 45-79 (same class as D MAP TIER|ossuarySprawl)
   'A BOSS vs ARENA|gravitosArena', 'A BOSS vs ARENA|zod_virgo', 'A BOSS vs ARENA|zod_libra', 'A BOSS vs ARENA|zod_scorpio',
   'A BOSS vs ARENA|zod_sagittarius', 'A BOSS vs ARENA|zod_capricorn', 'A BOSS vs ARENA|zod_aquarius', 'A BOSS vs ARENA|zod_pisces',
   'C QUEST|q_barnaby_five', 'C QUEST|q_hourglass_1',

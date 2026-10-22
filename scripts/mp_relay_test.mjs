@@ -21,7 +21,7 @@ const ROOT = process.env.LX_MP_ROOT ? fwd(process.env.LX_MP_ROOT) : null;
 const BASELINE = process.env.MP_TEST_BASELINE === '1';
 const PRE_FIX_REV = 'b42a9175';   // the last origin commit of mp-cf before this package
 const PORT = +(process.env.PORT || 11410);
-const FILES = ['src/index.js', '_cf_test.mjs', '_api_test.mjs', 'README.md', 'wrangler.toml', 'package.json', 'package-lock.json'];
+const FILES = ['src/index.js', 'src/feedback.js', 'src/feedback_api.js', 'src/feedback_admin.js', 'src/feedback_mail.js', 'src/feedback_smtp.js', '_cf_test.mjs', '_api_test.mjs', 'README.md', 'wrangler.toml', 'package.json', 'package-lock.json'];
 const T = fwd(tmpdir()) + '/lx_mp_relay_' + process.pid;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (f, ms) => { const t0 = Date.now(); for (;;) { const v = await f(); if (v || Date.now() - t0 > ms) return v; await wait(200); } };

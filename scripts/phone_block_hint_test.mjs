@@ -30,6 +30,8 @@ for (const [vw, vh] of [[667, 375], [842, 325], [1180, 820]]) {
     for (const id of ['loading-overlay', 'class-select-modal', 'lo-auth']) { const o = document.getElementById(id); if (o) { o.style.display = 'none'; o.classList.add('fade'); } }
     window._lxBootGateDone = true; window._prologueActive = false;
     player.cls = 'rogue'; player.level = 12; player.hp = player.maxHp = 600; player._god = true;
+    player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { everdawn_welcome: true });   // the welcome film hides the deck
+    player._storyBeatsSeen = Object.assign(player._storyBeatsSeen || {}, { everdawn_welcome: true });   // the welcome film hides the deck
     loadMap('town'); game.paused = false;
     await new Promise((r) => setTimeout(r, 2500));
     for (const id of ['story-beat-overlay', 'boss-intro-overlay']) { const o = document.getElementById(id); if (o) o.classList.remove('on'); }
