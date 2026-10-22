@@ -40,6 +40,7 @@ try {
     applyClass('warrior'); player.level = 80; try { closeAllModals(); } catch (e) {}
     const out = {};
     out.epitaph = _bossEpitaph('zodiac_aries', { zodiacBoss: true, name: 'Ariel, the Ram' });
+    player.quests = player.quests || {}; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_boss_aetherion = true;   // v0.30.1862 mira-freed - Sage Mira stands at the Gate only once her questline is done
     const mira = async (map) => { loadMap(map, 300); await W8(700); try { closeAllModals(); } catch (e) {} const n = game.npcs.find((x) => x.role === 'sage');
       game._sageStage = 1; openNPC(n); await W8(200); try { const d = document.getElementById('dialog'); if (d && typeof d._twSkip === 'function') d._twSkip(); } catch (e) {} await W8(1500);
       const t = document.getElementById('dialog-text').innerText; closeDialog(); return t; };

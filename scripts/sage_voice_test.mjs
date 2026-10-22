@@ -1,4 +1,6 @@
-// "???" (Sage Mira) has a voice that matches her (v0.30.x sage-voice).
+// "???" (Sage Mira) has a voice that matches her (v0.30.x sage-voice; v0.30.1862 mira-whisper: her film voice now - per user "for mira npc
+// SFX make it similar to her sound in the game videos" - the Luna whisper of her "help me" / "thank you", a soft "Mm..." under
+// her three bells, as a NEW file npc_mira_whisper.mp3; its hum still sits in her pitch band).
 //   node scripts/sage_voice_test.mjs            (MOJI_GAME_FILE=<build.html> to test a private build)
 // Per user: "regenerate ??? NPC sound voice, as it doesnt match". The clip is measured (a young woman's pitch band,
 // real voice in it - not the 130 Hz sigh it replaced), the service worker's cache generation carries the bump a
@@ -13,7 +15,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = process.env.PORT || '11121';
 const FILE = process.env.MOJI_GAME_FILE ? path.basename(process.env.MOJI_GAME_FILE) : 'mojiworld_game.html';
 let bad = 0, total = 0; const check = (ok, what, info) => { total++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${what}${ok ? '' : '   ' + JSON.stringify(info)}`); if (!ok) bad++; };
-const CLIP = path.join(ROOT, 'audio', 'npc', 'npc_mystery_sage.mp3');
+const CLIP = path.join(ROOT, 'audio', 'npc', 'npc_mira_whisper.mp3');
 const m = voiceReport(CLIP);
 console.log('clip', JSON.stringify(m));
 check(m.f0 >= 230 && m.f0 <= 460 && m.vowelBand >= 0.25, 'the ??? clip sits in a young woman\'s pitch band with real voice in it (the old one was a 130 Hz sigh)', m);
@@ -30,7 +32,7 @@ try {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, serviceWorkers: 'block' }); const p = await ctx.newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(String(e).slice(0, 160)));
   const got = [];
-  p.on('response', async (r) => { if (/audio\/npc\/npc_mystery_sage\.mp3/.test(r.url())) { let n = -1; try { n = (await r.body()).length; } catch (e) {} got.push({ s: r.status(), n }); } });
+  p.on('response', async (r) => { if (/audio\/npc\/npc_mira_whisper\.mp3/.test(r.url())) { let n = -1; try { n = (await r.body()).length; } catch (e) {} got.push({ s: r.status(), n }); } });
   await p.addInitScript(() => { try { localStorage.setItem('mojiworld_prologue_seen', '1'); } catch (e) {} });
   await p.goto(`http://localhost:${PORT}/${FILE}?dev=1`, { waitUntil: 'domcontentloaded', timeout: 180000 });
   await p.waitForFunction(() => typeof loadMap === 'function' && typeof openNPC === 'function', null, { timeout: 150000 });
@@ -50,7 +52,7 @@ try {
   await p.waitForTimeout(500);
   console.log('in game', JSON.stringify({ r, got, size }));
   // 76be52094 v0.30.1623 serve.js answers Range requests: a media load may arrive as a 206 carrying the whole file
-  check(!r.err && r.key === 'mystery_sage' && got.some((g) => (g.s === 200 || g.s === 206) && g.n === size), 'talking to ??? loads exactly this clip', { r, got, size });
+  check(!r.err && r.key === 'mira_whisper' && got.some((g) => (g.s === 200 || g.s === 206) && g.n === size), 'talking to ??? loads exactly this clip', { r, got, size });
   check(errs.length === 0, 'no page errors', errs.slice(0, 3));
   await ctx.close();
 } finally { await browser.close().catch(() => {}); srv.kill(); }

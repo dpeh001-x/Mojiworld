@@ -66,6 +66,7 @@ try {
     try { _lxBootGateDone = true; window._prologueActive = false; } catch (e) {}
     for (const id of ['loading-overlay', 'lo-auth', 'class-select-modal', 'lo-menu']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
     applyClass('warrior'); player.level = 60; player.mojicoins = 100000; game._playMs = 3600000;
+    player.quests = player.quests || {}; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_boss_aetherion = true;   // v0.30.1862 mira-freed - Sage Mira stands at the Gate only once her questline is done
   });
   const bravo = await talk('town', 'expedition');
   check(!bravo.no && bravo.leaves === 1 && twins(bravo.labels).length === 0 && bravo.labels.some((l) => /Begin Expedition/.test(l)), 'Bravo (town): one Leave, no "Maybe later", the Begin button present', J(bravo.no ? bravo : bravo.labels));

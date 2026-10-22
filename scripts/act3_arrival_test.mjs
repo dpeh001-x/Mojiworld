@@ -47,6 +47,7 @@ const r = await page.evaluate(async () => {
     chains: (byBeat.arrival_chains_end || []).sort(),
     sky: (byBeat.arrival_sky_beyond || []).sort(),
   };
+  player.quests = player.quests || {}; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_boss_aetherion = true;   // v0.30.1862 mira-freed - Sage Mira stands at the Gate only once her questline is done
   out.mapBeats = { forest: _sbBeatForMap('forest'), gate: _sbBeatForMap('wayfarersLantern2'),
                    forge: _sbBeatForMap('sundered_forge') };
   // the ten that were dropped must now resolve to NO beat at all

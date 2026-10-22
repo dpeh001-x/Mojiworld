@@ -63,6 +63,7 @@ try {
       window._pickChatLine = (p) => { if (!got && p && p.some((l) => (NPC_CHAT_LINES[role] || []).includes(l))) got = p.slice(); return orig(p); };
       for (let i = 0; i < 40 && !got; i++) { n._chatNext = 0; n._chat = null; await sleep(120); } window._pickChatLine = orig; return got; };
     const am = () => game.mapData.npcs.find((n) => n.role === 'amnesiac'), sage = () => game.mapData.npcs.find((n) => n.role === 'sage');
+    player.quests = player.quests || {}; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_boss_aetherion = true;   // v0.30.1862 mira-freed - Sage Mira stands at the Gate only once her questline is done
     // ---- 1. BEFORE the Twelve --------------------------------------------------------------------------------------------
     loadMap('wayfarersLantern2', 400); await sleep(1500); game.paused = false;
     openNPC(sage()); await sleep(300); out.preOpenBeat = beatOn();

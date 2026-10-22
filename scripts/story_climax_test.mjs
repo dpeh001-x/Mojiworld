@@ -37,6 +37,7 @@ try {
     const talk = async (n, role) => { const o = npcN(n, role); if (!o) return { text: '', opts: [] }; game._brokMenu = null; game._sageStage = 0; game._lxOrderPage = null; openNPC(o); await sleep(300); await settle(); return { text: text(), opts: opts() }; };
     const fresh = (done, seen) => { player._miraNamed = false; player._storyBeatsSeen = Object.assign({ tutorial_intro: true, everdawn_welcome: true }, seen || {}); player.quests = player.quests || { active: {}, completed: {} }; player.quests.active = {}; player.quests.completed = Object.assign({}, done || {}); game.bestiary = game.bestiary || {}; for (const k of Object.keys(game.bestiary)) if (/^_boss_zodiac_/.test(k)) delete game.bestiary[k]; };
     // --- the Sage, unnamed and named
+    player.quests = player.quests || {}; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_boss_aetherion = true;   // v0.30.1862 mira-freed - Sage Mira stands at the Gate only once her questline is done
     await go('wayfarersLantern2'); out.sageThere = !!npcN(null, 'sage');
     fresh(); game._sageStage = 1; { const o = npcN(null, 'sage'); openNPC(o); await sleep(300); await settle(); out.stage1Pre = text(); } await close();
     fresh({}, { mira_twelve_reveal: true }); game._sageStage = 1; { const o = npcN(null, 'sage'); openNPC(o); await sleep(300); await settle(); out.stage1Post = text(); } await close();
