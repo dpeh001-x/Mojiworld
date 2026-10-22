@@ -1,8 +1,11 @@
 // Mojiworld FEEDBACK PORTAL - email to the studio (v0.30.1851, per user: "sends in an email to admin@moji-studios.com").
-// Pure functions + two transports, no Cloudflare globals at load (tests run it in plain Node):
+// Pure functions + three transports, no Cloudflare globals at load (tests run it in plain Node). First one configured wins: Resend, then Google SMTP, then the send_email binding.
+//   0. Google SMTP (SMTP_PASS secret = an app password for the mailbox; feedback_smtp.js): signs in to smtp.gmail.com as SMTP_USER (default admin@moji-studios.com) and mails the report to the
+//      same mailbox. No third-party service and no DNS change - the right route when the domain mail is already Google Workspace (as moji-studios.com is).
 //   1. Resend (https://resend.com) when the RESEND_API_KEY secret is set - a plain HTTPS call, works to any address once the sending domain is verified there.
 //   2. Cloudflare Email Routing's send_email binding (FEEDBACK_MAIL in wrangler.toml) - no key, but the destination must be a verified Email Routing address.
 // A report is stored BEFORE it is mailed; a mail failure never loses it (the record keeps {mail:{ok:false,error}} and the dashboard has "Email again").
+import { smtpSend, SMTP_HOST_DEFAULT, SMTP_PORT_DEFAULT } from './feedback_smtp.js';
 export const MAIL_TO_DEFAULT = 'admin@moji-studios.com', MAIL_FROM_DEFAULT = 'feedback@moji-studios.com';
 const CTRL = /[\u0000-\u001f\u007f]/g;
 const oneLine = (v, n) => String(v == null ? '' : v).replace(CTRL, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -63,12 +66,18 @@ export async function sendReportMail(rec, shot, env, deps) {
       let why = ''; try { why = oneLine((await r.text()), 160); } catch (_) {}
       return { ok: false, via: 'resend', error: 'Resend ' + r.status + (why ? ': ' + why : '') };
     }
+    if (env.SMTP_PASS) {   // Google SMTP: From must be the mailbox we sign in to, so SMTP_USER is also the sender
+      const user = okAddr(env.SMTP_USER) ? env.SMTP_USER : to;
+      const raw = buildMime({ from: user, to, subject, text, shotDataUrl: shot, replyTo: rec.contact, id: rec.id, now });
+      await smtpSend({ host: env.SMTP_HOST || SMTP_HOST_DEFAULT, port: SMTP_PORT_DEFAULT, user, pass: env.SMTP_PASS, from: user, to, raw, connect: deps.connect, timeoutMs: deps.smtpTimeoutMs });
+      return { ok: true, via: 'smtp', to };
+    }
     if (env.FEEDBACK_MAIL && typeof env.FEEDBACK_MAIL.send === 'function') {
       const EM = deps.EmailMessage || (await import('cloudflare:email')).EmailMessage;
       const raw = buildMime({ from, to, subject, text, shotDataUrl: shot, replyTo: rec.contact, id: rec.id, now });
       await env.FEEDBACK_MAIL.send(new EM(from, to, raw));
       return { ok: true, via: 'cloudflare', to };
     }
-    return { ok: false, via: 'none', error: 'No email transport is configured (set the RESEND_API_KEY secret, or enable the FEEDBACK_MAIL send_email binding).' };
-  } catch (e) { return { ok: false, via: env.RESEND_API_KEY ? 'resend' : 'cloudflare', error: oneLine(e && e.message || e, 200) }; }
+    return { ok: false, via: 'none', error: 'No email transport is configured (set the SMTP_PASS secret - a Google app password -, or RESEND_API_KEY, or enable the FEEDBACK_MAIL send_email binding).' };
+  } catch (e) { const pw = String(env.SMTP_PASS || ''); let msg = oneLine((e && e.message) || e, 200); if (pw) msg = msg.split(pw).join('***'); return { ok: false, via: env.RESEND_API_KEY ? 'resend' : pw ? 'smtp' : 'cloudflare', error: msg }; }
 }

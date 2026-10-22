@@ -29,7 +29,7 @@ table.d{width:100%;border-collapse:collapse;font-size:12px}table.d td{padding:3p
 <input id="key" type="password" placeholder="admin key" autocomplete="off"><button class="pri" id="go">Open</button><div class="err" id="gerr"></div></div>
 <div id="app" hidden>
 <header><h1>🐞 Mojiworld Feedback</h1><span class="count" id="tot"></span><span class="sp"></span>
-<input id="q" placeholder="search text, version, map…" size="26"><button id="refresh">↻ Refresh</button><button id="csv">⬇ CSV</button><button id="json">⬇ JSON</button><button id="lock">Lock</button></header>
+<input id="q" placeholder="search text, version, map…" size="26"><button id="refresh">↻ Refresh</button><button id="csv">⬇ CSV</button><button id="json">⬇ JSON</button><button id="tmail" title="Sends one clearly labelled test email to the report mailbox. Stores nothing.">✉ Test email</button><button id="lock">Lock</button></header>
 <div class="chips" id="chips"></div>
 <main><div class="list" id="list"></div><div class="detail" id="detail"><div class="count">Pick a report.</div></div></main></div>
 <script>
@@ -68,6 +68,7 @@ $('go').onclick=function(){sessionStorage.setItem(K,$('key').value.trim());$('ge
 $('refresh').onclick=load;$('lock').onclick=function(){lock('')};$('q').onkeydown=function(e){if(e.key==='Enter')load()};
 $('csv').onclick=function(){api('/api/feedback/list?format=csv'+(fType?'&type='+fType:'')+(fStatus?'&status='+fStatus:'')).then(function(r){return r.text()}).then(function(t){dl('mojiworld-feedback.csv','text/csv',t)})};
 $('json').onclick=function(){dl('mojiworld-feedback.json','application/json',JSON.stringify(items,null,2))};
+$('tmail').onclick=function(){var b=$('tmail');b.textContent='Sending…';api('/api/feedback/testmail',{method:'POST',body:'{}'}).then(function(r){return r.json()}).then(function(j){b.textContent=j.ok?'✉ Sent via '+j.via+' to '+(j.to||'the mailbox')+' ✓ check the inbox':'✉ FAILED: '+(j.error||'unknown')}).catch(function(){b.textContent='✉ FAILED: network'})};
 if(sessionStorage.getItem(K))load();setInterval(function(){if(!$('app').hidden)load()},60000);
 })();
 </script></body></html>`;

@@ -17,15 +17,21 @@ Each accepted report is emailed to **admin@moji-studios.com** (override with the
 The report is saved *before* it is mailed, so a mail problem never loses it: the dashboard shows "Email NOT sent" with the reason and an **Email again** button.
 
 ### Turn the email on (one of these - it needs an account only you have)
-**A. Resend (recommended, ~5 minutes).** Sign up at resend.com (free tier), add and verify the domain `moji-studios.com` (DNS records), create an API key, then:
+**A. Google SMTP (v0.30.1857, the right one for a Google Workspace mailbox such as admin@moji-studios.com).** No third-party service and no DNS change: the Worker signs in to `smtp.gmail.com` (port 465, TLS) as the mailbox and mails the report to it.
+1. Sign in to the mailbox's Google account, turn on **2-Step Verification** (Security) if it is off, then open **Security -> App passwords** (myaccount.google.com/apppasswords), name it "Mojiworld feedback" and copy the 16-character password. On a Workspace account an admin may first have to allow 2-Step Verification / app passwords for the organisation.
+2. Set it as a Worker secret yourself (the password is never in the repo, the logs or an error message):
 ```bash
 cd mp-cf
-npx wrangler secret put RESEND_API_KEY
-npx wrangler deploy
+npx wrangler secret put SMTP_PASS      # paste the app password
 ```
-**B. Cloudflare Email Routing.** In the Cloudflare dashboard enable Email Routing on `moji-studios.com` and verify the destination inbox, then uncomment the `[[send_email]]` block at the bottom of `mp-cf/wrangler.toml` and `npx wrangler deploy`. Cloudflare only lets this binding send to addresses verified as Email Routing destinations - if `admin@moji-studios.com` is a *forwarding* address rather than a real inbox, set `FEEDBACK_EMAIL_TO` to the real destination inbox instead.
+Optional: `npx wrangler secret put SMTP_USER` if the mailbox that signs in is not admin@moji-studios.com (that address is the default, and also the sender).
+3. Open `/feedback-admin`, sign in with the admin key and press **Test email**. It says "Sent via smtp to admin@moji-studios.com" and the message arrives within a minute, or it shows why Google refused (a 535 means the app password is wrong, revoked, or app passwords are off for the account).
 
-If both are set, Resend is used. If neither is set, reports are still stored and the dashboard says "No email transport is configured". **Check it works** after deploying: send one report from the game, then open `/feedback-admin` - the report should read "Emailed via resend" (or "cloudflare") and arrive in the inbox within a minute. If it says NOT sent, the reason is shown (for example "domain not verified"); fix it and press **Email again**.
+**B. Resend.** Sign up at resend.com (free tier), add and verify the domain `moji-studios.com` (DNS records), create an API key, then `npx wrangler secret put RESEND_API_KEY` and `npx wrangler deploy`.
+
+**C. Cloudflare Email Routing.** Only for a domain whose mail is *not* already hosted elsewhere (Email Routing replaces the MX records, so do not enable it on a Google Workspace domain). Enable it, verify the destination inbox, then uncomment the `[[send_email]]` block at the bottom of `mp-cf/wrangler.toml` and `npx wrangler deploy`.
+
+If several are set the order is Resend, Google SMTP, then the binding. If none is set, reports are still stored and the dashboard says "No email transport is configured". A report that failed to mail keeps the reason and an **Email again** button.
 
 ## One-time setup (your Cloudflare account)
 The feedback API lives in the same Worker as multiplayer (`mp-cf/`), in its **own Durable Object instance** (`feedback`), so reports never slow the relay.
@@ -33,7 +39,7 @@ The feedback API lives in the same Worker as multiplayer (`mp-cf/`), in its **ow
 ```bash
 cd mp-cf
 npx wrangler secret put FEEDBACK_ADMIN_KEY      # pick a long random key (8+ characters) - this opens the dashboard
-npx wrangler secret put RESEND_API_KEY          # the email (option A above)
+npx wrangler secret put SMTP_PASS               # the email: a Google app password (option A above), or RESEND_API_KEY for option B
 npx wrangler secret put FEEDBACK_WEBHOOK        # OPTIONAL: a Discord/Slack webhook URL (https) - every new report is also posted there
 npx wrangler deploy
 ```
@@ -54,4 +60,4 @@ Open **`https://<your worker>.workers.dev/feedback-admin`** (the same host the g
 Raw IP addresses are **not** stored (only a short salted hash, used for the hourly limit and to group one spammer's reports). The store keeps the newest 3000 reports; older ones are dropped. A honeypot field, the hourly limit and a flood guard keep bots out. The email contains what the player chose to send and nothing else.
 
 ## Tests
-`node mp-cf/_feedback_test.mjs` (backend + the hourly limit), `node mp-cf/_feedback_mail_test.mjs` (the email: message, both transports, failures), `node mp-cf/_feedback_worker_test.mjs` (through the Worker + MojiRoom), `node mp-cf/_feedback_admin_ui_test.mjs` (the dashboard, real browser), `node scripts/feedback_portal_test.mjs` (the in-game panel, real browser), `node scripts/feedback_steam_test.mjs` (the Steam app's static server, bridge and relay URL). None needs a deploy or a real mail account; **only a real send from your account proves the last step**, so do the check above once after deploying.
+`node mp-cf/_feedback_test.mjs` (backend + the hourly limit), `node mp-cf/_feedback_mail_test.mjs` (the email: message, Resend, Cloudflare, failures), `node mp-cf/_feedback_smtp_test.mjs` (the Google SMTP dialogue against a fake server, the Test email route), `node mp-cf/_feedback_worker_test.mjs` (through the Worker + MojiRoom), `node mp-cf/_feedback_admin_ui_test.mjs` (the dashboard, real browser), `node scripts/feedback_portal_test.mjs` (the in-game panel, real browser), `node scripts/feedback_steam_test.mjs` (the Steam app's static server, bridge and relay URL). None needs a deploy or a real mail account; **only a real send from your account proves the last step**, so do the check above once after deploying.

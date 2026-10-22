@@ -47,7 +47,7 @@ export async function feedbackApi(request, ctx) {
       const r = await storeReport(storage, s.rec, s.shot, request.headers.get('cf-connecting-ip'), now);
       await setLimit(storage, ipH, now, gap);
       const mailer = ctx.mail || sendReportMail;
-      const m = await mailer(r.rec, s.shot, env, { fetchFn: ctx.fetchFn, now: () => now });
+      const m = await mailer(r.rec, s.shot, env, { fetchFn: ctx.fetchFn, connect: ctx.connect, now: () => now });
       r.rec.mail = { ok: !!m.ok, via: m.via, at: now, ...(m.ok ? {} : { error: String(m.error || 'failed').slice(0, 200) }) };
       try { await storage.put(KEY(r.rec.id), r.rec); } catch (_) {}
       if (env && env.FEEDBACK_WEBHOOK && /^https:[/][/]/.test(env.FEEDBACK_WEBHOOK)) {
@@ -85,10 +85,15 @@ export async function feedbackApi(request, ctx) {
       if (b.note != null) rec.note = String(b.note).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, FB_CAP.note);
       await storage.put(KEY(id), rec); return J({ ok: true, item: rec });
     }
+    if (path === '/api/feedback/testmail' && request.method === 'POST') {   // "is the email wired up?": a clearly labelled test message; stores nothing and never touches the hourly limit
+      const rec = { id: String(now).padStart(13, '0') + '-7e5700', t: now, type: 'feedback', status: 'new', ver: 'dashboard test', msg: 'This is a TEST email from the Mojiworld feedback dashboard. If you can read it, report emails are working. No player report was stored.', contact: '', diag: { platform: 'dashboard' } };
+      const m = await (ctx.mail || sendReportMail)(rec, '', env, { fetchFn: ctx.fetchFn, connect: ctx.connect, now: () => now });
+      return J({ ok: !!m.ok, via: m.via, to: m.to, error: m.ok ? undefined : String(m.error || 'failed').slice(0, 200) }, 200);
+    }
     if (path === '/api/feedback/resend' && request.method === 'POST') {
       let b; try { b = await request.json(); } catch (_) { return J({ ok: false, error: 'bad request' }, 400); }
       const id = String((b && b.id) || '').replace(/[^0-9a-f-]/g, ''), rec = id && await storage.get(KEY(id)); if (!rec) return J({ ok: false, error: 'not found' }, 404);
-      const m = await (ctx.mail || sendReportMail)(rec, rec.hasShot ? await storage.get('fbs:' + id) : '', env, { fetchFn: ctx.fetchFn, now: () => now });
+      const m = await (ctx.mail || sendReportMail)(rec, rec.hasShot ? await storage.get('fbs:' + id) : '', env, { fetchFn: ctx.fetchFn, connect: ctx.connect, now: () => now });
       rec.mail = { ok: !!m.ok, via: m.via, at: now, ...(m.ok ? {} : { error: String(m.error || 'failed').slice(0, 200) }) }; await storage.put(KEY(id), rec);
       return J({ ok: !!m.ok, item: rec, error: m.ok ? undefined : rec.mail.error });
     }
