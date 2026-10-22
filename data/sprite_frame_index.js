@@ -883,7 +883,7 @@ window.LX_SPRITE_FRAME_INDEX = {
    "waterPillar": 9,
    "wave": 9,
    "whirl": 9,
-   "zodiacTide": 9,
+   "zodiacFrost": 9,
    "zodiac": 9
   },
   "summons/anim": {
