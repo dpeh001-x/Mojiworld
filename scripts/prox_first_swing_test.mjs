@@ -49,7 +49,7 @@ try {
       const P = performance, orig = P.now, t0 = orig.call(P); let t = t0, sw = null, lastStamp = 0; const swings = [], seen = [];
       P.now = () => t;
       try {
-        for (let e = 0; e <= 2800; e += 2) { t = t0 + e; m.x = player.x + player.w / 2; m.vx = 0;
+        for (let e = 0; e <= 2800; e += 2) { t = t0 + e; game._lxMobHeldWall = 0; m.x = player.x + player.w / 2; m.vx = 0;   /* v0.30.1356: the held attack clock would freeze the drawn frame in this paused step */
           const f = set.attack.indexOf(_monsterStateFrame(m)); if (!seen.length || seen[seen.length - 1][1] !== f) seen.push([e, f]);
           if (m._swStrikeAt > 0 && m._swStrikeAt !== lastStamp) { lastStamp = m._swStrikeAt; if (swings.length === 2) break;
             sw = { start: e, hitAt: -1, frameAtHit: -1, open: 0, swingMs: Math.round(m._swStrikeEnd - t) }; swings.push(sw); }

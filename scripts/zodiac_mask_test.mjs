@@ -63,7 +63,7 @@ try {
   await page.evaluate(() => { window._lxSigilCount = window.__sc; });
   check(D.known === false && D.brok.opts.some((t) => /Trade all Zodiac Sigils/.test(t)) && D.furn.opts.some((t) => /Trade all Zodiac Sigils/.test(t)) && /ZODIAC SIGILS/.test(D.brok.text), 'holding a sigil shows the Trade button and the sigil line even while the Twelve read as unknown', J([D.brok.opts, D.furn.opts]));
   // a row the hero has earned is never hidden, even if the Twelve were somehow still unknown
-  const C = await page.evaluate(() => { game.bestiary.aetherion = 0; game.achievements.zodiacAll = true; const k = _lxTwelveKnown(); try { closeAllModals(); } catch (e) {} openCodex(); const t = document.getElementById('codex-list').innerText; game.achievements.zodiacAll = false; return { k, hasName: /The Twelve Houses/.test(t) }; });
+  const C = await page.evaluate(() => { game.bestiary.aetherion = 0; game.achievements.zodiacAll = true; const k = _lxTwelveKnown(); try { closeAllModals(); } catch (e) {} openCodex(); const t = document.getElementById('codex-list').innerText; game.achievements.zodiacAll = false; return { k, hasName: /The Twelve Stars/.test(t) }; });
   check(C.k === false && C.hasName === true, 'an achievement the hero has earned keeps its real name', J(C));
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }

@@ -67,7 +67,7 @@ try {
   const sf = await sigil('zod_aries', true);
   check(sf.fillerTab === 'etc' && sf.before === sf.cap && sf.after <= sf.cap && !sf.bagged && !sf.dropped && sf.held && sf.toldWisp, 'a Zodiac Sigil won with a full Etc tab is held by the Postal Wisp (not on the ground, not past the last slot) and she says so', sf);
   const sb = await sigil('zod_gemini', true, true);
-  check(sb.before === sb.cap && sb.after <= sb.cap && !sb.bagged && sb.dropped && !sb.held && sb.told, 'with her satchel full (30 parcels) the sigil drops at your feet as before, and the toast says so', sb);
+  check(sb.before === sb.cap && sb.after <= sb.cap && !sb.bagged && !sb.dropped && sb.held, 'with her satchel full (30 parcels) a Zodiac Sigil is still kept by the Wisp (a forced earned reward, v0.30.1734)', sb);
   const sr = await sigil('zod_taurus', false);
   check(sr.bagged && !sr.dropped && sr.after === sr.before + 1, 'with room in the Etc tab the sigil still goes straight into the bag', sr);
   await p.evaluate(() => { player.inventory = player.inventory.filter((x) => !(x && /^Test Pebble/.test(x.name))); __unblock(); loadMap('mushroom'); });

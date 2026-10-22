@@ -80,7 +80,7 @@ ok('every way in carries the Lv 15 gate',
   r.into.length > 0 && r.into.every(p => p.gate === 15),
   { entrances: r.into.map(p => `${p.from} (Lv ${p.gate})`) });
 ok('...and each one says so on the portal label',
-  r.into.every(p => /Lv\s*15\+/.test(p.name || '')), { names: r.into.map(p => p.name) });
+  r.into.every(p => /\(Lv\s*19-20\)/.test(p.name || '')), { names: r.into.map(p => p.name) });   // the label is the roster span since v0.30.1742; the gate (15) is pinned by the checks above
 ok('W-map fast travel reads the same gate (no walk-in bypass)', r.wmGate === 15, { wmGate: r.wmGate });
 ok('the map keeps levelReq 15 through the sweep, so the W-map label is honest',
   r.levelReq === 15, { levelReq: r.levelReq });

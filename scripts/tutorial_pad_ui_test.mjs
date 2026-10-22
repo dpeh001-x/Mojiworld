@@ -55,7 +55,7 @@ const out = await page.evaluate(async () => {
   r.hasPadBadge = /class="pad-btn/.test(r.renderedTryIt || '');
   r.hasKeycap = /<kbd>/.test(r.renderedTryIt || '');
   // the attack step: a face button, with its hardware colour class
-  const atk = TUTORIAL_STEPS.find(s => /swing your weapon/i.test(s.tryIt || ''));
+  const atk = TUTORIAL_STEPS.find(s => /(swing your weapon|fire your bow|cast a magic bolt)/i.test(s.tryIt || ''));
   r.attackRendered = atk ? _tutTouchify(atk.tryIt) : null;
   r.attackIsFace = /pad-btn face x/.test(r.attackRendered || '');
   // the badge must actually be styled, not an unstyled span

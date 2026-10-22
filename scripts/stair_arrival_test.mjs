@@ -17,7 +17,7 @@ const PORT = Number(process.argv[2] || process.env.PORT || 10421);
 let pass = 0, fail = 0; const ok = (n, c, x) => { if (c) pass++; else fail++; console.log((c ? 'PASS ' : 'FAIL ') + n + (x !== undefined ? '  ' + JSON.stringify(x).slice(0, 500) : '')); };
 const game = readFileSync(path.join(ROOT, 'mojiworld_game.html'), 'utf8');
 { const i = game.indexOf("mode: 'travel',"); const j = game.indexOf('onPick:', i); const body = game.slice(j, game.indexOf('_wmRenderRecent();', j));
-  ok("the W-map's pick loads the map with no entryX (the path that fell)", i > 0 && /loadMap\(id\);/.test(body)); }
+  ok("the W-map's pick loads the map with a cleared arrival x (v0.30.1709; the path that fell)", i > 0 && /loadMap\(id,\s*\(typeof _lxClearArrivalX/.test(body)); }
 const server = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT }); await new Promise((r) => setTimeout(r, 1500));
 const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio'] }); const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });

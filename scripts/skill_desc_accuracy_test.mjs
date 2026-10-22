@@ -38,7 +38,7 @@ try {
     claim('marksman_ult', `${fmt(LX_PROTOCOL_LINE_ATK)}× ATK + ${LX_PROTOCOL_LINE_FLAT} each`);
     claim('marksman_oneshot', `${fmt(LX_DEADEYE_LINE_ATK)}× ATK + ${LX_DEADEYE_LINE_FLAT} each`);
     claim('dragoon_ult', `460px shockwave (${fmt(lit('dragoon_ult', /performAround\(460, ([\d.]+),/))}× ATK`);
-    claim('shinobi_seal', `dealing ${fmt(LX_KAGE_DMG)}× ATK`);
+    claim('shinobi_seal', `dealing ${fmt(lit('shinobi_seal', /_ag14\.hit\(m, Math\.floor\(getAtk\(\) \* ([\d.]+)\), false, 'melee'\)/))}× ATK`);
     claim('hexmaster_grandhex', `a ${fmt(LX_GRANDHEX_BURST_MUL)}× ATK burst`);
     claim('hexmaster_grandhex', `PULSES AGAIN (${fmt(LX_GRANDHEX_BURST_MUL * 0.8)}× ATK)`);
     claim('hexmaster_grandhex', `RUPTURES for ${fmt(LX_GRANDHEX_RUPTURE_MUL)}× ATK and splashes ${Math.round(LX_GRANDHEX_RUPTURE_SPLASH * 100)}%`);
@@ -60,7 +60,7 @@ try {
     { const [a, b] = lit2('elemental', /getAtk\(\) \* ([\d.]+) \* jumpMul \+ (\d+)/); claim('elemental', `(${fmt(a)}× ATK + ${b}, −8% per hop)`); }
     claim('archbishop_ult', `five holy pulses (${fmt(lit('archbishop_ult', /performAround\(\d+, ([\d.]+), \{ color: '#fff1a0'/))}× ATK`);
     claim('phantom_ult', `shards (${fmt(lit('phantom_ult', /damage: getAtk\(\) \* ([\d.]+) \+/))}× ATK each)`);
-    claim('nightreaper_ult', `shuriken (${fmt(lit('nightreaper_ult', /damage: getAtk\(\) \* ([\d.]+) \+ 10/))}× ATK each)`);
+    claim('nightreaper_ult', `shuriken (${fmt(lit('nightreaper_ult', /damage: getAtk\(\) \* ([\d.]+) \+ \d+/))}× ATK each)`);
     claim('arcaneBurst', `(${fmt(lit('arcaneBurst', /performAround\(_abAoe, ([\d.]+),/))}× ATK, heavy knockback)`);
     claim('holyLight', `holy AoE (${fmt(lit('holyLight', /const _aoeDmg = Math\.max\(1, Math\.floor\(getAtk\(\) \* ([\d.]+)\)\)/))}× ATK`);
     claim('darkPulse', `(220px, ${fmt(lit('darkPulse', /performAround\(220, ([\d.]+),/))}× ATK)`);

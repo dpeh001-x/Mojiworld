@@ -117,7 +117,7 @@ try {
   ok('SIEGE: a staggered stream frees the other skills at once', !R.siege.channel && R.siege.lockLeft <= 0, JSON.stringify(R.siege));
   ok('GRAIL: 1.2 s into the ascend the 0.8 s guard is over (still floating)', R.grail.ascended > 0 && R.grail.invuln <= 0 && !R.grailErr, JSON.stringify(R.grail) + (R.grailErr || ''));
   ok('CRITS: Shadow Strike and the Grail\'s pillars land plain even when every crit roll succeeds', R.crits.ss > 0 && R.crits.ssCrit === 0 && R.crits.gr > 0 && R.crits.grCrit === 0, JSON.stringify(R.crits) + (R.ssErr || ''));
-  ok('CRITS: Voidrift Execution, Kage Rush and the clones pass no crit flag either (source)', /hitMonster\(target, Math\.floor\(getAtk\(\) \* 5\.2\), false, 'phantom_cut'\)/.test(src) && /_ag14\.hit\(m, Math\.floor\(getAtk\(\) \* LX_KAGE_DMG\), false, 'melee'\)/.test(src) && /_ag12\.hit\(m, dmg, false, 'shadow'\)/.test(src));
+  ok('CRITS: Voidrift Execution, Kage Rush and the clones pass no crit flag either (source)', /hitMonster\(target, Math\.floor\(getAtk\(\) \* 5\.2\), false, 'phantom_cut'\)/.test(src) && /_ag14\.hit\(m, Math\.floor\(getAtk\(\) \* 11\), false, 'melee'\)/.test(src) && /_ag12\.hit\(m, dmg, false, 'shadow'\)/.test(src));
   ok('no page errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 } catch (e) { ok('harness ran', false, String(e).slice(0, 200)); }
 console.log(`\n${pass} passed, ${fail} failed`);

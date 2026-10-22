@@ -45,12 +45,11 @@ try {
   });
   const L = R.lv, X = R.idx;
   check(L.q_hourglass_1 === 50 && L.q_hourglass_2 === 56 && L.q_hourglass_3 === 69, 'Hourglass I is Lv 50, II is Lv 56, III stays Lv 69', J(L));
-  check(L.q_boss_sundered_smith < L.q_hourglass_1 && L.q_boss_sundered_smith < L.q_boss_aetherion, 'the Smith comes before Hourglass I and the Sanctum (by level; the Sanctum is Lv 55 since v0.30.1855, so it no longer sorts after Hourglass II)', J(L));
-  check(X.q_distorted_portal < X.q_boss_sundered_smith && X.q_boss_sundered_smith < X.q_hourglass_1 && X.q_hourglass_1 < X.q_hourglass_2 && X.q_hourglass_2 < X.q_boss_aetherion && X.q_boss_aetherion < X.q_hourglass_3,
-    "the Journal lists them in order: portal, Smith, Hourglass I, II, the Sanctum, III", J(X));
+  check(L.q_boss_sundered_smith < L.q_hourglass_1 && L.q_hourglass_1 < L.q_boss_aetherion && L.q_boss_aetherion < L.q_hourglass_2, 'the Smith, Hourglass I, the Sanctum (Lv 55 since v0.30.1855) and Hourglass II come in level order', J(L));
+  check(X.q_distorted_portal < X.q_boss_sundered_smith && X.q_boss_sundered_smith < X.q_hourglass_1 && X.q_hourglass_1 < X.q_boss_aetherion && X.q_boss_aetherion < X.q_hourglass_2 && X.q_hourglass_2 < X.q_hourglass_3,
+    "the Journal lists them in order: portal, Smith, Hourglass I, the Sanctum (Lv 55), Hourglass II, III", J(X));
   check(X.q_last_step < 0 || (X.q_boss_sundered_smith < X.q_last_step && X.q_last_step < X.q_hourglass_1), 'the Last Step (when the build has it) sits between the Smith and Hourglass I', J(X));
-  const _ln = R.line.filter((e) => e[0] !== 'q_boss_aetherion');   // v0.30.1855: the Sanctum (Lv 55) sits between Hourglass II (56) and III in the Journal chain on purpose
-  const asc = _ln.every((e, i) => i === 0 || e[1] >= _ln[i - 1][1]);
+  const asc = R.line.every((e, i) => i === 0 || e[1] >= R.line[i - 1][1]);
   check(asc, 'every quest of the line, portal to Hourglass III, is in non-decreasing level order', J(R.line));
   const E = R.exp;
   check(E.q_hourglass_1[1] >= 0.15 && E.q_hourglass_1[1] <= 0.16 && E.q_hourglass_2[1] >= 0.15 && E.q_hourglass_2[1] <= 0.16, 'Hourglass I and II still pay about 15.5% of their own level (not a pay cut)', J(E));

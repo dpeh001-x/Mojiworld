@@ -43,7 +43,7 @@ ok('LX_MOB_PROJ knows radiantLance', /radiantLance:\s*'p_virga_lance\.webp'/.tes
 ok('it renders oriented to its velocity', /radiantLance:\s*\{\s*mode:\s*'orient'/.test(s),
   'the burst fires on all eight compass points; a static sprite would face one way in all of them');
 ok('holy light tests MDEF, not DEF', /p\.skill === 'radiantLance'/.test(s)
-  && /isMagic[\s\S]{0,400}?p\.skill === 'radiantLance'/.test(s));
+  && /isMagic[\s\S]{0,700}?p\.skill === 'radiantLance'/.test(s));
 
 // ---- the AI: fly to the CENTRE OF THE SCREEN --------------------------------
 const ai = s.match(/\n  virgo\(m, dt, dist, phase, z\) \{[\s\S]*?\n  \},\n/);

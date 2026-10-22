@@ -146,14 +146,14 @@ const R = await page.evaluate(async () => {
 
     player.cls = 'archer'; player.job = 'ranger'; player.master = 'skyhunter';
     player.skillCooldowns = {}; player.mp = 99999;
-    out.wolfExpect = Math.floor(getMaxHp() * 15);
+    out.wolfExpect = Math.floor(getMaxHp() * 15) * 3;   // skyhunter tier
     try { castSkill('wildBond'); } catch (e) {}
     out.wolf = player.pet ? player.pet.maxHp : null;
-    out.eagleExpect = Math.floor(getMaxHp() * 15);
+    out.eagleExpect = Math.floor(getMaxHp() * 15) * 3;
     try { castSkill('skyhunter_ult'); } catch (e) {}
     out.eagle = player.ultPet ? player.ultPet.maxHp : null;
     player.master = 'beastmaster'; player.skillCooldowns = {}; player.ultPet = null; player.pack = [];
-    out.packExpect = Math.floor(getMaxHp() * 15);
+    out.packExpect = Math.floor(getMaxHp() * 15) * 5;   // beastmaster tier
     try { castSkill('beastmaster_pack'); } catch (e) {}
     out.pack = (player.pack && player.pack[0]) ? player.pack[0].maxHp : null;
 
@@ -204,9 +204,9 @@ const near = (v, e) => v != null && Math.abs(v - e) <= Math.max(2, e * 0.02);
 const shown = (v, e) => (v == null ? 'NOT SUMMONED' : v) + ' vs expected ' + e;
 ok('necromancer minion HP is player max HP x15', near(H.minion, H.minionExpect),
    shown(H.minion, H.minionExpect) + ' (player maxHp ' + H.playerMax + ')');
-ok('wolf HP is player max HP x15', near(H.wolf, H.wolfExpect), shown(H.wolf, H.wolfExpect));
-ok('skyhunter eagle HP is player max HP x15', near(H.eagle, H.eagleExpect), shown(H.eagle, H.eagleExpect));
-ok('beastmaster pack HP is player max HP x15', near(H.pack, H.packExpect), shown(H.pack, H.packExpect));
+ok('wolf HP is player max HP x15 x the skyhunter tier (3)', near(H.wolf, H.wolfExpect), shown(H.wolf, H.wolfExpect));
+ok('skyhunter eagle HP is player max HP x15 x the tier (3)', near(H.eagle, H.eagleExpect), shown(H.eagle, H.eagleExpect));
+ok('beastmaster pack HP is player max HP x15 x the beastmaster tier (5)', near(H.pack, H.packExpect), shown(H.pack, H.packExpect));
 ok('mojimon companion HP is player max HP x15', near(H.mm, H.mmExpect),
    shown(H.mm, H.mmExpect) + (H.mmErr ? ' err=' + H.mmErr : ''));
 // The companion is the one summon with an upgrade lane — investing points must

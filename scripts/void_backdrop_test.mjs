@@ -74,7 +74,7 @@ await browser.close(); server.kill();
 console.log(`  void: video ${JSON.stringify(r.video)}, lit ${r.litPct.toFixed(1)}% of the upper canvas, ground ${JSON.stringify(r.ground)}, feet ${Math.round(r.feet)}`);
 checks.push(['the Void is the current map', r.map === 'void', r.map]);
 checks.push(['the sky video exists, is muted, loops, and is playing', !!r.video && r.video.muted && r.video.loop && r.video.playing, JSON.stringify(r.video)]);
-checks.push(['it has decoded frames at the drop\'s 832x464', !!r.video && r.video.ready >= 2 && r.video.w === 832 && r.video.h === 464]);
+checks.push(['it has decoded frames at the upscaled drop\'s size (>= 832x464; 1872x1044 since v0.30.1837)', !!r.video && r.video.ready >= 2 && r.video.w >= 832 && r.video.h >= 464]);
 checks.push(['the canvas is no longer black (the video is being painted)', r.litPct > 5, r.litPct.toFixed(1) + '%']);
 checks.push(['the ground platform still exists and the hero stands on it', !!r.ground && r.ground.y === 480 && Math.abs(r.feet - 480) < 3, `feet ${Math.round(r.feet)} vs ground ${r.ground && r.ground.y}`]);
 checks.push(['the file was served, not 404', vidReq.length > 0 && vidReq.every((s) => s === 200 || s === 206), vidReq.join(',')]);

@@ -178,7 +178,7 @@ const near = (got, want, tol) => got != null && want != null && want > 0
 
 for (const r of data.rows) {
   chk(`Lv ${r.L}: level stamped on both modes`,
-      r.express && r.express.lv === r.L && r.exped && r.exped.lv === r.L,
+      r.express && r.express.lv === r.L && r.exped && r.exped.lv === Math.max(50, r.L),   // v0.30.874: below Lv 50 every Expedition foe is Lv 50
       { trainRush: r.express && r.express.lv, expedition: r.exped && r.exped.lv });
 }
 // the helper must reproduce what the game actually spawns

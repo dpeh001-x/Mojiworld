@@ -72,7 +72,7 @@ ok('radiance is OCCASIONAL, not every hit', chance > 0 && chance <= 0.35, `chanc
 
 // ---- the engine actually fires and resolves the volley ----------------------
 ok('_columnLanesFor helper exists', /function _columnLanesFor\(cs, cx\)/.test(s));
-ok('the trait handler builds lanes at telegraph time', /m\._columnLanes = _columnLanesFor\(cs, _playerCx\)/.test(s));
+ok('the trait handler builds lanes at telegraph time', /m\._columnLanes = _columnLanesFor\(cs, _aimCx\)/.test(s));
 ok('the strike spawns one pillar per lane', /for \(const _lane of _csLanes\) game\.projectiles\.push\(\{/.test(s));
 ok('every lane is drawn as a danger zone', /for \(const _zl of _zLanes\) out\.push\(\{ kind: 'column'/.test(s));
 ok('the pillar carries its radiance option', /_radiance: cs\.radiance \|\| null/.test(s));
