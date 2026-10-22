@@ -1,5 +1,5 @@
 // Mojiworld FEEDBACK PORTAL - email to the studio (v0.30.1851, per user: "sends in an email to admin@moji-studios.com").
-// Pure functions + three transports, no Cloudflare globals at load (tests run it in plain Node). First one configured wins: Resend, then Google SMTP, then the send_email binding.
+// Pure functions + three transports, no Cloudflare globals at load (tests run it in plain Node). First one configured wins: Resend, then Google SMTP, then the Apps Script webhook, then the send_email binding.
 //   0. Google SMTP (SMTP_PASS secret = an app password for the mailbox; feedback_smtp.js): signs in to smtp.gmail.com as SMTP_USER (default admin@moji-studios.com) and mails the report to the
 //      same mailbox. No third-party service and no DNS change - the right route when the domain mail is already Google Workspace (as moji-studios.com is).
 //   1. Resend (https://resend.com) when the RESEND_API_KEY secret is set - a plain HTTPS call, works to any address once the sending domain is verified there.
@@ -72,12 +72,20 @@ export async function sendReportMail(rec, shot, env, deps) {
       await smtpSend({ host: env.SMTP_HOST || SMTP_HOST_DEFAULT, port: SMTP_PORT_DEFAULT, user, pass: env.SMTP_PASS, from: user, to, raw, connect: deps.connect, timeoutMs: deps.smtpTimeoutMs });
       return { ok: true, via: 'smtp', to };
     }
+    if (env.MAIL_WEBHOOK_URL) {   // Google Apps Script web app that mails as the mailbox owner (no app password, no 2-Step Verification, no DNS): see docs/guides/FEEDBACK_PORTAL.md
+      if (!/^https:[/][/](script[.]google[.]com|script[.]googleusercontent[.]com)[/]/.test(env.MAIL_WEBHOOK_URL)) return { ok: false, via: 'webhook', error: 'MAIL_WEBHOOK_URL must be the https://script.google.com/macros/s/.../exec address of the deployed script.' };
+      const f = deps.fetchFn || fetch;
+      const r = await f(env.MAIL_WEBHOOK_URL, { method: 'POST', redirect: 'follow', headers: { 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ key: env.MAIL_WEBHOOK_KEY || '', to, subject: oneLine(subject, 200), body: text, replyTo: okAddr(rec.contact) ? rec.contact : '', id: rec.id, shot: shot && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(shot) ? shot.slice(shot.indexOf(',') + 1) : '' }), signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined });
+      let j = null, raw = ''; try { raw = await r.text(); j = JSON.parse(raw); } catch (_) {}
+      if (r.ok && j && j.ok) return { ok: true, via: 'webhook', to };
+      return { ok: false, via: 'webhook', error: j && j.error ? 'The mail script said: ' + oneLine(j.error, 140) : 'The mail script did not accept the request (' + r.status + ') - is it deployed as a web app that runs as you, with access "Anyone"? ' + oneLine(raw, 80) };
+    }
     if (env.FEEDBACK_MAIL && typeof env.FEEDBACK_MAIL.send === 'function') {
       const EM = deps.EmailMessage || (await import('cloudflare:email')).EmailMessage;
       const raw = buildMime({ from, to, subject, text, shotDataUrl: shot, replyTo: rec.contact, id: rec.id, now });
       await env.FEEDBACK_MAIL.send(new EM(from, to, raw));
       return { ok: true, via: 'cloudflare', to };
     }
-    return { ok: false, via: 'none', error: 'No email transport is configured (set the SMTP_PASS secret - a Google app password -, or RESEND_API_KEY, or enable the FEEDBACK_MAIL send_email binding).' };
-  } catch (e) { const pw = String(env.SMTP_PASS || ''); let msg = oneLine((e && e.message) || e, 200); if (pw) msg = msg.split(pw).join('***'); return { ok: false, via: env.RESEND_API_KEY ? 'resend' : pw ? 'smtp' : 'cloudflare', error: msg }; }
+    return { ok: false, via: 'none', error: 'No email transport is configured (set MAIL_WEBHOOK_URL - the Google Apps Script mailer -, or SMTP_PASS - a Google app password -, or RESEND_API_KEY, or enable the FEEDBACK_MAIL send_email binding).' };
+  } catch (e) { const pw = String(env.SMTP_PASS || ''); let msg = oneLine((e && e.message) || e, 200); if (pw) msg = msg.split(pw).join('***'); return { ok: false, via: env.RESEND_API_KEY ? 'resend' : pw ? 'smtp' : env.MAIL_WEBHOOK_URL ? 'webhook' : 'cloudflare', error: msg }; }
 }

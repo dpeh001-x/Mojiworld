@@ -17,21 +17,24 @@ Each accepted report is emailed to **admin@moji-studios.com** (override with the
 The report is saved *before* it is mailed, so a mail problem never loses it: the dashboard shows "Email NOT sent" with the reason and an **Email again** button.
 
 ### Turn the email on (one of these - it needs an account only you have)
-**A. Google SMTP (v0.30.1857, the right one for a Google Workspace mailbox such as admin@moji-studios.com).** No third-party service and no DNS change: the Worker signs in to `smtp.gmail.com` (port 465, TLS) as the mailbox and mails the report to it.
-1. Sign in to the mailbox's Google account, turn on **2-Step Verification** (Security) if it is off, then open **Security -> App passwords** (myaccount.google.com/apppasswords), name it "Mojiworld feedback" and copy the 16-character password. On a Workspace account an admin may first have to allow 2-Step Verification / app passwords for the organisation.
-2. Set it as a Worker secret yourself (the password is never in the repo, the logs or an error message):
+**A. Google Apps Script mailer (v0.30.1859, the easy one for a Google mailbox such as admin@moji-studios.com).** No app password, no 2-Step Verification, no DNS: a ten-line script in the mailbox's own Google account sends the email, and the Worker just calls it.
+1. Signed in as the mailbox, open script.google.com -> **New project**, delete the sample code and paste the contents of `mp-cf/mail_script.gs.txt`. Replace `__KEY__` with a long random string (keep it; it is the script's password).
+2. **Deploy -> New deployment -> Web app**, Execute as **Me**, Who has access **Anyone**, **Deploy**. The first time, Google asks you to authorise it to send email: choose your account, then Advanced -> "Go to ... (unsafe)" -> Allow (it is your own script). Copy the **Web app URL** (it ends in `/exec`).
+3. Give the Worker that address with `?k=` and the key on the end, as a secret (it is never in the repo):
 ```bash
 cd mp-cf
-npx wrangler secret put SMTP_PASS      # paste the app password
+npx wrangler secret put MAIL_WEBHOOK_URL    # https://script.google.com/macros/s/.../exec?k=<the key>
 ```
-Optional: `npx wrangler secret put SMTP_USER` if the mailbox that signs in is not admin@moji-studios.com (that address is the default, and also the sender).
-3. Open `/feedback-admin`, sign in with the admin key and press **Test email**. It says "Sent via smtp to admin@moji-studios.com" and the message arrives within a minute, or it shows why Google refused (a 535 means the app password is wrong, revoked, or app passwords are off for the account).
+4. Open `/feedback-admin`, sign in with the admin key and press **Test email**. It says "Sent via webhook to admin@moji-studios.com" and the message arrives within a minute, or it shows why not (a Google sign-in page instead of JSON means the deployment's access is not "Anyone"; "bad key" means the `?k=` does not match the script).
+Safety: requests without the key are refused, and even with it the script can only mail addresses at moji-studios.com. Apps Script allows about 100 emails a day on a free account (1500 on Workspace), far above the one-report-per-hour-per-connection limit in practice.
 
-**B. Resend.** Sign up at resend.com (free tier), add and verify the domain `moji-studios.com` (DNS records), create an API key, then `npx wrangler secret put RESEND_API_KEY` and `npx wrangler deploy`.
+**B. Google SMTP.** Needs an **app password**, which Google only issues when 2-Step Verification is on: Security -> App passwords, then `npx wrangler secret put SMTP_PASS` (optional `SMTP_USER`, default admin@moji-studios.com). The Worker signs in to `smtp.gmail.com:465`. Press **Test email**; a 535 means the app password is wrong, revoked, or app passwords are off for the account.
 
-**C. Cloudflare Email Routing.** Only for a domain whose mail is *not* already hosted elsewhere (Email Routing replaces the MX records, so do not enable it on a Google Workspace domain). Enable it, verify the destination inbox, then uncomment the `[[send_email]]` block at the bottom of `mp-cf/wrangler.toml` and `npx wrangler deploy`.
+**C. Resend.** Sign up at resend.com (free tier), add and verify the domain `moji-studios.com` (DNS records), create an API key, then `npx wrangler secret put RESEND_API_KEY` and `npx wrangler deploy`.
 
-If several are set the order is Resend, Google SMTP, then the binding. If none is set, reports are still stored and the dashboard says "No email transport is configured". A report that failed to mail keeps the reason and an **Email again** button.
+**D. Cloudflare Email Routing.** Only for a domain whose mail is *not* already hosted elsewhere (Email Routing replaces the MX records, so do not enable it on a Google Workspace domain). Enable it, verify the destination inbox, then uncomment the `[[send_email]]` block at the bottom of `mp-cf/wrangler.toml` and `npx wrangler deploy`.
+
+If several are set the order is Resend, Google SMTP, the Apps Script mailer, then the binding. If none is set, reports are still stored and the dashboard says "No email transport is configured". A report that failed to mail keeps the reason and an **Email again** button.
 
 ## One-time setup (your Cloudflare account)
 The feedback API lives in the same Worker as multiplayer (`mp-cf/`), in its **own Durable Object instance** (`feedback`), so reports never slow the relay.
@@ -39,7 +42,7 @@ The feedback API lives in the same Worker as multiplayer (`mp-cf/`), in its **ow
 ```bash
 cd mp-cf
 npx wrangler secret put FEEDBACK_ADMIN_KEY      # pick a long random key (8+ characters) - this opens the dashboard
-npx wrangler secret put SMTP_PASS               # the email: a Google app password (option A above), or RESEND_API_KEY for option B
+npx wrangler secret put MAIL_WEBHOOK_URL         # the email: the Apps Script mailer (option A above); or SMTP_PASS / RESEND_API_KEY (B / C)
 npx wrangler secret put FEEDBACK_WEBHOOK        # OPTIONAL: a Discord/Slack webhook URL (https) - every new report is also posted there
 npx wrangler deploy
 ```
@@ -60,4 +63,4 @@ Open **`https://<your worker>.workers.dev/feedback-admin`** (the same host the g
 Raw IP addresses are **not** stored (only a short salted hash, used for the hourly limit and to group one spammer's reports). The store keeps the newest 3000 reports; older ones are dropped. A honeypot field, the hourly limit and a flood guard keep bots out. The email contains what the player chose to send and nothing else.
 
 ## Tests
-`node mp-cf/_feedback_test.mjs` (backend + the hourly limit), `node mp-cf/_feedback_mail_test.mjs` (the email: message, Resend, Cloudflare, failures), `node mp-cf/_feedback_smtp_test.mjs` (the Google SMTP dialogue against a fake server, the Test email route), `node mp-cf/_feedback_worker_test.mjs` (through the Worker + MojiRoom), `node mp-cf/_feedback_admin_ui_test.mjs` (the dashboard, real browser), `node scripts/feedback_portal_test.mjs` (the in-game panel, real browser), `node scripts/feedback_steam_test.mjs` (the Steam app's static server, bridge and relay URL). None needs a deploy or a real mail account; **only a real send from your account proves the last step**, so do the check above once after deploying.
+`node mp-cf/_feedback_test.mjs` (backend + the hourly limit), `node mp-cf/_feedback_mail_test.mjs` (the email: message, Resend, Cloudflare, failures), `node mp-cf/_feedback_smtp_test.mjs` (the Google SMTP dialogue against a fake server, the Test email route), `node mp-cf/_feedback_webhook_test.mjs` (the Apps Script mailer), `node mp-cf/_feedback_worker_test.mjs` (through the Worker + MojiRoom), `node mp-cf/_feedback_admin_ui_test.mjs` (the dashboard, real browser), `node scripts/feedback_portal_test.mjs` (the in-game panel, real browser), `node scripts/feedback_steam_test.mjs` (the Steam app's static server, bridge and relay URL). None needs a deploy or a real mail account; **only a real send from your account proves the last step**, so do the check above once after deploying.
