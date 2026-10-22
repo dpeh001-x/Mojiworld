@@ -16483,7 +16483,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1865';
+const GAME_VERSION = 'v0.30.1866';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -18947,6 +18947,76 @@ const LX_PLAYER_PROJ = (() => {
   }
   return out;
 })();
+// v0.30.1866 hazard-themed-art - THEMED CEILING HAZARDS. A ceilingHazards entry with `art:` falls as its own sprite instead of the red meteor,
+// drawn inside the meteor's own falling hitbox (_lxMeteorGeom: same band, same timing), so only the picture changes.
+const LX_HZ_ART = (() => {
+  const out = {};
+  const files = { skull: 'projectiles/p_hz_skull', ribbone: 'projectiles/p_hz_ribbone', bonechunk: 'projectiles/p_hz_bonechunk', ember: 'projectiles/p_hz_ember', marker: 'fx/meteor_marker_bone' };
+  for (const k in files) {
+    const img = new Image(); img.decoding = 'async';
+    _lxFxMark(img, 'Sprites/' + files[k] + '.webp');   // v0.30.1866 hazard-themed-art - parked until the map asks
+    img.src = 'Sprites/' + files[k] + '.webp';
+    if (img.decode) img.decode().catch(() => {});
+    out[k] = img;
+  }
+  return out;
+})();
+// v0.30.1866 hazard-themed-art - paints h._art in the meteor's place; true = drawn (the caller skips the meteor). Unknown key = false = meteor.
+function _lxHzArtDraw(h, sx, camY) {
+  const img = (h._art !== 'marker') ? LX_HZ_ART[h._art] : null;
+  if (!img) return false;
+  const g = _lxMeteorGeom(h, camY), t = (game.time | 0) + ((h.cx | 0) % 97), sz = g.sz;
+  const blit = (im, x, y, s, rot, a) => {
+    const d = _lxProjScaled(im, Math.round(s));
+    ctx.save(); ctx.globalAlpha = a; ctx.translate(x, y); if (rot) ctx.rotate(rot);
+    ctx.drawImage(d, -s / 2, -s / 2, s, s); ctx.restore();
+  };
+  if (!_lxPlayerProjReady(img)) {   // v0.30.1866 hazard-themed-art - still decoding: a plain stand-in in the entry colour, never the red meteor
+    ctx.fillStyle = h.color || '#ddd4c0'; ctx.strokeStyle = '#2a2018'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(sx, g.hitY + g.hitR * 0.3, sz * 0.14, sz * 0.2, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    return true;
+  }
+  if (h._art === 'ember') {   // a small glowing cluster, flickering, with a fading streak above it
+    const s = sz * 0.5, y = g.hitY + g.hitR * 0.3, fl = 0.85 + 0.15 * Math.sin(t * 0.7);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    for (let i = 3; i >= 1; i--) blit(img, sx + Math.sin(t * 0.3 + i) * 4, y - i * s * 0.32, s * (1 - i * 0.16), 0, 0.32 - i * 0.08);
+    ctx.restore();
+    blit(img, sx, y, s, 0, fl);
+    return true;
+  }
+  if (h._art === 'ribbone') {   // one long bone, rocking as it falls, two ghost copies above
+    const s = sz * 0.62, y = g.hitY + g.hitR * 0.15, r = Math.sin(t * 0.15) * 0.45;
+    for (let i = 2; i >= 1; i--) blit(img, sx, y - i * sz * 0.17, s, Math.sin((t - i * 3) * 0.15) * 0.45, 0.3 - i * 0.1);
+    blit(img, sx, y, s, r, 1);
+    return true;
+  }
+  if (h._art === 'skull') {   // a cute little skull, wobbling as it falls, two ghost copies above
+    const s = sz * 0.42, y = g.hitY + g.hitR * 0.3;
+    for (let i = 2; i >= 1; i--) blit(img, sx, y - i * sz * 0.15, s * (1 - i * 0.08), Math.sin((t - i * 3) * 0.2) * 0.4, 0.3 - i * 0.1);
+    blit(img, sx, y, s, Math.sin(t * 0.2) * 0.4, 1);
+    return true;
+  }
+  // bonechunk: a tumbling chunk with loose bones thrown round it (the avalanche)
+  const s = sz * 0.5, y = g.hitY + g.hitR * 0.3, spin = -t * 0.07;
+  blit(img, sx, y - sz * 0.2, s * 0.9, spin - 0.2, 0.22);
+  if (h._art === 'bonechunk' && _lxPlayerProjReady(LX_HZ_ART.ribbone)) {
+    for (let i = 0; i < 3; i++) blit(LX_HZ_ART.ribbone, sx + (i - 1) * s * 0.36, y - s * (0.55 + 0.25 * (i % 2)), s * 0.5, t * 0.11 * (i % 2 ? 1 : -1) + i, 0.95);
+  }
+  blit(img, sx, y, s, spin, 1);
+  return true;
+}
+// v0.30.1866 hazard-themed-art - bones land in a puff of bone dust instead of the fire blast. true = handled; embers return false and keep the fire.
+function _lxHzArtImpact(h, cx, camY, radius) {
+  if (!h || !LX_HZ_ART[h._art] || h._art === 'ember' || h._art === 'marker') return false;
+  spawnSmoothExplosion(cx, camY + 460, radius * 0.8, '#f6eedc', '#8a7d6488', { life: 30 });
+  spawnSmoothImpact(cx, camY + 440, '#e8dcc0');
+  const cols = ['#efe6d0', '#d6cbb2', '#b3a88f', '#8f846d'];
+  for (let j = 0; j < 15; j++) {
+    game.particles.push({ x: cx + (Math.random() - 0.5) * radius * 2, y: camY + 410 + Math.random() * 60,
+      vx: (Math.random() - 0.5) * 8, vy: -Math.random() * 7, life: 44, color: cols[j % 4], size: 3 + Math.random() * 4 });
+  }
+  return true;
+}
 function _lxPlayerProjReady(img) {
   if (img && img._lxLazy === true && !img._lxWanted && typeof _lxWantImg === 'function') _lxWantImg(img, true);   // v0.30.1234 lazy-fx - shown while parked: ask
   return !!(img && img.complete && img.naturalWidth > 0);
@@ -37085,6 +37155,7 @@ const MAPS = {
     ceilingHazards: {
       minDelayMs: 7000, maxDelayMs: 11000, warnMs: 1500,
       damage: 70, radius: 130, color: '#d8d4c8',
+      art: 'skull',   // v0.30.1866 hazard-themed-art - falls as this sprite, not the red meteor
       label: 'a falling rib-cage',
       introToast: '🦴 Bone-fall! Watch for warning marks above.',
     },
@@ -37223,6 +37294,7 @@ const MAPS = {
     ceilingHazards: {
       minDelayMs: 5000, maxDelayMs: 8000, warnMs: 1300,
       damage: 95, radius: 140, color: '#c8c0b0',
+      art: 'skull',   // v0.30.1866 hazard-themed-art - falls as this sprite, not the red meteor
       label: 'a falling rib-cage',
       introToast: '🦴 Catacomb bones falling — heads up.',
     },
@@ -37281,6 +37353,7 @@ const MAPS = {
     ceilingHazards: {
       minDelayMs: 4000, maxDelayMs: 6000, warnMs: 1200,
       damage: 115, radius: 150, color: '#b8a898',
+      art: 'skull',   // v0.30.1866 hazard-themed-art - falls as this sprite, not the red meteor
       label: 'a vault-fall of bone',
       introToast: '🦴 The Necromancer\'s vault sheds its bones!',
     },
@@ -37688,6 +37761,7 @@ const MAPS = {
       minDelayMs: 8000, maxDelayMs: 12000, warnMs: 1700,
       damage: 70, radius: 130,
       color: '#aaccff', label: 'a falling rib-bone',
+      art: 'ribbone',   // v0.30.1866 hazard-themed-art - falls as this sprite, not the red meteor
       introToast: '💀 The vault sheds its bones...',
     },
     platforms: [
@@ -38269,6 +38343,7 @@ const MAPS = {
       minDelayMs: 5000, maxDelayMs: 8000, warnMs: 1400,
       damage: 120, radius: 130,
       color: '#ffaa44', label: 'an ember shower',
+      art: 'ember',   // v0.30.1866 hazard-themed-art - falls as this sprite, not the red meteor
       introToast: '🔥 The Gate weeps embers!',
     },
     // v0.25.842 — Wind + updrafts.
@@ -42787,6 +42862,7 @@ MAPS.ossuarySprawl = {
   ceilingHazards: {
     minDelayMs: 8000, maxDelayMs: 13000, warnMs: 1700,
     damage: 110, radius: 175, color: '#e8e0c8',
+    art: 'bonechunk',   // v0.30.1866 hazard-themed-art - falls as this sprite, not the red meteor
     label: 'a bone avalanche',
     introToast: '\uD83E\uDDB4 Ossuary Sprawl \u2014 the bone-stacks collapse without warning. A great warden walks among the dead.',
   },
@@ -62342,7 +62418,7 @@ function _coopHazList() {
       w: Math.round(h.w || 0), h: Math.round(h.h || 0), r: Math.round(h.radius || 0),
       l: Math.round((h.life != null) ? h.life : (h.timer || 0)), ml: Math.round(h.maxLife || h.timer || 0),
       d: Math.round(h.damage || 0), c: String(h.color || '').slice(0, 9),
-      mk: h._markerOnly ? 1 : (h._spore ? 2 : 0), sk: h._skin || undefined, gy: (h._gy != null) ? Math.round(h._gy) : undefined, sl: String(h._sourceLabel || '').slice(0, 40),   // v0.30.1615 a spore burst rides to a guest as itself
+      mk: h._markerOnly ? 1 : (h._spore ? 2 : 0), sk: h._skin || undefined, ar: h._art || undefined /* v0.30.1866 hazard-themed-art */, gy: (h._gy != null) ? Math.round(h._gy) : undefined, sl: String(h._sourceLabel || '').slice(0, 40),   // v0.30.1615 a spore burst rides to a guest as itself
     });
     if (_xf) list[list.length - 1].xf = _xf;   // v0.30.x coop-ohko
   }
@@ -62418,7 +62494,8 @@ function _coopApplyHazards(msg) {
     h.damage = +e.d || 0; h.color = e.c || '#ffaa33';
     if (e.mk === 2) { h._spore = 1; h._fireColumn = 1; } else if (e.mk) h._markerOnly = 1;   // v0.30.1615
     if (e.gy !== undefined) h._gy = +e.gy;
-    if (e.sk) h._skin = String(e.sk).slice(0, 8);   // v0.30.1629 a door trial's line of light
+    if (e.sk) h._skin = String(e.sk).slice(0, 8);
+    if (e.ar && LX_HZ_ART[e.ar]) h._art = e.ar;   // v0.30.1866 hazard-themed-art - a known look only   // v0.30.1629 a door trial's line of light
     if (e.sl) h._sourceLabel = e.sl;
     if (e.xf && typeof e.xf === 'object') {   // v0.30.x coop-ohko — what the type's resolver reads
       for (const _k of _COOP_HZ_XF) if (e.xf[_k] != null) h[_k] = e.xf[_k];
@@ -120027,6 +120104,8 @@ function updateProjectiles(dt) {
             life: 40, color: j % 3 ? '#66c8ff' : '#e6f8ff', size: 2 + Math.random() * 3
           });
         }
+      } else if (h._art && _lxHzArtImpact(h, _cx, _impactCamY, radius)) {
+        // v0.30.1866 hazard-themed-art - bone dust, drawn by _lxHzArtImpact
       } else if (h._spore && typeof _lxSporeBurst === 'function') {
         _lxSporeBurst(_cx, h._gy != null ? h._gy : _impactCamY + 480, radius, h);   // v0.30.1615 green, rising, slow
       } else {
@@ -145646,6 +145725,7 @@ function updateMapEvents(dt) {
     if (game._lavaEruptCD == null) {
       // Seed initial delay so the player isn't blasted on map entry
       game._lavaEruptCD = cfg.minDelayMs;
+      if (cfg.art && LX_HZ_ART[cfg.art]) { _lxPlayerProjReady(LX_HZ_ART[cfg.art]); if (cfg.art === 'bonechunk') _lxPlayerProjReady(LX_HZ_ART.ribbone); if (cfg.art !== 'ember') _lxPlayerProjReady(LX_HZ_ART.marker); }   //v0.30.1866 hazard-themed-art - ask for the lazy art on map entry
     }
     game._lavaEruptCD -= dt;
     if (game._lavaEruptCD <= 0) {
@@ -145682,6 +145762,7 @@ function updateMapEvents(dt) {
         damage: cfg.damage || 60,
         color: cfg.color || '#ff7733',                            // v0.25.841 — themable
         _sourceLabel: cfg.label || 'a lava eruption',             // v0.25.841 — themable
+        _art: (cfg.art && cfg.art !== 'marker' && LX_HZ_ART[cfg.art]) ? cfg.art : undefined,   // v0.30.1866 hazard-themed-art - the sprite it falls as (none = the red meteor)
       });
       // Roll next cooldown between min and max delay
       game._lavaEruptCD = (cfg.minDelayMs || 6500) +
@@ -176245,7 +176326,8 @@ function drawHazards(_behindPass) {
       // v0.29.x — blue (Gravitos) meteors NEVER fall back to the red sprite:
       // if the blue rune hasn't decoded yet, use the procedural draw below
       // (which paints blue when _gravBlue) instead of flashing the red marker.
-      const _markerSprite = h._gravBlue
+      const _markerSprite = (h._art && h._art !== 'ember' && LX_HZ_ART.marker) ? LX_HZ_ART.marker   // v0.30.1866 hazard-themed-art - the bone rune (same size, place and pulse)
+        : h._gravBlue
         ? (LX_FX && LX_FX.meteor_marker_blue)
         : (h.owner !== 'enemy' && LX_FX && LX_FX.meteor_marker_player) ? LX_FX.meteor_marker_player   // v0.30.1777 player-meteor - the player's own landing rune
         : (LX_FX && LX_FX.meteor_marker);
@@ -176295,6 +176377,7 @@ function drawHazards(_behindPass) {
         continue;
       }
       if (h._markerOnly || h._aquaFlood) continue;   // v0.26.1029 — Aqua flood draws only its ground rune, not a falling meteor
+      if (h._art && _lxHzArtDraw(h, sx, _camY)) continue;   // v0.30.1866 hazard-themed-art - a themed ceiling hazard falls as its own sprite
       // v0.25.209 — Sprite-based meteor replaces the procedural circle
       // stack. Used by the mage's Meteor (job F) and Sage's Meteor Shower
       // (master G) — both push 'meteor_warn' hazards. Falls back to the
