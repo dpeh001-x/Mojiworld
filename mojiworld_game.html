@@ -16483,7 +16483,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1868';
+const GAME_VERSION = 'v0.30.1869';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52928,6 +52928,16 @@ function _lxZodMeteorLoss(mul, sign) { return _lxZodHitCap(_lxZodRollLoss(sign, 
 // v0.30.1853 zodiac-damage-cap - the direct hits a co-op peer receives as bosshit (sl, cut to 24) that run the cap
 const LX_ZODIAC_CAP_SL = ["Sagittarius's Point-Blank Volley", "Sagittarius's Marked Shot", "Pisces's Tidal Crush", "Aquarius's Conductive Pool"].map((t) => t.slice(0, 24));
 function _lxZodCapLabel(sl) { return LX_ZODIAC_CAP_SL.indexOf(String(sl || '').slice(0, 24)) >= 0; }   // v0.30.1853 zodiac-damage-cap
+// v0.30.1869 zodiac-melee-cap - THE SIGNATURE SWING IS CAPPED TOO (per user: "cap them to 45%"). Aries, Capricorn and Pisces's heavy swing lands
+// through the boss heavy band (a share of the level bar, not of the hero's pool): 36-47% of a geared Lv 70 hero's max HP on every
+// tier. It now takes at most 45% of max HP, flat on every tier (a lighter swing is unchanged, never trimmed to Story's 30%), and it
+// counts toward the 1.2 s window, so a shot on top shares the tier's cap. The window never trims the swing itself.
+const LX_ZODIAC_SWING_CAP = 0.45;
+function _lxZodSwingCap(v) {   // v0.30.1869 zodiac-melee-cap - one signature swing: at most 45% of max HP; it counts toward the window
+  if (!(v > 0) || typeof player === 'undefined' || !player) return v;
+  const mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
+  v = Math.min(v, Math.max(1, Math.floor(mh * LX_ZODIAC_SWING_CAP))); _lxZodHitNote(v); return v;
+}
 function _lxLeoHitCap(v) {   // v0.30.1850 regulus-damage
   if (!(v > 0) || typeof player === 'undefined' || !player) return v;
   return _lxZodHitCap(v);   // v0.30.1853 zodiac-damage-cap - the shared table and window
@@ -62387,6 +62397,7 @@ const _COOP_HZ_XF = ['stun', 'colorTele', 'poison', 'maxRadius', 'bolt', 'tele',
   'atk', '_bhAwakened', '_bhCoreRadius', '_bhPullRadius', '_gravBand', 'footY'];
 _COOP_HZ_XF.push('floorPct'); _COOP_PJ_XF.push('_lxFloorPct', '_hitFloor');   // v0.30.1738 legosaurus-buff - a guest's copy of his quake / swing / column keeps its floor; v0.30.1796 _hitFloor: and of Aetherion's feather / scale / halo keeps its own
 _COOP_HZ_XF.push('_vfx');   // v0.30.1736 bughunt7: Mira's falling sand wore the Sovereign's pillar art on a guest
+_COOP_PJ_XF.push('_lxZodSwing');   // v0.30.1869 zodiac-melee-cap - a guest's copy of a zodiac swing runs the same 45% cap on its own bar
 // Detonations: a guest mirror lags the host, so the frame that drops a hazard the host just resolved can arrive before
 // the guest's copy counts down to its own resolve - and the guest walked out of a one-shot. The hazard loop stamps each
 // synced hazard that runs out; its uid rides the frames for 400 ms and the guest resolves its copy at once.
@@ -103284,6 +103295,7 @@ function updateMonsters(dt) {
               _sourceLabel: m.name || 'Heavy Swing',
             _zoneAttack: (typeof _lxZoneWorthy === 'function') && _lxZoneWorthy(m, (bm.dmgMul || 1.5)),   // v0.29.x — punishment follows the DRAWN zone; unmarked stays baseline
               _swingType: m.type,   // v0.29.812 — picks that monster's own swing art in the draw branch
+              _lxZodSwing: m.zodiacSign || (m.zodiacBoss ? 'zodiac' : null),   // v0.30.1869 zodiac-melee-cap - a zodiac signature swing: capped at 45% of max HP where it lands
               _sgM: { dx: m.x - _sx, dy: m.y - _lxSwingBandY(m, _sh), w: m.w, h: m.h }, _sgF: _facing, _sgL0: 14, _sgBoss: !!(m.isBoss || m.boss || m.zodiacBoss),   // v0.30.1460 swing-redesign - the path starts at the swinger
               // v0.30.x - per-trait impact (opt-in; only types that declare it
               // pay the stop, so the other 28 swingers are untouched)
@@ -118792,6 +118804,7 @@ function updateProjectiles(dt) {
           if (_projLost < _capFloor) _projLost = _capFloor;
         }
         if (p._zodiacSign && _projLost > 0 && !player._god) _projLost = _lxZodHitCap(_projLost);   // v0.30.1853 zodiac-damage-cap - one zodiac shot takes at most LX_ZODIAC_HIT_CAP of max HP, nor stacks past it in 1.2 s
+        if (p._lxZodSwing && _projLost > 0 && !player._god) _projLost = _lxZodSwingCap(_projLost);   // v0.30.1869 zodiac-melee-cap - at most 45% of max HP on every tier; counts toward the window
         if (p._zodiacSign === 'aquarius' && !player._god && _projLost > 0) {   // bughunt sibling-3 - a shot that took nothing (a paused player's zeroed hit, a negate) seals nothing, like its siblings above
           // "if touched by some projectiles, players are unable to use
           // potions for 45 seconds". game.time is the 60Hz sim counter, the
