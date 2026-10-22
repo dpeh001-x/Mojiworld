@@ -2,7 +2,8 @@
 // behind all this and could not get along, so each leads a faction to no avail; an independent hero (Mira, never named) came closest to the secrets, was cursed and
 // distorted and lost part of her memory; the blade a smith forged for her was meant to cut the unbreakable curse. And the creator's secret is never told, only hinted.
 //   1. each captain's order page has 'Did the four ever stand together?' answered in their own voice (<= 60 words), and the woman at the gate went on alone;
-//   2. Will's 'Barnaby's work?' no longer claims the Bastion's blades are Barnaby's (they are hers, and none has broken): she asked him for the one that would;
+//   2. Will's 'Barnaby's work?' no longer claims the Bastion's blades are Barnaby's (they are hers, and none has broken): she asked him for the one that would
+//      (one spine, v0.30.1851: it opens once the Distorted Portal is done, the Order Book being retired);
 //   3. her boss card and dossier carry the curse-cutting blade she cannot remember the reason for;
 //   4. no new line names Mira, the creator, a playground or anything like it; 5. no page errors.
 //   node scripts/captains_past_test.mjs     MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
@@ -42,9 +43,9 @@ try {
     out.hera = await ask('azureAbode', 'Hera', /What was the Academia\?/, TH);
     out.hong = await ask('emeraldVillage', 'Lady Hong', /What guards the grove\?/, TG);
     out.taiga = await ask('shadowWovenHood', 'Taiga', /Who do you fight\?/, TT);
-    player.quests.completed = {}; player.quests.active = Object.assign({}, player.quests.active || {}, { q_barnaby_roll: { progress: 0, targetCount: 1 } });
+    player.quests.completed = { q_distorted_portal: true };   // one spine: Will's "Barnaby's work?" waits on the Portal (the Order Book is retired)
     out.work = await ask('bastionThrone', 'Will', /Who fights beside you\?/, /Barnaby's work\?/);
-    delete player.quests.active.q_barnaby_roll;
+    player.quests.completed = {};
     out.lore = (typeof BOSS_INTROS === 'object' && BOSS_INTROS.miraFallen) ? BOSS_INTROS.miraFallen.lore : '';
     out.w = { will: words(out.will.t), hera: words(out.hera.t), hong: words(out.hong.t), taiga: words(out.taiga.t), work: words(out.work.t), lore: words(out.lore) };
     return out;

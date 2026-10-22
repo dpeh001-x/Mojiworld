@@ -42,7 +42,8 @@ try {
     const zt = STORY_BEATS.zodiac_twelve_done.stanzas[STORY_BEATS.zodiac_twelve_done.stanzas.length - 1].text; out.twelveDone = zt();
     // ---- 3. the critical list ----
     out.crit = Object.keys(QUESTS).filter((k) => QUESTS[k].critical).sort(); out.endingCrit = ENDING.every((k) => QUESTS[k] && QUESTS[k].critical);
-    out.tearOpt = ['q_lyra_kin', 'q_lyra_forge', 'q_lyra_last'].map((k) => !!QUESTS[k].critical);
+    out.tearOpt = ['q_lyra_kin'].map((k) => !!(QUESTS[k] || {}).critical);   // one spine: The Tear V-VI are retired, only IV stays (optional)
+    out.tearRetired = ['q_lyra_forge', 'q_lyra_last'].every((k) => QUESTS[k] === undefined && _LX_RETIRED_QUESTS.includes(k));
     out.autoStarts = ENDING.filter((k) => QUESTS[k].autoStart || (!QUESTS[k].giver && !QUESTS[k].giverByClass));   // none starts itself: each has a giver
     // ---- 4. Gravitos stays unreconciled ----
     const gr = STORY_BEATS.gravitos_reason.stanzas; out.s2 = gr[1].text; out.s3 = gr[2].text; out.s4 = gr[3].text; out.odd = { ledger: STORY_BEATS.dreams_ledger.stanzas[3].text, lore: BOSS_INTROS.gravitos.lore, ledgerWords: words(STORY_BEATS.dreams_ledger.stanzas[3].text) }; out.grWords = gr.map((x) => words(typeof x.text === 'function' ? x.text({ gate_answer: 'home' }) : x.text));
@@ -67,7 +68,7 @@ try {
   ok('2. the twelfth star\'s card points at Arlen\'s page, and the ledger always reads "You answered every one"', /Old Arlen has stopped sorting his maps/.test(R.twelveDone) && /You answered every one/.test(R.ledgerEnd), R.twelveDone.slice(0, 80));
   ok('1. Pisces is not sealed: no star\'s door waits on the others (nothing gates a sign on a count)', !has('stars at rest before') && !has('the last door will not open'));
   ok('3. all sixteen quests the ending leans on are critical (the Road x7, canary, kindest hand, Dreams x3, the Tear\'s first four): 27 in all', R.endingCrit && R.crit.length === 27, R.crit.length);
-  ok('3. the Tear\'s last three stay optional, and none of the sixteen starts itself (each has a giver)', R.tearOpt.every((b) => b === false) && R.autoStarts.length === 0, [R.tearOpt, R.autoStarts]);
+  ok('3. q_lyra_kin stays optional, The Tear V-VI are retired (one spine), and none of the sixteen starts itself (each has a giver)', R.tearOpt.every((b) => b === false) && R.tearRetired && R.autoStarts.length === 0, [R.tearOpt, R.tearRetired, R.autoStarts]);   // one spine
   ok('4. Gravitos does not take the reason: he cannot answer the world, will not agree, will not call it a mistake', /I cannot answer it\. I will not agree with it\./.test(R.s2) && /I will not call it a mistake\./.test(R.s3) && /not learn it from you/.test(R.s4) && R.grWords.every((n) => n <= 60), R.grWords);
   ok('4. Gravitos is the odd one: a thirteenth line in Arlen\'s ledger, his own reason says it, his Codex card says it; twelve asked for a dream, he asked to be still', /thirteenth line in the ledger, in a heavier hand\. The odd one\. Not a dream: a wish to be still\./.test(R.odd.ledger) && R.odd.ledgerWords <= 70 && /I am the odd one\./.test(R.s3) && /I asked to be still/.test(R.s3) && /odd one among the stars/.test(R.odd.lore), R.odd.ledgerWords);
   ok('4. the ending\'s own text says never in peace, and no longer says relief', /never in peace/.test(R.epi) && /He would not take it\./.test(src.slice(src.indexOf('never in peace'), src.indexOf('never in peace') + 400)) && !/in relief/.test(R.epi), R.epi.slice(0, 60));

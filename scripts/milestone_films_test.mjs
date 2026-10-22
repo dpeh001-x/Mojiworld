@@ -3,9 +3,10 @@
 //   1. the title: the key art's sky plays as a loop over the 4K still - never asked for before the title menu is up, then
 //      playing muted and looping inside .lo-bg, on the art's own coordinates (re-placed on resize), masked across the hills,
 //      and torn down when the overlay leaves; reduced motion never loads it;
-//   2. the job advancement, the first zodiac kill and the master advancement each play their film with its soundtrack
+//   2. the job advancement and the first zodiac kill each play their film with its soundtrack (one spine, per user: the master
+//      advancement plays none - young Barnaby's fall, just before it, is the Portal's one film)
 //      (unmuted, audio decoding) while the scene's score (the theme the film ends on) waits silent;
-//   3. each film is warmed while the player is busy (job pick, mastery pick, the sign's last words);
+//   3. each film is warmed while the player is busy (job pick, the sign's last words); the mastery pick warms nothing;
 //   4. the films, their SPEC records and the title loop are on disk, and the films are packed for the Steam build.
 // The build before fails 1-4.   node scripts/milestone_films_test.mjs     MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -20,8 +21,7 @@ const EXE = ['C:/Program Files/Google/Chrome/Application/chrome.exe'].find((p) =
 const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--mute-audio', '--autoplay-policy=no-user-gesture-required'] });
 const errs = [];
 const CINE = 'steam/higgsfield/cinematics/';
-const FILMS = [['advancement_1_done', 'clip_mirror_breaks', 'bgm_interdimensional_ascension.mp3'], ['first_zodiac_kill', 'clip_three_notes', 'bgm_zodiac_sanctum.mp3'],
-  ['advancement_2_done', 'clip_distortion_closes', 'The Singularity.mp3']];
+const FILMS = [['advancement_1_done', 'clip_mirror_breaks', 'bgm_interdimensional_ascension.mp3'], ['first_zodiac_kill', 'clip_three_notes', 'bgm_zodiac_sanctum.mp3']];   // one spine: advancement_2_done's film retired (per user: Barnaby Fall only)
 const boot = async (ctx) => {
   const page = await ctx.newPage(); page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 140)));
   const reqs = []; page.on('request', (r) => { if (/title_sky_loop/.test(r.url())) reqs.push(Date.now()); });
@@ -88,7 +88,7 @@ try {
     const job = Object.keys(JOBS).find((j) => JOBS[j] && (JOBS[j].cls === player.cls || JOBS[j].base === player.cls || JOBS[j].class === player.cls)) || Object.keys(JOBS)[0];
     player.job = job;
     try { openMasterAdvancement(); } catch (e) { out.masterErr = String(e.message); }
-    out.warmMaster = W('advancement_2_done');
+    out.warmMaster = W('advancement_2_done'); out.masterClip = STORY_BEAT_CLIPS.advancement_2_done || null; out.fall = typeof LX_BARNABY_FALL === 'string' ? LX_BARNABY_FALL : null;
     try { closeAllModals(); } catch (e) {} if (am) am.style.display = 'none';
     return out;
   }, FILMS);
@@ -97,7 +97,8 @@ try {
     ok(`2. ${beat}: plays ${clip} with its soundtrack while the score (${score}) waits silent`, r.clip === clip + '.mp4' && r.src === clip + '.mp4' && r.w === 1280 && r.h === 720
       && r.muted === false && r.bytes > 0 && r.scoreSilent && r.score === score && r.closed, J(r));
   }
-  ok('3. the job and mastery films are warmed while the player chooses', F.warmJob === true && F.warmMaster === true, J({ job: F.warmJob, master: F.warmMaster, e: [F.advErr, F.masterErr] }));
+  ok('3. the job film is warmed while the player chooses', F.warmJob === true, J({ job: F.warmJob, e: [F.advErr] }));
+  ok('2. the master advancement plays no film of its own: young Barnaby\'s fall is the Portal\'s one film (one spine, per user)', F.masterClip === null && F.warmMaster === false && /clip_barnaby_fall/.test(F.fall || ''), J({ clip: F.masterClip, warm: F.warmMaster, fall: F.fall, e: F.masterErr }));
   const html = readFileSync(path.join(SERVE_ROOT, FILE), 'utf8').split(String.fromCharCode(13)).join('');
   ok('3. the first-House film is warmed behind the sign\'s last words', /_sbPreloadClip\('first_zodiac_kill'\);[^\n]*\n\s*setTimeout\(\(\) => \{ _playStoryBeat\('first_zodiac_kill'\); \}, 1800\);/.test(html));
   await ctx.close();

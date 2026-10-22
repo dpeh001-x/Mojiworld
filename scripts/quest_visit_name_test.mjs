@@ -33,15 +33,16 @@ try {
     _ensureQuests();
     const out = { crit: !!(QUESTS.q_visit_lavaCavern && QUESTS.q_visit_lavaCavern.critical), giver: QUESTS.q_visit_lavaCavern && QUESTS.q_visit_lavaCavern.giver };
     player.quests.active.q_visit_lavaCavern = { progress: 0, objProgress: [0, 0, 0] };
-    player.quests.active.q_barnaby_roll = { progress: 0 };
+    QUESTS.q_lx_visit_probe = { name: 'Visit Probe', kind: 'visit', target: 'sundered_forge', count: 1, levelReq: 1, desc: 'probe' };   // one spine: Barnaby II (the last visit-a-map quest) is retired; a stand-in drives the same row
+    player.quests.active.q_lx_visit_probe = { progress: 0 };
     try { abandonQuest('q_visit_lavaCavern', true); } catch (e) {}
     out.stillActive = !!player.quests.active.q_visit_lavaCavern;
     if (!out.stillActive) player.quests.active.q_visit_lavaCavern = { progress: 0, objProgress: [0, 0, 0] };
     const txt = (html) => { const d = document.createElement('div'); d.innerHTML = html || ''; return d.textContent.replace(/\s+/g, ' ').trim(); };
-    out.row = txt(_qnavRowHtml('q_barnaby_roll', false));
-    const dest = _qnavDest('q_barnaby_roll');
+    out.row = txt(_qnavRowHtml('q_lx_visit_probe', false));
+    const dest = _qnavDest('q_lx_visit_probe');
     out.label = _qnavLabel(dest);
-    game.qnav = 'q_barnaby_roll'; game.paused = false;
+    game.qnav = 'q_lx_visit_probe'; game.paused = false;
     try { closeAllModals(); } catch (e) {}
     const _mu = window._qnavModalUp; window._qnavModalUp = () => false;   // the fresh page's tour counts as an open panel; the key is drawn over the world
     game.paused = false;   // closing the panels can leave the world paused; the key hides then
@@ -51,7 +52,7 @@ try {
     return out;
   });
   ok('[1] Recover the Forge-Key is critical, Brok still gives it, and abandoning it is refused', R.crit && R.giver === 'Brok' && R.stillActive, { crit: R.crit, giver: R.giver, stillActive: R.stillActive });
-  ok('[2] the Order Book\'s row: "Go to" The Sundered Forge, never the id', /Go to/.test(R.row) && /The Sundered Forge/.test(R.row) && !/sundered_forge/.test(R.row), R.row);
+  ok('[2] a visit quest\'s row: "Go to" The Sundered Forge, never the id', /Go to/.test(R.row) && /The Sundered Forge/.test(R.row) && !/sundered_forge/.test(R.row), R.row);
   ok('[3] its destination label is the map\'s name', R.label === 'The Sundered Forge', R.label);
   ok('[4] the compass key names the map', R.key === 'The Sundered Forge', { key: R.key, err: R.keyErr });
   ok('[5] a hunt row still names the creature and its map', /Emberling/.test(R.hunt) && /Lava Cavern/.test(R.hunt), R.hunt);

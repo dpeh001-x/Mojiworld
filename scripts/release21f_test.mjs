@@ -8,7 +8,7 @@
 //   [1c] (per user) the Bubblegum Swamp axolotl is Lv 20 (game table + data/monster_stats.js), so the Lv 21 / 22 class rungs fit their road
 //   [2] III · Ledger of the Unfinished: Lv 49 (Oakhart's Verdant Haven is behind Verdant Hollow, Lv 51); it unlocks at 49 with II
 //       done, not at 48; the story chain holds it after The Forge That Broke and before The Last Step, in level order
-//   [3] Next (the compass): a Lv 41 hero past the Distorted Portal is pointed at Barnaby, not the Ledger; with the Smith done, at
+//   [3] Next (the compass): a Lv 41 hero past the Distorted Portal is pointed at The Forge That Broke (one spine: Barnaby I-IV retired), not the Ledger; with the Smith done, at
 //       the Ledger; the Ledger done, at the Last Step
 //   node release21f_test.mjs        PORT / MOJI_GAME_FILE / SERVE_ROOT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -115,8 +115,8 @@ try {
   ok('[2a] III · Ledger of the Unfinished is Lv 46+ (its road, Verdant Hollow, is Lv 51) and still follows II', L.lv >= 46 && L.prereq === 'q_carried_2', { lv: L.lv, prereq: L.prereq });
   ok('[2b] with II done it unlocks at its level, not a level before', L.unl49 && !L.unl48, { 48: L.unl48, 49: L.unl49 });
   ok('[2c] the story chain holds it after The Forge That Broke and before The Last Step, in level order', L.idx.two < L.idx.portal && L.idx.smith < L.idx.three && L.idx.three < L.idx.last && L.beforeHasSmith && L.outOfOrder.length === 0, L);
-  ok('[3] Next: past the Portal it is Barnaby (not the Ledger); past the Smith it is the Ledger; past the Ledger it is the Last Step',
-    L.next41 === 'q_barnaby_five' && L.next46 === 'q_carried_3' && L.next50 === 'q_last_step', { next41: L.next41, next46: L.next46, next50: L.next50 });
+  ok('[3] Next: past the Portal it is The Forge That Broke (not the Ledger); past the Smith it is the Ledger; past the Ledger it is the Last Step',
+    L.next41 === 'q_boss_sundered_smith' &&   /* one spine: was q_barnaby_five */ L.next46 === 'q_carried_3' && L.next50 === 'q_last_step', { next41: L.next41, next46: L.next46, next50: L.next50 });
   ok('[4] no page errors', errs.length === 0, errs.slice(0, 3));
 } finally { await browser.close(); server.kill(); }
 console.log(`\n${pass} pass, ${fail} fail`);

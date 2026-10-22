@@ -1,7 +1,7 @@
 // STORY COHESION (per user: "ensure that the NPC dialogues and the quests and the codex and this storyline is well cohesive without any conflicts and written beautifully,
 // succinctly, easily understandable"). Six readers audited the quests, the Codex, the story beats, the boss text and the NPC dialogue against one canon sheet; every conflict
 // they found and I verified is pinned here so it cannot drift back: the facts that disagreed (the glass stair that SHATTERS, a silent gate answer, five fragments not "every" one,
-// the Vigil road, the Amnesiac walking DOWN, eight PROMISES, the Woman Who Turned Back being a COPY) and the lines that were unclear.
+// the Vigil road, the Amnesiac walking DOWN, eight PROMISES, the Woman Who Turned Back being a COPY - on the Last Step card since one spine retired Tear VI) and the lines that were unclear.
 //   [SERVE_ROOT=<dir with serve.js, data, art>] [PORT=n] node scripts/story_cohesion_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import { existsSync, readFileSync } from 'node:fs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -40,7 +40,7 @@ try {
     const out = {}; const D = (id) => String((QUESTS[id] || {}).desc || '');
     out.beat = JSON.stringify(STORY_BEATS.arrival_sky_beyond); out.epi = EVERDAWN_EPITAPHS; out.voice = LX_BOSS_VOICE; out.intro = BOSS_INTROS;
     out.sig = { arbiter: monsterTypes.towerArbiter.signature, mira: monsterTypes.miraFallen.signature, harea: monsterTypes.harea.signature };
-    out.q = { grav: D('q_boss_gravitos'), hg5: D('q_hourglass_5'), dawn2: D('q_long_dawn_2'), lyra: D('q_lyra_last'), mooma: D('q_boss_mooma'), road5: D('q_road_5'), cut: D('q_lyra_cut'), tear: D('q_lyra_tear'), inner: D('q_inner_dim_trial'), under: D('q_clockwork_underpass'), fox: D('q_kill_nimbusFox'), bath: D('q_visit_bathhouse'), glass: D('q_visit_glasswind'), lava: D('q_visit_lavaCavern'), hg3: D('q_hourglass_3'), king: D('q_boss_king') };
+    out.q = { grav: D('q_boss_gravitos'), hg5: D('q_hourglass_5'), dawn2: D('q_long_dawn_2'), lyra: D('q_last_step'), retired: ['q_lyra_last'].filter((k) => k in QUESTS),   /* one spine: Tear VI retired, the copy wording is on the Last Step */ mooma: D('q_boss_mooma'), road5: D('q_road_5'), cut: D('q_lyra_cut'), tear: D('q_lyra_tear'), inner: D('q_inner_dim_trial'), under: D('q_clockwork_underpass'), fox: D('q_kill_nimbusFox'), bath: D('q_visit_bathhouse'), glass: D('q_visit_glasswind'), lava: D('q_visit_lavaCavern'), hg3: D('q_hourglass_3'), king: D('q_boss_king') };
     out.frag = { n: Object.keys(DAWN_FRAGMENTS).length, names: Object.values(DAWN_FRAGMENTS).map((f) => f.name) };
     out.acts = EVERDAWN_ACTS.map((a) => a.blurb).join(' | '); out.kaze = MONSTER_BESTIARY.aetherion.flavor;
     const body = document.getElementById('lore-body'); _renderLoreTab('world'); out.world = body.innerText;
@@ -49,7 +49,7 @@ try {
   });
   const Q = R.q, E = R.epi, V = R.voice, I = R.intro;
   check(/stair shatters/.test(E.miraFallen) && !/closes/.test(E.miraFallen) && /does not turn back/.test(E.miraFallen), 'the Woman Who Turned Back: the glass stair SHATTERS when she falls (the film shows it), and she does not turn back', E.miraFallen);
-  check(/copied it, and gave the copy wings/.test(I.miraFallen.lore) && /copied it, and gave the copy wings/.test(R.sig.mira) && /distorted copy of the first to turn back/.test(Q.lyra), 'she is a COPY kept by the cold, in her card, her signature and the Lyra VI quest alike', I.miraFallen.lore.slice(-90));
+  check(/copied it, and gave the copy wings/.test(I.miraFallen.lore) && /copied it, and gave the copy wings/.test(R.sig.mira) && /distorted copy of the first who turned back/.test(Q.lyra) && /The cold kept her at the moment she turned/.test(Q.lyra) && Q.retired.length === 0, 'she is a COPY kept by the cold, in her card, her signature and the Last Step quest alike (one spine: Tear VI retired)', I.miraFallen.lore.slice(-90));
   check(/carried to the gate/.test(R.beat) && !/named at the gate/.test(R.beat), "the arrival beat holds for a player who said nothing at the gate (\"the reason you carried\")", R.beat.slice(0, 120));
   check(/right back/.test(V.legosaurus) && /I.ll be right back/.test(I.legosaurus.lore), "Legosaurus's voice quotes the same promise as its card: \"right back\"", V.legosaurus);
   check(/eight promises/.test(V.octobaby) && /eight promises/.test(E.octobaby) && /eight promises to return/.test(I.octobaby.lore) && !/^[^]*eight wishes/.test(JSON.stringify([V.octobaby, E.octobaby, I.octobaby])), "Octobaby keeps eight PROMISES in its card, voice and epitaph, and speaks in the first person", V.octobaby);

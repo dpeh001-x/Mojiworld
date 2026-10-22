@@ -1,7 +1,8 @@
 // THE CAPTAINS IN THE STORY (v0.30.1554, per user: "add in more depth of the storyline especially during the quests, on all the
 // classes captains (hera, taiga, lady hong, will) make more mentions of them and how notable they are in terms of presence,
 // achievement, aura" + "For lyra put her in some roles as well").
-//   1. twelve quest descriptions carry their captain line (or Lyra's), inside the per-quest word caps
+//   1. eleven quest descriptions carry their captain line (or Lyra's), inside the per-quest word caps (one spine, v0.30.1851: the
+//      Order Book is retired, so eleven not twelve, and Will's "Barnaby's work?" waits on the Distorted Portal)
 //   2. each captain answers for the quest that passed through them, on the order's page - and only once it has (state-gated)
 //   3. each captain's neighbour says what that captain has done (Elena / Auron / Yun / Ren)
 //   4. Lyra's "What are you working on?" moves with her arc (before / after chapter II / after chapter IV)
@@ -29,7 +30,7 @@ const QLINES = {
   q_distorted_portal: "Taiga's Hood has not let it out of sight since.",
   q_lyra_cut: 'Hers is the one signature the circle never checks.',
   q_lyra_kin: 'Taiga, Lady Hong and Will stood in its mouth so it could take no one else',
-  q_barnaby_roll: "Will's white blade",
+  // one spine: q_barnaby_roll (the Order Book, "Will's white blade") is retired with Barnaby I-IV
   q_canary_quiet: 'Lyra copied every reading into her own book.',
   q_kill_nimbusFox: 'Lyra keeps the tally, mostly correctly.',
   q_visit_glasswind: 'Lyra saw it first, and Hera believed her.',
@@ -54,15 +55,15 @@ try {
     await sleep(2500); const vi = document.getElementById('void-intro-overlay'); if (vi) vi.classList.remove('show');
     // ---- 1. quest prose
     out.q = Object.fromEntries(Object.entries(QLINES).map(([id, line]) => { const d = (QUESTS[id] && (QUESTS[id]._lxDesc0 != null ? QUESTS[id]._lxDesc0 : QUESTS[id].desc)) || '';
-      return [id, { has: d.includes(line), w: wc(d), cap: /^q_(barnaby|lyra)_/.test(id) ? 190 : /^q_(distorted_portal|boss_sundered_smith|last_step|boss_aetherion|long_dawn_2|kindest_hand|four_captains)$/.test(id) ? 170 : 120 }]; }));
+      return [id, { has: d.includes(line), w: wc(d), cap: /^q_(barnaby|lyra)_/.test(id) ? 190 : /^q_(boss_sundered_smith|last_step)$/.test(id) ? 230 : /^q_(distorted_portal|boss_aetherion|long_dawn_2|kindest_hand|four_captains)$/.test(id) ? 170 : 120 }]; }));   // one spine: the Smith and the Last Step carry the folded chapters (230)
     // ---- dialog helpers
     const text = () => (document.getElementById('dialog-text') || {}).textContent || '';
     const opts = () => [...document.querySelectorAll('#dialog-options button')].map((b) => (b.textContent || '').trim());
     const settle = async () => { const d = document.getElementById('dialog'); for (let i = 0; i < 200 && d.classList.contains('typing'); i++) await sleep(50); await sleep(100); };
     const click = async (lab) => { const b = [...document.querySelectorAll('#dialog-options button')].find((x) => (x.textContent || '').trim() === lab); if (b) { b.click(); await sleep(250); await settle(); } return b ? text() : null; };
     _ensureQuests();
-    const setDone = (ids) => { player.quests.completed = player.quests.completed || {}; for (const id of ['q_lyra_tear', 'q_lyra_kin', 'q_barnaby_roll']) delete player.quests.completed[id];
-      if (player.quests.active) delete player.quests.active.q_barnaby_roll; for (const id of ids) player.quests.completed[id] = true; };
+    const setDone = (ids) => { player.quests.completed = player.quests.completed || {}; for (const id of ['q_lyra_tear', 'q_lyra_kin', 'q_distorted_portal']) delete player.quests.completed[id];   // one spine: the Portal gates Will's "Barnaby's work?"
+      for (const id of ids) player.quests.completed[id] = true; };
     const talk = async (map, name, label, page) => { loadMap(map, 300); await sleep(900); game.paused = false; const n = (game.mapData.npcs || []).find((x) => x.name === name);
       if (!n) return { err: 'no ' + name + ' on ' + map };
       openNPC(n); await sleep(300); await settle(); if (page) await click(page); const menu = opts(); const said = label ? await click(label) : null;
@@ -71,12 +72,12 @@ try {
     const PAGE = { Taiga: 'Who do you fight?', Will: 'Who fights beside you?', Hera: 'What was the Academia?', 'Lady Hong': 'What guards the grove?' };
     const CAP = [['shadowWovenHood', 'Taiga', 'A tiger wore your hood.', 'q_lyra_kin'], ['bastionThrone', 'Will', 'I met a lion with your sword.', 'q_lyra_kin'],
       ['azureAbode', 'Hera', 'I met the hare at the tear.', 'q_lyra_tear'], ['emeraldVillage', 'Lady Hong', 'A goose carried your bow.', 'q_lyra_kin'],
-      ['bastionThrone', 'Will', "Barnaby's work?", 'q_barnaby_roll']];
+      ['bastionThrone', 'Will', "Barnaby's work?", 'q_distorted_portal']];   // one spine: was the Order Book (q_barnaby_roll, retired)
     out.cap = [];
     for (const [map, name, label, q] of CAP) {
       setDone([]); const before = await talk(map, name, null, PAGE[name]);
       setDone([q]); const after = await talk(map, name, label, PAGE[name]);
-      let active = null; if (q === 'q_barnaby_roll') { setDone([]); player.quests.active.q_barnaby_roll = { progress: 0, targetCount: 1 }; active = await talk(map, name, null, PAGE[name]); }
+      const active = null;   // one spine: the "while the roll call is active" leg went with q_barnaby_roll
       out.cap.push({ name, label, before: before.menu ? before.menu.includes(label) : before.err, after: after.menu ? after.menu.includes(label) : after.err, said: after.said, w: wc(after.said),
         active: active ? active.menu.includes(label) : null });
     }
@@ -97,7 +98,7 @@ try {
     // ---- 6. the crowded captain card: every gated option showing, the Distorted Portal on offer, two quests on offer
     out.fit = {};
     for (const [cls, map, name] of [['warrior', 'bastionThrone', 'Will'], ['mage', 'azureAbode', 'Hera'], ['archer', 'emeraldVillage', 'Lady Hong'], ['rogue', 'shadowWovenHood', 'Taiga']]) {
-      applyClass(cls); player.level = 50; player.job = player.job || 'x'; setDone(['q_lyra_tear', 'q_lyra_kin']); player.quests.active.q_barnaby_roll = { progress: 0, targetCount: 1 };
+      applyClass(cls); player.level = 50; player.job = player.job || 'x'; setDone(['q_lyra_tear', 'q_lyra_kin']);   // one spine: no retired roll call put active
       delete player.quests.completed.q_distorted_portal; delete player.quests.active.q_distorted_portal;
       loadMap(map, 300); await sleep(900); game.paused = false; const n = (game.mapData.npcs || []).find((x) => x.name === name);
       const keep = JSON.stringify(player.quests.active || {});
@@ -107,7 +108,7 @@ try {
       const card = document.getElementById('dialog').getBoundingClientRect(), wrap = document.querySelector('.game-wrapper').getBoundingClientRect();
       const btns = [...document.querySelectorAll('#dialog-options button')].map((b) => b.getBoundingClientRect());
       out.fit[name] = { main, n: btns.length, top: Math.round(card.top - wrap.top), bottom: Math.round(wrap.bottom - card.bottom), lastBtn: btns.length ? Math.round(wrap.bottom - btns[btns.length - 1].bottom) : null, menu: opts() };
-      try { closeDialog(); } catch (e) {} player.quests.active = JSON.parse(keep); delete player.quests.active.q_barnaby_roll; await sleep(150); game.paused = false;
+      try { closeDialog(); } catch (e) {} player.quests.active = JSON.parse(keep); await sleep(150); game.paused = false;
     }
     return out;
   }, QLINES);

@@ -35,17 +35,17 @@ try {
     const study = (t) => Object.values(QUESTS).find((q) => q && q.bestiary && q.target === t);
     const namesAMap = (t) => { const q = study(t); if (!q) return null; return names(t).some((n) => q.desc.includes(n.split(/ [·(]/)[0]) || (n.includes('Crypt') && q.desc.includes('Crypt'))); };
     const ret = Object.entries(QUESTS).filter(([id, q]) => q && typeof q.desc === 'string' && !q.giver && /Come back when|Bring me \d/.test(q.desc)).map(([id]) => id);
-    const h1 = QUESTS.q_hourglass_1.desc, b5 = QUESTS.q_barnaby_five;
+    const h1 = QUESTS.q_hourglass_1.desc, b5 = QUESTS.q_visit_lavaCavern;   // one spine: Barnaby I is retired; Brok's own errand is the hand-in that comes back to him
     return {
       places: { hourglass: /Lava Cavern/.test(h1) && (mob.emberling || []).includes('lavaCavern'), zombie: namesAMap('zombie'), horny: namesAMap('horny'), zombieMaps: names('zombie'), hornyMaps: names('horny') },
       returns: ret.slice(0, 5), returnsN: ret.length,
-      barnaby5: { giver: b5.giver, handIn: !!b5.handIn, backToGiver: /bring (?:me|him) word/.test(b5.desc), sendsAway: /then go and see Barnaby/.test(b5.desc) },
+      barnaby5: { giver: b5.giver, handIn: !!b5.handIn, backToGiver: /Bring the key home/.test(b5.desc), sendsAway: /then go and see Barnaby/.test(b5.desc) },
       stars: { steps: STAR_STEPS.slice(), sig: STAR_SIG_STEPS.slice(), t1: _starCurve(STAR_SIG_STEPS, 10, 1), t10: _starCurve(STAR_SIG_STEPS, 10, 10) },
     };
   });
   check(r.places.hourglass && r.places.zombie && r.places.horny, 'PLACES: Hourglass I and the zombie / horned-mushroom studies name maps those creatures spawn on', J(r.places));
   check(r.returnsN === 0, 'RETURNS: no giverless quest (ladder, Codex study) says come back or bring me N', J(r.returns));
-  check(r.barnaby5.giver === 'Brok' && r.barnaby5.handIn && r.barnaby5.backToGiver && !r.barnaby5.sendsAway, 'RETURNS: Brok\'s first Barnaby chapter sends you back to Brok, its hand-in', J(r.barnaby5));
+  check(r.barnaby5.giver === 'Brok' && r.barnaby5.handIn && r.barnaby5.backToGiver && !r.barnaby5.sendsAway, 'RETURNS: Brok\'s Forge-Key sends you back to Brok, its hand-in (one spine: Barnaby I retired)', J(r.barnaby5));
   const brok = /Every star adds more than the one before: \+(\d+)% to \+(\d+)% to its stats, \+(\d+)% to \+(\d+)% to its main stat/.exec(src);
   const pct = (v) => Math.round((v - 1) * 100), S0 = r.stars.steps, S1 = r.stars.sig;   // v0.30.1589: one step per star
   check(!!brok && +brok[1] === pct(S0[0]) && +brok[2] === pct(S0[S0.length - 1]) && +brok[3] === pct(S1[0]) && +brok[4] === pct(S1[S1.length - 1]), 'FACTS: Brok\'s star numbers are the forge\'s own steps', J({ said: brok && brok.slice(1), code: r.stars }));

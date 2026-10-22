@@ -5,8 +5,8 @@
 //   [3] a co-op guest at Gravitos's last form earns "Conqueror of Mojiworld"
 //   [4] a guest's copies of Arlen's strike / a column / Mira's sand keep their own art (the co-op field lists)
 //   [5] "Run the Ticket Rush again" does not re-lock The Tear 0 (and the Rush's own stage order still holds)
-//   [6] the navigator sends The Order Book to the Sundered Forge and The Tear 0 to Milo; a reached map is progress
-//   [7] the HUD's Next row names an errand in progress, not a level the hero already has
+//   [6] the navigator sends a hand-in visit to its map and The Tear 0 to Milo; a reached map is progress (one spine: a stand-in, The Order Book is retired)
+//   [7] the HUD's Next row names an errand in progress, not a level the hero already has (one spine: the Forge-Key before The Forge That Broke)
 //   [8] Guguma's / the Taxi Uncle's "back to" sets the hero down clear of the doors
 //   [9] a death respawns the hero beside the Void's portal, not on it
 //   [10] the class-select cards say what the code does (warrior DR, the rogue's dash)
@@ -66,22 +66,24 @@ try {
   const nv = await page.evaluate(() => {
     const keep = JSON.parse(JSON.stringify(player.quests));
     try {
-      player.quests.active = { q_barnaby_roll: { progress: 0 }, q_lyra_aperture: { progress: 0 } };
-      const a = _qnavDest('q_barnaby_roll') || {}, b = _qnavDest('q_lyra_aperture') || {};
+      // one spine: The Order Book (the only hand-in visit) is retired; a stand-in with its shape carries the check
+      QUESTS.__bh7_visit = { name: 'Stand-in Order Book', icon: 'X', levelReq: 45, giver: 'Barnaby', handIn: true, kind: 'visit', target: 'sundered_forge', count: 1, rewards: { mojicoins: 100, exp: 10 } };
+      player.quests.active = { __bh7_visit: { progress: 0 }, q_lyra_aperture: { progress: 0 } };
+      const a = _qnavDest('__bh7_visit') || {}, b = _qnavDest('q_lyra_aperture') || {};
       loadMap('sundered_forge'); tickQuestVisit('sundered_forge'); __clear();
-      const ob = player.quests.active.q_barnaby_roll || {};
-      return { orderBook: { who: a.who, map: a.map, verb: a.verb }, tear0: { who: b.who, verb: b.verb }, reached: { progress: ob.progress | 0, ready: !!ob.readyToHandIn } };
-    } finally { player.quests = keep; }
+      const ob = player.quests.active.__bh7_visit || {};
+      return { orderBook: { who: a.who, map: a.map, verb: a.verb }, tear0: { who: b.who, verb: b.verb }, reached: { progress: ob.progress | 0, ready: !!ob.readyToHandIn }, gone: !QUESTS.q_barnaby_roll };
+    } finally { player.quests = keep; delete QUESTS.__bh7_visit; }
   });
-  ok('[6] the navigator sends The Order Book to the Forge and The Tear 0 to Milo; a reached map counts as done', nv.orderBook.map === 'sundered_forge' && nv.tear0.who === 'Milo' && nv.reached.progress >= 1 && nv.reached.ready, nv);
+  ok('[6] the navigator sends a hand-in visit to its map and The Tear 0 to Milo; a reached map counts as done (The Order Book is retired)', nv.gone && nv.orderBook.map === 'sundered_forge' && nv.tear0.who === 'Milo' && nv.reached.progress >= 1 && nv.reached.ready, nv);
   // [7] the HUD's Next row
   const nx = await page.evaluate(async () => {
     loadMap('town'); game.paused = false; await __steps(5); __clear();
     const keep = JSON.parse(JSON.stringify(player.quests)), lv = player.level;
     try {
       player.level = 47;
-      for (const id of _QUEST_STORY_CHAIN) { if (id === 'q_barnaby_five') break; player.quests.completed[id] = 1; delete player.quests.active[id]; }
-      for (const id of ['q_barnaby_five']) { delete player.quests.completed[id]; delete player.quests.active[id]; if (player.quests.unlocked) delete player.quests.unlocked[id]; }
+      for (const id of _QUEST_STORY_CHAIN) { if (id === 'q_boss_sundered_smith') break; /* one spine: was q_barnaby_five */ player.quests.completed[id] = 1; delete player.quests.active[id]; }
+      for (const id of ['q_boss_sundered_smith', 'q_last_step']) {   /* one spine */ delete player.quests.completed[id]; delete player.quests.active[id]; if (player.quests.unlocked) delete player.quests.unlocked[id]; }
       delete player.quests.completed.q_visit_lavaCavern; player.quests.active.q_visit_lavaCavern = { progress: 0 };
       renderQuestTracker();
       const row = [...document.querySelectorAll('.qt-row')].find((r) => /Next:/.test(r.textContent));

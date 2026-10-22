@@ -1,11 +1,12 @@
 // RELEASE 26e (warrior / archer Lv 20-60 mid-story hunter round) stays fixed - real keys (Z, N, Up, arrows, Q, Escape) and clicks:
 //   [1] the Woman Who Turned Back felled at Lv 47 (real Z): her own death lines (not Aetherion's), The Last Step is NOT marked done in
 //       silence; the tracker and the Journal say it is done and completes at Lv 50; at Lv 50 it completes with its reward and its toast
-//   [2] the Smith's ashes: a Smith kill before The Forge That Broke is in hand (Barnaby II's visit) plays no film and leaves it unseen;
-//       The Forge That Broke's kill plays it
+//   [2] the Smith's ashes (one spine: he falls once): a Smith kill before the Portal plays no film; past the Portal his first kill plays it
+//       once, even before The Forge That Broke is in hand (that quest is then credited when it opens, at Lv 45), and never twice;
+//       The Forge That Broke's kill plays it for a fresh hero
 //   [3] every super boss has death lines of its own; none but Aetherion's says "TEARBORN" or that a soul goes free
 //   [4] Lv 42 past the portal, Recover the Forge-Key (critical, Lv 35) not done: the tracker's Next row and the Journal name it (see Brok),
-//       not "Five Stories About a Smith - Lv 45"
+//       not "The Forge That Broke - Lv 45" (one spine: Barnaby I-IV retired)
 //   [5] walking over another class's better weapon: "Looted", no "★ Better" / gold panel; the hero's own class still gets "★ Better"
 //   [6] a quit during Young Barnaby's fall, then Continue: the film plays before the master pick opens, and the pick still follows
 //   [7] (a) N under Will's dais talks to Will (Distorted Portal offer), not Munch; (b) the Mirror Self Trial's start toast after that talk
@@ -130,39 +131,56 @@ try {
       sb.length >= 4 && sb.every(([k, L]) => L === 'own' || (Array.isArray(L) && (k === 'aetherion') === /TEARBORN/.test(L[0]) && (k === 'aetherion' || !/soul goes free/.test(L[1])))), sb);
     await ctx.close();
   }
-  // ---------------- [2] the Smith's ashes wait for The Forge That Broke
+  // ---------------- [2] the Smith's ashes: once the Portal is done, on his first death (one spine: he falls once; was "wait for The Forge That Broke")
   if (on('2')) {
     const { ctx, page } = await boot('warrior');
-    await page.evaluate(() => { window.__H.hero(46, 'q_barnaby_roll', { job: 'berserker', master: 'warlord', done: ['q_visit_lavaCavern'] }); delete player._storyBeatsSeen.mira_ashes;
-      if (game.bossDefeated) delete game.bossDefeated.sundered_forge; });
+    const fresh = () => page.evaluate(() => { delete player._storyBeatsSeen.mira_ashes; if (game.bestiary) { game.bestiary.sundered_smith = 0; delete game.bestiary._boss_sundered_smith; }
+      if (game.bossDefeated) delete game.bossDefeated.sundered_forge; if (game._bossDefeatedAt) delete game._bossDefeatedAt.sundered_forge; });
+    const revive = () => page.evaluate(() => { if (game.bossDefeated) delete game.bossDefeated.sundered_forge; if (game._bossDefeatedAt) delete game._bossDefeatedAt.sundered_forge; });
+    const films = async (n) => { let f = []; for (let i = 0; i < n && !f.length; i++) { await sleep(500); f = await page.evaluate(() => window.__H.films()); } return f; };
+    // (a) before the Portal: no film
+    await page.evaluate(() => { window.__H.hero(46, 'q_distorted_portal', { job: 'berserker', master: 'warlord', done: ['q_visit_lavaCavern'] }); }); await fresh();
     await load(page, 'sundered_forge', 300);
-    const k1 = await killWithZ(page, 'sundered_smith');
-    let f1 = []; for (let i = 0; i < 10 && !f1.length; i++) { await sleep(500); f1 = await page.evaluate(() => window.__H.films()); }
-    const s1 = await page.evaluate(() => ({ seen: !!player._storyBeatsSeen.mira_ashes, smith: !!player.quests.active.q_boss_sundered_smith }));
-    ok('[2] a Smith kill before The Forge That Broke is in hand (Barnaby II\'s visit) plays no ashes film and leaves it unseen', k1 > 0 && !f1.length && !s1.seen && !s1.smith, { swings: k1, films: f1, ...s1 });
+    const k0 = await killWithZ(page, 'sundered_smith'); const f0 = await films(10);
+    const s0 = await page.evaluate(() => ({ seen: !!player._storyBeatsSeen.mira_ashes }));
+    ok('[2] a Smith kill before the Distorted Portal is done plays no ashes film and leaves it unseen', k0 > 0 && !f0.length && !s0.seen, { swings: k0, films: f0, ...s0 });   // one spine
     await settle(page);
-    // Barnaby II-IV done: The Forge That Broke starts itself; the Smith stands again
-    await page.evaluate(() => { for (const id of ['q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish']) { player.quests.completed[id] = Date.now(); delete player.quests.active[id]; }
-      tickQuestUnlocks(); if (game.bossDefeated) delete game.bossDefeated.sundered_forge; if (game._bossDefeatedAt) delete game._bossDefeatedAt.sundered_forge; });
+    // (b) past the Portal, Lv 44 (The Forge That Broke not yet in hand): the film plays once, the quest is credited when it opens, a second kill plays nothing
+    await page.evaluate(() => { window.__H.hero(44, 'q_boss_sundered_smith', { job: 'berserker', master: 'warlord', done: ['q_visit_lavaCavern'] }); }); await fresh();
+    await load(page, 'town', 900); await load(page, 'sundered_forge', 300);
+    const k1 = await killWithZ(page, 'sundered_smith'); const f1 = await films(16);
+    const s1 = await page.evaluate(() => ({ seen: !!player._storyBeatsSeen.mira_ashes, active: !!player.quests.active.q_boss_sundered_smith, done: !!player.quests.completed.q_boss_sundered_smith }));
+    ok('[2] past the Portal, a Smith kill before The Forge That Broke is in hand plays the ashes film (once)', k1 > 0 && f1.includes('kill-film-overlay') && s1.seen && !s1.active && !s1.done, { swings: k1, films: f1, ...s1 });   // one spine: was "plays no film"
+    await settle(page);
+    await page.evaluate(() => { devSetLevel(45); player.expToNext = _lxLevelCost(45); tickQuestUnlocks(); tickQuestUnlocks(); });
+    await load(page, 'town', 900);
+    const cr = await page.evaluate(() => ({ done: !!player.quests.completed.q_boss_sundered_smith, active: !!player.quests.active.q_boss_sundered_smith }));
+    ok('[2] ...and at Lv 45 The Forge That Broke is credited for that kill (no second fight asked)', cr.done && !cr.active, cr);   // one spine
+    await revive(); await load(page, 'sundered_forge', 300);
+    const k2 = await killWithZ(page, 'sundered_smith'); const f2 = await films(10);
+    ok('[2] ...a later Smith kill never plays the ashes film twice', k2 > 0 && !f2.includes('kill-film-overlay'), { swings: k2, films: f2 });   // one spine
+    await settle(page);
+    // (c) a fresh hero with The Forge That Broke active: its kill plays the film and completes it
+    await page.evaluate(() => { window.__H.hero(46, 'q_boss_sundered_smith', { job: 'berserker', master: 'warlord', done: ['q_visit_lavaCavern'] }); }); await fresh();
+    await page.evaluate(() => tickQuestUnlocks());
     await load(page, 'town', 900);
     const act = await page.evaluate(() => !!player.quests.active.q_boss_sundered_smith);
     await load(page, 'sundered_forge', 300);
-    const k2 = await killWithZ(page, 'sundered_smith');
-    let f2 = []; for (let i = 0; i < 16 && !f2.length; i++) { await sleep(500); f2 = await page.evaluate(() => window.__H.films()); }
-    const s2 = await page.evaluate(() => ({ seen: !!player._storyBeatsSeen.mira_ashes, done: !!player.quests.completed.q_boss_sundered_smith }));
-    ok('[2] The Forge That Broke\'s kill plays the ashes film', act && k2 > 0 && f2.includes('kill-film-overlay') && s2.seen && s2.done, { active: act, swings: k2, films: f2, ...s2 });
+    const k3 = await killWithZ(page, 'sundered_smith'); const f3 = await films(16);
+    const s3 = await page.evaluate(() => ({ seen: !!player._storyBeatsSeen.mira_ashes, done: !!player.quests.completed.q_boss_sundered_smith }));
+    ok('[2] The Forge That Broke\'s kill plays the ashes film', act && k3 > 0 && f3.includes('kill-film-overlay') && s3.seen && s3.done, { active: act, swings: k3, films: f3, ...s3 });
     await settle(page);
     await ctx.close();
   }
   // ---------------- [4] a critical prerequisite the hero can do now is named, whatever the beat's level
   if (on('4')) {
     const { ctx, page } = await boot('warrior');
-    await page.evaluate(() => { window.__H.hero(42, 'q_barnaby_five', { job: 'berserker', master: 'warlord' }); tickQuestUnlocks(); });
+    await page.evaluate(() => { window.__H.hero(42, 'q_boss_sundered_smith', { job: 'berserker', master: 'warlord' });   /* one spine: was q_barnaby_five */ tickQuestUnlocks(); });
     await load(page, 'town', 900);
     const st = await page.evaluate(() => ({ unl: !!player.quests.unlocked.q_visit_lavaCavern, act: !!player.quests.active.q_visit_lavaCavern, nb: _nextStoryBeat(), rows: window.__H.rows() }));
     const nb = st.rows.find((r) => /Next/.test(r)) || '';
-    ok('[4] Lv 42, the Forge-Key not done: the tracker\'s Next row names Recover the Forge-Key (see Brok), not "Five Stories ... Lv 45"',
-      st.nb === 'q_barnaby_five' && st.unl && !st.act && /Recover the Forge-Key/.test(nb) && /see Brok/.test(nb) && !/Lv 45/.test(nb), { ...st, nb });
+    ok('[4] Lv 42, the Forge-Key not done: the tracker\'s Next row names Recover the Forge-Key (see Brok), not "The Forge That Broke ... Lv 45"',
+      st.nb === 'q_boss_sundered_smith' && st.unl && !st.act && /Recover the Forge-Key/.test(nb) && /see Brok/.test(nb) && !/Lv 45/.test(nb), { ...st, nb });
     await openJournal(page);
     const jn = await page.evaluate(() => { const b = document.querySelector('#quest-modal .qj-saga-next'); return b ? b.textContent.replace(/\s+/g, ' ').trim() : null; });
     ok('[4] ...and so does the Journal\'s Next', !!jn && /Recover the Forge-Key/.test(jn) && !/Lv 45/.test(jn), jn);
@@ -172,7 +190,7 @@ try {
   // ---------------- [5] another class's better weapon is "Looted", the hero's own is "★ Better"
   if (on('5')) {
     const { ctx, page } = await boot('warrior');
-    await page.evaluate(() => { window.__H.hero(40, 'q_barnaby_five', { job: 'berserker', master: 'warlord' }); player._autoEquipEnabled = false; });
+    await page.evaluate(() => { window.__H.hero(40, 'q_boss_sundered_smith', { job: 'berserker', master: 'warlord' }); player._autoEquipEnabled = false;   /* one spine: was q_barnaby_five */ });
     await load(page, 'forest', 300);
     const walkOver = async (it) => { await page.evaluate((it) => { game.monsters.length = 0; window.__toasts.length = 0; const g = document.getElementById('gear-change'); if (g) g.style.opacity = '0';
         game.drops.push({ x: player.x + player.w / 2 + 120, y: player.y + player.h - 30, vy: 0, type: 'item', item: it, life: 99999, noMagnet: true }); }, it);

@@ -47,11 +47,11 @@ try {
     }
     const src = document.documentElement.outerHTML;
     return { bad, barn, barnabyAt: where.Barnaby || [], eons: src.includes('EONS FROM NOW'), realm: src.includes('IN A DIFFERENT REALM — AT THE FAR END OF THE DREAM'),
-      pointer: /His stall is in the Everdawn Megamall/.test((QUESTS.q_barnaby_five || {}).desc || ''), five: (QUESTS.q_barnaby_five || {}).levelReq };
+      pointer: [].concat(QUESTS.q_boss_sundered_smith.prereq || []).includes('q_visit_lavaCavern') && /Brok\'s soot-grey list/.test(QUESTS.q_boss_sundered_smith.desc), five: QUESTS.q_boss_sundered_smith.levelReq };   // one spine: Barnaby I is retired; Brok's key and list open the Smith
   });
   check(r.bad.length === 0, 'no quest unlocks well below the level of the map its giver stands on', J(r.bad));
   check(J(r.barnabyAt) === J(['everdawn_megamall']) && Object.entries(r.barn).every(([id, lv]) => lv === (id === 'q_kindest_hand' ? 50 : 45)), "Barnaby stands in the Everdawn Megamall and his quests open at 45 again (the Kindest Hand after them at 50)", J({ at: r.barnabyAt, lv: r.barn }));
-  check(r.five === 45 && r.pointer, "Brok's Barnaby I stays Lv 45 and says where Barnaby's stall is", J({ lv: r.five, pointer: r.pointer }));
+  check(r.five === 45 && r.pointer, "Brok's Forge-Key opens The Forge That Broke (Lv 45), whose card opens on Brok's list (one spine: Barnaby I retired)", J({ lv: r.five, pointer: r.pointer }));
   check(!r.eons && r.realm, 'the prologue opens IN A DIFFERENT REALM', J({ eons: r.eons, realm: r.realm }));
   check(errs.length === 0, 'no page errors', J(errs.slice(0, 3)));
 } catch (e) { check(false, 'harness: ' + String(e.message).slice(0, 300)); }

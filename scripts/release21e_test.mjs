@@ -2,15 +2,15 @@
 //   [1] a Necromancer's thralls (real V presses: Dark Pulse) walk through a door with the hero (real arrow keys + Up): the same five
 //       objects, their life still counting, standing at the hero's feet with no old-map target; they follow into a boss arena, into
 //       an Expedition and out of it; an expired thrall stays behind; the MojiMon is not doubled; death and a world reset clear them
-//   [2] Barnaby III: Young Barnaby felled on Barnaby II's road, II handed in, III taken - the Eleventh Hour has him again at once and
-//       the kill counts; a generic boss quest (q_road_6, the King) finds its boss after a recent kill; abandon + re-accept is no farm
+//   [2] the Portal: Young Barnaby falls once, the kill counts, and nothing brings him back for a second fight (one spine: Barnaby
+//       II-III, which re-fought him, are retired); a generic boss quest (q_road_6, the King) finds its boss after a recent kill; abandon + re-accept is no farm
 //   [3] Brok's grey-list line: "come see me at forty-five" below Lv 45 only; a Lv 47 hero hears the ready-now line (real N press)
 //   [4] the fragment toast counts the five ("(1/5)"), the Weight of Morning says it is Gravitos's own and the last
 //   [5] a Lv 49 -> 50 Necromancer (real kill) sees "New skill learnt - Necrotic Ascendance" once, even when a warning arrives while
 //       it is unread in a full stack; a second level-up to the same level does not raise it again
 //   [6] the Sundered Forge's far door to the Last Step always stands; a real Up is refused until The Forge That Broke is done, with a
-//       message naming what is left (fresh Lv 50 save: the next step; S1 Barnaby IV ready: take Barnaby his answer; S4 old save with
-//       the Smith beaten: Barnaby I after Brok's errand); once it is done the same door takes the hero down
+//       message naming what is left (fresh Lv 50 save: the next step; S1 The Forge That Broke ready: hand it in; S4 old save with
+//       the Smith beaten: The Forge That Broke, after Brok's errand); once it is done the same door takes the hero down
 //   [7] S4: the tracker's and the Journal's Next name Recover the Forge-Key itself (critical since v0.30.1781: on the main path), see Brok - no passed level
 //   node release21e_test.mjs        PORT / MOJI_GAME_FILE / SERVE_ROOT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -168,14 +168,14 @@ try {
   ok('[3a] Brok to a Lv 47 hero: the grey list without "come see me at forty-five" (a ready-now line)', B47.grey && !B47.forty5, B47);
   ok('[3b] ...a Lv 44 hero still hears "come see me at forty-five"', B44.grey && B44.forty5, B44);
   // ---- [6] the Last Step's far door always stands in the Forge; a real Up is refused until The Forge That Broke is done
-  // [7] an old save with the Smith beaten and no Barnaby quest: "Next:" names Barnaby I, after Brok's errand
+  // [7] an old save with the Smith beaten and the Forge-Key not done: "Next:" names the Forge-Key (one spine: the key opens the Smith)
   const setS = async (kind) => P.evaluate(async (k) => {
     const { fresh, go, calm } = window._r21; fresh(50); calm(); player.dawnFragments = []; game.bestiary = game.bestiary || {};
     if (game.bossDefeated) { delete game.bossDefeated.lastStep; delete game.bossDefeated.sundered_forge; } if (game.bestiary) delete game.bestiary._boss_miraFallen;
-    if (k !== 'S0') { for (const id of _QUEST_STORY_CHAIN) { if (id === 'q_barnaby_five') break; player.quests.completed[id] = Date.now(); } player.quests.completed.q_distorted_portal = Date.now(); }
-    if (k === 'S1') { for (const id of ['q_visit_lavaCavern', 'q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands']) player.quests.completed[id] = Date.now(); player.quests.active.q_barnaby_finish = { progress: 1, readyToHandIn: true }; }
+    if (k !== 'S0') { for (const id of _QUEST_STORY_CHAIN) { if (id === 'q_boss_sundered_smith') break; if (id === 'q_visit_lavaCavern') continue; player.quests.completed[id] = Date.now(); } player.quests.completed.q_distorted_portal = Date.now(); delete player.quests.completed.q_visit_lavaCavern; }   // one spine: Barnaby I is retired
+    if (k === 'S1') { player.quests.completed.q_visit_lavaCavern = Date.now(); player.quests.active.q_boss_sundered_smith = { progress: 1, readyToHandIn: true }; }   // one spine: the Smith's own quest, felled and not handed in
     if (k === 'S4') { game.bestiary.sundered_smith = 1; game.bestiary._boss_sundered_smith = true; }
-    if (k === 'DONE') { for (const id of ['q_visit_lavaCavern', 'q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish', 'q_boss_sundered_smith']) player.quests.completed[id] = Date.now(); }
+    if (k === 'DONE') { for (const id of ['q_visit_lavaCavern', 'q_boss_sundered_smith']) player.quests.completed[id] = Date.now(); }
     await go('sundered_forge', 1300); calm(); for (const m of game.monsters) if (m) { m.currentHp = 0; } game.monsters.length = 0;
     try { renderQuestTracker(); } catch (e) {}
     const nx = [...document.querySelectorAll('.qt-row')].map((r) => r.textContent.replace(/\s+/g, ' ').trim()).filter((t) => /Next:|Barnaby|Smith/.test(t));
@@ -186,29 +186,29 @@ try {
   const S0 = await setS('S0'), S0d = await tryDoor();
   ok('[6a] a fresh Lv 50 save: the far door stands in the Forge; a real Up is refused and names the next step', S0.door && !S0.open && S0d.d && S0d.d.now === 'sundered_forge' && /won't open/.test(S0d.toast) && /Next: /.test(S0d.toast), { S0, S0d });
   const S1 = await setS('S1'), S1d = await tryDoor();
-  ok('[6b] S1 (the Smith fell for Barnaby IV): the door stands, refuses, and says to take Barnaby his answer; the tracker shows IV', S1.door && S1d.d && S1d.d.now === 'sundered_forge' && /Take Barnaby his answer/.test(S1d.toast) && S1.rows.some((r) => r.includes('What the Fire Finishes')), { S1, S1d });
+  ok('[6b] S1 (the Smith felled, The Forge That Broke not handed in): the door stands, refuses until it is handed in; the tracker shows it', S1.door && S1d.d && S1d.d.now === 'sundered_forge' && /until The Forge That Broke is handed in/.test(S1d.toast) && S1.rows.some((r) => r.includes('The Forge That Broke')), { S1, S1d });
   const S4 = await setS('S4'), S4d = await tryDoor();
-  ok('[6c] S4 (old save: the Smith beaten, no Barnaby quest): the door stands and refuses, naming Barnaby I after Brok\'s errand', S4.door && S4d.d && S4d.d.now === 'sundered_forge' && /Five Stories About a Smith/.test(S4d.toast) && /Recover the Forge-Key/.test(S4d.toast), { S4, S4d });
+  ok('[6c] S4 (old save: the Smith beaten, the Forge-Key not done): the door stands and refuses, naming The Forge That Broke after Brok\'s errand', S4.door && S4d.d && S4d.d.now === 'sundered_forge' && /Next: The Forge That Broke/.test(S4d.toast) && /Recover the Forge-Key/.test(S4d.toast), { S4, S4d });
   ok('[7a] S4: the tracker\'s Next names Recover the Forge-Key (critical since v0.30.1781), see Brok - not a level already passed', S4.rows.some((r) => /Next: Recover the Forge-Key/.test(r) && /see Brok/.test(r) && !/Lv 35/.test(r)), S4.rows);
   const J4 = await P.evaluate(async () => { window._r21.clear(); let btn = null; for (let i = 0; i < 3 && !btn; i++) { try { toggleQuestJournal(); } catch (e) {} for (let k = 0; k < 20 && !(btn = document.querySelector('.qj-saga-next')); k++) await window._r21.sleep(100); }
     const t = btn ? btn.textContent.replace(/\s+/g, ' ').trim() : 'none: ' + JSON.stringify({ saga: !!document.querySelector('.qj-saga'), modal: !!document.getElementById('quest-modal') }); window._r21.clear(); return t; });
   ok('[7b] S4: the Journal\'s Next button names Recover the Forge-Key (critical since v0.30.1781; no false Lv 45 / Lv 35)', !!J4 && /Recover the Forge-Key/.test(J4) && !/Lv 45/.test(J4) && !/Lv 35/.test(J4), J4);
   const SD = await setS('DONE'), SDd = await tryDoor();
   ok('[6d] with The Forge That Broke done the same door takes the hero to the Last Step', SD.door && SD.open && SDd.d && SDd.d.now === 'lastStep' && !SDd.toast, { SD, SDd });
-  // ---- [2] Barnaby III: Young Barnaby felled on Barnaby II's road
+  // ---- [2] the Portal: Young Barnaby falls once (one spine: Barnaby II-III, which re-fought him, are retired)
   const B = await P.evaluate(async () => {
     const { fresh, go, sleep, killBoss, bossHere } = window._r21; fresh(47); const out = {};
-    for (const k of ['q_visit_lavaCavern', 'q_distorted_portal', 'q_barnaby_five']) player.quests.completed[k] = Date.now();
-    out.accRoll = acceptQuest('q_barnaby_roll');
+    for (const p of [].concat(QUESTS.q_distorted_portal.prereq || [])) player.quests.completed[p] = Date.now();
+    if (!player.job) { try { applyJob('ninja'); } catch (e) {} }   // the instructors offer the Portal after the first job
+    player.quests.unlocked.q_distorted_portal = true; out.acc = acceptQuest('q_distorted_portal', true);
     await go('confusedVigil', 300); out.killed = await killBoss('young_confused_barnaby'); out.rec = !!(game.bossDefeated && game.bossDefeated.confusedVigil);
-    await go('sundered_forge', 300); out.rollReady = !!(player.quests.active.q_barnaby_roll && player.quests.active.q_barnaby_roll.readyToHandIn);
-    _completeQuest('q_barnaby_roll'); out.accHands = acceptQuest('q_barnaby_hands');
-    await go('confusedVigil', 300); await sleep(600); out.bossBack = bossHere('young_confused_barnaby');
-    out.killed2 = await killBoss('young_confused_barnaby'); for (let k = 0; k < 15 && !(player.quests.completed.q_barnaby_hands || (player.quests.active.q_barnaby_hands && (player.quests.active.q_barnaby_hands.readyToHandIn || (player.quests.active.q_barnaby_hands.progress | 0) >= 1))); k++) await sleep(200);
-    const a = player.quests.active.q_barnaby_hands; out.counted = !!(a && (a.readyToHandIn || (a.progress | 0) >= 1)) || !!player.quests.completed.q_barnaby_hands;
+    for (let k = 0; k < 15; k++) { const a = player.quests.active.q_distorted_portal; if (player.quests.completed.q_distorted_portal || (a && (a.readyToHandIn || (a.progress | 0) >= 1))) break; await sleep(200); }
+    const a = player.quests.active.q_distorted_portal; out.counted = !!(a && (a.readyToHandIn || (a.progress | 0) >= 1)) || !!player.quests.completed.q_distorted_portal;
+    await go('sundered_forge', 300); await go('confusedVigil', 300); await sleep(600); out.bossBack = bossHere('young_confused_barnaby');
+    out.retired = ['q_barnaby_roll', 'q_barnaby_hands'].filter((id) => QUESTS[id]);
     return out; });
-  ok('[2-setup] Young Barnaby falls on Barnaby II\'s road and the Eleventh Hour records it', B.accRoll && B.killed && B.rec && B.rollReady, B);
-  ok('[2a] Barnaby II handed in, III taken: Young Barnaby stands in the Eleventh Hour at once (not 10 min later) and the kill counts', B.accHands && B.bossBack && B.killed2 && B.counted, B);
+  ok('[2-setup] the Portal taken: Young Barnaby falls in the Eleventh Hour, it records him, and the kill counts', B.acc && B.killed && B.rec && B.counted, B);
+  ok('[2a] ...and he is not back for a second fight (no chapter re-opens him)', !B.bossBack && B.retired.length === 0, B);
   // ---- [2b] a bestiary refight (King Krook) taken after a recent kill finds him; abandon + re-accept is no respawn farm
   const K = await P.evaluate(async () => {
     const { go, sleep, killBoss, bossHere } = window._r21; const out = {};

@@ -34,7 +34,7 @@ try {
     for (let i = 0; i < 60; i++) { const ok = ['miraFallen', 'miraFallencast', 'miraFallencollapse'].every((k) => BOSS_ATTACK_FRAMES[k] && BOSS_ATTACK_FRAMES[k].length && BOSS_ATTACK_FRAMES[k].every((f) => f && f.complete && f.naturalWidth > 0)); if (ok) break; await sleep(250); }
     out.sets = { idle: (BOSS_IDLE_FRAMES.miraFallen || []).length, walk: (BOSS_WALK_FRAMES.miraFallen || []).length, attack: (BOSS_ATTACK_FRAMES.miraFallen || []).length, cast: (BOSS_ATTACK_FRAMES.miraFallencast || []).length, collapse: (BOSS_ATTACK_FRAMES.miraFallencollapse || []).length };
     out.art = { feather: !!LX_MOB_PROJ.mfallenfeather, col: !!LX_FX.fx_col_miraFallen, tg: !!LX_FX.tg_col_miraFallen, sand: !!LX_VFX.miraSandPillar, shard: await fetch('Sprites/monsters/miraEchoShard.webp').then((r) => r.ok).catch(() => false) };   // loaded lazily when the Eleven first rise
-    const q = QUESTS.q_lyra_last || {}; out.quest = { target: q.target, prereq: q.prereq, giver: q.giver, lv: q.levelReq, story: !!q.story };
+    const q = QUESTS.q_last_step || {}; out.quest = { target: q.target, prereq: q.prereq, lv: q.levelReq, critical: !!q.critical, hunters: Object.keys(QUESTS).filter((k) => QUESTS[k] && QUESTS[k].kind === 'boss' && QUESTS[k].target === 'miraFallen') };   // one spine (per user): The Tear VI is retired, the Last Step is her one fight
     // freeze her own clocks; each move is armed on purpose below
     m._miraElevenAt = m._miraGateAt = m._miraFeatherAt = m._miraSandAt = m._miraStepAt = 1e12; m._bigMeleeCd = 1e9; m._columnCd = 1e9; m._hgCd = 1e9;
     return out;
@@ -42,7 +42,7 @@ try {
   ok('the Last Step is a Lv 50 boss arena that spawns her, behind the Sundered Forge (a door each way)', R.arena.lv === 50 && R.arena.boss && R.arena.spawns === 'miraFallen' && /sundered_forge/.test(R.arena.back) && R.arena.forgeDoor, R.arena);
   ok('she spawns alone, Lv 55, a super boss but not hyper, her name unsaid', R.me && R.me.n === 1 && R.me.others === 0 && R.me.lv === 55 && R.me.sup && !R.me.hyper && R.me.name === 'The Woman Who Turned Back', R.me);
   ok('her five sets decode (idle 9, walk 9, Twin Verdict 16, cast 16, Gate 16) and her shot, column, warning, sand and shard art are registered', R.sets.idle === 9 && R.sets.walk === 9 && R.sets.attack === 16 && R.sets.cast === 16 && R.sets.collapse === 16 && Object.values(R.art).every(Boolean), { sets: R.sets, art: R.art });
-  ok('Lyra VI (after V, given by Hera, Lv 50) is hunted here', R.quest.target === 'miraFallen' && [].concat(R.quest.prereq).indexOf('q_lyra_forge') >= 0 && R.quest.giver === 'Hera' && R.quest.lv === 50 && R.quest.story, R.quest);
+  ok('The Last Step (critical, Lv 50, after The Forge That Broke) is the one quest that hunts her here (The Tear VI retired: one fight per boss)', R.quest.target === 'miraFallen' && [].concat(R.quest.prereq).join() === 'q_boss_sundered_smith' && R.quest.lv === 50 && R.quest.critical && R.quest.hunters.join() === 'q_last_step', R.quest);
   const now0 = await page.evaluate(() => Date.now()); await page.clock.pauseAt(now0 + 1000);
   const step = async (n, fn) => { for (let i = 0; i < n; i++) { await page.clock.runFor(16); if (fn) await page.evaluate(fn); } };
   const keep = () => { player.hp = getMaxHp(); player.invulnerable = 0; };

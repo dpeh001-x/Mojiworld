@@ -1,7 +1,7 @@
-// THE SMITH WAITS FOR BARNABY IV (per user, 2026-10-09: "Smith waits for Barnaby IV", from the play-order audit). The Forge That Broke could be won before Barnaby's
-// chapters, whose last two then said "make the Smith put the hammer down" about a man already gone. Now: The Forge That Broke needs the portal AND Barnaby IV; Barnaby II
-// (The Roll Call) is a visit to the Sundered Forge instead of a second Smith kill (he falls once in the chain, in IV); the Journal lists Barnaby I-IV before the Smith; and a
-// hand-off that cannot start the next quest names what it waits on. Reads the Past-the-Tear levels and lines from the game; it does not pin them.
+// THE SMITH WAITS FOR THE FORGE-KEY (one spine, v0.30.1851, per user: one fight per boss). Was "the Smith waits for Barnaby IV" (2026-10-09): Barnaby I-IV are
+// retired, their lore folded into The Forge That Broke's card. Now: The Forge That Broke needs the portal AND Brok's Forge-Key (q_visit_lavaCavern); the Journal lists
+// the portal, the Smith, then the Last Step with no Barnaby chapter between; a hand-off that cannot start the Smith names what it waits on; and no hand-in respawns a
+// felled boss. Reads the levels and lines from the game; it does not pin them.
 //   [SERVE_ROOT=<dir with serve.js, data, art>] [PORT=n] node scripts/smith_gate_test.mjs [page.html]
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process'; import { existsSync } from 'node:fs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'); const require = createRequire(import.meta.url);
@@ -26,51 +26,42 @@ try {
     player.cls = 'warrior'; player.job = 'knight'; player.master = null;
     const Q = QUESTS, C = _QUEST_STORY_CHAIN, out = {};
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const B = ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish'];
-    out.def = { smith: Q.q_boss_sundered_smith.prereq, smithCrit: !!Q.q_boss_sundered_smith.critical, roll: { kind: Q.q_barnaby_roll.kind, target: Q.q_barnaby_roll.target, count: Q.q_barnaby_roll.count, boss: !!Q.q_barnaby_roll.bossFight, mapReal: !!MAPS[Q.q_barnaby_roll.target], mapLv: (MAPS[Q.q_barnaby_roll.target] || {}).levelReq },
-      finish: { kind: Q.q_barnaby_finish.kind, target: Q.q_barnaby_finish.target }, hands: { target: Q.q_barnaby_hands.target }, lv: B.concat(['q_boss_sundered_smith']).map((id) => Q[id].levelReq) };
+    const B = ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish'];   // one spine: all four retired
+    out.def = { smith: Q.q_boss_sundered_smith.prereq, smithCrit: !!Q.q_boss_sundered_smith.critical, retired: B.map((id) => Q[id] === undefined && _LX_RETIRED_QUESTS.includes(id)),
+      smithKind: Q.q_boss_sundered_smith.kind, smithTarget: Q.q_boss_sundered_smith.target, smithDesc: Q.q_boss_sundered_smith.desc, portalTarget: Q.q_distorted_portal.target,
+      lv: ['q_distorted_portal', 'q_boss_sundered_smith', 'q_last_step'].map((id) => Q[id].levelReq) };   // one spine: Portal -> Smith -> Last Step
     out.idx = {}; for (const id of ['q_distorted_portal'].concat(B, ['q_boss_sundered_smith', 'q_last_step'])) out.idx[id] = C.indexOf(id);
     const fresh = () => { player.quests = { active: {}, completed: {}, unlocked: {}, progress: {} }; _ensureQuests(); };
     const base = () => { fresh(); for (const k of C) { if (k === 'q_distorted_portal') break; player.quests.completed[k] = 1; } player.quests.completed.q_distorted_portal = 1; player.level = 45; };
-    // the gate: portal done, Lv 45, Barnaby unfinished -> the Smith stays shut; finish IV -> he opens
-    base(); player.quests.completed.q_visit_lavaCavern = 1; tickQuestUnlocks(); await sleep(150);
-    out.gate = { noBarnaby: !!(player.quests.unlocked.q_boss_sundered_smith || player.quests.active.q_boss_sundered_smith) };
-    for (const k of ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands']) player.quests.completed[k] = 1; tickQuestUnlocks(); await sleep(150);
-    out.gate.throughIII = !!(player.quests.unlocked.q_boss_sundered_smith || player.quests.active.q_boss_sundered_smith);
-    player.quests.completed.q_barnaby_finish = 1; tickQuestUnlocks(); await sleep(250);
-    out.gate.afterIV = !!(player.quests.unlocked.q_boss_sundered_smith || player.quests.active.q_boss_sundered_smith);
-    // Barnaby II walks to the Forge: another map does not count, the Forge does
-    base(); player.quests.completed.q_visit_lavaCavern = 1; player.quests.completed.q_barnaby_five = 1; tickQuestUnlocks();
-    acceptQuest('q_barnaby_roll'); const a0 = player.quests.active.q_barnaby_roll;
-    out.visit = { accepted: !!a0 };
-    tickQuestVisit('lavaCavern'); out.visit.otherMap = !!(player.quests.active.q_barnaby_roll && player.quests.active.q_barnaby_roll.readyToHandIn) || !!player.quests.completed.q_barnaby_roll;
-    tickQuestVisit('sundered_forge'); out.visit.forge = !!(player.quests.active.q_barnaby_roll && player.quests.active.q_barnaby_roll.readyToHandIn) || !!player.quests.completed.q_barnaby_roll;
+    // the gate: portal done, Lv 45, no Forge-Key -> the Smith stays shut; recover the key -> he opens   // one spine: was Barnaby IV
+    base(); delete player.quests.completed.q_visit_lavaCavern; tickQuestUnlocks(); await sleep(150);
+    out.gate = { noKey: !!(player.quests.unlocked.q_boss_sundered_smith || player.quests.active.q_boss_sundered_smith) };
+    player.quests.completed.q_visit_lavaCavern = 1; tickQuestUnlocks(); await sleep(250);
+    out.gate.withKey = !!(player.quests.unlocked.q_boss_sundered_smith || player.quests.active.q_boss_sundered_smith);
     // the hand-off from the portal names what the Smith waits on
-    base(); delete player.quests.completed.q_distorted_portal; const toastsKeep = []; out.hand = {};
-    player.quests.completed.q_distorted_portal = 1; out.hand.none = _lxAct1Next('q_distorted_portal');
+    base(); delete player.quests.completed.q_visit_lavaCavern; out.hand = {};
+    out.hand.none = _lxAct1Next('q_distorted_portal');
     player.quests.completed.q_visit_lavaCavern = 1; out.hand.errandDone = _lxAct1Next('q_distorted_portal');
-    for (const k of B) player.quests.completed[k] = 1; out.hand.allDone = _lxAct1Next('q_distorted_portal');
-    // handing in IV (not III) puts the Smith back in his arena at once
-    const hand = (id) => { fresh(); const q = Q[id]; player.level = 45; player.exp = 0; player.expToNext = _lxLevelCost(45); player.quests.active[id] = { targetCount: q.count || 1, rewardScale: 1 }; player._pqStagePaid = {}; player._pqChainRuns = 0;
-      game.bossDefeated = game.bossDefeated || {}; game._bossDefeatedAt = game._bossDefeatedAt || {}; game.bossDefeated.sundered_forge = true; game._bossDefeatedAt.sundered_forge = game._playMs || 0;
+    // no hand-in puts a felled boss back in his arena (one spine: was "Barnaby IV respawns the Smith")
+    const hand = (id, map) => { fresh(); const q = Q[id]; player.level = 45; player.exp = 0; player.expToNext = _lxLevelCost(45); player.quests.active[id] = { targetCount: q.count || 1, rewardScale: 1 }; player._pqStagePaid = {}; player._pqChainRuns = 0;
+      game.bossDefeated = game.bossDefeated || {}; game._bossDefeatedAt = game._bossDefeatedAt || {}; game.bossDefeated[map] = true; game._bossDefeatedAt[map] = game._playMs || 0;
       const lvUp = window._maybeLevelUp; window._maybeLevelUp = function () {}; try { _completeQuest(id); } catch (e) {} finally { window._maybeLevelUp = lvUp; }
-      return { standing: !game.bossDefeated.sundered_forge && game._bossDefeatedAt.sundered_forge === undefined, done: !!player.quests.completed[id] }; };
-    out.respawn = { hands: hand('q_barnaby_hands'), finish: hand('q_barnaby_finish') };
+      return { standing: !game.bossDefeated[map] && game._bossDefeatedAt[map] === undefined, done: !!player.quests.completed[id] }; };
+    out.respawn = { portal: hand('q_distorted_portal', 'confusedVigil'), smith: hand('q_boss_sundered_smith', 'sundered_forge') };
     return out;
   });
   const D = R.def, X = R.idx;
-  check(Array.isArray(D.smith) && D.smith.indexOf('q_distorted_portal') >= 0 && D.smith.indexOf('q_barnaby_finish') >= 0, 'The Forge That Broke needs the portal AND Barnaby IV', J(D.smith));
-  check(D.roll.kind === 'visit' && D.roll.target === 'sundered_forge' && D.roll.count === 1 && !D.roll.boss && D.roll.mapReal && D.roll.mapLv <= D.lv[1], 'Barnaby II (The Roll Call) is a visit to the Sundered Forge, not a Smith kill', J(D.roll));
-  check(D.finish.kind === 'boss' && D.finish.target === 'sundered_smith' && D.hands.target === 'young_confused_barnaby', 'Barnaby III still faces young Barnaby and Barnaby IV still ends the Smith', J([D.finish, D.hands]));
-  check(X.q_distorted_portal < X.q_barnaby_five && X.q_barnaby_five < X.q_barnaby_roll && X.q_barnaby_roll < X.q_barnaby_hands && X.q_barnaby_hands < X.q_barnaby_finish && X.q_barnaby_finish < X.q_boss_sundered_smith && X.q_boss_sundered_smith < X.q_last_step,
-    'the Journal lists the portal, Barnaby I-IV, the Smith, then the Last Step', J(X));
-  check(D.lv.every((v, i, a) => i === 0 || v >= a[i - 1]), "Barnaby's chapters and the Smith stay in non-decreasing level order", J(D.lv));
-  check(R.gate.noBarnaby === false && R.gate.throughIII === false && R.gate.afterIV === true, 'at Lv 45 with the portal done the Smith stays shut until Barnaby IV is done, then opens', J(R.gate));
-  check(R.visit.accepted && R.visit.otherMap === false && R.visit.forge === true, 'Barnaby II completes on entering the Sundered Forge, not on another map', J(R.visit));
+  check(Array.isArray(D.smith) && D.smith.indexOf('q_distorted_portal') >= 0 && D.smith.indexOf('q_visit_lavaCavern') >= 0 && !D.smith.some((p) => /barnaby/.test(p)), 'The Forge That Broke needs the portal AND the Forge-Key (no Barnaby chapter)', J(D.smith));   // one spine
+  check(D.retired.every(Boolean), 'Barnaby I-IV are retired (absent from QUESTS, listed in _LX_RETIRED_QUESTS)', J(D.retired));   // one spine: was "Barnaby II is a visit"
+  check(D.smithKind === 'boss' && D.smithTarget === 'sundered_smith' && D.portalTarget === 'young_confused_barnaby', 'the Portal still faces young Barnaby and The Forge That Broke still ends the Smith', J([D.portalTarget, D.smithTarget]));   // one spine
+  check(/Brok's soot-grey list names Barnaby/.test(D.smithDesc) && /Before the sky fell, the woman at the gate came to his bench with one order/.test(D.smithDesc), "Barnaby I-IV's lore survives on the Smith's card (the list, the one order)", String(D.smithDesc).slice(0, 120));   // one spine
+  check(X.q_distorted_portal >= 0 && ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish'].every((id) => X[id] === -1) && X.q_distorted_portal < X.q_boss_sundered_smith && X.q_boss_sundered_smith < X.q_last_step,
+    'the Journal lists the portal, the Smith, then the Last Step (no Barnaby chapter)', J(X));   // one spine
+  check(D.lv.every((v, i, a) => i === 0 || v >= a[i - 1]), 'the Portal, the Smith and the Last Step stay in non-decreasing level order', J(D.lv));
+  check(R.gate.noKey === false && R.gate.withKey === true, 'at Lv 45 with the portal done the Smith stays shut until the Forge-Key is recovered, then opens', J(R.gate));   // one spine
   check(/waits on/.test(R.hand.none) && /Recover the Forge-Key/.test(R.hand.none) && /Brok/.test(R.hand.none), "the portal's hand-off names what the Smith waits on (the Forge-Key errand, see Brok)", R.hand.none);
-  check(/waits on/.test(R.hand.errandDone) && /Five Stories About a Smith/.test(R.hand.errandDone) && /Brok/.test(R.hand.errandDone), 'with the errand done it names Barnaby I instead', R.hand.errandDone);
-  check(!/waits on/.test(R.hand.allDone), 'with Barnaby finished the hand-off no longer says "waits on" (the Smith starts)', R.hand.allDone);
-  check(R.respawn.hands.done && R.respawn.hands.standing === false && R.respawn.finish.done && R.respawn.finish.standing === true, 'handing in Barnaby IV (not III) puts the Smith back in his arena at once', J(R.respawn));
+  check(!/waits on/.test(R.hand.errandDone) && /The Forge That Broke/.test(R.hand.errandDone), 'with the errand done the hand-off no longer says "waits on" (the Smith starts)', R.hand.errandDone);   // one spine: no Barnaby I step
+  check(R.respawn.portal.done && R.respawn.portal.standing === false && R.respawn.smith.done && R.respawn.smith.standing === false, 'handing in the Portal or the Smith leaves the felled boss felled (no respawns)', J(R.respawn));   // one spine
   check(errs.length === 0, 'no page errors', errs.join(' | '));
 } finally { await browser.close(); try { server.kill(); } catch (e) {} }
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

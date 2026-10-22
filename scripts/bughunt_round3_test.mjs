@@ -5,9 +5,9 @@
 //   [4] a Boss Rush kill ticks no quest (Gravitos dies in one form there); an Echo Keeper echo still does (v0.30.1698)
 //   [5] the Necromancer's undead strike on their 400 ms cadence again (v0.30.1674's bite hold had halved them)
 //   [6] Cancer's Pincer Sweep moves her again (the boss plant rooted it)
-//   [7] a hero with The Tear VI in hand keeps the Forge's door to the Last Step
+//   [7] a hero with The Last Step in hand keeps the Forge's door to it (one spine: The Tear VI is retired)
 //   [8] a co-op guest does not count the split twin as a kill (bestiary or quest)
-//   [9] the journal's Next names the errand that holds Barnaby I back, not a false "Lv 45"
+//   [9] the journal's Next names the errand that holds The Forge That Broke back (the Forge-Key), not a false "Lv 45" (one spine: was Barnaby I)
 //   [10] no page errors
 //   node scripts/bughunt_round3_test.mjs        PORT / MOJI_GAME_FILE override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -43,17 +43,17 @@ try {
   const j = await page.evaluate(async () => {
     loadMap('town'); game.paused = false; await __steps(5);
     player.level = 50;
-    for (const id of _QUEST_STORY_CHAIN) { if (id === 'q_barnaby_five') break; player.quests.completed[id] = 1; delete player.quests.active[id]; }
-    for (const id of ['q_visit_lavaCavern', 'q_barnaby_five']) { delete player.quests.completed[id]; delete player.quests.active[id]; if (player.quests.unlocked) delete player.quests.unlocked[id]; }
+    for (const id of _QUEST_STORY_CHAIN) { if (id === 'q_boss_sundered_smith') break;   /* one spine: Barnaby I retired, the Smith is next past the Portal */ player.quests.completed[id] = 1; delete player.quests.active[id]; }
+    for (const id of ['q_visit_lavaCavern', 'q_boss_sundered_smith', 'q_last_step']) {   /* one spine */ delete player.quests.completed[id]; delete player.quests.active[id]; if (player.quests.unlocked) delete player.quests.unlocked[id]; }
     const nb = typeof _nextStoryBeat === 'function' ? _nextStoryBeat() : null;
     try { closeAllModals(); } catch (e) {}
     let btn = null;
     for (let i = 0; i < 3 && !btn; i++) { try { toggleQuestJournal(); } catch (e) {} for (let k = 0; k < 20 && !(btn = document.querySelector('.qj-saga-next')); k++) await new Promise((r) => setTimeout(r, 100)); }
     const txt = btn ? btn.textContent.replace(/\s+/g, ' ').trim() : null;
     try { closeAllModals(); } catch (e) {}
-    return { next: nb, button: txt, errand: QUESTS.q_visit_lavaCavern && QUESTS.q_visit_lavaCavern.name };
+    return { next: nb, button: txt, errand: QUESTS.q_visit_lavaCavern && QUESTS.q_visit_lavaCavern.name, gone: !QUESTS.q_barnaby_five };
   });
-  ok('[9] the journal\'s Next names the errand that holds Barnaby I back (no false "Lv 45")', j.next === 'q_barnaby_five' && !!j.button && j.button.includes(j.errand) && !/Lv 45/.test(j.button), j);
+  ok('[9] the journal\'s Next names the errand that holds The Forge That Broke back (no false "Lv 45"; Barnaby I is retired)', j.gone && j.next === 'q_boss_sundered_smith' /* one spine: was q_barnaby_five */ && !!j.button && j.button.includes(j.errand) && !/Lv 45/.test(j.button), j);
   // [1]
   const a = await page.evaluate(async () => {
     player._god = true;
@@ -99,6 +99,10 @@ try {
   ok('[4] a Boss Rush kill ticks no quest; an Echo Keeper echo still does', d.rush === '0' && d.echo !== '0' && d.echo !== 'spawn failed', d);
   // [5]
   const e = await page.evaluate(async () => {
+    // one spine: [9] leaves a Lv 50 hero with the Portal done, so [4]'s Gravitos EXP levels him and the Master Advancement offer (and its
+    // flashback) can open on a timer inside this window and pause the count. Let it fire, then shut it, before measuring.
+    await new Promise((r) => setTimeout(r, 1500)); player._storyBeatsSeen.advancement_2 = true;
+    { const am = document.getElementById('advancement-modal'); if (am) am.style.display = 'none'; } try { closeAllModals(); } catch (e) {} __clear();
     loadMap('forest'); game.paused = false; await __steps(5); game.monsters.length = 0; game.minions = [];   // a hunting map: town is peaceful, summons do not fight there
     const fx = player.x + 60, fy = player.y + player.h;
     const foe = spawnMonster(fx + 30, fy - 40, 'slime'); if (!foe) return { err: 'no foe' };
@@ -126,11 +130,11 @@ try {
     for (const k of ['q_boss_sundered_smith', 'q_last_step', 'q_lyra_last', 'q_boss_aetherion']) { delete player.quests.completed[k]; delete player.quests.active[k]; }
     if (game.bossDefeated) { delete game.bossDefeated.lastStep; } if (game.bestiary) delete game.bestiary._boss_miraFallen;
     loadMap('sundered_forge'); game.paused = false; await __steps(5); const closed = (game.portals || []).filter((p) => p && p.dest === 'lastStep').length, shut = !_lxLastStepDoorOpen();   // release21: the door stands, shut
-    player.quests.active.q_lyra_last = { progress: 0 };
+    player.quests.active.q_last_step = { progress: 0 };   // one spine: The Tear VI retired; the Last Step is the quest that goes through this door
     loadMap('sundered_forge'); game.paused = false; await __steps(5); const withQuest = (game.portals || []).filter((p) => p && p.dest === 'lastStep').length, openQ = _lxLastStepDoorOpen();
-    delete player.quests.active.q_lyra_last; return { closed, shut, withQuest, openQ };
+    delete player.quests.active.q_last_step; return { closed, shut, withQuest, openQ, gone: !QUESTS.q_lyra_last };
   });
-  ok('[7] a hero with The Tear VI in hand keeps the Forge\'s door to the Last Step (and it stays shut without it)', g.closed === 1 && g.shut && g.withQuest >= 1 && g.openQ, g);   // release21: it stands but is shut without it
+  ok('[7] a hero with The Last Step in hand keeps the Forge\'s door to it (and it stays shut without it; The Tear VI is retired)', g.gone && g.closed === 1 && g.shut && g.withQuest >= 1 && g.openQ, g);   // release21: it stands but is shut without it
   // [8]
   const h = await page.evaluate(async () => {
     loadMap('zod_gemini'); game.paused = false; await __steps(5);

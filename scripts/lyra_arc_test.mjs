@@ -4,6 +4,8 @@
 // cannot see: a giver who is not a placed NPC, a target no map spawns, a prereq
 // pointing at nothing, a level gate above the maps the target lives in. Each of
 // those makes a quest that reads beautifully and can never be completed.
+// One spine (v0.30.1851, per user): The Tear V-VI are retired - the arc is chapters 0-IV, and its ending
+// rides on The Last Step (q_last_step), which carries the roll and keys Lyra's lines.
 // Run: node scripts/lyra_arc_test.mjs [file.html]
 import { chromium } from 'playwright-core';
 import path from 'node:path';
@@ -24,7 +26,7 @@ await page.goto(URL + '?dev=1', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => typeof QUESTS !== 'undefined' && typeof MAPS !== 'undefined' && typeof _qnavDest === 'function', { timeout: 60000 });
 
 const r = await page.evaluate(() => {
-  const ids = ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge', 'q_lyra_last'];   // v0.30.1627 mira-fallen: VI closes the Distorted Portal
+  const ids = ['q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin'];   // one spine: V-VI retired (the Last Step carries the roll, checked below)
   const out = { chapters: [] };
   const npcNames = new Set();
   for (const id in MAPS) for (const n of (MAPS[id].npcs || [])) if (n && n.name) npcNames.add(n.name);
@@ -59,7 +61,7 @@ const r = await page.evaluate(() => {
       rewardCoins: (q.rewards || {}).mojicoins,
     });
   }
-  out.prereqExists = ['q_lyra_tear','q_lyra_cut','q_lyra_kin','q_lyra_forge','q_lyra_last'].every((k) => [].concat((QUESTS[k] || {}).prereq || []).every((x) => !!QUESTS[x]));   // chapter VI also needs the Smith (2026-10-09): a list
+  out.prereqExists = ['q_lyra_tear','q_lyra_cut','q_lyra_kin','q_last_step'].every((k) => [].concat((QUESTS[k] || {}).prereq || []).every((x) => !!QUESTS[x]));   // one spine: the Last Step stands in for the retired V-VI
   // the subtle Sovereign hint must still be present for chapter IV to pay off
   const _src = [...document.querySelectorAll('script')].map((x) => x.textContent).join('');
   out.sovereignHint = /sapphire signet/i.test(_src);
@@ -82,10 +84,16 @@ const r = await page.evaluate(() => {
   // attach to and the Lv 20 -> Lv 40 arc stops being one idea
   out.trialNamesAperture = /APERTURE/.test((QUESTS.q_inner_dim_trial || {}).desc || '');
   // the chain must be a LINE, not three quests that happen to exist
-  out.chain = ids.map((i) => { const p = (QUESTS[i] || {}).prereq; return Array.isArray(p) ? p[0] : (p || null); });   // the first prerequisite is still the previous chapter (VI also needs the Smith)
+  out.chain = ids.map((i) => { const p = (QUESTS[i] || {}).prereq; return Array.isArray(p) ? p[0] : (p || null); });   // the first prerequisite is still the previous chapter
   // the target's maps must be enterable at the quest's own level gate
   out.targetMapLevels = spawnMaps('harea').map((m) => ({ map: m, levelReq: MAPS[m].levelReq }));
   out.totalQuests = Object.keys(QUESTS).length;
+  // one spine: The Tear V-VI are retired; the Last Step carries the roll and Lyra's lines key on it
+  out.retired = ['q_lyra_forge', 'q_lyra_last'].map((k) => QUESTS[k] === undefined && _LX_RETIRED_QUESTS.includes(k));
+  { const q = QUESTS.q_last_step || {}; let d = null; try { d = _qnavDest('q_last_step'); } catch (_e) {}
+    out.last = { prereq: q.prereq, critical: !!q.critical, story: !!q.story, target: q.target, levelReq: q.levelReq, desc: q.desc || '', coins: (q.rewards || {}).mojicoins,
+      targetMaps: spawnMaps(q.target), targetMapGate: Math.max(0, ...spawnMaps(q.target).map((m) => MAPS[m].levelReq || 1)), navResolves: !!d }; }
+  out.lyraLines = /_ld\.q_last_step\) text = "You told me what is written at the bottom/.test(_src) && /d\.q_last_step\) el\.textContent = 'You read me the roll from the bottom of the stair/.test(_src) && !/q_lyra_last\) (text|el\.textContent) =/.test(_src);
   return out;
 });
 await browser.close();
@@ -108,7 +116,7 @@ for (const c of r.chapters) {
   check((c.rewardCoins | 0) > 0, `${c.qid} pays out`, c.rewardCoins);
 }
 check(r.prereqExists, 'chapter II\'s prereq points at a real quest', r.chapters[1] && r.chapters[1].prereq);
-check(JSON.stringify(r.chain) === JSON.stringify(['q_pq_carriage', 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut', 'q_lyra_kin', 'q_lyra_forge']), 'the seven chapters form one ordered chain 0 -> I -> II -> III -> IV -> V -> VI', r.chain);
+check(JSON.stringify(r.chain) === JSON.stringify(['q_pq_carriage', 'q_lyra_aperture', 'q_lyra_loan', 'q_lyra_tear', 'q_lyra_cut']), 'the five chapters form one ordered chain 0 -> I -> II -> III -> IV', r.chain);
 // the prelude must be reachable BEFORE the Lv 40 chapters, or it is not a prelude
 const pre = r.chapters[0], first = r.chapters[1];
 check(pre && first && pre.levelReq < first.levelReq, 'the prelude gates lower than chapter I (it is genuinely a prelude)', { prelude: pre && pre.levelReq, chapterI: first && first.levelReq });
@@ -131,7 +139,15 @@ for (const c of r.chapters) {
   check(c.levelReq >= c.targetMapGate, `${c.qid} is not gated BELOW the maps its own target lives in`, { gate: c.levelReq, targetMapGate: c.targetMapGate, maps: c.targetMaps });
 }
 check(r.sovereignHint, 'the Sovereign still carries the sapphire signet chapter IV asks you to look for', r.sovereignHint);
-check(r.barnabySootHint, 'the distorted Barnaby still carries the forge-soot chapter V asks you to look for', r.barnabySootHint);
+check(r.barnabySootHint, 'the distorted Barnaby still carries the forge-soot (his lore outlives the retired chapter V)', r.barnabySootHint);   // one spine
+check(r.retired.every(Boolean), 'The Tear V-VI are retired (absent from QUESTS, listed in _LX_RETIRED_QUESTS)', r.retired);   // one spine
+{ const L = r.last;   // one spine: the Last Step is where the arc's ending now lives
+  check(L.prereq === 'q_boss_sundered_smith' && L.critical && L.story && L.target === 'miraFallen', 'the Last Step follows the Smith and hunts the copy (miraFallen), critical + story', L);
+  check(L.targetMaps.length > 0 && L.levelReq >= L.targetMapGate && L.navResolves, "the Last Step's target spawns, is not gated below its maps, and resolves in the navigator", { maps: L.targetMaps, gate: L.targetMapGate, lv: L.levelReq, nav: L.navResolves });
+  check(L.desc.length > 400 && (L.coins | 0) > 0, 'the Last Step carries real prose and pays out', { chars: L.desc.length, coins: L.coins });
+  check(/It is a roll of twelve expeditions/.test(L.desc) && /one line she did not finish: "It was never meant to/.test(L.desc) && /Then tell Lyra what the roll says\.$/.test(L.desc.trim()), "the Last Step carries The Tear VI's roll (twelve expeditions, the unfinished line, tell Lyra)", L.desc.slice(-160));
+}
+check(r.lyraLines, "Lyra's after-the-stair lines key on q_last_step (not the retired q_lyra_last)", r.lyraLines);   // one spine
 check(r.smithCanonIntact, 'the Sundered Smith\'s own story is untouched (chapter V explains the road, not the man)', r.smithCanonIntact);
 check(r.trialNamesAperture, 'the Mirror Self trial names the aperture the prelude explains', r.trialNamesAperture);
 check(errs.length === 0, 'no page errors', errs);

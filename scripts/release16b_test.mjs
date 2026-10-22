@@ -1,13 +1,13 @@
 // RELEASE 16b (round ten story-order playthrough) stays fixed:
 //   [1] the Gate's four endings and the Sixth Crossing card name no Houses or champions ("The stars are waiting." / "the twelve fallen stars")
-//   [2] The Sanctum's Refusal opens at Lv 50 and starts itself once the Last Step is done; the Journal's Next puts it after the Last Step;
+//   [2] The Sanctum's Refusal opens at Lv 55 (one spine) and starts itself once the Last Step is done; the Journal's Next puts it after the Last Step;
 //       a save whose Aetherion fall is recorded (quest unlocked or in hand) gets it completed once, with the Keystone; a kill made with the
 //       quest in hand pays exactly once
 //   [3] the compass ranks a critical offer above a plain one, and an auto-picked plain offer gives way; a hand pick (pin or guide key) is kept
-//   [4] The Tear VI taken after the copy fell is ready to hand in to Hera and its card says the descent is done
+//   [4] one spine: The Tear VI is retired - absent from QUESTS, its roll lives on the Last Step card, Hera offers no turn-in
 //   [5] the Lv 40 nudge with The Distorted Portal done names the master pick, not the portal quest
 //   [6] an accepted quest that falls back to its giver says "Talk to" (Ticket Rush stage 2), never "Accept from"
-//   [7] Lyra's greeting follows her arc (after The Tear IV and The Tear VI)
+//   [7] Lyra's greeting follows her arc (after The Tear IV and The Last Step - one spine)
 //   [8] the early-milestone ladder's last toast says "Every milestone claimed"
 //   node scripts/release16b_test.mjs        PORT / MOJI_GAME_FILE / SERVE_ROOT override
 import { createRequire } from 'node:module'; import path from 'node:path'; import { fileURLToPath } from 'node:url'; import { spawn } from 'node:child_process';
@@ -50,16 +50,16 @@ try {
     out.sky = STORY_BEATS.arrival_sky_beyond.stanzas.map((x) => (typeof x.text === 'function' ? x.text({}) : x.text)).join(' | ');
     window._lxTwelveKnown = () => false; out.gateNo = ['wake', undefined].map((a) => last({ gate_answer: a })); out.skyNo = STORY_BEATS.arrival_sky_beyond.stanzas.map((x) => (typeof x.text === 'function' ? x.text({}) : x.text)).join(' | '); window._lxTwelveKnown = _tk;
     // [2] The Sanctum's Refusal
-    const PAST = ['q_distorted_portal', 'q_barnaby_finish', 'q_boss_sundered_smith', 'q_last_step'];
+    const PAST = ['q_distorted_portal', 'q_boss_sundered_smith', 'q_last_step'];   // one spine: Barnaby IV (q_barnaby_finish) is retired
     out.lv = QUESTS.q_boss_aetherion.levelReq;
     out.chain = ['q_last_step', 'q_hourglass_1', 'q_boss_aetherion'].map((id) => _QUEST_STORY_CHAIN.indexOf(id));
-    reset(50, PAST); tickQuestUnlocks(); out.at50 = { active: !!player.quests.active.q_boss_aetherion, done: !!player.quests.completed.q_boss_aetherion };
-    reset(60, PAST); tickQuestUnlocks(); out.at60 = { active: !!player.quests.active.q_boss_aetherion, done: !!player.quests.completed.q_boss_aetherion };
+    reset(54, PAST); tickQuestUnlocks(); out.at50 = { active: !!player.quests.active.q_boss_aetherion, done: !!player.quests.completed.q_boss_aetherion };
+    reset(55, PAST); tickQuestUnlocks(); out.at60 = { active: !!player.quests.active.q_boss_aetherion, done: !!player.quests.completed.q_boss_aetherion };
     const coins = () => player.mojicoins | 0;
-    reset(60, PAST); player.quests.active.q_boss_aetherion = { progress: 0 }; game.bestiary.aetherion = 1; game.bestiary._boss_aetherion = 1;   // the hunter's save: killed at 53, auto-started at 60
+    reset(60, PAST); player.quests.active.q_boss_aetherion = { progress: 0 }; game.bestiary.aetherion = 1; game.bestiary._boss_aetherion = 1;   // the hunter's save: killed early, auto-started at the door
     let c0 = coins(); tickQuestUnlocks(); const d1 = coins() - c0; c0 = coins(); tickQuestUnlocks(); tickQuestUnlocks();
     out.oldSave = { done: !!player.quests.completed.q_boss_aetherion, keystone: player.dawnFragments.filter((f) => f === 'frag_aetherion').length, paid: d1, again: coins() - c0 };
-    reset(60, PAST); game.bestiary.aetherion = 1;   // killed at the door (Lv 50+) before the quest opened at Lv 60: it unlocks now
+    reset(60, PAST); game.bestiary.aetherion = 1;   // killed before the quest opened: it unlocks now
     tickQuestUnlocks(); out.unlockedFall = { done: !!player.quests.completed.q_boss_aetherion, active: !!player.quests.active.q_boss_aetherion };
     reset(60, PAST); tickQuestUnlocks(); c0 = coins();   // the normal road: quest in hand, then the kill
     tickQuestKill('aetherion', true); game.bestiary.aetherion = 1; game.bestiary._boss_aetherion = 1; tickQuestUnlocks(); tickQuestUnlocks();
@@ -71,11 +71,10 @@ try {
     out.nav.auto = auto([], null); out.nav.pinned = auto(['q_kill_gummy'], null); out.nav.keyed = auto([], 'q_kill_gummy');
     game.qnav = null; game.qnavPins = []; game._qnavByHand = null;
     // [4] The Tear VI
-    reset(55, ['q_lyra_forge', 'q_boss_sundered_smith']);
-    out.t6before = QUESTS.q_lyra_last.desc;
+    // one spine: The Tear V-VI are retired; the roll moved onto the Last Step card
+    reset(55, ['q_boss_sundered_smith']);
+    out.t6 = { gone: !QUESTS.q_lyra_last && !QUESTS.q_lyra_forge && Array.isArray(_LX_RETIRED_QUESTS) && _LX_RETIRED_QUESTS.includes('q_lyra_last'), card: (QUESTS.q_last_step || {}).desc || '' };
     player.quests.completed.q_last_step = 1; game.bestiary.miraFallen = 1;
-    out.t6accept = acceptQuest('q_lyra_last');
-    const a6 = player.quests.active.q_lyra_last || {}; out.t6 = { ready: !!a6.readyToHandIn, desc: QUESTS.q_lyra_last.desc };
     const npcMap = (name) => Object.keys(MAPS).find((id) => (MAPS[id].npcs || []).some((n) => n && n.name === name));
     const text = () => (document.getElementById('dialog-text') || {}).textContent || '';
     const settle = async () => { const d = document.getElementById('dialog'); for (let i = 0; i < 200 && d && d.classList.contains('typing'); i++) await sleep(50); await sleep(150); };
@@ -92,7 +91,7 @@ try {
     // [7] Lyra
     reset(55, []); out.lyra0 = (await talk('Lyra')).text;
     reset(55, ['q_lyra_kin']); out.lyra4 = (await talk('Lyra')).text;
-    reset(55, ['q_lyra_kin', 'q_lyra_last']); out.lyra6 = (await talk('Lyra')).text;
+    reset(55, ['q_lyra_kin', 'q_last_step']); out.lyra6 = (await talk('Lyra')).text;
     // [8] the milestone ladder (source)
     const src = await (await fetch(location.href.split('?')[0])).text();
     out.mile = { now: src.includes('Every milestone claimed'), old: src.includes('Every chapter claimed') };
@@ -101,21 +100,23 @@ try {
   });
   ok('[1] the Gate\'s four endings close "The stars are waiting." and name no Houses', R.gate.every((t) => /The stars are waiting\.$/.test(t) && !/Houses/i.test(t)) && R.gateNo.every((t) => /The road is waiting\.$/.test(t) && !/stars|Houses/i.test(t)), R.gate.map((t) => t.slice(-40)));
   ok('[1] the Sixth Crossing card speaks of the twelve fallen stars, with no houses or champions', /twelve fallen stars/.test(R.sky) && !/house|champion/i.test(R.sky), R.sky);
-  ok('[2] The Sanctum\'s Refusal opens at Lv 60 (per user, 2026-10-12), after the Last Step and Hourglass I in the Journal', R.lv === 60 && R.chain[0] >= 0 && R.chain[0] < R.chain[1] && R.chain[1] < R.chain[2], { lv: R.lv, chain: R.chain });
-  ok('[2] at Lv 50 with the Last Step done it stays shut; at Lv 60 it starts itself', !R.at50.active && !R.at50.done && R.at60.active && !R.at60.done, [R.at50, R.at60]);
+  ok('[2] The Sanctum\'s Refusal opens at Lv 55 (one spine, per user 2026-10-22; was 60), after the Last Step and Hourglass I in the Journal', R.lv === 55 && R.chain[0] >= 0 && R.chain[0] < R.chain[1] && R.chain[1] < R.chain[2], { lv: R.lv, chain: R.chain });
+  ok('[2] at Lv 54 with the Last Step done it stays shut; at Lv 55 it starts itself',   // one spine: door is Lv 55
+    !R.at50.active && !R.at50.done && R.at60.active && !R.at60.done, [R.at50, R.at60]);
   ok('[2] an old save whose fall is recorded (quest in hand) completes it once, with one Keystone', R.oldSave.done && R.oldSave.keystone === 1 && R.oldSave.paid > 0 && R.oldSave.again === 0, R.oldSave);
   ok('[2] a fall made before the quest opened completes it when it unlocks (no second kill asked)', R.unlockedFall.done && !R.unlockedFall.active, R.unlockedFall);
   ok('[2] a kill made with the quest in hand pays once (same payout, one Keystone)', R.kill.done && R.kill.keystone === 1 && R.kill.paid === R.oldSave.paid, R.kill);
   ok('[3] a critical offer ranks above a plain one in the guide list', R.nav.trial >= 0 && R.nav.gummy >= 0 && R.nav.trial < R.nav.gummy, R.nav);
   ok('[3] an auto-picked plain offer gives way to the critical quest', R.nav.auto === 'q_inner_dim_trial', R.nav.auto);
   ok('[3] a hand-picked target is kept (Journal pin, guide key)', R.nav.pinned === 'q_kill_gummy' && R.nav.keyed === 'q_kill_gummy', R.nav);
-  ok('[4] before the copy falls, The Tear VI still sends you down', /Go down to the Last Step/.test(R.t6before), R.t6before.slice(-160));
-  ok('[4] taken after the copy fell, The Tear VI is ready to hand in and its card says the descent is done', R.t6accept && R.t6.ready && /already been to the bottom/.test(R.t6.desc) && /Go to Hera/.test(R.t6.desc) && !/Go down to the Last Step/.test(R.t6.desc), { ready: R.t6.ready, tail: R.t6.desc.slice(-120) });
-  ok('[4] Hera offers the turn-in', Array.isArray(R.t6hera) && R.t6hera.some((o) => /The Tear VI/.test(o)), R.t6hera);
+  ok('[4] one spine: The Tear V-VI are retired (absent from QUESTS, listed in _LX_RETIRED_QUESTS)', R.t6.gone, R.t6.gone);
+  ok('[4] one spine: the Tear VI roll survives on the Last Step card', /It is a roll of twelve expeditions/.test(R.t6.card) && /It was never meant to/.test(R.t6.card) && /Then tell Lyra what the roll says[.]/.test(R.t6.card), R.t6.card.slice(-160));
+  ok('[4] one spine: Hera offers no Tear VI turn-in', Array.isArray(R.t6hera) && !R.t6hera.some((o) => /The Tear VI/.test(o)), R.t6hera);
   ok('[5] the Lv 40 nudge after the portal names the master pick, not the portal quest', R.nudge.some((t) => /master path/.test(t)) && !R.nudge.some((t) => /Find the Talented Smith/.test(t)), R.nudge);
   ok('[6] an accepted Ticket Rush stage 2 says "Talk to" its giver', R.spire && R.spire.verb === 'Talk to', R.spire);
   ok('[7] Lyra greets a newcomer as before', /apprentice in the Academia/.test(R.lyra0), R.lyra0.slice(0, 80));
-  ok('[7] after The Tear IV and The Tear VI her greeting moves on', /You put the copies down/.test(R.lyra4) && /Hera told me what is written at the bottom/.test(R.lyra6) && !/apprentice in the Academia/.test(R.lyra6), [R.lyra4.slice(0, 60), R.lyra6.slice(0, 60)]);
+  ok('[7] after The Tear IV and The Last Step her greeting moves on',   // one spine: keyed on q_last_step (was q_lyra_last)
+    /You put the copies down/.test(R.lyra4) && /You told me what is written at the bottom/.test(R.lyra6) && !/apprentice in the Academia/.test(R.lyra6), [R.lyra4.slice(0, 60), R.lyra6.slice(0, 60)]);
   ok('[8] the early-milestone ladder says "Every milestone claimed"', R.mile.now && !R.mile.old, R.mile);
   ok('no page errors', errs.length === 0, errs.slice(0, 3));
 } catch (e) { fail++; console.log('FAIL harness: ' + String(e.message).slice(0, 300)); }

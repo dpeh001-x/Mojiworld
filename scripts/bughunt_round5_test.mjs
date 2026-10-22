@@ -1,6 +1,7 @@
 // BUG HUNT, ROUND 5 (2026-10-11) - findings from four read-only hunters, each proven in the running game. Base FAIL / fix PASS.
 //   [1] Aetherion's Gate opens with its white flash and burst again (v0.30.1727's comment had swallowed the call)
 //   [2] a monster frame the retry brings back is right-sized again, and coming back online re-arms a spent retry budget
+//   [8] a hand-in visit quest waits for its giver (one spine: a stand-in, The Order Book is retired)
 //   [3] on a phone, every post-office hint names the Postal Wisp (there is no P on the touch deck)
 //   [4] a door asks "Leave the fight?" right after a Gravitos form change (full HP, but two forms beaten)
 //   [5] the W map's "back to" strip asks too, before it charges the fare
@@ -187,12 +188,15 @@ try {
       const card = document.querySelector('#powerup-modal .powerup-card'); if (card) card.click(); await wait(200);
       out.fullBag = { card: !!card, kept: !!game._pendingBossBoon, bag: player.boons.length };
       game._pendingBossBoon = null; player.boons = bs; clear(); }
-    // H12-1 the Order Book waits for Barnaby
-    { const id = 'q_barnaby_roll', q = QUESTS[id];
+    // H12-1 a hand-in visit quest waits for its giver. one spine: "II - The Order Book" (the only hand-in visit) is retired, so a stand-in
+    // with its shape (Barnaby, visit sundered_forge, guaranteed gear) carries the check
+    out.orderBookGone = !QUESTS.q_barnaby_roll;
+    QUESTS.__bh5_visit = { name: 'Stand-in Order Book', icon: 'X', levelReq: 45, giver: 'Barnaby', handIn: true, kind: 'visit', target: 'sundered_forge', count: 1, rewards: { mojicoins: 100, exp: 10, gearChance: 1.00, gearTier: 4 } };
+    { const id = '__bh5_visit', q = QUESTS[id];
       delete player.quests.completed[id]; player.quests.active[id] = { progress: 0 };
       loadMap('sundered_forge'); for (let i = 0; i < 20; i++) { await wait(100); clear(); }
       const a = player.quests.active[id]; out.orderBook = { kind: q && q.kind, handIn: !!(q && q.handIn), active: !!a, ready: !!(a && a.readyToHandIn), completed: !!player.quests.completed[id] };
-      delete player.quests.active[id]; delete player.quests.completed[id]; loadMap('forest'); game.paused = false; await steps(5); clear(); }
+      delete player.quests.active[id]; delete player.quests.completed[id]; delete QUESTS[id]; loadMap('forest'); game.paused = false; await steps(5); clear(); }
     // H12-7 / H12-8 a co-op guest: a Rush echo ticks no quest; a real boss kill stamps when
     { const was = { host: net.isHost, hostId: net.hostId }, tq = window.tickQuestKill; let ticks = 0; window.tickQuestKill = function () { ticks++; return tq.apply(this, arguments); };
       try {
@@ -210,7 +214,7 @@ try {
     { const src = await (await fetch(location.pathname)).text(); out.scrollPromise = src.includes('exchanged for Setshards on reload'); }
     return out;
   });
-  ok('[8] "The Order Book" waits for Barnaby (its gear is not wiped by the loading map)', ec.orderBook.kind === 'visit' && ec.orderBook.active && ec.orderBook.ready && !ec.orderBook.completed, ec.orderBook);
+  ok('[8] a hand-in visit quest waits for its giver (its gear is not wiped by the loading map); The Order Book itself is retired', ec.orderBookGone && ec.orderBook.kind === 'visit' && ec.orderBook.active && ec.orderBook.ready && !ec.orderBook.completed, ec.orderBook);
   ok('[9] a sale pays the price it quoted, Slaughter Ladder or not', ec.sale.withLadder === ec.sale.without && ec.sale.without > 0, ec.sale);
   ok('[10] the Story Path is not scored inside a Tower run (its rung waits)', ec.rungInRun === false, { rungInRun: ec.rungInRun });
   ok('[11] "Legendary Find" counts a worn legendary; "Attuned" means every slot you have', ec.legendaryWorn === true && ec.attuned.cap < 3 && ec.attuned.unlocked === true, { legendaryWorn: ec.legendaryWorn, attuned: ec.attuned });

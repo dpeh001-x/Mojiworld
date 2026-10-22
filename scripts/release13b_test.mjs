@@ -6,7 +6,7 @@
 //     the Spire live only in the Expedition tower, whose kills are never recorded)
 //   3 with all twelve signs down: the Amnesiac's "What is the Everdawn?" (Act 3) and "Why was I sent here?" pages and the
 //     Journal's Act 3 summary are past tense; before, unchanged
-//   4 after the ending Barnaby's Craft page and "What did you make?" have bare hands; before, gloved
+//   4 after the ending Barnaby's Craft page and "What did you make?" (open once The Forge That Broke is done - one spine) have bare hands; before, gloved
 //   5 The Twelve Houses: a navigator destination (Zodiac Sanctum) and a tracker line; Lyra's cut names Elder Arlen and his map;
 //     the Master Conductor's two quests say "Warp with Milo" (tracker + navigator)
 //   node scripts/release13b_test.mjs        MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
@@ -66,7 +66,7 @@ try {
     game.bestiary._boss_kingKrook = 1;
     openNPC(marb); await settle(); out.marbAll = text(); await close();
     // ---------------- 4. Barnaby ----------------
-    const barn = npc('Barnaby'); player.quests.completed.q_barnaby_finish = 1;
+    const barn = npc('Barnaby'); player.quests.completed.q_boss_sundered_smith = 1;   // one spine: "What did you make?" keys on The Forge That Broke (Barnaby IV is retired)
     const barnPages = async () => { const r = {}; game._brokMenu = 'craft'; openNPC(barn); await settle(); r.craft = text(); await close();
       game._brokMenu = null; openNPC(barn); await settle(); r.madeOpt = await click(/What did you make\?/); await settle(); r.made = text(); await close(); return r; };
     out.barnBefore = await barnPages();

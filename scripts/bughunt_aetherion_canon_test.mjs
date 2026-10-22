@@ -36,10 +36,10 @@ try {
     const out = {}; const codexP = (LORE_WORLD_HTML.match(/<p>[^]*?<\/p>/g) || []).find((p) => /Aetherion/.test(p)) || '';
     const tx = (h) => String(h).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
     const stanza0 = () => { const t = STORY_BEATS.warden_falls.stanzas[0].text; return typeof t === 'function' ? t({}) : t; };
-    out.texts = { 'the Sanctum quest': QUESTS.q_boss_aetherion.desc, 'Hourglass V': QUESTS.q_hourglass_5.desc, 'Lyra VI': QUESTS.q_lyra_last.desc, 'the Codex page': tx(codexP), 'the bestiary card': BOSS_INTROS.aetherion.lore, "the boss's own line": LX_BOSS_VOICE.aetherion, 'the epitaph': EVERDAWN_EPITAPHS.aetherion, 'the Amnesiac': stanza0(), 'Master Kaze': MONSTER_BESTIARY.aetherion.flavor };
+    out.texts = { 'the Sanctum quest': QUESTS.q_boss_aetherion.desc, 'Hourglass V': QUESTS.q_hourglass_5.desc, 'the Last Step': QUESTS.q_last_step.desc,   /* one spine: Lyra VI retired, its roll moved to the Last Step card */ 'the Codex page': tx(codexP), 'the bestiary card': BOSS_INTROS.aetherion.lore, "the boss's own line": LX_BOSS_VOICE.aetherion, 'the epitaph': EVERDAWN_EPITAPHS.aetherion, 'the Amnesiac': stanza0(), 'Master Kaze': MONSTER_BESTIARY.aetherion.flavor };
     out.names = { mon: monsterTypes.aetherion.name, title: BOSS_INTROS.aetherion.title, q: QUESTS.q_boss_aetherion.name, h5: QUESTS.q_hourglass_5.name, frag: DAWN_FRAGMENTS.frag_aetherion && DAWN_FRAGMENTS.frag_aetherion.name, from: DAWN_FRAGMENTS.frag_aetherion && DAWN_FRAGMENTS.frag_aetherion.from, ach: (ACHIEVEMENTS.find((a) => a.id === 'aetherionDown') || {}).name };
     out.acts = EVERDAWN_ACTS.map((a) => a.blurb).join(' | ');
-    out.q3 = QUESTS.q_boss_aetherion.desc; out.codex = tx(codexP); out.lyra = QUESTS.q_lyra_last.desc; out.voice = LX_BOSS_VOICE.aetherion; out.epi = EVERDAWN_EPITAPHS.aetherion; out.lore = BOSS_INTROS.aetherion.lore;
+    out.q3 = QUESTS.q_boss_aetherion.desc; out.codex = tx(codexP); out.lyra = QUESTS.q_last_step.desc; out.lyraGone = !QUESTS.q_lyra_last;   /* one spine */ out.voice = LX_BOSS_VOICE.aetherion; out.epi = EVERDAWN_EPITAPHS.aetherion; out.lore = BOSS_INTROS.aetherion.lore;
     out.gravitosFrags = QUESTS.q_boss_gravitos && QUESTS.q_boss_gravitos.desc;
     out.amnesiacPost = (() => { const f = window._lxSiblingsKnown; window._lxSiblingsKnown = () => true; try { return stanza0(); } finally { window._lxSiblingsKnown = f; } })();
     return out;
@@ -47,14 +47,17 @@ try {
   const T = R.texts, he = /\b(he|his|him|himself)\b/i, name = /\bMira\b/;
   check(R.names.mon === 'Aetherion, the Tearborn' && R.names.title === 'The Tearborn' && R.names.from === 'Aetherion, the Tearborn', 'her name everywhere is "Aetherion, the Tearborn"', J(R.names));
   check(R.names.q === "The Sanctum's Refusal" && R.names.h5 === 'Hourglass V \u2014 The Tearborn Speaks' && R.names.frag === 'Sanctum Keystone' && R.names.ach === 'Let Her Go', 'her quests, her fragment and her achievement drop "the Warden" / "Shardfather"', J(R.names));
-  // the two male references that are not about her: Vesper's note (Lyra VI) and the Amnesiac's own stage direction
-  const OTHERS = { 'Lyra VI': /because his note says/g, 'the Amnesiac': /\*[^*]*\*/g };
+  // the two male references that are not about her: the Smith's hammer (the Last Step) and the Amnesiac's own stage direction
+  const OTHERS = { 'the Last Step': /The Smith set his hammer down, and his ashes did not fall./g,   // one spine: was Vesper's note on Lyra VI
+  'the Amnesiac': /\*[^*]*\*/g };
   for (const [k, v0] of Object.entries(T)) if (v0) { const v = OTHERS[k] ? v0.replace(OTHERS[k], '') : v0; check(!he.test(v), k + ': no he / his / him for her', (v.match(/.{0,40}\b(he|his|him|himself)\b.{0,30}/i) || [''])[0]); }
   for (const [k, v] of Object.entries({ ...T, 'the Act blurbs': R.acts })) check(!name.test(v), k + ': her name is not used (it is told only at the gate)');
-  for (const [k, v] of Object.entries({ ...T, ...R.names })) if (k !== 'the Amnesiac' && k !== 'Lyra VI') check(!/Warden/.test(String(v)), k + ': nothing of hers is called a Warden (the Cap-Warden is another character)');
+  for (const [k, v] of Object.entries({ ...T, ...R.names })) if (k !== 'the Amnesiac' && k !== 'the Last Step')   // one spine: was Lyra VI
+    check(!/Warden/.test(String(v)), k + ': nothing of hers is called a Warden (the Cap-Warden is another character)');
   check(/woman at the gate/.test(R.q3) && /seal on her dark-magic blade broke/.test(R.q3) && /she has guarded the break/.test(R.q3) && /the woman inside her goes free/.test(R.q3), 'the Sanctum quest: the woman at the gate herself, distorted when the seal on her dark-magic blade broke, who goes free when she yields', R.q3.slice(60, 400));
   check(/the Tearborn, who broke the sky/.test(R.codex) && /distorted into this form when the seal on her dark-magic blade broke/.test(R.codex) && /Every hero who passed the gate tried to move her/.test(R.codex), 'the Codex page says the same, and that none of the heroes could move her', R.codex.slice(-260));
-  check(/distorted copy of the first to turn back from the gate/.test(R.lyra) && /the glass parts on the Sanctum, and the one it was copied from waits there/.test(R.lyra), "Lyra VI matches the films: the Last Step's copy is distorted, the glass parts on the Sanctum when it falls, and the one it was copied from waits there", R.lyra.slice(300, 520));
+  // one spine: Lyra VI is retired; the Last Step card carries the copy, the Sanctum card the glass breaking when it falls
+  check(R.lyraGone && /distorted copy of the first who turned back from the gate/.test(R.lyra) && /It is a roll of twelve expeditions/.test(R.lyra) && /^The copy fell, and the glass stair shattered./.test(R.q3), "Lyra VI is retired and the films still match: the Last Step's copy is distorted (its roll moved there), and the Sanctum card opens on the glass breaking when it falls", R.lyra.slice(300, 520));
   check(/dark magic/.test(R.lore) && /It is what the seal made of her\./.test(R.lore) && /She was the cut once. She is the wound now\./.test(R.lore), 'the bestiary card: the sealed blade, what the seal made of her; the answer once, the wound now', R.lore);
   check(/Let her go\./.test(R.voice) && /what the seal left of her/.test(R.voice) && /took her shape/.test(R.voice), "the boss's own line: the tear she did not wipe away, the cold gave me her face, let her go", R.voice);
   check(/what the seal made of a woman/.test(R.epi) && /that soul goes free/.test(R.epi) && /she looks relieved/.test(R.epi), 'the epitaph: she looks relieved and the soul goes free', R.epi);

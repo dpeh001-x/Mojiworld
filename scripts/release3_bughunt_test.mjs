@@ -63,7 +63,8 @@ try {
     out.q1 = { progress: player.quests.active.q_zodiac_twelve.progress, tracker: document.getElementById('quest-tracker').textContent.replace(/\s+/g, ' ').slice(0, 200) };
     // Q2
     _lxNormaliseQuestCounts();
-    out.q2 = ['q_lyra_kin', 'q_barnaby_five', 'q_dream_closer'].map((id) => ({ id, count: QUESTS[id].count, sum: QUESTS[id].objectives.reduce((s, o) => s + o.count, 0) }));
+    out.q2gone = !QUESTS.q_barnaby_five;   // one spine: Barnaby I is retired; q_long_dawn_2 (four objectives) takes its seat
+    out.q2 = ['q_lyra_kin', 'q_long_dawn_2', 'q_dream_closer'].map((id) => ({ id, count: QUESTS[id].count, sum: QUESTS[id].objectives.reduce((s, o) => s + o.count, 0) }));
     out.q2all = Object.keys(QUESTS).filter((id) => Array.isArray(QUESTS[id].objectives) && QUESTS[id].objectives.length && QUESTS[id].count !== QUESTS[id].objectives.reduce((s, o) => s + o.count, 0));
     // Q3
     player.quests = { active: {}, completed: {}, unlocked: {} }; _ensureQuests(); player.level = 40;
@@ -93,7 +94,7 @@ try {
   ok('B2. no lava falls in Krook\'s arena once he is down', R.b2.found && R.b2.dead && R.b2.lava === 0, R.b2);
   ok('B3. a split twin does not feed the bestiary a second kill', R.b3.src && !R.b3.old, R.b3);
   ok('Q1. the Twelve Houses counts its beaten signs (11/12)', R.q1.progress === 11, R.q1);
-  ok('Q2. every multi-objective quest counts the total of its objectives', R.q2.every((x) => x.count === x.sum) && R.q2all.length === 0, { q2: R.q2, off: R.q2all });
+  ok('Q2. every multi-objective quest counts the total of its objectives', R.q2gone && R.q2.every((x) => x.count === x.sum) && R.q2all.length === 0, { q2: R.q2, off: R.q2all });   // one spine: q2gone
   ok('Q3. the guide skips an objective already done', R.q3.kind === 'hunt' && R.q3.who && R.q3.who !== R.q3.first, R.q3);
   ok('Q4. the Track toast names the creature, not its id', /Gummibeau/.test(R.q4) && !/^gummy/.test(R.q4), R.q4);
   ok('U1. Esc from a slider inside Settings closes Settings', u1open && !u1after, { u1open, u1after });

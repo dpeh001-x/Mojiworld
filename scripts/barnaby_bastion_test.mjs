@@ -5,6 +5,9 @@
 //      nowhere else - the Frosted Mansion keeps neither him nor the anvil;
 //   2. REACH: the talk key picks him from the courtyard floor under the step, and his card names him;
 //   3. LEVELS: Barnaby II-IV and Lyra V open at 45 again, the Kindest Hand at 50; the Journal routes them to the Bastion;
+//      one spine (v0.30.1851, per user): Barnaby I-IV and Lyra V are retired and their lore is on the Smith's card (Lv 45),
+//      so [3] pins the retirement + the Smith / Kindest Hand levels, [5] reads the chapters' lines off the Smith card, and
+//      "What did you make?" waits on the Smith;
 //   4. NO MANSION: no quest, shop line or Will page sends you to the Frosted Mansion or calls him "of Glasswind";
 //   5. CANON: his forge and its blades are older than the Bastion - the woman at the gate (Mira, per user, in place of a smith
 //      "Mara" nobody ever met) left them and walked up the road, so the forge stood cold the night the sky fell (why that night
@@ -77,11 +80,12 @@ try {
       armory: (MAP_PROPS.everdawn_megamall || []).some((q) => q.key === 'mall_shop_armory' && Math.abs(q.x - mb.x) <= 40) && (MAP_PROPS.everdawn_megamall || []).some((q) => q.key === 'bastion_anvil' && Math.abs(q.x - mb.x) <= 120), brokHere: !!brok() } : null; }
     const t0 = await talk(); out.card = t0; await close();
     // ---- 3. levels and routing
-    out.lv = ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish', 'q_lyra_forge', 'q_kindest_hand'].map((id) => QUESTS[id].levelReq);
-    out.nav = ['q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish', 'q_lyra_forge'].map((id) => { const d = _qnavDest(id); return d && d.map; });
+    out.retired = ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish', 'q_lyra_forge'].filter((id) => !!QUESTS[id]);   // one spine: all retired
+    out.lv = ['q_boss_sundered_smith', 'q_kindest_hand'].map((id) => (QUESTS[id] || {}).levelReq);   // one spine
+    // one spine: no Barnaby chapter is left for the Journal to route (the Smith's quest hunts the Sundered Forge).
     // ---- 4/5. text
-    const D = (id) => QUESTS[id].desc || '';
-    out.descs = ['q_barnaby_five', 'q_barnaby_roll', 'q_barnaby_hands', 'q_barnaby_finish', 'q_lyra_forge', 'q_kindest_hand'].map(D);
+    const D = (id) => (QUESTS[id] || {}).desc || '';
+    out.descs = ['q_boss_sundered_smith', 'q_kindest_hand'].map(D);   // one spine: the Smith card carries Barnaby I-IV + Lyra V
     out.voice = Object.values(LX_SHOP_VOICE.Barnaby).join(' ');
     out.epilogue = document.documentElement.outerHTML.includes('The smith who was put somewhere small.');
     // the Codex's Doomed Expedition page: her blades, and her name only once she has told it
@@ -96,14 +100,14 @@ try {
     { const t0 = await talk(); out.pre = { card: t0.text, opts: t0.opts, bub: null }; } await close(); out.pre.bub = await bubble();
     game.bestiary._boss_zodiac_taurus = 1;
     { const t1 = await talk(); out.taur = { card: t1.text, opts: t1.opts, bub: null }; } await close(); out.taur.bub = await bubble();
-    player.quests = player.quests || { active: {}, completed: {} }; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_barnaby_finish = true;
-    { await talk(); const had = await click(/What did you make\?/); await settle(); out.made = had ? text() : null; await close(); } delete player.quests.completed.q_barnaby_finish;
+    player.quests = player.quests || { active: {}, completed: {} }; player.quests.completed = player.quests.completed || {}; player.quests.completed.q_boss_sundered_smith = true;   // one spine: was q_barnaby_finish
+    { await talk(); const had = await click(/What did you make\?/); await settle(); out.made = had ? text() : null; await close(); } delete player.quests.completed.q_boss_sundered_smith;
     player._storyBeatsSeen.epilogue_gravitos = true;
     out.dawn = { card: (await talk()).text, bub: null }; await close(); out.dawn.bub = await bubble();
     // ---- 7. caps
     const OWN = (typeof NPC_CHAT_LINES_OWN === 'object' && NPC_CHAT_LINES_OWN.Barnaby) || {};
     out.bubbles = [].concat(OWN.base || [], OWN.dawn || []);
-    out.caps = { chapters: out.descs.slice(0, 5).map(words), lines: [out.made, (typeof _lxBarnabyLine === 'function') ? _lxBarnabyLine() : '', LX_SHOP_VOICE.Barnaby.intro].map(words),
+    out.caps = { chapters: out.descs.slice(0, 1).map(words) /* one spine: the Smith card */, lines: [out.made, (typeof _lxBarnabyLine === 'function') ? _lxBarnabyLine() : '', LX_SHOP_VOICE.Barnaby.intro].map(words),
       bubbles: out.bubbles.filter((l) => words(l) > 6 || /\bPress [A-Z0-9]\b/.test(l)) };
     return out;
   });
@@ -113,17 +117,17 @@ try {
     && !R.barnInBastion && R.mall && R.mall.onGround && R.mall.armory && !R.mall.brokHere, { brok: R.brokLists, barnaby: R.lists, placed: P, mall: R.mall });
   ok('[1] the Frosted Mansion keeps neither him nor his anvil', !R.mansion.npc && !R.mansion.anvil, R.mansion);
   ok('[2] standing beside him on the courtyard floor the talk key picks Brok; in the Megamall Barnaby\'s card names him', R.reach.target === 'Brok' && /Barnaby/.test(R.card.text), { reach: R.reach, card: R.card.text.slice(0, 90) });
-  ok('[3] Barnaby I-IV and Lyra V open at 45, the Kindest Hand at 50', JSON.stringify(R.lv) === '[45,45,45,45,45,50]', R.lv);
-  ok('[3] the Journal routes his quests to the Megamall', R.nav.every((m) => m === 'everdawn_megamall'), R.nav);
+  ok('[3] one spine: Barnaby I-IV and Lyra V are retired; the Smith card that carries them opens at 45, the Kindest Hand at 50', R.retired.length === 0 && JSON.stringify(R.lv) === '[45,50]', { left: R.retired, lv: R.lv });
   const all = R.descs.join(' ') + ' ' + R.voice + ' ' + R.will + ' ' + [R.pre.card, R.taur.card, R.made, R.dawn.card].join(' ');
   ok('[4] nothing sends you to the Frosted Mansion for him or calls him "of Glasswind"; the smith has no frost', !/Frosted Mansion|Glasswind|frost|too cold to touch/i.test(all), (all.match(/.{0,40}(Frosted Mansion|Glasswind|frost|too cold).{0,30}/i) || [''])[0]);
-  const [five, roll, , fin, forge] = R.descs;
-  ok('[5] I: the Bastion\'s old smith, the officer\'s "put somewhere small" (the epilogue\'s receipt), his stall in the Everdawn Megamall',
-    /Barnaby, the Bastion's old smith/.test(five) && /put somewhere small/.test(five) && /His stall is in the Everdawn Megamall\./.test(five) && R.epilogue, five.slice(0, 120));
-  ok('[5] II: the forge\'s old bench, the blade for the woman at the gate that never closed, and Will\'s white blade', /on his bench/.test(roll) && /a blade for the woman at the gate/.test(roll) && /Will's white blade/.test(roll), roll.slice(60, 260));
-  ok('[5] IV: the Smith armed the heroes who climbed, the Bastion\'s own among them (the Twelve are named only after Aetherion falls)', /armed the heroes who climbed, the Bastion's own among them/.test(fin) && !/the Twelve/.test(fin), fin.slice(-330, -150));
-  ok('[5] V: a blade older than the Bastion; the night the sky fell its forge had stood cold since the woman at the gate walked up the road',
-    /a Bastion blade older than the Bastion/.test(forge) && /Before the sky fell, the woman at the gate came to his bench with one order/.test(forge) && /She took it up the road and left her forge cold/.test(forge) && /^Barnaby starts with someone else/.test(forge), forge.slice(0, 160));
+  const [smith] = R.descs;   // one spine: Barnaby I-IV and Lyra V are folded into the Smith card
+  // one spine: Barnaby I's officer theory + stall line and Barnaby II's Will's-blade line went with their chapters
+  ok('[5] I: the Smith card names Barnaby, the Bastion\'s old smith; the epilogue keeps "put somewhere small"',
+    /Barnaby, the Bastion's old smith/.test(smith) && R.epilogue, smith.slice(0, 120));
+  ok('[5] II: the woman at the gate brought one order to his bench, "Make it honest."', /the woman at the gate came to his bench with one order/.test(smith) && /Make it honest\./.test(smith), smith.slice(200, 420));   // one spine
+  ok('[5] IV: the Smith armed the heroes who climbed (the Twelve are named only after Aetherion falls)', /He armed the heroes who climbed/.test(smith) && !/the Twelve/.test(smith), smith.slice(-330, -150));   // one spine
+  ok('[5] V: before the sky fell she came with one order, took the blade up the road and left her forge cold',   // one spine: "older than the Bastion" stays in the Codex check below
+    /Before the sky fell, the woman at the gate came to his bench with one order/.test(smith) && /She took it up the road and left her forge cold/.test(smith), smith.slice(180, 340));
   ok('[5] his card and Will: he kept the forge four years, the woman at the gate left it and its blades, it has a new smith, he built his own forge (his card names no other shopkeeper); "Brok keeps it now."; no forge now."; nobody names her',
     /I kept the Bastion's forge four years\./.test(R.voice) && /the woman at the gate left it cold, every rack full/.test(R.voice) && /It has a new smith\./.test(R.voice) && /I built my own forge down here\./.test(R.voice) && !/Brok|\bher\b|\bhers\b/.test(R.voice)
     && /the woman at the gate left them racked in her forge, and none has broken\. Brok keeps it now\./.test(R.will)
@@ -132,9 +136,9 @@ try {
     /Bastion blades made by the woman at the gate, older than the Bastion itself/.test(R.cdx.before) && /Bastion blades made by Mira, older than the Bastion itself/.test(R.cdx.after) && !/Mira/.test(R.cdx.before) && !R.mara,
     { before: (R.cdx.before.match(/finest ever made.{0,90}/) || [''])[0], after: (R.cdx.after.match(/finest ever made.{0,60}/) || [''])[0], mara: R.mara });
   ok('[6] his card carries no oath: no "Where did you stand" option, no breach, no gate; his bubble comes from his own pool', !R.pre.opts.some((o) => /Where did you stand/.test(o)) && !/We stand until|breach|SOMEONE PUSHES|The gate/.test(R.pre.card + R.taur.card + R.made) && R.pre.bub === 'Gloves stay on.' && R.taur.bub === 'Gloves stay on.', { opts: R.pre.opts, bub: R.pre.bub });
-  ok('[6] after Barnaby III "What did you make?" is his confession: a blade for the woman who walked up the road, something he could not name, the stay-with-the-iron regret', /A blade, for the woman who walked up the road/.test(R.made || '') && /fuse magic into the steel/.test(R.made || '') && /Iron would have told me no/.test(R.made || '') && !/Smith|Sundered|Twelve|Zodiac|Mira/.test(R.made || ''), (R.made || '').slice(0, 140));
+  ok('[6] after the Smith (one spine: was Barnaby IV) "What did you make?" is his confession: a blade for the woman who walked up the road, something he could not name, the stay-with-the-iron regret', /A blade, for the woman who walked up the road/.test(R.made || '') && /fuse magic into the steel/.test(R.made || '') && /Iron would have told me no/.test(R.made || '') && !/Smith|Sundered|Twelve|Zodiac|Mira/.test(R.made || ''), (R.made || '').slice(0, 140));
   ok('[6] after the ending: his gloves stay off, the tear is shut, plain iron he can name', /gloves lie on the bench/.test(R.dawn.card) && /nothing I cannot name/.test(R.dawn.card) && R.dawn.bub === 'Gloves off. First morning.', { card: R.dawn.card.slice(0, 120), bub: R.dawn.bub });
-  ok('[7] chapters <= 190 words (170 until the line was given room, per user), his lines <= 60, bubbles <= 6 and naming no key', R.caps.chapters.every((w) => w <= 190) && R.caps.lines.every((w) => w > 0 && w <= 60) && R.caps.bubbles.length === 0 && R.bubbles.length >= 10, R.caps);
+  ok('[7] the Smith card <= 230 words (one spine: it carries Barnaby I-IV + Lyra V), his lines <= 60, bubbles <= 6 and naming no key', R.caps.chapters.every((w) => w <= 230) && R.caps.lines.every((w) => w > 0 && w <= 60) && R.caps.bubbles.length === 0 && R.bubbles.length >= 10, R.caps);
   ok('[8] no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 } catch (e) { ok('harness: ' + String(e.message).slice(0, 200), false); }
 await browser.close(); server.kill();

@@ -4,7 +4,7 @@
 // Text only, no quest (so the story-prose cap is untouched):
 //   1. Lv 10-35, once: his card says gloves stay on - a smith never works in a material he cannot name, and he broke the rule once;
 //   2. Lv 36+, until the Distorted Portal is done, once: look at the young smith's face; he made a thing he should not have;
-//   3. after Barnaby III: 'What did you make?' - a blade for the woman who walked up the road, fuse magic into the steel, a mouth in the town, regret;
+//   3. after the Smith (one spine, v0.30.1851: was Barnaby III/IV): 'What did you make?' - a blade for the woman who walked up the road, fuse magic into the steel, a mouth in the town, regret;
 //   4. Nurse Joyce (Lv 15+) and Old Arlen (Lv 25+) each carry one rumour from Brok's list, heard thirty levels early;
 //   5. none of it stands an oath, guards, holds a door or names the Smith, the Twelve or Mira; every line is <= 60 words; 6. no page errors.
 //   node scripts/barnaby_buildup_test.mjs     MOJI_SERVE_ROOT / MOJI_GAME_FILE / PORT override
@@ -48,9 +48,9 @@ try {
     fresh(38, { q_distorted_portal: true }); out.done38 = (await talk('Barnaby')).text; await close();
     fresh(60, { q_distorted_portal: true }); out.lv60 = (await talk('Barnaby')).text; await close();
     fresh(60, { q_distorted_portal: true }); out.before3 = (await talk('Barnaby')).opts; await close();
-    fresh(60, { q_distorted_portal: true, q_barnaby_finish: true }); out.after3opts = (await talk('Barnaby')).opts; await close();
+    fresh(60, { q_distorted_portal: true, q_boss_sundered_smith: true }); out.after3opts = (await talk('Barnaby')).opts; await close(); // one spine: Barnaby IV is retired, the gate is the Smith
     out.made = await ask('Barnaby', /What did you make\?/);
-    fresh(60, { q_distorted_portal: true, q_barnaby_finish: true, q_last_step: true }); out.lastAns = await ask('Barnaby', /I found her at the bottom of the stair\./); out.lastOpts = (await talk('Barnaby')).opts; await close();
+    fresh(60, { q_distorted_portal: true, q_boss_sundered_smith: true, q_last_step: true }); out.lastAns = await ask('Barnaby', /I found her at the bottom of the stair\./); out.lastOpts = (await talk('Barnaby')).opts; await close();
     fresh(14); out.joyce14 = (await talk('Nurse Joyce')).opts; await close();
     fresh(15); out.joyce15 = await ask('Nurse Joyce', /Do you know Barnaby the smith\?/);
     await go('town', 400); await sleep(400);
@@ -68,7 +68,7 @@ try {
   ok('[1] below Lv 10 the card has neither line', !/Gloves stay on|young smith/.test(R.lv5 || ''), (R.lv5 || '').slice(0, 80));
   ok('[2] Lv 38: look at the young smith\'s face; a thing he made once and should not have - shown once', /If the tear shows you a young smith, look at his face/.test(lv38) && /There is a thing I made once\./.test(lv38) && !/should not have/.test(lv38) && !/young smith/.test(R.lv38b || ''), lv38.slice(0, 170));
   ok('[2] it is gone once the Distorted Portal is done', !/young smith|Gloves stay on/.test((R.done38 || '') + (R.lv60 || '')), [(R.done38 || '').slice(0, 60), (R.lv60 || '').slice(0, 60)]);
-  ok('[3] "What did you make?" appears only after Barnaby IV (the quest tells it first, the shop answers quietly after)', !R.before3.some((o) => /What did you make/.test(o)) && R.after3opts.some((o) => /What did you make/.test(o)), [R.before3, R.after3opts]);
+  ok('[3] "What did you make?" appears only after the Smith falls (one spine: was Barnaby IV; the quest tells it first, the shop answers quietly after)', !R.before3.some((o) => /What did you make/.test(o)) && R.after3opts.some((o) => /What did you make/.test(o)), [R.before3, R.after3opts]);
   ok('[3] the answer: a blade for the woman who walked up the road, fuse magic into the steel, a mouth in the town, and he should have stayed with the iron', /A blade, for the woman who walked up the road/.test(R.made || '') && /fuse magic into the steel/.test(R.made || '') && /a mouth in the town/.test(R.made || '') && /Iron would have told me no/.test(R.made || '') && /She asked for honest\. I gave her perfect/.test(R.made || ''), (R.made || '').slice(0, 160));
   ok('[3] "I found her at the bottom of the stair." appears only after the Last Step, and ends on the crossed-out word', !R.before3.some((o) => /bottom of the stair/.test(o)) && R.lastOpts.some((o) => /bottom of the stair/.test(o)) && /She wrote "no hurry" on the ticket\. I finished it that night\./.test(R.lastAns || '') && /crosses out one word, and writes it again in his own poor hand/.test(R.lastAns || ''), (R.lastAns || '').slice(0, 160));
   ok('[4] Nurse Joyce: no option at Lv 14, the burns that moved by Thursday at Lv 15', !R.joyce14.some((o) => /Barnaby/.test(o)) && /By Thursday the scars had moved/.test(R.joyce15 || ''), [R.joyce14, (R.joyce15 || '').slice(0, 80)]);
