@@ -119,3 +119,7 @@ server-side but not yet applied on login.
 | `src/index.js` | Worker (routes WS to the DO) + `MojiRoom` Durable Object (relay + persistence) |
 | `wrangler.toml` | Worker + DO config (SQLite class = free plan) |
 | `_cf_test.mjs` | Local protocol + persistence test (13 assertions) |
+
+## Feedback portal (v0.30.1851)
+
+The in-game **Feedback & Bug Reports** panel posts to this Worker (`POST /api/feedback`), which keeps the reports in their own Durable Object instance (`feedback`) so they never queue behind the relay. Read and triage them at `/feedback-admin` behind the `FEEDBACK_ADMIN_KEY` secret; `FEEDBACK_WEBHOOK` (optional) posts each new report to Discord/Slack. Setup, the API and the privacy notes: [`docs/guides/FEEDBACK_PORTAL.md`](../docs/guides/FEEDBACK_PORTAL.md). Tests: `node _feedback_test.mjs`, `node _feedback_worker_test.mjs`, `node _feedback_admin_ui_test.mjs` (no deploy needed).

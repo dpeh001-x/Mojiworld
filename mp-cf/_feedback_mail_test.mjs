@@ -1,0 +1,62 @@
+// FEEDBACK PORTAL email (mp-cf/src/feedback_mail.js): the message, both transports, the failure modes, and the whole path from a player's POST to a mail request.   node mp-cf/_feedback_mail_test.mjs
+import http from 'node:http';
+import { sendReportMail, buildMime, mailSubject, mailText, encodeHeader, MAIL_TO_DEFAULT, MAIL_FROM_DEFAULT } from './src/feedback_mail.js';
+import { feedbackApi } from './src/feedback_api.js';
+let pass = 0, fail = 0; const ok = (c, m, x) => { if (c) pass++; else fail++; console.log((c ? '  PASS ' : '  FAIL ') + m + (x !== undefined && !c ? '  [' + JSON.stringify(x).slice(0, 240) + ']' : '')); };
+const jpeg = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/yQALCAABAAEBAREA/8wABgAQEAX/2gAIAQEAAD8A0s8g/9k=';
+const rec = (o) => ({ id: '1800000000000-abc123', t: 1_800_000_000_000, type: 'bug', status: 'new', ver: 'v0.30.1851', msg: 'The portal on the cliff sends me back to town.\nIt happens every time.', contact: 'player@example.com', diag: { map: 'cliff', level: 12, cls: 'mage', platform: 'web', errors: ['TypeError: x is undefined'], quests: ['q_a', 'q_b'] }, ...o });
+const parse = (raw) => { const [head, ...rest] = raw.split('\r\n\r\n'); const h = {}; let last = ''; for (const l of head.split('\r\n')) { if (/^[ \t]/.test(l)) h[last] += ' ' + l.trim(); else { const i = l.indexOf(':'); last = l.slice(0, i).toLowerCase(); h[last] = l.slice(i + 1).trim(); } } return { h, body: rest.join('\r\n\r\n') }; };
+const decodeB64 = (s) => Buffer.from(s.replace(/\s+/g, ''), 'base64').toString('utf8');
+
+console.log('message');
+ok(MAIL_TO_DEFAULT === 'admin@moji-studios.com', 'the default recipient is admin@moji-studios.com');
+const t = mailText(rec(), true); ok(/Type:\s+bug/.test(t) && /Report id: 1800000000000-abc123/.test(t) && /sends me back to town/.test(t) && /map\s+cliff/.test(t) && /TypeError: x is undefined/.test(t) && /screenshot of the game is attached/.test(t) && /Contact:\s+player@example.com/.test(t), 'the body carries type, id, message, game info, errors, contact and the screenshot note');
+ok(/No screenshot attached/.test(mailText(rec(), false)), 'and says so when there is no screenshot');
+ok(/^\[Mojiworld bug\] v0\.30\.1851 · cliff — The portal on the cliff sends me back to town\. It happens every time\.$/.test(mailSubject(rec())), 'the subject names the type, version, map and the first line of the report', mailSubject(rec()));
+ok(!/[\r\n]/.test(mailSubject(rec({ msg: 'line one\r\nBcc: attacker@evil.example\r\nline three' }))), 'a newline in the message never reaches the subject');
+let m = parse(buildMime({ from: MAIL_FROM_DEFAULT, to: MAIL_TO_DEFAULT, subject: mailSubject(rec()), text: t, shotDataUrl: jpeg, replyTo: 'player@example.com', id: rec().id, now: rec().t }));
+ok(m.h.from.includes('feedback@moji-studios.com') && m.h.to === 'admin@moji-studios.com' && m.h['reply-to'] === 'player@example.com' && /^multipart\/mixed; boundary=/.test(m.h['content-type']) && m.h['mime-version'] === '1.0' && /^<fb-1800000000000-abc123@moji-studios\.com>$/.test(m.h['message-id']), 'the MIME headers: From, To, Reply-To (the player), multipart, Message-ID', m.h);
+const bnd = /boundary="([^"]+)"/.exec(m.h['content-type'])[1]; const parts = m.body.split('--' + bnd).filter((p) => p.trim() && p.trim() !== '--');
+ok(parts.length === 2 && /text\/plain; charset=utf-8/.test(parts[0]) && decodeB64(parts[0].split('\r\n\r\n')[1]).includes('sends me back to town'), 'a text part (utf-8, base64) that decodes to the report');
+const imgBytes = Buffer.from(parts[1].split('\r\n\r\n')[1].replace(/\s+/g, ''), 'base64'); ok(/Content-Disposition: attachment; filename="report-abc123\.jpg"/.test(parts[1]) && imgBytes[0] === 0xff && imgBytes[1] === 0xd8, 'the screenshot is attached as a real JPEG (starts FF D8)');
+m = parse(buildMime({ from: 'a@b.co', to: 'admin@moji-studios.com', subject: 'x', text: 'plain', id: 'z-1', now: 1 })); ok(/^text\/plain/.test(m.h['content-type']) && !m.h['reply-to'] && decodeB64(m.body) === 'plain', 'without a screenshot it is a single text/plain message');
+m = parse(buildMime({ from: 'a@b.co', to: 'admin@moji-studios.com', subject: 'x', text: 'y', id: 'z-1', now: 1, replyTo: 'bad\r\nBcc: evil@x.co' })); ok(!m.h['reply-to'] && !m.h.bcc, 'a Reply-To that is not a clean address (or smuggles a header) is dropped');
+const enc = encodeHeader('Bug 🐞 — café ' + 'é'.repeat(60)); ok(/^[\x20-\x7e\r\n]+$/.test(enc) && enc.split(/\r\n /).every((w) => w.length <= 75) && /=\?UTF-8\?B\?/.test(enc), 'a subject with an emoji and accents is encoded into legal header words (<= 75 chars each)');
+const back = enc.split(/\r\n /).map((w) => decodeB64(/\?B\?(.+)\?=/.exec(w)[1])).join(''); ok(back === ('Bug 🐞 — café ' + 'é'.repeat(60)).slice(0, 300), 'and it decodes back to exactly the same text');
+
+console.log('transport: Resend (a real HTTP request to a local fake)');
+const got = []; let mode = 'ok';
+const srv = http.createServer((rq, rs) => { let b = ''; rq.on('data', (d) => (b += d)); rq.on('end', () => { got.push({ url: rq.url, method: rq.method, h: rq.headers, b: JSON.parse(b || '{}') }); if (mode === 'ok') { rs.writeHead(200, { 'content-type': 'application/json' }); rs.end('{"id":"re_1"}'); } else if (mode === 'deny') { rs.writeHead(403, { 'content-type': 'application/json' }); rs.end('{"message":"The moji-studios.com domain is not verified"}'); } else { /* hang */ } }); }).listen(0);
+const PORT = srv.address().port, realFetch = fetch, viaLocal = (u, o) => realFetch(String(u).replace('https://api.resend.com', 'http://127.0.0.1:' + PORT), o);
+let r = await sendReportMail(rec(), jpeg, { RESEND_API_KEY: 're_test_key' }, { fetchFn: viaLocal });
+ok(r.ok && r.via === 'resend' && r.to === 'admin@moji-studios.com', 'a configured key sends through Resend', r);
+const q = got[0]; ok(q && q.method === 'POST' && q.url === '/emails' && q.h.authorization === 'Bearer re_test_key' && /^mojifb-/.test(q.h['idempotency-key']) && q.b.to[0] === 'admin@moji-studios.com' && /feedback@moji-studios\.com/.test(q.b.from) && q.b.reply_to === 'player@example.com' && /\[Mojiworld bug\]/.test(q.b.subject) && /sends me back to town/.test(q.b.text) && q.b.attachments.length === 1 && q.b.attachments[0].filename === 'report-abc123.jpg', 'the request: POST /emails, bearer key, idempotency key, the right to/from/reply-to/subject/text and one attachment', q && { m: q.method, u: q.url, to: q.b.to });
+r = await sendReportMail(rec({ contact: 'just a discord name' }), '', { RESEND_API_KEY: 'k', FEEDBACK_EMAIL_TO: 'owner@elsewhere.com', FEEDBACK_EMAIL_FROM: 'noreply@moji-studios.com' }, { fetchFn: viaLocal }); const q2 = got[got.length - 1];
+ok(r.ok && q2.b.to[0] === 'owner@elsewhere.com' && /noreply@moji-studios\.com/.test(q2.b.from) && !('reply_to' in q2.b) && !('attachments' in q2.b), 'recipient and sender can be overridden by vars; a non-address contact sets no Reply-To; no screenshot, no attachment');
+r = await sendReportMail(rec(), '', { RESEND_API_KEY: 'k', FEEDBACK_EMAIL_TO: 'not an address\r\nBcc: x@y.co' }, { fetchFn: viaLocal }); ok(r.ok && got[got.length - 1].b.to[0] === 'admin@moji-studios.com', 'a bad FEEDBACK_EMAIL_TO falls back to admin@moji-studios.com (never to a header-smuggling value)');
+mode = 'deny'; r = await sendReportMail(rec(), '', { RESEND_API_KEY: 'k' }, { fetchFn: viaLocal }); ok(!r.ok && r.via === 'resend' && /Resend 403/.test(r.error) && /not verified/.test(r.error), 'a refusal (403: domain not verified) is reported with its reason, not thrown', r);
+r = await sendReportMail(rec(), '', { RESEND_API_KEY: 'k' }, { fetchFn: async () => { throw new Error('connect ECONNREFUSED'); } }); ok(!r.ok && /ECONNREFUSED/.test(r.error), 'a network failure is reported, not thrown');
+mode = 'hang'; const t0 = Date.now(); r = await sendReportMail(rec(), '', { RESEND_API_KEY: 'k' }, { fetchFn: viaLocal }); ok(!r.ok && Date.now() - t0 < 12000, 'a mail server that never answers is given up on (about 9 s), not waited for forever', [Date.now() - t0, r]);
+srv.closeAllConnections && srv.closeAllConnections(); srv.close();
+
+console.log('transport: Cloudflare send_email binding');
+const sent = []; class FakeEM { constructor(from, to, raw) { this.from = from; this.to = to; this.raw = raw; } }
+r = await sendReportMail(rec(), jpeg, { FEEDBACK_MAIL: { send: async (m) => { sent.push(m); } } }, { EmailMessage: FakeEM, now: () => rec().t });
+ok(r.ok && r.via === 'cloudflare' && sent.length === 1 && sent[0].from === 'feedback@moji-studios.com' && sent[0].to === 'admin@moji-studios.com', 'the binding sends one message from feedback@ to admin@', r);
+m = parse(sent[0].raw); ok(m.h.to === 'admin@moji-studios.com' && /multipart\/mixed/.test(m.h['content-type']) && m.body.includes('image/jpeg') && decodeB64(m.body.split('\r\n\r\n')[1]).includes('Type:'), 'and the raw message is the full MIME (text + screenshot)');
+r = await sendReportMail(rec(), '', { FEEDBACK_MAIL: { send: async () => { throw new Error('destination address not verified'); } } }, { EmailMessage: FakeEM }); ok(!r.ok && r.via === 'cloudflare' && /not verified/.test(r.error), 'a binding failure (unverified destination) is reported with its reason');
+r = await sendReportMail(rec(), '', { RESEND_API_KEY: 'k', FEEDBACK_MAIL: { send: async () => { sent.push('x'); } } }, { fetchFn: async () => new Response('{}', { status: 200 }), EmailMessage: FakeEM }); ok(r.via === 'resend' && sent.length === 1, 'when both are set Resend wins and the binding is not also used (no double mail)');
+r = await sendReportMail(rec(), '', {}, {}); ok(!r.ok && r.via === 'none' && /No email transport/.test(r.error), 'with neither configured it says exactly that');
+r = await sendReportMail(rec(), '', { FEEDBACK_MAIL: { send: async () => {} } }, {}); ok(!r.ok && r.via === 'cloudflare', 'outside Cloudflare (no cloudflare:email module) the binding path fails cleanly instead of crashing', r);
+
+console.log('whole path: a player POST -> one email');
+class Store { constructor() { this.m = new Map(); } async get(k) { return this.m.get(k); } async put(k, v) { this.m.set(k, JSON.parse(JSON.stringify(v))); } async delete(k) { return this.m.delete(k); }
+  async list(o = {}) { let ks = [...this.m.keys()].filter((k) => !o.prefix || k.startsWith(o.prefix)).sort(); if (o.reverse) ks.reverse(); if (o.limit) ks = ks.slice(0, o.limit); return new Map(ks.map((k) => [k, this.m.get(k)])); } }
+const st = new Store(), calls = []; let clock = 1_800_000_000_000;
+const post = (body, ip, key) => feedbackApi(new Request('https://w.test/api/feedback' + (key ? '/resend' : ''), { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip, ...(key ? { authorization: 'Bearer ' + key } : {}) }, body: JSON.stringify(body) }), { storage: st, env: { RESEND_API_KEY: 'rk', FEEDBACK_ADMIN_KEY: 'integration-admin-key' }, throttle: async () => true, cors: {}, now: () => (clock += 1000), fetchFn: async (u, o) => { calls.push({ u, o }); return new Response('{"id":"x"}', { status: 200 }); } });
+let x = await post({ type: 'idea', msg: 'Please add a dance emote for Guguma', contact: 'fan@example.com', ver: 'v0.30.1851', diag: { map: 'forest', level: 5 }, shot: jpeg, cid: 'whole-1' }, '203.0.113.5'); let j = await x.json();
+ok(x.status === 200 && j.ok && j.mail === true && calls.length === 1 && calls[0].u === 'https://api.resend.com/emails', 'POST /api/feedback stores the report and makes exactly one email request to Resend', [x.status, j, calls.length]);
+const body = JSON.parse(calls[0].o.body); ok(body.to[0] === 'admin@moji-studios.com' && /\[Mojiworld idea\]/.test(body.subject) && /dance emote/.test(body.text) && body.reply_to === 'fan@example.com' && body.attachments.length === 1, 'to admin@moji-studios.com, subject tagged [Mojiworld idea], the message, the fan as Reply-To, the screenshot attached');
+const stored = [...(await st.list({ prefix: 'fb:' })).values()][0]; ok(stored.mail.ok === true && stored.mail.via === 'resend', 'the stored report records that it was emailed');
+x = await post({ type: 'bug', msg: 'Second one inside the hour, should be refused', ver: 'v0.30.1851' }, '203.0.113.5'); j = await x.json(); ok(x.status === 429 && calls.length === 1, 'a second report from the same connection inside the hour: 429 and NO second email');
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

@@ -15,6 +15,9 @@
 
 // v0.29.x — 'look' + 'eq' (full peer avatar, matching mp/server.mjs since
 // v0.29.11) and 'v' (client build stamp for version-skew detection).
+import { feedbackApi } from './feedback_api.js';   // v0.30.1851 feedback portal
+import { ADMIN_HTML } from './feedback_admin.js';
+
 const PRESENCE_FIELDS = ['name', 'cls', 'job', 'master', 'level', 'map', 'x', 'y', 'vx', 'vy',
   'facing', 'hp', 'maxHp', 'mp', 'maxMp', 'anim', 'look', 'eq', 'v',
   // v0.29.x — 'ti' = the peer's worn title, shown under their nameplate.
@@ -164,6 +167,12 @@ export default {
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
       return new Response(JSON.stringify({ ok: true, now: Date.now() }), { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', ...CORS } });
     }
+    // v0.30.1851 feedback portal - the in-game feedback form posts to /api/feedback; the admin page and its API read the same store. Reports live in their OWN Durable Object
+    // instance ('feedback'), so a flood of them (or the dashboard) never queues behind the multiplayer relay on 'global'.
+    if (url.pathname === '/feedback-admin') {
+      return new Response(ADMIN_HTML, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY' } });
+    }
+    if (url.pathname.startsWith('/api/feedback')) return env.ROOMS.get(env.ROOMS.idFromName('feedback')).fetch(request);
     // The WebSocket relay AND the HTTP account/cloud-save API are both served by
     // the one global Durable Object (shared storage). Route both to it.
     if (request.headers.get('Upgrade') === 'websocket' || url.pathname.startsWith('/api/')) {
@@ -452,6 +461,7 @@ export class MojiRoom {
   async handleApi(request) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const path = new URL(request.url).pathname;
+    if (path.startsWith('/api/feedback')) return feedbackApi(request, { storage: this.storage, env: this.env, cors: CORS, throttle: (req, bucket, limit, windowMs) => this._ipThrottle(req, bucket, limit, windowMs) });   // v0.30.1851 feedback portal
     try {
       if (path === '/api/register' && request.method === 'POST') return await this.apiRegister(request);
       if (path === '/api/login' && request.method === 'POST') return await this.apiLogin(request);
