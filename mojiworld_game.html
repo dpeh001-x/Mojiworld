@@ -16403,7 +16403,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1849';
+const GAME_VERSION = 'v0.30.1850';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52831,6 +52831,21 @@ function addShake(amount) {
 // v0.30.475 — the flat band every zodiac projectile lands in, before defensive ABILITIES and before
 // Capricorn's own floor. Rolled per hit so a volley is not twelve identical numbers.
 const LX_ZODIAC_PROJ_MIN = 3000, LX_ZODIAC_PROJ_MAX = 5000;
+// v0.30.1850 regulus-damage - REGULUS NEVER ONE-SHOTS FROM RANGE (per user: "Regulus projectile sometimes does insane damage that one hit kills the
+// players ... ensure the damage is fair"). One hit of his - a shot (roar cone, phase nova) or a meteor (Sun Comet, Solar Flare) - takes
+// at most this share of the hero's max HP, after every multiplier. His meteors were sized from his raw ATK through the level-gap ramp
+// (a Lv 70 mage lost 222% to one comet); they now land the zodiac roll like his shots. A whole roar (15% cone + a shot) stays under the
+// bar on every tier; a tank never reaches the cap, so it only trims squishy builds and the hard tiers.
+const LX_LEO_HIT_CAP = { story: 0.30, normal: 0.45, hard: 0.55, nightmare: 0.65 };
+function _lxLeoHitCap(v) {   // v0.30.1850 regulus-damage
+  if (!(v > 0) || typeof player === 'undefined' || !player) return v;
+  const mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
+  const f = LX_LEO_HIT_CAP[(typeof _lxDiffTier === 'function') ? _lxDiffTier() : 'normal'] || LX_LEO_HIT_CAP.normal;
+  return Math.min(v, Math.max(1, Math.floor(mh * f)));
+}
+function _lxLeoMeteorLoss(mul) {   // v0.30.1850 regulus-damage - a Regulus meteor: the zodiac roll (DEF ramp, difficulty, block / DR / Aegis), x mul, capped
+  return _lxLeoHitCap(Math.max(1, Math.floor(_lxRolledProjLoss(LX_ZODIAC_PROJ_MIN, LX_ZODIAC_PROJ_MAX) * ((mul > 0) ? mul : 1))));
+}
 // v0.30.614 - AQUARIUS'S SEAL IS BOUNDED. 45 s sealed (v0.30.297, per user), then at least 15 s in which no hit can
 // seal again. Before this a live seal was refreshed to a full 45 s by EVERY sealing hit; while only her aura bolts
 // carried her sign that was rare, but v0.30.601 tagged every zodiac projectile, and her homing droplets and waves
@@ -62320,9 +62335,11 @@ function _coopApplyHazHit(msg) {
   // relay that forwards only the fields it knows.
   if ((msg.gb || /Gravity Crush column|Crush Tendril|Decay Pillar/.test(String(msg.sl || ''))) && _hzLost > LX_GRAV_METEOR_CAP) _hzLost = LX_GRAV_METEOR_CAP;
   { const _hf = +msg.hf; if (_hf > 0 && _hf <= 0.5 && _hzLost > 0) _hzLost = Math.max(_hzLost, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * _hf * (player.blockTimer > 0 ? 0.3 : 1))); }   // v0.30.1730 bughunt4 - the host's column floor
+  if (+msg.lm === 1 && _hzLost > 0) _hzLost = _lxLeoMeteorLoss(1);   // v0.30.1850 regulus-damage - a Regulus meteor (the guest never runs the fall: a full roll, as the host's fall)
   player.hp -= _lxLost(_hzLost);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
+  if (+msg.lm === 1) player.invulnerable = 1200;   // v0.30.1850 regulus-damage
   player._hitIframeAt = game.time;   // bughunt guest-taken (parityA-2): a HIT-granted i-frame, or the draw hides the hero for the first ~60 ms of it
   player._lastDamageSource = msg.sl || 'a meteor strike';
   { const _kbv = Math.min(40, +msg.kb | 0);   // bughunt parityA-4 - the pillars' shove (_kb), away from the column's centre with real lift, as the host's own player is thrown
@@ -118478,6 +118495,7 @@ function updateProjectiles(dt) {
           _projLost = _lxRolledProjLoss(LX_ZODIAC_PROJ_MIN, LX_ZODIAC_PROJ_MAX);   // v0.30.601 - shared with the boss bands; the maths is unchanged
           if (p._zodiacSign === 'scorpio') _projLost = _lxRolledProjLoss(2100, 3500);   // v0.30.1661 scorpio-dmg-cut - Scorpio's own roll, 30% under the other eleven's 3,000-5,000 (per user)
         }
+        if (p._zodiacSign === 'leo' && _projLost > 0 && !player._god) _projLost = _lxLeoHitCap(_projLost);   // v0.30.1850 regulus-damage - one Regulus shot never takes more than LX_LEO_HIT_CAP of max HP
         // v0.30.297 — PER-SIGN PROJECTILE RULES (per user). Applied AFTER the
         // band clamps above, so block / warrior DR / aegis still mitigate
         // first; this raises the floor rather than bypassing defence. Keyed
@@ -119624,8 +119642,10 @@ function updateProjectiles(dt) {
         let _pLost = (player._god ? 0 : ((typeof _diffDmg === 'function') ? _diffDmg(_pd, 0, !!h._pctCap) : _pd));
         if (h._gravBlue && _pLost > LX_GRAV_METEOR_CAP) _pLost = LX_GRAV_METEOR_CAP;
         if (h._hpFloorPct > 0 && _pLost > 0 && !player._god) _pLost = Math.max(_pLost, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * h._hpFloorPct * (player.blockTimer > 0 ? 0.3 : 1)));   // v0.30.1721 aetherion-boost - Aetherion's columns: a floor, x0.3 when blocking (as _lxBossHpFloor)   // v0.30.816 grav-meteor-cap — the fall is the payload, and it had no ceiling
+        if (h._leoMeteor && _pLost > 0 && !player._god) _pLost = _lxLeoMeteorLoss(1);   // v0.30.1850 regulus-damage - the zodiac roll, capped (was ATK x1.2-1.4 through the level-gap ramp)
         player.hp = Math.max(0, player.hp - _pLost);
         player.invulnerable = 400;
+        if (h._leoMeteor) player.invulnerable = 1200;   // v0.30.1850 regulus-damage - a shot's window: the Flare's three meteors 220 ms apart are one hit
         player._lastDamageSource = h._sourceLabel || 'Meteor';
         if (game.damageNumbers) {
           game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2,
@@ -119673,6 +119693,7 @@ function updateProjectiles(dt) {
             // kb - the shove, gbd - Gravitos's final-loss band [floor, cap, mul, ref]. (The 0.35 landing residual is NOT sent: it records that the fall
             // already hit the HOST, and a guest's fall pass is never simulated.)
             hf: h._hpFloorPct > 0 ? h._hpFloorPct : undefined,   // v0.30.1730 bughunt4 - Aetherion's 20% floor reaches a guest
+            lm: h._leoMeteor ? 1 : undefined,   // v0.30.1850 regulus-damage - a guest lands the same roll and cap on its own DEF
             pc: h._pctCap ? 1 : 0, kb: h._kb | 0, gbd: h._gravBand ? [+h._gravBand.floor || 0, +h._gravBand.cap || 0, +h._gravBand.mul || 1, Math.round(+h._gravBand.ref || 0)] : undefined })); } catch (e) {}
         }
         // Player-targeted: standard pattern from the projectile-hit
@@ -119707,6 +119728,7 @@ function updateProjectiles(dt) {
           }
           if (h._hpFloorPct > 0 && _mLost > 0 && !player._god) _mLost = Math.max(_mLost, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * h._hpFloorPct * (player.blockTimer > 0 ? 0.3 : 1)));   // v0.30.1730 bughunt4 - Aetherion's floor on the landing too (beside the falling head it was the old ~1%)
           if (h._gravBlue && _mLost > LX_GRAV_METEOR_CAP) _mLost = LX_GRAV_METEOR_CAP;   // v0.30.816 grav-meteor-cap — after the band, so the band can only tighten it
+          if (h._leoMeteor && _mLost > 0 && !player._god) _mLost = _lxLeoMeteorLoss(_landMul);   // v0.30.1850 regulus-damage - the residual is 35% of a roll, capped
           player.hp -= _mLost;
           player.lastHitTime = game.time;
           player.invulnerable = 600;   // standard iframe window after a meteor
@@ -170706,7 +170728,7 @@ const ZODIAC_AI = {
         game.hazards.push({
           // v0.25.622 — added cx field (was missing — same NaN cascade as Aries)
           // v0.25.634 — owner:'enemy' so the resolver damages player, not Leo itself
-          type: 'meteor_warn', x: tx, y: 440, cx: tx, timer: 70, damage: m.atk * 1.4, color: '#ffaa33', owner: 'enemy', radius: 90,   // v0.26.1033 — was radius-less: resolver default 180 vs renderer default 90 -> unavoidable hits ±80px outside the drawn cue
+          type: 'meteor_warn', x: tx, y: 440, cx: tx, timer: 70, damage: m.atk * 1.4, color: '#ffaa33', owner: 'enemy', radius: 90, _leoMeteor: true /* v0.30.1850 regulus-damage - lands the zodiac roll, capped (_lxLeoMeteorLoss) */,   // v0.26.1033 — was radius-less: resolver default 180 vs renderer default 90 -> unavoidable hits ±80px outside the drawn cue
         });
       }
       if (m.patternTimer > 500) { m.patternState = 'idle'; m.patternTimer = 0; m._leoFired = false; }
@@ -170729,7 +170751,7 @@ const ZODIAC_AI = {
               // v0.25.622 — added cx (was missing — NaN cascade)
               // v0.25.634 — owner:'enemy' so the resolver targets player not Leo
               type: 'meteor_warn', x: tx, y: 440, cx: tx, timer: 80,
-              damage: m.atk * 1.2, color: '#ffaa33', owner: 'enemy', radius: 90,   // v0.26.1033 — match drawn telegraph width (see comet fix above)
+              damage: m.atk * 1.2, color: '#ffaa33', owner: 'enemy', radius: 90, _leoMeteor: true /* v0.30.1850 regulus-damage */,   // v0.26.1033 — match drawn telegraph width (see comet fix above)
             });
           }, i * 220);
         }
