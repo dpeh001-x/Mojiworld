@@ -2,7 +2,8 @@
 // kills the players, please do a check on it and ensure the damage is fair". A real Regulus in his arena (zod_leo) attacks a geared
 // at-level hero (devSetLevel + the best shop piece per slot, as gear_allowance); every hit is logged with HP held full (a hit, never a
 // death). His Sun Comet / Solar Flare meteors took 222% / 191% of a Lv 70 mage's max HP on Normal (ATK through the level-gap ramp);
-// a roar shot 62-103% on top of the 15% cone. Now each ranged hit is the zodiac roll, capped at 45% (Normal) / 65% (Nightmare).
+// a roar shot 62-103% on top of the 15% cone. Now each ranged hit is the zodiac roll, capped at 45% (Normal) / 85% (Nightmare)
+// (v0.30.x zodiac-damage-cap: the cap table every sign shares).
 //   node scripts/regulus_damage_test.mjs     (MOJI_GAME_FILE=<build.html> PORT=<port>)
 import { chromium } from 'playwright-core';
 import path from 'node:path';
@@ -122,12 +123,12 @@ try {
   console.log(`  co-op: hazhit ${JSON.stringify(coop.hz)}  guest meteor ${JSON.stringify(coop.g && coop.g.hz)}  guest shot ${JSON.stringify(coop.g && coop.g.pj)}`);
   check(!!coop.hz && coop.g.hz.length === 2 && coop.g.hz.every((d) => d > 0 && d <= capA), `co-op guest: a Regulus meteor from the host's own message takes at most 45% (${coop.g ? coop.g.hz.map((d) => pct(d, coop.maxHp)).join(', ') : '-'}%)`, coop);
   check(!!coop.pj && coop.g.pj.length > 0 && coop.g.pj.every((d) => d <= capA), `co-op guest: the guest's copy of a roar shot takes at most 45% (${coop.g ? coop.g.pj.map((d) => pct(d, coop.maxHp)).join(', ') : '-'}%)`, coop);
-  // ---- Lv 80 mage, Nightmare: the cap is 65%, no attack ends a full bar
-  const B = await E(() => __RG.setup('mage', 80, 'nightmare')); const capB = Math.floor(B.maxHp * 0.65);
+  // ---- Lv 80 mage, Nightmare: the cap is 85% (v0.30.x zodiac-damage-cap), no attack ends a full bar
+  const B = await E(() => __RG.setup('mage', 80, 'nightmare')); const capB = Math.floor(B.maxHp * 0.85);
   const cometB = await E(() => __RG.atk('comet')), roarB = [await E(() => __RG.atk('roar')), await E(() => __RG.atk('roar'))];
   console.log(`hero ${B.cls} L${B.lv} ${B.diff}: max HP ${B.maxHp}, DEF ${B.def}\n  comet ${JSON.stringify(cometB.hits)}  roar ${JSON.stringify(roarB.map((r) => r.hits))}`);
-  check(cometB.hits.length > 0 && cometB.worst <= capB, `Lv 80 mage, Nightmare: a Sun Comet takes at most 65% (worst ${pct(cometB.worst, B.maxHp)}%)`, cometB);
-  check(roarB.every((r) => shot(r) > 0 && shot(r) <= capB && r.sum < B.maxHp), `Lv 80 mage, Nightmare: a roar shot takes at most 65% and a whole roar never ends a full bar (${roarB.map((r) => pct(r.sum, B.maxHp)).join(', ')}%)`, roarB);
+  check(cometB.hits.length > 0 && cometB.worst <= capB, `Lv 80 mage, Nightmare: a Sun Comet takes at most 85% (worst ${pct(cometB.worst, B.maxHp)}%)`, cometB);
+  check(roarB.every((r) => shot(r) > 0 && shot(r) <= capB && r.sum < B.maxHp), `Lv 80 mage, Nightmare: a roar shot takes at most 85% and a whole roar never ends a full bar (${roarB.map((r) => pct(r.sum, B.maxHp)).join(', ')}%)`, roarB);
   // ---- Lv 90 warrior, Normal: a tank never reaches the cap - his hits are the zodiac roll, untouched
   const C = await E(() => __RG.setup('warrior', 90, 'normal')); const capC = Math.floor(C.maxHp * 0.45);
   const cometC = await E(() => __RG.atk('comet')), roarC = await E(() => __RG.atk('roar'));

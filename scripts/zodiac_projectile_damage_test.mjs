@@ -49,6 +49,7 @@ try {
         if (typeof refreshGearCache === 'function') refreshGearCache();
         player.maxHp = 400000; player.hp = 400000;
         player.blockTimer = 0; player._aegis = false;
+        game._lxZc = null;   // v0.30.x zodiac-damage-cap - a fresh hit: the cap's 1.2 s window is cleared with the i-frames
         player.invulnerable = 0; player.lastHitTime = -9999;
         Object.assign(player, (extra && extra.player) || {});
         game.projectiles.length = 0;

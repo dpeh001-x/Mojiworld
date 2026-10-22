@@ -16483,7 +16483,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1852';
+const GAME_VERSION = 'v0.30.1853';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -52917,15 +52917,42 @@ const LX_ZODIAC_PROJ_MIN = 3000, LX_ZODIAC_PROJ_MAX = 5000;
 // at most this share of the hero's max HP, after every multiplier. His meteors were sized from his raw ATK through the level-gap ramp
 // (a Lv 70 mage lost 222% to one comet); they now land the zodiac roll like his shots. A whole roar (15% cone + a shot) stays under the
 // bar on every tier; a tank never reaches the cap, so it only trims squishy builds and the hard tiers.
-const LX_LEO_HIT_CAP = { story: 0.30, normal: 0.45, hard: 0.55, nightmare: 0.65 };
+// v0.30.1853 zodiac-damage-cap - ONE CAP FOR ALL TWELVE SIGNS (per user: Story 30%, Normal 45%, Hard 65%, Nightmare 85%; Regulus had 30/45/55/65).
+// A zodiac hit - a shot, a zodiac hazard, an untelegraphed direct hit - takes at most this share of the hero's max HP after every
+// multiplier, and every capped zodiac hit inside LX_ZODIAC_HIT_WIN_F frames (1.2 s, the window a shot already grants) shares the one
+// cap, so a hazard, a cone or a point-blank hit with a shot on top never stacks past it. A telegraphed hit (the roar cone, the Sun
+// Pounce) lands in full but counts toward the window (_lxZodHitNote). A tank never reaches the cap; it trims squishy builds and hard tiers.
+const LX_ZODIAC_HIT_CAP = { story: 0.30, normal: 0.45, hard: 0.65, nightmare: 0.85 };
+const LX_LEO_HIT_CAP = LX_ZODIAC_HIT_CAP;   // v0.30.1853 zodiac-damage-cap - Regulus reads the shared table
+const LX_ZODIAC_HIT_WIN_F = 72;   // v0.30.1853 zodiac-damage-cap - 1.2 s of game frames
+const LX_ZODIAC_POOL_MUL = 0.16;   // v0.30.1853 zodiac-damage-cap - a Venom Deluge tick: its old share of an Ambush (ATK x0.11 vs x0.7)
+function _lxZodWin() {   // v0.30.1853 zodiac-damage-cap - the capped zodiac hits of the last 1.2 s, as [frame, loss]
+  const now = game.time | 0; let w = game._lxZc; if (!Array.isArray(w)) w = game._lxZc = [];
+  for (let i = w.length - 1; i >= 0; i--) { const d = now - w[i][0]; if (d < 0 || d >= LX_ZODIAC_HIT_WIN_F) w.splice(i, 1); }
+  return w;
+}
+function _lxZodHitCap(v) {   // v0.30.1853 zodiac-damage-cap - one zodiac hit: at most the tier's share of max HP, less what the window already took
+  if (!(v > 0) || typeof player === 'undefined' || !player || typeof game === 'undefined' || !game) return v;
+  const mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
+  const f = LX_ZODIAC_HIT_CAP[(typeof _lxDiffTier === 'function') ? _lxDiffTier() : 'normal'] || LX_ZODIAC_HIT_CAP.normal;
+  const w = _lxZodWin(); let got = 0; for (const e of w) got += e[1];
+  v = Math.min(v, Math.max(1, Math.floor(mh * f) - got)); w.push([game.time | 0, v]); return v;
+}
+function _lxZodHitNote(v) { if (v > 0 && typeof game !== 'undefined' && game) _lxZodWin().push([game.time | 0, v]); }   // v0.30.1853 zodiac-damage-cap - lands in full, counts
+function _lxZodRollLoss(sign, mul) {   // v0.30.1853 zodiac-damage-cap - the sign's zodiac roll (Scorpio's own 2,100-3,500) x mul, uncapped
+  const r = (sign === 'scorpio') ? _lxRolledProjLoss(2100, 3500) : _lxRolledProjLoss(LX_ZODIAC_PROJ_MIN, LX_ZODIAC_PROJ_MAX);
+  return Math.max(1, Math.floor(r * ((mul > 0) ? mul : 1)));
+}
+function _lxZodMeteorLoss(mul, sign) { return _lxZodHitCap(_lxZodRollLoss(sign, mul)); }   // v0.30.1853 zodiac-damage-cap - a zodiac hazard: the roll, capped
+// v0.30.1853 zodiac-damage-cap - the direct hits a co-op peer receives as bosshit (sl, cut to 24) that run the cap
+const LX_ZODIAC_CAP_SL = ["Sagittarius's Point-Blank Volley", "Sagittarius's Marked Shot", "Pisces's Tidal Crush", "Aquarius's Conductive Pool"].map((t) => t.slice(0, 24));
+function _lxZodCapLabel(sl) { return LX_ZODIAC_CAP_SL.indexOf(String(sl || '').slice(0, 24)) >= 0; }   // v0.30.1853 zodiac-damage-cap
 function _lxLeoHitCap(v) {   // v0.30.1850 regulus-damage
   if (!(v > 0) || typeof player === 'undefined' || !player) return v;
-  const mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
-  const f = LX_LEO_HIT_CAP[(typeof _lxDiffTier === 'function') ? _lxDiffTier() : 'normal'] || LX_LEO_HIT_CAP.normal;
-  return Math.min(v, Math.max(1, Math.floor(mh * f)));
+  return _lxZodHitCap(v);   // v0.30.1853 zodiac-damage-cap - the shared table and window
 }
 function _lxLeoMeteorLoss(mul) {   // v0.30.1850 regulus-damage - a Regulus meteor: the zodiac roll (DEF ramp, difficulty, block / DR / Aegis), x mul, capped
-  return _lxLeoHitCap(Math.max(1, Math.floor(_lxRolledProjLoss(LX_ZODIAC_PROJ_MIN, LX_ZODIAC_PROJ_MAX) * ((mul > 0) ? mul : 1))));
+  return _lxZodMeteorLoss(mul, 'leo');   // v0.30.1853 zodiac-damage-cap
 }
 // v0.30.614 - AQUARIUS'S SEAL IS BOUNDED. 45 s sealed (v0.30.297, per user), then at least 15 s in which no hit can
 // seal again. Before this a live seal was refreshed to a full 45 s by EVERY sealing hit; while only her aura bolts
@@ -62536,10 +62563,12 @@ function _coopApplyHazHit(msg) {
   if ((msg.gb || /Gravity Crush column|Crush Tendril|Decay Pillar/.test(String(msg.sl || ''))) && _hzLost > LX_GRAV_METEOR_CAP) _hzLost = LX_GRAV_METEOR_CAP;
   { const _hf = +msg.hf; if (_hf > 0 && _hf <= 0.5 && _hzLost > 0) _hzLost = Math.max(_hzLost, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * _hf * (player.blockTimer > 0 ? 0.3 : 1))); }   // v0.30.1730 bughunt4 - the host's column floor
   if (+msg.lm === 1 && _hzLost > 0) _hzLost = _lxLeoMeteorLoss(1);   // v0.30.1850 regulus-damage - a Regulus meteor (the guest never runs the fall: a full roll, as the host's fall)
+  if (msg.zs && +msg.lm !== 1 && _hzLost > 0) _hzLost = _lxZodMeteorLoss(1, String(msg.zs).slice(0, 12));   // v0.30.1853 zodiac-damage-cap - a zodiac hazard: a full roll, as the host's fall
   player.hp -= _lxLost(_hzLost);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
   if (+msg.lm === 1) player.invulnerable = 1200;   // v0.30.1850 regulus-damage
+  if (msg.zs) player.invulnerable = 1200;   // v0.30.1853 zodiac-damage-cap
   player._hitIframeAt = game.time;   // bughunt guest-taken (parityA-2): a HIT-granted i-frame, or the draw hides the hero for the first ~60 ms of it
   player._lastDamageSource = msg.sl || 'a meteor strike';
   { const _kbv = Math.min(40, +msg.kb | 0);   // bughunt parityA-4 - the pillars' shove (_kb), away from the column's centre with real lift, as the host's own player is thrown
@@ -62622,6 +62651,7 @@ function _coopApplyBossHit(msg) {
     const _bf = +msg.gbd[0], _bc = +msg.gbd[1], _bm = +msg.gbd[2], _br = +msg.gbd[3];
     if (Number.isFinite(_bf) && Number.isFinite(_bc) && Number.isFinite(_bm) && Number.isFinite(_br) && _bc > 0 && _bc <= 2 && _bf >= 0 && _bf <= _bc && _bm > 0 && _bm <= 100 && _br >= 0 && _br <= 1e7) _bhLost = _gravBandClamp(dmg, { floor: _bf, cap: _bc, mul: _bm, ref: _br });
   }
+  if (_bhLost > 0 && _lxZodCapLabel(msg.sl)) _bhLost = _lxZodHitCap(_bhLost);   // v0.30.1853 zodiac-damage-cap - on the guest's own bar
   player.hp -= _lxLost(_bhLost);
   player.lastHitTime = game.time;
   player.invulnerable = 600;
@@ -62878,6 +62908,7 @@ function _lxBossExecLocal(kind, p) {
     player.vx = _lrd * 5;
     const _rd = Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * Math.min(1, Math.max(0, +p.fr || 0)));
     player.hp -= (player._god ? 0 : _rd);
+    if (!player._god) _lxZodHitNote(_rd);   // v0.30.1853 zodiac-damage-cap - the roar cone lands in full and counts: a roar shot on top shares the cap
     player.lastHitTime = game.time;
     player._lastDamageSource = "Leo's Royal Roar";
     if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _rd + ' ROAR', life: 55, color: '#ffdd44', size: 18, big: true });
@@ -63098,7 +63129,7 @@ function _coopSelfBossHit(cx, cy, radius, dmgRaw, dmgFrac, label, color, grounde
   if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
   if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
   // v0.29.x — %-fraction nukes get the 99.9%-maxHp ceiling (see _coopApplyBossHit).
-  player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg);
+  { let _sbL = (typeof _diffDmg === 'function') ? _diffDmg(dmg, 0, isFrac) : dmg; if (_sbL > 0 && _lxZodCapLabel(label)) _sbL = _lxZodHitCap(_sbL); player.hp -= _lxLost(_sbL); }   // v0.30.1853 zodiac-damage-cap
   player.lastHitTime = game.time;
   player.invulnerable = 600;
   player._hitIframeAt = game.time;   // bughunt guest-taken (parityA-2): the host's own re-applied strike, same i-frame mark
@@ -118755,7 +118786,6 @@ function updateProjectiles(dt) {
           _projLost = _lxRolledProjLoss(LX_ZODIAC_PROJ_MIN, LX_ZODIAC_PROJ_MAX);   // v0.30.601 - shared with the boss bands; the maths is unchanged
           if (p._zodiacSign === 'scorpio') _projLost = _lxRolledProjLoss(2100, 3500);   // v0.30.1661 scorpio-dmg-cut - Scorpio's own roll, 30% under the other eleven's 3,000-5,000 (per user)
         }
-        if (p._zodiacSign === 'leo' && _projLost > 0 && !player._god) _projLost = _lxLeoHitCap(_projLost);   // v0.30.1850 regulus-damage - one Regulus shot never takes more than LX_LEO_HIT_CAP of max HP
         // v0.30.297 — PER-SIGN PROJECTILE RULES (per user). Applied AFTER the
         // band clamps above, so block / warrior DR / aegis still mitigate
         // first; this raises the floor rather than bypassing defence. Keyed
@@ -118770,6 +118800,7 @@ function updateProjectiles(dt) {
           const _capFloor = Math.max(1, Math.floor(_capMax * 0.32));
           if (_projLost < _capFloor) _projLost = _capFloor;
         }
+        if (p._zodiacSign && _projLost > 0 && !player._god) _projLost = _lxZodHitCap(_projLost);   // v0.30.1853 zodiac-damage-cap - one zodiac shot takes at most LX_ZODIAC_HIT_CAP of max HP, nor stacks past it in 1.2 s
         if (p._zodiacSign === 'aquarius' && !player._god && _projLost > 0) {   // bughunt sibling-3 - a shot that took nothing (a paused player's zeroed hit, a negate) seals nothing, like its siblings above
           // "if touched by some projectiles, players are unable to use
           // potions for 45 seconds". game.time is the 60Hz sim counter, the
@@ -119125,7 +119156,10 @@ function updateProjectiles(dt) {
             }
             if (player.cls === 'warrior' && typeof _warriorDr === 'function') dmg = Math.max(1, Math.floor(dmg * _warriorDr()));
             if (player._aegis) dmg = Math.max(1, Math.floor(dmg * 0.5));
-            player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(((typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg)));
+            const _zpS = h._zodiacSign || (h._owner && h._owner.zodiacSign) || (/Scorpio/.test(String(h._sourceLabel || '')) ? 'scorpio' : null);   // v0.30.1853 zodiac-damage-cap
+            let _zpL = player._god ? 0 : ((typeof _diffDmg === 'function') ? _diffDmg(dmg) : dmg);   // v0.30.1853 zodiac-damage-cap - a paused hero or a Second Skin negate still takes nothing
+            if (_zpS && _zpL > 0) _zpL = _lxZodHitCap(_lxZodRollLoss(_zpS, LX_ZODIAC_POOL_MUL));   // v0.30.1853 zodiac-damage-cap - was ATK through the level-gap ramp, every 26 frames
+            player.hp -= (player._god ? _lxLost(0, dmg) : _lxLost(_zpL));
             player.lastHitTime = game.time;
             player._lastDamageSource = "Scorpio's Venom Deluge";
             if (game.damageNumbers) {
@@ -119903,9 +119937,11 @@ function updateProjectiles(dt) {
         if (h._gravBlue && _pLost > LX_GRAV_METEOR_CAP) _pLost = LX_GRAV_METEOR_CAP;
         if (h._hpFloorPct > 0 && _pLost > 0 && !player._god) _pLost = Math.max(_pLost, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * h._hpFloorPct * (player.blockTimer > 0 ? 0.3 : 1)));   // v0.30.1721 aetherion-boost - Aetherion's columns: a floor, x0.3 when blocking (as _lxBossHpFloor)   // v0.30.816 grav-meteor-cap — the fall is the payload, and it had no ceiling
         if (h._leoMeteor && _pLost > 0 && !player._god) _pLost = _lxLeoMeteorLoss(1);   // v0.30.1850 regulus-damage - the zodiac roll, capped (was ATK x1.2-1.4 through the level-gap ramp)
+        if (h._zodiacSign && !h._leoMeteor && _pLost > 0 && !player._god) _pLost = _lxZodMeteorLoss(1, h._zodiacSign);   // v0.30.1853 zodiac-damage-cap - Ariel's trail and tile, Scorpio's Ambush: the sign's roll, capped
         player.hp = Math.max(0, player.hp - _pLost);
         player.invulnerable = 400;
         if (h._leoMeteor) player.invulnerable = 1200;   // v0.30.1850 regulus-damage - a shot's window: the Flare's three meteors 220 ms apart are one hit
+        if (h._zodiacSign) player.invulnerable = 1200;   // v0.30.1853 zodiac-damage-cap - a shot's window
         player._lastDamageSource = h._sourceLabel || 'Meteor';
         if (game.damageNumbers) {
           game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2,
@@ -119954,6 +119990,7 @@ function updateProjectiles(dt) {
             // already hit the HOST, and a guest's fall pass is never simulated.)
             hf: h._hpFloorPct > 0 ? h._hpFloorPct : undefined,   // v0.30.1730 bughunt4 - Aetherion's 20% floor reaches a guest
             lm: h._leoMeteor ? 1 : undefined,   // v0.30.1850 regulus-damage - a guest lands the same roll and cap on its own DEF
+            zs: (h._zodiacSign && !h._leoMeteor) ? String(h._zodiacSign).slice(0, 12) : undefined,   // v0.30.1853 zodiac-damage-cap - a guest lands the sign's roll and cap on its own DEF
             pc: h._pctCap ? 1 : 0, kb: h._kb | 0, gbd: h._gravBand ? [+h._gravBand.floor || 0, +h._gravBand.cap || 0, +h._gravBand.mul || 1, Math.round(+h._gravBand.ref || 0)] : undefined })); } catch (e) {}
         }
         // Player-targeted: standard pattern from the projectile-hit
@@ -119989,6 +120026,7 @@ function updateProjectiles(dt) {
           if (h._hpFloorPct > 0 && _mLost > 0 && !player._god) _mLost = Math.max(_mLost, Math.floor(((typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)) * h._hpFloorPct * (player.blockTimer > 0 ? 0.3 : 1)));   // v0.30.1730 bughunt4 - Aetherion's floor on the landing too (beside the falling head it was the old ~1%)
           if (h._gravBlue && _mLost > LX_GRAV_METEOR_CAP) _mLost = LX_GRAV_METEOR_CAP;   // v0.30.816 grav-meteor-cap — after the band, so the band can only tighten it
           if (h._leoMeteor && _mLost > 0 && !player._god) _mLost = _lxLeoMeteorLoss(_landMul);   // v0.30.1850 regulus-damage - the residual is 35% of a roll, capped
+          if (h._zodiacSign && !h._leoMeteor && _mLost > 0 && !player._god) _mLost = _lxZodMeteorLoss(_landMul, h._zodiacSign);   // v0.30.1853 zodiac-damage-cap - the residual is 35% of a roll, capped
           player.hp -= _mLost;
           player.lastHitTime = game.time;
           player.invulnerable = 600;   // standard iframe window after a meteor
@@ -169841,7 +169879,7 @@ const ZODIAC_AI = {
         // looped game.monsters and applied damage there — Aries' charge
         // hazard was hitting the very boss that spawned it. User reported
         // "Aries is damaging itself".
-        game.hazards.push({ type: 'meteor_warn', x: _cx, y: m.y + m.h - 8, cx: _cx, timer: 20, damage: m.atk * 0.5, owner: 'enemy', radius: 90 });   // v0.26.1033 — match drawn telegraph width (resolver default 180 vs renderer 90)
+        game.hazards.push({ type: 'meteor_warn', x: _cx, y: m.y + m.h - 8, cx: _cx, timer: 20, damage: m.atk * 0.5, owner: 'enemy', radius: 90, _zodiacSign: m.zodiacSign || null /* v0.30.1853 zodiac-damage-cap */ });   // v0.26.1033 — match drawn telegraph width (resolver default 180 vs renderer 90)
       }
       if (m.patternTimer > 900) {
         m.patternState = 'chargeBurst'; m.patternTimer = 0; m.vx = 0;
@@ -169885,6 +169923,7 @@ const ZODIAC_AI = {
           color: '#cc3322',
           _sourceLabel: 'a Cracked Arena tile',
           _ariesCrack: true,
+          _zodiacSign: m.zodiacSign || null,   // v0.30.1853 zodiac-damage-cap - the zodiac roll, capped (was ATK x0.7 through the level-gap ramp)
         });
         addShake(8); flash(0.25); audio.play('crit');
       }
@@ -170927,6 +170966,7 @@ const ZODIAC_AI = {
             if (player.cls === 'warrior' && typeof _warriorDr === 'function') _d = Math.max(1, Math.floor(_d * _warriorDr()));
             if (player._aegis) _d = Math.max(1, Math.floor(_d * 0.5));
             player.hp -= _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_d, 0, true) : _d);
+            _lxZodHitNote(_lxShownLost());   // v0.30.1853 zodiac-damage-cap - the Sun Pounce lands in full (telegraphed) and counts toward the window
             player.lastHitTime = game.time;
             player.invulnerable = Math.max(player.invulnerable || 0, 800);   // v0.30.x bughunt combat-9 - never cuts a longer live immunity
             player._lastDamageSource = 'the Sun Pounce';
@@ -171644,6 +171684,7 @@ const ZODIAC_AI = {
         damage: Math.max(60, Math.floor((m.atk || 200) * 0.7)),   // v0.30.1661 scorpio-dmg-cut - was 1.0
         color: '#aa44dd',
         _sourceLabel: 'a Scorpio Ambush',
+        _zodiacSign: m.zodiacSign || null,   // v0.30.1853 zodiac-damage-cap - Scorpio's roll, capped (was ATK x0.7 through the level-gap ramp)
       });
       if (typeof showToast === 'function') {
         showToast('🦂 Scorpio BURROWS — step off the ambush!', 'epic');
@@ -171897,7 +171938,7 @@ const ZODIAC_AI = {
         if (player.blockTimer > 0) { _kd = Math.max(1, Math.floor(_kd * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }   // v0.30.1841 release28c: Block, DR, Aegis, _diffDmg, _lxLost
         if (player.cls === 'warrior' && typeof _warriorDr === 'function') _kd = Math.max(1, Math.floor(_kd * _warriorDr()));
         if (player._aegis) _kd = Math.max(1, Math.floor(_kd * 0.5));
-        player.hp -= (player._god ? _lxLost(0, _kd) : _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_kd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _kd));
+        player.hp -= (player._god ? _lxLost(0, _kd) : _lxLost(_lxZodHitCap((typeof _diffDmg === 'function') ? _diffDmg(_kd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _kd) /* v0.30.1853 zodiac-damage-cap */));
         player.invulnerable = Math.max(player.invulnerable || 0, 400);
         if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m.x + m.w/2, m.y + m.h/2, 140, 0, 0.12, "Sagittarius's Point-Blank Volley", '#ffcc44');
         player.lastHitTime = game.time; player._lastDamageSource = "Sagittarius's Point-Blank Volley";
@@ -172012,7 +172053,7 @@ const ZODIAC_AI = {
           if (player.blockTimer > 0) { _sd = Math.max(1, Math.floor(_sd * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }   // v0.30.1841 release28c: Block, DR, Aegis, _diffDmg, _lxLost
           if (player.cls === 'warrior' && typeof _warriorDr === 'function') _sd = Math.max(1, Math.floor(_sd * _warriorDr()));
           if (player._aegis) _sd = Math.max(1, Math.floor(_sd * 0.5));
-          player.hp -= (player._god ? _lxLost(0, _sd) : _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_sd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _sd));
+          player.hp -= (player._god ? _lxLost(0, _sd) : _lxLost(_lxZodHitCap((typeof _diffDmg === 'function') ? _diffDmg(_sd, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _sd) /* v0.30.1853 zodiac-damage-cap */));
           if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m._sagMarkX, m._sagMarkY, 70, 0, 0.24, "Sagittarius's Marked Shot", '#ffaa44');   /* bughunt boss-5: the marked spot, not the arena */
           player.lastHitTime = game.time; player._lastDamageSource = "Sagittarius's Marked Shot";
           if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost() + ' MARKED', life: 60, color: '#ffaa44', size: 20, big: true });
@@ -172324,6 +172365,7 @@ const ZODIAC_AI = {
             if (player.cls === 'warrior' && typeof _warriorDr === 'function') _shock *= _warriorDr();
             if (player._aegis) _shock *= 0.5;
             _shock = Math.max(1, Math.floor(_shock));
+            if (!player._god) _shock = _lxZodHitCap(_shock);   // v0.30.1853 zodiac-damage-cap - capped; a shot on top shares the cap
             player.hp -= (player._god ? 0 : _shock);
             if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(h.x + h.w / 2, 0, h.w / 2, 0, 0.35, "Aquarius's Conductive Pool", '#ffee44');   /* bughunt boss-5: the electrified lane, x only */
             player.lastHitTime = game.time;
@@ -172510,7 +172552,7 @@ const ZODIAC_AI = {
             if (player.blockTimer > 0) { _td = Math.max(1, Math.floor(_td * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }   // v0.30.1841 release28c: Block, DR, Aegis, _diffDmg, _lxLost
             if (player.cls === 'warrior' && typeof _warriorDr === 'function') _td = Math.max(1, Math.floor(_td * _warriorDr()));
             if (player._aegis) _td = Math.max(1, Math.floor(_td * 0.5));
-            player.hp -= (player._god ? _lxLost(0, _td) : _lxLost((typeof _diffDmg === 'function') ? _diffDmg(_td, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _td));
+            player.hp -= (player._god ? _lxLost(0, _td) : _lxLost(_lxZodHitCap((typeof _diffDmg === 'function') ? _diffDmg(_td, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _td) /* v0.30.1853 zodiac-damage-cap */));
             if (typeof _coopBroadcastBossHit === 'function') _coopBroadcastBossHit(m._tidalX, m._tidalY, 90, 0, 0.26, "Pisces's Tidal Crush", '#aa66ff');   /* bughunt boss-5: 90, the host's +-80 box (was 240) */
             player.lastHitTime = game.time; player._lastDamageSource = "Pisces's Tidal Crush"; player.hitStun = 300;
             if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost() + ' CRUSH', life: 60, color: '#aa66ff', size: 20, big: true });
@@ -175017,7 +175059,7 @@ function _lxScorpioDelugeFire(m) {
       cx: px, cy: gy,
       w: LX_SCORPIO_POOL_W, h: 28,
       life: LX_SCORPIO_POOL_FRAMES, maxLife: LX_SCORPIO_POOL_FRAMES,
-      owner: 'enemy', damage: dmg, _owner: m,
+      owner: 'enemy', damage: dmg, _owner: m, _zodiacSign: m.zodiacSign || null,   // v0.30.1853 zodiac-damage-cap - a tick is 16% of Scorpio's roll, capped
       _sourceLabel: "Scorpio's Venom Deluge",
     });
     // Impact burst — art only, no damage of its own; the pool is the threat.
