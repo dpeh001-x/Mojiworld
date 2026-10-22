@@ -236,7 +236,7 @@ if (on('5')) {
   await ctx.close();
 }
 // [2] + [6] the boss doors: every arena's recommended level, then the Singularity's card at Lv 70 and Lv 105, the Smith's at Lv 45
-const REC = { slimeCave: 9, confusedVigil: 40, octopusGrotto: 50, sundered_forge: 45, lastStep: 50, krookThrone: 40, innerDimension: 20, sanctum: 60, gravitosArena: 90, boss: 10, blockland_apex: 55,
+const REC = { slimeCave: 9, confusedVigil: 40, octopusGrotto: 50, sundered_forge: 45, lastStep: 50, krookThrone: 40, innerDimension: 20, sanctum: 55, gravitosArena: 90, boss: 10, blockland_apex: 55,
   zod_aries: 70, zod_taurus: 72, zod_gemini: 74, zod_cancer: 76, zod_leo: 78, zod_virgo: 80, zod_libra: 82, zod_scorpio: 84, zod_sagittarius: 86, zod_capricorn: 88, zod_aquarius: 90, zod_pisces: 92, tower_b5: 30, tower_b10: 30 };
 const door = async (page, from, dest, lv) => {
   await page.evaluate(async ([from, lv]) => { const R = window._r28c; devSetLevel(lv); await R.go(from, 300); game.monsters = []; }, [from, lv]);
