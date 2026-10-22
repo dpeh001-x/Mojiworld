@@ -87,6 +87,7 @@ ok('the Lv-50 bulk band holds (krook vs octobaby within 1.5x)',
 let payDrift = [];
 for (const bt of BOSSES) {
   const b = rows.find((r) => r.t === bt);
+  if (bt === 'young_confused_barnaby') continue;   // v0.30.1756: HP x4 on purpose, EXP deliberately not scaled
   if (Math.abs(b.exp - b.hp * 0.055) / (b.hp * 0.055) > 0.35) payDrift.push(bt + ' exp');
 }
 ok('boss EXP still tracks the file’s own hp×0.055 rule (±35%)',

@@ -94,7 +94,7 @@ try {
   check(R.L2.atRelease === 7 && R.L2.before >= 0 && R.L2.before < 7, 'L. form 2 laser: the chest blast (f7) is on screen the step the bolts release', R.L2);
   check(R.W_wave.atFire === 5 && R.W_wave.before < 5, 'W. the wave fires on the punch lunge (f5)', R.W_wave);
   check(R.W_blackhole.atFire === 5 && R.W_blackhole.before < 5, 'W. the blackhole fires on the punch lunge (f5)', R.W_blackhole);
-  check(R.S.singularity.atResolve === 6 && R.S.singularity.stepBefore < 6 && R.S.collapseRain.atResolve === 6 && R.S.collapseRain.stepBefore < 6, 'S. form 2 Singularity and Collapse Rain: the star burst (f6) starts at the resolve', R.S);
+  check(R.S.singularity.atResolve === 8 && R.S.singularity.atCast === 0 && R.S.collapseRain.atResolve === 6 && R.S.collapseRain.stepBefore < 6, 'S. form 2: the Singularity ends on its last frame at the resolve (v0.30.1827); Collapse Rain star burst (f6) starts at the resolve', R.S);
   for (const t of ['towerArbiter', 'gravitos', 'mooma']) { const c = R['C_' + t]; check(c.key >= 0 && c.at120 === c.key && c.at112 < c.key && c.at0 >= 0 && c.at0 < c.key, `C. ${t}: a contact hit shows its key frame (f${c.key}) 120 ms after (+-8), led into by its windup`, c); }
   check(R.D.started && R.D.atBrace === 0 && R.D.at860 === 2, "D. Legosaurus's dash set restarts at the brace: f0 then, f2 as the launch comes (850 ms)", R.D);
   const HAND = { gravitos: 1, gravitoslaser: 1, gravitos2laser: 1, gravitos2star: 1, legosaurusdash: 1, towerArbiter: 1 };

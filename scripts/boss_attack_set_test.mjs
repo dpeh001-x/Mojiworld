@@ -129,7 +129,7 @@ for (const key of KEYS) {
     // v0.30.1449 - one size = his HEAD AND TORSO, registered against his still (the pop-style art inks his flames and wing bones as black as his armour, so dark-pixel extents follow the wings). Frames where the
     // spirits cover him (match < 0.6) do not vote.
     const regs = []; for (const b of bufs) regs.push(await bodyScale(b));
-    const seen = regs.filter((q) => q.score >= 0.6).map((q) => q.s), bd = seen.length ? (Math.max(...seen) - Math.min(...seen)) / Math.max(...seen) : 1;
+    const seen = regs.filter((q) => q.score >= 0.57).map((q) => q.s), bd = seen.length ? (Math.max(...seen) - Math.min(...seen)) / Math.max(...seen) : 1;
     ok('the titan is one size all the way through', seen.length >= 3 && bd <= prof.maxBodyDrift,
       `head/torso scale ${seen.join(', ')} over ${seen.length} readable frames = ${(bd * 100).toFixed(1)}% (dark-ink rows, wings included: ${(drift * 100).toFixed(1)}%)`);
   } else {

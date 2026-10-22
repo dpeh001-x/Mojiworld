@@ -68,7 +68,7 @@ ok('Lv 86 vs Gloopaloo: the same table numbers - no hidden level floor', exact(r
 ok('Lv 200 prestige: still the table numbers', exact(r.king200, R.king), { got: r.king200, table: R.king });
 ok('Mooma at Lv 16 spawns her table row', exact(r.mooma16, R.mooma), { got: r.mooma16, table: R.mooma });
 ok('a Lv-50 boss is the table at level and overleveled alike (Krook 50 / 86)', exact(r.krook50, R.kingKrook) && exact(r.krook86, R.kingKrook), { at50: r.krook50, at86: r.krook86, table: R.kingKrook });
-ok('the scripted Mirror fight is its table row', exact(r.mirror86, R.mirrorSelf), { got: r.mirror86, table: R.mirrorSelf });
+ok('the scripted Mirror fight is its table HP (its ATK is 0.4x the hero since v0.30.1742)', !!r.mirror86 && r.mirror86.maxHp === R.mirrorSelf.hp, { got: r.mirror86, table: R.mirrorSelf });
 ok('a tower boss spawns its table row (per-floor scaling lives in the expedition spawner)', exact(r.towerBoss, R.towerArbiter), { got: r.towerBoss, table: R.towerArbiter });
 ok('boss rewards are the table pay within the reward jitter, at any level', payOk(r.king10, R.king) && payOk(r.king86, R.king) && payOk(r.krook86, R.kingKrook), { k10: r.king10, k86: r.king86, table: R.king, RJ: r.RJ });
 ok('a normal mob is its table row within the stat jitter, at any level', !!r.snail86 && Math.abs(r.snail86.maxHp - R.snail.hp) <= Math.ceil(R.snail.hp * r.MJ) + 1, { got: r.snail86, table: R.snail });

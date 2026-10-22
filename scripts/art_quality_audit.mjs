@@ -61,8 +61,9 @@ const broken  = rows.filter(r => r.err);
 //   fx/safezone_shield.webp - v0.30.582 (a4f1a07a): 128px by design
 //     (scripts/gen_safezone_icon.mjs asserts it), drawn at Math.min(24, z.h * 0.42).
 const SMALL_OK = { 'fx/safezone_shield.webp': 24 };
-const lowRes  = rows.filter(r => !r.err && Math.max(r.w, r.h) < (SMALL_OK[`${r.d}/${r.f}`] ? SMALL_OK[`${r.d}/${r.f}`] * 4 : MIN_PX));
-const tiny    = rows.filter(r => !r.err && r.kb < MIN_KB);
+const SMALL_ART = /^fx\/(tg_jump_|reflect_badge\.webp)/;   // v0.30.1773/1778/1854: marks drawn at 17-58 px, so 92-136 px and 4-5 KB is plenty
+const lowRes  = rows.filter(r => !r.err && !SMALL_ART.test(`${r.d}/${r.f}`) && Math.max(r.w, r.h) < (SMALL_OK[`${r.d}/${r.f}`] ? SMALL_OK[`${r.d}/${r.f}`] * 4 : MIN_PX));
+const tiny    = rows.filter(r => !r.err && !SMALL_ART.test(`${r.d}/${r.f}`) && r.kb < MIN_KB);
 const opaque  = rows.filter(r => !r.err && r.alphaMin === 255 && !OPAQUE_OK.test(r.d));
 
 const section = (title, list, fmt) => {

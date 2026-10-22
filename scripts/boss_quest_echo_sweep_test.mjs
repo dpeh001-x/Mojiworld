@@ -106,7 +106,7 @@ try {
   ok('1d. the re-armed King\'s live kill completes The Brimming Tyrant (the tester\'s report: a quest taken after the kill can still be finished)', !!R.tester.rearm && R.tester.rearm.slain && R.tester.done && !R.tester.active, R.tester);
   ok('2. a NIGHTMARE echo completes it too', !R.nightmare.err && R.nightmare.slain && R.nightmare.done, R.nightmare);
   const rows = R.rows.filter((r) => r.skip === undefined), skipped = R.rows.filter((r) => r.skip !== undefined);
-  ok('3a. the sweep found the boss quests (at least 18 quest/boss pairs with an echo arena)', rows.length >= 18, rows.length);
+  ok('3a. the sweep found the boss quests (at least 16 quest/boss pairs with an echo arena; v0.30.1855: one fight per boss)', rows.length >= 16, rows.length);
   for (const r of rows) ok(`3b. ${r.id}: an echo of ${r.t} (${r.err || 'arena ok'}) advances it`, !r.err && r.slain && r.type === r.t && r.ticked, r);
   for (const r of skipped) ok(`3c. ${r.id}: ${r.t} has no echo arena, and NO_ECHO names its re-fight`, !!r.skip, r.skip || 'add an Echo Keeper arena or a NO_ECHO entry');
   ok('no page errors', errs.length === 0, errs);

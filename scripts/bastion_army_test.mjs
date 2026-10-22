@@ -25,7 +25,7 @@ const mapAt = G.indexOf("bastionThrone: {\n    name:'The Bastion");
 const plats = arrayAt('platforms: [', mapAt), npcs = arrayAt('npcs: [', mapAt), props = arrayAt('  bastionThrone: [', G.indexOf('const MAP_PROPS = {'));
 const WORLD = +(G.slice(mapAt).match(/worldWidth: (\d+)/) || [])[1], PDH = +(G.match(/const PROP_DEFAULT_H = (\d+);/) || [])[1];
 const PXG = +(G.match(/const NPC_PX_PER_GAME_PX = (\d+);/) || [])[1];
-const js = (file, name) => { const t = fs.readFileSync(path.join(ROOT, 'data', file), 'utf8'); return JSON.parse(t.slice(t.indexOf(name + ' = ') + name.length + 3, t.lastIndexOf(';'))); };
+const js = (file, name) => { const t = fs.readFileSync(path.join(ROOT, 'data', file), 'utf8'); return JSON.parse(t.slice(t.indexOf(name + ' = ') + name.length + 3, t.indexOf('};', t.indexOf(name + ' = ')) + 1)); };
 const BB = js('sprite_bbox.js', 'window.LX_SPRITE_BBOX'), ED = js('sprite_edges.js', 'window.LX_SPRITE_EDGES');
 const MAN = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'assets_manifest.json'), 'utf8'));
 const FI = fs.readFileSync(path.join(ROOT, 'data', 'sprite_frame_index.js'), 'utf8');

@@ -102,7 +102,7 @@ try {
     const out = {}, MAP = stage(); let uid = 880000;
     const mirror = (type, boss, u) => { net._coopSpawning = true; const m = spawnMonster(player.x + 300, player.y - 20, type, !!boss, false); net._coopSpawning = false; m.uid = (u != null) ? u : ++uid; m._coopMirror = true; return m; };
     const kill = (id, m, extra) => Object.assign({ t: 'kill', id, u: m.uid, e: m.exp, c: m.mojicoins, x: player.x + 300, y: player.y, map: MAP, tp: m.type, b: 0, il: 0 }, extra || {});
-    const pay = (f) => { const e0 = player.exp, c0 = player.mojicoins || 0; player.level = 40; const err = H(f); const r = { exp: player.exp - e0, coins: (player.mojicoins || 0) - c0, err }; player.level = 40; return r; };
+    const pay = (f) => { const e0 = player.exp, c0 = player.mojicoins || 0; player.level = 40; player.expToNext = 1e12; const err = H(f); const r = { exp: player.exp - e0, coins: (player.mojicoins || 0) - c0, err }; player.level = 40; return r; };
     const m1 = mirror('slime'); out.first = pay(kill(7, m1));
     const m1b = mirror('slime', false, m1.uid); out.redelivered = pay(kill(7, m1b));                  // the same sender, the same uid: still a redelivery
     net.hostId = 8; const m2 = mirror('slime', false, m1.uid); out.newHostSameUid = pay(kill(8, m2));   // another host’s counter reached the same number

@@ -42,7 +42,7 @@ try {
     window.__steps = (n) => new Promise((r) => { const g0 = game.time; const f = () => (game.time - g0 >= n ? r() : requestAnimationFrame(f)); f(); });
     window.__wait = (ms) => new Promise((r) => setTimeout(r, ms));
     // close any film overlay the way a player does (any key), then let its 500 ms fade finish
-    window.__closeFilms = async () => { let n = 0; for (const id of ['kill-film-overlay', 'barnaby-fall-overlay', 'captains-teaser-overlay']) { if (document.getElementById(id)) { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); n++; } }
+    window.__closeFilms = async () => { let n = 0; if (['kill-film-overlay', 'barnaby-fall-overlay', 'captains-teaser-overlay'].some((id) => document.getElementById(id))) await new Promise((r) => setTimeout(r, 700));   /* v0.30.1756: a film ignores input for its first 600 ms */ for (const id of ['kill-film-overlay', 'barnaby-fall-overlay', 'captains-teaser-overlay']) { if (document.getElementById(id)) { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); n++; } }
       if (n) await __wait(800); for (const id of ['kill-film-overlay', 'barnaby-fall-overlay', 'captains-teaser-overlay']) { const o = document.getElementById(id); if (o) o.remove(); } game.paused = false; return n; };
   });
   // [1] the portrait nag (phones): turn to portrait mid-game, tap "Play in portrait anyway"

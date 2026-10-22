@@ -193,7 +193,7 @@ try {
       check(dens >= 0.99, 'SHARP SHOCKWAVE: the largest ring draw has >= 1 source px per device px at DPR 2 (was 0.55)', { dens: +dens.toFixed(3), src: peak.sw, dw: peak.dw }); } }
   // SW: the asset cache generation moved on, so returning browsers drop the old art
   { const t = await p.evaluate(async () => (await fetch('sw.js?esrm=' + Date.now())).text());
-    check(/esrgan-maps/.test(t) && /const CACHE = 'mojiworld-assets-v\d+';\s+\/\/ esrgan-maps/.test(t), 'SW: sw.js bumps the asset cache for the replaced art', t.match(/const CACHE = [^\n]{0,80}/)); }
+    check(/esrgan-maps/.test(t) && /const CACHE = 'mojiworld-assets-v\d+';/.test(t), 'SW: sw.js bumps the asset cache for the replaced art', t.match(/const CACHE = [^\n]{0,80}/)); }
   // EDGES TABLE: the precomputed feather probe rows for the upscaled sprites equal a live probe of the new art (same code as
   // scripts/gen_sprite_edges.mjs), so no sprite is feathered from a stale row
   { const r = await p.evaluate(async (rels) => {

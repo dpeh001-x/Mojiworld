@@ -64,7 +64,7 @@ const R = await page.evaluate(async () => {
 const P = await page.evaluate(async () => {
   const npc = (game.npcs || []).find((n) => n && n.role && Math.abs((n.x + 20) - (player.x + player.w / 2)) < 2000);
   if (!npc) return { err: 'no npc' };
-  player.x = npc.x - 120; player.vx = 0;
+  player.x = npc.x - player.w / 2; player.vx = 0;   // v0.30.1739: a click talks only inside the talk reach (70 px)
   await new Promise((z) => setTimeout(z, 1200));
   try { closeAllModals(); } catch (e) {} game.paused = false;
   const cv = document.getElementById('game-canvas') || document.querySelector('canvas'); const rc = cv.getBoundingClientRect();

@@ -83,9 +83,9 @@ ok('he is in form 2 and every pose was sampled', !R.noBoss && R.phase === 'aethe
   { phase: R.phase, idle: B.idle && B.idle.length, walk: B.walk && B.walk.length, attack: B.attack && B.attack.length });
 for (const st of ['idle', 'attack']) {
   ok(`${st}: the LIFTED foot meets the floor (was 7.2 px above it)`, B[st].length && B[st].every((x) => x.high <= 2), { lifted: span(B[st], 'high') });
-  ok(`${st}: the planted foot digs in no more than 12 px`, B[st].length && B[st].every((x) => x.low >= -12), { planted: span(B[st], 'low') });
+  ok(`${st}: the planted foot digs in no more than 18 px (v0.30.1727 pushed form 2 down 6 px)`, B[st].length && B[st].every((x) => x.low >= -18), { planted: span(B[st], 'low') });
 }
-ok('walk: the foot on the ground stays within the same band', B.walk.length && B.walk.every((x) => x.low >= -12 && x.low <= 2), { lowest: span(B.walk, 'low') });
+ok('walk: the foot on the ground stays within the same band', B.walk.length && B.walk.every((x) => x.low >= -18 && x.low <= 2), { lowest: span(B.walk, 'low') });
 const lows = ['idle', 'walk', 'attack'].map((st) => B[st].length ? Math.min(...B[st].map((x) => x.low)) : null);
 ok('the three poses sit at one depth - no hop when he switches (within 2 px)', lows.every((v) => v != null) && Math.max(...lows) - Math.min(...lows) <= 2, { idle: lows[0], walk: lows[1], attack: lows[2] });
 ok('no page errors', errs.length === 0, errs.slice(0, 3));

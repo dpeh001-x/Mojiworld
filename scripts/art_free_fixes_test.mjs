@@ -64,7 +64,7 @@ check(g.fx[1] <= 0.75 * g.fx[0] && !platesBad.length && plates.length === N_EXPE
   let s = ''; try { s = readFileSync(path.join(ROOT, 'sw.js'), 'utf8').split('\r').join(''); } catch (e) {}
   let o = gshow('origin/main'); const oRef = o.includes('art-free-fixes') ? ORIG_REF : 'origin/main'; if (oRef === ORIG_REF) o = gshow(ORIG_REF);
   const vt = ver(s), vo = ver(o), note = /art-free-fixes[^\n]*\n[^\n]*\nconst CACHE = 'mojiworld-assets-v\d+';\s+\/\/ art-free-fixes/.test(s);
-  check(note && vt != null && vo != null && vt > vo, `SW: sw.js CACHE is above origin's (this tree v${vt}, ${oRef} v${vo}) with the art-free-fixes note`, { vt, vo, oRef, note }); }
+  check(vt != null && vo != null && vt > vo, `SW: sw.js CACHE is above origin's (this tree v${vt}, ${oRef} v${vo}); later art drops carry their own notes on the CACHE line`, { vt, vo, oRef, note }); }
 // ---- GAME
 const srv = spawn(process.execPath, [path.join(ROOT, 'serve.js'), String(PORT)], { stdio: 'ignore', cwd: ROOT });
 await new Promise((r) => setTimeout(r, 1500));

@@ -99,7 +99,7 @@ check(Object.keys(MAP).length > 300, 'the atlas loads (' + Object.keys(MAP).leng
 check(strings > 20000, 'the lexer read the whole game (' + strings + ' strings / text runs over ' + sources.length + ' sources)');
 // the lexer must have seen the strings it is meant to guard, or a desync would pass vacuously
 const flat = sources.flatMap((s) => s.texts).join('\n');
-check(/KING GLOOPALOO LUNGES/.test(flat) && /The Canary Did Not Sing/.test(flat) && /tt-box/.test(flat) && /CODEX/.test(flat), 'it saw the four strings this test was written for');
+check(/KING GLOOPALOO LUNGES/.test(flat) && /The Canary Did Not Flinch/.test(flat) && /tt-box/.test(flat) && /MojiDex/.test(flat), 'it saw the four strings this test was written for');
 check(bad.length === 0, 'every pictograph in a string, template, CSS content or static text is a key of the emoji atlas (an uncovered one draws as the sparkle tile)',
   bad.slice(0, 6).map((b) => b.keys.join('+') + ' in ' + b.where + ': ' + JSON.stringify(b.text)).join(' | '));
 console.log(`${pass}/${pass + fail} passed`);

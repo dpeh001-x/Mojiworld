@@ -34,6 +34,9 @@ const out = await page.evaluate(async () => {
   player.luck = 0; player._god = true; game.paused = false;
   loadMap('forest', 300);
   await new Promise(r => setTimeout(r, 400));
+  game._mapAffix = WORLD_AFFIXES[0];   // the day's map affix (Hoard-Touched drop x1.9 on some days) is not what this test measures
+  game._mapAffix = WORLD_AFFIXES[0];   // the day's map affix (Hoard-Touched drop x1.9 on some days) is not what this test measures
+  game._mapAffix = WORLD_AFFIXES[0];   // the day's map affix (Hoard-Touched drop x1.9 on some days) is not what this test measures
 
   // ── CHESTS: open N of each grade through the real openChest ──────────────
   const chestRate = {};

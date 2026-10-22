@@ -36,7 +36,7 @@ const finish = async () => {
 const MPF = ['src/index.js', 'README.md', 'wrangler.toml', 'package.json', 'package-lock.json'];
 for (const v of ['new', 'old']) {
   mkdirSync(T + '/' + v + '/mp-cf/src', { recursive: true });
-  for (const f of MPF) writeFileSync(T + '/' + v + '/mp-cf/' + f, git('show', 'origin/main:mp-cf/' + f));
+  for (const f of [...MPF, ...String(git('ls-tree', '--name-only', 'origin/main', 'mp-cf/src/')).split(String.fromCharCode(10)).map((x) => x.trim().replace('mp-cf/', '')).filter((x) => x.startsWith('src/') && x.endsWith('.js') && !MPF.includes(x))]) writeFileSync(T + '/' + v + '/mp-cf/' + f, git('show', 'origin/main:mp-cf/' + f));
 }
 writeFileSync(T + '/old/mp-cf/src/index.js', git('show', 'b42a9175:mp-cf/src/index.js'));
 { const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts/apply_cloud_close_push_relay.mjs')], { env: { ...process.env, LX_MP_ROOT: T + '/new' }, encoding: 'utf8' });

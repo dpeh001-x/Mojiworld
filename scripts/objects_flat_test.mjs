@@ -23,7 +23,7 @@ const PROPS = { bastion_anvil: [768, 758], bastion_throne: [992, 991], bastion_t
   town_fountain_small_east: [768, 584] };
 const SYMMETRIC = ['market_stall_1', 'market_stall_2', 'shadow_shuriken_rack', 'bastion_throne_scribe_desk', 'bastion_throne_prayer_candle', 'celestial_arcane_glyph_stone', 'crate_stack', 'well_stone',
   'azure_large_waterfountain', 'azure_waterfountain', 'town_fountain_small_east'];
-const table = (file, name) => { const t = fs.readFileSync(path.join(ROOT, 'data', file), 'utf8'); return JSON.parse(t.slice(t.indexOf(name + ' = ') + name.length + 3, t.lastIndexOf(';'))); };
+const table = (file, name) => { const t = fs.readFileSync(path.join(ROOT, 'data', file), 'utf8'); return JSON.parse(t.slice(t.indexOf(name + ' = ') + name.length + 3, t.indexOf('};', t.indexOf(name + ' = ')) + 1)); };
 const BB = table('sprite_bbox.js', 'window.LX_SPRITE_BBOX'), ED = table('sprite_edges.js', 'window.LX_SPRITE_EDGES');
 const rows = [];
 for (const [k, [canvas, oldBottom]] of Object.entries(PROPS)) {

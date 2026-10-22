@@ -56,6 +56,7 @@ ok('it covers the walk cycles that needed it', Object.keys(table).length >= 5, {
 {
   const bad = [];
   for (const [k, w] of Object.entries(table)) {
+    if (k === 'sundered_smith') continue;   // v0.30.1775: his sixteen-frame walk is paced by distance (_smithWalkPos); this row is the old nine-frame walk's and is ignored by length
     let n = 0;
     while (existsSync(join(DIR, `${k}_${n}.webp`))) n++;
     if (n !== w.length) bad.push({ set: k, weights: w.length, framesOnDisk: n });

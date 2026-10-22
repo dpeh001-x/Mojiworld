@@ -150,7 +150,8 @@ try {
         _lxCoopRewardSeen.set(929292, { tp: 'miraFallen', boss: true, lv: 90, e: 1, c: 1 });
         _coopApplyKill({ map: game.currentMap, id: 1, u: 929292, tp: 'miraFallen', b: 1, e: 0, c: 0, x: player.x, y: player.y });
       });
-      await __wait(2800); __clear();
+      await __wait(2800); window._lxKillFilmPending = 0; { const _ko = document.getElementById('kill-film-overlay'); if (_ko) _ko.remove(); } await __wait(1500);   // the film (v0.30.1635) is a long video: the door opens when it ends
+      __clear();
       out.door = { before, after: (game.portals || []).some((p) => p && p.dest === 'sanctum') };
     } finally { game.bossDefeated = keepBD; game._pendingBossBoon = null; __clear(); }
     return out;

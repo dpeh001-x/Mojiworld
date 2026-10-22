@@ -30,7 +30,7 @@ const MAPS_ = {
     portals: (B.bastionRampart.portals || []).map((p) => p.x), props: arrayAt('  bastionRampart: [', mp) },
 };
 const SRC = {}; for (const m of G.matchAll(/(bastion_goof_\w+): *\{ still: '(Sprites\/[^']+)', frames: '(Sprites\/[^']+)' \}/g)) SRC[m[1]] = { still: m[2], frames: m[3] };
-const table = (file, name) => { const t = fs.readFileSync(path.join(ROOT, 'data', file), 'utf8'); return JSON.parse(t.slice(t.indexOf(name + ' = ') + name.length + 3, t.lastIndexOf(';'))); };
+const table = (file, name) => { const t = fs.readFileSync(path.join(ROOT, 'data', file), 'utf8'); return JSON.parse(t.slice(t.indexOf(name + ' = ') + name.length + 3, t.indexOf('};', t.indexOf(name + ' = ')) + 1)); };
 const BB = table('sprite_bbox.js', 'window.LX_SPRITE_BBOX'), ED = table('sprite_edges.js', 'window.LX_SPRITE_EDGES');
 const GOOF = ['bastion_goof_daisy', 'bastion_goof_flop', 'bastion_goof_mope', 'bastion_goof_munch'];
 const srcBad = GOOF.filter((k) => { const s = SRC[k]; if (!s) return true; const rel = s.still.replace(/^Sprites\//, '');

@@ -192,7 +192,7 @@ ok('the Arbiter pillar zone carries its own art', r.arbiter && r.arbiter.tg === 
 ok('a zodiac column sign carries its own sign telegraph (v0.30.91)',
    r.zodiac && r.zodiac.tg === 'tg_col_zodiac_taurus', r.zodiac);
 ok('a devastating boss swing zone carries the kind art', r.swingTg === 'tg_swing', { tg: r.swingTg });
-ok('the dash lane carries the kind art', r.dashTg === 'tg_dash', { tg: r.dashTg });
+ok('the dash lane carries the kind art (or the boss own lane art - Legosaurus has tg_dash_legosaurus since v0.30.1771)', r.dashTg === 'tg_dash' || r.dashTg === 'tg_dash_legosaurus', { tg: r.dashTg });
 ok('a LIVE zone with decoded art paints drawImage-ONLY — zero plain rectangles',
    r.paintReady && r.paintReady.drawImage >= 1 && r.paintReady.fillRect === 0 && r.paintReady.strokeRect === 0,
    r.paintReady);

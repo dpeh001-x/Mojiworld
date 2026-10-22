@@ -88,7 +88,7 @@ try {
   if (bad(k)) ok('King Krook harness: ' + bad(k), false, k.diag || null);
   else {
     ok('King Krook: a stomp that starts on the move - every frame of its first 500 ms is his own size (body within 6% of his idle / walk)', k.early.every((x) => band(k, x)), { idleH: k.idleH, walkR: k.walkR, span: span(k.early), frames: brief(k.early) });
-    ok('...he draws his own body frames until he plants, then the stomp art takes over', k.early.some((x) => x.st === 'body') && k.late.some((x) => x.st === 'attack'), { early: [...new Set(k.early.map((x) => x.st))], late: [...new Set(k.late.map((x) => x.st))] });
+    ok('...the stomp art draws from the first frame (v0.30.1759 krook-plant: every pattern is a stand-still attack)', k.early.every((x) => x.st === 'attack') && k.late.some((x) => x.st === 'attack'), { early: [...new Set(k.early.map((x) => x.st))], late: [...new Set(k.late.map((x) => x.st))] });
     ok('...and the stomp art is drawn at his size (its calibration unchanged)', k.late.filter((x) => x.st === 'attack').length >= 5 && k.late.filter((x) => x.st === 'attack').every((x) => Math.abs(x.r - 1) <= 0.15), { span: span(k.late.filter((x) => x.st === 'attack')) });
   }
   if (bad(a)) ok('Aetherion harness: ' + bad(a), false, a.diag || null);

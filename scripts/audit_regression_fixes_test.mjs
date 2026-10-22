@@ -72,9 +72,11 @@ try {
     // clearSave (already fixed in v0.30.494)
     markSet(); clearSave(); o.marker.clearSave = markGone();
     // backup restore
+    try { _flushSaveStateNow(); } catch (e) {}
+    const _signedSave = localStorage.getItem(SAVE_KEY);   // v0.30.1734: a restore of an unsigned backup is refused before it clears the marker, so the probe backup is a real (signed) save
     markSet();
     try {
-      const blob = JSON.stringify({ t: 2, player: { level: 5, name: 'B', cls: 'warrior' }, game: {} });
+      const blob = _signedSave || JSON.stringify({ t: 2, player: { level: 5, name: 'B', cls: 'warrior' }, game: {} });
       const arr = (typeof _lxGetBackups === 'function') ? _lxGetBackups() : [];
       arr.unshift({ id: 'probe', ts: Date.now(), label: 'probe', name: 'B', level: 5, cls: 'warrior', map: 'forest', data: blob });
       if (typeof _lxStoreBackups === 'function') _lxStoreBackups(arr);
@@ -103,7 +105,7 @@ try {
     return s.slice(0, i) + s.slice(j + 1);
   };
   const srcNoHelpers = _strip(_strip(src, '_lxPaintWrite'), '_lxSaveStoreRaw');
-  const installs = (srcNoHelpers.match(/localStorage\.setItem\(SAVE_KEY,|_lxPaintWrite\(|_lxSaveStoreRaw\(/g) || []).length;
+  const installs = (srcNoHelpers.match(/localStorage\.setItem\(SAVE_KEY,(?!\s*[Dd]\.json)|_lxPaintWrite\(|_lxSaveStoreRaw\(/g) || []).length;
   const clears = (src.match(/removeItem\(_LX_SAVE_MARK_KEY\)/g) || []).length;
   const holdFlag = /if \(game\._gravitosCinePlaying\) return true;/.test(src);
   const drainFn = /function _lxDrainPendingSweeps\(\)/.test(src);
