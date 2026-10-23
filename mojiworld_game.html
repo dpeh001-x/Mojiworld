@@ -16488,7 +16488,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1881';
+const GAME_VERSION = 'v0.30.1882';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -63152,6 +63152,26 @@ function _lxBossExecLocal(kind, p) {
     }
     return true;
   }
+  case 'brGore': {   // fix-coop-gore-guest - a Taurus / Legosaurus charge ran over THIS player (p.to): their own HP, Block, DR and Aegis, as the host's own gore
+    if (typeof net === 'undefined' || !net || net.myId == null || +p.to !== +net.myId) return false;
+    if (player._god || (typeof game !== 'undefined' && game && game.paused)) return false;   // Aegis holds; a paused guest is out of the fight
+    const _cr = +p.cr === 1, _fr = Math.min(1, Math.max(0, +p.fr || 0.99)), _lf = Math.min(1, Math.max(0, +p.lf || 0.05));
+    const _lb = String(p.lb || '').slice(0, 40), _cl = /^#[0-9a-fA-F]{3,8}$/.test(String(p.c || '')) ? String(p.c) : '#ffcc66';
+    _lxGoreLand({ level: Math.min(300, Math.max(1, +p.lv || 1)), _bdCrush: _cr, _bdDir: +p.dir < 0 ? -1 : 1 },
+      { gore: { frac: _fr, label: _lb, color: _cl }, crush: _cr ? { leave: _lf, label: _lb, color: _cl } : null });
+    return true;
+  }
+  case 'gsSpike': {   // fix-coop-spike-guest - a Shardlich eruption at (p.x, p.y): this player's own position, i-frames, Block / DR / Aegis, as the host's own hit
+    if (typeof net === 'undefined' || !net || net.isHost) return false;   // the host's block resolved its own hit
+    if (player._god || (player.invulnerable | 0) > 0 || (typeof game !== 'undefined' && game && game.paused)) return false;
+    const _sx = +p.x, _sy = +p.y;
+    if (!Number.isFinite(_sx) || !Number.isFinite(_sy)) return false;
+    if (Math.abs((player.x + player.w / 2) - _sx) < 55 && Math.abs((player.y + player.h) - _sy) < 60) {
+      _lxSpikeHit({ level: Math.min(300, Math.max(1, +p.lv || 1)), label: String(p.lb || '').slice(0, 40) });
+      return true;
+    }
+    return false;
+  }
   case 'qteLock': {   // v0.30.1740 coop-guest (bughunt H17-3) - a boss lock addressed to ONE player (p.to): see _lxShackleTryPeer
     if (typeof net === 'undefined' || !net || net.myId == null || +p.to !== +net.myId) return false;
     if (typeof _QTE === 'undefined' || _QTE.active || player._god || typeof _qteShackleStart !== 'function') return false;
@@ -64250,6 +64270,18 @@ function _coopHostApplyDamage(uid, dmg, isCrit, skill, pk, pid) {
 function _coopBroadcastKill(m, exp, coins) {
   if (!_coopActive() || !net.isHost || !m) return;
   if (typeof _coopKeyHasPeers === 'function' && !_coopKeyHasPeers()) return;   // v0.30.1443 coop-keyed - nobody shares my map: nothing to send
+  // fix-coop-fastkill-mirror: a monster killed before its first monster tick (48 ms) was never sent, so no guest held a mirror of it - and a guest's kill handler
+  // pays nothing for a monster it never mirrored (that rule stays: it is what stops a host minting rewards for monsters that never existed). The kill was
+  // dropped: no EXP, coins, quest tick or streak. Send it once now, as its first sight (in full); the kill follows it down the same socket.
+  if (!m._kfSent && m.uid != null && typeof _coopTickMonsters === 'function') {
+    const _fkAt = performance.now();
+    if (_fkAt - (net._coopFastKfAt || 0) >= 125) {   // at most 8 catch-up frames a second: a mass kill must not eat the relay's 40 msg/s budget
+      net._coopFastKfAt = _fkAt;
+      const _fkHp = m.currentHp; if (!(_fkHp > 0)) m.currentHp = 1;   // the tick skips the dead
+      net._coopMonAt = 0;
+      try { _coopTickMonsters(); } catch (e) {} finally { m.currentHp = _fkHp; }
+    }
+  }
   // v0.29.356 — `il` tags illusion kills. Mirages already ship e:0/c:0, but the
   // guest side also awards quest/bestiary credit and (new) Slaughter-Ladder
   // streak credit off this frame — both must be able to tell a real kill from
@@ -102612,6 +102644,110 @@ function _lxMobDotTick(m, dt) {
   if (m.currentHp <= 0) { (game._pendingKills = game._pendingKills || []).push(m); return true; }   // drained after the loop (v0.25.585)
   return false;
 }
+// fix-coop-skill-aim: MONSTER_SKILLS kinds that act on the target's position once, at the cast, and so can be aimed at a partner (see the cast gate in updateMonsters).
+const LX_SKILL_AIMABLE = { groundStun: 1, poisonCloud: 1, dashCharge: 1, shockwave: 1, freezeBeam: 1, summon: 1, cloudburst: 1, spreadFan: 1, mortarLob: 1, enrageSelf: 1, lightningStrike: 1 };
+// fix-coop-heat-aura: one Forgewight heat-aura burn on THIS client's player (balance notes and layers as they were in the host block).
+// The host's block in updateMonsters and a guest's mirror tick (_lxCoopGuestAuraTick) both call it, so the two take the same hit.
+function _lxHeatAuraHit(m) {
+        // v0.29.321 — BALANCE FIX. The first cut routed this through _diffDmg,
+        // whose level-punish multiplier (×5 at Lv60) is meant for projectiles;
+        // contact-range damage uses the banded ANCHOR system so an at-level
+        // hit can never one-shot. Measured before the fix: 206% of an
+        // at-level mage's maxHp in one aura tick. Now: a fraction of the
+        // mob's own touch anchor, hard-capped at 18% of player maxHp.
+        const _haLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+        const _haRef = (typeof _refHpAtLv === 'function') ? _refHpAtLv(_haLv) : 200;
+        const _haB = (typeof _dmgBandPct === 'function') ? _dmgBandPct(_haLv) : { tFloor: 0.10 };
+        let _haDmg = Math.max(1, Math.floor(_haRef * (_haB.tFloor || 0.10) * 0.40) - Math.floor(getDef() * 0.25));
+        _haDmg = Math.min(_haDmg, Math.floor(getMaxHp() * 0.18));
+        // v0.30.x bughunt combat-4 - the layers the Taurus gore beside it already honours: Block, warrior DR, Divine Aegis, then the mana shield on the final loss
+        if (player.blockTimer > 0) { _haDmg = Math.max(1, Math.floor(_haDmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+        if (player.cls === 'warrior' && typeof _warriorDr === 'function') _haDmg = Math.max(1, Math.floor(_haDmg * _warriorDr()));
+        if (player._aegis) _haDmg = Math.max(1, Math.floor(_haDmg * 0.5));
+        _haDmg = _lxManaShieldAbsorb(_haDmg);
+        player.hp -= _haDmg;
+        player.lastHitTime = game.time;
+        player._lastDamageSource = m.label || m.type || 'searing heat';
+        player.invulnerable = 450;
+        game.damageNumbers.push({ taken: true, x: player.x + player.w/2 - 10, y: player.y - 8, vy: -1.6, text: String(_haDmg), life: 26, color: '#ff8844', size: 12 });
+        for (let i = 0; i < 6; i++) {
+          game.particles.push({ x: player.x + Math.random() * player.w, y: player.y + player.h - Math.random() * 12,
+            vx: (Math.random() - 0.5) * 2, vy: -1.5 - Math.random() * 2, life: 20, color: i % 2 ? '#ff6622' : '#ffaa33', size: 2, gravity: -0.02 });
+        }
+}
+// fix-coop-heat-aura: a GUEST runs no monster AI, so a Forgewight's heat aura never reached it (the host's block reads the host's player only: a guest stood
+// in the aura untouched). Its mirror carries the trait, so the guest burns itself - same 150 px, same 950 ms beat, same numbers (_lxHeatAuraHit).
+function _lxCoopGuestAuraTick(dt) {
+  if (typeof player === 'undefined' || !player || player.hp <= 0 || player._god || (player.invulnerable | 0) > 0) return;
+  if (typeof game === 'undefined' || !game || game.paused) return;   // a paused guest is out of the fight
+  const arr = game.monsters || [];
+  const pcx = player.x + player.w / 2, pcy = player.y + player.h / 2;
+  for (let i = 0; i < arr.length; i++) {
+    const m = arr[i];
+    if (!m || !m._coopMirror || !(m.currentHp > 0) || !m.traits) continue;
+    if (m.traits.pullsPlayer) {   // fix-coop-pull-guest - the Brinekraken's drag (updateMonsters reads the host's player only), the host's numbers verbatim
+      const P = m.traits.pullsPlayer, range = P.range || 240, strength = P.strength || 0.18;
+      const dxp = (m.x + m.w / 2) - pcx, dyp = (m.y + m.h / 2) - pcy, d2 = dxp * dxp + dyp * dyp;
+      if (d2 > 1 && d2 < range * range) { const d = Math.sqrt(d2), proxRamp = Math.max(0.4, d / range); player.vx += (dxp / d) * strength * proxRamp; player.vy += (dyp / d) * strength * proxRamp - 0.05; }
+    }
+    if (!m.traits.heatAura) continue;
+    if (m._heatT === undefined) m._heatT = 0;
+    m._heatT -= dt;
+    const dx = pcx - (m.x + m.w / 2), dy = pcy - (m.y + m.h / 2);
+    if (m._heatT <= 0 && (dx * dx + dy * dy) < 150 * 150) { m._heatT = 950; _lxHeatAuraHit(m); return; }   // one burn a tick: the i-frame it sets gates the rest
+  }
+}
+// fix-coop-gore-guest: a Taurus / Legosaurus goring (or crushing) charge landing on THIS client's player. updateMonsters calls it for the host; a partner the charge
+// runs over gets a brGore execute (_lxBossExecLocal) that calls it on their own screen with stand-ins for m / bd (level, crush flag, direction, share, label).
+function _lxGoreLand(m, bd) {
+            const _mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
+            // v0.30.1738 legosaurus-buff - the CRUSHING charge takes the player down to a sliver (bd.crush.leave of max HP), or to 1 HP when already under
+            // it: near fatal, never a kill by itself. Block, warrior DR and Aegis still take their share off below. It is flat - not
+            // through _diffDmg, whose level punish and 99.9% cap would turn a share into a kill.
+            const _crush = !!(m._bdCrush && bd.crush);
+            let _g = _crush ? Math.max(1, Math.floor(player.hp) - Math.max(1, Math.floor(_mh * (bd.crush.leave || 0.05))))
+              : Math.max(1, Math.floor(_mh * Math.min(1, bd.gore.frac || 0.99)));
+            if (_crush && player.hp <= Math.max(1, Math.floor(_mh * (bd.crush.leave || 0.05)))) _g = Math.max(0, Math.floor(player.hp) - 1);
+            if (player.blockTimer > 0) { _g = Math.max(1, Math.floor(_g * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+            if (player.cls === 'warrior' && typeof _warriorDr === 'function') _g = Math.max(1, Math.floor(_g * _warriorDr()));
+            if (player._aegis) _g = Math.max(1, Math.floor(_g * 0.5));
+            player.hp -= _lxLost(_crush ? _g : ((typeof _diffDmg === 'function') ? _diffDmg(_g, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _g));   // v0.30.x — real level, not the untrustworthy levelReq fallback (x2.5 punish measured)
+            player.lastHitTime = game.time;
+            player.invulnerable = Math.max(player.invulnerable || 0, 900);   // v0.30.x bughunt combat-9 - never cuts a longer live immunity (Holy Shield, Apotheosis)
+            player._lastDamageSource = (_crush ? bd.crush.label : bd.gore.label) || 'a goring charge';
+            player.vx = m._bdDir * 22; player.vy = -9;          // launched, not nudged
+            if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 46, color: (_crush ? bd.crush.color : bd.gore.color) || '#ffcc66', big: true });
+            if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'fx_taurus_gore', { size: 260, life: 46 });
+            if (typeof addShake === 'function') addShake(22);
+            if (typeof addHitStop === 'function') addHitStop(130);
+            if (typeof flash === 'function') flash(0.65);
+            if (typeof showToast === 'function') showToast(_crush ? 'CRUSHED - you are hanging on by a thread!' : 'GORED - do not stand in the lane!', 'danger');
+            if (_crush) { if (typeof addShake === 'function') addShake(28); if (typeof flash === 'function') flash(0.85); }
+}
+// fix-coop-spike-guest: one Shardlich eruption landing on THIS client's player (the host's block in updateMonsters resolves position and i-frames, then calls it; a guest's
+// gsSpike execute does the same against its own position, with a stand-in m {level, label} for the numbers).
+function _lxSpikeHit(m) {
+            // v0.29.321 — BALANCE FIX, same as heatAura above: the _diffDmg
+            // level-punish made a spike hit 863% of an at-level mage's maxHp.
+            // A dodgeable telegraphed hit should hurt HARD but never one-shot
+            // at-level: 1.25x the mob's touch anchor, capped at 55% maxHp.
+            const _gsLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
+            const _gsRef = (typeof _refHpAtLv === 'function') ? _refHpAtLv(_gsLv) : 300;
+            const _gsB = (typeof _dmgBandPct === 'function') ? _dmgBandPct(_gsLv) : { tFloor: 0.10 };
+            let _gsDmg = Math.max(2, Math.floor(_gsRef * (_gsB.tFloor || 0.10) * 1.25) - Math.floor(getDef() * 0.5));
+            _gsDmg = Math.min(_gsDmg, Math.floor(getMaxHp() * 0.55));
+            // v0.30.x bughunt combat-4 - Block, warrior DR, Divine Aegis and the mana shield, as on the Taurus gore
+            if (player.blockTimer > 0) { _gsDmg = Math.max(1, Math.floor(_gsDmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
+            if (player.cls === 'warrior' && typeof _warriorDr === 'function') _gsDmg = Math.max(1, Math.floor(_gsDmg * _warriorDr()));
+            if (player._aegis) _gsDmg = Math.max(1, Math.floor(_gsDmg * 0.5));
+            _gsDmg = _lxManaShieldAbsorb(_gsDmg);
+            player.hp -= _gsDmg;
+            player.lastHitTime = game.time;
+            player._lastDamageSource = m.label || m.type || 'glass spikes';
+            player.invulnerable = 900;
+            player.vy = Math.min(player.vy, -5);   // knock-up sells the eruption
+            game.damageNumbers.push({ taken: true, x: player.x + player.w/2 - 10, y: player.y - 10, vy: -2, text: String(_gsDmg), life: 30, color: '#a0c8ff', size: 13 });
+}
 function updateMonsters(dt) {
   game._lxMobRanAt = game.time; game._lxMobRanWall = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();   // v0.30.1341 swing-sync - see _lxMobAnimHold
   // v0.29.619 — SANCTUARY SWEEP. Layer 2 of the town guarantee: spawnMonster
@@ -102662,6 +102798,7 @@ function updateMonsters(dt) {
     }
     if (typeof _lxZodiacGuestTick === 'function') _lxZodiacGuestTick(dt);   // v0.30.1740 coop-guest (bughunt H17-4) - Virgo's sins / marks / Judgment and Leo's mark, on a guest (before the touch below, so its first touch already counts)
     _coopFollowerContactTick();   // mirrored monsters still deal contact damage (else follower is invincible)
+    _lxCoopGuestAuraTick(dt);   // fix-coop-heat-aura - and a mirrored Forgewight's aura burns it
     // v0.30.509 — drain on THIS exit too. v0.30.505 put the _pendingSweeps drain after the main
     // loop only, so a guest who becomes a follower on the frame after an orphan was queued
     // returned here every frame and the zero-HP entry stayed in game.monsters.
@@ -102997,13 +103134,15 @@ function updateMonsters(dt) {
     const _ccHalted = (m.stunTimer > 0) || (m.freezeTimer > 0 && !(m.isBoss || m.boss))
       || (m._stagger > 0) || (m._dirOpenT > 0)   // v0.30.x — the opening was only a START gate; a latched swing resolved into it
       || ((m._sovCollapseUntil | 0) > (game.time | 0));   // v0.30.570 sov-ohko — the Sovereign's swing / echo / column stay holstered while its collapse charges
+    // fix-coop-ranged-aim: the player this mob is fighting (nearest of the host and the partners, as the rest of its kit reads) - the range gate, the on-screen gate and the shot below take THEIR position, not the host's. null = the host (solo), unchanged.
+    const _lxAim = (_aggroPeers && _aggroPeers.length) ? _lxCoopAimOf(m, _aggroPeers, _hostIdle) : null;
     // Monster ranged attack
     if (m.shoot && !m.isBoss && m.currentHp > 0 && !_ccHalted) {
       // v0.29.639 - per-type fire variance; default preserves old behaviour.
       if (m.shootTimer === undefined) m.shootTimer = m.shootCd + Math.random() * (m.shootCdVar || 1000);
       m.shootTimer -= dt;
-      const dxs = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
-      const dys = Math.abs((player.y + player.h/2) - (m.y + m.h/2));
+      const dxs = Math.abs((_lxAim ? _lxAim.cx : player.x + player.w/2) - (m.x + m.w/2));   // fix-coop-ranged-aim
+      const dys = Math.abs((_lxAim ? _lxAim.cy : player.y + player.h/2) - (m.y + m.h/2));
       // v0.25.527 — On-screen gate at the SHOOT source. The v0.25.522 gate
       // already refuses damage from off-camera projectiles after they've
       // been spawned, but a projectile that crosses into the viewport
@@ -103022,6 +103161,7 @@ function updateMonsters(dt) {
           _shootOnScreen = false;
         }
       }
+      if (!_shootOnScreen && _lxAim && _lxAimSees(_lxAim, m)) _shootOnScreen = true;   // fix-coop-ranged-aim - on the screen of the partner it shoots at
       // v0.25.765 — Flying mobs fire from much greater range than ground
       // mobs. They can sustain altitude and bombard the player from afar
       // (Buzzbee 700 px stings, Spook 700 px curses, Seraph 700 px volleys,
@@ -103069,7 +103209,7 @@ function updateMonsters(dt) {
         m._shootWindup -= dt;
         if (m._shootWindup <= 0) {
           m._shootWindup = 0;
-          _fireShotFor(m);
+          if (_lxAim) _lxWithAim(_lxAim, () => _fireShotFor(m)); else _fireShotFor(m);   // fix-coop-ranged-aim - the shot leaves aimed at the partner; its copy on that partner's screen damages them there
           m.shootTimer = m.shootCd + Math.random() * (m.shootCdVar || 1200);   // v0.29.639
           if (m.boss || m.isBoss) m._postShotHold = 320;
         }
@@ -103088,7 +103228,7 @@ function updateMonsters(dt) {
           m._atkStrikeMs = _wu; m._animSt = null; m._tellUntil = _nowWu + _wu;   /* v0.30.396 — the parry tell shows through the windup */   // v0.30.382 — the strike frame lands on the release             // hold the pose a touch past release
           m.shootTimer = 999999;                           // suspend re-trigger; release resets it
         } else {
-          _fireShotFor(m);
+          if (_lxAim) _lxWithAim(_lxAim, () => _fireShotFor(m)); else _fireShotFor(m);   // fix-coop-ranged-aim
           m.shootTimer = m.shootCd + Math.random() * (m.shootCdVar || 1200);   // v0.29.639
         }
       }
@@ -103275,7 +103415,6 @@ function updateMonsters(dt) {
       }
     } else if (m.currentHp <= 0) { m._echoT = 0; m._echoShot = null; }
     // v0.30.1740 coop-guest (bughunt H17-2) - the player this monster is fighting (see _lxCoopAimOf); null = the host, as solo
-    const _lxAim = (_aggroPeers && _aggroPeers.length) ? _lxCoopAimOf(m, _aggroPeers, _hostIdle) : null;
     const _aimCx = _lxAim ? _lxAim.cx : _playerCx, _aimFeet = _lxAim ? _lxAim.feet : (player.y + player.h);
     if (m.traits && m.traits.bigMelee && (!m.isBoss || m.traits.activeBoss) && m.currentHp > 0 && !_ccHalted) {
       const bm = m.traits.bigMelee;
@@ -103610,6 +103749,7 @@ function updateMonsters(dt) {
           && Math.abs(_bdDx) > (bd.minRange || 120) && _bdOnScreen) {
         m._braceDashing = true;
         m._bdPhase = 'brace';
+        m._bdGoredPeers = null;          // fix-coop-gore-guest - and each partner is gored at most once per charge, like the host
         m._bdGored = false;              // v0.30.x - gore lands at most once per charge
         // v0.30.1738 legosaurus-buff - a CRUSHING charge (bd.crush): rolled here, at the brace, and told at once - a red lane and red brace sparks
         // through the same 850 ms brace (the authored dash set times its launch to it), a warning toast and a hard flash.
@@ -103673,29 +103813,21 @@ function updateMonsters(dt) {
               && Math.abs((player.x + player.w / 2) - (m.x + m.w / 2)) < (m.w + player.w) / 2
               && Math.abs((player.y + player.h / 2) - (m.y + m.h / 2)) < (m.h + player.h) / 2) {
             m._bdGored = true;
-            const _mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100));
-            // v0.30.1738 legosaurus-buff - the CRUSHING charge takes the player down to a sliver (bd.crush.leave of max HP), or to 1 HP when already under
-            // it: near fatal, never a kill by itself. Block, warrior DR and Aegis still take their share off below. It is flat - not
-            // through _diffDmg, whose level punish and 99.9% cap would turn a share into a kill.
-            const _crush = !!(m._bdCrush && bd.crush);
-            let _g = _crush ? Math.max(1, Math.floor(player.hp) - Math.max(1, Math.floor(_mh * (bd.crush.leave || 0.05))))
-              : Math.max(1, Math.floor(_mh * Math.min(1, bd.gore.frac || 0.99)));
-            if (_crush && player.hp <= Math.max(1, Math.floor(_mh * (bd.crush.leave || 0.05)))) _g = Math.max(0, Math.floor(player.hp) - 1);
-            if (player.blockTimer > 0) { _g = Math.max(1, Math.floor(_g * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
-            if (player.cls === 'warrior' && typeof _warriorDr === 'function') _g = Math.max(1, Math.floor(_g * _warriorDr()));
-            if (player._aegis) _g = Math.max(1, Math.floor(_g * 0.5));
-            player.hp -= _lxLost(_crush ? _g : ((typeof _diffDmg === 'function') ? _diffDmg(_g, (typeof _mobLevel === 'function') ? _mobLevel(m) : 0, true) : _g));   // v0.30.x — real level, not the untrustworthy levelReq fallback (x2.5 punish measured)
-            player.lastHitTime = game.time;
-            player.invulnerable = Math.max(player.invulnerable || 0, 900);   // v0.30.x bughunt combat-9 - never cuts a longer live immunity (Holy Shield, Apotheosis)
-            player._lastDamageSource = (_crush ? bd.crush.label : bd.gore.label) || 'a goring charge';
-            player.vx = m._bdDir * 22; player.vy = -9;          // launched, not nudged
-            if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: '-' + _lxShownLost(), life: 46, color: (_crush ? bd.crush.color : bd.gore.color) || '#ffcc66', big: true });
-            if (typeof spawnSpriteBurst === 'function') spawnSpriteBurst(player.x + player.w / 2, player.y + player.h / 2, 'fx_taurus_gore', { size: 260, life: 46 });
-            if (typeof addShake === 'function') addShake(22);
-            if (typeof addHitStop === 'function') addHitStop(130);
-            if (typeof flash === 'function') flash(0.65);
-            if (typeof showToast === 'function') showToast(_crush ? 'CRUSHED - you are hanging on by a thread!' : 'GORED - do not stand in the lane!', 'danger');
-            if (_crush) { if (typeof addShake === 'function') addShake(28); if (typeof flash === 'function') flash(0.85); }
+            _lxGoreLand(m, bd);   // fix-coop-gore-guest - the landing itself (defined above updateMonsters) is shared with a partner it runs over
+          }
+          // fix-coop-gore-guest: the block above reads the host's player only, so a partner under the charge was never gored (a Taurus charge that crushes the
+          // host for 99% of max HP did the ordinary 20% contact hit to a guest in the same spot). Same overlap test on each partner's position (once per charge
+          // each), then a brGore execute addressed to them: they apply it to their own HP, Block, DR and Aegis.
+          if (bd.gore && _aggroPeers && _aggroPeers.length) {
+            for (const _gp of _aggroPeers) {
+              if (m._bdGoredPeers && m._bdGoredPeers[_gp.id]) continue;
+              if (Math.abs((_gp.x + player.w / 2) - (m.x + m.w / 2)) < (m.w + player.w) / 2
+                  && Math.abs((_gp.y + player.h / 2) - (m.y + m.h / 2)) < (m.h + player.h) / 2) {
+                (m._bdGoredPeers || (m._bdGoredPeers = {}))[_gp.id] = 1;
+                const _gc = !!(m._bdCrush && bd.crush), _gd = _gc ? bd.crush : bd.gore;
+                _lxBossExec('brGore', { to: _gp.id, fr: bd.gore.frac || 0.99, cr: _gc ? 1 : 0, lf: _gc ? (bd.crush.leave || 0.05) : 0, lb: _gd.label || '', c: _gd.color || '', lv: (typeof _mobLevel === 'function') ? _mobLevel(m) : 1, dir: m._bdDir });
+              }
+            }
           }
           if (game.time % 2 === 0 && typeof _budgetedParticlePush === 'function') {
             _budgetedParticlePush({
@@ -104031,31 +104163,7 @@ function updateMonsters(dt) {
       const _haDx = _playerCx - (m.x + m.w/2), _haDy = _playerCy - (m.y + m.h/2);
       if (m._heatT <= 0 && (_haDx * _haDx + _haDy * _haDy) < _haR * _haR) {
         m._heatT = 950;
-        // v0.29.321 — BALANCE FIX. The first cut routed this through _diffDmg,
-        // whose level-punish multiplier (×5 at Lv60) is meant for projectiles;
-        // contact-range damage uses the banded ANCHOR system so an at-level
-        // hit can never one-shot. Measured before the fix: 206% of an
-        // at-level mage's maxHp in one aura tick. Now: a fraction of the
-        // mob's own touch anchor, hard-capped at 18% of player maxHp.
-        const _haLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
-        const _haRef = (typeof _refHpAtLv === 'function') ? _refHpAtLv(_haLv) : 200;
-        const _haB = (typeof _dmgBandPct === 'function') ? _dmgBandPct(_haLv) : { tFloor: 0.10 };
-        let _haDmg = Math.max(1, Math.floor(_haRef * (_haB.tFloor || 0.10) * 0.40) - Math.floor(getDef() * 0.25));
-        _haDmg = Math.min(_haDmg, Math.floor(getMaxHp() * 0.18));
-        // v0.30.x bughunt combat-4 - the layers the Taurus gore beside it already honours: Block, warrior DR, Divine Aegis, then the mana shield on the final loss
-        if (player.blockTimer > 0) { _haDmg = Math.max(1, Math.floor(_haDmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
-        if (player.cls === 'warrior' && typeof _warriorDr === 'function') _haDmg = Math.max(1, Math.floor(_haDmg * _warriorDr()));
-        if (player._aegis) _haDmg = Math.max(1, Math.floor(_haDmg * 0.5));
-        _haDmg = _lxManaShieldAbsorb(_haDmg);
-        player.hp -= _haDmg;
-        player.lastHitTime = game.time;
-        player._lastDamageSource = m.label || m.type || 'searing heat';
-        player.invulnerable = 450;
-        game.damageNumbers.push({ taken: true, x: player.x + player.w/2 - 10, y: player.y - 8, vy: -1.6, text: String(_haDmg), life: 26, color: '#ff8844', size: 12 });
-        for (let i = 0; i < 6; i++) {
-          game.particles.push({ x: player.x + Math.random() * player.w, y: player.y + player.h - Math.random() * 12,
-            vx: (Math.random() - 0.5) * 2, vy: -1.5 - Math.random() * 2, life: 20, color: i % 2 ? '#ff6622' : '#ffaa33', size: 2, gravity: -0.02 });
-        }
+        _lxHeatAuraHit(m);   // fix-coop-heat-aura - the burn itself (_lxHeatAuraHit, above updateMonsters) is shared with a guest's mirror tick
       }
     }
     // packHunter (sepulchreHound: "Packs of three. Coordinated lunge.") —
@@ -104119,12 +104227,12 @@ function updateMonsters(dt) {
     if (m.traits && m.traits.groundSpikes && m.currentHp > 0 && player.hp > 0) {
       if (m._spikeCd === undefined) m._spikeCd = 3000 + Math.random() * 3000;
       if (!m._spikeFiring) m._spikeCd -= dt;
-      const _gsDx = Math.abs(_playerCx - (m.x + m.w/2));
+      const _gsDx = Math.abs((_lxAim ? _lxAim.cx : _playerCx) - (m.x + m.w/2));   // fix-coop-spike-guest - the spikes lock under the player this mob fights, not only the host
       if (!m._spikeFiring && m._spikeCd <= 0 && _gsDx < 460) {
         m._spikeFiring = true;
         m._spikeT = 700;
-        m._spikeX = _playerCx;
-        m._spikeY = player.y + player.h;         // floor line at lock time
+        m._spikeX = _lxAim ? _lxAim.cx : _playerCx;
+        m._spikeY = _lxAim ? _lxAim.feet : player.y + player.h;         // floor line at lock time
       }
       if (m._spikeFiring) {
         m._spikeT -= dt;
@@ -104143,29 +104251,12 @@ function updateMonsters(dt) {
           }
           if (typeof addShake === 'function') addShake(3);
           const _gsHalf = 55;
+          // fix-coop-spike-guest: the eruption below resolves against the host only; a guest gets a gsSpike execute with the spot, and tests its OWN position against it (same 55 x 60 px)
+          if (_aggroPeers && _aggroPeers.length) _lxBossExec('gsSpike', { x: Math.round(m._spikeX), y: Math.round(m._spikeY), lv: (typeof _mobLevel === 'function') ? _mobLevel(m) : 1, lb: String(m.label || m.type || 'glass spikes') });
           if ((player.invulnerable | 0) <= 0 && !player._god && !game.paused &&   // v0.30.x bughunt combat-4 - not on a paused hero
               Math.abs((player.x + player.w/2) - m._spikeX) < _gsHalf &&
               Math.abs((player.y + player.h) - m._spikeY) < 60) {
-            // v0.29.321 — BALANCE FIX, same as heatAura above: the _diffDmg
-            // level-punish made a spike hit 863% of an at-level mage's maxHp.
-            // A dodgeable telegraphed hit should hurt HARD but never one-shot
-            // at-level: 1.25x the mob's touch anchor, capped at 55% maxHp.
-            const _gsLv = (typeof _mobLevel === 'function') ? _mobLevel(m) : (m.level || 1);
-            const _gsRef = (typeof _refHpAtLv === 'function') ? _refHpAtLv(_gsLv) : 300;
-            const _gsB = (typeof _dmgBandPct === 'function') ? _dmgBandPct(_gsLv) : { tFloor: 0.10 };
-            let _gsDmg = Math.max(2, Math.floor(_gsRef * (_gsB.tFloor || 0.10) * 1.25) - Math.floor(getDef() * 0.5));
-            _gsDmg = Math.min(_gsDmg, Math.floor(getMaxHp() * 0.55));
-            // v0.30.x bughunt combat-4 - Block, warrior DR, Divine Aegis and the mana shield, as on the Taurus gore
-            if (player.blockTimer > 0) { _gsDmg = Math.max(1, Math.floor(_gsDmg * 0.3)); if (typeof triggerBlock === 'function') triggerBlock(); }
-            if (player.cls === 'warrior' && typeof _warriorDr === 'function') _gsDmg = Math.max(1, Math.floor(_gsDmg * _warriorDr()));
-            if (player._aegis) _gsDmg = Math.max(1, Math.floor(_gsDmg * 0.5));
-            _gsDmg = _lxManaShieldAbsorb(_gsDmg);
-            player.hp -= _gsDmg;
-            player.lastHitTime = game.time;
-            player._lastDamageSource = m.label || m.type || 'glass spikes';
-            player.invulnerable = 900;
-            player.vy = Math.min(player.vy, -5);   // knock-up sells the eruption
-            game.damageNumbers.push({ taken: true, x: player.x + player.w/2 - 10, y: player.y - 10, vy: -2, text: String(_gsDmg), life: 30, color: '#a0c8ff', size: 13 });
+            _lxSpikeHit(m);   // fix-coop-spike-guest - the hit itself (above updateMonsters) is shared with a guest's gsSpike execute
           }
         }
       }
@@ -104242,8 +104333,11 @@ function updateMonsters(dt) {
       }
       m._mskTimer -= dt;
       if (m._mskTimer <= 0) {
-        const dxs = Math.abs((player.x + player.w/2) - (m.x + m.w/2));
-        const dys = Math.abs((player.y + player.h/2) - (m.y + m.h/2));
+        // fix-coop-skill-aim: the cast gate measures the player the mob is fighting (not only the host), and the cast leaves aimed at them. Only the kinds that act on a player's
+        // POSITION, once, at the cast (LX_SKILL_AIMABLE): a lantern pulse writes the player's HP, a homing shot steers at the host after it leaves, and a rapid-fire volley re-reads the player on timers.
+        const _skAim = (_lxAim && LX_SKILL_AIMABLE[MONSTER_SKILLS[m.type].kind]) ? _lxAim : null;
+        const dxs = Math.abs((_skAim ? _skAim.cx : player.x + player.w/2) - (m.x + m.w/2));
+        const dys = Math.abs((_skAim ? _skAim.cy : player.y + player.h/2) - (m.y + m.h/2));
         if (dxs < 320 && dys < 220 && m.aggroTarget) {
           const sk = MONSTER_SKILLS[m.type];
           const fn = MONSTER_SKILL_FNS[sk.kind];
@@ -104257,7 +104351,7 @@ function updateMonsters(dt) {
           // the squall more relentless than it had been. Half-cooldown keeps
           // the pre-cap cadence while still never stacking. Strict === false,
           // so every existing void special keeps its old behaviour exactly.
-          const _fired = fn ? fn(m) : undefined;
+          const _fired = fn ? (_skAim ? _lxWithAim(_skAim, () => fn(m)) : fn(m)) : undefined;   // fix-coop-skill-aim
           m._mskTimer = (_fired === false) ? sk.cd * (0.45 + Math.random() * 0.20)
                                            : sk.cd * (0.85 + Math.random() * 0.30);
         } else {
