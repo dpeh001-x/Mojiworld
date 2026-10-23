@@ -9994,6 +9994,7 @@
   .moji-buff-pill[data-buff="comboAtk"]    { border-color: rgba(255, 200, 80,  0.55); }
   .moji-buff-pill[data-buff="healLock"]    { border-color: rgba(255, 60, 90, 0.85); background: rgba(80, 10, 24, 0.55); }   /* v0.30.588 ohko-pass — a debuff reads red */
   .moji-buff-pill[data-buff="potionSeal"]  { border-color: rgba(255, 60, 90, 0.85); background: rgba(80, 10, 24, 0.55); }   /* v0.30.621 - a debuff reads red */
+  .moji-buff-pill[data-buff="soulDrain"]   { border-color: rgba(190, 120, 255, 0.9); background: rgba(42, 10, 66, 0.6); }   /* v0.30.1874 gravitos-ohko-rework - the drain reads violet */
   .moji-buff-pill[data-buff="comboXp"]     { border-color: rgba(120, 200, 255, 0.55); }
   .moji-buff-pill[data-buff="eagleEye"]    { border-color: rgba(120, 220, 255, 0.55); }
   .moji-buff-pill[data-buff="guardian"]    { border-color: rgba(140, 220, 140, 0.55); }
@@ -16483,7 +16484,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1873';
+const GAME_VERSION = 'v0.30.1874';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -62396,7 +62397,75 @@ const _COOP_HZ_TYPES = { gravitos_singularity: 1, sovereign_drain_pillar: 1, bla
 const _COOP_HZ_XF = ['stun', 'colorTele', 'poison', 'maxRadius', 'bolt', 'tele', 'slow', 'dir', 'warn', 'reach', 'downdraft',
   'atk', '_bhAwakened', '_bhCoreRadius', '_bhPullRadius', '_gravBand', 'footY'];
 _COOP_HZ_XF.push('floorPct'); _COOP_PJ_XF.push('_lxFloorPct', '_hitFloor');   // v0.30.1738 legosaurus-buff - a guest's copy of his quake / swing / column keeps its floor; v0.30.1796 _hitFloor: and of Aetherion's feather / scale / halo keeps its own
-_COOP_HZ_XF.push('_vfx');   // v0.30.1736 bughunt7: Mira's falling sand wore the Sovereign's pillar art on a guest
+_COOP_HZ_XF.push('_vfx');
+_COOP_HZ_XF.push('_rainDrain');
+// v0.30.1874 gravitos-ohko-rework - SOUL DRAIN, the status (per user: "Soul drain should not be a OHKO move, it should be a move whereby the players HP drops
+// by 10% every second for 10 seconds with a unique status affliction", then "10% of max HP, but it can't kill"). Ticks run on
+// game.time (60 a step-second): 10 of them, 10% of max HP each, never below 1 HP, no DEF / i-frames / hit flash. Caught again
+// while it runs -> back to 10 ticks (no stack). Ends on death / downed, a form change, leaving the map, or a cleanse.
+const LX_SD_TICKS = 10, LX_SD_EVERY_F = 60, LX_SD_FRAC = 0.10;
+function _lxSoulDrainBoss() { const ms = game.monsters; if (ms) for (let i = 0; i < ms.length; i++) { const m = ms[i]; if (m && m.type === 'gravitos') return m; } return null; }
+function _lxSoulDrainLeftF() { return (player._sdLeft | 0) > 0 ? Math.max(0, ((player._sdLeft | 0) - 1) * LX_SD_EVERY_F + ((player._sdNextAt | 0) - (game.time | 0))) : 0; }
+function _lxSoulDrainApply() {
+  if (!player || !(player.hp > 0) || player._god || player._downed) return false;
+  const now = game.time | 0, was = (player._sdLeft | 0) > 0, g = _lxSoulDrainBoss();
+  player._sdLeft = LX_SD_TICKS;
+  if (!was) player._sdNextAt = now + LX_SD_EVERY_F;
+  player._sdMap = game.currentMap; player._sdForm = g ? ((g._gravitosPhase | 0) || 1) : null;
+  if (typeof showToast === 'function') showToast(was ? '\u{1F47B} SOUL DRAIN renewed \u2014 10 s' : '\u{1F47B} SOUL DRAIN \u2014 10% HP a second for 10 s (it cannot kill)', 'epic');
+  if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 8, y: player.y - 12, vy: -2, text: 'SOUL DRAIN', life: 56, color: '#c08cff', size: 16 });
+  return true;
+}
+function _lxSoulDrainTick() {
+  if (!((player._sdLeft | 0) > 0)) return;
+  const now = game.time | 0, g = _lxSoulDrainBoss();
+  if (!(player.hp > 0) || player._downed || game.dying || player._sdMap !== game.currentMap
+      || (player._sdForm != null && (!g || ((g._gravitosPhase | 0) || 1) !== player._sdForm))) { player._sdLeft = 0; return; }
+  if (now % 3 === 0 && typeof _budgetedParticlePush === 'function') {   // wisps rise off the hero and drift toward him
+    const px = player.x + player.w / 2, dir = g ? Math.sign((g.x + g.w / 2) - px) || 1 : 0;
+    _budgetedParticlePush({ x: px + (Math.random() - 0.5) * player.w, y: player.y + player.h * (0.25 + Math.random() * 0.6), vx: dir * (0.9 + Math.random() * 1.1), vy: -0.9 - Math.random() * 0.9, life: 34, color: Math.random() < 0.6 ? '#b47cff' : '#efe2ff', size: 2.5 + Math.random() * 2 });
+  }
+  if (now < (player._sdNextAt | 0)) return;
+  player._sdNextAt = now + LX_SD_EVERY_F; player._sdLeft = (player._sdLeft | 0) - 1;
+  if (player._god) return;
+  const mh = Math.max(1, (typeof getMaxHp === 'function') ? getMaxHp() : (player.maxHp || 100)), before = player.hp;
+  player.hp = Math.max(1, player.hp - Math.max(1, Math.floor(mh * LX_SD_FRAC)));
+  const lost = Math.max(0, Math.round(before - player.hp));
+  if (game.damageNumbers) game.damageNumbers.push({ taken: true, x: player.x + 10 + (Math.random() - 0.5) * 12, y: player.y + 4, vy: -1.6, text: lost > 0 ? '-' + lost : 'SOUL', life: 40, color: '#b47cff', size: 13 });
+}
+function _lxSoulDrainAura(sx, sy) {   // a violet aura over the hero, breathing with the ticks
+  try {
+    const cx = sx + (player.w || 28) / 2, cy = sy + (player.h || 44) * 0.55, k = 1 - Math.min(1, Math.max(0, ((player._sdNextAt | 0) - (game.time | 0)) / LX_SD_EVERY_F));
+    const img = (typeof _lxGfBake === 'function') ? _lxGfBake('sd_aura', 128, (c) => { const gr = c.createRadialGradient(0, 0, 6, 0, 0, 64); gr.addColorStop(0, 'rgba(214,170,255,0.75)'); gr.addColorStop(0.45, 'rgba(150,80,255,0.42)'); gr.addColorStop(1, 'rgba(90,30,180,0)'); c.fillStyle = gr; c.fillRect(-64, -64, 128, 128); }) : null;
+    if (!img) return;
+    const w = (player.w || 28) * 2.6, h = (player.h || 44) * 1.9;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.45 + 0.3 * k;
+    ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h); ctx.restore();
+  } catch (e) {}
+}   // v0.30.1874 gravitos-ohko-rework - a guest's copy of a rain box drains its own HP / MP the same way
+// v0.30.1874 gravitos-ohko-rework - per user: "Change collapse rain to a 1hp and 1mp attack", then "If youre at 1 hp you die". A Collapse Rain box that
+// resolves on a hero outside its light: above 1 HP -> HP 1 and MP 1 (alive, normal hit i-frames); at 1 HP -> a real death through the
+// Singularity's own death path (cheat-death charge, triggerDeath, co-op downed). God mode and live invulnerability skip it like any hit;
+// block and DR do not apply (a forced drain, as Soul Drain and the drain pillars). Once per box: the box resolves once, the latch backs it up.
+function _lxRainDrainHit(h) {   // v0.30.1874 gravitos-ohko-rework
+  if (!h || h._rdDone) return false;
+  h._rdDone = 1;
+  if (!player || !(player.hp > 0) || player._god || player._downed || game.dying) return false;
+  if ((player.invulnerable | 0) > 0) return false;
+  player._lastDamageSource = h._sourceLabel || "Gravitos' Collapse Rain";
+  player.lastHitTime = game.time;
+  if (player.hp <= 1) {
+    player.hp = 0;
+    game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: 'COLLAPSED', life: 64, color: '#ff44ff', size: 20 });
+    if (!game.dying && typeof triggerDeath === 'function') { try { if (typeof _tryCheatDeathRevive !== 'function' || !_tryCheatDeathRevive()) triggerDeath(); } catch (_) {} }
+    return true;
+  }
+  player.hp = 1;
+  if (!(player.mp <= 1)) player.mp = 1;
+  player.invulnerable = Math.max(player.invulnerable || 0, 900); player._hitIframeAt = game.time;
+  game.damageNumbers.push({ taken: true, x: player.x + 14, y: player.y, vy: -2, text: 'HP\u21921  MP\u21921', life: 64, color: '#cc66ff', size: 18 });
+  return true;
+}   // v0.30.1736 bughunt7: Mira's falling sand wore the Sovereign's pillar art on a guest
 _COOP_PJ_XF.push('_lxZodSwing');   // v0.30.1869 zodiac-melee-cap - a guest's copy of a zodiac swing runs the same 45% cap on its own bar
 // Detonations: a guest mirror lags the host, so the frame that drops a hazard the host just resolved can arrive before
 // the guest's copy counts down to its own resolve - and the guest walked out of a one-shot. The hazard loop stamps each
@@ -62969,30 +63038,7 @@ function _lxBossExecLocal(kind, p) {
       });
     }
     if (!_drainBlocked) {
-    // Apply unavoidable drain. Clamp to 1 (don't reduce below 1).
-    // v0.29.550 — honour godmode. The drain is a CLAMP, not damage, so it
-    // sailed past every `hp -= player._god ? 0 : dmg` guard — during the
-    // prologue memory it set HP→1 and MP→1 straight through godmode, and
-    // since the prologue tick re-pins HP but (before this fix) not MP,
-    // the player spent the rest of the tutorial fight at MP 1, unable to
-    // cast — the "low MP and HP moments" reported. The telegraph and
-    // toast still play; only the clamp respects _god.
-    if (!player._god && player.hp > 1) {
-      player.hp = 1;
-      player.lastHitTime = game.time;
-      player._lastDamageSource = 'Gravitos\' Soul Drain';
-      game.damageNumbers.push({
-        taken: true, x: player.x + 14, y: player.y, vy: -2,
-        text: 'HP→1', life: 56, color: '#cc66ff', size: 18,
-      });
-    }
-    if (!player._god && player.mp > 1) {   // v0.29.550 — same godmode guard as the HP clamp above
-      player.mp = 1;
-      game.damageNumbers.push({
-        taken: true, x: player.x + 14, y: player.y - 26, vy: -2,
-        text: 'MP→1', life: 56, color: '#88aaff', size: 16,
-      });
-    }
+    _lxSoulDrainApply();   // v0.30.1874 gravitos-ohko-rework - was HP -> 1 / MP -> 1: now 10% of max HP a second for 10 s, never below 1 HP
     }   // v0.29.830 — end of the line-of-sight gate
     // v0.25.716 — Post-drain godmode upped 600 ms → 8000 ms.
     // v0.25.725 — Trimmed back 8000 ms → 2500 ms per user request.
@@ -86952,6 +86998,7 @@ function updatePlayer(dt) {
   }
   player._lastHpForVoice = player.hp;
 
+  if (typeof _lxSoulDrainTick === 'function') _lxSoulDrainTick();   // v0.30.1874 gravitos-ohko-rework
   // Zodiac status ticks — poison DOT, ice floor, frozen timer.
   // v0.25.591 — poison tick rate halved 45 → 90 frames (1.5 s) per user
   // spec. Per-tick damage doubled so total DPS is preserved. Result: half
@@ -100296,6 +100343,7 @@ const SKILL_FNS = {
     player._iceFloor   = 0;
     player._slowTimer  = 0;
     player._skillLockTimer = 0;
+    player._sdLeft = 0;   // v0.30.1874 gravitos-ohko-rework
     player.hitStun = 0;
     // v0.25.546 — New celestial_aurora VFX sprite at the field centre.
     // v0.25.547 — Cast-time 15-mote ring removed; the sprite covers the
@@ -109921,7 +109969,7 @@ function bossAI(m, dt, distToPlayer) {
       if (!m._drainAnnounced) {
         m._drainAnnounced = true;
         // v0.29.830 — the call to action is the mechanic now, not "heal and hope".
-        showToast('💀 SOUL DRAIN — BREAK LINE OF SIGHT!', 'legendary');
+        showToast('\u{1F47B} SOUL DRAIN \u2014 BREAK LINE OF SIGHT!', 'legendary');   // v0.30.1874 gravitos-ohko-rework - no skull: it drains, it does not kill
         audio.play('boss_alarm');
         // v0.26.172 — Authored soul-ring telegraph sprite layered on
         // top of the procedural spiral particles. 1500 ms life matches
@@ -110185,6 +110233,7 @@ function bossAI(m, dt, distToPlayer) {
           life: SAFE_LIFE, maxLife: SAFE_LIFE,
           atk: 99999,
           safeZones: [safeRect],
+          _rainDrain: true, _sourceLabel: "Gravitos' Collapse Rain",   // v0.30.1874 gravitos-ohko-rework - drains to 1 HP / 1 MP (kills only at 1 HP), see _lxRainDrainHit
         });
         m._rainIdx += 1;
         // Announce the start of the rain on the first spawn, smaller
@@ -119579,7 +119628,7 @@ function updateProjectiles(dt) {
       // forgives a nudge on the resolve frame. See _lxSzInside.
       safe = _lxSzInside(h, _strict);
       if (!safe && h._lastSafeTick != null && ((game.time | 0) - h._lastSafeTick) <= LX_SZ_GRACE_TICKS) safe = true;
-      if (!safe && player.hp > 0 && !player._god) {
+      if (!safe && h._rainDrain) { _lxRainDrainHit(h); } else if (!safe && player.hp > 0 && !player._god) {   // v0.30.1874 gravitos-ohko-rework - a Collapse Rain box drains instead of killing
         if (LX_OHKO_PARRYABLE && player._ohkoParry > 0) {   // v0.30.588 ohko-pass — the collapse cannot be parried
           /* PERFECT PARRY: pressed A within the tight 120ms window as the collapse resolved -> fully negate the OHKO (high-skill reward; gated by the 1.8-2.5s block cooldown). */
           player._ohkoParry = 0;
@@ -120984,8 +121033,9 @@ function _lxOhkoFinalDraw() {
     if ('letterSpacing' in ctx) ctx.letterSpacing = '5px';
     const ly = Math.round(cy + Math.min(W, H) * 0.2 + 26);   // under the dial
     ctx.globalAlpha = 0.78 + 0.22 * Math.sin(L * 0.21);
-    ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(14,3,24,0.9)'; ctx.strokeText('REACH THE LIGHT', cx, ly);
-    ctx.fillStyle = '#ffd36b'; ctx.fillText('REACH THE LIGHT', cx, ly);
+    const _ofLbl = h._rainDrain ? 'REACH THE LIGHT OR DROP TO 1 HP' : 'REACH THE LIGHT';   // v0.30.1874 gravitos-ohko-rework - a rain box drains, the Singularity kills
+    ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(14,3,24,0.9)'; ctx.strokeText(_ofLbl, cx, ly);
+    ctx.fillStyle = '#ffd36b'; ctx.fillText(_ofLbl, cx, ly);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
     ctx.restore();
     // the collapse: the last half-second closes onto the core and whites out
@@ -133675,6 +133725,7 @@ function useConsumable(id, opts) {
     player._poisonTimer   = 0;
     player._poisonDmg     = 0;
     player._poisonTickAcc = 0;
+    player._sdLeft = 0;   // v0.30.1874 gravitos-ohko-rework
     player._skillLockTimer = 0;
     player.burnTimer      = 0;
     player.burnDmg        = 0;
@@ -154182,6 +154233,7 @@ function drawPlayer() {
   // below stay upright above the body, matching monster tag behaviour.
   if (window._lxDownedDraw) { window._lxDownedDraw = false; ctx.restore(); }
   window._lxDownedPoseK = 0; window._lxDownedSquash = 0;   // v0.30.1054 hero-scoped: the next draw (a peer, a preview) stands normally
+  if ((player._sdLeft | 0) > 0 && typeof _lxSoulDrainAura === 'function') _lxSoulDrainAura(sx, sy);   // v0.30.1874 gravitos-ohko-rework
   _drawPlayerNameTag(sx, sy);
   _drawPlayerStatusIcons(sx, sy);
   return;
@@ -154265,6 +154317,14 @@ function _lxStatusGlyph(g, kind, cx, cy, r, tint, t) {
         g.bezierCurveTo(s * 0.9, s * 0.05, s * 0.75, s, 0, s);
         g.bezierCurveTo(-s * 0.75, s, -s * 0.9, s * 0.05, 0, -s); F();
         if (!K) { g.fillStyle = INK; g.beginPath(); g.arc(0, s * 0.3, s * 0.28, 0, Math.PI * 2); g.fill(); }
+        break;
+      }
+      case 'soul': {                        // v0.30.1874 gravitos-ohko-rework - a wisp curling up, a heart at its core
+        g.beginPath(); g.moveTo(s * 0.25, -s);
+        g.bezierCurveTo(s * 0.2, -s * 0.4, s * 0.95, -s * 0.1, s * 0.75, s * 0.45);
+        g.bezierCurveTo(s * 0.55, s, -s * 0.55, s, -s * 0.75, s * 0.45);
+        g.bezierCurveTo(-s * 0.95, -s * 0.15, -s * 0.1, -s * 0.35, s * 0.25, -s); F();
+        if (!K) { const hs = s * 0.24, hy = s * 0.3; g.fillStyle = INK; g.beginPath(); g.moveTo(0, hy + hs); g.bezierCurveTo(-hs * 2.1, hy - hs * 0.3, -hs * 0.7, hy - hs * 1.7, 0, hy - hs * 0.5); g.bezierCurveTo(hs * 0.7, hy - hs * 1.7, hs * 2.1, hy - hs * 0.3, 0, hy + hs); g.fill(); }
         break;
       }
       case 'slow': {                        // hourglass
@@ -154546,6 +154606,7 @@ const _LX_PSI = {   // v0.30.x BOSS-LAG-CPU
   frozen: { kind: 'frozen', tint: '#88ddff' },
   chill: { kind: 'chill', tint: '#aaeeff' },
   poison: { kind: 'poison', tint: '#aa66ee' },
+  soul: { kind: 'soul', tint: '#a865ff' },   // v0.30.1874 gravitos-ohko-rework
   slow: { kind: 'slow', tint: '#88aacc' },
   ice: { kind: 'ice', tint: '#aaddff' },
   shock: { kind: 'shock', tint: '#ffdd44' },
@@ -154568,7 +154629,7 @@ function _drawPlayerStatusIcons(sx, sy) {
   // v0.29.486 (perf-pass) — flag pre-check before allocating (mirrors the
   // v0.26.244 monster-side fix): a healthy player paid an array per frame.
   if (!_ctl && !_hl && !((player.burnTimer | 0) > 0 || (player.frozenTimer | 0) > 0 || (player.freezeTimer | 0) > 0 ||
-        (player._poisonTimer | 0) > 0 || (player._slowTimer | 0) > 0 || (player._iceFloor | 0) > 0 ||
+        (player._poisonTimer | 0) > 0 || (player._slowTimer | 0) > 0 || (player._iceFloor | 0) > 0 || (player._sdLeft | 0) > 0 ||
         (player._electrocuteTimer | 0) > 0 || (player.invulnerable | 0) > 150 ||
         ((player.hitStun | 0) > 100 && player._lastDamageSource === 'a pothole') ||
         ((player._heavyStunUntil | 0) > (game.time | 0) && (player.hitStun | 0) > 0))) return;   // v0.29.7xx — heavy-stun marker
@@ -154577,6 +154638,7 @@ function _drawPlayerStatusIcons(sx, sy) {
   if ((player.frozenTimer  | 0) > 0) icons.push(_LX_PSI.frozen);
   if ((player.freezeTimer  | 0) > 0 && (player.frozenTimer | 0) <= 0) icons.push(_LX_PSI.chill);
   if ((player._poisonTimer | 0) > 0) icons.push(_LX_PSI.poison);
+  if ((player._sdLeft | 0) > 0) icons.push(_LX_PSI.soul);   // v0.30.1874 gravitos-ohko-rework
   if ((player._slowTimer   | 0) > 0) icons.push(_LX_PSI.slow);
   if ((player._iceFloor    | 0) > 0) icons.push(_LX_PSI.ice);
   // v0.26.249 — Electrocution icon. Yellow lightning bolt to match the
@@ -178637,6 +178699,7 @@ const BUFF_META = [
   // gap: 11 registered against 12 buffs the code actually sets.
   { key: 'sleight',       icon: '🗡',  label: 'Sleight',     dur: 2500  },
   { key: 'healLock',      skill: 'buff_healLock', icon: '\u{1F6AB}', label: 'HEAL LOCKED', dur: 10000 },   // v0.30.588 ohko-pass — driven by the lock clock, see _updateBuffRow
+  { key: 'soulDrain',     skill: 'buff_soulDrain', icon: '\u{1F47B}', label: 'SOUL DRAIN', dur: 10000 },   // v0.30.1874 gravitos-ohko-rework - driven by the drain's own clock
   { key: 'potionSeal',    skill: 'buff_potionSeal', icon: '\u{1F9EA}', label: 'POTIONS SEALED', dur: 15000 },   // v0.30.621 - driven by the seal clock, see _updateBuffRow
   { key: 'warCry',        icon: '⚔',  label: 'War Cry',     dur: 12000 },
   { key: 'bloodlust',     icon: '🩸', label: 'Bloodlust',    dur: 12000 },
@@ -178678,6 +178741,7 @@ function _updateBuffRow() {
     const _hlMs = _lxHealLocked() ? Math.max(1, Math.round(((player._healLockUntil | 0) - (game.time | 0)) * 1000 / 60)) : 0;
     if ((player.buffs.healLock | 0) !== _hlMs) player.buffs.healLock = _hlMs;
   }
+  { const _sdMs = (player._sdLeft | 0) > 0 ? Math.max(1, Math.round(_lxSoulDrainLeftF() * 1000 / 60)) : 0; if ((player.buffs.soulDrain | 0) !== _sdMs) player.buffs.soulDrain = _sdMs; }   // v0.30.1874 gravitos-ohko-rework
   if (typeof _lxPotionSealLeftF === 'function') {   // v0.30.621 - the potion seal counts down as a pill, so 'not sealed' is visible
     const _psMs = Math.round(_lxPotionSealLeftF() * 1000 / 60);
     if ((player.buffs.potionSeal | 0) !== _psMs) player.buffs.potionSeal = _psMs;

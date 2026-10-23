@@ -128,7 +128,7 @@ const r = await page.evaluate(async () => {
     // (_lxHealLockInstall: an accessor on player.hp that refuses any raise while it lasts) silently kept this reset
     // from happening - the sheltered run started at the 1 HP the open run's drain had left and "drained" (1 run in
     // 8). Lift the lock and write through the restore flag the accessor honours, as the game's own restores do.
-    player._healLockUntil = 0; player._potionLockUntil = 0;
+    player._healLockUntil = 0; player._potionLockUntil = 0; player._sdLeft = 0;   // v0.30.x gravitos-ohko-rework - each run starts without the Soul Drain status
     window._lxHpRestore = true; try { player.hp = player.maxHp; } finally { window._lxHpRestore = false; }
     const gy2 = (game.mapData.platforms || []).filter((p) => p.type === 'ground')[0].y;
     const plats = (game.mapData.platforms || []).filter((p) => p.type !== 'ground');
@@ -165,7 +165,7 @@ const r = await page.evaluate(async () => {
     let lo = player.hp;
     for (let i = 0; i < 8; i++) { await frame(); lo = Math.min(lo, player.hp); }
     return { fired: !!m._drainFired, hpBefore: Math.round(hp0), hpAfter: Math.round(player.hp), hpLow: Math.round(lo),
-             drained: lo <= 1 };
+             drained: lo <= 1, sd: player._sdLeft | 0 };   // v0.30.x gravitos-ohko-rework - the Soul Drain status's ticks still to come
   };
   game.paused = false;
   out.exposedRun = await drain(false);
@@ -220,8 +220,8 @@ check(r.hasLos, 'the line-of-sight helper exists', r.hasLos);
 check(r.safe > 0, 'Soul Drain has sheltered spots the player can actually stand in', { safe: r.safe, of: r.spots });
 check(r.safePct >= 5 && r.safePct <= 70, 'and shelter is meaningful but not everywhere (it is a skill check, not a freebie)', r.safePct);
 check(r.pointBlank === false, 'standing next to him in the open is never sheltered', r.pointBlank);
-check(!!(r.exposedRun && r.exposedRun.fired && r.exposedRun.drained), 'caught in the open, the drain still takes you to 1 HP', r.exposedRun);
-check(!!(r.shelteredRun && r.shelteredRun.fired && !r.shelteredRun.drained), 'behind cover, the drain resolves and does NOT drain you', r.shelteredRun);
+check(!!(r.exposedRun && r.exposedRun.fired && r.exposedRun.sd === 10 && !r.exposedRun.drained), 'caught in the open, the drain lands the Soul Drain status (10 ticks to come) and no instant drop to 1 HP', r.exposedRun);   // v0.30.x gravitos-ohko-rework
+check(!!(r.shelteredRun && r.shelteredRun.fired && !r.shelteredRun.drained && !r.shelteredRun.sd), 'behind cover, the drain resolves and does NOT drain you (no status)', r.shelteredRun);   // v0.30.x gravitos-ohko-rework
 check(r.singGap != null && r.singGap >= 15 * 60, 'Singularity has a hard recast floor well above its 9s cooldown', r.singGap);
 check(r.oneShots >= 2, 'the one-shot survey saw the boss commit to its big attacks', r.oneShots);
 // The regression this guards: base picks Singularity 6/6 times, six in a row.

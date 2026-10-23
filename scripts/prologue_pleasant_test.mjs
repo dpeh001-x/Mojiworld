@@ -50,17 +50,17 @@ const drain = await page.evaluate(() => {
   // god ON: pools must survive the resolve untouched
   player._god = true; player.hp = hpMax; player.mp = mpMax;
   bossAI(mk(), 16.7, 300);
-  const god = { hp: player.hp, mp: player.mp };
+  const god = { hp: player.hp, mp: player.mp, sd: player._sdLeft | 0 };   // v0.30.x gravitos-ohko-rework - and no Soul Drain status
   // god OFF: the mortal clamp must still bite (the real endgame fight)
   player._god = false; player.hp = hpMax; player.mp = mpMax;
   bossAI(mk(), 16.7, 300);
-  const mortal = { hp: player.hp, mp: player.mp };
+  const mortal = { hp: player.hp, mp: player.mp, sd: player._sdLeft | 0 }; player._sdLeft = 0;   // v0.30.x gravitos-ohko-rework - the drain is a status now
   player.hp = hpMax; player.mp = mpMax;
   return { god, mortal, hpMax, mpMax };
 });
 console.log('\nsoul drain:');
-check(drain.god.hp === drain.hpMax && drain.god.mp === drain.mpMax, 'godmode keeps HP and MP untouched through the drain', drain.god);
-check(drain.mortal.hp === 1 && drain.mortal.mp === 1, 'the mortal clamp still bites outside godmode', drain.mortal);
+check(drain.god.hp === drain.hpMax && drain.god.mp === drain.mpMax && !drain.god.sd, 'godmode keeps HP and MP untouched through the drain (no Soul Drain status)', drain.god);   // v0.30.x gravitos-ohko-rework
+check(drain.mortal.sd === 10 && drain.mortal.hp === drain.hpMax, 'outside godmode the drain still bites: the Soul Drain status lands (10 ticks of 10% max HP to come)', drain.mortal);   // v0.30.x gravitos-ohko-rework
 
 // ---- 2. the tick pins both pools -----------------------------------------
 const tick = await page.evaluate(() => {
