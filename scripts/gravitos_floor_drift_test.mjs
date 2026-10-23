@@ -36,8 +36,9 @@ try {
     loadMap('gravitosArena', 300); await sleep(600); game.paused = true;
     const out = {};
     const plats = () => (game.mapData.platforms || []).map((p) => ({ x: p.x, y: p.y, w: p.w, type: p.type, bx: p._driftBaseX, ax: p._driftAx, ay: p._driftAy, doomed: !!p._lxDoomed }));
-    const floorOf = (x) => { const y = _defaultPortalY(x); const p = (game.mapData.platforms || []).find((q) => q.y === y && x >= q.x && x <= q.x + q.w); return p ? { x: p.x, y: p.y, type: p.type } : null; };
-    out.authored = plats(); out.portals = (game.mapData.portals || []).map((po) => ({ x: po.x, dest: po.dest, y: _defaultPortalY(po.x), floor: floorOf(po.x) }));
+    // gravitos-portal-platform: a door's floor at its OWN y (the exit stands on the left y:180 perch since the map bake), matched on the authored x
+    const floorOf = (po) => { const y = (typeof po.y === 'number') ? po.y : _defaultPortalY(po.x); const p = (game.mapData.platforms || []).find((q) => { const bx = q._driftBaseX != null ? q._driftBaseX : q.x, ax = Math.abs(q._driftAx || 0); return Math.abs(q.y - y) <= 24 && po.x >= bx - ax && po.x <= bx + q.w + ax; }); return p ? { x: p._driftBaseX != null ? p._driftBaseX : p.x, y: p.y, type: p.type } : null; };
+    out.authored = plats(); out.portals = (game.mapData.portals || []).map((po) => ({ x: po.x, dest: po.dest, y: (typeof po.y === 'number') ? po.y : _defaultPortalY(po.x), floor: floorOf(po) }));
     out.padsBefore = (game.mapData.launchPads || []).map((q) => ({ x: q.x, y: q.y, floor: q._spireFloor }));
     const p320 = (game.mapData.platforms || []).find((p) => (p._driftBaseX != null ? p._driftBaseX : p.x) === 500 && p.y === 320);
     const pad320 = (game.mapData.launchPads || []).find((q) => q.y === 320 && q.x >= 480 && q.x <= 720);
@@ -53,7 +54,7 @@ try {
     const tick = (ms) => { for (let k = 0; k < ms / 16; k++) _lxGravArenaTick(16); };
     _lxGravCollapse(2); tick(1200); out.after2 = plats();
     _lxGravCollapse(3); tick(1200); out.after3 = plats();
-    out.portalsAfter = (game.mapData.portals || []).map((po) => ({ x: po.x, y: _defaultPortalY(po.x), floor: floorOf(po.x) }));
+    out.portalsAfter = (game.mapData.portals || []).map((po) => ({ x: po.x, y: (typeof po.y === 'number') ? po.y : _defaultPortalY(po.x), floor: floorOf(po) }));
     out.padsAfter = (game.mapData.launchPads || []).map((q) => ({ x: q.x, y: q.y }));
     loadMap('sanctum', 100); await sleep(300); loadMap('gravitosArena', 300); await sleep(600); game.paused = true;
     out.reentry = plats().length;
@@ -63,11 +64,11 @@ try {
   console.log('authored', r.authored.length, 'platforms; portals', JSON.stringify(r.portals));
   console.log('drift', JSON.stringify(r.drift), '| swung to', r.swungX, '| pads', JSON.stringify(r.padsBefore));
   ok('the arena authors eight platforms', r.authored.length === 8, r.authored.length);
-  ok('every portal stands on the ground slab', r.portals.length >= 1 && r.portals.every((po) => po.floor && po.floor.type === 'ground'), r.portals);
-  ok('form 2 drops the y:180 perches (mid-swing)', !has(r.after2, 340, 180) && !has(r.after2, 1700, 180) && r.after2.length === 6, r.after2.length);
-  ok('form 3 drops the y:320 pair (mid-swing)', !has(r.after3, 500, 320) && !has(r.after3, 1500, 320) && r.after3.length === 4, r.after3.length);
+  ok('every portal stands on a floor (the exit: the platform the door stands on, the left y:180 perch)', r.portals.length >= 1 && r.portals.every((po) => po.floor), r.portals);
+  ok('form 2 drops the right y:180 perch and keeps the door\'s (mid-swing)', has(r.after2, 340, 180) && !has(r.after2, 1700, 180) && r.after2.length === 7, r.after2.length);
+  ok('form 3 drops the y:320 pair (mid-swing)', !has(r.after3, 500, 320) && !has(r.after3, 1500, 320) && r.after3.length === 5, r.after3.length);
   ok('the ground, the centre and the y:380 ledges survive both', has(r.after3, 0, 480) && has(r.after3, 900, 260) && has(r.after3, 140, 380) && has(r.after3, 1880, 380));
-  ok("every portal's floor is untouched after both collapses", r.portalsAfter.every((po, i) => po.floor && po.floor.type === 'ground' && po.y === r.portals[i].y), r.portalsAfter);
+  ok("every portal's floor is untouched after both collapses", r.portalsAfter.every((po, i) => po.floor && r.portals[i].floor && po.floor.x === r.portals[i].floor.x && po.floor.y === r.portals[i].floor.y && po.y === r.portals[i].y), r.portalsAfter);
   ok('the three ground pads survive; the two y:320 pads fell with their platforms', r.padsAfter.length === 3 && r.padsAfter.every((q) => q.y === 480), r.padsAfter);
   ok('floating platforms drift, and further than the Spire (>= 40px)', r.drift.maxDev >= 40, r.drift);
   ok('...sweeping about their authored x, and back where they started after a full period', r.drift.backToStart != null && r.drift.backToStart <= 1.5 && Math.abs(r.drift.sweepCentre - 500) <= 2, r.drift);

@@ -63,7 +63,7 @@ const out = await page.evaluate(async () => {
   player.cls = 'warrior'; player.level = 100; player._god = true; game.paused = false;
 
   const floating = () => (game.mapData.platforms || []).filter((p) => p.type !== 'ground').length;
-  const at = (x, y) => (game.mapData.platforms || []).some((p) => p.x === x && p.y === y);
+  const at = (x, y) => (game.mapData.platforms || []).some((p) => (p._driftBaseX != null ? p._driftBaseX : p.x) === x && p.y === y);   // gravitos-portal-platform: authored x (the perches drift)
   const ground = () => (game.mapData.platforms || []).filter((p) => p.type === 'ground');
   const pads = () => (game.mapData.launchPads || []).length;
   // Advance the PRODUCTION tick past the 900 ms telegraph in 16 ms steps, the
@@ -89,8 +89,8 @@ const out = await page.evaluate(async () => {
   ok('platforms are still SOLID during the telegraph', midTell === 7, `still standing: ${midTell}`);
   settle(1100);
   const p2 = floating(), t2 = tintTo();
-  ok('form 2 drops the two high perches (7 -> 5)', p2 === 5, `floating ${p2}`);
-  ok('...and it was the y:180 pair', !at(340, 180) && !at(1700, 180));
+  ok('form 2 drops the right high perch (7 -> 6)', p2 === 6, `floating ${p2}`);   // gravitos-portal-platform
+  ok('...the right y:180 perch fell; the left one keeps the door standing (the exit, per user)', at(340, 180) && !at(1700, 180));
   ok('form 2 tint is darker than form 1', t2 > t0 + 0.1, `${t0} -> ${t2}`);
 
   // ---- FORM 2 -> 3 -------------------------------------------------------
@@ -99,7 +99,7 @@ const out = await page.evaluate(async () => {
   ok('form 3 reached', m._gravitosPhase === 3, `phase ${m._gravitosPhase}`);
   settle(1100);
   const p3 = floating(), t3 = tintTo(), pad3 = pads();
-  ok('form 3 drops the y:320 pair (5 -> 3)', p3 === 3, `floating ${p3}`);
+  ok('form 3 drops the y:320 pair (6 -> 4)', p3 === 4, `floating ${p3}`);   // gravitos-portal-platform
   ok('...and it was the y:320 pair', !at(500, 320) && !at(1500, 320));
   ok('form 3 tint is darker still', t3 > t2 + 0.1, `${t2} -> ${t3}`);
   ok('the 2 pads riding those platforms fell with them', pad3 === 3, `pads ${pad0} -> ${pad3}`);
@@ -111,8 +111,8 @@ const out = await page.evaluate(async () => {
   ok('SAFETY: the full-width ground is untouched',
      g.length === 1 && g[0].x === 0 && g[0].w === 2200, JSON.stringify(g.map((q) => [q.x, q.w])));
   ok('SAFETY: the y:260 centre survives (collapseRain targets it)', at(900, 260));
-  ok('SAFETY: arena is still traversable (ground + 3 floating + 3 pads)',
-     p3 === 3 && g.length === 1 && pad3 === 3);
+  ok('SAFETY: arena is still traversable (ground + 4 floating + 3 pads)',   // gravitos-portal-platform
+     p3 === 4 && g.length === 1 && pad3 === 3);
 
   // The eased tint must actually converge in the DRAW path. Nothing here calls
   // it directly — if the render hook is missing, _lxGravTintCur never moves.
