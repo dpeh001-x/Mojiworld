@@ -16488,7 +16488,7 @@ function _lxDevSurface() {
 // v0.30.1830 lock-proof-resync - LOCK-PROOF RE-SYNC (build tooling only, no game change). Ship chains bump the line
 // below; their re-sync no longer touches the shared git index, so a stale .git/index.lock (the Codex app leaves one
 // when it kills its own git diff mid-refresh) can neither stop nor spoil a ship. Proof: scripts/lock_proof_resync_test.mjs.
-const GAME_VERSION = 'v0.30.1882';
+const GAME_VERSION = 'v0.30.1883';
 // v0.30.791 - LAUNCH POLISH: errors thrown outside the frame loop (event handlers, timers, promises) used to vanish.
 // The frame loop already survives its own exceptions (_lxFrame); this covers everything else: one console line per
 // distinct message, and at most one on-screen note every 30 s so a player can tell us something went wrong. Never rethrows.
@@ -121175,6 +121175,9 @@ function _lxGovBake(key, w, h, paint) {
   cv = document.createElement('canvas'); cv.width = w; cv.height = h; paint(cv.getContext('2d'), w, h); _LX_GOV.bakes[key] = cv; return cv;
 }
 function _lxGovLowFx() { return !!(typeof LX_PERF !== 'undefined' && LX_PERF && LX_PERF.veryLowFx); }
+// fix-gov-shed: the governor's reactive flag (frames running long) sheds the field's second additive passes - the rain's rift glow (0.3 screen) and the Singularity's second wave ring (0.5 screen) -
+// so the 5 s the player has to dodge in cost ~0.4 screen less on a machine that is already struggling. A machine that keeps up draws every layer exactly as before; window._lxNoLowSheds keeps them (A/B).
+function _lxGovMidFx() { return !window._lxNoLowSheds && !!(typeof LX_PERF !== 'undefined' && LX_PERF && LX_PERF.lowFx); }
 // v0.30.1876 gravitos-ohko-visuals - the landing: a shake and bursts that outlive the hazard. Once per hazard, on every client from its own
 // copy (origin 'hz' is never mirrored, so a guest does not get the host's as well).
 function _lxGovBoom(h, camX, camY) {
@@ -121231,7 +121234,7 @@ function _lxGovMeteor(met, x0, y0, x1, y1, e, sh, a, trail) {
 // one in the foreground. Each burst is the crystal art, a shock ring and a bloom. All of it is a pure function of the box's age (no
 // particles, no state) and nothing lands on a shelter.
 function _lxGovRainBack(h, prog, camX, camY) {
-  const t = game.time | 0, age = Math.max(0, (h.maxLife | 0) - (h.life | 0)), zs = h.safeZones || [], still = !!game._reduceMotion, low = _lxGovLowFx();
+  const t = game.time | 0, age = Math.max(0, (h.maxLife | 0) - (h.life | 0)), zs = h.safeZones || [], still = !!game._reduceMotion, low = _lxGovLowFx(), mid = _lxGovMidFx();
   const fin = Math.min(1, age / 10), gy = LX_GOV_FLOOR, seed = (h.maxLife | 0) * 7 + Math.round(zs.length ? zs[0].x : 0);
   ctx.save();
   ctx.globalAlpha = 0.3 + 0.24 * prog; ctx.drawImage(_lxGovSky(), 0, camY, W, H);
@@ -121242,7 +121245,8 @@ function _lxGovRainBack(h, prog, camX, camY) {
   if (rift) {
     const rw = W * 0.9, rh = rw * (rift.naturalHeight || 1) / (rift.naturalWidth || 1) * 0.55, rx = (W - rw) / 2, ry = camY + 84 - rh / 2;
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 0.62 * fin; ctx.drawImage(rift, rx, ry, rw, rh);   // the tear itself, not blown out
-    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = (0.12 + (still ? 0 : 0.1 * Math.sin(t * 0.09))) * fin; ctx.drawImage(rift, rx, ry, rw, rh);   // and its breathing glow
+    ctx.globalCompositeOperation = 'lighter';   // the blend mode stays 'lighter' for the layers below either way
+    if (!mid) { ctx.globalAlpha = (0.12 + (still ? 0 : 0.1 * Math.sin(t * 0.09))) * fin; ctx.drawImage(rift, rx, ry, rw, rh); }   // and its breathing glow (fix-gov-shed: shed while the governor says frames run long)
   }
   if (!low) {
     const sh = _lxGovShaft();
@@ -121314,7 +121318,7 @@ function _lxGovRainZone(z, h, camX) {
 // swells as the count runs - a debris spiral turning round it, shockwaves pulsing out, streaks of light falling in, the accretion disc,
 // and a lensing ring turning the other way. Drawn high over the arena, so the boss and the shelters stay in plain view.
 function _lxGovSingBack(h, prog, camX, camY) {
-  const t = game.time | 0, age = Math.max(0, (h.maxLife | 0) - (h.life | 0)), still = !!game._reduceMotion, low = _lxGovLowFx();
+  const t = game.time | 0, age = Math.max(0, (h.maxLife | 0) - (h.life | 0)), still = !!game._reduceMotion, low = _lxGovLowFx(), mid = _lxGovMidFx();
   ctx.fillStyle = 'rgba(14,2,26,' + (0.26 + prog * 0.48).toFixed(3) + ')';
   ctx.fillRect(0, camY, W, H);
   const cx = W * _LX_GF_DISC.fx, cy = camY + H * _LX_GF_DISC.fy, grow = Math.min(1, age / 36);
@@ -121322,7 +121326,7 @@ function _lxGovSingBack(h, prog, camX, camY) {
   const core = _lxGovImg('grav_sing_core'), lens = _lxGovImg('grav_sing_lens'), wave = _lxGovImg('grav_sing_wave'), deb = _lxGovImg('grav_sing_debris');
   ctx.save();
   if (deb && !low) { const d = R * 4.4; ctx.save(); ctx.translate(cx, cy); ctx.rotate(spin * 2.4); ctx.globalAlpha = 0.65 * grow; ctx.drawImage(deb, -d / 2, -d / 2, d, d); ctx.restore(); }
-  if (wave && !still) { ctx.globalCompositeOperation = 'lighter'; for (let i = 0; i < 2; i++) { const p = ((t + i * 30) % 60) / 60, d = R * (2.2 + 4.2 * p); ctx.globalAlpha = 0.6 * (1 - p) * grow; ctx.drawImage(wave, cx - d / 2, cy - d / 2, d, d); } ctx.globalCompositeOperation = 'source-over'; }
+  if (wave && !still) { ctx.globalCompositeOperation = 'lighter'; for (let i = 0; i < (mid ? 1 : 2); i++) { const p = ((t + i * 30) % 60) / 60, d = R * (2.2 + 4.2 * p); ctx.globalAlpha = 0.6 * (1 - p) * grow; ctx.drawImage(wave, cx - d / 2, cy - d / 2, d, d); } ctx.globalCompositeOperation = 'source-over'; }
   if (!still && !low) {
     ctx.beginPath();
     for (let i = 0; i < 14; i++) { const ph = (t * 0.012 + i * 0.137) % 1, rr = R * (1.2 + 3.6 * (1 - ph)), a = i * 2.39996 + ph * 1.6, r2 = rr * 0.8, a2 = a + 0.24; ctx.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * 0.6); ctx.lineTo(cx + Math.cos(a2) * r2, cy + Math.sin(a2) * r2 * 0.6); }
